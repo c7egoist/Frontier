@@ -1,1 +1,24 @@
-# Frontier
+# SOLID ARC
+
+A WebGPU-based parametric sketcher prototype for the browser.
+
+## Current surface
+
+- 2D drafting for lines, polylines, rectangles, circles, ellipses, Bézier curves, and continuous cubic Hermite curves.
+- Construction planes with elevation, twist, and tilt.
+- A real perspective 3D viewport rendered with WebGPU when available, with a WebGL fallback.
+- Draw directly onto the active construction plane in 3D using camera ray intersection.
+- Smooth camera lag for orbit and zoom.
+- Static HTML, CSS, and JavaScript: no build step and no server dependency.
+
+## GitHub Pages
+
+The site is intentionally self-contained. Publish the repository root with GitHub Pages, then open `index.html` at the Pages URL. All asset references are relative, so it works from a project subpath.
+
+For local preview:
+
+```bash
+python3 -m http.server 4173 --bind 0.0.0.0
+```
+
+The 3D status readout reports `WEBGPU` when the browser successfully initializes WebGPU and `WEBGL FALLBACK` when it does not.

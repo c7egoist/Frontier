@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#050505" />
-  <title>NOVA/CAD — 2D drafting</title>
+  <meta name="theme-color" content="#111315" />
+  <title>SOLID ARC — WebGPU parametric sketcher</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -13,8 +13,8 @@
       <div class="brand-lockup">
         <div class="brand-mark" aria-hidden="true">✦</div>
         <div>
-          <div class="brand-name">NOVA<span>/CAD</span></div>
-          <div class="brand-kicker">spatial drafting workbench</div>
+          <div class="brand-name">SOLID ARC</div>
+          <div class="brand-kicker">WebGPU parametric sketcher</div>
         </div>
       </div>
 
@@ -85,7 +85,7 @@
       <section class="viewport-column">
         <div class="viewport-toolbar">
           <div class="view-heading">
-            <span class="eyebrow" id="viewEyebrow">DRAFTING PLANE</span>
+            <span class="eyebrow" id="viewEyebrow">PARAMETRIC DRAFT</span>
             <span class="view-title" id="viewTitle">XY / FRONT</span>
           </div>
           <div class="viewport-tools">
@@ -132,7 +132,7 @@
     <footer class="statusbar">
       <div class="status-left"><span class="status-led"></span><span>LOCAL SKETCH</span><span class="status-divider"></span><span>NO SERVER</span></div>
       <div class="status-center" id="statusMessage">Choose a primitive or curve to draw</div>
-      <div class="status-right"><span>ORTHO</span><span class="status-divider"></span><span>SNAP 10 MM</span><span class="status-divider"></span><span>GPU READY</span></div>
+      <div class="status-right"><span>ORTHO</span><span class="status-divider"></span><span>SNAP 10 MM</span><span class="status-divider"></span><span id="rendererReadout">WEBGPU STARTING</span></div>
     </footer>
   </div>
   <script src="./app.js"></script>

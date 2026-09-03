@@ -47,8 +47,12 @@ let view = {
 let orbit = {
   yaw: -0.72,
   pitch: 0.56,
-  zoom: 1
+  zoom: 1,
+  goalYaw: -0.72,
+  goalPitch: 0.56,
+  goalZoom: 1
 };
+let cameraAnimation = null;
 
 let activeTool = 'select';
 let sketch = { points: [], preview: null };
@@ -64,7 +68,19 @@ let glProgram = null;
 let glPosition = null;
 let glMatrix = null;
 let glColor = null;
+let gpuRenderer = {
+  device: null,
+  context: null,
+  format: null,
+  pipeline: null,
+  layout: null,
+  uniformBuffer: null,
+  width: 0,
+  height: 0,
+  ready: false
+};
 let cameraView = null;
+const rendererReadout = document.querySelector('#rendererReadout');
 
 function initWebGL() {
   gl = sceneCanvas.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: false });
@@ -97,7 +113,61 @@ function initWebGL() {
   gl.enable(gl.DEPTH_TEST);
 }
 
-initWebGL();
+async function initWebGPURenderer() {
+  if (!navigator.gpu) {
+    initWebGL();
+    rendererReadout.textContent = 'WEBGL FALLBACK';
+    return;
+  }
+  try {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) throw new Error('No WebGPU adapter');
+    const device = await adapter.requestDevice();
+    const context = sceneCanvas.getContext('webgpu');
+    if (!context) throw new Error('WebGPU context unavailable');
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({ device, format, alphaMode: 'opaque' });
+    const shader = device.createShaderModule({ code: `
+      struct SceneUniforms {
+        camera: mat4x4<f32>,
+        tint: vec4<f32>,
+      };
+      @group(0) @binding(0) var<uniform> scene: SceneUniforms;
+      @vertex fn vertexMain(@location(0) position: vec3<f32>) -> @builtin(position) vec4<f32> {
+        return scene.camera * vec4<f32>(position, 1.0);
+      }
+      @fragment fn fragmentMain() -> @location(0) vec4<f32> {
+        return scene.tint;
+      }
+    ` });
+    const layout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } }] });
+    const pipelineLayout = device.createPipelineLayout({ bindGroupLayouts: [layout] });
+    const pipelineBase = {
+      layout: pipelineLayout,
+      vertex: {
+        module: shader,
+        entryPoint: 'vertexMain',
+        buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }]
+      },
+      fragment: { module: shader, entryPoint: 'fragmentMain', targets: [{ format }] },
+      depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
+    };
+    const pipeline = device.createRenderPipeline({ ...pipelineBase, primitive: { topology: 'line-list' } });
+    const fillPipeline = device.createRenderPipeline({ ...pipelineBase, primitive: { topology: 'triangle-list' } });
+    const uniformBuffer = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    gpuRenderer = { device, context, format, pipeline, fillPipeline, layout, uniformBuffer, width: 0, height: 0, ready: true };
+    rendererReadout.textContent = 'WEBGPU';
+    device.lost.then(() => {
+      gpuRenderer.ready = false;
+      rendererReadout.textContent = 'WEBGPU LOST';
+    });
+    renderAll();
+  } catch (error) {
+    initWebGL();
+    rendererReadout.textContent = 'WEBGL FALLBACK';
+    setMessage('WebGPU unavailable · using WebGL fallback');
+  }
+}
 
 const toolLabels = {
   select: 'Select geometry or a plane',
@@ -256,7 +326,7 @@ function setMode(mode) {
   draftCanvas.classList.toggle('is-hidden', mode !== '2d');
   sceneCanvas.classList.toggle('is-hidden', mode !== '3d');
   orbitHint.classList.toggle('is-visible', mode === '3d');
-  viewEyebrow.textContent = mode === '2d' ? 'DRAFTING PLANE' : 'SPATIAL PREVIEW';
+  viewEyebrow.textContent = mode === '2d' ? 'PARAMETRIC DRAFT' : 'SPATIAL PREVIEW';
   viewTitle.textContent = mode === '2d' ? 'XY / FRONT' : 'ISOMETRIC / WORLD';
   setMessage(mode === '2d' ? toolLabels[activeTool] : 'Drag to orbit · scroll to zoom');
   renderAll();
@@ -916,7 +986,106 @@ function previewRecord3D() {
   return null;
 }
 
+let gpuFrameBuffers = [];
+
+function gpuWriteUniforms(matrix, colour, alpha) {
+  const uniformBuffer = gpuRenderer.device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  gpuRenderer.device.queue.writeBuffer(uniformBuffer, 0, matrix.buffer, matrix.byteOffset, matrix.byteLength);
+  const tint = new Float32Array(colourVector(colour, alpha));
+  gpuRenderer.device.queue.writeBuffer(uniformBuffer, 64, tint.buffer, tint.byteOffset, tint.byteLength);
+  const bindGroup = gpuRenderer.device.createBindGroup({
+    layout: gpuRenderer.layout,
+    entries: [{ binding: 0, resource: { buffer: uniformBuffer } }]
+  });
+  gpuFrameBuffers.push(uniformBuffer);
+  return bindGroup;
+}
+
+function gpuLineVertices(points, close = false) {
+  if (points.length < 2) return new Float32Array();
+  const vertices = [];
+  for (let index = 1; index < points.length; index += 1) vertices.push(points[index - 1], points[index]);
+  if (close) vertices.push(points[points.length - 1], points[0]);
+  const packed = new Float32Array(vertices.length * 3);
+  vertices.forEach((point, index) => { packed[index * 3] = point.x; packed[index * 3 + 1] = point.y; packed[index * 3 + 2] = point.z; });
+  return packed;
+}
+
+function gpuTriangleVertices(points) {
+  if (points.length < 3) return new Float32Array();
+  const vertices = [points[0], points[1], points[2]];
+  for (let index = 3; index < points.length; index += 1) vertices.push(points[0], points[index - 1], points[index]);
+  const packed = new Float32Array(vertices.length * 3);
+  vertices.forEach((point, index) => { packed[index * 3] = point.x; packed[index * 3 + 1] = point.y; packed[index * 3 + 2] = point.z; });
+  return packed;
+}
+
+function gpuDrawVertices(pass, packed, colour, alpha, fill = false) {
+  if (!packed.length) return;
+  const vertexBuffer = gpuRenderer.device.createBuffer({ size: packed.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
+  gpuRenderer.device.queue.writeBuffer(vertexBuffer, 0, packed.buffer, packed.byteOffset, packed.byteLength);
+  const bindGroup = gpuWriteUniforms(cameraView.matrix, colour, alpha);
+  pass.setPipeline(fill ? gpuRenderer.fillPipeline : gpuRenderer.pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.setVertexBuffer(0, vertexBuffer);
+  pass.draw(packed.length / 3);
+  gpuFrameBuffers.push(vertexBuffer);
+}
+
+function renderWebGPU() {
+  const size = resizeCanvas(sceneCanvas, false);
+  if (gpuRenderer.width !== sceneCanvas.width || gpuRenderer.height !== sceneCanvas.height) {
+    gpuRenderer.context.configure({ device: gpuRenderer.device, format: gpuRenderer.format, alphaMode: 'opaque' });
+    gpuRenderer.width = sceneCanvas.width;
+    gpuRenderer.height = sceneCanvas.height;
+  }
+  cameraView = cameraMatrices(size.width, size.height);
+  const device = gpuRenderer.device;
+  const depthTexture = device.createTexture({ size: [sceneCanvas.width, sceneCanvas.height, 1], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT });
+  gpuFrameBuffers = [depthTexture];
+  const encoder = device.createCommandEncoder();
+  const pass = encoder.beginRenderPass({
+    colorAttachments: [{ view: gpuRenderer.context.getCurrentTexture().createView(), clearValue: { r: .063, g: .071, b: .075, a: 1 }, loadOp: 'clear', storeOp: 'store' }],
+    depthStencilAttachment: { view: depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' }
+  });
+  const grid = [];
+  for (let coordinate = -300; coordinate <= 300; coordinate += 20) {
+    grid.push({ x: coordinate, y: -300, z: -.35 }, { x: coordinate, y: 300, z: -.35 });
+    grid.push({ x: -300, y: coordinate, z: -.35 }, { x: 300, y: coordinate, z: -.35 });
+  }
+  gpuDrawVertices(pass, gpuLineVertices(grid), '#2a3033', .7);
+  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }]), '#a77c81', .95);
+  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 120, z: 0 }]), '#789383', .95);
+  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 120 }]), '#8297bd', .95);
+  scene.planes.slice().sort((a, b) => a.elevation - b.elevation).forEach(plane => {
+    const corners = planeCorners3D(plane);
+    gpuDrawVertices(pass, gpuTriangleVertices(corners), plane.id === selectedId ? '#a5bac5' : '#6f8c98', plane.id === selectedId ? .18 : .08, true);
+    gpuDrawVertices(pass, gpuLineVertices(corners, true), plane.id === selectedId ? '#d7e2e6' : '#8eb4c4', plane.id === selectedId ? 1 : .75);
+  });
+  if (activeTool === 'plane' && sketch.previewWorld) {
+    const previewPlane = { center: makePoint(sketch.previewWorld.x, sketch.previewWorld.y), width: 160, height: 100, elevation: sketch.previewWorld.z, twist: 0, tiltX: 0, tiltY: 0 };
+    const corners = planeCorners3D(previewPlane);
+    gpuDrawVertices(pass, gpuTriangleVertices(corners), '#8eb4c4', .08, true);
+    gpuDrawVertices(pass, gpuLineVertices(corners, true), '#a5bac5', .65);
+  }
+  scene.records.forEach(record => {
+    const points = recordPoints3D(record);
+    gpuDrawVertices(pass, gpuLineVertices(points, record.form === 'rectangle' || record.form === 'circle' || record.form === 'ellipse'), record.id === selectedId ? '#d7e2e6' : record.color, record.id === selectedId ? 1 : .95);
+  });
+  const preview = previewRecord3D();
+  if (preview) gpuDrawVertices(pass, gpuLineVertices(recordPoints3D(preview), preview.form === 'rectangle' || preview.form === 'circle' || preview.form === 'ellipse'), '#c6d4da', .8);
+  pass.end();
+  const frameResources = gpuFrameBuffers.slice();
+  gpuFrameBuffers = [];
+  device.queue.submit([encoder.finish()]);
+  device.queue.onSubmittedWorkDone().then(() => frameResources.forEach(resource => resource.destroy()));
+}
+
 function render3D() {
+  if (gpuRenderer.ready) {
+    renderWebGPU();
+    return;
+  }
   if (!gl) return;
   const size = resizeCanvas(sceneCanvas, false);
   gl.viewport(0, 0, sceneCanvas.width, sceneCanvas.height);
@@ -1117,7 +1286,7 @@ function finishPolyline() {
 function onScenePointerDown(event) {
   if (event.button === 1 || event.button === 2 || event.altKey || event.shiftKey) {
     isOrbiting = true;
-    dragAnchor = { x: event.clientX, y: event.clientY, yaw: orbit.yaw, pitch: orbit.pitch };
+    dragAnchor = { x: event.clientX, y: event.clientY, yaw: orbit.goalYaw, pitch: orbit.goalPitch };
     sceneCanvas.classList.add('is-orbiting');
     sceneCanvas.setPointerCapture(event.pointerId);
     return;
@@ -1144,9 +1313,9 @@ function onScenePointerDown(event) {
 
 function onScenePointerMove(event) {
   if (isOrbiting && dragAnchor) {
-    orbit.yaw = dragAnchor.yaw + (event.clientX - dragAnchor.x) * 0.008;
-    orbit.pitch = clamp(dragAnchor.pitch + (event.clientY - dragAnchor.y) * 0.008, -1.2, 1.2);
-    render3D();
+    orbit.goalYaw = dragAnchor.yaw + (event.clientX - dragAnchor.x) * 0.008;
+    orbit.goalPitch = clamp(dragAnchor.pitch + (event.clientY - dragAnchor.y) * 0.008, -1.2, 1.2);
+    requestCameraMotion();
     return;
   }
   if (activeTool === 'select' || !cameraView) return;
@@ -1164,18 +1333,46 @@ function onScenePointerUp(event) {
   if (sceneCanvas.hasPointerCapture(event.pointerId)) sceneCanvas.releasePointerCapture(event.pointerId);
 }
 
+function requestCameraMotion() {
+  if (cameraAnimation) return;
+  cameraAnimation = requestAnimationFrame(animateCamera);
+}
+
+function animateCamera() {
+  const ease = .14;
+  orbit.yaw += (orbit.goalYaw - orbit.yaw) * ease;
+  orbit.pitch += (orbit.goalPitch - orbit.pitch) * ease;
+  orbit.zoom += (orbit.goalZoom - orbit.zoom) * ease;
+  zoomReadout.textContent = `${Math.round(orbit.zoom * 100)}%`;
+  if (view.mode === '3d') render3D();
+  const settled = Math.abs(orbit.goalYaw - orbit.yaw) < .0005 && Math.abs(orbit.goalPitch - orbit.pitch) < .0005 && Math.abs(orbit.goalZoom - orbit.zoom) < .0005;
+  if (settled) {
+    orbit.yaw = orbit.goalYaw;
+    orbit.pitch = orbit.goalPitch;
+    orbit.zoom = orbit.goalZoom;
+    cameraAnimation = null;
+    if (view.mode === '3d') render3D();
+  } else {
+    cameraAnimation = requestAnimationFrame(animateCamera);
+  }
+}
+
 function zoomBy(factor) {
   if (view.mode === '2d') view.zoom = clamp(view.zoom * factor, 0.15, 8);
-  else orbit.zoom = clamp(orbit.zoom * factor, 0.35, 3.5);
+  else {
+    orbit.goalZoom = clamp(orbit.goalZoom * factor, 0.35, 3.5);
+    requestCameraMotion();
+  }
   renderAll();
 }
 
 function setCameraPreset(preset) {
-  if (preset === 'top') { orbit.yaw = -0.35; orbit.pitch = 1.48; }
-  if (preset === 'front') { orbit.yaw = -Math.PI / 2; orbit.pitch = 0.08; }
-  if (preset === 'right') { orbit.yaw = 0; orbit.pitch = 0.08; }
-  orbit.zoom = 1;
-  if (view.mode !== '3d') setMode('3d'); else renderAll();
+  if (preset === 'top') { orbit.goalYaw = -0.35; orbit.goalPitch = 1.48; }
+  if (preset === 'front') { orbit.goalYaw = -Math.PI / 2; orbit.goalPitch = 0.08; }
+  if (preset === 'right') { orbit.goalYaw = 0; orbit.goalPitch = 0.08; }
+  orbit.goalZoom = 1;
+  if (view.mode !== '3d') setMode('3d');
+  requestCameraMotion();
 }
 
 function fitView() {
@@ -1415,4 +1612,6 @@ document.querySelector('#importFile').addEventListener('change', event => { if (
 window.addEventListener('keydown', onKeyDown);
 window.addEventListener('resize', renderAll);
 
+rendererReadout.textContent = 'WEBGPU STARTING';
+initWebGPURenderer();
 renderAll();
