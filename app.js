@@ -64,6 +64,8 @@ let cameraAnimation = null;
 let activeTool = 'select';
 let sketch = { points: [], preview: null, previewWorld: null };
 let shapeDrag = null;
+let controlDrag = null;
+let pickedControlPoint = null;
 let selectedId = null;
 let undoStack = [];
 let redoStack = [];
@@ -236,6 +238,16 @@ function controlPointsForRecord(record) {
   return [];
 }
 
+function guidePointsForRecord(record) {
+  if (record.form === 'circle') return [];
+  if (isCurveForm(record.form)) return controlPointsForRecord(record);
+  if (record.form === 'line' || record.form === 'polyline' || record.form === 'polygon') return record.points || [];
+  if (record.form === 'rectangle') return cornersForRectangle(record);
+  if (record.form === 'ellipse') return [record.center, makePoint(record.center.x + record.radiusX, record.center.y), makePoint(record.center.x, record.center.y + record.radiusY)];
+  if (record.form === 'slot') return record.points || [];
+  return [];
+}
+
 function makePoint(x = 0, y = 0) {
   return { x: Number(x), y: Number(y) };
 }
@@ -356,6 +368,8 @@ function setMessage(message) {
 function setTool(tool) {
   activeTool = tool;
   shapeDrag = null;
+  controlDrag = null;
+  pickedControlPoint = null;
   sketch = { points: [], preview: null, previewWorld: null };
   document.querySelectorAll('.tool-button').forEach(button => {
     button.classList.toggle('is-active', button.dataset.tool === tool);
@@ -683,21 +697,39 @@ function bsplineSamples(record, count = 128) {
   return Array.from({ length: count + 1 }, (_, index) => bsplinePoint(points, index / count, degree, weights));
 }
 
-function curveSamples(record, count = 128) {
-  if (record.form === 'arc') return arcSamples(record, count);
-  if (record.form === 'bspline' || record.form === 'nurbs') return bsplineSamples(record, count);
+function curveLengthEstimate(record) {
+  if (record.form === 'arc' && record.radius !== undefined) return Math.abs(record.radius * (record.sweep || 0));
+  const points = record.points || (record.form === 'hermite' ? [record.start, record.end, record.tangentStart, record.tangentEnd].filter(Boolean) : []);
+  let length = 0;
+  for (let index = 1; index < points.length; index += 1) length += distance(points[index - 1], points[index]);
+  if (record.form === 'bezier' || record.form === 'hermite') length *= 1.35;
+  return Math.max(length, 1);
+}
+
+function adaptiveCurveResolution(record) {
+  const viewportScale = view.mode === '2d'
+    ? view.zoom
+    : (cameraView ? cameraView.height / (2 * Math.tan(Math.PI / 3.2 / 2) * (700 / Math.max(orbit.zoom, .35))) : orbit.zoom);
+  const estimatedPixels = curveLengthEstimate(record) * Math.max(viewportScale, .1);
+  return Math.max(48, Math.min(8192, Math.ceil(estimatedPixels / 3)));
+}
+
+function curveSamples(record, count = null) {
+  const sampleCount = count || adaptiveCurveResolution(record);
+  if (record.form === 'arc') return arcSamples(record, sampleCount);
+  if (record.form === 'bspline' || record.form === 'nurbs') return bsplineSamples(record, sampleCount);
   const controlPoints = record.points || [];
   const points = [];
   if (record.form === 'bezier' && controlPoints.length === 4) {
-    for (let i = 0; i <= count; i += 1) points.push(bezierPoint(controlPoints, i / count));
+    for (let i = 0; i <= sampleCount; i += 1) points.push(bezierPoint(controlPoints, i / sampleCount));
     return points;
   }
   if (record.form === 'hermite' && !controlPoints.length && record.start && record.end && record.tangentStart && record.tangentEnd) {
-    for (let i = 0; i <= count; i += 1) points.push(hermitePoint(record, i / count));
+    for (let i = 0; i <= sampleCount; i += 1) points.push(hermitePoint(record, i / sampleCount));
     return points;
   }
   if (controlPoints.length < 2) return controlPoints.slice();
-  for (let i = 0; i <= count; i += 1) points.push(catmullRomPoint(controlPoints, i / count));
+  for (let i = 0; i <= sampleCount; i += 1) points.push(catmullRomPoint(controlPoints, i / sampleCount));
   return points;
 }
 
@@ -773,45 +805,46 @@ function drawRecord2D(ctx, record, width, height, selected = false) {
 
 function drawRecordGuides2D(ctx, record, width, height) {
   const project = point => screenFromWorld(point, width, height);
+  const handles = guidePointsForRecord(record);
+  if (!handles.length) return;
   ctx.save();
   ctx.strokeStyle = 'rgba(255,255,255,.48)';
-  ctx.fillStyle = colors.selected;
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 4]);
-  const handles = controlPointsForRecord(record);
-  if (handles.length) {
-    const pts = handles.map(project);
-    if (record.form === 'bezier' || record.form === 'hermite') {
-      ctx.beginPath();
-      if (record.form === 'bezier') {
-        if (pts[1]) { ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); }
-        if (pts[3] && pts[2]) { ctx.moveTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y); }
-      } else if (pts[1]) {
-        ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y);
-        if (pts[3] && pts[2]) { ctx.moveTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y); }
-      }
-      ctx.stroke();
+  const pts = handles.map(project);
+  if (record.form === 'bezier' || record.form === 'hermite') {
+    ctx.beginPath();
+    if (record.form === 'bezier') {
+      if (pts[1]) { ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y); }
+      if (pts[3] && pts[2]) { ctx.moveTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y); }
+    } else if (pts[1]) {
+      ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y);
+      if (pts[3] && pts[2]) { ctx.moveTo(pts[2].x, pts[2].y); ctx.lineTo(pts[3].x, pts[3].y); }
     }
-    if (['bspline', 'nurbs', 'spline'].includes(record.form) && pts.length > 1) {
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let index = 1; index < pts.length; index += 1) ctx.lineTo(pts[index].x, pts[index].y);
-      ctx.stroke();
-    }
-    ctx.setLineDash([]);
-    pts.forEach(point => { ctx.beginPath(); ctx.arc(point.x, point.y, 3, 0, Math.PI * 2); ctx.fill(); });
+    ctx.stroke();
   }
-  if (record.form === 'circle') {
-    const center = project(record.center);
-    ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(center.x, center.y); ctx.lineTo(center.x + record.radius * view.zoom, center.y); ctx.stroke();
-    ctx.setLineDash([]); ctx.beginPath(); ctx.arc(center.x, center.y, 3, 0, Math.PI * 2); ctx.fill();
+  if (['bspline', 'nurbs', 'spline'].includes(record.form) && pts.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+    for (let index = 1; index < pts.length; index += 1) ctx.lineTo(pts[index].x, pts[index].y);
+    ctx.stroke();
   }
   if (record.form === 'ellipse') {
-    const center = project(record.center);
-    ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(center.x - record.radiusX * view.zoom, center.y); ctx.lineTo(center.x + record.radiusX * view.zoom, center.y); ctx.stroke(); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(center.x, center.y - record.radiusY * view.zoom); ctx.lineTo(center.x, center.y + record.radiusY * view.zoom); ctx.stroke();
-    ctx.setLineDash([]); ctx.beginPath(); ctx.arc(center.x, center.y, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[1].x, pts[1].y);
+    ctx.moveTo(pts[0].x, pts[0].y); ctx.lineTo(pts[2].x, pts[2].y);
+    ctx.stroke();
   }
+  ctx.setLineDash([]);
+  pts.forEach((point, index) => {
+    const picked = pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index;
+    ctx.beginPath();
+    ctx.arc(point.x, point.y, picked ? 5.5 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = picked ? colors.selected : '#aeb8bc';
+    ctx.fill();
+    ctx.strokeStyle = colors.selected;
+    ctx.stroke();
+  });
   ctx.restore();
 }
 
@@ -1105,23 +1138,28 @@ function recordPoints3D(record) {
     const ordered = ensureWinding(localPoints, 'CCW');
     return ordered.map(point => recordPoint3D(record, point));
   }
-  if (record.form === 'bezier' || record.form === 'hermite' || record.form === 'spline' || record.form === 'bspline' || record.form === 'nurbs' || record.form === 'arc') return curveSamples(record, 128).map(point => recordPoint3D(record, point));
+  if (record.form === 'bezier' || record.form === 'hermite' || record.form === 'spline' || record.form === 'bspline' || record.form === 'nurbs' || record.form === 'arc') return curveSamples(record).map(point => recordPoint3D(record, point));
   if (record.form === 'polygon') return ensureWinding(record.points, 'CCW').map(point => recordPoint3D(record, point));
   if (record.form === 'slot') return slotBoundary(record).map(point => recordPoint3D(record, point));
   return [];
 }
 
 function controlPointMarkers3D(record) {
-  const controls = controlPointsForRecord(record);
-  const size = 4;
+  const controls = guidePointsForRecord(record);
+  const plane = scene.planes.find(item => item.id === record.planeId) || null;
+  const normal = plane ? planeWorldNormal(plane) : { x: 0, y: 0, z: 1 };
+  const sizeForIndex = index => pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index ? 6 : 4;
   const markers = [];
-  controls.forEach(control => {
-    const point = recordPoint3D(record, control);
-    markers.push(
-      { x: point.x - size, y: point.y, z: point.z }, { x: point.x + size, y: point.y, z: point.z },
-      { x: point.x, y: point.y - size, z: point.z }, { x: point.x, y: point.y + size, z: point.z },
-      { x: point.x, y: point.y, z: point.z - size }, { x: point.x, y: point.y, z: point.z + size }
-    );
+  controls.forEach((control, index) => {
+    const size = sizeForIndex(index);
+    const circle = [];
+    for (let step = 0; step < 16; step += 1) {
+      const angle = step / 16 * Math.PI * 2;
+      const point = recordPoint3D(record, { x: control.x + Math.cos(angle) * size, y: control.y + Math.sin(angle) * size });
+      const towardCamera = dot3(normal, sub3(cameraView.eye, point)) >= 0 ? 1 : -1;
+      circle.push(add3(point, scale3(normal, towardCamera * .25)));
+    }
+    for (let step = 0; step < circle.length; step += 1) markers.push(circle[step], circle[(step + 1) % circle.length]);
   });
   return markers;
 }
@@ -1384,7 +1422,7 @@ function renderWebGPU() {
     const tint = record.id === selectedId ? colors.selected : record.color;
     if (closed) gpuDrawVertices(pass, triangleVertexPacket(points), tint, record.id === selectedId ? .24 : .1, true);
     gpuDrawVertices(pass, lineVertexPacket(points, closed), tint, record.id === selectedId ? 1 : .95);
-    if (record.id === selectedId && isCurveForm(record.form)) gpuDrawVertices(pass, pairVertexPacket(controlPointMarkers3D(record)), colors.selected, 1);
+    if (record.id === selectedId && guidePointsForRecord(record).length) gpuDrawVertices(pass, pairVertexPacket(controlPointMarkers3D(record)), colors.selected, 1);
   });
   const preview = previewRecord3D();
   if (preview) {
@@ -1424,7 +1462,7 @@ function render3D() {
     const tint = record.id === selectedId ? colors.selected : record.color;
     if (closed) glDraw(points, gl.TRIANGLE_FAN, tint, cameraView.matrix, record.id === selectedId ? .24 : .1);
     glDraw(points, gl.LINE_STRIP, tint, cameraView.matrix, record.id === selectedId ? 1 : .95, closed);
-    if (record.id === selectedId && isCurveForm(record.form)) glDraw(controlPointMarkers3D(record), gl.LINES, colors.selected, cameraView.matrix, 1);
+    if (record.id === selectedId && guidePointsForRecord(record).length) glDraw(controlPointMarkers3D(record), gl.LINES, colors.selected, cameraView.matrix, 1);
   });
   const preview = previewRecord3D();
   if (preview) {
@@ -1552,6 +1590,74 @@ function updatePointerReadout(screenPoint) {
   crosshair.style.display = view.mode === '2d' && activeTool !== 'select' ? 'block' : 'none';
 }
 
+function findGuidePointAt2D(point) {
+  const record = findSelected();
+  if (!record || record.form === 'circle') return null;
+  const handles = guidePointsForRecord(record);
+  let best = null;
+  handles.forEach((handle, index) => {
+    const distanceToPoint = distance(point, handle);
+    if (distanceToPoint <= 10 / view.zoom && (!best || distanceToPoint < best.distance)) best = { recordId: record.id, index, distance: distanceToPoint };
+  });
+  return best;
+}
+
+function findGuidePointAtScene(screenPoint) {
+  const record = findSelected();
+  if (!record || record.form === 'circle') return null;
+  const handles = guidePointsForRecord(record);
+  let best = null;
+  handles.forEach((handle, index) => {
+    const projected = projectWorld(recordPoint3D(record, handle));
+    const distanceToPoint = Math.hypot(screenPoint.x - projected.x, screenPoint.y - projected.y);
+    if (distanceToPoint <= 12 && (!best || distanceToPoint < best.distance)) best = { recordId: record.id, index, distance: distanceToPoint };
+  });
+  return best;
+}
+
+function updateGuidePoint(record, index, point) {
+  if (record.form === 'hermite' && !record.points) {
+    if (index === 0) record.start = point;
+    if (index === 1) record.tangentStart = point;
+    if (index === 2) record.tangentEnd = point;
+    if (index === 3) record.end = point;
+    return;
+  }
+  if (record.form === 'arc') {
+    const next = record.points.slice();
+    next[index] = point;
+    Object.assign(record, arcRecordFromPoints(next, record.planeId), { id: record.id, name: record.name, color: record.color });
+    return;
+  }
+  if (record.form === 'slot') {
+    const next = record.points.slice();
+    next[index] = point;
+    Object.assign(record, slotRecordFromPoints(next, record.planeId), { id: record.id, name: record.name, color: record.color });
+    return;
+  }
+  if (record.form === 'rectangle') {
+    const x = record.origin.x; const y = record.origin.y;
+    const maxX = x + record.width; const maxY = y + record.height;
+    if (index === 0) Object.assign(record, { origin: makePoint(point.x, point.y), width: Math.max(1, maxX - point.x), height: Math.max(1, maxY - point.y) });
+    if (index === 1) Object.assign(record, { origin: makePoint(x, point.y), width: Math.max(1, point.x - x), height: Math.max(1, maxY - point.y) });
+    if (index === 2) Object.assign(record, { width: Math.max(1, point.x - x), height: Math.max(1, point.y - y) });
+    if (index === 3) Object.assign(record, { origin: makePoint(point.x, y), width: Math.max(1, maxX - point.x), height: Math.max(1, point.y - y) });
+    return;
+  }
+  if (record.form === 'ellipse') {
+    if (index === 0) record.center = point;
+    if (index === 1) record.radiusX = Math.max(1, Math.abs(point.x - record.center.x));
+    if (index === 2) record.radiusY = Math.max(1, Math.abs(point.y - record.center.y));
+    return;
+  }
+  if (record.points && record.points[index]) record.points[index] = point;
+}
+
+function normaliseSelectedWinding() {
+  const record = findSelected();
+  if (record?.form === 'polygon') record.points = ensureWinding(record.points, 'CCW');
+}
+
 function previewDraftEvent(event) {
   const position = pointerPosition(event, draftCanvas);
   const rect = draftCanvas.getBoundingClientRect();
@@ -1579,7 +1685,18 @@ function onDraftPointerDown(event) {
   updatePointerReadout(position);
 
   if (activeTool === 'select') {
+    const guide = findGuidePointAt2D(point);
+    if (guide) {
+      selectedId = guide.recordId;
+      pickedControlPoint = guide;
+      controlDrag = { ...guide, pointerId: event.pointerId, surface: 'draft' };
+      saveSnapshot();
+      draftCanvas.setPointerCapture(event.pointerId);
+      renderAll();
+      return;
+    }
     selectAt(point);
+    pickedControlPoint = null;
     renderAll();
     return;
   }
@@ -1604,6 +1721,17 @@ function onDraftPointerDown(event) {
 function onDraftPointerMove(event) {
   const position = pointerPosition(event, draftCanvas);
   updatePointerReadout(position);
+  if (controlDrag && controlDrag.surface === 'draft' && controlDrag.pointerId === event.pointerId) {
+    const rect = draftCanvas.getBoundingClientRect();
+    const point = worldFromScreen(position, rect.width, rect.height, event);
+    const record = scene.records.find(item => item.id === controlDrag.recordId);
+    if (record) {
+      updateGuidePoint(record, controlDrag.index, point);
+      pickedControlPoint = { recordId: record.id, index: controlDrag.index };
+      renderAll();
+    }
+    return;
+  }
   if (isPanning && dragAnchor) {
     view.pan.x = dragAnchor.panX + event.clientX - dragAnchor.x;
     view.pan.y = dragAnchor.panY + event.clientY - dragAnchor.y;
@@ -1623,12 +1751,28 @@ function onDraftPointerMove(event) {
     render2D();
     return;
   }
-  if (!sketch.points.length || activeTool === 'select') return;
+  if (activeTool === 'select') {
+    const guide = findGuidePointAt2D(rawWorldFromScreen(position, rect.width, rect.height));
+    const changed = guide?.recordId !== pickedControlPoint?.recordId || guide?.index !== pickedControlPoint?.index;
+    if (changed) {
+      pickedControlPoint = guide;
+      render2D();
+    }
+    return;
+  }
+  if (!sketch.points.length) return;
   sketch.preview = worldFromScreen(position, rect.width, rect.height, event);
   render2D();
 }
 
 function onDraftPointerUp(event) {
+  if (controlDrag && controlDrag.surface === 'draft' && controlDrag.pointerId === event.pointerId) {
+    normaliseSelectedWinding();
+    controlDrag = null;
+    if (draftCanvas.hasPointerCapture(event.pointerId)) draftCanvas.releasePointerCapture(event.pointerId);
+    renderAll();
+    return;
+  }
   if (shapeDrag && shapeDrag.surface === 'draft' && shapeDrag.pointerId === event.pointerId) {
     const position = pointerPosition(event, draftCanvas);
     const rect = draftCanvas.getBoundingClientRect();
@@ -1696,13 +1840,13 @@ function previewSceneEvent(event) {
 }
 
 function onScenePointerDown(event) {
-  if (!cameraView) return;
   if (event.button === 2 && activeTool !== 'select') {
     event.preventDefault();
     if (!shapeDrag) previewSceneEvent(event);
     confirmCurrentDrawing();
     return;
   }
+  if (!cameraView) return;
   // Blender-style navigation remains available when selecting: MMB orbits, Shift+MMB pans.
   if ((event.button === 1 || event.button === 2) && event.shiftKey) {
     beginScenePan(event);
@@ -1716,7 +1860,18 @@ function onScenePointerDown(event) {
   const screenPoint = pointerPosition(event, sceneCanvas);
   const hit = scenePointForEvent(event);
   if (activeTool === 'select') {
+    const guide = findGuidePointAtScene(screenPoint);
+    if (guide) {
+      selectedId = guide.recordId;
+      pickedControlPoint = guide;
+      controlDrag = { ...guide, pointerId: event.pointerId, surface: 'scene' };
+      saveSnapshot();
+      sceneCanvas.setPointerCapture(event.pointerId);
+      renderAll();
+      return;
+    }
     selectAtScene(screenPoint);
+    pickedControlPoint = null;
     renderAll();
     return;
   }
@@ -1741,6 +1896,16 @@ function onScenePointerDown(event) {
 }
 
 function onScenePointerMove(event) {
+  if (controlDrag && controlDrag.surface === 'scene' && controlDrag.pointerId === event.pointerId) {
+    const hit = scenePointForEvent(event);
+    const record = scene.records.find(item => item.id === controlDrag.recordId);
+    if (hit && record) {
+      updateGuidePoint(record, controlDrag.index, hit.local);
+      pickedControlPoint = { recordId: record.id, index: controlDrag.index };
+      renderAll();
+    }
+    return;
+  }
   if (isScenePanning && dragAnchor) {
     const rect = sceneCanvas.getBoundingClientRect();
     const scale = (700 / orbit.zoom) * (2 * Math.tan(Math.PI / 3.2 / 2)) / Math.max(rect.height, 1);
@@ -1768,7 +1933,16 @@ function onScenePointerMove(event) {
     render3D();
     return;
   }
-  if (activeTool === 'select' || !cameraView) return;
+  if (!cameraView) return;
+  if (activeTool === 'select') {
+    const guide = findGuidePointAtScene(pointerPosition(event, sceneCanvas));
+    const changed = guide?.recordId !== pickedControlPoint?.recordId || guide?.index !== pickedControlPoint?.index;
+    if (changed) {
+      pickedControlPoint = guide;
+      render3D();
+    }
+    return;
+  }
   const hit = scenePointForEvent(event);
   if (!hit) return;
   sketch.preview = hit.local;
@@ -1777,6 +1951,13 @@ function onScenePointerMove(event) {
 }
 
 function onScenePointerUp(event) {
+  if (controlDrag && controlDrag.surface === 'scene' && controlDrag.pointerId === event.pointerId) {
+    normaliseSelectedWinding();
+    controlDrag = null;
+    if (sceneCanvas.hasPointerCapture(event.pointerId)) sceneCanvas.releasePointerCapture(event.pointerId);
+    renderAll();
+    return;
+  }
   if (shapeDrag && shapeDrag.surface === 'scene' && shapeDrag.pointerId === event.pointerId) {
     const hit = scenePointForEvent(event);
     if (hit && shapeDrag.moved) {
@@ -2095,7 +2276,7 @@ function onKeyDown(event) {
   const key = event.key.toLowerCase();
   const shortcuts = { v: 'select', l: 'line', p: 'polyline', g: 'polygon', r: 'rectangle', c: 'circle', e: 'ellipse', t: 'arc', o: 'slot', b: 'bezier', h: 'hermite', n: 'bspline', u: 'nurbs', s: 'spline', a: 'plane' };
   if (shortcuts[key]) { event.preventDefault(); setTool(shortcuts[key]); }
-  if (key === 'escape') { shapeDrag = null; sketch = { points: [], preview: null, previewWorld: null }; setTool('select'); }
+  if (key === 'escape') { shapeDrag = null; controlDrag = null; pickedControlPoint = null; sketch = { points: [], preview: null, previewWorld: null }; setTool('select'); }
   if (key === 'delete' || key === 'backspace') deleteSelected();
   if (key === 'f') fitView();
   if (key === '1') setMode('2d');
@@ -2107,7 +2288,12 @@ function onKeyDown(event) {
 draftCanvas.addEventListener('pointerdown', onDraftPointerDown);
 draftCanvas.addEventListener('pointermove', onDraftPointerMove);
 draftCanvas.addEventListener('pointerup', onDraftPointerUp);
-draftCanvas.addEventListener('pointerleave', () => { if (!isPanning && !shapeDrag) { sketch.preview = null; render2D(); } });
+draftCanvas.addEventListener('pointerleave', () => {
+  if (!isPanning && !shapeDrag && !controlDrag) { sketch.preview = null; pickedControlPoint = null; render2D(); }
+});
+sceneCanvas.addEventListener('pointerleave', () => {
+  if (!controlDrag && !isOrbiting && !isScenePanning) { pickedControlPoint = null; render3D(); }
+});
 sceneCanvas.addEventListener('pointerdown', onScenePointerDown);
 sceneCanvas.addEventListener('pointermove', onScenePointerMove);
 sceneCanvas.addEventListener('pointerup', onScenePointerUp);
