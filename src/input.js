@@ -42,6 +42,31 @@ function hermitePoint(record, t) {
   };
 }
 
+function catmullRomPoint(points, t) {
+  if (points.length === 1) return points[0];
+  if (points.length === 2) return { x: points[0].x + (points[1].x - points[0].x) * t, y: points[0].y + (points[1].y - points[0].y) * t };
+  const scaled = Math.max(0, Math.min(1, t)) * (points.length - 1);
+  const segment = Math.min(points.length - 2, Math.floor(scaled));
+  const local = scaled - segment;
+  const p0 = points[Math.max(0, segment - 1)];
+  const p1 = points[segment];
+  const p2 = points[segment + 1];
+  const p3 = points[Math.min(points.length - 1, segment + 2)];
+  const local2 = local * local;
+  const local3 = local2 * local;
+  return {
+    x: 0.5 * ((2 * p1.x) + (-p0.x + p2.x) * local + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * local2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * local3),
+    y: 0.5 * ((2 * p1.y) + (-p0.y + p2.y) * local + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * local2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * local3)
+  };
+}
+
+function continuousCurvePoints(points, count = 128) {
+  if (points.length < 2) return points.slice();
+  const sampled = [];
+  for (let index = 0; index <= count; index += 1) sampled.push(catmullRomPoint(points, index / count));
+  return sampled;
+}
+
 function sampleRecord(record, callback) {
   if (record.form === 'line' || record.form === 'polyline') return record.points.slice();
   if (record.form === 'rectangle') return rectangleCorners(record);
@@ -60,13 +85,16 @@ function sampleRecord(record, callback) {
   }
   if (record.form === 'bezier' && record.points?.length === 4) {
     const points = [];
-    for (let index = 0; index <= 96; index += 1) points.push(cubicPoint(record.points, index / 96));
+    for (let index = 0; index <= 128; index += 1) points.push(cubicPoint(record.points, index / 128));
     return points;
   }
-  if (record.form === 'hermite') {
+  if (record.form === 'hermite' && !record.points?.length && record.start && record.end && record.tangentStart && record.tangentEnd) {
     const points = [];
-    for (let index = 0; index <= 96; index += 1) points.push(hermitePoint(record, index / 96));
+    for (let index = 0; index <= 128; index += 1) points.push(hermitePoint(record, index / 128));
     return points;
+  }
+  if ((record.form === 'bezier' || record.form === 'hermite' || record.form === 'spline') && record.points?.length) {
+    return continuousCurvePoints(record.points);
   }
   return callback ? callback(record) || [] : [];
 }
@@ -89,8 +117,11 @@ function candidatePoints(record, samples) {
     const corners = rectangleCorners(record);
     candidates.push({ point: midpoint(corners[0], corners[2]), label: 'centre' });
   }
-  if (record.form === 'bezier') record.points.forEach(point => candidates.push({ point, label: 'control point' }));
-  if (record.form === 'hermite') [record.start, record.end, record.tangentStart, record.tangentEnd].forEach(point => candidates.push({ point, label: 'control point' }));
+  if (record.form === 'bezier' || record.form === 'spline') record.points.forEach(point => candidates.push({ point, label: 'control point' }));
+  if (record.form === 'hermite') {
+    const controls = record.points || [record.start, record.end, record.tangentStart, record.tangentEnd];
+    controls.filter(Boolean).forEach(point => candidates.push({ point, label: 'control point' }));
+  }
   return candidates;
 }
 
@@ -152,16 +183,15 @@ export function confirmDrawing({ activeTool, sketch, addPlane, finishPolyline, f
     return true;
   }
   if (activeTool === 'polyline') {
-    if (sketch.preview) {
-      sketch.points.push(sketch.preview);
-      sketch.preview = null;
-    }
+    if (sketch.preview && (!sketch.points.length || distance(sketch.points[sketch.points.length - 1], sketch.preview) > 0.01)) sketch.points.push(sketch.preview);
+    sketch.preview = null;
     finishPolyline();
     return true;
   }
-  const required = { line: 2, rectangle: 2, circle: 2, ellipse: 2, bezier: 4, hermite: 4 }[activeTool];
+  const required = { line: 2, rectangle: 2, circle: 2, ellipse: 2, bezier: 2, hermite: 2, spline: 2 }[activeTool];
   if (!required) return false;
-  if (sketch.preview && sketch.points.length < required) sketch.points.push(sketch.preview);
+  const continuousCurve = ['bezier', 'hermite', 'spline'].includes(activeTool);
+  if (sketch.preview && ((continuousCurve && (!sketch.points.length || distance(sketch.points[sketch.points.length - 1], sketch.preview) > 0.01)) || (!continuousCurve && sketch.points.length < required))) sketch.points.push(sketch.preview);
   if (sketch.points.length >= required) finishDrawing();
   return true;
 }
