@@ -1007,6 +1007,13 @@ function gpuWriteUniforms(matrix, colour, alpha) {
   return bindGroup;
 }
 
+function gpuPairVertices(points) {
+  if (points.length < 2) return new Float32Array();
+  const packed = new Float32Array(points.length * 3);
+  points.forEach((point, index) => { packed[index * 3] = point.x; packed[index * 3 + 1] = point.y; packed[index * 3 + 2] = point.z; });
+  return packed;
+}
+
 function gpuLineVertices(points, close = false) {
   if (points.length < 2) return new Float32Array();
   const vertices = [];
@@ -1059,7 +1066,7 @@ function renderWebGPU() {
     grid.push({ x: coordinate, y: -240, z: -.35 }, { x: coordinate, y: 240, z: -.35 });
     grid.push({ x: -240, y: coordinate, z: -.35 }, { x: 240, y: coordinate, z: -.35 });
   }
-  gpuDrawVertices(pass, gpuLineVertices(grid), '#2a3033', .7);
+  gpuDrawVertices(pass, gpuPairVertices(grid), '#2a3033', .7);
   gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }]), '#a77c81', .95);
   gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 120, z: 0 }]), '#789383', .95);
   gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 120 }]), '#8297bd', .95);
