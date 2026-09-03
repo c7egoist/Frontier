@@ -426,14 +426,14 @@ function drawGrid(ctx, width, height) {
 
   const origin = screenFromWorld({ x: 0, y: 0 }, width, height);
   ctx.lineWidth = 1.5;
-  ctx.strokeStyle = '#594043';
+  ctx.strokeStyle = '#4a4a4a';
   ctx.beginPath(); ctx.moveTo(0, origin.y); ctx.lineTo(width, origin.y); ctx.stroke();
-  ctx.strokeStyle = '#334a38';
+  ctx.strokeStyle = '#3d3d3d';
   ctx.beginPath(); ctx.moveTo(origin.x, 0); ctx.lineTo(origin.x, height); ctx.stroke();
-  ctx.fillStyle = '#8f5b5f';
+  ctx.fillStyle = '#989898';
   ctx.font = '9px SFMono-Regular, Consolas, monospace';
   ctx.fillText('X', width - 17, origin.y - 7);
-  ctx.fillStyle = '#649071';
+  ctx.fillStyle = '#888888';
   ctx.fillText('Y', origin.x + 7, 14);
   ctx.fillStyle = '#626267';
   ctx.beginPath(); ctx.arc(origin.x, origin.y, 2, 0, Math.PI * 2); ctx.fill();
@@ -964,9 +964,9 @@ function draw3Grid() {
 }
 
 function draw3Axes() {
-  glDraw([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }], gl.LINES, '#a77c81', cameraView.matrix, .95);
-  glDraw([{ x: 0, y: 0, z: 0 }, { x: 0, y: 120, z: 0 }], gl.LINES, '#789383', cameraView.matrix, .95);
-  glDraw([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 120 }], gl.LINES, '#8297bd', cameraView.matrix, .95);
+  glDraw([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }], gl.LINES, '#a0a0a0', cameraView.matrix, .95);
+  glDraw([{ x: 0, y: 0, z: 0 }, { x: 0, y: 120, z: 0 }], gl.LINES, '#858585', cameraView.matrix, .95);
+  glDraw([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 120 }], gl.LINES, '#6e6e6e', cameraView.matrix, .95);
 }
 
 function draw3Plane(plane, selected) {
@@ -1067,9 +1067,9 @@ function renderWebGPU() {
     grid.push({ x: -240, y: coordinate, z: -.35 }, { x: 240, y: coordinate, z: -.35 });
   }
   gpuDrawVertices(pass, gpuPairVertices(grid), '#2a3033', .7);
-  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }]), '#a77c81', .95);
-  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 120, z: 0 }]), '#789383', .95);
-  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 120 }]), '#8297bd', .95);
+  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }]), '#a0a0a0', .95);
+  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 120, z: 0 }]), '#858585', .95);
+  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 120 }]), '#6e6e6e', .95);
   scene.planes.slice().sort((a, b) => a.elevation - b.elevation).forEach(plane => {
     const corners = planeCorners3D(plane);
     gpuDrawVertices(pass, gpuTriangleVertices(corners), plane.id === selectedId ? '#a5bac5' : '#6f8c98', plane.id === selectedId ? .18 : .08, true);
@@ -1486,21 +1486,31 @@ function renderSceneInspector() {
   scene.planes.forEach(plane => rows.push({ ...plane, kindLabel: 'CONSTRUCTION PLANE', iconClass: 'plane' }));
   scene.records.forEach(record => rows.push({ ...record, kindLabel: formLabels[record.form], iconClass: record.form === 'bezier' || record.form === 'hermite' ? 'curve' : '' }));
   sceneInspector.innerHTML = `
-    <div class="scene-section">
-      <div class="section-label"><span>WORKSPACE</span><span class="accent">${total ? 'LIVE' : 'EMPTY'}</span></div>
-      <div class="scene-list">
-        ${rows.length ? rows.map(record => `
-          <button class="scene-row ${record.id === selectedId ? 'is-selected' : ''}" data-scene-id="${record.id}">
-            <span class="scene-icon ${record.iconClass}">${iconFor(record)}</span>
-            <span><span class="scene-name">${escapeHtml(record.name)}</span><span class="scene-kind">${record.kindLabel}</span></span>
-          </button>`).join('') : '<div class="scene-empty">Your sketch is empty.<br>Choose a primitive, curve,<br>or plane to begin.</div>'}
-      </div>
+    <div class="inspector-scroll">
+      <section class="inspector-card">
+        <div class="card-head">
+          <div><div class="card-kicker">SCENE CONTENT</div><div class="card-title">Construction order</div></div>
+          <span class="card-count">${String(total).padStart(2, '0')}</span>
+        </div>
+        <div class="card-body">
+          <div class="scene-list">
+            ${rows.length ? rows.map(record => `
+              <button class="scene-row ${record.id === selectedId ? 'is-selected' : ''}" data-scene-id="${record.id}">
+                <span class="scene-icon ${record.iconClass}">${iconFor(record)}</span>
+                <span><span class="scene-name">${escapeHtml(record.name)}</span><span class="scene-kind">${record.kindLabel}</span></span>
+              </button>`).join('') : '<div class="scene-empty">No geometry yet.<br>Choose a primitive, curve,<br>or plane from the pill toolbar.</div>'}
+          </div>
+        </div>
+      </section>
+      <section class="inspector-card compact-card">
+        <div class="card-head"><div><div class="card-kicker">WORKSPACE</div><div class="card-title">Draft contents</div></div><span class="card-dot ${total ? 'is-on' : ''}"></span></div>
+        <div class="card-note">${scene.planes.length} plane${scene.planes.length === 1 ? '' : 's'} · ${scene.records.length} geometry record${scene.records.length === 1 ? '' : 's'}</div>
+      </section>
     </div>`;
   sceneInspector.querySelectorAll('[data-scene-id]').forEach(row => row.addEventListener('click', () => {
     selectedId = row.dataset.sceneId;
     renderAll();
   }));
-  sceneInspector.querySelectorAll('[data-quick-tool]').forEach(button => button.addEventListener('click', () => setTool(button.dataset.quickTool)));
 }
 
 function field(label, property, current, inputType = 'text', suffix = '') {
@@ -1510,34 +1520,71 @@ function field(label, property, current, inputType = 'text', suffix = '') {
 function renderPropertiesInspector() {
   const record = findSelected();
   if (!record) {
-    propertiesInspector.innerHTML = '<div class="blank-properties"><strong>Nothing selected</strong>Select geometry in the viewport or scene list to inspect its dimensions, coordinates, and construction settings.</div>';
+    propertiesInspector.innerHTML = '<div class="inspector-scroll"><div class="blank-properties"><strong>Nothing selected</strong>Select geometry in the Scene view to inspect its dimensions and construction settings.</div></div>';
     return;
   }
   if (record.form === 'plane') {
     propertiesInspector.innerHTML = `
-      <div class="property-head"><div class="property-title"><div class="property-icon">◇</div><div><div class="property-name">${escapeHtml(record.name)}</div><div class="scene-kind">CONSTRUCTION PLANE</div></div></div></div>
-      <div class="property-form">
-        ${field('Name', 'name', record.name)}
-        ${field('Origin X', 'centerX', record.center.x, 'number')}
-        ${field('Origin Y', 'centerY', record.center.y, 'number')}
-        ${field('Width', 'width', record.width, 'number')}
-        ${field('Height', 'height', record.height, 'number')}
-        ${field('Elevation', 'elevation', record.elevation, 'number')}
-        ${field('Twist', 'twist', record.twist, 'number')}
-        ${field('Tilt X', 'tiltX', record.tiltX, 'number')}
-        ${field('Tilt Y', 'tiltY', record.tiltY, 'number')}
-        <div class="readout-box"><div class="readout"><div class="readout-label">ORIGIN X</div><div class="readout-value">${record.center.x.toFixed(2)} mm</div></div><div class="readout"><div class="readout-label">ORIGIN Y</div><div class="readout-value">${record.center.y.toFixed(2)} mm</div></div></div>
+      <div class="inspector-scroll">
+        <section class="property-card selected-card">
+          <div class="property-card-head"><span>CONSTRUCTION PLANE</span><span class="card-count">3D</span></div>
+          <div class="property-name-large">${escapeHtml(record.name)}</div>
+          <div class="property-subtitle">ACTIVE WORKING SURFACE</div>
+        </section>
+        <section class="property-card">
+          <div class="property-card-head"><span>IDENTITY</span><span>01</span></div>
+          <div class="property-card-body">
+            ${field('Name', 'name', record.name)}
+          </div>
+        </section>
+        <section class="property-card">
+          <div class="property-card-head"><span>PLACEMENT</span><span>XYZ</span></div>
+          <div class="property-card-body">
+            ${field('Origin X', 'centerX', record.center.x, 'number')}
+            ${field('Origin Y', 'centerY', record.center.y, 'number')}
+            ${field('Elevation', 'elevation', record.elevation, 'number')}
+          </div>
+        </section>
+        <section class="property-card">
+          <div class="property-card-head"><span>ORIENTATION</span><span>DEG</span></div>
+          <div class="property-card-body">
+            ${field('Twist', 'twist', record.twist, 'number')}
+            ${field('Tilt X', 'tiltX', record.tiltX, 'number')}
+            ${field('Tilt Y', 'tiltY', record.tiltY, 'number')}
+          </div>
+        </section>
+        <section class="property-card">
+          <div class="property-card-head"><span>SIZE</span><span>MM</span></div>
+          <div class="property-card-body">
+            ${field('Width', 'width', record.width, 'number')}
+            ${field('Height', 'height', record.height, 'number')}
+          </div>
+        </section>
         <button class="delete-button" data-delete="${record.id}">DELETE PLANE</button>
       </div>`;
   } else {
     const count = record.form === 'line' || record.form === 'polyline' || record.form === 'bezier' ? record.points.length : 1;
     propertiesInspector.innerHTML = `
-      <div class="property-head"><div class="property-title"><div class="property-icon">${iconFor(record)}</div><div><div class="property-name">${escapeHtml(record.name)}</div><div class="scene-kind">${formLabels[record.form]}</div></div></div></div>
-      <div class="property-form">
-        ${field('Name', 'name', record.name)}
-        ${field('Stroke', 'color', record.color, 'color')}
-        <div class="readout-box"><div class="readout"><div class="readout-label">FORM</div><div class="readout-value">${formLabels[record.form]}</div></div><div class="readout"><div class="readout-label">POINTS</div><div class="readout-value">${count}</div></div></div>
-        <div class="readout-box"><div class="readout"><div class="readout-label">CENTRE X</div><div class="readout-value">${getRecordCentre(record).x.toFixed(2)} mm</div></div><div class="readout"><div class="readout-label">CENTRE Y</div><div class="readout-value">${getRecordCentre(record).y.toFixed(2)} mm</div></div></div>
+      <div class="inspector-scroll">
+        <section class="property-card selected-card">
+          <div class="property-card-head"><span>${formLabels[record.form]}</span><span class="card-count">2D / 3D</span></div>
+          <div class="property-name-large">${escapeHtml(record.name)}</div>
+          <div class="property-subtitle">PARAMETRIC GEOMETRY</div>
+        </section>
+        <section class="property-card">
+          <div class="property-card-head"><span>IDENTITY</span><span>01</span></div>
+          <div class="property-card-body">
+            ${field('Name', 'name', record.name)}
+            ${field('Stroke', 'color', record.color, 'color')}
+          </div>
+        </section>
+        <section class="property-card">
+          <div class="property-card-head"><span>MEASUREMENTS</span><span>MM</span></div>
+          <div class="property-card-body">
+            <div class="readout-box"><div class="readout"><div class="readout-label">FORM</div><div class="readout-value">${formLabels[record.form]}</div></div><div class="readout"><div class="readout-label">POINTS</div><div class="readout-value">${count}</div></div></div>
+            <div class="readout-box"><div class="readout"><div class="readout-label">CENTRE X</div><div class="readout-value">${getRecordCentre(record).x.toFixed(2)}</div></div><div class="readout"><div class="readout-label">CENTRE Y</div><div class="readout-value">${getRecordCentre(record).y.toFixed(2)}</div></div></div>
+          </div>
+        </section>
         <button class="delete-button" data-delete="${record.id}">DELETE GEOMETRY</button>
       </div>`;
   }
@@ -1582,8 +1629,8 @@ function deleteSelected() {
 function setInspector(tab) {
   activeInspector = tab;
   document.querySelectorAll('.inspector-tab').forEach(button => button.classList.toggle('is-active', button.dataset.inspector === tab));
-  sceneInspector.classList.toggle('is-hidden', tab !== 'scene');
-  propertiesInspector.classList.toggle('is-hidden', tab !== 'properties');
+  const track = document.querySelector('#inspectorTrack');
+  if (track) track.style.transform = tab === 'properties' ? 'translateX(-50%)' : 'translateX(0)';
 }
 
 function exportSketch() {
