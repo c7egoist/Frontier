@@ -67,22 +67,139 @@ function continuousCurvePoints(points, count = 128) {
   return sampled;
 }
 
+function arcRecordFromPoints(points) {
+  const [a, through, c] = points;
+  const determinant = 2 * (a.x * (through.y - c.y) + through.x * (c.y - a.y) + c.x * (a.y - through.y));
+  if (Math.abs(determinant) < 0.00001) return { center: a, radius: 0, startAngle: 0, sweep: 0 };
+  const a2 = a.x * a.x + a.y * a.y;
+  const b2 = through.x * through.x + through.y * through.y;
+  const c2 = c.x * c.x + c.y * c.y;
+  const center = {
+    x: (a2 * (through.y - c.y) + b2 * (c.y - a.y) + c2 * (a.y - through.y)) / determinant,
+    y: (a2 * (c.x - through.x) + b2 * (a.x - c.x) + c2 * (through.x - a.x)) / determinant
+  };
+  const startAngle = Math.atan2(a.y - center.y, a.x - center.x);
+  const throughAngle = Math.atan2(through.y - center.y, through.x - center.x);
+  const endAngle = Math.atan2(c.y - center.y, c.x - center.x);
+  const fullTurn = Math.PI * 2;
+  const ccwSweep = (endAngle - startAngle + fullTurn) % fullTurn;
+  const throughSweep = (throughAngle - startAngle + fullTurn) % fullTurn;
+  return {
+    center,
+    radius: distance(center, a),
+    startAngle,
+    sweep: throughSweep <= ccwSweep + 0.00001 ? ccwSweep : -(fullTurn - ccwSweep)
+  };
+}
+
+function arcSamples(record, count = 96) {
+  const geometry = record.center && record.radius !== undefined ? record : arcRecordFromPoints(record.points || []);
+  if (!geometry.center || !geometry.radius || !geometry.sweep) return record.points ? record.points.slice() : [];
+  const points = [];
+  for (let index = 0; index <= count; index += 1) {
+    const angle = geometry.startAngle + geometry.sweep * index / count;
+    points.push({ x: geometry.center.x + Math.cos(angle) * geometry.radius, y: geometry.center.y + Math.sin(angle) * geometry.radius });
+  }
+  return points;
+}
+
+function slotBoundary(record, segments = 24) {
+  const points = record.points || [];
+  const start = record.start || points[0];
+  const end = record.end || points[1];
+  const radius = record.radius ?? 0;
+  if (!start || !end || !radius) return points.slice();
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const direction = { x: dx / length, y: dy / length };
+  const normal = { x: -direction.y, y: direction.x };
+  const boundary = [
+    { x: start.x - normal.x * radius, y: start.y - normal.y * radius },
+    { x: end.x - normal.x * radius, y: end.y - normal.y * radius }
+  ];
+  for (let index = 1; index <= segments; index += 1) {
+    const angle = -Math.PI / 2 + Math.PI * index / segments;
+    boundary.push({ x: end.x + direction.x * Math.cos(angle) * radius + normal.x * Math.sin(angle) * radius, y: end.y + direction.y * Math.cos(angle) * radius + normal.y * Math.sin(angle) * radius });
+  }
+  for (let index = 1; index <= segments; index += 1) {
+    const angle = Math.PI / 2 + Math.PI * index / segments;
+    boundary.push({ x: start.x + direction.x * Math.cos(angle) * radius + normal.x * Math.sin(angle) * radius, y: start.y + direction.y * Math.cos(angle) * radius + normal.y * Math.sin(angle) * radius });
+  }
+  if (boundary.length > 1 && distance(boundary[boundary.length - 1], boundary[0]) < 0.0001) boundary.pop();
+  return boundary;
+}
+
+function clampedKnotVector(pointCount, degree) {
+  const knotCount = pointCount + degree + 1;
+  return Array.from({ length: knotCount }, (_, index) => {
+    if (index <= degree) return 0;
+    if (index >= pointCount) return 1;
+    return (index - degree) / (pointCount - degree);
+  });
+}
+
+function bsplinePoint(points, t, requestedDegree = 3, weights = null) {
+  if (points.length === 1) return points[0];
+  const degree = Math.max(1, Math.min(requestedDegree, points.length - 1));
+  const knots = clampedKnotVector(points.length, degree);
+  const parameter = Math.max(0, Math.min(1, t));
+  if (parameter >= 1) return points[points.length - 1];
+  let span = degree;
+  for (let index = degree; index < points.length; index += 1) {
+    if (parameter >= knots[index] && parameter < knots[index + 1]) { span = index; break; }
+  }
+  const basis = new Array(degree + 1).fill(0);
+  const left = new Array(degree + 1).fill(0);
+  const right = new Array(degree + 1).fill(0);
+  basis[0] = 1;
+  for (let order = 1; order <= degree; order += 1) {
+    left[order] = parameter - knots[span + 1 - order];
+    right[order] = knots[span + order] - parameter;
+    let saved = 0;
+    for (let offset = 0; offset < order; offset += 1) {
+      const denominator = right[offset + 1] + left[order - offset];
+      const value = denominator ? basis[offset] / denominator : 0;
+      basis[offset] = saved + right[offset + 1] * value;
+      saved = left[order - offset] * value;
+    }
+    basis[order] = saved;
+  }
+  let x = 0; let y = 0; let weightTotal = 0;
+  for (let offset = 0; offset <= degree; offset += 1) {
+    const point = points[span - degree + offset];
+    const weight = weights ? Number(weights[span - degree + offset]) || 1 : 1;
+    const contribution = basis[offset] * weight;
+    x += point.x * contribution;
+    y += point.y * contribution;
+    weightTotal += contribution;
+  }
+  return { x: weightTotal ? x / weightTotal : x, y: weightTotal ? y / weightTotal : y };
+}
+
+function bsplineSamples(record, count = 128) {
+  const points = record.points || [];
+  if (points.length < 2) return points.slice();
+  const degree = Number(record.degree) || 3;
+  const weights = record.form === 'nurbs' ? record.weights : null;
+  return Array.from({ length: count + 1 }, (_, index) => bsplinePoint(points, index / count, degree, weights));
+}
+
 function sampleRecord(record, callback) {
-  if (record.form === 'line' || record.form === 'polyline') return record.points.slice();
+  if (record.form === 'line' || record.form === 'polyline' || record.form === 'polygon') return (record.points || []).slice();
   if (record.form === 'rectangle') return rectangleCorners(record);
   if (record.form === 'circle' || record.form === 'ellipse') {
     const points = [];
-    for (let index = 0; index <= 64; index += 1) {
+    for (let index = 0; index < 64; index += 1) {
       const angle = index / 64 * Math.PI * 2;
       const radiusX = record.form === 'circle' ? record.radius : record.radiusX;
       const radiusY = record.form === 'circle' ? record.radius : record.radiusY;
-      points.push({
-        x: record.center.x + Math.cos(angle) * radiusX,
-        y: record.center.y + Math.sin(angle) * radiusY
-      });
+      points.push({ x: record.center.x + Math.cos(angle) * radiusX, y: record.center.y + Math.sin(angle) * radiusY });
     }
     return points;
   }
+  if (record.form === 'arc') return arcSamples(record);
+  if (record.form === 'slot') return slotBoundary(record);
   if (record.form === 'bezier' && record.points?.length === 4) {
     const points = [];
     for (let index = 0; index <= 128; index += 1) points.push(cubicPoint(record.points, index / 128));
@@ -93,9 +210,7 @@ function sampleRecord(record, callback) {
     for (let index = 0; index <= 128; index += 1) points.push(hermitePoint(record, index / 128));
     return points;
   }
-  if ((record.form === 'bezier' || record.form === 'hermite' || record.form === 'spline') && record.points?.length) {
-    return continuousCurvePoints(record.points);
-  }
+  if (['bezier', 'hermite', 'bspline', 'nurbs', 'spline'].includes(record.form) && record.points?.length) return record.form === 'bspline' || record.form === 'nurbs' ? bsplineSamples(record) : continuousCurvePoints(record.points);
   return callback ? callback(record) || [] : [];
 }
 
@@ -117,11 +232,11 @@ function candidatePoints(record, samples) {
     const corners = rectangleCorners(record);
     candidates.push({ point: midpoint(corners[0], corners[2]), label: 'centre' });
   }
-  if (record.form === 'bezier' || record.form === 'spline') record.points.forEach(point => candidates.push({ point, label: 'control point' }));
-  if (record.form === 'hermite') {
+  if (['bezier', 'hermite', 'bspline', 'nurbs', 'spline', 'arc'].includes(record.form)) {
     const controls = record.points || [record.start, record.end, record.tangentStart, record.tangentEnd];
     controls.filter(Boolean).forEach(point => candidates.push({ point, label: 'control point' }));
   }
+  if (record.form === 'slot' && record.points) record.points.forEach(point => candidates.push({ point, label: 'slot point' }));
   return candidates;
 }
 
@@ -141,9 +256,7 @@ function pointOnImportant(point, records, planes, threshold, samples) {
     if (point.y >= bounds.minY - threshold && point.y <= bounds.maxY + threshold) consider({ x: centreX, y: point.y }, Math.abs(point.x - centreX));
     if (point.x >= bounds.minX - threshold && point.x <= bounds.maxX + threshold) consider({ x: point.x, y: centreY }, Math.abs(point.y - centreY));
   });
-  planes.forEach(plane => {
-    consider(plane.center, distance(point, plane.center));
-  });
+  planes.forEach(plane => consider(plane.center, distance(point, plane.center)));
   return best;
 }
 
@@ -154,6 +267,14 @@ function pointAlongGeometry(point, records, threshold, samples) {
     for (let index = 1; index < points.length; index += 1) {
       const hit = pointToSegment(point, points[index - 1], points[index]);
       if (hit.distance <= threshold && (!best || hit.distance < best.distance)) best = { point: { x: hit.x, y: hit.y }, distance: hit.distance, label: 'curve' };
+    }
+    if (['polygon', 'slot', 'rectangle', 'circle', 'ellipse'].includes(record.form)) {
+      const first = points[0];
+      const last = points[points.length - 1];
+      if (first && last) {
+        const hit = pointToSegment(point, last, first);
+        if (hit.distance <= threshold && (!best || hit.distance < best.distance)) best = { point: { x: hit.x, y: hit.y }, distance: hit.distance, label: 'closed edge' };
+      }
     }
   });
   return best;
@@ -180,17 +301,18 @@ export function confirmDrawing({ activeTool, sketch, addPlane, finishPolyline, f
   if (activeTool === 'plane') {
     if (sketch.previewWorld) addPlane(sketch.previewWorld);
     else if (sketch.preview) addPlane(sketch.preview);
-    return true;
+    return Boolean(sketch.previewWorld || sketch.preview);
   }
-  if (activeTool === 'polyline') {
+  if (activeTool === 'polyline' || activeTool === 'polygon') {
     if (sketch.preview && (!sketch.points.length || distance(sketch.points[sketch.points.length - 1], sketch.preview) > 0.01)) sketch.points.push(sketch.preview);
     sketch.preview = null;
-    finishPolyline();
+    if (activeTool === 'polyline') finishPolyline();
+    else if (sketch.points.length >= 3) finishDrawing();
     return true;
   }
-  const required = { line: 2, rectangle: 2, circle: 2, ellipse: 2, bezier: 2, hermite: 2, spline: 2 }[activeTool];
+  const required = { line: 2, rectangle: 2, circle: 2, ellipse: 2, arc: 3, slot: 3, bezier: 2, hermite: 2, bspline: 2, nurbs: 2, spline: 2 }[activeTool];
   if (!required) return false;
-  const continuousCurve = ['bezier', 'hermite', 'spline'].includes(activeTool);
+  const continuousCurve = ['bezier', 'hermite', 'bspline', 'nurbs', 'spline'].includes(activeTool);
   if (sketch.preview && ((continuousCurve && (!sketch.points.length || distance(sketch.points[sketch.points.length - 1], sketch.preview) > 0.01)) || (!continuousCurve && sketch.points.length < required))) sketch.points.push(sketch.preview);
   if (sketch.points.length >= required) finishDrawing();
   return true;

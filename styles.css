@@ -33,7 +33,9 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 1px s
 .floating-toolbar { position: absolute; z-index: 8; top: 50%; left: 20px; display: flex; flex-direction: column; align-items: center; gap: 3px; max-height: calc(100% - 40px); padding: 5px; border: 1px solid #464646; border-radius: 999px; background: rgba(25, 29, 31, .98); overflow-y: auto; overflow-x: hidden; scrollbar-color: #4a565b transparent; scrollbar-width: thin; transform: translateY(-50%); }
 .floating-toolbar::-webkit-scrollbar { width: 4px; }
 .floating-toolbar::-webkit-scrollbar-thumb { background: #4a565b; border-radius: 2px; }
-.floating-toolbar .tool-button { flex: 0 0 35px; width: 35px; height: 35px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.floating-toolbar .tool-button { position: relative; flex: 0 0 35px; width: 35px; height: 35px; display: grid; place-items: center; padding: 0; border: 1px solid transparent; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.toolbar-tooltip { position: fixed; z-index: 30; min-width: max-content; padding: 7px 9px; border: 1px solid #4c4c4c; border-radius: 8px; background: #0a0a0a; box-shadow: 0 8px 22px rgba(0,0,0,.45); color: #eeeeee; font: 9px var(--mono); letter-spacing: .04em; opacity: 0; pointer-events: none; transform: translate(4px, -50%); transition: opacity .16s ease, transform .16s ease; white-space: nowrap; }
+.toolbar-tooltip.is-visible { opacity: 1; transform: translate(0, -50%); }
 .floating-toolbar .tool-button svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .floating-toolbar .tool-button:hover { border-color: #555555; background: var(--surface-3); color: var(--text); }
 .floating-toolbar .tool-button.is-active { border-color: #777777; background: var(--accent-soft); color: #eeeeee; }

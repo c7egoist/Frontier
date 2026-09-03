@@ -4,11 +4,13 @@ A WebGPU-based parametric sketcher prototype for the browser.
 
 ## Current surface
 
-- 2D drafting for lines, polylines, rectangles, circles, ellipses, continuous Bézier/Hermite curves, and Catmull–Rom splines.
+- 2D drafting for lines, polylines, polygons, rectangles, circles, ellipses, slots, three-point arcs, continuous Bézier/Hermite curves, B-splines, NURBS, and Catmull–Rom splines.
+- The toolbar provides hover and keyboard tooltips; selected geometry uses a bright neutral highlight and selected curves expose their control points in 2D and 3D.
+- CAD curve tools include Bézier, cubic Hermite, B-spline, and NURBS; additional sketch tools include three-point arc, slot, and polygon.
 - Left-click adds points; right-click confirms every drawing. Rectangles and circles use click-drag sizing, while ellipses use the centre-and-corner workflow.
 - Curves and polylines remain open for as many left-clicked points as needed, then finish as one continuous drawing with right-click.
 - Construction planes with elevation, twist, and tilt.
-- Closed rectangles, circles, ellipses, and planes keep a consistent counter-clockwise winding order and render as semi-transparent filled faces with outlines.
+- Closed rectangles, circles, ellipses, polygons, slots, and planes keep a consistent counter-clockwise winding order and render as semi-transparent filled faces with outlines.
 - A real perspective 3D viewport rendered with WebGPU when available, with a WebGL fallback.
 - 3D is the default view; 2D drafting remains available from the left pill toolbar.
 - Draw directly onto the active construction plane in 3D using camera ray intersection.

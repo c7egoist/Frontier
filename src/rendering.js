@@ -17,11 +17,76 @@ export function lineVertexPacket(points, close = false) {
   return pairVertexPacket(vertices);
 }
 
+function cross2(a, b, c) {
+  return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+function pointInTriangle(point, a, b, c) {
+  const first = cross2(a, b, point);
+  const second = cross2(b, c, point);
+  const third = cross2(c, a, point);
+  const hasNegative = first < -0.000001 || second < -0.000001 || third < -0.000001;
+  const hasPositive = first > 0.000001 || second > 0.000001 || third > 0.000001;
+  return !(hasNegative && hasPositive);
+}
+
+function triangulatePolygon(points) {
+  const vertices = points.slice();
+  if (vertices.length > 3) {
+    const first = vertices[0];
+    const last = vertices[vertices.length - 1];
+    if (Math.hypot(first.x - last.x, first.y - last.y) < 0.000001) vertices.pop();
+  }
+  if (vertices.length < 3) return [];
+  if (vertices.length === 3) return polygonSignedArea(vertices) < 0 ? [vertices[0], vertices[2], vertices[1]] : vertices;
+  if (polygonSignedArea(vertices) < 0) vertices.reverse();
+  let convex = true;
+  for (let index = 0; index < vertices.length; index += 1) {
+    if (cross2(vertices[index], vertices[(index + 1) % vertices.length], vertices[(index + 2) % vertices.length]) <= 0.000001) { convex = false; break; }
+  }
+  if (convex) {
+    const fan = [];
+    for (let index = 2; index < vertices.length; index += 1) fan.push(vertices[0], vertices[index - 1], vertices[index]);
+    return fan;
+  }
+  const indices = Array.from({ length: vertices.length }, (_, index) => index);
+  const triangles = [];
+  let guard = vertices.length * vertices.length;
+  while (indices.length > 3 && guard > 0) {
+    let clipped = false;
+    for (let index = 0; index < indices.length; index += 1) {
+      const previous = indices[(index + indices.length - 1) % indices.length];
+      const current = indices[index];
+      const next = indices[(index + 1) % indices.length];
+      const a = vertices[previous];
+      const b = vertices[current];
+      const c = vertices[next];
+      if (cross2(a, b, c) <= 0.000001) continue;
+      let containsVertex = false;
+      for (const candidate of indices) {
+        if (candidate === previous || candidate === current || candidate === next) continue;
+        if (pointInTriangle(vertices[candidate], a, b, c)) { containsVertex = true; break; }
+      }
+      if (containsVertex) continue;
+      triangles.push(a, b, c);
+      indices.splice(index, 1);
+      clipped = true;
+      break;
+    }
+    if (!clipped) break;
+    guard -= 1;
+  }
+  if (indices.length === 3) triangles.push(vertices[indices[0]], vertices[indices[1]], vertices[indices[2]]);
+  if (triangles.length < 3) {
+    triangles.length = 0;
+    for (let index = 2; index < vertices.length; index += 1) triangles.push(vertices[0], vertices[index - 1], vertices[index]);
+  }
+  return triangles;
+}
+
 export function triangleVertexPacket(points) {
-  if (points.length < 3) return new Float32Array();
-  const vertices = [points[0], points[1], points[2]];
-  for (let index = 3; index < points.length; index += 1) vertices.push(points[0], points[index - 1], points[index]);
-  return pairVertexPacket(vertices);
+  const triangles = triangulatePolygon(points);
+  return triangles.length >= 3 ? pairVertexPacket(triangles) : new Float32Array();
 }
 
 export function polygonSignedArea(points) {
@@ -45,5 +110,5 @@ export function ensureWinding(points, desired = 'CCW') {
 }
 
 export function isClosedForm(form) {
-  return form === 'rectangle' || form === 'circle' || form === 'ellipse' || form === 'plane';
+  return ['rectangle', 'circle', 'ellipse', 'polygon', 'slot', 'plane'].includes(form);
 }
