@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#111315" />
   <title>SOLID ARC — WebGPU parametric sketcher</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=3" />
 </head>
 <body>
   <main class="app-shell">
@@ -84,7 +84,7 @@
     </div>
 
     <!-- Non-visual hooks keep the sketch actions available to keyboard commands. -->
-    <div class="system-hooks" aria-hidden="true">
+    <div class="system-hooks" hidden aria-hidden="true">
       <button id="undoButton"></button><button id="redoButton"></button><button id="newButton"></button><button id="planeButton"></button>
       <button id="gridButton"></button><button id="snapButton" class="is-active"></button><button id="fitButton"></button>
       <button id="exportButton"></button><button id="importButton"></button><input id="importFile" type="file" />
@@ -92,6 +92,6 @@
       <span id="geometryCount"></span><span id="planeCount"></span><span id="snapStep"></span>
     </div>
   </main>
-  <script src="./app.js"></script>
+  <script src="./app.js?v=3"></script>
 </body>
 </html>

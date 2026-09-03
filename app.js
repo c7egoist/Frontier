@@ -124,10 +124,7 @@ async function initWebGPURenderer() {
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('No WebGPU adapter');
     const device = await adapter.requestDevice();
-    const context = sceneCanvas.getContext('webgpu');
-    if (!context) throw new Error('WebGPU context unavailable');
     const format = navigator.gpu.getPreferredCanvasFormat();
-    context.configure({ device, format, alphaMode: 'opaque' });
     const shader = device.createShaderModule({ code: `
       struct SceneUniforms {
         camera: mat4x4<f32>,
@@ -156,6 +153,9 @@ async function initWebGPURenderer() {
     const pipeline = device.createRenderPipeline({ ...pipelineBase, primitive: { topology: 'line-list' } });
     const fillPipeline = device.createRenderPipeline({ ...pipelineBase, primitive: { topology: 'triangle-list' } });
     const uniformBuffer = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const context = sceneCanvas.getContext('webgpu');
+    if (!context) throw new Error('WebGPU context unavailable');
+    context.configure({ device, format, alphaMode: 'opaque' });
     gpuRenderer = { device, context, format, pipeline, fillPipeline, layout, uniformBuffer, width: 0, height: 0, ready: true };
     rendererReadout.textContent = 'WEBGPU';
     device.lost.then(() => {
