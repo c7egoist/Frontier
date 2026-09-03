@@ -7,8 +7,9 @@ A WebGPU-based parametric sketcher prototype for the browser.
 - 2D drafting for lines, polylines, rectangles, circles, ellipses, Bézier curves, and continuous cubic Hermite curves.
 - Construction planes with elevation, twist, and tilt.
 - A real perspective 3D viewport rendered with WebGPU when available, with a WebGL fallback.
+- 3D is the default view; 2D drafting remains available from the left pill toolbar.
 - Draw directly onto the active construction plane in 3D using camera ray intersection.
-- Smooth camera lag for orbit and zoom.
+- Smooth camera lag for orbit and zoom, with stable world-Z-up orbiting.
 - Static HTML, CSS, and JavaScript: no build step and no server dependency.
 
 ## GitHub Pages

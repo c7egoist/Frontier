@@ -34,7 +34,7 @@ let scene = {
 };
 
 let view = {
-  mode: '2d',
+  mode: '3d',
   zoom: 1,
   pan: { x: 0, y: 0 },
   showGrid: true,
@@ -50,7 +50,8 @@ let orbit = {
   zoom: 1,
   goalYaw: -0.72,
   goalPitch: 0.56,
-  goalZoom: 1
+  goalZoom: 1,
+  target: { x: 0, y: 0, z: 0 }
 };
 let cameraAnimation = null;
 
@@ -850,12 +851,12 @@ function glDraw(points, mode, colour, matrix, alpha = 1, close = false) {
 }
 
 function cameraMatrices(width, height) {
-  const target = { x: 0, y: 0, z: 0 };
+  const target = orbit.target;
   const distanceFromTarget = 520 / orbit.zoom;
   const eye = {
-    x: Math.cos(orbit.pitch) * Math.cos(orbit.yaw) * distanceFromTarget,
-    y: Math.cos(orbit.pitch) * Math.sin(orbit.yaw) * distanceFromTarget,
-    z: Math.sin(orbit.pitch) * distanceFromTarget
+    x: target.x + Math.cos(orbit.pitch) * Math.cos(orbit.yaw) * distanceFromTarget,
+    y: target.y + Math.cos(orbit.pitch) * Math.sin(orbit.yaw) * distanceFromTarget,
+    z: target.z + Math.sin(orbit.pitch) * distanceFromTarget
   };
   const projection = perspectiveMatrix(Math.PI / 4.2, width / Math.max(height, 1), 1, 4000);
   const look = lookAtMatrix(eye, target, { x: 0, y: 0, z: 1 });
@@ -935,15 +936,16 @@ function pointInPolygon(point, polygon) {
 function selectAtScene(screenPoint) {
   for (let i = scene.planes.length - 1; i >= 0; i -= 1) {
     const polygon = planeCorners3D(scene.planes[i]).map(projectWorld);
-    if (pointInPolygon(screenPoint, polygon)) { selectedId = scene.planes[i].id; return; }
+    if (pointInPolygon(screenPoint, polygon)) { selectedId = scene.planes[i].id; return true; }
   }
   for (let i = scene.records.length - 1; i >= 0; i -= 1) {
     const projected = recordPoints3D(scene.records[i]).map(projectWorld);
     for (let index = 1; index < projected.length; index += 1) {
-      if (screenSegmentDistance(screenPoint, projected[index - 1], projected[index]) < 10) { selectedId = scene.records[i].id; return; }
+      if (screenSegmentDistance(screenPoint, projected[index - 1], projected[index]) < 10) { selectedId = scene.records[i].id; return true; }
     }
   }
   selectedId = null;
+  return false;
 }
 
 function draw3Grid() {
@@ -1295,7 +1297,13 @@ function onScenePointerDown(event) {
   const screenPoint = pointerPosition(event, sceneCanvas);
   const hit = scenePointForEvent(event);
   if (activeTool === 'select') {
-    selectAtScene(screenPoint);
+    const hitSelection = selectAtScene(screenPoint);
+    if (!hitSelection) {
+      isOrbiting = true;
+      dragAnchor = { x: event.clientX, y: event.clientY, yaw: orbit.goalYaw, pitch: orbit.goalPitch };
+      sceneCanvas.classList.add('is-orbiting');
+      sceneCanvas.setPointerCapture(event.pointerId);
+    }
     renderAll();
     return;
   }
@@ -1385,9 +1393,28 @@ function fitView() {
     else points.push(...record.points);
   });
   scene.planes.forEach(plane => points.push(...planeCorners2D(plane)));
-  if (!points.length) { view.zoom = 1; view.pan = { x: 0, y: 0 }; renderAll(); return; }
+  if (!points.length) {
+    if (view.mode === '3d') {
+      orbit.target = { x: 0, y: 0, z: 0 };
+      orbit.goalZoom = 1;
+      requestCameraMotion();
+    } else {
+      view.zoom = 1;
+      view.pan = { x: 0, y: 0 };
+    }
+    renderAll();
+    return;
+  }
   const xs = points.map(point => point.x); const ys = points.map(point => point.y);
   const width = Math.max(...xs) - Math.min(...xs); const height = Math.max(...ys) - Math.min(...ys);
+  if (view.mode === '3d') {
+    orbit.target = { x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2, z: 0 };
+    orbit.goalZoom = clamp(260 / Math.max(width, height, 120), .35, 3.5);
+    requestCameraMotion();
+    renderAll();
+    setMessage('Fit all geometry to 3D view');
+    return;
+  }
   const rect = draftCanvas.getBoundingClientRect();
   view.zoom = clamp(Math.min((rect.width - 120) / Math.max(width, 100), (rect.height - 120) / Math.max(height, 100)), 0.15, 8);
   view.pan = { x: -((Math.max(...xs) + Math.min(...xs)) / 2) * view.zoom, y: ((Math.max(...ys) + Math.min(...ys)) / 2) * view.zoom };
@@ -1421,14 +1448,6 @@ function renderSceneInspector() {
             <span class="scene-icon ${record.iconClass}">${iconFor(record)}</span>
             <span><span class="scene-name">${escapeHtml(record.name)}</span><span class="scene-kind">${record.kindLabel}</span></span>
           </button>`).join('') : '<div class="scene-empty">Your sketch is empty.<br>Choose a primitive, curve,<br>or plane to begin.</div>'}
-      </div>
-    </div>
-    <div class="scene-section">
-      <div class="section-label"><span>QUICK ADD</span><span>⌘ K</span></div>
-      <div class="quick-actions">
-        <button class="quiet-button" data-quick-tool="line">＋ LINE</button>
-        <button class="quiet-button" data-quick-tool="rectangle">＋ RECT</button>
-        <button class="quiet-button" data-quick-tool="plane">＋ PLANE</button>
       </div>
     </div>`;
   sceneInspector.querySelectorAll('[data-scene-id]').forEach(row => row.addEventListener('click', () => {
@@ -1583,6 +1602,8 @@ draftCanvas.addEventListener('dblclick', finishPolyline);
 sceneCanvas.addEventListener('pointerdown', onScenePointerDown);
 sceneCanvas.addEventListener('pointermove', onScenePointerMove);
 sceneCanvas.addEventListener('pointerup', onScenePointerUp);
+draftCanvas.addEventListener('contextmenu', event => event.preventDefault());
+sceneCanvas.addEventListener('contextmenu', event => event.preventDefault());
 
 canvasWrap.addEventListener('wheel', event => {
   event.preventDefault();
