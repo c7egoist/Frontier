@@ -8,6 +8,7 @@ A WebGPU-based parametric sketcher prototype for the browser.
 - Left-click adds points; right-click confirms every drawing. Rectangles and circles use click-drag sizing, while ellipses use the centre-and-corner workflow.
 - Curves and polylines remain open for as many left-clicked points as needed, then finish as one continuous drawing with right-click.
 - Construction planes with elevation, twist, and tilt.
+- Closed rectangles, circles, ellipses, and planes keep a consistent counter-clockwise winding order and render as semi-transparent filled faces with outlines.
 - A real perspective 3D viewport rendered with WebGPU when available, with a WebGL fallback.
 - 3D is the default view; 2D drafting remains available from the left pill toolbar.
 - Draw directly onto the active construction plane in 3D using camera ray intersection.

@@ -1,6 +1,6 @@
-import { snapPoint, confirmDrawing } from './src/input.js?v=15';
-import { escapeMarkup, propertyField, slideInspector, bindInspectorTabs } from './src/ui.js?v=15';
-import { pairVertexPacket, lineVertexPacket, triangleVertexPacket } from './src/rendering.js?v=15';
+import { snapPoint, confirmDrawing } from './src/input.js?v=17';
+import { escapeMarkup, propertyField, slideInspector, bindInspectorTabs } from './src/ui.js?v=17';
+import { pairVertexPacket, lineVertexPacket, triangleVertexPacket, ensureWinding, isClosedForm } from './src/rendering.js?v=17';
 
 const draftCanvas = document.querySelector('#draftCanvas');
 const sceneCanvas = document.querySelector('#sceneCanvas');
@@ -154,11 +154,25 @@ async function initWebGPURenderer() {
         entryPoint: 'vertexMain',
         buffers: [{ arrayStride: 12, attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }] }]
       },
-      fragment: { module: shader, entryPoint: 'fragmentMain', targets: [{ format }] },
+      fragment: {
+        module: shader,
+        entryPoint: 'fragmentMain',
+        targets: [{
+          format,
+          blend: {
+            color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+            alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' }
+          }
+        }]
+      },
       depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' }
     };
     const pipeline = device.createRenderPipeline({ ...pipelineBase, primitive: { topology: 'line-list' } });
-    const fillPipeline = device.createRenderPipeline({ ...pipelineBase, primitive: { topology: 'triangle-list' } });
+    const fillPipeline = device.createRenderPipeline({
+      ...pipelineBase,
+      primitive: { topology: 'triangle-list' },
+      depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' }
+    });
     const uniformBuffer = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const context = sceneCanvas.getContext('webgpu');
     if (!context) throw new Error('WebGPU context unavailable');
@@ -280,6 +294,7 @@ function makeRecord(form, payload) {
     form,
     color: colorByForm[form] || colors.white,
     planeId: activePlane()?.id || null,
+    winding: isClosedForm(form) ? 'CCW' : null,
     ...payload
   };
 }
@@ -296,6 +311,7 @@ function makePlane(center) {
     twist: 0,
     tiltX: 0,
     tiltY: 0,
+    winding: 'CCW',
     color: colors.cyan
   };
 }
@@ -525,7 +541,7 @@ function cornersForRectangle(record) {
   const y = record.origin.y;
   const w = record.width;
   const h = record.height;
-  return [makePoint(x, y), makePoint(x + w, y), makePoint(x + w, y + h), makePoint(x, y + h)];
+  return ensureWinding([makePoint(x, y), makePoint(x + w, y), makePoint(x + w, y + h), makePoint(x, y + h)], 'CCW');
 }
 
 function drawPath(ctx, points, projector, close = false) {
@@ -541,6 +557,20 @@ function drawPath(ctx, points, projector, close = false) {
   ctx.stroke();
 }
 
+function fillClosedPath2D(ctx, points, projector, colour, alpha) {
+  if (points.length < 3) return;
+  const first = projector(points[0]);
+  ctx.beginPath();
+  ctx.moveTo(first.x, first.y);
+  for (let index = 1; index < points.length; index += 1) {
+    const point = projector(points[index]);
+    ctx.lineTo(point.x, point.y);
+  }
+  ctx.closePath();
+  ctx.fillStyle = colourCss(colour, alpha);
+  ctx.fill();
+}
+
 function drawRecord2D(ctx, record, width, height, selected = false) {
   const project = point => screenFromWorld(point, width, height);
   ctx.save();
@@ -550,14 +580,20 @@ function drawRecord2D(ctx, record, width, height, selected = false) {
   ctx.lineWidth = selected ? 2.5 : 1.7;
 
   if (record.form === 'line' || record.form === 'polyline') drawPath(ctx, record.points, project);
-  if (record.form === 'rectangle') drawPath(ctx, cornersForRectangle(record), project, true);
+  if (record.form === 'rectangle') {
+    const corners = cornersForRectangle(record);
+    fillClosedPath2D(ctx, corners, project, record.color, selected ? .2 : .1);
+    drawPath(ctx, corners, project, true);
+  }
   if (record.form === 'circle') {
     const center = project(record.center);
-    ctx.beginPath(); ctx.arc(center.x, center.y, record.radius * view.zoom, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(center.x, center.y, record.radius * view.zoom, 0, Math.PI * 2);
+    ctx.fillStyle = colourCss(record.color, selected ? .2 : .1); ctx.fill(); ctx.stroke();
   }
   if (record.form === 'ellipse') {
     const center = project(record.center);
-    ctx.beginPath(); ctx.ellipse(center.x, center.y, record.radiusX * view.zoom, record.radiusY * view.zoom, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(center.x, center.y, record.radiusX * view.zoom, record.radiusY * view.zoom, 0, 0, Math.PI * 2);
+    ctx.fillStyle = colourCss(record.color, selected ? .2 : .1); ctx.fill(); ctx.stroke();
   }
   if (record.form === 'bezier' || record.form === 'hermite' || record.form === 'spline') drawPath(ctx, curveSamples(record), project);
   ctx.restore();
@@ -610,10 +646,11 @@ function planeCorners2D(plane) {
   const halfH = plane.height / 2;
   const angle = (plane.twist || 0) * Math.PI / 180;
   const local = [makePoint(-halfW, -halfH), makePoint(halfW, -halfH), makePoint(halfW, halfH), makePoint(-halfW, halfH)];
-  return local.map(point => makePoint(
+  const corners = local.map(point => makePoint(
     plane.center.x + point.x * Math.cos(angle) - point.y * Math.sin(angle),
     plane.center.y + point.x * Math.sin(angle) + point.y * Math.cos(angle)
   ));
+  return ensureWinding(corners, 'CCW');
 }
 
 function drawPlane2D(ctx, plane, width, height, selected = false) {
@@ -652,15 +689,17 @@ function drawPreview2D(ctx, width, height) {
   if (activeTool === 'polyline' && points.length >= 1) drawPath(ctx, points, project);
   if (activeTool === 'rectangle' && points.length >= 1) {
     const a = points[0]; const b = points[1] || points[0];
-    drawPath(ctx, [a, makePoint(b.x, a.y), b, makePoint(a.x, b.y)], project, true);
+    const corners = ensureWinding([a, makePoint(b.x, a.y), b, makePoint(a.x, b.y)], 'CCW');
+    fillClosedPath2D(ctx, corners, project, colors.acid, .08);
+    drawPath(ctx, corners, project, true);
   }
   if (activeTool === 'circle' && points.length >= 1) {
     const center = project(points[0]); const radius = points[1] ? distance(points[0], points[1]) * view.zoom : 0;
-    ctx.beginPath(); ctx.arc(center.x, center.y, radius, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(center.x, center.y, radius, 0, Math.PI * 2); ctx.fillStyle = colourCss(colors.acid, .08); ctx.fill(); ctx.stroke();
   }
   if (activeTool === 'ellipse' && points.length >= 1) {
     const center = project(points[0]); const second = points[1] || points[0];
-    ctx.beginPath(); ctx.ellipse(center.x, center.y, Math.abs(second.x - points[0].x) * view.zoom, Math.abs(second.y - points[0].y) * view.zoom, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.ellipse(center.x, center.y, Math.abs(second.x - points[0].x) * view.zoom, Math.abs(second.y - points[0].y) * view.zoom, 0, 0, Math.PI * 2); ctx.fillStyle = colourCss(colors.acid, .08); ctx.fill(); ctx.stroke();
   }
   if (['bezier', 'hermite', 'spline'].includes(activeTool) && points.length >= 1) {
     points.forEach(point => { const p = project(point); ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill(); });
@@ -847,12 +886,13 @@ function planeWorldNormal(plane) {
 function planeCorners3D(plane) {
   const halfW = plane.width / 2;
   const halfH = plane.height / 2;
-  return [
-    planeLocalToWorld({ x: -halfW, y: -halfH, z: 0 }, plane),
-    planeLocalToWorld({ x: halfW, y: -halfH, z: 0 }, plane),
-    planeLocalToWorld({ x: halfW, y: halfH, z: 0 }, plane),
-    planeLocalToWorld({ x: -halfW, y: halfH, z: 0 }, plane)
-  ];
+  const localCorners = ensureWinding([
+    { x: -halfW, y: -halfH },
+    { x: halfW, y: -halfH },
+    { x: halfW, y: halfH },
+    { x: -halfW, y: halfH }
+  ], 'CCW');
+  return localCorners.map(point => planeLocalToWorld({ x: point.x, y: point.y, z: 0 }, plane));
 }
 
 function recordPoint3D(record, point) {
@@ -864,14 +904,16 @@ function recordPoints3D(record) {
   if (record.form === 'line' || record.form === 'polyline') return record.points.map(point => recordPoint3D(record, point));
   if (record.form === 'rectangle') return cornersForRectangle(record).map(point => recordPoint3D(record, point));
   if (record.form === 'circle') {
-    const points = [];
-    for (let i = 0; i <= 64; i += 1) { const angle = i / 64 * Math.PI * 2; points.push(recordPoint3D(record, { x: record.center.x + Math.cos(angle) * record.radius, y: record.center.y + Math.sin(angle) * record.radius })); }
-    return points;
+    const localPoints = [];
+    for (let i = 0; i < 64; i += 1) { const angle = i / 64 * Math.PI * 2; localPoints.push({ x: record.center.x + Math.cos(angle) * record.radius, y: record.center.y + Math.sin(angle) * record.radius }); }
+    const ordered = ensureWinding(localPoints, 'CCW');
+    return ordered.map(point => recordPoint3D(record, point));
   }
   if (record.form === 'ellipse') {
-    const points = [];
-    for (let i = 0; i <= 64; i += 1) { const angle = i / 64 * Math.PI * 2; points.push(recordPoint3D(record, { x: record.center.x + Math.cos(angle) * record.radiusX, y: record.center.y + Math.sin(angle) * record.radiusY })); }
-    return points;
+    const localPoints = [];
+    for (let i = 0; i < 64; i += 1) { const angle = i / 64 * Math.PI * 2; localPoints.push({ x: record.center.x + Math.cos(angle) * record.radiusX, y: record.center.y + Math.sin(angle) * record.radiusY }); }
+    const ordered = ensureWinding(localPoints, 'CCW');
+    return ordered.map(point => recordPoint3D(record, point));
   }
   if (record.form === 'bezier' || record.form === 'hermite' || record.form === 'spline') return curveSamples(record, 128).map(point => recordPoint3D(record, point));
   return [];
@@ -881,6 +923,11 @@ function colourVector(hex, alpha = 1) {
   const clean = String(hex || '#a5bac5').replace('#', '');
   const full = clean.length === 3 ? clean.split('').map(char => char + char).join('') : clean;
   return [parseInt(full.slice(0, 2), 16) / 255, parseInt(full.slice(2, 4), 16) / 255, parseInt(full.slice(4, 6), 16) / 255, alpha];
+}
+
+function colourCss(hex, alpha = 1) {
+  const [red, green, blue] = colourVector(hex, alpha);
+  return `rgba(${Math.round(red * 255)}, ${Math.round(green * 255)}, ${Math.round(blue * 255)}, ${alpha})`;
 }
 
 function glDraw(points, mode, colour, matrix, alpha = 1, close = false) {
@@ -1121,10 +1168,18 @@ function renderWebGPU() {
   }
   scene.records.forEach(record => {
     const points = recordPoints3D(record);
-    gpuDrawVertices(pass, lineVertexPacket(points, record.form === 'rectangle' || record.form === 'circle' || record.form === 'ellipse'), record.id === selectedId ? '#d7e2e6' : record.color, record.id === selectedId ? 1 : .95);
+    const closed = isClosedForm(record.form);
+    const tint = record.id === selectedId ? '#d7e2e6' : record.color;
+    if (closed) gpuDrawVertices(pass, triangleVertexPacket(points), tint, record.id === selectedId ? .2 : .1, true);
+    gpuDrawVertices(pass, lineVertexPacket(points, closed), tint, record.id === selectedId ? 1 : .95);
   });
   const preview = previewRecord3D();
-  if (preview) gpuDrawVertices(pass, lineVertexPacket(recordPoints3D(preview), preview.form === 'rectangle' || preview.form === 'circle' || preview.form === 'ellipse'), '#c6d4da', .8);
+  if (preview) {
+    const points = recordPoints3D(preview);
+    const closed = isClosedForm(preview.form);
+    if (closed) gpuDrawVertices(pass, triangleVertexPacket(points), '#c6d4da', .12, true);
+    gpuDrawVertices(pass, lineVertexPacket(points, closed), '#c6d4da', .8);
+  }
   pass.end();
   const frameResources = gpuFrameBuffers.slice();
   gpuFrameBuffers = [];
@@ -1152,11 +1207,18 @@ function render3D() {
   }
   scene.records.forEach(record => {
     const points = recordPoints3D(record);
-    const closed = record.form === 'rectangle' || record.form === 'circle' || record.form === 'ellipse';
-    glDraw(points, closed ? gl.LINE_STRIP : gl.LINE_STRIP, record.id === selectedId ? '#d7e2e6' : record.color, cameraView.matrix, record.id === selectedId ? 1 : .95, closed);
+    const closed = isClosedForm(record.form);
+    const tint = record.id === selectedId ? '#d7e2e6' : record.color;
+    if (closed) glDraw(points, gl.TRIANGLE_FAN, tint, cameraView.matrix, record.id === selectedId ? .2 : .1);
+    glDraw(points, gl.LINE_STRIP, tint, cameraView.matrix, record.id === selectedId ? 1 : .95, closed);
   });
   const preview = previewRecord3D();
-  if (preview) glDraw(recordPoints3D(preview), gl.LINE_STRIP, '#c6d4da', cameraView.matrix, .8, preview.form === 'rectangle' || preview.form === 'circle' || preview.form === 'ellipse');
+  if (preview) {
+    const points = recordPoints3D(preview);
+    const closed = isClosedForm(preview.form);
+    if (closed) glDraw(points, gl.TRIANGLE_FAN, '#c6d4da', cameraView.matrix, .12);
+    glDraw(points, gl.LINE_STRIP, '#c6d4da', cameraView.matrix, .8, closed);
+  }
 }
 
 function renderAll() {
@@ -1177,8 +1239,8 @@ function addRecord(record) {
   saveSnapshot();
   scene.records.push(record);
   selectedId = record.id;
-  sketch = { points: [], preview: null };
-  setTool('select');
+  sketch = { points: [], preview: null, previewWorld: null };
+  shapeDrag = null;
   setMessage(`Created ${record.name}`);
 }
 
@@ -1188,7 +1250,8 @@ function addPlaneAt(point) {
   plane.elevation = Number(point.z) || 0;
   scene.planes.push(plane);
   selectedId = plane.id;
-  setTool('select');
+  sketch = { points: [], preview: null, previewWorld: null };
+  shapeDrag = null;
   setMessage(`Created ${plane.name}`);
 }
 
@@ -1770,7 +1833,11 @@ function importSketch(file) {
       const incoming = JSON.parse(reader.result);
       if (!incoming || !Array.isArray(incoming.records) || !Array.isArray(incoming.planes)) throw new Error('Invalid sketch');
       saveSnapshot();
-      scene = { records: incoming.records, planes: incoming.planes, nextId: Number(incoming.nextId) || 1 };
+      scene = {
+        records: incoming.records.map(record => ({ ...record, winding: isClosedForm(record.form) ? 'CCW' : (record.winding || null) })),
+        planes: incoming.planes.map(plane => ({ ...plane, winding: 'CCW' })),
+        nextId: Number(incoming.nextId) || 1
+      };
       selectedId = null;
       renderAll();
       setMessage('Sketch imported');
