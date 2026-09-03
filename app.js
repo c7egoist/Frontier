@@ -676,15 +676,15 @@ function mat4Multiply(a, b) {
   return result;
 }
 
-function perspectiveMatrix(fieldOfView, aspect, near, far) {
+function perspectiveMatrix(fieldOfView, aspect, near, far, webGpuDepth = false) {
   const f = 1 / Math.tan(fieldOfView / 2);
   const range = near - far;
   const result = new Float32Array(16);
   result[0] = f / aspect;
   result[5] = f;
-  result[10] = (far + near) / range;
+  result[10] = webGpuDepth ? far / range : (far + near) / range;
   result[11] = -1;
-  result[14] = (2 * far * near) / range;
+  result[14] = webGpuDepth ? (far * near) / range : (2 * far * near) / range;
   return result;
 }
 
@@ -850,7 +850,7 @@ function glDraw(points, mode, colour, matrix, alpha = 1, close = false) {
   gl.deleteBuffer(storage);
 }
 
-function cameraMatrices(width, height) {
+function cameraMatrices(width, height, webGpuDepth = false) {
   const target = orbit.target;
   const distanceFromTarget = 520 / orbit.zoom;
   const eye = {
@@ -858,7 +858,7 @@ function cameraMatrices(width, height) {
     y: target.y + Math.cos(orbit.pitch) * Math.sin(orbit.yaw) * distanceFromTarget,
     z: target.z + Math.sin(orbit.pitch) * distanceFromTarget
   };
-  const projection = perspectiveMatrix(Math.PI / 4.2, width / Math.max(height, 1), 1, 4000);
+  const projection = perspectiveMatrix(Math.PI / 4.2, width / Math.max(height, 1), 1, 4000, webGpuDepth);
   const look = lookAtMatrix(eye, target, { x: 0, y: 0, z: 1 });
   const matrix = mat4Multiply(projection, look);
   return { matrix, inverse: invertMatrix(matrix), eye, width, height };
@@ -884,7 +884,7 @@ function unprojectScreen(screenPoint, clipZ) {
 }
 
 function sceneRay(screenPoint) {
-  const near = unprojectScreen(screenPoint, -1);
+  const near = unprojectScreen(screenPoint, gpuRenderer.ready ? 0 : -1);
   const far = unprojectScreen(screenPoint, 1);
   return { origin: near, direction: normalize3(sub3(far, near)) };
 }
@@ -1041,7 +1041,7 @@ function renderWebGPU() {
     gpuRenderer.width = sceneCanvas.width;
     gpuRenderer.height = sceneCanvas.height;
   }
-  cameraView = cameraMatrices(size.width, size.height);
+  cameraView = cameraMatrices(size.width, size.height, true);
   const device = gpuRenderer.device;
   const depthTexture = device.createTexture({ size: [sceneCanvas.width, sceneCanvas.height, 1], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT });
   gpuFrameBuffers = [depthTexture];
@@ -1093,7 +1093,7 @@ function render3D() {
   gl.viewport(0, 0, sceneCanvas.width, sceneCanvas.height);
   gl.clearColor(0.063, 0.071, 0.075, 1);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-  cameraView = cameraMatrices(size.width, size.height);
+  cameraView = cameraMatrices(size.width, size.height, false);
   gl.lineWidth(1);
   draw3Grid();
   draw3Axes();

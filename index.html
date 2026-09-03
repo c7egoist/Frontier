@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#111315" />
   <title>SOLID ARC — WebGPU parametric sketcher</title>
-  <link rel="stylesheet" href="./styles.css?v=3" />
+  <link rel="stylesheet" href="./styles.css?v=4" />
 </head>
 <body>
   <main class="app-shell">
@@ -51,14 +51,16 @@
 
       <section class="viewport-column" aria-label="Solid Arc viewport">
         <div class="canvas-wrap" id="canvasWrap">
+          <div class="app-brand">
+            <div class="brand-mark">✦</div>
+            <div><div class="brand-name">SOLID ARC</div><div class="brand-kicker">WebGPU parametric sketcher</div></div>
+            <span class="renderer-readout" id="rendererReadout">WEBGPU STARTING</span>
+          </div>
           <canvas id="draftCanvas" class="is-hidden"></canvas>
           <canvas id="sceneCanvas"></canvas>
           <div class="canvas-crosshair" id="canvasCrosshair"></div>
           <div class="coordinate-readout" id="coordinateReadout">X 0.00 <span>·</span> Y 0.00</div>
           <div class="canvas-hint is-hidden" id="canvasHint">Choose a tool to begin drawing</div>
-          <div class="view-cube" id="viewCube">
-            <div class="cube-top">TOP</div><div class="cube-face">XYZ</div><div class="cube-axis axis-x">X</div><div class="cube-axis axis-y">Y</div><div class="cube-axis axis-z">Z</div>
-          </div>
           <div class="zoom-control">
             <button id="zoomOut" aria-label="Zoom out">−</button>
             <span id="zoomReadout">100%</span>
@@ -69,11 +71,6 @@
       </section>
 
       <aside class="inspector" aria-label="Scene and properties">
-        <div class="inspector-brand">
-          <div class="brand-mark">✦</div>
-          <div><div class="brand-name">SOLID ARC</div><div class="brand-kicker">WebGPU parametric sketcher</div></div>
-          <span class="renderer-readout" id="rendererReadout">WEBGPU STARTING</span>
-        </div>
         <div class="inspector-tabs">
           <button class="inspector-tab is-active" data-inspector="scene">SCENE <span id="sceneCount">0</span></button>
           <button class="inspector-tab" data-inspector="properties">PROPERTIES</button>
@@ -92,6 +89,6 @@
       <span id="geometryCount"></span><span id="planeCount"></span><span id="snapStep"></span>
     </div>
   </main>
-  <script src="./app.js?v=3"></script>
+  <script src="./app.js?v=4"></script>
 </body>
 </html>
