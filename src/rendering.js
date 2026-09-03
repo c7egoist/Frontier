@@ -226,5 +226,6 @@ export function ensureWinding(points, desired = 'CCW') {
 }
 
 export function isClosedForm(form) {
+  // A polyline is deliberately an open stroke; only these forms receive a face.
   return ['rectangle', 'circle', 'ellipse', 'polygon', 'slot', 'plane'].includes(form);
 }

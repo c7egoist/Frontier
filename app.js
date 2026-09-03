@@ -29,6 +29,8 @@ const colors = {
   purple: '#aca9c5',
   white: '#d7dcde',
   selected: '#ffffff',
+  vertex: '#63d486',
+  vertexPicked: '#b7ffc2',
   muted: '#858d91'
 };
 
@@ -839,8 +841,8 @@ function drawRecordGuides2D(ctx, record, width, height) {
   pts.forEach((point, index) => {
     const picked = pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index;
     ctx.beginPath();
-    ctx.arc(point.x, point.y, picked ? 6 : 4.5, 0, Math.PI * 2);
-    ctx.fillStyle = picked ? colors.selected : '#aeb8bc';
+    ctx.arc(point.x, point.y, picked ? 5 : 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = picked ? colors.vertexPicked : colors.vertex;
     ctx.fill();
   });
   ctx.restore();
@@ -1148,20 +1150,38 @@ function controlPointMarkerBatches3D(record) {
   const normal = plane ? planeWorldNormal(plane) : { x: 0, y: 0, z: 1 };
   return controls.map((control, index) => {
     const picked = pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index;
-    const size = picked ? 6 : 4.5;
-    const center = recordPoint3D(record, control);
-    const towardCamera = dot3(normal, sub3(cameraView.eye, center)) >= 0 ? 1 : -1;
-    const offset = scale3(normal, towardCamera * .25);
-    const diskCenter = add3(center, offset);
-    const rim = [];
-    for (let step = 0; step < 16; step += 1) {
-      const angle = step / 16 * Math.PI * 2;
-      const point = recordPoint3D(record, { x: control.x + Math.cos(angle) * size, y: control.y + Math.sin(angle) * size });
-      rim.push(add3(point, offset));
+    const radius = picked ? 4.2 : 2.8;
+    const surfacePoint = recordPoint3D(record, control);
+    const towardCamera = dot3(normal, sub3(cameraView.eye, surfacePoint)) >= 0 ? 1 : -1;
+    const center = add3(surfacePoint, scale3(normal, towardCamera * .4));
+    const latitudeBands = 6;
+    const longitudeBands = 12;
+    const rings = [];
+    for (let latitude = 0; latitude <= latitudeBands; latitude += 1) {
+      const phi = -Math.PI / 2 + Math.PI * latitude / latitudeBands;
+      const ring = [];
+      for (let longitude = 0; longitude < longitudeBands; longitude += 1) {
+        const theta = 2 * Math.PI * longitude / longitudeBands;
+        ring.push({
+          x: center.x + radius * Math.cos(phi) * Math.cos(theta),
+          y: center.y + radius * Math.cos(phi) * Math.sin(theta),
+          z: center.z + radius * Math.sin(phi)
+        });
+      }
+      rings.push(ring);
     }
     const triangles = [];
-    for (let step = 0; step < rim.length; step += 1) triangles.push(diskCenter, rim[step], rim[(step + 1) % rim.length]);
-    return { triangles, colour: picked ? colors.selected : '#aeb8bc' };
+    for (let latitude = 0; latitude < latitudeBands; latitude += 1) {
+      for (let longitude = 0; longitude < longitudeBands; longitude += 1) {
+        const nextLongitude = (longitude + 1) % longitudeBands;
+        const top = rings[latitude][longitude];
+        const topNext = rings[latitude][nextLongitude];
+        const bottom = rings[latitude + 1][longitude];
+        const bottomNext = rings[latitude + 1][nextLongitude];
+        triangles.push(top, bottom, topNext, topNext, bottom, bottomNext);
+      }
+    }
+    return { triangles, colour: picked ? colors.vertexPicked : colors.vertex };
   });
 }
 
