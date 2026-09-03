@@ -1,6 +1,6 @@
 import { snapPoint, confirmDrawing } from './src/input.js?v=21';
 import { escapeMarkup, propertyField, slideInspector, bindInspectorTabs } from './src/ui.js?v=21';
-import { pairVertexPacket, lineVertexPacket, triangleVertexPacket, ensureWinding, isClosedForm } from './src/rendering.js?v=21';
+import { pairVertexPacket, lineVertexPacket, triangleVertexPacket, triangulatePolygon, ensureWinding, isClosedForm } from './src/rendering.js?v=22';
 
 const draftCanvas = document.querySelector('#draftCanvas');
 const sceneCanvas = document.querySelector('#sceneCanvas');
@@ -839,11 +839,9 @@ function drawRecordGuides2D(ctx, record, width, height) {
   pts.forEach((point, index) => {
     const picked = pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index;
     ctx.beginPath();
-    ctx.arc(point.x, point.y, picked ? 5.5 : 4, 0, Math.PI * 2);
+    ctx.arc(point.x, point.y, picked ? 6 : 4.5, 0, Math.PI * 2);
     ctx.fillStyle = picked ? colors.selected : '#aeb8bc';
     ctx.fill();
-    ctx.strokeStyle = colors.selected;
-    ctx.stroke();
   });
   ctx.restore();
 }
@@ -1144,24 +1142,27 @@ function recordPoints3D(record) {
   return [];
 }
 
-function controlPointMarkers3D(record) {
+function controlPointMarkerBatches3D(record) {
   const controls = guidePointsForRecord(record);
   const plane = scene.planes.find(item => item.id === record.planeId) || null;
   const normal = plane ? planeWorldNormal(plane) : { x: 0, y: 0, z: 1 };
-  const sizeForIndex = index => pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index ? 6 : 4;
-  const markers = [];
-  controls.forEach((control, index) => {
-    const size = sizeForIndex(index);
-    const circle = [];
+  return controls.map((control, index) => {
+    const picked = pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index;
+    const size = picked ? 6 : 4.5;
+    const center = recordPoint3D(record, control);
+    const towardCamera = dot3(normal, sub3(cameraView.eye, center)) >= 0 ? 1 : -1;
+    const offset = scale3(normal, towardCamera * .25);
+    const diskCenter = add3(center, offset);
+    const rim = [];
     for (let step = 0; step < 16; step += 1) {
       const angle = step / 16 * Math.PI * 2;
       const point = recordPoint3D(record, { x: control.x + Math.cos(angle) * size, y: control.y + Math.sin(angle) * size });
-      const towardCamera = dot3(normal, sub3(cameraView.eye, point)) >= 0 ? 1 : -1;
-      circle.push(add3(point, scale3(normal, towardCamera * .25)));
+      rim.push(add3(point, offset));
     }
-    for (let step = 0; step < circle.length; step += 1) markers.push(circle[step], circle[(step + 1) % circle.length]);
+    const triangles = [];
+    for (let step = 0; step < rim.length; step += 1) triangles.push(diskCenter, rim[step], rim[(step + 1) % rim.length]);
+    return { triangles, colour: picked ? colors.selected : '#aeb8bc' };
   });
-  return markers;
 }
 
 function colourVector(hex, alpha = 1) {
@@ -1330,7 +1331,7 @@ function draw3Axes() {
 
 function draw3Plane(plane, selected) {
   const corners = planeCorners3D(plane);
-  glDraw([corners[0], corners[1], corners[2], corners[3]], gl.TRIANGLE_FAN, selected ? colors.selected : '#6f8c98', cameraView.matrix, selected ? .24 : .08);
+  glDraw(triangulatePolygon(corners), gl.TRIANGLES, selected ? colors.selected : '#6f8c98', cameraView.matrix, selected ? .24 : .08);
   glDraw(corners, gl.LINE_STRIP, selected ? colors.selected : '#8eb4c4', cameraView.matrix, selected ? 1 : .75, true);
 }
 
@@ -1422,7 +1423,7 @@ function renderWebGPU() {
     const tint = record.id === selectedId ? colors.selected : record.color;
     if (closed) gpuDrawVertices(pass, triangleVertexPacket(points), tint, record.id === selectedId ? .24 : .1, true);
     gpuDrawVertices(pass, lineVertexPacket(points, closed), tint, record.id === selectedId ? 1 : .95);
-    if (record.id === selectedId && guidePointsForRecord(record).length) gpuDrawVertices(pass, pairVertexPacket(controlPointMarkers3D(record)), colors.selected, 1);
+    if (record.id === selectedId) controlPointMarkerBatches3D(record).forEach(marker => gpuDrawVertices(pass, pairVertexPacket(marker.triangles), marker.colour, 1, true));
   });
   const preview = previewRecord3D();
   if (preview) {
@@ -1460,15 +1461,15 @@ function render3D() {
     const points = recordPoints3D(record);
     const closed = isClosedForm(record.form);
     const tint = record.id === selectedId ? colors.selected : record.color;
-    if (closed) glDraw(points, gl.TRIANGLE_FAN, tint, cameraView.matrix, record.id === selectedId ? .24 : .1);
+    if (closed) glDraw(triangulatePolygon(points), gl.TRIANGLES, tint, cameraView.matrix, record.id === selectedId ? .24 : .1);
     glDraw(points, gl.LINE_STRIP, tint, cameraView.matrix, record.id === selectedId ? 1 : .95, closed);
-    if (record.id === selectedId && guidePointsForRecord(record).length) glDraw(controlPointMarkers3D(record), gl.LINES, colors.selected, cameraView.matrix, 1);
+    if (record.id === selectedId) controlPointMarkerBatches3D(record).forEach(marker => glDraw(marker.triangles, gl.TRIANGLES, marker.colour, cameraView.matrix, 1));
   });
   const preview = previewRecord3D();
   if (preview) {
     const points = recordPoints3D(preview);
     const closed = isClosedForm(preview.form);
-    if (closed) glDraw(points, gl.TRIANGLE_FAN, '#c6d4da', cameraView.matrix, .12);
+    if (closed) glDraw(triangulatePolygon(points), gl.TRIANGLES, '#c6d4da', cameraView.matrix, .12);
     glDraw(points, gl.LINE_STRIP, '#c6d4da', cameraView.matrix, .8, closed);
   }
 }
