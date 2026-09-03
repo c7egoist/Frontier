@@ -5,7 +5,7 @@ A WebGPU-based parametric sketcher prototype for the browser.
 ## Current surface
 
 - 2D drafting for lines, polylines, polygons, rectangles, circles, ellipses, slots, three-point arcs, continuous Bézier/Hermite curves, B-splines, NURBS, and Catmull–Rom splines.
-- The toolbar provides hover and keyboard tooltips; selected geometry uses a bright neutral highlight and exposes its applicable construction guides, vertices, or circular control handles in 2D and 3D. Circles intentionally remain guide-free when selected.
+- The toolbar provides hover and keyboard tooltips; selected geometry uses a bright neutral highlight and exposes its applicable construction guides, vertices, or circular control handles in 2D and 3D. Vertex markers are small filled green screen-facing dots that remain easy to pick from any camera angle. Circles intentionally remain guide-free when selected.
 - CAD curve tools include Bézier, cubic Hermite, B-spline, and NURBS; additional sketch tools include three-point arc, slot, and polygon. Curves use adaptive tessellation based on model length and current view scale, so long or zoomed-in curves stay smooth.
 - Left-click adds points; right-click confirms every drawing. Rectangles and circles use click-drag sizing, while ellipses use the centre-and-corner workflow.
 - Curves and polylines remain open for as many left-clicked points as needed, then finish as one continuous drawing with right-click. Polylines remain open strokes and are never filled or implicitly closed.

@@ -1146,41 +1146,25 @@ function recordPoints3D(record) {
 
 function controlPointMarkerBatches3D(record) {
   const controls = guidePointsForRecord(record);
-  const plane = scene.planes.find(item => item.id === record.planeId) || null;
-  const normal = plane ? planeWorldNormal(plane) : { x: 0, y: 0, z: 1 };
+  const basis = cameraScreenBasis();
+  const fieldOfView = Math.PI / 3.2;
   return controls.map((control, index) => {
     const picked = pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index;
-    const radius = picked ? 4.2 : 2.8;
     const surfacePoint = recordPoint3D(record, control);
-    const towardCamera = dot3(normal, sub3(cameraView.eye, surfacePoint)) >= 0 ? 1 : -1;
-    const center = add3(surfacePoint, scale3(normal, towardCamera * .4));
-    const latitudeBands = 6;
-    const longitudeBands = 12;
-    const rings = [];
-    for (let latitude = 0; latitude <= latitudeBands; latitude += 1) {
-      const phi = -Math.PI / 2 + Math.PI * latitude / latitudeBands;
-      const ring = [];
-      for (let longitude = 0; longitude < longitudeBands; longitude += 1) {
-        const theta = 2 * Math.PI * longitude / longitudeBands;
-        ring.push({
-          x: center.x + radius * Math.cos(phi) * Math.cos(theta),
-          y: center.y + radius * Math.cos(phi) * Math.sin(theta),
-          z: center.z + radius * Math.sin(phi)
-        });
-      }
-      rings.push(ring);
+    const toCamera = sub3(cameraView.eye, surfacePoint);
+    const depth = Math.max(Math.hypot(toCamera.x, toCamera.y, toCamera.z), 1);
+    const worldPerPixel = depth * 2 * Math.tan(fieldOfView / 2) / Math.max(cameraView.height, 1);
+    const radius = worldPerPixel * (picked ? 6 : 4);
+    // Move the billboard a few pixels toward the camera so it is not z-fighting
+    // with the selected edge or face while keeping the projected vertex fixed.
+    const center = add3(surfacePoint, scale3(normalize3(toCamera), worldPerPixel * 2));
+    const rim = [];
+    for (let step = 0; step < 16; step += 1) {
+      const angle = step / 16 * Math.PI * 2;
+      rim.push(add3(center, add3(scale3(basis.right, Math.cos(angle) * radius), scale3(basis.up, Math.sin(angle) * radius))));
     }
     const triangles = [];
-    for (let latitude = 0; latitude < latitudeBands; latitude += 1) {
-      for (let longitude = 0; longitude < longitudeBands; longitude += 1) {
-        const nextLongitude = (longitude + 1) % longitudeBands;
-        const top = rings[latitude][longitude];
-        const topNext = rings[latitude][nextLongitude];
-        const bottom = rings[latitude + 1][longitude];
-        const bottomNext = rings[latitude + 1][nextLongitude];
-        triangles.push(top, bottom, topNext, topNext, bottom, bottomNext);
-      }
-    }
+    for (let step = 0; step < rim.length; step += 1) triangles.push(center, rim[step], rim[(step + 1) % rim.length]);
     return { triangles, colour: picked ? colors.vertexPicked : colors.vertex };
   });
 }
