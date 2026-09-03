@@ -51,7 +51,8 @@ let orbit = {
   goalYaw: -0.72,
   goalPitch: 0.56,
   goalZoom: 1,
-  target: { x: 0, y: 0, z: 0 }
+  target: { x: 0, y: 0, z: 0 },
+  goalTarget: { x: 0, y: 0, z: 0 }
 };
 let cameraAnimation = null;
 
@@ -62,6 +63,7 @@ let undoStack = [];
 let redoStack = [];
 let isPanning = false;
 let isOrbiting = false;
+let isScenePanning = false;
 let dragAnchor = null;
 let activeInspector = 'scene';
 let gl = null;
@@ -693,9 +695,11 @@ function lookAtMatrix(eye, centre, up) {
   const x = normalize3(cross3(up, z));
   const y = cross3(z, x);
   const result = new Float32Array(16);
-  result[0] = x.x; result[1] = x.y; result[2] = x.z; result[3] = 0;
-  result[4] = y.x; result[5] = y.y; result[6] = y.z; result[7] = 0;
-  result[8] = z.x; result[9] = z.y; result[10] = z.z; result[11] = 0;
+  // WebGPU consumes column-major matrices. These are the camera basis rows
+  // laid out for transformPoint(), with world Z kept as the up direction.
+  result[0] = x.x; result[1] = y.x; result[2] = z.x; result[3] = 0;
+  result[4] = x.y; result[5] = y.y; result[6] = z.y; result[7] = 0;
+  result[8] = x.z; result[9] = y.z; result[10] = z.z; result[11] = 0;
   result[12] = -dot3(x, eye); result[13] = -dot3(y, eye); result[14] = -dot3(z, eye); result[15] = 1;
   return result;
 }
@@ -852,13 +856,13 @@ function glDraw(points, mode, colour, matrix, alpha = 1, close = false) {
 
 function cameraMatrices(width, height, webGpuDepth = false) {
   const target = orbit.target;
-  const distanceFromTarget = 520 / orbit.zoom;
+  const distanceFromTarget = 700 / orbit.zoom;
   const eye = {
     x: target.x + Math.cos(orbit.pitch) * Math.cos(orbit.yaw) * distanceFromTarget,
     y: target.y + Math.cos(orbit.pitch) * Math.sin(orbit.yaw) * distanceFromTarget,
     z: target.z + Math.sin(orbit.pitch) * distanceFromTarget
   };
-  const projection = perspectiveMatrix(Math.PI / 4.2, width / Math.max(height, 1), 1, 4000, webGpuDepth);
+  const projection = perspectiveMatrix(Math.PI / 3.2, width / Math.max(height, 1), .1, 5000, webGpuDepth);
   const look = lookAtMatrix(eye, target, { x: 0, y: 0, z: 1 });
   const matrix = mat4Multiply(projection, look);
   return { matrix, inverse: invertMatrix(matrix), eye, width, height };
@@ -950,7 +954,7 @@ function selectAtScene(screenPoint) {
 
 function draw3Grid() {
   const points = [];
-  const extent = 300;
+  const extent = 240;
   const step = 20;
   for (let coordinate = -extent; coordinate <= extent; coordinate += step) {
     points.push({ x: coordinate, y: -extent, z: -0.35 }, { x: coordinate, y: extent, z: -0.35 });
@@ -1051,9 +1055,9 @@ function renderWebGPU() {
     depthStencilAttachment: { view: depthTexture.createView(), depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' }
   });
   const grid = [];
-  for (let coordinate = -300; coordinate <= 300; coordinate += 20) {
-    grid.push({ x: coordinate, y: -300, z: -.35 }, { x: coordinate, y: 300, z: -.35 });
-    grid.push({ x: -300, y: coordinate, z: -.35 }, { x: 300, y: coordinate, z: -.35 });
+  for (let coordinate = -240; coordinate <= 240; coordinate += 20) {
+    grid.push({ x: coordinate, y: -240, z: -.35 }, { x: coordinate, y: 240, z: -.35 });
+    grid.push({ x: -240, y: coordinate, z: -.35 }, { x: 240, y: coordinate, z: -.35 });
   }
   gpuDrawVertices(pass, gpuLineVertices(grid), '#2a3033', .7);
   gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }]), '#a77c81', .95);
@@ -1285,25 +1289,43 @@ function finishPolyline() {
   finishDrawing();
 }
 
+function cameraScreenBasis() {
+  const forward = normalize3(sub3(orbit.target, cameraView.eye));
+  const right = normalize3(cross3(forward, { x: 0, y: 0, z: 1 }));
+  const up = normalize3(cross3(right, forward));
+  return { right, up };
+}
+
+function beginSceneOrbit(event) {
+  isOrbiting = true;
+  dragAnchor = { x: event.clientX, y: event.clientY, yaw: orbit.goalYaw, pitch: orbit.goalPitch };
+  sceneCanvas.classList.add('is-orbiting');
+  sceneCanvas.setPointerCapture(event.pointerId);
+}
+
+function beginScenePan(event) {
+  isScenePanning = true;
+  dragAnchor = { x: event.clientX, y: event.clientY, target: { ...orbit.goalTarget } };
+  sceneCanvas.classList.add('is-orbiting');
+  sceneCanvas.setPointerCapture(event.pointerId);
+}
+
 function onScenePointerDown(event) {
-  if (event.button === 1 || event.button === 2 || event.altKey || event.shiftKey) {
-    isOrbiting = true;
-    dragAnchor = { x: event.clientX, y: event.clientY, yaw: orbit.goalYaw, pitch: orbit.goalPitch };
-    sceneCanvas.classList.add('is-orbiting');
-    sceneCanvas.setPointerCapture(event.pointerId);
+  if (!cameraView) return;
+  // Blender-style navigation: MMB orbits; Shift+MMB pans; RMB is also accepted for orbit.
+  if ((event.button === 1 || event.button === 2) && event.shiftKey) {
+    beginScenePan(event);
     return;
   }
-  if (event.button !== 0 || !cameraView) return;
+  if (event.button === 1 || event.button === 2 || (event.button === 0 && event.altKey)) {
+    beginSceneOrbit(event);
+    return;
+  }
+  if (event.button !== 0) return;
   const screenPoint = pointerPosition(event, sceneCanvas);
   const hit = scenePointForEvent(event);
   if (activeTool === 'select') {
-    const hitSelection = selectAtScene(screenPoint);
-    if (!hitSelection) {
-      isOrbiting = true;
-      dragAnchor = { x: event.clientX, y: event.clientY, yaw: orbit.goalYaw, pitch: orbit.goalPitch };
-      sceneCanvas.classList.add('is-orbiting');
-      sceneCanvas.setPointerCapture(event.pointerId);
-    }
+    selectAtScene(screenPoint);
     renderAll();
     return;
   }
@@ -1320,9 +1342,21 @@ function onScenePointerDown(event) {
 }
 
 function onScenePointerMove(event) {
+  if (isScenePanning && dragAnchor) {
+    const rect = sceneCanvas.getBoundingClientRect();
+    const scale = (700 / orbit.zoom) * (2 * Math.tan(Math.PI / 3.2 / 2)) / Math.max(rect.height, 1);
+    const basis = cameraScreenBasis();
+    orbit.goalTarget = {
+      x: dragAnchor.target.x - basis.right.x * (event.clientX - dragAnchor.x) * scale + basis.up.x * (event.clientY - dragAnchor.y) * scale,
+      y: dragAnchor.target.y - basis.right.y * (event.clientX - dragAnchor.x) * scale + basis.up.y * (event.clientY - dragAnchor.y) * scale,
+      z: dragAnchor.target.z - basis.right.z * (event.clientX - dragAnchor.x) * scale + basis.up.z * (event.clientY - dragAnchor.y) * scale
+    };
+    requestCameraMotion();
+    return;
+  }
   if (isOrbiting && dragAnchor) {
-    orbit.goalYaw = dragAnchor.yaw + (event.clientX - dragAnchor.x) * 0.008;
-    orbit.goalPitch = clamp(dragAnchor.pitch + (event.clientY - dragAnchor.y) * 0.008, -1.2, 1.2);
+    orbit.goalYaw = dragAnchor.yaw - (event.clientX - dragAnchor.x) * 0.008;
+    orbit.goalPitch = clamp(dragAnchor.pitch - (event.clientY - dragAnchor.y) * 0.008, -1.45, 1.45);
     requestCameraMotion();
     return;
   }
@@ -1336,6 +1370,7 @@ function onScenePointerMove(event) {
 
 function onScenePointerUp(event) {
   isOrbiting = false;
+  isScenePanning = false;
   dragAnchor = null;
   sceneCanvas.classList.remove('is-orbiting');
   if (sceneCanvas.hasPointerCapture(event.pointerId)) sceneCanvas.releasePointerCapture(event.pointerId);
@@ -1351,13 +1386,17 @@ function animateCamera() {
   orbit.yaw += (orbit.goalYaw - orbit.yaw) * ease;
   orbit.pitch += (orbit.goalPitch - orbit.pitch) * ease;
   orbit.zoom += (orbit.goalZoom - orbit.zoom) * ease;
+  orbit.target.x += (orbit.goalTarget.x - orbit.target.x) * ease;
+  orbit.target.y += (orbit.goalTarget.y - orbit.target.y) * ease;
+  orbit.target.z += (orbit.goalTarget.z - orbit.target.z) * ease;
   zoomReadout.textContent = `${Math.round(orbit.zoom * 100)}%`;
   if (view.mode === '3d') render3D();
-  const settled = Math.abs(orbit.goalYaw - orbit.yaw) < .0005 && Math.abs(orbit.goalPitch - orbit.pitch) < .0005 && Math.abs(orbit.goalZoom - orbit.zoom) < .0005;
+  const settled = Math.abs(orbit.goalYaw - orbit.yaw) < .0005 && Math.abs(orbit.goalPitch - orbit.pitch) < .0005 && Math.abs(orbit.goalZoom - orbit.zoom) < .0005 && Math.abs(orbit.goalTarget.x - orbit.target.x) < .01 && Math.abs(orbit.goalTarget.y - orbit.target.y) < .01 && Math.abs(orbit.goalTarget.z - orbit.target.z) < .01;
   if (settled) {
     orbit.yaw = orbit.goalYaw;
     orbit.pitch = orbit.goalPitch;
     orbit.zoom = orbit.goalZoom;
+    orbit.target = { ...orbit.goalTarget };
     cameraAnimation = null;
     if (view.mode === '3d') render3D();
   } else {
@@ -1395,7 +1434,7 @@ function fitView() {
   scene.planes.forEach(plane => points.push(...planeCorners2D(plane)));
   if (!points.length) {
     if (view.mode === '3d') {
-      orbit.target = { x: 0, y: 0, z: 0 };
+      orbit.goalTarget = { x: 0, y: 0, z: 0 };
       orbit.goalZoom = 1;
       requestCameraMotion();
     } else {
@@ -1408,7 +1447,7 @@ function fitView() {
   const xs = points.map(point => point.x); const ys = points.map(point => point.y);
   const width = Math.max(...xs) - Math.min(...xs); const height = Math.max(...ys) - Math.min(...ys);
   if (view.mode === '3d') {
-    orbit.target = { x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2, z: 0 };
+    orbit.goalTarget = { x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2, z: 0 };
     orbit.goalZoom = clamp(260 / Math.max(width, height, 120), .35, 3.5);
     requestCameraMotion();
     renderAll();

@@ -9,7 +9,7 @@ A WebGPU-based parametric sketcher prototype for the browser.
 - A real perspective 3D viewport rendered with WebGPU when available, with a WebGL fallback.
 - 3D is the default view; 2D drafting remains available from the left pill toolbar.
 - Draw directly onto the active construction plane in 3D using camera ray intersection.
-- Smooth camera lag for orbit and zoom, with stable world-Z-up orbiting.
+- Smooth camera lag for orbit and zoom, with stable world-Z-up orbiting and Blender-style MMB navigation.
 - Static HTML, CSS, and JavaScript: no build step and no server dependency.
 
 ## GitHub Pages

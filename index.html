@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="theme-color" content="#111315" />
   <title>SOLID ARC — WebGPU parametric sketcher</title>
-  <link rel="stylesheet" href="./styles.css?v=4" />
+  <link rel="stylesheet" href="./styles.css?v=6" />
 </head>
 <body>
   <main class="app-shell">
@@ -59,14 +59,6 @@
           <canvas id="draftCanvas" class="is-hidden"></canvas>
           <canvas id="sceneCanvas"></canvas>
           <div class="canvas-crosshair" id="canvasCrosshair"></div>
-          <div class="coordinate-readout" id="coordinateReadout">X 0.00 <span>·</span> Y 0.00</div>
-          <div class="canvas-hint is-hidden" id="canvasHint">Choose a tool to begin drawing</div>
-          <div class="zoom-control">
-            <button id="zoomOut" aria-label="Zoom out">−</button>
-            <span id="zoomReadout">100%</span>
-            <button id="zoomIn" aria-label="Zoom in">＋</button>
-          </div>
-          <div class="orbit-hint is-visible" id="orbitHint"><span class="mouse-icon">⌁</span> DRAG EMPTY SPACE TO ORBIT&nbsp;&nbsp;·&nbsp;&nbsp;SCROLL TO ZOOM</div>
         </div>
       </section>
 
@@ -87,8 +79,10 @@
       <button id="exportButton"></button><button id="importButton"></button><input id="importFile" type="file" />
       <span id="viewEyebrow"></span><span id="viewTitle"></span><span id="statusMessage"></span><span id="footerMessage"></span>
       <span id="geometryCount"></span><span id="planeCount"></span><span id="snapStep"></span>
+      <span id="coordinateReadout"></span><span id="canvasHint"></span><span id="orbitHint"></span><span id="zoomReadout"></span>
+      <button id="zoomIn"></button><button id="zoomOut"></button>
     </div>
   </main>
-  <script src="./app.js?v=4"></script>
+  <script src="./app.js?v=6"></script>
 </body>
 </html>
