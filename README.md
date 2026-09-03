@@ -11,6 +11,7 @@ A WebGPU-based parametric sketcher prototype for the browser.
 - Draw directly onto the active construction plane in 3D using camera ray intersection.
 - Smooth camera lag for orbit and zoom, with stable world-Z-up orbiting and Blender-style MMB navigation.
 - Static HTML, CSS, and JavaScript: no build step and no server dependency.
+- Code is split into `src/input.js`, `src/ui.js`, and `src/rendering.js` so snapping, inspector presentation, and GPU packet creation can grow independently.
 
 ## GitHub Pages
 

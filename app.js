@@ -1,3 +1,7 @@
+import { snapPoint, confirmDrawing } from './src/input.js?v=13';
+import { escapeMarkup, propertyField, slideInspector, bindInspectorTabs } from './src/ui.js?v=13';
+import { pairVertexPacket, lineVertexPacket, triangleVertexPacket } from './src/rendering.js?v=13';
+
 const draftCanvas = document.querySelector('#draftCanvas');
 const sceneCanvas = document.querySelector('#sceneCanvas');
 const canvasWrap = document.querySelector('#canvasWrap');
@@ -358,16 +362,23 @@ function screenFromWorld(point, width, height) {
   };
 }
 
-function worldFromScreen(point, width, height) {
+function worldFromScreen(point, width, height, modifiers = {}) {
   const raw = {
     x: (point.x - width / 2 - view.pan.x) / view.zoom,
     y: -(point.y - height / 2 - view.pan.y) / view.zoom
   };
-  if (!view.snap) return makePoint(raw.x, raw.y);
-  return makePoint(
-    Math.round(raw.x / view.snapSize) * view.snapSize,
-    Math.round(raw.y / view.snapSize) * view.snapSize
-  );
+  const active = activePlane();
+  const planeId = active?.id || null;
+  const records = scene.records.filter(record => (record.planeId || null) === planeId);
+  return snapPoint(raw, {
+    records,
+    planes: active ? [active] : [],
+    ctrlKey: Boolean(modifiers.ctrlKey),
+    altKey: Boolean(modifiers.altKey),
+    grid: modifiers.grid !== undefined ? modifiers.grid : view.snap && !modifiers.ctrlKey && !modifiers.altKey,
+    gridSize: view.snapSize,
+    threshold: 12 / view.zoom
+  });
 }
 
 function rawWorldFromScreen(point, width, height) {
@@ -910,14 +921,32 @@ function activePlane() {
   return selectedRecord?.planeId ? scene.planes.find(plane => plane.id === selectedRecord.planeId) || null : null;
 }
 
+function sceneSnapPoint(point, event) {
+  const plane = activePlane();
+  const planeId = plane?.id || null;
+  const records = scene.records.filter(record => (record.planeId || null) === planeId);
+  const rect = sceneCanvas.getBoundingClientRect();
+  const worldPerPixel = (700 / Math.max(orbit.zoom, .35)) * (2 * Math.tan(Math.PI / 3.2 / 2)) / Math.max(rect.height, 1);
+  return snapPoint(point, {
+    records,
+    planes: plane ? [plane] : [],
+    ctrlKey: Boolean(event.ctrlKey),
+    altKey: Boolean(event.altKey),
+    grid: view.snap && !event.ctrlKey && !event.altKey,
+    gridSize: view.snapSize,
+    threshold: 14 * worldPerPixel
+  });
+}
+
 function scenePointForEvent(event) {
   const screenPoint = pointerPosition(event, sceneCanvas);
-  const hit = rayPlaneHit(sceneRay(screenPoint), activePlane());
+  const plane = activePlane();
+  const hit = rayPlaneHit(sceneRay(screenPoint), plane);
   if (!hit) return null;
-  const local = worldToPlaneLocal(hit, activePlane());
+  const local = worldToPlaneLocal(hit, plane);
   return {
     world: hit,
-    local: view.snap ? makePoint(Math.round(local.x / view.snapSize) * view.snapSize, Math.round(local.y / view.snapSize) * view.snapSize) : local
+    local: activeTool === 'select' ? local : sceneSnapPoint(local, event)
   };
 }
 
@@ -1007,32 +1036,6 @@ function gpuWriteUniforms(matrix, colour, alpha) {
   return bindGroup;
 }
 
-function gpuPairVertices(points) {
-  if (points.length < 2) return new Float32Array();
-  const packed = new Float32Array(points.length * 3);
-  points.forEach((point, index) => { packed[index * 3] = point.x; packed[index * 3 + 1] = point.y; packed[index * 3 + 2] = point.z; });
-  return packed;
-}
-
-function gpuLineVertices(points, close = false) {
-  if (points.length < 2) return new Float32Array();
-  const vertices = [];
-  for (let index = 1; index < points.length; index += 1) vertices.push(points[index - 1], points[index]);
-  if (close) vertices.push(points[points.length - 1], points[0]);
-  const packed = new Float32Array(vertices.length * 3);
-  vertices.forEach((point, index) => { packed[index * 3] = point.x; packed[index * 3 + 1] = point.y; packed[index * 3 + 2] = point.z; });
-  return packed;
-}
-
-function gpuTriangleVertices(points) {
-  if (points.length < 3) return new Float32Array();
-  const vertices = [points[0], points[1], points[2]];
-  for (let index = 3; index < points.length; index += 1) vertices.push(points[0], points[index - 1], points[index]);
-  const packed = new Float32Array(vertices.length * 3);
-  vertices.forEach((point, index) => { packed[index * 3] = point.x; packed[index * 3 + 1] = point.y; packed[index * 3 + 2] = point.z; });
-  return packed;
-}
-
 function gpuDrawVertices(pass, packed, colour, alpha, fill = false) {
   if (!packed.length) return;
   const vertexBuffer = gpuRenderer.device.createBuffer({ size: packed.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
@@ -1066,27 +1069,27 @@ function renderWebGPU() {
     grid.push({ x: coordinate, y: -240, z: -.35 }, { x: coordinate, y: 240, z: -.35 });
     grid.push({ x: -240, y: coordinate, z: -.35 }, { x: 240, y: coordinate, z: -.35 });
   }
-  gpuDrawVertices(pass, gpuPairVertices(grid), '#2a3033', .7);
-  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }]), '#a0a0a0', .95);
-  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 120, z: 0 }]), '#858585', .95);
-  gpuDrawVertices(pass, gpuLineVertices([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 120 }]), '#6e6e6e', .95);
+  gpuDrawVertices(pass, pairVertexPacket(grid), '#2a3033', .7);
+  gpuDrawVertices(pass, lineVertexPacket([{ x: 0, y: 0, z: 0 }, { x: 120, y: 0, z: 0 }]), '#a0a0a0', .95);
+  gpuDrawVertices(pass, lineVertexPacket([{ x: 0, y: 0, z: 0 }, { x: 0, y: 120, z: 0 }]), '#858585', .95);
+  gpuDrawVertices(pass, lineVertexPacket([{ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 120 }]), '#6e6e6e', .95);
   scene.planes.slice().sort((a, b) => a.elevation - b.elevation).forEach(plane => {
     const corners = planeCorners3D(plane);
-    gpuDrawVertices(pass, gpuTriangleVertices(corners), plane.id === selectedId ? '#a5bac5' : '#6f8c98', plane.id === selectedId ? .18 : .08, true);
-    gpuDrawVertices(pass, gpuLineVertices(corners, true), plane.id === selectedId ? '#d7e2e6' : '#8eb4c4', plane.id === selectedId ? 1 : .75);
+    gpuDrawVertices(pass, triangleVertexPacket(corners), plane.id === selectedId ? '#a5bac5' : '#6f8c98', plane.id === selectedId ? .18 : .08, true);
+    gpuDrawVertices(pass, lineVertexPacket(corners, true), plane.id === selectedId ? '#d7e2e6' : '#8eb4c4', plane.id === selectedId ? 1 : .75);
   });
   if (activeTool === 'plane' && sketch.previewWorld) {
     const previewPlane = { center: makePoint(sketch.previewWorld.x, sketch.previewWorld.y), width: 160, height: 100, elevation: sketch.previewWorld.z, twist: 0, tiltX: 0, tiltY: 0 };
     const corners = planeCorners3D(previewPlane);
-    gpuDrawVertices(pass, gpuTriangleVertices(corners), '#8eb4c4', .08, true);
-    gpuDrawVertices(pass, gpuLineVertices(corners, true), '#a5bac5', .65);
+    gpuDrawVertices(pass, triangleVertexPacket(corners), '#8eb4c4', .08, true);
+    gpuDrawVertices(pass, lineVertexPacket(corners, true), '#a5bac5', .65);
   }
   scene.records.forEach(record => {
     const points = recordPoints3D(record);
-    gpuDrawVertices(pass, gpuLineVertices(points, record.form === 'rectangle' || record.form === 'circle' || record.form === 'ellipse'), record.id === selectedId ? '#d7e2e6' : record.color, record.id === selectedId ? 1 : .95);
+    gpuDrawVertices(pass, lineVertexPacket(points, record.form === 'rectangle' || record.form === 'circle' || record.form === 'ellipse'), record.id === selectedId ? '#d7e2e6' : record.color, record.id === selectedId ? 1 : .95);
   });
   const preview = previewRecord3D();
-  if (preview) gpuDrawVertices(pass, gpuLineVertices(recordPoints3D(preview), preview.form === 'rectangle' || preview.form === 'circle' || preview.form === 'ellipse'), '#c6d4da', .8);
+  if (preview) gpuDrawVertices(pass, lineVertexPacket(recordPoints3D(preview), preview.form === 'rectangle' || preview.form === 'circle' || preview.form === 'ellipse'), '#c6d4da', .8);
   pass.end();
   const frameResources = gpuFrameBuffers.slice();
   gpuFrameBuffers = [];
@@ -1235,7 +1238,7 @@ function onDraftPointerDown(event) {
   if (event.button !== 0) return;
   const position = pointerPosition(event, draftCanvas);
   const rect = draftCanvas.getBoundingClientRect();
-  const point = worldFromScreen(position, rect.width, rect.height);
+  const point = activeTool === 'select' ? rawWorldFromScreen(position, rect.width, rect.height) : worldFromScreen(position, rect.width, rect.height, event);
   updatePointerReadout(position);
 
   if (activeTool === 'select') {
@@ -1265,20 +1268,20 @@ function onDraftPointerMove(event) {
   }
   if (activeTool === 'plane') {
     const rect = draftCanvas.getBoundingClientRect();
-    sketch.preview = worldFromScreen(position, rect.width, rect.height);
+    sketch.preview = worldFromScreen(position, rect.width, rect.height, event);
     render2D();
     return;
   }
   if (!sketch.points.length || activeTool === 'select' || activeTool === 'polyline') {
     if (activeTool === 'polyline' && sketch.points.length) {
       const rect = draftCanvas.getBoundingClientRect();
-      sketch.preview = worldFromScreen(position, rect.width, rect.height);
+      sketch.preview = worldFromScreen(position, rect.width, rect.height, event);
       render2D();
     }
     return;
   }
   const rect = draftCanvas.getBoundingClientRect();
-  sketch.preview = worldFromScreen(position, rect.width, rect.height);
+  sketch.preview = worldFromScreen(position, rect.width, rect.height, event);
   render2D();
 }
 
@@ -1294,6 +1297,20 @@ function finishPolyline() {
   if (activeTool !== 'polyline' || sketch.points.length < 2) return;
   if (sketch.preview && distance(sketch.points[sketch.points.length - 1], sketch.preview) < 0.01) sketch.points.pop();
   finishDrawing();
+}
+
+function confirmCurrentDrawing() {
+  const handled = confirmDrawing({
+    activeTool,
+    sketch,
+    addPlane: point => addPlaneAt(point),
+    finishPolyline,
+    finishDrawing
+  });
+  if (handled) {
+    renderAll();
+    if (activeTool !== 'select') setMessage('Confirmed');
+  }
 }
 
 function cameraScreenBasis() {
@@ -1476,10 +1493,6 @@ function iconFor(record) {
   return '／';
 }
 
-function escapeHtml(text) {
-  return String(text).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#039;', '"': '&quot;' }[char]));
-}
-
 function renderSceneInspector() {
   const total = scene.records.length + scene.planes.length;
   const rows = [];
@@ -1497,7 +1510,7 @@ function renderSceneInspector() {
             ${rows.length ? rows.map(record => `
               <button class="scene-row ${record.id === selectedId ? 'is-selected' : ''}" data-scene-id="${record.id}">
                 <span class="scene-icon ${record.iconClass}">${iconFor(record)}</span>
-                <span><span class="scene-name">${escapeHtml(record.name)}</span><span class="scene-kind">${record.kindLabel}</span></span>
+                <span><span class="scene-name">${escapeMarkup(record.name)}</span><span class="scene-kind">${record.kindLabel}</span></span>
               </button>`).join('') : '<div class="scene-empty">No geometry yet.<br>Choose a primitive, curve,<br>or plane from the pill toolbar.</div>'}
           </div>
         </div>
@@ -1513,10 +1526,6 @@ function renderSceneInspector() {
   }));
 }
 
-function field(label, property, current, inputType = 'text', suffix = '') {
-  return `<div class="field"><label>${label}</label><input data-property="${property}" type="${inputType}" value="${escapeHtml(current)}" />${suffix ? `<small>${suffix}</small>` : ''}</div>`;
-}
-
 function renderPropertiesInspector() {
   const record = findSelected();
   if (!record) {
@@ -1528,36 +1537,36 @@ function renderPropertiesInspector() {
       <div class="inspector-scroll">
         <section class="property-card selected-card">
           <div class="property-card-head"><span>CONSTRUCTION PLANE</span><span class="card-count">3D</span></div>
-          <div class="property-name-large">${escapeHtml(record.name)}</div>
+          <div class="property-name-large">${escapeMarkup(record.name)}</div>
           <div class="property-subtitle">ACTIVE WORKING SURFACE</div>
         </section>
         <section class="property-card">
           <div class="property-card-head"><span>IDENTITY</span><span>01</span></div>
           <div class="property-card-body">
-            ${field('Name', 'name', record.name)}
+            ${propertyField('Name', 'name', record.name)}
           </div>
         </section>
         <section class="property-card">
           <div class="property-card-head"><span>PLACEMENT</span><span>XYZ</span></div>
           <div class="property-card-body">
-            ${field('Origin X', 'centerX', record.center.x, 'number')}
-            ${field('Origin Y', 'centerY', record.center.y, 'number')}
-            ${field('Elevation', 'elevation', record.elevation, 'number')}
+            ${propertyField('Origin X', 'centerX', record.center.x, 'number')}
+            ${propertyField('Origin Y', 'centerY', record.center.y, 'number')}
+            ${propertyField('Elevation', 'elevation', record.elevation, 'number')}
           </div>
         </section>
         <section class="property-card">
           <div class="property-card-head"><span>ORIENTATION</span><span>DEG</span></div>
           <div class="property-card-body">
-            ${field('Twist', 'twist', record.twist, 'number')}
-            ${field('Tilt X', 'tiltX', record.tiltX, 'number')}
-            ${field('Tilt Y', 'tiltY', record.tiltY, 'number')}
+            ${propertyField('Twist', 'twist', record.twist, 'number')}
+            ${propertyField('Tilt X', 'tiltX', record.tiltX, 'number')}
+            ${propertyField('Tilt Y', 'tiltY', record.tiltY, 'number')}
           </div>
         </section>
         <section class="property-card">
           <div class="property-card-head"><span>SIZE</span><span>MM</span></div>
           <div class="property-card-body">
-            ${field('Width', 'width', record.width, 'number')}
-            ${field('Height', 'height', record.height, 'number')}
+            ${propertyField('Width', 'width', record.width, 'number')}
+            ${propertyField('Height', 'height', record.height, 'number')}
           </div>
         </section>
         <button class="delete-button" data-delete="${record.id}">DELETE PLANE</button>
@@ -1568,14 +1577,14 @@ function renderPropertiesInspector() {
       <div class="inspector-scroll">
         <section class="property-card selected-card">
           <div class="property-card-head"><span>${formLabels[record.form]}</span><span class="card-count">2D / 3D</span></div>
-          <div class="property-name-large">${escapeHtml(record.name)}</div>
+          <div class="property-name-large">${escapeMarkup(record.name)}</div>
           <div class="property-subtitle">PARAMETRIC GEOMETRY</div>
         </section>
         <section class="property-card">
           <div class="property-card-head"><span>IDENTITY</span><span>01</span></div>
           <div class="property-card-body">
-            ${field('Name', 'name', record.name)}
-            ${field('Stroke', 'color', record.color, 'color')}
+            ${propertyField('Name', 'name', record.name)}
+            ${propertyField('Stroke', 'color', record.color, 'color')}
           </div>
         </section>
         <section class="property-card">
@@ -1630,7 +1639,7 @@ function setInspector(tab) {
   activeInspector = tab;
   document.querySelectorAll('.inspector-tab').forEach(button => button.classList.toggle('is-active', button.dataset.inspector === tab));
   const track = document.querySelector('#inspectorTrack');
-  if (track) track.style.transform = tab === 'properties' ? 'translateX(-50%)' : 'translateX(0)';
+  slideInspector(track, tab);
 }
 
 function exportSketch() {
@@ -1675,6 +1684,11 @@ function newSketch() {
 
 function onKeyDown(event) {
   if (event.target.matches('input')) return;
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    confirmCurrentDrawing();
+    return;
+  }
   const key = event.key.toLowerCase();
   const shortcuts = { v: 'select', l: 'line', p: 'polyline', r: 'rectangle', c: 'circle', e: 'ellipse', b: 'bezier', h: 'hermite', a: 'plane' };
   if (shortcuts[key]) { event.preventDefault(); setTool(shortcuts[key]); }
@@ -1705,7 +1719,7 @@ canvasWrap.addEventListener('wheel', event => {
 
 document.querySelectorAll('.tool-button').forEach(button => button.addEventListener('click', () => setTool(button.dataset.tool)));
 document.querySelectorAll('.mode-button').forEach(button => button.addEventListener('click', () => setMode(button.dataset.view)));
-document.querySelectorAll('.inspector-tab').forEach(button => button.addEventListener('click', () => setInspector(button.dataset.inspector)));
+bindInspectorTabs(document.querySelectorAll('.inspector-tab'), document.querySelector('#inspectorTrack'), tab => { activeInspector = tab; });
 document.querySelector('#undoButton').addEventListener('click', undo);
 document.querySelector('#redoButton').addEventListener('click', redo);
 document.querySelector('#newButton').addEventListener('click', newSketch);
