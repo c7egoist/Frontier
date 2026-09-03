@@ -1,6 +1,6 @@
 import { snapPoint, confirmDrawing } from './src/input.js?v=21';
 import { escapeMarkup, propertyField, slideInspector, bindInspectorTabs } from './src/ui.js?v=21';
-import { pairVertexPacket, lineVertexPacket, triangleVertexPacket, triangulatePolygon, ensureWinding, isClosedForm } from './src/rendering.js?v=22';
+import { pairVertexPacket, lineVertexPacket, triangleVertexPacket, triangulatePolygon, ensureWinding, isClosedForm } from './src/rendering.js?v=23';
 
 const draftCanvas = document.querySelector('#draftCanvas');
 const sceneCanvas = document.querySelector('#sceneCanvas');
@@ -31,6 +31,15 @@ const colors = {
   selected: '#ffffff',
   vertex: '#63d486',
   vertexPicked: '#b7ffc2',
+  gizmoX: '#e01414',
+  gizmoY: '#12d40a',
+  gizmoZ: '#1560e0',
+  gizmoXHover: '#ff5c5c',
+  gizmoYHover: '#6dff67',
+  gizmoZHover: '#5d96ff',
+  gizmoCyan: '#1fc7c7',
+  gizmoMagenta: '#c81ec8',
+  gizmoYellow: '#e0cd12',
   muted: '#858d91'
 };
 
@@ -67,6 +76,9 @@ let activeTool = 'select';
 let sketch = { points: [], preview: null, previewWorld: null };
 let shapeDrag = null;
 let controlDrag = null;
+let gizmoState = null;
+let gizmoDrag = null;
+let gizmoHoverAxis = null;
 let pickedControlPoint = null;
 let selectedId = null;
 let undoStack = [];
@@ -86,6 +98,9 @@ let gpuRenderer = {
   context: null,
   format: null,
   pipeline: null,
+  fillPipeline: null,
+  gizmoPipeline: null,
+  gizmoFillPipeline: null,
   layout: null,
   uniformBuffer: null,
   width: 0,
@@ -178,11 +193,21 @@ async function initWebGPURenderer() {
       primitive: { topology: 'triangle-list' },
       depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'less-equal' }
     });
+    const gizmoPipeline = device.createRenderPipeline({
+      ...pipelineBase,
+      primitive: { topology: 'line-list' },
+      depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' }
+    });
+    const gizmoFillPipeline = device.createRenderPipeline({
+      ...pipelineBase,
+      primitive: { topology: 'triangle-list' },
+      depthStencil: { format: 'depth24plus', depthWriteEnabled: false, depthCompare: 'always' }
+    });
     const uniformBuffer = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const context = sceneCanvas.getContext('webgpu');
     if (!context) throw new Error('WebGPU context unavailable');
     context.configure({ device, format, alphaMode: 'opaque' });
-    gpuRenderer = { device, context, format, pipeline, fillPipeline, layout, uniformBuffer, width: 0, height: 0, ready: true };
+    gpuRenderer = { device, context, format, pipeline, fillPipeline, gizmoPipeline, gizmoFillPipeline, layout, uniformBuffer, width: 0, height: 0, ready: true };
     rendererReadout.textContent = 'WEBGPU';
     device.lost.then(() => {
       gpuRenderer.ready = false;
@@ -371,6 +396,9 @@ function setTool(tool) {
   activeTool = tool;
   shapeDrag = null;
   controlDrag = null;
+  gizmoState = null;
+  gizmoDrag = null;
+  gizmoHoverAxis = null;
   pickedControlPoint = null;
   sketch = { points: [], preview: null, previewWorld: null };
   document.querySelectorAll('.tool-button').forEach(button => {
@@ -1120,7 +1148,9 @@ function planeCorners3D(plane) {
 
 function recordPoint3D(record, point) {
   const plane = scene.planes.find(item => item.id === record.planeId) || null;
-  return planeLocalToWorld({ x: point.x, y: point.y, z: 0 }, plane);
+  const world = planeLocalToWorld({ x: point.x, y: point.y, z: 0 }, plane);
+  const offset = record.gizmoOffset || { x: 0, y: 0, z: 0 };
+  return { x: world.x + (Number(offset.x) || 0), y: world.y + (Number(offset.y) || 0), z: world.z + (Number(offset.z) || 0) };
 }
 
 function recordPoints3D(record) {
@@ -1167,6 +1197,222 @@ function controlPointMarkerBatches3D(record) {
     for (let step = 0; step < rim.length; step += 1) triangles.push(center, rim[step], rim[(step + 1) % rim.length]);
     return { triangles, colour: picked ? colors.vertexPicked : colors.vertex };
   });
+}
+
+function gizmoAxisDefinitions() {
+  return [
+    { name: 'x', dir: { x: 1, y: 0, z: 0 }, u: { x: 0, y: 1, z: 0 }, v: { x: 0, y: 0, z: 1 }, colour: colors.gizmoX, hover: colors.gizmoXHover, plane: colors.gizmoCyan },
+    { name: 'y', dir: { x: 0, y: 1, z: 0 }, u: { x: 1, y: 0, z: 0 }, v: { x: 0, y: 0, z: 1 }, colour: colors.gizmoY, hover: colors.gizmoYHover, plane: colors.gizmoMagenta },
+    { name: 'z', dir: { x: 0, y: 0, z: 1 }, u: { x: 1, y: 0, z: 0 }, v: { x: 0, y: 1, z: 0 }, colour: colors.gizmoZ, hover: colors.gizmoZHover, plane: colors.gizmoYellow }
+  ];
+}
+
+function gizmoOriginForState() {
+  if (!gizmoState || selectedId !== gizmoState.recordId) return null;
+  const record = scene.records.find(item => item.id === gizmoState.recordId);
+  const control = record && guidePointsForRecord(record)[gizmoState.index];
+  return record && control ? recordPoint3D(record, control) : null;
+}
+
+function gizmoConeTriangles(origin, axis, u, v, baseDistance, tipDistance, radius) {
+  const base = add3(origin, scale3(axis, baseDistance));
+  const tip = add3(origin, scale3(axis, tipDistance));
+  const triangles = [];
+  const segments = 20;
+  for (let step = 0; step < segments; step += 1) {
+    const firstAngle = step / segments * Math.PI * 2;
+    const nextAngle = (step + 1) / segments * Math.PI * 2;
+    const first = add3(base, add3(scale3(u, Math.cos(firstAngle) * radius), scale3(v, Math.sin(firstAngle) * radius)));
+    const next = add3(base, add3(scale3(u, Math.cos(nextAngle) * radius), scale3(v, Math.sin(nextAngle) * radius)));
+    triangles.push(tip, first, next, base, next, first);
+  }
+  return triangles;
+}
+
+function gizmoCylinderTriangles(origin, axis, u, v, centreDistance, length, radius) {
+  const start = add3(origin, scale3(axis, centreDistance - length / 2));
+  const end = add3(origin, scale3(axis, centreDistance + length / 2));
+  const triangles = [];
+  const segments = 20;
+  for (let step = 0; step < segments; step += 1) {
+    const firstAngle = step / segments * Math.PI * 2;
+    const nextAngle = (step + 1) / segments * Math.PI * 2;
+    const startFirst = add3(start, add3(scale3(u, Math.cos(firstAngle) * radius), scale3(v, Math.sin(firstAngle) * radius)));
+    const startNext = add3(start, add3(scale3(u, Math.cos(nextAngle) * radius), scale3(v, Math.sin(nextAngle) * radius)));
+    const endFirst = add3(end, add3(scale3(u, Math.cos(firstAngle) * radius), scale3(v, Math.sin(firstAngle) * radius)));
+    const endNext = add3(end, add3(scale3(u, Math.cos(nextAngle) * radius), scale3(v, Math.sin(nextAngle) * radius)));
+    triangles.push(startFirst, endFirst, startNext, startNext, endFirst, endNext);
+  }
+  return triangles;
+}
+
+function gizmoArcTriangles(origin, u, v, innerRadius, outerRadius, sweep, segments) {
+  const centre = Math.PI / 4;
+  const start = centre - sweep / 2;
+  const triangles = [];
+  const pointAt = (radius, angle) => add3(origin, add3(scale3(u, Math.cos(angle) * radius), scale3(v, Math.sin(angle) * radius)));
+  for (let step = 0; step < segments; step += 1) {
+    const firstAngle = start + sweep * step / segments;
+    const nextAngle = start + sweep * (step + 1) / segments;
+    const innerFirst = pointAt(innerRadius, firstAngle);
+    const outerFirst = pointAt(outerRadius, firstAngle);
+    const innerNext = pointAt(innerRadius, nextAngle);
+    const outerNext = pointAt(outerRadius, nextAngle);
+    triangles.push(innerFirst, outerFirst, innerNext, outerFirst, outerNext, innerNext);
+  }
+  return triangles;
+}
+
+function gizmoBillboardRingTriangles(origin) {
+  const basis = cameraScreenBasis();
+  const toCamera = normalize3(sub3(cameraView.eye, origin));
+  const depth = Math.max(Math.hypot(toCamera.x, toCamera.y, toCamera.z), 1);
+  const worldPerPixel = depth * 2 * Math.tan(Math.PI / 3.2 / 2) / Math.max(cameraView.height, 1);
+  const centre = add3(origin, scale3(toCamera, worldPerPixel * 2));
+  const radius = Math.max(45 * .16, worldPerPixel * 8);
+  const band = Math.max(45 * .008, worldPerPixel * 1.1);
+  const innerRadius = Math.max(radius - band, worldPerPixel * 2);
+  const outerRadius = radius + band;
+  const triangles = [];
+  const segments = 40;
+  for (let step = 0; step < segments; step += 1) {
+    const firstAngle = step / segments * Math.PI * 2;
+    const nextAngle = (step + 1) / segments * Math.PI * 2;
+    const innerFirst = add3(centre, add3(scale3(basis.right, Math.cos(firstAngle) * innerRadius), scale3(basis.up, Math.sin(firstAngle) * innerRadius)));
+    const outerFirst = add3(centre, add3(scale3(basis.right, Math.cos(firstAngle) * outerRadius), scale3(basis.up, Math.sin(firstAngle) * outerRadius)));
+    const innerNext = add3(centre, add3(scale3(basis.right, Math.cos(nextAngle) * innerRadius), scale3(basis.up, Math.sin(nextAngle) * innerRadius)));
+    const outerNext = add3(centre, add3(scale3(basis.right, Math.cos(nextAngle) * outerRadius), scale3(basis.up, Math.sin(nextAngle) * outerRadius)));
+    triangles.push(innerFirst, outerFirst, innerNext, outerFirst, outerNext, innerNext);
+  }
+  return triangles;
+}
+
+function gizmoGeometry() {
+  const origin = gizmoOriginForState();
+  if (!origin || !cameraView) return null;
+  const length = 45;
+  const tip = length * .95;
+  const radius = length * .06;
+  const fillBatches = [];
+  const lineBatches = [];
+  gizmoAxisDefinitions().forEach(axis => {
+    const colour = gizmoHoverAxis === axis.name ? axis.hover : axis.colour;
+    fillBatches.push({ triangles: gizmoConeTriangles(origin, axis.dir, axis.u, axis.v, tip - length * .1, tip + length * .09, radius), colour, alpha: 1 });
+    fillBatches.push({ triangles: gizmoCylinderTriangles(origin, axis.dir, axis.u, axis.v, tip - length * .28, length * .14, radius), colour, alpha: 1 });
+
+    const half = length * .08;
+    const planeCentre = add3(origin, scale3(add3(axis.u, axis.v), tip - half));
+    const planeCorners = [
+      add3(planeCentre, add3(scale3(axis.u, -half), scale3(axis.v, -half))),
+      add3(planeCentre, add3(scale3(axis.u, half), scale3(axis.v, -half))),
+      add3(planeCentre, add3(scale3(axis.u, half), scale3(axis.v, half))),
+      add3(planeCentre, add3(scale3(axis.u, -half), scale3(axis.v, half)))
+    ];
+    // Keep the reference's translucent plane handle, but use a conservative
+    // alpha and no depth writes so it cannot obscure the sketch face beneath it.
+    fillBatches.push({ triangles: [planeCorners[0], planeCorners[1], planeCorners[2], planeCorners[0], planeCorners[2], planeCorners[3]], colour: axis.plane, alpha: .18 });
+    lineBatches.push({ points: planeCorners, colour: axis.plane, alpha: .95, close: true });
+
+    fillBatches.push({ triangles: gizmoArcTriangles(origin, axis.u, axis.v, length * .62 - length * .038, length * .62 + length * .038, 31 * Math.PI / 180, 24), colour, alpha: 1 });
+  });
+  fillBatches.push({ triangles: gizmoBillboardRingTriangles(origin), colour: '#ffffff', alpha: 1 });
+  return { fillBatches, lineBatches };
+}
+
+function renderGizmoWebGPU(pass) {
+  const geometry = gizmoGeometry();
+  if (!geometry) return;
+  geometry.fillBatches.forEach(batch => gpuDrawVertices(pass, pairVertexPacket(batch.triangles), batch.colour, batch.alpha, true, true));
+  geometry.lineBatches.forEach(batch => gpuDrawVertices(pass, lineVertexPacket(batch.points, batch.close), batch.colour, batch.alpha, false, true));
+}
+
+function renderGizmoWebGL() {
+  const geometry = gizmoGeometry();
+  if (!geometry) return;
+  gl.disable(gl.DEPTH_TEST);
+  geometry.fillBatches.forEach(batch => glDraw(batch.triangles, gl.TRIANGLES, batch.colour, cameraView.matrix, batch.alpha));
+  geometry.lineBatches.forEach(batch => glDraw(batch.points, gl.LINE_STRIP, batch.colour, cameraView.matrix, batch.alpha, batch.close));
+  gl.enable(gl.DEPTH_TEST);
+}
+
+function findGizmoHandleAtScene(screenPoint) {
+  const origin = gizmoOriginForState();
+  if (!origin || !cameraView) return null;
+  const projectedOrigin = projectWorld(origin);
+  let best = null;
+  gizmoAxisDefinitions().forEach(axis => {
+    const projectedTip = projectWorld(add3(origin, scale3(axis.dir, 45 * 1.08)));
+    const dx = projectedTip.x - projectedOrigin.x;
+    const dy = projectedTip.y - projectedOrigin.y;
+    const length = Math.hypot(dx, dy);
+    const along = length ? ((screenPoint.x - projectedOrigin.x) * dx + (screenPoint.y - projectedOrigin.y) * dy) / (length * length) : 0;
+    const distanceToAxis = screenSegmentDistance(screenPoint, projectedOrigin, projectedTip);
+    const distanceToOrigin = Math.hypot(screenPoint.x - projectedOrigin.x, screenPoint.y - projectedOrigin.y);
+    const foreshortened = length < 18 && distanceToOrigin >= 9 && distanceToOrigin <= 14;
+    const onHandle = foreshortened || (along >= .38 && along <= 1.08 && distanceToAxis <= 12);
+    if (onHandle && (!best || distanceToAxis < best.distance)) best = { axis: axis.name, dir: axis.dir, distance: distanceToAxis };
+  });
+  return best;
+}
+
+function axisParameterAtScreen(screenPoint, origin, axis) {
+  const ray = sceneRay(screenPoint);
+  const w0 = sub3(origin, ray.origin);
+  const a = dot3(axis, axis);
+  const b = dot3(axis, ray.direction);
+  const c = dot3(ray.direction, ray.direction);
+  const d = dot3(axis, w0);
+  const e = dot3(ray.direction, w0);
+  const denominator = a * c - b * b;
+  if (Math.abs(denominator) < 0.000001) return null;
+  return (b * e - c * d) / denominator;
+}
+
+function beginGizmoAxisDrag(handle, event) {
+  const origin = gizmoOriginForState();
+  if (!origin) return false;
+  const parameter = axisParameterAtScreen(pointerPosition(event, sceneCanvas), origin, handle.dir);
+  if (parameter === null) return false;
+  const record = scene.records.find(item => item.id === gizmoState.recordId);
+  if (!record) return false;
+  gizmoDrag = {
+    recordId: record.id,
+    index: gizmoState.index,
+    axis: handle.axis,
+    dir: handle.dir,
+    origin,
+    startParameter: parameter,
+    startOffsetZ: Number(record.gizmoOffset?.z) || 0,
+    pointerId: event.pointerId
+  };
+  gizmoHoverAxis = handle.axis;
+  saveSnapshot();
+  sceneCanvas.setPointerCapture(event.pointerId);
+  return true;
+}
+
+function updateGuideWithGizmo(record, index, axis, delta, startWorld, startOffsetZ) {
+  if (axis === 'z') {
+    record.gizmoOffset = { ...(record.gizmoOffset || {}), z: startOffsetZ + delta };
+    return;
+  }
+  const targetWorld = add3(startWorld, scale3(axis === 'x' ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 }, delta));
+  const offset = record.gizmoOffset || { x: 0, y: 0, z: 0 };
+  const unoffsetWorld = { x: targetWorld.x - (Number(offset.x) || 0), y: targetWorld.y - (Number(offset.y) || 0), z: targetWorld.z - (Number(offset.z) || 0) };
+  const plane = scene.planes.find(item => item.id === record.planeId) || null;
+  updateGuidePoint(record, index, plane ? worldToPlaneLocal(unoffsetWorld, plane) : makePoint(unoffsetWorld.x, unoffsetWorld.y));
+}
+
+function updateGizmoDrag(event) {
+  if (!gizmoDrag || gizmoDrag.pointerId !== event.pointerId) return;
+  const current = axisParameterAtScreen(pointerPosition(event, sceneCanvas), gizmoDrag.origin, gizmoDrag.dir);
+  const record = scene.records.find(item => item.id === gizmoDrag.recordId);
+  if (current === null || !record) return;
+  let delta = current - gizmoDrag.startParameter;
+  if (event.ctrlKey) delta = Math.round(delta / Math.max(view.snapSize, .0001)) * view.snapSize;
+  updateGuideWithGizmo(record, gizmoDrag.index, gizmoDrag.axis, delta, gizmoDrag.origin, gizmoDrag.startOffsetZ);
+  pickedControlPoint = { recordId: record.id, index: gizmoDrag.index };
+  renderAll();
 }
 
 function colourVector(hex, alpha = 1) {
@@ -1373,12 +1619,15 @@ function gpuWriteUniforms(matrix, colour, alpha) {
   return bindGroup;
 }
 
-function gpuDrawVertices(pass, packed, colour, alpha, fill = false) {
+function gpuDrawVertices(pass, packed, colour, alpha, fill = false, overlay = false) {
   if (!packed.length) return;
   const vertexBuffer = gpuRenderer.device.createBuffer({ size: packed.byteLength, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST });
   gpuRenderer.device.queue.writeBuffer(vertexBuffer, 0, packed.buffer, packed.byteOffset, packed.byteLength);
   const bindGroup = gpuWriteUniforms(cameraView.matrix, colour, alpha);
-  pass.setPipeline(fill ? gpuRenderer.fillPipeline : gpuRenderer.pipeline);
+  const pipeline = overlay
+    ? (fill ? gpuRenderer.gizmoFillPipeline : gpuRenderer.gizmoPipeline)
+    : (fill ? gpuRenderer.fillPipeline : gpuRenderer.pipeline);
+  pass.setPipeline(pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.setVertexBuffer(0, vertexBuffer);
   pass.draw(packed.length / 3);
@@ -1436,6 +1685,7 @@ function renderWebGPU() {
     if (closed) gpuDrawVertices(pass, triangleVertexPacket(points), '#c6d4da', .12, true);
     gpuDrawVertices(pass, lineVertexPacket(points, closed), '#c6d4da', .8);
   }
+  renderGizmoWebGPU(pass);
   pass.end();
   const frameResources = gpuFrameBuffers.slice();
   gpuFrameBuffers = [];
@@ -1476,6 +1726,7 @@ function render3D() {
     if (closed) glDraw(triangulatePolygon(points), gl.TRIANGLES, '#c6d4da', cameraView.matrix, .12);
     glDraw(points, gl.LINE_STRIP, '#c6d4da', cameraView.matrix, .8, closed);
   }
+  renderGizmoWebGL();
 }
 
 function renderAll() {
@@ -1630,14 +1881,18 @@ function updateGuidePoint(record, index, point) {
   }
   if (record.form === 'arc') {
     const next = record.points.slice();
+    const gizmoOffset = record.gizmoOffset;
     next[index] = point;
     Object.assign(record, arcRecordFromPoints(next, record.planeId), { id: record.id, name: record.name, color: record.color });
+    if (gizmoOffset) record.gizmoOffset = gizmoOffset;
     return;
   }
   if (record.form === 'slot') {
     const next = record.points.slice();
+    const gizmoOffset = record.gizmoOffset;
     next[index] = point;
     Object.assign(record, slotRecordFromPoints(next, record.planeId), { id: record.id, name: record.name, color: record.color });
+    if (gizmoOffset) record.gizmoOffset = gizmoOffset;
     return;
   }
   if (record.form === 'rectangle') {
@@ -1693,6 +1948,8 @@ function onDraftPointerDown(event) {
     const guide = findGuidePointAt2D(point);
     if (guide) {
       selectedId = guide.recordId;
+      gizmoState = { recordId: guide.recordId, index: guide.index };
+      gizmoHoverAxis = null;
       pickedControlPoint = guide;
       controlDrag = { ...guide, pointerId: event.pointerId, surface: 'draft' };
       saveSnapshot();
@@ -1701,6 +1958,8 @@ function onDraftPointerDown(event) {
       return;
     }
     selectAt(point);
+    gizmoState = null;
+    gizmoHoverAxis = null;
     pickedControlPoint = null;
     renderAll();
     return;
@@ -1865,9 +2124,16 @@ function onScenePointerDown(event) {
   const screenPoint = pointerPosition(event, sceneCanvas);
   const hit = scenePointForEvent(event);
   if (activeTool === 'select') {
+    const gizmoHandle = findGizmoHandleAtScene(screenPoint);
+    if (gizmoHandle && beginGizmoAxisDrag(gizmoHandle, event)) {
+      event.preventDefault();
+      return;
+    }
     const guide = findGuidePointAtScene(screenPoint);
     if (guide) {
       selectedId = guide.recordId;
+      gizmoState = { recordId: guide.recordId, index: guide.index };
+      gizmoHoverAxis = null;
       pickedControlPoint = guide;
       controlDrag = { ...guide, pointerId: event.pointerId, surface: 'scene' };
       saveSnapshot();
@@ -1876,6 +2142,8 @@ function onScenePointerDown(event) {
       return;
     }
     selectAtScene(screenPoint);
+    gizmoState = null;
+    gizmoHoverAxis = null;
     pickedControlPoint = null;
     renderAll();
     return;
@@ -1901,6 +2169,10 @@ function onScenePointerDown(event) {
 }
 
 function onScenePointerMove(event) {
+  if (gizmoDrag && gizmoDrag.pointerId === event.pointerId) {
+    updateGizmoDrag(event);
+    return;
+  }
   if (controlDrag && controlDrag.surface === 'scene' && controlDrag.pointerId === event.pointerId) {
     const hit = scenePointForEvent(event);
     const record = scene.records.find(item => item.id === controlDrag.recordId);
@@ -1940,10 +2212,16 @@ function onScenePointerMove(event) {
   }
   if (!cameraView) return;
   if (activeTool === 'select') {
-    const guide = findGuidePointAtScene(pointerPosition(event, sceneCanvas));
-    const changed = guide?.recordId !== pickedControlPoint?.recordId || guide?.index !== pickedControlPoint?.index;
+    const screenPoint = pointerPosition(event, sceneCanvas);
+    const gizmoHandle = findGizmoHandleAtScene(screenPoint);
+    const guide = findGuidePointAtScene(screenPoint);
+    const changed = gizmoHandle?.axis !== gizmoHoverAxis
+      || guide?.recordId !== pickedControlPoint?.recordId
+      || guide?.index !== pickedControlPoint?.index;
     if (changed) {
+      gizmoHoverAxis = gizmoHandle?.axis || null;
       pickedControlPoint = guide;
+      sceneCanvas.style.cursor = gizmoHandle ? 'pointer' : 'grab';
       render3D();
     }
     return;
@@ -1956,6 +2234,14 @@ function onScenePointerMove(event) {
 }
 
 function onScenePointerUp(event) {
+  if (gizmoDrag && gizmoDrag.pointerId === event.pointerId) {
+    normaliseSelectedWinding();
+    gizmoDrag = null;
+    gizmoHoverAxis = null;
+    if (sceneCanvas.hasPointerCapture(event.pointerId)) sceneCanvas.releasePointerCapture(event.pointerId);
+    renderAll();
+    return;
+  }
   if (controlDrag && controlDrag.surface === 'scene' && controlDrag.pointerId === event.pointerId) {
     normaliseSelectedWinding();
     controlDrag = null;
@@ -2281,7 +2567,7 @@ function onKeyDown(event) {
   const key = event.key.toLowerCase();
   const shortcuts = { v: 'select', l: 'line', p: 'polyline', g: 'polygon', r: 'rectangle', c: 'circle', e: 'ellipse', t: 'arc', o: 'slot', b: 'bezier', h: 'hermite', n: 'bspline', u: 'nurbs', s: 'spline', a: 'plane' };
   if (shortcuts[key]) { event.preventDefault(); setTool(shortcuts[key]); }
-  if (key === 'escape') { shapeDrag = null; controlDrag = null; pickedControlPoint = null; sketch = { points: [], preview: null, previewWorld: null }; setTool('select'); }
+  if (key === 'escape') { shapeDrag = null; controlDrag = null; gizmoDrag = null; gizmoState = null; gizmoHoverAxis = null; pickedControlPoint = null; sketch = { points: [], preview: null, previewWorld: null }; setTool('select'); }
   if (key === 'delete' || key === 'backspace') deleteSelected();
   if (key === 'f') fitView();
   if (key === '1') setMode('2d');
@@ -2297,7 +2583,12 @@ draftCanvas.addEventListener('pointerleave', () => {
   if (!isPanning && !shapeDrag && !controlDrag) { sketch.preview = null; pickedControlPoint = null; render2D(); }
 });
 sceneCanvas.addEventListener('pointerleave', () => {
-  if (!controlDrag && !isOrbiting && !isScenePanning) { pickedControlPoint = null; render3D(); }
+  if (!controlDrag && !gizmoDrag && !isOrbiting && !isScenePanning) {
+    pickedControlPoint = null;
+    gizmoHoverAxis = null;
+    sceneCanvas.style.cursor = activeTool === 'select' ? 'grab' : 'crosshair';
+    render3D();
+  }
 });
 sceneCanvas.addEventListener('pointerdown', onScenePointerDown);
 sceneCanvas.addEventListener('pointermove', onScenePointerMove);
