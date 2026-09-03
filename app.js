@@ -1,6 +1,6 @@
 import { snapPoint, confirmDrawing } from './src/input.js?v=21';
 import { escapeMarkup, propertyField, slideInspector, bindInspectorTabs } from './src/ui.js?v=21';
-import { pairVertexPacket, lineVertexPacket, triangleVertexPacket, triangulatePolygon, ensureWinding, isClosedForm } from './src/rendering.js?v=23';
+import { pairVertexPacket, lineVertexPacket, triangleVertexPacket, triangulatePolygon, ensureWinding, isClosedForm } from './src/rendering.js?v=24';
 
 const draftCanvas = document.querySelector('#draftCanvas');
 const sceneCanvas = document.querySelector('#sceneCanvas');
@@ -1146,16 +1146,68 @@ function planeCorners3D(plane) {
   return localCorners.map(point => planeLocalToWorld({ x: point.x, y: point.y, z: 0 }, plane));
 }
 
-function recordPoint3D(record, point) {
+function pointOffsetForRecord(record, index) {
+  const offsets = record.gizmoPointOffsets || {};
+  const pointOffset = index === undefined ? null : offsets[index];
+  const legacyOffset = record.gizmoOffset;
+  const offset = pointOffset || legacyOffset || { x: 0, y: 0, z: 0 };
+  return { x: Number(offset.x) || 0, y: Number(offset.y) || 0, z: Number(offset.z) || 0 };
+}
+
+function setPointOffsetForRecord(record, index, offset) {
+  if (!record.gizmoPointOffsets) record.gizmoPointOffsets = {};
+  record.gizmoPointOffsets[index] = { x: Number(offset.x) || 0, y: Number(offset.y) || 0, z: Number(offset.z) || 0 };
+}
+
+function recordPoint3D(record, point, index) {
   const plane = scene.planes.find(item => item.id === record.planeId) || null;
   const world = planeLocalToWorld({ x: point.x, y: point.y, z: 0 }, plane);
-  const offset = record.gizmoOffset || { x: 0, y: 0, z: 0 };
-  return { x: world.x + (Number(offset.x) || 0), y: world.y + (Number(offset.y) || 0), z: world.z + (Number(offset.z) || 0) };
+  const offset = pointOffsetForRecord(record, index);
+  return { x: world.x + offset.x, y: world.y + offset.y, z: world.z + offset.z };
+}
+
+function interpolateGuideOffset(record, parameter) {
+  const controls = controlPointsForRecord(record);
+  if (controls.length < 2) return { x: 0, y: 0, z: 0 };
+  const offsets = controls.map((_, index) => record.gizmoPointOffsets?.[index] || { x: 0, y: 0, z: 0 });
+  const t = clamp(parameter, 0, 1);
+  if ((record.form === 'bezier' || record.form === 'hermite') && controls.length === 4) {
+    const first = lerp3(offsets[0], offsets[1], t);
+    const second = lerp3(offsets[1], offsets[2], t);
+    const third = lerp3(offsets[2], offsets[3], t);
+    return lerp3(lerp3(first, second, t), lerp3(second, third, t), t);
+  }
+  const scaled = t * (offsets.length - 1);
+  const segment = Math.min(offsets.length - 2, Math.floor(scaled));
+  return lerp3(offsets[segment], offsets[segment + 1], scaled - segment);
+}
+
+function lerp3(a, b, t) {
+  return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t, z: a.z + (b.z - a.z) * t };
+}
+
+function curvePoints3D(record) {
+  const samples = curveSamples(record);
+  const sampleCount = Math.max(samples.length - 1, 1);
+  return samples.map((point, index) => add3(recordPoint3D(record, point), interpolateGuideOffset(record, index / sampleCount)));
+}
+
+function slotBoundary3D(record) {
+  const boundary = slotBoundary(record);
+  const startOffset = pointOffsetForRecord(record, 0);
+  const endOffset = pointOffsetForRecord(record, 1);
+  const widthOffset = pointOffsetForRecord(record, 2);
+  const segments = 24;
+  return boundary.map((point, index) => {
+    const endpointOffset = index === 0 || index > segments + 1 ? startOffset : endOffset;
+    const offset = add3(endpointOffset, scale3(widthOffset, .35));
+    return add3(recordPoint3D(record, point), offset);
+  });
 }
 
 function recordPoints3D(record) {
-  if (record.form === 'line' || record.form === 'polyline') return record.points.map(point => recordPoint3D(record, point));
-  if (record.form === 'rectangle') return cornersForRectangle(record).map(point => recordPoint3D(record, point));
+  if (record.form === 'line' || record.form === 'polyline') return record.points.map((point, index) => recordPoint3D(record, point, index));
+  if (record.form === 'rectangle') return cornersForRectangle(record).map((point, index) => recordPoint3D(record, point, index));
   if (record.form === 'circle') {
     const localPoints = [];
     for (let i = 0; i < 64; i += 1) { const angle = i / 64 * Math.PI * 2; localPoints.push({ x: record.center.x + Math.cos(angle) * record.radius, y: record.center.y + Math.sin(angle) * record.radius }); }
@@ -1163,14 +1215,20 @@ function recordPoints3D(record) {
     return ordered.map(point => recordPoint3D(record, point));
   }
   if (record.form === 'ellipse') {
-    const localPoints = [];
-    for (let i = 0; i < 64; i += 1) { const angle = i / 64 * Math.PI * 2; localPoints.push({ x: record.center.x + Math.cos(angle) * record.radiusX, y: record.center.y + Math.sin(angle) * record.radiusY }); }
-    const ordered = ensureWinding(localPoints, 'CCW');
-    return ordered.map(point => recordPoint3D(record, point));
+    const centre = recordPoint3D(record, record.center, 0);
+    const centreOffset = record.gizmoPointOffsets?.[0] || { x: 0, y: 0, z: 0 };
+    const xAxis = sub3(add3(recordPoint3D(record, makePoint(record.center.x + record.radiusX, record.center.y), 1), centreOffset), centre);
+    const yAxis = sub3(add3(recordPoint3D(record, makePoint(record.center.x, record.center.y + record.radiusY), 2), centreOffset), centre);
+    const points = [];
+    for (let i = 0; i < 64; i += 1) {
+      const angle = i / 64 * Math.PI * 2;
+      points.push(add3(centre, add3(scale3(xAxis, Math.cos(angle)), scale3(yAxis, Math.sin(angle)))));
+    }
+    return points;
   }
-  if (record.form === 'bezier' || record.form === 'hermite' || record.form === 'spline' || record.form === 'bspline' || record.form === 'nurbs' || record.form === 'arc') return curveSamples(record).map(point => recordPoint3D(record, point));
-  if (record.form === 'polygon') return ensureWinding(record.points, 'CCW').map(point => recordPoint3D(record, point));
-  if (record.form === 'slot') return slotBoundary(record).map(point => recordPoint3D(record, point));
+  if (record.form === 'bezier' || record.form === 'hermite' || record.form === 'spline' || record.form === 'bspline' || record.form === 'nurbs' || record.form === 'arc') return curvePoints3D(record);
+  if (record.form === 'polygon') return ensureWinding(record.points, 'CCW').map(point => recordPoint3D(record, point, record.points.indexOf(point)));
+  if (record.form === 'slot') return slotBoundary3D(record);
   return [];
 }
 
@@ -1180,7 +1238,7 @@ function controlPointMarkerBatches3D(record) {
   const fieldOfView = Math.PI / 3.2;
   return controls.map((control, index) => {
     const picked = pickedControlPoint && pickedControlPoint.recordId === record.id && pickedControlPoint.index === index;
-    const surfacePoint = recordPoint3D(record, control);
+    const surfacePoint = recordPoint3D(record, control, index);
     const toCamera = sub3(cameraView.eye, surfacePoint);
     const depth = Math.max(Math.hypot(toCamera.x, toCamera.y, toCamera.z), 1);
     const worldPerPixel = depth * 2 * Math.tan(fieldOfView / 2) / Math.max(cameraView.height, 1);
@@ -1211,7 +1269,7 @@ function gizmoOriginForState() {
   if (!gizmoState || selectedId !== gizmoState.recordId) return null;
   const record = scene.records.find(item => item.id === gizmoState.recordId);
   const control = record && guidePointsForRecord(record)[gizmoState.index];
-  return record && control ? recordPoint3D(record, control) : null;
+  return record && control ? recordPoint3D(record, control, gizmoState.index) : null;
 }
 
 function gizmoConeTriangles(origin, axis, u, v, baseDistance, tipDistance, radius) {
@@ -1382,7 +1440,7 @@ function beginGizmoAxisDrag(handle, event) {
     dir: handle.dir,
     origin,
     startParameter: parameter,
-    startOffsetZ: Number(record.gizmoOffset?.z) || 0,
+    startOffsetZ: pointOffsetForRecord(record, gizmoState.index).z,
     pointerId: event.pointerId
   };
   gizmoHoverAxis = handle.axis;
@@ -1392,12 +1450,13 @@ function beginGizmoAxisDrag(handle, event) {
 }
 
 function updateGuideWithGizmo(record, index, axis, delta, startWorld, startOffsetZ) {
+  const pointOffset = pointOffsetForRecord(record, index);
   if (axis === 'z') {
-    record.gizmoOffset = { ...(record.gizmoOffset || {}), z: startOffsetZ + delta };
+    setPointOffsetForRecord(record, index, { x: pointOffset.x, y: pointOffset.y, z: startOffsetZ + delta });
     return;
   }
   const targetWorld = add3(startWorld, scale3(axis === 'x' ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 }, delta));
-  const offset = record.gizmoOffset || { x: 0, y: 0, z: 0 };
+  const offset = pointOffset;
   const unoffsetWorld = { x: targetWorld.x - (Number(offset.x) || 0), y: targetWorld.y - (Number(offset.y) || 0), z: targetWorld.z - (Number(offset.z) || 0) };
   const plane = scene.planes.find(item => item.id === record.planeId) || null;
   updateGuidePoint(record, index, plane ? worldToPlaneLocal(unoffsetWorld, plane) : makePoint(unoffsetWorld.x, unoffsetWorld.y));
@@ -1634,6 +1693,22 @@ function gpuDrawVertices(pass, packed, colour, alpha, fill = false, overlay = fa
   gpuFrameBuffers.push(vertexBuffer);
 }
 
+function isPlanarFace(points) {
+  if (points.length < 4) return true;
+  const origin = points[0];
+  let normal = null;
+  for (let first = 1; first < points.length - 1 && !normal; first += 1) {
+    for (let second = first + 1; second < points.length; second += 1) {
+      const candidate = cross3(sub3(points[first], origin), sub3(points[second], origin));
+      if (Math.hypot(candidate.x, candidate.y, candidate.z) > 0.000001) { normal = normalize3(candidate); break; }
+    }
+  }
+  if (!normal) return true;
+  const scale = Math.max(...points.map(point => Math.hypot(point.x - origin.x, point.y - origin.y, point.z - origin.z)), 1);
+  const tolerance = Math.max(scale * 0.000001, 0.0001);
+  return points.every(point => Math.abs(dot3(sub3(point, origin), normal)) <= tolerance);
+}
+
 function renderWebGPU() {
   const size = resizeCanvas(sceneCanvas, false);
   if (gpuRenderer.width !== sceneCanvas.width || gpuRenderer.height !== sceneCanvas.height) {
@@ -1673,8 +1748,9 @@ function renderWebGPU() {
   scene.records.forEach(record => {
     const points = recordPoints3D(record);
     const closed = isClosedForm(record.form);
+    const fillable = closed && isPlanarFace(points);
     const tint = record.id === selectedId ? colors.selected : record.color;
-    if (closed) gpuDrawVertices(pass, triangleVertexPacket(points), tint, record.id === selectedId ? .24 : .1, true);
+    if (fillable) gpuDrawVertices(pass, triangleVertexPacket(points), tint, record.id === selectedId ? .24 : .1, true);
     gpuDrawVertices(pass, lineVertexPacket(points, closed), tint, record.id === selectedId ? 1 : .95);
     if (record.id === selectedId) controlPointMarkerBatches3D(record).forEach(marker => gpuDrawVertices(pass, pairVertexPacket(marker.triangles), marker.colour, 1, true));
   });
@@ -1682,7 +1758,8 @@ function renderWebGPU() {
   if (preview) {
     const points = recordPoints3D(preview);
     const closed = isClosedForm(preview.form);
-    if (closed) gpuDrawVertices(pass, triangleVertexPacket(points), '#c6d4da', .12, true);
+    const fillable = closed && isPlanarFace(points);
+    if (fillable) gpuDrawVertices(pass, triangleVertexPacket(points), '#c6d4da', .12, true);
     gpuDrawVertices(pass, lineVertexPacket(points, closed), '#c6d4da', .8);
   }
   renderGizmoWebGPU(pass);
@@ -1714,8 +1791,9 @@ function render3D() {
   scene.records.forEach(record => {
     const points = recordPoints3D(record);
     const closed = isClosedForm(record.form);
+    const fillable = closed && isPlanarFace(points);
     const tint = record.id === selectedId ? colors.selected : record.color;
-    if (closed) glDraw(triangulatePolygon(points), gl.TRIANGLES, tint, cameraView.matrix, record.id === selectedId ? .24 : .1);
+    if (fillable) glDraw(triangulatePolygon(points), gl.TRIANGLES, tint, cameraView.matrix, record.id === selectedId ? .24 : .1);
     glDraw(points, gl.LINE_STRIP, tint, cameraView.matrix, record.id === selectedId ? 1 : .95, closed);
     if (record.id === selectedId) controlPointMarkerBatches3D(record).forEach(marker => glDraw(marker.triangles, gl.TRIANGLES, marker.colour, cameraView.matrix, 1));
   });
@@ -1723,7 +1801,8 @@ function render3D() {
   if (preview) {
     const points = recordPoints3D(preview);
     const closed = isClosedForm(preview.form);
-    if (closed) glDraw(triangulatePolygon(points), gl.TRIANGLES, '#c6d4da', cameraView.matrix, .12);
+    const fillable = closed && isPlanarFace(points);
+    if (fillable) glDraw(triangulatePolygon(points), gl.TRIANGLES, '#c6d4da', cameraView.matrix, .12);
     glDraw(points, gl.LINE_STRIP, '#c6d4da', cameraView.matrix, .8, closed);
   }
   renderGizmoWebGL();
@@ -1864,7 +1943,7 @@ function findGuidePointAtScene(screenPoint) {
   const handles = guidePointsForRecord(record);
   let best = null;
   handles.forEach((handle, index) => {
-    const projected = projectWorld(recordPoint3D(record, handle));
+    const projected = projectWorld(recordPoint3D(record, handle, index));
     const distanceToPoint = Math.hypot(screenPoint.x - projected.x, screenPoint.y - projected.y);
     if (distanceToPoint <= 12 && (!best || distanceToPoint < best.distance)) best = { recordId: record.id, index, distance: distanceToPoint };
   });
@@ -1882,17 +1961,21 @@ function updateGuidePoint(record, index, point) {
   if (record.form === 'arc') {
     const next = record.points.slice();
     const gizmoOffset = record.gizmoOffset;
+    const gizmoPointOffsets = record.gizmoPointOffsets;
     next[index] = point;
     Object.assign(record, arcRecordFromPoints(next, record.planeId), { id: record.id, name: record.name, color: record.color });
     if (gizmoOffset) record.gizmoOffset = gizmoOffset;
+    if (gizmoPointOffsets) record.gizmoPointOffsets = gizmoPointOffsets;
     return;
   }
   if (record.form === 'slot') {
     const next = record.points.slice();
     const gizmoOffset = record.gizmoOffset;
+    const gizmoPointOffsets = record.gizmoPointOffsets;
     next[index] = point;
     Object.assign(record, slotRecordFromPoints(next, record.planeId), { id: record.id, name: record.name, color: record.color });
     if (gizmoOffset) record.gizmoOffset = gizmoOffset;
+    if (gizmoPointOffsets) record.gizmoPointOffsets = gizmoPointOffsets;
     return;
   }
   if (record.form === 'rectangle') {
