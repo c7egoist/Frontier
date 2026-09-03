@@ -77,6 +77,7 @@ let sketch = { points: [], preview: null, previewWorld: null };
 let shapeDrag = null;
 let controlDrag = null;
 let gizmoState = null;
+let gizmoMode = 'translate';
 let gizmoDrag = null;
 let gizmoHoverAxis = null;
 let pickedControlPoint = null;
@@ -1272,6 +1273,17 @@ function gizmoOriginForState() {
   return record && control ? recordPoint3D(record, control, gizmoState.index) : null;
 }
 
+function setGizmoMode(mode) {
+  if (!['translate', 'scale', 'rotate'].includes(mode)) return false;
+  if (activeTool !== 'select') setTool('select');
+  gizmoMode = mode;
+  gizmoDrag = null;
+  gizmoHoverAxis = null;
+  sceneCanvas.style.cursor = 'grab';
+  renderAll();
+  return true;
+}
+
 function gizmoConeTriangles(origin, axis, u, v, baseDistance, tipDistance, radius) {
   const base = add3(origin, scale3(axis, baseDistance));
   const tip = add3(origin, scale3(axis, tipDistance));
@@ -1355,25 +1367,26 @@ function gizmoGeometry() {
   const lineBatches = [];
   gizmoAxisDefinitions().forEach(axis => {
     const colour = gizmoHoverAxis === axis.name ? axis.hover : axis.colour;
-    fillBatches.push({ triangles: gizmoConeTriangles(origin, axis.dir, axis.u, axis.v, tip - length * .1, tip + length * .09, radius), colour, alpha: 1 });
-    fillBatches.push({ triangles: gizmoCylinderTriangles(origin, axis.dir, axis.u, axis.v, tip - length * .28, length * .14, radius), colour, alpha: 1 });
+    if (gizmoMode === 'translate') {
+      fillBatches.push({ triangles: gizmoConeTriangles(origin, axis.dir, axis.u, axis.v, tip - length * .1, tip + length * .09, radius), colour, alpha: 1 });
 
-    const half = length * .08;
-    const planeCentre = add3(origin, scale3(add3(axis.u, axis.v), tip - half));
-    const planeCorners = [
-      add3(planeCentre, add3(scale3(axis.u, -half), scale3(axis.v, -half))),
-      add3(planeCentre, add3(scale3(axis.u, half), scale3(axis.v, -half))),
-      add3(planeCentre, add3(scale3(axis.u, half), scale3(axis.v, half))),
-      add3(planeCentre, add3(scale3(axis.u, -half), scale3(axis.v, half)))
-    ];
-    // Keep the reference's translucent plane handle, but use a conservative
-    // alpha and no depth writes so it cannot obscure the sketch face beneath it.
-    fillBatches.push({ triangles: [planeCorners[0], planeCorners[1], planeCorners[2], planeCorners[0], planeCorners[2], planeCorners[3]], colour: axis.plane, alpha: .18 });
-    lineBatches.push({ points: planeCorners, colour: axis.plane, alpha: .95, close: true });
-
-    fillBatches.push({ triangles: gizmoArcTriangles(origin, axis.u, axis.v, length * .62 - length * .038, length * .62 + length * .038, 31 * Math.PI / 180, 24), colour, alpha: 1 });
+      const half = length * .08;
+      const planeCentre = add3(origin, scale3(add3(axis.u, axis.v), tip - half));
+      const planeCorners = [
+        add3(planeCentre, add3(scale3(axis.u, -half), scale3(axis.v, -half))),
+        add3(planeCentre, add3(scale3(axis.u, half), scale3(axis.v, -half))),
+        add3(planeCentre, add3(scale3(axis.u, half), scale3(axis.v, half))),
+        add3(planeCentre, add3(scale3(axis.u, -half), scale3(axis.v, half)))
+      ];
+      // Keep the reference's translucent plane handle, but use a conservative
+      // alpha and no depth writes so it cannot obscure the sketch face beneath it.
+      fillBatches.push({ triangles: [planeCorners[0], planeCorners[1], planeCorners[2], planeCorners[0], planeCorners[2], planeCorners[3]], colour: axis.plane, alpha: .18 });
+      lineBatches.push({ points: planeCorners, colour: axis.plane, alpha: .95, close: true });
+    }
+    if (gizmoMode === 'scale') fillBatches.push({ triangles: gizmoCylinderTriangles(origin, axis.dir, axis.u, axis.v, tip - length * .28, length * .14, radius), colour, alpha: 1 });
+    if (gizmoMode === 'rotate') fillBatches.push({ triangles: gizmoArcTriangles(origin, axis.u, axis.v, length * .62 - length * .038, length * .62 + length * .038, 31 * Math.PI / 180, 24), colour, alpha: 1 });
   });
-  fillBatches.push({ triangles: gizmoBillboardRingTriangles(origin), colour: '#ffffff', alpha: 1 });
+  if (gizmoMode === 'translate') fillBatches.push({ triangles: gizmoBillboardRingTriangles(origin), colour: '#ffffff', alpha: 1 });
   return { fillBatches, lineBatches };
 }
 
@@ -1393,22 +1406,81 @@ function renderGizmoWebGL() {
   gl.enable(gl.DEPTH_TEST);
 }
 
+function screenPlanePoint(screenPoint, normal, origin) {
+  const ray = sceneRay(screenPoint);
+  const denominator = dot3(normal, ray.direction);
+  if (Math.abs(denominator) < 0.000001) return null;
+  const distanceAlongRay = dot3(sub3(origin, ray.origin), normal) / denominator;
+  if (distanceAlongRay < 0) return null;
+  return add3(ray.origin, scale3(ray.direction, distanceAlongRay));
+}
+
+function gizmoScreenRingRadius(origin) {
+  const basis = cameraScreenBasis();
+  const toCamera = sub3(cameraView.eye, origin);
+  const depth = Math.max(Math.hypot(toCamera.x, toCamera.y, toCamera.z), 1);
+  const worldPerPixel = depth * 2 * Math.tan(Math.PI / 3.2 / 2) / Math.max(cameraView.height, 1);
+  const radius = Math.max(45 * .16, worldPerPixel * 8);
+  const centre = projectWorld(origin);
+  const edge = projectWorld(add3(origin, scale3(basis.right, radius)));
+  return { centre, radius: Math.max(Math.hypot(edge.x - centre.x, edge.y - centre.y), 5) };
+}
+
+function gizmoAngleAtScreen(screenPoint, axis, origin, reference) {
+  const hit = screenPlanePoint(screenPoint, axis, origin);
+  if (!hit) return null;
+  const vector = sub3(hit, origin);
+  const ref = normalize3(sub3(reference, scale3(axis, dot3(reference, axis))));
+  const perpendicular = normalize3(cross3(axis, ref));
+  return Math.atan2(dot3(vector, perpendicular), dot3(vector, ref));
+}
+
+function gizmoRotationHit(screenPoint, origin, axis) {
+  const centre = Math.PI / 4;
+  const start = centre - 31 * Math.PI / 360;
+  const inner = 45 * .62 - 45 * .038;
+  const outer = 45 * .62 + 45 * .038;
+  let nearest = Infinity;
+  for (let step = 0; step < 24; step += 1) {
+    const firstAngle = start + (31 * Math.PI / 180) * step / 24;
+    const nextAngle = start + (31 * Math.PI / 180) * (step + 1) / 24;
+    const first = add3(origin, add3(scale3(axis.u, Math.cos(firstAngle) * ((inner + outer) / 2)), scale3(axis.v, Math.sin(firstAngle) * ((inner + outer) / 2))));
+    const next = add3(origin, add3(scale3(axis.u, Math.cos(nextAngle) * ((inner + outer) / 2)), scale3(axis.v, Math.sin(nextAngle) * ((inner + outer) / 2))));
+    nearest = Math.min(nearest, screenSegmentDistance(screenPoint, projectWorld(first), projectWorld(next)));
+  }
+  return nearest;
+}
+
 function findGizmoHandleAtScene(screenPoint) {
   const origin = gizmoOriginForState();
   if (!origin || !cameraView) return null;
   const projectedOrigin = projectWorld(origin);
   let best = null;
+  if (gizmoMode === 'translate') {
+    const ring = gizmoScreenRingRadius(origin);
+    const distanceToRing = Math.hypot(screenPoint.x - ring.centre.x, screenPoint.y - ring.centre.y);
+    if (distanceToRing >= ring.radius * .65 && distanceToRing <= ring.radius * 1.4) best = { mode: 'translate', axis: 'screen', distance: Math.abs(distanceToRing - ring.radius) };
+  }
   gizmoAxisDefinitions().forEach(axis => {
-    const projectedTip = projectWorld(add3(origin, scale3(axis.dir, 45 * 1.08)));
-    const dx = projectedTip.x - projectedOrigin.x;
-    const dy = projectedTip.y - projectedOrigin.y;
-    const length = Math.hypot(dx, dy);
-    const along = length ? ((screenPoint.x - projectedOrigin.x) * dx + (screenPoint.y - projectedOrigin.y) * dy) / (length * length) : 0;
-    const distanceToAxis = screenSegmentDistance(screenPoint, projectedOrigin, projectedTip);
-    const distanceToOrigin = Math.hypot(screenPoint.x - projectedOrigin.x, screenPoint.y - projectedOrigin.y);
-    const foreshortened = length < 18 && distanceToOrigin >= 9 && distanceToOrigin <= 14;
-    const onHandle = foreshortened || (along >= .38 && along <= 1.08 && distanceToAxis <= 12);
-    if (onHandle && (!best || distanceToAxis < best.distance)) best = { axis: axis.name, dir: axis.dir, distance: distanceToAxis };
+    let distanceToHandle = Infinity;
+    let onHandle = false;
+    if (gizmoMode === 'rotate') {
+      distanceToHandle = gizmoRotationHit(screenPoint, origin, axis);
+      onHandle = distanceToHandle <= 12;
+    } else {
+      const projectedTip = projectWorld(add3(origin, scale3(axis.dir, 45 * 1.08)));
+      const dx = projectedTip.x - projectedOrigin.x;
+      const dy = projectedTip.y - projectedOrigin.y;
+      const length = Math.hypot(dx, dy);
+      const along = length ? ((screenPoint.x - projectedOrigin.x) * dx + (screenPoint.y - projectedOrigin.y) * dy) / (length * length) : 0;
+      distanceToHandle = screenSegmentDistance(screenPoint, projectedOrigin, projectedTip);
+      const distanceToOrigin = Math.hypot(screenPoint.x - projectedOrigin.x, screenPoint.y - projectedOrigin.y);
+      const foreshortened = length < 18 && distanceToOrigin >= 9 && distanceToOrigin <= 14;
+      const minimum = gizmoMode === 'scale' ? .5 : .38;
+      const maximum = gizmoMode === 'scale' ? .86 : 1.08;
+      onHandle = foreshortened || (along >= minimum && along <= maximum && distanceToHandle <= 12);
+    }
+    if (onHandle && (!best || distanceToHandle < best.distance)) best = { mode: gizmoMode, axis: axis.name, dir: axis.dir, distance: distanceToHandle };
   });
   return best;
 }
@@ -1426,50 +1498,103 @@ function axisParameterAtScreen(screenPoint, origin, axis) {
   return (b * e - c * d) / denominator;
 }
 
+function recordPivotWorld(record) {
+  const controls = guidePointsForRecord(record);
+  if (!controls.length) return null;
+  const total = controls.reduce((sum, control, index) => add3(sum, recordPoint3D(record, control, index)), { x: 0, y: 0, z: 0 });
+  return scale3(total, 1 / controls.length);
+}
+
+function rotateAroundAxis(vector, axis, angle) {
+  const cosine = Math.cos(angle);
+  const sine = Math.sin(angle);
+  return add3(add3(scale3(vector, cosine), scale3(cross3(axis, vector), sine)), scale3(axis, dot3(axis, vector) * (1 - cosine)));
+}
+
 function beginGizmoAxisDrag(handle, event) {
   const origin = gizmoOriginForState();
   if (!origin) return false;
-  const parameter = axisParameterAtScreen(pointerPosition(event, sceneCanvas), origin, handle.dir);
-  if (parameter === null) return false;
+  const screenPoint = pointerPosition(event, sceneCanvas);
   const record = scene.records.find(item => item.id === gizmoState.recordId);
   if (!record) return false;
-  gizmoDrag = {
-    recordId: record.id,
-    index: gizmoState.index,
-    axis: handle.axis,
-    dir: handle.dir,
-    origin,
-    startParameter: parameter,
-    startOffsetZ: pointOffsetForRecord(record, gizmoState.index).z,
-    pointerId: event.pointerId
-  };
+  gizmoDrag = { recordId: record.id, index: gizmoState.index, mode: handle.mode, axis: handle.axis, dir: handle.dir, origin, pointerId: event.pointerId };
+  if (handle.mode === 'translate' && handle.axis === 'screen') {
+    const normal = normalize3(sub3(orbit.target, cameraView.eye));
+    gizmoDrag.startHit = screenPlanePoint(screenPoint, normal, origin);
+    if (!gizmoDrag.startHit) { gizmoDrag = null; return false; }
+  } else if (handle.mode === 'translate' || handle.mode === 'scale') {
+    gizmoDrag.startParameter = axisParameterAtScreen(screenPoint, origin, handle.dir);
+    if (gizmoDrag.startParameter === null) { gizmoDrag = null; return false; }
+    if (handle.mode === 'scale') {
+      gizmoDrag.pivot = recordPivotWorld(record) || origin;
+      gizmoDrag.startVector = sub3(origin, gizmoDrag.pivot);
+    }
+  } else if (handle.mode === 'rotate') {
+    const definition = gizmoAxisDefinitions().find(axis => axis.name === handle.axis);
+    gizmoDrag.reference = definition.u;
+    gizmoDrag.startAngle = gizmoAngleAtScreen(screenPoint, handle.dir, origin, definition.u);
+    gizmoDrag.pivot = recordPivotWorld(record) || origin;
+    if (gizmoDrag.startAngle === null) { gizmoDrag = null; return false; }
+    gizmoDrag.startVector = sub3(origin, gizmoDrag.pivot);
+  }
   gizmoHoverAxis = handle.axis;
   saveSnapshot();
   sceneCanvas.setPointerCapture(event.pointerId);
   return true;
 }
 
-function updateGuideWithGizmo(record, index, axis, delta, startWorld, startOffsetZ) {
-  const pointOffset = pointOffsetForRecord(record, index);
-  if (axis === 'z') {
-    setPointOffsetForRecord(record, index, { x: pointOffset.x, y: pointOffset.y, z: startOffsetZ + delta });
+function setGuideWorldPoint(record, index, worldPoint) {
+  const plane = scene.planes.find(item => item.id === record.planeId) || null;
+  const local = plane ? worldToPlaneLocal(worldPoint, plane) : makePoint(worldPoint.x, worldPoint.y);
+  const baseWorld = plane ? planeLocalToWorld({ x: local.x, y: local.y, z: 0 }, plane) : { x: local.x, y: local.y, z: 0 };
+  updateGuidePoint(record, index, local);
+  setPointOffsetForRecord(record, index, sub3(worldPoint, baseWorld));
+}
+
+function updateGuideWithGizmo(record, index, mode, axis, delta, startWorld, pivot, startVector) {
+  const axisVector = axis === 'x' ? { x: 1, y: 0, z: 0 } : (axis === 'y' ? { x: 0, y: 1, z: 0 } : { x: 0, y: 0, z: 1 });
+  if (mode === 'translate') {
+    setGuideWorldPoint(record, index, add3(startWorld, scale3(axisVector, delta)));
     return;
   }
-  const targetWorld = add3(startWorld, scale3(axis === 'x' ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 }, delta));
-  const offset = pointOffset;
-  const unoffsetWorld = { x: targetWorld.x - (Number(offset.x) || 0), y: targetWorld.y - (Number(offset.y) || 0), z: targetWorld.z - (Number(offset.z) || 0) };
-  const plane = scene.planes.find(item => item.id === record.planeId) || null;
-  updateGuidePoint(record, index, plane ? worldToPlaneLocal(unoffsetWorld, plane) : makePoint(unoffsetWorld.x, unoffsetWorld.y));
+  if (mode === 'scale') {
+    const factor = Math.max(.05, 1 + delta / 45);
+    const scaled = { x: startVector.x, y: startVector.y, z: startVector.z };
+    if (axis === 'x') scaled.x *= factor;
+    if (axis === 'y') scaled.y *= factor;
+    if (axis === 'z') scaled.z *= factor;
+    setGuideWorldPoint(record, index, add3(pivot, scaled));
+    return;
+  }
+  const rotated = rotateAroundAxis(startVector, axisVector, delta);
+  setGuideWorldPoint(record, index, add3(pivot, rotated));
 }
 
 function updateGizmoDrag(event) {
   if (!gizmoDrag || gizmoDrag.pointerId !== event.pointerId) return;
-  const current = axisParameterAtScreen(pointerPosition(event, sceneCanvas), gizmoDrag.origin, gizmoDrag.dir);
   const record = scene.records.find(item => item.id === gizmoDrag.recordId);
-  if (current === null || !record) return;
-  let delta = current - gizmoDrag.startParameter;
-  if (event.ctrlKey) delta = Math.round(delta / Math.max(view.snapSize, .0001)) * view.snapSize;
-  updateGuideWithGizmo(record, gizmoDrag.index, gizmoDrag.axis, delta, gizmoDrag.origin, gizmoDrag.startOffsetZ);
+  if (!record) return;
+  const screenPoint = pointerPosition(event, sceneCanvas);
+  let delta = 0;
+  let startVector = gizmoDrag.startVector;
+  if (gizmoDrag.mode === 'translate' && gizmoDrag.axis === 'screen') {
+    const normal = normalize3(sub3(orbit.target, cameraView.eye));
+    const currentHit = screenPlanePoint(screenPoint, normal, gizmoDrag.origin);
+    if (!currentHit || !gizmoDrag.startHit) return;
+    setGuideWorldPoint(record, gizmoDrag.index, add3(gizmoDrag.origin, sub3(currentHit, gizmoDrag.startHit)));
+  } else if (gizmoDrag.mode === 'translate' || gizmoDrag.mode === 'scale') {
+    const current = axisParameterAtScreen(screenPoint, gizmoDrag.origin, gizmoDrag.dir);
+    if (current === null) return;
+    delta = current - gizmoDrag.startParameter;
+    if (event.ctrlKey) delta = Math.round(delta / Math.max(view.snapSize, .0001)) * view.snapSize;
+    updateGuideWithGizmo(record, gizmoDrag.index, gizmoDrag.mode, gizmoDrag.axis, delta, gizmoDrag.origin, gizmoDrag.pivot, startVector);
+  } else {
+    const currentAngle = gizmoAngleAtScreen(screenPoint, gizmoDrag.dir, gizmoDrag.origin, gizmoDrag.reference);
+    if (currentAngle === null) return;
+    delta = currentAngle - gizmoDrag.startAngle;
+    if (event.ctrlKey) delta = Math.round(delta / (5 * Math.PI / 180)) * (5 * Math.PI / 180);
+    updateGuideWithGizmo(record, gizmoDrag.index, 'rotate', gizmoDrag.axis, delta, gizmoDrag.origin, gizmoDrag.pivot, startVector);
+  }
   pickedControlPoint = { recordId: record.id, index: gizmoDrag.index };
   renderAll();
 }
@@ -2648,7 +2773,13 @@ function onKeyDown(event) {
     return;
   }
   const key = event.key.toLowerCase();
-  const shortcuts = { v: 'select', l: 'line', p: 'polyline', g: 'polygon', r: 'rectangle', c: 'circle', e: 'ellipse', t: 'arc', o: 'slot', b: 'bezier', h: 'hermite', n: 'bspline', u: 'nurbs', s: 'spline', a: 'plane' };
+  const gizmoShortcuts = { g: 'translate', s: 'scale', r: 'rotate' };
+  if (gizmoShortcuts[key]) {
+    event.preventDefault();
+    setGizmoMode(gizmoShortcuts[key]);
+    return;
+  }
+  const shortcuts = { v: 'select', l: 'line', p: 'polyline', c: 'circle', e: 'ellipse', t: 'arc', o: 'slot', b: 'bezier', h: 'hermite', n: 'bspline', u: 'nurbs', a: 'plane' };
   if (shortcuts[key]) { event.preventDefault(); setTool(shortcuts[key]); }
   if (key === 'escape') { shapeDrag = null; controlDrag = null; gizmoDrag = null; gizmoState = null; gizmoHoverAxis = null; pickedControlPoint = null; sketch = { points: [], preview: null, previewWorld: null }; setTool('select'); }
   if (key === 'delete' || key === 'backspace') deleteSelected();
