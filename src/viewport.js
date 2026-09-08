@@ -1036,6 +1036,10 @@ export function createViewport(canvas, { onPick } = {}) {
     if (!viewCam) controls.update();
     gradePass.uniforms.uSat.value = saturation;
     gradePass.uniforms.uCon.value = contrast;
+    /* the composer draws several passes; keep the counters accumulating across all of them
+       instead of being reset to the last fullscreen quad, which is what the footer wants */
+    renderer.info.autoReset = false;
+    renderer.info.reset();
     composer.render();
   }
 
@@ -1044,7 +1048,8 @@ export function createViewport(canvas, { onPick } = {}) {
   function start(onFrame) {
     const loop = () => {
       raf = requestAnimationFrame(loop);
-      const real = Math.min(clock.getDelta(), 0.06);
+      const raw = clock.getDelta();
+      const real = Math.min(raw, 0.06);        // capped for the simulation, never for the counter
       if (!viewCam) controls.update();                 // damping keeps running so inertia survives
       let dt = animateOn ? real : 0;
       if (stepFor > 0) { dt = stepFor; stepFor = 0; dirty = true; }   // single-frame advance
@@ -1052,7 +1057,7 @@ export function createViewport(canvas, { onPick } = {}) {
       if (!shouldRender) return;
       dirty = false;
       tick(dt);
-      frames++; acc += real;
+      frames++; acc += raw;
       if (acc > 0.5) { fps = frames / acc; frames = 0; acc = 0; }
       onFrame && onFrame({ fps, dt, time, dayFactor, camera: activeCamera(), editorCamera: camera, controls, playing: !!viewCam });
     };
@@ -1065,6 +1070,8 @@ export function createViewport(canvas, { onPick } = {}) {
     applyNode, applyAll, setSelection, focusOn, frameAll, start, resize, pickAt,
     setClock, stepOnce, setViewCamera, snapView, orbitBy, requestRender,
     get isPlaying() { return !!viewCam; },
+    get isFlying() { return !!flight; },                 // a framing tween is still running
+    get renderInfo() { return renderer.info.render; },   // triangles, draw calls, for the footer
     get dayFactor() { return dayFactor; },
     get sunDir() { return sunDir; },
     setHudElements(v, g) { vignetteEl = v; grainEl = g; },

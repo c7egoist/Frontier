@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://api.fontshare.com" crossorigin>
 <link href="https://api.fontshare.com/v2/css?f[]=general-sans@300,400,500,600,700&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9' fill='none' stroke='white' stroke-width='2'/></svg>">
-  <script type="module" crossorigin src="./assets/index-BGoTlgEs.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-tHd-3NRg.css">
+  <script type="module" crossorigin src="./assets/index-DXFJYNBo.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-DF7PbeGk.css">
 </head>
 <body>
 <div id="app">
@@ -41,43 +41,38 @@
     <aside class="dock dock-left" id="outliner"></aside>
 
     <section class="stage" id="stage">
-      <canvas id="gl"></canvas>
-      <div class="vign" id="vign"></div>
-      <div class="grain" id="grain"></div>
-      <div id="billboards"></div>
-      <div id="marquee"></div>
 
-      <div class="gatemask" id="gateMask"><div class="bar t"></div><div class="bar b"></div>
-        <div class="gatetag" id="gateTag"></div></div>
-
-      <div class="vp-bar">
-        <div class="glasspill" id="catBar"><span class="lbl">Show</span></div>
-        <div class="glasspill" id="labelBar"></div>
+      <header class="vp-head">
+        <div class="vp-menus" id="vpMenus"></div>
         <div class="spacer"></div>
-        <div class="vp-bar-right">
-          <div class="glasspill iso" id="isoBanner" style="display:none"></div>
-          <div class="glasspill" id="transport"></div>
+        <div class="isochip" id="isoBanner" style="display:none"></div>
+        <div class="tstrip" id="transport"></div>
+      </header>
+
+      <div class="vp-view" id="vpView">
+        <canvas id="gl"></canvas>
+        <div class="vign" id="vign"></div>
+        <div class="grain" id="grain"></div>
+        <div id="billboards"></div>
+
+        <div class="gatemask" id="gateMask"><div class="bar t"></div><div class="bar b"></div>
+          <div class="gatetag" id="gateTag"></div></div>
+
+        <div class="axisorb" id="axisOrb" title="Click an axis to snap the view · drag to orbit · double click to frame all">
+          <div class="orbhint" id="orbHint"></div>
         </div>
       </div>
 
-      <div class="vp-bottom">
+      <footer class="vp-foot">
+        <div class="stats" id="vpStats"></div>
+        <div class="spacer"></div>
         <div class="tod" id="todBar">
           <span class="clock" id="todClock">06:00</span>
           <div id="todSlider" style="flex:1"></div>
           <button class="iconbtn ghost" id="todPlay" title="Run the day cycle"></button>
         </div>
-      </div>
+      </footer>
 
-      <div class="vp-hud">
-        <div class="hudcard" id="hudLeft"></div>
-      </div>
-
-      <div class="vp-right">
-        <div class="hudcard" id="hudSel"></div>
-        <div class="axisorb" id="axisOrb" title="Click an axis to snap the view · drag to orbit · double click to frame all">
-          <div class="orbhint" id="orbHint"></div>
-        </div>
-      </div>
     </section>
 
     <aside class="dock dock-right" id="inspector">

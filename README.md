@@ -10,10 +10,14 @@ A state-of-the-art outliner for a real-time world editor, built in the **Slate U
    billboard to select it, click it again (or press <kbd>Enter</kbd>) and its **settings popup**
    opens right where the object lives, tethered to the marker and made of exactly the same
    controls as the docked inspector.
-3. **A viewport with a transport.** Unreal's model: **Play** runs the world through a scene camera
-   behind a framing gate, **Simulate** runs it with the editor camera still free, **Pause** and
-   **Step** own the clock, **Stop** puts the world back exactly as you left it. When nothing is
-   running you can drop the viewport out of realtime altogether and it redraws only on change.
+3. **A viewport that is a panel, not a canvas with stickers.** It has a **header** — menus for what
+   is shown, how markers read and where the camera is pointed, plus an Unreal-style transport strip
+   — and a **footer** of live counters. Nothing floats over the image except the markers themselves
+   and the view gizmo.
+4. **A transport.** Unreal's model: **Play** runs the world through a scene camera behind a framing
+   gate, **Simulate** runs it with the editor camera still free, **Pause** and **Step** own the
+   clock, **Stop** puts the world back exactly as you left it. When nothing is running you can drop
+   the viewport out of realtime altogether and it redraws only on change.
 
 ![Frontier — day](docs/preview-day.png)
 
@@ -98,7 +102,10 @@ rules"*, add this branch under **Settings → Environments → github-pages → 
 | tune it with room to breathe             | the docked inspector on the right, same sheet, more width                 |
 | stop the scene being a wall of pills     | markers declutter by depth; labels are hover / always / off                |
 | reorganise the world                     | drag tree rows to re-parent — drop *inside* a folder or *between* rows     |
-| light the shot                           | scrub the time-of-day pill under the viewport, or run the day cycle        |
+| light the shot                           | scrub the time-of-day pill in the viewport footer, or run the day cycle    |
+| hide a whole class of thing              | **Show** menu in the header — categories with counts, All / None           |
+| read the markers differently             | **Markers** menu — names on hover, names always, icons only                |
+| get a straight-on view                   | **View** menu, or a knob on the gizmo: front, back, left, right, top, bottom |
 | see the shot the way the camera sees it | **Play** — the gate masks in, the editor furniture steps out of frame      |
 | watch the world move but keep flying    | **Simulate** — same clock, your camera                                     |
 | study one thing in a busy world         | select any number of entities and **Isolate** them (<kbd>I</kbd>)          |
@@ -108,6 +115,34 @@ Popups and the dock are **the same property sheet**, generated from the same sch
 same model — change a slider in one and the other moves on the same frame.
 
 ![Frontier — night](docs/preview-night.png)
+
+---
+
+## The viewport chrome
+
+```
+┌ header ────────────────────────────────────────────────────────────────────────────┐
+│ Show All ▾   Markers on hover ▾   View Perspective ▾        ★2 Exit  ▶ ⟳ ⏸ ⏭ ⏹ │ REALTIME │ EDIT │
+├ view ──────────────────────────────────────────────────────────────────────────────┤
+│                          billboards · gate mask · axis orb                          │
+├ footer ────────────────────────────────────────────────────────────────────────────┤
+│ FPS 60 · 16.6 ms │ TRIS 241,690 · 78 draws │ ENTITIES 23 · 23 visible │ DAYLIGHT 100% · 46° │ 09:12 ──o── ▶ │
+└─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+**Header.** Three menus and one strip. *Show* is a checklist of categories with a live count each,
+plus All / None, and it stays open while you tick things off. *Markers* picks how billboards read.
+*View* holds the six standard views and the two framing commands — and the label stops claiming
+`Top` the moment the camera no longer looks down that axis, whichever way you moved it. The isolate
+chip appears beside the transport only while an isolation set exists.
+
+**Footer.** Counters that tell the truth: frames per second and the milliseconds behind them,
+triangles and draw calls accumulated across *every* pass of the composer, entities in the world and
+how many survive the current visibility and isolation state, daylight and sun elevation, and the
+isolated count when there is one. The time-of-day scrubber sits on the right where a timeline
+belongs.
+
+![Frontier — the Show menu](docs/preview-menu.png)
 
 ---
 
@@ -138,6 +173,9 @@ billboard goes with it, the rows dim in the tree, and an amber banner over the v
 is isolated and offers the way out (<kbd>Esc</kbd> also exits).
 
 ![Frontier — isolating three entities](docs/preview-isolate.png)
+
+Watch the footer while you do it: `ENTITIES 23 · 3 visible`, `TRIS` collapsing from 241,690 to
+11,913, and an `ISOLATED 3` counter that only exists while the set does.
 
 ---
 
@@ -184,6 +222,7 @@ Double-click a row (or a popup title) to rename. Right-click anything for its co
 
 ```
 index.html          shell: topbar · outliner dock · stage · inspector dock · status bar
+                    stage = viewport header (menus + transport) · render view · footer counters
 src/
   world.js          entity table + property SCHEMA + the authored scene (single source of truth)
   viewport.js       three.js scene: sky/moon shader, star dome, cloud deck, ocean, gizmos, post

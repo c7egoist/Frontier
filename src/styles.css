@@ -74,10 +74,11 @@ svg{display:block;}
 .dock-right{flex:0 0 356px;}
 .dock.collapsed{flex-basis:0 !important;opacity:0;pointer-events:none;border-width:0;margin-left:-10px;}
 
-.stage{flex:1;min-width:0;position:relative;border-radius:var(--r-panel);overflow:hidden;
+.stage{flex:1;min-width:0;display:flex;flex-direction:column;border-radius:var(--r-panel);overflow:hidden;
   background:#07090c;border:1px solid var(--stroke);box-shadow:var(--shadow-panel);}
-.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;}
-.stage canvas.dragging{cursor:grabbing;}
+.vp-view{position:relative;flex:1;min-height:0;min-width:0;overflow:hidden;}
+.vp-view canvas{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;}
+.vp-view canvas.dragging{cursor:grabbing;}
 
 .statusbar{flex:0 0 30px;display:flex;align-items:center;gap:14px;padding:0 16px;font-size:11px;
   color:var(--text-faint);background:var(--panel);border:1px solid var(--stroke);border-radius:14px;}
@@ -316,14 +317,68 @@ svg{display:block;}
 mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;padding:0 1px;}
 .nohits{padding:18px 16px;color:var(--text-faint);font-size:12px;text-align:center;}
 
-/* ── viewport furniture ────────────────────────────────────────────────────────────────────── */
-.vp-bar{position:absolute;top:12px;left:12px;right:12px;display:flex;align-items:center;gap:8px;
-  pointer-events:none;z-index:12;}
-.vp-bar > *{pointer-events:auto;}
-.glasspill{display:flex;align-items:center;gap:6px;height:34px;padding:0 6px;border-radius:var(--r-pill);
-  background:rgba(10,10,10,.66);border:1px solid var(--stroke);backdrop-filter:blur(18px) saturate(140%);
-  box-shadow:0 10px 30px rgba(0,0,0,.5);}
-.glasspill .lbl{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-faint);padding:0 8px 0 8px;}
+/* ── viewport chrome ───────────────────────────────────────────────────────────────────────────
+   The viewport is a panel like any other: a header of menus and the transport, the render view,
+   and a footer of live counters. Nothing floats over the image except the gizmo and the markers. */
+.vp-head{flex:0 0 44px;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;
+  background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012));
+  border-bottom:1px solid var(--stroke);z-index:20;}
+.vp-menus{display:flex;align-items:center;gap:2px;min-width:0;flex:0 1 auto;}
+.vp-foot{flex:0 0 40px;display:flex;align-items:center;gap:10px;padding:0 10px 0 4px;
+  background:linear-gradient(180deg,rgba(255,255,255,.012),rgba(255,255,255,.035));
+  border-top:1px solid var(--stroke);z-index:20;}
+
+/* menu buttons in the viewport header */
+.vm{position:relative;}
+.vmbtn{height:28px;padding:0 8px 0 10px;border-radius:var(--r-pill);border:none;cursor:pointer;
+  background:transparent;color:var(--text-dim);font-size:11.5px;font-weight:500;display:inline-flex;
+  align-items:center;gap:7px;white-space:nowrap;transition:background .15s var(--ease),color .15s var(--ease);}
+.vmbtn:hover{background:var(--raised);color:var(--text);}
+.vm.open .vmbtn{background:var(--selected);color:var(--text);}
+.vmbtn .val{color:var(--text);font-weight:600;}
+.vmbtn .caret{display:grid;place-items:center;opacity:.5;}
+.vm.open .vmbtn .caret svg{transform:rotate(180deg);}
+.vmbtn .caret svg{transition:transform .2s var(--ease);}
+.vmpop{position:absolute;top:calc(100% + 7px);left:0;min-width:216px;z-index:70;display:none;
+  background:var(--field);border:1px solid var(--stroke-strong);border-radius:var(--r-inset);padding:6px;
+  box-shadow:0 24px 60px rgba(0,0,0,.6);}
+.vm.open .vmpop{display:block;animation:pop .16s var(--ease);}
+@keyframes pop{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:none;}}
+.vmrow{display:flex;align-items:center;gap:9px;padding:7px 10px;border-radius:12px;cursor:pointer;
+  color:var(--text-dim);font-size:12.5px;transition:background .13s var(--ease),color .13s var(--ease);}
+.vmrow:hover{background:#141414;color:var(--text);}
+.vmrow.on{color:var(--text);}
+.vmrow .tick{width:13px;flex:0 0 13px;display:grid;place-items:center;opacity:0;}
+.vmrow.on .tick{opacity:1;}
+.vmrow .swat{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.vmrow .n{margin-left:auto;font-size:10.5px;color:var(--text-faint);font-variant-numeric:tabular-nums;}
+.vmrow .sc{margin-left:auto;font-size:10px;color:var(--text-faint);letter-spacing:.6px;}
+.vmhead{padding:7px 10px 5px;font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:var(--text-faint);}
+.vmsep{height:1px;background:var(--stroke);margin:5px 8px;}
+
+/* transport strip */
+.tstrip{display:flex;align-items:center;gap:2px;height:30px;padding:0 4px;border-radius:var(--r-pill);
+  background:var(--inset);border:1px solid var(--stroke);flex-shrink:0;}
+.tstrip .sep{width:1px;height:16px;background:var(--stroke);margin:0 5px;flex-shrink:0;}
+
+/* footer counters */
+.stats{display:flex;align-items:center;flex:0 0 auto;min-width:0;overflow:hidden;}
+.stat{display:flex;align-items:baseline;gap:6px;padding:0 11px;position:relative;white-space:nowrap;}
+.stat + .stat::before{content:"";position:absolute;left:0;top:-6px;height:12px;width:1px;background:var(--stroke);}
+.stat .lb{font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-faint);}
+.stat .vl{font-size:11.5px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+.stat .vl.dim{color:var(--text-dim);font-weight:500;}
+.stat .vl .sub{color:var(--text-faint);font-weight:500;}
+.stat.warn .vl{color:var(--caution);}
+.stat.hide{display:none;}
+
+/* the isolate chip sits in the header next to the transport */
+.isochip{display:flex;align-items:center;gap:6px;height:28px;padding:0 4px 0 10px;border-radius:var(--r-pill);flex-shrink:0;
+  background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.4);color:var(--caution);
+  font-size:11px;font-weight:600;}
+.isochip .chipbtn{height:22px;color:var(--caution);}
+.isochip .chipbtn:hover{background:rgba(245,158,11,.2);color:#ffd694;}
+
 .chipbtn{height:24px;padding:0 10px;border-radius:var(--r-pill);border:none;cursor:pointer;background:transparent;
   color:var(--text-dim);font-size:11px;font-weight:500;display:inline-flex;align-items:center;gap:6px;
   transition:background .15s var(--ease),color .15s var(--ease);}
@@ -331,26 +386,18 @@ mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;paddin
 .chipbtn.on{background:var(--accent-soft);color:var(--text);}
 .chipbtn .swat{width:7px;height:7px;border-radius:50%;}
 
-.vp-hud{position:absolute;left:12px;bottom:12px;display:flex;gap:8px;align-items:flex-end;z-index:12;}
-.hudcard{background:rgba(10,10,10,.66);border:1px solid var(--stroke);border-radius:14px;padding:8px 12px;
-  backdrop-filter:blur(18px) saturate(140%);font-size:10.5px;color:var(--text-faint);line-height:1.7;
-  font-variant-numeric:tabular-nums;box-shadow:0 10px 30px rgba(0,0,0,.5);}
-.hudcard b{color:var(--text-dim);font-weight:600;}
-.hudcard .k{color:var(--text);font-weight:600;}
-
-.vp-right{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:8px;align-items:flex-end;z-index:12;}
-.axisorb{width:76px;height:76px;border-radius:50%;background:rgba(10,10,10,.6);border:1px solid var(--stroke);
-  backdrop-filter:blur(18px);position:relative;box-shadow:0 10px 30px rgba(0,0,0,.5);}
+.axisorb{position:absolute;right:14px;bottom:14px;z-index:12;
+  width:76px;height:76px;border-radius:50%;background:rgba(10,10,10,.6);border:1px solid var(--stroke);
+  backdrop-filter:blur(18px);box-shadow:0 10px 30px rgba(0,0,0,.5);}
 .axisorb .ax{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;
   display:grid;place-items:center;font-size:8.5px;font-weight:700;color:#000;transition:none;}
 .axisorb .ax.neg{background:transparent !important;border:1px solid currentColor;}
 .axisorb .stem{position:absolute;left:50%;top:50%;height:1.5px;transform-origin:0 50%;opacity:.6;}
 
-/* time-of-day scrubber in the viewport */
-.tod{display:flex;align-items:center;gap:10px;height:34px;padding:0 14px 0 12px;border-radius:var(--r-pill);
-  background:rgba(10,10,10,.66);border:1px solid var(--stroke);backdrop-filter:blur(18px) saturate(140%);
-  box-shadow:0 10px 30px rgba(0,0,0,.5);min-width:250px;}
-.tod .clock{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.5px;min-width:52px;}
+/* time-of-day scrubber, docked in the viewport footer */
+.tod{display:flex;align-items:center;gap:10px;height:28px;padding:0 6px 0 12px;border-radius:var(--r-pill);
+  background:var(--inset);border:1px solid var(--stroke);flex:0 1 236px;min-width:132px;}
+.tod .clock{font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.5px;min-width:48px;}
 .tod .kslider{height:18px;}
 
 /* ── billboards ────────────────────────────────────────────────────────────────────────────── */
@@ -459,8 +506,6 @@ mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;paddin
 .stage .spacer{flex:1;}
 
 /* ── viewport transport (play · simulate · pause · step · stop) ─────────────────────────────── */
-.vp-bar{flex-wrap:wrap;row-gap:8px;}
-.glasspill .sep{width:1px;height:18px;background:var(--stroke);margin:0 4px;flex-shrink:0;}
 .tbtn{width:28px;height:26px;border-radius:var(--r-pill);border:none;cursor:pointer;background:transparent;
   color:var(--text-dim);display:grid;place-items:center;flex-shrink:0;
   transition:background .15s var(--ease),color .15s var(--ease),transform .15s var(--ease);}
@@ -490,7 +535,7 @@ mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;paddin
 /* running state: the editor furniture steps out of the way */
 body.playing #billboards{display:none;}
 body.playing .stage{box-shadow:0 0 0 1px rgba(34,197,94,.45),var(--shadow-panel);}
-body.playing .stage canvas{cursor:default;}
+body.playing .vp-view canvas{cursor:default;}
 .gatemask{position:absolute;inset:0;pointer-events:none;z-index:7;display:none;}
 .gatemask.on{display:block;}
 .gatemask .bar{position:absolute;left:0;right:0;height:0;background:#000;transition:height .25s var(--ease);}
@@ -499,22 +544,11 @@ body.playing .stage canvas{cursor:default;}
   transition:width .25s var(--ease);}
 .gatemask .bar.l{left:0;} .gatemask .bar.r{right:0;}
 
-/* the transport and the isolate banner ride the right edge of the viewport bar */
-.vp-bar-right{margin-left:auto;display:flex;align-items:center;gap:8px;pointer-events:auto;}
-
 /* a run clears the editor furniture out of the frame, the way PIE does */
-body.playing #catBar,body.playing #labelBar,body.playing #hudSel,
-body.playing .vp-bottom,body.playing .axisorb{opacity:0;pointer-events:none;}
-#catBar,#labelBar,#hudSel,.vp-bottom,.axisorb{transition:opacity .22s var(--ease);}
+body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
+.vp-menus,.axisorb{transition:opacity .22s var(--ease);}
 .gatetag{position:absolute;left:14px;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;
   color:rgba(255,255,255,.55);}
-
-/* isolate banner */
-.glasspill.iso{border-color:rgba(245,158,11,.45);background:rgba(30,22,6,.72);}
-.glasspill.iso .txt{font-size:11px;font-weight:600;color:var(--caution);padding:0 4px 0 10px;letter-spacing:.2px;}
-
-/* time-of-day scrubber, bottom centre like a timeline */
-.vp-bottom{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:12;display:flex;gap:8px;}
 
 /* ── view gizmo ─────────────────────────────────────────────────────────────────────────────── */
 .axisorb{cursor:grab;user-select:none;}

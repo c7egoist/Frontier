@@ -8,7 +8,7 @@ import './styles.css';
 import * as THREE from 'three';
 import {
   scene, flat, reflatten, byId, typeOf, isFolder, TYPES, CATEGORIES, makeNode,
-  setIsolation, isolatedIds, isIsolating, isIsolated,
+  setIsolation, isolatedIds, isIsolating, isIsolated, effectiveVis,
 } from './world.js';
 import { createViewport } from './viewport.js';
 import { createBillboards } from './billboards.js';
@@ -26,6 +26,7 @@ const state = {
   mode: 'split',
   cats: new Set(CATEGORIES),
   labelMode: 'hover',
+  view: 'persp',       // which standard view the camera is parked on, if any
   tod: 7.4,            // hours
   dayCycle: false,     // the sun runs on its own
   transport: 'edit',   // edit | simulate | play
@@ -37,6 +38,7 @@ const state = {
 
 const $ = s => document.querySelector(s);
 const stage = $('#stage');
+const vpView = $('#vpView');
 const canvas = $('#gl');
 
 /* ── viewport ──────────────────────────────────────────────────────────────────────────────── */
@@ -63,7 +65,7 @@ const popupHost = {
   refreshChrome: () => app.refreshChrome(),
 };
 const popups = createPopups($('#popups'), popupHost, () => {
-  const r = stage.getBoundingClientRect();
+  const r = vpView.getBoundingClientRect();
   return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
 });
 
@@ -146,6 +148,7 @@ const app = {
     flat.forEach(n => n.solo = isIsolated(n));
     vp.applyAll();
     outliner.render();
+    paintStats();
     renderIsolationBanner();
   },
 
@@ -153,7 +156,7 @@ const app = {
 
   contextMenu(node, e) { openContext(node, e); },
   toast,
-  refreshChrome() { renderInspector(); outliner.render(); billboards.rebuild(billboardNodes()); },
+  refreshChrome() { renderInspector(); outliner.render(); billboards.rebuild(billboardNodes()); paintStats(); },
   showInspector() { setMode(state.mode === 'outliner' ? 'split' : state.mode); },
 
   addEntity(type, parent) {
@@ -258,9 +261,7 @@ function syncSelection() {
   $('#stSel').textContent = state.selection.size
     ? `${state.selection.size} selected · ${node ? node.name : ''}`
     : 'nothing selected';
-  $('#hudSel').innerHTML = node
-    ? `<b>${escape(node.name)}</b><br>${typeOf(node).label} · ${node.vis ? 'visible' : 'hidden'}${node.locked ? ' · locked' : ''}`
-    : 'no selection';
+  paintStats();
 }
 const escape = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 
@@ -270,32 +271,103 @@ billboards.setCategories(state.cats);
 billboards.rebuild(billboardNodes());
 
 /* ── viewport furniture ────────────────────────────────────────────────────────────────────── */
-const catBar = $('#catBar');
-CATEGORIES.forEach(cat => {
-  const b = el('button', 'chipbtn on', `<span class="swat" style="background:${catColor(cat)}"></span>${cat}`);
-  b.onclick = () => {
-    state.cats.has(cat) ? state.cats.delete(cat) : state.cats.add(cat);
-    b.classList.toggle('on', state.cats.has(cat));
-    billboards.setCategories(state.cats);
+/* ── viewport header menus ─────────────────────────────────────────────────────────────────────
+   Everything that used to float over the image as a pill lives in the header now: one menu for
+   what is shown, one for how markers read, one for the view itself. */
+const vpMenus = $('#vpMenus');
+const TICK = ic('check', { size: 12, width: 3 });
+
+function menu(label, build) {
+  const wrap = el('div', 'vm');
+  const btn = el('button', 'vmbtn', '');
+  const pop = el('div', 'vmpop');
+  wrap.append(btn, pop);
+  vpMenus.appendChild(wrap);
+
+  const api = {
+    wrap, btn, pop,
+    setLabel(html) { btn.innerHTML = `${html}<span class="caret">${ic('chevdown', { size: 12 })}</span>`; },
+    close() { wrap.classList.remove('open'); },
+    paint() { pop.innerHTML = ''; build(api, pop); },
   };
-  catBar.appendChild(b);
+  api.row = (html, on, fn, { keep = false } = {}) => {
+    const r = el('div', `vmrow${on ? ' on' : ''}`, `<span class="tick">${TICK}</span>${html}`);
+    r.onclick = e => { e.stopPropagation(); fn(); api.paint(); if (!keep) api.close(); };
+    pop.appendChild(r);
+    return r;
+  };
+  api.head = t => pop.appendChild(el('div', 'vmhead', t));
+  api.sep = () => pop.appendChild(el('div', 'vmsep'));
+
+  btn.onclick = e => {
+    e.stopPropagation();
+    const wasOpen = wrap.classList.contains('open');
+    document.querySelectorAll('.vm.open').forEach(x => x.classList.remove('open'));
+    if (!wasOpen) { api.paint(); wrap.classList.add('open'); }
+  };
+  api.paint();
+  api.setLabel(label);
+  return api;
+}
+addEventListener('pointerdown', e => {
+  if (!e.target.closest('.vm')) document.querySelectorAll('.vm.open').forEach(x => x.classList.remove('open'));
 });
+
 function catColor(cat) {
   const k = Object.values(TYPES).find(t => t.cat === cat);
   return k ? k.color : '#888';
 }
+const catCount = cat => flat.filter(n => !isFolder(n) && typeOf(n).cat === cat).length;
 
-const labelBar = $('#labelBar');
-[['hover', 'Hover'], ['always', 'Labels'], ['none', 'Icons']].forEach(([m, label]) => {
-  const b = el('button', `chipbtn${state.labelMode === m ? ' on' : ''}`, label);
-  b.onclick = () => {
-    state.labelMode = m;
-    billboards.setLabelMode(m);
-    labelBar.querySelectorAll('.chipbtn').forEach(x => x.classList.remove('on'));
-    b.classList.add('on');
-  };
-  labelBar.appendChild(b);
+const showMenu = menu('', (m, pop) => {
+  m.head('Show in viewport');
+  CATEGORIES.forEach(cat => m.row(
+    `<span class="swat" style="background:${catColor(cat)}"></span>${cat}<span class="n">${catCount(cat)}</span>`,
+    state.cats.has(cat),
+    () => {
+      state.cats.has(cat) ? state.cats.delete(cat) : state.cats.add(cat);
+      billboards.setCategories(state.cats);
+      paintShowLabel();
+    },
+    { keep: true },
+  ));
+  m.sep();
+  m.row('All categories', state.cats.size === CATEGORIES.length,
+    () => { state.cats = new Set(CATEGORIES); billboards.setCategories(state.cats); paintShowLabel(); }, { keep: true });
+  m.row('None', state.cats.size === 0,
+    () => { state.cats = new Set(); billboards.setCategories(state.cats); paintShowLabel(); }, { keep: true });
 });
+function paintShowLabel() {
+  const n = state.cats.size, all = CATEGORIES.length;
+  showMenu.setLabel(`${ic('layers', { size: 13 })}Show <span class="val">${n === all ? 'All' : n === 0 ? 'None' : `${n}/${all}`}</span>`);
+}
+paintShowLabel();
+
+const LABEL_MODES = [['hover', 'Names on hover'], ['always', 'Names always'], ['none', 'Icons only']];
+const markerMenu = menu('', (m) => {
+  m.head('Markers');
+  LABEL_MODES.forEach(([mode, label]) => m.row(label, state.labelMode === mode, () => setLabels(mode)));
+});
+function paintMarkerLabel() {
+  const cur = LABEL_MODES.find(([m]) => m === state.labelMode);
+  markerMenu.setLabel(`${ic('tag', { size: 13 })}Markers <span class="val">${cur ? cur[1].replace('Names ', '').replace('Icons only', 'Icons') : ''}</span>`);
+}
+paintMarkerLabel();
+
+const VIEW_ROWS = [['front', 'Front', 'Z'], ['back', 'Back', ''], ['right', 'Right', 'X'],
+  ['left', 'Left', ''], ['top', 'Top', 'Y'], ['bottom', 'Bottom', '']];
+const viewMenu = menu('', (m) => {
+  m.head('Standard views');
+  VIEW_ROWS.forEach(([k, label]) => m.row(label, state.view === k, () => snapView(k)));
+  m.sep();
+  m.row(`Frame everything<span class="sc">⇧F</span>`, false, () => { vp.frameAll(); state.view = 'persp'; paintViewLabel(); });
+  m.row(`Frame selection<span class="sc">F</span>`, false, () => app.focus(byId(state.cursorId)));
+});
+function paintViewLabel() {
+  const cur = VIEW_ROWS.find(([k]) => k === state.view);
+  viewMenu.setLabel(`${ic('camera', { size: 13 })}View <span class="val">${cur ? cur[1] : 'Perspective'}</span>`);
+}
+paintViewLabel();
 
 
 /* ── transport: play · simulate · pause · step · stop ──────────────────────────────────────────
@@ -329,7 +401,7 @@ gateMask.append(barL, barR);
 const GATE_RATIO = { '16:9': 16 / 9, '2.39:1': 2.39, '4:3': 4 / 3, '1:1': 1 };
 function applyGate(camNode) {
   if (!camNode) { gateMask.classList.remove('on'); return; }
-  const r = stage.getBoundingClientRect();
+  const r = vpView.getBoundingClientRect();
   const ratio = GATE_RATIO[camNode.props.gate] || 16 / 9;
   const view = r.width / r.height;
   const bt = view > ratio ? 0 : (r.height - r.width / ratio) / 2;
@@ -484,8 +556,8 @@ function renderIsolationBanner() {
   const n = isolatedIds().size;
   if (!n) { b.style.display = 'none'; b.innerHTML = ''; return; }
   b.style.display = 'flex';
-  b.innerHTML = `<span class="txt">${ic('solo', { size: 11, color: 'currentColor' })}</span>
-    <span class="txt">Isolating ${n} ${n === 1 ? 'entity' : 'entities'}</span>`;
+  b.title = `${n} ${n === 1 ? 'entity is' : 'entities are'} isolated — everything else is hidden`;
+  b.innerHTML = `${ic('solo', { size: 11, color: 'currentColor' })}<span>${n}</span>`;
   const x = el('button', 'chipbtn', 'Exit');
   x.onclick = () => app.exitIsolation();
   b.appendChild(x);
@@ -664,7 +736,7 @@ pal.addEventListener('pointerdown', e => { if (!e.target.closest('.palbox')) clo
 function setLabels(m) {
   state.labelMode = m;
   billboards.setLabelMode(m);
-  labelBar.querySelectorAll('.chipbtn').forEach((x, i) => x.classList.toggle('on', ['hover', 'always', 'none'][i] === m));
+  paintMarkerLabel();
 }
 
 /* ── keyboard ──────────────────────────────────────────────────────────────────────────────── */
@@ -745,7 +817,19 @@ function snapView(name) {
   if (!view) return;
   if (state.transport === 'play') { toast('Stop the run to move the editor camera'); return; }
   vp.snapView(new THREE.Vector3(...view.v));
+  state.view = name;
+  paintViewLabel();
   toast(`${name[0].toUpperCase() + name.slice(1)} view`);
+}
+/* The label stops claiming a standard view the moment the camera no longer looks down that axis —
+   checked against the camera itself, so it is true however the view was moved. */
+const leaveStandardView = () => { if (state.view !== 'persp') { state.view = 'persp'; paintViewLabel(); } };
+function auditView(camera, controls) {
+  if (state.view === 'persp' || vp.isFlying) return;
+  const want = VIEWS[state.view];
+  if (!want) return;
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  if (dir.dot(new THREE.Vector3(...want.v)) < 0.9995) leaveStandardView();
 }
 const orbEls = Object.entries(VIEWS).map(([name, a]) => {
   const stem = el('div', 'stem');
@@ -775,6 +859,47 @@ orb.addEventListener('pointerdown', e => {
 });
 orb.addEventListener('dblclick', () => { vp.frameAll(); toast('Framed the world'); });
 
+/* ── viewport footer counters ──────────────────────────────────────────────────────────────────
+   One row of live numbers: how fast, how heavy, how much of the world you are actually looking
+   at. Cells are declared once and only their values are written per frame. */
+const statsHost = $('#vpStats');
+const STAT_CELLS = [['perf', 'fps'], ['geo', 'tris'], ['ents', 'entities'],
+  ['day', 'daylight'], ['iso', 'isolated']];
+const STAT_TIPS = {
+  perf: 'Frames per second and the time each frame took',
+  geo: 'Triangles and draw calls in the last frame, across every pass',
+  ents: 'Entities in the world, and how many are visible right now',
+  day: 'How much daylight the sun is giving, and its elevation',
+  iso: 'How many entities the isolation set is holding',
+};
+const statCells = {};
+STAT_CELLS.forEach(([k, label]) => {
+  const cell = el('div', 'stat', `<span class="lb">${label}</span><span class="vl">—</span>`);
+  cell.title = STAT_TIPS[k] || '';
+  statsHost.appendChild(cell);
+  statCells[k] = { cell, vl: cell.querySelector('.vl') };
+});
+const setStat = (k, v, sub = '', { show = true, warn = false, dim = false } = {}) => {
+  const c = statCells[k];
+  if (!c) return;
+  c.cell.classList.toggle('hide', !show);
+  c.cell.classList.toggle('warn', warn);
+  c.vl.classList.toggle('dim', dim);
+  const html = sub ? `${v}<span class="sub"> · ${sub}</span>` : String(v);
+  if (c.vl.innerHTML !== html) c.vl.innerHTML = html;
+};
+const fmt = n => n.toLocaleString('en-US');
+
+/* the counters that only move when the world does, not every frame */
+function paintStats() {
+  const ents = flat.filter(n => !isFolder(n));
+  const visible = ents.filter(n => effectiveVis(n));
+  setStat('ents', ents.length, `${visible.length} visible`);
+  const iso = isolatedIds().size;
+  setStat('iso', iso, '', { show: iso > 0, warn: true });
+
+}
+
 /* ── frame loop ────────────────────────────────────────────────────────────────────────────── */
 let lastTod = 0;
 vp.start(({ fps, dt, camera, controls, dayFactor, playing }) => {
@@ -798,19 +923,23 @@ vp.start(({ fps, dt, camera, controls, dayFactor, playing }) => {
     stem.style.opacity = String(0.15 + (v.z + 1) * 0.16);
   });
 
-  /* hud */
-  if (performance.now() - lastTod > 120) {
+  auditView(vp.camera, controls);
+
+  /* footer counters, four times a second — writing them every frame would cost more than the frame */
+  if (performance.now() - lastTod > 250) {
     lastTod = performance.now();
+    const r = vp.renderInfo;
+    setStat('perf', fps.toFixed(0), `${(1000 / Math.max(fps, 1)).toFixed(1)} ms`, { warn: fps < 24 });
+    setStat('geo', fmt(r.triangles), `${fmt(r.calls)} draws`);
+    setStat('day', `${(dayFactor * 100).toFixed(0)}%`, `${sunNode().props.elevation.toFixed(0)}°`);
+
     const p = camera.position;
-    $('#hudLeft').innerHTML =
-      `<b>fps</b> <span class="k">${fps.toFixed(0)}</span> &nbsp; <b>daylight</b> <span class="k">${(dayFactor * 100).toFixed(0)}%</span><br>` +
-      `<b>cam</b> ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} &nbsp; <b>dist</b> ${camera.position.distanceTo(controls.target).toFixed(1)} m` +
-      (playing ? `<br><b>view</b> <span class="k">${escape(byId(state.playCamId)?.name || 'camera')}</span>` : '') +
-      (isIsolating() ? `<br><b>isolated</b> <span class="k">${isolatedIds().size}</span>` : '');
     $('#stRender').textContent = state.paused ? 'paused · on-demand redraw'
-      : state.realtime ? `WebGL2 · ACES · ${fps.toFixed(0)} fps`
-        : 'realtime off · on-demand redraw';
-    $('#stCam').textContent = `${state.tod.toFixed(2).padStart(5, '0')} h · sun ${flat.find(n => n.type === 'sun').props.elevation.toFixed(1)}°`;
+      : state.realtime ? 'WebGL2 · ACES · realtime'
+        : 'WebGL2 · ACES · on-demand redraw';
+    $('#stCam').textContent = playing
+      ? `through ${byId(state.playCamId)?.name || 'camera'} · ${state.tod.toFixed(2).padStart(5, '0')} h`
+      : `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} · ${camera.position.distanceTo(controls.target).toFixed(1)} m · ${state.tod.toFixed(2).padStart(5, '0')} h`;
   }
 });
 

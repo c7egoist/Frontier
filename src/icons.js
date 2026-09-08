@@ -46,6 +46,7 @@ export const P = {
   play:    '<path d="M6 4l14 8-14 8z"/>',
   pause:   '<rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/>',
   stop:    '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  tag:     '<path d="M3 12.5V4a1 1 0 0 1 1-1h8.5L21 11.5 12.5 20 3 12.5z"/><circle cx="7.5" cy="7.5" r="1.4"/>',
   step:    '<path d="M7 5v14l9-7z"/><path d="M18 5v14"/>',
   sim:     '<path d="M12 3a9 9 0 1 0 9 9"/><path d="M12 7v5l3.5 2"/><path d="M17 3l4 2-4 2z"/>',
   plus:    '<path d="M12 5v14M5 12h14"/>',
