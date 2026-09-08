@@ -19,8 +19,11 @@ export function createOutliner(host, app) {
       <div class="ph-icon">${ic('layers', { size: 15 })}</div>
       <div><div class="ph-title">Outliner</div><div class="ph-sub" id="olSub"></div></div>
       <div class="spacer"></div>
-      <button class="iconbtn ghost" id="olExpand" title="Expand all">${ic('plus', { size: 13 })}</button>
-      <button class="iconbtn ghost" id="olCollapse" title="Collapse all">${ic('chevdown', { size: 13 })}</button>
+      <div class="vm" id="olAddWrap">
+        <button class="iconbtn ghost" id="olAdd" title="Add an entity to the world">${ic('plus', { size: 14 })}</button>
+        <div class="vmpop right" id="olAddPop"></div>
+      </div>
+      <button class="iconbtn ghost" id="olFold" title="Collapse / expand every group">${ic('chevdown', { size: 13 })}</button>
     </div>
     <div class="search-row">
       <div class="field">
@@ -55,8 +58,39 @@ export function createOutliner(host, app) {
     if (e.key === 'Escape') { searchEl.value = ''; query = ''; render(); }
   });
   clearEl.onclick = () => { searchEl.value = ''; query = ''; render(); searchEl.focus(); };
-  host.querySelector('#olExpand').onclick = () => { flat.forEach(n => n.open = true); render(); };
-  host.querySelector('#olCollapse').onclick = () => { flat.forEach(n => { if (n.depth === 0) n.open = false; }); render(); };
+  /* one twirl for the whole tree: open everything, or shut every group */
+  const foldBtn = host.querySelector('#olFold');
+  foldBtn.onclick = () => {
+    const anyShut = flat.some(n => n.kids.length && !n.open);
+    flat.forEach(n => { if (n.kids.length) n.open = anyShut || n.depth > 0; });
+    if (!anyShut) flat.forEach(n => { if (n.depth === 0) n.open = false; });
+    foldBtn.classList.toggle('on', !anyShut);
+    render();
+  };
+
+  /* ── add entity ───────────────────────────────────────────────────────────────────────────
+     The panel that owns the tree owns adding to it. Types come from the world schema, so a new
+     entity kind appears here the moment it is declared. */
+  const addWrap = host.querySelector('#olAddWrap');
+  const addPop = host.querySelector('#olAddPop');
+  function paintAdd() {
+    addPop.innerHTML = '';
+    const head = el('div', 'vmhead', 'Add entity');
+    addPop.appendChild(head);
+    let cat = null;
+    (app.addable ? app.addable() : []).forEach(t => {
+      if (t.cat !== cat) { cat = t.cat; addPop.appendChild(el('div', 'vmhead', cat)); }
+      const r = el('div', 'vmrow', `<span class="tick"></span>${ic(t.icon, { size: 13, color: t.color })}<span>${t.label}</span>`);
+      r.onclick = e => { e.stopPropagation(); addWrap.classList.remove('open'); app.addEntity(t.key, null); };
+      addPop.appendChild(r);
+    });
+  }
+  host.querySelector('#olAdd').onclick = e => {
+    e.stopPropagation();
+    const open = addWrap.classList.contains('open');
+    document.querySelectorAll('.vm.open').forEach(x => x.classList.remove('open'));
+    if (!open) { paintAdd(); addWrap.classList.add('open'); }
+  };
 
   /* matching ------------------------------------------------------------------------------ */
   const selfMatch = n => {

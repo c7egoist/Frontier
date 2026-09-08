@@ -16,7 +16,7 @@ import { createOutliner } from './outliner.js';
 import { createPopups } from './popup.js';
 import { createLang } from './lang.js';
 import { buildSheet, setProp } from './inspector.js';
-import { el, slider, dropdown, repaintSliders } from './kit.js';
+import { el, slider, repaintSliders } from './kit.js';
 import { ic } from './icons.js';
 import { bus } from './bus.js';
 
@@ -25,6 +25,7 @@ const state = {
   selection: new Set(),
   cursorId: null,
   mode: 'split',
+  docks: { left: true, right: true },
   cats: new Set(CATEGORIES),
   labelMode: 'hover',
   view: 'persp',       // which standard view the camera is parked on, if any
@@ -160,7 +161,7 @@ const app = {
   contextMenu(node, e) { openContext(node, e); },
   toast,
   refreshChrome() { renderInspector(); outliner.render(); billboards.rebuild(billboardNodes()); paintStats(); },
-  showInspector() { setMode(state.mode === 'outliner' ? 'split' : state.mode); },
+  showInspector() { setDock('right', true); },
 
   addEntity(type, parent) {
     const t = TYPES[type];
@@ -248,6 +249,8 @@ const app = {
     return t;
   },
 
+  addable: () => ADDABLE.map(k => ({ key: k, ...TYPES[k] })),
+
   setPhysics(nodes, on) {
     nodes.forEach(n => { n.physics = on; n.vel = 0; });
     outliner.render();
@@ -308,9 +311,6 @@ function syncSelection() {
       popups.openFor(node, { auto: true });
     } else popups.closeAuto();
   }
-  $('#stSel').textContent = state.selection.size
-    ? `${state.selection.size} selected · ${node ? node.name : ''}`
-    : 'nothing selected';
   paintStats();
 }
 const escape = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -400,6 +400,8 @@ const markerMenu = menu('', (m) => {
   m.sep();
   m.head('On select');
   m.row('Open the settings popup', state.autoPopup, () => act.autoPopup(!state.autoPopup), { keep: true });
+  m.sep();
+  m.row('Close all open popups', false, () => { popups.closeAll(); toast('Popups closed'); });
 });
 function paintMarkerLabel() {
   const cur = LABEL_MODES.find(([m]) => m === state.labelMode);
@@ -520,6 +522,7 @@ function restoreWorld() {
 }
 
 function setTransport(mode) {
+  if (mode !== 'edit' && state.transport === 'edit') toast('Running — <b>Esc</b> stops and restores the editor state');
   if (mode === 'edit') {
     const was = state.transport;
     if (was !== 'edit') restoreWorld();
@@ -592,9 +595,6 @@ function updateTransport() {
   /* one authority for "is the world moving": the viewport animates and redraws, or it does not */
   const live = state.realtime && !state.paused;
   vp.setClock({ animate: live, render: live });
-  $('#stHint').textContent = running
-    ? (state.paused ? 'Paused — press . to step a frame, Esc to stop' : 'Running — Esc stops and restores the editor state')
-    : 'Click a billboard to select · click it again for settings · drag rows to re-parent';
 }
 
 btnPlay.onclick = () => setTransport(state.transport === 'play' ? 'edit' : 'play');
@@ -640,38 +640,43 @@ todPlay.onclick = () => {
   if (state.dayCycle && !state.realtime) setRealtime(true);
 };
 
-/* topbar icons */
-$('#brandMark').innerHTML = ic('world', { size: 15 });
-$('#btnFrame').innerHTML = ic('focus', { size: 13 });
-$('#btnClosePops').innerHTML = ic('close', { size: 13 });
-$('#btnHelp').innerHTML = ic('command', { size: 13 });
+$('#vpBrand').innerHTML = ic('world', { size: 15 });
 $('#insPopout').innerHTML = ic('copy', { size: 13 });
 $('#insFocus').innerHTML = ic('focus', { size: 13 });
-$('#btnFrame').onclick = () => { vp.frameAll(); toast('Framed the world'); };
-$('#btnClosePops').onclick = () => { popups.closeAll(); toast('Popups closed'); };
-$('#btnHelp').onclick = () => focusConsole('help');
-$('#btnPalette').onclick = () => focusConsole('');
 $('#insFocus').onclick = () => app.focus(byId(state.cursorId));
 $('#insPopout').onclick = () => { const n = byId(state.cursorId); if (n && !typeOf(n).noBillboard) popups.openFor(n); else if (n) toast('That entity has no billboard'); };
 
-/* add-entity dropdown */
 const ADDABLE = ['cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'camera', 'particles', 'probe', 'audio'];
-const addDD = dropdown(['Add entity…', ...ADDABLE.map(k => TYPES[k].label)], 'Add entity…', label => {
-  const key = ADDABLE.find(k => TYPES[k].label === label);
-  addDD._set('Add entity…');
-  if (key) app.addEntity(key, byId(state.cursorId));
-}, { width: 148 });
-$('#addHost').appendChild(addDD);
 
-/* layout modes */
-function setMode(m) {
-  state.mode = m;
-  $('#outliner').classList.toggle('collapsed', m === 'inspector');
-  $('#inspector').classList.toggle('collapsed', m === 'outliner');
-  document.querySelectorAll('#layoutSeg button').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
-  setTimeout(() => { vp.resize(); repaintSliders(); }, 340);
+/* ── the docks ─────────────────────────────────────────────────────────────────────────────────
+   There is no application chrome above the workspace any more: the two panels are toggled from
+   the viewport header itself, so the editor is the world plus exactly the panels you asked for. */
+const docksEl = $('#vpDocks');
+const dockBtn = (side, icon, label, key) => {
+  const b = el('button', 'dockbtn', ic(icon, { size: 14 }));
+  b.title = `${label} panel  (${key})`;
+  b.onclick = () => setDock(side, !state.docks[side]);
+  docksEl.appendChild(b);
+  return b;
+};
+const btnDockL = dockBtn('left', 'panelL', 'Outliner', '[');
+const btnDockR = dockBtn('right', 'panelR', 'Inspector', ']');
+
+function setDock(side, on) {
+  state.docks[side] = on;
+  state.mode = state.docks.left && state.docks.right ? 'split'
+    : state.docks.left ? 'outliner' : state.docks.right ? 'inspector' : 'viewport';
+  $('#outliner').classList.toggle('collapsed', !state.docks.left);
+  $('#inspector').classList.toggle('collapsed', !state.docks.right);
+  btnDockL.classList.toggle('on', state.docks.left);
+  btnDockR.classList.toggle('on', state.docks.right);
+  setTimeout(() => { vp.resize(); repaintSliders(); fitStats(); }, 340);
 }
-document.querySelectorAll('#layoutSeg button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+/* the old three-way layout switch, kept as an idea rather than a widget */
+function setMode(m) {
+  setDock('left', m === 'split' || m === 'outliner');
+  setDock('right', m === 'split' || m === 'inspector');
+}
 
 /* ── context menu ──────────────────────────────────────────────────────────────────────────── */
 const ctx = $('#ctxmenu');
@@ -805,9 +810,10 @@ function quickCommands() {
     { label: 'Frame selection', sub: 'view', run: () => app.focus(node) },
     { label: 'Close all popups', sub: 'view', run: () => popups.closeAll() },
     { label: `Settings popup on select: turn ${state.autoPopup ? 'off' : 'on'}`, sub: 'behaviour', run: () => act.autoPopup(!state.autoPopup) },
-    { label: 'Layout — outliner only', sub: 'layout', run: () => setMode('outliner') },
-    { label: 'Layout — split', sub: 'layout', run: () => setMode('split') },
-    { label: 'Layout — inspector only', sub: 'layout', run: () => setMode('inspector') },
+    { label: `Outliner panel: ${state.docks.left ? 'hide' : 'show'}`, sub: 'layout', run: () => setDock('left', !state.docks.left) },
+    { label: `Inspector panel: ${state.docks.right ? 'hide' : 'show'}`, sub: 'layout', run: () => setDock('right', !state.docks.right) },
+    { label: 'Layout — both panels', sub: 'layout', run: () => setMode('split') },
+    { label: 'Layout — viewport only', sub: 'layout', run: () => setMode('viewport') },
     ...ADDABLE.map(k => ({ label: `Add ${TYPES[k].label}`, sub: 'create', run: () => app.addEntity(k, node) })),
   ];
 }
@@ -941,6 +947,8 @@ addEventListener('keydown', e => {
   if (k === 'h' && node) { node.vis = !node.vis; bus.emit('treechange'); return; }
   if (k === 'l' && node) { node.locked = !node.locked; bus.emit('treechange'); return; }
   if (k === 'i') { app.toggleIsolateSelection(); return; }
+  if (e.key === '[') { setDock('left', !state.docks.left); return; }
+  if (e.key === ']') { setDock('right', !state.docks.right); return; }
   if (k === 'enter' && node && !typeOf(node).noBillboard && !isFolder(node)) { popups.toggle(node); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && node) { e.preventDefault(); app.remove(node); return; }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -1043,7 +1051,7 @@ orb.addEventListener('dblclick', () => { vp.frameAll(); toast('Framed the world'
    at. Cells are declared once and only their values are written per frame. */
 const statsHost = $('#vpStats');
 const STAT_CELLS = [['perf', 'fps'], ['geo', 'tris'], ['ents', 'entities'],
-  ['day', 'daylight'], ['phys', 'physics'], ['iso', 'isolated']];
+  ['day', 'daylight'], ['phys', 'physics'], ['iso', 'isolated'], ['cam', 'camera', 'opt']];
 const STAT_TIPS = {
   perf: 'Frames per second and the time each frame took',
   geo: 'Triangles and draw calls in the last frame, across every pass',
@@ -1051,10 +1059,11 @@ const STAT_TIPS = {
   day: 'How much daylight the sun is giving, and its elevation',
   phys: 'Physics bodies, and how many are still moving',
   iso: 'How many entities the isolation set is holding',
+  cam: 'Where the editor camera is, and how far it is from what it orbits',
 };
 const statCells = {};
-STAT_CELLS.forEach(([k, label]) => {
-  const cell = el('div', 'stat', `<span class="lb">${label}</span><span class="vl">—</span>`);
+STAT_CELLS.forEach(([k, label, opt]) => {
+  const cell = el('div', `stat${opt ? ' opt' : ''}`, `<span class="lb">${label}</span><span class="vl">—</span>`);
   cell.title = STAT_TIPS[k] || '';
   statsHost.appendChild(cell);
   statCells[k] = { cell, vl: cell.querySelector('.vl') };
@@ -1073,8 +1082,9 @@ const fmt = n => n.toLocaleString('en-US');
 /* the footer never clips: if the cells no longer fit, they drop their secondary halves first */
 function fitStats() {
   const foot = statsHost.parentElement;
-  statsHost.classList.remove('tight');                     /* always measure the roomy layout */
-  if (foot.scrollWidth - foot.clientWidth > 0) statsHost.classList.add('tight');
+  statsHost.classList.remove('lite', 'tight');             /* always measure the roomy layout */
+  if (foot.scrollWidth > foot.clientWidth) statsHost.classList.add('lite');    /* camera goes */
+  if (foot.scrollWidth > foot.clientWidth) statsHost.classList.add('tight');   /* then the subs */
 }
 addEventListener('resize', fitStats);
 
@@ -1157,12 +1167,9 @@ vp.start(({ fps, dt, camera, controls, dayFactor, playing }) => {
     fitStats();
 
     const p = camera.position;
-    $('#stRender').textContent = state.paused ? 'paused · on-demand redraw'
-      : state.realtime ? 'WebGL2 · ACES · realtime'
-        : 'WebGL2 · ACES · on-demand redraw';
-    $('#stCam').textContent = playing
-      ? `through ${byId(state.playCamId)?.name || 'camera'} · ${state.tod.toFixed(2).padStart(5, '0')} h`
-      : `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} · ${camera.position.distanceTo(controls.target).toFixed(1)} m · ${state.tod.toFixed(2).padStart(5, '0')} h`;
+    setStat('cam', playing ? `through ${byId(state.playCamId)?.name || 'camera'}`
+      : `${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)}`,
+    playing ? '' : `${camera.position.distanceTo(controls.target).toFixed(1)} m`, { dim: true });
   }
 });
 
@@ -1173,7 +1180,8 @@ addEventListener('resize', () => { if (state.transport === 'play') applyGate(byI
 setTimeOfDay(7.4);
 vp.applyAll();
 outliner.render();
-setMode('split');
+setDock('left', true);
+setDock('right', true);
 app.select(flat.find(n => n.name === 'Anchor Cube').id);
 billboards.setLabelMode('hover');
 renderIsolationBanner();
@@ -1183,7 +1191,7 @@ setTimeout(() => toast('Click a billboard to select · click again for settings'
 /* a tiny handle for automation, embedding and console poking */
 window.frontier = {
   state, app, setTimeOfDay, vp, popups, outliner, billboards, world: { flat, scene },
-  setTransport, setPaused, setRealtime, stepFrame, snapView,
+  setTransport, setPaused, setRealtime, stepFrame, snapView, setMode, setDock,
   lang, focusConsole,
   /* run a line of English exactly as if it were typed into the console */
   run(text) { const p = lang.parse(text); if (!p) return null; if (!p.ok) { echo(p.error, true); return p; } const msg = p.run(); echo(typeof msg === 'string' ? msg : p.title); toast(typeof msg === 'string' ? msg : p.title); return p; },

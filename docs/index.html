@@ -7,35 +7,11 @@
 <link rel="preconnect" href="https://api.fontshare.com" crossorigin>
 <link href="https://api.fontshare.com/v2/css?f[]=general-sans@300,400,500,600,700&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9' fill='none' stroke='white' stroke-width='2'/></svg>">
-  <script type="module" crossorigin src="./assets/index-Dvi5UbMc.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-CcHSXuR_.css">
+  <script type="module" crossorigin src="./assets/index-6ndS4lNI.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-C_TsLtW8.css">
 </head>
 <body>
 <div id="app">
-
-  <header class="topbar">
-    <div class="brand">
-      <div class="mark" id="brandMark"></div>
-      <div>
-        <div class="wordmark">Frontier</div>
-        <div class="proj">Shoreline · world.frontier</div>
-      </div>
-    </div>
-    <div class="divider"></div>
-    <div class="seg" id="layoutSeg">
-      <button data-mode="outliner">Outliner</button>
-      <button data-mode="split" class="active">Split</button>
-      <button data-mode="inspector">Inspector</button>
-    </div>
-    <div class="divider"></div>
-    <div id="addHost"></div>
-    <div class="spacer"></div>
-    <button class="btn ghost sm" id="btnPalette">Command <span class="kbd">⌘K</span></button>
-    <div class="divider"></div>
-    <button class="iconbtn ghost" id="btnFrame" title="Frame everything  (Shift+F)"></button>
-    <button class="iconbtn ghost" id="btnClosePops" title="Close all popups"></button>
-    <button class="iconbtn ghost" id="btnHelp" title="Shortcuts"></button>
-  </header>
 
   <div class="workspace">
     <aside class="dock dock-left" id="outliner"></aside>
@@ -43,6 +19,9 @@
     <section class="stage" id="stage">
 
       <header class="vp-head">
+        <div class="vbrand" id="vpBrand" title="Frontier — Shoreline · world.frontier"></div>
+        <div class="vp-docks" id="vpDocks"></div>
+        <div class="vhsep"></div>
         <div class="vp-menus" id="vpMenus"></div>
         <div class="spacer"></div>
         <div class="isochip" id="isoBanner" style="display:none"></div>
@@ -105,13 +84,6 @@
     </aside>
   </div>
 
-  <footer class="statusbar">
-    <span class="dot"></span><span id="stRender">renderer</span>
-    <span id="stCam">camera</span>
-    <span id="stSel">selection</span>
-    <div class="spacer" style="flex:1"></div>
-    <span id="stHint">Click a billboard to select · click it again for settings · drag rows to re-parent</span>
-  </footer>
 </div>
 
 <div id="popups"></div>
