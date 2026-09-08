@@ -300,6 +300,7 @@ src/
     controls.js     tapes, steppers, state pills, spec tiles — the no-slider control kit
     moon.js         night sky, phase strip, selenographic atlas, sky track, light meter
     sun.js          sky strip, stereographic sun path, illuminance curve, blackbody ramp, shadows
+    water.js        a section through the sea: wave pad, Douglas scale, depth ramp, glitter
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
@@ -324,6 +325,8 @@ control — drag the sun path to move the clock, the lux meter to change the moo
 ruler to resize the disc.
 
 ![Frontier — the sun panel](docs/preview-sun.png)
+
+![Frontier — the water panel](docs/preview-water.png)
 
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
 hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a

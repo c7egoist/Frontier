@@ -83,9 +83,15 @@ export function tape({
     /* what the ends and the middle mean */
     const ms = marks || [{ t: 0, l: fmt(min, dec) }, { t: 1, l: fmt(max, dec) }];
     g.fillStyle = 'rgba(255,255,255,.28)';
-    ms.forEach(({ t, l }, i) => {
+    const taken = [];                                  /* a label that would collide is dropped */
+    ms.forEach(({ t, l }) => {
+      const x = pad + t * span, tw = g.measureText(l).width;
+      const x0 = t <= 0 ? x : t >= 1 ? x - tw : x - tw / 2;
+      const x1 = x0 + tw;
+      if (taken.some(([a, b]) => x0 < b + 5 && x1 > a - 5)) return;
+      taken.push([x0, x1]);
       g.textAlign = t <= 0 ? 'left' : t >= 1 ? 'right' : 'center';
-      g.fillText(l, pad + t * span, h - 1);
+      g.fillText(l, x, h - 1);
     });
 
     /* the marker */

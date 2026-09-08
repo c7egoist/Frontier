@@ -835,3 +835,15 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .s-path .mp-3up{margin-top:10px;}
 .s-path .tape{margin-bottom:2px;}
 .spanel .mp-note{padding:2px 2px 0;}
+
+/* ── the water panel ───────────────────────────────────────────────────────────────────────── */
+.w-hero canvas{cursor:crosshair;}
+.w-hero canvas.grabbing{cursor:grabbing;}
+.w-scale{margin-bottom:10px;}
+.w-specs{grid-template-columns:1fr 1fr;}
+.w-glint{margin-bottom:10px;}
+.w-glint canvas{display:block;width:100%;}
+.w-ramp canvas{cursor:ew-resize;touch-action:none;}
+.w-ramp canvas.drag{cursor:grabbing;}
+.wpanel .mp-subhead{margin:10px 0 4px;}
+.mp-cap .w-sub,.w-hero .mp-cap .r{text-transform:none;letter-spacing:.3px;}
