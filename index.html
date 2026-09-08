@@ -61,6 +61,20 @@
         </div>
       </div>
 
+      <div class="console" id="console">
+        <div class="csug" id="cmdSug"></div>
+        <div class="crow">
+          <span class="cprompt" id="cmdIcon"></span>
+          <div class="cfield">
+            <div class="cghost" aria-hidden="true"><span class="typed" id="cmdTyped"></span><span class="rest" id="cmdRest"></span></div>
+            <input id="cmdInput" placeholder="Say what you want — “rotate cube 40 degrees on Z”, “add sphere at x 3 y 2 z -1”" spellcheck="false" autocomplete="off">
+          </div>
+          <span class="cecho" id="cmdEcho"></span>
+          <span class="kbd" id="cmdKbd">⌘K</span>
+          <button class="iconbtn ghost" id="cmdRun" title="Run  (Enter)"></button>
+        </div>
+      </div>
+
       <footer class="vp-foot">
         <div class="stats" id="vpStats"></div>
         <div class="spacer"></div>
@@ -101,10 +115,6 @@
 <div id="popups"></div>
 <div id="ctxmenu"></div>
 <div id="toasts"></div>
-<div id="palette"><div class="palbox">
-  <div class="head" id="palHead"><input id="palInput" placeholder="Search entities and commands…" spellcheck="false"></div>
-  <div class="pallist" id="palList"></div>
-</div></div>
 
 <script type="module" src="/src/main.js"></script>
 </body>

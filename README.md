@@ -14,7 +14,11 @@ A state-of-the-art outliner for a real-time world editor, built in the **Slate U
    is shown, how markers read and where the camera is pointed, plus an Unreal-style transport strip
    — and a **footer** of live counters. Nothing floats over the image except the markers themselves
    and the view gizmo.
-4. **A transport.** Unreal's model: **Play** runs the world through a scene camera behind a framing
+4. **A console that speaks English.** A line under the viewport (<kbd>⌘K</kbd>) takes what you would
+   say out loud — *"rotate anchor cube 40 degrees on z"*, *"add sphere at x 3 y 2 z -1"*,
+   *"enable physics on selected objects"*, *"delete from ram marker post"* — completes it as you
+   type, and shows you in a sentence what it is about to do before it does it.
+5. **A transport.** Unreal's model: **Play** runs the world through a scene camera behind a framing
    gate, **Simulate** runs it with the editor camera still free, **Pause** and **Step** own the
    clock, **Stop** puts the world back exactly as you left it. When nothing is running you can drop
    the viewport out of realtime altogether and it redraws only on change.
@@ -95,9 +99,10 @@ rules"*, add this branch under **Settings → Environments → github-pages → 
 
 | I want to…                              | I do…                                                                    |
 | --------------------------------------- | ------------------------------------------------------------------------ |
-| find something in a busy world           | search / type-filter chips in the outliner, or <kbd>⌘K</kbd> command palette |
+| find something in a busy world           | search / type-filter chips in the outliner, or say `find chrome sphere`    |
 | select an object I can see               | click its billboard (or click the geometry itself)                        |
-| tune it without losing the view          | click the billboard again → floating settings popup, tethered to the marker |
+| tune it without losing the view          | selecting **opens its settings popup** — tethered to the marker, dock or no dock |
+| say what I want instead of hunting for it | the console: `move glass slab 2 m on x`, `set roughness of sphere to 0.2`  |
 | compare two entities                     | open several popups at once, pin the ones that should stay put            |
 | tune it with room to breathe             | the docked inspector on the right, same sheet, more width                 |
 | stop the scene being a wall of pills     | markers declutter by depth; labels are hover / always / off                |
@@ -110,11 +115,55 @@ rules"*, add this branch under **Settings → Environments → github-pages → 
 | watch the world move but keep flying    | **Simulate** — same clock, your camera                                     |
 | study one thing in a busy world         | select any number of entities and **Isolate** them (<kbd>I</kbd>)          |
 | get back to a known view                | the axis orb: click a knob to snap, drag to orbit, double-click to frame all |
+| make something fall                      | `enable physics on cube` then **Simulate** — it drops, bounces and sleeps   |
+| free an entity for good                  | `delete from ram <name>` — the buffers go back to the driver, not to limbo  |
 
 Popups and the dock are **the same property sheet**, generated from the same schema, bound to the
 same model — change a slider in one and the other moves on the same frame.
 
 ![Frontier — night](docs/preview-night.png)
+
+---
+
+## The console — plain English, no syntax
+
+<kbd>⌘K</kbd> puts the caret in the line under the viewport. Type the way you would talk. It ghosts
+the rest of the phrase behind your caret (<kbd>Tab</kbd> accepts), and the top row of the stack is
+always **what this will do**, in a sentence, before you press <kbd>Enter</kbd>.
+
+![Frontier — the command console](docs/preview-console.png)
+
+```
+find chrome sphere                     locate it, select it, reveal it in the tree, frame it
+rotate anchor cube 40 degrees on z     degrees by default; "1.57 rad on y" works too
+move glass slab 2 m on x               or "move cube to x 4 y 1 z 0"
+scale sphere 2x                        uniform, or "scale cube 2x on y"
+add sphere at x 100, y 400, z 900      any type: cube, light, camera, particles, probe, audio…
+add point light named Fire at x 1 y 2 z 3
+enable physics on Cube001, sphere001   gravity, bounce and sleep — watch it under Simulate
+enable physics on selected objects     "selection", "selected", "this", "them" all work
+isolate selection                      and "exit isolation" to come back
+set roughness of chrome sphere to 0.2  any property on any entity, by its own label
+set colour of anchor cube to red       hex or colour words
+set time to golden hour                or 17:40, 6pm, sunrise, midnight
+hide star field · lock ocean · rename cube to Anchor Block · duplicate torus
+delete marker post                     removes it from the scene
+delete from ram marker post            deletes it AND disposes geometry, materials and textures
+play · simulate · pause · step · stop · view top · frame everything · help
+```
+
+Names are matched forgivingly: `cub`, `Cube001` and `anchor` all find **Anchor Cube**, `all lights`
+takes every light, and a bare name with no verb means *find it*. Word order barely matters —
+`rotate 40 deg on z the cube` parses the same as `rotate cube 40 degrees on z`. If a phrase is
+missing something, the console says which part rather than failing silently: *"How far should it
+turn?"*
+
+**Physics** is the one command that changes the world over time. A body accelerates under gravity,
+lands on the platform (or the sea if it is off the edge), bounces once or twice and goes to sleep;
+the footer counts how many bodies are awake. It only runs while the world is running, so the
+authored scene never drifts — **Stop** puts every position back.
+
+![Frontier — physics under Simulate](docs/preview-physics.png)
 
 ---
 
@@ -204,7 +253,8 @@ changes (debounced, never per frame).
 
 | Key | Action | | Key | Action |
 | --- | --- | --- | --- | --- |
-| <kbd>⌘K</kbd> | command palette | | <kbd>F</kbd> | frame selection |
+| <kbd>⌘K</kbd> | jump to the console | | <kbd>F</kbd> | frame selection |
+| <kbd>Tab</kbd> | accept the ghosted completion | | <kbd>↑ ↓</kbd> | (in the console) history / rows |
 | <kbd>Enter</kbd> | toggle settings popup | | <kbd>Shift F</kbd> | frame the world |
 | <kbd>H</kbd> | hide / show | | <kbd>L</kbd> | lock |
 | <kbd>I</kbd> | isolate selection | | <kbd>⌘D</kbd> | duplicate |
@@ -230,6 +280,7 @@ src/
   outliner.js       tree: search, filters, twirl animation, multi-select, drag-to-reparent
   inspector.js      builds a property sheet for any node straight from its schema
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
+  lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
   icons.js          one stroke language, 24×24
   bus.js            select / propchange / treechange
@@ -256,8 +307,13 @@ gradient stop) and every numeric readout is type-in editable, clamped to its own
 ### Notes
 
 * No terrain — deliberately. The world is sky, water, light and objects.
+* Selecting anything opens its settings popup by default — independent of the inspector dock, which
+  may not even be on screen in outliner-only layout. The popup follows the selection and is replaced
+  by the next one unless you claim it by pinning or dragging it. Turn the behaviour off in the
+  **Markers** menu, or say `auto popups off`.
 * `window.frontier` exposes `{ state, app, setTimeOfDay, vp, popups, outliner, billboards, world,
-  setTransport, setPaused, setRealtime, stepFrame, snapView }` for console poking and automation.
+  setTransport, setPaused, setRealtime, stepFrame, snapView, lang, run }` for console poking and
+  automation — `frontier.run('rotate cube 40 deg on z')` executes a line exactly as if typed.
 * The viewport owns one clock. `vp.setClock({ animate, render })` is the only switch that decides
   whether the world moves and whether a frame is drawn; everything else — the transport, the day
   cycle, the realtime toggle — is a caller of it.

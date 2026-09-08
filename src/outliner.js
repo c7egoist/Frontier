@@ -181,6 +181,7 @@ export function createOutliner(host, app) {
          <span class="nm">${highlight(n.name)}</span>
          ${isFolder(n) ? `<span class="badge count">${n.kids.length}</span>` : ''}
          ${n.dynamic ? '<span class="badge dyn">dyn</span>' : ''}
+         ${n.physics ? '<span class="badge phys" title="Physics body">phys</span>' : ''}
          <button class="st ${n.solo ? 'solo' : ''}" data-a="solo" title="Isolate  (I)">${ic('solo', { size: 12 })}</button>
          ${isFolder(n) ? '' : `<button class="st ${n.locked ? 'act' : ''}" data-a="lock" title="Lock">${ic(n.locked ? 'lock' : 'unlock', { size: 12 })}</button>`}
          <button class="st ${n.vis ? '' : 'off'}" data-a="vis" title="Visibility">${ic(n.vis ? 'eye' : 'eyeoff', { size: 12 })}</button>`;

@@ -1086,5 +1086,36 @@ export function createViewport(canvas, { onPick } = {}) {
       objects.delete(node.id);
       anchors.delete(node.id);
     },
+
+    /* remove AND free — geometry, materials and their textures are disposed, so the buffers go
+       back to the driver instead of lingering until the tab is closed. Reports what it freed. */
+    purge(node) {
+      const e = objects.get(node.id);
+      const freed = { geometries: 0, materials: 0, textures: 0, triangles: 0 };
+      if (!e) { dirty = true; return freed; }
+      const eat = obj => {
+        if (obj.geometry) {
+          const g = obj.geometry;
+          const idx = g.index ? g.index.count : (g.attributes.position?.count || 0);
+          freed.triangles += Math.floor(idx / 3);
+          g.dispose(); freed.geometries++;
+        }
+        const mats = Array.isArray(obj.material) ? obj.material : obj.material ? [obj.material] : [];
+        mats.forEach(m => {
+          Object.values(m).forEach(v => { if (v && v.isTexture) { v.dispose(); freed.textures++; } });
+          m.dispose(); freed.materials++;
+        });
+      };
+      [e.root, e.helper, e.target].forEach(r => r && r.traverse && r.traverse(eat));
+      scene3.remove(e.root);
+      if (e.helper) scene3.remove(e.helper);
+      if (e.target) scene3.remove(e.target);
+      if (e.mesh) { const i = pickables.indexOf(e.mesh); if (i >= 0) pickables.splice(i, 1); }
+      objects.delete(node.id);
+      anchors.delete(node.id);
+      renderer.renderLists.dispose();
+      dirty = true;
+      return freed;
+    },
   };
 }

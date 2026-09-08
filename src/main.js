@@ -14,7 +14,8 @@ import { createViewport } from './viewport.js';
 import { createBillboards } from './billboards.js';
 import { createOutliner } from './outliner.js';
 import { createPopups } from './popup.js';
-import { buildSheet } from './inspector.js';
+import { createLang } from './lang.js';
+import { buildSheet, setProp } from './inspector.js';
 import { el, slider, dropdown, repaintSliders } from './kit.js';
 import { ic } from './icons.js';
 import { bus } from './bus.js';
@@ -34,6 +35,8 @@ const state = {
   realtime: true,      // Unreal's viewport realtime toggle
   playCamId: null,
   snapshot: null,      // world state captured when a run starts, restored on stop
+  autoPopup: true,     // selecting an entity opens its settings popup
+  gravity: 9.81,
 };
 
 const $ = s => document.querySelector(s);
@@ -180,6 +183,7 @@ const app = {
     outliner.revealNode(n);
     billboards.rebuild(billboardNodes());
     app.toast(`Added <b>${n.name}</b>`);
+    return n;
   },
 
   duplicate(node) {
@@ -211,6 +215,44 @@ const app = {
     outliner.render();
     renderInspector();
     app.toast(`Deleted <b>${node.name}</b>`);
+  },
+
+  /* delete from RAM — the scene loses the entity AND the driver gets its buffers back. A run in
+     progress will not restore it on Stop either: purged is purged. */
+  purge(node) {
+    if (!node) return null;
+    if (['sky', 'sun', 'water', 'post'].includes(node.type)) { app.toast('That entity is required by the world'); return null; }
+    const t = { geometries: 0, materials: 0, textures: 0, triangles: 0, nodes: 0 };
+    const kill = n => {
+      n.kids.slice().forEach(kill);
+      const f = vp.purge(n) || {};
+      t.geometries += f.geometries || 0; t.materials += f.materials || 0;
+      t.textures += f.textures || 0; t.triangles += f.triangles || 0; t.nodes++;
+      state.selection.delete(n.id);
+      if (popups.has(n.id)) popups.close(n.id);
+      if (state.snapshot) {
+        state.snapshot.nodes = state.snapshot.nodes.filter(r => r.id !== n.id);
+        state.snapshot.ids = state.snapshot.ids.filter(id => id !== n.id);
+      }
+    };
+    kill(node);
+    const list = node.parent ? node.parent.kids : scene;
+    const i = list.indexOf(node);
+    if (i >= 0) list.splice(i, 1);
+    reflatten();
+    if (state.cursorId === node.id) state.cursorId = null;
+    billboards.rebuild(billboardNodes());
+    outliner.render();
+    renderInspector();
+    paintStats();
+    return t;
+  },
+
+  setPhysics(nodes, on) {
+    nodes.forEach(n => { n.physics = on; n.vel = 0; });
+    outliner.render();
+    renderInspector();
+    paintStats();
   },
 };
 function folderForCat(cat) {
@@ -258,6 +300,14 @@ function syncSelection() {
   billboards.setSelection([...state.selection]);
   renderInspector();
   const node = byId(state.cursorId);
+  /* the settings popup follows the selection — the inspector dock being open or shut, or not
+     existing at all in outliner-only layout, has nothing to do with it */
+  if (state.autoPopup && state.transport !== 'play') {
+    if (node && !isFolder(node)) {
+      popups.closeAuto(node.id);
+      popups.openFor(node, { auto: true });
+    } else popups.closeAuto();
+  }
   $('#stSel').textContent = state.selection.size
     ? `${state.selection.size} selected · ${node ? node.name : ''}`
     : 'nothing selected';
@@ -347,6 +397,9 @@ const LABEL_MODES = [['hover', 'Names on hover'], ['always', 'Names always'], ['
 const markerMenu = menu('', (m) => {
   m.head('Markers');
   LABEL_MODES.forEach(([mode, label]) => m.row(label, state.labelMode === mode, () => setLabels(mode)));
+  m.sep();
+  m.head('On select');
+  m.row('Open the settings popup', state.autoPopup, () => act.autoPopup(!state.autoPopup), { keep: true });
 });
 function paintMarkerLabel() {
   const cur = LABEL_MODES.find(([m]) => m === state.labelMode);
@@ -429,7 +482,7 @@ function snapshotWorld() {
     iso: [...isolatedIds()],
     ids: flat.map(n => n.id),
     nodes: flat.map(n => ({
-      id: n.id, name: n.name, vis: n.vis, locked: n.locked, dynamic: n.dynamic,
+      id: n.id, name: n.name, vis: n.vis, locked: n.locked, dynamic: n.dynamic, physics: !!n.physics,
       props: JSON.parse(JSON.stringify(n.props)),
     })),
   };
@@ -452,6 +505,7 @@ function restoreWorld() {
     const n = byId(rec.id);
     if (!n) return;
     n.name = rec.name; n.vis = rec.vis; n.locked = rec.locked; n.dynamic = rec.dynamic;
+    n.physics = rec.physics; n.vel = 0;
     n.props = rec.props;
   });
   setIsolation(snap.iso);
@@ -595,8 +649,8 @@ $('#insPopout').innerHTML = ic('copy', { size: 13 });
 $('#insFocus').innerHTML = ic('focus', { size: 13 });
 $('#btnFrame').onclick = () => { vp.frameAll(); toast('Framed the world'); };
 $('#btnClosePops').onclick = () => { popups.closeAll(); toast('Popups closed'); };
-$('#btnHelp').onclick = () => openPalette('?');
-$('#btnPalette').onclick = () => openPalette('');
+$('#btnHelp').onclick = () => focusConsole('help');
+$('#btnPalette').onclick = () => focusConsole('');
 $('#insFocus').onclick = () => app.focus(byId(state.cursorId));
 $('#insPopout').onclick = () => { const n = byId(state.cursorId); if (n && !typeOf(n).noBillboard) popups.openFor(n); else if (n) toast('That entity has no billboard'); };
 
@@ -659,11 +713,85 @@ function toast(html) {
   setTimeout(() => t.remove(), 1900);
 }
 
-/* ── command palette ───────────────────────────────────────────────────────────────────────── */
-const pal = $('#palette'), palInput = $('#palInput'), palList = $('#palList');
-let palItems = [], palIndex = 0;
+/* ── the command console ───────────────────────────────────────────────────────────────────────
+   A line under the viewport that takes plain English. Everything the editor can do is reachable
+   from it, and it says what it understood before it does it. ⌘K puts the caret here.
 
-function commands() {
+   "rotate anchor cube 40 degrees on z" · "add sphere at x 3 y 2 z -1" · "enable physics on
+   selected objects" · "set roughness of chrome sphere to 0.2" · "delete from ram marker post" */
+const consoleEl = $('#console'), cmdInput = $('#cmdInput'), cmdSug = $('#cmdSug');
+const cmdTyped = $('#cmdTyped'), cmdRest = $('#cmdRest'), cmdEcho = $('#cmdEcho');
+$('#cmdIcon').innerHTML = ic('command', { size: 14 });
+$('#cmdRun').innerHTML = ic('play', { size: 13 });
+
+/* what the console is allowed to do to the world */
+const act = {
+  find(nodes) {
+    app.select(nodes[0].id);
+    nodes.slice(1).forEach(n => app.select(n.id, { additive: true }));
+    outliner.revealNode(nodes[0]);
+    vp.focusOn(nodes[0]);
+    if (!state.autoPopup) popups.openFor(nodes[0]);
+  },
+  commit(nodes, key) {
+    nodes.forEach(n => bus.emit('propchange', { node: n, key, value: n.props[key], src: 'console' }));
+    renderInspector();
+  },
+  add(type, { pos, name } = {}) {
+    const n = app.addEntity(type, byId(state.cursorId));
+    if (pos) { n.props.pos = pos.slice(); bus.emit('propchange', { node: n, key: 'pos', src: 'console' }); }
+    if (name) { n.name = uniqueName(name); bus.emit('treechange'); }
+    vp.focusOn(n);
+    return n;
+  },
+  physics(nodes, on) {
+    app.setPhysics(nodes, on);
+    if (on && state.transport === 'edit') toast('Press <b>Simulate</b> (Alt S) to let them fall');
+  },
+  isolate(nodes) { app.isolate(nodes.map(n => n.id)); },
+  exitIsolation() { app.exitIsolation(); },
+  purge(nodes) {
+    const t = { geometries: 0, materials: 0, textures: 0, triangles: 0, nodes: 0 };
+    const names = nodes.map(n => n.name);
+    nodes.forEach(n => {
+      const f = app.purge(n);
+      if (!f) return;
+      t.geometries += f.geometries; t.materials += f.materials;
+      t.textures += f.textures; t.triangles += f.triangles; t.nodes += f.nodes;
+    });
+    if (!t.nodes) return 'Nothing was purged';
+    return `Purged <b>${names.join(', ')}</b> — freed ${fmt(t.triangles)} triangles, ${t.geometries} ${t.geometries === 1 ? 'geometry' : 'geometries'}, ${t.materials} materials`;
+  },
+  remove(nodes) { nodes.forEach(n => app.remove(n)); },
+  visible(nodes, v) { nodes.forEach(n => n.vis = v); bus.emit('treechange'); },
+  lock(nodes, v) { nodes.forEach(n => n.locked = v); bus.emit('treechange'); },
+  rename(node, name) { node.name = uniqueName(name); bus.emit('treechange'); renderInspector(); },
+  duplicate(nodes) { nodes.forEach(n => app.duplicate(n)); },
+  focus(node) { app.focus(node); },
+  frameAll() { vp.frameAll(); state.view = 'persp'; paintViewLabel(); },
+  snapView(k) { snapView(k); },
+  setTime(h) { setTimeOfDay(h); },
+  dayCycle(on) { if (state.dayCycle !== on) todPlay.click(); },
+  transport(m) { setTransport(m); },
+  pause(p) { setPaused(p); },
+  step() { stepFrame(); },
+  labels(m) { setLabels(m); },
+  autoPopup(on) {
+    state.autoPopup = on;
+    if (!on) popups.closeAuto();
+    else { const n = byId(state.cursorId); if (n && !isFolder(n)) popups.openFor(n, { auto: true }); }
+    paintMarkerLabel();
+  },
+  openSettings(nodes) { nodes.slice(0, 4).forEach(n => popups.openFor(n)); },
+  closePopups() { popups.closeAll(); },
+  setProp(node, key, value) { setProp(node, key, value, null); renderInspector(); },
+  help() { cmdInput.value = ''; openConsole(); paintSug(); },
+};
+
+const lang = createLang({ state, act });
+
+/* the editor's own canned commands still live in the list, under the English ones */
+function quickCommands() {
   const node = byId(state.cursorId);
   return [
     { label: 'Play — run through a camera', sub: 'transport', run: () => setTransport('play') },
@@ -673,24 +801,10 @@ function commands() {
     { label: 'Stop and restore', sub: 'transport', run: () => setTransport('edit') },
     { label: `Realtime viewport: turn ${state.realtime ? 'off' : 'on'}`, sub: 'viewport', run: () => setRealtime(!state.realtime) },
     { label: 'Isolate selection', sub: 'view', run: () => app.toggleIsolateSelection() },
-    { label: 'Exit isolation', sub: 'view', run: () => app.exitIsolation() },
-    { label: 'View — front', sub: 'camera', run: () => snapView('front') },
-    { label: 'View — back', sub: 'camera', run: () => snapView('back') },
-    { label: 'View — left', sub: 'camera', run: () => snapView('left') },
-    { label: 'View — right', sub: 'camera', run: () => snapView('right') },
-    { label: 'View — top', sub: 'camera', run: () => snapView('top') },
-    { label: 'View — bottom', sub: 'camera', run: () => snapView('bottom') },
     { label: 'Frame everything', sub: 'view', run: () => vp.frameAll() },
     { label: 'Frame selection', sub: 'view', run: () => app.focus(node) },
     { label: 'Close all popups', sub: 'view', run: () => popups.closeAll() },
-    { label: 'Labels: always on', sub: 'billboards', run: () => setLabels('always') },
-    { label: 'Labels: on hover', sub: 'billboards', run: () => setLabels('hover') },
-    { label: 'Labels: icons only', sub: 'billboards', run: () => setLabels('none') },
-    { label: 'Time — sunrise 06:00', sub: 'time', run: () => setTimeOfDay(6) },
-    { label: 'Time — golden hour 17:40', sub: 'time', run: () => setTimeOfDay(17.66) },
-    { label: 'Time — blue hour 19:10', sub: 'time', run: () => setTimeOfDay(19.16) },
-    { label: 'Time — midnight 00:00', sub: 'time', run: () => setTimeOfDay(0) },
-    { label: 'Toggle day cycle', sub: 'time', run: () => todPlay.click() },
+    { label: `Settings popup on select: turn ${state.autoPopup ? 'off' : 'on'}`, sub: 'behaviour', run: () => act.autoPopup(!state.autoPopup) },
     { label: 'Layout — outliner only', sub: 'layout', run: () => setMode('outliner') },
     { label: 'Layout — split', sub: 'layout', run: () => setMode('split') },
     { label: 'Layout — inspector only', sub: 'layout', run: () => setMode('inspector') },
@@ -698,41 +812,106 @@ function commands() {
   ];
 }
 
-function openPalette(seed = '') {
-  pal.classList.add('open');
-  palInput.value = seed === '?' ? '' : seed;
-  paintPalette();
-  palInput.focus();
-}
-const closePalette = () => pal.classList.remove('open');
-function paintPalette() {
-  const q = palInput.value.trim().toLowerCase();
-  const ents = flat.filter(n => !q || n.name.toLowerCase().includes(q) || typeOf(n).label.toLowerCase().includes(q))
-    .slice(0, 40)
-    .map(n => ({ label: n.name, sub: typeOf(n).label, icon: typeOf(n).icon, color: typeOf(n).color, run: () => { app.select(n.id); outliner.revealNode(n); app.focus(n); } }));
-  const cmds = commands().filter(c => !q || c.label.toLowerCase().includes(q));
-  palItems = [...ents, ...cmds];
-  palIndex = 0;
-  palList.innerHTML = palItems.map((it, i) =>
-    `<div class="palrow${i === 0 ? ' on' : ''}" data-i="${i}">
-       ${ic(it.icon || 'command', { size: 14, color: it.color })}<span>${escape(it.label)}</span><span class="sub">${it.sub}</span></div>`).join('')
-    || '<div class="nohits">No matches</div>';
-  palList.querySelectorAll('.palrow').forEach(r => {
-    r.onclick = () => { palItems[+r.dataset.i].run(); closePalette(); };
-    r.onmouseenter = () => { palIndex = +r.dataset.i; markPal(); };
+let sugRows = [], sugIndex = 0, ghost = '';
+const history = [];
+let histAt = -1;
+
+const openConsole = () => consoleEl.classList.add('open', 'on');
+const closeSug = () => consoleEl.classList.remove('open');
+
+function paintSug() {
+  const text = cmdInput.value;
+  sugRows = lang.suggest(text, quickCommands());
+  sugIndex = 0;
+  ghost = lang.completion(text, sugRows);
+  cmdTyped.textContent = text;
+  cmdRest.textContent = ghost;
+  consoleEl.classList.toggle('bad', !!(text.trim() && sugRows[0] && sugRows[0].bad));
+  cmdSug.innerHTML = '';
+  if (!sugRows.length) { cmdSug.innerHTML = '<div class="csughead">Nothing matches — try “help”</div>'; return; }
+  cmdSug.appendChild(el('div', 'csughead', text.trim() ? 'What this will do' : 'Say something like'));
+  sugRows.forEach((r, i) => {
+    const row = el('div', `crow2${r.primary ? ' primary' : ''}${r.bad ? ' bad' : ''}${r.danger ? ' danger' : ''}`,
+      `${ic(r.icon || 'command', { size: 14, color: r.color })}
+       <span class="t">${escape(r.title)}</span>
+       <span class="sub">${escape(r.sub || (r.insert ? 'complete' : 'run'))}</span>`);
+    row.onmouseenter = () => { sugIndex = i; markSug(); };
+    row.onclick = e => { e.preventDefault(); runRow(i); };
+    row.onmousedown = e => e.preventDefault();      // keep the caret in the field
+    cmdSug.appendChild(row);
   });
+  markSug();
 }
-const markPal = () => palList.querySelectorAll('.palrow').forEach((r, i) => r.classList.toggle('on', i === palIndex));
-palInput.addEventListener('input', paintPalette);
-palInput.addEventListener('keydown', e => {
-  e.stopPropagation();
-  if (e.key === 'Escape') closePalette();
-  if (e.key === 'ArrowDown') { palIndex = Math.min(palIndex + 1, palItems.length - 1); markPal(); scrollPal(); e.preventDefault(); }
-  if (e.key === 'ArrowUp') { palIndex = Math.max(palIndex - 1, 0); markPal(); scrollPal(); e.preventDefault(); }
-  if (e.key === 'Enter') { palItems[palIndex]?.run(); closePalette(); }
+const markSug = () => cmdSug.querySelectorAll('.crow2').forEach((r, i) => r.classList.toggle('on', i === sugIndex));
+
+function echo(html, bad = false) {
+  cmdEcho.innerHTML = html;
+  cmdEcho.classList.toggle('err', bad);
+  cmdEcho.classList.add('show');
+  clearTimeout(echo._t);
+  echo._t = setTimeout(() => cmdEcho.classList.remove('show'), 3200);
+}
+
+function runRow(i) {
+  const row = sugRows[i];
+  if (!row) return;
+  if (row.insert && !row.run) {          /* a completion, not an action */
+    cmdInput.value = row.insert;
+    cmdInput.focus();
+    paintSug();
+    return;
+  }
+  if (row.bad || !row.run) { echo(row.error || 'I did not understand that', true); return; }
+  const said = cmdInput.value.trim();
+  let msg;
+  try { msg = row.run(); }
+  catch (err) { echo(err.message || 'That did not work', true); return; }
+  if (said && history[history.length - 1] !== said) history.push(said);
+  histAt = -1;
+  const text = typeof msg === 'string' ? msg : row.title;
+  echo(text);
+  toast(text);
+  cmdInput.value = '';
+  paintSug();
+  closeSug();
+}
+
+cmdInput.addEventListener('focus', () => { openConsole(); paintSug(); });
+cmdInput.addEventListener('blur', () => {
+  consoleEl.classList.remove('on', 'bad');
+  setTimeout(closeSug, 120);
 });
-const scrollPal = () => palList.querySelectorAll('.palrow')[palIndex]?.scrollIntoView({ block: 'nearest' });
-pal.addEventListener('pointerdown', e => { if (!e.target.closest('.palbox')) closePalette(); });
+cmdInput.addEventListener('input', () => { openConsole(); paintSug(); });
+cmdInput.addEventListener('keydown', e => {
+  e.stopPropagation();                                  /* the console owns every key it gets */
+  const atEnd = cmdInput.selectionStart === cmdInput.value.length;
+  if (e.key === 'Escape') { cmdInput.value = ''; paintSug(); closeSug(); cmdInput.blur(); return; }
+  if (e.key === 'Tab' || (e.key === 'ArrowRight' && atEnd && ghost)) {
+    if (ghost) { e.preventDefault(); cmdInput.value += ghost; paintSug(); return; }
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (!cmdInput.value && history.length) { histAt = Math.max(histAt - 1, -1); cmdInput.value = histAt < 0 ? '' : history[history.length - 1 - histAt]; paintSug(); return; }
+    sugIndex = Math.min(sugIndex + 1, sugRows.length - 1); markSug(); scrollSug(); return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (!cmdInput.value && history.length) { histAt = Math.min(histAt + 1, history.length - 1); cmdInput.value = history[history.length - 1 - histAt]; paintSug(); return; }
+    sugIndex = Math.max(sugIndex - 1, 0); markSug(); scrollSug(); return;
+  }
+  if (e.key === 'Enter') { e.preventDefault(); runRow(sugIndex); }
+});
+const scrollSug = () => cmdSug.querySelectorAll('.crow2')[sugIndex]?.scrollIntoView({ block: 'nearest' });
+$('#cmdRun').onclick = () => runRow(sugIndex);
+$('#cmdKbd').onclick = () => focusConsole();
+function focusConsole(seed = null) {
+  if (seed != null) cmdInput.value = seed;
+  openConsole();
+  cmdInput.focus();
+  cmdInput.select();
+  paintSug();
+}
+
 function setLabels(m) {
   state.labelMode = m;
   billboards.setLabelMode(m);
@@ -744,7 +923,7 @@ addEventListener('keydown', e => {
   if (e.target.matches('input, textarea')) return;
   const node = byId(state.cursorId);
   const k = e.key.toLowerCase();
-  if ((e.metaKey || e.ctrlKey) && k === 'k') { e.preventDefault(); openPalette(); return; }
+  if ((e.metaKey || e.ctrlKey) && k === 'k') { e.preventDefault(); focusConsole(''); return; }
   if ((e.metaKey || e.ctrlKey) && k === 'd') { e.preventDefault(); app.duplicate(node); return; }
   if ((e.metaKey || e.ctrlKey) && k === 'r') { e.preventDefault(); setRealtime(!state.realtime); return; }
   if (e.altKey && k === 'p') { e.preventDefault(); setTransport(state.transport === 'play' ? 'edit' : 'play'); return; }
@@ -752,7 +931,7 @@ addEventListener('keydown', e => {
   if (k === 'p' && !e.altKey && !e.metaKey && !e.ctrlKey) { setPaused(!state.paused); return; }
   if (e.key === '.') { stepFrame(); return; }
   if (e.key === 'Escape') {
-    closePalette(); ctx.classList.remove('open');
+    closeSug(); ctx.classList.remove('open');
     if (state.transport !== 'edit') { setTransport('edit'); return; }
     if (isIsolating()) { app.exitIsolation(); return; }
     if (popups.count()) popups.closeAll(); else app.select(null);
@@ -864,12 +1043,13 @@ orb.addEventListener('dblclick', () => { vp.frameAll(); toast('Framed the world'
    at. Cells are declared once and only their values are written per frame. */
 const statsHost = $('#vpStats');
 const STAT_CELLS = [['perf', 'fps'], ['geo', 'tris'], ['ents', 'entities'],
-  ['day', 'daylight'], ['iso', 'isolated']];
+  ['day', 'daylight'], ['phys', 'physics'], ['iso', 'isolated']];
 const STAT_TIPS = {
   perf: 'Frames per second and the time each frame took',
   geo: 'Triangles and draw calls in the last frame, across every pass',
   ents: 'Entities in the world, and how many are visible right now',
   day: 'How much daylight the sun is giving, and its elevation',
+  phys: 'Physics bodies, and how many are still moving',
   iso: 'How many entities the isolation set is holding',
 };
 const statCells = {};
@@ -890,6 +1070,14 @@ const setStat = (k, v, sub = '', { show = true, warn = false, dim = false } = {}
 };
 const fmt = n => n.toLocaleString('en-US');
 
+/* the footer never clips: if the cells no longer fit, they drop their secondary halves first */
+function fitStats() {
+  const foot = statsHost.parentElement;
+  statsHost.classList.remove('tight');                     /* always measure the roomy layout */
+  if (foot.scrollWidth - foot.clientWidth > 0) statsHost.classList.add('tight');
+}
+addEventListener('resize', fitStats);
+
 /* the counters that only move when the world does, not every frame */
 function paintStats() {
   const ents = flat.filter(n => !isFolder(n));
@@ -897,13 +1085,46 @@ function paintStats() {
   setStat('ents', ents.length, `${visible.length} visible`);
   const iso = isolatedIds().size;
   setStat('iso', iso, '', { show: iso > 0, warn: true });
+  const bodies = ents.filter(n => n.physics);
+  const awake = bodies.filter(n => !n.resting).length;
+  setStat('phys', bodies.length, bodies.length ? (awake ? `${awake} awake` : 'at rest') : '', { show: bodies.length > 0 });
+  fitStats();
 
+}
+
+/* ── physics ───────────────────────────────────────────────────────────────────────────────────
+   Not an engine — a believable fall. A body accelerates under gravity, lands on the platform (or
+   the sea if it is off the edge), bounces a little and goes to sleep. It only runs while the world
+   is running, so the authored scene never drifts, and Stop restores it like everything else. */
+const HALF = { cube: 0.5, plane: 0.02, sphere: 0.6, cylinder: 0.5, torus: 0.92 };
+const PLATFORM_R = 3.6, PLATFORM_TOP = -0.175;
+const restHeight = n => (HALF[n.type] ?? 0.4) * Math.abs(n.props.scale ? n.props.scale[1] : 1);
+
+function stepPhysics(dt) {
+  if (dt <= 0) return;
+  const bodies = flat.filter(n => n.physics && !isFolder(n) && !n.locked && Array.isArray(n.props.pos));
+  if (!bodies.length) return;
+  const sea = flat.find(n => n.type === 'water')?.props.level ?? -0.6;
+  bodies.forEach(n => {
+    const p = n.props.pos;
+    const onPlatform = Math.hypot(p[0], p[2]) < PLATFORM_R;
+    const floor = (onPlatform ? PLATFORM_TOP : sea) + restHeight(n);
+    n.vel = (n.vel || 0) - state.gravity * dt;
+    p[1] = +(p[1] + n.vel * dt).toFixed(4);
+    if (p[1] <= floor) {
+      p[1] = floor;
+      if (Math.abs(n.vel) > 0.8) { n.vel = -n.vel * 0.34; n.resting = false; }   /* bounce */
+      else { n.vel = 0; n.resting = true; }
+    } else n.resting = false;
+    bus.emit('propchange', { node: n, key: 'pos', value: p, src: 'physics' });
+  });
 }
 
 /* ── frame loop ────────────────────────────────────────────────────────────────────────────── */
 let lastTod = 0;
 vp.start(({ fps, dt, camera, controls, dayFactor, playing }) => {
   if (dt > 0 && dayClockRunning()) setTimeOfDay(state.tod + dt * sunNode().props.rate / 600);
+  if (dt > 0 && state.transport !== 'edit') stepPhysics(dt);
 
   billboards.update();
   popups.update(billboards);
@@ -932,6 +1153,8 @@ vp.start(({ fps, dt, camera, controls, dayFactor, playing }) => {
     setStat('perf', fps.toFixed(0), `${(1000 / Math.max(fps, 1)).toFixed(1)} ms`, { warn: fps < 24 });
     setStat('geo', fmt(r.triangles), `${fmt(r.calls)} draws`);
     setStat('day', `${(dayFactor * 100).toFixed(0)}%`, `${sunNode().props.elevation.toFixed(0)}°`);
+    if (flat.some(n => n.physics)) paintStats();      /* the awake count changes while bodies fall */
+    fitStats();
 
     const p = camera.position;
     $('#stRender').textContent = state.paused ? 'paused · on-demand redraw'
@@ -961,4 +1184,7 @@ setTimeout(() => toast('Click a billboard to select · click again for settings'
 window.frontier = {
   state, app, setTimeOfDay, vp, popups, outliner, billboards, world: { flat, scene },
   setTransport, setPaused, setRealtime, stepFrame, snapView,
+  lang, focusConsole,
+  /* run a line of English exactly as if it were typed into the console */
+  run(text) { const p = lang.parse(text); if (!p) return null; if (!p.ok) { echo(p.error, true); return p; } const msg = p.run(); echo(typeof msg === 'string' ? msg : p.title); toast(typeof msg === 'string' ? msg : p.title); return p; },
 };

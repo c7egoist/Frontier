@@ -29,8 +29,19 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
     return openFor(node);
   }
 
-  function openFor(node) {
-    if (open.has(node.id)) { flash(open.get(node.id)); return open.get(node.id); }
+  /* the popup that follows the selection: it is replaced by the next selection unless the user
+     has claimed it by pinning or dragging it, in which case it stays like any other */
+  function closeAuto(keepId = null) {
+    [...open.values()].forEach(r => { if (r.auto && r.node.id !== keepId) close(r.node.id); });
+  }
+
+  function openFor(node, { auto = false } = {}) {
+    if (open.has(node.id)) {
+      const r = open.get(node.id);
+      if (!auto) r.auto = false;
+      flash(r);
+      return r;
+    }
     const t = typeOf(node);
     const elm = el('div', 'pop');
     const tether = el('div');
@@ -82,13 +93,15 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
     elm.append(head, body, foot);
     host.appendChild(elm);
 
-    const rec = { node, elm, tether, sheet, pinned: false, detached: false, pos: { x: 0, y: 0 } };
+    const rec = { node, elm, tether, sheet, pinned: false, detached: false, auto, pos: { x: 0, y: 0 } };
+    if (auto) elm.classList.add('auto');
     open.set(node.id, rec);
 
     closeBtn.onclick = () => close(node.id);
     focusBtn.onclick = () => app.focus(node);
     pinBtn.onclick = () => {
       rec.pinned = !rec.pinned;
+      rec.auto = false; elm.classList.remove('auto');
       rec.detached = rec.detached || rec.pinned;
       pinBtn.classList.toggle('on', rec.pinned);
       tether.style.display = rec.pinned ? 'none' : '';
@@ -98,6 +111,7 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
     head.addEventListener('pointerdown', e => {
       if (e.target.closest('button')) return;
       head.classList.add('grabbing');
+      rec.auto = false; elm.classList.remove('auto');
       head.setPointerCapture(e.pointerId);
       const start = { x: e.clientX, y: e.clientY, px: rec.pos.x, py: rec.pos.y };
       rec.detached = true;
@@ -162,5 +176,9 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
     });
   }
 
-  return { openFor, toggle, close, closeAll, update, has: id => open.has(id), count: () => open.size };
+  return {
+    openFor, toggle, close, closeAll, closeAuto, update,
+    has: id => open.has(id), count: () => open.size,
+    ids: () => [...open.keys()],
+  };
 }

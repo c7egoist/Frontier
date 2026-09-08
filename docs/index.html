@@ -7,8 +7,8 @@
 <link rel="preconnect" href="https://api.fontshare.com" crossorigin>
 <link href="https://api.fontshare.com/v2/css?f[]=general-sans@300,400,500,600,700&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='9' fill='none' stroke='white' stroke-width='2'/></svg>">
-  <script type="module" crossorigin src="./assets/index-DXFJYNBo.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/index-DF7PbeGk.css">
+  <script type="module" crossorigin src="./assets/index-Dvi5UbMc.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-CcHSXuR_.css">
 </head>
 <body>
 <div id="app">
@@ -63,6 +63,20 @@
         </div>
       </div>
 
+      <div class="console" id="console">
+        <div class="csug" id="cmdSug"></div>
+        <div class="crow">
+          <span class="cprompt" id="cmdIcon"></span>
+          <div class="cfield">
+            <div class="cghost" aria-hidden="true"><span class="typed" id="cmdTyped"></span><span class="rest" id="cmdRest"></span></div>
+            <input id="cmdInput" placeholder="Say what you want — “rotate cube 40 degrees on Z”, “add sphere at x 3 y 2 z -1”" spellcheck="false" autocomplete="off">
+          </div>
+          <span class="cecho" id="cmdEcho"></span>
+          <span class="kbd" id="cmdKbd">⌘K</span>
+          <button class="iconbtn ghost" id="cmdRun" title="Run  (Enter)"></button>
+        </div>
+      </div>
+
       <footer class="vp-foot">
         <div class="stats" id="vpStats"></div>
         <div class="spacer"></div>
@@ -103,10 +117,6 @@
 <div id="popups"></div>
 <div id="ctxmenu"></div>
 <div id="toasts"></div>
-<div id="palette"><div class="palbox">
-  <div class="head" id="palHead"><input id="palInput" placeholder="Search entities and commands…" spellcheck="false"></div>
-  <div class="pallist" id="palList"></div>
-</div></div>
 
 </body>
 </html>

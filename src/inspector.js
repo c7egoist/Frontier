@@ -125,6 +125,9 @@ export function buildSheet(node, { compact = false, onDirty = () => {} } = {}) {
       row('Visible', toggle(node.vis, v => { node.vis = v; bus.emit('treechange'); onDirty(); })),
       row('Locked', toggle(node.locked, v => { node.locked = v; bus.emit('treechange'); onDirty(); })),
       row('Dynamic', toggle(node.dynamic, v => { node.dynamic = v; bus.emit('treechange'); })),
+      ...(Array.isArray(node.props.pos)
+        ? [row('Physics', toggle(!!node.physics, v => { node.physics = v; node.vel = 0; bus.emit('treechange'); bus.emit('physicschange'); }))]
+        : []),
       row('Type', el('span', 'val', TYPES[node.type].label)),
       row('ID', el('span', 'val', `#${String(node.id).padStart(3, '0')}`)),
     );

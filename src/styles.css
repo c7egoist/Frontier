@@ -311,6 +311,7 @@ svg{display:block;}
 .badge{font-size:9px;letter-spacing:.5px;text-transform:uppercase;padding:2px 6px;border-radius:var(--r-pill);
   background:var(--raised);color:var(--text-dim);font-weight:600;flex-shrink:0;}
 .badge.dyn{background:rgba(108,119,255,.18);color:#9aa2ff;}
+.badge.phys{background:rgba(34,197,94,.16);color:#7ddfa0;}
 .badge.count{background:transparent;color:var(--text-faint);padding-right:2px;}
 .kids{overflow:hidden;transition:height .26s var(--ease),opacity .2s var(--ease);}
 .kids.shut{height:0 !important;opacity:0;}
@@ -322,11 +323,11 @@ mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;paddin
    and a footer of live counters. Nothing floats over the image except the gizmo and the markers. */
 .vp-head{flex:0 0 44px;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;
   background:linear-gradient(180deg,rgba(255,255,255,.035),rgba(255,255,255,.012));
-  border-bottom:1px solid var(--stroke);z-index:20;}
+  border-bottom:1px solid var(--stroke);z-index:150;}   /* chrome outranks the floating popups */
 .vp-menus{display:flex;align-items:center;gap:2px;min-width:0;flex:0 1 auto;}
 .vp-foot{flex:0 0 40px;display:flex;align-items:center;gap:10px;padding:0 10px 0 4px;
   background:linear-gradient(180deg,rgba(255,255,255,.012),rgba(255,255,255,.035));
-  border-top:1px solid var(--stroke);z-index:20;}
+  border-top:1px solid var(--stroke);z-index:150;}
 
 /* menu buttons in the viewport header */
 .vm{position:relative;}
@@ -363,7 +364,10 @@ mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;paddin
 
 /* footer counters */
 .stats{display:flex;align-items:center;flex:0 0 auto;min-width:0;overflow:hidden;}
-.stat{display:flex;align-items:baseline;gap:6px;padding:0 11px;position:relative;white-space:nowrap;}
+.stat{display:flex;align-items:baseline;gap:6px;padding:0 10px;position:relative;white-space:nowrap;}
+/* when the footer runs out of room the secondary halves step aside before anything is clipped */
+.stats.tight .stat{padding:0 8px;}
+.stats.tight .vl .sub{display:none;}
 .stat + .stat::before{content:"";position:absolute;left:0;top:-6px;height:12px;width:1px;background:var(--stroke);}
 .stat .lb{font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-faint);}
 .stat .vl{font-size:11.5px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
@@ -455,22 +459,60 @@ mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;paddin
   background:rgba(255,255,255,.02);flex-shrink:0;}
 .pop .tail{position:absolute;left:-1px;top:-1px;width:0;height:0;}
 
-/* ── command palette ───────────────────────────────────────────────────────────────────────── */
-#palette{position:fixed;inset:0;z-index:200;display:none;background:rgba(0,0,0,.55);
-  backdrop-filter:blur(3px);align-items:flex-start;justify-content:center;padding-top:14vh;}
-#palette.open{display:flex;animation:fadeIn .16s var(--ease);}
-@keyframes fadeIn{from{opacity:0}to{opacity:1}}
-.palbox{width:min(560px,92vw);background:rgba(16,16,16,.96);border:1px solid var(--stroke-strong);
-  border-radius:20px;box-shadow:var(--shadow-pop);overflow:hidden;animation:popIn .2s var(--ease);}
-.palbox .head{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--stroke);}
-.palbox input{flex:1;background:transparent;border:none;outline:none;color:var(--text);font-size:15px;user-select:text;}
-.palbox input::placeholder{color:var(--text-faint);}
-.pallist{max-height:46vh;overflow-y:auto;padding:6px;scrollbar-width:none;}
-.pallist::-webkit-scrollbar{display:none;}
-.palrow{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:12px;cursor:pointer;font-size:13px;}
-.palrow .sub{margin-left:auto;font-size:10.5px;color:var(--text-faint);letter-spacing:.6px;text-transform:uppercase;}
-.palrow.on{background:var(--selected);}
-.palrow:hover{background:#1b1b1b;}
+/* ── the command console ───────────────────────────────────────────────────────────────────────
+   A permanent line under the viewport that speaks English. It ghosts the completion behind your
+   caret, explains in a header row exactly what it is about to do, and lists the entities and
+   commands that match while you type. ⌘K puts the caret in it from anywhere. */
+.console{position:relative;flex:0 0 40px;display:flex;align-items:center;padding:0 8px 0 10px;
+  background:linear-gradient(180deg,rgba(255,255,255,.015),rgba(255,255,255,.03));
+  border-top:1px solid var(--stroke);z-index:150;transition:background .18s var(--ease);}
+/* while it is open the console outranks the floating popups — you are talking to it, after all */
+.console.open{z-index:160;}
+.console.on{background:linear-gradient(180deg,rgba(108,119,255,.10),rgba(108,119,255,.05));
+  box-shadow:inset 0 1px 0 rgba(108,119,255,.35);}
+.crow{display:flex;align-items:center;gap:10px;width:100%;min-width:0;}
+.cprompt{display:grid;place-items:center;width:20px;flex:0 0 20px;color:var(--text-faint);}
+.console.on .cprompt{color:var(--hi);}
+.console.bad .cprompt{color:var(--danger);}
+.cfield{position:relative;flex:1;min-width:0;height:26px;}
+.cfield input{position:absolute;inset:0;width:100%;background:transparent;border:none;outline:none;
+  color:var(--text);font:inherit;font-size:12.5px;letter-spacing:.1px;user-select:text;padding:0;}
+.cfield input::placeholder{color:var(--text-faint);}
+.cghost{position:absolute;inset:0;display:flex;align-items:center;font-size:12.5px;letter-spacing:.1px;
+  pointer-events:none;white-space:pre;overflow:hidden;}
+.cghost .typed{color:transparent;}
+.cghost .rest{color:var(--text-faint);opacity:.65;}
+.cecho{font-size:11px;color:var(--text-dim);white-space:nowrap;overflow:hidden;max-width:42%;
+  opacity:0;transition:opacity .2s var(--ease);}
+.cecho.show{opacity:1;}
+.cecho b{color:var(--text);font-weight:600;}
+.cecho.err{color:var(--danger);}
+#cmdKbd{flex-shrink:0;}
+
+/* the suggestion stack rises out of the console instead of covering the viewport */
+.csug{position:absolute;left:8px;right:8px;bottom:calc(100% + 6px);z-index:80;display:none;
+  background:rgba(12,12,12,.97);border:1px solid var(--stroke-strong);border-radius:var(--r-inset);
+  padding:6px;box-shadow:0 -22px 60px rgba(0,0,0,.65);max-height:min(46vh,420px);overflow-y:auto;
+  scrollbar-width:none;}
+.csug::-webkit-scrollbar{display:none;}
+.console.open .csug{display:block;animation:sugIn .16s var(--ease);}
+@keyframes sugIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:none;}}
+.crow2{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:13px;cursor:pointer;
+  font-size:12.5px;color:var(--text-dim);}
+.crow2 .t{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.crow2 .sub{margin-left:auto;font-size:10px;color:var(--text-faint);letter-spacing:.7px;
+  text-transform:uppercase;white-space:nowrap;flex-shrink:0;}
+.crow2.on{background:var(--selected);}
+.crow2:hover{background:#1b1b1b;}
+.crow2.primary{background:rgba(108,119,255,.13);border:1px solid rgba(108,119,255,.34);}
+.crow2.primary.on{background:rgba(108,119,255,.24);}
+.crow2.primary .t{font-weight:600;}
+.crow2.bad{background:rgba(239,68,68,.10);border:1px solid rgba(239,68,68,.3);}
+.crow2.bad .t{color:#ffb4b4;}
+.crow2.danger .t{color:#ff9c9c;}
+.crow2 .go{margin-left:auto;font-size:9.5px;letter-spacing:.8px;color:var(--text-faint);
+  border:1px solid var(--stroke-strong);border-radius:6px;padding:2px 6px;flex-shrink:0;}
+.csughead{padding:7px 10px 5px;font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:var(--text-faint);}
 
 /* ── toast ─────────────────────────────────────────────────────────────────────────────────── */
 #toasts{position:fixed;bottom:56px;left:50%;transform:translateX(-50%);z-index:300;display:flex;
