@@ -9,6 +9,7 @@ import { el, slider, toggle, vec3, colorChip, dropdown, beginRename, swatchRow, 
 import { ic } from './icons.js';
 import { bus } from './bus.js';
 import { CUSTOM_PANELS } from './panels/index.js';
+import { pillToggle, specList } from './panels/controls.js';
 
 export const TINTS = ['#c9a24b', '#ef5350', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#9aa0a6'];
 
@@ -137,21 +138,27 @@ export function buildSheet(node, { compact = false, onDirty = () => {} } = {}) {
 
   /* per-object state card for anything the schema does not own */
   if (!isFolder(node)) {
-    const card = el('div', 'pcard');
+    const card = el('div', 'pcard mp-state');
     card.innerHTML = `<h4>Object<span class="cw">${ic('chevdown', { size: 12 })}</span></h4>`;
     const body = el('div', 'pbody');
     card.appendChild(body);
     card.querySelector('h4').onclick = () => card.classList.toggle('shut');
-    body.append(
-      row('Visible', toggle(node.vis, v => { node.vis = v; bus.emit('treechange'); onDirty(); })),
-      row('Locked', toggle(node.locked, v => { node.locked = v; bus.emit('treechange'); onDirty(); })),
-      row('Dynamic', toggle(node.dynamic, v => { node.dynamic = v; bus.emit('treechange'); })),
-      ...(Array.isArray(node.props.pos)
-        ? [row('Physics', toggle(!!node.physics, v => { node.physics = v; node.vel = 0; bus.emit('treechange'); bus.emit('physicschange'); }))]
-        : []),
-      row('Type', el('span', 'val', TYPES[node.type].label)),
-      row('ID', el('span', 'val', `#${String(node.id).padStart(3, '0')}`)),
+    /* state as words with a light beside them, not a stack of switches */
+    const pills = el('div', 'mp-tags');
+    pills.append(
+      pillToggle('VISIBLE', node.vis, v => { node.vis = v; bus.emit('treechange'); onDirty(); }),
+      pillToggle('LOCKED', node.locked, v => { node.locked = v; bus.emit('treechange'); onDirty(); }),
+      pillToggle('DYNAMIC', node.dynamic, v => { node.dynamic = v; bus.emit('treechange'); }),
     );
+    if (Array.isArray(node.props.pos)) {
+      pills.appendChild(pillToggle('PHYSICS', !!node.physics, v => {
+        node.physics = v; node.vel = 0; bus.emit('treechange'); bus.emit('physicschange');
+      }));
+    }
+    body.append(pills, specList([
+      ['type', TYPES[node.type].label],
+      ['id', `#${String(node.id).padStart(3, '0')}`],
+    ]));
     host.appendChild(card);
   }
 

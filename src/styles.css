@@ -634,17 +634,6 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 
 .mp-note{font-size:10.5px;color:var(--text-faint);letter-spacing:.2px;padding:2px 2px 0;}
 
-.mp-dials{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 8px;}
-.mp-dial{background:var(--field);border:1px solid var(--stroke);border-radius:var(--r-inset);
-  padding:8px 9px 9px;display:flex;flex-direction:column;align-items:center;gap:2px;}
-.mp-dial .hd{display:flex;align-items:baseline;gap:6px;width:100%;margin-bottom:2px;}
-.mp-dial .hd .k{font-size:8.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
-.mp-dial .hd .v{margin-left:auto;font-size:12.5px;font-weight:500;color:var(--text);
-  letter-spacing:-.3px;font-variant-numeric:tabular-nums;}
-.mp-dial .hd .v em{font-style:normal;font-size:9px;color:var(--text-dim);margin-left:1px;}
-.mp-dial svg{width:100%;max-width:104px;aspect-ratio:1;display:block;overflow:visible;
-  cursor:grab;touch-action:none;}
-.mp-dial.grabbing svg{cursor:grabbing;}
 .mp-dial .ring{fill:none;stroke:var(--stroke-strong);stroke-width:1;}
 .mp-dial .ring2{fill:rgba(255,255,255,.02);stroke:var(--stroke);stroke-width:1;}
 .mp-dial .tick{stroke:rgba(255,255,255,.14);stroke-width:1;}
@@ -791,3 +780,45 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
   color:var(--text);margin-bottom:10px;}
 .sheet.bespoke .prow .pl{font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;
   color:var(--text-faint);}
+
+/* ── tapes and steppers ───────────────────────────────────────────────────────────────────────
+   A tape is a ruler with a marker on it: you can read the range off the strip, count the ticks,
+   and grab it anywhere. The stepper beside it is for the last decimal. Between them they replace
+   every slider in an instrument panel. */
+.tape{margin:10px 0 12px;}
+.tape .hd{display:flex;align-items:center;gap:8px;margin-bottom:1px;}
+.tape .hd .k{font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:var(--text-faint);}
+.tape canvas{display:block;width:100%;cursor:ew-resize;touch-action:none;}
+.tape canvas.drag{cursor:grabbing;}
+
+.step{margin-left:auto;display:flex;align-items:center;gap:4px;}
+.step button{width:20px;height:20px;flex:0 0 20px;border-radius:7px;background:var(--raised);
+  border:1px solid var(--stroke);color:var(--text-dim);font-size:12px;line-height:1;cursor:pointer;
+  display:grid;place-items:center;padding:0;transition:background .14s var(--ease),color .14s var(--ease);}
+.step button:hover{color:var(--text);background:var(--selected);}
+.step .f{display:flex;align-items:baseline;gap:3px;background:var(--field);
+  border:1px solid var(--stroke);border-radius:9px;padding:3px 8px;}
+.step input{width:42px;background:transparent;border:0;outline:none;color:var(--text);
+  font:inherit;font-size:12.5px;font-weight:500;text-align:right;font-variant-numeric:tabular-nums;
+  letter-spacing:-.2px;}
+.step i{font-style:normal;font-size:9px;color:var(--text-dim);}
+
+.mp-meter{padding-top:0;}
+.mp-meter .hd,.mp-size .hd{display:flex;align-items:center;gap:6px;padding:8px 9px 2px;}
+.mp-meter .hd .k,.mp-size .hd .k{font-size:8.5px;letter-spacing:1.1px;text-transform:uppercase;
+  color:var(--text-faint);}
+.mp-size canvas{cursor:ew-resize;touch-action:none;}
+.mp-size canvas.drag,.mp-meter canvas.drag{cursor:grabbing;}
+.mp-meter canvas{cursor:ew-resize;touch-action:none;}
+.mp-chartwrap canvas{cursor:ew-resize;touch-action:none;}
+.mp-chartwrap canvas.drag{cursor:grabbing;}
+
+/* state pills and the flat facts under them */
+.mp-tag.state i{background:var(--text-faint);box-shadow:none;}
+.mp-tag.state.on i{background:var(--ok);box-shadow:0 0 7px rgba(34,197,94,.65);}
+.mp-state .mp-tags{margin:0 0 10px;}
+.mp-spec{display:grid;grid-template-columns:1fr 1fr;gap:6px;}
+.mp-spec > div{display:flex;flex-direction:column;gap:1px;padding:7px 10px;background:var(--field);
+  border:1px solid var(--stroke);border-radius:14px;}
+.mp-spec .k{font-size:8.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
+.mp-spec b{font-size:13px;font-weight:500;color:var(--text);letter-spacing:-.2px;}

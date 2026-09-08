@@ -12,7 +12,8 @@
      · angular size is drawn against the real moon's half a degree
    The numbers are still there, and still typed in, because a designer needs both.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
-import { el, slider, colorChip } from '../kit.js';
+import { el, colorChip } from '../kit.js';
+import { tape, stepper, pillToggle } from './controls.js';
 import { ic } from '../icons.js';
 import { bus } from '../bus.js';
 
@@ -278,12 +279,6 @@ export function moonPanel(node, ctx) {
   });
   ac.appendChild(tags);
 
-  /* the cycle, ticked out day by day, with the moon itself as the handle */
-  const tlWrap = el('div', 'mp-tl');
-  const tl = el('canvas');
-  tlWrap.appendChild(tl);
-  const tlLbl = el('div', 'mp-tllbl', '<span>NEW</span><span>FULL</span><span>NEW</span>');
-  ac.append(tlWrap, tlLbl);
   ac.querySelector('.mp-x').onclick = () => { ac.classList.toggle('tall'); paintMap(); };
   host.appendChild(ac);
 
@@ -416,43 +411,6 @@ export function moonPanel(node, ctx) {
 
     readout.innerHTML =
       `<span class="k">sub-earth</span><b>0.0°N 0.0°E</b><span class="k">sub-solar</span><b>${ls >= 0 ? '' : '−'}${Math.abs(ls).toFixed(1)}°${ls < 0 ? 'W' : 'E'}</b>`;
-    paintTl();
-  }
-
-  function paintTl() {
-    const w = tlWrap.clientWidth || 280, h = 26;
-    const dpr = Math.min(devicePixelRatio || 1, 2);
-    if (tl.width !== w * dpr || tl.height !== h * dpr) { tl.width = w * dpr; tl.height = h * dpr; }
-    tl.style.height = h + 'px';
-    const g = tl.getContext('2d');
-    g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.clearRect(0, 0, w, h);
-    const pad = 9, span = w - pad * 2;
-    const days = Math.max(1, Math.round(P.period ?? 27.3));
-
-    g.fillStyle = 'rgba(255,255,255,.22)';
-    g.beginPath(); g.arc(3.5, h / 2, 2.2, 0, Math.PI * 2); g.fill();
-    g.beginPath(); g.arc(w - 3.5, h / 2, 2.2, 0, Math.PI * 2); g.fill();
-
-    for (let i = 0; i <= days; i++) {
-      const t = i / days, x = pad + t * span;
-      const q = Math.abs(((t * 4) % 1)) < 0.02 || Math.abs(((t * 4) % 1)) > 0.98;
-      g.strokeStyle = q ? 'rgba(255,255,255,.34)' : 'rgba(255,255,255,.14)';
-      g.lineWidth = 1;
-      const len = q ? 9 : 5;
-      g.beginPath(); g.moveTo(x, h / 2 - len / 2); g.lineTo(x, h / 2 + len / 2); g.stroke();
-    }
-
-    const cur = ((P.phase ?? 0.68) % 1 + 1) % 1;
-    const hx = pad + cur * span;
-    g.fillStyle = 'rgba(18,18,18,.96)';
-    g.strokeStyle = 'rgba(255,255,255,.16)';
-    const bw = 30, bh = 20;
-    g.beginPath();
-    g.roundRect(Math.max(0, Math.min(w - bw, hx - bw / 2)), h / 2 - bh / 2, bw, bh, 10);
-    g.fill(); g.stroke();
-    drawMoon(g, Math.max(bw / 2, Math.min(w - bw / 2, hx)), h / 2, 6.4,
-      { phase: cur, tint: P.tint, earthshine: 0.18, brightness: 1 });
   }
 
   const scrub = (elm, fn) => {
@@ -464,7 +422,6 @@ export function moonPanel(node, ctx) {
     on(elm, 'pointermove', e => { if (elm.hasPointerCapture?.(e.pointerId)) move(e); });
     on(elm, 'pointerup', e => { elm.releasePointerCapture?.(e.pointerId); elm.classList.remove('grabbing'); });
   };
-  scrub(tlWrap, t => { setProp(node, 'phase', +t.toFixed(4)); paintAll(); });
   /* dragging the atlas walks the terminator, which is the same thing as walking the phase */
   let mdrag = null;
   on(map, 'pointerdown', e => { map.setPointerCapture(e.pointerId); mdrag = { x: e.clientX, p: P.phase ?? 0.68 }; map.classList.add('grabbing'); });
@@ -595,16 +552,65 @@ export function moonPanel(node, ctx) {
   });
   pb.appendChild(strip);
 
-  const fine = slider({
-    min: 0, max: 1, value: P.phase ?? 0.68, dec: 3, thin: compact,
+  /* the cycle, ticked out day by day, with the moon itself as the handle */
+  const tlWrap = el('div', 'mp-tl');
+  const tl = el('canvas');
+  tlWrap.appendChild(tl);
+  const tlLbl = el('div', 'mp-tllbl', '<span>NEW</span><span>FULL</span><span>NEW</span>');
+  pb.append(tlWrap, tlLbl);
+
+  function paintTl() {
+    const w = tlWrap.clientWidth || 280, h = 26;
+    const dpr = Math.min(devicePixelRatio || 1, 2);
+    if (tl.width !== w * dpr || tl.height !== h * dpr) { tl.width = w * dpr; tl.height = h * dpr; }
+    tl.style.height = h + 'px';
+    const g = tl.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const pad = 9, span = w - pad * 2;
+    const days = Math.max(1, Math.round(P.period ?? 27.3));
+
+    g.fillStyle = 'rgba(255,255,255,.22)';
+    g.beginPath(); g.arc(3.5, h / 2, 2.2, 0, Math.PI * 2); g.fill();
+    g.beginPath(); g.arc(w - 3.5, h / 2, 2.2, 0, Math.PI * 2); g.fill();
+
+    for (let i = 0; i <= days; i++) {
+      const t = i / days, x = pad + t * span;
+      const q = Math.abs(((t * 4) % 1)) < 0.02 || Math.abs(((t * 4) % 1)) > 0.98;
+      g.strokeStyle = q ? 'rgba(255,255,255,.34)' : 'rgba(255,255,255,.14)';
+      g.lineWidth = 1;
+      const len = q ? 9 : 5;
+      g.beginPath(); g.moveTo(x, h / 2 - len / 2); g.lineTo(x, h / 2 + len / 2); g.stroke();
+    }
+
+    const cur = ((P.phase ?? 0.68) % 1 + 1) % 1;
+    const hx = pad + cur * span;
+    g.fillStyle = 'rgba(18,18,18,.96)';
+    g.strokeStyle = 'rgba(255,255,255,.16)';
+    const bw = 30, bh = 20;
+    g.beginPath();
+    g.roundRect(Math.max(0, Math.min(w - bw, hx - bw / 2)), h / 2 - bh / 2, bw, bh, 10);
+    g.fill(); g.stroke();
+    drawMoon(g, Math.max(bw / 2, Math.min(w - bw / 2, hx)), h / 2, 6.4,
+      { phase: cur, tint: P.tint, earthshine: 0.18, brightness: 1 });
+  }
+  scrub(tlWrap, t => { setProp(node, 'phase', +t.toFixed(4)); paintAll(); });
+
+  /* the exact number, for when a designer knows what they want */
+  const fine = stepper({
+    value: P.phase ?? 0.68, min: 0, max: 1, dec: 3, step: 0.005,
     onInput: v => { setProp(node, 'phase', v); paintAll(); },
   });
-  pb.appendChild(row('Fine', fine));
-  const period = slider({
-    min: 1, max: 60, value: P.period ?? 27.3, dec: 1, unit: 'd', thin: compact,
+  const fineRow = el('div', 'mp-subhead', '<span class="k">phase</span>');
+  fineRow.appendChild(fine);
+  pb.appendChild(fineRow);
+
+  const period = tape({
+    label: 'Cycle length', min: 1, max: 60, value: P.period ?? 27.3, dec: 1, unit: 'd', step: 0.1,
+    marks: [{ t: 0, l: '1 d' }, { t: 27.3 / 59, l: 'LUNAR 27.3' }, { t: 1, l: '60 d' }],
     onInput: v => { setProp(node, 'period', v); paintAll(); },
   });
-  pb.appendChild(row('Cycle', period));
+  pb.appendChild(period);
   const nextFull = el('div', 'mp-note', '');
   pb.appendChild(nextFull);
   host.appendChild(pc);
@@ -707,90 +713,24 @@ export function moonPanel(node, ctx) {
     drawMoon(g, px(t), py(v), 5.6, { phase: P.phase ?? 0.68, tint: P.tint, earthshine: 0.2, brightness: 1 });
   }
 
-  /* the two instruments, each with its own reading */
-  const dials = el('div', 'mp-dials');
-  const compass = el('div', 'mp-dial', `
-    <div class="hd"><span class="k">azimuth</span><b class="v">—</b></div>
-    <svg viewBox="0 0 100 100">
-      <circle class="ring" cx="50" cy="50" r="40"/>
-      <circle class="ring2" cx="50" cy="50" r="29"/>
-      <g class="ticks"></g>
-      <line class="needle" x1="50" y1="50" x2="50" y2="14"/>
-      <circle class="hub" cx="50" cy="50" r="3.2"/>
-      <circle class="knob" cx="50" cy="14" r="5.4"/>
-      <text class="lbl n" x="50" y="9">N</text><text class="lbl" x="93" y="53">E</text>
-      <text class="lbl" x="50" y="97">S</text><text class="lbl" x="7" y="53">W</text>
-    </svg>`);
-  const alt = el('div', 'mp-dial', `
-    <div class="hd"><span class="k">altitude</span><b class="v">—</b></div>
-    <svg viewBox="0 0 100 100">
-      <path class="arc" d="M 10 72 A 40 40 0 0 1 90 72"/>
-      <line class="ground" x1="6" y1="72" x2="94" y2="72"/>
-      <path class="fill" d=""/>
-      <line class="ray" x1="50" y1="72" x2="50" y2="32"/>
-      <circle class="knob" cx="50" cy="32" r="5.4"/>
-      <text class="lbl" x="50" y="86">horizon</text>
-    </svg>`);
-  dials.append(compass, alt);
-  sb.appendChild(dials);
-
-  const ticks = compass.querySelector('.ticks');
-  for (let i = 0; i < 24; i++) {
-    const a = i / 24 * Math.PI * 2;
-    const long = i % 6 === 0;
-    const r1 = long ? 33 : 36, r2 = 40;
-    const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-    l.setAttribute('x1', 50 + Math.sin(a) * r1); l.setAttribute('y1', 50 - Math.cos(a) * r1);
-    l.setAttribute('x2', 50 + Math.sin(a) * r2); l.setAttribute('y2', 50 - Math.cos(a) * r2);
-    l.setAttribute('class', long ? 'tick long' : 'tick');
-    ticks.appendChild(l);
-  }
-
-  const needle = compass.querySelector('.needle');
-  const cKnob = compass.querySelector('.knob');
-  const cVal = compass.querySelector('.hd .v');
-  const ray = alt.querySelector('.ray');
-  const aKnob = alt.querySelector('.knob');
-  const aFill = alt.querySelector('.fill');
-  const aVal = alt.querySelector('.hd .v');
-
-  function paintDials() {
-    const az = ((P.azimuth ?? 292) % 360 + 360) % 360;
-    const a = az * Math.PI / 180;
-    const x = 50 + Math.sin(a) * 36, y = 50 - Math.cos(a) * 36;
-    needle.setAttribute('x2', x); needle.setAttribute('y2', y);
-    cKnob.setAttribute('cx', x); cKnob.setAttribute('cy', y);
-    cVal.innerHTML = `${Math.round(az)}<em>°</em>`;
-
-    const e = Math.max(-20, Math.min(90, P.elevation ?? 46));
-    const t = (e + 20) / 110 * Math.PI;
-    const ex = 50 - Math.cos(t) * 40, ey = 72 - Math.sin(t) * 40;
-    ray.setAttribute('x2', ex); ray.setAttribute('y2', ey);
-    aKnob.setAttribute('cx', ex); aKnob.setAttribute('cy', ey);
-    aKnob.classList.toggle('under', e < 0);
-    aFill.setAttribute('d', `M 10 72 A 40 40 0 0 1 ${ex.toFixed(2)} ${ey.toFixed(2)}`);
-    aVal.innerHTML = `${e >= 0 ? '+' : '−'}${Math.abs(e).toFixed(0)}<em>°</em>`;
-  }
-
-  const dragDial = (elm, fn) => {
-    const svg = elm.querySelector('svg');
-    const move = e => {
-      const r = svg.getBoundingClientRect();
-      fn((e.clientX - r.left) / r.width * 100, (e.clientY - r.top) / r.height * 100);
-    };
-    on(svg, 'pointerdown', e => { svg.setPointerCapture(e.pointerId); elm.classList.add('grabbing'); move(e); });
-    on(svg, 'pointermove', e => { if (svg.hasPointerCapture?.(e.pointerId)) move(e); });
-    on(svg, 'pointerup', e => { svg.releasePointerCapture?.(e.pointerId); elm.classList.remove('grabbing'); });
+  /* the arc is the instrument: drag along it to fly the moon through the night */
+  const arcTime = e => {
+    const r = arc.getBoundingClientRect();
+    const L = 2, R = 30;
+    const t = Math.max(0, Math.min(1, (e.clientX - r.left - L) / Math.max(1, r.width - L - R)));
+    bus.emit('settod', (12 + t * 24) % 24);
   };
-  dragDial(compass, (x, y) => {
-    const az = ((Math.atan2(x - 50, 50 - y) * 180 / Math.PI) + 360) % 360;
-    setSky(null, az);
+  on(arc, 'pointerdown', e => { arc.setPointerCapture(e.pointerId); arc.classList.add('drag'); arcTime(e); });
+  on(arc, 'pointermove', e => { if (arc.hasPointerCapture?.(e.pointerId)) arcTime(e); });
+  on(arc, 'pointerup', e => { arc.releasePointerCapture?.(e.pointerId); arc.classList.remove('drag'); });
+
+  /* bearing, read off a compass tape rather than a dial */
+  const bearing = tape({
+    label: 'Bearing', min: 0, max: 360, value: ((P.azimuth ?? 292) % 360 + 360) % 360, dec: 0, unit: '°', step: 1,
+    marks: [{ t: 0, l: 'N' }, { t: 0.25, l: 'E' }, { t: 0.5, l: 'S' }, { t: 0.75, l: 'W' }, { t: 1, l: 'N' }],
+    onInput: v => setSky(null, v),
   });
-  dragDial(alt, (x, y) => {
-    const t = Math.atan2(72 - y, 50 - x);
-    const e = Math.max(-20, Math.min(90, (Math.min(Math.max(t, 0), Math.PI) / Math.PI) * 110 - 20));
-    setSky(e, null);
-  });
+  sb.appendChild(bearing);
 
   /* rise · transit · set, three numbers on one line */
   const track = el('div', 'mp-3up');
@@ -859,14 +799,35 @@ export function moonPanel(node, ctx) {
 
   /* the meter — a log scale, because moonlight lives in the bottom decade */
   const meterWrap = el('div', 'mp-meter');
+  meterWrap.innerHTML = '<div class="hd"><span class="k">moonlight</span></div>';
   const meter = el('canvas');
   meterWrap.appendChild(meter);
+  const luxStep = stepper({
+    value: P.moonlight ?? 0.35, min: 0, max: 2, dec: 2, step: 0.01, unit: 'lx',
+    onInput: v => { setProp(node, 'moonlight', v); paintAll(); },
+  });
+  meterWrap.querySelector('.hd').appendChild(luxStep);
   lb.appendChild(meterWrap);
   const STOPS = [[0.0005, 'STARLIGHT'], [0.05, 'WALK'], [0.25, 'READ'], [1, 'PRINT'], [2, '']];
   const lpos = v => {
     const lo = Math.log10(0.0005), hi = Math.log10(2);
     return Math.max(0, Math.min(1, (Math.log10(Math.max(0.0005, v)) - lo) / (hi - lo)));
   };
+  /* the meter is the control: grab it anywhere and the ground gets brighter */
+  const luxFrom = e => {
+    const r = meter.getBoundingClientRect();
+    const pad = 8, span = Math.max(1, r.width - pad * 2);
+    const t = Math.max(0, Math.min(1, (e.clientX - r.left - pad) / span));
+    const lo = Math.log10(0.0005), hi = Math.log10(2);
+    const ground = 10 ** (lo + t * (hi - lo));
+    const k = Math.max(0.02, illumination(P.phase ?? 0.68));
+    setProp(node, 'moonlight', +Math.min(2, ground / k).toFixed(3));
+    paintAll();
+  };
+  on(meter, 'pointerdown', e => { meter.setPointerCapture(e.pointerId); meter.classList.add('drag'); luxFrom(e); });
+  on(meter, 'pointermove', e => { if (meter.hasPointerCapture?.(e.pointerId)) luxFrom(e); });
+  on(meter, 'pointerup', e => { meter.releasePointerCapture?.(e.pointerId); meter.classList.remove('drag'); });
+
   function paintLux() {
     const w = meterWrap.clientWidth || 280, h = 40;
     const dpr = Math.min(devicePixelRatio || 1, 2);
@@ -911,16 +872,27 @@ export function moonPanel(node, ctx) {
 
   /* angular size, on a ruler */
   const sizeWrap = el('div', 'mp-size');
-  sizeWrap.innerHTML = `<div class="hd"><span class="k">angular size</span><b class="v">—</b></div>`;
+  sizeWrap.innerHTML = '<div class="hd"><span class="k">angular size</span></div>';
   const sizeCv = el('canvas');
   sizeWrap.appendChild(sizeCv);
-  const sizeVal = sizeWrap.querySelector('.hd .v');
   const sizeCap = el('div', 'mp-k mp-note', '');
-  const sizeSlider = slider({
-    min: 0.2, max: 6, value: P.angular ?? 1.6, dec: 2, unit: '°', thin: compact,
+  const sizeStep = stepper({
+    value: P.angular ?? 1.6, min: 0.2, max: 6, dec: 2, step: 0.05, unit: '°',
     onInput: v => { setProp(node, 'angular', v); paintAll(); },
   });
-  lb.append(sizeWrap, sizeCap, row('Size', sizeSlider));
+  sizeWrap.querySelector('.hd').appendChild(sizeStep);
+  lb.append(sizeWrap, sizeCap);
+  /* the ruler under the disc is the control — drag it and the moon grows */
+  const sizeFrom = e => {
+    const r = sizeCv.getBoundingClientRect();
+    const pad = 8, span = Math.max(1, r.width - pad * 2);
+    const v = Math.max(0.2, Math.min(6, (e.clientX - r.left - pad) / span * 6));
+    setProp(node, 'angular', +v.toFixed(2));
+    paintAll();
+  };
+  on(sizeCv, 'pointerdown', e => { sizeCv.setPointerCapture(e.pointerId); sizeCv.classList.add('drag'); sizeFrom(e); });
+  on(sizeCv, 'pointermove', e => { if (sizeCv.hasPointerCapture?.(e.pointerId)) sizeFrom(e); });
+  on(sizeCv, 'pointerup', e => { sizeCv.releasePointerCapture?.(e.pointerId); sizeCv.classList.remove('drag'); });
   lc.querySelector('.mp-x').onclick = () => { lc.classList.toggle('tall'); paintSize(); };
 
   function paintSize() {
@@ -968,7 +940,6 @@ export function moonPanel(node, ctx) {
     g.font = '8px ui-sans-serif, system-ui';
     g.textAlign = 'center';
     g.fillText('REAL 0.52°', cx, cy + Math.max(real, mine) * scale + 10);
-    sizeVal.innerHTML = `${mine.toFixed(2)}<em>°</em>`;
     sizeCap.textContent = `${(mine / real).toFixed(1)}× the real moon`;
   }
 
@@ -988,24 +959,23 @@ export function moonPanel(node, ctx) {
   tintHead.appendChild(chip);
   lb.append(tintHead, tintRow);
 
-  const bright = slider({
-    min: 0, max: 4, value: P.brightness ?? 1.1, dec: 2, unit: '×', thin: compact,
+  const bright = tape({
+    label: 'Brightness', min: 0, max: 4, value: P.brightness ?? 1.1, dec: 2, unit: '×', step: 0.05,
+    marks: [{ t: 0, l: 'OFF' }, { t: 0.25, l: 'REAL 1.0' }, { t: 1, l: '4×' }],
     onInput: v => { setProp(node, 'brightness', v); paintAll(); },
   });
-  const earth = slider({
-    min: 0, max: 1, value: P.earthshine ?? 0.16, dec: 2, thin: compact,
+  const earth = tape({
+    label: 'Earthshine', min: 0, max: 1, value: P.earthshine ?? 0.16, dec: 2, step: 0.01,
+    marks: [{ t: 0, l: 'NONE' }, { t: 0.16, l: 'REAL' }, { t: 1, l: 'FULL' }],
     onInput: v => { setProp(node, 'earthshine', v); paintAll(); },
   });
-  const lux = slider({
-    min: 0, max: 2, value: P.moonlight ?? 0.35, dec: 2, unit: 'lx', thin: compact,
-    onInput: v => { setProp(node, 'moonlight', v); paintAll(); },
-  });
-  lb.append(row('Brightness', bright), row('Earthshine', earth), row('Moonlight', lux));
+  lb.append(bright, earth);
   host.appendChild(lc);
   /* ── keeping every surface honest ─────────────────────────────────────────────────────── */
   function paintAll() {
-    paintSky(); paintCap(); paintDials(); paintSize(); paintChart(); paintMap();
-    paintArc(); paintDay(); paintLux(); markTints();
+    paintSky(); paintCap(); paintSize(); paintChart(); paintMap();
+    paintArc(); paintDay(); paintLux(); paintTl(); markTints();
+    bearing._set(((P.azimuth ?? 292) % 360 + 360) % 360);
     const p = ((P.phase ?? 0.68) % 1 + 1) % 1;
     const litPc = illumination(p) * 100;
     const per = P.period ?? 27.3;
@@ -1045,12 +1015,12 @@ export function moonPanel(node, ctx) {
       : l < 0.02 ? 'starlight only' : l < 0.08 ? 'shapes, no colour'
       : l < 0.25 ? 'you could walk' : l < 1 ? 'you could read' : 'bright enough to work by';
     /* keep the fine controls in step when the value came from somewhere else */
-    fine._set && fine._set(P.phase);
-    period._set && period._set(P.period);
-    sizeSlider._set && sizeSlider._set(P.angular);
-    bright._set && bright._set(P.brightness);
-    earth._set && earth._set(P.earthshine);
-    lux._set && lux._set(P.moonlight);
+    fine._set(P.phase ?? 0.68);
+    period._set(P.period ?? 27.3);
+    sizeStep._set(P.angular ?? 1.6);
+    luxStep._set(P.moonlight ?? 0.35);
+    bright._set(P.brightness ?? 1.1);
+    earth._set(P.earthshine ?? 0.16);
     chip._set && chip._set(P.tint);
   }
 
@@ -1064,7 +1034,10 @@ export function moonPanel(node, ctx) {
   register && register(() => syncers.forEach(f => f()));
 
   /* the hero canvas is width-driven, so it has to know when the dock does */
-  const ro = new ResizeObserver(() => { paintSky(); paintSize(); paintChart(); paintMap(); });
+  const ro = new ResizeObserver(() => {
+    paintSky(); paintSize(); paintChart(); paintMap(); paintArc(); paintDay(); paintTl(); paintLux();
+    [bearing, period, bright, earth].forEach(t => t._paint && t._paint());
+  });
   ro.observe(host);
   host._dispose = () => ro.disconnect();
 
