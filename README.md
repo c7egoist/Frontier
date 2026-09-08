@@ -302,6 +302,8 @@ src/
     sun.js          sky strip, stereographic sun path, illuminance curve, blackbody ramp, shadows
     water.js        a section through the sea: wave pad, Douglas scale, depth ramp, glitter
     wind.js         a live flow field, anemometer trace, Beaufort scale, and what obeys it
+    sky.js          a slice of the real sky, extinction spectrum, Mie phase curve, visibility
+    stars.js        a live star field, magnitude histogram, spectral ramp, sidereal drift
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
@@ -330,6 +332,10 @@ ruler to resize the disc.
 ![Frontier — the water panel](docs/preview-water.png)
 
 ![Frontier — the wind panel](docs/preview-wind.png)
+
+![Frontier — the sky panel](docs/preview-sky.png)
+
+![Frontier — the stars panel](docs/preview-stars.png)
 
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
 hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a

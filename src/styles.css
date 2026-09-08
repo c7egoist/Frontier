@@ -857,3 +857,18 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .wf-steady .mp-spec{grid-template-columns:1fr 1fr;margin-top:4px;}
 .wf-drives .mp-tags{margin-bottom:8px;}
 .mp-cap .wf-sub{text-transform:none;letter-spacing:.3px;}
+
+/* ── the sky and star panels ───────────────────────────────────────────────────────────────── */
+.sk-hero canvas{cursor:crosshair;}
+.sk-hero canvas.grabbing{cursor:grabbing;}
+.st-hero canvas{cursor:grab;}
+.st-hero canvas.grabbing{cursor:grabbing;}
+.sk-phase canvas,.sk-grad canvas,.st-ramp canvas{display:block;width:100%;}
+.sk-phase canvas{cursor:ew-resize;touch-action:none;}
+.sk-phase canvas.drag{cursor:grabbing;}
+.sk-specs,.st-specs{grid-template-columns:1fr 1fr;margin-top:10px;}
+.mp-cap .sk-sub,.mp-cap .st-sub{text-transform:none;letter-spacing:.3px;}
+.skypanel .mp-subhead,.starpanel .mp-subhead{margin:10px 0 4px;}
+.st-mag .mp-num .i{font-size:38px;}
+.sk-hero .mp-cap{background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,.55) 55%,rgba(0,0,0,.88) 100%);}
+.sk-hero .mp-cap .mp-illum,.sk-hero .mp-cap .r{color:rgba(255,255,255,.72);}
