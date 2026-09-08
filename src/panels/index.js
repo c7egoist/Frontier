@@ -8,9 +8,11 @@
 import { moonPanel } from './moon.js';
 import { sunPanel } from './sun.js';
 import { waterPanel } from './water.js';
+import { windPanel } from './wind.js';
 
 export const CUSTOM_PANELS = {
   moon: { build: moonPanel, owns: ['Orbit', 'Appearance'] },
   sun: { build: sunPanel, owns: ['Orbit', 'Disc & light'] },
   water: { build: waterPanel, owns: ['Body', 'Waves', 'Surface'] },
+  wind: { build: windPanel, owns: ['Field'] },
 };

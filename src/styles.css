@@ -847,3 +847,13 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .w-ramp canvas.drag{cursor:grabbing;}
 .wpanel .mp-subhead{margin:10px 0 4px;}
 .mp-cap .w-sub,.w-hero .mp-cap .r{text-transform:none;letter-spacing:.3px;}
+
+/* ── the wind panel ────────────────────────────────────────────────────────────────────────── */
+.wf-hero canvas{cursor:crosshair;}
+.wf-hero canvas.grabbing{cursor:grabbing;}
+.wf-meter canvas{cursor:ew-resize;touch-action:none;}
+.wf-meter canvas.drag{cursor:grabbing;}
+.wf-specs{grid-template-columns:1fr 1fr;margin-top:10px;}
+.wf-steady .mp-spec{grid-template-columns:1fr 1fr;margin-top:4px;}
+.wf-drives .mp-tags{margin-bottom:8px;}
+.mp-cap .wf-sub{text-transform:none;letter-spacing:.3px;}
