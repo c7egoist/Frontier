@@ -11,6 +11,7 @@ import { waterPanel } from './water.js';
 import { windPanel } from './wind.js';
 import { skyPanel } from './sky.js';
 import { starsPanel } from './stars.js';
+import { fogPanel } from './fog.js';
 
 export const CUSTOM_PANELS = {
   moon: { build: moonPanel, owns: ['Orbit', 'Appearance'] },
@@ -19,4 +20,5 @@ export const CUSTOM_PANELS = {
   wind: { build: windPanel, owns: ['Field'] },
   sky: { build: skyPanel, owns: ['Atmosphere', 'Look', 'Rendering'] },
   stars: { build: starsPanel, owns: ['Field', 'Sphere'] },
+  fog: { build: fogPanel, owns: ['Volumetrics'] },
 };

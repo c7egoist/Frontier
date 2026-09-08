@@ -872,3 +872,14 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .st-mag .mp-num .i{font-size:38px;}
 .sk-hero .mp-cap{background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,.55) 55%,rgba(0,0,0,.88) 100%);}
 .sk-hero .mp-cap .mp-illum,.sk-hero .mp-cap .r{color:rgba(255,255,255,.72);}
+
+/* Fog instrument — sight line, contrast trace, altitude profile, scattering chamber */
+.fg-hero canvas{cursor:crosshair;touch-action:none;}
+.fg-hero canvas.grabbing{cursor:grabbing;}
+.fg-hero .mp-cap{background:linear-gradient(180deg,rgba(4,6,8,0),rgba(4,6,8,.92));}
+.mp-cap .fg-sub{text-transform:none;letter-spacing:.3px;}
+.fg-vis canvas,.fg-profile canvas{cursor:crosshair;touch-action:none;}
+.fg-vis canvas.drag,.fg-profile canvas.drag{cursor:grabbing;}
+.fg-profile canvas,.fg-chamber canvas{display:block;width:100%;}
+.fogpanel .mp-subhead{margin:10px 0 4px;}
+.fogpanel.disabled .fg-hero canvas,.fogpanel.disabled .fg-chamber canvas{filter:saturate(.25);opacity:.62;}
