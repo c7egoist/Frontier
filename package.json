@@ -1,12 +1,13 @@
 {
   "name": "frontier",
   "version": "0.1.0",
-  "description": "Frontier — a state-of-the-art world outliner and billboard-driven viewport for the Slate editor language",
+  "description": "Frontier \u2014 a state-of-the-art world outliner and billboard-driven viewport for the Slate editor language",
   "main": "index.js",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:pages": "rm -rf docs/assets docs/index.html && vite build --outDir docs --emptyOutDir false"
   },
   "repository": {
     "type": "git",

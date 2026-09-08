@@ -19,8 +19,71 @@ A state-of-the-art outliner for a real-time world editor, built in the **Slate U
 
 ```bash
 npm install
-npm run dev        # http://localhost:5173
+npm run dev          # http://localhost:5173
+npm run build        # dist/ — relative asset paths, deployable to any subpath
+npm run build:pages  # docs/ — the same build, committed for GitHub Pages
 ```
+
+**Live:** <https://c7egoist.github.io/Frontier/>
+
+---
+
+## Deploying
+
+**This repository cannot be served raw.** `index.html` is a Vite entry point: it points at
+`/src/main.js` and the modules import `three` as a bare specifier. Publishing the branch as-is
+gives you unstyled HTML and a 404 for the script — the browser is asking for
+`c7egoist.github.io/src/main.js`, which does not exist. It has to be built first.
+
+The built site is committed to `docs/`, so Pages can serve it with no CI:
+
+> **Settings → Pages → Source: Deploy from a branch → Branch `arena/01a08158-frontier`,
+> folder `/docs` → Save.** Wait a minute, then hard-reload
+> <https://c7egoist.github.io/Frontier/>.
+
+After changing any source file run `npm run build:pages` and commit `docs/` again. `base` is
+`'./'` in `vite.config.js`, so the same output works at the domain root, under `/Frontier/`, or
+straight off the filesystem.
+
+<details>
+<summary>Prefer CI over a committed build? Add this workflow yourself</summary>
+
+Create `.github/workflows/pages.yml` — it has to be added from the GitHub web UI or your own
+machine, because app tokens are not permitted to push workflow files — then set
+**Settings → Pages → Source: GitHub Actions**.
+
+```yaml
+name: Deploy to GitHub Pages
+on:
+  push:
+    branches: [arena/01a08158-frontier, main]
+  workflow_dispatch:
+permissions: { contents: read, pages: write, id-token: write }
+concurrency: { group: pages, cancel-in-progress: true }
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: dist }
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: { name: github-pages, url: '${{ steps.deployment.outputs.page_url }}' }
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+```
+
+If that job fails with *"not allowed to deploy to github-pages due to environment protection
+rules"*, add this branch under **Settings → Environments → github-pages → Deployment branches**.
+</details>
 
 ---
 
