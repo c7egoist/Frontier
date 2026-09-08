@@ -229,6 +229,7 @@ svg{display:block;}
 .prow{display:flex;align-items:center;gap:10px;margin-bottom:8px;min-height:30px;}
 .prow:last-child{margin-bottom:0;}
 .prow .pl{flex:0 0 70px;font-size:11.5px;font-weight:500;color:var(--text-dim);line-height:1.25;}
+.prow.wide{flex-wrap:wrap;}
 .prow.wide .pl{flex-basis:100%;margin-bottom:2px;}
 .prow.stack{flex-wrap:wrap;}
 .val{font-size:11.5px;color:var(--text-dim);text-align:right;flex:1;font-variant-numeric:tabular-nums;}
@@ -601,3 +602,71 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
   letter-spacing:1.2px;text-transform:uppercase;color:var(--text-faint);white-space:nowrap;opacity:0;
   transition:opacity .15s var(--ease);}
 .axisorb:hover .orbhint{opacity:1;}
+
+
+/* ── bespoke panels · the moon ─────────────────────────────────────────────────────────────────
+   A moon is a thing you look at, so the panel shows you one. Everything in here is an instrument:
+   the sky scrubs the phase, the dials fly the moon across the sky (and the world clock with it),
+   and angular size is drawn against the half a degree the real moon takes up. */
+.mpanel{display:flex;flex-direction:column;gap:10px;}
+
+.mp-hero{padding:0;overflow:hidden;position:relative;border-radius:var(--r-inset);
+  background:#05070f;border:1px solid var(--stroke-strong);}
+.mp-sky{display:block;width:100%;cursor:ew-resize;touch-action:none;}
+.mp-sky.grabbing{cursor:grabbing;}
+.mp-cap{position:absolute;inset:auto 0 0 0;display:flex;align-items:flex-end;gap:10px;
+  padding:8px 12px 9px;background:linear-gradient(180deg,rgba(5,7,15,0),rgba(5,7,15,.88));
+  pointer-events:none;}
+.mp-cap .l{display:flex;flex-direction:column;gap:2px;min-width:0;}
+.mp-cap b{font-size:12.5px;font-weight:600;color:var(--text);letter-spacing:.2px;}
+.mp-cap .mp-illum{font-size:10px;color:var(--text-faint);letter-spacing:.6px;text-transform:uppercase;}
+.mp-cap .r{margin-left:auto;font-size:10.5px;color:var(--text-dim);text-align:right;
+  font-variant-numeric:tabular-nums;}
+.mp-cap .down{color:var(--caution);}
+
+.mp-strip{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:3px;margin-bottom:10px;}
+.mp-chip{padding:4px 2px;border-radius:11px;border:1px solid transparent;background:transparent;
+  cursor:pointer;display:grid;place-items:center;min-width:0;
+  transition:background .15s var(--ease),border-color .15s var(--ease);}
+.mp-chip canvas{width:100%;max-width:30px;height:auto;aspect-ratio:1;display:block;}
+.mp-chip:hover{background:#141414;}
+.mp-chip.on{background:var(--selected);border-color:var(--stroke-strong);}
+
+.mp-note{font-size:10.5px;color:var(--text-faint);letter-spacing:.2px;padding:2px 2px 0;}
+
+.mp-dials{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;}
+.mp-dial{background:var(--field);border:1px solid var(--stroke);border-radius:var(--r-inset);
+  padding:8px 8px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;
+  cursor:grab;touch-action:none;}
+.mp-dial.grabbing{cursor:grabbing;}
+.mp-dial svg{width:100%;max-width:104px;aspect-ratio:1;display:block;overflow:visible;}
+.mp-dial .cap{font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-faint);}
+.mp-dial .ring{fill:none;stroke:var(--stroke-strong);stroke-width:1;}
+.mp-dial .ring2{fill:rgba(255,255,255,.02);stroke:var(--stroke);stroke-width:1;}
+.mp-dial .tick{stroke:rgba(255,255,255,.14);stroke-width:1;}
+.mp-dial .tick.long{stroke:rgba(255,255,255,.30);}
+.mp-dial .needle,.mp-dial .ray{stroke:var(--hi);stroke-width:1.6;stroke-linecap:round;}
+.mp-dial .hub{fill:var(--hi);}
+.mp-dial .knob{fill:#e9ecff;stroke:var(--hi);stroke-width:2;}
+.mp-dial .knob.under{fill:var(--caution);stroke:var(--caution);}
+.mp-dial .arc{fill:none;stroke:var(--stroke-strong);stroke-width:1;}
+.mp-dial .fill{fill:none;stroke:rgba(108,119,255,.5);stroke-width:2.5;stroke-linecap:round;}
+.mp-dial .ground{stroke:rgba(255,255,255,.18);stroke-width:1;}
+.mp-dial .lbl{fill:var(--text-faint);font-size:8px;text-anchor:middle;letter-spacing:.6px;}
+.mp-dial .lbl.n{fill:var(--text-dim);}
+
+.mp-track{display:flex;align-items:baseline;gap:7px;padding:7px 10px;margin-bottom:6px;
+  background:var(--inset);border-radius:var(--r-pill);font-size:11px;color:var(--text);
+  font-variant-numeric:tabular-nums;}
+.mp-track .k{font-size:9px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
+.mp-track b{font-weight:600;margin-right:6px;}
+
+.mp-size{margin:2px 0 0;background:var(--field);border:1px solid var(--stroke);
+  border-radius:var(--r-inset);overflow:hidden;}
+.mp-size canvas{display:block;width:100%;}
+.mp-tints{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:wrap;}
+.mp-tints .colorrow{margin-left:auto;}
+.mp-tint{width:20px;height:20px;border-radius:7px;border:1px solid var(--stroke-strong);cursor:pointer;
+  transition:transform .14s var(--ease);}
+.mp-tint:hover{transform:translateY(-1px);}
+.mp-tint.on{box-shadow:0 0 0 2px var(--panel),0 0 0 3.5px var(--text);}

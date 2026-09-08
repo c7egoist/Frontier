@@ -8,6 +8,7 @@ import { TYPES, typeOf, isFolder } from './world.js';
 import { el, slider, toggle, vec3, colorChip, dropdown, beginRename, swatchRow, repaintSliders } from './kit.js';
 import { ic } from './icons.js';
 import { bus } from './bus.js';
+import { CUSTOM_PANELS } from './panels/index.js';
 
 export const TINTS = ['#c9a24b', '#ef5350', '#f59e0b', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#9aa0a6'];
 
@@ -68,11 +69,20 @@ const readout = (node, key) => {
 export function buildSheet(node, { compact = false, onDirty = () => {} } = {}) {
   const host = el('div', 'sheet');
   const bound = [];
-  const panel = { node, compact, sync: () => bound.forEach(b => b.ctl._set && b.ctl._set(node.props[b.def.k])) };
+  const extra = [];                                   /* bespoke panels keep themselves in step */
+  const panel = {
+    node, compact,
+    sync: () => { bound.forEach(b => b.ctl._set && b.ctl._set(node.props[b.def.k])); extra.forEach(f => f()); },
+  };
   panels.add(panel);
-  host._dispose = () => panels.delete(panel);
 
   const t = typeOf(node);
+
+  /* a type with an instrument gets it first, and keeps whichever schema groups it did not claim */
+  const custom = CUSTOM_PANELS[node.type];
+  const owned = new Set(custom ? custom.owns || [] : []);
+  let customEl = null;
+  host._dispose = () => { panels.delete(panel); customEl && customEl._dispose && customEl._dispose(); };
 
   /* identity — the popup carries its own header, so the strip is only for the dock */
   if (!compact) buildIdentity();
@@ -98,8 +108,18 @@ export function buildSheet(node, { compact = false, onDirty = () => {} } = {}) {
   host.appendChild(ident);
   }
 
+  if (custom) {
+    customEl = custom.build(node, {
+      compact,
+      setProp: (n, k, v) => setProp(n, k, v, panel),
+      register: fn => extra.push(fn),
+      onDirty,
+    });
+    host.appendChild(customEl);
+  }
+
   /* schema cards */
-  (t.groups || []).forEach((group, gi) => {
+  (t.groups || []).filter(g => !owned.has(g.title)).forEach((group, gi) => {
     const card = el('div', 'pcard');
     const head = el('h4', null, `${group.title}<span class="cw">${ic('chevdown', { size: 12 })}</span>`);
     const body = el('div', 'pbody');

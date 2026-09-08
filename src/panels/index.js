@@ -1,0 +1,12 @@
+/* ════════════════════════════════════════════════════════════════════════════════════════════
+   BESPOKE PANELS
+   Most entities are happy being generated from their schema. A few deserve an instrument instead:
+   a moon you can see, a sun you can aim, water you can watch. This registry says which types have
+   one, and which of their schema groups the instrument replaces — anything it does not claim is
+   still generated underneath it, so no property is ever unreachable.
+   ════════════════════════════════════════════════════════════════════════════════════════════ */
+import { moonPanel } from './moon.js';
+
+export const CUSTOM_PANELS = {
+  moon: { build: moonPanel, owns: ['Orbit', 'Appearance'] },
+};

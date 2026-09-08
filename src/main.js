@@ -977,6 +977,9 @@ bus.on('treechange', () => {
   billboards.rebuild(billboardNodes());
   syncSelection();
 });
+/* an instrument that moves the sky moves the clock with it */
+bus.on('settod', h => setTimeOfDay(h));
+
 function syncTodFromSun() {
   const sun = flat.find(n => n.type === 'sun');
   const h = 6 + (sun.props.azimuth - 90) / 15;
