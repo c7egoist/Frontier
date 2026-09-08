@@ -11,7 +11,7 @@
 //        --trace     write every tick's poses as CSV (tick, t, body, shape, x, y, z, vx, vy, vz, active) for offline proofs
 //
 //    Merge note: the three lines marked ⟨TICK⟩ are the only thing Project-Zero needs inside its render loop — after
-//    `Camera.AdvanceLocomotion` and before the ImGui build — plus the Bring()/Construct() block before the loop.
+//    `Camera.AdvanceLocomotion` and before the dispatch build — plus the Bring()/Construct() block before the loop.
 
 #include "../../../Engine/PhysicalDynamics/RigidBodySolver.h"
 #include "../../../Engine/DeviceExchange/DiagnosticMetrics.h"

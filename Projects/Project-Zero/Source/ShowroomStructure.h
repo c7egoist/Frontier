@@ -1,8 +1,8 @@
 //============================================================================================================================================
 //                                                      SHOWROOMSTRUCTURE.H
 //============================================================================================================================================
-// 🧩 Project-Zero's spatial-interface level (`--scene showroom`): the Cornell box widened and furnished, so a 3D
-//    interface panel can be judged against saturated neighbours, a mirror, and real colour bleed.
+// 🧩 Project-Zero's furnished level (`--scene showroom`): the Cornell box widened and dressed with saturated
+//    neighbours, a mirror, and real colour bleed, so materials and indirect light can be judged in a room.
 //
 //    The original CornellBox.gltf is deliberately left untouched — it is the bit-identity reference for the open GPU
 //    verification, and a second level is cheaper than a disputed baseline. The showroom keeps Cornell's red and green
@@ -51,10 +51,6 @@ public:
     [[nodiscard]] const std::vector<TriangleIndex>&      QueryTriangles()     const noexcept { return Triangles; }
     [[nodiscard]] const std::vector<Vector3>&            QueryCornerNormals() const noexcept { return CornerNormals; }
     [[nodiscard]] const std::vector<MaterialDescriptor>& QueryMaterials()     const noexcept { return Materials; }
-
-    // Where the trial interface hangs: centred on the rear wall, at eye height, tilted toward the camera.
-    [[nodiscard]] static Vector3 QueryPanelOrigin() noexcept { return Vector3{ 0.0f, 1.55f, 1.32f }; }
-    [[nodiscard]] static float   QueryPanelTilt()   noexcept { return -0.21f; }   // [rad] ≈ 12° face-up toward the eye
 
 private:
     void AppendQuad(const Vector3& A, const Vector3& B, const Vector3& C, const Vector3& D, uint32_t Material, float UvScale) noexcept;

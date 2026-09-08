@@ -32,7 +32,6 @@ $ProjectRoot    = Join-Path $RepositoryRoot 'Projects\Project-Zero'
 $OutputRoot     = Join-Path $ProjectRoot    "Build\Output\Windows\$Configuration"
 
 $script:GlfwBuilt   = $false
-$script:ThorVGBuilt = $false
 
 #---
 #                                        CONSOLE REPORTING
@@ -174,13 +173,7 @@ function Get-IncludePaths([string] $VulkanRoot)
         "/I$EngineRoot"
         "/I$(Join-Path $ProjectRoot 'Source')"
         "/I$(Join-Path $VulkanRoot  'Include')"
-        "/I$(Join-Path $PackageRoot 'miniaudio')"
-        "/I$(Join-Path $RepositoryRoot 'Projects\Project-Dyno\Source')"
-        "/I$(Join-Path $PackageRoot 'imgui')"
-        "/I$(Join-Path $PackageRoot 'imgui\backends')"
         "/I$(Join-Path $PackageRoot 'glfw\include')"
-        "/I$(Join-Path $PackageRoot 'thorvg\inc')"
-        "/I$(Join-Path $PackageRoot 'tomlpp\include')"
         "/I$(Join-Path $PackageRoot 'jolt')"
         "/I$(Join-Path $PackageRoot 'cgltf')"
         "/I$(Join-Path $PackageRoot 'tinybvh')"
@@ -361,15 +354,12 @@ $ShaderTable = @(
     @{ Source = 'ClusterCull.slang';           Stage = 'compute';  Output = 'ClusterCull.spv' }
     @{ Source = 'HiZReduce.slang';             Stage = 'compute';  Output = 'HiZReduce.spv' }
     @{ Source = 'AtrousDenoise.slang';         Stage = 'compute';  Output = 'AtrousDenoise.spv' }
-    @{ Source = 'AtmosphereLut.slang';         Stage = 'compute';  Output = 'AtmosphereLut.spv' }
     @{ Source = 'LuminanceReduce.slang';       Stage = 'compute';  Output = 'LuminanceReduce.spv' }
     @{ Source = 'SurfaceResolve.slang';        Stage = 'compute';  Output = 'SurfaceResolve.spv' }
     @{ Source = 'VisibilityRaster.vert.slang'; Stage = 'vertex';   Output = 'VisibilityRaster.vert.spv' }
     @{ Source = 'VisibilityRaster.frag.slang'; Stage = 'fragment'; Output = 'VisibilityRaster.frag.spv' }
-    @{ Source = 'InterfaceRaster.vert.slang';  Stage = 'vertex';   Output = 'InterfaceRaster.vert.spv' }
-    @{ Source = 'InterfaceRaster.frag.slang';  Stage = 'fragment'; Output = 'InterfaceRaster.frag.spv' }
 )
-$ShaderIncludeNames = @('SceneRecords.slang', 'RayGeneration.slang', 'TraversalCWBVH.slang', 'InterfaceRecords.slang', 'InterfaceSignedDistance.slang', 'AtmosphereScattering.slang')
+$ShaderIncludeNames = @('SceneRecords.slang', 'RayGeneration.slang', 'TraversalCWBVH.slang')
 
 function Invoke-ShaderLowering([string] $VulkanRoot)
 {
@@ -488,14 +478,11 @@ Import-ToolchainEnvironment
 $VulkanRoot = Resolve-VulkanRoot
 Write-Building "Vulkan SDK $VulkanRoot"
 
-# Ensure submodules are present -- all 12 packages, soft on network/SSL failure
+# Ensure submodules are present -- soft on network/SSL failure
 Write-Building 'Ensuring ExternalPackages submodules are initialised...'
 Push-Location $RepositoryRoot
 $SubmoduleList = @(
-    'ExternalPackages/imgui'
     'ExternalPackages/glfw'
-    'ExternalPackages/thorvg'
-    'ExternalPackages/tomlpp'
     'ExternalPackages/jolt'
     'ExternalPackages/ufbx'
     'ExternalPackages/earcut'
@@ -503,7 +490,6 @@ $SubmoduleList = @(
     'ExternalPackages/tinybvh'
     'ExternalPackages/clipper2'
     'ExternalPackages/stb'
-    'ExternalPackages/miniaudio'
     'ExternalPackages/fast_obj'
 )
 # Pass 1 -- try normal update (will use cached objects when already checked out)
@@ -555,29 +541,6 @@ if (-not $UpdateOk)
 }
 Pop-Location
 
-# Apply Slate's ImGui divergence BEFORE anything is translated. `git submodule update` above restores the
-#    vendored tree to its pinned commit, which silently discards the patches -- that is exactly how the
-#    trapezoidal tabs disappeared once already. Re-applying here means the two steps can never be run out of
-#    order. The script is idempotent and every member it adds defaults to 0.0f, so a build that has already
-#    been patched skips, and an unpatched build is visually identical until Slate seats the style values.
-Write-Building 'Applying ImGui patches (Patches/) ...'
-Push-Location $RepositoryRoot
-$PatchScript = Join-Path $RepositoryRoot 'Scripts\ApplyImGuiPatches.ps1'
-if (Test-Path $PatchScript)
-{
-    & powershell -NoProfile -ExecutionPolicy Bypass -File $PatchScript
-    if ($LASTEXITCODE -ne 0)
-    {
-        Pop-Location
-        throw 'ApplyImGuiPatches.ps1 failed; refusing to build against a half-patched ImGui'
-    }
-}
-else
-{
-    Write-Skipped 'Scripts\ApplyImGuiPatches.ps1 is absent - building against pristine ImGui'
-}
-Pop-Location
-
 # Build GLFW DLL if absent
 $GlfwLib = Join-Path $PackageRoot 'glfw\lib-vc2022\glfw3dll.lib'
 if ((-not (Test-Path $GlfwLib)) -and (-not $script:GlfwBuilt))
@@ -586,16 +549,6 @@ if ((-not (Test-Path $GlfwLib)) -and (-not $script:GlfwBuilt))
     $ExitCode = Invoke-DependencyScript (Join-Path $ScriptRoot 'BuildGLFW.ps1') @()
     if ($ExitCode -ne 0) { throw 'BuildGLFW.ps1 failed' }
     $script:GlfwBuilt = $true
-}
-
-# Build ThorVG static lib if absent
-$ThorVGLib = Join-Path $PackageRoot 'thorvg\lib\thorvg.lib'
-if ((-not (Test-Path $ThorVGLib)) -and (-not $script:ThorVGBuilt))
-{
-    Write-Building 'ThorVG library absent - invoking BuildThorVG.ps1'
-    $ExitCode = Invoke-DependencyScript (Join-Path $ScriptRoot 'BuildThorVG.ps1') @('-Configuration', $Configuration)
-    if ($ExitCode -ne 0) { throw 'BuildThorVG.ps1 failed' }
-    $script:ThorVGBuilt = $true
 }
 
 # Build Jolt static lib if absent (D4: rigid bodies drive instance transforms)
@@ -623,16 +576,6 @@ $ObjectRoot = Join-Path $OutputRoot 'Object'
 $Flags        = Get-CompilationFlags $Configuration
 $IncludePaths = Get-IncludePaths $VulkanRoot
 
-# Collect sources
-$ImGuiSources = @(
-    (Join-Path $PackageRoot 'imgui\imgui.cpp')
-    (Join-Path $PackageRoot 'imgui\imgui_draw.cpp')
-    (Join-Path $PackageRoot 'imgui\imgui_tables.cpp')
-    (Join-Path $PackageRoot 'imgui\imgui_widgets.cpp')
-    (Join-Path $PackageRoot 'imgui\backends\imgui_impl_glfw.cpp')
-    (Join-Path $PackageRoot 'imgui\backends\imgui_impl_vulkan.cpp')
-)
-
 $EngineRelative = @(
     # NOTE: this list must match the .cpp files actually in the tree (branch arena/01a06c54-slate, 2026-09-04).
     # Phantom entries from a foreign module layout were removed and the two missing DisplayPresentation files
@@ -644,35 +587,12 @@ $EngineRelative = @(
     'Engine\DeviceExchange\OrientationClassifier.cpp'
     'Engine\DisplayPresentation\ReSTIRIntegrator.cpp'
     'Engine\DisplayPresentation\ShadingTableCodec.cpp'
-    'Engine\DisplayPresentation\RenderScheduler.cpp'
-    'Engine\DisplayPresentation\ThemeStructure.cpp'
-    'Engine\DisplayPresentation\VectorCodec.cpp'
-    'Engine\DisplayPresentation\ControlCentreHost.cpp'
-    'Engine\DisplayPresentation\FontCodec.cpp'
-    'Engine\DisplayPresentation\PixelSpace.cpp'
-    'Engine\DisplayPresentation\MotionIntegrator.cpp'
-    'Engine\DisplayPresentation\GlyphSpace.cpp'
-    'Engine\DisplayPresentation\NotificationQueue.cpp'
-    'Engine\DisplayPresentation\TelemetryMetrics.cpp'
-    'Engine\DisplayPresentation\ControlKit.cpp'
-    'Engine\DisplayPresentation\TextEntryState.cpp'
-    'Engine\DisplayPresentation\InterfaceOutlinerSequence.cpp'
-    'Engine\DisplayPresentation\InterfaceBrowserSequence.cpp'
-    'Engine\GeometricRaster\CelestialSolver.cpp'
     'Engine\DisplayPresentation\ExposureIntegrator.cpp'
-    'Engine\DisplayPresentation\DaylightSolver.cpp'
-    'Engine\DisplayPresentation\DialogueHost.cpp'
-    'Engine\DisplayPresentation\AppearanceInspector.cpp'
-    'Engine\DisplayPresentation\ConfigurationInspector.cpp'
-    'Engine\DisplayPresentation\ConfigurationRegistry.cpp'
-    'Engine\DisplayPresentation\TypefaceRegistry.cpp'
-    'Engine\DisplayPresentation\FidelityClassifier.cpp'
     'Engine\GeometricRaster\CameraProjection.cpp'
     'Engine\GeometricRaster\GeometryStructure.cpp'
     'Engine\GeometricRaster\SceneStructure.cpp'
     'Engine\GeometricRaster\TraversalIndex.cpp'
     'Engine\DeviceExchange\VisibilityExchange.cpp'
-    'Engine\DisplayPresentation\DiagnosticInspector.cpp'
     'Engine\ContentInterchange\MaterialIndex.cpp'
     'Engine\ContentInterchange\MaterialCodec.cpp'
     'Engine\ContentInterchange\TextureIndex.cpp'
@@ -682,25 +602,8 @@ $EngineRelative = @(
     'Engine\ContentInterchange\ObjCodec.cpp'
     'Engine\ContentInterchange\ContentCodec.cpp'
     'Engine\ContentInterchange\UfbxTranslation.cpp'
-    'Engine\SpatialInterface\InterfaceStructure.cpp'
-    'Engine\SpatialInterface\InterfaceSequence.cpp'
-    'Engine\SpatialInterface\InterfaceLayoutCodec.cpp'
-    'Engine\SpatialInterface\PaletteConfiguration.cpp'
-    'Engine\SpatialInterface\InterfacePointerProjection.cpp'
-    'Engine\SpatialInterface\InterfaceTextProjection.cpp'
-    'Engine\SpatialInterface\InterfaceScreenSequence.cpp'
-    'Engine\SpatialInterface\InterfaceVectorCodec.cpp'
-    'Engine\SpatialInterface\InterfaceLightProjection.cpp'
-    'Engine\DeviceExchange\InterfaceExchange.cpp'
-    'Projects\Project-Zero\Source\InterfaceTrialSequence.cpp'
     'Projects\Project-Zero\Source\InstanceMotionSequence.cpp'
     'Projects\Project-Zero\Source\PhysicsInstanceSequence.cpp'
-    'Projects\Project-Zero\Source\InterfaceAudioSequence.cpp'
-    'Projects\Project-Dyno\Source\CrankClickIntegrator.cpp'
-    'Projects\Project-Dyno\Source\DynoSequence.cpp'
-    'Engine\PlatformInterchange\AudioExchange.cpp'
-    'Engine\PlatformInterchange\MiniaudioTranslation.cpp'
-    'Engine\PlatformInterchange\WaveCodec.cpp'
     'Engine\PhysicalDynamics\RigidBodySolver.cpp'
     'Projects\Project-Zero\Source\ShowroomStructure.cpp'
     'Projects\Project-Zero\Source\RayTracingSolver.cpp'
@@ -715,12 +618,11 @@ foreach ($Rel in $EngineRelative)
 }
 
 # Fail fast with NAMES if the source list ever rots again (was: 73 cascading c1xx C1083s, 2026-09-04).
-$MissingSources = @($EngineSources | Where-Object { -not (Test-Path $_) }) + @($ImGuiSources | Where-Object { -not (Test-Path $_) })
+$MissingSources = @($EngineSources | Where-Object { -not (Test-Path $_) })
 if ($MissingSources.Count -gt 0) { throw ('missing source files in the translation batch:' + [Environment]::NewLine + ($MissingSources -join [Environment]::NewLine)) }
 
 $AllSources = New-Object System.Collections.Generic.List[string]
 foreach ($S in $EngineSources) { $AllSources.Add($S) }
-foreach ($S in $ImGuiSources)  { $AllSources.Add($S) }
 
 # Translate
 $ObjectFiles = Invoke-Translation $AllSources.ToArray() 'Project-Zero' $ObjectRoot $Flags $IncludePaths
@@ -788,7 +690,6 @@ $LinkArgs.Add("/PDB:$(Join-Path $BinaryRoot 'Project-Zero.pdb')")
 foreach ($Obj in $ObjectFiles)                    { $LinkArgs.Add($Obj) }
 $LinkArgs.Add((Join-Path $VulkanRoot 'Lib\vulkan-1.lib'))
 $LinkArgs.Add((Join-Path $PackageRoot 'glfw\lib-vc2022\glfw3dll.lib'))
-$LinkArgs.Add((Join-Path $PackageRoot 'thorvg\lib\thorvg.lib'))
 $LinkArgs.Add($JoltLib)
 $LinkArgs.Add('gdi32.lib')
 $LinkArgs.Add('user32.lib')
@@ -806,10 +707,9 @@ if ($LASTEXITCODE -ne 0)
 
 Write-Produced $ExePath
 
-# Mirror the freshly linked binary to <repo>\Build\ so `.\Build\Project-Zero.exe` works from the repository root,
-#    which is the command References/RunningTheShowroom.md documents. Copying (rather than only linking here) is what
-#    prevents the classic "I rebuilt but the old UI is still there" report: a stale copy from an earlier session would
-#    otherwise sit at that path forever, since nothing else ever writes to it.
+# Mirror the freshly linked binary to <repo>\Build\ so `.\Build\Project-Zero.exe` works from the repository root.
+#    Copying (rather than only linking here) is what prevents a stale copy from an earlier session sitting at that
+#    path forever, since nothing else ever writes to it.
 $RootBinary = Join-Path $RepositoryRoot 'Build'
 New-Item -ItemType Directory -Force -Path $RootBinary | Out-Null
 foreach ($Payload in @('Project-Zero.exe', 'Project-Zero.pdb', 'glfw3.dll'))

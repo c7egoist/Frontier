@@ -20,7 +20,7 @@ struct FlyThroughConfiguration
     float                   MouseSensitivity;                   // [rad/px] rotational sensitivity per mouse pixel
     float                   ScrollSpeedIncrement;               // [m/s] speed delta per scroll wheel step
     float                   AccelerationDamping;                // [0..1] momentum smoothing coefficient
-    bool                    InvertPitch = false;                // [bool] Control Centre › Input › "Invert Y-Axis"
+    bool                    InvertPitch = false;                // [bool] true = mouse-up pitches the camera down
 };
 
 //------------------------------------------------------------------------------------------------------------------------

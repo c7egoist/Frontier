@@ -4,7 +4,7 @@
 // 🧩 The C-ABI boundary to the platform's audio device (miniaudio: WASAPI / PulseAudio / ALSA / Core Audio, null when asked).
 //    Owns the device, its realtime thread, and the one rule that keeps audio glitch-free: the realtime callback touches
 //    nothing but the attached SignalIntegrator and a handful of relaxed atomics. The main thread talks to it through
-//    Advance(Δτ) exactly like every other host in Slate (Notifications.Advance, ControlCentre.AdvanceLocomotion …).
+//    Advance(Δτ) once per frame from the main loop.
 //
 //    Threads
 //        main       Open / Attach / Advance / Close — Advance publishes device events (start, stop, reroute, loss) as

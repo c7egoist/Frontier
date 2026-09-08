@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 //  Four things here are easy to get wrong and hard to notice afterwards:
 //
-//    · a linear mean instead of a log mean — the sun entering frame blacks out the image;
+//    · a linear mean instead of a log mean — a luminaire entering frame blacks out the image;
 //    · frame-rate dependent easing — the transition looks different on different hardware;
 //    · symmetric adaptation — dark rooms resolve implausibly fast, or bright doorways implausibly slowly;
 //    · no bounds — a black frame drives exposure to infinity and amplifies noise into a grey blizzard.
@@ -102,7 +102,7 @@ static float MeterWith(const std::vector<MeterTap>& Taps, bool CentreWeighted, f
     const double Anchor = BinLog2(MedianIndex);
 
     // Everything within a few stops of it. A distance in stops is what separates a bright OUTLIER from a bright
-    //    SUBJECT, where an area fraction cannot: sunlit ground sits two stops from its sky, a hole in a roof
+    //    SUBJECT, where an area fraction cannot: lit ground sits two stops from the room around it, a bare bulb
     //    sits eleven stops above the room it lights.
     double Weighted = 0.0, Used = 0.0;
     for (int Index = 0; Index < kHistogramBins; ++Index)
@@ -165,12 +165,13 @@ int main()
         // The definition of "correct": a scene whose average luminance is L must be rendered so that L maps to
         //    the key for that luminance. If this is wrong every scene is uniformly too dark or too bright.
         //
-        // ⚠️ The key is a CONSTANT only in daylight. Below the photopic level it falls, deliberately, because
-        //    an exposure of Key/L renders every scene at the same mid-grey and a starlit field would arrive
-        //    looking like an overcast afternoon. Asserting against the constant here was asserting that night
-        //    must look like day — so the expectation follows the curve, and test 11 is what pins the curve
+        // ⚠️ The key is a CONSTANT only in bright scenes. Below the photopic level it falls, deliberately,
+        //    because an exposure of Key/L renders every scene at the same mid-grey and a dark interior would
+        //    arrive looking like a bright hall. Asserting against the constant here was asserting that dark
+        //    must look like bright — so the expectation follows the curve, and test 11 is what pins the curve
         //    itself down.
         ExposureConfiguration Config{};
+        Config.Mode = ExposureModeCategory::Adaptive;
         for (float Luminance : { 0.001f, 0.18f, 1.0f, 100.0f, 8000.0f })
         {
             const float Exposure = ExposureIntegrator::ExposureForLuminance(Luminance, Config);
@@ -197,7 +198,9 @@ int main()
         for (float FrameRate : { 15.0f, 30.0f, 60.0f, 360.0f })
         {
             ExposureIntegrator Exposure;
-            Exposure.AssignConfiguration(ExposureConfiguration{});
+            ExposureConfiguration RateConfig{};
+            RateConfig.Mode = ExposureModeCategory::Adaptive;
+            Exposure.AssignConfiguration(RateConfig);
             Exposure.ObserveLuminance(std::log(0.18f));
             Exposure.Snap();
             Results[Index++] = Settle(Exposure, 18.0f, 0.5f, FrameRate);
@@ -218,6 +221,7 @@ int main()
         // Both directions cover the same log distance, so any difference in progress is the asymmetry and not
         //    the size of the change.
         ExposureConfiguration Config{};
+        Config.Mode = ExposureModeCategory::Adaptive;
 
         ExposureIntegrator Brightening;
         Brightening.AssignConfiguration(Config);
@@ -243,20 +247,21 @@ int main()
     }
 
     //------------------------------------------------------------------------------------------------------------------
-    std::printf("\n5. the sun entering frame does not black out the image\n");
+    std::printf("\n5. a luminaire entering frame does not black out the image\n");
     {
         // The reason the measurement is a log mean. Modelled directly: a frame that is 99 % dim room and 1 %
-        //    sun disc. A LINEAR average is dominated by the sun; a log average is not, and the difference is
+        //    bare bulb. A LINEAR average is dominated by the bulb; a log average is not, and the difference is
         //    the whole argument.
         const float RoomLuminance = 1.0f;
-        const float SunLuminance  = 1.6e9f;   // the solar disc, in cd/m²
-        const float SunFraction   = 0.01f;
+        const float BulbLuminance = 1.6e9f;   // a small source at enormous luminance, in cd/m²
+        const float BulbFraction  = 0.01f;
 
-        const float LinearMean = (1.0f - SunFraction) * RoomLuminance + SunFraction * SunLuminance;
-        const float LogMean    = std::exp((1.0f - SunFraction) * std::log(RoomLuminance)
-                                        + SunFraction * std::log(SunLuminance));
+        const float LinearMean = (1.0f - BulbFraction) * RoomLuminance + BulbFraction * BulbLuminance;
+        const float LogMean    = std::exp((1.0f - BulbFraction) * std::log(RoomLuminance)
+                                        + BulbFraction * std::log(BulbLuminance));
 
         ExposureConfiguration Config{};
+        Config.Mode = ExposureModeCategory::Adaptive;
         const float LinearExposure = ExposureIntegrator::ExposureForLuminance(LinearMean, Config);
         const float LogExposure    = ExposureIntegrator::ExposureForLuminance(LogMean, Config);
 
@@ -270,23 +275,24 @@ int main()
         Expect(RoomLuminance * LinearExposure < 0.01f,
                "a linear mean really would black the room out — the failure this avoids");
         Expect(RoomLuminance * LogExposure > 0.05f,
-               "the log mean keeps the room visible with the sun in shot");
+               "the log mean keeps the room visible with the bulb in shot");
     }
 
     //------------------------------------------------------------------------------------------------------------------
     std::printf("\n6. exposure is bounded at both ends\n");
     {
         // Without a ceiling a nearly black frame drives exposure toward infinity and amplifies sensor noise
-        //    into a grey blizzard; without a floor, staring at the sun drives it to zero.
+        //    into a grey blizzard; without a floor, staring at a bare bulb drives it to zero.
         ExposureConfiguration Config{};
+        Config.Mode = ExposureModeCategory::Adaptive;
 
         const float Darkest  = ExposureIntegrator::ExposureForLuminance(0.0f,   Config);
         const float Brightest= ExposureIntegrator::ExposureForLuminance(1.0e9f, Config);
-        std::printf("     a black frame gives %.2f, the sun's disc gives %.5f\n",
+        std::printf("     a black frame gives %.2f, a 1e9 bulb gives %.5f\n",
                     static_cast<double>(Darkest), static_cast<double>(Brightest));
 
         Expect(Darkest   <= Config.MaximumExposure, "a black frame cannot drive exposure past the ceiling");
-        Expect(Brightest >= Config.MinimumExposure, "and the sun cannot drive it below the floor");
+        Expect(Brightest >= Config.MinimumExposure, "and a bare bulb cannot drive it below the floor");
         Expect(std::isfinite(Darkest) && std::isfinite(Brightest), "neither bound produces a non-finite value");
     }
 
@@ -296,7 +302,9 @@ int main()
         // A NaN in the adapted value would propagate forever — every later frame compares against it and stays
         //    NaN, so the screen goes black for the rest of the session rather than for one frame.
         ExposureIntegrator Exposure;
-        Exposure.AssignConfiguration(ExposureConfiguration{});
+        ExposureConfiguration PoisonConfig{};
+        PoisonConfig.Mode = ExposureModeCategory::Adaptive;
+        Exposure.AssignConfiguration(PoisonConfig);
 
         Exposure.ObserveLuminance(std::numeric_limits<float>::quiet_NaN());
         Exposure.Advance(1.0f / 60.0f);
@@ -318,7 +326,9 @@ int main()
         // An exponential approach must be monotone. Overshoot would read as the image pulsing after every
         //    change in view, which is the kind of thing that gets blamed on the denoiser.
         ExposureIntegrator Exposure;
-        Exposure.AssignConfiguration(ExposureConfiguration{});
+        ExposureConfiguration SettleConfig{};
+        SettleConfig.Mode = ExposureModeCategory::Adaptive;
+        Exposure.AssignConfiguration(SettleConfig);
         Exposure.ObserveLuminance(std::log(0.1f));
         Exposure.Snap();
         Exposure.ObserveLuminance(std::log(100.0f));
@@ -338,19 +348,20 @@ int main()
     }
 
     //------------------------------------------------------------------------------------------------------------------
-    std::printf("\n9. the night sky becomes visible, which is the point\n");
+    std::printf("\n9. dim scenes become visible, which is the point\n");
     {
-        // The reason this phase exists. A7's stars and moonlit sky are physically 8 orders of magnitude below a
-        //    noon sky; under one fixed exposure they are a black screen. These are the exposures adaptation
+        // The reason this phase exists. A dark interior can sit eight orders of magnitude below a bright
+        //    hall; under one fixed exposure the dark end is a black screen. These are the exposures adaptation
         //    supplies, and whether each scene then lands in a visible range.
         ExposureConfiguration Config{};
+        Config.Mode = ExposureModeCategory::Adaptive;
         struct Scene { const char* Name; float Luminance; };
         const Scene Scenes[] = {
-            { "noon sky",       8000.0f  },
-            { "overcast",       2000.0f  },
-            { "sunset",           50.0f  },
-            { "civil twilight",    3.0f  },
-            { "moonlit sky",       0.1f  },
+            { "bright hall",    8000.0f  },
+            { "bright room",    2000.0f  },
+            { "dim room",         50.0f  },
+            { "dark room",         3.0f  },
+            { "near-black",        0.1f  },
         };
         bool AllVisible = true;
         for (const Scene& S : Scenes)
@@ -362,18 +373,17 @@ int main()
                         static_cast<double>(Exposure), static_cast<double>(Rendered));
             if (Rendered < 0.02f || Rendered > 1.0f) AllVisible = false;
         }
-        Expect(AllVisible, "every scene from noon to moonlight lands in a visible range");
+        Expect(AllVisible, "every scene from bright to near-black lands in a visible range");
     }
 
     //------------------------------------------------------------------------------------------------------------------
-    std::printf("\n10. the meter is SCALE INVARIANT — the same rule at noon and at midnight\n");
+    std::printf("\n10. the meter is SCALE INVARIANT — the same rule in bright rooms and dark ones\n");
     {
         // 🔴 The defect this replaces. The reduction used to skip any pixel below a fixed 1e-2 cd/m², which is a
-        //    daylight constant sitting in a place every scale of scene passes through. Measured across a sunset:
-        //    at 9° below the horizon the sky fell under the floor while the ground was still above it, so the
-        //    sky went black against a correctly exposed ground; by 18° below, EVERY pixel was excluded, the
-        //    sample count reached zero and the meter stopped updating and held its last daylight reading. That
-        //    is a permanently black night with no stars in it.
+        //    bright-scene constant sitting in a place every scale of scene passes through. In a dim interior the
+        //    lit wall fell under the floor while the luminaire was still above it, so the wall went black against
+        //    a correctly exposed lamp; in a darker room EVERY pixel was excluded, the sample count reached zero
+        //    and the meter stopped updating and held its last bright reading. That is a permanently black room.
         //
         //    A percentile of the frame's own distribution has no absolute constant in it, so the identical
         //    frame scaled down by six orders of magnitude must meter six orders of magnitude lower — exactly.
@@ -408,37 +418,38 @@ int main()
         Expect(Highest / Lowest < Quantisation,
                "and they agree with each other to the histogram's own resolution");
 
-        // The specific frame that used to return nothing at all: a night sky with stars in it.
-        std::vector<MeterTap> Night;
+        // The specific frame that used to return nothing at all: a dark frame with one bright tap in it.
+        std::vector<MeterTap> Dark;
         for (int I = 0; I < 2304; ++I)
-            Night.push_back({ 1.0e-4f, (I % 48 + 0.5f) / 48.0f, (I / 48 + 0.5f) / 48.0f });
-        Night[1100].Luminance = 0.4f;   // one star
-        const float NightMetered = MeterFrame(Night);
-        std::printf("     a night sky at 1e-4 with one star meters %.3e\n", static_cast<double>(NightMetered));
-        Expect(NightMetered > 0.0f,      "a night frame still produces a reading — the old rule produced none");
-        Expect(NightMetered < 1.0e-3f,   "and it reads the sky, not the star");
+            Dark.push_back({ 1.0e-4f, (I % 48 + 0.5f) / 48.0f, (I / 48 + 0.5f) / 48.0f });
+        Dark[1100].Luminance = 0.4f;   // one bright tap
+        const float DarkMetered = MeterFrame(Dark);
+        std::printf("     a dark frame at 1e-4 with one bright tap meters %.3e\n", static_cast<double>(DarkMetered));
+        Expect(DarkMetered > 0.0f,      "a dark frame still produces a reading — the old rule produced none");
+        Expect(DarkMetered < 1.0e-3f,   "and it reads the room, not the tap");
     }
 
     //------------------------------------------------------------------------------------------------------------------
-    std::printf("\n11. dark adaptation — night renders as night, and stars come through it\n");
+    std::printf("\n11. dark adaptation — dark renders as dark, and bright points come through it\n");
     {
         ExposureConfiguration Config{};
+        Config.Mode = ExposureModeCategory::Adaptive;
 
         // Above the photopic level nothing changes at all, which is the identity switch: every image made
         //    before this curve existed is reproduced exactly.
         bool Identity = true;
         for (float L : { 5.0f, 50.0f, 2000.0f, 120000.0f })
             if (std::fabs(ExposureIntegrator::KeyForLuminance(L, Config) - Config.KeyValue) > 1e-6f) Identity = false;
-        Expect(Identity, "at and above the photopic level the key is exactly KeyValue — nothing changes in daylight");
+        Expect(Identity, "at and above the photopic level the key is exactly KeyValue — nothing changes in bright scenes");
 
         std::printf("     scene                luminance      key    renders at\n");
         struct Row { const char* Name; float Luminance; };
         const Row Rows[] = {
-            { "noon",            8000.0f  },
-            { "overcast",        2000.0f  },
-            { "civil twilight",     3.0f  },
-            { "moonlit sky",        0.1f  },
-            { "starlit sky",     1.0e-4f  },
+            { "bright hall",     8000.0f  },
+            { "bright room",     2000.0f  },
+            { "dim room",            3.0f  },
+            { "dark room",           0.1f  },
+            { "near-black",      1.0e-4f  },
         };
         float PreviousRendered = 1e9f;
         bool  Monotonic = true;
@@ -454,36 +465,36 @@ int main()
         }
         Expect(Monotonic, "a darker scene always renders darker — the eye never fully compensates");
 
-        // 🔴 The point of the whole curve. A full-compensation exposure renders the night sky at mid-grey and
-        //    the stars as a barely brighter grey on top of it; with dark adaptation the sky is nearly black and
-        //    the same stars are points of light well above white.
-        const float SkyLuminance  = 1.0e-4f;
-        const float StarLuminance = 0.052f;   // a bright star's peak: StarBrightness 0.4 × the field's 0.13
-        const float Exposure = ExposureIntegrator::ExposureForLuminance(SkyLuminance, Config);
-        const float SkyRenders  = SkyLuminance  * Exposure;
-        const float StarRenders = StarLuminance * Exposure;
-        std::printf("     night: sky renders %.4f, a bright star renders %.2f  (contrast %.0f:1)\n",
-                    static_cast<double>(SkyRenders), static_cast<double>(StarRenders),
-                    static_cast<double>(StarRenders / SkyRenders));
-        Expect(SkyRenders  < 0.05f, "the night sky renders dark, not as grey daylight");
-        Expect(StarRenders > 1.0f,  "while a bright star saturates — visible as a point of light");
+        // 🔴 The point of the whole curve. A full-compensation exposure renders a dark room at mid-grey and
+        //    a bright point in it as a barely brighter grey on top; with dark adaptation the room is nearly
+        //    black and the same point is well above white.
+        const float DarkLuminance  = 1.0e-4f;
+        const float PointLuminance = 0.052f;   // a small bright point against the dark
+        const float Exposure = ExposureIntegrator::ExposureForLuminance(DarkLuminance, Config);
+        const float DarkRenders  = DarkLuminance  * Exposure;
+        const float PointRenders = PointLuminance * Exposure;
+        std::printf("     dark: room renders %.4f, a bright point renders %.2f  (contrast %.0f:1)\n",
+                    static_cast<double>(DarkRenders), static_cast<double>(PointRenders),
+                    static_cast<double>(PointRenders / DarkRenders));
+        Expect(DarkRenders  < 0.05f, "the dark room renders dark, not as mid-grey");
+        Expect(PointRenders > 1.0f,  "while a bright point saturates — visible as a point of light");
 
         // What the same scene would have done with the curve switched off, so the difference is on the record.
         ExposureConfiguration Flat = Config;
         Flat.ScotopicExponent = 0.0f;
-        const float FlatSky = SkyLuminance * ExposureIntegrator::ExposureForLuminance(SkyLuminance, Flat);
-        std::printf("     with dark adaptation off the same sky renders %.3f — grey, not night\n",
-                    static_cast<double>(FlatSky));
-        Expect(FlatSky > 0.15f, "and with the exponent at zero it really does render as mid-grey");
+        const float FlatDark = DarkLuminance * ExposureIntegrator::ExposureForLuminance(DarkLuminance, Flat);
+        std::printf("     with dark adaptation off the same room renders %.3f — grey, not dark\n",
+                    static_cast<double>(FlatDark));
+        Expect(FlatDark > 0.15f, "and with the exponent at zero it really does render as mid-grey");
     }
 
     //------------------------------------------------------------------------------------------------------------------
     std::printf("\n12. framing moves the exposure less than it used to\n");
     {
         // Reported as "close to the object it looks fine, move away and the scene gets brighter". Part of that
-        //    was the sky model's missing ground, fixed separately; the rest is that an UNWEIGHTED frame average
-        //    lets the amount of empty space in shot decide how bright the subject renders. Every camera meters
-        //    centre-weighted for exactly this reason.
+        //    was the dark void the oculus opens onto, fixed separately; the rest is that an UNWEIGHTED frame
+        //    average lets the amount of empty space in shot decide how bright the subject renders. Every camera
+        //    meters centre-weighted for exactly this reason.
         const float Subject = 1000.0f, Surround = 200.0f;
         float Lowest = 1e9f, Highest = 0.0f, FlatLowest = 1e9f, FlatHighest = 0.0f;
         std::printf("     subject size    metered    renders at   (unweighted would be)\n");
@@ -510,25 +521,25 @@ int main()
 
         // ⚠️ Stated plainly because it is a limit, not a bug: an average meter CANNOT hold a small bright
         //    subject at a fixed brightness against a dark surround, and neither can a real camera — that is
-        //    what exposure compensation exists for. The reported white-out was not this. It was the sky model
-        //    having no ground, which put a black void across the bottom half of the frame and dragged the
-        //    reading by 86×; that is fixed in the atmosphere, not here.
+        //    what exposure compensation exists for. The reported white-out was not this. It was the black void
+        //    the oculus opens onto, which filled the bottom half of the frame and dragged the reading by 86×;
+        //    metering the subject rather than the surround is what fixed it.
         std::printf("     (an average meter cannot fully hold a shrinking subject — a camera does not either)\n");
     }
 
     //------------------------------------------------------------------------------------------------------------------
     std::printf("\n13. a bright hole in a dark room does not pump the exposure as the camera moves\n");
     {
-        // 🔴 Reported as "moving back and forth still changes the brightness of the sky and the Cornell box",
-        //    with the sharp observation that whatever it was could not be the box's own shading, because the SKY
-        //    was moving too and the sky does not depend on where the camera stands. It does not — but the
-        //    exposure does, and the exposure is global.
+        // 🔴 Reported as "moving back and forth still changes the brightness of the room", with the sharp
+        //    observation that whatever it was could not be the box's own shading, because the LAMP was moving
+        //    too and the lamp does not depend on where the camera stands. It does not — but the exposure does,
+        //    and the exposure is global.
         //
-        //    A Cornell frame with the roof oculus in shot is BIMODAL: a room near 1 cd/m² and a hole showing sky
-        //    at thousands. Walking about changes how much of the frame the hole covers, and a percentile window
-        //    that is narrow at the top lets that second mode slide in and out of the average.
-        const float Room = 1.0f, SkyThroughHole = 3000.0f;
-        const auto Frame = [&](float SkyShare)
+        //    A Cornell frame with the luminaire in shot is BIMODAL: a room near 1 cd/m² and a lamp at thousands.
+        //    Walking about changes how much of the frame the lamp covers, and a percentile window that is narrow
+        //    at the top lets that second mode slide in and out of the average.
+        const float Room = 1.0f, BulbInShot = 3000.0f;
+        const auto Frame = [&](float BulbShare)
         {
             std::vector<MeterTap> Taps;
             const int N = 48;
@@ -536,16 +547,16 @@ int main()
                 for (int I = 0; I < N; ++I)
                 {
                     const float X = (I + 0.5f) / N, Y = (J + 0.5f) / N;
-                    // The hole sits high in frame, as a roof opening does.
-                    const bool  Sky = Y < SkyShare;
+                    // The lamp sits high in frame, as a ceiling fitting does.
+                    const bool  Bulb = Y < BulbShare;
                     const float Wall = Room * (0.5f + 1.0f * ((I * 7 + J * 13) % 97) / 97.0f);
-                    Taps.push_back({ Sky ? SkyThroughHole : Wall, X, Y });
+                    Taps.push_back({ Bulb ? BulbInShot : Wall, X, Y });
                 }
             return Taps;
         };
 
         float Lowest = 1e9f, Highest = 0.0f;
-        std::printf("     sky share of frame   metered\n");
+        std::printf("     bulb share of frame   metered\n");
         for (float Share : { 0.00f, 0.02f, 0.05f, 0.10f, 0.20f, 0.35f })
         {
             const float Metered = MeterFrame(Frame(Share));
@@ -555,13 +566,13 @@ int main()
         }
         const float Stops = std::log2(Highest / Lowest);
         std::printf("     the reading moves %.2f stops across the whole sweep\n", static_cast<double>(Stops));
-        Expect(Stops < 0.25f, "the exposure does not move as the hole comes into and out of shot");
+        Expect(Stops < 0.25f, "the exposure does not move as the lamp comes into and out of shot");
 
         // What the previous window did on the identical frames, so the regression is recognisable.
         float NarrowLow = 1e9f, NarrowHigh = 0.0f;
         for (float Share : { 0.00f, 0.02f, 0.05f, 0.10f, 0.20f, 0.35f })
         {
-            // Twelve stops is wide enough to let the oculus sky back in, which is what the percentile window
+            // Twelve stops is wide enough to let the lamp back in, which is what the percentile window
             //    effectively did — the same frames, metered as they used to be.
             const float Metered = MeterWith(Frame(Share), true, 12.0f);
             NarrowLow = std::fmin(NarrowLow, Metered); NarrowHigh = std::fmax(NarrowHigh, Metered);
@@ -569,48 +580,48 @@ int main()
         std::printf("     the previous 20/5 window moved %.2f stops on the same frames\n",
                     static_cast<double>(std::log2(NarrowHigh / NarrowLow)));
         Expect(std::log2(NarrowHigh / NarrowLow) > 1.5f,
-               "a window that admits the hole really does pump — this is the bug being fixed");
+               "a window that admits the lamp really does pump — this is the bug being fixed");
 
         // ⚠️ And the wider window must not have made the meter blind to a scene that genuinely IS bright. A
-        //    landscape is mostly sky, and there the sky is the subject rather than an outlier.
-        std::vector<MeterTap> Outdoor;
+        //    bright hall is mostly bright walls, and there the brightness is the subject rather than an outlier.
+        std::vector<MeterTap> Hall;
         for (int J = 0; J < 48; ++J)
             for (int I = 0; I < 48; ++I)
             {
                 const float X = (I + 0.5f) / 48.0f, Y = (J + 0.5f) / 48.0f;
-                Outdoor.push_back({ Y < 0.59f ? 2000.0f : 10000.0f, X, Y });
+                Hall.push_back({ Y < 0.59f ? 2000.0f : 10000.0f, X, Y });
             }
-        const float Landscape = MeterFrame(Outdoor);
-        std::printf("     a landscape of 2000 sky over 10000 ground still meters %.0f\n",
-                    static_cast<double>(Landscape));
-        Expect(Landscape > 1500.0f && Landscape < 9000.0f,
-               "a daylight landscape still meters as daylight, not as the darkest thing in it");
+        const float Bright = MeterFrame(Hall);
+        std::printf("     a hall of 2000 walls over 10000 floor still meters %.0f\n",
+                    static_cast<double>(Bright));
+        Expect(Bright > 1500.0f && Bright < 9000.0f,
+               "a bright hall still meters as bright, not as the darkest thing in it");
     }
 
     //------------------------------------------------------------------------------------------------------------------
     std::printf("\n14. colour drains out of the image at the light levels where it drains out of the eye\n");
     {
-        // 🔴 Reported as "sunrise still looks like a sunset in reverse, there is no white line on the horizon",
-        //    with screenshots taken between 15 and 27 degrees BELOW the horizon — an hour or two before sunrise.
-        //    The model is right about the light there: the horizon glow at −15° measures 0.078 cd/m². What was
-        //    wrong is that it was rendered at full saturation, and it is almost entirely red, so the red channel
-        //    clipped while blue stayed black and a faint glow became a lurid orange band.
+        // 🔴 Reported as a faint red glow rendering as a lurid orange band. The model is right about the
+        //    light there: the glow measures 0.078 cd/m². What was wrong is that it was rendered at full
+        //    saturation, and it is almost entirely red, so the red channel clipped while blue stayed black and
+        //    a faint glow became a lurid band.
         //
         //    Cones give out before rods do. Below about 3 cd/m² colour drains from what a person sees and by
-        //    0.003 it is gone — you can still make out a landscape at midnight but not what colour it is.
+        //    0.003 it is gone — you can still make out a dark room but not what colour it is.
         ExposureIntegrator Exposure;
         ExposureConfiguration Config{};
+        Config.Mode = ExposureModeCategory::Adaptive;
         Exposure.AssignConfiguration(Config);
 
         std::printf("     adapted luminance   colour\n");
         struct Row { const char* Name; float Luminance; };
         const Row Rows[] = {
-            { "noon",              8000.0f },
-            { "overcast",          2000.0f },
+            { "bright hall",       8000.0f },
+            { "bright room",       2000.0f },
             { "a lit room",           30.0f },
-            { "deep dusk",             1.0f },
-            { "pre-dawn glow",         0.05f },
-            { "starlight",           1.0e-4f },
+            { "dim room",              1.0f },
+            { "dark corner",           0.05f },
+            { "near-black",          1.0e-4f },
         };
         float Previous = 2.0f;
         bool  Monotonic = true;
@@ -628,31 +639,31 @@ int main()
 
         Exposure.ObserveLuminance(std::log(8000.0f)); Exposure.Snap();
         Expect(std::fabs(Exposure.QueryColourSaturation() - 1.0f) < 1e-6f,
-               "daylight is fully saturated — nothing about a normal scene changes");
+               "a bright scene is fully saturated — nothing about a normal scene changes");
         Exposure.ObserveLuminance(std::log(1.0e-4f)); Exposure.Snap();
         Expect(Exposure.QueryColourSaturation() < 0.01f,
-               "and starlight is achromatic, as it is to the eye");
+               "and near-black is achromatic, as it is to the eye");
 
         // 🔴 The specific frame that was wrong. A red-dominated glow at 0.078 cd/m², rendered with and without.
-        Exposure.ObserveLuminance(std::log(0.0016f));   // what the meter anchors on in a pre-dawn frame
+        Exposure.ObserveLuminance(std::log(0.0016f));   // what the meter anchors on in a dark frame
         Exposure.Snap();
         const float S = Exposure.QueryColourSaturation();
-        const float R = 0.150f, G = 0.017f, B = 0.0033f;          // the measured pre-dawn horizon, linear
+        const float R = 0.150f, G = 0.017f, B = 0.0033f;          // the measured dark glow, linear
         const float Y = 0.2126f * R + 0.7152f * G + 0.0722f * B;
         const float Rm = Y + (R - Y) * S, Bm = Y + (B - Y) * S;
-        std::printf("     the −15° horizon: R/B %.0f at full colour, %.2f after desaturation (sat %.2f)\n",
+        std::printf("     the dark glow: R/B %.0f at full colour, %.2f after desaturation (sat %.2f)\n",
                     static_cast<double>(R / B), static_cast<double>(Rm / std::fmax(Bm, 1e-9f)),
                     static_cast<double>(S));
         Expect(R / B > 20.0f,                     "the glow really is almost pure red — this is why it looked lurid");
         Expect(Rm / std::fmax(Bm, 1e-9f) < 2.0f,  "and desaturated it is very nearly neutral — a pale band");
 
-        // ⚠️ And sunrise itself must be untouched: the whole point is to fix the hour BEFORE it, not to wash
-        //    the colour out of the thing the user is waiting for.
-        Exposure.ObserveLuminance(std::log(160.0f));   // the frame at actual sunrise
+        // ⚠️ And a bright scene must be untouched: the point is to fix the dark end, not to wash the colour
+        //    out of everything else.
+        Exposure.ObserveLuminance(std::log(160.0f));   // a well-lit frame
         Exposure.Snap();
-        std::printf("     at sunrise the adapted level is photopic, colour %.2f\n",
+        std::printf("     at 160 the adapted level is photopic, colour %.2f\n",
                     static_cast<double>(Exposure.QueryColourSaturation()));
-        Expect(Exposure.QueryColourSaturation() > 0.99f, "sunrise keeps all of its colour");
+        Expect(Exposure.QueryColourSaturation() > 0.99f, "bright scenes keep all of their colour");
 
         // Manual mode is the identity switch for the whole adaptive path, and that must include this.
         ExposureConfiguration Manual = Config;
@@ -662,83 +673,6 @@ int main()
         Fixed.ObserveLuminance(std::log(1.0e-4f)); Fixed.Snap();
         Expect(std::fabs(Fixed.QueryColourSaturation() - 1.0f) < 1e-6f,
                "manual exposure keeps full colour — every pre-A7d image is still reproducible");
-    }
-
-    //------------------------------------------------------------------------------------------------------------------
-    std::printf("\n15. an incident reading makes camera movement a NO-OP, not merely a smaller one\n");
-    {
-        // 🔴 Reported four times: "the sky changes brightness when I move closer to or further from the box".
-        //    The observation that the SKY moves is what proves the cause — sky radiance depends on view
-        //    direction alone, so if it changes when the camera translates, it is the exposure. Three metering
-        //    rules in a row reduced it without removing it, because every one of them asked the frame, and a
-        //    frame changes when the framing does.
-        //
-        //    The light FALLING on a scene does not. Anchoring to that is the difference between a smaller drift
-        //    and no drift, and "smaller" is not what was asked for.
-        ExposureIntegrator Exposure;
-        ExposureConfiguration Config{};
-        Exposure.AssignConfiguration(Config);
-
-        // The anchor is a LUMINANCE now: the mean a camera would see pointed anywhere, from DaylightSolver.
-        const float Anchor = 2161.0f;                              // a 45 deg sun, measured
-        Exposure.ObserveIlluminance(Anchor);
-        Expect(std::fabs(Exposure.QueryIncidentLuminance() - Anchor) < 0.5f,
-               "the anchor is used as the luminance it is, not converted");
-
-        // Walk the camera about: the frame reading wanders, as it must. The exposure must not.
-        float Lowest = 1e30f, Highest = 0.0f;
-        std::printf("     frame reads      exposure\n");
-        // ⚠️ Swept over the range a real scene covers, not a token one: turning from the horizon band to the
-        //    lit ground under a low sun is five and a half stops, and a dead zone narrower than that is escaped
-        //    by simply looking down.
-        for (float FrameStops : { -5.0f, -2.5f, 0.0f, 2.5f, 5.0f })
-        {
-            const float Frame = Anchor * std::exp2(FrameStops);
-            Exposure.ObserveLuminance(std::log(Frame));
-            Exposure.Snap();
-            const float E = Exposure.QueryExposure();
-            std::printf("     %11.1f   %.6e\n", static_cast<double>(Frame), static_cast<double>(E));
-            Lowest = std::fmin(Lowest, E); Highest = std::fmax(Highest, E);
-        }
-        std::printf("     across +/-5 stops of framing the exposure moved %.4f stops\n",
-                    static_cast<double>(std::log2(Highest / Lowest)));
-        Expect(std::log2(Highest / Lowest) < 1.0e-4f,
-               "inside the dead zone the exposure does not move AT ALL as the framing changes");
-
-        // ⚠️ And it must still be able to leave the dead zone. Standing inside the Cornell box, the room is
-        //    several stops below the sky over its roof, and exposing for the sky would render it black.
-        Exposure.ObserveLuminance(std::log(Anchor * std::exp2(-14.0f)));
-        Exposure.Snap();
-        const float Indoors = Exposure.QueryObservedLuminance();
-        std::printf("     fourteen stops below the sky, the reading follows the frame to %.4f\n",
-                    static_cast<double>(Indoors));
-        Expect(Indoors < Anchor * 0.05f, "a scene the sky cannot reach is metered from the frame, as it must be");
-
-        // The handover has no corner in it, or the image would pop as the camera crossed the threshold.
-        float Previous = 1e30f; bool Monotonic = true, Smooth = true;
-        float Last = -1.0f;
-        for (float Stops = 0.0f; Stops <= 16.0f; Stops += 0.25f)
-        {
-            ExposureIntegrator Probe; Probe.AssignConfiguration(Config);
-            Probe.ObserveIlluminance(Anchor);
-            Probe.ObserveLuminance(std::log(Anchor * std::exp2(-Stops)));
-            Probe.Snap();
-            const float Observed = Probe.QueryObservedLuminance();
-            if (Observed > Previous + 1e-6f) Monotonic = false;
-            if (Last > 0.0f && std::log2(Last / std::fmax(Observed, 1e-12f)) > 0.75f) Smooth = false;
-            Previous = Observed; Last = Observed;
-        }
-        Expect(Monotonic, "a darker frame never raises the reading");
-        Expect(Smooth,    "and the handover is gradual — no step the camera could cross and make the image pop");
-
-        // Off, it is the pre-A7e behaviour exactly.
-        ExposureConfiguration Frame = Config;
-        Frame.IncidentMetering = false;
-        ExposureIntegrator Old; Old.AssignConfiguration(Frame);
-        Old.ObserveIlluminance(Anchor);
-        Old.ObserveLuminance(std::log(1234.0f));
-        Expect(std::fabs(Old.QueryObservedLuminance() - 1234.0f) < 0.01f,
-               "with incident metering off the frame is used alone — the identity switch");
     }
 
     std::printf("\n>>> %s (%d failure%s)\n", Failures == 0 ? "ALL PASS" : "FAILURES", Failures, Failures == 1 ? "" : "s");

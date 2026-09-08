@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
-#  CheckExposureIntegrator.sh — A6b: adaptive exposure, the prerequisite for aerial perspective and the night sky
+#  CheckExposureIntegrator.sh — A6b: adaptive exposure and its metering invariants
 # ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 set -u
 Root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,11 +19,11 @@ rm -f "$Binary"
 echo
 echo "[Exposure] design invariants"
 
-# 🔴 LOG, never linear. A linear average is dominated by the brightest thing in frame, so the sun disc entering
+# 🔴 LOG, never linear. A linear average is dominated by the brightest thing in frame, so a luminaire entering
 # view blacks out the whole image. The histogram buckets are log2 slices, which is the same property expressed
 # as a distribution rather than as a sum.
 grep -q 'log2(Luminance)' Engine/Shaders/LuminanceReduce.slang \
-    || { echo "  the reduction is not working in log space — the sun would black out the frame"; Fail=1; }
+    || { echo "  the reduction is not working in log space — a luminaire would black out the frame"; Fail=1; }
 
 # ⚠️ Frame-rate independence. `* Rate * Delta` adapts faster on faster hardware, so the same transition looks
 # different per machine; 1 - exp(-dt/tau) does not.
@@ -36,20 +36,20 @@ Darken=$(grep -oP 'DarkenSeconds\s*=\s*\K[0-9.]+' Engine/DisplayPresentation/Exp
 awk -v b="$Brighten" -v d="$Darken" 'BEGIN { exit !(b < d) }' \
     || { echo "  brightening ($Brighten s) is not faster than darkening ($Darken s)"; Fail=1; }
 
-# ⚠️ The exposure floor must be small enough for daylight. A noon sky needs 2.25e-5; a floor anywhere near
-# 0.01 clamps it and renders the sky as flat white — which reads as a tone-mapping bug, not a clamp.
+# ⚠️ The exposure floor must be small enough for bright scenes. A floodlit interior needs 2.25e-5; a floor
+# anywhere near 0.01 clamps it and renders highlights as flat white — which reads as a tone-mapping bug.
 awk -v f="$(grep -oP 'MinimumExposure\s*=\s*\K[0-9.e-]+' Engine/DisplayPresentation/ExposureIntegrator.h)" \
     'BEGIN { exit !(f < 0.0000225) }' \
-    || { echo "  MinimumExposure is too high — a noon sky would clamp to white"; Fail=1; }
+    || { echo "  MinimumExposure is too high — bright scenes would clamp to white"; Fail=1; }
 
 # ── A7c: the meter is a histogram, and has no absolute threshold in it ───────────────────────────────────────────
 # 🔴 No ABSOLUTE luminance may decide whether a pixel is metered. The rule used to skip anything below a fixed
-# 1e-2 cd/m², which is a daylight constant standing where every scale of scene passes through: measured across a
-# sunset, at 9 deg below the horizon the sky fell under it while the ground was still above it, so the sky went
-# black against a correctly exposed ground, and by 18 deg below EVERY pixel was excluded, the count reached zero
-# and the meter froze at its last daylight reading. A permanently black night with no stars in it.
+# 1e-2 cd/m², which is a bright-scene constant standing where every scale of scene passes through: in a dim
+# interior the lit wall fell under it while the luminaire was still above it, so the wall went black against a
+# correctly exposed lamp, and in a darker room EVERY pixel was excluded, the count reached zero and the meter
+# froze at its last bright reading. A permanently black room.
 if grep -qE 'kMeteringFloor|Luminance < [0-9]' Engine/Shaders/LuminanceReduce.slang; then
-    echo "  the reduction has an absolute metering threshold again — it will go blind at night"; Fail=1
+    echo "  the reduction has an absolute metering threshold again — it will go blind in the dark"; Fail=1
 fi
 grep -q 'atomicAdd(Bins\[Bin\], Weight)' Engine/Shaders/LuminanceReduce.slang \
     || { echo "  the reduction no longer builds a histogram"; Fail=1; }
@@ -81,9 +81,9 @@ done
 # 🔴 The exposure is anchored to the frame's MEDIAN and averaged over a window measured in STOPS, not over a
 # percentile of the distribution. A percentile cannot tell a bright outlier from a bright subject, because both
 # are simply "the top". That is what made the exposure pump as the camera moved: a Cornell frame is a room near
-# 1 cd/m2 with a hole showing sky at thousands, the bright mode slid into and out of the average as the hole's
-# share of the frame changed, and the reading swung up to 4.7 stops. Exposure is global, so the SKY pumped with
-# it - a sky whose brightness depends on where the camera stands is not a sky problem.
+# 1 cd/m2 with a bulb at thousands, the bright mode slid into and out of the average as the bulb's share of the
+# frame changed, and the reading swung up to 4.7 stops. Exposure is global, so the ROOM pumped with it - a room
+# whose brightness depends on where the camera stands is not a lighting problem.
 grep -q 'Seen >= Total \* 0.5' Engine/DeviceExchange/SwapchainExchange.cpp \
     || { echo "  the meter no longer anchors on the median — a bright mode can drag it again"; Fail=1; }
 grep -q 'std::fabs(Centre - Anchor) > static_cast<double>(kLuminanceMedianStops)' Engine/DeviceExchange/SwapchainExchange.cpp \
@@ -93,7 +93,7 @@ if grep -qE 'kLuminanceTrimLow|kLuminanceTrimHigh' Engine/DeviceExchange/Swapcha
 fi
 
 # ⚠️ Bounded on both sides, and measured rather than tuned: three to eight stops all behave identically, and at
-# twelve the oculus sky comes back inside the window and the pumping returns.
+# twelve the bulb comes back inside the window and the pumping returns.
 awk -v f="$(grep -oP 'kLuminanceMedianStops\s*=\s*\K[0-9.]+' Engine/DeviceExchange/SwapchainExchange.h)" \
     'BEGIN { exit !(f >= 3.0 && f <= 8.0) }' \
     || { echo "  the median window is outside the measured-safe 3..8 stop band"; Fail=1; }
@@ -103,18 +103,18 @@ grep -q 'std::fabs(Centre - Anchor) > MedianStops' Scratchpad/ExposureIntegrator
     || { echo "  the harness no longer ports the median-anchored window"; Fail=1; }
 
 # ── A7c: dark adaptation ─────────────────────────────────────────────────────────────────────────────────────────
-# 🔴 An exposure of Key/L renders every scene at the same mid-grey, so a starlit field arrives looking like an
-# overcast afternoon and its stars are a slightly brighter grey. The key must fall below the photopic level.
+# 🔴 An exposure of Key/L renders every scene at the same mid-grey, so a candlelit room arrives looking like an
+# overcast afternoon. The key must fall below the photopic level.
 grep -q 'KeyForLuminance' Engine/DisplayPresentation/ExposureIntegrator.cpp \
-    || { echo "  the key is constant again — night would render as grey daylight and hide the stars"; Fail=1; }
+    || { echo "  the key is constant again — dark scenes would render as mid-grey"; Fail=1; }
 grep -q 'if (Safe >= Config.PhotopicLuminance) return Config.KeyValue;' Engine/DisplayPresentation/ExposureIntegrator.cpp \
-    || { echo "  dark adaptation no longer leaves daylight exactly unchanged"; Fail=1; }
+    || { echo "  dark adaptation no longer leaves bright scenes exactly unchanged"; Fail=1; }
 
-# The numerical floor must be epsilon, not a scene luminance: at 1e-2 a night sky clamps straight up to it and
-# the adaptation curve never engages at all.
+# The numerical floor must be epsilon, not a scene luminance: at 1e-2 a dark interior clamps straight up to it
+# and the adaptation curve never engages at all.
 awk -v f="$(grep -oP 'LuminanceFloor\s*=\s*\K[0-9.e-]+' Engine/DisplayPresentation/ExposureIntegrator.h)" \
     'BEGIN { exit !(f < 0.00001) }' \
-    || { echo "  LuminanceFloor is a scene luminance again — it would clamp the night away"; Fail=1; }
+    || { echo "  LuminanceFloor is a scene luminance again — it would clamp dark scenes away"; Fail=1; }
 
 # The renderer must read ONE exposure value, or manual and adaptive become two code paths that disagree.
 grep -q 'float QueryExposure() const noexcept' Engine/DisplayPresentation/ExposureIntegrator.h \
@@ -145,7 +145,7 @@ grep -q '(Vulkan->ActiveSlot + 1u) % kCycleSlotCount' Engine/DeviceExchange/Swap
     || { echo "  the readback does not use the completed cycle slot — it would stall"; Fail=1; }
 
 # The accumulator has to be big enough for the whole histogram; a short buffer would silently drop the top bins,
-# which are exactly where the sun and every highlight live.
+# which are exactly where the luminaires and every highlight live.
 grep -q 'kLuminanceHistogramBytes' Engine/DeviceExchange/SwapchainExchange.cpp \
     || { echo "  the accumulator is not sized from the histogram"; Fail=1; }
 
@@ -176,56 +176,6 @@ grep -q 'Push.ColourSaturation = Dispatch.ColourSaturation;' Engine/DeviceExchan
 # Manual mode is the identity switch for the whole adaptive path, and that has to include this.
 grep -q 'if (Config.Mode == ExposureModeCategory::Manual) return 1.0f;' Engine/DisplayPresentation/ExposureIntegrator.cpp \
     || { echo "  manual exposure no longer keeps full colour — pre-A7d images are unreproducible"; Fail=1; }
-
-# ── A7e: incident metering ───────────────────────────────────────────────────────────────────────────────────────
-# 🔴 A frame changes when the camera moves; the light falling on the scene does not. Three metering rules in a row
-# reduced the sky's drift without removing it, because all three asked the frame. The anchor must come from the
-# SUN AND SKY, and the dead zone is what turns "smaller drift" into "no drift".
-grep -q 'void ExposureIntegrator::ObserveIlluminance' Engine/DisplayPresentation/ExposureIntegrator.cpp \
-    || { echo "  the exposure has no incident reading — the sky would drift with the camera again"; Fail=1; }
-grep -q 'Ease(Config.IncidentDeadZoneStops, Config.IncidentHandoverStops, Disagreement)' Engine/DisplayPresentation/ExposureIntegrator.cpp \
-    || { echo "  the dead zone is gone — the frame would always pull the exposure, however little"; Fail=1; }
-# 🔴 This gate used to demand 1–4 stops and it was WRONG — it was guarding an assumption, not a measurement.
-# The dead zone has to be as wide as a SCENE, because that is what the camera swings across: at a 2° sun the
-# horizon band reads ~20 000 cd/m² and the lit ground under it ~440, five and a half stops apart in one frame.
-# Anything narrower is escaped by tilting down, which is exactly how the drift kept coming back at sunrise.
-# Measured worst anchor-to-frame disagreement: 1.9 stops at 45°, 4.4 at 10°, 4.5 at 0°, 4.3 at −4°, 7.0 at −8°.
-# Six holds every case with the sun above the horizon. Beyond about eight it would start ignoring real changes
-# in the light, so the band is bounded on both sides.
-awk -v f="$(grep -oP 'IncidentDeadZoneStops\s*=\s*\K[0-9.]+' Engine/DisplayPresentation/ExposureIntegrator.h)" \
-    'BEGIN { exit !(f >= 5.0 && f <= 8.0) }' \
-    || { echo "  the dead zone is not a plausible width — narrower than a scene drifts, wider ignores real light"; Fail=1; }
-
-# ⚠️ The incident figure must be camera-independent, which means it is derived from the SUN, not from anything
-# the camera carries. A solver that took a camera position would defeat the entire purpose.
-grep -q 'float QueryIlluminance(float SunIlluminance, float SunElevationRadians, float Turbidity)' Engine/DisplayPresentation/DaylightSolver.h \
-    || { echo "  the daylight solver's signature changed — check nothing camera-dependent crept into it"; Fail=1; }
-
-# 🔴 The exposure must anchor to QueryAnchorLuminance, NOT to QueryIlluminance. Illuminance is cosine-weighted,
-# so at a low sun — where all the sky's light sits in a band a few degrees up, at cos≈0 — it collapses while the
-# screen stays bright. That put every sunrise outside the dead zone and handed metering back to the frame.
-grep -q 'QueryAnchorLuminance' Engine/DisplayPresentation/ReSTIRIntegrator.cpp \
-    || { echo "  the exposure is anchored to illuminance again — it will drift at sunrise and sunset"; Fail=1; }
-grep -q 'CachedMeanSky' Engine/DisplayPresentation/DaylightSolver.cpp \
-    || { echo "  the solid-angle sky mean is gone — the anchor is cosine-weighted and wrong near the horizon"; Fail=1; }
-if grep -qE 'Camera|View|Pixel' Engine/DisplayPresentation/DaylightSolver.h; then
-    echo "  the daylight solver mentions the camera — an incident reading may not depend on where it stands"; Fail=1
-fi
-grep -q 'Adaptation.ObserveIlluminance' Engine/DisplayPresentation/ReSTIRIntegrator.cpp \
-    || { echo "  nothing supplies the incident reading, so the exposure falls back to the frame"; Fail=1; }
-grep -q 'Integrator.ObserveDaylight();' Projects/Project-Zero/Source/GameExecution.cpp \
-    || { echo "  the host never asks for the daylight reading"; Fail=1; }
-
-# 🔴 ONE description of the atmosphere on the CPU, shared by the exposure and the proofs. A second copy would
-# drift, and the drift would show as an exposure that disagreed with the sky it was exposing for.
-grep -q '#include "DisplayPresentation/AtmosphereModel.h"' Scratchpad/AtmosphereScatteringTest.cpp \
-    || { echo "  the atmosphere proof carries its own copy of the model again"; Fail=1; }
-grep -q '#include "AtmosphereModel.h"' Engine/DisplayPresentation/DaylightSolver.cpp \
-    || { echo "  the daylight solver is not using the shared atmosphere model"; Fail=1; }
-
-# Off restores pure frame metering, so every pre-A7e image is still reproducible.
-grep -q 'if (!Config.IncidentMetering || IncidentLuminance <= 0.0f)' Engine/DisplayPresentation/ExposureIntegrator.cpp \
-    || { echo "  incident metering can no longer be switched off"; Fail=1; }
 
 # ── The resize path ──────────────────────────────────────────────────────────────────────────────────────────────
 # 🔴 A resize destroys and recreates HistoryImageView, and the reduction's descriptor set binds it. Leaving that

@@ -39,9 +39,6 @@ int main(){
     CheckTrue("exactly 2 emissive materials", emissiveMats==2);
     // floor normal points up
     Vector3 f0 = N[0]; CheckTrue("floor normal is +Z", f0.z > 0.99f);
-    // panel anchor sits inside the room, above the plinth, in front of rear wall
-    Vector3 P = ShowroomStructure::QueryPanelOrigin();
-    CheckTrue("panel origin inside room", P.x>-2.f&&P.x<2.f&&P.y<3.f&&P.z>0.f&&P.z<3.f);
     printf(Fail? "\n>>> %d FAILURE(S)\n" : "\n>>> ALL PASS (0 failures)\n", Fail);
     return Fail?1:0;
 }

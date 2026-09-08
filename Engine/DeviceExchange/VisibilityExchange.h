@@ -32,7 +32,7 @@ struct InstanceRecord;   // GeometricRaster/SceneStructure.h — 160 B std430 mi
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     DEBUG VIEW
 //------------------------------------------------------------------------------------------------------------------------
-// Mirrors kDebug* in Shaders/SurfaceResolve.slang. Cycled by the debug popup (F3) and persisted as [render] debug_view.
+// Mirrors kDebug* in Shaders/SurfaceResolve.slang.
 
 enum class DebugViewCategory : uint32_t
 {

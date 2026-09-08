@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs every headless gate in the repository, in dependency order, and reports one line each.
 #
-# This exists so "is the tree healthy?" is one command rather than seventeen. Each script is self-contained and
+# This exists so "is the tree healthy?" is one command rather than fifteen. Each script is self-contained and
 #    fetches what it needs, so a fresh clone with submodules initialised can run this directly.
 set -uo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -27,22 +27,8 @@ Run()
 echo
 echo "=== build and toolchain ==="
 Run CheckBuildIntegrity
-Run CheckImGuiPatches
 
 echo
-echo "=== spatial interface (P0 - P4) ==="
-Run CheckPanelPlacement
-Run CheckPointerProjection
-Run CheckTextProjection
-Run CheckScreenSequence
-Run CheckVectorCodec
-Run CheckLightProjection
-Run CheckPanelSample
-Run CheckInterfaceAudio
-Run CheckOutlinerSequence
-Run CheckPanelLayout
-Run CheckRasterProof
-
 echo
 echo "=== ReSTIR (R6 - R7) ==="
 Run CheckSpatialTapJitter
@@ -51,10 +37,7 @@ Run CheckAtrousDenoise
 
 echo
 echo "=== scene and dynamic geometry (D1 - D6) ==="
-Run CheckCelestialSolver
-Run CheckAtmosphereScattering
 Run CheckExposureIntegrator
-Run CheckPrimitiveGeometry
 Run CheckShowroomGeometry
 Run CheckTraversalIdentity
 Run CheckHitIdentity
@@ -70,9 +53,6 @@ Run CheckAcousticArchives
 Run CheckFluidProject
 
 echo
-echo "=== shaders ==="
-Run CompileInterfaceShaders
-
 echo
 if [ $Failed -eq 0 ]; then
     echo ">>> ALL $Passed SUITES GREEN"

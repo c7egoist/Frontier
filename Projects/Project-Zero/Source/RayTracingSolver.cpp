@@ -39,7 +39,7 @@ void RayTracingSolver::ConstructCornellBoxScene() noexcept
     Materials.push_back(AnalyticalMaterial{ Vector3{ 0.78f, 0.78f, 0.78f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.4f, 0.0f, 4 });
     // Material 5: Short Box (cool white diffuse)
     Materials.push_back(AnalyticalMaterial{ Vector3{ 0.78f, 0.78f, 0.78f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.4f, 0.0f, 5 });
-    // Material 6: Sphere (warm off-white, smoother than the boxes so the oculus highlight is visible on it)
+    // Material 6: Sphere (warm off-white, smoother than the boxes so specular response reads on it)
     Materials.push_back(AnalyticalMaterial{ Vector3{ 0.82f, 0.78f, 0.72f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.25f, 0.0f, 6 });
     // Material 7: Cone (muted blue)
     Materials.push_back(AnalyticalMaterial{ Vector3{ 0.35f, 0.45f, 0.70f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.4f, 0.0f, 7 });
@@ -52,8 +52,8 @@ void RayTracingSolver::ConstructCornellBoxScene() noexcept
     //      Z ∈ [ 0, +3]  up / zenith        (floor at Z = 0, ceiling + luminaire at Z = +3)
     //    The camera stands at Y < 0 looking along +Y into the room.
     //
-    //    The room is deliberately larger than the classic 2 × 2 × 2 Cornell box: the sky work needs floor area for a
-    //    sun shaft to land on and enough height for the shaft to read as a shaft rather than a bright patch.
+    //    The room is deliberately larger than the classic 2 × 2 × 2 Cornell box: the extra floor area gives
+    //    long shadows and penumbrae room to read, and keeps the tall box clear of the walls.
     //
     //    ⚠️ The emissive quad MUST remain the last geometry appended — the shader addresses light
     //       triangles as the trailing LightTriangleCount entries of the triangle buffer.
@@ -63,29 +63,22 @@ void RayTracingSolver::ConstructCornellBoxScene() noexcept
     constexpr float RoomMinX = -2.0f, RoomMaxX = 2.0f;
     constexpr float RoomMinY =  0.0f, RoomMaxY = 4.0f;
     constexpr float RoomTopZ =  3.0f;
-    // A CIRCULAR oculus rather than a rectangle: a round opening throws an elliptical shaft that reads as
-    //    sunlight through a roof, and its silhouette is the clearest possible test that the sky is being sampled
-    //    through real geometry rather than painted on.
+    // A CIRCULAR oculus rather than a rectangle: a round opening reads as an opening rather than a missing
+    //    quad, and its silhouette is the clearest possible test that rays pass through real geometry rather than
+    //    stopping at a painted ceiling.
     constexpr float HoleRadius   = 0.75f;                  // [m]
     constexpr float HoleCentreX  = 0.0f;                   // [m]
-    // 🔴 The shaft goes NORTH, so the hole belongs SOUTH of where the light should land. This was 3.05 — set
-    //    back toward the north wall on the reasoning that the shaft would cross the floor — and that is
-    //    backwards. At any northern latitude the midday sun stands to the south, so a roof opening throws its
-    //    shaft AWAY from the camera, toward +Y. From 3.05 the light landed at Y ≈ 4.3, which is behind the back
-    //    wall: measured over a day at latitude 45, the shaft was fully on the floor for 0 % of daylight.
-    //
-    //    Swept rather than guessed. 2.10 puts the noon shaft at Y ≈ 3.3 and holds the whole disc on the floor
-    //    for 32 % of daylight at latitude 45 and 39 % at the equator — the best either latitude achieves, since
-    //    what carries the shaft out of the room is the sun's EAST-WEST travel, not its height. It also clears
-    //    the luminaire, which occupies Y ∈ [0.9, 1.7] of the same ceiling.
-    constexpr float HoleCentreY  = 2.10f;                  // [m] south of the target, because the shaft runs north
+    // 🔴 The hole belongs SOUTH of centre. An earlier placement at 3.05 crowded the back wall and left the
+    //    opening half over the rear of the room; 2.10 was swept rather than guessed and centres the admitted
+    //    light over open floor. It also clears the luminaire, which occupies Y ∈ [0.9, 1.7] of the same ceiling.
+    constexpr float HoleCentreY  = 2.10f;                  // [m] south of centre, clear of the lamp
     constexpr uint32_t HoleSides = 48u;                    // 48 sides: the rim reads as a circle at room scale
 
     // Floor (Z = 0, normal +Z)
     AppendQuad(Vector3{ RoomMinX, RoomMinY, 0.0f }, Vector3{ RoomMaxX, RoomMinY, 0.0f }, Vector3{ RoomMaxX, RoomMaxY, 0.0f }, Vector3{ RoomMinX, RoomMaxY, 0.0f }, 0);
 
-    // Ceiling (Z = RoomTopZ, normal −Z) — a plate with the oculus cut out of it. Until the sky exists the
-    //    opening reads as black, which is correct: there is genuinely nothing above it yet.
+    // Ceiling (Z = RoomTopZ, normal −Z) — a plate with the oculus cut out of it. The opening reads as
+    //    black, which is correct: there is genuinely nothing above it.
     AppendPlateWithCircularHole(RoomMinX, RoomMinY, RoomMaxX, RoomMaxY, RoomTopZ,
                                 Vector3{ HoleCentreX, HoleCentreY, RoomTopZ }, HoleRadius, HoleSides, true, 0);
 
@@ -97,7 +90,7 @@ void RayTracingSolver::ConstructCornellBoxScene() noexcept
     AppendQuad(Vector3{ RoomMaxX, RoomMaxY, 0.0f }, Vector3{ RoomMaxX, RoomMinY, 0.0f }, Vector3{ RoomMaxX, RoomMinY, RoomTopZ }, Vector3{ RoomMaxX, RoomMaxY, RoomTopZ }, 2);
 
     // Tall Box (0.84 × 0.84 footprint, 1.8 m tall, rotated +22° about Z) — rear left, clear of the aperture so it
-    //    catches the edge of the shaft and casts a long shadow rather than plugging the hole.
+    //    casts a long shadow across the floor rather than plugging the hole.
     AppendBox(Vector3{ -0.90f, 2.70f, 0.90f }, Vector3{ 0.42f, 0.42f, 0.90f },  22.0f, 4);
     // Short Box (0.84 × 0.84 footprint, 0.9 m tall, rotated −18° about Z) — front right
     AppendBox(Vector3{  0.85f, 1.50f, 0.45f }, Vector3{ 0.42f, 0.42f, 0.45f }, -18.0f, 5);
@@ -113,8 +106,8 @@ void RayTracingSolver::ConstructCornellBoxScene() noexcept
     //
     // ⚠️ Moved forward with the aperture, and it MUST stay clear of it. The quad hangs 5 mm below the ceiling
     //    plane, so any part of it inside the opening would be seen through the hole as a bright horizontal slab
-    //    with the sky behind it — the one thing the aperture exists to show, blocked by the lamp that the
-    //    aperture is meant to be compared against. The hole reaches Y = 1.35 at its nearest; this ends at 1.15.
+    //    blocking the opening it is meant to be compared against. The hole reaches Y = 1.35 at its nearest;
+    //    this ends at 1.15.
     constexpr float LampMinY = 0.35f, LampMaxY = 1.15f, LampZ = RoomTopZ - 0.005f;
     AppendQuad(Vector3{ -0.50f, LampMaxY, LampZ }, Vector3{ 0.50f, LampMaxY, LampZ },
                Vector3{  0.50f, LampMinY, LampZ }, Vector3{ -0.50f, LampMinY, LampZ }, 3);
@@ -182,59 +175,6 @@ void RayTracingSolver::AppendBox(const Vector3& Center, const Vector3& Extents, 
     // Right (+X)
     AppendQuad(Corners[1], Corners[2], Corners[6], Corners[5], MaterialIdx);
 }
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                                  OUTDOOR SCENE
-//------------------------------------------------------------------------------------------------------------------------
-// A1–A7 built a physically correct sun, sky, sunset, moon, star field, skylight and adaptive exposure — and the
-//    only place any of it could be seen was a 1.5 m oculus at 12.9° elevation, subtending 13° from a camera that
-//    starts facing a wall. This scene exists so that work can actually be judged.
-//
-//    🔴 No ceiling and no walls. That is the entire point: every ray that misses geometry resolves to sky, so a
-//    sunset fills the frame instead of a porthole and the moon has somewhere to rise.
-
-void RayTracingSolver::ConstructOutdoorScene() noexcept
-{
-    Triangles.clear();
-    Materials.clear();
-
-    // Ground is deliberately mid-grey and slightly rough. A bright ground would bounce enough light to mask the
-    //    sky's own contribution, which is the thing being judged; a dark one would hide the sun's shadows.
-    Materials.push_back(AnalyticalMaterial{ Vector3{ 0.32f, 0.32f, 0.30f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.6f, 0.0f, 0 });
-    // A neutral white for the shadow casters, so their shading is the sky's colour and not their own.
-    Materials.push_back(AnalyticalMaterial{ Vector3{ 0.80f, 0.80f, 0.80f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.4f, 0.0f, 1 });
-    // Smoother, to catch a specular glint of the sun and the sky.
-    Materials.push_back(AnalyticalMaterial{ Vector3{ 0.72f, 0.74f, 0.78f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.15f, 0.0f, 2 });
-    // Warm, so the sunset's colour shift is legible against something that is not neutral.
-    Materials.push_back(AnalyticalMaterial{ Vector3{ 0.70f, 0.45f, 0.28f }, Vector3{ 0.0f, 0.0f, 0.0f }, 0.5f, 0.0f, 3 });
-
-    // ⚠️ The ground is 400 m across, not a few metres. Two reasons, both load-bearing:
-    //      · the horizon has to be far enough away that the eye reads it as a horizon rather than as the edge of
-    //        a plate, which is what makes the sky feel like a sky;
-    //      · aerial perspective (A6) is invisible over six metres — 0.016 % colour shift, 24× below one 8-bit
-    //        step — and only becomes measurable over hundreds. This scene is what makes that phase testable.
-    constexpr float GroundExtent = 200.0f;   // [m] half-width
-    AppendQuad(Vector3{ -GroundExtent, -GroundExtent, 0.0f }, Vector3{  GroundExtent, -GroundExtent, 0.0f },
-               Vector3{  GroundExtent,  GroundExtent, 0.0f }, Vector3{ -GroundExtent,  GroundExtent, 0.0f }, 0);
-
-    // Casters at a spread of heights, so shadow length changes visibly as the sun moves and the penumbra widens
-    //    with distance from the ground — which is the A4 result made observable.
-    AppendSphere(Vector3{ -3.20f, 6.00f, 1.20f }, 1.20f, 40u, 20u, 1u);
-    AppendSphere(Vector3{  4.60f, 11.00f, 0.70f }, 0.70f, 32u, 16u, 2u);
-    AppendCone  (Vector3{  1.80f, 5.20f, 0.00f }, 0.90f, 2.60f, 40u, 3u);
-    AppendTorus (Vector3{ -1.40f, 9.50f, 1.60f }, 1.10f, 0.30f, 44u, 22u, 2u);
-
-    // A tall thin slab. A long shadow is the clearest possible read on the sun's elevation, and its edge is
-    //    where a penumbra is easiest to measure against the numbers A4 recorded.
-    AppendBox(Vector3{  6.50f, 4.00f, 2.00f }, Vector3{ 0.25f, 1.60f, 2.00f }, 18.0f, 1u);
-    AppendBox(Vector3{ -6.00f, 3.20f, 0.60f }, Vector3{ 1.00f, 1.00f, 0.60f }, -12.0f, 3u);
-
-    // ⚠️ NO luminaire. The sun is the only light, which is what A4 made possible: before it, a scene with no
-    //    emissive triangle was simply black. That makes this scene a live test of the sun-as-emitter path — if
-    //    it ever regresses, this render goes dark rather than merely looking wrong.
-}
-
-//------------------------------------------------------------------------------------------------------------------------
 //                                             PARAMETRIC PRIMITIVES
 //------------------------------------------------------------------------------------------------------------------------
 // Winding is counter-clockwise seen from OUTSIDE the solid, matching AppendBox: AppendTriangle derives the

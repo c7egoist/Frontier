@@ -5,15 +5,12 @@
 //
 //        room      4.0 wide (X ±2.0) · 5.0 deep (Y −2.0 … +3.0) · 3.0 tall (Z 0 … 3.0), open face at −Y
 //        walls     left red, right green (Cornell's, so colour bleed reads the same), rear / floor / ceiling white
-//        inlay     deep blue floor rectangle + amber strip along the rear base — saturated neighbours for the panel
-//        plinth    0.9 × 0.5 × 0.35 dark dielectric, centred under the panel
-//        chrome    r = 0.34 sphere on the plinth (metalness 1, roughness 0.08) — reflects the panel back at the eye
+//        inlay     deep blue floor rectangle + amber strip along the rear base — saturated neighbours for colour bleed
+//        plinth    0.9 × 0.5 × 0.35 dark dielectric, room centre
+//        chrome    r = 0.34 sphere on the plinth (metalness 1, roughness 0.08) — a mirror in the middle of the room
 //        pillar    0.34 × 0.34 × 1.5 matte column, left rear
 //        copper    r = 0.28 rough copper sphere on a short stand, right rear
 //        luminaire 1.2 × 1.0 ceiling panel (Cornell's ~32 nit) + a dimmer 0.8 × 0.3 rear strip for rim separation
-//
-// The interface panel hangs at (0, 1.55, 1.32), tilted ≈ 12° toward the eye — in front of the rear wall, above the
-//    chrome sphere, so its own light is visible both directly and in reflection.
 
 #include "ShowroomStructure.h"
 
@@ -128,7 +125,7 @@ void ShowroomStructure::Construct(uint32_t DropBodyCount) noexcept
         D.Slabs[0].SpecularRoughness = 0.28f;
         Materials.push_back(D);
 
-        D = MakeMaterial("chrome");                                       // 6 — mirrors the panel
+        D = MakeMaterial("chrome");                                       // 6 — the room's mirror
         SetColour(D.Slabs[0].BaseColor, 0.92f, 0.93f, 0.95f);
         D.Slabs[0].BaseMetalness     = 1.0f;
         D.Slabs[0].SpecularRoughness = 0.08f;

@@ -17,23 +17,18 @@ Scratchpad/GenerateControlPanelProof
 Scratchpad/VectorGlyphTest
 .DS_Store
 
-# Per-user Control Centre preferences (written by ConfigurationRegistry at runtime)
-Projects/*/Content/Slate.config.toml
-
 # Fetched test levels (Projects/Project-Zero/Build/FetchSponza.ps1) - never committed
 Projects/*/Content/Scenes/Sponza/
 Projects/*/Content/Scenes/ShaderBall.gltf
 Scratchpad/InterfaceRasterTest
 
-# Compiled shaders (produced by ToolchainSequence / CompileInterfaceShaders.sh)
+# Compiled shaders (produced by ToolchainSequence)
 *.spv
 
 # Generated on first run by GameExecution (--scene showroom). CornellBox.gltf stays tracked as the
 #    bit-identity reference; the showroom is derived from ShowroomStructure.cpp and regenerates.
 Projects/Project-Zero/Content/Scenes/Showroom.gltf
 Projects/Project-Zero/Content/Scenes/ShowroomDrop.gltf
-# A8: regenerated on first run by --scene outdoor, same as the two above.
-Projects/Project-Zero/Content/Scenes/Outdoor.gltf
 
 # Jolt static library and Project-Physics build output (derived; rebuilt by Scripts/BuildJolt.sh and the toolchain scripts)
 ExternalPackages/jolt/lib/

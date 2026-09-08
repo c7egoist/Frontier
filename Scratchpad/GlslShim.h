@@ -57,15 +57,3 @@ inline vec4 vec4_from(vec2 a, vec2 b) { return vec4(a.x, a.y, b.x, b.y); }
 inline float uintBitsToFloat(uint u) { float f; std::memcpy(&f, &u, 4); return f; }
 inline uint floatBitsToUint(float f) { uint u; std::memcpy(&u, &f, 4); return u; }
 inline float log2(float a) { return std::log2(a); }
-// ---- extras for the spatial-interface port (InterfaceSignedDistance.slang) ----
-inline float atan(float y, float x) { return std::atan2(y, x); }   // GLSL's two-argument atan
-inline float atan(float x) { return std::atan(x); }
-inline vec2 abs(vec2 a) { return {std::abs(a.x), std::abs(a.y)}; }
-inline vec2 min(vec2 a, vec2 b) { return {std::min(a.x, b.x), std::min(a.y, b.y)}; }
-inline vec2 min(vec2 a, float b) { return {std::min(a.x, b), std::min(a.y, b)}; }
-#define nonuniformEXT(x) (x)
-struct Sampler { int Width = 1, Height = 1; vec4 Constant = vec4(1); float LastLod = 0; };
-inline ivec2 textureSize(Sampler& s, int) { return { s.Width, s.Height }; }
-inline vec4 textureLod(Sampler& s, vec2, float lod) { s.LastLod = lod; return s.Constant; }
-inline vec3 vec3_from2(float a, vec2 b) { return vec3(a, b.x, b.y); }
-inline vec3 yzw_of(vec4 v) { return vec3(v.y, v.z, v.w); }
