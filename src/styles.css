@@ -634,13 +634,17 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 
 .mp-note{font-size:10.5px;color:var(--text-faint);letter-spacing:.2px;padding:2px 2px 0;}
 
-.mp-dials{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;}
+.mp-dials{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 8px;}
 .mp-dial{background:var(--field);border:1px solid var(--stroke);border-radius:var(--r-inset);
-  padding:8px 8px 6px;display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:8px 9px 9px;display:flex;flex-direction:column;align-items:center;gap:2px;}
+.mp-dial .hd{display:flex;align-items:baseline;gap:6px;width:100%;margin-bottom:2px;}
+.mp-dial .hd .k{font-size:8.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
+.mp-dial .hd .v{margin-left:auto;font-size:12.5px;font-weight:500;color:var(--text);
+  letter-spacing:-.3px;font-variant-numeric:tabular-nums;}
+.mp-dial .hd .v em{font-style:normal;font-size:9px;color:var(--text-dim);margin-left:1px;}
+.mp-dial svg{width:100%;max-width:104px;aspect-ratio:1;display:block;overflow:visible;
   cursor:grab;touch-action:none;}
-.mp-dial.grabbing{cursor:grabbing;}
-.mp-dial svg{width:100%;max-width:104px;aspect-ratio:1;display:block;overflow:visible;}
-.mp-dial .cap{font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-faint);}
+.mp-dial.grabbing svg{cursor:grabbing;}
 .mp-dial .ring{fill:none;stroke:var(--stroke-strong);stroke-width:1;}
 .mp-dial .ring2{fill:rgba(255,255,255,.02);stroke:var(--stroke);stroke-width:1;}
 .mp-dial .tick{stroke:rgba(255,255,255,.14);stroke-width:1;}
@@ -655,21 +659,34 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .mp-dial .lbl{fill:var(--text-faint);font-size:8px;text-anchor:middle;letter-spacing:.6px;}
 .mp-dial .lbl.n{fill:var(--text-dim);}
 
-.mp-track{display:flex;align-items:baseline;gap:7px;padding:7px 10px;margin-bottom:6px;
-  background:var(--inset);border-radius:var(--r-pill);font-size:11px;color:var(--text);
+/* rise · transit · set — three columns, label over number */
+.mp-3up{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:2px 0 4px;}
+.mp-3up > div{display:flex;flex-direction:column;gap:1px;padding:7px 10px;background:var(--field);
+  border:1px solid var(--stroke);border-radius:14px;}
+.mp-3up .k{font-size:8.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
+.mp-3up b{font-size:14px;font-weight:500;letter-spacing:-.3px;color:var(--text);
   font-variant-numeric:tabular-nums;}
-.mp-track .k{font-size:9px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
-.mp-track b{font-weight:600;margin-right:6px;}
 
+/* the light meter and the size ruler are both read the same way: a scale with a marker on it */
+.mp-meter{margin:2px 0 10px;background:var(--field);border:1px solid var(--stroke);
+  border-radius:var(--r-inset);overflow:hidden;padding:2px 0 0;}
+.mp-meter canvas{display:block;width:100%;}
 .mp-size{margin:2px 0 0;background:var(--field);border:1px solid var(--stroke);
   border-radius:var(--r-inset);overflow:hidden;}
+.mp-size .hd{display:flex;align-items:baseline;gap:6px;padding:8px 11px 0;}
+.mp-size .hd .k{font-size:8.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
+.mp-size .hd .v{margin-left:auto;font-size:12.5px;font-weight:500;color:var(--text);
+  letter-spacing:-.3px;font-variant-numeric:tabular-nums;}
+.mp-size .hd .v em{font-style:normal;font-size:9px;color:var(--text-dim);margin-left:1px;}
 .mp-size canvas{display:block;width:100%;}
-.mp-tints{display:flex;align-items:center;gap:6px;flex:1 1 auto;min-width:0;flex-wrap:wrap;}
-.mp-tints .colorrow{margin-left:auto;}
-.mp-tint{width:20px;height:20px;border-radius:7px;border:1px solid var(--stroke-strong);cursor:pointer;
-  transition:transform .14s var(--ease);}
-.mp-tint:hover{transform:translateY(-1px);}
-.mp-tint.on{box-shadow:0 0 0 2px var(--panel),0 0 0 3.5px var(--text);}
+
+/* tint, as named presets with a dot each */
+.mp-subhead{display:flex;align-items:center;gap:8px;margin:12px 0 6px;}
+.mp-subhead .k{font-size:9px;letter-spacing:1.3px;text-transform:uppercase;color:var(--text-faint);}
+.mp-subhead .colorrow{margin-left:auto;flex:0 0 auto;}
+.mp-tag i{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;
+  vertical-align:1px;box-shadow:0 0 0 1px rgba(0,0,0,.4);}
+.mp-tints .mp-tag{padding:5px 9px;}
 
 /* ── the moon panel · type scale ───────────────────────────────────────────────────────────────
    Sizes are the whole point of this look: one big light numeral, its decimals dropped back a
@@ -689,7 +706,9 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .mp-num .i{font-size:46px;color:var(--text);}
 .mp-num .d{font-size:46px;color:var(--text-faint);}
 .mp-num .u{font-size:12px;letter-spacing:0;color:var(--text-dim);margin-left:7px;transform:translateY(-2px);}
-.mp-target .v{color:var(--text-dim);letter-spacing:.6px;}
+.mp-k{font-size:9.5px;letter-spacing:1.3px;text-transform:uppercase;color:var(--text-faint);}
+.mp-target{display:flex;align-items:baseline;gap:6px;}
+.mp-target .v{font-size:11px;letter-spacing:.1px;text-transform:none;color:var(--text-dim);}
 
 .mp-metric{padding-bottom:8px;}
 .mp-chartwrap{margin:2px -4px 0;}
@@ -753,3 +772,22 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .pop .mp-stat .n{font-size:21px;}
 .pop .mp-pill{padding:6px 7px 7px;}
 .pop .mp-pill .v{font-size:12.5px;}
+
+/* every label inside the moon panel speaks in the same small caps */
+.mpanel .prow .pl{font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--text-faint);
+  flex-basis:64px;}
+.mpanel .mp-note{font-size:10px;letter-spacing:.2px;color:var(--text-faint);text-transform:none;}
+.mpanel .mp-k.mp-note{letter-spacing:1.1px;text-transform:uppercase;padding:6px 2px 0;}
+.mp-track2 .mp-num,.mp-light .mp-num{margin-bottom:4px;}
+.mp-track2 .mp-num .i,.mp-track2 .mp-num .d,
+.mp-light .mp-num .i,.mp-light .mp-num .d{font-size:40px;}
+.mp-chead .l{cursor:pointer;}
+.pcard.shut .mp-num,.pcard.shut .mp-target{display:none;}
+.pop .mp-track2 .mp-num .i,.pop .mp-track2 .mp-num .d,
+.pop .mp-light .mp-num .i,.pop .mp-light .mp-num .d{font-size:34px;}
+
+/* a sheet with an instrument in it: the generic cards borrow the same headline */
+.sheet.bespoke .pcard > h4{font-size:15px;font-weight:450;letter-spacing:-.1px;text-transform:none;
+  color:var(--text);margin-bottom:10px;}
+.sheet.bespoke .prow .pl{font-size:9.5px;letter-spacing:1.2px;text-transform:uppercase;
+  color:var(--text-faint);}

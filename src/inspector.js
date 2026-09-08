@@ -109,6 +109,7 @@ export function buildSheet(node, { compact = false, onDirty = () => {} } = {}) {
   }
 
   if (custom) {
+    host.classList.add('bespoke');            /* the generic cards fall in line with the instrument */
     customEl = custom.build(node, {
       compact,
       setProp: (n, k, v) => setProp(n, k, v, panel),
