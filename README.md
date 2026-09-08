@@ -295,6 +295,11 @@ src/
   billboards.js     DOM markers projected from world-space anchors, depth sort + declutter
   outliner.js       tree: search, filters, twirl animation, multi-select, drag-to-reparent
   inspector.js      builds a property sheet for any node straight from its schema
+  panels/           bespoke instruments that replace the generated sheet for a few types
+    index.js        the registry: which type gets an instrument, which groups it claims
+    controls.js     tapes, steppers, state pills, spec tiles — the no-slider control kit
+    moon.js         night sky, phase strip, selenographic atlas, sky track, light meter
+    sun.js          sky strip, stereographic sun path, illuminance curve, blackbody ramp, shadows
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
@@ -308,6 +313,17 @@ property definitions (`slider`, `switch`, `vec3`, `color`, `select`, `readout`).
 popup, the command palette and the outliner filters all read that table, so adding an entity type —
 or a property to an existing one — is a few lines of data, no UI work. That is also what makes the
 sheet portable: the same table can drive the engine-side `ControlKit` panels one-for-one.
+
+**Why a few types get an instrument instead of a sheet.** A moon is a thing you look at and a sun is
+a thing you aim, so those two are drawn rather than listed: `panels/index.js` maps a type to
+`{ build, owns }`, the instrument claims the schema groups it replaces, and anything it does not
+claim is still generated underneath it — no property is ever unreachable. Inside an instrument there
+are no sliders: values live on **tapes** (a ruler with the range written on it and a marker you can
+grab) with a **stepper** beside them for the last decimal, and every visualisation is also the
+control — drag the sun path to move the clock, the lux meter to change the moonlight, the degree
+ruler to resize the disc.
+
+![Frontier — the sun panel](docs/preview-sun.png)
 
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
 hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a

@@ -6,7 +6,9 @@
    still generated underneath it, so no property is ever unreachable.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 import { moonPanel } from './moon.js';
+import { sunPanel } from './sun.js';
 
 export const CUSTOM_PANELS = {
   moon: { build: moonPanel, owns: ['Orbit', 'Appearance'] },
+  sun: { build: sunPanel, owns: ['Orbit', 'Disc & light'] },
 };

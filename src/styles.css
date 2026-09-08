@@ -822,3 +822,16 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
   border:1px solid var(--stroke);border-radius:14px;}
 .mp-spec .k{font-size:8.5px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
 .mp-spec b{font-size:13px;font-weight:500;color:var(--text);letter-spacing:-.2px;}
+
+/* ── the sun panel ─────────────────────────────────────────────────────────────────────────────
+   Same kit as the moon, tuned for a thing you cannot look at directly: the sun path dial wants
+   to be square, the blackbody ramp wants to be seen, and the shadow plan wants a grid. */
+.s-map{aspect-ratio:auto;}
+.s-map canvas{cursor:grab;}
+.s-map canvas.drag{cursor:grabbing;}
+.s-ramp .hd{padding-bottom:0;}
+.s-shadowmap{margin-bottom:10px;}
+.s-shadowmap canvas{display:block;width:100%;}
+.s-path .mp-3up{margin-top:10px;}
+.s-path .tape{margin-bottom:2px;}
+.spanel .mp-note{padding:2px 2px 0;}
