@@ -426,22 +426,35 @@ export const byId = id => flat.find(n => n.id === id) || null;
 export const isFolder = n => n.type === 'folder';
 export const typeOf = n => TYPES[n.type] || TYPES.cube;
 export const leaves = () => flat.filter(n => !isFolder(n));
-let _soloId = null;
-export const setSolo = id => { _soloId = id; };
-export const soloId = () => _soloId;
+/* ── isolation (Unreal's "isolate selection", Blender's local view) ────────────────────────────
+   A set, not a single id: any number of entities can be isolated together. A node survives
+   isolation if it IS isolated, or is an ancestor of one (so its folder row still reads), or a
+   descendant of one (so isolating a group keeps the group whole). */
+let _isolated = new Set();
 const related = (a, b) => {           /* a is b, or an ancestor / descendant of b */
   let c = b; while (c) { if (c === a) return true; c = c.parent; }
   c = a; while (c) { if (c === b) return true; c = c.parent; }
   return false;
 };
+export const setIsolation = ids => { _isolated = new Set(ids || []); };
+export const isolatedIds = () => _isolated;
+export const isIsolating = () => _isolated.size > 0;
+export const isIsolated = n => _isolated.has(n.id);
+
+/* is this node inside the current isolation set (itself, an ancestor or a descendant of a member) */
+export const inIsolation = n => {
+  if (!_isolated.size) return true;
+  for (const id of _isolated) {
+    const s = flat.find(x => x.id === id);
+    if (s && related(s, n)) return true;
+  }
+  return false;
+};
+
 export const effectiveVis = n => {
   let cur = n;
   while (cur) { if (!cur.vis) return false; cur = cur.parent; }
-  if (_soloId != null) {
-    const s = flat.find(x => x.id === _soloId);
-    if (s && !related(s, n)) return false;
-  }
-  return true;
+  return inIsolation(n);
 };
 export const CATEGORIES = ['Environment', 'Water', 'Geometry', 'Lighting', 'Cameras', 'Effects'];
 export const catOf = n => typeOf(n).cat || 'Scene';

@@ -181,7 +181,7 @@ export function createOutliner(host, app) {
          <span class="nm">${highlight(n.name)}</span>
          ${isFolder(n) ? `<span class="badge count">${n.kids.length}</span>` : ''}
          ${n.dynamic ? '<span class="badge dyn">dyn</span>' : ''}
-         ${isFolder(n) ? '' : `<button class="st ${n.solo ? 'solo' : ''}" data-a="solo" title="Solo">${ic('solo', { size: 12 })}</button>`}
+         <button class="st ${n.solo ? 'solo' : ''}" data-a="solo" title="Isolate  (I)">${ic('solo', { size: 12 })}</button>
          ${isFolder(n) ? '' : `<button class="st ${n.locked ? 'act' : ''}" data-a="lock" title="Lock">${ic(n.locked ? 'lock' : 'unlock', { size: 12 })}</button>`}
          <button class="st ${n.vis ? '' : 'off'}" data-a="vis" title="Visibility">${ic(n.vis ? 'eye' : 'eyeoff', { size: 12 })}</button>`;
 
@@ -191,7 +191,7 @@ export function createOutliner(host, app) {
         const a = b.dataset.a;
         if (a === 'vis') n.vis = !n.vis;
         if (a === 'lock') n.locked = !n.locked;
-        if (a === 'solo') { const on = !n.solo; flat.forEach(x => x.solo = false); n.solo = on; app.applySolo(); }
+        if (a === 'solo') { app.toggleIsolateNode(n); return; }
         bus.emit('treechange');
       });
       row.onclick = e => app.select(n.id, { additive: e.ctrlKey || e.metaKey, range: e.shiftKey });

@@ -4,7 +4,7 @@
    uses. Unpinned popups track their billboard as the camera moves; pinned ones stay put. Several
    can be open at once so two entities can be tuned against each other.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
-import { typeOf } from './world.js';
+import { typeOf, isIsolated } from './world.js';
 import { buildSheet } from './inspector.js';
 import { el, beginRename } from './kit.js';
 import { bus } from './bus.js';
@@ -70,8 +70,13 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
     const foot = el('div', 'pop-foot');
     const inspectBtn = el('button', 'btn sm ghost', `${ic('panelR', { size: 12 })} Inspector`);
     inspectBtn.onclick = () => { app.select(node.id); app.showInspector(); };
-    const isoBtn = el('button', 'btn sm ghost', `${ic('solo', { size: 12 })} Solo`);
-    isoBtn.onclick = () => app.soloNode(node);
+    const isoBtn = el('button', 'btn sm ghost', `${ic('solo', { size: 12 })} Isolate`);
+    const paintIso = () => {
+      isoBtn.classList.toggle('on', isIsolated(node));
+      isoBtn.lastChild.textContent = isIsolated(node) ? ' Leave' : ' Isolate';
+    };
+    isoBtn.onclick = () => { app.toggleIsolateNode(node); paintIso(); };
+    paintIso();
     foot.append(inspectBtn, isoBtn);
 
     elm.append(head, body, foot);

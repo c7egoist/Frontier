@@ -45,14 +45,24 @@
       <div id="billboards"></div>
       <div id="marquee"></div>
 
+      <div class="gatemask" id="gateMask"><div class="bar t"></div><div class="bar b"></div>
+        <div class="gatetag" id="gateTag"></div></div>
+
       <div class="vp-bar">
         <div class="glasspill" id="catBar"><span class="lbl">Show</span></div>
         <div class="glasspill" id="labelBar"></div>
         <div class="spacer"></div>
+        <div class="vp-bar-right">
+          <div class="glasspill iso" id="isoBanner" style="display:none"></div>
+          <div class="glasspill" id="transport"></div>
+        </div>
+      </div>
+
+      <div class="vp-bottom">
         <div class="tod" id="todBar">
           <span class="clock" id="todClock">06:00</span>
           <div id="todSlider" style="flex:1"></div>
-          <button class="iconbtn ghost" id="todPlay" title="Run the day"></button>
+          <button class="iconbtn ghost" id="todPlay" title="Run the day cycle"></button>
         </div>
       </div>
 
@@ -62,7 +72,9 @@
 
       <div class="vp-right">
         <div class="hudcard" id="hudSel"></div>
-        <div class="axisorb" id="axisOrb"></div>
+        <div class="axisorb" id="axisOrb" title="Click an axis to snap the view · drag to orbit · double click to frame all">
+          <div class="orbhint" id="orbHint"></div>
+        </div>
       </div>
     </section>
 

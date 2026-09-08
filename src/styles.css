@@ -457,3 +457,71 @@ mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;paddin
   opacity:var(--grain,.02);
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='.9'/%3E%3C/svg%3E");}
 .stage .spacer{flex:1;}
+
+/* ── viewport transport (play · simulate · pause · step · stop) ─────────────────────────────── */
+.vp-bar{flex-wrap:wrap;row-gap:8px;}
+.glasspill .sep{width:1px;height:18px;background:var(--stroke);margin:0 4px;flex-shrink:0;}
+.tbtn{width:28px;height:26px;border-radius:var(--r-pill);border:none;cursor:pointer;background:transparent;
+  color:var(--text-dim);display:grid;place-items:center;flex-shrink:0;
+  transition:background .15s var(--ease),color .15s var(--ease),transform .15s var(--ease);}
+.tbtn:hover{background:var(--raised);color:var(--text);}
+.tbtn.play:hover{background:rgba(34,197,94,.16);color:#7ee7a5;}
+.tbtn.sim:hover{background:rgba(108,119,255,.18);color:#aeb4ff;}
+.tbtn.pause:hover{background:rgba(245,158,11,.16);color:#f6c66a;}
+.tbtn.stop:hover{background:rgba(239,68,68,.16);color:#ff9b9b;}
+.tbtn:active{transform:scale(.92);}
+.tbtn:disabled{opacity:.3;cursor:default;}
+.tbtn:disabled:hover{background:transparent;color:var(--text-dim);}
+.tbtn.play.on{background:var(--ok);color:#04140a;}
+.tbtn.sim.on{background:var(--hi);color:#fff;}
+.tbtn.pause.on{background:var(--caution);color:#1a1204;}
+.tbtn.rt{width:auto;padding:0 10px;font-size:10px;letter-spacing:1.1px;text-transform:uppercase;font-weight:600;gap:6px;
+  display:inline-flex;align-items:center;}
+.tbtn.rt.on{background:var(--accent-soft);color:var(--text);}
+.tbtn.rt .led{width:6px;height:6px;border-radius:50%;background:#3a3a3a;}
+.tbtn.rt.on .led{background:var(--ok);box-shadow:0 0 8px var(--ok);}
+.statechip{font-size:10px;letter-spacing:1.3px;text-transform:uppercase;font-weight:700;padding:0 10px;
+  height:22px;display:flex;align-items:center;border-radius:var(--r-pill);}
+.statechip.edit{color:var(--text-faint);}
+.statechip.simulate{background:rgba(108,119,255,.2);color:#aeb4ff;}
+.statechip.play{background:rgba(34,197,94,.2);color:#7ee7a5;}
+.statechip.paused{background:rgba(245,158,11,.2);color:#f6c66a;}
+
+/* running state: the editor furniture steps out of the way */
+body.playing #billboards{display:none;}
+body.playing .stage{box-shadow:0 0 0 1px rgba(34,197,94,.45),var(--shadow-panel);}
+body.playing .stage canvas{cursor:default;}
+.gatemask{position:absolute;inset:0;pointer-events:none;z-index:7;display:none;}
+.gatemask.on{display:block;}
+.gatemask .bar{position:absolute;left:0;right:0;height:0;background:#000;transition:height .25s var(--ease);}
+.gatemask .bar.t{top:0;} .gatemask .bar.b{bottom:0;}
+.gatemask .bar.l,.gatemask .bar.r{top:0;bottom:0;left:auto;right:auto;height:auto;width:0;
+  transition:width .25s var(--ease);}
+.gatemask .bar.l{left:0;} .gatemask .bar.r{right:0;}
+
+/* the transport and the isolate banner ride the right edge of the viewport bar */
+.vp-bar-right{margin-left:auto;display:flex;align-items:center;gap:8px;pointer-events:auto;}
+
+/* a run clears the editor furniture out of the frame, the way PIE does */
+body.playing #catBar,body.playing #labelBar,body.playing #hudSel,
+body.playing .vp-bottom,body.playing .axisorb{opacity:0;pointer-events:none;}
+#catBar,#labelBar,#hudSel,.vp-bottom,.axisorb{transition:opacity .22s var(--ease);}
+.gatetag{position:absolute;left:14px;font-size:10px;letter-spacing:1.4px;text-transform:uppercase;
+  color:rgba(255,255,255,.55);}
+
+/* isolate banner */
+.glasspill.iso{border-color:rgba(245,158,11,.45);background:rgba(30,22,6,.72);}
+.glasspill.iso .txt{font-size:11px;font-weight:600;color:var(--caution);padding:0 4px 0 10px;letter-spacing:.2px;}
+
+/* time-of-day scrubber, bottom centre like a timeline */
+.vp-bottom{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);z-index:12;display:flex;gap:8px;}
+
+/* ── view gizmo ─────────────────────────────────────────────────────────────────────────────── */
+.axisorb{cursor:grab;user-select:none;}
+.axisorb:active{cursor:grabbing;}
+.axisorb .ax{cursor:pointer;transition:transform .12s var(--ease),box-shadow .12s var(--ease);}
+.axisorb .ax:hover{transform:scale(1.45);box-shadow:0 0 0 2px rgba(255,255,255,.25);}
+.axisorb .orbhint{position:absolute;left:50%;top:-17px;transform:translateX(-50%);font-size:9px;
+  letter-spacing:1.2px;text-transform:uppercase;color:var(--text-faint);white-space:nowrap;opacity:0;
+  transition:opacity .15s var(--ease);}
+.axisorb:hover .orbhint{opacity:1;}

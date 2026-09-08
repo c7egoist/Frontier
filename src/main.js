@@ -6,7 +6,10 @@
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 import './styles.css';
 import * as THREE from 'three';
-import { scene, flat, reflatten, byId, typeOf, isFolder, TYPES, CATEGORIES, makeNode, setSolo, soloId } from './world.js';
+import {
+  scene, flat, reflatten, byId, typeOf, isFolder, TYPES, CATEGORIES, makeNode,
+  setIsolation, isolatedIds, isIsolating, isIsolated,
+} from './world.js';
 import { createViewport } from './viewport.js';
 import { createBillboards } from './billboards.js';
 import { createOutliner } from './outliner.js';
@@ -23,8 +26,13 @@ const state = {
   mode: 'split',
   cats: new Set(CATEGORIES),
   labelMode: 'hover',
-  tod: 7.4,          // hours
-  playing: false,
+  tod: 7.4,            // hours
+  dayCycle: false,     // the sun runs on its own
+  transport: 'edit',   // edit | simulate | play
+  paused: false,
+  realtime: true,      // Unreal's viewport realtime toggle
+  playCamId: null,
+  snapshot: null,      // world state captured when a run starts, restored on stop
 };
 
 const $ = s => document.querySelector(s);
@@ -50,6 +58,7 @@ const popupHost = {
   select: (...a) => app.select(...a),
   focus: n => app.focus(n),
   soloNode: n => app.soloNode(n),
+  toggleIsolateNode: n => app.toggleIsolateNode(n),
   showInspector: () => app.showInspector(),
   refreshChrome: () => app.refreshChrome(),
 };
@@ -106,21 +115,41 @@ const app = {
     app.toast(`Framing <b>${node.name}</b>`);
   },
 
-  soloNode(node) {
-    const on = soloId() !== node.id;
-    setSolo(on ? node.id : null);
-    flat.forEach(n => n.solo = false);
-    if (on) node.solo = true;
-    app.applySolo();
-    app.toast(on ? `Soloing <b>${node.name}</b>` : 'Solo cleared');
+  /* ── isolate ───────────────────────────────────────────────────────────────────────────────
+     Isolation is a set: any number of entities can be isolated at once, and isolating a folder
+     keeps its whole subtree. Toggling with the same selection exits, like Unreal. */
+  isolate(ids) {
+    const want = new Set([...ids].filter(id => byId(id)));
+    const cur = isolatedIds();
+    const same = want.size === cur.size && [...want].every(id => cur.has(id));
+    setIsolation(same ? [] : want);
+    app.applyIsolation();
+    const n = isolatedIds().size;
+    app.toast(n ? `Isolated <b>${n}</b> ${n === 1 ? 'entity' : 'entities'}` : 'Isolation cleared');
   },
 
-  applySolo() {
-    const sid = flat.find(n => n.solo)?.id ?? null;
-    setSolo(sid);
+  toggleIsolateSelection() {
+    if (!state.selection.size) { if (isIsolating()) app.isolate([]); return; }
+    app.isolate([...state.selection]);
+  },
+
+  toggleIsolateNode(node) {
+    const cur = new Set(isolatedIds());
+    cur.has(node.id) ? cur.delete(node.id) : cur.add(node.id);
+    setIsolation(cur);
+    app.applyIsolation();
+  },
+
+  exitIsolation() { setIsolation([]); app.applyIsolation(); app.toast('Isolation cleared'); },
+
+  applyIsolation() {
+    flat.forEach(n => n.solo = isIsolated(n));
     vp.applyAll();
     outliner.render();
+    renderIsolationBanner();
   },
+
+  soloNode(node) { app.isolate([node.id]); },   // kept: single-entity shorthand
 
   contextMenu(node, e) { openContext(node, e); },
   toast,
@@ -268,6 +297,205 @@ const labelBar = $('#labelBar');
   labelBar.appendChild(b);
 });
 
+
+/* ── transport: play · simulate · pause · step · stop ──────────────────────────────────────────
+   Unreal's model. SIMULATE runs the world with the editor camera still free; PLAY runs it looking
+   through a scene camera with the gate masked in and the editor furniture hidden; PAUSE freezes
+   the clock and STEP advances a single frame; STOP restores the world exactly as it was when the
+   run started, so nothing you nudge while it is running leaks back into the authored scene. */
+const transportEl = $('#transport');
+const tbtn = (cls, icon, title) => {
+  const b = el('button', `tbtn ${cls}`, ic(icon, { size: 13 }));
+  b.title = title;
+  transportEl.appendChild(b);
+  return b;
+};
+const btnPlay = tbtn('play', 'play', 'Play — run the world through a scene camera  (Alt P)');
+const btnSim = tbtn('sim', 'sim', 'Simulate — run the world, keep the editor camera  (Alt S)');
+const btnPause = tbtn('pause', 'pause', 'Pause / resume  (P)');
+const btnStep = tbtn('step', 'step', 'Advance one frame  (.)');
+const btnStop = tbtn('stop', 'stop', 'Stop — restore the editor state  (Esc)');
+transportEl.appendChild(el('div', 'sep'));
+const btnRealtime = el('button', 'tbtn rt on', '<span class="led"></span>Realtime');
+btnRealtime.title = 'Realtime viewport — animate and redraw continuously  (Ctrl R)';
+transportEl.appendChild(btnRealtime);
+const stateChip = el('div', 'statechip edit', 'Edit');
+transportEl.appendChild(stateChip);
+
+const gateMask = $('#gateMask');
+const barL = el('div', 'bar l'), barR = el('div', 'bar r');
+gateMask.append(barL, barR);
+
+const GATE_RATIO = { '16:9': 16 / 9, '2.39:1': 2.39, '4:3': 4 / 3, '1:1': 1 };
+function applyGate(camNode) {
+  if (!camNode) { gateMask.classList.remove('on'); return; }
+  const r = stage.getBoundingClientRect();
+  const ratio = GATE_RATIO[camNode.props.gate] || 16 / 9;
+  const view = r.width / r.height;
+  const bt = view > ratio ? 0 : (r.height - r.width / ratio) / 2;
+  const bl = view > ratio ? (r.width - r.height * ratio) / 2 : 0;
+  gateMask.classList.add('on');
+  gateMask.querySelector('.bar.t').style.height = bt + 'px';
+  gateMask.querySelector('.bar.b').style.height = bt + 'px';
+  barL.style.width = bl + 'px';
+  barR.style.width = bl + 'px';
+  const tag = $('#gateTag');
+  tag.textContent = `${camNode.name} · ${camNode.props.gate} · ${Math.round(camNode.props.fov)}° · f/${camNode.props.aperture}`;
+  tag.style.top = (bt + 10) + 'px';
+  tag.style.left = (bl + 14) + 'px';
+}
+
+const playCameraNode = () => {
+  const cur = byId(state.cursorId);
+  if (cur && cur.type === 'camera') return cur;
+  return flat.find(n => n.type === 'camera') || null;
+};
+
+function snapshotWorld() {
+  state.snapshot = {
+    tod: state.tod,
+    iso: [...isolatedIds()],
+    ids: flat.map(n => n.id),
+    nodes: flat.map(n => ({
+      id: n.id, name: n.name, vis: n.vis, locked: n.locked, dynamic: n.dynamic,
+      props: JSON.parse(JSON.stringify(n.props)),
+    })),
+  };
+}
+function restoreWorld() {
+  const snap = state.snapshot;
+  if (!snap) return;
+  /* anything spawned during the run is discarded, exactly like leaving PIE */
+  const known = new Set(snap.ids);
+  flat.filter(n => !known.has(n.id)).forEach(n => {
+    vp.remove(n);
+    const list = n.parent ? n.parent.kids : scene;
+    const i = list.indexOf(n);
+    if (i >= 0) list.splice(i, 1);
+    state.selection.delete(n.id);
+    if (popups.has(n.id)) popups.close(n.id);
+  });
+  reflatten();
+  snap.nodes.forEach(rec => {
+    const n = byId(rec.id);
+    if (!n) return;
+    n.name = rec.name; n.vis = rec.vis; n.locked = rec.locked; n.dynamic = rec.dynamic;
+    n.props = rec.props;
+  });
+  setIsolation(snap.iso);
+  flat.forEach(n => n.solo = isIsolated(n));
+  state.snapshot = null;
+  setTimeOfDay(snap.tod);
+  vp.applyAll();
+  outliner.render();
+  renderInspector();
+  renderIsolationBanner();
+  billboards.rebuild(billboardNodes());
+}
+
+function setTransport(mode) {
+  if (mode === 'edit') {
+    const was = state.transport;
+    if (was !== 'edit') restoreWorld();
+    state.transport = 'edit';
+    state.paused = false;
+    state.playCamId = null;
+    vp.setViewCamera(null);
+    document.body.classList.remove('playing');
+    applyGate(null);
+    if (was !== 'edit') toast('Stopped · editor state restored');
+  } else {
+    if (state.transport === 'edit') snapshotWorld();
+    state.realtime = true;              // a run is always realtime
+    state.paused = false;
+    if (mode === 'play') {
+      const cam = playCameraNode();
+      if (cam && vp.setViewCamera(cam)) {
+        state.transport = 'play';
+        state.playCamId = cam.id;
+        document.body.classList.add('playing');
+        applyGate(cam);
+        toast(`Playing through <b>${cam.name}</b>`);
+      } else {
+        toast('No camera to play through — simulating instead');
+        mode = 'simulate';
+      }
+    }
+    if (mode === 'simulate') {
+      state.transport = 'simulate';
+      state.playCamId = null;
+      vp.setViewCamera(null);
+      document.body.classList.remove('playing');
+      applyGate(null);
+      toast('Simulating');
+    }
+  }
+  updateTransport();
+}
+
+function setPaused(p) {
+  state.paused = p;
+  updateTransport();
+  toast(p ? 'Paused' : 'Resumed');
+}
+function stepFrame() {
+  if (!state.paused) setPaused(true);
+  const dt = 1 / 30;
+  vp.stepOnce(dt);
+  if (dayClockRunning(true)) setTimeOfDay(state.tod + dt * sunNode().props.rate / 600);
+}
+function setRealtime(v) {
+  state.realtime = v;
+  updateTransport();
+}
+
+function updateTransport() {
+  const running = state.transport !== 'edit';
+  btnPlay.classList.toggle('on', state.transport === 'play');
+  btnSim.classList.toggle('on', state.transport === 'simulate');
+  btnPause.classList.toggle('on', state.paused);
+  btnPause.innerHTML = ic(state.paused ? 'play' : 'pause', { size: 13 });
+  btnStep.disabled = !state.paused;
+  btnStop.disabled = !running;
+  btnRealtime.classList.toggle('on', state.realtime);
+  btnRealtime.disabled = running;
+  const label = state.paused ? 'Paused' : state.transport === 'play' ? 'Play'
+    : state.transport === 'simulate' ? 'Simulate' : state.realtime ? 'Edit' : 'Edit · static';
+  stateChip.textContent = label;
+  stateChip.className = 'statechip ' + (state.paused ? 'paused' : state.transport);
+  /* one authority for "is the world moving": the viewport animates and redraws, or it does not */
+  const live = state.realtime && !state.paused;
+  vp.setClock({ animate: live, render: live });
+  $('#stHint').textContent = running
+    ? (state.paused ? 'Paused — press . to step a frame, Esc to stop' : 'Running — Esc stops and restores the editor state')
+    : 'Click a billboard to select · click it again for settings · drag rows to re-parent';
+}
+
+btnPlay.onclick = () => setTransport(state.transport === 'play' ? 'edit' : 'play');
+btnSim.onclick = () => setTransport(state.transport === 'simulate' ? 'edit' : 'simulate');
+btnPause.onclick = () => setPaused(!state.paused);
+btnStep.onclick = () => stepFrame();
+btnStop.onclick = () => setTransport('edit');
+btnRealtime.onclick = () => setRealtime(!state.realtime);
+
+/* ── isolation banner ──────────────────────────────────────────────────────────────────────── */
+function renderIsolationBanner() {
+  const b = $('#isoBanner');
+  const n = isolatedIds().size;
+  if (!n) { b.style.display = 'none'; b.innerHTML = ''; return; }
+  b.style.display = 'flex';
+  b.innerHTML = `<span class="txt">${ic('solo', { size: 11, color: 'currentColor' })}</span>
+    <span class="txt">Isolating ${n} ${n === 1 ? 'entity' : 'entities'}</span>`;
+  const x = el('button', 'chipbtn', 'Exit');
+  x.onclick = () => app.exitIsolation();
+  b.appendChild(x);
+}
+
+const sunNode = () => flat.find(n => n.type === 'sun');
+const dayClockRunning = (ignorePause = false) =>
+  (ignorePause || (state.realtime && !state.paused)) &&
+  (state.transport !== 'edit' || sunNode().props.animate);
+
 const todSlider = slider({
   min: 0, max: 24, value: state.tod, dec: 2, unit: 'h', thin: true,
   onInput: v => setTimeOfDay(v, { silent: true }),
@@ -277,12 +505,13 @@ $('#todSlider').appendChild(todSlider);
 const todPlay = $('#todPlay');
 todPlay.innerHTML = ic('play', { size: 12 });
 todPlay.onclick = () => {
-  state.playing = !state.playing;
-  const sun = flat.find(n => n.type === 'sun');
-  sun.props.animate = state.playing;
-  todPlay.innerHTML = ic(state.playing ? 'pause' : 'play', { size: 12 });
-  todPlay.classList.toggle('on', state.playing);
+  state.dayCycle = !state.dayCycle;
+  const sun = sunNode();
+  sun.props.animate = state.dayCycle;
+  todPlay.innerHTML = ic(state.dayCycle ? 'pause' : 'play', { size: 12 });
+  todPlay.classList.toggle('on', state.dayCycle);
   bus.emit('propchange', { node: sun, key: 'animate', src: 'tod' });
+  if (state.dayCycle && !state.realtime) setRealtime(true);
 };
 
 /* topbar icons */
@@ -328,7 +557,7 @@ function openContext(node, e) {
     ['sep'],
     [node.vis ? 'Hide' : 'Show', node.vis ? 'eyeoff' : 'eye', () => { node.vis = !node.vis; bus.emit('treechange'); }, true, 'H'],
     [node.locked ? 'Unlock' : 'Lock', node.locked ? 'unlock' : 'lock', () => { node.locked = !node.locked; bus.emit('treechange'); }, true, 'L'],
-    ['Solo', 'solo', () => app.soloNode(node), !isFolder(node)],
+    [isIsolated(node) ? 'Leave isolation' : 'Isolate', 'solo', () => app.toggleIsolateNode(node), true, 'I'],
     ['Duplicate', 'copy', () => app.duplicate(node), !isFolder(node), '⌘D'],
     ['sep'],
     ['Delete', 'trash', () => app.remove(node), true, '⌫', true],
@@ -365,6 +594,20 @@ let palItems = [], palIndex = 0;
 function commands() {
   const node = byId(state.cursorId);
   return [
+    { label: 'Play — run through a camera', sub: 'transport', run: () => setTransport('play') },
+    { label: 'Simulate — run the world', sub: 'transport', run: () => setTransport('simulate') },
+    { label: 'Pause / resume', sub: 'transport', run: () => setPaused(!state.paused) },
+    { label: 'Step one frame', sub: 'transport', run: () => stepFrame() },
+    { label: 'Stop and restore', sub: 'transport', run: () => setTransport('edit') },
+    { label: `Realtime viewport: turn ${state.realtime ? 'off' : 'on'}`, sub: 'viewport', run: () => setRealtime(!state.realtime) },
+    { label: 'Isolate selection', sub: 'view', run: () => app.toggleIsolateSelection() },
+    { label: 'Exit isolation', sub: 'view', run: () => app.exitIsolation() },
+    { label: 'View — front', sub: 'camera', run: () => snapView('front') },
+    { label: 'View — back', sub: 'camera', run: () => snapView('back') },
+    { label: 'View — left', sub: 'camera', run: () => snapView('left') },
+    { label: 'View — right', sub: 'camera', run: () => snapView('right') },
+    { label: 'View — top', sub: 'camera', run: () => snapView('top') },
+    { label: 'View — bottom', sub: 'camera', run: () => snapView('bottom') },
     { label: 'Frame everything', sub: 'view', run: () => vp.frameAll() },
     { label: 'Frame selection', sub: 'view', run: () => app.focus(node) },
     { label: 'Close all popups', sub: 'view', run: () => popups.closeAll() },
@@ -431,11 +674,22 @@ addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if ((e.metaKey || e.ctrlKey) && k === 'k') { e.preventDefault(); openPalette(); return; }
   if ((e.metaKey || e.ctrlKey) && k === 'd') { e.preventDefault(); app.duplicate(node); return; }
-  if (e.key === 'Escape') { closePalette(); ctx.classList.remove('open'); if (popups.count()) popups.closeAll(); else app.select(null); return; }
+  if ((e.metaKey || e.ctrlKey) && k === 'r') { e.preventDefault(); setRealtime(!state.realtime); return; }
+  if (e.altKey && k === 'p') { e.preventDefault(); setTransport(state.transport === 'play' ? 'edit' : 'play'); return; }
+  if (e.altKey && k === 's') { e.preventDefault(); setTransport(state.transport === 'simulate' ? 'edit' : 'simulate'); return; }
+  if (k === 'p' && !e.altKey && !e.metaKey && !e.ctrlKey) { setPaused(!state.paused); return; }
+  if (e.key === '.') { stepFrame(); return; }
+  if (e.key === 'Escape') {
+    closePalette(); ctx.classList.remove('open');
+    if (state.transport !== 'edit') { setTransport('edit'); return; }
+    if (isIsolating()) { app.exitIsolation(); return; }
+    if (popups.count()) popups.closeAll(); else app.select(null);
+    return;
+  }
   if (k === 'f') { e.shiftKey ? vp.frameAll() : app.focus(node); return; }
   if (k === 'h' && node) { node.vis = !node.vis; bus.emit('treechange'); return; }
   if (k === 'l' && node) { node.locked = !node.locked; bus.emit('treechange'); return; }
-  if (k === 'i' && node) { app.soloNode(node); return; }
+  if (k === 'i') { app.toggleIsolateSelection(); return; }
   if (k === 'enter' && node && !typeOf(node).noBillboard && !isFolder(node)) { popups.toggle(node); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && node) { e.preventDefault(); app.remove(node); return; }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
@@ -473,39 +727,66 @@ function syncTodFromSun() {
   todSlider._set(state.tod);
 }
 
-/* ── axis orb ──────────────────────────────────────────────────────────────────────────────── */
+/* ── view gizmo ────────────────────────────────────────────────────────────────────────────────
+   The orb is not decoration: each knob snaps the camera to that axis, dragging the body orbits,
+   and a double click frames the world. Front is +Z, right is +X, top is +Y. */
 const orb = $('#axisOrb');
-const AXES = [
-  { v: [1, 0, 0], label: 'X', color: 'var(--ax-x)' }, { v: [-1, 0, 0], label: '', color: 'var(--ax-x)', neg: true },
-  { v: [0, 1, 0], label: 'Y', color: 'var(--ax-y)' }, { v: [0, -1, 0], label: '', color: 'var(--ax-y)', neg: true },
-  { v: [0, 0, 1], label: 'Z', color: 'var(--ax-z)' }, { v: [0, 0, -1], label: '', color: 'var(--ax-z)', neg: true },
-];
-const orbEls = AXES.map(a => {
+const orbHint = $('#orbHint');
+const VIEWS = {
+  right:  { v: [1, 0, 0],  label: 'X', color: 'var(--ax-x)' },
+  left:   { v: [-1, 0, 0], label: '',  color: 'var(--ax-x)', neg: true },
+  top:    { v: [0, 1, 0],  label: 'Y', color: 'var(--ax-y)' },
+  bottom: { v: [0, -1, 0], label: '',  color: 'var(--ax-y)', neg: true },
+  front:  { v: [0, 0, 1],  label: 'Z', color: 'var(--ax-z)' },
+  back:   { v: [0, 0, -1], label: '',  color: 'var(--ax-z)', neg: true },
+};
+function snapView(name) {
+  const view = VIEWS[name];
+  if (!view) return;
+  if (state.transport === 'play') { toast('Stop the run to move the editor camera'); return; }
+  vp.snapView(new THREE.Vector3(...view.v));
+  toast(`${name[0].toUpperCase() + name.slice(1)} view`);
+}
+const orbEls = Object.entries(VIEWS).map(([name, a]) => {
   const stem = el('div', 'stem');
   stem.style.background = a.color;
   const dot = el('div', `ax${a.neg ? ' neg' : ''}`, a.label);
   dot.style.background = a.color;
   dot.style.color = a.neg ? a.color : '#000';
+  dot.title = `${name[0].toUpperCase() + name.slice(1)} view`;
+  dot.addEventListener('pointerdown', e => e.stopPropagation());
+  dot.addEventListener('click', e => { e.stopPropagation(); snapView(name); });
+  dot.addEventListener('pointerenter', () => { orbHint.textContent = name; });
+  dot.addEventListener('pointerleave', () => { orbHint.textContent = 'drag to orbit'; });
   orb.append(stem, dot);
   return { stem, dot, a };
 });
+orbHint.textContent = 'drag to orbit';
+
+/* drag the orb body to orbit the editor camera */
+orb.addEventListener('pointerdown', e => {
+  if (e.target.closest('.ax') || state.transport === 'play') return;
+  orb.setPointerCapture(e.pointerId);
+  let last = { x: e.clientX, y: e.clientY };
+  const mv = ev => { vp.orbitBy(ev.clientX - last.x, ev.clientY - last.y); last = { x: ev.clientX, y: ev.clientY }; };
+  const up = () => { orb.removeEventListener('pointermove', mv); orb.removeEventListener('pointerup', up); };
+  orb.addEventListener('pointermove', mv);
+  orb.addEventListener('pointerup', up);
+});
+orb.addEventListener('dblclick', () => { vp.frameAll(); toast('Framed the world'); });
 
 /* ── frame loop ────────────────────────────────────────────────────────────────────────────── */
 let lastTod = 0;
-vp.start(({ fps, camera, controls, dayFactor }) => {
-  /* day cycle */
-  const sun = flat.find(n => n.type === 'sun');
-  if (sun.props.animate) {
-    const dt = 1 / Math.max(fps, 1);
-    setTimeOfDay(state.tod + dt * sun.props.rate / 600);
-  }
+vp.start(({ fps, dt, camera, controls, dayFactor, playing }) => {
+  if (dt > 0 && dayClockRunning()) setTimeOfDay(state.tod + dt * sunNode().props.rate / 600);
 
   billboards.update();
   popups.update(billboards);
 
-  /* axis orb */
+  /* axis orb — always shows where the editor camera is looking */
+  const orbCam = vp.camera;
   orbEls.forEach(({ stem, dot, a }) => {
-    const v = new THREE.Vector3(...a.v).applyQuaternion(camera.quaternion.clone().invert());
+    const v = new THREE.Vector3(...a.v).applyQuaternion(orbCam.quaternion.clone().invert());
     const x = 38 + v.x * 26, y = 38 - v.y * 26;
     dot.style.left = x + 'px'; dot.style.top = y + 'px';
     dot.style.marginLeft = '-8px'; dot.style.marginTop = '-8px';
@@ -523,11 +804,18 @@ vp.start(({ fps, camera, controls, dayFactor }) => {
     const p = camera.position;
     $('#hudLeft').innerHTML =
       `<b>fps</b> <span class="k">${fps.toFixed(0)}</span> &nbsp; <b>daylight</b> <span class="k">${(dayFactor * 100).toFixed(0)}%</span><br>` +
-      `<b>cam</b> ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} &nbsp; <b>dist</b> ${camera.position.distanceTo(controls.target).toFixed(1)} m`;
-    $('#stRender').textContent = `WebGL2 · ACES · ${fps.toFixed(0)} fps`;
+      `<b>cam</b> ${p.x.toFixed(1)}, ${p.y.toFixed(1)}, ${p.z.toFixed(1)} &nbsp; <b>dist</b> ${camera.position.distanceTo(controls.target).toFixed(1)} m` +
+      (playing ? `<br><b>view</b> <span class="k">${escape(byId(state.playCamId)?.name || 'camera')}</span>` : '') +
+      (isIsolating() ? `<br><b>isolated</b> <span class="k">${isolatedIds().size}</span>` : '');
+    $('#stRender').textContent = state.paused ? 'paused · on-demand redraw'
+      : state.realtime ? `WebGL2 · ACES · ${fps.toFixed(0)} fps`
+        : 'realtime off · on-demand redraw';
     $('#stCam').textContent = `${state.tod.toFixed(2).padStart(5, '0')} h · sun ${flat.find(n => n.type === 'sun').props.elevation.toFixed(1)}°`;
   }
 });
+
+/* the aspect mask has to follow the stage, whatever changes its size */
+addEventListener('resize', () => { if (state.transport === 'play') applyGate(byId(state.playCamId)); });
 
 /* ── boot ──────────────────────────────────────────────────────────────────────────────────── */
 setTimeOfDay(7.4);
@@ -536,7 +824,12 @@ outliner.render();
 setMode('split');
 app.select(flat.find(n => n.name === 'Anchor Cube').id);
 billboards.setLabelMode('hover');
+renderIsolationBanner();
+updateTransport();
 setTimeout(() => toast('Click a billboard to select · click again for settings'), 700);
 
 /* a tiny handle for automation, embedding and console poking */
-window.frontier = { state, app, setTimeOfDay, vp, popups, outliner, billboards, world: { flat, scene } };
+window.frontier = {
+  state, app, setTimeOfDay, vp, popups, outliner, billboards, world: { flat, scene },
+  setTransport, setPaused, setRealtime, stepFrame, snapView,
+};

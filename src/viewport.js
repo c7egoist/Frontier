@@ -702,6 +702,7 @@ export function createViewport(canvas, { onPick } = {}) {
   }
 
   function applyNode(node) {
+    dirty = true;
     const t = typeOf(node);
     if (['sky', 'sun', 'moon', 'stars', 'clouds', 'fog', 'wind', 'water', 'post'].includes(node.type)) {
       applyEnvironment();
@@ -732,7 +733,7 @@ export function createViewport(canvas, { onPick } = {}) {
       e.light.decay = p.decay;
       e.light.castShadow = p.shadows;
       e.glow.material.color.set(p.color);
-      e.glow.visible = p.gizmoGlow && visible;
+      e.glow.visible = p.gizmoGlow && visible && !viewCam;
       anchors.set(node.id, new THREE.Vector3(...p.pos));
     } else if (node.type === 'spotlight') {
       e.root.position.set(...p.pos);
@@ -748,7 +749,7 @@ export function createViewport(canvas, { onPick } = {}) {
       const rad = Math.tan(p.angle * D2R) * len;
       [e.cone, e.wire].forEach(g => {
         /* the wire cone is always available as a hint; the volume only shows for the selected light */
-        g.visible = p.showCone && visible && (g === e.wire || selectedIds.has(node.id));
+        g.visible = p.showCone && visible && !viewCam && (g === e.wire || selectedIds.has(node.id));
         g.scale.set(rad, len, rad);
         g.position.set(0, 0, 0);
         const mid = to.clone().sub(from).multiplyScalar(0.5);
@@ -763,12 +764,18 @@ export function createViewport(canvas, { onPick } = {}) {
       e.proxy.position.set(...p.pos);
       e.proxy.lookAt(new THREE.Vector3(...p.lookAt));
       e.proxy.fov = p.fov;
-      e.proxy.aspect = ({ '16:9': 16 / 9, '2.39:1': 2.39, '4:3': 4 / 3, '1:1': 1 })[p.gate] || 16 / 9;
-      e.proxy.far = THREE.MathUtils.clamp(p.focus * 0.4, 1.6, 4.5);
+      if (e.proxy !== viewCam) {
+        /* the proxy is only a frustum drawing while it is not the camera we are looking through */
+        e.proxy.aspect = ({ '16:9': 16 / 9, '2.39:1': 2.39, '4:3': 4 / 3, '1:1': 1 })[p.gate] || 16 / 9;
+        e.proxy.far = THREE.MathUtils.clamp(p.focus * 0.4, 1.6, 4.5);
+      } else {
+        e.proxy.aspect = (canvas.clientWidth || 16) / (canvas.clientHeight || 9);
+        e.proxy.near = 0.1; e.proxy.far = 6000;
+      }
       e.proxy.updateProjectionMatrix();
       e.proxy.updateMatrixWorld(true);
       e.helper.update();
-      e.helper.visible = p.showFrustum && visible && selectedIds.has(node.id);
+      e.helper.visible = p.showFrustum && visible && !viewCam && selectedIds.has(node.id);
       anchors.set(node.id, new THREE.Vector3(p.pos[0], p.pos[1] + 0.35, p.pos[2]));
     } else if (node.type === 'particles') {
       e.root.position.set(...p.pos);
@@ -783,19 +790,20 @@ export function createViewport(canvas, { onPick } = {}) {
     } else if (node.type === 'probe') {
       e.root.position.set(...p.pos);
       e.bounds.scale.setScalar(p.radius);
-      e.bounds.visible = p.showBounds && visible && selectedIds.has(node.id);
+      e.bounds.visible = p.showBounds && visible && !viewCam && selectedIds.has(node.id);
       e.bounds.material.opacity = 0.06 + 0.12 * p.intensity;
       anchors.set(node.id, new THREE.Vector3(...p.pos));
     } else if (node.type === 'audio') {
       e.root.position.set(...p.pos);
       e.ring.scale.setScalar(p.radius);
       e.ring.material.opacity = 0.12 + 0.3 * p.gain;
-      e.ring.visible = visible && selectedIds.has(node.id);
+      e.ring.visible = visible && !viewCam && selectedIds.has(node.id);
       anchors.set(node.id, new THREE.Vector3(...p.pos));
     }
   }
 
   function applyAll() {
+    dirty = true;
     reflatten();
     applyEnvironment();
     flat.forEach(n => { if (n.type !== 'folder') applyNode(n); });
@@ -803,7 +811,8 @@ export function createViewport(canvas, { onPick } = {}) {
 
   /* ── post chain ── */
   const composer = new EffectComposer(renderer);
-  composer.addPass(new RenderPass(scene3, camera));
+  const renderPass = new RenderPass(scene3, camera);
+  composer.addPass(renderPass);
   const bloomPass = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.42, 0.6, 0.85);
   composer.addPass(bloomPass);
   const outlinePass = new OutlinePass(new THREE.Vector2(1, 1), scene3, camera);
@@ -880,7 +889,8 @@ export function createViewport(canvas, { onPick } = {}) {
       if (e?.mesh) sel.push(e.mesh);
       if (e?.bounds) sel.push(e.bounds);
     });
-    outlinePass.selectedObjects = sel;
+    outlinePass.selectedObjects = viewCam ? [] : sel;   /* no editor outline inside a run */
+    lastSelection = sel;
   }
 
   /* ── framing ── */
@@ -912,6 +922,10 @@ export function createViewport(canvas, { onPick } = {}) {
   }
 
   /* ── resize / loop ── */
+  /* clock gating: the loop only draws when something actually changed, unless it is realtime */
+  let animateOn = true, renderOn = true, dirty = true, stepFor = 0;
+  let viewCam = null;                       // non-null while playing through a scene camera
+
   function resize() {
     const w = canvas.clientWidth || 1, h = canvas.clientHeight || 1;
     renderer.setSize(w, h, false);
@@ -920,7 +934,9 @@ export function createViewport(canvas, { onPick } = {}) {
     outlinePass.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    if (viewCam) { viewCam.aspect = w / h; viewCam.updateProjectionMatrix(); }
     starUniforms.uPixelRatio.value = renderer.getPixelRatio();
+    dirty = true;
   }
   const ro = new ResizeObserver(resize);
   ro.observe(canvas);
@@ -929,20 +945,82 @@ export function createViewport(canvas, { onPick } = {}) {
   const clock = new THREE.Clock();
   let time = 0, fps = 60, acc = 0, frames = 0;
 
+  /* Realtime is a viewport property, exactly like Unreal's toggle: when it is off the viewport
+     stops animating and only redraws when something actually changed (camera, property, layout).
+     `animate` advances world time; `render` keeps the frame loop hot. */
+  const activeCamera = () => viewCam || camera;
+  const requestRender = () => { dirty = true; };
+  controls.addEventListener('change', requestRender);
+
+  function setClock({ animate, render }) {
+    if (animate !== undefined) animateOn = animate;
+    if (render !== undefined) renderOn = render;
+    dirty = true;
+  }
+  function stepOnce(dt = 1 / 30) { stepFor = dt; dirty = true; }
+
+  let lastSelection = [];
+  function setViewCamera(node) {
+    if (!node) {
+      viewCam = null;
+      renderPass.camera = camera;
+      outlinePass.renderCamera = camera;
+      controls.enabled = true;
+    } else {
+      const e = objects.get(node.id);
+      if (!e?.proxy) return false;
+      viewCam = e.proxy;
+      viewCam.aspect = (canvas.clientWidth || 16) / (canvas.clientHeight || 9);
+      viewCam.near = 0.1; viewCam.far = 6000;
+      viewCam.updateProjectionMatrix();
+      renderPass.camera = viewCam;
+      outlinePass.renderCamera = viewCam;
+      controls.enabled = false;
+    }
+    outlinePass.selectedObjects = viewCam ? [] : lastSelection;
+    applyAll();                     /* editor helpers step out of frame during a run */
+    dirty = true;
+    return true;
+  }
+
+  /* view gizmo: snap to an axis, or orbit by a screen-space drag */
+  function snapView(dir) {
+    const d = new THREE.Vector3(dir.x, dir.y, dir.z).normalize();
+    controls.maxPolarAngle = d.y < -0.5 ? Math.PI : Math.PI * 0.495;
+    const dist = Math.max(camera.position.distanceTo(controls.target), 3);
+    const to = d.multiplyScalar(dist);
+    if (Math.abs(to.y) > dist * 0.9) to.x += dist * 0.004;   // never look straight down the pole
+    flight = {
+      t: 0, fromT: controls.target.clone(), toT: controls.target.clone(),
+      fromP: camera.position.clone(), toP: controls.target.clone().add(to),
+    };
+    dirty = true;
+  }
+  function orbitBy(dx, dy) {
+    const off = camera.position.clone().sub(controls.target);
+    const sph = new THREE.Spherical().setFromVector3(off);
+    sph.theta -= dx * 0.009;
+    sph.phi = THREE.MathUtils.clamp(sph.phi - dy * 0.009, 0.03, controls.maxPolarAngle - 0.01);
+    camera.position.copy(controls.target).add(new THREE.Vector3().setFromSpherical(sph));
+    camera.lookAt(controls.target);
+    dirty = true;
+  }
+
   function tick(dt) {
+    const cam = activeCamera();
     time += dt;
     const starN = nodeOf('stars');
     stars.rotation.y += dt * 0.0015 * (starN.props.drift || 0);
 
-    skyUniforms && (sky.position.copy(camera.position));
-    stars.position.copy(camera.position);
+    sky.position.copy(cam.position);
+    stars.position.copy(cam.position);
     starUniforms.uTime.value = time;
     cloudUniforms.uTime.value = time;
     cloudUniforms.uDay.value = dayFactor;
     waterUniforms.uTime.value = time;
     waterUniforms.uDay.value = dayFactor;
-    clouds.position.x = camera.position.x;
-    clouds.position.z = camera.position.z;
+    clouds.position.x = cam.position.x;
+    clouds.position.z = cam.position.z;
     objects.forEach(e => { if (e.uni) { e.uni.uTime.value = time; e.uni.uDay.value = dayFactor; } });
 
     envClock += dt;
@@ -955,7 +1033,7 @@ export function createViewport(canvas, { onPick } = {}) {
       camera.position.lerpVectors(flight.fromP, flight.toP, k);
       if (flight.t >= 1) flight = null;
     }
-    controls.update();
+    if (!viewCam) controls.update();
     gradePass.uniforms.uSat.value = saturation;
     gradePass.uniforms.uCon.value = contrast;
     composer.render();
@@ -966,11 +1044,17 @@ export function createViewport(canvas, { onPick } = {}) {
   function start(onFrame) {
     const loop = () => {
       raf = requestAnimationFrame(loop);
-      const dt = Math.min(clock.getDelta(), 0.06);
+      const real = Math.min(clock.getDelta(), 0.06);
+      if (!viewCam) controls.update();                 // damping keeps running so inertia survives
+      let dt = animateOn ? real : 0;
+      if (stepFor > 0) { dt = stepFor; stepFor = 0; dirty = true; }   // single-frame advance
+      const shouldRender = renderOn || animateOn || dirty || !!flight;
+      if (!shouldRender) return;
+      dirty = false;
       tick(dt);
-      frames++; acc += dt;
+      frames++; acc += real;
       if (acc > 0.5) { fps = frames / acc; frames = 0; acc = 0; }
-      onFrame && onFrame({ fps, time, dayFactor, camera, controls });
+      onFrame && onFrame({ fps, dt, time, dayFactor, camera: activeCamera(), editorCamera: camera, controls, playing: !!viewCam });
     };
     loop();
     return () => cancelAnimationFrame(raf);
@@ -979,6 +1063,8 @@ export function createViewport(canvas, { onPick } = {}) {
   return {
     scene3, camera, controls, renderer, anchors, objects,
     applyNode, applyAll, setSelection, focusOn, frameAll, start, resize, pickAt,
+    setClock, stepOnce, setViewCamera, snapView, orbitBy, requestRender,
+    get isPlaying() { return !!viewCam; },
     get dayFactor() { return dayFactor; },
     get sunDir() { return sunDir; },
     setHudElements(v, g) { vignetteEl = v; grainEl = g; },

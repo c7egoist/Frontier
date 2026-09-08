@@ -6,7 +6,7 @@
    the labels stay legible at any distance, and hit-testing is exact.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 import * as THREE from 'three';
-import { flat, typeOf, effectiveVis } from './world.js';
+import { flat, typeOf, effectiveVis, inIsolation } from './world.js';
 import { ic } from './icons.js';
 import { el } from './kit.js';
 
@@ -58,7 +58,8 @@ export function createBillboards(host, vp, { onSelect, onOpen, onContext } = {})
       if (!node) { elm.remove(); chips.delete(id); return; }
       const a = vp.anchors.get(id);
       const t = typeOf(node);
-      if (!a || !visibleCats.has(t.cat)) { elm.style.display = 'none'; return; }
+      /* isolation takes markers away with their entities; the eye only mutes them */
+      if (!a || !visibleCats.has(t.cat) || !inIsolation(node)) { elm.style.display = 'none'; return; }
       v.copy(a).project(cam);
       if (v.z > 1) { elm.style.display = 'none'; return; }
       const x = (v.x * 0.5 + 0.5) * w, y = (-v.y * 0.5 + 0.5) * h;
