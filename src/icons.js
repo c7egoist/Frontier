@@ -55,6 +55,8 @@ export const P = {
   reset:   '<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/>',
   command: '<path d="M6 3a3 3 0 1 1-3 3v12a3 3 0 1 0 3-3h12a3 3 0 1 1 3 3V6a3 3 0 1 0-3 3H6z"/>',
   check:   '<path d="m4 12 6 6L20 6"/>',
+  alert:   '<path d="M12 3 2 20h20z"/><path d="M12 10v4"/><path d="M12 17.2v.4"/>',
+  arrowout:'<path d="M8.5 15.5 15.5 8.5"/><path d="M9.5 8.5h6v6"/>',
   grid:    '<path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',
   world:   '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>',
 };

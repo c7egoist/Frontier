@@ -670,3 +670,86 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
   transition:transform .14s var(--ease);}
 .mp-tint:hover{transform:translateY(-1px);}
 .mp-tint.on{box-shadow:0 0 0 2px var(--panel),0 0 0 3.5px var(--text);}
+
+/* ── the moon panel · type scale ───────────────────────────────────────────────────────────────
+   Sizes are the whole point of this look: one big light numeral, its decimals dropped back a
+   shade, its unit shrunk to a footnote — and everything that labels it pushed down to 9.5px
+   uppercase with a lot of letter-spacing. Nothing lands in the middle. */
+.mpanel .mp-chead{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;}
+.mpanel .mp-chead .l{display:flex;flex-direction:column;gap:1px;min-width:0;}
+.mpanel .mp-chead .t{font-size:15px;font-weight:450;letter-spacing:-.1px;color:var(--text);}
+.mpanel .mp-chead .s{font-size:9.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--text-faint);}
+.mpanel .mp-x{margin-left:auto;width:24px;height:24px;flex:0 0 24px;border-radius:9px;display:grid;
+  place-items:center;color:var(--text-dim);background:transparent;border:1px solid transparent;
+  cursor:pointer;transition:background .15s var(--ease),color .15s var(--ease);}
+.mpanel .mp-x:hover{background:var(--raised);color:var(--text);}
+
+.mp-num{display:flex;align-items:baseline;gap:0;line-height:.94;font-weight:300;
+  letter-spacing:-2.4px;font-variant-numeric:tabular-nums;margin:2px 0 6px;}
+.mp-num .i{font-size:46px;color:var(--text);}
+.mp-num .d{font-size:46px;color:var(--text-faint);}
+.mp-num .u{font-size:12px;letter-spacing:0;color:var(--text-dim);margin-left:7px;transform:translateY(-2px);}
+.mp-target .v{color:var(--text-dim);letter-spacing:.6px;}
+
+.mp-metric{padding-bottom:8px;}
+.mp-chartwrap{margin:2px -4px 0;}
+.mp-chartwrap canvas{display:block;width:100%;}
+
+/* ── the rail ──────────────────────────────────────────────────────────────────────────────── */
+.mp-rail{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:5px;}
+.mp-pill{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0;
+  padding:7px 9px 8px;background:var(--panel);border:1px solid var(--stroke);
+  border-radius:var(--r-pill);}
+.mp-pill .v{font-size:14px;font-weight:500;color:var(--text);letter-spacing:-.3px;
+  font-variant-numeric:tabular-nums;white-space:nowrap;max-width:100%;overflow:hidden;
+  text-overflow:ellipsis;}
+.mp-rail{grid-template-columns:repeat(3,minmax(0,1fr)) minmax(0,1.25fr);}
+.mp-pill .v em{font-style:normal;font-size:9.5px;font-weight:400;color:var(--text-dim);margin-left:2px;
+  letter-spacing:.4px;}
+.mp-pill .k{font-size:9px;letter-spacing:1.1px;text-transform:uppercase;color:var(--text-faint);}
+
+/* ── the duo ───────────────────────────────────────────────────────────────────────────────── */
+.mp-duo{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.mp-stat{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:11px 13px 10px;align-items:end;}
+.mp-stat .i{grid-column:1/-1;width:19px;height:19px;border-radius:7px;display:grid;place-items:center;
+  color:var(--ok);background:rgba(34,197,94,.13);margin-bottom:6px;}
+.mp-stat.down .i{color:var(--danger);background:rgba(239,68,68,.14);}
+.mp-stat .l{font-size:11px;color:var(--text-dim);letter-spacing:.1px;align-self:end;}
+.mp-stat .n{font-size:25px;font-weight:300;letter-spacing:-1.4px;color:var(--text);line-height:1;
+  font-variant-numeric:tabular-nums;text-align:right;}
+.mp-stat .n em{font-style:normal;font-size:11px;letter-spacing:0;color:var(--text-dim);margin-left:2px;}
+
+/* ── the atlas ─────────────────────────────────────────────────────────────────────────────── */
+.mp-atlas{padding-bottom:10px;}
+.mp-map{position:relative;border-radius:var(--r-inset);overflow:hidden;border:1px solid var(--stroke);
+  background:#0d0f13;}
+.mp-map canvas{display:block;width:100%;cursor:ew-resize;touch-action:none;}
+.mp-map canvas.grabbing{cursor:grabbing;}
+.mp-read{position:absolute;left:8px;bottom:6px;display:flex;align-items:baseline;gap:5px;
+  padding:3px 8px;border-radius:var(--r-pill);background:rgba(5,6,10,.72);
+  backdrop-filter:blur(6px);font-size:9.5px;color:var(--text);font-variant-numeric:tabular-nums;}
+.mp-read .k{font-size:8px;letter-spacing:1px;text-transform:uppercase;color:var(--text-faint);}
+.mp-read b{font-weight:500;margin-right:4px;}
+
+.mp-tags{display:flex;gap:5px;margin:8px 0 2px;flex-wrap:wrap;}
+.mp-tag{padding:4px 9px;border-radius:var(--r-pill);border:1px solid var(--stroke);
+  background:transparent;color:var(--text-faint);font-size:8.5px;letter-spacing:1.2px;
+  cursor:pointer;transition:color .15s var(--ease),border-color .15s var(--ease);}
+.mp-tag:hover{color:var(--text-dim);}
+.mp-tag.on{color:var(--text);border-color:var(--stroke-strong);background:var(--inset);}
+
+.mp-tl{margin-top:8px;padding:0 2px;cursor:ew-resize;touch-action:none;}
+.mp-tl canvas{display:block;width:100%;}
+.mp-tllbl{display:flex;justify-content:space-between;padding:2px 4px 0;
+  font-size:8.5px;letter-spacing:1.2px;color:var(--text-faint);}
+
+/* ── the hero caption, on the same scale ───────────────────────────────────────────────────── */
+.mp-cap b{font-size:15px;font-weight:500;letter-spacing:-.2px;}
+.mp-cap .mp-illum{font-size:9px;letter-spacing:1.3px;}
+.mp-cap .r{font-size:9.5px;letter-spacing:.7px;text-transform:uppercase;}
+
+/* ── the compact form shrinks the display, not the labels ──────────────────────────────────── */
+.pop .mp-num .i,.pop .mp-num .d{font-size:38px;}
+.pop .mp-stat .n{font-size:21px;}
+.pop .mp-pill{padding:6px 7px 7px;}
+.pop .mp-pill .v{font-size:12.5px;}
