@@ -205,6 +205,7 @@ export const TYPES = {
     groups: [
       { title: 'Transform', props: [V('pos', 'Position', { def: [0, -2, 0], step: 0.1 })] },
       { title: 'Height Field', props: [
+        D('terrainMode', 'Authoring mode', ['Sculpt', 'Erode', 'Smooth', 'Paint', 'Stamp'], { def: 'Sculpt' }),
         S('size', 'World size', 10, 2000, { def: 180, dec: 0, unit: 'm' }),
         S('height', 'Relief', 0, 80, { def: 12, dec: 1, unit: 'm' }),
         S('frequency', 'Feature scale', 0.1, 8, { def: 1.2, dec: 2 }),
@@ -225,6 +226,19 @@ export const TYPES = {
         D('assetKind', 'Asset type', ['Auto Detect', '3D Model', 'Image / Texture', 'Audio', 'IES Light', 'HDRI', 'Video', 'Data'], { def: 'Auto Detect' }),
         D('importMode', 'Import as', ['Reference', 'Embed', 'Copy into project'], { def: 'Reference' }),
         T('autoReload', 'Watch source', { def: true }), T('generatePreview', 'Generate preview', { def: true }),
+      ]},
+    ],
+  },
+
+  curve: {
+    label: 'Curve', icon: 'motion', color: '#ff79c6', cat: 'Curves',
+    groups: [
+      TRANSFORM(),
+      { title: 'Curve', props: [
+        D('curveKind', 'Curve type', ['Bezier', 'Catmull-Rom', 'NURBS', 'Polyline', 'Arc', 'Helix'], { def: 'Bezier' }),
+        S('pointCount', 'Control points', 2, 32, { def: 4, dec: 0 }), S('degree', 'Degree', 1, 5, { def: 3, dec: 0 }),
+        S('tension', 'Tension', 0, 1, { def: 0.5, dec: 2 }), S('thickness', 'Viewport width', 0.5, 8, { def: 2, dec: 1, unit: 'px' }),
+        C('color', 'Curve colour', { def: '#ff79c6' }), T('closed', 'Closed loop', { def: false }), T('showControls', 'Show control polygon', { def: true }), T('adaptive', 'Adaptive sampling', { def: true }),
       ]},
     ],
   },
@@ -493,6 +507,11 @@ export const scene = [
     N('New Asset', 'asset', []),
   ], { props: { tint: '#d4a5ff' } }),
 
+  N('Curves', 'folder', [
+    N('Motion Path', 'curve', [], { props: { curveKind: 'Bezier', color: '#ff79c6' } }),
+    N('Vehicle Rail', 'curve', [], { props: { curveKind: 'Catmull-Rom', color: '#5eead4', tension: 0.35 } }),
+  ], { props: { tint: '#ff79c6' } }),
+
   N('Objects', 'folder', [
     N('Platform', 'cylinder', [], {
       locked: true,
@@ -594,6 +613,6 @@ export const effectiveVis = n => {
   while (cur) { if (!cur.vis) return false; cur = cur.parent; }
   return inIsolation(n);
 };
-export const CATEGORIES = ['Environment', 'Water', 'Terrain', 'Assets', 'Geometry', 'Lighting', 'Cameras', 'Effects'];
+export const CATEGORIES = ['Environment', 'Water', 'Terrain', 'Assets', 'Curves', 'Geometry', 'Lighting', 'Cameras', 'Effects'];
 export const catOf = n => typeOf(n).cat || 'Scene';
 reflatten();

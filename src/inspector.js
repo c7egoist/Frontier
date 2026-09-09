@@ -6,7 +6,7 @@
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 import { TYPES, typeOf, isFolder } from './world.js';
 import { el, slider, toggle, vec3, colorChip, dropdown, beginRename, swatchRow, repaintSliders } from './kit.js';
-import { ic } from './icons.js';
+import { ic, folderIcon } from './icons.js';
 import { bus } from './bus.js';
 import { CUSTOM_PANELS } from './panels/index.js';
 import { pillToggle, specList } from './panels/controls.js';
@@ -90,7 +90,7 @@ export function buildSheet(node, { compact = false, onDirty = () => {} } = {}) {
   function buildIdentity() {
   const ident = el('div', 'ident');
   ident.innerHTML =
-    `<div class="glyph">${ic(t.icon, { size: 18, color: node.props.tint || t.color })}</div>
+    `<div class="glyph">${ic(isFolder(node) ? folderIcon(node.name) : t.icon, { size: 18, color: node.props.tint || t.color })}</div>
      <div class="who"><span class="name-edit" title="Double click to rename">${node.name}</span>
        <div class="kind">${t.label}${node.locked ? ' · locked' : ''}${node.vis ? '' : ' · hidden'}</div></div>`;
   const quick = el('div', 'row-actions');

@@ -468,6 +468,10 @@ export function createViewport(canvas, { onPick } = {}) {
       root.add(mesh);
       entry.mesh = mesh;
       pickables.push(mesh);
+    } else if (node.type === 'curve') {
+      const line = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: col(node.props.color), transparent: true, opacity: .95 }));
+      const controls = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineDashedMaterial({ color: 0xffffff, transparent: true, opacity: .28, dashSize: .18, gapSize: .12 }));
+      line.userData.nodeId = node.id; root.add(line, controls); entry.line = line; entry.controls = controls; pickables.push(line);
     } else if (node.type === 'terrain') {
       const geo = new THREE.PlaneGeometry(1, 1, 64, 64);
       const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: col(node.props.lowColor), roughness: .9, side: THREE.DoubleSide }));
@@ -749,6 +753,20 @@ export function createViewport(canvas, { onPick } = {}) {
       mat.emissiveIntensity = p.emissiveStrength;
       e.mesh.castShadow = p.castShadow;
       anchors.set(node.id, new THREE.Vector3(p.pos[0], p.pos[1] + Math.abs(p.scale[1]) * 0.62 + 0.35, p.pos[2]));
+    } else if (node.type === 'curve') {
+      e.root.position.set(...p.pos); e.root.rotation.set(...p.rot.map(v => v * D2R)); e.root.scale.set(...p.scale);
+      const raw = p.controlPoints || Array.from({ length: Math.max(2, p.pointCount || 4) }, (_, i) => {
+        const t = i / Math.max(1, (p.pointCount || 4) - 1); return [(t - .5) * 8, Math.sin(t * Math.PI * 2) * 1.4, Math.cos(t * Math.PI * 3) * 1.2];
+      });
+      const cps = raw.map(v => new THREE.Vector3(...v)), samples = [];
+      if (p.curveKind === 'Polyline') samples.push(...cps);
+      else if (p.curveKind === 'Arc') for (let i = 0; i <= 80; i++) { const a = i / 80 * Math.PI * (p.closed ? 2 : 1.55); samples.push(new THREE.Vector3(Math.cos(a) * 3.5, 0, Math.sin(a) * 3.5)); }
+      else if (p.curveKind === 'Helix') for (let i = 0; i <= 100; i++) { const a = i / 100 * Math.PI * 4; samples.push(new THREE.Vector3(Math.cos(a) * 2.2, (i / 100 - .5) * 5, Math.sin(a) * 2.2)); }
+      else if (p.curveKind === 'Bezier' && cps.length >= 4) { const c = new THREE.CubicBezierCurve3(cps[0], cps[1], cps[2], cps[3]); samples.push(...c.getPoints(p.adaptive ? 96 : 32)); }
+      else { const c = new THREE.CatmullRomCurve3(cps, !!p.closed, p.curveKind === 'NURBS' ? 'centripetal' : 'catmullrom', p.tension ?? .5); samples.push(...c.getPoints(p.adaptive ? 96 : 32)); }
+      e.line.geometry.dispose(); e.line.geometry = new THREE.BufferGeometry().setFromPoints(samples); e.line.material.color.set(p.color); e.line.material.linewidth = p.thickness;
+      e.controls.geometry.dispose(); e.controls.geometry = new THREE.BufferGeometry().setFromPoints(cps); e.controls.computeLineDistances(); e.controls.visible = p.showControls && visible && !viewCam && selectedIds.has(node.id);
+      const mid = samples[Math.floor(samples.length / 2)] || new THREE.Vector3(); anchors.set(node.id, mid.clone().multiply(e.root.scale).applyEuler(e.root.rotation).add(e.root.position));
     } else if (node.type === 'terrain') {
       e.root.position.set(...p.pos); e.root.scale.set(p.size, p.size, 1);
       const a = e.mesh.geometry.attributes.position, base = e.basePositions;
@@ -936,7 +954,7 @@ export function createViewport(canvas, { onPick } = {}) {
     selectedIds = new Set(ids);
     /* re-apply anything whose gizmo visibility depends on selection */
     flat.forEach(n => {
-      if (!['camera', 'cinecamera', 'playercamera', 'vehiclecamera', 'probe', 'audio', 'spotlight', 'ieslight'].includes(n.type)) return;
+      if (!['camera', 'cinecamera', 'playercamera', 'vehiclecamera', 'curve', 'probe', 'audio', 'spotlight', 'ieslight'].includes(n.type)) return;
       if (before.has(n.id) !== selectedIds.has(n.id)) applyNode(n);
     });
     const sel = [];
@@ -1138,7 +1156,7 @@ export function createViewport(canvas, { onPick } = {}) {
       scene3.remove(e.root);
       if (e.helper) scene3.remove(e.helper);
       if (e.target) scene3.remove(e.target);
-      if (e.mesh) { const i = pickables.indexOf(e.mesh); if (i >= 0) pickables.splice(i, 1); }
+      [e.mesh, e.line].filter(Boolean).forEach(obj => { const i = pickables.indexOf(obj); if (i >= 0) pickables.splice(i, 1); });
       objects.delete(node.id);
       anchors.delete(node.id);
     },

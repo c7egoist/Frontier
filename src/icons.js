@@ -61,4 +61,21 @@ export const P = {
   world:   '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"/>',
 };
 
-export const ic = (name, opts) => svg(P[name] || P.cube, opts);
+/* Entity glyphs are compact two-colour flat marks. Utility controls stay monochrome so colour
+   continues to mean “thing in the world”, never “button”. */
+const MULTI = {
+  folder: ['#f4c95d','#ff8a5b'], cube: ['#ff7b6b','#ffd166'], sphere: ['#75c7ff','#9b8cff'], torus: ['#b58cff','#ff87c8'], cylinder: ['#7bd6b2','#62a8ff'], plane: ['#62c7e8','#a7f3d0'],
+  light: ['#ffd84d','#ff8b3d'], spot: ['#ffe36e','#ff7657'], camera: ['#63d3ff','#8b7cff'], sky: ['#69bfff','#b899ff'], sun: ['#ffd34e','#ff7b42'], moon: ['#d2dcff','#8d9cff'], stars: ['#e8e8ff','#9d8cff'], cloud: ['#eef5ff','#8eb9dd'], fog: ['#b7c8d8','#7d91aa'], wind: ['#6ee7c2','#6ba8ff'], water: ['#52d2ef','#557cff'],
+  motion: ['#ff79c6','#62d8ff'], particles: ['#ff8bd5','#ffd15c'], probe: ['#61e2ff','#8b7cff'], audio: ['#b991ff','#ff82b8'], post: ['#ff9a63','#8d7dff'], fx: ['#ff81ca','#ffd35e'], world: ['#8fd070','#55c9e8'], layers: ['#d6a0ff','#68c9ff'],
+};
+export const folderIcon = name => ({ Environment:'sky', Water:'water', Terrain:'world', Assets:'layers', Objects:'cube', Lighting:'light', Cameras:'camera', Effects:'fx', Curves:'motion' })[name] || 'folder';
+export const ic = (name, opts = {}) => {
+  const pal = MULTI[name];
+  if (!pal || opts.mono) return svg(P[name] || P.cube, opts);
+  const size = opts.size || 14, primary = opts.color || pal[0], width = opts.width || 1.75;
+  return `<svg class="multi-icon" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <rect x="1" y="1" width="22" height="22" rx="6" fill="${primary}" opacity=".13"/>
+    <g stroke="${primary}" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">${P[name] || P.cube}</g>
+    <circle cx="18.5" cy="5.5" r="2.25" fill="${pal[1]}" stroke="#0b0b0b" stroke-width="1"/>
+  </svg>`;
+};

@@ -4,12 +4,12 @@ A state-of-the-art outliner for a real-time world editor, built in the **Slate U
 (tokens lifted verbatim from `Slate/References/UIComponents.html`) and extended in three directions:
 
 1. **More of the world.** Not just meshes — sky, sun, moon, stars, clouds, fog, wind, water,
-   lights, cameras, particles, reflection probes, audio emitters and the post stack are all first
-   class entities in one tree.
-2. **A viewport you can point at.** Every entity is drawn in 3D as a **billboard marker**. Click a
-   billboard to select it, click it again (or press <kbd>Enter</kbd>) and its **settings popup**
-   opens right where the object lives, tethered to the marker and made of exactly the same
-   controls as the docked inspector.
+   terrain, assets, editable curves, lights, cameras, particles, reflection probes, audio emitters
+   and the post stack are all first-class entities in one tree.
+2. **A viewport you can point at.** Every entity is drawn in 3D as a **billboard marker**. Clicking
+   the billboard selects it and opens its **settings popup** once beside the marker. Picking its 3D
+   geometry or Outliner row only selects it. The popup stays exactly where it opened until you drag
+   it, and uses the same authored instrument as the docked Inspector.
 3. **A viewport that is a panel, not a canvas with stickers.** It has a **header** — the two panel
    toggles, menus for what is shown, how markers read and where the camera is pointed, plus an
    Unreal-style transport strip — and a **footer** of live counters. There is no application bar
@@ -101,10 +101,10 @@ rules"*, add this branch under **Settings → Environments → github-pages → 
 | I want to…                              | I do…                                                                    |
 | --------------------------------------- | ------------------------------------------------------------------------ |
 | find something in a busy world           | search / type-filter chips in the outliner, or say `find chrome sphere`    |
-| select an object I can see               | click its billboard (or click the geometry itself)                        |
-| tune it without losing the view          | selecting **opens its settings popup** — tethered to the marker, dock or no dock |
+| select an object I can see               | click its billboard, geometry, or Outliner row                            |
+| tune it without losing the view          | click its billboard to open a stationary settings popup                   |
 | say what I want instead of hunting for it | the console: `move glass slab 2 m on x`, `set roughness of sphere to 0.2`  |
-| compare two entities                     | open several popups at once, pin the ones that should stay put            |
+| compare two entities                     | open several billboard popups and drag them into a useful arrangement     |
 | tune it with room to breathe             | the docked inspector on the right, same sheet, more width                 |
 | stop the scene being a wall of pills     | markers declutter by depth; labels are hover / always / off                |
 | reorganise the world                     | drag tree rows to re-parent — drop *inside* a folder or *between* rows     |
@@ -271,7 +271,7 @@ changes (debounced, never per frame).
 | <kbd>⌘K</kbd> | jump to the console | | <kbd>F</kbd> | frame selection |
 | <kbd>Tab</kbd> | accept the ghosted completion | | <kbd>↑ ↓</kbd> | (in the console) history / rows |
 | <kbd>[</kbd> | outliner panel | | <kbd>]</kbd> | inspector panel |
-| <kbd>Enter</kbd> | toggle settings popup | | <kbd>Shift F</kbd> | frame the world |
+| <kbd>Enter</kbd> | run a console command | | <kbd>Shift F</kbd> | frame the world |
 | <kbd>H</kbd> | hide / show | | <kbd>L</kbd> | lock |
 | <kbd>I</kbd> | isolate selection | | <kbd>⌘D</kbd> | duplicate |
 | <kbd>↑ ↓</kbd> | walk the tree | | <kbd>← →</kbd> | collapse / expand |
@@ -312,12 +312,13 @@ src/
     advancedLights.js automotive IES distributions, area emitters, tubes, mounting coordinates
     effects.js      particles, reflection capture, spatial audio, tone response and image texture
     cameras.js      viewfinder, cinema optics, player spring arm, automotive chase rig
-    terrain.js      topographic atlas, relief profile, height source and surface controls
+    terrain.js      interactive atlas, sculpt-mode dock, relief profile, source and surface controls
     assets.js       universal drag/drop import slot for models, images, audio, IES, HDRI and data
-  popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
+    curves.js       draggable control hull for Bezier, Catmull-Rom, NURBS, polyline, arc and helix
+  popup.js          fixed-position billboard settings panels (same instruments, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
-  icons.js          one stroke language, 24×24
+  icons.js          ergonomic flat two-colour entity glyphs + monochrome utility marks, 24×24
   bus.js            select / propchange / treechange
   styles.css        design tokens — the only place a colour or radius is written down
 ```
@@ -377,6 +378,8 @@ ruler to resize the disc.
 
 ![Frontier — the terrain panel](docs/preview-terrain.png)
 
+![Frontier — the interactive curve editor](docs/preview-curves.png)
+
 ![Frontier — the universal asset import panel](docs/preview-asset-import.png)
 
 ### Asset import workflow
@@ -389,8 +392,9 @@ reference the source, embed it, or copy it into the project; source watching and
 are independent states.
 
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
-hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a
-marker without a second projection path. The 3D scene keeps the pixels; the UI keeps the widgets.
+hit-testing is exact and free, hover/selected states are CSS, and a popup can take its opening
+position from a marker without a second projection path. The 3D scene keeps the pixels; the UI
+keeps the widgets.
 
 ### Tokens
 
@@ -402,15 +406,17 @@ gradient stop) and every numeric readout is type-in editable, clamped to its own
 ### Notes
 
 * Terrain is a first-class Outliner entity with a procedural height field, imported-heightmap slot,
-  topographic inspector and viewport mesh.
+  topographic inspector, dedicated Sculpt/Erode/Smooth/Paint/Stamp mode dock and viewport mesh.
+* Curves are first-class transformable entities with interactive control hulls and Bezier,
+  Catmull-Rom, NURBS, polyline, arc and helix modes.
 * No application bar and no status bar. Everything they held moved to where it is used: the panel
   toggles and the brand to the viewport header, **Add entity** to the outliner header (that `+` used
   to expand the tree, which is what the twirl next to it is for), the command entry to the console,
   the renderer and camera readouts to the footer, and the selection line to the outliner footer.
-* Selecting anything opens its settings popup by default — independent of the inspector dock, which
-  may not even be on screen in outliner-only layout. The popup follows the selection and is replaced
-  by the next one unless you claim it by pinning or dragging it. Turn the behaviour off in the
-  **Markers** menu, or say `auto popups off`.
+* Floating settings are billboard-only. Outliner selection, direct geometry picking, keyboard
+  navigation and console commands never create one. Each popup takes its initial position beside
+  the clicked billboard and ignores subsequent camera/billboard motion; only dragging its header
+  moves it.
 * `window.frontier` exposes `{ state, app, setTimeOfDay, vp, popups, outliner, billboards, world,
   setTransport, setPaused, setRealtime, stepFrame, snapView, lang, run }` for console poking and
   automation — `frontier.run('rotate cube 40 deg on z')` executes a line exactly as if typed.

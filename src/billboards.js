@@ -36,7 +36,7 @@ export function createBillboards(host, vp, { onSelect, onOpen, onContext } = {})
     b.addEventListener('click', e => {
       e.stopPropagation();
       const already = selection.has(node.id) && selection.size === 1;
-      onSelect && onSelect(node, e);
+      onSelect && onSelect(node, e, b);
       if (already || e.detail === 2) onOpen && onOpen(node, b);
     });
     b.addEventListener('dblclick', e => { e.stopPropagation(); onOpen && onOpen(node, b); });

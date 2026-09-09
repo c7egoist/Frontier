@@ -17,7 +17,7 @@ import { createPopups } from './popup.js';
 import { createLang } from './lang.js';
 import { buildSheet, setProp } from './inspector.js';
 import { el, slider, repaintSliders } from './kit.js';
-import { ic } from './icons.js';
+import { ic, folderIcon } from './icons.js';
 import { bus } from './bus.js';
 
 /* ── state ─────────────────────────────────────────────────────────────────────────────────── */
@@ -36,7 +36,6 @@ const state = {
   realtime: true,      // Unreal's viewport realtime toggle
   playCamId: null,
   snapshot: null,      // world state captured when a run starts, restored on stop
-  autoPopup: true,     // selecting an entity opens its settings popup
   gravity: 9.81,
 };
 
@@ -55,8 +54,17 @@ const vp = createViewport(canvas, {
 vp.setHudElements($('#vign'), $('#grain'));
 
 const billboards = createBillboards($('#billboards'), vp, {
-  onSelect: (node, e) => app.select(node.id, { additive: e.ctrlKey || e.metaKey }),
-  onOpen: node => popups.openFor(node),
+  onSelect: (node, e, billboard) => {
+    app.select(node.id, { additive: e.ctrlKey || e.metaKey });
+    if (state.transport === 'play') return;
+    popups.closeAuto(node.id);
+    const r = billboard.getBoundingClientRect();
+    popups.openFor(node, { auto: true, pos: { x: r.right + 14, y: r.top - 14 } });
+  },
+  onOpen: (node, billboard) => {
+    const r = billboard.getBoundingClientRect();
+    popups.openFor(node, { auto: true, pos: { x: r.right + 14, y: r.top - 14 } });
+  },
   onContext: (node, e) => { app.select(node.id); app.contextMenu(node, e); },
 });
 /* the popup layer talks to the app through a late-bound facade — popups exist before `app` does */
@@ -286,7 +294,7 @@ const app = {
 };
 bus.on('assetfile', ({ node, file }) => app.importAsset(node, file));
 function folderForCat(cat) {
-  return ({ Environment: 'Environment', Water: 'Water', Terrain: 'Terrain', Assets: 'Assets', Geometry: 'Objects', Lighting: 'Lighting', Cameras: 'Cameras', Effects: 'Effects' })[cat] || 'Objects';
+  return ({ Environment: 'Environment', Water: 'Water', Terrain: 'Terrain', Assets: 'Assets', Curves: 'Curves', Geometry: 'Objects', Lighting: 'Lighting', Cameras: 'Cameras', Effects: 'Effects' })[cat] || 'Objects';
 }
 function uniqueName(base) {
   const names = new Set(flat.map(n => n.name));
@@ -307,7 +315,7 @@ function renderInspector() {
   if (currentSheet?._dispose) currentSheet._dispose();
   body.innerHTML = '';
   const t = node ? typeOf(node) : null;
-  $('#insIcon').innerHTML = ic(t ? t.icon : 'settings', { size: 15, color: t ? t.color : undefined });
+  $('#insIcon').innerHTML = ic(t ? (isFolder(node) ? folderIcon(node.name) : t.icon) : 'settings', { size: 15, color: t ? (node.props.tint || t.color) : undefined });
   $('#insTitle').textContent = node ? node.name : 'Inspector';
   $('#insSub').textContent = node
     ? (state.selection.size > 1 ? `${state.selection.size} selected · editing ${t.label}` : `${t.label} · #${String(node.id).padStart(3, '0')}`)
@@ -328,16 +336,11 @@ function renderInspector() {
 function syncSelection() {
   vp.setSelection([...state.selection]);
   billboards.setSelection([...state.selection]);
+  popups.closeAuto();
   renderInspector();
-  const node = byId(state.cursorId);
-  /* the settings popup follows the selection — the inspector dock being open or shut, or not
-     existing at all in outliner-only layout, has nothing to do with it */
-  if (state.autoPopup && state.transport !== 'play') {
-    if (node && !isFolder(node)) {
-      popups.closeAuto(node.id);
-      popups.openFor(node, { auto: true });
-    } else popups.closeAuto();
-  }
+  /* Selection from geometry, the Outliner, keyboard or console updates only the Inspector.
+     Floating settings are created exclusively by the billboard callback above. A panel the user
+     has dragged is no longer automatic and is therefore left alone. */
   paintStats();
 }
 const escape = s => String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
@@ -425,9 +428,7 @@ const markerMenu = menu('', (m) => {
   m.head('Markers');
   LABEL_MODES.forEach(([mode, label]) => m.row(label, state.labelMode === mode, () => setLabels(mode)));
   m.sep();
-  m.head('On select');
-  m.row('Open the settings popup', state.autoPopup, () => act.autoPopup(!state.autoPopup), { keep: true });
-  m.sep();
+  m.head('Billboard settings');
   m.row('Close all open popups', false, () => { popups.closeAll(); toast('Popups closed'); });
 });
 function paintMarkerLabel() {
@@ -669,12 +670,10 @@ todPlay.onclick = () => {
 };
 
 $('#vpBrand').innerHTML = ic('world', { size: 15 });
-$('#insPopout').innerHTML = ic('copy', { size: 13 });
 $('#insFocus').innerHTML = ic('focus', { size: 13 });
 $('#insFocus').onclick = () => app.focus(byId(state.cursorId));
-$('#insPopout').onclick = () => { const n = byId(state.cursorId); if (n && !typeOf(n).noBillboard) popups.openFor(n); else if (n) toast('That entity has no billboard'); };
 
-const ADDABLE = ['asset', 'terrain', 'cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'ieslight', 'arealight', 'tubelight', 'camera', 'cinecamera', 'playercamera', 'vehiclecamera', 'particles', 'probe', 'audio'];
+const ADDABLE = ['asset', 'terrain', 'curve', 'cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'ieslight', 'arealight', 'tubelight', 'camera', 'cinecamera', 'playercamera', 'vehiclecamera', 'particles', 'probe', 'audio'];
 
 /* ── the docks ─────────────────────────────────────────────────────────────────────────────────
    There is no application chrome above the workspace any more: the two panels are toggled from
@@ -710,7 +709,6 @@ function setMode(m) {
 const ctx = $('#ctxmenu');
 function openContext(node, e) {
   const items = [
-    ['Open settings popup', 'settings', () => popups.openFor(node), !typeOf(node).noBillboard && !isFolder(node)],
     ['Frame in viewport', 'focus', () => app.focus(node), true, 'F'],
     ['Rename', 'copy', () => { outliner.render(); const r = document.querySelector(`.row[data-id="${node.id}"] .nm`); r && r.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })); }, true, 'F2'],
     ['sep'],
@@ -764,7 +762,6 @@ const act = {
     nodes.slice(1).forEach(n => app.select(n.id, { additive: true }));
     outliner.revealNode(nodes[0]);
     vp.focusOn(nodes[0]);
-    if (!state.autoPopup) popups.openFor(nodes[0]);
   },
   commit(nodes, key) {
     nodes.forEach(n => bus.emit('propchange', { node: n, key, value: n.props[key], src: 'console' }));
@@ -809,13 +806,6 @@ const act = {
   pause(p) { setPaused(p); },
   step() { stepFrame(); },
   labels(m) { setLabels(m); },
-  autoPopup(on) {
-    state.autoPopup = on;
-    if (!on) popups.closeAuto();
-    else { const n = byId(state.cursorId); if (n && !isFolder(n)) popups.openFor(n, { auto: true }); }
-    paintMarkerLabel();
-  },
-  openSettings(nodes) { nodes.slice(0, 4).forEach(n => popups.openFor(n)); },
   closePopups() { popups.closeAll(); },
   setProp(node, key, value) { setProp(node, key, value, null); renderInspector(); },
   help() { cmdInput.value = ''; openConsole(); paintSug(); },
@@ -837,7 +827,6 @@ function quickCommands() {
     { label: 'Frame everything', sub: 'view', run: () => vp.frameAll() },
     { label: 'Frame selection', sub: 'view', run: () => app.focus(node) },
     { label: 'Close all popups', sub: 'view', run: () => popups.closeAll() },
-    { label: `Settings popup on select: turn ${state.autoPopup ? 'off' : 'on'}`, sub: 'behaviour', run: () => act.autoPopup(!state.autoPopup) },
     { label: `Outliner panel: ${state.docks.left ? 'hide' : 'show'}`, sub: 'layout', run: () => setDock('left', !state.docks.left) },
     { label: `Inspector panel: ${state.docks.right ? 'hide' : 'show'}`, sub: 'layout', run: () => setDock('right', !state.docks.right) },
     { label: 'Layout — both panels', sub: 'layout', run: () => setMode('split') },
@@ -977,7 +966,6 @@ addEventListener('keydown', e => {
   if (k === 'i') { app.toggleIsolateSelection(); return; }
   if (e.key === '[') { setDock('left', !state.docks.left); return; }
   if (e.key === ']') { setDock('right', !state.docks.right); return; }
-  if (k === 'enter' && node && !typeOf(node).noBillboard && !isFolder(node)) { popups.toggle(node); return; }
   if ((e.key === 'Delete' || e.key === 'Backspace') && node) { e.preventDefault(); app.remove(node); return; }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();

@@ -55,7 +55,7 @@ Whole groups:
 ```
 all lights          every point and spot light
 all cameras         every camera
-all Environment     every entity in a category (Environment · Water · Geometry · Lighting · Cameras · Effects)
+all Environment     every entity in a category (Environment · Water · Terrain · Assets · Curves · Geometry · Lighting · Cameras · Effects)
 everything          every entity in the world
 ```
 
@@ -124,7 +124,7 @@ Types you can add: `cube` (`box`, `block`), `sphere` (`ball`), `torus` (`donut`,
 `tube light` (`light bar`), `camera` (`cam`), `cinematic camera` (`film camera`),
 `player camera` (`follow camera`), `vehicle camera` (`car camera`, `chase camera`),
 `terrain` (`landscape`, `height field`), `asset slot` (`imported asset`),
-`particles` (`sparks`), `probe`, `audio` (`sound`).
+`curve` (`spline`, `Bezier`, `NURBS`, `motion path`), `particles` (`sparks`), `probe`, `audio` (`sound`).
 
 ### Visibility, locking, isolation
 
@@ -135,9 +135,7 @@ Types you can add: `cube` (`box`, `block`), `sphere` (`ball`), `torus` (`donut`,
 | `isolate selection` | hide everything that is not in the set |
 | `isolate chrome sphere, signal torus` | isolate several at once |
 | `exit isolation` · `unisolate` · `show everything` | bring the world back |
-| `settings glass slab` | open the floating settings popup for it |
-| `close popups` | close them all |
-| `auto popups off` · `auto popups on` | whether selecting something opens its popup |
+| `close popups` | close all billboard-opened settings panels |
 | `labels always` · `labels on hover` · `labels icons only` | how the billboards read |
 
 ### Properties

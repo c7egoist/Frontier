@@ -61,6 +61,7 @@ const TYPE_WORDS = {
   stars: ['stars', 'star field', 'starfield'], clouds: ['clouds', 'cloud layer'],
   fog: ['fog', 'height fog', 'haze'], wind: ['wind', 'wind field'], post: ['post', 'post stack', 'grade'],
   terrain: ['terrain', 'landscape', 'height field'], asset: ['asset', 'asset slot', 'import slot', 'imported asset'],
+  curve: ['curve', 'spline', 'bezier', 'nurbs', 'path', 'motion path'],
   folder: ['folder', 'group'],
 };
 const COLORS = {
@@ -509,18 +510,6 @@ export function createLang(ctx) {
     },
     /* markers, popups, layout ───────────────────────────────────────────────────────────── */
     {
-      id: 'settings', keys: ['settings', 'open settings', 'edit', 'tune', 'inspect'],
-      usage: 'settings <entity>', help: 'open the floating settings popup',
-      build(rest) {
-        const r = resolve(rest);
-        if (!r.nodes.length) return fail(r.misses.length ? `No entity called “${r.misses[0]}”` : 'Nothing is selected');
-        return plan({
-          title: `Open settings for ${names(r.nodes)}`, sub: 'popup', icon: 'settings',
-          run() { act.openSettings(r.nodes); return `Settings for <b>${names(r.nodes)}</b>`; },
-        });
-      },
-    },
-    {
       id: 'closepops', keys: ['close popups', 'close all popups', 'clear popups'], usage: 'close popups', help: '',
       build() { return plan({ title: 'Close all popups', sub: 'view', icon: 'close', run() { act.closePopups(); return 'Popups closed'; } }); },
     },
@@ -531,14 +520,6 @@ export function createLang(ctx) {
         const mode = /always|on$|show/.test(q) ? 'always' : /hover/.test(q) ? 'hover' : /icon|off|none|hide/.test(q) ? 'none' : null;
         if (!mode) return fail('Which marker mode?', 'labels always · labels on hover · labels icons only');
         return plan({ title: `Markers: ${mode === 'none' ? 'icons only' : `names ${mode}`}`, sub: 'billboards', icon: 'tag', run() { act.labels(mode); return 'Marker mode changed'; } });
-      },
-    },
-    {
-      id: 'autopop', keys: ['auto popup', 'auto popups', 'popup on select', 'toggle auto popup'],
-      usage: 'auto popups off', help: 'open a settings popup whenever you select something',
-      build(rest) {
-        const on = !/\b(off|no|disable|stop)\b/i.test(rest);
-        return plan({ title: `Settings popup on select: ${on ? 'on' : 'off'}`, sub: 'behaviour', icon: 'settings', run() { act.autoPopup(on); return `Auto popups ${on ? 'on' : 'off'}`; } });
       },
     },
     /* generic property setter ───────────────────────────────────────────────────────────── */

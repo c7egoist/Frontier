@@ -1,8 +1,7 @@
 /* ════════════════════════════════════════════════════════════════════════════════════════════
    FLOATING SETTINGS POPUPS
-   Opened from a billboard, tethered to it, and made of exactly the same property sheet the dock
-   uses. Unpinned popups track their billboard as the camera moves; pinned ones stay put. Several
-   can be open at once so two entities can be tuned against each other.
+   Opened exclusively from a billboard and made of exactly the same property sheet the dock uses. A popup is placed once beside the clicked billboard and then stays put until the user
+   drags it. Several can be open at once so two entities can be tuned against each other.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 import { typeOf, isIsolated } from './world.js';
 import { buildSheet } from './inspector.js';
@@ -35,7 +34,7 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
     [...open.values()].forEach(r => { if (r.auto && r.node.id !== keepId) close(r.node.id); });
   }
 
-  function openFor(node, { auto = false } = {}) {
+  function openFor(node, { auto = false, pos = null } = {}) {
     if (open.has(node.id)) {
       const r = open.get(node.id);
       if (!auto) r.auto = false;
@@ -66,13 +65,11 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
       visBtn.classList.toggle('on', !node.vis);
       bus.emit('treechange');
     };
-    const pinBtn = el('button', 'iconbtn ghost', ic('pin', { size: 12 }));
-    pinBtn.title = 'Pin in place';
     const focusBtn = el('button', 'iconbtn ghost', ic('focus', { size: 12 }));
     focusBtn.title = 'Frame in viewport  (F)';
     const closeBtn = el('button', 'iconbtn ghost', ic('close', { size: 12 }));
     closeBtn.title = 'Close  (Esc)';
-    head.append(visBtn, focusBtn, pinBtn, closeBtn);
+    head.append(visBtn, focusBtn, closeBtn);
 
     const body = el('div', 'pop-body');
     const sheet = buildSheet(node, { compact: true, onDirty: () => { head.querySelector('.t').textContent = node.name; app.refreshChrome(); } });
@@ -93,20 +90,16 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
     elm.append(head, body, foot);
     host.appendChild(elm);
 
-    const rec = { node, elm, tether, sheet, pinned: false, detached: false, auto, pos: { x: 0, y: 0 } };
+    /* Popups take one position when opened and stay there. Camera motion never drags a settings
+       panel around; only an explicit header drag changes these coordinates. */
+    const rec = { node, elm, tether, sheet, pinned: false, detached: true, auto, pos: pos || { x: 0, y: 0 } };
     if (auto) elm.classList.add('auto');
     open.set(node.id, rec);
+    place(rec);
+    requestAnimationFrame(() => place(rec)); // settle after custom panel layout has its final size
 
     closeBtn.onclick = () => close(node.id);
     focusBtn.onclick = () => app.focus(node);
-    pinBtn.onclick = () => {
-      rec.pinned = !rec.pinned;
-      rec.auto = false; elm.classList.remove('auto');
-      rec.detached = rec.detached || rec.pinned;
-      pinBtn.classList.toggle('on', rec.pinned);
-      tether.style.display = rec.pinned ? 'none' : '';
-    };
-
     /* drag by the header */
     head.addEventListener('pointerdown', e => {
       if (e.target.closest('button')) return;
@@ -145,35 +138,10 @@ export function createPopups(host, app, getBounds = () => ({ left: 8, top: 8, ri
     return { x, y, w, h };
   }
 
-  /* called every frame — unpinned popups ride along with their billboard */
-  function update(billboards) {
-    open.forEach(rec => {
-      const bb = billboards.screenPos(rec.node.id);
-      if (!rec.detached) {
-        const b = getBounds();
-        const w = rec.elm.offsetWidth || 318;
-        if (bb) {
-          /* flip to the other side of the marker when the right edge is close */
-          const right = bb.x + 46;
-          rec.pos.x = (right + w + 12 > b.right) ? bb.x - w - 16 : right;
-          rec.pos.y = bb.y - 14;
-        } else if (!rec.pinned) { rec.pos.x = b.right - w - 20; rec.pos.y = b.top + 70; }
-      }
-      const r = place(rec);
-      if (bb && !rec.pinned) {
-        const ax = bb.x + bb.w / 2, ay = bb.y + bb.h / 2;
-        const edge = r.x > ax ? r.x : r.x + r.w;
-        const dx = edge - ax, dy = r.y + 22 - ay;
-        const len = Math.hypot(dx, dy);
-        rec.tether.style.display = len > 8 && len < 900 ? 'block' : 'none';
-        rec.tether.style.left = ax + 'px';
-        rec.tether.style.top = ay + 'px';
-        rec.tether.style.width = len + 'px';
-        rec.tether.style.transform = `rotate(${Math.atan2(dy, dx)}rad)`;
-      } else {
-        rec.tether.style.display = 'none';
-      }
-    });
+  /* Called with the render loop only to keep panels inside resized viewport bounds. Their anchor
+     is deliberately ignored: a popup never chases a billboard or camera. */
+  function update() {
+    open.forEach(rec => { place(rec); rec.tether.style.display = 'none'; });
   }
 
   return {

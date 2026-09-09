@@ -21,6 +21,7 @@ import { effectsPanel } from './effects.js';
 import { cameraPanel } from './cameras.js';
 import { terrainPanel } from './terrain.js';
 import { assetPanel } from './assets.js';
+import { curvePanel } from './curves.js';
 
 export const CUSTOM_PANELS = {
   folder: { build: folderPanel, owns: ['Group'] },
@@ -44,6 +45,7 @@ export const CUSTOM_PANELS = {
   vehiclecamera: { build: cameraPanel, owns: ['Transform', 'Vehicle Rig'] },
   terrain: { build: terrainPanel, owns: ['Transform', 'Height Field'] },
   asset: { build: assetPanel, owns: ['Transform', 'Asset Source'] },
+  curve: { build: curvePanel, owns: ['Transform', 'Curve'] },
   clouds: { build: cloudsPanel, owns: ['Layer', 'Motion & tint'] },
   moon: { build: moonPanel, owns: ['Orbit', 'Appearance'] },
   sun: { build: sunPanel, owns: ['Orbit', 'Disc & light'] },

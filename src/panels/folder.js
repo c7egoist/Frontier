@@ -5,7 +5,7 @@
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 import { el, colorChip } from '../kit.js';
 import { pillToggle } from './controls.js';
-import { ic } from '../icons.js';
+import { ic, folderIcon } from '../icons.js';
 import { TYPES, isFolder, typeOf } from '../world.js';
 import { bus } from '../bus.js';
 
@@ -21,7 +21,7 @@ export function folderPanel(node, ctx) {
   /* ── hierarchy hero ────────────────────────────────────────────────────────────────────── */
   const hero = el('div', 'pcard mp-hero fd-hero');
   const cv = el('canvas');
-  const cap = el('div', 'mp-cap', `<div class="l"><b>Collection</b><span class="mp-illum fd-sub">—</span></div><div class="r">—</div>`);
+  const cap = el('div', 'mp-cap', `<div class="l"><b>${esc(node.name)} collection</b><span class="mp-illum fd-sub">—</span></div><div class="r">—</div>`);
   hero.append(cv, cap); host.append(hero);
 
   function canvas(cv, h) {
@@ -72,7 +72,7 @@ export function folderPanel(node, ctx) {
     mb.innerHTML='';
     if(!node.kids.length){mb.innerHTML='<div class="fd-empty">NO ENTITIES IN THIS COLLECTION</div>';return}
     node.kids.forEach(n=>{
-      const row=el('div','fd-row');row.innerHTML=`<span class="fd-ic">${ic(typeOf(n).icon,{size:14,color:n.props?.tint||typeOf(n).color})}</span><span class="fd-who"><b>${esc(n.name)}</b><em>${esc(typeOf(n).label)}${isFolder(n)?` · ${n.kids.length} children`:''}</em></span><button class="fd-eye" title="Toggle visibility">${ic(n.vis===false?'eyeoff':'eye',{size:13})}</button>`;
+      const row=el('div','fd-row');row.innerHTML=`<span class="fd-ic">${ic(isFolder(n)?folderIcon(n.name):typeOf(n).icon,{size:14,color:n.props?.tint||typeOf(n).color})}</span><span class="fd-who"><b>${esc(n.name)}</b><em>${esc(typeOf(n).label)}${isFolder(n)?` · ${n.kids.length} children`:''}</em></span><button class="fd-eye" title="Toggle visibility">${ic(n.vis===false?'eyeoff':'eye',{size:13})}</button>`;
       row.querySelector('.fd-eye').onclick=()=>{n.vis=n.vis===false;bus.emit('treechange');onDirty?.();paintAll()}; mb.append(row);
     });
   }

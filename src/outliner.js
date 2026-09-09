@@ -5,7 +5,7 @@
    searching never collapses the tree into an unreadable flat list.
    ════════════════════════════════════════════════════════════════════════════════════════════ */
 import { scene, flat, reflatten, TYPES, typeOf, isFolder, effectiveVis } from './world.js';
-import { ic } from './icons.js';
+import { ic, folderIcon } from './icons.js';
 import { el, dropdown, beginRename } from './kit.js';
 import { bus } from './bus.js';
 
@@ -209,9 +209,10 @@ export function createOutliner(host, app) {
       const leaf = !n.kids.length;
       const open = query || filters.size ? true : n.open;
       const tint = isFolder(n) ? (n.props.tint || t.color) : t.color;
+      const iconName = isFolder(n) ? folderIcon(n.name) : t.icon;
       row.innerHTML =
         `<span class="tw ${leaf ? 'leaf' : ''} ${open ? 'open' : ''}">${ic('chev', { size: 12 })}</span>
-         <span class="ni">${ic(t.icon, { size: 14, color: tint })}</span>
+         <span class="ni${isFolder(n) ? ' folder-glyph' : ''}">${ic(iconName, { size: isFolder(n) ? 16 : 14, color: tint })}</span>
          <span class="nm">${highlight(n.name)}</span>
          ${isFolder(n) ? `<span class="badge count">${n.kids.length}</span>` : ''}
          ${n.dynamic ? '<span class="badge dyn">dyn</span>' : ''}
