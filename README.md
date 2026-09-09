@@ -1,7 +1,9 @@
-# Frontier — Outliner
+# Frontier — Scene Outliner
 
-A calm, fast, keyboard-first outliner. No build step, no dependencies —
-just open `index.html` (or serve the folder) and start thinking.
+A game-engine scene outliner: typed entities (folders, meshes, lights,
+cameras, audio, particles, physics, scripts) in a fast keyboard-first
+hierarchy. No build step, no dependencies — just open `index.html`
+(or serve the folder).
 
 ## Run
 
@@ -11,27 +13,30 @@ python3 -m http.server 8000
 # → http://localhost:8000
 ```
 
-Your outline auto-saves to `localStorage` as you type.
+Your scene auto-saves to `localStorage` as you edit.
 
 ## Use
 
 | Key | Action |
 |---|---|
-| `Enter` | New bullet below (splits text at cursor) |
-| `Tab` / `Shift+Tab` | Indent / outdent |
-| `⌫` at line start | Merge with bullet above |
-| `↑` / `↓` | Move between bullets |
-| `Alt` + `↑`/`↓` | Move bullet (with children) up / down |
-| `Alt` + `←`/`→` | Collapse / expand |
-| `Ctrl` + `Enter` | Zoom in / out of bullet |
-| `Esc` | Zoom out one level |
-| `Ctrl` + `/` | Shortcut reference |
+| `Enter` / `F2` | Rename selected entity |
+| `↑` `↓` `←` `→` | Navigate · collapse / expand |
+| `Tab` / `Shift+Tab` | Reparent (indent / outdent) |
+| `Insert` | Add entity |
+| `Ctrl+D` | Duplicate (with children) |
+| `V` | Show / hide |
+| `Del` | Delete (with children) |
+| `Alt` + `↑`/`↓` | Reorder |
+| `Ctrl+Enter` | Isolate subtree / back out |
+| `/` | Search entities |
+| `Ctrl+/` | Shortcut reference |
 
-Mouse: click a bullet to collapse, double-click (or `Alt`-click) to zoom.
-Paste multi-line text to get one bullet per line.
+Mouse: click selects, double-click renames, click the eye to show/hide,
+double-click a bullet to isolate a subtree, right-click for the
+entity menu.
 
 ## Theme
 
 All visuals derive from the **theme token block** at the top of
-`styles.css` (`dark` default + `light`). To re-skin the app to match a
-brand, only that block needs to change.
+`styles.css` (`dark` signature theme + `light`). To re-skin the app,
+only that block needs to change.
