@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Frontier — Outliner</title>
+  <meta name="description" content="Frontier: a calm, fast, keyboard-first outliner." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%236c7cff' d='M16 2l12 14-12 14L4 16z'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <svg class="mark" width="22" height="22" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M16 2l12 14-12 14L4 16z" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round"/>
+          <circle cx="16" cy="16" r="3" fill="currentColor"/>
+        </svg>
+        <input id="docTitle" class="doc-title" type="text" value="Untitled"
+               aria-label="Document title" autocomplete="off" spellcheck="false"
+               placeholder="Untitled" maxlength="120" />
+      </div>
+      <div class="actions">
+        <span id="counts" class="counts" aria-live="polite"></span>
+        <button id="collapseBtn" class="icon-btn" type="button" title="Collapse all" aria-label="Collapse all">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2 6l6-4 6 4M2 11l6-4 6 4"/>
+          </svg>
+        </button>
+        <button id="themeBtn" class="icon-btn" type="button" title="Toggle theme" aria-label="Toggle theme">
+          <svg class="icon-sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <circle cx="8" cy="8" r="3.2"/>
+            <path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/>
+          </svg>
+          <svg class="icon-moon" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z"/>
+          </svg>
+        </button>
+        <button id="shortcutsBtn" class="icon-btn" type="button" title="Keyboard shortcuts (Ctrl+/)" aria-label="Keyboard shortcuts">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1.5" y="4" width="13" height="9" rx="1.5"/>
+            <path d="M4 7h1M7 7h1M10 7h1M4 10h8"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <nav id="crumbs" class="crumbs" aria-label="Breadcrumb" hidden></nav>
+
+  <main class="page" id="page">
+    <div id="outline" class="outline" role="tree" aria-label="Outline"></div>
+
+    <footer class="hints" aria-label="Quick hints">
+      <span><kbd>Enter</kbd> new</span>
+      <span><kbd>Tab</kbd> indent</span>
+      <span><kbd>Alt</kbd>+<kbd>↑↓</kbd> move</span>
+      <span>click <i class="mini-dot"></i> collapse</span>
+      <span>double-click <i class="mini-dot"></i> zoom</span>
+      <span><kbd>Ctrl</kbd>+<kbd>/</kbd> all shortcuts</span>
+    </footer>
+  </main>
+
+  <div id="modalBackdrop" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <h2 id="modalTitle">Keyboard shortcuts</h2>
+        <button id="modalClose" class="icon-btn" type="button" aria-label="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+            <path d="M2 2l10 10M12 2L2 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="modal-grid">
+        <div><kbd>Enter</kbd></div><span>New bullet below (splits text at cursor)</span>
+        <div><kbd>Tab</kbd> / <kbd>⇧ Tab</kbd></div><span>Indent / outdent</span>
+        <div><kbd>⌫</kbd> at start</div><span>Merge with bullet above</span>
+        <div><kbd>↑</kbd> <kbd>↓</kbd></div><span>Move between bullets</span>
+        <div><kbd>Alt</kbd>+<kbd>↑↓</kbd></div><span>Move bullet (with children) up / down</span>
+        <div><kbd>Alt</kbd>+<kbd>←→</kbd></div><span>Collapse / expand</span>
+        <div><kbd>Ctrl</kbd>+<kbd>↵</kbd></div><span>Zoom in / out of bullet</span>
+        <div><kbd>Esc</kbd></div><span>Zoom out one level</span>
+        <div><kbd>Ctrl</kbd>+<kbd>/</kbd></div><span>Open this panel</span>
+      </div>
+      <p class="modal-note">Tip: paste multi-line text to turn each line into its own bullet.</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
