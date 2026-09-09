@@ -305,6 +305,8 @@ src/
     sky.js          a slice of the real sky, extinction spectrum, Mie phase curve, visibility
     stars.js        a live star field, magnitude histogram, spectral ramp, sidereal drift
     fog.js          calibrated sight line, contrast curve, vertical profile, scattering chamber
+    folder.js       hierarchy map, collection composition, live manifest, branch controls
+    geometry.js     turntable, world placement deck, dimensions, interactive BRDF laboratory
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
@@ -339,6 +341,10 @@ ruler to resize the disc.
 ![Frontier — the stars panel](docs/preview-stars.png)
 
 ![Frontier — the fog panel](docs/preview-fog.png)
+
+![Frontier — the folder panel](docs/preview-folder.png)
+
+![Frontier — the object panel](docs/preview-objects.png)
 
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
 hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a

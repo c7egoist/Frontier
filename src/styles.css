@@ -883,3 +883,29 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .fg-profile canvas,.fg-chamber canvas{display:block;width:100%;}
 .fogpanel .mp-subhead{margin:10px 0 4px;}
 .fogpanel.disabled .fg-hero canvas,.fogpanel.disabled .fg-chamber canvas{filter:saturate(.25);opacity:.62;}
+
+/* Folder manifest */
+.fd-hero canvas{display:block;width:100%;}
+.mp-cap .fd-sub,.mp-cap .ge-sub{text-transform:none;letter-spacing:.3px;}
+.fd-donut{display:grid;grid-template-columns:118px 1fr;align-items:center;min-height:128px;}
+.fd-donut canvas{display:block;width:118px;}
+.fd-legend{display:flex;flex-direction:column;gap:7px;padding:8px 4px 8px 8px;}
+.fd-legend>div{display:grid;grid-template-columns:6px 1fr auto;gap:7px;align-items:center;font-size:9px;text-transform:uppercase;letter-spacing:.8px;color:var(--text-faint);}
+.fd-legend i{width:5px;height:5px;border-radius:50%;}.fd-legend b{font-size:12px;color:var(--text);font-weight:500;}
+.fd-list{display:flex;flex-direction:column;gap:3px;}
+.fd-row{display:grid;grid-template-columns:24px 1fr 28px;align-items:center;gap:6px;padding:7px 7px;background:var(--field);border-radius:10px;border:1px solid var(--stroke);}
+.fd-ic{width:23px;height:23px;border-radius:8px;background:var(--inset);display:grid;place-items:center;}
+.fd-who{display:flex;flex-direction:column;gap:1px;min-width:0}.fd-who b{font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.fd-who em{font-style:normal;font-size:8.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--text-faint)}
+.fd-eye{width:27px;height:27px;border-radius:9px;color:var(--text-faint);display:grid;place-items:center}.fd-eye:hover{background:var(--raised);color:var(--text)}
+.fd-empty{padding:20px;text-align:center;font-size:9px;letter-spacing:1px;color:var(--text-faint)}
+.folderpanel .mp-subhead{margin:10px 0 4px;}
+
+/* Shared geometry/object instrument */
+.ge-hero canvas{display:block;width:100%;cursor:grab;touch-action:none}.ge-hero canvas.grabbing{cursor:grabbing}
+.ge-plan canvas,.ge-lab canvas{display:block;width:100%;cursor:crosshair;touch-action:none}.ge-plan canvas.drag,.ge-lab canvas.drag{cursor:grabbing}
+.ge-steppers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin:4px 0 10px;}
+.ge-axis{display:flex;flex-direction:column;gap:4px;min-width:0;padding:6px 6px 5px;border:1px solid var(--stroke);border-radius:11px;background:var(--field)}
+.ge-axis>span{font-size:8px;font-weight:600;letter-spacing:1px}.ge-axis>span.x{color:var(--ax-x)}.ge-axis>span.y{color:var(--ax-y)}.ge-axis>span.z{color:var(--ax-z)}
+.ge-axis .step{width:100%;}.ge-axis .step .f{min-width:0;}.ge-axis .step input{width:38px;}
+.ge-colours{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ge-colours .mp-subhead{margin:9px 0 4px;}
+.geopanel .mp-subhead{margin:10px 0 4px;}

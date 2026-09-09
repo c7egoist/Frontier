@@ -12,8 +12,16 @@ import { windPanel } from './wind.js';
 import { skyPanel } from './sky.js';
 import { starsPanel } from './stars.js';
 import { fogPanel } from './fog.js';
+import { folderPanel } from './folder.js';
+import { geometryPanel } from './geometry.js';
 
 export const CUSTOM_PANELS = {
+  folder: { build: folderPanel, owns: ['Group'] },
+  cube: { build: geometryPanel, owns: ['Transform', 'Surface'] },
+  sphere: { build: geometryPanel, owns: ['Transform', 'Surface'] },
+  torus: { build: geometryPanel, owns: ['Transform', 'Surface'] },
+  cylinder: { build: geometryPanel, owns: ['Transform', 'Surface'] },
+  plane: { build: geometryPanel, owns: ['Transform', 'Surface'] },
   moon: { build: moonPanel, owns: ['Orbit', 'Appearance'] },
   sun: { build: sunPanel, owns: ['Orbit', 'Disc & light'] },
   water: { build: waterPanel, owns: ['Body', 'Waves', 'Surface'] },
