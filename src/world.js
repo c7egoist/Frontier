@@ -311,6 +311,48 @@ export const TYPES = {
     ],
   },
 
+  cinecamera: {
+    label: 'Cinematic Camera', icon: 'camera', color: '#64d2ff', cat: 'Cameras',
+    groups: [
+      { title: 'Transform', props: [V('pos', 'Position', { def: [10, 3, 12], step: 0.05 }), V('lookAt', 'Look at', { def: [0, 1, 0], step: 0.05 })] },
+      { title: 'Cinema Lens', props: [
+        S('focal', 'Focal length', 12, 200, { def: 50, dec: 0, unit: 'mm' }), S('sensorWidth', 'Sensor width', 12, 70, { def: 36, dec: 1, unit: 'mm' }),
+        S('fov', 'Field of view', 6, 140, { def: 39.6, dec: 1, unit: '°' }), S('focus', 'Focus distance', 0.2, 500, { def: 8, dec: 1, unit: 'm' }),
+        S('aperture', 'Aperture', 0.7, 22, { def: 2.8, dec: 1, unit: 'f' }), S('shutterAngle', 'Shutter angle', 1, 360, { def: 180, dec: 0, unit: '°' }),
+        S('iso', 'ISO', 25, 12800, { def: 800, dec: 0 }), S('squeeze', 'Anamorphic squeeze', 1, 2, { def: 1, dec: 2, unit: '×' }),
+        D('gate', 'Aspect', ['16:9', '2.39:1', '4:3', '1:1'], { def: '2.39:1' }), T('showFrustum', 'Draw frustum', { def: true }),
+      ]},
+    ],
+  },
+
+  playercamera: {
+    label: 'Player Camera', icon: 'camera', color: '#69c3ff', cat: 'Cameras',
+    groups: [
+      { title: 'Transform', props: [V('pos', 'Position', { def: [0, 2.2, 6], step: 0.05 }), V('lookAt', 'Look at', { def: [0, 1.4, 0], step: 0.05 })] },
+      { title: 'Player Rig', props: [
+        S('fov', 'Field of view', 35, 120, { def: 72, dec: 0, unit: '°' }), S('boom', 'Boom length', 0, 12, { def: 4.2, dec: 1, unit: 'm' }),
+        S('shoulder', 'Shoulder offset', -2, 2, { def: 0.45, dec: 2, unit: 'm' }), S('damping', 'Follow damping', 0, 1, { def: 0.72, dec: 2 }),
+        S('near', 'Near clip', 0.01, 2, { def: 0.1, dec: 2, unit: 'm' }), S('far', 'Far clip', 10, 10000, { def: 2000, dec: 0, unit: 'm' }),
+        T('collision', 'Camera collision', { def: true }), T('input', 'Player input', { def: true }),
+        D('gate', 'Aspect', ['16:9', '2.39:1', '4:3', '1:1'], { def: '16:9' }), S('aperture', 'Preview aperture', 0.7, 22, { def: 5.6, dec: 1, unit: 'f' }), T('showFrustum', 'Draw frustum', { def: true }),
+      ]},
+    ],
+  },
+
+  vehiclecamera: {
+    label: 'Vehicle Camera', icon: 'camera', color: '#5eead4', cat: 'Cameras',
+    groups: [
+      { title: 'Transform', props: [V('pos', 'Position', { def: [0, 1.8, 6.5], step: 0.05 }), V('lookAt', 'Look at', { def: [0, 1, 0], step: 0.05 })] },
+      { title: 'Vehicle Rig', props: [
+        D('mode', 'Mount', ['Chase', 'Bumper', 'Cockpit', 'Hood', 'Orbit Rig'], { def: 'Chase' }), S('fov', 'Field of view', 35, 130, { def: 68, dec: 0, unit: '°' }),
+        S('distance', 'Follow distance', 0, 20, { def: 6.5, dec: 1, unit: 'm' }), S('height', 'Mount height', 0.2, 6, { def: 1.8, dec: 1, unit: 'm' }),
+        S('lag', 'Velocity lag', 0, 1, { def: 0.35, dec: 2 }), S('lookAhead', 'Look ahead', 0, 50, { def: 12, dec: 0, unit: 'm' }),
+        S('shake', 'Road vibration', 0, 1, { def: 0.12, dec: 2 }), T('horizonLock', 'Horizon lock', { def: true }), T('collision', 'Collision sweep', { def: true }),
+        D('gate', 'Aspect', ['16:9', '2.39:1', '4:3', '1:1'], { def: '16:9' }), S('aperture', 'Preview aperture', 0.7, 22, { def: 4, dec: 1, unit: 'f' }), T('showFrustum', 'Draw frustum', { def: true }),
+      ]},
+    ],
+  },
+
   /* ── effects ───────────────────────────────────────────────────────────────────────────── */
   particles: {
     label: 'Particles', icon: 'particles', color: '#ffa8e0', cat: 'Effects',
@@ -457,6 +499,9 @@ export const scene = [
   N('Cameras', 'folder', [
     N('Hero Camera', 'camera', [], { props: { pos: [9.5, 3.4, 9.5], lookAt: [0, 1.1, 0], fov: 42 } }),
     N('Wide Camera', 'camera', [], { props: { pos: [-11, 6, -8], lookAt: [0, 1, 0], fov: 74, gate: '2.39:1' } }),
+    N('Picture Car Cinema', 'cinecamera', [], { props: { pos: [8, 2.6, 11], lookAt: [0, 1, 0], focal: 65, fov: 31, focus: 9.5 } }),
+    N('Player Follow', 'playercamera', [], { dynamic: true }),
+    N('Vehicle Chase', 'vehiclecamera', [], { dynamic: true }),
   ], { props: { tint: '#69c3ff' } }),
 
   N('Effects', 'folder', [

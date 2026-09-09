@@ -311,6 +311,7 @@ src/
     lights.js       point/spot photometry, falloff curves, cone distribution, placement and aim
     advancedLights.js automotive IES distributions, area emitters, tubes, mounting coordinates
     effects.js      particles, reflection capture, spatial audio, tone response and image texture
+    cameras.js      viewfinder, cinema optics, player spring arm, automotive chase rig
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
@@ -365,6 +366,12 @@ ruler to resize the disc.
 ![Frontier — the spatial audio panel](docs/preview-audio.png)
 
 ![Frontier — the post effects panel](docs/preview-effects.png)
+
+![Frontier — the cinematic camera panel](docs/preview-cinematic-camera.png)
+
+![Frontier — the player camera panel](docs/preview-player-camera.png)
+
+![Frontier — the vehicle camera panel](docs/preview-vehicle-camera.png)
 
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
 hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a

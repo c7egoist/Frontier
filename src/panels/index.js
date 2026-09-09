@@ -18,6 +18,7 @@ import { cloudsPanel } from './clouds.js';
 import { lightPanel } from './lights.js';
 import { advancedLightPanel } from './advancedLights.js';
 import { effectsPanel } from './effects.js';
+import { cameraPanel } from './cameras.js';
 
 export const CUSTOM_PANELS = {
   folder: { build: folderPanel, owns: ['Group'] },
@@ -35,6 +36,10 @@ export const CUSTOM_PANELS = {
   probe: { build: effectsPanel, owns: ['Capture'] },
   audio: { build: effectsPanel, owns: ['Source'] },
   post: { build: effectsPanel, owns: ['Tone', 'Image'] },
+  camera: { build: cameraPanel, owns: ['Transform', 'Lens', 'Framing'] },
+  cinecamera: { build: cameraPanel, owns: ['Transform', 'Cinema Lens'] },
+  playercamera: { build: cameraPanel, owns: ['Transform', 'Player Rig'] },
+  vehiclecamera: { build: cameraPanel, owns: ['Transform', 'Vehicle Rig'] },
   clouds: { build: cloudsPanel, owns: ['Layer', 'Motion & tint'] },
   moon: { build: moonPanel, owns: ['Orbit', 'Appearance'] },
   sun: { build: sunPanel, owns: ['Orbit', 'Disc & light'] },

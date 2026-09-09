@@ -472,10 +472,11 @@ function applyGate(camNode) {
   tag.style.left = (bl + 14) + 'px';
 }
 
+const CAMERA_TYPES = ['camera', 'cinecamera', 'playercamera', 'vehiclecamera'];
 const playCameraNode = () => {
   const cur = byId(state.cursorId);
-  if (cur && cur.type === 'camera') return cur;
-  return flat.find(n => n.type === 'camera') || null;
+  if (cur && CAMERA_TYPES.includes(cur.type)) return cur;
+  return flat.find(n => n.type === 'playercamera') || flat.find(n => CAMERA_TYPES.includes(n.type)) || null;
 };
 
 function snapshotWorld() {
@@ -646,7 +647,7 @@ $('#insFocus').innerHTML = ic('focus', { size: 13 });
 $('#insFocus').onclick = () => app.focus(byId(state.cursorId));
 $('#insPopout').onclick = () => { const n = byId(state.cursorId); if (n && !typeOf(n).noBillboard) popups.openFor(n); else if (n) toast('That entity has no billboard'); };
 
-const ADDABLE = ['cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'ieslight', 'arealight', 'tubelight', 'camera', 'particles', 'probe', 'audio'];
+const ADDABLE = ['cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'ieslight', 'arealight', 'tubelight', 'camera', 'cinecamera', 'playercamera', 'vehiclecamera', 'particles', 'probe', 'audio'];
 
 /* ── the docks ─────────────────────────────────────────────────────────────────────────────────
    There is no application chrome above the workspace any more: the two panels are toggled from

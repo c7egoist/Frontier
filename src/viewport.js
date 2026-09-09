@@ -507,8 +507,8 @@ export function createViewport(canvas, { onPick } = {}) {
       const geo = node.type === 'arealight' ? new THREE.PlaneGeometry(1, 1) : new THREE.CylinderGeometry(1, 1, 1, 20);
       const shape = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col(node.props.color), side: THREE.DoubleSide }));
       root.add(light, shape); entry.light = light; entry.shape = shape;
-    } else if (node.type === 'camera') {
-      const cam = new THREE.PerspectiveCamera(node.props.fov, 16 / 9, 0.4, 9);
+    } else if (['camera', 'cinecamera', 'playercamera', 'vehiclecamera'].includes(node.type)) {
+      const cam = new THREE.PerspectiveCamera(node.props.fov, 16 / 9, node.props.near || 0.4, node.props.far || 6000);
       const helper = new THREE.CameraHelper(cam);
       helper.material.opacity = 0.22;
       helper.material.transparent = true;
@@ -788,7 +788,7 @@ export function createViewport(canvas, { onPick } = {}) {
     } else if (node.type === 'tubelight') {
       e.root.position.set(...p.pos); e.root.rotation.set(...p.rot.map(v=>v*D2R)); e.light.color.set(p.color); e.light.intensity = visible ? p.lumens * .018 : 0; e.light.distance = p.distance; e.light.castShadow = p.shadows;
       e.shape.scale.set(p.radius, p.length, p.radius); e.shape.material.color.set(p.color); e.shape.visible = p.showShape && visible && !viewCam; anchors.set(node.id, new THREE.Vector3(...p.pos));
-    } else if (node.type === 'camera') {
+    } else if (['camera', 'cinecamera', 'playercamera', 'vehiclecamera'].includes(node.type)) {
       e.root.position.set(...p.pos);
       e.root.lookAt(new THREE.Vector3(...p.lookAt));
       e.proxy.position.set(...p.pos);
@@ -797,10 +797,11 @@ export function createViewport(canvas, { onPick } = {}) {
       if (e.proxy !== viewCam) {
         /* the proxy is only a frustum drawing while it is not the camera we are looking through */
         e.proxy.aspect = ({ '16:9': 16 / 9, '2.39:1': 2.39, '4:3': 4 / 3, '1:1': 1 })[p.gate] || 16 / 9;
-        e.proxy.far = THREE.MathUtils.clamp(p.focus * 0.4, 1.6, 4.5);
+        e.proxy.near = p.near || 0.1;
+        e.proxy.far = THREE.MathUtils.clamp((p.focus ?? p.distance ?? p.boom ?? 12) * 0.4, 1.6, 6);
       } else {
         e.proxy.aspect = (canvas.clientWidth || 16) / (canvas.clientHeight || 9);
-        e.proxy.near = 0.1; e.proxy.far = 6000;
+        e.proxy.near = p.near || 0.1; e.proxy.far = p.far || 6000;
       }
       e.proxy.updateProjectionMatrix();
       e.proxy.updateMatrixWorld(true);
@@ -910,7 +911,7 @@ export function createViewport(canvas, { onPick } = {}) {
     selectedIds = new Set(ids);
     /* re-apply anything whose gizmo visibility depends on selection */
     flat.forEach(n => {
-      if (!['camera', 'probe', 'audio', 'spotlight', 'ieslight'].includes(n.type)) return;
+      if (!['camera', 'cinecamera', 'playercamera', 'vehiclecamera', 'probe', 'audio', 'spotlight', 'ieslight'].includes(n.type)) return;
       if (before.has(n.id) !== selectedIds.has(n.id)) applyNode(n);
     });
     const sel = [];

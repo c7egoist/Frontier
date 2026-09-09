@@ -121,7 +121,9 @@ from the run snapshot, so **Stop** cannot bring it back. Ordinary `delete` is th
 Types you can add: `cube` (`box`, `block`), `sphere` (`ball`), `torus` (`donut`, `ring`),
 `cylinder` (`tube`, `pillar`), `plane` (`quad`, `panel`), `point light` (`light`, `lamp`),
 `spot light` (`spot`), `IES light` (`automotive light`, `headlamp`), `area light` (`softbox`),
-`tube light` (`light bar`), `camera` (`cam`), `particles` (`sparks`), `probe`, `audio` (`sound`).
+`tube light` (`light bar`), `camera` (`cam`), `cinematic camera` (`film camera`),
+`player camera` (`follow camera`), `vehicle camera` (`car camera`, `chase camera`),
+`particles` (`sparks`), `probe`, `audio` (`sound`).
 
 ### Visibility, locking, isolation
 

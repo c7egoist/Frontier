@@ -933,3 +933,11 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 /* Effects laboratory */
 .ef-hero canvas{display:block;width:100%}.ef-sphere canvas,.ef-polar canvas,.ef-curve canvas{display:block;width:100%}
 .ef-res,.ef-clips,.ef-maps{margin:5px 0 9px}.postpanel .ef-hero canvas{cursor:default}
+
+/* Camera family — viewfinder, projection, rig and placement instruments */
+.ca-hero canvas{display:block;width:100%;cursor:crosshair;touch-action:none}.ca-hero canvas.grabbing{cursor:grabbing}
+.mp-cap .ca-sub{text-transform:none;letter-spacing:.3px}.ca-frame canvas,.ca-dof canvas,.ca-rig canvas,.ca-car canvas,.ca-plan canvas{display:block;width:100%}
+.ca-plan canvas{cursor:crosshair;touch-action:none}.ca-plan canvas.drag{cursor:grabbing}.ca-gates,.ca-modes{margin:8px 0 2px}
+.camerapanel .mp-subhead{margin:10px 0 4px}.ca-steppers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-bottom:8px}
+.ca-axis{display:flex;flex-direction:column;gap:4px;padding:6px;background:var(--field);border:1px solid var(--stroke);border-radius:11px;min-width:0}.ca-axis>span{font-size:8px;letter-spacing:1px;color:var(--text-faint)}
+.ca-axis .step{width:100%}.ca-axis .step .f{min-width:0}.ca-axis .step input{width:38px}
