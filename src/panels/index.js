@@ -16,6 +16,8 @@ import { folderPanel } from './folder.js';
 import { geometryPanel } from './geometry.js';
 import { cloudsPanel } from './clouds.js';
 import { lightPanel } from './lights.js';
+import { advancedLightPanel } from './advancedLights.js';
+import { effectsPanel } from './effects.js';
 
 export const CUSTOM_PANELS = {
   folder: { build: folderPanel, owns: ['Group'] },
@@ -26,6 +28,13 @@ export const CUSTOM_PANELS = {
   plane: { build: geometryPanel, owns: ['Transform', 'Surface'] },
   pointlight: { build: lightPanel, owns: ['Transform', 'Emission'] },
   spotlight: { build: lightPanel, owns: ['Transform', 'Cone'] },
+  ieslight: { build: advancedLightPanel, owns: ['Transform', 'Photometry'] },
+  arealight: { build: advancedLightPanel, owns: ['Transform', 'Emitter'] },
+  tubelight: { build: advancedLightPanel, owns: ['Transform', 'Emitter'] },
+  particles: { build: effectsPanel, owns: ['Emitter', 'Look'] },
+  probe: { build: effectsPanel, owns: ['Capture'] },
+  audio: { build: effectsPanel, owns: ['Source'] },
+  post: { build: effectsPanel, owns: ['Tone', 'Image'] },
   clouds: { build: cloudsPanel, owns: ['Layer', 'Motion & tint'] },
   moon: { build: moonPanel, owns: ['Orbit', 'Appearance'] },
   sun: { build: sunPanel, owns: ['Orbit', 'Disc & light'] },

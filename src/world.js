@@ -240,6 +240,56 @@ export const TYPES = {
     ],
   },
 
+  ieslight: {
+    label: 'IES / Automotive', icon: 'spot', color: '#f6dc72', cat: 'Lighting',
+    groups: [
+      { title: 'Transform', props: [
+        V('pos', 'Position', { def: [0, 1, 0], step: 0.05 }),
+        V('target', 'Aim at', { def: [0, 0.6, -12], step: 0.05 }),
+      ]},
+      { title: 'Photometry', props: [
+        D('profile', 'Distribution', ['ECE Low Beam', 'SAE Low Beam', 'High Beam', 'Fog Lamp', 'Parking Lamp', 'Custom .IES'], { def: 'ECE Low Beam' }),
+        S('lumens', 'Luminous flux', 0, 8000, { def: 1650, dec: 0, unit: 'lm' }),
+        S('multiplier', 'Profile multiplier', 0, 4, { def: 1, dec: 2, unit: '×' }),
+        S('range', 'Photometric range', 1, 250, { def: 120, dec: 0, unit: 'm' }),
+        S('cone', 'Field angle', 5, 100, { def: 58, dec: 1, unit: '°' }),
+        S('cutoff', 'Cut-off pitch', -5, 5, { def: -1.0, dec: 1, unit: '°' }),
+        C('color', 'Colour', { def: '#fff2cf' }),
+        S('temperature', 'Temperature', 1800, 12000, { def: 4300, dec: 0, unit: 'K' }),
+        T('shadows', 'Cast shadows', { def: true }),
+        T('showDistribution', 'Draw distribution', { def: true }),
+      ]},
+    ],
+  },
+
+  arealight: {
+    label: 'Rect Area Light', icon: 'plane', color: '#f5d34b', cat: 'Lighting',
+    groups: [
+      { title: 'Transform', props: [V('pos', 'Position', { def: [0, 3, 0], step: 0.05 }), V('target', 'Aim at', { def: [0, 0, 0], step: 0.05 })] },
+      { title: 'Emitter', props: [
+        S('width', 'Width', 0.1, 20, { def: 2, dec: 2, unit: 'm' }),
+        S('height', 'Height', 0.1, 20, { def: 1, dec: 2, unit: 'm' }),
+        S('lumens', 'Luminous flux', 0, 20000, { def: 2400, dec: 0, unit: 'lm' }),
+        S('spread', 'Spread', 1, 180, { def: 120, dec: 0, unit: '°' }),
+        C('color', 'Colour', { def: '#fff1d6' }),
+        T('twoSided', 'Two sided', { def: false }), T('shadows', 'Cast shadows', { def: false }), T('showShape', 'Draw emitter', { def: true }),
+      ]},
+    ],
+  },
+
+  tubelight: {
+    label: 'Tube Light', icon: 'light', color: '#f5d34b', cat: 'Lighting',
+    groups: [
+      { title: 'Transform', props: [V('pos', 'Position', { def: [0, 2, 0], step: 0.05 }), V('rot', 'Rotation', { def: [0, 0, 0], step: 1, unit: '°' })] },
+      { title: 'Emitter', props: [
+        S('length', 'Length', 0.1, 20, { def: 1.5, dec: 2, unit: 'm' }), S('radius', 'Radius', 0.01, 1, { def: 0.04, dec: 2, unit: 'm' }),
+        S('lumens', 'Luminous flux', 0, 12000, { def: 1800, dec: 0, unit: 'lm' }), S('distance', 'Reach', 1, 120, { def: 24, dec: 0, unit: 'm' }),
+        C('color', 'Colour', { def: '#e8f2ff' }), S('temperature', 'Temperature', 1800, 12000, { def: 5600, dec: 0, unit: 'K' }),
+        T('shadows', 'Cast shadows', { def: false }), T('showShape', 'Draw emitter', { def: true }),
+      ]},
+    ],
+  },
+
   /* ── cameras ───────────────────────────────────────────────────────────────────────────── */
   camera: {
     label: 'Camera', icon: 'camera', color: '#69c3ff', cat: 'Cameras',
@@ -397,6 +447,11 @@ export const scene = [
     N('Fill Point', 'pointlight', [], {
       props: { pos: [-3.5, 1.6, 4.6], color: '#ffb47a', intensity: 10, distance: 22 },
     }),
+    N('ECE Low Beam', 'ieslight', [], {
+      props: { pos: [-1.1, 0.72, 4.2], target: [-1.1, 0.45, -24], profile: 'ECE Low Beam' },
+    }),
+    N('Softbox', 'arealight', [], { props: { pos: [3.5, 4.5, 2], target: [0, 1, 0] } }),
+    N('Studio Tube', 'tubelight', [], { props: { pos: [-3, 3.2, -2], rot: [0, 0, 20] } }),
   ], { props: { tint: '#f5d34b' } }),
 
   N('Cameras', 'folder', [

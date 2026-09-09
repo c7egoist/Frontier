@@ -51,6 +51,8 @@ const TYPE_WORDS = {
   cylinder: ['cylinder', 'tube', 'pillar', 'post'], plane: ['plane', 'quad', 'panel', 'card'],
   pointlight: ['point light', 'pointlight', 'light', 'lamp', 'bulb'],
   spotlight: ['spot light', 'spotlight', 'spot'],
+  ieslight: ['ies light', 'ies', 'automotive light', 'headlamp', 'headlight'],
+  arealight: ['area light', 'rect light', 'softbox'], tubelight: ['tube light', 'linear light', 'light bar'],
   camera: ['camera', 'cam', 'view camera'], particles: ['particles', 'particle system', 'sparks', 'fx'],
   probe: ['probe', 'reflection probe'], audio: ['audio', 'sound', 'speaker', 'emitter'],
   water: ['water', 'ocean', 'sea'], sky: ['sky', 'atmosphere'], sun: ['sun'], moon: ['moon'],
@@ -139,7 +141,7 @@ export function createLang(ctx) {
       if (cat) return { nodes: flat.filter(n => !isFolder(n) && typeOf(n).cat === cat), word: `all ${cat}` };
       const tk = typeFromWords(bulk);
       if (tk) return { nodes: flat.filter(n => n.type === tk), word: `all ${TYPES[tk].label.toLowerCase()}s` };
-      if (/^light/.test(norm(bulk))) return { nodes: flat.filter(n => ['pointlight', 'spotlight'].includes(n.type)), word: 'all lights' };
+      if (/^light/.test(norm(bulk))) return { nodes: flat.filter(n => ['pointlight', 'spotlight', 'ieslight', 'arealight', 'tubelight'].includes(n.type)), word: 'all lights' };
     }
 
     const ranked = flat.map(n => ({ n, s: scoreNode(q, n) })).filter(r => r.s > 0).sort((a, b) => b.s - a.s);

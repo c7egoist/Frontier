@@ -309,6 +309,8 @@ src/
     geometry.js     turntable, world placement deck, dimensions, interactive BRDF laboratory
     clouds.js       satellite cover map, condensate histogram, cloud deck, advection controls
     lights.js       point/spot photometry, falloff curves, cone distribution, placement and aim
+    advancedLights.js automotive IES distributions, area emitters, tubes, mounting coordinates
+    effects.js      particles, reflection capture, spatial audio, tone response and image texture
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
@@ -353,6 +355,16 @@ ruler to resize the disc.
 ![Frontier — the spotlight panel](docs/preview-spotlight.png)
 
 ![Frontier — the point light panel](docs/preview-pointlight.png)
+
+![Frontier — the automotive IES panel](docs/preview-ies.png)
+
+![Frontier — the particle effects panel](docs/preview-particles.png)
+
+![Frontier — the reflection probe panel](docs/preview-probe.png)
+
+![Frontier — the spatial audio panel](docs/preview-audio.png)
+
+![Frontier — the post effects panel](docs/preview-effects.png)
 
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
 hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a

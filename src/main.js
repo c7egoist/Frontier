@@ -646,7 +646,7 @@ $('#insFocus').innerHTML = ic('focus', { size: 13 });
 $('#insFocus').onclick = () => app.focus(byId(state.cursorId));
 $('#insPopout').onclick = () => { const n = byId(state.cursorId); if (n && !typeOf(n).noBillboard) popups.openFor(n); else if (n) toast('That entity has no billboard'); };
 
-const ADDABLE = ['cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'camera', 'particles', 'probe', 'audio'];
+const ADDABLE = ['cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'ieslight', 'arealight', 'tubelight', 'camera', 'particles', 'probe', 'audio'];
 
 /* ── the docks ─────────────────────────────────────────────────────────────────────────────────
    There is no application chrome above the workspace any more: the two panels are toggled from

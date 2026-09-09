@@ -921,3 +921,15 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .li-photo canvas,.li-aim canvas{display:block;width:100%;cursor:crosshair;touch-action:none}.li-photo canvas.drag,.li-aim canvas.drag{cursor:grabbing}
 .lightpanel .mp-subhead{margin:10px 0 4px}.li-steppers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-bottom:8px}
 .li-axis{display:flex;flex-direction:column;gap:4px;padding:6px;background:var(--field);border:1px solid var(--stroke);border-radius:11px;min-width:0}.li-axis>span{font-size:8px;letter-spacing:1px;color:var(--text-faint)}.li-axis .step{width:100%}.li-axis .step .f{min-width:0}.li-axis .step input{width:38px}
+
+/* Automotive / shaped emitters */
+.al-hero canvas{display:block;width:100%;cursor:crosshair;touch-action:none}.al-hero canvas.grabbing{cursor:grabbing}
+.mp-cap .al-sub,.mp-cap .ef-sub{text-transform:none;letter-spacing:.3px}.al-dist canvas{display:block;width:100%}
+.advlightpanel .mp-subhead,.effectpanel .mp-subhead{margin:10px 0 4px}.al-profiles{margin:8px 0 2px}
+.al-steppers,.ef-steppers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-bottom:8px}
+.al-axis,.ef-axis{display:flex;flex-direction:column;gap:4px;padding:6px;background:var(--field);border:1px solid var(--stroke);border-radius:11px;min-width:0}.al-axis>span,.ef-axis>span{font-size:8px;letter-spacing:1px;color:var(--text-faint)}
+.al-axis .step,.ef-axis .step{width:100%}.al-axis .step .f,.ef-axis .step .f{min-width:0}.al-axis .step input,.ef-axis .step input{width:38px}
+
+/* Effects laboratory */
+.ef-hero canvas{display:block;width:100%}.ef-sphere canvas,.ef-polar canvas,.ef-curve canvas{display:block;width:100%}
+.ef-res,.ef-clips,.ef-maps{margin:5px 0 9px}.postpanel .ef-hero canvas{cursor:default}

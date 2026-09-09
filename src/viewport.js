@@ -491,6 +491,22 @@ export function createViewport(canvas, { onPick } = {}) {
       light.target = target;
       root.add(light, cone, wire);
       entry.light = light; entry.target = target; entry.cone = cone; entry.wire = wire;
+    } else if (node.type === 'ieslight') {
+      /* Three's core has no IES sampler; the viewport uses a focused spot proxy while the
+         inspector owns the authored photometric distribution. */
+      const light = new THREE.SpotLight(col(node.props.color), 80, 0, 0.55, 0.18, 2);
+      light.castShadow = true;
+      const target = new THREE.Object3D(); scene3.add(target); light.target = target;
+      const cone = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 48, 1, true),
+        new THREE.MeshBasicMaterial({ color: col(node.props.color), transparent: true, opacity: 0.045, side: THREE.DoubleSide, depthWrite: false }));
+      root.add(light, cone); entry.light = light; entry.target = target; entry.cone = cone;
+    } else if (node.type === 'arealight' || node.type === 'tubelight') {
+      /* Area/tube emitters use a practical point proxy in this prototype, plus their authored
+         luminous shape. The panel remains photometrically explicit about the actual emitter. */
+      const light = new THREE.PointLight(col(node.props.color), 30, 50, 2);
+      const geo = node.type === 'arealight' ? new THREE.PlaneGeometry(1, 1) : new THREE.CylinderGeometry(1, 1, 1, 20);
+      const shape = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col(node.props.color), side: THREE.DoubleSide }));
+      root.add(light, shape); entry.light = light; entry.shape = shape;
     } else if (node.type === 'camera') {
       const cam = new THREE.PerspectiveCamera(node.props.fov, 16 / 9, 0.4, 9);
       const helper = new THREE.CameraHelper(cam);
@@ -758,6 +774,20 @@ export function createViewport(canvas, { onPick } = {}) {
         g.material.color.set(p.color);
       });
       anchors.set(node.id, new THREE.Vector3(...p.pos));
+    } else if (node.type === 'ieslight') {
+      e.root.position.set(...p.pos); e.target.position.set(...p.target);
+      e.light.color.set(p.color); e.light.intensity = visible ? p.lumens * p.multiplier * 0.055 : 0;
+      e.light.distance = p.range; e.light.angle = p.cone * D2R * 0.5; e.light.penumbra = 0.22; e.light.castShadow = p.shadows;
+      const from = new THREE.Vector3(...p.pos), to = new THREE.Vector3(...p.target), len = Math.max(from.distanceTo(to), .2), rad = Math.tan(p.cone * D2R * .5) * len;
+      e.cone.visible = p.showDistribution && visible && !viewCam && selectedIds.has(node.id); e.cone.scale.set(rad, len, rad);
+      e.cone.position.copy(to.clone().sub(from).multiplyScalar(.5)); e.cone.quaternion.setFromUnitVectors(new THREE.Vector3(0,-1,0), to.clone().sub(from).normalize()); e.cone.material.color.set(p.color);
+      anchors.set(node.id, new THREE.Vector3(...p.pos));
+    } else if (node.type === 'arealight') {
+      e.root.position.set(...p.pos); e.root.lookAt(new THREE.Vector3(...p.target)); e.light.color.set(p.color); e.light.intensity = visible ? p.lumens * .018 : 0; e.light.distance = 80; e.light.castShadow = p.shadows;
+      e.shape.scale.set(p.width, p.height, 1); e.shape.material.color.set(p.color); e.shape.visible = p.showShape && visible && !viewCam; anchors.set(node.id, new THREE.Vector3(...p.pos));
+    } else if (node.type === 'tubelight') {
+      e.root.position.set(...p.pos); e.root.rotation.set(...p.rot.map(v=>v*D2R)); e.light.color.set(p.color); e.light.intensity = visible ? p.lumens * .018 : 0; e.light.distance = p.distance; e.light.castShadow = p.shadows;
+      e.shape.scale.set(p.radius, p.length, p.radius); e.shape.material.color.set(p.color); e.shape.visible = p.showShape && visible && !viewCam; anchors.set(node.id, new THREE.Vector3(...p.pos));
     } else if (node.type === 'camera') {
       e.root.position.set(...p.pos);
       e.root.lookAt(new THREE.Vector3(...p.lookAt));
@@ -880,7 +910,7 @@ export function createViewport(canvas, { onPick } = {}) {
     selectedIds = new Set(ids);
     /* re-apply anything whose gizmo visibility depends on selection */
     flat.forEach(n => {
-      if (!['camera', 'probe', 'audio', 'spotlight'].includes(n.type)) return;
+      if (!['camera', 'probe', 'audio', 'spotlight', 'ieslight'].includes(n.type)) return;
       if (before.has(n.id) !== selectedIds.has(n.id)) applyNode(n);
     });
     const sel = [];
