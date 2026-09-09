@@ -909,3 +909,15 @@ body.playing .vp-menus,body.playing .axisorb{opacity:0;pointer-events:none;}
 .ge-axis .step{width:100%;}.ge-axis .step .f{min-width:0;}.ge-axis .step input{width:38px;}
 .ge-colours{display:grid;grid-template-columns:1fr 1fr;gap:10px}.ge-colours .mp-subhead{margin:9px 0 4px;}
 .geopanel .mp-subhead{margin:10px 0 4px;}
+
+/* Cloud weather station */
+.cl-hero canvas{display:block;width:100%;cursor:crosshair;touch-action:none}.cl-hero canvas.grabbing{cursor:grabbing}
+.mp-cap .cl-sub,.mp-cap .li-sub{text-transform:none;letter-spacing:.3px;}
+.cl-cover canvas,.cl-section canvas{display:block;width:100%;cursor:crosshair;touch-action:none}.cl-cover canvas.drag,.cl-section canvas.drag{cursor:grabbing}
+.cloudpanel .mp-subhead{margin:10px 0 4px}.cl-colours{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* Point and spot photometric instruments */
+.li-hero canvas{display:block;width:100%;cursor:crosshair;touch-action:none}.li-hero canvas.grabbing{cursor:grabbing}
+.li-photo canvas,.li-aim canvas{display:block;width:100%;cursor:crosshair;touch-action:none}.li-photo canvas.drag,.li-aim canvas.drag{cursor:grabbing}
+.lightpanel .mp-subhead{margin:10px 0 4px}.li-steppers{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;margin-bottom:8px}
+.li-axis{display:flex;flex-direction:column;gap:4px;padding:6px;background:var(--field);border:1px solid var(--stroke);border-radius:11px;min-width:0}.li-axis>span{font-size:8px;letter-spacing:1px;color:var(--text-faint)}.li-axis .step{width:100%}.li-axis .step .f{min-width:0}.li-axis .step input{width:38px}

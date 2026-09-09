@@ -307,6 +307,8 @@ src/
     fog.js          calibrated sight line, contrast curve, vertical profile, scattering chamber
     folder.js       hierarchy map, collection composition, live manifest, branch controls
     geometry.js     turntable, world placement deck, dimensions, interactive BRDF laboratory
+    clouds.js       satellite cover map, condensate histogram, cloud deck, advection controls
+    lights.js       point/spot photometry, falloff curves, cone distribution, placement and aim
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
@@ -345,6 +347,12 @@ ruler to resize the disc.
 ![Frontier — the folder panel](docs/preview-folder.png)
 
 ![Frontier — the object panel](docs/preview-objects.png)
+
+![Frontier — the cloud layer panel](docs/preview-clouds.png)
+
+![Frontier — the spotlight panel](docs/preview-spotlight.png)
+
+![Frontier — the point light panel](docs/preview-pointlight.png)
 
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
 hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a
