@@ -638,6 +638,28 @@ kbd {
 
 .ctx-item kbd { font-size: 10px; }
 
+.ver {
+  margin-left: auto;
+  font-family: var(--font-display);
+  font-size: 11px;
+  color: var(--faint);
+  user-select: none;
+}
+
+.link-btn {
+  background: none;
+  border: 0;
+  padding: 0;
+  margin-left: 6px;
+  font-size: inherit;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.link-btn:hover { color: var(--danger); }
+
 /* ---------- modal ---------- */
 
 .modal-backdrop {

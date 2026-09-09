@@ -996,6 +996,23 @@ function openModal() { modalBackdrop.hidden = false; modalClose.focus(); }
 
 shortcutsBtn.addEventListener("click", openModal);
 modalClose.addEventListener("click", () => { modalBackdrop.hidden = true; });
+$("#resetScene").addEventListener("click", () => {
+  modalBackdrop.hidden = true;
+  try { localStorage.removeItem(LS_KEY); } catch (_) {}
+  state.title = "Level 01";
+  state.nodes = defaultNodes();
+  state.zoomId = null;
+  editingId = null;
+  originalText = "";
+  filterQuery = "";
+  searchInput.value = "";
+  searchClear.hidden = true;
+  setSearch(false);
+  titleEl.value = state.title;
+  document.title = state.title + " — Frontier";
+  save();
+  select(state.nodes[0].id, true);
+});
 modalBackdrop.addEventListener("click", (e) => {
   if (e.target === modalBackdrop) modalBackdrop.hidden = true;
 });
