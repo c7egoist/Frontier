@@ -9,7 +9,7 @@
 
 /* ---------- constants ---------- */
 
-const LS_KEY = "frontier.outliner.v1";
+const LS_KEY = "frontier.outliner.v2";
 const THEME_KEY = "frontier.theme";
 const STEP = 24;      // px per indent level (mirrors .gutter width)
 const BASE_X = 20;    // px: bullet center of a level-0 row (8 pad + 12)
@@ -110,20 +110,27 @@ function mk(text, level, type, visible) {
 function defaultNodes() {
   return [
     mk("Environment", 0, "folder"),
-    mk("Directional Light", 1, "light"),
+    mk("Sun", 1, "sun"),
+    mk("Moon", 1, "moon"),
+    mk("Sky Atmosphere", 1, "sky"),
+    mk("Sky Light", 1, "skylight"),
+    mk("Height Fog", 1, "fog"),
     mk("Sky Dome", 1, "mesh"),
     mk("Ground", 1, "mesh"),
     mk("Ambience", 1, "audio"),
     mk("Player", 0, "folder"),
     mk("Player Capsule", 1, "mesh"),
     mk("Player Camera", 1, "camera"),
+    mk("Flashlight", 1, "spot"),
     mk("Footsteps", 1, "audio"),
     mk("Player Controller", 1, "script"),
     mk("Gameplay", 0, "folder"),
     mk("Coin Pickup", 1, "mesh"),
     mk("Pickup Burst", 2, "particles"),
+    mk("Pickup Glow", 2, "light"),
     mk("Enemy Spawner", 1, "script"),
     mk("Trigger Volume", 1, "physics"),
+    mk("Global Post Process", 0, "post"),
     mk("Debug Grid", 0, "mesh", false),
   ];
 }
