@@ -1,9 +1,13 @@
 # Frontier — Scene Outliner
 
-A game-engine scene outliner: typed entities (folders, meshes, lights,
-cameras, audio, particles, physics, scripts) in a fast keyboard-first
-hierarchy. No build step, no dependencies — just open `index.html`
-(or serve the folder).
+A game-engine scene outliner in the spirit of Unreal: typed entities
+in a fast keyboard-first hierarchy. No build step, no dependencies —
+just open `index.html` (or serve the folder).
+
+Entity types: **Atmosphere** (Sky Atmosphere, Sky Light, Directional
+Light/Sun, Moon, Fog), **Lights** (Point, Spot), **Scene** (Folder,
+Mesh, Camera, Particles, Physics), **Audio & Logic** (Audio, Script,
+Post Process).
 
 ## Run
 

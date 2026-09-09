@@ -19,24 +19,42 @@ const svgWrap = (inner) =>
   '<svg viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor"' +
   ' stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + "</svg>";
 
-/* Entity types: id, menu label, default name, icon (svg inner). */
+/* Entity types: id, category, menu label, default name, icon (svg inner). */
 const TYPES = [
-  { id: "folder", label: "Folder", def: "New Folder",
-    icon: '<path d="M1.5 4.2c0-.7.5-1.2 1.2-1.2h2.9l1.3 1.6h4.4c.7 0 1.2.5 1.2 1.2V10c0 .7-.5 1.2-1.2 1.2H2.7c-.7 0-1.2-.5-1.2-1.2z"/>' },
-  { id: "mesh", label: "Mesh", def: "Cube",
-    icon: '<path d="M7 1.4l5.3 3v4.2L7 11.6 1.7 8.6V4.4z"/><path d="M1.7 4.4L7 7.4l5.3-3M7 7.4v4.2"/>' },
-  { id: "light", label: "Light", def: "Point Light",
+  // ----- Atmosphere (Unreal-style sky & celestial) -----
+  { id: "sky", cat: "Atmosphere", label: "Sky Atmosphere", def: "Sky Atmosphere",
+    icon: '<path d="M1.5 10.5h11"/><path d="M4 10.5a3 3 0 0 1 6 0"/><path d="M7 1.6v1.3M3.7 2.9l.9.9M10.3 2.9l-.9.9"/>' },
+  { id: "skylight", cat: "Atmosphere", label: "Sky Light", def: "Sky Light",
+    icon: '<path d="M2 10a5 5 0 0 1 10 0"/><path d="M1.5 10.5h11"/><path d="M4.5 10a2.5 2.5 0 0 1 5 0"/>' },
+  { id: "sun", cat: "Atmosphere", label: "Directional Light", def: "Sun",
     icon: '<circle cx="7" cy="7" r="2.4"/><path d="M7 1.2v1.6M7 11.2v1.6M1.2 7h1.6M11.2 7h1.6M2.9 2.9l1.1 1.1M10 10l1.1 1.1M11.1 2.9L10 4M4 10l-1.1 1.1"/>' },
-  { id: "camera", label: "Camera", def: "Camera",
+  { id: "moon", cat: "Atmosphere", label: "Moon", def: "Moon",
+    icon: '<path d="M12.2 7.5A5.2 5.2 0 1 1 6.5 1.8 4.1 4.1 0 0 0 12.2 7.5z"/>' },
+  { id: "fog", cat: "Atmosphere", label: "Fog", def: "Height Fog",
+    icon: '<path d="M1.5 4.5c1.2-1 2.3-1 3.5 0s2.3 1 3.5 0 2.3-1 3.5 0"/><path d="M1.5 7.5c1.2-1 2.3-1 3.5 0s2.3 1 3.5 0 2.3-1 3.5 0"/><path d="M1.5 10.5c1.2-1 2.3-1 3.5 0s2.3 1 3.5 0 2.3-1 3.5 0"/>' },
+  // ----- Lights -----
+  { id: "light", cat: "Lights", label: "Point Light", def: "Point Light",
+    icon: '<circle cx="7" cy="5.6" r="2.6"/><path d="M5.8 9.6h2.4M6.3 11.4h1.4M2.4 2.4l.9.9M11.6 2.4l-.9.9"/>' },
+  { id: "spot", cat: "Lights", label: "Spot Light", def: "Spot Light",
+    icon: '<path d="M5.6 1.5h2.8L11 9H3z"/><path d="M2.5 11.5h9"/>' },
+  // ----- Scene -----
+  { id: "folder", cat: "Scene", label: "Folder", def: "New Folder",
+    icon: '<path d="M1.5 4.2c0-.7.5-1.2 1.2-1.2h2.9l1.3 1.6h4.4c.7 0 1.2.5 1.2 1.2V10c0 .7-.5 1.2-1.2 1.2H2.7c-.7 0-1.2-.5-1.2-1.2z"/>' },
+  { id: "mesh", cat: "Scene", label: "Mesh", def: "Cube",
+    icon: '<path d="M7 1.4l5.3 3v4.2L7 11.6 1.7 8.6V4.4z"/><path d="M1.7 4.4L7 7.4l5.3-3M7 7.4v4.2"/>' },
+  { id: "camera", cat: "Scene", label: "Camera", def: "Camera",
     icon: '<rect x="1.4" y="4.6" width="11.2" height="6.8" rx="1.6"/><circle cx="7" cy="8" r="2"/><path d="M4.4 4.6l1-1.6h3.2l1 1.6"/>' },
-  { id: "audio", label: "Audio", def: "Audio Source",
-    icon: '<path d="M2 5.4v3.2h2.6L8.2 11V3L4.6 5.4z"/><path d="M9.7 5a2.8 2.8 0 0 1 0 4M11.2 3.5a5 5 0 0 1 0 7"/>' },
-  { id: "particles", label: "Particles", def: "Particle System",
+  { id: "particles", cat: "Scene", label: "Particles", def: "Particle System",
     icon: '<path d="M6.6 1c.5 2.2 1.2 2.9 3.4 3.4-2.2.5-2.9 1.2-3.4 3.4-.5-2.2-1.2-2.9-3.4-3.4 2.2-.5 2.9-1.2 3.4-3.4z"/><path d="M11.3 8.2c.3 1.2.7 1.6 1.9 1.9-1.2.3-1.6.7-1.9 1.9-.3-1.2-.7-1.6-1.9-1.9 1.2-.3 1.6-.7 1.9-1.9z"/>' },
-  { id: "physics", label: "Physics", def: "Rigid Body",
+  { id: "physics", cat: "Scene", label: "Physics", def: "Rigid Body",
     icon: '<circle cx="7" cy="7" r="1.7"/><ellipse cx="7" cy="7" rx="5.6" ry="2.2"/>' },
-  { id: "script", label: "Script", def: "New Script",
+  // ----- Audio & Logic -----
+  { id: "audio", cat: "Audio & Logic", label: "Audio", def: "Audio Source",
+    icon: '<path d="M2 5.4v3.2h2.6L8.2 11V3L4.6 5.4z"/><path d="M9.7 5a2.8 2.8 0 0 1 0 4M11.2 3.5a5 5 0 0 1 0 7"/>' },
+  { id: "script", cat: "Audio & Logic", label: "Script", def: "New Script",
     icon: '<path d="M5.2 4.2L2.6 7l2.6 2.8M8.8 4.2L11.4 7l-2.6 2.8"/>' },
+  { id: "post", cat: "Audio & Logic", label: "Post Process", def: "Post Process Volume",
+    icon: '<path d="M1.5 4.5h11M1.5 9.5h11"/><circle cx="5.2" cy="4.5" r="1.4"/><circle cx="8.8" cy="9.5" r="1.4"/>' },
 ];
 const TYPE_MAP = Object.fromEntries(TYPES.map((t) => [t.id, t]));
 
@@ -811,7 +829,15 @@ function zoomOut() {
 
 function buildAddMenu() {
   addMenu.innerHTML = "";
+  let lastCat = null;
   TYPES.forEach((t) => {
+    if (t.cat !== lastCat) {
+      lastCat = t.cat;
+      const head = document.createElement("div");
+      head.className = "add-head";
+      head.textContent = t.cat;
+      addMenu.appendChild(head);
+    }
     const b = document.createElement("button");
     b.className = "add-item";
     b.type = "button";

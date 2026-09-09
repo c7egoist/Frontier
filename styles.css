@@ -226,7 +226,9 @@ input:focus-visible {
   position: absolute;
   top: calc(100% + 10px);
   right: 0;
-  width: 264px;
+  width: 280px;
+  max-height: min(66vh, 520px);
+  overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 18px;
@@ -234,9 +236,22 @@ input:focus-visible {
   padding: 8px;
   z-index: 40;
   animation: pop 0.14s ease;
+  scrollbar-width: thin;
 }
 
 .add-menu[hidden] { display: none; }
+
+.add-head {
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 10px 12px 4px;
+}
+
+.add-head:first-child { padding-top: 4px; }
 
 .add-item {
   display: flex;
