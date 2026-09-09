@@ -187,6 +187,32 @@ const app = {
     return n;
   },
 
+  importAsset(node, file) {
+    if (!node || node.type !== 'asset' || !file) return;
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const kind = ({
+      obj: '3D Model', fbx: '3D Model', gltf: '3D Model', glb: '3D Model', usd: '3D Model', usdz: '3D Model', stl: '3D Model', dae: '3D Model',
+      png: 'Image / Texture', jpg: 'Image / Texture', jpeg: 'Image / Texture', webp: 'Image / Texture', tga: 'Image / Texture', tif: 'Image / Texture', tiff: 'Image / Texture', exr: 'HDRI', hdr: 'HDRI',
+      wav: 'Audio', mp3: 'Audio', ogg: 'Audio', flac: 'Audio', m4a: 'Audio', aac: 'Audio',
+      ies: 'IES Light', mp4: 'Video', webm: 'Video', mov: 'Video', json: 'Data', csv: 'Data', bin: 'Data', raw: 'Data',
+    })[ext] || (file.type.startsWith('image/') ? 'Image / Texture' : file.type.startsWith('audio/') ? 'Audio' : file.type.startsWith('video/') ? 'Video' : 'Data');
+    if (node.props.previewUrl?.startsWith('blob:')) URL.revokeObjectURL(node.props.previewUrl);
+    node.props.assetKind = kind;
+    node.props.sourceName = file.name;
+    node.props.sourceBytes = file.size;
+    node.props.mime = file.type || `application/${ext || 'octet-stream'}`;
+    node.props.extension = ext.toUpperCase() || 'FILE';
+    node.props.status = 'Ready';
+    node.props.modified = file.lastModified || Date.now();
+    node.props.previewUrl = URL.createObjectURL(file);
+    if (/^(New Asset|Asset Slot)/.test(node.name)) node.name = file.name.replace(/\.[^.]+$/, '');
+    bus.emit('propchange', { node, key: 'sourceName', src: 'import' });
+    bus.emit('assetimport', { node, file, kind });
+    bus.emit('treechange');
+    vp.applyNode(node); outliner.render(); renderInspector();
+    app.toast(`Imported <b>${file.name}</b> as ${kind}`);
+  },
+
   duplicate(node) {
     if (!node || isFolder(node)) return;
     const copy = makeNode(uniqueName(node.name.replace(/ \d+$/, '')), node.type, [], {
@@ -258,8 +284,9 @@ const app = {
     paintStats();
   },
 };
+bus.on('assetfile', ({ node, file }) => app.importAsset(node, file));
 function folderForCat(cat) {
-  return ({ Environment: 'Environment', Water: 'Water', Geometry: 'Objects', Lighting: 'Lighting', Cameras: 'Cameras', Effects: 'Effects' })[cat] || 'Objects';
+  return ({ Environment: 'Environment', Water: 'Water', Terrain: 'Terrain', Assets: 'Assets', Geometry: 'Objects', Lighting: 'Lighting', Cameras: 'Cameras', Effects: 'Effects' })[cat] || 'Objects';
 }
 function uniqueName(base) {
   const names = new Set(flat.map(n => n.name));
@@ -647,7 +674,7 @@ $('#insFocus').innerHTML = ic('focus', { size: 13 });
 $('#insFocus').onclick = () => app.focus(byId(state.cursorId));
 $('#insPopout').onclick = () => { const n = byId(state.cursorId); if (n && !typeOf(n).noBillboard) popups.openFor(n); else if (n) toast('That entity has no billboard'); };
 
-const ADDABLE = ['cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'ieslight', 'arealight', 'tubelight', 'camera', 'cinecamera', 'playercamera', 'vehiclecamera', 'particles', 'probe', 'audio'];
+const ADDABLE = ['asset', 'terrain', 'cube', 'sphere', 'torus', 'cylinder', 'plane', 'pointlight', 'spotlight', 'ieslight', 'arealight', 'tubelight', 'camera', 'cinecamera', 'playercamera', 'vehiclecamera', 'particles', 'probe', 'audio'];
 
 /* ── the docks ─────────────────────────────────────────────────────────────────────────────────
    There is no application chrome above the workspace any more: the two panels are toggled from

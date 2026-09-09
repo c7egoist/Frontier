@@ -468,6 +468,14 @@ export function createViewport(canvas, { onPick } = {}) {
       root.add(mesh);
       entry.mesh = mesh;
       pickables.push(mesh);
+    } else if (node.type === 'terrain') {
+      const geo = new THREE.PlaneGeometry(1, 1, 64, 64);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: col(node.props.lowColor), roughness: .9, side: THREE.DoubleSide }));
+      mesh.rotation.x = -Math.PI / 2; mesh.receiveShadow = true; mesh.castShadow = true; mesh.userData.nodeId = node.id;
+      root.add(mesh); entry.mesh = mesh; entry.basePositions = geo.attributes.position.array.slice(); pickables.push(mesh);
+    } else if (node.type === 'asset') {
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xd4a5ff, roughness: .38, metalness: .18, wireframe: true }));
+      mesh.userData.nodeId = node.id; root.add(mesh); entry.mesh = mesh; pickables.push(mesh);
     } else if (node.type === 'pointlight') {
       const light = new THREE.PointLight(col(node.props.color), 14, 26, 2);
       const glow = new THREE.Mesh(new THREE.SphereGeometry(0.11, 16, 12),
@@ -741,6 +749,23 @@ export function createViewport(canvas, { onPick } = {}) {
       mat.emissiveIntensity = p.emissiveStrength;
       e.mesh.castShadow = p.castShadow;
       anchors.set(node.id, new THREE.Vector3(p.pos[0], p.pos[1] + Math.abs(p.scale[1]) * 0.62 + 0.35, p.pos[2]));
+    } else if (node.type === 'terrain') {
+      e.root.position.set(...p.pos); e.root.scale.set(p.size, p.size, 1);
+      const a = e.mesh.geometry.attributes.position, base = e.basePositions;
+      for (let i = 0; i < a.count; i++) {
+        const x = base[i * 3], y = base[i * 3 + 1], f = p.frequency || 1;
+        const n = Math.sin((x * 8.3 + p.seed * .013) * f) * .45 + Math.sin((y * 10.7 - p.seed * .019) * f) * .3 + Math.sin((x + y) * 21 * f) * .12;
+        a.setZ(i, n * p.height * .5 / Math.max(1, p.size));
+      }
+      a.needsUpdate = true; e.mesh.geometry.computeVertexNormals();
+      e.mesh.material.color.copy(new THREE.Color(p.lowColor).lerp(new THREE.Color(p.highColor), .42));
+      e.mesh.material.roughness = p.roughness; e.mesh.material.wireframe = p.wireframe; e.mesh.castShadow = p.castShadow;
+      anchors.set(node.id, new THREE.Vector3(p.pos[0], p.pos[1] + p.height * .35, p.pos[2]));
+    } else if (node.type === 'asset') {
+      e.root.position.set(...p.pos); e.root.rotation.set(...p.rot.map(v => v * D2R)); e.root.scale.set(...p.scale);
+      const colors = { '3D Model': 0xd4a5ff, 'Image / Texture': 0x6cc8ff, Audio: 0xb78dff, 'IES Light': 0xf6dc72, HDRI: 0x8fd3ff, Video: 0xff9d6c, Data: 0x9aa0a6 };
+      e.mesh.material.color.setHex(colors[p.assetKind] || 0xd4a5ff); e.mesh.material.wireframe = !p.sourceName;
+      anchors.set(node.id, new THREE.Vector3(p.pos[0], p.pos[1] + Math.abs(p.scale[1]) * .7, p.pos[2]));
     } else if (node.type === 'pointlight') {
       e.root.position.set(...p.pos);
       e.light.color.set(p.color);

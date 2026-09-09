@@ -123,6 +123,7 @@ Types you can add: `cube` (`box`, `block`), `sphere` (`ball`), `torus` (`donut`,
 `spot light` (`spot`), `IES light` (`automotive light`, `headlamp`), `area light` (`softbox`),
 `tube light` (`light bar`), `camera` (`cam`), `cinematic camera` (`film camera`),
 `player camera` (`follow camera`), `vehicle camera` (`car camera`, `chase camera`),
+`terrain` (`landscape`, `height field`), `asset slot` (`imported asset`),
 `particles` (`sparks`), `probe`, `audio` (`sound`).
 
 ### Visibility, locking, isolation

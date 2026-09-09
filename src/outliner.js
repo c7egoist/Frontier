@@ -236,6 +236,18 @@ export function createOutliner(host, app) {
         app.focus(n);
       };
       row.oncontextmenu = e => { e.preventDefault(); app.contextMenu(n, e); };
+      /* Asset Slots are import targets: a file can come from Finder/Explorer straight onto the
+         entity in the hierarchy. The same target is repeated in its inspector. */
+      row.ondragover = e => {
+        if (n.type !== 'asset' || !e.dataTransfer?.types?.includes('Files')) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; row.classList.add('file-over');
+      };
+      row.ondragleave = () => row.classList.remove('file-over');
+      row.ondrop = e => {
+        row.classList.remove('file-over');
+        if (n.type !== 'asset' || !e.dataTransfer?.files?.length) return;
+        e.preventDefault(); e.stopPropagation(); app.importAsset?.(n, e.dataTransfer.files[0]);
+      };
       row.addEventListener('pointerdown', e => {
         if (e.button !== 0 || e.target.closest('.st') || e.target.closest('.tw')) return;
         const x0 = e.clientX, y0 = e.clientY;

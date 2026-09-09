@@ -199,6 +199,36 @@ export const TYPES = {
     ],
   },
 
+  /* ── terrain & imported assets ─────────────────────────────────────────────────────────── */
+  terrain: {
+    label: 'Terrain', icon: 'world', color: '#8fb36b', cat: 'Terrain',
+    groups: [
+      { title: 'Transform', props: [V('pos', 'Position', { def: [0, -2, 0], step: 0.1 })] },
+      { title: 'Height Field', props: [
+        S('size', 'World size', 10, 2000, { def: 180, dec: 0, unit: 'm' }),
+        S('height', 'Relief', 0, 80, { def: 12, dec: 1, unit: 'm' }),
+        S('frequency', 'Feature scale', 0.1, 8, { def: 1.2, dec: 2 }),
+        S('seed', 'Seed', 0, 9999, { def: 417, dec: 0 }),
+        D('resolution', 'Resolution', ['64', '128', '256', '512', '1024'], { def: '256' }),
+        C('lowColor', 'Valley colour', { def: '#263628' }), C('highColor', 'Peak colour', { def: '#88917b' }),
+        S('roughness', 'Surface roughness', 0, 1, { def: 0.88, dec: 2 }),
+        T('wireframe', 'Wire overlay', { def: false }), T('castShadow', 'Cast shadows', { def: true }),
+      ]},
+    ],
+  },
+
+  asset: {
+    label: 'Asset Slot', icon: 'layers', color: '#d4a5ff', cat: 'Assets',
+    groups: [
+      { title: 'Transform', props: [V('pos', 'Position', { def: [0, 1, 0], step: 0.05 }), V('rot', 'Rotation', { def: [0, 0, 0], step: 1, unit: '°' }), V('scale', 'Scale', { def: [1, 1, 1], step: 0.02 })] },
+      { title: 'Asset Source', props: [
+        D('assetKind', 'Asset type', ['Auto Detect', '3D Model', 'Image / Texture', 'Audio', 'IES Light', 'HDRI', 'Video', 'Data'], { def: 'Auto Detect' }),
+        D('importMode', 'Import as', ['Reference', 'Embed', 'Copy into project'], { def: 'Reference' }),
+        T('autoReload', 'Watch source', { def: true }), T('generatePreview', 'Generate preview', { def: true }),
+      ]},
+    ],
+  },
+
   /* ── geometry ──────────────────────────────────────────────────────────────────────────── */
   cube:     { label: 'Cube',     icon: 'cube',     color: '#9aa0a6', cat: 'Geometry', mesh: 'box',      groups: [TRANSFORM(), MATERIAL] },
   sphere:   { label: 'Sphere',   icon: 'sphere',   color: '#9aa0a6', cat: 'Geometry', mesh: 'sphere',   groups: [TRANSFORM(), MATERIAL] },
@@ -455,6 +485,14 @@ export const scene = [
     N('Ocean', 'water', []),
   ], { props: { tint: '#4fb6d8' } }),
 
+  N('Terrain', 'folder', [
+    N('Landscape', 'terrain', []),
+  ], { props: { tint: '#8fb36b' } }),
+
+  N('Assets', 'folder', [
+    N('New Asset', 'asset', []),
+  ], { props: { tint: '#d4a5ff' } }),
+
   N('Objects', 'folder', [
     N('Platform', 'cylinder', [], {
       locked: true,
@@ -556,6 +594,6 @@ export const effectiveVis = n => {
   while (cur) { if (!cur.vis) return false; cur = cur.parent; }
   return inIsolation(n);
 };
-export const CATEGORIES = ['Environment', 'Water', 'Geometry', 'Lighting', 'Cameras', 'Effects'];
+export const CATEGORIES = ['Environment', 'Water', 'Terrain', 'Assets', 'Geometry', 'Lighting', 'Cameras', 'Effects'];
 export const catOf = n => typeOf(n).cat || 'Scene';
 reflatten();

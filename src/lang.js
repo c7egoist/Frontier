@@ -60,6 +60,7 @@ const TYPE_WORDS = {
   water: ['water', 'ocean', 'sea'], sky: ['sky', 'atmosphere'], sun: ['sun'], moon: ['moon'],
   stars: ['stars', 'star field', 'starfield'], clouds: ['clouds', 'cloud layer'],
   fog: ['fog', 'height fog', 'haze'], wind: ['wind', 'wind field'], post: ['post', 'post stack', 'grade'],
+  terrain: ['terrain', 'landscape', 'height field'], asset: ['asset', 'asset slot', 'import slot', 'imported asset'],
   folder: ['folder', 'group'],
 };
 const COLORS = {

@@ -312,6 +312,8 @@ src/
     advancedLights.js automotive IES distributions, area emitters, tubes, mounting coordinates
     effects.js      particles, reflection capture, spatial audio, tone response and image texture
     cameras.js      viewfinder, cinema optics, player spring arm, automotive chase rig
+    terrain.js      topographic atlas, relief profile, height source and surface controls
+    assets.js       universal drag/drop import slot for models, images, audio, IES, HDRI and data
   popup.js          floating, tethered, pinnable settings panels (same sheet, compact)
   lang.js           plain-English command parser: verbs, fuzzy entity lookup, suggestions
   kit.js            ControlKit primitives: slider, switch, value pill, axis field, dropdown, colour
@@ -373,6 +375,19 @@ ruler to resize the disc.
 
 ![Frontier — the vehicle camera panel](docs/preview-vehicle-camera.png)
 
+![Frontier — the terrain panel](docs/preview-terrain.png)
+
+![Frontier — the universal asset import panel](docs/preview-asset-import.png)
+
+### Asset import workflow
+
+Choose **Asset Slot** from the Outliner’s **Add entity** menu, place and name it like any other
+entity, then either choose a source in its inspector or drop a file directly onto its Outliner row.
+The slot detects 3D models (`.gltf`, `.glb`, `.obj`, `.fbx`, `.usd`, `.stl`), images and textures,
+audio, `.ies` photometric profiles, HDRI/EXR, video and data. Import policy remains explicit:
+reference the source, embed it, or copy it into the project; source watching and preview generation
+are independent states.
+
 **Why DOM billboards instead of sprites.** Glyphs stay crisp at any distance, labels stay legible,
 hit-testing is exact and free, hover/selected states are CSS, and a popup can be tethered to a
 marker without a second projection path. The 3D scene keeps the pixels; the UI keeps the widgets.
@@ -386,7 +401,8 @@ gradient stop) and every numeric readout is type-in editable, clamped to its own
 
 ### Notes
 
-* No terrain — deliberately. The world is sky, water, light and objects.
+* Terrain is a first-class Outliner entity with a procedural height field, imported-heightmap slot,
+  topographic inspector and viewport mesh.
 * No application bar and no status bar. Everything they held moved to where it is used: the panel
   toggles and the brand to the viewport header, **Add entity** to the outliner header (that `+` used
   to expand the tree, which is what the twirl next to it is for), the command entry to the console,
