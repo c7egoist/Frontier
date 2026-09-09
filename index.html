@@ -211,6 +211,26 @@
 <main id="view">
   <div id="loading">INITIALISING RENDERER…</div>
 
+<script>
+  window.LOG = (msg, cls='')=>{ const b=document.getElementById('logBody'); if(!b) return; const d=document.createElement('div'); d.className=cls; d.innerHTML='<span class="t">'+new Date().toLocaleTimeString('en-GB')+'</span>'+String(msg).replace(/</g,'&lt;'); b.appendChild(d); b.scrollTop=b.scrollHeight; (cls==='err'?console.error:console.log)(msg); };
+  window.addEventListener('error', e=>LOG('Error: '+e.message+(e.filename?' @ '+e.filename.split('/').pop()+':'+e.lineno:''),'err'));
+  window.addEventListener('unhandledrejection', e=>LOG('Rejection: '+(e.reason&&e.reason.message||e.reason),'err'));
+  document.addEventListener('DOMContentLoaded', ()=>{ document.getElementById('logClear').onclick=()=>document.getElementById('logBody').innerHTML='';
+    LOG('Page loaded. UA: '+navigator.userAgent.split(') ').pop());
+    const c=document.createElement('canvas'); const g2=c.getContext('webgl2'); const g1=g2?null:c.getContext('webgl');
+    if(g2){ const dbg=g2.getExtension('WEBGL_debug_renderer_info'); LOG('WebGL2 OK - '+(dbg?g2.getParameter(dbg.UNMASKED_RENDERER_WEBGL):g2.getParameter(g2.RENDERER)),'ok'); }
+    else if(g1){ LOG('WebGL2 unavailable, WebGL1 only','warn'); } else LOG('No WebGL context available (hardware acceleration disabled?)','err');
+    if(!(HTMLScriptElement.supports && HTMLScriptElement.supports('importmap'))) LOG('Import maps not supported by this browser','err');
+    setTimeout(()=>{ if(!window.__moduleStarted) LOG('Module script never started - check DevTools console','err'); }, 1500);
+  });
+</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+}}
+</script>
+
 <script type="module">
 window.__moduleStarted = true; LOG('Module script started');
 /* =====================================================================
