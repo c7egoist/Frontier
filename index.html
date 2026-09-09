@@ -163,6 +163,12 @@
   .hud .pill b{color:var(--text);font-weight:400}
   .gizmo{position:absolute;right:14px;bottom:14px;padding:10px 14px;border-radius:16px;background:rgba(14,14,16,.6);backdrop-filter:blur(12px);font-size:11px;color:var(--dim);line-height:1.7}
   .gizmo b{color:var(--muted);font-weight:400}
+  #log{position:absolute;left:14px;bottom:14px;width:440px;max-height:220px;display:flex;flex-direction:column;border-radius:16px;background:rgba(14,14,16,.82);backdrop-filter:blur(12px);font-size:11px;z-index:6;overflow:hidden;font-family:ui-monospace,Consolas,monospace}
+  .log-head{display:flex;justify-content:space-between;padding:8px 12px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;font-family:Outfit,sans-serif;font-size:10px}
+  .log-head #logClear{cursor:pointer}.log-head #logClear:hover{color:#fff}
+  #logBody{overflow:auto;padding:0 12px 10px;display:flex;flex-direction:column;gap:3px;user-select:text}
+  #logBody div{color:#b9b9c0;white-space:pre-wrap;word-break:break-word;line-height:1.4}
+  #logBody .ok{color:var(--green)} #logBody .err{color:var(--red)} #logBody .warn{color:var(--yellow)} #logBody .t{color:var(--dim);margin-right:6px}
   #loading{position:absolute;inset:0;display:grid;place-items:center;background:var(--bg);color:var(--muted);font-size:12px;letter-spacing:1px;z-index:5;transition:opacity .4s}
 </style>
 </head>
@@ -206,6 +212,7 @@
   <div id="loading">INITIALISING RENDERER…</div>
 
 <script type="module">
+window.__moduleStarted = true; LOG('Module script started');
 /* =====================================================================
    STATE — every entity's editable properties live here
 ===================================================================== */
@@ -440,7 +447,7 @@ window.addEventListener('keydown', e=>{
    BOOT UI FIRST (does not depend on the renderer)
 ===================================================================== */
 let ready = false; const safeApply = ()=>{ if (ready) applyAll(); };
-renderTree(); renderInspector();
+renderTree(); renderInspector(); LOG('UI built: '+Object.keys(ENTITIES).length+' entities','ok');
 const loadingEl = document.getElementById('loading');
 const showErr = (msg)=>{ if (!loadingEl) return; loadingEl.style.opacity=1; loadingEl.innerHTML = `<div style="max-width:420px;text-align:center;line-height:1.7"><div style="color:#ff453a;font-weight:400;margin-bottom:6px">Renderer failed to start</div><div style="color:#8e8e95;font-size:12px;word-break:break-word">${msg}</div><div style="color:#5c5c64;font-size:11px;margin-top:10px">three.js is loaded from cdn.jsdelivr.net — make sure it's reachable, then reload.</div></div>`; };
 window.addEventListener('error', e=>{ if (!ready) showErr(e.message); });
@@ -448,17 +455,18 @@ window.addEventListener('unhandledrejection', e=>{ if (!ready) showErr(e.reason 
 
 let THREE, OrbitControls, EffectComposer, RenderPass, UnrealBloomPass, ShaderPass, OutputPass;
 try {
-  THREE = await import('three');
+  LOG('Loading three.js from cdn.jsdelivr.net…');
+  THREE = await import('three'); LOG('three.js r'+THREE.REVISION+' loaded','ok');
   ({ OrbitControls } = await import('three/addons/controls/OrbitControls.js'));
   ({ EffectComposer } = await import('three/addons/postprocessing/EffectComposer.js'));
   ({ RenderPass } = await import('three/addons/postprocessing/RenderPass.js'));
   ({ UnrealBloomPass } = await import('three/addons/postprocessing/UnrealBloomPass.js'));
   ({ ShaderPass } = await import('three/addons/postprocessing/ShaderPass.js'));
-  ({ OutputPass } = await import('three/addons/postprocessing/OutputPass.js'));
-} catch (err) { showErr(err.message); throw err; }
+  ({ OutputPass } = await import('three/addons/postprocessing/OutputPass.js')); LOG('Addons loaded (controls, postprocessing)','ok');
+} catch (err) { LOG('CDN import failed: '+err.message,'err'); showErr(err.message); throw err; }
 const glCanvas = document.createElement('canvas');
 const gl2 = glCanvas.getContext('webgl2', { antialias:true, powerPreference:'high-performance' });
-if (!gl2) showErr('WebGL2 is not available in this browser / GPU driver.');
+if (!gl2){ LOG('WebGL2 context creation failed','err'); showErr('WebGL2 is not available in this browser / GPU driver.'); } else LOG('WebGL2 context created','ok');
 /* =====================================================================
    RENDERER / SCENE
 ===================================================================== */
@@ -469,7 +477,7 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1;
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-view.appendChild(renderer.domElement);
+view.appendChild(renderer.domElement); LOG('Renderer attached, '+view.clientWidth+'x'+view.clientHeight);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 5000);
@@ -596,7 +604,7 @@ const starMat = new THREE.ShaderMaterial({
       vec3 cool = vec3(0.75,0.85,1.0); vec3 warm = vec3(1.0,0.86,0.7); vec3 col = mix(cool, warm, step(1.0-uWarmth, vT));
       gl_FragColor = vec4(col*uBright*vA*0.5, a*uNight*min(1.0,vA)); }`
 });
-buildStars();
+buildStars(); LOG('Sky, stars built');
 
 /* ---------- Moon ---------- */
 const moonUniforms = { sunDir:{value:new THREE.Vector3()}, tint:{value:new THREE.Color('#dfe6f2')}, bright:{value:1}, earthshine:{value:0.12}, tex:{value:makeMoonTexture()} };
@@ -800,7 +808,9 @@ function loop(){
   if (t-sparkT>0.15){ sparkT=t; drawSparks(); }
   fpsN++; if (t-fpsT>0.5){ document.getElementById('fps').textContent = Math.round(fpsN/(t-fpsT)); fpsT=t; fpsN=0; }
 }
-ready = true; applyAll(); syncInspector(); loop();
+ready = true; applyAll(); syncInspector(); LOG('Scene ready — render loop running','ok'); loop();
+renderer.domElement.addEventListener('webglcontextlost', e=>LOG('WebGL context lost','err'));
+renderer.debug.onShaderError = (gl, prog, vs, fs)=>{ LOG('Shader compile error: '+(gl.getShaderInfoLog(fs)||gl.getShaderInfoLog(vs)||gl.getProgramInfoLog(prog)),'err'); };
 loadingEl.style.opacity=0; setTimeout(()=>loadingEl.remove(), 500);
 
 /* =====================================================================
