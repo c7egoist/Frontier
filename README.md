@@ -1,23 +1,21 @@
-# Frontier — Scene Outliner
+# Frontier — World Editor
 
-A game-engine scene outliner in the spirit of Unreal: typed entities
-in a fast keyboard-first hierarchy. No build step, no dependencies —
-just open `index.html` (or serve the folder).
+A game-engine world editor in the spirit of Unreal: an entity
+hierarchy fused with a **live 3D viewport** and a **Details panel**.
+No build step — just open `index.html` (or serve the folder). The
+viewport streams three.js from a CDN.
+
+Three panes: **Hierarchy** (entities) · **Viewport** (live render) ·
+**Details** (per-entity properties). Everything is linked: select,
+hide, move or retune an entity and the 3D world updates instantly.
 
 Entity types: **Atmosphere** (Sky Atmosphere, Sky Light, Directional
 Light/Sun, Moon, Fog), **Lights** (Point, Spot), **Scene** (Folder,
 Mesh, Camera, Particles, Physics), **Audio & Logic** (Audio, Script,
-Post Process).
+Post Process). Mesh shape follows the name: Ground, Capsule, Coin…
 
-## Run
-
-```sh
-# any static server, e.g.
-python3 -m http.server 8000
-# → http://localhost:8000
-```
-
-Your scene auto-saves to `localStorage` as you edit.
+Time of day: scrub the timeline pill (or press `T`) to sweep a full
+day/night cycle — sun arc, dusk skies, moonrise, stars.
 
 ## Use
 
@@ -33,11 +31,10 @@ Your scene auto-saves to `localStorage` as you edit.
 | `Alt` + `↑`/`↓` | Reorder |
 | `Ctrl+Enter` | Isolate subtree / back out |
 | `/` | Search entities |
+| `T` | Play / pause time-lapse |
 | `Ctrl+/` | Shortcut reference |
 
-Mouse: click selects, double-click renames, click the eye to show/hide,
-double-click a bullet to isolate a subtree, right-click for the
-entity menu.
+Viewport: drag to orbit, scroll to zoom, click any object to select it.
 
 ## Theme
 

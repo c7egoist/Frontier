@@ -3,13 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Frontier — Scene Outliner</title>
-  <meta name="description" content="Frontier: a game-engine scene outliner. Entities, hierarchy, fast keyboard flow." />
+  <title>Frontier — World Editor</title>
+  <meta name="description" content="Frontier: a game-engine world editor. Entity hierarchy, live 3D viewport, details." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=4" />
+  <link rel="stylesheet" href="styles.css?v=5" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg stroke='%23d4f542' stroke-width='2.8' stroke-linecap='round'%3E%3Cpath d='M4 17L10 6'/%3E%3Cpath d='M10 19L16 8'/%3E%3Cpath d='M16 21L22 10'/%3E%3C/g%3E%3C/svg%3E" />
+  <script type="importmap">
+    { "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    } }
+  </script>
 </head>
 <body>
   <header class="topbar">
@@ -26,17 +32,11 @@
                aria-label="Scene name" autocomplete="off" spellcheck="false"
                placeholder="Untitled Scene" maxlength="120" />
       </div>
+      <div class="stats" id="stats" aria-live="polite"></div>
       <div class="actions">
-        <span id="counts" class="counts" aria-live="polite"></span>
         <button id="addBtn" class="icon-btn accent" type="button" title="Add entity (Insert)" aria-label="Add entity" aria-haspopup="true">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
             <path d="M8 3v10M3 8h10"/>
-          </svg>
-        </button>
-        <button id="searchBtn" class="icon-btn" type="button" title="Search entities (/)" aria-label="Search entities">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-            <circle cx="7" cy="7" r="4.2"/>
-            <path d="M10.2 10.2L14 14"/>
           </svg>
         </button>
         <button id="collapseBtn" class="icon-btn" type="button" title="Collapse all" aria-label="Collapse all">
@@ -62,38 +62,71 @@
         <div id="addMenu" class="add-menu" role="menu" aria-label="Add entity" hidden></div>
       </div>
     </div>
-    <div id="searchbar" class="searchbar" hidden>
-      <div class="search-box">
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
-          <circle cx="7" cy="7" r="4.2"/>
-          <path d="M10.2 10.2L14 14"/>
-        </svg>
-        <input id="searchInput" type="text" placeholder="Search entities…" aria-label="Search entities"
-               autocomplete="off" spellcheck="false" />
-        <button id="searchClear" class="search-clear" type="button" aria-label="Clear search" hidden>
-          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <path d="M2 2l10 10M12 2L2 12"/>
+  </header>
+
+  <div class="shell">
+    <aside class="panel hier" aria-label="Hierarchy">
+      <div class="panel-head">
+        <span>Hierarchy</span>
+        <button id="searchBtn" class="mini-btn" type="button" title="Search entities (/)" aria-label="Search entities">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <circle cx="7" cy="7" r="4.2"/>
+            <path d="M10.2 10.2L14 14"/>
           </svg>
         </button>
       </div>
-    </div>
-  </header>
+      <div id="searchbar" class="searchbar" hidden>
+        <div class="search-box">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+            <circle cx="7" cy="7" r="4.2"/>
+            <path d="M10.2 10.2L14 14"/>
+          </svg>
+          <input id="searchInput" type="text" placeholder="Search entities…" aria-label="Search entities"
+                 autocomplete="off" spellcheck="false" />
+          <button id="searchClear" class="search-clear" type="button" aria-label="Clear search" hidden>
+            <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+              <path d="M2 2l10 10M12 2L2 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+      <nav id="crumbs" class="crumbs" aria-label="Breadcrumb" hidden></nav>
+      <div id="outline" class="outline" role="tree" aria-label="Scene entities"></div>
+      <footer class="hints" aria-label="Quick hints">
+        <span><kbd>Enter</kbd> rename</span>
+        <span><kbd>Tab</kbd> reparent</span>
+        <span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span>
+        <span><kbd>V</kbd> show / hide</span>
+        <span><kbd>Del</kbd> delete</span>
+        <span><kbd>T</kbd> time-lapse</span>
+        <span class="ver">v5</span>
+      </footer>
+    </aside>
 
-  <nav id="crumbs" class="crumbs" aria-label="Breadcrumb" hidden></nav>
+    <section class="stage" aria-label="Viewport">
+      <div id="viewport" class="viewport"></div>
+      <div id="vignette" class="vignette"></div>
+      <div class="vp-hint">Drag to orbit · Scroll to zoom · Click to select</div>
+      <div id="vpFallback" class="vp-fallback" hidden>3D preview unavailable — needs network access to the three.js CDN.</div>
+      <div class="timebar" role="group" aria-label="Time of day">
+        <button id="timePlay" class="time-play" type="button" title="Play time-lapse (T)" aria-label="Play time-lapse">
+          <svg class="ic-play" width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3.5 2.2v9.6L11.5 7z"/></svg>
+          <svg class="ic-pause" width="13" height="13" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3.5 2.5h2.6v9H3.5zm4.4 0h2.6v9H7.9z"/></svg>
+        </button>
+        <svg class="time-ico" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+          <circle cx="8" cy="8" r="3.2"/>
+          <path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6"/>
+        </svg>
+        <input id="timeSlider" type="range" min="0" max="24" step="0.1" value="10" aria-label="Time of day" />
+        <span id="timeRead" class="time-read">10:00</span>
+      </div>
+    </section>
 
-  <main class="page" id="page">
-    <div id="outline" class="outline" role="tree" aria-label="Scene entities"></div>
-
-    <footer class="hints" aria-label="Quick hints">
-      <span><kbd>Enter</kbd> rename</span>
-      <span><kbd>Tab</kbd> reparent</span>
-      <span><kbd>Ctrl</kbd>+<kbd>D</kbd> duplicate</span>
-      <span><kbd>V</kbd> show / hide</span>
-      <span><kbd>Del</kbd> delete</span>
-      <span><kbd>/</kbd> search</span>
-      <span class="ver">v4</span>
-    </footer>
-  </main>
+    <aside class="panel details" aria-label="Details">
+      <div class="panel-head"><span>Details</span></div>
+      <div id="details" class="details-body"></div>
+    </aside>
+  </div>
 
   <div id="ctxMenu" class="ctx-menu" role="menu" hidden>
     <button class="ctx-item" type="button" data-act="rename"><span>Rename</span><kbd>Enter</kbd></button>
@@ -119,19 +152,21 @@
         <div><kbd>Tab</kbd> / <kbd>⇧ Tab</kbd></div><span>Reparent (indent / outdent)</span>
         <div><kbd>Insert</kbd></div><span>Add entity</span>
         <div><kbd>Ctrl</kbd>+<kbd>D</kbd></div><span>Duplicate (with children)</span>
-        <div><kbd>V</kbd></div><span>Show / hide</span>
+        <div><kbd>V</kbd></div><span>Show / hide (viewport updates live)</span>
         <div><kbd>Del</kbd></div><span>Delete (with children)</span>
         <div><kbd>Alt</kbd>+<kbd>↑↓</kbd></div><span>Reorder</span>
         <div><kbd>Ctrl</kbd>+<kbd>↵</kbd></div><span>Isolate subtree / back out</span>
         <div><kbd>/</kbd></div><span>Search entities</span>
+        <div><kbd>T</kbd></div><span>Play / pause time-lapse</span>
         <div><kbd>Ctrl</kbd>+<kbd>/</kbd></div><span>Open this panel</span>
       </div>
-      <p class="modal-note">Right-click any entity for rename, duplicate, visibility and delete.
+      <p class="modal-note">Drag to orbit the viewport · click any 3D object to select it.
         <button id="resetScene" class="link-btn" type="button">Reset to sample scene</button>
       </p>
     </div>
   </div>
 
-  <script src="app.js?v=4"></script>
+  <script type="module" src="viewport.js?v=5"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>

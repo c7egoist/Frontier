@@ -1,8 +1,7 @@
 /* ============================================================
-   FRONTIER · SCENE OUTLINER — game-engine entity hierarchy
-   Model: flat list of nodes with `level`; collapse hides
-   descendants, isolate (zoom) scopes the view to one subtree.
-   Selection + rename flow mirrors Unity/Unreal outliners.
+   FRONTIER · WORLD EDITOR — entity hierarchy + live viewport
+   The hierarchy owns state (nodes, props, time); viewport.js
+   owns pixels. Talk via window.__frontier* hooks.
    ============================================================ */
 
 "use strict";
@@ -11,8 +10,8 @@
 
 const LS_KEY = "frontier.outliner.v2";
 const THEME_KEY = "frontier.theme";
-const STEP = 24;      // px per indent level (mirrors .gutter width)
-const BASE_X = 20;    // px: bullet center of a level-0 row (8 pad + 12)
+const STEP = 24;
+const BASE_X = 20;
 const MAX_LEVEL = 12;
 
 const svgWrap = (inner) =>
@@ -21,7 +20,6 @@ const svgWrap = (inner) =>
 
 /* Entity types: id, category, menu label, default name, icon (svg inner). */
 const TYPES = [
-  // ----- Atmosphere (Unreal-style sky & celestial) -----
   { id: "sky", cat: "Atmosphere", label: "Sky Atmosphere", def: "Sky Atmosphere",
     icon: '<path d="M1.5 10.5h11"/><path d="M4 10.5a3 3 0 0 1 6 0"/><path d="M7 1.6v1.3M3.7 2.9l.9.9M10.3 2.9l-.9.9"/>' },
   { id: "skylight", cat: "Atmosphere", label: "Sky Light", def: "Sky Light",
@@ -32,12 +30,10 @@ const TYPES = [
     icon: '<path d="M12.2 7.5A5.2 5.2 0 1 1 6.5 1.8 4.1 4.1 0 0 0 12.2 7.5z"/>' },
   { id: "fog", cat: "Atmosphere", label: "Fog", def: "Height Fog",
     icon: '<path d="M1.5 4.5c1.2-1 2.3-1 3.5 0s2.3 1 3.5 0 2.3-1 3.5 0"/><path d="M1.5 7.5c1.2-1 2.3-1 3.5 0s2.3 1 3.5 0 2.3-1 3.5 0"/><path d="M1.5 10.5c1.2-1 2.3-1 3.5 0s2.3 1 3.5 0 2.3-1 3.5 0"/>' },
-  // ----- Lights -----
   { id: "light", cat: "Lights", label: "Point Light", def: "Point Light",
     icon: '<circle cx="7" cy="5.6" r="2.6"/><path d="M5.8 9.6h2.4M6.3 11.4h1.4M2.4 2.4l.9.9M11.6 2.4l-.9.9"/>' },
   { id: "spot", cat: "Lights", label: "Spot Light", def: "Spot Light",
     icon: '<path d="M5.6 1.5h2.8L11 9H3z"/><path d="M2.5 11.5h9"/>' },
-  // ----- Scene -----
   { id: "folder", cat: "Scene", label: "Folder", def: "New Folder",
     icon: '<path d="M1.5 4.2c0-.7.5-1.2 1.2-1.2h2.9l1.3 1.6h4.4c.7 0 1.2.5 1.2 1.2V10c0 .7-.5 1.2-1.2 1.2H2.7c-.7 0-1.2-.5-1.2-1.2z"/>' },
   { id: "mesh", cat: "Scene", label: "Mesh", def: "Cube",
@@ -48,7 +44,6 @@ const TYPES = [
     icon: '<path d="M6.6 1c.5 2.2 1.2 2.9 3.4 3.4-2.2.5-2.9 1.2-3.4 3.4-.5-2.2-1.2-2.9-3.4-3.4 2.2-.5 2.9-1.2 3.4-3.4z"/><path d="M11.3 8.2c.3 1.2.7 1.6 1.9 1.9-1.2.3-1.6.7-1.9 1.9-.3-1.2-.7-1.6-1.9-1.9 1.2-.3 1.6-.7 1.9-1.9z"/>' },
   { id: "physics", cat: "Scene", label: "Physics", def: "Rigid Body",
     icon: '<circle cx="7" cy="7" r="1.7"/><ellipse cx="7" cy="7" rx="5.6" ry="2.2"/>' },
-  // ----- Audio & Logic -----
   { id: "audio", cat: "Audio & Logic", label: "Audio", def: "Audio Source",
     icon: '<path d="M2 5.4v3.2h2.6L8.2 11V3L4.6 5.4z"/><path d="M9.7 5a2.8 2.8 0 0 1 0 4M11.2 3.5a5 5 0 0 1 0 7"/>' },
   { id: "script", cat: "Audio & Logic", label: "Script", def: "New Script",
@@ -57,24 +52,27 @@ const TYPES = [
     icon: '<path d="M1.5 4.5h11M1.5 9.5h11"/><circle cx="5.2" cy="4.5" r="1.4"/><circle cx="8.8" cy="9.5" r="1.4"/>' },
 ];
 const TYPE_MAP = Object.fromEntries(TYPES.map((t) => [t.id, t]));
+const POS_TYPES = new Set(["mesh", "physics", "particles", "audio", "camera", "light", "spot"]);
 
 const EYE = '<path d="M1.4 7S3.2 3.9 7 3.9 12.6 7 12.6 7 10.8 10.1 7 10.1 1.4 7 1.4 7z"/><circle cx="7" cy="7" r="1.6"/>';
 const EYE_OFF = '<path d="M2.6 2.6l8.8 8.8M5.2 4.2A5.4 5.4 0 0 1 7 4c3.8 0 5.6 3 5.6 3a8.4 8.4 0 0 1-1.5 1.9M8.6 10A1.9 1.9 0 0 1 6 8.3M3.2 5.5C2.1 6.2 1.4 7 1.4 7s1.8 3.1 5.6 3.1c.6 0 1.2-.1 1.7-.3"/>';
+const ICO_DUP = '<rect x="4.6" y="4.6" width="7.4" height="7.4" rx="1.4"/><path d="M9.4 4.6V3.2a1.2 1.2 0 0 0-1.2-1.2H3.2A1.2 1.2 0 0 0 2 3.2v5a1.2 1.2 0 0 0 1.2 1.2h1.4"/>';
+const ICO_TRASH = '<path d="M2.2 3.6h9.6M5.4 3.6V2.4a1 1 0 0 1 1-1h1.2a1 1 0 0 1 1 1v1.2M3.8 3.6l.7 7.6a1 1 0 0 0 1 .9h3a1 1 0 0 0 1-.9l.7-7.6"/>';
 
 /* ---------- state ---------- */
 
-let state = { title: "Level 01", nodes: [], zoomId: null, selectedId: null };
+let state = { title: "Level 01", nodes: [], zoomId: null, selectedId: null, timeOfDay: 10 };
 let editingId = null;
 let originalText = "";
 let filterQuery = "";
-let pendingSel = null;   // row id to focus after render
+let pendingSel = null;
 let pendingScroll = false;
-let pendingEdit = null;  // row id to enter rename mode after render
+let pendingEdit = null;
 
 const $ = (sel) => document.querySelector(sel);
 const outlineEl = $("#outline");
 const crumbsEl = $("#crumbs");
-const countsEl = $("#counts");
+const statsEl = $("#stats");
 const titleEl = $("#docTitle");
 const collapseBtn = $("#collapseBtn");
 const themeBtn = $("#themeBtn");
@@ -89,6 +87,10 @@ const ctxMenu = $("#ctxMenu");
 const ctxToggleLabel = $("#ctxToggleLabel");
 const modalBackdrop = $("#modalBackdrop");
 const modalClose = $("#modalClose");
+const detailsEl = $("#details");
+const timeSlider = $("#timeSlider");
+const timeRead = $("#timeRead");
+const timePlay = $("#timePlay");
 
 /* ---------- helpers ---------- */
 
@@ -96,43 +98,85 @@ function uid() {
   return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
 }
 
+function esc(s) {
+  return String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** Fill missing per-type props (idempotent; safe for migrations). */
+function ensureProps(node, index) {
+  const P = (node.props && typeof node.props === "object") ? node.props : {};
+  node.props = P;
+  const i = index || 0;
+  if (POS_TYPES.has(node.type) && P.x === undefined) {
+    const a = i * 2.39996;
+    const r = node.type === "light" || node.type === "spot" ? 4 : 3.5;
+    P.x = +(Math.cos(a) * r).toFixed(2);
+    P.z = +(Math.sin(a) * r).toFixed(2);
+    P.y = node.type === "light" ? 4 : node.type === "spot" ? 5 : node.type === "camera" ? 3 : node.type === "audio" ? 2 : 0.6;
+  }
+  const def = (k, v) => { if (P[k] === undefined) P[k] = v; };
+  switch (node.type) {
+    case "mesh": def("scale", 1); def("color", "#9aa3b5"); break;
+    case "physics": def("scale", 1); def("color", "#d4f542"); break;
+    case "particles": def("scale", 1); def("color", "#d4f542"); def("speed", 1); break;
+    case "audio": def("volume", 0.8); break;
+    case "camera": def("fov", 50); break;
+    case "light": def("intensity", 1); def("color", "#ffd9a0"); break;
+    case "spot": def("intensity", 1); def("color", "#fff3d6"); break;
+    case "sun": def("intensity", 3); break;
+    case "moon": def("intensity", 0.6); break;
+    case "skylight": def("intensity", 0.5); break;
+    case "fog": def("density", 0.008); def("color", "#8b93a7"); break;
+    case "post": def("intensity", 0.35); break;
+  }
+  return P;
+}
+
 function mk(text, level, type, visible) {
-  return {
+  const n = {
     id: uid(),
     text: text || "",
     level: level || 0,
     collapsed: false,
     type: TYPE_MAP[type] ? type : "mesh",
     visible: visible !== false,
+    props: {},
   };
+  ensureProps(n, Math.floor(Math.random() * 24));
+  return n;
 }
 
 function defaultNodes() {
-  return [
-    mk("Environment", 0, "folder"),
-    mk("Sun", 1, "sun"),
-    mk("Moon", 1, "moon"),
-    mk("Sky Atmosphere", 1, "sky"),
-    mk("Sky Light", 1, "skylight"),
-    mk("Height Fog", 1, "fog"),
-    mk("Sky Dome", 1, "mesh"),
-    mk("Ground", 1, "mesh"),
-    mk("Ambience", 1, "audio"),
-    mk("Player", 0, "folder"),
-    mk("Player Capsule", 1, "mesh"),
-    mk("Player Camera", 1, "camera"),
-    mk("Flashlight", 1, "spot"),
-    mk("Footsteps", 1, "audio"),
-    mk("Player Controller", 1, "script"),
-    mk("Gameplay", 0, "folder"),
-    mk("Coin Pickup", 1, "mesh"),
-    mk("Pickup Burst", 2, "particles"),
-    mk("Pickup Glow", 2, "light"),
-    mk("Enemy Spawner", 1, "script"),
-    mk("Trigger Volume", 1, "physics"),
-    mk("Global Post Process", 0, "post"),
-    mk("Debug Grid", 0, "mesh", false),
+  const raw = [
+    ["Environment", 0, "folder"],
+    ["Sun", 1, "sun"],
+    ["Moon", 1, "moon"],
+    ["Sky Atmosphere", 1, "sky"],
+    ["Sky Light", 1, "skylight"],
+    ["Height Fog", 1, "fog"],
+    ["Sky Dome", 1, "mesh"],
+    ["Ground", 1, "mesh"],
+    ["Ambience", 1, "audio"],
+    ["Player", 0, "folder"],
+    ["Player Capsule", 1, "mesh"],
+    ["Player Camera", 1, "camera"],
+    ["Flashlight", 1, "spot"],
+    ["Footsteps", 1, "audio"],
+    ["Player Controller", 1, "script"],
+    ["Gameplay", 0, "folder"],
+    ["Coin Pickup", 1, "mesh"],
+    ["Pickup Burst", 2, "particles"],
+    ["Pickup Glow", 2, "light"],
+    ["Enemy Spawner", 1, "script"],
+    ["Trigger Volume", 1, "physics"],
+    ["Global Post Process", 0, "post"],
+    ["Debug Grid", 0, "mesh", false],
   ];
+  return raw.map(([text, level, type, visible], i) => {
+    const n = { id: uid(), text, level, collapsed: false, type, visible: visible !== false, props: {} };
+    ensureProps(n, i);
+    return n;
+  });
 }
 
 /* ---------- persistence ---------- */
@@ -143,8 +187,8 @@ function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
-      localStorage.setItem(LS_KEY, JSON.stringify({ title: state.title, nodes: state.nodes }));
-    } catch (_) { /* storage unavailable — keep running in memory */ }
+      localStorage.setItem(LS_KEY, JSON.stringify({ title: state.title, nodes: state.nodes, timeOfDay: state.timeOfDay }));
+    } catch (_) {}
   }, 150);
 }
 
@@ -155,6 +199,7 @@ function load() {
     const data = JSON.parse(raw);
     if (!data || !Array.isArray(data.nodes)) return false;
     state.title = typeof data.title === "string" ? data.title : "Level 01";
+    state.timeOfDay = Number.isFinite(data.timeOfDay) ? data.timeOfDay : 10;
     const nodes = data.nodes.filter(
       (n) => n && typeof n.id === "string" && typeof n.text === "string" && Number.isFinite(n.level)
     ).map((n) => ({
@@ -164,12 +209,13 @@ function load() {
       collapsed: !!n.collapsed,
       type: typeof n.type === "string" ? n.type : "",
       visible: n.visible !== false,
+      props: (n.props && typeof n.props === "object") ? n.props : {},
     }));
-    // migrate typeless saves: parents → folder, leaves → mesh
     nodes.forEach((n, i) => {
       if (!TYPE_MAP[n.type]) {
         n.type = (i + 1 < nodes.length && nodes[i + 1].level > n.level) ? "folder" : "mesh";
       }
+      ensureProps(n, i);
     });
     state.nodes = nodes;
     return state.nodes.length > 0;
@@ -178,14 +224,13 @@ function load() {
   }
 }
 
-/* ---------- tree queries (flat-list model) ---------- */
+/* ---------- tree queries ---------- */
 
 function hasChildren(index) {
   const nodes = state.nodes;
   return index + 1 < nodes.length && nodes[index + 1].level > nodes[index].level;
 }
 
-/** [start, end] indices of node + all descendants. */
 function blockRange(index) {
   const nodes = state.nodes;
   let end = index;
@@ -198,7 +243,6 @@ function countDescendants(index) {
   return e - s;
 }
 
-/** Index range + base level for the current isolate scope. */
 function zoomRange() {
   const nodes = state.nodes;
   if (!state.zoomId) return [0, nodes.length - 1, 0];
@@ -208,13 +252,11 @@ function zoomRange() {
   return [z, end, nodes[z].level];
 }
 
-/** Visible rows in scope, minus collapsed descendants; search shows matches + ancestors. */
 function visibleRows() {
   const nodes = state.nodes;
   const [zs, ze, base] = zoomRange();
   const q = filterQuery.trim().toLowerCase();
   let showSet = null;
-
   if (q) {
     showSet = new Set();
     for (let i = 0; i < nodes.length; i++) {
@@ -225,9 +267,8 @@ function visibleRows() {
       }
     }
   }
-
   const rows = [];
-  const hidden = []; // stack of collapsed ancestor levels
+  const hidden = [];
   for (let i = zs; i <= ze && i < nodes.length; i++) {
     const n = nodes[i];
     if (showSet) {
@@ -242,7 +283,6 @@ function visibleRows() {
   return rows;
 }
 
-/** Path of indices from document root down to `index` (inclusive). */
 function pathTo(index) {
   const nodes = state.nodes;
   const stack = [];
@@ -269,7 +309,22 @@ function ensureSelectionValid() {
   if (state.selectedId && !state.nodes.some((n) => n.id === state.selectedId)) state.selectedId = null;
 }
 
-/* ---------- selection helpers ---------- */
+/* ---------- viewport bridge ---------- */
+
+function snapshot() {
+  return { nodes: state.nodes, selectedId: state.selectedId, timeOfDay: state.timeOfDay };
+}
+
+function syncViewport() {
+  if (window.__frontierSync) window.__frontierSync(snapshot());
+}
+
+window.__frontierSelect = (id) => {
+  if (state.nodes.some((n) => n.id === id)) select(id);
+};
+window.__frontierRequestSync = () => syncViewport();
+
+/* ---------- selection ---------- */
 
 function rowEl(id) {
   return outlineEl.querySelector('[data-id="' + id + '"]');
@@ -315,8 +370,10 @@ function render() {
   outlineEl.appendChild(frag);
 
   renderCrumbs();
-  updateCounts(rows.length);
+  renderStats(rows.length);
+  renderDetails();
   updateCollapseBtn();
+  syncViewport();
 
   if (pendingEdit) {
     const id = pendingEdit;
@@ -381,7 +438,7 @@ function createRow({ node, index, rel }) {
     '<svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 1.5L6.5 5l-3 3.5"/></svg>';
   bullet.addEventListener("click", (e) => {
     e.stopPropagation();
-    if (e.detail > 1) return; // handled by dblclick
+    if (e.detail > 1) return;
     if (e.altKey || e.metaKey || e.ctrlKey) { zoomToggle(node.id); return; }
     if (kids) toggleCollapse(index);
     else if (!selected) select(node.id);
@@ -409,7 +466,6 @@ function createRow({ node, index, rel }) {
     text.addEventListener("keydown", (e) => onEditKeyDown(e, index, text));
     text.addEventListener("blur", () => commitEditing(index));
     text.addEventListener("paste", (e) => {
-      // plain-text, single line names
       e.preventDefault();
       const clip = e.clipboardData || window.clipboardData;
       const t = clip ? clip.getData("text/plain").split("\n")[0] : "";
@@ -444,7 +500,7 @@ function createRow({ node, index, rel }) {
   row.appendChild(eye);
 
   row.addEventListener("click", () => {
-    if (editingId) return; // commit via blur; keep selection
+    if (editingId) return;
     if (!selected) select(node.id);
     else row.focus();
   });
@@ -499,13 +555,21 @@ function renderCrumbs() {
   });
 }
 
-function updateCounts(visibleCount) {
+function renderStats(visibleCount) {
   const n = state.nodes.length;
   const hiddenCount = state.nodes.filter((x) => !x.visible).length;
-  let label = n + (n === 1 ? " entity" : " entities");
-  if (filterQuery.trim()) label = visibleCount + " of " + n;
-  else if (hiddenCount) label += " · " + hiddenCount + " hidden";
-  countsEl.textContent = label;
+  const count = (types) => state.nodes.filter((x) => types.includes(x.type)).length;
+  const atmo = count(["sky", "skylight", "sun", "moon", "fog"]);
+  const lights = count(["light", "spot"]);
+  const objs = count(["mesh", "camera", "particles", "physics"]);
+  let total = n + (n === 1 ? " entity" : " entities");
+  if (filterQuery.trim()) total = visibleCount + " of " + n;
+  else if (hiddenCount) total += " · " + hiddenCount + " hidden";
+  statsEl.innerHTML =
+    '<span class="stat total">' + esc(total) + "</span>" +
+    '<span class="stat">' + atmo + " atmosphere</span>" +
+    '<span class="stat">' + lights + " lights</span>" +
+    '<span class="stat">' + objs + " objects</span>";
 }
 
 function updateCollapseBtn() {
@@ -513,6 +577,213 @@ function updateCollapseBtn() {
   collapseBtn.title = anyOpen ? "Collapse all" : "Expand all";
   collapseBtn.setAttribute("aria-label", collapseBtn.title);
 }
+
+/* ---------- details panel ---------- */
+
+function fmtVal(v, step) {
+  const dec = (String(step).split(".")[1] || "").length;
+  return Number(v).toFixed(Math.min(dec, 3));
+}
+
+function sliderRow(label, key, val, min, max, step) {
+  return '<label class="row"><span>' + label + "</span>" +
+    '<input type="range" data-p="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + val + '" />' +
+    "<b>" + fmtVal(val, step) + "</b></label>";
+}
+
+function colorRow(label, key, val) {
+  return '<label class="row"><span>' + label + "</span>" +
+    '<input type="color" data-c="' + key + '" value="' + esc(val) + '" />' +
+    "<b>" + esc(val) + "</b></label>";
+}
+
+function renderDetails() {
+  const node = state.nodes.find((n) => n.id === state.selectedId);
+  if (!node) {
+    detailsEl.innerHTML = '<div class="det-empty">Select an entity<br /><span>Click in the hierarchy or the viewport</span></div>';
+    return;
+  }
+  const type = TYPE_MAP[node.type] || TYPE_MAP.mesh;
+  const P = ensureProps(node, 0);
+  const idx = state.nodes.indexOf(node);
+
+  let h = '<div class="det-card"><div class="det-top">' +
+    '<span class="det-icon">' + svgWrap(type.icon) + "</span>" +
+    '<div class="det-name"><input id="detName" type="text" value="' + esc(node.text) + '" maxlength="80" autocomplete="off" spellcheck="false" /></div>' +
+    "</div>" +
+    '<div class="det-type" style="margin-top:6px">' + esc(type.label) + (node.visible ? "" : " · hidden") + "</div>" +
+    '<div class="det-actions">' +
+    '<button class="det-btn" type="button" data-act="toggle">' + svgWrap(node.visible ? EYE : EYE_OFF) + (node.visible ? "Hide" : "Show") + "</button>" +
+    '<button class="det-btn" type="button" data-act="duplicate">' + svgWrap(ICO_DUP) + "Duplicate</button>" +
+    '<button class="det-btn danger" type="button" data-act="delete">' + svgWrap(ICO_TRASH) + "Delete</button>" +
+    "</div></div>";
+
+  if (POS_TYPES.has(node.type)) {
+    h += '<div class="det-card"><div class="det-sec">Transform</div>' +
+      sliderRow("X", "x", P.x, -12, 12, 0.1) +
+      sliderRow("Y", "y", P.y, -2, 12, 0.1) +
+      sliderRow("Z", "z", P.z, -12, 12, 0.1);
+    if (node.type === "mesh" || node.type === "physics" || node.type === "particles") {
+      h += sliderRow("Scale", "scale", P.scale, 0.1, 4, 0.05);
+    }
+    h += "</div>";
+  }
+
+  const open = (title) => '<div class="det-card"><div class="det-sec">' + title + "</div>";
+  switch (node.type) {
+    case "sun":
+      h += open("Directional Light") + sliderRow("Intensity", "intensity", P.intensity, 0, 8, 0.1) +
+        '<div class="note">Position follows Time of Day.</div></div>';
+      break;
+    case "moon":
+      h += open("Moon") + sliderRow("Intensity", "intensity", P.intensity, 0, 3, 0.05) +
+        '<div class="note">Rises as the sun sets.</div></div>';
+      break;
+    case "sky":
+      h += open("Sky") +
+        '<label class="row"><span>Time</span><input id="detTime" type="range" min="0" max="24" step="0.1" value="' + state.timeOfDay + '" /><b>' + fmtTime(state.timeOfDay) + "</b></label>" +
+        '<div class="note">Drives sun, moon and stars.</div></div>';
+      break;
+    case "skylight":
+      h += open("Sky Light") + sliderRow("Intensity", "intensity", P.intensity, 0, 2, 0.05) +
+        '<div class="note">Ambient hemisphere fill.</div></div>';
+      break;
+    case "fog":
+      h += open("Fog") + sliderRow("Density", "density", P.density, 0, 0.05, 0.001) + colorRow("Color", "color", P.color) + "</div>";
+      break;
+    case "light":
+    case "spot":
+      h += open(type.label) + sliderRow("Intensity", "intensity", P.intensity, 0, 3, 0.05) + colorRow("Color", "color", P.color) + "</div>";
+      break;
+    case "mesh":
+      h += open("Mesh") + colorRow("Color", "color", P.color) +
+        '<div class="note">Shape follows the name: Ground, Capsule, Coin…</div></div>';
+      break;
+    case "particles":
+      h += open("Particles") + colorRow("Color", "color", P.color) + sliderRow("Speed", "speed", P.speed, 0, 5, 0.1) + "</div>";
+      break;
+    case "audio":
+      h += open("Audio") + sliderRow("Volume", "volume", P.volume, 0, 1, 0.05) +
+        '<div class="note">Marker pulses with volume.</div></div>';
+      break;
+    case "camera":
+      h += open("Camera") + sliderRow("FOV", "fov", P.fov, 20, 120, 1) +
+        '<div class="note">Marker only — not the view camera.</div></div>';
+      break;
+    case "physics":
+      h += open("Physics") + '<div class="note">Wireframe collision body.</div></div>';
+      break;
+    case "script":
+      h += open("Script") + '<div class="note">Runtime only — no viewport presence.</div></div>';
+      break;
+    case "post":
+      h += open("Post Process") + sliderRow("Intensity", "intensity", P.intensity, 0, 1, 0.05) +
+        '<div class="note">Vignette overlay on the viewport.</div></div>';
+      break;
+    case "folder": {
+      const kids = hasChildren(idx) ? countDescendants(idx) : 0;
+      h += open("Folder") + '<div class="note">' + kids + (kids === 1 ? " child" : " children") + " inside.</div></div>";
+      break;
+    }
+  }
+
+  detailsEl.innerHTML = h;
+
+  // wire: name
+  const nameInput = detailsEl.querySelector("#detName");
+  nameInput.addEventListener("input", () => {
+    node.text = nameInput.value;
+    const row = rowTextEl(node.id);
+    if (row) row.textContent = node.text;
+    save();
+  });
+  nameInput.addEventListener("change", () => { render(); });
+  nameInput.addEventListener("keydown", (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") { e.preventDefault(); render(); if (state.selectedId) { const r = rowEl(state.selectedId); if (r) r.focus(); } }
+    if (e.key === "Escape") nameInput.blur();
+  });
+
+  // wire: sliders + colors (light path — no full render)
+  detailsEl.querySelectorAll("input[data-p]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      node.props[inp.dataset.p] = parseFloat(inp.value);
+      inp.closest(".row").querySelector("b").textContent = fmtVal(inp.value, inp.step);
+      save();
+      syncViewport();
+    });
+  });
+  detailsEl.querySelectorAll("input[data-c]").forEach((inp) => {
+    inp.addEventListener("input", () => {
+      node.props[inp.dataset.c] = inp.value;
+      inp.closest(".row").querySelector("b").textContent = inp.value;
+      save();
+      syncViewport();
+    });
+  });
+  const detTime = detailsEl.querySelector("#detTime");
+  if (detTime) {
+    detTime.addEventListener("input", () => {
+      setTime(parseFloat(detTime.value));
+      detTime.closest(".row").querySelector("b").textContent = fmtTime(state.timeOfDay);
+    });
+  }
+
+  // wire: actions
+  detailsEl.querySelectorAll(".det-btn").forEach((b) => {
+    b.addEventListener("click", () => {
+      const i = state.nodes.findIndex((n) => n.id === node.id);
+      if (i < 0) return;
+      if (b.dataset.act === "toggle") toggleVisible(i);
+      else if (b.dataset.act === "duplicate") duplicateBlock(i);
+      else if (b.dataset.act === "delete") deleteBlock(i);
+    });
+  });
+}
+
+/* ---------- time of day ---------- */
+
+function fmtTime(t) {
+  const h = Math.floor(t) % 24;
+  const m = Math.floor((t - Math.floor(t)) * 60);
+  return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0");
+}
+
+function setTime(v) {
+  state.timeOfDay = ((v % 24) + 24) % 24;
+  timeSlider.value = state.timeOfDay;
+  timeRead.textContent = fmtTime(state.timeOfDay);
+  save();
+  if (window.__frontierTime) window.__frontierTime(state.timeOfDay);
+  else syncViewport();
+}
+
+let playing = false;
+let playRaf = 0;
+let lastTick = 0;
+
+function setPlaying(v) {
+  playing = v;
+  timePlay.classList.toggle("playing", v);
+  timePlay.title = v ? "Pause time-lapse (T)" : "Play time-lapse (T)";
+  if (v) {
+    lastTick = performance.now();
+    playRaf = requestAnimationFrame(tick);
+  } else {
+    cancelAnimationFrame(playRaf);
+  }
+}
+
+function tick(now) {
+  if (!playing) return;
+  const dt = (now - lastTick) / 1000;
+  lastTick = now;
+  setTime(state.timeOfDay + dt * 0.5); // full day ≈ 48 s
+  playRaf = requestAnimationFrame(tick);
+}
+
+timeSlider.addEventListener("input", () => setTime(parseFloat(timeSlider.value)));
+timePlay.addEventListener("click", () => setPlaying(!playing));
 
 /* ---------- row keyboard flow ---------- */
 
@@ -584,7 +855,7 @@ function onRowKeyDown(e, index) {
       toggleAddMenu(true);
       break;
     case "Escape":
-      if (!modalBackdrop.hidden || !addMenu.hidden || !ctxMenu.hidden) return; // global closes menus
+      if (!modalBackdrop.hidden || !addMenu.hidden || !ctxMenu.hidden) return;
       if (state.zoomId) zoomOut();
       break;
     default:
@@ -608,10 +879,10 @@ function startEditing(id) {
 }
 
 function onEditKeyDown(e, index, el) {
-  e.stopPropagation(); // editing owns every keystroke
+  e.stopPropagation();
   if (e.key === "Enter") {
     e.preventDefault();
-    el.blur(); // blur commits
+    el.blur();
   } else if (e.key === "Escape") {
     e.preventDefault();
     cancelEditing();
@@ -671,7 +942,7 @@ function addEntity(typeId) {
   const fresh = mk(type.def, level, type.id);
   nodes.splice(at, 0, fresh);
   save();
-  startEditing(fresh.id); // select + rename immediately
+  startEditing(fresh.id);
 }
 
 function duplicateBlock(index) {
@@ -684,6 +955,7 @@ function duplicateBlock(index) {
     collapsed: n.collapsed,
     type: n.type,
     visible: n.visible,
+    props: Object.assign({}, n.props),
   }));
   nodes.splice(e + 1, 0, ...copies);
   save();
@@ -696,7 +968,6 @@ function deleteBlock(index) {
   const rows = visibleRows();
   const removed = new Set(nodes.slice(s, e + 1).map((n) => n.id));
 
-  // neighbor to select afterwards: next visible survivor, else previous
   let nextId = null;
   const after = rows.find((r) => r.index > e);
   if (after) nextId = after.node.id;
@@ -1009,6 +1280,7 @@ $("#resetScene").addEventListener("click", () => {
   state.title = "Level 01";
   state.nodes = defaultNodes();
   state.zoomId = null;
+  state.timeOfDay = 10;
   editingId = null;
   originalText = "";
   filterQuery = "";
@@ -1017,6 +1289,7 @@ $("#resetScene").addEventListener("click", () => {
   setSearch(false);
   titleEl.value = state.title;
   document.title = state.title + " — Frontier";
+  setTime(10);
   save();
   select(state.nodes[0].id, true);
 });
@@ -1034,7 +1307,7 @@ document.addEventListener("click", (e) => {
 window.addEventListener("scroll", () => { if (!ctxMenu.hidden) hideCtx(); }, true);
 
 document.addEventListener("keydown", (e) => {
-  const typing = editingId || e.target.closest("input, textarea");
+  const typing = editingId || (e.target.closest && e.target.closest("input, textarea"));
   if ((e.ctrlKey || e.metaKey) && e.key === "/") {
     e.preventDefault();
     modalBackdrop.hidden = !modalBackdrop.hidden;
@@ -1051,13 +1324,15 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "/") {
     e.preventDefault();
     setSearch(true);
+  } else if (e.key.toLowerCase() === "t") {
+    e.preventDefault();
+    setPlaying(!playing);
   }
 });
 
-// clicking empty page space deselects
-$("#page").addEventListener("click", (e) => {
-  if (e.target.closest(".node") || e.target.closest("button") || e.target.closest(".crumbs") || e.target.closest("input")) return;
-  if (state.selectedId) {
+// clicking empty hierarchy space deselects
+outlineEl.addEventListener("click", (e) => {
+  if (e.target === outlineEl && state.selectedId) {
     state.selectedId = null;
     render();
   }
@@ -1079,7 +1354,16 @@ $("#page").addEventListener("click", (e) => {
 
   titleEl.value = state.title || "";
   document.title = (state.title || "Scene") + " — Frontier";
+  timeSlider.value = state.timeOfDay;
+  timeRead.textContent = fmtTime(state.timeOfDay);
   buildAddMenu();
   state.selectedId = state.nodes[0].id;
   render();
+
+  setTimeout(() => {
+    if (!window.__frontierReady) {
+      const f = document.getElementById("vpFallback");
+      if (f) f.hidden = false;
+    }
+  }, 7000);
 })();
