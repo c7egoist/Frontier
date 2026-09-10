@@ -82,6 +82,14 @@
   #err { position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
     background: #3d1712; border: 1px solid var(--bad); color: #ffd7d2; font-size: 12.5px;
     padding: 9px 16px; border-radius: 10px; display: none; z-index: 6; max-width: 80%; }
+  #fallback { position: absolute; inset: 0; display: none; align-items: center;
+    justify-content: center; flex-direction: column; gap: 10px; padding: 18px; }
+  #fallback img { max-width: 100%; max-height: calc(100% - 40px); object-fit: contain;
+    border-radius: 12px; box-shadow: 0 12px 40px #0006; background: #ece7db; }
+  #fallbackNote { font-size: 12px; color: #3d4a5c; background: #ffffffaa;
+    padding: 6px 12px; border-radius: 999px; }
+  #statusLine { margin-top: 14px; font-size: 11.5px; color: var(--mut); line-height: 1.5;
+    border-top: 1px solid var(--line); padding-top: 10px; word-break: break-word; }
 
   /* ---------- right panel ---------- */
   #panel { width: 308px; min-width: 308px; background: var(--panel);
@@ -146,6 +154,7 @@
     </div>
     <button id="genBtn">Generate tree</button>
     <div class="tiny">shape sliders apply on Generate</div>
+    <div id="statusLine">starting…</div>
   </aside>
 
   <div id="main">
@@ -155,12 +164,17 @@
       <span class="chip"><small>tris</small><b id="stTris">–</b></span>
       <span class="chip"><small>height</small><b id="stH">–</b></span>
       <span class="chip"><small>euler</small><b id="stEuler">–</b></span>
+      <span class="chip"><small>renderer</small><b id="renderMode">…</b></span>
       <span class="spacer"></span>
       <button class="btn" id="dlGlb">Download .glb</button>
       <button class="btn" id="dlObj">Download .obj</button>
     </div>
     <div id="view">
       <canvas id="gl"></canvas>
+      <div id="fallback">
+        <img id="previewImg" alt="server-rendered tree preview">
+        <div id="fallbackNote">2D server preview — sliders, Generate and export fully work</div>
+      </div>
       <div id="err"></div>
       <div id="hint">drag&nbsp;·&nbsp;orbit&nbsp;&nbsp;&nbsp;wheel&nbsp;·&nbsp;zoom&nbsp;&nbsp;&nbsp;right-drag&nbsp;·&nbsp;pan</div>
       <div id="loader"><div class="spin"></div><p id="loadMsg">Growing branches…</p></div>
@@ -194,6 +208,6 @@
     </div>
   </aside>
 </div>
-<script src="app.js"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>

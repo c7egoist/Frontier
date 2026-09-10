@@ -1,14 +1,45 @@
 // Frontier Studio viewer: raw WebGL, zero dependencies.
-// Textured bark (albedo + normal map), alpha-tested leaf cards, pivot wind,
-// ground + fog, parametric regeneration via the studio server API.
+// Hardened boot: the data/UI layer (spec, sliders, generate, export, stats)
+// ALWAYS runs; the 3D renderer initializes independently and falls back to
+// a server-rendered 2D preview when WebGL is unavailable. Errors are sticky
+// and every boot step is reported on the status line.
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
-  const canvas = $('gl');
-  const gl = canvas.getContext('webgl', { antialias: true, alpha: true });
-  if (!gl) { showErr('WebGL unavailable in this browser.'); return; }
-  if (!gl.getExtension('OES_element_index_uint')) { showErr('WebGL uint indices unsupported.'); return; }
-  const EXT_DERIV = !!gl.getExtension('OES_standard_derivatives');
+  const V = 'v=3'; // cache buster for app data fetches
+
+  /* ---------------- status + errors (never throws) ---------------- */
+  function status(msg) {
+    const el = $('statusLine');
+    if (el) el.textContent = msg;
+    console.log('[studio] ' + msg);
+  }
+  function showErr(msg, sticky) {
+    const e = $('err');
+    if (!e) return;
+    e.textContent = msg;
+    e.style.display = 'block';
+    clearTimeout(showErr._t);
+    if (!sticky) showErr._t = setTimeout(() => { e.style.display = 'none'; }, 6000);
+  }
+  function clearErr() {
+    const e = $('err');
+    if (e) e.style.display = 'none';
+    clearTimeout(showErr._t);
+  }
+  window.addEventListener('error', ev => {
+    showErr('JS error: ' + (ev.message || ev.error), true);
+    status('crashed: ' + (ev.message || ev.error));
+  });
+
+  /* ---------------- shared state ---------------- */
+  let gl = null, hasGL = false, isGL2 = false;
+  let P_BARK = null, P_LEAF = null, P_WIRE = null, P_GROUND = null;
+  let TEX = null, groundMesh = null;
+  let meshes = [];
+  let yaw = -0.9, pitch = 0.14, dist = 10, target = [0, 2.2, 0], groundR = 6;
+  let curPreset = 'oak', specParams = [];
+  const FOG = [0.925, 0.905, 0.855];
 
   /* ---------------- shaders ---------------- */
   const VS_MAIN = `
@@ -49,17 +80,19 @@
       mapN.xy *= strength;
       return normalize(mat3(T, B, N) * mapN);
     }`;
-  const FS_BARK = `
+  function fragSources(useDeriv, needDirective) {
+    const ext = needDirective ? '#extension GL_OES_standard_derivatives : enable' : '';
+    const FS_BARK = `
     precision mediump float;
-    ${EXT_DERIV ? '#extension GL_OES_standard_derivatives : enable' : ''}
+    ${ext}
     varying vec3 vN; varying vec2 vUV; varying float vAO, vPhase, vFog; varying vec3 vWp;
     uniform sampler2D uAlbMap; uniform sampler2D uNrmMap;
     uniform vec3 uLight, uFogColor; uniform float uNrmStr, uFogNear, uFogFar;
-    ${EXT_DERIV ? PERTURB : ''}
+    ${useDeriv ? PERTURB : ''}
     void main() {
       vec3 alb = texture2D(uAlbMap, vUV).rgb;
       vec3 N = normalize(vN);
-      ${EXT_DERIV ? 'N = perturbNormal(N, vWp, vUV, uNrmStr);' : ''}
+      ${useDeriv ? 'N = perturbNormal(N, vWp, vUV, uNrmStr);' : ''}
       float d = abs(dot(N, normalize(uLight))) * 0.68 + 0.32;
       float hemi = 0.72 + 0.28 * N.y;
       float ao = 0.35 + 0.65 * vAO;
@@ -67,7 +100,7 @@
       float f = clamp((vFog - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
       gl_FragColor = vec4(mix(col, uFogColor, f), 1.0);
     }`;
-  const FS_LEAF = `
+    const FS_LEAF = `
     precision mediump float;
     varying vec3 vN; varying vec2 vUV; varying float vAO, vPhase, vFog; varying vec3 vWp;
     uniform sampler2D uLeafMap;
@@ -81,21 +114,21 @@
       float h = fract(vPhase * 7.13);
       vec3 tint = vec3(0.90 + 0.20 * h, 0.94 + 0.12 * h, 0.86 + 0.16 * fract(h * 3.7));
       vec3 col = tx.rgb * tint * d * hemi * 1.1;
-      float sss = pow(max(dot(-N, normalize(uLight)), 0.0), 2.0) * 0.35; // backlit lift
+      float sss = pow(max(dot(-N, normalize(uLight)), 0.0), 2.0) * 0.35;
       col += tx.rgb * sss;
       float f = clamp((vFog - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
       gl_FragColor = vec4(mix(col, uFogColor, f), 1.0);
     }`;
-  const FS_WIRE = `
+    const FS_WIRE = `
     precision mediump float;
     varying vec3 vN; varying vec2 vUV; varying float vAO, vPhase, vFog; varying vec3 vWp;
     void main() { gl_FragColor = vec4(0.05, 0.06, 0.08, 1.0); }`;
-  const VS_GROUND = `
+    const VS_GROUND = `
     attribute vec3 aPos; attribute vec2 aUV;
     uniform mat4 uMVP; varying vec2 vUV; varying float vFog;
     void main() { vUV = aUV; vec4 mv = uMVP * vec4(aPos, 1.0);
       gl_Position = mv; vFog = max(mv.w, 0.0); }`;
-  const FS_GROUND = `
+    const FS_GROUND = `
     precision mediump float;
     varying vec2 vUV; varying float vFog;
     uniform sampler2D uTex; uniform vec3 uFogColor; uniform float uFogNear, uFogFar;
@@ -104,6 +137,8 @@
       float f = clamp((vFog - uFogNear) / (uFogFar - uFogNear), 0.0, 1.0);
       gl_FragColor = vec4(mix(col, uFogColor, f), 1.0);
     }`;
+    return { FS_BARK, FS_LEAF, FS_WIRE, VS_GROUND, FS_GROUND };
+  }
 
   function compile(t, s) {
     const h = gl.createShader(t); gl.shaderSource(h, s); gl.compileShader(h);
@@ -120,11 +155,6 @@
       throw new Error('link: ' + gl.getProgramInfoLog(p));
     return p;
   }
-  let P_BARK, P_LEAF, P_WIRE, P_GROUND;
-  try {
-    P_BARK = prog(VS_MAIN, FS_BARK); P_LEAF = prog(VS_MAIN, FS_LEAF);
-    P_WIRE = prog(VS_MAIN, FS_WIRE); P_GROUND = prog(VS_GROUND, FS_GROUND);
-  } catch (e) { showErr(String(e)); return; }
 
   /* ---------------- textures ---------------- */
   function loadTex(url, repeat) {
@@ -144,29 +174,23 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
       gl.generateMipmap(gl.TEXTURE_2D);
     };
-    img.onerror = () => console.warn('texture failed: ' + url);
+    img.onerror = () => status('texture failed: ' + url + ' (continuing untextured)');
     img.src = url;
     return tex;
   }
-  const TEX = {
-    barkAlb: loadTex('assets/bark_albedo.png', true),
-    barkNrm: loadTex('assets/bark_normal.png', true),
-    leaf: loadTex('assets/leaf_alpha.png', false),
-  };
-  // procedural ground: grass disc fading to fog color + contact shadow
   function groundTexture() {
     const S = 256, cv = document.createElement('canvas');
     cv.width = cv.height = S;
     const c = cv.getContext('2d');
-    const g = c.createRadialGradient(S/2, S/2, S*0.02, S/2, S/2, S*0.5);
+    const g = c.createRadialGradient(S / 2, S / 2, S * 0.02, S / 2, S / 2, S * 0.5);
     g.addColorStop(0.00, '#42502e'); g.addColorStop(0.10, '#5d7340');
     g.addColorStop(0.35, '#7d9a58'); g.addColorStop(0.75, '#b9b49b');
     g.addColorStop(1.00, '#ece7db');
     c.fillStyle = g; c.fillRect(0, 0, S, S);
-    for (let i = 0; i < 2600; i++) { // speckle
+    for (let i = 0; i < 2600; i++) {
       const x = Math.random() * S, y = Math.random() * S;
-      const dx = (x - S/2) / S, dy = (y - S/2) / S;
-      if (dx*dx + dy*dy > 0.22) continue;
+      const dx = (x - S / 2) / S, dy = (y - S / 2) / S;
+      if (dx * dx + dy * dy > 0.22) continue;
       c.fillStyle = Math.random() < 0.5 ? '#6b8a4c55' : '#8fae6555';
       c.fillRect(x, y, 2, 2);
     }
@@ -179,7 +203,6 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     return tex;
   }
-  TEX.ground = groundTexture();
 
   /* ---------------- mesh buffers ---------------- */
   function meshBuffers(m, isLeaf) {
@@ -204,16 +227,18 @@
         if (!edges.has(key)) { edges.add(key); L.push(a, b); }
       }
     }
-    return { n, triCount: idx.length / 3,
+    return {
+      n, triCount: idx.length / 3,
       bPos: buf(pos, gl.ARRAY_BUFFER), bNrm: buf(nrm, gl.ARRAY_BUFFER),
       bUV: buf(uv, gl.ARRAY_BUFFER), bCol: buf(col, gl.ARRAY_BUFFER),
       bPiv: buf(piv, gl.ARRAY_BUFFER), bFlu: buf(flu, gl.ARRAY_BUFFER),
       bIdx: buf(idx, gl.ELEMENT_ARRAY_BUFFER),
-      bLin: buf(new Uint32Array(L), gl.ELEMENT_ARRAY_BUFFER), lineCount: L.length };
+      bLin: buf(new Uint32Array(L), gl.ELEMENT_ARRAY_BUFFER), lineCount: L.length
+    };
   }
   function freeMesh(mb) {
-    if (!mb) return;
-    for (const k of ['bPos','bNrm','bUV','bCol','bPiv','bFlu','bIdx','bLin']) gl.deleteBuffer(mb[k]);
+    if (!mb || !gl) return;
+    for (const k of ['bPos', 'bNrm', 'bUV', 'bCol', 'bPiv', 'bFlu', 'bIdx', 'bLin']) gl.deleteBuffer(mb[k]);
   }
   function bindMain(pr, mb) {
     function at(name, b, n) {
@@ -226,22 +251,56 @@
     at('aPos', mb.bPos, 3); at('aNrm', mb.bNrm, 3); at('aUV', mb.bUV, 2);
     at('aCol', mb.bCol, 4); at('aPiv', mb.bPiv, 3); at('aFlu', mb.bFlu, 1);
   }
-  // ground disc (unit circle, scaled per tree)
-  const groundMesh = (function () {
+  function buildGroundMesh() {
     const SEG = 48, P = [0, 0, 0], UV = [0.5, 0.5], I = [];
     for (let i = 0; i <= SEG; i++) {
       const a = i / SEG * Math.PI * 2;
       P.push(Math.cos(a), 0, Math.sin(a)); UV.push(0.5 + Math.cos(a) / 2, 0.5 + Math.sin(a) / 2);
     }
     for (let i = 1; i <= SEG; i++) I.push(0, i + 1, i); // up-facing (CCW from +Y)
-    function buf(d, t, ty) { const b = gl.createBuffer();
-      gl.bindBuffer(t, b); gl.bufferData(t, ty === 'f' ? new Float32Array(d) : new Uint16Array(d), gl.STATIC_DRAW); return b; }
-    return { bPos: buf(P, gl.ARRAY_BUFFER, 'f'), bUV: buf(UV, gl.ARRAY_BUFFER, 'f'),
-             bIdx: buf(I, gl.ELEMENT_ARRAY_BUFFER, 'i'), count: I.length };
-  })();
+    function buf(d, t, ty) {
+      const b = gl.createBuffer();
+      gl.bindBuffer(t, b); gl.bufferData(t, ty === 'f' ? new Float32Array(d) : new Uint16Array(d), gl.STATIC_DRAW); return b;
+    }
+    return {
+      bPos: buf(P, gl.ARRAY_BUFFER, 'f'), bUV: buf(UV, gl.ARRAY_BUFFER, 'f'),
+      bIdx: buf(I, gl.ELEMENT_ARRAY_BUFFER, 'i'), count: I.length
+    };
+  }
+
+  /* ---------------- GL init (isolated: throws -> 2D fallback) ---------------- */
+  function initGL() {
+    const canvas = $('gl');
+    const kinds = ['webgl2', 'webgl', 'experimental-webgl'];
+    let ctx = null, kind = '';
+    for (const k of kinds) {
+      try { ctx = canvas.getContext(k, { antialias: true, alpha: true }); } catch (e) { ctx = null; }
+      if (ctx) { kind = k; break; }
+    }
+    if (!ctx) throw new Error('WebGL unavailable (tried webgl2/webgl/experimental-webgl)');
+    gl = ctx;
+    isGL2 = (kind === 'webgl2') ||
+      (typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext);
+    if (!isGL2 && !gl.getExtension('OES_element_index_uint'))
+      throw new Error('WebGL 1 without uint-index support');
+    const useDeriv = isGL2 || !!gl.getExtension('OES_standard_derivatives');
+    const src = fragSources(useDeriv, !isGL2 && useDeriv);
+    P_BARK = prog(VS_MAIN, src.FS_BARK); P_LEAF = prog(VS_MAIN, src.FS_LEAF);
+    P_WIRE = prog(VS_MAIN, src.FS_WIRE); P_GROUND = prog(src.VS_GROUND, src.FS_GROUND);
+    TEX = {
+      barkAlb: loadTex('assets/bark_albedo.png?' + V, true),
+      barkNrm: loadTex('assets/bark_normal.png?' + V, true),
+      leaf: loadTex('assets/leaf_alpha.png?' + V, false),
+    };
+    TEX.ground = groundTexture();
+    groundMesh = buildGroundMesh();
+    gl.enable(gl.DEPTH_TEST);
+    hasGL = true;
+    $('renderMode').textContent = isGL2 ? '3D · webgl2' : '3D · webgl1';
+    status('renderer: ' + kind + ' OK');
+  }
 
   /* ---------------- camera ---------------- */
-  let yaw = -0.9, pitch = 0.14, dist = 10, target = [0, 2.2, 0], groundR = 6;
   const view = $('view');
   let drag = null;
   view.addEventListener('contextmenu', e => e.preventDefault());
@@ -255,8 +314,8 @@
       const s = dist * 0.0016;
       const cx = Math.cos(yaw), sx = Math.sin(yaw);
       target = [drag.t0[0] - ((e.clientX - drag.x) * cx * s),
-                drag.t0[1] + (e.clientY - drag.y) * s,
-                drag.t0[2] + ((e.clientX - drag.x) * sx * s)];
+      drag.t0[1] + (e.clientY - drag.y) * s,
+      drag.t0[2] + ((e.clientX - drag.x) * sx * s)];
     } else {
       yaw = drag.y0 - (e.clientX - drag.x) * 0.006;
       pitch = Math.min(1.4, Math.max(-0.25, drag.p0 + (e.clientY - drag.y) * 0.006));
@@ -271,23 +330,22 @@
   /* ---------------- math ---------------- */
   function persp(fovy, asp, n, f) {
     const t = 1 / Math.tan(fovy / 2);
-    return [t/asp,0,0,0, 0,t,0,0, 0,0,(f+n)/(n-f),-1, 0,0,2*f*n/(n-f),0];
+    return [t / asp, 0, 0, 0, 0, t, 0, 0, 0, 0, (f + n) / (n - f), -1, 0, 0, 2 * f * n / (n - f), 0];
   }
   function mul(a, b) {
     const o = new Array(16).fill(0);
     for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
-      o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+      o[c * 4 + r] = a[r] * b[c * 4] + a[4 + r] * b[c * 4 + 1] + a[8 + r] * b[c * 4 + 2] + a[12 + r] * b[c * 4 + 3];
     return o;
   }
-  const norm3 = v => { const l = Math.hypot(v[0],v[1],v[2]) || 1; return [v[0]/l, v[1]/l, v[2]/l]; };
-  const cross3 = (a,b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
-  const dot3 = (a,b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
-  const FOG = [0.925, 0.905, 0.855];
+  const norm3 = v => { const l = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / l, v[1] / l, v[2] / l]; };
+  const cross3 = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
   /* ---------------- render ---------------- */
-  let meshes = [];
-  gl.enable(gl.DEPTH_TEST);
+  const canvas = $('gl');
   function frame(tms) {
+    if (!hasGL) return;
     const dpr = Math.min(devicePixelRatio || 1, 2);
     const w = Math.max(view.clientWidth * dpr, 2), h = Math.max(view.clientHeight * dpr, 2);
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
@@ -296,12 +354,12 @@
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     if ($('spin').checked && !drag) yaw += 0.0032;
     const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
-    const eye = [target[0] + dist*cp*sy, target[1] + dist*sp, target[2] + dist*cp*cy];
-    const z = norm3([eye[0]-target[0], eye[1]-target[1], eye[2]-target[2]]);
-    const x = norm3(cross3([0,1,0], z)), y = cross3(z, x);
-    const V = [x[0],y[0],z[0],0, x[1],y[1],z[1],0, x[2],y[2],z[2],0,
-               -dot3(x,eye), -dot3(y,eye), -dot3(z,eye), 1];
-    const mvp = mul(persp(0.68, w/h, 0.1, 120), V);
+    const eye = [target[0] + dist * cp * sy, target[1] + dist * sp, target[2] + dist * cp * cy];
+    const z = norm3([eye[0] - target[0], eye[1] - target[1], eye[2] - target[2]]);
+    const x = norm3(cross3([0, 1, 0], z)), y = cross3(z, x);
+    const V = [x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0,
+      -dot3(x, eye), -dot3(y, eye), -dot3(z, eye), 1];
+    const mvp = mul(persp(0.68, w / h, 0.1, 120), V);
     const wind = +$('wind').value, speed = +$('speed').value, tsec = tms * 0.001;
     const fogNear = dist * 1.1, fogFar = dist * 3.4;
     function common(pr, leaf) {
@@ -319,10 +377,9 @@
         gl.uniform3f(gl.getUniformLocation(pr, 'uLight'), 0.45, 0.75, 0.55);
       }
     }
-    // ground
     if ($('showGround').checked) {
       gl.useProgram(P_GROUND);
-      const S = [groundR,0,0,0, 0,1,0,0, 0,0,groundR,0, target[0],0,target[2],1];
+      const S = [groundR, 0, 0, 0, 0, 1, 0, 0, 0, 0, groundR, 0, target[0], 0, target[2], 1];
       gl.uniformMatrix4fv(gl.getUniformLocation(P_GROUND, 'uMVP'), false, mul(mvp, S));
       gl.uniform3f(gl.getUniformLocation(P_GROUND, 'uFogColor'), FOG[0], FOG[1], FOG[2]);
       gl.uniform1f(gl.getUniformLocation(P_GROUND, 'uFogNear'), fogNear);
@@ -377,24 +434,29 @@
   function setTree(data) {
     for (const mm of meshes) freeMesh(mm.mb);
     meshes = [];
-    const bark = meshBuffers(data.bark, false);
-    meshes.push({ mb: bark, leaf: false, show: () => $('showBark').checked });
-    if (data.leaves) {
-      const lv = meshBuffers(data.leaves, true);
-      meshes.push({ mb: lv, leaf: true, show: () => $('showLeaves').checked });
+    if (hasGL) {
+      const bark = meshBuffers(data.bark, false);
+      meshes.push({ mb: bark, leaf: false, show: () => $('showBark').checked });
+      if (data.leaves) {
+        const lv = meshBuffers(data.leaves, true);
+        meshes.push({ mb: lv, leaf: true, show: () => $('showLeaves').checked });
+      }
     }
     const P = data.bark.positions;
-    let mn = [1e9,1e9,1e9], mx = [-1e9,-1e9,-1e9];
+    let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
     for (const p of P) for (let i = 0; i < 3; i++) {
       mn[i] = Math.min(mn[i], p[i]); mx[i] = Math.max(mx[i], p[i]);
     }
-    target = [(mn[0]+mx[0])/2, (mn[1]+mx[1])/2 * 0.9, (mn[2]+mx[2])/2];
+    target = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2 * 0.9, (mn[2] + mx[2]) / 2];
     const H = mx[1] - mn[1];
-    dist = Math.max(H, mx[0]-mn[0], mx[2]-mn[2]) * 1.75;
+    dist = Math.max(H, mx[0] - mn[0], mx[2] - mn[2]) * 1.75;
     groundR = Math.max(H * 1.1, 4);
     updateStats(data);
+    clearErr();
+    if (!hasGL) refreshPreview();
+    else status('tree ready: ' + meshes.reduce((a, m) => a + m.mb.triCount, 0).toFixed(0) + ' tris (3D)');
   }
-  function fmt(n) { return n >= 1000 ? (n/1000).toFixed(1) + 'k' : String(n); }
+  function fmt(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
   function updateStats(data) {
     const m = data.meta, lt = data.leaves ? data.leaves.indices.length / 3 : 0;
     const bt = data.bark.indices.length / 3;
@@ -406,11 +468,11 @@
     badge.textContent = m.valid ? '● watertight single mesh' : '● INVALID mesh';
     badge.classList.toggle('bad', !m.valid);
     const checks = [
-      ['Closed surface', (m.boundary_edges|0) === 0 && (m.nonmanifold_edges|0) === 0],
-      ['Manifold edges', (m.nonmanifold_edges|0) === 0],
-      ['Consistent winding', (m.inconsistent_edges|0) === 0],
+      ['Closed surface', (m.boundary_edges | 0) === 0 && (m.nonmanifold_edges | 0) === 0],
+      ['Manifold edges', (m.nonmanifold_edges | 0) === 0],
+      ['Consistent winding', (m.inconsistent_edges | 0) === 0],
       ['Genus 0 (ball)', m.euler === 2],
-      ['Single component', (m.components|0) === 1],
+      ['Single component', (m.components | 0) === 1],
     ];
     const ok = checks.filter(c => c[1]).length;
     $('healthPct').textContent = Math.round(ok / checks.length * 100);
@@ -418,24 +480,50 @@
       el.className = checks[i][1] ? 'ok' : 'no';
     });
     $('validRows').innerHTML = checks.map(c =>
-      `<div class="vrow"><span>${c[0]}</span><b class="${c[1]?'good':'bad'}">${c[1]?'pass':'FAIL'}</b></div>`).join('');
+      `<div class="vrow"><span>${c[0]}</span><b class="${c[1] ? 'good' : 'bad'}">${c[1] ? 'pass' : 'FAIL'}</b></div>`).join('');
     $('meshRows').innerHTML =
       `<div class="vrow"><span>Bark verts / tris</span><b>${fmt(data.bark.positions.length)} / ${fmt(bt)}</b></div>` +
-      `<div class="vrow"><span>Leaf verts / tris</span><b>${fmt(data.leaves?data.leaves.positions.length:0)} / ${fmt(lt)}</b></div>` +
-      `<div class="vrow"><span>Skeleton nodes</span><b>${fmt(m.skeleton_nodes||0)}</b></div>` +
-      `<div class="vrow"><span>Boundary edges</span><b>${m.boundary_edges|0}</b></div>` +
-      `<div class="vrow"><span>Non-manifold</span><b>${m.nonmanifold_edges|0}</b></div>`;
+      `<div class="vrow"><span>Leaf verts / tris</span><b>${fmt(data.leaves ? data.leaves.positions.length : 0)} / ${fmt(lt)}</b></div>` +
+      `<div class="vrow"><span>Skeleton nodes</span><b>${fmt(m.skeleton_nodes || 0)}</b></div>` +
+      `<div class="vrow"><span>Boundary edges</span><b>${m.boundary_edges | 0}</b></div>` +
+      `<div class="vrow"><span>Non-manifold</span><b>${m.nonmanifold_edges | 0}</b></div>`;
+  }
+
+  /* ---------------- 2D fallback preview ---------------- */
+  function refreshPreview() {
+    status('rendering 2D preview…');
+    fetch('api/preview?' + V, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        preset: curPreset, seed: +$('seed').value || 0,
+        lod: 2, values: collectValues()
+      }),
+    }).then(r => {
+      if (!r.ok) return r.json().then(j => { throw new Error(j.error || r.status); });
+      return r.blob();
+    }).then(blob => {
+      const img = $('previewImg');
+      if (img.src && img.src.startsWith('blob:')) URL.revokeObjectURL(img.src);
+      img.src = URL.createObjectURL(blob);
+      status('2D preview ready (sliders + Generate + export fully work)');
+    }).catch(e => {
+      showErr('preview failed: ' + e.message, true);
+      status('preview failed: ' + e.message);
+    });
+  }
+  function enterFallback(reason) {
+    hasGL = false;
+    canvas.style.display = 'none';
+    $('fallback').style.display = 'flex';
+    $('renderMode').textContent = '2D preview';
+    showErr('3D unavailable (' + reason + ') — showing server preview. Sliders, Generate and export all work.', true);
+    status('renderer: 2D fallback (' + reason + ')');
   }
 
   /* ---------------- parametric UI ---------------- */
   const PRESET_INFO = {
     oak: 'broadleaf', pine: 'conifer', birch: 'slender', colony: 'dense crown', sapling: 'test',
   };
-  let curPreset = 'oak', specParams = [];
-  function showErr(msg) {
-    const e = $('err'); e.textContent = msg; e.style.display = 'block';
-    clearTimeout(showErr._t); showErr._t = setTimeout(() => e.style.display = 'none', 6000);
-  }
   function setLoading(on, msg) {
     $('loader').classList.toggle('show', on);
     $('genBtn').disabled = on;
@@ -447,13 +535,17 @@
       if (p === 'sapling') continue;
       const b = document.createElement('button');
       b.className = 'preset' + (p === curPreset ? ' on' : '');
-      b.innerHTML = `<b>${p[0].toUpperCase()+p.slice(1)}</b><span>${PRESET_INFO[p]||''}</span>`;
+      b.innerHTML = `<b>${p[0].toUpperCase() + p.slice(1)}</b><span>${PRESET_INFO[p] || ''}</span>`;
       b.onclick = () => { curPreset = p; loadSpec(); };
       box.appendChild(b);
     }
   }
   function loadSpec() {
-    fetch('api/spec?preset=' + curPreset).then(r => r.json()).then(spec => {
+    status('loading slider spec for ' + curPreset + '…');
+    fetch('api/spec?preset=' + curPreset + '&' + V).then(r => {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(spec => {
       buildPresets(spec.presets);
       document.querySelectorAll('#presets .preset').forEach(el => {
         el.classList.toggle('on', el.textContent.toLowerCase().startsWith(curPreset));
@@ -482,7 +574,11 @@
         }
         host.appendChild(div);
       }
-    }).catch(() => showErr('studio API unreachable — is frontier_server running?'));
+      status('spec ready: ' + spec.params.length + ' sliders');
+    }).catch(e => {
+      showErr('studio API unreachable (' + e.message + ') — is frontier_server running?', true);
+      status('spec FAILED: ' + e.message);
+    });
   }
   function collectValues() {
     const v = {};
@@ -491,23 +587,31 @@
   }
   $('genBtn').onclick = () => {
     setLoading(true, 'Growing branches… fusing junctions…');
-    fetch('api/generate', {
+    status('generating ' + curPreset + '…');
+    fetch('api/generate?' + V, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preset: curPreset, seed: +$('seed').value || 0,
-        lod: +$('lod').value, values: collectValues() }),
-    }).then(r => r.json()).then(data => {
+      body: JSON.stringify({
+        preset: curPreset, seed: +$('seed').value || 0,
+        lod: +$('lod').value, values: collectValues()
+      }),
+    }).then(r => {
+      if (!r.ok) return r.json().then(j => { throw new Error(j.error || r.status); });
+      return r.json();
+    }).then(data => {
       setLoading(false);
-      if (data.error) { showErr(data.error); return; }
+      if (data.error) { showErr(data.error, true); return; }
       setTree(data);
-    }).catch(e => { setLoading(false); showErr('generate failed: ' + e); });
+    }).catch(e => { setLoading(false); showErr('generate failed: ' + e.message, true); status('generate FAILED'); });
   };
   $('dice').onclick = () => { $('seed').value = Math.floor(Math.random() * 9999); };
   function download(fmt) {
     setLoading(true, 'Exporting ' + fmt + '…');
-    fetch('api/export', {
+    fetch('api/export?' + V, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preset: curPreset, seed: +$('seed').value || 0,
-        lod: +$('lod').value, values: collectValues(), format: fmt }),
+      body: JSON.stringify({
+        preset: curPreset, seed: +$('seed').value || 0,
+        lod: +$('lod').value, values: collectValues(), format: fmt
+      }),
     }).then(r => {
       if (!r.ok) return r.json().then(j => { throw new Error(j.error || r.status); });
       return r.blob();
@@ -518,7 +622,8 @@
       a.download = `frontier_${curPreset}.${fmt}`;
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-    }).catch(e => { setLoading(false); showErr('export failed: ' + e.message); });
+      status('exported ' + fmt);
+    }).catch(e => { setLoading(false); showErr('export failed: ' + e.message, true); });
   }
   $('dlGlb').onclick = () => download('glb');
   $('dlObj').onclick = () => download('obj');
@@ -533,16 +638,25 @@
   $('speed').oninput = e => $('speedVal').textContent = (+e.target.value).toFixed(2);
   $('nrmStr').oninput = e => $('nrmVal').textContent = (+e.target.value).toFixed(2);
 
-  /* boot: instant paint from bundled tree.json, then live spec */
-  fetch('tree.json').then(r => r.json()).then(data => {
+  /* ---------------- boot (data layer independent of 3D) ---------------- */
+  try {
+    initGL();
+  } catch (e) {
+    enterFallback(e.message);
+  }
+  if (hasGL) requestAnimationFrame(frame);
+  status('loading bundled tree.json…');
+  fetch('tree.json?' + V).then(r => {
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+  }).then(data => {
+    status('tree.json parsed, building…');
     setTree(data);
     if (data.meta && data.meta.preset && PRESET_INFO[data.meta.preset]) curPreset = data.meta.preset;
-    const s = (data.meta && data.meta.seed) || 1;
-    $('seed').value = s;
+    $('seed').value = (data.meta && data.meta.seed) || 1;
     loadSpec();
-  }).catch(() => {
-    showErr('tree.json missing — press Generate.');
+  }).catch(e => {
+    status('tree.json FAILED (' + e.message + ') — press Generate');
     loadSpec();
   });
-  requestAnimationFrame(frame);
 })();

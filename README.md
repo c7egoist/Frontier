@@ -46,8 +46,11 @@ python tools/frontier_server.py --port 8123    # open localhost:8123
 
 API: `GET /api/spec?preset=oak` (slider spec + defaults),
 `POST /api/generate` (`{preset, seed, lod, values}` → tree JSON),
-`POST /api/export` (`{…, format: glb|obj}` → file download).
+`POST /api/export` (`{…, format: glb|obj}` → file download),
+`POST /api/preview` (→ server-rendered PNG for browsers without WebGL).
 `viewer/tree.json` bundled so the studio paints instantly, even offline.
+Headless end-to-end check: `node tools/studio_smoke.js` (needs the server;
+`NOGL=1` exercises the 2D-fallback path).
 
 ## How it works
 
