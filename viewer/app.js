@@ -6,7 +6,7 @@
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
-  const V = 'v=3'; // cache buster for app data fetches
+  const V = 'v=4'; // cache buster for app data fetches
 
   /* ---------------- status + errors (never throws) ---------------- */
   function status(msg) {
@@ -496,7 +496,7 @@
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         preset: curPreset, seed: +$('seed').value || 0,
-        lod: 2, values: collectValues()
+        lod: +$('lod').value, values: collectValues() // server clamps to <=1
       }),
     }).then(r => {
       if (!r.ok) return r.json().then(j => { throw new Error(j.error || r.status); });
@@ -604,6 +604,7 @@
     }).catch(e => { setLoading(false); showErr('generate failed: ' + e.message, true); status('generate FAILED'); });
   };
   $('dice').onclick = () => { $('seed').value = Math.floor(Math.random() * 9999); };
+  $('retry3d').onclick = () => location.reload();
   function download(fmt) {
     setLoading(true, 'Exporting ' + fmt + '…');
     fetch('api/export?' + V, {

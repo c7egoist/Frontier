@@ -62,9 +62,9 @@ def bark(size=512, seed=7):
     # albedo: grey-brown plates, near-black furrows, pale worn tops
     top = np.clip((h - 0.62) * 3.0, 0, 1)
     albedo = np.zeros((size, size, 3))
-    albedo[..., 0] = 0.32 + 0.26 * plates + 0.22 * top - 0.26 * crack
-    albedo[..., 1] = 0.24 + 0.19 * plates + 0.17 * top - 0.20 * crack
-    albedo[..., 2] = 0.18 + 0.13 * plates + 0.12 * top - 0.14 * crack
+    albedo[..., 0] = 0.36 + 0.24 * plates + 0.20 * top - 0.14 * crack
+    albedo[..., 1] = 0.27 + 0.17 * plates + 0.15 * top - 0.11 * crack
+    albedo[..., 2] = 0.20 + 0.12 * plates + 0.11 * top - 0.08 * crack
     albedo += np.random.default_rng(seed + 2).normal(0, 0.010, albedo.shape)
     albedo = np.clip(albedo, 0, 1)
     # normal map from height (tangent space, +Y up in UV)

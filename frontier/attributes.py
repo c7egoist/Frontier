@@ -68,13 +68,17 @@ def compute_normals(mesh: Mesh) -> np.ndarray:
 
 
 def compute_uvs(mesh: Mesh, skel: Skeleton, uv_scale: float = 2.0) -> np.ndarray:
-    """Cylindrical bark UVs: u around the ring, v along arclength."""
+    """Cylindrical bark UVs: u around the ring (3 tiles/turn), v along arclength."""
     n = len(mesh.positions)
     uv = np.zeros((n, 2))
     for i in range(n):
         nid = mesh.v_node[i]
-        arc = skel.nodes[nid].arclen if 0 <= nid < len(skel.nodes) else 0.0
-        uv[i, 0] = mesh.v_u[i]
+        over = mesh.v_arc[i] if i < len(mesh.v_arc) else None
+        if over is not None:
+            arc = over
+        else:
+            arc = skel.nodes[nid].arclen if 0 <= nid < len(skel.nodes) else 0.0
+        uv[i, 0] = mesh.v_u[i] * 3.0
         uv[i, 1] = arc / max(uv_scale, 1e-6)
     return uv
 

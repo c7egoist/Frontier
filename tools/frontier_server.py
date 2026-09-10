@@ -29,7 +29,7 @@ from frontier.export_gltf import write_glb
 from frontier.export_obj import write_obj
 from frontier.generate import generate_tree
 from frontier.presets import PRESETS, get_preset
-from soft_render import render as soft_render_img
+from soft_render import render_tree_preview
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -210,38 +210,16 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/preview":
             # Server-rendered 2D PNG fallback for browsers without WebGL.
             try:
-                import numpy as np
                 from PIL import Image
 
                 body = self._read_json()
                 skel, mesh, leaf = split_values(body.get("values"))
                 r = generate_tree(
                     body.get("preset", "oak"), seed=int(body.get("seed", 1)),
-                    lod=min(int(body.get("lod", 2)), 2),
+                    lod=min(int(body.get("lod", 1)), 1),
                     skel_override=skel, mesh_override=mesh, leaf_override=leaf,
                 )
-                V = np.asarray(r.bark.verts(), float)
-                F = np.asarray(r.bark.triangulate(), np.int64)
-                N = np.asarray(r.bark_normals, float)
-                bark_alb = np.array([0.62, 0.47, 0.34])
-                if r.leaves is not None:
-                    LP = np.asarray(r.leaves.positions, float)
-                    LI = np.asarray(r.leaves.indices)
-                    LN = np.asarray(r.leaves.normals, float)
-                    VV = np.vstack([V, LP])
-                    FF = np.vstack([F, LI + len(V)])
-                    NN = np.vstack([N, LN])
-                    alb = np.zeros((len(FF), 3))
-                    alb[: len(F)] = bark_alb
-                    alb[len(F):] = np.array([0.22, 0.45, 0.18])
-                    ao_full = np.concatenate(
-                        [np.asarray(r.bark_wind["ao"], float), np.ones(len(LP))])
-                    img = soft_render_img(VV, FF, NN, alb, ao=ao_full,
-                                          size=(700, 860), bg=(236, 231, 219))
-                else:
-                    ao = np.asarray(r.bark_wind["ao"], float)
-                    img = soft_render_img(V, F, N, bark_alb, ao=ao,
-                                          size=(700, 860), bg=(236, 231, 219))
+                img = render_tree_preview(r)
                 buf = io.BytesIO()
                 Image.fromarray(img).save(buf, format="PNG")
                 data = buf.getvalue()

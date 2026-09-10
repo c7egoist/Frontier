@@ -63,6 +63,7 @@ class RingInfo:
     center: np.ndarray
     radius: float
     tangent: np.ndarray
+    web_pairs: tuple = ()  # (parent_vid, child_vid) web correspondences
 
 
 class Mesh:
@@ -73,16 +74,18 @@ class Mesh:
         # per-vertex tags for attributes
         self.v_node: List[int] = []
         self.v_u: List[float] = []  # angular fraction around ring
+        self.v_arc: List = []  # texture arclength override (None = node arclen)
         self.v_kind: List[int] = []
         self.v_center: List[np.ndarray] = []  # ring center (radial ref)
         self.flipped_by_guard = False
 
     # -- construction ------------------------------------------------ #
-    def add_vert(self, pos, node=-1, u=0.0, kind=K_TUBE, center=None) -> int:
+    def add_vert(self, pos, node=-1, u=0.0, kind=K_TUBE, center=None, arc=None) -> int:
         pos = np.asarray(pos, dtype=np.float64).reshape(3)
         self.positions.append(pos)
         self.v_node.append(int(node))
         self.v_u.append(float(u))
+        self.v_arc.append(None if arc is None else float(arc))
         self.v_kind.append(int(kind))
         self.v_center.append(
             np.asarray(center if center is not None else pos, dtype=np.float64).reshape(3)
@@ -133,8 +136,11 @@ class Mesh:
 # --------------------------------------------------------------------------- #
 
 
-def _align_loop_starts(V: np.ndarray, A: List[int], B: List[int]) -> List[int]:
-    """Rotate loop B so its seam best matches loop A's seam."""
+def _align_loop_starts(V: np.ndarray, A: List[int], B: List[int]):
+    """Rotate loop B so its seam best matches loop A's seam.
+
+    Returns (rotated_B, k) with rotated_B[j] == B[(j + k) % m].
+    """
     n, m = len(A), len(B)
     Apos = V[np.array(A)]
     Bpos = V[np.array(B)]
@@ -145,19 +151,52 @@ def _align_loop_starts(V: np.ndarray, A: List[int], B: List[int]) -> List[int]:
             d = float(np.sum((Apos - Bpos[idx]) ** 2))
             if d < best:
                 best, best_k = d, k
-        return [B[(j + best_k) % m] for j in range(m)]
+        return [B[(j + best_k) % m] for j in range(m)], best_k
     k = int(np.argmin(np.sum((Bpos - Apos[0]) ** 2, axis=1)))
-    return [B[(j + k) % m] for j in range(m)]
+    return [B[(j + k) % m] for j in range(m)], k
 
 
-def bridge_loops(mesh: Mesh, A: List[int], B: List[int]):
+def rotate_ring_uv(mesh: Mesh, ring: "RingInfo", k: int) -> None:
+    """Adopt a bridge rotation into the stored ring order + u values.
+
+    bridge_loops rotates loop B for twist-free connectivity; without this
+    the per-vertex u stays in creation order and any texture shears at
+    every ring. Call with the k returned by bridge_loops.
+    """
+    m = len(ring.indices)
+    if m == 0:
+        return
+    k %= m
+    if k:
+        ring.indices = ring.indices[k:] + ring.indices[:k]
+        for j, vid in enumerate(ring.indices):
+            if mesh.v_kind[vid] == K_CROTCH:
+                continue  # shared between both child loops; keep u=0.5
+            mesh.v_u[vid] = j / m
+
+
+def match_web_uv(mesh: Mesh, parent_ring: "RingInfo") -> None:
+    """Copy parent-path u values onto child-loop web verts (pairwise).
+
+    Each web quad then interpolates u between (near-)equal values instead
+    of sweeping a constant phase offset across the texture (the wide
+    diagonal smears). Runs after the parent ring's bridge adoption.
+    """
+    for pvid, cvid in parent_ring.web_pairs:
+        if mesh.v_kind[cvid] == K_CROTCH:
+            continue  # shared tip; keep u=0.5
+        mesh.v_u[cvid] = mesh.v_u[pvid]
+
+
+def bridge_loops(mesh: Mesh, A: List[int], B: List[int]) -> int:
     """Bridge closed loop A (root side) to closed loop B (tip side).
 
     Equal counts -> pure quads. Unequal counts -> "dart" walk mixing
-    quads and triangles. Always manifold.
+    quads and triangles. Always manifold. Returns the rotation k applied
+    to B (see rotate_ring_uv).
     """
     V = mesh.verts()
-    B = _align_loop_starts(V, A, B)
+    B, k = _align_loop_starts(V, A, B)
     n, m = len(A), len(B)
     A2 = A + [A[0]]
     B2 = B + [B[0]]
@@ -177,6 +216,7 @@ def bridge_loops(mesh: Mesh, A: List[int], B: List[int]):
         else:
             mesh.add_tri(A2[i], B2[j + 1], B2[j])
             j += 1
+    return k
 
 
 # --------------------------------------------------------------------------- #
@@ -204,8 +244,8 @@ def surface_radius(u: float, arclen: float, base_r: float, surf: Dict | None) ->
             r *= 1.0 + over * max(lobe, 0.25)
     flute_amp = float(surf.get("flute_amp", 0.0))
     if flute_amp > 0:
-        flutes = max(int(surf.get("flutes", 9)), 2)
-        twist = float(surf.get("flute_twist", 1.4))
+        flutes = max(int(surf.get("flutes", 7)), 2)
+        twist = float(surf.get("flute_twist", 0.25))
         mask = min(max((base_r - 0.22 * trunk_r) / (0.45 * trunk_r), 0.0), 1.0)
         mask = mask * mask * (3.0 - 2.0 * mask)
         r *= 1.0 + flute_amp * mask * np.sin(2.0 * np.pi * u * flutes + arclen * twist)
@@ -293,9 +333,9 @@ def build_junction(
         "flare": bool(mo.get("flare", True)),
         "buttress_lobes": int(mo.get("buttress_lobes", 6)),
         "buttress_amp": float(mo.get("buttress_amp", 0.30)),
-        "flutes": int(mo.get("flutes", 9)),
-        "flute_amp": float(mo.get("flute_amp", 0.055)),
-        "flute_twist": float(mo.get("flute_twist", 1.4)),
+        "flutes": int(mo.get("flutes", 7)),
+        "flute_amp": float(mo.get("flute_amp", 0.035)),
+        "flute_twist": float(mo.get("flute_twist", 0.25)),
     }
     # collar swelling (branch collar like real trees) also keeps the throat full
     R0, R1, R2 = r0 * collar_parent, r1 * collar_child, r2 * collar_child
@@ -428,7 +468,8 @@ def build_junction(
         mesh.add_vert(und(R0, p, C0, j), node=jid, u=j / n0, kind=K_JUNCTION, center=C0)
         for j, p in enumerate(Ppts)
     ]
-    crotch_idx = mesh.add_vert(C, node=jid, u=0.5, kind=K_CROTCH, center=J)
+    crotch_idx = mesh.add_vert(C, node=jid, u=0.5, kind=K_CROTCH, center=J,
+                                 arc=Jn.arclen + 0.25 * (o1 + o2))
 
     L1idx = []
     for k, p in enumerate(F1):
@@ -436,12 +477,13 @@ def build_junction(
             L1idx.append(crotch_idx)
         else:
             L1idx.append(
-                mesh.add_vert(und(R1, p, Cc1, k), node=jid, u=k / (2 * b1 + 1), kind=K_JUNCTION, center=Cc1)
+                mesh.add_vert(und(R1, p, Cc1, k), node=jid, u=k / (2 * b1 + 1), kind=K_JUNCTION, center=Cc1,
+                                arc=C1n.arclen)
             )
     for k, p in enumerate(B1[1:], start=1):
         L1idx.append(
             mesh.add_vert(und(R1, p, Cc1, len(F1) + k), node=jid, u=(len(F1) + k) / (2 * b1 + 1),
-                          kind=K_JUNCTION, center=Cc1)
+                          kind=K_JUNCTION, center=Cc1, arc=C1n.arclen)
         )
 
     L2idx = []
@@ -450,12 +492,13 @@ def build_junction(
             L2idx.append(crotch_idx)
         else:
             L2idx.append(
-                mesh.add_vert(und(R2, p, Cc2, k), node=jid, u=k / (2 * b2 + 1), kind=K_JUNCTION, center=Cc2)
+                mesh.add_vert(und(R2, p, Cc2, k), node=jid, u=k / (2 * b2 + 1), kind=K_JUNCTION, center=Cc2,
+                                arc=C2n.arclen)
             )
     for k, p in enumerate(F2[1:], start=1):
         L2idx.append(
             mesh.add_vert(und(R2, p, Cc2, len(Bk2) + k), node=jid, u=(len(Bk2) + k) / (2 * b2 + 1),
-                          kind=K_JUNCTION, center=Cc2)
+                          kind=K_JUNCTION, center=Cc2, arc=C2n.arclen)
         )
 
     # arcs (index space)
@@ -483,7 +526,8 @@ def build_junction(
     mesh.add_tri(S_L, O1F_i, O1B_i)
     mesh.add_tri(S_R, O2B_i, O2F_i)
 
-    Pring = RingInfo(indices=Pidx, center=C0, radius=R0, tangent=u0v)
+    Pring = RingInfo(indices=Pidx, center=C0, radius=R0, tangent=u0v,
+                     web_pairs=tuple(zip(pf, cf)) + tuple(zip(pb, cb)))
     return Pring, {
         c1: RingInfo(indices=L1idx, center=Cc1, radius=R1, tangent=u1),
         c2: RingInfo(indices=L2idx, center=Cc2, radius=R2, tangent=u2),
@@ -569,9 +613,9 @@ def build_tree_mesh(skel: Skeleton, opts: Dict | None = None) -> Mesh:
         "flare": do_flare,
         "buttress_lobes": int(opts.get("buttress_lobes", 6)),
         "buttress_amp": float(opts.get("buttress_amp", 0.30)),
-        "flutes": int(opts.get("flutes", 9)),
-        "flute_amp": float(opts.get("flute_amp", 0.055)),
-        "flute_twist": float(opts.get("flute_twist", 1.4)),
+        "flutes": int(opts.get("flutes", 7)),
+        "flute_amp": float(opts.get("flute_amp", 0.035)),
+        "flute_twist": float(opts.get("flute_twist", 0.25)),
     }
 
     in_ring: Dict[int, RingInfo] = {}
@@ -588,6 +632,7 @@ def build_tree_mesh(skel: Skeleton, opts: Dict | None = None) -> Mesh:
                                      undulation, opts)
         in_ring[root.id] = Pring
         out_rings[root.id] = outs
+        match_web_uv(mesh, Pring)
         add_root_cap(mesh, Pring, root.id)
     else:
         ring = add_tube_ring(mesh, root.pos, tube_radius(root), root.normal, root.binormal,
@@ -617,18 +662,22 @@ def build_tree_mesh(skel: Skeleton, opts: Dict | None = None) -> Mesh:
             Pring, outs = build_junction(mesh, skel, nid, parent_out.center, undulation, opts)
             in_ring[nid] = Pring
             out_rings[nid] = outs
-            bridge_loops(mesh, parent_out.indices, Pring.indices)
+            k = bridge_loops(mesh, parent_out.indices, Pring.indices)
+            rotate_ring_uv(mesh, Pring, k)
+            match_web_uv(mesh, Pring)
         elif len(node.children) == 1:
             ring = add_tube_ring(mesh, node.pos, tube_radius(node), node.normal, node.binormal,
                                  node.ring_n, nid, undulation, node.arclen, surf)
             in_ring[nid] = ring
             out_rings[nid] = {node.children[0]: ring}
-            bridge_loops(mesh, parent_out.indices, ring.indices)
+            k = bridge_loops(mesh, parent_out.indices, ring.indices)
+            rotate_ring_uv(mesh, ring, k)
         elif len(node.children) == 0:
             ring = add_tube_ring(mesh, node.pos, tube_radius(node), node.normal, node.binormal,
                                  node.ring_n, nid, undulation, node.arclen, surf)
             in_ring[nid] = ring
-            bridge_loops(mesh, parent_out.indices, ring.indices)
+            k = bridge_loops(mesh, parent_out.indices, ring.indices)
+            rotate_ring_uv(mesh, ring, k)
             add_tip_cap(mesh, ring, nid)
         else:  # pragma: no cover - enforced binary upstream
             raise JunctionError(f"node {nid} has {len(node.children)} children (need <= 2)")

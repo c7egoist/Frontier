@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import copy
 
-RINGS_LOD0 = {"trunk_n": 18, "tip_n": 5, "ring_gamma": 0.7}
-RINGS_LOD1 = {"trunk_n": 12, "tip_n": 5, "ring_gamma": 0.8}
-RINGS_LOD2 = {"trunk_n": 8, "tip_n": 4, "ring_gamma": 0.9}
+RINGS_LOD0 = {"trunk_n": 24, "tip_n": 5, "ring_gamma": 0.7}
+RINGS_LOD1 = {"trunk_n": 16, "tip_n": 5, "ring_gamma": 0.8}
+RINGS_LOD2 = {"trunk_n": 12, "tip_n": 4, "ring_gamma": 0.9}
 
 MESH_DEFAULT = {
     "undulation": 0.03,
@@ -18,9 +18,9 @@ MESH_DEFAULT = {
     "relax": 2,
     "collar_parent": 1.12,
     "collar_child": 1.06,
-    "flutes": 9,
-    "flute_amp": 0.055,
-    "flute_twist": 1.4,
+    "flutes": 7,
+    "flute_amp": 0.035,
+    "flute_twist": 0.25,
     "buttress_lobes": 6,
     "buttress_amp": 0.30,
 }
@@ -91,9 +91,9 @@ def _pine():
     }
     leaves = {
         "enabled": True,
-        "count": 1200,
-        "size": 0.24,
-        "size_spread": 0.06,
+        "count": 2400,
+        "size": 0.28,
+        "size_spread": 0.07,
         "min_depth": 2,
         "cross": 2,
         "droop": 0.15,
