@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+out/
+examples/output/
+dist/
+*.viewer.json
+.DS_Store
