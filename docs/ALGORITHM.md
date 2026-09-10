@@ -37,6 +37,13 @@ Pipeline surgery (both growers):
   triangles ("darts") where only one advances. Always manifold; seam
   rotation is auto-aligned to minimize twist.
 * Root is fan-capped below the flare; tips end in short cone caps.
+* **Bark UVs**: u = angular fraction × 3 tiles/turn; v = arclength/2.
+  Junction child-loop verts carry a texture-arclength override (`v_arc`,
+  the child node arclen) so V interpolates *across* the webs instead of
+  smearing a constant-V 1D texture slice (the old diagonal-stripe
+  artifact); child-loop U is pairwise-matched to the parent path U after
+  P-ring adoption. Seam-vertex splitting is deliberately *not* used —
+  it would break the watertight-manifold guarantee.
 
 ## 3. The fused Y junction ("webbed pants")
 
