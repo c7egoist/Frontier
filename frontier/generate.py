@@ -28,13 +28,23 @@ class GenerateResult:
 
 
 def generate_tree(preset: str = "oak", seed: int = 1, lod: int = 0,
-                  skel_override: Optional[Dict] = None) -> GenerateResult:
+                  skel_override: Optional[Dict] = None,
+                  mesh_override: Optional[Dict] = None,
+                  leaf_override: Optional[Dict] = None,
+                  ring_override: Optional[Dict] = None) -> GenerateResult:
     skel_params, ring_params, mesh_opts, leaf_params = get_preset(preset)
+    # User shape first; LOD simplification derives from it (relative scaling).
+    if skel_override:
+        skel_params.update(skel_override)
+    if mesh_override:
+        mesh_opts.update(mesh_override)
+    if leaf_override:
+        leaf_params.update(leaf_override)
+    if ring_override:
+        ring_params.update(ring_override)
     skel_params, ring_params, mesh_opts, leaf_params = apply_lod(
         skel_params, ring_params, mesh_opts, leaf_params, lod
     )
-    if skel_override:
-        skel_params.update(skel_override)
 
     skel = build_skeleton(skel_params, seed, ring_params)
     bark = build_tree_mesh(skel, mesh_opts)

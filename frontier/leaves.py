@@ -45,14 +45,21 @@ def build_leaf_mesh(skel: Skeleton, params: dict, seed: int = 1) -> LeafMeshData
     R = max(skel.nodes[skel.root].radius, 1e-6)
     H = max(skel.height(), 1e-6)
     y0 = min(n.pos[1] for n in skel.nodes)
+    # cluster foliage at twig tips: terminals + deep nodes get most cards
+    w = np.array(
+        [1.0 + 3.0 * (len(n.children) == 0) + 2.0 * (n.depth / max_depth) for n in cands],
+        dtype=np.float64,
+    )
+    w /= w.sum()
+    pick = rng.choice(len(cands), size=count, p=w)
 
     P, N_, UV, C, I, PV = [], [], [], [], [], []
     vi = 0
     for i in range(count):
-        node = cands[rng.integers(0, len(cands))]
+        node = cands[int(pick[i])]
         s = max(size + rng.normal(0, spread), size * 0.35)
-        # anchor near the twig with a small random offset
-        anchor = node.pos + node.tangent * rng.uniform(-0.05, 0.12) + rng.normal(0, 0.03, 3)
+        # anchor at the twig, biased outward along the growth direction
+        anchor = node.pos + node.tangent * rng.uniform(0.0, 0.22) + rng.normal(0, 0.035, 3)
         weight = float(np.clip(0.75 + 0.25 * (node.pos[1] - y0) / H + 0.1 * node.depth / max_depth, 0, 1))
         phase = float(rng.random())
         pivot = node.pos.copy()

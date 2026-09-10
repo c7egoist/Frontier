@@ -272,6 +272,7 @@ def grow_recursive(params: Dict, seed: int = 1) -> Skeleton:
     apical = float(params.get("apical", 0.55))  # leader length boost
     phototrop = float(params.get("phototropism", 0.06))
     upright = float(params.get("upright", 0.10))
+    tip_lift = float(params.get("tip_lift", 0.0))
     gravitrop = float(params.get("gravitrop", 0.02))
     curl = float(params.get("curl", 0.12))
     envelope = params.get("envelope", "none")
@@ -309,8 +310,14 @@ def grow_recursive(params: Dict, seed: int = 1) -> Skeleton:
             # organic wander (reduced near the trunk so leaders stay true)
             wander_axis_az = rng.uniform(0, 2 * np.pi)
             d = _rotate_dir(rng, d, rng.normal(0, curl * 0.35 * straight), wander_axis_az)
-            # phototropism: bend towards up (light); leaders pull upright
-            eff_photo = phototrop + up_bias * 0.15 + upright * (1.0 - depth_frac) ** 2
+            # phototropism: bend towards up (light); leaders pull upright;
+            # branch tips curl skyward (tip_lift grows along the branch)
+            eff_photo = (
+                phototrop
+                + up_bias * 0.15
+                + upright * (1.0 - depth_frac) ** 2
+                + tip_lift * t * t * min(depth_frac + 0.35, 1.0)
+            )
             d = normalize(d + np.array([0.0, eff_photo, 0.0]))
             sag = gravitrop * (0.4 + 0.6 * depth / max(max_depth, 1))
             d = normalize(d - np.array([0.0, sag * (0.3 + 0.7 * t), 0.0]))
@@ -322,7 +329,9 @@ def grow_recursive(params: Dict, seed: int = 1) -> Skeleton:
             if depth < max_depth and not is_tip_joint and (s % lateral_every == 0):
                 h_frac = float(np.clip(pos[1] / max(total_h, 1e-6), 0.0, 1.0))
                 env = envelope_scale(h_frac)
-                count = n_laterals + (1 if rng.random() < lat2_prob else 0) + whorl
+                count = n_laterals + (1 if rng.random() < lat2_prob else 0)
+                if depth == 0:
+                    count += whorl  # pine whorls ring the trunk only
                 for li in range(count):
                     az = azim_offset + lat_index * golden + rng.normal(0, 0.35)
                     lat_index += 1

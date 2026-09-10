@@ -184,6 +184,34 @@ def bridge_loops(mesh: Mesh, A: List[int], B: List[int]):
 # --------------------------------------------------------------------------- #
 
 
+def surface_radius(u: float, arclen: float, base_r: float, surf: Dict | None) -> float:
+    """Bark surface detail: root flare + buttress lobes + trunk flutes.
+
+    Pure radial displacement, so topology/manifoldness is untouched.
+    """
+    r = base_r
+    if not surf:
+        return r
+    trunk_r = max(float(surf.get("trunk_r", base_r)), 1e-6)
+    if surf.get("flare", True):
+        over = flare_factor(arclen, trunk_r) - 1.0
+        if over > 1e-4:
+            lobes = max(int(surf.get("buttress_lobes", 6)), 1)
+            lamp = float(surf.get("buttress_amp", 0.30))
+            lobe = 1.0 + lamp * np.cos(2.0 * np.pi * u * lobes) * float(
+                np.exp(-arclen / (0.8 * trunk_r))
+            )
+            r *= 1.0 + over * max(lobe, 0.25)
+    flute_amp = float(surf.get("flute_amp", 0.0))
+    if flute_amp > 0:
+        flutes = max(int(surf.get("flutes", 9)), 2)
+        twist = float(surf.get("flute_twist", 1.4))
+        mask = min(max((base_r - 0.22 * trunk_r) / (0.45 * trunk_r), 0.0), 1.0)
+        mask = mask * mask * (3.0 - 2.0 * mask)
+        r *= 1.0 + flute_amp * mask * np.sin(2.0 * np.pi * u * flutes + arclen * twist)
+    return r
+
+
 def add_tube_ring(
     mesh: Mesh,
     center,
@@ -194,6 +222,7 @@ def add_tube_ring(
     node_id: int,
     undulation: float = 0.0,
     arclen: float = 0.0,
+    surf: Dict | None = None,
 ) -> RingInfo:
     center = np.asarray(center, dtype=np.float64).reshape(3)
     t = normalize(np.cross(frame_n, frame_b))
@@ -202,10 +231,10 @@ def add_tube_ring(
         th = 2.0 * np.pi * j / n
         direction = np.cos(th) * np.asarray(frame_n) + np.sin(th) * np.asarray(frame_b)
         direction = normalize(direction)
-        r = radius
+        r = surface_radius(j / n, arclen, radius, surf)
         if undulation > 0:
             wob = np.sin(arclen * 2.1 + j * 2.39996) * 0.6 + np.sin(arclen * 5.7 + j * 1.3) * 0.4
-            r = radius * (1.0 + undulation * wob)
+            r = r * (1.0 + undulation * wob)
         p = center + direction * r
         idx.append(mesh.add_vert(p, node=node_id, u=j / n, kind=K_TUBE, center=center))
     return RingInfo(indices=idx, center=center, radius=radius, tangent=t)
@@ -258,6 +287,16 @@ def build_junction(
 
     collar_parent = float(mesh_opts.get("collar_parent", 1.12)) if isinstance(mesh_opts, dict) else 1.12
     collar_child = float(mesh_opts.get("collar_child", 1.06)) if isinstance(mesh_opts, dict) else 1.06
+    mo = mesh_opts if isinstance(mesh_opts, dict) else {}
+    surf: Dict = {
+        "trunk_r": skel.nodes[skel.root].radius,
+        "flare": bool(mo.get("flare", True)),
+        "buttress_lobes": int(mo.get("buttress_lobes", 6)),
+        "buttress_amp": float(mo.get("buttress_amp", 0.30)),
+        "flutes": int(mo.get("flutes", 9)),
+        "flute_amp": float(mo.get("flute_amp", 0.055)),
+        "flute_twist": float(mo.get("flute_twist", 1.4)),
+    }
     # collar swelling (branch collar like real trees) also keeps the throat full
     R0, R1, R2 = r0 * collar_parent, r1 * collar_child, r2 * collar_child
 
@@ -334,8 +373,9 @@ def build_junction(
         Bcoef = float(np.dot(bJ, ww))
         th_star = np.arctan2(-Acoef, Bcoef)
 
-        def ring_pt(th):
-            return C0 + R0 * (np.cos(th) * nJ + np.sin(th) * bJ)
+        def ring_pt(th, j=0):
+            rr = surface_radius((j % n0) / n0, Jn.arclen, R0, surf)
+            return C0 + rr * (np.cos(th) * nJ + np.sin(th) * bJ)
 
         # S_L (index 0) must sit on the child-1 side
         side_ref = Cc1 - J
@@ -343,7 +383,7 @@ def build_junction(
             np.dot(ring_pt(th_star) - J, side_ref)
         ):
             th_star += np.pi
-        pts = [ring_pt(th_star + 2.0 * np.pi * j / n0) for j in range(n0)]
+        pts = [ring_pt(th_star + 2.0 * np.pi * j / n0, j) for j in range(n0)]
         return pts
 
     def arc_points(center, radius, p_from, p_to, segs):
@@ -381,7 +421,8 @@ def build_junction(
             return pt
         wob = np.sin(Jn.arclen * 2.1 + k * 2.39996) * 0.6 + np.sin(Jn.arclen * 5.7 + k * 1.3) * 0.4
         d = normalize(pt - center)
-        return center + d * (base_radius * (1.0 + undulation * wob))
+        # preserve incoming radius (collar/flute modulation), add wobble
+        return center + d * (float(np.linalg.norm(pt - center)) * (1.0 + undulation * wob))
 
     Pidx = [
         mesh.add_vert(und(R0, p, C0, j), node=jid, u=j / n0, kind=K_JUNCTION, center=C0)
@@ -523,15 +564,21 @@ def build_tree_mesh(skel: Skeleton, opts: Dict | None = None) -> Mesh:
     mesh = Mesh()
     assert skel.root is not None
     trunk_r = skel.nodes[skel.root].radius
+    surf: Dict = {
+        "trunk_r": trunk_r,
+        "flare": do_flare,
+        "buttress_lobes": int(opts.get("buttress_lobes", 6)),
+        "buttress_amp": float(opts.get("buttress_amp", 0.30)),
+        "flutes": int(opts.get("flutes", 9)),
+        "flute_amp": float(opts.get("flute_amp", 0.055)),
+        "flute_twist": float(opts.get("flute_twist", 1.4)),
+    }
 
     in_ring: Dict[int, RingInfo] = {}
     out_rings: Dict[int, Dict[int, RingInfo]] = {}
 
     def tube_radius(node) -> float:
-        r = node.radius
-        if do_flare:
-            r *= flare_factor(node.arclen, trunk_r)
-        return r
+        return node.radius  # flare/flutes applied per-vertex in surface_radius
 
     # root ring
     root = skel.nodes[skel.root]
@@ -544,7 +591,7 @@ def build_tree_mesh(skel: Skeleton, opts: Dict | None = None) -> Mesh:
         add_root_cap(mesh, Pring, root.id)
     else:
         ring = add_tube_ring(mesh, root.pos, tube_radius(root), root.normal, root.binormal,
-                             root.ring_n, root.id, undulation, root.arclen)
+                             root.ring_n, root.id, undulation, root.arclen, surf)
         in_ring[root.id] = ring
         out_rings[root.id] = {c: ring for c in root.children}
         add_root_cap(mesh, ring, root.id)
@@ -573,13 +620,13 @@ def build_tree_mesh(skel: Skeleton, opts: Dict | None = None) -> Mesh:
             bridge_loops(mesh, parent_out.indices, Pring.indices)
         elif len(node.children) == 1:
             ring = add_tube_ring(mesh, node.pos, tube_radius(node), node.normal, node.binormal,
-                                 node.ring_n, nid, undulation, node.arclen)
+                                 node.ring_n, nid, undulation, node.arclen, surf)
             in_ring[nid] = ring
             out_rings[nid] = {node.children[0]: ring}
             bridge_loops(mesh, parent_out.indices, ring.indices)
         elif len(node.children) == 0:
             ring = add_tube_ring(mesh, node.pos, tube_radius(node), node.normal, node.binormal,
-                                 node.ring_n, nid, undulation, node.arclen)
+                                 node.ring_n, nid, undulation, node.arclen, surf)
             in_ring[nid] = ring
             bridge_loops(mesh, parent_out.indices, ring.indices)
             add_tip_cap(mesh, ring, nid)

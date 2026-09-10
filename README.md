@@ -36,13 +36,18 @@ python tools/frontier_cli.py batch --preset birch --seeds 1-8 --out out/birch_se
 python -m unittest tests.test_all
 ```
 
-Interactive wind proof (zero-dependency WebGL, pivot shader + wireframe):
+Interactive studio (zero-dependency WebGL: textured bark + normal maps,
+leaf cards, pivot wind, ground/fog) with preset + parametric shape sliders
+and one-click GLB/OBJ export:
 
 ```bash
-python tools/frontier_cli.py generate --preset oak --seed 1 --format viewer --out /tmp/fv
-cp /tmp/fv/oak_01_lod0.viewer.json viewer/tree.json
-python -m http.server --directory viewer 8123   # open localhost:8123
+python tools/frontier_server.py --port 8123    # open localhost:8123
 ```
+
+API: `GET /api/spec?preset=oak` (slider spec + defaults),
+`POST /api/generate` (`{preset, seed, lod, values}` → tree JSON),
+`POST /api/export` (`{…, format: glb|obj}` → file download).
+`viewer/tree.json` bundled so the studio paints instantly, even offline.
 
 ## How it works
 

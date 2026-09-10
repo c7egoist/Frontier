@@ -18,6 +18,11 @@ MESH_DEFAULT = {
     "relax": 2,
     "collar_parent": 1.12,
     "collar_child": 1.06,
+    "flutes": 9,
+    "flute_amp": 0.055,
+    "flute_twist": 1.4,
+    "buttress_lobes": 6,
+    "buttress_amp": 0.30,
 }
 
 LEAVES_OFF = {"enabled": False}
@@ -30,16 +35,17 @@ def _oak():
         "trunk_len": 3.4,
         "trunk_radius": 0.26,
         "tip_radius": 0.014,
-        "segs": 6,
+        "segs": 7,
         "len_decay": 0.62,
         "lat_ratio": 0.52,
         "branch_angle": 0.75,  # ~43 deg
         "branch_angle_spread": 0.20,
         "laterals": 1,
-        "laterals2_prob": 0.30,
+        "laterals2_prob": 0.45,
         "apical": 0.45,
         "phototropism": 0.05,
         "upright": 0.14,
+        "tip_lift": 0.10,
         "gravitrop": 0.030,
         "curl": 0.16,
         "up_bias": 0.02,
@@ -47,9 +53,9 @@ def _oak():
     }
     leaves = {
         "enabled": True,
-        "count": 900,
-        "size": 0.16,
-        "size_spread": 0.06,
+        "count": 1700,
+        "size": 0.20,
+        "size_spread": 0.07,
         "min_depth": 2,
         "cross": 2,
         "droop": 0.35,
@@ -60,11 +66,11 @@ def _oak():
 def _pine():
     skel = {
         "method": "recursive",
-        "max_depth": 3,
-        "trunk_len": 5.2,
+        "max_depth": 4,
+        "trunk_len": 5.6,
         "trunk_radius": 0.20,
         "tip_radius": 0.012,
-        "segs": 7,
+        "segs": 10,
         "len_decay": 0.55,
         "lat_ratio": 0.42,
         "branch_angle": 1.25,  # ~72 deg, near-horizontal whorls
@@ -76,6 +82,7 @@ def _pine():
         "apical": 0.9,
         "phototropism": 0.03,
         "upright": 0.20,
+        "tip_lift": 0.06,
         "gravitrop": 0.012,
         "curl": 0.07,
         "up_bias": 0.10,
@@ -84,9 +91,9 @@ def _pine():
     }
     leaves = {
         "enabled": True,
-        "count": 700,
-        "size": 0.20,
-        "size_spread": 0.05,
+        "count": 1200,
+        "size": 0.24,
+        "size_spread": 0.06,
         "min_depth": 2,
         "cross": 2,
         "droop": 0.15,
@@ -108,10 +115,11 @@ def _birch():
         "branch_angle": 0.55,  # ~32 deg, fastigiate
         "branch_angle_spread": 0.14,
         "laterals": 1,
-        "laterals2_prob": 0.20,
+        "laterals2_prob": 0.30,
         "apical": 0.7,
         "phototropism": 0.08,
         "upright": 0.22,
+        "tip_lift": 0.14,
         "gravitrop": 0.008,
         "curl": 0.10,
         "up_bias": 0.16,
@@ -119,9 +127,9 @@ def _birch():
     }
     leaves = {
         "enabled": True,
-        "count": 800,
-        "size": 0.11,
-        "size_spread": 0.04,
+        "count": 1800,
+        "size": 0.13,
+        "size_spread": 0.05,
         "min_depth": 2,
         "cross": 2,
         "droop": 0.45,
@@ -132,7 +140,7 @@ def _birch():
 def _broadleaf_colony():
     skel = {
         "method": "colonization",
-        "attractors": 800,
+        "attractors": 1000,
         "trunk_len": 2.4,
         "trunk_radius": 0.22,
         "tip_radius": 0.012,
@@ -142,15 +150,15 @@ def _broadleaf_colony():
         "envelope": "sphere",
         "crown_radius": 2.1,
         "crown_height": 2.6,
-        "max_nodes": 2600,
-        "max_iter": 160,
+        "max_nodes": 3200,
+        "max_iter": 170,
         "subdiv_factor": 2.5,
     }
     leaves = {
         "enabled": True,
-        "count": 1000,
-        "size": 0.15,
-        "size_spread": 0.06,
+        "count": 2000,
+        "size": 0.18,
+        "size_spread": 0.07,
         "min_depth": 3,
         "cross": 2,
         "droop": 0.35,
@@ -207,9 +215,16 @@ def apply_lod(skel_params, ring_params, mesh_opts, leaf_params, lod: int):
     if lod == 1:
         ring_params.update(RINGS_LOD1)
         skel_params["subdiv_factor"] = skel_params.get("subdiv_factor", 2.5) * 1.5
+        skel_params["segs"] = max(int(skel_params.get("segs", 6)) - 1, 3)
+        if skel_params.get("method") == "colonization":
+            skel_params["step"] = skel_params.get("step", 0.24) * 1.3
         leaf_params["count"] = int(leaf_params.get("count", 0) * 0.55)
     elif lod >= 2:
         ring_params.update(RINGS_LOD2)
         skel_params["subdiv_factor"] = skel_params.get("subdiv_factor", 2.5) * 2.2
+        skel_params["segs"] = max(int(skel_params.get("segs", 6)) - 1, 4)
+        skel_params["laterals2_prob"] = skel_params.get("laterals2_prob", 0.3) * 0.7
+        if skel_params.get("method") == "colonization":
+            skel_params["step"] = skel_params.get("step", 0.24) * 1.7
         leaf_params["count"] = int(leaf_params.get("count", 0) * 0.28)
     return skel_params, ring_params, mesh_opts, leaf_params
