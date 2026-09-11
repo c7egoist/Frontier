@@ -662,6 +662,17 @@ export class Mesher {
         const s = (z - stem.logicalStart) * stem.logicalLength;
         if (s > sStart && s < L) mand.push({ s, pri: 1 });
       }
+      // Culm nodes: rings on the ridge and on either shoulder of every swelling.
+      if (B.nodeSwell > 0) {
+        const sp = Math.max(0.01, B.nodeSpacing);
+        const w = 0.16 * sp;
+        for (let z = sp; z < 1; z += sp) {
+          for (const dz of [-w, -w * 0.5, 0, w * 0.5, w]) {
+            const s = (z + dz - stem.logicalStart) * stem.logicalLength;
+            if (s > sStart && s < L) mand.push({ s, pri: 1 });
+          }
+        }
+      }
     } else if (kind === 'side' && stem.role !== 'root') {
       // Follow the emergence bend: one ring per skeleton node across the first segment.
       const segLen = stem.logicalLength / curveRes;

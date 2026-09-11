@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment } from '../src/tree/params';
 import { buildSkeleton } from '../src/tree/skeleton';
 import { buildMesh } from '../src/tree/mesher';
@@ -11,6 +11,13 @@ function build(params: TreeParams) {
   const report = validateTopology(mesh);
   return { skel, mesh, leaves, stats, report };
 }
+
+// Each test is a long, fully synchronous mesh build. Between tests vitest only
+// yields microtasks, so the worker never gets to drain its message port; once a
+// file runs past the RPC timeout that surfaces as a spurious "Timeout calling
+// onTaskUpdate" error. A macrotask yield (setTimeout 0) between tests
+// lets the worker service its RPC replies.
+afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 describe('welded branch mesh is a single closed manifold', () => {
   for (const preset of PRESETS) {

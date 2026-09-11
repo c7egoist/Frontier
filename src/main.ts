@@ -501,6 +501,9 @@ function buildBotanyPage(): void {
   slider(sGlobal, 'Root flare', () => params.botany.flare, (v) => (params.botany.flare = v), { min: 0, max: 3, step: 0.05 }, onChange);
   slider(sGlobal, 'Base splits', () => params.botany.baseSplits, (v) => (params.botany.baseSplits = Math.round(v)), { min: -3, max: 4, step: 1, title: 'Clones at the base of the trunk (negative = up to N, random)' }, onChange);
   slider(sGlobal, 'Attraction up', () => params.botany.attractionUp, (v) => (params.botany.attractionUp = v), { min: -4, max: 4, step: 0.1, title: 'Vertical tropism. Negative droops (willow), positive reaches up.' }, onChange);
+  slider(sGlobal, 'Canopy flattening', () => params.botany.flatten, (v) => (params.botany.flatten = v), { min: 0, max: 1, step: 0.05, title: 'Pulls the fine growth towards the horizontal: flat-topped canopies (acacia).' }, onChange);
+  slider(sGlobal, 'Culm nodes', () => params.botany.nodeSwell, (v) => (params.botany.nodeSwell = v), { min: 0, max: 0.4, step: 0.01, title: 'Periodic swelling of the trunk (bamboo). 0 = none.' }, onChange);
+  slider(sGlobal, 'Node spacing', () => params.botany.nodeSpacing, (v) => (params.botany.nodeSpacing = v), { min: 0.02, max: 0.2, step: 0.005, title: 'Distance between culm nodes as a fraction of the trunk length.' }, onChange);
 
   const enabled = (): number => params.botany.levels;
   const lvl = (key: keyof typeof b): (() => number[]) => () => params.botany[key] as number[];

@@ -200,6 +200,19 @@ function applyTropism(t: Turtle, tropism: V3, fraction: number): void {
   t.right = normalize(rotateAxis(t.right, axis, alpha));
 }
 
+/** Pull the heading towards the horizontal plane (flat-topped canopies). */
+function flattenTowardsHorizontal(t: Turtle, amount: number): void {
+  const h = { x: t.dir.x, y: 0, z: t.dir.z };
+  const hl = length(h);
+  if (hl < 1e-6) return;
+  const target = vscale(h, 1 / hl);
+  const ang = angleBetween(t.dir, target);
+  if (ang < 1e-5) return;
+  const step = Math.min(ang, 12 * amount * DEG2RAD * Math.sin(ang));
+  const nd = rotateTowards(t.dir, target, step);
+  setDirection(t, nd);
+}
+
 /** Skeleton sub-steps per Weber-Penn segment (independent of mesh resolution). */
 const SUBSTEPS = [6, 4, 3, 2];
 /** Maximum angle between a side child and the parent surface normal at emergence. */
@@ -244,6 +257,21 @@ export function taperRadius(radius0: number, nTaper: number, z: number, logicalL
   return (1 - depth) * taper + depth * Math.sqrt(inner);
 }
 
+/**
+ * Culm nodes (bamboo): a short, smooth ridge every `nodeSpacing` of the trunk
+ * length, `nodeSwell` high relative to the radius. Zero at the very base so
+ * the trunk ring the roots are welded into stays round.
+ */
+export function nodeSwellFactor(botany: BotanyParams, z: number): number {
+  const spacing = Math.max(0.01, botany.nodeSpacing);
+  const u = (z / spacing) % 1; // 0..1 within an internode
+  const w = 0.16; // ridge half-width as a fraction of the internode
+  const d = Math.min(u, 1 - u) / w;
+  if (d >= 1) return 1;
+  const bump = 0.5 + 0.5 * Math.cos(Math.PI * d);
+  return 1 + botany.nodeSwell * bump * Math.min(1, z / spacing);
+}
+
 export function flareFactor(flare: number, z: number): number {
   const y = Math.max(0, 1 - 8 * z);
   return flare * ((Math.pow(100, y) - 1) / 100) + 1;
@@ -277,7 +305,10 @@ export function stemRadiusAt(stem: Stem, s: number, mesh: MeshParams, botany: Bo
     r = stem.logicalRadius * Math.pow(Math.max(0, 1 - z), Math.max(0.05, stem.taper));
   } else {
     r = taperRadius(stem.logicalRadius, stem.taper, z, stem.logicalLength);
-    if (stem.level === 0) r *= flareFactor(botany.flare, z);
+    if (stem.level === 0) {
+      r *= flareFactor(botany.flare, z);
+      if (botany.nodeSwell > 0) r *= nodeSwellFactor(botany, z);
+    }
   }
   r *= stem.radiusFactor;
   if (stem.children.length) r *= pipeFactor(stem, s, mesh);
@@ -501,7 +532,10 @@ export class SkeletonBuilder {
           const nd = rotateTowards(turtle.dir, emergeTarget, emergeAngle / substeps);
           setDirection(turtle, nd);
         }
-        if (level > 1) applyTropism(turtle, this.tropism, 1 / substeps);
+        if (level > 1) {
+          applyTropism(turtle, this.tropism, 1 / substeps);
+          if (p.flatten > 0) flattenTowardsHorizontal(turtle, p.flatten / substeps);
+        }
         turtle.pos = addScaled(turtle.pos, turtle.dir, stepLen);
         s += stepLen;
         stem.nodes.push({ pos: clone(turtle.pos), dir: clone(turtle.dir), right: clone(turtle.right), s });
