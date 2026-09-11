@@ -1,5 +1,5 @@
 import './ui/styles.css';
-import { PRESETS, TreeParams, cloneParams, SHAPE_NAMES, Shape, scatterFor, trunkBaseRadius, rootReach } from './tree/params';
+import { PRESETS, PRESET_GROUPS, TreeParams, cloneParams, SHAPE_NAMES, Shape, scatterFor, trunkBaseRadius, rootReach } from './tree/params';
 import { Viewer, DEFAULT_VIEW, ViewerSettings, DisplayMode } from './viewer/scene';
 import { el, section, slider, select, check, levelsHeader, levelRow, fmtInt } from './ui/controls';
 import type { WorkerRequest, WorkerResponse, GenerateResponse } from './worker/tree.worker';
@@ -251,6 +251,9 @@ function syncView(): void {
 // -----------------------------------------------------------------------------
 
 let debounceTimer = 0;
+/** Re-frame the camera once the next tree arrives (species change: sizes differ wildly). */
+let frameOnNext = false;
+
 function scheduleGenerate(immediate = false): void {
   window.clearTimeout(debounceTimer);
   debounceTimer = window.setTimeout(() => generate(), immediate ? 0 : 140);
@@ -304,7 +307,8 @@ worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
     const firstTree = !hasTree;
     viewer.setTree(buffers, leaves, msg.summary.height);
     viewer.setObstacles(msg.obstacles);
-    if (firstTree) viewer.frame();
+    if (firstTree || frameOnNext) viewer.frame();
+    frameOnNext = false;
     hasTree = true;
     updateReport(msg);
     if (pending) {
@@ -439,17 +443,28 @@ function buildBotanyPage(): void {
   const sPreset = section('Species', page);
   const presetRow = el('div', 'preset-row');
   const presetSel = el('select');
-  for (const p of PRESETS) {
-    const o = el('option', '', p.name);
-    o.value = p.name;
-    presetSel.append(o);
-  }
+  const grouped = new Set<string>();
+  const addGroup = (label: string, names: string[]): void => {
+    const og = el('optgroup');
+    og.label = label;
+    for (const name of names) {
+      if (!PRESETS.some((p) => p.name === name)) continue;
+      const o = el('option', '', name);
+      o.value = name;
+      og.append(o);
+      grouped.add(name);
+    }
+    if (og.childElementCount > 0) presetSel.append(og);
+  };
+  for (const g of PRESET_GROUPS) addGroup(g.label, g.names);
+  addGroup('Other', PRESETS.map((p) => p.name).filter((n) => !grouped.has(n)));
   presetSel.value = params.name;
   presetSel.addEventListener('change', () => {
     const seed = params.seed;
     params = cloneParams(PRESETS.find((p) => p.name === presetSel.value)!);
     params.seed = seed;
     selectedObstacle = -1;
+    frameOnNext = true;
     buildBotanyPage();
     buildRootsPage();
     buildMeshPage();
@@ -805,6 +820,7 @@ generate();
   setPreset(name: string) {
     params = cloneParams(PRESETS.find((p) => p.name === name) ?? PRESETS[0]);
     selectedObstacle = -1;
+    frameOnNext = true;
     buildBotanyPage();
     buildRootsPage();
     buildMeshPage();

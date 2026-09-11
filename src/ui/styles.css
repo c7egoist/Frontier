@@ -537,6 +537,23 @@ select {
   padding: 3px 8px;
   height: 26px;
 }
+select optgroup {
+  font-style: normal;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  background: var(--bg-1);
+}
+select option {
+  font-weight: 400;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text-0);
+  background: var(--bg-2);
+}
 
 /* ---------------------------------------------------------- site objects */
 .obj-tools {

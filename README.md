@@ -16,7 +16,7 @@ npm run build      # static bundle in dist/
 
 | Stage | Module | Summary |
 |---|---|---|
-| Botany | `src/tree/skeleton.ts` | Weber–Penn parametric model (SIGGRAPH '95): per-level curvature, S-curves, clones/splits, phyllotactic child placement, crown-shape length envelopes, taper, root flare, tropism. 8 species presets in `src/tree/params.ts`. |
+| Botany | `src/tree/skeleton.ts` | Weber–Penn parametric model (SIGGRAPH '95): per-level curvature, S-curves, clones/splits, phyllotactic child placement, crown-shape length envelopes, taper, root flare, tropism. 30 species presets grouped by biome (oaks, forest broadleaf and conifers, jungle, savanna, desert, rocky terrain) in `src/tree/params.ts`. |
 | Meshing | `src/tree/mesher.ts` | **Welded quad mesher** (below). Emits quads only, plus ≤1 triangle per tip cap for odd ring counts. |
 | Validation | `src/tree/validate.ts` | Half-edge style audit: boundary edges, non-manifold edges, winding consistency, degenerate faces, isolated vertices, connected components, Euler characteristic / genus, valence histogram. |
 | Wind | `src/viewer/shaders.ts` | Three-tier vertex wind (trunk sway ∝ height², limb bending about a per-limb pivot with phase, twig/leaf flutter). Data is baked per vertex by the mesher. |

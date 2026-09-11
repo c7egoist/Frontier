@@ -184,9 +184,7 @@ export class Mesher {
     if (base.kind === 'fork') loop = base.dRing.slice();
     if (loop) {
       const smp = sampleStem(stem, sStart);
-      const fit = this.fitPhase(loop, smp.pos, smp.dir, smp.right);
-      phase = fit.phase;
-      if (fit.reversed) loop.reverse();
+      phase = this.fitPhase(loop, smp.pos, smp.dir, smp.right);
     }
 
     // Plan the windows of the side children.
@@ -393,14 +391,19 @@ export class Mesher {
   }
 
   /**
-   * Fit a regular angular spacing to an arbitrary closed loop as seen along
-   * `dir`. Returns the starting angle and whether the loop winds clockwise
-   * (in which case the caller must reverse it). The winding is taken from the
-   * signed area of the projected polygon and the angles are measured from the
-   * projected centroid, so the result does not depend on where the stem axis
-   * happens to pierce the loop.
+   * Fit a regular angular spacing to a closed loop as seen along `dir`:
+   * returns the starting angle that best aligns ring vertex k with loop
+   * vertex k. The angles are measured from the projected centroid, so the
+   * result does not depend on where the stem axis happens to pierce the loop.
+   *
+   * The loop's orientation is not inferred here: hole loops and fork D-rings
+   * are both assembled so that they run counter-clockwise as seen from the
+   * child's tip, which is the winding of the child's rings. (A signed-area
+   * test on the projection was used before; it lies when the loop is folded
+   * in projection, e.g. a root leaving a steep buttress almost tangentially,
+   * and reversing the loop then winds every bridge quad against the parent.)
    */
-  private fitPhase(loop: number[], center: V3, dir: V3, right: V3): { phase: number; reversed: boolean } {
+  private fitPhase(loop: number[], center: V3, dir: V3, right: V3): number {
     const up = cross(dir, right);
     const M = loop.length;
     const xs: number[] = new Array(M);
@@ -416,25 +419,14 @@ export class Mesher {
     }
     cx /= M;
     cy /= M;
-    let area2 = 0;
-    for (let k = 0; k < M; k++) {
-      const k1 = (k + 1) % M;
-      area2 += xs[k] * ys[k1] - xs[k1] * ys[k];
-    }
-    const reversed = area2 < 0;
-    const psi: number[] = new Array(M);
-    for (let k = 0; k < M; k++) {
-      const kk = reversed ? M - 1 - k : k;
-      psi[k] = Math.atan2(ys[kk] - cy, xs[kk] - cx);
-    }
     let sx = 0;
     let sy = 0;
     for (let k = 0; k < M; k++) {
-      const a = psi[k] - (TAU * k) / M;
+      const a = Math.atan2(ys[k] - cy, xs[k] - cx) - (TAU * k) / M;
       sx += Math.cos(a);
       sy += Math.sin(a);
     }
-    return { phase: Math.atan2(sy, sx), reversed };
+    return Math.atan2(sy, sx);
   }
 
   /** Quads between two loops of equal length: (a[k], a[k+1], b[k+1], b[k]). */
