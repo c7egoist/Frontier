@@ -98,6 +98,12 @@ export interface BotanyParams {
   leaves: number;
   leafScale: number;
   leafScaleX: number;
+  /**
+   * Fraction of each terminal stem, measured back from its tip, that carries
+   * leaves. 1 spreads them along the whole stem (broadleaf); small values
+   * gather them into a tip tuft (yucca rosettes, foxtail pine brushes).
+   */
+  leafTuft: number;
 }
 
 export interface MeshParams {
@@ -265,6 +271,7 @@ export const DEFAULT_BOTANY: BotanyParams = {
   leaves: 25,
   leafScale: 0.17,
   leafScaleX: 1,
+  leafTuft: 1,
 };
 
 export function cloneParams(p: TreeParams): TreeParams {
@@ -1212,17 +1219,20 @@ export const PRESETS: TreeParams[] = [
     segSplits: L(0.7, 0.9, 0.9, 0),
     splitAngle: L(80, 60, 60, 0),
     splitAngleV: L(20, 15, 15, 0),
-    downAngle: L(0, 55, 55, 45),
-    downAngleV: L(0, 10, 10, 10),
-    rotate: L(0, 140, 140, 140),
-    rotateV: L(0, 40, 40, 0),
+    downAngle: L(0, 55, 55, 50),
+    downAngleV: L(0, 10, 10, 40),
+    rotate: L(0, 140, 140, 137),
+    rotateV: L(0, 40, 40, 20),
     branches: L(1, 4, 3, 0),
     branchDist: L(0, 0, 0, 0),
     radiusMod: L(1, 0.95, 0.95, 1),
     attractionUp: 1.0,
-    leaves: 0,
-    leafScale: 0.2,
-    leafScaleX: 0.15,
+    // Foliage: a dense rosette of stiff, bayonet-shaped leaves (15–35 cm) at
+    // the tip of every arm; the arms themselves stay bare.
+    leaves: 110,
+    leafScale: 0.32,
+    leafScaleX: 0.12,
+    leafTuft: 0.2,
   }, { trunkRadialSegments: 20, rootLobeAmplitude: 0.15, rootLobeHeight: 0.05 }, { count: 4, radius: 0.3, length: 0.12, laterals: 1, forks: 0.3 }),
 
   preset('Desert Ironwood', {
@@ -1286,17 +1296,20 @@ export const PRESETS: TreeParams[] = [
     segSplits: L(0.5, 0.45, 0.2, 0),
     splitAngle: L(55, 55, 45, 0),
     splitAngleV: L(15, 15, 10, 0),
-    downAngle: L(0, 55, 50, 45),
-    downAngleV: L(0, -15, 20, 20),
-    rotate: L(0, 110, 140, 140),
-    rotateV: L(0, 50, 50, 0),
+    downAngle: L(0, 55, 50, 40),
+    downAngleV: L(0, -15, 20, 35),
+    rotate: L(0, 110, 140, 137),
+    rotateV: L(0, 50, 50, 30),
     branches: L(1, 7, 16, 0),
     branchDist: L(0, 0, 0, 0),
     radiusMod: L(1, 1, 1, 1),
     attractionUp: 0.7,
-    leaves: 20,
-    leafScale: 0.05,
-    leafScaleX: 0.15,
+    // Foliage: short needles (2.5–4 cm) packed into bottle-brush tufts on the
+    // outer half of every branchlet.
+    leaves: 220,
+    leafScale: 0.07,
+    leafScaleX: 0.35,
+    leafTuft: 0.4,
   }, { trunkRadialSegments: 28, rootLobeAmplitude: 0.5, rootLobeHeight: 0.1 }, { count: 6, radius: 0.5, length: 0.3, laterals: 2, forks: 0.6, exposure: 0.7, climb: 6 }),
 
   preset('Rowan', {

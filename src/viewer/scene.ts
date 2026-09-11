@@ -114,8 +114,8 @@ export class Viewer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    this.scene.background = new THREE.Color(0x1b1d21);
-    this.scene.fog = new THREE.Fog(0x1b1d21, 60, 220);
+    this.scene.background = new THREE.Color(0x0c0d10);
+    this.scene.fog = new THREE.Fog(0x0c0d10, 60, 220);
 
     this.pmrem = new THREE.PMREMGenerator(this.renderer);
     this.scene.environment = this.pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
@@ -144,16 +144,16 @@ export class Viewer {
     const hemi = new THREE.HemisphereLight(0xbcd0e8, 0x3a3229, 0.55);
     this.scene.add(hemi);
 
-    this.groundMat = new THREE.MeshStandardMaterial({ color: 0x24262b, roughness: 1, metalness: 0 });
+    this.groundMat = new THREE.MeshStandardMaterial({ color: 0x1a1c20, roughness: 1, metalness: 0 });
     this.ground = new THREE.Mesh(new THREE.CircleGeometry(400, 64), this.groundMat);
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.receiveShadow = true;
     this.scene.add(this.ground);
     this.scene.add(this.obstacleGroup);
 
-    this.grid = new THREE.GridHelper(80, 80, 0x3a3d44, 0x2a2d33);
+    this.grid = new THREE.GridHelper(80, 80, 0x3b3e46, 0x2a2d34);
     (this.grid.material as THREE.Material).transparent = true;
-    (this.grid.material as THREE.Material).opacity = 0.6;
+    (this.grid.material as THREE.Material).opacity = 0.55;
     this.grid.position.y = 0.002;
     this.scene.add(this.grid);
 
@@ -489,16 +489,18 @@ export class Viewer {
         .replace(
           '#include <common>',
           `#include <common>\nuniform float uMode;\nuniform sampler2D uMatcap;\nvarying vec4 vWindV;\nvarying float vLevel;\nvarying float vJunction;\nvarying vec3 vViewNrm;
+          // Debug palettes are authored in sRGB; convert so they survive lighting + tone mapping.
+          vec3 srgbIn(vec3 c) { return pow(c, vec3(2.2)); }
           vec3 levelColor(float l) {
-            if (l < 0.5) return vec3(0.54, 0.35, 0.23);
-            if (l < 1.5) return vec3(0.79, 0.55, 0.29);
-            if (l < 2.5) return vec3(0.44, 0.63, 0.42);
-            if (l < 3.5) return vec3(0.35, 0.63, 0.79);
-            return vec3(0.72, 0.42, 0.36);
+            if (l < 0.5) return srgbIn(vec3(0.54, 0.35, 0.23));
+            if (l < 1.5) return srgbIn(vec3(0.79, 0.55, 0.29));
+            if (l < 2.5) return srgbIn(vec3(0.44, 0.63, 0.42));
+            if (l < 3.5) return srgbIn(vec3(0.35, 0.63, 0.79));
+            return srgbIn(vec3(0.72, 0.42, 0.36));
           }
           vec3 heat(float t) {
             t = clamp(t, 0.0, 1.0);
-            return mix(mix(vec3(0.10, 0.20, 0.55), vec3(0.20, 0.75, 0.55), smoothstep(0.0, 0.5, t)), vec3(0.98, 0.85, 0.25), smoothstep(0.5, 1.0, t));
+            return srgbIn(mix(mix(vec3(0.10, 0.20, 0.55), vec3(0.20, 0.75, 0.55), smoothstep(0.0, 0.5, t)), vec3(0.98, 0.85, 0.25), smoothstep(0.5, 1.0, t)));
           }`,
         )
         .replace(
@@ -506,7 +508,7 @@ export class Viewer {
           `#include <color_fragment>
           if (uMode > 0.5 && uMode < 1.5) diffuseColor.rgb = levelColor(vLevel);
           else if (uMode > 1.5 && uMode < 2.5) diffuseColor.rgb = heat(vWindV.y * 0.75 + vWindV.w * 0.25);
-          else if (uMode > 2.5 && uMode < 3.5) diffuseColor.rgb = mix(vec3(0.62, 0.60, 0.58), vec3(0.95, 0.42, 0.18), vJunction);
+          else if (uMode > 2.5 && uMode < 3.5) diffuseColor.rgb = srgbIn(mix(vec3(0.62, 0.60, 0.58), vec3(0.95, 0.42, 0.18), vJunction));
           else if (uMode > 5.5) diffuseColor.rgb = vec3(0.16, 0.17, 0.19);`,
         )
         .replace(
@@ -520,7 +522,7 @@ export class Viewer {
           }`,
         );
     };
-    mat.customProgramCacheKey = () => 'bark-wind-v3';
+    mat.customProgramCacheKey = () => 'bark-wind-v4';
     return mat;
   }
 

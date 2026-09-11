@@ -1,12 +1,14 @@
 import './ui/styles.css';
 import { PRESETS, PRESET_GROUPS, TreeParams, cloneParams, SHAPE_NAMES, Shape, scatterFor, trunkBaseRadius, rootReach } from './tree/params';
 import { Viewer, DEFAULT_VIEW, ViewerSettings, DisplayMode } from './viewer/scene';
-import { el, section, slider, select, check, levelsHeader, levelRow, fmtInt } from './ui/controls';
+import { el, icon, button, section, slider, select, check, stepper, levelsHeader, levelRow, fmtInt, fmtCompact } from './ui/controls';
 import type { WorkerRequest, WorkerResponse, GenerateResponse } from './worker/tree.worker';
 import { LeafMesh } from './tree/mesh';
 import { GpuBuffers } from './tree/export';
 import { ObstacleKind, ObstacleSpec, makeObstacle, scatterObstacles } from './env/environment';
 import { Random } from './core/random';
+
+const APP_NAME = 'Frontier';
 
 // -----------------------------------------------------------------------------
 // State
@@ -22,16 +24,49 @@ let reqId = 0;
 const worker = new Worker(new URL('./worker/tree.worker.ts', import.meta.url), { type: 'module' });
 
 // -----------------------------------------------------------------------------
-// Layout
+// Layout: three floating cards – Library · Viewport · Inspector
 // -----------------------------------------------------------------------------
 
 const app = document.getElementById('app')!;
+app.append(el('div', 'bg'));
 
-const topbar = el('div', 'topbar');
-const brand = el('div', 'brand');
-brand.append(el('span', 'mark'), el('span', '', 'Frontier'), el('span', 'sub', 'Tree Generator'));
-topbar.append(brand);
+// ---- Library (left) ---------------------------------------------------------
 
+const library = el('aside', 'card library');
+{
+  const head = el('div', 'card-head');
+  const h1 = el('h1');
+  h1.append(el('span', 'dot green'), document.createTextNode('Library'));
+  head.append(h1, el('span', 'badge', APP_NAME + ' · species'));
+  library.append(head);
+}
+const libTiles = el('div', 'tiles');
+const tileSpecies = el('div', 'tile');
+const tileFaces = el('div', 'tile');
+libTiles.append(tileSpecies, tileFaces);
+library.append(libTiles);
+
+const searchRow = el('div', 'search');
+searchRow.append(icon('search'));
+const searchInput = el('input');
+searchInput.placeholder = 'Search species…';
+searchInput.spellcheck = false;
+searchRow.append(searchInput);
+library.append(searchRow);
+
+const libTree = el('div', 'tree');
+library.append(libTree);
+
+const libFoot = el('div', 'card-foot');
+library.append(libFoot);
+
+// ---- Viewport (centre) ------------------------------------------------------
+
+const viewport = el('main', 'card viewport');
+const canvas = el('canvas');
+viewport.append(canvas);
+
+const vtop = el('div', 'vtop');
 const modeSeg = el('div', 'seg');
 const MODES: { id: DisplayMode; label: string }[] = [
   { id: 'shaded', label: 'Shaded' },
@@ -39,11 +74,11 @@ const MODES: { id: DisplayMode; label: string }[] = [
   { id: 'wireframe', label: 'Wire' },
   { id: 'levels', label: 'Levels' },
   { id: 'junctions', label: 'Junctions' },
-  { id: 'wind', label: 'Wind weights' },
+  { id: 'wind', label: 'Wind' },
 ];
 const modeButtons = new Map<DisplayMode, HTMLButtonElement>();
 for (const m of MODES) {
-  const b = el('button', m.id === view.mode ? 'active' : '', m.label);
+  const b = el('button', m.id === view.mode ? 'on' : '', m.label);
   b.addEventListener('click', () => {
     view.mode = m.id;
     syncView();
@@ -51,38 +86,76 @@ for (const m of MODES) {
   modeButtons.set(m.id, b);
   modeSeg.append(b);
 }
-topbar.append(el('div', 'spacer'), modeSeg);
-
-const wireToggle = el('button', 'btn ghost', 'Quad overlay');
+const toggleSeg = el('div', 'seg');
+const wireToggle = el('button');
+wireToggle.append(icon('quad'), el('span', '', 'Quads'));
+wireToggle.title = 'Quad overlay';
 wireToggle.addEventListener('click', () => {
   view.showWire = !view.showWire;
   syncView();
 });
-const windToggle = el('button', 'btn ghost', 'Wind');
+const windToggle = el('button');
+windToggle.append(icon('wind'), el('span', '', 'Wind'));
+windToggle.title = 'Animate wind';
 windToggle.addEventListener('click', () => {
   view.windEnabled = !view.windEnabled;
   syncView();
 });
-const frameBtn = el('button', 'btn ghost');
-frameBtn.append(document.createTextNode('Frame '), Object.assign(el('kbd'), { textContent: 'F' }));
-const exportObj = el('button', 'btn', 'Export OBJ');
-const exportGlb = el('button', 'btn', 'Export GLB');
-const shotBtn = el('button', 'btn ghost', 'Screenshot');
-const topGroup = el('div', 'group');
-topGroup.append(wireToggle, windToggle, frameBtn, shotBtn, exportObj, exportGlb);
-topbar.append(topGroup);
+const leavesToggle = el('button');
+leavesToggle.append(icon('leaf'), el('span', '', 'Leaves'));
+leavesToggle.title = 'Leaf cards';
+leavesToggle.addEventListener('click', () => {
+  view.showLeaves = !view.showLeaves;
+  syncView();
+});
+toggleSeg.append(wireToggle, leavesToggle, windToggle);
+const actionSeg = el('div', 'seg');
+const frameBtn = el('button');
+frameBtn.append(icon('frame'), el('span', '', 'Frame'));
+frameBtn.title = 'Frame the tree · F';
+const shotBtn = el('button');
+shotBtn.append(icon('camera'));
+shotBtn.title = 'Save a PNG of the viewport';
+actionSeg.append(frameBtn, shotBtn);
+const exportSeg = el('div', 'seg');
+const exportObj = el('button');
+exportObj.append(icon('download'), el('span', '', 'OBJ'));
+const exportGlb = el('button');
+exportGlb.append(icon('download'), el('span', '', 'GLB'));
+exportSeg.append(exportObj, exportGlb);
+vtop.append(modeSeg, el('span', 'spacer'), toggleSeg, actionSeg, exportSeg);
+viewport.append(vtop);
 
-const viewport = el('div', 'viewport');
-const canvas = el('canvas');
-viewport.append(canvas);
+const axisHud = el('div', 'axis-hud');
+const camPill = el('div', 'pill');
+const sizePill = el('div', 'pill');
+axisHud.append(sizePill, camPill);
+viewport.append(axisHud);
+
+const vtitle = el('div', 'vtitle');
+const vtitleName = el('span', 'n');
+const vtitleMeta = el('span', 'm');
+vtitle.append(vtitleName, vtitleMeta);
+viewport.append(vtitle);
 
 const hud = el('div', 'hud');
-const status = el('div', 'status');
-const statusDot = el('span', 'dot');
+const navPill = el('div', 'nav glass keysbar');
+const keys = el('div', 'keys');
+for (const [k, l] of [
+  ['LMB', 'orbit'],
+  ['RMB', 'pan'],
+  ['F', 'frame'],
+  ['B', 'base'],
+  ['R', 'reseed'],
+]) {
+  keys.append(el('span', 'k', k), el('span', 'kl', l));
+}
+navPill.append(keys);
+const status = el('div', 'nav glass status');
+const statusDot = el('span', 'sdot');
 const statusText = el('span', '', 'Idle');
 status.append(statusDot, statusText);
-const chip = el('div', 'chip');
-hud.append(status, chip);
+hud.append(status, navPill);
 viewport.append(hud);
 
 const legend = el('div', 'legend');
@@ -91,15 +164,33 @@ viewport.append(legend);
 const toast = el('div', 'toast');
 viewport.append(toast);
 
-const panel = el('aside', 'panel');
+const errBar = el('div', 'errbar');
+viewport.append(errBar);
+
+// ---- Inspector (right) ------------------------------------------------------
+
+const panel = el('aside', 'card inspector');
+{
+  const head = el('div', 'card-head');
+  const h1 = el('h1');
+  h1.append(el('span', 'dot orange'), document.createTextNode('Inspector'));
+  const badge = el('span', 'badge', 'tree · welded');
+  head.append(h1, badge);
+  panel.append(head);
+}
+const hero = el('div', 'hero');
+panel.append(hero);
+const presence = el('div', 'presence');
+panel.append(presence);
+
 const tabs = el('div', 'tabs');
-const tabBotany = el('button', 'active', 'Botany');
-const tabRoots = el('button', '', 'Roots & Site');
+const tabBotany = el('button', 'on', 'Botany');
+const tabRoots = el('button', '', 'Roots');
 const tabMesh = el('button', '', 'Mesh');
-const tabView = el('button', '', 'Viewport');
+const tabView = el('button', '', 'View');
 const tabReport = el('button', '', 'Topology');
 tabs.append(tabBotany, tabRoots, tabMesh, tabView, tabReport);
-const scroll = el('div', 'scroll');
+const scroll = el('div', 'insp');
 panel.append(tabs, scroll);
 
 const pages = {
@@ -119,28 +210,37 @@ const tabMap: [HTMLButtonElement, HTMLElement][] = [
 ];
 function showTab(btn: HTMLButtonElement): void {
   for (const [b, p] of tabMap) {
-    b.classList.toggle('active', b === btn);
+    b.classList.toggle('on', b === btn);
     p.style.display = b === btn ? '' : 'none';
   }
+  scroll.scrollTop = 0;
 }
 for (const [btn] of tabMap) btn.addEventListener('click', () => showTab(btn));
 showTab(tabBotany);
 
-const statusbar = el('div', 'statusbar');
-const sbLeft = el('span');
-const sbMid = el('span');
-const sbRight = el('span', 'right');
-statusbar.append(sbLeft, sbMid, sbRight);
+const cmdline = el('div', 'cmdline');
+const cmdPrompt = el('span', 'prompt', '›');
+const cmdInput = el('input');
+cmdInput.placeholder = 'command · seed 42 · preset oak · mode wire · export glb · help';
+cmdInput.spellcheck = false;
+cmdline.append(cmdPrompt, cmdInput);
+panel.append(cmdline);
 
-app.append(topbar, viewport, panel, statusbar);
+app.append(library, viewport, panel);
 
 // -----------------------------------------------------------------------------
 // Viewer
 // -----------------------------------------------------------------------------
 
 const viewer = new Viewer(canvas);
+const narrowObserver = new ResizeObserver(() => viewport.classList.toggle('narrow', viewport.clientWidth < 860));
+narrowObserver.observe(viewport);
+let camTick = 0;
 viewer.onFrame(() => {
-  sbRight.textContent = `${viewer.fps.toFixed(0)} fps`;
+  if (++camTick % 6 !== 0) return;
+  const az = ((viewer.controls.getAzimuthalAngle() * 180) / Math.PI + 360) % 360;
+  const elv = 90 - (viewer.controls.getPolarAngle() * 180) / Math.PI;
+  camPill.textContent = `persp · az ${az.toFixed(0)}° · el ${elv.toFixed(0)}° · d ${viewer.controls.getDistance().toFixed(1)} m · ${viewer.fps.toFixed(0)} fps`;
 });
 frameBtn.addEventListener('click', () => viewer.frame());
 window.addEventListener('keydown', (e) => {
@@ -205,9 +305,11 @@ shotBtn.addEventListener('click', () => {
 
 function syncView(): void {
   viewer.applySettings(view);
-  for (const [id, b] of modeButtons) b.classList.toggle('active', id === view.mode);
-  wireToggle.classList.toggle('primary', view.showWire);
-  windToggle.classList.toggle('primary', view.windEnabled);
+  if (lastResult) refreshPresence();
+  for (const [id, b] of modeButtons) b.classList.toggle('on', id === view.mode);
+  wireToggle.classList.toggle('on', view.showWire);
+  windToggle.classList.toggle('on', view.windEnabled);
+  leavesToggle.classList.toggle('on', view.showLeaves);
   legend.style.display = view.mode === 'levels' || view.mode === 'junctions' || view.mode === 'wind' ? '' : 'none';
   legend.innerHTML = '';
   if (view.mode === 'levels') {
@@ -275,7 +377,9 @@ worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
   const msg = ev.data;
   if (msg.type === 'error') {
     busy = false;
-    setStatus('err', `Error: ${msg.message}`);
+    setStatus('err', 'Generation failed');
+    errBar.textContent = msg.message;
+    errBar.classList.add('show');
     console.error(msg.message);
     return;
   }
@@ -320,41 +424,167 @@ worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
 let hasTree = false;
 
 function setStatus(kind: 'ok' | 'warn' | 'err' | 'busy' | '', text: string): void {
-  statusDot.className = 'dot ' + kind;
+  statusDot.className = 'sdot ' + kind;
   statusText.textContent = text;
+  if (kind !== 'err') errBar.classList.remove('show');
 }
 
 // -----------------------------------------------------------------------------
 // Report
 // -----------------------------------------------------------------------------
 
+function kvSpan(ico: string, label: string, value: string, cls = ''): HTMLElement {
+  const sp = el('span', 'kv' + (cls ? ' ' + cls : ''));
+  sp.append(icon(ico), document.createTextNode(label + (value ? ' ' : '')));
+  if (value) sp.append(el('b', '', value));
+  return sp;
+}
+
+function refreshPresence(): void {
+  const cells = presence.querySelectorAll<HTMLElement>('.pcell');
+  const states = [view.showLeaves, view.showObstacles, view.showGrid, view.windEnabled];
+  cells.forEach((c, i) => c.classList.toggle('on', states[i]));
+}
+
+function groupOf(name: string): string {
+  return PRESET_GROUPS.find((g) => g.names.includes(name))?.label ?? 'Custom';
+}
+
+function groupIcon(name: string): string {
+  const g = groupOf(name);
+  if (g.includes('conifer') || g.includes('Rocky')) return 'conifer';
+  if (g === 'Jungle') return 'palm';
+  if (g === 'Savanna') return 'acacia';
+  if (g === 'Desert') return 'yucca';
+  return 'tree';
+}
+
+/** Tiny bar chart of stems per level (trunk → twigs → roots) in the hero card. */
+function drawSpark(cv: HTMLCanvasElement, levels: number[], roots: number): void {
+  const w = 96;
+  const h = 56;
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = w * dpr;
+  cv.height = h * dpr;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+  ctx.scale(dpr, dpr);
+  const vals = [...levels, roots];
+  const max = Math.max(1, ...vals);
+  const colours = ['#8a5a3c', '#c98b4b', '#6fa16b', '#5aa1c9', '#b86b5c'];
+  const bw = 12;
+  const gap = (w - bw * vals.length) / (vals.length - 1);
+  vals.forEach((v, i) => {
+    const bh = Math.max(2, (Math.log1p(v) / Math.log1p(max)) * (h - 14));
+    const x = i * (bw + gap);
+    ctx.fillStyle = colours[i];
+    ctx.globalAlpha = 0.9;
+    roundRect(ctx, x, h - 12 - bh, bw, bh, 3);
+    ctx.fill();
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = '#fff';
+    ctx.font = '8px JetBrains Mono Variable, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(['L0', 'L1', 'L2', 'L3', 'R'][i], x + bw / 2, h - 2);
+  });
+  ctx.globalAlpha = 1;
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
+}
+
 function updateReport(r: GenerateResponse): void {
   const rep = r.report;
   const ok = rep.closed && rep.manifold && rep.components === 1 && rep.genus === 0;
   setStatus(ok ? 'ok' : 'warn', ok ? 'Closed manifold · genus 0' : 'Topology issues – see report');
 
-  chip.innerHTML = '';
-  const kv = (k: string, v: string): void => {
-    chip.append(el('span', '', k), el('b', '', v));
+  // Hero card: species, height, mesh census.
+  hero.innerHTML = '';
+  const cTop = el('div', 'c-top');
+  const ico = el('span', 'ico');
+  ico.append(icon(groupIcon(params.name)));
+  const heroText = el('div', 't');
+  heroText.append(el('span', 'n', params.name), el('span', 'm', `${groupOf(params.name).toLowerCase()} · seed ${params.seed} · ${r.timings.total.toFixed(0)} ms`));
+  cTop.append(ico, heroText);
+  const big = el('div', 'big');
+  big.append(el('span', 'v', r.summary.height.toFixed(1)), el('span', 'u', 'm'), el('span', 'lab', 'height'));
+  const side = el('div', 'side');
+  const cell = (k: string, v: string, cls = ''): void => {
+    const d = el('div');
+    d.append(el('span', 'k', k), el('span', 'v2' + (cls ? ' ' + cls : ''), v));
+    side.append(d);
   };
-  kv('Faces', fmtInt(rep.faces));
-  kv('Quads', `${(rep.quadRatio * 100).toFixed(2)} %`);
-  kv('Vertices', fmtInt(rep.vertices));
-  kv('Stems', fmtInt(r.summary.stems));
-  kv('Roots', fmtInt(r.summary.rootStems));
-  kv('Height', `${r.summary.height.toFixed(1)} m`);
-  kv('Build', `${r.timings.total.toFixed(0)} ms`);
+  cell('faces', fmtCompact(rep.faces));
+  cell('quads', `${(rep.quadRatio * 100).toFixed(rep.quadRatio > 0.9995 ? 0 : 1)} %`);
+  cell('stems', fmtInt(r.summary.stems));
+  cell('roots', `${r.summary.primaryRoots} / ${r.summary.rootStems}`);
+  cell('leaves', fmtCompact(r.summary.leaves));
+  cell('genus', ok ? '0 · closed' : `${rep.genus} · ${rep.components} part${rep.components === 1 ? '' : 's'}`, ok ? 'ok' : 'warn');
+  const spark = el('canvas', 'spark');
+  hero.append(cTop, big, side, spark);
+  drawSpark(spark, r.summary.stemsPerLevel.slice(0, 4), r.summary.rootStems);
 
-  sbLeft.innerHTML = `<b>${params.name}</b> · seed ${params.seed}`;
-  sbMid.textContent = `stems L0–L3: ${r.summary.stemsPerLevel.slice(0, 4).join(' / ')} · roots ${r.summary.primaryRoots}/${r.summary.rootStems} · objects ${r.summary.obstacles} · leaves ${fmtInt(r.summary.leaves)} · dropped ${r.stats.droppedStems}`;
+  // Presence grid: the four toggles that decide what the viewport shows.
+  presence.innerHTML = '';
+  const pcell = (name: string, label: string, on: boolean, click: () => void): void => {
+    const c = el('button', 'pcell' + (on ? ' on' : ''));
+    c.append(icon(name), el('span', '', label));
+    c.addEventListener('click', click);
+    presence.append(c);
+  };
+  pcell('leaf', 'Leaves', view.showLeaves, () => {
+    view.showLeaves = !view.showLeaves;
+    syncView();
+  });
+  pcell('ground', 'Objects', view.showObstacles, () => {
+    view.showObstacles = !view.showObstacles;
+    syncView();
+  });
+  pcell('grid', 'Grid', view.showGrid, () => {
+    view.showGrid = !view.showGrid;
+    syncView();
+  });
+  pcell('wind', 'Wind', view.windEnabled, () => {
+    view.windEnabled = !view.windEnabled;
+    syncView();
+  });
+
+  vtitleName.textContent = params.name;
+  vtitleMeta.textContent = `seed ${params.seed} · ${fmtInt(r.summary.stems)} stems · ${r.summary.obstacles} object${r.summary.obstacles === 1 ? '' : 's'}${r.stats.droppedStems ? ` · ${r.stats.droppedStems} dropped` : ''}`;
+  sizePill.textContent = `${fmtInt(rep.faces)} F · ${fmtInt(rep.vertices)} V · ${fmtInt(r.buffers.index.length / 3)} tris`;
+  tileFaces.innerHTML = '';
+  tileFaces.className = 'tile ' + (ok ? 'ok' : 'warn');
+  tileFaces.append(el('span', 'l', 'Faces'), el('span', 's', ok ? 'genus 0' : `${rep.boundaryEdges + rep.nonManifoldEdges} bad edges`), el('b', '', fmtCompact(rep.faces)));
+  libFoot.innerHTML = '';
+  const census = el('div', 'census');
+  const parts = [...r.summary.stemsPerLevel.slice(0, 4), r.summary.rootStems];
+  const total = Math.max(1, parts.reduce((a, b) => a + b, 0));
+  const colours = ['#8a5a3c', '#c98b4b', '#6fa16b', '#5aa1c9', '#b86b5c'];
+  parts.forEach((n, i) => {
+    const bar = el('i');
+    bar.style.width = `${(n / total) * 100}%`;
+    bar.style.background = colours[i];
+    census.append(bar);
+  });
+  const footRow = el('div', 'foot-row');
+  footRow.append(kvSpan('tree', 'stems', fmtInt(r.summary.stems)), kvSpan('layers', 'levels', String(params.botany.levels)), el('span', 'sp'), kvSpan('check', ok ? 'clean' : 'issues', '', ok ? 'ok' : 'warn'));
+  libFoot.append(census, footRow);
 
   const page = pages.report;
   page.innerHTML = '';
-  const s1 = section('Manifold checks', page);
-  const list = el('div', 'check-list');
+  const s1 = section('Manifold checks', page, { hint: ok ? 'all pass' : 'issues' });
+  const list = el('div', 'list');
   const item = (label: string, pass: boolean, detail: string): void => {
-    const it = el('div', 'item');
-    it.append(el('span', 'dot ' + (pass ? 'ok' : 'err')), el('span', '', label), el('small', '', detail));
+    const it = el('div', 'li' + (pass ? '' : ' warn'));
+    it.append(el('span', 'dot'), el('span', 't', label), el('span', 'm', detail));
     list.append(it);
   };
   item('Closed surface (no boundary edges)', rep.boundaryEdges === 0, `${rep.boundaryEdges} open`);
@@ -366,8 +596,8 @@ function updateReport(r: GenerateResponse): void {
   item('No isolated vertices', rep.isolatedVertices === 0, `${rep.isolatedVertices}`);
   s1.append(list);
 
-  const s2 = section('Mesh statistics', page);
-  const grid = el('div', 'kv');
+  const s2 = section('Mesh statistics', page, { hint: `${fmtCompact(rep.faces)} faces` });
+  const grid = el('div', 'kvgrid');
   const add = (k: string, v: string, cls = ''): void => {
     grid.append(el('span', '', k), el('b', cls, v));
   };
@@ -402,9 +632,9 @@ function updateReport(r: GenerateResponse): void {
   }
   s3.append(bars);
 
-  const s4 = section('Timings', page, { collapsed: true });
-  const tg = el('div', 'kv');
   const t = r.timings;
+  const s4 = section('Timings', page, { collapsed: true, hint: `${t.total.toFixed(0)} ms` });
+  const tg = el('div', 'kvgrid');
   const addT = (k: string, v: number): void => {
     tg.append(el('span', '', k), el('b', '', `${v.toFixed(1)} ms`));
   };
@@ -417,12 +647,104 @@ function updateReport(r: GenerateResponse): void {
   s4.append(tg);
 
   if (r.stats.droppedStems > 0) {
-    const s5 = section('Dropped stems', page, { collapsed: true });
-    const dg = el('div', 'kv');
+    const s5 = section('Dropped stems', page, { collapsed: true, hint: String(r.stats.droppedStems) });
+    const dg = el('div', 'kvgrid');
     for (const [k, v] of Object.entries(r.stats.dropReasons)) dg.append(el('span', '', k), el('b', '', fmtInt(v)));
     s5.append(dg, el('p', 'note', 'A stem is dropped when no window can be opened for it on the parent without overlapping another junction. Increase trunk radial segments or rings per segment to make room.'));
   }
 }
+
+// -----------------------------------------------------------------------------
+// Library (species browser)
+// -----------------------------------------------------------------------------
+
+const GROUP_ICON: Record<string, string> = {
+  Oaks: 'tree',
+  'Forest · broadleaf': 'tree',
+  'Forest · conifers': 'conifer',
+  Jungle: 'palm',
+  Savanna: 'acacia',
+  Desert: 'yucca',
+  'Rocky terrain': 'mountain',
+};
+const GROUP_ACCENT: Record<string, string> = {
+  Oaks: '#c98b4b',
+  'Forest · broadleaf': '#6fa16b',
+  'Forest · conifers': '#4fd8e0',
+  Jungle: '#34c759',
+  Savanna: '#e5d33a',
+  Desert: '#ffb454',
+  'Rocky terrain': '#b48cff',
+};
+const closedGroups = new Set<string>();
+
+function speciesMeta(name: string): string {
+  const p = PRESETS.find((x) => x.name === name);
+  if (!p) return '';
+  const b = p.botany;
+  return `${SHAPE_NAMES[b.shape].toLowerCase()} · ${b.scale} m · L${b.levels}`;
+}
+
+function buildLibrary(): void {
+  libTree.innerHTML = '';
+  const q = searchInput.value.trim().toLowerCase();
+  const grouped = new Set<string>();
+  const groups = [...PRESET_GROUPS.map((g) => ({ label: g.label, names: g.names.filter((n) => PRESETS.some((p) => p.name === n)) }))];
+  for (const g of groups) g.names.forEach((n) => grouped.add(n));
+  const rest = PRESETS.map((p) => p.name).filter((n) => !grouped.has(n));
+  if (rest.length) groups.push({ label: 'Other', names: rest });
+  let shown = 0;
+  for (const g of groups) {
+    const names = g.names.filter((n) => !q || n.toLowerCase().includes(q) || g.label.toLowerCase().includes(q));
+    if (names.length === 0) continue;
+    const grp = el('div', 'grp' + (closedGroups.has(g.label) && !q ? ' closed' : ''));
+    const gh = el('div', 'grp-h');
+    gh.append(icon('caret', 'i car'), el('span', '', g.label), el('span', 'cnt', String(names.length)));
+    gh.addEventListener('click', () => {
+      if (closedGroups.has(g.label)) closedGroups.delete(g.label);
+      else closedGroups.add(g.label);
+      grp.classList.toggle('closed');
+    });
+    const kids = el('div', 'kids');
+    for (const name of names) {
+      const row = el('div', 'row' + (name === params.name ? ' sel' : ''));
+      row.style.setProperty('--acc', GROUP_ACCENT[g.label] ?? '#9aa4b2');
+      const ico = el('span', 'ico');
+      ico.append(icon(GROUP_ICON[g.label] ?? 'tree'));
+      const txt = el('div', 'txt');
+      txt.append(el('span', 'name', name), el('span', 'meta', speciesMeta(name)));
+      row.append(ico, txt);
+      if (name === params.name) {
+        const st = el('span', 'st ok');
+        st.append(icon('check'));
+        row.append(st);
+      }
+      row.addEventListener('click', () => {
+        if (name !== params.name) selectPreset(name);
+      });
+      kids.append(row);
+      shown++;
+    }
+    grp.append(gh, kids);
+    libTree.append(grp);
+  }
+  if (shown === 0) {
+    const empty = el('div', 'empty');
+    empty.append(el('b', '', 'No species match'), document.createTextNode('Try a family name such as “oak”, “conifer” or “savanna”.'));
+    libTree.append(empty);
+  }
+  tileSpecies.innerHTML = '';
+  tileSpecies.className = 'tile ok';
+  tileSpecies.append(el('span', 'l', 'Species'), el('span', 's', `${groups.length} families`), el('b', '', String(PRESETS.length)));
+}
+searchInput.addEventListener('input', () => buildLibrary());
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    searchInput.value = '';
+    buildLibrary();
+    searchInput.blur();
+  }
+});
 
 // -----------------------------------------------------------------------------
 // Botany page
@@ -440,45 +762,13 @@ function buildBotanyPage(): void {
   page.innerHTML = '';
   const b = params.botany;
 
-  const sPreset = section('Species', page);
-  const presetRow = el('div', 'preset-row');
-  const presetSel = el('select');
-  const grouped = new Set<string>();
-  const addGroup = (label: string, names: string[]): void => {
-    const og = el('optgroup');
-    og.label = label;
-    for (const name of names) {
-      if (!PRESETS.some((p) => p.name === name)) continue;
-      const o = el('option', '', name);
-      o.value = name;
-      og.append(o);
-      grouped.add(name);
-    }
-    if (og.childElementCount > 0) presetSel.append(og);
-  };
-  for (const g of PRESET_GROUPS) addGroup(g.label, g.names);
-  addGroup('Other', PRESETS.map((p) => p.name).filter((n) => !grouped.has(n)));
-  presetSel.value = params.name;
-  presetSel.addEventListener('change', () => {
-    const seed = params.seed;
-    params = cloneParams(PRESETS.find((p) => p.name === presetSel.value)!);
-    params.seed = seed;
-    selectedObstacle = -1;
-    frameOnNext = true;
-    buildBotanyPage();
-    buildRootsPage();
-    buildMeshPage();
-    scheduleGenerate(true);
-  });
-  presetRow.append(presetSel);
-  sPreset.append(presetRow);
-
-  const seedRow = el('div', 'seed-row');
-  const seedLabel = el('span', '', 'Seed');
-  seedLabel.style.color = 'var(--text-1)';
-  seedLabel.style.width = '110px';
-  const seedInput = el('input', 'num');
+  const sSeed = section('Seed', page, { hint: groupOf(params.name).toLowerCase() });
+  const seedRow = el('div', 'ctl rowctl seed');
+  seedRow.append(el('span', 'lab', 'Seed'));
+  const stp = el('div', 'stp');
+  const seedInput = el('input', 'n');
   seedInput.type = 'text';
+  seedInput.spellcheck = false;
   seedInput.value = String(params.seed);
   seedInput.addEventListener('change', () => {
     const v = parseInt(seedInput.value, 10);
@@ -487,11 +777,29 @@ function buildBotanyPage(): void {
       scheduleGenerate(true);
     }
   });
-  const rnd = el('button', 'btn');
-  rnd.append(document.createTextNode('Randomise '), Object.assign(el('kbd'), { textContent: 'R' }));
-  rnd.addEventListener('click', () => randomSeed());
-  seedRow.append(seedLabel, seedInput, rnd);
-  sPreset.append(seedRow);
+  seedInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') seedInput.blur();
+  });
+  const seedDec = el('button', 'b', '−');
+  seedDec.addEventListener('click', () => setSeed(params.seed - 1));
+  const seedInc = el('button', 'b', '+');
+  seedInc.addEventListener('click', () => setSeed(params.seed + 1));
+  stp.append(seedDec, seedInput, seedInc);
+  const rnd = button('Randomise', () => randomSeed(), { icon: 'dice', kbd: 'R', cls: 'slim' });
+  seedRow.append(stp, rnd);
+  sSeed.append(seedRow);
+  const resetRow = el('div', 'actions');
+  resetRow.append(
+    button('Reset species', () => {
+      const seed = params.seed;
+      params = cloneParams(PRESETS.find((p) => p.name === params.name) ?? PRESETS[0]);
+      params.seed = seed;
+      selectedObstacle = -1;
+      rebuildPages();
+      scheduleGenerate(true);
+    }, { icon: 'reset', title: 'Restore the preset values of the current species' }),
+  );
+  sSeed.append(resetRow);
   refreshers.push(() => {
     seedInput.value = String(params.seed);
   });
@@ -505,16 +813,16 @@ function buildBotanyPage(): void {
     (v) => (params.botany.shape = v),
     onChange,
   );
-  slider(sGlobal, 'Height (m)', () => params.botany.scale, (v) => (params.botany.scale = v), { min: 1, max: 60, step: 0.5 }, onChange);
-  slider(sGlobal, 'Height variation', () => params.botany.scaleV, (v) => (params.botany.scaleV = v), { min: 0, max: 20, step: 0.5 }, onChange);
-  slider(sGlobal, 'Levels', () => params.botany.levels, (v) => (params.botany.levels = Math.round(v)), { min: 1, max: 4, step: 1 }, () => {
+  slider(sGlobal, 'Height', () => params.botany.scale, (v) => (params.botany.scale = v), { min: 1, max: 80, step: 0.5, unit: 'm' }, onChange);
+  slider(sGlobal, 'Height variation', () => params.botany.scaleV, (v) => (params.botany.scaleV = v), { min: 0, max: 20, step: 0.5, unit: 'm' }, onChange);
+  stepper(sGlobal, 'Levels', () => params.botany.levels, (v) => (params.botany.levels = v), { min: 1, max: 4, integer: true, title: 'Recursion depth: trunk, limbs, branches, twigs' }, () => {
     onChange();
     for (const r of refreshers) r();
   });
-  slider(sGlobal, 'Trunk ratio', () => params.botany.ratio, (v) => (params.botany.ratio = v), { min: 0.005, max: 0.06, step: 0.001, title: 'Trunk radius as a fraction of trunk length' }, onChange);
+  slider(sGlobal, 'Trunk ratio', () => params.botany.ratio, (v) => (params.botany.ratio = v), { min: 0.005, max: 0.16, step: 0.001, title: 'Trunk radius as a fraction of trunk length' }, onChange);
   slider(sGlobal, 'Ratio power', () => params.botany.ratioPower, (v) => (params.botany.ratioPower = v), { min: 0.5, max: 3, step: 0.05, title: 'How fast child radius falls off with relative length' }, onChange);
   slider(sGlobal, 'Root flare', () => params.botany.flare, (v) => (params.botany.flare = v), { min: 0, max: 3, step: 0.05 }, onChange);
-  slider(sGlobal, 'Base splits', () => params.botany.baseSplits, (v) => (params.botany.baseSplits = Math.round(v)), { min: -3, max: 4, step: 1, title: 'Clones at the base of the trunk (negative = up to N, random)' }, onChange);
+  stepper(sGlobal, 'Base splits', () => params.botany.baseSplits, (v) => (params.botany.baseSplits = v), { min: -3, max: 4, integer: true, title: 'Clones at the base of the trunk (negative = up to N, random)' }, onChange);
   slider(sGlobal, 'Attraction up', () => params.botany.attractionUp, (v) => (params.botany.attractionUp = v), { min: -4, max: 4, step: 0.1, title: 'Vertical tropism. Negative droops (willow), positive reaches up.' }, onChange);
   slider(sGlobal, 'Canopy flattening', () => params.botany.flatten, (v) => (params.botany.flatten = v), { min: 0, max: 1, step: 0.05, title: 'Pulls the fine growth towards the horizontal: flat-topped canopies (acacia).' }, onChange);
   slider(sGlobal, 'Culm nodes', () => params.botany.nodeSwell, (v) => (params.botany.nodeSwell = v), { min: 0, max: 0.4, step: 0.01, title: 'Periodic swelling of the trunk (bamboo). 0 = none.' }, onChange);
@@ -557,10 +865,11 @@ function buildBotanyPage(): void {
   levelRow(sBranch, 'Rotate var. °', lvl('rotateV'), setLvl('rotateV'), { step: 1, min: 0, enabled }, onChange);
   levelRow(sBranch, 'Distribution', lvl('branchDist'), setLvl('branchDist'), { step: 0.5, min: 0, max: 8, enabled, title: '0 alternate · 1 opposite · >1 whorled' }, onChange);
 
-  const sLeaf = section('Leaves (proxy cards)', page, { collapsed: true });
-  slider(sLeaf, 'Leaves per twig', () => params.botany.leaves, (v) => (params.botany.leaves = Math.round(v)), { min: 0, max: 200, step: 1 }, onChange);
-  slider(sLeaf, 'Leaf size', () => params.botany.leafScale, (v) => (params.botany.leafScale = v), { min: 0.02, max: 0.6, step: 0.01 }, onChange);
-  slider(sLeaf, 'Leaf width', () => params.botany.leafScaleX, (v) => (params.botany.leafScaleX = v), { min: 0.1, max: 2, step: 0.05 }, onChange);
+  const sLeaf = section('Leaves', page, { collapsed: true, hint: 'proxy cards' });
+  slider(sLeaf, 'Leaves per twig', () => params.botany.leaves, (v) => (params.botany.leaves = Math.round(v)), { min: 0, max: 300, step: 1 }, onChange);
+  slider(sLeaf, 'Leaf length', () => params.botany.leafScale, (v) => (params.botany.leafScale = v), { min: 0.02, max: 0.6, step: 0.01, unit: 'm' }, onChange);
+  slider(sLeaf, 'Leaf width', () => params.botany.leafScaleX, (v) => (params.botany.leafScaleX = v), { min: 0.1, max: 2, step: 0.05, unit: '×' }, onChange);
+  slider(sLeaf, 'Tip tuft', () => params.botany.leafTuft, (v) => (params.botany.leafTuft = v), { min: 0.05, max: 1, step: 0.05, title: 'Fraction of each terminal stem, from the tip, that carries leaves. 1 = the whole stem; small values gather the leaves into a tip rosette (yucca) or brush (foxtail pine).' }, onChange);
 }
 
 
@@ -575,34 +884,34 @@ function buildRootsPage(): void {
   const R = (): TreeParams['roots'] => params.roots;
   const E = (): TreeParams['environment'] => params.environment;
 
-  const s1 = section('Root system', page);
+  const s1 = section('Root system', page, { hint: R().enabled ? `${R().count} primary` : 'off' });
   check(s1, 'Grow roots', () => R().enabled, (v) => (R().enabled = v), onChange);
-  slider(s1, 'Primary roots', () => R().count, (v) => (R().count = Math.round(v)), { min: 1, max: 12, step: 1, title: 'Roots leaving the trunk base; the trunk gets one buttress lobe per root' }, onChange);
-  slider(s1, 'Length', () => R().length, (v) => (R().length = v), { min: 0.04, max: 0.6, step: 0.01, title: 'Fraction of the tree height', format: (v) => `${(v * params.botany.scale).toFixed(1)} m` }, onChange);
+  stepper(s1, 'Primary roots', () => R().count, (v) => (R().count = v), { min: 1, max: 12, integer: true, title: 'Roots leaving the trunk base; the trunk gets one buttress lobe per root' }, onChange);
+  slider(s1, 'Length', () => R().length, (v) => (R().length = v), { min: 0.04, max: 0.6, step: 0.01, title: 'Fraction of the tree height', format: (v) => `${(v * params.botany.scale).toFixed(1)}`, unit: 'm' }, onChange);
   slider(s1, 'Length variation', () => R().lengthV, (v) => (R().lengthV = v), { min: 0, max: 0.3, step: 0.01 }, onChange);
   slider(s1, 'Radius', () => R().radius, (v) => (R().radius = v), { min: 0.1, max: 0.68, step: 0.01, title: 'Fraction of the trunk radius' }, onChange);
   slider(s1, 'Radius variation', () => R().radiusV, (v) => (R().radiusV = v), { min: 0, max: 0.5, step: 0.01 }, onChange);
   slider(s1, 'Taper', () => R().taper, (v) => (R().taper = v), { min: 0.3, max: 2, step: 0.05, title: '<1 stays thick for longer, >1 thins out quickly' }, onChange);
   slider(s1, 'Exit height', () => R().emergeHeight, (v) => (R().emergeHeight = v), { min: 0, max: 2.5, step: 0.05, title: 'Height of the root above the ground where it leaves the trunk, in root radii' }, onChange);
-  slider(s1, 'Descent °', () => R().descent, (v) => (R().descent = v), { min: 0, max: 60, step: 1, title: 'Initial pitch below the horizontal' }, onChange);
+  slider(s1, 'Descent', () => R().descent, (v) => (R().descent = v), { min: 0, max: 60, step: 1, title: 'Initial pitch below the horizontal', unit: '°' }, onChange);
   slider(s1, 'Exposure', () => R().exposure, (v) => (R().exposure = v), { min: 0, max: 1, step: 0.02, title: '0 = flush with the soil · 0.5 = half buried · 1 = lying on top' }, onChange);
   slider(s1, 'Meander', () => R().wander, (v) => (R().wander = v), { min: 0, max: 1.5, step: 0.05 }, onChange);
   slider(s1, 'Dive at', () => R().dive, (v) => (R().dive = v), { min: 0.3, max: 1, step: 0.02, title: 'Fraction of the length after which the tip dives underground' }, onChange);
 
   const s2 = section('Branching', page);
   slider(s2, 'Fork chance', () => R().forks, (v) => (R().forks = v), { min: 0, max: 1, step: 0.05 }, onChange);
-  slider(s2, 'Laterals per root', () => R().laterals, (v) => (R().laterals = Math.round(v)), { min: 0, max: 6, step: 1 }, onChange);
+  stepper(s2, 'Laterals per root', () => R().laterals, (v) => (R().laterals = v), { min: 0, max: 6, integer: true }, onChange);
   slider(s2, 'Lateral radius', () => R().lateralRadius, (v) => (R().lateralRadius = v), { min: 0.2, max: 0.68, step: 0.01, title: 'Relative to the parent root' }, onChange);
   slider(s2, 'Lateral length', () => R().lateralLength, (v) => (R().lateralLength = v), { min: 0.1, max: 1.2, step: 0.05, title: 'Relative to the remaining parent length' }, onChange);
 
   const s3 = section('Response to objects', page);
   slider(s3, 'Attraction', () => R().attraction, (v) => (R().attraction = v), { min: 0, max: 1, step: 0.05, title: 'Pull towards nearby objects (0 = indifferent)' }, onChange);
   slider(s3, 'Grip', () => R().grip, (v) => (R().grip = v), { min: 0, max: 1, step: 0.05, title: 'How deeply the root presses into the object it follows' }, onChange);
-  slider(s3, 'Climb height', () => R().climb, (v) => (R().climb = v), { min: 0, max: 12, step: 0.5, title: 'Objects up to this many root diameters tall are climbed over; taller ones are skirted' }, onChange);
+  slider(s3, 'Climb height', () => R().climb, (v) => (R().climb = v), { min: 0, max: 12, step: 0.5, title: 'Objects up to this many root diameters tall are climbed over; taller ones are skirted', unit: '⌀' }, onChange);
 
-  const s4 = section('Objects on site', page, { hint: `${E().obstacles.length}` });
-  const tools = el('div', 'obj-tools');
-  const kindSel = el('select');
+  const s4 = section('Objects on site', page, { hint: `${E().obstacles.length} placed` });
+  const tools = el('div', 'actions');
+  const kindSel = el('select', 'dd');
   for (const [v, l] of [
     ['rock', 'Rock'],
     ['block', 'Block'],
@@ -613,12 +922,9 @@ function buildRootsPage(): void {
   }
   kindSel.value = addKind;
   kindSel.addEventListener('change', () => (addKind = kindSel.value as ObstacleKind));
-  const placeBtn = el('button', 'btn', 'Place in viewport');
-  placeBtn.addEventListener('click', () => setPlacing(!viewer.isPlacing));
+  const placeBtn = button('Place', () => setPlacing(!viewer.isPlacing), { icon: 'place', title: 'Click on the ground in the viewport to add an object' });
   placementRefreshers.push(() => placeBtn.classList.toggle('primary', viewer.isPlacing));
-  const scatterBtn = el('button', 'btn ghost', 'Scatter');
-  scatterBtn.title = 'Replace the objects with a random layout within root reach';
-  scatterBtn.addEventListener('click', () => {
+  const scatterBtn = button('Scatter', () => {
     const sc = E().scatter;
     const next = scatterFor(params, Math.floor(Math.random() * 99999) + 1, sc.count);
     next.blocks = sc.blocks;
@@ -629,17 +935,16 @@ function buildRootsPage(): void {
     selectedObstacle = -1;
     buildRootsPage();
     scheduleGenerate(true);
-  });
-  const clearBtn = el('button', 'btn ghost', 'Clear');
-  clearBtn.addEventListener('click', () => {
+  }, { icon: 'scatter', title: 'Replace the objects with a random layout within root reach' });
+  const clearBtn = button('Clear', () => {
     E().obstacles = [];
     selectedObstacle = -1;
     buildRootsPage();
     scheduleGenerate(true);
-  });
+  }, { icon: 'trash', cls: 'danger' });
   tools.append(kindSel, placeBtn, scatterBtn, clearBtn);
   s4.append(tools);
-  slider(s4, 'Scatter count', () => E().scatter.count, (v) => (E().scatter.count = Math.round(v)), { min: 0, max: 12, step: 1 }, () => undefined);
+  stepper(s4, 'Scatter count', () => E().scatter.count, (v) => (E().scatter.count = v), { min: 0, max: 12, integer: true }, () => undefined);
   slider(s4, 'Block share', () => E().scatter.blocks, (v) => (E().scatter.blocks = v), { min: 0, max: 1, step: 0.05, title: 'Fraction of scattered objects that are blocks' }, () => undefined);
 
   const list = el('div', 'obj-list');
@@ -647,15 +952,17 @@ function buildRootsPage(): void {
   if (obs.length === 0) list.append(el('p', 'note', 'No objects. Place one in the viewport, or scatter a few – roots grow onto whatever stands within their reach and can be dragged around afterwards.'));
   obs.forEach((o, i) => {
     const row = el('div', 'obj-row' + (i === selectedObstacle ? ' selected' : ''));
-    const head = el('div', 'obj-head');
-    const title = el('span', 'obj-title', `${o.kind === 'rock' ? 'Rock' : 'Block'} ${i + 1}`);
-    const pos = el('span', 'obj-pos', `${o.x.toFixed(2)}, ${o.z.toFixed(2)} m`);
-    const del = el('button', 'btn ghost small', 'Remove');
+    const head = el('div', 'li obj-head');
+    const title = el('span', 't', `${o.kind === 'rock' ? 'Rock' : 'Block'} ${i + 1}`);
+    const pos = el('span', 'm', `${o.x.toFixed(2)}, ${o.z.toFixed(2)} m`);
+    const del = el('button', 'ib');
+    del.title = 'Remove';
+    del.append(icon('x'));
     del.addEventListener('click', (ev) => {
       ev.stopPropagation();
       removeObstacle(i);
     });
-    head.append(title, pos, del);
+    head.append(el('span', 'dot'), title, pos, del);
     head.addEventListener('click', () => {
       selectedObstacle = selectedObstacle === i ? -1 : i;
       buildRootsPage();
@@ -669,10 +976,10 @@ function buildRootsPage(): void {
         onChange();
       };
       select(body, 'Type', [{ value: 'rock', label: 'Rock' }, { value: 'block', label: 'Block' }], () => o.kind, (v) => (o.kind = v as ObstacleKind), set(() => undefined));
-      slider(body, 'Size (m)', () => o.size, (v) => (o.size = v), { min: 0.1, max: 4, step: 0.05 }, set(() => undefined));
-      slider(body, 'X (m)', () => o.x, (v) => (o.x = v), { min: -15, max: 15, step: 0.05 }, set(() => undefined));
-      slider(body, 'Z (m)', () => o.z, (v) => (o.z = v), { min: -15, max: 15, step: 0.05 }, set(() => undefined));
-      slider(body, 'Rotation °', () => (o.yaw * 180) / Math.PI, (v) => (o.yaw = (v * Math.PI) / 180), { min: 0, max: 360, step: 1 }, set(() => undefined));
+      slider(body, 'Size', () => o.size, (v) => (o.size = v), { min: 0.1, max: 4, step: 0.05, unit: 'm' }, set(() => undefined));
+      slider(body, 'X', () => o.x, (v) => (o.x = v), { min: -15, max: 15, step: 0.05, unit: 'm' }, set(() => undefined));
+      slider(body, 'Z', () => o.z, (v) => (o.z = v), { min: -15, max: 15, step: 0.05, unit: 'm' }, set(() => undefined));
+      slider(body, 'Rotation', () => (o.yaw * 180) / Math.PI, (v) => (o.yaw = (v * Math.PI) / 180), { min: 0, max: 360, step: 1, unit: '°' }, set(() => undefined));
       slider(body, 'Burial', () => o.burial, (v) => (o.burial = v), { min: 0, max: 0.9, step: 0.02, title: '0 = resting on the ground · 0.5 = half buried' }, set(() => undefined));
       slider(body, 'Roughness', () => o.roughness, (v) => (o.roughness = v), { min: 0, max: 0.5, step: 0.01 }, set(() => undefined));
       slider(body, 'Stretch X', () => o.aspect[0], (v) => (o.aspect[0] = v), { min: 0.4, max: 3, step: 0.05 }, set(() => undefined));
@@ -688,7 +995,6 @@ function buildRootsPage(): void {
     Object.assign(el('p', 'note'), {
       textContent:
         'Roots are grown by a turtle that senses the ground and the objects around the tree: it climbs onto whatever it can, presses into the surface it follows, wraps around what it cannot climb and dives underground at the tip. Every root is welded into the trunk through a junction window like any branch, so the whole plant stays one closed quad surface. Drag objects in the viewport to move them; press B to frame the base.',
-      style: 'padding: 10px 14px',
     }),
   );
 }
@@ -698,24 +1004,24 @@ function buildMeshPage(): void {
   page.innerHTML = '';
   const m = (): TreeParams['mesh'] => params.mesh;
   const s1 = section('Resolution', page);
-  slider(s1, 'Trunk ring segments', () => m().trunkRadialSegments, (v) => (m().trunkRadialSegments = Math.round(v / 2) * 2), { min: 8, max: 48, step: 2, title: 'Vertices around the trunk. Children derive their ring size from the window they grow out of.' }, onChange);
+  slider(s1, 'Trunk ring segments', () => m().trunkRadialSegments, (v) => (m().trunkRadialSegments = Math.round(v / 2) * 2), { min: 8, max: 48, step: 2, title: 'Vertices around the trunk. Children derive their ring size from the window they grow out of.', unit: 'v' }, onChange);
   levelsHeader(s1);
   levelRow(s1, 'Rings / segment', () => m().ringsPerSegment, (i, v) => (m().ringsPerSegment[i] = v), { step: 1, min: 1, max: 8, integer: true, enabled: () => params.botany.levels }, onChange);
-  slider(s1, 'Root ring segments', () => m().rootRadialSegments, (v) => (m().rootRadialSegments = Math.round(v / 2) * 2), { min: 6, max: 24, step: 2, title: 'Minimum vertices around a primary root where it leaves the trunk' }, onChange);
-  slider(s1, 'Min radius (mm)', () => m().minRadius * 1000, (v) => (m().minRadius = v / 1000), { min: 1, max: 30, step: 0.5 }, onChange);
-  slider(s1, 'Cull below (mm)', () => m().cullRadius * 1000, (v) => (m().cullRadius = v / 1000), { min: 0, max: 40, step: 0.5, title: 'Skip stems thinner than this (LOD)' }, onChange);
+  slider(s1, 'Root ring segments', () => m().rootRadialSegments, (v) => (m().rootRadialSegments = Math.round(v / 2) * 2), { min: 6, max: 24, step: 2, title: 'Minimum vertices around a primary root where it leaves the trunk', unit: 'v' }, onChange);
+  slider(s1, 'Min radius', () => m().minRadius * 1000, (v) => (m().minRadius = v / 1000), { min: 1, max: 30, step: 0.5, unit: 'mm' }, onChange);
+  slider(s1, 'Cull below', () => m().cullRadius * 1000, (v) => (m().cullRadius = v / 1000), { min: 0, max: 40, step: 0.5, title: 'Skip stems thinner than this (LOD)', unit: 'mm' }, onChange);
   check(s1, 'Cap stem tips', () => m().capTips, (v) => (m().capTips = v), onChange);
 
   const s2 = section('Junctions', page);
   slider(s2, 'Collar width', () => m().collarScale, (v) => (m().collarScale = v), { min: 1.0, max: 2.2, step: 0.05, title: 'Window size relative to the child diameter' }, onChange);
   slider(s2, 'Collar length', () => m().collarLength, (v) => (m().collarLength = v), { min: 0.2, max: 2.5, step: 0.05, title: 'Distance of the first full child ring from the parent surface, in child radii' }, onChange);
-  slider(s2, 'Collar rings', () => m().collarRings, (v) => (m().collarRings = Math.round(v)), { min: 0, max: 3, step: 1, title: 'Intermediate edge loops between the window and the first child ring' }, onChange);
+  stepper(s2, 'Collar rings', () => m().collarRings, (v) => (m().collarRings = v), { min: 0, max: 3, integer: true, title: 'Intermediate edge loops between the window and the first child ring' }, onChange);
   slider(s2, 'Collar fillet', () => m().collarFillet, (v) => (m().collarFillet = v), { min: 0, max: 1, step: 0.05, title: '0 = straight chamfer, 1 = tangent-continuous fillet' }, onChange);
   slider(s2, 'Collar mitre', () => m().collarMitre, (v) => (m().collarMitre = v), { min: 0, max: 0.9, step: 0.05, title: 'Tilt of the first child ring towards the parent surface' }, onChange);
   slider(s2, 'Fork area conservation', () => m().forkRadiusConservation, (v) => (m().forkRadiusConservation = v), { min: 0, max: 1, step: 0.05, title: '0: forks keep the parent radius (Weber–Penn) · 1: cross-section area is conserved (da Vinci rule)' }, onChange);
 
   const s3 = section('Root buttresses', page);
-  slider(s3, 'Lobes', () => m().rootLobes, (v) => (m().rootLobes = Math.round(v)), { min: 0, max: 9, step: 1, title: 'Used when the root system is disabled; otherwise one lobe per primary root' }, onChange);
+  stepper(s3, 'Lobes', () => m().rootLobes, (v) => (m().rootLobes = v), { min: 0, max: 9, integer: true, title: 'Used when the root system is disabled; otherwise one lobe per primary root' }, onChange);
   slider(s3, 'Amplitude', () => m().rootLobeAmplitude, (v) => (m().rootLobeAmplitude = v), { min: 0, max: 1, step: 0.02 }, onChange);
   slider(s3, 'Height', () => m().rootLobeHeight, (v) => (m().rootLobeHeight = v), { min: 0.02, max: 0.3, step: 0.01, title: 'Fraction of trunk length over which the lobes fade' }, onChange);
 
@@ -723,7 +1029,6 @@ function buildMeshPage(): void {
     Object.assign(el('p', 'note'), {
       textContent:
         'The branch system is a single closed quad surface. Side branches grow out of a rectangular window cut into the parent ring grid; forks split the parent ring into arcs joined by a crotch bridge. Nothing is intersected or merged.',
-      style: 'padding: 10px 14px',
     }),
   );
 }
@@ -735,7 +1040,7 @@ function buildViewPage(): void {
   viewRefreshers.push(check(s1, 'Enabled', () => view.windEnabled, (v) => (view.windEnabled = v), syncView).refresh);
   viewRefreshers.push(slider(s1, 'Strength', () => view.windStrength, (v) => (view.windStrength = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
   viewRefreshers.push(slider(s1, 'Gustiness', () => view.windGust, (v) => (view.windGust = v), { min: 0, max: 1.5, step: 0.05 }, syncView).refresh);
-  viewRefreshers.push(slider(s1, 'Direction °', () => view.windDirection, (v) => (view.windDirection = v), { min: 0, max: 360, step: 1 }, syncView).refresh);
+  viewRefreshers.push(slider(s1, 'Direction', () => view.windDirection, (v) => (view.windDirection = v), { min: 0, max: 360, step: 1, unit: '°' }, syncView).refresh);
   viewRefreshers.push(slider(s1, 'Trunk flex', () => view.trunkFlex, (v) => (view.trunkFlex = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
   viewRefreshers.push(slider(s1, 'Limb flex', () => view.limbFlex, (v) => (view.limbFlex = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
   viewRefreshers.push(slider(s1, 'Detail flutter', () => view.detailFlex, (v) => (view.detailFlex = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
@@ -750,9 +1055,31 @@ function buildViewPage(): void {
   page.append(
     Object.assign(el('p', 'note'), {
       textContent: 'Wind is evaluated in the vertex shader from per-vertex data baked by the generator: normalised height (trunk sway), limb weight + pivot (limb bending) and a detail weight (twig flutter). Because branches and twigs share one welded surface, the deformation is continuous through every junction.',
-      style: 'padding: 10px 14px',
     }),
   );
+}
+
+function setSeed(seed: number): void {
+  params.seed = Math.max(0, Math.round(seed));
+  for (const r of refreshers) r();
+  scheduleGenerate(true);
+}
+
+function rebuildPages(): void {
+  buildBotanyPage();
+  buildRootsPage();
+  buildMeshPage();
+  buildLibrary();
+}
+
+function selectPreset(name: string): void {
+  const seed = params.seed;
+  params = cloneParams(PRESETS.find((p) => p.name === name) ?? PRESETS[0]);
+  params.seed = seed;
+  selectedObstacle = -1;
+  frameOnNext = true;
+  rebuildPages();
+  scheduleGenerate(true);
 }
 
 function randomSeed(): void {
@@ -785,11 +1112,11 @@ function download(url: string, filename: string): void {
 }
 
 let toastTimer = 0;
-function showToast(text: string): void {
+function showToast(text: string, ms = 1800): void {
   toast.textContent = text;
   toast.classList.add('show');
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => toast.classList.remove('show'), 1800);
+  toastTimer = window.setTimeout(() => toast.classList.remove('show'), ms);
 }
 
 function slug(s: string): string {
@@ -804,8 +1131,85 @@ buildBotanyPage();
 buildRootsPage();
 buildMeshPage();
 buildViewPage();
+buildLibrary();
 syncView();
 generate();
+
+// -----------------------------------------------------------------------------
+// Command line (Inspector footer)
+// -----------------------------------------------------------------------------
+
+function runCommand(line: string): void {
+  const [verb, ...rest] = line.trim().split(/\s+/);
+  const arg = rest.join(' ');
+  const v = verb.toLowerCase();
+  if (!v) return;
+  if (v === 'seed') {
+    const n = parseInt(arg, 10);
+    if (Number.isNaN(n)) randomSeed();
+    else setSeed(n);
+  } else if (v === 'preset' || v === 'species') {
+    const q = arg.toLowerCase();
+    const hit = PRESETS.find((p) => p.name.toLowerCase() === q) ?? PRESETS.find((p) => p.name.toLowerCase().includes(q));
+    if (hit) selectPreset(hit.name);
+    else showToast(`No species matches “${arg}”`);
+  } else if (v === 'mode') {
+    const hit = MODES.find((m) => m.id === arg.toLowerCase() || m.label.toLowerCase() === arg.toLowerCase());
+    if (hit) {
+      view.mode = hit.id;
+      syncView();
+    } else showToast('Modes: ' + MODES.map((m) => m.id).join(' · '));
+  } else if (v === 'export') {
+    const f = arg.toLowerCase();
+    if (f === 'obj' || f === 'glb') requestExport(f);
+    else showToast('export obj | export glb');
+  } else if (v === 'frame') {
+    if (arg === 'base') viewer.frameBase(rootReach(params));
+    else viewer.frame();
+  } else if (v === 'wind') {
+    view.windEnabled = arg ? arg === 'on' : !view.windEnabled;
+    syncView();
+  } else if (v === 'leaves') {
+    view.showLeaves = arg ? arg === 'on' : !view.showLeaves;
+    syncView();
+  } else if (v === 'quads' || v === 'wire') {
+    view.showWire = arg ? arg === 'on' : !view.showWire;
+    syncView();
+  } else if (v === 'scatter') {
+    const n = parseInt(arg, 10);
+    const sc = params.environment.scatter;
+    const next = scatterFor(params, Math.floor(Math.random() * 99999) + 1, Number.isNaN(n) ? sc.count : n);
+    next.blocks = sc.blocks;
+    next.burial = sc.burial;
+    next.roughness = sc.roughness;
+    params.environment.scatter = next;
+    params.environment.obstacles = scatterObstacles(next, trunkBaseRadius(params.botany));
+    selectedObstacle = -1;
+    buildRootsPage();
+    scheduleGenerate(true);
+  } else if (v === 'clear') {
+    params.environment.obstacles = [];
+    selectedObstacle = -1;
+    buildRootsPage();
+    scheduleGenerate(true);
+  } else if (v === 'shot' || v === 'screenshot') {
+    download(viewer.screenshot(), `${slug(params.name)}_${params.seed}.png`);
+  } else if (v === 'help' || v === '?') {
+    showToast('seed [n] · preset <name> · mode <shaded|matcap|wireframe|levels|junctions|wind> · export obj|glb · frame [base] · wind|leaves|quads [on|off] · scatter [n] · clear · shot', 5000);
+  } else {
+    showToast(`Unknown command “${verb}” · type help`);
+  }
+}
+cmdInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    runCommand(cmdInput.value);
+    cmdInput.value = '';
+  } else if (e.key === 'Escape') {
+    cmdInput.value = '';
+    cmdInput.blur();
+  }
+  e.stopPropagation();
+});
 
 // Expose for debugging / automation.
 (window as unknown as { frontier: unknown }).frontier = {
@@ -821,9 +1225,7 @@ generate();
     params = cloneParams(PRESETS.find((p) => p.name === name) ?? PRESETS[0]);
     selectedObstacle = -1;
     frameOnNext = true;
-    buildBotanyPage();
-    buildRootsPage();
-    buildMeshPage();
+    rebuildPages();
     scheduleGenerate(true);
   },
   setSeed(seed: number) {
@@ -845,9 +1247,7 @@ generate();
     if (partial.environment) Object.assign(params.environment, partial.environment);
     if (partial.seed !== undefined) params.seed = partial.seed;
     if (partial.name) params.name = partial.name;
-    buildBotanyPage();
-    buildRootsPage();
-    buildMeshPage();
+    rebuildPages();
     scheduleGenerate(true);
   },
   frameBase: () => viewer.frameBase(rootReach(params)),

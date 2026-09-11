@@ -173,7 +173,8 @@ export class LeafMesh {
   pivots: number[] = [];
   indices: number[] = [];
 
+  /** Number of leaf cards (each card is a 5-vertex kite = 3 triangles). */
   get count(): number {
-    return this.indices.length / 6;
+    return this.indices.length / 9;
   }
 }

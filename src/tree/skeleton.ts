@@ -382,6 +382,7 @@ export class SkeletonBuilder {
   private stems: Stem[] = [];
   private leaves: Leaf[] = [];
   private treeScale = 0;
+  private readonly leafRng: Random;
   private baseLength = 0;
   private splitError = [0, 0, 0, 0, 0];
   private nextId = 0;
@@ -391,6 +392,9 @@ export class SkeletonBuilder {
     this.p = params.botany;
     this.mesh = params.mesh;
     this.rng = new Random(params.seed);
+    // Leaves draw from their own stream so leaf density / size never perturbs
+    // the branch skeleton of a given seed.
+    this.leafRng = new Random((params.seed ^ 0x1eaf5eed) >>> 0);
     this.tropism = { x: 0, y: this.p.attractionUp, z: 0 };
   }
 
@@ -499,8 +503,11 @@ export class SkeletonBuilder {
     // Children / leaves budget for this physical stem.
     let leafCount = 0;
     let branchCount = 0;
+    const tuft = clamp(p.leafTuft, 0.05, 1);
     if (isLastLevel && p.leaves > 0) {
-      leafCount = this.calcLeafCount(stem) * (1 - start / curveRes);
+      // Tufted foliage keeps the same number of leaves but packs them into the
+      // last `tuft` of the stem, so the per-segment budget is scaled up.
+      leafCount = (this.calcLeafCount(stem) * (1 - start / curveRes)) / tuft;
     } else if (!isLastLevel) {
       branchCount = this.calcBranchCount(stem) * (1 - start / curveRes) * branchesFactor;
     }
@@ -568,7 +575,7 @@ export class SkeletonBuilder {
         const onSeg = Math.floor(perSegBranches + branchError);
         branchError -= onSeg - perSegBranches;
         if (onSeg > 0) this.makeBranches(stem, seg, curveRes, segLength, start, onSeg, prevRot);
-      } else if (leafCount > 0) {
+      } else if (leafCount > 0 && seg > (1 - tuft) * curveRes - 1) {
         const onSeg = Math.floor(perSegLeaves + leafError);
         leafError -= onSeg - perSegLeaves;
         if (onSeg > 0) this.makeLeaves(stem, seg, curveRes, segLength, start, onSeg, prevRot);
@@ -588,6 +595,20 @@ export class SkeletonBuilder {
       }
     }
     stem.length = s;
+
+    // Tufted species (yucca rosettes, foxtail-pine brushes) carry foliage on
+    // every bare tip, not only on the deepest level: an arm that produced no
+    // children ends in a tuft as well.
+    if (!isLastLevel && tuft < 1 && p.leaves > 0 && stem.children.length === 0) {
+      const perSeg = this.calcLeafCount(stem) / tuft / curveRes;
+      let err = 0;
+      for (let seg = Math.max(start + 1, 1); seg <= curveRes; seg++) {
+        if (seg <= (1 - tuft) * curveRes - 1) continue;
+        const onSeg = Math.floor(perSeg + err);
+        err -= onSeg - perSeg;
+        if (onSeg > 0) this.makeLeaves(stem, seg, curveRes, segLength, start, onSeg, prevRot);
+      }
+    }
   }
 
   private makeFork(
@@ -782,12 +803,13 @@ export class SkeletonBuilder {
     const lp = Math.min(stem.level + 1, 3);
     const startOffset = start * segLength;
     const leafScale = p.leafScale * (this.treeScale / Math.max(1e-6, p.scale));
+    const tuftStart = (1 - clamp(p.leafTuft, 0.05, 1)) * stem.logicalLength;
     for (let b = 0; b < count; b++) {
       const offset = clamp((b + 0.5) / count, 0, 1);
       const stemOffset = ((seg - 1 + offset) / curveRes) * stem.logicalLength;
       const sLocal = stemOffset - startOffset;
-      if (sLocal <= 0 || sLocal > stem.length) continue;
-      const rAngle = this.calcRotateAngle(lp, prevRot);
+      if (sLocal <= 0 || sLocal > stem.length || stemOffset < tuftStart) continue;
+      const rAngle = this.calcRotateAngle(lp, prevRot, this.leafRng);
       const sample = sampleStem(stem, sLocal);
       const right = normalize(rotateAxis(sample.right, sample.dir, rAngle * DEG2RAD));
       const dAngle = this.calcDownAngle(stem, stemOffset);
@@ -807,7 +829,7 @@ export class SkeletonBuilder {
         dir,
         right: leafRight,
         normal,
-        scale: leafScale * this.rng.range(0.85, 1.15),
+        scale: leafScale * this.leafRng.range(0.85, 1.15),
         stem,
         t: clamp(sLocal / Math.max(1e-6, stem.length), 0, 1),
       };
@@ -864,16 +886,16 @@ export class SkeletonBuilder {
     return angle;
   }
 
-  private calcRotateAngle(lp: number, prevRot: { v: number }): number {
+  private calcRotateAngle(lp: number, prevRot: { v: number }, rng: Random = this.rng): number {
     const p = this.p;
     const rot = this.levelParam(p.rotate, lp);
     const rotV = this.levelParam(p.rotateV, lp);
     if (rot >= 0) {
-      const r = (prevRot.v + rot + this.rng.uniform() * rotV) % 360;
+      const r = (prevRot.v + rot + rng.uniform() * rotV) % 360;
       prevRot.v = r;
       return r;
     }
-    const r = prevRot.v * (180 + rot + this.rng.uniform() * rotV);
+    const r = prevRot.v * (180 + rot + rng.uniform() * rotV);
     prevRot.v = -prevRot.v;
     return r;
   }
