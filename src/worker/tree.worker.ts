@@ -48,8 +48,10 @@ export interface GenerateResponse {
     count: number;
   };
   obstacles: { kind: ObstacleKind; positions: Float32Array; normals: Float32Array; indices: Uint32Array }[];
-  /** How far the trunk was sunk below the ground for the root collars (metres). */
+  /** How far the plant continues below the ground (metres). */
   groundDepth: number;
+  /** Grass mesher statistics (grasses only). */
+  grass: import('../plant/grassMesher').GrassStats | null;
   report: ReturnType<typeof generateTree>['report'];
   stats: ReturnType<typeof generateTree>['stats'];
   timings: ReturnType<typeof generateTree>['timings'];
@@ -79,7 +81,7 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       const r = generateTree(msg.params);
       const leaves = packLeaves(r.leaves);
       const samples: GenerateResponse['samples'] = [];
-      for (const st of r.skeleton.stems) {
+      for (const st of r.skeleton?.stems ?? []) {
         if (st.dropped || !st.parent || samples.length > 400) continue;
         if (st.attach !== 'side' && st.attach !== 'fork') continue;
         const n = st.nodes[0];
@@ -101,7 +103,8 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
         buffers: r.buffers,
         leaves,
         obstacles: r.obstacles,
-        groundDepth: r.skeleton.groundDepth,
+        groundDepth: r.groundDepth,
+        grass: r.grass ?? null,
         report: r.report,
         stats: r.stats,
         timings: r.timings,

@@ -1,9 +1,10 @@
-# Frontier — Procedural Tree Generator
+# Frontier — Procedural Tree & Plant Generator
 
-A production-oriented tree generator that outputs **one closed, manifold quad mesh** per tree —
-no intersecting tubes, no "place a twig on a branch" merges. Branches grow *out of* their parent's
-surface through shared edge loops, forks are true Y-crotches, and every vertex carries wind data
-so the whole tree bends as a single skin.
+A production-oriented vegetation generator that outputs **one closed, manifold quad mesh** per
+plant — no intersecting tubes, no "place a twig on a branch" merges. Branches grow *out of* their
+parent's surface through shared edge loops, forks are true Y-crotches, grass blades and culms grow
+out of a welded crown the same way, and every vertex carries wind data so the whole plant bends as
+a single skin. 30 tree species and 14 grasses ship as presets.
 
 ```
 npm install
@@ -20,8 +21,9 @@ npm run build      # static bundle in dist/
 | Meshing | `src/tree/mesher.ts` | **Welded quad mesher** (below). Emits quads only, plus ≤1 triangle per tip cap for odd ring counts. |
 | Validation | `src/tree/validate.ts` | Half-edge style audit: boundary edges, non-manifold edges, winding consistency, degenerate faces, isolated vertices, connected components, Euler characteristic / genus, valence histogram. |
 | Wind | `src/viewer/shaders.ts` | Three-tier vertex wind (trunk sway ∝ height², limb bending about a per-limb pivot with phase, twig/leaf flutter). Data is baked per vertex by the mesher. |
+| Grasses | `src/plant/grassMesher.ts`, `src/plant/grassParams.ts` | **Welded grass mesher** (below): crown dome, leaf blades, culms with nodes/sheaths/leaves and four inflorescence types, all one closed quad manifold. 14 species in three families (turf & meadow, tussock, cereals & reeds). |
 | Export | `src/tree/export.ts` | OBJ with **quads preserved** (for Blender/Maya/ZBrush), GLB (triangulated) with wind data in `COLOR_0` and level/junction flags in `TEXCOORD_1`. |
-| UI | `src/main.ts`, `src/ui/*` | Three floating cards in the SolidArc panel language: **Library** (species browser grouped by biome, search, census), **Viewport** (display modes shaded / clay / wire / levels / junctions / wind, pill toolbar, camera read-out, key hints), **Inspector** (hero card with height + mesh census, presence grid, tabs Botany · Roots · Mesh · View · Topology with tick-track sliders, steppers, per-level tables with drag-to-scrub cells, and a command line: `seed 42`, `preset oak`, `mode wire`, `export glb`, `help`). Generation runs in a Web Worker. |
+| UI | `src/main.ts`, `src/ui/*` | Three floating cards in the SolidArc panel language: **Library** (species browser grouped by biome and plant family, search, census), **Viewport** (display modes shaded / clay / wire / levels / junctions / wind, pill toolbar, camera read-out, exact fit-to-view framing from 10 cm turf to 70 m redwoods, key hints), **Inspector** (hero card with height + mesh census, presence grid, tabs Botany · Roots · Mesh · View · Topology for trees and Grass · View · Topology for grasses, with tick-track sliders, steppers, per-level tables with drag-to-scrub cells, and a command line: `seed 42`, `preset oak`, `mode wire`, `export glb`, `help`). Generation runs in a Web Worker. |
 
 ## The welded mesher
 
@@ -48,6 +50,39 @@ the window, the collar reads as a real branch collar rather than a cylinder poki
 Result: `V − E + F = 2`, zero boundary edges, zero non-manifold edges, > 99.8 % quads on every
 preset × seed in the test matrix.
 
+## The welded grass mesher
+
+Grasses are not trees with the trunk removed: a tussock is a few hundred organs sharing one crown,
+each organ a few millimetres wide. `src/plant/grassMesher.ts` builds every grass plant as **one
+closed quad manifold** — the same guarantee as the trees, with no triangles at all:
+
+* **Crown.** A grid dome (an elliptical disc mapped onto a `K × K` lattice, `K` derived from the
+  tiller count) whose cells are the attachment windows: 1 × 1 / 1 × 2 / 2 × 2 cells per leaf blade,
+  larger blocks per culm. Below the ground the dome continues as an inset rim skirt and a ladder
+  cap, so the plant is closed and can sink into the soil (`crownSink`).
+* **Organs.** Blades, culms, culm leaves, inflorescence branchlets, spikelets, bristles and awns
+  are all tubes grown from a window in their parent's ring grid through the same collar loops
+  (Bézier fillet) the tree mesher uses. Windows are planned on the parent's ring stations before
+  the parent is meshed, so no window ever straddles a ring and no two windows overlap.
+* **Blades.** Cross-section `bladePoint`: a 4-vertex strip, or a 6/8-vertex keeled section with a
+  `rolled` parameter that curls the section into an arc (fescues, marram). Length, width, lean,
+  droop, twist and a sine wave are all per-species with per-blade variation; a `centreBias` grows
+  the inner tillers taller or shorter than the rim.
+* **Culms.** Hollow-looking stems with nodes at `((k+1)/(n+1))^1.25` of the length, a swelling at
+  each node and a +45 % sheath above it; distichous leaves leave the sheath top through their own
+  window, the flag leaf is the shortest. Culms nod (`nod`) under the weight of the head.
+* **Inflorescences.** `spike` (two opposite spikelet rows with awns — wheat, barley), `foxtail`
+  (dense whorls of bristles — timothy, fountain grass, elephant grass), `panicle` (golden-angle
+  branchlets with optional secondaries, spikelet bulges and awns — meadow grass, oat, red oat grass)
+  and `plume` (soft drooping branchlet fans — silver grass, pampas, reed). Every head part shares a
+  single ring-row height on the rachis so the windows tile cleanly.
+* **Wind.** `height` is normalised by the real plant height; `limb` runs along each organ with the
+  pivot at its base on the crown (culm children pivot at the culm base); `phase` is per tiller;
+  `detail` is a flutter weight that fades out for small plants so lawn turf doesn't jitter.
+
+`Lawn Turf` (330 blades) is 14.5 k faces, `Wheat` 9 k, `Meadow Grass` 67 k, `Pampas Grass` (24 culms,
+plumes with secondaries) 305 k — all genus 0, zero dropped organs, on every seed in the test matrix.
+
 ## Wind
 
 Per-vertex attributes baked by the mesher:
@@ -67,8 +102,16 @@ full tree, close-ups of specific junction types, display modes and the wind defo
 used to review the results in this repository; they require `puppeteer-core` and a Chromium binary
 (`CHROME_PATH`).
 
+`scripts/probe.ts` (trees) and `scripts/grassProbe.ts` (grasses) run the full pipeline headlessly
+and print the topology audit per preset × seed: `npx vite-node scripts/grassProbe.ts "" 1,2,3`.
+
+`npm test` covers every preset (30 trees + 14 grasses) × 3 seeds: closed, manifold, consistently
+wound, one component, genus 0, quad ratio, drop budget, wind attribute ranges, determinism and
+the OBJ/GLB/GPU exporters.
+
 ## Scope of this phase
 
-Form and topology only: solid-colour materials, proxy leaf cards. Bark textures, UV layout for
-atlases, LOD chains and detailed leaves are the next step; the quad flow and the UV seams are
-already laid out to make that straightforward.
+Form and topology only: solid-colour materials, proxy leaf cards on trees. Bark and blade
+textures, UV layout for atlases, LOD chains and detailed leaves are the next step; the quad flow
+and the UV seams are already laid out to make that straightforward. Grasses are the first non-tree
+plant family; shrubs, ferns and succulents can reuse the same organ/window machinery.

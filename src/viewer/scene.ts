@@ -129,7 +129,7 @@ export class Viewer {
     this.controls.dampingFactor = 0.08;
     this.controls.target.set(0, 6, 0);
     this.controls.maxPolarAngle = Math.PI * 0.52;
-    this.controls.minDistance = 0.5;
+    this.controls.minDistance = 0.05;
     this.controls.maxDistance = 300;
 
     this.sun = new THREE.DirectionalLight(0xfff1dc, 3.2);
@@ -372,8 +372,10 @@ export class Viewer {
 
   setTree(buffers: GpuBuffers, leaves: LeafMesh | null, height: number): void {
     this.clearTree();
-    this.treeHeight = Math.max(1, height);
-    this.uniforms.uTreeHeight.value = this.treeHeight;
+    // Real height drives the framing (grasses can be a few centimetres tall);
+    // the sway amplitude keeps a floor so small plants still visibly move.
+    this.treeHeight = Math.max(0.05, height);
+    this.uniforms.uTreeHeight.value = Math.max(0.5, height);
 
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(buffers.position, 3));
@@ -420,8 +422,9 @@ export class Viewer {
       this.treeGroup.add(this.leafMesh);
     }
 
-    // Shadow frustum & camera framing.
-    const r = Math.max(8, this.treeHeight * 0.8);
+    // Shadow frustum & camera framing (tight around small plants so blades still get crisp shadows).
+    const r = Math.max(1.2, this.treeHeight * 0.8);
+    // (small plants keep the 1.2 m frustum: plenty of shadow-map resolution)
     const cam = this.sun.shadow.camera;
     cam.left = -r;
     cam.right = r;
@@ -435,21 +438,93 @@ export class Viewer {
     this.applySettings(this.settings);
   }
 
+  /**
+   * Fit the whole plant in view, from the standard three-quarter direction:
+   * a 60 m kapok and a 10 cm turf both fill the frame. The fit is exact for
+   * the visible geometry (vertices above ground) projected into the camera
+   * frame; the 0.5 % most distant outliers (stray twig tips) may touch the edge.
+   */
   frame(): void {
-    const h = this.treeHeight;
-    const dist = h * 1.55 + 4;
-    this.controls.target.set(0, h * 0.5, 0);
-    const dir = new THREE.Vector3(0.7, 0.32, 1).normalize();
-    this.camera.position.copy(dir.multiplyScalar(dist)).add(new THREE.Vector3(0, h * 0.5, 0));
+    const dir = new THREE.Vector3(0.7, 0.32, 1).normalize(); // target → camera
+    const fwd = dir.clone().negate();
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+    const up = new THREE.Vector3().crossVectors(right, fwd);
+    const tanV = Math.tan((this.camera.fov * Math.PI) / 360);
+    const tanH = tanV * Math.max(0.4, this.camera.aspect);
+
+    const pos = this.branchMesh ? (this.branchMesh.geometry.getAttribute('position').array as Float32Array) : null;
+    let cx = 0;
+    let cy = this.treeHeight * 0.5;
+    let dist = this.treeHeight * 2;
+    if (pos && pos.length >= 3) {
+      // Screen-space extents of the plant.
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+      for (let i = 0; i < pos.length; i += 3) {
+        const y = pos[i + 1];
+        if (y < -0.01) continue; // roots and the sunk crown are hidden by the ground
+        const x = pos[i], z = pos[i + 2];
+        const sx = x * right.x + y * right.y + z * right.z;
+        const sy = x * up.x + y * up.y + z * up.z;
+        if (sx < minX) minX = sx;
+        if (sx > maxX) maxX = sx;
+        if (sy < minY) minY = sy;
+        if (sy > maxY) maxY = sy;
+      }
+      if (!Number.isFinite(minX)) return;
+      const mx = (minX + maxX) * 0.5;
+      const my = (minY + maxY) * 0.5;
+      // Distance from the target needed to hold every vertex inside the frustum:
+      // lateral offset / tan(half fov) plus the vertex's depth towards the camera.
+      let need = 0;
+      const n = pos.length / 3;
+      const req = new Float32Array(n);
+      let k = 0;
+      for (let i = 0; i < pos.length; i += 3) {
+        const y = pos[i + 1];
+        if (y < -0.01) continue;
+        const x = pos[i], z = pos[i + 2];
+        const sx = x * right.x + y * right.y + z * right.z - mx;
+        const sy = x * up.x + y * up.y + z * up.z - my;
+        const sz = x * dir.x + y * dir.y + z * dir.z;
+        const d = Math.max(Math.abs(sx) / tanH, Math.abs(sy) / tanV) + sz;
+        req[k++] = d;
+        if (d > need) need = d;
+      }
+      // 99.5th percentile through a histogram (no sort of a million values).
+      const bins = new Uint32Array(512);
+      const lo = Math.min(0, need);
+      const scale = 511 / Math.max(1e-6, need - lo);
+      for (let i = 0; i < k; i++) bins[Math.floor((req[i] - lo) * scale)]++;
+      let acc = 0;
+      let b = 0;
+      for (; b < 512; b++) {
+        acc += bins[b];
+        if (acc >= k * 0.998) break;
+      }
+      dist = Math.max(0.1, (lo + (b + 1) / scale) * 1.1);
+      // Target: the screen-space centre projected back onto the plant's axis
+      // plane, raised a little so the plant sits below the toolbar overlays.
+      const centre = right.clone().multiplyScalar(mx).add(up.clone().multiplyScalar(my + dist * tanV * 0.07));
+      cx = centre.x;
+      cy = centre.y;
+      const target = new THREE.Vector3(cx, cy, centre.z);
+      this.controls.target.copy(target);
+      this.camera.position.copy(dir).multiplyScalar(dist).add(target);
+      this.controls.update();
+      return;
+    }
+    this.controls.target.set(0, cy, 0);
+    this.camera.position.copy(dir).multiplyScalar(dist).add(new THREE.Vector3(0, cy, 0));
     this.controls.update();
   }
 
   /** Low camera on the trunk base and the root system. */
   frameBase(reach = 4): void {
-    const d = Math.max(3, reach * 1.6);
-    this.controls.target.set(0, 0.35, 0);
+    const d = Math.max(0.4, reach * 1.6);
+    const ty = Math.min(0.35, d * 0.12);
+    this.controls.target.set(0, ty, 0);
     const dir = new THREE.Vector3(0.75, 0.42, 1).normalize();
-    this.camera.position.copy(dir.multiplyScalar(d)).add(new THREE.Vector3(0, 0.35, 0));
+    this.camera.position.copy(dir.multiplyScalar(d)).add(new THREE.Vector3(0, ty, 0));
     this.controls.update();
   }
 

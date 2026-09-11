@@ -4,7 +4,7 @@
  * Used by the worker, the tests and the CLI.
  */
 
-import { TreeParams, DEFAULT_ROOTS } from './params';
+import { TreeParams, DEFAULT_ROOTS, isGrass } from './params';
 import { buildSkeleton, Skeleton } from './skeleton';
 import { buildMesh, MesherStats } from './mesher';
 import { validateTopology, TopologyReport } from './validate';
@@ -12,6 +12,8 @@ import { toGpuBuffers, GpuBuffers } from './export';
 import { LeafMesh, QuadMesh } from './mesh';
 import { Environment, ObstacleMeshData, DEFAULT_ENVIRONMENT } from '../env/environment';
 import { buildRoots } from './roots';
+import { GrassMesher, GrassStats } from '../plant/grassMesher';
+import { DEFAULT_GRASS } from '../plant/grassParams';
 
 export interface Timings {
   skeleton: number;
@@ -35,7 +37,8 @@ export interface SkeletonSummary {
 }
 
 export interface GenerateResult {
-  skeleton: Skeleton;
+  /** Tree skeleton (null for grasses). */
+  skeleton: Skeleton | null;
   environment: Environment;
   mesh: QuadMesh;
   leaves: LeafMesh;
@@ -45,6 +48,10 @@ export interface GenerateResult {
   buffers: GpuBuffers;
   timings: Timings;
   summary: SkeletonSummary;
+  /** How far the plant continues below the ground (metres). */
+  groundDepth: number;
+  /** Grass mesher statistics (grasses only). */
+  grass?: GrassStats;
 }
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -60,6 +67,7 @@ export function completeParams(params: TreeParams): TreeParams {
 
 export function generateTree(params: TreeParams, options: { validate?: boolean; obstacleMeshes?: boolean } = {}): GenerateResult {
   completeParams(params);
+  if (isGrass(params)) return generateGrass(params, options);
   const t0 = now();
   const skeleton = buildSkeleton(params);
   const t1 = now();
@@ -93,6 +101,60 @@ export function generateTree(params: TreeParams, options: { validate?: boolean; 
       rootStems: stats.rootStems,
       obstacles: environment.count,
     },
+    groundDepth: skeleton.groundDepth,
+  };
+}
+
+/**
+ * Grass pipeline: crown + tillers welded by the grass mesher → validation →
+ * GPU buffers. The result has the same shape as a tree's so the worker, the
+ * exporters and the UI treat both alike; "stems" are organs here.
+ */
+function generateGrass(params: TreeParams, options: { validate?: boolean; obstacleMeshes?: boolean }): GenerateResult {
+  const g = params.grass ?? { ...DEFAULT_GRASS };
+  params.grass = g;
+  const t0 = now();
+  const built = new GrassMesher(g, params.seed).build();
+  const t1 = now();
+  const environment = new Environment(params.environment);
+  const report = options.validate === false ? emptyReport(built.mesh) : validateTopology(built.mesh);
+  const t2 = now();
+  const buffers = toGpuBuffers(built.mesh);
+  const obstacles = options.obstacleMeshes === false ? [] : environment.meshAll();
+  const t3 = now();
+  const gs = built.stats;
+  const stats: MesherStats = {
+    stems: gs.organs,
+    droppedStems: gs.dropped,
+    dropReasons: gs.dropReasons,
+    junctions: gs.junctions,
+    forks: 0,
+    maxDepth: 3,
+    rootStems: 0,
+    droppedRoots: 0,
+  };
+  return {
+    skeleton: null,
+    environment,
+    mesh: built.mesh,
+    leaves: new LeafMesh(),
+    obstacles,
+    report,
+    stats,
+    buffers,
+    timings: { skeleton: 0, roots: 0, mesh: t1 - t0, validate: t2 - t1, buffers: t3 - t2, total: t3 - t0 },
+    summary: {
+      stems: gs.organs,
+      stemsPerLevel: [...gs.perLevel],
+      leaves: 0,
+      height: built.height,
+      treeScale: built.height,
+      primaryRoots: 0,
+      rootStems: 0,
+      obstacles: environment.count,
+    },
+    groundDepth: built.groundDepth,
+    grass: gs,
   };
 }
 

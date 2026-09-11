@@ -12,6 +12,7 @@
  */
 
 import { EnvironmentParams, DEFAULT_SCATTER, scatterObstacles } from '../env/environment';
+import { GrassParams, DEFAULT_GRASS, GRASS_PRESETS, GRASS_GROUPS } from '../plant/grassParams';
 
 export type Level4<T> = [T, T, T, T];
 
@@ -206,14 +207,23 @@ export const DEFAULT_ROOTS: RootParams = {
   dive: 0.75,
 };
 
+/** What kind of plant a parameter set describes. Trees go through the Weber-Penn skeleton, grasses through the grass mesher. */
+export type PlantKind = 'tree' | 'grass';
+
 export interface TreeParams {
   name: string;
   seed: number;
+  /** Defaults to 'tree' when absent (older saved parameter sets). */
+  kind?: PlantKind;
   botany: BotanyParams;
   mesh: MeshParams;
   roots: RootParams;
   environment: EnvironmentParams;
+  /** Grass description (kind === 'grass'). */
+  grass?: GrassParams;
 }
+
+export const isGrass = (p: { kind?: PlantKind }): boolean => p.kind === 'grass';
 
 export const DEFAULT_MESH: MeshParams = {
   trunkRadialSegments: 24,
@@ -321,11 +331,25 @@ function preset(name: string, botany: Partial<BotanyParams>, mesh: Partial<MeshP
   };
 }
 
+function grassPreset(name: string, grass: Partial<GrassParams>): TreeParams {
+  const roots = { ...DEFAULT_ROOTS, enabled: false };
+  return {
+    name,
+    seed: 1,
+    kind: 'grass',
+    botany: { ...DEFAULT_BOTANY },
+    mesh: { ...DEFAULT_MESH },
+    roots,
+    environment: { enabled: false, scatter: { ...DEFAULT_SCATTER, count: 0 }, obstacles: [] },
+    grass: { ...DEFAULT_GRASS, ...grass },
+  };
+}
+
 /**
- * Presets. Botanical values are based on the species tables published in
+ * Tree presets. Botanical values are based on the species tables published in
  * Weber & Penn (1995) and tuned for the welded mesher.
  */
-export const PRESETS: TreeParams[] = [
+export const TREE_PRESETS: TreeParams[] = [
   preset('English Oak', {
     shape: Shape.Hemispherical,
     scale: 16,
@@ -1387,6 +1411,9 @@ export const PRESETS: TreeParams[] = [
   }, {}, { count: 5, radius: 0.42, length: 0.26, laterals: 2, forks: 0.5 }),
 ];
 
+/** Every species: trees first, then the grasses. */
+export const PRESETS: TreeParams[] = [...TREE_PRESETS, ...GRASS_PRESETS.map((g) => grassPreset(g.name, g.grass))];
+
 /** Grouping for the species list. Presets missing here are shown under "Other". */
 export const PRESET_GROUPS: { label: string; names: string[] }[] = [
   { label: 'Oaks', names: ['English Oak', 'White Oak', 'Northern Red Oak', 'Southern Live Oak', 'Valley Oak', 'Pin Oak', 'Cork Oak', 'California Black Oak'] },
@@ -1396,6 +1423,7 @@ export const PRESET_GROUPS: { label: string; names: string[] }[] = [
   { label: 'Savanna', names: ['Umbrella Thorn', 'Baobab', 'Marula', 'Fever Tree'] },
   { label: 'Desert', names: ['Joshua Tree', 'Desert Ironwood'] },
   { label: 'Rocky terrain', names: ['Bristlecone Pine', 'Rowan'] },
+  ...GRASS_GROUPS,
 ];
 
 export function getPreset(name: string): TreeParams {

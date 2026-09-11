@@ -1,15 +1,26 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment } from '../src/tree/params';
+import { PRESETS, TREE_PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment, isGrass } from '../src/tree/params';
 import { buildSkeleton } from '../src/tree/skeleton';
 import { buildMesh } from '../src/tree/mesher';
 import { validateTopology } from '../src/tree/validate';
 import { toOBJ, toGLB, toGpuBuffers } from '../src/tree/export';
+import { GrassMesher } from '../src/plant/grassMesher';
+import { DEFAULT_GRASS, GRASS_PRESETS } from '../src/plant/grassParams';
+import { generateTree } from '../src/tree/generate';
+import { LeafMesh } from '../src/tree/mesh';
 
 function build(params: TreeParams) {
   const skel = buildSkeleton(params);
   const { mesh, leaves, stats } = buildMesh(skel);
   const report = validateTopology(mesh);
   return { skel, mesh, leaves, stats, report };
+}
+
+function buildGrass(preset: { grass: Partial<(typeof GRASS_PRESETS)[number]['grass']> }, seed: number) {
+  const g = { ...DEFAULT_GRASS, ...preset.grass };
+  const built = new GrassMesher(g, seed).build();
+  const report = validateTopology(built.mesh);
+  return { ...built, report };
 }
 
 // Each test is a long, fully synchronous mesh build. Between tests vitest only
@@ -20,7 +31,7 @@ function build(params: TreeParams) {
 afterEach(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 describe('welded branch mesh is a single closed manifold', () => {
-  for (const preset of PRESETS) {
+  for (const preset of TREE_PRESETS) {
     for (const seed of [1, 7, 42]) {
       it(`${preset.name} seed ${seed}`, () => {
         const p = cloneParams(preset);
@@ -40,6 +51,95 @@ describe('welded branch mesh is a single closed manifold', () => {
       });
     }
   }
+});
+
+describe('welded grass plant is a single closed manifold', () => {
+  for (const preset of GRASS_PRESETS) {
+    for (const seed of [1, 7, 42]) {
+      it(`${preset.name} seed ${seed}`, () => {
+        const { report, stats, mesh, height, groundDepth } = buildGrass(preset, seed);
+        expect(report.boundaryEdges, 'boundary edges').toBe(0);
+        expect(report.nonManifoldEdges, 'non-manifold edges').toBe(0);
+        expect(report.inconsistentEdges, 'inconsistent winding').toBe(0);
+        expect(report.degenerateFaces, 'degenerate faces').toBe(0);
+        expect(report.isolatedVertices, 'isolated vertices').toBe(0);
+        expect(report.components, 'connected components').toBe(1);
+        expect(report.eulerCharacteristic, 'Euler characteristic').toBe(2);
+        expect(report.genus).toBe(0);
+        // Grass is entirely quads: no tip caps, no triangles anywhere.
+        expect(report.quadRatio).toBe(1);
+        expect(stats.dropped, 'dropped organs').toBe(0);
+        // Every organ but the crown was welded through a window.
+        expect(stats.junctions).toBe(stats.organs - 1);
+        expect(stats.blades + stats.culms).toBeGreaterThan(0);
+        expect(height).toBeGreaterThan(0.03);
+        expect(groundDepth).toBeGreaterThan(0);
+        // Wind attributes: in range, sway weight reaches 1 at the top, no limb
+        // weight or flutter on the crown. (Counted in a plain loop: one expect
+        // per vertex would dominate the test time on 200k-vertex plants.)
+        const n = mesh.vertexCount;
+        let maxHeight = 0;
+        let outOfRange = 0;
+        let crownMoving = 0;
+        for (let i = 0; i < n; i++) {
+          for (let k = 0; k < 4; k++) {
+            const v = mesh.wind[i * 4 + k];
+            if (!(v >= 0 && v <= 1)) outOfRange++;
+          }
+          if (mesh.wind[i * 4] > maxHeight) maxHeight = mesh.wind[i * 4];
+          if (mesh.levels[i] === 0 && (mesh.wind[i * 4 + 1] !== 0 || mesh.wind[i * 4 + 3] !== 0)) crownMoving++;
+        }
+        expect(outOfRange, 'wind attributes out of [0, 1]').toBe(0);
+        expect(crownMoving, 'crown vertices with limb/flutter weight').toBe(0);
+        expect(maxHeight).toBeCloseTo(1, 5);
+      });
+    }
+  }
+
+  it('grass presets carry the grass kind and go through the shared pipeline', () => {
+    const grasses = PRESETS.filter(isGrass);
+    expect(grasses.length).toBe(GRASS_PRESETS.length);
+    const p = cloneParams(grasses.find((g) => g.name === 'Wheat')!);
+    p.seed = 3;
+    const r = generateTree(p);
+    expect(r.skeleton).toBeNull();
+    expect(r.grass).toBeDefined();
+    expect(r.report.closed && r.report.manifold).toBe(true);
+    expect(r.report.genus).toBe(0);
+    expect(r.stats.stems).toBe(r.grass!.organs);
+    expect(r.summary.stemsPerLevel).toEqual(r.grass!.perLevel);
+    expect(r.summary.height).toBeGreaterThan(0.5);
+    expect(r.buffers.index.length).toBe(r.mesh.quadCount * 6 + r.mesh.triCount * 3);
+  });
+
+  it('is deterministic for a given seed and differs across seeds', () => {
+    const a = buildGrass(GRASS_PRESETS[0], 9);
+    const b = buildGrass(GRASS_PRESETS[0], 9);
+    const c = buildGrass(GRASS_PRESETS[0], 10);
+    expect(a.mesh.positions.length).toBe(b.mesh.positions.length);
+    expect(a.report.faces).toBe(b.report.faces);
+    const sum = (arr: ArrayLike<number>) => {
+      let t = 0;
+      for (let i = 0; i < arr.length; i++) t += arr[i] * ((i % 7) + 1);
+      return t;
+    };
+    expect(sum(a.mesh.positions)).toBe(sum(b.mesh.positions));
+    // The crown lattice is seed independent; the tillers on it are not.
+    expect(sum(c.mesh.positions)).not.toBe(sum(a.mesh.positions));
+  });
+
+  it('exports a grass plant as quads to OBJ and GLB', () => {
+    const { mesh } = buildGrass(GRASS_PRESETS.find((g) => g.name === 'Lawn Turf')!, 1);
+    const leaves = new LeafMesh();
+    const obj = toOBJ(mesh, leaves, 'grass');
+    const lines = obj.split('\n');
+    expect(lines.filter((l) => l.startsWith('v ')).length).toBe(mesh.vertexCount);
+    expect(lines.filter((l) => l.startsWith('f ') && l.trim().split(/\s+/).length === 5).length).toBe(mesh.quadCount);
+    const glb = toGLB(mesh, leaves, 'grass');
+    const dv = new DataView(glb);
+    expect(dv.getUint32(0, true)).toBe(0x46546c67);
+    expect(dv.getUint32(8, true)).toBe(glb.byteLength);
+  });
 });
 
 describe('stress configurations', () => {
