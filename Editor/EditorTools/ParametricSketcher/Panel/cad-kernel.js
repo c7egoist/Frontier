@@ -202,7 +202,138 @@
     return [A[0] + -d[1] * inward * amount, A[1] + d[0] * inward * amount];
   }
 
+  function cleanPolygon2D(P, tolerance = 1e-7) {
+    const out = [];
+    (P || []).forEach(q => {
+      const p = [Number(q[0]), Number(q[1])];
+      if (!Number.isFinite(p[0]) || !Number.isFinite(p[1])) return;
+      if (!out.length || Math.hypot(p[0] - out[out.length - 1][0], p[1] - out[out.length - 1][1]) > tolerance) out.push(p);
+    });
+    if (out.length > 1 && Math.hypot(out[0][0] - out[out.length - 1][0], out[0][1] - out[out.length - 1][1]) <= tolerance) out.pop();
+    let changed = true;
+    while (changed && out.length > 3) {
+      changed = false;
+      for (let i = 0; i < out.length; i++) {
+        const a = out[(i + out.length - 1) % out.length], b = out[i], c = out[(i + 1) % out.length];
+        const cross2 = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+        if (Math.abs(cross2) <= tolerance) { out.splice(i, 1); changed = true; break; }
+      }
+    }
+    return out;
+  }
+
+  function pointIn2D(p, P) {
+    let inside = false;
+    for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+      const a = P[i], b = P[j];
+      if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / ((b[1] - a[1]) || EPS) + a[0]) inside = !inside;
+    }
+    return inside;
+  }
+
+  function booleanIntersections(a, b, c, d, tolerance) {
+    const r = [b[0] - a[0], b[1] - a[1]], s = [d[0] - c[0], d[1] - c[1]];
+    const den = r[0] * s[1] - r[1] * s[0], q = [c[0] - a[0], c[1] - a[1]];
+    const rr = r[0] * r[0] + r[1] * r[1], ss = s[0] * s[0] + s[1] * s[1];
+    const out = [];
+    const push = (t, u) => { if (t >= -tolerance && t <= 1 + tolerance && u >= -tolerance && u <= 1 + tolerance) out.push([clamp(t, 0, 1), clamp(u, 0, 1)]); };
+    if (Math.abs(den) > tolerance) {
+      push((q[0] * s[1] - q[1] * s[0]) / den, (q[0] * r[1] - q[1] * r[0]) / den);
+      return out;
+    }
+    // Collinear edges need their overlap endpoints added to both split lists.
+    if (Math.abs(q[0] * r[1] - q[1] * r[0]) <= tolerance) {
+      if (rr > tolerance) {
+        const t0 = ((c[0] - a[0]) * r[0] + (c[1] - a[1]) * r[1]) / rr;
+        const t1 = ((d[0] - a[0]) * r[0] + (d[1] - a[1]) * r[1]) / rr;
+        if (t0 >= -tolerance && t0 <= 1 + tolerance) push(t0, ss > tolerance ? ((a[0] + r[0] * t0 - c[0]) * s[0] + (a[1] + r[1] * t0 - c[1]) * s[1]) / ss : 0);
+        if (t1 >= -tolerance && t1 <= 1 + tolerance) push(t1, ss > tolerance ? ((a[0] + r[0] * t1 - c[0]) * s[0] + (a[1] + r[1] * t1 - c[1]) * s[1]) / ss : 0);
+      }
+      if (ss > tolerance) {
+        const u0 = ((a[0] - c[0]) * s[0] + (a[1] - c[1]) * s[1]) / ss;
+        const u1 = ((b[0] - c[0]) * s[0] + (b[1] - c[1]) * s[1]) / ss;
+        if (u0 >= -tolerance && u0 <= 1 + tolerance) push(rr > tolerance ? ((c[0] + s[0] * u0 - a[0]) * r[0] + (c[1] + s[1] * u0 - a[1]) * r[1]) / rr : 0, u0);
+        if (u1 >= -tolerance && u1 <= 1 + tolerance) push(rr > tolerance ? ((c[0] + s[0] * u1 - a[0]) * r[0] + (c[1] + s[1] * u1 - a[1]) * r[1]) / rr : 0, u1);
+      }
+    }
+    return out;
+  }
+
+  function boolean2D(polygons, operation = 'union') {
+    const R = (polygons || []).map(p => Array.isArray(p) ? { outer: p, holes: [] } : p).map(r => ({ outer: cleanPolygon2D(r.outer), holes: (r.holes || []).map(h => cleanPolygon2D(h)).filter(h => h.length >= 3) })).filter(r => r.outer.length >= 3);
+    if (R.length < 2) return [];
+    const bounds = R.flatMap(r => [r.outer, ...r.holes]).flat();
+    const scale = Math.max(1, ...bounds.map(q => Math.max(Math.abs(q[0]), Math.abs(q[1]))));
+    const tolerance = scale * 1e-8, probe = scale * 1e-7;
+    const edges = [];
+    R.forEach((region, owner) => [region.outer, ...region.holes].forEach(poly => poly.forEach((a, i) => edges.push({ a, b: poly[(i + 1) % poly.length], owner, ts: [0, 1] }))));
+    for (let i = 0; i < edges.length; i++) for (let j = i + 1; j < edges.length; j++) {
+      if (edges[i].owner === edges[j].owner) continue;
+      booleanIntersections(edges[i].a, edges[i].b, edges[j].a, edges[j].b, tolerance).forEach(([t, u]) => { edges[i].ts.push(t); edges[j].ts.push(u); });
+    }
+    const insideResult = p => {
+      const hit = R.map(region => pointIn2D(p, region.outer) && !region.holes.some(h => pointIn2D(p, h)));
+      if (operation === 'intersection' || operation === 'intersect') return hit.every(Boolean);
+      if (operation === 'subtract' || operation === 'difference') return !!hit[0] && !hit.slice(1).some(Boolean);
+      if (operation === 'xor' || operation === 'exclusive') return hit.filter(Boolean).length % 2 === 1;
+      return hit.some(Boolean);
+    };
+    const segments = new Map();
+    const quant = p => `${Math.round(p[0] / tolerance)},${Math.round(p[1] / tolerance)}`;
+    const addSegment = (a, b) => {
+      if (Math.hypot(b[0] - a[0], b[1] - a[1]) <= tolerance) return;
+      const ka = quant(a), kb = quant(b), key = `${ka}>${kb}`, reverse = `${kb}>${ka}`;
+      if (segments.has(reverse)) { segments.delete(reverse); return; }
+      if (!segments.has(key)) segments.set(key, { a: [a[0], a[1]], b: [b[0], b[1]] });
+    };
+    edges.forEach(e => {
+      const ts = [...new Set(e.ts.map(t => clamp(t, 0, 1)).sort((a, b) => a - b))];
+      for (let i = 0; i < ts.length - 1; i++) {
+        const t0 = ts[i], t1 = ts[i + 1];
+        const a = [e.a[0] + (e.b[0] - e.a[0]) * t0, e.a[1] + (e.b[1] - e.a[1]) * t0];
+        const b = [e.a[0] + (e.b[0] - e.a[0]) * t1, e.a[1] + (e.b[1] - e.a[1]) * t1];
+        const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], d = unit([b[0] - a[0], b[1] - a[1], 0]);
+        const left = [mid[0] - d[1] * probe, mid[1] + d[0] * probe], right = [mid[0] + d[1] * probe, mid[1] - d[0] * probe];
+        const L = insideResult(left), R = insideResult(right);
+        if (L === R) continue;
+        if (L) addSegment(a, b); else addSegment(b, a);
+      }
+    });
+    const list = [...segments.values()], byStart = new Map();
+    list.forEach((s, i) => { const k = quant(s.a); if (!byStart.has(k)) byStart.set(k, []); byStart.get(k).push(i); });
+    const used = new Set(), loops = [];
+    list.forEach((first, startIndex) => {
+      if (used.has(startIndex)) return;
+      const loop = [], start = quant(first.a); let i = startIndex, guard = 0;
+      while (!used.has(i) && guard++ < list.length + 4) {
+        used.add(i); const s = list[i]; if (!loop.length) loop.push(s.a); loop.push(s.b);
+        const endKey = quant(s.b); if (endKey === start) break;
+        const candidates = (byStart.get(endKey) || []).filter(n => !used.has(n));
+        if (!candidates.length) break;
+        if (candidates.length === 1) { i = candidates[0]; continue; }
+        const prev = s.a, cur = s.b, incoming = Math.atan2(cur[1] - prev[1], cur[0] - prev[0]);
+        i = candidates.slice().sort((x, y) => {
+          const ax = Math.atan2(list[x].b[1] - cur[1], list[x].b[0] - cur[0]);
+          const ay = Math.atan2(list[y].b[1] - cur[1], list[y].b[0] - cur[0]);
+          const wrap = a => Math.abs(Math.atan2(Math.sin(a - incoming), Math.cos(a - incoming)));
+          return wrap(ax) - wrap(ay);
+        })[0];
+      }
+      if (loop.length > 3 && quant(loop[0]) === quant(loop[loop.length - 1])) {
+        const clean = cleanPolygon2D(loop, tolerance * 4); if (Math.abs(area2(clean)) > tolerance * tolerance) loops.push(clean);
+      }
+    });
+    return loops.sort((a, b) => Math.abs(area2(b)) - Math.abs(area2(a)));
+  }
+
   class FrontierCadKernel {
+    static boolean2D(polygons, operation = 'union') { return boolean2D(polygons, operation); }
+    static mirror2D(points, a, b) {
+      const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy;
+      if (L < EPS) throw new Error('mirror axis has zero length');
+      return (points || []).map(q => { const t = ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L; const x = a[0] + dx * t, y = a[1] + dy * t; return [2 * x - q[0], 2 * y - q[1]]; });
+    }
+
     static build(body, rawLoops, options = {}) {
       const loops0 = normalizeLoops(rawLoops);
       if (!loops0.length) return FrontierCadKernel.empty(body);

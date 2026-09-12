@@ -583,12 +583,12 @@ function loopOf(c){const p=c.params;if(c.ctype==='circle'){const n=segsFor(c,48)
   if(c.ctype==='ellipse')return ellipsePts(p,segsFor(c,64));if(c.ctype==='poly'&&p.closed&&p.pts.length>2)return hasBulge(c)?polyExpand(c).pts:p.pts.slice();
   if(c.ctype==='arc'&&c.params.closed){const n=segsFor(c,48);const a0=p.a0*Math.PI/180,a1=p.a1*Math.PI/180;const pts=[];for(let i=0;i<=n;i++){const a=a0+(a1-a0)*i/n;pts.push([p.cx+Math.cos(a)*p.r,p.cy+Math.sin(a)*p.r]);}return pts;}return null;}
 function sketchProfile(s){ // closed loops: largest = outer, rest = holes; else legacy sequential lines+arcs
-  const kids=s.children.map(byId).filter(Boolean);
+  const kids=s.children.map(byId).filter(c=>c&&c.visible!==false);
   const hasSeq=kids.some(c=>c.ctype==='line'||c.ctype==='arc');
   const loops=kids.filter(c=>!c.cons).map(c=>({c,pts:loopOf(c)})).filter(l=>l.pts).map(l=>({...l,area:polyArea(l.pts)})).sort((a,b)=>b.area-a.area);
   if(loops.length&&!hasSeq){const R=sketchRegions(s).filter(r=>r.on);if(!R.length)return {outer:[],holes:[],regions:[]};const regions=[];R.forEach(r=>r.faces.forEach(F=>regions.push({outer:F.outer,holes:F.holes})));const big=regions.reduce((a,b)=>Math.abs(polyArea(b.outer))>Math.abs(polyArea(a.outer))?b:a);return {outer:big.outer,holes:big.holes,regions};}
   const outer=[],holes=[];
-  s.children.map(byId).forEach(c=>{if(!c||!c.visible&&false)return;const p=c.params;
+  s.children.map(byId).filter(c=>c&&c.visible!==false).forEach(c=>{const p=c.params;
     if(c.ctype==='line'){outer.push([p.x1,p.y1]);}
     else if(c.ctype==='arc'){const n=Math.max(8,Math.round(segsFor(c,48)*Math.abs(p.a1-p.a0)/360));for(let i=0;i<=n;i++){const a=(p.a0+(p.a1-p.a0)*i/n)*Math.PI/180;outer.push([p.cx+Math.cos(a)*p.r,p.cy+Math.sin(a)*p.r]);}}
     else if(c.ctype==='circle'){const n=segsFor(c,48);holes.push(Array.from({length:n},(_,i)=>{const a=i/n*Math.PI*2;return [p.cx+Math.cos(a)*p.r,p.cy+Math.sin(a)*p.r]}));}
@@ -607,7 +607,9 @@ function extrudeMesh(s,h,draft){const prof=sketchProfile(s);const tris=[],lines=
 // ── Solid builders (profile-based) ──────────────────────────────────────────────
 function signedArea(p){let a=0;for(let i=0;i<p.length;i++){const j=(i+1)%p.length;a+=p[i][0]*p[j][1]-p[j][0]*p[i][1];}return a/2;}
 function profileOf(f){ // closed loop(s) of a curve or a filled sketch region, in the owning sketch's plane space → [{outer,holes}]
-  if(!f)return null;if(f.kind==='curve'){const C=curvePlane(f);if(!C||!C.closed||C.pts.length<3)return null;let P=C.pts.slice();if(signedArea(P)<0)P.reverse();return {sk:byId(f.parent),regions:[{outer:P,holes:[]}]};}
+  if(!f)return null;if(f.kind==='curve'){
+    if(Array.isArray(f.booleanRegions)&&f.booleanRegions.length)return {sk:byId(f.parent),regions:f.booleanRegions.map(r=>({outer:r.outer.map(q=>[q[0],q[1]]),holes:(r.holes||[]).map(h=>h.map(q=>[q[0],q[1]]))}))};
+    const C=curvePlane(f);if(!C||!C.closed||C.pts.length<3)return null;let P=C.pts.slice();if(signedArea(P)<0)P.reverse();return {sk:byId(f.parent),regions:[{outer:P,holes:[]}]};}
   if(f.kind==='sketch'){const pr=sketchProfile(f);const regions=pr.regions&&pr.regions.length?pr.regions:(pr.outer.length>2?[{outer:pr.outer,holes:pr.holes}]:[]);if(!regions.length)return null;return {sk:f,regions};}return null;}
 function profileMesh(regions,h,draft,sym){const tris=[],lines=[];const z0=sym?-h/2:0,z1=sym?h/2:h;const k=Math.tan((draft||0)*Math.PI/180)*(z1-z0);
   regions.forEach(({outer,holes})=>{if(outer.length<3)return;const O=signedArea(outer)<0?outer.slice().reverse():outer;const H=holes.map(hl=>signedArea(hl)>0?hl.slice().reverse():hl);
@@ -641,7 +643,11 @@ function profileSegs(f){ // → [{pts:[[u,v]..] (loop ctrl points), bulge:[], ei
   const loops=[];const add=(pts,bulge,eids,smooth,hole)=>{if(pts.length<3&&!(pts.length===2&&bulge.some(b=>b)))return;let P=pts.slice(),B=bulge.slice(),E=eids.slice(),S=smooth.slice();
     const area=signedArea(P.length>2?P:polyExpandPts(P,B));const wantCCW=!hole;if((area>0)!==wantCCW){const n=P.length;const P2=[],B2=[],E2=[],S2=[];for(let i=0;i<n;i++){const j=(n-1-i);P2.push(P[j]);}for(let i=0;i<n;i++){const j=(n-1-i+n-1)%n;B2.push(-(B[j]||0));E2.push(E[j]);S2.push(S[j]);}P=P2;B=B2;E=E2;S=S2;}
     loops.push({pts:P,bulge:B,eids:E,smooth:S,hole:!!hole,orig:P.map((_,i)=>i)});};
-  if(f.kind==='curve'){const cs=f.scl||[1,1,1],cr=(f.rot3?f.rot3[2]:f.rot||0)*Math.PI/180,cp=f.pos||[0,0,0];const c=Math.cos(cr),sn=Math.sin(cr);const X=q=>{let u=q[0]*cs[0],v=q[1]*cs[1];if(cr){const t=u;u=t*c-v*sn;v=t*sn+v*c;}return [u+cp[0],v+cp[1]];};const p=f.params;
+  if(f.kind==='curve'){
+    if(Array.isArray(f.booleanRegions)&&f.booleanRegions.length){
+      let ei=0;f.booleanRegions.forEach(R=>{const addRegion=(P,hole)=>{const pts=P.map(q=>[q[0],q[1]]);add(pts,pts.map(()=>0),pts.map(()=>ei++),pts.map(()=>false),hole);};addRegion(R.outer,false);(R.holes||[]).forEach(H=>addRegion(H,true));});return loops;
+    }
+    const cs=f.scl||[1,1,1],cr=(f.rot3?f.rot3[2]:f.rot||0)*Math.PI/180,cp=f.pos||[0,0,0];const c=Math.cos(cr),sn=Math.sin(cr);const X=q=>{let u=q[0]*cs[0],v=q[1]*cs[1];if(cr){const t=u;u=t*c-v*sn;v=t*sn+v*c;}return [u+cp[0],v+cp[1]];};const p=f.params;
     if(f.ctype==='circle'){const C=X([p.cx,p.cy]);const r=p.r*cs[0];add([[C[0]+r,C[1]],[C[0]-r,C[1]]],[1,1],[0,0],[true,true],false);return loops;}
     if(f.ctype==='poly'&&(!isSlot(f)||hasBulge(f))){const CP=ctrlPlane(f);if(!CP.closed)return null;const n=CP.pts.length;add(CP.pts,CP.pts.map((_,i)=>CP.bulge[i]||0),CP.pts.map((_,i)=>i),CP.pts.map((_,i)=>!!CP.bulge[i]),false);return loops;}
     const C=curvePlane(f);if(!C||!C.closed)return null;add(C.pts,C.pts.map(()=>0),C.pts.map(()=>0),C.pts.map(()=>true),false);return loops;}
@@ -960,7 +966,7 @@ function renderInspector(){let ids=[...doc.sel];const insp=$('#insp');if(!ids.le
   if(ids.length>1){$('#inspBadge').textContent=ids.length+' selected';insp.innerHTML=`<div class="hero"><div class="c-top"><span class="ico" style="--acc:#fff">${icon('body',18)}</span><span class="t"><span class="n">Multiple figures</span><span class="m">${ids.length} selected</span></span></div>
     <div class="list">${ids.map(id=>byId(id)).map(f=>`<div class="li" style="--acc:${KINDS[f.kind].acc}"><span class="dot" style="background:${KINDS[f.kind].acc}"></span><span class="t">${f.name}</span><span class="m">${f.kind}</span></div>`).join('')}</div></div>
     <div class="actions"><button class="abtn" id="aBool">${icon('body',14)} Boolean union</button><button class="abtn" id="aMirror">Mirror</button><button class="abtn danger" id="aDel">Delete</button></div>`;
-    $('#aDel').onclick=delSel;$('#aBool').onclick=()=>log('boolean union '+ids.map(i=>byId(i).name).join(' ')+'  → console host required');$('#aMirror').onclick=()=>log('mirror '+ids.map(i=>byId(i).name).join(' ')+' XZ');return;}
+    $('#aDel').onclick=delSel;$('#aBool').onclick=()=>booleanStart('union',{keep:true});$('#aMirror').onclick=()=>patStart('mirror',{keep:true});return;}
   const f=byId(ids[0]);const m=measure(f);const acc=KINDS[f.kind].acc;$('#inspBadge').textContent=`${f.kind} · #${f.id}`;
   let html=`<div class="hero" style="--acc:${acc}"><div class="c-top"><span class="ico">${icon(f.kind,18)}</span><span class="t"><span class="n" contenteditable spellcheck="false" id="nameEd">${f.name}</span><span class="m">${f.op||f.ctype||f.axis||f.plane||f.key||f.kind}${f.recipe?' · derived':''}</span></span></div>
     <div class="big"><span class="v">${m.v>=10000?fmt(m.v/1000,1):fmt(m.v,m.v<10?2:1)}</span><span class="u">${m.v>=10000&&m.u==='mm³'?'cm³':m.u}</span><span class="lab">${m.lab}</span></div>
@@ -1638,7 +1644,7 @@ const GLYPH={
   SketchSlot:'M8 8h8a4 4 0 0 1 0 8H8a4 4 0 0 1 0-8zM8 12h.01M16 12h.01',SketchPolySlot:'M4 16l5-8 4 6 7-8M4 16m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M9 8m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M13 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M20 6m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0',SketchCircle:'M12 12m-8 0a8 8 0 1 0 16 0a8 8 0 1 0-16 0M12 12h.01',
   SketchArc:'M5 18A9 9 0 0 1 18 5M5 18l.01 0M18 5l.01 0M12 14h.01',SketchEllipse:'M12 12m-9 0a9 5.5 0 1 0 18 0a9 5.5 0 1 0-18 0',
   SketchPolygon:'M12 3l8 4.5v9L12 21l-8-4.5v-9z',SketchPoint:'M12 12m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0M12 12m-7 0a7 7 0 1 0 14 0a7 7 0 1 0-14 0',
-  Soon:'M12 8v4l3 3M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 1 0-18 0'};
+  Boolean:'M4 7h7a5 5 0 0 1 0 10H4M20 7h-7a5 5 0 0 0 0 10h7M8 12h8',Soon:'M12 8v4l3 3M12 12m-9 0a9 9 0 1 0 18 0a9 9 0 0 0-18 0'};
 const gl=(n,sz=24)=>`<svg class="i" style="width:${sz}px;height:${sz}px" viewBox="0 0 24 24"><path d="${GLYPH[n]||GLYPH.Soon}"/></svg>`;
 const CAT=[
   {key:'reference',label:'Reference',glyph:'RefPlane',ops:[
@@ -1673,7 +1679,7 @@ const CAT=[
     {id:'fillet',label:'Fillet',glyph:'Fillet',accel:'B',mod:'fillet',prompts:['Click a corner','Drag to set the radius · ⏎'],params:[{k:'r',kind:'slider',label:'Radius',min:.5,max:50,step:.5,value:4,unit:'mm'}]},
     {id:'chamfer',label:'Chamfer',glyph:'Chamfer',accel:'⇧B',mod:'chamfer',prompts:['Click a corner','Drag to set the distance · ⏎'],params:[{k:'d',kind:'slider',label:'Distance',min:.5,max:50,step:.5,value:3,unit:'mm'}]},
   ]},{key:'solid',label:'Solid',glyph:'Extrude',ops:[{id:'extrude',label:'Extrude',glyph:'Extrude',accel:'E',solid:'extrude',prompts:['Click a closed profile (or a filled region) · drag / type the height · ⏎ apply'],params:[{k:'draft',kind:'slider',label:'Draft angle',min:-20,max:20,step:.5,value:0,unit:'°'},{k:'sym',kind:'toggle',label:'Symmetric (both sides)',value:false}]},
-    {id:'inset',label:'Inset face',glyph:'Offset',accel:'I',solid:'inset',prompts:['Click a planar face of a solid · drag / type the inset distance · ⏎ apply'],params:[]},{id:'loft',label:'Loft',glyph:'Loft',accel:'⇧O',solid:'loft',prompts:['Click the first closed profile','Click the next profile (different sketch / plane or offset) · ⏎ to finish'],params:[{k:'closed',kind:'toggle',label:'Cap ends',value:true},{k:'segs',kind:'slider',label:'Ruling samples',min:8,max:96,step:1,value:32,unit:''}]}]},{key:'boolean',label:'Boolean',glyph:'Soon',soon:true},
+    {id:'inset',label:'Inset face',glyph:'Offset',accel:'I',solid:'inset',prompts:['Click a planar face of a solid · drag / type the inset distance · ⏎ apply'],params:[]},{id:'loft',label:'Loft',glyph:'Loft',accel:'⇧O',solid:'loft',prompts:['Click the first closed profile','Click the next profile (different sketch / plane or offset) · ⏎ to finish'],params:[{k:'closed',kind:'toggle',label:'Cap ends',value:true},{k:'segs',kind:'slider',label:'Ruling samples',min:8,max:96,step:1,value:32,unit:''}]}]},{key:'boolean',label:'2D Boolean',glyph:'Boolean',ops:[{id:'union',label:'Union',glyph:'Boolean',run:()=>booleanStart('union',catState.vals),prompts:['Select two or more closed profiles'],params:[{k:'keep',kind:'toggle',label:'Keep source profiles',value:true}]},{id:'subtract',label:'Subtract',glyph:'Cut',run:()=>booleanStart('subtract',catState.vals),prompts:['Select subject first, then tool profiles'],params:[{k:'keep',kind:'toggle',label:'Keep source profiles',value:true}]},{id:'intersection',label:'Intersect',glyph:'Fill',run:()=>booleanStart('intersection',catState.vals),prompts:['Select overlapping closed profiles'],params:[{k:'keep',kind:'toggle',label:'Keep source profiles',value:true}]},{id:'xor',label:'Exclusive OR',glyph:'Boolean',run:()=>booleanStart('xor',catState.vals),prompts:['Select two or more closed profiles'],params:[{k:'keep',kind:'toggle',label:'Keep source profiles',value:true}]}]},
 ];
 const catState={rail:'sketch',op:null,vals:{}};
 const opById=id=>{for(const c of CAT)for(const o of (c.ops||[]))if(o.id===id)return o;return null;};
@@ -2152,6 +2158,34 @@ function selectTool(){let was=null;if(solidTool){was=solidTool.kind;solidEnd();}
 function anyTool(){return !!(tool||dimTool||modTool||fillTool||offTool||patTool||solidTool);}
 Object.assign(GLYPH,{Save:'M5 3h11l3 3v15H5zM8 3v6h7V3M8 21v-7h8v7',History:'M12 8v4l3 2M3 12a9 9 0 1 0 3-6.7M3 3v5h5',Mirror:'M12 3v18M4 7l5 5-5 5V7zM20 7l-5 5 5 5V7z',PatLin:'M4 8h4v8H4zM10 8h4v8h-4zM16 8h4v8h-4z',PatCirc:'M12 4a2 2 0 1 0 0 .01M12 20a2 2 0 1 0 0 .01M4 12a2 2 0 1 0 0 .01M20 12a2 2 0 1 0 0 .01M12 12a6 6 0 0 1 6 0',Snap:'M12 12m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0M12 3v4M12 17v4M3 12h4M17 12h4',Select:'M5 3l14 9-6 1.5L16 20l-2 1-3-6.5L6 19z',Offset:'M4 12a8 8 0 1 0 16 0a8 8 0 1 0-16 0M8 12a4 4 0 1 0 8 0a4 4 0 1 0-8 0',Fill:'M4 20V4h16v16zM8 8h8v8H8z',FillOn:'M4 20V4h16v16zM8 8l8 8M16 8l-8 8'});
 
+/* ══ 2-D region booleans ═══════════════════════════════════════════════════════════════════════════════════════
+   Booleaning happens on the sketch plane, before extrusion. The kernel splits
+   every input edge at intersections and classifies both sides of each atomic
+   segment, then returns oriented result loops. */
+function booleanSourceCurves(closedOnly=true){
+  const out=[];[...doc.sel].map(byId).forEach(f=>{if(!f||f.kind!=='curve'||f.visible===false||f.ctype==='point')return;const C=curvePlane(f);if(C&&(!closedOnly||C.closed)&&C.pts.length>=2)out.push(f);});return out;
+}
+function booleanRegionsFromLoops(loops){
+  const L=(loops||[]).filter(P=>P&&P.length>=3).sort((a,b)=>Math.abs(signedArea(b))-Math.abs(signedArea(a))),regions=[];
+  L.forEach(P=>{const a=signedArea(P);if(Math.abs(a)<1e-7)return;if(a>0){regions.push({outer:P.map(q=>[q[0],q[1]]),holes:[]});return;}const q=P[0],host=regions.find(r=>ptInPoly(q[0],q[1],r.outer));if(host)host.holes.push(P.map(v=>[v[0],v[1]]));});
+  if(!regions.length&&L.length){const P=L[0].map(q=>[q[0],q[1]]);regions.push({outer:signedArea(P)<0?P.slice().reverse():P,holes:[]});}return regions;
+}
+function booleanStart(kind,vals={}){
+  if(tool)endTool();if(modTool)modEnd();if(solidTool)solidEnd();if(patTool)patEnd();if(offTool)offEnd();
+  const src=booleanSourceCurves();if(src.length<2){log(`2D ${kind}: select at least two closed curves in one sketch first`);return false;}
+  const sk=byId(src[0].parent);if(!sk||src.some(f=>f.parent!==sk.id)){log('2D boolean: all profiles must belong to the same sketch / workplane');return false;}
+  const loops=src.map(f=>{if(Array.isArray(f.booleanRegions)&&f.booleanRegions.length)return f.booleanRegions[0];const C=curvePlane(f);return {outer:C.pts.map(q=>[q[0],q[1]]),holes:[]};}),result=FrontierCadKernel.boolean2D(loops,kind),regions=booleanRegionsFromLoops(result);
+  if(!regions.length){log(`2D ${kind}: profiles do not produce a closed region`);return false;}
+  snapshot(`2D ${kind}`);const made=[];regions.forEach(R=>{const reg={outer:R.outer.map(q=>[q[0],q[1]]),holes:R.holes.map(H=>H.map(q=>[q[0],q[1]]))};const f=mk('curve',nextName(`Boolean${kind[0].toUpperCase()+kind.slice(1)}`),{pts:reg.outer.map(q=>[q[0],q[1]]),closed:true},{ctype:'poly',parent:sk.id,fill:true,recipe:src.map(x=>x.name).concat(`2D ${kind}`),boolean:{op:kind,sources:src.map(x=>x.id)},booleanRegions:[reg]});doc.figures.push(f);sk.children.push(f.id);made.push(f.id);});
+  if(vals.keep===false)src.forEach(f=>{f.visible=false;});doc.sel=new Set(made);sub_.sel.clear();invalidate(sk.id);topoCache.clear();renderOutliner();renderInspector();renderCat();draw();log(`2D ${kind} · ${src.map(f=>f.name).join(' + ')} → ${made.map(id=>byId(id).name).join(', ')}`);return true;
+}
+function mirrorSelection2D(axis){
+  const src=booleanSourceCurves(false);if(!src.length){log('2D mirror: select one or more sketch curves first');return false;}const sk=byId(src[0].parent);if(!sk||src.some(f=>f.parent!==sk.id)){log('2D mirror: all curves must belong to one sketch');return false;}
+  const a=axis&&axis[0]||[0,0],b=axis&&axis[1]||[0,1];if(Math.hypot(b[0]-a[0],b[1]-a[1])<1e-7){log('2D mirror: axis has zero length');return false;}snapshot('2D mirror');const made=[];
+  src.forEach(s=>{const spec=xfPoints(s,mirrorFn(a,b));if(!spec)return;const g=spawnFrom(s,sk,spec);g.recipe=[s.name,'2D mirror'];g.link={src:s.id,kind:'mirror',a:[...a],b:[...b]};if(s.booleanRegions)g.booleanRegions=s.booleanRegions.map(R=>({outer:FrontierCadKernel.mirror2D(R.outer,a,b),holes:(R.holes||[]).map(H=>FrontierCadKernel.mirror2D(H,a,b))}));made.push(g.id);});
+  invalidate(sk.id);topoCache.clear();doc.sel=new Set(made);renderOutliner();renderInspector();draw();log(`2D mirror · ${made.length} linked cop${made.length===1?'y':'ies'} across ${a[0]},${a[1]} → ${b[0]},${b[1]}`);return !!made.length;
+}
+
 // ══ Mirror · Linear pattern · Circular pattern (Sketch Modify) ═════════════════════════════════════════════════
 // ══ Solid tools: Extrude (pick profile → drag height) · Loft (pick 2+ profiles) ═══════════════════════════════
 let solidTool=null; // {kind:'extrude'|'loft', vals, hover, prof:{f,pf}, drag:{h,sx,sy,moved}, num, secs:[]}
@@ -2256,12 +2290,12 @@ function ctrlCentroid(f){const C=f.ctype==='poly'?ctrlPlane(f):curvePlane(f);if(
 function migrateLinks(){let n=0;doc.figures.forEach(f=>{if(f.kind!=='curve'||f.link||!f.mirrorOf)return;const src=byId(f.mirrorOf);if(!src||src.kind!=='curve'){delete f.mirrorOf;return;}const c1=ctrlCentroid(src),c2=ctrlCentroid(f);if(!c1||!c2||Math.hypot(c2[0]-c1[0],c2[1]-c1[1])<1e-9){delete f.mirrorOf;return;}
     const m=[(c1[0]+c2[0])/2,(c1[1]+c2[1])/2];const d=[-(c2[1]-c1[1]),c2[0]-c1[0]];f.link={src:src.id,kind:'mirror',a:m,b:[m[0]+d[0],m[1]+d[1]]};delete f.mirrorOf;n++;});if(n)log(`upgraded ${n} mirror cop${n>1?'ies':'y'} to live links`);return n;}
 function syncLinks(){if(!syncLinks._mig){syncLinks._mig=true;migrateLinks();}let changed=false;const seen=new Set();const upd=f=>{if(seen.has(f.id))return;seen.add(f.id);const src=byId(f.link.src);if(!src||src.kind!=='curve'||src.parent!==f.parent){delete f.link;f.recipe=null;return;}if(src.link)upd(src);const fn=linkFn(f.link);if(!fn){delete f.link;return;}const spec=xfPoints(src,fn);if(!spec)return;
-    const cmp=spec.slot?{...spec.params,pts:f.params.pts}:spec.params;const same=f.ctype===spec.ctype&&JSON.stringify(f.params)===JSON.stringify(cmp)&&!(f.pos&&(f.pos[0]||f.pos[1]))&&!(f.rot3&&f.rot3[2]);if(same)return;
-    f.ctype=spec.ctype;f.params=spec.params;f.pos=[0,0,(f.pos||[0,0,0])[2]||0];f.rot3=[0,0,0];f.rot=0;f.scl=[1,1,1];f.cons=src.cons;if(spec.slot)regenSlot(f);invalidate(f.id);invalidateTopo(f.id);changed=true;};
+    const cmp=spec.slot?{...spec.params,pts:f.params.pts}:spec.params;const linkedRegions=src.booleanRegions?src.booleanRegions.map(R=>({outer:R.outer.map(fn),holes:(R.holes||[]).map(H=>H.map(fn))})):null;const same=f.ctype===spec.ctype&&JSON.stringify(f.params)===JSON.stringify(cmp)&&JSON.stringify(f.booleanRegions||null)===JSON.stringify(linkedRegions)&&!(f.pos&&(f.pos[0]||f.pos[1]))&&!(f.rot3&&f.rot3[2]);if(same)return;
+    f.ctype=spec.ctype;f.params=spec.params;f.pos=[0,0,(f.pos||[0,0,0])[2]||0];f.rot3=[0,0,0];f.rot=0;f.scl=[1,1,1];f.cons=src.cons;if(linkedRegions)f.booleanRegions=linkedRegions;else delete f.booleanRegions;if(spec.slot)regenSlot(f);invalidate(f.id);invalidateTopo(f.id);changed=true;};
   doc.figures.forEach(f=>{if(f.kind==='curve'&&f.link)upd(f);});if(changed){doc.figures.forEach(f=>{if(f.kind==='sketch')invalidate(f.id);});}return changed;}
 function unlink(f){if(!f.link)return;snapshot('unlink '+f.name);delete f.link;renderInspector();draw();}
 // inspector: mirror a curve across another curve (pick from a dropdown of lines in the same sketch)
-function mirrorAcross(f,axisId){const sk=byId(f.parent);const ax=byId(axisId);if(!sk||!ax)return;const e=curvePlane(ax);if(!e)return;snapshot('mirror across '+ax.name);const fn=mirrorFn(e.pts[0],e.pts[e.pts.length-1]);const spec=xfPoints(f,fn);if(!spec)return;const g=spawnFrom(f,sk,spec);g.recipe=[f.name,'mirror · '+ax.name];g.link={src:f.id,kind:'mirror',axis:ax.id};invalidate(sk.id);topoCache.clear();doc.sel=new Set([g.id]);renderOutliner();renderInspector();draw();log(`mirror ${f.name} across ${ax.name} → ${g.name}`);}
+function mirrorAcross(f,axisId){const sk=byId(f.parent);const ax=byId(axisId);if(!sk||!ax)return;const e=curvePlane(ax);if(!e)return;snapshot('mirror across '+ax.name);const a=e.pts[0],b=e.pts[e.pts.length-1],fn=mirrorFn(a,b);const spec=xfPoints(f,fn);if(!spec)return;const g=spawnFrom(f,sk,spec);g.recipe=[f.name,'mirror · '+ax.name];g.link={src:f.id,kind:'mirror',axis:ax.id};if(f.booleanRegions)g.booleanRegions=f.booleanRegions.map(R=>({outer:R.outer.map(fn),holes:(R.holes||[]).map(H=>H.map(fn))}));invalidate(sk.id);topoCache.clear();doc.sel=new Set([g.id]);renderOutliner();renderInspector();draw();log(`mirror ${f.name} across ${ax.name} → ${g.name}`);}
 function drawToolPreview(g){if(!tool)return;const pl=activePlane();if(!pl)return;const B=planeBasis(pl);const W3=uv=>[B.o[0]+B.u[0]*uv[0]+B.v[0]*uv[1],B.o[1]+B.u[1]*uv[0]+B.v[1]*uv[1],B.o[2]+B.u[2]*uv[0]+B.v[2]*uv[1]];
   const P=hover&&!(tool.op.confirmStep&&tool.pts.length>=2)&&!(tool.pts.length&&tool.pts[tool.pts.length-1][0]===hover[0]&&tool.pts[tool.pts.length-1][1]===hover[1])?[...tool.pts,hover]:tool.pts.slice();
   const shape=shapeFrom(tool.op,P,tool.vals,false);
@@ -2281,6 +2315,8 @@ function runCmd(s){const [v,...a]=s.split(/\s+/);const N=a.map(Number);snapshot(
   else if(v==='hide'||v==='show'){const t=doc.figures.find(x=>x.name===a[0]);if(t)t.visible=v==='show';}
   else if(v==='delete'){const t=doc.figures.find(x=>x.name===a[0]);if(t){doc.sel=new Set([t.id]);delSel();return;}}
   else if(v==='select'){const t=doc.figures.find(x=>x.name===a[0]);if(t)doc.sel=new Set([t.id]);}
+  else if(v==='boolean'&&a.length>=3){const fs=a.slice(1).map(n=>doc.figures.find(x=>x.name===n)).filter(f=>f);doc.sel=new Set(fs.map(f=>f.id));booleanStart(a[0]==='difference'?'subtract':a[0],{keep:true});return;}
+  else if(v==='mirror'&&a.length>=2){const f=doc.figures.find(x=>x.name===a[0]);if(f){doc.sel=new Set([f.id]);const axis=a[1].toUpperCase()==='U'?[[0,0],[1,0]]:[[0,0],[0,1]];mirrorSelection2D(axis);}return;}
   else if(v==='view'){setView(a[0]);}
   else if(v==='plane'){const o={base:'XY',offset:0,tilt:0,size:200,show:true};a.forEach(x=>{const m=x.match(/^--(\w+)=(.+)$/);if(m)o[m[1]]=isNaN(+m[2])?m[2]:+m[2];else if(/^(XY|XZ|YZ)$/i.test(x))o.base=x.toUpperCase();});createWorkplane(o);return;}
   else if(v==='undo'){dropSnapshot();undo();return;}

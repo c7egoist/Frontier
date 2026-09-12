@@ -51,4 +51,13 @@ const cylinder = FrontierCadKernel.build({ params: { height: 20 } }, circle);
 assert.equal(cylinder.brep.faces.filter(f => f.kind === 'cylinder').length, 1, 'a circular profile is one analytic cylindrical face');
 assert.equal(cylinder.brep.edges.filter(e => /^(top|bot):/.test(e.key)).length, 2, 'a cylinder has two circular boundary edges');
 
+const A = [[0, 0], [10, 0], [10, 10], [0, 10]];
+const B = [[5, 0], [15, 0], [15, 10], [5, 10]];
+const boolArea = loops => loops.reduce((sum, p) => sum + Math.abs(require('../cad-kernel.js').math.area2(p)), 0);
+assert.equal(boolArea(FrontierCadKernel.boolean2D([A, B], 'union')), 150, '2D union arrangement');
+assert.equal(boolArea(FrontierCadKernel.boolean2D([A, B], 'intersection')), 50, '2D intersection arrangement');
+assert.equal(boolArea(FrontierCadKernel.boolean2D([A, B], 'subtract')), 50, '2D difference arrangement');
+assert.equal(FrontierCadKernel.boolean2D([A, B], 'xor').length, 2, '2D xor keeps both disjoint lobes');
+assert.deepEqual(FrontierCadKernel.mirror2D([[2, 3], [5, 3]], [0, 0], [0, 1]), [[-2, 3], [-5, 3]], '2D mirror across the sketch V axis');
+
 console.log('Frontier CAD kernel smoke: all checks passed');
