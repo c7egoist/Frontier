@@ -22,6 +22,7 @@
 import {
   V3,
   UP,
+  TAU,
   DEG2RAD,
   add,
   addScaled,
@@ -414,6 +415,10 @@ export class SkeletonBuilder {
 
     this.makeStem(turtle, trunk, 0, 0, 1, 1);
 
+    // Cactus spines: place needle leaves at areole bumps on rib peaks / pad areoles.
+    // Uses p.leaves / p.leafScale / p.leafScaleX as spine count & size, p.ribs / p.flatness for placement.
+    this.generateCactusSpines();
+
     // Post pass: limb reach (for wind amplitude) and height.
     let height = 0;
     for (const s of this.stems) {
@@ -504,7 +509,8 @@ export class SkeletonBuilder {
     let leafCount = 0;
     let branchCount = 0;
     const tuft = clamp(p.leafTuft, 0.05, 1);
-    if (isLastLevel && p.leaves > 0) {
+    const isCactusStem = p.ribs >= 3 || Math.max(...p.flatness) > 0.4;
+    if (isLastLevel && p.leaves > 0 && !isCactusStem) {
       // Tufted foliage keeps the same number of leaves but packs them into the
       // last `tuft` of the stem, so the per-segment budget is scaled up.
       leafCount = (this.calcLeafCount(stem) * (1 - start / curveRes)) / tuft;
@@ -599,7 +605,7 @@ export class SkeletonBuilder {
     // Tufted species (yucca rosettes, foxtail-pine brushes) carry foliage on
     // every bare tip, not only on the deepest level: an arm that produced no
     // children ends in a tuft as well.
-    if (!isLastLevel && tuft < 1 && p.leaves > 0 && stem.children.length === 0) {
+    if (!isLastLevel && tuft < 1 && p.leaves > 0 && !isCactusStem && stem.children.length === 0) {
       const perSeg = this.calcLeafCount(stem) / tuft / curveRes;
       let err = 0;
       for (let seg = Math.max(start + 1, 1); seg <= curveRes; seg++) {
@@ -835,6 +841,106 @@ export class SkeletonBuilder {
       };
       stem.leaves.push(leaf);
       this.leaves.push(leaf);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cactus spines — needle leaves placed at areole bumps on rib peaks / pad faces.
+  // Uses p.leaves as total spine budget (scaled by treeScale) and distributes
+  // spines among the geometric areoles (rib peaks × rows). Areole positions
+  // follow the same rib / spacing model as the mesher, so spines sit exactly
+  // on the tubercles.
+  // ---------------------------------------------------------------------------
+  private generateCactusSpines(): void {
+    const p = this.p;
+    if (p.leaves <= 0) return;
+    const flatMax = Math.max(...p.flatness);
+    const hasRibs = p.ribs >= 3;
+    const isFlatPad = flatMax > 0.4;
+    if (!hasRibs && !isFlatPad) return;
+    const ribCount = hasRibs ? Math.round(p.ribs) : 0;
+    const ribTwistRad = (p.ribTwist ?? 0) * DEG2RAD;
+    const leafScaleBase = p.leafScale * (this.treeScale / Math.max(1e-6, p.scale));
+    // Distribute spines proportionally to areole count, but cap total per stem
+    // to keep AAA plants tractable (Cholla has 750 stems × 200 areoles would explode).
+    for (const stem of this.stems) {
+      if (stem.dropped || stem.role === 'root') continue;
+      const lvlFlat = p.flatness[Math.min(stem.level, 3)] ?? 0;
+      const stemIsCactus = hasRibs || lvlFlat > 0.4;
+      if (!stemIsCactus) continue;
+      const L = stem.length;
+      if (L < 0.015) continue;
+      // Length-proportional budget: a 7 m column gets ~55% of p.leaves, a 0.15 m twig gets ~4% .
+      // Tiny twigs are skipped — spines would be invisible and would explode on Cholla (750+ stems).
+      const midR = stemRadiusAt(stem, L * 0.5, this.mesh, p);
+      const stemIsFlat = lvlFlat > 0.4;
+      if (stemIsFlat ? midR < 0.0035 : midR < 0.0035) continue;
+      let budget = Math.round(p.leaves * (L / Math.max(1, this.treeScale)) * 0.55);
+      if (p.levels === 1) budget = Math.round(budget * 1.35);
+      budget = clamp(budget, hasRibs ? 2 : 2, hasRibs ? 180 : 24);
+      if (L < 0.28 && p.scale > 0.45) budget = Math.min(budget, 7);
+      const spacingLen = Math.max(0.02, (p.areoleSpacing ?? 0.06) * stem.logicalLength);
+      const rows = Math.max(1, Math.floor(L / Math.max(0.02, spacingLen)));
+      const areolesPerRow = hasRibs ? ribCount : 6;
+      const totalAreoles = rows * areolesPerRow;
+      // If we have fewer spines than areoles, pick a random subset of areoles
+      for (let i = 0; i < budget; i++) {
+        const areoleIdx = Math.floor(this.leafRng.range(0, totalAreoles));
+        const r = Math.floor(areoleIdx / areolesPerRow);
+        const k = areoleIdx % areolesPerRow;
+        const sRow = (r + 0.5) * (L / rows) + this.leafRng.range(-0.012, 0.012) * L;
+        const s = clamp(sRow, 0.04, L - 0.02);
+        const sample = sampleStem(stem, s);
+        const radius = stemRadiusAt(stem, s, this.mesh, p);
+        const up = normalize(cross(sample.dir, sample.right));
+        const twist = hasRibs ? ribTwistRad * (s / Math.max(1e-6, L)) : 0;
+        let radial: V3;
+        let radLen = 1;
+        if (hasRibs) {
+          const theta = (TAU * k) / ribCount + twist;
+          const c = Math.cos(theta), sn = Math.sin(theta);
+          radial = normalize({ x: sample.right.x * c + up.x * sn, y: sample.right.y * c + up.y * sn, z: sample.right.z * c + up.z * sn });
+        } else {
+          // Flat pad: random angle around ellipse
+          const theta = (TAU * k) / areolesPerRow + this.leafRng.range(-0.12, 0.12);
+          const c = Math.cos(theta), sn = Math.sin(theta);
+          const flat = lvlFlat;
+          const ay = 1 - clamp(flat, 0, 0.92);
+          const cs = c, sns = sn * ay;
+          const radialRaw = { x: sample.right.x * cs + up.x * sns, y: sample.right.y * cs + up.y * sns, z: sample.right.z * cs + up.z * sns };
+          radial = normalize(radialRaw);
+          radLen = Math.sqrt(cs * cs + sns * sns);
+        }
+        const pos = addScaled(sample.pos, radial, radius * radLen * 0.98);
+        // One areole → a small cluster: for ribbed cacti the budget already counts clusters,
+        // so each leaf here is one cluster centre with a few fanned needles. To stay within
+        // budget we emit 1–2 needles per cluster, fanned.
+        const cluster = hasRibs ? (budget < totalAreoles * 0.5 ? 1 : this.leafRng.range(0, 1) < 0.3 ? 2 : 1) : 1;
+        for (let cIdx = 0; cIdx < cluster; cIdx++) {
+          const isCentre = cIdx === 0;
+          const coneDeg = isCentre ? this.leafRng.range(0, 7) : this.leafRng.range(11, 26);
+          const cone = coneDeg * DEG2RAD;
+          const phi = isCentre ? 0 : this.leafRng.range(0, TAU);
+          const t1 = lengthSq(cross(radial, sample.dir)) > 1e-10 ? normalize(cross(radial, sample.dir)) : normalize(cross(radial, up));
+          const t2 = normalize(cross(radial, t1));
+          const dirRaw = {
+            x: radial.x * Math.cos(cone) + (t1.x * Math.cos(phi) + t2.x * Math.sin(phi)) * Math.sin(cone),
+            y: radial.y * Math.cos(cone) + (t1.y * Math.cos(phi) + t2.y * Math.sin(phi)) * Math.sin(cone),
+            z: radial.z * Math.cos(cone) + (t1.z * Math.cos(phi) + t2.z * Math.sin(phi)) * Math.sin(cone),
+          };
+          const dir = normalize(dirRaw);
+          let leafRight = lengthSq(cross(dir, sample.dir)) > 1e-10 ? normalize(cross(dir, sample.dir)) : anyPerpendicular(dir);
+          leafRight = normalize(leafRight);
+          const normal = normalize(cross(dir, leafRight));
+          const scale = leafScaleBase * this.leafRng.range(0.78, 1.22);
+          const leaf: Leaf = { pos: { ...pos }, dir, right: leafRight, normal, scale, stem, t: clamp(s / Math.max(1e-6, L), 0, 1) };
+          stem.leaves.push(leaf);
+          this.leaves.push(leaf);
+          if (this.leaves.length > 9000) break; // safety cap for extremely branched cholla
+        }
+        if (this.leaves.length > 9000) break;
+      }
+      if (this.leaves.length > 9000) break;
     }
   }
 
