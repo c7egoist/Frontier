@@ -356,6 +356,60 @@ int main()
         Expect(Rising, "higher tiers march it more finely");
     }
 
+    // ── ⑧ the jitter dithers but never wanders ─────────────────────────────────────────────────────────────────
+    // P2.1: the layer march jitters its start per ray (MarchJitter: hash13 over the spread direction plus
+    // fract(Time*3)), so adjacent rays sample different phases instead of contouring into bands. The same ray
+    // twice is bit-identical (deterministic — proofs and stills are stable); neighbouring rays and later
+    // clocks sample different phases (the dither dithers). The anti-banding evidence itself lives in the
+    // kernel proof's streak gauge, which renders the jittered field; this pins the mechanism.
+    std::printf("\n8. the march jitter dithers without wandering\n");
+    {
+        CloudLayerSettings Layer{};
+        Layer.Enabled = true; Layer.Base = 1000.0f; Layer.Thickness = 800.0f;
+        Layer.Coverage = 0.6f; Layer.Density = 1.5f;
+        LocalVolumeSettings None{};
+        const float Eye[3] = { 0.0f, 0.0f, 50.0f };
+        float Ray[3] = { 0.0f, 0.5f, 0.87f };
+        const float RL = std::sqrt(Ray[0]*Ray[0] + Ray[1]*Ray[1] + Ray[2]*Ray[2]);
+        for (int C = 0; C < 3; ++C) Ray[C] /= RL;
+        const float Sun[3] = { 0.0f, 0.5f, 0.87f };
+        const float Radiance[3] = { 20.0f, 19.0f, 17.0f }, Ambient[3] = { 0.7f, 0.8f, 1.0f };
+
+        const VolumetricSample First = VolumetricMedia::March(
+            Layer, None, None, Wind, Budget, Eye, Ray, 1.0e5f, Sun, Radiance, Ambient, 0.0f);
+        const VolumetricSample Second = VolumetricMedia::March(
+            Layer, None, None, Wind, Budget, Eye, Ray, 1.0e5f, Sun, Radiance, Ambient, 0.0f);
+        Expect(First.Transmittance == Second.Transmittance && First.Scatter[0] == Second.Scatter[0] &&
+               First.Scatter[1] == Second.Scatter[1] && First.Scatter[2] == Second.Scatter[2] &&
+               First.StepsTaken == Second.StepsTaken,
+               "the same ray twice is bit-identical");
+        Expect(First.StepsTaken > 0u && First.Transmittance < 1.0f,
+               "the probe ray actually meets cloud (or the asserts below are vacuous)");
+
+        // A 4x4 fan of neighbouring rays, half a degree apart: identical transmittances across the whole
+        // fan would mean the per-ray phase collapsed to a constant.
+        bool Varied = false;
+        float Previous = First.Transmittance;
+        for (int I = 0; I < 16; ++I)
+        {
+            float Fan[3] = { (static_cast<float>(I % 4) - 1.5f) * 0.009f, 0.5f, 0.87f };
+            const float FL = std::sqrt(Fan[0]*Fan[0] + Fan[1]*Fan[1] + Fan[2]*Fan[2]);
+            for (int C = 0; C < 3; ++C) Fan[C] /= FL;
+            const VolumetricSample FanSample = VolumetricMedia::March(
+                Layer, None, None, Wind, Budget, Eye, Fan, 1.0e5f, Sun, Radiance, Ambient, 0.0f);
+            if (FanSample.Transmittance != Previous) Varied = true;
+            Previous = FanSample.Transmittance;
+        }
+        Expect(Varied, "neighbouring rays sample different phases");
+
+        // The same ray a tenth of a second later re-rolls the dither (fract 0.0 -> 0.3): the clock term is
+        // live, so the dither animates instead of baking a fixed pattern into the sky.
+        const VolumetricSample Later = VolumetricMedia::March(
+            Layer, None, None, Wind, Budget, Eye, Ray, 1.0e5f, Sun, Radiance, Ambient, 0.1f);
+        Expect(Later.Transmittance != First.Transmittance,
+               "a later clock re-rolls the phase");
+    }
+
     std::printf("\n");
     for (int I = 0; I < 108; ++I) std::putchar('=');
     std::printf("\n%s\n\n", Failures == 0 ? "  the media behave" : "  THE MEDIA DO NOT BEHAVE");

@@ -157,3 +157,59 @@ Status log (append; newest last):
   asserts), exposure, volumetric, sundirect, moon, editor-preview; all sheets + 2 portraits committed. The low
   portrait's bright glow is faithful (same integral + tonemap as REF saturates both); the disc's own deep-orange
   linear colour is pinned in the parity proof. D1e overlay-vs-occlude re-audit stays deferred to post-D2.
+
+- 2026-09-13: P2.0 diagnosis landed (no code). REF cloud block (~986-1175: clDensity, cloudMarch, marchLocal,
+  uniShadow, cloudLayer, cloudShadow, clProfiler, lcDensity, vfDensity) + wind JS (windBase/Gust/Turb/Disp/Step)
+  mapped term-by-term against VolumetricMedia.h / WindField.h / SkyRecords.slang / SkyCloudKernelProof.cpp.
+  CONFIRMED D2a-f, all now measured in ENG code: sin-hash at 3 sites (+ twin mirrors it); noise [-1,1] roundtrip;
+  3/2 octaves vs REF 4-oct shape (2.02/4.1/8.3, /0.9375) + 2-oct erosion (erode=mix(det,1-det,clamp(hn*3))*
+  detail*.45, clamp(base-erode*(1-base))); smoothstep-sharpened remap vs REF linear; extinction .01 vs .06;
+  single HG .45 vs dual-lobe (g1 .8 / g2 .3 / mix .3, x4pi, sunL*.02) + per-medium ms-octaves (layer
+  (a,b)=(1,1)/(.5,.55)/(.25,.3025), local sh+.55sqrt+.3fourth) + Beer-powder (.6) + absorption (.05); full-sky
+  ambient vs REF amb*.9*mix(.35,1,hn) (ENG cloud bases ~3x overlit = the veil); no jitter / far cap (thick*14
+  below-inside, max(60km,thick*40) above) / anvil lean (hn*thick*.35) / cirrus streak (x*1.12, z*.6) / lodFar
+  fade (90-180 km) / aerial mix (mix(acc,sky*(1-T)*.9,aer*.6)); clock = LocalHours*3600 vs wall-clock integral
+  (WIND.int += base(0)*gust*dt, drift = int*f(alt), gust phase += dt*(.35+gust*.4)).
+  NEW transcription bugs: (i) SampleSwirl advects ALTITUDE (z*.02+t*.03) where REF advects the horizontal plane,
+  and its component mix is not REF's (n1-n2,n2-n3,n3-n1) — re-transcribe exactly. (ii) GustPhase rate misses
+  REF's gust term (Tick += dt*.35, REF dt*(.35+gust*.4)). (iii) Bearing comment claims TOWARD; the (sin,cos)
+  formula is REF's FROM form (pattern moves bearing+180) — renumber 225->214 + fix the word. (iv) Steadiness is
+  an ENG invention (default 1.0 = REF; keep + note). (v) Height profiles: stratus/sc/cumulus/cb match REF
+  clProfiler; altostratus/cirrus differ — port. (vi) Fog uses the cloud coverage model; REF vf is extinction x
+  hetero x gravity (.35/m, 3-oct .55/.3/.15, shapes/falloff) — needs lanes it doesn't have, so -> P8; P2 aligns
+  only fog g .45->.6 + shared jitter. Defaults to align: wind 8@225/shear .35/veer 12/turb .3 -> 4.2@214/.6/18/
+  .2; cov .55/thick 1200/scale 1.0/anvil .5/albedo .92-.97 -> .45/900/1.4/.3/white; local centre (0,0,400) half
+  (300,300,150) scale 120 -> (40,-160,120)/(90,70,35)/30, den 1->1.2; tier taps 6->4 (REF Standard 28 steps/4
+  taps; min(userSteps,tierSteps) rule + user axis -> P7). RECORD: P2 needs scatter (g1/g2/mix/absorb/amb/powder/
+  detail) + localDetail + wind (int.xy, wall) = 11 lanes; grow +3 rows (320->368B, cloud rows are last so no
+  offset shifts): SkyCloudScatter, SkyCloudDetail, SkyCloudClock. Albedo.w retired (sole reader: CloudDriftAt).
+  lcType/lcShape/lcSoft bit-packed into CloudControl.w (reserved uint; soft 8-bit fixed). Layer/local single-g
+  lanes retired-but-packed (documented). Unlinked entity winds + fog albedo/shape/absorb -> P8 (next growth).
+  JITTER: REF hash13(pixel,fract(uTime*3)); ENG uses an integer hash of (pixelIndex, wall-clock frame) — animated
+  like REF (no shower-door), bit-exact CPU/GPU (REF's float hash of large pixel coords is implementation-defined
+  across sin). March gains a defaulted PixelSeed (0 = deterministic uniform shift for proofs); shader plumbing
+  TBD by call-chain check (PixelIndex if <=2 hops, else ray-dir hash). STRUCTURAL keeps (reasoned, documented):
+  flat slab (D2g); fixed-step counts (finer than REF fixed-count; the cap bounds cost); per-medium span marches
+  (union broke transmittance monotonicity, measured); ShadowMarch already paces uniShadow (port the exact
+  growing-tap form d=st*i^2*.35 + lod anyway). sunUp moves INTO the march per medium (layer: sun elev; local:
+  normalized box height; fog: absolute height); caller-side DayF scaling (raster/twin/proofs) goes away.
+  SLICES: P2.1 hash13 + noise[0,1] + jitter (3 transcriptions + determinism asserts; re-pin noise-shifted stats).
+  P2.2 wind clock (integral state in Tick, AdvectDrift = int*f + static lean, gust rate, swirl, all defaults,
+  record growth + Clock row). P2.3 far cap (layer only). P2.4a density terms (octaves/erosion/linear remap/lean/
+  streak/lod/lc profiles+shape). P2.4b lighting terms (uniShadow/ms/powder/absorb/ext/HG/sunUp/hn-amb/aerial).
+  P2.5 sheets + portraits + census gates. P8 takes: fog vf model, unlinked winds, point/spot on fog, user step
+  axis; P3 takes the dead HeightFogOpticalDepth (only its proof calls it) + eye->hit fog segments.
+- 2026-09-13: P2.1 LANDED (hash13 + jitter). Sin-hash replaced by Hoskins hash13 (REF-verbatim) at all 3 noise
+  sites + twin, same op order (bit-identical CPU-side); noise now [0,1] like vnoise (both shape remaps dropped
+  the *0.5+0.5; the WindField range fix also restores the REF swirl magnitude, which ran 2x hot on [-1,1]
+  differences). Layer march jitters its start per ray: hash13 over the spread direction (x317.19 — bounces have
+  no pixel to hash, so the direction seeds every path) plus fract(Time*3), layer only like REF; (I+Jitter) grid
+  in CPU/shader/twin (the uniform shift absorbs the midpoint; no signature changes anywhere). Jitter-design
+  note: dir-hash won over the planned PixelSeed (3-hop shader plumbing through the ONE-entry SkyAlong, and
+  bounces need dir-hash anyway). Proof section 8 pins bit-identical repeat + fan variation + clock re-roll; the
+  .sh guards hash13 presence, sin-hash absence (comments stripped) and jitter twins. Gates green: volumetric
+  (section 6 shafts hold under the new field), sky-kernel (streakDy 0.0235/Dx 0.0164 ratio 1.43, twin-vs-raster
+  0.0014, +2h identical character), celestial-sky (census bands hold with NO re-pins: noon 137550 px/114.4,
+  box 14009/0.417), shader-compile (SPIR-V clean), moon, tiers, fidelity, exposure, editor-preview, scene. Noon
+  A/B: horizontal striations across every puff (before) -> fine incoherent grain (after); the grain is the
+  sharpened remap under dither (D2d) and P2.4a's linear remap + erosion removes its cause. Sheets recommitted.

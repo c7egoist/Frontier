@@ -216,8 +216,7 @@ public:
         float Shape = Noise(S[0], S[1], S[2]) * 0.5f
                     + Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f) * 0.25f
                     + Noise(S[0] * 4.10f + 7.7f, S[1] * 4.10f + 2.2f, S[2] * 4.10f + 1.1f) * 0.125f;
-        Shape /= 0.875f;
-        Shape = Shape * 0.5f + 0.5f;
+        Shape /= 0.875f;   // Noise is [0,1] (reference vnoise), so the shape already spans the remap
 
         const float Threshold = 1.0f - Clamp(Cloud.Coverage, 0.0f, 1.0f);
         const float Raw = Clamp((Shape - Threshold) / std::fmax(1.0f - Threshold, 1e-3f), 0.0f, 1.0f);
@@ -295,8 +294,7 @@ public:
         //    the third (a puff is smooth-walled anyway — the lost octave is sub-step ripple).
         float Shape = Noise(S[0], S[1], S[2]) * 0.5f
                     + Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f) * 0.25f;
-        Shape /= 0.75f;
-        Shape = Shape * 0.5f + 0.5f;
+        Shape /= 0.75f;   // [0,1] noise (see the layer): no remap shift needed
 
         const float Threshold = 1.0f - Clamp(Volume.Coverage, 0.0f, 1.0f);
         const float Raw = Clamp((Shape - Threshold) / std::fmax(1.0f - Threshold, 1e-3f), 0.0f, 1.0f);
@@ -450,10 +448,16 @@ public:
             if (Count > Cap) Count = Cap;
             const float ActualStep = Span / static_cast<float>(Count);
             const float Phase = HenyeyGreenstein(CosTheta, PhaseG);
+            // The reference jitters the march start per ray (t=t0+dt*hash13) so adjacent rays sample
+            //    different phases instead of contouring into bands. The seed is the ray direction —
+            //    bounces have no pixel to hash — plus the clock's third-of-a-second fraction, through the
+            //    same hash13; layer only, like the reference (marchLocal never jitters). The uniform shift
+            //    absorbs the midpoint: (I+Jitter) is the shifted regular grid in both twins.
+            const float Jitter = M == 0u ? MarchJitter(Direction, Time) : 0.5f;
 
             for (uint32_t I = 0u; I < Count; ++I)
             {
-                const float T = SpanNear + (static_cast<float>(I) + 0.5f) * ActualStep;
+                const float T = SpanNear + (static_cast<float>(I) + Jitter) * ActualStep;
                 const float P[3] = { Origin[0] + Direction[0] * T,
                                      Origin[1] + Direction[1] * T,
                                      Origin[2] + Direction[2] * T };
@@ -550,12 +554,32 @@ private:
         return std::exp(-OpticalDepth);
     }
 
-    static float Hash(float X, float Y, float Z) noexcept
+    // Per-ray march-phase jitter in [0,1): hash13 over the spread direction plus the clock fraction.
+    //    The 317.19 spread puts adjacent-pixel directions (~0.003 apart) ~0.1 hash cells apart so they
+    //    decorrelate; fract(Time*3) re-rolls the dither three times a second like the reference — and a
+    //    static frame keeps a static dither while the clock stands still, so stills never shimmer.
+    static float MarchJitter(const float Direction[3], float Time) noexcept
     {
-        float S = std::sin(X * 127.1f + Y * 311.7f + Z * 74.7f) * 43758.5453f;
-        return S - std::floor(S);
+        const float Frame = Time * 3.0f;
+        return Hash(Direction[0] * 317.19f, Direction[1] * 317.19f, Frame - std::floor(Frame));
     }
 
+    // The reference hash13 (Hoskins' fract-only form — no sine, so no large-coordinate banding):
+    // p=fract(p*.1031); p+=dot(p,p.zyx+31.32); return fract((p.x+p.y)*p.z). Twinned verbatim (same op
+    //    order, so bit-identical on the CPU side) in WindField::Hash, SkyRecords.slang CloudHash and the
+    //    kernel proof's TwinHash.
+    static float Hash(float X, float Y, float Z) noexcept
+    {
+        float Px = X * 0.1031f, Py = Y * 0.1031f, Pz = Z * 0.1031f;
+        Px -= std::floor(Px); Py -= std::floor(Py); Pz -= std::floor(Pz);
+        const float D = Px * (Pz + 31.32f) + Py * (Py + 31.32f) + Pz * (Px + 31.32f);
+        Px += D; Py += D; Pz += D;
+        const float H = (Px + Py) * Pz;
+        return H - std::floor(H);
+    }
+
+    // Trilinear value noise over hash13 — [0,1] like the reference vnoise. The old [-1,1] roundtrip died
+    //    with the sin hash: every caller maps the shape straight into its own remap now.
     static float Noise(float X, float Y, float Z) noexcept
     {
         const float Ix = std::floor(X), Iy = std::floor(Y), Iz = std::floor(Z);
@@ -570,7 +594,7 @@ private:
         const float X00 = N000 + (N100 - N000) * Ux, X10 = N010 + (N110 - N010) * Ux;
         const float X01 = N001 + (N101 - N001) * Ux, X11 = N011 + (N111 - N011) * Ux;
         const float Y0 = X00 + (X10 - X00) * Uy,     Y1 = X01 + (X11 - X01) * Uy;
-        return (Y0 + (Y1 - Y0) * Uz) * 2.0f - 1.0f;
+        return Y0 + (Y1 - Y0) * Uz;
     }
 };
 

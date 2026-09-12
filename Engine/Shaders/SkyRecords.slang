@@ -203,8 +203,10 @@ const float kCloudMaxDistance = 200000.0; // [m] enough to cover the visible tro
 
 float CloudHash(vec3 P)
 {
-    float S = sin(P.x * 127.1 + P.y * 311.7 + P.z * 74.7) * 43758.5453;
-    return S - floor(S);
+    // hash13, twinned from VolumetricMedia (same op order): the noise lattice hash.
+    vec3 Q = fract(P * 0.1031);
+    Q += dot(Q, Q.zyx + 31.32);
+    return fract((Q.x + Q.y) * Q.z);
 }
 
 float CloudNoise(vec3 P)
@@ -221,7 +223,7 @@ float CloudNoise(vec3 P)
     float N111 = CloudHash(I + vec3(1.0, 1.0, 1.0));
     float X00 = mix(N000, N100, U.x), X10 = mix(N010, N110, U.x);
     float X01 = mix(N001, N101, U.x), X11 = mix(N011, N111, U.x);
-    return (mix(mix(X00, X10, U.y), mix(X01, X11, U.y), U.z) * 2.0) - 1.0;
+    return mix(mix(X00, X10, U.y), mix(X01, X11, U.y), U.z);
 }
 
 float CloudHeightProfile(uint Type, float Normalised)
@@ -279,7 +281,6 @@ float CloudDensityAt(vec3 Position)
                 + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25
                 + CloudNoise(S * 4.10 + vec3(7.7, 2.2, 1.1)) * 0.125;
     Shape /= 0.875;
-    Shape = Shape * 0.5 + 0.5;
     float Threshold = 1.0 - clamp(SkyCloudLayer.z, 0.0, 1.0);
     float Raw = clamp((Shape - Threshold) / max(1.0 - Threshold, 1e-3), 0.0, 1.0);
     return smoothstep(0.0, 1.0, Raw) * Profile * max(SkyCloudLayer.w, 0.0);
@@ -310,7 +311,6 @@ float LocalDensityAt(vec3 Position, bool FogVolume)
     vec3 S = (Position + Drift) * Inverse;
     float Shape = CloudNoise(S) * 0.5 + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25;
     Shape /= 0.75;
-    Shape = Shape * 0.5 + 0.5;
     float Threshold = 1.0 - clamp(Params.y, 0.0, 1.0);
     float Raw = clamp((Shape - Threshold) / max(1.0 - Threshold, 1e-3), 0.0, 1.0);
     return smoothstep(0.0, 1.0, Raw) * Mask * max(Params.x, 0.0);
@@ -398,6 +398,13 @@ float CloudHenyeyGreenstein(float CosTheta, float G)
     return (1.0 - G * G) / (4.0 * Pi * pow(Denominator, 1.5));
 }
 
+float CloudMarchJitter(vec3 Direction)
+{
+    // Twin of VolumetricMedia::MarchJitter, which carries the note. The clock reads the record's own w
+    //    lane — the march takes no Time parameter, exactly like the drift it sits beside.
+    return CloudHash(vec3(Direction.xy * 317.19, fract(SkyCloudAlbedo.w * 3.0)));
+}
+
 void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint Medium,
                       vec3 SunDirection, vec3 SunRadiance, vec3 AmbientRadiance,
                       inout vec3 Scatter, inout float Transmittance)
@@ -420,9 +427,10 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
     //    same three albedos VolumetricMedia::March shades with.
     vec3 Albedo = Medium == 0u ? SkyCloudAlbedo.xyz
                 : (Medium == 1u ? vec3(0.92, 0.94, 0.97) : vec3(0.88));
+    float Jitter = Medium == 0u ? CloudMarchJitter(Direction) : 0.5;
     for (uint I = 0u; I < Count; ++I)
     {
-        float T = Near + (float(I) + 0.5) * Step;
+        float T = Near + (float(I) + Jitter) * Step;
         vec3 P = Origin + Direction * T;
         float Density = Medium == 0u ? CloudDensityAt(P) : LocalDensityAt(P, Medium == 2u);
         if (Density <= 1e-5) continue;

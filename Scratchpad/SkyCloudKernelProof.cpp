@@ -47,8 +47,18 @@ float TwinSmoothstep(float E0, float E1, float V)
 }
 float TwinHash(const float P[3])
 {
-    float H = std::sin(P[0]*127.1f + P[1]*311.7f + P[2]*74.7f) * 43758.5453f;
+    float Px = P[0]*0.1031f, Py = P[1]*0.1031f, Pz = P[2]*0.1031f;
+    Px -= std::floor(Px); Py -= std::floor(Py); Pz -= std::floor(Pz);
+    float D = Px*(Pz+31.32f) + Py*(Py+31.32f) + Pz*(Px+31.32f);
+    Px += D; Py += D; Pz += D;
+    float H = (Px+Py)*Pz;
     return H - std::floor(H);
+}
+float TwinMarchJitter(const float Direction[3], float Time)
+{
+    float Q[3] = { Direction[0]*317.19f, Direction[1]*317.19f, Time*3.0f };
+    Q[2] -= std::floor(Q[2]);
+    return TwinHash(Q);
 }
 float TwinNoise(const float P[3])
 {
@@ -65,7 +75,7 @@ float TwinNoise(const float P[3])
     float X01=TwinHash(C001)+(TwinHash(C101)-TwinHash(C001))*U[0];
     float X11=TwinHash(C011)+(TwinHash(C111)-TwinHash(C011))*U[0];
     float Y0=X00+(X10-X00)*U[1], Y1=X01+(X11-X01)*U[1];
-    return (Y0+(Y1-Y0)*U[2])*2.0f-1.0f;
+    return Y0+(Y1-Y0)*U[2];
 }
 float TwinHeightProfile(const SkyConstantRecord& K, uint32_t Type, float Normalised)
 {
@@ -123,7 +133,6 @@ float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3])
     float Q2[3] = { S[0]*4.10f+7.7f, S[1]*4.10f+2.2f, S[2]*4.10f+1.1f };
     float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f + TwinNoise(Q2)*0.125f;
     Shape /= 0.875f;
-    Shape = Shape*0.5f+0.5f;
     float Coverage = K.CloudLayer[2] < 0.0f ? 0.0f : (K.CloudLayer[2] > 1.0f ? 1.0f : K.CloudLayer[2]);
     float Threshold = 1.0f-Coverage;
     float Raw = (Shape-Threshold)/std::fmax(1.0f-Threshold, 1e-3f);
@@ -161,7 +170,6 @@ float TwinLocalDensityAt(const SkyConstantRecord& K, const float Position[3], bo
     float Q1[3] = { S[0]*2.02f+3.1f, S[1]*2.02f+1.7f, S[2]*2.02f+9.2f };
     float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f;
     Shape /= 0.75f;
-    Shape = Shape*0.5f+0.5f;
     float Coverage = Params[1] < 0.0f ? 0.0f : (Params[1] > 1.0f ? 1.0f : Params[1]);
     float Threshold = 1.0f-Coverage;
     float Raw = (Shape-Threshold)/std::fmax(1.0f-Threshold, 1e-3f);
@@ -258,6 +266,7 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
     uint32_t Cap = Medium == 0u ? (Budget*4u > 4u ? Budget*4u : 4u) : Budget;
     if (Count > Cap) Count = Cap;
     float Step = Span/float(Count);
+    float Jitter = Medium == 0u ? TwinMarchJitter(Direction, K.CloudAlbedo[3]) : 0.5f;
     float G = Medium == 0u ? K.CloudShape[3]
             : (Medium == 1u ? K.LocalCloudParams[3] : K.LocalFogParams[3]);
     float Mu = Direction[0]*SunDirection[0]+Direction[1]*SunDirection[1]+Direction[2]*SunDirection[2];
@@ -270,7 +279,7 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
     float S[3] = { 0.0f, 0.0f, 0.0f };
     for (uint32_t I = 0u; I < Count; ++I)
     {
-        float Tm = Near + (float(I)+0.5f)*Step;
+        float Tm = Near + (float(I)+Jitter)*Step;
         float P[3] = { Origin[0]+Direction[0]*Tm, Origin[1]+Direction[1]*Tm, Origin[2]+Direction[2]*Tm };
         float Density = Medium == 0u ? TwinCloudDensityAt(K, P) : TwinLocalDensityAt(K, P, Medium == 2u);
         if (Density <= 1e-5f) continue;

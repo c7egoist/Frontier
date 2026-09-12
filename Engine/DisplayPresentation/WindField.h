@@ -193,12 +193,19 @@ private:
 
     static float Hash(float X, float Y, float Z) noexcept
     {
-        float S = std::sin(X * 127.1f + Y * 311.7f + Z * 74.7f) * 43758.5453f;
-        return S - std::floor(S);
+        // hash13, twinned from VolumetricMedia (same op order): the swirl's lattice hash.
+        float Px = X * 0.1031f, Py = Y * 0.1031f, Pz = Z * 0.1031f;
+        Px -= std::floor(Px); Py -= std::floor(Py); Pz -= std::floor(Pz);
+        const float D = Px * (Pz + 31.32f) + Py * (Py + 31.32f) + Pz * (Px + 31.32f);
+        Px += D; Py += D; Pz += D;
+        const float H = (Px + Py) * Pz;
+        return H - std::floor(H);
     }
 
     // Trilinear value noise. Matched to the demo's vnoise so the CPU and GPU twins agree; the proof checks the
-    //    field itself rather than this helper, but a different noise would drift the two apart.
+    //    field itself rather than this helper, but a different noise would drift the two apart. [0,1] like the
+    //    reference — the old [-1,1] range doubled every central difference, so the swirl ran 2x hot; this
+    //    range fix restores the reference magnitude for free.
     static float ValueNoise(float X, float Y, float Z) noexcept
     {
         const float Ix = std::floor(X), Iy = std::floor(Y), Iz = std::floor(Z);
@@ -215,7 +222,7 @@ private:
         const float X00 = N000 + (N100 - N000) * Ux, X10 = N010 + (N110 - N010) * Ux;
         const float X01 = N001 + (N101 - N001) * Ux, X11 = N011 + (N111 - N011) * Ux;
         const float Y0  = X00 + (X10 - X00) * Uy,    Y1  = X01 + (X11 - X01) * Uy;
-        return (Y0 + (Y1 - Y0) * Uz) * 2.0f - 1.0f;
+        return Y0 + (Y1 - Y0) * Uz;
     }
 };
 

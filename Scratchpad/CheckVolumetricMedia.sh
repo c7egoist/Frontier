@@ -114,5 +114,23 @@ Report $? "the unused scene-occlusion callback is gone"
 Report $? "no screen-space radial blur"
 
 echo
+echo "[VolumetricMedia] the noise is the reference hash13 and the layer march jitters"
+# P2.1: Hoskins' fract-only hash13 replaced the sin hash at all three noise sites (the CPU march, WindField's
+#    swirl lattice, the shader's CloudHash); the layer march jitters its start per ray through the same hash
+#    (marchLocal never jitters, like the reference). Comments are stripped for the negative check: the headers
+#    necessarily name the old form to explain the replacement (the CheckShadowTiers trap again).
+NoiseCode="$(sed 's;//.*;;' "$Header" Engine/DisplayPresentation/WindField.h Engine/Shaders/SkyRecords.slang)"
+! printf '%s' "$NoiseCode" | grep -q '127.1'
+Report $? "no sin-hash constants survive at any noise site"
+printf '%s' "$NoiseCode" | grep -q '0.1031'
+Report $? "the Hoskins hash13 constant is present"
+printf '%s' "$NoiseCode" | grep -q 'MarchJitter'
+Report $? "the CPU march jitters the layer start per ray"
+printf '%s' "$NoiseCode" | grep -q 'CloudMarchJitter'
+Report $? "the shader march twins it"
+grep -q 'MarchJitter' Scratchpad/VolumetricMediaProof.cpp
+Report $? "the proof pins the jitter's determinism"
+
+echo
 if [ "$Fail" != "0" ]; then echo "[VolumetricMedia] FAILED"; exit 1; fi
 echo "[VolumetricMedia] OK"
