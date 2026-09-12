@@ -582,7 +582,7 @@ function analyticPoint2D(d,t){if(!d||d.type==='line')return [d.a[0]+(d.b[0]-d.a[
 function analyticPathPoints(path){const out=[];(path||[]).forEach((d,di)=>{const n=d.type==='line'?1:Math.max(8,Math.ceil(Math.abs(d.sweep||Math.PI*2)/(Math.PI/24)));for(let i=0;i<=n;i++){if(di&&i===0)continue;out.push(analyticPoint2D(d,i/n));}});return out;}
 function analyticPathLines(path){const L=[];(path||[]).forEach(d=>{const n=d.type==='line'?1:Math.max(8,Math.ceil(Math.abs(d.sweep||Math.PI*2)/(Math.PI/24)));for(let i=0;i<n;i++)L.push([analyticPoint2D(d,i/n),analyticPoint2D(d,(i+1)/n)]);});return L;}
 function loopScreen(f){const lp=loopOf(f);if(!lp||!planarLoop(f))return null;const vz=f.params.vz||[];const s=lp.map((q,i)=>project(xform(f,[q[0],q[1],vz[i]||0])));return s.some(x=>!x)?null:s;}
-function loopOf(c){const p=c.params;if(Array.isArray(c.booleanPaths)&&c.booleanPaths.length){const R=c.booleanPaths[0];return analyticPathPoints(R.outer);}
+function loopOf(c){if(!c||!c.params)return null;const p=c.params;if(Array.isArray(c.booleanPaths)&&c.booleanPaths.length&&c.booleanPaths[0]&&Array.isArray(c.booleanPaths[0].outer)){const R=c.booleanPaths[0];return analyticPathPoints(R.outer);}
 if(c.ctype==='circle'){const n=segsFor(c,48);return Array.from({length:n},(_,i)=>{const a=i/n*Math.PI*2;return [p.cx+Math.cos(a)*p.r,p.cy+Math.sin(a)*p.r]});}
   if(c.ctype==='ellipse')return ellipsePts(p,segsFor(c,64));if(c.ctype==='poly'&&p.closed&&p.pts.length>2)return hasBulge(c)?polyExpand(c).pts:p.pts.slice();
   if(c.ctype==='arc'&&c.params.closed){const n=segsFor(c,48);const a0=p.a0*Math.PI/180,a1=p.a1*Math.PI/180;const pts=[];for(let i=0;i<=n;i++){const a=a0+(a1-a0)*i/n;pts.push([p.cx+Math.cos(a)*p.r,p.cy+Math.sin(a)*p.r]);}return pts;}return null;}
@@ -649,7 +649,7 @@ function profileSegs(f){ // → [{pts:[[u,v]..] (loop ctrl points), bulge:[], ei
     const area=signedArea(P.length>2?P:polyExpandPts(P,B));const wantCCW=!hole;if((area>0)!==wantCCW){const n=P.length;const P2=[],B2=[],E2=[],S2=[];for(let i=0;i<n;i++){const j=(n-1-i);P2.push(P[j]);}for(let i=0;i<n;i++){const j=(n-1-i+n-1)%n;B2.push(-(B[j]||0));E2.push(E[j]);S2.push(S[j]);}P=P2;B=B2;E=E2;S=S2;}
     loops.push({pts:P,bulge:B,eids:E,smooth:S,hole:!!hole,orig:P.map((_,i)=>i)});};
   if(f.kind==='curve'){
-    if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length){let ei=0;f.booleanPaths.forEach(R=>{const addPath=(path,hole)=>{const ss=analyticPathSegments(path),pts=ss.map(s=>[s.a[0],s.a[1]]);add(pts,ss.map(s=>s.bulge),ss.map(()=>ei++),ss.map(s=>!!s.bulge),hole);};addPath(R.outer,false);(R.holes||[]).forEach(H=>addPath(H,true));});return loops;}
+    if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length&&f.booleanPaths[0]){let ei=0;f.booleanPaths.filter(Boolean).forEach(R=>{const addPath=(path,hole)=>{if(!Array.isArray(path)||!path.length)return;const ss=analyticPathSegments(path),pts=ss.map(s=>[s.a[0],s.a[1]]);add(pts,ss.map(s=>s.bulge),ss.map(()=>ei++),ss.map(s=>!!s.bulge),hole);};addPath(R.outer,false);(R.holes||[]).forEach(H=>addPath(H,true));});return loops;}
     if(Array.isArray(f.booleanRegions)&&f.booleanRegions.length){
       let ei=0;f.booleanRegions.forEach(R=>{const addRegion=(P,hole)=>{const pts=P.map(q=>[q[0],q[1]]);add(pts,pts.map(()=>0),pts.map(()=>ei++),pts.map(()=>false),hole);};addRegion(R.outer,false);(R.holes||[]).forEach(H=>addRegion(H,true));});return loops;
     }
@@ -805,7 +805,7 @@ function allTris(m){if(!m)return [];const t=(m.tris||[]).slice();(m.quads||[]).f
 function meshVolume(m){let v=0;allTris(m).forEach(([a,b,c])=>{v+=dot(a,cross(b,c))/6;});return Math.abs(v);}
 function ellipsePts(p,n=48){const a=(p.tilt||0)*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);return Array.from({length:n},(_,i)=>{const t=i/n*Math.PI*2,x=Math.cos(t)*p.rx,y=Math.sin(t)*p.ry;return [p.cx+x*ca-y*sa,p.cy+x*sa+y*ca]});}
 function curveLines(c){const p=c.params,L=[];
-  if(Array.isArray(c.booleanPaths)&&c.booleanPaths.length){analyticPathLines(c.booleanPaths[0].outer).forEach(l=>L.push([V(l[0][0],l[0][1],0),V(l[1][0],l[1][1],0)]));return {tris:[],lines:L};}
+  if(Array.isArray(c.booleanPaths)&&c.booleanPaths.length&&c.booleanPaths[0]&&Array.isArray(c.booleanPaths[0].outer)){analyticPathLines(c.booleanPaths[0].outer).forEach(l=>L.push([V(l[0][0],l[0][1],0),V(l[1][0],l[1][1],0)]));return {tris:[],lines:L};}
   if(c.ctype==='line')L.push([V(p.x1,p.y1,0),V(p.x2,p.y2,0)]);
   else if(c.ctype==='poly'&&hasBulge(c)){const E=polyExpand(c);const pts=E.pts,n=pts.length;const N=E.closed?n:n-1;for(let i=0;i<N;i++)L.push([V(pts[i][0],pts[i][1],0),V(pts[(i+1)%n][0],pts[(i+1)%n][1],0)]);}
   else if(c.ctype==='poly'){const pts=p.pts||[],vz=p.vz||[];const Z=i=>vz[i]||0;for(let i=0;i<pts.length-1;i++)L.push([V(pts[i][0],pts[i][1],Z(i)),V(pts[i+1][0],pts[i+1][1],Z(i+1))]);if(p.closed&&pts.length>2)L.push([V(pts[pts.length-1][0],pts[pts.length-1][1],Z(pts.length-1)),V(pts[0][0],pts[0][1],Z(0))]);}
@@ -859,7 +859,7 @@ function measure(f){const p=f.params;
     if(f.op==='subtract'){const a=byId(f.a),b=byId(f.b);const v=a.params.w*a.params.d*a.params.h-(b?Math.PI*b.params.r**2*a.params.h:0);return {v,u:'mm³',lab:'volume',rows:[['tool',b?b.name:'—'],['faces',7],['SSI curves',2]]};}}
   if(f.kind==='surface'){if(f.op==='plane')return {v:p.w*p.h,u:'mm²',lab:'area',rows:[['degree','1 × 1'],['spans',(p.subdiv|0)+' × '+(p.subdiv|0)],['G','G∞']]};
     if(f.op==='loft'){const s=Math.hypot(p.r1-p.r0,p.h);return {v:Math.PI*(p.r0+p.r1)*s,u:'mm²',lab:'lateral area',rows:[['degree','3 × 1'],['sections',2],['twist',p.twist+'°']]};}}
-  if(f.kind==='curve'&&Array.isArray(f.booleanPaths)){const lengthPath=P=>(P||[]).reduce((s,d)=>{if(d.type==='line')return s+Math.hypot(d.b[0]-d.a[0],d.b[1]-d.a[1]);if(d.type==='arc')return s+Math.abs(d.r*d.sweep);const n=32;let l=0;for(let i=0;i<n;i++){const a=analyticPoint2D(d,i/n),b=analyticPoint2D(d,(i+1)/n);l+=Math.hypot(b[0]-a[0],b[1]-a[1]);}return s+l;},0);const R=f.booleanPaths[0],area=f.booleanRegions&&f.booleanRegions[0]?Math.abs(polyArea(f.booleanRegions[0].outer))-((f.booleanRegions[0].holes||[]).reduce((s,h)=>s+Math.abs(polyArea(h)),0)):0;return {v:lengthPath(R.outer),u:'mm',lab:'analytic perimeter',rows:[['edges',(R.outer||[]).length+(R.holes||[]).reduce((s,h)=>s+h.length,0)],['closed','yes'],['area',fmt(area,0)+' mm²']]};}
+  if(f.kind==='curve'&&Array.isArray(f.booleanPaths)&&f.booleanPaths[0]){const lengthPath=P=>(P||[]).reduce((s,d)=>{if(!d)return s;if(d.type==='line')return s+Math.hypot(d.b[0]-d.a[0],d.b[1]-d.a[1]);if(d.type==='arc')return s+Math.abs(d.r*d.sweep);const n=32;let l=0;for(let i=0;i<n;i++){const a=analyticPoint2D(d,i/n),b=analyticPoint2D(d,(i+1)/n);l+=Math.hypot(b[0]-a[0],b[1]-a[1]);}return s+l;},0);const R=f.booleanPaths[0],area=f.booleanRegions&&f.booleanRegions[0]?Math.abs(polyArea(f.booleanRegions[0].outer))-((f.booleanRegions[0].holes||[]).reduce((s,h)=>s+Math.abs(polyArea(h)),0)):0;return {v:lengthPath(R.outer),u:'mm',lab:'analytic perimeter',rows:[['edges',(R.outer||[]).length+(R.holes||[]).reduce((s,h)=>s+h.length,0)],['closed','yes'],['area',fmt(area,0)+' mm²']]};}
   if(f.kind==='curve'&&f.ctype==='poly'){const q=f.params.pts||[];let L=0;for(let i=0;i<q.length-1;i++)L+=Math.hypot(q[i+1][0]-q[i][0],q[i+1][1]-q[i][1]);if(f.params.closed&&q.length>2)L+=Math.hypot(q[0][0]-q[q.length-1][0],q[0][1]-q[q.length-1][1]);return {v:L,u:'mm',lab:f.params.closed?'perimeter':'length',rows:[['vertices',q.length],['closed',f.params.closed?'yes':'no'],['area',f.params.closed?fmt(polyArea(q),0)+' mm²':'—']]};}
   if(f.kind==='curve'&&f.ctype==='ellipse'){const a=f.params.rx,b=f.params.ry,h=((a-b)/(a+b))**2;return {v:Math.PI*(a+b)*(1+3*h/(10+Math.sqrt(4-3*h))),u:'mm',lab:'circumference',rows:[['degree',2],['rational','yes'],['area',fmt(Math.PI*a*b,0)+' mm²']]};}
   if(f.kind==='curve'&&f.ctype==='point')return {v:0,u:'',lab:'datum point',rows:[['u',fmt(f.params.cx,1)],['v',fmt(f.params.cy,1)],['construction',f.cons?'yes':'no']]};
@@ -1482,7 +1482,7 @@ const isSlot=f=>f&&f.kind==='curve'&&f.ctype==='poly'&&Array.isArray(f.params.sp
 function regenSlot(f){if(!isSlot(f))return;f.params.r=Math.max(.5,+f.params.r||1);const O=slotOutline(f.params.spine,f.params.r);f.params.pts=O.pts;f.params.bulge=O.bulge;delete f.params.vz;}
 function topo(f){if(topoCache.has(f.id))return topoCache.get(f.id);let t;
   if(f.kind==='curve'){const closed=f.ctype==='circle'||f.ctype==='ellipse'||!!f.params.closed;let pts,verts,edges=[];
-    if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length){const R=f.booleanPaths[0],paths=[R.outer||[],...(R.holes||[])];verts=[];paths.forEach(path=>{const base=verts.length;path.forEach(d=>verts.push({id:verts.length,p:analyticPoint2D(d,0),z:0}));path.forEach((d,i)=>edges.push({id:edges.length,a:base+i,b:base+(i+1)%path.length,path:d,curve:true}));});}
+    if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length&&f.booleanPaths[0]){const R=f.booleanPaths[0],paths=[R.outer||[],...(R.holes||[])];verts=[];paths.forEach(path=>{const base=verts.length;path.forEach(d=>verts.push({id:verts.length,p:analyticPoint2D(d,0),z:0}));path.forEach((d,i)=>edges.push({id:edges.length,a:base+i,b:base+(i+1)%path.length,path:d,curve:true}));});}
     else {pts=polyPtsOf(f);verts=pts.map((p,i)=>({id:i,p,z:(f.params.vz||[])[i]||0}));
       if(isSlot(f)){edges.push({id:0,a:0,b:pts.length-1,curve:true});} // whole slot outline = one edge; vertices = slot centres
       else if(f.ctype==='poly'||f.ctype==='line'){const bl=f.params.bulge||[];for(let i=0;i<pts.length-1;i++)edges.push({id:i,a:i,b:i+1,arc:bl[i]||0});if(closed&&pts.length>2)edges.push({id:pts.length-1,a:pts.length-1,b:0,arc:bl[pts.length-1]||0});}
@@ -1997,8 +1997,8 @@ function modPrompt(){if(!modTool)return;const [t,txt]=MOD_INFO[modTool.kind];$('
 function modEnd(){modTool=null;$('#prompt').classList.remove('show');cv.style.cursor='';draw();}
 // curve as a control polyline in sketch-plane coords, with the curve-local transform baked in
 function arcSample(f){const p=f.params;const a0=p.a0*Math.PI/180,a1=p.a1*Math.PI/180;const n=Math.max(8,Math.round(segsFor(f,64)*Math.abs(a1-a0)/(Math.PI*2)));return Array.from({length:n+1},(_,i)=>{const t=a0+(a1-a0)*i/n;return [p.cx+Math.cos(t)*p.r,p.cy+Math.sin(t)*p.r];});}
-function curvePlane(f){const p=f.params;let pts,closed=false;
-  if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length){pts=analyticPathPoints(f.booleanPaths[0].outer);closed=true;}
+function curvePlane(f){if(!f||!f.params)return null;const p=f.params;let pts,closed=false;
+  if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length&&f.booleanPaths[0]&&Array.isArray(f.booleanPaths[0].outer)){pts=analyticPathPoints(f.booleanPaths[0].outer);closed=true;}
   else if(f.ctype==='line')pts=[[p.x1,p.y1],[p.x2,p.y2]];
   else if(f.ctype==='poly'){if(hasBulge(f)){const E=polyExpand(f);pts=E.pts.map(q=>[q[0],q[1]]);closed=E.closed;}else{pts=(p.pts||[]).map(q=>[q[0],q[1]]);closed=!!p.closed&&pts.length>2;}}
   else if(f.ctype==='arc'&&!p.closed)pts=arcSample(f);
