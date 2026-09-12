@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const out = process.argv[2] || '/tmp/shots';
-const presetName = process.argv[3] || 'English Oak';
+const presetName = process.argv[3] || 'Saguaro';
 const mode = process.argv[4] || 'shaded';
 const seed = Number(process.argv[5] || 1);
 const extra = process.argv[6] ? JSON.parse(process.argv[6]) : {};

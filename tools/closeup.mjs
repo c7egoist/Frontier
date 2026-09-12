@@ -3,7 +3,7 @@
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
 import path from 'node:path';
-const [out = '/tmp/shots', presetName = 'English Oak', seedS = '1', ...shots] = process.argv.slice(2);
+const [out = '/tmp/shots', presetName = 'Saguaro', seedS = '1', ...shots] = process.argv.slice(2);
 const seed = Number(seedS);
 fs.mkdirSync(out, { recursive: true });
 const browser = await puppeteer.launch({

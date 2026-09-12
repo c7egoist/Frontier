@@ -101,6 +101,9 @@ export function paletteForSpecies(name: string, grass = false): ViewerPalette {
     if (n.includes('aloe')) {
       return { stem: 0x6f9565, leaf: 0x6f9565, stemRoughness: 0.74, leafRoughness: 0.62, accent: 0xd58a62 };
     }
+    if (n.includes('queen victoria') || n.includes('yucca rostrata')) {
+      return { stem: 0x698f7d, leaf: 0x698f7d, stemRoughness: 0.7, leafRoughness: 0.6, accent: n.includes('yucca') ? 0xd4c58b : undefined };
+    }
     if (n.includes('haworthia') || n.includes('snake plant')) {
       return { stem: 0x4f745b, leaf: 0x4f745b, stemRoughness: 0.78, leafRoughness: 0.62 };
     }
@@ -109,7 +112,7 @@ export function paletteForSpecies(name: string, grass = false): ViewerPalette {
     }
     return { stem: 0x657d50, leaf: 0x657d50, stemRoughness: 0.78, leafRoughness: 0.68 };
   }
-  if (n.includes('saguaro') || n.includes('organ pipe') || n.includes('cardon') || n.includes('senita') || n.includes('fencepost')) {
+  if (n.includes('saguaro') || n.includes('organ pipe') || n.includes('cardon') || n.includes('senita') || n.includes('fencepost') || n.includes('blue myrtle') || n.includes('peruvian apple') || n.includes('totem pole')) {
     return { stem: 0x4e8166, leaf: 0xd8c791, stemRoughness: 0.86, leafRoughness: 0.82 };
   }
   if (n.includes('barrel') || n.includes('pincushion') || n.includes('rainbow') || n.includes('lady finger') || n.includes('claret cup')) {
@@ -126,6 +129,9 @@ export function paletteForSpecies(name: string, grass = false): ViewerPalette {
   }
   if (n.includes('joshua') || n.includes('ironwood')) {
     return { stem: 0x6b5948, leaf: 0x6f8b4d, stemRoughness: 0.9, leafRoughness: 0.72 };
+  }
+  if (n.includes('ponytail')) {
+    return { stem: 0x785d42, leaf: 0x708b4f, stemRoughness: 0.88, leafRoughness: 0.68 };
   }
   return { ...DEFAULT_PALETTE };
 }
