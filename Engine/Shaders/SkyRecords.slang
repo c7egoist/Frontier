@@ -314,6 +314,15 @@ float LocalDensityAt(vec3 Position, bool FogVolume)
     return smoothstep(0.0, 1.0, Raw) * Mask * max(Params.x, 0.0);
 }
 
+// How far past the slab entry the layer march may run: the reference's span cut (celestial line 1023),
+//    spelled for the block — above the slab max(60 km, thick x 40), below or inside thick x 14. Layer only;
+//    the boxes span themselves.
+float CloudSlabFarCap(float OriginZ, float Base, float Top)
+{
+    float Thickness = Top - Base;
+    return OriginZ > Top ? max(60000.0, Thickness * 40.0) : Thickness * 14.0;
+}
+
 bool CloudSlabInterval(vec3 Origin, vec3 Direction, float Maximum, out float Near, out float Far)
 {
     float Ceiling = max(SkyCloudShape.y, 0.0);
@@ -323,12 +332,15 @@ bool CloudSlabInterval(vec3 Origin, vec3 Direction, float Maximum, out float Nea
     if (abs(Direction.z) < 1e-6)
     {
         if (Origin.z < Base || Origin.z > Top) return false;
-        Near = 0.0; Far = Maximum; return Far > Near;
+        Near = 0.0; Far = Maximum;
+        Far = min(Far, Near + CloudSlabFarCap(Origin.z, Base, Top));
+        return Far > Near;
     }
     float T0 = (Base - Origin.z) / Direction.z;
     float T1 = (Top - Origin.z) / Direction.z;
     if (T0 > T1) { float Swap = T0; T0 = T1; T1 = Swap; }
     Near = max(T0, 0.0); Far = min(T1, Maximum);
+    Far = min(Far, Near + CloudSlabFarCap(Origin.z, Base, Top));
     return Far > Near;
 }
 

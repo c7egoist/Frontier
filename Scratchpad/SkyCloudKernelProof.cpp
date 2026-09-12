@@ -170,6 +170,13 @@ float TwinLocalDensityAt(const SkyConstantRecord& K, const float Position[3], bo
     Raw = Raw < 0.0f ? 0.0f : (Raw > 1.0f ? 1.0f : Raw);
     return TwinSmoothstep(0.0f, 1.0f, Raw)*Mask*std::fmax(Params[0], 0.0f);
 }
+// The kernel's far-cap law, transcribed: above the slab max(60 km, thick x 40), else thick x 14.
+float TwinSlabFarCap(float OriginZ, float Base, float Top)
+{
+    float Thickness = Top - Base;
+    return OriginZ > Top ? std::fmax(60000.0f, Thickness * 40.0f) : Thickness * 14.0f;
+}
+
 bool TwinSlabInterval(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
                       float Maximum, float& Near, float& Far)
 {
@@ -181,12 +188,15 @@ bool TwinSlabInterval(const SkyConstantRecord& K, const float Origin[3], const f
     if (std::fabs(Direction[2]) < 1e-6f)
     {
         if (Origin[2] < Base || Origin[2] > Top) return false;
-        Near = 0.0f; Far = Maximum; return Far > Near;
+        Near = 0.0f; Far = Maximum;
+        Far = std::fmin(Far, Near + TwinSlabFarCap(Origin[2], Base, Top));
+        return Far > Near;
     }
     float T0 = (Base-Origin[2])/Direction[2];
     float T1 = (Top-Origin[2])/Direction[2];
     if (T0 > T1) { float Swap = T0; T0 = T1; T1 = Swap; }
     Near = std::fmax(T0, 0.0f); Far = std::fmin(T1, Maximum);
+    Far = std::fmin(Far, Near + TwinSlabFarCap(Origin[2], Base, Top));
     return Far > Near;
 }
 bool TwinBoxInterval(const float Origin[3], const float Direction[3], const float Centre[3],
@@ -467,6 +477,32 @@ int main()
         }
         Expect(FormulaOk, "CPU drift equals integral x altitude factor x art");
         Expect(TwinsOk, "kernel drift matches the CPU bit-for-bit");
+    }
+
+    // 1b ─ the twin cuts the slab interval at the far cap, like the kernel. Explicit layer rows so the
+    //    expected spans are hand-computable, not staging-dependent.
+    {
+        SkyConstantRecord C = Sky.PackSkyRecord();
+        C.CloudLayer[0] = 1500.0f; C.CloudLayer[1] = 900.0f; C.CloudShape[1] = 14000.0f;
+        const float Eye[3] = { 0.0f, 0.0f, 100.0f };
+        float Graze[3] = { 1.0f, 0.0f, 0.01f };
+        const float GL = std::sqrt(Graze[0]*Graze[0] + Graze[2]*Graze[2]);
+        Graze[0] /= GL; Graze[2] /= GL;
+        float Near = 0.0f, Far = 0.0f;
+        const bool Hit = TwinSlabInterval(C, Eye, Graze, 200000.0f, Near, Far);
+        Expect(Hit && Far == Near + 12600.0f,
+               "below: a grazing twin interval ends at entry + thick x 14");
+        const float Up[3] = { 0.0f, 0.0f, 1.0f };
+        const bool HitUp = TwinSlabInterval(C, Eye, Up, 200000.0f, Near, Far);
+        Expect(HitUp && Near == 1400.0f && Far == 2300.0f,
+               "below: a steep twin interval keeps its plane exit");
+        const float Orbit[3] = { 0.0f, 0.0f, 3000.0f };
+        float Limb[3] = { 1.0f, 0.0f, -0.005f };
+        const float LL = std::sqrt(Limb[0]*Limb[0] + Limb[2]*Limb[2]);
+        Limb[0] /= LL; Limb[2] /= LL;
+        const bool HitLimb = TwinSlabInterval(C, Orbit, Limb, 200000.0f, Near, Far);
+        Expect(HitLimb && Far == Near + 60000.0f,
+               "above: a grazing twin interval ends at entry + 60 km");
     }
 
     // 2 ─ render the morning frame through the kernel twin, and through the raster for the parity check. The

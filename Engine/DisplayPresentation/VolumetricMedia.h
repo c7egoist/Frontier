@@ -189,6 +189,18 @@ public:
         return OutTop > OutBase + 1.0f;
     }
 
+    // How far past the slab entry the layer march may run. The reference caps the span (celestial line 1023):
+    // a camera above the slab sees max(60 km, thick x 40); below or inside it sees thick x 14. The cap is a
+    // cut, not a fade — beyond it the march simply stops — and it belongs to the layer only (marchLocal
+    // spans its own box). All three slab-interval twins (here, the shader's, the proof's) call their own
+    // spelling of this law.
+    static float SlabFarCap(float OriginZ, float Base, float Top) noexcept
+    {
+        const float Thickness = Top - Base;
+        if (OriginZ > Top) return std::fmax(60000.0f, Thickness * 40.0f);
+        return Thickness * 14.0f;
+    }
+
     // Cloud density at a world point. Z-up: altitude is p.z.
     static float CloudDensity(const CloudLayerSettings& Cloud, const WindSettings& Wind,
                               const float Position[3]) noexcept
@@ -522,7 +534,9 @@ private:
         return T * T * (3.0f - 2.0f * T);
     }
 
-    // Where a ray crosses a horizontal slab between two altitudes.
+    // Where a ray crosses a horizontal slab between two altitudes. Both branches cut the exit at the far
+    //    cap: without it a grazing ray stretches its bounded steps over hundreds of kilometres of chord and
+    //    shades the horizon as mush.
     static bool SlabInterval(float OriginZ, float DirectionZ, float Base, float Top, float Maximum,
                              float& Near, float& Far) noexcept
     {
@@ -530,13 +544,15 @@ private:
         {
             if (OriginZ < Base || OriginZ > Top) return false;
             Near = 0.0f; Far = Maximum;
-            return true;
+            Far = std::fmin(Far, Near + SlabFarCap(OriginZ, Base, Top));
+            return Far > Near;
         }
         float T1 = (Base - OriginZ) / DirectionZ;
         float T2 = (Top - OriginZ) / DirectionZ;
         if (T1 > T2) { const float Swap = T1; T1 = T2; T2 = Swap; }
         Near = std::fmax(T1, 0.0f);
         Far  = std::fmin(T2, Maximum);
+        Far  = std::fmin(Far, Near + SlabFarCap(OriginZ, Base, Top));
         return Far > Near;
     }
 

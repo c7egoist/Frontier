@@ -123,6 +123,27 @@ WindCalls=$(printf '%s' "$SkyCode" | grep -c 'CloudWindAt(')
 Report $? "the wind is sampled only inside the drift ($WindCalls sites: def + 1)"
 
 echo
+echo "[SkyKernel] the kernel cuts the slab at the far cap, like the march"
+# The shader and its twin spell the same law (celestial line 1023) so a capped grazing ray shades identically
+# on every path — the parity bound below is what would catch a missed twin.
+ShaderCaps=$(grep -c 'float CloudSlabFarCap' Engine/Shaders/SkyRecords.slang)
+[ "$ShaderCaps" = "1" ]
+Report $? "exactly one shader far-cap helper ($ShaderCaps found)"
+TwinCaps=$(grep -c 'float TwinSlabFarCap' Scratchpad/SkyCloudKernelProof.cpp)
+[ "$TwinCaps" = "1" ]
+Report $? "exactly one twin far-cap helper ($TwinCaps found)"
+printf '%s' "$SkyCode" | grep -q 'Thickness \* 14\.0'
+Report $? "below and inside, the kernel's cap is thick x 14"
+printf '%s' "$SkyCode" | grep -q 'max(60000\.0, Thickness \* 40\.0)'
+Report $? "above, the kernel's cap is max(60 km, thick x 40)"
+ShaderCalls=$(grep -c 'CloudSlabFarCap(Origin' Engine/Shaders/SkyRecords.slang)
+[ "$ShaderCalls" = "2" ]
+Report $? "both kernel interval branches cut at it ($ShaderCalls call sites)"
+TwinCalls=$(grep -c 'TwinSlabFarCap(Origin' Scratchpad/SkyCloudKernelProof.cpp)
+[ "$TwinCalls" = "2" ]
+Report $? "both twin interval branches cut at it ($TwinCalls call sites)"
+
+echo
 echo "[SkyKernel] the kernel's shadow, steps and whites match the march"
 # CloudShadowMedium marches local half-step taps like VolumetricMedia::ShadowMarch; the full-interval march it
 #    replaced strode whole clouds between taps at grazing angles. The pin forbids the midpoint-grid form inside

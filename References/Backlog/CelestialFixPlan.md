@@ -235,3 +235,20 @@ Status log (append; newest last):
   noon 136590/127.1, box 13669/0.508), shader-compile, precip (one stale pin updated), moon, tiers, fidelity,
   exposure, editor-preview, scene. Two missed density callers caught by the pack-proof build (precip emitter,
   sky census probe). Morning render recommitted: undrifted broken sky, blue gaps overhead, veiling at horizon.
+- 2026-09-13: P2.3 LANDED (layer far cap). REF line 1023 transcribed as one named helper per slab-interval
+  twin — CPU SlabFarCap (public, next to SlabExtent) + shader CloudSlabFarCap + proof TwinSlabFarCap — both
+  branches each: above the slab max(60 km, thick x 40), below or inside thick x 14, as a cut (Far = min(Far,
+  Near + cap)), layer only (both box exits still run to the maximum, pinned). A grazing ray now marches
+  12.6 km at full step resolution instead of stretching its count cap over ~90 km of chord; the far mush
+  beyond the cut is gone on all three paths. Proofs: media section 9 pins the law exact-float (both branches
+  + the max() arm at thick 2000 -> 80 km), the grazing discrimination (89 steps, not 112 — the probe cloud is
+  optically thin so the T<0.005 early-out cannot fire and the count is geometry, not weather), Maximum-at-cut
+  bit-identity, and the steep 7-step control; the twin pins its own interval directly (grazing below/above +
+  steep plane exit). Gates green with NO re-pins: volumetric, sky-kernel (parity IMPROVED 0.0013->0.0008 —
+  both paths stopped shading the far field they previously shaded slightly differently; morning streak
+  0.0245/0.0180, +2h 0.0552/0.0491 drift 0.053), celestial-sky (noon 136352/126.3, box 13669/0.508, night ratio
+  0.68), shader-compile, moon, tiers, fidelity, exposure, precip, editor-preview, scene. Sheets recommitted
+  (above-camera dawn sheets move under the 60 km arm). CORRECTION to the P2.2 close-out note: the
+  "packets-guard on WallSeconds_" and "WindSpeed unused-field decision" were phantoms — no WindSpeed
+  identifier exists anywhere, and wall-clock semantics make large-dt integral advance correct (steady_clock
+  never runs backward), so there is nothing to guard; the LocalDensity Time re-add stays P2.4a's per plan.

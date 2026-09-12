@@ -84,6 +84,24 @@ Report $? "no reference altitude survives on the host"
 Report $? "no inline flow-times-time drift in either density"
 
 echo
+echo "[VolumetricMedia] the layer march stops at the reference's far cap"
+# REF cloudMarch cuts the slab span (celestial line 1023): above the slab max(60 km, thick x 40), below or
+#    inside thick x 14. One helper spells the law; both interval branches call it; the boxes are not capped.
+CapDefs=$(grep -c 'static float SlabFarCap' "$Header")
+[ "$CapDefs" = "1" ]
+Report $? "exactly one SlabFarCap helper ($CapDefs found)"
+CapCalls=$(grep -c 'SlabFarCap(Origin' "$Header")
+[ "$CapCalls" = "2" ]
+Report $? "both interval branches cut at it ($CapCalls call sites)"
+grep -q 'Thickness \* 14\.0f' "$Header"
+Report $? "below and inside, the cap is thick x 14"
+grep -q 'fmax(60000\.0f, Thickness \* 40\.0f)' "$Header"
+Report $? "above, the cap is max(60 km, thick x 40)"
+BoxMaxes=$(grep -c 'fmin(BoxFar, MaximumDistance)\|fmin(FogFar, MaximumDistance)' "$Header")
+[ "$BoxMaxes" = "2" ]
+Report $? "the boxes still run to the maximum ($BoxMaxes uncapped exits)"
+
+echo
 echo "[VolumetricMedia] bodiless volumes have a marker to grab"
 Marker=Engine/SpatialInterface/VolumeMarker.h
 [ -f "$Marker" ]

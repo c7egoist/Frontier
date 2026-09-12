@@ -410,6 +410,58 @@ int main()
                "a later clock re-rolls the phase");
     }
 
+    std::printf("\n9. the layer march stops at the far cap\n");
+    {
+        // The cap law itself: below or inside, thick x 14; above, max(60 km, thick x 40). Exact floats —
+        // the law is one multiply, so a transcription slip has nowhere to hide.
+        Expect(VolumetricMedia::SlabFarCap(100.0f, 1500.0f, 2400.0f) == 12600.0f,
+               "below the slab the cap is thick x 14");
+        Expect(VolumetricMedia::SlabFarCap(2000.0f, 1500.0f, 2400.0f) == 12600.0f,
+               "inside the slab the cap is still thick x 14");
+        Expect(VolumetricMedia::SlabFarCap(3000.0f, 1500.0f, 2400.0f) == 60000.0f,
+               "above a thin slab the 60 km floor wins");
+        Expect(VolumetricMedia::SlabFarCap(5000.0f, 1500.0f, 3500.0f) == 80000.0f,
+               "above a thick slab thick x 40 wins");
+
+        CloudLayerSettings Layer{};
+        Layer.Enabled = true; Layer.Base = 1500.0f; Layer.Thickness = 900.0f;
+        // Optically thin on purpose: the count asserts need every step taken, and the march breaks at
+        // T < 0.005. At density 0.02 even 89 peak samples total OD 2.52 (T = 0.08), so no early-out can
+        // fire whatever the field holds — the counts below are geometry, not weather.
+        Layer.Coverage = 0.6f; Layer.Density = 0.02f;
+        LocalVolumeSettings None{};
+        const float Sun[3] = { 0.0f, 0.5f, 0.87f };
+        const float Radiance[3] = { 20.0f, 19.0f, 17.0f }, Ambient[3] = { 0.7f, 0.8f, 1.0f };
+
+        // A grazing ray from below: 90 km of chord, cut to 12.6 km. At the tier step (4000/28 m) the cut
+        // span takes 89 steps; an uncut chord would saturate the 112-step count cap instead.
+        const float Eye[3] = { 0.0f, 0.0f, 100.0f };
+        float Graze[3] = { 1.0f, 0.0f, 0.01f };
+        const float GL = std::sqrt(Graze[0]*Graze[0] + Graze[2]*Graze[2]);
+        Graze[0] /= GL; Graze[2] /= GL;
+        const VolumetricSample Cut = VolumetricMedia::March(
+            Layer, None, None, Wind, Budget, Eye, Graze, 200000.0f, Sun, Radiance, Ambient, 0.0f);
+        Expect(Cut.StepsTaken == 89u,
+               "a grazing ray marches the cut span, not the count cap (89 steps, not 112)");
+
+        // The cap is a cut, not a fade: marching with the maximum already at the cut shades bit-identical
+        // light, so nothing beyond the cap contributed.
+        const float Entry = (1500.0f - 100.0f) / Graze[2];
+        const VolumetricSample Short = VolumetricMedia::March(
+            Layer, None, None, Wind, Budget, Eye, Graze, Entry + 12600.0f, Sun, Radiance, Ambient, 0.0f);
+        Expect(Short.Transmittance == Cut.Transmittance && Short.Scatter[0] == Cut.Scatter[0] &&
+               Short.Scatter[1] == Cut.Scatter[1] && Short.Scatter[2] == Cut.Scatter[2] &&
+               Short.StepsTaken == Cut.StepsTaken,
+               "a maximum at the cut shades bit-identical to 200 km");
+
+        // A steep ray never reaches the cap: 900 m of chord at 4000/28 m steps is 7 steps, cap or no cap.
+        const float Up[3] = { 0.0f, 0.0f, 1.0f };
+        const VolumetricSample Steep = VolumetricMedia::March(
+            Layer, None, None, Wind, Budget, Eye, Up, 200000.0f, Sun, Radiance, Ambient, 0.0f);
+        Expect(Steep.StepsTaken == 7u,
+               "a steep ray keeps its 7 steps (short spans are untouched)");
+    }
+
     std::printf("\n");
     for (int I = 0; I < 108; ++I) std::putchar('=');
     std::printf("\n%s\n\n", Failures == 0 ? "  the media behave" : "  THE MEDIA DO NOT BEHAVE");
