@@ -87,7 +87,10 @@ DispatchConfiguration ReSTIRIntegrator::BuildDispatch(
     // A6b. ONE exposure value reaches the shader, whether it came from the slider or from adaptation. Manual
     //    mode returns the configured value unchanged, so every pre-A6b image is still reproducible, and the two
     //    modes cannot become two code paths that disagree about what the tone map receives.
-    Dispatch.Exposure              = Adaptation.QueryExposure();
+    // P1. Times the celestial daylight factor (the panel's autoEV as a linear multiplier): the sun's own
+    //    elevation tames the frame exactly as the reference exposes with exp2(uEV + autoEV). 1.0 unless the
+    //    project assigned one, so non-celestial frames are byte-identical to before.
+    Dispatch.Exposure              = Adaptation.QueryExposure() * CelestialExposureFactor;
     // A7d. The eye's remaining colour at this adapted level. Taken from the same integrator as the exposure so
     //    the two can never describe different light.
     Dispatch.ColourSaturation      = Adaptation.QueryColourSaturation();

@@ -1,4 +1,4 @@
-# l.md — Standing instructions for every AI session on this repo
+# Standing orders for every AI session on this repo
 
 > The user has repeated these instructions for days across sessions. Read this file
 > FIRST, before any other doc, and treat every line as a standing order until the

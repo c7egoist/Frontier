@@ -15,7 +15,17 @@
 
 #include <cstdint>
 #include <string>
+#if __has_include(<vulkan/vulkan.h>)
 #include <vulkan/vulkan.h>
+#else
+// Headless-proof fallback (P1): the ONLY Vulkan name this header needs is the opaque physical-device handle
+//    in Probe()'s signature. With the SDK present the include above wins and this vanishes; without one (a
+//    proof sandbox with no GPU and no SDK) the CPU proofs — solver, raster, sheets — still compile, because
+//    none of them links RayTracingCapabilitySet.cpp or calls Probe(). If this header ever needs a second
+//    Vulkan name, extend the fallback rather than re-requiring the SDK: CPU proofs must never depend on it
+//    (StandingOrders §3).
+using VkPhysicalDevice = struct VkPhysicalDevice_T*;
+#endif
 
 namespace Frontier {
 

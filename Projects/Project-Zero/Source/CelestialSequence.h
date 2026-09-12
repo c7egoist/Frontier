@@ -185,6 +185,11 @@ public:
     float SkyTint[3]     = { 1.0f, 1.0f, 1.0f };
     float SkyBrightness  = 1.0f;
     float SunDirect      = 1.0f;   // [x] direct-sun gain on top of the panel's 0.11 (the Sun row's Direct slider)
+    // [x] the manual exposure slider as the CPU raster sees it. Mirrors the engine default
+    //    (GameExecution's IntegratorConfig.Exposure = 1.05): ApplyTo composes the raster's display exposure
+    //    as ManualExposure × DaylightExposure(sun elevation), exactly the runtime's Dispatch.Exposure in
+    //    Manual mode — so a proof sheet and the shipped frame tone-map identically (StandingOrders §3).
+    float ManualExposure = 1.05f;
     float GroundAlbedo[3] = { 0.19f, 0.17f, 0.14f };
     float StarBrightness = 1.0f;
     float StarSize       = 1.0f;

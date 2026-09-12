@@ -106,6 +106,38 @@ public:
         return Rgb[0] * kLuminance[0] + Rgb[1] * kLuminance[1] + Rgb[2] * kLuminance[2];
     }
 
+    // ── Daylight exposure (the reference panel's autoEV) ───────────────────────────────────────────────────
+    // Reference: CelestialPanel.reference.html, main(): `autoEV` then `col *= exp2(uEV + autoEV)`.
+    //
+    //    autoEV(elev) = −0.35·ss(−8,−1,elev) − 1.0·ss(−1,6,elev) − 0.6·ss(6,30,elev)
+    //
+    // The panel's daylight tamer: at noon it multiplies the frame by 2^−1.95 ≈ 0.26, which is what keeps a
+    //    22×-intensity sun inside the ACES range so the DISC keeps an edge against its own aureole. Without
+    //    it the aureole lands near white next to a white disc and the sun reads as a blinding blob — the
+    //    defect P1 exists to fix. Returns the LINEAR multiplier (exp2 of the curve), so the caller exposes
+    //    with `manual × DaylightExposure(elev)` exactly as the panel exposes with `exp2(uEV + autoEV)`.
+    //
+    // ⚠️ THIS IS NOT ADAPTIVE EXPOSURE, and the distinction is load-bearing. It is a pure function of the
+    //    sun's elevation: no meter, no history, no frame feedback, same input → same bits on CPU and GPU.
+    //    It therefore CANNOT fight ReSTIR the way a metered loop was feared to (StandingOrders §2 note):
+    //    exposure reaches every path strictly AFTER accumulation (ReSTIRViewport resolves the mean in linear
+    //    radiance and tone-maps only into OutputImage; LuminanceReduce meters the linear image, never the
+    //    presentation one), so a per-frame factor changes only the display mapping — reservoirs, history and
+    //    moments never see it, and no accumulation reset is owed when the sun moves. The engine's Manual mode
+    //    stays Manual: this multiplies the integrator's answer, it never replaces the metering.
+    //
+    // ⚠️ APPLIED IFF THE CELESTIAL SYSTEM IS ENABLED. The panel has no indoor mode so its autoEV is
+    //    unconditional; here the term exists to expose the SKY, and an indoor frame (Cornell box, showroom)
+    //    has no sky to tame. Gating on Enabled keeps every pre-celestial image reproducible exactly.
+    static float DaylightExposure(float SunElevationDegrees) noexcept
+    {
+        const float BelowHorizon = SmoothUnit(-8.0f, -1.0f, SunElevationDegrees);
+        const float Sunrise      = SmoothUnit(-1.0f,  6.0f, SunElevationDegrees);
+        const float Morning      = SmoothUnit( 6.0f, 30.0f, SunElevationDegrees);
+        const float AutoEv = -0.35f * BelowHorizon - 1.0f * Sunrise - 0.6f * Morning;
+        return std::exp2(AutoEv);
+    }
+
     // The Narkowicz ACES fit, as used by the ReSTIR kernel. Matching the kernel exactly is the point.
     static float AcesFilm(float X) noexcept
     {
@@ -188,6 +220,12 @@ public:
     }
 
 private:
+    static float SmoothUnit(float Edge0, float Edge1, float V) noexcept
+    {
+        const float T = V < Edge0 ? 0.0f : (V > Edge1 ? 1.0f : (V - Edge0) / (Edge1 - Edge0));
+        return T * T * (3.0f - 2.0f * T);
+    }
+
     static float HableCurve(float X) noexcept
     {
         constexpr float A = 0.15f, B = 0.50f, C = 0.10f, D = 0.20f, E = 0.02f, F = 0.30f;

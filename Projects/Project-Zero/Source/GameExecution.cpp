@@ -1218,6 +1218,16 @@ int main(int argc, char** argv)
             Frontier::TelemetryRowStructure Rows = Telemetry.QueryRows(); Rows.SceneLine = Line; Telemetry.AssignRows(Rows);
         }
 
+        // ④a P1 — daylight exposure. The reference panel exposes every frame with exp2(uEV + autoEV); the
+        //    autoEV half is a pure function of the sun's elevation (ColourPipeline::DaylightExposure), so it is
+        //    assigned here, fresh from the solved frame, ahead of the dispatch that consumes it. Gated on the
+        //    celestial system: no sky, no taming, and every indoor frame is byte-identical to before. Assigning
+        //    it owes no accumulation reset — exposure is display-only post-accumulation (see the setter's note).
+        Integrator.AssignCelestialExposureFactor(
+            Celestial.Enabled
+                ? Frontier::ColourPipeline::DaylightExposure(Celestial.Frame().Sun.Elevation)
+                : 1.0f);
+
         const Frontier::DispatchConfiguration Dispatch = Integrator.BuildDispatch(
             Camera,
             RenderWidth,

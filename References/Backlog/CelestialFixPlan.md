@@ -4,7 +4,7 @@
 
 Branch: `arena/01a09785-frontier` (base: streamlink `arena/01a09335-frontier` @ `86c5ab3`, imported).
 Reference: `References/CelestialPanel.reference.html` (SultanAladin/Frontier- `eaab23e`).
-Standing orders: `l.md`. Prior plan docs (`CelestialPortPlan.md`, `CelestialPortSteps.md`) stay valid for
+Standing orders: `StandingOrders.md`. Prior plan docs (`CelestialPortPlan.md`, `CelestialPortSteps.md`) stay valid for
 sequencing rationale; this doc is the fault-by-fault fix list with evidence.
 
 Conventions: REF = reference HTML line; ENG = engine file. All REF lines are `grep`-verifiable in the vendored file.
@@ -116,7 +116,7 @@ tier ladder: Draft 20 / Balanced 36 / High 64 cloud steps (map onto our 5-tier l
 
 ③ PHASES (in order; each lands with PNG sheets + numeric gate + proof-fidelity note)
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-P0 DONE this session: base import, l.md, this plan, vendored reference.
+P0 DONE this session: base import, StandingOrders.md, this plan, vendored reference.
 P1 Sun disk + exposure. Port autoEV; align planet/atmo/kelvin defaults; transcribe disk gating + reddening;
    re-audit disk vs REF sheets (noon/sunset/night). Gate: disk edge contrast + centre/edge ratio within REF band.
 P2 Cloud march fidelity (D2 a–g). Both twins + defaults + wind-integral clock + hash13. Gate: CPU/GPU twin
@@ -131,3 +131,15 @@ P8 Remaining entities audit: 2D cloud layer, terrain, precipitation on both path
 
 Status log (append; newest last):
 - 2026-09-12: P0 landed. D1–D7 diagnosed against vendored REF. Starting P1.
+- 2026-09-12: P1-exposure landed. `ColourPipeline::DaylightExposure(elev)` transcribes the panel's autoEV curve
+  (-.35·ss(-8,-1) -1.0·ss(-1,6) -.6·ss(6,30), linear exp2) into ColourTransfer.h, shared by both paths. ReSTIR:
+  `ReSTIRIntegrator.CelestialExposureFactor` multiplies `Adaptation.QueryExposure()` at BuildDispatch;
+  GameExecution assigns it from the solved sun elevation pre-dispatch (1.0 when celestial off); the setter is
+  presentation-only (no reset — exposure lands after accumulation, same argument as AssignDenoise), answering
+  the RESTIR×exposure worry: no feedback into reservoirs/history/meter. Raster/proofs: ManualExposure 1.05f +
+  ApplyTo composes manual × DaylightExposure. Exposure gate pins the dispatch line + P1 structure; test §15 pins
+  5 reference values, monotonicity, bit determinism. Headless enablers: RayTracingCapabilitySet.h compiles
+  without the Vulkan SDK (__has_include fallback; proofs never link Probe()); sandbox deps in /home/user/deps
+  (CGLTF/UFBX/STB/TINYBVH) + imgui/stb submodules initialised. Gates green: exposure, sky-kernel (+SPIR-V),
+  celestial-sky, editor-preview; showcase re-rendered; sheets committed. REMAINING P1: disk gating/reddening
+  transcription + planet/atmosphere default alignment (100 km / 6371 km / Rayleigh pair).

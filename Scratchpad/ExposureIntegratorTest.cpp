@@ -14,9 +14,11 @@
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
 #include "DisplayPresentation/ExposureIntegrator.h"
+#include "DisplayPresentation/ColourTransfer.h"
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <algorithm>
 #include <initializer_list>
 #include <limits>
@@ -662,6 +664,53 @@ int main()
         Fixed.ObserveLuminance(std::log(1.0e-4f)); Fixed.Snap();
         Expect(std::fabs(Fixed.QueryColourSaturation() - 1.0f) < 1e-6f,
                "manual exposure keeps full colour — every pre-A7d image is still reproducible");
+    }
+
+    //------------------------------------------------------------------------------------------------------------------
+    std::printf("\n15. daylight exposure — the panel's autoEV as a linear multiplier, pinned to the reference\n");
+    {
+        // Reference: CelestialPanel.reference.html, main():
+        //    autoEV = -.35*ss(-8,-1,elev) - 1.0*ss(-1,6,elev) - .6*ss(6,30,elev); col *= exp2(uEV + autoEV).
+        // ColourPipeline::DaylightExposure returns exp2(autoEV). Values below were evaluated from that formula
+        //    by hand (smoothstep t^2(3-2t), exp2), not copied from the implementation's output — an independent
+        //    calculation in the ShadowMatrixProof pattern.
+        struct Pin { float Elevation; float Factor; };
+        const Pin Pins[] = {
+            { -10.0f, 1.0000f },   // deep night: no taming at all
+            {  -4.5f, 0.8858f },   // mid civil twilight: -0.175 EV
+            {   0.0f, 0.7550f },   // sunrise: -0.405 EV
+            {  10.0f, 0.3803f },   // morning: -1.394 EV
+            {  45.0f, 0.2588f },   // full day: -1.95 EV, the plateau
+        };
+        std::printf("     sun elev   factor\n");
+        for (const Pin& P : Pins)
+        {
+            const float Got = ColourPipeline::DaylightExposure(P.Elevation);
+            std::printf("     %7.1f°   %.4f  (reference %.4f)\n",
+                        static_cast<double>(P.Elevation), static_cast<double>(Got),
+                        static_cast<double>(P.Factor));
+            char What[96];
+            std::snprintf(What, sizeof(What), "autoEV at %+.1f deg matches the reference curve",
+                          static_cast<double>(P.Elevation));
+            Expect(std::fabs(Got - P.Factor) < 2e-3f, What);
+        }
+
+        // The curve must never brighten as the sun climbs — a non-monotonic tamer would pump the frame.
+        bool Monotonic = true;
+        float Previous = 2.0f;
+        for (float E = -20.0f; E <= 80.0f; E += 0.5f)
+        {
+            const float F = ColourPipeline::DaylightExposure(E);
+            if (F > Previous + 1e-6f) Monotonic = false;
+            Previous = F;
+        }
+        Expect(Monotonic, "the tamer never brightens as the sun climbs (-20 to +80 deg)");
+
+        // Pure function, no state: the same elevation twice must give identical BITS on this build, so CPU
+        //    and GPU consumers cannot disagree about what the factor was.
+        const float A = ColourPipeline::DaylightExposure(17.25f);
+        const float B = ColourPipeline::DaylightExposure(17.25f);
+        Expect(std::memcmp(&A, &B, sizeof(float)) == 0, "the factor is bit-deterministic per elevation");
     }
 
     std::printf("\n>>> %s (%d failure%s)\n", Failures == 0 ? "ALL PASS" : "FAILURES", Failures, Failures == 1 ? "" : "s");

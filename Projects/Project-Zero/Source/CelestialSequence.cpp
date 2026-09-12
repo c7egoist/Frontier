@@ -414,6 +414,16 @@ void CelestialSequence::ApplyTo(VisibilityRaster& Raster, const CelestialBudget&
     Settings.CloudTime = Observation.LocalHours * 3600.0f;
 
     Raster.AssignCelestial(Settings);
+
+    // The raster's display exposure, composed here — not left to the caller — because ApplyTo's contract is
+    //    one call that cannot wire half the sky. Manual slider × daylight factor, the runtime's exact
+    //    Dispatch.Exposure in Manual mode (Adaptation × CelestialExposureFactor), so proof sheets tone-map
+    //    identically to shipped frames. Recomputed from the slider every call, never accumulated, so repeated
+    //    ApplyTo calls cannot compound the factor. ToneMap/Gamma/Saturation ride through untouched.
+    ColourTransfer Transfer = Raster.QueryColourTransfer();
+    Transfer.Exposure = ManualExposure
+        * (Enabled ? ColourPipeline::DaylightExposure(Solved.Sun.Elevation) : 1.0f);
+    Raster.AssignColourTransfer(Transfer);
 }
 
 SkyConstantRecord CelestialSequence::PackSkyRecord() const noexcept

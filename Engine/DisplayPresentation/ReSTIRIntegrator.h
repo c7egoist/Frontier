@@ -98,6 +98,13 @@ public:
             ResetAccumulation();
         }
     }
+    // P1. The celestial daylight factor (ColourPipeline::DaylightExposure of the sun's elevation) multiplies
+    //    the exposure at BuildDispatch. ⚠️ Presentation-only, like AssignDenoise: exposure reaches the shader
+    //    strictly after accumulation (the history, moments and reservoirs are linear), so a moving sun changes
+    //    only the display mapping and owes NO reset — resetting here would restart convergence every tick while
+    //    time animates. Default 1.0 reproduces every pre-celestial image exactly.
+    void AssignCelestialExposureFactor(float Value) noexcept { CelestialExposureFactor = Value; }
+    [[nodiscard]] float QueryCelestialExposureFactor() const noexcept { return CelestialExposureFactor; }
     void AssignGlobalIllumination(bool     On)    noexcept { if (ActiveConfiguration.GlobalIllumination  != On)    { ActiveConfiguration.GlobalIllumination  = On;    ResetAccumulation(); } }
     void AssignAntiAliasing      (bool     On)    noexcept { if (ActiveConfiguration.AntiAliasing        != On)    { ActiveConfiguration.AntiAliasing        = On;    ResetAccumulation(); } }
     void AssignTemporalReuse     (bool     On)    noexcept { if (ActiveConfiguration.TemporalReuse       != On)    { ActiveConfiguration.TemporalReuse       = On;    ResetAccumulation(); } }
@@ -139,6 +146,7 @@ public:
 private:
     ReSTIRIntegratorConfiguration ActiveConfiguration;  // [-]  live-tunable parameters
     ExposureIntegrator Adaptation{};  // A6b: adaptive exposure
+    float CelestialExposureFactor = 1.0f;   // [-] P1: daylight factor, 1.0 when the sky is off
     uint32_t                      AccumulationIndex;    // [-]  temporal frame counter (incremented per frame)
     bool                          ResetPending = false; // [-]  a reset landed after the dispatch read the index
 

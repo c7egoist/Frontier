@@ -225,9 +225,23 @@ awk '/void SwapchainExchange::RecordAndPresent/{f=1} f&&/if \(ResizePending\)/{r
     Engine/DeviceExchange/SwapchainExchange.cpp \
     || { echo "  a pending resize is handled after the acquire — it would strand a signalled semaphore"; Fail=1; }
 
-# One exposure value reaches the shader, whichever mode is active.
-grep -q 'Dispatch.Exposure              = Adaptation.QueryExposure();' Engine/DisplayPresentation/ReSTIRIntegrator.cpp \
-    || { echo "  the dispatch does not take its exposure from the integrator"; Fail=1; }
+# One exposure value reaches the shader, whichever mode is active — times the celestial daylight factor.
+grep -q 'Dispatch.Exposure              = Adaptation.QueryExposure() \* CelestialExposureFactor;' Engine/DisplayPresentation/ReSTIRIntegrator.cpp \
+    || { echo "  the dispatch does not take its exposure from the integrator times the daylight factor"; Fail=1; }
+
+# ── P1: daylight exposure (the panel's autoEV) ────────────────────────────────────────────────────────────────
+# A pure function of sun elevation, applied identically on both paths. It must stay a pure function (no meter,
+#    no history — the thing that would let it fight ReSTIR), and it must reach the shader and the CPU raster
+#    through the same value, or day sheets and shipped frames diverge.
+grep -q 'static float DaylightExposure(float SunElevationDegrees) noexcept' Engine/DisplayPresentation/ColourTransfer.h \
+    || { echo "  ColourPipeline::DaylightExposure is missing — the daylight tamer has nowhere to live"; Fail=1; }
+grep -q 'AssignCelestialExposureFactor' Projects/Project-Zero/Source/GameExecution.cpp \
+    || { echo "  the project never assigns the daylight factor — the GPU path would expose without it"; Fail=1; }
+grep -q 'ColourPipeline::DaylightExposure(Solved.Sun.Elevation)' Projects/Project-Zero/Source/CelestialSequence.cpp \
+    || { echo "  ApplyTo no longer composes the raster transfer — proof sheets would diverge from shipped frames"; Fail=1; }
+# Presentation-only, like AssignDenoise: a reset here would restart convergence every tick while time animates.
+! sed -n '/void AssignCelestialExposureFactor/,/}/p' Engine/DisplayPresentation/ReSTIRIntegrator.h | grep -q 'ResetAccumulation' \
+    || { echo "  the daylight-factor setter resets accumulation — time animation would never converge"; Fail=1; }
 
 [ "$Fail" = "0" ] && echo "  log mean, frame-rate independence, bounds and GPU wiring hold     PASS"
 
