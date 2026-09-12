@@ -4,7 +4,7 @@
  * Used by the worker, the tests and the CLI.
  */
 
-import { TreeParams, DEFAULT_ROOTS, isGrass } from './params';
+import { TreeParams, DEFAULT_ROOTS, isGrass, isSucculent } from './params';
 import { buildSkeleton, Skeleton } from './skeleton';
 import { buildMesh, MesherStats } from './mesher';
 import { validateTopology, TopologyReport } from './validate';
@@ -14,6 +14,8 @@ import { Environment, ObstacleMeshData, DEFAULT_ENVIRONMENT } from '../env/envir
 import { buildRoots } from './roots';
 import { GrassMesher, GrassStats } from '../plant/grassMesher';
 import { DEFAULT_GRASS } from '../plant/grassParams';
+import { SucculentMesher, SucculentSample, SucculentStats } from '../plant/succulentMesher';
+import { DEFAULT_SUCCULENT } from '../plant/succulentParams';
 
 export interface Timings {
   skeleton: number;
@@ -52,6 +54,10 @@ export interface GenerateResult {
   groundDepth: number;
   /** Grass mesher statistics (grasses only). */
   grass?: GrassStats;
+  /** Succulent mesher statistics (desert flora only). */
+  succulent?: SucculentStats;
+  /** Junction locations for succulent inspection tooling. */
+  succulentSamples?: SucculentSample[];
 }
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -68,6 +74,7 @@ export function completeParams(params: TreeParams): TreeParams {
 export function generateTree(params: TreeParams, options: { validate?: boolean; obstacleMeshes?: boolean } = {}): GenerateResult {
   completeParams(params);
   if (isGrass(params)) return generateGrass(params, options);
+  if (isSucculent(params)) return generateSucculent(params, options);
   const t0 = now();
   const skeleton = buildSkeleton(params);
   const t1 = now();
@@ -155,6 +162,56 @@ function generateGrass(params: TreeParams, options: { validate?: boolean; obstac
     },
     groundDepth: built.groundDepth,
     grass: gs,
+  };
+}
+
+/** Desert flora pipeline: all visible organs are already part of the welded quad mesh. */
+function generateSucculent(params: TreeParams, options: { validate?: boolean; obstacleMeshes?: boolean }): GenerateResult {
+  const s = params.succulent ?? { ...DEFAULT_SUCCULENT };
+  params.succulent = s;
+  const t0 = now();
+  const built = new SucculentMesher(s, params.seed).build();
+  const t1 = now();
+  const environment = new Environment(params.environment);
+  const report = options.validate === false ? emptyReport(built.mesh) : validateTopology(built.mesh);
+  const t2 = now();
+  const buffers = toGpuBuffers(built.mesh);
+  const obstacles = options.obstacleMeshes === false ? [] : environment.meshAll();
+  const t3 = now();
+  const ss = built.stats;
+  const stats: MesherStats = {
+    stems: ss.organs,
+    droppedStems: ss.dropped,
+    dropReasons: ss.dropReasons,
+    junctions: ss.junctions,
+    forks: ss.arms,
+    maxDepth: 3,
+    rootStems: 0,
+    droppedRoots: 0,
+  };
+  return {
+    skeleton: null,
+    environment,
+    mesh: built.mesh,
+    leaves: new LeafMesh(),
+    obstacles,
+    report,
+    stats,
+    buffers,
+    timings: { skeleton: 0, roots: 0, mesh: t1 - t0, validate: t2 - t1, buffers: t3 - t2, total: t3 - t0 },
+    summary: {
+      stems: ss.organs,
+      stemsPerLevel: [...ss.perLevel],
+      leaves: 0,
+      height: built.height,
+      treeScale: built.height,
+      primaryRoots: 0,
+      rootStems: 0,
+      obstacles: environment.count,
+    },
+    groundDepth: built.groundDepth,
+    succulent: ss,
+    succulentSamples: built.samples,
   };
 }
 

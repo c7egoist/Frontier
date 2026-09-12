@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { PRESETS, TREE_PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment, isGrass } from '../src/tree/params';
+import { PRESETS, TREE_PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment, isGrass, isSucculent } from '../src/tree/params';
 import { buildSkeleton } from '../src/tree/skeleton';
 import { buildMesh } from '../src/tree/mesher';
 import { validateTopology } from '../src/tree/validate';
 import { toOBJ, toGLB, toGpuBuffers } from '../src/tree/export';
 import { GrassMesher } from '../src/plant/grassMesher';
 import { DEFAULT_GRASS, GRASS_PRESETS } from '../src/plant/grassParams';
+import { SUCCULENT_PRESETS } from '../src/plant/succulentParams';
 import { generateTree } from '../src/tree/generate';
 import { LeafMesh } from '../src/tree/mesh';
 
@@ -139,6 +140,75 @@ describe('welded grass plant is a single closed manifold', () => {
     const dv = new DataView(glb);
     expect(dv.getUint32(0, true)).toBe(0x46546c67);
     expect(dv.getUint32(8, true)).toBe(glb.byteLength);
+  });
+});
+
+describe('welded cactus and succulent plants', () => {
+  for (const preset of SUCCULENT_PRESETS) {
+    for (const seed of [1, 7, 42]) {
+      it(`${preset.name} seed ${seed}`, () => {
+        const p = cloneParams(PRESETS.find((x) => x.name === preset.name)!);
+        p.seed = seed;
+        const r = generateTree(p);
+        expect(isSucculent(p)).toBe(true);
+        expect(r.skeleton).toBeNull();
+        expect(r.succulent).toBeDefined();
+        expect(r.report.boundaryEdges, 'boundary edges').toBe(0);
+        expect(r.report.nonManifoldEdges, 'non-manifold edges').toBe(0);
+        expect(r.report.inconsistentEdges, 'inconsistent winding').toBe(0);
+        expect(r.report.degenerateFaces, 'degenerate faces').toBe(0);
+        expect(r.report.isolatedVertices, 'isolated vertices').toBe(0);
+        expect(r.report.components, 'connected components').toBe(1);
+        expect(r.report.eulerCharacteristic, 'Euler characteristic').toBe(2);
+        expect(r.report.genus).toBe(0);
+        expect(r.report.quadRatio).toBeGreaterThanOrEqual(0.998);
+        expect(r.stats.droppedStems / Math.max(1, r.summary.stems)).toBeLessThan(0.02);
+        expect(r.succulent!.junctions).toBe(r.succulent!.organs - 1);
+        expect(r.succulentSamples).toHaveLength(r.succulent!.junctions);
+        expect(r.succulentSamples!.every((sample) => sample.pos.every(Number.isFinite) && sample.dir.every(Number.isFinite))).toBe(true);
+        expect(r.succulent!.spines + r.succulent!.teeth + r.succulent!.leaves + r.succulent!.pads + r.succulent!.canes).toBeGreaterThan(0);
+        let maxHeight = 0;
+        for (let i = 0; i < r.mesh.vertexCount; i++) {
+          for (let k = 0; k < 4; k++) {
+            expect(r.mesh.wind[i * 4 + k]).toBeGreaterThanOrEqual(0);
+            expect(r.mesh.wind[i * 4 + k]).toBeLessThanOrEqual(1);
+          }
+          maxHeight = Math.max(maxHeight, r.mesh.wind[i * 4]);
+        }
+        expect(maxHeight).toBeCloseTo(1, 5);
+      });
+    }
+  }
+
+  it('is deterministic and changes with the seed', () => {
+    const preset = PRESETS.find((x) => x.name === 'Saguaro')!;
+    const a = cloneParams(preset);
+    const b = cloneParams(preset);
+    const c = cloneParams(preset);
+    a.seed = 17;
+    b.seed = 17;
+    c.seed = 18;
+    const ra = generateTree(a);
+    const rb = generateTree(b);
+    const rc = generateTree(c);
+    expect(ra.mesh.positions).toEqual(rb.mesh.positions);
+    expect(ra.report.faces).toBe(rb.report.faces);
+    const checksum = (v: ArrayLike<number>): number => {
+      let sum = 0;
+      for (let i = 0; i < v.length; i++) sum += v[i] * ((i % 11) + 1);
+      return sum;
+    };
+    expect(checksum(ra.mesh.positions)).not.toBe(checksum(rc.mesh.positions));
+  });
+
+  it('exports spines and pads as one quad mesh', () => {
+    const p = cloneParams(PRESETS.find((x) => x.name === 'Prickly Pear')!);
+    p.seed = 4;
+    const r = generateTree(p);
+    const obj = toOBJ(r.mesh, new LeafMesh(), 'prickly_pear');
+    expect(obj.split('\n').filter((line) => line.startsWith('f ') && line.trim().split(/\s+/).length === 5).length).toBe(r.mesh.quadCount);
+    const glb = toGLB(r.mesh, new LeafMesh(), 'prickly_pear');
+    expect(new DataView(glb).getUint32(0, true)).toBe(0x46546c67);
   });
 });
 

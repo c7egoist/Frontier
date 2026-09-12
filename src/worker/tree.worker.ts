@@ -52,6 +52,8 @@ export interface GenerateResponse {
   groundDepth: number;
   /** Grass mesher statistics (grasses only). */
   grass: import('../plant/grassMesher').GrassStats | null;
+  /** Succulent mesher statistics (desert flora only). */
+  succulent: import('../plant/succulentMesher').SucculentStats | null;
   report: ReturnType<typeof generateTree>['report'];
   stats: ReturnType<typeof generateTree>['stats'];
   timings: ReturnType<typeof generateTree>['timings'];
@@ -80,7 +82,7 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
     if (msg.type === 'generate') {
       const r = generateTree(msg.params);
       const leaves = packLeaves(r.leaves);
-      const samples: GenerateResponse['samples'] = [];
+      const samples: GenerateResponse['samples'] = r.succulentSamples ? [...r.succulentSamples] : [];
       for (const st of r.skeleton?.stems ?? []) {
         if (st.dropped || !st.parent || samples.length > 400) continue;
         if (st.attach !== 'side' && st.attach !== 'fork') continue;
@@ -105,6 +107,7 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
         obstacles: r.obstacles,
         groundDepth: r.groundDepth,
         grass: r.grass ?? null,
+        succulent: r.succulent ?? null,
         report: r.report,
         stats: r.stats,
         timings: r.timings,

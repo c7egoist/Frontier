@@ -370,7 +370,7 @@ export class Viewer {
     }
   }
 
-  setTree(buffers: GpuBuffers, leaves: LeafMesh | null, height: number): void {
+  setTree(buffers: GpuBuffers, leaves: LeafMesh | null, height: number, desertStyle = 0): void {
     this.clearTree();
     // Real height drives the framing (grasses can be a few centimetres tall);
     // the sway amplitude keeps a floor so small plants still visibly move.
@@ -387,7 +387,7 @@ export class Viewer {
     geo.setAttribute('aJunction', new THREE.BufferAttribute(buffers.junction, 1));
     geo.setIndex(new THREE.BufferAttribute(buffers.index, 1));
 
-    const mat = this.makeBarkMaterial();
+    const mat = this.makeBarkMaterial(desertStyle);
     this.branchMesh = new THREE.Mesh(geo, mat);
     this.branchMesh.castShadow = true;
     this.branchMesh.receiveShadow = true;
@@ -549,13 +549,14 @@ export class Viewer {
       .replace('#include <begin_vertex>', `vec3 transformed = applyWind(vec3(position));`);
   }
 
-  private makeBarkMaterial(): THREE.MeshStandardMaterial {
+  private makeBarkMaterial(desertStyle = 0): THREE.MeshStandardMaterial {
     const mat = new THREE.MeshStandardMaterial({ color: BARK, roughness: 0.92, metalness: 0.0, side: THREE.DoubleSide });
     const modeU = { value: 0 };
     mat.userData.mode = modeU;
     mat.onBeforeCompile = (shader) => {
       this.injectWind(shader);
       shader.uniforms.uMode = modeU;
+      shader.uniforms.uDesertStyle = { value: desertStyle };
       shader.uniforms.uMatcap = { value: this.matcapTexture };
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `#include <common>\nattribute float aLevel;\nattribute float aJunction;\nvarying vec4 vWindV;\nvarying float vLevel;\nvarying float vJunction;\nvarying vec3 vViewNrm;`)
@@ -563,9 +564,27 @@ export class Viewer {
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          `#include <common>\nuniform float uMode;\nuniform sampler2D uMatcap;\nvarying vec4 vWindV;\nvarying float vLevel;\nvarying float vJunction;\nvarying vec3 vViewNrm;
-          // Debug palettes are authored in sRGB; convert so they survive lighting + tone mapping.
+          `#include <common>\nuniform float uMode;\nuniform float uDesertStyle;\nuniform sampler2D uMatcap;\nvarying vec4 vWindV;\nvarying float vLevel;\nvarying float vJunction;\nvarying vec3 vViewNrm;
+          // Debug palettes and desert albedos are authored in sRGB; convert so they survive lighting + tone mapping.
           vec3 srgbIn(vec3 c) { return pow(c, vec3(2.2)); }
+          vec3 desertColor(float l) {
+            // 1 = column/barrel cacti, 2 = succulent rosettes, 3 = desert perennials.
+            if (uDesertStyle < 1.5) {
+              if (l < 0.5) return srgbIn(vec3(0.24, 0.39, 0.20));
+              if (l < 1.5) return srgbIn(vec3(0.29, 0.44, 0.22));
+              if (l < 2.5) return srgbIn(vec3(0.36, 0.50, 0.25));
+              return srgbIn(vec3(0.72, 0.56, 0.32));
+            }
+            if (uDesertStyle < 2.5) {
+              if (l < 0.5) return srgbIn(vec3(0.28, 0.42, 0.27));
+              if (l < 2.5) return srgbIn(vec3(0.39, 0.58, 0.34));
+              return srgbIn(vec3(0.70, 0.54, 0.30));
+            }
+            if (l < 0.5) return srgbIn(vec3(0.36, 0.34, 0.24));
+            if (l < 1.5) return srgbIn(vec3(0.42, 0.42, 0.27));
+            if (l < 2.5) return srgbIn(vec3(0.44, 0.60, 0.38));
+            return srgbIn(vec3(0.56, 0.46, 0.28));
+          }
           vec3 levelColor(float l) {
             if (l < 0.5) return srgbIn(vec3(0.54, 0.35, 0.23));
             if (l < 1.5) return srgbIn(vec3(0.79, 0.55, 0.29));
@@ -581,6 +600,7 @@ export class Viewer {
         .replace(
           '#include <color_fragment>',
           `#include <color_fragment>
+          if (uDesertStyle > 0.5 && uMode < 0.5) diffuseColor.rgb = desertColor(vLevel);
           if (uMode > 0.5 && uMode < 1.5) diffuseColor.rgb = levelColor(vLevel);
           else if (uMode > 1.5 && uMode < 2.5) diffuseColor.rgb = heat(vWindV.y * 0.75 + vWindV.w * 0.25);
           else if (uMode > 2.5 && uMode < 3.5) diffuseColor.rgb = srgbIn(mix(vec3(0.62, 0.60, 0.58), vec3(0.95, 0.42, 0.18), vJunction));
@@ -597,7 +617,7 @@ export class Viewer {
           }`,
         );
     };
-    mat.customProgramCacheKey = () => 'bark-wind-v4';
+    mat.customProgramCacheKey = () => 'bark-wind-v5';
     return mat;
   }
 

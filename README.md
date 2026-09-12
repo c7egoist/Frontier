@@ -4,7 +4,7 @@ A production-oriented vegetation generator that outputs **one closed, manifold q
 plant — no intersecting tubes, no "place a twig on a branch" merges. Branches grow *out of* their
 parent's surface through shared edge loops, forks are true Y-crotches, grass blades and culms grow
 out of a welded crown the same way, and every vertex carries wind data so the whole plant bends as
-a single skin. 30 tree species and 14 grasses ship as presets.
+a single skin. 30 tree species, 14 grasses, and 10 desert cacti/succulents ship as presets.
 
 ```
 npm install
@@ -22,6 +22,7 @@ npm run build      # static bundle in dist/
 | Validation | `src/tree/validate.ts` | Half-edge style audit: boundary edges, non-manifold edges, winding consistency, degenerate faces, isolated vertices, connected components, Euler characteristic / genus, valence histogram. |
 | Wind | `src/viewer/shaders.ts` | Three-tier vertex wind (trunk sway ∝ height², limb bending about a per-limb pivot with phase, twig/leaf flutter). Data is baked per vertex by the mesher. |
 | Grasses | `src/plant/grassMesher.ts`, `src/plant/grassParams.ts` | **Welded grass mesher** (below): crown dome, leaf blades, culms with nodes/sheaths/leaves and four inflorescence types, all one closed quad manifold. 14 species in three families (turf & meadow, tussock, cereals & reeds). |
+| Cacti & succulents | `src/plant/succulentMesher.ts`, `src/plant/succulentParams.ts` | **Welded desert-flora mesher** (below): ribbed stems and arms, tuberculate joints, flattened pads, golden-angle leaves, whiplike canes, areole bosses, spines, terminal points and marginal teeth. 10 species in the Desert · Cacti & Succulents family. |
 | Export | `src/tree/export.ts` | OBJ with **quads preserved** (for Blender/Maya/ZBrush), GLB (triangulated) with wind data in `COLOR_0` and level/junction flags in `TEXCOORD_1`. |
 | UI | `src/main.ts`, `src/ui/*` | Three floating cards in the SolidArc panel language: **Library** (species browser grouped by biome and plant family, search, census), **Viewport** (display modes shaded / clay / wire / levels / junctions / wind, pill toolbar, camera read-out, exact fit-to-view framing from 10 cm turf to 70 m redwoods, key hints), **Inspector** (hero card with height + mesh census, presence grid, tabs Botany · Roots · Mesh · View · Topology for trees and Grass · View · Topology for grasses, with tick-track sliders, steppers, per-level tables with drag-to-scrub cells, and a command line: `seed 42`, `preset oak`, `mode wire`, `export glb`, `help`). Generation runs in a Web Worker. |
 
@@ -83,6 +84,34 @@ closed quad manifold** — the same guarantee as the trees, with no triangles at
 `Lawn Turf` (330 blades) is 14.5 k faces, `Wheat` 9 k, `Meadow Grass` 67 k, `Pampas Grass` (24 culms,
 plumes with secondaries) 305 k — all genus 0, zero dropped organs, on every seed in the test matrix.
 
+## The welded succulent mesher
+
+`src/plant/succulentMesher.ts` is the desert-flora counterpart to the tree and grass meshers. It
+never imports a model or texture. A cactus body, arm, pad, cane, leaf, areole, spine, glochid-like
+point, marginal tooth and terminal spine is an organ in one parent/child surface graph:
+
+* **Cactus bodies.** Ring grids carry species-specific rib profiles. Saguaro arms use a curved
+  horizontal-to-vertical elbow and a widened collar, barrel cacti use squat ellipsoidal bodies with
+  a woolly crown cluster, and hedgehog heads form a low ribbed cushion. Cholla joints are
+  independently tuberculate segments with a branched skeleton.
+* **Pads.** Prickly pear pads are flattened oval capsules grown from older pads' side windows.
+  Their branching is seeded and depth-limited; each pad has a deliberate areole row and each
+  areole grows real spine tubes through its own window rather than receiving a decal.
+* **Rosettes.** Blue Century Agave, Mojave Yucca, Desert Spoon and Aloe use a golden-angle leaf
+  sequence. Leaves are thick closed keeled strips with tapered tips; agave/aloe margins carry
+  welded teeth and the leaf tip carries a terminal spine where botanically appropriate.
+* **Ocotillo.** A short welded base fans into 5–10 curved canes. Small leaves leave the cane at
+  alternating stations, so the canes carry more wind weight than the nearly rigid cactus stems.
+* **Topology and wind.** The planner reserves parent cells around each window and rejects a
+  candidate before it can make an isolated 2×2 hole. Every accepted child is bridged with a fillet
+  collar, and every organ is quad-capped. The result is genus 0, zero boundary/non-manifold edges,
+  and 100 % quads on the shipped roster. Cactus stems use a low-amplitude limb/detail tier;
+  ocotillo canes and rosette leaves receive progressively larger limb and flutter weights.
+
+The shipped roster is: Saguaro; Golden Barrel (*Echinocactus grusonii*); Prickly Pear (*Opuntia
+engelmannii*); Cholla (*Cylindropuntia*); Hedgehog Cactus (*Echinocereus engelmannii*); Blue Century
+Agave; Mojave Yucca; Ocotillo; Desert Spoon (*Dasylirion wheeleri*); and Aloe.
+
 ## Wind
 
 Per-vertex attributes baked by the mesher:
@@ -102,10 +131,11 @@ full tree, close-ups of specific junction types, display modes and the wind defo
 used to review the results in this repository; they require `puppeteer-core` and a Chromium binary
 (`CHROME_PATH`).
 
-`scripts/probe.ts` (trees) and `scripts/grassProbe.ts` (grasses) run the full pipeline headlessly
-and print the topology audit per preset × seed: `npx vite-node scripts/grassProbe.ts "" 1,2,3`.
+`scripts/probe.ts` (trees), `scripts/grassProbe.ts` (grasses), and `scripts/succulentProbe.ts`
+(desert flora) run the full pipeline headlessly and print the topology audit per preset × seed:
+`npx vite-node scripts/succulentProbe.ts "" 1,7,42`.
 
-`npm test` covers every preset (30 trees + 14 grasses) × 3 seeds: closed, manifold, consistently
+`npm test` covers every preset (30 trees + 14 grasses + 10 desert plants) × 3 seeds: closed, manifold, consistently
 wound, one component, genus 0, quad ratio, drop budget, wind attribute ranges, determinism and
 the OBJ/GLB/GPU exporters.
 
@@ -113,5 +143,6 @@ the OBJ/GLB/GPU exporters.
 
 Form and topology only: solid-colour materials, proxy leaf cards on trees. Bark and blade
 textures, UV layout for atlases, LOD chains and detailed leaves are the next step; the quad flow
-and the UV seams are already laid out to make that straightforward. Grasses are the first non-tree
-plant family; shrubs, ferns and succulents can reuse the same organ/window machinery.
+and the UV seams are already laid out to make that straightforward. Grasses were the first
+non-tree plant family; the desert roster now exercises the same organ/window machinery for cacti,
+pads, areoles and spined rosettes.
