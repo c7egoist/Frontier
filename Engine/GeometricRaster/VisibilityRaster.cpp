@@ -795,29 +795,22 @@ void VisibilityRaster::Shade(const SceneStructure& Level, const float Eye[3], co
         Out[0] += Glow[0]; Out[1] += Glow[1]; Out[2] += Glow[2];
 
         // The sun's body. The integral above is skylight only, so without this the sun is a Mie glow with no
-        //    source on this path while the kernel draws a disc — two skies from one engine. Transcribed term
-        //    for term from the shader (SkyAlong in SkyRecords.slang): smoothstep-edged, limb-darkened, gated
-        //    near the horizon, at the panel's own defaults (0.53 deg diameter, 0.25 softness, 12x disc
-        //    radiance), reddened by the integral's own transmittance. A hidden sun needs no extra gate:
-        //    a disabled sky takes the fallback branch above, and below the horizon SeesSpace is false.
+        //    source on this path while the kernel draws a disc — two skies from one engine. The shared SunDisc
+        //    (AtmosphereModel.h): smoothstep-edged, limb-darkened, gated by the SUN's elevation and reddened by
+        //    the sun-path extinction, at the panel's own defaults (0.53 deg diameter, 0.25 softness, 12x disc
+        //    radiance). Behind the weather: overcast dims the disc as it dims the stars (CloudT is 1 when clear).
+        //    A hidden sun needs no extra gate: a disabled sky takes the fallback branch above, and below the
+        //    horizon SeesSpace is false.
         if (SeesSpace)
         {
             const float SunDot = Dir[0] * Celestial_.Light.Direction[0]
                                + Dir[1] * Celestial_.Light.Direction[1]
                                + Dir[2] * Celestial_.Light.Direction[2];
             const float SunAng = std::acos(std::fmax(-1.0f, std::fmin(1.0f, SunDot)));
-            constexpr float kSunSoft = 0.25f;
-            constexpr float kSunBoost = 12.0f;
-            const float ViewElev = std::asin(std::fmax(-1.0f, std::fmin(1.0f, Dir[2]))) * 180.0f / kPi;
-            const float SunSoftElev = Mix01(1.0f, 2.2f, 1.0f - Smooth01(0.0f, 4.0f, ViewElev));
-            const float SunDisc = 1.0f - Smooth01(kSunAngularRadius * (1.0f - kSunSoft * 0.9f * SunSoftElev),
-                                                  kSunAngularRadius, SunAng);
-            const float SunLimb = Mix01(1.0f, 0.55f, Smooth01(0.0f, kSunAngularRadius, SunAng));
-            const float SunGate = Mix01(0.35f, 1.0f, Smooth01(-1.0f, 8.0f, ViewElev));
-            // Behind the weather: overcast dims the disc as it dims the stars (CloudT is 1 when clear).
-            for (int C = 0; C < 3; ++C)
-                Out[C] += SunDisc * SunLimb * Celestial_.Light.Colour[C] * Celestial_.Light.Intensity
-                        * S.Transmittance[C] * kSunBoost * SunGate * CloudT;
+            float DiscRgb[3];
+            SunDisc::Evaluate(Celestial_.Light, Celestial_.Medium, SunAng, SunElevationDegrees,
+                              S.Transmittance, DiscRgb);
+            Out[0] += DiscRgb[0] * CloudT; Out[1] += DiscRgb[1] * CloudT; Out[2] += DiscRgb[2] * CloudT;
         }
     };
 

@@ -140,32 +140,65 @@ int main(){
     }
 
     // ── The analytic sun disc ──────────────────────────────────────────────────────────────────────────
-    // SkyRecords.slang appends the panel's sun body after the integral; AtmosphereModel has no disc, so parity
-    //    here means the FORMULA behaves as the panel specifies — full at the centre, zero off-disc, fading at
-    //    the horizon, dead when the pack zeroes the radiance. Transcribed from the same panel source, not copied
-    //    from the shader; the SPIR-V compile in the gate pins the shader's syntax, this pins the semantics.
+    // The CPU raster draws the panel's sun body through SunDisc::Evaluate, and so does this — the formula is
+    //    executed, not re-derived, so a drift between the proof and the path it guards is impossible. The shader
+    //    transcribes the same terms (SkyRecords.slang SkyAlong); the SPIR-V compile in the gate pins its syntax
+    //    and the pairwise-literal pins hold its constants. Reference bands below are independently computed
+    //    (Kasten-Young air mass × Beer-Lambert through the default medium, evaluated in doubles outside this
+    //    tree), so they check the formula rather than echoing it.
     {
         const float kPi = 3.14159265358979323846f;
         const float kSunRadius = 0.53f * (kPi / 180.0f) * 0.5f;
-        auto Smooth = [](float E0, float E1, float X){ float T = (X - E0) / (E1 - E0);
-            T = T < 0.0f ? 0.0f : (T > 1.0f ? 1.0f : T); return T * T * (3.0f - 2.0f * T); };
-        auto Disc = [&](float SunAng, float ViewElev, float& OutDisc, float& OutLimb, float& OutFade){
-            float SunSoftElev = 1.0f + (2.2f - 1.0f) * (1.0f - Smooth(0.0f, 4.0f, ViewElev));
-            OutDisc = 1.0f - Smooth(kSunRadius * (1.0f - 0.25f * 0.9f * SunSoftElev), kSunRadius, SunAng);
-            OutLimb = 1.0f + (0.55f - 1.0f) * Smooth(0.0f, kSunRadius, SunAng);
-            OutFade = 0.35f + (1.0f - 0.35f) * Smooth(-1.0f, 8.0f, ViewElev);
-        };
-        float D, L, Fd;
-        Disc(0.0f, 20.0f, D, L, Fd);
-        Expect(D == 1.0f, "the disc is full at the sun's centre");
-        Expect(L == 1.0f, "no limb darkening at the sun's centre");
-        Expect(Fd == 1.0f, "no horizon fade on a high sun");
-        Disc(5.0f * kPi / 180.0f, 20.0f, D, L, Fd);
-        Expect(D == 0.0f, "five degrees off the sun there is no disc");
-        Disc(0.0f, -1.0f, D, L, Fd);
-        Expect(D == 1.0f && Fd == 0.35f, "at the horizon the disc survives at 0.35, dimmed not popped");
-        float D2, L2, Fd2; Disc(0.0f, 8.0f, D2, L2, Fd2);
-        Expect(Fd2 == 1.0f && Fd < Fd2, "the fade rises monotonically from horizon to 8 deg");
+        const float Clear[3] = { 1.0f, 1.0f, 1.0f };   // the view floor wins: max(ext, 1) == 1
+        const float Blind[3] = { 0.0f, 0.0f, 0.0f };   // no floor: the sun-path extinction rules alone
+        auto Rgb = [&](float SunAng, float SunElev, const float Trans[3], float Out[3]){
+            SunDisc::Evaluate(Light, Medium, SunAng, SunElev, Trans, Out); };
+        float High[3], Low[3], Edge[3];
+        Rgb(0.0f, 20.0f, Clear, High);
+        bool Full = true;
+        for (int C = 0; C < 3; ++C) Full = Full && (High[C] == Light.Colour[C] * 22.0f * 12.0f);
+        Expect(Full, "the disc is full at the sun's centre: colour x 22 x 12, no limb, no gate");
+        Rgb(5.0f * kPi / 180.0f, 20.0f, Clear, Low);
+        Expect(Low[0] == 0.0f && Low[1] == 0.0f && Low[2] == 0.0f,
+               "five degrees off the sun there is no disc");
+        Rgb(kSunRadius, 20.0f, Clear, Edge);
+        Expect(Edge[0] == 0.0f && Edge[1] == 0.0f && Edge[2] == 0.0f,
+               "the disc ends exactly at its angular radius");
+        float Horizon[3], Plateau[3];
+        Rgb(0.0f, -1.0f, Clear, Horizon);
+        Rgb(0.0f, 8.0f, Clear, Plateau);
+        bool Dimmed = true, Flat = true;
+        for (int C = 0; C < 3; ++C)
+        {
+            Dimmed = Dimmed && (Horizon[C] == High[C] * 0.35f);
+            Flat = Flat && (Plateau[C] == High[C]);
+        }
+        Expect(Dimmed, "at the horizon the disc survives at 0.35, dimmed not popped");
+        Expect(Flat, "the gate plateaus from 8 deg up: 8 deg and 20 deg agree exactly");
+        Expect(Horizon[0] < Plateau[0], "the gate rises monotonically from horizon to 8 deg");
+        float Night[3];
+        Rgb(0.0f, -5.0f, Clear, Night);
+        Expect(Night[0] == Horizon[0], "below the horizon the gate holds at 0.35 — hiding the disc is the caller's SeesSpace");
+        // Reddening. At 8° sun the independent evaluation gives ext (0.6016, 0.3944, 0.1346), times the
+        //    5800 K tint: R/B 4.93.
+        float Dusk[3];
+        Rgb(0.0f, 8.0f, Blind, Dusk);
+        const double DuskRB = static_cast<double>(Dusk[0]) / static_cast<double>(Dusk[2]);
+        Expect(Dusk[0] > Dusk[1] && Dusk[1] > Dusk[2], "extinction orders the channels red > green > blue");
+        Expect(DuskRB > 4.86 && DuskRB < 5.00, "at 8 deg sun the disc is deep orange (R/B 4.93)");
+        Expect(Dusk[0] > 156.0f && Dusk[0] < 162.0f, "and its red reaches 159 linear: 0.60 x 22 x 12");
+        // Overhead the same extinction is nearly neutral: ext (0.9079, 0.8378, 0.6828) at 50°, R/B 1.47.
+        float Noon[3], NoonFloor[3];
+        Rgb(0.0f, 50.0f, Blind, Noon);
+        Rgb(0.0f, 50.0f, Clear, NoonFloor);
+        const double NoonRB = static_cast<double>(Noon[0]) / static_cast<double>(Noon[2]);
+        Expect(NoonRB > 1.44 && NoonRB < 1.49, "at 50 deg sun the disc is near-white (R/B 1.47)");
+        Expect(NoonFloor[0] > Noon[0] && NoonFloor[2] > Noon[2],
+               "in clear air the view floor wins over the sun-path extinction");
+        const float Haze[3] = { 0.01f, 0.01f, 0.01f };
+        float Hazy[3];
+        Rgb(0.0f, 50.0f, Haze, Hazy);
+        Expect(Hazy[0] == Noon[0], "below the extinction the floor lets go — the sun path rules");
         const SkyConstantRecord Off = PackSkyConstants(Medium, Light, Twilight, 30.0f, 2.0f, 16u, 6u, false);
         Expect(Off.SunRadiance[0] == 0.0f && Off.SunRadiance[1] == 0.0f && Off.SunRadiance[2] == 0.0f,
                "a hidden sun packs zero radiance, which kills the disc's multiplier");

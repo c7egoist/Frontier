@@ -117,8 +117,10 @@ tier ladder: Draft 20 / Balanced 36 / High 64 cloud steps (map onto our 5-tier l
 ③ PHASES (in order; each lands with PNG sheets + numeric gate + proof-fidelity note)
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 P0 DONE this session: base import, StandingOrders.md, this plan, vendored reference.
-P1 Sun disk + exposure. Port autoEV; align planet/atmo/kelvin defaults; transcribe disk gating + reddening;
-   re-audit disk vs REF sheets (noon/sunset/night). Gate: disk edge contrast + centre/edge ratio within REF band.
+P1 DONE: Sun disk + exposure. autoEV landed (see log); planet/atmo/kelvin defaults aligned (6371 km / 100 km /
+   kelvinRGB(5800)); disk gating + reddening transcribed exactly from REF 1238-1242 through one shared SunDisc
+   (CPU raster calls it, shader transcribes it, parity proof executes it); sun portraits (noon + low) gate edge,
+   roundness and colour. Post-D2 re-audit of the occlude-vs-overlay rule stays open (D1e).
 P2 Cloud march fidelity (D2 a–g). Both twins + defaults + wind-integral clock + hash13. Gate: CPU/GPU twin
    agreement per pixel (parity proof), streak metric (horizontal-band energy below threshold), span-cap bounds.
 P3 ReSTIR weather (D3). NEE occlusion, fog segments, no-double-count. Gate: A/B path sheets + estimator audits.
@@ -143,3 +145,15 @@ Status log (append; newest last):
   (CGLTF/UFBX/STB/TINYBVH) + imgui/stb submodules initialised. Gates green: exposure, sky-kernel (+SPIR-V),
   celestial-sky, editor-preview; showcase re-rendered; sheets committed. REMAINING P1: disk gating/reddening
   transcription + planet/atmosphere default alignment (100 km / 6371 km / Rayleigh pair).
+- 2026-09-13: P1-disk landed, P1 COMPLETE. AtmosphereModel defaults now 6371 km / 100 km / kelvinRGB(5800);
+  Kasten-Young moved to AtmosphereModel::AirMass as the single source (solver forwards; almanac pins hold).
+  New shared SunDisc::Evaluate transcribes REF 1238-1242 exactly: sun-elevation soft/gate, analytic sun-path
+  extinction maxed against view-transmittance-squared, 0.25/12x panel defaults. CPU raster calls it; SkyAlong
+  transcribes it (new SkyAirMass, sun elev from SkySunDirection.w, pre-cloud view transmittance captured for the
+  floor); parity proof executes it (13 pins incl. R/B 4.93 at 8 deg and 1.47 at 50 deg vs independent doubles).
+  New sun portraits (4 deg FOV at the solved sun, noon +2.1 deg) gate aim, limb radius/roundness/crispness and
+  colour through the production raster: edge at r=18 (stencil-corrected 21), +-1 px round, white overhead,
+  R/B 1.39 warm core at dusk. Gates green: sky-kernel (+13 P1 pins, SPIR-V clean), celestial-sky (+6 portrait
+  asserts), exposure, volumetric, sundirect, moon, editor-preview; all sheets + 2 portraits committed. The low
+  portrait's bright glow is faithful (same integral + tonemap as REF saturates both); the disc's own deep-orange
+  linear colour is pinned in the parity proof. D1e overlay-vs-occlude re-audit stays deferred to post-D2.

@@ -62,6 +62,15 @@ const float kSunAngularRadius = 0.53 * (3.14159265358979323846 / 180.0) * 0.5;
 //                                                    THE INTEGRAL
 //------------------------------------------------------------------------------------------------------------------------
 
+// Air mass at an elevation above the horizon, Kasten-Young 1989 — the panel's airMassOf, transcribed term for
+//    term. MUST equal AtmosphereModel::AirMass; the solver proof pins the host's values against the almanac.
+float SkyAirMass(float ElevationDegrees)
+{
+    float Zenith = 90.0 - ElevationDegrees;
+    if (Zenith >= 96.0) return 40.0;
+    return min(40.0, 1.0 / (cos(radians(Zenith)) + 0.50572 * pow(96.07995 - Zenith, -1.6364)));
+}
+
 // Ray-sphere about the planet centre. Returns false on a miss; Near/Far may be negative and the caller clamps.
 bool SkyIntersect(vec3 Origin, vec3 Direction, float Radius, out float Near, out float Far)
 {
@@ -541,7 +550,9 @@ vec3 SkyAlong(vec3 Direction, vec3 Origin)
     // Everything below this point is behind the weather too: stars, twilight, the lunar discs and the solar disc
     //    must all use the same cloud transmittance as the atmospheric background. Keep the atmosphere's
     //    transmittance multiplied in the value passed to MoonAlong and the sun body; otherwise clouds would
-    //    shade only the blue sky while leaving the brightest celestial sources pasted on top.
+    //    shade only the blue sky while leaving the brightest celestial sources pasted on top. The sun body also
+    //    needs the view transmittance WITHOUT the weather (its reddening floor), so it is captured first.
+    vec3 ViewTransmittance = Transmittance;
     Transmittance *= CloudTransmittance;
     Radiance = Radiance * CloudTransmittance + CloudScatter;
     // Aureole compression. Art-directed, twilight precedent: the single-scatter integral near the sun reaches
@@ -576,30 +587,36 @@ vec3 SkyAlong(vec3 Direction, vec3 Origin)
     //    does. MoonAlong is declared by MoonRecords.slang, which ReSTIRViewport includes BEFORE this file.
     if (!HitGround) Radiance += MoonAlong(Direction, Transmittance);
     // The sun's body. The integral above is skylight only, so without this the sun is a Mie glow with no
-    //    source — the "blurred disc". Transcribed from the reference panel (Diagnostics/CelestialPanel.html on
-    //    arena/01a08682-frontier): smoothstep-edged disc, limb-darkened, gated near the horizon, at the panel's
-    //    own defaults (0.53 deg diameter, 0.25 softness, 12x disc radiance). Two deliberate differences: the
-    //    reddening uses the integral's transmittance already in hand (the panel recomputes extinction from air
-    //    mass; the view-ray value is exact for the disc pixel), and the panel's extra analytic sun-glow (sg) is
-    //    NOT transcribed — the Mie lobe already provides the forward glow and both would double it. (Revisited
-    //    by porting it: sg peaks at ~5 linear against a ~20-linear forward field, <=7 LSB after the curve, and
-    //    no honest assertion separates it — so it stays out, and stays documented.) A hidden sun needs no extra
-    //    gate: PackSkyRecord zeroes the radiance, which kills the disc while twilight and the moons live on.
-    //    Elevation reads Direction.z: the engine is Z-up, the panel Y-up.
+    //    source — the "blurred disc". Transcribed term for term from the panel's lines 1238-1242 (spec:
+    //    References/CelestialPanel.reference.html): smoothstep-edged disc, limb-darkened, gated near the horizon,
+    //    at the panel's own defaults (0.53 deg diameter, 0.25 softness, 12x disc radiance). Every elevation here
+    //    is the SUN's (SkySunDirection.w) — the view ray's elevation is nowhere in the panel's disc, and the host
+    //    twin (SunDisc::Evaluate) takes no view elevation for exactly that reason. The reddening is the panel's
+    //    max(sun-path extinction, view-transmittance-squared): analytic Beer-Lambert through the Kasten-Young air
+    //    mass of the SUN elevation, floored by the view ray's own transmittance for the from-altitude case. Two
+    //    deliberate differences remain: the disc sits BEHIND the weather (the panel draws it over its clouds; the
+    //    engine attenuates — re-audit after the cloud field is fixed, D1e), and the panel's extra analytic
+    //    sun-glow (sg) is NOT transcribed — the Mie lobe already provides the forward glow and both would double
+    //    it. (Revisited by porting it: sg peaks at ~5 linear against a ~20-linear forward field, <=7 LSB after
+    //    the curve, and no honest assertion separates it — so it stays out, and stays documented.) A hidden sun
+    //    needs no extra gate: PackSkyRecord zeroes the radiance, which kills the disc while twilight and the
+    //    moons live on.
     if (!HitGround)
     {
-        const float kPi = 3.14159265358979323846;
         float SunAng = acos(clamp(dot(Direction, SkySunDirection.xyz), -1.0, 1.0));
         const float kSunRadius = kSunAngularRadius;   // the shared body: the NEE cone samples this same disc
         const float kSunSoft = 0.25;
         const float kSunBoost = 12.0;
-        float ViewElev = degrees(asin(clamp(Direction.z, -1.0, 1.0)));
+        float SunElev = SkySunDirection.w;
         // The panel evaluates the edge twice and keeps the second (horizon-softened) form; only it is kept here.
-        float SunSoftElev = mix(1.0, 2.2, 1.0 - smoothstep(0.0, 4.0, ViewElev));
+        float SunSoftElev = mix(1.0, 2.2, 1.0 - smoothstep(0.0, 4.0, SunElev));
         float SunDisc = 1.0 - smoothstep(kSunRadius * (1.0 - kSunSoft * 0.9 * SunSoftElev), kSunRadius, SunAng);
         float SunLimb = mix(1.0, 0.55, smoothstep(0.0, kSunRadius, SunAng));
-        Radiance += SunDisc * SunLimb * SkySunRadiance.xyz * Transmittance * kSunBoost
-                  * mix(0.35, 1.0, smoothstep(-1.0, 8.0, ViewElev));
+        vec3 SunExt = exp(-(SkyRayleigh.xyz * SkyRayleigh.w + vec3(SkyMie.x * 1.1) * SkyMie.y)
+                          * SkyAirMass(SunElev));
+        vec3 SunCol = SkySunRadiance.xyz * max(SunExt, ViewTransmittance * ViewTransmittance);
+        Radiance += SunDisc * SunLimb * SunCol * kSunBoost
+                  * mix(0.35, 1.0, smoothstep(-1.0, 8.0, SunElev)) * CloudTransmittance;
     }
     return Radiance;
 }

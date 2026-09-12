@@ -8,8 +8,8 @@
 #    one sun-shadow march, one light loop — so fog shadows cloud for free. Splitting them apart looks almost
 #    identical in a still frame and costs double, so the structure is asserted rather than reviewed.
 #
-#  ② THE CEILING. Clouds are tropospheric. Without a clamp a Base of 200 km renders a cloud shell OUTSIDE a 60 km
-#    atmosphere, visible from orbit as a band floating in vacuum. The failure is silent: the render succeeds.
+#  ② THE CEILING. Clouds are tropospheric. Without a clamp a Base of 200 km renders a cloud shell OUTSIDE the
+#    100 km atmosphere, visible from orbit as a band floating in vacuum. The failure is silent: the render succeeds.
 #
 #  ③ THE PROHIBITED OPTIMISATIONS, each measured and reverted upstream: clear-air striding (73b71d6, speckled
 #    cloud), a low-res cloud FBO with temporal reprojection (a152901, slower and worse), and atmosphere LUTs

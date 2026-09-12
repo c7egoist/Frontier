@@ -168,6 +168,43 @@ grep -qE 'kAureoleSigma = 5\.0f' Engine/DisplayPresentation/SkyConstantRecord.h
 Report $? "the host's aureole width is the same 5 deg"
 
 echo
+echo "[SkyKernel] the sun's body is one formula on both paths"
+# P1: the disc lives once (SunDisc::Evaluate) and the shader transcribes it term for term. The elevation
+#    everywhere is the SUN's — the panel evaluates its disc from the sun's own altitude, and a revision that read
+#    the view ray drew the wrong extinction everywhere off the sun's centre — and the reddening is the panel's
+#    max(sun-path extinction, view-transmittance-squared).
+Defs=$(grep -c 'static void Evaluate(const AtmosphereLight& Light, const AtmosphereMedium& Medium,' Engine/DisplayPresentation/AtmosphereModel.h)
+[ "$Defs" = "1" ]
+Report $? "the disc lives in exactly one place ($Defs definition)"
+grep -q 'SunDisc::Evaluate(Celestial_.Light, Celestial_.Medium, SunAng, SunElevationDegrees,' Engine/GeometricRaster/VisibilityRaster.cpp
+Report $? "the raster calls it with the sun's elevation, never the view ray's"
+! printf '%s' "$SkyCode" | grep -q 'ViewElev'
+Report $? "the shader's disc knows no view elevation"
+printf '%s' "$SkyCode" | grep -q 'float SunElev = SkySunDirection.w;'
+Report $? "the shader gates, softens and reddens by the sun's elevation"
+printf '%s' "$SkyCode" | grep -q 'float SkyAirMass(float ElevationDegrees)'
+Report $? "the shader carries its own Kasten-Young for the sun path"
+printf '%s' "$SkyCode" | grep -qF 'max(SunExt, ViewTransmittance * ViewTransmittance)'
+Report $? "the disc reddens by max(sun-path extinction, view-transmittance-squared)"
+# Pairwise literals: the disc's constants exist twice (C++ + shader) with no shared header, so a retune that
+#    lands on one path and not the other fails here rather than shipping two suns.
+printf '%s' "$SkyCode" | grep -qE 'kSunSoft = 0\.25;'
+Report $? "the shader's softness is the panel's 0.25"
+grep -qE 'kSunSoft = 0\.25f;' Engine/DisplayPresentation/AtmosphereModel.h
+Report $? "the host's softness is the same 0.25"
+printf '%s' "$SkyCode" | grep -qE 'kSunBoost = 12\.0;'
+Report $? "the shader's boost is the panel's 12x"
+grep -qE 'kSunBoost = 12\.0f;' Engine/DisplayPresentation/AtmosphereModel.h
+Report $? "the host's boost is the same 12x"
+# Planet, shell and sunlight: the panel's defaults, in the one place both paths read them.
+grep -qE 'PlanetRadius += 6371000\.0f;' Engine/DisplayPresentation/AtmosphereModel.h
+Report $? "the planet is the panel's 6371 km"
+grep -qE 'AtmosphereHeight = 100000\.0f;' Engine/DisplayPresentation/AtmosphereModel.h
+Report $? "the shell is the panel's 100 km"
+grep -qE 'Colour\[3\] += \{ 1\.0f, 0\.9521f, 0\.9065f \};' Engine/DisplayPresentation/AtmosphereModel.h
+Report $? "sunlight carries the panel's 5800 K tint"
+
+echo
 echo "[SkyKernel] the C++ mirror matches the shader's std140 layout"
 grep -q 'static_assert(sizeof(SkyConstantRecord) == 320u' Engine/DisplayPresentation/SkyConstantRecord.h
 Report $? "the sky and weather record is pinned at 320 bytes"

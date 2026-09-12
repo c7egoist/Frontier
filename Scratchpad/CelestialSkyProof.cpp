@@ -20,7 +20,9 @@
 //    • the noon zenith must be blue-dominant (the Rayleigh signature, asserted on linear radiance),
 //    • night must be essentially black rather than the old flat blue constant,
 //    • the night sheet must carry the star field (on/off census), while the noon sheet must not (the daylight
-//      gate, proved end to end rather than trusted).
+//      gate, proved end to end rather than trusted),
+//    • the sun portraits aim the same raster at the solved sun through a 4° FOV (a declared camera choice, P1),
+//      so the 0.53° disc spans ~42 px: compact, round, crisp-edged, white overhead and deep red at +2° sun.
 
 #include "GeometricRaster/VisibilityRaster.h"
 #include "GeometricRaster/SceneStructure.h"
@@ -594,6 +596,222 @@ int main()
     }
     std::printf("           wrote Diagnostics/Celestial_02_Dawn_*.png (8 stages)\n");
 
+    // ── Sun portraits: the disc at 42 pixels, not 3 ──────────────────────────────────────────────────────────
+    // P1. The disc is 0.53° wide — at the sheets' 55° FOV it is three pixels and no picture can show whether it
+    //    is a clean disc or a blob. These two portraits drive the SAME production raster through a 4° FOV aimed
+    //    straight at the solved sun (a declared test choice of CAMERA only: the scene, the sequence, the budgets
+    //    and the transfer are untouched), so the disc spans ~42 px and its size, edge and colour are measurable.
+    //    Bodies and weather stay off by the Bare rule — a cloud across the sun would be measured as the disc.
+    {
+        std::printf("\n  sun portraits (4 deg FOV, aimed at the solved sun)\n");
+        struct PortraitStats
+        {
+            float SunElev = -999.0f;
+            float CentreRgb[3] = {};
+            double CoreDx = 0.0, CoreDy = 0.0;   // clipped-core centroid vs frame centre [px]
+            double EdgeRadius = 0.0;             // steepest-falloff radius about the centroid [px]
+            double EdgeGradient = 0.0;           // brightness fall across the edge stencil [LSB]
+            double PlateauMean = 0.0;            // well inside the limb [LSB]
+            double GlowMean = 0.0;               // well outside it [LSB]
+            double AxisSpread = 0.0;             // max-min edge radius over 8 half-rays [px]
+        };
+        auto RenderPortrait = [&](float Hour, const char* File) -> PortraitStats
+        {
+            PortraitStats P;
+            for (uint32_t E = 0u; E < kCelestialEntityCount; ++E) Sky.Shown[E] = true;
+            Sky.Observation.Year = 2026; Sky.Observation.Month = 9; Sky.Observation.Day = 10;
+            Sky.Observation.LocalHours = Hour; Sky.Observation.UtcOffset = 2.0f;
+            Sky.Observation.Latitude = -26.19f; Sky.Observation.Longitude = 28.32f;
+            Sky.Tick(0.0f, TickOrigin, 0.0f);
+            P.SunElev = Sky.Frame().Sun.Elevation;
+            // Aim: Forward is the solved sun; Right/Up complete the orthonormal basis by the project's camera
+            //    convention (Right = Forward x WorldUp, Up = Right x Forward).
+            float F[3] = { Sky.Frame().Sun.Direction[0], Sky.Frame().Sun.Direction[1],
+                           Sky.Frame().Sun.Direction[2] };
+            float R[3] = { F[1], -F[0], 0.0f };
+            float Rl = std::sqrt(R[0] * R[0] + R[1] * R[1]);
+            if (Rl < 1e-6f) { R[0] = 1.0f; R[1] = 0.0f; Rl = 1.0f; }
+            R[0] /= Rl; R[1] /= Rl; R[2] = 0.0f;
+            const float U[3] = { R[1] * F[2] - R[2] * F[1], R[2] * F[0] - R[0] * F[2],
+                                 R[0] * F[1] - R[1] * F[0] };
+            Sky.Shown[static_cast<uint32_t>(CelestialEntity::Stars)] = false;
+            Sky.Shown[static_cast<uint32_t>(CelestialEntity::Moons)] = false;
+            Sky.Shown[static_cast<uint32_t>(CelestialEntity::CloudLayer)] = false;
+            Sky.Shown[static_cast<uint32_t>(CelestialEntity::LocalCloud)] = false;
+            Sky.Shown[static_cast<uint32_t>(CelestialEntity::LocalFog)] = false;
+            VisibilityRaster Raster;
+            Sky.ApplyTo(Raster, Budget);
+            std::vector<unsigned char> Frame(static_cast<size_t>(kWidth) * kHeight * 4u, 0u);
+            double MeanLum = 0.0;
+            constexpr float kPortraitFov = 4.0f * 3.14159265f / 180.0f;
+            if (!Raster.Render(Level, Eye, F, R, U, kPortraitFov,
+                               kWidth, kHeight, Frame.data(), MeanLum)) return P;
+            for (uint32_t E = 0u; E < kCelestialEntityCount; ++E) Sky.Shown[E] = true;
+            std::vector<unsigned char> Rgb(static_cast<size_t>(kWidth) * kHeight * 3u);
+            for (size_t I = 0; I < static_cast<size_t>(kWidth) * kHeight; ++I)
+            {
+                Rgb[I * 3u + 0u] = Frame[I * 4u + 0u];
+                Rgb[I * 3u + 1u] = Frame[I * 4u + 1u];
+                Rgb[I * 3u + 2u] = Frame[I * 4u + 2u];
+            }
+            PngWriteShim::WritePng(File, static_cast<int>(kWidth), static_cast<int>(kHeight), 3,
+                                   Rgb.data(), static_cast<int>(kWidth) * 3);
+            // Brightness is the max channel, so a red disc reads as bright as a white one.
+            auto Bright = [&](uint32_t X, uint32_t Y) -> double
+            {
+                const size_t I = (static_cast<size_t>(Y) * kWidth + X) * 4u;
+                return static_cast<double>(Frame[I] > Frame[I + 1u]
+                       ? (Frame[I] > Frame[I + 2u] ? Frame[I] : Frame[I + 2u])
+                       : (Frame[I + 1u] > Frame[I + 2u] ? Frame[I + 1u] : Frame[I + 2u]));
+            };
+            // The core centroid above (Peak − 2): the clipped disc heart. First-maximum in scan order would be
+            //    the disc's top edge, a full radius off-centre — the centroid is the aim measurement.
+            double Peak = 0.0;
+            for (uint32_t Y = 0; Y < kHeight; ++Y)
+                for (uint32_t X = 0; X < kWidth; ++X) Peak = std::fmax(Peak, Bright(X, Y));
+            double Cx = 0.0, Cy = 0.0, Cn = 0.0;
+            for (uint32_t Y = 0; Y < kHeight; ++Y)
+                for (uint32_t X = 0; X < kWidth; ++X)
+                    if (Bright(X, Y) >= Peak - 2.0) { Cx += X; Cy += Y; Cn += 1.0; }
+            if (Cn < 1.0) return P;
+            Cx /= Cn; Cy /= Cn;
+            P.CoreDx = Cx - static_cast<double>(kWidth / 2u);
+            P.CoreDy = Cy - static_cast<double>(kHeight / 2u);
+            // Radial profile in 1 px bins about the centroid, out to 40 px. The limb is the steepest falloff:
+            //    a crisp edge concentrates it in one bin at the geometric radius (21 px), a blob spreads it.
+            double Ring[41] = {}; uint32_t RingN[41] = {};
+            for (uint32_t Y = 0; Y < kHeight; ++Y)
+                for (uint32_t X = 0; X < kWidth; ++X)
+                {
+                    const double Dx = static_cast<double>(X) - Cx;
+                    const double Dy = static_cast<double>(Y) - Cy;
+                    const int Rad = static_cast<int>(std::floor(std::sqrt(Dx * Dx + Dy * Dy) + 0.5));
+                    if (Rad >= 0 && Rad <= 40) { Ring[Rad] += Bright(X, Y); ++RingN[Rad]; }
+                }
+            for (int Rr = 0; Rr <= 40; ++Rr)
+                if (RingN[Rr] > 0u) Ring[Rr] /= static_cast<double>(RingN[Rr]);
+            double Plat = 0.0, Glow = 0.0;
+            for (int Rr = 6; Rr <= 12; ++Rr) Plat += Ring[Rr];
+            for (int Rr = 30; Rr <= 36; ++Rr) Glow += Ring[Rr];
+            P.PlateauMean = Plat / 7.0; P.GlowMean = Glow / 7.0;
+            for (int Rr = 10; Rr <= 30; ++Rr)
+            {
+                const double Fall = Ring[Rr - 4] - Ring[Rr + 4];
+                if (Fall > P.EdgeGradient) { P.EdgeGradient = Fall; P.EdgeRadius = Rr; }
+            }
+            // Roundness: the same steepest-falloff radius along 8 half-rays (4 axes × 2 signs) through the
+            //    centroid, each smoothed with a 3 px boxcar first.
+            double AxisLo = 1e30, AxisHi = -1e30;
+            const int AxisDx[4] = { 1, 1, 0, -1 }, AxisDy[4] = { 0, 1, 1, 1 };
+            for (int A = 0; A < 4; ++A)
+                for (int Sgn = -1; Sgn <= 1; Sgn += 2)
+                {
+                    // Diagonal half-rays step 0.707 px per radius unit, so every half-ray shares the radius
+                    //    unit — counting diagonal pixels as 1 px each would shrink those radii by √2 and fake
+                    //    an out-of-roundness of ~7 px on a perfect circle.
+                    const double Step = (AxisDx[A] != 0 && AxisDy[A] != 0) ? 0.70710678 : 1.0;
+                    double Prof[41] = {};
+                    for (int Rr = 0; Rr <= 40; ++Rr)
+                    {
+                        const int X = static_cast<int>(Cx + 0.5)
+                                    + static_cast<int>(AxisDx[A] * Rr * Sgn * Step + 0.5 * Sgn);
+                        const int Y = static_cast<int>(Cy + 0.5)
+                                    + static_cast<int>(AxisDy[A] * Rr * Sgn * Step + 0.5 * Sgn);
+                        Prof[Rr] = (X >= 0 && X < static_cast<int>(kWidth) && Y >= 0
+                                    && Y < static_cast<int>(kHeight))
+                                 ? Bright(static_cast<uint32_t>(X), static_cast<uint32_t>(Y)) : 0.0;
+                    }
+                    double BestFall = -1e30, BestR = 0.0;
+                    for (int Rr = 10; Rr <= 30; ++Rr)
+                    {
+                        const double Lo = (Prof[Rr - 4] + Prof[Rr - 3] + Prof[Rr - 2]) / 3.0;
+                        const double Hi = (Prof[Rr + 2] + Prof[Rr + 3] + Prof[Rr + 4]) / 3.0;
+                        if (Lo - Hi > BestFall) { BestFall = Lo - Hi; BestR = Rr; }
+                    }
+                    AxisLo = std::fmin(AxisLo, BestR); AxisHi = std::fmax(AxisHi, BestR);
+                }
+            P.AxisSpread = AxisHi - AxisLo;
+            double Cr = 0.0, Cg = 0.0, Cb = 0.0;
+            for (int Dy = -2; Dy <= 2; ++Dy)
+                for (int Dx = -2; Dx <= 2; ++Dx)
+                {
+                    const size_t I = (static_cast<size_t>(kHeight / 2u + Dy) * kWidth
+                                    + (kWidth / 2u + Dx)) * 4u;
+                    Cr += Frame[I]; Cg += Frame[I + 1u]; Cb += Frame[I + 2u];
+                }
+            P.CentreRgb[0] = static_cast<float>(Cr / 25.0);
+            P.CentreRgb[1] = static_cast<float>(Cg / 25.0);
+            P.CentreRgb[2] = static_cast<float>(Cb / 25.0);
+            return P;
+        };
+
+        // Low sun first: scan the morning for +2° elevation, the dawn-stage idiom.
+        float LowHour = 6.4f, Best = 1e30f;
+        for (float H = 5.0f; H <= 8.0f; H += 0.02f)
+        {
+            CelestialObservation Probe = Sky.Observation;
+            Probe.LocalHours = H;
+            const float Residual = std::fabs(CelestialSolver::Solve(Probe).Sun.Elevation - 2.0f);
+            if (Residual < Best) { Best = Residual; LowHour = H; }
+        }
+        if (Best > 0.15f)
+        {
+            std::printf("  no morning hour reaches +2.0 deg (best residual %.2f)\n",
+                        static_cast<double>(Best));
+            return 2;
+        }
+        const PortraitStats Noon = RenderPortrait(12.0f, "Diagnostics/Celestial_04_SunPortrait_Noon.png");
+        const PortraitStats Low  = RenderPortrait(LowHour, "Diagnostics/Celestial_04_SunPortrait_LowSun.png");
+        if (Noon.SunElev < -900.0f || Low.SunElev < -900.0f)
+        {
+            std::printf("  a portrait render failed\n");
+            return 2;
+        }
+        std::printf("  noon: sun %+.1f deg, core %+.1f,%+.1f px, edge r=%.0f fall %.1f LSB (plateau %.0f, glow %.0f), axes +-%.0f\n",
+                    static_cast<double>(Noon.SunElev), Noon.CoreDx, Noon.CoreDy, Noon.EdgeRadius,
+                    Noon.EdgeGradient, Noon.PlateauMean, Noon.GlowMean, Noon.AxisSpread);
+        std::printf("  low:  sun %+.1f deg, core %+.1f,%+.1f px, edge r=%.0f fall %.1f LSB (plateau %.0f, glow %.0f), axes +-%.0f\n",
+                    static_cast<double>(Low.SunElev), Low.CoreDx, Low.CoreDy, Low.EdgeRadius,
+                    Low.EdgeGradient, Low.PlateauMean, Low.GlowMean, Low.AxisSpread);
+        std::printf("           wrote Diagnostics/Celestial_04_SunPortrait_*.png\n");
+
+        char PortraitDetail[200];
+        std::snprintf(PortraitDetail, sizeof(PortraitDetail), "noon core %+.1f,%+.1f px, low core %+.1f,%+.1f px",
+                      Noon.CoreDx, Noon.CoreDy, Low.CoreDx, Low.CoreDy);
+        Require("the aimed sun sits frame-centre in both portraits",
+                std::fabs(Noon.CoreDx) < 12.0 && std::fabs(Noon.CoreDy) < 12.0
+                && std::fabs(Low.CoreDx) < 12.0 && std::fabs(Low.CoreDy) < 12.0, PortraitDetail);
+        std::snprintf(PortraitDetail, sizeof(PortraitDetail), "noon edge r=%.0f, low edge r=%.0f (geometric: 21 px)",
+                      Noon.EdgeRadius, Low.EdgeRadius);
+        Require("the limb sits at the geometric radius — a 42 px body, not a blob",
+                Noon.EdgeRadius >= 16.0 && Noon.EdgeRadius <= 26.0
+                && Low.EdgeRadius >= 16.0 && Low.EdgeRadius <= 26.0, PortraitDetail);
+        std::snprintf(PortraitDetail, sizeof(PortraitDetail), "noon fall %.1f over plateau %.0f/glow %.0f, low fall %.1f over %.0f/%.0f",
+                      Noon.EdgeGradient, Noon.PlateauMean, Noon.GlowMean,
+                      Low.EdgeGradient, Low.PlateauMean, Low.GlowMean);
+        Require("the edge is crisp: the limb falls steeply onto the glow, not gradually",
+                Noon.EdgeGradient > 20.0 && Noon.PlateauMean - Noon.GlowMean > 25.0
+                && Low.EdgeGradient > 3.0 && Low.PlateauMean - Low.GlowMean > 4.0, PortraitDetail);
+        std::snprintf(PortraitDetail, sizeof(PortraitDetail), "noon axes +-%.0f px, low axes +-%.0f px",
+                      Noon.AxisSpread, Low.AxisSpread);
+        Require("the limb is round: all 8 half-rays agree on the radius",
+                Noon.AxisSpread <= 6.0 && Low.AxisSpread <= 10.0, PortraitDetail);
+        std::snprintf(PortraitDetail, sizeof(PortraitDetail), "noon centre %.0f %.0f %.0f (white overhead)",
+                      static_cast<double>(Noon.CentreRgb[0]), static_cast<double>(Noon.CentreRgb[1]),
+                      static_cast<double>(Noon.CentreRgb[2]));
+        Require("overhead the disc is white",
+                Noon.CentreRgb[0] > 200.0f && Noon.CentreRgb[1] > 200.0f && Noon.CentreRgb[2] > 200.0f,
+                PortraitDetail);
+        const double LowRB = Low.CentreRgb[2] > 0.5f
+                           ? static_cast<double>(Low.CentreRgb[0]) / static_cast<double>(Low.CentreRgb[2]) : 99.0;
+        std::snprintf(PortraitDetail, sizeof(PortraitDetail), "low centre %.0f %.0f %.0f, R/B %.2f (warm sunset core)",
+                      static_cast<double>(Low.CentreRgb[0]), static_cast<double>(Low.CentreRgb[1]),
+                      static_cast<double>(Low.CentreRgb[2]), LowRB);
+        Require("low the core is warm: red and green clip while blue holds back",
+                Low.CentreRgb[0] > 240.0f && Low.CentreRgb[1] > 200.0f
+                && LowRB > 1.20 && LowRB < 1.65, PortraitDetail);
+    }
+
     // ── Leaving the atmosphere ─────────────────────────────────────────────────────────────────────────────────
     // Two failures this guards, both reported from orbit. Rays that pass below the horizon must meet a PLANET:
     //    the raster's miss path had no world of its own, so the only ground was whatever finite geometry the
@@ -604,7 +822,7 @@ int main()
     struct Rung { const char* Name; float Height; bool ExpectBlackAbove; };
     const Rung Ladder[] = {
         { "ground 2 m",   2.0f,       false },
-        { "top 60 km",    60000.0f,   true  },
+        { "top 100 km",   100000.0f,  true  },
         { "ISS 400 km",   400000.0f,  true  },
         { "3000 km",      3000000.0f, true  },
     };

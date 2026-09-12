@@ -33,7 +33,7 @@ int main()
     VolumetricBudget Budget{};
 
     // ── ① the ceiling ──────────────────────────────────────────────────────────────────────────────────────────
-    // Clouds are tropospheric. Without a ceiling a Base of 200 km puts cloud OUTSIDE a 60 km atmosphere, which
+    // Clouds are tropospheric. Without a ceiling a Base of 200 km puts cloud OUTSIDE the 100 km atmosphere, which
     // renders happily and shows a shell floating in vacuum from orbit — the thing that looked wrong from space.
     std::printf("1. clouds cannot leave the troposphere\n");
     std::printf("     %12s %12s %12s   %s\n", "requested", "slab base", "slab top", "state");

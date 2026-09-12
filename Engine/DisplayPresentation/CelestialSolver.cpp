@@ -6,6 +6,7 @@
 //    +40.33° at the June solstice. This carries the date.
 
 #include "CelestialSolver.h"
+#include "AtmosphereModel.h"
 
 #include <cmath>
 
@@ -61,13 +62,9 @@ double CelestialSolver::JulianDayFrom(int32_t Year, int32_t Month, int32_t Day, 
 
 float CelestialSolver::AirMass(float ElevationDegrees) noexcept
 {
-    // Kasten-Young: the secant law diverges at the horizon, this stays finite. Beyond 96° zenith the sun is far
-    //    enough below the horizon that the path length stops being meaningful; clamp rather than extrapolate.
-    const double Zenith = 90.0 - static_cast<double>(ElevationDegrees);
-    if (Zenith >= 96.0) return 40.0f;
-    const double Denominator = std::cos(Radians(Zenith)) + 0.50572 * std::pow(96.07995 - Zenith, -1.6364);
-    if (Denominator <= 0.0) return 40.0f;
-    return static_cast<float>(std::fmin(40.0, 1.0 / Denominator));
+    // Kasten-Young lives in AtmosphereModel now (the sun disc reads it too); this forwards so the solver's
+    //    callers and the almanac pins keep working unchanged. One definition, one behaviour.
+    return AtmosphereModel::AirMass(ElevationDegrees);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

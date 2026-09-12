@@ -49,8 +49,8 @@ struct AtmosphereMedium
     float MieScaleHeight      = 1200.0f;   // [m] aerosols hug the ground
     float MieAnisotropy       = 0.78f;     // [-] Henyey-Greenstein g: forward scattering, the glow around the sun
 
-    float PlanetRadius     = 6360000.0f;   // [m]
-    float AtmosphereHeight = 60000.0f;     // [m] top of the modelled shell
+    float PlanetRadius     = 6371000.0f;   // [m] the panel's atm_planetR (was 6360 km)
+    float AtmosphereHeight = 100000.0f;    // [m] top of the modelled shell: the panel's atm_height (was 60 km)
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -60,7 +60,9 @@ struct AtmosphereMedium
 struct AtmosphereLight
 {
     float Direction[3] = { 0.0f, 0.0f, 1.0f };   // [-] unit, toward the sun (CelestialSolver's convention)
-    float Colour[3]    = { 1.0f, 1.0f, 1.0f };   // [-] linear tint
+    // [-] linear tint: the panel's kelvinRGB(5800), evaluated (r 255, g 242.79, b 231.16 over 255). Sunlight is
+    //    very slightly warm, and the tint multiplies the sky integral, the clouds and the disc alike — as uSunColor does.
+    float Colour[3]    = { 1.0f, 0.9521f, 0.9065f };
     float Intensity    = 22.0f;                  // [x] matches the panel's default
 };
 
@@ -200,6 +202,20 @@ private:
 class AtmosphereModel
 {
 public:
+    // Air mass along a path at ElevationDegrees above the horizon, Kasten-Young 1989: the secant law diverges at
+    //    the horizon, this stays finite (1.0 at the zenith, ~38 at the horizon, clamped at 40 past 96° zenith).
+    //    The single source — CelestialSolver::AirMass forwards here, the sun disc reads it, and SkyRecords.slang
+    //    transcribes it as SkyAirMass (the panel's airMassOf, same constants).
+    static float AirMass(float ElevationDegrees) noexcept
+    {
+        const double Zenith = 90.0 - static_cast<double>(ElevationDegrees);
+        if (Zenith >= 96.0) return 40.0f;
+        const double Denominator = std::cos(Zenith * 3.14159265358979323846 / 180.0)
+                                 + 0.50572 * std::pow(96.07995 - Zenith, -1.6364);
+        if (Denominator <= 0.0) return 40.0f;
+        return static_cast<float>(std::fmin(40.0, 1.0 / Denominator));
+    }
+
     // Ray-sphere intersection about the planet centre. Returns false when the ray misses; otherwise Near/Far are
     //    the two roots and may be negative (the caller clamps).
     static bool IntersectSphere(const float Origin[3], const float Direction[3], float Radius,
@@ -333,6 +349,67 @@ public:
                                * Light.Intensity * Light.Colour[C];
         }
         return Result;
+    }
+};
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  THE SUN'S BODY
+//------------------------------------------------------------------------------------------------------------------------
+
+// The panel's sun body (References/CelestialPanel.reference.html:1238-1242) as the CPU raster calls it. The two
+//    elevation-driven terms — the edge softening, the horizon gate — and the reddening all read the SUN's elevation,
+//    never the view ray's: the panel evaluates them from elevDeg, the sun's own altitude, and an earlier revision
+//    that read the view ray drew the wrong extinction everywhere off the sun's centre. The shader twin in
+//    SkyRecords.slang transcribes this term for term (its SkySunDirection.w is the same elevation); the parity
+//    proof calls this, so it executes production code rather than re-deriving the formula.
+//
+//    OutRgb is what the disc ADDS: smoothstep-edged, limb-darkened, gated near the horizon, at the panel's own
+//    defaults (0.53° diameter, 0.25 softness, 12x disc radiance — the shader's pairwise-pinned literals). The colour
+//    is the light's tint times the per-channel max of (a) the analytic sun-path extinction — Beer-Lambert through
+//    the Kasten-Young air mass of the sun elevation, NO ozone, exactly the panel's line 1240 — and (b) the view
+//    ray's own transmittance squared, which wins from altitude where the view path is the clearer one. Behind the
+//    weather is the CALLER's decision (the panel draws the disc over its clouds; the engine attenuates it, D1e):
+//    this returns the unoccluded body and the caller multiplies by its cloud transmittance.
+class SunDisc
+{
+public:
+    static void Evaluate(const AtmosphereLight& Light, const AtmosphereMedium& Medium,
+                         float SunAngularDistance, float SunElevationDegrees,
+                         const float ViewTransmittance[3], float OutRgb[3]) noexcept
+    {
+        constexpr float kPi = 3.14159265358979323846f;
+        constexpr float kSunRadius = 0.53f * (kPi / 180.0f) * 0.5f;   // == kSunAngularRadius, pairwise-pinned
+        constexpr float kSunSoft = 0.25f;    // the panel's sun_soft default
+        constexpr float kSunBoost = 12.0f;   // the panel's sun_disc default
+
+        // The panel evaluates the edge twice and keeps the second (horizon-softened) form; only it is kept here.
+        const float Soft = Lerp(1.0f, 2.2f, 1.0f - SmoothStep(0.0f, 4.0f, SunElevationDegrees));
+        const float Disc = 1.0f - SmoothStep(kSunRadius * (1.0f - kSunSoft * 0.9f * Soft),
+                                             kSunRadius, SunAngularDistance);
+        if (Disc <= 0.0f) { OutRgb[0] = OutRgb[1] = OutRgb[2] = 0.0f; return; }
+        const float Limb = Lerp(1.0f, 0.55f, SmoothStep(0.0f, kSunRadius, SunAngularDistance));
+        const float Gate = Lerp(0.35f, 1.0f, SmoothStep(-1.0f, 8.0f, SunElevationDegrees));
+
+        const float AirMass = AtmosphereModel::AirMass(SunElevationDegrees);
+        for (int C = 0; C < 3; ++C)
+        {
+            const float BetaR = Medium.RayleighScattering[C] * Medium.RayleighStrength;
+            const float BetaM = Medium.MieScattering * Medium.MieStrength;
+            const float Ext = std::exp(-(BetaR * Medium.RayleighScaleHeight
+                                         + BetaM * 1.1f * Medium.MieScaleHeight) * AirMass);
+            const float Floor = ViewTransmittance[C] * ViewTransmittance[C];
+            OutRgb[C] = Disc * Limb * Light.Colour[C] * (Ext > Floor ? Ext : Floor)
+                      * Light.Intensity * kSunBoost * Gate;
+        }
+    }
+
+private:
+    static float Lerp(float A, float B, float T) noexcept { return A + (B - A) * T; }
+    static float SmoothStep(float Edge0, float Edge1, float V) noexcept
+    {
+        const float T = (V - Edge0) / (Edge1 - Edge0);
+        const float Clamped = T < 0.0f ? 0.0f : (T > 1.0f ? 1.0f : T);
+        return Clamped * Clamped * (3.0f - 2.0f * Clamped);
     }
 };
 
