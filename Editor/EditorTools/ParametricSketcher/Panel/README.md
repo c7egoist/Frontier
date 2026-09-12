@@ -27,6 +27,7 @@ node Verification/kernel-smoke.js
 - cap push and inset are replayed as feature operations, while planar side-face moves update the supporting profile edge;
 - the mesh is a presentation cache, never the modelling source of truth;
 - 2-D union, subtract, intersection, and XOR split profile edges at intersections and rebuild oriented outer/hole loops before extrusion;
+- Boolean outputs retain analytic line and circular-arc path descriptors for topology and selection; tessellated points are presentation samples only;
 - 2-D mirror uses a real axis transform, preserves holes/boolean regions, and stores a live link to the source curve.
 
 Select closed sketch profiles and open **Construct → 2D Boolean**, or use the multi-selection Inspector actions for union, subtract, intersect, and XOR. Inspector **Mirror 2D** treats the first selected curve as the source and the second selected curve as the reference: a line uses its actual plane-space line, while other curves use their plane-space position and rotation. Select sketch curves and press **M** for the interactive mirror tool. Command-line examples: `boolean subtract Circle01 Circle02`, `mirror Line01 V`.

@@ -259,14 +259,59 @@
     return out;
   }
 
+  function analyticPoint2D(d, t) {
+    t = clamp(t, 0, 1);
+    if (!d || d.type === 'line') return [d.a[0] + (d.b[0] - d.a[0]) * t, d.a[1] + (d.b[1] - d.a[1]) * t];
+    const a = (d.a0 || 0) + (d.sweep || 0) * t;
+    if (d.type === 'ellipse') { const c = Math.cos(d.rot || 0), s = Math.sin(d.rot || 0), x = Math.cos(a) * d.rx, y = Math.sin(a) * d.ry; return [d.c[0] + x * c - y * s, d.c[1] + x * s + y * c]; }
+    return [d.c[0] + Math.cos(a) * d.r, d.c[1] + Math.sin(a) * d.r];
+  }
+
+  function analyticSamples2D(d) {
+    if (!d) return [];
+    const n = d.type === 'line' ? 1 : Math.max(8, Math.ceil(Math.abs(d.sweep || TAU) / (Math.PI / 24)));
+    const out = []; for (let i = 0; i <= n; i++) out.push(analyticPoint2D(d, i / n));
+    return out;
+  }
+
+  function trimAnalytic2D(d, u0, u1) {
+    if (!d) return null;
+    if (d.type === 'line') return { type: 'line', a: analyticPoint2D(d, u0), b: analyticPoint2D(d, u1) };
+    return { ...d, c: [d.c[0], d.c[1]], a0: (d.a0 || 0) + (d.sweep || 0) * u0, sweep: (d.sweep || 0) * (u1 - u0) };
+  }
+
+  function analyticPathFromEdges2D(edges) {
+    const out = [], runs = [];
+    const flush = run => { if (!run) return; out.push(trimAnalytic2D(run.d, run.u0, run.u1)); };
+    edges.forEach(e => {
+      if (!e.analytic) { flush(runs.pop()); out.push({ type: 'line', a: [e.a[0], e.a[1]], b: [e.b[0], e.b[1]] }); return; }
+      const last = runs[runs.length - 1];
+      if (last && last.key === e.analyticId && Math.abs(last.u1 - e.u0) <= 1e-5) last.u1 = e.u1;
+      else { flush(runs.pop()); runs.push({ key: e.analyticId, d: e.analytic, u0: e.u0, u1: e.u1 }); }
+    });
+    flush(runs.pop());
+    return out.filter(Boolean);
+  }
+
   function boolean2D(polygons, operation = 'union') {
-    const R = (polygons || []).map(p => Array.isArray(p) ? { outer: p, holes: [] } : p).map(r => ({ outer: cleanPolygon2D(r.outer), holes: (r.holes || []).map(h => cleanPolygon2D(h)).filter(h => h.length >= 3) })).filter(r => r.outer.length >= 3);
+    const R = (polygons || []).map(p => Array.isArray(p) ? { outer: p, holes: [] } : p).map(r => ({ outer: cleanPolygon2D(r.outer), holes: (r.holes || []).map(h => cleanPolygon2D(h)).filter(h => h.length >= 3), analytic: r.analytic || null })).filter(r => r.outer.length >= 3);
     if (R.length < 2) return [];
     const bounds = R.flatMap(r => [r.outer, ...r.holes]).flat();
     const scale = Math.max(1, ...bounds.map(q => Math.max(Math.abs(q[0]), Math.abs(q[1]))));
     const tolerance = scale * 1e-8, probe = scale * 1e-7;
     const edges = [];
-    R.forEach((region, owner) => [region.outer, ...region.holes].forEach(poly => poly.forEach((a, i) => edges.push({ a, b: poly[(i + 1) % poly.length], owner, ts: [0, 1] }))));
+    R.forEach((region, owner) => {
+      const addBoundary = (poly, path, hole) => {
+        if (Array.isArray(path) && path.length) {
+          path.forEach((d, di) => {
+            const S = analyticSamples2D(d);
+            for (let i = 0; i < S.length - 1; i++) edges.push({ a: S[i], b: S[i + 1], owner, ts: [0, 1], analytic: d, analyticId: `${owner}:${hole ? 'h' : 'o'}:${di}` , u0: i / (S.length - 1), u1: (i + 1) / (S.length - 1) });
+          });
+        } else poly.forEach((a, i) => edges.push({ a, b: poly[(i + 1) % poly.length], owner, ts: [0, 1], analytic: null, analyticId: null, u0: 0, u1: 1 }));
+      };
+      addBoundary(region.outer, region.analytic && region.analytic.outer, false);
+      (region.holes || []).forEach((poly, i) => addBoundary(poly, region.analytic && region.analytic.holes && region.analytic.holes[i], true));
+    });
     for (let i = 0; i < edges.length; i++) for (let j = i + 1; j < edges.length; j++) {
       if (edges[i].owner === edges[j].owner) continue;
       booleanIntersections(edges[i].a, edges[i].b, edges[j].a, edges[j].b, tolerance).forEach(([t, u]) => { edges[i].ts.push(t); edges[j].ts.push(u); });
@@ -280,11 +325,11 @@
     };
     const segments = new Map();
     const quant = p => `${Math.round(p[0] / tolerance)},${Math.round(p[1] / tolerance)}`;
-    const addSegment = (a, b) => {
+    const addSegment = (a, b, meta) => {
       if (Math.hypot(b[0] - a[0], b[1] - a[1]) <= tolerance) return;
       const ka = quant(a), kb = quant(b), key = `${ka}>${kb}`, reverse = `${kb}>${ka}`;
       if (segments.has(reverse)) { segments.delete(reverse); return; }
-      if (!segments.has(key)) segments.set(key, { a: [a[0], a[1]], b: [b[0], b[1]] });
+      if (!segments.has(key)) segments.set(key, { a: [a[0], a[1]], b: [b[0], b[1]], analytic: meta && meta.d, analyticId: meta && meta.id, u0: meta ? meta.u0 : 0, u1: meta ? meta.u1 : 1 });
     };
     edges.forEach(e => {
       const ts = [...new Set(e.ts.map(t => clamp(t, 0, 1)).sort((a, b) => a - b))];
@@ -296,17 +341,19 @@
         const left = [mid[0] - d[1] * probe, mid[1] + d[0] * probe], right = [mid[0] + d[1] * probe, mid[1] - d[0] * probe];
         const L = insideResult(left), R = insideResult(right);
         if (L === R) continue;
-        if (L) addSegment(a, b); else addSegment(b, a);
+        const u0 = e.u0 + (e.u1 - e.u0) * t0, u1 = e.u0 + (e.u1 - e.u0) * t1;
+        if (L) addSegment(a, b, e.analytic ? { d: e.analytic, id: e.analyticId, u0, u1 } : null);
+        else addSegment(b, a, e.analytic ? { d: e.analytic, id: e.analyticId, u0: u1, u1: u0 } : null);
       }
     });
     const list = [...segments.values()], byStart = new Map();
     list.forEach((s, i) => { const k = quant(s.a); if (!byStart.has(k)) byStart.set(k, []); byStart.get(k).push(i); });
-    const used = new Set(), loops = [];
+    const used = new Set(), results = [];
     list.forEach((first, startIndex) => {
       if (used.has(startIndex)) return;
-      const loop = [], start = quant(first.a); let i = startIndex, guard = 0;
+      const loop = [], loopEdges = [], start = quant(first.a); let i = startIndex, guard = 0;
       while (!used.has(i) && guard++ < list.length + 4) {
-        used.add(i); const s = list[i]; if (!loop.length) loop.push(s.a); loop.push(s.b);
+        used.add(i); const s = list[i]; loopEdges.push(s); if (!loop.length) loop.push(s.a); loop.push(s.b);
         const endKey = quant(s.b); if (endKey === start) break;
         const candidates = (byStart.get(endKey) || []).filter(n => !used.has(n));
         if (!candidates.length) break;
@@ -320,10 +367,11 @@
         })[0];
       }
       if (loop.length > 3 && quant(loop[0]) === quant(loop[loop.length - 1])) {
-        const clean = cleanPolygon2D(loop, tolerance * 4); if (Math.abs(area2(clean)) > tolerance * tolerance) loops.push(clean);
+        const clean = cleanPolygon2D(loop, tolerance * 4); if (Math.abs(area2(clean)) > tolerance * tolerance) results.push({ points: clean, path: analyticPathFromEdges2D(loopEdges) });
       }
     });
-    return loops.sort((a, b) => Math.abs(area2(b)) - Math.abs(area2(a)));
+    results.sort((a, b) => Math.abs(area2(b.points)) - Math.abs(area2(a.points)));
+    const loops = results.map(r => r.points); loops.paths = results.map(r => r.path); return loops;
   }
 
   class FrontierCadKernel {

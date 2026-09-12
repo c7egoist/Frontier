@@ -437,7 +437,7 @@ svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stro
   <div id="cmd"><span class="p">arc ›</span><input id="cmdIn" placeholder="box 40 30 20 · extrude Sketch01 15 · dim on"></div>
 </aside>
 
-<script src="cad-kernel.js?v=3717171"></script>
+<script src="cad-kernel.js?v=analytic-2d"></script>
 <script>
 /* ── compatibility: polyfills for older browsers / GPUs (Canvas 2D is the only renderer; no GPU features are required) ── */
 (function(){try{
@@ -578,8 +578,12 @@ function cylMesh(r,h,n,r1=r,twist=0,caps=true){const tris=[],lines=[];const ring
   return {tris,lines};}
 function planeMesh(w,h,sub){const tris=[],lines=[];const x=w/2,y=h/2;tris.push([V(-x,-y,0),V(x,-y,0),V(x,y,0)],[V(-x,-y,0),V(x,y,0),V(-x,y,0)]);
   for(let i=0;i<=sub;i++){const u=-x+w*i/sub,v=-y+h*i/sub;lines.push([V(u,-y,0),V(u,y,0)],[V(-x,v,0),V(x,v,0)]);}return {tris,lines,twoSided:true};}
+function analyticPoint2D(d,t){if(!d||d.type==='line')return [d.a[0]+(d.b[0]-d.a[0])*t,d.a[1]+(d.b[1]-d.a[1])*t];const a=(d.a0||0)+(d.sweep||0)*t;if(d.type==='ellipse'){const co=Math.cos(d.rot||0),si=Math.sin(d.rot||0),x=Math.cos(a)*d.rx,y=Math.sin(a)*d.ry;return [d.c[0]+x*co-y*si,d.c[1]+x*si+y*co];}return [d.c[0]+Math.cos(a)*d.r,d.c[1]+Math.sin(a)*d.r];}
+function analyticPathPoints(path){const out=[];(path||[]).forEach((d,di)=>{const n=d.type==='line'?1:Math.max(8,Math.ceil(Math.abs(d.sweep||Math.PI*2)/(Math.PI/24)));for(let i=0;i<=n;i++){if(di&&i===0)continue;out.push(analyticPoint2D(d,i/n));}});return out;}
+function analyticPathLines(path){const L=[];(path||[]).forEach(d=>{const n=d.type==='line'?1:Math.max(8,Math.ceil(Math.abs(d.sweep||Math.PI*2)/(Math.PI/24)));for(let i=0;i<n;i++)L.push([analyticPoint2D(d,i/n),analyticPoint2D(d,(i+1)/n)]);});return L;}
 function loopScreen(f){const lp=loopOf(f);if(!lp||!planarLoop(f))return null;const vz=f.params.vz||[];const s=lp.map((q,i)=>project(xform(f,[q[0],q[1],vz[i]||0])));return s.some(x=>!x)?null:s;}
-function loopOf(c){const p=c.params;if(c.ctype==='circle'){const n=segsFor(c,48);return Array.from({length:n},(_,i)=>{const a=i/n*Math.PI*2;return [p.cx+Math.cos(a)*p.r,p.cy+Math.sin(a)*p.r]});}
+function loopOf(c){const p=c.params;if(Array.isArray(c.booleanPaths)&&c.booleanPaths.length){const R=c.booleanPaths[0];return analyticPathPoints(R.outer);}
+if(c.ctype==='circle'){const n=segsFor(c,48);return Array.from({length:n},(_,i)=>{const a=i/n*Math.PI*2;return [p.cx+Math.cos(a)*p.r,p.cy+Math.sin(a)*p.r]});}
   if(c.ctype==='ellipse')return ellipsePts(p,segsFor(c,64));if(c.ctype==='poly'&&p.closed&&p.pts.length>2)return hasBulge(c)?polyExpand(c).pts:p.pts.slice();
   if(c.ctype==='arc'&&c.params.closed){const n=segsFor(c,48);const a0=p.a0*Math.PI/180,a1=p.a1*Math.PI/180;const pts=[];for(let i=0;i<=n;i++){const a=a0+(a1-a0)*i/n;pts.push([p.cx+Math.cos(a)*p.r,p.cy+Math.sin(a)*p.r]);}return pts;}return null;}
 function sketchProfile(s){ // closed loops: largest = outer, rest = holes; else legacy sequential lines+arcs
@@ -639,11 +643,13 @@ function loftMesh(sections,n,capped){ // sections: [{pts (plane space), sk}] →
    inward-offset rings; a rounded vertical edge is a cylinder face inserted into the profile.
    The tessellation carries per-vertex analytic normals (smooth quads) and the topology carries faces / edges / vertices
    keyed by stable names ('side:2', 'cap:top', 'top:2', 'ftop:2', 'fside:3' …) so edits survive rebuilds. */
+function analyticPathSegments(path){const out=[];(path||[]).forEach(d=>{if(d.type==='line'){out.push({a:d.a,b:d.b,bulge:0});return;}if(d.type==='ellipse'){const n=Math.max(16,Math.ceil(Math.abs(d.sweep||Math.PI*2)/(Math.PI/18)));for(let i=0;i<n;i++)out.push({a:analyticPoint2D(d,i/n),b:analyticPoint2D(d,(i+1)/n),bulge:0});return;}const sweep=d.sweep||Math.PI*2;if(Math.abs(Math.abs(sweep)-Math.PI*2)<1e-6){const h={...d,sweep:sweep/2},j={...d,a0:(d.a0||0)+sweep/2,sweep:sweep/2};out.push({a:analyticPoint2D(h,0),b:analyticPoint2D(h,1),bulge:Math.tan(h.sweep/4)},{a:analyticPoint2D(j,0),b:analyticPoint2D(j,1),bulge:Math.tan(j.sweep/4)});}else out.push({a:analyticPoint2D(d,0),b:analyticPoint2D(d,1),bulge:Math.tan(sweep/4)});});return out;}
 function profileSegs(f){ // → [{pts:[[u,v]..] (loop ctrl points), bulge:[], eids:[], smooth:[]}] loops with material on the LEFT
   const loops=[];const add=(pts,bulge,eids,smooth,hole)=>{if(pts.length<3&&!(pts.length===2&&bulge.some(b=>b)))return;let P=pts.slice(),B=bulge.slice(),E=eids.slice(),S=smooth.slice();
     const area=signedArea(P.length>2?P:polyExpandPts(P,B));const wantCCW=!hole;if((area>0)!==wantCCW){const n=P.length;const P2=[],B2=[],E2=[],S2=[];for(let i=0;i<n;i++){const j=(n-1-i);P2.push(P[j]);}for(let i=0;i<n;i++){const j=(n-1-i+n-1)%n;B2.push(-(B[j]||0));E2.push(E[j]);S2.push(S[j]);}P=P2;B=B2;E=E2;S=S2;}
     loops.push({pts:P,bulge:B,eids:E,smooth:S,hole:!!hole,orig:P.map((_,i)=>i)});};
   if(f.kind==='curve'){
+    if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length){let ei=0;f.booleanPaths.forEach(R=>{const addPath=(path,hole)=>{const ss=analyticPathSegments(path),pts=ss.map(s=>[s.a[0],s.a[1]]);add(pts,ss.map(s=>s.bulge),ss.map(()=>ei++),ss.map(s=>!!s.bulge),hole);};addPath(R.outer,false);(R.holes||[]).forEach(H=>addPath(H,true));});return loops;}
     if(Array.isArray(f.booleanRegions)&&f.booleanRegions.length){
       let ei=0;f.booleanRegions.forEach(R=>{const addRegion=(P,hole)=>{const pts=P.map(q=>[q[0],q[1]]);add(pts,pts.map(()=>0),pts.map(()=>ei++),pts.map(()=>false),hole);};addRegion(R.outer,false);(R.holes||[]).forEach(H=>addRegion(H,true));});return loops;
     }
@@ -799,6 +805,7 @@ function allTris(m){if(!m)return [];const t=(m.tris||[]).slice();(m.quads||[]).f
 function meshVolume(m){let v=0;allTris(m).forEach(([a,b,c])=>{v+=dot(a,cross(b,c))/6;});return Math.abs(v);}
 function ellipsePts(p,n=48){const a=(p.tilt||0)*Math.PI/180,ca=Math.cos(a),sa=Math.sin(a);return Array.from({length:n},(_,i)=>{const t=i/n*Math.PI*2,x=Math.cos(t)*p.rx,y=Math.sin(t)*p.ry;return [p.cx+x*ca-y*sa,p.cy+x*sa+y*ca]});}
 function curveLines(c){const p=c.params,L=[];
+  if(Array.isArray(c.booleanPaths)&&c.booleanPaths.length){analyticPathLines(c.booleanPaths[0].outer).forEach(l=>L.push([V(l[0][0],l[0][1],0),V(l[1][0],l[1][1],0)]));return {tris:[],lines:L};}
   if(c.ctype==='line')L.push([V(p.x1,p.y1,0),V(p.x2,p.y2,0)]);
   else if(c.ctype==='poly'&&hasBulge(c)){const E=polyExpand(c);const pts=E.pts,n=pts.length;const N=E.closed?n:n-1;for(let i=0;i<N;i++)L.push([V(pts[i][0],pts[i][1],0),V(pts[(i+1)%n][0],pts[(i+1)%n][1],0)]);}
   else if(c.ctype==='poly'){const pts=p.pts||[],vz=p.vz||[];const Z=i=>vz[i]||0;for(let i=0;i<pts.length-1;i++)L.push([V(pts[i][0],pts[i][1],Z(i)),V(pts[i+1][0],pts[i+1][1],Z(i+1))]);if(p.closed&&pts.length>2)L.push([V(pts[pts.length-1][0],pts[pts.length-1][1],Z(pts.length-1)),V(pts[0][0],pts[0][1],Z(0))]);}
@@ -840,7 +847,7 @@ const meshCache=new Map();
 function meshOf(f){if(!meshCache.has(f.id))meshCache.set(f.id,build(f));return meshCache.get(f.id);}
 function invalidate(id){meshCache.delete(id);topoCache.delete(id);const par=byId(id);doc.figures.forEach(f=>{if(f.src===id||f.a===id||f.b===id||(f.parent===id)||f.profile===id||(par&&par.kind==='curve'&&f.src===par.parent)||(f.sections&&f.sections.includes(id))||(f.sections&&par&&par.kind==='curve'&&f.sections.some(x=>{const c=byId(x);return c&&c.parent===par.parent;})))meshCache.delete(f.id);});
   const f=byId(id);if(f&&f.parent)invalidate(f.parent);}
-function rebuildAll(){meshCache.clear();topoCache.clear();renderOutliner();renderInspector();draw();}
+function rebuildAll(){migrateBooleanPaths();meshCache.clear();topoCache.clear();renderOutliner();renderInspector();draw();}
 
 /* ── measures ─────────────────────────────────────────────── */
 function measure(f){const p=f.params;
@@ -852,6 +859,7 @@ function measure(f){const p=f.params;
     if(f.op==='subtract'){const a=byId(f.a),b=byId(f.b);const v=a.params.w*a.params.d*a.params.h-(b?Math.PI*b.params.r**2*a.params.h:0);return {v,u:'mm³',lab:'volume',rows:[['tool',b?b.name:'—'],['faces',7],['SSI curves',2]]};}}
   if(f.kind==='surface'){if(f.op==='plane')return {v:p.w*p.h,u:'mm²',lab:'area',rows:[['degree','1 × 1'],['spans',(p.subdiv|0)+' × '+(p.subdiv|0)],['G','G∞']]};
     if(f.op==='loft'){const s=Math.hypot(p.r1-p.r0,p.h);return {v:Math.PI*(p.r0+p.r1)*s,u:'mm²',lab:'lateral area',rows:[['degree','3 × 1'],['sections',2],['twist',p.twist+'°']]};}}
+  if(f.kind==='curve'&&Array.isArray(f.booleanPaths)){const lengthPath=P=>(P||[]).reduce((s,d)=>{if(d.type==='line')return s+Math.hypot(d.b[0]-d.a[0],d.b[1]-d.a[1]);if(d.type==='arc')return s+Math.abs(d.r*d.sweep);const n=32;let l=0;for(let i=0;i<n;i++){const a=analyticPoint2D(d,i/n),b=analyticPoint2D(d,(i+1)/n);l+=Math.hypot(b[0]-a[0],b[1]-a[1]);}return s+l;},0);const R=f.booleanPaths[0],area=f.booleanRegions&&f.booleanRegions[0]?Math.abs(polyArea(f.booleanRegions[0].outer))-((f.booleanRegions[0].holes||[]).reduce((s,h)=>s+Math.abs(polyArea(h)),0)):0;return {v:lengthPath(R.outer),u:'mm',lab:'analytic perimeter',rows:[['edges',(R.outer||[]).length+(R.holes||[]).reduce((s,h)=>s+h.length,0)],['closed','yes'],['area',fmt(area,0)+' mm²']]};}
   if(f.kind==='curve'&&f.ctype==='poly'){const q=f.params.pts||[];let L=0;for(let i=0;i<q.length-1;i++)L+=Math.hypot(q[i+1][0]-q[i][0],q[i+1][1]-q[i][1]);if(f.params.closed&&q.length>2)L+=Math.hypot(q[0][0]-q[q.length-1][0],q[0][1]-q[q.length-1][1]);return {v:L,u:'mm',lab:f.params.closed?'perimeter':'length',rows:[['vertices',q.length],['closed',f.params.closed?'yes':'no'],['area',f.params.closed?fmt(polyArea(q),0)+' mm²':'—']]};}
   if(f.kind==='curve'&&f.ctype==='ellipse'){const a=f.params.rx,b=f.params.ry,h=((a-b)/(a+b))**2;return {v:Math.PI*(a+b)*(1+3*h/(10+Math.sqrt(4-3*h))),u:'mm',lab:'circumference',rows:[['degree',2],['rational','yes'],['area',fmt(Math.PI*a*b,0)+' mm²']]};}
   if(f.kind==='curve'&&f.ctype==='point')return {v:0,u:'',lab:'datum point',rows:[['u',fmt(f.params.cx,1)],['v',fmt(f.params.cy,1)],['construction',f.cons?'yes':'no']]};
@@ -887,7 +895,7 @@ $('#ddMenu').onclick=e=>e.stopPropagation();
 addEventListener('pointerdown',e=>{if(!e.target.closest('#filters'))$('#filters').classList.remove('open');});
 function metaOf(f){const m=measure(f);const p=f.params;
   if(f.kind==='body')return `${f.op} · ${fmt(m.v/1000,1)} cm³`;if(f.kind==='surface')return `${f.op} · ${fmt(m.v,0)} mm²`;
-  if(f.kind==='curve')return f.ctype==='point'?`point · ${fmt(p.cx,0)}, ${fmt(p.cy,0)}`:`${f.ctype} · ${fmt(m.v,1)} mm`;if(f.kind==='sketch'){const pl=byId(f.planeId);return `${pl?pl.name:f.plane} · ${f.children.length} curves`;}
+  if(f.kind==='curve')return f.ctype==='point'?`point · ${fmt(p.cx,0)}, ${fmt(p.cy,0)}`:`${Array.isArray(f.booleanPaths)?'analytic path':f.ctype} · ${fmt(m.v,1)} mm`;if(f.kind==='sketch'){const pl=byId(f.planeId);return `${pl?pl.name:f.plane} · ${f.children.length} curves`;}
   if(f.kind==='plane')return `${f.axis}${p.offset?' +'+p.offset:''}${p.tilt?' ∠'+p.tilt+'°':''} · ${p.size} mm${f.id===active_.plane?' · active':''}`;if(f.kind==='dim')return `${fmt(m.v,1)} mm · driving`;return '';}
 function renderOutliner(){const q=$('#q').value.toLowerCase();const tree=$('#tree');let html='';
   const order=['sketch','body','surface','plane','dim'];
@@ -968,7 +976,7 @@ function renderInspector(){let ids=[...doc.sel];const insp=$('#insp');if(!ids.le
     <div class="actions" style="flex-wrap:wrap"><button class="abtn" data-bool="union">${icon('body',13)} union</button><button class="abtn" data-bool="subtract">subtract</button><button class="abtn" data-bool="intersection">intersect</button><button class="abtn" data-bool="xor">XOR</button><button class="abtn" id="aMirror">Mirror 2D</button><button class="abtn danger" id="aDel">Delete</button></div><div class="empty" style="padding:6px 0 0">Boolean order follows selection. Mirror uses the first curve as source and the second curve's plane position / rotation as the reference axis.</div>`;
     $('#aDel').onclick=delSel;$$('[data-bool]').forEach(b=>b.onclick=()=>booleanStart(b.dataset.bool,{keep:true}));$('#aMirror').onclick=()=>mirrorBySelectedReference(ids);return;}
   const f=byId(ids[0]);const m=measure(f);const acc=KINDS[f.kind].acc;$('#inspBadge').textContent=`${f.kind} · #${f.id}`;
-  let html=`<div class="hero" style="--acc:${acc}"><div class="c-top"><span class="ico">${icon(f.kind,18)}</span><span class="t"><span class="n" contenteditable spellcheck="false" id="nameEd">${f.name}</span><span class="m">${f.op||f.ctype||f.axis||f.plane||f.key||f.kind}${f.recipe?' · derived':''}</span></span></div>
+  let html=`<div class="hero" style="--acc:${acc}"><div class="c-top"><span class="ico">${icon(f.kind,18)}</span><span class="t"><span class="n" contenteditable spellcheck="false" id="nameEd">${f.name}</span><span class="m">${f.op||(Array.isArray(f.booleanPaths)?'analytic path':f.ctype)||f.axis||f.plane||f.key||f.kind}${f.recipe?' · derived':''}</span></span></div>
     <div class="big"><span class="v">${m.v>=10000?fmt(m.v/1000,1):fmt(m.v,m.v<10?2:1)}</span><span class="u">${m.v>=10000&&m.u==='mm³'?'cm³':m.u}</span><span class="lab">${m.lab}</span></div>
     <div class="side">${m.rows.map(r=>`<div><span class="k">${r[0]}</span><span class="v2">${r[1]}</span></div>`).join('')}</div><canvas id="heroViz" width="240" height="160"></canvas></div>`;
   html+=`<div class="presence">
@@ -984,7 +992,7 @@ function renderInspector(){let ids=[...doc.sel];const insp=$('#insp');if(!ids.le
       ${xyzRow('rot3',f.rot3,'rotate','Rotation',0,'°',0.5)}
       ${xyzRow('scl',f.scl,'scale','Scale',2,'',0.01)}
       <div class="xf-foot"><button class="abtn" data-xr="pos">${ic('reset',11)} pos</button><button class="abtn" data-xr="rot3">${ic('reset',11)} rot</button><button class="abtn" data-xr="scl">${ic('reset',11)} scale</button></div></div>`);}
-  if(f.kind==='curve'&&f.ctype!=='point'&&f.ctype!=='line'){const canClose=f.ctype==='poly'||f.ctype==='arc';const isClosed=f.ctype==='circle'||f.ctype==='ellipse'||!!f.params.closed;
+  if(f.kind==='curve'&&f.ctype!=='point'&&f.ctype!=='line'&&!Array.isArray(f.booleanPaths)){const canClose=f.ctype==='poly'||f.ctype==='arc';const isClosed=f.ctype==='circle'||f.ctype==='ellipse'||!!f.params.closed;
     html+=sec('cv','Curve display','loop · fill · resolution',`<div class="ctl"><div class="rowctl"><span class="lab">Closed loop</span><span class="sw ${isClosed?'on':''} ${canClose?'':'dis'}" id="swClosed"></span></div></div>
       <div class="ctl"><div class="rowctl"><span class="lab">Fill when closed</span><span class="sw ${f.fill!==false?'on':''}" id="swFill"></span></div></div>
       ${isSlot(f)?`<div class="ctl"><div class="ctl-top"><span class="lab">Slot radius</span><span class="val" id="slotRV">${fmt(f.params.r,1)} mm</span></div><input type="range" id="slotR" min="0.5" max="100" step="0.5" value="${f.params.r}"></div>`:''}
@@ -1473,11 +1481,13 @@ function polyExpand(f){const p=f.params;const pts=p.pts||[],n=pts.length;const c
 const isSlot=f=>f&&f.kind==='curve'&&f.ctype==='poly'&&Array.isArray(f.params.spine);
 function regenSlot(f){if(!isSlot(f))return;f.params.r=Math.max(.5,+f.params.r||1);const O=slotOutline(f.params.spine,f.params.r);f.params.pts=O.pts;f.params.bulge=O.bulge;delete f.params.vz;}
 function topo(f){if(topoCache.has(f.id))return topoCache.get(f.id);let t;
-  if(f.kind==='curve'){const pts=polyPtsOf(f);const closed=f.ctype==='circle'||f.ctype==='ellipse'||!!f.params.closed;
-    const verts=pts.map((p,i)=>({id:i,p,z:(f.params.vz||[])[i]||0}));const edges=[];
-    if(isSlot(f)){edges.push({id:0,a:0,b:pts.length-1,curve:true});} // whole slot outline = one edge; vertices = slot centres
-    else if(f.ctype==='poly'||f.ctype==='line'){const bl=f.params.bulge||[];for(let i=0;i<pts.length-1;i++)edges.push({id:i,a:i,b:i+1,arc:bl[i]||0});if(closed&&pts.length>2)edges.push({id:pts.length-1,a:pts.length-1,b:0,arc:bl[pts.length-1]||0});}
-    else if(f.ctype!=='point'){edges.push({id:0,a:0,b:1,curve:true});} // the whole curve is one edge; vertex 0 = centre, 1 = radius handle
+  if(f.kind==='curve'){const closed=f.ctype==='circle'||f.ctype==='ellipse'||!!f.params.closed;let pts,verts,edges=[];
+    if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length){const R=f.booleanPaths[0],paths=[R.outer||[],...(R.holes||[])];verts=[];paths.forEach(path=>{const base=verts.length;path.forEach(d=>verts.push({id:verts.length,p:analyticPoint2D(d,0),z:0}));path.forEach((d,i)=>edges.push({id:edges.length,a:base+i,b:base+(i+1)%path.length,path:d,curve:true}));});}
+    else {pts=polyPtsOf(f);verts=pts.map((p,i)=>({id:i,p,z:(f.params.vz||[])[i]||0}));
+      if(isSlot(f)){edges.push({id:0,a:0,b:pts.length-1,curve:true});} // whole slot outline = one edge; vertices = slot centres
+      else if(f.ctype==='poly'||f.ctype==='line'){const bl=f.params.bulge||[];for(let i=0;i<pts.length-1;i++)edges.push({id:i,a:i,b:i+1,arc:bl[i]||0});if(closed&&pts.length>2)edges.push({id:pts.length-1,a:pts.length-1,b:0,arc:bl[pts.length-1]||0});}
+      else if(f.ctype!=='point'){edges.push({id:0,a:0,b:1,curve:true});} // the whole curve is one edge; vertex 0 = centre, 1 = radius handle
+    }
     const faces=[];const lp=loopOf(f);if(lp&&planarLoop(f))faces.push({id:0,loop:lp});
     t={verts,edges,faces};}
   else if(meshOf(f).brep){const br=meshOf(f).brep;t={verts:br.verts.map(v=>({id:v.id,p:v.p})),edges:br.edges.map(e=>({id:e.id,key:e.key,pts:e.pts,tangent:e.tangent})),faces:br.faces.map(F=>({id:F.id,key:F.key,kind:F.kind,tris:F.tris}))};}
@@ -1496,13 +1506,13 @@ function planarLoop(f){if(isSlot(f))return true;const vz=f.params.vz;if(!vz||!vz
   return P.every(p=>Math.abs(dot(sub(p,P[0]),n))<1e-3);}
 function curveVertWorld(f,i){const t=topo(f);const v=t.verts[i];return xform(f,[v.p[0],v.p[1],v.p[2]+(v.z||0)]);}
 function subWorld(f,kind,idx){const t=topo(f);if(kind==='vertex'){return f.kind==='curve'?curveVertWorld(f,idx):xform(f,t.verts[idx].p);}
-  if(kind==='edge'){const e=t.edges[idx];if(!e)return null;if(e.pts){const P=e.pts.filter(Boolean);if(!P.length)return null;const c=P.reduce((a,p)=>add(a,p),[0,0,0]).map(v=>v/P.length);return xform(f,c);}const a=subWorld(f,'vertex',e.a),b=subWorld(f,'vertex',e.b);return mul(add(a,b),.5);}
+  if(kind==='edge'){const e=t.edges[idx];if(!e)return null;if(e.path){const q=analyticPoint2D(e.path,.5);return xform(f,[q[0],q[1],0]);}if(e.pts){const P=e.pts.filter(Boolean);if(!P.length)return null;const c=P.reduce((a,p)=>add(a,p),[0,0,0]).map(v=>v/P.length);return xform(f,c);}const a=subWorld(f,'vertex',e.a),b=subWorld(f,'vertex',e.b);return mul(add(a,b),.5);}
   if(kind==='face'){const fc=t.faces[idx];if(fc.loop){const c=fc.loop.reduce((a,q)=>[a[0]+q[0],a[1]+q[1]],[0,0]).map(v=>v/fc.loop.length);return xform(f,[c[0],c[1],0]);}const pts=[];fc.tris.forEach(tr=>tr.forEach(p=>pts.push(p)));const c=pts.reduce((a,p)=>add(a,p),[0,0,0]).map(v=>v/pts.length);return xform(f,c);}}
 // picking sub-elements (screen space). modes: Set of 'vertex'|'edge'|'face'
 function pickSub(px,py,modes,onlyKind){cam=camBasis();let best=null;
   doc.figures.forEach(f=>{if(!f.visible||f.kind==='dim'||f.kind==='sketch'||f.kind==='plane'||!filt.has(f.kind)||(onlyKind&&f.kind!==onlyKind))return;if(f.cons&&!view.cons)return;const t=topo(f);
     if(modes.has('vertex'))t.verts.forEach((v,i)=>{const s=project(subWorld(f,'vertex',i));if(!s)return;const d=Math.hypot(px-s[0],py-s[1]);if(d<8){const sc=s[2]-2-(8-d)*0.01;if(!best||sc<best.sc)best={sc,fig:f.id,kind:'vertex',idx:i};}});
-    if(modes.has('edge'))t.edges.forEach((e,i)=>{let segs;if(e.pts){segs=[];for(let k=0;k<e.pts.length-1;k++){if(e.pts[k]&&e.pts[k+1])segs.push([project(xform(f,e.pts[k])),project(xform(f,e.pts[k+1]))]);}}else if(e.curve){const L=curveLines(f).lines;segs=L.map(l=>l.map(p=>project(xform(f,p))));}else if(e.arc){const A=arcPoints(t.verts[e.a].p,t.verts[e.b].p,e.arc);segs=[];for(let k=0;k<A.length-1;k++)segs.push([project(xform(f,[A[k][0],A[k][1],0])),project(xform(f,[A[k+1][0],A[k+1][1],0]))]);}else segs=[[project(subWorld(f,'vertex',e.a)),project(subWorld(f,'vertex',e.b))]];
+    if(modes.has('edge'))t.edges.forEach((e,i)=>{let segs;if(e.path){segs=analyticPathLines([e.path]).map(l=>l.map(q=>project(xform(f,[q[0],q[1],0]))));}else if(e.pts){segs=[];for(let k=0;k<e.pts.length-1;k++){if(e.pts[k]&&e.pts[k+1])segs.push([project(xform(f,e.pts[k])),project(xform(f,e.pts[k+1]))]);}}else if(e.curve){const L=curveLines(f).lines;segs=L.map(l=>l.map(p=>project(xform(f,p))));}else if(e.arc){const A=arcPoints(t.verts[e.a].p,t.verts[e.b].p,e.arc);segs=[];for(let k=0;k<A.length-1;k++)segs.push([project(xform(f,[A[k][0],A[k][1],0])),project(xform(f,[A[k+1][0],A[k+1][1],0]))]);}else segs=[[project(subWorld(f,'vertex',e.a)),project(subWorld(f,'vertex',e.b))]];
       segs.forEach(sg=>{if(!sg[0]||!sg[1])return;const d=segDist(px,py,sg[0],sg[1]);if(d<6){const sc=Math.min(sg[0][2],sg[1][2])-1;if(!best||sc<best.sc)best={sc,fig:f.id,kind:'edge',idx:i};}});});
     if(modes.has('face'))t.faces.forEach((fc,i)=>{if(fc.loop){const s=loopScreen(f);if(!s)return;if(ptInPoly(px,py,s)){const sc=s.reduce((a,q)=>a+q[2],0)/s.length;if(!best||sc<best.sc)best={sc,fig:f.id,kind:'face',idx:i};}}
       else fc.tris.forEach(tr=>{const s=tr.map(p=>project(xform(f,p)));if(s.some(x=>!x))return;if(inTri(px,py,s)){const sc=(s[0][2]+s[1][2]+s[2][2])/3;if(!best||sc<best.sc)best={sc,fig:f.id,kind:'face',idx:i};}});});});
@@ -1559,7 +1569,7 @@ function drawSubOverlay(g){const modes=subModes();const anySub=modes.has('vertex
       else fc.tris.forEach(tr=>{const s=tr.map(p=>project(xform(f,p)));if(s.some(x=>!x))return;g.beginPath();g.moveTo(s[0][0],s[0][1]);g.lineTo(s[1][0],s[1][1]);g.lineTo(s[2][0],s[2][1]);g.closePath();g.fill();});});
     if(modes.has('vertex')||sub_.sel.size||modTool)t.verts.forEach((v,i)=>{const on=isSel({kind:'vertex',idx:i}),hv=hov&&hov.fig===f.id&&hov.kind==='vertex'&&hov.idx===i;if(!on&&!hv||f.kind!=='body')return;const s2=project(xform(f,v.p));if(!s2)return;g.fillStyle=on?'#7ee0a0':'#fff';g.beginPath();g.arc(s2[0],s2[1],on?4.5:3.5,0,Math.PI*2);g.fill();});
     if(modes.has('edge')||sub_.sel.size||modTool)t.edges.forEach((e,i)=>{const on=isSel({kind:'edge',idx:i}),hv=hov&&hov.fig===f.id&&hov.kind==='edge'&&hov.idx===i;if(!on&&!hv)return;g.strokeStyle=on?'#7ee0a0':'#fff';g.lineWidth=on?3:2;g.beginPath();
-      if(e.pts){let pen=false;e.pts.forEach(q=>{if(!q){pen=false;return;}const s2=project(xform(f,q));if(!s2){pen=false;return;}pen?g.lineTo(s2[0],s2[1]):g.moveTo(s2[0],s2[1]);pen=true;});}else if(e.curve){curveLines(f).lines.forEach(l=>{const a=project(xform(f,l[0])),b=project(xform(f,l[1]));if(a&&b){g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);}});}else if(e.arc){const A=arcPoints(t.verts[e.a].p,t.verts[e.b].p,e.arc);A.forEach((q,k)=>{const s2=project(xform(f,[q[0],q[1],0]));if(!s2)return;k?g.lineTo(s2[0],s2[1]):g.moveTo(s2[0],s2[1]);});}else{const a=project(subWorld(f,'vertex',e.a)),b=project(subWorld(f,'vertex',e.b));if(a&&b){g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);}}g.stroke();});
+      if(e.path){analyticPathLines([e.path]).forEach(l=>{const a=project(xform(f,[l[0][0],l[0][1],0])),b=project(xform(f,[l[1][0],l[1][1],0]));if(a&&b){g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);}});}else if(e.pts){let pen=false;e.pts.forEach(q=>{if(!q){pen=false;return;}const s2=project(xform(f,q));if(!s2){pen=false;return;}pen?g.lineTo(s2[0],s2[1]):g.moveTo(s2[0],s2[1]);pen=true;});}else if(e.curve){curveLines(f).lines.forEach(l=>{const a=project(xform(f,l[0])),b=project(xform(f,l[1]));if(a&&b){g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);}});}else if(e.arc){const A=arcPoints(t.verts[e.a].p,t.verts[e.b].p,e.arc);A.forEach((q,k)=>{const s2=project(xform(f,[q[0],q[1],0]));if(!s2)return;k?g.lineTo(s2[0],s2[1]):g.moveTo(s2[0],s2[1]);});}else{const a=project(subWorld(f,'vertex',e.a)),b=project(subWorld(f,'vertex',e.b));if(a&&b){g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);}}g.stroke();});
     if(modes.has('vertex'))t.verts.forEach((v,i)=>{const s=project(subWorld(f,'vertex',i));if(!s)return;const on=isSel({kind:'vertex',idx:i}),hv=hov&&hov.fig===f.id&&hov.kind==='vertex'&&hov.idx===i;
       g.fillStyle=on?'#7ee0a0':hv?'#fff':(f.kind==='curve'?'rgba(127,240,245,.9)':'rgba(255,255,255,.7)');g.beginPath();g.arc(s[0],s[1],on||hv?4.5:3,0,7);g.fill();if(on||hv){g.strokeStyle='rgba(0,0,0,.6)';g.lineWidth=1;g.stroke();}});
     // lifted polylines: draw drop lines from lifted vertices to the plane so the Z offset reads
@@ -1709,6 +1719,7 @@ function dofMap(sk){const map=[];sk.children.map(byId).filter(f=>f&&!f.link).for
 // geometry accessors in plane space (u,v)
 function vtx(h){const f=byId(h.fig);if(!f)return null;const P=polyPtsOf(f);const q=P[h.idx];return q?[q[0],q[1]]:null;}
 function edgeInfo(h){const f=byId(h.fig);if(!f)return null;const t=topo(f);const e=t.edges[h.idx];if(!e)return null;
+  if(e.path){const a=analyticPoint2D(e.path,0),b=analyticPoint2D(e.path,1);if(e.path.type==='arc')return {kind:'circle',c:e.path.c,r:e.path.r,f,path:true,a,b};return {kind:'line',a,b,f,path:true};}
   if(e.curve&&isSlot(f)){const S=f.params.spine;return {kind:'line',a:[S[0][0],S[0][1]],b:[S[S.length-1][0],S[S.length-1][1]],f,ia:0,ib:S.length-1,slot:true,r:f.params.r};}
   if(e.curve)return {kind:'circle',c:[f.params.cx,f.params.cy],r:f.params.r,f};
   const P=polyPtsOf(f);if(e.arc){const A=bulgeArc(P[e.a],P[e.b],e.arc);if(A)return {kind:'circle',c:A.c,r:A.r,f,arc:true,a:[P[e.a][0],P[e.a][1]],b:[P[e.b][0],P[e.b][1]],ia:e.a,ib:e.b};}return {kind:'line',a:[P[e.a][0],P[e.a][1]],b:[P[e.b][0],P[e.b][1]],f,ia:e.a,ib:e.b};}
@@ -1987,7 +1998,8 @@ function modEnd(){modTool=null;$('#prompt').classList.remove('show');cv.style.cu
 // curve as a control polyline in sketch-plane coords, with the curve-local transform baked in
 function arcSample(f){const p=f.params;const a0=p.a0*Math.PI/180,a1=p.a1*Math.PI/180;const n=Math.max(8,Math.round(segsFor(f,64)*Math.abs(a1-a0)/(Math.PI*2)));return Array.from({length:n+1},(_,i)=>{const t=a0+(a1-a0)*i/n;return [p.cx+Math.cos(t)*p.r,p.cy+Math.sin(t)*p.r];});}
 function curvePlane(f){const p=f.params;let pts,closed=false;
-  if(f.ctype==='line')pts=[[p.x1,p.y1],[p.x2,p.y2]];
+  if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length){pts=analyticPathPoints(f.booleanPaths[0].outer);closed=true;}
+  else if(f.ctype==='line')pts=[[p.x1,p.y1],[p.x2,p.y2]];
   else if(f.ctype==='poly'){if(hasBulge(f)){const E=polyExpand(f);pts=E.pts.map(q=>[q[0],q[1]]);closed=E.closed;}else{pts=(p.pts||[]).map(q=>[q[0],q[1]]);closed=!!p.closed&&pts.length>2;}}
   else if(f.ctype==='arc'&&!p.closed)pts=arcSample(f);
   else if(f.ctype==='point')return null;
@@ -2165,20 +2177,33 @@ Object.assign(GLYPH,{Save:'M5 3h11l3 3v15H5zM8 3v6h7V3M8 21v-7h8v7',History:'M12
 function booleanSourceCurves(closedOnly=true){
   const out=[];[...doc.sel].map(byId).forEach(f=>{if(!f||f.kind!=='curve'||f.visible===false||f.ctype==='point')return;const C=curvePlane(f);if(C&&(!closedOnly||C.closed)&&C.pts.length>=2)out.push(f);});return out;
 }
-function booleanRegionsFromLoops(loops){
-  const L=(loops||[]).filter(P=>P&&P.length>=3).sort((a,b)=>Math.abs(signedArea(b))-Math.abs(signedArea(a))),regions=[];
-  L.forEach(P=>{const a=signedArea(P);if(Math.abs(a)<1e-7)return;if(a>0){regions.push({outer:P.map(q=>[q[0],q[1]]),holes:[]});return;}const q=P[0],host=regions.find(r=>ptInPoly(q[0],q[1],r.outer));if(host)host.holes.push(P.map(v=>[v[0],v[1]]));});
-  if(!regions.length&&L.length){const P=L[0].map(q=>[q[0],q[1]]);regions.push({outer:signedArea(P)<0?P.slice().reverse():P,holes:[]});}return regions;
+function booleanRegionsFromLoops(loops,paths){
+  const L=(loops||[]).map((P,i)=>({P,path:paths&&paths[i]})).filter(x=>x.P&&x.P.length>=3).sort((a,b)=>Math.abs(signedArea(b.P))-Math.abs(signedArea(a.P))),regions=[];
+  L.forEach(({P,path})=>{const a=signedArea(P);if(Math.abs(a)<1e-7)return;if(a>0){regions.push({outer:P.map(q=>[q[0],q[1]]),holes:[],analytic:{outer:path||P.map((q,i)=>({type:'line',a:q,b:P[(i+1)%P.length]})),holes:[]}});return;}const q=P[0],host=regions.find(r=>ptInPoly(q[0],q[1],r.outer));if(host){host.holes.push(P.map(v=>[v[0],v[1]]));host.analytic.holes.push(path||P.map((v,i)=>({type:'line',a:v,b:P[(i+1)%P.length]})));}});
+  if(!regions.length&&L.length){const P=L[0].P.map(q=>[q[0],q[1]]),path=L[0].path||P.map((q,i)=>({type:'line',a:q,b:P[(i+1)%P.length]}));regions.push({outer:signedArea(P)<0?P.slice().reverse():P,holes:[],analytic:{outer:signedArea(P)<0?path.slice().reverse().map(d=>({type:'line',a:d.b,b:d.a})):path,holes:[]}});}return regions;
 }
+function curveAnalyticRegion(f){
+  if(Array.isArray(f.booleanPaths)&&f.booleanPaths.length)return JSON.parse(JSON.stringify(f.booleanPaths[0]));
+  const C=curvePlane(f),p=f.params;if(!C)return null;const cp=f.pos||[0,0,0],cs=f.scl||[1,1,1],cr=((f.rot3&&f.rot3[2])||f.rot||0)*Math.PI/180,c=Math.cos(cr),s=Math.sin(cr),tr=q=>{let u=q[0]*cs[0],v=q[1]*cs[1],t=u;u=t*c-v*s;v=t*s+v*c;return [u+cp[0],v+cp[1]];};
+  if(f.ctype==='line')return {outer:[{type:'line',a:C.pts[0],b:C.pts[1]}],holes:[]};
+  if(f.ctype==='poly'){const Q=ctrlPlane(f),path=[];for(let i=0;i<(Q.closed?Q.pts.length:Q.pts.length-1);i++){const a=Q.pts[i],b=Q.pts[(i+1)%Q.pts.length],bl=(Q.bulge||[])[i]||0;if(bl){const A=bulgeArc(a,b,bl);path.push({type:'arc',c:A.c,r:A.r,a0:A.a0,sweep:A.sweep});}else path.push({type:'line',a,b});}return {outer:path,holes:[]};}
+  const center=tr([p.cx,p.cy]),uniform=Math.abs(Math.abs(cs[0])-Math.abs(cs[1]))<1e-7,det=cs[0]*cs[1];
+  if(f.ctype==='circle'||f.ctype==='arc'){const r=Math.abs(p.r*cs[0]),rx=Math.abs(p.r*cs[0]),ry=Math.abs(p.r*cs[1]),start=tr([p.cx+p.r*Math.cos(f.ctype==='circle'?0:p.a0*Math.PI/180),p.cy+p.r*Math.sin(f.ctype==='circle'?0:p.a0*Math.PI/180)]),a0=uniform?Math.atan2(start[1]-center[1],start[0]-center[0]):(f.ctype==='circle'?0:p.a0*Math.PI/180),sw=f.ctype==='circle'?Math.PI*2*(det<0?-1:1):(p.a1-p.a0)*Math.PI/180*(det<0?-1:1);return {outer:[{type:uniform?'arc':'ellipse',c:center,r,rx,ry,rot:cr,a0,sweep:sw}],holes:[]};}
+  if(f.ctype==='ellipse'){const tilt=(p.tilt||0)*Math.PI/180;return {outer:[{type:'ellipse',c:center,rx:Math.abs(p.rx*cs[0]),ry:Math.abs(p.ry*cs[1]),rot:cr+tilt,a0:0,sweep:Math.PI*2*(det<0?-1:1)}],holes:[]};}
+  return {outer:C.pts.map((q,i)=>({type:'line',a:q,b:C.pts[(i+1)%C.pts.length]})),holes:[]};
+}
+function migrateBooleanPaths(){doc.figures.filter(f=>f.kind==='curve'&&f.boolean&&(!Array.isArray(f.booleanPaths)||!f.booleanPaths.length)).forEach(f=>{const src=(f.boolean.sources||[]).map(byId).filter(s=>s&&s.kind==='curve');if(src.length<2)return;const inputs=src.map(s=>{if(Array.isArray(s.booleanRegions)&&s.booleanRegions.length){const R=s.booleanRegions[0];return {outer:R.outer,holes:R.holes||[],analytic:curveAnalyticRegion(s)};}const C=curvePlane(s);return C?{outer:C.pts,holes:[],analytic:curveAnalyticRegion(s)}:null;}).filter(Boolean);if(inputs.length<2)return;const out=FrontierCadKernel.boolean2D(inputs,f.boolean.op||'union'),regions=booleanRegionsFromLoops(out,out.paths);if(!regions.length)return;const old=Math.abs(signedArea(f.booleanRegions&&f.booleanRegions[0]?f.booleanRegions[0].outer:[]));const R=regions.reduce((best,r)=>!best||Math.abs(Math.abs(signedArea(r.outer))-old)<Math.abs(Math.abs(signedArea(best.outer))-old)?r:best,null);if(R)f.booleanPaths=[R.analytic];});}
 function booleanStart(kind,vals={}){
   if(tool)endTool();if(modTool)modEnd();if(solidTool)solidEnd();if(patTool)patEnd();if(offTool)offEnd();
   const src=booleanSourceCurves();if(src.length<2){log(`2D ${kind}: select at least two closed curves in one sketch first`);return false;}
   const sk=byId(src[0].parent);if(!sk||src.some(f=>f.parent!==sk.id)){log('2D boolean: all profiles must belong to the same sketch / workplane');return false;}
-  const loops=src.map(f=>{if(Array.isArray(f.booleanRegions)&&f.booleanRegions.length)return f.booleanRegions[0];const C=curvePlane(f);return {outer:C.pts.map(q=>[q[0],q[1]]),holes:[]};}),result=FrontierCadKernel.boolean2D(loops,kind),regions=booleanRegionsFromLoops(result);
+  const loops=src.map(f=>{if(Array.isArray(f.booleanRegions)&&f.booleanRegions.length){const R=f.booleanRegions[0];return {outer:R.outer.map(q=>[q[0],q[1]]),holes:(R.holes||[]).map(H=>H.map(q=>[q[0],q[1]])),analytic:curveAnalyticRegion(f)};}const C=curvePlane(f);return {outer:C.pts.map(q=>[q[0],q[1]]),holes:[],analytic:curveAnalyticRegion(f)};}),result=FrontierCadKernel.boolean2D(loops,kind),regions=booleanRegionsFromLoops(result,result.paths);
   if(!regions.length){log(`2D ${kind}: profiles do not produce a closed region`);return false;}
-  snapshot(`2D ${kind}`);const made=[];regions.forEach(R=>{const reg={outer:R.outer.map(q=>[q[0],q[1]]),holes:R.holes.map(H=>H.map(q=>[q[0],q[1]]))};const f=mk('curve',nextName(`Boolean${kind[0].toUpperCase()+kind.slice(1)}`),{pts:reg.outer.map(q=>[q[0],q[1]]),closed:true},{ctype:'poly',parent:sk.id,fill:true,recipe:src.map(x=>x.name).concat(`2D ${kind}`),boolean:{op:kind,sources:src.map(x=>x.id)},booleanRegions:[reg]});doc.figures.push(f);sk.children.push(f.id);made.push(f.id);});
+  snapshot(`2D ${kind}`);const made=[];regions.forEach(R=>{const reg={outer:R.outer.map(q=>[q[0],q[1]]),holes:R.holes.map(H=>H.map(q=>[q[0],q[1]]))};const f=mk('curve',nextName(`Boolean${kind[0].toUpperCase()+kind.slice(1)}`),{pts:reg.outer.map(q=>[q[0],q[1]]),closed:true},{ctype:'poly',parent:sk.id,fill:true,recipe:src.map(x=>x.name).concat(`2D ${kind}`),boolean:{op:kind,sources:src.map(x=>x.id)},booleanRegions:[reg],booleanPaths:[reg.analytic]});doc.figures.push(f);sk.children.push(f.id);made.push(f.id);});
   if(vals.keep===false)src.forEach(f=>{f.visible=false;});doc.sel=new Set(made);sub_.sel.clear();invalidate(sk.id);topoCache.clear();renderOutliner();renderInspector();renderCat();draw();log(`2D ${kind} · ${src.map(f=>f.name).join(' + ')} → ${made.map(id=>byId(id).name).join(', ')}`);return true;
 }
+function mapAnalyticDescriptor(d,fn){if(!d)return null;if(d.type==='line')return {type:'line',a:fn(d.a),b:fn(d.b)};const c=fn(d.c),p0=fn(analyticPoint2D(d,0)),ang=Math.atan2(p0[1]-c[1],p0[0]-c[0]),u=fn([d.c[0]+1,d.c[1]]),v=fn([d.c[0],d.c[1]+1]),det=(u[0]-c[0])*(v[1]-c[1])-(u[1]-c[1])*(v[0]-c[0]),out={...d,c,a0:ang,sweep:(d.sweep||Math.PI*2)*(det<0?-1:1)};if(d.type==='ellipse')out.rot=ang;return out;}
+function mapAnalyticRegions(regions,fn){return (regions||[]).map(R=>({outer:(R.outer||[]).map(d=>mapAnalyticDescriptor(d,fn)),holes:(R.holes||[]).map(H=>H.map(d=>mapAnalyticDescriptor(d,fn)))}));}
 function mirrorReferenceAxis2D(ref){
   if(!ref)return null;
   const C=ref.kind==='curve'?curvePlane(ref):null;
@@ -2193,7 +2218,7 @@ function mirrorReferenceAxis2D(ref){
 function mirrorSelection2D(axis,sourceOverride,reference){
   const src=sourceOverride||booleanSourceCurves(false);if(!src.length){log('2D mirror: select one or more sketch curves first');return false;}const sk=byId(src[0].parent);if(!sk||src.some(f=>f.parent!==sk.id)){log('2D mirror: all curves must belong to one sketch');return false;}
   const a=axis&&axis[0]||[0,0],b=axis&&axis[1]||[0,1];if(Math.hypot(b[0]-a[0],b[1]-a[1])<1e-7){log('2D mirror: axis has zero length');return false;}snapshot('2D mirror');const made=[];
-  src.forEach(s=>{const spec=xfPoints(s,mirrorFn(a,b));if(!spec)return;const g=spawnFrom(s,sk,spec);g.recipe=[s.name,reference?`2D mirror · ${reference.name}`:'2D mirror'];g.link={src:s.id,kind:'mirror',a:[...a],b:[...b],ref:reference?reference.id:undefined};if(s.booleanRegions)g.booleanRegions=s.booleanRegions.map(R=>({outer:FrontierCadKernel.mirror2D(R.outer,a,b),holes:(R.holes||[]).map(H=>FrontierCadKernel.mirror2D(H,a,b))}));made.push(g.id);});
+  src.forEach(s=>{const spec=xfPoints(s,mirrorFn(a,b));if(!spec)return;const g=spawnFrom(s,sk,spec);g.recipe=[s.name,reference?`2D mirror · ${reference.name}`:'2D mirror'];g.link={src:s.id,kind:'mirror',a:[...a],b:[...b],ref:reference?reference.id:undefined};if(s.booleanRegions)g.booleanRegions=s.booleanRegions.map(R=>({outer:FrontierCadKernel.mirror2D(R.outer,a,b),holes:(R.holes||[]).map(H=>FrontierCadKernel.mirror2D(H,a,b))}));if(s.booleanPaths)g.booleanPaths=mapAnalyticRegions(s.booleanPaths,mirrorFn(a,b));made.push(g.id);});
   invalidate(sk.id);topoCache.clear();doc.sel=new Set(made);renderOutliner();renderInspector();draw();log(`2D mirror · ${made.length} linked cop${made.length===1?'y':'ies'} across ${a[0]},${a[1]}`);return !!made.length;
 }
 function mirrorBySelectedReference(ids){
@@ -2306,12 +2331,12 @@ function ctrlCentroid(f){const C=f.ctype==='poly'?ctrlPlane(f):curvePlane(f);if(
 function migrateLinks(){let n=0;doc.figures.forEach(f=>{if(f.kind!=='curve'||f.link||!f.mirrorOf)return;const src=byId(f.mirrorOf);if(!src||src.kind!=='curve'){delete f.mirrorOf;return;}const c1=ctrlCentroid(src),c2=ctrlCentroid(f);if(!c1||!c2||Math.hypot(c2[0]-c1[0],c2[1]-c1[1])<1e-9){delete f.mirrorOf;return;}
     const m=[(c1[0]+c2[0])/2,(c1[1]+c2[1])/2];const d=[-(c2[1]-c1[1]),c2[0]-c1[0]];f.link={src:src.id,kind:'mirror',a:m,b:[m[0]+d[0],m[1]+d[1]]};delete f.mirrorOf;n++;});if(n)log(`upgraded ${n} mirror cop${n>1?'ies':'y'} to live links`);return n;}
 function syncLinks(){if(!syncLinks._mig){syncLinks._mig=true;migrateLinks();}let changed=false;const seen=new Set();const upd=f=>{if(seen.has(f.id))return;seen.add(f.id);const src=byId(f.link.src);if(!src||src.kind!=='curve'||src.parent!==f.parent){delete f.link;f.recipe=null;return;}if(src.link)upd(src);const fn=linkFn(f.link);if(!fn){delete f.link;return;}const spec=xfPoints(src,fn);if(!spec)return;
-    const cmp=spec.slot?{...spec.params,pts:f.params.pts}:spec.params;const linkedRegions=src.booleanRegions?src.booleanRegions.map(R=>({outer:R.outer.map(fn),holes:(R.holes||[]).map(H=>H.map(fn))})):null;const same=f.ctype===spec.ctype&&JSON.stringify(f.params)===JSON.stringify(cmp)&&JSON.stringify(f.booleanRegions||null)===JSON.stringify(linkedRegions)&&!(f.pos&&(f.pos[0]||f.pos[1]))&&!(f.rot3&&f.rot3[2]);if(same)return;
-    f.ctype=spec.ctype;f.params=spec.params;f.pos=[0,0,(f.pos||[0,0,0])[2]||0];f.rot3=[0,0,0];f.rot=0;f.scl=[1,1,1];f.cons=src.cons;if(linkedRegions)f.booleanRegions=linkedRegions;else delete f.booleanRegions;if(spec.slot)regenSlot(f);invalidate(f.id);invalidateTopo(f.id);changed=true;};
+    const cmp=spec.slot?{...spec.params,pts:f.params.pts}:spec.params;const linkedRegions=src.booleanRegions?src.booleanRegions.map(R=>({outer:R.outer.map(fn),holes:(R.holes||[]).map(H=>H.map(fn))})):null;const linkedPaths=src.booleanPaths?mapAnalyticRegions(src.booleanPaths,fn):null;const same=f.ctype===spec.ctype&&JSON.stringify(f.params)===JSON.stringify(cmp)&&JSON.stringify(f.booleanRegions||null)===JSON.stringify(linkedRegions)&&JSON.stringify(f.booleanPaths||null)===JSON.stringify(linkedPaths)&&!(f.pos&&(f.pos[0]||f.pos[1]))&&!(f.rot3&&f.rot3[2]);if(same)return;
+    f.ctype=spec.ctype;f.params=spec.params;f.pos=[0,0,(f.pos||[0,0,0])[2]||0];f.rot3=[0,0,0];f.rot=0;f.scl=[1,1,1];f.cons=src.cons;if(linkedRegions)f.booleanRegions=linkedRegions;else delete f.booleanRegions;if(linkedPaths)f.booleanPaths=linkedPaths;else delete f.booleanPaths;if(spec.slot)regenSlot(f);invalidate(f.id);invalidateTopo(f.id);changed=true;};
   doc.figures.forEach(f=>{if(f.kind==='curve'&&f.link)upd(f);});if(changed){doc.figures.forEach(f=>{if(f.kind==='sketch')invalidate(f.id);});}return changed;}
 function unlink(f){if(!f.link)return;snapshot('unlink '+f.name);delete f.link;renderInspector();draw();}
 // inspector: mirror a curve across another curve (pick from a dropdown of lines in the same sketch)
-function mirrorAcross(f,axisId){const sk=byId(f.parent);const ax=byId(axisId);if(!sk||!ax)return;const e=curvePlane(ax);if(!e)return;snapshot('mirror across '+ax.name);const a=e.pts[0],b=e.pts[e.pts.length-1],fn=mirrorFn(a,b);const spec=xfPoints(f,fn);if(!spec)return;const g=spawnFrom(f,sk,spec);g.recipe=[f.name,'mirror · '+ax.name];g.link={src:f.id,kind:'mirror',axis:ax.id};if(f.booleanRegions)g.booleanRegions=f.booleanRegions.map(R=>({outer:R.outer.map(fn),holes:(R.holes||[]).map(H=>H.map(fn))}));invalidate(sk.id);topoCache.clear();doc.sel=new Set([g.id]);renderOutliner();renderInspector();draw();log(`mirror ${f.name} across ${ax.name} → ${g.name}`);}
+function mirrorAcross(f,axisId){const sk=byId(f.parent);const ax=byId(axisId);if(!sk||!ax)return;const e=curvePlane(ax);if(!e)return;snapshot('mirror across '+ax.name);const a=e.pts[0],b=e.pts[e.pts.length-1],fn=mirrorFn(a,b);const spec=xfPoints(f,fn);if(!spec)return;const g=spawnFrom(f,sk,spec);g.recipe=[f.name,'mirror · '+ax.name];g.link={src:f.id,kind:'mirror',axis:ax.id};if(f.booleanRegions)g.booleanRegions=f.booleanRegions.map(R=>({outer:R.outer.map(fn),holes:(R.holes||[]).map(H=>H.map(fn))}));if(f.booleanPaths)g.booleanPaths=mapAnalyticRegions(f.booleanPaths,fn);invalidate(sk.id);topoCache.clear();doc.sel=new Set([g.id]);renderOutliner();renderInspector();draw();log(`mirror ${f.name} across ${ax.name} → ${g.name}`);}
 function drawToolPreview(g){if(!tool)return;const pl=activePlane();if(!pl)return;const B=planeBasis(pl);const W3=uv=>[B.o[0]+B.u[0]*uv[0]+B.v[0]*uv[1],B.o[1]+B.u[1]*uv[0]+B.v[1]*uv[1],B.o[2]+B.u[2]*uv[0]+B.v[2]*uv[1]];
   const P=hover&&!(tool.op.confirmStep&&tool.pts.length>=2)&&!(tool.pts.length&&tool.pts[tool.pts.length-1][0]===hover[0]&&tool.pts[tool.pts.length-1][1]===hover[1])?[...tool.pts,hover]:tool.pts.slice();
   const shape=shapeFrom(tool.op,P,tool.vals,false);

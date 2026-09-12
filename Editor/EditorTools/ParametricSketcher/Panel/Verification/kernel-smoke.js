@@ -58,6 +58,10 @@ assert.equal(boolArea(FrontierCadKernel.boolean2D([A, B], 'union')), 150, '2D un
 assert.equal(boolArea(FrontierCadKernel.boolean2D([A, B], 'intersection')), 50, '2D intersection arrangement');
 assert.equal(boolArea(FrontierCadKernel.boolean2D([A, B], 'subtract')), 50, '2D difference arrangement');
 assert.equal(FrontierCadKernel.boolean2D([A, B], 'xor').length, 2, '2D xor keeps both disjoint lobes');
+const circlePoly = (cx, r, n = 48) => Array.from({ length: n }, (_, i) => { const a = i * Math.PI * 2 / n; return [cx + Math.cos(a) * r, Math.sin(a) * r]; });
+const analyticCircle = (cx, r) => ({ outer: circlePoly(cx, r), holes: [], analytic: { outer: [{ type: 'arc', c: [cx, 0], r, a0: 0, sweep: Math.PI * 2 }], holes: [] } });
+const analyticUnion = FrontierCadKernel.boolean2D([analyticCircle(0, 10), analyticCircle(8, 10)], 'union');
+assert.ok(analyticUnion.paths.length && analyticUnion.paths[0].every(s => s.type === 'arc'), 'boolean result retains circular analytic arcs');
 assert.deepEqual(FrontierCadKernel.mirror2D([[2, 3], [5, 3]], [0, 0], [0, 1]), [[-2, 3], [-5, 3]], '2D mirror across the sketch V axis');
 
 console.log('Frontier CAD kernel smoke: all checks passed');
