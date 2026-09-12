@@ -65,20 +65,21 @@ grep -q 'kReferenceSpan' "$Header"
 Report $? "the march derives its count from a bounded step size"
 
 echo
-echo "[VolumetricMedia] advection is uniform plus frozen shear, never local flow times time"
+echo "[VolumetricMedia] advection is the wind integral, never local flow times time"
 # The streak note lives in WindField::AdvectDrift: the local flow times time-of-day piled 76 km of offset
 #    across the slab by 7am and shredded the sampling grid into horizontal streaks. Both densities route
-#    through the one helper; the old inline form (flow times the clock at the art factor) must not return.
+#    through the one helper — integral times altitude factor — and the frozen-shear form it replaced (a
+#    reference altitude, a shear memory, a cell clamp) must not return.
 DriftDefs=$(grep -c 'static void AdvectDrift' Engine/DisplayPresentation/WindField.h)
 [ "$DriftDefs" = "1" ]
 Report $? "exactly one AdvectDrift helper ($DriftDefs found)"
 DriftCalls=$(grep -c 'AdvectDrift(' "$Header")
 [ "$DriftCalls" = "2" ]
 Report $? "both densities route through it ($DriftCalls call sites)"
-grep -q '0.5f \* (Base + Top)' "$Header"
-Report $? "the layer advects by the slab-mid flow"
-grep -q 'Volume.Centre\[2\]' "$Header"
-Report $? "the box advects by the flow at its centre"
+grep -q 'Wind.Integral\[0\] \* Factor \* ArtFactor' Engine/DisplayPresentation/WindField.h
+Report $? "the helper scales the packed integral by the altitude factor"
+! grep -q 'ReferenceAltitudeMetres' Engine/DisplayPresentation/WindField.h
+Report $? "no reference altitude survives on the host"
 ! sed 's;//.*;;' "$Header" | grep -qE 'Time \* 0\.[86]f'
 Report $? "no inline flow-times-time drift in either density"
 
@@ -106,7 +107,7 @@ echo "[VolumetricMedia] cloud shafts come from the medium shadowing itself"
 # The scene-occlusion callback was removed - nothing in the engine called it and no such geometry exists yet.
 #    What stays is the half that renders: ShadowMarch accumulates cloud density along the sun ray, which is what
 #    lights a cloud at all. Deleting THAT would leave clouds flat, so it is guarded here.
-printf '%s' "$MediaCode" | grep -q 'Cloud.Enabled ? CloudDensity(Cloud, Wind, Q, Time) : 0.0f'
+printf '%s' "$MediaCode" | grep -q 'Cloud.Enabled ? CloudDensity(Cloud, Wind, Q) : 0.0f'
 Report $? "the sun-shadow march samples cloud density along the sun ray"
 ! printf '%s' "$MediaCode" | grep -q 'SunVisibilityAt'
 Report $? "the unused scene-occlusion callback is gone"

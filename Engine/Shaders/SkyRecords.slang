@@ -22,9 +22,10 @@
 //                                                   THE UNIFORM BLOCK
 //------------------------------------------------------------------------------------------------------------------------
 
-// 320 bytes, std140. Sized against Vulkan's guaranteed 128-byte push limit deliberately NOT applying here: the
-//    push block is already at that limit with five uint reserves left, and the atmosphere plus weather need twenty
-//    16-byte rows. A uniform buffer is the only place it fits, which is what the binding reservation anticipated.
+// 368 bytes, std140. Sized against Vulkan's guaranteed 128-byte push limit deliberately NOT applying here: the
+//    push block is already at that limit with five uint reserves left, and the atmosphere plus weather need
+//    twenty-three 16-byte rows. A uniform buffer is the only place it fits, which is what the binding reservation
+//    anticipated.
 layout(std140, binding = 21) uniform SkyConstants
 {
     vec4 SkySunDirection;    // xyz = unit, toward the sun (CelestialSolver's convention); w = elevation [deg]
@@ -42,7 +43,7 @@ layout(std140, binding = 21) uniform SkyConstants
     vec4 SkyCloudLayer;      // base, thickness, coverage, density
     vec4 SkyCloudShape;      // feature scale, ceiling, anvil, HG anisotropy
     vec4 SkyCloudWind;       // speed, bearing [deg], shear [/km], veer [deg/km]
-    vec4 SkyCloudAlbedo;     // rgb albedo, w = cloud clock seconds
+    vec4 SkyCloudAlbedo;     // rgb albedo, w retired (P2.2): SkyCloudClock carries the clock
     uvec4 SkyCloudControl;   // cloud steps, local steps, sun-shadow taps, reserved
     vec4 SkyLocalCloudCentre;
     vec4 SkyLocalCloudHalfSize;
@@ -50,6 +51,9 @@ layout(std140, binding = 21) uniform SkyConstants
     vec4 SkyLocalFogCentre;
     vec4 SkyLocalFogHalfSize;
     vec4 SkyLocalFogParams;
+    vec4 SkyCloudScatter;    // forward g1, back g2, lobe mix, absorption (P2.4b reads; packed P2.2)
+    vec4 SkyCloudDetail;     // sky ambient x, powder, erosion detail, local erosion detail (P2.4 reads)
+    vec4 SkyCloudClock;      // wind integral xy [m], wall clock [s], spare
 };
 
 // The sun's angular RADIUS, one definition for the three consumers: the disc below draws this body, the
@@ -246,19 +250,13 @@ vec3 CloudWindAt(float Altitude)
     return vec3(sin(Bearing), cos(Bearing), 0.0) * Speed;
 }
 
-// Uniform advection plus a frozen shear offset — the twin of WindField::AdvectDrift, which carries the streak
-//    note. NEVER the local flow times the clock: accumulating the altitude-varying wind over time-of-day piled
-//    76 km of offset across the slab by 7am and shredded the sampling grid into horizontal streaks. The whole
-//    medium rides the reference flow (slab-mid, box centre) and the shear/veer lean it statically: 120 s of
-//    shear memory, the caller's art factor, clamped to ±2 cells. The clock reads the record's own w lane.
-vec2 CloudDriftAt(float Altitude, float ReferenceAltitude, float Cell, float ArtFactor)
+// The wind displacement — the twin of WindField::AdvectDrift, which carries the streak note. The packed wind
+//    integral times the altitude factor (local wind over surface wind) times the caller's art factor: shear
+//    and veer lean the field progressively, never from time-of-day. Reads the Clock row, not the retired w lane.
+vec2 CloudDriftAt(float Altitude, float ArtFactor)
 {
-    vec3 Step = CloudWindAt(Altitude);
-    vec3 Reference = CloudWindAt(ReferenceAltitude);
-    const float kShearMemory = 120.0;
-    vec2 Shear = (Step.xy - Reference.xy) * (kShearMemory * ArtFactor);
-    Shear = clamp(Shear, vec2(-2.0 * Cell), vec2(2.0 * Cell));
-    return Reference.xy * (SkyCloudAlbedo.w * ArtFactor) + Shear;
+    float Factor = length(CloudWindAt(Altitude).xy) / max(1e-3, SkyCloudWind.x);
+    return SkyCloudClock.xy * Factor * ArtFactor;
 }
 
 float CloudDensityAt(vec3 Position)
@@ -274,7 +272,7 @@ float CloudDensityAt(vec3 Position)
 
     vec3 Drift = vec3(0.0);
     if ((SkyControl.z & kCloudFollowWindFlag) != 0u)
-        Drift.xy = CloudDriftAt(Position.z, 0.5 * (Base + Top), max(SkyCloudShape.x * 900.0, 1.0), 0.8);
+        Drift.xy = CloudDriftAt(Position.z, 0.8);
     float Inverse = 1.0 / max(SkyCloudShape.x * 900.0, 1.0);
     vec3 S = vec3((Position.xy + Drift.xy) * Inverse, Position.z * Inverse);
     float Shape = CloudNoise(S) * 0.5
@@ -306,7 +304,7 @@ float LocalDensityAt(vec3 Position, bool FogVolume)
     vec3 Drift = vec3(0.0);
     uint WindFlag = FogVolume ? kLocalFogWindFlag : kLocalCloudWindFlag;
     if ((SkyControl.z & WindFlag) != 0u)
-        Drift.xy = CloudDriftAt(Position.z, Centre.z, max(Params.z, 1.0), 0.6);
+        Drift.xy = CloudDriftAt(Position.z, 0.6);
     float Inverse = 1.0 / max(Params.z, 1.0);
     vec3 S = (Position + Drift) * Inverse;
     float Shape = CloudNoise(S) * 0.5 + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25;
@@ -400,9 +398,9 @@ float CloudHenyeyGreenstein(float CosTheta, float G)
 
 float CloudMarchJitter(vec3 Direction)
 {
-    // Twin of VolumetricMedia::MarchJitter, which carries the note. The clock reads the record's own w
-    //    lane — the march takes no Time parameter, exactly like the drift it sits beside.
-    return CloudHash(vec3(Direction.xy * 317.19, fract(SkyCloudAlbedo.w * 3.0)));
+    // Twin of VolumetricMedia::MarchJitter, which carries the note. The clock reads the record's Clock
+    //    row — the march takes no Time parameter, exactly like the drift it sits beside.
+    return CloudHash(vec3(Direction.xy * 317.19, fract(SkyCloudClock.z * 3.0)));
 }
 
 void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint Medium,

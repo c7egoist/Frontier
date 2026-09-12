@@ -235,7 +235,7 @@ public:
     // Celestial sky and weather record → binding 21, safe every frame: a memcpy into the persistently mapped
     //    uniform buffer, no reallocation and no descriptor rewrite. DeviceExchange must not include
     //    DisplayPresentation (it is the layer below it), so the caller packs with SkyConstantRecord and hands over
-    //    plain bytes. False when the bytes are null, the size is not 320, or the buffer does not exist yet; the
+    //    plain bytes. False when the bytes are null, the size is not 368, or the buffer does not exist yet; the
     //    previous contents stand, so a refusal degrades to a stale sky, not a tear.
     [[nodiscard]] bool          RefreshSky(const void* Bytes, uint32_t ByteCount) noexcept;
     // Celestial moon record → binding 22, safe every frame: the same arrangement as the sky record above, 288

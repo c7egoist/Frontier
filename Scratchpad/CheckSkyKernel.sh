@@ -97,25 +97,30 @@ printf '%s' "$Code" | grep -q 'CloudSunTransmittance(hitPos, shadeDir)'
 Report $? "the selected ReSTIR sun is shadowed by the cloud field"
 
 echo
-echo "[SkyKernel] the kernel's drift cannot shred the slab"
+echo "[SkyKernel] the kernel's drift is the packed integral, never time-of-day"
 # The streak note lives in WindField::AdvectDrift: the local flow times time-of-day piled 76 km of offset
-#    across the slab by 7am. Both densities must route through the one CloudDriftAt twin, whose clamp and shear
-#    memory are pinned pairwise with the CPU's below.
+#    across the slab by 7am. Both densities route through the one CloudDriftAt twin — integral times altitude
+#    factor — and the frozen-shear form it replaced (shear memory, two-cell clamp) must not return on either
+#    side. The w-lane clock it read is retired: the Clock row carries the integral and the wall.
 DriftDefs=$(printf '%s' "$SkyCode" | grep -c 'vec2 CloudDriftAt(float Altitude')
 [ "$DriftDefs" = "1" ]
 Report $? "exactly one CloudDriftAt twin ($DriftDefs found)"
 DriftCalls=$(printf '%s' "$SkyCode" | grep -c 'CloudDriftAt(Position')
 [ "$DriftCalls" = "2" ]
 Report $? "both densities route through it ($DriftCalls call sites)"
-printf '%s' "$SkyCode" | grep -q 'clamp(Shear, vec2(-2.0 \* Cell), vec2(2.0 \* Cell))'
-Report $? "the shear offset is clamped to two cells"
-printf '%s' "$SkyCode" | grep -q 'kShearMemory = 120.0;'
-Report $? "the shader's shear memory is 120 s"
-grep -q 'kShearMemory = 120.0f;' Engine/DisplayPresentation/WindField.h
-Report $? "the host's shear memory is the same 120 s"
+printf '%s' "$SkyCode" | grep -q 'SkyCloudClock.xy \* Factor \* ArtFactor'
+Report $? "the drift is the packed integral times the altitude factor"
+printf '%s' "$SkyCode" | grep -q 'max(1e-3, SkyCloudWind.x)'
+Report $? "the factor divides by the surface wind, guarded at zero"
+! printf '%s' "$SkyCode" | grep -q 'kShearMemory'
+Report $? "no shear memory survives in the shader"
+! grep -q 'kShearMemory' Engine/DisplayPresentation/WindField.h
+Report $? "none survives on the host either"
+! printf '%s' "$SkyCode" | grep -q 'SkyCloudAlbedo.w'
+Report $? "nothing reads the retired w-lane clock"
 WindCalls=$(printf '%s' "$SkyCode" | grep -c 'CloudWindAt(')
-[ "$WindCalls" = "3" ]
-Report $? "the wind is sampled only inside the drift ($WindCalls sites: def + 2)"
+[ "$WindCalls" = "2" ]
+Report $? "the wind is sampled only inside the drift ($WindCalls sites: def + 1)"
 
 echo
 echo "[SkyKernel] the kernel's shadow, steps and whites match the march"
@@ -206,8 +211,8 @@ Report $? "sunlight carries the panel's 5800 K tint"
 
 echo
 echo "[SkyKernel] the C++ mirror matches the shader's std140 layout"
-grep -q 'static_assert(sizeof(SkyConstantRecord) == 320u' Engine/DisplayPresentation/SkyConstantRecord.h
-Report $? "the sky and weather record is pinned at 320 bytes"
+grep -q 'static_assert(sizeof(SkyConstantRecord) == 368u' Engine/DisplayPresentation/SkyConstantRecord.h
+Report $? "the sky and weather record is pinned at 368 bytes"
 Offsets=$(grep -c 'static_assert(offsetof(SkyConstantRecord' Engine/DisplayPresentation/SkyConstantRecord.h)
 [ "$Offsets" -ge 8 ]
 Report $? "every member's offset is asserted ($Offsets of them)"
@@ -228,10 +233,10 @@ grep -q 'PoolSizes\[2\].descriptorCount = 3u' "$X"
 Report $? "the sampler pool no longer budgets binding 22"
 grep -q 'PoolSizes\[3\].descriptorCount = 3u' "$X"
 Report $? "the UBO pool budgets sky, moons and the retired hole"
-# DeviceExchange may not include DisplayPresentation, so the 320 restated there is pinned by hand: if the mirror
+# DeviceExchange may not include DisplayPresentation, so the 368 restated there is pinned by hand: if the mirror
 #    ever grows, this is the check that says the host allocation did not follow it.
-grep -q 'kSkyRecordBytes = 320u' "$X"
-Report $? "the host allocation agrees with the mirror's 320 bytes"
+grep -q 'kSkyRecordBytes = 368u' "$X"
+Report $? "the host allocation agrees with the mirror's 368 bytes"
 # A write's descriptorType must equal the layout's too, which is why 21 has its own helper rather than WriteBuffer.
 grep -q 'Write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; Write.pBufferInfo' "$X"
 Report $? "the write helper speaks uniform-buffer, not storage-buffer"

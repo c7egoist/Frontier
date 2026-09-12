@@ -99,8 +99,9 @@ public:
         // The clouds, by value: the settings are small, and a disabled struct is the march's own early-out, so
         //    lending values keeps the lifetimes trivial. All three default to disabled, so nothing existing
         //    changes until the project lends live ones. The wind advects them, the budget paces the march, and
-        //    the clock is time-of-day seconds — the rain's precedent (Tick passes LocalHours * 3600 to the
-        //    precipitation pool), so scrubbing the day cycle drifts the sky and a still frame stays put.
+        //    the clock is wall-clock seconds from Tick (P2.2) — the drift reads Wind.Integral, the march reads
+        //    this for its jitter, and scrubbing the day cycle moves neither (time-of-day advection shredded
+        //    the slab; WindField::AdvectDrift carries the note).
         CloudLayerSettings  CloudLayer{};
         LocalVolumeSettings LocalCloud{};
         LocalVolumeSettings LocalFog{};

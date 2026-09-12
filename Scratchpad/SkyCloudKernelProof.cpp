@@ -95,20 +95,14 @@ void TwinWindAt(const SkyConstantRecord& K, float Altitude, float Out[3])
     float Bearing = (K.CloudWind[1] + K.CloudWind[3] * Km) * 3.14159265358979323846f / 180.0f;
     Out[0] = std::sin(Bearing)*Speed; Out[1] = std::cos(Bearing)*Speed; Out[2] = 0.0f;
 }
-void TwinDriftAt(const SkyConstantRecord& K, float Altitude, float RefAltitude, float Cell,
-                 float ArtFactor, float Out[2])
+void TwinDriftAt(const SkyConstantRecord& K, float Altitude, float ArtFactor, float Out[2])
 {
-    float Step[3], Reference[3];
+    float Step[3];
     TwinWindAt(K, Altitude, Step);
-    TwinWindAt(K, RefAltitude, Reference);
-    const float kShearMemory = 120.0f;
-    for (int C = 0; C < 2; ++C)
-    {
-        float Shear = (Step[C]-Reference[C]) * (kShearMemory*ArtFactor);
-        const float Limit = 2.0f*Cell;
-        Shear = Shear < -Limit ? -Limit : (Shear > Limit ? Limit : Shear);
-        Out[C] = Reference[C]*(K.CloudAlbedo[3]*ArtFactor) + Shear;
-    }
+    float StepLength = std::sqrt(Step[0]*Step[0] + Step[1]*Step[1]);
+    float Factor = StepLength / std::fmax(1e-3f, K.CloudWind[0]);
+    Out[0] = K.CloudClock[0]*Factor*ArtFactor;
+    Out[1] = K.CloudClock[1]*Factor*ArtFactor;
 }
 float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3])
 {
@@ -124,7 +118,7 @@ float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3])
     if ((K.Control[2] & kTwinFollowWindFlag) != 0u)
     {
         float Advected[2];
-        TwinDriftAt(K, Position[2], 0.5f*(Base+Top), std::fmax(K.CloudShape[0]*900.0f, 1.0f), 0.8f, Advected);
+        TwinDriftAt(K, Position[2], 0.8f, Advected);
         Drift[0] = Advected[0]; Drift[1] = Advected[1];
     }
     float Inverse = 1.0f/std::fmax(K.CloudShape[0]*900.0f, 1.0f);
@@ -161,7 +155,7 @@ float TwinLocalDensityAt(const SkyConstantRecord& K, const float Position[3], bo
     if ((K.Control[2] & WindFlag) != 0u)
     {
         float Advected[2];
-        TwinDriftAt(K, Position[2], Centre[2], std::fmax(Params[2], 1.0f), 0.6f, Advected);
+        TwinDriftAt(K, Position[2], 0.6f, Advected);
         Drift[0] = Advected[0]; Drift[1] = Advected[1];
     }
     float Inverse = 1.0f/std::fmax(Params[2], 1.0f);
@@ -432,45 +426,55 @@ int main()
     const float Aspect = (float)kW / (float)kH;
     ColourTransfer Colour{};
 
-    // 1 ─ the drift bound, both twins: the altitude-varying part of the offset can never span more than the
-    //    clamp's width across the slab, whatever the sliders say (deterministic — no field instance involved).
+    // 1 ─ the drift formula, both twins: displacement = integral × altitude factor × art, exactly. The old
+    //    span bound died with the frozen-shear form it guarded: the integral's shear leans progressively by
+    //    design (the reference ships it), so what this pins instead is the formula itself — hand-computed from
+    //    the trusted SampleStep — plus bit-exact CPU/kernel agreement across a sweep of altitudes, integrals
+    //    and slider extremes. Coherence at scale is proven by the renders below, which march a 2 h integral.
     {
-        bool CpuOk = true, KernelOk = true;
+        bool FormulaOk = true, TwinsOk = true;
         const float Cases[3][2] = { { 0.0f, 0.0f }, { 1.0f, 31.0f }, { 2.0f, 60.0f } };
+        const float Integrals[3][2] = { { 0.0f, 0.0f }, { 1234.5f, -678.9f }, { 30240.0f, -15120.0f } };
         for (const auto& Case : Cases)
         {
             WindSettings Probe = Wind;
             Probe.Shear = Case[0]; Probe.Veer = Case[1];
-            float Cell = std::fmax(Cloud.Scale*900.0f, 1.0f);
-            float Mid = Cloud.Base + 0.5f*Cloud.Thickness;
-            float Ref[2]; WindField::AdvectDrift(Probe, Mid, Mid, 25128.0f, Cell, 0.8f, Ref);
-            // The kernel twin reads the record's own packed wind; steer the pack through the live wind so both
-            //    twins face the same sliders.
-            WindSettings SavedWind = Sky.Wind;
-            Sky.Wind = Probe;
-            SkyConstantRecord ProbeK = Sky.PackSkyRecord();
-            Sky.Wind = SavedWind;
-            for (float A = Cloud.Base-200.0f; A <= Cloud.Base+Cloud.Thickness+200.0f; A += 50.0f)
+            for (const auto& Int : Integrals)
             {
-                float D[2]; WindField::AdvectDrift(Probe, A, Mid, 25128.0f, Cell, 0.8f, D);
-                float Span = std::fmax(std::fabs(D[0]-Ref[0]), std::fabs(D[1]-Ref[1]));
-                if (Span > 4.0f*Cell + 1.0f) CpuOk = false;
-                float G[2], GRef[2];
-                TwinDriftAt(ProbeK, A, Mid, Cell, 0.8f, G);
-                TwinDriftAt(ProbeK, Mid, Mid, Cell, 0.8f, GRef);
-                float KernelSpan = std::fmax(std::fabs(G[0]-GRef[0]), std::fabs(G[1]-GRef[1]));
-                if (KernelSpan > 4.0f*Cell + 1.0f) KernelOk = false;
+                Probe.Integral[0] = Int[0]; Probe.Integral[1] = Int[1];
+                // The kernel twin reads the record's own packed wind; steer the pack through the live wind
+                //    so both twins face the same sliders and the same integral.
+                WindSettings SavedWind = Sky.Wind;
+                Sky.Wind = Probe;
+                SkyConstantRecord ProbeK = Sky.PackSkyRecord();
+                Sky.Wind = SavedWind;
+                for (float A = Cloud.Base-200.0f; A <= Cloud.Base+Cloud.Thickness+200.0f; A += 50.0f)
+                {
+                    float D[2]; WindField::AdvectDrift(Probe, A, 0.8f, D);
+                    float Step[3]; WindField::SampleStep(Probe, A, Step);
+                    float Len = std::sqrt(Step[0]*Step[0] + Step[1]*Step[1]);
+                    float F = Len / std::fmax(1e-3f, Probe.Speed);
+                    for (int C = 0; C < 2; ++C)
+                    {
+                        float E = Int[C]*F*0.8f;
+                        float Tol = std::fmax(std::fabs(E)*1e-5f, 1e-3f);
+                        if (std::fabs(D[C]-E) > Tol) FormulaOk = false;
+                    }
+                    float G[2]; TwinDriftAt(ProbeK, A, 0.8f, G);
+                    if (G[0] != D[0] || G[1] != D[1]) TwinsOk = false;
+                }
             }
         }
-        Expect(CpuOk, "CPU drift: shear/veer span <= 4 cells at any slider extreme");
-        Expect(KernelOk, "kernel drift: shear/veer span <= 4 cells at any slider extreme");
+        Expect(FormulaOk, "CPU drift equals integral x altitude factor x art");
+        Expect(TwinsOk, "kernel drift matches the CPU bit-for-bit");
     }
 
     // 2 ─ render the morning frame through the kernel twin, and through the raster for the parity check. The
     //    per-pixel frame is the lab's (atmosphere + aureole + ground + colour); only the cloud march swaps.
     static unsigned char TwinRgb[(size_t)kW*kH*3u], RasterRgb[(size_t)kW*kH*3u];
     auto Render = [&](const SkyConstantRecord& K, unsigned char* Rgb, bool Twin) {
-        float CloudTime = Sky.Observation.LocalHours * 3600.0f;
+        // The raster branch reads the PACKED wall clock, like everything else it shares with the twin.
+        float CloudTime = K.CloudClock[2];
         for (uint32_t Py = 0; Py < kH; ++Py) for (uint32_t Px = 0; Px < kW; ++Px)
         {
             const float Sx = (2.0f * ((Px + 0.5f) / (float)kW) - 1.0f) * TanHalf * Aspect;
@@ -559,22 +563,30 @@ int main()
     Expect(MeanTwin > 0.15f && MeanTwin < 0.85f, "morning kernel render: mean luminance sane");
     Expect(Diff < 0.05f, "kernel twin matches the raster march (dual-path parity)");
 
-    // 3 ─ two cloud-hours later the OLD drift had piled 58 cells of shear across the slab; the uniform drift
-    //    must render the same coherent field. Only the clock advances — the sun stays put.
+    // 3 ─ two wall-clock hours later the integral holds ~50 km of drift (2 h of staged 7 m/s wind): the
+    //    field must have MOVED (or the clock is decorative) and stayed coherent (or the shear shredded it).
+    //    Only Tick advances — LocalHours never moves, so the sun stays put while the clouds sail.
     {
-        double SavedHours = Sky.Observation.LocalHours;
-        Sky.Observation.LocalHours = SavedHours + 2.0;
+        static unsigned char MorningRgb[(size_t)kW*kH*3u];
+        for (uint32_t I = 0u; I < (uint32_t)sizeof(MorningRgb); ++I) MorningRgb[I] = TwinRgb[I];
+        const float LateOrigin[3] = { 0.0f, 0.0f, 2.0f };
+        Sky.Tick(7200.0f, LateOrigin, 0.0f);
         SkyConstantRecord Late = Sky.PackSkyRecord();
         Render(Late, TwinRgb, true);
-        Sky.Observation.LocalHours = SavedHours;
         float LateDy = 0.0f, LateDx = 0.0f;
         StreakGauge(TwinRgb, kW, kH, LateDy, LateDx);
-        double Sum = 0.0; long N = 0;
+        double Sum = 0.0, Moved = 0.0; long N = 0;
         for (uint32_t I = 0; I < kW*kH; ++I)
-            for (int C = 0; C < 3; ++C) { Sum += TwinRgb[I*3u+C]/255.0; ++N; }
+            for (int C = 0; C < 3; ++C)
+            {
+                Sum += TwinRgb[I*3u+C]/255.0;
+                Moved += std::fabs(int(TwinRgb[I*3u+C])-int(MorningRgb[I*3u+C]))/255.0; ++N;
+            }
         float LateMean = float(Sum/double(N));
-        std::printf("  +2h cloud clock: streakDy=%.4f streakDx=%.4f ratio=%.2f mean=%.3f\n",
-                    LateDy, LateDx, LateDy/std::fmax(LateDx, 1e-6f), LateMean);
+        float Drift = float(Moved/double(N));
+        std::printf("  +2h wall clock: streakDy=%.4f streakDx=%.4f ratio=%.2f mean=%.3f drift=%.3f\n",
+                    LateDy, LateDx, LateDy/std::fmax(LateDx, 1e-6f), LateMean, Drift);
+        Expect(Drift > 0.03f, "+2h kernel render: the field moved with the clock");
         Expect(LateDy < 0.06f, "+2h kernel render: elevation residual stays coherent");
         Expect(LateDy < 1.6f*LateDx + 0.01f, "+2h kernel render: no directional streak signature");
         Expect(LateMean > 0.15f && LateMean < 0.85f, "+2h kernel render: mean luminance sane");

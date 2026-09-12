@@ -46,7 +46,7 @@ Report $? "and reports that state rather than silently emitting nothing"
 
 echo
 echo "[Precipitation] cloud cover is a gate, not a probability"
-printf '%s' "$Code" | grep -q 'ColumnCover(Cloud, Wind, X, Y, SlabBase, SlabTop, Time) < Settings.MinimumCloudCover'
+printf '%s' "$Code" | grep -q 'ColumnCover(Cloud, Wind, X, Y, SlabBase, SlabTop) < Settings.MinimumCloudCover'
 Report $? "a column below the cover threshold produces nothing"
 # The demo's form was `random() > min(1, .25 + cover*1.2)`. Any random() in the spawn gate is that bug returning.
 ! printf '%s' "$Code" | grep -qE 'Random\(\) *[<>] *[^;]*Cover'

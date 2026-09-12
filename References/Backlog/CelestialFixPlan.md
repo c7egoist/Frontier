@@ -213,3 +213,25 @@ Status log (append; newest last):
   box 14009/0.417), shader-compile (SPIR-V clean), moon, tiers, fidelity, exposure, editor-preview, scene. Noon
   A/B: horizontal striations across every puff (before) -> fine incoherent grain (after); the grain is the
   sharpened remap under dither (D2d) and P2.4a's linear remap + erosion removes its cause. Sheets recommitted.
+- 2026-09-13: P2.2 LANDED (wind-integral clock + reference defaults + record growth). Tick now advances a
+  wall-clock wind integral (gusted surface flow, REF windStep order — gust from the un-advanced phase), the
+  gust phase at dt*(.35+gust*.4), and a wall-seconds dither clock; LocalHours moves none of them. AdvectDrift
+  is REF windDisp transcribed exactly (integral x |step|/speed x art, trig-only): the Time, reference-altitude
+  and cell params are gone, and with them the 120 s shear memory and the 2-cell clamp (both gates now assert
+  their absence). Densities and the shadow march dropped their dead Time params (P2.4a re-adds wall time to the
+  densities for the erosion drift); the march keeps it for the jitter. SampleSwirl re-transcribed term-by-term
+  (horizontal-plane time advection — the old form drifted altitude upward — and the reference mix (Dz-Dy,
+  Dx-Dz, Dy-Dx)); WindFieldProof section 7 pins it against an independent inline transcription (0.000e+00 over
+  64 probes) and section 8 pins the drift formula plus the zero-wind/zero-integral guards. Struct defaults all
+  REF now (wind 4.2@214 FROM + comment fix, shear .6, veer 18, turb .2; cov .45, thick 900, scale 1.4, anvil .3,
+  albedo white; local (40,-160,120)/(90,70,35)/1.2/30; budget taps 6->4 — every sheet already renders at tier
+  taps, so the pre-jitter posterization note is dead; Steadiness kept as a documented ENG extension, default
+  1.0 = REF). Prepare's staged look untouched (P5 owns staging; only fog g .45->.6 added). Record 320->368 B
+  (+SkyCloudScatter/Detail/Clock; Albedo.w retired to 0, sole reader gone): host mirror, shader block, host
+  allocation, pack proof and both gate pins moved together; shader drift/jitter read the Clock row. Twin proof:
+  drift test rewritten (formula + bit-exact CPU/kernel agreement — PASS), raster branch reads the packed wall,
+  +2h test now Ticks 7200 s and pins drift=0.053 (moved) with streak 0.055/0.049 ratio 1.12 (coherent). Gates
+  green with NO re-pins: wind, volumetric, sky-kernel (parity 0.0013), celestial-sky (census holds undrifted:
+  noon 136590/127.1, box 13669/0.508), shader-compile, precip (one stale pin updated), moon, tiers, fidelity,
+  exposure, editor-preview, scene. Two missed density callers caught by the pack-proof build (precip emitter,
+  sky census probe). Morning render recommitted: undrifted broken sky, blue gaps overhead, veiling at horizon.

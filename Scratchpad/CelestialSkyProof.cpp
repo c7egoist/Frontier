@@ -1045,7 +1045,7 @@ int main()
                     const float P[3] = { Sky.LocalCloud.Centre[0] + X * 50.0f,
                                          Sky.LocalCloud.Centre[1] + Y * 50.0f,
                                          Sky.LocalCloud.Centre[2] + Z * 25.0f };
-                    BodySum += VolumetricMedia::LocalDensity(Sky.LocalCloud, Sky.Wind, P, 11.0f * 3600.0f);
+                    BodySum += VolumetricMedia::LocalDensity(Sky.LocalCloud, Sky.Wind, P);
                     ++BodyN;
                 }
         const double BodyMean = BodySum / BodyN;

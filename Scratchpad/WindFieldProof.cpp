@@ -75,9 +75,10 @@ int main()
     {
         float Surface[3];
         WindField::SampleStep(Wind, 0.0f, Surface);
-        // Bearing 225 means blowing toward the south-west: -X and -Y in equal measure.
+        // Bearing 225 reads FROM the south-west: the upwind vector points back -X and -Y in equal measure
+        //    (the advected pattern moves downwind, opposite — the reference panel's FROM convention).
         const bool Quadrant = Surface[0] < 0.0f && Surface[1] < 0.0f;
-        Expect(Quadrant, "bearing 225 blows toward the south-west");
+        Expect(Quadrant, "bearing 225 points upwind to the south-west");
         Expect(std::fabs(Length(Surface) - Wind.Speed) < 1e-4f, "surface speed matches the setting exactly");
         Expect(std::fabs(Surface[2]) < 1e-6f, "the base flow is horizontal");
     }
@@ -214,6 +215,103 @@ int main()
         std::printf("     8.0 m/s reads force %u, %s\n",
                     WindField::BeaufortForce(8.0f), WindField::BeaufortName(WindField::BeaufortForce(8.0f)));
         Expect(Correct, "every threshold lands on the right force");
+    }
+
+    // ── ⑦ the swirl is the reference windTurb, independently ─────────────────────────────────────────────────
+    // P2.2 re-transcribed SampleSwirl term-by-term (horizontal-plane time advection, the reference's
+    // (n1-n2,n2-n3,n3-n1) mix with the axis permutation folded in). The transcription was verified by reading
+    // against REF windTurb; what this pins is that the production code computes what the reading says: an
+    // independent hash13 + trilinear + curl, written inline from the reference formula, must agree with
+    // SampleSwirl to float noise at every probe point. (It would have caught the old bug: the z-advected
+    // form disagrees with this check at every nonzero clock.)
+    std::printf("\n7. the swirl matches an independent transcription of windTurb\n");
+    {
+        auto RefHash = [](float X, float Y, float Z) {
+            float Px = X * 0.1031f, Py = Y * 0.1031f, Pz = Z * 0.1031f;
+            Px -= std::floor(Px); Py -= std::floor(Py); Pz -= std::floor(Pz);
+            const float D = Px * (Pz + 31.32f) + Py * (Py + 31.32f) + Pz * (Px + 31.32f);
+            Px += D; Py += D; Pz += D;
+            const float H = (Px + Py) * Pz;
+            return H - std::floor(H);
+        };
+        auto RefNoise = [&](float X, float Y, float Z) {
+            const float Ix = std::floor(X), Iy = std::floor(Y), Iz = std::floor(Z);
+            const float Fx = X - Ix, Fy = Y - Iy, Fz = Z - Iz;
+            const float Ux = Fx * Fx * (3.0f - 2.0f * Fx);
+            const float Uy = Fy * Fy * (3.0f - 2.0f * Fy);
+            const float Uz = Fz * Fz * (3.0f - 2.0f * Fz);
+            const float N000 = RefHash(Ix, Iy, Iz),         N100 = RefHash(Ix + 1, Iy, Iz);
+            const float N010 = RefHash(Ix, Iy + 1, Iz),     N110 = RefHash(Ix + 1, Iy + 1, Iz);
+            const float N001 = RefHash(Ix, Iy, Iz + 1),     N101 = RefHash(Ix + 1, Iy, Iz + 1);
+            const float N011 = RefHash(Ix, Iy + 1, Iz + 1), N111 = RefHash(Ix + 1, Iy + 1, Iz + 1);
+            const float X00 = N000 + (N100 - N000) * Ux, X10 = N010 + (N110 - N010) * Ux;
+            const float X01 = N001 + (N101 - N001) * Ux, X11 = N011 + (N111 - N011) * Ux;
+            const float Y0 = X00 + (X10 - X00) * Uy,     Y1 = X01 + (X11 - X01) * Uy;
+            return Y0 + (Y1 - Y0) * Uz;
+        };
+        WindSettings SwirlWind = Wind;
+        SwirlWind.Turbulence = 0.2f; SwirlWind.Steadiness = 1.0f;
+        double Worst = 0.0;
+        for (int I = 0; I < 64; ++I)
+        {
+            const float P[3] = { static_cast<float>(I % 8) * 13.7f - 41.0f,
+                                 static_cast<float>((I / 8) % 8) * 9.1f - 27.0f,
+                                 static_cast<float>(I % 5) * 311.0f + 7.0f };
+            const float T = static_cast<float>(I) * 0.37f;
+            float Got[3];
+            WindField::SampleSwirl(SwirlWind, P, T, Got);
+            // REF windTurb in Z-up axes: q = p*.02 + (t*.05, t*.03, 0), then the (n1-n2,n2-n3,n3-n1) mix.
+            const float Qx = P[0] * 0.02f + T * 0.05f;
+            const float Qy = P[1] * 0.02f + T * 0.03f;
+            const float Qz = P[2] * 0.02f;
+            constexpr float E = 0.5f;
+            const float Dx = RefNoise(Qx + E, Qy, Qz) - RefNoise(Qx - E, Qy, Qz);
+            const float Dy = RefNoise(Qx, Qy + E, Qz) - RefNoise(Qx, Qy - E, Qz);
+            const float Dz = RefNoise(Qx, Qy, Qz + E) - RefNoise(Qx, Qy, Qz - E);
+            const float Scale = SwirlWind.Turbulence * SwirlWind.Speed * 0.9f;
+            const float Want[3] = { (Dz - Dy) * Scale, (Dx - Dz) * Scale, (Dy - Dx) * Scale };
+            for (int C = 0; C < 3; ++C)
+                Worst = std::fmax(Worst, std::fabs(static_cast<double>(Got[C] - Want[C])));
+        }
+        std::printf("     worst component difference over 64 probes: %.3e\n", Worst);
+        Expect(Worst < 1e-5, "production swirl matches the independent transcription");
+    }
+
+    // ── ⑧ the drift is integral times altitude factor ────────────────────────────────────────────────────────
+    // P2.2 replaced the frozen-shear form with the reference windDisp: the whole medium rides the wall-clock
+    // integral, each altitude scaled by its own wind over the surface wind. Hand-checked against SampleStep
+    // (the trusted primitive): the formula, the zero-integral rest state, and the zero-wind guard.
+    std::printf("\n8. the drift scales the integral by the altitude factor\n");
+    {
+        WindSettings DriftWind = Wind;
+        DriftWind.Integral[0] = 2500.0f; DriftWind.Integral[1] = -1200.0f;
+        bool Formula = true;
+        for (float A : { 0.0f, 1500.0f, 3000.0f, 8000.0f })
+        {
+            float D[2];
+            WindField::AdvectDrift(DriftWind, A, 0.8f, D);
+            float Step[3];
+            WindField::SampleStep(DriftWind, A, Step);
+            const float Len = std::sqrt(Step[0]*Step[0] + Step[1]*Step[1]);
+            const float F = Len / std::fmax(1e-3f, DriftWind.Speed);
+            for (int C = 0; C < 2; ++C)
+            {
+                const float E = (C == 0 ? 2500.0f : -1200.0f) * F * 0.8f;
+                if (std::fabs(D[C] - E) > std::fmax(std::fabs(E) * 1e-6f, 1e-4f)) Formula = false;
+            }
+        }
+        Expect(Formula, "drift equals integral x |step|/speed x art at every altitude");
+
+        WindSettings Calm = Wind;
+        Calm.Speed = 0.0f; Calm.Integral[0] = 999.0f; Calm.Integral[1] = 999.0f;
+        float Zero[2];
+        WindField::AdvectDrift(Calm, 1500.0f, 0.8f, Zero);
+        Expect(Zero[0] == 0.0f && Zero[1] == 0.0f, "zero wind holds the field still (guarded, no NaN)");
+
+        WindSettings Fresh = Wind;
+        float Rest[2];
+        WindField::AdvectDrift(Fresh, 1500.0f, 0.8f, Rest);
+        Expect(Rest[0] == 0.0f && Rest[1] == 0.0f, "a zero integral is the rest state, whatever the sliders say");
     }
 
     std::printf("\n");

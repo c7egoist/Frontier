@@ -291,6 +291,7 @@ void CelestialSequence::Prepare() noexcept
     LocalCloud.Coverage = 0.8f; LocalCloud.Density = 2.5f; LocalCloud.Scale = 40.0f;
     LocalFog.Centre[0] = 70.0f; LocalFog.Centre[1] = 90.0f; LocalFog.Centre[2] = 14.0f;
     LocalFog.HalfSize[0] = 70.0f; LocalFog.HalfSize[1] = 70.0f; LocalFog.HalfSize[2] = 14.0f;
+    LocalFog.Anisotropy = 0.6f;   // REF vf_g (the struct default is the cloud's single-g; P2.4b duals both)
 
     Precip.Enabled = false;
     Rain.Configure(8192u);
@@ -340,9 +341,20 @@ void CelestialSequence::Tick(float DeltaSeconds, const float Camera[3], float Gr
     Solved = CelestialSolver::Solve(Observation);
     for (int C = 0; C < 3; ++C) Light.Direction[C] = Solved.Sun.Direction[C];
 
-    // ③ The wind's gust phase. Everything downstream advects by this, so it moves before they do.
-    Wind.GustPhase += DeltaSeconds * 0.35f;
-    if (Wind.GustPhase > 6.28318531f * 1024.0f) Wind.GustPhase -= 6.28318531f * 1024.0f;
+    // ③ The wind: the gust envelope sampled from the current phase, then the integral, the phase and the
+    //    wall clock advance together — the reference windStep order (gust from the un-advanced phase). The
+    //    integral is wall time's, never time-of-day's: scrubbing LocalHours must not teleport the clouds.
+    //    (Unwrapped like the reference: a month of wind is 10 000 km, still sub-metre-quantized in float.)
+    {
+        float Base[3];
+        WindField::SampleStep(Wind, 0.0f, Base);
+        const float GustNow = WindField::SampleGust(Wind);
+        Wind.Integral[0] += Base[0] * GustNow * DeltaSeconds;
+        Wind.Integral[1] += Base[1] * GustNow * DeltaSeconds;
+        Wind.GustPhase += DeltaSeconds * (0.35f + Wind.Gust * 0.4f);
+        if (Wind.GustPhase > 6.28318531f * 1024.0f) Wind.GustPhase -= 6.28318531f * 1024.0f;
+        WallSeconds_ += DeltaSeconds;
+    }
 
     // ④ Precipitation last: its emitter reads the cloud layer, which the wind has just moved.
     const bool Falling = Precip.Enabled && Shown[static_cast<uint32_t>(CelestialEntity::Precipitation)];
@@ -411,7 +423,9 @@ void CelestialSequence::ApplyTo(VisibilityRaster& Raster, const CelestialBudget&
     Settings.LocalFog = (WantLocalFog && LocalFog.Enabled) ? LocalFog : LocalVolumeSettings{};
     Settings.Wind = Wind;
     Settings.CloudBudget = Budget.Volumetrics;
-    Settings.CloudTime = Observation.LocalHours * 3600.0f;
+    // Wall-clock seconds, decoupled from LocalHours (P2.2): the drift reads Wind.Integral, the march reads
+    //    this for its jitter — scrubbing the time of day moves neither.
+    Settings.CloudTime = WallSeconds_;
 
     Raster.AssignCelestial(Settings);
 
@@ -454,7 +468,7 @@ SkyConstantRecord CelestialSequence::PackSkyRecord() const noexcept
                    WantClouds ? Cloud : CloudLayerSettings{},
                    WantLocalCloud ? LocalCloud : LocalVolumeSettings{},
                    WantLocalFog ? LocalFog : LocalVolumeSettings{},
-                   Wind, Budget.Volumetrics, Observation.LocalHours * 3600.0f);
+                   Wind, Budget.Volumetrics, WallSeconds_);
     return Record;
 }
 

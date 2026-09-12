@@ -9,6 +9,8 @@
 //    • a base flow with speed and bearing, sheared and veered with altitude (Ekman-like: faster and turning
 //      clockwise as you climb, because friction with the ground falls away),
 //    • a gust envelope, three sines at incommensurate rates so it never audibly loops,
+//    • the wind integral: the gusted surface flow accumulated over wall time by Tick — the ONLY clock the
+//      march advects by (P2.2), so scrubbing the time of day never moves a cloud,
 //    • curl turbulence — the curl of a low-frequency noise field, which is divergence-free by construction and
 //      therefore swirls without compressing the air.
 //
@@ -43,14 +45,17 @@ namespace Frontier {
 //    rather than a translation of it.
 struct WindSettings
 {
-    float Speed     = 8.0f;    // [m/s] at the surface — the panel's Force, shown on the Beaufort rose
-    float Bearing   = 225.0f;  // [deg] compass bearing the wind blows TOWARD
-    float Shear     = 0.35f;   // [x/km] fractional speed gain per kilometre of altitude
-    float Veer      = 12.0f;   // [deg/km] clockwise turn per kilometre (Ekman spiral)
+    float Speed     = 4.2f;    // [m/s] at the surface — the panel's Force, shown on the Beaufort rose
+    float Bearing   = 214.0f;  // [deg] compass bearing the wind blows FROM (pattern moves bearing+180)
+    float Shear     = 0.6f;    // [x/km] fractional speed gain per kilometre of altitude
+    float Veer      = 18.0f;   // [deg/km] clockwise turn per kilometre (Ekman spiral)
     float Gust      = 0.25f;   // [0..1] gust depth; 0 is a steady flow
-    float GustPhase = 0.0f;    // [rad] advanced by the frame clock, so the CPU and GPU twins agree
-    float Turbulence= 0.30f;   // [0..1] curl-noise swirl
-    float Steadiness= 1.0f;    // [0..1] panel's Steadiness — scales gust and turbulence together
+    float GustPhase = 0.0f;    // [rad] Tick-advanced at dt*(.35+gust*.4) (REF windStep), so twins agree
+    float Turbulence= 0.2f;    // [0..1] curl-noise swirl
+    float Steadiness= 1.0f;    // [0..1] ENG extension (no panel knob) — scales gust and turbulence; 1 = REF
+    float Integral[2] = { 0.0f, 0.0f };   // [m] Tick-advanced STATE, not a setting: the wall-clock wind
+                               // integral (gusted surface flow, accumulated). The ONLY clock the march
+                               // advects by — time-of-day never moves a cloud. Proofs construct it at zero.
 };
 
 class WindField
@@ -68,42 +73,40 @@ public:
         const float Kilometres = (AltitudeMetres > 0.0f ? AltitudeMetres : 0.0f) * 0.001f;
         const float Speed   = Wind.Speed * (1.0f + Wind.Shear * Kilometres);
         const float Bearing = (Wind.Bearing + Wind.Veer * Kilometres) * kPi / 180.0f;
-        // Bearing is a compass angle: 0 is north (+Y), 90 is east (+X).
+        // Bearing is a compass angle: 0 is north (+Y), 90 is east (+X). The vector points upwind (back
+        //    toward the bearing); the advected pattern moves downwind, opposite — so 214 reads FROM the
+        //    south-west, the reference panel's convention.
         OutVelocity[0] = std::sin(Bearing) * Speed;
         OutVelocity[1] = std::cos(Bearing) * Speed;
         OutVelocity[2] = 0.0f;
     }
 
-    // Uniform advection plus a frozen shear offset: how a cloud field follows the wind without shredding.
+    // The wind displacement: the wall-clock integral times the altitude factor, the reference windDisp
+    //    transcribed exactly (P2.2). The whole medium rides the integral — gusted surface flow accumulated by
+    //    Tick, never time-of-day — and each altitude scales it by its own wind over the surface wind, so
+    //    shear/veer lean the field progressively the way the reference does.
     //
-    //    ⚠️ NEVER the local flow times time-of-day. That older form drifted every altitude by its own wind over
-    //    seconds-since-midnight, and the shear/veer piled 76 km of altitude-dependent offset across the 1.1 km
-    //    slab by 7am (measured): adjacent elevation rays sampled field points five cells apart — fully
-    //    decorrelated — while adjacent azimuth rays stayed correlated, which is exactly horizontal cloud
-    //    streaks that worsen through the day. Physically the error is accumulating shear over hours: real shear
-    //    shapes a cloud over its ~10-minute eddy life, not since midnight, and there is no formation term here
-    //    to replace the shredded field. So the whole medium advects by the flow at ReferenceAltitudeMetres —
-    //    coherent at every hour — and the shear/veer survive as a static lean, frozen at a young cloud's memory
-    //    (120 s) and clamped to ±2 cells, so no slider combination can shred the sampling grid again. With shear
-    //    and veer at zero the lean vanishes and this equals the old flow-times-time exactly.
+    //    ⚠️ NEVER the local flow times time-of-day: that older form drifted every altitude by its own wind over
+    //    seconds-since-midnight and piled 76 km of altitude-dependent offset across the slab by 7am (measured),
+    //    which shredded the sampling grid into horizontal streaks. The uniform-flow-plus-frozen-shear form that
+    //    replaced it cured the shredding but froze the shear at a 120 s memory with a ±2-cell clamp — a second
+    //    invention between the field and the reference. This form keeps the anti-shredding property the honest
+    //    way: the factor varies slowly (shear 0.6/km leans ~40% across a 900 m slab), so at session timescales
+    //    the differential stays near a cell and the sampling stays coherent; over very long sessions the shear
+    //    keeps accumulating, exactly as the reference ships it. Scrubbing LocalHours moves nothing: there is no
+    //    time-of-day anywhere in this function.
     //
-    //    Trig-only (two SampleSteps), so it is safe inside a march like SampleStep itself. Transcribed as
+    //    Trig-only (one SampleStep), so it is safe inside a march like SampleStep itself. Transcribed as
     //    CloudDriftAt in Shaders/SkyRecords.slang; the sky-cloud proof renders through the twin.
-    static void AdvectDrift(const WindSettings& Wind, float AltitudeMetres, float ReferenceAltitudeMetres,
-                            float TimeSeconds, float CellMetres, float ArtFactor, float OutDrift[2]) noexcept
+    static void AdvectDrift(const WindSettings& Wind, float AltitudeMetres, float ArtFactor,
+                            float OutDrift[2]) noexcept
     {
-        float Step[3], Reference[3];
+        float Step[3];
         SampleStep(Wind, AltitudeMetres, Step);
-        SampleStep(Wind, ReferenceAltitudeMetres, Reference);
-        constexpr float kShearMemory = 120.0f;   // [s] the lean a young cloud carries
-        const float Cell = Clamp(CellMetres, 1.0f, 1.0e6f);
-        for (int C = 0; C < 2; ++C)
-        {
-            float Shear = (Step[C] - Reference[C]) * kShearMemory * ArtFactor;
-            const float Limit = 2.0f * Cell;
-            Shear = Shear < -Limit ? -Limit : (Shear > Limit ? Limit : Shear);
-            OutDrift[C] = Reference[C] * TimeSeconds * ArtFactor + Shear;
-        }
+        const float StepLength = std::sqrt(Step[0] * Step[0] + Step[1] * Step[1]);
+        const float Factor = StepLength / std::fmax(1e-3f, Wind.Speed);
+        OutDrift[0] = Wind.Integral[0] * Factor * ArtFactor;
+        OutDrift[1] = Wind.Integral[1] * Factor * ArtFactor;
     }
 
     // The gust envelope. Three sines at deliberately incommensurate rates (1, 2.31, 4.7) so the pattern never
@@ -133,9 +136,13 @@ public:
         const float Strength = Wind.Turbulence * Clamp(Wind.Steadiness, 0.0f, 1.0f);
         if (Strength <= 0.0f) return;                    // the early-out that makes the guard cheap
 
+        // Transcribed term-by-term from the reference windTurb (P2.2): the lattice point advects the
+        //    HORIZONTAL plane with time (x and the horizontal y — never the altitude z, which the old form
+        //    drifted upward), and the output mixes the reference's (n1-n2, n2-n3, n3-n1) with the Y-up/Z-up
+        //    axis permutation folded in: (Dz-Dy, Dx-Dz, Dy-Dx). Still a curl, still divergence-free.
         const float Q[3] = { Position[0] * 0.02f + Time * 0.05f,
-                             Position[1] * 0.02f,
-                             Position[2] * 0.02f + Time * 0.03f };
+                             Position[1] * 0.02f + Time * 0.03f,
+                             Position[2] * 0.02f };
         constexpr float E = 0.5f;
 
         // Central differences along each axis: the six evaluations.
@@ -144,9 +151,9 @@ public:
         const float Dz = ValueNoise(Q[0], Q[1], Q[2] + E) - ValueNoise(Q[0], Q[1], Q[2] - E);
 
         const float Scale = Strength * Wind.Speed * 0.9f;
-        OutSwirl[0] = (Dy - Dz) * Scale;
-        OutSwirl[1] = (Dz - Dx) * Scale;
-        OutSwirl[2] = (Dx - Dy) * Scale;
+        OutSwirl[0] = (Dz - Dy) * Scale;
+        OutSwirl[1] = (Dx - Dz) * Scale;
+        OutSwirl[2] = (Dy - Dx) * Scale;
     }
 
     //--------------------------------------------------------------------------------------------------------------------

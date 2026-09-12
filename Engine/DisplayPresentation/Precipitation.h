@@ -285,7 +285,7 @@ public:
             if (Settings.SpawnFromClouds)
             {
                 if (!HaveCloud) { ++Last.RejectedClearSky; continue; }
-                if (ColumnCover(Cloud, Wind, X, Y, SlabBase, SlabTop, Time) < Settings.MinimumCloudCover)
+                if (ColumnCover(Cloud, Wind, X, Y, SlabBase, SlabTop) < Settings.MinimumCloudCover)
                 {
                     ++Last.RejectedClearSky;
                     continue;
@@ -385,7 +385,7 @@ public:
     // Cloud cover in a vertical column, sampled at a few heights through the slab. This is what makes rain fall
     //    out of clouds rather than out of a clear sky.
     static float ColumnCover(const CloudLayerSettings& Cloud, const WindSettings& Wind,
-                             float X, float Y, float SlabBase, float SlabTop, float Time) noexcept
+                             float X, float Y, float SlabBase, float SlabTop) noexcept
     {
         constexpr int kSamples = 4;
         float Sum = 0.0f;
@@ -393,7 +393,7 @@ public:
         {
             const float T = (static_cast<float>(I) + 0.5f) / static_cast<float>(kSamples);
             const float P[3] = { X, Y, SlabBase + (SlabTop - SlabBase) * T };
-            Sum += VolumetricMedia::CloudDensity(Cloud, Wind, P, Time);
+            Sum += VolumetricMedia::CloudDensity(Cloud, Wind, P);
         }
         return Sum / static_cast<float>(kSamples);
     }

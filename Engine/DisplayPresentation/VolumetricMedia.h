@@ -53,14 +53,23 @@ struct CloudLayerSettings
     bool              Enabled   = false;
     CloudTypeCategory Type      = CloudTypeCategory::Cumulus;
     float             Base      = 1500.0f;   // [m] altitude of the cloud base
-    float             Thickness = 1200.0f;   // [m] slab depth
-    float             Coverage  = 0.55f;     // [0..1]
+    float             Thickness = 900.0f;    // [m] slab depth
+    float             Coverage  = 0.45f;     // [0..1]
     float             Density   = 1.0f;      // [x]
-    float             Scale     = 1.0f;      // [x] feature size
+    float             Scale     = 1.4f;      // [x] feature size
     float             Anisotropy = 0.45f;    // Henyey-Greenstein g (the march used the box's; now per-medium)
-    float             Albedo[3] = { 0.92f, 0.94f, 0.97f };   // the cloud white (likewise)
-    float             Anvil     = 0.5f;      // [0..1] cumulonimbus spreading
+    float             Albedo[3] = { 1.0f, 1.0f, 1.0f };   // the cloud white (likewise)
+    float             Anvil     = 0.3f;      // [0..1] cumulonimbus spreading
     bool              FollowWind = true;     // link to the Wind Field entity
+    // Scattering, named as the reference panel names it (packed P2.2, read P2.4b): the dual HG lobe, the
+    //    multi-scatter/absorption/powder terms, and the erosion-octave strength the density carves with.
+    float             ForwardLobe = 0.8f;    // HG g1: the forward lobe
+    float             BackLobe  = 0.3f;      // HG g2: the back lobe (negated in the mix, REF dualHG)
+    float             LobeMix   = 0.3f;      // [0..1] back-lobe weight
+    float             Absorption = 0.05f;    // [0..1] Beer absorption on top of scattering
+    float             SkyAmbient = 0.9f;     // [x] sky-ambient gain on the in-scatter
+    float             Powder    = 0.6f;      // [0..1] Beer-powder brightening toward the sun
+    float             ErosionDetail = 0.6f;  // [0..1] erosion-octave strength
 
     // ⚠️ THE CEILING. Clouds are a tropospheric phenomenon: they form where there is enough water vapour and
     //    convection, which is the bottom ~12 km of a 60 km atmosphere. Without an explicit ceiling the slab is
@@ -84,14 +93,15 @@ struct CloudLayerSettings
 struct LocalVolumeSettings
 {
     bool  Enabled  = false;
-    float Centre[3]  = { 0.0f, 0.0f, 400.0f };   // [m] world position, Z-up
-    float HalfSize[3] = { 300.0f, 300.0f, 150.0f };
-    float Density   = 1.0f;
+    float Centre[3]  = { 40.0f, -160.0f, 120.0f };   // [m] world position, Z-up (REF lc pos, axis-permuted)
+    float HalfSize[3] = { 90.0f, 70.0f, 35.0f };
+    float Density   = 1.2f;
     float Coverage  = 0.6f;
-    float Scale     = 120.0f;    // [m] feature size
+    float Scale     = 30.0f;    // [m] feature size
     float Albedo[3] = { 0.92f, 0.94f, 0.97f };
     float Anisotropy = 0.45f;    // Henyey-Greenstein g
     bool  FollowWind = true;
+    float ErosionDetail = 0.55f; // [0..1] own erosion strength (REF lc_detail; scatter stays shared, P2.4)
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -120,7 +130,9 @@ struct VolumetricBudget
 {
     uint32_t CloudSteps      = 28u;   // FidelityCriteria::CloudMarchStepCount
     uint32_t LocalSteps      = 28u;   // FidelityCriteria::LocalVolumeStepCount
-    uint32_t LightTaps       = 6u;    // FidelityCriteria::CloudLightTapCount (4 posterized the shading)
+    uint32_t LightTaps       = 4u;    // FidelityCriteria::CloudLightTapCount (the tier's Standard count; the
+                                      // posterization the old 6 guarded against was measured pre-jitter, and
+                                      // every sheet already renders at tier taps)
     float    CoverageMargin  = 0.03f; // FidelityCriteria::CloudCoverageMargin
 };
 
@@ -179,7 +191,7 @@ public:
 
     // Cloud density at a world point. Z-up: altitude is p.z.
     static float CloudDensity(const CloudLayerSettings& Cloud, const WindSettings& Wind,
-                              const float Position[3], float Time) noexcept
+                              const float Position[3]) noexcept
     {
         float Base = 0.0f, Top = 0.0f;
         if (!SlabExtent(Cloud, Base, Top)) return 0.0f;
@@ -191,16 +203,15 @@ public:
         const float Profile = HeightProfile(Cloud.Type, Normalised, Cloud.Anvil);
         if (Profile <= 0.0f) return 0.0f;
 
-        // Advection, uniform plus frozen shear (WindField::AdvectDrift — the streak note lives there): the
-        //    whole slab rides the slab-mid flow, statically leaned by the shear. Trig-only, so it stays safe
-        //    inside the march like the SampleStep it replaces — and SampleStep-only, the swirl still belongs
-        //    once per pixel (the regression the source branch's last commit fixed).
+        // Advection, the wind integral times the altitude factor (WindField::AdvectDrift — the streak note
+        //    lives there): the whole slab rides Tick's wall-clock accumulation, never time-of-day. Trig-only,
+        //    so it stays safe inside the march like the SampleStep it replaces — and SampleStep-only, the
+        //    swirl still belongs once per pixel (the regression the source branch's last commit fixed).
         float Drift[3] = { 0.0f, 0.0f, 0.0f };
         if (Cloud.FollowWind)
         {
             float Advected[2];
-            WindField::AdvectDrift(Wind, Altitude, 0.5f * (Base + Top), Time,
-                                   std::fmax(Cloud.Scale * 900.0f, 1.0f), 0.8f, Advected);
+            WindField::AdvectDrift(Wind, Altitude, 0.8f, Advected);
             Drift[0] = Advected[0]; Drift[1] = Advected[1];
         }
 
@@ -262,7 +273,7 @@ public:
     }
 
     static float LocalDensity(const LocalVolumeSettings& Volume, const WindSettings& Wind,
-                              const float Position[3], float Time) noexcept
+                              const float Position[3]) noexcept
     {
         if (!Volume.Enabled) return 0.0f;
         float Local[3];
@@ -275,14 +286,13 @@ public:
         const float Mask = 1.0f - SmoothStep(0.55f, 1.0f, R);
         if (Mask <= 0.0f) return 0.0f;
 
-        // Advection, uniform plus frozen shear like the layer's (WindField::AdvectDrift): the whole box
-        //    rides the flow at its centre altitude.
+        // Advection, the wind integral like the layer's (WindField::AdvectDrift): the whole box rides
+        //    Tick's wall-clock accumulation at its own altitude factor.
         float Drift[3] = { 0.0f, 0.0f, 0.0f };
         if (Volume.FollowWind)
         {
             float Advected[2];
-            WindField::AdvectDrift(Wind, Position[2], Volume.Centre[2], Time,
-                                   std::fmax(Volume.Scale, 1.0f), 0.6f, Advected);
+            WindField::AdvectDrift(Wind, Position[2], 0.6f, Advected);
             Drift[0] = Advected[0]; Drift[1] = Advected[1];
         }
 
@@ -464,15 +474,15 @@ public:
                 ++Result.StepsTaken;
 
                 float Density = 0.0f;
-                if (M == 0u)      Density = CloudDensity(Cloud, Wind, P, Time);
-                else if (M == 1u) Density = LocalDensity(LocalCloud, Wind, P, Time);
-                else              Density = LocalDensity(LocalFog, Wind, P, Time);
+                if (M == 0u)      Density = CloudDensity(Cloud, Wind, P);
+                else if (M == 1u) Density = LocalDensity(LocalCloud, Wind, P);
+                else              Density = LocalDensity(LocalFog, Wind, P);
                 if (Density <= 1e-5f) continue;
 
                 // Sun visibility, marched once for the combined medium — fog shadows cloud and cloud shadows
                 //    fog for free, whichever loop this step sits in.
                 const float SunTransmittance = ShadowMarch(Cloud, LocalCloud, LocalFog, Wind, P, SunDirection,
-                                                     ActualStep, Budget.LightTaps, Time);
+                                                     ActualStep, Budget.LightTaps);
                 ++Result.ShadowMarches;
 
                 const float Extinction = Density * ActualStep * 0.01f;
@@ -534,7 +544,7 @@ private:
     static float ShadowMarch(const CloudLayerSettings& Cloud, const LocalVolumeSettings& LocalCloud,
                              const LocalVolumeSettings& LocalFog, const WindSettings& Wind,
                              const float Position[3], const float SunDirection[3],
-                             float StepSize, uint32_t Taps, float Time) noexcept
+                             float StepSize, uint32_t Taps) noexcept
     {
         const uint32_t Count = Taps == 0u ? 1u : Taps;
         float OpticalDepth = 0.0f;
@@ -544,9 +554,9 @@ private:
             const float Q[3] = { Position[0] + SunDirection[0] * Distance,
                                  Position[1] + SunDirection[1] * Distance,
                                  Position[2] + SunDirection[2] * Distance };
-            const float Density = (Cloud.Enabled ? CloudDensity(Cloud, Wind, Q, Time) : 0.0f)
-                                + LocalDensity(LocalCloud, Wind, Q, Time)
-                                + LocalDensity(LocalFog, Wind, Q, Time);
+            const float Density = (Cloud.Enabled ? CloudDensity(Cloud, Wind, Q) : 0.0f)
+                                + LocalDensity(LocalCloud, Wind, Q)
+                                + LocalDensity(LocalFog, Wind, Q);
             OpticalDepth += Density * StepSize * 0.5f * 0.01f;
             // Past opaque, further taps change transmittance by under 2% — invisible, so stop paying for them.
             if (OpticalDepth > 4.0f) break;
@@ -554,10 +564,11 @@ private:
         return std::exp(-OpticalDepth);
     }
 
-    // Per-ray march-phase jitter in [0,1): hash13 over the spread direction plus the clock fraction.
+    // Per-ray march-phase jitter in [0,1): hash13 over the spread direction plus the wall-clock fraction.
     //    The 317.19 spread puts adjacent-pixel directions (~0.003 apart) ~0.1 hash cells apart so they
     //    decorrelate; fract(Time*3) re-rolls the dither three times a second like the reference — and a
-    //    static frame keeps a static dither while the clock stands still, so stills never shimmer.
+    //    static frame keeps a static dither while Tick stands still, so stills never shimmer. (Time is
+    //    wall-clock seconds — P2.2 decoupled the march from LocalHours; the drift reads Wind.Integral.)
     static float MarchJitter(const float Direction[3], float Time) noexcept
     {
         const float Frame = Time * 3.0f;

@@ -211,6 +211,10 @@ private:
     PrecipitationSystem Rain{};
     StarCatalogueIndex  Catalogue{};
     float               ElapsedHours = 0.0f;
+    // Wall-clock seconds, accumulated by every Tick (P2.2): the ONLY clock the clouds read (march jitter,
+    //    erosion drift, swirl). The wind integral beside it is the drift; this is the dither. Scrubbing
+    //    LocalHours moves neither.
+    float               WallSeconds_ = 0.0f;
     // The moon atlas, lent by AssignMoonAtlas. Slots are bindless sampler2D[] indices for the kernel; views are
     //    borrowed level-0 pixels for the CPU raster, stable once Decode has run (a later registration moves the
     //    descriptors, never their texel heaps). Nothing is read until AtlasAssigned_ says both halves arrived.

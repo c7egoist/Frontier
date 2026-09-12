@@ -58,7 +58,7 @@ int main()
         CloudLayerSettings High{};
         High.Enabled = true; High.Base = 100000.0f; High.Thickness = 2000.0f;
         const float Above[3] = { 0.0f, 0.0f, 100500.0f };
-        Expect(VolumetricMedia::CloudDensity(High, Wind, Above, 0.0f) == 0.0f,
+        Expect(VolumetricMedia::CloudDensity(High, Wind, Above) == 0.0f,
                "a layer pushed above the ceiling has zero density everywhere");
 
         // From orbit, looking down, the march must find nothing above the ceiling.
@@ -133,8 +133,8 @@ int main()
         for (int I = 0; I < 400; ++I)
         {
             const float Q[3] = { P[0] + static_cast<float>(I) * 37.0f, P[1] + static_cast<float>(I) * 19.0f, P[2] };
-            if (VolumetricMedia::CloudDensity(Low, Wind, Q, 0.0f) > 0.0f) ++LowHits;
-            if (VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f) > 0.0f) ++HighHits;
+            if (VolumetricMedia::CloudDensity(Low, Wind, Q) > 0.0f) ++LowHits;
+            if (VolumetricMedia::CloudDensity(High, Wind, Q) > 0.0f) ++HighHits;
         }
         std::printf("     coverage 0.2 fills %u of 400 samples, coverage 0.9 fills %u\n", LowHits, HighHits);
         Expect(HighHits > LowHits, "more coverage fills more of the sky");

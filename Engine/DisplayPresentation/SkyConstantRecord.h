@@ -26,7 +26,10 @@
 //        offset 272   SkyLocalFogCentre    vec4
 //        offset 288   SkyLocalFogHalfSize  vec4
 //        offset 304   SkyLocalFogParams     vec4
-//        block size = 320 B
+//        offset 320   SkyCloudScatter      vec4
+//        offset 336   SkyCloudDetail       vec4
+//        offset 352   SkyCloudClock        vec4
+//        block size = 368 B
 //
 //    Every member is a four-component vector on purpose. std140 rounds a vec3 up to sixteen bytes anyway, so
 //    packing scalars into the spare lanes costs nothing and keeps the block at whole rows — the alternative is a
@@ -81,7 +84,7 @@ struct SkyConstantRecord
     float    CloudLayer[4];     // base, thickness, coverage, density [m, m, -, x]
     float    CloudShape[4];     // feature scale, ceiling, anvil, HG anisotropy
     float    CloudWind[4];      // speed [m/s], bearing [deg], shear [/km], veer [deg/km]
-    float    CloudAlbedo[4];    // rgb albedo, w = cloud clock seconds
+    float    CloudAlbedo[4];    // rgb albedo, w retired (P2.2): SkyCloudClock carries the clock
     uint32_t CloudControl[4];   // cloud steps, local steps, sun taps, reserved
     float    LocalCloudCentre[4]; // xyz centre, w unused
     float    LocalCloudHalfSize[4]; // xyz half-size, w unused
@@ -89,9 +92,14 @@ struct SkyConstantRecord
     float    LocalFogCentre[4];
     float    LocalFogHalfSize[4];
     float    LocalFogParams[4];
+    // P2.2 growth: the march's scattering knobs and its clock, beside the weather they belong to. The cloud
+    //    rows are last, so nothing above shifts — only the block size moves (320 → 368).
+    float    CloudScatter[4];   // forward g1, back g2, lobe mix, absorption (P2.4b reads; packed P2.2)
+    float    CloudDetail[4];    // sky ambient x, powder, erosion detail, local erosion detail (P2.4 reads)
+    float    CloudClock[4];     // wind integral xy [m], wall clock [s], spare
 };
 
-static_assert(sizeof(SkyConstantRecord) == 320u, "SkyConstants must match the shader's std140 block exactly");
+static_assert(sizeof(SkyConstantRecord) == 368u, "SkyConstants must match the shader's std140 block exactly");
 static_assert(sizeof(SkyConstantRecord) % 16u == 0u, "std140 blocks are 16-B aligned");
 static_assert(offsetof(SkyConstantRecord, SunRadiance) == 16u, "SkySunRadiance sits at offset 16");
 static_assert(offsetof(SkyConstantRecord, Rayleigh)    == 32u, "SkyRayleigh sits at offset 32");
@@ -112,6 +120,9 @@ static_assert(offsetof(SkyConstantRecord, LocalCloudParams) == 256u, "SkyLocalCl
 static_assert(offsetof(SkyConstantRecord, LocalFogCentre)  == 272u, "SkyLocalFogCentre sits at offset 272");
 static_assert(offsetof(SkyConstantRecord, LocalFogHalfSize) == 288u, "SkyLocalFogHalfSize sits at offset 288");
 static_assert(offsetof(SkyConstantRecord, LocalFogParams)  == 304u, "SkyLocalFogParams sits at offset 304");
+static_assert(offsetof(SkyConstantRecord, CloudScatter)   == 320u, "SkyCloudScatter sits at offset 320");
+static_assert(offsetof(SkyConstantRecord, CloudDetail)    == 336u, "SkyCloudDetail sits at offset 336");
+static_assert(offsetof(SkyConstantRecord, CloudClock)     == 352u, "SkyCloudClock sits at offset 352");
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     THE PACKER
@@ -181,7 +192,8 @@ inline SkyConstantRecord PackSkyConstants(const AtmosphereMedium& Medium, const 
 // Packs the weather consumed by the ReSTIR miss, bounce and direct-sun paths. The atmosphere and weather share a
 // record so a live slider update cannot leave the sky on one frame and its cloud shadow on another. Disabled media
 // are represented by flags, not by stale rows: the record is zero-filled by the caller and the shader's early-outs
-// then cost no cloud samples.
+// then cost no cloud samples. CloudTime is wall-clock seconds (P2.2) — the drift reads Wind.Integral, packed
+// beside it in the Clock row.
 inline void PackSkyVolumes(SkyConstantRecord& R, bool Enabled,
                            const CloudLayerSettings& Cloud, const LocalVolumeSettings& LocalCloud,
                            const LocalVolumeSettings& LocalFog, const WindSettings& Wind,
@@ -219,10 +231,22 @@ inline void PackSkyVolumes(SkyConstantRecord& R, bool Enabled,
     R.CloudWind[2] = Wind.Shear;
     R.CloudWind[3] = Wind.Veer;
     for (int C = 0; C < 3; ++C) R.CloudAlbedo[C] = Cloud.Albedo[C];
-    R.CloudAlbedo[3] = CloudTime;
+    R.CloudAlbedo[3] = 0.0f;   // retired: the w-lane clock died with time-of-day advection (P2.2)
     R.CloudControl[0] = Budget.CloudSteps == 0u ? 1u : Budget.CloudSteps;
     R.CloudControl[1] = Budget.LocalSteps == 0u ? 1u : Budget.LocalSteps;
     R.CloudControl[2] = Budget.LightTaps == 0u ? 1u : Budget.LightTaps;
+    R.CloudScatter[0] = Cloud.ForwardLobe;
+    R.CloudScatter[1] = Cloud.BackLobe;
+    R.CloudScatter[2] = Cloud.LobeMix;
+    R.CloudScatter[3] = Cloud.Absorption;
+    R.CloudDetail[0] = Cloud.SkyAmbient;
+    R.CloudDetail[1] = Cloud.Powder;
+    R.CloudDetail[2] = Cloud.ErosionDetail;
+    R.CloudDetail[3] = LocalCloud.ErosionDetail;
+    R.CloudClock[0] = Wind.Integral[0];
+    R.CloudClock[1] = Wind.Integral[1];
+    R.CloudClock[2] = CloudTime;
+    R.CloudClock[3] = 0.0f;
 
     for (int C = 0; C < 3; ++C)
     {
