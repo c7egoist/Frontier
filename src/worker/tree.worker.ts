@@ -52,6 +52,8 @@ export interface GenerateResponse {
   groundDepth: number;
   /** Grass mesher statistics (grasses only). */
   grass: import('../plant/grassMesher').GrassStats | null;
+  /** Succulent mesher statistics (succulents only). */
+  succulent: import('../plant/succulentMesher').SucculentStats | null;
   report: ReturnType<typeof generateTree>['report'];
   stats: ReturnType<typeof generateTree>['stats'];
   timings: ReturnType<typeof generateTree>['timings'];
@@ -105,6 +107,7 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
         obstacles: r.obstacles,
         groundDepth: r.groundDepth,
         grass: r.grass ?? null,
+        succulent: r.succulent ?? null,
         report: r.report,
         stats: r.stats,
         timings: r.timings,
@@ -136,7 +139,7 @@ ctx.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       let data: ArrayBuffer;
       if (msg.format === 'obj') {
         const enc = new TextEncoder();
-        data = enc.encode(toOBJ(r.mesh, leaves, msg.params.name.replace(/\s+/g, '_'))).buffer as ArrayBuffer;
+        data = enc.encode(toOBJ(r.mesh, leaves, msg.params.name.replace(/\\s+/g, '_'))).buffer as ArrayBuffer;
       } else {
         data = toGLB(r.mesh, leaves, msg.params.name);
       }

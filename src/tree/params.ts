@@ -13,6 +13,7 @@
 
 import { EnvironmentParams, DEFAULT_SCATTER, scatterObstacles } from '../env/environment';
 import { GrassParams, DEFAULT_GRASS, GRASS_PRESETS, GRASS_GROUPS } from '../plant/grassParams';
+import { SucculentParams, DEFAULT_SUCCULENT, SUCCULENT_PRESETS, SUCCULENT_GROUPS } from '../plant/succulentParams';
 
 export type Level4<T> = [T, T, T, T];
 
@@ -207,8 +208,8 @@ export const DEFAULT_ROOTS: RootParams = {
   dive: 0.75,
 };
 
-/** What kind of plant a parameter set describes. Trees go through the Weber-Penn skeleton, grasses through the grass mesher. */
-export type PlantKind = 'tree' | 'grass';
+/** What kind of plant a parameter set describes. */
+export type PlantKind = 'tree' | 'grass' | 'succulent';
 
 export interface TreeParams {
   name: string;
@@ -221,9 +222,13 @@ export interface TreeParams {
   environment: EnvironmentParams;
   /** Grass description (kind === 'grass'). */
   grass?: GrassParams;
+  /** Succulent / cactus description (kind === 'succulent'). */
+  succulent?: SucculentParams;
 }
 
 export const isGrass = (p: { kind?: PlantKind }): boolean => p.kind === 'grass';
+export const isSucculent = (p: { kind?: PlantKind }): boolean => p.kind === 'succulent';
+export const isTree = (p: { kind?: PlantKind }): boolean => !p.kind || p.kind === 'tree';
 
 export const DEFAULT_MESH: MeshParams = {
   trunkRadialSegments: 24,
@@ -342,6 +347,20 @@ function grassPreset(name: string, grass: Partial<GrassParams>): TreeParams {
     roots,
     environment: { enabled: false, scatter: { ...DEFAULT_SCATTER, count: 0 }, obstacles: [] },
     grass: { ...DEFAULT_GRASS, ...grass },
+  };
+}
+
+function succulentPreset(name: string, succulent: Partial<SucculentParams>): TreeParams {
+  const roots = { ...DEFAULT_ROOTS, enabled: false };
+  return {
+    name,
+    seed: 1,
+    kind: 'succulent',
+    botany: { ...DEFAULT_BOTANY },
+    mesh: { ...DEFAULT_MESH },
+    roots,
+    environment: { enabled: false, scatter: { ...DEFAULT_SCATTER, count: 0 }, obstacles: [] },
+    succulent: { ...DEFAULT_SUCCULENT, ...succulent },
   };
 }
 
@@ -1411,8 +1430,12 @@ export const TREE_PRESETS: TreeParams[] = [
   }, {}, { count: 5, radius: 0.42, length: 0.26, laterals: 2, forks: 0.5 }),
 ];
 
-/** Every species: trees first, then the grasses. */
-export const PRESETS: TreeParams[] = [...TREE_PRESETS, ...GRASS_PRESETS.map((g) => grassPreset(g.name, g.grass))];
+/** Every species: trees first, then the grasses, then the desert succulents. */
+export const PRESETS: TreeParams[] = [
+  ...TREE_PRESETS,
+  ...GRASS_PRESETS.map((g) => grassPreset(g.name, g.grass)),
+  ...SUCCULENT_PRESETS.map((s) => succulentPreset(s.name, s.succulent)),
+];
 
 /** Grouping for the species list. Presets missing here are shown under "Other". */
 export const PRESET_GROUPS: { label: string; names: string[] }[] = [
@@ -1424,6 +1447,7 @@ export const PRESET_GROUPS: { label: string; names: string[] }[] = [
   { label: 'Desert', names: ['Joshua Tree', 'Desert Ironwood'] },
   { label: 'Rocky terrain', names: ['Bristlecone Pine', 'Rowan'] },
   ...GRASS_GROUPS,
+  ...SUCCULENT_GROUPS,
 ];
 
 export function getPreset(name: string): TreeParams {

@@ -6,6 +6,8 @@ import { validateTopology } from '../src/tree/validate';
 import { toOBJ, toGLB, toGpuBuffers } from '../src/tree/export';
 import { GrassMesher } from '../src/plant/grassMesher';
 import { DEFAULT_GRASS, GRASS_PRESETS } from '../src/plant/grassParams';
+import { SucculentMesher } from '../src/plant/succulentMesher';
+import { SUCCULENT_PRESETS, DEFAULT_SUCCULENT } from '../src/plant/succulentParams';
 import { generateTree } from '../src/tree/generate';
 import { LeafMesh } from '../src/tree/mesh';
 
@@ -288,3 +290,85 @@ describe('exporters', () => {
     expect(max).toBeLessThan(g.position.length / 3);
   });
 });
+
+describe('welded succulent plant is a single closed manifold', () => {
+  function buildSucculent(preset: { succulent: any }, seed: number) {
+    const g = { ...DEFAULT_SUCCULENT, ...preset.succulent };
+    const built = new SucculentMesher(g, seed).build();
+    const report = validateTopology(built.mesh);
+    return { ...built, report };
+  }
+  for (const preset of SUCCULENT_PRESETS) {
+    for (const seed of [1, 7, 42]) {
+      it(`${preset.name} seed ${seed}`, () => {
+        const { report, stats, mesh, height, groundDepth } = buildSucculent(preset, seed);
+        expect(report.boundaryEdges, 'boundary edges').toBe(0);
+        expect(report.nonManifoldEdges, 'non-manifold edges').toBe(0);
+        expect(report.inconsistentEdges, 'inconsistent winding').toBe(0);
+        expect(report.degenerateFaces, 'degenerate faces').toBe(0);
+        expect(report.isolatedVertices, 'isolated vertices').toBe(0);
+        expect(report.components, 'connected components').toBe(1);
+        expect(report.eulerCharacteristic, 'Euler characteristic').toBe(2);
+        expect(report.genus).toBe(0);
+        expect(report.quadRatio).toBe(1);
+        expect(stats.dropped, 'dropped organs').toBeLessThan(8);
+        expect(stats.junctions).toBe(stats.organs - 1);
+        expect(height).toBeGreaterThan(0.05);
+        expect(groundDepth).toBeGreaterThan(0);
+        const n = mesh.vertexCount;
+        let maxHeight = 0;
+        let outOfRange = 0;
+        for (let i = 0; i < n; i++) {
+          for (let k = 0; k < 4; k++) {
+            const v = mesh.wind[i * 4 + k];
+            if (!(v >= 0 && v <= 1)) outOfRange++;
+          }
+          if (mesh.wind[i * 4] > maxHeight) maxHeight = mesh.wind[i * 4];
+        }
+        expect(outOfRange, 'wind attributes out of [0, 1]').toBe(0);
+        expect(maxHeight).toBeCloseTo(1, 5);
+      });
+    }
+  }
+
+  it('succulent presets carry the succulent kind and go through the shared pipeline', () => {
+    const succulents = PRESETS.filter((p: any) => (p as any).succulent);
+    expect(succulents.length).toBe(SUCCULENT_PRESETS.length);
+    const p = cloneParams(succulents.find((s: any) => s.name === 'Saguaro')!);
+    p.seed = 3;
+    const r = generateTree(p);
+    expect(r.skeleton).toBeNull();
+    expect(r.succulent).toBeDefined();
+    expect(r.report.closed && r.report.manifold).toBe(true);
+    expect(r.report.genus).toBe(0);
+    expect(r.stats.stems).toBe(r.succulent!.organs);
+    expect(r.summary.stemsPerLevel).toEqual(r.succulent!.perLevel);
+    expect(r.summary.height).toBeGreaterThan(0.5);
+    expect(r.buffers.index.length).toBe(r.mesh.quadCount * 6 + r.mesh.triCount * 3);
+  });
+
+  it('is deterministic for a given seed and differs across seeds', () => {
+    const a = new SucculentMesher({ ...DEFAULT_SUCCULENT, ...SUCCULENT_PRESETS[0].succulent }, 9).build();
+    const b = new SucculentMesher({ ...DEFAULT_SUCCULENT, ...SUCCULENT_PRESETS[0].succulent }, 9).build();
+    const c = new SucculentMesher({ ...DEFAULT_SUCCULENT, ...SUCCULENT_PRESETS[0].succulent }, 10).build();
+    expect(a.mesh.positions.length).toBe(b.mesh.positions.length);
+    expect(validateTopology(a.mesh).faces).toBe(validateTopology(b.mesh).faces);
+    const sum = (arr: ArrayLike<number>) => { let t=0; for(let i=0;i<arr.length;i++) t+=arr[i]*((i%7)+1); return t; };
+    expect(sum(a.mesh.positions)).toBe(sum(b.mesh.positions));
+    expect(sum(c.mesh.positions)).not.toBe(sum(a.mesh.positions));
+  });
+
+  it('exports a succulent plant as quads to OBJ and GLB', () => {
+    const built = new SucculentMesher({ ...DEFAULT_SUCCULENT, ...SUCCULENT_PRESETS.find((g)=>g.name==='Blue Agave')!.succulent }, 1).build();
+    const leaves = new LeafMesh();
+    const obj = toOBJ(built.mesh, leaves, 'succulent');
+    const lines = obj.split('\n');
+    expect(lines.filter((l: string)=>l.startsWith('v ')).length).toBe(built.mesh.vertexCount);
+    expect(lines.filter((l: string)=>l.startsWith('f ') && l.trim().split(/\s+/).length===5).length).toBe(built.mesh.quadCount);
+    const glb = toGLB(built.mesh, leaves, 'succulent');
+    const dv = new DataView(glb);
+    expect(dv.getUint32(0,true)).toBe(0x46546c67);
+    expect(dv.getUint32(8,true)).toBe(glb.byteLength);
+  });
+});
+
