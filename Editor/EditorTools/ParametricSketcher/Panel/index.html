@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Frontier — Sketch</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="background"></div>
+  <main id="app" aria-label="Frontier two dimensional CAD workbench">
+    <aside class="panel outliner" aria-label="Outliner">
+      <header class="panel-head"><div><i class="dot cyan"></i><h1>Outliner</h1></div><span class="badge">Sketch document</span></header>
+      <div class="metrics">
+        <div class="metric"><span>Geometry</span><strong id="geometryCount">0</strong><small id="geometryMeta">0 curves</small></div>
+        <div class="metric"><span>Selection</span><strong id="selectionCount">0</strong><small id="selectionMeta">Nothing selected</small></div>
+      </div>
+      <label class="search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"></circle><path d="m16 16 4 4"></path></svg><input id="search" placeholder="Search geometry" autocomplete="off"></label>
+      <div class="tree-head"><span>Sketch</span><button id="newLayer" title="Add layer">＋</button></div>
+      <section class="tree" id="tree" aria-live="polite"></section>
+      <footer class="outliner-footer">
+        <div class="status-line"><span class="led good"></span><span id="topologyStatus">Analytical topology · clean</span></div>
+        <div class="status-meta"><span id="pointCount">0 vertices</span><span>mm · tol 1e−6</span></div>
+      </footer>
+    </aside>
+
+    <section class="panel viewport" aria-label="Sketch viewport">
+      <canvas id="canvas" aria-label="Two dimensional sketch viewport"></canvas>
+      <div class="viewport-top">
+        <div class="segmented" aria-label="View controls">
+          <button data-view="fit" title="Fit all geometry (F)">Fit</button>
+          <button data-view="grid" class="on" title="Toggle grid">Grid</button>
+          <button data-view="snap" class="on" title="Toggle snap">Snap</button>
+        </div>
+        <div class="mode-pill" id="modePill"><span class="led cyan"></span><span id="modeName">Select</span><kbd>V</kbd></div>
+        <div class="spacer"></div>
+        <button id="helpButton" class="icon-button" title="Keyboard shortcuts">?</button>
+      </div>
+      <div id="floatingToolbar" class="floating-toolbar glass" aria-label="Sketch tools">
+        <button data-tool="select" class="tool active" title="Select (V)"><span class="tool-icon">↖</span><span>Select</span><kbd>V</kbd></button>
+        <div class="tool-separator"></div>
+        <button data-tool="line" class="tool" title="Line (L)"><span class="tool-icon">╱</span><span>Line</span><kbd>L</kbd></button>
+        <button data-tool="polyline" class="tool" title="Polyline (P)"><span class="tool-icon">⌁</span><span>Polyline</span><kbd>P</kbd></button>
+        <button data-tool="rectangle" class="tool" title="Rectangle (R)"><span class="tool-icon">□</span><span>Rect</span><kbd>R</kbd></button>
+        <button data-tool="circle" class="tool" title="Circle (C)"><span class="tool-icon">○</span><span>Circle</span><kbd>C</kbd></button>
+        <button data-tool="arc" class="tool" title="Arc (A)"><span class="tool-icon">◜</span><span>Arc</span><kbd>A</kbd></button>
+        <div class="tool-separator"></div>
+        <button data-tool="move" class="tool" title="Move selected geometry (M)"><span class="tool-icon">✣</span><span>Move</span><kbd>M</kbd></button>
+        <button data-tool="scale" class="tool" title="Uniform scale selected geometry (S)"><span class="tool-icon">⤢</span><span>Scale</span><kbd>S</kbd></button>
+        <button data-action="offset" class="tool" title="Offset selected curve (O)"><span class="tool-icon">⇉</span><span>Offset</span><kbd>O</kbd></button>
+        <button data-tool="trim" class="tool" title="Trim line at crossing (T)"><span class="tool-icon">✂</span><span>Trim</span><kbd>T</kbd></button>
+        <div class="tool-separator"></div>
+        <button data-action="fillet" class="tool" title="Fillet two selected lines"><span class="tool-icon">⌒</span><span>Fillet</span></button>
+        <button data-action="chamfer" class="tool" title="Chamfer two selected lines"><span class="tool-icon">◇</span><span>Chamfer</span></button>
+        <button data-action="mirror" class="tool" title="Mirror selected entities about an axis"><span class="tool-icon">⇋</span><span>Mirror</span></button>
+      </div>
+      <div id="toolPrompt" class="tool-prompt glass" aria-live="polite"><span class="led cyan"></span><span id="promptText">Click geometry to select</span><kbd>Esc</kbd></div>
+      <div id="cursorReadout" class="cursor-readout"><span id="cursorX">X 0.00</span><span id="cursorY">Y 0.00</span><span id="snapReadout">Grid 1 mm</span></div>
+      <div id="viewportFooter"><div><strong id="documentName">Untitled sketch</strong><span id="documentDetail">2D parametric sketch</span></div><div class="viewport-hints"><kbd>MMB</kbd><span>pan</span><kbd>Wheel</kbd><span>zoom</span></div></div>
+      <div id="emptyHint" class="empty-hint"><b>Start a sketch</b><span>Choose a curve tool or press <kbd>L</kbd> for Line.</span></div>
+    </section>
+
+    <aside class="panel inspector" aria-label="Inspector">
+      <header class="panel-head"><div><i class="dot orange"></i><h1>Inspector</h1></div><span class="badge" id="inspectorBadge">Nothing selected</span></header>
+      <div id="inspectorContent" class="inspector-content"></div>
+      <form id="commandForm" class="command" autocomplete="off"><span>⌘</span><input id="commandInput" placeholder="line · offset 5 · fit" aria-label="Command input"></form>
+    </aside>
+  </main>
+
+  <footer id="bottomBar">
+    <div class="history"><button id="undo" title="Undo (Ctrl/Cmd+Z)">↶ <span>Undo</span></button><button id="redo" title="Redo (Ctrl/Cmd+Shift+Z)">↷ <span>Redo</span></button></div>
+    <div class="bottom-center"><span class="led good"></span><span id="operationStatus">Ready — topological 2D sketch kernel</span></div>
+    <div class="file-actions"><button id="newDocument">New</button><button id="importDocument">Import</button><button id="exportDocument">Export</button><input id="fileInput" type="file" accept=".json,.dxf,application/json,text/plain" hidden></div>
+  </footer>
+
+  <dialog id="helpDialog">
+    <section class="dialog-card"><header><div><span class="eyebrow">FRONTIER SKETCH</span><h2>Keyboard shortcuts</h2></div><button class="close-dialog" value="close">×</button></header>
+      <div class="shortcut-grid">
+        <div><kbd>V</kbd><span>Select</span></div><div><kbd>L</kbd><span>Line</span></div><div><kbd>P</kbd><span>Polyline</span></div><div><kbd>R</kbd><span>Rectangle</span></div><div><kbd>C</kbd><span>Circle</span></div><div><kbd>A</kbd><span>Arc</span></div>
+        <div><kbd>M</kbd><span>Move selection</span></div><div><kbd>S</kbd><span>Uniform scale</span></div><div><kbd>O</kbd><span>Offset</span></div><div><kbd>T</kbd><span>Trim line</span></div><div><kbd>F</kbd><span>Fit view</span></div><div><kbd>Del</kbd><span>Delete selection</span></div>
+      </div>
+      <p>Curves store analytical definitions and stable topological point references. The viewport only samples those entities for display; it does not own geometry.</p>
+    </section>
+  </dialog>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
