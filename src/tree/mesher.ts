@@ -24,6 +24,7 @@
 import {
   V3,
   TAU,
+  DEG2RAD,
   add,
   addScaled,
   cross,
@@ -136,9 +137,43 @@ export class Mesher {
     return stem.limbRoot.nodes[0].pos;
   }
 
-  /** Surface radius of a stem at arc length `s` and ring angle `theta` (buttress lobes included). */
+  /** Surface radius of a stem at arc length `s` and ring angle `theta` (buttress lobes + cactus ribs/flat included). */
   private surfaceRadius(stem: Stem, s: number, theta: number): number {
-    return stemRadiusAt(stem, s, this.P, this.B) * trunkLobeFactor(this.P, stem, s, theta, this.lobePhase, this.lobes);
+    const base = stemRadiusAt(stem, s, this.P, this.B) * trunkLobeFactor(this.P, stem, s, theta, this.lobePhase, this.lobes);
+    const B = this.B;
+    let rr = base;
+    // Ribs
+    if (B.ribs >= 3 && (B.ribDepth ?? 0) > 1e-4 && stem.role !== 'root') {
+      const ribs = Math.round(B.ribs);
+      const twist = (B.ribTwist ?? 0) * DEG2RAD * (s / Math.max(1e-6, stem.length));
+      const w0 = Math.cos(ribs * (theta + twist));
+      let t = (w0 + 1) * 0.5;
+      const sharp = clamp(B.ribSharp ?? 0.6, 0, 1);
+      const exp = 1 - 0.45 * sharp;
+      t = Math.pow(clamp(t, 0, 1), exp);
+      const w = t * 2 - 1;
+      rr *= 1 + clamp(B.ribDepth, 0, 0.5) * w;
+      // Areole bump on peaks
+      if ((B.areoleBump ?? 0) > 1e-4 && w > 0.35) {
+        const spacing = Math.max(0.02, (B.areoleSpacing ?? 0.06) * stem.logicalLength);
+        const ph = ((s % spacing) / spacing);
+        const d = Math.abs(ph - 0.5) / 0.22;
+        const bumpProfile = Math.exp(-d * d * 8) * clamp((w - 0.35) / 0.45, 0, 1);
+        rr *= 1 + B.areoleBump * bumpProfile;
+      }
+    }
+    // Flatness (Opuntia pads)
+    const flat = B.flatness ? (B.flatness[Math.min(stem.level, 3)] ?? 0) : 0;
+    if (flat > 1e-4 && stem.role !== 'root') {
+      const ay = 1 - clamp(flat, 0, 0.92);
+      const ax = 1;
+      // ellipse radius factor for this theta: sqrt((ax cos)^2 + (ay sin)^2) / 1? Actually off length is rr * sqrt((ax c)^2 + (ay sn)^2) vs rr.
+      // We bake it into rr: rr_ellipse = rr * sqrt(ax²c²+ay²sn²)
+      rr *= Math.sqrt(ax * ax * Math.cos(theta) * Math.cos(theta) + ay * ay * Math.sin(theta) * Math.sin(theta));
+      // But surfaceRadius is isotropic (used for window placement) – return mean (approx rr of average). Keep isotropic.
+      // For now return base* (0.5*(ax+ay)) approximated.
+    }
+    return rr;
   }
 
   private addVertex(p: V3, stem: Stem, s: number, junction = 0): number {
@@ -362,8 +397,19 @@ export class Mesher {
     const up = cross(smp.dir, smp.right);
     const idx: number[] = new Array(N);
     const P = this.P;
+    const B = this.B;
     const lobed = isTrunk && this.lobes > 0 && P.rootLobeAmplitude > 0 && s + stem.logicalStart * stem.logicalLength < P.rootLobeHeight * stem.logicalLength;
     const an = tiltNormal ? dot(smp.dir, tiltNormal) : 1;
+    const hasRibs = (B.ribs ?? 0) >= 3 && (B.ribDepth ?? 0) > 1e-4 && stem.role !== 'root';
+    const ribCount = hasRibs ? Math.round(B.ribs) : 0;
+    const ribDepth = clamp(B.ribDepth ?? 0.14, 0, 0.5);
+    const ribSharp = clamp(B.ribSharp ?? 0.6, 0, 1);
+    const ribTwist = (B.ribTwist ?? 0) * DEG2RAD;
+    const areoleBump = B.areoleBump ?? 0;
+    const areoleSpacing = Math.max(0.02, (B.areoleSpacing ?? 0.06) * stem.logicalLength);
+    const flat = B.flatness ? (B.flatness[Math.min(stem.level, 3)] ?? 0) : 0;
+    const ay = 1 - clamp(flat, 0, 0.92);
+    const ax = 1;
     for (let j = 0; j < N; j++) {
       if (skip && skip(j)) {
         idx[j] = -1;
@@ -372,8 +418,37 @@ export class Mesher {
       const th = phase + (TAU * j) / N;
       let rr = r;
       if (lobed) rr *= trunkLobeFactor(P, stem, s, th, this.lobePhase, this.lobes);
-      const c = Math.cos(th);
-      const sn = Math.sin(th);
+      // Cactus ribs (longitudinal corrugation) + helical twist + areole tubercles
+      if (hasRibs) {
+        const thRib = th + ribTwist * (s / Math.max(1e-6, stem.length));
+        const w0 = Math.cos(ribCount * thRib);
+        let t = (w0 + 1) * 0.5;
+        const exp = 1 - 0.45 * ribSharp;
+        t = Math.pow(clamp(t, 0, 1), exp);
+        const w = t * 2 - 1;
+        rr *= 1 + ribDepth * w;
+        if (areoleBump > 1e-4 && w > 0.35) {
+          const ph = ((s % areoleSpacing) / areoleSpacing);
+          const d = Math.abs(ph - 0.5) / 0.22;
+          const bumpProfile = Math.exp(-d * d * 8) * clamp((w - 0.35) / 0.45, 0, 1);
+          rr *= 1 + areoleBump * bumpProfile;
+        }
+      }
+      // Flattening for Opuntia pads (elliptical cross-section)
+      let c = Math.cos(th);
+      let sn = Math.sin(th);
+      if (flat > 1e-4) {
+        // Scale the unit circle into an ellipse before applying radius.
+        // The effective radius multiplier is the ellipse distance in direction th.
+        // We keep rr as mean, then scale components.
+        c *= ax;
+        sn *= ay;
+        // Renormalize to keep smoothly varying? The length of (c,sn) is now sqrt(ax²cos²+ay²sin²); we want that as factor.
+        // Instead of scaling rr, we scale c,sn and compute off as rr * (c*right + sn*up) where c,sn already ellipse-scaled.
+        // So don't multiply rr, just use scaled c,sn.
+      } else {
+        // c,sn already unit
+      }
       const off = {
         x: rr * (c * smp.right.x + sn * up.x),
         y: rr * (c * smp.right.y + sn * up.y),

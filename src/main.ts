@@ -722,6 +722,7 @@ const GROUP_ICON: Record<string, string> = {
   'Grasses · turf & meadow': 'grass',
   'Grasses · tussock': 'tussock',
   'Grasses · cereals & reeds': 'wheat',
+  'Desert · succulents': 'yucca',
 };
 const GROUP_ACCENT: Record<string, string> = {
   Oaks: '#c98b4b',
@@ -734,6 +735,7 @@ const GROUP_ACCENT: Record<string, string> = {
   'Grasses · turf & meadow': '#8fd15a',
   'Grasses · tussock': '#c9d36a',
   'Grasses · cereals & reeds': '#e2b95b',
+  'Desert · succulents': '#ff8c52',
 };
 const closedGroups = new Set<string>();
 
@@ -934,6 +936,17 @@ function buildBotanyPage(): void {
   slider(sLeaf, 'Leaf length', () => params.botany.leafScale, (v) => (params.botany.leafScale = v), { min: 0.02, max: 0.6, step: 0.01, unit: 'm' }, onChange);
   slider(sLeaf, 'Leaf width', () => params.botany.leafScaleX, (v) => (params.botany.leafScaleX = v), { min: 0.1, max: 2, step: 0.05, unit: '×' }, onChange);
   slider(sLeaf, 'Tip tuft', () => params.botany.leafTuft, (v) => (params.botany.leafTuft = v), { min: 0.05, max: 1, step: 0.05, title: 'Fraction of each terminal stem, from the tip, that carries leaves. 1 = the whole stem; small values gather the leaves into a tip rosette (yucca) or brush (foxtail pine).' }, onChange);
+
+  // ── Cactus & succulent (AAA ribbing / pads) ────────────────────────
+  const sCactus = section('Cactus & succulent', page, { collapsed: false, hint: params.botany.ribs ? `${params.botany.ribs} ribs` : 'smooth' });
+  stepper(sCactus, 'Ribs', () => params.botany.ribs, (v) => (params.botany.ribs = Math.round(v)), { min: 0, max: 32, integer: true, title: 'Longitudinal ribs on cactus stems (0 = smooth). Columnar cacti 16–22, barrels 21–27.' }, () => { onChange(); sCactus.title = params.botany.ribs ? `${params.botany.ribs} ribs` : 'smooth'; });
+  slider(sCactus, 'Rib depth', () => params.botany.ribDepth, (v) => (params.botany.ribDepth = v), { min: 0, max: 0.4, step: 0.01, title: 'Depth of grooves as fraction of radius' }, onChange);
+  slider(sCactus, 'Rib sharpness', () => params.botany.ribSharp, (v) => (params.botany.ribSharp = v), { min: 0, max: 1, step: 0.05, title: '0 = sinusoidal, 1 = V-groove areole notches (barrel)' }, onChange);
+  slider(sCactus, 'Rib twist °', () => params.botany.ribTwist, (v) => (params.botany.ribTwist = v), { min: 0, max: 45, step: 1, unit: '°', title: 'Helical twist over the stem length' }, onChange);
+  slider(sCactus, 'Areole bump', () => params.botany.areoleBump, (v) => (params.botany.areoleBump = v), { min: 0, max: 0.2, step: 0.005, title: 'Tubercle height on rib peaks (fraction of radius)' }, onChange);
+  slider(sCactus, 'Areole spacing', () => params.botany.areoleSpacing, (v) => (params.botany.areoleSpacing = v), { min: 0.02, max: 0.15, step: 0.005, title: 'Spacing of areole bumps as fraction of stem length' }, onChange);
+  levelsHeader(sCactus, ['—', 'L1', 'L2', 'L3']);
+  levelRow(sCactus, 'Flatness (pad)', () => params.botany.flatness as unknown as number[], (i, v) => ((params.botany.flatness as unknown as number[])[i] = v), { step: 0.02, min: 0, max: 0.92, enabled: () => params.botany.levels, title: 'Elliptical pad flattening: 0 circular, 0.85 Opuntia pad (width≫thickness)' }, onChange);
 }
 
 
@@ -1210,7 +1223,7 @@ function buildMeshPage(): void {
   page.innerHTML = '';
   const m = (): TreeParams['mesh'] => params.mesh;
   const s1 = section('Resolution', page);
-  slider(s1, 'Trunk ring segments', () => m().trunkRadialSegments, (v) => (m().trunkRadialSegments = Math.round(v / 2) * 2), { min: 8, max: 48, step: 2, title: 'Vertices around the trunk. Children derive their ring size from the window they grow out of.', unit: 'v' }, onChange);
+  slider(s1, 'Trunk ring segments', () => m().trunkRadialSegments, (v) => (m().trunkRadialSegments = Math.round(v / 2) * 2), { min: 8, max: 96, step: 2, title: 'Vertices around the trunk. Children derive their ring size from the window they grow out of.', unit: 'v' }, onChange);
   levelsHeader(s1);
   levelRow(s1, 'Rings / segment', () => m().ringsPerSegment, (i, v) => (m().ringsPerSegment[i] = v), { step: 1, min: 1, max: 8, integer: true, enabled: () => params.botany.levels }, onChange);
   slider(s1, 'Root ring segments', () => m().rootRadialSegments, (v) => (m().rootRadialSegments = Math.round(v / 2) * 2), { min: 6, max: 24, step: 2, title: 'Minimum vertices around a primary root where it leaves the trunk', unit: 'v' }, onChange);
