@@ -437,7 +437,7 @@ svg.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6;stro
   <div id="cmd"><span class="p">arc ›</span><input id="cmdIn" placeholder="box 40 30 20 · extrude Sketch01 15 · dim on"></div>
 </aside>
 
-<script src="cad-kernel.js"></script>
+<script src="cad-kernel.js?v=3717171"></script>
 <script>
 /* ── compatibility: polyfills for older browsers / GPUs (Canvas 2D is the only renderer; no GPU features are required) ── */
 (function(){try{
@@ -965,8 +965,8 @@ function renderInspector(){let ids=[...doc.sel];const insp=$('#insp');if(!ids.le
     $('#swDims').onclick=()=>{doc.dims=!doc.dims;renderInspector();draw();};$('#swLat').onclick=()=>{view.lattice=!view.lattice;renderInspector();draw();};$('#swCons').onclick=()=>{view.cons=!view.cons;renderInspector();draw();};return;}
   if(ids.length>1){$('#inspBadge').textContent=ids.length+' selected';insp.innerHTML=`<div class="hero"><div class="c-top"><span class="ico" style="--acc:#fff">${icon('body',18)}</span><span class="t"><span class="n">Multiple figures</span><span class="m">${ids.length} selected</span></span></div>
     <div class="list">${ids.map(id=>byId(id)).map(f=>`<div class="li" style="--acc:${KINDS[f.kind].acc}"><span class="dot" style="background:${KINDS[f.kind].acc}"></span><span class="t">${f.name}</span><span class="m">${f.kind}</span></div>`).join('')}</div></div>
-    <div class="actions"><button class="abtn" id="aBool">${icon('body',14)} Boolean union</button><button class="abtn" id="aMirror">Mirror</button><button class="abtn danger" id="aDel">Delete</button></div>`;
-    $('#aDel').onclick=delSel;$('#aBool').onclick=()=>booleanStart('union',{keep:true});$('#aMirror').onclick=()=>patStart('mirror',{keep:true});return;}
+    <div class="actions" style="flex-wrap:wrap"><button class="abtn" data-bool="union">${icon('body',13)} union</button><button class="abtn" data-bool="subtract">subtract</button><button class="abtn" data-bool="intersection">intersect</button><button class="abtn" data-bool="xor">XOR</button><button class="abtn" id="aMirror">Mirror 2D</button><button class="abtn danger" id="aDel">Delete</button></div><div class="empty" style="padding:6px 0 0">Boolean order follows selection. Mirror uses the first curve as source and the second curve's plane position / rotation as the reference axis.</div>`;
+    $('#aDel').onclick=delSel;$$('[data-bool]').forEach(b=>b.onclick=()=>booleanStart(b.dataset.bool,{keep:true}));$('#aMirror').onclick=()=>mirrorBySelectedReference(ids);return;}
   const f=byId(ids[0]);const m=measure(f);const acc=KINDS[f.kind].acc;$('#inspBadge').textContent=`${f.kind} · #${f.id}`;
   let html=`<div class="hero" style="--acc:${acc}"><div class="c-top"><span class="ico">${icon(f.kind,18)}</span><span class="t"><span class="n" contenteditable spellcheck="false" id="nameEd">${f.name}</span><span class="m">${f.op||f.ctype||f.axis||f.plane||f.key||f.kind}${f.recipe?' · derived':''}</span></span></div>
     <div class="big"><span class="v">${m.v>=10000?fmt(m.v/1000,1):fmt(m.v,m.v<10?2:1)}</span><span class="u">${m.v>=10000&&m.u==='mm³'?'cm³':m.u}</span><span class="lab">${m.lab}</span></div>
@@ -2179,11 +2179,27 @@ function booleanStart(kind,vals={}){
   snapshot(`2D ${kind}`);const made=[];regions.forEach(R=>{const reg={outer:R.outer.map(q=>[q[0],q[1]]),holes:R.holes.map(H=>H.map(q=>[q[0],q[1]]))};const f=mk('curve',nextName(`Boolean${kind[0].toUpperCase()+kind.slice(1)}`),{pts:reg.outer.map(q=>[q[0],q[1]]),closed:true},{ctype:'poly',parent:sk.id,fill:true,recipe:src.map(x=>x.name).concat(`2D ${kind}`),boolean:{op:kind,sources:src.map(x=>x.id)},booleanRegions:[reg]});doc.figures.push(f);sk.children.push(f.id);made.push(f.id);});
   if(vals.keep===false)src.forEach(f=>{f.visible=false;});doc.sel=new Set(made);sub_.sel.clear();invalidate(sk.id);topoCache.clear();renderOutliner();renderInspector();renderCat();draw();log(`2D ${kind} · ${src.map(f=>f.name).join(' + ')} → ${made.map(id=>byId(id).name).join(', ')}`);return true;
 }
-function mirrorSelection2D(axis){
-  const src=booleanSourceCurves(false);if(!src.length){log('2D mirror: select one or more sketch curves first');return false;}const sk=byId(src[0].parent);if(!sk||src.some(f=>f.parent!==sk.id)){log('2D mirror: all curves must belong to one sketch');return false;}
+function mirrorReferenceAxis2D(ref){
+  if(!ref)return null;
+  const C=ref.kind==='curve'?curvePlane(ref):null;
+  // A line/polyline reference uses its actual transformed geometry. For a
+  // circle, boolean region, or primitive reference, use its plane-space
+  // position and local rotation as the mirror datum.
+  if(C&&C.pts.length>=2&&((ref.ctype==='line')||(ref.ctype==='poly'&&!C.closed&&C.pts.length===2)))return [C.pts[0],C.pts[1]];
+  let c=[0,0];if(C&&C.pts.length){C.pts.forEach(q=>{c[0]+=q[0];c[1]+=q[1];});c[0]/=C.pts.length;c[1]/=C.pts.length;}
+  else if(ref.pos)c=[ref.pos[0]||0,ref.pos[1]||0];
+  const ang=((ref.rot3&&ref.rot3[2])||ref.rot||0)*Math.PI/180;return [c,[c[0]+Math.cos(ang),c[1]+Math.sin(ang)]];
+}
+function mirrorSelection2D(axis,sourceOverride,reference){
+  const src=sourceOverride||booleanSourceCurves(false);if(!src.length){log('2D mirror: select one or more sketch curves first');return false;}const sk=byId(src[0].parent);if(!sk||src.some(f=>f.parent!==sk.id)){log('2D mirror: all curves must belong to one sketch');return false;}
   const a=axis&&axis[0]||[0,0],b=axis&&axis[1]||[0,1];if(Math.hypot(b[0]-a[0],b[1]-a[1])<1e-7){log('2D mirror: axis has zero length');return false;}snapshot('2D mirror');const made=[];
-  src.forEach(s=>{const spec=xfPoints(s,mirrorFn(a,b));if(!spec)return;const g=spawnFrom(s,sk,spec);g.recipe=[s.name,'2D mirror'];g.link={src:s.id,kind:'mirror',a:[...a],b:[...b]};if(s.booleanRegions)g.booleanRegions=s.booleanRegions.map(R=>({outer:FrontierCadKernel.mirror2D(R.outer,a,b),holes:(R.holes||[]).map(H=>FrontierCadKernel.mirror2D(H,a,b))}));made.push(g.id);});
-  invalidate(sk.id);topoCache.clear();doc.sel=new Set(made);renderOutliner();renderInspector();draw();log(`2D mirror · ${made.length} linked cop${made.length===1?'y':'ies'} across ${a[0]},${a[1]} → ${b[0]},${b[1]}`);return !!made.length;
+  src.forEach(s=>{const spec=xfPoints(s,mirrorFn(a,b));if(!spec)return;const g=spawnFrom(s,sk,spec);g.recipe=[s.name,reference?`2D mirror · ${reference.name}`:'2D mirror'];g.link={src:s.id,kind:'mirror',a:[...a],b:[...b],ref:reference?reference.id:undefined};if(s.booleanRegions)g.booleanRegions=s.booleanRegions.map(R=>({outer:FrontierCadKernel.mirror2D(R.outer,a,b),holes:(R.holes||[]).map(H=>FrontierCadKernel.mirror2D(H,a,b))}));made.push(g.id);});
+  invalidate(sk.id);topoCache.clear();doc.sel=new Set(made);renderOutliner();renderInspector();draw();log(`2D mirror · ${made.length} linked cop${made.length===1?'y':'ies'} across ${a[0]},${a[1]}`);return !!made.length;
+}
+function mirrorBySelectedReference(ids){
+  if(!ids||ids.length<2){log('Mirror 2D: select the source first and the reference object second');return false;}
+  const source=byId(ids[0]),reference=byId(ids[1]);if(!source||!reference||source.kind!=='curve'||reference.parent!==source.parent){log('Mirror 2D: source and reference must be curves in the same sketch');return false;}
+  const axis=mirrorReferenceAxis2D(reference);if(!axis)return false;return mirrorSelection2D(axis,[source],reference);
 }
 
 // ══ Mirror · Linear pattern · Circular pattern (Sketch Modify) ═════════════════════════════════════════════════
@@ -2284,7 +2300,7 @@ function patUV(px,py){const t=patTool;const save=tool;tool=tool||{pts:t.pts,op:{
 function patMove(px,py){const t=patTool;t.hover=patUV(px,py);requestDraw();}
 function patKey(e){const t=patTool;if(e.key==='Escape'){patEnd();return true;}if(e.key==='Enter'){if(t.kind==='mirror'&&t.pts.length<2){t.pts=[[0,0],[0,1]];}patApply();return true;}return false;}
 // ── live links: a copy made by mirror / pattern follows its source until unlinked ──
-function linkFn(L){if(L.kind==='mirror'){let a=L.a,b=L.b;if(L.axis){const ax=byId(L.axis);if(!ax)return null;const e=ctrlPlane(ax);a=e.pts[0];b=e.pts[e.pts.length-1];}if(!a||!b)return null;return mirrorFn(a,b);}
+function linkFn(L){if(L.kind==='mirror'){let a=L.a,b=L.b;if(L.ref){const ref=byId(L.ref),axis=mirrorReferenceAxis2D(ref);if(!axis)return null;[a,b]=axis;}else if(L.axis){const ax=byId(L.axis);if(!ax)return null;const e=ctrlPlane(ax);a=e.pts[0];b=e.pts[e.pts.length-1];}if(!a||!b)return null;return mirrorFn(a,b);}
   if(L.kind==='linear')return q=>[q[0]+L.d[0],q[1]+L.d[1]];if(L.kind==='circular'){const co=Math.cos(L.ang),si=Math.sin(L.ang);return q=>{const x=q[0]-L.c[0],y=q[1]-L.c[1];return [L.c[0]+x*co-y*si,L.c[1]+x*si+y*co];};}return null;}
 function ctrlCentroid(f){const C=f.ctype==='poly'?ctrlPlane(f):curvePlane(f);if(!C||!C.pts.length)return null;let x=0,y=0;C.pts.forEach(q=>{x+=q[0];y+=q[1];});return [x/C.pts.length,y/C.pts.length];}
 function migrateLinks(){let n=0;doc.figures.forEach(f=>{if(f.kind!=='curve'||f.link||!f.mirrorOf)return;const src=byId(f.mirrorOf);if(!src||src.kind!=='curve'){delete f.mirrorOf;return;}const c1=ctrlCentroid(src),c2=ctrlCentroid(f);if(!c1||!c2||Math.hypot(c2[0]-c1[0],c2[1]-c1[1])<1e-9){delete f.mirrorOf;return;}

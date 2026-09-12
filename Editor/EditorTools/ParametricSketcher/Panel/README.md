@@ -29,6 +29,6 @@ node Verification/kernel-smoke.js
 - 2-D union, subtract, intersection, and XOR split profile edges at intersections and rebuild oriented outer/hole loops before extrusion;
 - 2-D mirror uses a real axis transform, preserves holes/boolean regions, and stores a live link to the source curve.
 
-Select closed sketch profiles and open **Construct → 2D Boolean** (or use the Multiple figures **Boolean union** action). Select sketch curves and press **M** for the interactive mirror tool; the inspector action uses the same sketch-space mirror logic. Command-line examples: `boolean subtract Circle01 Circle02`, `mirror Line01 V`.
+Select closed sketch profiles and open **Construct → 2D Boolean**, or use the multi-selection Inspector actions for union, subtract, intersect, and XOR. Inspector **Mirror 2D** treats the first selected curve as the source and the second selected curve as the reference: a line uses its actual plane-space line, while other curves use their plane-space position and rotation. Select sketch curves and press **M** for the interactive mirror tool. Command-line examples: `boolean subtract Circle01 Circle02`, `mirror Line01 V`.
 
 The existing sketch tools, constraints, dimensions, pattern tools, history, document save/open, and viewport interactions remain in `index.html`. No C++ source is changed by this prototype.
