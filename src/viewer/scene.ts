@@ -65,11 +65,70 @@ export const DEFAULT_VIEW: ViewerSettings = {
   xrayGround: false,
 };
 
-const BARK = new THREE.Color(0x6e6258);
-const LEAF = new THREE.Color(0x5f7c3a);
+export interface ViewerPalette {
+  /** Main welded surface. Trees use this for bark; grasses/succulents use it for the whole organ mesh. */
+  stem: number;
+  /** Separate proxy cards: foliage on trees, needles/spines on cacti. */
+  leaf: number;
+  stemRoughness: number;
+  leafRoughness: number;
+  /** Optional flower / seed-head accent applied to grass head level geometry. */
+  accent?: number;
+}
+
+const DEFAULT_PALETTE: ViewerPalette = { stem: 0x6e6258, leaf: 0x5f7c3a, stemRoughness: 0.92, leafRoughness: 0.75 };
 const ROCK = new THREE.Color(0x5b5c5e);
 const BLOCK = new THREE.Color(0x6b665c);
 const ROCK_HOVER = new THREE.Color(0x7d8390);
+
+/**
+ * A restrained species palette keeps the preview honest: the silhouette and
+ * topology remain the source of truth, while cacti read as living green tissue
+ * and their areole spines read as dry ivory rather than generic tree bark.
+ */
+export function paletteForSpecies(name: string, grass = false): ViewerPalette {
+  const n = name.toLowerCase();
+  if (grass) {
+    if (n.includes('dudleya') || n.includes('echeveria') || n.includes('living stones')) {
+      return { stem: 0x86a9a0, leaf: 0x86a9a0, stemRoughness: 0.68, leafRoughness: 0.58 };
+    }
+    if (n.includes('blue agave') || n.includes('parry') || n.includes('century agave') || n.includes('desert spoon')) {
+      return { stem: 0x618d75, leaf: 0x618d75, stemRoughness: 0.72, leafRoughness: 0.62, accent: 0xd1a25c };
+    }
+    if (n.includes('red yucca')) {
+      return { stem: 0x587d62, leaf: 0x587d62, stemRoughness: 0.75, leafRoughness: 0.64, accent: 0xb85f68 };
+    }
+    if (n.includes('aloe')) {
+      return { stem: 0x6f9565, leaf: 0x6f9565, stemRoughness: 0.74, leafRoughness: 0.62, accent: 0xd58a62 };
+    }
+    if (n.includes('haworthia') || n.includes('snake plant')) {
+      return { stem: 0x4f745b, leaf: 0x4f745b, stemRoughness: 0.78, leafRoughness: 0.62 };
+    }
+    if (n.includes('jade')) {
+      return { stem: 0x6b8650, leaf: 0x6b8650, stemRoughness: 0.85, leafRoughness: 0.48 };
+    }
+    return { stem: 0x657d50, leaf: 0x657d50, stemRoughness: 0.78, leafRoughness: 0.68 };
+  }
+  if (n.includes('saguaro') || n.includes('organ pipe') || n.includes('cardon') || n.includes('senita') || n.includes('fencepost')) {
+    return { stem: 0x4e8166, leaf: 0xd8c791, stemRoughness: 0.86, leafRoughness: 0.82 };
+  }
+  if (n.includes('barrel') || n.includes('pincushion') || n.includes('rainbow') || n.includes('lady finger') || n.includes('claret cup')) {
+    return { stem: 0x6d914f, leaf: 0xe0c98d, stemRoughness: 0.82, leafRoughness: 0.8 };
+  }
+  if (n.includes('prickly pear') || n.includes('beavertail')) {
+    return { stem: 0x658d67, leaf: 0xc9d3a0, stemRoughness: 0.8, leafRoughness: 0.78 };
+  }
+  if (n.includes('cholla')) {
+    return { stem: 0x6f8f5b, leaf: 0xd5c18c, stemRoughness: 0.88, leafRoughness: 0.82 };
+  }
+  if (n.includes('ocotillo')) {
+    return { stem: 0x795a3e, leaf: 0x587d4b, stemRoughness: 0.9, leafRoughness: 0.72 };
+  }
+  if (n.includes('joshua') || n.includes('ironwood')) {
+    return { stem: 0x6b5948, leaf: 0x6f8b4d, stemRoughness: 0.9, leafRoughness: 0.72 };
+  }
+  return { ...DEFAULT_PALETTE };
+}
 
 export class Viewer {
   readonly renderer: THREE.WebGLRenderer;
@@ -96,6 +155,7 @@ export class Viewer {
   private placementListeners: ((e: PlacementEvent) => void)[] = [];
   private sun: THREE.DirectionalLight;
   private settings: ViewerSettings = { ...DEFAULT_VIEW };
+  private palette: ViewerPalette = { ...DEFAULT_PALETTE };
   private treeHeight = 10;
   private pmrem: THREE.PMREMGenerator;
   private matcapTexture: THREE.Texture;
@@ -370,8 +430,9 @@ export class Viewer {
     }
   }
 
-  setTree(buffers: GpuBuffers, leaves: LeafMesh | null, height: number): void {
+  setTree(buffers: GpuBuffers, leaves: LeafMesh | null, height: number, palette: ViewerPalette = DEFAULT_PALETTE): void {
     this.clearTree();
+    this.palette = palette;
     // Real height drives the framing (grasses can be a few centimetres tall);
     // the sway amplitude keeps a floor so small plants still visibly move.
     this.treeHeight = Math.max(0.05, height);
@@ -550,20 +611,22 @@ export class Viewer {
   }
 
   private makeBarkMaterial(): THREE.MeshStandardMaterial {
-    const mat = new THREE.MeshStandardMaterial({ color: BARK, roughness: 0.92, metalness: 0.0, side: THREE.DoubleSide });
+    const mat = new THREE.MeshStandardMaterial({ color: this.palette.stem, roughness: this.palette.stemRoughness, metalness: 0.0, side: THREE.DoubleSide });
     const modeU = { value: 0 };
     mat.userData.mode = modeU;
     mat.onBeforeCompile = (shader) => {
       this.injectWind(shader);
       shader.uniforms.uMode = modeU;
       shader.uniforms.uMatcap = { value: this.matcapTexture };
+      shader.uniforms.uAccent = { value: new THREE.Color(this.palette.accent ?? this.palette.stem) };
+      shader.uniforms.uAccentMix = { value: this.palette.accent === undefined ? 0 : 1 };
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `#include <common>\nattribute float aLevel;\nattribute float aJunction;\nvarying vec4 vWindV;\nvarying float vLevel;\nvarying float vJunction;\nvarying vec3 vViewNrm;`)
         .replace('#include <fog_vertex>', `#include <fog_vertex>\nvWindV = aWind;\nvLevel = aLevel;\nvJunction = aJunction;\nvViewNrm = normalize(normalMatrix * objectNormal);`);
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          `#include <common>\nuniform float uMode;\nuniform sampler2D uMatcap;\nvarying vec4 vWindV;\nvarying float vLevel;\nvarying float vJunction;\nvarying vec3 vViewNrm;
+          `#include <common>\nuniform float uMode;\nuniform sampler2D uMatcap;\nuniform vec3 uAccent;\nuniform float uAccentMix;\nvarying vec4 vWindV;\nvarying float vLevel;\nvarying float vJunction;\nvarying vec3 vViewNrm;
           // Debug palettes are authored in sRGB; convert so they survive lighting + tone mapping.
           vec3 srgbIn(vec3 c) { return pow(c, vec3(2.2)); }
           vec3 levelColor(float l) {
@@ -581,6 +644,7 @@ export class Viewer {
         .replace(
           '#include <color_fragment>',
           `#include <color_fragment>
+          if (uAccentMix > 0.5 && vLevel > 2.5) diffuseColor.rgb = uAccent;
           if (uMode > 0.5 && uMode < 1.5) diffuseColor.rgb = levelColor(vLevel);
           else if (uMode > 1.5 && uMode < 2.5) diffuseColor.rgb = heat(vWindV.y * 0.75 + vWindV.w * 0.25);
           else if (uMode > 2.5 && uMode < 3.5) diffuseColor.rgb = srgbIn(mix(vec3(0.62, 0.60, 0.58), vec3(0.95, 0.42, 0.18), vJunction));
@@ -602,7 +666,7 @@ export class Viewer {
   }
 
   private makeLeafMaterial(): THREE.MeshStandardMaterial {
-    const mat = new THREE.MeshStandardMaterial({ color: LEAF, roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
+    const mat = new THREE.MeshStandardMaterial({ color: this.palette.leaf, roughness: this.palette.leafRoughness, metalness: 0, side: THREE.DoubleSide });
     mat.onBeforeCompile = (shader) => this.injectWind(shader);
     mat.customProgramCacheKey = () => 'leaf-wind-v3';
     return mat;

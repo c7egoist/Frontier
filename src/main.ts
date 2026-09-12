@@ -1,7 +1,7 @@
 import './ui/styles.css';
 import { PRESETS, PRESET_GROUPS, TreeParams, cloneParams, SHAPE_NAMES, Shape, scatterFor, trunkBaseRadius, rootReach, isGrass } from './tree/params';
 import { GrassParams, Inflorescence, INFLORESCENCE_NAMES, HEAD_BRANCH_NAMES, grassHeight, grassHabit } from './plant/grassParams';
-import { Viewer, DEFAULT_VIEW, ViewerSettings, DisplayMode } from './viewer/scene';
+import { Viewer, DEFAULT_VIEW, ViewerSettings, DisplayMode, paletteForSpecies } from './viewer/scene';
 import { el, icon, button, section, slider, select, check, stepper, levelsHeader, levelRow, fmtInt, fmtCompact } from './ui/controls';
 import type { WorkerRequest, WorkerResponse, GenerateResponse } from './worker/tree.worker';
 import { LeafMesh } from './tree/mesh';
@@ -15,7 +15,7 @@ const APP_NAME = 'Frontier';
 // State
 // -----------------------------------------------------------------------------
 
-let params: TreeParams = cloneParams(PRESETS[0]);
+let params: TreeParams = cloneParams(PRESETS.find((p) => p.name === 'Saguaro') ?? PRESETS[0]);
 const view: ViewerSettings = { ...DEFAULT_VIEW };
 let lastResult: GenerateResponse | null = null;
 let busy = false;
@@ -439,7 +439,7 @@ worker.onmessage = (ev: MessageEvent<WorkerResponse>) => {
     leaves.pivots = Array.from(msg.leaves.pivots);
     leaves.indices = Array.from(msg.leaves.indices);
     const firstTree = !hasTree;
-    viewer.setTree(buffers, leaves, msg.summary.height);
+    viewer.setTree(buffers, leaves, msg.summary.height, paletteForSpecies(params.name, isGrass(params)));
     viewer.setObstacles(msg.obstacles);
     if (firstTree || frameOnNext) viewer.frame();
     frameOnNext = false;
@@ -546,6 +546,9 @@ function updateReport(r: GenerateResponse): void {
   heroText.append(el('span', 'n', params.name), el('span', 'm', `${groupOf(params.name).toLowerCase()} · seed ${params.seed} · ${r.timings.total.toFixed(0)} ms`));
   cTop.append(ico, heroText);
   const grass = isGrass(params);
+  const finiteGeometry = r.buffers.position.every((v) => Number.isFinite(v)) && r.buffers.normal.every((v) => Number.isFinite(v));
+  const reviewPass = ok && finiteGeometry && r.stats.droppedStems === 0 && rep.quadRatio >= 0.995;
+  inspectorBadge.textContent = grass ? `succulent · ${reviewPass ? 'QA pass' : 'review'}` : `${params.botany.ribs ? 'cactus' : 'tree'} · ${reviewPass ? 'QA pass' : 'review'}`;
   const big = el('div', 'big');
   const hSmall = r.summary.height < 1;
   big.append(el('span', 'v', hSmall ? (r.summary.height * 100).toFixed(0) : r.summary.height.toFixed(grass ? 2 : 1)), el('span', 'u', hSmall ? 'cm' : 'm'), el('span', 'lab', 'height'));
@@ -623,6 +626,19 @@ function updateReport(r: GenerateResponse): void {
 
   const page = pages.report;
   page.innerHTML = '';
+  const review = section('Asset review', page, { hint: reviewPass ? 'PASS' : 'HOLD' });
+  const reviewGrid = el('div', 'kvgrid');
+  reviewGrid.append(
+    el('span', '', 'Topology'),
+    el('b', reviewPass ? 'ok' : 'warn', reviewPass ? 'closed · genus 0' : 'needs review'),
+    el('span', '', 'Surface'),
+    el('b', reviewPass ? 'ok' : 'warn', `${(rep.quadRatio * 100).toFixed(2)}% quads`),
+    el('span', '', 'Finite data'),
+    el('b', finiteGeometry ? 'ok' : 'warn', finiteGeometry ? 'yes' : 'no'),
+    el('span', '', 'Dropped organs'),
+    el('b', r.stats.droppedStems === 0 ? 'ok' : 'warn', fmtInt(r.stats.droppedStems)),
+  );
+  review.append(reviewGrid, el('p', 'note', 'Review gate checks finite geometry, one closed surface, no dropped organs, and a dense quad silhouette before this asset is treated as production-ready.'));
   const s1 = section('Manifold checks', page, { hint: ok ? 'all pass' : 'issues' });
   const list = el('div', 'list');
   const item = (label: string, pass: boolean, detail: string): void => {
@@ -748,7 +764,7 @@ function speciesMeta(name: string): string {
     return `${grassHabit(g)} · ${h < 1 ? `${Math.round(h * 100)} cm` : `${h.toFixed(1)} m`} · ${g.head === 'none' ? 'vegetative' : g.head}`;
   }
   const b = p.botany;
-  return `${SHAPE_NAMES[b.shape].toLowerCase()} · ${b.scale} m · L${b.levels}`;
+  return `${SHAPE_NAMES[b.shape].toLowerCase()} · ${b.scale} m · ${b.ribs ? `${b.ribs} ribs` : `L${b.levels}`}`;
 }
 
 function buildLibrary(): void {

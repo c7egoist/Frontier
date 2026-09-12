@@ -4,7 +4,7 @@ A production-oriented vegetation generator that outputs **one closed, manifold q
 plant — no intersecting tubes, no "place a twig on a branch" merges. Branches grow *out of* their
 parent's surface through shared edge loops, forks are true Y-crotches, grass blades and culms grow
 out of a welded crown the same way, and every vertex carries wind data so the whole plant bends as
-a single skin. 30 tree species and 14 grasses ship as presets.
+a single skin. 45 tree species and 27 grass / succulent species ship as presets.
 
 ```
 npm install
@@ -17,11 +17,11 @@ npm run build      # static bundle in dist/
 
 | Stage | Module | Summary |
 |---|---|---|
-| Botany | `src/tree/skeleton.ts` | Weber–Penn parametric model (SIGGRAPH '95): per-level curvature, S-curves, clones/splits, phyllotactic child placement, crown-shape length envelopes, taper, root flare, tropism. 30 species presets grouped by biome (oaks, forest broadleaf and conifers, jungle, savanna, desert, rocky terrain) in `src/tree/params.ts`. |
+| Botany | `src/tree/skeleton.ts` | Weber–Penn parametric model (SIGGRAPH '95): per-level curvature, S-curves, clones/splits, phyllotactic child placement, crown-shape length envelopes, taper, root flare, tropism. 45 tree presets grouped by biome (oaks, forest broadleaf and conifers, jungle, savanna, desert, rocky terrain) in `src/tree/params.ts`, including ribbed cacti, flattened Opuntia pads, and clustered desert columns. |
 | Meshing | `src/tree/mesher.ts` | **Welded quad mesher** (below). Emits quads only, plus ≤1 triangle per tip cap for odd ring counts. |
 | Validation | `src/tree/validate.ts` | Half-edge style audit: boundary edges, non-manifold edges, winding consistency, degenerate faces, isolated vertices, connected components, Euler characteristic / genus, valence histogram. |
 | Wind | `src/viewer/shaders.ts` | Three-tier vertex wind (trunk sway ∝ height², limb bending about a per-limb pivot with phase, twig/leaf flutter). Data is baked per vertex by the mesher. |
-| Grasses | `src/plant/grassMesher.ts`, `src/plant/grassParams.ts` | **Welded grass mesher** (below): crown dome, leaf blades, culms with nodes/sheaths/leaves and four inflorescence types, all one closed quad manifold. 14 species in three families (turf & meadow, tussock, cereals & reeds). |
+| Grasses | `src/plant/grassMesher.ts`, `src/plant/grassParams.ts` | **Welded grass mesher** (below): crown dome, leaf blades, culms with nodes/sheaths/leaves and four inflorescence types, all one closed quad manifold. 27 species across turf, meadow, tussock, cereals, reeds, and fleshy desert rosettes. |
 | Export | `src/tree/export.ts` | OBJ with **quads preserved** (for Blender/Maya/ZBrush), GLB (triangulated) with wind data in `COLOR_0` and level/junction flags in `TEXCOORD_1`. |
 | UI | `src/main.ts`, `src/ui/*` | Three floating cards in the SolidArc panel language: **Library** (species browser grouped by biome and plant family, search, census), **Viewport** (display modes shaded / clay / wire / levels / junctions / wind, pill toolbar, camera read-out, exact fit-to-view framing from 10 cm turf to 70 m redwoods, key hints), **Inspector** (hero card with height + mesh census, presence grid, tabs Botany · Roots · Mesh · View · Topology for trees and Grass · View · Topology for grasses, with tick-track sliders, steppers, per-level tables with drag-to-scrub cells, and a command line: `seed 42`, `preset oak`, `mode wire`, `export glb`, `help`). Generation runs in a Web Worker. |
 
@@ -83,6 +83,27 @@ closed quad manifold** — the same guarantee as the trees, with no triangles at
 `Lawn Turf` (330 blades) is 14.5 k faces, `Wheat` 9 k, `Meadow Grass` 67 k, `Pampas Grass` (24 culms,
 plumes with secondaries) 305 k — all genus 0, zero dropped organs, on every seed in the test matrix.
 
+## Desert library & review gate
+
+The desert shelf is the default view and is deliberately split into two geometry families:
+
+* **Cacti / woody desert plants** use rib corrugation, helical rib twist, areole tubercles,
+  flattened pad cross-sections, and spine clusters placed at those same surface stations. The
+  catalog includes Saguaro, Organ Pipe, Golden Barrel, Fishhook Barrel, Prickly Pear, Cholla,
+  Ocotillo, Cardón, Pincushion, Claret Cup, Mexican Fencepost, Senita, Texas Rainbow, and
+  Lady Finger Cactus.
+* **Succulent rosettes** use thick keeled blades grown through crown windows rather than flat
+  cards: Agaves, Aloe, Sotol, Echeveria, Haworthia, Jade, Blue Agave, Red Yucca, Beargrass,
+  Dudleya, Living Stones, and Snake Plant. The species palette is kept in the viewer so blue
+  waxy rosettes, blue-green agaves, cactus tissue, and ivory spines do not all render as generic
+  brown bark.
+
+Before a desert preset is considered catalogued, `npm run verify:desert` builds seeds 1, 7, and
+42 and rejects non-finite vertices, disconnected or non-manifold surfaces, dropped organs,
+degenerate faces, under-resolved silhouettes, and quad ratios below 99.5%. Use the existing
+`tools/screenshot.mjs` harness with a Chromium path for the final image review; topology passing
+is never treated as a substitute for looking at the silhouette.
+
 ## Wind
 
 Per-vertex attributes baked by the mesher:
@@ -102,16 +123,18 @@ full tree, close-ups of specific junction types, display modes and the wind defo
 used to review the results in this repository; they require `puppeteer-core` and a Chromium binary
 (`CHROME_PATH`).
 
-`scripts/probe.ts` (trees) and `scripts/grassProbe.ts` (grasses) run the full pipeline headlessly
-and print the topology audit per preset × seed: `npx vite-node scripts/grassProbe.ts "" 1,2,3`.
+`scripts/probe.ts` (trees), `scripts/grassProbe.ts` (grasses), and `scripts/desertProbe.ts` (the
+strict desert review gate) run the full pipeline headlessly and print the topology audit per preset
+× seed: `npx vite-node scripts/grassProbe.ts "" 1,2,3`.
 
-`npm test` covers every preset (30 trees + 14 grasses) × 3 seeds: closed, manifold, consistently
+`npm test` covers every preset (45 trees + 27 grasses / succulents) × 3 seeds: closed, manifold, consistently
 wound, one component, genus 0, quad ratio, drop budget, wind attribute ranges, determinism and
 the OBJ/GLB/GPU exporters.
 
 ## Scope of this phase
 
-Form and topology only: solid-colour materials, proxy leaf cards on trees. Bark and blade
-textures, UV layout for atlases, LOD chains and detailed leaves are the next step; the quad flow
-and the UV seams are already laid out to make that straightforward. Grasses are the first non-tree
-plant family; shrubs, ferns and succulents can reuse the same organ/window machinery.
+Form and topology are the source of truth: the preview now applies species-appropriate solid
+material palettes, while tree foliage and cactus spines remain lightweight proxy cards. PBR bark /
+blade texture atlases, UV packing, LOD chains, and detailed leaf cards are still the next production
+step; the quad flow and UV seams are already laid out to make that straightforward. Succulents
+reuse the welded crown / organ window machinery instead of faking volume with intersecting cards.
