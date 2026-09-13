@@ -202,7 +202,10 @@ const uint kLocalFogFlag        = 1u << 2u;
 const uint kCloudFollowWindFlag = 1u << 3u;
 const uint kLocalCloudWindFlag  = 1u << 4u;
 const uint kLocalFogWindFlag    = 1u << 5u;
-const float kCloudExtinctionScale = 0.01;
+// The reference's extinction scales (panel optical-depth readout: tau = den x depth x .06): cloud .06
+// with the layer's absorption, fog keeps its own .01 (it is not vf — P8 re-derives it with vfDensity).
+const float kCloudExtinctionScale = 0.06;
+const float kFogExtinctionScale = 0.01;
 const float kCloudMaxDistance = 200000.0; // [m] enough to cover the visible troposphere without grazing-ray runaway
 
 float CloudHash(vec3 P)
@@ -450,26 +453,43 @@ bool CloudBoxInterval(vec3 Origin, vec3 Direction, vec3 Centre, vec3 HalfSize, f
 
 float CloudShadowMedium(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3 Swirl)
 {
-    // Twin of VolumetricMedia::ShadowMarch: Taps half-step taps toward the sun from the sample point. The taps
-    //    pace the medium's own reference step (the view step the CPU march passes is the same size to 4% — the
-    //    rescale — so both paths resolve the same self-shadowing, the 4.83x gap/shadow contrast the CPU path
-    //    measured). A full-interval march was tried here first: at grazing its taps stride whole clouds between
-    //    samples and the shadow aliases into noise, while these local taps stay inside the structure.
-    //    The lod threading is the reference's (clShadow/uniShadow): the layer's first two taps keep erosion,
-    //    the rest skip it, and the local shadow always skips it (the fog ignores lod).
-    float StepSize = Medium == 0u ? 4000.0 / float(max(SkyCloudControl.x, 1u))
-                   : max((Medium == 1u ? SkyLocalCloudParams.z : SkyLocalFogParams.z) * 0.5, 1.0);
-    uint Count = max(Taps, 1u);
-    float Depth = 0.0;
+    // Twin of VolumetricMedia::ShadowMarch (P2.4b): the layer marches clLight's growing-spaced taps
+    //    (d = st*i²*.35 off st = thick*.12, weight d*.8, the tier's count, far taps coarse); the boxes
+    //    march uniShadow's linear taps (d = st*i*.5 off the widest half-size, weight st*.5, fixed 4).
+    //    No view step leaks in: the shadow paces each medium's own size, so one sun ray shades one way
+    //    whichever loop calls. A full-interval march was tried here first: at grazing its taps stride
+    //    whole clouds between samples and the shadow aliases into noise, while these local taps stay
+    //    inside the structure. The local cloud carries the layer's absorption in its weight (marchLocal
+    //    folds it into uniShadow); the layer's returns with the multi-scatter loop (P2.4c).
     float Time = SkyCloudClock.z;
-    for (uint I = 1u; I <= Count; ++I)
+    float Depth = 0.0;
+    if (Medium == 0u)
     {
-        float Distance = StepSize * float(I) * 0.5;
-        vec3 Q = Origin + Direction * Distance;
-        float D = Medium == 0u ? CloudDensityAt(Q, Time, I > 2u ? 1.0 : 0.0)
-                : LocalDensityAt(Q, Medium == 2u, Swirl, 1.0);
-        Depth += D * StepSize * 0.5 * kCloudExtinctionScale;
-        if (Depth > 4.0) break;
+        float Ceiling = max(SkyCloudShape.y, 0.0);
+        float Base = clamp(SkyCloudLayer.x, 0.0, Ceiling);
+        float Top = clamp(SkyCloudLayer.x + SkyCloudLayer.y, 0.0, Ceiling);
+        if (Top <= Base) return 1.0;
+        float St = (Top - Base) * 0.12;
+        for (uint I = 1u; I <= 5u; ++I)
+        {
+            if (I > Taps) break;
+            float D = St * float(I) * float(I) * 0.35;
+            Depth += CloudDensityAt(Origin + Direction * D, Time, I > 2u ? 1.0 : 0.0) * D * 0.8;
+            if (Depth > 4.0) break;
+        }
+    }
+    else
+    {
+        vec3 HalfSize = Medium == 1u ? SkyLocalCloudHalfSize.xyz : SkyLocalFogHalfSize.xyz;
+        float St = max(max(HalfSize.x, HalfSize.y), HalfSize.z) * (Medium == 1u ? 0.25 : 0.5);
+        float Weight = St * 0.5 * (Medium == 1u ? (1.0 + SkyCloudScatter.w) * kCloudExtinctionScale
+                                               : kFogExtinctionScale);
+        for (uint I = 1u; I <= 4u; ++I)
+        {
+            float D = St * float(I) * 0.5;
+            Depth += LocalDensityAt(Origin + Direction * D, Medium == 2u, Swirl, 1.0) * Weight;
+            if (Depth > 4.0) break;
+        }
     }
     return exp(-Depth);
 }
@@ -535,7 +555,9 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
         float Density = Medium == 0u ? CloudDensityAt(P, Time, Lod) : LocalDensityAt(P, Medium == 2u, Swirl, 0.0);
         if (Density <= 1e-5) continue;
         float SunT = CloudSunTransmittance(P, SunDirection, Swirl);
-        float Extinction = Density * Step * kCloudExtinctionScale;
+        float Sigma = Medium == 2u ? kFogExtinctionScale
+                                   : (1.0 + SkyCloudScatter.w) * kCloudExtinctionScale;
+        float Extinction = Density * Step * Sigma;
         float SegmentT = exp(-Extinction);
         vec3 Incoming = SunRadiance * SunT * Phase + AmbientRadiance;
         Scatter += Incoming * Albedo * (1.0 - SegmentT) * Transmittance;

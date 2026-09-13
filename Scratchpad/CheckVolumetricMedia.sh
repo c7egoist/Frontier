@@ -125,10 +125,29 @@ echo "[VolumetricMedia] cloud shafts come from the medium shadowing itself"
 # The scene-occlusion callback was removed - nothing in the engine called it and no such geometry exists yet.
 #    What stays is the half that renders: ShadowMarch accumulates cloud density along the sun ray, which is what
 #    lights a cloud at all. Deleting THAT would leave clouds flat, so it is guarded here.
-printf '%s' "$MediaCode" | grep -q 'Cloud.Enabled ? CloudDensity(Cloud, Wind, Q, Time, TapLod) : 0.0f'
-Report $? "the sun-shadow march samples cloud density along the sun ray"
-printf '%s' "$MediaCode" | grep -q 'const float TapLod = I > 2u ? 1.0f : 0.0f;'
+# P2.4b: the shadow paces each medium's own size — clLight's quadratic taps for the layer, uniShadow's
+#    linear taps for the boxes. No view step may leak in (the old form's lie: one sun ray shading
+#    differently per calling loop), so StepSize's absence from both shadow bodies is pinned, not reviewed.
+printf '%s' "$MediaCode" | grep -q 'const float St = (Top - Base) \* 0.12f;'
+Report $? "the layer shadow paces the thickness (st = thick x .12)"
+printf '%s' "$MediaCode" | grep -q 'const float D = St \* F \* F \* 0.35f;'
+Report $? "the layer taps grow quadratically (d = st i^2 .35)"
+printf '%s' "$MediaCode" | grep -q ') \* D \* 0.8f;'
+Report $? "the layer taps weigh d x .8"
+printf '%s' "$MediaCode" | grep -q 'const float St = Widest \* (IsFog ? 0.5f : 0.25f);'
+Report $? "the boxes pace the half-size (x.25 cloud, x.5 fog)"
+printf '%s' "$MediaCode" | grep -q 'I <= 4u; ++I)'
+Report $? "the boxes march a fixed 4 taps"
+printf '%s' "$MediaCode" | grep -q 'I <= 5u; ++I)'
+Report $? "the layer marches at most 5 taps"
+printf '%s' "$MediaCode" | grep -q 'I > 2u ? 1.0f : 0.0f'
 Report $? "the shadow's first two taps keep erosion, the rest skip it"
+printf '%s' "$MediaCode" | grep -q 'Sigma = M == 2u ? 0.01f : (1.0f + Cloud.Absorption) \* 0.06f;'
+Report $? "the view reads cloud .06 with absorption, fog .01"
+! sed -n '/static float ShadowBox/,/^    }/p' "$Header" | sed 's;//.*;;' | grep -q 'StepSize'
+Report $? "no view step leaks into the box shadow"
+! sed -n '/static float ShadowMarch/,/^    }/p' "$Header" | sed 's;//.*;;' | grep -q 'StepSize'
+Report $? "none leaks into the layer shadow either"
 ! printf '%s' "$MediaCode" | grep -q 'SunVisibilityAt'
 Report $? "the unused scene-occlusion callback is gone"
 ! printf '%s' "$MediaCode" | grep -qiE 'radial.?blur|screenspace shaft'

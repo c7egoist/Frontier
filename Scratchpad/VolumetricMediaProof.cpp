@@ -577,6 +577,78 @@ int main()
                "unlinked, a stray swirl leaves the box bit-identical");
     }
 
+    std::printf("\n11. the shadow quadrature paces each medium's own size\n");
+    {
+        // The shadow's fixtures: a deep high-cover slab (taps 2-4 stay inside it), a thin cousin for the
+        // strict-ordering test (tap 1 cannot trip the early-out at density 0.1), and the default box.
+        CloudLayerSettings Slab{};
+        Slab.Enabled = true; Slab.Base = 1500.0f; Slab.Thickness = 900.0f;
+        Slab.Coverage = 0.95f; Slab.Density = 1.0f;
+        CloudLayerSettings Thin = Slab;
+        Thin.Density = 0.1f;
+        LocalVolumeSettings Puff{};
+        Puff.Enabled = true;
+        CloudLayerSettings NoSlab{};
+        LocalVolumeSettings Nothing{};
+        const float NoSwirl[3] = { 0.0f, 0.0f, 0.0f };
+        const float StraightUp[3] = { 0.0f, 0.0f, 1.0f };
+
+        // Clear air above the slab: every tap samples exactly 0 (the slab guard), depth sums to exactly 0,
+        // transmittance is exactly 1 — at any tap count, including 0 (zero taps means the shadow is off).
+        const float Above[3] = { 40.0f, -160.0f, 2600.0f };
+        Expect(VolumetricMedia::ShadowMarch(Slab, Nothing, Nothing, Wind, Above, StraightUp,
+                                            5u, 0.0f, NoSwirl) == 1.0f,
+               "clear air above the slab transmits exactly 1");
+        Expect(VolumetricMedia::ShadowMarch(Slab, Nothing, Nothing, Wind, Above, StraightUp,
+                                            0u, 0.0f, NoSwirl) == 1.0f,
+               "zero taps means the shadow is off (exactly 1)");
+
+        // The box marches a fixed 4 taps whatever the tier count says — bit-identical — and it actually
+        // shadows, or the equality is vacuous.
+        // A dense cell of the default box (D = 0.614 uneroded here), low enough that taps 1-3
+        // stay in body on the way up.
+        const float InBox[3] = { 0.0f, -140.0f, 110.0f };
+        const float Box1 = VolumetricMedia::ShadowMarch(NoSlab, Puff, Nothing, Wind, InBox, StraightUp,
+                                                        1u, 0.0f, NoSwirl);
+        const float Box5 = VolumetricMedia::ShadowMarch(NoSlab, Puff, Nothing, Wind, InBox, StraightUp,
+                                                        5u, 0.0f, NoSwirl);
+        std::printf("     box shadow: 1 tap %.4f, 5 taps %.4f\n", Box1, Box5);
+        Expect(Box1 == Box5, "the box marches a fixed 4 taps at any tier count (bit-identical)");
+        Expect(Box1 < 1.0f, "and the box actually shadows (or the equality is vacuous)");
+
+        // Layer taps accumulate: every term is nonnegative, so more taps shadow at least as much — and
+        // strictly more where tap 1 cannot trip the early-out alone (density 0.1 caps its depth at 3.5).
+        const float AtBase[3] = { 40.0f, -160.0f, 1550.0f };
+        const float Deep1 = VolumetricMedia::ShadowMarch(Slab, Nothing, Nothing, Wind, AtBase, StraightUp,
+                                                         1u, 0.0f, NoSwirl);
+        const float Deep5 = VolumetricMedia::ShadowMarch(Slab, Nothing, Nothing, Wind, AtBase, StraightUp,
+                                                         5u, 0.0f, NoSwirl);
+        const float Thin1 = VolumetricMedia::ShadowMarch(Thin, Nothing, Nothing, Wind, AtBase, StraightUp,
+                                                         1u, 0.0f, NoSwirl);
+        const float Thin5 = VolumetricMedia::ShadowMarch(Thin, Nothing, Nothing, Wind, AtBase, StraightUp,
+                                                         5u, 0.0f, NoSwirl);
+        std::printf("     layer shadow: deep 1 tap %.4f, 5 taps %.4f; thin 1 tap %.4f, 5 taps %.4f\n",
+                    Deep1, Deep5, Thin1, Thin5);
+        Expect(Deep5 <= Deep1, "more taps shadow at least as much (every tap adds nonnegative depth)");
+        Expect(Thin5 < Thin1, "and strictly more where tap 1 cannot trip the early-out alone");
+
+        // Per-medium transmittances multiply: the combined march equals the product of the solo marches,
+        // bit-exact — the media never interact inside the quadrature.
+        CloudLayerSettings Low = Slab;
+        Low.Base = 100.0f;
+        const float SoloSlab = VolumetricMedia::ShadowMarch(Low, Nothing, Nothing, Wind, InBox, StraightUp,
+                                                            5u, 0.0f, NoSwirl);
+        const float SoloBox = VolumetricMedia::ShadowMarch(NoSlab, Puff, Nothing, Wind, InBox, StraightUp,
+                                                           5u, 0.0f, NoSwirl);
+        const float Both = VolumetricMedia::ShadowMarch(Low, Puff, Nothing, Wind, InBox, StraightUp,
+                                                        5u, 0.0f, NoSwirl);
+        std::printf("     split shadow: slab %.4f, box %.4f, both %.4f\n", SoloSlab, SoloBox, Both);
+        Expect(SoloSlab < 1.0f && SoloBox < 1.0f,
+               "both media shadow the probe (or the product below is vacuous)");
+        Expect(Both == SoloSlab * SoloBox,
+               "the combined shadow is the product of the solo shadows, bit-exact");
+    }
+
     std::printf("\n");
     for (int I = 0; I < 108; ++I) std::putchar('=');
     std::printf("\n%s\n\n", Failures == 0 ? "  the media behave" : "  THE MEDIA DO NOT BEHAVE");

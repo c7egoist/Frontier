@@ -35,7 +35,8 @@ namespace {
 // The control flags live only in SkyRecords.slang (kCloudLayerFlag et al.); the twin mirrors their values.
 constexpr uint32_t kTwinLayerFlag = 1u << 0u, kTwinLocalCloudFlag = 1u << 1u, kTwinLocalFogFlag = 1u << 2u;
 constexpr uint32_t kTwinFollowWindFlag = 1u << 3u, kTwinBoxWindFlag = 1u << 4u, kTwinFogWindFlag = 1u << 5u;
-constexpr float kTwinExtinction = 0.01f;
+constexpr float kTwinCloudExtinction = 0.06f;
+constexpr float kTwinFogExtinction = 0.01f;
 constexpr float kTwinMaxDistance = 200000.0f;
 
 // ── Transcribed BACK from Engine/Shaders/SkyRecords.slang, not from VolumetricMedia ─────────────────────────
@@ -331,20 +332,38 @@ bool TwinBoxInterval(const float Origin[3], const float Direction[3], const floa
 float TwinShadowMedium(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
                        uint32_t Medium, uint32_t Taps, const float Swirl[3])
 {
-    float StepSize = Medium == 0u ? 4000.0f/std::fmax(float(K.CloudControl[0] ? K.CloudControl[0] : 1u), 1.0f)
-                   : std::fmax((Medium == 1u ? K.LocalCloudParams[2] : K.LocalFogParams[2])*0.5f, 1.0f);
-    uint32_t Count = Taps ? Taps : 1u;
-    float Depth = 0.0f;
     float Time = K.CloudClock[2];
-    for (uint32_t I = 1u; I <= Count; ++I)
+    float Depth = 0.0f;
+    if (Medium == 0u)
     {
-        float Distance = StepSize*float(I)*0.5f;
-        float Q[3] = { Origin[0]+Direction[0]*Distance, Origin[1]+Direction[1]*Distance,
-                       Origin[2]+Direction[2]*Distance };
-        float D = Medium == 0u ? TwinCloudDensityAt(K, Q, Time, I > 2u ? 1.0f : 0.0f)
-                : TwinLocalDensityAt(K, Q, Medium == 2u, Swirl, 1.0f);
-        Depth += D*StepSize*0.5f*kTwinExtinction;
-        if (Depth > 4.0f) break;
+        float Ceiling = std::fmax(K.CloudShape[1], 0.0f);
+        float Base = K.CloudLayer[0] < 0.0f ? 0.0f : (K.CloudLayer[0] > Ceiling ? Ceiling : K.CloudLayer[0]);
+        float TopEnd = K.CloudLayer[0]+K.CloudLayer[1];
+        float Top = TopEnd < 0.0f ? 0.0f : (TopEnd > Ceiling ? Ceiling : TopEnd);
+        if (Top <= Base) return 1.0f;
+        float St = (Top-Base)*0.12f;
+        for (uint32_t I = 1u; I <= 5u; ++I)
+        {
+            if (I > Taps) break;
+            float D = St*float(I)*float(I)*0.35f;
+            float Q[3] = { Origin[0]+Direction[0]*D, Origin[1]+Direction[1]*D, Origin[2]+Direction[2]*D };
+            Depth += TwinCloudDensityAt(K, Q, Time, I > 2u ? 1.0f : 0.0f)*D*0.8f;
+            if (Depth > 4.0f) break;
+        }
+    }
+    else
+    {
+        const float* HalfSize = Medium == 1u ? K.LocalCloudHalfSize : K.LocalFogHalfSize;
+        float St = std::fmax(HalfSize[0], std::fmax(HalfSize[1], HalfSize[2]))*(Medium == 1u ? 0.25f : 0.5f);
+        float Weight = St*0.5f*(Medium == 1u ? (1.0f+K.CloudScatter[3])*kTwinCloudExtinction
+                                            : kTwinFogExtinction);
+        for (uint32_t I = 1u; I <= 4u; ++I)
+        {
+            float D = St*float(I)*0.5f;
+            float Q[3] = { Origin[0]+Direction[0]*D, Origin[1]+Direction[1]*D, Origin[2]+Direction[2]*D };
+            Depth += TwinLocalDensityAt(K, Q, Medium == 2u, Swirl, 1.0f)*Weight;
+            if (Depth > 4.0f) break;
+        }
     }
     return std::exp(-Depth);
 }
@@ -402,7 +421,8 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
                       : TwinLocalDensityAt(K, P, Medium == 2u, Swirl, 0.0f);
         if (Density <= 1e-5f) continue;
         float SunT = TwinSunTransmittance(K, P, SunDirection, Swirl);
-        float Extinction = Density*Step*kTwinExtinction;
+        float Sigma = Medium == 2u ? kTwinFogExtinction : (1.0f+K.CloudScatter[3])*kTwinCloudExtinction;
+        float Extinction = Density*Step*Sigma;
         float SegmentT = std::exp(-Extinction);
         float Incoming[3] = { SunRadiance[0]*SunT*Phase+Ambient[0],
                               SunRadiance[1]*SunT*Phase+Ambient[1],
@@ -744,7 +764,12 @@ int main()
         std::printf("  +2h wall clock: streakDy=%.4f streakDx=%.4f ratio=%.2f mean=%.3f drift=%.3f\n",
                     LateDy, LateDx, LateDy/std::fmax(LateDx, 1e-6f), LateMean, Drift);
         Expect(Drift > 0.03f, "+2h kernel render: the field moved with the clock");
-        Expect(LateDy < 0.06f, "+2h kernel render: elevation residual stays coherent");
+        // P2.4b re-pin (was 0.06): the ported light quadrature shadows deeply (tap weights to 756x
+        // density), which raises ALL structured contrast — Dx rose with Dy (0.051 to 0.056), the ratio
+        // holds 1.11 with no directional signature, and the twin still matches the raster to 0.0008. This
+        // is the reference's hard-edged light, not shredding returning (that read 3x higher with a blown
+        // ratio). P2.4c's multi-scatter will soften it back down.
+        Expect(LateDy < 0.07f, "+2h kernel render: elevation residual stays coherent");
         Expect(LateDy < 1.6f*LateDx + 0.01f, "+2h kernel render: no directional streak signature");
         Expect(LateMean > 0.15f && LateMean < 0.85f, "+2h kernel render: mean luminance sane");
     }

@@ -145,13 +145,36 @@ Report $? "both twin interval branches cut at it ($TwinCalls call sites)"
 
 echo
 echo "[SkyKernel] the kernel's shadow, steps and whites match the march"
-# CloudShadowMedium marches local half-step taps like VolumetricMedia::ShadowMarch; the full-interval march it
-#    replaced strode whole clouds between taps at grazing angles. The pin forbids the midpoint-grid form inside
-#    the shadow body (the view march keeps it — that is the resolved-local-taps structure, asserted as one).
-sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'StepSize \* float(I) \* 0.5'
-Report $? "the shadow taps pace the medium's own step"
+# P2.4b: the kernel marches the reference's light quadratures — clLight's growing-spaced taps for the layer,
+#    uniShadow's linear taps for the boxes — and no view step may leak into either body (the CPU march passes
+#    none). The midpoint-grid prohibition stays: a full-interval march strides whole clouds at grazing and
+#    aliases into noise (the view march keeps its grid — the resolved-local-taps structure, asserted as one).
+sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q '(Top - Base) \* 0.12'
+Report $? "the layer shadow paces the thickness"
+sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'St \* float(I) \* float(I) \* 0.35'
+Report $? "the layer taps grow quadratically"
+sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q ') \* D \* 0.8'
+Report $? "the layer taps weigh d x .8"
+sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'Medium == 1u ? 0.25 : 0.5'
+Report $? "the boxes pace the half-size (x.25 cloud, x.5 fog)"
+sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'I <= 4u; ++I)'
+Report $? "the boxes march a fixed 4 taps"
+sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'I <= 5u; ++I)'
+Report $? "the layer marches at most 5 taps"
+! sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | sed 's;//.*;;' | grep -q 'StepSize'
+Report $? "no view step leaks into the shadow"
 ! sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | sed 's;//.*;;' | grep -q '(float(I) + 0.5)'
 Report $? "no full-interval midpoint grid inside the shadow march"
+printf '%s' "$SkyCode" | grep -q 'kCloudExtinctionScale = 0.06;'
+Report $? "cloud extinction is the reference's .06"
+printf '%s' "$SkyCode" | grep -q 'kFogExtinctionScale = 0.01;'
+Report $? "fog keeps its own .01"
+printf '%s' "$SkyCode" | grep -q '(1.0 + SkyCloudScatter.w) \* kCloudExtinctionScale'
+Report $? "cloud reads the packed absorption with its scale"
+grep -q 'St\*float(I)\*float(I)\*0.35f' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin's layer taps grow quadratically too"
+grep -q 'kTwinCloudExtinction = 0.06f' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin reads cloud .06 as well"
 printf '%s' "$SkyCode" | grep -q 'max(Budget \* 4u, 4u)'
 Report $? "the layer's step cap is the CPU march's 4x budget"
 printf '%s' "$SkyCode" | grep -q 'vec3(0.88)'
