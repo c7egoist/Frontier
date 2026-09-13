@@ -370,6 +370,49 @@ lengths, so it proved nothing. Final check compares the same direction with and 
 Gated in `SkyIntegrationTest` section 4c. **ALL 23 SUITES GREEN.**
 
 
+### LENS FLARE: three elements, three tiers, freely combinable — and no halo (2026-09-13)
+
+Requested: "add lensflare 3 types for 3 tiers (quality/graphics) + dynamic settings + allow combining".
+
+**The three elements, chosen so none of them CAN read as a halo.** Every reference implementation (Chapman,
+Froyok's UE port, the commercial packs) ships four: ghosts, streaks, starburst **and a halo**. The halo is
+deliberately absent — a ring of light hugging the sun is indistinguishable from the atmosphere's own Mie
+aureole, and stacking one on the other is exactly the artefact banned earlier. The three that remain are each
+structurally safe: the STREAK is horizontal (anisotropic), the GHOSTS sit across the frame from the sun, and the
+STARBURST is hard spikes with dark gaps.
+
+**Tiers are presets, not a straitjacket.** `--flare off|low|medium|high` maps to strictly nested element sets
+(0 / streak / +ghosts / +starburst), and `--flare-elements streak,starburst` overrides the tier entirely — so
+combinations the tiers never produce are legal. Resolved to bits on the CPU, so the shader only ever sees three
+independent branches. 30 new TOML properties, live-reloadable like everything else.
+
+🔴 **THE DEAD-CENTRE GHOST COLLAPSE — a halo I very nearly shipped.** Looking EXACTLY at the sun, `sunOffset`
+is the zero vector, every ghost centre collapses onto `forward` (= the sun), and the whole chain piles into a
+ring around it. Measured 0.147 of ghost energy within 4 degrees while the off-axis case read exactly zero. It
+only bites when the camera points straight at the sun — the single most likely thing a player does. Fixed by
+returning nothing when there is no displacement (physically correct: ghosts ARE displacement) with a 1-degree
+ramp so it cannot pop. Gated.
+
+🔴 **ODD APERTURES MUST DOUBLE.** `cos(theta * blades * 0.5)` gave 7 spikes for a 7-bladed iris. Real optics
+give **2N for odd N** (14), because opposed spike pairs coincide only when N is even. Caught by counting maxima
+around a ring, not by eye. Now computed explicitly.
+
+**Intensity calibrated against the tone map rather than guessed.** The flare lives where ACES is nearly flat
+(sky already 0.93 near the sun), so the first defaults produced **38 changed pixels out of 128 000** — present
+in the numbers, invisible on screen. Measured lift sweep: 1x +0.039, 3x +0.062, **6x +0.070**, 18x +0.117,
+30x +0.137. 6x is the knee; past it ACES saturates. Starburst needed its own raise (its energy is in thin
+spikes, measuring 0.0002 against the streak's 0.064). Now 606 px differ.
+
+**Two gates caught my own mistakes:** the property table rejected defaults of 6 against a slider maximum of 4
+(ranges widened to 30), and the field-order diff caught the flare block at index 4 in the shader but 21 in C++ —
+exactly the silent-corruption bug that gate exists for. Also added a `CelestialPropertyKind::Integer` with typed
+accessors, because writing a float bit pattern into an `int` field turns 6 blades into 1086324736.
+
+Record 368 -> **432 B (27 vec4s)**. Gates: `Scratchpad/LensFlareTest.cpp` (26 checks, shape-based) +
+`Scratchpad/CheckLensFlare.sh`, which greps for a halo IDENTIFIER in code with comments stripped — verified by
+adding `CelestialFlareHalo` and watching it fail. Renders 28-31. **ALL 24 SUITES GREEN.**
+
+
 Status log (append; newest last):
 - 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
   0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on

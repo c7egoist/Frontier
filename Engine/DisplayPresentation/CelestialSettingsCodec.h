@@ -113,6 +113,30 @@ inline std::string StripComment(const std::string& Line) noexcept
             }
             WriteCelestialSwitch(Settings, *Found, On);
         }
+        else if (Found->Kind == CelestialPropertyKind::Integer)
+        {
+            char*         End    = nullptr;
+            const long    Parsed = std::strtol(Value.c_str(), &End, 10);
+            if (End == Value.c_str())
+            {
+                std::cerr << "[Celestial] " << Path << ":" << LineNumber << ": '" << Full
+                          << "' wants a whole number, got '" << Value << "'\n";
+                continue;
+            }
+            // ⚠️ Reject a fractional value outright rather than truncating it. "6.5 blades" is not a typo the
+            //    reader should guess at — silently becoming 6 would leave the file and the render disagreeing.
+            if (*End != '\0')
+            {
+                std::cerr << "[Celestial] " << Path << ":" << LineNumber << ": '" << Full
+                          << "' wants a whole number, got '" << Value << "'\n";
+                continue;
+            }
+            if (Parsed < static_cast<long>(Found->Minimum) || Parsed > static_cast<long>(Found->Maximum))
+                std::cerr << "[Celestial] " << Path << ":" << LineNumber << ": '" << Full << "' = " << Parsed
+                          << " clamped to [" << static_cast<long>(Found->Minimum) << ", "
+                          << static_cast<long>(Found->Maximum) << "]\n";
+            WriteCelestialInteger(Settings, *Found, static_cast<int32_t>(Parsed));
+        }
         else
         {
             char*       End    = nullptr;
@@ -173,6 +197,10 @@ inline std::string StripComment(const std::string& Line) noexcept
         if (Property.Kind == CelestialPropertyKind::Switch)
             std::fprintf(File, "%-18s = %-10s  # %s\n", KeyName,
                          ReadCelestialSwitch(Settings, Property) ? "true" : "false", Property.Summary);
+        else if (Property.Kind == CelestialPropertyKind::Integer)
+            std::fprintf(File, "%-18s = %-10d  # %s, %d to %d\n", KeyName,
+                         ReadCelestialInteger(Settings, Property), Property.Summary,
+                         static_cast<int>(Property.Minimum), static_cast<int>(Property.Maximum));
         else
             std::fprintf(File, "%-18s = %-10.6g  # %s [%s], %g to %g\n", KeyName,
                          static_cast<double>(ReadCelestialReal(Settings, Property)),

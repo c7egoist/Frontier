@@ -38,7 +38,11 @@ CheckConstant() {
 # ── The two miss sites must actually call the sky ────────────────────────────────────────────────────────────────────────────────
 echo
 echo "[SkyIntegration] both escape paths reach the sky"
-CheckConstant "the primary miss resolves to the sky"  'Resolve\(pixel, CelestialSky\(' "$Viewport"
+# ⚠️ Matches the CALL, not the exact one-liner. The miss path used to be `Resolve(pixel, CelestialSky(...))` on
+#    a single line; adding the lens flare split it into a local `background` that the flare is then added to.
+#    Pinning the old text would have failed on a correct refactor, which is a gate testing formatting rather
+#    than behaviour. What must remain true is that the miss path asks CelestialSky for the background.
+CheckConstant "the primary miss resolves to the sky"  'CelestialSky\(Celestial\[0\], CameraOrigin, rayDirection, true\)' "$Viewport"
 CheckConstant "an escaping bounce collects the sky"   'accumulatedRadiance \+= throughput \* skyRadiance' "$Viewport"
 
 # 🔴 The bounce path is what makes objects RECEIVE the light rather than stand in front of a backdrop. If the

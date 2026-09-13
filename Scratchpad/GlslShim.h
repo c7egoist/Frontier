@@ -59,4 +59,9 @@ inline uint floatBitsToUint(float f) { uint u; std::memcpy(&u, &f, 4); return u;
 inline float log2(float a) { return std::log2(a); }
 // GLSL angle conversions — used by the celestial glare term.
 inline float degrees(float r) { return r * 57.2957795130823f; }
+// GLSL's two-argument atan is C's atan2. Without this the one-argument std::atan is picked and the compiler
+// reports "too many arguments", which is how the lens-flare port first failed.
+inline float atan(float y, float x) { return std::atan2(y, x); }
+// GLSL's mod is a true modulus (result takes the sign of y), unlike C's fmod which takes the sign of x.
+inline float mod(float x, float y) { return x - y * std::floor(x / y); }
 inline float radians(float d) { return d * 0.01745329251994330f; }

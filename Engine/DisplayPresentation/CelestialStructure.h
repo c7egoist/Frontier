@@ -165,6 +165,98 @@ struct CelestialStars
 };
 
 //------------------------------------------------------------------------------------------------------------------------
+//                                                     LENS FLARE
+//------------------------------------------------------------------------------------------------------------------------
+
+// 🔴 THE FLARE IS A LENS ARTEFACT, NOT AN ATMOSPHERIC ONE, AND THAT DISTINCTION IS THE WHOLE DESIGN.
+//
+//    Everything else in this file describes light in the AIR — scattering, absorption, the sun's own disc. A lens
+//    flare happens INSIDE the camera: light that has already arrived bounces between glass elements, diffracts at
+//    the aperture blades, and lands somewhere it does not belong. Keeping the two separate matters because they
+//    behave differently: the atmosphere's aureole grows as the air thickens, while a flare's ghosts move when the
+//    CAMERA turns even though the air has not changed at all.
+//
+//    ⚠️ THERE IS NO HALO ELEMENT HERE, DELIBERATELY. Every off-the-shelf flare library ships one — Chapman's
+//    article, Froyok's UE implementation, and the commercial packs all list "halo" among the standard features.
+//    It is explicitly unwanted here: a ring of light hugging the sun is indistinguishable from the atmosphere's
+//    own aureole, and stacking one on top of the other is exactly the "sun blending into the atmosphere like a
+//    halo" that this project rejected. The three tiers below reach for ghosts, streaks and a starburst — all of
+//    which sit AWAY from the sun or have hard radial structure, so none of them can be mistaken for haze.
+enum class LensFlareTierCategory : uint32_t
+{
+    Off      = 0u,   // nothing at all; the sun is its disc and its tight glare, and no more
+    Low      = 1u,   // anamorphic streak only — one horizontal smear, the cheapest recognisable flare
+    Medium   = 2u,   // + ghosts: the chain of coloured blobs mirrored through the frame centre
+    High     = 3u,   // + starburst: aperture diffraction spikes, the most expensive and most obviously "camera"
+};
+
+// The three elements as independent bits, so a tier is a PRESET rather than a straitjacket. `--flare-elements`
+//    can switch any of them on or off individually; the tier simply chooses a sensible default combination.
+enum LensFlareElementBits : uint32_t
+{
+    LensFlareElementStreak    = 1u << 0,   // anamorphic horizontal smear
+    LensFlareElementGhosts    = 1u << 1,   // internal reflections, mirrored through the centre
+    LensFlareElementStarburst = 1u << 2,   // aperture diffraction spikes
+};
+
+struct CelestialLensFlare
+{
+    bool                  Enabled = true;
+    LensFlareTierCategory Tier    = LensFlareTierCategory::Medium;
+
+    // 0 means "use the tier's default set". Any non-zero value overrides the tier entirely, which is how the
+    //    three elements combine freely — Low quality with a starburst, or High without ghosts, are both legal.
+    uint32_t ElementMask = 0u;
+
+    // 🔴 CALIBRATED AGAINST THE TONE MAP, NOT GUESSED. The flare lives in the brightest part of frame, where
+    //    ACES is nearly flat — near the sun at 17:00 the sky already sits at 0.93 ACES, so lifting it takes far
+    //    more linear light than intuition suggests. Measured lift above the bare sky, sweeping this multiplier:
+    //
+    //        1x  -> +0.039 peak     6x  -> +0.070      18x -> +0.117
+    //        3x  -> +0.062         10x  -> +0.092      30x -> +0.137
+    //
+    //    The first defaults (1x) produced 38 changed pixels out of 128 000 — present in the numbers, invisible
+    //    on screen. 6x is the knee: clearly readable, and past it the curve flattens so extra energy buys
+    //    saturation rather than visibility.
+    float Intensity = 6.0f;    // [x]   master multiplier over every element
+
+    // ── Anamorphic streak ───────────────────────────────────────────────────────────────────────────────────
+    //    The horizontal blue smear of a cinema lens. Cheapest element and the most recognisable, which is why
+    //    it is the one the Low tier keeps.
+    float StreakIntensity = 0.55f;   // [x]
+    float StreakLength    = 14.0f;   // [deg] half-length along the horizontal
+    float StreakThickness = 0.55f;   // [deg] vertical falloff
+    float StreakTintR     = 0.45f;   // [-]   anamorphic streaks are classically blue
+    float StreakTintG     = 0.62f;
+    float StreakTintB     = 1.00f;
+
+    // ── Ghosts ──────────────────────────────────────────────────────────────────────────────────────────────
+    //    Internal reflections. Each ghost sits at -i x (sun position) through the frame centre, so they sweep
+    //    ACROSS the frame as the camera turns — the behaviour that reads unmistakably as a lens rather than sky.
+    int   GhostCount      = 5;       // [cnt]
+    float GhostIntensity  = 0.22f;   // [x]
+    float GhostDispersal  = 0.36f;   // [-]   spacing along the sun-to-centre vector
+    float GhostSize       = 2.6f;    // [deg] angular radius of the first ghost
+    float GhostChromatic  = 0.35f;   // [-]   per-ghost colour separation
+
+    // ── Starburst ───────────────────────────────────────────────────────────────────────────────────────────
+    //    Aperture diffraction. Blade count sets the spike count: an even-bladed iris gives N spikes, an odd one
+    //    gives 2N, which is why 6 blades give 6 and 7 blades give 14. Real photographic behaviour, not a choice.
+    int   StarburstBlades    = 6;      // [cnt]
+    // ⚠️ The starburst reads far weaker than its number suggests, because its energy is concentrated into a few
+    //    thin spikes rather than spread over an area — at the same nominal intensity as the streak it measured
+    //    0.0002 ACES lift against the streak's 0.064. Raised so the spikes are actually visible; the SHAPE
+    //    checks in LensFlareTest are what keep it from becoming a glow, so brightness is free to be useful.
+    float StarburstIntensity = 6.0f;   // [x]
+    float StarburstLength    = 7.0f;   // [deg]
+    float StarburstSharpness = 24.0f;  // [-]  higher = thinner, harder spikes
+
+    // ⚠️ Occlusion. A flare is formed in the lens, so it must vanish when the sun goes behind something — but
+    //    SOFTLY, because the sun has angular size and is progressively hidden. A hard on/off pops.
+    float OcclusionFade = 1.0f;   // [-] 1 = fully fade when occluded, 0 = ignore occlusion entirely
+};
+
+//------------------------------------------------------------------------------------------------------------------------
 //                                                       THE WIND
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -213,6 +305,7 @@ struct CelestialStructure
     CelestialAtmosphericFog AtmosphericFog{};
     CelestialLocalFog       LocalFog{};
     CelestialMoon           Moon{};
+    CelestialLensFlare      LensFlare{};
     CelestialStars          Stars{};
     CelestialWind           Wind{};
     CelestialExposure       Exposure{};
@@ -222,7 +315,10 @@ struct CelestialStructure
 //                                              THE PROPERTY TABLE (the "sliders")
 //------------------------------------------------------------------------------------------------------------------------
 
-enum class CelestialPropertyKind : uint8_t { Real = 0u, Switch = 1u };
+// ⚠️ Integer was added for the lens flare (ghost count, aperture blades, quality tier). Storing those as floats
+//    and rounding at the edit site would let 6.5 blades exist in the file and silently become 6 or 7 depending on
+//    who rounded; an explicit kind means the codec refuses the bad value and says so by line number.
+enum class CelestialPropertyKind : uint8_t { Real = 0u, Switch = 1u, Integer = 2u };
 
 // One editable property: what it is called, what it means, and what a legal value looks like. `Offset` is the
 //    field's byte offset inside CelestialStructure, so an editor reaches the field without a switch statement and
@@ -242,6 +338,8 @@ struct CelestialProperty
     CelestialProperty{ PathText, UnitText, CelestialPropertyKind::Real, offsetof(CelestialStructure, Field), Lo, Hi, SummaryText }
 #define FRONTIER_CELESTIAL_SWITCH(PathText, Field, SummaryText) \
     CelestialProperty{ PathText, "", CelestialPropertyKind::Switch, offsetof(CelestialStructure, Field), 0.0f, 1.0f, SummaryText }
+#define FRONTIER_CELESTIAL_INTEGER(PathText, UnitText, Field, Lo, Hi, SummaryText) \
+    CelestialProperty{ PathText, UnitText, CelestialPropertyKind::Integer, offsetof(CelestialStructure, Field), Lo, Hi, SummaryText }
 
 // The table. Order is the order a panel would present them; grouping follows the structs above.
 inline constexpr CelestialProperty kCelestialProperties[] =
@@ -294,6 +392,35 @@ inline constexpr CelestialProperty kCelestialProperties[] =
     FRONTIER_CELESTIAL_REAL("moon.earthshine",     "x",   Moon.Earthshine,   0.0f, 1.0f,  "ashen glow on the dark limb"),
 
     FRONTIER_CELESTIAL_SWITCH("stars.enabled", Stars.Enabled, "draw the star field"),
+    // ── Lens flare ───────────────────────────────────────────────────────────────────────────────────────────
+    //    ⚠️ No "halo" property exists and none should be added. See the note on CelestialLensFlare.
+    FRONTIER_CELESTIAL_SWITCH("flare.enabled", LensFlare.Enabled, "lens flare master switch"),
+    FRONTIER_CELESTIAL_INTEGER("flare.tier", "", LensFlare.Tier, 0.0f, 3.0f,
+                               "0 off, 1 streak only, 2 +ghosts, 3 +starburst"),
+    FRONTIER_CELESTIAL_INTEGER("flare.elements", "", LensFlare.ElementMask, 0.0f, 7.0f,
+                               "0 = use the tier; else bits 1 streak, 2 ghosts, 4 starburst (combinable)"),
+    FRONTIER_CELESTIAL_REAL("flare.intensity", "x", LensFlare.Intensity, 0.0f, 30.0f, "master flare multiplier"),
+
+    FRONTIER_CELESTIAL_REAL("flare.streak.intensity", "x",   LensFlare.StreakIntensity, 0.0f, 4.0f, "anamorphic streak strength"),
+    FRONTIER_CELESTIAL_REAL("flare.streak.length",    "deg", LensFlare.StreakLength,    0.0f, 60.0f, "streak half-length"),
+    FRONTIER_CELESTIAL_REAL("flare.streak.thickness", "deg", LensFlare.StreakThickness, 0.05f, 6.0f, "streak vertical falloff"),
+    FRONTIER_CELESTIAL_REAL("flare.streak.tintR",     "-",   LensFlare.StreakTintR,     0.0f, 1.0f, "streak tint red"),
+    FRONTIER_CELESTIAL_REAL("flare.streak.tintG",     "-",   LensFlare.StreakTintG,     0.0f, 1.0f, "streak tint green"),
+    FRONTIER_CELESTIAL_REAL("flare.streak.tintB",     "-",   LensFlare.StreakTintB,     0.0f, 1.0f, "streak tint blue"),
+
+    FRONTIER_CELESTIAL_INTEGER("flare.ghost.count",   "",    LensFlare.GhostCount,      0.0f, 12.0f, "how many internal reflections"),
+    FRONTIER_CELESTIAL_REAL("flare.ghost.intensity",  "x",   LensFlare.GhostIntensity,  0.0f, 4.0f, "ghost strength"),
+    FRONTIER_CELESTIAL_REAL("flare.ghost.dispersal",  "-",   LensFlare.GhostDispersal,  0.0f, 2.0f, "ghost spacing along the centre vector"),
+    FRONTIER_CELESTIAL_REAL("flare.ghost.size",       "deg", LensFlare.GhostSize,       0.1f, 20.0f, "angular radius of the first ghost"),
+    FRONTIER_CELESTIAL_REAL("flare.ghost.chromatic",  "-",   LensFlare.GhostChromatic,  0.0f, 2.0f, "per-ghost colour separation"),
+
+    FRONTIER_CELESTIAL_INTEGER("flare.starburst.blades", "", LensFlare.StarburstBlades, 3.0f, 16.0f, "iris blades: even N gives N spikes, odd gives 2N"),
+    FRONTIER_CELESTIAL_REAL("flare.starburst.intensity", "x",   LensFlare.StarburstIntensity, 0.0f, 30.0f, "starburst strength"),
+    FRONTIER_CELESTIAL_REAL("flare.starburst.length",    "deg", LensFlare.StarburstLength,    0.0f, 40.0f, "spike length"),
+    FRONTIER_CELESTIAL_REAL("flare.starburst.sharpness", "-",   LensFlare.StarburstSharpness, 1.0f, 96.0f, "higher = thinner spikes"),
+
+    FRONTIER_CELESTIAL_REAL("flare.occlusionFade", "-", LensFlare.OcclusionFade, 0.0f, 1.0f, "how much occlusion kills the flare"),
+
     FRONTIER_CELESTIAL_REAL("stars.brightness","x", Stars.Brightness, 0.0f, 20.0f, "radiance multiplier"),
     FRONTIER_CELESTIAL_REAL("stars.density",   "x", Stars.Density,    0.0f, 4.0f,  "how many are drawn"),
     FRONTIER_CELESTIAL_REAL("stars.size",      "x", Stars.SizeScale,  0.0f, 8.0f,  "point size"),
@@ -332,6 +459,28 @@ inline void WriteCelestialReal(CelestialStructure& S, const CelestialProperty& P
 {
     const float Clamped = Value < P.Minimum ? P.Minimum : (Value > P.Maximum ? P.Maximum : Value);
     *reinterpret_cast<float*>(reinterpret_cast<unsigned char*>(&S) + P.Offset) = Clamped;
+}
+
+// 🔴 INTEGER FIELDS NEED THEIR OWN ACCESSORS, AND THIS IS NOT A STYLE PREFERENCE. Every integer property in the
+//    table (the flare tier, the element mask, ghost count, aperture blades) is a 4-byte int or uint32_t, not a
+//    float. Writing through the float accessor would deposit an IEEE bit pattern into an integer field —
+//    `6.0f` becomes 1086324736 — so a blade count of 6 would read back as garbage. The property Kind exists
+//    precisely so the codec picks the right one, and the gate asserts every Integer property names a 4-byte field.
+inline int32_t ReadCelestialInteger(const CelestialStructure& S, const CelestialProperty& P) noexcept
+{
+    int32_t Value = 0;
+    const unsigned char* Address = reinterpret_cast<const unsigned char*>(&S) + P.Offset;
+    __builtin_memcpy(&Value, Address, sizeof(Value));
+    return Value;
+}
+
+inline void WriteCelestialInteger(CelestialStructure& S, const CelestialProperty& P, int32_t Value) noexcept
+{
+    const int32_t Low  = static_cast<int32_t>(P.Minimum);
+    const int32_t High = static_cast<int32_t>(P.Maximum);
+    const int32_t Clamped = Value < Low ? Low : (Value > High ? High : Value);
+    unsigned char* Address = reinterpret_cast<unsigned char*>(&S) + P.Offset;
+    __builtin_memcpy(Address, &Clamped, sizeof(Clamped));
 }
 
 inline void WriteCelestialSwitch(CelestialStructure& S, const CelestialProperty& P, bool Value) noexcept

@@ -119,7 +119,7 @@ layout(rgba16f, binding = 18) uniform image2D HistorySurfaceImage;   // R7a: xyz
 layout(rgba32f, binding = 19) uniform image2D MomentImage;           // R7: x = E[luma], y = E[luma²], reprojected with the mean
 layout(rgba32f, binding = 20) uniform writeonly image2D DenoiseImage; // R7: xyz = linear radiance, w = variance — the à-trous input
 // ── P1: the celestial record ───────────────────────────────────────────────────────────────────────────────────────
-// Mirrors CelestialUniform (Engine/DisplayPresentation/CelestialUniform.h) field for field, 23 vec4s = 368 bytes.
+// Mirrors CelestialUniform (Engine/DisplayPresentation/CelestialUniform.h) field for field, 27 vec4s = 432 bytes.
 // ⚠️ A readonly SSBO rather than a uniform block, deliberately: std430 lays vec4s out identically to the C++ struct,
 //    whereas std140 would need padding rules re-derived here, and the descriptor pool's storage-buffer count is the
 //    one already sized for data bindings. Read-only, written once per frame by the CPU solve — nothing is baked (F4).
@@ -129,6 +129,10 @@ struct CelestialRecord
     vec4 SunRadianceAndLimb;            // rgb DISC radiance [W/m2/sr], w limb darkening
     vec4 SunIrradianceAndScale;         // rgb top-of-atmosphere IRRADIANCE [W/m2], w sky scale
     vec4 SunTransmittance;              // rgb atmospheric transmittance to the sun at ground, w unused
+    vec4 FlareStreakAndFlags;           // rgb streak tint x intensity, w element bits as a float
+    vec4 FlareGhostAndCount;            // x intensity, y dispersal, z size [rad], w count
+    vec4 FlareBurstAndChroma;           // x intensity, y length [rad], z sharpness, w blades
+    vec4 FlareChromaAndFade;            // x ghost chromatic, y occlusion fade, z streak length, w streak thickness
     vec4 MoonDirectionAndCosRadius;
     vec4 MoonRadianceAndEarthshine;
     vec4 RayleighScatteringAndHeight;   // rgb 1/m, w scale height [m]
@@ -157,6 +161,11 @@ layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord C
 #define kCelestialFlagLocalCloud 8u
 #define kCelestialFlagMoon       16u
 #define kCelestialFlagStars      32u
+
+// Lens-flare element bits. Mirror LensFlareElementBits in CelestialStructure.h; the gate asserts they agree.
+#define kFlareElementStreak      1u
+#define kFlareElementGhosts      2u
+#define kFlareElementStarburst   4u
 
 layout(binding = 22) uniform sampler2D Textures[];   // R4a bindless table — ⚠️ a variable-count binding must be the last one in the set
 
@@ -560,6 +569,168 @@ vec3 CelestialAerialPerspective(CelestialRecord sky, vec3 origin, vec3 surfacePo
                                          kAerialSteps, kAerialSunSteps, distance, transmittance);
 
     return surfaceRadiance * transmittance + inScatter * sky.SunIrradianceAndScale.xyz;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                    🔴 LENS FLARE — a camera artefact, never a halo
+//------------------------------------------------------------------------------------------------------------------------
+//
+//    WHY THESE THREE ELEMENTS AND NOT THE USUAL FOUR. Every reference implementation — Chapman's article,
+//    Froyok's UE port, the commercial packs — ships ghosts, streaks, a starburst AND A HALO. The halo is
+//    deliberately absent here. A ring of light hugging the sun is visually indistinguishable from the
+//    atmosphere's own Mie aureole, which this renderer already computes, and stacking a second one on top is
+//    precisely the "sun blending into the atmosphere like a halo" that was rejected outright.
+//
+//    The three that remain are each safe from that failure BY CONSTRUCTION, not by tuning:
+//      · the STREAK is horizontal, so it cannot read as a radially symmetric glow;
+//      · the GHOSTS sit on the far side of the frame centre, nowhere near the sun;
+//      · the STARBURST is hard radial spikes with gaps between them, which no haze produces.
+//
+//    All three are driven by the sun's SCREEN-RELATIVE position, which is what makes them read as a lens: they
+//    sweep and swing as the camera turns even though the sky has not changed. That is the opposite of the
+//    atmosphere, and it is why they must be computed here rather than folded into the sky integral.
+uint CelestialFlareElements(CelestialRecord sky) { return uint(sky.FlareStreakAndFlags.w); }
+
+// The anamorphic streak: a horizontal smear through the sun. `right` and `up` are the camera's own basis, so
+//    the streak stays level with the FRAME rather than with the world — tilt the camera and it tilts with it,
+//    which is exactly what a real anamorphic lens does.
+vec3 CelestialFlareStreak(CelestialRecord sky, vec3 rayDirection, vec3 right, vec3 up)
+{
+    vec3  sunDirection = sky.SunDirectionAndCosRadius.xyz;
+    if (dot(rayDirection, sunDirection) <= 0.0) return vec3(0.0);
+
+    // Offset from the sun, split into the camera's horizontal and vertical axes.
+    vec3  offset     = rayDirection - sunDirection * dot(rayDirection, sunDirection);
+    float horizontal = abs(dot(offset, right));
+    float vertical   = abs(dot(offset, up));
+
+    float length    = sky.FlareChromaAndFade.z;
+    float thickness = sky.FlareChromaAndFade.w;
+    if (horizontal > length) return vec3(0.0);
+
+    // Smooth along the streak and sharply across it. The vertical term is squared-exponential so the smear has
+    //    a soft core and no hard edge, and the horizontal term tapers to exactly zero at the tip.
+    float along  = 1.0 - horizontal / length;
+    float across = exp(-(vertical * vertical) / max(thickness * thickness, 1e-12));
+
+    return sky.FlareStreakAndFlags.xyz * (along * along * across);
+}
+
+// Ghosts: internal reflections between lens elements. Each sits at a point obtained by reflecting the sun
+//    through the frame centre and scaling — so as the sun approaches the edge of frame, the ghosts march
+//    across from the opposite side. That motion is the tell that this is glass, not sky.
+vec3 CelestialFlareGhosts(CelestialRecord sky, vec3 rayDirection, vec3 forward)
+{
+    int count = int(sky.FlareGhostAndCount.w);
+    if (count <= 0) return vec3(0.0);
+
+    vec3  sunDirection = sky.SunDirectionAndCosRadius.xyz;
+    float dispersal    = sky.FlareGhostAndCount.y;
+    float size         = sky.FlareGhostAndCount.z;
+    float chromatic    = sky.FlareChromaAndFade.x;
+
+    // The sun's offset from the centre of the frame, which is the axis every ghost lies on.
+    vec3 sunOffset = sunDirection - forward * dot(sunDirection, forward);
+
+    // 🔴 THE DEGENERATE CASE THAT WAS A HALO. When the camera looks EXACTLY at the sun, sunOffset is the zero
+    //    vector, every ghost centre collapses to `forward` — which is the sun — and the whole chain piles up
+    //    into a ring hugging it. That is precisely the banned artefact, and it appears in the single most
+    //    likely thing a player does: look straight at the sun. Caught by the ring sweep in LensFlareTest §3,
+    //    which measured 0.147 of ghost energy within 4 degrees while the off-axis case read exactly zero.
+    //
+    //    Physically there is nothing to draw here: ghosts are reflections displaced ACROSS the frame, and with
+    //    the source dead centre there is no displacement, so the reflections land on the source and are simply
+    //    the source. Returning nothing is the honest answer, and it also removes the discontinuity — the fade
+    //    below ramps the ghosts in as the sun moves off centre rather than switching them on.
+    float offAxis = length(sunOffset);
+    if (offAxis < 1e-4) return vec3(0.0);
+
+    // Ramp in over the first degree off-centre, so there is no pop as the sun crosses the frame's middle.
+    float centreFade = clamp(offAxis / 0.0175, 0.0, 1.0);
+
+    vec3 total = vec3(0.0);
+    for (int i = 1; i <= count; ++i)
+    {
+        // Mirrored through the centre and stepped outward: -i * dispersal puts ghost 1 just past the centre and
+        //    the rest trailing away from the sun.
+        float step   = -float(i) * dispersal;
+        vec3  centre = normalize(forward + sunOffset * step);
+
+        float distance = length(rayDirection - centre * dot(rayDirection, centre));
+        float radius   = size * (0.6 + 0.5 * float(i));     // later ghosts are larger, as in a real stack
+        if (distance > radius) continue;
+
+        // A soft-edged disc with a brighter rim — real ghosts are images of the aperture, not gaussians.
+        float t    = distance / radius;
+        float disc = (1.0 - t * t);
+        disc = disc * disc * (0.55 + 0.45 * t * t);
+
+        // Each ghost carries a different tint: successive reflections pass the lens coating a different number
+        //    of times, so they drift through the spectrum rather than all being the same colour.
+        float phase = float(i) * chromatic;
+        vec3  tint  = vec3(0.5 + 0.5 * cos(phase),
+                           0.5 + 0.5 * cos(phase + 2.094),
+                           0.5 + 0.5 * cos(phase + 4.189));
+
+        total += tint * disc;
+    }
+
+    return total * sky.FlareGhostAndCount.x * centreFade;
+}
+
+// Starburst: diffraction at the aperture blades. An even-bladed iris produces N spikes and an odd-bladed one
+//    produces 2N — that is real photographic behaviour, and it falls out of the cos(N * angle) term below
+//    rather than being special-cased.
+vec3 CelestialFlareStarburst(CelestialRecord sky, vec3 rayDirection, vec3 right, vec3 up)
+{
+    vec3  sunDirection = sky.SunDirectionAndCosRadius.xyz;
+    float cosAngle     = dot(rayDirection, sunDirection);
+    if (cosAngle <= 0.0) return vec3(0.0);
+
+    float angle = acos(clamp(cosAngle, -1.0, 1.0));
+    float reach = sky.FlareBurstAndChroma.y;
+    if (angle > reach || angle < 1e-6) return vec3(0.0);
+
+    vec3  offset = rayDirection - sunDirection * cosAngle;
+    float theta  = atan(dot(offset, up), dot(offset, right));
+
+    // 🔴 ODD BLADE COUNTS MUST DOUBLE, AND THE FIRST VERSION DID NOT. A 7-bladed iris makes a 14-point star,
+    //    because each blade edge diffracts into a pair of opposed spikes and with odd N those pairs do not
+    //    coincide; with even N they overlap exactly and you get N. The original `cos(theta * blades * 0.5)`
+    //    gave 7 spikes for 7 blades — measured, not assumed, by counting maxima around a ring.
+    //
+    //    The correct spike count is N for even N and 2N for odd N, so that is computed explicitly rather than
+    //    hoped for from an algebraic coincidence.
+    float blades = sky.FlareBurstAndChroma.w;
+    float spikes = mod(blades, 2.0) < 0.5 ? blades : blades * 2.0;
+    float lobe   = abs(cos(theta * spikes * 0.5));
+    float spike  = pow(lobe, sky.FlareBurstAndChroma.z);
+
+    // 🔴 Falls off as 1/angle along each spike, so the spikes are LONG but the light between them is zero. That
+    //    gap is what keeps a starburst from reading as a glow: a halo fills the annulus, a starburst does not.
+    float radial = (1.0 - angle / reach) / (1.0 + angle * 40.0);
+
+    return vec3(spike * radial) * sky.FlareBurstAndChroma.x;
+}
+
+// Everything the lens adds, composited. `occlusion` is 1 when the sun is fully visible and 0 when hidden.
+vec3 CelestialLensFlare(CelestialRecord sky, vec3 rayDirection, vec3 forward, vec3 right, vec3 up,
+                        vec3 sunTransmittance, float occlusion)
+{
+    uint elements = CelestialFlareElements(sky);
+    if (elements == 0u) return vec3(0.0);
+
+    // The flare is formed from light that reached the lens, so it must carry the sun's own attenuation: at
+    //    sunset the ghosts go orange with the sun, for free, rather than needing their own colour ramp.
+    float fade = mix(1.0, occlusion, sky.FlareChromaAndFade.y);
+    if (fade <= 0.0) return vec3(0.0);
+
+    vec3 total = vec3(0.0);
+    if ((elements & kFlareElementStreak)    != 0u) total += CelestialFlareStreak(sky, rayDirection, right, up);
+    if ((elements & kFlareElementGhosts)    != 0u) total += CelestialFlareGhosts(sky, rayDirection, forward);
+    if ((elements & kFlareElementStarburst) != 0u) total += CelestialFlareStarburst(sky, rayDirection, right, up);
+
+    return total * sunTransmittance * sky.SunIrradianceAndScale.xyz * fade;
 }
 
 // The whole sky along a ray: scattering, plus the discs composited on top. `includeDiscs` is false for the
@@ -1184,7 +1355,16 @@ void main()
                                                      uvec2(ViewportWidth, ViewportHeight));
 
         // Discs included: this is what the eye sees directly, so the sun and moon belong in it.
-        Resolve(pixel, CelestialSky(Celestial[0], CameraOrigin, rayDirection, true));
+        vec3 background = CelestialSky(Celestial[0], CameraOrigin, rayDirection, true);
+
+        // 🔴 The lens flare, added on the miss path only. Occlusion is 1 here BY DEFINITION: this pixel is a
+        //    miss, so nothing is between the camera and the sky along it. Surface pixels get the flare too —
+        //    see the surface exit below, where occlusion is 0 because geometry is in the way.
+        CelestialRecord sky = Celestial[0];
+        background += CelestialLensFlare(sky, rayDirection, CameraForward, CameraRight, CameraUp,
+                                         sky.SunTransmittance.xyz, 1.0);
+
+        Resolve(pixel, background);
         return;
     }
 

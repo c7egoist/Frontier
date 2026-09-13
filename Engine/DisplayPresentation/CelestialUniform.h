@@ -14,7 +14,7 @@
 //    stops four bytes per vector being wasted. Every static_assert below is load-bearing.
 //
 //    🔴 WHY A UNIFORM BUFFER AND NOT THE PUSH BLOCK. The push block has 7 spare uints — 28 bytes. The celestial
-//    state below is 368 bytes (23 vec4s) and will not shrink. Pushing it is not an option; this was checked rather than
+//    state below is 432 bytes (27 vec4s) and will not shrink. Pushing it is not an option; this was checked rather than
 //    assumed. The buffer is written every frame from the CPU solve (F4: nothing is baked).
 
 #pragma once
@@ -25,6 +25,9 @@
 #include <cstring>
 
 namespace Frontier {
+
+// Local to the packer: the record ships angles in radians, the settings hold degrees.
+inline constexpr float kDegreesToRadiansF = 0.01745329251994330f;
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                   THE GPU RECORD
@@ -41,6 +44,10 @@ struct alignas(16) CelestialUniform
     float SunTransmittance[4];           // rgb = atmospheric transmittance to the sun at ground level, w unused
 
     // ── Moon ──────────────────────────────────────────────────────────────────────────────────────────────────
+    float FlareStreakAndFlags[4];        // rgb = streak tint x intensity, w = element bits as a float
+    float FlareGhostAndCount[4];         // x intensity, y dispersal, z size [rad], w count
+    float FlareBurstAndChroma[4];        // x intensity, y length [rad], z sharpness, w blades
+    float FlareChromaAndFade[4];         // x ghost chromatic, y occlusion fade, z streak length, w streak thickness
     float MoonDirectionAndCosRadius[4];  // xyz = unit direction TO the moon, w = cos(angular radius)
     float MoonRadianceAndEarthshine[4];  // rgb = radiance, w = earthshine
 
@@ -86,16 +93,16 @@ inline constexpr uint32_t kCelestialFlagStars      = 1u << 5u;
 //                                                  LAYOUT GUARANTEES
 //------------------------------------------------------------------------------------------------------------------------
 
-static_assert(sizeof(CelestialUniform) == 368, "the shader's CelestialRecord must be resized to match");
+static_assert(sizeof(CelestialUniform) == 432, "the shader's CelestialRecord must be resized to match");
 static_assert(alignof(CelestialUniform) == 16, "std140 requires 16-byte alignment");
 static_assert(sizeof(CelestialUniform) % 16 == 0, "std140 pads the block to a multiple of 16");
 static_assert(offsetof(CelestialUniform, SunRadianceAndLimb) == 16, "sun radiance moved");
-static_assert(offsetof(CelestialUniform, MoonDirectionAndCosRadius) == 64, "moon block moved");
-static_assert(offsetof(CelestialUniform, RayleighScatteringAndHeight) == 96, "atmosphere block moved");
-static_assert(offsetof(CelestialUniform, CloudLayer) == 176, "cloud block moved");
-static_assert(offsetof(CelestialUniform, LocalCloudCentreAndDensity) == 256, "local volume block moved");
-static_assert(offsetof(CelestialUniform, StarsAndRotation) == 320, "night sky block moved");
-static_assert(offsetof(CelestialUniform, ExposureAndFlags) == 336, "exposure moved");
+static_assert(offsetof(CelestialUniform, MoonDirectionAndCosRadius) == 128, "moon block moved");
+static_assert(offsetof(CelestialUniform, RayleighScatteringAndHeight) == 160, "atmosphere block moved");
+static_assert(offsetof(CelestialUniform, CloudLayer) == 240, "cloud block moved");
+static_assert(offsetof(CelestialUniform, LocalCloudCentreAndDensity) == 320, "local volume block moved");
+static_assert(offsetof(CelestialUniform, StarsAndRotation) == 384, "night sky block moved");
+static_assert(offsetof(CelestialUniform, ExposureAndFlags) == 400, "exposure moved");
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                              BLACK-BODY COLOUR
@@ -309,6 +316,53 @@ inline void PackCelestialUniform(
     Out.LocalFogExtentAndG[3] = Settings.LocalFog.Anisotropy;
 
     // ── Night sky ─────────────────────────────────────────────────────────────────────────────────────────────
+    // ── Lens flare ──────────────────────────────────────────────────────────────────────────────────────────
+    // 🔴 THE TIER IS RESOLVED TO ELEMENT BITS HERE, ON THE CPU, ONCE PER FRAME. The shader never sees a "tier" —
+    //    it sees three independent bits and branches on them. That is what lets the tiers be presets rather than
+    //    a straitjacket: ElementMask overrides the tier completely, so "Low quality but with a starburst" is a
+    //    legal combination rather than a special case someone has to add later.
+    {
+        uint32_t Elements = Settings.LensFlare.ElementMask;
+        if (Elements == 0u)
+        {
+            switch (Settings.LensFlare.Tier)
+            {
+                case LensFlareTierCategory::Off:    Elements = 0u; break;
+                case LensFlareTierCategory::Low:    Elements = LensFlareElementStreak; break;
+                case LensFlareTierCategory::Medium: Elements = LensFlareElementStreak | LensFlareElementGhosts; break;
+                case LensFlareTierCategory::High:   Elements = LensFlareElementStreak | LensFlareElementGhosts
+                                                             | LensFlareElementStarburst; break;
+            }
+        }
+        if (!Settings.LensFlare.Enabled) Elements = 0u;
+
+        const float Master = Settings.LensFlare.Intensity;
+
+        Out.FlareStreakAndFlags[0] = Settings.LensFlare.StreakTintR * Settings.LensFlare.StreakIntensity * Master;
+        Out.FlareStreakAndFlags[1] = Settings.LensFlare.StreakTintG * Settings.LensFlare.StreakIntensity * Master;
+        Out.FlareStreakAndFlags[2] = Settings.LensFlare.StreakTintB * Settings.LensFlare.StreakIntensity * Master;
+        Out.FlareStreakAndFlags[3] = static_cast<float>(Elements);
+
+        // ⚠️ Angular sizes are shipped as COSINES, like every other angular quantity in this record, so the
+        //    shader compares dot products directly and never calls acos in an inner loop.
+        const float StreakLengthRadians = Settings.LensFlare.StreakLength * kDegreesToRadiansF;
+        const float StreakThickRadians  = Settings.LensFlare.StreakThickness * kDegreesToRadiansF;
+        Out.FlareChromaAndFade[0] = Settings.LensFlare.GhostChromatic;
+        Out.FlareChromaAndFade[1] = Settings.LensFlare.OcclusionFade;
+        Out.FlareChromaAndFade[2] = StreakLengthRadians;
+        Out.FlareChromaAndFade[3] = StreakThickRadians;
+
+        Out.FlareGhostAndCount[0] = Settings.LensFlare.GhostIntensity * Master;
+        Out.FlareGhostAndCount[1] = Settings.LensFlare.GhostDispersal;
+        Out.FlareGhostAndCount[2] = Settings.LensFlare.GhostSize * kDegreesToRadiansF;
+        Out.FlareGhostAndCount[3] = static_cast<float>(Settings.LensFlare.GhostCount);
+
+        Out.FlareBurstAndChroma[0] = Settings.LensFlare.StarburstIntensity * Master;
+        Out.FlareBurstAndChroma[1] = Settings.LensFlare.StarburstLength * kDegreesToRadiansF;
+        Out.FlareBurstAndChroma[2] = Settings.LensFlare.StarburstSharpness;
+        Out.FlareBurstAndChroma[3] = static_cast<float>(Settings.LensFlare.StarburstBlades);
+    }
+
     Out.StarsAndRotation[0] = Settings.Stars.Enabled ? Settings.Stars.Brightness : 0.0f;
     Out.StarsAndRotation[1] = Settings.Stars.Density;
     Out.StarsAndRotation[2] = Settings.Stars.SizeScale;

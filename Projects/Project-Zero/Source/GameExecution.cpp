@@ -72,6 +72,10 @@ void PrintUsage(const char* Program) noexcept
               << "  --exposure <float>         Manual-mode tone-map scalar\n"
               << "  --adaptive                 frame-metered exposure\n"
               << "  --sky-exposure             exposure from the sun's elevation (steady under camera motion)\n"
+              << "  --flare off|low|medium|high   lens flare quality tier (low=streak, medium=+ghosts, high=+starburst)\n"
+              << "  --flare-elements <list>    comma-separated streak,ghosts,starburst - overrides the tier\n"
+              << "  --flare-intensity <x>      master flare multiplier\n"
+              << "  --no-flare                 disable the lens flare entirely\n"
               << "  --no-gi --no-aa --no-temporal --no-spatial --uniform-pick --no-denoise --no-reprojection\n"
               << "  --reset-on-motion          restart accumulation on camera motion (legacy A/B)\n"
               << "  --render-scale <float>     kernel resolution fraction\n"
@@ -144,6 +148,45 @@ int main(int argc, char** argv)
         else if (std::strcmp(Arg, "--no-reprojection") == 0) WantReprojection = false;
         else if (std::strcmp(Arg, "--reset-on-motion") == 0) WantResetOnMotion = true;
         else if (std::strcmp(Arg, "--no-sky") == 0)          Celestial.Enabled = false;
+        else if (std::strcmp(Arg, "--no-flare") == 0)        Celestial.LensFlare.Enabled = false;
+        else if (std::strcmp(Arg, "--flare") == 0)
+        {
+            // Quality tier by name, because "--flare 2" tells a reader nothing. The tiers are presets over the
+            //    same three elements; --flare-elements overrides them entirely.
+            if (const char* V = NeedValue(Arg))
+            {
+                if      (std::strcmp(V, "off")    == 0) Celestial.LensFlare.Tier = Frontier::LensFlareTierCategory::Off;
+                else if (std::strcmp(V, "low")    == 0) Celestial.LensFlare.Tier = Frontier::LensFlareTierCategory::Low;
+                else if (std::strcmp(V, "medium") == 0) Celestial.LensFlare.Tier = Frontier::LensFlareTierCategory::Medium;
+                else if (std::strcmp(V, "high")   == 0) Celestial.LensFlare.Tier = Frontier::LensFlareTierCategory::High;
+                else std::cerr << "[Celestial] --flare wants off|low|medium|high, got '" << V << "'\n";
+            }
+        }
+        else if (std::strcmp(Arg, "--flare-elements") == 0)
+        {
+            // Comma-separated, freely combinable: "streak,starburst" is a legal set the tiers never produce.
+            if (const char* V = NeedValue(Arg))
+            {
+                uint32_t Mask = 0u;
+                const std::string Text(V);
+                size_t Start = 0u;
+                while (Start <= Text.size())
+                {
+                    const size_t Comma = Text.find(',', Start);
+                    const std::string Item = Text.substr(Start, Comma == std::string::npos ? std::string::npos : Comma - Start);
+                    if      (Item == "streak")    Mask |= Frontier::LensFlareElementStreak;
+                    else if (Item == "ghosts")    Mask |= Frontier::LensFlareElementGhosts;
+                    else if (Item == "starburst") Mask |= Frontier::LensFlareElementStarburst;
+                    else if (!Item.empty())
+                        std::cerr << "[Celestial] --flare-elements: unknown element '" << Item
+                                  << "' (want streak, ghosts or starburst)\n";
+                    if (Comma == std::string::npos) break;
+                    Start = Comma + 1u;
+                }
+                Celestial.LensFlare.ElementMask = Mask;
+            }
+        }
+        else if (std::strcmp(Arg, "--flare-intensity") == 0) { if (const char* V = NeedValue(Arg)) Celestial.LensFlare.Intensity = static_cast<float>(std::atof(V)); }
         else if (std::strcmp(Arg, "--sky") == 0)          { if (const char* V = NeedValue(Arg)) CelestialPath = V; }
         else if (std::strcmp(Arg, "--write-sky") == 0)    { if (const char* V = NeedValue(Arg)) CelestialTemplatePath = V; }
         else if (std::strcmp(Arg, "--time") == 0)         { if (const char* V = NeedValue(Arg)) Celestial.Observation.LocalHours = static_cast<float>(std::atof(V)); }

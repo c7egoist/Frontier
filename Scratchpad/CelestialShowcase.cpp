@@ -214,12 +214,14 @@ int main(int argc, char** argv)
     const int   width   = argc > 3 ? std::atoi(argv[3]) : 420;
     const int   height  = argc > 4 ? std::atoi(argv[4]) : 250;
     const int   samples = argc > 5 ? std::atoi(argv[5]) : 40;
+    const int   flareTier = argc > 6 ? std::atoi(argv[6]) : -1;   // -1 = leave the default
 
     //---------------------------------------------------------------------------------------------------------
     // 🔴 THE PRODUCTION CHAIN. Settings -> real ephemeris -> the actual GPU record -> read back as the shader.
     //---------------------------------------------------------------------------------------------------------
     Frontier::CelestialStructure settings{};          // defaults: Benoni, -26.19, +28.32, UTC+2, 2026-09-13
     settings.Observation.LocalHours = hours;
+    if (flareTier >= 0) settings.LensFlare.Tier = static_cast<Frontier::LensFlareTierCategory>(flareTier);
 
     const Frontier::CelestialSolution solution = Frontier::SolveCelestial(settings);
 
@@ -375,6 +377,10 @@ int main(int argc, char** argv)
                 // 🔴 THE PRIMARY MISS, THROUGH THE SHADER'S OWN FUNCTION — sky, sun disc and moon disc, exactly
                 //    as the kernel composites them. Stars are added separately only because P7 has not landed.
                 colour = CelestialSky(sky, camera.Origin, dir, true) + PlaceholderStars(sky, dir);
+
+                // 🔴 The lens flare, from the shader's own functions. Occlusion is 1 on a miss by definition.
+                colour = colour + CelestialLensFlare(sky, dir, camera.Forward, camera.Right, camera.Up,
+                                                     sky.SunTransmittance.xyz(), 1.0f);
             }
 
             // 🔴 AERIAL PERSPECTIVE, through the shader's own function. Surface pixels only — the sky is
