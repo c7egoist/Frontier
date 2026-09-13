@@ -24,6 +24,27 @@ void ExposureIntegrator::Advance(float DeltaSeconds) noexcept
 {
     if (DeltaSeconds <= 0.0f) return;
 
+    // ── Celestial easing ────────────────────────────────────────────────────────────────────────────────────
+    // Frame-rate independent, and in LOG space for the same reason the luminance adaptation is: the gain spans
+    //    six orders of magnitude across a day, so a linear approach would stall and then snap.
+    //
+    //    🔴 Note what is NOT read here: nothing measured from the frame. The eased quantity is a function of the
+    //    sun's elevation and elapsed time only, which is what keeps F3 fixed.
+    {
+        const float Target = std::max(Config.CelestialGain, Config.MinimumExposure);
+        if (CelestialEasedGain < 0.0f || Config.CelestialEaseSeconds <= 1.0e-4f)
+        {
+            CelestialEasedGain = Target;   // first frame, or easing disabled: adopt immediately
+        }
+        else
+        {
+            const float Blend = 1.0f - std::exp(-DeltaSeconds / Config.CelestialEaseSeconds);
+            const float LogNow    = std::log(std::max(CelestialEasedGain, Config.MinimumExposure));
+            const float LogTarget = std::log(Target);
+            CelestialEasedGain = std::exp(LogNow + (LogTarget - LogNow) * Blend);
+        }
+    }
+
     // Asymmetric: the direction of change picks the time constant. Brightening is the fast one because a viewer
     //    expects a bright doorway to resolve almost at once, while dark adaptation genuinely takes seconds.
     const bool  Brightening = ObservedLuminance > AdaptedLuminance;
@@ -78,6 +99,17 @@ float ExposureIntegrator::QueryColourSaturation() const noexcept
 float ExposureIntegrator::QueryExposure() const noexcept
 {
     if (Config.Mode == ExposureModeCategory::Manual) return Config.ManualExposure;
+
+    // 🔴 P4/F3. Celestial returns the solver's gain and reads NOTHING measured from the frame — not
+    //    AdaptedLuminance, not ObservedLuminance. That omission is the entire fix: there is no frame-dependent
+    //    term, so there is no mechanism by which turning the camera can change the exposure. A reviewer can
+    //    confirm the property by reading this one branch, and the gate asserts the branch stays this shape.
+    if (Config.Mode == ExposureModeCategory::Celestial)
+    {
+        const float Gain = CelestialEasedGain >= 0.0f ? CelestialEasedGain : Config.CelestialGain;
+        return std::clamp(Gain, Config.MinimumExposure, Config.MaximumExposure);
+    }
+
     return ExposureForLuminance(AdaptedLuminance, Config);
 }
 

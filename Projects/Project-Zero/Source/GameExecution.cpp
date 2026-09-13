@@ -14,6 +14,7 @@
 //        --candidates <n> --extra <n>               ReSTIR budget (default 8, 2)
 //        --exposure <float>         Manual-mode tone-map scalar (default 1.05)
 //        --adaptive                 frame-metered exposure instead of the fixed Manual value
+//        --sky-exposure             exposure driven by the sun's elevation only — immune to camera motion (F3)
 //        --no-gi --no-aa --no-temporal --no-spatial --uniform-pick --no-denoise --no-reprojection
 //        --reset-on-motion          restart accumulation whenever the camera moves (legacy; P0 turned this off)
 //        --render-scale <float>     kernel resolution as a fraction of the window (default 1)
@@ -66,6 +67,7 @@ void PrintUsage(const char* Program) noexcept
               << "  --candidates <n> --extra <n>\n"
               << "  --exposure <float>         Manual-mode tone-map scalar\n"
               << "  --adaptive                 frame-metered exposure\n"
+              << "  --sky-exposure             exposure from the sun's elevation (steady under camera motion)\n"
               << "  --no-gi --no-aa --no-temporal --no-spatial --uniform-pick --no-denoise --no-reprojection\n"
               << "  --reset-on-motion          restart accumulation on camera motion (legacy A/B)\n"
               << "  --render-scale <float>     kernel resolution fraction\n"
@@ -95,7 +97,8 @@ int main(int argc, char** argv)
     Frontier::RayTracingRequestCategory TierRequest = Frontier::RayTracingRequestCategory::Auto;
     uint32_t    Candidates = 8u, ExtraCandidates = 2u;
     float       Exposure = 1.05f;
-    bool        AdaptiveExposure = false;
+    bool        AdaptiveExposure  = false;
+    bool        CelestialExposure = false;
     bool        WantGi = true, WantAa = true, WantTemporal = true, WantSpatial = true;
     bool        WantAliasPick = true, WantDenoise = true, WantReprojection = true;
 
@@ -123,6 +126,7 @@ int main(int argc, char** argv)
         if      (std::strcmp(Arg, "--help") == 0)            { PrintUsage(argv[0]); return 0; }
         else if (std::strcmp(Arg, "--animate") == 0)         AnimateInstances = true;
         else if (std::strcmp(Arg, "--adaptive") == 0)        AdaptiveExposure = true;
+        else if (std::strcmp(Arg, "--sky-exposure") == 0)    CelestialExposure = true;
         else if (std::strcmp(Arg, "--no-gi") == 0)           WantGi = false;
         else if (std::strcmp(Arg, "--no-aa") == 0)           WantAa = false;
         else if (std::strcmp(Arg, "--no-temporal") == 0)     WantTemporal = false;
@@ -393,17 +397,25 @@ int main(int argc, char** argv)
     IntegratorConfig.ResetOnMotion        = WantResetOnMotion;
 
     Frontier::ReSTIRIntegrator Integrator(IntegratorConfig);
-    if (AdaptiveExposure)
+    if (AdaptiveExposure && CelestialExposure)
+    {
+        std::cerr << "[Exposure] --adaptive and --sky-exposure are mutually exclusive: --adaptive meters the "
+                     "frame (and so moves with the camera), --sky-exposure follows the sun. Using --sky-exposure.\n";
+        AdaptiveExposure = false;
+    }
+    if (AdaptiveExposure || CelestialExposure)
     {
         Frontier::ExposureConfiguration Adapt = Integrator.Exposure().QueryConfiguration();
-        Adapt.Mode = Frontier::ExposureModeCategory::Adaptive;
+        Adapt.Mode = CelestialExposure ? Frontier::ExposureModeCategory::Celestial
+                                       : Frontier::ExposureModeCategory::Adaptive;
         Integrator.Exposure().AssignConfiguration(Adapt);
     }
     {
         char Line[256];
         std::snprintf(Line, sizeof(Line),
                       "Run: %u candidates, %u extra, exposure %s %.3f, GI %s, AA %s, temporal %s, spatial %s, pick %s, denoise %s, reprojection %s, motion %s",
-                      Candidates, ExtraCandidates, AdaptiveExposure ? "adaptive from" : "manual",
+                      Candidates, ExtraCandidates,
+                      CelestialExposure ? "celestial from" : (AdaptiveExposure ? "adaptive from" : "manual"),
                       static_cast<double>(Exposure), WantGi ? "on" : "off", WantAa ? "on" : "off",
                       WantTemporal ? "on" : "off", WantSpatial ? "on" : "off",
                       WantAliasPick ? "alias" : "uniform", WantDenoise ? "on" : "off",
@@ -628,6 +640,16 @@ int main(int argc, char** argv)
                           "CelestialUniform and the GPU buffer must be the same size; update the shader's "
                           "CelestialRecord and kCelestialRecordBytes together");
             Surface.UploadCelestial(&Record, static_cast<uint32_t>(sizeof(Record)));
+
+            // 🔴 P4/F3: the exposure for this frame, from the sun's elevation and nothing else.
+            //
+            //    Note WHERE this happens — before ObserveCamera, and fed from `Solution`, which was computed
+            //    from the clock and the observer's latitude. There is no path by which the camera could
+            //    influence it, which is the point: F3 was "exposure keeps changing when camera angle changes,
+            //    especially when sun hasn't changed", and the fix is that the quantity is simply not a function
+            //    of the camera any more.
+            if (CelestialExposure)
+                Integrator.Exposure().ObserveCelestialGain(Solution.ExposureGain);
         }
 
         Integrator.ObserveCamera(Camera, RenderWidth, RenderHeight);

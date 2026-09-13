@@ -36,6 +36,7 @@ Run CheckCelestialSolver
 Run CheckAtmosphereScatter
 Run CheckSkyIntegration
 Run CheckSunReservoir
+Run CheckCelestialExposure
 Run CheckSpatialTapJitter
 Run CheckTemporalReprojection
 Run CheckAtrousDenoise

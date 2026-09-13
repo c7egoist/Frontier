@@ -33,8 +33,9 @@ namespace Frontier {
 
 enum class ExposureModeCategory : uint32_t
 {
-    Manual   = 0u,   // the fixed value — reproduces every pre-A6b image exactly
-    Adaptive = 1u,   // measured from the frame and eased over time
+    Manual    = 0u,   // the fixed value — reproduces every pre-A6b image exactly
+    Adaptive  = 1u,   // measured from the frame and eased over time
+    Celestial = 2u,   // 🔴 P4/F3: driven by the SUN'S ELEVATION and nothing else
 };
 
 struct ExposureConfiguration
@@ -44,6 +45,33 @@ struct ExposureConfiguration
     ExposureModeCategory Mode = ExposureModeCategory::Manual;
 
     float ManualExposure   = 1.05f;    // [-]   used in Manual mode; also the value Adaptive starts from
+
+    // ── Celestial exposure ──────────────────────────────────────────────────────────────────────────────────
+    // 🔴 THE F3 FIX, STATED AS A MODE. The reported failure was "exposure keeps changing when camera angle
+    //    changes, especially when sun hasn't changed". Adaptive does that BY CONSTRUCTION — it meters the frame,
+    //    so turning to face a bright wall is indistinguishable from the wall getting brighter. Manual does not
+    //    drift, but it also cannot follow a day-night cycle, so a scene correctly exposed at noon is unreadable
+    //    at dusk.
+    //
+    //    Celestial is the third option and the right one outdoors: the gain comes from the SUN'S ELEVATION,
+    //    which is a property of the world clock, not of where anyone is looking. Point the camera anywhere you
+    //    like — the exposure does not move. Let an hour pass and it tracks the sky exactly as a real camera on
+    //    manual-but-metered-for-daylight would.
+    //
+    //    The value is supplied by CelestialSolver::SolveCelestialEv100, whose signature takes an angle and
+    //    settings and has no way to reach a camera. That is deliberate: the guarantee is structural rather than
+    //    a promise to be careful.
+    float CelestialGain    = 1.0f;     // [-]   set each frame from the solver in Celestial mode
+
+    // ⚠️ EASED, AND THE REASON IS MEASURED. At realtime the curve's steepest point is 0.015 EV/s — far below the
+    //    ~0.1 EV/s at which flicker becomes noticeable — so easing is unnecessary for a normal day. But under a
+    //    60x time-lapse (`--time-rate 60`) the same curve reaches 0.91 EV/s at the horizon, which visibly
+    //    pumps. A 4-second time constant on the GAIN removes that without touching the curve itself.
+    //
+    //    🔴 THIS DOES NOT REOPEN F3. The eased quantity is still a function of sun elevation alone; easing adds
+    //    a dependence on TIME, never on the camera. Turning on the spot still cannot change the exposure,
+    //    because nothing the camera does enters the input.
+    float CelestialEaseSeconds = 4.0f;  // [s] 0 disables easing entirely
     float KeyValue         = 0.18f;    // [-]   the mid-grey a correctly exposed scene should average to
     float BrightenSeconds  = 0.40f;    // [s]   time constant when the scene gets BRIGHTER (iris closes fast)
     float DarkenSeconds    = 2.20f;    // [s]   and when it gets DARKER (dark adaptation is genuinely slow)
@@ -112,6 +140,13 @@ public:
     //    The tone map mixes toward grey by this. Always 1 in Manual mode.
     [[nodiscard]] float QueryColourSaturation() const noexcept;
 
+    // Supply this frame's celestial gain, computed by the solver from the sun's elevation. Separate from
+    //    Advance so the whole mode is testable with no GPU and no clock.
+    void ObserveCelestialGain(float Gain) noexcept { Config.CelestialGain = Gain; }
+
+    // The eased value actually used, for display and for tests.
+    [[nodiscard]] float QueryCelestialEasedGain() const noexcept { return CelestialEasedGain; }
+
     // Jump straight to the measurement, with no easing. For a camera cut or a scene load, where easing would
     //    show the viewer several seconds of the previous scene's exposure.
     void Snap() noexcept { AdaptedLuminance = ObservedLuminance; }
@@ -127,6 +162,7 @@ private:
     ExposureConfiguration Config{};
     float ObservedLuminance = 0.18f;   // [cd/m²] the most recent frame reading — what the adaptation chases
     float AdaptedLuminance  = 0.18f;   // [cd/m²] what the eye currently believes
+    float CelestialEasedGain = -1.0f;  // [-]     eased celestial gain; negative means "not yet initialised"
 };
 
 } // namespace Frontier

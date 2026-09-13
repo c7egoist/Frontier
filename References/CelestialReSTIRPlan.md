@@ -249,6 +249,46 @@ Status log (append; newest last):
   Jolt) were missing third-party trees, not regressions -- verified by running them against the pre-P0 stash --
   and are now populated out-of-band; .gitignore records that ExternalPackages/ is not carried on this branch.
   User confirmed: TOML + CLI for the slider surface (P8), stability before sky. NEXT: P1.
+- 2026-09-13: **P4 DONE — F3 fixed: the exposure stops moving when the camera does.**
+  New `ExposureModeCategory::Celestial` alongside Manual and Adaptive, selected by `--sky-exposure`. Manual does
+  not drift but cannot follow a day; Adaptive follows the day but meters the FRAME, so turning to face a bright
+  wall is indistinguishable from the wall getting brighter — that IS F3, by construction. Celestial takes the
+  gain from `SolveCelestialEv100(elevation, settings)`, whose signature cannot reach a camera.
+  **Measured, with a control.** A camera sweep swinging the frame meter **160x** with the sun fixed:
+  Celestial drift **0.00000000%** (bit-stable), Adaptive on the IDENTICAL sweep **29.51x**. The Adaptive control
+  stays in the harness and the gate fails if it is removed — without it, §1 only proves a constant is constant.
+  Celestial still tracks the sky: **2.1e6x** from noon to −20°, monotonic.
+  🔴 **A REAL DEFECT FOUND, AND THE FIRST FIX WAS THE WRONG ONE.** A smoothness check failed at 0.0222 EV across
+  a 0.02° window. Investigating rather than widening the bound: the VALUE is continuous at the horizon join
+  (9.3917 → 9.4000 → 9.4139, one-sided steps 8e-5 / 6e-4 EV) — only the SLOPE changes, 0.83 → 1.39 EV/deg, a
+  C0-but-not-C1 join that is invisible. EV-per-degree is not perceptible; EV-per-SECOND is. Rewritten that way:
+  realtime worst is **0.01514 EV/s**, 6.6x under the ~0.1 EV/s flicker threshold.
+  **But the rewrite exposed a genuine one**: at `--time-rate 60` the same curve hits **0.908 EV/s** — visible
+  pumping through sunrise. Added a 4 s ease on the GAIN (not a change to the curve). Constant chosen by sweep:
+      ease   1x rate   1x lag | 60x rate  60x lag
+        0s   0.00351   0.0000 |  0.46406   0.0000
+        4s   0.00347   0.0138 |  0.19949   0.7962
+       20s   0.00331   0.0659 |  0.09527   1.9046
+       30s   0.00302   0.0899 |  0.07030   2.1080
+  ⚠️ **I could not get 60x under the threshold and said so rather than faking it.** The requirement is
+  self-contradictory: a 60x lapse compresses sunrise's ~6 EV into ~a minute, so the average rate is ~0.1 EV/s by
+  construction. Buying it costs ~2 EV of lag — the exposure visibly trailing the sky, a worse artefact than the
+  flicker. 4 s is the knee: realtime lag 0.0138 EV (invisible), and it still more than halves the lapse rate.
+  The test now asserts what is true and useful — easing must measurably help (>40%), and REALTIME must be 4x
+  under threshold — instead of an impossible bound.
+  **The ease does not reopen F3**, and that is its own gated section: with easing ON the 160x sweep still moves
+  nothing (0.00000000%). Easing adds a dependence on TIME, never on the camera.
+  Gate greps the Celestial branch of `QueryExposure` for `AdaptedLuminance|ObservedLuminance|ExposureForLuminance`
+  and fails if any appears; verified by DELIBERATELY adding a frame-luminance term — caught — then restoring.
+  Also enforces `--adaptive` and `--sky-exposure` mutual exclusion.
+  **Visual**: `Scratchpad/ExposureStabilityPreview.png`, a 105° pan with a fixed sun, Adaptive (red bar) vs
+  Celestial (green bar). On a FIXED LIT SURFACE the spread is **Adaptive 19.05% vs Celestial 4.28%** — and the
+  residual is one frame whose sample patch clips a sphere, not exposure drift; the exposure value itself is
+  1.07087 at every angle. ⚠️ Whole-frame mean is a poor measure here (15.8% vs 11.9%) because panning genuinely
+  changes what is in shot; the fixed-surface patch is the honest one.
+  Gates: `Scratchpad/CelestialExposureTest.cpp` (16 checks) + `Scratchpad/CheckCelestialExposure.sh`, registered.
+  **ALL 21 SUITES GREEN.** NEXT: P5 — clouds.
+
 - 2026-09-13: **P3 DONE — F2 fixed: the sun is a member of the reservoir's light pool.**
   The sun is given light index `LightTriangleCount` (one past the real luminaires) so it travels through EVERY
   existing path — initial RIS, extra candidates, temporal reuse, spatial reuse, the shadow ray, the final shade —
