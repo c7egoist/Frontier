@@ -73,11 +73,30 @@ void SkySpheresStructure::Construct() noexcept
     }
 
     // ── Ground ──────────────────────────────────────────────────────────────────────────────────────────────────────
-    //    80 × 80 m. Large enough that the far edge is well past where the sky's own horizon appears, so the
-    //    skyline in frame is the ATMOSPHERE's horizon and not the end of a plane. A 6 m plane like the
-    //    shader-ball level would put a visible edge right through the shot.
-    AppendQuad(Vector3{ -40.0f, -40.0f, 0.0f }, Vector3{ 40.0f, -40.0f, 0.0f },
-               Vector3{  40.0f,  40.0f, 0.0f }, Vector3{ -40.0f, 40.0f, 0.0f }, 0u, 0.25f);
+    // 🔴 60 km, NOT 80 m — AND THAT IS THE FIX FOR THE HARD HORIZON SEAM.
+    //
+    //    The plane was 80 m. That put its far edge 2.5 degrees below horizontal, so between the edge and the
+    //    true skyline the camera saw nothing but a black wedge, and the sky met the ground in a 99-level cliff
+    //    with the hue jumping gold to mauve in 8 pixels. Two things were wrong and only one of them was shading.
+    //
+    //    Aerial perspective only becomes visible over KILOMETRES. Measured with the shipping integral at golden
+    //    hour, a lit ground patch of 0.134:
+    //
+    //          40 m -> 0.134  (transmittance 0.9985 — the haze is 0.2%, invisible)
+    //           1 km -> 0.176
+    //           5 km -> 0.331
+    //          20 km -> 0.764
+    //          80 km -> 1.371   == the sky just above the horizon at 1.294
+    //
+    //    So at 80 m NO amount of correct haze could have shown. At tens of kilometres the ground converges to
+    //    the sky's own radiance and the seam stops existing — not smoothed by a fade, but because both sides
+    //    are integrating nearly the same air.
+    //
+    //    ⚠️ 60 km is chosen over "infinite" because the geometric horizon from 1.75 m is only ~4.7 km away, so
+    //    the plane is already 12x past the point where the earth curves out of sight. Larger just wastes float
+    //    precision on triangles that can never be seen.
+    AppendQuad(Vector3{ -60000.0f, -60000.0f, 0.0f }, Vector3{ 60000.0f, -60000.0f, 0.0f },
+               Vector3{  60000.0f,  60000.0f, 0.0f }, Vector3{ -60000.0f, 60000.0f, 0.0f }, 0u, 0.00002f);
 
     // ── The three spheres ───────────────────────────────────────────────────────────────────────────────────────────
     //    32 × 64 is finer than the shader-ball grid because these are the subject rather than a swatch: at the

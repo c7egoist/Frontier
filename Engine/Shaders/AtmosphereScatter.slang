@@ -251,13 +251,14 @@ vec3 AtmosphereMultipleScattering(
     return scatteringHere * source * kIsotropicPhase * (1.0 / (1.0 - kMultipleScatteringAlbedo));
 }
 
-vec3 AtmosphereScatter(
+vec3 AtmosphereScatterTo(
     AtmosphereParameters atmosphere,
     vec3  position,          // from the planet centre
     vec3  viewDirection,
     vec3  sunDirection,
     int   viewSteps,
     int   sunSteps,
+    float maxDistance,       // [m] stop here (aerial perspective); negative = march to the sky
     out   vec3 outTransmittance)
 {
     float topRadius = atmosphere.PlanetRadius + atmosphere.AtmosphereHeight;
@@ -265,6 +266,13 @@ vec3 AtmosphereScatter(
     float distance  = AtmosphereRaySphere(position, viewDirection, topRadius);
     float groundHit = AtmosphereRaySphere(position, viewDirection, atmosphere.PlanetRadius);
     if (groundHit > 0.0) distance = min(distance, groundHit);
+
+    // 🔴 AERIAL PERSPECTIVE. A negative maxDistance means "march to the sky"; a positive one stops the march at
+    //    a piece of scene geometry, which is what turns this same integral into the haze between the eye and an
+    //    object. Stopping early also means the ground-bounce term below must not fire — the ray never reached
+    //    the planet, it hit a rock in front of it.
+    bool stoppedAtGeometry = maxDistance > 0.0 && maxDistance < distance;
+    if (stoppedAtGeometry) { distance = maxDistance; groundHit = -1.0; }
 
     outTransmittance = vec3(1.0);
     if (distance <= 0.0) return vec3(0.0);
@@ -347,6 +355,21 @@ vec3 AtmosphereScatter(
 
     outTransmittance = throughput;
     return radiance;
+}
+
+// The sky-only form: march all the way to the top of the atmosphere or to the planet. Every existing caller
+//    uses this, so adding aerial perspective did not disturb a single call site.
+vec3 AtmosphereScatter(
+    AtmosphereParameters atmosphere,
+    vec3  position,
+    vec3  viewDirection,
+    vec3  sunDirection,
+    int   viewSteps,
+    int   sunSteps,
+    out   vec3 outTransmittance)
+{
+    return AtmosphereScatterTo(atmosphere, position, viewDirection, sunDirection,
+                               viewSteps, sunSteps, -1.0, outTransmittance);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

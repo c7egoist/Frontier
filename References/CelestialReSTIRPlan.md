@@ -338,6 +338,38 @@ Belt of Venus above it), `24_ms_morning.png` (blue sky, distinctly blue shadows)
 Gated in `AtmosphereScatterTest` section 5b against the real-world numbers. **ALL 23 SUITES GREEN.**
 
 
+### D4: the hard sky/ground seam — AERIAL PERSPECTIVE was missing (2026-09-13)
+
+User: the dawn and golden-hour renders show "a very short blur black to orange to bluish in a short distance"
+and it "looks very unrealistic". Measured the golden-hour frame: the ground varied only ~20 levels over 200 px
+of receding distance, and the sky met it in a **99-level cliff in 8 px**, hue jumping gold to mauve.
+
+**Cause: aerial perspective was never implemented.** `grep` found no trace of it in either shader — scene
+geometry was shaded and written with no haze between it and the eye. Added `AtmosphereScatterTo` (the same
+integral, with a `maxDistance` that stops the march at a surface) and `CelestialAerialPerspective`, applied at
+the SINGLE exit point for surface pixels so it attenuates the total leaving the surface rather than one term.
+The composite is the standard `L = L_surface·T + L_inscatter` (Preetham 1999 → Hillaire 2020). The old
+`AtmosphereScatter` signature is kept as a wrapper, so **no existing call site changed.**
+
+🔴 **BUT THE SEAM WAS NOT A SHADING BUG, AND THAT MATTERED.** With haze wired in, the cliff was still 96 levels.
+Measured why: **at 1.75 m eye height the entire visible ground is within ~216 m**, and at 216 m transmittance is
+0.9985 — the haze contributes 0.2%. Aerial perspective needs kilometres:
+
+      40 m -> 0.134 (unchanged)   1 km -> 0.176   5 km -> 0.331   20 km -> 0.764   80 km -> 1.371 == sky 1.294
+
+**Checked against a real photograph** rather than assuming: a sea horizon at eye level is a genuinely SHARP
+line. The crisp seam at 1.75 m is correct. Re-rendered from 260 m and the seam vanishes on its own —
+`Renders/27_aerial_from_altitude.png`, scan 249→220→204→183 instead of a 96-level drop.
+Ground plane enlarged 80 m → 60 km in `SkySpheresStructure` so distance can exist at all; at 80 m no amount of
+correct haze could ever have shown.
+
+**Three of my own test bugs, each fixed by correcting the test rather than the bound:** (i) forgot to scale
+in-scatter by solar irradiance, so haze FELL with distance; (ii) asked for a 60 km surface from 2 m eye height,
+which the planet blocks at 5 km; (iii) compared ground-at-60 km against a sky ray at +0.5° — different path
+lengths, so it proved nothing. Final check compares the same direction with and without a surface: **1.0001×**.
+Gated in `SkyIntegrationTest` section 4c. **ALL 23 SUITES GREEN.**
+
+
 Status log (append; newest last):
 - 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
   0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on

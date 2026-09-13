@@ -368,6 +368,12 @@ ShadingRecord ResolveMaterial(GpuMaterial mat, GpuInstance instance, uint primit
 #define kSkyViewSteps 16
 #define kSkySunSteps  8
 
+// Aerial perspective runs on every surface pixel, not just misses, so it gets a smaller budget. The segment is
+//    also far shorter than a sky ray — metres to kilometres rather than a hundred kilometres — so it needs far
+//    fewer steps to resolve.
+#define kAerialSteps    8
+#define kAerialSunSteps 4
+
 // Unpack the celestial record into the scattering parameters. Kept next to the include so the mapping from the
 //    CPU-side struct to the physics is one short function that can be read in one go.
 AtmosphereParameters CelestialAtmosphereOf(CelestialRecord sky)
@@ -517,6 +523,43 @@ vec3 CelestialSunGlare(CelestialRecord sky, vec3 rayDirection, vec3 transmittanc
     // Driven by the DISC's radiance, so the flare tracks the sun's own brightness and reddens with it at dusk:
     //    the same SunTransmittance that warms the direct light warms the glare.
     return sky.SunRadianceAndLimb.xyz * (psf * kGlareStrength * window) * transmittance;
+}
+
+// 🔴 AERIAL PERSPECTIVE — the haze between the eye and a surface.
+//
+//    WHY THIS MATTERS AND WHAT IT FIXES. Without it a ground plane renders as a flat slab of one colour that
+//    meets the sky at a hard seam. Measured on the golden-hour preview: the ground varied only ~20 levels over
+//    200 px of receding distance, and the sky-to-ground transition was a 99-level cliff in 8 px, jumping hue
+//    from gold to mauve. Real distance does two things at once and this does both:
+//
+//      · OUT-SCATTER: the surface's own light is attenuated on its way to the eye  (multiply by transmittance)
+//      · IN-SCATTER:  air between eye and surface glows with scattered sunlight    (add the marched radiance)
+//
+//    The standard composite, in every reference from Preetham 1999 to Hillaire 2020, is exactly:
+//
+//        L = L_surface * T(eye, surface) + L_inscatter(eye, surface)
+//
+//    ⚠️ THIS IS WHY THE HORIZON SEAM DISAPPEARS. As a surface recedes, T falls towards zero and the in-scatter
+//    rises towards the sky's own radiance — so ground at the skyline converges to the SAME value as the sky
+//    just above it. The seam is not smoothed by a fade; it stops existing, because both sides are computing the
+//    same integral over nearly the same air.
+vec3 CelestialAerialPerspective(CelestialRecord sky, vec3 origin, vec3 surfacePosition, vec3 surfaceRadiance)
+{
+    if ((uint(sky.ExposureAndFlags.w) & kCelestialFlagEnabled) == 0u) return surfaceRadiance;
+
+    vec3  toSurface = surfacePosition - origin;
+    float distance  = length(toSurface);
+    if (distance < 1.0) return surfaceRadiance;      // nothing to scatter in the first metre
+
+    AtmosphereParameters atmosphere = CelestialAtmosphereOf(sky);
+    vec3 observer = CelestialObserver(sky, origin);
+
+    vec3 transmittance;
+    vec3 inScatter = AtmosphereScatterTo(atmosphere, observer, toSurface / distance,
+                                         sky.SunDirectionAndCosRadius.xyz,
+                                         kAerialSteps, kAerialSunSteps, distance, transmittance);
+
+    return surfaceRadiance * transmittance + inScatter * sky.SunIrradianceAndScale.xyz;
 }
 
 // The whole sky along a ray: scattering, plus the discs composited on top. `includeDiscs` is false for the
@@ -1466,6 +1509,14 @@ void main()
     //------------------------------------------------------------------------------------------------------------------
     if ((FeatureFlags & kFeatureAmbientFloor) != 0u)
         accumulatedRadiance += albedo * frame.Occlusion * AmbientStrength;
+
+    // 🔴 AERIAL PERSPECTIVE, applied LAST and at the single exit point for surface pixels.
+    //
+    //    Placed here deliberately: every lighting contribution — direct, reservoir, bounce, emission, ambient —
+    //    has already been summed, and haze must attenuate the TOTAL leaving the surface, not one term of it.
+    //    Applying it earlier would let later additions arrive unattenuated, so a distant emissive would punch
+    //    through kilometres of air at full strength.
+    accumulatedRadiance = CelestialAerialPerspective(Celestial[0], CameraOrigin, hitPos, accumulatedRadiance);
 
     // R7a: the primary hit's geometric normal and camera distance are what the next frame validates its
     //    back-projection against — the same pair R6 row 2 uses to validate reprojected reservoirs.

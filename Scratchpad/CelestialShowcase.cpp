@@ -177,6 +177,9 @@ static bool Trace(vec3 origin, vec3 dir, float& t, vec3& normal, vec3& albedo)
         const float x = -b - std::sqrt(disc);
         if (x > 1e-3f && x < t) { t = x; normal = normalize(origin + dir * x - s.Centre); albedo = s.Albedo; hit = true; }
     }
+    // The ground is an infinite plane here, matching SkySpheresStructure's 60 km quad: the point of the scene
+    //    is that the ground REACHES the horizon, so aerial perspective has kilometres to work over and the sky
+    //    meets the land instead of meeting a void.
     if (dir.z < 0.0f)
     {
         const float x = -origin.z / dir.z;
@@ -288,6 +291,7 @@ int main(int argc, char** argv)
                                                       vec2(uniform(rng), uniform(rng)), extent);
             vec3 colour(0.0f, 0.0f, 0.0f);
             float t; vec3 normal, albedo;
+            bool isSurfaceHit = true;
 
             if (Trace(camera.Origin, dir, t, normal, albedo))
             {
@@ -367,10 +371,16 @@ int main(int argc, char** argv)
             }
             else
             {
+                isSurfaceHit = false;
                 // 🔴 THE PRIMARY MISS, THROUGH THE SHADER'S OWN FUNCTION — sky, sun disc and moon disc, exactly
                 //    as the kernel composites them. Stars are added separately only because P7 has not landed.
                 colour = CelestialSky(sky, camera.Origin, dir, true) + PlaceholderStars(sky, dir);
             }
+
+            // 🔴 AERIAL PERSPECTIVE, through the shader's own function. Surface pixels only — the sky is
+            //    already the full integral and must not be hazed a second time.
+            if (isSurfaceHit)
+                colour = CelestialAerialPerspective(sky, camera.Origin, camera.Origin + dir * t, colour);
 
             accumulated = accumulated + colour;
         }

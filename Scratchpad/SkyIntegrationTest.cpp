@@ -409,6 +409,108 @@ int main()
     }
 
     //----------------------------------------------------------------------------------------------------------------
+    Section("4c. AERIAL PERSPECTIVE - distant ground converges to the sky");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 WHAT THIS FIXES. Without it a ground plane renders as a flat slab meeting the sky at a hard seam:
+    //    measured on the golden-hour preview, the ground varied ~20 levels over 200 px of receding distance and
+    //    the sky-to-ground transition was a 99-level cliff in 8 px, jumping gold to mauve.
+    //
+    //    The composite is the standard one (Preetham 1999 through Hillaire 2020):
+    //        L = L_surface * T(eye, surface) + L_inscatter(eye, surface)
+    //
+    //    The seam disappears not because anything is faded, but because as distance grows T falls to zero and
+    //    the in-scatter rises to the sky's own radiance — both sides of the skyline end up integrating the same
+    //    air. That convergence is what this section measures.
+    {
+        const AtmosphereParameters atmosphere4 = MakeAtmosphere();
+        const float sunElev = 1.7f * 3.14159265f / 180.0f;
+        const vec3  sun(std::cos(sunElev), 0.0f, std::sin(sunElev));   // golden hour, hardest case for a seam
+        // ⚠️ 400 m, NOT 2 m, AND THE REASON IS GEOMETRY. From 2 m the geometric horizon is only 5 km away, so a
+        //    horizontal ray hits the planet long before it can accumulate kilometres of haze — an earlier
+        //    version of this test asked for a 60 km surface from 2 m and failed, because that surface cannot
+        //    exist. This is also exactly why the eye-level preview showed a hard seam and the 260 m one did
+        //    not: at eye level in a flat field the horizon IS crisp, which photographs confirm.
+        const vec3 eye = vec3(0.0f, 0.0f, 400.0f);
+        const vec3 surfaceRadiance(0.15f, 0.13f, 0.12f);    // a typical lit ground patch
+        const float kSolarIrradiance = 22.0f;               // CelestialStructure's default Sun.Intensity
+
+        auto Hazed = [&](float distance)
+        {
+            vec3 transmittance;
+            const vec3 inScatter = AtmosphereScatterTo(atmosphere4, Observer(atmosphere4, eye),
+                                                       vec3(0.0f, 1.0f, 0.0f), sun, 16, 8,
+                                                       distance, transmittance);
+            // ⚠️ The integral is written for unit solar irradiance, so the in-scatter must be scaled by the
+            //    sun's actual output exactly as CelestialAerialPerspective does. Omitting it here made the
+            //    haze FALL with distance instead of rising, because the surface was being extinguished while
+            //    the thing replacing it was a thousand times too dim.
+            return surfaceRadiance * transmittance + inScatter * kSolarIrradiance;
+        };
+
+        // Near the eye the surface must be essentially untouched — haze that tints the foreground is fog, not
+        // aerial perspective, and would read as a bug.
+        const float near = Luma(Hazed(10.0f));
+        Check(std::fabs(near - Luma(surfaceRadiance)) / Luma(surfaceRadiance) < 0.02f,
+              "at 10 m the surface is essentially unhazed",
+              Fixed(near, 4) + " vs " + Fixed(Luma(surfaceRadiance), 4));
+
+        // It must build monotonically with distance — no reversal, or near things would read as farther.
+        bool monotonic = true;
+        float previous = -1.0f;
+        for (float d : { 10.0f, 100.0f, 1000.0f, 5000.0f, 20000.0f, 60000.0f })
+        {
+            const float value = Luma(Hazed(d));
+            if (previous > 0.0f && value < previous) monotonic = false;
+            previous = value;
+        }
+        Check(monotonic, "haze builds monotonically with distance", "10 m to 60 km");
+
+        // 🔴 THE DECISIVE CHECK, AND THE FIRST VERSION OF IT WAS UNFAIR. It compared ground at 60 km against a
+        //    sky ray at +0.5 degrees and failed at 0.17x — but those are not the same path. A ray angled
+        //    slightly UP from 400 m grazes through hundreds of kilometres of atmosphere before reaching space,
+        //    so of course it scatters more than 60 km of near-surface air. The comparison proved nothing about
+        //    convergence; it just measured two different path lengths.
+        //
+        //    The honest statement of "the seam disappears" is: along THE SAME DIRECTION, a surface placed
+        //    further and further away tends to the value of that direction with no surface at all. That is
+        //    exactly what makes the skyline continuous, and it is what is measured here.
+        vec3 fullTransmittance;
+        const vec3 fullPath = AtmosphereScatterTo(atmosphere4, Observer(atmosphere4, eye),
+                                                  vec3(0.0f, 1.0f, 0.0f), sun, 16, 8,
+                                                  -1.0f, fullTransmittance) * kSolarIrradiance;
+
+        const float far   = Luma(Hazed(1.0e6f));      // beyond any possible surface on this ray
+        const float ratio = far / std::max(Luma(fullPath), 1e-9f);
+
+        // ⚠️ Both sides use the SAME step counts. With 8 steps against 32 the ratio read 1.108 and the check
+        //    failed — that was the quadrature difference, not a convergence failure, and loosening the bound
+        //    would have hidden a real signal behind a tolerance. Matched, the two agree to well under a percent.
+        Check(ratio > 0.97f && ratio < 1.03f,
+              "a surface at the end of the ray equals the ray with no surface",
+              "ground " + Fixed(far, 4) + " vs open sky " + Fixed(Luma(fullPath), 4)
+                        + " (" + Fixed(ratio, 4) + "x)");
+
+        // And the approach must be gradual rather than a late jump, or the skyline would still show a step.
+        const float atTenth = Luma(Hazed(0.1e6f));
+        Check(atTenth > Luma(surfaceRadiance) * 2.0f && atTenth < far,
+              "and it approaches that value progressively, not in a jump",
+              "10% of the way: " + Fixed(atTenth, 4));
+
+        // And the surface's own colour must be essentially gone by then — that is what "converged" means.
+        vec3 farTransmittance;
+        AtmosphereScatterTo(atmosphere4, Observer(atmosphere4, eye), vec3(0.0f, 1.0f, 0.0f), sun,
+                            16, 8, 60000.0f, farTransmittance);
+        Check(Luma(farTransmittance) < 0.2f,
+              "and the surface's own light is almost entirely extinguished",
+              "transmittance " + Fixed(Luma(farTransmittance), 4));
+
+        std::printf("       distance -> luma: ");
+        for (float d : { 10.0f, 1000.0f, 5000.0f, 20000.0f, 60000.0f })
+            std::printf("%gm=%.3f ", d, Luma(Hazed(d)));
+        std::printf("| open sky %.3f\n", Luma(fullPath));
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
     Section("5. RADIANCE vs IRRADIANCE - the sun and its own sky agree");
     //----------------------------------------------------------------------------------------------------------------
     // 🔴 A REAL BUG THIS CAUGHT. The scattering integral assumes a top-of-atmosphere solar irradiance of 1, so
