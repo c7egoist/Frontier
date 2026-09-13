@@ -7,7 +7,7 @@
 //    line, so two runs with the same flags are directly comparable frame for frame. The flags exist to isolate
 //    ReSTIR behaviour (reuse paths, denoiser, exposure) one variable at a time:
 //
-//        --scene <file.gltf|glb|shaderball|showroom|drop>   (default: Content/Scenes/CornellBox.gltf)
+//        --scene <file.gltf|glb|spheres|cornell|shaderball|showroom|drop>   (default: spheres)
 //        --scale <float>            uniform scene scale (default 1)
 //        --width <px> --height <px> window size (default 1280x720)
 //        --tier <auto|software|rayquery|pipeline>   traversal backend request (default auto)
@@ -24,7 +24,10 @@
 //
 //    showroom — the furnished level, exported once from ShowroomStructure then imported like any other
 //    drop     — the physics level (D4): showroom + 12 rigid bodies (needs a Jolt-capable build)
-//    default  CornellBox.gltf — regenerated from RayTracingSolver when missing, so the reference image is
+//    spheres  SkySpheres.gltf — THE DEFAULT. Three matte spheres on open ground under the sky, no luminaire:
+//             every photon comes from the sun and the atmosphere, so a broken celestial path renders black
+//             rather than being covered for by a fill light. Same scene as the images in Renders/.
+//    cornell  CornellBox.gltf — regenerated from RayTracingSolver when missing, so the reference image is
 //             unchanged; the CPU solver stays only as that generator.
 //    Sponza   Content/Scenes/Sponza/Sponza.gltf (fetched by the build script, not committed).
 
@@ -42,6 +45,7 @@
 #include "FlyThroughSolver.h"
 #include "RayTracingSolver.h"
 #include "../../../Engine/ContentInterchange/ShaderBallStructure.h"
+#include "../../../Engine/ContentInterchange/SkySpheresStructure.h"
 #include "ShowroomStructure.h"
 #include "InstanceMotionSequence.h"
 #include "PhysicsInstanceSequence.h"
@@ -60,7 +64,7 @@ namespace {
 void PrintUsage(const char* Program) noexcept
 {
     std::cout << "Usage: " << Program << " [options]\n"
-              << "  --scene <path|shaderball|showroom|drop>   level to render\n"
+              << "  --scene <path|spheres|cornell|shaderball|showroom|drop>   level to render\n"
               << "  --scale <float>            uniform scene scale\n"
               << "  --width <px> --height <px> window size\n"
               << "  --tier <auto|software|rayquery|pipeline>\n"
@@ -91,7 +95,11 @@ int main(int argc, char** argv)
     //    on instance ordinals without either having to inspect the other.
     constexpr uint32_t kDropBodyCount = 12u;
 
-    std::string ScenePath  = "Projects/Project-Zero/Content/Scenes/CornellBox.gltf";
+    // 🔴 THE DEFAULT IS NOW THE OUTDOOR LEVEL, NOT THE CORNELL BOX.
+    //    A sealed room is the worst possible scene for a sky: no sun, no horizon, no directional shadows, no
+    //    sky-lit ambient. `--scene cornell` still builds the identical box for the twelve harnesses that use it
+    //    as a bit-identity reference — the box is untouched, it is simply no longer what you get by default.
+    std::string ScenePath  = "Projects/Project-Zero/Content/Scenes/SkySpheres.gltf";
     float       SceneScale = 1.0f;
     uint32_t    WindowWidth = 1280u, WindowHeight = 720u;
     Frontier::RayTracingRequestCategory TierRequest = Frontier::RayTracingRequestCategory::Auto;
@@ -186,6 +194,8 @@ int main(int argc, char** argv)
     WindowHeight = std::max(1u, WindowHeight);
     Candidates   = std::max(1u, Candidates);
     RenderScale  = std::clamp(RenderScale, 0.1f, 1.0f);
+    if (ScenePath == "spheres")   ScenePath = "Projects/Project-Zero/Content/Scenes/SkySpheres.gltf";     // the outdoor default
+    if (ScenePath == "cornell")   ScenePath = "Projects/Project-Zero/Content/Scenes/CornellBox.gltf";     // the sealed-room reference
     if (ScenePath == "shaderball") ScenePath = "Projects/Project-Zero/Content/Scenes/ShaderBall.gltf";   // R4b material test level
     if (ScenePath == "showroom")   ScenePath = "Projects/Project-Zero/Content/Scenes/Showroom.gltf";     // furnished level
     bool DropScene = false;
@@ -255,6 +265,16 @@ int main(int argc, char** argv)
                 std::cerr << "[Scene] Exported the Cornell box to " << ScenePath << "\n";
             else
                 std::cerr << "[Scene] Cornell export failed: " << Error << "\n";
+        }
+
+        const bool IsSkySpheres = ScenePath.find("SkySpheres.gltf") != std::string::npos;
+        if (IsSkySpheres && !std::filesystem::exists(ScenePath, FsError))
+        {
+            std::filesystem::create_directories(std::filesystem::path(ScenePath).parent_path(), FsError);
+            std::string Error;
+            Frontier::SkySpheresStructure Spheres; Spheres.Construct();
+            if (Spheres.Export(ScenePath, &Error)) std::cerr << "[Scene] Exported the sky-spheres level to " << ScenePath << "\n";
+            else                                   std::cerr << "[Scene] Sky-spheres export failed: " << Error << "\n";
         }
 
         const bool IsShaderBall = ScenePath.find("ShaderBall.gltf") != std::string::npos;

@@ -38,6 +38,7 @@ Run CheckSkyIntegration
 Run CheckSunReservoir
 Run CheckCelestialExposure
 Run CheckShowcaseTracksShader
+Run CheckSkySpheresScene
 Run CheckSpatialTapJitter
 Run CheckTemporalReprojection
 Run CheckAtrousDenoise

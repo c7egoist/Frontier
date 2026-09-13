@@ -225,6 +225,44 @@ P9 · Performance pass.                                                         
 • Commit working states on this branch only; never switch branches.
 
 
+## DEFERRED — user-reported visual gaps (2026-09-13)
+
+The user reviewed `Renders/` and judged the result "believable", but named three things that are not yet
+convincing. These are NOT done and must not be quietly dropped. Each carries what is already known about the
+cause, so whoever picks it up does not start from zero.
+
+- **D1 — the white line at the horizon at dawn is not visible in the renders.**
+  The physics IS there and is gated: `CheckAtmosphereScatter` measures the band peaking **3.70 deg above** the
+  horizon at 6.24x the horizon radiance, surviving the LUT at the same 3.70 deg. So this is a PRESENTATION
+  failure, not a missing feature. Suspects in order: (a) the ACES tone map compresses a ~6x linear difference
+  into nearly the same output where its curve is steepest; (b) the dawn exposure comes from the twilight EV
+  branch and may be crushing it; (c) the band is ~4 deg tall and the render is 240 px over a ~58 deg vertical
+  FOV, so it spans ~16 px. NEXT STEP: render dawn at high resolution with a LINEAR tone map and a false-colour
+  ramp, and confirm the band is in the pixels before touching any physics.
+
+- **D2 — the blue sky tint on lit surfaces is not reading properly.**
+  The bounce path does collect sky radiance (`SkyIntegrationTest` measures B/R 2.54 on an up-facing surface) and
+  the shadows ARE blue. But on SUNLIT faces the sun term dominates by 2-3 orders of magnitude, so the sky's
+  share is genuinely small — physically right, possibly under-selling reality where multiple scattering and
+  ground inter-reflection add more. NEXT STEP: inspect the multiple-scattering term in `AtmosphereScatter`; it
+  is one cheap approximation and may simply be too dark.
+
+- **D3 — the sun disc is not visible in the renders.**
+  The falsification gate proves the disc IS rendered (zeroing it changes the image) and `SkyIntegrationTest`
+  proves it is 0.53 deg with a sharp edge and limb darkening. But 0.53 deg over a 58 deg FOV at 240 px is
+  **~2 pixels** — correct and invisible. Real cameras show a large sun through lens bloom and sensor blooming,
+  neither of which exists here. NEXT STEP: this is likely a BLOOM problem, not a sun problem. Render at high
+  resolution where the disc spans ~20 px to confirm, then decide whether a bloom pass belongs in P9.
+
+**Scene change (DONE 2026-09-13):** the default level is now `--scene spheres` (`SkySpheresStructure`) — the
+same three matte spheres and open ground as `Renders/`, with **no luminaire at all**, so the sun and sky are the
+only lights and a broken celestial path renders black rather than being covered for by a fill light. 11 906
+triangles, 80x80 m ground so the skyline in shot is the atmosphere's horizon and not a plane edge. The Cornell
+box is untouched and still reachable via `--scene cornell`: twelve harnesses use it as a bit-identity reference,
+and deleting it to change a default would have been vandalism. Gated by `CheckSkySpheresScene.sh`, which asserts
+the new default AND that Cornell still works.
+
+
 Status log (append; newest last):
 - 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
   0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on
