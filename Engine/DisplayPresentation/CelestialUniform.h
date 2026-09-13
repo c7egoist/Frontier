@@ -14,7 +14,7 @@
 //    stops four bytes per vector being wasted. Every static_assert below is load-bearing.
 //
 //    🔴 WHY A UNIFORM BUFFER AND NOT THE PUSH BLOCK. The push block has 7 spare uints — 28 bytes. The celestial
-//    state below is 336 bytes (21 vec4s) and will not shrink. Pushing it is not an option; this was checked rather than
+//    state below is 352 bytes (22 vec4s) and will not shrink. Pushing it is not an option; this was checked rather than
 //    assumed. The buffer is written every frame from the CPU solve (F4: nothing is baked).
 
 #pragma once
@@ -36,7 +36,8 @@ struct alignas(16) CelestialUniform
 {
     // ── Sun ───────────────────────────────────────────────────────────────────────────────────────────────────
     float SunDirectionAndCosRadius[4];   // xyz = unit direction TO the sun, w = cos(angular radius)
-    float SunRadianceAndLimb[4];         // rgb = radiance at the top of the atmosphere, w = limb darkening
+    float SunRadianceAndLimb[4];         // rgb = DISC radiance [W/m2/sr], w = limb darkening
+    float SunIrradianceAndScale[4];      // rgb = top-of-atmosphere IRRADIANCE [W/m2], w = sky scale
 
     // ── Moon ──────────────────────────────────────────────────────────────────────────────────────────────────
     float MoonDirectionAndCosRadius[4];  // xyz = unit direction TO the moon, w = cos(angular radius)
@@ -84,16 +85,16 @@ inline constexpr uint32_t kCelestialFlagStars      = 1u << 5u;
 //                                                  LAYOUT GUARANTEES
 //------------------------------------------------------------------------------------------------------------------------
 
-static_assert(sizeof(CelestialUniform) == 336, "the shader's CelestialRecord must be resized to match");
+static_assert(sizeof(CelestialUniform) == 352, "the shader's CelestialRecord must be resized to match");
 static_assert(alignof(CelestialUniform) == 16, "std140 requires 16-byte alignment");
 static_assert(sizeof(CelestialUniform) % 16 == 0, "std140 pads the block to a multiple of 16");
 static_assert(offsetof(CelestialUniform, SunRadianceAndLimb) == 16, "sun radiance moved");
-static_assert(offsetof(CelestialUniform, MoonDirectionAndCosRadius) == 32, "moon block moved");
-static_assert(offsetof(CelestialUniform, RayleighScatteringAndHeight) == 64, "atmosphere block moved");
-static_assert(offsetof(CelestialUniform, CloudLayer) == 144, "cloud block moved");
-static_assert(offsetof(CelestialUniform, LocalCloudCentreAndDensity) == 224, "local volume block moved");
-static_assert(offsetof(CelestialUniform, StarsAndRotation) == 288, "night sky block moved");
-static_assert(offsetof(CelestialUniform, ExposureAndFlags) == 304, "exposure moved");
+static_assert(offsetof(CelestialUniform, MoonDirectionAndCosRadius) == 48, "moon block moved");
+static_assert(offsetof(CelestialUniform, RayleighScatteringAndHeight) == 80, "atmosphere block moved");
+static_assert(offsetof(CelestialUniform, CloudLayer) == 160, "cloud block moved");
+static_assert(offsetof(CelestialUniform, LocalCloudCentreAndDensity) == 240, "local volume block moved");
+static_assert(offsetof(CelestialUniform, StarsAndRotation) == 304, "night sky block moved");
+static_assert(offsetof(CelestialUniform, ExposureAndFlags) == 320, "exposure moved");
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                              BLACK-BODY COLOUR
@@ -163,8 +164,33 @@ inline void PackCelestialUniform(
 
     float SunTint[3];
     BlackBodyLinearRgb(Settings.Sun.TemperatureKelvin, SunTint);
-    for (int C = 0; C < 3; ++C) Out.SunRadianceAndLimb[C] = SunTint[C] * Settings.Sun.Intensity;
+
+    // 🔴 RADIANCE AND IRRADIANCE ARE NOT THE SAME QUANTITY, AND CONFLATING THEM WAS A REAL BUG HERE.
+    //
+    //    The scattering integral is written for a top-of-atmosphere solar IRRADIANCE of 1, so everything it
+    //    returns is in units of "per unit solar irradiance". The sun's disc, however, is drawn with a RADIANCE.
+    //    The two are related by the disc's solid angle:  irradiance = radiance x solidAngle.
+    //
+    //    The first version used `Intensity` directly as the disc radiance while the sky used an implicit 1.0.
+    //    Measured, that made the direct sun 1377x the zenith sky at 50 degrees elevation, where the true ratio is
+    //    nearer 100-200x — which is exactly why the first scene render came out with a blown-white ground under
+    //    a correctly-exposed sky. The sun was, in effect, being quoted in different units from its own sky.
+    //
+    //    Fixed by deriving both from one number. `Intensity` is the top-of-atmosphere irradiance; the disc
+    //    radiance is that divided by the solid angle it covers, so a ray that lands on the disc and a surface
+    //    that integrates the whole sun agree by construction — and changing the sun's ANGULAR SIZE now correctly
+    //    keeps its total power constant instead of silently brightening the scene.
+    const float SunAngularRadiusSquared = SunAngularRadius * SunAngularRadius;
+    const float SunSolidAngle = 3.14159265358979f * SunAngularRadiusSquared;   // [sr] small-angle disc
+    const float DiscRadianceScale = Settings.Sun.Intensity / (SunSolidAngle > 1e-12f ? SunSolidAngle : 1e-12f);
+
+    for (int C = 0; C < 3; ++C) Out.SunRadianceAndLimb[C] = SunTint[C] * DiscRadianceScale;
     Out.SunRadianceAndLimb[3] = Settings.Sun.LimbDarkening;
+
+    // The same light, as the irradiance the atmosphere and the surfaces are driven by. `w` scales the sky, so
+    //    turning the sun up brightens the sky it lights rather than only the dot of the disc.
+    for (int C = 0; C < 3; ++C) Out.SunIrradianceAndScale[C] = SunTint[C] * Settings.Sun.Intensity;
+    Out.SunIrradianceAndScale[3] = Settings.Sun.Intensity;
 
     // ── Moon ──────────────────────────────────────────────────────────────────────────────────────────────────
     const float MoonAngularRadius = Settings.Moon.AngularDiameterDegrees * 0.5f * static_cast<float>(kDegreesToRadians);
@@ -176,8 +202,13 @@ inline void PackCelestialUniform(
     // The moon is sunlight, reflected: its radiance is the sun's scaled by the lunar albedo and the brightness
     //    slider. Deriving it rather than typing a number is what makes a daytime moon come out right for free —
     //    it is lit by the same sun, so it stays a plausible grey against a bright sky instead of a glowing decal.
-    const float MoonScale = Settings.Moon.Albedo * Settings.Moon.Brightness;
-    for (int C = 0; C < 3; ++C) Out.MoonRadianceAndEarthshine[C] = Out.SunRadianceAndLimb[C] * MoonScale;
+    //    Its radiance follows the same rule: the moon reflects a fraction of the sun's irradiance, spread over
+    //    its own solid angle. Deriving it from the irradiance (not from the sun's disc radiance) keeps it correct
+    //    when the two bodies are given different angular sizes.
+    const float MoonSolidAngle = 3.14159265358979f * MoonAngularRadius * MoonAngularRadius;
+    const float MoonScale = Settings.Moon.Albedo * Settings.Moon.Brightness
+                          / (MoonSolidAngle > 1e-12f ? MoonSolidAngle : 1e-12f);
+    for (int C = 0; C < 3; ++C) Out.MoonRadianceAndEarthshine[C] = Out.SunIrradianceAndScale[C] * MoonScale;
     Out.MoonRadianceAndEarthshine[3] = Settings.Moon.Earthshine;
 
     // ── Atmosphere ────────────────────────────────────────────────────────────────────────────────────────────

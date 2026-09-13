@@ -119,14 +119,15 @@ layout(rgba16f, binding = 18) uniform image2D HistorySurfaceImage;   // R7a: xyz
 layout(rgba32f, binding = 19) uniform image2D MomentImage;           // R7: x = E[luma], y = E[luma²], reprojected with the mean
 layout(rgba32f, binding = 20) uniform writeonly image2D DenoiseImage; // R7: xyz = linear radiance, w = variance — the à-trous input
 // ── P1: the celestial record ───────────────────────────────────────────────────────────────────────────────────────
-// Mirrors CelestialUniform (Engine/DisplayPresentation/CelestialUniform.h) field for field, 21 vec4s = 336 bytes.
+// Mirrors CelestialUniform (Engine/DisplayPresentation/CelestialUniform.h) field for field, 22 vec4s = 352 bytes.
 // ⚠️ A readonly SSBO rather than a uniform block, deliberately: std430 lays vec4s out identically to the C++ struct,
 //    whereas std140 would need padding rules re-derived here, and the descriptor pool's storage-buffer count is the
 //    one already sized for data bindings. Read-only, written once per frame by the CPU solve — nothing is baked (F4).
 struct CelestialRecord
 {
     vec4 SunDirectionAndCosRadius;      // xyz dir TO sun, w cos(angular radius)
-    vec4 SunRadianceAndLimb;            // rgb radiance, w limb darkening
+    vec4 SunRadianceAndLimb;            // rgb DISC radiance [W/m2/sr], w limb darkening
+    vec4 SunIrradianceAndScale;         // rgb top-of-atmosphere IRRADIANCE [W/m2], w sky scale
     vec4 MoonDirectionAndCosRadius;
     vec4 MoonRadianceAndEarthshine;
     vec4 RayleighScatteringAndHeight;   // rgb 1/m, w scale height [m]
@@ -357,7 +358,14 @@ ShadingRecord ResolveMaterial(GpuMaterial mat, GpuInstance instance, uint primit
 // P2: the physical sky. Shared verbatim with Scratchpad/AtmosphereScatterTest.cpp, which compiles this same file
 //    as C++ and measures the dawn band, the sunset chroma and the ozone-blue zenith against thresholds. One
 //    implementation, two compilers — so the proof cannot drift away from what ships.
+#include "RayGeneration.slang"
 #include "AtmosphereScatter.slang"
+
+// Real-time step budget. Measured against a 256/32 reference across dawn, sunset and noon: with the warped step
+//    distribution, 16/8 lands at 2.12% mean error — better than 32 UNIFORM steps (2.435%) at half the cost. The
+//    table is in AtmosphereScatter.slang at the march.
+#define kSkyViewSteps 16
+#define kSkySunSteps  8
 
 // Unpack the celestial record into the scattering parameters. Kept next to the include so the mapping from the
 //    CPU-side struct to the physics is one short function that can be read in one go.
@@ -374,6 +382,105 @@ AtmosphereParameters CelestialAtmosphereOf(CelestialRecord sky)
     atmosphere.PlanetRadius        = sky.GroundAlbedoAndPlanetRadius.w;
     atmosphere.AtmosphereHeight    = sky.AtmosphereHeightAndFog.x;
     return atmosphere;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                          P2b: THE SKY AS SEEN BY A RAY
+//------------------------------------------------------------------------------------------------------------------------
+
+// Where the observer is, in planet-centred coordinates. The world is a local tangent frame with z up, so the
+//    camera sits atop the planet radius; +z in world is "up" is "away from the centre", which is what makes the
+//    ENU directions from the CPU solver line up with the sphere geometry here without a change of basis.
+vec3 CelestialObserver(CelestialRecord sky, vec3 worldPosition)
+{
+    float planetRadius = sky.GroundAlbedoAndPlanetRadius.w;
+    return vec3(worldPosition.x, worldPosition.y, worldPosition.z + planetRadius);
+}
+
+// 🔴 THE SUN DISC, COMPOSITED ANALYTICALLY — F1, the "weird shapes" rule.
+//
+//    The disc is 0.53 degrees across. The sky-view LUT is 192x192 over the whole sphere with a non-linear
+//    latitude warp, so a texel near the horizon subtends far more than that: rasterising the disc into the table
+//    turns a crisp circle into a smeared polygon that swims as the sun moves, which is precisely the "the sky
+//    gives weird shapes" report. So the LUT holds sky ONLY, and the disc is added here, per-pixel, at full
+//    resolution, as an exact analytic test against the true direction.
+//
+//    Limb darkening is the real solar profile: the edge of the disc is dimmer than the centre because the line of
+//    sight there grazes cooler, higher photosphere. Without it the sun reads as a flat sticker.
+vec3 CelestialSunDisc(CelestialRecord sky, vec3 rayDirection, vec3 transmittance)
+{
+    vec3  sunDirection = sky.SunDirectionAndCosRadius.xyz;
+    float cosRadius    = sky.SunDirectionAndCosRadius.w;
+    float cosAngle     = dot(rayDirection, sunDirection);
+
+    if (cosAngle < cosRadius) return vec3(0.0);
+
+    // Normalised radius across the disc, 0 at centre and 1 at the limb.
+    float normalised = sqrt(max(0.0, 1.0 - (1.0 - cosAngle) / max(1.0 - cosRadius, 1e-9)));
+    float limb       = 1.0 - sky.SunRadianceAndLimb.w * (1.0 - normalised);
+
+    return sky.SunRadianceAndLimb.xyz * limb * transmittance;
+}
+
+// The moon: the same analytic composite, but lit by the sun rather than self-luminous, so it carries a phase.
+//    ⚠️ NO DAY/NIGHT SWITCH. A daytime moon is real and the brief asks for it; it disappears at noon purely
+//    because the sky's own radiance is orders of magnitude above it, which the physical numbers already produce.
+vec3 CelestialMoonDisc(CelestialRecord sky, vec3 rayDirection, vec3 transmittance)
+{
+    if ((uint(sky.ExposureAndFlags.w) & kCelestialFlagMoon) == 0u) return vec3(0.0);
+
+    vec3  moonDirection = sky.MoonDirectionAndCosRadius.xyz;
+    float cosRadius     = sky.MoonDirectionAndCosRadius.w;
+    float cosAngle      = dot(rayDirection, moonDirection);
+
+    if (cosAngle < cosRadius) return vec3(0.0);
+
+    // Position across the disc, as a unit vector on the lunar sphere facing us. The phase terminator is then just
+    //    the dot product with the sun — so the crescent always points at the sun, because it IS the sun's lighting
+    //    rather than a hand-animated mask that can drift out of step with the sky.
+    // Build a local frame on the disc to find which way this point faces.
+    vec3 right = normalize(cross(vec3(0.0, 0.0, 1.0), moonDirection));
+    vec3 up    = cross(moonDirection, right);
+    vec3 offset = rayDirection - moonDirection * cosAngle;
+    vec2 disc   = vec2(dot(offset, right), dot(offset, up));
+    float radius = length(disc) / max(sqrt(max(1.0 - cosRadius * cosRadius, 1e-9)), 1e-9);
+    vec3 surfaceNormal = normalize(moonDirection * sqrt(max(0.0, 1.0 - radius * radius))
+                                 + right * disc.x * 60.0 + up * disc.y * 60.0);
+
+    float lit = max(dot(surfaceNormal, sky.SunDirectionAndCosRadius.xyz), 0.0);
+
+    // Earthshine keeps the unlit limb faintly visible, as it is in life.
+    float shade = lit + sky.MoonRadianceAndEarthshine.w;
+
+    return sky.MoonRadianceAndEarthshine.xyz * shade * transmittance;
+}
+
+// The whole sky along a ray: scattering, plus the discs composited on top. `includeDiscs` is false for the
+//    reservoir's light-sampling path, where the sun is sampled as an explicit light rather than found by chance.
+vec3 CelestialSky(CelestialRecord sky, vec3 origin, vec3 rayDirection, bool includeDiscs)
+{
+    if ((uint(sky.ExposureAndFlags.w) & kCelestialFlagEnabled) == 0u) return vec3(0.0);
+
+    AtmosphereParameters atmosphere = CelestialAtmosphereOf(sky);
+    vec3 observer = CelestialObserver(sky, origin);
+
+    vec3 transmittance;
+    vec3 radiance = AtmosphereScatter(atmosphere, observer, rayDirection,
+                                      sky.SunDirectionAndCosRadius.xyz,
+                                      kSkyViewSteps, kSkySunSteps, transmittance);
+
+    // ⚠️ The integral is written for unit solar irradiance, so the sun's actual output scales it here — and it
+    //    must be the SAME number the disc is derived from, or the sky and the sun it came from drift apart in
+    //    brightness as the Intensity slider moves.
+    radiance *= sky.SunIrradianceAndScale.xyz;
+
+    if (includeDiscs)
+    {
+        radiance += CelestialSunDisc(sky, rayDirection, transmittance);
+        radiance += CelestialMoonDisc(sky, rayDirection, transmittance);
+    }
+
+    return radiance;
 }
 const uint kVisibilityInvalid = 0xFFFFFFFFu;
 uint VisibilityInstance(uint Packed)  { return (Packed >> 14) & 0x3FFFFu; }
@@ -840,11 +947,30 @@ void main()
     vec4 surface    = imageLoad(SurfaceImage, ivec2(pixel));
     uint visibility = floatBitsToUint(surface.w);
 
-    // The ray-miss path. A miss carries no direction (the visibility raster only stores hits) and there is
-    //    no environment light, so it resolves to black.
+    // The ray-miss path: the camera ray left the scene, so it sees the sky.
+    //
+    //    ⚠️ THE MISS CARRIES NO DIRECTION. The visibility raster only records hits, so the ray has to be rebuilt
+    //    from the pixel and the camera basis. It must match the raster's own mapping exactly or the sky will be
+    //    subtly sheared against the geometry — the horizon would not meet the ground at the same place.
     if (visibility == kVisibilityInvalid)
     {
-        Resolve(pixel, vec3(0.0));
+        // ⚠️ USE THE SHARED MAPPING, NEVER A LOCAL COPY. RayGeneration.slang is the single statement of how a
+        //    pixel becomes a world ray, including the Vulkan y-down flip. A hand-rolled copy here would be one
+        //    sign error away from a sky that is vertically mirrored against the geometry, and the two would
+        //    disagree only on the miss path — the hardest kind of bug to see and the easiest to introduce.
+        CameraBasis basis;
+        basis.Origin     = CameraOrigin;
+        basis.Forward    = CameraForward;
+        basis.Right      = CameraRight;
+        basis.Up         = CameraUp;
+        basis.TanHalfFov = FieldOfViewTanHalf;
+        basis.Aspect     = AspectRatio;
+
+        vec3 rayDirection = GeneratePrimaryDirection(basis, pixel, vec2(0.5),
+                                                     uvec2(ViewportWidth, ViewportHeight));
+
+        // Discs included: this is what the eye sees directly, so the sun and moon belong in it.
+        Resolve(pixel, CelestialSky(Celestial[0], CameraOrigin, rayDirection, true));
         return;
     }
 
@@ -1100,8 +1226,20 @@ void main()
 
             Hit bounceHit = TraceScene(bounceRay);
 
-            // A bounce ray that escapes the scene contributes nothing: there is no environment light.
-            if (bounceHit.valid && dot(bounceDir, hitNormal) > 0.0)
+            // 🔴 A BOUNCE RAY THAT ESCAPES NOW COLLECTS THE SKY. This is the line that makes scene objects
+            //    actually RECEIVE the celestial light rather than merely stand in front of a pretty backdrop —
+            //    the explicit requirement. Without it a sunlit courtyard renders black-shadowed, because the only
+            //    light reaching an upward-facing surface from the open sky would be nothing at all.
+            //
+            //    Discs are EXCLUDED here. The sun is sampled as an explicit light in the reservoir (P3), so
+            //    letting a random bounce also hit the disc would double-count it — and because the disc is tiny
+            //    and enormously bright, the rare hit that did occur would arrive as a fireflies-grade spike.
+            if (!bounceHit.valid && dot(bounceDir, hitNormal) > 0.0)
+            {
+                vec3 skyRadiance = CelestialSky(Celestial[0], hitPos, bounceDir, false);
+                accumulatedRadiance += throughput * skyRadiance;
+            }
+            else if (bounceHit.valid && dot(bounceDir, hitNormal) > 0.0)
             {
                 GpuMaterial   bMat  = Materials[bounceHit.matIdx];
                 // D2: TraceScene already resolved the instance — reuse it rather than repeating the search here.

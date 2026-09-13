@@ -34,6 +34,7 @@ echo "=== ReSTIR (R6 - R7) ==="
 Run CheckViewpointStability
 Run CheckCelestialSolver
 Run CheckAtmosphereScatter
+Run CheckSkyIntegration
 Run CheckSpatialTapJitter
 Run CheckTemporalReprojection
 Run CheckAtrousDenoise

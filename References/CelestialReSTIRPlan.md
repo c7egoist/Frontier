@@ -249,6 +249,40 @@ Status log (append; newest last):
   Jolt) were missing third-party trees, not regressions -- verified by running them against the pre-P0 stash --
   and are now populated out-of-band; .gitignore records that ExternalPackages/ is not carried on this branch.
   User confirmed: TOML + CLI for the slider surface (P8), stability before sky. NEXT: P1.
+- 2026-09-13: **P2b DONE — the sky is on screen, and scene objects receive it.**
+  Wired both escape paths in `ReSTIRViewport.slang`. Primary miss now reconstructs the ray via the SHARED
+  `GeneratePrimaryDirection` (RayGeneration.slang) — not a local copy, because a hand-rolled version is one sign
+  error from a vertically mirrored sky that shows ONLY on the miss path. Bounce-escape now returns
+  `CelestialSky(..., includeDiscs=false)` into `accumulatedRadiance`: this is the line that satisfies "scene
+  objects actually receive this light". Discs excluded there because the sun becomes an explicit reservoir light
+  in P3 — including it would double-count AND deliver fireflies, being tiny and enormously bright.
+  SPIR-V **188 680 -> 211 956 B**; the gate now FAILS if the module drops below 200 kB, since dead-code stripping
+  would silently prove the sky is unreachable while every other check still passed.
+  **Step budget, measured not guessed.** Uniform stepping converged badly (32 steps still 2.44% off). Added a
+  warped distribution t = (i/n)^kStepWarp:
+      8 steps: uniform 18.413% | k=1.5 6.699% | k=2.0 4.376%
+     16 steps: uniform  8.142% | k=1.5 2.120% | k=2.0 1.680%
+  k=2.0 has a lower mean but a much worse tail (42.5% vs 21.4% worst at 16) because it starves the far field —
+  which is where the twilight band lives. **k=1.5 chosen; 16 warped steps beat 32 uniform at half the cost.**
+  Production runs kSkyViewSteps 16 / kSkySunSteps 8, verified at **2.164% mean vs a 256/32 reference**.
+  🔴 **A REAL PHYSICS BUG, FOUND BY RENDERING.** The first scene render had a blown-white ground under a correct
+  sky. Cause: the scattering integral assumes top-of-atmosphere solar irradiance = 1, but `Sun.Intensity` was
+  being used directly as the DISC RADIANCE. Radiance and irradiance differ by the disc's solid angle
+  (6.72e-5 sr). Measured consequence: direct sun was **1377x the zenith sky at 50 deg elevation**, against a true
+  ratio nearer 100-200x. Fixed by deriving both from one number — Intensity IS the irradiance, disc radiance is
+  irradiance/solidAngle, and the sky is scaled by the same irradiance. Added `SunIrradianceAndScale` (record
+  336 -> **352 B**, 22 vec4s). Now energy-conserving: the disc integrates back to its own irradiance to **0.006%**
+  at 0.25/0.53/1.5 deg, and changing the sun's angular SIZE no longer silently brightens the scene.
+  **Two test bugs also caught and fixed honestly** (the code was right both times): (i) asserted the frame is
+  brighter towards the bottom — false, with a 27.5 deg half-FOV the bottom is BELOW the horizon looking at
+  shadowed ground; the horizon is a ~50x cliff at exactly 0 deg, so the test now finds the horizon row and checks
+  it is the brightest. (ii) Asserted an up-facing surface receives more than a sideways one — false: measured
+  up 0.017, side 0.050, down 0.078, because a sideways face sees the bright horizon band plus lit ground. Now
+  checks all orientations are non-zero and that the zenith-facing sample is the BLUEST (it alone sees no ground).
+  Gates: `Scratchpad/SkyIntegrationTest.cpp` (25 checks) + `Scratchpad/CheckSkyIntegration.sh`, registered.
+  Visual: `Scratchpad/SkyScenePreview.png` (4 elevations, sky + sky-lit ground). **ALL 19 SUITES GREEN.**
+  NEXT: P3 — the sun as an explicit ReSTIR reservoir light (F2), with shadow rays.
+
 - 2026-09-13: **P2a DONE — the scattering integral, and the LUT question settled with measurements.**
   The user challenged the LUT plan directly: their LUT gave no white line at dawn, no vibrant sunrise/sunset, no
   vivid zenith, and they asked whether an analytic sky would be more realistic. Researched, then MEASURED.
