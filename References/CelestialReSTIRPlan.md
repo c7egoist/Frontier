@@ -247,12 +247,24 @@ cause, so whoever picks it up does not start from zero.
   ground inter-reflection add more. NEXT STEP: inspect the multiple-scattering term in `AtmosphereScatter`; it
   is one cheap approximation and may simply be too dark.
 
-- **D3 — the sun disc is not visible in the renders.**
-  The falsification gate proves the disc IS rendered (zeroing it changes the image) and `SkyIntegrationTest`
-  proves it is 0.53 deg with a sharp edge and limb darkening. But 0.53 deg over a 58 deg FOV at 240 px is
-  **~2 pixels** — correct and invisible. Real cameras show a large sun through lens bloom and sensor blooming,
-  neither of which exists here. NEXT STEP: this is likely a BLOOM problem, not a sun problem. Render at high
-  resolution where the disc spans ~20 px to confirm, then decide whether a bloom pass belongs in P9.
+- **D3 — the sun disc is not visible in the renders. ✅ DIAGNOSED (fix still deferred).**
+  Two independent causes, both measured, neither of them a bug in the disc:
+  1. **Size.** 0.53 deg over a ~58 deg vertical FOV at 240 px is **2.2 px**. At the 540 px heroes it is 4.9 px.
+     It is physically the right size and visually nothing. Real photographs show a big sun because of lens
+     bloom and sensor blooming, not because the disc is large.
+  2. **The tone map eats it.** Measured at 17:00 along a ray sweeping off the sun:
+         0.00 deg  luma 1.659e5    ACES out 1.03
+         0.26 deg  luma 1.060e5    ACES out 1.03      <- still inside the disc
+         0.27 deg  luma 4.384      ACES out 1.01      <- just outside; a 24 000x CLIFF
+         5.00 deg  luma 3.791      ACES out 1.01
+     The disc is **24 000x** its surrounding sky and the edge is razor sharp at exactly 0.265 deg — but ACES maps
+     everything above ~0.3 linear to ~1.0, so the disc AND the sky around it both clip to pure white.
+  **Proved visually:** `Renders/18_sun_disc_zoom_log_scale.png` — same scene, same shader, 8 deg FOV, with the
+  tone map swapped for a diagnostic log10 ramp. The disc appears as a clean sharp-edged circle. With ACES the
+  identical frame is uniformly white (`Renders/18_sun_disc_zoom_8deg_fov.png` before it was replaced).
+  **So the sun is correct and the DISPLAY PATH is the problem.** The fix is a bloom pass — which is the honest
+  way to make a 2 px, 24 000x-contrast object read on screen, and is exactly what a real lens does. Scheduled
+  for P9 (perf/present) rather than bodged now by inflating the disc, which would be a lie about its size.
 
 **Scene change (DONE 2026-09-13):** the default level is now `--scene spheres` (`SkySpheresStructure`) — the
 same three matte spheres and open ground as `Renders/`, with **no luminaire at all**, so the sun and sky are the
