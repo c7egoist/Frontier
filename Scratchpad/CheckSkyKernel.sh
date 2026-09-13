@@ -149,21 +149,21 @@ echo "[SkyKernel] the kernel's shadow, steps and whites match the march"
 #    uniShadow's linear taps for the boxes — and no view step may leak into either body (the CPU march passes
 #    none). The midpoint-grid prohibition stays: a full-interval march strides whole clouds at grazing and
 #    aliases into noise (the view march keeps its grid — the resolved-local-taps structure, asserted as one).
-sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q '(Top - Base) \* 0.12'
+sed -n '/float CloudShadowDepth/,/^}/p' "$Sky" | grep -q '(Top - Base) \* 0.12'
 Report $? "the layer shadow paces the thickness"
-sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'St \* float(I) \* float(I) \* 0.35'
+sed -n '/float CloudShadowDepth/,/^}/p' "$Sky" | grep -q 'St \* float(I) \* float(I) \* 0.35'
 Report $? "the layer taps grow quadratically"
-sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q ') \* D \* 0.8'
+sed -n '/float CloudShadowDepth/,/^}/p' "$Sky" | grep -q ') \* D \* 0.8'
 Report $? "the layer taps weigh d x .8"
-sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'Medium == 1u ? 0.25 : 0.5'
+sed -n '/float CloudShadowDepth/,/^}/p' "$Sky" | grep -q 'Medium == 1u ? 0.25 : 0.5'
 Report $? "the boxes pace the half-size (x.25 cloud, x.5 fog)"
-sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'I <= 4u; ++I)'
+sed -n '/float CloudShadowDepth/,/^}/p' "$Sky" | grep -q 'I <= 4u; ++I)'
 Report $? "the boxes march a fixed 4 taps"
-sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | grep -q 'I <= 5u; ++I)'
+sed -n '/float CloudShadowDepth/,/^}/p' "$Sky" | grep -q 'I <= 5u; ++I)'
 Report $? "the layer marches at most 5 taps"
-! sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | sed 's;//.*;;' | grep -q 'StepSize'
+! sed -n '/float CloudShadowDepth/,/^}/p' "$Sky" | sed 's;//.*;;' | grep -q 'StepSize'
 Report $? "no view step leaks into the shadow"
-! sed -n '/float CloudShadowMedium/,/^}/p' "$Sky" | sed 's;//.*;;' | grep -q '(float(I) + 0.5)'
+! sed -n '/float CloudShadowDepth/,/^}/p' "$Sky" | sed 's;//.*;;' | grep -q '(float(I) + 0.5)'
 Report $? "no full-interval midpoint grid inside the shadow march"
 printf '%s' "$SkyCode" | grep -q 'kCloudExtinctionScale = 0.06;'
 Report $? "cloud extinction is the reference's .06"
@@ -179,6 +179,41 @@ printf '%s' "$SkyCode" | grep -q 'max(Budget \* 4u, 4u)'
 Report $? "the layer's step cap is the CPU march's 4x budget"
 printf '%s' "$SkyCode" | grep -q 'vec3(0.88)'
 Report $? "the fog keeps the CPU march's fixed grey"
+
+echo
+echo "[SkyKernel] the kernel's light loop is the reference's"
+# P2.4c: cloudMarch/marchLocal's light — the .02 weather gain, the dual lobe x4pi, multi-scatter in place
+#    of the shadow transmittance, Beer powder, height-in-slab ambient, the Sc/sigT accumulation. (The shadow
+#    re-scope above — CloudShadowMedium to CloudShadowDepth — is P2.4c's too: the light loop reads each
+#    medium's own od, so the quadrature returns depth and the transmittance is the wrapper's exponential.)
+printf '%s' "$SkyCode" | grep -q 'vec3 SunL = SunRadiance \* 0.02;'
+Report $? "sunlight enters the weather with the panel's .02 gain"
+printf '%s' "$SkyCode" | grep -q 'CloudDualLobe(CosSun, SkyCloudScatter\.x, SkyCloudScatter\.y, SkyCloudScatter\.z)'
+Report $? "the clouds read the dual lobe from the global scatter row"
+printf '%s' "$SkyCode" | grep -q 'CloudSingleLobe(CosSun, SkyLocalFogParams\.w)'
+Report $? "the fog keeps its own g in a single lobe"
+printf '%s' "$SkyCode" | grep -q 'CloudMultiScatterLayer(Own, SkyCloudScatter\.w)'
+Report $? "the layer's octaves read its own depth with absorption"
+printf '%s' "$SkyCode" | grep -q 'CloudMultiScatterLocal(exp(-Own))'
+Report $? "the local closed form reads its own depth in T-space"
+printf '%s' "$SkyCode" | grep -q 'CloudPowder(CosSun, Extinction, SkyCloudDetail\.y)'
+Report $? "powder reads the view slice and the detail row"
+printf '%s' "$SkyCode" | grep -q 'mix(OwnRaw, Density \* (LayerTop - LayerBase) \* 0\.3, Lod)'
+Report $? "far from the slab the shadow mixes to rho*thick*.3"
+printf '%s' "$SkyCode" | grep -q 'float OthersT = exp(-((D0 + D1 + D2) - OwnRaw));'
+Report $? "the others' transmittance crosses the media"
+printf '%s' "$SkyCode" | grep -q 'float SunT = Medium == 2u ? CombinedT : OthersT;'
+Report $? "clouds take OthersT, the fog the combined shadow"
+printf '%s' "$SkyCode" | grep -q '(0\.35 + 0\.65 \* Hn)'
+Report $? "the ambient lifts by height-in-slab"
+printf '%s' "$SkyCode" | grep -q 'Ms += B \* exp(-Od \* A \* (1\.0 + Absorb));'
+Report $? "the octaves attenuate inside the exponent"
+printf '%s' "$SkyCode" | grep -q 'A \*= 0\.5; B \*= 0\.55;'
+Report $? "halving extinction, .55 contribution"
+printf '%s' "$SkyCode" | grep -q 'T + 0\.55 \* Root + 0\.3 \* sqrt(Root)'
+Report $? "the closed form sums T, root and fourth-root"
+printf '%s' "$SkyCode" | grep -q '1\.0 - 0\.5 \* clamp(CosTheta, 0\.0, 1\.0)'
+Report $? "powder gates on the sun-ahead cosine"
 
 echo
 echo "[SkyKernel] the kernel's densities twin the reference field"

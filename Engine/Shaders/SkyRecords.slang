@@ -451,16 +451,20 @@ bool CloudBoxInterval(vec3 Origin, vec3 Direction, vec3 Centre, vec3 HalfSize, f
     return Far > Near;
 }
 
-float CloudShadowMedium(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3 Swirl)
+float CloudShadowDepth(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3 Swirl)
 {
-    // Twin of VolumetricMedia::ShadowMarch (P2.4b): the layer marches clLight's growing-spaced taps
-    //    (d = st*i²*.35 off st = thick*.12, weight d*.8, the tier's count, far taps coarse); the boxes
-    //    march uniShadow's linear taps (d = st*i*.5 off the widest half-size, weight st*.5, fixed 4).
-    //    No view step leaks in: the shadow paces each medium's own size, so one sun ray shades one way
-    //    whichever loop calls. A full-interval march was tried here first: at grazing its taps stride
-    //    whole clouds between samples and the shadow aliases into noise, while these local taps stay
-    //    inside the structure. The local cloud carries the layer's absorption in its weight (marchLocal
-    //    folds it into uniShadow); the layer's returns with the multi-scatter loop (P2.4c).
+    // Twin of VolumetricMedia::ShadowDepthSlab/ShadowDepthBox (P2.4b quadrature, P2.4c return): the
+    //    layer marches clLight's growing-spaced taps (d = st*i²*.35 off st = thick*.12, weight d*.8,
+    //    the tier's count, far taps coarse); the boxes march uniShadow's linear taps (d = st*i*.5 off
+    //    the widest half-size, weight st*.5, fixed 4). No view step leaks in: the shadow paces each
+    //    medium's own size, so one sun ray shades one way whichever loop calls. A full-interval march
+    //    was tried here first: at grazing its taps stride whole clouds between samples and the shadow
+    //    aliases into noise, while these local taps stay inside the structure. The local cloud carries
+    //    the layer's absorption in its weight (marchLocal folds it into uniShadow); the layer's returns
+    //    inside the multi-scatter exponent. Returns depth: the light loop's multi-scatter reads od past
+    //    4, so the old Depth>4 early-out is gone. A disabled medium reads 0.
+    uint Flag = Medium == 0u ? kCloudLayerFlag : (Medium == 1u ? kLocalCloudFlag : kLocalFogFlag);
+    if ((SkyControl.z & Flag) == 0u) return 0.0;
     float Time = SkyCloudClock.z;
     float Depth = 0.0;
     if (Medium == 0u)
@@ -468,14 +472,13 @@ float CloudShadowMedium(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec
         float Ceiling = max(SkyCloudShape.y, 0.0);
         float Base = clamp(SkyCloudLayer.x, 0.0, Ceiling);
         float Top = clamp(SkyCloudLayer.x + SkyCloudLayer.y, 0.0, Ceiling);
-        if (Top <= Base) return 1.0;
+        if (Top <= Base) return 0.0;
         float St = (Top - Base) * 0.12;
         for (uint I = 1u; I <= 5u; ++I)
         {
             if (I > Taps) break;
             float D = St * float(I) * float(I) * 0.35;
             Depth += CloudDensityAt(Origin + Direction * D, Time, I > 2u ? 1.0 : 0.0) * D * 0.8;
-            if (Depth > 4.0) break;
         }
     }
     else
@@ -488,10 +491,14 @@ float CloudShadowMedium(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec
         {
             float D = St * float(I) * 0.5;
             Depth += LocalDensityAt(Origin + Direction * D, Medium == 2u, Swirl, 1.0) * Weight;
-            if (Depth > 4.0) break;
         }
     }
-    return exp(-Depth);
+    return Depth;
+}
+
+float CloudShadowMedium(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3 Swirl)
+{
+    return exp(-CloudShadowDepth(Origin, Direction, Medium, Taps, Swirl));
 }
 
 float CloudSunTransmittance(vec3 Origin, vec3 Direction, vec3 Swirl)
@@ -512,6 +519,42 @@ float CloudHenyeyGreenstein(float CosTheta, float G)
     const float Pi = 3.14159265358979323846;
     float Denominator = max(1.0 + G * G - 2.0 * G * CosTheta, 1e-4);
     return (1.0 - G * G) / (4.0 * Pi * pow(Denominator, 1.5));
+}
+
+// Twin of VolumetricMedia::DualLobePhase (P2.4c, REF ph/phC) — the note lives there.
+float CloudDualLobe(float CosTheta, float G1, float G2, float Mix)
+{
+    float Forward = CloudHenyeyGreenstein(CosTheta, G1);
+    float Back = CloudHenyeyGreenstein(CosTheta, -G2);
+    return (Forward + (Back - Forward) * Mix) * 4.0 * 3.14159265358979323846;
+}
+
+// Twin of VolumetricMedia::SingleLobePhase (REF phF).
+float CloudSingleLobe(float CosTheta, float G)
+{
+    return CloudHenyeyGreenstein(CosTheta, G) * 4.0 * 3.14159265358979323846;
+}
+
+// Twin of VolumetricMedia::MultiScatterLayer (REF cloudMarch ms): b starts at 1, ms(0)=1.8525.
+float CloudMultiScatterLayer(float Od, float Absorb)
+{
+    float Ms = 0.0; float A = 1.0; float B = 1.0;
+    for (uint O = 0u; O < 3u; ++O) { Ms += B * exp(-Od * A * (1.0 + Absorb)); A *= 0.5; B *= 0.55; }
+    return Ms;
+}
+
+// Twin of VolumetricMedia::MultiScatterLocal(float Transmittance) (REF marchLocal ms): ms(1)=1.85.
+float CloudMultiScatterLocal(float T)
+{
+    float Root = sqrt(max(T, 0.0));
+    return T + 0.55 * Root + 0.3 * sqrt(Root);
+}
+
+// Twin of VolumetricMedia::PowderTerm (REF powder).
+float CloudPowder(float CosTheta, float ViewOd, float Strength)
+{
+    float Gate = 1.0 - 0.5 * clamp(CosTheta, 0.0, 1.0);
+    return 1.0 - Strength * exp(-ViewOd * 2.0) * Gate;
 }
 
 float CloudMarchJitter(vec3 Direction)
@@ -536,8 +579,11 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
     //    span takes the same steps on both paths, so a capped grazing ray shades identically in either.
     Count = min(Count, Medium == 0u ? max(Budget * 4u, 4u) : Budget);
     float Step = Span / float(Count);
-    float G = Medium == 0u ? SkyCloudShape.w : (Medium == 1u ? SkyLocalCloudParams.w : SkyLocalFogParams.w);
-    float Phase = CloudHenyeyGreenstein(dot(Direction, SunDirection), G);
+    float CosSun = dot(Direction, SunDirection);
+    // The lobes are the record's global scatter row (REF uCLG1/uCLG2/uCLMix): the local cloud reads the
+    //    layer's, like the CPU march; the fog keeps its own g in a single lobe. x4pi inside, like the panel.
+    float Phase = Medium == 2u ? CloudSingleLobe(CosSun, SkyLocalFogParams.w)
+                               : CloudDualLobe(CosSun, SkyCloudScatter.x, SkyCloudScatter.y, SkyCloudScatter.z);
     // The layer's white rides the record; the box keeps the CPU default white (the sheet exposes no local
     //    albedo, so the default is the only value both paths ever see); the fog keeps its fixed grey — the
     //    same three albedos VolumetricMedia::March shades with.
@@ -548,18 +594,42 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
     float Lod = Medium == 0u ? smoothstep(20000.0, 200000.0, Near) : 0.0;
     float Time = SkyCloudClock.z;
     float Jitter = Medium == 0u ? CloudMarchJitter(Direction) : 0.5;
+    // The light loop's constants (P2.4c, REF sunL/sunBase): the panel's .02 weather gain on the sun, the
+    //    tier's shadow taps, and the slab's altitudes for the height-in-slab hn and the lodFar mix.
+    uint Taps = max(SkyCloudControl.z, 1u);
+    float Ceiling = max(SkyCloudShape.y, 0.0);
+    float LayerBase = clamp(SkyCloudLayer.x, 0.0, Ceiling);
+    float LayerTop = clamp(SkyCloudLayer.x + SkyCloudLayer.y, 0.0, Ceiling);
+    vec3 SunL = SunRadiance * 0.02;
     for (uint I = 0u; I < Count; ++I)
     {
         float T = Near + (float(I) + Jitter) * Step;
         vec3 P = Origin + Direction * T;
         float Density = Medium == 0u ? CloudDensityAt(P, Time, Lod) : LocalDensityAt(P, Medium == 2u, Swirl, 0.0);
         if (Density <= 1e-5) continue;
-        float SunT = CloudSunTransmittance(P, SunDirection, Swirl);
+        float D0 = CloudShadowDepth(P, SunDirection, 0u, Taps, Swirl);
+        float D1 = CloudShadowDepth(P, SunDirection, 1u, Taps, Swirl);
+        float D2 = CloudShadowDepth(P, SunDirection, 2u, Taps, Swirl);
+        float OwnRaw = Medium == 0u ? D0 : (Medium == 1u ? D1 : D2);
+        float Own = Medium == 0u ? mix(OwnRaw, Density * (LayerTop - LayerBase) * 0.3, Lod) : OwnRaw;
+        float OthersT = exp(-((D0 + D1 + D2) - OwnRaw));
+        float CombinedT = exp(-(D0 + D1 + D2));
         float Sigma = Medium == 2u ? kFogExtinctionScale
                                    : (1.0 + SkyCloudScatter.w) * kCloudExtinctionScale;
         float Extinction = Density * Step * Sigma;
         float SegmentT = exp(-Extinction);
-        vec3 Incoming = SunRadiance * SunT * Phase + AmbientRadiance;
+        float Ms = Medium == 0u ? CloudMultiScatterLayer(Own, SkyCloudScatter.w)
+                 : (Medium == 1u ? CloudMultiScatterLocal(exp(-Own)) : 1.0);
+        float Powder = Medium == 2u ? 1.0 : CloudPowder(CosSun, Extinction, SkyCloudDetail.y);
+        float Hn = 1.0;
+        if (Medium == 0u) Hn = (P.z - LayerBase) / max(LayerTop - LayerBase, 1.0);
+        else if (Medium == 1u) Hn = (P.z - SkyLocalCloudCentre.z) / max(SkyLocalCloudHalfSize.z, 1.0) * 0.5 + 0.5;
+        Hn = clamp(Hn, 0.0, 1.0);
+        float AmbMix = Medium == 2u ? 1.0 : (0.35 + 0.65 * Hn);
+        float AmbGain = Medium == 2u ? 0.9 : SkyCloudDetail.x;
+        float ScGain = Medium == 2u ? 1.0 : 1.0 / (1.0 + SkyCloudScatter.w);
+        float SunT = Medium == 2u ? CombinedT : OthersT;
+        vec3 Incoming = (SunL * Phase * Ms * Powder * SunT + AmbientRadiance * AmbGain * AmbMix) * ScGain;
         Scatter += Incoming * Albedo * (1.0 - SegmentT) * Transmittance;
         Transmittance *= SegmentT;
         if (Transmittance < 0.005) break;

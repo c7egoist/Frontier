@@ -329,9 +329,11 @@ bool TwinBoxInterval(const float Origin[3], const float Direction[3], const floa
     Near = std::fmax(Low, 0.0f); Far = std::fmin(High, Maximum);
     return Far > Near;
 }
-float TwinShadowMedium(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
-                       uint32_t Medium, uint32_t Taps, const float Swirl[3])
+float TwinShadowDepth(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
+                      uint32_t Medium, uint32_t Taps, const float Swirl[3])
 {
+    uint32_t Flag = Medium == 0u ? kTwinLayerFlag : (Medium == 1u ? kTwinLocalCloudFlag : kTwinLocalFogFlag);
+    if ((K.Control[2] & Flag) == 0u) return 0.0f;
     float Time = K.CloudClock[2];
     float Depth = 0.0f;
     if (Medium == 0u)
@@ -340,7 +342,7 @@ float TwinShadowMedium(const SkyConstantRecord& K, const float Origin[3], const 
         float Base = K.CloudLayer[0] < 0.0f ? 0.0f : (K.CloudLayer[0] > Ceiling ? Ceiling : K.CloudLayer[0]);
         float TopEnd = K.CloudLayer[0]+K.CloudLayer[1];
         float Top = TopEnd < 0.0f ? 0.0f : (TopEnd > Ceiling ? Ceiling : TopEnd);
-        if (Top <= Base) return 1.0f;
+        if (Top <= Base) return 0.0f;
         float St = (Top-Base)*0.12f;
         for (uint32_t I = 1u; I <= 5u; ++I)
         {
@@ -348,7 +350,6 @@ float TwinShadowMedium(const SkyConstantRecord& K, const float Origin[3], const 
             float D = St*float(I)*float(I)*0.35f;
             float Q[3] = { Origin[0]+Direction[0]*D, Origin[1]+Direction[1]*D, Origin[2]+Direction[2]*D };
             Depth += TwinCloudDensityAt(K, Q, Time, I > 2u ? 1.0f : 0.0f)*D*0.8f;
-            if (Depth > 4.0f) break;
         }
     }
     else
@@ -362,26 +363,46 @@ float TwinShadowMedium(const SkyConstantRecord& K, const float Origin[3], const 
             float D = St*float(I)*0.5f;
             float Q[3] = { Origin[0]+Direction[0]*D, Origin[1]+Direction[1]*D, Origin[2]+Direction[2]*D };
             Depth += TwinLocalDensityAt(K, Q, Medium == 2u, Swirl, 1.0f)*Weight;
-            if (Depth > 4.0f) break;
         }
     }
-    return std::exp(-Depth);
-}
-float TwinSunTransmittance(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
-                           const float Swirl[3])
-{
-    uint32_t Taps = K.CloudControl[2] ? K.CloudControl[2] : 1u;
-    float Result = 1.0f;
-    if ((K.Control[2] & kTwinLayerFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 0u, Taps, Swirl);
-    if ((K.Control[2] & kTwinLocalCloudFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 1u, Taps, Swirl);
-    if ((K.Control[2] & kTwinLocalFogFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 2u, Taps, Swirl);
-    return Result;
+    return Depth;
 }
 float TwinPhase(float Mu, float G)
 {
     float G2 = G*G;
     float Den = std::pow(std::fmax(1.0f+G2-2.0f*G*Mu, 1e-6f), 1.5f);
     return (1.0f-G2)/std::fmax(4.0f*3.14159265358979323846f*Den, 1e-9f);
+}
+// Twin of VolumetricMedia::DualLobePhase (P2.4c, REF ph/phC) — the note lives there.
+float TwinDualLobe(float Mu, float G1, float G2, float Mix)
+{
+    float Forward = TwinPhase(Mu, G1);
+    float Back = TwinPhase(Mu, -G2);
+    return (Forward+(Back-Forward)*Mix)*4.0f*3.14159265358979323846f;
+}
+// Twin of VolumetricMedia::SingleLobePhase (REF phF).
+float TwinSingleLobe(float Mu, float G)
+{
+    return TwinPhase(Mu, G)*4.0f*3.14159265358979323846f;
+}
+// Twin of VolumetricMedia::MultiScatterLayer (REF cloudMarch ms): b starts at 1, ms(0)=1.8525.
+float TwinMultiScatterLayer(float Od, float Absorb)
+{
+    float Ms = 0.0f, A = 1.0f, B = 1.0f;
+    for (uint32_t O = 0u; O < 3u; ++O) { Ms += B*std::exp(-Od*A*(1.0f+Absorb)); A *= 0.5f; B *= 0.55f; }
+    return Ms;
+}
+// Twin of VolumetricMedia::MultiScatterLocal (REF marchLocal ms): ms(1)=1.85.
+float TwinMultiScatterLocal(float T)
+{
+    float Root = std::sqrt(std::fmax(T, 0.0f));
+    return T+0.55f*Root+0.3f*std::sqrt(Root);
+}
+// Twin of VolumetricMedia::PowderTerm (REF powder).
+float TwinPowder(float Mu, float ViewOd, float Strength)
+{
+    float Gate = 1.0f-0.5f*(Mu < 0.0f ? 0.0f : (Mu > 1.0f ? 1.0f : Mu));
+    return 1.0f-Strength*std::exp(-ViewOd*2.0f)*Gate;
 }
 void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
                      float Near, float Far, uint32_t Medium, const float SunDirection[3],
@@ -403,14 +424,23 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
     float Lod = Medium == 0u ? TwinSmoothstep(20000.0f, 200000.0f, Near) : 0.0f;
     float Time = K.CloudClock[2];
     float Jitter = Medium == 0u ? TwinMarchJitter(Direction, Time) : 0.5f;
-    float G = Medium == 0u ? K.CloudShape[3]
-            : (Medium == 1u ? K.LocalCloudParams[3] : K.LocalFogParams[3]);
     float Mu = Direction[0]*SunDirection[0]+Direction[1]*SunDirection[1]+Direction[2]*SunDirection[2];
-    float Phase = TwinPhase(Mu, G);
+    // The lobes are the record's global scatter row (REF uCLG1/uCLG2/uCLMix): the local cloud reads the
+    //    layer's, like the CPU march; the fog keeps its own g in a single lobe. x4pi inside, like the panel.
+    float Phase = Medium == 2u ? TwinSingleLobe(Mu, K.LocalFogParams[3])
+                               : TwinDualLobe(Mu, K.CloudScatter[0], K.CloudScatter[1], K.CloudScatter[2]);
     float Albedo[3];
     if (Medium == 0u) { Albedo[0]=K.CloudAlbedo[0]; Albedo[1]=K.CloudAlbedo[1]; Albedo[2]=K.CloudAlbedo[2]; }
     else if (Medium == 1u) { Albedo[0]=0.92f; Albedo[1]=0.94f; Albedo[2]=0.97f; }
     else { Albedo[0]=Albedo[1]=Albedo[2]=0.88f; }
+    // The light loop's constants (P2.4c, REF sunL/sunBase): the panel's .02 weather gain on the sun, the
+    //    tier's shadow taps, and the slab's altitudes for the height-in-slab hn and the lodFar mix.
+    uint32_t Taps = K.CloudControl[2] ? K.CloudControl[2] : 1u;
+    float TwinCeiling = std::fmax(K.CloudShape[1], 0.0f);
+    float TwinBase = K.CloudLayer[0] < 0.0f ? 0.0f : (K.CloudLayer[0] > TwinCeiling ? TwinCeiling : K.CloudLayer[0]);
+    float TwinTopEnd = K.CloudLayer[0]+K.CloudLayer[1];
+    float TwinTop = TwinTopEnd < 0.0f ? 0.0f : (TwinTopEnd > TwinCeiling ? TwinCeiling : TwinTopEnd);
+    float SunL[3] = { SunRadiance[0]*0.02f, SunRadiance[1]*0.02f, SunRadiance[2]*0.02f };
     float T = 1.0f;
     float S[3] = { 0.0f, 0.0f, 0.0f };
     for (uint32_t I = 0u; I < Count; ++I)
@@ -420,13 +450,30 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
         float Density = Medium == 0u ? TwinCloudDensityAt(K, P, Time, Lod)
                       : TwinLocalDensityAt(K, P, Medium == 2u, Swirl, 0.0f);
         if (Density <= 1e-5f) continue;
-        float SunT = TwinSunTransmittance(K, P, SunDirection, Swirl);
+        float D0 = TwinShadowDepth(K, P, SunDirection, 0u, Taps, Swirl);
+        float D1 = TwinShadowDepth(K, P, SunDirection, 1u, Taps, Swirl);
+        float D2 = TwinShadowDepth(K, P, SunDirection, 2u, Taps, Swirl);
+        float OwnRaw = Medium == 0u ? D0 : (Medium == 1u ? D1 : D2);
+        float Own = Medium == 0u ? OwnRaw+(Density*(TwinTop-TwinBase)*0.3f-OwnRaw)*Lod : OwnRaw;
+        float OthersT = std::exp(-((D0+D1+D2)-OwnRaw));
+        float CombinedT = std::exp(-(D0+D1+D2));
         float Sigma = Medium == 2u ? kTwinFogExtinction : (1.0f+K.CloudScatter[3])*kTwinCloudExtinction;
         float Extinction = Density*Step*Sigma;
         float SegmentT = std::exp(-Extinction);
-        float Incoming[3] = { SunRadiance[0]*SunT*Phase+Ambient[0],
-                              SunRadiance[1]*SunT*Phase+Ambient[1],
-                              SunRadiance[2]*SunT*Phase+Ambient[2] };
+        float Ms = Medium == 0u ? TwinMultiScatterLayer(Own, K.CloudScatter[3])
+                 : (Medium == 1u ? TwinMultiScatterLocal(std::exp(-Own)) : 1.0f);
+        float Powder = Medium == 2u ? 1.0f : TwinPowder(Mu, Extinction, K.CloudDetail[1]);
+        float Hn = 1.0f;
+        if (Medium == 0u) Hn = (P[2]-TwinBase)/std::fmax(TwinTop-TwinBase, 1.0f);
+        else if (Medium == 1u) Hn = (P[2]-K.LocalCloudCentre[2])/std::fmax(K.LocalCloudHalfSize[2], 1.0f)*0.5f+0.5f;
+        Hn = Hn < 0.0f ? 0.0f : (Hn > 1.0f ? 1.0f : Hn);
+        float AmbMix = Medium == 2u ? 1.0f : (0.35f+0.65f*Hn);
+        float AmbGain = Medium == 2u ? 0.9f : K.CloudDetail[0];
+        float ScGain = Medium == 2u ? 1.0f : 1.0f/(1.0f+K.CloudScatter[3]);
+        float SunT = Medium == 2u ? CombinedT : OthersT;
+        float Incoming[3] = { (SunL[0]*Phase*Ms*Powder*SunT+Ambient[0]*AmbGain*AmbMix)*ScGain,
+                              (SunL[1]*Phase*Ms*Powder*SunT+Ambient[1]*AmbGain*AmbMix)*ScGain,
+                              (SunL[2]*Phase*Ms*Powder*SunT+Ambient[2]*AmbGain*AmbMix)*ScGain };
         for (int C = 0; C < 3; ++C)
             S[C] += Incoming[C]*Albedo[C]*(1.0f-SegmentT)*T;
         T *= SegmentT;

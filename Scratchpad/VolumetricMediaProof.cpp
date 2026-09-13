@@ -617,7 +617,8 @@ int main()
         Expect(Box1 < 1.0f, "and the box actually shadows (or the equality is vacuous)");
 
         // Layer taps accumulate: every term is nonnegative, so more taps shadow at least as much — and
-        // strictly more where tap 1 cannot trip the early-out alone (density 0.1 caps its depth at 3.5).
+        // strictly more where taps 2-5 see nonzero density (P2.4c removed the old Depth>4 early-out, so
+        // every tap always counts; density 0.1 keeps tap 1's depth at 3.5 either way).
         const float AtBase[3] = { 40.0f, -160.0f, 1550.0f };
         const float Deep1 = VolumetricMedia::ShadowMarch(Slab, Nothing, Nothing, Wind, AtBase, StraightUp,
                                                          1u, 0.0f, NoSwirl);
@@ -630,7 +631,7 @@ int main()
         std::printf("     layer shadow: deep 1 tap %.4f, 5 taps %.4f; thin 1 tap %.4f, 5 taps %.4f\n",
                     Deep1, Deep5, Thin1, Thin5);
         Expect(Deep5 <= Deep1, "more taps shadow at least as much (every tap adds nonnegative depth)");
-        Expect(Thin5 < Thin1, "and strictly more where tap 1 cannot trip the early-out alone");
+        Expect(Thin5 < Thin1, "and strictly more where taps 2-5 see nonzero density");
 
         // Per-medium transmittances multiply: the combined march equals the product of the solo marches,
         // bit-exact — the media never interact inside the quadrature.
@@ -647,6 +648,109 @@ int main()
                "both media shadow the probe (or the product below is vacuous)");
         Expect(Both == SoloSlab * SoloBox,
                "the combined shadow is the product of the solo shadows, bit-exact");
+    }
+
+    std::printf("\n12. the light loop is the reference's\n");
+    {
+        // The multi-scatter endpoints: b starts at 1, so ms(0) = 1+.55+.3025 = 1.8525 — the octave
+        //    sum's own value, pinned exact; deep od extinguishes toward 0; between, it falls
+        //    monotonically (every octave is a falling exponential in od).
+        const float Ms0 = VolumetricMedia::MultiScatterLayer(0.0f, 0.05f);
+        std::printf("     layer ms: od 0 -> %.4f, od 40 -> %.2e\n",
+                    Ms0, VolumetricMedia::MultiScatterLayer(40.0f, 0.05f));
+        Expect(std::fabs(Ms0 - 1.8525f) < 1e-5f, "ms(0) = 1.8525 (octave weights 1/.55/.3025)");
+        Expect(VolumetricMedia::MultiScatterLayer(40.0f, 0.05f) < 1e-4f, "ms(40) extinguishes below 1e-4");
+        bool MsMono = true;
+        float PrevMs = Ms0;
+        for (int I = 1; I <= 40; ++I)
+        {
+            const float V = VolumetricMedia::MultiScatterLayer(static_cast<float>(I) * 0.5f, 0.05f);
+            MsMono = MsMono && V <= PrevMs;
+            PrevMs = V;
+        }
+        Expect(MsMono, "the layer octaves fall monotonically over od 0..20");
+
+        // The local closed form meets the octaves at full transmittance (1+.55+.3 = 1.85 against the
+        //    octave sum's 1.8525) and dies at zero, rising monotonically between.
+        const float Lm1 = VolumetricMedia::MultiScatterLocal(1.0f);
+        std::printf("     local ms: T 1 -> %.4f, T 0 -> %.1f\n",
+                    Lm1, VolumetricMedia::MultiScatterLocal(0.0f));
+        Expect(std::fabs(Lm1 - 1.85f) < 1e-5f, "local ms(1) = 1.85 (meets the octave sum)");
+        Expect(VolumetricMedia::MultiScatterLocal(0.0f) == 0.0f, "local ms(0) = 0 exactly");
+        bool LmMono = true;
+        float PrevLm = 0.0f;
+        for (int I = 1; I <= 20; ++I)
+        {
+            const float V = VolumetricMedia::MultiScatterLocal(static_cast<float>(I) * 0.05f);
+            LmMono = LmMono && V >= PrevLm;
+            PrevLm = V;
+        }
+        Expect(LmMono, "the local closed form rises monotonically over T 0..1");
+
+        // Powder lives in [.4,1]: full strength at grazing over a dense slice, unity toward clear air —
+        // swept over sun cosines and view extinctions, none may escape the band.
+        bool PowderBand = true;
+        for (int A = 0; A <= 10; ++A)
+            for (int E = 0; E <= 10; ++E)
+            {
+                const float P = VolumetricMedia::PowderTerm(-1.0f + static_cast<float>(A) * 0.2f,
+                                                            static_cast<float>(E) * 0.5f, 0.6f);
+                PowderBand = PowderBand && P >= 0.4f - 1e-5f && P <= 1.0f + 1e-5f;
+            }
+        Expect(PowderBand, "powder stays in [.4,1] over sun cosines x view extinctions");
+
+        // The dual lobe looks forward: sun-ahead outshines sun-behind by well over an order of magnitude
+        //    at the panel's lobes (g1 .8, g2 .3, mix .3) — pinned as a ratio band, not a point.
+        const float Fwd = VolumetricMedia::DualLobePhase(1.0f, 0.8f, 0.3f, 0.3f);
+        const float Back = VolumetricMedia::DualLobePhase(-1.0f, 0.8f, 0.3f, 0.3f);
+        std::printf("     dual lobe: forward %.2f, back %.3f, ratio %.1f\n", Fwd, Back, Fwd / Back);
+        Expect(Fwd > Back, "the dual lobe looks forward (sun-ahead outshines sun-behind)");
+        Expect(Fwd / Back > 35.0f && Fwd / Back < 40.0f,
+               "forward/back ratio sits in (35,40) at the panel's lobes");
+
+        // Cross-shadowing through OthersT: a box riding alongside the view ray clears the ray by 20 m,
+        //    so the view march never enters it — but the slanted sun taps of the slab's occupied sample
+        //    reach inside, and the slab's sunlight must dim while its transmittance stays bit-identical.
+        //    The taps are local (tens of metres, like the reference's), so the box sits against the ray,
+        //    not above the slab — thin in y so the ray clears it, wide in x/z so the taps land inside its
+        //    ellipsoid. The straight-up ray at wall-clock 0 jitters to exactly 0 (Hash(0,0,0)), so sample 0
+        //    sits at the eye (z 2000, occupied at den 0.0916 — the other two fall in noise holes) and the
+        //    box is probed against it (D1 = 1.64); like §11's InBox, a slab-noise retune may move the
+        //    occupancy and must re-probe this address. A disabled box changes nothing.
+        CloudLayerSettings Slab12{};
+        Slab12.Enabled = true; Slab12.Base = 1500.0f; Slab12.Thickness = 900.0f; Slab12.Coverage = 0.95f;
+        LocalVolumeSettings PuffAside{};
+        PuffAside.Enabled = true; PuffAside.Coverage = 1.0f;
+        PuffAside.Centre[0] = 40.0f; PuffAside.Centre[1] = -100.0f; PuffAside.Centre[2] = 2050.0f;
+        PuffAside.HalfSize[0] = 200.0f; PuffAside.HalfSize[1] = 40.0f; PuffAside.HalfSize[2] = 160.0f;
+        LocalVolumeSettings Off{};
+        const float Eye12[3] = { 40.0f, -160.0f, 2000.0f };
+        const float Up[3] = { 0.0f, 0.0f, 1.0f };
+        const float Slant[3] = { 0.0f, 0.5f, 0.8660254f };
+        const float Noon[3] = { 20.0f, 19.0f, 17.0f }, Sky[3] = { 0.7f, 0.8f, 1.0f };
+        const VolumetricSample Solo = VolumetricMedia::March(Slab12, Off, Off, Wind, Budget,
+                                                             Eye12, Up, 2400.0f, Slant, Noon, Sky, 0.0f);
+        const VolumetricSample Cross = VolumetricMedia::March(Slab12, PuffAside, Off, Wind, Budget,
+                                                              Eye12, Up, 2400.0f, Slant, Noon, Sky, 0.0f);
+        LocalVolumeSettings PuffOff = PuffAside;
+        PuffOff.Enabled = false;
+        const VolumetricSample Same = VolumetricMedia::March(Slab12, PuffOff, Off, Wind, Budget,
+                                                             Eye12, Up, 2400.0f, Slant, Noon, Sky, 0.0f);
+        std::printf("     cross-shadow: solo scatter %.3f, crossed %.3f, T %.4f vs %.4f\n",
+                    Solo.Scatter[0], Cross.Scatter[0], Solo.Transmittance, Cross.Transmittance);
+        Expect(Solo.Transmittance == Cross.Transmittance,
+               "the box off the view path leaves transmittance bit-identical");
+        Expect(Cross.Scatter[0] < Solo.Scatter[0] && Cross.Scatter[1] < Solo.Scatter[1] &&
+               Cross.Scatter[2] < Solo.Scatter[2],
+               "but its sun-path shadow darkens the slab's scatter (OthersT)");
+        Expect(Same.Scatter[0] == Solo.Scatter[0] && Same.Scatter[1] == Solo.Scatter[1] &&
+               Same.Scatter[2] == Solo.Scatter[2] && Same.Transmittance == Solo.Transmittance,
+               "a disabled box changes nothing, bit-exact");
+
+        // The lodFar mix never executes at ground-level gates (Lod 0 below 20 km), so its workhorse is
+        //    pinned directly: the mix endpoints are exact, and the mix line itself is source-pinned below.
+        Expect(VolumetricMedia::Lerp(2.5f, 7.5f, 0.0f) == 2.5f, "the lodFar mix starts at the marched depth");
+        Expect(VolumetricMedia::Lerp(2.5f, 7.5f, 1.0f) == 7.5f, "and ends at the rho*thick*.3 estimate");
     }
 
     std::printf("\n");

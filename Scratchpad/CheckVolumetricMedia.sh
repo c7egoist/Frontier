@@ -144,14 +144,47 @@ printf '%s' "$MediaCode" | grep -q 'I > 2u ? 1.0f : 0.0f'
 Report $? "the shadow's first two taps keep erosion, the rest skip it"
 printf '%s' "$MediaCode" | grep -q 'Sigma = M == 2u ? 0.01f : (1.0f + Cloud.Absorption) \* 0.06f;'
 Report $? "the view reads cloud .06 with absorption, fog .01"
-! sed -n '/static float ShadowBox/,/^    }/p' "$Header" | sed 's;//.*;;' | grep -q 'StepSize'
+! sed -n '/static float ShadowDepthBox/,/^    }/p' "$Header" | sed 's;//.*;;' | grep -q 'StepSize'
 Report $? "no view step leaks into the box shadow"
-! sed -n '/static float ShadowMarch/,/^    }/p' "$Header" | sed 's;//.*;;' | grep -q 'StepSize'
+! sed -n '/static float ShadowDepthSlab/,/^    }/p' "$Header" | sed 's;//.*;;' | grep -q 'StepSize'
 Report $? "none leaks into the layer shadow either"
 ! printf '%s' "$MediaCode" | grep -q 'SunVisibilityAt'
 Report $? "the unused scene-occlusion callback is gone"
 ! printf '%s' "$MediaCode" | grep -qiE 'radial.?blur|screenspace shaft'
 Report $? "no screen-space radial blur"
+
+echo
+echo "[VolumetricMedia] the march shades the reference's light loop"
+# P2.4c: cloudMarch/marchLocal's light on the CPU march — the .02 weather gain, the dual lobe x4pi,
+#    multi-scatter in place of the shadow transmittance, Beer powder, height-in-slab ambient, the Sc/sigT
+#    accumulation. (The leak re-scope above — ShadowBox/ShadowMarch to ShadowDepthBox/ShadowDepthSlab — is
+#    P2.4c's too: the quadrature moved into the depth functions, so the absence is pinned where it lives.)
+printf '%s' "$MediaCode" | grep -q 'SunRadiance\[0\] \* 0\.02f'
+Report $? "sunlight enters the weather with the panel's .02 gain"
+printf '%s' "$MediaCode" | grep -q 'DualLobePhase(CosTheta, PhaseG, Cloud\.BackLobe, Cloud\.LobeMix)'
+Report $? "the clouds read the dual lobe from the layer's globals"
+printf '%s' "$MediaCode" | grep -q 'SingleLobePhase(CosTheta, PhaseG)'
+Report $? "the fog keeps its own g in a single lobe"
+printf '%s' "$MediaCode" | grep -q 'MultiScatterLayer(OwnOd, Cloud\.Absorption)'
+Report $? "the layer's octaves read its own depth with absorption"
+printf '%s' "$MediaCode" | grep -q 'MultiScatterLocal(std::exp(-OwnOd))'
+Report $? "the local closed form reads its own depth in T-space"
+printf '%s' "$MediaCode" | grep -q 'PowderTerm(CosTheta, Extinction, Cloud\.Powder)'
+Report $? "powder reads the view slice and the layer's strength"
+printf '%s' "$MediaCode" | grep -q 'Density \* (LayerTop - LayerBase) \* 0\.3f'
+Report $? "far from the slab the shadow mixes to rho*thick*.3"
+printf '%s' "$MediaCode" | grep -q 'float OthersT = std::exp(-((Depth0 + Depth1 + Depth2) - OwnRaw));'
+Report $? "the others' transmittance crosses the media"
+printf '%s' "$MediaCode" | grep -q 'float SunT = M == 2u ? CombinedT : OthersT;'
+Report $? "clouds take OthersT, the fog the combined shadow"
+printf '%s' "$MediaCode" | grep -q '(0\.35f + 0\.65f \* Hn)'
+Report $? "the ambient lifts by height-in-slab"
+printf '%s' "$MediaCode" | grep -q 'float Ms = 0\.0f, A = 1\.0f, B = 1\.0f;'
+Report $? "the octaves start at b = 1 (ms(0) = 1.8525)"
+printf '%s' "$MediaCode" | grep -q 'Ms += B \* std::exp(-OpticalDepth \* A \* (1\.0f + Absorption));'
+Report $? "attenuating inside the exponent"
+printf '%s' "$MediaCode" | grep -q '0\.55f \* Root + 0\.3f \* std::sqrt(Root)'
+Report $? "the closed form sums T, root and fourth-root"
 
 echo
 echo "[VolumetricMedia] the noise is the reference hash13 and the layer march jitters"

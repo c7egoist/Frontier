@@ -57,7 +57,7 @@ struct CloudLayerSettings
     float             Coverage  = 0.45f;     // [0..1]
     float             Density   = 1.0f;      // [x]
     float             Scale     = 1.4f;      // [x] feature size
-    float             Anisotropy = 0.45f;    // Henyey-Greenstein g (the march used the box's; now per-medium)
+    float             Anisotropy = 0.45f;    // legacy single-lobe g, superseded by ForwardLobe (P2.4c reads the dual lobe)
     float             Albedo[3] = { 1.0f, 1.0f, 1.0f };   // the cloud white (likewise)
     float             Anvil     = 0.3f;      // [0..1] cumulonimbus spreading
     bool              FollowWind = true;     // link to the Wind Field entity
@@ -506,11 +506,15 @@ public:
 
         // ── Each medium's own interval ─────────────────────────────────────────────────────────────────────────
         float SlabNear = 1e30f, SlabFar = -1e30f; bool SlabHit = false;
+        // The slab's altitudes, hoisted to march scope (P2.4c): the light loop reads the height-in-slab
+        //    hn and the lodFar thickness mix from the same Base/Top the interval marches.
+        float LayerBase = 0.0f, LayerTop = 0.0f;
         if (Cloud.Enabled)
         {
             float Base = 0.0f, Top = 0.0f;
             if (SlabExtent(Cloud, Base, Top))
             {
+                LayerBase = Base; LayerTop = Top;
                 // The slab is horizontal, so its interval is where the ray crosses the two altitudes.
                 float Lo = 0.0f, Hi = 0.0f;
                 if (SlabInterval(Origin[2], Direction[2], Base, Top, MaximumDistance, Lo, Hi))
@@ -578,7 +582,7 @@ public:
             //    RAISE transmittance — more medium letting more light through, which is impossible), and the
             //    cap keeps a pathological span from running away. Midpoints cover this medium's actual interval
             //    [SpanNear, SpanFar], so no samples are spent in the empty distance before its near boundary.
-            float SpanNear = 0.0f, SpanFar = 0.0f, StepSize = 1.0f, PhaseG = 0.45f;
+            float SpanNear = 0.0f, SpanFar = 0.0f, StepSize = 1.0f, PhaseG = Cloud.ForwardLobe;
             uint32_t Cap = 1u;
             if (M == 0u)
             {
@@ -587,7 +591,7 @@ public:
                 const uint32_t Reference = Budget.CloudSteps == 0u ? 1u : Budget.CloudSteps;
                 StepSize = kReferenceSpan / static_cast<float>(Reference);
                 Cap = Reference * 4u;               // never more than 4x the tier's budget
-                PhaseG = Cloud.Anisotropy;
+                PhaseG = Cloud.ForwardLobe;
             }
             else if (M == 1u)
             {
@@ -595,7 +599,9 @@ public:
                 SpanNear = BoxNear; SpanFar = BoxFar;
                 StepSize = std::fmax(LocalCloud.Scale * 0.5f, 1.0f);
                 Cap = Budget.LocalSteps == 0u ? 1u : Budget.LocalSteps;
-                PhaseG = LocalCloud.Anisotropy;
+                // Global lobes (REF): marchLocal reads the same uCLG1/uCLG2/uCLMix as cloudMarch, so the
+                //    local cloud takes the layer's — exactly like it takes the layer's absorption.
+                PhaseG = Cloud.ForwardLobe;
             }
             else
             {
@@ -616,7 +622,13 @@ public:
             if (Count < 1u) Count = 1u;
             if (Count > Cap) Count = Cap;
             const float ActualStep = Span / static_cast<float>(Count);
-            const float Phase = HenyeyGreenstein(CosTheta, PhaseG);
+            // The phase (P2.4c): the dual lobe x4pi on the cloud paths (PhaseG is the primary lobe's g,
+            //    the back lobe and mix are the layer's), the fog's single lobe x4pi — the panel's
+            //    convention, paired with the .02 weather gain on the sunlight below.
+            const float Phase = M == 2u ? SingleLobePhase(CosTheta, PhaseG)
+                                        : DualLobePhase(CosTheta, PhaseG, Cloud.BackLobe, Cloud.LobeMix);
+            // Sunlight into the weather (REF sunL/sunBase): the panel's .02 gain, all three media.
+            const float SunL[3] = { SunRadiance[0] * 0.02f, SunRadiance[1] * 0.02f, SunRadiance[2] * 0.02f };
             // The reference jitters the march start per ray (t=t0+dt*hash13) so adjacent rays sample
             //    different phases instead of contouring into bands. The seed is the ray direction —
             //    bounces have no pixel to hash — plus the clock's third-of-a-second fraction, through the
@@ -638,11 +650,25 @@ public:
                 else              Density = LocalDensity(LocalFog, Wind, P, PixelSwirl, 0.0f, true);
                 if (Density <= 1e-5f) continue;
 
-                // Sun visibility, marched once for the combined medium — fog shadows cloud and cloud shadows
-                //    fog for free, whichever loop this step sits in.
-                const float SunTransmittance = ShadowMarch(Cloud, LocalCloud, LocalFog, Wind, P, SunDirection,
-                                                     Budget.LightTaps, Time, PixelSwirl);
+                // Sun visibility, marched once per medium (P2.4c): the same three ladders the old combined
+                //    ShadowMarch ran, but the light loop needs each medium's own optical depth — the layer's
+                //    multi-scatter octaves read D0 bare, the local closed form reads exp(-D1), the fog keeps
+                //    the combined transmittance. The others' transmittance keeps fog shadowing cloud and
+                //    cloud shadowing fog for free, while each medium's MS sees its own od — REF-exact when
+                //    a medium marches alone.
+                const float Depth0 = ShadowDepthSlab(Cloud, Wind, P, SunDirection, Budget.LightTaps, Time);
+                const float Depth1 = ShadowDepthBox(LocalCloud, Wind, P, SunDirection, PixelSwirl,
+                                                    Cloud.Absorption, false);
+                const float Depth2 = ShadowDepthBox(LocalFog, Wind, P, SunDirection, PixelSwirl,
+                                                    Cloud.Absorption, true);
                 ++Result.ShadowMarches;
+                // lodFar (REF cloudMarch): far from the slab the marched shadow gives way to the fixed
+                //    rho*thick*.3 estimate — cheaper light, no orbit shimmer. Layer only.
+                const float OwnRaw = M == 0u ? Depth0 : (M == 1u ? Depth1 : Depth2);
+                const float OwnOd = M == 0u
+                    ? Lerp(OwnRaw, Density * (LayerTop - LayerBase) * 0.3f, LayerLod) : OwnRaw;
+                const float OthersT = std::exp(-((Depth0 + Depth1 + Depth2) - OwnRaw));
+                const float CombinedT = std::exp(-(Depth0 + Depth1 + Depth2));
 
                 // The reference's extinction scales (panel optical-depth readout: tau = den x depth x .06):
                 // cloud .06 with the layer's absorption (marchLocal folds it into the local weight too), fog
@@ -650,6 +676,21 @@ public:
                 const float Sigma = M == 2u ? 0.01f : (1.0f + Cloud.Absorption) * 0.06f;
                 const float Extinction = Density * ActualStep * Sigma;
                 const float StepTransmittance = std::exp(-Extinction);
+                // The light loop (REF cloudMarch/marchLocal): multi-scatter in place of the shadow
+                //    transmittance, Beer powder toward the sun, sky ambient lifted by height-in-slab —
+                //    accumulated in the Sc/sigT form (the cloud's /(1+Absorb), the fog's a no-op unity).
+                const float MultiScatter = M == 0u ? MultiScatterLayer(OwnOd, Cloud.Absorption)
+                                         : (M == 1u ? MultiScatterLocal(std::exp(-OwnOd)) : 1.0f);
+                const float Powder = M == 2u ? 1.0f : PowderTerm(CosTheta, Extinction, Cloud.Powder);
+                float Hn = 1.0f;
+                if (M == 0u)      Hn = (P[2] - LayerBase) / std::fmax(LayerTop - LayerBase, 1.0f);
+                else if (M == 1u) Hn = (P[2] - LocalCloud.Centre[2])
+                                       / std::fmax(LocalCloud.HalfSize[2], 1.0f) * 0.5f + 0.5f;
+                Hn = Clamp(Hn, 0.0f, 1.0f);
+                const float AmbientMix = M == 2u ? 1.0f : (0.35f + 0.65f * Hn);
+                const float AmbientGain = M == 2u ? 0.9f : Cloud.SkyAmbient;
+                const float ScatterGain = M == 2u ? 1.0f : 1.0f / (1.0f + Cloud.Absorption);
+                const float SunT = M == 2u ? CombinedT : OthersT;
                 for (int C = 0; C < 3; ++C)
                 {
                     // Each medium its own albedo: the layer owns its white now (it used the box's), the fog
@@ -657,7 +698,9 @@ public:
                     float Albedo = 0.88f;
                     if (M == 0u)      Albedo = Cloud.Albedo[C];
                     else if (M == 1u) Albedo = LocalCloud.Albedo[C];
-                    const float In = (SunRadiance[C] * SunTransmittance * Phase + AmbientRadiance[C]) * Albedo;
+                    const float SunLi = SunL[C] * Phase * MultiScatter * Powder * SunT;
+                    const float AmbLi = AmbientRadiance[C] * AmbientGain * AmbientMix;
+                    const float In = (SunLi + AmbLi) * Albedo * ScatterGain;
                     Result.Scatter[C] += In * (1.0f - StepTransmittance) * Transmittance;
                 }
                 Transmittance *= StepTransmittance;
@@ -667,6 +710,51 @@ public:
 
         Result.Transmittance = Transmittance;
         return Result;
+    }
+
+    // The dual-lobe phase (P2.4c, REF ph/phC): the forward lobe at g1 mixed with the back lobe at
+    //    -g2, times 4pi — the panel's convention, paired with the .02 weather gain on the sunlight. The
+    //    lobes are the layer's on every cloud path (marchLocal reads the same uCLG1/uCLG2/uCLMix as
+    //    cloudMarch), so the local cloud takes Cloud's — exactly like it takes Cloud's absorption.
+    static float DualLobePhase(float CosTheta, float ForwardG, float BackG, float Mix) noexcept
+    {
+        constexpr float kPi = 3.14159265358979323846f;
+        const float Forward = HenyeyGreenstein(CosTheta, ForwardG);
+        const float Back = HenyeyGreenstein(CosTheta, -BackG);
+        return (Forward + (Back - Forward) * Mix) * 4.0f * kPi;
+    }
+    // The fog's single lobe (REF phF): the same 4pi convention, its own g.
+    static float SingleLobePhase(float CosTheta, float G) noexcept
+    {
+        constexpr float kPi = 3.14159265358979323846f;
+        return HenyeyGreenstein(CosTheta, G) * 4.0f * kPi;
+    }
+    // The layer's multi-scatter (REF cloudMarch ms): three octaves halving the extinction (a x.5) and
+    //    scaling the contribution (b x.55), absorption inside the exponent. b starts at 1 — ms(0)=1.8525,
+    //    which is why lit cloud reads brighter than single scattering ever allows.
+    static float MultiScatterLayer(float OpticalDepth, float Absorption) noexcept
+    {
+        float Ms = 0.0f, A = 1.0f, B = 1.0f;
+        for (uint32_t O = 0u; O < 3u; ++O)
+        {
+            Ms += B * std::exp(-OpticalDepth * A * (1.0f + Absorption));
+            A *= 0.5f; B *= 0.55f;
+        }
+        return Ms;
+    }
+    // The local cloud's multi-scatter (REF marchLocal ms): the octave sum in closed form in T-space —
+    //    ms(1)=1.85 matches the octave sum's 1.8525, since the local shadow already carries (1+Absorb).
+    static float MultiScatterLocal(float Transmittance) noexcept
+    {
+        const float Root = std::sqrt(std::fmax(Transmittance, 0.0f));
+        return Transmittance + 0.55f * Root + 0.3f * std::sqrt(Root);
+    }
+    // Beer powder (REF cloudMarch/marchLocal powder): the view slice's own extinction darkens grazing
+    //    light while the sun ahead burns through — the (1-.5*clamp) gate.
+    static float PowderTerm(float CosTheta, float ViewExtinction, float Strength) noexcept
+    {
+        const float Gate = 1.0f - 0.5f * Clamp(CosTheta, 0.0f, 1.0f);
+        return 1.0f - Strength * std::exp(-ViewExtinction * 2.0f) * Gate;
     }
 
     static float HenyeyGreenstein(float CosTheta, float G) noexcept
@@ -706,14 +794,18 @@ public:
         return Far > Near;
     }
 
-    // One box's sun-shadow quadrature (P2.4b): uniShadow's linear taps — d = st*i*.5 off the widest
-    //    half-size (x.25 cloud, x.5 fog), weight st*.5, fixed 4. The cloud carries the layer's absorption
-    //    in its weight like marchLocal; the fog keeps its own .01 scale (it is not vf — P8 re-derives
-    //    this weight with vfDensity). Lod 1: the shadow always skips erosion, like the reference.
-    static float ShadowBox(const LocalVolumeSettings& Volume, const WindSettings& Wind,
-                           const float Position[3], const float SunDirection[3],
-                           const float Swirl[3], float Absorption, bool IsFog) noexcept
+    // One box's sun-shadow optical depth (P2.4b quadrature, P2.4c return): uniShadow's linear taps —
+    //    d = st*i*.5 off the widest half-size (x.25 cloud, x.5 fog), weight st*.5, fixed 4. The cloud
+    //    carries the layer's absorption in its weight like marchLocal; the fog keeps its own .01 scale
+    //    (it is not vf — P8 re-derives this weight with vfDensity). Lod 1: the shadow always skips
+    //    erosion, like the reference. Returns depth, not transmittance: the light loop's multi-scatter
+    //    reads od past 4, where transmittance has already underflowed toward noise — so the old Depth>4
+    //    early-out is gone, and the reference marches every tap anyway. A disabled volume reads 0.
+    static float ShadowDepthBox(const LocalVolumeSettings& Volume, const WindSettings& Wind,
+                                const float Position[3], const float SunDirection[3],
+                                const float Swirl[3], float Absorption, bool IsFog) noexcept
     {
+        if (!Volume.Enabled) return 0.0f;
         const float Widest = std::fmax(Volume.HalfSize[0], std::fmax(Volume.HalfSize[1], Volume.HalfSize[2]));
         const float St = Widest * (IsFog ? 0.5f : 0.25f);
         const float Weight = St * 0.5f * (IsFog ? 0.01f : (1.0f + Absorption) * 0.06f);
@@ -725,49 +817,58 @@ public:
                                  Position[1] + SunDirection[1] * D,
                                  Position[2] + SunDirection[2] * D };
             Depth += LocalDensity(Volume, Wind, Q, Swirl, 1.0f, IsFog) * Weight;
-            // Past opaque, further taps change transmittance by under 2% — invisible, so stop paying.
-            // (P2.4c revisits this: the multi-scatter octaves read optical depth past 4.)
-            if (Depth > 4.0f) break;
         }
-        return std::exp(-Depth);
+        return Depth;
     }
 
-    // The sun-shadow march (P2.4b): the layer marches clLight's growing-spaced taps (d = st*i²*.35 off
-    //    st = thick*.12, weight d*.8, the tier's count, far taps coarse); each box marches ShadowBox.
-    //    No view step leaks in — the shadow paces each medium's own size, so one sun ray shades one way
-    //    no matter which loop calls. Per-medium transmittances multiply (depths add under the exponential).
-    //    The layer's absorption returns with the multi-scatter loop (P2.4c); clLight's od carries none.
+    // One box's sun-shadow transmittance: the depth's exponential. Kept for the §11 probes (and any
+    //    caller that wants the shadow, not the depth); the march reads ShadowDepthBox directly.
+    static float ShadowBox(const LocalVolumeSettings& Volume, const WindSettings& Wind,
+                           const float Position[3], const float SunDirection[3],
+                           const float Swirl[3], float Absorption, bool IsFog) noexcept
+    {
+        return std::exp(-ShadowDepthBox(Volume, Wind, Position, SunDirection, Swirl, Absorption, IsFog));
+    }
+
+    // The layer's sun-shadow optical depth: clLight's growing-spaced taps (d = st*i²*.35 off
+    //    st = thick*.12, weight d*.8, the tier's count, far taps coarse). No view step leaks in — the
+    //    shadow paces each medium's own size, so one sun ray shades one way no matter which loop calls.
+    //    clLight's od carries no absorption; it returns inside the multi-scatter exponent (P2.4c).
+    static float ShadowDepthSlab(const CloudLayerSettings& Cloud, const WindSettings& Wind,
+                                 const float Position[3], const float SunDirection[3],
+                                 uint32_t Taps, float Time) noexcept
+    {
+        float Depth = 0.0f;
+        float Base, Top;
+        if (Cloud.Enabled && SlabExtent(Cloud, Base, Top))
+        {
+            const float St = (Top - Base) * 0.12f;
+            for (uint32_t I = 1u; I <= 5u; ++I)
+            {
+                if (I > Taps) break;
+                const float F = static_cast<float>(I);
+                const float D = St * F * F * 0.35f;
+                const float Q[3] = { Position[0] + SunDirection[0] * D,
+                                     Position[1] + SunDirection[1] * D,
+                                     Position[2] + SunDirection[2] * D };
+                Depth += CloudDensity(Cloud, Wind, Q, Time, I > 2u ? 1.0f : 0.0f) * D * 0.8f;
+            }
+        }
+        return Depth;
+    }
+
+    // The sun-shadow march: per-medium transmittances multiply (depths add under the exponential), in
+    //    the same op order as always — a disabled medium multiplies exactly 1. The march reads the
+    //    depths directly; this stays for the §11 probes and the callers that want the shadow as one T.
     static float ShadowMarch(const CloudLayerSettings& Cloud, const LocalVolumeSettings& LocalCloud,
                              const LocalVolumeSettings& LocalFog, const WindSettings& Wind,
                              const float Position[3], const float SunDirection[3],
                              uint32_t Taps, float Time, const float Swirl[3]) noexcept
     {
         float Result = 1.0f;
-        if (Cloud.Enabled)
-        {
-            float Base, Top;
-            if (SlabExtent(Cloud, Base, Top))
-            {
-                const float St = (Top - Base) * 0.12f;
-                float Depth = 0.0f;
-                for (uint32_t I = 1u; I <= 5u; ++I)
-                {
-                    if (I > Taps) break;
-                    const float F = static_cast<float>(I);
-                    const float D = St * F * F * 0.35f;
-                    const float Q[3] = { Position[0] + SunDirection[0] * D,
-                                         Position[1] + SunDirection[1] * D,
-                                         Position[2] + SunDirection[2] * D };
-                    Depth += CloudDensity(Cloud, Wind, Q, Time, I > 2u ? 1.0f : 0.0f) * D * 0.8f;
-                    if (Depth > 4.0f) break;
-                }
-                Result *= std::exp(-Depth);
-            }
-        }
-        if (LocalCloud.Enabled)
-            Result *= ShadowBox(LocalCloud, Wind, Position, SunDirection, Swirl, Cloud.Absorption, false);
-        if (LocalFog.Enabled)
-            Result *= ShadowBox(LocalFog, Wind, Position, SunDirection, Swirl, Cloud.Absorption, true);
+        Result *= std::exp(-ShadowDepthSlab(Cloud, Wind, Position, SunDirection, Taps, Time));
+        Result *= ShadowBox(LocalCloud, Wind, Position, SunDirection, Swirl, Cloud.Absorption, false);
+        Result *= ShadowBox(LocalFog, Wind, Position, SunDirection, Swirl, Cloud.Absorption, true);
         return Result;
     }
 
