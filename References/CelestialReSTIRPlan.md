@@ -249,6 +249,49 @@ Status log (append; newest last):
   Jolt) were missing third-party trees, not regressions -- verified by running them against the pre-P0 stash --
   and are now populated out-of-band; .gitignore records that ExternalPackages/ is not carried on this branch.
   User confirmed: TOML + CLI for the slider surface (P8), stability before sky. NEXT: P1.
+- 2026-09-13: **P2a DONE — the scattering integral, and the LUT question settled with measurements.**
+  The user challenged the LUT plan directly: their LUT gave no white line at dawn, no vibrant sunrise/sunset, no
+  vivid zenith, and they asked whether an analytic sky would be more realistic. Researched, then MEASURED.
+  **The research answer.** Hosek-Wilkie is not an independent model — it is a curve FITTED to a brute-force path
+  trace (1M rays/px, 40 min-3 hr per 128x128). So "analytic vs LUT" is a fit-to-physics vs the physics; the LUT
+  caches the same integral Hosek fitted to. Three specifics, all against analytic:
+    · The paper itself says after-sunset "cannot be fitted... because it cannot recreate the earth casting a
+      shadow onto the atmosphere". That shadow IS the dawn band. A fit has no geometry to cast it.
+    · Vibrant sunset + blue twilight zenith are OZONE (Chappuis, peak 603 nm). Hulburt 1953: the sunset zenith
+      blue is "1/3 Rayleigh and 2/3 ozone, during twilight wholly ozone"; without it the zenith goes
+      "grayish green-blue... yellowish". Preetham and Hosek-Wilkie have NO ozone term.
+    · Hosek-Wilkie gets BRIGHTER as the sun sets (Kol 2012: "game developers will not use a model that generates
+      a sky with an increasingly bright solar region as the sun sets"); at turbidity 2.99 it can go fully black.
+    · Cost is inverted here anyway: the sky is a ReSTIR reservoir light evaluated many times per pixel, not a
+      backdrop drawn once, so analytic-per-sample is the EXPENSIVE option.
+  **Built** `Engine/Shaders/AtmosphereScatter.slang` — one implementation compiled twice (GLSL + C++ via
+  GlslShim), included by ReSTIRViewport.slang and by the proof, so they cannot drift. Ozone as a 25 km SHELL
+  (tent, 30 km thick) not an exponential — the shell geometry is what makes the slant path explode at twilight.
+  Mie extinction = scattering x 1.11 (albedo 0.9). Analytic per-segment integration (S - S*T)/sigma instead of a
+  rectangle rule, which removes horizon banding.
+  **Measured (Scratchpad/AtmosphereScatterTest.cpp, 27 checks):** dawn band peaks at **3.70 deg above** the
+  horizon, **6.24x** the horizon and **4.11x** the sky 25 deg up — a real ridge. Sunset horizon R/B goes
+  **0.90 -> 242.8**. Ozone shifts twilight zenith B/G **0.87 -> 1.77** and moves luma **43.2% at twilight vs
+  3.0% at noon** (correctly a twilight-only effect). Sky irradiance monotonic, **7.9x** drop 80 deg -> 0 deg.
+  **Two real defects the harness caught.** (i) §6 first reported brightness RISING at 20 deg. The physics was
+  fine; the TEST was aliasing the narrow Mie lobe on a coarse 8x40 deg grid and not weighting by solid angle.
+  Fixed to a 2x10 deg sin*cos-weighted irradiance integral — the fix was the measurement, not the threshold.
+  (ii) Dawn LUT error was 6.195%, over budget. Root cause found by sweep: **linear storage**. A bilinear filter
+  tracks the arithmetic mean between texels differing 100x across the shadow edge; the falloff is Beer-Lambert,
+  so the geometric mean is right. Log-space storage + 192x192:
+      192x108 linear 6.195% | 192x108 log 2.316% | 192x192 linear 2.714% | **192x192 log 0.983%** | 192x256 log 0.965%
+  256 rows buys 0.02% for 33% memory, so 192x192 is the knee. Final dawn **0.607%**, sunset **0.205%**.
+  **The LUT answer, quantified.** Non-linear (Hillaire 5.3) vs naive linear mapping, dawn: **8.91% -> 0.61%**.
+  The user's bad LUT was almost certainly linear-mapped and/or linear-stored, not "LUTs can't do this". Through
+  the cache the band still peaks at **3.70 deg** (identical to the march) at 6.36x/4.15x, and sunset keeps
+  **220/243 = 91%** of its chroma. Gate keeps the linear-mapping and ozone-off CONTROLS so the comparison keeps
+  proving something.
+  F1 enforced mechanically: the gate greps AtmosphereScatter.slang for any disc/limb/angular-radius term and
+  fails if one appears. Visual check rendered to `Scratchpad/SkyPreview.png` (4 elevations; disc composited at
+  full res, never baked).
+  Gates: `Scratchpad/CheckAtmosphereScatter.sh`, registered. **ALL 18 SUITES GREEN.**
+  NEXT: P2b — bake the LUT on the GPU, wire the miss path, keep --sky-raymarch as the live A/B reference.
+
 - 2026-09-13: **P1 DONE — CelestialStructure, the ephemeris solver, and the GPU record.** Four new files.
   1a. `Engine/DisplayPresentation/CelestialStructure.h` — every celestial property with its units, plus a
       `kCelestialProperties` table (52 entries) that binds name/unit/range/default to each field's own offset, so

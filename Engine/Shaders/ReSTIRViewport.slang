@@ -353,6 +353,28 @@ ShadingRecord ResolveMaterial(GpuMaterial mat, GpuInstance instance, uint primit
 }
 
 #include "TraversalCWBVH.slang"
+
+// P2: the physical sky. Shared verbatim with Scratchpad/AtmosphereScatterTest.cpp, which compiles this same file
+//    as C++ and measures the dawn band, the sunset chroma and the ozone-blue zenith against thresholds. One
+//    implementation, two compilers — so the proof cannot drift away from what ships.
+#include "AtmosphereScatter.slang"
+
+// Unpack the celestial record into the scattering parameters. Kept next to the include so the mapping from the
+//    CPU-side struct to the physics is one short function that can be read in one go.
+AtmosphereParameters CelestialAtmosphereOf(CelestialRecord sky)
+{
+    AtmosphereParameters atmosphere;
+    atmosphere.RayleighScattering  = sky.RayleighScatteringAndHeight.xyz;
+    atmosphere.MieScattering       = sky.MieScatteringAndHeight.xyz;
+    atmosphere.OzoneAbsorption     = sky.OzoneAbsorptionAndG.xyz;
+    atmosphere.GroundAlbedo        = sky.GroundAlbedoAndPlanetRadius.xyz;
+    atmosphere.RayleighScaleHeight = sky.RayleighScatteringAndHeight.w;
+    atmosphere.MieScaleHeight      = sky.MieScatteringAndHeight.w;
+    atmosphere.MieAnisotropy       = sky.OzoneAbsorptionAndG.w;
+    atmosphere.PlanetRadius        = sky.GroundAlbedoAndPlanetRadius.w;
+    atmosphere.AtmosphereHeight    = sky.AtmosphereHeightAndFog.x;
+    return atmosphere;
+}
 const uint kVisibilityInvalid = 0xFFFFFFFFu;
 uint VisibilityInstance(uint Packed)  { return (Packed >> 14) & 0x3FFFFu; }
 uint VisibilityPrimitive(uint Packed) { return Packed & 0x3FFFu; }
