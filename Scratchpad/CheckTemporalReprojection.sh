@@ -24,12 +24,13 @@ ShaderSurface=$(grep -oP 'layout\(rgba16f, binding = \K[0-9]+(?=\) uniform image
 ShaderTextures=$(grep -oP 'layout\(binding = \K[0-9]+(?=\) uniform sampler2D Textures)' Engine/Shaders/ReSTIRViewport.slang)
 
 Fail=0
-# 22 bindings: the set runs 0..21 with no holes. Textures[] is last at 21 (Vulkan requires the
+# 23 bindings: the set runs 0..22 with no holes. P1 added the celestial record at 21, pushing the
+# bindless table to 22. Textures[] must stay last (Vulkan requires the
 # variable-count binding on the highest number). HistorySurfaceImage stayed at 18 and is still
 # shared with the denoiser for its edge-stopping weights.
-[ "$Count" = "22" ]           || { echo "  kComputeBindingCount is $Count, expected 22"; Fail=1; }
+[ "$Count" = "23" ]           || { echo "  kComputeBindingCount is $Count, expected 23"; Fail=1; }
 [ "$ShaderSurface" = "18" ]   || { echo "  HistorySurfaceImage is at $ShaderSurface, expected 18"; Fail=1; }
-[ "$ShaderTextures" = "21" ]  || { echo "  Textures[] is at $ShaderTextures, expected 21"; Fail=1; }
+[ "$ShaderTextures" = "22" ]  || { echo "  Textures[] is at $ShaderTextures, expected 22"; Fail=1; }
 
 # The variable-count bindless array must be the highest binding in the set — Vulkan requires it.
 [ "$ShaderTextures" = "$((Count - 1))" ] \

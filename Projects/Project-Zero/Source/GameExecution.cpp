@@ -30,6 +30,8 @@
 #include "../../../Engine/DeviceExchange/SwapchainExchange.h"
 #include "../../../Engine/DisplayPresentation/ReSTIRIntegrator.h"
 #include "../../../Engine/DisplayPresentation/ShadingTableCodec.h"
+#include "../../../Engine/DisplayPresentation/CelestialUniform.h"
+#include "../../../Engine/DisplayPresentation/CelestialSettingsCodec.h"
 #include "../../../Engine/DeviceExchange/DiagnosticMetrics.h"
 #include "../../../Engine/ContentInterchange/ContentCodec.h"
 #include "../../../Engine/ContentInterchange/SceneCodec.h"
@@ -69,7 +71,14 @@ void PrintUsage(const char* Program) noexcept
               << "  --render-scale <float>     kernel resolution fraction\n"
               << "  --frame-cap <fps>          pace the loop\n"
               << "  --frames <n>               exit after n presented frames\n"
-              << "  --animate                  scripted instance motion (D3)\n";
+              << "  --animate                  scripted instance motion (D3)\n"
+              << "  --sky <file.toml>          live-reloaded celestial settings (edit while running)\n"
+              << "  --write-sky <file.toml>    write a fully commented settings template and exit\n"
+              << "  --time <hours>             local clock time, 0-24 (default 12)\n"
+              << "  --date <YYYY-MM-DD>        observation date\n"
+              << "  --latitude <deg> --longitude <deg>   observer site, +N / +E\n"
+              << "  --time-rate <x>            in-game hours per real second (0 = frozen clock)\n"
+              << "  --no-sky                   disable the celestial system entirely\n";
 }
 
 } // namespace
@@ -89,6 +98,14 @@ int main(int argc, char** argv)
     bool        AdaptiveExposure = false;
     bool        WantGi = true, WantAa = true, WantTemporal = true, WantSpatial = true;
     bool        WantAliasPick = true, WantDenoise = true, WantReprojection = true;
+
+    // P1 celestial state. The struct holds its own defaults (Benoni, noon, today); the CLI and the TOML file only
+    //    override. CelestialHoursPerSecond advances the in-game clock, and defaults to 0 so that the sky is
+    //    perfectly still unless asked to move — a drifting sun would make every A/B comparison unrepeatable.
+    Frontier::CelestialStructure Celestial{};
+    std::string CelestialPath;
+    std::string CelestialTemplatePath;
+    float       CelestialHoursPerSecond = 0.0f;
     bool        WantResetOnMotion = false;   // P0: motion no longer restarts accumulation; this restores the old behaviour
     float       RenderScale = 1.0f;
     float       FrameCapFps = 0.0f;   // 0 = uncapped
@@ -114,6 +131,29 @@ int main(int argc, char** argv)
         else if (std::strcmp(Arg, "--no-denoise") == 0)      WantDenoise = false;
         else if (std::strcmp(Arg, "--no-reprojection") == 0) WantReprojection = false;
         else if (std::strcmp(Arg, "--reset-on-motion") == 0) WantResetOnMotion = true;
+        else if (std::strcmp(Arg, "--no-sky") == 0)          Celestial.Enabled = false;
+        else if (std::strcmp(Arg, "--sky") == 0)          { if (const char* V = NeedValue(Arg)) CelestialPath = V; }
+        else if (std::strcmp(Arg, "--write-sky") == 0)    { if (const char* V = NeedValue(Arg)) CelestialTemplatePath = V; }
+        else if (std::strcmp(Arg, "--time") == 0)         { if (const char* V = NeedValue(Arg)) Celestial.Observation.LocalHours = static_cast<float>(std::atof(V)); }
+        else if (std::strcmp(Arg, "--latitude") == 0)     { if (const char* V = NeedValue(Arg)) Celestial.Observation.Latitude  = static_cast<float>(std::atof(V)); }
+        else if (std::strcmp(Arg, "--longitude") == 0)    { if (const char* V = NeedValue(Arg)) Celestial.Observation.Longitude = static_cast<float>(std::atof(V)); }
+        else if (std::strcmp(Arg, "--time-rate") == 0)    { if (const char* V = NeedValue(Arg)) CelestialHoursPerSecond = static_cast<float>(std::atof(V)); }
+        else if (std::strcmp(Arg, "--date") == 0)
+        {
+            // YYYY-MM-DD. Parsed strictly: a half-read date silently defaulting to the epoch would put the sun in
+            //    the wrong place by weeks, which looks like a solver bug rather than a typo at the prompt.
+            if (const char* V = NeedValue(Arg))
+            {
+                int Y = 0, M = 0, D = 0;
+                if (std::sscanf(V, "%d-%d-%d", &Y, &M, &D) == 3 && M >= 1 && M <= 12 && D >= 1 && D <= 31)
+                {
+                    Celestial.Observation.Year  = Y;
+                    Celestial.Observation.Month = M;
+                    Celestial.Observation.Day   = D;
+                }
+                else std::cerr << "[CLI] --date wants YYYY-MM-DD, got '" << V << "'; keeping the default.\n";
+            }
+        }
         else if (std::strcmp(Arg, "--scene") == 0)        { if (const char* V = NeedValue(Arg)) ScenePath = V; }
         else if (std::strcmp(Arg, "--scale") == 0)        { if (const char* V = NeedValue(Arg)) SceneScale = static_cast<float>(std::atof(V)); }
         else if (std::strcmp(Arg, "--width") == 0)        { if (const char* V = NeedValue(Arg)) WindowWidth = static_cast<uint32_t>(std::atoi(V)); }
@@ -146,6 +186,36 @@ int main(int argc, char** argv)
     if (ScenePath == "showroom")   ScenePath = "Projects/Project-Zero/Content/Scenes/Showroom.gltf";     // furnished level
     bool DropScene = false;
     if (ScenePath == "drop") { ScenePath = "Projects/Project-Zero/Content/Scenes/ShowroomDrop.gltf"; DropScene = true; }   // D4 physics level
+
+    //──────────────────────────────────────────────────────────────────────────
+    // P1: the celestial control surface
+    //──────────────────────────────────────────────────────────────────────────
+    // --write-sky emits a template and exits, so there is always a way to see every property and its range without
+    //    reading the source. The template is generated from kCelestialProperties, so it cannot go out of date.
+    if (!CelestialTemplatePath.empty())
+    {
+        if (Frontier::WriteCelestialSettings(CelestialTemplatePath.c_str(), Celestial))
+        {
+            std::cerr << "[Celestial] wrote " << Frontier::kCelestialPropertyCount
+                      << " properties to " << CelestialTemplatePath << "\n";
+            return 0;
+        }
+        std::cerr << "[Celestial] could not write " << CelestialTemplatePath << "\n";
+        return 1;
+    }
+
+    Frontier::CelestialSettingsWatch CelestialWatch;
+    if (!CelestialPath.empty())
+    {
+        CelestialWatch.AssignPath(CelestialPath);
+        // The first Poll loads the file; if it is missing, write it, so --sky doubles as "make me one to edit".
+        if (!CelestialWatch.Poll(Celestial))
+        {
+            if (Frontier::WriteCelestialSettings(CelestialPath.c_str(), Celestial))
+                std::cerr << "[Celestial] " << CelestialPath << " did not exist; wrote the defaults there. "
+                             "Edit it while the game runs.\n";
+        }
+    }
 
     //──────────────────────────────────────────────────────────────────────────
     // Telemetry sink
@@ -399,6 +469,7 @@ int main(int argc, char** argv)
     Frontier::ProjectZero::InstanceMotionSequence InstanceMotion;
     bool   InstanceMotionReady = false;
     double InstanceMotionElapsed = 0.0;   // [s]
+    double CelestialWallSeconds  = 0.0;   // [s] monotonic real time for the wind — NOT the time of day
 
     // D4 — real rigid bodies. Takes precedence over the scripted driver: --scene drop replaces the analytic path
     //    with Jolt poses through exactly the same RefreshInstances upload, which is why D3 was worth proving first.
@@ -517,6 +588,46 @@ int main(int argc, char** argv)
             const float Measured = Surface.QueryAverageLogLuminance();
             if (Measured > -1.0e8f) Integrator.Exposure().ObserveLuminance(Measured);
             Integrator.Exposure().Advance(Δτ);
+        }
+
+        //──────────────────────────────────────────────────────────────────────
+        // P1: solve the sky and hand it to the GPU. Every frame, unconditionally.
+        //──────────────────────────────────────────────────────────────────────
+        // ⚠️ TWO CLOCKS, AND THEY ARE NOT THE SAME CLOCK. `CelestialWallSeconds` is monotonic real time and drives
+        //    the wind, so the cloud field advects at a steady rate no matter what the time-of-day slider does.
+        //    `Observation.LocalHours` is the time of day and drives the sun. Scrubbing the hour therefore moves the
+        //    sun without teleporting the clouds, which is the behaviour a person expects and the opposite of what
+        //    a single shared clock would give.
+        CelestialWallSeconds += static_cast<double>(Δτ);
+        if (CelestialHoursPerSecond != 0.0f)
+        {
+            Celestial.Observation.LocalHours += CelestialHoursPerSecond * Δτ;
+            // Wrap the day over, so leaving the game running overnight does not park the sun at hour 4000.
+            while (Celestial.Observation.LocalHours >= 24.0f)
+            {
+                Celestial.Observation.LocalHours -= 24.0f;
+                Celestial.Observation.Day += 1;
+                if (Celestial.Observation.Day > 28) { Celestial.Observation.Day = 1; Celestial.Observation.Month += 1; }
+                if (Celestial.Observation.Month > 12) { Celestial.Observation.Month = 1; Celestial.Observation.Year += 1; }
+            }
+        }
+
+        // Live reload: an editor save changes the sky on the next frame, no restart. This is the slider, for now.
+        if (CelestialWatch.Poll(Celestial))
+        {
+            const Frontier::CelestialSolution Reloaded = Frontier::SolveCelestial(Celestial);
+            std::cerr << "[Celestial] sun elevation " << Reloaded.SunElevationDegrees
+                      << " deg, EV100 " << Reloaded.ExposureEv100 << "\n";
+        }
+
+        {
+            const Frontier::CelestialSolution Solution = Frontier::SolveCelestial(Celestial);
+            Frontier::CelestialUniform Record{};
+            Frontier::PackCelestialUniform(Celestial, Solution, CelestialWallSeconds, Record);
+            static_assert(sizeof(Frontier::CelestialUniform) == Frontier::kCelestialRecordBytes,
+                          "CelestialUniform and the GPU buffer must be the same size; update the shader's "
+                          "CelestialRecord and kCelestialRecordBytes together");
+            Surface.UploadCelestial(&Record, static_cast<uint32_t>(sizeof(Record)));
         }
 
         Integrator.ObserveCamera(Camera, RenderWidth, RenderHeight);

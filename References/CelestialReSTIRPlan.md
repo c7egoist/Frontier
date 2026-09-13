@@ -249,6 +249,40 @@ Status log (append; newest last):
   Jolt) were missing third-party trees, not regressions -- verified by running them against the pre-P0 stash --
   and are now populated out-of-band; .gitignore records that ExternalPackages/ is not carried on this branch.
   User confirmed: TOML + CLI for the slider surface (P8), stability before sky. NEXT: P1.
+- 2026-09-13: **P1 DONE — CelestialStructure, the ephemeris solver, and the GPU record.** Four new files.
+  1a. `Engine/DisplayPresentation/CelestialStructure.h` — every celestial property with its units, plus a
+      `kCelestialProperties` table (52 entries) that binds name/unit/range/default to each field's own offset, so
+      a control cannot exist for a field that is gone and a field cannot be added without saying how it is edited.
+      No `HideInDay` flag anywhere: a daytime moon must fall out of the radiance comparison, not a special case.
+  1b. `CelestialSolver.h` — header-only, Vulkan-free, so the test includes the production file. Almanac
+      Appendix C sun (0.01 deg), truncated Meeus moon (arcminutes), IAU 1982 sidereal time, ENU on the engine's
+      Z-up. `SolveCelestialEv100(elevation, settings)` — the signature IS the F3 fix: no camera can be passed,
+      so a still sun gives a still gain. Anchors 15 EV zenith / 9 EV horizon / -6 EV night.
+  1c. `CelestialUniform.h` — 21 vec4s = 336 B, std140-safe by having no scalar arrays at all; black-body sun
+      tint normalised to unit luminance so temperature changes hue and Intensity changes brightness, separately.
+      Wind drift is INTEGRATED ON THE CPU in metres from wall time, so moving the speed slider does not
+      retroactively rewrite cloud history.
+  1d. `CelestialSettingsCodec.h` — live-reloaded TOML (mtime poll), generated from the same property table;
+      `--write-sky` emits a fully commented template. This is the slider surface until P8.
+  Plumbing: binding 21 = celestial SSBO, bindless `Textures[]` moved to 22, `kComputeBindingCount` 22 -> 23,
+  storage-buffer pool count 11 -> 12 (the file's own comments record the 11-vs-12 bug; the new gate now counts
+  both sides instead of trusting the literal). Buffer allocated once and kept across resizes, host-visible and
+  persistently mapped, zeroed so a pre-upload frame reads flags=0 rather than NaN. Game loop solves and uploads
+  every frame; `--time/--date/--latitude/--longitude/--time-rate/--sky/--no-sky` added.
+  ⚠️ TWO CLOCKS: wall time drives the wind, `LocalHours` drives the sun. Scrubbing the hour must not teleport
+  the clouds.
+  Measured, not assumed — three real defects the proof caught: (i) the daylight EV curve used a CUBE root, whose
+  infinite derivative at zero elevation jumped **0.288 EV in the first hundredth of a degree** above the horizon,
+  a visible flash at sunrise; the 2/3 exponent brings the largest step to **0.0139 EV**. (ii) The first transit
+  test sampled clock noon corrected for longitude and missed due north by **4.58 deg** — the equation of time,
+  up to +/-16 min; the test now finds the transit by search, and both solstice altitudes land within 0.005 deg
+  (40.375 / 87.244 vs 40.37 / 87.25). (iii) The star-rotation test compared an unwrapped angle; it now compares
+  modulo a turn and confirms the **0.9856 deg/day** sidereal over-rotation.
+  Gates: `Scratchpad/CelestialSolverTest.cpp` (44 checks, 0 failures) + `Scratchpad/CheckCelestialSolver.sh`,
+  which also diffs the 21 C++ field names against the shader struct field-by-field, compares all six flag bits,
+  counts the descriptor pool against the layout, asserts 22 is the highest binding, and re-lowers the production
+  kernel to SPIR-V (188 680 bytes, up from 187 192). `CheckTemporalReprojection.sh` updated for 23/22.
+  **ALL 17 SUITES GREEN.** NEXT: P2, the sky LUTs and the miss path.
 - 2026-09-13: Plan written after reading the tree. Key findings: this tree is ReSTIR-only already (R1), the
   three "no environment light" sites are located (R2), the binding set is full and gated (R3), push constants are
   full (R4), and the exposure complaint has a known mechanism that a sky would AMPLIFY (R5) — so P0 fixes it

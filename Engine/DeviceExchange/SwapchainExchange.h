@@ -61,7 +61,12 @@ static constexpr float    kLuminanceLog2High      =  30.0f;   // 1e9 cd/m², abo
 static constexpr float    kLuminanceMedianStops   = 6.0f;
 static constexpr uint32_t kLuminanceHistogramBytes = kLuminanceHistogramBins * 4u;
 
-static constexpr uint32_t kComputeBindingCount  = 22u;    // compute set 0: 0 out · 1 tris · 2 materials · 3 history · 4 surface · 5 normal · 6 instances · 7 luminaires · 8/9 CWBVH · 10 slabs · 11 vertices · 12 indices · 13 energy LUT · 14 sheen LUT · 15 motion · 16 prev reservoir · 17 curr reservoir · 18 history normal+depth (R7a) · 19 luminance moments (R7) · 20 denoise input (R7) · 21 Textures[] (variable-count binding MUST stay last — Vulkan requires it on the highest binding number)
+static constexpr uint32_t kComputeBindingCount  = 23u;    // compute set 0: 0 out · 1 tris · 2 materials · 3 history · 4 surface · 5 normal · 6 instances · 7 luminaires · 8/9 CWBVH · 10 slabs · 11 vertices · 12 indices · 13 energy LUT · 14 sheen LUT · 15 motion · 16 prev reservoir · 17 curr reservoir · 18 history normal+depth (R7a) · 19 luminance moments (R7) · 20 denoise input (R7) · 21 celestial record (P1) · 22 Textures[] (variable-count binding MUST stay last — Vulkan requires it on the highest binding number)
+// P1: the byte size of the celestial record at binding 21. Stated here rather than as sizeof(CelestialUniform) so
+//    that this header does not have to pull in the DisplayPresentation tree; the two are tied together by a
+//    static_assert at the point of upload, which fails the build if they ever disagree.
+static constexpr uint32_t kCelestialRecordBytes = 336u;
+
 static constexpr uint32_t kTextureSlotCapacity  = 1024u;  // bindless sampler2D[] size (variable-count binding; Pascal maxPerStageDescriptorSamplers ≥ 4000)
 class MaterialIndex;    // ContentInterchange/MaterialIndex.h (R4a)
 
@@ -240,6 +245,12 @@ public:
     //    available yet. Reads the slot the GPU has already finished with, so it never stalls: the value is one
     //    or two frames stale, which is invisible against adaptation time constants measured in seconds.
     [[nodiscard]] float QueryAverageLogLuminance() const noexcept;
+
+    // P1. Hand the GPU this frame's celestial state. Called once per frame, before the dispatch is recorded, with
+    //    the freshly packed CelestialUniform; `ByteCount` is checked against the buffer so a struct that grew
+    //    without the shader growing with it is caught here instead of corrupting the descriptor set.
+    //    Taking void* keeps this header free of the celestial headers — see kCelestialRecordBytes above.
+    void UploadCelestial(const void* Record, uint32_t ByteCount) noexcept;
 
     template<typename TargetType>
     [[nodiscard]] TargetType    Convert() const noexcept;

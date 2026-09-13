@@ -121,6 +121,14 @@ struct SwapchainExchange::VulkanRecord
     // A6b luminance reduction. One accumulator per cycle slot: the CPU reads slot N's result while the GPU is
     //    writing slot N+1, so nothing is ever read while it is being written and no extra fence is needed.
     //    Persistently mapped — mapping and unmapping every frame is a driver round trip for eight bytes.
+    // P1 celestial record — one host-visible, persistently mapped buffer holding CelestialUniform (336 B).
+    //    ONE, not one per cycle slot: it is written on the render thread immediately before the frame's dispatch
+    //    is recorded and read only by that dispatch, and 336 bytes of HOST_COHERENT write costs far less than the
+    //    fence bookkeeping multi-buffering would need. Revisit only if the celestial solve ever moves off-thread.
+    VkBuffer                 CelestialBuffer = VK_NULL_HANDLE;
+    VkDeviceMemory           CelestialMemory = VK_NULL_HANDLE;
+    void*                    CelestialMapped = nullptr;
+
     VkBuffer                 LuminanceBuffers[kCycleSlotCount] = {};
     VkDeviceMemory           LuminanceMemory [kCycleSlotCount] = {};
     void*                    LuminanceMapped [kCycleSlotCount] = {};
@@ -448,6 +456,10 @@ void SwapchainExchange::Retire() noexcept
         if (Vulkan->LuminanceBuffers[Slot]) vkDestroyBuffer(Vulkan->Device, Vulkan->LuminanceBuffers[Slot], nullptr);
         if (Vulkan->LuminanceMemory[Slot])  vkFreeMemory(Vulkan->Device, Vulkan->LuminanceMemory[Slot], nullptr);
     }
+    if (Vulkan->CelestialMapped) vkUnmapMemory(Vulkan->Device, Vulkan->CelestialMemory);
+    if (Vulkan->CelestialBuffer) vkDestroyBuffer(Vulkan->Device, Vulkan->CelestialBuffer, nullptr);
+    if (Vulkan->CelestialMemory) vkFreeMemory(Vulkan->Device, Vulkan->CelestialMemory, nullptr);
+
     if (Vulkan->LuminancePipeline)   vkDestroyPipeline(Vulkan->Device, Vulkan->LuminancePipeline, nullptr);
     if (Vulkan->LuminanceLayout)     vkDestroyPipelineLayout(Vulkan->Device, Vulkan->LuminanceLayout, nullptr);
     if (Vulkan->LuminanceSetLayout)  vkDestroyDescriptorSetLayout(Vulkan->Device, Vulkan->LuminanceSetLayout, nullptr);
@@ -1049,6 +1061,27 @@ bool SwapchainExchange::BringStorageImage() noexcept
         std::cerr << "[SwapchainExchange] Reservoirs: 2 x " << (Vulkan->ReservoirBytes >> 20u) << " MB (64 B/px temporal DI state).\n";
     }
 
+    // 4. P1 celestial record - allocated once and kept across resizes. The sky does not care how big the window is,
+    //    and reallocating it here would leak the old buffer on every resize, which is the kind of thing that only
+    //    shows up after someone has dragged a window border for ten seconds.
+    if (!Vulkan->CelestialBuffer)
+    {
+        constexpr uint32_t CelestialHostVisible =
+            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+        AllocateBuffer(Vulkan->Device, Vulkan->MemoryProperties, kCelestialRecordBytes,
+                       VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, CelestialHostVisible,
+                       Vulkan->CelestialBuffer, Vulkan->CelestialMemory);
+        if (!Vulkan->CelestialBuffer) return false;
+        if (vkMapMemory(Vulkan->Device, Vulkan->CelestialMemory, 0u, kCelestialRecordBytes, 0u,
+                        &Vulkan->CelestialMapped) != VK_SUCCESS || !Vulkan->CelestialMapped)
+            return false;
+        // Zeroed, so the flags word reads 0 and the shader takes the disabled path until the first real upload.
+        //    A frame of uninitialised celestial state would be a frame of NaN sky, and NaN poisons the reservoir
+        //    history, which then survives long after the bad frame itself is gone.
+        std::memset(Vulkan->CelestialMapped, 0, kCelestialRecordBytes);
+        std::cerr << "[SwapchainExchange] Celestial record: " << kCelestialRecordBytes << " B host-visible (binding 21).\n";
+    }
+
     Vulkan->HistoryInitialised = false;
     return true;
 }
@@ -1107,11 +1140,11 @@ bool SwapchainExchange::BringComputePipeline() noexcept
     for (uint32_t B = 4u; B < kComputeBindingCount - 1u; ++B)
     {
         LayoutBindings[B].binding         = B;
-        LayoutBindings[B].descriptorType  = (B < 6u || B == 18u || B == 19u || B == 20u) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : (B == 13u || B == 14u || B == 15u) ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;   // 18 R7a surface · 19/20 R7 moments + denoise input
+        LayoutBindings[B].descriptorType  = (B < 6u || B == 18u || B == 19u || B == 20u) ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : (B == 13u || B == 14u || B == 15u) ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;   // 18 R7a surface · 19/20 R7 moments + denoise input · 21 P1 celestial record falls through to STORAGE_BUFFER, which is what it wants
         LayoutBindings[B].descriptorCount = 1u;
         LayoutBindings[B].stageFlags      = VK_SHADER_STAGE_COMPUTE_BIT;
     }
-    const uint32_t TextureBinding = kComputeBindingCount - 1u;   // 21 (must be the highest binding)
+    const uint32_t TextureBinding = kComputeBindingCount - 1u;   // 22 (must be the highest binding)
     LayoutBindings[TextureBinding].binding         = TextureBinding;
     LayoutBindings[TextureBinding].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     LayoutBindings[TextureBinding].descriptorCount = Vulkan->DescriptorIndexing ? kTextureSlotCapacity : 1u;
@@ -1482,7 +1515,10 @@ bool SwapchainExchange::BringDescriptorSet() noexcept
     // ⚠️ Counted by hand. It once said 11 against a layout asking for 12, so every run began with
     //    "trying to allocate 12 ... but this pool only has a total of 11": allowed to succeed on this driver,
     //    guaranteed to fail on another.
-    PoolSizes[1].descriptorCount = 11u;                         // 1, 2, 6-12, 16-17
+    // ⚠️ 12, not 11: binding 21 (the P1 celestial record) is a storage buffer too. This count is the thing the
+    //    comment above warns about — it is hand-maintained, and adding a binding without bumping it is exactly the
+    //    11-vs-12 bug all over again. CheckCelestialBinding.sh now counts the layout and the pool and compares.
+    PoolSizes[1].descriptorCount = 12u;                         // 1, 2, 6-12, 16-17, 21
     PoolSizes[2].type            = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     PoolSizes[2].descriptorCount = 3u + (Vulkan->DescriptorIndexing ? kTextureSlotCapacity : 1u);   // 13/14 material LUTs · 15 motion · the bindless table
 
@@ -1655,7 +1691,9 @@ void SwapchainExchange::WriteDescriptorSet() noexcept
     WriteBuffer(17u, CurrReservoirInfo);
     WriteImage (18u, HistorySurfaceInfo);   // R7a: history (normal, depth) for running-mean reprojection
     WriteImage (19u, MomentInfo);           // R7:  luminance moments, for the variance estimate
-    WriteImage (20u, DenoiseInputInfo);     // R7:  linear radiance + variance, the à-trous input
+    WriteImage (20u, DenoiseInputInfo);     // R7:  linear radiance + variance, the a-trous input
+    VkDescriptorBufferInfo CelestialInfo{ Vulkan->CelestialBuffer, 0u, VK_WHOLE_SIZE };
+    WriteBuffer(21u, CelestialInfo);        // P1:  sun, sky, clouds, fog, moon, stars - re-uploaded every frame
     // R4a: the texture table. Written in one go (partially bound: slots past the resident count stay undefined and are
     //    never indexed — the material records only reference resident slots).
     std::vector<VkDescriptorImageInfo> TextureInfos;
@@ -2113,6 +2151,35 @@ bool SwapchainExchange::RefreshTraversal(const TraversalIndex& Traversal, const 
     //    acceleration structure or shading would read the body's old position.
     UploadTriangles(Facets);
     return true;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                         P1: THE PER-FRAME CELESTIAL UPLOAD
+//------------------------------------------------------------------------------------------------------------------------
+
+// Every frame, unconditionally. There is no dirty flag and there should not be one: the sun moves continuously, the
+//    wind advects continuously, and a 336-byte memcpy into already-mapped HOST_COHERENT memory is not a cost worth
+//    a staleness bug. This is what "fully dynamic, nothing baked at load" (F4) means in practice.
+void SwapchainExchange::UploadCelestial(const void* Record, uint32_t ByteCount) noexcept
+{
+    if (!Vulkan || !Vulkan->CelestialMapped || !Record) return;
+
+    // A caller that grew CelestialUniform without growing the shader's CelestialRecord would otherwise write past
+    //    the buffer. Refuse, loudly, once — the sky going missing with an explanation beats memory corruption.
+    if (ByteCount != kCelestialRecordBytes)
+    {
+        static bool Reported = false;
+        if (!Reported)
+        {
+            Reported = true;
+            std::cerr << "[SwapchainExchange] Celestial record is " << ByteCount << " B but the buffer is "
+                      << kCelestialRecordBytes << " B. Update kCelestialRecordBytes and the shader's "
+                         "CelestialRecord together, then rebuild the SPIR-V.\n";
+        }
+        return;
+    }
+
+    std::memcpy(Vulkan->CelestialMapped, Record, ByteCount);
 }
 
 void SwapchainExchange::UploadScene(const SceneStructure& Scene, const TraversalIndex& Traversal, const TextureIndex* Textures) noexcept

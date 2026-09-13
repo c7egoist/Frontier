@@ -118,7 +118,45 @@ layout(std430, binding = 17) writeonly buffer CurrReservoirExtent { GpuReservoir
 layout(rgba16f, binding = 18) uniform image2D HistorySurfaceImage;   // R7a: xyz = normal, w = depth the history mean was shaded at (w ≤ 0 = no surface)
 layout(rgba32f, binding = 19) uniform image2D MomentImage;           // R7: x = E[luma], y = E[luma²], reprojected with the mean
 layout(rgba32f, binding = 20) uniform writeonly image2D DenoiseImage; // R7: xyz = linear radiance, w = variance — the à-trous input
-layout(binding = 21) uniform sampler2D Textures[];   // R4a bindless table — ⚠️ a variable-count binding must be the last one in the set
+// ── P1: the celestial record ───────────────────────────────────────────────────────────────────────────────────────
+// Mirrors CelestialUniform (Engine/DisplayPresentation/CelestialUniform.h) field for field, 21 vec4s = 336 bytes.
+// ⚠️ A readonly SSBO rather than a uniform block, deliberately: std430 lays vec4s out identically to the C++ struct,
+//    whereas std140 would need padding rules re-derived here, and the descriptor pool's storage-buffer count is the
+//    one already sized for data bindings. Read-only, written once per frame by the CPU solve — nothing is baked (F4).
+struct CelestialRecord
+{
+    vec4 SunDirectionAndCosRadius;      // xyz dir TO sun, w cos(angular radius)
+    vec4 SunRadianceAndLimb;            // rgb radiance, w limb darkening
+    vec4 MoonDirectionAndCosRadius;
+    vec4 MoonRadianceAndEarthshine;
+    vec4 RayleighScatteringAndHeight;   // rgb 1/m, w scale height [m]
+    vec4 MieScatteringAndHeight;
+    vec4 OzoneAbsorptionAndG;           // rgb 1/m, w Mie anisotropy
+    vec4 GroundAlbedoAndPlanetRadius;
+    vec4 AtmosphereHeightAndFog;        // x shell [m], y fog density, z fog height, w fog sun scatter
+    vec4 CloudLayer;                    // x coverage, y density, z base [m], w thickness [m]
+    vec4 CloudShape;                    // x shape scale [m], y detail, z anvil, w powder
+    vec4 CloudLighting;                 // x g1, y g2, z mix, w ambient
+    vec4 CloudAbsorptionAndWind;        // x absorption, yz wind drift [m], w wind speed
+    vec4 WindShear;                     // x shear, y veer [rad], z gust, w turbulence
+    vec4 LocalCloudCentreAndDensity;    // w == 0 means disabled; no branch needed
+    vec4 LocalCloudExtentAndCoverage;
+    vec4 LocalFogCentreAndDensity;      // w == 0 means disabled
+    vec4 LocalFogExtentAndG;
+    vec4 StarsAndRotation;              // x brightness, y density, z size, w sidereal rotation [rad]
+    vec4 ExposureAndFlags;              // x gain, y EV100, z sun elevation [deg], w feature bits as a float
+    vec4 MilkyWayAndMoonPhase;          // x milky way, y lit fraction, z elongation [rad], w wall seconds
+};
+layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord Celestial[]; };
+
+#define kCelestialFlagEnabled    1u
+#define kCelestialFlagFog        2u
+#define kCelestialFlagLocalFog   4u
+#define kCelestialFlagLocalCloud 8u
+#define kCelestialFlagMoon       16u
+#define kCelestialFlagStars      32u
+
+layout(binding = 22) uniform sampler2D Textures[];   // R4a bindless table — ⚠️ a variable-count binding must be the last one in the set
 
 const float kTemporalNormalCos = 0.906308;   // cos(25°): temporal/spatial normal validation
 const float kTemporalDepthTol  = 0.10;       // 10% relative depth validation
