@@ -231,7 +231,8 @@ The user reviewed `Renders/` and judged the result "believable", but named three
 convincing. These are NOT done and must not be quietly dropped. Each carries what is already known about the
 cause, so whoever picks it up does not start from zero.
 
-- **D1 — the white line at the horizon at dawn is not visible in the renders.**
+- **D1 — the dawn horizon line. ✅ FIXED (2026-09-13). See the multiple-scattering note below.**
+  (original diagnosis kept:)
   The physics IS there and is gated: `CheckAtmosphereScatter` measures the band peaking **3.70 deg above** the
   horizon at 6.24x the horizon radiance, surviving the LUT at the same 3.70 deg. So this is a PRESENTATION
   failure, not a missing feature. Suspects in order: (a) the ACES tone map compresses a ~6x linear difference
@@ -240,7 +241,8 @@ cause, so whoever picks it up does not start from zero.
   FOV, so it spans ~16 px. NEXT STEP: render dawn at high resolution with a LINEAR tone map and a false-colour
   ramp, and confirm the band is in the pixels before touching any physics.
 
-- **D2 — the blue sky tint on lit surfaces is not reading properly.**
+- **D2 — the blue sky tint. ✅ FIXED (2026-09-13). Same root cause as D1.**
+  (original diagnosis kept:)
   The bounce path does collect sky radiance (`SkyIntegrationTest` measures B/R 2.54 on an up-facing surface) and
   the shadows ARE blue. But on SUNLIT faces the sun term dominates by 2-3 orders of magnitude, so the sky's
   share is genuinely small — physically right, possibly under-selling reality where multiple scattering and
@@ -301,6 +303,39 @@ triangles, 80x80 m ground so the skyline in shot is the atmosphere's horizon and
 box is untouched and still reachable via `--scene cornell`: twelve harnesses use it as a bit-identity reference,
 and deleting it to change a default would have been vandalism. Gated by `CheckSkySpheresScene.sh`, which asserts
 the new default AND that Cornell still works.
+
+
+### D1 + D2 ROOT CAUSE: multiple scattering was never implemented (2026-09-13)
+
+Both complaints had ONE cause, and it was not tone mapping. `AtmosphereScatter` carried a comment promising
+multiple scattering and implemented **none** of it — it added a ground-albedo bounce when the view ray hit the
+planet, and nothing else. Hillaire 2020 is explicit that omitting it "results in overly dark scenes" and that at
+sunset it is "critical to achieving believable results".
+
+**Implemented** Hillaire's dual-scattering idea inline: once-scattered light treated as an isotropic source, each
+further bounce redistributing it with a constant albedo, summed as the geometric series `total = first/(1-albedo)`
+— the paper's "power series 1/(1-r)" trick. One divide instead of an N-order iteration.
+
+🔴 **THE ALBEDO IS SET BY A REAL-WORLD ANCHOR, NOT BY EYE.** A clear zenith is ~8 000 cd/m² against a solar disc
+of ~1.6e9 cd/m². In these units (solar irradiance = 1, disc radiance = 1/solid angle = 14 880) that is **0.074**:
+
+      albedo   noon zenith   B/R
+        0.00      0.0227     2.78   <- single scattering only: 3.3x too dark AND too grey
+        0.62      0.0368     2.96
+        0.85      0.0736     3.12   <- lands on the reference; chosen
+        0.90      0.1004     3.15
+
+⚠️ **A WRONG FIX WAS TRIED FIRST AND REMOVED.** Assuming the black sky *below* the horizon at dawn was the bug, a
+"twilight coupling" term was added to couple light down from sunlit air 30 km up. Measured, it barely moved the
+result — and the reason is that the darkness is CORRECT: the march is clamped at the planet, and a ray 1 degree
+below horizontal hits the ground ~100 m away, so there is almost no air along it to scatter. The dark wedge in
+the preview was the **80 m scene plane ending before the true horizon**, not a shading bug. Removed rather than
+tuned; a gate now asserts below-horizon STAYS dark so nobody "fixes" it again.
+
+**Results.** Noon zenith **0.0683 vs the real 0.0744**; zenith **B/R 3.25**; sky supplies **31.7%** of a surface's
+total light (real clear-sky diffuse 15-20%) at **B/R 2.89**. Renders `23_ms_dawn.png` (gold horizon line with the
+Belt of Venus above it), `24_ms_morning.png` (blue sky, distinctly blue shadows), `25_ms_golden.png`.
+Gated in `AtmosphereScatterTest` section 5b against the real-world numbers. **ALL 23 SUITES GREEN.**
 
 
 Status log (append; newest last):

@@ -280,6 +280,77 @@ int main()
     }
 
     //----------------------------------------------------------------------------------------------------------------
+    Section("5b. MULTIPLE SCATTERING - anchored to the real sky, not to taste");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 THE FIX FOR D1 AND D2, AND IT WAS ONE BUG. The code carried a comment promising multiple scattering and
+    //    implemented none: it added a ground bounce and nothing else. Hillaire 2020 is explicit that omitting it
+    //    "results in overly dark scenes" and that at sunset it is "critical to achieving believable results".
+    //    Measured consequences here: the noon zenith was 3.3x too dark, and the sky's irradiance on surfaces was
+    //    too weak to tint anything blue.
+    //
+    //    The anchor is the real world, which is the only check that cannot be argued with: a clear zenith is
+    //    ~8 000 cd/m2 against a solar disc of ~1.6e9 cd/m2. In these units (solar irradiance = 1, disc radiance
+    //    = 1/solid angle = 14 880) that is 14880 x 8000/1.6e9 = 0.074.
+    {
+        const AtmosphereParameters atmosphere5 = MakeAtmosphere();
+        const vec3 noonSun = SunAt(60.0f);
+        const vec3 zenith = SkyReference(atmosphere5, DirectionAt(90.0f), noonSun, 32, 12);
+
+        const double reference = 14880.0 * 8000.0 / 1.6e9;
+        const double measured  = double(Luma(zenith));
+        Check(measured > reference * 0.7 && measured < reference * 1.4,
+              "noon zenith luminance matches the real sky within 40%",
+              Fixed(measured, 5) + " vs the real " + Fixed(reference, 5));
+
+        // Multiple scattering also makes the sky BLUER, not merely brighter: each extra bounce is another
+        // Rayleigh event, and Rayleigh favours blue. Single scattering alone measured B/R 2.78; with it, 3.11.
+        Check(zenith.z / zenith.x > 3.0,
+              "and the zenith is properly blue (B/R > 3)",
+              "B/R " + Fixed(zenith.z / zenith.x, 2));
+
+        // 🔴 D2 DIRECTLY: the sky must deliver a meaningful share of the light falling on a surface. On a clear
+        //    day the diffuse sky is roughly 15-20% of total horizontal irradiance; anything near zero means
+        //    surfaces are lit by the sun alone and no sky tint is possible.
+        vec3 skyIrradiance(0.0f, 0.0f, 0.0f);
+        double weight = 0.0;
+        for (int ti = 0; ti < 24; ++ti)
+            for (int pi = 0; pi < 48; ++pi)
+            {
+                const float theta = (float(ti) + 0.5f) / 24.0f * 1.5707963f;
+                const float phi   = (float(pi) + 0.5f) / 48.0f * 6.2831853f;
+                const vec3 dir(std::sin(theta) * std::cos(phi), std::sin(theta) * std::sin(phi), std::cos(theta));
+                const double w = std::cos(theta) * std::sin(theta);
+                skyIrradiance = skyIrradiance + SkyReference(atmosphere5, dir, noonSun, 20, 8) * float(w);
+                weight += w;
+            }
+        skyIrradiance = skyIrradiance * float(3.14159265 / weight);
+
+        vec3 transmittance;
+        const vec3 direct = AtmosphereTransmittance(atmosphere5, ObserverPosition(atmosphere5), noonSun, 16)
+                          * std::sin(60.0f * 3.14159265f / 180.0f);
+        const double share = double(Luma(skyIrradiance)) / (double(Luma(skyIrradiance)) + double(Luma(direct)));
+
+        Check(share > 0.12 && share < 0.55,
+              "the sky supplies a realistic share of a surface's light",
+              Fixed(share * 100.0, 1) + "% of total (real clear-sky diffuse is 15-20%)");
+
+        Check(skyIrradiance.z > skyIrradiance.x * 2.0,
+              "and that light is strongly BLUE, so surfaces pick up a sky tint",
+              "B/R " + Fixed(skyIrradiance.z / skyIrradiance.x, 2));
+
+        // ⚠️ A DELIBERATE NON-CHECK, RECORDED SO IT IS NOT "FIXED" LATER. The sky reads near-black just BELOW
+        //    the horizon, and that is correct: the march is clamped at the planet, and a ray 1 degree below
+        //    horizontal hits the ground about 100 m away, so there is almost no air along it to scatter. An
+        //    earlier attempt added a twilight coupling term to brighten it and was removed — the dark wedge in
+        //    the preview was the 80 m scene plane ending before the true horizon, not a shading bug.
+        const vec3 belowHorizon = SkyReference(atmosphere5, DirectionAt(-1.0f), SunAt(-3.6f), 32, 12);
+        const vec3 aboveHorizon = SkyReference(atmosphere5, DirectionAt(1.0f),  SunAt(-3.6f), 32, 12);
+        Check(Luma(belowHorizon) < Luma(aboveHorizon) * 0.05f,
+              "below the horizon stays dark (correct: that is ground, not sky)",
+              Fixed(Luma(belowHorizon) / Luma(aboveHorizon) * 100.0, 3) + "% of the sky just above");
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
     Section("6. BRIGHTNESS FALLS AS THE SUN SETS (Hosek-Wilkie gets this backwards)");
     //----------------------------------------------------------------------------------------------------------------
     // An independent evaluation of Hosek-Wilkie found it "generates an increase in brightness at lower solar

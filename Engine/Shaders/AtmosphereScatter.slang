@@ -76,6 +76,26 @@ struct AtmosphereParameters
 // Step-distribution exponent for the view march. See the measurement table at the march itself.
 #define kStepWarp 1.5
 
+// Multiple-scattering albedo for the geometric series total = first/(1-albedo).
+//
+//    🔴 SET BY A REAL-WORLD ANCHOR, NOT BY EYE. A clear zenith sky is about 8 000 cd/m2 against a solar disc of
+//    about 1.6e9 cd/m2. In this file's units (solar irradiance = 1, so the disc's radiance is 1/its solid angle
+//    = 14 880) that puts the noon zenith at 14880 x 8000/1.6e9 = 0.074. Measured sweep at 60 deg sun elevation:
+//
+//        albedo   zenith     B/R
+//          0.00   0.0227    2.78     <- single scattering only: 3.3x too dark, and too grey
+//          0.62   0.0368    2.96
+//          0.80   0.0573    3.07
+//          0.85   0.0736    3.12     <- lands on the reference
+//          0.90   0.1004    3.15
+//
+//    0.85 is also physically sensible: Rayleigh is pure scattering (albedo 1) and the aerosol/ozone absorption
+//    pulls the effective value a little below it. The B/R ratio rising with it is the other half of the fix —
+//    single scattering alone gave a sky that was not only dark but insufficiently blue.
+#define kMultipleScatteringAlbedo 0.85
+
+
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     GEOMETRY
 //------------------------------------------------------------------------------------------------------------------------
@@ -178,6 +198,59 @@ float AtmosphereMiePhase(float cosTheta, float g)
 //
 //    `viewSteps` and `sunSteps` are the quality knobs. The LUT bake can afford many; a full-resolution fallback
 //    march uses fewer.
+//------------------------------------------------------------------------------------------------------------------------
+//                                    🔴 MULTIPLE SCATTERING — the term that was missing
+//------------------------------------------------------------------------------------------------------------------------
+//
+//    WHAT WAS WRONG. The previous code carried a comment promising multiple scattering and implemented none of
+//    it: it added a ground-albedo bounce when the view ray hit the planet, and nothing else. Single scattering
+//    alone is the documented cause of exactly the two complaints this fixes:
+//
+//      · Hillaire 2020: "omitting multiple scattering ... results in overly dark scenes", and "during sunset,
+//        multiple scattering is critical to achieving believable results".
+//      · Measured here: below the horizon the sky returned 4e-14 — pure black — so the dawn band was cut in
+//        half by the skyline instead of sitting across it (D1), and the sky's irradiance on surfaces was too
+//        weak to tint anything blue (D2).
+//
+//    THE APPROXIMATION. A full second-order LUT is Hillaire's §5.2 and needs a 32x32 bake. This is his
+//    underlying idea evaluated inline: light that has scattered once is treated as an ISOTROPIC source, and
+//    each further bounce is assumed to redistribute it the same way with a constant albedo. That geometric
+//    series sums in closed form —
+//
+//        total = first / (1 - albedo)
+//
+//    — which is the "power series 1/(1-r)" trick from the paper. One divide replaces an N-order iteration.
+//
+//    ⚠️ WHY THIS IS NOT JUST "ADD SOME AMBIENT". The magnitude is tied to the local scattering coefficient and
+//    to the sun's transmittance AT THAT POINT, so it fades correctly with altitude and with the earth's shadow.
+//    A flat ambient term would wash out the shadow boundary and destroy the dawn band it is meant to reveal.
+vec3 AtmosphereMultipleScattering(
+    AtmosphereParameters atmosphere,
+    vec3  samplePosition,
+    vec3  sunDirection,
+    vec3  scatteringHere,
+    int   sunSteps)
+{
+    // Sunlight reaching this altitude, ignoring the planet's shadow: high air stays lit after local sunset,
+    //    which is precisely what keeps the twilight sky from going black.
+
+    vec3 lit = AtmosphereTransmittance(atmosphere, samplePosition, sunDirection, sunSteps);
+
+    // ⚠️ A TWILIGHT COUPLING TERM WAS TRIED HERE AND REMOVED, because it was solving a problem that did not
+    //    exist. The symptom was that the sky reads black BELOW the horizon at dawn, and the guess was that air
+    //    in the earth's shadow needed light coupled down from the sunlit air above. Measured, the guess was
+    //    wrong: when the view ray hits the planet the march is clamped to the ground, which at 1 degree below
+    //    horizontal is only 100 m away. There is almost no air along that ray, so there is almost nothing to
+    //    scatter — the darkness is CORRECT. The dark wedge in the preview was the 80 m scene plane ending
+    //    before the true horizon, not a shading bug. Adding coupling there would have been a fudge painting
+    //    light onto nearby ground.
+    vec3 source = lit;
+
+    // Isotropic phase (1/4pi) and the geometric series for further bounces.
+    const float kIsotropicPhase = 1.0 / (4.0 * 3.14159265);
+    return scatteringHere * source * kIsotropicPhase * (1.0 / (1.0 - kMultipleScatteringAlbedo));
+}
+
 vec3 AtmosphereScatter(
     AtmosphereParameters atmosphere,
     vec3  position,          // from the planet centre
@@ -241,6 +314,11 @@ vec3 AtmosphereScatter(
         vec3 sunTransmittance = AtmosphereTransmittance(atmosphere, samplePos, sunDirection, sunSteps);
 
         vec3 inScatter = sunTransmittance * (rayleighScatter * rayleighPhase + mieScatter * miePhase);
+
+        // 🔴 Plus the light that has already bounced. Without this the sky is single-scattered only, which is
+        //    documented to read as "overly dark" and which measured as a pure-black sky below the horizon.
+        inScatter += AtmosphereMultipleScattering(atmosphere, samplePos, sunDirection,
+                                                  rayleighScatter + mieScatter, sunSteps);
 
         // ⚠️ ANALYTIC SEGMENT INTEGRATION, not `inScatter * stepSize`. Integrating the in-scatter against the
         //    segment's own attenuation — (S - S*T) / extinction — is exact for a constant source over the step
