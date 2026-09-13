@@ -721,6 +721,8 @@ int main()
     //    per-pixel frame is the lab's (atmosphere + aureole + ground + colour); only the cloud march swaps.
     static unsigned char TwinRgb[(size_t)kW*kH*3u], RasterRgb[(size_t)kW*kH*3u];
     int Iso = 0; // Isolation switch for the SKY_ISO frames below: 1 = atmosphere only, 2 = flat cloud ambient.
+    // Scan dump for grain hunts (SKY_SCAN=<row>): raw pre-cloud/transmittance/post floats along one row.
+    int ScanRow = std::getenv("SKY_SCAN") ? std::atoi(std::getenv("SKY_SCAN")) : -1;
     auto Render = [&](const SkyConstantRecord& K, unsigned char* Rgb, bool Twin) {
         // The raster branch reads the PACKED wall clock, like everything else it shares with the twin.
         float CloudTime = K.CloudClock[2];
@@ -764,24 +766,94 @@ int main()
                     }
                 }
             }
-            if (Twin)
+            float PreCloud[3] = { Out[0], Out[1], Out[2] };
+            // SSAA: production converges sub-pixel sunlit wisps by temporal accumulation (256-frame bake);
+            //    one ray per pixel aliases grazing wisps into white dots the accumulation melts on the GPU,
+            //    so the still proof averages sub-rays instead (2x2 base, adaptively filled to 4x4 where the
+            //    base set spreads — the wisp's weight drops to one ray in sixteen). The background stays
+            //    single-ray (it is smooth); only the cloud march supersamples. Sub-rays share the centre
+            //    ray's ground distance: downward rays miss the above-eye slab exactly, so the shortcut is
+            //    exact here. SCAN prints sub-ray 0 (the aliased ray) so hunts still see the raw march.
+            auto ShootSub = [&](float Offx, float Offy, float SubOut[3], bool Scan) {
+                const float SSx = (2.0f * ((Px + 0.5f + Offx) / (float)kW) - 1.0f) * TanHalf * Aspect;
+                const float SSy = (1.0f - 2.0f * ((Py + 0.5f + Offy) / (float)kH)) * TanHalf;
+                float SDir[3] = { F[0] + R[0]*SSx + U[0]*SSy, F[1] + R[1]*SSx + U[1]*SSy, F[2] + R[2]*SSx + U[2]*SSy };
+                const float SDl = std::sqrt(SDir[0]*SDir[0] + SDir[1]*SDir[1] + SDir[2]*SDir[2]);
+                SDir[0] /= SDl; SDir[1] /= SDl; SDir[2] /= SDl;
+                const float SubMax = S.HitGround ? CloudMaxDist : 1e30f;
+                SubOut[0] = PreCloud[0]; SubOut[1] = PreCloud[1]; SubOut[2] = PreCloud[2];
+                if (Twin)
+                {
+                    // The twin reads the record exactly as the kernel does — packed sun, packed clock, packed
+                    //    budgets — so the pack itself is under test alongside the transcription.
+                    float SunRad[3] = { K.SunRadiance[0]*DayF, K.SunRadiance[1]*DayF, K.SunRadiance[2]*DayF };
+                    float Maximum = SubMax > kTwinMaxDistance ? kTwinMaxDistance : SubMax;
+                    float Scatter[3] = { 0.0f, 0.0f, 0.0f }; float T = 1.0f;
+                    float Flat[3] = { 0.7f, 0.8f, 1.0f };
+                    if (Iso != 1)
+                        TwinCloudAlong(K, Eye, SDir, Maximum, K.SunDirection, SunRad, Iso == 2 ? Flat : SubOut, Scatter, T);
+                    for (int C = 0; C < 3; ++C) SubOut[C] = SubOut[C]*T + Scatter[C];
+                    if (Scan && ScanRow >= 0 && Py == (uint32_t)ScanRow)
+                    {
+                        float ScanNear = 0.0f, ScanFar = 0.0f;
+                        uint32_t ScanCount = 0u; float ScanStep = 0.0f;
+                        if (TwinSlabInterval(K, Eye, SDir, Maximum, ScanNear, ScanFar))
+                        {
+                            float ScanSpan = ScanFar - ScanNear;
+                            uint32_t ScanBudget = K.CloudControl[0] ? K.CloudControl[0] : 1u;
+                            ScanCount = (uint32_t)std::fmax(std::ceil(ScanSpan / (4000.0f / float(ScanBudget))), 1.0f);
+                            uint32_t ScanCap = ScanBudget * 4u > 4u ? ScanBudget * 4u : 4u;
+                            if (ScanCount > ScanCap) ScanCount = ScanCap;
+                            ScanStep = ScanSpan / float(ScanCount);
+                        }
+                        std::printf("SCAN %3u pre=%.4f,%.4f,%.4f T=%.4f out=%.4f,%.4f,%.4f n=%.0f cnt=%u st=%.0f\n",
+                                    Px, PreCloud[0], PreCloud[1], PreCloud[2], T, SubOut[0], SubOut[1], SubOut[2],
+                                    ScanNear, ScanCount, ScanStep);
+                    }
+                }
+                else
+                {
+                    const VolumetricSample V = VolumetricMedia::March(Cloud, Sky.LocalCloud, Sky.LocalFog, Wind, VB,
+                        Eye, SDir, SubMax, Light.Direction, CloudSunRad, SubOut, CloudTime);
+                    for (int C = 0; C < 3; ++C) SubOut[C] = SubOut[C] * V.Transmittance + V.Scatter[C];
+                    if (Scan && ScanRow >= 0 && Py == (uint32_t)ScanRow)
+                        std::printf("SCANR %3u pre=%.4f,%.4f,%.4f T=%.4f out=%.4f,%.4f,%.4f\n",
+                                    Px, PreCloud[0], PreCloud[1], PreCloud[2],
+                                    V.Transmittance, SubOut[0], SubOut[1], SubOut[2]);
+                }
+            };
+            float Acc[3] = { 0.0f, 0.0f, 0.0f };
+            float SpreadLo[3] = { 1e30f, 1e30f, 1e30f }, SpreadHi[3] = { -1e30f, -1e30f, -1e30f };
+            const float Base[4][2] = { {-0.25f,-0.25f}, {0.25f,-0.25f}, {-0.25f,0.25f}, {0.25f,0.25f} };
+            for (uint32_t Sub = 0; Sub < 4u; ++Sub)
             {
-                // The twin reads the record exactly as the kernel does — packed sun, packed clock, packed
-                //    budgets — so the pack itself is under test alongside the transcription.
-                float SunRad[3] = { K.SunRadiance[0]*DayF, K.SunRadiance[1]*DayF, K.SunRadiance[2]*DayF };
-                float Maximum = CloudMaxDist > kTwinMaxDistance ? kTwinMaxDistance : CloudMaxDist;
-                float Scatter[3] = { 0.0f, 0.0f, 0.0f }; float T = 1.0f;
-                float Flat[3] = { 0.7f, 0.8f, 1.0f };
-                if (Iso != 1)
-                    TwinCloudAlong(K, Eye, Dir, Maximum, K.SunDirection, SunRad, Iso == 2 ? Flat : Out, Scatter, T);
-                for (int C = 0; C < 3; ++C) Out[C] = Out[C]*T + Scatter[C];
+                float SubOut[3];
+                ShootSub(Base[Sub][0], Base[Sub][1], SubOut, Sub == 0u);
+                for (int C = 0; C < 3; ++C)
+                {
+                    Acc[C] += SubOut[C];
+                    if (SubOut[C] < SpreadLo[C]) SpreadLo[C] = SubOut[C];
+                    if (SubOut[C] > SpreadHi[C]) SpreadHi[C] = SubOut[C];
+                }
             }
-            else
+            float Spread = 0.0f;
+            for (int C = 0; C < 3; ++C)
+                if (SpreadHi[C] - SpreadLo[C] > Spread) Spread = SpreadHi[C] - SpreadLo[C];
+            uint32_t Rays = 4u;
+            if (Spread > 0.35f)
             {
-                const VolumetricSample V = VolumetricMedia::March(Cloud, Sky.LocalCloud, Sky.LocalFog, Wind, VB,
-                    Eye, Dir, CloudMaxDist, Light.Direction, CloudSunRad, Out, CloudTime);
-                for (int C = 0; C < 3; ++C) Out[C] = Out[C] * V.Transmittance + V.Scatter[C];
+                // A spread sub-ray set means a grazing wisp splits the pixel: fill the 4x4 grid (the 12
+                //    cells interleaving the base 2x2) so the wisp's weight drops to one ray in sixteen.
+                const float Fine[4] = { -0.375f, -0.125f, 0.125f, 0.375f };
+                for (uint32_t Fy = 0; Fy < 4u; ++Fy) for (uint32_t Fx = 0; Fx < 4u; ++Fx)
+                {
+                    float SubOut[3];
+                    ShootSub(Fine[Fx], Fine[Fy], SubOut, false);
+                    for (int C = 0; C < 3; ++C) Acc[C] += SubOut[C];
+                    ++Rays;
+                }
             }
+            for (int C = 0; C < 3; ++C) Out[C] = Acc[C] / float(Rays);
             unsigned char Enc[3];
             ColourPipeline::ApplyToByte(Colour, Out, Enc);
             Rgb[((size_t)Py * kW + Px) * 3u + 0u] = Enc[0];
@@ -825,6 +897,7 @@ int main()
         SkyConstantRecord Late = Sky.PackSkyRecord();
         Render(Late, TwinRgb, true);
         PngWriteShim::WritePng("Diagnostics/SkyCloudKernel_Plus2h.png", kW, kH, 3, TwinRgb, (int)kW * 3);
+        if (ScanRow >= 0) Render(Late, RasterRgb, false); // +2h raster for twin-vs-raster parity scans (SKY_SCAN only).
         float LateDy = 0.0f, LateDx = 0.0f;
         StreakGauge(TwinRgb, kW, kH, LateDy, LateDx);
         double Sum = 0.0, Moved = 0.0; long N = 0;
