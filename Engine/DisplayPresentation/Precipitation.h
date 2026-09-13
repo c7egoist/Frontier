@@ -396,7 +396,7 @@ public:
         {
             const float T = (static_cast<float>(I) + 0.5f) / static_cast<float>(kSamples);
             const float P[3] = { X, Y, SlabBase + (SlabTop - SlabBase) * T };
-            Sum += VolumetricMedia::CloudDensity(Cloud, Wind, P, WallTime, 0.0f);
+            Sum += VolumetricMedia::CloudDensity(Cloud, Wind, P, WallTime, 0.0f, 0.0f);
         }
         return Sum / static_cast<float>(kSamples);
     }

@@ -255,7 +255,7 @@ public:
     // Cloud density at a world point. Z-up: altitude is p.z. Time is wall-clock seconds (the erosion octave
     //    drifts with it); Lod is the march's distance level (past 0.5 the erosion is skipped, see March).
     static float CloudDensity(const CloudLayerSettings& Cloud, const WindSettings& Wind,
-                              const float Position[3], float Time, float Lod) noexcept
+                              const float Position[3], float Time, float Lod, float OctaveLod) noexcept
     {
         float Base = 0.0f, Top = 0.0f;
         if (!SlabExtent(Cloud, Base, Top)) return 0.0f;
@@ -307,9 +307,20 @@ public:
         const float Oct4Fade = SmoothStep(0.0f, 1.0f, Lod);
         const float Oct4 = Oct4Fade >= 1.0f ? 0.5f
             : Lerp(Noise(S[0] * 8.3f + 1.3f, S[1] * 8.3f + 8.8f, S[2] * 8.3f + 4.4f), 0.5f, Oct4Fade);
+        // P2.4g: the cascade continues on the uncapped octave LOD (steps / 66): the third octave
+        //    (307 m) dissolves over Oct 1-2 (steps 66-133 m) and the second (624 m) over Oct 2-4.1
+        //    (steps 133-271 m) — each octave gone as it drops past ~2 samples a feature. The capped
+        //    LOD saturates at 66 m and cannot express those ranges. The first octave never fades: it
+        //    is the puff structure itself, and flat octaves would gate the horizon clear, not veiled.
+        const float Oct3Fade = SmoothStep(1.0f, 2.0f, OctaveLod);
+        const float Oct3 = Oct3Fade >= 1.0f ? 0.5f
+            : Lerp(Noise(S[0] * 4.10f + 7.7f, S[1] * 4.10f + 2.2f, S[2] * 4.10f + 1.1f), 0.5f, Oct3Fade);
+        const float Oct2Fade = SmoothStep(2.0f, 4.1f, OctaveLod);
+        const float Oct2 = Oct2Fade >= 1.0f ? 0.5f
+            : Lerp(Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f), 0.5f, Oct2Fade);
         float Shape = Noise(S[0], S[1], S[2]) * 0.5f
-                    + Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f) * 0.25f
-                    + Noise(S[0] * 4.10f + 7.7f, S[1] * 4.10f + 2.2f, S[2] * 4.10f + 1.1f) * 0.125f
+                    + Oct2 * 0.25f
+                    + Oct3 * 0.125f
                     + Oct4 * 0.0625f;
         Shape /= 0.9375f;
 
@@ -663,7 +674,7 @@ public:
                 ++Result.StepsTaken;
 
                 float Density = 0.0f;
-                if (M == 0u)      Density = CloudDensity(Cloud, Wind, P, Time, DensityLod);
+                if (M == 0u)      Density = CloudDensity(Cloud, Wind, P, Time, DensityLod, ActualStep / 66.0f);
                 else if (M == 1u) Density = LocalDensity(LocalCloud, Wind, P, PixelSwirl, 0.0f, false);
                 else              Density = LocalDensity(LocalFog, Wind, P, PixelSwirl, 0.0f, true);
                 if (Density <= 1e-5f) continue;
@@ -893,7 +904,7 @@ public:
                 const float Q[3] = { Position[0] + SunDirection[0] * D,
                                      Position[1] + SunDirection[1] * D,
                                      Position[2] + SunDirection[2] * D };
-                Depth += CloudDensity(Cloud, Wind, Q, Time, std::fmax(Lod, I > 2u ? 1.0f : 0.0f)) * D * 0.8f;
+                Depth += CloudDensity(Cloud, Wind, Q, Time, std::fmax(Lod, I > 2u ? 1.0f : 0.0f), D / 66.0f) * D * 0.8f;
             }
         }
         return Depth;

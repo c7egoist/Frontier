@@ -58,7 +58,7 @@ int main()
         CloudLayerSettings High{};
         High.Enabled = true; High.Base = 100000.0f; High.Thickness = 2000.0f;
         const float Above[3] = { 0.0f, 0.0f, 100500.0f };
-        Expect(VolumetricMedia::CloudDensity(High, Wind, Above, 0.0f, 0.0f) == 0.0f,
+        Expect(VolumetricMedia::CloudDensity(High, Wind, Above, 0.0f, 0.0f, 0.0f) == 0.0f,
                "a layer pushed above the ceiling has zero density everywhere");
 
         // From orbit, looking down, the march must find nothing above the ceiling.
@@ -133,8 +133,8 @@ int main()
         for (int I = 0; I < 400; ++I)
         {
             const float Q[3] = { P[0] + static_cast<float>(I) * 37.0f, P[1] + static_cast<float>(I) * 19.0f, P[2] };
-            if (VolumetricMedia::CloudDensity(Low, Wind, Q, 0.0f, 0.0f) > 0.0f) ++LowHits;
-            if (VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 0.0f) > 0.0f) ++HighHits;
+            if (VolumetricMedia::CloudDensity(Low, Wind, Q, 0.0f, 0.0f, 0.0f) > 0.0f) ++LowHits;
+            if (VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 0.0f, 0.0f) > 0.0f) ++HighHits;
         }
         std::printf("     coverage 0.2 fills %u of 400 samples, coverage 0.9 fills %u\n", LowHits, HighHits);
         Expect(HighHits > LowHits, "more coverage fills more of the sky");
@@ -524,8 +524,8 @@ int main()
         {
             const float Q[3] = { 120.0f + static_cast<float>(I) * 37.0f,
                                  240.0f + static_cast<float>(I) * 19.0f, 1600.0f };
-            const float Carved = VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 0.0f);
-            const float Whole = VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 1.0f);
+            const float Carved = VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 0.0f, 0.0f);
+            const float Whole = VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 1.0f, 1.0f);
             if (Carved > Whole) Carves = false;
             if (Carved < Whole) ++Strict;
         }
@@ -535,14 +535,23 @@ int main()
 
         // The lod gate opens past 0.5: two lods above it shade bit-identical uneroded light — while
         // P2.4f's octave fade runs between them, so the pair moves to 1.0/1.5 (both fully faded) and the
-        // 0.6/1.0 pair now proves the fade itself (partial vs full octave must differ).
+        // 0.6/1.0 pair now proves the fade itself (partial vs full octave must differ). P2.4g holds the
+        // octave LOD at 1.0 across the identical pair (the cascade would legitimately differ at 1.5).
         const float P[3] = { 120.0f, 240.0f, 1600.0f };
-        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f) ==
-               VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.5f),
+        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f, 1.0f) ==
+               VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.5f, 1.0f),
                "lod 1.0 and lod 1.5 agree bit-for-bit (both skip erosion, octave fully faded)");
-        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 0.6f) !=
-               VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f),
+        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 0.6f, 0.6f) !=
+               VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f, 1.0f),
                "lod 0.6 and lod 1.0 differ (the octave fades between them)");
+        // P2.4g's cascade, isolated: the capped LOD held at 1.0 while the octave LOD crosses each
+        // octave's dissolve range — the third over Oct 1-2, the second over Oct 2-4.1.
+        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f, 1.5f) !=
+               VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f, 2.5f),
+               "oct 1.5 and oct 2.5 differ (the third octave fades between them)");
+        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f, 3.0f) !=
+               VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f, 5.0f),
+               "oct 3.0 and oct 5.0 differ (the second octave fades between them)");
 
         // The lean is a rigid downwind shift: the field at P under a +x integral equals the rest field at
         // P + drift + lean, where the drift comes from the trusted AdvectDrift and the lean direction (+x)
@@ -554,8 +563,8 @@ int main()
         const float HnI = (1600.0f - 1500.0f) / (2500.0f - 1500.0f);
         const float LeanI = HnI * 1000.0f * 0.35f * 0.2f;
         const float Shifted[3] = { P[0] + DriftI[0] + LeanI, P[1] + DriftI[1], P[2] };
-        const float Leaned = VolumetricMedia::CloudDensity(High, WindI, P, 0.0f, 0.0f);
-        const float Rest = VolumetricMedia::CloudDensity(High, Wind, Shifted, 0.0f, 0.0f);
+        const float Leaned = VolumetricMedia::CloudDensity(High, WindI, P, 0.0f, 0.0f, 0.0f);
+        const float Rest = VolumetricMedia::CloudDensity(High, Wind, Shifted, 0.0f, 0.0f, 0.0f);
         std::printf("     lean rigid-shift difference: %.3e\n", std::fabs(Leaned - Rest));
         Expect(std::fabs(Leaned - Rest) < 1e-4f,
                "drift + lean shift the field rigidly (a missing lean misses by metres)");
@@ -592,8 +601,8 @@ int main()
         // integral moves nothing, and a stray swirl cannot move the box either.
         CloudLayerSettings Free = High;
         Free.FollowWind = false;
-        Expect(VolumetricMedia::CloudDensity(Free, WindI, P, 0.0f, 0.0f) ==
-               VolumetricMedia::CloudDensity(Free, Wind, P, 0.0f, 0.0f),
+        Expect(VolumetricMedia::CloudDensity(Free, WindI, P, 0.0f, 0.0f, 0.0f) ==
+               VolumetricMedia::CloudDensity(Free, Wind, P, 0.0f, 0.0f, 0.0f),
                "unlinked, the integral leaves the slab bit-identical");
         LocalVolumeSettings Anchored = Puff;
         Anchored.FollowWind = false;

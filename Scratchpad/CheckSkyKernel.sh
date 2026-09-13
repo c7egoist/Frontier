@@ -500,8 +500,8 @@ printf '%s' "$SkyCode" | grep -q 'return smoothstep(33\.0, 66\.0, StepSize);'
 Report $? "the shader sheds the erosion octave past 66 m steps"
 printf '%s' "$SkyCode" | grep -q 'float DensityLod = max(Lod, CloudErosionStepLod(Step));'
 Report $? "the kernel LOD never reads finer than the step allows"
-printf '%s' "$SkyCode" | grep -q 'CloudDensityAt(P, Time, DensityLod)'
-Report $? "the kernel density reads the march LOD"
+printf '%s' "$SkyCode" | grep -q 'CloudDensityAt(P, Time, DensityLod, Step / 66\.0)'
+Report $? "the kernel density reads the march LOD (and the octave step)"
 printf '%s' "$SkyCode" | grep -q 'max(Lod, I > 2u ? 1\.0 : 0\.0)'
 Report $? "the shadow taps never read finer than the march LOD"
 printf '%s' "$SkyCode" | grep -q 'CloudShadowDepth(P, SunDirection, 0u, Taps, Swirl, DensityLod)'
@@ -527,6 +527,23 @@ grep -q 'Oct4 = Oct4Fade >= 1\.0f' Scratchpad/SkyCloudKernelProof.cpp
 Report $? "the twin fourth octave fades to its mean"
 grep -q 'TwinSmoothstep(0\.3f, 0\.5f, Lod)' Scratchpad/SkyCloudKernelProof.cpp
 Report $? "the twin erosion dissolves instead of popping out"
+# P2.4g's twins: the kernel and the transcription cascade the same octaves on the same plumbing.
+printf '%s' "$SkyCode" | grep -q 'Oct3 = Oct3Fade >= 1\.0'
+Report $? "the kernel third octave fades on the octave LOD"
+printf '%s' "$SkyCode" | grep -q 'Oct2 = Oct2Fade >= 1\.0'
+Report $? "the kernel second octave fades on the octave LOD"
+printf '%s' "$SkyCode" | grep -q 'Step / 66\.0'
+Report $? "the kernel march passes its step uncapped"
+printf '%s' "$SkyCode" | grep -q 'D / 66\.0'
+Report $? "the kernel taps pass their distance scale"
+grep -q 'Oct3 = Oct3Fade >= 1\.0f' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin third octave fades on the octave LOD"
+grep -q 'Oct2 = Oct2Fade >= 1\.0f' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin second octave fades on the octave LOD"
+grep -q 'Step / 66\.0f' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin march passes its step uncapped"
+grep -q 'D / 66\.0f' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin taps pass their distance scale"
 
 echo
 if [ "$Fail" != "0" ]; then echo "[SkyKernel] FAILED"; exit 1; fi

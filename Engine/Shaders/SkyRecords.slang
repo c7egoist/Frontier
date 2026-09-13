@@ -294,7 +294,7 @@ vec2 CloudDriftAt(float Altitude, float ArtFactor)
     return SkyCloudClock.xy * Factor * ArtFactor;
 }
 
-float CloudDensityAt(vec3 Position, float Time, float Lod)
+float CloudDensityAt(vec3 Position, float Time, float Lod, float OctaveLod)
 {
     float Ceiling = max(SkyCloudShape.y, 0.0);
     float Base = clamp(SkyCloudLayer.x, 0.0, Ceiling);
@@ -322,9 +322,16 @@ float CloudDensityAt(vec3 Position, float Time, float Lod)
     //    eval outright, which doubles as the far-shadow fast path.
     float Oct4Fade = smoothstep(0.0, 1.0, Lod);
     float Oct4 = Oct4Fade >= 1.0 ? 0.5 : mix(CloudNoise(S * 8.3 + vec3(1.3, 8.8, 4.4)), 0.5, Oct4Fade);
+    // P2.4g: the cascade continues on the uncapped octave LOD (steps / 66): the third octave (307 m)
+    //    dissolves over Oct 1-2 and the second (624 m) over Oct 2-4.1 — each gone as it drops past ~2
+    //    samples a feature. The first octave never fades (note at VolumetricMedia::CloudDensity).
+    float Oct3Fade = smoothstep(1.0, 2.0, OctaveLod);
+    float Oct3 = Oct3Fade >= 1.0 ? 0.5 : mix(CloudNoise(S * 4.10 + vec3(7.7, 2.2, 1.1)), 0.5, Oct3Fade);
+    float Oct2Fade = smoothstep(2.0, 4.1, OctaveLod);
+    float Oct2 = Oct2Fade >= 1.0 ? 0.5 : mix(CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)), 0.5, Oct2Fade);
     float Shape = CloudNoise(S) * 0.5
-                + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25
-                + CloudNoise(S * 4.10 + vec3(7.7, 2.2, 1.1)) * 0.125
+                + Oct2 * 0.25
+                + Oct3 * 0.125
                 + Oct4 * 0.0625;
     Shape /= 0.9375;
     if (SkyControl.w == 5u)
@@ -486,7 +493,7 @@ float CloudShadowDepth(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3
         {
             if (I > Taps) break;
             float D = St * float(I) * float(I) * 0.35;
-            Depth += CloudDensityAt(Origin + Direction * D, Time, max(Lod, I > 2u ? 1.0 : 0.0)) * D * 0.8;
+            Depth += CloudDensityAt(Origin + Direction * D, Time, max(Lod, I > 2u ? 1.0 : 0.0), D / 66.0) * D * 0.8;
         }
     }
     else
@@ -628,7 +635,7 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
     {
         float T = Near + (float(I) + Jitter) * Step;
         vec3 P = Origin + Direction * T;
-        float Density = Medium == 0u ? CloudDensityAt(P, Time, DensityLod) : LocalDensityAt(P, Medium == 2u, Swirl, 0.0);
+        float Density = Medium == 0u ? CloudDensityAt(P, Time, DensityLod, Step / 66.0) : LocalDensityAt(P, Medium == 2u, Swirl, 0.0);
         if (Density <= 1e-5) continue;
         // The shadow reads the march's erosion LOD (the boxes ignore it — their taps stay lod 1).
         float D0 = CloudShadowDepth(P, SunDirection, 0u, Taps, Swirl, DensityLod);

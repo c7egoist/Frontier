@@ -153,7 +153,7 @@ void TwinSwirlAt(const SkyConstantRecord& K, const float P[3], float T, float Ou
     Out[0] = (Dz-Dy)*Scale; Out[1] = (Dx-Dz)*Scale; Out[2] = (Dy-Dx)*Scale;
     Out[0] *= 8.0f; Out[1] *= 8.0f; Out[2] *= 8.0f;
 }
-float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3], float Time, float Lod)
+float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3], float Time, float Lod, float OctaveLod)
 {
     float Ceiling = std::fmax(K.CloudShape[1], 0.0f);
     float Base = K.CloudLayer[0] < 0.0f ? 0.0f : (K.CloudLayer[0] > Ceiling ? Ceiling : K.CloudLayer[0]);
@@ -185,7 +185,12 @@ float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3], fl
     // P2.4f's twin: the fourth octave fades to its mean with the LOD exactly as the engine pair does.
     float Oct4Fade = TwinSmoothstep(0.0f, 1.0f, Lod);
     float Oct4 = Oct4Fade >= 1.0f ? 0.5f : TwinNoise(Q3)*(1.0f-Oct4Fade)+0.5f*Oct4Fade;
-    float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f + TwinNoise(Q2)*0.125f + Oct4*0.0625f;
+    // P2.4g's twin: the cascade continues on the uncapped octave LOD exactly as the engine pair does.
+    float Oct3Fade = TwinSmoothstep(1.0f, 2.0f, OctaveLod);
+    float Oct3 = Oct3Fade >= 1.0f ? 0.5f : TwinNoise(Q2)*(1.0f-Oct3Fade)+0.5f*Oct3Fade;
+    float Oct2Fade = TwinSmoothstep(2.0f, 4.1f, OctaveLod);
+    float Oct2 = Oct2Fade >= 1.0f ? 0.5f : TwinNoise(Q1)*(1.0f-Oct2Fade)+0.5f*Oct2Fade;
+    float Shape = TwinNoise(S)*0.5f + Oct2*0.25f + Oct3*0.125f + Oct4*0.0625f;
     Shape /= 0.9375f;
     if (K.Control[3] == 5u)
     {
@@ -360,7 +365,7 @@ float TwinShadowDepth(const SkyConstantRecord& K, const float Origin[3], const f
             if (I > Taps) break;
             float D = St*float(I)*float(I)*0.35f;
             float Q[3] = { Origin[0]+Direction[0]*D, Origin[1]+Direction[1]*D, Origin[2]+Direction[2]*D };
-            Depth += TwinCloudDensityAt(K, Q, Time, std::fmax(Lod, I > 2u ? 1.0f : 0.0f))*D*0.8f;
+            Depth += TwinCloudDensityAt(K, Q, Time, std::fmax(Lod, I > 2u ? 1.0f : 0.0f), D / 66.0f)*D*0.8f;
         }
     }
     else
@@ -463,7 +468,7 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
     {
         float Tm = Near + (float(I)+Jitter)*Step;
         float P[3] = { Origin[0]+Direction[0]*Tm, Origin[1]+Direction[1]*Tm, Origin[2]+Direction[2]*Tm };
-        float Density = Medium == 0u ? TwinCloudDensityAt(K, P, Time, DensityLod)
+        float Density = Medium == 0u ? TwinCloudDensityAt(K, P, Time, DensityLod, Step / 66.0f)
                       : TwinLocalDensityAt(K, P, Medium == 2u, Swirl, 0.0f);
         if (Density <= 1e-5f) continue;
         // The shadow reads the march's erosion LOD (the boxes ignore it — their taps stay lod 1).

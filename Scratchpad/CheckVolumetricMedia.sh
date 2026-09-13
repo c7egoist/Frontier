@@ -237,8 +237,8 @@ printf '%s' "$MediaCode" | grep -q 'ErosionStepLod(float StepSize) noexcept { re
 Report $? "steps past 66 m shed the erosion octave"
 printf '%s' "$MediaCode" | grep -q 'const float DensityLod = std::fmax(LayerLod, ErosionStepLod(ActualStep));'
 Report $? "the march LOD never reads finer than the step allows"
-printf '%s' "$MediaCode" | grep -q 'CloudDensity(Cloud, Wind, P, Time, DensityLod)'
-Report $? "the layer density reads the march LOD"
+printf '%s' "$MediaCode" | grep -q 'CloudDensity(Cloud, Wind, P, Time, DensityLod, ActualStep / 66\.0f)'
+Report $? "the layer density reads the march LOD (and the octave step)"
 printf '%s' "$MediaCode" | grep -q 'std::fmax(Lod, I > 2u ? 1\.0f : 0\.0f)'
 Report $? "the shadow taps never read finer than the march LOD"
 ShadowLod=$(grep -A1 'Budget\.LightTaps, Time,$' "$Header" | grep -c 'DensityLod')
@@ -258,6 +258,17 @@ printf '%s' "$MediaCode" | grep -q 'Oct4 = Oct4Fade >= 1\.0f'
 Report $? "the fourth octave fades to its mean with the LOD"
 printf '%s' "$MediaCode" | grep -q '(1\.0f - SmoothStep(0\.3f, 0\.5f, Lod))'
 Report $? "the erosion dissolves instead of popping out"
+# P2.4g: the cascade continues on the uncapped octave LOD (steps / 66) past the capped LOD's 66 m
+#    saturation — the third octave over Oct 1-2, the second over Oct 2-4.1; the march passes its step,
+#    the taps their own distance scale.
+printf '%s' "$MediaCode" | grep -q 'Oct3 = Oct3Fade >= 1\.0f'
+Report $? "the third octave fades on the octave LOD"
+printf '%s' "$MediaCode" | grep -q 'Oct2 = Oct2Fade >= 1\.0f'
+Report $? "the second octave fades on the octave LOD"
+printf '%s' "$MediaCode" | grep -q 'ActualStep / 66\.0f'
+Report $? "the march passes its step uncapped"
+printf '%s' "$MediaCode" | grep -q 'D / 66\.0f'
+Report $? "the taps pass their distance scale"
 
 echo
 if [ "$Fail" != "0" ]; then echo "[VolumetricMedia] FAILED"; exit 1; fi
