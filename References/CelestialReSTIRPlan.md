@@ -249,6 +249,34 @@ Status log (append; newest last):
   Jolt) were missing third-party trees, not regressions -- verified by running them against the pre-P0 stash --
   and are now populated out-of-band; .gitignore records that ExternalPackages/ is not carried on this branch.
   User confirmed: TOML + CLI for the slider surface (P8), stability before sky. NEXT: P1.
+- 2026-09-13: **The showcase now compiles the SHADER'S OWN TEXT — the previous visual proof was not one.**
+  User pushed back: "did u render what the GPU would have done via the CPU (that's what you should do)". Correct
+  challenge. The first showcase HAND-WROTE C++ "mirrors" of CelestialSunDisc / CelestialMoonDisc / CelestialSky
+  and described them as mirroring the shader. That is a proof that agrees with itself: if the shader's disc
+  maths were broken, the mirror would still render a pleasant picture and report success.
+  Built `Scratchpad/ExtractCelestialPort.sh`, which lifts the ACTUAL TEXT of the shader's celestial block —
+  CelestialRecord + all 5 functions — out of ReSTIRViewport.slang, rewrites GLSL swizzles/out-params, and
+  compiles it as C++. Mirrors deleted. The record is filled by `memcpy` from PackCelestialUniform with a
+  `static_assert` on size, so a packing divergence produces garbage rather than a plausible lie. Flag bits are
+  deliberately NOT emitted by the extractor — the shader code binds to `Frontier::kCelestialFlag*` from the C++
+  header, forcing the two to agree.
+  🔴 **PROVED BY FALSIFICATION, NOT ASSERTION.** New `Scratchpad/CheckShowcaseTracksShader.sh` edits the shipping
+  shader, re-renders, and REQUIRES the image to change: zeroing the sun disc (3 bytes), halving sky radiance
+  (99 341 bytes), removing the moon disc (6 bytes). It also greps the showcase for re-introduced mirrors.
+  **The falsification immediately caught that the showcase was not showing its own subject.** Zeroing the sun
+  disc changed ZERO bytes — because the camera faced a fixed north-east bearing while the sun was 63.7 deg
+  off-axis at noon and 275 deg away at sunset. The disc was never in shot. Camera now follows
+  `SunAzimuthDegrees`, and the spheres are placed camera-relative and rotated with it (fixed world positions put
+  them out of frame at every hour but noon). An image that CANNOT show the thing it claims to prove is not
+  evidence, and only the falsification test surfaced that.
+  **Two of my own probes were wrong before the code was.** A "disable the flag check" probe appended a no-op
+  label and changed nothing; a "multiply earthshine by 64" probe changed nothing because the moon already
+  renders at ~2.4e5 times saturation. Both reported FAIL, both times the probe was at fault, and the fix was a
+  probe that perturbs something observable (zeroing the moon disc) rather than a loosened comparison.
+  Visual: `Scratchpad/CelestialDayCycle.png` regenerated — 10 frames 5.5h..22h, sun disc visible, shadows
+  rotating with the sun through the day, blue sky-lit shadows, gold horizon at dawn and dusk, stars at night.
+  **ALL 22 SUITES GREEN.**
+
 - 2026-09-13: **VISUAL PROOF of P1-P4 — and it found three real bugs that every gate had missed.**
   User asked to SEE the sun/atmosphere before clouds go on top. Built `Scratchpad/CelestialShowcase.cpp`, which
   drives the whole production chain per frame: `SolveCelestial` (real almanac ephemeris at Benoni) ->

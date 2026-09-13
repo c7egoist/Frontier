@@ -1,27 +1,39 @@
 //============================================================================================================================================
-// 🎬 Scratchpad/CelestialShowcase.cpp — visual proof of P1..P4, driven end to end by the production code
+// 🎬 Scratchpad/CelestialShowcase.cpp — what the GPU would draw, computed on the CPU from the SAME SHADER TEXT
 //============================================================================================================================================
-// This exists to answer one question honestly: does the work so far actually look like a sky?
+// This answers "show me the sun and atmosphere" with an image whose every lighting value is produced by the
+// shipping shader source, not by a C++ restatement of it.
 //
-// 🔴 WHAT MAKES THIS A PROOF RATHER THAN A PICTURE. Every number that reaches a pixel comes from the shipping
-//    code, not from a convenient re-implementation:
+// 🔴 THE DISTINCTION THAT MATTERS, AND WHICH THIS FILE GOT WRONG ONCE.
 //
-//      · the sun and moon positions come from SolveCelestial — the real almanac ephemeris, at Benoni's actual
-//        latitude and longitude, for a real date and clock time. They are NOT hand-placed angles.
-//      · the GPU record is built by PackCelestialUniform, the same function the engine uploads, and this file
-//        then reads the SAME FIELDS the shader reads. If the packing were wrong, this image would be wrong.
-//      · the sky is Engine/Shaders/AtmosphereScatter.slang compiled as C++ — the production integral.
-//      · pixel->ray is Engine/Shaders/RayGeneration.slang, the production mapping.
-//      · direct sunlight is attenuated by SolveSunTransmittance, so the warm light at dusk is computed.
-//      · exposure is ExposureIntegrator in Celestial mode — the P4 F3 fix, driven by sun elevation alone.
+//    An earlier version hand-wrote SunDisc()/MoonDisc()/Sky() in C++ and called them "mirrors" of the shader.
+//    That is a proof that agrees with itself: if CelestialMoonDisc in the shader were broken, the mirror would
+//    still render a perfectly pleasant picture and report success. Useless.
 //
-//    The only things written here are the toy scene (a ground plane and three spheres) and the integrator loop,
-//    because the engine's BVH and BSDF stack need a GPU. The LIGHTING is all production.
+//    Now Scratchpad/ExtractCelestialPort.sh lifts the ACTUAL TEXT of the shader's celestial block —
+//    CelestialRecord, CelestialAtmosphereOf, CelestialObserver, CelestialSunDisc, CelestialMoonDisc,
+//    CelestialSky — out of ReSTIRViewport.slang and compiles it as C++ through GlslShim.h. Edit the shader and
+//    this image changes. That is the only version of this claim worth making.
 //
-// ⚠️ HONEST LIMITATION: this is CPU-rendered, so it is not a screenshot of the engine running on a GPU. It
-//    proves the maths and the wiring produce the right image; it cannot prove the Vulkan path does.
+//    The full chain, all production:
+//      SolveCelestial            real almanac ephemeris at Benoni, for a real date and clock time
+//      PackCelestialUniform      the exact bytes the engine uploads to binding 21
+//      CelestialSky (extracted)  the shader's own sky, discs, flags and step budget
+//      AtmosphereScatter.slang   the scattering integral it calls
+//      RayGeneration.slang       the production pixel->ray mapping, including the Vulkan y-flip
+//      SolveSunTransmittance     the reddening of direct sunlight
+//      ExposureIntegrator        Celestial mode — the P4 F3 fix
+//
+//    What is NOT production, and cannot be here: the BVH and the BSDF stack. This harness intersects three
+//    analytic spheres and a plane with a Lambertian response, because the engine's traversal needs a GPU. So
+//    the LIGHTING is the engine's; the GEOMETRY and MATERIALS are a stand-in.
+//
+// ⚠️ THEREFORE: this is what the GPU would compute for this scene, evaluated on the CPU. It is not a screenshot
+//    of Vulkan running. Identical maths, same source text, same inputs — but the Vulkan path itself is
+//    unproven until someone runs it on hardware.
 //
 // Build (from repo root):
+//   bash Scratchpad/ExtractCelestialPort.sh /tmp/CelestialPort.inc
 //   sed -E 's/\.(xyz|xy|yz|xz)\b([^(])/.\1()\2/g; s/\bout +(vec[234]|float) +/\1\& /g' \
 //       Engine/Shaders/AtmosphereScatter.slang > /tmp/AtmosphereScatter.port.inc
 //   sed -E 's/\.(xyz|xy|yz|xz)\b([^(])/.\1()\2/g' Engine/Shaders/RayGeneration.slang > /tmp/RayGeneration.port.inc
@@ -30,14 +42,39 @@
 
 #include "GlslShim.h"
 
-#define FRONTIER_CPU_PORT
-#include "/tmp/AtmosphereScatter.port.inc"
-#include "/tmp/RayGeneration.port.inc"
-
 #include "Engine/DisplayPresentation/CelestialStructure.h"
 #include "Engine/DisplayPresentation/CelestialSolver.h"
 #include "Engine/DisplayPresentation/CelestialUniform.h"
 #include "Engine/DisplayPresentation/ExposureIntegrator.h"
+
+#define FRONTIER_CPU_PORT
+#include "/tmp/AtmosphereScatter.port.inc"
+#include "/tmp/RayGeneration.port.inc"
+
+// The shader's celestial block reads `Celestial[0]`, a storage buffer. The extractor rewrites that to this
+//    single record, which the harness fills from PackCelestialUniform.
+struct CelestialRecord;
+static CelestialRecord* gCelestialRecordPtr = nullptr;
+#define gCelestialRecord (*gCelestialRecordPtr)
+
+// 🔴 THE FLAG BITS COME FROM THE C++ HEADER, NOT FROM THE SHADER.
+//    The extractor deliberately does not emit the shader's `#define kCelestialFlag*`. Binding the extracted
+//    SHADER code to the ENGINE's constants means the two are forced to agree: if the shader ever renumbered a
+//    bit, this render would visibly break instead of quietly diverging. CheckCelestialSolver already asserts
+//    the six values match on both sides, so this is a second, executable check of the same property.
+using Frontier::kCelestialFlagEnabled;
+using Frontier::kCelestialFlagFog;
+using Frontier::kCelestialFlagLocalFog;
+using Frontier::kCelestialFlagLocalCloud;
+using Frontier::kCelestialFlagMoon;
+using Frontier::kCelestialFlagStars;
+
+// 🔴 THE SHIPPING SHADER TEXT, COMPILED AS C++.
+//    Overridable so the falsification gate can point at its own extraction without racing the default one.
+#ifndef FRONTIER_SHOWCASE_PORT
+#define FRONTIER_SHOWCASE_PORT "/tmp/CelestialPort.inc"
+#endif
+#include FRONTIER_SHOWCASE_PORT
 
 #include <cstdio>
 #include <cstring>
@@ -48,146 +85,53 @@
 #include <random>
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                          READ THE RECORD AS THE SHADER DOES
-//------------------------------------------------------------------------------------------------------------------------
-// Mirrors CelestialRecord in ReSTIRViewport.slang. Reading through the packed record rather than the settings
-// struct is deliberate: it exercises PackCelestialUniform, so a packing mistake shows up as a broken image.
-
-static vec3 Rgb(const float v[4]) { return vec3(v[0], v[1], v[2]); }
-
-struct SkyView
-{
-    vec3  SunDirection, SunDiscRadiance, SunIrradiance, SunTransmittance;
-    vec3  MoonDirection, MoonRadiance;
-    float SunCosRadius, SunLimb, MoonCosRadius, MoonEarthshine;
-    float StarRotation, MilkyWay, StarBrightness;
-    uint32_t Flags;
-    AtmosphereParameters Atmosphere;
-};
-
-static SkyView ReadRecord(const Frontier::CelestialUniform& R)
-{
-    SkyView v;
-    v.SunDirection     = Rgb(R.SunDirectionAndCosRadius);
-    v.SunCosRadius     = R.SunDirectionAndCosRadius[3];
-    v.SunDiscRadiance  = Rgb(R.SunRadianceAndLimb);
-    v.SunLimb          = R.SunRadianceAndLimb[3];
-    v.SunIrradiance    = Rgb(R.SunIrradianceAndScale);
-    v.SunTransmittance = Rgb(R.SunTransmittance);
-    v.MoonDirection    = Rgb(R.MoonDirectionAndCosRadius);
-    v.MoonCosRadius    = R.MoonDirectionAndCosRadius[3];
-    v.MoonRadiance     = Rgb(R.MoonRadianceAndEarthshine);
-    v.MoonEarthshine   = R.MoonRadianceAndEarthshine[3];
-    v.StarRotation     = R.StarsAndRotation[1];
-    v.StarBrightness   = R.StarsAndRotation[0];
-    v.MilkyWay         = R.MilkyWayAndMoonPhase[0];
-    v.Flags            = uint32_t(R.ExposureAndFlags[3]);
-
-    v.Atmosphere.RayleighScattering  = Rgb(R.RayleighScatteringAndHeight);
-    v.Atmosphere.RayleighScaleHeight = R.RayleighScatteringAndHeight[3];
-    v.Atmosphere.MieScattering       = Rgb(R.MieScatteringAndHeight);
-    v.Atmosphere.MieScaleHeight      = R.MieScatteringAndHeight[3];
-    v.Atmosphere.OzoneAbsorption     = Rgb(R.OzoneAbsorptionAndG);
-    v.Atmosphere.MieAnisotropy       = R.OzoneAbsorptionAndG[3];
-    v.Atmosphere.GroundAlbedo        = Rgb(R.GroundAlbedoAndPlanetRadius);
-    v.Atmosphere.PlanetRadius        = R.GroundAlbedoAndPlanetRadius[3];
-    v.Atmosphere.AtmosphereHeight    = R.AtmosphereHeightAndFog[0];
-    return v;
-}
-
-//------------------------------------------------------------------------------------------------------------------------
-//                                               SKY, DISCS, STARS
+//                                      FILLING THE RECORD, AND THE ONE LOCAL ADDITION
 //------------------------------------------------------------------------------------------------------------------------
 
-static vec3 Observer(const SkyView& s, vec3 world)
+// PackCelestialUniform writes a flat float array; the shader reads a struct of vec4s. They are the same 368
+//    bytes, so the record is filled by a straight copy. If the two ever disagreed this would produce garbage —
+//    which is the point of doing it this way rather than assigning field by field.
+static CelestialRecord RecordFromUniform(const Frontier::CelestialUniform& Packed)
 {
-    return vec3(world.x, world.y, world.z + s.Atmosphere.PlanetRadius);
+    static_assert(sizeof(CelestialRecord) == sizeof(Frontier::CelestialUniform),
+                  "the shader's CelestialRecord and the CPU's CelestialUniform must be the same size");
+    CelestialRecord record;
+    std::memcpy(&record, &Packed, sizeof(record));
+    return record;
 }
 
-// Mirrors CelestialSunDisc(): analytic, full resolution, never baked into a LUT. This is the F1 rule.
-static vec3 SunDisc(const SkyView& s, vec3 dir, vec3 transmittance)
-{
-    const float cosAngle = dot(dir, s.SunDirection);
-    if (cosAngle < s.SunCosRadius) return vec3(0.0f, 0.0f, 0.0f);
-    const float r = std::sqrt(std::max(0.0f, 1.0f - (1.0f - cosAngle) / std::max(1.0f - s.SunCosRadius, 1e-9f)));
-    return s.SunDiscRadiance * (1.0f - s.SunLimb * (1.0f - r)) * transmittance;
-}
-
-// Mirrors CelestialMoonDisc(): lit by the sun, so the crescent always faces the sun by construction.
-static vec3 MoonDisc(const SkyView& s, vec3 dir, vec3 transmittance)
-{
-    const float cosAngle = dot(dir, s.MoonDirection);
-    if (cosAngle < s.MoonCosRadius) return vec3(0.0f, 0.0f, 0.0f);
-
-    vec3 right = normalize(cross(vec3(0.0f, 0.0f, 1.0f), s.MoonDirection));
-    vec3 up    = cross(s.MoonDirection, right);
-    vec3 offset = dir - s.MoonDirection * cosAngle;
-    const vec2 disc(dot(offset, right), dot(offset, up));
-    const float sinR = std::sqrt(std::max(1.0f - s.MoonCosRadius * s.MoonCosRadius, 1e-9f));
-    const float radius = std::min(length(disc) / sinR, 1.0f);
-
-    const vec3 normal = normalize(s.MoonDirection * std::sqrt(std::max(0.0f, 1.0f - radius * radius))
-                                + right * (disc.x / sinR) + up * (disc.y / sinR));
-    const float lit = std::max(dot(normal, s.SunDirection), 0.0f);
-    return s.MoonRadiance * (lit + s.MoonEarthshine) * transmittance;
-}
-
-// Stars: a deterministic hash field rotated by the sidereal angle from the solver, so they wheel correctly
-// through the night instead of sitting still. Not P7-complete; enough to show the night sky is not empty.
+// ⚠️ STARS ARE THE ONE THING HERE THAT IS NOT PRODUCTION CODE — P7 has not been written yet, so the shader has
+//    no star function to extract. This is a placeholder so the night frames are not empty, and it is kept
+//    visibly separate from everything above rather than blended in as though it shipped.
 //
-// ⚠️ THE UNITS HERE ARE RADIANCE, PER UNIT SOLAR IRRADIANCE — the same scale the sky integral works in. The
-//    first version of this function used raw values around 1.0, which sounds harmless until you remember the
-//    night exposure gain is ~2.8e5: every star rendered at 845 000x white and the whole frame blew out. The
-//    engine was never wrong — CelestialStructure's Stars.Brightness is a MULTIPLIER awaiting P7, not a
-//    radiance — but this preview was, and a preview that lies is worse than no preview.
-//
-//    Calibrated so a bright star lands near 0.6 linear and a faint one near 0.02 at the moonless-night gain.
+//    It is calibrated in RADIANCE, per unit solar irradiance, like everything else. An earlier version used raw
+//    values near 1.0 against a night exposure gain of ~2.8e5 and rendered every star at 845 000x white.
 #define kStarBrightRadiance 2.1e-6f
-static vec3 Stars(const SkyView& s, vec3 dir)
-{
-    if ((s.Flags & 32u) == 0u || s.StarBrightness <= 0.0f) return vec3(0.0f, 0.0f, 0.0f);
 
-    // Rotate the view direction about the world z axis by the sidereal angle.
-    const float c = std::cos(-s.StarRotation), sn = std::sin(-s.StarRotation);
+static vec3 PlaceholderStars(const CelestialRecord& sky, vec3 dir)
+{
+    if ((uint32_t(sky.ExposureAndFlags.w) & kCelestialFlagStars) == 0u) return vec3(0.0f, 0.0f, 0.0f);
+
+    const float rotation = sky.StarsAndRotation.w;
+    const float c = std::cos(-rotation), sn = std::sin(-rotation);
     const vec3 d(dir.x * c - dir.y * sn, dir.x * sn + dir.y * c, dir.z);
     if (d.z < -0.05f) return vec3(0.0f, 0.0f, 0.0f);
 
-    // Quantise the sphere and hash each cell; only a small fraction light up.
     const float cell = 420.0f;
     const int ix = int(std::floor(d.x * cell)), iy = int(std::floor(d.y * cell)), iz = int(std::floor(d.z * cell));
     uint32_t h = uint32_t(ix * 73856093) ^ uint32_t(iy * 19349663) ^ uint32_t(iz * 83492791);
     h ^= h >> 13; h *= 0x5bd1e995u; h ^= h >> 15;
 
-    const float pick = float(h & 0xFFFFu) / 65535.0f;
-    if (pick > 0.010f) return vec3(0.0f, 0.0f, 0.0f);
+    if (float(h & 0xFFFFu) / 65535.0f > 0.010f) return vec3(0.0f, 0.0f, 0.0f);
 
     const float mag = float((h >> 16) & 0xFFu) / 255.0f;
-    const float brightness = s.StarBrightness * kStarBrightRadiance * (0.03f + mag * mag * 1.0f);
-    // A touch of colour: hot blue-white through cool orange.
+    const float brightness = sky.StarsAndRotation.x * kStarBrightRadiance * (0.03f + mag * mag);
     const vec3 tint = mag > 0.72f ? vec3(0.80f, 0.86f, 1.00f)
                     : mag > 0.34f ? vec3(1.00f, 0.98f, 0.94f)
                                   : vec3(1.00f, 0.80f, 0.62f);
 
-    // The Milky Way: a broad band, deliberately soft.
-    const float band = std::exp(-std::pow(std::fabs(d.z - 0.25f) * 3.4f, 2.0f)) * s.MilkyWay;
+    const float band = std::exp(-std::pow(std::fabs(d.z - 0.25f) * 3.4f, 2.0f)) * sky.MilkyWayAndMoonPhase.x;
     return tint * brightness + vec3(0.75f, 0.78f, 0.95f) * (band * kStarBrightRadiance * 0.08f);
-}
-
-// The sky along a ray. `includeDiscs` false on the bounce path, where the sun is an explicit reservoir light.
-static vec3 Sky(const SkyView& s, vec3 origin, vec3 dir, bool includeDiscs, int viewSteps, int sunSteps)
-{
-    vec3 transmittance;
-    vec3 radiance = AtmosphereScatter(s.Atmosphere, Observer(s, origin), dir, s.SunDirection,
-                                      viewSteps, sunSteps, transmittance);
-    radiance = radiance * s.SunIrradiance;    // the integral assumes unit irradiance
-
-    if (includeDiscs)
-    {
-        radiance = radiance + Stars(s, dir) * transmittance;
-        radiance = radiance + SunDisc(s, dir, transmittance);
-        radiance = radiance + MoonDisc(s, dir, transmittance);
-    }
-    return radiance;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -196,16 +140,36 @@ static vec3 Sky(const SkyView& s, vec3 origin, vec3 dir, bool includeDiscs, int 
 
 struct Sphere { vec3 Centre; float Radius; vec3 Albedo; };
 
-static const Sphere kSpheres[3] = {
+// ⚠️ Placed in CAMERA-RELATIVE coordinates and rotated into the world each frame. The camera follows the sun's
+//    azimuth so the disc is always in shot; with fixed world positions the spheres fell out of frame at every
+//    hour except noon, and a showcase of sunlight with nothing for the sun to light is not much of a showcase.
+static Sphere gSpheres[3] = {
     { vec3(-2.7f,  9.5f, 1.15f), 1.15f, vec3(0.72f, 0.26f, 0.20f) },
     { vec3( 0.2f,  7.6f, 0.78f), 0.78f, vec3(0.30f, 0.52f, 0.72f) },
     { vec3( 3.0f, 11.2f, 1.55f), 1.55f, vec3(0.80f, 0.70f, 0.32f) },
 };
 
+static void PlaceSpheresFacing(float azimuthRadians)
+{
+    static const Sphere local[3] = {
+        { vec3(-2.7f,  9.5f, 1.15f), 1.15f, vec3(0.72f, 0.26f, 0.20f) },
+        { vec3( 0.2f,  7.6f, 0.78f), 0.78f, vec3(0.30f, 0.52f, 0.72f) },
+        { vec3( 3.0f, 11.2f, 1.55f), 1.55f, vec3(0.80f, 0.70f, 0.32f) },
+    };
+    const float c = std::cos(azimuthRadians), s = std::sin(azimuthRadians);
+    for (int i = 0; i < 3; ++i)
+    {
+        const vec3 p = local[i].Centre;
+        gSpheres[i].Centre = vec3(p.x * c + p.y * s, -p.x * s + p.y * c, p.z);
+        gSpheres[i].Radius = local[i].Radius;
+        gSpheres[i].Albedo = local[i].Albedo;
+    }
+}
+
 static bool Trace(vec3 origin, vec3 dir, float& t, vec3& normal, vec3& albedo)
 {
     bool hit = false; t = 1e30f;
-    for (const Sphere& s : kSpheres)
+    for (const Sphere& s : gSpheres)
     {
         const vec3 oc = origin - s.Centre;
         const float b = dot(oc, dir), c = dot(oc, oc) - s.Radius * s.Radius, disc = b * b - c;
@@ -223,7 +187,7 @@ static bool Trace(vec3 origin, vec3 dir, float& t, vec3& normal, vec3& albedo)
 
 static bool Occluded(vec3 origin, vec3 dir)
 {
-    for (const Sphere& s : kSpheres)
+    for (const Sphere& s : gSpheres)
     {
         const vec3 oc = origin - s.Centre;
         const float b = dot(oc, dir), c = dot(oc, oc) - s.Radius * s.Radius, disc = b * b - c;
@@ -259,7 +223,9 @@ int main(int argc, char** argv)
     Frontier::CelestialUniform record{};
     Frontier::PackCelestialUniform(settings, solution, /*wallSeconds*/ 0.0, record);
 
-    const SkyView sky = ReadRecord(record);
+    // The shader's own record type, filled from the exact bytes the engine uploads.
+    CelestialRecord sky = RecordFromUniform(record);
+    gCelestialRecordPtr = &sky;
 
     // Exposure: the P4 Celestial mode, from sun elevation alone. Settled, so this is the curve not a transient.
     Frontier::ExposureIntegrator exposureIntegrator;
@@ -277,13 +243,27 @@ int main(int argc, char** argv)
     const float exposure = exposureIntegrator.QueryExposure() * kUnitReconciliation;
 
     //---------------------------------------------------------------------------------------------------------
+    // 🔴 AIM THE CAMERA AT THE SUN'S AZIMUTH, rather than at a fixed compass bearing.
+    //
+    //    The first version faced a fixed north-east. At noon that put the sun 63.7 degrees off-axis and at
+    //    sunset 275 degrees away — so the sun disc was never in shot, and a falsification test that ZEROED the
+    //    disc in the shader changed literally zero bytes of the render. The test was right to fire: an image
+    //    that cannot show the disc cannot be evidence the disc works.
+    //
+    //    Following the azimuth means every frame actually contains the thing being demonstrated. A slight
+    //    offset keeps the sun off dead-centre so the sky gradient either side of it stays visible.
+    const float sunAzimuth = solution.SunAzimuthDegrees * 3.14159265f / 180.0f;
+    const float viewAzimuth = sunAzimuth + 0.16f;
+
     CameraBasis camera;
     camera.Origin     = vec3(0.0f, 0.0f, 1.75f);
-    camera.Forward    = normalize(vec3(0.30f, 1.0f, -0.045f));   // looking roughly north-east, at the horizon
+    camera.Forward    = normalize(vec3(std::sin(viewAzimuth), std::cos(viewAzimuth), -0.045f));
     camera.Right      = normalize(cross(camera.Forward, vec3(0.0f, 0.0f, 1.0f)));
     camera.Up         = normalize(cross(camera.Right, camera.Forward));
     camera.TanHalfFov = std::tan(29.0f * 3.14159265f / 180.0f);
     camera.Aspect     = float(width) / float(height);
+
+    PlaceSpheresFacing(viewAzimuth);
 
     const uvec2 extent{ uint32_t(width), uint32_t(height) };
 
@@ -309,17 +289,20 @@ int main(int argc, char** argv)
 
                 // ── Direct sun, sampled across its DISC: this is the P3 reservoir light, and sampling the disc
                 //    rather than the centre is what gives the shadow a real penumbra.
-                if (sky.SunDirection.z > 0.0f)
+                const vec3 sunDirection = sky.SunDirectionAndCosRadius.xyz();
+                if (sunDirection.z > 0.0f)
                 {
+                    // P3's cone sample across the sun's DISC — this is what gives the shadow a penumbra.
+                    const float cosRadius = sky.SunDirectionAndCosRadius.w;
                     const float u1 = uniform(rng), u2 = uniform(rng);
-                    const float cosTheta = sky.SunCosRadius + (1.0f - sky.SunCosRadius) * u1;
+                    const float cosTheta = cosRadius + (1.0f - cosRadius) * u1;
                     const float sinTheta = std::sqrt(std::max(0.0f, 1.0f - cosTheta * cosTheta));
                     const float phi = 6.2831853f * u2;
-                    const vec3 tangent = normalize(std::fabs(sky.SunDirection.z) < 0.99f
-                                                 ? cross(vec3(0.0f, 0.0f, 1.0f), sky.SunDirection)
+                    const vec3 tangent = normalize(std::fabs(sunDirection.z) < 0.99f
+                                                 ? cross(vec3(0.0f, 0.0f, 1.0f), sunDirection)
                                                  : vec3(1.0f, 0.0f, 0.0f));
-                    const vec3 bitangent = cross(sky.SunDirection, tangent);
-                    const vec3 toSun = normalize(sky.SunDirection * cosTheta
+                    const vec3 bitangent = cross(sunDirection, tangent);
+                    const vec3 toSun = normalize(sunDirection * cosTheta
                                                + tangent * (sinTheta * std::cos(phi))
                                                + bitangent * (sinTheta * std::sin(phi)));
 
@@ -328,7 +311,8 @@ int main(int argc, char** argv)
                     {
                         // 🔴 SunTransmittance is why the light warms at dusk: the air is filtering it.
                         colour = colour + albedo * (1.0f / 3.14159265f)
-                                        * sky.SunIrradiance * sky.SunTransmittance * cosSurface;
+                                        * sky.SunIrradianceAndScale.xyz() * sky.SunTransmittance.xyz()
+                                        * cosSurface;
                     }
                 }
 
@@ -343,15 +327,17 @@ int main(int argc, char** argv)
                 //
                 //    Squared, for the same reason the exposure term is: the terminator region is lit at a
                 //    grazing angle, so a half-lit disc delivers well under half a full moon's light.
-                if (sky.MoonDirection.z > 0.0f && sky.SunDirection.z < 0.02f)
+                const vec3 moonDirection = sky.MoonDirectionAndCosRadius.xyz();
+                if (moonDirection.z > 0.0f && sunDirection.z < 0.02f)
                 {
-                    const float cosSurface = std::max(dot(normal, sky.MoonDirection), 0.0f);
-                    if (cosSurface > 0.0f && !Occluded(hit + normal * 1e-3f, sky.MoonDirection))
+                    const float cosSurface = std::max(dot(normal, moonDirection), 0.0f);
+                    if (cosSurface > 0.0f && !Occluded(hit + normal * 1e-3f, moonDirection))
                     {
-                        const float moonSolidAngle = 6.2831853f * (1.0f - sky.MoonCosRadius);
-                        const float phase = std::clamp(record.MilkyWayAndMoonPhase[1], 0.0f, 1.0f);
+                        const float moonSolidAngle = 6.2831853f * (1.0f - sky.MoonDirectionAndCosRadius.w);
+                        const float phase = std::clamp(sky.MilkyWayAndMoonPhase.y, 0.0f, 1.0f);
                         colour = colour + albedo * (1.0f / 3.14159265f)
-                                        * sky.MoonRadiance * moonSolidAngle * (phase * phase) * cosSurface;
+                                        * sky.MoonRadianceAndEarthshine.xyz() * moonSolidAngle
+                                        * (phase * phase) * cosSurface;
                     }
                 }
 
@@ -368,11 +354,16 @@ int main(int argc, char** argv)
 
                 float t2; vec3 n2, a2;
                 if (!Trace(hit + normal * 1e-3f, bounce, t2, n2, a2))
-                    colour = colour + albedo * Sky(sky, hit, bounce, false, 10, 5);
+                {
+                    // 🔴 P2b, and this is the SHADER'S OWN CelestialSky — discs excluded, as on the bounce path.
+                    colour = colour + albedo * CelestialSky(sky, hit, bounce, false);
+                }
             }
             else
             {
-                colour = Sky(sky, camera.Origin, dir, true, 18, 9);
+                // 🔴 THE PRIMARY MISS, THROUGH THE SHADER'S OWN FUNCTION — sky, sun disc and moon disc, exactly
+                //    as the kernel composites them. Stars are added separately only because P7 has not landed.
+                colour = CelestialSky(sky, camera.Origin, dir, true) + PlaceholderStars(sky, dir);
             }
 
             accumulated = accumulated + colour;
