@@ -533,11 +533,16 @@ int main()
         Expect(Carves, "the eroded density never exceeds the uneroded");
         Expect(Strict > 0u, "and it carves strictly somewhere");
 
-        // The lod gate opens past 0.5: two lods above it shade bit-identical uneroded light.
+        // The lod gate opens past 0.5: two lods above it shade bit-identical uneroded light — while
+        // P2.4f's octave fade runs between them, so the pair moves to 1.0/1.5 (both fully faded) and the
+        // 0.6/1.0 pair now proves the fade itself (partial vs full octave must differ).
         const float P[3] = { 120.0f, 240.0f, 1600.0f };
-        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 0.6f) ==
+        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f) ==
+               VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.5f),
+               "lod 1.0 and lod 1.5 agree bit-for-bit (both skip erosion, octave fully faded)");
+        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 0.6f) !=
                VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f),
-               "lod 0.6 and lod 1.0 agree bit-for-bit (both skip erosion)");
+               "lod 0.6 and lod 1.0 differ (the octave fades between them)");
 
         // The lean is a rigid downwind shift: the field at P under a +x integral equals the rest field at
         // P + drift + lean, where the drift comes from the trusted AdvectDrift and the lean direction (+x)

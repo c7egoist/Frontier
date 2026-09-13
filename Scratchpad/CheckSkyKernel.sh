@@ -518,6 +518,15 @@ grep -q '(Ambient\[C\]\*Haze-OutScatter\[C\])\*Aer' Scratchpad/SkyCloudKernelPro
 Report $? "the twin dissolves toward the same haze"
 printf '%s' "$SkyCode" | grep -q 'mix(CloudMarchJitter(Direction), 0\.5, smoothstep(0\.4, 0\.6, DensityLod))'
 Report $? "the layer jitter fades out with the unresolved detail"
+# P2.4f's twins: the kernel and the transcription dissolve the same detail the same way.
+printf '%s' "$SkyCode" | grep -q 'Oct4 = Oct4Fade >= 1\.0'
+Report $? "the kernel fourth octave fades to its mean"
+printf '%s' "$SkyCode" | grep -q '(1\.0 - smoothstep(0\.3, 0\.5, Lod))'
+Report $? "the kernel erosion dissolves instead of popping out"
+grep -q 'Oct4 = Oct4Fade >= 1\.0f' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin fourth octave fades to its mean"
+grep -q 'TwinSmoothstep(0\.3f, 0\.5f, Lod)' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin erosion dissolves instead of popping out"
 
 echo
 if [ "$Fail" != "0" ]; then echo "[SkyKernel] FAILED"; exit 1; fi

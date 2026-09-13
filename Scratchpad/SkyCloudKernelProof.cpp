@@ -182,7 +182,10 @@ float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3], fl
     float Q1[3] = { S[0]*2.02f+3.1f, S[1]*2.02f+1.7f, S[2]*2.02f+9.2f };
     float Q2[3] = { S[0]*4.10f+7.7f, S[1]*4.10f+2.2f, S[2]*4.10f+1.1f };
     float Q3[3] = { S[0]*8.3f+1.3f, S[1]*8.3f+8.8f, S[2]*8.3f+4.4f };
-    float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f + TwinNoise(Q2)*0.125f + TwinNoise(Q3)*0.0625f;
+    // P2.4f's twin: the fourth octave fades to its mean with the LOD exactly as the engine pair does.
+    float Oct4Fade = TwinSmoothstep(0.0f, 1.0f, Lod);
+    float Oct4 = Oct4Fade >= 1.0f ? 0.5f : TwinNoise(Q3)*(1.0f-Oct4Fade)+0.5f*Oct4Fade;
+    float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f + TwinNoise(Q2)*0.125f + Oct4*0.0625f;
     Shape /= 0.9375f;
     if (K.Control[3] == 5u)
     {
@@ -200,7 +203,8 @@ float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3], fl
     float E2[3] = { S[0]*19.0f+5.0f, S[1]*19.0f+5.0f, S[2]*19.0f+5.0f };
     float Detail = TwinNoise(E1)*0.6f + TwinNoise(E2)*0.4f;
     float MixT = Hn*3.0f; MixT = MixT < 0.0f ? 0.0f : (MixT > 1.0f ? 1.0f : MixT);
-    float Erode = (Detail+(1.0f-Detail-Detail)*MixT)*K.CloudDetail[2]*0.45f;
+    // P2.4f's twin: the erosion dissolves over LOD 0.3-0.5 exactly as the engine pair does.
+    float Erode = (Detail+(1.0f-Detail-Detail)*MixT)*K.CloudDetail[2]*0.45f*(1.0f-TwinSmoothstep(0.3f, 0.5f, Lod));
     float Carved = Body-Erode*(1.0f-Body);
     Carved = Carved < 0.0f ? 0.0f : (Carved > 1.0f ? 1.0f : Carved);
     return Carved*std::fmax(K.CloudLayer[3], 0.0f);

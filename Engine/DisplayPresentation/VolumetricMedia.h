@@ -300,10 +300,17 @@ public:
         // the old note measured was the sharpened remap under the sin-hash field, both gone now (P2.1 took
         // the hash, this slice takes the sharpening), and the jittered march breaks what aliasing is left
         // into incoherent grain, which is what the reference's own coarse steps do.
+        // P2.4f: the fourth octave (152 m at scale 1.4) fades to its mean with the LOD — past 66 m steps
+        //    it is unresolvable (under two samples a feature) and marches as threshold-graze lottery
+        //    instead of structure. Fading to the mean is the infinite-ray mean, exact; fully faded it
+        //    skips its noise eval outright, which doubles as the far-shadow fast path.
+        const float Oct4Fade = SmoothStep(0.0f, 1.0f, Lod);
+        const float Oct4 = Oct4Fade >= 1.0f ? 0.5f
+            : Lerp(Noise(S[0] * 8.3f + 1.3f, S[1] * 8.3f + 8.8f, S[2] * 8.3f + 4.4f), 0.5f, Oct4Fade);
         float Shape = Noise(S[0], S[1], S[2]) * 0.5f
                     + Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f) * 0.25f
                     + Noise(S[0] * 4.10f + 7.7f, S[1] * 4.10f + 2.2f, S[2] * 4.10f + 1.1f) * 0.125f
-                    + Noise(S[0] * 8.3f + 1.3f, S[1] * 8.3f + 8.8f, S[2] * 8.3f + 4.4f) * 0.0625f;
+                    + Oct4 * 0.0625f;
         Shape /= 0.9375f;
 
         // Cirrus streaks (REF): only the top type stretches its sample — wide along x, pinched along the
@@ -329,8 +336,10 @@ public:
         const float TimeShift = Time * 0.02f;
         const float Detail = Noise(S[0] * 9.0f + TimeShift, S[1] * 9.0f + TimeShift, S[2] * 9.0f + TimeShift) * 0.6f
                            + Noise(S[0] * 19.0f + 5.0f, S[1] * 19.0f + 5.0f, S[2] * 19.0f + 5.0f) * 0.4f;
+        // P2.4f: the erosion dissolves over LOD 0.3-0.5 instead of popping out at 0.5 — the early-return
+        //    past 0.5 stays, now a seamless fast path rather than a visible contour.
         const float Erode = Lerp(Detail, 1.0f - Detail, Clamp(Hn * 3.0f, 0.0f, 1.0f))
-                          * Cloud.ErosionDetail * 0.45f;
+                          * Cloud.ErosionDetail * 0.45f * (1.0f - SmoothStep(0.3f, 0.5f, Lod));
         return Clamp(Body - Erode * (1.0f - Body), 0.0f, 1.0f) * Cloud.Density;
     }
 

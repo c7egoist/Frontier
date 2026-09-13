@@ -316,10 +316,16 @@ float CloudDensityAt(vec3 Position, float Time, float Lod)
 
     float Inverse = 1.0 / max(SkyCloudShape.x * 900.0, 1.0);
     vec3 S = vec3(Slanted * Inverse, Position.z * Inverse);
+    // P2.4f: the fourth octave (152 m at scale 1.4) fades to its mean with the LOD — past 66 m steps
+    //    it is unresolvable (under two samples a feature) and marches as threshold-graze lottery instead
+    //    of structure. Fading to the mean is the infinite-ray mean, exact; fully faded it skips its noise
+    //    eval outright, which doubles as the far-shadow fast path.
+    float Oct4Fade = smoothstep(0.0, 1.0, Lod);
+    float Oct4 = Oct4Fade >= 1.0 ? 0.5 : mix(CloudNoise(S * 8.3 + vec3(1.3, 8.8, 4.4)), 0.5, Oct4Fade);
     float Shape = CloudNoise(S) * 0.5
                 + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25
                 + CloudNoise(S * 4.10 + vec3(7.7, 2.2, 1.1)) * 0.125
-                + CloudNoise(S * 8.3 + vec3(1.3, 8.8, 4.4)) * 0.0625;
+                + Oct4 * 0.0625;
     Shape /= 0.9375;
     if (SkyControl.w == 5u)
     {
@@ -332,7 +338,9 @@ float CloudDensityAt(vec3 Position, float Time, float Lod)
     float TimeShift = Time * 0.02;
     float Detail = CloudNoise(S * 9.0 + vec3(TimeShift)) * 0.6
                  + CloudNoise(S * 19.0 + vec3(5.0)) * 0.4;
-    float Erode = mix(Detail, 1.0 - Detail, clamp(Hn * 3.0, 0.0, 1.0)) * SkyCloudDetail.z * 0.45;
+    // P2.4f: the erosion dissolves over LOD 0.3-0.5 instead of popping out at 0.5.
+    float Erode = mix(Detail, 1.0 - Detail, clamp(Hn * 3.0, 0.0, 1.0)) * SkyCloudDetail.z * 0.45
+                * (1.0 - smoothstep(0.3, 0.5, Lod));
     return clamp(Body - Erode * (1.0 - Body), 0.0, 1.0) * max(SkyCloudLayer.w, 0.0);
 }
 

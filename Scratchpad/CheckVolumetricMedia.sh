@@ -252,6 +252,12 @@ printf '%s' "$MediaCode" | grep -q '(AmbientRadiance\[C\] \* Haze - LayerS) \* A
 Report $? "far scatter dissolves toward the sky-haze"
 printf '%s' "$MediaCode" | grep -q 'Lerp(MarchJitter(Direction, Time), 0\.5f, SmoothStep(0\.4f, 0\.6f, DensityLod))'
 Report $? "the layer jitter fades out with the unresolved detail"
+# P2.4f: the unresolvable detail dissolves with the LOD instead of marching as lottery — the fourth
+#    octave to its mean (past 66 m steps it is under two samples a feature), the erosion over 0.3-0.5.
+printf '%s' "$MediaCode" | grep -q 'Oct4 = Oct4Fade >= 1\.0f'
+Report $? "the fourth octave fades to its mean with the LOD"
+printf '%s' "$MediaCode" | grep -q '(1\.0f - SmoothStep(0\.3f, 0\.5f, Lod))'
+Report $? "the erosion dissolves instead of popping out"
 
 echo
 if [ "$Fail" != "0" ]; then echo "[VolumetricMedia] FAILED"; exit 1; fi
