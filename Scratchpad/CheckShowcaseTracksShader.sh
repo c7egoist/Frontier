@@ -39,8 +39,12 @@ trap Restore EXIT
 echo "[ShowcaseTracksShader] the showcase compiles the shader's own celestial block"
 
 # The extractor must find all five functions; a partial lift would silently fall back to nothing.
-if bash Scratchpad/ExtractCelestialPort.sh "$Port" 2>&1 | grep -q '5 celestial functions'; then
-    echo "  OK    all 5 celestial functions extracted from the shipping shader"
+# ⚠️ The COUNT is asserted by ExtractCelestialPort.sh itself (it exits non-zero on a mismatch), so this checks
+#    the extraction SUCCEEDED rather than hard-coding a number here that goes stale every time a celestial
+#    function is added. It went stale once already, when the glare term took the count from 5 to 6.
+if ExtractOutput="$(bash Scratchpad/ExtractCelestialPort.sh "$Port" 2>&1)"; then
+
+    echo "  OK    celestial block extracted from the shipping shader"
 else
     echo "  FAIL  could not extract the celestial block from $Viewport"
     exit 1
@@ -122,6 +126,12 @@ Probe "halving the sky radiance" 17.8 \
 #    the perturbation that can actually show. Two earlier versions of this probe were no-ops and reported
 #    failure; both times the probe was wrong rather than the showcase, and the honest fix was a probe that
 #    perturbs something observable.
+# The glare is the term that makes the sun readable; if the showcase stopped tracking it, the images would look
+# right while the shader had drifted.
+Probe "removing the sun glare" 17.0 \
+      'return sky.SunRadianceAndLimb.xyz * (psf * kGlareStrength * window) * transmittance;' \
+      'return vec3(0.0);' \
+
 Probe "removing the moon disc" 19.5 \
       'return sky.MoonRadianceAndEarthshine.xyz * shade * transmittance;' \
       'return vec3(0.0);'

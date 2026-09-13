@@ -74,6 +74,34 @@ CheckConstant "the disc is analytic and full-resolution" 'vec3 CelestialSunDisc'
 CheckConstant "the bounce path excludes the discs"       'CelestialSky\(Celestial\[0\], hitPos, bounceDir, false\)' "$Viewport"
 CheckConstant "the primary path includes them"           'CelestialSky\(Celestial\[0\], CameraOrigin, rayDirection, true\)' "$Viewport"
 
+# ── 🔴 THE HALO CONSTRAINT, PINNED ────────────────────────────────────────────────────────────────────────────────────────────────
+echo
+echo "[SkyIntegration] the sun's glare cannot become a halo"
+# The user's words: "the sun blending into the atmosphere like a halo is 1 thing i absolutely do not want".
+# The proof above checks the SHAPE; these pin the shader to the constants the proof assumes, so the two cannot
+# drift apart. The theta^-2 term in particular must never come back — it is what made the first attempt a halo.
+CheckConstant "the glare cuts off hard at 2.5 deg"     '#define kGlareCutoff  2\.5' "$Viewport"
+CheckConstant "the core radius is 0.30 deg"            '#define kGlareInner   0\.30' "$Viewport"
+CheckConstant "strength is the measured 2.5e-3"        '#define kGlareStrength 2\.5e-3' "$Viewport"
+CheckConstant "the falloff is pure theta^-3"           'psf = 1\.0 / \(t \* t \* t\)' "$Viewport"
+
+# A theta^-2 term reaches ~30 degrees. Its presence would be the halo, reintroduced.
+GlareBody="$(sed -n '/^vec3 CelestialSunGlare/,/^}/p' "$Viewport")"
+if printf '%s' "$GlareBody" | grep -qE '5\.0 / \(t \* t\)|/ \(t \* t\)\s*;'; then
+    echo "  FAIL  the theta^-2 tail is back in the glare — that reaches ~30 deg and IS the halo"
+    Fail=1
+else
+    echo "  OK    no theta^-2 tail; the glare cannot reach far enough to be a halo"
+fi
+
+# The disc must be composited AFTER the glare, or the flare washes over its edge.
+if grep -A2 'CelestialSunGlare(sky, rayDirection, transmittance);' "$Viewport" | grep -q 'CelestialSunDisc'; then
+    echo "  OK    the disc is drawn on top of its own glare, so its edge stays sharp"
+else
+    echo "  FAIL  the disc is not composited after the glare; its edge would be washed out"
+    Fail=1
+fi
+
 # ── The measured step budget ─────────────────────────────────────────────────────────────────────────────────────────────────────
 echo
 echo "[SkyIntegration] the real-time step budget is the measured one"

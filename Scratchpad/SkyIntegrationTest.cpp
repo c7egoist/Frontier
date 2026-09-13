@@ -336,6 +336,79 @@ int main()
     }
 
     //----------------------------------------------------------------------------------------------------------------
+    Section("4b. THE SUN'S GLARE IS A FLARE, NOT A HALO");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 AN EXPLICIT USER CONSTRAINT: "the sun blending into the atmosphere like a halo is 1 thing i absolutely
+    //    do not want". The glare exists because the disc is 0.53 deg and ~2 px at render size while being
+    //    24 000x its surroundings — without it the sun is invisible. But the fix must not become the failure.
+    //
+    //    The atmosphere ALREADY makes a broad aureole: measured, the sky 0.3 deg from the sun is only 3.2x the
+    //    sky 20 deg away. That gentle Mie lobe is the real haze. The glare must be categorically tighter, so
+    //    these thresholds are about SHAPE, not brightness — a halo is a reach problem and cannot be tuned away
+    //    by lowering the strength. The first attempt used the full CIE function (theta^-3 + theta^-2) and still
+    //    lifted the sky at 3 deg after an 800x strength cut; the theta^-2 tail had to be REMOVED.
+    {
+        // Mirrors CelestialSunGlare in the shader. The gate below pins the shader's constants to these.
+        const double inner = 0.30, cutoff = 2.5, strength = 2.5e-3;
+        auto Glare = [&](double degreesFromSun)
+        {
+            if (degreesFromSun > cutoff) return 0.0;
+            const double t = std::max(degreesFromSun, inner);
+            const double w = 1.0 - degreesFromSun / cutoff;
+            return (1.0 / (t * t * t)) * strength * w * w;
+        };
+
+        // 1. It must vanish completely well before the aureole's scale.
+        Check(Glare(2.6) == 0.0 && Glare(5.0) == 0.0 && Glare(10.0) == 0.0,
+              "the glare is exactly zero beyond 2.5 deg",
+              "0 at 2.6, 5 and 10 deg");
+
+        // 2. It must be overwhelmingly concentrated at the disc. A halo would be flat-ish across its span.
+        const double nearSun = Glare(0.35), atOne = Glare(1.0), atTwo = Glare(2.0);
+        Check(nearSun > atOne * 20.0,
+              "it falls at least 20x from 0.35 deg to 1 deg",
+              Fixed(nearSun / atOne, 1) + "x");
+        Check(nearSun > atTwo * 200.0,
+              "and at least 200x by 2 deg — a flare, not a wash",
+              Fixed(nearSun / atTwo, 1) + "x");
+
+        // 3. 🔴 THE DECISIVE ONE. Compare the glare's concentration against the ATMOSPHERE's own aureole, which
+        //    is the thing it must not resemble. The aureole varies only ~3x over 20 degrees; the glare must be
+        //    orders of magnitude steeper over a far shorter span, or it is just a second haze.
+        const AtmosphereParameters atmosphere2 = MakeAtmosphere();
+        const float sunElev = 12.0f * 3.14159265f / 180.0f;
+        const vec3 sun2(std::cos(sunElev), 0.0f, std::sin(sunElev));
+        auto SkyAt = [&](float offsetDegrees)
+        {
+            const float a = offsetDegrees * 3.14159265f / 180.0f;
+            const vec3 tangent = normalize(cross(vec3(0.0f, 0.0f, 1.0f), sun2));
+            const vec3 dir = normalize(sun2 * std::cos(a) + tangent * std::sin(a));
+            return Luma(Sky(atmosphere2, vec3(0.0f, 0.0f, 2.0f), dir, sun2));
+        };
+        const double aureoleRatio = double(SkyAt(0.35f)) / double(SkyAt(2.0f));
+        const double glareRatio   = nearSun / atTwo;
+        Check(glareRatio > aureoleRatio * 100.0,
+              "the glare is >100x more concentrated than the atmosphere's aureole",
+              "glare " + Fixed(glareRatio, 1) + "x vs aureole " + Fixed(aureoleRatio, 3) + "x over the same span");
+
+        // 4. It must not be a hard-edged disc either: the user asked for a SMOOTH fade.
+        bool monotonic = true;
+        double previous = 1e30;
+        for (int i = 1; i <= 250; ++i)
+        {
+            const double value = Glare(double(i) * 0.01);
+            if (value > previous + 1e-12) monotonic = false;
+            previous = value;
+        }
+        Check(monotonic, "the fade is monotonic — smooth, with no ring or step", "0.01 to 2.5 deg");
+
+        // And it must reach zero continuously rather than dropping off a cliff at the cutoff.
+        Check(Glare(2.45) < Glare(1.0) * 0.02,
+              "it has already faded to nothing before the cutoff, so no edge shows",
+              Fixed(Glare(2.45) / Glare(1.0) * 100.0, 3) + "% of its 1 deg value");
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
     Section("5. RADIANCE vs IRRADIANCE - the sun and its own sky agree");
     //----------------------------------------------------------------------------------------------------------------
     // 🔴 A REAL BUG THIS CAUGHT. The scattering integral assumes a top-of-atmosphere solar irradiance of 1, so

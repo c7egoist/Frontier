@@ -456,6 +456,69 @@ vec3 CelestialMoonDisc(CelestialRecord sky, vec3 rayDirection, vec3 transmittanc
     return sky.MoonRadianceAndEarthshine.xyz * shade * transmittance;
 }
 
+// 🔴 CAMERA/EYE GLARE AROUND THE SUN — a TIGHT flare that keeps the disc readable, NOT a halo.
+//
+//    The problem this solves, measured: the disc is 24 000x the sky beside it and 0.53 deg across. At a typical
+//    render height that is ~2 px, and ACES maps both the disc and the sky around it to ~1.0, so the sun and its
+//    surroundings clip to the same white and the sun is invisible. Physically correct, visually absent.
+//
+//    ⚠️ WHAT THIS MUST NOT BECOME. The atmosphere ALREADY produces a broad aureole: measured at 17:00, the sky
+//    0.3 deg from the sun is only 3.20x the sky 20 degrees away — a wide, gentle Mie forward lobe. That is the
+//    real haze, and it is already there. A second broad term stacked on top of it is precisely the "sun blending
+//    into the atmosphere like a halo" that is not wanted. So this function is deliberately NARROW and STEEP.
+//
+//    The shape is the CIE disability-glare function (Vos & van den Berg; the simplified general form is
+//    10/theta^3 + 5/theta^2). Two properties earn it its place over a Gaussian bloom:
+//      · theta^-3 falls off FAST — by 2 degrees it has dropped ~1000x from its value at 0.2 degrees, so it stays
+//        a compact flare hugging the disc instead of a wash spreading over the sky;
+//      · it is what an actual eye and an actual lens do, so the result reads as a photograph rather than an
+//        effect. The sun in a photograph is not a big disc: it is a small disc inside a tight glare.
+//
+//    kGlareInner keeps theta^-3 finite at theta = 0 and sets where the flare stops growing; it is a shade wider
+//    than the disc so the glare emerges from behind the sun's edge rather than spiking at its centre.
+//    ⚠️ THE CUTOFF AND THE EXPONENT WERE BOTH SET BY MEASUREMENT, AND THE FIRST ATTEMPT WAS A HALO.
+//    With the CIE tail (theta^-3 + theta^-2) and a 6 deg cutoff, the flare still lifted the sky by +0.03 ACES
+//    at 3 degrees even after the strength was cut 800x — because theta^-2 decays far too slowly to stay tight.
+//    Measured lift above bare sky at 3 deg, sweeping strength: 0.139, 0.139, 0.139, 0.117, 0.071, 0.030 — it
+//    refused to go away. Scaling could not fix a shape problem.
+//
+//    So the tail term is dropped and the cutoff pulled in to 2.5 deg: pure theta^-3, which falls 1000x per
+//    decade of angle, inside a hard window. That is a flare hugging the disc, and it CANNOT reach far enough to
+//    read as a halo. Fixed by changing the shape, not by turning the knob down.
+#define kGlareInner   0.30      // [deg] core softening radius, just wider than the disc's own 0.265
+#define kGlareCutoff  2.5       // [deg] hard limit — past this the sky is untouched, so no halo is possible
+//    Strength measured on the same sweep, as ACES lift above the bare sky at a correctly exposed 17:00:
+//        2.5e-3 -> flare visible to 0.6 deg, ZERO lift at 3 deg    <- chosen
+//        1.0e-4 -> visible only to 0.3 deg (too faint to help)
+//    With the theta^-3 shape the strength now controls brightness WITHOUT controlling reach, which is exactly
+//    the separation that was missing before.
+#define kGlareStrength 2.5e-3   // [-]   scales the disc's radiance into the flare
+
+vec3 CelestialSunGlare(CelestialRecord sky, vec3 rayDirection, vec3 transmittance)
+{
+    vec3  sunDirection = sky.SunDirectionAndCosRadius.xyz;
+    float cosAngle     = dot(rayDirection, sunDirection);
+    if (cosAngle <= 0.0) return vec3(0.0);   // never behind the viewer
+
+    // ⚠️ Not named `degrees` — that is a GLSL builtin, and shadowing it compiles here but breaks the C++ port.
+    float angle = degrees(acos(clamp(cosAngle, -1.0, 1.0)));
+    if (angle > kGlareCutoff) return vec3(0.0);
+
+    // theta^-3 ONLY. The CIE function's theta^-2 term describes scatter out to 30 degrees, which is right for
+    //    modelling disability glare and wrong for drawing a sun: it is what made the first attempt a halo.
+    float t  = max(angle, kGlareInner);
+    float psf = 1.0 / (t * t * t);
+
+    // Smoothly windowed to zero across the whole range rather than only at the end: squared cosine falloff, so
+    //    there is no angle at which the flare has a hard edge or a visible ring.
+    float w = 1.0 - angle / kGlareCutoff;
+    float window = w * w;
+
+    // Driven by the DISC's radiance, so the flare tracks the sun's own brightness and reddens with it at dusk:
+    //    the same SunTransmittance that warms the direct light warms the glare.
+    return sky.SunRadianceAndLimb.xyz * (psf * kGlareStrength * window) * transmittance;
+}
+
 // The whole sky along a ray: scattering, plus the discs composited on top. `includeDiscs` is false for the
 //    reservoir's light-sampling path, where the sun is sampled as an explicit light rather than found by chance.
 vec3 CelestialSky(CelestialRecord sky, vec3 origin, vec3 rayDirection, bool includeDiscs)
@@ -477,6 +540,10 @@ vec3 CelestialSky(CelestialRecord sky, vec3 origin, vec3 rayDirection, bool incl
 
     if (includeDiscs)
     {
+        // Glare first, then the disc on top of it — so the disc always sits ABOVE its own flare and stays the
+        //    brightest thing in frame. Reversing these would let the flare wash over the disc's edge, which is
+        //    the "sun dissolving into the sky" failure.
+        radiance += CelestialSunGlare(sky, rayDirection, transmittance);
         radiance += CelestialSunDisc(sky, rayDirection, transmittance);
         radiance += CelestialMoonDisc(sky, rayDirection, transmittance);
     }

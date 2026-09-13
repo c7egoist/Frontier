@@ -239,7 +239,13 @@ int main(int argc, char** argv)
     //    integral's relative units (solar irradiance = Sun.Intensity). One constant reconciles the two, and it
     //    is the SAME constant at every time of day — so the day-night ramp you see is the solver's curve, not a
     //    per-frame fudge. Verified by the strip: nothing is re-tuned between frames.
-    const float kUnitReconciliation = 7000.0f;
+    //    ⚠️ WAS 7000, WHICH BLEW THE SKY OUT. Measured at 17:00 the sky 0.4 deg from the sun reached ACES 1.000
+    //    — pure white — with the sun's own disc clipping to the same value, so the sun was invisible against a
+    //    white sky and NO glare term could have helped. A photographer shooting toward the sun stops down so the
+    //    sky holds detail and only the sun clips. 800 does that: near-sun sky 0.87, mid sky 0.78, lit ground
+    //    0.09..0.44 across the day. This is the single constant that made D3 look like a missing feature when it
+    //    was an exposure error.
+    const float kUnitReconciliation = 800.0f;
     const float exposure = exposureIntegrator.QueryExposure() * kUnitReconciliation;
 
     //---------------------------------------------------------------------------------------------------------

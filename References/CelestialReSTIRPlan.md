@@ -247,7 +247,35 @@ cause, so whoever picks it up does not start from zero.
   ground inter-reflection add more. NEXT STEP: inspect the multiple-scattering term in `AtmosphereScatter`; it
   is one cheap approximation and may simply be too dark.
 
-- **D3 — the sun disc is not visible in the renders. ✅ DIAGNOSED (fix still deferred).**
+- **D3 — the sun disc is not visible. ✅ FIXED (2026-09-13).** Two causes, both real, neither in the disc.
+  **Cause 1, the one that mattered: THE SKY WAS OVER-EXPOSED.** The showcase's unit-reconciliation constant was
+  7000, which put the sky 0.4 deg from the sun at **ACES 1.000 — pure white**, with the disc clipping to the
+  same value. The sun was invisible against a white sky and NO glare term could have helped. A photographer
+  shooting toward the sun stops down so the sky holds detail and only the sun clips. Measured sweep:
+      recon   ACES at 0.4deg / 2deg / 10deg / 30deg / lit ground
+       7000    1.000  1.000  1.000  0.942  0.715   <- sky blown, sun invisible
+        800    0.870  0.866  0.776  0.436  0.090   <- chosen
+  **Cause 2: 0.53 deg is ~2 px** at render size, so even correctly exposed it needs glare to read — which is
+  what a real lens and a real eye do.
+  **Added `CelestialSunGlare` to the production shader.** ⚠️ USER CONSTRAINT: "the sun blending into the
+  atmosphere like a halo is 1 thing i absolutely do not want." The atmosphere ALREADY makes a broad aureole
+  (sky 0.3 deg from the sun is only 3.2x the sky 20 deg away), so a second broad term would be exactly that halo.
+  🔴 **THE FIRST ATTEMPT WAS A HALO, AND TUNING COULD NOT FIX IT.** Using the full CIE disability-glare function
+  (theta^-3 + theta^-2, 6 deg cutoff) the flare still lifted the sky at 3 deg after cutting strength 800x —
+  measured lift at 3 deg across the sweep: 0.139, 0.139, 0.139, 0.117, 0.071, 0.030. It refused to go away
+  because **reach is a SHAPE problem, not a strength problem**: the theta^-2 term describes ocular scatter out
+  to 30 degrees, which is right for modelling disability glare and wrong for drawing a sun. Dropped the tail
+  entirely, pure **theta^-3** inside a hard **2.5 deg** cutoff with a squared-cosine window. Now: **zero lift at
+  3 deg**, flare visible only to ~0.6 deg, and strength controls brightness WITHOUT controlling reach.
+  Gated in `SkyIntegrationTest` section 4b by SHAPE, not brightness: zero beyond 2.5 deg; falls 47.9x by 1 deg
+  and **3450x by 2 deg**; and the decisive one — the glare is **3450x concentrated vs the atmosphere's aureole
+  at 1.024x over the same span**, i.e. >100x steeper than the thing it must not resemble. Plus monotonic fade
+  (no ring) and faded to 0.008% before the cutoff (no edge). `CheckSkyIntegration` pins the constants and FAILS
+  if the theta^-2 tail returns. `CheckShowcaseTracksShader` gained a falsification probe for the glare.
+  Renders: `19_sun_glare_afternoon.png`, `20_sun_glare_morning.png`, `21_sun_glare_golden.png`,
+  `22_sun_glare_sunrise.png` — a distinct disc with a tight smooth fade, sitting in front of the sky.
+
+- **D3 (original diagnosis, kept for the record).**
   Two independent causes, both measured, neither of them a bug in the disc:
   1. **Size.** 0.53 deg over a ~58 deg vertical FOV at 240 px is **2.2 px**. At the 540 px heroes it is 4.9 px.
      It is physically the right size and visually nothing. Real photographs show a big sun because of lens

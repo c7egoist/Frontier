@@ -57,3 +57,6 @@ inline vec4 vec4_from(vec2 a, vec2 b) { return vec4(a.x, a.y, b.x, b.y); }
 inline float uintBitsToFloat(uint u) { float f; std::memcpy(&f, &u, 4); return f; }
 inline uint floatBitsToUint(float f) { uint u; std::memcpy(&u, &f, 4); return u; }
 inline float log2(float a) { return std::log2(a); }
+// GLSL angle conversions — used by the celestial glare term.
+inline float degrees(float r) { return r * 57.2957795130823f; }
+inline float radians(float d) { return d * 0.01745329251994330f; }
