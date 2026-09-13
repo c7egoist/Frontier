@@ -360,7 +360,7 @@ void VisibilityRaster::RasterizeShadow(const SceneStructure& Level, const float 
     Rx /= Rl; Ry /= Rl; Rz /= Rl;
     ShadowR_[0] = Rx; ShadowR_[1] = Ry; ShadowR_[2] = Rz;
     ShadowU_[0] = Ry * Dz - Rz * Dy; ShadowU_[1] = Rz * Dx - Rx * Dz; ShadowU_[2] = Rx * Dy - Ry * Dx;
-    ShadowTan_ = std::tan(kShadowHalf * kPi / 180.0f);
+    // ShadowTan_ arrives per-tap from the caller (the sun's tightened frustum vs the 65 deg emissive cone).
 
     std::fill(Shadow_.begin(), Shadow_.end(), 1e30f);
     const auto& Flat = Level.QueryFlatTriangles();
@@ -595,6 +595,36 @@ void VisibilityRaster::Shade(const SceneStructure& Level, const float Eye[3], co
     const float CloudSunRad[3] = { Celestial_.Light.Colour[0] * Celestial_.Light.Intensity * CloudDayFactor,
                                    Celestial_.Light.Colour[1] * Celestial_.Light.Intensity * CloudDayFactor,
                                    Celestial_.Light.Colour[2] * Celestial_.Light.Intensity * CloudDayFactor };
+    // The sun tap (P5): the raster's only direct lights used to be emissive scene triangles, so a sunlit
+    //    scene rendered as black geometry against a correct sky — no sun ever reached a surface. The sun
+    //    rides the same tap loop as a far point whose weight cancels its own falloff (Weight = Dist^2),
+    //    i.e. a directional light: parallel rays, NdotL shading, PCSS shadows from a tightened frustum.
+    //    Skipped below -12 deg by the same twilight ramp the clouds take.
+    bool SunTapPlaced = false;
+    float SunTan = 1.0f;
+    const float SunDayFactor = Smooth01(-12.0f, 0.0f, SunElevationDegrees);
+    if (Celestial_.Enabled && SunDayFactor > 0.0f && TapCount_ < kLightTaps + kSunTaps)
+    {
+        const float Extent[3] = { MaxB[0] - MinB[0], MaxB[1] - MinB[1], MaxB[2] - MinB[2] };
+        const float Radius = 0.5f * std::sqrt(Extent[0]*Extent[0] + Extent[1]*Extent[1] + Extent[2]*Extent[2]);
+        float Dist = Radius * 50.0f;
+        if (Dist < 500.0f) Dist = 500.0f;
+        if (Dist > 20000.0f) Dist = 20000.0f;
+        LightTap& Sun = Taps_[TapCount_++];
+        Sun.P[0] = Centre[0] + Celestial_.Light.Direction[0] * Dist;
+        Sun.P[1] = Centre[1] + Celestial_.Light.Direction[1] * Dist;
+        Sun.P[2] = Centre[2] + Celestial_.Light.Direction[2] * Dist;
+        Sun.N[0] = -Celestial_.Light.Direction[0];
+        Sun.N[1] = -Celestial_.Light.Direction[1];
+        Sun.N[2] = -Celestial_.Light.Direction[2];
+        Sun.Le[0] = Celestial_.Light.Colour[0] * Celestial_.Light.Intensity * SunDayFactor;
+        Sun.Le[1] = Celestial_.Light.Colour[1] * Celestial_.Light.Intensity * SunDayFactor;
+        Sun.Le[2] = Celestial_.Light.Colour[2] * Celestial_.Light.Intensity * SunDayFactor;
+        Sun.Weight = Dist * Dist;
+        Sun.Size = Dist * 0.00465f; // solar angular radius (0.265 deg) at the tap distance: sharp penumbrae.
+        SunTan = (Radius * 1.35f) / Dist; // the frustum fits the scene sphere, not the 65 deg emissive cone.
+        SunTapPlaced = true;
+    }
     const float SunBearing = std::atan2(Celestial_.Light.Direction[0], Celestial_.Light.Direction[1]);
     const auto AzimuthDeltaFor = [SunBearing](const float Dir[3]) -> float
     {
@@ -901,6 +931,9 @@ void VisibilityRaster::Shade(const SceneStructure& Level, const float Eye[3], co
     for (uint32_t TapIdx = 0u; TapIdx < TapCount_; ++TapIdx)
     {
         const LightTap& Tap = Taps_[TapIdx];
+        // The sun tap looks down a tightened frustum (fitted above); emissive taps keep the 65 deg cone.
+        ShadowTan_ = (SunTapPlaced && TapIdx == TapCount_ - 1u)
+                   ? SunTan : std::tan(kShadowHalf * kPi / 180.0f);
         RasterizeShadow(Level, Tap.P, Centre);
         for (uint32_t Y = 0u; Y < Height; ++Y)
         {

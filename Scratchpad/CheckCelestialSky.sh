@@ -66,6 +66,18 @@ Stray=$(grep -rln --include=*.cpp -e '5\.8e-6' -e '13\.5e-6' Engine/ | grep -v A
 if [ -z "$Stray" ]; then printf '  %-64s PASS\n' "the Rayleigh coefficients live in one place"
 else printf '  %-64s FAIL\n' "a second copy of the medium: $Stray"; Fail=1; fi
 
+# P5: the sun rides the tap loop as a far point whose weight cancels its own falloff — without it a
+#    sunlit scene renders as black geometry against a correct sky.
+grep -q 'Sun.Weight = Dist \* Dist;' Engine/GeometricRaster/VisibilityRaster.cpp
+if [ $? -eq 0 ]; then printf '  %-64s PASS\n' "the sun tap cancels its own falloff"
+else printf '  %-64s FAIL\n' "the sun tap cancels its own falloff"; Fail=1; fi
+grep -q 'SunTan = (Radius \* 1\.35f) / Dist;' Engine/GeometricRaster/VisibilityRaster.cpp
+if [ $? -eq 0 ]; then printf '  %-64s PASS\n' "the sun frustum fits the scene sphere"
+else printf '  %-64s FAIL\n' "the sun frustum fits the scene sphere"; Fail=1; fi
+grep -q 'Taps_\[kLightTaps + kSunTaps\]' Engine/GeometricRaster/VisibilityRaster.h
+if [ $? -eq 0 ]; then printf '  %-64s PASS\n' "the tap buffer holds the sun"
+else printf '  %-64s FAIL\n' "the tap buffer holds the sun"; Fail=1; fi
+
 echo
 if [ "$Fail" != "0" ]; then echo "[CelestialSky] FAILED"; exit 1; fi
 echo "[CelestialSky] OK"

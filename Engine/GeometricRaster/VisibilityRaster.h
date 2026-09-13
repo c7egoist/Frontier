@@ -189,7 +189,11 @@ private:
     }
 
     std::vector<LumiTri>  Lumi_;     // emissive triangles, rebuilt every render
-    LightTap              Taps_[kLightTaps] = {};
+    // Four emissive taps plus the sun: the celestial port's directional light rides the same tap loop
+    //    (P5: the GPU mirror in ShadowRaster/ShadowResolve grows its own sun tap next — the CPU must not
+    //    outrender the GPU it mirrors).
+    static constexpr uint32_t kSunTaps     = 1u;
+    LightTap              Taps_[kLightTaps + kSunTaps] = {};
     uint32_t              TapCount_  = 0u;
 
     CelestialSettings     Celestial_{};   // the sky behind the geometry (disabled = flat fallback colour)
