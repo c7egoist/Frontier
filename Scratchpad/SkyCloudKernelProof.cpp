@@ -27,6 +27,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 using namespace Frontier;
 using namespace Frontier::ProjectZero;
@@ -45,6 +46,12 @@ float TwinSmoothstep(float E0, float E1, float V)
     float T = (V-E0)/(E1-E0);
     T = T < 0.0f ? 0.0f : (T > 1.0f ? 1.0f : T);
     return T*T*(3.0f-2.0f*T);
+}
+float TwinErosionStepLod(float StepSize)
+{
+    // Twin of VolumetricMedia::ErosionStepLod, which carries the note: steps past 66 m cannot resolve
+    //    the erosion octave, so they read the uneroded body instead of aliasing confetti.
+    return TwinSmoothstep(33.0f, 66.0f, StepSize);
 }
 float TwinHash(const float P[3])
 {
@@ -330,7 +337,7 @@ bool TwinBoxInterval(const float Origin[3], const float Direction[3], const floa
     return Far > Near;
 }
 float TwinShadowDepth(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
-                      uint32_t Medium, uint32_t Taps, const float Swirl[3])
+                      uint32_t Medium, uint32_t Taps, const float Swirl[3], float Lod)
 {
     uint32_t Flag = Medium == 0u ? kTwinLayerFlag : (Medium == 1u ? kTwinLocalCloudFlag : kTwinLocalFogFlag);
     if ((K.Control[2] & Flag) == 0u) return 0.0f;
@@ -349,7 +356,7 @@ float TwinShadowDepth(const SkyConstantRecord& K, const float Origin[3], const f
             if (I > Taps) break;
             float D = St*float(I)*float(I)*0.35f;
             float Q[3] = { Origin[0]+Direction[0]*D, Origin[1]+Direction[1]*D, Origin[2]+Direction[2]*D };
-            Depth += TwinCloudDensityAt(K, Q, Time, I > 2u ? 1.0f : 0.0f)*D*0.8f;
+            Depth += TwinCloudDensityAt(K, Q, Time, std::fmax(Lod, I > 2u ? 1.0f : 0.0f))*D*0.8f;
         }
     }
     else
@@ -422,8 +429,13 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
     if (Count > Cap) Count = Cap;
     float Step = Span/float(Count);
     float Lod = Medium == 0u ? TwinSmoothstep(20000.0f, 200000.0f, Near) : 0.0f;
+    // P2.4d: the erosion LOD fades detail the step cannot resolve (note at ErosionStepLod). Kept apart
+    //    from Lod: the shadow's lodFar mix stays distance-only, as the reference has it.
+    float StepLod = Medium == 0u ? TwinErosionStepLod(Step) : 0.0f;
+    float DensityLod = StepLod > Lod ? StepLod : Lod;
     float Time = K.CloudClock[2];
-    float Jitter = Medium == 0u ? TwinMarchJitter(Direction, Time) : 0.5f;
+    float Jitter = 0.5f;
+    if (Medium == 0u) { float Hj = TwinMarchJitter(Direction, Time); float Fj = TwinSmoothstep(0.4f, 0.6f, DensityLod); Jitter = Hj+(0.5f-Hj)*Fj; }
     float Mu = Direction[0]*SunDirection[0]+Direction[1]*SunDirection[1]+Direction[2]*SunDirection[2];
     // The lobes are the record's global scatter row (REF uCLG1/uCLG2/uCLMix): the local cloud reads the
     //    layer's, like the CPU march; the fog keeps its own g in a single lobe. x4pi inside, like the panel.
@@ -447,12 +459,13 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
     {
         float Tm = Near + (float(I)+Jitter)*Step;
         float P[3] = { Origin[0]+Direction[0]*Tm, Origin[1]+Direction[1]*Tm, Origin[2]+Direction[2]*Tm };
-        float Density = Medium == 0u ? TwinCloudDensityAt(K, P, Time, Lod)
+        float Density = Medium == 0u ? TwinCloudDensityAt(K, P, Time, DensityLod)
                       : TwinLocalDensityAt(K, P, Medium == 2u, Swirl, 0.0f);
         if (Density <= 1e-5f) continue;
-        float D0 = TwinShadowDepth(K, P, SunDirection, 0u, Taps, Swirl);
-        float D1 = TwinShadowDepth(K, P, SunDirection, 1u, Taps, Swirl);
-        float D2 = TwinShadowDepth(K, P, SunDirection, 2u, Taps, Swirl);
+        // The shadow reads the march's erosion LOD (the boxes ignore it — their taps stay lod 1).
+        float D0 = TwinShadowDepth(K, P, SunDirection, 0u, Taps, Swirl, DensityLod);
+        float D1 = TwinShadowDepth(K, P, SunDirection, 1u, Taps, Swirl, DensityLod);
+        float D2 = TwinShadowDepth(K, P, SunDirection, 2u, Taps, Swirl, DensityLod);
         float OwnRaw = Medium == 0u ? D0 : (Medium == 1u ? D1 : D2);
         float Own = Medium == 0u ? OwnRaw+(Density*(TwinTop-TwinBase)*0.3f-OwnRaw)*Lod : OwnRaw;
         float OthersT = std::exp(-((D0+D1+D2)-OwnRaw));
@@ -480,6 +493,17 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
         if (T < 0.005f) break;
     }
     OutScatter[0]=S[0]; OutScatter[1]=S[1]; OutScatter[2]=S[2]; OutT = T;
+    // The aerial perspective (REF cloudMarch tail, twin of VolumetricMedia::March): air below the layer
+    //    dissolves the layer's own scatter toward the sky behind it — entry-distance driven, never above.
+    //    TwinMarchMedium zeroes its outputs at entry, so the composed OutScatter/OutT ARE this medium's
+    //    own contribution and no entry capture is needed.
+    if (Medium == 0u)
+    {
+        float Above = Origin[2] >= TwinTop ? 1.0f : 0.0f;
+        float Aer = (1.0f-std::exp(-Near*3e-5f))*(1.0f-Above)*0.6f;
+        float Haze = (1.0f-OutT)*0.9f;
+        for (int C = 0; C < 3; ++C) OutScatter[C] += (Ambient[C]*Haze-OutScatter[C])*Aer;
+    }
 }
 void TwinCloudAlong(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
                     float Maximum, const float SunDirection[3], const float SunRadiance[3],
@@ -696,6 +720,7 @@ int main()
     // 2 ─ render the morning frame through the kernel twin, and through the raster for the parity check. The
     //    per-pixel frame is the lab's (atmosphere + aureole + ground + colour); only the cloud march swaps.
     static unsigned char TwinRgb[(size_t)kW*kH*3u], RasterRgb[(size_t)kW*kH*3u];
+    int Iso = 0; // Isolation switch for the SKY_ISO frames below: 1 = atmosphere only, 2 = flat cloud ambient.
     auto Render = [&](const SkyConstantRecord& K, unsigned char* Rgb, bool Twin) {
         // The raster branch reads the PACKED wall clock, like everything else it shares with the twin.
         float CloudTime = K.CloudClock[2];
@@ -745,8 +770,10 @@ int main()
                 //    budgets — so the pack itself is under test alongside the transcription.
                 float SunRad[3] = { K.SunRadiance[0]*DayF, K.SunRadiance[1]*DayF, K.SunRadiance[2]*DayF };
                 float Maximum = CloudMaxDist > kTwinMaxDistance ? kTwinMaxDistance : CloudMaxDist;
-                float Scatter[3]; float T = 1.0f;
-                TwinCloudAlong(K, Eye, Dir, Maximum, K.SunDirection, SunRad, Out, Scatter, T);
+                float Scatter[3] = { 0.0f, 0.0f, 0.0f }; float T = 1.0f;
+                float Flat[3] = { 0.7f, 0.8f, 1.0f };
+                if (Iso != 1)
+                    TwinCloudAlong(K, Eye, Dir, Maximum, K.SunDirection, SunRad, Iso == 2 ? Flat : Out, Scatter, T);
                 for (int C = 0; C < 3; ++C) Out[C] = Out[C]*T + Scatter[C];
             }
             else
@@ -797,6 +824,7 @@ int main()
         Sky.Tick(7200.0f, LateOrigin, 0.0f);
         SkyConstantRecord Late = Sky.PackSkyRecord();
         Render(Late, TwinRgb, true);
+        PngWriteShim::WritePng("Diagnostics/SkyCloudKernel_Plus2h.png", kW, kH, 3, TwinRgb, (int)kW * 3);
         float LateDy = 0.0f, LateDx = 0.0f;
         StreakGauge(TwinRgb, kW, kH, LateDy, LateDx);
         double Sum = 0.0, Moved = 0.0; long N = 0;
@@ -819,6 +847,17 @@ int main()
         Expect(LateDy < 0.07f, "+2h kernel render: elevation residual stays coherent");
         Expect(LateDy < 1.6f*LateDx + 0.01f, "+2h kernel render: no directional streak signature");
         Expect(LateMean > 0.15f && LateMean < 0.85f, "+2h kernel render: mean luminance sane");
+        // Isolation frames for grain hunts (SKY_ISO=1 in the environment): the +2h frame with no
+        //    clouds (the atmosphere/aureole/ground alone) and with a flat cloud ambient (march-internal
+        //    structure only). Off in normal runs — the gate never pays for them.
+        if (std::getenv("SKY_ISO"))
+        {
+            Iso = 1; Render(Late, TwinRgb, true);
+            PngWriteShim::WritePng("/tmp/iso_atmo.png", kW, kH, 3, TwinRgb, (int)kW * 3);
+            Iso = 2; Render(Late, TwinRgb, true);
+            PngWriteShim::WritePng("/tmp/iso_flatamb.png", kW, kH, 3, TwinRgb, (int)kW * 3);
+            Iso = 0;
+        }
     }
 
     // 4 ─ the clock's fraction re-rolls the march jitter: the same record seeded at fractional wall 0.25

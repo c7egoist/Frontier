@@ -228,5 +228,31 @@ Remaps=$(printf '%s' "$MediaCode" | grep -c 'SmoothStep(0.0f, 1.0f, Raw)')
 Report $? "the smoothstep remap survives only in the kept fog ($Remaps site)"
 
 echo
+echo "[VolumetricMedia] the far layer fades detail and dissolves into haze"
+# P2.4d: the stills have no TAA, so the march fades what its steps cannot resolve — the erosion
+#    octave past 66 m steps (ErosionStepLod: Nyquist against the 66 m q*sc*19 lattice), the shadow
+#    taps to the march's LOD (the wrappers stay lod 0, REF-exact), and the layer's scatter toward
+#    the sky behind it (the cloudMarch tail: aer over the entry distance, never from above).
+printf '%s' "$MediaCode" | grep -q 'ErosionStepLod(float StepSize) noexcept { return SmoothStep(33\.0f, 66\.0f, StepSize); }'
+Report $? "steps past 66 m shed the erosion octave"
+printf '%s' "$MediaCode" | grep -q 'const float DensityLod = std::fmax(LayerLod, ErosionStepLod(ActualStep));'
+Report $? "the march LOD never reads finer than the step allows"
+printf '%s' "$MediaCode" | grep -q 'CloudDensity(Cloud, Wind, P, Time, DensityLod)'
+Report $? "the layer density reads the march LOD"
+printf '%s' "$MediaCode" | grep -q 'std::fmax(Lod, I > 2u ? 1\.0f : 0\.0f)'
+Report $? "the shadow taps never read finer than the march LOD"
+ShadowLod=$(grep -A1 'Budget\.LightTaps, Time,$' "$Header" | grep -c 'DensityLod')
+[ "$ShadowLod" = "1" ]
+Report $? "the march hands its erosion LOD to the layer shadow ($ShadowLod site)"
+printf '%s' "$MediaCode" | grep -q 'std::exp(-SpanNear \* 3e-5f)'
+Report $? "the aerial depth runs on the entry distance"
+printf '%s' "$MediaCode" | grep -q 'const float Haze = (1\.0f - LayerT) \* 0\.9f;'
+Report $? "the haze target is the reference's sky*(1-T)*.9"
+printf '%s' "$MediaCode" | grep -q '(AmbientRadiance\[C\] \* Haze - LayerS) \* Aer'
+Report $? "far scatter dissolves toward the sky-haze"
+printf '%s' "$MediaCode" | grep -q 'Lerp(MarchJitter(Direction, Time), 0\.5f, SmoothStep(0\.4f, 0\.6f, DensityLod))'
+Report $? "the layer jitter fades out with the unresolved detail"
+
+echo
 if [ "$Fail" != "0" ]; then echo "[VolumetricMedia] FAILED"; exit 1; fi
 echo "[VolumetricMedia] OK"

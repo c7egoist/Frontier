@@ -492,5 +492,33 @@ grep -q 'Surface.RefreshSky(' Projects/Project-Zero/Source/GameExecution.cpp
 Report $? "the project pushes it at the swapchain"
 
 echo
+echo "[SkyKernel] the kernel fades detail and dissolves into haze"
+# P2.4d's twins: the shader and the proof's transcription fade the same octaves, hand the same LOD
+#    to the same shadow, and dissolve toward the same haze — the transcription is pinned line by
+#    line so a retune lands on all three paths or fails here.
+printf '%s' "$SkyCode" | grep -q 'return smoothstep(33\.0, 66\.0, StepSize);'
+Report $? "the shader sheds the erosion octave past 66 m steps"
+printf '%s' "$SkyCode" | grep -q 'float DensityLod = max(Lod, CloudErosionStepLod(Step));'
+Report $? "the kernel LOD never reads finer than the step allows"
+printf '%s' "$SkyCode" | grep -q 'CloudDensityAt(P, Time, DensityLod)'
+Report $? "the kernel density reads the march LOD"
+printf '%s' "$SkyCode" | grep -q 'max(Lod, I > 2u ? 1\.0 : 0\.0)'
+Report $? "the shadow taps never read finer than the march LOD"
+printf '%s' "$SkyCode" | grep -q 'CloudShadowDepth(P, SunDirection, 0u, Taps, Swirl, DensityLod)'
+Report $? "the march hands its erosion LOD to the layer shadow"
+printf '%s' "$SkyCode" | grep -q 'exp(-Near \* 3e-5)'
+Report $? "the kernel aerial runs on the entry distance"
+printf '%s' "$SkyCode" | grep -q '(AmbientRadiance \* Haze - LayerS) \* Aer'
+Report $? "the kernel dissolves toward the same haze"
+grep -q 'TwinSmoothstep(33\.0f, 66\.0f, StepSize)' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin sheds the same octave"
+grep -q 'float DensityLod = StepLod > Lod ? StepLod : Lod;' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin keeps the step LOD apart from lodFar"
+grep -q '(Ambient\[C\]\*Haze-OutScatter\[C\])\*Aer' Scratchpad/SkyCloudKernelProof.cpp
+Report $? "the twin dissolves toward the same haze"
+printf '%s' "$SkyCode" | grep -q 'mix(CloudMarchJitter(Direction), 0\.5, smoothstep(0\.4, 0\.6, DensityLod))'
+Report $? "the layer jitter fades out with the unresolved detail"
+
+echo
 if [ "$Fail" != "0" ]; then echo "[SkyKernel] FAILED"; exit 1; fi
 echo "[SkyKernel] OK"

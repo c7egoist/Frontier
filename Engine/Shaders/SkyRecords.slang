@@ -451,7 +451,7 @@ bool CloudBoxInterval(vec3 Origin, vec3 Direction, vec3 Centre, vec3 HalfSize, f
     return Far > Near;
 }
 
-float CloudShadowDepth(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3 Swirl)
+float CloudShadowDepth(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3 Swirl, float Lod)
 {
     // Twin of VolumetricMedia::ShadowDepthSlab/ShadowDepthBox (P2.4b quadrature, P2.4c return): the
     //    layer marches clLight's growing-spaced taps (d = st*i²*.35 off st = thick*.12, weight d*.8,
@@ -478,7 +478,7 @@ float CloudShadowDepth(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3
         {
             if (I > Taps) break;
             float D = St * float(I) * float(I) * 0.35;
-            Depth += CloudDensityAt(Origin + Direction * D, Time, I > 2u ? 1.0 : 0.0) * D * 0.8;
+            Depth += CloudDensityAt(Origin + Direction * D, Time, max(Lod, I > 2u ? 1.0 : 0.0)) * D * 0.8;
         }
     }
     else
@@ -498,7 +498,7 @@ float CloudShadowDepth(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3
 
 float CloudShadowMedium(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3 Swirl)
 {
-    return exp(-CloudShadowDepth(Origin, Direction, Medium, Taps, Swirl));
+    return exp(-CloudShadowDepth(Origin, Direction, Medium, Taps, Swirl, 0.0));
 }
 
 float CloudSunTransmittance(vec3 Origin, vec3 Direction, vec3 Swirl)
@@ -557,6 +557,13 @@ float CloudPowder(float CosTheta, float ViewOd, float Strength)
     return 1.0 - Strength * exp(-ViewOd * 2.0) * Gate;
 }
 
+float CloudErosionStepLod(float StepSize)
+{
+    // Twin of VolumetricMedia::ErosionStepLod, which carries the note: steps past 66 m cannot resolve
+    //    the erosion octave, so they read the uneroded body instead of aliasing confetti.
+    return smoothstep(33.0, 66.0, StepSize);
+}
+
 float CloudMarchJitter(vec3 Direction)
 {
     // Twin of VolumetricMedia::MarchJitter, which carries the note. The clock reads the record's Clock
@@ -592,8 +599,11 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
     // lodFar (REF cloudMarch): the layer sheds its erosion past 200 km of entry distance; the local
     // march always reads full detail (marchLocal passes lod 0).
     float Lod = Medium == 0u ? smoothstep(20000.0, 200000.0, Near) : 0.0;
+    // P2.4d: the march LOD fades detail the step cannot resolve (note at ErosionStepLod) — and with the
+    //    detail gone the jitter fades too, since per-ray phases sampling a smooth field are pure noise.
+    float DensityLod = max(Lod, CloudErosionStepLod(Step));
     float Time = SkyCloudClock.z;
-    float Jitter = Medium == 0u ? CloudMarchJitter(Direction) : 0.5;
+    float Jitter = Medium == 0u ? mix(CloudMarchJitter(Direction), 0.5, smoothstep(0.4, 0.6, DensityLod)) : 0.5;
     // The light loop's constants (P2.4c, REF sunL/sunBase): the panel's .02 weather gain on the sun, the
     //    tier's shadow taps, and the slab's altitudes for the height-in-slab hn and the lodFar mix.
     uint Taps = max(SkyCloudControl.z, 1u);
@@ -601,15 +611,21 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
     float LayerBase = clamp(SkyCloudLayer.x, 0.0, Ceiling);
     float LayerTop = clamp(SkyCloudLayer.x + SkyCloudLayer.y, 0.0, Ceiling);
     vec3 SunL = SunRadiance * 0.02;
+    // The aerial perspective (REF cloudMarch tail, P2.4d) rewrites the layer's own scatter after the
+    //    loop, so its entry values are captured here; the erosion LOD fades the detail octaves the step
+    //    cannot resolve (ErosionStepLod carries the note).
+    vec3 ScatterBefore = Scatter;
+    float TransmittanceBefore = Transmittance;
     for (uint I = 0u; I < Count; ++I)
     {
         float T = Near + (float(I) + Jitter) * Step;
         vec3 P = Origin + Direction * T;
-        float Density = Medium == 0u ? CloudDensityAt(P, Time, Lod) : LocalDensityAt(P, Medium == 2u, Swirl, 0.0);
+        float Density = Medium == 0u ? CloudDensityAt(P, Time, DensityLod) : LocalDensityAt(P, Medium == 2u, Swirl, 0.0);
         if (Density <= 1e-5) continue;
-        float D0 = CloudShadowDepth(P, SunDirection, 0u, Taps, Swirl);
-        float D1 = CloudShadowDepth(P, SunDirection, 1u, Taps, Swirl);
-        float D2 = CloudShadowDepth(P, SunDirection, 2u, Taps, Swirl);
+        // The shadow reads the march's erosion LOD (the boxes ignore it — their taps stay lod 1).
+        float D0 = CloudShadowDepth(P, SunDirection, 0u, Taps, Swirl, DensityLod);
+        float D1 = CloudShadowDepth(P, SunDirection, 1u, Taps, Swirl, DensityLod);
+        float D2 = CloudShadowDepth(P, SunDirection, 2u, Taps, Swirl, DensityLod);
         float OwnRaw = Medium == 0u ? D0 : (Medium == 1u ? D1 : D2);
         float Own = Medium == 0u ? mix(OwnRaw, Density * (LayerTop - LayerBase) * 0.3, Lod) : OwnRaw;
         float OthersT = exp(-((D0 + D1 + D2) - OwnRaw));
@@ -633,6 +649,17 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
         Scatter += Incoming * Albedo * (1.0 - SegmentT) * Transmittance;
         Transmittance *= SegmentT;
         if (Transmittance < 0.005) break;
+    }
+    // The aerial perspective (REF cloudMarch tail, twin of VolumetricMedia::March): air below the layer
+    //    dissolves the layer's own scatter toward the sky behind it — entry-distance driven, never above.
+    if (Medium == 0u)
+    {
+        float Above = Origin.z >= LayerTop ? 1.0 : 0.0;
+        float Aer = (1.0 - exp(-Near * 3e-5)) * (1.0 - Above) * 0.6;
+        float LayerT = Transmittance / max(TransmittanceBefore, 1e-6);
+        float Haze = (1.0 - LayerT) * 0.9;
+        vec3 LayerS = Scatter - ScatterBefore;
+        Scatter = ScatterBefore + LayerS + (AmbientRadiance * Haze - LayerS) * Aer;
     }
 }
 

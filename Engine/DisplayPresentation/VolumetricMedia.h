@@ -629,12 +629,21 @@ public:
                                         : DualLobePhase(CosTheta, PhaseG, Cloud.BackLobe, Cloud.LobeMix);
             // Sunlight into the weather (REF sunL/sunBase): the panel's .02 gain, all three media.
             const float SunL[3] = { SunRadiance[0] * 0.02f, SunRadiance[1] * 0.02f, SunRadiance[2] * 0.02f };
+            // The aerial perspective (REF cloudMarch tail, P2.4d) rewrites the layer's own scatter after
+            //    the loop, so its entry values are captured here; the erosion LOD fades the detail octaves
+            //    the step cannot resolve (ErosionStepLod carries the note).
+            const float ScatterBefore[3] = { Result.Scatter[0], Result.Scatter[1], Result.Scatter[2] };
+            const float TransmittanceBefore = Transmittance;
+            const float DensityLod = std::fmax(LayerLod, ErosionStepLod(ActualStep));
             // The reference jitters the march start per ray (t=t0+dt*hash13) so adjacent rays sample
             //    different phases instead of contouring into bands. The seed is the ray direction —
             //    bounces have no pixel to hash — plus the clock's third-of-a-second fraction, through the
             //    same hash13; layer only, like the reference (marchLocal never jitters). The uniform shift
-            //    absorbs the midpoint: (I+Jitter) is the shifted regular grid in both twins.
-            const float Jitter = M == 0u ? MarchJitter(Direction, Time) : 0.5f;
+            //    absorbs the midpoint: (I+Jitter) is the shifted regular grid in both twins. With the
+            //    detail faded the jitter fades too (P2.4d): per-ray phases sampling a smooth field are
+            //    pure noise, and a fixed grid cannot band against 9x-oversampled base octaves.
+            const float Jitter = M == 0u
+                ? Lerp(MarchJitter(Direction, Time), 0.5f, SmoothStep(0.4f, 0.6f, DensityLod)) : 0.5f;
 
             for (uint32_t I = 0u; I < Count; ++I)
             {
@@ -645,7 +654,7 @@ public:
                 ++Result.StepsTaken;
 
                 float Density = 0.0f;
-                if (M == 0u)      Density = CloudDensity(Cloud, Wind, P, Time, LayerLod);
+                if (M == 0u)      Density = CloudDensity(Cloud, Wind, P, Time, DensityLod);
                 else if (M == 1u) Density = LocalDensity(LocalCloud, Wind, P, PixelSwirl, 0.0f, false);
                 else              Density = LocalDensity(LocalFog, Wind, P, PixelSwirl, 0.0f, true);
                 if (Density <= 1e-5f) continue;
@@ -656,7 +665,8 @@ public:
                 //    the combined transmittance. The others' transmittance keeps fog shadowing cloud and
                 //    cloud shadowing fog for free, while each medium's MS sees its own od — REF-exact when
                 //    a medium marches alone.
-                const float Depth0 = ShadowDepthSlab(Cloud, Wind, P, SunDirection, Budget.LightTaps, Time);
+                const float Depth0 = ShadowDepthSlab(Cloud, Wind, P, SunDirection, Budget.LightTaps, Time,
+                                                       DensityLod);
                 const float Depth1 = ShadowDepthBox(LocalCloud, Wind, P, SunDirection, PixelSwirl,
                                                     Cloud.Absorption, false);
                 const float Depth2 = ShadowDepthBox(LocalFog, Wind, P, SunDirection, PixelSwirl,
@@ -705,6 +715,21 @@ public:
                 }
                 Transmittance *= StepTransmittance;
                 if (Transmittance < 0.005f) break;  // fully occluded; nothing behind matters
+            }
+            // The aerial perspective (REF cloudMarch tail): air below the layer dissolves the layer's own
+            //    scatter toward the sky behind it — entry-distance driven, never from above the slab.
+            if (M == 0u)
+            {
+                const float Above = Origin[2] >= LayerTop ? 1.0f : 0.0f;
+                const float Aer = (1.0f - std::exp(-SpanNear * 3e-5f)) * (1.0f - Above) * 0.6f;
+                const float LayerT = Transmittance / std::fmax(TransmittanceBefore, 1e-6f);
+                const float Haze = (1.0f - LayerT) * 0.9f;
+                for (int C = 0; C < 3; ++C)
+                {
+                    const float LayerS = Result.Scatter[C] - ScatterBefore[C];
+                    Result.Scatter[C] = ScatterBefore[C] + LayerS
+                        + (AmbientRadiance[C] * Haze - LayerS) * Aer;
+                }
             }
         }
 
@@ -772,6 +797,14 @@ public:
         return T * T * (3.0f - 2.0f * T);
     }
 
+    // The erosion LOD (P2.4d): the reference erodes every sample and lets TAA converge the shimmer;
+    //    stills have no TAA, so a step that cannot resolve the 66 m erosion octave (the q*sc*19 lattice
+    //    at the default 1.4 km cell) must not sample it — Nyquist wants 33 m steps at the finest, and
+    //    past 66 m the octave is pure aliasing. Fading it keeps the far layer's billows connected
+    //    instead of confetti; the jitter fades with it (at the march), since per-ray phases sampling
+    //    a smooth field are pure noise.
+    static float ErosionStepLod(float StepSize) noexcept { return SmoothStep(33.0f, 66.0f, StepSize); }
+
     // Where a ray crosses a horizontal slab between two altitudes. Both branches cut the exit at the far
     //    cap: without it a grazing ray stretches its bounded steps over hundreds of kilometres of chord and
     //    shades the horizon as mush.
@@ -836,7 +869,7 @@ public:
     //    clLight's od carries no absorption; it returns inside the multi-scatter exponent (P2.4c).
     static float ShadowDepthSlab(const CloudLayerSettings& Cloud, const WindSettings& Wind,
                                  const float Position[3], const float SunDirection[3],
-                                 uint32_t Taps, float Time) noexcept
+                                 uint32_t Taps, float Time, float Lod) noexcept
     {
         float Depth = 0.0f;
         float Base, Top;
@@ -851,7 +884,7 @@ public:
                 const float Q[3] = { Position[0] + SunDirection[0] * D,
                                      Position[1] + SunDirection[1] * D,
                                      Position[2] + SunDirection[2] * D };
-                Depth += CloudDensity(Cloud, Wind, Q, Time, I > 2u ? 1.0f : 0.0f) * D * 0.8f;
+                Depth += CloudDensity(Cloud, Wind, Q, Time, std::fmax(Lod, I > 2u ? 1.0f : 0.0f)) * D * 0.8f;
             }
         }
         return Depth;
@@ -866,7 +899,7 @@ public:
                              uint32_t Taps, float Time, const float Swirl[3]) noexcept
     {
         float Result = 1.0f;
-        Result *= std::exp(-ShadowDepthSlab(Cloud, Wind, Position, SunDirection, Taps, Time));
+        Result *= std::exp(-ShadowDepthSlab(Cloud, Wind, Position, SunDirection, Taps, Time, 0.0f));
         Result *= ShadowBox(LocalCloud, Wind, Position, SunDirection, Swirl, Cloud.Absorption, false);
         Result *= ShadowBox(LocalFog, Wind, Position, SunDirection, Swirl, Cloud.Absorption, true);
         return Result;

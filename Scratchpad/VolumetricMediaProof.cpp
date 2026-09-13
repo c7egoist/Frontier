@@ -359,9 +359,11 @@ int main()
     // ── ⑧ the jitter dithers but never wanders ─────────────────────────────────────────────────────────────────
     // P2.1: the layer march jitters its start per ray (MarchJitter: hash13 over the spread direction plus
     // fract(Time*3)), so adjacent rays sample different phases instead of contouring into bands. The same ray
-    // twice is bit-identical (deterministic — proofs and stills are stable); neighbouring rays and later
-    // clocks sample different phases (the dither dithers). The anti-banding evidence itself lives in the
-    // kernel proof's streak gauge, which renders the jittered field; this pins the mechanism.
+    // twice is bit-identical (deterministic — proofs and stills are stable); neighbouring rays see
+    // different skies. Later clocks re-roll the dither where the steps resolve the detail — P2.4d fades
+    // the jitter with the erosion, so coarse steps freeze their phases and stills never shimmer. The
+    // anti-banding evidence itself lives in the kernel proof's streak gauge, which renders the field
+    // with and without the dither; this pins the mechanism.
     std::printf("\n8. the march jitter dithers without wandering\n");
     {
         CloudLayerSettings Layer{};
@@ -400,14 +402,32 @@ int main()
             if (FanSample.Transmittance != Previous) Varied = true;
             Previous = FanSample.Transmittance;
         }
-        Expect(Varied, "neighbouring rays sample different phases");
+        Expect(Varied, "neighbouring rays see different skies");
 
-        // The same ray a tenth of a second later re-rolls the dither (fract 0.0 -> 0.3): the clock term is
-        // live, so the dither animates instead of baking a fixed pattern into the sky.
+        // P2.4d: the jitter fades with the detail, so the clock's role splits by step. Coarse steps
+        //    (this fixture: 919 m over 7, the phases frozen at the grid midpoint) ignore the dither —
+        //    the same ray a tenth of a second later moves only by the wind's breath (4.2 m/s over 0.1 s
+        //    through a kilometre-scale field), three orders below the old jitter lottery. That is the
+        //    anti-shimmer pin: frozen phases, breathing field.
         const VolumetricSample Later = VolumetricMedia::March(
             Layer, None, None, Wind, Budget, Eye, Ray, 1.0e5f, Sun, Radiance, Ambient, 0.1f);
-        Expect(Later.Transmittance != First.Transmittance,
-               "a later clock re-rolls the phase");
+        Expect(std::fabs(Later.Transmittance - First.Transmittance) < 2e-3f &&
+               std::fabs(Later.Scatter[0] - First.Scatter[0]) < 2e-2f &&
+               std::fabs(Later.Scatter[1] - First.Scatter[1]) < 2e-2f &&
+               std::fabs(Later.Scatter[2] - First.Scatter[2]) < 2e-2f,
+               "a later clock barely breathes on coarse steps");
+        // Fine steps re-roll: 128 over the reference span resolves the erosion (30 m steps), so the
+        //    dither dithers again (fract 0.0 -> 0.3) and the tenth-second-later ray differs.
+        VolumetricBudget Fine = Budget;
+        Fine.CloudSteps = 128u;
+        const VolumetricSample FineFirst = VolumetricMedia::March(
+            Layer, None, None, Wind, Fine, Eye, Ray, 1.0e5f, Sun, Radiance, Ambient, 0.0f);
+        const VolumetricSample FineLater = VolumetricMedia::March(
+            Layer, None, None, Wind, Fine, Eye, Ray, 1.0e5f, Sun, Radiance, Ambient, 0.1f);
+        Expect(FineFirst.Transmittance < 1.0f,
+               "the fine probe ray actually meets cloud (or the re-roll below is vacuous)");
+        Expect(FineLater.Transmittance != FineFirst.Transmittance,
+               "a later clock re-rolls the phase where detail resolves");
     }
 
     std::printf("\n9. the layer march stops at the far cap\n");
@@ -751,6 +771,46 @@ int main()
         //    pinned directly: the mix endpoints are exact, and the mix line itself is source-pinned below.
         Expect(VolumetricMedia::Lerp(2.5f, 7.5f, 0.0f) == 2.5f, "the lodFar mix starts at the marched depth");
         Expect(VolumetricMedia::Lerp(2.5f, 7.5f, 1.0f) == 7.5f, "and ends at the rho*thick*.3 estimate");
+    }
+
+    std::printf("\n13. the far column dissolves toward the sky-haze, transmittance untouched\n");
+    {
+        // The aerial isolation (P2.4d, REF cloudMarch tail): the same vertical column marched from
+        //    100 m below the slab and from 98 km out. Both eyes traverse the same samples (same span,
+        //    same steps, frozen phases), so the transmittances agree to float dust — while the far
+        //    scatter dissolves toward sky*(1-T)*.9 by the entry-distance aer and the near one barely
+        //    breathes. T compares at 1e-6, not ==: over 98 km eyes the sample positions cancel in
+        //    float and the last dust is honest arithmetic, not signal.
+        CloudLayerSettings Slab13{};
+        Slab13.Enabled = true; Slab13.Base = 1000.0f; Slab13.Thickness = 800.0f;
+        // Overcast by construction (0.9/2.0): the column must be saturated, not threshold-poised —
+        //    at the coverage edge the multi-scatter steepness amplifies float dust into scatter
+        //    wobble that swamps the aerial signal the test isolates.
+        Slab13.Coverage = 0.9f; Slab13.Density = 2.0f;
+        LocalVolumeSettings None13{};
+        const float Up13[3] = { 0.0f, 0.0f, 1.0f };
+        const float NearEye[3] = { 0.0f, 0.0f, 900.0f };
+        const float FarEye[3] = { 0.0f, 0.0f, 900.0f - 98000.0f };
+        const float Sun13[3] = { 0.0f, 0.5f, 0.87f };
+        const float Noon13[3] = { 20.0f, 19.0f, 17.0f }, Sky13[3] = { 0.7f, 0.8f, 1.0f };
+        const VolumetricSample Near13 = VolumetricMedia::March(
+            Slab13, None13, None13, Wind, Budget, NearEye, Up13, 1.0e5f, Sun13, Noon13, Sky13, 0.0f);
+        const VolumetricSample Far13 = VolumetricMedia::March(
+            Slab13, None13, None13, Wind, Budget, FarEye, Up13, 2.0e5f, Sun13, Noon13, Sky13, 0.0f);
+        const float Haze13 = (1.0f - Near13.Transmittance) * 0.9f;
+        const float Target13 = Sky13[0] * Haze13;
+        const float AerFar = (1.0f - std::exp(-98100.0f * 3e-5f)) * 0.6f;
+        const float Moved13 = (Far13.Scatter[0] - Near13.Scatter[0]) / (Target13 - Near13.Scatter[0]);
+        std::printf("     aerial: near %.3f, far %.3f, haze %.3f (T %.4f vs %.4f)\n",
+                    Near13.Scatter[0], Far13.Scatter[0], Target13,
+                    Near13.Transmittance, Far13.Transmittance);
+        Expect(std::fabs(Far13.Transmittance - Near13.Transmittance) < 1e-6f,
+               "the aerial never touches transmittance");
+        Expect((Far13.Scatter[0] - Near13.Scatter[0]) * (Target13 - Near13.Scatter[0]) > 0.0f &&
+               std::fabs(Far13.Scatter[0] - Near13.Scatter[0]) < std::fabs(Target13 - Near13.Scatter[0]),
+               "the far scatter moves toward the haze, never past it");
+        Expect(std::fabs(Moved13 - AerFar) < 0.05f,
+               "the dissolved fraction is the entry-distance aer");
     }
 
     std::printf("\n");
