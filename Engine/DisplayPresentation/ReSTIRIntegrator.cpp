@@ -44,14 +44,43 @@ void ReSTIRIntegrator::ObserveCamera(const ProjectZero::FlyThroughSolver& Camera
     const bool Turned  = ForwardDelta.LengthSquared() > DirectionTolerance * DirectionTolerance;
     const bool Resized = ViewportWidth != HistoryWidth || ViewportHeight != HistoryHeight;
 
-    if (Moved || Turned || Resized)
+    HistoryOrigin  = Origin;
+    HistoryForward = Forward;
+    HistoryWidth   = ViewportWidth;
+    HistoryHeight  = ViewportHeight;
+
+    // P0 ⚠️ A RESIZE genuinely invalidates everything: the reservoir buffers are indexed by
+    //    `y * ViewportWidth + x` and the history images are a different shape, so there is nothing
+    //    meaningful to inherit. That restart stays.
+    if (Resized)
     {
-        HistoryOrigin  = Origin;
-        HistoryForward = Forward;
-        HistoryWidth   = ViewportWidth;
-        HistoryHeight  = ViewportHeight;
         ResetAccumulation();
+        return;
     }
+
+    // P0 — camera MOTION no longer restarts the accumulation, and this is the fix for the longest-running
+    //    complaint against this renderer: "the exposure keeps changing when the camera angle changes, even
+    //    when the sun hasn't moved."
+    //
+    //    The exposure was never the culprit — in Manual mode QueryExposure() returns a constant and cannot
+    //    move (proved in References/ReSTIRBrightnessDiagnosis.md). The real chain was:
+    //        every temporal path in the kernel is gated on FrameIndex > 0, so resetting here forced the
+    //        moving image to 1 sample per pixel; the accumulated radiance is linear but the display is
+    //        ACES + gamma, both nonlinear; and for a nonlinear T, E[T(X)] != T(E[X]) (Jensen). A noisy
+    //        1-spp pixel and a converged pixel with the SAME true mean therefore display at different
+    //        brightness. Measured by Scratchpad/ViewpointStabilityTest.cpp: 53% at equal true radiance,
+    //        and 94% for a broad source like a sky. That is what the viewer was seeing.
+    //
+    //    The machinery to do better already existed and was simply switched off by this reset: R2 writes
+    //    motion vectors, R6 row 2 back-projects reservoirs through them, and R7a reprojects the running
+    //    mean — all validated by the same 25 deg / 10% normal-and-depth rule, which is what rejects a
+    //    disocclusion. Those validators are the correct place to decide what survives a camera move;
+    //    a blanket restart is not, because it also throws away the 99% of the frame that is still valid.
+    //
+    //    ResetOnMotion keeps the old behaviour available for A/B (--reset-on-motion), because the previous
+    //    images were all made under it and comparisons must remain possible.
+    if ((Moved || Turned) && ActiveConfiguration.ResetOnMotion)
+        ResetAccumulation();
 }
 
 //============================================================================================================================================

@@ -131,6 +131,26 @@ const uint  kSpatialTaps       = 4u;         // R6 row 3: 4-tap cross — the tr
 //    Measured: 121 isolated pools versus 1 when jittered, and a 30 % class-to-class bias that never decayed.
 const float kSpatialRadiusMinPx = 4.0;       // [px] at 1280 px width — scaled by RenderWidth/1280 for resolution independence
 const float kSpatialRadiusMaxPx = 16.0;      // [px] the band's mean matches the old fixed radius, so reuse reach is unchanged
+// P0 ⚠️ The radius above is in PIXELS, which makes the reuse footprint depend on how far away the surface is: standing
+//    at a wall, a 16 px tap covers a few millimetres of it; backing away, the same 16 px spans metres. That is a
+//    viewpoint-dependent estimator — validation pass rates and M growth change with distance, so the SAME surface
+//    converges to a slightly different brightness seen from near and from far (suspect 1 in
+//    References/ReSTIRBrightnessDiagnosis.md). The pixel radius is therefore corrected toward a constant WORLD
+//    footprint: the reference metre-per-pixel is taken at kSpatialReferenceDepth, and the radius scales by the ratio,
+//    clamped so a distant surface cannot collapse the cross onto its own pixel nor a very near one fling taps across
+//    the screen. Constant in metres = the same neighbourhood is reused wherever the camera stands.
+const float kSpatialReferenceDepth = 4.0;    // [m]  depth at which the pixel radii above are taken as authored
+const float kSpatialDepthScaleMin  = 0.35;   // [-]  floor on the correction (far surfaces keep a usable cross)
+const float kSpatialDepthScaleMax  = 2.50;   // [-]  ceiling (near surfaces do not tap half the screen away)
+
+// P0 ⚠️ ONE distance regularisation, read by the RIS target function AND by both shading sites. They used to
+//    disagree — the target divided by d^2 + 0.001 while shading divided by d^2 + 0.01 — which means RIS was
+//    resampling against a target that is not proportional to what the shader then computes. That is a silent
+//    10x mismatch at 10 cm (the shading denominator doubles there: a whole stop of darkening on close-range
+//    light transport) and it degrades the resampling quality at every distance, because the reservoir is
+//    optimising for the wrong function. It cannot move with the camera for fixed geometry, so it was never the
+//    viewpoint bug, but it is a real bug and the sky's NEE will read the same constant.
+const float kDistanceEpsilon = 0.001;
 
 const uint kMaterialTextureNone = 0xFFFFFFFFu;
 
@@ -567,7 +587,7 @@ float PHatFull(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec3 
     if (cosT <= 0.0) return 0.0;
     vec3  wi = ToLocal(F, lDir);
     if (wi.z <= 0.0) return 0.0;
-    return max(dot(EvaluateBsdf(m, L, wo, wi), emit), 0.0) * cosT / (dist2 + 0.001);
+    return max(dot(EvaluateBsdf(m, L, wo, wi), emit), 0.0) * cosT / (dist2 + kDistanceEpsilon);
 }
 
 struct Reservoir
@@ -923,7 +943,11 @@ void main()
                 uint  tapSeed = PcgHash(MakeSeed(pixel, FrameIndex) ^ 0x9E3779B9u);
                 float scale   = float(ViewportWidth) / 1280.0;
                 float angle   = RandFloat(tapSeed) * 6.28318531;
-                float radius  = mix(kSpatialRadiusMinPx, kSpatialRadiusMaxPx, RandFloat(tapSeed)) * scale;
+                // P0: hold the reuse footprint constant in METRES, not in pixels (see the constants' note). A pixel
+                //    subtends more world the further the surface is, so the pixel radius is divided by that growth.
+                float depthScale = clamp(kSpatialReferenceDepth / max(primaryT, 1e-3),
+                                         kSpatialDepthScaleMin, kSpatialDepthScaleMax);
+                float radius  = mix(kSpatialRadiusMinPx, kSpatialRadiusMaxPx, RandFloat(tapSeed)) * scale * depthScale;
 
                 for (uint tap = 0u; tap < kSpatialTaps; ++tap)
                 {
@@ -992,7 +1016,7 @@ void main()
                 float dist2 = dot(res.SelectedPoint - hitPos, res.SelectedPoint - hitPos);
                 vec3  wiLocal = ToLocal(frame, shadeDir);
                 vec3  f = wiLocal.z > 0.0 ? EvaluateBsdf(shading, layers, woLocal, wiLocal) : vec3(0.0);   // R4b: full lobe stack
-                accumulatedRadiance += f * chosenEmit * shadeCos * res.UnbiasedWeight / (dist2 + 0.01);
+                accumulatedRadiance += f * chosenEmit * shadeCos * res.UnbiasedWeight / (dist2 + kDistanceEpsilon);
             }
         }
     }
@@ -1057,7 +1081,7 @@ void main()
                         vec3  bF = EvaluateBsdf(bShading, bLayers, bWo, bWi);
                         // ⚠️ Divide by the count the pick above chose from: dividing by a different number
                         //    than you sampled from is a bias that scales the whole second bounce.
-                        accumulatedRadiance += throughput * bF * bLEmit * bCos / ((bDist2 + 0.01) * float(bLightCount));
+                        accumulatedRadiance += throughput * bF * bLEmit * bCos / ((bDist2 + kDistanceEpsilon) * float(bLightCount));
                     }
                 }
             }

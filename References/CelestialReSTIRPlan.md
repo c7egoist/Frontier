@@ -226,6 +226,29 @@ P9 · Performance pass.                                                         
 
 
 Status log (append; newest last):
+- 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
+  0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on
+      FrameIndex > 0, so the old reset forced the moving image to 1 spp, and a nonlinear display (ACES + gamma)
+      turns that variance into apparent brightness (Jensen). Measured by the new harness: at IDENTICAL true
+      radiance, 1 spp displays 53.4% darker than converged -- and 93.5% for a broad source like a sky, which is
+      why this had to land before P1. Eight camera stops on one fixed, fixed-lit surface: 4.97% spread at 1 spp
+      vs 0.11% with history kept, so the 1% band the plan promised is met with room. The reprojection machinery
+      (R2 motion vectors, R6 row 2 back-projection, R7a mean reprojection, all validated by the same 25 deg/10%
+      rule) already existed and was simply switched off by the reset -- no new validator was written. A viewport
+      RESIZE still restarts, correctly: the reservoir buffers are indexed by y*ViewportWidth+x, so there is
+      nothing to inherit. Legacy behaviour kept behind --reset-on-motion for A/B.
+  0b. Spatial tap radius corrected toward a constant WORLD footprint (kSpatialReferenceDepth 4 m, clamped
+      [0.35, 2.50]). A pixel-space radius varied its footprint 128x across 0.5-64 m; depth-scaled it is 17.9x,
+      clamped at both ends so a far surface keeps a usable cross and a near one does not tap across the screen.
+  0c. One distance regularisation. The RIS target divided by d^2+0.001 while both shading sites divided by
+      d^2+0.01 -- the reservoir was resampling against a target not proportional to what got shaded (3.57x
+      apart at 5 cm). Now a single kDistanceEpsilon, read by all four sites; the gate forbids the literals.
+  Gates: new Scratchpad/CheckViewpointStability.sh (numeric proof + pins every constant against the shader and
+  the integrator + asserts the production kernel still lowers to SPIR-V, 187 192 bytes via the in-sandbox
+  glslang). Added to CheckEverything. ALL 16 SUITES GREEN. Five suites that were failing on arrival (tinybvh,
+  Jolt) were missing third-party trees, not regressions -- verified by running them against the pre-P0 stash --
+  and are now populated out-of-band; .gitignore records that ExternalPackages/ is not carried on this branch.
+  User confirmed: TOML + CLI for the slider surface (P8), stability before sky. NEXT: P1.
 - 2026-09-13: Plan written after reading the tree. Key findings: this tree is ReSTIR-only already (R1), the
   three "no environment light" sites are located (R2), the binding set is full and gated (R3), push constants are
   full (R4), and the exposure complaint has a known mechanism that a sky would AMPLIFY (R5) — so P0 fixes it

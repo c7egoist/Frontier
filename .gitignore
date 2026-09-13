@@ -49,3 +49,8 @@ Diagnostics/ProjectDyno_TelemetryReport*.md
 
 # Phase A acoustics: third-party reference clips fetched by Scratchpad/AcousticLaFerrariReference.js --fetch (no licence) - never committed
 Scratchpad/LaFerrariReference/
+
+# Third-party package trees are fetched out-of-band in this sandbox (symlinks into /home/user/deps);
+#    the repository has never carried them as gitlinks on this branch.
+ExternalPackages/*
+!ExternalPackages/.gitkeep

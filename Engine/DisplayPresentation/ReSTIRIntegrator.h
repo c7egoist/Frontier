@@ -41,6 +41,11 @@ struct ReSTIRIntegratorConfiguration
     bool        Denoise            = true;  // [-]   R7: edge-avoiding à-trous filter (false = the raw accumulated image)
     bool        TemporalReprojection = true; // [-]   R7a: back-project the running mean through the motion vectors
                                              //       (false = the pre-R7a same-pixel accumulator, kept as an identity switch)
+    // P0 ⚠️ OFF by default, and that is the fix, not a tuning choice. When true, ANY camera motion restarts the
+    //       accumulation, which forces the moving image to 1 spp; a nonlinear display then renders that noise as a
+    //       brightness shift (Jensen), which is what "the exposure changes when I move the camera" actually was.
+    //       Kept as a flag (--reset-on-motion) so every image made under the old behaviour can still be reproduced.
+    bool        ResetOnMotion      = false; // [-]   restart accumulation on camera movement (legacy A/B behaviour)
 };
 
 //------------------------------------------------------------------------------------------------------------------------

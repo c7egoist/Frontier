@@ -31,6 +31,7 @@ Run CheckBuildIntegrity
 echo
 echo
 echo "=== ReSTIR (R6 - R7) ==="
+Run CheckViewpointStability
 Run CheckSpatialTapJitter
 Run CheckTemporalReprojection
 Run CheckAtrousDenoise

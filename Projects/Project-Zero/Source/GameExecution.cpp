@@ -15,6 +15,7 @@
 //        --exposure <float>         Manual-mode tone-map scalar (default 1.05)
 //        --adaptive                 frame-metered exposure instead of the fixed Manual value
 //        --no-gi --no-aa --no-temporal --no-spatial --uniform-pick --no-denoise --no-reprojection
+//        --reset-on-motion          restart accumulation whenever the camera moves (legacy; P0 turned this off)
 //        --render-scale <float>     kernel resolution as a fraction of the window (default 1)
 //        --frame-cap <fps>          pace the loop (default: uncapped)
 //        --frames <n>               exit after n presented frames (default: run until the window closes)
@@ -64,6 +65,7 @@ void PrintUsage(const char* Program) noexcept
               << "  --exposure <float>         Manual-mode tone-map scalar\n"
               << "  --adaptive                 frame-metered exposure\n"
               << "  --no-gi --no-aa --no-temporal --no-spatial --uniform-pick --no-denoise --no-reprojection\n"
+              << "  --reset-on-motion          restart accumulation on camera motion (legacy A/B)\n"
               << "  --render-scale <float>     kernel resolution fraction\n"
               << "  --frame-cap <fps>          pace the loop\n"
               << "  --frames <n>               exit after n presented frames\n"
@@ -87,6 +89,7 @@ int main(int argc, char** argv)
     bool        AdaptiveExposure = false;
     bool        WantGi = true, WantAa = true, WantTemporal = true, WantSpatial = true;
     bool        WantAliasPick = true, WantDenoise = true, WantReprojection = true;
+    bool        WantResetOnMotion = false;   // P0: motion no longer restarts accumulation; this restores the old behaviour
     float       RenderScale = 1.0f;
     float       FrameCapFps = 0.0f;   // 0 = uncapped
     uint32_t    FrameLimit = 0u;      // 0 = run until the window closes
@@ -110,6 +113,7 @@ int main(int argc, char** argv)
         else if (std::strcmp(Arg, "--uniform-pick") == 0)    WantAliasPick = false;
         else if (std::strcmp(Arg, "--no-denoise") == 0)      WantDenoise = false;
         else if (std::strcmp(Arg, "--no-reprojection") == 0) WantReprojection = false;
+        else if (std::strcmp(Arg, "--reset-on-motion") == 0) WantResetOnMotion = true;
         else if (std::strcmp(Arg, "--scene") == 0)        { if (const char* V = NeedValue(Arg)) ScenePath = V; }
         else if (std::strcmp(Arg, "--scale") == 0)        { if (const char* V = NeedValue(Arg)) SceneScale = static_cast<float>(std::atof(V)); }
         else if (std::strcmp(Arg, "--width") == 0)        { if (const char* V = NeedValue(Arg)) WindowWidth = static_cast<uint32_t>(std::atoi(V)); }
@@ -316,6 +320,7 @@ int main(int argc, char** argv)
     IntegratorConfig.AliasPick          = WantAliasPick;
     IntegratorConfig.Denoise            = WantDenoise;
     IntegratorConfig.TemporalReprojection = WantReprojection;
+    IntegratorConfig.ResetOnMotion        = WantResetOnMotion;
 
     Frontier::ReSTIRIntegrator Integrator(IntegratorConfig);
     if (AdaptiveExposure)
@@ -327,12 +332,13 @@ int main(int argc, char** argv)
     {
         char Line[256];
         std::snprintf(Line, sizeof(Line),
-                      "Run: %u candidates, %u extra, exposure %s %.3f, GI %s, AA %s, temporal %s, spatial %s, pick %s, denoise %s, reprojection %s",
+                      "Run: %u candidates, %u extra, exposure %s %.3f, GI %s, AA %s, temporal %s, spatial %s, pick %s, denoise %s, reprojection %s, motion %s",
                       Candidates, ExtraCandidates, AdaptiveExposure ? "adaptive from" : "manual",
                       static_cast<double>(Exposure), WantGi ? "on" : "off", WantAa ? "on" : "off",
                       WantTemporal ? "on" : "off", WantSpatial ? "on" : "off",
                       WantAliasPick ? "alias" : "uniform", WantDenoise ? "on" : "off",
-                      WantReprojection ? "on" : "off");
+                      WantReprojection ? "on" : "off",
+                      WantResetOnMotion ? "resets accumulation" : "keeps history");
         Logger.RecordMessage(Frontier::DiagnosticSeverity::Information, "Run", Line);
     }
 
