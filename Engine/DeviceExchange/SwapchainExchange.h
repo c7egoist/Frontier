@@ -65,7 +65,7 @@ static constexpr uint32_t kComputeBindingCount  = 23u;    // compute set 0: 0 ou
 // P1: the byte size of the celestial record at binding 21. Stated here rather than as sizeof(CelestialUniform) so
 //    that this header does not have to pull in the DisplayPresentation tree; the two are tied together by a
 //    static_assert at the point of upload, which fails the build if they ever disagree.
-static constexpr uint32_t kCelestialRecordBytes = 352u;
+static constexpr uint32_t kCelestialRecordBytes = 368u;
 
 static constexpr uint32_t kTextureSlotCapacity  = 1024u;  // bindless sampler2D[] size (variable-count binding; Pascal maxPerStageDescriptorSamplers ≥ 4000)
 class MaterialIndex;    // ContentInterchange/MaterialIndex.h (R4a)

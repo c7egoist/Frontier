@@ -347,4 +347,68 @@ inline void HorizonToWorldDirection(const HorizonPosition& Horizon, float OutDir
     return Solution;
 }
 
+//------------------------------------------------------------------------------------------------------------------------
+//                              ATMOSPHERIC ATTENUATION OF DIRECT SUNLIGHT
+//------------------------------------------------------------------------------------------------------------------------
+
+// 🔴 WHY DIRECT SUNLIGHT GOES ORANGE AT SUNSET. Sunlight reaching the ground has crossed the atmosphere; the
+//    length of that crossing is the AIR MASS, which is ~1 overhead and ~38 at the horizon. Rayleigh extinction
+//    scales as 1/lambda^4, so a long path strips blue far faster than red and the surviving light is warm.
+//
+//    Shading that ignores this stays noon-white under an orange sky, which reads as a sky pasted behind a
+//    differently lit world — one of the cheapest-looking failures in a day-night cycle.
+//
+//    This is a closed form rather than a march because it is evaluated once per frame on the CPU: a single
+//    vertical optical depth scaled by the air mass. Kasten-Young is used for the air mass because the naive
+//    1/sin(elevation) diverges at the horizon (infinite at 0 degrees, and negative below it) — which would make
+//    the sun's colour explode exactly when it matters most.
+//
+//    ⚠️ Takes an elevation and settings. No camera, by construction — same rule as the exposure (F3).
+inline void SolveSunTransmittance(const CelestialStructure& Settings, float ElevationRadians, float OutRgb[3]) noexcept
+{
+    const double ElevationDegrees = static_cast<double>(ElevationRadians) * kRadiansToDegrees;
+
+    if (ElevationDegrees <= -2.0)
+    {
+        // Fully below the horizon: no direct sunlight reaches the ground at all.
+        OutRgb[0] = OutRgb[1] = OutRgb[2] = 0.0f;
+        return;
+    }
+
+    // Kasten-Young (1989) relative air mass. Finite at the horizon (~37.9) where 1/sin diverges.
+    const double Clamped  = ElevationDegrees < 0.0 ? 0.0 : ElevationDegrees;
+    const double AirMass  = 1.0 / (std::sin(Clamped * kDegreesToRadians)
+                                 + 0.50572 * std::pow(Clamped + 6.07995, -1.6364));
+
+    // Vertical optical depth of each constituent: coefficient x scale height, the integral of an exponential
+    //    density from the ground to space. Ozone uses its layer thickness rather than a scale height.
+    const double RayleighDepth[3] = {
+        static_cast<double>(Settings.Atmosphere.RayleighScattering[0]) * Settings.Atmosphere.RayleighScaleHeight,
+        static_cast<double>(Settings.Atmosphere.RayleighScattering[1]) * Settings.Atmosphere.RayleighScaleHeight,
+        static_cast<double>(Settings.Atmosphere.RayleighScattering[2]) * Settings.Atmosphere.RayleighScaleHeight
+    };
+    const double MieDepth = static_cast<double>(Settings.Atmosphere.MieScattering)
+                          * Settings.Atmosphere.MieScaleHeight * 1.11;   // 1.11 = extinction/scattering, albedo 0.9
+    const double OzoneThickness = 30000.0;
+    const double OzoneDepth[3] = {
+        static_cast<double>(Settings.Atmosphere.OzoneAbsorption[0]) * OzoneThickness * 0.5,
+        static_cast<double>(Settings.Atmosphere.OzoneAbsorption[1]) * OzoneThickness * 0.5,
+        static_cast<double>(Settings.Atmosphere.OzoneAbsorption[2]) * OzoneThickness * 0.5
+    };
+
+    for (int Channel = 0; Channel < 3; ++Channel)
+    {
+        const double Depth = (RayleighDepth[Channel] + MieDepth + OzoneDepth[Channel]) * AirMass;
+        OutRgb[Channel] = static_cast<float>(std::exp(-Depth));
+    }
+
+    // Between -2 and 0 degrees the sun is geometrically set but refraction still lifts a sliver of it into view.
+    //    Fade rather than cut, or the key light vanishes in a single frame.
+    if (ElevationDegrees < 0.0)
+    {
+        const float Fade = static_cast<float>((ElevationDegrees + 2.0) / 2.0);
+        for (int Channel = 0; Channel < 3; ++Channel) OutRgb[Channel] *= Fade;
+    }
+}
+
 } // namespace Frontier

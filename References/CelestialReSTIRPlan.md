@@ -249,6 +249,41 @@ Status log (append; newest last):
   Jolt) were missing third-party trees, not regressions -- verified by running them against the pre-P0 stash --
   and are now populated out-of-band; .gitignore records that ExternalPackages/ is not carried on this branch.
   User confirmed: TOML + CLI for the slider surface (P8), stability before sky. NEXT: P1.
+- 2026-09-13: **P3 DONE — F2 fixed: the sun is a member of the reservoir's light pool.**
+  The sun is given light index `LightTriangleCount` (one past the real luminaires) so it travels through EVERY
+  existing path — initial RIS, extra candidates, temporal reuse, spatial reuse, the shadow ray, the final shade —
+  with no parallel code path that could drift out of step. RTG2 ch.23's rule: the sun is an ordinary pool entry.
+  **The one trick, and why it needs no special case.** The reservoir stores a world POINT and divides by d²; the
+  sun has no position. Rather than fork the estimator across 11 `PHatFull` call sites, the sun is a disc at
+  `kSunDistance = 100 km` with emission = irradiance × d². The two cancel exactly, leaving f·E·cosθ through
+  unmodified shared code. Sampling the DISC rather than the centre gives genuine penumbrae from the existing
+  shadow ray, free. Proven, not asserted: cancellation exact at the owning pixel, **0.0100% worst** for reuse
+  from 5 m away, survives fp32. kSunDistance justified in BOTH directions — at 1 km the reuse parallax (0.287°)
+  would EXCEED the sun's own disc (0.265°); at 1e9 m emission would be ~2.2e19 and lose fp32 mantissa. At 100 km
+  parallax is **0.0029°, ~1% of the disc**.
+  **Unbiasedness measured**, since adding the sun changes pSource for every light and getting that wrong biases
+  the image permanently: RIS converges to ground truth within **0.008% / 0.108% / 0.057%** at sunShare
+  0.50 / 0.25 / 0.75 (400k trials each). Cone sampling verified uniform over solid angle (2.02% bin spread) and
+  correctly sized (0.26467° vs 0.265°).
+  🔴 **A SILENT-DEATH BUG FIXED AND GATED.** The direct-lighting block was gated on `LightTriangleCount > 0u`, so
+  an outdoor scene with no emissive triangles skipped direct lighting entirely — the sun would have been in the
+  pool and STILL never sampled, i.e. F2 reintroduced while every other check passed. Now gated on
+  `TotalLightCount(sky)`, and the gate greps for the old form returning.
+  **Sunset reddening of DIRECT light** added as `SolveSunTransmittance` (record 352 → **368 B**, 23 vec4s, new
+  `SunTransmittance`). Kasten-Young air mass, because naive 1/sin diverges at the horizon — exactly when it
+  matters. Measured R/B **1.274 at noon → 721 at sunset**; monotonic; fades through the −2..0° refraction window
+  instead of cutting. Elevation-only signature: no camera reachable (F3 discipline, gated).
+  **A gate that passed because it crashed.** The stray-`SampleLightPoint` check used `grep -v` with an unescaped
+  `(`, so grep errored, produced empty output, and the check printed OK. Rewritten with `grep -F`, then verified
+  by DELIBERATELY reintroducing the bug — the gate caught it at line 1135 — and restoring.
+  Gates: `Scratchpad/SunReservoirTest.cpp` (22 checks) + `Scratchpad/CheckSunReservoir.sh`, registered.
+  SPIR-V 211 956 → **217 356 B**. Visual: `Scratchpad/SunShadowPreview.png` (64 spp, sun-disc sampled; shadows are
+  blue from skylight, not black, and lengthen and warm as the sun sets). **ALL 20 SUITES GREEN.**
+  ⚠️ ENVIRONMENT NOTE: the sandbox reset wiped `/home/user/deps` and `ExternalPackages/` (both outside the repo,
+  never committed). Rebuilt glslang from source and re-cloned tinybvh/ufbx/cgltf/jolt/stb + Vulkan-Headers;
+  libJolt.a rebuilt. Celestial suites were unaffected throughout — only the 5 third-party suites had failed.
+  NEXT: P4 — celestial exposure driven by sun elevation only, which is the direct fix for F3.
+
 - 2026-09-13: **P2b DONE — the sky is on screen, and scene objects receive it.**
   Wired both escape paths in `ReSTIRViewport.slang`. Primary miss now reconstructs the ray via the SHARED
   `GeneratePrimaryDirection` (RayGeneration.slang) — not a local copy, because a hand-rolled version is one sign

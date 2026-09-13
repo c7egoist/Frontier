@@ -14,7 +14,7 @@
 //    stops four bytes per vector being wasted. Every static_assert below is load-bearing.
 //
 //    🔴 WHY A UNIFORM BUFFER AND NOT THE PUSH BLOCK. The push block has 7 spare uints — 28 bytes. The celestial
-//    state below is 352 bytes (22 vec4s) and will not shrink. Pushing it is not an option; this was checked rather than
+//    state below is 368 bytes (23 vec4s) and will not shrink. Pushing it is not an option; this was checked rather than
 //    assumed. The buffer is written every frame from the CPU solve (F4: nothing is baked).
 
 #pragma once
@@ -38,6 +38,7 @@ struct alignas(16) CelestialUniform
     float SunDirectionAndCosRadius[4];   // xyz = unit direction TO the sun, w = cos(angular radius)
     float SunRadianceAndLimb[4];         // rgb = DISC radiance [W/m2/sr], w = limb darkening
     float SunIrradianceAndScale[4];      // rgb = top-of-atmosphere IRRADIANCE [W/m2], w = sky scale
+    float SunTransmittance[4];           // rgb = atmospheric transmittance to the sun at ground level, w unused
 
     // ── Moon ──────────────────────────────────────────────────────────────────────────────────────────────────
     float MoonDirectionAndCosRadius[4];  // xyz = unit direction TO the moon, w = cos(angular radius)
@@ -85,16 +86,16 @@ inline constexpr uint32_t kCelestialFlagStars      = 1u << 5u;
 //                                                  LAYOUT GUARANTEES
 //------------------------------------------------------------------------------------------------------------------------
 
-static_assert(sizeof(CelestialUniform) == 352, "the shader's CelestialRecord must be resized to match");
+static_assert(sizeof(CelestialUniform) == 368, "the shader's CelestialRecord must be resized to match");
 static_assert(alignof(CelestialUniform) == 16, "std140 requires 16-byte alignment");
 static_assert(sizeof(CelestialUniform) % 16 == 0, "std140 pads the block to a multiple of 16");
 static_assert(offsetof(CelestialUniform, SunRadianceAndLimb) == 16, "sun radiance moved");
-static_assert(offsetof(CelestialUniform, MoonDirectionAndCosRadius) == 48, "moon block moved");
-static_assert(offsetof(CelestialUniform, RayleighScatteringAndHeight) == 80, "atmosphere block moved");
-static_assert(offsetof(CelestialUniform, CloudLayer) == 160, "cloud block moved");
-static_assert(offsetof(CelestialUniform, LocalCloudCentreAndDensity) == 240, "local volume block moved");
-static_assert(offsetof(CelestialUniform, StarsAndRotation) == 304, "night sky block moved");
-static_assert(offsetof(CelestialUniform, ExposureAndFlags) == 320, "exposure moved");
+static_assert(offsetof(CelestialUniform, MoonDirectionAndCosRadius) == 64, "moon block moved");
+static_assert(offsetof(CelestialUniform, RayleighScatteringAndHeight) == 96, "atmosphere block moved");
+static_assert(offsetof(CelestialUniform, CloudLayer) == 176, "cloud block moved");
+static_assert(offsetof(CelestialUniform, LocalCloudCentreAndDensity) == 256, "local volume block moved");
+static_assert(offsetof(CelestialUniform, StarsAndRotation) == 320, "night sky block moved");
+static_assert(offsetof(CelestialUniform, ExposureAndFlags) == 336, "exposure moved");
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                              BLACK-BODY COLOUR
@@ -191,6 +192,24 @@ inline void PackCelestialUniform(
     //    turning the sun up brightens the sky it lights rather than only the dot of the disc.
     for (int C = 0; C < 3; ++C) Out.SunIrradianceAndScale[C] = SunTint[C] * Settings.Sun.Intensity;
     Out.SunIrradianceAndScale[3] = Settings.Sun.Intensity;
+
+    // 🔴 THE REDDENING OF DIRECT SUNLIGHT, COMPUTED ONCE PER FRAME ON THE CPU.
+    //
+    //    Sunlight reaching the ground has crossed the whole atmosphere, so it is attenuated — mildly and neutrally
+    //    at noon, enormously and very redly at sunset, because the slant path is dozens of times longer and
+    //    Rayleigh scattering removes blue far faster than red. This is why a sunset scene turns warm: the AIR is
+    //    filtering the light. Without it the shading would stay noon-white while the sky went orange, which reads
+    //    as a cheap sky pasted behind a differently-lit world.
+    //
+    //    It is a function of sun elevation alone, so it is computed once here rather than per-pixel in the
+    //    kernel — and, like the exposure, it CANNOT depend on the camera, which keeps it clear of F3.
+    {
+        const float Elevation = std::asin(std::fmin(std::fmax(Out.SunDirectionAndCosRadius[2], -1.0f), 1.0f));
+        float Transmittance[3];
+        SolveSunTransmittance(Settings, Elevation, Transmittance);
+        for (int C = 0; C < 3; ++C) Out.SunTransmittance[C] = Transmittance[C];
+        Out.SunTransmittance[3] = 0.0f;
+    }
 
     // ── Moon ──────────────────────────────────────────────────────────────────────────────────────────────────
     const float MoonAngularRadius = Settings.Moon.AngularDiameterDegrees * 0.5f * static_cast<float>(kDegreesToRadians);

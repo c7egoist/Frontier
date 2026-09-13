@@ -119,7 +119,7 @@ layout(rgba16f, binding = 18) uniform image2D HistorySurfaceImage;   // R7a: xyz
 layout(rgba32f, binding = 19) uniform image2D MomentImage;           // R7: x = E[luma], y = E[luma²], reprojected with the mean
 layout(rgba32f, binding = 20) uniform writeonly image2D DenoiseImage; // R7: xyz = linear radiance, w = variance — the à-trous input
 // ── P1: the celestial record ───────────────────────────────────────────────────────────────────────────────────────
-// Mirrors CelestialUniform (Engine/DisplayPresentation/CelestialUniform.h) field for field, 22 vec4s = 352 bytes.
+// Mirrors CelestialUniform (Engine/DisplayPresentation/CelestialUniform.h) field for field, 23 vec4s = 368 bytes.
 // ⚠️ A readonly SSBO rather than a uniform block, deliberately: std430 lays vec4s out identically to the C++ struct,
 //    whereas std140 would need padding rules re-derived here, and the descriptor pool's storage-buffer count is the
 //    one already sized for data bindings. Read-only, written once per frame by the CPU solve — nothing is baked (F4).
@@ -128,6 +128,7 @@ struct CelestialRecord
     vec4 SunDirectionAndCosRadius;      // xyz dir TO sun, w cos(angular radius)
     vec4 SunRadianceAndLimb;            // rgb DISC radiance [W/m2/sr], w limb darkening
     vec4 SunIrradianceAndScale;         // rgb top-of-atmosphere IRRADIANCE [W/m2], w sky scale
+    vec4 SunTransmittance;              // rgb atmospheric transmittance to the sun at ground, w unused
     vec4 MoonDirectionAndCosRadius;
     vec4 MoonRadianceAndEarthshine;
     vec4 RayleighScatteringAndHeight;   // rgb 1/m, w scale height [m]
@@ -715,18 +716,98 @@ vec3 SampleLightPoint(uint lightTriIdx, float u1, float u2)
 }
 
 //------------------------------------------------------------------------------------------------------------------------
+//                                    🔴 P3 / F2: THE SUN IS A MEMBER OF THE LIGHT POOL
+//------------------------------------------------------------------------------------------------------------------------
+//
+//    The reported failure was "sun isn't being used in ReSTIR" — the sun painted on the miss path as a backdrop
+//    while the reservoir resampled only emissive triangles. Ray Tracing Gems II ch.23 states the rule plainly:
+//    the sun is an ordinary entry in the light pool. So it is given a light index one past the end of the
+//    luminaire table and travels through EVERY existing path — initial RIS, extra candidates, temporal reuse,
+//    spatial reuse, the shadow ray, the final shade — with no parallel code path to drift out of step.
+//
+//    ⚠️ HOW A DIRECTIONAL LIGHT FITS AN AREA-LIGHT ESTIMATOR. The reservoir stores a world POINT and the shading
+//    maths divides by d². The sun has no position. Rather than special-case the estimator (which would mean
+//    touching 11 call sites and inventing a second target function), the sun is represented as a disc at a large
+//    but finite distance:
+//
+//        · the sample point is hitPos + (direction jittered within the sun's angular radius) * kSunDistance
+//        · its "emission" is irradiance x kSunDistance², so that emission / d² collapses back to the irradiance
+//
+//    The two cancel exactly, so f·E·cosθ comes out — the correct directional-light contribution — through the
+//    unmodified area-light code. Sampling across the disc rather than the centre is what produces genuine
+//    penumbrae from the existing shadow ray, for free.
+//
+//    kSunDistance is a compromise measured against float precision, not a round number picked by feel. Too small
+//    and a reservoir shared between pixels parallaxes (the stored point implies a different direction at a
+//    neighbour); too large and emission = E·d² loses mantissa. At 100 km, two pixels 5 m apart disagree by
+//    5e-5 rad = 0.003 deg — far inside the sun's own 0.53 deg disc, so reuse stays physically sensible — while
+//    E·d² stays around 2e11, comfortably inside fp32.
+#define kSunDistance 100000.0
+
+// The sun occupies the index one past the real luminaires, so `< LightTriangleCount` still means "a triangle".
+uint SunLightIndex() { return LightTriangleCount; }
+
+bool SunIsActive(CelestialRecord sky)
+{
+    // Below the horizon the sun contributes nothing and must not be sampled: every candidate spent on it would
+    //    be a wasted reservoir slot returning zero, which shows up as noise at dusk.
+    return (uint(sky.ExposureAndFlags.w) & kCelestialFlagEnabled) != 0u
+        && sky.SunDirectionAndCosRadius.z > 0.0;
+}
+
+uint TotalLightCount(CelestialRecord sky)
+{
+    return LightTriangleCount + (SunIsActive(sky) ? 1u : 0u);
+}
+
 // Every read of a light's emission goes through this accessor, so the reservoir paths cannot disagree
 //    about what a light radiates.
 vec3 LightEmission(uint lightIndex)
 {
+    if (lightIndex >= LightTriangleCount)
+    {
+        // The sun, pre-multiplied by d² so the estimator's 1/d² cancels it. Attenuated by the atmosphere along
+        //    the path to the sun, which is what reddens direct sunlight at sunset — the scene warms because the
+        //    air is filtering the light, not because a colour was keyframed.
+        CelestialRecord sky = Celestial[0];
+        return sky.SunIrradianceAndScale.xyz * sky.SunTransmittance.xyz * (kSunDistance * kSunDistance);
+    }
     return Materials[floatBitsToUint(Triangles[LightTriangle(lightIndex)].v0.w)].Emissive.xyz;
+}
+
+// Sample a point on a light. For a triangle this is the usual area sample; for the sun it is a point on its
+//    visible disc, which is what gives the shadow its penumbra.
+vec3 SampleLightPointFrom(uint lightIndex, float u1, float u2, vec3 from)
+{
+    if (lightIndex >= LightTriangleCount)
+    {
+        CelestialRecord sky = Celestial[0];
+        vec3  sunDirection = sky.SunDirectionAndCosRadius.xyz;
+        float cosRadius    = sky.SunDirectionAndCosRadius.w;
+
+        // Uniform direction inside the cone of half-angle acos(cosRadius) — the standard cone sample.
+        float cosTheta = mix(cosRadius, 1.0, u1);
+        float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
+        float phi      = 6.2831853 * u2;
+
+        vec3 tangent   = normalize(abs(sunDirection.z) < 0.99 ? cross(vec3(0.0, 0.0, 1.0), sunDirection)
+                                                              : vec3(1.0, 0.0, 0.0));
+        vec3 bitangent = cross(sunDirection, tangent);
+
+        vec3 jittered = normalize(sunDirection * cosTheta
+                                + tangent   * (sinTheta * cos(phi))
+                                + bitangent * (sinTheta * sin(phi)));
+
+        return from + jittered * kSunDistance;
+    }
+    return SampleLightPoint(lightIndex, u1, u2);
 }
 
 // R6 row 3: light-triangle pick. Alias ON (F5, default): one Walker-alias probe — col uniform, accept on
 //    Threshold else redirect to AliasSlot, source pdf = Probability[z] (power/total, SceneStructure.cpp).
 //    Alias OFF: uniform over luminaires with p = 1/N — bit-for-bit the R0 estimator (identity proof).
 //    Any positive pSource keeps RIS unbiased: the converged image is unchanged, only the noise differs.
-uint PickLight(inout uint seed, out float pSource)
+uint PickTriangleLight(inout uint seed, out float pSource)
 {
     if ((FeatureFlags & kFeatureAliasPick) != 0u)
     {
@@ -738,6 +819,29 @@ uint PickLight(inout uint seed, out float pSource)
     }
     pSource = 1.0 / float(LightTriangleCount);
     return min(uint(RandFloat(seed) * float(LightTriangleCount)), LightTriangleCount - 1u);
+}
+
+uint PickLight(inout uint seed, out float pSource)
+{
+    // 🔴 The sun competes for reservoir slots on equal terms. An even split between "the sun" and "everything
+    //    else" is the simple choice and a sound one outdoors, where the sun usually dominates but the emissives
+    //    still matter; any positive pSource keeps RIS unbiased, so this trades noise, never correctness.
+    CelestialRecord sky = Celestial[0];
+    if (SunIsActive(sky))
+    {
+        const float sunShare = LightTriangleCount > 0u ? 0.5 : 1.0;
+        if (RandFloat(seed) < sunShare)
+        {
+            pSource = sunShare;
+            return SunLightIndex();
+        }
+        // Fall through to a triangle pick, whose probability must be scaled by the share left over for it.
+        float trianglePSource;
+        uint  picked = PickTriangleLight(seed, trianglePSource);
+        pSource = trianglePSource * (1.0 - sunShare);
+        return picked;
+    }
+    return PickTriangleLight(seed, pSource);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -1006,7 +1110,11 @@ void main()
     //    spatiotemporal neighbour taps, shade.
     //------------------------------------------------------------------------------------------------------------------
 
-    if (LightTriangleCount > 0u)
+    // 🔴 F2: the gate is now the TOTAL light count, so an outdoor scene with no emissive triangles still runs
+    //    the full reservoir pipeline against the sun. Previously this read `LightTriangleCount > 0u`, which meant
+    //    a daylit scene containing no lamps skipped direct lighting entirely and was lit only by the bounce —
+    //    the sun would have been present in the pool and still never sampled.
+    if (TotalLightCount(Celestial[0]) > 0u)
     {
         // Initial reservoir from M = SamplesPerPixel candidates
         Reservoir res;
@@ -1024,7 +1132,7 @@ void main()
             uint   li          = PickLight(seed, pSource);   // R6 row 3: alias (F5) or uniform (identity proof)
             float  u1          = RandFloat(seed);
             float  u2          = RandFloat(seed);
-            vec3   lp          = SampleLightPoint(li, u1, u2);
+            vec3   lp          = SampleLightPointFrom(li, u1, u2, hitPos);
             vec3   toLight     = lp - hitPos;
 
             // Get light material
@@ -1056,7 +1164,7 @@ void main()
                 uint   nli    = PickLight(seed, npSource);   // R6 row 3: same alias/uniform gate as the initial loop
                 float  nu1    = RandFloat(seed);
                 float  nu2    = RandFloat(seed);
-                vec3   nlp    = SampleLightPoint(nli, nu1, nu2);
+                vec3   nlp    = SampleLightPointFrom(nli, nu1, nu2, hitPos);
                 vec3   nToL   = nlp - hitPos;
                 vec3   nEmit  = LightEmission(nli);
                 float  nPHat  = PHatFull(frame, shading, layers, woLocal, nEmit, nToL, dot(nToL, nToL));
@@ -1252,7 +1360,7 @@ void main()
                 {
                     accumulatedRadiance += throughput * bFrame.Emission;
                 }
-                else if (LightTriangleCount > 0u)
+                else if (TotalLightCount(Celestial[0]) > 0u)
                 {
                     vec3  bHitPos    = bounceHit.pos;
                     vec3  bHitNormal = bFrame.Geometric;
@@ -1262,9 +1370,9 @@ void main()
 
                     // The secondary bounce is a single unweighted sample rather than a reservoir, so a
                     //    uniform pick over the emissive triangles is the correct estimator here.
-                    const uint bLightCount = LightTriangleCount;
+                    const uint bLightCount = TotalLightCount(Celestial[0]);
                     uint  bLi  = min(uint(RandFloat(seed) * float(bLightCount)), bLightCount - 1u);
-                    vec3  bLp  = SampleLightPoint(bLi, RandFloat(seed), RandFloat(seed));
+                    vec3  bLp  = SampleLightPointFrom(bLi, RandFloat(seed), RandFloat(seed), bHitPos);
                     vec3  bToL = bLp - bHitPos;
                     float bDist = length(bToL);
                     vec3  bLDir = bToL / bDist;
