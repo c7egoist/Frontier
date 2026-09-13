@@ -676,7 +676,7 @@ float PHatSun(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec3 h
     if (wi.z <= 0.0) return 0.0;
     // Cloud transmittance belongs in the RIS target, not only in the final shade. Otherwise reservoir reuse
     //    selects using an unshadowed p̂ but evaluates a cloud-shadowed contribution, which biases the sun.
-    return max(dot(EvaluateBsdf(m, L, wo, wi), sunEmit), 0.0) * cosT * CloudSunTransmittance(hitPos, sunDir);
+    return max(dot(EvaluateBsdf(m, L, wo, wi), sunEmit), 0.0) * cosT * CloudSunTransmittance(hitPos, sunDir, CloudPixelSwirl(hitPos, sunDir));
 }
 
 // p̂ of a STORED sample — the one question every merge asks, answered for both light kinds. A sun sample's
@@ -1178,7 +1178,7 @@ void main()
                     // The reservoir target carries this same visibility term (PHatSun), so the cloud does not
                     //    turn into a post-hoc multiplier that would bias temporal/spatial reuse.
                     accumulatedRadiance += f * SunEmission() * shadeCos * res.UnbiasedWeight
-                                         * CloudSunTransmittance(hitPos, shadeDir);
+                                         * CloudSunTransmittance(hitPos, shadeDir, CloudPixelSwirl(hitPos, shadeDir));
                 }
                 else
                 {
@@ -1261,7 +1261,7 @@ void main()
                             // The bounced sun is still travelling through the same cloud field as primary NEE; scene
                             //    visibility alone only tests geometry and would leave indirect sunlight unshadowed by weather.
                             accumulatedRadiance += throughput * bF * SunEmission() * bCos * SunSolidAngle()
-                                                 * CloudSunTransmittance(bHitPos, bSunDir) / pPick;
+                                                 * CloudSunTransmittance(bHitPos, bSunDir, CloudPixelSwirl(bHitPos, bSunDir)) / pPick;
                         }
                     }
                     else

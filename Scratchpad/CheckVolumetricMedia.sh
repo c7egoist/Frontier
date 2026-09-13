@@ -125,8 +125,10 @@ echo "[VolumetricMedia] cloud shafts come from the medium shadowing itself"
 # The scene-occlusion callback was removed - nothing in the engine called it and no such geometry exists yet.
 #    What stays is the half that renders: ShadowMarch accumulates cloud density along the sun ray, which is what
 #    lights a cloud at all. Deleting THAT would leave clouds flat, so it is guarded here.
-printf '%s' "$MediaCode" | grep -q 'Cloud.Enabled ? CloudDensity(Cloud, Wind, Q) : 0.0f'
+printf '%s' "$MediaCode" | grep -q 'Cloud.Enabled ? CloudDensity(Cloud, Wind, Q, Time, TapLod) : 0.0f'
 Report $? "the sun-shadow march samples cloud density along the sun ray"
+printf '%s' "$MediaCode" | grep -q 'const float TapLod = I > 2u ? 1.0f : 0.0f;'
+Report $? "the shadow's first two taps keep erosion, the rest skip it"
 ! printf '%s' "$MediaCode" | grep -q 'SunVisibilityAt'
 Report $? "the unused scene-occlusion callback is gone"
 ! printf '%s' "$MediaCode" | grep -qiE 'radial.?blur|screenspace shaft'
@@ -149,6 +151,29 @@ printf '%s' "$NoiseCode" | grep -q 'CloudMarchJitter'
 Report $? "the shader march twins it"
 grep -q 'MarchJitter' Scratchpad/VolumetricMediaProof.cpp
 Report $? "the proof pins the jitter's determinism"
+
+echo
+echo "[VolumetricMedia] the densities are the reference's four-octave field"
+# P2.4a ports celestial clDensity/lcDensity: four shape octaves under /0.9375, the 0.5 lod gate that skips
+#    erosion in the distance, the 0.35 downwind lean, the 0.45 erosion carve, one x8 pixel swirl. The old
+#    smoothstep remap survives ONLY in the kept fog branch (P8's vf replaces it); the ported paths remap
+#    linearly, which is what the absence count below guards.
+Octaves=$(printf '%s' "$MediaCode" | grep -c 'S\[0\] \* 8.3f')
+[ "$Octaves" = "2" ]
+Report $? "both ported densities sum the fourth octave ($Octaves sites)"
+Gates=$(printf '%s' "$MediaCode" | grep -c 'Lod > 0.5f')
+[ "$Gates" = "2" ]
+Report $? "both ported densities gate erosion at lod 0.5 ($Gates sites)"
+printf '%s' "$MediaCode" | grep -q 'Hn \* (Top - Base) \* 0.35f \* LeanFactor'
+Report $? "the slab leans 0.35 of its depth downwind"
+Erodes=$(printf '%s' "$MediaCode" | grep -c 'ErosionDetail \* 0.45f')
+[ "$Erodes" = "2" ]
+Report $? "both ported densities carve at 0.45 ($Erodes sites)"
+printf '%s' "$MediaCode" | grep -q 'PixelSwirl\[0\] = Turb\[0\] \* 8.0f'
+Report $? "the march stirs one x8 pixel swirl"
+Remaps=$(printf '%s' "$MediaCode" | grep -c 'SmoothStep(0.0f, 1.0f, Raw)')
+[ "$Remaps" = "1" ]
+Report $? "the smoothstep remap survives only in the kept fog ($Remaps site)"
 
 echo
 if [ "$Fail" != "0" ]; then echo "[VolumetricMedia] FAILED"; exit 1; fi

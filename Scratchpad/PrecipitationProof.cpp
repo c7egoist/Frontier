@@ -52,7 +52,7 @@ int main()
         const CloudLayerSettings Cloud = OvercastSky();
         const float Camera[3] = { 0.0f, 0.0f, 2.0f };
         for (int Tick = 0; Tick < 60; ++Tick)
-            System.Step(Rain, Cloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f);
+            System.Step(Rain, Cloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f, static_cast<float>(Tick) / 60.0f);
 
         // Quadrant balance about the camera. A view-biased emitter piles particles into one side.
         uint32_t Quadrant[4] = { 0u, 0u, 0u, 0u };
@@ -92,7 +92,7 @@ int main()
             Fresh.Configure(8192u);
             const float Camera[3] = { 0.0f, 0.0f, Height };
             for (int Tick = 0; Tick < 20; ++Tick)
-                Fresh.Step(Rain, Cloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f);
+                Fresh.Step(Rain, Cloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f, static_cast<float>(Tick) / 60.0f);
             const PrecipitationTelemetry& T = Fresh.Telemetry();
             std::printf("     %12.0f %10u %10u   %s\n", Height, T.SpawnedThisStep, T.Alive,
                         T.AboveWeather ? "above the weather" : "weather");
@@ -118,13 +118,13 @@ int main()
         Clear.Configure(8192u);
         CloudLayerSettings NoCloud{};      // disabled entirely
         for (int Tick = 0; Tick < 30; ++Tick)
-            Clear.Step(Rain, NoCloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f);
+            Clear.Step(Rain, NoCloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f, static_cast<float>(Tick) / 60.0f);
 
         PrecipitationSystem Overcast;
         Overcast.Configure(8192u);
         const CloudLayerSettings Cloud = OvercastSky();
         for (int Tick = 0; Tick < 30; ++Tick)
-            Overcast.Step(Rain, Cloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f);
+            Overcast.Step(Rain, Cloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f, static_cast<float>(Tick) / 60.0f);
 
         std::printf("     clear sky: %u alive, %u columns rejected\n",
                     Clear.Telemetry().Alive, Clear.Telemetry().RejectedClearSky);
@@ -139,7 +139,7 @@ int main()
         CloudLayerSettings Patchy = OvercastSky();
         Patchy.Coverage = 0.35f;
         for (int Tick = 0; Tick < 30; ++Tick)
-            Broken.Step(Rain, Patchy, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f);
+            Broken.Step(Rain, Patchy, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f, static_cast<float>(Tick) / 60.0f);
         std::printf("     broken   : %u alive, %u columns rejected\n",
                     Broken.Telemetry().Alive, Broken.Telemetry().RejectedClearSky);
         Expect(Broken.Telemetry().RejectedClearSky > 0u,
@@ -162,12 +162,12 @@ int main()
 
         // Prime the field so its allocation is done before the measurement — the point being tested is that it
         //    does NOT grow with accumulation, not that it starts empty.
-        System.Step(Snow, Cloud, Wind, Camera, 1.0f / 60.0f, 0.0f, 0.0f);
+        System.Step(Snow, Cloud, Wind, Camera, 1.0f / 60.0f, 0.0f, 0.0f, 0.0f);
         const size_t BytesAtStart = System.Field().ByteCount();
         uint32_t HighWater = 0u;
         for (int Tick = 0; Tick < 7200; ++Tick)   // 120 s at 60 Hz — snow falls at 1 m/s, so it needs the time
         {
-            System.Step(Snow, Cloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f);
+            System.Step(Snow, Cloud, Wind, Camera, 1.0f / 60.0f, static_cast<float>(Tick) / 60.0f, 0.0f, static_cast<float>(Tick) / 60.0f);
             if (System.Telemetry().Alive > HighWater) HighWater = System.Telemetry().Alive;
         }
         const size_t BytesAtEnd = System.Field().ByteCount();

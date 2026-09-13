@@ -142,6 +142,18 @@ int main(){
         Expect(R.Twilight[0]==0.7f && R.Twilight[1]==0.3f, "the twilight settings arrive as packed");
     }
 
+    // ⑧ The local-cloud word and the turbulence lane.
+    Sky.LocalCloud.Enabled = true;
+    Sky.LocalCloud.Type = LocalCloudType::Cumuliform;
+    Sky.LocalCloud.Shape = LocalCloudShape::Ellipsoid;
+    Sky.LocalCloud.Soft = 0.5f;
+    Sky.Wind.Turbulence = 0.35f;
+    {
+        const SkyConstantRecord R = Sky.PackSkyRecord();
+        Expect(R.CloudControl[3] == 32773u, "type, shape and softness bit-pack into the control word");
+        Expect(R.CloudClock[3] == 0.35f, "the turbulence reaches the clock row for the swirl");
+    }
+
     std::printf("\n");
     for(int I=0;I<108;++I) std::putchar('=');
     std::printf("\n%s\n\n", Failures==0 ? "  the kernel is packed the raster's sky" : "  THE PACK AND THE RASTER DISAGREE");

@@ -238,8 +238,25 @@ float CloudHeightProfile(uint Type, float Normalised)
     if (Type == 2u) return smoothstep(0.0, 0.07, H) * (1.0 - smoothstep(0.35, 1.0, H)) * 1.15;
     if (Type == 3u) return smoothstep(0.0, 0.05, H) * (1.0 - smoothstep(0.85, 1.0, H))
                          * mix(1.0, 1.6, smoothstep(0.7, 1.0, H) * SkyCloudShape.z);
-    if (Type == 4u) return smoothstep(0.0, 0.20, H) * (1.0 - smoothstep(0.55, 0.9, H)) * 0.75;
-    return smoothstep(0.0, 0.25, H) * (1.0 - smoothstep(0.4, 0.85, H)) * 0.45;
+    if (Type == 4u) return smoothstep(0.0, 0.3, H) * (1.0 - smoothstep(0.6, 1.0, H)) * 0.7;
+    return smoothstep(0.0, 0.4, H) * (1.0 - smoothstep(0.5, 1.0, H)) * 0.35;
+}
+
+// The local cloud's vertical profile (REF lcDensity's three-way): 0 stratiform, 1 cumuliform, 2 wispy.
+float CloudLocalProfile(uint Type, float Normalised)
+{
+    float H = clamp(Normalised, 0.0, 1.0);
+    if (Type == 0u) return smoothstep(0.0, 0.1, H) * (1.0 - smoothstep(0.75, 1.0, H));
+    if (Type == 1u) return smoothstep(0.0, 0.08, H) * (1.0 - smoothstep(0.4, 1.0, H)) * 1.15;
+    return smoothstep(0.0, 0.3, H) * (1.0 - smoothstep(0.6, 1.0, H)) * 0.6;
+}
+
+// The local cloud's mask (REF lcMask): a box fades on its thinnest margin, an ellipsoid on its radius.
+float CloudLocalMask(uint Shape, float Soft, vec3 Local)
+{
+    float M = Shape == 0u ? min(min(1.0 - abs(Local.x), 1.0 - abs(Local.y)), 1.0 - abs(Local.z))
+                          : 1.0 - length(Local);
+    return smoothstep(0.0, max(0.05, Soft), M);
 }
 
 vec3 CloudWindAt(float Altitude)
@@ -248,6 +265,21 @@ vec3 CloudWindAt(float Altitude)
     float Speed = SkyCloudWind.x * (1.0 + SkyCloudWind.z * Km);
     float Bearing = radians(SkyCloudWind.y + SkyCloudWind.w * Km);
     return vec3(sin(Bearing), cos(Bearing), 0.0) * Speed;
+}
+
+// The per-pixel turbulence displacement (REF windSwirl = windTurb x 8): the reference's six-noise curl in
+//    Z-up axes, times eight. Called ONCE per pixel (see CloudAlong), never per step. Reads the record's REF
+//    form — no Steadiness lane exists, so Steadiness != 1 is CPU-path-only (the default 1.0 is identical).
+vec3 CloudSwirlAt(vec3 P, float T)
+{
+    if (SkyCloudClock.w <= 0.0) return vec3(0.0);
+    vec3 Q = P * 0.02 + vec3(T * 0.05, T * 0.03, 0.0);
+    float E = 0.5;
+    float Dx = CloudNoise(Q + vec3(E, 0.0, 0.0)) - CloudNoise(Q - vec3(E, 0.0, 0.0));
+    float Dy = CloudNoise(Q + vec3(0.0, E, 0.0)) - CloudNoise(Q - vec3(0.0, E, 0.0));
+    float Dz = CloudNoise(Q + vec3(0.0, 0.0, E)) - CloudNoise(Q - vec3(0.0, 0.0, E));
+    float Scale = SkyCloudClock.w * SkyCloudWind.x * 0.9;
+    return vec3(Dz - Dy, Dx - Dz, Dy - Dx) * Scale * 8.0;
 }
 
 // The wind displacement — the twin of WindField::AdvectDrift, which carries the streak note. The packed wind
@@ -259,32 +291,49 @@ vec2 CloudDriftAt(float Altitude, float ArtFactor)
     return SkyCloudClock.xy * Factor * ArtFactor;
 }
 
-float CloudDensityAt(vec3 Position)
+float CloudDensityAt(vec3 Position, float Time, float Lod)
 {
     float Ceiling = max(SkyCloudShape.y, 0.0);
     float Base = clamp(SkyCloudLayer.x, 0.0, Ceiling);
     float Top = clamp(SkyCloudLayer.x + SkyCloudLayer.y, 0.0, Ceiling);
     if (Position.z < Base || Position.z > Top || Top <= Base + 1.0) return 0.0;
 
-    float H = (Position.z - Base) / (Top - Base);
-    float Profile = CloudHeightProfile(SkyControl.w, H);
+    float Hn = clamp((Position.z - Base) / (Top - Base), 0.0, 1.0);
+    float Profile = CloudHeightProfile(SkyControl.w, Hn);
     if (Profile <= 0.0) return 0.0;
 
     vec3 Drift = vec3(0.0);
     if ((SkyControl.z & kCloudFollowWindFlag) != 0u)
         Drift.xy = CloudDriftAt(Position.z, 0.8);
+    float LeanFactor = SkyControl.w >= 3u ? SkyCloudShape.z : 0.2;
+    float DriftLen = length(Drift.xy);
+    float LeanGuard = max(1e-3, DriftLen + 1e-3);
+    float LeanReach = Hn * (Top - Base) * 0.35 * LeanFactor;
+    vec2 Slanted = Position.xy + Drift.xy + LeanReach * Drift.xy / LeanGuard;
+
     float Inverse = 1.0 / max(SkyCloudShape.x * 900.0, 1.0);
-    vec3 S = vec3((Position.xy + Drift.xy) * Inverse, Position.z * Inverse);
+    vec3 S = vec3(Slanted * Inverse, Position.z * Inverse);
     float Shape = CloudNoise(S) * 0.5
                 + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25
-                + CloudNoise(S * 4.10 + vec3(7.7, 2.2, 1.1)) * 0.125;
-    Shape /= 0.875;
+                + CloudNoise(S * 4.10 + vec3(7.7, 2.2, 1.1)) * 0.125
+                + CloudNoise(S * 8.3 + vec3(1.3, 8.8, 4.4)) * 0.0625;
+    Shape /= 0.9375;
+    if (SkyControl.w == 5u)
+    {
+        float Streak = CloudNoise(vec3(S.x * 0.25, S.y * 6.0, S.z * 4.0));
+        Shape = Shape * 0.6 + Streak * 0.5;
+    }
     float Threshold = 1.0 - clamp(SkyCloudLayer.z, 0.0, 1.0);
-    float Raw = clamp((Shape - Threshold) / max(1.0 - Threshold, 1e-3), 0.0, 1.0);
-    return smoothstep(0.0, 1.0, Raw) * Profile * max(SkyCloudLayer.w, 0.0);
+    float Body = clamp((Shape - Threshold) / max(1.0 - Threshold, 1e-3), 0.0, 1.0) * Profile;
+    if (Body <= 0.0 || Lod > 0.5) return Body * max(SkyCloudLayer.w, 0.0);
+    float TimeShift = Time * 0.02;
+    float Detail = CloudNoise(S * 9.0 + vec3(TimeShift)) * 0.6
+                 + CloudNoise(S * 19.0 + vec3(5.0)) * 0.4;
+    float Erode = mix(Detail, 1.0 - Detail, clamp(Hn * 3.0, 0.0, 1.0)) * SkyCloudDetail.z * 0.45;
+    return clamp(Body - Erode * (1.0 - Body), 0.0, 1.0) * max(SkyCloudLayer.w, 0.0);
 }
 
-float LocalDensityAt(vec3 Position, bool FogVolume)
+float LocalDensityAt(vec3 Position, bool FogVolume, vec3 Swirl, float Lod)
 {
     if (FogVolume)
     {
@@ -296,22 +345,55 @@ float LocalDensityAt(vec3 Position, bool FogVolume)
     vec3 HalfSize = max(FogVolume ? SkyLocalFogHalfSize.xyz : SkyLocalCloudHalfSize.xyz, vec3(1e-3));
     vec4 Params = FogVolume ? SkyLocalFogParams : SkyLocalCloudParams;
     vec3 Local = (Position - Centre) / HalfSize;
-    float R = length(Local);
-    if (R >= 1.0) return 0.0;
-    float Mask = 1.0 - smoothstep(0.55, 1.0, R);
+
+    if (FogVolume)
+    {
+        // Kept, not ported (P8's vf replaces it): the fog marches exactly what it always marched.
+        float R = length(Local);
+        if (R >= 1.0) return 0.0;
+        float Mask = 1.0 - smoothstep(0.55, 1.0, R);
+        if (Mask <= 0.0) return 0.0;
+
+        vec3 Drift = vec3(0.0);
+        if ((SkyControl.z & kLocalFogWindFlag) != 0u)
+            Drift.xy = CloudDriftAt(Position.z, 0.6);
+        float Inverse = 1.0 / max(Params.z, 1.0);
+        vec3 S = (Position + Drift) * Inverse;
+        float Shape = CloudNoise(S) * 0.5 + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25;
+        Shape /= 0.75;
+        float Threshold = 1.0 - clamp(Params.y, 0.0, 1.0);
+        float Raw = clamp((Shape - Threshold) / max(1.0 - Threshold, 1e-3), 0.0, 1.0);
+        return smoothstep(0.0, 1.0, Raw) * Mask * max(Params.x, 0.0);
+    }
+
+    // The unpacked local-cloud word: type in bits 0-1, shape in bit 2, softness 8-bit fixed in 8-15.
+    uint LocalPack = SkyCloudControl.w;
+    uint LocalType = LocalPack & 3u;
+    uint LocalShape = (LocalPack >> 2u) & 1u;
+    float LocalSoft = float((LocalPack >> 8u) & 255u) / 255.0;
+
+    float Hn = clamp(Local.z * 0.5 + 0.5, 0.0, 1.0);
+    float Profile = CloudLocalProfile(LocalType, Hn);
+    if (Profile <= 0.0) return 0.0;
+    float Mask = CloudLocalMask(LocalShape, LocalSoft, Local);
     if (Mask <= 0.0) return 0.0;
 
-    vec3 Drift = vec3(0.0);
-    uint WindFlag = FogVolume ? kLocalFogWindFlag : kLocalCloudWindFlag;
-    if ((SkyControl.z & WindFlag) != 0u)
-        Drift.xy = CloudDriftAt(Position.z, 0.6);
+    vec3 Push = vec3(0.0);
+    if ((SkyControl.z & kLocalCloudWindFlag) != 0u)
+        Push = vec3(CloudDriftAt(Position.z, 0.6), 0.0) + Swirl * 0.6;
     float Inverse = 1.0 / max(Params.z, 1.0);
-    vec3 S = (Position + Drift) * Inverse;
-    float Shape = CloudNoise(S) * 0.5 + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25;
-    Shape /= 0.75;
+    vec3 S = (Position + Push) * Inverse;
+    float Shape = CloudNoise(S) * 0.5
+                + CloudNoise(S * 2.02 + vec3(3.1, 1.7, 9.2)) * 0.25
+                + CloudNoise(S * 4.10 + vec3(7.7, 2.2, 1.1)) * 0.125
+                + CloudNoise(S * 8.3 + vec3(1.3, 8.8, 4.4)) * 0.0625;
+    Shape /= 0.9375;
     float Threshold = 1.0 - clamp(Params.y, 0.0, 1.0);
-    float Raw = clamp((Shape - Threshold) / max(1.0 - Threshold, 1e-3), 0.0, 1.0);
-    return smoothstep(0.0, 1.0, Raw) * Mask * max(Params.x, 0.0);
+    float Body = clamp((Shape - Threshold) / max(1.0 - Threshold, 1e-3), 0.0, 1.0) * Profile * Mask;
+    if (Body <= 0.0 || Lod > 0.5) return Body * max(Params.x, 0.0);
+    float Detail = CloudNoise(S * 9.0) * 0.6 + CloudNoise(S * 19.0 + vec3(5.0)) * 0.4;
+    float Erode = mix(Detail, 1.0 - Detail, clamp(Hn * 3.0, 0.0, 1.0)) * SkyCloudDetail.w * 0.45;
+    return clamp(Body - Erode * (1.0 - Body), 0.0, 1.0) * max(Params.x, 0.0);
 }
 
 // How far past the slab entry the layer march may run: the reference's span cut (celestial line 1023),
@@ -366,38 +448,42 @@ bool CloudBoxInterval(vec3 Origin, vec3 Direction, vec3 Centre, vec3 HalfSize, f
     return Far > Near;
 }
 
-float CloudShadowMedium(vec3 Origin, vec3 Direction, uint Medium, uint Taps)
+float CloudShadowMedium(vec3 Origin, vec3 Direction, uint Medium, uint Taps, vec3 Swirl)
 {
     // Twin of VolumetricMedia::ShadowMarch: Taps half-step taps toward the sun from the sample point. The taps
     //    pace the medium's own reference step (the view step the CPU march passes is the same size to 4% — the
     //    rescale — so both paths resolve the same self-shadowing, the 4.83x gap/shadow contrast the CPU path
     //    measured). A full-interval march was tried here first: at grazing its taps stride whole clouds between
     //    samples and the shadow aliases into noise, while these local taps stay inside the structure.
+    //    The lod threading is the reference's (clShadow/uniShadow): the layer's first two taps keep erosion,
+    //    the rest skip it, and the local shadow always skips it (the fog ignores lod).
     float StepSize = Medium == 0u ? 4000.0 / float(max(SkyCloudControl.x, 1u))
                    : max((Medium == 1u ? SkyLocalCloudParams.z : SkyLocalFogParams.z) * 0.5, 1.0);
     uint Count = max(Taps, 1u);
     float Depth = 0.0;
+    float Time = SkyCloudClock.z;
     for (uint I = 1u; I <= Count; ++I)
     {
         float Distance = StepSize * float(I) * 0.5;
         vec3 Q = Origin + Direction * Distance;
-        float D = Medium == 0u ? CloudDensityAt(Q) : LocalDensityAt(Q, Medium == 2u);
+        float D = Medium == 0u ? CloudDensityAt(Q, Time, I > 2u ? 1.0 : 0.0)
+                : LocalDensityAt(Q, Medium == 2u, Swirl, 1.0);
         Depth += D * StepSize * 0.5 * kCloudExtinctionScale;
         if (Depth > 4.0) break;
     }
     return exp(-Depth);
 }
 
-float CloudSunTransmittance(vec3 Origin, vec3 Direction)
+float CloudSunTransmittance(vec3 Origin, vec3 Direction, vec3 Swirl)
 {
     if ((SkyControl.z & (kCloudLayerFlag | kLocalCloudFlag | kLocalFogFlag)) == 0u) return 1.0;
     // Per-medium transmittances multiply, which is the combined medium's: optical depths add under the
     //    exponential, so this equals the CPU shadow march's summed densities at the same tap points.
     uint Taps = max(SkyCloudControl.z, 1u);
     float Result = 1.0;
-    if ((SkyControl.z & kCloudLayerFlag) != 0u) Result *= CloudShadowMedium(Origin, Direction, 0u, Taps);
-    if ((SkyControl.z & kLocalCloudFlag) != 0u) Result *= CloudShadowMedium(Origin, Direction, 1u, Taps);
-    if ((SkyControl.z & kLocalFogFlag) != 0u) Result *= CloudShadowMedium(Origin, Direction, 2u, Taps);
+    if ((SkyControl.z & kCloudLayerFlag) != 0u) Result *= CloudShadowMedium(Origin, Direction, 0u, Taps, Swirl);
+    if ((SkyControl.z & kLocalCloudFlag) != 0u) Result *= CloudShadowMedium(Origin, Direction, 1u, Taps, Swirl);
+    if ((SkyControl.z & kLocalFogFlag) != 0u) Result *= CloudShadowMedium(Origin, Direction, 2u, Taps, Swirl);
     return Result;
 }
 
@@ -417,7 +503,7 @@ float CloudMarchJitter(vec3 Direction)
 
 void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint Medium,
                       vec3 SunDirection, vec3 SunRadiance, vec3 AmbientRadiance,
-                      inout vec3 Scatter, inout float Transmittance)
+                      inout vec3 Scatter, inout float Transmittance, vec3 Swirl)
 {
     float Span = Far - Near;
     if (Span <= 0.0) return;
@@ -437,14 +523,18 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
     //    same three albedos VolumetricMedia::March shades with.
     vec3 Albedo = Medium == 0u ? SkyCloudAlbedo.xyz
                 : (Medium == 1u ? vec3(0.92, 0.94, 0.97) : vec3(0.88));
+    // lodFar (REF cloudMarch): the layer sheds its erosion past 200 km of entry distance; the local
+    // march always reads full detail (marchLocal passes lod 0).
+    float Lod = Medium == 0u ? smoothstep(20000.0, 200000.0, Near) : 0.0;
+    float Time = SkyCloudClock.z;
     float Jitter = Medium == 0u ? CloudMarchJitter(Direction) : 0.5;
     for (uint I = 0u; I < Count; ++I)
     {
         float T = Near + (float(I) + Jitter) * Step;
         vec3 P = Origin + Direction * T;
-        float Density = Medium == 0u ? CloudDensityAt(P) : LocalDensityAt(P, Medium == 2u);
+        float Density = Medium == 0u ? CloudDensityAt(P, Time, Lod) : LocalDensityAt(P, Medium == 2u, Swirl, 0.0);
         if (Density <= 1e-5) continue;
-        float SunT = CloudSunTransmittance(P, SunDirection);
+        float SunT = CloudSunTransmittance(P, SunDirection, Swirl);
         float Extinction = Density * Step * kCloudExtinctionScale;
         float SegmentT = exp(-Extinction);
         vec3 Incoming = SunRadiance * SunT * Phase + AmbientRadiance;
@@ -452,6 +542,16 @@ void CloudMarchMedium(vec3 Origin, vec3 Direction, float Near, float Far, uint M
         Transmittance *= SegmentT;
         if (Transmittance < 0.005) break;
     }
+}
+
+// One ray's turbulence displacement (REF gSwirl, filled once per pixel in main): a windTurb x8 thirty
+// metres along the ray, only when turbulence is on and a local cloud follows the wind. CloudAlong calls
+// it for the view ray; the viewport's NEE calls it for each shadow ray, which has no pixel of its own
+// (the same per-ray generalisation the jitter's direction-hash makes for bounces).
+vec3 CloudPixelSwirl(vec3 Origin, vec3 Direction)
+{
+    if (SkyCloudClock.w <= 0.0 || (SkyControl.z & kLocalCloudWindFlag) == 0u) return vec3(0.0);
+    return CloudSwirlAt(Origin + Direction * 30.0, SkyCloudClock.z);
 }
 
 void CloudAlong(vec3 Origin, vec3 Direction, float Maximum, vec3 SunDirection, vec3 SunRadiance,
@@ -473,12 +573,13 @@ void CloudAlong(vec3 Origin, vec3 Direction, float Maximum, vec3 SunDirection, v
         {
             uint Swap = Order[B]; Order[B] = Order[B - 1u]; Order[B - 1u] = Swap;
         }
+    vec3 PixelSwirl = CloudPixelSwirl(Origin, Direction);
     for (uint I = 0u; I < 3u; ++I)
     {
         uint M = Order[I];
         if (!Hits[M] || Transmittance < 0.005) continue;
         CloudMarchMedium(Origin, Direction, Nears[M], Fars[M], M, SunDirection, SunRadiance,
-                         AmbientRadiance, Scatter, Transmittance);
+                         AmbientRadiance, Scatter, Transmittance, PixelSwirl);
     }
 }
 

@@ -85,7 +85,8 @@ struct SkyConstantRecord
     float    CloudShape[4];     // feature scale, ceiling, anvil, HG anisotropy
     float    CloudWind[4];      // speed [m/s], bearing [deg], shear [/km], veer [deg/km]
     float    CloudAlbedo[4];    // rgb albedo, w retired (P2.2): SkyCloudClock carries the clock
-    uint32_t CloudControl[4];   // cloud steps, local steps, sun taps, reserved
+    uint32_t CloudControl[4];   // cloud steps, local steps, sun taps, local-cloud word (P2.4a):
+                                // bits 0-1 type, bit 2 shape, bits 8-15 softness 8-bit fixed, rest reserved
     float    LocalCloudCentre[4]; // xyz centre, w unused
     float    LocalCloudHalfSize[4]; // xyz half-size, w unused
     float    LocalCloudParams[4]; // density, coverage, feature scale, HG anisotropy
@@ -96,7 +97,7 @@ struct SkyConstantRecord
     //    rows are last, so nothing above shifts — only the block size moves (320 → 368).
     float    CloudScatter[4];   // forward g1, back g2, lobe mix, absorption (P2.4b reads; packed P2.2)
     float    CloudDetail[4];    // sky ambient x, powder, erosion detail, local erosion detail (P2.4 reads)
-    float    CloudClock[4];     // wind integral xy [m], wall clock [s], spare
+    float    CloudClock[4];     // wind integral xy [m], wall clock [s], turbulence (P2.4a: the swirl's gain)
 };
 
 static_assert(sizeof(SkyConstantRecord) == 368u, "SkyConstants must match the shader's std140 block exactly");
@@ -235,6 +236,14 @@ inline void PackSkyVolumes(SkyConstantRecord& R, bool Enabled,
     R.CloudControl[0] = Budget.CloudSteps == 0u ? 1u : Budget.CloudSteps;
     R.CloudControl[1] = Budget.LocalSteps == 0u ? 1u : Budget.LocalSteps;
     R.CloudControl[2] = Budget.LightTaps == 0u ? 1u : Budget.LightTaps;
+    // The local-cloud word: type in bits 0-1, shape in bit 2, softness 8-bit fixed in 8-15. Cleared with
+    // the volume — a hidden cloud leaves no stale type behind.
+    const float Soft01 = LocalCloud.Soft < 0.0f ? 0.0f : (LocalCloud.Soft > 1.0f ? 1.0f : LocalCloud.Soft);
+    const uint32_t Soft8 = static_cast<uint32_t>(Soft01 * 255.0f + 0.5f);
+    R.CloudControl[3] = UseLocalCloud
+                      ? (static_cast<uint32_t>(LocalCloud.Type)
+                         | (static_cast<uint32_t>(LocalCloud.Shape) << 2u) | (Soft8 << 8u))
+                      : 0u;
     R.CloudScatter[0] = Cloud.ForwardLobe;
     R.CloudScatter[1] = Cloud.BackLobe;
     R.CloudScatter[2] = Cloud.LobeMix;
@@ -246,7 +255,7 @@ inline void PackSkyVolumes(SkyConstantRecord& R, bool Enabled,
     R.CloudClock[0] = Wind.Integral[0];
     R.CloudClock[1] = Wind.Integral[1];
     R.CloudClock[2] = CloudTime;
-    R.CloudClock[3] = 0.0f;
+    R.CloudClock[3] = Wind.Turbulence;   // the swirl's gain (P2.4a; the shader has no other turb lane)
 
     for (int C = 0; C < 3; ++C)
     {

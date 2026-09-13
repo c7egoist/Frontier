@@ -93,7 +93,7 @@ printf '%s' "$SkyCode" | grep -q 'SkyTwilightGlow(Direction) \* CloudTransmittan
 Report $? "twilight and stars stay behind the cloud layer"
 printf '%s' "$Code" | grep -q 'CloudAlong(CameraOrigin, -viewDir, primaryT'
 Report $? "a primary surface composes the camera-to-hit weather segment"
-printf '%s' "$Code" | grep -q 'CloudSunTransmittance(hitPos, shadeDir)'
+printf '%s' "$Code" | grep -q 'CloudSunTransmittance(hitPos, shadeDir, CloudPixelSwirl(hitPos, shadeDir))'
 Report $? "the selected ReSTIR sun is shadowed by the cloud field"
 
 echo
@@ -106,8 +106,8 @@ DriftDefs=$(printf '%s' "$SkyCode" | grep -c 'vec2 CloudDriftAt(float Altitude')
 [ "$DriftDefs" = "1" ]
 Report $? "exactly one CloudDriftAt twin ($DriftDefs found)"
 DriftCalls=$(printf '%s' "$SkyCode" | grep -c 'CloudDriftAt(Position')
-[ "$DriftCalls" = "2" ]
-Report $? "both densities route through it ($DriftCalls call sites)"
+[ "$DriftCalls" = "3" ]
+Report $? "all three media route through it ($DriftCalls call sites)"
 printf '%s' "$SkyCode" | grep -q 'SkyCloudClock.xy \* Factor \* ArtFactor'
 Report $? "the drift is the packed integral times the altitude factor"
 printf '%s' "$SkyCode" | grep -q 'max(1e-3, SkyCloudWind.x)'
@@ -156,6 +156,43 @@ printf '%s' "$SkyCode" | grep -q 'max(Budget \* 4u, 4u)'
 Report $? "the layer's step cap is the CPU march's 4x budget"
 printf '%s' "$SkyCode" | grep -q 'vec3(0.88)'
 Report $? "the fog keeps the CPU march's fixed grey"
+
+echo
+echo "[SkyKernel] the kernel's densities twin the reference field"
+# P2.4a: the shader transcribes clDensity/lcDensity term for term — the twin proof re-renders both frames to
+#    bound the transcription, and these pins hold its constants so a retune lands on all three paths or fails
+#    here. The local word unpacks beside the densities; the pack that fills it is pinned with the record.
+ShaderOct=$(printf '%s' "$SkyCode" | grep -c 'S \* 8.3')
+[ "$ShaderOct" = "2" ]
+Report $? "both ported densities sum the fourth octave ($ShaderOct sites)"
+ShaderGate=$(printf '%s' "$SkyCode" | grep -c 'Lod > 0.5')
+[ "$ShaderGate" = "2" ]
+Report $? "both ported densities gate erosion at lod 0.5 ($ShaderGate sites)"
+printf '%s' "$SkyCode" | grep -q 'Hn \* (Top - Base) \* 0.35 \* LeanFactor'
+Report $? "the slab leans 0.35 of its depth downwind"
+ShaderErode=$(printf '%s' "$SkyCode" | grep -c 'clamp(Hn \* 3.0, 0.0, 1.0)) \* SkyCloudDetail')
+[ "$ShaderErode" = "2" ]
+Report $? "both ported densities erode through the detail row ($ShaderErode sites)"
+printf '%s' "$SkyCode" | grep -q 'S.x \* 0.25, S.y \* 6.0, S.z \* 4.0'
+Report $? "the cirrus streak stretches across the wind"
+printf '%s' "$SkyCode" | grep -q 'smoothstep(20000.0, 200000.0, Near)'
+Report $? "the march fades detail across 20-200 km"
+printf '%s' "$SkyCode" | grep -q 'vec3 CloudPixelSwirl(vec3 Origin, vec3 Direction)'
+Report $? "one per-pixel swirl feeds the march and the sun taps"
+printf '%s' "$SkyCode" | grep -q 'Dy - Dx) \* Scale \* 8.0'
+Report $? "the swirl carries the reference's x8"
+printf '%s' "$SkyCode" | grep -q '(LocalPack >> 8u)'
+Report $? "the local word unpacks its 8-bit softness"
+ShaderRemap=$(printf '%s' "$SkyCode" | grep -c 'smoothstep(0.0, 1.0, Raw)')
+[ "$ShaderRemap" = "1" ]
+Report $? "the smoothstep remap survives only in the kept fog ($ShaderRemap site)"
+TwinSwirl=$(grep -c 'void TwinSwirlAt' Scratchpad/SkyCloudKernelProof.cpp)
+[ "$TwinSwirl" = "1" ]
+Report $? "the twin stirs its own swirl ($TwinSwirl helper)"
+grep -q 'Soft8 << 8u' Engine/DisplayPresentation/SkyConstantRecord.h
+Report $? "softness bit-packs into the local-cloud word"
+grep -q 'R.CloudClock\[3\] = Wind.Turbulence' Engine/DisplayPresentation/SkyConstantRecord.h
+Report $? "the turbulence reaches the clock row for the swirl"
 
 echo
 echo "[SkyKernel] the block is declared where it was reserved"

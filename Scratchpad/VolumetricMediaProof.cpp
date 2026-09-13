@@ -58,7 +58,7 @@ int main()
         CloudLayerSettings High{};
         High.Enabled = true; High.Base = 100000.0f; High.Thickness = 2000.0f;
         const float Above[3] = { 0.0f, 0.0f, 100500.0f };
-        Expect(VolumetricMedia::CloudDensity(High, Wind, Above) == 0.0f,
+        Expect(VolumetricMedia::CloudDensity(High, Wind, Above, 0.0f, 0.0f) == 0.0f,
                "a layer pushed above the ceiling has zero density everywhere");
 
         // From orbit, looking down, the march must find nothing above the ceiling.
@@ -133,8 +133,8 @@ int main()
         for (int I = 0; I < 400; ++I)
         {
             const float Q[3] = { P[0] + static_cast<float>(I) * 37.0f, P[1] + static_cast<float>(I) * 19.0f, P[2] };
-            if (VolumetricMedia::CloudDensity(Low, Wind, Q) > 0.0f) ++LowHits;
-            if (VolumetricMedia::CloudDensity(High, Wind, Q) > 0.0f) ++HighHits;
+            if (VolumetricMedia::CloudDensity(Low, Wind, Q, 0.0f, 0.0f) > 0.0f) ++LowHits;
+            if (VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 0.0f) > 0.0f) ++HighHits;
         }
         std::printf("     coverage 0.2 fills %u of 400 samples, coverage 0.9 fills %u\n", LowHits, HighHits);
         Expect(HighHits > LowHits, "more coverage fills more of the sky");
@@ -460,6 +460,121 @@ int main()
             Layer, None, None, Wind, Budget, Eye, Up, 200000.0f, Sun, Radiance, Ambient, 0.0f);
         Expect(Steep.StepsTaken == 7u,
                "a steep ray keeps its 7 steps (short spans are untouched)");
+    }
+
+    std::printf("\n10. the densities erode, lean and swirl like the reference\n");
+    {
+        // The ported layer profiles: altostratus peaks 0.7 mid-slab, cirrus 0.35 — exact on the plateau,
+        // banded on the slopes.
+        Expect(VolumetricMedia::HeightProfile(CloudTypeCategory::Altostratus, 0.45f, 0.3f) == 0.7f,
+               "altostratus peaks at 0.7");
+        Expect(VolumetricMedia::HeightProfile(CloudTypeCategory::Cirrus, 0.45f, 0.3f) == 0.35f,
+               "cirrus peaks at 0.35");
+        const float AltoEdge = VolumetricMedia::HeightProfile(CloudTypeCategory::Altostratus, 0.1f, 0.3f);
+        Expect(AltoEdge > 0.1f && AltoEdge < 0.3f, "altostratus rises through its lower edge");
+        const float CirrusEdge = VolumetricMedia::HeightProfile(CloudTypeCategory::Cirrus, 0.8f, 0.3f);
+        Expect(CirrusEdge > 0.05f && CirrusEdge < 0.2f, "cirrus falls through its upper edge");
+
+        // The local profiles and mask, direct: stratiform peaks 1.0, wispy 0.6, cumuliform between 1.0 and
+        // 1.1; the ellipsoid clips its corners to exactly 0 while the box fades them to ~0.104.
+        Expect(VolumetricMedia::LocalHeightProfile(LocalCloudType::Stratiform, 0.5f) == 1.0f,
+               "stratiform peaks at 1.0");
+        Expect(VolumetricMedia::LocalHeightProfile(LocalCloudType::Wispy, 0.45f) == 0.6f,
+               "wispy peaks at 0.6");
+        const float CuProf = VolumetricMedia::LocalHeightProfile(LocalCloudType::Cumuliform, 0.5f);
+        Expect(CuProf > 1.0f && CuProf < 1.1f, "cumuliform cores above 1.0");
+        const float Centre[3] = { 0.0f, 0.0f, 0.0f }, Corner[3] = { 0.9f, 0.9f, 0.9f };
+        Expect(VolumetricMedia::LocalCloudMask(LocalCloudShape::Ellipsoid, 0.5f, Centre) == 1.0f,
+               "the ellipsoid is solid at its centre");
+        Expect(VolumetricMedia::LocalCloudMask(LocalCloudShape::Ellipsoid, 0.5f, Corner) == 0.0f,
+               "the ellipsoid clips its corners");
+        const float BoxCorner = VolumetricMedia::LocalCloudMask(LocalCloudShape::Box, 0.5f, Corner);
+        Expect(BoxCorner > 0.09f && BoxCorner < 0.12f, "the box fades its corners instead");
+
+        CloudLayerSettings High{};
+        High.Enabled = true; High.Base = 1500.0f; High.Thickness = 1000.0f;
+        High.Coverage = 0.9f; High.Density = 1.0f;
+
+        // Erosion carves, never builds: lod 0 sits at or under lod 1 everywhere on the transect, and
+        // strictly under somewhere (at hn 0.1 the mix weight cannot vanish, so some carve is guaranteed
+        // wherever the body is strictly inside (0, 1)).
+        uint32_t Strict = 0u;
+        bool Carves = true;
+        for (int I = 0; I < 8; ++I)
+        {
+            const float Q[3] = { 120.0f + static_cast<float>(I) * 37.0f,
+                                 240.0f + static_cast<float>(I) * 19.0f, 1600.0f };
+            const float Carved = VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 0.0f);
+            const float Whole = VolumetricMedia::CloudDensity(High, Wind, Q, 0.0f, 1.0f);
+            if (Carved > Whole) Carves = false;
+            if (Carved < Whole) ++Strict;
+        }
+        std::printf("     erosion carves at %u of 8 transect points\n", Strict);
+        Expect(Carves, "the eroded density never exceeds the uneroded");
+        Expect(Strict > 0u, "and it carves strictly somewhere");
+
+        // The lod gate opens past 0.5: two lods above it shade bit-identical uneroded light.
+        const float P[3] = { 120.0f, 240.0f, 1600.0f };
+        Expect(VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 0.6f) ==
+               VolumetricMedia::CloudDensity(High, Wind, P, 0.0f, 1.0f),
+               "lod 0.6 and lod 1.0 agree bit-for-bit (both skip erosion)");
+
+        // The lean is a rigid downwind shift: the field at P under a +x integral equals the rest field at
+        // P + drift + lean, where the drift comes from the trusted AdvectDrift and the lean direction (+x)
+        // is hand-derived from the integral's sign — a missing or flipped lean misses by metres, not ulps.
+        WindSettings WindI = Wind;
+        WindI.Integral[0] = 1000.0f; WindI.Integral[1] = 0.0f;
+        float DriftI[2];
+        WindField::AdvectDrift(WindI, 1600.0f, 0.8f, DriftI);
+        const float HnI = (1600.0f - 1500.0f) / (2500.0f - 1500.0f);
+        const float LeanI = HnI * 1000.0f * 0.35f * 0.2f;
+        const float Shifted[3] = { P[0] + DriftI[0] + LeanI, P[1] + DriftI[1], P[2] };
+        const float Leaned = VolumetricMedia::CloudDensity(High, WindI, P, 0.0f, 0.0f);
+        const float Rest = VolumetricMedia::CloudDensity(High, Wind, Shifted, 0.0f, 0.0f);
+        std::printf("     lean rigid-shift difference: %.3e\n", std::fabs(Leaned - Rest));
+        Expect(std::fabs(Leaned - Rest) < 1e-4f,
+               "drift + lean shift the field rigidly (a missing lean misses by metres)");
+
+        // The swirl stirs the sample, not the profile: uneroded (lod 1) local densities at swirl-shifted
+        // points agree once each side's own profile x mask is divided out. Zero integral, so the drift is
+        // exactly 0 and the shift is pure swirl.
+        LocalVolumeSettings Puff{};
+        Puff.Enabled = true;
+        Puff.Centre[0] = 0.0f; Puff.Centre[1] = 0.0f; Puff.Centre[2] = 400.0f;
+        Puff.HalfSize[0] = 200.0f; Puff.HalfSize[1] = 200.0f; Puff.HalfSize[2] = 100.0f;
+        Puff.Density = 1.0f; Puff.Coverage = 0.6f; Puff.Scale = 60.0f;
+        const float SwA[3] = { 10.0f, -6.0f, 4.0f }, SwB[3] = { 0.0f, 0.0f, 0.0f };
+        const float P1[3] = { 10.0f, 20.0f, 405.0f };
+        const float P2[3] = { P1[0] + SwA[0] * 0.6f, P1[1] + SwA[1] * 0.6f, P1[2] + SwA[2] * 0.6f };
+        const float D1 = VolumetricMedia::LocalDensity(Puff, Wind, P1, SwA, 1.0f, false);
+        const float D2 = VolumetricMedia::LocalDensity(Puff, Wind, P2, SwB, 1.0f, false);
+        const float L1[3] = { (P1[0] - Puff.Centre[0]) / Puff.HalfSize[0],
+                              (P1[1] - Puff.Centre[1]) / Puff.HalfSize[1],
+                              (P1[2] - Puff.Centre[2]) / Puff.HalfSize[2] };
+        const float L2[3] = { (P2[0] - Puff.Centre[0]) / Puff.HalfSize[0],
+                              (P2[1] - Puff.Centre[1]) / Puff.HalfSize[1],
+                              (P2[2] - Puff.Centre[2]) / Puff.HalfSize[2] };
+        const float W1 = VolumetricMedia::LocalHeightProfile(Puff.Type, L1[2] * 0.5f + 0.5f)
+                       * VolumetricMedia::LocalCloudMask(Puff.Shape, Puff.Soft, L1);
+        const float W2 = VolumetricMedia::LocalHeightProfile(Puff.Type, L2[2] * 0.5f + 0.5f)
+                       * VolumetricMedia::LocalCloudMask(Puff.Shape, Puff.Soft, L2);
+        std::printf("     swirl rigid-shift difference: %.3e\n", std::fabs(D1 / W1 - D2 / W2));
+        Expect(W1 > 0.0f && W2 > 0.0f, "both swirl probes sit inside the body (or the ratio is vacuous)");
+        Expect(std::fabs(D1 / W1 - D2 / W2) < 1e-6f,
+               "the swirl shifts the sample rigidly (a dropped swirl misses by a tenth of a cell)");
+
+        // Unlinked is static — today's contract, pinned until P8 ports the reference's unlinked drift: the
+        // integral moves nothing, and a stray swirl cannot move the box either.
+        CloudLayerSettings Free = High;
+        Free.FollowWind = false;
+        Expect(VolumetricMedia::CloudDensity(Free, WindI, P, 0.0f, 0.0f) ==
+               VolumetricMedia::CloudDensity(Free, Wind, P, 0.0f, 0.0f),
+               "unlinked, the integral leaves the slab bit-identical");
+        LocalVolumeSettings Anchored = Puff;
+        Anchored.FollowWind = false;
+        Expect(VolumetricMedia::LocalDensity(Anchored, Wind, P1, SwA, 0.0f, false) ==
+               VolumetricMedia::LocalDensity(Anchored, Wind, P1, SwB, 0.0f, false),
+               "unlinked, a stray swirl leaves the box bit-identical");
     }
 
     std::printf("\n");

@@ -1036,6 +1036,8 @@ int main()
 
         // LocalDensity honours the parked flag, and the box pair above restored it — enable for the probe.
         Sky.LocalCloud.Enabled = true;
+        // No pixel, no swirl: the probe samples the undisplaced field (REF with turbulence off), full detail.
+        const float NoSwirl[3] = { 0.0f, 0.0f, 0.0f };
         double BodySum = 0.0;
         int BodyN = 0;
         for (int Z = -1; Z <= 1; ++Z)
@@ -1045,7 +1047,7 @@ int main()
                     const float P[3] = { Sky.LocalCloud.Centre[0] + X * 50.0f,
                                          Sky.LocalCloud.Centre[1] + Y * 50.0f,
                                          Sky.LocalCloud.Centre[2] + Z * 25.0f };
-                    BodySum += VolumetricMedia::LocalDensity(Sky.LocalCloud, Sky.Wind, P);
+                    BodySum += VolumetricMedia::LocalDensity(Sky.LocalCloud, Sky.Wind, P, NoSwirl, 0.0f, false);
                     ++BodyN;
                 }
         const double BodyMean = BodySum / BodyN;
@@ -1068,7 +1070,11 @@ int main()
         //    floored against a march that goes black (which would also halve, to zero).
         std::snprintf(Detail, sizeof(Detail), "cloudy/clear ratio %.2f at %.2f LSB", NightCloudy / NightClear,
                       NightCloudy);
-        Require("night clouds veil the airglow", NightCloudy < NightClear * 0.75 && NightCloudy > 0.01, Detail);
+        // P2.4a re-pin (was 0.75): the ported field veils less than the old S-curved placeholder (ratio
+        // 0.68 at P2.3, 0.80 now — a 0.02-LSB move on sub-LSB dust, 0 pixels change either way). P2.4b's phase
+        // and powder will move the night brightness again; the band only guards against vanished or pitch
+        // night clouds, not the reference field's own covering power.
+        Require("night clouds veil the airglow", NightCloudy < NightClear * 0.85 && NightCloudy > 0.01, Detail);
         std::snprintf(Detail, sizeof(Detail), "mean box density %.3f at 11h (a ghost reads ~0.09)", BodyMean);
         Require("the parked box holds real body at 11h", BodyMean > 0.30, Detail);
     }

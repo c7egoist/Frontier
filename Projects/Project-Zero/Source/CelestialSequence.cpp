@@ -361,7 +361,7 @@ void CelestialSequence::Tick(float DeltaSeconds, const float Camera[3], float Gr
     PrecipitationSettings Active = Precip;
     Active.Enabled = Falling;
     Rain.Step(Active, Shown[static_cast<uint32_t>(CelestialEntity::CloudLayer)] ? Cloud : CloudLayerSettings{},
-              Wind, Camera, DeltaSeconds, Observation.LocalHours * 3600.0f, GroundHeight);
+              Wind, Camera, DeltaSeconds, Observation.LocalHours * 3600.0f, GroundHeight, WallSeconds_);
 }
 
 //------------------------------------------------------------------------------------------------------------------------

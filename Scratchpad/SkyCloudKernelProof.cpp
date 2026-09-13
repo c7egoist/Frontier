@@ -85,8 +85,8 @@ float TwinHeightProfile(const SkyConstantRecord& K, uint32_t Type, float Normali
     if (Type == 2u) return TwinSmoothstep(0.0f, 0.07f, H)*(1.0f-TwinSmoothstep(0.35f, 1.0f, H))*1.15f;
     if (Type == 3u) return TwinSmoothstep(0.0f, 0.05f, H)*(1.0f-TwinSmoothstep(0.85f, 1.0f, H))
                         * (1.0f+(1.6f-1.0f)*(TwinSmoothstep(0.7f, 1.0f, H)*K.CloudShape[2]));
-    if (Type == 4u) return TwinSmoothstep(0.0f, 0.20f, H)*(1.0f-TwinSmoothstep(0.55f, 0.9f, H))*0.75f;
-    return TwinSmoothstep(0.0f, 0.25f, H)*(1.0f-TwinSmoothstep(0.4f, 0.85f, H))*0.45f;
+    if (Type == 4u) return TwinSmoothstep(0.0f, 0.3f, H)*(1.0f-TwinSmoothstep(0.6f, 1.0f, H))*0.7f;
+    return TwinSmoothstep(0.0f, 0.4f, H)*(1.0f-TwinSmoothstep(0.5f, 1.0f, H))*0.35f;
 }
 void TwinWindAt(const SkyConstantRecord& K, float Altitude, float Out[3])
 {
@@ -104,15 +104,57 @@ void TwinDriftAt(const SkyConstantRecord& K, float Altitude, float ArtFactor, fl
     Out[0] = K.CloudClock[0]*Factor*ArtFactor;
     Out[1] = K.CloudClock[1]*Factor*ArtFactor;
 }
-float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3])
+float TwinLocalProfile(uint32_t Type, float Normalised)
+{
+    float H = Normalised < 0.0f ? 0.0f : (Normalised > 1.0f ? 1.0f : Normalised);
+    if (Type == 0u) return TwinSmoothstep(0.0f, 0.1f, H)*(1.0f-TwinSmoothstep(0.75f, 1.0f, H));
+    if (Type == 1u) return TwinSmoothstep(0.0f, 0.08f, H)*(1.0f-TwinSmoothstep(0.4f, 1.0f, H))*1.15f;
+    return TwinSmoothstep(0.0f, 0.3f, H)*(1.0f-TwinSmoothstep(0.6f, 1.0f, H))*0.6f;
+}
+float TwinLocalMask(uint32_t Shape, float Soft, const float Local[3])
+{
+    float M;
+    if (Shape == 0u)
+    {
+        float Mx = 1.0f-std::fabs(Local[0]);
+        float My = 1.0f-std::fabs(Local[1]);
+        float Mz = 1.0f-std::fabs(Local[2]);
+        M = std::fmin(std::fmin(Mx, My), Mz);
+    }
+    else
+    {
+        M = 1.0f-std::sqrt(Local[0]*Local[0]+Local[1]*Local[1]+Local[2]*Local[2]);
+    }
+    return TwinSmoothstep(0.0f, std::fmax(0.05f, Soft), M);
+}
+// The kernel's per-pixel swirl (REF windSwirl = windTurb x 8), transcribed: the same op order as
+// WindField::SampleSwirl (which the proof checks bit-for-bit), times eight like the reference.
+void TwinSwirlAt(const SkyConstantRecord& K, const float P[3], float T, float Out[3])
+{
+    Out[0] = Out[1] = Out[2] = 0.0f;
+    if (K.CloudClock[3] <= 0.0f) return;
+    float Q[3] = { P[0]*0.02f + T*0.05f, P[1]*0.02f + T*0.03f, P[2]*0.02f };
+    constexpr float E = 0.5f;
+    float Qpx[3] = { Q[0]+E, Q[1], Q[2] }, Qmx[3] = { Q[0]-E, Q[1], Q[2] };
+    float Qpy[3] = { Q[0], Q[1]+E, Q[2] }, Qmy[3] = { Q[0], Q[1]-E, Q[2] };
+    float Qpz[3] = { Q[0], Q[1], Q[2]+E }, Qmz[3] = { Q[0], Q[1], Q[2]-E };
+    float Dx = TwinNoise(Qpx)-TwinNoise(Qmx);
+    float Dy = TwinNoise(Qpy)-TwinNoise(Qmy);
+    float Dz = TwinNoise(Qpz)-TwinNoise(Qmz);
+    float Scale = K.CloudClock[3]*K.CloudWind[0]*0.9f;
+    Out[0] = (Dz-Dy)*Scale; Out[1] = (Dx-Dz)*Scale; Out[2] = (Dy-Dx)*Scale;
+    Out[0] *= 8.0f; Out[1] *= 8.0f; Out[2] *= 8.0f;
+}
+float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3], float Time, float Lod)
 {
     float Ceiling = std::fmax(K.CloudShape[1], 0.0f);
     float Base = K.CloudLayer[0] < 0.0f ? 0.0f : (K.CloudLayer[0] > Ceiling ? Ceiling : K.CloudLayer[0]);
     float TopEnd = K.CloudLayer[0]+K.CloudLayer[1];
     float Top = TopEnd < 0.0f ? 0.0f : (TopEnd > Ceiling ? Ceiling : TopEnd);
     if (Position[2] < Base || Position[2] > Top || Top <= Base+1.0f) return 0.0f;
-    float H = (Position[2]-Base)/(Top-Base);
-    float Profile = TwinHeightProfile(K, K.Control[3], H);
+    float Hn = (Position[2]-Base)/(Top-Base);
+    Hn = Hn < 0.0f ? 0.0f : (Hn > 1.0f ? 1.0f : Hn);
+    float Profile = TwinHeightProfile(K, K.Control[3], Hn);
     if (Profile <= 0.0f) return 0.0f;
     float Drift[3] = { 0.0f, 0.0f, 0.0f };
     if ((K.Control[2] & kTwinFollowWindFlag) != 0u)
@@ -121,19 +163,42 @@ float TwinCloudDensityAt(const SkyConstantRecord& K, const float Position[3])
         TwinDriftAt(K, Position[2], 0.8f, Advected);
         Drift[0] = Advected[0]; Drift[1] = Advected[1];
     }
+    float LeanFactor = K.Control[3] >= 3u ? K.CloudShape[2] : 0.2f;
+    float DriftLen = std::sqrt(Drift[0]*Drift[0]+Drift[1]*Drift[1]);
+    float LeanGuard = std::fmax(1e-3f, DriftLen+1e-3f);
+    float LeanReach = Hn*(Top-Base)*0.35f*LeanFactor;
+    float S0 = Position[0]+Drift[0]+LeanReach*Drift[0]/LeanGuard;
+    float S1 = Position[1]+Drift[1]+LeanReach*Drift[1]/LeanGuard;
     float Inverse = 1.0f/std::fmax(K.CloudShape[0]*900.0f, 1.0f);
-    float S[3] = { (Position[0]+Drift[0])*Inverse, (Position[1]+Drift[1])*Inverse, Position[2]*Inverse };
+    float S[3] = { S0*Inverse, S1*Inverse, Position[2]*Inverse };
     float Q1[3] = { S[0]*2.02f+3.1f, S[1]*2.02f+1.7f, S[2]*2.02f+9.2f };
     float Q2[3] = { S[0]*4.10f+7.7f, S[1]*4.10f+2.2f, S[2]*4.10f+1.1f };
-    float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f + TwinNoise(Q2)*0.125f;
-    Shape /= 0.875f;
+    float Q3[3] = { S[0]*8.3f+1.3f, S[1]*8.3f+8.8f, S[2]*8.3f+4.4f };
+    float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f + TwinNoise(Q2)*0.125f + TwinNoise(Q3)*0.0625f;
+    Shape /= 0.9375f;
+    if (K.Control[3] == 5u)
+    {
+        float Streak[3] = { S[0]*0.25f, S[1]*6.0f, S[2]*4.0f };
+        Shape = Shape*0.6f + TwinNoise(Streak)*0.5f;
+    }
     float Coverage = K.CloudLayer[2] < 0.0f ? 0.0f : (K.CloudLayer[2] > 1.0f ? 1.0f : K.CloudLayer[2]);
     float Threshold = 1.0f-Coverage;
-    float Raw = (Shape-Threshold)/std::fmax(1.0f-Threshold, 1e-3f);
-    Raw = Raw < 0.0f ? 0.0f : (Raw > 1.0f ? 1.0f : Raw);
-    return TwinSmoothstep(0.0f, 1.0f, Raw)*Profile*std::fmax(K.CloudLayer[3], 0.0f);
+    float Body = (Shape-Threshold)/std::fmax(1.0f-Threshold, 1e-3f);
+    Body = Body < 0.0f ? 0.0f : (Body > 1.0f ? 1.0f : Body);
+    Body *= Profile;
+    if (Body <= 0.0f || Lod > 0.5f) return Body*std::fmax(K.CloudLayer[3], 0.0f);
+    float TimeShift = Time*0.02f;
+    float E1[3] = { S[0]*9.0f+TimeShift, S[1]*9.0f+TimeShift, S[2]*9.0f+TimeShift };
+    float E2[3] = { S[0]*19.0f+5.0f, S[1]*19.0f+5.0f, S[2]*19.0f+5.0f };
+    float Detail = TwinNoise(E1)*0.6f + TwinNoise(E2)*0.4f;
+    float MixT = Hn*3.0f; MixT = MixT < 0.0f ? 0.0f : (MixT > 1.0f ? 1.0f : MixT);
+    float Erode = (Detail+(1.0f-Detail-Detail)*MixT)*K.CloudDetail[2]*0.45f;
+    float Carved = Body-Erode*(1.0f-Body);
+    Carved = Carved < 0.0f ? 0.0f : (Carved > 1.0f ? 1.0f : Carved);
+    return Carved*std::fmax(K.CloudLayer[3], 0.0f);
 }
-float TwinLocalDensityAt(const SkyConstantRecord& K, const float Position[3], bool Fog)
+float TwinLocalDensityAt(const SkyConstantRecord& K, const float Position[3], bool Fog,
+                         const float Swirl[3], float Lod)
 {
     if (Fog)
     {
@@ -146,29 +211,72 @@ float TwinLocalDensityAt(const SkyConstantRecord& K, const float Position[3], bo
     float Local[3] = { (Position[0]-Centre[0])/std::fmax(HalfSize[0], 1e-3f),
                        (Position[1]-Centre[1])/std::fmax(HalfSize[1], 1e-3f),
                        (Position[2]-Centre[2])/std::fmax(HalfSize[2], 1e-3f) };
-    float R = std::sqrt(Local[0]*Local[0]+Local[1]*Local[1]+Local[2]*Local[2]);
-    if (R >= 1.0f) return 0.0f;
-    float Mask = 1.0f-TwinSmoothstep(0.55f, 1.0f, R);
+    if (Fog)
+    {
+        float R = std::sqrt(Local[0]*Local[0]+Local[1]*Local[1]+Local[2]*Local[2]);
+        if (R >= 1.0f) return 0.0f;
+        float Mask = 1.0f-TwinSmoothstep(0.55f, 1.0f, R);
+        if (Mask <= 0.0f) return 0.0f;
+        float Drift[3] = { 0.0f, 0.0f, 0.0f };
+        if ((K.Control[2] & kTwinFogWindFlag) != 0u)
+        {
+            float Advected[2];
+            TwinDriftAt(K, Position[2], 0.6f, Advected);
+            Drift[0] = Advected[0]; Drift[1] = Advected[1];
+        }
+        float Inverse = 1.0f/std::fmax(Params[2], 1.0f);
+        float S[3] = { (Position[0]+Drift[0])*Inverse, (Position[1]+Drift[1])*Inverse,
+                       (Position[2]+Drift[2])*Inverse };
+        float Q1[3] = { S[0]*2.02f+3.1f, S[1]*2.02f+1.7f, S[2]*2.02f+9.2f };
+        float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f;
+        Shape /= 0.75f;
+        float Coverage = Params[1] < 0.0f ? 0.0f : (Params[1] > 1.0f ? 1.0f : Params[1]);
+        float Threshold = 1.0f-Coverage;
+        float Raw = (Shape-Threshold)/std::fmax(1.0f-Threshold, 1e-3f);
+        Raw = Raw < 0.0f ? 0.0f : (Raw > 1.0f ? 1.0f : Raw);
+        return TwinSmoothstep(0.0f, 1.0f, Raw)*Mask*std::fmax(Params[0], 0.0f);
+    }
+    uint32_t LocalPack = K.CloudControl[3];
+    uint32_t LocalType = LocalPack & 3u;
+    uint32_t LocalShape = (LocalPack >> 2u) & 1u;
+    float LocalSoft = float((LocalPack >> 8u) & 255u)/255.0f;
+    float Hn = Local[2]*0.5f+0.5f;
+    Hn = Hn < 0.0f ? 0.0f : (Hn > 1.0f ? 1.0f : Hn);
+    float Profile = TwinLocalProfile(LocalType, Hn);
+    if (Profile <= 0.0f) return 0.0f;
+    float Mask = TwinLocalMask(LocalShape, LocalSoft, Local);
     if (Mask <= 0.0f) return 0.0f;
-    uint32_t WindFlag = Fog ? kTwinFogWindFlag : kTwinBoxWindFlag;
-    float Drift[3] = { 0.0f, 0.0f, 0.0f };
-    if ((K.Control[2] & WindFlag) != 0u)
+    float Push[3] = { 0.0f, 0.0f, 0.0f };
+    if ((K.Control[2] & kTwinBoxWindFlag) != 0u)
     {
         float Advected[2];
         TwinDriftAt(K, Position[2], 0.6f, Advected);
-        Drift[0] = Advected[0]; Drift[1] = Advected[1];
+        Push[0] = Advected[0]+Swirl[0]*0.6f;
+        Push[1] = Advected[1]+Swirl[1]*0.6f;
+        Push[2] = Swirl[2]*0.6f;
     }
     float Inverse = 1.0f/std::fmax(Params[2], 1.0f);
-    float S[3] = { (Position[0]+Drift[0])*Inverse, (Position[1]+Drift[1])*Inverse,
-                   (Position[2]+Drift[2])*Inverse };
+    float S[3] = { (Position[0]+Push[0])*Inverse, (Position[1]+Push[1])*Inverse,
+                   (Position[2]+Push[2])*Inverse };
     float Q1[3] = { S[0]*2.02f+3.1f, S[1]*2.02f+1.7f, S[2]*2.02f+9.2f };
-    float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f;
-    Shape /= 0.75f;
+    float Q2[3] = { S[0]*4.10f+7.7f, S[1]*4.10f+2.2f, S[2]*4.10f+1.1f };
+    float Q3[3] = { S[0]*8.3f+1.3f, S[1]*8.3f+8.8f, S[2]*8.3f+4.4f };
+    float Shape = TwinNoise(S)*0.5f + TwinNoise(Q1)*0.25f + TwinNoise(Q2)*0.125f + TwinNoise(Q3)*0.0625f;
+    Shape /= 0.9375f;
     float Coverage = Params[1] < 0.0f ? 0.0f : (Params[1] > 1.0f ? 1.0f : Params[1]);
     float Threshold = 1.0f-Coverage;
-    float Raw = (Shape-Threshold)/std::fmax(1.0f-Threshold, 1e-3f);
-    Raw = Raw < 0.0f ? 0.0f : (Raw > 1.0f ? 1.0f : Raw);
-    return TwinSmoothstep(0.0f, 1.0f, Raw)*Mask*std::fmax(Params[0], 0.0f);
+    float Body = (Shape-Threshold)/std::fmax(1.0f-Threshold, 1e-3f);
+    Body = Body < 0.0f ? 0.0f : (Body > 1.0f ? 1.0f : Body);
+    Body *= Profile*Mask;
+    if (Body <= 0.0f || Lod > 0.5f) return Body*std::fmax(Params[0], 0.0f);
+    float E1[3] = { S[0]*9.0f, S[1]*9.0f, S[2]*9.0f };
+    float E2[3] = { S[0]*19.0f+5.0f, S[1]*19.0f+5.0f, S[2]*19.0f+5.0f };
+    float Detail = TwinNoise(E1)*0.6f + TwinNoise(E2)*0.4f;
+    float MixT = Hn*3.0f; MixT = MixT < 0.0f ? 0.0f : (MixT > 1.0f ? 1.0f : MixT);
+    float Erode = (Detail+(1.0f-Detail-Detail)*MixT)*K.CloudDetail[3]*0.45f;
+    float Carved = Body-Erode*(1.0f-Body);
+    Carved = Carved < 0.0f ? 0.0f : (Carved > 1.0f ? 1.0f : Carved);
+    return Carved*std::fmax(Params[0], 0.0f);
 }
 // The kernel's far-cap law, transcribed: above the slab max(60 km, thick x 40), else thick x 14.
 float TwinSlabFarCap(float OriginZ, float Base, float Top)
@@ -221,30 +329,33 @@ bool TwinBoxInterval(const float Origin[3], const float Direction[3], const floa
     return Far > Near;
 }
 float TwinShadowMedium(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
-                       uint32_t Medium, uint32_t Taps)
+                       uint32_t Medium, uint32_t Taps, const float Swirl[3])
 {
     float StepSize = Medium == 0u ? 4000.0f/std::fmax(float(K.CloudControl[0] ? K.CloudControl[0] : 1u), 1.0f)
                    : std::fmax((Medium == 1u ? K.LocalCloudParams[2] : K.LocalFogParams[2])*0.5f, 1.0f);
     uint32_t Count = Taps ? Taps : 1u;
     float Depth = 0.0f;
+    float Time = K.CloudClock[2];
     for (uint32_t I = 1u; I <= Count; ++I)
     {
         float Distance = StepSize*float(I)*0.5f;
         float Q[3] = { Origin[0]+Direction[0]*Distance, Origin[1]+Direction[1]*Distance,
                        Origin[2]+Direction[2]*Distance };
-        float D = Medium == 0u ? TwinCloudDensityAt(K, Q) : TwinLocalDensityAt(K, Q, Medium == 2u);
+        float D = Medium == 0u ? TwinCloudDensityAt(K, Q, Time, I > 2u ? 1.0f : 0.0f)
+                : TwinLocalDensityAt(K, Q, Medium == 2u, Swirl, 1.0f);
         Depth += D*StepSize*0.5f*kTwinExtinction;
         if (Depth > 4.0f) break;
     }
     return std::exp(-Depth);
 }
-float TwinSunTransmittance(const SkyConstantRecord& K, const float Origin[3], const float Direction[3])
+float TwinSunTransmittance(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
+                           const float Swirl[3])
 {
     uint32_t Taps = K.CloudControl[2] ? K.CloudControl[2] : 1u;
     float Result = 1.0f;
-    if ((K.Control[2] & kTwinLayerFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 0u, Taps);
-    if ((K.Control[2] & kTwinLocalCloudFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 1u, Taps);
-    if ((K.Control[2] & kTwinLocalFogFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 2u, Taps);
+    if ((K.Control[2] & kTwinLayerFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 0u, Taps, Swirl);
+    if ((K.Control[2] & kTwinLocalCloudFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 1u, Taps, Swirl);
+    if ((K.Control[2] & kTwinLocalFogFlag) != 0u) Result *= TwinShadowMedium(K, Origin, Direction, 2u, Taps, Swirl);
     return Result;
 }
 float TwinPhase(float Mu, float G)
@@ -256,7 +367,7 @@ float TwinPhase(float Mu, float G)
 void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const float Direction[3],
                      float Near, float Far, uint32_t Medium, const float SunDirection[3],
                      const float SunRadiance[3], const float Ambient[3],
-                     float OutScatter[3], float& OutT)
+                     float OutScatter[3], float& OutT, const float Swirl[3])
 {
     OutScatter[0]=OutScatter[1]=OutScatter[2]=0.0f; OutT = 1.0f;
     float Span = Far-Near;
@@ -270,7 +381,9 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
     uint32_t Cap = Medium == 0u ? (Budget*4u > 4u ? Budget*4u : 4u) : Budget;
     if (Count > Cap) Count = Cap;
     float Step = Span/float(Count);
-    float Jitter = Medium == 0u ? TwinMarchJitter(Direction, K.CloudAlbedo[3]) : 0.5f;
+    float Lod = Medium == 0u ? TwinSmoothstep(20000.0f, 200000.0f, Near) : 0.0f;
+    float Time = K.CloudClock[2];
+    float Jitter = Medium == 0u ? TwinMarchJitter(Direction, Time) : 0.5f;
     float G = Medium == 0u ? K.CloudShape[3]
             : (Medium == 1u ? K.LocalCloudParams[3] : K.LocalFogParams[3]);
     float Mu = Direction[0]*SunDirection[0]+Direction[1]*SunDirection[1]+Direction[2]*SunDirection[2];
@@ -285,9 +398,10 @@ void TwinMarchMedium(const SkyConstantRecord& K, const float Origin[3], const fl
     {
         float Tm = Near + (float(I)+Jitter)*Step;
         float P[3] = { Origin[0]+Direction[0]*Tm, Origin[1]+Direction[1]*Tm, Origin[2]+Direction[2]*Tm };
-        float Density = Medium == 0u ? TwinCloudDensityAt(K, P) : TwinLocalDensityAt(K, P, Medium == 2u);
+        float Density = Medium == 0u ? TwinCloudDensityAt(K, P, Time, Lod)
+                      : TwinLocalDensityAt(K, P, Medium == 2u, Swirl, 0.0f);
         if (Density <= 1e-5f) continue;
-        float SunT = TwinSunTransmittance(K, P, SunDirection);
+        float SunT = TwinSunTransmittance(K, P, SunDirection, Swirl);
         float Extinction = Density*Step*kTwinExtinction;
         float SegmentT = std::exp(-Extinction);
         float Incoming[3] = { SunRadiance[0]*SunT*Phase+Ambient[0],
@@ -306,11 +420,18 @@ void TwinCloudAlong(const SkyConstantRecord& K, const float Origin[3], const flo
 {
     OutScatter[0]=OutScatter[1]=OutScatter[2]=0.0f; OutT = 1.0f;
     float Near, Far;
+    float PixelSwirl[3] = { 0.0f, 0.0f, 0.0f };
+    if (K.CloudClock[3] > 0.0f && (K.Control[2] & kTwinBoxWindFlag) != 0u)
+    {
+        float At[3] = { Origin[0]+Direction[0]*30.0f, Origin[1]+Direction[1]*30.0f,
+                        Origin[2]+Direction[2]*30.0f };
+        TwinSwirlAt(K, At, K.CloudClock[2], PixelSwirl);
+    }
     if ((K.Control[2] & kTwinLayerFlag) != 0u &&
         TwinSlabInterval(K, Origin, Direction, Maximum, Near, Far))
     {
         float S[3]; float T;
-        TwinMarchMedium(K, Origin, Direction, Near, Far, 0u, SunDirection, SunRadiance, Ambient, S, T);
+        TwinMarchMedium(K, Origin, Direction, Near, Far, 0u, SunDirection, SunRadiance, Ambient, S, T, PixelSwirl);
         for (int C = 0; C < 3; ++C) OutScatter[C] += S[C]*OutT;
         OutT *= T;
     }
@@ -318,7 +439,7 @@ void TwinCloudAlong(const SkyConstantRecord& K, const float Origin[3], const flo
         TwinBoxInterval(Origin, Direction, K.LocalCloudCentre, K.LocalCloudHalfSize, Maximum, Near, Far))
     {
         float S[3]; float T;
-        TwinMarchMedium(K, Origin, Direction, Near, Far, 1u, SunDirection, SunRadiance, Ambient, S, T);
+        TwinMarchMedium(K, Origin, Direction, Near, Far, 1u, SunDirection, SunRadiance, Ambient, S, T, PixelSwirl);
         for (int C = 0; C < 3; ++C) OutScatter[C] += S[C]*OutT;
         OutT *= T;
     }
@@ -326,7 +447,7 @@ void TwinCloudAlong(const SkyConstantRecord& K, const float Origin[3], const flo
         TwinBoxInterval(Origin, Direction, K.LocalFogCentre, K.LocalFogHalfSize, Maximum, Near, Far))
     {
         float S[3]; float T;
-        TwinMarchMedium(K, Origin, Direction, Near, Far, 2u, SunDirection, SunRadiance, Ambient, S, T);
+        TwinMarchMedium(K, Origin, Direction, Near, Far, 2u, SunDirection, SunRadiance, Ambient, S, T, PixelSwirl);
         for (int C = 0; C < 3; ++C) OutScatter[C] += S[C]*OutT;
         OutT *= T;
     }
@@ -626,6 +747,46 @@ int main()
         Expect(LateDy < 0.06f, "+2h kernel render: elevation residual stays coherent");
         Expect(LateDy < 1.6f*LateDx + 0.01f, "+2h kernel render: no directional streak signature");
         Expect(LateMean > 0.15f && LateMean < 0.85f, "+2h kernel render: mean luminance sane");
+    }
+
+    // 4 ─ the clock's fraction re-rolls the march jitter: the same record seeded at fractional wall 0.25
+    //    and 0.75 must shade DIFFERENT cloud columns (a frozen seed would repeat the banding exactly), and
+    //    the twin's swirl helper must agree with the engine's SampleSwirl bit-for-bit.
+    {
+        SkyConstantRecord A = Sky.PackSkyRecord();
+        SkyConstantRecord B = A;
+        A.CloudClock[2] = 100.25f; B.CloudClock[2] = 100.75f;
+        const float Up[3] = { 0.0f, 0.0f, 1.0f };
+        float JA = TwinMarchJitter(Up, A.CloudClock[2]);
+        float JB = TwinMarchJitter(Up, B.CloudClock[2]);
+        std::printf("  jitter re-roll: j(100.25)=%.5f j(100.75)=%.5f\n", JA, JB);
+        Expect(JA != JB, "fractional wall seconds re-roll the jitter (or the seed is frozen)");
+        Expect(JA >= 0.0f && JA <= 1.0f && JB >= 0.0f && JB <= 1.0f, "both jitter draws stay in [0,1]");
+        float SwirlA[3], SwirlB[3];
+        const float At[3] = { 120.0f, -340.0f, 1600.0f };
+        TwinSwirlAt(A, At, A.CloudClock[2], SwirlA);
+        TwinSwirlAt(B, At, B.CloudClock[2], SwirlB);
+        Expect(SwirlA[0] != SwirlB[0] || SwirlA[1] != SwirlB[1] || SwirlA[2] != SwirlB[2],
+               "the swirl stirs with the clock (or time is decorative)");
+
+        // Bit-exactness against the engine: with steadiness 1.0 the strength lane collapses to the
+        // turbulence itself, the twin's noise transcribes the engine's hash op-for-op, and the reference's
+        // x8 over the raw curl divides back out exactly — so twin/8 IS the engine swirl, bit for bit.
+        WindSettings Calm{};
+        Calm.Turbulence = 0.35f; Calm.Steadiness = 1.0f; Calm.Speed = 6.0f;
+        SkyConstantRecord KC{};
+        KC.CloudClock[3] = 0.35f; KC.CloudWind[0] = 6.0f;
+        float Eng[3], Twn[3];
+        WindField::SampleSwirl(Calm, At, 100.25f, Eng);
+        TwinSwirlAt(KC, At, 100.25f, Twn);
+        Expect(Twn[0] / 8.0f == Eng[0] && Twn[1] / 8.0f == Eng[1] && Twn[2] / 8.0f == Eng[2],
+               "twin swirl / 8 is the engine swirl bit-for-bit");
+        Calm.Turbulence = 0.0f; KC.CloudClock[3] = 0.0f;
+        WindField::SampleSwirl(Calm, At, 100.25f, Eng);
+        TwinSwirlAt(KC, At, 100.25f, Twn);
+        Expect(Eng[0] == 0.0f && Eng[1] == 0.0f && Eng[2] == 0.0f
+            && Twn[0] == 0.0f && Twn[1] == 0.0f && Twn[2] == 0.0f,
+               "zero turbulence stills both swirls exactly");
     }
 
     if (Failures == 0) std::printf("[SkyCloudKernel] OK\n");

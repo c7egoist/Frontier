@@ -90,6 +90,16 @@ struct CloudLayerSettings
 //    These are the entities that need a gizmo and a billboard marker. A global cloud layer has no position to
 //    drag; a local volume does, and it has no visible body to click on when its density is low — so the editor
 //    needs a proxy. See VolumeMarker below.
+enum class LocalCloudType : uint32_t
+{
+    Stratiform = 0u, Cumuliform = 1u, Wispy = 2u,   // REF lc_type (the vertical profile it bakes with)
+};
+
+enum class LocalCloudShape : uint32_t
+{
+    Box = 0u, Ellipsoid = 1u,                        // REF lc_shape (the mask it fades with)
+};
+
 struct LocalVolumeSettings
 {
     bool  Enabled  = false;
@@ -98,6 +108,9 @@ struct LocalVolumeSettings
     float Density   = 1.2f;
     float Coverage  = 0.6f;
     float Scale     = 30.0f;    // [m] feature size
+    LocalCloudType  Type  = LocalCloudType::Cumuliform;   // REF lc_type (cloud path only; the fog ignores it)
+    LocalCloudShape Shape = LocalCloudShape::Ellipsoid;   // REF lc_shape (likewise)
+    float Soft      = 0.5f;      // [0..1] REF lc_soft: the mask's edge width (likewise)
     float Albedo[3] = { 0.92f, 0.94f, 0.97f };
     float Anisotropy = 0.45f;    // Henyey-Greenstein g
     bool  FollowWind = true;
@@ -172,11 +185,48 @@ public:
                 return SmoothStep(0.0f, 0.05f, H) * (1.0f - SmoothStep(0.85f, 1.0f, H))
                      * Lerp(1.0f, 1.6f, SmoothStep(0.7f, 1.0f, H) * Anvil);
             case CloudTypeCategory::Altostratus:
-                return SmoothStep(0.0f, 0.20f, H) * (1.0f - SmoothStep(0.55f, 0.9f, H)) * 0.75f;
+                return SmoothStep(0.0f, 0.30f, H) * (1.0f - SmoothStep(0.6f, 1.0f, H)) * 0.7f;
             case CloudTypeCategory::Cirrus:
             default:
-                return SmoothStep(0.0f, 0.25f, H) * (1.0f - SmoothStep(0.4f, 0.85f, H)) * 0.45f;
+                return SmoothStep(0.0f, 0.40f, H) * (1.0f - SmoothStep(0.5f, 1.0f, H)) * 0.35f;
         }
+    }
+
+    // The local cloud's vertical profile (REF lcDensity's three-way on the box height): stratiform a flat
+    //    sheet, cumuliform a tall core, wispy a thin mid band.
+    static float LocalHeightProfile(LocalCloudType Type, float Normalised) noexcept
+    {
+        const float H = Clamp(Normalised, 0.0f, 1.0f);
+        switch (Type)
+        {
+            case LocalCloudType::Stratiform:
+                return SmoothStep(0.0f, 0.10f, H) * (1.0f - SmoothStep(0.75f, 1.0f, H));
+            case LocalCloudType::Cumuliform:
+                return SmoothStep(0.0f, 0.08f, H) * (1.0f - SmoothStep(0.4f, 1.0f, H)) * 1.15f;
+            case LocalCloudType::Wispy:
+            default:
+                return SmoothStep(0.0f, 0.30f, H) * (1.0f - SmoothStep(0.6f, 1.0f, H)) * 0.6f;
+        }
+    }
+
+    // The local cloud's mask (REF lcMask): a box fades on its thinnest margin, an ellipsoid on its radius,
+    //    over the softness width. Local is the box-normalised position (-1..1); corners of a box stay visible
+    //    (margin 0.1 fades, it does not clip), which is why the cloud path has no radius early-out.
+    static float LocalCloudMask(LocalCloudShape Shape, float Soft, const float Local[3]) noexcept
+    {
+        float M = 0.0f;
+        if (Shape == LocalCloudShape::Box)
+        {
+            const float Mx = 1.0f - std::fabs(Local[0]);
+            const float My = 1.0f - std::fabs(Local[1]);
+            const float Mz = 1.0f - std::fabs(Local[2]);
+            M = std::fmin(std::fmin(Mx, My), Mz);
+        }
+        else
+        {
+            M = 1.0f - std::sqrt(Local[0]*Local[0] + Local[1]*Local[1] + Local[2]*Local[2]);
+        }
+        return SmoothStep(0.0f, std::fmax(0.05f, Soft), M);
     }
 
     // The slab's actual extent after the ceiling is applied. Returns false when the layer has been pushed
@@ -202,8 +252,10 @@ public:
     }
 
     // Cloud density at a world point. Z-up: altitude is p.z.
+    // Cloud density at a world point. Z-up: altitude is p.z. Time is wall-clock seconds (the erosion octave
+    //    drifts with it); Lod is the march's distance level (past 0.5 the erosion is skipped, see March).
     static float CloudDensity(const CloudLayerSettings& Cloud, const WindSettings& Wind,
-                              const float Position[3]) noexcept
+                              const float Position[3], float Time, float Lod) noexcept
     {
         float Base = 0.0f, Top = 0.0f;
         if (!SlabExtent(Cloud, Base, Top)) return 0.0f;
@@ -211,14 +263,16 @@ public:
         const float Altitude = Position[2];
         if (Altitude < Base || Altitude > Top) return 0.0f;
 
-        const float Normalised = (Altitude - Base) / (Top - Base);
-        const float Profile = HeightProfile(Cloud.Type, Normalised, Cloud.Anvil);
+        const float Hn = Clamp((Altitude - Base) / (Top - Base), 0.0f, 1.0f);
+        const float Profile = HeightProfile(Cloud.Type, Hn, Cloud.Anvil);
         if (Profile <= 0.0f) return 0.0f;
 
         // Advection, the wind integral times the altitude factor (WindField::AdvectDrift — the streak note
         //    lives there): the whole slab rides Tick's wall-clock accumulation, never time-of-day. Trig-only,
         //    so it stays safe inside the march like the SampleStep it replaces — and SampleStep-only, the
         //    swirl still belongs once per pixel (the regression the source branch's last commit fixed).
+        //    Unlinked the slab sits still: the reference drifts it on its own wind and clock, but that needs
+        //    lanes the record does not have yet (P8's growth), so unlinked is static and the proof pins it.
         float Drift[3] = { 0.0f, 0.0f, 0.0f };
         if (Cloud.FollowWind)
         {
@@ -227,29 +281,57 @@ public:
             Drift[0] = Advected[0]; Drift[1] = Advected[1];
         }
 
-        const float Inverse = 1.0f / std::fmax(Cloud.Scale * 900.0f, 1.0f);
-        const float S[3] = { (Position[0] + Drift[0]) * Inverse,
-                             (Position[1] + Drift[1]) * Inverse,
-                             Position[2] * Inverse };
+        // The shear leans the column downwind (REF clDensity): hn * thick * .35 along the drift direction,
+        // full anvil spread on cumulonimbus and above, a fifth of that on the lower types. The lean follows
+        // the drift rather than the linkage, so P8's unlinked drift will lean with no further change — and
+        // at a zero integral the guarded normalisation is exactly zero, so the rest state stands straight.
+        const uint32_t TypeId = static_cast<uint32_t>(Cloud.Type);
+        const float LeanFactor = (TypeId >= 3u ? Cloud.Anvil : 0.2f);
+        const float DriftLen = std::sqrt(Drift[0]*Drift[0] + Drift[1]*Drift[1]);
+        const float LeanGuard = std::fmax(1e-3f, DriftLen + 1e-3f);
+        const float LeanReach = Hn * (Top - Base) * 0.35f * LeanFactor;
+        const float S0 = Position[0] + Drift[0] + LeanReach * Drift[0] / LeanGuard;
+        const float S1 = Position[1] + Drift[1] + LeanReach * Drift[1] / LeanGuard;
 
-        // Three octaves, not four: the march steps at ~143 m and the fourth octave's 38 m features alias
-        //    into long moire streaks (measured — the 11h layer smeared horizontally with hard smoothstepped
-        //    edges). What the steps cannot resolve must not be in the field; the lost detail lives below the
-        //    sampling floor anyway.
+        const float Inverse = 1.0f / std::fmax(Cloud.Scale * 900.0f, 1.0f);
+        const float S[3] = { S0 * Inverse, S1 * Inverse, Position[2] * Inverse };
+
+        // Four octaves (REF shape): the lost fourth comes back with the erosion that needs it — the moire
+        // the old note measured was the sharpened remap under the sin-hash field, both gone now (P2.1 took
+        // the hash, this slice takes the sharpening), and the jittered march breaks what aliasing is left
+        // into incoherent grain, which is what the reference's own coarse steps do.
         float Shape = Noise(S[0], S[1], S[2]) * 0.5f
                     + Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f) * 0.25f
-                    + Noise(S[0] * 4.10f + 7.7f, S[1] * 4.10f + 2.2f, S[2] * 4.10f + 1.1f) * 0.125f;
-        Shape /= 0.875f;   // Noise is [0,1] (reference vnoise), so the shape already spans the remap
+                    + Noise(S[0] * 4.10f + 7.7f, S[1] * 4.10f + 2.2f, S[2] * 4.10f + 1.1f) * 0.125f
+                    + Noise(S[0] * 8.3f + 1.3f, S[1] * 8.3f + 8.8f, S[2] * 8.3f + 4.4f) * 0.0625f;
+        Shape /= 0.9375f;
 
+        // Cirrus streaks (REF): only the top type stretches its sample — wide along x, pinched along the
+        // other two axes. Axis-permuted: the reference reads (x*.25, y*4, z*6) Y-up with y vertical, and
+        // here z is vertical, so the x4 pinch rides S[2] and the x6 rides S[1].
+        if (Cloud.Type == CloudTypeCategory::Cirrus)
+        {
+            const float Streak = Noise(S[0] * 0.25f, S[1] * 6.0f, S[2] * 4.0f);
+            Shape = Shape * 0.6f + Streak * 0.5f;
+        }
+
+        // Linear, not sharpened (REF base): the veil the old note measured is the missing height-ambient's
+        // (P2.4b), not the remap's — sharpening here would double-count the fix and carve the erosion's
+        // footing out from under it.
         const float Threshold = 1.0f - Clamp(Cloud.Coverage, 0.0f, 1.0f);
-        const float Raw = Clamp((Shape - Threshold) / std::fmax(1.0f - Threshold, 1e-3f), 0.0f, 1.0f);
-        // Sharpened, not linear: the fbm piles samples in the middle of its range, so a linear body paints
-        //    every threshold crossing as a broad translucent veil — measured, coverage 0.52 gave 1 clear column
-        //    in 81 with almost no opaque core anywhere (a white sky, not broken cloud). The smoothstep keeps
-        //    the mapping monotonic (the gate's coverage asserts hold) while thinning the veil toward clean
-        //    edges and opaque cores — what Coverage promises ("fraction of sky covered").
-        const float Body = SmoothStep(0.0f, 1.0f, Raw);
-        return Body * Profile * Cloud.Density;
+        const float Body = Clamp((Shape - Threshold) / std::fmax(1.0f - Threshold, 1e-3f), 0.0f, 1.0f)
+                         * Profile;
+        if (Body <= 0.0f || Lod > 0.5f) return Body * Cloud.Density;
+
+        // Eroding detail (REF): two hot octaves of the leaned coordinate, the first drifting on wall time,
+        // mixed against their own inverse toward the top and scaled by the panel's detail strength. The mix
+        // (det, 1-det, hn*3) eats the tops more than the base — what turns puffs cauliflower.
+        const float TimeShift = Time * 0.02f;
+        const float Detail = Noise(S[0] * 9.0f + TimeShift, S[1] * 9.0f + TimeShift, S[2] * 9.0f + TimeShift) * 0.6f
+                           + Noise(S[0] * 19.0f + 5.0f, S[1] * 19.0f + 5.0f, S[2] * 19.0f + 5.0f) * 0.4f;
+        const float Erode = Lerp(Detail, 1.0f - Detail, Clamp(Hn * 3.0f, 0.0f, 1.0f))
+                          * Cloud.ErosionDetail * 0.45f;
+        return Clamp(Body - Erode * (1.0f - Body), 0.0f, 1.0f) * Cloud.Density;
     }
 
     //--------------------------------------------------------------------------------------------------------------------
@@ -284,46 +366,95 @@ public:
         return true;
     }
 
+    // Local density at a world point. Swirl is the march's per-pixel turbulence (REF gSwirl, already x8);
+    // Lod skips the erosion past 0.5. IsFog selects the kept fog body: the reference models fog separately
+    // (vfDensity, P8's port), so the fog path below is byte-for-byte the old body — type, shape, softness,
+    // profile, swirl and erosion are the cloud path's alone.
     static float LocalDensity(const LocalVolumeSettings& Volume, const WindSettings& Wind,
-                              const float Position[3]) noexcept
+                              const float Position[3], const float Swirl[3], float Lod, bool IsFog) noexcept
     {
         if (!Volume.Enabled) return 0.0f;
         float Local[3];
         for (int C = 0; C < 3; ++C)
             Local[C] = (Position[C] - Volume.Centre[C]) / std::fmax(Volume.HalfSize[C], 1e-3f);
 
-        // A soft ellipsoidal mask inside the box, so the volume has no visible corners.
-        const float R = std::sqrt(Local[0] * Local[0] + Local[1] * Local[1] + Local[2] * Local[2]);
-        if (R >= 1.0f) return 0.0f;
-        const float Mask = 1.0f - SmoothStep(0.55f, 1.0f, R);
+        // One advection for both bodies: fog and cloud ride the same art-.6 drift, and only one branch runs
+        // per call — computing it here keeps the single-call-site contract the gate pins.
+        float Advected[2] = { 0.0f, 0.0f };
+        if (Volume.FollowWind)
+            WindField::AdvectDrift(Wind, Position[2], 0.6f, Advected);
+
+        if (IsFog)
+        {
+            // Kept, not ported: P8 replaces this whole branch with vfDensity. Until then the fog marches
+            // exactly what it always marched (the gate pins the old mask's constants below).
+            const float R = std::sqrt(Local[0] * Local[0] + Local[1] * Local[1] + Local[2] * Local[2]);
+            if (R >= 1.0f) return 0.0f;
+            const float Mask = 1.0f - SmoothStep(0.55f, 1.0f, R);
+            if (Mask <= 0.0f) return 0.0f;
+
+            float Drift[3] = { 0.0f, 0.0f, 0.0f };
+            if (Volume.FollowWind)
+            {
+                Drift[0] = Advected[0]; Drift[1] = Advected[1];
+            }
+
+            const float Inverse = 1.0f / std::fmax(Volume.Scale, 1.0f);
+            const float S[3] = { (Position[0] + Drift[0]) * Inverse,
+                                 (Position[1] + Drift[1]) * Inverse,
+                                 Position[2] * Inverse };
+            float Shape = Noise(S[0], S[1], S[2]) * 0.5f
+                        + Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f) * 0.25f;
+            Shape /= 0.75f;
+
+            const float Threshold = 1.0f - Clamp(Volume.Coverage, 0.0f, 1.0f);
+            const float Raw = Clamp((Shape - Threshold) / std::fmax(1.0f - Threshold, 1e-3f), 0.0f, 1.0f);
+            const float Body = SmoothStep(0.0f, 1.0f, Raw);
+            return Body * Mask * Volume.Density;
+        }
+
+        // The local cloud (REF lcDensity): box height first — hn runs 0 at the floor to 1 at the lid.
+        const float Hn = Clamp(Local[2] * 0.5f + 0.5f, 0.0f, 1.0f);
+        const float Profile = LocalHeightProfile(Volume.Type, Hn);
+        if (Profile <= 0.0f) return 0.0f;
+        const float Mask = LocalCloudMask(Volume.Shape, Volume.Soft, Local);
         if (Mask <= 0.0f) return 0.0f;
 
-        // Advection, the wind integral like the layer's (WindField::AdvectDrift): the whole box rides
-        //    Tick's wall-clock accumulation at its own altitude factor.
-        float Drift[3] = { 0.0f, 0.0f, 0.0f };
+        // Advection like the layer's at art .6, plus the per-pixel swirl at .6 (REF disp*.6+gSwirl*.6 — the
+        // swirl arrives x8 and full-3D, so it stirs the altitude channel the drift leaves alone). Gated on
+        // the linkage with the drift: unlinked the reference swaps both for its own time-drift (P8 here, so
+        // unlinked the box sits still and a stray swirl cannot move it).
+        float Push[3] = { 0.0f, 0.0f, 0.0f };
         if (Volume.FollowWind)
         {
-            float Advected[2];
-            WindField::AdvectDrift(Wind, Position[2], 0.6f, Advected);
-            Drift[0] = Advected[0]; Drift[1] = Advected[1];
+            Push[0] = Advected[0] + Swirl[0] * 0.6f;
+            Push[1] = Advected[1] + Swirl[1] * 0.6f;
+            Push[2] = Swirl[2] * 0.6f;
         }
 
         const float Inverse = 1.0f / std::fmax(Volume.Scale, 1.0f);
-        const float S[3] = { (Position[0] + Drift[0]) * Inverse,
-                             (Position[1] + Drift[1]) * Inverse,
-                             Position[2] * Inverse };
-        // Two octaves: the box marches at half its feature scale, which resolves the first two and aliases
-        //    the third (a puff is smooth-walled anyway — the lost octave is sub-step ripple).
+        const float S[3] = { (Position[0] + Push[0]) * Inverse,
+                             (Position[1] + Push[1]) * Inverse,
+                             (Position[2] + Push[2]) * Inverse };
+
         float Shape = Noise(S[0], S[1], S[2]) * 0.5f
-                    + Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f) * 0.25f;
-        Shape /= 0.75f;   // [0,1] noise (see the layer): no remap shift needed
+                    + Noise(S[0] * 2.02f + 3.1f, S[1] * 2.02f + 1.7f, S[2] * 2.02f + 9.2f) * 0.25f
+                    + Noise(S[0] * 4.10f + 7.7f, S[1] * 4.10f + 2.2f, S[2] * 4.10f + 1.1f) * 0.125f
+                    + Noise(S[0] * 8.3f + 1.3f, S[1] * 8.3f + 8.8f, S[2] * 8.3f + 4.4f) * 0.0625f;
+        Shape /= 0.9375f;
 
         const float Threshold = 1.0f - Clamp(Volume.Coverage, 0.0f, 1.0f);
-        const float Raw = Clamp((Shape - Threshold) / std::fmax(1.0f - Threshold, 1e-3f), 0.0f, 1.0f);
-        // Sharpened like the layer's body (see the note there): the local volumes share the fbm's middling
-        //    distribution, so they share its veil. Same monotonic curve, same gate guarantees.
-        const float Body = SmoothStep(0.0f, 1.0f, Raw);
-        return Body * Mask * Volume.Density;
+        const float Body = Clamp((Shape - Threshold) / std::fmax(1.0f - Threshold, 1e-3f), 0.0f, 1.0f)
+                         * Profile * Mask;
+        if (Body <= 0.0f || Lod > 0.5f) return Body * Volume.Density;
+
+        // Eroding detail (REF): the same two hot octaves, but the local erosion reads no clock — its drift
+        // already rode in on s. That is why this signature takes a swirl and no time.
+        const float Detail = Noise(S[0] * 9.0f, S[1] * 9.0f, S[2] * 9.0f) * 0.6f
+                           + Noise(S[0] * 19.0f + 5.0f, S[1] * 19.0f + 5.0f, S[2] * 19.0f + 5.0f) * 0.4f;
+        const float Erode = Lerp(Detail, 1.0f - Detail, Clamp(Hn * 3.0f, 0.0f, 1.0f))
+                          * Volume.ErosionDetail * 0.45f;
+        return Clamp(Body - Erode * (1.0f - Body), 0.0f, 1.0f) * Volume.Density;
     }
 
     //--------------------------------------------------------------------------------------------------------------------
@@ -418,6 +549,22 @@ public:
         const float CosTheta = Direction[0] * SunDirection[0] + Direction[1] * SunDirection[1]
                              + Direction[2] * SunDirection[2];
 
+        // The march's two per-ray constants. lodFar (REF cloudMarch) fades the erosion with slab-entry
+        // distance: under 20 km full detail, past 200 km (orbit) none. The swirl (REF gSwirl) is one
+        // windTurb x8 sampled 30 m along the ray, only when a linked local cloud can read it — the fog's
+        // arm arrives with P8's vf port, which is the only other reader.
+        const float LayerLod = SlabHit ? SmoothStep(20000.0f, 200000.0f, SlabNear) : 0.0f;
+        float PixelSwirl[3] = { 0.0f, 0.0f, 0.0f };
+        if (Wind.Turbulence > 0.0f && LocalCloud.Enabled && LocalCloud.FollowWind)
+        {
+            const float At[3] = { Origin[0] + Direction[0] * 30.0f,
+                                  Origin[1] + Direction[1] * 30.0f,
+                                  Origin[2] + Direction[2] * 30.0f };
+            float Turb[3];
+            WindField::SampleSwirl(Wind, At, Time, Turb);
+            PixelSwirl[0] = Turb[0] * 8.0f; PixelSwirl[1] = Turb[1] * 8.0f; PixelSwirl[2] = Turb[2] * 8.0f;
+        }
+
         float Transmittance = 1.0f;
         constexpr float kReferenceSpan = 4000.0f;   // [m] the span the tier's step count is quoted against
         for (uint32_t S = 0u; S < 3u; ++S)
@@ -486,15 +633,15 @@ public:
                 ++Result.StepsTaken;
 
                 float Density = 0.0f;
-                if (M == 0u)      Density = CloudDensity(Cloud, Wind, P);
-                else if (M == 1u) Density = LocalDensity(LocalCloud, Wind, P);
-                else              Density = LocalDensity(LocalFog, Wind, P);
+                if (M == 0u)      Density = CloudDensity(Cloud, Wind, P, Time, LayerLod);
+                else if (M == 1u) Density = LocalDensity(LocalCloud, Wind, P, PixelSwirl, 0.0f, false);
+                else              Density = LocalDensity(LocalFog, Wind, P, PixelSwirl, 0.0f, true);
                 if (Density <= 1e-5f) continue;
 
                 // Sun visibility, marched once for the combined medium — fog shadows cloud and cloud shadows
                 //    fog for free, whichever loop this step sits in.
                 const float SunTransmittance = ShadowMarch(Cloud, LocalCloud, LocalFog, Wind, P, SunDirection,
-                                                     ActualStep, Budget.LightTaps);
+                                                     ActualStep, Budget.LightTaps, Time, PixelSwirl);
                 ++Result.ShadowMarches;
 
                 const float Extinction = Density * ActualStep * 0.01f;
@@ -556,11 +703,14 @@ private:
         return Far > Near;
     }
 
-    // The shared sun-shadow march: a few long steps toward the light through the COMBINED medium.
+    // The shared sun-shadow march: a few long steps toward the light through the COMBINED medium. Time and
+    // Swirl ride through to the densities; the lod threading is the reference's (clShadow/uniShadow): the
+    // layer's first two taps keep erosion, the rest skip it, the local shadow always skips it (P2.4b owns
+    // the exact tap-spacing form — this slice owns the lod it threads).
     static float ShadowMarch(const CloudLayerSettings& Cloud, const LocalVolumeSettings& LocalCloud,
                              const LocalVolumeSettings& LocalFog, const WindSettings& Wind,
                              const float Position[3], const float SunDirection[3],
-                             float StepSize, uint32_t Taps) noexcept
+                             float StepSize, uint32_t Taps, float Time, const float Swirl[3]) noexcept
     {
         const uint32_t Count = Taps == 0u ? 1u : Taps;
         float OpticalDepth = 0.0f;
@@ -570,9 +720,10 @@ private:
             const float Q[3] = { Position[0] + SunDirection[0] * Distance,
                                  Position[1] + SunDirection[1] * Distance,
                                  Position[2] + SunDirection[2] * Distance };
-            const float Density = (Cloud.Enabled ? CloudDensity(Cloud, Wind, Q) : 0.0f)
-                                + LocalDensity(LocalCloud, Wind, Q)
-                                + LocalDensity(LocalFog, Wind, Q);
+            const float TapLod = I > 2u ? 1.0f : 0.0f;
+            const float Density = (Cloud.Enabled ? CloudDensity(Cloud, Wind, Q, Time, TapLod) : 0.0f)
+                                + LocalDensity(LocalCloud, Wind, Q, Swirl, 1.0f, false)
+                                + LocalDensity(LocalFog, Wind, Q, Swirl, 1.0f, true);
             OpticalDepth += Density * StepSize * 0.5f * 0.01f;
             // Past opaque, further taps change transmittance by under 2% — invisible, so stop paying for them.
             if (OpticalDepth > 4.0f) break;

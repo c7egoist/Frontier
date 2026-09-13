@@ -219,10 +219,12 @@ public:
     [[nodiscard]] const PrecipitationTelemetry& Telemetry() const noexcept { return Last; }
 
     // One simulation step. GroundHeight is the world Z of the surface under a point; the caller supplies it so
-    //    this does not need to know about terrain.
+    //    this does not need to know about terrain. Time drives the particles (the rain's own clock, untouched
+    //    here); WallTime feeds the cover gate's erosion octave, which must read the same wall seconds the
+    //    march shades with or rain falls out of a different field than the one rendered.
     void Step(const PrecipitationSettings& Settings, const CloudLayerSettings& Cloud,
               const WindSettings& Wind, const float Camera[3], float DeltaSeconds, float Time,
-              float GroundHeight) noexcept
+              float GroundHeight, float WallTime) noexcept
     {
         Last = PrecipitationTelemetry{};
         if (!Settings.Enabled || DeltaSeconds <= 0.0f) { Particles.clear(); return; }
@@ -285,7 +287,7 @@ public:
             if (Settings.SpawnFromClouds)
             {
                 if (!HaveCloud) { ++Last.RejectedClearSky; continue; }
-                if (ColumnCover(Cloud, Wind, X, Y, SlabBase, SlabTop) < Settings.MinimumCloudCover)
+                if (ColumnCover(Cloud, Wind, X, Y, SlabBase, SlabTop, WallTime) < Settings.MinimumCloudCover)
                 {
                     ++Last.RejectedClearSky;
                     continue;
@@ -383,9 +385,10 @@ public:
     }
 
     // Cloud cover in a vertical column, sampled at a few heights through the slab. This is what makes rain fall
-    //    out of clouds rather than out of a clear sky.
+    //    out of clouds rather than out of a clear sky. Lod 0: the emitter samples its own sky — near field,
+    //    full detail — at the wall seconds the march shades with.
     static float ColumnCover(const CloudLayerSettings& Cloud, const WindSettings& Wind,
-                             float X, float Y, float SlabBase, float SlabTop) noexcept
+                             float X, float Y, float SlabBase, float SlabTop, float WallTime) noexcept
     {
         constexpr int kSamples = 4;
         float Sum = 0.0f;
@@ -393,7 +396,7 @@ public:
         {
             const float T = (static_cast<float>(I) + 0.5f) / static_cast<float>(kSamples);
             const float P[3] = { X, Y, SlabBase + (SlabTop - SlabBase) * T };
-            Sum += VolumetricMedia::CloudDensity(Cloud, Wind, P);
+            Sum += VolumetricMedia::CloudDensity(Cloud, Wind, P, WallTime, 0.0f);
         }
         return Sum / static_cast<float>(kSamples);
     }
