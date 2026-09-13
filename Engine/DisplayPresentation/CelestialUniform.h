@@ -221,13 +221,25 @@ inline void PackCelestialUniform(
     // The moon is sunlight, reflected: its radiance is the sun's scaled by the lunar albedo and the brightness
     //    slider. Deriving it rather than typing a number is what makes a daytime moon come out right for free —
     //    it is lit by the same sun, so it stays a plausible grey against a bright sky instead of a glowing decal.
-    //    Its radiance follows the same rule: the moon reflects a fraction of the sun's irradiance, spread over
-    //    its own solid angle. Deriving it from the irradiance (not from the sun's disc radiance) keeps it correct
-    //    when the two bodies are given different angular sizes.
-    const float MoonSolidAngle = 3.14159265358979f * MoonAngularRadius * MoonAngularRadius;
-    const float MoonScale = Settings.Moon.Albedo * Settings.Moon.Brightness
-                          / (MoonSolidAngle > 1e-12f ? MoonSolidAngle : 1e-12f);
-    for (int C = 0; C < 3; ++C) Out.MoonRadianceAndEarthshine[C] = Out.SunIrradianceAndScale[C] * MoonScale;
+    // 🔴 THE MOON IS A LIT SURFACE, NOT A LAMP — AND GETTING THIS WRONG MADE THE NIGHT BRIGHTER THAN THE DAY.
+    //
+    //    An earlier version wrote `albedo * brightness / solidAngle`, copying the SUN's radiance = irradiance /
+    //    solidAngle rule. That rule is right for the sun, whose *irradiance* is the known quantity. It is wrong
+    //    for the moon, whose known quantity is the sunlight FALLING ON IT. The moon is a diffuse sphere lit by
+    //    the same solar irradiance E, so the radiance leaving it is the Lambertian result:
+    //
+    //        L_moon = E * albedo / pi
+    //
+    //    and radiance is conserved along a ray, so that is also what arrives here. Dividing by the solid angle
+    //    instead inflated it by 1/(sa * pi) ~ 5000x; measured, the moon was delivering 0.192 of the sun's
+    //    irradiance instead of ~2e-6, i.e. **96 000x too bright**, which rendered a blown-white midnight.
+    //
+    //    Sanity check against the world, which is the only real test: this gives a ground irradiance ratio of
+    //    2.47e-6 versus the sun. Full moonlight is ~0.25 lux against ~120 000 lux of sunlight, a ratio of
+    //    ~2.1e-6. So the physical form lands within 1.2x of reality with no tuning constant at all.
+    for (int C = 0; C < 3; ++C)
+        Out.MoonRadianceAndEarthshine[C] = Out.SunIrradianceAndScale[C]
+                                         * (Settings.Moon.Albedo * Settings.Moon.Brightness / 3.14159265358979f);
     Out.MoonRadianceAndEarthshine[3] = Settings.Moon.Earthshine;
 
     // ── Atmosphere ────────────────────────────────────────────────────────────────────────────────────────────

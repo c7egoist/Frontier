@@ -25,6 +25,7 @@
 
 #include "Engine/DisplayPresentation/CelestialStructure.h"
 #include "Engine/DisplayPresentation/CelestialSolver.h"
+#include "Engine/DisplayPresentation/CelestialUniform.h"
 
 #include <cstdio>
 #include <cmath>
@@ -310,6 +311,51 @@ int main()
         Check(!std::isfinite(farEmission) || double(farEmission) > 1e18,
               "at 1e9 m the emission would be ~1e19 (why not farther)",
               Fixed(double(farEmission), 0));
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
+    Section("4b. MOONLIGHT IS THE RIGHT BRIGHTNESS (checked against the real world)");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 A REAL BUG CAUGHT BY LOOKING AT A RENDER. The night frames came out blown white. Cause: the moon's
+    //    radiance was computed as `irradiance / solidAngle`, copying the SUN's rule. That rule is right for the
+    //    sun, whose irradiance is the known quantity; it is wrong for the moon, which is a diffuse sphere LIT BY
+    //    that same irradiance, so L = E * albedo / pi. The wrong form was 96 145x too bright.
+    //
+    //    The check is against the world, not against the code: full moonlight is ~0.25 lux and sunlight
+    //    ~120 000 lux, a ratio of ~2.1e-6. Anything within an order of magnitude of that is physically sane;
+    //    the corrected form lands at 4.0e-6, i.e. 2x. Tight enough to catch a units error, loose enough not to
+    //    fail on the moon's real 0.25-0.30 lux spread or on a deliberate Brightness tweak.
+    {
+        Frontier::CelestialStructure settings{};
+        settings.Observation.LocalHours = 21.0f;
+
+        const Frontier::CelestialSolution solution = Frontier::SolveCelestial(settings);
+        Frontier::CelestialUniform record{};
+        Frontier::PackCelestialUniform(settings, solution, 0.0, record);
+
+        const double cosRadius  = record.MoonDirectionAndCosRadius[3];
+        const double solidAngle = 6.2831853 * (1.0 - cosRadius);
+        const double moonIrradiance = double(record.MoonRadianceAndEarthshine[0]) * solidAngle;
+        const double sunIrradiance  = double(record.SunIrradianceAndScale[0]);
+        const double ratio = moonIrradiance / sunIrradiance;
+
+        const double realWorldRatio = 0.25 / 120000.0;
+
+        Check(ratio > realWorldRatio * 0.1 && ratio < realWorldRatio * 10.0,
+              "moon/sun ground irradiance is within 10x of reality",
+              Fixed(ratio * 1e6, 3) + "e-6 vs the real " + Fixed(realWorldRatio * 1e6, 3) + "e-6");
+
+        // And the specific regression: the moon must never out-shine a meaningful fraction of the sun.
+        Check(ratio < 1e-4,
+              "the moon is not remotely as bright as the sun (the blown-white-night bug)",
+              "ratio " + Fixed(ratio, 9));
+
+        // The physical form has no tuning constant, so assert the formula itself rather than a magic number.
+        const double expected = double(settings.Moon.Albedo) * double(settings.Moon.Brightness) / 3.14159265358979;
+        const double actual   = double(record.MoonRadianceAndEarthshine[0]) / sunIrradiance;
+        Check(std::fabs(actual - expected) / expected < 0.02,
+              "moon radiance is exactly E*albedo/pi, with no fudge factor",
+              Fixed(actual, 8) + " vs " + Fixed(expected, 8));
     }
 
     //----------------------------------------------------------------------------------------------------------------

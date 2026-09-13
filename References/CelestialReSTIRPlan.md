@@ -249,6 +249,42 @@ Status log (append; newest last):
   Jolt) were missing third-party trees, not regressions -- verified by running them against the pre-P0 stash --
   and are now populated out-of-band; .gitignore records that ExternalPackages/ is not carried on this branch.
   User confirmed: TOML + CLI for the slider surface (P8), stability before sky. NEXT: P1.
+- 2026-09-13: **VISUAL PROOF of P1-P4 — and it found three real bugs that every gate had missed.**
+  User asked to SEE the sun/atmosphere before clouds go on top. Built `Scratchpad/CelestialShowcase.cpp`, which
+  drives the whole production chain per frame: `SolveCelestial` (real almanac ephemeris at Benoni) ->
+  `PackCelestialUniform` (the actual GPU record) -> read back through the SAME fields the shader reads ->
+  `AtmosphereScatter.slang` + `RayGeneration.slang` compiled as C++ -> `SolveSunTransmittance` for direct light
+  -> `ExposureIntegrator` in Celestial mode. Only the toy scene and integrator loop are harness code.
+  Ephemeris self-validates in the output: noon sun **+60.09 deg at azimuth 1.33** (due north — correct for the
+  southern hemisphere), sunrise az **90**, sunset az **275**, EV100 **13.98 -> -5.60** across the day.
+  🔴 **BUG 1 (ENGINE, SHIPPED): the moon was 96 145x too bright.** First render had blown-white night frames.
+  `PackCelestialUniform` computed moon radiance as `irradiance / solidAngle`, copying the SUN's rule. That rule
+  is right for the sun, whose irradiance is the known quantity; the moon is a diffuse sphere LIT BY that
+  irradiance, so **L = E x albedo / pi**. Delivered 0.192 of the sun's ground irradiance instead of ~2e-6.
+  Fixed to the physical form — no tuning constant — and it lands at **3.96e-6 vs the real 2.08e-6, within 2x**
+  (full moon ~0.25 lux against sunlight ~120 000 lux). This was a direct consequence of the P2b units fix
+  over-correcting, i.e. a bug I introduced two phases earlier and only a picture caught.
+  🔴 **BUG 2 (ENGINE): night exposure ignored the moon.** The solver pinned full night at -6 EV with the comment
+  "moonlight is scene radiance, not an exposure change". That comment was wrong. Photographically a moonless
+  landscape is ~EV -6 and a full-moon landscape ~EV -2.5 — **3.5 stops** a real camera must dial in. Added
+  `SolveCelestialEv100WithMoon(sunElev, moonElev, moonPhase, settings)`, ramped in below -6 deg sun so there is
+  no step. ⚠️ Does NOT reopen F3: the new terms are moon elevation and phase, both world state like the sun's
+  elevation; still no camera in the signature. F3 was never "exposure must not change", it was "must not change
+  WHEN THE SUN HASN'T".
+  🔴 **BUG 3 (HARNESS, not the engine): the showcase lit the ground with a new moon as if it were full.**
+  MoonRadiance is the radiance of the LIT part of the disc; the disc shader applies the terminator per-pixel,
+  but a LIGHT SOURCE integrates the whole disc and must be scaled by the lit fraction. Phase was 0.09 (near new)
+  yet the ground rendered at **202/255 — brighter than the sunlit frames**. Scaled by phase² (grazing terminator
+  light); night ground now **6.8 / 9.7 / 0.0** at 18.6h / 19.5h / 22.0h.
+  Also fixed in the harness: the star field was quoted in raw units (~1.0) against a night gain of 2.8e5, so
+  every star rendered **845 000x white**. Recalibrated to radiance (~2.1e-6). The engine was never wrong here —
+  `Stars.Brightness` is a multiplier awaiting P7 — but a preview that lies is worse than no preview.
+  Gated: new section 4b in `SunReservoirTest.cpp` checks moon/sun ground irradiance against the REAL WORLD ratio
+  (within 10x), asserts the moon can never approach the sun, and asserts the formula is exactly E·albedo/pi with
+  no fudge factor. Visual: `Scratchpad/CelestialDayCycle.png` (10 frames, 5.5h -> 22h).
+  **ALL 21 SUITES GREEN.** Lesson recorded: 21 green suites did not catch a 96 000x error, because every gate
+  compared the code against itself. The real-world ratio check is the fix for that class.
+
 - 2026-09-13: **P4 DONE — F3 fixed: the exposure stops moving when the camera does.**
   New `ExposureModeCategory::Celestial` alongside Manual and Adaptive, selected by `--sky-exposure`. Manual does
   not drift but cannot follow a day; Adaptive follows the day but meters the FRAME, so turning to face a bright

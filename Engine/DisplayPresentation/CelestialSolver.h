@@ -274,12 +274,58 @@ inline void HorizonToWorldDirection(const HorizonPosition& Horizon, float OutDir
     }
     else
     {
-        Ev100 = -6.0f;   // Full night. Moonlight is scene radiance, not an exposure change.
+        Ev100 = -6.0f;   // Full astronomical night, with no moon: bare starlight.
     }
 
     Ev100 += Settings.ExposureBias;
     if (Elevation < 0.0f) Ev100 += Settings.NightBias;
     return Ev100;
+}
+
+// 🔴 THE MOON HAS TO ENTER THE EXPOSURE, AND THE ORIGINAL COMMENT HERE WAS WRONG.
+//
+//    The first version said "moonlight is scene radiance, not an exposure change" and pinned full night at
+//    -6 EV regardless of the moon. That is not how exposure works, and a render caught it: at 19:30 with the
+//    moon 11 degrees up, the ground came out at 202/255 — about 4.8 stops overexposed, a blown-white midnight.
+//
+//    Photographic reference (ISO 100): a moonless starlit landscape is about EV -6, a full-moon landscape about
+//    EV -2.5. That is ~3.5 stops, and it is a real difference a real camera must dial in. Ignoring it means the
+//    night is always metered for starlight, so any moon at all overexposes.
+//
+//    ⚠️ THIS DOES NOT REOPEN F3. The added terms are the moon's ELEVATION and PHASE — both properties of the
+//    sky at a given instant, exactly like the sun's elevation. There is still no camera in the signature, so
+//    turning on the spot still cannot change the exposure. F3 was never "exposure must not change"; it was
+//    "exposure must not change WHEN THE SUN HASN'T", and the moon is part of that same world state.
+[[nodiscard]] inline float SolveCelestialEv100WithMoon(float SunElevationDegrees,
+                                                       float MoonElevationDegrees,
+                                                       float MoonPhase,
+                                                       const CelestialExposure& Settings) noexcept
+{
+    const float SunOnly = SolveCelestialEv100(SunElevationDegrees, Settings);
+
+    // The moon only matters once the sun is well down; in daylight it is thousands of times too faint to shift
+    //    the metering, and the sun branch already has it right.
+    if (SunElevationDegrees > -6.0f || MoonElevationDegrees <= 0.0f) return SunOnly;
+
+    // How much moonlight there actually is: the lit fraction of the disc, times how high it sits (a low moon is
+    //    dimmed by the long slant path and lights the ground at a glancing angle).
+    const float Phase     = MoonPhase < 0.0f ? 0.0f : (MoonPhase > 1.0f ? 1.0f : MoonPhase);
+    const float Elevation = MoonElevationDegrees > 90.0f ? 90.0f : MoonElevationDegrees;
+    const float Altitude  = std::sin(static_cast<double>(Elevation) * kDegreesToRadians) > 0.0
+                          ? static_cast<float>(std::sin(static_cast<double>(Elevation) * kDegreesToRadians))
+                          : 0.0f;
+
+    // Full moon at the zenith is the +3.5 EV case; a thin crescent low down is worth almost nothing. Phase
+    //    enters squared because a half-lit disc delivers far less than half the light of a full one — the
+    //    terminator region is lit at a grazing angle and the opposition surge only happens near full.
+    const float MoonStrength = Phase * Phase * Altitude;
+    const float MoonEv = 3.5f * MoonStrength;
+
+    // Ramp the moon's influence in as the sun sets, so there is no step at the -6 degree boundary.
+    const float SunFade = SunElevationDegrees <= -12.0f ? 1.0f
+                        : (-6.0f - SunElevationDegrees) / 6.0f;
+
+    return SunOnly + MoonEv * SunFade;
 }
 
 // Standard photometric mapping: gain = 1 / (1.2 · 2^EV100). The 1.2 is the ISO 2721 calibration constant, the same
@@ -335,7 +381,11 @@ inline void HorizonToWorldDirection(const HorizonPosition& Horizon, float OutDir
 
     if (Settings.Exposure.SunElevationDriven)
     {
-        Solution.ExposureEv100 = SolveCelestialEv100(Solution.SunElevationDegrees, Settings.Exposure);
+        // Sun AND moon: both are world state, neither is the camera. See SolveCelestialEv100WithMoon.
+        Solution.ExposureEv100 = SolveCelestialEv100WithMoon(Solution.SunElevationDegrees,
+                                                             Solution.MoonElevationDegrees,
+                                                             Solution.MoonPhase,
+                                                             Settings.Exposure);
         Solution.ExposureGain  = ExposureGainFromEv100(Solution.ExposureEv100);
     }
     else
