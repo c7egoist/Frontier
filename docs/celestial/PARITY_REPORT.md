@@ -5,9 +5,15 @@
 **Reference:** `docs/celestial/index.html` (the checked-in copy of the supplied HTML/WebGL page)  
 **Compared engine path:** `Engine/Shaders/ReSTIRViewport.slang`, `Engine/Shaders/AtmosphereScatter.slang`, `Engine/Shaders/CelestialMedia.slang`, `Engine/DisplayPresentation/CelestialSolver.h`, `Engine/DisplayPresentation/CelestialUniform.h`
 
-## 1. Executive conclusion
+## 1. Important correction to the earlier visual claim
 
-The Project Zero frames do not look like the HTML reference because the two programs are not rendering the same state through the same presentation contract. The atmosphere march and the coloured dawn complement were ported, but the following higher-level inputs are different:
+This report is a code-level parity audit, not a completed HTML-versus-Project-Zero image comparison. The earlier description of `Renders/HtmlCelestialProof/` as HTML-reference proof images was incorrect. Its README and generation script show that those images are produced by extracting and compiling the **engine's own** `ReSTIRViewport.slang` functions as C++; they are not browser captures of `docs/celestial/index.html`.
+
+The clear-sky images do visibly contain a strong white horizon line at the 06:18 and 18:36 frames. Therefore “the line is missing” is too strong. The defensible statement is that the line can be displaced, weakened, or absent at a requested clock label because of the solar-model, presentation, and media mismatches described below. A true claim of visual exactness still requires a matched browser capture, which has not yet been completed.
+
+## 2. Executive conclusion
+
+The Project Zero frames are not yet proven to look like the HTML reference because the two programs are not rendering the same state through the same presentation contract. The atmosphere march and the coloured dawn complement were ported, but the following higher-level inputs are different:
 
 1. **The sun is in a different place at the same clock time.** The HTML page uses a date-independent, simplified latitude/hour-angle orbit. Project Zero uses a date-, longitude-, UTC-offset-, and ephemeris-based solar solver. The measured elevation error is approximately **1.0–3.7 degrees**, and the azimuth error is approximately **1.3–3.7 degrees**.
 2. **The exposure curve is not the HTML exposure curve.** The HTML uses `exp2(uEV + autoEV)` with the default `uEV = 0.4`. Project Zero uses an EV100 photographic curve, converts it to a gain, then the showcase applies an additional `800` relative-unit reconciliation constant. At the low sun positions that determine sunset colour, those gains differ by tens of times.
@@ -167,7 +173,7 @@ There is currently **no valid per-pixel parity score**. A browser capture of the
 
 The numerical solar table and the fog/exposure calculations above are valid code-level comparisons. They are sufficient to explain the observed visual differences, but a final pixel-error number must wait until both implementations render a matched state.
 
-## 7. Required order for a true mirror port
+## 8. Required order for a true mirror port
 
 To make the HTML reference the source of truth while preserving the requested clear-sky coverage—pre-dawn, sunrise, morning, noon, afternoon/golden hour, sunset, dusk, and twilight—the next implementation pass should be done in this order:
 

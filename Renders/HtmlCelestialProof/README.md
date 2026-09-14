@@ -1,6 +1,6 @@
-# HTML-reference celestial proof strip
+# Celestial shader proof strip (not an HTML capture)
 
-These six proof renders are produced by `Scratchpad/CelestialShowcase.cpp` after extracting the shipping celestial functions from `Engine/Shaders/ReSTIRViewport.slang` with `Scratchpad/ExtractCelestialPort.sh`.
+These six proof renders are produced by `Scratchpad/CelestialShowcase.cpp` after extracting the shipping celestial functions from `Engine/Shaders/ReSTIRViewport.slang` with `Scratchpad/ExtractCelestialPort.sh`. They are **not** screenshots of `docs/celestial/index.html`; the directory's historical `HtmlCelestialProof` name is misleading. Use them to prove the engine shader path is internally reproducible, not to claim browser pixel parity.
 
 | Render | Local time | Solar elevation | Reference path exercised |
 |---|---:|---:|---|
