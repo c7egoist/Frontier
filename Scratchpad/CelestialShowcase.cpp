@@ -391,7 +391,9 @@ int main(int argc, char** argv)
                     const vec3 mediaRadiance = MediaScatter(sky, camera.Origin, dir,
                                                             sky.SunDirectionAndCosRadius.xyz(),
                                                             sky.SunIrradianceAndScale.xyz() * sky.SunTransmittance.xyz(),
-                                                            colour,
+                                                            // The sky DOME lights the cloud, not the sky the
+                                                            //    cloud happens to be standing in front of.
+                                                            CelestialSky(sky, camera.Origin, vec3(0.0f, 0.0f, 1.0f), false),
                                                             200000.0f, 48, mediaTransmittance);
                     colour = colour * mediaTransmittance + mediaRadiance;
                 }

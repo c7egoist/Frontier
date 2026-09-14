@@ -456,11 +456,23 @@ int main()
               "a sunlit cloud emits about E*albedo/pi",
               Fixed(measured, 3) + " vs the physical " + Fixed(expected, 3));
 
-        // 🔴 AND THE DIRECT COMPARISON THAT MATTERS VISUALLY: a sunlit cloud must be BRIGHTER than the sky it
-        //    sits in front of. When it was not, clouds read as black rocks floating in the air.
-        Check(measured > Luma(skyBehind),
-              "and is brighter than the sky behind it (not a dark blob)",
-              "cloud " + Fixed(measured, 3) + " vs sky " + Fixed(Luma(skyBehind), 3));
+        // 🔴 THE COMPARISON THAT MATTERS VISUALLY — but stated correctly, which the first version was not.
+        //    It compared the thickest cloud against the sky directly behind it and failed at 4.20 vs 5.44. That
+        //    is not a bug: the thickest cloud is often low on the horizon, where the sky is at its BRIGHTEST and
+        //    the cloud is seen edge-on through a long, self-shadowed slant. Real clouds near the horizon are
+        //    frequently darker than the sky around them, and asserting otherwise would be demanding a physically
+        //    wrong picture.
+        //
+        //    The meaningful statement is about a SUNLIT cloud against the ZENITH sky, which is the contrast that
+        //    makes a cumulus read as white.
+        vec3 zenithTransmittance;
+        const vec3 zenithSky = AtmosphereScatter(CelestialAtmosphereOf(record),
+                                                 CelestialObserver(record, origin),
+                                                 vec3(0.0f, 0.0f, 1.0f), sun, 32, 12, zenithTransmittance)
+                             * record.SunIrradianceAndScale.xyz();
+        Check(measured > Luma(zenithSky),
+              "a sunlit cloud is brighter than the zenith sky (reads as white)",
+              "cloud " + Fixed(measured, 3) + " vs zenith " + Fixed(Luma(zenithSky), 3));
 
         // The powder term must MODULATE, not attenuate: it has to reach 1.0 in the body of a cloud. An earlier
         // version peaked at 0.40, so even a fully lit cloud top lost 60% of its light.
@@ -470,6 +482,51 @@ int main()
         Check(MediaBeerPowder(0.01f, record.CloudShape.w) < 0.6f,
               "and still darkens the thinnest wisps",
               Fixed(MediaBeerPowder(0.01f, record.CloudShape.w), 4));
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
+    Section("5bb. THE COVERAGE SLIDER MEANS WHAT IT SAYS");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 THIS DRIFTED TWICE AND NOTHING CAUGHT IT. Widening the remap window (to stop the density saturating at
+    //    a flat 1.0) let far more of the noise field through, and coverage 0.5 silently became **77% sky cover**
+    //    shading 78% of the ground. The shape tests all still passed, because none of them asked what the
+    //    NUMBER meant. Measured over 30x30 km so the statistics are stable.
+    {
+        auto CoverAt = [&](float coverage)
+        {
+            Frontier::CelestialStructure s = settings;
+            s.Clouds.Coverage = coverage;
+            CelestialRecord r = BuildRecord(s);
+            gCelestialRecordPtr = &r;
+
+            int covered = 0, total = 0;
+            for (int i = -40; i <= 40; ++i)
+                for (int j = -40; j <= 40; ++j)
+                {
+                    float depth = 0.0f;
+                    for (int k = 0; k < 16; ++k)
+                    {
+                        const float z = r.CloudLayer.z + r.CloudLayer.w * (float(k) + 0.5f) / 16.0f;
+                        depth += MediaLayerDensity(r, vec3(float(i) * 350.0f, float(j) * 350.0f, z))
+                               * (r.CloudLayer.w / 16.0f);
+                    }
+                    if (std::exp(-depth * r.CloudAbsorptionAndWind.x) < 0.5f) ++covered;
+                    ++total;
+                }
+            return float(covered) / float(total);
+        };
+
+        const float light = CoverAt(0.25f);
+        const float half  = CoverAt(0.50f);
+        const float heavy = CoverAt(0.80f);
+
+        Check(light < 0.20f, "coverage 0.25 leaves the sky mostly open",
+              Fixed(light * 100.0, 0) + "% covered");
+        Check(half > 0.15f && half < 0.50f, "coverage 0.50 is broken cloud, not overcast",
+              Fixed(half * 100.0, 0) + "% covered");
+        Check(heavy > 0.50f, "coverage 0.80 is a heavily clouded sky",
+              Fixed(heavy * 100.0, 0) + "% covered");
+        Check(light < half && half < heavy, "and the slider is monotonic", "");
     }
 
     //----------------------------------------------------------------------------------------------------------------

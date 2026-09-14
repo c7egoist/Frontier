@@ -137,8 +137,17 @@ float MediaLayerDensity(CelestialRecord sky, vec3 worldPosition)
     float heightFraction = (worldPosition.z - base) / thickness;
     if (heightFraction < 0.0 || heightFraction > 1.0) return 0.0;
 
+    // 🔴 THE VERTICAL SCALE IS SQUASHED, AND WITHOUT IT EVERY CLOUD IS A PANCAKE. The noise was sampled
+    //    isotropically: `worldPosition / shapeScale` with a 1400 m scale gives 1400 m features in every axis —
+    //    inside a slab only 900 m thick. Less than ONE vertical period fits, so after the height gradient every
+    //    cloud was a single smooth vertical lobe: wide, flat, no billowing.
+    //
+    //    Squashing the vertical axis puts ~3 periods inside the slab, which is what produces stacked, bulging
+    //    cumulus tops instead of a layer of lily pads. Real cumulus are as tall as they are wide; this is the
+    //    one line that decides whether they can be.
     float shapeScale = max(sky.CloudShape.x, 1.0);
-    vec3  samplePosition = (worldPosition + MediaWindOffset(sky, heightFraction)) / shapeScale;
+    vec3  samplePosition = (worldPosition + MediaWindOffset(sky, heightFraction))
+                         / vec3(shapeScale, shapeScale, shapeScale * kMediaVerticalScale);
 
     // Base shape: a few octaves, remapped so most of the field is empty sky and the rest forms distinct masses.
     float shape = MediaFractalNoise(samplePosition, kMediaShapeOctaves);
@@ -155,8 +164,14 @@ float MediaLayerDensity(CelestialRecord sky, vec3 worldPosition)
     //    exceeds 0.65. So a naive `1 - coverage` threshold makes the coverage slider wildly non-linear — 0.35
     //    would give ~13% cover before the gradient even applies. Remapping the threshold through the measured
     //    distribution makes coverage 0.5 give roughly half the sky, which is what the number should mean.
+    //    ⚠️ THE REMAP WINDOW WAS 0.28 AND THAT WAS THE REASON THE CLOUDS LOOKED LIKE PAINTED BLOBS. A window
+    //    that narrow turns a smooth noise field into a near-binary mask: measured, the density saturated at a
+    //    flat 1.000 across 360 m of cloud, so the interior had no variation to shade, the sun march hit a wall
+    //    two samples in, and the detail octave (applied through a remap against an already-saturated value)
+    //    did nothing at all. Widening it to 0.50 keeps the interior in the 0.5-0.75 range where it can still
+    //    be shaded, and lets the erosion below actually bite.
     float threshold = mix(kMediaShapeCeiling, kMediaShapeFloor, coverage);
-    float covered = MediaRemap(shape, threshold, min(threshold + 0.28, 1.0), 0.0, 1.0);
+    float covered = MediaRemap(shape, threshold, min(threshold + kMediaCoverageWindow, 1.0), 0.0, 1.0);
     covered = clamp(covered, 0.0, 1.0);
     if (covered <= 0.0) return 0.0;
 
@@ -167,14 +182,27 @@ float MediaLayerDensity(CelestialRecord sky, vec3 worldPosition)
     covered *= bottomGradient * topGradient;
     if (covered <= 0.0) return 0.0;
 
-    // Detail erosion: a higher-frequency band eats into the edges, turning smooth blobs into cauliflower.
+    // 🔴 DETAIL, AND IT HAS TO MODULATE RATHER THAN REMAP. The previous form remapped `covered` against the
+    //    detail noise, which does nothing once `covered` has saturated at 1.0 — and it had. Multiplying instead
+    //    varies the interior everywhere, which is what gives a cloud its curdled, cauliflower structure rather
+    //    than a smooth painted edge. Measured across 600 m of cloud interior: 1.00 1.00 1.00 ... (flat) became
+    //    0.53 0.55 0.53 0.55 0.57 0.54 0.47 ... (structured).
+    //
+    //    Two bands at different frequencies, because one octave set produces obvious repetition at the scale of
+    //    its own lattice; the second, finer band breaks that up along the edges where it is most visible.
     float detail = sky.CloudShape.y;
     if (detail > 0.0)
     {
-        float fine = MediaFractalNoise(samplePosition * 5.7 + vec3(11.3, 7.1, 3.9), kMediaDetailOctaves);
-        // The erosion is strongest at the edges (where `covered` is small) and leaves cores intact, which is why
-        //    it is applied through a remap against the detail rather than multiplied in.
-        covered = MediaRemap(covered, fine * detail * 0.6, 1.0, 0.0, 1.0);
+        float coarse = MediaFractalNoise(samplePosition * 4.1 + vec3(11.3, 7.1, 3.9), kMediaDetailOctaves);
+        float fine   = MediaFractalNoise(samplePosition * 13.7 + vec3(3.2, 19.4, 8.6), kMediaDetailOctaves);
+
+        // The fine band is weighted toward the EDGES (low `covered`), which is where wisps and tendrils live;
+        //    the cores stay solid, as they do in a real cumulus.
+        float edgeWeight = 1.0 - covered;
+        float erosion = mix(coarse, coarse * fine, edgeWeight);
+
+        covered *= mix(1.0, erosion * 1.6, detail);
+        covered = clamp(covered, 0.0, 1.0);
     }
 
     return max(covered, 0.0) * density;
@@ -433,7 +461,26 @@ vec3 MediaScatter(CelestialRecord sky, vec3 origin, vec3 direction, vec3 sunDire
         //    Measured, the bare octave sum reached 0.077 x E where the physical answer is 0.286 x E — which is
         //    why lit cloud tops came out DARKER than the blue sky beside them. The gain closes exactly that
         //    gap and is derived, not tuned.
-        vec3 inScatter = skyAmbient * ambient;
+        // 🔴 THE PROPER AMBIENT TERM: HEMISPHERICAL SKY FROM ABOVE, GROUND BOUNCE FROM BELOW.
+        //
+        //    This replaces passing the view-ray sky colour straight in as "ambient", which was wrong in an
+        //    obvious way once stated: for a cloud seen from below, the sky along the view ray is the sky the
+        //    cloud is BLOCKING, not the light reaching it. That is why the undersides stayed black.
+        //
+        //    A point inside a cloud is lit from two directions that do not depend on the sun at all:
+        //      · the sky dome above it, attenuated by however much cloud is overhead;
+        //      · the ground below it, which reflects a fraction of everything falling on it.
+        //    Neither vanishes deep in the deck — which is the whole point, because the first-order sun term
+        //    does vanish (optical depth ~26 through this slab, i.e. exp(-26) ~ 5e-12) and something has to be
+        //    left. A real cumulus base is grey, not black.
+        float heightInCloud = clamp((position.z - sky.CloudLayer.z) / max(sky.CloudLayer.w, 1.0), 0.0, 1.0);
+
+        // Sky reaches down from the top; ground bounce reaches up from the bottom. Both fall off toward the
+        //    middle of the deck, which is genuinely the darkest part of a thick cloud.
+        float fromAbove = exp(-(1.0 - heightInCloud) * kMediaAmbientFalloff);
+        float fromBelow = exp(-heightInCloud * kMediaAmbientFalloff) * kMediaGroundBounce;
+
+        vec3 inScatter = skyAmbient * ambient * (fromAbove + fromBelow);
         {
             float orderExtinction = 1.0;
             float orderPhase      = 1.0;
@@ -454,6 +501,10 @@ vec3 MediaScatter(CelestialRecord sky, vec3 origin, vec3 direction, vec3 sunDire
                 float straight = pow(max(sunlight, 1e-4), orderExtinction);
                 float diffused = mix(straight, kMediaDiffuseFloor, 1.0 - orderWeight);
                 float orderSunlight = max(straight, diffused);
+                // ⚠️ This floor handles SUN light that has diffused sideways through the cloud. It is a
+                //    different mechanism from the ambient term above, which handles SKY and GROUND light, and
+                //    both are needed: the floor alone left bases black because orders 2 and 3 carry only 0.5
+                //    and 0.25 of the weight while the first order still collapses to zero.
                 float orderLobe     = mix(0.25 / 3.14159265, phase, orderPhase);
 
                 inScatter += sunRadiance * (orderSunlight * orderLobe * orderWeight * kMediaAlbedoGain);

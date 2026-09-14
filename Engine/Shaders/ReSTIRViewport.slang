@@ -192,8 +192,24 @@ layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord C
 // The coverage threshold sweeps between these two points on the noise distribution. Measured over 20 000
 //    samples of the 3-octave sum: ~2% of the field exceeds 0.72 and ~97% exceeds 0.28, so coverage 0 is an
 //    (almost) clear sky and coverage 1 is (almost) solid overcast, with 0.5 landing near half cover.
-#define kMediaShapeCeiling 0.72
-#define kMediaShapeFloor   0.28
+// ⚠️ RECALIBRATED AFTER WIDENING THE REMAP WINDOW. With the old narrow window these two made coverage roughly
+//    linear, but a wider window lets far more of the field through: measured, coverage 0.5 produced **77% sky
+//    cover** and shaded 78% of the ground. (Those two agreeing is itself the proof the shadow is correct — it
+//    was the coverage that was wrong, not the shadowing.) Raising the floor pulls the whole mapping back so the
+//    slider means what it says.
+#define kMediaShapeCeiling 0.80
+#define kMediaShapeFloor   0.46
+// How wide the coverage remap window is. 0.28 made the field near-binary — flat, saturated interiors with no
+//    shading detail and an erosion pass that could not bite. See the measurement in CelestialMedia.slang.
+#define kMediaCoverageWindow 0.50
+// How fast sky light from above (and ground bounce from below) fades toward the middle of the cloud deck.
+//    An e-fold across the slab: the centre of a thick cloud is the darkest place in it, but never black.
+#define kMediaAmbientFalloff 1.6
+// How much of the light falling on the ground comes back up into the cloud base. Typical terrain albedo.
+#define kMediaGroundBounce   0.30
+// The noise's vertical wavelength as a fraction of its horizontal one. At 1.0 a 1400 m cloud scale gives 1400 m
+//    vertical features inside a 900 m slab — under one period, i.e. flat pancakes. 0.22 fits ~3 periods.
+#define kMediaVerticalScale  0.22
 // Energy normalisation for the octave sum: a cloud reflects as a body of albedo ~0.9, i.e. radiance E*0.9/pi,
 //    but a sum of phase-function samples averages ~1/4pi. 0.286/0.077 closes the gap. See CelestialMedia.slang.
 #define kMediaAlbedoGain   3.73
@@ -205,7 +221,10 @@ layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord C
 #define kMediaPowderSharpness 6.0
 // Samples along the line to the sun when shadowing GEOMETRY through the cloud deck. Runs once per shaded pixel
 //    on the shadow-ray path, so it is a probe rather than a march.
-#define kMediaShadowSteps 6
+// ⚠️ 6 was too few and biased the shadow HEAVY. Over a ~1200 m slant path each sample stood for 200 m, so a
+//    single hit on a thin cloud was extrapolated across the whole segment: 25% sky cover produced only 19%
+//    sunlit ground, when the two should roughly agree. 12 halves that error and is still a probe, not a march.
+#define kMediaShadowSteps 12
 #define kMediaViewSteps    48
 #define kMediaSunSteps     5
 #define kMediaShapeOctaves 3
@@ -1414,7 +1433,12 @@ void main()
             vec3  mediaRadiance = MediaScatter(skyRecord, CameraOrigin, rayDirection,
                                                skyRecord.SunDirectionAndCosRadius.xyz,
                                                skyRecord.SunIrradianceAndScale.xyz * skyRecord.SunTransmittance.xyz,
-                                               background,
+                                               // ⚠️ THE SKY DOME OVERHEAD, NOT `background`. Passing the sky
+                                               //    along the VIEW ray meant a cloud seen from below was being
+                                               //    "lit" by the sky it is itself blocking, which is why the
+                                               //    undersides rendered black. The zenith is a fair, cheap
+                                               //    stand-in for the hemispherical average.
+                                               CelestialSky(skyRecord, CameraOrigin, vec3(0.0, 0.0, 1.0), false),
                                                kMediaFarDistance, kMediaViewSteps, mediaTransmittance);
             background = background * mediaTransmittance + mediaRadiance;
         }

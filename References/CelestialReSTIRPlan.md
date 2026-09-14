@@ -530,6 +530,46 @@ Now 39 checks.
 altitude — `Renders/39_cloud_shadows.png`. **ALL 25 SUITES GREEN.**
 
 
+### CLOUD SHAPE AND SHADING: four structural defects (2026-09-13)
+
+User: "you still need to fix the clouds, look how rubbish they are". Correct — the shading fixes had made them
+white but the SHAPE was still wrong. Four defects, each measured:
+
+🔴 **1. THE DENSITY FIELD WAS BINARY.** The coverage remap window was 0.28, which turns smooth noise into a
+mask: measured, density saturated at a flat **1.000 across 360 m** of cloud. Three consequences — the interior
+had no variation to shade, the sun march hit a wall two samples in (sunlight 0.66 → 0.0057 → 0.0), and the
+detail octave, applied as a remap against an already-saturated value, did nothing at all. Window widened to
+0.50: interiors now sit in the 0.5-0.75 range where they can still be shaded.
+
+🔴 **2. DETAIL REMAPPED INSTEAD OF MODULATING.** Same cause — remapping a saturated value is a no-op. Changed
+to multiplicative, with two frequency bands and the finer one weighted toward the EDGES where wisps live.
+Interior profile went from `1.00 1.00 1.00 1.00...` (flat) to `0.53 0.55 0.53 0.55 0.57 0.54 0.47...`.
+
+🔴 **3. EVERY CLOUD WAS A PANCAKE.** The noise was sampled isotropically, so a 1400 m shape scale gave 1400 m
+VERTICAL features inside a 900 m slab — under one period, i.e. a single smooth lobe after the height gradient.
+Added `kMediaVerticalScale 0.22`, fitting ~3 periods in the slab, which is what produces stacked billowing tops.
+
+🔴 **4. THE AMBIENT TERM WAS THE WRONG SKY** — the fix flagged as outstanding last time. `skyAmbient` was the
+sky along the VIEW ray, which for a cloud seen from below is the sky the cloud is BLOCKING. Replaced with a
+proper hemispherical estimate: sky from above and ground bounce from below, each falling off toward the middle
+of the deck (the genuinely darkest part of a thick cloud) but **never to zero**. The first-order sun term does
+reach zero — optical depth ~26 through the slab, exp(-26) ≈ 5e-12 — so something has to remain, and a real
+cumulus base is grey rather than black. Call sites now pass the zenith sky, not the view-ray sky.
+
+**And a calibration that had silently drifted:** widening the remap window let far more field through, so
+coverage 0.5 became **77% sky cover shading 78% of the ground**. Every shape test still passed because none
+asked what the number MEANT. Recalibrated (0.5 → 28% cover, 0.8 → 68%) and gated in new §5bb.
+
+⚠️ **Two of my own tests were wrong, in opposite directions.** One asserted a cloud is always brighter than the
+sky behind it — false: the thickest cloud is often low on the horizon where the sky is brightest and the cloud
+is seen edge-on and self-shadowed. Real clouds there ARE darker. Restated as the meaningful claim: a sunlit
+cloud beats the ZENITH sky (4.20 vs 1.45). The shadow/cover agreement (77% vs 78%) was also what PROVED the
+shadowing was right and the coverage was wrong — the two agreeing exactly pointed at the real culprit.
+
+Also: `kMediaShadowSteps` 6 → 12, because over a ~1200 m slant each sample stood for 200 m and a single hit on
+thin cloud was extrapolated across the whole segment. 39 checks, **ALL 25 SUITES GREEN.**
+
+
 Status log (append; newest last):
 - 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
   0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on

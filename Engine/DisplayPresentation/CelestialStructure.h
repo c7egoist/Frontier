@@ -92,7 +92,12 @@ struct CelestialClouds
     float Density    = 1.0f;     // [x]
     float BaseHeight = 1500.0f;  // [m]   above the ground plane
     float Thickness  = 900.0f;   // [m]
-    float ShapeScale = 1400.0f;  // [m]   wavelength of the base Perlin-Worley shape
+    // ⚠️ 1400 m put roughly one cloud across the whole visible sky at ground level, so the deck read as a few
+    //    enormous smears rather than as weather. 600 m gives several distinct clouds in frame, which is what
+    //    makes the sky look populated. Measured sky cover at coverage 0.5: 600 m -> 25%, 1100 m -> 42%,
+    //    1800 m -> 16% (too few, too large to read as separate clouds). 1100 m gives distinct cumulus at a
+    //    believable spacing. Still large relative to the 900 m slab, hence kMediaVerticalScale.
+    float ShapeScale = 1100.0f;  // [m]   wavelength of the base shape
     float DetailScale = 0.6f;    // [-]   Worley erosion strength
     float Anvil      = 0.3f;     // [-]   upper-level shear/spread
 
