@@ -322,19 +322,12 @@ inline void PackCelestialUniform(
     //    a straitjacket: ElementMask overrides the tier completely, so "Low quality but with a starburst" is a
     //    legal combination rather than a special case someone has to add later.
     {
+        // ⚠️ THE STYLE IS ALREADY RESOLVED BY THE TIME WE GET HERE. ApplyLensFlareStyle writes the element mask
+        //    and the shaping into the settings when the style is chosen — this packer only reads. Resolving the
+        //    preset here instead would mean the TOML file and the render disagreed: the file would still say
+        //    "cinematic" while every numeric field under it had been ignored.
         uint32_t Elements = Settings.LensFlare.ElementMask;
-        if (Elements == 0u)
-        {
-            switch (Settings.LensFlare.Tier)
-            {
-                case LensFlareTierCategory::Off:    Elements = 0u; break;
-                case LensFlareTierCategory::Low:    Elements = LensFlareElementStreak; break;
-                case LensFlareTierCategory::Medium: Elements = LensFlareElementStreak | LensFlareElementGhosts; break;
-                case LensFlareTierCategory::High:   Elements = LensFlareElementStreak | LensFlareElementGhosts
-                                                             | LensFlareElementStarburst; break;
-            }
-        }
-        if (!Settings.LensFlare.Enabled) Elements = 0u;
+        if (!Settings.LensFlare.Enabled || Settings.LensFlare.Style == LensFlareStyleCategory::Off) Elements = 0u;
 
         const float Master = Settings.LensFlare.Intensity;
 

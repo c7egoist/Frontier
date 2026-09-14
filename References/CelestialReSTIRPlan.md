@@ -413,6 +413,40 @@ Record 368 -> **432 B (27 vec4s)**. Gates: `Scratchpad/LensFlareTest.cpp` (26 ch
 adding `CelestialFlareHalo` and watching it fail. Renders 28-31. **ALL 24 SUITES GREEN.**
 
 
+### LENS FLARE: quality tiers replaced by a STYLE dropdown (2026-09-13)
+
+User: "I think we should instead use a dropdown to change instead of quality tiers", and asked whether the
+starburst type was the tier.
+
+**Answering the question first: half right, and my naming caused the confusion.** Medium was indeed streak +
+ghosts. But the starburst TYPE was never the tier — the tiers only switched the starburst ON at High, while its
+shape came from a separate `flare.starburst.blades` setting that worked at any tier. Two unrelated knobs, named
+as though they were one.
+
+🔴 **THE TIERS WERE DISHONEST AND THE USER WAS RIGHT TO REJECT THEM.** Counted the expensive operations:
+streak 5, starburst 6, ghosts 6 **plus a loop over every ghost**. The starburst — labelled "High" — is the
+CHEAPER of the two. The ladder was ranking how elaborate each element looks and presenting it as performance.
+A dropdown of looks is what it always was.
+
+**Replaced with `LensFlareStyleCategory`: Off / Cinematic / Vintage / Clean / Custom.** Each preset is a whole
+camera, including its aperture — which is the part the tiers got wrong, since "which starburst you get" belongs
+to a look rather than a hidden separate setting:
+  · Cinematic — long cool anamorphic streak + 4 restrained ghosts, no burst (wide-open cinema lens)
+  · Vintage   — 8 warm ghosts, faint streak, soft **6-point** burst, sharpness 10 (uncoated glass)
+  · Clean     — starburst alone, **14-point**, sharpness 40 (stopped-down modern prime)
+  · Custom    — touches nothing, so hand-tuned values and live TOML survive
+Elements still combine freely: `ElementMask` overrides any preset, and `--flare-elements` switches to Custom.
+
+**A real bug my own test caught.** The default struct says `Style = Cinematic` but `ElementMask = 0`, and a
+default-constructed struct never calls `ApplyLensFlareStyle` — so the settings claimed a flare and rendered
+NOTHING. Measured 0.00000 where the composite test expected light. The two defaults are one statement of intent;
+they now agree and a gate asserts it.
+
+Also gated: presets must leave no residue when switched (apply Vintage then Clean = fresh Clean), Custom must
+preserve hand-tuned values, and `LensFlareTierCategory` must never reappear. 32 checks, 0 failures.
+Renders 32-35 show the four styles. **ALL 24 SUITES GREEN.**
+
+
 Status log (append; newest last):
 - 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
   0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on

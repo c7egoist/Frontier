@@ -219,7 +219,7 @@ int main()
     //    circle — that number IS the distinction, and no brightness setting can fake it.
     {
         Frontier::CelestialStructure high = settings;
-        high.LensFlare.Tier = Frontier::LensFlareTierCategory::High;
+        Frontier::ApplyLensFlareStyle(high.LensFlare, Frontier::LensFlareStyleCategory::Vintage);
         CelestialRecord burst = BuildRecord(high);
         gCelestialRecordPtr = &burst;
 
@@ -282,43 +282,95 @@ int main()
     }
 
     //----------------------------------------------------------------------------------------------------------------
-    Section("5. TIERS ARE PRESETS, AND THE ELEMENTS COMBINE FREELY");
+    Section("5. STYLES ARE WHOLE CAMERAS, AND ELEMENTS STILL COMBINE");
     //----------------------------------------------------------------------------------------------------------------
+    // 🔴 WHY STYLES REPLACED QUALITY TIERS. The old selector was Off/Low/Medium/High, which claims each step
+    //    costs more. It does not: the starburst ("High") is a few trig ops with no loop, while the ghosts
+    //    ("Medium") loop over every ghost — the starburst is the CHEAPER of the two. The ladder was ranking how
+    //    elaborate things look and calling it performance. A style dropdown says what it actually is.
     {
-        auto MaskFor = [&](Frontier::LensFlareTierCategory tier)
+        auto Apply = [&](Frontier::LensFlareStyleCategory style)
         {
             Frontier::CelestialStructure t = settings;
-            t.LensFlare.Tier = tier;
-            t.LensFlare.ElementMask = 0u;
+            Frontier::ApplyLensFlareStyle(t.LensFlare, style);
+            return t;
+        };
+        auto MaskOf = [&](const Frontier::CelestialStructure& t)
+        {
             return uint32_t(BuildRecord(t).FlareStreakAndFlags.w);
         };
 
-        Check(MaskFor(Frontier::LensFlareTierCategory::Off) == 0u, "tier Off draws nothing", "");
-        Check(MaskFor(Frontier::LensFlareTierCategory::Low) == 1u, "tier Low is the streak alone", "");
-        Check(MaskFor(Frontier::LensFlareTierCategory::Medium) == 3u, "tier Medium adds ghosts", "");
-        Check(MaskFor(Frontier::LensFlareTierCategory::High) == 7u, "tier High adds the starburst", "");
+        // 🔴 THE DEFAULT STYLE AND THE DEFAULT MASK MUST AGREE. A default-constructed struct never calls
+        //    ApplyLensFlareStyle, so if the mask defaults to 0 while the style says "Cinematic", the settings
+        //    claim a flare and render none. That is exactly what happened: the composite test measured 0.00000.
+        Frontier::CelestialStructure fresh{};
+        Frontier::CelestialStructure applied{};
+        Frontier::ApplyLensFlareStyle(applied.LensFlare, applied.LensFlare.Style);
+        Check(fresh.LensFlare.ElementMask == applied.LensFlare.ElementMask,
+              "the default mask matches the default style",
+              "fresh " + std::to_string(fresh.LensFlare.ElementMask) + " vs applied "
+                       + std::to_string(applied.LensFlare.ElementMask));
 
-        // The tiers must be strictly nested, so raising quality only ever ADDS. A tier that swapped one element
-        // for another would make the quality setting a matter of taste rather than of cost.
-        Check((MaskFor(Frontier::LensFlareTierCategory::Low) & MaskFor(Frontier::LensFlareTierCategory::Medium))
-                  == MaskFor(Frontier::LensFlareTierCategory::Low)
-           && (MaskFor(Frontier::LensFlareTierCategory::Medium) & MaskFor(Frontier::LensFlareTierCategory::High))
-                  == MaskFor(Frontier::LensFlareTierCategory::Medium),
-              "the tiers are strictly nested - higher only adds", "");
+        Check(MaskOf(Apply(Frontier::LensFlareStyleCategory::Off)) == 0u, "Off draws nothing", "");
+        Check(MaskOf(Apply(Frontier::LensFlareStyleCategory::Cinematic)) == 3u,
+              "Cinematic is streak + ghosts", "mask 3");
+        Check(MaskOf(Apply(Frontier::LensFlareStyleCategory::Vintage)) == 7u,
+              "Vintage is all three", "mask 7");
+        Check(MaskOf(Apply(Frontier::LensFlareStyleCategory::Clean)) == 4u,
+              "Clean is the starburst alone", "mask 4");
 
-        // 🔴 THE COMBINING REQUIREMENT. ElementMask overrides the tier completely, so combinations the tiers
-        //    never produce are legal: a starburst at Low quality, or High without ghosts.
-        Frontier::CelestialStructure odd = settings;
-        odd.LensFlare.Tier = Frontier::LensFlareTierCategory::Low;
-        odd.LensFlare.ElementMask = Frontier::LensFlareElementStreak | Frontier::LensFlareElementStarburst;
-        Check(uint32_t(BuildRecord(odd).FlareStreakAndFlags.w) == 5u,
-              "streak + starburst without ghosts is a legal combination", "mask 5");
+        // 🔴 THE POINT OF STYLES OVER TIERS: each is a different CAMERA, not the same camera with more switches
+        //    on. Two presets that share an element must still shape it differently, or the dropdown is just a
+        //    relabelled quality ladder.
+        const Frontier::CelestialStructure vintage = Apply(Frontier::LensFlareStyleCategory::Vintage);
+        const Frontier::CelestialStructure clean   = Apply(Frontier::LensFlareStyleCategory::Clean);
 
-        Frontier::CelestialStructure ghostsOnly = settings;
-        ghostsOnly.LensFlare.Tier = Frontier::LensFlareTierCategory::High;
-        ghostsOnly.LensFlare.ElementMask = Frontier::LensFlareElementGhosts;
-        Check(uint32_t(BuildRecord(ghostsOnly).FlareStreakAndFlags.w) == 2u,
-              "and the mask overrides a higher tier, not merges with it", "mask 2");
+        Check(vintage.LensFlare.StarburstBlades != clean.LensFlare.StarburstBlades,
+              "Vintage and Clean are different irises",
+              std::to_string(vintage.LensFlare.StarburstBlades) + " vs "
+                  + std::to_string(clean.LensFlare.StarburstBlades) + " blades");
+
+        // Which means they produce a visibly different number of spikes — 6 against 14.
+        Check(vintage.LensFlare.StarburstBlades % 2 == 0 && clean.LensFlare.StarburstBlades % 2 == 1,
+              "so one gives N spikes and the other 2N", "6-point vs 14-point");
+
+        Check(clean.LensFlare.StarburstSharpness > vintage.LensFlare.StarburstSharpness * 2.0f,
+              "Clean's spikes are far harder than Vintage's soft burst",
+              Fixed(vintage.LensFlare.StarburstSharpness, 0) + " vs " + Fixed(clean.LensFlare.StarburstSharpness, 0));
+
+        const Frontier::CelestialStructure cinematic = Apply(Frontier::LensFlareStyleCategory::Cinematic);
+        Check(cinematic.LensFlare.StreakTintB > cinematic.LensFlare.StreakTintR * 2.0f
+           && vintage.LensFlare.StreakTintR > vintage.LensFlare.StreakTintB,
+              "Cinematic streaks cool, Vintage streaks warm", "opposite tints");
+
+        Check(vintage.LensFlare.GhostCount > cinematic.LensFlare.GhostCount,
+              "uncoated Vintage glass ghosts more than coated Cinematic",
+              std::to_string(vintage.LensFlare.GhostCount) + " vs " + std::to_string(cinematic.LensFlare.GhostCount));
+
+        // ⚠️ A PRESET MUST NOT INHERIT FROM WHICHEVER PRESET CAME BEFORE IT. Apply Vintage (8 ghosts, warm) then
+        //    Clean on the SAME struct, and Clean must look exactly like a fresh Clean.
+        Frontier::CelestialStructure sequence = settings;
+        Frontier::ApplyLensFlareStyle(sequence.LensFlare, Frontier::LensFlareStyleCategory::Vintage);
+        Frontier::ApplyLensFlareStyle(sequence.LensFlare, Frontier::LensFlareStyleCategory::Clean);
+        Check(sequence.LensFlare.StarburstBlades == clean.LensFlare.StarburstBlades
+           && sequence.LensFlare.GhostCount      == clean.LensFlare.GhostCount
+           && sequence.LensFlare.StreakTintB     == clean.LensFlare.StreakTintB,
+              "switching styles leaves no residue from the previous one", "");
+
+        // Custom is the one that must leave everything alone, or hand-tuning is impossible.
+        Frontier::CelestialStructure hand = settings;
+        hand.LensFlare.GhostCount = 11;
+        hand.LensFlare.StarburstBlades = 9;
+        Frontier::ApplyLensFlareStyle(hand.LensFlare, Frontier::LensFlareStyleCategory::Custom);
+        Check(hand.LensFlare.GhostCount == 11 && hand.LensFlare.StarburstBlades == 9,
+              "Custom preserves hand-tuned values", "11 ghosts, 9 blades kept");
+
+        // 🔴 AND THE COMBINING REQUIREMENT SURVIVES THE CHANGE. ElementMask still overrides, so a preset plus an
+        //    extra element is legal without inventing another preset for it.
+        Frontier::CelestialStructure combined = Apply(Frontier::LensFlareStyleCategory::Cinematic);
+        combined.LensFlare.ElementMask = Frontier::LensFlareElementStreak | Frontier::LensFlareElementStarburst;
+        Check(MaskOf(combined) == 5u,
+              "streak + starburst without ghosts is still reachable", "mask 5");
     }
 
     //----------------------------------------------------------------------------------------------------------------
@@ -344,7 +396,7 @@ int main()
         //    close to the sun where a halo would live, in the HIGH tier with everything on, and require the
         //    variation around that ring to be large — a halo is uniform, anything structured is not.
         Frontier::CelestialStructure high = settings;
-        high.LensFlare.Tier = Frontier::LensFlareTierCategory::High;
+        Frontier::ApplyLensFlareStyle(high.LensFlare, Frontier::LensFlareStyleCategory::Vintage);
         CelestialRecord all = BuildRecord(high);
         gCelestialRecordPtr = &all;
 

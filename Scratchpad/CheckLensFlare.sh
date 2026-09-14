@@ -74,9 +74,18 @@ CheckConstant "odd blade counts double the spike count" 'mod\(blades, 2\.0\) < 0
 
 # ── Tiers and combining ──────────────────────────────────────────────────────────────────────────────────────────────────────────
 echo
-echo "[LensFlare] tiers and free combination"
-CheckConstant "four tiers exist"                  'LensFlareTierCategory' "$Structure"
-CheckConstant "the mask overrides the tier"       'ElementMask' "$Structure"
+echo "[LensFlare] styles and free combination"
+CheckConstant "the style enum exists"             'LensFlareStyleCategory' "$Structure"
+CheckConstant "styles are applied as whole looks"  'ApplyLensFlareStyle' "$Structure"
+CheckConstant "the mask overrides the style"      'ElementMask' "$Structure"
+# ⚠️ The quality ladder was removed deliberately: measured, the starburst ("High") is cheaper than the ghosts
+#    ("Medium"), so the tiers ranked elaborateness and called it performance. If they come back, so does the lie.
+if grep -q 'LensFlareTierCategory' "$Structure" "$Viewport"; then
+    echo "  FAIL  the quality tiers returned; they claimed a cost order the measurements contradict"
+    Fail=1
+else
+    echo "  OK    no quality-tier enum (styles replaced it)"
+fi
 CheckConstant "the game exposes --flare"          '\-\-flare' "Projects/Project-Zero/Source/GameExecution.cpp"
 CheckConstant "and --flare-elements for combining" '\-\-flare-elements' "Projects/Project-Zero/Source/GameExecution.cpp"
 

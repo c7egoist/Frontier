@@ -72,8 +72,8 @@ void PrintUsage(const char* Program) noexcept
               << "  --exposure <float>         Manual-mode tone-map scalar\n"
               << "  --adaptive                 frame-metered exposure\n"
               << "  --sky-exposure             exposure from the sun's elevation (steady under camera motion)\n"
-              << "  --flare off|low|medium|high   lens flare quality tier (low=streak, medium=+ghosts, high=+starburst)\n"
-              << "  --flare-elements <list>    comma-separated streak,ghosts,starburst - overrides the tier\n"
+              << "  --flare <style>            lens flare look: off, cinematic, vintage, clean, custom\n"
+              << "  --flare-elements <list>    comma-separated streak,ghosts,starburst - switches to custom\n"
               << "  --flare-intensity <x>      master flare multiplier\n"
               << "  --no-flare                 disable the lens flare entirely\n"
               << "  --no-gi --no-aa --no-temporal --no-spatial --uniform-pick --no-denoise --no-reprojection\n"
@@ -151,15 +151,16 @@ int main(int argc, char** argv)
         else if (std::strcmp(Arg, "--no-flare") == 0)        Celestial.LensFlare.Enabled = false;
         else if (std::strcmp(Arg, "--flare") == 0)
         {
-            // Quality tier by name, because "--flare 2" tells a reader nothing. The tiers are presets over the
-            //    same three elements; --flare-elements overrides them entirely.
+            // A named LOOK, not a quality level. Applying it stamps the whole camera character — elements,
+            //    blade count, tints — into the settings, which is then what the TOML template will show.
             if (const char* V = NeedValue(Arg))
             {
-                if      (std::strcmp(V, "off")    == 0) Celestial.LensFlare.Tier = Frontier::LensFlareTierCategory::Off;
-                else if (std::strcmp(V, "low")    == 0) Celestial.LensFlare.Tier = Frontier::LensFlareTierCategory::Low;
-                else if (std::strcmp(V, "medium") == 0) Celestial.LensFlare.Tier = Frontier::LensFlareTierCategory::Medium;
-                else if (std::strcmp(V, "high")   == 0) Celestial.LensFlare.Tier = Frontier::LensFlareTierCategory::High;
-                else std::cerr << "[Celestial] --flare wants off|low|medium|high, got '" << V << "'\n";
+                if      (std::strcmp(V, "off")       == 0) Frontier::ApplyLensFlareStyle(Celestial.LensFlare, Frontier::LensFlareStyleCategory::Off);
+                else if (std::strcmp(V, "cinematic") == 0) Frontier::ApplyLensFlareStyle(Celestial.LensFlare, Frontier::LensFlareStyleCategory::Cinematic);
+                else if (std::strcmp(V, "vintage")   == 0) Frontier::ApplyLensFlareStyle(Celestial.LensFlare, Frontier::LensFlareStyleCategory::Vintage);
+                else if (std::strcmp(V, "clean")     == 0) Frontier::ApplyLensFlareStyle(Celestial.LensFlare, Frontier::LensFlareStyleCategory::Clean);
+                else if (std::strcmp(V, "custom")    == 0) Celestial.LensFlare.Style = Frontier::LensFlareStyleCategory::Custom;
+                else std::cerr << "[Celestial] --flare wants off|cinematic|vintage|clean|custom, got '" << V << "'\n";
             }
         }
         else if (std::strcmp(Arg, "--flare-elements") == 0)
@@ -183,7 +184,9 @@ int main(int argc, char** argv)
                     if (Comma == std::string::npos) break;
                     Start = Comma + 1u;
                 }
+                // Overriding the elements by hand means this is no longer one of the named looks.
                 Celestial.LensFlare.ElementMask = Mask;
+                Celestial.LensFlare.Style       = Frontier::LensFlareStyleCategory::Custom;
             }
         }
         else if (std::strcmp(Arg, "--flare-intensity") == 0) { if (const char* V = NeedValue(Arg)) Celestial.LensFlare.Intensity = static_cast<float>(std::atof(V)); }

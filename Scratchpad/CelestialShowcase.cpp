@@ -221,7 +221,9 @@ int main(int argc, char** argv)
     //---------------------------------------------------------------------------------------------------------
     Frontier::CelestialStructure settings{};          // defaults: Benoni, -26.19, +28.32, UTC+2, 2026-09-13
     settings.Observation.LocalHours = hours;
-    if (flareTier >= 0) settings.LensFlare.Tier = static_cast<Frontier::LensFlareTierCategory>(flareTier);
+    if (flareTier >= 0)
+        Frontier::ApplyLensFlareStyle(settings.LensFlare,
+                                      static_cast<Frontier::LensFlareStyleCategory>(flareTier));
 
     const Frontier::CelestialSolution solution = Frontier::SolveCelestial(settings);
 
