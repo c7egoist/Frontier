@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Slate — World Browser (design proof)</title>
+<style>
+  /* ══════════════════════════════════════════════════════════════════════════════════════════════════════════
+     WORLD BROWSER — design proof for the engine-side InterfaceOutlinerSequence.
+     Tokens are lifted verbatim from References/UIComponents.html so the C++ renderer has one source of truth.
+     Layout follows OutlinerV2: [ tree | details ] with a whole-card slide to per-object properties.
+     ══════════════════════════════════════════════════════════════════════════════════════════════════════════ */
+  :root{
+    --bg:#050505; --panel:#121212; --inset:#1a1a1a; --field:#000000;
+    --raised:#222222; --selected:#2a2a2a;
+    --stroke:rgba(255,255,255,.05); --stroke-strong:#2e2e2e;
+    --text:#f0f0f0; --text-dim:#888888; --text-faint:#5c5c5c;
+    --accent:#ffffff; --accent-soft:rgba(255,255,255,.12);
+    --hi:#6c77ff; --danger:#ef4444; --ok:#22c55e; --caution:#f59e0b;
+    --ax-x:#ef5350; --ax-y:#69d06d; --ax-z:#5b8cff;
+    --r-panel:24px; --r-inset:18px; --r-pill:999px;
+    --row-h:32px; --ctl-h:40px;
+    --ease:cubic-bezier(.22,.61,.36,1);
+    --shadow-panel:0 20px 60px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.03);
+  }
+  *{box-sizing:border-box;margin:0;padding:0;font-family:'Segoe UI',system-ui,sans-serif;user-select:none;}
+  html,body{height:100%;}
+  body{background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;padding:24px;overflow:hidden;}
+
+  .card{width:min(1040px,97vw);height:min(700px,94vh);background:var(--panel);border-radius:var(--r-panel);
+    box-shadow:var(--shadow-panel);display:flex;flex-direction:column;overflow:hidden;}
+  .card-head,.card-foot{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:0 20px;}
+  .card-head{height:56px;border-bottom:1px solid var(--stroke);}
+  .card-foot{height:40px;border-top:1px solid var(--stroke);color:var(--text-faint);font-size:11.5px;}
+  .h-title{font-size:14px;font-weight:600;letter-spacing:.4px;}
+  .h-sub{font-size:11px;color:var(--text-faint);}
+  .spacer{flex:1;}
+  .iconbtn{width:28px;height:28px;border-radius:50%;border:none;cursor:pointer;background:var(--raised);
+    color:var(--text-dim);display:grid;place-items:center;
+    transition:background .18s var(--ease),color .18s var(--ease),transform .18s var(--ease);}
+  .iconbtn:hover{background:#2e2e2e;color:var(--text);transform:scale(1.08);}
+  .iconbtn:active{transform:scale(.94);}
+  .iconbtn.on{background:var(--accent);color:#000;}
+
+  .view-wrap{flex:1;overflow:hidden;min-height:0;}
+  .view{height:100%;display:flex;min-width:0;}
+
+  /* One page. The split is animated by flex-basis so either side can take the whole card without a
+     navigation step — no separate properties screen, no back button. */
+  .tree-pane{flex:0 0 54%;min-width:0;display:flex;flex-direction:column;border-right:1px solid var(--stroke);
+    transition:flex-basis .32s var(--ease),border-color .32s var(--ease),opacity .22s var(--ease);}
+  .det-pane{flex:1;min-width:0;display:flex;flex-direction:column;overflow-y:auto;scrollbar-width:none;
+    padding:14px 18px 16px;transition:opacity .22s var(--ease),padding .32s var(--ease);}
+  .det-pane::-webkit-scrollbar{display:none;}
+
+  .view.only-tree  .tree-pane{flex-basis:100%;border-right-color:transparent;}
+  .view.only-tree  .det-pane {opacity:0;pointer-events:none;padding-left:0;padding-right:0;flex-basis:0;}
+  .view.only-props .tree-pane{flex-basis:0;opacity:0;pointer-events:none;border-right-color:transparent;}
+  .view.only-props .det-pane {flex:1;}
+
+  .sec-label{font-size:10px;letter-spacing:1.6px;color:var(--text-faint);text-transform:uppercase;padding:14px 20px 8px;
+    display:flex;align-items:center;gap:8px;}
+  .filter-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:0 20px 12px;}
+
+  .tree{flex:1;overflow-y:auto;padding:0 12px 10px;scrollbar-width:none;}
+  .tree::-webkit-scrollbar{display:none;}
+  .row{display:flex;align-items:center;gap:8px;height:var(--row-h);padding:0 8px;cursor:pointer;
+    transition:background .14s var(--ease);}
+  .row:hover{background:#1c1c1c;}
+  .row.sel{background:var(--selected);box-shadow:inset 2px 0 0 var(--accent);}
+  .row .tw{width:16px;height:16px;flex:0 0 16px;display:grid;place-items:center;color:var(--text-faint);
+    transition:transform .18s var(--ease);}
+  .row .tw.open{transform:rotate(90deg);}
+  .row .tw.leaf{visibility:hidden;}
+  .row .ni{width:16px;height:16px;flex:0 0 16px;display:grid;place-items:center;}
+  .row .nm{font-size:12.5px;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .row.locked .nm{color:var(--text-faint);}
+  .row .st{width:20px;height:20px;flex:0 0 20px;border:none;background:transparent;color:var(--text-faint);
+    cursor:pointer;display:grid;place-items:center;transition:color .15s var(--ease);}
+  .row .st:hover{color:var(--text);}
+  .row .st.off{color:#333;}
+  .row .st.act{color:var(--hi);}
+
+  .pcard{background:var(--inset);border-radius:var(--r-inset);padding:14px 16px 16px;margin-bottom:12px;
+    animation:cardIn .28s var(--ease);}
+  @keyframes cardIn{from{transform:translateY(8px);opacity:0;}to{transform:none;opacity:1;}}
+  .pcard h4{font-size:10.5px;letter-spacing:1.4px;text-transform:uppercase;color:var(--text-faint);margin-bottom:12px;}
+  /* .crow equivalent: gap 14, min-height matches the control height so rows do not crowd */
+  .prow{display:flex;align-items:center;gap:12px;margin-bottom:10px;min-height:30px;}
+  .prow:last-child{margin-bottom:0;}
+  .prow .pl{flex:0 0 76px;font-size:12px;font-weight:500;color:var(--text-dim);}
+  /* axis fields — .vpill geometry with the axis letter in the leading cell (ControlKit::ValuePill inverted:
+     the label cell leads instead of trailing, because X/Y/Z reads better before the number). */
+  .vec{display:flex;gap:6px;flex:1;min-width:0;}
+  .vfield{flex:1;min-width:0;height:32px;display:flex;border-radius:var(--r-pill);overflow:hidden;
+    border:1px solid var(--stroke);transition:border-color .15s var(--ease);}
+  .vfield:hover{border-color:var(--stroke-strong);}
+  .vfield:focus-within{border-color:var(--hi);}
+  .vfield .ax{width:26px;flex:0 0 26px;background:var(--inset);border-right:1px solid var(--stroke);
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:11px;}
+  .vfield.x .ax{color:var(--ax-x);} .vfield.y .ax{color:var(--ax-y);} .vfield.z .ax{color:var(--ax-z);}
+  .vfield .num{flex:1;min-width:0;background:var(--field);display:flex;align-items:center;padding:0 8px;}
+  .vfield input{background:none;border:none;color:var(--text);font-size:12px;width:100%;outline:none;
+    font-family:inherit;font-variant-numeric:tabular-nums;}
+  .vfield input:disabled{color:var(--text-faint);}
+
+  /* dropdown — UIComponents .dd / .dd-btn / .dd-menu, verbatim geometry */
+  .dd{position:relative;min-width:0;}
+  .dd-btn{display:flex;align-items:stretch;height:34px;border-radius:var(--r-pill);overflow:hidden;
+    border:1px solid var(--stroke);cursor:pointer;}
+  .dd-btn .cur{flex:1;background:var(--field);display:flex;align-items:center;padding:0 14px;font-size:12.5px;
+    font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .dd-btn .caret{width:36px;background:var(--inset);border-left:1px solid var(--stroke);display:flex;
+    align-items:center;justify-content:center;color:var(--text-dim);transition:background .15s var(--ease);}
+  .dd-btn:hover .caret{background:var(--raised);}
+  .dd-btn .caret svg{transition:transform .2s var(--ease);}
+  .dd.open .caret svg{transform:rotate(180deg);}
+  .dd-menu{position:absolute;top:calc(100% + 8px);left:0;right:0;z-index:40;background:var(--field);
+    border:1px solid var(--stroke-strong);border-radius:18px;padding:6px;display:none;flex-direction:column;
+    gap:2px;box-shadow:0 24px 60px rgba(0,0,0,.75);min-width:190px;}
+  .dd.open .dd-menu{display:flex;}
+  .dd-menu .opt{padding:8px 12px;border-radius:var(--r-pill);cursor:pointer;color:var(--text-dim);font-size:12.5px;
+    font-weight:500;display:flex;align-items:center;gap:9px;transition:background .12s var(--ease),color .12s var(--ease);}
+  .dd-menu .opt:hover{background:#141414;color:var(--text);}
+  .dd-menu .opt.sel{color:var(--text);background:#181818;}
+  .dd-menu .opt .tick{width:14px;flex:0 0 14px;display:grid;place-items:center;opacity:0;}
+  .dd-menu .opt.sel .tick{opacity:1;}
+  .dd-menu .sep{height:1px;background:var(--stroke);margin:4px 8px;}
+  /* switch — UIComponents verbatim: 46 x 26, knob 20, on = accent fill + #111 knob */
+  .switch{width:46px;height:26px;border-radius:var(--r-pill);flex-shrink:0;cursor:pointer;
+    background:var(--raised);border:1px solid var(--stroke);position:relative;transition:background .18s var(--ease);}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:20px;height:20px;border-radius:50%;
+    background:#bdbdbd;transition:transform .18s var(--ease),background .18s var(--ease);}
+  .switch[data-on="true"]{background:var(--accent);}
+  .switch[data-on="true"]::after{transform:translateX(20px);background:#111;}
+
+  /* slider — matches ControlKit::Slider, which is the authority. The C++ fills the left side with
+     FillRectangle(..., R = TrackH * 0.5), i.e. the fill is itself a PILL, not a hard-edged gradient stop.
+     A CSS linear-gradient cannot round its own end, so the track is built from real elements instead. */
+  .kslider{flex:1;min-width:90px;height:28px;position:relative;cursor:pointer;touch-action:none;}
+  .kslider .track{position:absolute;inset:0;border-radius:var(--r-pill);background:var(--raised);}
+  /* The filled side is #4a4a4a — dark, close to the track, so the thumb is what carries the eye.
+     A bright fill turns every row into a progress bar and the panel stops reading as controls. */
+  .kslider .kfill{position:absolute;left:0;top:0;height:100%;border-radius:var(--r-pill);background:#4a4a4a;
+    min-width:28px;}
+  .kslider.hi .kfill{background:var(--hi);}
+  .kslider .knob{position:absolute;top:50%;width:26px;height:26px;border-radius:50%;background:#e0e0e0;
+    transform:translate(-50%,-50%);transition:transform .12s var(--ease);
+    box-shadow:0 1px 3px rgba(0,0,0,.5);}
+  .kslider.drag .knob{transform:translate(-50%,-50%) scale(1.1);}
+  /* .thin — the quiet variant, kept for reference; the property panels use the full-height slider
+     because that is what the engine's validation build shows. */
+  .kslider.thin{height:18px;}
+  .kslider.thin .track{top:4px;bottom:4px;}
+  .kslider.thin .kfill{top:4px;height:10px;min-width:18px;}
+  .kslider.thin .knob{width:18px;height:18px;}
+
+  /* value pill — UIComponents .vpill, 118 px: number cell + 44 px unit cell */
+  /* .vpill — kit geometry: 118 px wide, 44 px unit cell, number cell in --field, unit cell in --inset */
+  .vpill{width:104px;height:30px;flex:0 0 104px;display:flex;border-radius:var(--r-pill);overflow:hidden;
+    border:1px solid var(--stroke);}
+  .vpill .num{flex:1;background:var(--field);display:flex;align-items:center;justify-content:center;
+    font-size:13.5px;font-weight:600;letter-spacing:.4px;font-variant-numeric:tabular-nums;}
+  .vpill .unit{width:36px;background:var(--inset);border-left:1px solid var(--stroke);display:flex;
+    align-items:center;justify-content:center;color:var(--text-faint);font-size:11.5px;font-weight:500;}
+
+  /* search field — UIComponents .field */
+  .field{flex:1;height:34px;border-radius:var(--r-pill);background:var(--field);border:1px solid var(--stroke);
+    display:flex;align-items:center;gap:10px;padding:0 14px;min-width:0;}
+  .field:focus-within{border-color:var(--stroke-strong);}
+  .field input{flex:1;min-width:0;background:transparent;border:none;outline:none;color:var(--text);
+    font:inherit;font-size:12.5px;}
+  .field input::placeholder{color:var(--text-faint);}
+  .field .ic{color:var(--text-faint);display:grid;place-items:center;}
+  .field .clr{width:18px;height:18px;border:none;border-radius:50%;background:var(--raised);color:var(--text-dim);
+    cursor:pointer;display:grid;place-items:center;font-size:11px;line-height:1;}
+  .field .clr:hover{background:var(--danger);color:#fff;}
+  .search-row{display:flex;align-items:center;gap:8px;padding:0 20px 8px;}
+  .search-row .dd{flex:0 0 150px;}
+
+  /* notes — OutlinerV2 .notes */
+  .notes{width:100%;min-height:76px;resize:vertical;background:var(--field);border:1px solid var(--stroke);
+    border-radius:12px;color:var(--text);font-size:12px;line-height:1.5;padding:10px 12px;outline:none;
+    user-select:text;font-family:inherit;transition:border-color .15s var(--ease);}
+  .notes:focus{border-color:var(--hi);}
+  .notes::placeholder{color:var(--text-faint);}
+
+  /* colour swatches — OutlinerV2 .swatch */
+  .swatches{display:flex;flex-wrap:wrap;gap:8px;flex:1;align-items:center;}
+  .swatch{width:22px;height:22px;border-radius:50%;cursor:pointer;border:1px solid rgba(255,255,255,.12);
+    transition:transform .15s var(--ease),box-shadow .15s var(--ease);}
+  .swatch:hover{transform:scale(1.15);}
+  .swatch.on{box-shadow:0 0 0 2px var(--inset),0 0 0 4px #fff;}
+  .swatch.none{background:transparent;position:relative;}
+  .swatch.none::after{content:"";position:absolute;left:2px;right:2px;top:50%;height:1.5px;background:var(--danger);
+    transform:rotate(-45deg);}
+
+  /* inline rename — used by both the tree row and the properties name field */
+  .nm input,.name-edit input{background:var(--field);border:1px solid var(--hi);color:var(--text);
+    font-size:12.5px;padding:1px 6px;outline:none;border-radius:6px;width:100%;font-family:inherit;
+    user-select:text;}
+  .name-edit{font-size:12.5px;cursor:text;padding:3px 7px;margin:-3px -7px;border-radius:6px;
+    transition:background .15s var(--ease);flex:1;}
+  .name-edit:hover{background:rgba(255,255,255,.05);}
+  .vfield input{cursor:text;}
+
+  /* animated open/close — the child block collapses its own height, and each row fades in behind it */
+  .kids{overflow:hidden;transition:height .26s var(--ease),opacity .2s var(--ease);}
+  .kids.shut{height:0 !important;opacity:0;}
+  @keyframes rowIn{from{opacity:0;transform:translateY(-3px);}to{opacity:1;transform:none;}}
+  .row.fresh{animation:rowIn .2s var(--ease);}
+  .hitcount{font-size:11px;color:var(--text-faint);white-space:nowrap;font-variant-numeric:tabular-nums;}
+  /* active-filter pills — OutlinerV2 .pill, removable */
+  .filter-row{display:flex;align-items:center;flex-wrap:wrap;gap:7px;padding:0 20px 10px;min-height:0;}
+  .filter-row:empty{padding-bottom:0;}
+  .pill{height:26px;padding:0 5px 0 11px;border-radius:var(--r-pill);background:#fff;color:#000;
+    font-size:11px;font-weight:600;display:flex;align-items:center;gap:5px;animation:pillIn .22s var(--ease);}
+  @keyframes pillIn{from{transform:scale(.7);opacity:0;}to{transform:scale(1);opacity:1;}}
+  .pill .px{width:17px;height:17px;border-radius:50%;border:none;cursor:pointer;background:transparent;color:#000;
+    font-size:10px;display:grid;place-items:center;transition:background .15s var(--ease),color .15s var(--ease);}
+  .pill .px:hover{background:var(--danger);color:#fff;}
+  mark{background:rgba(108,119,255,.35);color:var(--text);border-radius:2px;padding:0 1px;}
+  .nohits{padding:18px 20px;color:var(--text-faint);font-size:12px;text-align:center;}
+  /* plain readout for non-editable values (child counts, material names, status) */
+  .val{font-size:11.5px;color:var(--text-dim);min-width:44px;text-align:right;font-variant-numeric:tabular-nums;}
+  .empty{display:grid;place-items:center;height:100%;color:var(--text-faint);font-size:12px;text-align:center;padding:24px;}
+  .badge{font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;padding:2px 7px;border-radius:var(--r-pill);
+    background:var(--raised);color:var(--text-dim);font-weight:600;}
+  .badge.dyn{background:rgba(108,119,255,.18);color:#9aa2ff;}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="card-head">
+    <div><div class="h-title" id="hTitle">World Browser</div>
+         <div class="h-sub" id="hSub">Cornell Box · 8 objects</div></div>
+    <div class="spacer"></div>
+    <!-- One page, two collapsible sides. Either pane can be given the whole card; there is no separate
+         properties screen to navigate to and back from. -->
+    <button class="iconbtn" id="btnOnlyTree" title="Outliner only">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round"><path d="M4 6h10M4 12h10M4 18h10"/><path d="M18 4v16" opacity=".35"/></svg></button>
+    <button class="iconbtn on" id="btnSplit" title="Split — outliner and properties">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round"><rect x="3" y="4" width="7" height="16" rx="1.5"/><rect x="14" y="4" width="7" height="16" rx="1.5"/></svg></button>
+    <button class="iconbtn" id="btnOnlyProps" title="Properties only">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round"><path d="M6 4v16" opacity=".35"/><path d="M10 6h10M10 12h10M10 18h10"/></svg></button>
+  </div>
+
+  <div class="view-wrap">
+    <div class="view" id="mainView">
+      <div class="tree-pane">
+        <div class="sec-label">Outliner</div>
+        <!-- Search and the filter dropdown share one line; the chips the dropdown adds appear on the row
+             below, so adding filters never reflows the search field. -->
+        <div class="search-row">
+          <div class="field">
+            <span class="ic"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+            <input id="search" type="text" placeholder="Search objects…" autocomplete="off" spellcheck="false">
+            <button class="clr" id="clrSearch" title="Clear" style="display:none">✕</button>
+          </div>
+          <div class="dd" id="ddFilter">
+            <div class="dd-btn"><div class="cur" id="ddCur">All types</div>
+              <div class="caret"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></div></div>
+            <div class="dd-menu" id="ddMenu"></div>
+          </div>
+        </div>
+        <div class="filter-row" id="chipRow"></div>
+        <div class="tree" id="tree"></div>
+      </div>
+      <div class="det-pane" id="details"></div>
+    </div>
+  </div>
+
+  <div class="card-foot"><span id="footSel">1 selected</span>
+    <span class="hitcount" id="hitcount" style="margin-left:14px"></span><div class="spacer"></div>
+    <span>InterfaceOutlinerSequence · design proof</span></div>
+</div>
+
+<script>
+/* ── icons ─────────────────────────────────────────────────────────────────────────────────── */
+const S=(p,c,sz)=>`<svg width="${sz||14}" height="${sz||14}" viewBox="0 0 24 24" fill="none" stroke="${c||'currentColor'}"
+  stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const P={
+  folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  mesh  :'<path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="M12 22V12"/><path d="m3 7 9 5 9-5"/>',
+  light :'<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9 4.9 19.1"/>',
+  camera:'<rect x="2" y="6" width="13" height="12" rx="2"/><path d="m15 10 7-4v12l-7-4z"/>',
+  sky   :'<path d="M4 16a5 5 0 1 1 3-9 6 6 0 1 1 5 9z"/>',
+  sun   :'<circle cx="12" cy="12" r="5"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>',
+  moon  :'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  cube  :'<path d="M12 2 3 7v10l9 5 9-5V7z"/>',
+};
+const COL={folder:'#c9a24b',mesh:'#9aa0a6',light:'#f5d34b',camera:'#69c3ff',sky:'#8fd3ff',sun:'#ffb14b',moon:'#b8c4d6'};
+const PALETTE=['#c9a24b','#ef5350','#f59e0b','#22c55e','#3b82f6','#8b5cf6','#ec4899','#9aa0a6'];
+const IC={
+  eye:()=>S('<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>'),
+  eyeoff:()=>S('<path d="M2 12s3.5-7 10-7c2 0 3.8.7 5.3 1.6M22 12s-3.5 7-10 7c-2 0-3.8-.7-5.3-1.6"/><path d="m3 3 18 18"/>'),
+  lock:()=>S('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
+  unlock:()=>S('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/>'),
+  motion:()=>S('<path d="M3 12h4l3-8 4 16 3-8h4"/>'),
+  chev:()=>S('<path d="m9 6 6 6-6 6"/>'),
+};
+
+/* ── model ─────────────────────────────────────────────────────────────────────────────────── */
+let UID=0;
+const N=(name,type,kids,x)=>({id:++UID,name,type,kids:kids||[],open:true,vis:true,locked:false,dynamic:false,
+  pos:[0,0,0],rot:[0,0,0],color:null,notes:'',...(x||{})});
+const scene=[
+  N('Environment','folder',[
+    N('Sky Atmosphere','sky',[],{locked:true}),
+    N('Sun','sun',[],{dynamic:true}),
+    N('Moon','moon',[],{dynamic:true}),
+  ]),
+  N('Geometry','folder',[
+    N('Floor','mesh',[],{locked:true}),
+    N('Ceiling','mesh',[],{locked:true}),
+    N('Back Wall','mesh',[],{locked:true}),
+    N('Left Wall (Red)','mesh',[],{locked:true}),
+    N('Right Wall (Green)','mesh',[],{locked:true}),
+    N('Tall Box','mesh',[],{dynamic:true,pos:[-0.35,1.35,0.60],rot:[0,0,22]}),
+    N('Short Box','mesh',[],{dynamic:true,pos:[0.35,0.75,0.30],rot:[0,0,-18]}),
+  ]),
+  N('Lighting','folder',[ N('Ceiling Luminaire','light',[],{pos:[0,1.0,1.995]}) ]),
+  N('Cameras','folder',[ N('Main Camera','camera',[],{pos:[0,-1.95,1.0]}) ]),
+];
+const LABEL={folder:'Folder',mesh:'Mesh',light:'Light',camera:'Camera',sky:'Sky',sun:'Sun',moon:'Moon'};
+
+const flat=[]; const walk=(l,d,p)=>l.forEach(n=>{n.depth=d;n.parent=p;flat.push(n);walk(n.kids,d+1,n);});
+const reflat=()=>{flat.length=0;walk(scene,0,null);};
+let selId=null; const filters=new Set(); let query='';
+const cur=()=>flat.find(n=>n.id===selId)||null;
+
+/* A node survives if it matches the search AND the type filter, or if a descendant does — otherwise searching
+   would hide the folders the hits live in and the tree would collapse into an unreadable flat list. */
+const selfMatch=n=>{
+  const q = !query || n.name.toLowerCase().includes(query);
+  const t = !filters.size || filters.has(LABEL[n.type]);
+  return q && t;
+};
+const subtreeMatch=n=>selfMatch(n)||n.kids.some(subtreeMatch);
+const countHits=()=>flat.filter(n=>n.type!=='folder'&&selfMatch(n)).length;
+const mark=name=>{
+  if(!query) return name;
+  const i=name.toLowerCase().indexOf(query);
+  if(i<0) return name;
+  return name.slice(0,i)+'<mark>'+name.slice(i,i+query.length)+'</mark>'+name.slice(i+query.length);
+};
+
+/* ── layout modes ──────────────────────────────────────────────────────────────────────────── */
+const mainView=document.getElementById('mainView');
+const hT=document.getElementById('hTitle'), hS=document.getElementById('hSub');
+const MODES={'only-tree':'btnOnlyTree','split':'btnSplit','only-props':'btnOnlyProps'};
+let mode='split';
+function setMode(m){
+  mode=m;
+  mainView.classList.remove('only-tree','only-props');
+  if(m!=='split') mainView.classList.add(m);
+  Object.entries(MODES).forEach(([k,id])=>document.getElementById(id).classList.toggle('on',k===m));
+  updateHeader();
+}
+function updateHeader(){
+  const n=cur();
+  if(mode==='only-props'&&n){ hT.textContent=n.name; hS.textContent=LABEL[n.type]+' Properties'; }
+  else{ hT.textContent='World Browser';
+        hS.textContent='Cornell Box · '+flat.filter(x=>x.type!=='folder').length+' objects'; }
+}
+Object.entries(MODES).forEach(([k,id])=>document.getElementById(id).onclick=()=>setMode(k));
+
+/* ── inline rename ─────────────────────────────────────────────────────────────────────────── */
+/* Shared by the tree row and the properties name field so both behave identically: Enter commits,
+   Escape reverts, blur commits, and an empty name is refused rather than silently accepted. */
+function beginRename(n,host,after){
+  if(!host||host.querySelector('input')) return;
+  const before=n.name;
+  host.innerHTML=`<input value="${before.replace(/"/g,'&quot;')}">`;
+  const inp=host.querySelector('input');
+  inp.focus(); inp.select();
+  let done=false;
+  const finish=commit=>{
+    if(done) return; done=true;
+    const v=inp.value.trim();
+    n.name = (commit && v) ? v : before;
+    after();
+  };
+  inp.onkeydown=e=>{ e.stopPropagation();
+    if(e.key==='Enter') finish(true);
+    if(e.key==='Escape') finish(false); };
+  inp.onblur=()=>finish(true);
+  inp.onclick=e=>e.stopPropagation();
+  inp.ondblclick=e=>e.stopPropagation();
+}
+
+/* ── tree ──────────────────────────────────────────────────────────────────────────────────── */
+const treeEl=document.getElementById('tree');
+/* Twirling a branch animates its child block from its measured height to zero (and back), rather than
+   re-rendering the tree. Re-rendering would snap, and would also destroy any inline rename in progress. */
+function toggleBranch(n,row){
+  const kids=row.nextElementSibling;
+  if(!kids||!kids.classList.contains('kids')) return;
+  const tw=row.querySelector('.tw');
+  n.open=!n.open;
+  tw.classList.toggle('open',n.open);
+  const h=kids.scrollHeight;
+  if(n.open){
+    kids.classList.remove('shut'); kids.style.height=h+'px';
+    setTimeout(()=>{ if(n.open) kids.style.height='auto'; },270);
+  }else{
+    kids.style.height=h+'px';
+    requestAnimationFrame(()=>{ kids.style.height='0px'; kids.classList.add('shut'); });
+  }
+}
+
+function renderTree(animateFresh){
+  reflat(); treeEl.innerHTML='';
+  let shown=0;
+  const build=(list,host)=>list.forEach(n=>{
+    if(!subtreeMatch(n)) return;
+    shown++;
+    const row=document.createElement('div');
+    row.className='row'+(n.id===selId?' sel':'')+(n.locked?' locked':'');
+    row.style.paddingLeft=(8+n.depth*18)+'px';
+    const leaf=!n.kids.length;
+    // While a query is live every branch is forced open, otherwise a hit inside a collapsed folder is invisible.
+    const open = query ? true : n.open;
+    row.innerHTML=
+      `<span class="tw ${leaf?'leaf':''} ${open?'open':''}">${IC.chev()}</span>`+
+      `<span class="ni">${S(P[n.type]||P.cube,n.color||COL[n.type],14)}</span>`+
+      `<span class="nm">${mark(n.name)}</span>`+
+      (n.dynamic?`<span class="badge dyn">dyn</span>`:'')+
+      (n.type!=='folder'?`<button class="st ${n.locked?'act':''}" data-a="lock" title="Locked">${n.locked?IC.lock():IC.unlock()}</button>`:'')+
+      (n.type!=='folder'?`<button class="st ${n.dynamic?'act':''}" data-a="dyn" title="Dynamic">${IC.motion()}</button>`:'')+
+      `<button class="st ${n.vis?'':'off'}" data-a="vis" title="Visible">${n.vis?IC.eye():IC.eyeoff()}</button>`;
+    if(!leaf) row.querySelector('.tw').onclick=e=>{e.stopPropagation();toggleBranch(n,row);};
+    row.querySelectorAll('.st').forEach(b=>b.onclick=e=>{
+      e.stopPropagation(); const a=b.dataset.a;
+      if(a==='vis')n.vis=!n.vis; if(a==='lock')n.locked=!n.locked; if(a==='dyn')n.dynamic=!n.dynamic;
+      renderTree(); renderDetails();});
+    row.onclick=()=>{selId=n.id;renderTree();renderDetails();updateHeader();};
+    // Double click renames in place. Guarded so the click handler above does not re-render mid-edit.
+    row.ondblclick=e=>{e.stopPropagation();beginRename(n,row.querySelector('.nm'),()=>{renderTree();renderDetails();});};
+    host.appendChild(row);
+    if(!leaf){
+      const kids=document.createElement('div');
+      kids.className='kids'+(open?'':' shut');
+      if(!open) kids.style.height='0px';
+      host.appendChild(kids);
+      build(n.kids,kids);
+    }
+  });
+  build(scene,treeEl);
+  if(!shown) treeEl.innerHTML=`<div class="nohits">No objects match “${query}”</div>`;
+  // Children of collapsed branches are built but hidden, so a later twirl has a real height to animate to.
+  treeEl.querySelectorAll('.kids:not(.shut)').forEach(k=>k.style.height='auto');
+  const hits=countHits();
+  document.getElementById('hitcount').textContent=(query||filters.size)?`${hits} of ${flat.filter(n=>n.type!=='folder').length}`:'';
+  document.getElementById('clrSearch').style.display=query?'grid':'none';
+  document.getElementById('footSel').textContent=(selId?1:0)+' selected';
+}
+const FILTER_TYPES=['Mesh','Light','Camera','Sky','Sun','Moon'];
+function renderFilters(){
+  const menu=document.getElementById('ddMenu'), cur=document.getElementById('ddCur');
+  const tick='<span class="tick"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"'
+           + ' stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="m4 12 6 6L20 6"/></svg></span>';
+  menu.innerHTML=
+    `<div class="opt ${filters.size?'':'sel'}" data-all="1">${tick}All types</div><div class="sep"></div>`
+    + FILTER_TYPES.map(t=>`<div class="opt ${filters.has(t)?'sel':''}" data-t="${t}">${tick}
+        <span style="display:grid;place-items:center;width:14px">${S(P[t.toLowerCase()]||P.cube,COL[t.toLowerCase()],13)}</span>${t}</div>`).join('');
+  cur.textContent = !filters.size ? 'All types'
+    : filters.size===1 ? [...filters][0] : `${filters.size} types`;
+  // Active filters become removable chips on their own row.
+  const chips=document.getElementById('chipRow');
+  chips.innerHTML=[...filters].map(t=>`<span class="pill">${t}<button class="px" data-t="${t}">✕</button></span>`).join('');
+  chips.querySelectorAll('.px').forEach(b=>b.onclick=()=>{filters.delete(b.dataset.t);renderFilters();renderTree();});
+  menu.querySelectorAll('.opt').forEach(o=>o.onclick=e=>{
+    e.stopPropagation();
+    if(o.dataset.all) filters.clear();
+    else { const t=o.dataset.t; filters.has(t)?filters.delete(t):filters.add(t); }
+    renderFilters(); renderTree();
+  });
+}
+document.getElementById('ddFilter').addEventListener('click',e=>{
+  if(e.target.closest('.dd-menu')) return;
+  document.getElementById('ddFilter').classList.toggle('open');
+});
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#ddFilter')) document.getElementById('ddFilter').classList.remove('open');
+});
+
+/* ── shared property blocks ────────────────────────────────────────────────────────────────── */
+const vec=(n,key,label,dis)=>`<div class="prow"><span class="pl">${label}</span><div class="vec">
+  ${['x','y','z'].map((a,i)=>`<div class="vfield ${a}"><span class="ax">${a.toUpperCase()}</span>
+  <span class="num"><input value="${n[key][i].toFixed(2)}" ${dis?'disabled':''}></span></div>`).join('')}</div></div>`;
+const sw=(label,on)=>`<div class="prow"><span class="pl">${label}</span>
+  <div class="switch" data-on="${on?'true':'false'}"></div></div>`;
+
+/* Kit slider: a real input[type=range] carrying .slider so it inherits the 28 px track / 26 px thumb rules
+   verbatim, with the filled-left-side gradient recomputed on input. `.thin` is used in the dense property
+   panels, matching how UIComponents describes the quiet variant. */
+/* Row order is the kit's .crow: label → value pill → slider. The pill leads so the numbers form a
+   readable column down the panel; the slider takes the remaining width. */
+const sl=(label,v,min,max,unit,dec)=>
+  `<div class="prow"><span class="pl">${label}</span>
+    <div class="vpill"><div class="num">${v}</div><div class="unit">${(unit||'').trim()||'°'}</div></div>
+    <div class="kslider" data-min="${min}" data-max="${max}" data-v="${v}" data-dec="${dec??((max-min)<=4?2:0)}">
+      <div class="track"></div><div class="kfill"></div><div class="knob"></div></div></div>`;
+
+/* Geometry mirrors ControlKit::Slider exactly: the thumb centre travels [half-thumb, width − half-thumb],
+   and the fill is a pill from the left edge to that centre — never a hard-edged gradient stop. */
+function paintSlider(el){
+  const min=+el.dataset.min, max=+el.dataset.max, v=+el.dataset.v, dec=+el.dataset.dec;
+  const t=(v-min)/(max-min);
+  const thumb=el.classList.contains('thin')?18:26;
+  const w=el.clientWidth||160;
+  const cx=thumb/2 + t*Math.max(w-thumb,1);
+  el.querySelector('.knob').style.left=cx+'px';
+  el.querySelector('.kfill').style.width=Math.max(cx,thumb)+'px';
+  const pill=el.parentElement.querySelector('.vpill .num');
+  if(pill) pill.textContent=v.toFixed(dec);
+}
+/* Every numeric readout is type-in editable: click the pill's number, get an input, Enter commits and the
+   slider jumps to it. Clamped to the control's own range so a typo cannot push a value out of bounds. */
+function bindEditableNumbers(root){
+  root.querySelectorAll('.vpill .num').forEach(cell=>{
+    cell.style.cursor='text';
+    cell.onclick=()=>{
+      if(cell.querySelector('input')) return;
+      const sliderEl=cell.closest('.prow')?.querySelector('.kslider');
+      const before=cell.textContent;
+      cell.innerHTML=`<input value="${before}" style="width:100%;background:transparent;border:none;
+        color:var(--text);font:inherit;text-align:center;outline:none;user-select:text">`;
+      const inp=cell.querySelector('input'); inp.focus(); inp.select();
+      let done=false;
+      const finish=commit=>{
+        if(done) return; done=true;
+        const v=parseFloat(inp.value);
+        if(commit && isFinite(v) && sliderEl){
+          const min=+sliderEl.dataset.min, max=+sliderEl.dataset.max;
+          sliderEl.dataset.v=Math.min(max,Math.max(min,v)).toFixed(4);
+          paintSlider(sliderEl);
+        } else cell.textContent=before;
+      };
+      inp.onkeydown=e=>{ e.stopPropagation();
+        if(e.key==='Enter')finish(true); if(e.key==='Escape')finish(false); };
+      inp.onblur=()=>finish(true);
+    };
+  });
+  // Axis fields commit on Enter / blur and revert on Escape.
+  root.querySelectorAll('.vfield input').forEach(inp=>{
+    if(inp.disabled) return;
+    let before=inp.value;
+    inp.onfocus=()=>{before=inp.value;inp.select();};
+    inp.onkeydown=e=>{ e.stopPropagation();
+      if(e.key==='Enter'){inp.blur();}
+      if(e.key==='Escape'){inp.value=before;inp.blur();} };
+    inp.onblur=()=>{ const v=parseFloat(inp.value);
+      inp.value = isFinite(v) ? v.toFixed(2) : before; };
+  });
+}
+
+function bindControls(root){
+  bindEditableNumbers(root);
+  root.querySelectorAll('.kslider').forEach(el=>{
+    requestAnimationFrame(()=>paintSlider(el));
+    const set=e=>{
+      const r=el.getBoundingClientRect();
+      const thumb=el.classList.contains('thin')?18:26;
+      const t=Math.min(1,Math.max(0,(e.clientX-r.left-thumb/2)/Math.max(r.width-thumb,1)));
+      const min=+el.dataset.min,max=+el.dataset.max;
+      el.dataset.v=(min+t*(max-min)).toFixed(4);
+      paintSlider(el);
+    };
+    el.addEventListener('pointerdown',e=>{
+      el.setPointerCapture(e.pointerId); el.classList.add('drag'); set(e);
+      const mv=ev=>set(ev);
+      const up=()=>{el.classList.remove('drag');el.removeEventListener('pointermove',mv);
+                    el.removeEventListener('pointerup',up);};
+      el.addEventListener('pointermove',mv); el.addEventListener('pointerup',up);
+    });
+  });
+  root.querySelectorAll('.switch').forEach(el=>{
+    el.addEventListener('click',()=>el.dataset.on = el.dataset.on==='true'?'false':'true');
+  });
+}
+
+const notesCard=n=>`<div class="pcard"><h4>Notes</h4>
+  <textarea class="notes" placeholder="Notes for ${n.name}…" spellcheck="false">${n.notes||''}</textarea></div>`;
+
+function bodyFor(n){
+  if(n.type==='sun') return `<div class="pcard"><h4>Orbit</h4>
+      ${sl('Elevation',34,-90,90,'°')}${sl('Azimuth',127,0,360,'°')}${sl('Time of day',14.2,0,24,' h')}
+      ${sw('Animate',true)}${sl('Rate',60,0,600,'×')}</div>
+    <div class="pcard"><h4>Disc</h4>${sl('Angular size',0.53,0.1,3,'°')}${sl('Intensity',120,0,200,' klx')}</div>`+notesCard(n);
+  if(n.type==='sky') return `<div class="pcard"><h4>Atmosphere</h4>
+      ${sl('Planet radius',6360,1000,10000,' km')}${sl('Thickness',100,10,200,' km')}
+      ${sl('Rayleigh height',8.0,1,20,' km')}${sl('Mie height',1.2,0.1,5,' km')}
+      ${sl('Mie asymmetry',0.80,-1,1,'')}${sl('Ozone centre',25,0,60,' km')}</div>
+    <div class="pcard"><h4>Rendering</h4>${sw('Aerial perspective',true)}${sw('Sky lights scene',true)}</div>`+notesCard(n);
+  if(n.type==='moon') return `<div class="pcard"><h4>Orbit</h4>
+      ${sl('Period',27.3,1,100,' d')}${sl('Phase',0.62,0,1,'')}${sl('Inclination',5.1,0,90,'°')}</div>
+    <div class="pcard"><h4>Appearance</h4>${sl('Angular size',0.52,0.1,3,'°')}${sl('Albedo',0.12,0,1,'')}</div>`+notesCard(n);
+  if(n.type==='camera') return `<div class="pcard"><h4>Transform</h4>${vec(n,'pos','Position')}${vec(n,'rot','Rotation')}</div>
+    <div class="pcard"><h4>Movement</h4>${sl('Speed',2.5,0.1,20,' m/s')}${sl('Field of view',55,20,120,'°')}
+      ${sl('Boost',3,1,10,'×')}</div>
+    <div class="pcard"><h4>Render Settings</h4>${sl('Candidates',4,1,64,'')}${sl('Extra candidates',2,0,16,'')}
+      ${sl('Exposure',1.05,0.05,4,'')}${sw('Temporal reuse',true)}${sw('Spatial reuse',true)}
+      ${sw('Alias pick',true)}${sw('Denoise',true)}</div>`+notesCard(n);
+  if(n.type==='light') return `<div class="pcard"><h4>Transform</h4>${vec(n,'pos','Position',n.locked)}</div>
+    <div class="pcard"><h4>Emission</h4>${sl('Illuminance',32,0,200,' lx')}${sw('Two sided',false)}</div>`+notesCard(n);
+  if(n.type==='folder') return `<div class="pcard"><h4>Folder</h4>
+    <div class="prow"><span class="pl">Children</span><span class="val">${n.kids.length}</span></div>
+    ${sw('Visible',n.vis)}${sw('Locked',n.locked)}</div>
+    <div class="pcard"><h4>Colour</h4>
+      <div class="prow"><span class="pl">Tint</span><div class="swatches" data-swatches>
+        <span class="swatch none ${n.color?'':'on'}" data-c=""></span>
+        ${PALETTE.map(c=>`<span class="swatch ${n.color===c?'on':''}" data-c="${c}" style="background:${c}"></span>`).join('')}
+      </div></div></div>` + notesCard(n);
+  return `<div class="pcard"><h4>Transform</h4>${vec(n,'pos','Position',n.locked)}${vec(n,'rot','Rotation',n.locked)}</div>
+    <div class="pcard"><h4>Object</h4>${sw('Visible',n.vis)}${sw('Locked',n.locked)}${sw('Dynamic',n.dynamic)}
+    <div class="prow"><span class="pl">Material</span><span class="val">material_${(n.id%6)}</span></div></div>`+notesCard(n);
+}
+function renderDetails(){
+  const d=document.getElementById('details'), n=cur();
+  if(!n){ d.innerHTML=`<div class="empty">Select an object to see its details</div>`; return; }
+  d.innerHTML=`<div class="pcard"><h4>${LABEL[n.type]}</h4>
+      <div class="prow"><span class="pl">Name</span>
+        <span class="name-edit" id="nameEdit" title="Double click to rename">${n.name}</span></div>
+      <div class="prow"><span class="pl">Status</span><span class="val" style="min-width:auto">
+        ${n.vis?'visible':'hidden'}${n.locked?' · locked':''}${n.dynamic?' · dynamic':''}</span></div></div>`
+    + bodyFor(n);
+  bindControls(d);
+
+  const nameEl=document.getElementById('nameEdit');
+  if(nameEl) nameEl.ondblclick=()=>beginRename(n,nameEl,()=>{renderTree();renderDetails();updateHeader();});
+
+  // Folder tint — recolours the row icon in the tree immediately.
+  d.querySelectorAll('[data-swatches] .swatch').forEach(sw=>sw.onclick=()=>{
+    n.color = sw.dataset.c || null; renderDetails(); renderTree(); });
+
+  const notes=d.querySelector('.notes');
+  if(notes) notes.oninput=()=>{ n.notes=notes.value; };
+}
+
+/* ── boot ──────────────────────────────────────────────────────────────────────────────────── */
+const searchEl=document.getElementById('search');
+searchEl.addEventListener('input',()=>{ query=searchEl.value.trim().toLowerCase(); renderTree(); });
+searchEl.addEventListener('keydown',e=>{ if(e.key==='Escape'){ searchEl.value=''; query=''; renderTree(); } });
+document.getElementById('clrSearch').addEventListener('click',()=>{
+  searchEl.value=''; query=''; renderTree(); searchEl.focus(); });
+
+reflat(); selId=flat.find(n=>n.name==='Sun').id;
+renderFilters(); renderTree(); renderDetails(); setMode('split');
+addEventListener('resize',()=>document.querySelectorAll('.kslider').forEach(paintSlider));
+</script>
+</body>
+</html>
