@@ -326,9 +326,11 @@ int main(int argc, char** argv)
                     if (cosSurface > 0.0f && !Occluded(hit + normal * 1e-3f, toSun))
                     {
                         // 🔴 SunTransmittance is why the light warms at dusk: the air is filtering it.
+                        //    MediaSunShadow is why a cloud passing overhead dims the ground beneath it.
                         colour = colour + albedo * (1.0f / 3.14159265f)
                                         * sky.SunIrradianceAndScale.xyz() * sky.SunTransmittance.xyz()
-                                        * cosSurface;
+                                        * cosSurface
+                                        * MediaSunShadow(sky, hit, sunDirection);
                     }
                 }
 

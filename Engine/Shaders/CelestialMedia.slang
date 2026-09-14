@@ -306,15 +306,28 @@ float MediaSunTransmittance(CelestialRecord sky, vec3 position, vec3 sunDirectio
     return exp(-depth * absorption);
 }
 
-// 🔴 BEER-POWDER. Beer's law alone makes cloud edges BRIGHTER than their cores, because thin means less
-//    extinction. Real clouds are the opposite at the edges facing away from the sun: thin regions scatter light
-//    out in every direction and look DARK. Schneider's powder term restores that, and without it clouds read as
-//    glowing cotton wool rather than as weather.
+// 🔴 POWDER IS AN EDGE DARKENING, NOT A BRIGHTNESS SCALE — AND MINE WAS BOTH, WHICH LOST 60% OF THE LIGHT.
+//
+//    Schneider's effect: thin wisps facing away from the sun look DARK, because light entering them scatters
+//    straight back out instead of building up. Beer's law alone says the opposite (thin = less extinction =
+//    brighter), so a correction is needed.
+//
+//    ⚠️ WHAT WENT WRONG. The first version was `beer * mix(1, 2*sugar, powder)`, which:
+//      · multiplied in Beer's law a SECOND time (the march already applies it via `1 - exp(-extinction)`), and
+//      · peaked at 0.40 instead of 1.0, so even a fully lit cloud top was multiplied by 0.4.
+//    Measured: a cloud top that should read 5.15 rendered 0.170 — 30x too dark, the black-rock look.
+//
+//    This version returns a factor that is **1.0 in the cloud body** and dips toward `1 - powder` only where the
+//    optical depth is genuinely small. It modulates; it does not attenuate.
+//
+//    `depth` is the optical depth along the VIEW ray at this sample — thin EDGES are what should darken. An
+//    earlier version passed the sun-path depth, which is ~0 at the cloud top, i.e. it darkened precisely the
+//    brightest part of the cloud.
 float MediaBeerPowder(float depth, float powder)
 {
-    float beer = exp(-depth);
-    float sugar = 1.0 - exp(-depth * 2.0);
-    return beer * mix(1.0, sugar * 2.0, clamp(powder, 0.0, 1.0));
+    // Rises from 0 at zero depth to 1 in the body; the scale sets how thin "thin" is.
+    float thickness = 1.0 - exp(-depth * kMediaPowderSharpness);
+    return mix(1.0, thickness, clamp(powder, 0.0, 1.0));
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -451,10 +464,10 @@ vec3 MediaScatter(CelestialRecord sky, vec3 origin, vec3 direction, vec3 sunDire
             }
         }
 
-        // The powder term darkens thin regions facing away from the sun. Applied to the FIRST-ORDER geometry
-        //    only in spirit, but as a scalar here it multiplies the whole in-scatter, which is close enough at
-        //    these depths and keeps the dark-edge look the term exists for.
-        inScatter *= MediaBeerPowder((1.0 - sunlight) * 4.0, powder);
+        // Powder darkens thin wisps. It takes the VIEW-ray optical depth at this sample, because "thin" means
+        //    thin as seen from here — and it is applied to the whole in-scatter, which keeps the dark-edge look
+        //    without touching the body of the cloud.
+        inScatter *= MediaBeerPowder(extinction, powder);
 
         // Analytic segment integration, as in AtmosphereScatter: exact for a constant source over the step and
         //    free of the banding a rectangle rule leaves in thick media.
@@ -467,6 +480,45 @@ vec3 MediaScatter(CelestialRecord sky, vec3 origin, vec3 direction, vec3 sunDire
 
     outTransmittance = transmittance;
     return radiance;
+}
+
+// 🔴 HOW MUCH DIRECT SUNLIGHT A GROUND POINT RECEIVES THROUGH THE CLOUD DECK.
+//
+//    Without this, clouds are painted on the sky and the ground below them stays in full sun — which is the
+//    single most obvious way volumetric clouds fail to be lighting. It is also what the user noticed:
+//    "clouds are also blocking light it seems", i.e. they should be and were not.
+//
+//    ⚠️ A FULL MARCH IS NOT AFFORDABLE HERE. This runs on the shadow-ray path, once per shaded pixel, so it
+//    samples the deck a handful of times along the line to the sun instead of marching it. That is enough to
+//    get a moving, shaped shadow — the point is that a cloud passing overhead dims the ground beneath it, not
+//    that the shadow edge is pixel-exact.
+float MediaSunShadow(CelestialRecord sky, vec3 worldPosition, vec3 sunDirection)
+{
+    float coverage = sky.CloudLayer.x;
+    if (coverage <= 0.0 || sunDirection.z <= 0.01) return 1.0;
+
+    float base      = sky.CloudLayer.z;
+    float thickness = sky.CloudLayer.w;
+
+    // Where the line to the sun crosses the slab. Below the deck this is a climb; inside it, a short hop.
+    float toBase = (base - worldPosition.z) / sunDirection.z;
+    float toTop  = (base + thickness - worldPosition.z) / sunDirection.z;
+    float near = max(0.0, min(toBase, toTop));
+    float far  = max(toBase, toTop);
+    if (far <= near) return 1.0;
+
+    float span = far - near;
+    float step = span / float(kMediaShadowSteps);
+
+    float depth = 0.0;
+    for (int i = 0; i < kMediaShadowSteps; ++i)
+    {
+        vec3 position = worldPosition + sunDirection * (near + step * (float(i) + 0.5));
+        depth += MediaLayerDensity(sky, position) * step;
+    }
+
+    // The same absorption the view march uses, so a cloud that LOOKS opaque also SHADES as if it were.
+    return exp(-depth * max(sky.CloudAbsorptionAndWind.x, 1e-6));
 }
 
 // The cheap form, for the bounce path. A bounce ray needs to know how much the cloud deck DIMS the sky it is

@@ -66,6 +66,17 @@ echo "[CelestialMedia] the details that decide whether clouds read as clouds"
 # A positive second HG lobe is a second FORWARD lobe, which silently removes all back-scatter.
 CheckConstant "the backward lobe default is negative" 'BackwardLobe = -0\.30f' "Engine/DisplayPresentation/CelestialStructure.h"
 CheckConstant "Beer-powder is present"                'float MediaBeerPowder' "$Media"
+# 🔴 Powder must MODULATE, never attenuate. The original `beer * mix(1, 2*sugar, powder)` re-applied Beer's law
+#    on top of the march's own `1 - exp(-extinction)` and peaked at 0.40, so a fully lit cloud top lost 60% of
+#    its light and clouds rendered 30x too dark — the black-rock look.
+if grep -A6 'float MediaBeerPowder' "$Media" | grep -qE 'exp\(-depth\)\s*\*|beer\s*\*'; then
+    echo "  FAIL  MediaBeerPowder re-applies Beer's law; the march already does that"
+    Fail=1
+else
+    echo "  OK    powder modulates rather than attenuating"
+fi
+CheckConstant "clouds shadow the ground"              'float MediaSunShadow' "$Media"
+CheckConstant "and the shadow is wired to the sun light" 'MediaSunShadow\(Celestial\[0\], hitPos' "$Viewport"
 CheckConstant "coverage erodes through a remap"       'MediaRemap\(shape, 1\.0 - coverage' "$Media"
 CheckConstant "the height gradient shapes the slab"   'bottomGradient \* topGradient' "$Media"
 

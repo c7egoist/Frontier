@@ -201,6 +201,11 @@ layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord C
 //    to the sun is fully blocked. This is diffusion from the lit top and sides — the reason a cumulus base is
 //    grey rather than black.
 #define kMediaDiffuseFloor 0.45
+// How sharply the powder term recovers to 1.0 with optical depth. Larger = only the very thinnest wisps darken.
+#define kMediaPowderSharpness 6.0
+// Samples along the line to the sun when shadowing GEOMETRY through the cloud deck. Runs once per shaded pixel
+//    on the shadow-ray path, so it is a probe rather than a march.
+#define kMediaShadowSteps 6
 #define kMediaViewSteps    48
 #define kMediaSunSteps     5
 #define kMediaShapeOctaves 3
@@ -1646,6 +1651,18 @@ void main()
             // Visibility re-traced at the current pixel; an occluded merged sample contributes nothing.
             res.Visible = TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint) ? 0u : 1u;
             if (res.Visible == 0u) res.UnbiasedWeight = 0.0;
+
+            // 🔴 CLOUDS BLOCK THE SUN. Geometry can occlude the sun with a shadow ray, but a cloud is not
+            //    geometry — it is a medium the ray passes straight through. Without this the ground under an
+            //    overcast sky stays in full, hard sunlight while the sky above it is solid cloud, which is the
+            //    most obvious way volumetric clouds fail to be lighting rather than decoration.
+            //
+            //    Applied as a continuous attenuation of the reservoir's weight rather than a binary occlusion,
+            //    because a cloud edge shades PARTIALLY — that gradient is what makes cloud shadows drift across
+            //    a landscape instead of snapping on and off.
+            if (res.Visible == 1u && res.SelectedLight >= LightTriangleCount)
+                res.UnbiasedWeight *= MediaSunShadow(Celestial[0], hitPos,
+                                                     Celestial[0].SunDirectionAndCosRadius.xyz);
 
             // Publish the final reservoir for next frame's temporal reuse (always — even occluded, M still counts).
             GpuReservoir outRes;

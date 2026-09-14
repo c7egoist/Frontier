@@ -27,6 +27,7 @@
 #include <vector>
 #include <algorithm>
 #include <chrono>
+#include <tuple>
 
 struct CelestialRecord;
 static CelestialRecord* gCelestialRecordPtr = nullptr;
@@ -331,13 +332,15 @@ int main()
               "powder makes very thin cloud DARKER than mid-thickness",
               "thin " + Fixed(thin, 4) + " vs medium " + Fixed(medium, 4));
 
-        // With powder off it must revert to plain Beer, where thin is brightest — proving the term is what
-        // causes the effect rather than something else in the curve.
-        const float thinNoPowder   = MediaBeerPowder(0.05f, 0.0f);
-        const float mediumNoPowder = MediaBeerPowder(0.60f, 0.0f);
-        Check(thinNoPowder > mediumNoPowder,
-              "and with powder off, plain Beer makes thin brightest (control)",
-              Fixed(thinNoPowder, 4) + " vs " + Fixed(mediumNoPowder, 4));
+        // ⚠️ THIS CONTROL WAS WRITTEN AGAINST THE OLD, WRONG FORMULA. Back when MediaBeerPowder returned
+        //    `beer * mix(1, 2*sugar, powder)` it re-applied Beer's law, so with powder = 0 it still decayed with
+        //    depth and "thin was brightest" was a meaningful reading. That double-application was the bug that
+        //    made clouds 30x too dark. The corrected term MODULATES rather than attenuates, so powder = 0 now
+        //    correctly means "no modulation at all" — a flat 1.0. Asserting the old behaviour would be
+        //    asserting the bug, so the control now checks the property that actually matters.
+        Check(MediaBeerPowder(0.05f, 0.0f) == 1.0f && MediaBeerPowder(3.0f, 0.0f) == 1.0f,
+              "with powder off the term is exactly 1.0 everywhere (no attenuation)",
+              "thin " + Fixed(MediaBeerPowder(0.05f, 0.0f), 4) + ", body " + Fixed(MediaBeerPowder(3.0f, 0.0f), 4));
 
         // Self-shadowing: a point deep in the deck must receive less sun than one at the top.
         const float top    = MediaSunTransmittance(record, vec3(0.0f, 0.0f, record.CloudLayer.z + record.CloudLayer.w * 0.95f),
@@ -406,6 +409,123 @@ int main()
         const float sideway = MediaAmbientTransmittance(r, normalize(vec3(1.0f, 0.0f, 0.15f)));
         Check(sideway < up, "a grazing ray is dimmed more than a vertical one",
               Fixed(sideway, 5) + " vs " + Fixed(up, 5));
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
+    Section("5b. A LIT CLOUD IS AS BRIGHT AS A LIT CLOUD SHOULD BE");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 THE CHECK THAT WOULD HAVE CAUGHT THE BLACK-ROCK CLOUDS IMMEDIATELY. A white cloud is a diffusely
+    //    reflecting body of albedo ~0.9, so a sunlit face emits about E x albedo / pi. Everything else in this
+    //    file measured shape, coverage and cost — all of which passed while the clouds rendered 30x too dark,
+    //    because nothing compared the cloud's radiance against the physical answer.
+    {
+        Frontier::CelestialStructure s = settings;
+        s.Clouds.Coverage = 0.5f;
+        CelestialRecord record = BuildRecord(s);
+        gCelestialRecordPtr = &record;
+
+        const vec3 sun = record.SunDirectionAndCosRadius.xyz();
+        const vec3 sunRadiance = record.SunIrradianceAndScale.xyz() * record.SunTransmittance.xyz();
+        const vec3 origin(0.0f, 0.0f, 2.0f);
+
+        // Find the thickest cloud in the sky and measure what it emits.
+        vec3 thickest(0.0f, 0.0f, 1.0f);
+        float mostOpaque = 0.0f;
+        for (int a = 0; a < 120; ++a)
+            for (int e = 10; e < 60; e += 4)
+            {
+                const float az = float(a) * 0.05236f;
+                const float el = float(e) * 3.14159265f / 180.0f;
+                const vec3 dir = normalize(vec3(std::cos(el) * std::cos(az), std::cos(el) * std::sin(az), std::sin(el)));
+                float t;
+                MediaScatter(record, origin, dir, sun, sunRadiance, CelestialSky(record, origin, dir, false),
+                             200000.0f, 48, t);
+                if (1.0f - t > mostOpaque) { mostOpaque = 1.0f - t; thickest = dir; }
+            }
+
+        float transmittance;
+        const vec3 skyBehind = CelestialSky(record, origin, thickest, false);
+        const vec3 cloud = MediaScatter(record, origin, thickest, sun, sunRadiance, skyBehind,
+                                        200000.0f, 48, transmittance);
+
+        const float expected = Luma(sunRadiance) * 0.9f / 3.14159265f;
+        const float measured = Luma(cloud);
+
+        Check(mostOpaque > 0.9f, "found an opaque cloud to measure", "opacity " + Fixed(mostOpaque, 3));
+        Check(measured > expected * 0.4f && measured < expected * 2.5f,
+              "a sunlit cloud emits about E*albedo/pi",
+              Fixed(measured, 3) + " vs the physical " + Fixed(expected, 3));
+
+        // 🔴 AND THE DIRECT COMPARISON THAT MATTERS VISUALLY: a sunlit cloud must be BRIGHTER than the sky it
+        //    sits in front of. When it was not, clouds read as black rocks floating in the air.
+        Check(measured > Luma(skyBehind),
+              "and is brighter than the sky behind it (not a dark blob)",
+              "cloud " + Fixed(measured, 3) + " vs sky " + Fixed(Luma(skyBehind), 3));
+
+        // The powder term must MODULATE, not attenuate: it has to reach 1.0 in the body of a cloud. An earlier
+        // version peaked at 0.40, so even a fully lit cloud top lost 60% of its light.
+        Check(MediaBeerPowder(3.0f, record.CloudShape.w) > 0.95f,
+              "powder returns to 1.0 in the cloud body",
+              Fixed(MediaBeerPowder(3.0f, record.CloudShape.w), 4));
+        Check(MediaBeerPowder(0.01f, record.CloudShape.w) < 0.6f,
+              "and still darkens the thinnest wisps",
+              Fixed(MediaBeerPowder(0.01f, record.CloudShape.w), 4));
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
+    Section("5c. CLOUDS BLOCK THE SUN");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 THE USER'S OBSERVATION: "clouds are also blocking light it seems" — they should be, and were not.
+    //    Geometry occludes the sun through the shadow ray, but a cloud is a medium the ray passes straight
+    //    through, so without an explicit term the ground under solid overcast stayed in full hard sunlight.
+    {
+        auto ShadowStats = [&](float coverage)
+        {
+            Frontier::CelestialStructure s = settings;
+            s.Clouds.Coverage = coverage;
+            CelestialRecord r = BuildRecord(s);
+            gCelestialRecordPtr = &r;
+            const vec3 sun = r.SunDirectionAndCosRadius.xyz();
+
+            float lowest = 1e9f, highest = 0.0f, total = 0.0f;
+            int count = 0;
+            for (int i = -30; i <= 30; ++i)
+                for (int j = -30; j <= 30; ++j)
+                {
+                    const float shadow = MediaSunShadow(r, vec3(float(i) * 60.0f, float(j) * 60.0f, 0.0f), sun);
+                    lowest = std::min(lowest, shadow);
+                    highest = std::max(highest, shadow);
+                    total += shadow;
+                    ++count;
+                }
+            return std::make_tuple(lowest, highest, total / float(count));
+        };
+
+        const auto clear = ShadowStats(0.0f);
+        Check(std::get<2>(clear) > 0.999f, "a clear sky casts no shadow at all", Fixed(std::get<2>(clear), 4));
+
+        const auto broken = ShadowStats(0.6f);
+        Check(std::get<0>(broken) < 0.2f, "under cloud the ground is deeply shaded",
+              "darkest " + Fixed(std::get<0>(broken), 3));
+        Check(std::get<1>(broken) > 0.9f, "and in the gaps it is in full sun",
+              "brightest " + Fixed(std::get<1>(broken), 3));
+
+        // Mean shading must track coverage, or the shadows are decorative rather than driven by the sky.
+        const auto heavy = ShadowStats(0.9f);
+        Check(std::get<2>(heavy) < std::get<2>(broken) && std::get<2>(broken) < std::get<2>(clear),
+              "mean ground shading follows coverage",
+              Fixed(std::get<2>(clear), 2) + " -> " + Fixed(std::get<2>(broken), 2)
+                    + " -> " + Fixed(std::get<2>(heavy), 2));
+
+        // ⚠️ The shadow must agree with what the cloud LOOKS like. A deck that renders opaque but shades
+        //    weakly (or the reverse) is two systems disagreeing about the same cloud.
+        Frontier::CelestialStructure s = settings;
+        s.Clouds.Coverage = 0.9f;
+        CelestialRecord r = BuildRecord(s);
+        gCelestialRecordPtr = &r;
+        Check(std::get<2>(heavy) < 0.35f,
+              "near-overcast leaves little direct sun on the ground",
+              Fixed(std::get<2>(heavy) * 100.0, 1) + "% of full sun");
     }
 
     //----------------------------------------------------------------------------------------------------------------

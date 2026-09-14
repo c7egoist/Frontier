@@ -493,6 +493,43 @@ lighting and local-volume settings had NO registered properties at all, so half 
 TOML. **ALL 25 SUITES GREEN.**
 
 
+### P5 COMPLETE: clouds are white, and they block the sun (2026-09-13)
+
+User: "clouds are a start, they look terrible... they also need scattering... clouds are also blocking light it
+seems". Both correct. Two distinct defects, both now fixed and measured.
+
+🔴 **DEFECT 1: THE POWDER TERM WAS EATING 60% OF ALL CLOUD LIGHT.** Measured a fully opaque sunlit cloud at
+**0.170 against a physical answer of 5.15 — 30x too dark**, which is exactly the black-rock look. Two errors in
+one expression, `beer * mix(1.0, 2*sugar, powder)`:
+  · it re-applied Beer's law, which the march already applies via `1 - exp(-extinction)`;
+  · it PEAKS at 0.40, not 1.0, so even a cloud top in full sun was multiplied by 0.4.
+Compounding it, the depth passed in was the SUN-path depth, which is ~0 at the cloud top — so the term darkened
+precisely the brightest part of the cloud. Powder is an EDGE DARKENING: it must return 1.0 in the body and dip
+only where the VIEW-ray depth is genuinely small. Rewritten as `mix(1, 1 - exp(-depth*sharpness), powder)`.
+Result: **5.63 vs the physical 5.15**, within 9%, and clouds are now brighter than the sky behind them.
+
+🔴 **DEFECT 2: CLOUDS DID NOT BLOCK THE SUN AT ALL.** `LightEmission` for the sun returns irradiance x
+*atmospheric* transmittance and has no position, so it cannot march. Geometry occludes the sun via the shadow
+ray; a cloud is a medium the ray passes straight through. The ground under solid overcast therefore stayed in
+full, hard sunlight. Added `MediaSunShadow` — a 6-sample probe along the line to the sun, applied at the shadow
+ray as a CONTINUOUS attenuation of the reservoir weight, because a cloud edge shades partially and that
+gradient is what makes shadows drift rather than snap. Measured: clear 1.00, broken 0.69, overcast **0.08** mean
+ground sun, with 0.0 under cloud and 1.0 in the gaps.
+
+**A test that asserted the bug.** The powder control checked "with powder off, thin is brightest" — true only of
+the broken double-Beer formula. Asserting it would have locked the bug in. Replaced with the property that
+actually matters: powder = 0 means exactly 1.0 everywhere.
+
+**Why the earlier gates missed all this:** 29 checks passed on shape, coverage, monotonicity and cost while the
+clouds were 30x too dark, because nothing compared cloud radiance against a physical reference. Added §5b —
+a sunlit cloud must emit ~E·albedo/π and must be brighter than the sky behind it — and §5c for shadowing.
+Now 39 checks.
+
+⚠️ Cloud shadows are invisible in an eye-level shot and that is correct, not a bug: the cloud shape scale is
+1400 m while the visible ground spans ~200 m, so the whole frame sits inside one cloud cell. Visible from
+altitude — `Renders/39_cloud_shadows.png`. **ALL 25 SUITES GREEN.**
+
+
 Status log (append; newest last):
 - 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
   0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on
