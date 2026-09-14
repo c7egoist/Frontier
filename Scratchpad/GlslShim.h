@@ -5,9 +5,12 @@
 #include <algorithm>
 struct vec2 { float x, y; vec2() : x(0), y(0) {} vec2(float a) : x(a), y(a) {} vec2(float a, float b) : x(a), y(b) {} };
 struct vec3 { float x, y, z; vec3() : x(0), y(0), z(0) {} vec3(float a) : x(a), y(a), z(a) {} vec3(float a, float b, float c) : x(a), y(b), z(c) {}
+    // GLSL allows vec3(vec2, float); the cloud wind offset uses it.
+    vec3(struct vec2 v, float c);
     vec2 xy() const { return {x, y}; } vec2 yz() const { return {y, z}; } vec2 xz() const { return {x, z}; } };
 struct vec4 { float x, y, z, w; vec4() : x(0), y(0), z(0), w(0) {} vec4(float a) : x(a), y(a), z(a), w(a) {} vec4(float a, float b, float c, float d) : x(a), y(b), z(c), w(d) {}
     vec4(vec3 v, float d) : x(v.x), y(v.y), z(v.z), w(d) {} vec3 xyz() const { return {x, y, z}; } vec2 xy() const { return {x, y}; } vec2 yz() const { return {y, z}; } vec2 zw() const { return {z, w}; } };
+inline vec3::vec3(vec2 v, float c) : x(v.x), y(v.y), z(c) {}
 struct mat3 { vec3 c[3]; mat3() {} mat3(vec3 a, vec3 b, vec3 d) { c[0] = a; c[1] = b; c[2] = d; } };
 #define V2OP(op) inline vec2 operator op(vec2 a, vec2 b) { return {a.x op b.x, a.y op b.y}; } inline vec2 operator op(vec2 a, float b) { return {a.x op b, a.y op b}; } inline vec2 operator op(float a, vec2 b) { return {a op b.x, a op b.y}; }
 #define V3OP(op) inline vec3 operator op(vec3 a, vec3 b) { return {a.x op b.x, a.y op b.y, a.z op b.z}; } inline vec3 operator op(vec3 a, float b) { return {a.x op b, a.y op b, a.z op b}; } inline vec3 operator op(float a, vec3 b) { return {a op b.x, a op b.y, a op b.z}; }
@@ -64,4 +67,11 @@ inline float degrees(float r) { return r * 57.2957795130823f; }
 inline float atan(float y, float x) { return std::atan2(y, x); }
 // GLSL's mod is a true modulus (result takes the sign of y), unlike C's fmod which takes the sign of x.
 inline float mod(float x, float y) { return x - y * std::floor(x / y); }
+// GLSL's floor/fract are component-wise on vectors; the procedural cloud noise needs vec3 floor.
+inline vec3 floor(vec3 a) { return { std::floor(a.x), std::floor(a.y), std::floor(a.z) }; }
+inline vec2 floor(vec2 a) { return { std::floor(a.x), std::floor(a.y) }; }
+inline vec3 fract(vec3 a) { return a - floor(a); }
+inline float fract(float a) { return a - std::floor(a); }
+inline vec3& operator/=(vec3& a, vec3 b) { a = a / b; return a; }
+inline vec3& operator+=(vec3& a, float b) { a = a + b; return a; }
 inline float radians(float d) { return d * 0.01745329251994330f; }

@@ -215,12 +215,14 @@ int main(int argc, char** argv)
     const int   height  = argc > 4 ? std::atoi(argv[4]) : 250;
     const int   samples = argc > 5 ? std::atoi(argv[5]) : 40;
     const int   flareTier = argc > 6 ? std::atoi(argv[6]) : -1;   // -1 = leave the default
+    const float cloudCover = argc > 7 ? float(std::atof(argv[7])) : -1.0f;   // -1 = leave the default
 
     //---------------------------------------------------------------------------------------------------------
     // 🔴 THE PRODUCTION CHAIN. Settings -> real ephemeris -> the actual GPU record -> read back as the shader.
     //---------------------------------------------------------------------------------------------------------
     Frontier::CelestialStructure settings{};          // defaults: Benoni, -26.19, +28.32, UTC+2, 2026-09-13
     settings.Observation.LocalHours = hours;
+    if (cloudCover >= 0.0f) settings.Clouds.Coverage = cloudCover;
     if (flareTier >= 0)
         Frontier::ApplyLensFlareStyle(settings.LensFlare,
                                       static_cast<Frontier::LensFlareStyleCategory>(flareTier));
@@ -370,7 +372,8 @@ int main(int argc, char** argv)
                 if (!Trace(hit + normal * 1e-3f, bounce, t2, n2, a2))
                 {
                     // 🔴 P2b, and this is the SHADER'S OWN CelestialSky — discs excluded, as on the bounce path.
-                    colour = colour + albedo * CelestialSky(sky, hit, bounce, false);
+                    colour = colour + albedo * CelestialSky(sky, hit, bounce, false)
+                                     * MediaAmbientTransmittance(sky, bounce);
                 }
             }
             else
@@ -379,6 +382,17 @@ int main(int argc, char** argv)
                 // 🔴 THE PRIMARY MISS, THROUGH THE SHADER'S OWN FUNCTION — sky, sun disc and moon disc, exactly
                 //    as the kernel composites them. Stars are added separately only because P7 has not landed.
                 colour = CelestialSky(sky, camera.Origin, dir, true) + PlaceholderStars(sky, dir);
+
+                // 🔴 Clouds and fog, from the shader's own integrator, composited in front of the sky.
+                {
+                    float mediaTransmittance;
+                    const vec3 mediaRadiance = MediaScatter(sky, camera.Origin, dir,
+                                                            sky.SunDirectionAndCosRadius.xyz(),
+                                                            sky.SunIrradianceAndScale.xyz() * sky.SunTransmittance.xyz(),
+                                                            colour,
+                                                            200000.0f, 48, mediaTransmittance);
+                    colour = colour * mediaTransmittance + mediaRadiance;
+                }
 
                 // 🔴 The lens flare, from the shader's own functions. Occlusion is 1 on a miss by definition.
                 colour = colour + CelestialLensFlare(sky, dir, camera.Forward, camera.Right, camera.Up,

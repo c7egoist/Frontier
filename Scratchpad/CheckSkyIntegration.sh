@@ -42,7 +42,7 @@ echo "[SkyIntegration] both escape paths reach the sky"
 #    a single line; adding the lens flare split it into a local `background` that the flare is then added to.
 #    Pinning the old text would have failed on a correct refactor, which is a gate testing formatting rather
 #    than behaviour. What must remain true is that the miss path asks CelestialSky for the background.
-CheckConstant "the primary miss resolves to the sky"  'CelestialSky\(Celestial\[0\], CameraOrigin, rayDirection, true\)' "$Viewport"
+CheckConstant "the primary miss resolves to the sky"  'CelestialSky\(skyRecord, CameraOrigin, rayDirection, true\)' "$Viewport"
 CheckConstant "an escaping bounce collects the sky"   'accumulatedRadiance \+= throughput \* skyRadiance' "$Viewport"
 
 # 🔴 The bounce path is what makes objects RECEIVE the light rather than stand in front of a backdrop. If the
@@ -76,7 +76,7 @@ CheckConstant "the disc is analytic and full-resolution" 'vec3 CelestialSunDisc'
 # The bounce path must pass includeDiscs=false: the sun is an explicit reservoir light (P3), so a bounce that also
 # hit the disc would double-count it and, being tiny and enormously bright, arrive as a firefly.
 CheckConstant "the bounce path excludes the discs"       'CelestialSky\(Celestial\[0\], hitPos, bounceDir, false\)' "$Viewport"
-CheckConstant "the primary path includes them"           'CelestialSky\(Celestial\[0\], CameraOrigin, rayDirection, true\)' "$Viewport"
+CheckConstant "the primary path includes them"           'CelestialSky\(skyRecord, CameraOrigin, rayDirection, true\)' "$Viewport"
 
 # ── 🔴 THE HALO CONSTRAINT, PINNED ────────────────────────────────────────────────────────────────────────────────────────────────
 echo

@@ -40,6 +40,7 @@ Run CheckCelestialExposure
 Run CheckShowcaseTracksShader
 Run CheckSkySpheresScene
 Run CheckLensFlare
+Run CheckCelestialMedia
 Run CheckSpatialTapJitter
 Run CheckTemporalReprojection
 Run CheckAtrousDenoise

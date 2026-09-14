@@ -76,6 +76,10 @@ void PrintUsage(const char* Program) noexcept
               << "  --flare-elements <list>    comma-separated streak,ghosts,starburst - switches to custom\n"
               << "  --flare-intensity <x>      master flare multiplier\n"
               << "  --no-flare                 disable the lens flare entirely\n"
+              << "  --clouds <0..1>            cloud coverage (0 clear, 1 overcast)\n"
+              << "  --no-clouds                clear sky\n"
+              << "  --fog <1/m>                atmospheric fog density\n"
+              << "  --no-fog / --local-fog / --local-cloud   toggle the bounded volumes\n"
               << "  --no-gi --no-aa --no-temporal --no-spatial --uniform-pick --no-denoise --no-reprojection\n"
               << "  --reset-on-motion          restart accumulation on camera motion (legacy A/B)\n"
               << "  --render-scale <float>     kernel resolution fraction\n"
@@ -149,6 +153,12 @@ int main(int argc, char** argv)
         else if (std::strcmp(Arg, "--reset-on-motion") == 0) WantResetOnMotion = true;
         else if (std::strcmp(Arg, "--no-sky") == 0)          Celestial.Enabled = false;
         else if (std::strcmp(Arg, "--no-flare") == 0)        Celestial.LensFlare.Enabled = false;
+        else if (std::strcmp(Arg, "--clouds") == 0)          { if (const char* V = NeedValue(Arg)) Celestial.Clouds.Coverage = static_cast<float>(std::atof(V)); }
+        else if (std::strcmp(Arg, "--no-clouds") == 0)        Celestial.Clouds.Coverage = 0.0f;
+        else if (std::strcmp(Arg, "--fog") == 0)             { if (const char* V = NeedValue(Arg)) Celestial.AtmosphericFog.Density = static_cast<float>(std::atof(V)); }
+        else if (std::strcmp(Arg, "--no-fog") == 0)           Celestial.AtmosphericFog.Enabled = false;
+        else if (std::strcmp(Arg, "--local-cloud") == 0)      Celestial.LocalCloud.Enabled = true;
+        else if (std::strcmp(Arg, "--local-fog") == 0)        Celestial.LocalFog.Enabled = true;
         else if (std::strcmp(Arg, "--flare") == 0)
         {
             // A named LOOK, not a quality level. Applying it stamps the whole camera character — elements,

@@ -98,7 +98,12 @@ struct CelestialClouds
 
     // Lighting (Schneider/Guerrilla): dual-lobe HG + Beer-powder. Defaults are the reference panel's.
     float ForwardLobe  = 0.80f;  // [-]   g1, forward scattering
-    float BackwardLobe = 0.30f;  // [-]   g2, backscatter
+    // 🔴 NEGATIVE, AND THE POSITIVE DEFAULT WAS A REAL BUG. Henyey-Greenstein's g is signed: positive scatters
+    //    FORWARD, negative scatters BACK. A "backward lobe" of +0.30 is a second, weaker forward lobe, so the
+    //    dual-lobe phase had no back-scatter at all — measured 0.47x the sideways value where it should exceed
+    //    it. That kills the glow you see around your own shadow on a cloud (the heiligenschein / anti-solar
+    //    brightening) and the silver lining on cloud edges facing away from the sun.
+    float BackwardLobe = -0.30f; // [-]   g2, backscatter — MUST be negative to scatter backwards
     float LobeMix      = 0.30f;  // [-]   blend between the two lobes
     float Absorption   = 0.05f;  // [1/m]
     float AmbientScale = 0.90f;  // [x]   sky contribution to the in-scatter
@@ -478,6 +483,21 @@ inline constexpr CelestialProperty kCelestialProperties[] =
     FRONTIER_CELESTIAL_REAL("clouds.detail",     "-", Clouds.DetailScale, 0.0f, 1.0f,    "edge erosion"),
     FRONTIER_CELESTIAL_REAL("clouds.anvil",      "-", Clouds.Anvil,       0.0f, 1.0f,    "upper-level spread"),
     FRONTIER_CELESTIAL_REAL("clouds.powder",     "-", Clouds.PowderScale, 0.0f, 1.0f,    "dark-edge term"),
+    // ⚠️ THE CLOUD LIGHTING AND THE LOCAL VOLUMES HAD NO PROPERTIES AT ALL. Every one of these fields was
+    //    packed into the GPU record and read by the shader, but none was reachable from TOML or the future
+    //    panel — so "dynamic settings" was only half true for the media. Registered here, which also means the
+    //    range checks in CheckCelestialSolver now police their defaults.
+    FRONTIER_CELESTIAL_REAL("clouds.forwardLobe",  "-",   Clouds.ForwardLobe,  0.0f, 0.99f, "HG g1: forward scattering"),
+    FRONTIER_CELESTIAL_REAL("clouds.backwardLobe", "-",   Clouds.BackwardLobe, -0.99f, 0.0f,
+                            "HG g2: MUST be negative to scatter backwards"),
+    FRONTIER_CELESTIAL_REAL("clouds.lobeMix",      "-",   Clouds.LobeMix,      0.0f, 1.0f,  "blend between the two lobes"),
+    FRONTIER_CELESTIAL_REAL("clouds.absorption",   "1/m", Clouds.Absorption,   0.0f, 1.0f,  "extinction per unit density"),
+    FRONTIER_CELESTIAL_REAL("clouds.ambient",      "x",   Clouds.AmbientScale, 0.0f, 4.0f,  "sky light into the cloud"),
+
+    // ⚠️ The local volumes are registered further down as localCloud.* / localFog.* and were ALREADY there.
+    //    An earlier version of this block added local.cloud.* duplicates pointing at the same fields, which the
+    //    "no two properties share a field" gate caught — two sliders editing one value is a trap, because
+    //    changing one silently contradicts the other in the same file.
 
     FRONTIER_CELESTIAL_SWITCH("localCloud.enabled",  LocalCloud.Enabled, "box-bounded local cloud volume"),
     FRONTIER_CELESTIAL_REAL("localCloud.density", "x", LocalCloud.Density,  0.0f, 8.0f, "local volume density"),

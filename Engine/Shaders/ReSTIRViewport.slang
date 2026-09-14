@@ -167,6 +167,48 @@ layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord C
 #define kFlareElementGhosts      2u
 #define kFlareElementStarburst   4u
 
+// Media step budgets. The view march is the expensive one; the sun march runs INSIDE it, so its cost is the
+//    product of the two and it is kept deliberately small. Both are measured in CheckCelestialMedia.
+// How far the media march reaches. 200 km is past the far edge of any cloud layer on the horizon; the march
+//    clips itself to the actual slab intersection, so this only bounds the fog case.
+#define kMediaFarDistance  200000.0
+// The sun-occlusion probe for the lens flare needs a yes/no answer, not a picture, so it runs coarse.
+#define kMediaOcclusionSteps 12
+// Surface fog runs on every geometry pixel, so it gets a smaller budget than the sky march — and the segment is
+//    metres to hundreds of metres rather than kilometres, so it needs fewer steps to resolve.
+#define kMediaSurfaceSteps  16
+// What fraction of the slab's nominal optical depth the AMBIENT approximation should use. Cloud does not fill
+//    its own bounding volume; this is the effective fill factor, calibrated so the result lands on measured
+//    overcast transmittance rather than on the geometric worst case.
+#define kMediaAmbientFill   0.012
+// Light that diffuses through a fully closed deck. An overcast day is dim, not dark: ~15% of clear-sky.
+#define kMediaOvercastFloor 0.15
+// Octave multiple-scattering approximation (Wrenninge/Hillaire). Each successive order is attenuated less,
+//    phase-flattened toward isotropic, and weighted lower. Three orders is the usual real-time choice.
+#define kMediaScatterOrders   3
+#define kMediaOrderExtinction 0.5
+#define kMediaOrderPhase      0.5
+#define kMediaOrderWeight     0.5
+// The coverage threshold sweeps between these two points on the noise distribution. Measured over 20 000
+//    samples of the 3-octave sum: ~2% of the field exceeds 0.72 and ~97% exceeds 0.28, so coverage 0 is an
+//    (almost) clear sky and coverage 1 is (almost) solid overcast, with 0.5 landing near half cover.
+#define kMediaShapeCeiling 0.72
+#define kMediaShapeFloor   0.28
+// Energy normalisation for the octave sum: a cloud reflects as a body of albedo ~0.9, i.e. radiance E*0.9/pi,
+//    but a sum of phase-function samples averages ~1/4pi. 0.286/0.077 closes the gap. See CelestialMedia.slang.
+#define kMediaAlbedoGain   3.73
+// How much light the higher scattering orders still receive deep inside a cloud, where the straight-line path
+//    to the sun is fully blocked. This is diffusion from the lit top and sides — the reason a cumulus base is
+//    grey rather than black.
+#define kMediaDiffuseFloor 0.45
+#define kMediaViewSteps    48
+#define kMediaSunSteps     5
+#define kMediaShapeOctaves 3
+#define kMediaDetailOctaves 2
+#define kMediaLocalOctaves 3
+
+#include "CelestialMedia.slang"
+
 layout(binding = 22) uniform sampler2D Textures[];   // R4a bindless table — ⚠️ a variable-count binding must be the last one in the set
 
 const float kTemporalNormalCos = 0.906308;   // cos(25°): temporal/spatial normal validation
@@ -1355,14 +1397,38 @@ void main()
                                                      uvec2(ViewportWidth, ViewportHeight));
 
         // Discs included: this is what the eye sees directly, so the sun and moon belong in it.
-        vec3 background = CelestialSky(Celestial[0], CameraOrigin, rayDirection, true);
+        CelestialRecord skyRecord = Celestial[0];
+        vec3 background = CelestialSky(skyRecord, CameraOrigin, rayDirection, true);
+
+        // 🔴 CLOUDS AND FOG, ON THE PRIMARY PATH ONLY. The media march composites IN FRONT of the sky — it
+        //    attenuates the sky behind it and adds its own scattered light, which is the same
+        //    `L*T + inscatter` composite the aerial perspective uses. One integrator serves the global deck,
+        //    local puffs, atmospheric fog and local fog, because they are one category of thing.
+        {
+            float mediaTransmittance;
+            vec3  mediaRadiance = MediaScatter(skyRecord, CameraOrigin, rayDirection,
+                                               skyRecord.SunDirectionAndCosRadius.xyz,
+                                               skyRecord.SunIrradianceAndScale.xyz * skyRecord.SunTransmittance.xyz,
+                                               background,
+                                               kMediaFarDistance, kMediaViewSteps, mediaTransmittance);
+            background = background * mediaTransmittance + mediaRadiance;
+        }
 
         // 🔴 The lens flare, added on the miss path only. Occlusion is 1 here BY DEFINITION: this pixel is a
         //    miss, so nothing is between the camera and the sky along it. Surface pixels get the flare too —
         //    see the surface exit below, where occlusion is 0 because geometry is in the way.
-        CelestialRecord sky = Celestial[0];
-        background += CelestialLensFlare(sky, rayDirection, CameraForward, CameraRight, CameraUp,
-                                         sky.SunTransmittance.xyz, 1.0);
+        // ⚠️ The flare is added AFTER the media, and deliberately not attenuated by it. A lens flare forms
+        //    inside the camera from light that already arrived, so cloud in the scene cannot dim a reflection
+        //    that happens between the glass elements. Occlusion of the SUN ITSELF is handled by the media
+        //    transmittance fed in below.
+        float sunThroughMedia;
+        {
+            vec3 ignored = MediaScatter(skyRecord, CameraOrigin, skyRecord.SunDirectionAndCosRadius.xyz,
+                                        skyRecord.SunDirectionAndCosRadius.xyz, vec3(0.0), vec3(0.0),
+                                        kMediaFarDistance, kMediaOcclusionSteps, sunThroughMedia);
+        }
+        background += CelestialLensFlare(skyRecord, rayDirection, CameraForward, CameraRight, CameraUp,
+                                         skyRecord.SunTransmittance.xyz, sunThroughMedia);
 
         Resolve(pixel, background);
         return;
@@ -1634,8 +1700,15 @@ void main()
             //    and enormously bright, the rare hit that did occur would arrive as a fireflies-grade spike.
             if (!bounceHit.valid && dot(bounceDir, hitNormal) > 0.0)
             {
-                vec3 skyRadiance = CelestialSky(Celestial[0], hitPos, bounceDir, false);
-                accumulatedRadiance += throughput * skyRadiance;
+                // 🔴 THE CHEAP FORM, AND THIS IS THE ARCHITECTURAL DECISION. This line runs once per bounce
+                //    SAMPLE, so a 48-step cloud march here would multiply by the sample count and is
+                //    unaffordable. A bounce ray needs to know how much the deck DIMS the sky it is sampling,
+                //    not what shape the clouds are, so it gets a closed-form average opacity instead of a
+                //    march. Without this the ground stays brightly sky-lit under heavy overcast, which is the
+                //    single most obvious way clouds fail to affect a scene.
+                vec3  skyRadiance = CelestialSky(Celestial[0], hitPos, bounceDir, false);
+                float cloudDimming = MediaAmbientTransmittance(Celestial[0], bounceDir);
+                accumulatedRadiance += throughput * skyRadiance * cloudDimming;
             }
             else if (bounceHit.valid && dot(bounceDir, hitNormal) > 0.0)
             {
@@ -1697,6 +1770,33 @@ void main()
     //    Applying it earlier would let later additions arrive unattenuated, so a distant emissive would punch
     //    through kilometres of air at full strength.
     accumulatedRadiance = CelestialAerialPerspective(Celestial[0], CameraOrigin, hitPos, accumulatedRadiance);
+
+    // 🔴 FOG MUST ALSO SIT IN FRONT OF GEOMETRY, OR IT IS NOT FOG. Aerial perspective above handles the thin
+    //    air over kilometres; this handles the dense media — a local fog pool the camera is looking through, or
+    //    a cloud the camera is inside. The march is bounded by the distance to THIS surface, which is what makes
+    //    a fog bank occlude a near object more than a far one correctly rather than hovering in front of both.
+    {
+        CelestialRecord mediaSky = Celestial[0];
+        uint mediaFlags = uint(mediaSky.ExposureAndFlags.w);
+
+        // Only pay for this when a dense medium can actually be between eye and surface. The global deck is
+        //    overhead and the aerial perspective already covers the air, so surfaces skip the layer entirely.
+        if ((mediaFlags & (kCelestialFlagFog | kCelestialFlagLocalFog | kCelestialFlagLocalCloud)) != 0u)
+        {
+            vec3  toSurface = hitPos - CameraOrigin;
+            float surfaceDistance = length(toSurface);
+            if (surfaceDistance > 0.5)
+            {
+                float mediaTransmittance;
+                vec3  mediaRadiance = MediaScatter(mediaSky, CameraOrigin, toSurface / surfaceDistance,
+                                                   mediaSky.SunDirectionAndCosRadius.xyz,
+                                                   mediaSky.SunIrradianceAndScale.xyz * mediaSky.SunTransmittance.xyz,
+                                                   CelestialSky(mediaSky, CameraOrigin, vec3(0.0, 0.0, 1.0), false),
+                                                   surfaceDistance, kMediaSurfaceSteps, mediaTransmittance);
+                accumulatedRadiance = accumulatedRadiance * mediaTransmittance + mediaRadiance;
+            }
+        }
+    }
 
     // R7a: the primary hit's geometric normal and camera distance are what the next frame validates its
     //    back-projection against — the same pair R6 row 2 uses to validate reprojected reservoirs.

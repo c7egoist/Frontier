@@ -43,6 +43,10 @@ static CelestialRecord* gCelestialRecordPtr = nullptr;
 using Frontier::kCelestialFlagEnabled;
 using Frontier::kCelestialFlagMoon;
 using Frontier::kCelestialFlagStars;
+// The extracted port now carries CelestialMedia too, which reads the volume flags.
+using Frontier::kCelestialFlagFog;
+using Frontier::kCelestialFlagLocalFog;
+using Frontier::kCelestialFlagLocalCloud;
 
 #define FRONTIER_CPU_PORT
 #include "/tmp/AtmosphereScatter.port.inc"

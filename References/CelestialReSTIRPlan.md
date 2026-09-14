@@ -447,6 +447,52 @@ preserve hand-tuned values, and `LensFlareTierCategory` must never reappear. 32 
 Renders 32-35 show the four styles. **ALL 24 SUITES GREEN.**
 
 
+### P5 PARTIAL: clouds and fog as one medium — working, but the shading is NOT finished (2026-09-13)
+
+User: "clouds (local clouds, global clouds), fog, atmospheric fog and local fog — I believe they're all the same
+category". Correct, and the implementation follows it: `Engine/Shaders/CelestialMedia.slang` has **one** density
+function and **one** integrator; the four media differ only in where their density comes from.
+
+**Constraints that shaped it.** The engine has NO 3D texture support (`sampler2D Textures[]` and nothing else),
+so the Schneider/Nubis precomputed Perlin-Worley volumes are unavailable — the noise is procedural. Measured:
+3 octaves of value noise is ~68 ns/sample on one CPU core, ~3.3 ms for 1080p at 32 steps. Affordable, and fully
+dynamic with no bake, which F4 requires anyway.
+
+🔴 **THE ARCHITECTURAL DECISION.** `CelestialSky` is called from the bounce path once per SAMPLE. A 48-step
+cloud march there multiplies by the sample count. So clouds march on the PRIMARY path only, and the bounce path
+gets `MediaAmbientTransmittance`, a closed-form average opacity. Measured **39x cheaper** than a march. Gated:
+the bounce block is grepped for `MediaScatter`.
+
+**Five real bugs, each found by measurement:**
+1. **The hash returned 0.0 everywhere.** Constants like 374761393 need 29 bits; a float32 mantissa holds 24, so
+   the multiply was rounded before the modulus. Eleven checks failed with zero density. Replaced with the
+   sin-fract construction, whose products stay exact.
+2. **Extinction counted three times.** `inScatter * BeerPowder(extinction) * density * (1-segment)` — all three
+   are the same optical depth. An opaque cloud emitted 0.0070 against a sky of 8.25.
+3. **The sun march over-reached ~11x.** Sample i was at `step*(i+0.5)*(1+i)` AND weighted by `step*(1+i)`, so
+   the path grew as the sum of squares and `sunlight` collapsed even at the cloud top.
+4. **Coverage was applied after the height gradient**, so the threshold rejected almost everything: coverage
+   0.35 covered **2% of the sky** (73 of 3721 points). Order swapped, and the threshold calibrated against the
+   measured noise distribution (50% of the field exceeds 0.50 but only 24% exceeds 0.65) so the slider is
+   roughly linear. Now 0.5 → 32% cover, 0.85 → 89%.
+5. **`MediaAmbientTransmittance` gave 1e-7 at 35% cover** — a lightless cave. Real overcast passes 10-25% of
+   clear-sky illuminance. Anchored to that, with a fill factor and an overcast floor. Now 1.00 → 0.71 → 0.48.
+   ⚠️ The test that let this through only asked for "less than half"; a one-sided bound cannot catch an
+   over-correction. Both ends are now checked.
+
+⚠️ **NOT DONE, AND VISIBLE IN THE RENDERS.** Cloud tops light correctly but the undersides are still far too
+dark — see `Renders/37_clouds_scattered.png` and `38_clouds_overcast.png`. Two contributing causes are known:
+`skyAmbient` is passed as the sky along the VIEW ray, which for a cloud seen from below is the sky the cloud is
+blocking rather than the dome that lights its base; and the octave sum's higher orders still fall away with
+depth despite `kMediaDiffuseFloor`. The albedo normalisation (`kMediaAlbedoGain 3.73`, derived from
+E·albedo/π vs the ~1/4π a phase sample averages) fixed the tops but not the bases. This needs a proper ambient
+term — hemispherical sky irradiance plus ground bounce — not another multiplier.
+
+Gates: `Scratchpad/CelestialMediaTest.cpp` (29 checks) + `CheckCelestialMedia.sh`. Also fixed: the cloud
+lighting and local-volume settings had NO registered properties at all, so half the media was unreachable from
+TOML. **ALL 25 SUITES GREEN.**
+
+
 Status log (append; newest last):
 - 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
   0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on
