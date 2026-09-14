@@ -28,7 +28,37 @@ Scene: Benoni (−26.19°, +28.32°), 2026-09-13, UTC+2. Sun and moon positions 
 ephemeris in `CelestialSolver.h`, not hand-placed angles — at noon the sun is at azimuth 1.33°, i.e. due
 **north**, which is correct for the southern hemisphere.
 
-Regenerate:
+## Clear-sky time-of-day set
+
+`ClearSky/` is the focused weather-clear set for the first atmosphere review. It uses the
+same open-ground sphere scene with cloud coverage forced to `0`, so the visual differences are
+only from the real ephemeris and the celestial atmosphere:
+
+| file | local time | phase |
+|---|---:|---|
+| `00_0430_astronomical_night.png` | 04:30 | pre-dawn astronomical night |
+| `01_0530_nautical_twilight.png` | 05:30 | nautical twilight |
+| `02_0618_sunrise.png` | 06:18 | sunrise / civil twilight boundary |
+| `03_0712_morning.png` | 07:12 | clear morning |
+| `04_1200_noon.png` | 12:00 | solar noon |
+| `05_1700_afternoon.png` | 17:00 | late afternoon |
+| `06_1748_golden_hour.png` | 17:48 | golden hour |
+| `07_1836_sunset.png` | 18:36 | sunset |
+| `08_1930_dusk.png` | 19:30 | post-sunset dusk |
+
+`09_clear_sky_contact_sheet.png` puts the whole progression on one strip. These renders keep
+the default cinematic lens character; the lens is not weather and can be disabled for a pure
+sky-only comparison in the showcase.
+
+Regenerate the focused set with:
+
+    bash Scratchpad/RenderClearSkySet.sh
+
+Optional environment variables are supported for a faster preview or a larger review render:
+
+    WIDTH=320 HEIGHT=180 SAMPLES=12 bash Scratchpad/RenderClearSkySet.sh
+
+The underlying showcase can also be rendered directly:
 
     bash Scratchpad/ExtractCelestialPort.sh /tmp/CelestialPort.inc
     g++ -std=c++20 -O2 -I Scratchpad -I . Scratchpad/CelestialShowcase.cpp \
