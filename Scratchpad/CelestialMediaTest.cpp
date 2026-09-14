@@ -585,6 +585,60 @@ int main()
     }
 
     //----------------------------------------------------------------------------------------------------------------
+    Section("5bd. OVERCAST DOES NOT COLLAPSE INTO A RING");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 REGRESSION FOR THE VISUAL BUG. With atmospheric fog enabled, the old integrator marched the whole
+    //    200 km sky bound with the same 48 samples. The 900 m cloud slab then received zero or one samples at
+    //    shallow angles, so neighboring rays alternated between "cloud" and "no cloud" in circular bands. The
+    //    density tests could not see this because they sample the field directly, not through the camera march.
+    {
+        Frontier::CelestialStructure cloudy = settings;
+        cloudy.Clouds.Coverage = 0.95f;
+        cloudy.AtmosphericFog.Enabled = true;
+        CelestialRecord withCloud = BuildRecord(cloudy);
+
+        Frontier::CelestialStructure fogOnly = cloudy;
+        fogOnly.Clouds.Coverage = 0.0f;
+        CelestialRecord withoutCloud = BuildRecord(fogOnly);
+
+        const vec3 origin(0.0f, 0.0f, 1.75f);
+        int cloudRays = 0, totalRays = 0;
+        float weakestBand = 1.0f;
+        for (int elevation = 2; elevation <= 26; elevation += 2)
+        {
+            int bandHits = 0, bandTotal = 0;
+            const float el = float(elevation) * 3.14159265f / 180.0f;
+            for (int azimuth = 0; azimuth < 360; azimuth += 15)
+            {
+                const float az = float(azimuth) * 3.14159265f / 180.0f;
+                const vec3 direction = normalize(vec3(std::cos(el) * std::cos(az),
+                                                      std::cos(el) * std::sin(az), std::sin(el)));
+                float cloudT, fogT;
+                MediaScatter(withCloud, origin, direction, withCloud.SunDirectionAndCosRadius.xyz(),
+                             vec3(1.0f), vec3(0.0f), 200000.0f, 48, cloudT);
+                MediaScatter(withoutCloud, origin, direction, withoutCloud.SunDirectionAndCosRadius.xyz(),
+                             vec3(1.0f), vec3(0.0f), 200000.0f, 48, fogT);
+
+                // Remove the known atmospheric-fog transmittance. What remains is the cloud's incremental
+                // extinction, so fog itself cannot make a clear ray look like a cloud hit.
+                const float cloudOpacity = 1.0f - cloudT / std::max(fogT, 1e-4f);
+                if (cloudOpacity > 0.02f) ++bandHits;
+                ++bandTotal;
+            }
+            cloudRays += bandHits;
+            totalRays += bandTotal;
+            weakestBand = std::min(weakestBand, float(bandHits) / float(bandTotal));
+        }
+
+        Check(float(cloudRays) / float(totalRays) > 0.80f,
+              "near-overcast reaches most camera rays even with atmospheric fog",
+              Fixed(100.0 * float(cloudRays) / float(totalRays), 1) + "% cloud-hit rays");
+        Check(weakestBand > 0.65f,
+              "no elevation band collapses into a ring-shaped gap",
+              Fixed(100.0 * weakestBand, 1) + "% weakest band");
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
     Section("5c. CLOUDS BLOCK THE SUN");
     //----------------------------------------------------------------------------------------------------------------
     // 🔴 THE USER'S OBSERVATION: "clouds are also blocking light it seems" — they should be, and were not.

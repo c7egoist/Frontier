@@ -392,44 +392,131 @@ vec3 MediaScatter(CelestialRecord sky, vec3 origin, vec3 direction, vec3 sunDire
     float ambient    = sky.CloudLighting.w;
     float powder     = sky.CloudShape.w;
 
-    // ⚠️ THE MARCH IS BOUNDED BY THE LAYER, NOT BY THE HORIZON. A ray that never reaches the cloud slab must not
-    //    pay for 64 steps of empty sky. Clip to the slab first; only fog (which is everywhere) uses the full
-    //    span, and fog needs no noise so its samples are cheap.
-    float near = 0.0;
-    float far  = maxDistance;
+    // 🔴 THE CLOUD INTERVAL MUST BE RESOLVED EVEN WHEN FOG IS ALSO ENABLED. The old march used one uniform
+    //    [0, maxDistance] interval whenever any fog flag was set. Primary sky rays have a 200 km bound, so their
+    //    900 m cloud layer occupied less than one sample at shallow angles. Some rays happened to hit the slab and
+    //    some missed it entirely; the result was a stack of circular bands / a ring of clouds in the overcast view.
+    //
+    //    Keep the full path for smooth atmospheric fog, but split it at the cloud slab and spend a dedicated budget
+    //    inside the slab. The intervals are still integrated by this ONE loop and share the same transmittance, so
+    //    this is not a second medium or a second renderer — it is adaptive segmentation of the same integral.
+    float pathNear = 0.0;
+    float pathFar  = maxDistance;
+    float layerNear = 0.0;
+    float layerFar  = 0.0;
+    bool layerHit = false;
+    bool hasLayer = sky.CloudLayer.x > 0.0 && sky.CloudLayer.w > 0.0;
 
-    bool fogPresent = (flags & (kCelestialFlagFog | kCelestialFlagLocalFog)) != 0u;
-    if (!fogPresent && sky.CloudLayer.x > 0.0)
+    if (hasLayer)
     {
         float base = sky.CloudLayer.z;
         float top  = base + sky.CloudLayer.w;
 
         if (abs(direction.z) < 1e-5)
         {
-            if (origin.z < base || origin.z > top) return vec3(0.0);
+            // A horizontal ray only sees the layer when the origin is already inside it.
+            layerHit = origin.z >= base && origin.z <= top;
+            if (layerHit) { layerNear = 0.0; layerFar = maxDistance; }
         }
         else
         {
             float tBase = (base - origin.z) / direction.z;
             float tTop  = (top  - origin.z) / direction.z;
-            near = max(0.0, min(tBase, tTop));
-            far  = min(maxDistance, max(tBase, tTop));
-            if (far <= near) return vec3(0.0);
+            layerNear = max(0.0, min(tBase, tTop));
+            layerFar  = min(maxDistance, max(tBase, tTop));
+            layerHit  = layerFar > layerNear;
         }
     }
 
-    float step = (far - near) / float(steps);
+    // When the layer is the only medium, clip the path to it: a ray that misses the slab must return immediately.
+    uint volumeFlags = flags & (kCelestialFlagFog | kCelestialFlagLocalFog | kCelestialFlagLocalCloud);
+    bool otherMediumPresent = volumeFlags != 0u;
+    bool splitLayer = otherMediumPresent && layerHit
+                   && (layerNear > pathNear + 1e-4 || layerFar < pathFar - 1e-4);
+    if (!otherMediumPresent)
+    {
+        if (!layerHit) return vec3(0.0);
+        pathNear = layerNear;
+        pathFar  = layerFar;
+    }
+
+    if (pathFar <= pathNear) return vec3(0.0);
+
+    // With a full-path medium, reserve two thirds of the samples for the cloud slab. The remainder is split
+    // between the fog-only intervals before and after it. The 48-step sky budget therefore remains bounded, while
+    // the cloud always receives 32 samples instead of an angle-dependent zero-or-one.
+    int preSteps = steps;
+    int layerSteps = 0;
+    int postSteps = 0;
+    if (splitLayer)
+    {
+        layerSteps = min(steps, max(8, (steps * 2) / 3));
+        int outsideSteps = steps - layerSteps;
+        bool hasPre  = layerNear > pathNear + 1e-4;
+        bool hasPost = layerFar  < pathFar  - 1e-4;
+        if (hasPre && hasPost)
+        {
+            preSteps = outsideSteps / 2;
+            postSteps = outsideSteps - preSteps;
+        }
+        else if (hasPre)
+        {
+            preSteps = outsideSteps;
+            postSteps = 0;
+        }
+        else
+        {
+            preSteps = 0;
+            postSteps = outsideSteps;
+        }
+        // At very small budgets one side can receive zero samples; the layer still gets every remaining sample,
+        // and the normal path is retained for the production 48-step / 12-step budgets.
+    }
+
     vec3  radiance = vec3(0.0);
     float transmittance = 1.0;
 
+    // A fixed midpoint in every ray is another way to manufacture rings: at a shallow angle the same sample
+    //    fraction crosses the same height contour across a whole row of pixels. Jitter the stratified sample
+    //    within its interval using the ray direction. It is deterministic (so it cannot shimmer from frame to
+    //    frame), but it breaks the screen-aligned march pattern; temporal accumulation supplies the missing
+    //    sub-sample coverage on the real viewport.
+    float sampleJitter = fract(sin(dot(direction, vec3(12.9898, 78.233, 45.164))) * 43758.5453123);
+
     for (int i = 0; i < steps; ++i)
     {
-        vec3 position = origin + direction * (near + step * (float(i) + 0.5));
+        float sampleNear = pathNear;
+        float sampleStep = (pathFar - pathNear) / float(steps);
+        int sampleIndex = i;
+
+        if (splitLayer)
+        {
+            if (i < preSteps && preSteps > 0)
+            {
+                sampleNear  = pathNear;
+                sampleStep = (layerNear - pathNear) / float(preSteps);
+                sampleIndex = i;
+            }
+            else if (i < preSteps + layerSteps)
+            {
+                sampleNear  = layerNear;
+                sampleStep = (layerFar - layerNear) / float(layerSteps);
+                sampleIndex = i - preSteps;
+            }
+            else if (postSteps > 0)
+            {
+                sampleNear  = layerFar;
+                sampleStep = (pathFar - layerFar) / float(postSteps);
+                sampleIndex = i - preSteps - layerSteps;
+            }
+        }
+
+        vec3 position = origin + direction * (sampleNear + sampleStep * (float(sampleIndex) + sampleJitter));
 
         float density = MediaDensity(sky, position);
         if (density <= 0.001) continue;   // empty space is the common case; skip the lighting work
 
-        float extinction = density * absorption * step;
+        float extinction = density * absorption * sampleStep;
 
         // Sunlight reaching here, self-shadowed by the medium above.
         float sunlight = MediaSunTransmittance(sky, position, sunDirection);

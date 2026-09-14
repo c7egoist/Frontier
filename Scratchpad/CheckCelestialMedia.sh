@@ -77,6 +77,10 @@ else
 fi
 CheckConstant "clouds shadow the ground"              'float MediaSunShadow' "$Media"
 CheckConstant "and the shadow is wired to the sun light" 'MediaSunShadow\(Celestial\[0\], hitPos' "$Viewport"
+# A full-path fog march must still give the thin cloud slab its own sample interval, or overcast collapses into
+#    screen-space rings. The numeric harness also proves this, but keep the architectural fix visible at the gate.
+CheckConstant "cloud/fog marching splits at the layer"     'bool splitLayer = otherMediumPresent' "$Media"
+CheckConstant "the split march jitters its strata"         'float sampleJitter' "$Media"
 CheckConstant "coverage erodes through a remap"       'MediaRemap\(shape, 1\.0 - coverage' "$Media"
 CheckConstant "the height gradient shapes the slab"   'bottomGradient \* topGradient' "$Media"
 

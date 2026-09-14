@@ -884,3 +884,23 @@ Status log (append; newest last):
   full (R4), and the exposure complaint has a known mechanism that a sky would AMPLIFY (R5) — so P0 fixes it
   before any sky code lands. glslang built in-sandbox; production kernel verified compiling to SPIR-V (R9).
   Awaiting the user's call on the P8 slider surface before starting.
+
+### P5 VISUAL REGRESSION: the overcast ring was the cloud/fog march (2026-09-14)
+
+The overcast render exposed a separate integration bug that the density and opacity gates could not see. When
+atmospheric fog was enabled, `MediaScatter` marched the entire 200 km sky bound with 48 uniform samples. The cloud
+slab is only 900 m thick, so at shallow view angles it occupied zero or one samples. Neighboring elevations then
+alternated between sampling the slab and missing it, which projected as a circular ring / stacked horizontal bands
+in `Renders/38_clouds_overcast.png`.
+
+Fixed in `Engine/Shaders/CelestialMedia.slang` without creating a second medium or renderer: the one integrator now
+computes the layer intersection, partitions the full fog path at the layer boundaries, reserves two thirds of its
+bounded sample budget for the cloud interval, and carries the same transmittance through all intervals. Each
+stratum also gets deterministic within-cell ray jitter so the midpoint pattern cannot form screen-aligned rings.
+The clear/scattered/overcast paths still use the same production shader text; only the march partition changed.
+
+Added §5bd to `Scratchpad/CelestialMediaTest.cpp` and structural pins to `CheckCelestialMedia.sh`. Against the old
+integrator the regression is falsified: **79.5%** cloud-hit rays overall and **0%** in the weakest elevation band;
+the fixed integrator measures **100.0% / 100.0%** at 0.95 coverage with atmospheric fog. The media proof is now
+48 checks, 0 failures. `Renders/38_clouds_overcast.png` was regenerated through the CPU-compiled production shader
+at 620×390, 12 spp; the overcast sky no longer has the ring-shaped gap.
