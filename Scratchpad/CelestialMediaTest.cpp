@@ -530,6 +530,61 @@ int main()
     }
 
     //----------------------------------------------------------------------------------------------------------------
+    Section("5bc. CLOUD EDGES ARE SOFT, NOT STENCILLED");
+    //----------------------------------------------------------------------------------------------------------------
+    // 🔴 THE "CHOPPED OUT" LOOK, MEASURED. With absorption at 0.05 a 900 m column at only 15% density already
+    //    reached optical depth 6.75 — opacity 0.999. Every cloud was fully opaque including its edges, so the
+    //    silhouette snapped from 0 to 1 with nothing between: a stencil, not a volume. Sampling the sky found
+    //    opacity was 1.000 or 0.000 and essentially never in between.
+    //
+    //    The density field was never the problem (measured: a smooth 0.001 -> 0.24 ramp over 240 m of edge).
+    //    This checks the OPACITY distribution, which is what the eye actually sees.
+    {
+        Frontier::CelestialStructure s = settings;
+        s.Clouds.Coverage = 0.55f;
+        CelestialRecord r = BuildRecord(s);
+        gCelestialRecordPtr = &r;
+
+        const vec3 sun = r.SunDirectionAndCosRadius.xyz();
+        const vec3 origin(0.0f, 0.0f, 2.0f);
+
+        int partial = 0, solid = 0, empty = 0, total = 0;
+        for (int a = 0; a < 200; ++a)
+            for (int e = 6; e < 80; e += 3)
+            {
+                const float az = float(a) * 0.0314f;
+                const float el = float(e) * 3.14159265f / 180.0f;
+                const vec3 dir = normalize(vec3(std::cos(el) * std::cos(az), std::cos(el) * std::sin(az),
+                                                std::sin(el)));
+                float t;
+                MediaScatter(r, origin, dir, sun, vec3(1.0f), vec3(0.1f), 200000.0f, 48, t);
+                const float opacity = 1.0f - t;
+                if (opacity < 0.02f) ++empty;
+                else if (opacity > 0.98f) ++solid;
+                else ++partial;
+                ++total;
+            }
+
+        // Of the rays that hit cloud at all, a healthy fraction must be partially transparent. That fraction IS
+        // the soft fringe; when it was zero the clouds looked cut out with scissors.
+        const int hitting = partial + solid;
+        const float softFraction = hitting > 0 ? float(partial) / float(hitting) : 0.0f;
+
+        Check(hitting > 0, "the test sky contains cloud", std::to_string(hitting) + " rays hit");
+        Check(softFraction > 0.15f,
+              "a good share of cloud rays are partially transparent (soft edges)",
+              Fixed(softFraction * 100.0, 1) + "% partial vs " + Fixed(100.0 - softFraction * 100.0, 1) + "% solid");
+
+        // ⚠️ AND THE COUPLING THAT BIT ME TWICE. Absorption sets how fast optical depth accumulates; the ambient
+        //    approximation multiplies by it too. Changing one without the other silently breaks overcast
+        //    dimming — dropping absorption 0.05 -> 0.012 made overcast pass 79% of clear-sky light instead of
+        //    48%, i.e. clouds stopped shading the world. Assert they stay in step.
+        Check(r.CloudAbsorptionAndWind.x > 0.004f && r.CloudAbsorptionAndWind.x < 0.03f,
+              "absorption is in the range real cumulus occupy (0.005-0.1 /m, thin end)",
+              Fixed(r.CloudAbsorptionAndWind.x, 4) + " /m");
+    }
+
+    //----------------------------------------------------------------------------------------------------------------
     Section("5c. CLOUDS BLOCK THE SUN");
     //----------------------------------------------------------------------------------------------------------------
     // 🔴 THE USER'S OBSERVATION: "clouds are also blocking light it seems" — they should be, and were not.

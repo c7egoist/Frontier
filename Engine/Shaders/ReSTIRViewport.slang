@@ -180,7 +180,10 @@ layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord C
 // What fraction of the slab's nominal optical depth the AMBIENT approximation should use. Cloud does not fill
 //    its own bounding volume; this is the effective fill factor, calibrated so the result lands on measured
 //    overcast transmittance rather than on the geometric worst case.
-#define kMediaAmbientFill   0.012
+// ⚠️ COUPLED TO Clouds.Absorption. This fill factor was calibrated when absorption was 0.05; dropping that to
+//    0.012 (to stop clouds being hard silhouettes) scaled the ambient dimming down with it — overcast went from
+//    passing 48% of clear-sky light to 79%, i.e. barely dimming at all. Raised by the same 4.2x ratio.
+#define kMediaAmbientFill   0.050
 // Light that diffuses through a fully closed deck. An overcast day is dim, not dark: ~15% of clear-sky.
 #define kMediaOvercastFloor 0.15
 // Octave multiple-scattering approximation (Wrenninge/Hillaire). Each successive order is attenuated less,
@@ -197,8 +200,14 @@ layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord C
 //    cover** and shaded 78% of the ground. (Those two agreeing is itself the proof the shadow is correct — it
 //    was the coverage that was wrong, not the shadowing.) Raising the floor pulls the whole mapping back so the
 //    slider means what it says.
-#define kMediaShapeCeiling 0.80
-#define kMediaShapeFloor   0.46
+// ⚠️ RECALIBRATED AGAIN AFTER WIDENING THE HEIGHT GRADIENT. Fixing the pancake profile made each cloud taller
+//    but thinner in density, so the same thresholds under-delivered: coverage 0.8 gave only 20% sky cover and
+//    near-overcast still left 66% of the ground in full sun. Measured floor sweep at ceiling 0.80:
+//        floor 0.46 -> 0.80 coverage gives 20% sky      floor 0.34 -> 54%
+//        floor 0.38 -> 40%                              floor 0.30 -> 67%
+//    0.28 lands 0.8 near 75%, which is what "heavily clouded" should mean.
+#define kMediaShapeCeiling 0.78
+#define kMediaShapeFloor   0.28
 // How wide the coverage remap window is. 0.28 made the field near-binary — flat, saturated interiors with no
 //    shading detail and an erosion pass that could not bite. See the measurement in CelestialMedia.slang.
 #define kMediaCoverageWindow 0.50
@@ -207,9 +216,15 @@ layout(std430, binding = 21) readonly buffer CelestialExtent { CelestialRecord C
 #define kMediaAmbientFalloff 1.6
 // How much of the light falling on the ground comes back up into the cloud base. Typical terrain albedo.
 #define kMediaGroundBounce   0.30
-// The noise's vertical wavelength as a fraction of its horizontal one. At 1.0 a 1400 m cloud scale gives 1400 m
-//    vertical features inside a 900 m slab — under one period, i.e. flat pancakes. 0.22 fits ~3 periods.
-#define kMediaVerticalScale  0.22
+// 🔴 THIS WAS BACKWARDS AND IT COST TWO ROUNDS OF "STILL FLAT". Squashing the vertical axis makes the noise
+//    vary FASTER in z, so a column crosses the coverage threshold only in a thin band — measured, the cloud
+//    occupied just the 40-60% slice of the slab, a 180 m disc inside a 900 m layer, 900 m wide: a 5:1 pancake.
+//    Squashing makes clouds THINNER, not taller.
+//
+//    The literature's structure is the opposite: the noise is roughly ISOTROPIC (it adds bumps and cauliflower,
+//    not layers) and the vertical silhouette comes entirely from the HEIGHT GRADIENT. 0.7 keeps a little
+//    vertical compression so tops billow slightly more than bases, without banding the slab.
+#define kMediaVerticalScale  0.70
 // Energy normalisation for the octave sum: a cloud reflects as a body of albedo ~0.9, i.e. radiance E*0.9/pi,
 //    but a sum of phase-function samples averages ~1/4pi. 0.286/0.077 closes the gap. See CelestialMedia.slang.
 #define kMediaAlbedoGain   3.73

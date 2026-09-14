@@ -175,10 +175,17 @@ float MediaLayerDensity(CelestialRecord sky, vec3 worldPosition)
     covered = clamp(covered, 0.0, 1.0);
     if (covered <= 0.0) return 0.0;
 
-    // The height profile. Real cloud decks have flat-ish bases (where rising air hits the condensation level)
-    //    and billowing, tapering tops. Two smoothsteps multiplied: rise quickly off the base, fall near the top.
-    float bottomGradient = smoothstep(0.0, 0.12, heightFraction);
-    float topGradient    = 1.0 - smoothstep(1.0 - sky.CloudShape.z * 0.7 - 0.15, 1.0, heightFraction);
+    // 🔴 THE HEIGHT GRADIENT IS WHAT GIVES A CUMULUS ITS SILHOUETTE, so it has to occupy most of the slab.
+    //    A cumulus has a flat, fairly sharp base where rising air first condenses, a broad bulging middle, and
+    //    a rounded top that tapers. Two smoothsteps: a fast rise off the base and a slow fall toward the top,
+    //    deliberately ASYMMETRIC because a real cloud is not an ellipsoid — its underside is much flatter than
+    //    its crown.
+    //
+    //    ⚠️ The base rise is short (12% of the slab) and the top falloff long (from 55% upward), which puts the
+    //    widest part around 40-50% height and leaves a tapering crown above it. Making both short produced a
+    //    thin disc; that is what the profile measurement caught.
+    float bottomGradient = smoothstep(0.0, 0.10, heightFraction);
+    float topGradient    = 1.0 - smoothstep(0.55 - sky.CloudShape.z * 0.15, 1.0, heightFraction);
     covered *= bottomGradient * topGradient;
     if (covered <= 0.0) return 0.0;
 

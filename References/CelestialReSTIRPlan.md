@@ -570,6 +570,41 @@ Also: `kMediaShadowSteps` 6 → 12, because over a ~1200 m slant each sample sto
 thin cloud was extrapolated across the whole segment. 39 checks, **ALL 25 SUITES GREEN.**
 
 
+### CLOUD EDGES: the "chopped out" look was ONE number (2026-09-13)
+
+User: "they look like clouds but chopped out; they don't have smooth edges". Researched, then measured.
+
+🔴 **THE CAUSE: absorption 0.05 /m made every cloud a hard stencil.** Optical depth is density x absorption x
+path, so a 900 m column at only **15% density** already reached depth 6.75 — opacity 0.999. The entire cloud,
+edges included, was fully opaque. Measured across 8 880 sky rays: opacity was **1.000 or 0.000 with essentially
+nothing in between**. That binary silhouette IS the chopped-out look.
+
+⚠️ **The density field was never the problem.** Measured across an edge: a smooth 0.001 → 0.24 ramp over 240 m.
+I had been rewriting shape code for two rounds when the fault was a single constant downstream of it. Real
+cumulus extinction is 0.005-0.1 /m with mean total optical depth near 5; **0.012** puts cloud edges at depth
+0.5-1.6 where they are genuinely translucent. Partial-opacity rays went **0% → 57.5%** of all rays hitting cloud.
+
+🔴 **AND I HAD THE VERTICAL SCALE BACKWARDS.** `kMediaVerticalScale 0.22` squashed the noise vertically, which
+makes it vary FASTER in z — so a column crossed the coverage threshold only in a thin band. Measured profile:
+the cloud occupied just the 40-60% slice of the slab, a 180 m disc inside a 900 m layer, 900 m wide — a **5:1
+pancake**. Squashing makes clouds thinner, not taller. The literature's structure is the opposite: noise
+roughly ISOTROPIC (0.70), with the vertical silhouette coming from the height gradient. Widened that gradient
+(fast rise off the base, slow fall from 55% up, deliberately asymmetric because a cumulus base is far flatter
+than its crown). Profile now: flat base at 10%, widest at 40%, tapering crown to 90%.
+
+**Two recalibrations these forced**, both caught by the gates rather than by eye:
+  · the taller/thinner clouds under-delivered coverage (0.8 gave 20% sky); floor 0.46 → 0.28, now 73%.
+  · `kMediaAmbientFill` was calibrated against the OLD absorption, so dropping absorption 4.2x made overcast
+    pass 79% of clear-sky light instead of 48% — clouds had stopped shading the world. Raised by the same 4.2x,
+    and the coupling is now documented at both ends plus asserted in §5bc.
+
+New gate §5bc measures the OPACITY DISTRIBUTION, which is what the eye sees, rather than the density field,
+which was always fine. 43 checks. **ALL 25 SUITES GREEN.**
+
+⚠️ Environment note: the sandbox wiped /home/user/deps and ExternalPackages again mid-session; rebuilt glslang,
+re-cloned the third-party trees and libJolt. Unrelated to the work.
+
+
 Status log (append; newest last):
 - 2026-09-13: P0 LANDED (stability; no sky code). The three faults are fixed and measured.
   0a. ObserveCamera no longer restarts the accumulation on camera motion. Every temporal path is gated on

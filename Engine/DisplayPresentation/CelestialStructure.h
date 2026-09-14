@@ -110,7 +110,16 @@ struct CelestialClouds
     //    brightening) and the silver lining on cloud edges facing away from the sun.
     float BackwardLobe = -0.30f; // [-]   g2, backscatter — MUST be negative to scatter backwards
     float LobeMix      = 0.30f;  // [-]   blend between the two lobes
-    float Absorption   = 0.05f;  // [1/m]
+    // 🔴 0.05 MADE EVERY CLOUD A HARD SILHOUETTE, AND THAT WAS THE "CHOPPED OUT" LOOK.
+    //    Optical depth is density x this x path length. At 0.05, a 900 m column at only 15% density already
+    //    reaches depth 6.75 — opacity 0.999. So the ENTIRE cloud, edges included, was fully opaque: measured
+    //    opacity across the sky was 1.000 or 0.000 with nothing in between, i.e. a stencil rather than a volume.
+    //
+    //    The density field itself is smooth (measured: 0.001 -> 0.24 over 240 m of edge), so the fault was
+    //    entirely here. Real cumulus extinction is 0.005-0.1 /m with a mean total optical depth near 5, and at
+    //    0.012 the same edge now spans depth 0.5-1.6 — translucent, which is what gives clouds soft fringes and
+    //    visible wisps instead of a cut-out silhouette.
+    float Absorption   = 0.012f; // [1/m]
     float AmbientScale = 0.90f;  // [x]   sky contribution to the in-scatter
     float PowderScale  = 0.60f;  // [-]   dark-edge term
 };
