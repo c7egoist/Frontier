@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frontier — Japanese Machiya Generator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Serif+JP:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <div id="canvas-container"></div>
+    
+    <div id="ui">
+      <header id="header">
+        <div class="logo">
+          <span class="jp">縁側</span>
+          <div>
+            <h1>FRONTIER</h1>
+            <p>Procedural Japanese Building Generator — 古代×現代</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button id="randomizeBtn" class="btn primary">🎲 Randomize 町家</button>
+          <button id="exportBtn" class="btn">⬇ Export GLTF</button>
+        </div>
+      </header>
+
+      <div id="panels">
+        <!-- LEFT: Controls like Geometry Nodes -->
+        <div id="controls-panel" class="panel scroll">
+          <div class="panel-title">GEOMETRY NODES // ジオメトリノード</div>
+          
+          <div class="node-group">
+            <div class="node-header" data-type="seed">🎲 SEED & CORE</div>
+            <div class="node-body">
+              <div class="field">
+                <label>Seed 乱数</label>
+                <div class="row">
+                  <input type="number" id="seed" value="1425" />
+                  <button id="seedRandom" class="mini">↻</button>
+                </div>
+              </div>
+              <div class="field">
+                <label>Building Archetype 建築類型</label>
+                <select id="buildingType">
+                  <option value="machiya">Machiya 町家 — Townhouse</option>
+                  <option value="izakaya">Izakaya 居酒屋 — Tavern</option>
+                  <option value="ryokan">Ryokan 旅館 — Inn</option>
+                  <option value="store">Store 商店 — Shop</option>
+                  <option value="house">Minka 民家 — Farmhouse</option>
+                  <option value="temple_shop">Temple Shop 門前町</option>
+                  <option value="office">Office 事務所 — Modern Mix</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Use 用途</label>
+                <select id="buildingUse">
+                  <option value="house">House 住居</option>
+                  <option value="store">Store 店舗</option>
+                  <option value="izakaya">Izakaya 居酒屋</option>
+                  <option value="office">Office 事務所</option>
+                  <option value="ryokan">Ryokan 旅館</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="node-group">
+            <div class="node-header" data-type="structure">🏯 STRUCTURE / 構造 — Boolean Stack</div>
+            <div class="node-body">
+              <div class="field row-2">
+                <div>
+                  <label>Width 幅 (m)</label>
+                  <input type="range" id="width" min="3" max="12" step="0.2" value="6.5" />
+                  <span class="val" data-for="width">6.5</span>
+                </div>
+                <div>
+                  <label>Depth 奥行 (m)</label>
+                  <input type="range" id="depth" min="3" max="14" step="0.2" value="8" />
+                  <span class="val" data-for="depth">8</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>Floors 階数 — Boolean Add</label>
+                <div class="boolean-row">
+                  <label class="check"><input type="checkbox" id="floor1" checked disabled /> 1F <span>Base</span></label>
+                  <label class="check"><input type="checkbox" id="floor2" checked /> 2F</label>
+                  <label class="check"><input type="checkbox" id="floor3" /> 3F</label>
+                  <label class="check"><input type="checkbox" id="floor4" /> 4F Attic</label>
+                </div>
+                <div class="row-2">
+                  <div>
+                    <label>Floor Height 階高</label>
+                    <input type="range" id="floorHeight" min="2.2" max="4.5" step="0.1" value="3.1" />
+                    <span class="val" data-for="floorHeight">3.1</span>
+                  </div>
+                  <div>
+                    <label>Pillar Density 柱密度</label>
+                    <input type="range" id="pillarDensity" min="1" max="5" step="1" value="3" />
+                    <span class="val" data-for="pillarDensity">3</span>
+                  </div>
+                </div>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="hasEngawa" checked /> Engawa 縁側 — Veranda</label>
+                <label class="check"><input type="checkbox" id="hasGenkan" checked /> Genkan 玄関 — Entrance</label>
+                <label class="check"><input type="checkbox" id="hasSecondFloorSetback" /> 2F Setback 下屋</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="node-group highlight">
+            <div class="node-header" data-type="roof">⛩ ROOF SYSTEM / 屋根 — Most Important</div>
+            <div class="node-body">
+              <div class="field">
+                <label>Roof Type 屋根形式</label>
+                <select id="roofType">
+                  <option value="irimoya">Irimoya 入母屋 — Hip-and-Gable (Most Traditional)</option>
+                  <option value="kirizuma">Kirizuma 切妻 — Gable</option>
+                  <option value="yosemune">Yosemune 寄棟 — Hip Roof</option>
+                  <option value="karahafu">Karahafu 唐破風 — Cusped Gable (Shrine/Store)</option>
+                  <option value="nokikarahafu">Noki-Karahafu 軒唐破風 — Curved Eaves</option>
+                  <option value="pagoda">Pagoda Tier 重層 — Multi-tier</option>
+                </select>
+              </div>
+              <div class="field row-2">
+                <div>
+                  <label>Roof Height 屋根高</label>
+                  <input type="range" id="roofHeight" min="0.8" max="5" step="0.1" value="2.8" />
+                  <span class="val" data-for="roofHeight">2.8</span>
+                </div>
+                <div>
+                  <label>Curve 反り Sori</label>
+                  <input type="range" id="roofCurve" min="0" max="1" step="0.05" value="0.65" />
+                  <span class="val" data-for="roofCurve">0.65</span>
+                </div>
+              </div>
+              <div class="field row-2">
+                <div>
+                  <label>Eaves Overhang 軒出</label>
+                  <input type="range" id="roofOverhang" min="0.2" max="2" step="0.05" value="0.9" />
+                  <span class="val" data-for="roofOverhang">0.9</span>
+                </div>
+                <div>
+                  <label>Ridge Height 棟高</label>
+                  <input type="range" id="ridgeHeight" min="0" max="0.8" step="0.05" value="0.25" />
+                  <span class="val" data-for="ridgeHeight">0.25</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>Roof Tile Type 瓦種 — Boolean</label>
+                <select id="roofTileType">
+                  <option value="kawara_nihon">Nihon Kawara 日本瓦 — Round Grey</option>
+                  <option value="kawara_ibushi">Ibushi いぶし銀 — Smoked Silver</option>
+                  <option value="kawara_red">Sekishu 赤瓦 — Red</option>
+                  <option value="mokume">Mokume 木目 — Wood Shingle</option>
+                  <option value="copper">Copper 銅板 — Green Patina</option>
+                  <option value="ceramic_blue">Ceramic 瑠璃 — Blue Glazed</option>
+                </select>
+              </div>
+              <div class="field row-2">
+                <div>
+                  <label>Tile Scale 瓦サイズ</label>
+                  <input type="range" id="tileScale" min="0.3" max="2" step="0.1" value="1" />
+                  <span class="val" data-for="tileScale">1.0</span>
+                </div>
+                <div>
+                  <label>Roof Color Override</label>
+                  <input type="color" id="roofColor" value="#4a4e52" />
+                </div>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="has3DTiles" checked /> 3D Tiles — Procedural Mesh 瓦メッシュ</label>
+                <label class="check"><input type="checkbox" id="hasOnigawara" checked /> Onigawara 鬼瓦 — Demon Tiles</label>
+                <label class="check"><input type="checkbox" id="hasRidgeOrnament" checked /> Ridge Ornament 鴟尾・棟飾り</label>
+                <label class="check"><input type="checkbox" id="hasKawaraDetail" /> Tile Ridge Lines 棟積み詳細</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="node-group">
+            <div class="node-header" data-type="material">🪵 MATERIALS / 材質 — Wood & Walls</div>
+            <div class="node-body">
+              <div class="field">
+                <label>Wood Type 木材</label>
+                <select id="woodType">
+                  <option value="hinoki">Hinoki 檜 — Light Blonde</option>
+                  <option value="sugi">Sugi 杉 — Cedar Warm</option>
+                  <option value="yakisugi">Yakisugi 焼杉 — Burnt Dark</option>
+                  <option value="keyaki">Keyaki 欅 — Zelkova Reddish</option>
+                  <option value="painted_red">Bengara 弁柄 — Red Painted</option>
+                  <option value="charcoal">Charcoal 炭 — Black Modern</option>
+                </select>
+              </div>
+              <div class="field row-2">
+                <div>
+                  <label>Wood Color 木色</label>
+                  <input type="color" id="woodColor" value="#c9a87a" />
+                </div>
+                <div>
+                  <label>Wood Age / Weathering</label>
+                  <input type="range" id="woodAge" min="0" max="1" step="0.05" value="0.3" />
+                  <span class="val" data-for="woodAge">0.3</span>
+                </div>
+              </div>
+              <div class="field">
+                <label>Wall Type 壁</label>
+                <select id="wallType">
+                  <option value="shikkui">Shikkui 漆喰 — White Plaster</option>
+                  <option value="yakisugi_wall">Yakisugi 焼杉板</option>
+                  <option value="shitami">Shitami-itabari 下見板張</option>
+                  <option value="namako">Namako なまこ壁 — Tile Pattern</option>
+                  <option value="modern_plaster">Modern Plaster モルタル</option>
+                </select>
+              </div>
+              <div class="field row-2">
+                <div>
+                  <label>Wall Color</label>
+                  <input type="color" id="wallColor" value="#f5f1e8" />
+                </div>
+                <div>
+                  <label>Wall Texture Scale</label>
+                  <input type="range" id="wallTexScale" min="0.2" max="3" step="0.1" value="1" />
+                  <span class="val" data-for="wallTexScale">1.0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="node-group">
+            <div class="node-header" data-type="light">🏮 LIGHTING / 照明 — Type & Modern Mix</div>
+            <div class="node-body">
+              <div class="field">
+                <label>Light Type 灯り種</label>
+                <select id="lightType">
+                  <option value="chochin">Chochin 提灯 — Paper Lanterns</option>
+                  <option value="andon">Andon 行灯 — Wood Frame</option>
+                  <option value="bare_bulb">Bare Bulb 裸電球 — Showa</option>
+                  <option value="neon">Neon ネオン — Modern Mixed</option>
+                  <option value="modern_mixed">Modern Mix 現代混合 — All</option>
+                  <option value="hidden_led">Hidden LED 間接照明</option>
+                </select>
+              </div>
+              <div class="field row-2">
+                <div>
+                  <label>Light Color</label>
+                  <input type="color" id="lightColor" value="#ffb84d" />
+                </div>
+                <div>
+                  <label>Intensity 明るさ</label>
+                  <input type="range" id="lightIntensity" min="0" max="3" step="0.1" value="1.2" />
+                  <span class="val" data-for="lightIntensity">1.2</span>
+                </div>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="hasChochin" checked /> Chochin Lanterns 提灯</label>
+                <label class="check"><input type="checkbox" id="hasAndon" /> Andon 行灯</label>
+                <label class="check"><input type="checkbox" id="hasStreetLight" /> Street Lamp 街灯</label>
+                <label class="check"><input type="checkbox" id="hasInteriorLights" checked /> Interior Glow 室内灯</label>
+              </div>
+              <div class="field row-2">
+                <div>
+                  <label>Chochin Count</label>
+                  <input type="range" id="chochinCount" min="0" max="8" step="1" value="3" />
+                  <span class="val" data-for="chochinCount">3</span>
+                </div>
+                <div>
+                  <label>Flicker 揺らぎ</label>
+                  <input type="range" id="lightFlicker" min="0" max="1" step="0.05" value="0.15" />
+                  <span class="val" data-for="lightFlicker">0.15</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="node-group">
+            <div class="node-header" data-type="infra">⚡ INFRA / インフラ — Electric & Modern</div>
+            <div class="node-body">
+              <div class="field">
+                <label class="check"><input type="checkbox" id="hasElectricPole" checked /> Electric Pole 電柱 — Boolean</label>
+                <label class="check"><input type="checkbox" id="hasPhoneLines" checked /> Phone Lines 電線</label>
+                <label class="check"><input type="checkbox" id="hasAircon" checked /> Aircon Units 室外機 — Modern</label>
+                <label class="check"><input type="checkbox" id="hasMeterBox" /> Meter Box 電気メーター</label>
+                <label class="check"><input type="checkbox" id="hasGutter" checked /> Gutter 雨樋 — Copper</label>
+              </div>
+              <div class="field">
+                <label>Modernity Level 現代度 古代⇄現代</label>
+                <input type="range" id="modernity" min="0" max="1" step="0.05" value="0.45" />
+                <span class="val" data-for="modernity">0.45</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="node-group">
+            <div class="node-header" data-type="signage">🪧 SIGNAGE / 看板 — Custom Text</div>
+            <div class="node-body">
+              <div class="field">
+                <label class="check"><input type="checkbox" id="hasKanban" checked /> Kanban 看板 — Main Sign</label>
+                <div class="row">
+                  <input type="text" id="kanbanText" value="山田商店" placeholder="Main kanban text" />
+                  <input type="text" id="kanbanTextEn" value="YAMADA" placeholder="English" style="max-width:90px" />
+                </div>
+                <div class="row">
+                  <label style="font-size:10px">Kanban Style</label>
+                  <select id="kanbanStyle">
+                    <option value="wood_vertical">Wood Vertical 縦看板</option>
+                    <option value="wood_horizontal">Wood Horizontal 横看板</option>
+                    <option value="metal_neon">Metal + Neon</option>
+                    <option value="paper">Paper 貼り紙</option>
+                  </select>
+                </div>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="hasNoren" checked /> Noren 暖簾 — Curtain</label>
+                <input type="text" id="norenText" value="営業中" placeholder="Noren text (e.g. 営業中)" />
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="hasPosters" checked /> Posters & Bills 貼り紙・ポスター</label>
+                <textarea id="posterTexts" rows="2" placeholder="One per line: poster texts">コーヒー ¥450
+ラーメン 営業中
+求人募集中</textarea>
+              </div>
+              <div class="field">
+                <label class="check"><input type="checkbox" id="hasSmallSigns" /> Small Signs 小看板・メニュー</label>
+              </div>
+            </div>
+          </div>
+
+          <div class="node-group">
+            <div class="node-header" data-type="props">🪑 PROPS / 備品 — Asian Style Furniture</div>
+            <div class="node-body">
+              <div class="field">
+                <label class="check"><input type="checkbox" id="hasFurniture" checked /> Interior Furniture 家具 — Boolean</label>
+                <label class="check"><input type="checkbox" id="hasChairsTables" /> Chairs & Tables 椅子・テーブル</label>
+                <label class="check"><input type="checkbox" id="hasZabuton" checked /> Zabuton & Low Tables 座布団・ちゃぶ台</label>
+                <label class="check"><input type="checkbox" id="hasPlants" checked /> Plants 植栽・盆栽</label>
+                <label class="check"><input type="checkbox" id="hasTansu" /> Tansu 箪笥 — Chests</label>
+                <label class="check"><input type="checkbox" id="hasKitchen" /> Kitchen Props 厨房備品</label>
+              </div>
+              <div class="field">
+                <label>Furniture Density</label>
+                <input type="range" id="furnitureDensity" min="0" max="1" step="0.1" value="0.6" />
+                <span class="val" data-for="furnitureDensity">0.6</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- RIGHT: Info + Graph -->
+        <div id="right-panel" class="panel">
+          <div class="panel-title">NODE GRAPH // 出力</div>
+          <div id="node-graph">
+            <div class="graph-node seed">SEED<br><span id="graphSeed">1425</span></div>
+            <div class="graph-line"></div>
+            <div class="graph-node structure">STRUCTURE<br><span id="graphFloors">2F • 6.5m</span></div>
+            <div class="graph-line"></div>
+            <div class="graph-node roof">ROOF ⛩<br><span id="graphRoof">Irimoya • Kawara</span></div>
+            <div class="graph-line"></div>
+            <div class="graph-node material">MATERIAL<br><span id="graphMaterial">Hinoki + Shikkui</span></div>
+            <div class="graph-line"></div>
+            <div class="graph-node details">DETAILS<br><span id="graphDetails">Chochin + Kanban</span></div>
+            <div class="graph-line"></div>
+            <div class="graph-node output">OUTPUT 🏯<br><span>Ancient x Modern</span></div>
+          </div>
+
+          <div id="stats">
+            <div class="stat"><label>Polys</label><span id="statPolys">—</span></div>
+            <div class="stat"><label>Tiles</label><span id="statTiles">—</span></div>
+            <div class="stat"><label>Lights</label><span id="statLights">—</span></div>
+          </div>
+
+          <div class="panel-title" style="margin-top:16px">PRESETS // プリセット</div>
+          <div id="presets">
+            <button data-preset="machiya_classic">町家 Classic Machiya</button>
+            <button data-preset="izakaya_night">居酒屋 Night Izakaya</button>
+            <button data-preset="modern_machiya">現代町家 Modern Mix</button>
+            <button data-preset="ryokan">旅館 Ryokan</button>
+            <button data-preset="showa_store">昭和商店 Showa Store</button>
+            <button data-preset="temple_gate">門前 Temple Shop</button>
+          </div>
+
+          <div class="panel-title" style="margin-top:16px">CONTROLS // 操作</div>
+          <div id="help">
+            <p><b>LMB drag</b> — Orbit • <b>RMB</b> — Pan • <b>Wheel</b> — Zoom</p>
+            <p><b>R</b> — Randomize • <b>F</b> — Focus • <b>G</b> — Toggle Grid</p>
+            <p>All parameters are procedural — like Blender Geometry Nodes booleans.</p>
+            <p style="margin-top:8px; font-size:11px; opacity:0.7">Roof curve Sori 反り is critical for Asian style — adjust for authentic sweep.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
