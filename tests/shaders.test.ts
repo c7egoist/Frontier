@@ -52,15 +52,22 @@ const VARIANTS: Record<string, Array<Record<string, number>>> = {
   'swe/swe_splat.wgsl': [{}, { SWE_COARSE: 1 }],
 };
 
-/** Entry points the TS layers dispatch. A rename has to break a test, not a frame. */
-const ENTRY_POINTS: Record<string, string[]> = {
+/**
+ * Entry points the TS layers dispatch. A rename has to break a test, not a frame. Entries written
+ * as an object are only compiled with those defines: `surface_resolve.wgsl` cannot contain both
+ * `resolveNear` and `resolveFar`, because the far branch *samples* the near field rather than
+ * writing it (no read-write storage textures), so the two are separate modules.
+ */
+type EntrySpec = string | { name: string; defines: Record<string, number> };
+
+const ENTRY_POINTS: Record<string, EntrySpec[]> = {
   'common/bed_bake.wgsl': ['main'],
   'swe/swe_hash.wgsl': ['clear', 'count', 'scatter'],
   'swe/swe_scan.wgsl': ['scanBlocks', 'scanTop', 'scanAdd'],
   'swe/swe_step.wgsl': ['main'],
   'swe/swe_splat.wgsl': ['clearNear', 'splatSwe'],
   'swe/swe_spawn.wgsl': ['spawnFromCrests'],
-  'swe/surface_resolve.wgsl': ['resolveNear', 'resolveFar'],
+  'swe/surface_resolve.wgsl': ['resolveNear', { name: 'resolveFar', defines: { RESOLVE_FAR: 1 } }],
   'wave/wave.wgsl': ['clearFar', 'update', 'splat'],
   'mpm/mpm.wgsl': ['clear', 'p2g', 'gridUpdate', 'g2p', 'spawn'],
   'render/ocean.wgsl': ['vs', 'fs', 'skyVs', 'skyFs'],
@@ -108,8 +115,9 @@ describe('wgsl modules', () => {
 
   it('declares the entry points the simulation dispatches', () => {
     for (const [name, entries] of Object.entries(ENTRY_POINTS)) {
-      const code = resolve(name);
-      for (const entry of entries) {
+      for (const spec of entries) {
+        const entry = typeof spec === 'string' ? spec : spec.name;
+        const code = resolve(name, typeof spec === 'string' ? undefined : spec.defines);
         // `@compute @workgroup_size(8, 8)` may sit between the stage attribute and the `fn`.
         const re = new RegExp(`@(compute|vertex|fragment)\\b[^;]*?\\bfn\\s+${entry}\\s*\\(`);
         expect(code, `${name}::${entry}`).toMatch(re);

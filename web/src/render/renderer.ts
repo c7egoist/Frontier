@@ -95,7 +95,10 @@ export class Renderer {
         { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
         t(1, 'float'),
         t(2, 'depth'),
-        t(3, 'float'),
+        // particleDepth is r32float, which is NOT filterable (without the optional
+        // `float32-filterable` device feature), so it is declared unfilterable-float and is only
+        // ever read with textureLoad. The filtered (NRF) copy is bound at 6.
+        t(3, 'unfilterable-float'),
         t(4, 'float'),
         { binding: 5, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
         t(6, 'unfilterable-float'),
@@ -254,7 +257,9 @@ export class Renderer {
     const make = (label: string, format: GPUTextureFormat, usage: GPUTextureUsageFlags) => this.device.createTexture({ label, size, format, usage });
     for (const tex of [this.sceneColor, this.sceneDepth, this.particleDepth, this.particleThickness, this.splatDepth, this.nrfA, this.nrfB]) tex?.destroy();
     this.sceneColor = make('scene-color', 'rgba16float', color);
-    this.sceneDepth = make('scene-depth', 'depth32float', GPUTextureUsage.RENDER_ATTACHMENT);
+    // sceneDepth is a depth attachment for the scene pass *and* a sampled texture for the fluid
+    // composite, so it needs TEXTURE_BINDING as well.
+    this.sceneDepth = make('scene-depth', 'depth32float', GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING);
     this.particleDepth = make('particle-depth', 'r32float', storage);
     this.particleThickness = make('particle-thickness', 'rgba16float', color);
     this.splatDepth = make('splat-depth', 'depth32float', GPUTextureUsage.RENDER_ATTACHMENT);

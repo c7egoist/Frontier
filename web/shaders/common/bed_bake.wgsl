@@ -7,7 +7,10 @@
 #include "common/globals.wgsl"
 #include "common/util.wgsl"
 
-@group(1) @binding(0) var bedOut: texture_storage_2d<r16float, write>;
+// rgba16float rather than r16float: WebGPU's r16float does not support the *write-only* storage
+// access this pass needs (the reference implementation only has to, too), and the extra channels
+// keep the layout identical to the other field textures.
+@group(1) @binding(0) var bedOut: texture_storage_2d<rgba16float, write>;
 
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {

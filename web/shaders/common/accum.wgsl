@@ -44,10 +44,18 @@ fn texelWorld(cell: vec2<i32>, dims: vec2<u32>, origin: vec2<f32>, size: vec2<f3
   return origin + (vec2<f32>(cell) + vec2<f32>(0.5)) * size / vec2<f32>(dims);
 }
 
-/// Manual bilinear read of a resolved rgba16float field. Storage textures cannot be bound to a
-/// filtering sampler, and the resolve passes must be able to read a field they may also write.
-fn bilinearLoadStorage(
-  tex: texture_storage_2d<rgba16float, read_write>,
+/// Manual bilinear read of a resolved rgba16float field.
+///
+/// Two variants because the two texture kinds take different `textureLoad` signatures: a sampled
+/// texture takes (texture, coords, level) and a *storage* texture takes (texture, coords) only --
+/// passing the level to a storage texture is a compile error, which is why this is not one function
+/// with an overload. Both are used:
+///   * `bilinearLoad`        -- sampling a field the current pass does not write (fragment shading,
+///                              and the far resolve reading the near field),
+///   * `bilinearLoadStorage` -- reading a field the same pass also writes, which is only possible
+///                              through the storage-texture binding.
+fn bilinearLoad(
+  tex: texture_2d<f32>,
   world: vec2<f32>,
   origin: vec2<f32>,
   size: vec2<f32>,
@@ -61,5 +69,23 @@ fn bilinearLoadStorage(
   let c10 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(1, 0), vec2<i32>(0), hi), 0);
   let c01 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(0, 1), vec2<i32>(0), hi), 0);
   let c11 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(1, 1), vec2<i32>(0), hi), 0);
+  return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+}
+
+fn bilinearLoadStorage(
+  tex: texture_storage_2d<rgba16float, read_write>,
+  world: vec2<f32>,
+  origin: vec2<f32>,
+  size: vec2<f32>,
+) -> vec4<f32> {
+  let dims = vec2<f32>(textureDimensions(tex));
+  let t = (world - origin) / size * dims - vec2<f32>(0.5);
+  let i = floor(t);
+  let f = clamp(t - i, vec2<f32>(0.0), vec2<f32>(1.0));
+  let hi = vec2<i32>(dims) - vec2<i32>(1);
+  let c00 = textureLoad(tex, clamp(vec2<i32>(i), vec2<i32>(0), hi));
+  let c10 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(1, 0), vec2<i32>(0), hi));
+  let c01 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(0, 1), vec2<i32>(0), hi));
+  let c11 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(1, 1), vec2<i32>(0), hi));
   return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
 }

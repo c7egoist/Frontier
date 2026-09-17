@@ -100,6 +100,33 @@ scanAdd), `swe_step` (main), `swe_splat` (clearNear/splatSwe/splatCoarse), `swe_
 * **Units**: metres, seconds, m³. Elevation η is relative to the still-water level; the world Y of the
   surface is `P.seaLevel + η`.
 
+### 4.1 WebGPU portability rules (learned from hardware validation errors)
+
+Four rules that are *not* optional on real drivers, each one a validation error this codebase
+actually produced on a GTX-class machine. `tests/textures.test.ts` and `tools/check-wgsl.mjs`
+enforce all four statically, because none of them can be reproduced in the sandbox (no GPU):
+
+1. **`textureLoad` on a storage texture takes two arguments.** The level argument only exists for
+   sampled textures. `common/accum.wgsl` therefore ships the bilinear read twice —
+   `bilinearLoad(tex: texture_2d<f32>, …)` with three-argument loads and
+   `bilinearLoadStorage(tex: texture_storage_2d<rgba16float, read_write>, …)` with two. They are not
+   interchangeable; `render/surface_field.wgsl` includes `common/accum.wgsl` instead of copying it.
+2. **Never bind a read-write storage texture.** It is the least-supported access mode in the spec
+   (`STORAGE_READ_WRITE_FORMATS` is a strict subset of the write-only set) and the pass that needed
+   it is trivial to split. `swe/surface_resolve.wgsl` has two variants: `#ifndef RESOLVE_FAR` writes
+   the near field (binding 3, write-only); `#ifdef RESOLVE_FAR` *samples* the near field through
+   binding 3 as a `texture_2d<f32>` and writes the far field at binding 4. Reading through a sampled
+   binding also gets hardware filtering for free.
+3. **Match the format to the access mode.** `r16float` supports read-write storage but *not*
+   write-only storage, which is the mode a bake pass uses, so the bed texture is `rgba16float`
+   (also keeps the channel layout uniform with the other fields). The WGSL declaration and the TS
+   descriptor must agree — a mismatch is a bind-group creation failure, not a shader error.
+4. **Declare the sample type the format actually has.** `r32float` is not filterable (without the
+   optional `float32-filterable` device feature), so the fluid composite declares
+   `particleDepth` as `unfilterable-float` and only ever reads it with `textureLoad`. Every bound
+   texture also needs `GPUTextureUsage.TEXTURE_BINDING` — `sceneDepth` is a depth attachment *and*
+   a sampled input, so it carries both flags.
+
 ## 5. Mass and momentum
 
 Volume is the conserved quantity, not mass: `V` is owned by the column particle, and the only things

@@ -12,6 +12,7 @@
 
 #include "common/globals.wgsl"
 #include "common/util.wgsl"
+#include "common/accum.wgsl"
 
 // ---------------------------------------------------------------------------
 // Sky
@@ -37,21 +38,8 @@ fn skyColor(dir: vec3<f32>, sunDir: vec3<f32>) -> vec3<f32> {
 // Height-field sampling
 // ---------------------------------------------------------------------------
 
-/// Manual bilinear fetch of a non-filterable 2D field laid out over `origin`/`size` in XZ.
-fn bilinearLoad(tex: texture_2d<f32>, world: vec2<f32>, origin: vec2<f32>, size: vec2<f32>) -> vec4<f32> {
-  let dims = vec2<f32>(textureDimensions(tex));
-  let uv = (world - origin) / size;
-  let t = uv * dims - vec2<f32>(0.5);
-  let i = floor(t);
-  let f = clamp(t - i, vec2<f32>(0.0), vec2<f32>(1.0));
-  let hi = vec2<i32>(dims) - vec2<i32>(1);
-  let c00 = textureLoad(tex, clamp(vec2<i32>(i), vec2<i32>(0), hi), 0);
-  let c10 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(1, 0), vec2<i32>(0), hi), 0);
-  let c01 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(0, 1), vec2<i32>(0), hi), 0);
-  let c11 = textureLoad(tex, clamp(vec2<i32>(i) + vec2<i32>(1, 1), vec2<i32>(0), hi), 0);
-  return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
-}
-
+// `bilinearLoad` lives in common/accum.wgsl, next to the storage-texture variant, so the height
+// fields have exactly one sampling convention (including the texel-centre offset).
 /// Blended near/far surface state: (elevation m, whitecap 0..1, velocity.xz m/s).
 /// `nearFieldFactor` (common/util.wgsl) is the single source of truth for the blend band, so the
 /// ocean mesh, the far-field resolve and the CPU-side sampling all agree.

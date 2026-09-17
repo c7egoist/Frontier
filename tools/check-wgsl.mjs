@@ -52,9 +52,15 @@ const lookup = (f) => sources.get(f.replace(/^\/+/, '').split('\\').join('/'));
 const variants = {
   'swe/swe_step.wgsl': [{}, { SWE_COARSE: 1 }],
   'swe/swe_splat.wgsl': [{}, { SWE_COARSE: 1 }],
+  'swe/surface_resolve.wgsl': [{}, { RESOLVE_FAR: 1 }],
 };
+// A module is an "entry" if it declares at least one entry point. That is the right test rather than
+// "does not live in common/": common/bed_bake.wgsl *is* dispatched directly and was silently
+// unchecked while this filter was directory-based. Include-only files (globals, util, accum,
+// surface_field, _layer) are covered transitively -- every module that includes them is checked.
+const HAS_ENTRY = /@(compute|vertex|fragment)\b[^;]{0,200}?\bfn\s+\w+\s*\(/;
 const entries = [...sources.keys()]
-  .filter((f) => !f.startsWith('common/') && !f.endsWith('_layer.wgsl'))
+  .filter((f) => !f.endsWith('_layer.wgsl') && HAS_ENTRY.test(sources.get(f)))
   .sort();
 
 // --- helpers ---------------------------------------------------------------
@@ -86,6 +92,104 @@ function globalsFields() {
 
 const WORKGROUP_BUDGET = 16384; // maxComputeWorkgroupStorageSize default (16 KiB)
 const INVOCATION_MAX = 256;     // maxComputeInvocationsPerWorkgroup default
+
+// --- texture rules -----------------------------------------------------------
+// The GPU is the only real validator, and every one of these mistakes is a *compile* or *creation*
+// error on device rather than something a test notices, so they are checked here. The two lists are
+// straight out of the WebGPU spec's texture-format capabilities table; the access mode matters,
+// which is the trap: r16float supports read-write but not write-only.
+const STORAGE_WRITE_FORMATS = new Set([
+  'r32uint', 'r32sint', 'r32float', 'rgba8unorm', 'rgba8snorm', 'rgba8uint', 'rgba8sint',
+  'rgba16uint', 'rgba16sint', 'rgba16float', 'rg32uint', 'rg32sint', 'rg32float',
+  'rgba32uint', 'rgba32sint', 'rgba32float', 'rgb10a2unorm', 'rgb10a2uint', 'rg11b10ufloat',
+]);
+const STORAGE_READ_WRITE_FORMATS = new Set([
+  ...STORAGE_WRITE_FORMATS, 'r16float', 'rg16float', 'r16uint', 'r16sint', 'rg16uint', 'rg16sint',
+  'r8unorm', 'r8snorm', 'r8uint', 'r8sint', 'rg8unorm', 'rg8snorm', 'rg8uint', 'rg8sint',
+]);
+function storageTextures(code) {
+  const out = [];
+  const re = /@group\((\d+)\)\s*@binding\((\d+)\)\s*var\s+(\w+)\s*:\s*texture_storage_2d<([^,>]+),\s*([^>]+)>/g;
+  let m;
+  while ((m = re.exec(code))) out.push({ group: Number(m[1]), binding: Number(m[2]), name: m[3], format: m[4].trim(), access: m[5].trim() });
+  return out;
+}
+
+/**
+ * Functions with their parameter lists and bodies, found by brace matching.
+ *
+ * The rules below are per-function on purpose: the two bilinear helpers both name their parameter
+ * `tex` and differ only in the texture kind, so a module-wide name set produces false positives.
+ */
+function functionsIn(code) {
+  const out = [];
+  for (const m of code.matchAll(/(?:^|\n)\s*fn\s+(\w+)\s*\(/g)) {
+    const scan = (from, open, close) => {
+      let depth = 0;
+      for (let i = from; i < code.length; i++) {
+        if (code[i] === open) depth++;
+        else if (code[i] === close) {
+          depth--;
+          if (depth === 0) return i;
+        }
+      }
+      return -1;
+    };
+    const parenStart = code.indexOf('(', m.index);
+    const parenEnd = scan(parenStart, '(', ')');
+    if (parenEnd < 0) continue;
+    const braceStart = code.indexOf('{', parenEnd);
+    if (braceStart < 0) continue;
+    const braceEnd = scan(braceStart, '{', '}');
+    if (braceEnd < 0) continue;
+    out.push({ name: m[1], params: code.slice(parenStart + 1, parenEnd), body: code.slice(braceStart + 1, braceEnd) });
+  }
+  return out;
+}
+
+/** Names bound to a storage texture: module-level vars, or parameters of the function in question. */
+function storageNamesIn(moduleNames, params) {
+  const names = new Set(moduleNames);
+  for (const param of params.split(',')) {
+    const m = /(\w+)\s*:\s*texture_storage_2d</.exec(param);
+    if (m) names.add(m[1]);
+  }
+  return names;
+}
+
+/**
+ * Every `fnName(...)` call with its arguments split at *top-level* commas. Hand-rolled scanning
+ * rather than a regex: arguments routinely contain calls of their own (`clamp(vec2<i32>(i), ...)`),
+ * which a naive `[^()]*` match silently skips -- and a rule that silently skips is worse than none.
+ */
+function topLevelCalls(code, fnName) {
+  const out = [];
+  const needle = `${fnName}(`;
+  for (let i = code.indexOf(needle); i >= 0; i = code.indexOf(needle, i + 1)) {
+    const before = code[i - 1];
+    if (before && /[\w.]/.test(before)) continue;
+    let depth = 0;
+    const args = [];
+    let current = '';
+    for (let j = i + needle.length; j < code.length; j++) {
+      const ch = code[j];
+      if (ch === '(') depth++;
+      else if (ch === ')') {
+        if (depth === 0) break;
+        depth--;
+      } else if (ch === ',' && depth === 0) {
+        args.push(current.trim());
+        current = '';
+        continue;
+      }
+      current += ch;
+    }
+    if (current.trim()) args.push(current.trim());
+    const name = /^(\w+)$/.exec(args[0] ?? '')?.[1];
+    out.push({ name: name ?? (args[0] ?? ''), args });
+  }
+  return out;
+}
 
 let errors = 0;
 let warnings = 0;
@@ -141,6 +245,31 @@ for (const entry of entries) {
     for (const m of code.matchAll(/\bP\.(\w+)/g)) refs.add(m[1]);
     for (const name of refs) {
       if (!fieldNames.has(name)) err(label, `uses P.${name}, which is not a field of Globals`);
+    }
+
+    // Texture declarations: format vs access mode, and textureLoad/textureSample kind mismatches.
+    const storages = storageTextures(code);
+    const moduleStorageNames = storages.map((t) => t.name);
+    for (const t of storages) {
+      const allowed = t.access === 'read-write' ? STORAGE_READ_WRITE_FORMATS : STORAGE_WRITE_FORMATS;
+      if (!allowed.has(t.format)) {
+        err(label, `texture_storage_2d<${t.format}, ${t.access}> is not a valid storage texture format/access pair`);
+      }
+    }
+    const scopes = [{ params: '', body: code, moduleNames: moduleStorageNames }, ...functionsIn(code).map((f) => ({ params: f.params, body: f.body, moduleNames: moduleStorageNames }))];
+    for (const scope of scopes) {
+      const storageNames = storageNamesIn(scope.moduleNames, scope.params);
+      for (const call of topLevelCalls(scope.body, 'textureLoad')) {
+        if (storageNames.has(call.name) && call.args.length !== 2) {
+          err(label, `textureLoad(${call.name}, ...) takes 2 arguments for a storage texture (got ${call.args.length})`);
+        }
+      }
+      for (const call of topLevelCalls(scope.body, 'textureSample')) {
+        if (storageNames.has(call.name)) err(label, `textureSample*( ${call.name} ) samples a storage texture; bind it as texture_2d instead`);
+      }
+    }
+    for (const t of storages) {
+      if (t.access === 'read-write') warn(label, `${t.name} uses read-write storage access, which older WebGPU implementations reject`);
     }
 
     // Workgroup sizes: sum of shared memory must fit the default 16 KiB budget.

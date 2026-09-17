@@ -40,7 +40,8 @@ export class Surface {
   private readonly resolveFarK: ComputeKernel;
 
   private readonly bgBake: GPUBindGroup;
-  private readonly bgResolve: GPUBindGroup;
+  private readonly bgResolveNear: GPUBindGroup;
+  private readonly bgResolveFar: GPUBindGroup;
   /** Bind groups are cached per particle buffer: the layers ping-pong, so there are two each. */
   private readonly fineGroups = new Map<GPUBuffer, GPUBindGroup>();
   private readonly coarseGroups = new Map<GPUBuffer, GPUBindGroup>();
@@ -75,7 +76,7 @@ export class Surface {
       label: 'bed.bake',
       code: shader('common/bed_bake.wgsl'),
       entryPoint: 'main',
-      bindings: [storageTex(0, 'r16float', 'write-only')],
+      bindings: [storageTex(0, 'rgba16float', 'write-only')],
     });
     this.bgBake = this.bake.group([stex(0, this.bedTexture)]);
 
@@ -88,27 +89,34 @@ export class Surface {
     this.clearFarK = createKernel(device, paramsLayout, { label: 'csw.splat.clearFar', code: splatCoarse, entryPoint: 'clearNear', bindings: splatLayoutCoarse });
     this.splatCoarseK = createKernel(device, paramsLayout, { label: 'csw.splat.splatCoarse', code: splatCoarse, entryPoint: 'splatCoarse', bindings: splatLayoutCoarse });
 
-    const resolve = shader('swe/surface_resolve.wgsl');
-    const resolveLayout = [
-      buf(0, 'read-only-storage'),
-      buf(1, 'read-only-storage'),
-      buf(2, 'read-only-storage'),
-      storageTex(3, 'rgba16float', 'read-write'),
-      storageTex(4, 'rgba16float', 'write-only'),
-      tex(8),
-      samp(9),
-    ];
-    this.resolveNearK = createKernel(device, paramsLayout, { label: 'surface.resolveNear', code: resolve, entryPoint: 'resolveNear', bindings: resolveLayout });
-    this.resolveFarK = createKernel(device, paramsLayout, { label: 'surface.resolveFar', code: resolve, entryPoint: 'resolveFar', bindings: resolveLayout });
-    this.bgResolve = this.resolveNearK.group([
+    // The two resolves share the source but not the layout: the near resolve *writes* the near field
+    // (a write-only storage texture), the far resolve *reads* it as a sampled texture. That split is
+    // what avoids a read-write storage texture, the least portable storage-texture access mode.
+    const resolveNearCode = shader('swe/surface_resolve.wgsl');
+    const resolveFarCode = shader('swe/surface_resolve.wgsl', { RESOLVE_FAR: 1 });
+    const accumulators = [buf(0, 'read-only-storage'), buf(1, 'read-only-storage'), buf(2, 'read-only-storage')];
+    const bedBinding = [tex(8), samp(9)];
+    this.resolveNearK = createKernel(device, paramsLayout, {
+      label: 'surface.resolveNear',
+      code: resolveNearCode,
+      entryPoint: 'resolveNear',
+      bindings: [...accumulators, storageTex(3, 'rgba16float', 'write-only'), ...bedBinding],
+    });
+    this.resolveFarK = createKernel(device, paramsLayout, {
+      label: 'surface.resolveFar',
+      code: resolveFarCode,
+      entryPoint: 'resolveFar',
+      bindings: [...accumulators, tex(3), storageTex(4, 'rgba16float', 'write-only'), ...bedBinding],
+    });
+    const accumBindings = [
       sbuf(0, this.nearAccum),
       sbuf(1, this.farAccum),
       sbuf(2, this.farCount),
-      stex(3, this.nearField),
-      stex(4, this.farField),
       stex(8, bed.texture),
       sps(9, bed.sampler),
-    ]);
+    ];
+    this.bgResolveNear = this.resolveNearK.group([...accumBindings, stex(3, this.nearField)]);
+    this.bgResolveFar = this.resolveFarK.group([...accumBindings, stex(3, this.nearField), stex(4, this.farField)]);
   }
 
   private fineGroup(particles: GPUBuffer): GPUBindGroup {
@@ -164,11 +172,11 @@ export class Surface {
 
   resolveNear(encoder: GPUCommandEncoder, params: GPUBindGroup): void {
     const n = Math.ceil(this.nearRes / 8);
-    this.resolveNearK.pass(encoder, params, this.bgResolve).dispatchWorkgroups(n, n);
+    this.resolveNearK.pass(encoder, params, this.bgResolveNear).dispatchWorkgroups(n, n);
   }
 
   resolveFar(encoder: GPUCommandEncoder, params: GPUBindGroup): void {
     const n = Math.ceil(this.farRes / 8);
-    this.resolveFarK.pass(encoder, params, this.bgResolve).dispatchWorkgroups(n, n);
+    this.resolveFarK.pass(encoder, params, this.bgResolveFar).dispatchWorkgroups(n, n);
   }
 }

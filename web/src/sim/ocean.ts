@@ -80,7 +80,9 @@ export class OceanSim {
     this.bedTexture = device.createTexture({
       label: 'bed-depth',
       size: [cfg.bedRes, cfg.bedRes],
-      format: 'r16float',
+      // rgba16float, not r16float: r16float has no write-only storage support in WebGPU, and this
+      // texture is baked by a compute pass and then sampled by the solver.
+      format: 'rgba16float',
       usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
 
