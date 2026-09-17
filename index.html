@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Frontier Ocean — GPU shallow-water ocean (no FFT)</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #05080d; }
+      canvas { display: block; width: 100vw; height: 100vh; }
+      body { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; color: #cfe6ff; }
+      #ui {
+        position: fixed; top: 12px; left: 12px; width: 272px; padding: 12px 14px;
+        background: rgba(6, 14, 24, .72); backdrop-filter: blur(10px);
+        border: 1px solid rgba(120, 190, 255, .18); border-radius: 10px;
+        max-height: calc(100vh - 24px); overflow: auto;
+      }
+      #ui h1 { font-size: 12px; letter-spacing: .14em; text-transform: uppercase; margin: 0 0 2px; color: #8fd0ff; }
+      #ui .sub { color: #6c8399; margin-bottom: 10px; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 5px 0; }
+      .row label { color: #9fb6c9; }
+      .row output { color: #7ee0c0; min-width: 44px; text-align: right; }
+      input[type=range] { width: 100%; accent-color: #39b6ff; }
+      .full { display: block; margin: 2px 0 8px; }
+      hr { border: 0; border-top: 1px solid rgba(120,190,255,.14); margin: 10px 0; }
+      #stats { color: #7ee0c0; }
+      .hint { color: #5d7488; margin-top: 8px; }
+      select, button {
+        background: #0c1a2a; color: #cfe6ff; border: 1px solid rgba(120,190,255,.25);
+        border-radius: 6px; padding: 3px 6px; font: inherit;
+      }
+      #err { position: fixed; inset: 0; display: none; place-content: center; text-align: center; padding: 10vh 8vw; font-size: 14px; }
+      #err.on { display: grid; }
+    </style>
+  </head>
+  <body>
+    <canvas id="gfx"></canvas>
+    <div id="ui"></div>
+    <div id="err"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
