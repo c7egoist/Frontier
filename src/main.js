@@ -50,6 +50,27 @@ function persist() {
 }
 
 /* ------------------------------------------------------------------ */
+/* Fatal-error guard: never leave the user with a silently blank page  */
+/* ------------------------------------------------------------------ */
+
+function showFatal(msg) {
+  const box = document.getElementById('fatal');
+  const pre = document.getElementById('fatal-msg');
+  if (!box || !pre) return;
+  pre.textContent = String(msg);
+  box.hidden = false;
+}
+
+window.addEventListener('error', (e) => {
+  console.error(e.error || e.message);
+  showFatal(`${e.message}\n${e.error?.stack || ''}`);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.error(e.reason);
+  showFatal(`Unhandled promise rejection:\n${e.reason?.stack || e.reason}`);
+});
+
+/* ------------------------------------------------------------------ */
 /* Boot                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -1062,8 +1083,13 @@ function toggleById(id, on, label) {
 /* Go                                                                  */
 /* ------------------------------------------------------------------ */
 
-buildUI();
-wireHud();
+try {
+  buildUI();
+  wireHud();
+} catch (err) {
+  console.error(err);
+  showFatal(`Could not build the control panel:\n${err.stack || err}`);
+}
 // only fetch the CJK webfonts when the system cannot draw kanji itself
 systemHasCJK() ? null : loadCJKFonts();
 viewer.onFps = (fps) => {

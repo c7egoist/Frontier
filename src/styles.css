@@ -210,3 +210,16 @@ input[type="color"]::-webkit-color-swatch { border: none; border-radius: 4px; }
   #panel { width: 100%; flex: none; border-left: none; border-top: 1px solid var(--line); }
   .hud-top-right { width: 132px; }
 }
+
+/* ---------- fatal error overlay ---------- */
+#fatal {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: rgba(8, 10, 14, 0.94);
+  color: var(--text);
+  padding: 8vh 8vw;
+  overflow: auto;
+}
+#fatal h2 { color: var(--accent); margin: 0 0 12px; font-size: 18px; }
+#fatal pre { white-space: pre-wrap; font-size: 12px; color: #ffbfc9; background: #14181f; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
