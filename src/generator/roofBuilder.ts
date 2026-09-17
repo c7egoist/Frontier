@@ -171,7 +171,17 @@ export class RoofBuilder {
       ridgeLenX, hipH, gW/2,
       ridgeLenX, ridgeH, 0
     ];
+    const gableUVs = [
+      0, 0,
+      1, 0,
+      0.5, 1,
+
+      0, 0,
+      1, 0,
+      0.5, 1
+    ];
     gableGeom.setAttribute('position', new THREE.Float32BufferAttribute(gableVerts, 3));
+    gableGeom.setAttribute('uv', new THREE.Float32BufferAttribute(gableUVs, 2));
     gableGeom.computeVertexNormals();
     const gableMesh = new THREE.Mesh(gableGeom, timberMat);
     group.add(gableMesh);
@@ -269,7 +279,17 @@ export class RoofBuilder {
       halfW, 0, -halfD,
       halfW, h, 0
     ];
+    const sideUVs = [
+      0, 0,
+      1, 0,
+      0.5, 1,
+
+      0, 0,
+      1, 0,
+      0.5, 1
+    ];
     sideGableGeom.setAttribute('position', new THREE.Float32BufferAttribute(sideVerts, 3));
+    sideGableGeom.setAttribute('uv', new THREE.Float32BufferAttribute(sideUVs, 2));
     sideGableGeom.computeVertexNormals();
     const sideGable = new THREE.Mesh(sideGableGeom, timberMat);
     group.add(sideGable);

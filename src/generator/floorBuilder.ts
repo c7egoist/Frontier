@@ -56,6 +56,7 @@ export class FloorBuilder {
     for (let ix = 0; ix <= colsX; ix++) {
       const x = -halfW + ix * stepX;
       for (let iz = 0; iz <= colsZ; iz++) {
+        const z = -halfD + iz * stepZ;
         // Only outer perimeter posts and key interior columns
         if (ix === 0 || ix === colsX || iz === 0 || iz === colsZ) {
           const post = new THREE.Mesh(postGeom, timberMat);
