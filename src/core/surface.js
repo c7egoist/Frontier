@@ -218,7 +218,19 @@ export function buildSurface(spec) {
   // Every face carries the arc length of its own upper edge: on a truncated face
   // (irimoya / xieshan ends, which stop at the break line) tiles and probes must stop
   // there, not at the profile's full run.
-  for (const face of faces) face.arcMax = face.profile.arc(face.mMax);
+  for (const face of faces) {
+    face.arcMax = face.profile.arc(face.mMax);
+    // A 破風/拝み (gable edge) exists on the main faces of every form with `gable`.
+    // On a hip-and-gable roof it starts where the hip line meets the break line.
+    face.gableEdge = !!formDef.gable && face.kind === 'main';
+    face.gableEdgeFrom = formDef.gable && formDef.hips ? hipRunGuess : 0;
+    // Metrics every face must sample: the break line where a truncated face (irimoya /
+    // xieshan ends) meets the main faces. Grids that share these rows meet exactly along
+    // the hip diagonal instead of leaving slivers.
+    face.featureMs = [face.mMax];
+    if (formDef.hips && formDef.gable) face.featureMs.push(hipRunGuess);
+    face.featureMs = [...new Set(face.featureMs.filter((v) => v >= 0 && v <= face.mMax + 1e-9))].sort((a, b) => a - b);
+  }
 
   /** Sample the eave line (m = 0) of a face as n+1 world points. */
   function eaveLine(face, n = 64) {
@@ -264,41 +276,25 @@ export function buildSurface(spec) {
     return out;
   }
 
-  /** Gable (破風) outline for a gable/hip-and-gable end: ridge apex → hip base. */
+  /** 破風 (gable) outline for one end: the raking edges from the eave/break up to the apex. */
   function gableOutline(sx) {
-    if (!hasEnds && !formDef.gable) return null;
     if (!formDef.gable) return null;
     const [r0, r1] = ridgeLine();
     const apex = sx > 0 ? r1 : r0;
-    const base = [];
-    if (hasEnds) {
-      const mainF = faces.find((f) => f.kind === 'main' && f.sign === 1);
-      const mBreak = hipRunGuess;
-      for (const sz of [1, -1]) {
-        const pts = [];
-        const steps = 12;
-        for (let i = 0; i <= steps; i++) {
-          const t = i / steps;                      // 0 at hip base → 1 at apex
-          const m = lerp(mBreak, 0, t);
-          const a = sx * (mainF.half - m);
-          pts.push(sample(mainF, m, a));
-        }
-        base.push({ sz, points: pts });
+    const mainF = faces.find((f) => f.kind === 'main' && !f.gableEnd) ?? faces.find((f) => f.kind === 'main');
+    const mFrom = mainF.gableEdgeFrom;
+    const edges = [];
+    for (const sz of [1, -1]) {
+      const pts = [];
+      const steps = 16;
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;                       // 0 at the eave/break → 1 at the apex
+        const m = lerp(mFrom, mainF.mMax, t);
+        pts.push(sample(mainF, m, sx * halfWidth(mainF, m)));
       }
-    } else {
-      // plain gable end: straight run from the eave end up to the apex
-      const mainF = faces.find((f) => f.kind === 'main' && f.sign === 1);
-      for (const sz of [1, -1]) {
-        const pts = [];
-        const steps = 12;
-        for (let i = 0; i <= steps; i++) {
-          const m = lerp(0, mainF.mMax, i / steps);
-          pts.push(sample(mainF, m, sx * mainF.half));
-        }
-        base.push({ sz, points: pts });
-      }
+      edges.push({ sz, points: pts });
     }
-    return { sx, apex, hipped: hasEnds, edges: base };
+    return { sx, apex, hipped: formDef.hips, mFrom, edges };
   }
 
   return {

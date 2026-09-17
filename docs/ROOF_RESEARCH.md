@@ -285,39 +285,66 @@ independent channels:
 
 ## 7. Verification — how "not floating, correct tiles, correct structure" is enforced
 
-`src/core/validate.js` runs on every generated roof (in the app's *Verify* panel and in `npm test`) and
-asserts, with numeric tolerances:
+"Correct" is defined by assertions with numeric tolerances, not by eye. `src/core/validate.js`
+runs on every generated roof (`node cli/report.mjs`, and the viewer prints the same numbers).
+The roof must pass **all** of them; the CLI exits non-zero otherwise. The list below is the
+implemented set — the numbers in brackets are the tolerances, and every check is measured on
+the built triangles, not on the parameters that were fed in.
 
-1. **Tile support (anti-float).** For every tile, the vertical distance from its underside to its
-   support surface (batten top if battens are modelled, else the sheathing top) must lie in
-   `[-2 mm, ceilingContact]`, and the tile must rest on ≥ 2 battens. **`float` = gap > tolerance** →
-   the roof fails with a list of offending tiles.
-2. **Head-lap watertightness.** For every pair of vertically adjacent tiles, up-slope overlap must equal
-   `totalLength − workingLength = 95 mm ± 0.5 mm` (per tile type). No overlap smaller than the catalogued
-   lap is allowed → no exposed gaps between courses.
-3. **Side-lap watertightness.** Same check across the slope for the 45 mm interlock, including the
-   partial tiles the layout inserts at the verges and hips.
-4. **Eave overhang.** The tile nose must project past the 広小舞 (hikoma) board by `0 to 60 mm`
-   (catalogued 瓦の出) — no tile hanging in the air past the deck edge, no tile buried inside the eave.
-5. **Coverage factor.** Total laid tile area ÷ roof surface area ∈ `[1.60, 1.90]` (theory 1.717) — a
-   cheap global check that the lap arithmetic was really applied.
-6. **Frame contact.** Each rafter's underside must touch every purlin/plate it crosses; ridge beam must
-   touch the crown post heads; crown posts must touch the tie beams; tie beams must be centred on the
-   eave beams' span. Any gap > tolerance is reported as a floating member.
-7. **Surface closure.** The sheathing surface is built as a closed ring; the validator checks the mantle
-   is continuous (shared edges are coincident to 1e-6) → no holes for water to pass through.
-8. **Plan assertions.** Ridge straight and horizontal; ridge length = eaveW − eaveD for `yosemune`;
-   hips at 45° in plan (±0.5°); eave lines symmetric about the ridge; every hip starts exactly on an eave
-   corner (the "no hip floating in mid-air" check); the 破風/bargeboard closes the gable triangle
-   (first and last point of the gable outline coincide with hip-rafter ends and the ridge end).
-9. **No part below the eave plane** in the tiled region | no part above the ridge plane
-   (nothing sticking out of the roof surface).
+**The roof plan**
 
-`npm test` prints a table of these assertions with pass/fail and the worst measured epsilon, and
-`npm run report` writes the same measurements per roof preset to `out/roof-report.json`.
-This is how "the roofs are correct" is *demonstrated* rather than asserted.
+1. `plan.ridge-level` / `plan.ridge-parallel` — the 棟 is level and parallel to the long axis (1e-6 m).
+2. `plan.hips-45deg` — every 隅棟 runs at 45° in plan (0.5°); this is what makes 入母屋/歇山 read correctly.
+3. `plan.hips-on-corner` (2 mm) — every hip starts exactly on an eave corner: no hip floating in mid-air.
+4. `plan.hips-reach-gable` (2 mm) — each hip terminates on the 破風 plane / ridge end, i.e. the 妻 section is a clean triangle.
+5. `plan.hip-ridge-length` (2 mm, where the form defines it) — e.g. 寄棟 ridge = eave width − eave depth.
+6. `plan.symmetric` (1e-9) — the surface is symmetric about the ridge.
 
----
+**The tiles**
+
+7. `lap.head` / `lap.side` — measured on the laid layout, never below the catalogue: 95 mm head,
+   45 mm side for JIS 300×305 桟瓦 (each tile family carries its own pair).
+8. `tiles.cover-face` — a 27×27 plan sample of every face must find a 平瓦 over it: catches trims
+   that leave an eave corner bare, gaps between courses, and courses that stop short of the ridge.
+9. `tiles.supported` (max bearing 3 mm, zero unsupported) — two-line support, mesh-to-mesh: at the
+   nose the tile must bear on its 瓦桟, and one working length up-slope on the next batten, whose
+   head it hooks over. The eave course nose may instead bear on the 広小舞 board; probes that land
+   above the topmost 瓦桟 are counted as ridge zone, not failures. Catches both floating tiles and
+   tiles buried in the sheathing.
+10. `tiles.bed-alignment` (±8 mm) — the 野地板 deck mesh must lie on the ideal offset surface one
+    construction stack (瓦桟 + ルーフィング) below the tile bed. Catches a wrong stack and any mesh
+    that has wandered off the surface.
+11. `tiles.coverage` — laid tile area ÷ roof area must match the tile family's own lap theory
+    (L×W)/(workL×workW) within −14 %/+12 %; e.g. 1.717 for 300×305 桟瓦, 1.000 for standing seam.
+    A layout with no lap at all reads ≈1.0 and fails.
+12. `eave.projection` — the tile nose overhangs the 広小舞 by the catalogued 瓦の出 (60 mm).
+
+**The frame**
+
+13. `frame.rafters-over-purlins` (6 mm; zero short rafters) — every 垂木 that crosses a 母屋 line is
+    measured mesh-to-mesh against it (its underside must sit on the purlin top), and every rafter
+    that stops below the lowest 母屋 must be a genuine hip stub trimmed by the 隅木, not a member
+    hanging in mid-air. This check is what caught the end-face rafters running past the hip diagonal.
+14. `frame.eave-beam-contact` (12 mm) — from the underside of every rafter crossing the 軒桁 line
+    (all four sides, the beam rings the building) to the beam's top face.
+15. `frame.crown-post-contact` (2 mm) — 真束 heads meet the underside of the 棟木.
+16. `layers.ordered` — 瓦 → 瓦桟 → ルーフィング → 野地板 → 垂木 offsets are strictly monotonic
+    (no interpenetration), including deep beds such as 茅葺, where the tile material itself
+    (not the batten grid) sets the deck depth.
+17. `structure.below-tiles` — no structural member rises through the tile bed.
+
+**The mesh**
+
+18. Sheathing, battens and rafters are tessellated finer than the tolerances they are tested
+    against (deck ≤130 mm, battens ≤180 mm, rafters ≤280 mm along the flow), so chord sag cannot
+    masquerade as an error; and adjacent faces share the break-line rows, so the 野地板 and the
+    tile beds meet exactly along the 隅棟 diagonal instead of leaving slivers.
+
+`node cli/report.mjs` prints all of this per preset with the worst measured epsilon, writes it to
+`out/roof-report.json`, and exits non-zero if anything fails. `node tools/render.mjs` renders the
+same roofs offline to PNG (hero, 妻側, eave corner, and a half-section through the whole stack)
+for the human eye. That combination — assertions for the numbers, renders for the shape — is how
+"the roofs are correct" is demonstrated rather than asserted.
 
 ## 8. Source list (all consulted during this research)
 

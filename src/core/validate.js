@@ -324,6 +324,34 @@ export function validateRoof(roof, opts = {}) {
     + `${worstBearing ? ` (worst @ ${worstBearing.face} arc ${worstBearing.arc} m, a ${worstBearing.a})` : ''}`
     + `${unsupported ? ` — ${unsupported} UNSupported` : ''}`);
 
+  // (C) the courses must actually COVER the face: sample the plan and require a laid
+  // tile over every sample. Catches trims that leave the corner bare, gaps between
+  // courses and faces whose courses stop short of the ridge/break line.
+  let coverTested = 0, uncovered = 0, worstGap = null;
+  for (const face of surface.faces) {
+    const lay = layout[face.id];
+    if (!lay || !lay.tiles.length) continue;
+    const NM = 26, NA = 26;
+    for (let i = 0; i <= NM; i++) {
+      const m = (face.mMax * i) / NM;
+      const arc = face.profile.arc(m);
+      const hw = surface.halfWidth(face, m);
+      for (let j = 0; j <= NA; j++) {
+        const a = -hw * 0.998 + 2 * hw * 0.998 * (j / NA);
+        coverTested++;
+        const hit = lay.tiles.some((t) => a >= t.a + t.uMin - 0.002 && a <= t.a + t.uMax + 0.002
+          && arc >= face.profile.arc(t.m) - 0.002 && arc <= face.profile.arc(t.m) + tile.length + 0.002);
+        if (!hit) {
+          uncovered++;
+          if (!worstGap) worstGap = { face: face.id, arc: +arc.toFixed(3), a: +a.toFixed(3), hw: +hw.toFixed(3) };
+        }
+      }
+    }
+  }
+  push('tiles.cover-face', coverTested > 0 && uncovered === 0, uncovered, 0,
+    `${coverTested} plan samples over ${surface.faces.length} faces: every point of the roof is under a 平瓦`
+    + (uncovered ? ` — ${uncovered} bare (e.g. ${worstGap.face} arc ${worstGap.arc} a ${worstGap.a} hw ${worstGap.hw})` : ''));
+
   // tile bed → 瓦桟 → ルーフィング → deck top
   const expected = offs.deckTop;
   if (deckPart && deckPart.positions.length) {
@@ -425,19 +453,49 @@ export function validateRoof(roof, opts = {}) {
   // ── 5. frame contact ───────────────────────────────────────────────────────
   const rafters = report.rafters || [];
   const purlins = report.purlins || [];
-  let crossing = 0, contacts = 0, stubs = 0;
-  for (const r of rafters) {
-    const facePurlins = purlins.filter((p) => p.face === r.face);
-    if (!facePurlins.length) continue;
-    for (const p of facePurlins) {
-      if (p.m <= r.mTop) crossing++;
-      else contacts++;                      // purlin is above where this rafter stops
+  const purlinPart = parts.find((p) => p.id === 'purlins');
+  let crossing = 0, stubs = 0, shortRafters = 0, worstPurlinGap = 0, purlinProbes = 0;
+  if (purlins.length && report.rafters?.length) {
+    const byFace = new Map();
+    for (const p of purlins) {
+      if (!byFace.has(p.face)) byFace.set(p.face, []);
+      byFace.get(p.face).push(p);
     }
-    const first = Math.min(...facePurlins.map((p) => p.m));
-    if (r.mTop < first) stubs++;
+    const purlinMesh = purlinPart && purlinPart.positions.length
+      ? [0, purlinPart.positions.length / 3] : null;
+    const step = Math.max(1, Math.floor(report.rafters.length / 80));
+    for (let i = 0; i < report.rafters.length; i += step) {
+      const r = report.rafters[i];
+      const list = byFace.get(r.face) || [];
+      if (!list.length) continue;
+      const first = Math.min(...list.map((p) => p.m));
+      const face = surface.faceById(r.face);
+      // A rafter that stops below the first 母屋 is a hip stub (the 隅木 carries that
+      // corner); anywhere else it would be a rafter hanging in the air.
+      if (r.mTop < first - 0.005) {
+        const hwTop = surface.halfWidth(face, r.mTop);
+        if (Math.abs(r.a) > hwTop - 0.8) { stubs++; } else { shortRafters++; }
+        continue;
+      }
+      for (const p of list) {
+        if (p.m > r.mTop) continue;
+        crossing++;
+        if (!purlinMesh) continue;
+        const f = surface.frameAt(face, p.m, r.a);
+        const probe = [f.origin[0] - f.normal[0] * report.offsets.rafterBottom,
+          f.origin[1] - f.normal[1] * report.offsets.rafterBottom,
+          f.origin[2] - f.normal[2] * report.offsets.rafterBottom];
+        const gap = triNearMesh(purlinPart.positions, purlinMesh, probe);
+        purlinProbes++;
+        worstPurlinGap = Math.max(worstPurlinGap, gap);
+      }
+    }
   }
-  push('frame.rafters-over-purlins', contacts === 0 || stubs > 0, stubs, 0,
-    `${crossing} rafter↔母屋 crossings; ${stubs} stub rafters near hips (trimmed by 隅木, expected)`);
+  push('frame.rafters-over-purlins',
+    shortRafters === 0 && (purlinProbes === 0 || worstPurlinGap < 0.006),
+    { shortRafters, worstGap: +worstPurlinGap.toFixed(4) }, { shortRafters: 0, worstGap: 0.006 },
+    `${crossing} 垂木↔母屋 crossings measured mesh-to-mesh (rafter underside sits on the purlin top); `
+    + `${stubs} stub rafters at the hips (trimmed by the 隅木, expected)`);
 
   const eb = report.primary?.eaveBeams || [];
   const rafterPart = parts.find((p) => p.id === 'rafters');

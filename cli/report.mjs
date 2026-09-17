@@ -4,7 +4,8 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { buildRoof } from '../src/core/build-roof.js';
 import { validateRoof, formatValidation } from '../src/core/validate.js';
 import { PRESETS, mergeSpec } from '../src/core/spec.js';
-import { toJSONReport, toOBJ } from '../src/core/export.js';
+import { toJSONReport, writeOBJStream } from '../src/core/export.js';
+import { createWriteStream } from 'node:fs';
 
 const args = process.argv.slice(2);
 const argOf = (n, d) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : d; };
@@ -27,7 +28,16 @@ for (const name of names) {
   console.log(formatValidation(v));
   if (!v.pass) { failures++; console.log('  FAILED:', v.failures.map((f) => f.id).join(', ')); }
   all.push({ name, pass: v.pass, ms: +ms.toFixed(0), ...toJSONReport(roof, v) });
-  if (wantObj) writeFileSync(`${outDir}/roof-${name}.obj`, toOBJ(roof.parts));
+  // OBJ files run to hundreds of MB for the big presets: only write them for a single
+  // --only preset, or for the small ones in a full run.
+  const smallPresets = ['minka', 'machiya', 'modern', 'gassho', 'hougyou'];
+  const writeThisObj = wantObj && (only ? name === only : smallPresets.includes(name));
+  if (writeThisObj) {
+    // streamed: these roofs run to millions of triangles
+    const stream = createWriteStream(`${outDir}/roof-${name}.obj`);
+    writeOBJStream(roof.parts, stream);
+    await new Promise((done) => stream.end(done));
+  }
 }
 
 writeFileSync(`${outDir}/roof-report.json`, JSON.stringify({ presets: all }, null, 2));

@@ -282,6 +282,7 @@ export function buildTileSolid(part, surface, face, m0, a0, tile, opts = {}) {
  */
 export function coverFace(surface, face, tile, spec, opts = {}) {
   const prof = face.profile;
+  const arcTop = face.arcMax ?? prof.arc(face.mMax);
   const courses = [];
   const nMax = Math.floor((prof.arc(face.mMax) - 1e-4) / tile.workL) + 1;
   for (let k = 0; k < nMax; k++) {
@@ -299,29 +300,31 @@ export function coverFace(surface, face, tile, spec, opts = {}) {
     const step = tile.workW;
     const cols = [];
     if (align === 'center') {
+      // start one half-tile outside the trim so the two edge tiles (the 調整瓦) are cut
+      // equally, then walk outward from the centre line in both directions
       for (let i = 0; ; i++) {
         const a = i * step;
-        if (a >= hw) break;
+        if (a - tile.width / 2 >= hw - 1e-6) break;
         cols.push(a);
         if (i > 0) cols.push(-a);
-        if (i === 0) cols.push(-step);
       }
     } else {
-      for (let a = -hw; a < hw - 1e-4; a += step) cols.push(a);
+      for (let a = -hw + tile.width / 2; a - tile.width / 2 < hw - 1e-4; a += step) cols.push(a);
     }
     for (const col of cols) {
-      // tiles are placed by their uMin edge; `col` is the centre of the tile's u-range
+      // `col` is the CENTRE of the tile's u-range: the tile physically spans
+      // [col + uMin, col + uMax], so the trim against the hip/verge must be measured
+      // from that edge, not from the centre.
       const uMin = -tile.width / 2;
       let uMax = tile.width / 2;
       const aStart = col;
-      const aEnd = col + tile.width;
-      if (aStart >= hw - 1e-6) continue;                    // wholly outside the trim
-      const over = aEnd - hw;
+      if (aStart + uMin >= hw - 1e-6) continue;             // wholly outside the trim
+      const over = (aStart + uMax) - hw;
       let adjusted = false;
       if (over > 0) {
-        // 調整瓦: the tile that runs into the hip / verge is cut back, and never to
-        // less than about a fifth of a tile (the hip tiles cover the remainder).
-        uMax = tile.width / 2 - over;
+        // 調整瓦: the tile that runs into the hip / verge is cut back along the
+        // diagonal, never to less than ~a fifth of a tile (隅棟 covers the remainder).
+        uMax -= over;
         adjusted = true;
       }
       if (uMax - uMin < 0.06) continue;
@@ -331,13 +334,17 @@ export function coverFace(surface, face, tile, spec, opts = {}) {
       buildTileSolid(part, surface, face, course.m, aStart, tile, {
         lengthSegments: segs, eaveTile: isEave, uMin, uMax, snowStop,
       });
-      // 本瓦葺 丸瓦: a separate barrel tile is laid over EVERY joint between pans
+      // 本瓦葺 丸瓦: a barrel tile is laid over EVERY joint between pans — except at the
+      // very top of the slope, where the 棟 (ridge) stack covers the joint instead, and
+      // except where the joint runs into the hip (隅棟 covers that).
       if (tile.family === 'hongawara' && !isEave) {
-        const aJoint = aStart + tile.width / 2 + uMax;
+        const aJoint = aStart + uMax - (tile.width - tile.workW) / 2;
+        const ar = prof.arc(course.m);
         const hwJ = surface.halfWidth(face, course.m + tile.workL);
-        if (aJoint < hwJ - tile.barrelDiameter * 0.4) {
-          buildBarrelTile(part, surface, face, course.m, aJoint, tile, segs);
-        }
+        const fits = aJoint < hwJ - tile.barrelDiameter * 0.75
+          && aJoint - tile.barrelDiameter * 0.75 > -hwJ;
+        const belowRidge = ar + (tile.barrelLength ?? tile.length + 0.02) <= arcTop + 1e-6;
+        if (fits && belowRidge) buildBarrelTile(part, surface, face, course.m, aJoint, tile, segs);
       }
       tiles.push({
         face: face.id, course: course.index, m: course.m, arc: course.arc, a: col,
@@ -509,11 +516,14 @@ function buildShibi(part, c, dir, s, capY, capR) {
   const up = [0, 1, 0];
   const across = vnorm([-dir[2], 0, dir[0]]);
   const base = vadd(c, vmul(up, capY));
-  const P = (a, y, d) => vadd(vadd(base, vmul(across, a)), vadd(vmul(up, y), vmul(dir, d)));
+  // 鴟尾 scale with the ridge they crown: a 大棟 carries a ~1.2 m finial
+  const k = Math.max(1, capR / 0.19);
+  const P = (a, y, d) => vadd(vadd(base, vmul(across, a * k)), vadd(vmul(up, y * k), vmul(dir, d * k)));
   part.loft([
     [P(-0.10, 0.0, 0), P(0.10, 0.0, 0), P(0.10, 0.0, 0.22), P(-0.10, 0.0, 0.22)],
-    [P(-0.13, 0.55, 0.02), P(0.13, 0.55, 0.02), P(0.13, 0.55, 0.26), P(-0.13, 0.55, 0.26)],
-    [P(-0.05, 0.80, 0.06), P(0.05, 0.80, 0.06), P(0.05, 0.80, 0.24), P(-0.05, 0.80, 0.24)],
+    [P(-0.19, 0.50, 0.02), P(0.19, 0.50, 0.02), P(0.19, 0.50, 0.30), P(-0.19, 0.50, 0.30)],
+    [P(-0.13, 0.72, 0.05), P(0.13, 0.72, 0.05), P(0.13, 0.72, 0.30), P(-0.13, 0.72, 0.30)],
+    [P(-0.03, 0.92, 0.08), P(0.03, 0.92, 0.08), P(0.03, 0.92, 0.26), P(-0.03, 0.92, 0.26)],
   ], { closed: true });
 }
 
@@ -550,9 +560,16 @@ export function buildHipRidges(part, surface, tile, spec) {
       const i0 = Math.floor(idx), i1 = Math.min(pts.length - 1, i0 + 1);
       const p = vlerp3(pts[i0], pts[i1], idx - i0);
       const m = t * surface.hipRun;
-      const nA = surface.normalAt(mainF, Math.min(m, mainF.mMax), hip.sx * (mainF.half - m));
-      const nB = surface.normalAt(endF, Math.min(m, endF.mMax), hip.sz * (endF.half - m));
-      const n = vnorm(vadd(nA, nB));
+      // Sample each face's normal a little inside it: exactly on the hip diagonal the
+      // corner flare (t → 0) makes frameAt degenerate and the cap would splay into spikes.
+      const sweep = surface.sweepTop ?? 0;
+      const tSafe = Math.max(m, sweep * 1.05) + 0.06;
+      const aA = hip.sx * (mainF.half - Math.min(tSafe, mainF.half - 0.02));
+      const aB = hip.sz * (endF.half - Math.min(tSafe, endF.half - 0.02));
+      const nA = surface.normalAt(mainF, Math.min(m, mainF.mMax), aA);
+      const nB = surface.normalAt(endF, Math.min(m, endF.mMax), aB);
+      let n = vnorm(vadd(nA, nB));
+      if (!isFinite(n[0])) n = nA;
       const tangent = i === 0 ? vnorm(vsub(pts[1], pts[0])) : vnorm(vsub(p, vlerp3(pts[Math.max(0, i0 - 1)], pts[i1], 0)));
       let x = vnorm(vsub([0, 1, 0], vmul(n, n[1])));
       if (!isFinite(x[0])) x = [1, 0, 0];
@@ -592,12 +609,13 @@ const vcrossV = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
 export function buildVerge(part, surface, tile, spec) {
   const made = [];
   for (const face of surface.faces) {
-    if (face.kind === 'main' && face.gableEnd) continue;   // handled by the bargeboard
+    if (!face.gableEdge) continue;        // hip edges are covered by the 隅棟 instead
     const prof = face.profile;
-    const steps = Math.max(4, Math.round(prof.arc(face.mMax) / 0.22));
+    const arcFrom = prof.arc(face.gableEdgeFrom);
+    const steps = Math.max(4, Math.round((face.arcMax - arcFrom) / 0.22));
     const path = [];
     for (let i = 0; i <= steps; i++) {
-      const s = lerp(0, prof.arc(face.mMax), i / steps);
+      const s = lerp(arcFrom, face.arcMax, i / steps);
       const m = prof.arcInv(s);
       const hw = surface.halfWidth(face, m);
       path.push({ m, a: hw });
@@ -659,21 +677,24 @@ export function buildBargeboard(part, surface, tile, spec) {
       const path = pts.map((p, i) => {
         const prev = pts[Math.max(0, i - 1)], next = pts[Math.min(pts.length - 1, i + 1)];
         const tangent = vnorm(vsub(next, prev));
-        const face = surface.faces.find((f) => f.kind === 'main' && f.sign === edge.sz);
-        const n = surface.normalAt(face, 0, 0);
-        let x = vnorm(vsub(tangent, vmul(n, tangent[0] * n[0] + tangent[1] * n[1] + tangent[2] * n[2])));
-        const y = vnorm(vcrossV(x, tangent));
-        return { origin: vadd(p, vmul(y, -depth * 0.35)), frame: { x, y, z: tangent } };
+        // the 破風 lies in the gable plane: board thickness along the plane normal,
+        // board width down the raking edge
+        let x = [sx, 0, 0];
+        let y = vnorm(vcrossV(x, tangent));
+        if (y[1] < 0) { y = vmul(y, -1); x = vmul(x, -1); }
+        return { origin: p, frame: { x, y, z: tangent } };
       });
-      const sec = [[-th / 2, -depth / 2], [th / 2, -depth / 2], [th / 2, depth / 2], [-th / 2, depth / 2]];
-      part.extrudePolygon(sec, path);
-      // 懸魚 gegyo (the pendant at the gable apex) when asked for
-      if (spec.eave?.gegyo && Math.abs(pts[0][1] - surface.hRidge) < 0.35) {
-        const f = path[path.length - 1];
-        part.extrudePolygon([[-0.12, -0.16], [0.12, -0.16], [0.10, 0.02], [0, 0.06], [-0.10, 0.02]], [f, { origin: vadd(f.origin, vmul(f.frame.z, 0.02)), frame: f.frame }]);
+      // section: (u, v) = (outward normal, up); the board hangs below the roof edge
+      part.extrudePolygon([[0, -depth], [th, -depth], [th, 0.004], [0, 0.004]], path);
+      if (spec.eave?.gegyo) {
+        const f = path[path.length - 1];          // 懸魚 pendant at the apex
+        part.extrudePolygon([
+          [-0.14, -0.30], [0.14, -0.30], [0.11, -0.03], [0, 0.05], [-0.11, -0.03],
+        ], [{ origin: vadd(f.origin, vmul(f.frame.y, -0.02)), frame: f.frame },
+          { origin: vadd(f.origin, vmul(f.frame.y, -0.06)), frame: f.frame }]);
       }
     }
-    made.push({ sx, hipped: g.hipped });
+    made.push({ sx, hipped: g.hipped, mFrom: g.mFrom });
   }
   return made;
 }

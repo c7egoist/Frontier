@@ -55,10 +55,21 @@ function off(surface, face, m, a, depth) {
 /** Max metric a rafter at across-position a may reach (cut against the hip). */
 export function rafterMaxM(surface, face, a) {
   const absA = Math.abs(a);
-  if (face.kind === 'main' && !face.hips) return face.mMax;
-  const gable = face.gable;
-  if (gable != null && absA <= gable - 1e-6) return face.mMax;
-  return Math.min(face.mMax, face.half - absA);
+  // Every rafter is cut where the surface ends: the ridge/break line above, and the
+  // 隅棟 (hip) diagonal to the side. `halfWidth(face, m) = 0` gives that diagonal.
+  let mTop = face.mMax;
+  if (face.kind === 'main') {
+    if (face.hips) {
+      // The 妻 (gable) section between the hips runs the full slope; the hip sections
+      // beside it are cut on the diagonal: halfWidth(m) = half − m down to `gable`.
+      const gable = face.gable ?? face.half;
+      if (absA > gable - 1e-6) mTop = Math.min(mTop, face.half - absA);
+    }
+  } else {
+    // end (hip) face: the surface is the triangle 0 ≤ |a| ≤ half − m
+    mTop = Math.min(mTop, face.half - absA);
+  }
+  return Math.max(0, mTop);
 }
 
 // ── tiles battens 瓦桟 ────────────────────────────────────────────────────────
@@ -97,32 +108,46 @@ export function buildDeck(part, surface, spec, offs) {
   let quads = 0;
   for (const face of surface.faces) {
     const prof = face.profile;
-    // fine enough that the sheathing's own chord sag stays ~2 mm under the tile bed
+    // fine enough that the sheathing's own chord sag stays ~2 mm under the tile bed,
+    // and always sampling the face's feature metrics so neighbouring faces share rows.
     const mSteps = Math.max(12, Math.round(prof.arc(face.mMax) / 0.08));
+    const ms = new Set();
+    for (let i = 0; i <= mSteps; i++) ms.add(prof.arcInv(lerp(0, prof.arc(face.mMax), i / mSteps)));
+    for (const fm of face.featureMs ?? []) ms.add(fm);
+    const mList = [...ms].sort((a, b) => a - b);
     const aSteps = Math.max(12, Math.round(surface.halfWidth(face, 0) / 0.10));
-    const grid = [];
-    for (let i = 0; i <= mSteps; i++) {
-      const m = prof.arcInv(lerp(0, prof.arc(face.mMax), i / mSteps));
+    // one vertex grid, then the slab's top sheet, bottom sheet and its rim
+    const top = [], bot = [];
+    for (const m of mList) {
       const hw = surface.halfWidth(face, m);
-      const row = [];
+      const rowT = [], rowB = [];
       for (let j = 0; j <= aSteps * 2; j++) {
         const a = lerp(-hw, hw, j / (aSteps * 2));
-        row.push({ m, a, hw });
+        const f = surface.frameAt(face, m, a);
+        const up = [-f.normal[0], -f.normal[1], -f.normal[2]];
+        rowT.push(vadd(f.origin, vmul(up, offs.deckTop)));
+        rowB.push(vadd(f.origin, vmul(up, offs.deckBottom)));
       }
-      grid.push(row);
+      top.push(rowT); bot.push(rowB);
     }
-    // 野地板 is a real board layer: top face at deckTop, bottom face at deckBottom
-    for (const [depth, ] of [[offs.deckTop], [offs.deckBottom]]) {
-      for (let i = 0; i + 1 < grid.length; i++) {
-        for (let j = 0; j + 1 < grid[i].length; j++) {
-          const A = off(surface, face, grid[i][j].m, grid[i][j].a, depth).origin;
-          const B = off(surface, face, grid[i][j + 1].m, grid[i][j + 1].a, depth).origin;
-          const C = off(surface, face, grid[i + 1][j + 1].m, grid[i + 1][j + 1].a, depth).origin;
-          const D = off(surface, face, grid[i + 1][j].m, grid[i + 1][j].a, depth).origin;
-          part.quad2(A, B, C, D);
-          quads++;
-        }
+    const rows = mList.length, cols = aSteps * 2 + 1;
+    for (let i = 0; i + 1 < rows; i++) {
+      for (let j = 0; j + 1 < cols; j++) {
+        part.quad2(top[i][j], top[i][j + 1], top[i + 1][j + 1], top[i + 1][j]);        // 野地板 top
+        part.quad2(bot[i + 1][j], bot[i + 1][j + 1], bot[i][j + 1], bot[i][j]);        // underside
+        quads += 2;
       }
+    }
+    // rim: closes the slab along the eave, the ridge/break line and both 破風/hip edges
+    for (let i = 0; i + 1 < rows; i++) {
+      part.quad2(top[i][0], top[i + 1][0], bot[i + 1][0], bot[i][0]);
+      part.quad2(top[i + 1][cols - 1], top[i][cols - 1], bot[i][cols - 1], bot[i + 1][cols - 1]);
+      quads += 2;
+    }
+    for (let j = 0; j + 1 < cols; j++) {
+      part.quad2(top[0][j], top[0][j + 1], bot[0][j + 1], bot[0][j]);
+      part.quad2(top[rows - 1][j + 1], top[rows - 1][j], bot[rows - 1][j], bot[rows - 1][j + 1]);
+      quads += 2;
     }
   }
   return quads;
@@ -204,6 +229,9 @@ export function buildPurlins(part, surface, spec, offs) {
     const prof = face.profile;
     const stations = prof.stations.slice(1, -1);        // intermediate purlins only
     for (const m of stations) {
+      // a 母屋 only exists where its face does: past the break line of a truncated end
+      // face the member belongs to the main faces only
+      if (m > face.mMax - 1e-6) continue;
       const hw = surface.halfWidth(face, m);
       if (hw < 0.15) continue;
       const y = prof.h(m) + surface.hEave;
