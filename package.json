@@ -1,0 +1,36 @@
+{
+  "name": "frontier-roof-generator",
+  "version": "1.0.0",
+  "description": "Procedural Japanese/East Asian roof generator - traditional forms, verified structure and tiling, GLB export",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node tools/check.mjs",
+    "shots": "node tools/render.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/c7egoist/Frontier.git"
+  },
+  "keywords": [
+    "procedural",
+    "japanese",
+    "architecture",
+    "roof",
+    "threejs",
+    "gltf"
+  ],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/c7egoist/Frontier/issues"
+  },
+  "homepage": "https://github.com/c7egoist/Frontier#readme",
+  "dependencies": {
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@sparticuz/chromium": "^153.0.0",
+    "pngjs": "^7.0.0",
+    "puppeteer-core": "^25.11.0"
+  }
+}
