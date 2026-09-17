@@ -1,0 +1,20 @@
+{
+  "name": "frontier-ocean",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --experimental-strip-types test/physics.ts && node test/validate-wgsl.mjs",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@webgpu/types": "^0.1.51",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0",
+    "wgsl_reflect": "^1.6.0"
+  }
+}
