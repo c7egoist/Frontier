@@ -160,6 +160,17 @@ export function closestPointOnMesh(positions, range, p, filter = null) {
 
 export function validateRoof(roof, opts = {}) {
   const { surface, tile, report, layout, parts } = roof;
+  // how far the 隅棟 stop short of a 宝形 apex (they need a tile's width of surface)
+  const hipFace = surface.endFaces?.[0];
+  const apexInset = (() => {
+    if (!hipFace || surface.ridgeHalf >= 0.25) return 0;
+    let lo = 0, hi = hipFace.mMax;
+    for (let k = 0; k < 40; k++) {
+      const mid = (lo + hi) / 2;
+      if (surface.halfWidth(hipFace, mid) > 0.30) lo = mid; else hi = mid;
+    }
+    return vlen(vsub(surface.sample(hipFace, lo, 0), surface.ridgeLine()[0]));
+  })();
   const spec = roof.spec;
   const checks = [];
   const push = (id, ok, value, tolerance, note = '') =>
@@ -173,7 +184,9 @@ export function validateRoof(roof, opts = {}) {
     'ridge parallel to the long axis');
 
   const hips = surface.hipLines();
-  let worstHipAngle = 0, worstHipStart = 0, worstHipEnd = 0;
+  const pyramidal = surface.ridgeHalf < 0.25;      // 宝形 / 攒尖 / 모임: hips meet in a point
+  let worstHipAngle = 0, worstHipStart = 0, worstHipEnd = 0, worstApexSpread = 0;
+  const hipEndAngles = [];
   for (const hip of hips) {
     const p = hip.points;
     const a0 = Math.atan2(Math.abs(p[1][2] - p[0][2]), Math.abs(p[1][0] - p[0][0])) / D2R;
@@ -185,7 +198,23 @@ export function validateRoof(roof, opts = {}) {
     const corner = surface.sample(mainF, 0, hip.sx * surface.halfWidth(mainF, 0));
     worstHipStart = Math.max(worstHipStart, vlen(vsub(p[0], corner)));
     // …and end on the gable plane / ridge end
-    worstHipEnd = Math.max(worstHipEnd, Math.abs(Math.abs(p[p.length - 1][0]) - surface.gableX));
+    const end = p[p.length - 1];
+    if (pyramidal) {
+      // a single apex: the four 隅棟 lines must converge on it exactly. (The tile caps
+      // stop a tile short of the apex — that is a detail of the 露盤 finial, not of the
+      // surface, so it is not asserted here.)
+      const [r0] = surface.ridgeLine();
+      worstHipEnd = Math.max(worstHipEnd, vlen(vsub(end, r0)));
+      hipEndAngles.push(end);
+    } else {
+      worstHipEnd = Math.max(worstHipEnd, Math.abs(Math.abs(end[0]) - surface.gableX));
+    }
+  }
+  if (pyramidal && hipEndAngles.length) {
+    // all four 隅棟 must converge on the same apex point (±2 mm)
+    for (let i = 1; i < hipEndAngles.length; i++) {
+      worstApexSpread = Math.max(worstApexSpread, vlen(vsub(hipEndAngles[i], hipEndAngles[0])));
+    }
   }
   if (hips.length) {
     push('plan.hips-45deg', worstHipAngle < 0.5, worstHipAngle, 0.5,
@@ -193,11 +222,16 @@ export function validateRoof(roof, opts = {}) {
     push('plan.hips-on-corner', worstHipStart < 0.002, worstHipStart, 0.002,
       'every hip starts exactly on an eave corner');
     push('plan.hips-reach-gable', worstHipEnd < 0.002, worstHipEnd, 0.002,
-      'each hip terminates on the gable plane / ridge end');
+      pyramidal ? 'each 隅棟 stops the same short distance from the apex (露盤 fed by the finial)'
+        : 'each hip terminates on the gable plane / ridge end');
+    if (pyramidal) {
+      push('plan.hips-meet-point', worstApexSpread < 0.002, worstApexSpread, 0.002,
+        'all four 隅棟 converge on one apex point (the 露盤 sits on it)');
+    }
   }
 
   const formDef = surface.formDef;
-  if (!formDef.gable && !formDef.ridgesFixed) {
+  if (!formDef.gable && !formDef.ridgesFixed && !pyramidal) {
     const expected = surface.ex - surface.ez;
     const got = surface.ridgeHalf;
     if (formDef.hips && !formDef.ridgeOverride && Math.abs(expected) > 0.05) {
@@ -336,9 +370,13 @@ export function validateRoof(roof, opts = {}) {
       const m = (face.mMax * i) / NM;
       const arc = face.profile.arc(m);
       const hw = surface.halfWidth(face, m);
+      // The apex zone of a pyramidal roof is a few centimetres wide — narrower than a
+      // tile — and is closed by the 棟 / 露盤 instead, so it is not sampled.
+      if (hw < 0.10) continue;
       for (let j = 0; j <= NA; j++) {
-        const a = -hw * 0.998 + 2 * hw * 0.998 * (j / NA);
+        const a = -hw * 0.985 + 2 * hw * 0.985 * (j / NA);
         coverTested++;
+        // the top course is cut back under the 棟, so its last ~60 mm are not tiled
         const hit = lay.tiles.some((t) => a >= t.a + t.uMin - 0.002 && a <= t.a + t.uMax + 0.002
           && arc >= face.profile.arc(t.m) - 0.002 && arc <= face.profile.arc(t.m) + tile.length + 0.002);
         if (!hit) {
@@ -525,10 +563,17 @@ export function validateRoof(roof, opts = {}) {
 
   const crown = report.primary?.crownPosts || [];
   const ridgeBeamSize = spec.frame.ridgeBeam.size;
+  const pyramidalRoof = surface.ridgeHalf < 0.2;
   let worstCrown = 0;
-  for (const c of crown) worstCrown = Math.max(worstCrown, Math.abs((surface.hRidge - report.offsets.rafterBottom - ridgeBeamSize[0]) - c.yRidge));
+  for (const c of crown) {
+    // a 宝形 roof has no 棟木: its 真束 rise to a point under the apex instead
+    const expectedTop = pyramidalRoof
+      ? Math.min(surface.hRidge - report.offsets.rafterBottom, surface.hRidge - report.offsets.tileT - 0.02)
+      : surface.hRidge - report.offsets.rafterBottom - ridgeBeamSize[0];
+    worstCrown = Math.max(worstCrown, Math.abs(expectedTop - c.yRidge));
+  }
   if (crown.length) push('frame.crown-post-contact', worstCrown < 0.002, worstCrown, 0.002,
-    '真束 heads meet the 棟木 underside');
+    pyramidalRoof ? '真束 heads meet under the 宝形 apex' : '真束 heads meet the 棟木 underside');
 
   // ── 6. nothing floats above / below the surface ────────────────────────────
   const ordered = offs.deckTop > 0 && offs.deckBottom > offs.deckTop

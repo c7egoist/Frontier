@@ -51,10 +51,18 @@ export function buildSurface(spec) {
   const o = spec.overhang;
 
   const ezPerp = D / 2 + o.eave;               // run from ridge to the ±Z eave line
-  const ezF = formDef.asymmetric ? D / 2 + o.eave : ezPerp;
-  const ezB = formDef.asymmetric ? D / 2 + o.rear : ezPerp;
-  const ez = (ezF + ezB) / 2;
-  const ex = W / 2 + o.gable;                  // run from centre to the ±X eave line
+  let ezF = formDef.asymmetric ? D / 2 + o.eave : ezPerp;
+  let ezB = formDef.asymmetric ? D / 2 + o.rear : ezPerp;
+  let ez = (ezF + ezB) / 2;
+  let ex = W / 2 + o.gable;                    // run from centre to the ±X eave line
+  // A 宝形 / 攒尖 / 모임 pyramid only closes if the eave rectangle is square: the 45°
+  // hips have to reach the apex at the same time in both directions. Deepen the
+  // shallower side's eave until it is, rather than leaving a roof that cannot meet.
+  const squarePlan = formDef.ridgeOverride === 0;
+  if (squarePlan) {
+    const side = Math.max(ex, ez);
+    ex = side; ezF = side; ezB = side; ez = side;
+  }
 
   const pitch = pitchFromSun(spec.pitch.sun);
   // Rise is set by the steeper (rear) side so the ridge stays a single level line.
@@ -74,7 +82,10 @@ export function buildSurface(spec) {
   // ── gable plane (tsuma) ────────────────────────────────────────────────────
   let gableX;
   const inset = o.gableInset ?? 0;
-  if (formDef.ridgeOverride === 0) gableX = 0;                      // pyramid
+  // 宝形 / 攒尖 / 모임 are square-plan pyramids: the ridge is a POINT. Over an oblong
+  // plan the same form is a 45° hip roof, which necessarily keeps a short ridge
+  // (2 × (ex − ez)) — returning 0 there would leave the top of the surface uncovered.
+  if (formDef.ridgeOverride === 0) gableX = Math.max(0, ex - ez);
   else if (formDef.ridgeOverride != null) gableX = formDef.ridgeOverride / 2;
   else if (!formDef.hips) gableX = ex;                              // gable roof
   else if (formDef.gable) gableX = W / 2 - inset;                   // irimoya / xieshan

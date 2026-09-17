@@ -254,6 +254,9 @@ export function buildPurlins(part, surface, spec, offs) {
 export function buildRidgeBeam(part, surface, spec, offs) {
   const size = spec.frame.ridgeBeam?.size ?? [0.15, 0.18];
   const [p0, p1] = surface.ridgeLine();
+  // 宝形 / 攒尖 / 모임 have no 棟木: the four 隅木 and the 真束 meet in a point under
+  // the 露盤, so a zero-length beam would be degenerate geometry.
+  if (Math.hypot(p1[0] - p0[0], p1[2] - p0[2]) < 0.2) return { length: 0, size, skipped: 'pyramidal' };
   const y = surface.hRidge - offs.rafterBottom;
   const a = [p0[0], y, p0[2]], b = [p1[0], y, p1[2]];
   part.boxBetween(a, b, [size[1], size[0]], [0, 1, 0]);
@@ -304,14 +307,18 @@ export function buildPrimaryFrame(part, surface, spec, offs, opts = {}) {
       part.boxBetween(a1, a2, [tieSize[1], tieSize[0]], [0, 1, 0]);
       out.ties.push({ x, a1, a2 });
 
-      // 真束 crown post: tie beam top → ridge beam underside
+      // 真束 crown post: tie beam top → 棟木 underside. A 宝形 roof has no 棟木, so the
+      // posts stop under the apex instead of climbing to a beam that is not there.
       const yTie = (a1[1] + a2[1]) / 2;
-      const yRidge = surface.hRidge - offs.rafterBottom - (spec.frame.ridgeBeam?.size?.[0] ?? 0.15);
-      if (yRidge - yTie > 0.15) {
+      const pyramidal = surface.ridgeHalf < 0.2;      // 宝形: no 棟木 to hang from
+      const yRidge = surface.hRidge - offs.rafterBottom
+        - (pyramidal ? 0 : (spec.frame.ridgeBeam?.size?.[0] ?? 0.15));
+      const yRidgeSafe = pyramidal ? Math.min(yRidge, surface.hRidge - offs.tileT - 0.02) : yRidge;
+      if (yRidgeSafe - yTie > 0.15) {
         const p = [x, yTie, surface.ridgeZ];
-        const q = [x, yRidge, surface.ridgeZ];
+        const q = [x, yRidgeSafe, surface.ridgeZ];
         part.boxBetween(p, q, [postSize[0], postSize[1]], [0, 1, 0]);
-        out.crownPosts.push({ x, yTie, yRidge });
+        out.crownPosts.push({ x, yTie, yRidge: yRidgeSafe });
       }
       // 束 struts under each purlin station (wagoya-gumi)
       const mainFace = surface.mainFaces[0];

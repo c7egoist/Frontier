@@ -31,6 +31,7 @@ createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
     let path = decodeURIComponent(url.pathname);
+    if (path === '/' || path === '') { res.writeHead(302, { location: '/viewer/' }); res.end(); return; }
     if (path.endsWith('/')) path += 'index.html';
     const full = join(root, normalize(path).replace(/^(\.\.[/\\])+/, ''));
     if (!full.startsWith(root)) { res.writeHead(403).end('forbidden'); return; }

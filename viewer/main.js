@@ -64,7 +64,7 @@ const state = {
   explode: 0,
   wire: false,
   hidden: new Set(),
-  lengthSegments: 4,
+  lengthSegments: 3,      // rebuild latency: 3 stations per tile is plenty at this scale
 };
 const group = new THREE.Group();
 scene.add(group);

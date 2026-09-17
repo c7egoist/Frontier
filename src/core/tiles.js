@@ -404,8 +404,33 @@ export function buildBarrelTile(part, surface, face, m0, aJoint, tile, segs = 5)
  * 冠瓦 kangawara cap on top. This mass is also what stops a Japanese roof lifting
  * off in a typhoon. Optionally closed with 鬼瓦 at both ends.
  */
+/** 露盤 + 宝珠 — the square plinth and jewel that crown a 宝形 (pyramidal) roof. */
+function buildHoju(part, c, y) {
+  const base = vadd(c, [0, y, 0]);
+  part.loft([
+    [vadd(base, [-0.13, 0, -0.13]), vadd(base, [0.13, 0, -0.13]), vadd(base, [0.13, 0, 0.13]), vadd(base, [-0.13, 0, 0.13])],
+    [vadd(base, [-0.17, 0.07, -0.17]), vadd(base, [0.17, 0.07, -0.17]), vadd(base, [0.17, 0.07, 0.17]), vadd(base, [-0.17, 0.07, 0.17])],
+    [vadd(base, [-0.13, 0.12, -0.13]), vadd(base, [0.13, 0.12, -0.13]), vadd(base, [0.13, 0.12, 0.13]), vadd(base, [-0.13, 0.12, 0.13])],
+  ], { closed: true });
+  // 請花 (lotus) + 宝珠 (jewel)
+  const rings = [
+    [0.16, 0.0], [0.10, 0.10], [0.13, 0.20], [0.10, 0.30], [0.14, 0.38], [0.05, 0.46],
+  ];
+  part.loft(rings.map(([r, h]) => part.ringPoints
+    ? part.ringPoints(vadd(base, [0, 0.12 + h, 0]), r, 10)
+    : Array.from({ length: 10 }, (_, k) => {
+      const ang = (2 * Math.PI * k) / 10;
+      return vadd(base, [Math.cos(ang) * r, 0.12 + h, Math.sin(ang) * r]);
+    })), { closed: true });
+}
+
 export function buildMainRidge(part, surface, tile, spec) {
   const [p0, p1] = surface.ridgeLine();
+  if (surface.ridgeHalf < 0.25) {
+    // pyramidal: the four 隅棟 converge under a 露盤 + 宝珠 instead of a 大棟
+    buildHoju(part, [p0[0], p0[1], p0[2]], 0);
+    return { ridgeLength: 0, capRadius: spec.ridge.capRadius ?? 0.13, hoju: true };
+  }
   const dir = vnorm(vsub(p1, p0));
   const alongY = [0, 1, 0];
   const across = vnorm([-dir[2], 0, dir[0]]);
@@ -552,14 +577,28 @@ export function buildHipRidges(part, surface, tile, spec) {
     // local normal = bisector of the two adjacent faces' normals
     const mainF = surface.faces.find((f) => f.kind === 'main' && f.sign === hip.sz);
     const endF = surface.faces.find((f) => f.kind === 'end' && f.sign === hip.sx);
+    // On a 宝形 (pyramidal) roof the four hips meet in one point: stop each cap a tile
+    // short of the apex, where the surface is still wide enough to carry the 隅棟, and
+    // let the 露盤 + 宝珠 finial cover the meeting point.
+    const hwAt = (f) => {
+      let lo = 0, hi = f.mMax;
+      for (let k = 0; k < 30; k++) {
+        const mid = (lo + hi) / 2;
+        if (surface.halfWidth(f, mid) > 0.30) lo = mid; else hi = mid;
+      }
+      return lo;
+    };
+    const mStop = Math.min(surface.hipRun, hwAt(mainF), hwAt(endF));
+    const mRun = Math.max(0.05, mStop);
     const path = [];
     const segs = Math.max(6, Math.round(pts.length * 1.5));
     for (let i = 0; i <= segs; i++) {
       const t = i / segs;
-      const idx = t * (pts.length - 1);
+      const frac = mRun / Math.max(1e-6, surface.hipRun);      // stop at mStop
+      const idx = t * frac * (pts.length - 1);
       const i0 = Math.floor(idx), i1 = Math.min(pts.length - 1, i0 + 1);
       const p = vlerp3(pts[i0], pts[i1], idx - i0);
-      const m = t * surface.hipRun;
+      const m = t * mRun;
       // Sample each face's normal a little inside it: exactly on the hip diagonal the
       // corner flare (t → 0) makes frameAt degenerate and the cap would splay into spikes.
       const sweep = surface.sweepTop ?? 0;
