@@ -14,6 +14,8 @@ function fail(msg: string): void {
   throw new Error(msg);
 }
 
+let gpuErrorShown = false; // throw the first GPU error only (fail-once)
+
 async function boot(): Promise<void> {
   if (!('gpu' in navigator) || !navigator.gpu) {
     fail('WebGPU is not available in this browser.\nUse Chrome/Edge 113+ (or enable the WebGPU flag), then reload.');
@@ -30,7 +32,12 @@ async function boot(): Promise<void> {
   device.addEventListener('uncapturederror', (ev) => {
     const e = ev as GPUUncapturedErrorEvent;
     console.error(e.error);
-    fail('GPU error: ' + e.error.message);
+    // throw once (so headless probes surface it as a pageerror) instead of
+    // rethrowing every frame and drowning the console
+    if (!gpuErrorShown) {
+      gpuErrorShown = true;
+      fail('GPU error: ' + e.error.message);
+    }
   });
 
   const ctx = canvas.getContext('webgpu')!;

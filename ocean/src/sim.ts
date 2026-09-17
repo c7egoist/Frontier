@@ -538,7 +538,9 @@ export class OceanSim {
       cp.setPipeline(this.pipes.score);
       cp.setBindGroup(0, sbg);
       cp.dispatchWorkgroups(8, 8);
-      e.copyBufferToBuffer(this.scoresBuf, 0, this.staging, 0, NEAR_BLOCK_COUNT * 2 * 4);
+      // NOTE: the staging copy is encoded AFTER cp.end() below — a
+      // copyBufferToBuffer recorded while a compute pass is open is a
+      // validation error and invalidates the whole command buffer.
     }
 
     // composite the near render texture (runs even with AMR off = pure upsample)
@@ -597,6 +599,11 @@ export class OceanSim {
     }
 
     cp.end();
+    if (this.tier.amr) {
+      // valid: the pass is closed; encoder order still puts this copy after
+      // the score dispatch on the queue
+      e.copyBufferToBuffer(this.scoresBuf, 0, this.staging, 0, NEAR_BLOCK_COUNT * 2 * 4);
+    }
     this.readbackScores();
   }
 
