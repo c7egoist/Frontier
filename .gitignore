@@ -1,0 +1,16 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# automated test renders & scratch output (the curated gallery in shots/ is committed)
+shots/test/
+shots/*-iso.png
+shots/*-front.png
+
+# editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.log

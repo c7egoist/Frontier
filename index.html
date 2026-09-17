@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>東亜 Building Generator — procedural East-Asian architecture</title>
+    <meta name="description" content="Procedurally generate East Asian buildings — ancient architecture with modern styling. Floors, roof types, roof tiles, woods, lanterns, neon, poles and wires. Export .glb for Blender." />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='48' font-size='52'%3E%F0%9F%8F%AE%3C/text%3E%3C/svg%3E" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport">
+        <div class="hud hud-top-left">
+          <span class="brand"><span class="jp">東亜</span> Building Generator</span>
+          <button id="btn-randomize" class="accent">🎲 Randomize</button>
+          <button id="btn-generate" class="primary">Generate</button>
+          <button id="btn-glb" title="Export the current building as a .glb (opens in Blender)">⬇ .glb</button>
+          <button id="btn-png">📷</button>
+          <button id="btn-lights" class="on">Lights: on</button>
+        </div>
+        <div class="hud hud-top-right">
+          <button id="btn-view">Golden hour</button>
+          <div class="row">
+            <button id="btn-frame">Frame</button>
+            <button id="btn-top">Top</button>
+          </div>
+          <span class="stat" id="hud-fps">– fps</span>
+        </div>
+        <div class="hud hud-bottom" id="hud-stats"></div>
+      </div>
+      <div id="panel"></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

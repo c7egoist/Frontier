@@ -1,0 +1,26 @@
+{
+  "name": "eastasia-building-generator",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Procedural generator for East Asian buildings \u2014 ancient architecture with modern styling. Parameter-driven, seeded, GLB export for Blender.",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node scripts/node-test.mjs",
+    "shots": "node scripts/dev/shot.mjs",
+    "textures": "node scripts/dev/texture-test.mjs",
+    "test:browser": "node scripts/headless-test.mjs"
+  },
+  "dependencies": {
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@fontsource/noto-sans-jp": "^5.3.0",
+    "@fontsource/shippori-mincho": "^5.3.0",
+    "@napi-rs/canvas": "^1.0.9",
+    "vite": "^6.0.0"
+  },
+  "optionalDependencies": {}
+}
