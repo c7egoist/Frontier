@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Frontier Ocean — particle ocean, WebGPU</title>
+    <meta name="description" content="A real-time ocean built from particles: shallow-water SPH + MLS-MPM spray + wave-packet swell, no FFT synthesis." />
+    <style>
+      :root {
+        color-scheme: dark;
+        --panel: rgba(6, 14, 22, 0.72);
+        --line: rgba(150, 200, 230, 0.18);
+        --text: #d8e8f2;
+        --dim: #86a4b8;
+        --accent: #7fd4ff;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: #05080c; overflow: hidden; }
+      body { font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--text); }
+      #gpu { display: block; width: 100vw; height: 100vh; touch-action: none; cursor: grab; }
+      #gpu:active { cursor: grabbing; }
+
+      .panel {
+        position: fixed;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 10px 12px;
+        backdrop-filter: blur(6px);
+        pointer-events: none;
+        user-select: none;
+      }
+      #hud { top: 12px; left: 12px; min-width: 232px; }
+      #hud b { color: var(--accent); font-weight: 600; }
+      #hud .row { display: flex; justify-content: space-between; gap: 14px; }
+      #hud .row span:last-child { color: var(--dim); }
+      #hud hr { border: 0; border-top: 1px solid var(--line); margin: 7px 0; }
+      #help { bottom: 12px; left: 12px; max-width: 340px; color: var(--dim); }
+      #help b { color: var(--text); }
+      #meter { position: fixed; top: 12px; right: 12px; width: 132px; text-align: right; }
+      #meter .bar { height: 5px; margin-top: 4px; background: rgba(255,255,255,0.12); border-radius: 3px; overflow: hidden; }
+      #meter .bar > i { display: block; height: 100%; width: 0%; background: var(--accent); transition: width 120ms linear; }
+      #fatal {
+        position: fixed; inset: 0; display: none; place-items: center; padding: 8vw;
+        background: #05080c; z-index: 10; text-align: left;
+      }
+      #fatal.show { display: grid; }
+      #fatal pre { white-space: pre-wrap; max-height: 70vh; overflow: auto; color: #ffb4b4; }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <canvas id="gpu"></canvas>
+
+    <div id="hud" class="panel">
+      <div><b>Frontier Ocean</b> <span id="preset"></span></div>
+      <div id="adapter" style="color: var(--dim)"></div>
+      <hr />
+      <div class="row"><span>fps</span><span id="fps">–</span></div>
+      <div class="row"><span>frame</span><span id="ms">–</span></div>
+      <div class="row"><span>quality</span><span id="quality">–</span></div>
+      <div class="row"><span>render</span><span id="res">–</span></div>
+      <hr />
+      <div class="row"><span>swe particles</span><span id="sweCount">–</span></div>
+      <div class="row"><span>wave packets</span><span id="waveCount">–</span></div>
+      <div class="row"><span>3D particles</span><span id="mpmCount">–</span></div>
+      <div class="row"><span>layer memory</span><span id="mem">–</span></div>
+      <div class="row"><span>view</span><span id="view">–</span></div>
+    </div>
+
+    <div id="meter" class="panel">
+      <div style="color: var(--dim)">gpu budget</div>
+      <div class="bar"><i id="load"></i></div>
+    </div>
+
+    <div id="help" class="panel">
+      <b>drag</b> look · <b>WASD</b> fly · <b>Shift</b> boost · <b>Space/C</b> up-down ·
+      <b>click</b> push water (<b>Alt</b> pull) ·
+      <b>1-5</b> debug views · <b>F</b> spray layer · <b>L</b> adaptive quality · <b>P</b> pause · <b>R</b> reset camera
+    </div>
+
+    <div id="fatal">
+      <div>
+        <h2 id="fatalTitle">WebGPU could not start</h2>
+        <pre id="fatalBody"></pre>
+        <p style="color: var(--dim)">
+          Requires Chrome/Edge 113+, Safari 18+ or Firefox 141+ with a discrete/integrated GPU that
+          supports WebGPU. On Linux, Chrome may need <code>--enable-unsafe-webgpu</code>.
+        </p>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
