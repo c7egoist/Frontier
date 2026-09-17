@@ -175,6 +175,16 @@ function rebuild(){
   document.getElementById('statTiles').textContent = result.stats.tiles.toLocaleString();
   document.getElementById('statLights').textContent = result.stats.lights;
 
+  // raster debug — copy debugCanvas to visible canvas
+  if(result.debugCanvas){
+    const target = document.getElementById('debugRaster');
+    if(target){
+      const tCtx = target.getContext('2d');
+      tCtx.clearRect(0,0,512,512);
+      tCtx.drawImage(result.debugCanvas,0,0);
+    }
+  }
+
   // graph
   document.getElementById('graphSeed').textContent = params.seed;
   const floors = (params.floor2?2:1)+(params.floor3?1:0)+(params.floor4?1:0);
