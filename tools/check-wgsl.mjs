@@ -93,6 +93,29 @@ function globalsFields() {
 const WORKGROUP_BUDGET = 16384; // maxComputeWorkgroupStorageSize default (16 KiB)
 const INVOCATION_MAX = 256;     // maxComputeInvocationsPerWorkgroup default
 
+// Per-stage resource ceilings, from the WebGPU default limits. Exceeding one is a pipeline-creation
+// failure on device, and the only symptom in the browser is "the ocean is black".
+const STAGE_LIMITS = {
+  storageBuffer: 8,    // maxStorageBuffersPerShaderStage
+  storageTexture: 4,   // maxStorageTexturesPerShaderStage
+  sampledTexture: 16,  // maxSampledTexturesPerShaderStage
+  sampler: 16,         // maxSamplersPerShaderStage
+  uniformBuffer: 12,   // maxUniformBuffersPerShaderStage
+};
+
+/** Which of the STAGE_LIMITS buckets a `var<...>` declaration belongs to. */
+function resourceKind(res) {
+  // `var<storage, read_write>` parses as `storage, read_write`: keep only the address space.
+  const t = (res.type ?? '').split(',')[0].trim();
+  if (t.startsWith('texture_storage')) return 'storageTexture';
+  if (t.startsWith('texture_depth')) return 'sampledTexture'; // depth textures count as sampled
+  if (t.startsWith('texture_') || t.startsWith('texture_external')) return 'sampledTexture';
+  if (t.startsWith('sampler')) return 'sampler';
+  if (t === 'uniform') return 'uniformBuffer';
+  if (t === 'storage' || t.startsWith('array<')) return 'storageBuffer';
+  return null;
+}
+
 // --- texture rules -----------------------------------------------------------
 // The GPU is the only real validator, and every one of these mistakes is a *compile* or *creation*
 // error on device rather than something a test notices, so they are checked here. The two lists are
@@ -158,7 +181,8 @@ function storageNamesIn(moduleNames, params) {
 }
 
 /**
- * Every `fnName(...)` call with its arguments split at *top-level* commas. Hand-rolled scanning
+ * Every `fnName(...)` call with its arguments split at *top-level* commas, and its offset in
+ * `code` (callers use the offset to ask whether the call sits inside a branch). Hand-rolled scanning
  * rather than a regex: arguments routinely contain calls of their own (`clamp(vec2<i32>(i), ...)`),
  * which a naive `[^()]*` match silently skips -- and a rule that silently skips is worse than none.
  */
@@ -186,7 +210,7 @@ function topLevelCalls(code, fnName) {
     }
     if (current.trim()) args.push(current.trim());
     const name = /^(\w+)$/.exec(args[0] ?? '')?.[1];
-    out.push({ name: name ?? (args[0] ?? ''), args });
+    out.push({ name: name ?? (args[0] ?? ''), args, index: i });
   }
   return out;
 }
@@ -267,10 +291,31 @@ for (const entry of entries) {
       for (const call of topLevelCalls(scope.body, 'textureSample')) {
         if (storageNames.has(call.name)) err(label, `textureSample*( ${call.name} ) samples a storage texture; bind it as texture_2d instead`);
       }
+      // The *implicit-level* sample is the one with a uniformity requirement; the `Level`/`Grad`
+      // forms are legal anywhere. Every call site in this codebase uses a level, so flag any that
+      // does not, and let the author either add one or prove the uniformity.
+      for (const call of topLevelCalls(scope.body, 'textureSample')) {
+        if (storageNames.has(call.name)) continue;
+        const inBranch = /\b(if|for|while|else)\b[\s\S]{0,400}$/.test(scope.body.slice(0, call.index));
+        if (inBranch) warn(label, `textureSample(${call.name}, ...) without an explicit level inside a branch; use textureSampleLevel unless the control flow is uniform`);
+      }
     }
     for (const t of storages) {
       if (t.access === 'read-write') warn(label, `${t.name} uses read-write storage access, which older WebGPU implementations reject`);
     }
+
+    // Per-stage resource counts: module scope is per-stage scope in WGSL, so every entry point in
+    // this module sees all of these resources.
+    const counts = {};
+    const tooMany = [];
+    for (const r of res) {
+      const kind = resourceKind(r);
+      if (!kind) continue;
+      counts[kind] = (counts[kind] ?? 0) + 1;
+      const limit = STAGE_LIMITS[kind];
+      if (limit !== undefined && counts[kind] > limit) tooMany.push(`${r.name} (${kind} ${counts[kind]} > ${limit})`);
+    }
+    if (tooMany.length) err(label, `exceeds a default per-stage resource limit: ${tooMany.join(', ')}`);
 
     // Workgroup sizes: sum of shared memory must fit the default 16 KiB budget.
     for (const fn of code.matchAll(/@workgroup_size\(([^)]*)\)[\s\S]{0,80}?fn\s+(\w+)/g)) {
@@ -279,11 +324,28 @@ for (const entry of entries) {
       if (!Number.isFinite(count)) continue;
       if (count > INVOCATION_MAX) err(label, `entry ${fn[2]} has ${count} invocations (> default max ${INVOCATION_MAX})`);
     }
-    const shared = [...code.matchAll(/var<workgroup>\s+(\w+)\s*:\s*array<([^,>]+),\s*(\d+)>/g)];
-    for (const s of shared) {
-      const bytes = Number(s[3]) * ({ f32: 4, i32: 4, u32: 4 }[s[2].trim()] ?? 16);
-      if (bytes > WORKGROUP_BUDGET) err(label, `var<workgroup> ${s[1]} is ${bytes} B (> ${WORKGROUP_BUDGET})`);
+    // The sizes are usually `const` names (`array<u32, BLOCK>`), so a literal-only rule would
+    // silently check nothing -- which is exactly what this one did until it was caught.
+    const intConsts = new Map();
+    for (const c of code.matchAll(/\bconst\s+(\w+)\s*(?::\s*\w+)?\s*=\s*(\d+)\s*u?\s*;/g)) {
+      intConsts.set(c[1], Number(c[2]));
     }
+    const scalarBytes = { f32: 4, i32: 4, u32: 4, 'atomic<u32>': 4, 'vec2<f32>': 8, 'vec3<f32>': 12, 'vec4<f32>': 16, 'vec4<u32>': 16 };
+    let sharedBytes = 0;
+    const unfixed = [];
+    for (const v of code.matchAll(/var<workgroup>\s+(\w+)\s*:\s*array<([^,>]+),\s*([\w]+)\s*>/g)) {
+      const count = /^\d+$/.test(v[3]) ? Number(v[3]) : intConsts.get(v[3]);
+      if (count === undefined) { unfixed.push(v[1]); continue; }
+      const elem = scalarBytes[v[2].trim()] ?? 16;
+      sharedBytes += elem * count;
+      if (elem * count > WORKGROUP_BUDGET) {
+        err(label, `var<workgroup> ${v[1]} is ${elem * count} B (> ${WORKGROUP_BUDGET})`);
+      }
+    }
+    if (sharedBytes > WORKGROUP_BUDGET) {
+      err(label, `workgroup memory totals ${sharedBytes} B (> ${WORKGROUP_BUDGET})`);
+    }
+    if (unfixed.length && verbose) warn(label, `could not size var<workgroup> ${unfixed.join(', ')}`);
 
     if (verbose) {
       console.log(`  ${label}`);

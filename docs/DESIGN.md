@@ -125,7 +125,19 @@ enforce all four statically, because none of them can be reproduced in the sandb
    optional `float32-filterable` device feature), so the fluid composite declares
    `particleDepth` as `unfilterable-float` and only ever reads it with `textureLoad`. Every bound
    texture also needs `GPUTextureUsage.TEXTURE_BINDING` — `sceneDepth` is a depth attachment *and*
-   a sampled input, so it carries both flags.
+   a sampled input, so it carries both flags. Two follow-on rules, because the symptom of breaking
+   them is a draw-time error rather than a pipeline error: a binding declared `unfilterable-float`
+   may never be passed to `textureSample*` with a *filtering* sampler (`textureLoad`, or a
+   non-filtering sampler, is fine), and a `texture_depth_2d` binding may only be read with
+   `textureLoad` or a `Compare` sample.
+
+`tools/check-wgsl.mjs` additionally enforces the default per-stage resource ceilings
+(`maxStorageBuffersPerShaderStage` 8, `maxStorageTexturesPerShaderStage` 4,
+`maxSampledTexturesPerShaderStage` 16, `maxSamplersPerShaderStage` 16,
+`maxUniformBuffersPerShaderStage` 12), `maxComputeInvocationsPerWorkgroup` 256 and the 16 KiB
+`maxComputeWorkgroupStorageSize` budget, so crossing a limit is a red check rather than a black
+frame. The per-binding size limit is handled at runtime instead: `deriveConfig` clamps every particle
+count to 90% of `maxStorageBufferBindingSize` (see §7).
 
 ## 5. Mass and momentum
 

@@ -549,6 +549,103 @@ describe('texture and binding contract', () => {
     expect(cross).toBeGreaterThanOrEqual(3);
   });
 
+  it('never pairs a filtering sampler with a texture its binding calls unfilterable', () => {
+    // WebGPU reports this at draw time, not at pipeline creation: "filtering sampler used with an
+    // unfilterable texture". The binding decides, so the two layout entries are checked against each
+    // other at every sample call site -- an unfilterable texture may still be read with a
+    // non-filtering sampler, and a depth binding may still be read with textureSampleCompare.
+    const check = (textureType: string | undefined, samplerType: string | undefined, isCompare: boolean): string | null => {
+      if (textureType === 'depth') return isCompare ? null : 'a depth binding sampled without a comparison sampler';
+      if (textureType !== 'unfilterable-float') return null;
+      return samplerType === 'filtering' ? 'an unfilterable-float binding sampled with a filtering sampler' : null;
+    };
+
+    // The rule itself, before trusting it on the shaders.
+    expect(check('unfilterable-float', 'filtering', false)).not.toBeNull();
+    expect(check('depth', 'filtering', false)).not.toBeNull();
+    expect(check('unfilterable-float', 'non-filtering', false)).toBeNull();
+    expect(check('float', 'filtering', false)).toBeNull();
+    expect(check('depth', 'filtering', true)).toBeNull();
+
+    const violations: string[] = [];
+    let resolved = 0;
+    for (const k of kernels) {
+      const code = resolveShader(k.file, (f) => shaderSources.get(f), { defines: k.defines }).code;
+      const bindingOf = new Map<string, number>();
+      for (const m of code.matchAll(/@group\(1\)\s*@binding\((\d+)\)\s*var\s+(\w+)\s*:/g)) {
+        bindingOf.set(m[2]!, Number(m[1]));
+      }
+      const entryAt = new Map(k.layout.map((e) => [e.binding, e]));
+      const label = (binding: number) => `${k.textures.get(binding) ?? `binding ${binding}`} (${k.label})`;
+
+      for (const call of code.matchAll(/\btextureSample\w*\s*\(/g)) {
+        const argsText = enclosed(code, call.index! + call[0].length - 1, '(', ')');
+        const args = splitTop(argsText).map((a) => a.trim());
+        const textureBinding = bindingOf.get(args[0] ?? '');
+        if (textureBinding === undefined) continue; // passed in as a function parameter
+        const textureEntry = entryAt.get(textureBinding);
+        if (!textureEntry) continue;
+        resolved++;
+        const samplerBinding = bindingOf.get((args[1] ?? '').trim());
+        const samplerEntry = samplerBinding === undefined ? undefined : entryAt.get(samplerBinding);
+        const why = check(textureEntry.sampleType, samplerEntry?.samplerType, call[0].includes('Compare'));
+        if (why) violations.push(`${label(textureBinding)}: ${why}`);
+      }
+    }
+    expect(violations).toEqual([]);
+    // Guard the guard: a scan that resolves no call sites would pass vacuously.
+    expect(resolved).toBeGreaterThanOrEqual(2);
+  });
+
+  it('never samples an unfilterable or depth binding from the render shaders either', () => {
+    // Same rule as above, but for `render/*.wgsl`, where the bindings come from the renderer's bind
+    // groups rather than from a sim layer: the pass that reads a texture is the pass whose layout
+    // says what the texture is. A descriptor is only treated as unsampleable when *every* bind group
+    // that binds it says so, so a future pass that legitimately binds a filterable copy at the same
+    // index does not trip this.
+    const sampleTypes = new Map<string, Set<string>>();
+    const textureNamesAt = new Map<number, Set<string>>();
+    for (const bg of bindGroups) {
+      const entryAt = new Map(bg.layout.entries.map((e) => [e.binding, e]));
+      for (const [binding, name] of bg.textures) {
+        const entry = entryAt.get(binding);
+        if (!entry?.sampleType) continue;
+        if (!sampleTypes.has(name)) sampleTypes.set(name, new Set());
+        sampleTypes.get(name)!.add(entry.sampleType);
+        if (!textureNamesAt.has(binding)) textureNamesAt.set(binding, new Set());
+        textureNamesAt.get(binding)!.add(name);
+      }
+    }
+
+    const violations: string[] = [];
+    let sampled = 0;
+    for (const file of shaderSources.keys()) {
+      if (!file.startsWith('render/')) continue;
+      const code = resolveShader(file, (f) => shaderSources.get(f), { defines: {} }).code;
+      const decl = new Map<string, { binding: number; depth: boolean }>();
+      for (const m of code.matchAll(/@group\(1\)\s*@binding\((\d+)\)\s*var\s+(\w+)\s*:\s*(texture\w*)/g)) {
+        decl.set(m[2]!, { binding: Number(m[1]), depth: m[3]!.startsWith('texture_depth') });
+      }
+      for (const call of code.matchAll(/\btextureSample\w*\s*\(/g)) {
+        const text = call[0].replace(/\s*\($/, '');
+        const args = splitTop(enclosed(code, call.index! + call[0].length - 1, '(', ')')).map((a) => a.trim());
+        const d = decl.get(args[0] ?? '');
+        if (!d) continue;
+        sampled++;
+        if (d.depth && !text.includes('Compare')) {
+          violations.push(`${file}: ${args[0]} is a depth binding but is sampled with ${text}`);
+          continue;
+        }
+        const candidates = [...(textureNamesAt.get(d.binding) ?? [])];
+        if (candidates.length && candidates.every((n) => sampleTypes.get(n)!.has('unfilterable-float'))) {
+          violations.push(`${file}: ${args[0]} (${candidates.join('/')}) is bound unfilterable-float but is sampled with ${text}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+    expect(sampled).toBeGreaterThanOrEqual(2);
+  });
+
   it('covers every group(1) resource a shader entry point uses', () => {
     let checked = 0;
     for (const k of kernels) {
