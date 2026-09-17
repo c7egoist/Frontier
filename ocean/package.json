@@ -11,8 +11,10 @@
     "typecheck": "tsc"
   },
   "devDependencies": {
+    "@sparticuz/chromium": "^153.0.0",
     "@webgpu/types": "^0.1.51",
     "esbuild": "^0.28.2",
+    "puppeteer-core": "^25.11.0",
     "typescript": "^5.5.4",
     "vite": "^5.4.0",
     "wgsl_reflect": "^1.6.0"

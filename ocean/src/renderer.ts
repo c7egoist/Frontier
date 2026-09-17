@@ -122,7 +122,7 @@ export class Renderer {
 
     const mkRender = (
       code: string, layout: GPUBindGroupLayout, vertex: { buffers?: GPUVertexBufferLayout[] },
-      blend: GPUBlendState | undefined, depthWrite: boolean,
+      blend: GPUBlendState | undefined, depthWrite: boolean, depthCompare: GPUCompareFunction = 'less',
     ): GPURenderPipeline => {
       const module = device.createShaderModule({ code });
       return device.createRenderPipeline({
@@ -140,13 +140,13 @@ export class Renderer {
         depthStencil: {
           format: 'depth24plus',
           depthWriteEnabled: depthWrite,
-          depthCompare: 'less',
+          depthCompare,
         },
       });
     };
 
     const emptyVB = { buffers: [] as GPUVertexBufferLayout[] };
-    this.skyPipe = mkRender(SKY, this.skyLayout, emptyVB, undefined, false);
+    this.skyPipe = mkRender(SKY, this.skyLayout, emptyVB, undefined, false, 'always');
 
     this.meshCount = 0;
     const mesh = buildOceanMesh();
@@ -172,6 +172,22 @@ export class Renderer {
     }, false);
 
     this.minimapPipe = mkRender(MINIMAP, this.minimapLayout, emptyVB, undefined, false);
+  }
+
+  // Offscreen probe target for GPU smoke tests (?probe=1): renders the same
+  // passes into a COPY_SRC texture so pixels can be read back on the CPU.
+  makeProbe(w = 256, h = 144): { tex: GPUTexture; view: GPUTextureView; buf: GPUBuffer; bytesPerRow: number } {
+    const bytesPerRow = Math.ceil((w * 4) / 256) * 256;
+    const tex = this.device.createTexture({
+      size: [w, h],
+      format: this.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+    });
+    const buf = this.device.createBuffer({
+      size: bytesPerRow * h,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+    return { tex, view: tex.createView(), buf, bytesPerRow };
   }
 
   resize(w: number, h: number): void {

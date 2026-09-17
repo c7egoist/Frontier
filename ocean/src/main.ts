@@ -51,6 +51,7 @@ async function boot(): Promise<void> {
   let sim = new OceanSim(device, { ...TIERS[gui.state.tier] }, pipes);
   const renderer = new Renderer(device, format);
   const urlScale = parseFloat(q.get('scale') ?? '1') || 1;
+  const probe = q.has('probe');
 
   function resize(): void {
     const dpr = window.devicePixelRatio || 1;
@@ -133,14 +134,66 @@ async function boot(): Promise<void> {
   let lastInvViewProj: Float32Array = new Float32Array(16);
   let statTimer = 0;
 
+  let frameCount = 0;
+  let probeDone = false;
+  async function runProbe(): Promise<void> {
+    // render one frame into an offscreen target and read the pixels back
+    const pr = renderer.makeProbe(256, 144);
+    const e = device.createCommandEncoder();
+    sim.frame(e, {
+      dt: 1 / 60, time: nowTime, camX: cam.targetX, camZ: cam.targetZ,
+      windAmp: 0.6, targetRms: 0.7, windDir: [1, 0], spawnRate: 1,
+      splash: null, sprayEnabled: true,
+    });
+    renderer.render(e, pr.view, {
+      sim,
+      viewProj: lastViewProj,
+      invViewProj: lastInvViewProj,
+      camPos: [cam.targetX + 30, 12, cam.targetZ + 30],
+      camRight: [1, 0, 0], camUp: [0, 1, 0],
+      time: nowTime,
+      sun: [0.42, 0.38, 0.25],
+      tier: TIERS[gui.state.tier],
+      waveview: false, minimap: false, spray: true,
+      windPhase: 0, foamGain: 1, meshOrigin: [cam.targetX, cam.targetZ],
+    });
+    e.copyTextureToBuffer(
+      { texture: pr.tex },
+      { buffer: pr.buf, bytesPerRow: pr.bytesPerRow, rowsPerImage: 144 },
+      [256, 144],
+    );
+    device.queue.submit([e.finish()]);
+    await pr.buf.mapAsync(GPUMapMode.READ);
+    const data = new Uint8Array(pr.buf.getMappedRange());
+    let rSum = 0, gSum = 0, bSum = 0, n = data.length / 4;
+    let distinct = new Set();
+    for (let i = 0; i < data.length; i += 4) {
+      rSum += data[i]; gSum += data[i + 1]; bSum += data[i + 2];
+      distinct.add((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
+    }
+    pr.buf.unmap();
+    (window as any).__probeResult = {
+      avg: [Math.round(rSum / n), Math.round(gSum / n), Math.round(bSum / n)],
+      distinctColors: distinct.size,
+      sample: [data[0], data[1], data[2], data[50000], data[50001], data[50002]],
+    };
+    pr.tex.destroy();
+    pr.buf.destroy();
+    probeDone = true;
+  }
+
   function frame(): void {
     const tickRes = fps.tick();
     const dt = tickRes.dt;
     nowTime += dt;
+    frameCount++;
+    if (probe && frameCount === 80 && !probeDone) {
+      void runProbe().catch((err) => { console.error('probe failed', err); probeDone = true; });
+    }
 
     const sea = gui.state.wind;
     const windAmp = 0.35 + 0.5 * sea;          // raw wind magnitude
-    const targetRms = 0.22 + 1.5 * sea * sea;  // desired near-field rms height (m)
+    const targetRms = 0.1 + 0.45 * sea * sea;  // desired near-field rms height (m)
     const windAngle = 2.1 + nowTime * 0.008;
     const windDir: [number, number] = [Math.cos(windAngle), Math.sin(windAngle)];
     let spawnRate = 0.3 + 1.6 * sea;

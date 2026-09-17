@@ -25,13 +25,21 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   for (var i = 0; i < 6; i = i + 1) {
     if (i >= nBands) { break; }
     let fi = f32(i);
-    let lambda = lMax * pow(ratio, fi);
-    let k = 2.0 * PI / lambda;
-    let amp = 0.62 * pow(0.62, fi);
+    // snap each band to integer wavenumbers (m,n) cycles per domain: the
+    // discrete sums of sin/cos then factorize to exactly zero, so the field
+    // starts with exactly zero spatial mean of both h and dh/dt (no DC drift)
+    let dxc = P.size / P.texN;
+    let lc = max(4.0, round(lMax * pow(ratio, fi) / dxc));
     let ang = hash21(vec2f(fi * 7.31 + 1.7, P.seed * 3.1)) * 2.0 * PI;
-    let dir = vec2f(cos(ang), sin(ang));
-    let omega = P.c * k;
-    let phase = dot(dir, world) * k + omega * P.time + hash21(vec2f(fi * 3.7, P.seed)) * 2.0 * PI;
+    var m = round(f32(N) * cos(ang) / lc);
+    var n = round(f32(N) * sin(ang) / lc);
+    if (m == 0.0 && n == 0.0) { n = 1.0; }
+    let kx = 2.0 * PI * m / f32(N);
+    let kz = 2.0 * PI * n / f32(N);
+    let kk = sqrt(kx * kx + kz * kz);
+    let amp = 0.62 * pow(0.62, fi);
+    let omega = P.c * kk;
+    let phase = kx * f32(id.x) + kz * f32(id.y) + omega * P.time + hash21(vec2f(fi * 3.7, P.seed)) * 2.0 * PI;
     h = h + amp * sin(phase);
     hv = hv + amp * omega * cos(phase);
   }
@@ -67,14 +75,22 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
 
   let alpha = P.c * P.dt * P.texN / P.size;
   let lapSum = hl + hr + hd + hu - 4.0 * st.x;
-  var hv = st.y + alpha * alpha * lapSum;
+  var hv = st.y + (alpha * alpha / P.dt) * lapSum; // wave eq: dt*c^2*laplacian(h); lap is raw sum = dx^2*grad^2
   hv = hv * exp(-(P.damping + P.pad0) * P.dt); // pad0 = sea-state feedback damping
 
-  // wind forcing: slowly drifting smooth noise injects energy at swell scales
+  // wind forcing: Laplacian of a drifting noise potential. Its sum over the
+  // periodic grid is exactly zero (telescoping), so it can never random-walk
+  // the ocean's mean sea level, unlike raw per-cell noise.
   let world = P.origin + (vec2f(id) + vec2f(0.5)) / P.texN * P.size;
   let nq = world / (P.size * 0.22) + vec2f(P.time * 0.06, -P.time * 0.045) + vec2f(P.seed);
-  let wn = 0.65 * vnoise(nq) + 0.35 * vnoise(nq * 2.7 + vec2f(31.7, 11.3));
-  hv = hv + P.dt * P.windAmp * (wn - 0.5) * 2.0;
+  let dn = 2.0 / (P.texN * 0.22);
+  var wn = vnoise(nq + vec2f(dn, 0.0)) - vnoise(nq - vec2f(dn, 0.0))
+         + vnoise(nq + vec2f(0.0, dn)) - vnoise(nq - vec2f(0.0, dn));
+  let q2 = nq * 0.45 + vec2f(7.7, 3.1);
+  let dn2 = 3.0 / (P.texN * 0.22);
+  wn = wn + 1.2 * (vnoise(q2 + vec2f(dn2, 0.0)) - vnoise(q2 - vec2f(dn2, 0.0))
+     + vnoise(q2 + vec2f(0.0, dn2)) - vnoise(q2 - vec2f(0.0, dn2)));
+  hv = hv + P.dt * P.windAmp * 2.6 * wn;
 
   // interaction: splash impulse
   if (abs(P.splashAmp) > 0.0001) {
@@ -86,6 +102,8 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   // high-band diffusion keeps the finest scale from ringing (CFL guard)
   let havg = 0.25 * (hl + hr + hd + hu);
   h = mix(h, havg, clamp(P.diffusion, 0.0, 0.9));
+  // (mean is maintained by mean-free init + zero-mean forcing; no DC pin —
+  // wind kicks would otherwise random-walk the whole ocean up/down over time
 
   // foam: accumulate at sharp, fast crests; decay over time
   let dxn = P.size / P.texN;
@@ -153,13 +171,19 @@ fn main(@builtin(global_invocation_id) g: vec3u) {
   let hd = neighbor(id + vec2i(0, -1)).x;
   let hu = neighbor(id + vec2i(0, 1)).x;
 
-  var hv = st.y + alpha * alpha * (hl + hr + hd + hu - 4.0 * st.x);
+  var hv = st.y + (alpha * alpha / P.dt) * (hl + hr + hd + hu - 4.0 * st.x);
   hv = hv * exp(-(P.damping + P.pad0) * P.dt); // pad0 = sea-state feedback damping
 
   let world = P.origin + uv * P.size;
   let nq = world / (P.size * 0.22) + vec2f(P.time * 0.06, -P.time * 0.045) + vec2f(P.seed);
-  let wn = 0.65 * vnoise(nq) + 0.35 * vnoise(nq * 2.7 + vec2f(31.7, 11.3));
-  hv = hv + P.dt * P.windAmp * (wn - 0.5) * 2.0;
+  let dn = 2.0 / (P.fineN * 0.22);
+  var wn = vnoise(nq + vec2f(dn, 0.0)) - vnoise(nq - vec2f(dn, 0.0))
+         + vnoise(nq + vec2f(0.0, dn)) - vnoise(nq - vec2f(0.0, dn));
+  let q2 = nq * 0.45 + vec2f(7.7, 3.1);
+  let dn2 = 3.0 / (P.fineN * 0.22);
+  wn = wn + 1.2 * (vnoise(q2 + vec2f(dn2, 0.0)) - vnoise(q2 - vec2f(dn2, 0.0))
+     + vnoise(q2 + vec2f(0.0, dn2)) - vnoise(q2 - vec2f(0.0, dn2)));
+  hv = hv + P.dt * P.windAmp * 2.6 * wn;
 
   if (abs(P.splashAmp) > 0.0001) {
     let d = world - P.splashXY;
@@ -257,8 +281,9 @@ fn main(
   let N = i32(P.texN);
   let id = vec2i(g.xy);
   var s = 0.0;
+  var st = vec4f(0.0); // function scope: read by the reduction below
   if (id.x < N && id.y < N) {
-    let st = textureLoad(coarseTex, id, 0);
+    st = textureLoad(coarseTex, id, 0);
     let hl = textureLoad(coarseTex, wrapId(id + vec2i(-1, 0), N), 0).x;
     let hr = textureLoad(coarseTex, wrapId(id + vec2i(1, 0), N), 0).x;
     let hd = textureLoad(coarseTex, wrapId(id + vec2i(0, -1), N), 0).x;
@@ -267,7 +292,9 @@ fn main(
     let grad = length(vec2f(hr - hl, hu - hd)) / (2.0 * dx);
     let curv = abs(hl + hr + hd + hu - 4.0 * st.x) / dx;
     let hvN = min(abs(st.y) / max(P.c, 1.0), 1.0);
-    s = 0.55 * grad + 0.50 * curv + 0.15 * hvN;
+    // crest-height term: high seas refine wave-crest blocks (the "more wave ->
+    // more resolution" rule); steepness/curvature terms catch splashes & wakes
+    s = 0.55 * grad + 0.50 * curv + 0.15 * hvN + 1.2 * min(max(st.x, 0.0) * 0.45, 1.0);
 
     if (abs(P.splashAmp) > 0.0001) {
       let world = P.origin + (vec2f(id) + vec2f(0.5)) * dx;

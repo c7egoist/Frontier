@@ -377,15 +377,13 @@ export class OceanSim {
 
   // --- AMR readback + hysteresis + budget ----------------------------------
   private processScores(): void {
-    if (this.tier.amr && this.lastScores) {
-      // sea-state regulation from per-block rms (mean over blocks)
+    if (this.lastScores) {
+      // sea-state regulation from per-block rms (mean over blocks), smoothed
+      // so the controller tracks the wave envelope, not individual groups
       let sum = 0;
       for (let i = 0; i < NEAR_BLOCK_COUNT; i++) sum += this.lastScores[NEAR_BLOCK_COUNT + i];
-      this.seaRms = sum / NEAR_BLOCK_COUNT;
-    } else if (!this.tier.amr && this.lastScores) {
-      let sum = 0;
-      for (let i = 0; i < NEAR_BLOCK_COUNT; i++) sum += this.lastScores[NEAR_BLOCK_COUNT + i];
-      this.seaRms = sum / NEAR_BLOCK_COUNT;
+      const measured = sum / NEAR_BLOCK_COUNT;
+      this.seaRms += (measured - this.seaRms) * 0.02;
     }
     if (!this.tier.amr) {
       if (this.refinedCount !== 0) {
@@ -399,7 +397,7 @@ export class OceanSim {
     }
     if (!this.lastScores) return;
     const s = this.lastScores;
-    const HI = 0.75, LO = 0.38;
+    const HI = 0.45, LO = 0.20;
     const order = Array.from({ length: NEAR_BLOCK_COUNT }, (_, i) => i)
       .sort((a, b) => s[b] - s[a]);
     let count = 0;
@@ -438,11 +436,13 @@ export class OceanSim {
     // scaling wind injection and adding feedback damping (verified numerically
     // in test/physics.ts)
     {
+      // cascade controller (matches test/physics.ts): envelope-smoothed rms,
+      // slow wind integration, fast proportional braking above a deadband
       const ratio = a.targetRms / Math.max(this.seaRms, 0.05);
-      const windWanted = a.windAmp * Math.max(0.04, Math.min(2.5, ratio));
-      const boostWanted = 1.2 * Math.max(0, this.seaRms / a.targetRms - 0.85);
-      this.regWind += (windWanted - this.regWind) * 0.06;
-      this.regBoost += (boostWanted - this.regBoost) * 0.06;
+      const windWanted = a.windAmp * Math.max(0.05, Math.min(2.5, ratio));
+      const boostWanted = 0.6 * Math.max(0, this.seaRms / (a.targetRms * 1.3) - 1.0);
+      this.regWind += (windWanted - this.regWind) * 0.02;
+      this.regBoost = boostWanted;
     }
     const windNear = this.regWind;
     const boostNear = this.regBoost;

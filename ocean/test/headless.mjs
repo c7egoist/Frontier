@@ -6,7 +6,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
-const ROOT = new URL('./dist', import.meta.url).pathname;
+const ROOT = new URL('../dist', import.meta.url).pathname;
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.png': 'image/png', '.svg': 'image/svg+xml', '.woff2': 'font/woff2',

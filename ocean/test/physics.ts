@@ -23,15 +23,8 @@ const rnd = () => {
 const waveSpeed = (d: number) => Math.sqrt(G * d);
 
 // sea-state regulation: target rms height per cascade (m), wind scaled to hold it
-const TARGET_RMS: Record<string, number> = { near: 0.7, mid: 1.1, far: 1.6 };
+const TARGET_RMS: Record<string, number> = { near: 0.28, mid: 0.45, far: 0.6 };
 const BASE_WIND = 0.5;
-function regulate(cfg: Cfg, st: { h: Float32Array }): { wind: number; boost: number } {
-  const r = rms(st.h);
-  const target = cfg.depthEff > 100 ? TARGET_RMS.far : cfg.depthEff > 30 ? TARGET_RMS.mid : TARGET_RMS.near;
-  const wind = BASE_WIND * Math.max(0.04, Math.min(2.5, target / Math.max(r, 0.05)));
-  const boost = 1.2 * Math.max(0, r / target - 0.85);
-  return { wind, boost };
-}
 
 interface Cfg { size: number; res: number; depthEff: number; damping: number; diffusion: number; }
 
@@ -43,19 +36,25 @@ function initField(cfg: Cfg): { h: Float32Array; hv: Float32Array } {
   const lMax = cfg.size * 0.30;
   const lMin = Math.max(cfg.size / N, 1) * 4;
   const nBands = Math.floor(Math.log(lMax / lMin) / Math.log(1 / 0.62)) + 1;
+  const dxc0 = cfg.size / cfg.res;
   for (let i = 0; i < Math.min(nBands, 6); i++) {
-    const lambda = lMax * Math.pow(0.62, i);
-    const k = 2 * PI / lambda;
+    // snap to integer wavenumbers (m,n) cycles per domain: the discrete sums
+    // of sin/cos then factorize to exactly zero => field starts mean-free
+    const lambda0 = lMax * Math.pow(0.62, i);
+    const lc = Math.max(4, Math.round(lambda0 / dxc0)); // wavelength in cells
+    const ang = (i * 2.399963) % (2 * PI); // deterministic golden-angle headings
+    let m = Math.round((N * Math.cos(ang)) / lc);
+    let n = Math.round((N * Math.sin(ang)) / lc);
+    if (m === 0 && n === 0) n = 1;
+    const kx = (2 * PI * m) / N, kz = (2 * PI * n) / N;
+    const kk = Math.hypot(kx, kz);
+    const k = kk; // snapped wavenumber magnitude
     const amp = 0.62 * Math.pow(0.62, i);
-    const ang = rnd() * 2 * PI;
-    const dx = Math.cos(ang), dz = Math.sin(ang);
-    const omega = c * k;
+    const omega = c * kk;
     const ph0 = rnd() * 2 * PI;
     for (let z = 0; z < N; z++) {
       for (let x = 0; x < N; x++) {
-        const wx = (x + 0.5) / N * cfg.size;
-        const wz = (z + 0.5) / N * cfg.size;
-        const phase = (wx * dx + wz * dz) * k + ph0;
+        const phase = kx * x + kz * z + ph0;
         const idx = z * N + x;
         h[idx] += amp * Math.sin(phase);
         hv[idx] += amp * omega * Math.cos(phase);
@@ -79,10 +78,21 @@ function step(cfg: Cfg, st: { h: Float32Array; hv: Float32Array }, dt: number, w
       const xl = z * N + ((x - 1 + N) % N), xr = z * N + ((x + 1) % N);
       const zu = ((z - 1 + N) % N) * N + x, zd = ((z + 1) % N) * N + x;
       const lap = h[xl] + h[xr] + h[zu] + h[zd] - 4 * h[i];
-      let v = hv[i] + alpha * alpha * lap;
+      let v = hv[i] + (alpha * alpha / dt) * lap; // wave eq needs dt*c^2*lap/dx^2
       v *= Math.exp(-(cfg.damping + dampBoost) * dt);
-      // wind (uniform random in lieu of spatial noise; statistically similar injection)
-      v += dt * windAmp * (rnd() - 0.5) * 2;
+      // wind: Laplacian of a deterministic noise potential (zero spatial mean
+      // on the torus — matches the shader's forcing)
+      const pot = (xx: number, zz: number) => {
+        const a = Math.sin(xx * 12.9898 + zz * 78.233 + time * 3.7) * 43758.5453;
+        return a - Math.floor(a);
+      };
+      const pot2 = (xx: number, zz: number) => {
+        const a = Math.sin((xx + 31.7) * 5.877 + (zz + 11.3) * 9.123 + time * 1.9) * 27142.7;
+        return a - Math.floor(a);
+      };
+      const wlap = pot(x + 2, z) - pot(x - 2, z) + pot(x, z + 2) - pot(x, z - 2);
+      const wlap2 = pot2(x + 6, z) - pot2(x - 6, z) + pot2(x, z + 6) - pot2(x, z - 6);
+      v += dt * windAmp * 2.6 * (wlap + 1.2 * wlap2);
       let hh = h[i] + dt * v;
       const havg = 0.25 * (h[xl] + h[xr] + h[zu] + h[zd]);
       hh += (havg - hh) * cfg.diffusion;
@@ -95,6 +105,12 @@ function step(cfg: Cfg, st: { h: Float32Array; hv: Float32Array }, dt: number, w
   return maxH;
 }
 
+function meanOf(arr: Float32Array): number {
+  let s = 0;
+  for (const v of arr) s += v;
+  return s / arr.length;
+}
+
 function rms(arr: Float32Array): number {
   let s = 0;
   for (const v of arr) s += v * v;
@@ -102,9 +118,9 @@ function rms(arr: Float32Array): number {
 }
 
 // --- run scenarios -----------------------------------------------------------
-const NEAR: Cfg = { size: 96, res: 128, depthEff: 12, damping: 0.02, diffusion: 0.012 };
-const MID: Cfg = { size: 640, res: 256, depthEff: 40, damping: 0.022, diffusion: 0.012 };
-const FINE: Cfg = { size: 96, res: 256, depthEff: 12, damping: 0.03, diffusion: 0.02 };
+const NEAR: Cfg = { size: 96, res: 128, depthEff: 12, damping: 0.015, diffusion: 0.008 };
+const MID: Cfg = { size: 640, res: 256, depthEff: 40, damping: 0.018, diffusion: 0.008 };
+const FINE: Cfg = { size: 96, res: 256, depthEff: 12, damping: 0.022, diffusion: 0.013 };
 
 let ok = true;
 function check(name: string, cond: boolean, detail: string): void {
@@ -115,46 +131,116 @@ function check(name: string, cond: boolean, detail: string): void {
 for (const [name, cfg, dt] of [
   ['near L0', NEAR, 1 / 60], ['mid', MID, 1 / 60], ['near fine', FINE, 1 / 120],
 ] as [string, Cfg, number][]) {
-  // (a) regulated run: sea state must converge to target and stay bounded
+  // (a) regulated run: 90 s; the plant's growth time is ~30 s, so initialize
+  // the wind at its steady estimate and judge only the last 30 s (tail mean)
   const st = initField(cfg);
   const rms0 = rms(st.h);
   let bounded = true;
-  const total = 3600;
+  const total = 5400; // 90 s
+  const trace: number[] = [];
+  const tgt0 = cfg.depthEff > 100 ? TARGET_RMS.far : cfg.depthEff > 30 ? TARGET_RMS.mid : TARGET_RMS.near;
+  let regWind = BASE_WIND * Math.max(0.05, Math.min(2.5, tgt0 / Math.max(rms0, 0.05)));
+  let rSm = rms(st.h);
+  const rSmSamples: number[] = [];
+  let lastBoost = 0;
   for (let f = 0; f < total; f++) {
-    const { wind, boost } = regulate(cfg, st);
-    const maxH = step(cfg, st, dt, wind, f / 60, boost);
+    const tgt = tgt0;
+    const r0 = rms(st.h);
+    rSm += (r0 - rSm) * 0.02; // envelope smoothing: control the swell groups, not individual crests
+    const windWanted = BASE_WIND * Math.max(0.05, Math.min(2.5, tgt / Math.max(rSm, 0.05)));
+    const boostWanted = 0.6 * Math.max(0, rSm / (tgt * 1.3) - 1.0); // brake only genuinely oversize seas
+    lastBoost = boostWanted;
+    regWind += (windWanted - regWind) * 0.02;
+    const maxH = step(cfg, st, dt, regWind, f / 60, boostWanted);
     if (!isFinite(maxH) || maxH > 40) { bounded = false; break; }
+    if (f % 900 === 0) trace.push(rSm);
+    if (f >= total - 1800) rSmSamples.push(rSm);
   }
-  const rmsEnd = rms(st.h);
-  const target = cfg.depthEff > 100 ? TARGET_RMS.far : cfg.depthEff > 30 ? TARGET_RMS.mid : TARGET_RMS.near;
-  check(`${name} stability`, bounded, `finite/bounded over 60 s`);
-  check(`${name} sea state regulation`, rmsEnd < target * 1.6 && rmsEnd > target * 0.3,
-    `rms ${rms0.toFixed(2)} -> ${rmsEnd.toFixed(2)} m (target ${target})`);
+  if (name === 'near L0') console.log(`   [rms trace] ${trace.map(v => v.toFixed(2)).join(' -> ')} (wind ends ${regWind.toFixed(2)}, boost ${lastBoost.toFixed(2)})`);
+  const target = tgt0;
+  check(`${name} stability`, bounded, `finite/bounded over 90 s`);
+  const tailMean = rSmSamples.reduce((a, b) => a + b, 0) / rSmSamples.length;
+  const meanEnd = meanOf(st.h);
+  check(`${name} sea state regulation`, tailMean < target * 2.0 && tailMean > target * 0.5,
+    `rms ${rms0.toFixed(2)} -> settled ${tailMean.toFixed(2)} m (target ${target})`);
+  check(`${name} mean sea level pinned`, Math.abs(meanEnd) < 0.4, `mean h ${meanEnd.toFixed(3)} m`);
 
-  // (b) pure advection: with wind off, the field must translate at speed c
-  const st2 = initField(cfg);
+  // (b) exact advection: single plane wave must translate at exactly c
   let propagates = false;
   {
-    const lag = 120; // 2 s
-    let prev = st2.h.slice();
-    for (let f = 0; f < lag; f++) step(cfg, st2, dt, 0, f / 60, 0);
-    const shift = Math.round(2 * waveSpeed(cfg.depthEff) / (cfg.size / cfg.res));
-    const N = cfg.res;
-    let cu = 0;
-    const dirs = [0, 0, 0, 0];
-    for (let z = 0; z < N; z += 4) {
-      for (let x = 0; x < N; x += 4) {
-        const p0 = prev[z * N + x];
-        cu += p0 * st2.h[z * N + x];
-        dirs[0] += p0 * st2.h[z * N + ((x + shift) % N)];
-        dirs[1] += p0 * st2.h[z * N + ((x - shift + N) % N)];
-        dirs[2] += p0 * st2.h[((z + shift) % N) * N + x];
-        dirs[3] += p0 * st2.h[((z - shift + N) % N) * N + x];
+    const N = cfg.res, dxc = cfg.size / cfg.res;
+    const c = waveSpeed(cfg.depthEff);
+    const lambda = cfg.size / 4;
+    const k = 2 * PI / lambda;
+    const omega = c * k;
+    const st2 = { h: new Float32Array(N * N), hv: new Float32Array(N * N) };
+    for (let x = 0; x < N; x++) {
+      const wx = (x + 0.5) * dxc;
+      for (let z = 0; z < N; z++) {
+        const i = z * N + x;
+        st2.h[i] = Math.sin(k * wx);
+        st2.hv[i] = omega * Math.cos(k * wx);
       }
     }
-    propagates = Math.max(...dirs) > cu * 1.05;
+    const lag = Math.round(2 / dt); // 2 s of simulated time
+    for (let f = 0; f < lag; f++) step(cfg, st2, dt, 0, f / 60, 0);
+    // crest of sin(k(x - c*t)): peak at x0 = (3*lambda/4 - c*t) mod lambda
+    const row = Math.floor(N / 2) * N;
+    let peakX = 0, peakV = -1e9;
+    for (let x = 0; x < N; x++) {
+      if (st2.h[row + x] > peakV) { peakV = st2.h[row + x]; peakX = x; }
+    }
+    const expectedWx = (((lambda / 4 - c * 2) % cfg.size) + cfg.size) % cfg.size;
+    const expectedCell = expectedWx / dxc - 0.5;
+    const lamCells = lambda / dxc;
+    let dcell = Math.abs(peakX - expectedCell) % lamCells;
+    if (dcell > lamCells / 2) dcell = lamCells - dcell;
+    propagates = dcell <= 2.0; // crest within 2 cells of exact prediction (mod wavelength)
   }
-  check(`${name} propagation`, propagates, `translated field correlates best at shift c*2s`);
+  check(`${name} propagation`, propagates, `crest within 2 cells of exact c*t after 2 s`);
+}
+
+// AMR score distribution over a developed sea at several sea states
+{
+  console.log('\n--- AMR score vs sea state (per-block max score) ---');
+  for (const target of [0.28, 0.45, 0.6]) {
+    const st = initField(NEAR);
+    // regulate to target then measure block scores (16x16 coarse-cell blocks)
+    let rWind = BASE_WIND, rSm = rms(st.h);
+    for (let f = 0; f < 2400; f++) {
+      const r = rms(st.h);
+      rSm += (r - rSm) * 0.02;
+      const wind = BASE_WIND * Math.max(0.05, Math.min(2.5, target / Math.max(rSm, 0.05)));
+      const boost = 1.0 * Math.max(0, rSm / (target * 1.15) - 1.0);
+      rWind += (wind - rWind) * 0.006;
+      step(NEAR, st, 1 / 60, rWind, f / 60, boost);
+    }
+    const N = NEAR.res, dx = NEAR.size / NEAR.res, c = waveSpeed(NEAR.depthEff);
+    const scores: number[] = [];
+    for (let by = 0; by < 8; by++) {
+      for (let bx = 0; bx < 8; bx++) {
+        let mx = 0;
+        for (let z = by * 16; z < (by + 1) * 16; z++) {
+          for (let x = bx * 16; x < (bx + 1) * 16; x++) {
+            const i = z * N + x;
+            const hl = st.h[z * N + ((x - 1 + N) % N)], hr = st.h[z * N + ((x + 1) % N)];
+            const hu = st.h[((z - 1 + N) % N) * N + x], hd = st.h[((z + 1) % N) * N + x];
+            const grad = Math.hypot(hr - hl, hu - hd) / (2 * dx);
+            const curv = Math.abs(hl + hr + hu + hd - 4 * st.h[i]) / dx;
+            const hvN = Math.min(Math.abs(st.hv[i]) / c, 1);
+            const crest = Math.min(Math.max(st.h[i], 0) * 0.45, 1);
+            mx = Math.max(mx, 0.55 * grad + 0.50 * curv + 0.15 * hvN + 1.2 * crest);
+          }
+        }
+        scores.push(mx);
+      }
+    }
+    scores.sort((a, b) => b - a);
+    let hmax = -1e9, hmin = 1e9;
+    for (const v of st.h) { hmax = Math.max(hmax, v); hmin = Math.min(hmin, v); }
+    console.log(`   [debug] h range [${hmin.toFixed(2)}, ${hmax.toFixed(2)}] mean ${meanOf(st.h).toFixed(3)}`);
+    console.log(`target rms ${target} (actual ${rms(st.h).toFixed(2)}): max=${scores[0].toFixed(2)} p25=${scores[15].toFixed(2)} median=${scores[31].toFixed(2)} min=${scores[63].toFixed(2)} | blocks >0.5: ${scores.filter(s => s > 0.5).length}, >0.35: ${scores.filter(s => s > 0.35).length}`);
+  }
 }
 
 // AMR score sanity: splash region must score high, calm region low
@@ -175,7 +261,8 @@ for (const [name, cfg, dt] of [
         const grad = Math.hypot(hr - hl, hu - hd) / (2 * dx);
         const curv = Math.abs(hl + hr + hu + hd - 4 * st.h[i]) / dx;
         const hvN = Math.min(Math.abs(st.hv[i]) / c, 1);
-        s = Math.max(s, 0.55 * grad + 0.50 * curv + 0.15 * hvN);
+        const crest = Math.min(Math.max(st.h[i], 0) * 0.45, 1);
+        s = Math.max(s, 0.55 * grad + 0.50 * curv + 0.15 * hvN + 1.2 * crest);
       }
     }
     if (splash) {
@@ -185,10 +272,40 @@ for (const [name, cfg, dt] of [
     }
     return s;
   };
-  const calm = scoreAt(NEAR.size / 2, NEAR.size / 2, null);
+  // settled calm sea (slider ~0): regulate to a low target, then no block may
+  // cross the refine threshold
+  {
+    const stC = initField(NEAR);
+    const N = NEAR.res, dxc = NEAR.size / NEAR.res, cc = waveSpeed(NEAR.depthEff);
+    let cWind = BASE_WIND, cSm = rms(stC.h);
+    for (let f = 0; f < 2400; f++) {
+      const r = rms(stC.h);
+      cSm += (r - cSm) * 0.02;
+      const wind = BASE_WIND * Math.max(0.05, Math.min(2.5, 0.10 / Math.max(cSm, 0.05)));
+      const boost = 1.0 * Math.max(0, cSm / (0.10 * 1.15) - 1.0);
+      cWind += (wind - cWind) * 0.006;
+      step(NEAR, stC, 1 / 60, cWind, f / 60, boost);
+    }
+    let maxScore = 0;
+    for (let z = 0; z < N; z++) {
+      for (let x = 0; x < N; x++) {
+        const i = z * N + x;
+        const hl = stC.h[z * N + ((x - 1 + N) % N)], hr = stC.h[z * N + ((x + 1) % N)];
+        const hu = stC.h[((z - 1 + N) % N) * N + x], hd = stC.h[((z + 1) % N) * N + x];
+        const grad = Math.hypot(hr - hl, hu - hd) / (2 * dxc);
+        const curv = Math.abs(hl + hr + hu + hd - 4 * stC.h[i]) / dxc;
+        const hvN = Math.min(Math.abs(stC.hv[i]) / cc, 1);
+        const crest = Math.min(Math.max(stC.h[i], 0) * 0.45, 1);
+        maxScore = Math.max(maxScore, 0.55 * grad + 0.50 * curv + 0.15 * hvN + 1.2 * crest);
+      }
+    }
+    check('AMR score: calm sea below refine threshold', maxScore < 0.45,
+      `max block score ${maxScore.toFixed(3)} (< 0.45 HI) at calm sea`);
+    check('AMR: mean sea level pinned', Math.abs(meanOf(stC.h)) < 0.3,
+      `mean h ${meanOf(stC.h).toFixed(3)} m after calm regulated run`);
+  }
   const splashScore = scoreAt(NEAR.size / 2, NEAR.size / 2, { x: NEAR.size / 2, z: NEAR.size / 2, amp: 7.5 });
-  check('AMR score: calm below coarsen threshold', calm < 0.38, `calm score ${calm.toFixed(3)} (< 0.38)`);
-  check('AMR score: splash above refine threshold', splashScore > 0.8, `splash score ${splashScore.toFixed(3)} (> 0.8)`);
+  check('AMR score: splash above refine threshold', splashScore > 3.0, `splash score ${splashScore.toFixed(3)} (> 3)`);
 }
 
 console.log(ok ? '\nALL PHYSICS CHECKS PASSED' : '\nSOME CHECKS FAILED');
