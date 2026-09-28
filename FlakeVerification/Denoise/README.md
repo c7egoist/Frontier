@@ -129,7 +129,12 @@ the recommended all-in-one default. Use a single guide (`flakeguide`, `specguide
 care about one material class; use `smart` as the general Standard-quality setting.
 
 ## Files
-- `GuideZoom.png` — raw vs atrous vs specguide vs emissguide vs smart, zoomed on the grid (**the new proof**)
+- `MetalsZoom.png` — **close-up (2× upscaled) of the front metal spheres**, raw vs atrous vs specguide vs
+  smart. This is the big, legible view: à-trous smears the reflections/highlights, the guides keep them.
+- `MetalsCompare.png` — same four modes, full-frame `metals` close view (512 each)
+- `MetalsGuides8.png` — all eight guide modes on the `metals` close view
+- `metals_<mode>.png` — the full-frame `metals` render for each mode
+- `GuideZoom.png` — raw vs atrous vs specguide vs emissguide vs smart, zoomed on the grid
 - `GuideCompare.png` — all eight guide variants on the full showcase frame
 - `guide_<mode>.png` — the full-frame render for each guide variant (wide showcase view)
 - `DenoiseZoom.png` — raw vs current vs flake-guide, zoomed (the original flake proof)
