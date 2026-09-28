@@ -149,6 +149,23 @@ static Scene buildShowcaseGrid(){
     return S;
 }
 
+// A test of EMISSIVE geometry as a GI source: one bright emissive sphere is the ONLY light (the ceiling "light" quad
+//    emits nothing, so there is no NEE — every lit pixel is lit indirectly through the surfel field). Plain raster can
+//    only show the emitter glowing + flat sky-ambient fill; surfel GI must additionally bleed warm light onto the floor,
+//    the back wall and the diffuse spheres. That difference is the proof that emissive lights work in the surfel GI path.
+static Scene buildEmissiveTest(){
+    Scene S; V zero{0,0,0}; float G=60.0f;
+    S.q.push_back({{-G,0,-G},{2*G,0,0},{0,0,2*G},{0,1,0}, V{0.60f,0.60f,0.62f}, zero});   // floor (checker in trace)
+    S.q.push_back({{-9,0,6},{18,0,0},{0,9,0},{0,0,-1}, V{0.72f,0.72f,0.74f}, zero});      // back wall to catch bleed
+    S.light=(int)S.q.size();
+    S.q.push_back({{-2,8.5f,-2},{4,0,0},{0,0,4},{0,-1,0}, zero, zero});                   // ceiling quad, ZERO emission -> no NEE
+    Mat em; em.base=zero; em.spec=0.f; em.emiss=V{9.0f,4.5f,2.0f};                          // the sole light: a warm emissive sphere
+    { Sphere e; e.c={0,1.1f,0.6f}; e.r=1.1f; e.m=em; S.s.push_back(e); }
+    for(int i=0;i<4;++i){ float a=i*1.5708f+0.4f; Mat d; d.base=V{0.85f,0.85f,0.86f}; d.spec=0.f; d.rough=1.f;
+        Sphere s; s.c={std::cos(a)*2.7f, 0.7f, 0.6f+std::sin(a)*2.7f}; s.r=0.7f; s.m=d; S.s.push_back(s); }
+    return S;
+}
+
 static Scene buildCornell(){
     Scene S; V white{0.75f,0.75f,0.75f}, red{0.75f,0.15f,0.15f}, green{0.15f,0.6f,0.15f}, zero{0,0,0};
     // room [0,1]^3, front (z=0 side, -z) open toward camera
@@ -487,6 +504,9 @@ int main(int argc,char**argv){
     } else if(sceneName=="glint"){
         S=buildGlintSheet();
         lookAt(cam, V{0.0f, 3.4f, -8.5f}, V{0.0f, 0.55f, 0.0f}, 40.0f);    // close row of flake spheres over the checker
+    } else if(sceneName=="emissive"){
+        S=buildEmissiveTest();
+        lookAt(cam, V{0.0f, 3.6f, -7.2f}, V{0.0f, 1.0f, 0.6f}, 44.0f);     // emissive-sphere-only-lit GI test
     } else {
         S=buildCornell();
         cam.eye={0.5f,0.5f,-1.55f}; cam.fwd={0,0,1}; cam.right={1,0,0}; cam.up={0,1,0};
