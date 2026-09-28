@@ -182,6 +182,23 @@ static Scene buildCornell(){
     return S;
 }
 
+// A close-up row of glint-flake spheres, density ramping 0.6 -> 8 left to right, over the studio checker floor. The
+//    dedicated sheet for verifying that flakes SPARKLE on the non-raytraced paths (plain raster + surfel GI), not only
+//    under the path tracer. Same flake body as row 12 of the showcase grid, just larger and camera-close.
+static Scene buildGlintSheet(){
+    Scene S; V zero{0,0,0}; float G=60.0f;
+    S.q.push_back({{-G,0,-G},{2*G,0,0},{0,0,2*G},{0,1,0}, V{0.34f,0.34f,0.36f}, zero});   // checker floor (set in trace)
+    S.light=(int)S.q.size();
+    S.q.push_back({{-6.0f,14.0f,-3.0f},{12,0,0},{0,0,12},{0,-1,0}, zero, {12,12,11.5f}}); // overhead area light
+    const int N=9; const float R=0.7f, STEP=1.72f; const float x0=-(N-1)*STEP*0.5f;
+    for(int i=0;i<N;++i){ float t=i/(float)(N-1);
+        Mat m; m.base=hueColor(0.58f,0.45f,0.30f); m.metal=0.85f; m.rough=0.22f;
+        m.glint=0.6f+7.4f*t; m.glintScale=5.0f+7.0f*t;                                   // density 0.6->8, finer to the right
+        Sphere sp; sp.c={x0+i*STEP, R, 0.0f}; sp.r=R; sp.m=m; S.s.push_back(sp);
+    }
+    return S;
+}
+
 //----------------------------------------------------------------------------------------------- intersection
 // Hit carries the shading normal + material directly, so curved and flat primitives are
 // handled uniformly downstream (no primitive-type branching outside trace()).
@@ -246,11 +263,19 @@ static inline V hueColor(float h, float sat, float val){
     switch(i%6){case 0:return{val,t,p};case 1:return{q,val,p};case 2:return{p,val,t};case 3:return{p,q,val};case 4:return{t,p,val};default:return{val,p,q};}
 }
 // A simple physically-plausible sky dome so "reflect the sky" is visibly the sky (zenith blue -> warm horizon -> ground).
+//    Now carries a bright SUN DISC + aureole: without a sharp feature in the environment, flakes/metals reflecting a
+//    smooth gradient read as flat. The sun gives every specular surface something to catch — and is what makes glint
+//    flakes SPARKLE on the non-raytraced paths (a tilted facet that lines up with the sun flashes white).
+static const V SUN_DIR{0.1473f,0.9820f,-0.1179f};   // ~ normalize(0.15, 1.0, -0.12); matches the overhead area light
 static inline V skyColor(V dir){
     float t = std::max(0.0f, dir.y);
     V zenith{0.30f,0.50f,0.95f}, horizon{0.85f,0.88f,0.95f}, ground{0.22f,0.20f,0.18f};
     if(dir.y < 0) return ground;
-    return horizon*(1.0f-t) + zenith*t;
+    V col = horizon*(1.0f-t) + zenith*t;
+    float s = dir.x*SUN_DIR.x + dir.y*SUN_DIR.y + dir.z*SUN_DIR.z; if(s<0) s=0;
+    float disc = std::pow(s, 3200.0f);      // tight bright disc (~1.5 deg)
+    float glow = std::pow(s, 9.0f);         // soft aureole
+    return col + V{1.0f,0.95f,0.86f}*(disc*10.0f + glow*0.28f);
 }
 static const V SKY_AMBIENT{0.16f,0.18f,0.22f};   // hemisphere ambient fill used by the plain-raster path (never black)
 
@@ -275,6 +300,20 @@ static inline float flakeMask(V P, float scale, float density){
     float u=(hsh>>8)*(1.0f/16777216.0f);
     float frac=std::min(0.9f, density*0.08f);      // density 1..8 -> up to ~64% of cells sparkle
     return u<frac ? 1.0f : 0.0f;
+}
+// A fired flake is a randomly-tilted micro-mirror FACET, not a mirror aligned with the surface normal. Deterministic
+//    per cell (so flakes are stable in space, reading as metal not noise). This per-flake normal is what makes flakes
+//    sparkle on EVERY path: each facet reflects the environment (incl. the sun disc) in its own direction, so a cluster
+//    of flakes flashes bright/dark instead of all returning the same flat sky colour. Physically this is the tilted-
+//    microfacet basis of the Deliot-Belcour flake model, reduced to one representative facet per cell.
+static inline V flakeFacetNormal(V P, float scale, V N){
+    int cx=(int)std::floor(P.x*scale), cy=(int)std::floor(P.y*scale), cz=(int)std::floor(P.z*scale);
+    uint32_t h1=hash((uint32_t)(cx*73856093) ^ (uint32_t)(cy*19349663) ^ (uint32_t)(cz*83492791));
+    uint32_t h2=hash(h1^0x9e3779b9u), h3=hash(h2^0x85ebca6bu);
+    auto sf=[](uint32_t h){ return (h>>8)*(1.0f/16777216.0f)*2.0f-1.0f; };
+    V fn = norm(N + V{sf(h1),sf(h2),sf(h3)}*0.55f);   // tilt cone up to ~30 deg off the surface normal
+    if(dot(fn,N) < 0.15f) fn = N;                     // keep the facet facing outward
+    return fn;
 }
 static inline V thinFilmTint(float thk, float cosV){
     // cheap iridescence: phase from thickness & angle drives an RGB shimmer
@@ -329,7 +368,8 @@ static V pathTrace(const Scene& S, V ro, V rd, RNG& r, int maxDepth){
         float pspec = (m.metal>0.5f||flake>0.f) ? 1.0f : std::min(0.9f, m.spec*(F.x+F.y+F.z)/3.0f);
         if(pspec>0.f && r.f()<pspec){                        // metal / dielectric specular reflection
             float rough = flake>0.f ? 0.02f : m.rough;
-            V R=norm(reflectV(rd,N)); if(rough>0.001f){ V u=randUnit(r); R=norm(R+u*(rough*rough)); if(dot(R,N)<=0) R=norm(reflectV(rd,N)); }
+            V Nspec = flake>0.f ? flakeFacetNormal(hp,m.glintScale,N) : N;   // flake reflects off its tilted facet -> sparkle from scene
+            V R=norm(reflectV(rd,Nspec)); if(rough>0.001f){ V u=randUnit(r); R=norm(R+u*(rough*rough)); if(dot(R,N)<=0) R=norm(reflectV(rd,Nspec)); }
             V tint = (m.metal>0.5f||flake>0.f) ? m.base : F*(1.0f/std::max(pspec,1e-3f));
             thr=thr*tint; ro=hp+N*1e-4f; rd=R;
         } else {                                             // diffuse / subsurface base
@@ -431,10 +471,12 @@ static inline V diffuseAlbedo(const Mat& m){
 int main(int argc,char**argv){
     int W=480,H=480, FRAMES=320, RAYS=8, DIRECT=64, SPP=32;
     std::string sceneName="cornell";
+    bool useSlab=false;                                       // --slabs: shade via the layered multi-slab stack (#29)
     for(int i=1;i<argc;++i){ std::string a=argv[i];
         auto nx=[&](int d){ return i+1<argc?atoi(argv[++i]):d; };
         if(a=="--w")W=nx(W); else if(a=="--h")H=nx(H); else if(a=="--frames")FRAMES=nx(FRAMES);
         else if(a=="--rays")RAYS=nx(RAYS); else if(a=="--direct")DIRECT=nx(DIRECT); else if(a=="--spp")SPP=nx(SPP);
+        else if(a=="--slabs") useSlab=true;
         else if(a=="--scene"){ if(i+1<argc) sceneName=argv[++i]; }
     }
     Cam cam; cam.aspect=(float)W/H; cam.W=W; cam.H=H;
@@ -442,6 +484,9 @@ int main(int argc,char**argv){
     if(sceneName=="grid"){
         S=buildShowcaseGrid();
         lookAt(cam, V{0.0f, 12.5f, -19.0f}, V{0.0f, 0.4f, 1.5f}, 44.0f);   // angled look over the 15x15 showcase field
+    } else if(sceneName=="glint"){
+        S=buildGlintSheet();
+        lookAt(cam, V{0.0f, 3.4f, -8.5f}, V{0.0f, 0.55f, 0.0f}, 40.0f);    // close row of flake spheres over the checker
     } else {
         S=buildCornell();
         cam.eye={0.5f,0.5f,-1.55f}; cam.fwd={0,0,1}; cam.right={1,0,0}; cam.up={0,1,0};
@@ -558,11 +603,55 @@ int main(int argc,char**argv){
         if(m.fuzzW>0.f) col=col + m.fuzzCol*(m.fuzzW*std::pow(1.0f-cosV,3.0f))*(reflectSky(N,m.fuzzRough));   // cloth sheen
         float flake=flakeMask(P,m.glintScale,m.glint); float rough=flake>0.f?0.02f:m.rough;                   // glint flakes
         V f0=m.base*m.metal + V{0.04f,0.04f,0.04f}*m.spec*(1.0f-m.metal); if(flake>0.f) f0=mixV(f0,m.base,0.9f);
-        V Fr=fres(f0,cosV); V skyR=reflectSky(Rr,rough);
+        V Fr=fres(f0,cosV); V skyR;
+        if(flake>0.f){ V fn=flakeFacetNormal(P,m.glintScale,N); skyR=skyColor(norm(reflectV(incoming,fn))); }  // per-facet SHARP env sample -> sparkle
+        else skyR=reflectSky(Rr,rough);
         col = col + ((m.metal>0.5f||flake>0.f) ? m.base*skyR : Fr*skyR*m.spec);                               // metal / spec
         if(m.coatW>0.f){ float F0=0.0533f, cF=m.coatW*(F0+(1.0f-F0)*std::pow(1.0f-cosV,5.0f));                // coat / car paint
             V tint=m.thinW>0.f?mixV(V{1,1,1},thinFilmTint(m.thinThk,cosV),m.thinW):V{1,1,1};
             col=col + tint*reflectSky(Rr,m.coatRough)*cF; }
+        return col;
+      };
+
+    // ---- MULTI-SLAB (layered) shade — roadmap #10/#29 Tier-B ------------------------------------------------------
+    // The flat path above sums every lobe unconditionally. A real layered material is instead an ORDERED STACK OF
+    //    SLABS composited top->bottom with an energy throughput T: each slab reflects F*T of the environment and passes
+    //    (1-F)*T down to the slab beneath; an opaque slab (conductor/pigment) terminates the stack. This is exactly the
+    //    coat-over-flake-over-metal/pigment stack the engine's Tier-B multi-slab layout will carry. Rendering the whole
+    //    showcase grid through THIS path proves every family still resolves once a material is a stack, not one slab.
+    std::function<V(V,V,const Mat&,V,int,int,RNG&)> shadeStack =
+      [&](V P, V N, const Mat& m, V incoming, int mode, int depth, RNG& r)->V {
+        if(m.transW>0.5f) return shadeAnalytic(P,N,m,incoming,mode,depth,r);   // glass is already an interface stack
+        float cosV=std::max(1e-3f,std::fabs(dot(N,incoming)));
+        V Rr=norm(reflectV(incoming,N));
+        V col=m.emiss;      // emission slab (additive)
+        V T{1,1,1};         // throughput still reaching the slab below
+        // SLAB 1 — clear coat (dielectric, optional thin-film tint)
+        if(m.coatW>0.f){
+            float F0=0.0533f, cF=m.coatW*(F0+(1.0f-F0)*std::pow(1.0f-cosV,5.0f));
+            V tint=m.thinW>0.f?mixV(V{1,1,1},thinFilmTint(m.thinThk,cosV),m.thinW):V{1,1,1};
+            col=col + tint*reflectSky(Rr,m.coatRough)*cF;
+            T=T*(1.0f-cF);
+        }
+        // SLAB 2 — glint flakes (tilted metal facets embedded beneath the coat)
+        float flake=flakeMask(P,m.glintScale,m.glint);
+        if(flake>0.f){
+            V fn=flakeFacetNormal(P,m.glintScale,N);
+            col=col + T*m.base*skyColor(norm(reflectV(incoming,fn)));
+            T=T*0.15f;      // fired flakes cover most of what is beneath them
+        }
+        // SLAB 3 — base: conductor (terminates) OR dielectric-spec over a diffuse/SSS slab
+        V dalb=diffuseAlbedo(m);
+        V direct=shadeDirect(S,P,N,dalb,r,depth==0?DIRECT:1);
+        V amb; if(mode==1){ float cov; V E=gatherE(sf,grid,P,N,cov); amb=dalb*INV_PI*E; } else amb=dalb*SKY_AMBIENT;
+        if(m.metal>0.5f){
+            col=col + T*m.base*reflectSky(Rr,m.rough);                     // opaque conductor slab
+        } else {
+            V Fr=fres(V{0.04f,0.04f,0.04f}*m.spec,cosV);
+            col=col + T*Fr*reflectSky(Rr,m.rough)*m.spec;                  // dielectric specular slab
+            col=col + T*(direct+amb);                                      // diffuse / subsurface slab beneath
+            if(m.fuzzW>0.f) col=col + T*m.fuzzCol*(m.fuzzW*std::pow(1.0f-cosV,3.0f))*reflectSky(N,m.fuzzRough);
+        }
         return col;
       };
 
@@ -576,7 +665,8 @@ int main(int argc,char**argv){
             for(int s=0;s<SPP;++s) acc=acc+pathTrace(S,cam.eye,rd,r,8);
             return acc*(1.0f/SPP);
         }
-        return shadeAnalytic(P,N,gb.mat[i],norm(P-cam.eye),pathMode,0,r);   // surfel-GI / plain-raster
+        return useSlab ? shadeStack  (P,N,gb.mat[i],norm(P-cam.eye),pathMode,0,r)   // MULTI-SLAB layered path (#29)
+                       : shadeAnalytic(P,N,gb.mat[i],norm(P-cam.eye),pathMode,0,r);  // flat single-slab path
     };
     auto renderMode=[&](int pathMode){ std::vector<V> out(W*H); par(W*H,[&](int i){ out[i]=resolvePixel(i,pathMode); }); return out; };
 

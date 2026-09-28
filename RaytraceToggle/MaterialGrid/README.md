@@ -52,3 +52,47 @@ g++ -O2 -std=c++17 -pthread ModeMatrix.cpp -o modematrix
 ./modematrix --scene grid --w 660 --h 480 --frames 130 --rays 8 --direct 48 --spp 44
 # writes mode_{plainraster,surfelgi,raytraced}.ppm   (--scene cornell for the box)
 ```
+
+---
+
+## Flakes on the non-raytraced paths (#30)
+
+`GlintSheet_Modes.png` — a close row of glint-flake spheres (density ramping 0.6 → 8 left→right) rendered through
+all three modes. Earlier, flakes only sparkled under the path tracer: on the non-RT paths a flake was a mirror
+aligned with the surface normal, so a cluster of flakes all reflected the *same* smooth sky direction and read as
+a flat patch. Two changes fix it, and they are physically the right ones:
+
+1. **Sun disc in the sky** (`skyColor`): a bright, ~1.5° sun + aureole. Without a sharp feature in the environment
+   there is nothing for a specular surface to catch, so metals and flakes looked flat regardless of the path.
+2. **Per-flake facet normals** (`flakeFacetNormal`): a fired flake is a *randomly-tilted micro-mirror*, deterministic
+   per cell. Each facet reflects the environment in its own direction, so a cluster flashes bright/dark (and
+   occasionally flares white on the sun) — the tilted-microfacet basis of the Deliot–Belcour flake model reduced to
+   one representative facet per cell.
+
+Result: flakes now sparkle at Standard fidelity on **plain raster and surfel GI**, not only under RT (RT still has
+the highest contrast because its facets reflect the real dark ground, punching visible holes). Reproduce:
+```bash
+./modematrix --scene glint --w 640 --h 300 --frames 90 --rays 6 --direct 40 --spp 40
+```
+
+## Materials through the multi-slab (layered) path (#29)
+
+`MultiSlab_Compare.png` — the full 15-family grid rendered through the flat single-slab shader (left) and the new
+**layered multi-slab stack** (right), surfel-GI mode. The flat path sums every lobe unconditionally; the stack path
+(`shadeStack`, enabled with `--slabs`) instead evaluates the material as an **ordered stack of slabs** composited
+top→bottom with an energy throughput `T`:
+
+```
+  clear-coat slab  → reflects F·T of the env, passes (1-F)·T down
+  glint-flake slab → tilted-facet reflection, covers most of what's beneath where it fires
+  base slab        → conductor (terminates the stack)  OR  dielectric-spec over a diffuse/SSS slab
+  (fuzz sheen, emission, glass-as-interface-stack handled in-line)
+```
+
+This is the Tier-B multi-slab layout (roadmap #10/#29): coat-over-flake-over-metal/pigment resolved as *layers*, not
+a blend. **Every one of the 15 families still resolves correctly through the stack** (RMSE vs the flat path ≈ 1.6 %),
+and the small differences are an *improvement* — the layered path conserves energy (the coat no longer double-counts
+with the base). Reproduce:
+```bash
+./modematrix --scene grid --slabs --w 560 --h 410 --frames 110 --rays 6 --direct 36 --spp 26
+```

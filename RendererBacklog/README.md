@@ -10,8 +10,8 @@ The owner's pre-games list of remaining renderer work, turned into `Docs/Roadmap
 ## The list at a glance
 | # | Item | Status found in code |
 |---|------|----------------------|
-| 29 | Materials verified through the **multi-slab** (layered) path | single slab exists; multi-slab layering deferred (#10) |
-| 30 | **Flakes** on the non-raytraced paths | proven on RT; unverified on plain-raster / surfel-GI |
+| 29 | Materials verified through the **multi-slab** (layered) path | ⚠️ CPU-proven: `shadeStack` layered evaluator, grid resolves (RMSE ≈1.6%) — `MaterialGrid/MultiSlab_Compare.png` |
+| 30 | **Flakes** on the non-raytraced paths | ⚠️ DONE on CPU: sun disc + per-flake facet normals → sparkle on all 3 modes — `MaterialGrid/GlintSheet_Modes.png` |
 | 31 | Wire the **hardware-RT** traversal (RT cores) | capability probe done; traversal still software CWBVH |
 | 32 | **Sky + cloud** bake | sky dome bake partly exists (#26); clouds still marched |
 | 33 | **Sun** bake | sun inpainted out of dome today; not baked |
@@ -20,6 +20,12 @@ The owner's pre-games list of remaining renderer work, turned into `Docs/Roadmap
 | 36 | **Scale / quality tiers** verified | 5-tier FidelityClassifier exists; verify end-to-end |
 | 37 | Fix the **wind** (clouds look wrong) | wind→cloud-noise coupling to audit |
 | 38 | **Cross-target** verification ("test both") | needs a device; overlaps GPU verification (#11) |
+
+## Progress (2026-09-28)
+Three items advanced this session — all in `RaytraceToggle/`, each a device/GPU-run away from shipped:
+- **#30 flakes on non-RT paths** — DONE on the CPU mirror (sun disc + per-flake facet normals). `MaterialGrid/GlintSheet_Modes.png`.
+- **#29 materials × multi-slab** — CPU-proven layered `shadeStack`; all 15 families resolve (RMSE ≈ 1.6% vs flat). `MaterialGrid/MultiSlab_Compare.png`.
+- **#27 sky as a reflection reservoir candidate** — prototyped & measured: **RMSE 0.236 → 0.093, ≈ 2.53× lower error at ~1 sample**. `ReflectionReservoir/`.
 
 ## Decision captured
 **ReSTIR for the surfel GI?** — Yes for **reflections** (that is roadmap #27, the cheap sub-ms reuse pass and the
