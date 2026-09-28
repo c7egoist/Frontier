@@ -1,12 +1,12 @@
 diff --git a/Engine/DisplayPresentation/ControlCentreHost.cpp b/Engine/DisplayPresentation/ControlCentreHost.cpp
-index 4ac429b..a1d8d7a 100644
+index 4ac429b..ac2daac 100644
 --- a/Engine/DisplayPresentation/ControlCentreHost.cpp
 +++ b/Engine/DisplayPresentation/ControlCentreHost.cpp
 @@ -830,6 +830,7 @@ constexpr QuickTileStructure TileTable[static_cast<size_t>(QuickTileCategory::Co
      { QuickTileCategory::Notifications,      ControlCentreIconCategory::NotificationsBell,    "Notifications",       false },
      { QuickTileCategory::Quality,            ControlCentreIconCategory::SlidersQuality,       "Quality",             true  },
      { QuickTileCategory::PatchGeometry, ControlCentreIconCategory::SlidersQuality, "Patch Geometry", true },
-+    { QuickTileCategory::Raytracing,    ControlCentreIconCategory::SparklesAntiAliasing, "Raytracing",    false },
++    { QuickTileCategory::Raytracing,    ControlCentreIconCategory::RaytracingBeam,       "Raytracing",    false },
  };
  
  constexpr uint32_t GridColumns = 4u;

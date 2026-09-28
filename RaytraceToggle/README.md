@@ -39,9 +39,28 @@ requirement, and it is what the CPU mirror proves.
 - **C++ patch applies clean** — `git apply --check` passes on `SultanAladin/Frontier-@main`.
 - **Behaviour proven on CPU** — `CpuMirror/ModeMatrix.cpp` renders all three modes correctly, with
   sky-vs-raytraced reflections and a ~0.00002 frame-to-frame surfel diff (no flicker).
-- **Not done here** (needs your machine — no Vulkan device / full build in this sandbox): the host-side
-  surfel buffer allocation + hash-grid build + the two extra `vkCmdDispatch` calls, and on-GPU visual
-  validation. Every one of those steps is spelled out in `PortingGuide.md`.
+- **On-GPU visual validation** still needs your machine (no Vulkan device in this sandbox). Everything else
+  the port needs is now written and verified as far as possible — see the follow-up below.
+
+## Follow-up — Thread E-2 (this round)
+
+Three additions on top of the delivery above:
+
+1. **Material grid** (`MaterialGrid/`) — a 20×20 = **400-sphere metalness×roughness×hue matrix** rendered by
+   the CPU mirror in all three modes (`ModeMatrix.cpp --scene grid`), proving **all materials render
+   correctly in every mode**. The mirror's material model was upgraded from binary metal to continuous
+   metalness/roughness + Schlick–Fresnel to make this meaningful. See `MaterialGrid/README.md`.
+2. **Host-side wiring** (`HostWiring/`) — the surfel-buffer allocation, host hash-grid build, the extra
+   `vkCmdDispatch` calls, the `SurfaceResolve` metal/rough aux target, and the `BuildDispatch` feature-bit
+   packing are now **written**: a self-contained `SurfelGIStage.{h,cpp}` module (compiles clean against real
+   Vulkan-Headers) plus three apply-clean patches. See `HostWiring/README.md`.
+3. **Dedicated Raytracing tile icon** (`HostWiring/Patches/RaytracingIcon.patch`) — a new `RaytracingBeam`
+   glyph (sphere + camera ray + two bounce rays) replaces the shared Sparkles glyph on the Raytracing tile.
+   Preview: `HostWiring/IconPreview/RaytracingIcon.png`.
+
+The only step that genuinely still needs your GPU is the `MaterialImage` storage-image allocation in
+`VisibilityExchange` (the file isn't in this sandbox's clone) — documented with the exact snippet in
+`HostWiring/README.md §3` — and on-device visual sign-off.
 
 ## Build / run the CPU mirror
 
