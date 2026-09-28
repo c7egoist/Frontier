@@ -1,0 +1,230 @@
+diff --git a/Projects/Project-Zero/Host/MaterialLevelViewport.cpp b/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
+index 98fc14b..ce9589a 100644
+--- a/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
++++ b/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
+@@ -53,6 +53,7 @@
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
++#include <chrono>
+ #include <mutex>
+ #include <string>
+ #include <thread>
+@@ -221,6 +222,24 @@ static vec3 SystemBFlakeNormal(const vec3& normal, const vec3& worldPos, float f
+     return pert;
+ }
+ 
++// The resolved System-B flake coverage at a hit (0 = no flake, 1 = a flake fully covers this footprint). This is the
++//    deterministic guide the denoiser prototypes use to KEEP flakes: it is the same finite hash-placed field the
++//    normal perturbation reads, so a pixel it marks is a pixel that genuinely carries a flake, not Monte-Carlo noise.
++static float SystemBFlakeWeight(const vec3& worldPos, float footprintMetres, float density, float uvScale)
++{
++    if (!(density > 0.0f)) return 0.0f;
++    AutomotivePaintParameters p = AutomotivePaintDefaults();
++    p.Density = density > 16.0f ? 16.0f : density;
++    float diam = 30.0f / (uvScale < 0.001f ? 0.001f : uvScale);
++    p.DiameterMm = diam < 0.4f ? 0.4f : (diam > 2.0f ? 2.0f : diam);
++    vec2 uv(worldPos.x + worldPos.z * 0.37f, worldPos.y + worldPos.z * 0.11f);
++    float fp = footprintMetres < 1e-5f ? 1e-5f : footprintMetres;
++    vec2 dx(fp, 0.0f), dy(0.0f, fp);
++    AutomotiveFlakeSurface s = AutomotivePrepareFlakes(p, uv, dx, dy);
++    float w = s.Weight * (1.0f - s.Unresolved);
++    return w < 0.0f ? 0.0f : (w > 1.0f ? 1.0f : w);
++}
++
+ Frontier::ProjectZero::SkyFogIntegrator g_Sky;
+ vec3  g_SunDirRender(0.0f, 0.0f, 1.0f);   // [-] unit vector toward the sun, render frame (Y-up)
+ float g_SunAngularRadius = 0.00465f;      // [rad] the sky core's disc radius (0.53° diameter)
+@@ -2174,6 +2193,12 @@ struct SequenceResult
+     std::vector<float> Mean;        // [W*H*3] the running mean, linear radiance (what ResolveSurface publishes)
+     std::vector<float> Surface;     // [W*H*4] normal xyz + depth in w (0 = sky): the filter's geometry buffer
+     std::vector<float> Variance;    // [W*H]   the variance of the mean the kernel's recursion reports
++    // Denoiser-prototype guides (populated at resolve, used by the --denoise-sweep A/B modes; ignored by the shipped
++    //    à-trous). Albedo = per-pixel demodulation colour, Rough = specular roughness, FlakeMask = deterministic
++    //    System-B flake coverage at the primary hit (0 = no flake). None of these touch the shipped filter path.
++    std::vector<float> Albedo;      // [W*H*3]
++    std::vector<float> Rough;       // [W*H]
++    std::vector<float> FlakeMask;   // [W*H]
+     long               NonFinite = 0;
+     double             ReservoirCoverage = 0.0;   // [%]  pixels whose reservoir survived the frame
+     double             MeanReservoirM = 0.0;      // [-]  mean M over the surface pixels (reuse is visible here)
+@@ -2214,6 +2239,9 @@ SequenceResult RenderSequence(const Viewpoint& VP, int Width, int Height, int Sp
+     Out.Mean.assign(static_cast<size_t>(Width) * Height * 3u, 0.0f);
+     Out.Surface.assign(static_cast<size_t>(Width) * Height * 4u, 0.0f);
+     Out.Variance.assign(static_cast<size_t>(Width) * Height, 0.0f);
++    Out.Albedo.assign(static_cast<size_t>(Width) * Height * 3u, 1.0f);
++    Out.Rough.assign(static_cast<size_t>(Width) * Height, 1.0f);
++    Out.FlakeMask.assign(static_cast<size_t>(Width) * Height, 0.0f);
+ 
+     // The running mean. The kernel keeps it in HistoryImage/HistorySurfaceImage and REPROJECTS it through the R2
+     //    motion vectors (ResolveSurface, R7a), so the CPU mirror does too. Double-buffered — a GPU reads and writes
+@@ -2603,6 +2631,25 @@ SequenceResult RenderSequence(const Viewpoint& VP, int Width, int Height, int Sp
+                 Out.Variance[Pixel] = VarianceOut;
+                 float* Surf4 = &Out.Surface[Pixel * 4u];
+                 Surf4[0] = Surf.Ng.x; Surf4[1] = Surf.Ng.y; Surf4[2] = Surf.Ng.z; Surf4[3] = Surf.Depth;
++                // Denoiser-prototype guides (deterministic; the shipped à-trous ignores these fields).
++                if (Surf.Depth > 0.0f)
++                {
++                    const ShadingRecord& M = Surf.Mat;
++                    vec3 alb = M.BaseColor + (M.SpecularColor - M.BaseColor) * M.Metalness;
++                    Out.Albedo[Pixel * 3u + 0u] = alb.x < 0.04f ? 0.04f : (alb.x > 1.0f ? 1.0f : alb.x);
++                    Out.Albedo[Pixel * 3u + 1u] = alb.y < 0.04f ? 0.04f : (alb.y > 1.0f ? 1.0f : alb.y);
++                    Out.Albedo[Pixel * 3u + 2u] = alb.z < 0.04f ? 0.04f : (alb.z > 1.0f ? 1.0f : alb.z);
++                    Out.Rough[Pixel] = M.SpecularRoughness;
++                    if (Surf.MaterialIdx >= 0 && !g_MatGlintsOff
++                        && static_cast<size_t>(Surf.MaterialIdx) < g_MatGlintDensity.size()
++                        && g_MatGlintDensity[static_cast<size_t>(Surf.MaterialIdx)] > 0.0f)
++                    {
++                        Out.FlakeMask[Pixel] = SystemBFlakeWeight(
++                            Surf.P, Surf.Depth * g_AutomotiveRaySpread,
++                            g_MatGlintDensity[static_cast<size_t>(Surf.MaterialIdx)],
++                            g_MatGlintUvScale[static_cast<size_t>(Surf.MaterialIdx)] * 3.0f);
++                    }
++                }
+                 if (Surf.Depth > 0.0f) { T.Surface += 1.0; T.SamplesBehind += static_cast<double>(Accumulator.Count); }
+             });
+ 
+@@ -2762,6 +2809,86 @@ void ApplyAtrousChain(SequenceResult& Result, int Extent, int Levels, float Expo
+     }
+ }
+ 
++//------------------------------------------------------------------------------------------------------------------------
++//   DENOISER PROTOTYPES — A/B variants over the SAME accumulated film (research: DenoiserResearch.md)
++//------------------------------------------------------------------------------------------------------------------------
++// These are host-side experiments layered ON TOP of the shipped à-trous (they call it unchanged), so the parity mirror
++//    is untouched. The point is to answer "how do we keep the flakes?" without more samples. Each mode is applied to a
++//    fresh copy of the film by --denoise-sweep and timed in isolation.
++enum class DenoiseMode { Raw, Atrous, Demod, SpecAware, FlakeGuide, Combo };
++static const char* DenoiseModeName(DenoiseMode M)
++{
++    switch (M) {
++        case DenoiseMode::Raw:        return "raw";
++        case DenoiseMode::Atrous:     return "atrous";
++        case DenoiseMode::Demod:      return "demod";
++        case DenoiseMode::SpecAware:  return "specaware";
++        case DenoiseMode::FlakeGuide: return "flakeguide";
++        case DenoiseMode::Combo:      return "combo";
++    }
++    return "?";
++}
++static float Smooth01(float x, float lo, float hi)
++{
++    if (hi <= lo) return x >= hi ? 1.0f : 0.0f;
++    float t = (x - lo) / (hi - lo);
++    t = t < 0.0f ? 0.0f : (t > 1.0f ? 1.0f : t);
++    return t * t * (3.0f - 2.0f * t);
++}
++
++// Apply one prototype mode to Result IN PLACE (Result.Mean becomes the final linear radiance).
++void ApplyDenoiseMode(SequenceResult& Result, DenoiseMode Mode, int Extent, int Levels, float Exposure)
++{
++    const size_t N = static_cast<size_t>(Extent) * Extent;
++    if (Mode == DenoiseMode::Raw) return;
++    if (Mode == DenoiseMode::Atrous) { ApplyAtrousChain(Result, Extent, Levels, Exposure); return; }
++
++    const std::vector<float> Raw = Result.Mean;   // pre-filter radiance, for the preserve/lerp modes
++
++    // A5/A1: demodulate by the per-pixel albedo so the filter runs on illumination, not surface colour.
++    const bool Demod = (Mode == DenoiseMode::Demod || Mode == DenoiseMode::Combo);
++    if (Demod)
++    {
++        for (size_t i = 0; i < N; ++i)
++            for (int c = 0; c < 3; ++c)
++                Result.Mean[i * 3u + static_cast<size_t>(c)] /= Result.Albedo[i * 3u + static_cast<size_t>(c)];
++        for (size_t i = 0; i < N; ++i)
++        {
++            float la = (Result.Albedo[i * 3u] + Result.Albedo[i * 3u + 1u] + Result.Albedo[i * 3u + 2u]) / 3.0f;
++            Result.Variance[i] /= (la * la);       // scalar approximation (see V8DenoiserReview #3)
++        }
++    }
++
++    ApplyAtrousChain(Result, Extent, Levels, Exposure);
++
++    if (Demod)
++        for (size_t i = 0; i < N; ++i)
++            for (int c = 0; c < 3; ++c)
++                Result.Mean[i * 3u + static_cast<size_t>(c)] *= Result.Albedo[i * 3u + static_cast<size_t>(c)];
++
++    // A2/A4: fade back toward the raw pixel where the guide says "genuine high-frequency detail", not noise.
++    if (Mode == DenoiseMode::SpecAware || Mode == DenoiseMode::FlakeGuide || Mode == DenoiseMode::Combo)
++    {
++        for (size_t i = 0; i < N; ++i)
++        {
++            float preserve = 0.0f;
++            if (Mode == DenoiseMode::FlakeGuide || Mode == DenoiseMode::Combo)
++                preserve = Result.FlakeMask[i];                          // deterministic flake coverage
++            if (Mode == DenoiseMode::SpecAware || Mode == DenoiseMode::Combo)
++            {
++                float s = 1.0f - Smooth01(Result.Rough[i], 0.02f, 0.18f); // low roughness -> keep sharp
++                preserve = preserve > s ? preserve : s;
++            }
++            preserve = preserve < 0.0f ? 0.0f : (preserve > 1.0f ? 1.0f : preserve);
++            for (int c = 0; c < 3; ++c)
++            {
++                const size_t k = i * 3u + static_cast<size_t>(c);
++                Result.Mean[k] = Result.Mean[k] * (1.0f - preserve) + Raw[k] * preserve;
++            }
++        }
++    }
++}
++
+ //------------------------------------------------------------------------------------------------------------------------
+ //                              THE INTERFACE OVERLAY — the raster stage's CPU mirror, over the film
+ //------------------------------------------------------------------------------------------------------------------------
+@@ -3052,6 +3179,7 @@ int main(int ArgumentCount, char** ArgumentValues)
+     float PanPerFrame = 0.0f;   // [m/frame] camera drift, so the reprojection has something to reproject
+     bool  UseRestir = false;    // the CPU ReSTIR DI mirror (see the block above)
+     bool  Denoise = false;      // the shipped à-trous chain over the accumulated film
++    bool  DenoiseSweep = false; // --denoise-sweep: render once, write every prototype denoiser variant + timings
+     unsigned Threads = std::thread::hardware_concurrency();
+     if (Threads == 0u) Threads = 2u;
+     bool ProbeMode = false;   // D10: --shadow-probe — does the moving object's shadow follow it? (no image, no noise)
+@@ -3112,6 +3240,7 @@ int main(int ArgumentCount, char** ArgumentValues)
+         else if (A == "--panel-gain") g_PanelGain = static_cast<float>(std::atof(Next("--panel-gain")));   // 0 = overlay only, no scene light
+         else if (A == "--denoise")  Denoise = true;
+         else if (A == "--denoise-levels") DenoiseLevels = std::atoi(Next("--denoise-levels"));
++        else if (A == "--denoise-sweep")  DenoiseSweep = true;
+         else if (A == "--help")
+         {
+             std::printf("usage: MaterialLevelViewport [--out file.png] [--level materials|showcase]\n"
+@@ -3233,6 +3362,40 @@ int main(int ArgumentCount, char** ArgumentValues)
+         if(!PngWriteCounterpart::WritePng(RawOutPath.c_str(),Width,Height,3,RawPng.data(),Width*3))return 2;
+         std::printf("[material-level] unfiltered accumulated film -> %s\n",RawOutPath.c_str());
+     }
++    if (DenoiseSweep)
++    {
++        // Strip a trailing .png from OutPath to make a stem for the per-mode files.
++        std::string Stem = OutPath;
++        if (Stem.size() > 4 && Stem.substr(Stem.size() - 4) == ".png") Stem = Stem.substr(0, Stem.size() - 4);
++
++        ColourTransfer SweepTransfer;
++        SweepTransfer.ToneMap = Frontier::ToneMapCategory::Aces;
++        SweepTransfer.Exposure = Exposure;
++        SweepTransfer.Saturation = 1.0f;
++
++        const DenoiseMode Modes[] = { DenoiseMode::Raw, DenoiseMode::Atrous, DenoiseMode::Demod,
++                                      DenoiseMode::SpecAware, DenoiseMode::FlakeGuide, DenoiseMode::Combo };
++        std::printf("[denoise-sweep] %d levels, %dx%d — timing the denoise stage only (render already done)\n",
++                    DenoiseLevels, Width, Height);
++        for (DenoiseMode Mode : Modes)
++        {
++            SequenceResult Copy = Sequence;                       // fresh film per mode
++            const auto T0 = std::chrono::high_resolution_clock::now();
++            ApplyDenoiseMode(Copy, Mode, Width, DenoiseLevels, Exposure);
++            const auto T1 = std::chrono::high_resolution_clock::now();
++            const double Ms = std::chrono::duration<double, std::milli>(T1 - T0).count();
++
++            std::vector<unsigned char> Png(Copy.Mean.size());
++            for (size_t i = 0; i < Copy.Mean.size(); i += 3u)
++                ColourPipeline::ApplyToByte(SweepTransfer, Copy.Mean.data() + i, Png.data() + i);
++            std::string Path = Stem + "_" + DenoiseModeName(Mode) + ".png";
++            const int Ok = PngWriteCounterpart::WritePng(Path.c_str(), Width, Height, 3, Png.data(), Width * 3);
++            std::printf("[denoise-sweep] %-11s %8.2f ms   -> %s%s\n",
++                        DenoiseModeName(Mode), Ms, Path.c_str(), Ok ? "" : "  (WRITE FAILED)");
++        }
++        return 0;
++    }
++
+     if (Denoise) ApplyAtrousChain(Sequence, Width, DenoiseLevels, Exposure);
+     const std::vector<float>& Film = Sequence.Mean;
+     if (UseRestir)
