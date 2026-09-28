@@ -5,6 +5,11 @@ renderer** and rendered them on the flake sphere so you can see which one actual
 Standard quality. **Start with `DenoiseZoom.png`** (raw vs current filter vs the winner), then
 `DenoiseCompare.png` (all six side by side).
 
+> **New — "what other guides can we use?"** The flake mask is just one *guide*. I added a whole menu of
+> them and a combined `smart` mode. See **`GuideZoom.png`** (raw → atrous → specguide → emissguide →
+> smart, zoomed on the showcase grid) and `GuideCompare.png` (all guides on the full frame), and the
+> **[Guide menu](#guide-menu--what-other-guides-can-we-use)** section below.
+
 ## How it works (one render, many denoisers)
 `--denoise-sweep` renders the frame **once**, then applies every denoiser variant to a fresh copy of
 the same accumulated film and times the denoise stage in isolation. So the timings below compare the
@@ -78,10 +83,72 @@ raw sample) — that removes the residual sparkle-noise without blurring, and is
 after this proof. It's the same "diffuse/specular split" idea from `DenoiserResearch.md`, just applied
 to the flake sub-channel.
 
+## Guide menu — "what other guides can we use?"
+
+A **guide** is a cheap, *deterministic* per-pixel signal that tells the denoiser **"this pixel is real
+high-frequency detail — don't blur it"**. Where a guide fires, the filtered pixel is faded back toward
+the raw sample (a lerp). The flake mask above is one guide; here is the full menu I prototyped, each as
+its own `--denoise-sweep` mode. They cost essentially nothing (a few ALU ops / pixel on the GPU) and
+compose by taking the max, which is what `smart` does.
+
+| mode | guide signal | preserves | needs |
+|---|---|---|---|
+| `flakeguide` | System-B flake coverage mask | metallic sparkle | flake mask (already there) |
+| `specguide` | low **effective** roughness (`min` of base / clearcoat / glass lobe) | chrome, gold, glass & clearcoat reflections | `Rough` buffer |
+| `emissguide` | emissive luminance ≥ ~1 nit | luminaires / glowing panels (they carry no noise) | `Emission` buffer |
+| `fresnelguide` | `pow(1 − N·V, 4)` | grazing-angle rim highlights on curved surfaces | `NdotV` buffer |
+| `edgeguide` | normal + relative-depth gradient to 4-neighbours | silhouettes & contact shadows (keeps them crisp) | `Surface` G-buffer (already there) |
+| **`smart`** | **max(flake, spec, emiss, 0.6·fresnel, edge)** | **all of the above at once** | all of the above |
+
+Why these are the right extra signals: the shipped à-trous edge-stops on **geometry** (normal/depth),
+so it protects big shape boundaries but happily blurs anything that is flat in geometry yet sharp in
+*shading* — exactly flakes, mirror/glass reflections, small luminaires and thin rim highlights. Each
+guide re-injects one of those shading-detail classes that geometry edge-stops miss.
+
+### Timings — guide sweep (denoise stage only, CPU mirror, 512×512, 5 levels, 2 cores)
+| mode | ms | note |
+|---|---|---|
+| raw | 0 | — |
+| atrous (current) | 1165 | baseline |
+| flakeguide | 1143 | +flake lerp |
+| specguide | 1078 | +roughness lerp |
+| emissguide | 1006 | +emissive lerp |
+| fresnelguide | 1010 | +Fresnel lerp |
+| edgeguide | 1074 | +3×3 gradient pass |
+| **smart** | **1052** | all guides combined |
+
+All within noise of the base à-trous — the guides are **effectively free** (the per-variant deltas
+here are dominated by cache/scheduling jitter on 2 cores, not real cost). On the GPU each guide is a
+handful of ALU ops folded into the existing taps.
+
+### Verdict
+See `GuideZoom.png`. `atrous` visibly **softens the glossy spheres' specular dots**; `specguide`
+restores those chrome/glass highlights; `emissguide` keeps the emissive band's edges crisp; and
+**`smart` keeps highlights, glow, rims and flakes sharp while still cleaning the floor noise** — it is
+the recommended all-in-one default. Use a single guide (`flakeguide`, `specguide`, …) when you only
+care about one material class; use `smart` as the general Standard-quality setting.
+
 ## Files
-- `DenoiseZoom.png` — raw vs current vs flake-guide, zoomed (**the proof**)
-- `DenoiseCompare.png` — all six variants side by side
-- `sweep_<mode>.png` — the full-frame render for each variant
-- `MaterialLevelViewport_SystemB+Denoise.patch` — self-contained diff vs clean HEAD: the System-B
-  flake wiring plus the `--denoise-sweep` prototypes (`ApplyDenoiseMode`, the guide buffers, the
-  `SystemBFlakeWeight` mask). Applies to `Projects/Project-Zero/Host/MaterialLevelViewport.cpp`.
+- `GuideZoom.png` — raw vs atrous vs specguide vs emissguide vs smart, zoomed on the grid (**the new proof**)
+- `GuideCompare.png` — all eight guide variants on the full showcase frame
+- `guide_<mode>.png` — the full-frame render for each guide variant (wide showcase view)
+- `DenoiseZoom.png` — raw vs current vs flake-guide, zoomed (the original flake proof)
+- `DenoiseCompare.png` — the original six flake variants side by side
+- `sweep_<mode>.png` — the full-frame render for each original variant
+- `MaterialLevelViewport_SystemB+Denoise.patch` — the denoise/guide diff (`ApplyDenoiseMode`, all guide
+  buffers + modes, the `SystemBFlakeWeight` mask). It layers **on top of** the System-B flake wiring in
+  `../ReSTIR/MaterialLevelViewport_SystemB.patch`, so apply that one first:
+  ```bash
+  cd <Frontier checkout>
+  patch -p1 --fuzz=8 < Slate/FlakeVerification/ReSTIR/MaterialLevelViewport_SystemB.patch
+  patch -p1 --fuzz=8 < Slate/FlakeVerification/Denoise/MaterialLevelViewport_SystemB+Denoise.patch
+  ```
+
+Repro for the guide sweep:
+```bash
+make -C Projects/Project-Zero/Host MaterialLevelViewport
+cd Projects/Project-Zero/Host
+./MaterialLevelViewport --level showcase --view wide --width 512 --height 512 \
+    --spp 6 --frames 6 --taps 2 --threads 2 --restir --flakes-systemb \
+    --denoise-sweep --out gsweep.png     # writes gsweep_{raw,atrous,flakeguide,specguide,emissguide,fresnelguide,edgeguide,smart}.png
+```
