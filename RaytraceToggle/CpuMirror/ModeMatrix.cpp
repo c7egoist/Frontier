@@ -52,31 +52,98 @@ struct RNG{ uint32_t s; RNG(uint32_t seed){ s=seed?seed:0x9e3779b9u; }
     inline float f(){ return (u()>>8)*(1.0f/16777216.0f); } };
 static inline uint32_t hash(uint32_t a){ a^=a>>16; a*=0x7feb352du; a^=a>>15; a*=0x846ca68bu; a^=a>>16; return a; }
 
+//----------------------------------------------------------------------------------------------- material model
+// A compact OpenPBR-flavoured material — enough lobes to render the engine's showcase families (glass, emission,
+//    coat/car-paint, fuzz/cloth, glint flakes, subsurface, thin film, metal, rough metal, ceramic/rubber ...).
+//    The same struct feeds the raytraced path tracer AND the surfel/plain analytic shade, so every material is
+//    evaluated in every mode — only the source of reflection/GI differs (scene rays vs sky + surfels).
+struct Mat {
+    V     base{0.8f,0.8f,0.8f};
+    float metal=0.f, rough=0.10f, spec=1.f, ior=1.5f;   // metalness, specular roughness, dielectric spec weight, IOR
+    float transW=0.f; V transCol{1,1,1}; float transDepth=1.f;   // transmission (glass): weight, tint, absorption depth
+    V     emiss{0,0,0};                                  // emissive radiance [nit-ish]
+    float fuzzW=0.f; V fuzzCol{1,1,1}; float fuzzRough=0.5f;     // sheen / cloth
+    float coatW=0.f, coatRough=0.f;                      // clear coat / car paint
+    float sssW=0.f;  V sssCol{1,1,1};                    // subsurface (approximated as tinted wrap diffuse)
+    float glint=0.f, glintScale=0.f;                     // glint flakes (Deliot-Belcour-ish sparkle)
+    float thinW=0.f, thinThk=0.f;                        // thin film (iridescent tint on the coat)
+};
 //----------------------------------------------------------------------------------------------- scene: rectangles
 struct Quad{ V p,u,v,n; V albedo; V emit; };   // rectangle = p + a*u + b*v, a,b in [0,1]; n = inward normal
-struct Sphere{ V c; float r; V albedo; V emit; float metal=0.f, rough=0.08f; };  // analytic curved primitive (metal>0.5 = reflective)
+struct Sphere{ V c; float r; Mat m; };         // analytic curved primitive carrying a full material
 struct Scene{ std::vector<Quad> q; std::vector<Sphere> s; int light=-1; };
 
 static inline V hueColor(float h, float sat, float val);   // fwd decl (defined below)
-// 20x20 = 400-material grid: rows sweep metalness 0->1 (+ a per-row hue), columns sweep roughness 0->1.
-// Mirrors the intent of the engine's 400-sphere material library (MaterialLevelViewport grid400) with this
-//    renderer's metal/roughness material model, so every cell is a distinct material to render in each mode.
-static Scene buildMaterialGrid(){
+static inline void setC(V& t,float r,float g,float b){ t={r,g,b}; }
+
+// The engine's showcase grid: 15 rows = 15 material FAMILIES, 15 columns = a hue + parameter sweep inside the
+//    family (ContentInterchange/ShowcaseStructure.cpp, r4 generator). 225 distinct materials, one per sphere,
+//    laid flat on the ground (radius 0.55, spacing 1.5) exactly like MaterialLevelViewport's grid. Rendered here
+//    through all three render-mode paths to prove every family shades correctly regardless of pipeline.
+static Scene buildShowcaseGrid(){
     Scene S; V zero{0,0,0};
-    const int N=20; const float R=0.46f, STEP=1.15f;
+    const int N=15; const float R=0.55f, STEP=1.5f;
     const float span=(N-1)*STEP; const float x0=-span*0.5f, z0=-span*0.5f;
-    // large neutral ground
-    float G=40.0f;
-    S.q.push_back({{-G,0,-G},{2*G,0,0},{0,0,2*G},{0,1,0}, V{0.35f,0.35f,0.37f}, zero});
-    // overhead area light
+    float G=60.0f;
+    S.q.push_back({{-G,0,-G},{2*G,0,0},{0,0,2*G},{0,1,0}, V{0.34f,0.34f,0.36f}, zero});   // concrete floor
     S.light=(int)S.q.size();
-    S.q.push_back({{-6.0f, 16.0f, -6.0f},{12,0,0},{0,0,12},{0,-1,0}, zero, {9,9,9}});
+    S.q.push_back({{-7.0f, 20.0f, -4.0f},{14,0,0},{0,0,14},{0,-1,0}, zero, {11,11,10.5f}});   // overhead sun-ish area light
     for(int row=0; row<N; ++row) for(int col=0; col<N; ++col){
-        float metal = row/(float)(N-1);
-        float rough = 0.03f + 0.95f*(col/(float)(N-1));
-        V alb = hueColor(row/(float)N, 0.62f, 0.85f);
+        float t   = col/(float)(N-1);       // 0..1 sweep
+        float Hue = col/(float)N;           // hue wheel
+        Mat m;
+        switch(row){
+        case 0:  // anisotropic metal (aniso direction not modelled -> reads as a hue-tinted polished metal ladder)
+            m.base=hueColor(Hue,0.55f,0.90f); m.metal=1.f; m.rough=0.14f+0.26f*t; break;
+        case 1:  // transmissive glass: IOR 1.30 -> 2.42, tinted, near-clear
+            m.base={1,1,1}; m.transW=1.f; m.transCol=hueColor(Hue,0.18f,1.0f); m.transDepth=3.0f;
+            m.ior=1.30f+1.12f*t; m.rough=0.02f; break;
+        case 2:  // subsurface: scatter colour around the wheel
+            m.base=hueColor(Hue,0.35f,0.88f); m.sssW=1.f; m.sssCol=hueColor(Hue,0.45f,0.95f);
+            m.rough=0.32f; m.ior=1.4f; break;
+        case 3:{ // thin film over dark / gold / black bases
+            int Base=col%3;
+            if(Base==0){ setC(m.base,0.03f,0.03f,0.04f); m.metal=0.f; }
+            else if(Base==1){ setC(m.base,1.0f,0.766f,0.336f); m.metal=1.f; }
+            else { setC(m.base,0.0f,0.0f,0.0f); m.metal=0.f; }
+            m.rough=0.04f+0.12f*Base; m.coatW=1.f; m.coatRough=0.05f;
+            m.thinW=1.f; m.thinThk=0.15f+1.15f*t; break; }
+        case 4:  // cloth / fuzz: velvet hue, fuzz weight & roughness rising
+            m.base=hueColor(Hue,0.75f,0.45f); m.spec=0.f; m.fuzzW=0.4f+0.6f*t;
+            m.fuzzRough=0.5f+0.45f*t; m.fuzzCol=hueColor(Hue,0.25f,1.0f); break;
+        case 5:  // coat / car paint: saturated base, clear coat frosts 0 -> 0.4
+            m.base=hueColor(Hue,0.85f,0.50f); m.rough=0.45f; m.coatW=1.f; m.coatRough=0.4f*t; break;
+        case 6:  // haziness: a broad second gloss lobe grows -> model as a rough clear coat
+            m.base=hueColor(Hue,0.45f,0.22f); m.rough=0.10f; m.coatW=0.6f; m.coatRough=0.50f+0.35f*t; break;
+        case 7:  // EON diffuse: a plain hue rainbow
+            m.base=hueColor(Hue,0.80f,0.75f); m.spec=0.f; m.rough=1.f; break;
+        case 8:  // emission: a luminaire rainbow
+            m.base=zero; m.spec=0.f; m.emiss=hueColor(Hue,0.85f,1.0f)*6.0f; break;
+        case 9:  // rough metal: the classic roughness ladder, in colour
+            m.base=hueColor(Hue,0.40f,0.85f); m.metal=1.f; m.rough=0.05f+0.85f*t; break;
+        case 10: // dielectric -> metal morph
+            m.base=hueColor(Hue,0.70f,0.65f); m.metal=t; m.rough=0.22f; break;
+        case 11: // ceramic / rubber, alternating columns
+            if((col&1)==0){ m.base=hueColor(Hue,0.30f,0.90f); m.spec=0.4f; m.rough=0.55f; }
+            else          { m.base=hueColor(Hue,0.55f,0.10f); m.spec=0.5f; m.rough=0.85f; } break;
+        case 12: // glint flakes over hue-tinted metal
+            m.base=hueColor(Hue,0.50f,0.30f); m.metal=0.8f; m.rough=0.25f;
+            m.glint=1.f+7.f*t; m.glintScale=4.f+8.f*t; break;
+        case 13: // absorbing glass: fixed IOR, tint deepening
+            m.base={1,1,1}; m.transW=1.f; m.transCol=hueColor(Hue,0.70f,0.85f);
+            m.transDepth=0.10f+0.50f*t; m.ior=1.52f; m.rough=0.05f; break;
+        case 14:{ // showpieces: chrome / black-gloss / pearl / gold / frosted glass
+            int Kind=col%5;
+            if(Kind==0){ setC(m.base,0.95f,0.96f,0.97f); m.metal=1.f; m.rough=0.03f; }
+            else if(Kind==1){ m.base=hueColor(Hue,0.90f,0.06f); m.rough=0.30f; m.coatW=1.f; m.coatRough=0.f; }
+            else if(Kind==2){ m.base=hueColor(Hue,0.15f,0.95f); m.sssW=0.6f; m.sssCol=hueColor(Hue,0.15f,0.95f);
+                              m.coatW=1.f; m.coatRough=0.05f; m.thinW=0.4f; m.thinThk=0.35f; }
+            else if(Kind==3){ setC(m.base,1.0f,0.766f,0.336f); m.metal=1.f; m.rough=0.06f; }
+            else { setC(m.base,1,1,1); m.transW=1.f; m.transCol=hueColor(Hue,0.10f,1.0f); m.ior=1.5f;
+                   m.rough=0.30f; m.transDepth=2.5f; } break; }
+        }
         float x = x0 + col*STEP, z = z0 + row*STEP;
-        S.s.push_back({{x, R, z}, R, alb, zero, metal, rough});
+        Sphere sp; sp.c={x,R,z}; sp.r=R; sp.m=m; S.s.push_back(sp);
     }
     return S;
 }
@@ -104,16 +171,20 @@ static Scene buildCornell(){
     box({0.12f,0.0f,0.66f},{0.33f,0.55f,0.84f}); // tall box, back-left corner (flat-surface reference)
     // ---- curved analytic primitives (the point of this scene) ----
     V ivory{0.80f,0.78f,0.72f}, pale{0.72f,0.72f,0.78f};
-    S.s.push_back({{0.66f,0.20f,0.55f},0.20f, ivory, zero, 1.0f, 0.04f});   // big sphere = POLISHED METAL (reflective) -> shows reflection modes
-    S.s.push_back({{0.34f,0.13f,0.34f},0.13f, pale,  zero});   // medium sphere, front-left -> red bleed
-    S.s.push_back({{0.72f,0.62f,0.32f},0.085f,white, zero});   // small floating sphere -> all-around curvature test
+    auto sph=[&](V c,float r,Mat m){ Sphere s; s.c=c; s.r=r; s.m=m; S.s.push_back(s); };
+    Mat metalM; metalM.base=ivory; metalM.metal=1.f; metalM.rough=0.04f;
+    Mat diffM;  diffM.base=pale;   diffM.rough=1.f;  diffM.spec=0.f;
+    Mat whiteM; whiteM.base=white; whiteM.rough=1.f; whiteM.spec=0.f;
+    sph({0.66f,0.20f,0.55f},0.20f, metalM);   // big sphere = POLISHED METAL -> shows reflection modes
+    sph({0.34f,0.13f,0.34f},0.13f, diffM);    // medium sphere, front-left -> red bleed
+    sph({0.72f,0.62f,0.32f},0.085f,whiteM);   // small floating sphere -> curvature test
     return S;
 }
 
 //----------------------------------------------------------------------------------------------- intersection
 // Hit carries the shading normal + material directly, so curved and flat primitives are
 // handled uniformly downstream (no primitive-type branching outside trace()).
-struct Hit{ float t=1e30f; bool hit=false; bool light=false; V N{0,1,0}, albedo{0,0,0}, emit{0,0,0}; float metal=0.f, rough=0.08f; };
+struct Hit{ float t=1e30f; bool hit=false; bool light=false; bool inside=false; V N{0,1,0}; V P{0,0,0}; Mat m; };
 static inline Hit trace(const Scene& S, V ro, V rd, float tmax){
     Hit h; h.t=tmax;
     for(int i=0;i<(int)S.q.size();++i){ const Quad& Q=S.q[i];
@@ -122,15 +193,17 @@ static inline Hit trace(const Scene& S, V ro, V rd, float tmax){
         V hp=ro+rd*t, rel=hp-Q.p;
         float a=dot(rel,Q.u)/dot(Q.u,Q.u), b=dot(rel,Q.v)/dot(Q.v,Q.v);
         if(a<0||a>1||b<0||b>1) continue;
-        h.t=t; h.hit=true; h.N=Q.n; h.albedo=Q.albedo; h.emit=Q.emit; h.light=(i==S.light);
+        h.t=t; h.hit=true; h.N=Q.n; h.light=(i==S.light);
+        Mat m; m.base=Q.albedo; m.emiss=Q.emit; m.rough=1.f; m.spec=0.3f; h.m=m; h.inside=false;
     }
     for(int i=0;i<(int)S.s.size();++i){ const Sphere& Q=S.s[i];
         V oc=ro-Q.c; float b=dot(oc,rd), c=dot(oc,oc)-Q.r*Q.r; float disc=b*b-c;
         if(disc<0) continue; float sq=std::sqrt(disc);
-        float t=-b-sq; if(t<=1e-4f) t=-b+sq; if(t<=1e-4f||t>=h.t) continue;
+        float t=-b-sq; bool inside=false; if(t<=1e-4f){ t=-b+sq; inside=true; } if(t<=1e-4f||t>=h.t) continue;
         V hp=ro+rd*t; V n=norm(hp-Q.c);                                // per-hit geometric normal (curvature)
-        h.t=t; h.hit=true; h.N=n; h.albedo=Q.albedo; h.emit=Q.emit; h.light=false; h.metal=Q.metal; h.rough=Q.rough;
+        h.t=t; h.hit=true; h.N=n; h.light=false; h.m=Q.m; h.inside=inside;
     }
+    if(h.hit) h.P=ro+rd*h.t;
     return h;
 }
 static inline bool occluded(const Scene& S, V ro, V rd, float dist){
@@ -175,29 +248,92 @@ static inline V skyColor(V dir){
 }
 static const V SKY_AMBIENT{0.16f,0.18f,0.22f};   // hemisphere ambient fill used by the plain-raster path (never black)
 
-// Unidirectional path tracer with NEE — the "raytraced" reference (true GI + true raytraced reflection on metal).
+// Dielectric Fresnel reflectance (unpolarised), cosI against the interface, eta = n_i/n_t.
+static inline float fresnelDielectric(float cosI, float eta){
+    cosI=std::fabs(cosI);
+    float s2 = eta*eta*(1.0f-cosI*cosI); if(s2>1.0f) return 1.0f;   // TIR
+    float cosT=std::sqrt(std::max(0.0f,1.0f-s2));
+    float rs=(eta*cosI-cosT)/(eta*cosI+cosT), rp=(cosI-eta*cosT)/(cosI+eta*cosT);
+    return 0.5f*(rs*rs+rp*rp);
+}
+static inline bool refractV(V d, V n, float eta, V& out){
+    float ci=-dot(d,n); float s2=eta*eta*(1.0f-ci*ci); if(s2>1.0f) return false;
+    out=norm(d*eta + n*(eta*ci-std::sqrt(std::max(0.0f,1.0f-s2)))); return true;
+}
+// Per-point sparkle for glint flakes: hash a cell keyed to surface position * scale; a fraction (set by density)
+//    of cells fire a bright, near-mirror flake. Deterministic in space so it reads as metal flakes, not noise.
+static inline float flakeMask(V P, float scale, float density){
+    if(density<=0.f) return 0.f;
+    int cx=(int)std::floor(P.x*scale), cy=(int)std::floor(P.y*scale), cz=(int)std::floor(P.z*scale);
+    uint32_t hsh=hash((uint32_t)(cx*73856093) ^ (uint32_t)(cy*19349663) ^ (uint32_t)(cz*83492791));
+    float u=(hsh>>8)*(1.0f/16777216.0f);
+    float frac=std::min(0.9f, density*0.08f);      // density 1..8 -> up to ~64% of cells sparkle
+    return u<frac ? 1.0f : 0.0f;
+}
+static inline V thinFilmTint(float thk, float cosV){
+    // cheap iridescence: phase from thickness & angle drives an RGB shimmer
+    float ph=(thk*6.0f + (1.0f-cosV)*3.0f);
+    return { 0.5f+0.5f*std::cos(ph), 0.5f+0.5f*std::cos(ph+2.09f), 0.5f+0.5f*std::cos(ph+4.19f) };
+}
+
+// Unidirectional path tracer with NEE — the "raytraced" reference: true GI, raytraced reflection AND refraction.
 static V pathTrace(const Scene& S, V ro, V rd, RNG& r, int maxDepth){
     V L{0,0,0}, thr{1,1,1};
     for(int b=0;b<maxDepth;++b){
         Hit h=trace(S,ro,rd,1e30f);
         if(!h.hit){ L=L+thr*skyColor(rd); break; }
-        if(h.light){ if(b==0) L=L+thr*h.emit; break; }       // emitter (NEE covers it on later bounces)
-        V hp=ro+rd*h.t; float metal=h.metal, rough=h.rough;
-        V f0 = h.albedo*metal + V{0.04f,0.04f,0.04f}*(1.0f-metal);
-        float cosV=std::max(0.0f,-dot(rd,h.N)); V F=fres(f0,cosV);
-        float pspec = metal>0.5f ? 1.0f : std::min(0.9f,(F.x+F.y+F.z)/3.0f);
-        if(r.f() < pspec){                                   // GGX-ish specular reflection (roughness-perturbed) -> glossy metal
-            V R=norm(reflectV(rd,h.N));
-            if(rough>0.001f){ V u=randUnit(r); R=norm(R + u*(rough*rough)); if(dot(R,h.N)<=0) R=norm(reflectV(rd,h.N)); }
-            V tint = metal>0.5f ? h.albedo : F*(1.0f/std::max(pspec,1e-3f));
-            thr=thr*tint; ro=hp+h.N*1e-4f; rd=R;
-        } else {                                             // diffuse (dielectric base)
-            V dalb=h.albedo*(1.0f-metal);
-            L=L+thr*shadeDirect(S,hp,h.N,dalb,r,1);
-            V t=std::fabs(h.N.x)<0.9f?V{1,0,0}:V{0,1,0}; V tx=norm(cross(t,h.N)); V ty=cross(h.N,tx);
+        if(h.light){ if(b==0) L=L+thr*h.m.emiss; break; }
+        const Mat& m=h.m; V hp=h.P; V N=h.N;
+        L=L+thr*m.emiss;                                     // emission
+        float cosV=std::max(1e-3f,-dot(rd,N));
+
+        // ---- glass / transmission (dielectric refraction with Beer-Lambert absorption) ----
+        if(m.transW>0.5f){
+            bool entering = dot(rd,N)<0.0f; V n = entering? N : N*-1.0f;
+            float eta = entering ? (1.0f/m.ior) : m.ior;
+            float Fr = fresnelDielectric(dot(rd,n), eta);
+            V rr; bool canRefract = refractV(rd,n,eta,rr);
+            if(m.rough>0.001f){ V u=randUnit(r); rr=norm(rr+u*(m.rough*m.rough)); }
+            if(!canRefract || r.f()<Fr){ ro=hp+n*1e-4f; rd=norm(reflectV(rd,n)); }
+            else {
+                if(!entering){ float d=h.t; V a{ std::exp(-(1.0f-m.transCol.x)*d/std::max(m.transDepth,1e-3f)),
+                                                 std::exp(-(1.0f-m.transCol.y)*d/std::max(m.transDepth,1e-3f)),
+                                                 std::exp(-(1.0f-m.transCol.z)*d/std::max(m.transDepth,1e-3f)) };
+                               thr=thr*a; }
+                ro=hp - n*1e-4f; rd=rr;
+            }
+            if(b>2){ float p=std::max(thr.x,std::max(thr.y,thr.z)); if(r.f()>p) break; thr=thr*(1.0f/std::max(p,1e-3f)); }
+            continue;
+        }
+
+        // ---- opaque: clear coat first, then base metal/dielectric spec, else diffuse/sss ----
+        float coatF = m.coatW>0.f ? m.coatW*fresnelDielectric(cosV, 1.0f/1.6f) : 0.f;
+        if(m.coatW>0.f && r.f()<coatF){                      // clear-coat reflection lobe
+            V R=norm(reflectV(rd,N)); if(m.coatRough>0.001f){ V u=randUnit(r); R=norm(R+u*(m.coatRough*m.coatRough)); if(dot(R,N)<=0) R=norm(reflectV(rd,N)); }
+            V tint = m.thinW>0.f ? mixV(V{1,1,1}, thinFilmTint(m.thinThk,cosV), m.thinW) : V{1,1,1};
+            thr=thr*tint*(1.0f/std::max(coatF,1e-3f))*coatF; ro=hp+N*1e-4f; rd=R;
+            if(b>2){ float p=std::max(thr.x,std::max(thr.y,thr.z)); if(r.f()>p) break; thr=thr*(1.0f/std::max(p,1e-3f)); }
+            continue;
+        }
+        // flakes: a fired flake acts as a bright near-mirror metal facet
+        float flake = flakeMask(hp, m.glintScale, m.glint);
+        V f0 = m.base*m.metal + V{0.04f,0.04f,0.04f}*m.spec*(1.0f-m.metal);
+        if(flake>0.f) f0 = mixV(f0, m.base, 0.9f);
+        V F=fres(f0,cosV);
+        float pspec = (m.metal>0.5f||flake>0.f) ? 1.0f : std::min(0.9f, m.spec*(F.x+F.y+F.z)/3.0f);
+        if(pspec>0.f && r.f()<pspec){                        // metal / dielectric specular reflection
+            float rough = flake>0.f ? 0.02f : m.rough;
+            V R=norm(reflectV(rd,N)); if(rough>0.001f){ V u=randUnit(r); R=norm(R+u*(rough*rough)); if(dot(R,N)<=0) R=norm(reflectV(rd,N)); }
+            V tint = (m.metal>0.5f||flake>0.f) ? m.base : F*(1.0f/std::max(pspec,1e-3f));
+            thr=thr*tint; ro=hp+N*1e-4f; rd=R;
+        } else {                                             // diffuse / subsurface base
+            V dalb = m.sssW>0.f ? mixV(m.base, m.sssCol, m.sssW) : m.base*(1.0f-m.metal);
+            L=L+thr*shadeDirect(S,hp,N,dalb,r,1);
+            if(m.fuzzW>0.f) L=L+thr*m.fuzzCol*(m.fuzzW*std::pow(1.0f-cosV,3.0f))*shadeDirect(S,hp,N,V{1,1,1},r,1);
+            V t=std::fabs(N.x)<0.9f?V{1,0,0}:V{0,1,0}; V tx=norm(cross(t,N)); V ty=cross(N,tx);
             float u1=r.f(),u2=r.f(); float rr=std::sqrt(u1), ph=2*PI*u2;
-            V wi=norm(tx*(rr*std::cos(ph))+ty*(rr*std::sin(ph))+h.N*std::sqrt(std::max(0.0f,1-u1)));
-            thr=thr*dalb*(1.0f/std::max(1.0f-pspec,1e-3f)); ro=hp+h.N*1e-4f; rd=wi;
+            V wi=norm(tx*(rr*std::cos(ph))+ty*(rr*std::sin(ph))+N*std::sqrt(std::max(0.0f,1-u1)));
+            thr=thr*dalb*(1.0f/std::max(1.0f-pspec,1e-3f)); ro=hp+N*1e-4f; rd=wi;
         }
         if(b>2){ float p=std::max(thr.x,std::max(thr.y,thr.z)); if(r.f()>p) break; thr=thr*(1.0f/std::max(p,1e-3f)); }
     }
@@ -279,7 +415,12 @@ static void writePPMraw(const std::string& path,const std::vector<V>& img,int W,
 }
 
 //----------------------------------------------------------------------------------------------- G-buffer
-struct GBuf{ std::vector<V> P,N,A; std::vector<float> M,Rgh; std::vector<uint8_t> valid; std::vector<uint8_t> emissivePix; int W,H; };
+struct GBuf{ std::vector<V> P,N,A; std::vector<Mat> mat; std::vector<uint8_t> valid; std::vector<uint8_t> emissivePix; int W,H; };
+// The diffuse-albedo channel a surfel carries (base diffuse, minus metal/glass which do not diffuse).
+static inline V diffuseAlbedo(const Mat& m){
+    if(m.transW>0.5f) return V{0,0,0};
+    return m.sssW>0.f ? mixV(m.base, m.sssCol, m.sssW) : m.base*(1.0f-m.metal);
+}
 
 int main(int argc,char**argv){
     int W=480,H=480, FRAMES=320, RAYS=8, DIRECT=64, SPP=32;
@@ -293,8 +434,8 @@ int main(int argc,char**argv){
     Cam cam; cam.aspect=(float)W/H; cam.W=W; cam.H=H;
     Scene S;
     if(sceneName=="grid"){
-        S=buildMaterialGrid();
-        lookAt(cam, V{3.0f, 13.5f, -20.0f}, V{0.0f, 0.6f, 1.0f}, 40.0f);   // angled look over the 400-sphere matrix
+        S=buildShowcaseGrid();
+        lookAt(cam, V{0.0f, 12.5f, -19.0f}, V{0.0f, 0.4f, 1.5f}, 44.0f);   // angled look over the 15x15 showcase field
     } else {
         S=buildCornell();
         cam.eye={0.5f,0.5f,-1.55f}; cam.fwd={0,0,1}; cam.right={1,0,0}; cam.up={0,1,0};
@@ -303,11 +444,11 @@ int main(int argc,char**argv){
 
     // ---- 1. VISIBILITY PASS -> G-buffer ----
     GBuf gb; gb.W=W; gb.H=H; gb.P.assign(W*H,{}); gb.N.assign(W*H,{}); gb.A.assign(W*H,{});
-    gb.valid.assign(W*H,0); gb.emissivePix.assign(W*H,0); gb.M.assign(W*H,0.f); gb.Rgh.assign(W*H,0.08f);
+    gb.mat.assign(W*H,Mat{}); gb.valid.assign(W*H,0); gb.emissivePix.assign(W*H,0);
     par(W*H,[&](int i){ int x=i%W,y=i/W; V rd=rayDir(cam,(float)x,(float)y);
         Hit h=trace(S,cam.eye,rd,1e30f); if(!h.hit) return;
         V P=cam.eye+rd*h.t;
-        gb.P[i]=P; gb.N[i]=h.N; gb.A[i]=h.albedo; gb.valid[i]=1; gb.M[i]=h.metal; gb.Rgh[i]=h.rough;
+        gb.P[i]=P; gb.N[i]=h.N; gb.mat[i]=h.m; gb.A[i]=diffuseAlbedo(h.m); gb.valid[i]=1;
         gb.emissivePix[i]= h.light?1:0;
     });
 
@@ -354,10 +495,10 @@ int main(int argc,char**argv){
                 V wi=tx*(rr*std::cos(ph)) + ty*(rr*std::sin(ph)) + s.n*std::sqrt(std::max(0.0f,1-u1)); wi=norm(wi);
                 Hit h=trace(S,s.pos+s.n*1e-4f,wi,1e30f);
                 if(!h.hit||h.light) continue;                            // miss or light -> 0 (direct handled by NEE)
-                V hp=s.pos+wi*h.t;
-                V Lo = shadeDirect(S,hp,h.N,h.albedo,r,1);               // 1st-bounce direct at the hit
+                V hp=s.pos+wi*h.t; V dalb=diffuseAlbedo(h.m);
+                V Lo = shadeDirect(S,hp,h.N,dalb,r,1);                   // 1st-bounce direct at the hit
                 float cov; V Ehit=gatherE(sf,grid,hp,h.N,cov);           // + multi-bounce from the field (old E)
-                Lo = Lo + h.albedo*INV_PI*Ehit;
+                Lo = Lo + dalb*INV_PI*Ehit + h.m.emiss;
                 // firefly clamp
                 Lo.x=std::min(Lo.x,FIREFLY);Lo.y=std::min(Lo.y,FIREFLY);Lo.z=std::min(Lo.z,FIREFLY);
                 meas=meas+Lo;
@@ -377,26 +518,44 @@ int main(int argc,char**argv){
         if(!gb.valid[i]){ V rd=rayDir(cam,(float)(i%W),(float)(i/W)); return skyColor(rd); }
         if(gb.emissivePix[i]) return S.q[S.light].emit;
         RNG r(hash((uint32_t)i*40503u+123u+(uint32_t)pathMode*2654435761u));
-        V P=gb.P[i], N=gb.N[i], A=gb.A[i];
-        if(pathMode==0){                                    // RAYTRACED: full path trace (GI + raytraced reflection)
+        V P=gb.P[i], N=gb.N[i];
+        if(pathMode==0){                                    // RAYTRACED: full path trace (GI + raytraced reflection/refraction)
             V rd=norm(P-cam.eye); V acc{0,0,0};
             for(int s=0;s<SPP;++s) acc=acc+pathTrace(S,cam.eye,rd,r,8);
             return acc*(1.0f/SPP);
         }
-        // continuous metal/roughness material — evaluated identically in surfel-GI and plain-raster modes.
-        float metal=gb.M[i], rough=gb.Rgh[i];
-        V Vd=norm(cam.eye-P);
-        V f0 = A*metal + V{0.04f,0.04f,0.04f}*(1.0f-metal);
-        V Fr = fres(f0, std::max(0.0f, dot(N,Vd)));
-        V dalb = A*(1.0f-metal);
+        // ---- surfel-GI / plain-raster: analytic evaluation of the SAME material (reflections = sky) ----
+        const Mat& m=gb.mat[i];
+        V Vd=norm(cam.eye-P); float cosV=std::max(1e-3f,dot(N,Vd));
+        auto reflectSky=[&](V dir,float rough){ return mixV(skyColor(dir), skyColor(V{0,1,0})*0.6f+SKY_AMBIENT, std::min(1.0f,rough)); };
+        V Rr = norm(reflectV(P-cam.eye, N));
+
+        // glass / transmission: refract the sky behind (tinted) + Fresnel sky reflection. No diffuse.
+        if(m.transW>0.5f){
+            V rr; bool ok=refractV(norm(P-cam.eye),N,1.0f/m.ior,rr);
+            V refr = ok? reflectSky(rr,m.rough) : reflectSky(Rr,m.rough);
+            float Fr=fresnelDielectric(cosV,1.0f/m.ior);
+            return m.emiss + m.transCol*refr*(1.0f-Fr) + reflectSky(Rr,m.rough)*Fr;
+        }
+
+        V dalb=diffuseAlbedo(m);
         V direct = shadeDirect(S,P,N,dalb,r,DIRECT);
         V lit;
-        if(pathMode==1){ float cov; V E=gatherE(sf,grid,P,N,cov); lit = direct + dalb*INV_PI*E; }  // SURFEL GI
-        else            lit = direct + dalb*SKY_AMBIENT;                                          // PLAIN RASTER (flat fill)
-        // specular = "reflect the sky" (RT off in both modes), roughness widens toward the sky average.
-        V Rr = norm(reflectV(P-cam.eye, N));
-        V skyR = mixV(skyColor(Rr), skyColor(V{0,1,0})*0.6f + SKY_AMBIENT, std::min(1.0f,rough));
-        return lit + Fr*skyR;
+        if(pathMode==1){ float cov; V E=gatherE(sf,grid,P,N,cov); lit=direct + dalb*INV_PI*E; }  // SURFEL GI
+        else            lit=direct + dalb*SKY_AMBIENT;                                           // PLAIN RASTER (flat fill)
+        V col = m.emiss + lit;
+        // fuzz sheen (cloth)
+        if(m.fuzzW>0.f) col=col + m.fuzzCol*(m.fuzzW*std::pow(1.0f-cosV,3.0f))*(reflectSky(N,m.fuzzRough));
+        // base specular / metal / flakes (reflect the sky)
+        float flake=flakeMask(P,m.glintScale,m.glint); float rough=flake>0.f?0.02f:m.rough;
+        V f0=m.base*m.metal + V{0.04f,0.04f,0.04f}*m.spec*(1.0f-m.metal); if(flake>0.f) f0=mixV(f0,m.base,0.9f);
+        V Fr=fres(f0,cosV); V skyR=reflectSky(Rr,rough);
+        col = col + ((m.metal>0.5f||flake>0.f) ? m.base*skyR : Fr*skyR*m.spec);
+        // clear coat / car paint (+ thin-film iridescence)
+        if(m.coatW>0.f){ float F0=0.0533f, cF=m.coatW*(F0+(1.0f-F0)*std::pow(1.0f-cosV,5.0f));
+            V tint=m.thinW>0.f?mixV(V{1,1,1},thinFilmTint(m.thinThk,cosV),m.thinW):V{1,1,1};
+            col=col + tint*reflectSky(Rr,m.coatRough)*cF; }
+        return col;
     };
     auto renderMode=[&](int pathMode){ std::vector<V> out(W*H); par(W*H,[&](int i){ out[i]=resolvePixel(i,pathMode); }); return out; };
 
