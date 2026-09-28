@@ -32,6 +32,7 @@
 #include <thread>
 #include <unordered_map>
 #include <algorithm>
+#include <functional>
 #include <string>
 
 //----------------------------------------------------------------------------------------------- vec3
@@ -194,7 +195,12 @@ static inline Hit trace(const Scene& S, V ro, V rd, float tmax){
         float a=dot(rel,Q.u)/dot(Q.u,Q.u), b=dot(rel,Q.v)/dot(Q.v,Q.v);
         if(a<0||a>1||b<0||b>1) continue;
         h.t=t; h.hit=true; h.N=Q.n; h.light=(i==S.light);
-        Mat m; m.base=Q.albedo; m.emiss=Q.emit; m.rough=1.f; m.spec=0.3f; h.m=m; h.inside=false;
+        Mat m; m.base=Q.albedo; m.emiss=Q.emit; m.rough=1.f; m.spec=0.3f;
+        if(i==0){   // ground: a subtle studio checkerboard so glass refraction & metal reflection carry structure
+            int cx=(int)std::floor(hp.x*0.5f), cz=(int)std::floor(hp.z*0.5f);
+            float c=((cx+cz)&1)?0.24f:0.46f; m.base={c,c,c*1.03f};
+        }
+        h.m=m; h.inside=false;
     }
     for(int i=0;i<(int)S.s.size();++i){ const Sphere& Q=S.s[i];
         V oc=ro-Q.c; float b=dot(oc,rd), c=dot(oc,oc)-Q.r*Q.r; float disc=b*b-c;
@@ -512,8 +518,54 @@ int main(int argc,char**argv){
     };
 
     // ================= THREE RENDER MODES (mirrors the engine's Raytracing tile x GI tile matrix) =================
-    // Reflection choice per mode: RT off -> SKY reflection; RT on -> RAYTRACED reflection. Materials (incl. the metal
-    //    sphere) are evaluated in EVERY mode, not only the raytraced path.
+    // Reflection choice per mode: RT off -> SKY reflection; RT on -> RAYTRACED reflection. Materials (incl. glass,
+    //    flakes, coat, fuzz, emission) are evaluated in EVERY mode, not only the raytraced path.
+    auto reflectSky=[&](V dir,float rough){ return mixV(skyColor(dir), skyColor(V{0,1,0})*0.6f+SKY_AMBIENT, std::min(1.0f,rough)); };
+
+    // Analytic (non-raytraced) shade of ONE surface for the surfel-GI / plain-raster paths. Opaque lobes use sky
+    //    reflections (per the "raytraced-or-sky only, no SSR" rule); GLASS still transmits the real scene — it
+    //    refracts a ray through the interfaces and shades whatever is behind it with THIS mode's lighting (surfel GI
+    //    or flat sky-ambient), so glass reads as glass in every mode instead of a flat sky-tinted ball. Bounded to a
+    //    few interfaces (no full path trace); `incoming` is the unit direction the segment travels toward P.
+    std::function<V(V,V,const Mat&,V,int,int,RNG&)> shadeAnalytic =
+      [&](V P, V N, const Mat& m, V incoming, int mode, int depth, RNG& r)->V {
+        float cosV=std::max(1e-3f, std::fabs(dot(N,incoming)));
+        // ---- glass / transmission: Fresnel sky reflection + refracted view of the actual scene behind ----
+        if(m.transW>0.5f && depth<4){
+            bool entering = dot(incoming,N)<0.0f; V n = entering? N : N*-1.0f;
+            float eta = entering ? (1.0f/m.ior) : m.ior;
+            float Fr = fresnelDielectric(dot(incoming,n), eta);
+            V reflC = reflectSky(norm(reflectV(incoming,n)), m.rough);   // reflection = sky (no SSR)
+            V rr; bool ok=refractV(incoming,n,eta,rr);
+            V refrC;
+            if(!ok) refrC = reflC;                                       // total internal reflection
+            else {
+                Hit hh = trace(S, P - n*1e-3f, rr, 1e30f);
+                if(!hh.hit) refrC = skyColor(rr);
+                else        refrC = shadeAnalytic(hh.P, hh.N, hh.m, rr, mode, depth+1, r);
+            }
+            V tint = entering ? V{1,1,1} : m.transCol;                   // absorb once, on the way out
+            return m.emiss + reflC*Fr + tint*refrC*(1.0f-Fr);
+        }
+        // ---- opaque ----
+        V Rr = norm(reflectV(incoming, N));
+        V dalb=diffuseAlbedo(m);
+        V direct = shadeDirect(S,P,N,dalb,r,depth==0?DIRECT:1);
+        V lit;
+        if(mode==1){ float cov; V E=gatherE(sf,grid,P,N,cov); lit=direct + dalb*INV_PI*E; }  // SURFEL GI
+        else        lit=direct + dalb*SKY_AMBIENT;                                           // PLAIN RASTER (flat fill)
+        V col = m.emiss + lit;
+        if(m.fuzzW>0.f) col=col + m.fuzzCol*(m.fuzzW*std::pow(1.0f-cosV,3.0f))*(reflectSky(N,m.fuzzRough));   // cloth sheen
+        float flake=flakeMask(P,m.glintScale,m.glint); float rough=flake>0.f?0.02f:m.rough;                   // glint flakes
+        V f0=m.base*m.metal + V{0.04f,0.04f,0.04f}*m.spec*(1.0f-m.metal); if(flake>0.f) f0=mixV(f0,m.base,0.9f);
+        V Fr=fres(f0,cosV); V skyR=reflectSky(Rr,rough);
+        col = col + ((m.metal>0.5f||flake>0.f) ? m.base*skyR : Fr*skyR*m.spec);                               // metal / spec
+        if(m.coatW>0.f){ float F0=0.0533f, cF=m.coatW*(F0+(1.0f-F0)*std::pow(1.0f-cosV,5.0f));                // coat / car paint
+            V tint=m.thinW>0.f?mixV(V{1,1,1},thinFilmTint(m.thinThk,cosV),m.thinW):V{1,1,1};
+            col=col + tint*reflectSky(Rr,m.coatRough)*cF; }
+        return col;
+      };
+
     auto resolvePixel=[&](int i,int pathMode)->V{           // pathMode: 0 raytraced, 1 surfel GI, 2 plain raster
         if(!gb.valid[i]){ V rd=rayDir(cam,(float)(i%W),(float)(i/W)); return skyColor(rd); }
         if(gb.emissivePix[i]) return S.q[S.light].emit;
@@ -524,38 +576,7 @@ int main(int argc,char**argv){
             for(int s=0;s<SPP;++s) acc=acc+pathTrace(S,cam.eye,rd,r,8);
             return acc*(1.0f/SPP);
         }
-        // ---- surfel-GI / plain-raster: analytic evaluation of the SAME material (reflections = sky) ----
-        const Mat& m=gb.mat[i];
-        V Vd=norm(cam.eye-P); float cosV=std::max(1e-3f,dot(N,Vd));
-        auto reflectSky=[&](V dir,float rough){ return mixV(skyColor(dir), skyColor(V{0,1,0})*0.6f+SKY_AMBIENT, std::min(1.0f,rough)); };
-        V Rr = norm(reflectV(P-cam.eye, N));
-
-        // glass / transmission: refract the sky behind (tinted) + Fresnel sky reflection. No diffuse.
-        if(m.transW>0.5f){
-            V rr; bool ok=refractV(norm(P-cam.eye),N,1.0f/m.ior,rr);
-            V refr = ok? reflectSky(rr,m.rough) : reflectSky(Rr,m.rough);
-            float Fr=fresnelDielectric(cosV,1.0f/m.ior);
-            return m.emiss + m.transCol*refr*(1.0f-Fr) + reflectSky(Rr,m.rough)*Fr;
-        }
-
-        V dalb=diffuseAlbedo(m);
-        V direct = shadeDirect(S,P,N,dalb,r,DIRECT);
-        V lit;
-        if(pathMode==1){ float cov; V E=gatherE(sf,grid,P,N,cov); lit=direct + dalb*INV_PI*E; }  // SURFEL GI
-        else            lit=direct + dalb*SKY_AMBIENT;                                           // PLAIN RASTER (flat fill)
-        V col = m.emiss + lit;
-        // fuzz sheen (cloth)
-        if(m.fuzzW>0.f) col=col + m.fuzzCol*(m.fuzzW*std::pow(1.0f-cosV,3.0f))*(reflectSky(N,m.fuzzRough));
-        // base specular / metal / flakes (reflect the sky)
-        float flake=flakeMask(P,m.glintScale,m.glint); float rough=flake>0.f?0.02f:m.rough;
-        V f0=m.base*m.metal + V{0.04f,0.04f,0.04f}*m.spec*(1.0f-m.metal); if(flake>0.f) f0=mixV(f0,m.base,0.9f);
-        V Fr=fres(f0,cosV); V skyR=reflectSky(Rr,rough);
-        col = col + ((m.metal>0.5f||flake>0.f) ? m.base*skyR : Fr*skyR*m.spec);
-        // clear coat / car paint (+ thin-film iridescence)
-        if(m.coatW>0.f){ float F0=0.0533f, cF=m.coatW*(F0+(1.0f-F0)*std::pow(1.0f-cosV,5.0f));
-            V tint=m.thinW>0.f?mixV(V{1,1,1},thinFilmTint(m.thinThk,cosV),m.thinW):V{1,1,1};
-            col=col + tint*reflectSky(Rr,m.coatRough)*cF; }
-        return col;
+        return shadeAnalytic(P,N,gb.mat[i],norm(P-cam.eye),pathMode,0,r);   // surfel-GI / plain-raster
     };
     auto renderMode=[&](int pathMode){ std::vector<V> out(W*H); par(W*H,[&](int i){ out[i]=resolvePixel(i,pathMode); }); return out; };
 

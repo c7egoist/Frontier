@@ -28,9 +28,19 @@ distinct:
 
 | Tile | Path | Tells |
 |---|---|---|
-| `grid_plainraster.png` | RT off, GI off | flat sky-ambient + direct; metals/coat/glass **reflect & refract the sky**. Every family already reads correctly — glass is translucent, flakes sparkle, emission glows, cloth is matte-sheened. |
-| `grid_surfelgi.png` | RT off, GI on | adds inter-sphere GI + contact darkening; richer colour bleed between neighbours. Reflections still sky-only. |
+| `grid_plainraster.png` | RT off, GI off | flat sky-ambient + direct. Every family reads correctly — flakes sparkle, emission glows, cloth is matte-sheened, and **glass genuinely transmits the scene** (see note below). |
+| `grid_surfelgi.png` | RT off, GI on | adds inter-sphere GI + contact darkening; richer colour bleed between neighbours. Glass still transmits the real scene, opaque reflections stay sky-only. |
 | `grid_raytraced.png` | RT on | true **raytraced reflection AND refraction**: glass shows the scene through it, metals reflect their neighbours, the glint-flake row sparkles with real specular facets, hero chrome/gold mirror the field. |
+
+#### Glass transmission in the non-RT modes (fix)
+Earlier the plain-raster / surfel-GI glass looked **flat/frosted**: those paths refracted only the
+smooth sky, so a glass sphere over featureless environment had nothing to transmit. The CPU mirror
+now shades dielectric transmission with a **recursive analytic refraction trace** (`shadeAnalytic`,
+bounded to depth 4): the refracted ray is intersected against the actual scene geometry and shaded
+with the *current mode's* lighting (surfel GI or flat sky-ambient). So glass transmits real geometry
+in **every** pipeline, not just when RT is on — it merely gains true multi-bounce accuracy under RT.
+A **studio checkerboard floor** was added to the ground quad so the transmitted/reflected structure
+is legible (an unbroken environment made the effect invisible regardless of correctness).
 
 Rendered 660×480, 130 frames, 44 spp (raytraced), surfel field converged to ~44 k surfels
 (frame-to-frame flicker 2×10⁻⁵).
