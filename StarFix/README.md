@@ -52,3 +52,46 @@ The full patched files are included here too (`PostRecords.slang`, `VisibilityRa
   raster profiles stay byte-for-byte equivalent.
 - Best long-term option: draw stars in a **full-resolution** presentation pass so their PSF is sized to the
   *display* pixel rather than the reduced render pixel — then even the coarsest tier gets crisp round stars.
+
+---
+
+## #34 — star **size** upper clamp (separate, smaller change)
+
+The fix above (`patches/PostRecords.slang.patch` + `VisibilityRaster.cpp.patch`) is the **StarFix profile**: it
+rewrites the flat disc into a smooth Gaussian PSF to kill the *blocky* look. Roadmap **#34** is a different, much
+smaller ask — put an **upper bound on star size** so no star can balloon into a big circle — and it targets the
+**original main formula** (which is what you quoted), not the Gaussian rewrite.
+
+```
+- float Radius = max(StarSize*0.0002, PixelAngle*0.5);                 // floor only -> can balloon
++ float Radius = clamp(StarSize*0.0002, PixelAngle*0.5, PixelAngle*1.2);// floor AND 1.2-px ceiling
+```
+
+Why this specifically fixes "big circles": there was **no upper bound**, so a large `StarSize` (or the wide
+pixel spread on the reduced-resolution tiers) grows the disc without limit. A **bright** star is worse still — its
+skirt runs out to `1.6·Radius` and is scaled by luminance, so an uncapped `Radius` is exactly why bright stars read
+as big circles. Capping `Radius` caps that skirt with it; ceiling `1.2 px` → footprint ≤ ~1.9 px radius. The
+half-pixel floor is untouched, so faint stars still get their sub-pixel core.
+
+- `patches/StarSizeClamp_PostRecords.patch` — GPU shader (`StarAlong`)
+- `patches/StarSizeClamp_VisibilityRaster.patch` — CPU raster twin (uses `std::clamp`; `<algorithm>` already included)
+
+Both apply cleanly against `main` (`git apply --check` OK). `Stars_SizeClamp.png` (from `StarSizeClampDemo.cpp`,
+which runs the exact original disc+skirt math) shows the effect side-by-side: **BEFORE** = big luminance-bloomed
+discs, **AFTER** = small points. Reproduce:
+```bash
+g++ -O2 -std=c++17 StarSizeClampDemo.cpp -o starclamp && ./starclamp
+```
+
+### ⚠ #34 and the StarFix Gaussian are MUTUALLY EXCLUSIVE
+Both edit the **same `Radius` line**, so you apply **one or the other**, never both:
+
+| You want… | Apply |
+|---|---|
+| smooth, non-blocky stars (bright ones *bloom* softly, i.e. get **bigger**) | StarFix profile (`PostRecords.slang.patch` + `VisibilityRaster.cpp.patch`) |
+| keep the original flat-disc look but **never let a star grow into a big circle** | #34 clamp (`StarSizeClamp_*.patch`) |
+
+The StarFix Gaussian deliberately widens bright stars (σ scaled up to 3× by apparent magnitude, support to 3σ) to
+read as bloom — so it would *reintroduce* large bright stars, the opposite of #34. A "smooth **and** small" variant
+is possible but not yet built: it would keep the Gaussian shape while also capping StarFix's `BloomScale` (3 → ~1.3)
+and its support (3σ → 2σ). Say the word and I'll add it.

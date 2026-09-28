@@ -70,9 +70,26 @@ a flat patch. Two changes fix it, and they are physically the right ones:
    one representative facet per cell.
 
 Result: flakes now sparkle at Standard fidelity on **plain raster and surfel GI**, not only under RT (RT still has
-the highest contrast because its facets reflect the real dark ground, punching visible holes). Reproduce:
+the highest contrast because its facets reflect the real dark ground).
+
+### Re-render (fix): flakes were reading as blocky squares, not sparkle
+The first `GlintSheet_Modes.png` looked **bugged** — the flakes appeared as big dark *square* blotches rather than
+fine sparkle. That was three compounding problems, all now fixed:
+
+1. **Cells far too large.** `glintScale` was `5..12`; with an `R=0.7` sphere that is only **~7–17 flake cells across
+   the whole sphere**, so each cell covered many pixels and read as a square tile. Scale is now **`45..120`**
+   (~60–170 cells across the sphere → sub-mm flakes that read as sparkle). The finer-to-the-right ramp is preserved.
+2. **No antialiasing on the raster/GI paths.** Those paths shaded exactly one primary ray per pixel, so the flake
+   pattern (keyed to hit position `P`) aliased hard at cell edges. Added **`--aa N` NxN primary-ray supersampling**
+   (jittered primary rays, re-traced fresh); the sheet is rendered at `--aa 3`, which dissolves the hard edges into
+   smooth sparkle. `--aa 1` keeps the old one-sample behaviour.
+3. **Pure-black downward facets.** A fired facet reflecting the dark `ground` colour returned near-black, so a run of
+   them looked like holes. A fired flake now **blends 30 % of the smooth body reflection into the facet sample**, so a
+   downward-pointing facet keeps a metal sheen instead of punching a black square.
+
+Reproduce (the committed sheet):
 ```bash
-./modematrix --scene glint --w 640 --h 300 --frames 90 --rays 6 --direct 40 --spp 40
+./modematrix --scene glint --w 560 --h 390 --aa 3 --frames 200 --spp 16
 ```
 
 ## Materials through the multi-slab (layered) path (#29)

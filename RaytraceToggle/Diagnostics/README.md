@@ -40,3 +40,22 @@ What exists in Frontier is **GPU cluster CULLING**, not a Nanite virtual-geometr
 virtual geometry (simplification + LOD selection across all paths, including reflection/shadow rays) is not yet
 implemented. If you want geometry clusters to also drive the RT path, that is the cluster-group-DAG-over-BLAS work the
 lab doc sketches — a separate, larger item than #31.
+
+### Follow-up: "my debug view shows clusters updating as I move — is that broken?"  — NO, that's it working
+
+That live update is **cluster culling doing its job**, not a bug. Every frame `ClusterCull.slang` re-runs the two-phase
+test against the *current* camera: frustum reject → normal-cone (back-facing cluster) reject → HiZ occlusion reject,
+then appends the survivors as indirect draws. So as you move, the set of clusters that pass changes continuously —
+clusters pop in as they enter the frustum/become visible and drop out as they leave or get occluded, and the debug
+overlay recolours to match. That is the expected, correct behaviour of a per-frame GPU culling pass.
+
+Two things it is **not**:
+- It is **not** mesh simplification. The clusters you see are fixed-resolution chunks being *selected/culled*, not a
+  Nanite virtual-geometry hierarchy swapping LODs by screen error. (That hierarchy is the separate, larger item —
+  now tracked as roadmap **#39**, full cross-path cluster LOD.)
+- It is **not** active on the ray-traced path. Rays traverse the BLAS/TLAS regardless of which clusters the raster
+  pass culled, so the debug view reflects only what the **raster/visibility** front-end draws. If RT is on, reflections
+  and shadows still see the full geometry even for clusters the raster pass dropped — by design.
+
+Bottom line: nothing to fix here. The updating overlay is the confirmation that cluster culling is live and correct;
+it just isn't the whole-Nanite feature, and it doesn't reach into the ray paths.

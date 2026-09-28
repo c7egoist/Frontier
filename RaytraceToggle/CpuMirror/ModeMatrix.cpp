@@ -210,7 +210,9 @@ static Scene buildGlintSheet(){
     const int N=9; const float R=0.7f, STEP=1.72f; const float x0=-(N-1)*STEP*0.5f;
     for(int i=0;i<N;++i){ float t=i/(float)(N-1);
         Mat m; m.base=hueColor(0.58f,0.45f,0.30f); m.metal=0.85f; m.rough=0.22f;
-        m.glint=0.6f+7.4f*t; m.glintScale=5.0f+7.0f*t;                                   // density 0.6->8, finer to the right
+        // FINE flakes: scale 45->120 -> cells 0.008..0.022 world units, ~60..170 cells across the R=0.7 sphere.
+        //   (The old 5..12 gave only ~7..17 cells across a sphere, which read as big square blocks, not sparkle.)
+        m.glint=0.6f+7.4f*t; m.glintScale=45.0f+75.0f*t;                                 // density 0.6->8, finer to the right
         Sphere sp; sp.c={x0+i*STEP, R, 0.0f}; sp.r=R; sp.m=m; S.s.push_back(sp);
     }
     return S;
@@ -486,13 +488,14 @@ static inline V diffuseAlbedo(const Mat& m){
 }
 
 int main(int argc,char**argv){
-    int W=480,H=480, FRAMES=320, RAYS=8, DIRECT=64, SPP=32;
+    int W=480,H=480, FRAMES=320, RAYS=8, DIRECT=64, SPP=32, AA=1;
     std::string sceneName="cornell";
     bool useSlab=false;                                       // --slabs: shade via the layered multi-slab stack (#29)
     for(int i=1;i<argc;++i){ std::string a=argv[i];
         auto nx=[&](int d){ return i+1<argc?atoi(argv[++i]):d; };
         if(a=="--w")W=nx(W); else if(a=="--h")H=nx(H); else if(a=="--frames")FRAMES=nx(FRAMES);
         else if(a=="--rays")RAYS=nx(RAYS); else if(a=="--direct")DIRECT=nx(DIRECT); else if(a=="--spp")SPP=nx(SPP);
+        else if(a=="--aa")AA=nx(AA);                          // NxN primary-ray supersampling (antialiases the flakes)
         else if(a=="--slabs") useSlab=true;
         else if(a=="--scene"){ if(i+1<argc) sceneName=argv[++i]; }
     }
@@ -624,7 +627,8 @@ int main(int argc,char**argv){
         float flake=flakeMask(P,m.glintScale,m.glint); float rough=flake>0.f?0.02f:m.rough;                   // glint flakes
         V f0=m.base*m.metal + V{0.04f,0.04f,0.04f}*m.spec*(1.0f-m.metal); if(flake>0.f) f0=mixV(f0,m.base,0.9f);
         V Fr=fres(f0,cosV); V skyR;
-        if(flake>0.f){ V fn=flakeFacetNormal(P,m.glintScale,N); skyR=skyColor(norm(reflectV(incoming,fn))); }  // per-facet SHARP env sample -> sparkle
+        if(flake>0.f){ V fn=flakeFacetNormal(P,m.glintScale,N); V fenv=skyColor(norm(reflectV(incoming,fn)));  // per-facet SHARP env sample -> sparkle
+            skyR = mixV(fenv, reflectSky(Rr,0.30f), 0.30f); }   // lift the floor: a downward facet keeps a metal sheen instead of a pure-black hole
         else skyR=reflectSky(Rr,rough);
         col = col + ((m.metal>0.5f||flake>0.f) ? m.base*skyR : Fr*skyR*m.spec);                               // metal / spec
         if(m.coatW>0.f){ float F0=0.0533f, cF=m.coatW*(F0+(1.0f-F0)*std::pow(1.0f-cosV,5.0f));                // coat / car paint
@@ -675,20 +679,30 @@ int main(int argc,char**argv){
         return col;
       };
 
-    auto resolvePixel=[&](int i,int pathMode)->V{           // pathMode: 0 raytraced, 1 surfel GI, 2 plain raster
-        if(!gb.valid[i]){ V rd=rayDir(cam,(float)(i%W),(float)(i/W)); return skyColor(rd); }
-        if(gb.emissivePix[i]) return S.q[S.light].emit;
-        RNG r(hash((uint32_t)i*40503u+123u+(uint32_t)pathMode*2654435761u));
-        V P=gb.P[i], N=gb.N[i];
+    // Shade ONE primary ray fresh (re-traces geometry so it can be super-sampled off the G-buffer grid). This is what
+    //    antialiases the glint flakes: the flake pattern is keyed to the hit position P, so hard cell edges alias badly
+    //    at one sample/pixel; averaging AAxAA jittered primary rays turns the pattern into smooth sparkle.
+    auto shadePrimary=[&](V ro,V rd,int pathMode,RNG& r)->V{
         if(pathMode==0){                                    // RAYTRACED: full path trace (GI + raytraced reflection/refraction)
-            V rd=norm(P-cam.eye); V acc{0,0,0};
-            for(int s=0;s<SPP;++s) acc=acc+pathTrace(S,cam.eye,rd,r,8);
-            return acc*(1.0f/SPP);
+            V acc{0,0,0}; for(int s=0;s<SPP;++s) acc=acc+pathTrace(S,ro,rd,r,8); return acc*(1.0f/SPP);
         }
-        return useSlab ? shadeStack  (P,N,gb.mat[i],norm(P-cam.eye),pathMode,0,r)   // MULTI-SLAB layered path (#29)
-                       : shadeAnalytic(P,N,gb.mat[i],norm(P-cam.eye),pathMode,0,r);  // flat single-slab path
+        Hit h=trace(S,ro,rd,1e30f);
+        if(!h.hit) return skyColor(rd);
+        if(h.light) return h.m.emiss;                       // area light quad
+        return useSlab ? shadeStack  (h.P,h.N,h.m,rd,pathMode,0,r)   // MULTI-SLAB layered path (#29)
+                       : shadeAnalytic(h.P,h.N,h.m,rd,pathMode,0,r);  // flat single-slab path
     };
-    auto renderMode=[&](int pathMode){ std::vector<V> out(W*H); par(W*H,[&](int i){ out[i]=resolvePixel(i,pathMode); }); return out; };
+    auto renderMode=[&](int pathMode){ std::vector<V> out(W*H);
+        par(W*H,[&](int i){ int x=i%W,y=i/W;
+            RNG r(hash((uint32_t)i*40503u+123u+(uint32_t)pathMode*2654435761u));
+            if(AA<=1){ out[i]=shadePrimary(cam.eye, rayDir(cam,(float)x,(float)y), pathMode, r); return; }
+            V acc{0,0,0};
+            for(int sy=0;sy<AA;++sy) for(int sx=0;sx<AA;++sx){
+                float jx=(sx+r.f())/AA-0.5f, jy=(sy+r.f())/AA-0.5f;      // jitter within the pixel footprint
+                acc=acc+shadePrimary(cam.eye, rayDir(cam, x+jx, y+jy), pathMode, r);
+            }
+            out[i]=acc*(1.0f/(AA*AA));
+        }); return out; };
 
     // ---- run the surfel field to convergence (needed for the surfel-GI mode) ----
     for(int f=1;f<=FRAMES;++f){ spawnPass(f); updatePass(f);
