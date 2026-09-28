@@ -54,7 +54,8 @@ static inline uint32_t hash(uint32_t a){ a^=a>>16; a*=0x7feb352du; a^=a>>15; a*=
 
 //----------------------------------------------------------------------------------------------- scene: rectangles
 struct Quad{ V p,u,v,n; V albedo; V emit; };   // rectangle = p + a*u + b*v, a,b in [0,1]; n = inward normal
-struct Scene{ std::vector<Quad> q; int light=-1; };
+struct Sphere{ V c; float r; V albedo; V emit; };                     // analytic curved primitive
+struct Scene{ std::vector<Quad> q; std::vector<Sphere> s; int light=-1; };
 
 static Scene buildCornell(){
     Scene S; V white{0.75f,0.75f,0.75f}, red{0.75f,0.15f,0.15f}, green{0.15f,0.6f,0.15f}, zero{0,0,0};
@@ -76,13 +77,19 @@ static Scene buildCornell(){
         S.q.push_back({{mn.x,mn.y,mx.z},{dx,0,0},{0,dy,0},{0,0,1},  white,zero}); // +z
         S.q.push_back({{mn.x,mn.y,mn.z},{dx,0,0},{0,dy,0},{0,0,-1}, white,zero}); // -z
     };
-    box({0.14f,0.0f,0.58f},{0.40f,0.60f,0.84f}); // tall box
-    box({0.55f,0.0f,0.28f},{0.80f,0.30f,0.54f}); // short box
+    box({0.12f,0.0f,0.66f},{0.33f,0.55f,0.84f}); // tall box, back-left corner (flat-surface reference)
+    // ---- curved analytic primitives (the point of this scene) ----
+    V ivory{0.80f,0.78f,0.72f}, pale{0.72f,0.72f,0.78f};
+    S.s.push_back({{0.66f,0.20f,0.55f},0.20f, ivory, zero});   // big sphere, right side  -> green bleed
+    S.s.push_back({{0.34f,0.13f,0.34f},0.13f, pale,  zero});   // medium sphere, front-left -> red bleed
+    S.s.push_back({{0.72f,0.62f,0.32f},0.085f,white, zero});   // small floating sphere -> all-around curvature test
     return S;
 }
 
 //----------------------------------------------------------------------------------------------- intersection
-struct Hit{ float t=1e30f; int q=-1; };
+// Hit carries the shading normal + material directly, so curved and flat primitives are
+// handled uniformly downstream (no primitive-type branching outside trace()).
+struct Hit{ float t=1e30f; bool hit=false; bool light=false; V N{0,1,0}, albedo{0,0,0}, emit{0,0,0}; };
 static inline Hit trace(const Scene& S, V ro, V rd, float tmax){
     Hit h; h.t=tmax;
     for(int i=0;i<(int)S.q.size();++i){ const Quad& Q=S.q[i];
@@ -91,12 +98,19 @@ static inline Hit trace(const Scene& S, V ro, V rd, float tmax){
         V hp=ro+rd*t, rel=hp-Q.p;
         float a=dot(rel,Q.u)/dot(Q.u,Q.u), b=dot(rel,Q.v)/dot(Q.v,Q.v);
         if(a<0||a>1||b<0||b>1) continue;
-        h.t=t; h.q=i;
+        h.t=t; h.hit=true; h.N=Q.n; h.albedo=Q.albedo; h.emit=Q.emit; h.light=(i==S.light);
+    }
+    for(int i=0;i<(int)S.s.size();++i){ const Sphere& Q=S.s[i];
+        V oc=ro-Q.c; float b=dot(oc,rd), c=dot(oc,oc)-Q.r*Q.r; float disc=b*b-c;
+        if(disc<0) continue; float sq=std::sqrt(disc);
+        float t=-b-sq; if(t<=1e-4f) t=-b+sq; if(t<=1e-4f||t>=h.t) continue;
+        V hp=ro+rd*t; V n=norm(hp-Q.c);                                // per-hit geometric normal (curvature)
+        h.t=t; h.hit=true; h.N=n; h.albedo=Q.albedo; h.emit=Q.emit; h.light=false;
     }
     return h;
 }
 static inline bool occluded(const Scene& S, V ro, V rd, float dist){
-    Hit h=trace(S,ro,rd,dist-1e-3f); return h.q>=0;
+    Hit h=trace(S,ro,rd,dist-1e-3f); return h.hit;
 }
 
 //----------------------------------------------------------------------------------------------- direct lighting (NEE, sharp)
@@ -204,10 +218,10 @@ int main(int argc,char**argv){
     GBuf gb; gb.W=W; gb.H=H; gb.P.assign(W*H,{}); gb.N.assign(W*H,{}); gb.A.assign(W*H,{});
     gb.valid.assign(W*H,0); gb.emissivePix.assign(W*H,0);
     par(W*H,[&](int i){ int x=i%W,y=i/W; V rd=rayDir(cam,(float)x,(float)y);
-        Hit h=trace(S,cam.eye,rd,1e30f); if(h.q<0) return;
-        const Quad& Q=S.q[h.q]; V P=cam.eye+rd*h.t;
-        gb.P[i]=P; gb.N[i]=Q.n; gb.A[i]=Q.albedo; gb.valid[i]=1;
-        gb.emissivePix[i]= (h.q==S.light)?1:0;
+        Hit h=trace(S,cam.eye,rd,1e30f); if(!h.hit) return;
+        V P=cam.eye+rd*h.t;
+        gb.P[i]=P; gb.N[i]=h.N; gb.A[i]=h.albedo; gb.valid[i]=1;
+        gb.emissivePix[i]= h.light?1:0;
     });
 
     // ---- 2. SURFEL FIELD ----
@@ -249,11 +263,11 @@ int main(int argc,char**argv){
                 float u1=r.f(),u2=r.f(); float rr=std::sqrt(u1), ph=2*PI*u2;
                 V wi=tx*(rr*std::cos(ph)) + ty*(rr*std::sin(ph)) + s.n*std::sqrt(std::max(0.0f,1-u1)); wi=norm(wi);
                 Hit h=trace(S,s.pos+s.n*1e-4f,wi,1e30f);
-                if(h.q<0||h.q==S.light) continue;                        // miss or light -> 0 (direct handled by NEE)
-                const Quad& Q=S.q[h.q]; V hp=s.pos+wi*h.t;
-                V Lo = shadeDirect(S,hp,Q.n,Q.albedo,r,1);               // 1st-bounce direct at the hit
-                float cov; V Ehit=gatherE(sf,grid,hp,Q.n,cov);           // + multi-bounce from the field (old E)
-                Lo = Lo + Q.albedo*INV_PI*Ehit;
+                if(!h.hit||h.light) continue;                            // miss or light -> 0 (direct handled by NEE)
+                V hp=s.pos+wi*h.t;
+                V Lo = shadeDirect(S,hp,h.N,h.albedo,r,1);               // 1st-bounce direct at the hit
+                float cov; V Ehit=gatherE(sf,grid,hp,h.N,cov);           // + multi-bounce from the field (old E)
+                Lo = Lo + h.albedo*INV_PI*Ehit;
                 // firefly clamp
                 Lo.x=std::min(Lo.x,FIREFLY);Lo.y=std::min(Lo.y,FIREFLY);Lo.z=std::min(Lo.z,FIREFLY);
                 meas=meas+Lo;

@@ -9,6 +9,10 @@ built to diagnose and fix the two failures you hit on the previous two attempts:
 It follows the same split your engine uses on the GTX path: a **visibility raster produces the
 G‑buffer**, and **surfels carry only the indirect (bounced) light**. Direct light stays sharp.
 
+The scene now includes **analytic curved primitives** (three diffuse spheres of different radius,
+plus a flat box for contrast) to prove surfels handle continuously‑varying normals, not just
+axis‑aligned faces — see *Curved surfaces* below.
+
 Reference technique: Jure Triglav's *surfel‑based GI* write‑up and the WebGI experiments — same idea,
 re‑derived here in plain C++ so every term is inspectable and there is no shader/driver black box.
 
@@ -89,6 +93,27 @@ The `surfel_distribution` and `coverage` outputs are the direct evidence: even s
 wall, floor and box face, with only mild falloff into corners.
 
 ---
+
+## Curved surfaces
+
+Surfels are a point‑sampled representation, so they don't care whether a surface is flat or curved —
+what matters is the **per‑hit geometric normal** in the G‑buffer and even coverage over the surface.
+Both are handled:
+
+- The visibility `trace()` returns a **per‑hit normal**. For a sphere that's `normalize(hit − centre)`,
+  so every surfel on a sphere gets the correct local normal; the hit record carries normal + material
+  directly, so nothing downstream branches on primitive type.
+- The gather (`gatherE`) already weights neighbours by `dot(N, surfel.n)` and by distance to the
+  surfel's tangent plane, which is exactly what you want on curvature: a surfel only contributes to
+  points whose normal agrees with it, so the shading follows the curve smoothly instead of leaking
+  across it.
+- Coverage‑driven spawning fills curved surfaces to the same target density as flat ones — the
+  `coverage` heat map is uniformly warm across the spheres, with only faint seams at silhouettes.
+
+Result (`SurfelGI_Result.png`): smooth GI gradients wrapping each sphere, red/green colour bleed on
+the curvature, and the small floating sphere picking up bounce from all directions — no faceting, no
+flicker (the ×20 diff stays black), no coverage gaps. Adding more/other analytic primitives is just
+another case in `trace()` returning `{t, normal, albedo}`.
 
 ## Mapping back to the engine
 
