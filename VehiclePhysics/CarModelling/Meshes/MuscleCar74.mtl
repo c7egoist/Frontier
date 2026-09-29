@@ -1,26 +1,18 @@
-newmtl steel
-Kd 0.62 0.66 0.72
+newmtl chrome
+Kd 0.92 0.94 0.97
 Ks 0.94 0.94 0.94
-Ns 384.25
+Ns 816.25
 d 1
 illum 3
-# frontier Metal_Steel
+# frontier Metal_Chrome
 
-newmtl pearl
-Kd 0.93 0.9 0.95
-Ks 0.31 0.31 0.31
-Ns 654.25
+newmtl plastic-blue
+Kd 0.16 0.36 0.85
+Ks 0.04 0.04 0.04
+Ns 510.25
 d 1
 illum 2
 # frontier AutomotiveFlakePaint  flakes=true
-
-newmtl carbon
-Kd 0.1 0.11 0.12
-Ks 0.58 0.58 0.58
-Ns 328
-d 1
-illum 3
-# frontier CarbonFibre
 
 newmtl rubber
 Kd 0.045 0.045 0.05

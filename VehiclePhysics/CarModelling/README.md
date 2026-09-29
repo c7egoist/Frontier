@@ -11,10 +11,12 @@ software rasteriser (no GUI, no GPU required here).
   Frontier additions** (see "Material system + exporter" below). The 200 MB baseline `Proofs/` gallery and the upstream
   `.patch` were intentionally **not** vendored (references, not the tool). Upstream gate: `SolidArc/Tools/Build/CheckSolidArc.sh`.
 - `BuildConsole.sh` — minimal build of just the console binary (no CMake, no verifier suite). `./BuildConsole.sh [out]`.
-- `Cars/` — `.scr` modelling scripts. **Racing cars (the deliverable):** `RaceGT.scr`, `RaceOpenWheel.scr`,
-  `RaceRally.scr`. Reference-style studies (early, replicate the sample images): `MuscleCar74.scr`, `Sedan.scr`, `Hatchback.scr`.
-- `Proofs/` — rendered preview PNGs. `AllRacingCars.png` is the contact sheet of the three racing designs.
-- `Meshes/` — exported `<Car>.obj` + `<Car>.mtl` + `<Car>.materials.json` for each racing car.
+- `Cars/` — `.scr` modelling scripts, one per car (the deliverable): `MuscleCar74.scr` (blue fastback),
+  `Sedan.scr` (pearl notchback), `Hatchback.scr` (red hot hatch). Each script models the car, renders its proof, and
+  exports its mesh.
+- `Proofs/` — rendered preview PNGs (`muscle.png`, `sedan.png`, `hatch.png`) and the `AllCars.png` contact sheet.
+- `Meshes/` — exported `<Car>.obj` + `<Car>.mtl` + `<Car>.materials.json` for each car (default = sharp/duplicated
+  faces). `MuscleCar74_welded.obj` is a welded (smooth) export demonstrating the `--weld` toggle.
 
 ## Material system + exporter (Frontier additions to SolidArc)
 SolidArc's matcap studios *are* the material system. This checkout extends them for a racing game and adds mesh export:
@@ -25,22 +27,26 @@ SolidArc's matcap studios *are* the material system. This checkout extends them 
 - **Car/engine studios added** (indices 10–13): `rubber` (matte tyre), `glass` (dark tinted, glossy), `headlight`
   (emissive white), `taillight` (emissive red), alongside the originals (steel chrome gold copper plastic-white/-red/-blue
   clay pearl carbon). `matcap list` prints all 14.
-- **`export <path.obj>`** tessellates every solid (via the kernel's exact `TessellateFace`) to a Wavefront **OBJ**, with
-  faces grouped by their per-face material as `usemtl` groups. It also writes:
+- **`export <path.obj> [--chord=t] [--weld[=eps]]`** tessellates every solid (via the kernel's exact `TessellateFace`)
+  to a Wavefront **OBJ**, with faces grouped by their per-face material as `usemtl` groups.
+  - **Duplicated vs welded (edge sharpness) is a toggle.** By **default** coincident vertices are **kept duplicated** so
+    every face carries its own normals and the low-poly creases stay crisp (the intended look). Passing **`--weld`**
+    merges vertices that share a position within each body and averages their normals — producing smooth, shared
+    topology with a smaller vertex count (e.g. MuscleCar74: 4609 → 3065 verts). `--weld=eps` sets the merge tolerance
+    in metres (default `1e-5`).
+  It also writes:
   - a portable **`.mtl`** (Kd/Ks/Ns/d + a `# frontier <Material>` tag per studio) for any OBJ viewer, and
   - an editable **`.materials.json`** manifest binding each studio to the real **Frontier engine material** — paints →
     **System B `AutomotiveFlakePaint`** (clear-coat + metallic flakes), tyres → `Rubber_Tyre`, windows → `Glass_Tinted`,
     trim → `Metal_Chrome`/`Metal_Steel`, lights → `Emissive_Headlight`/`Emissive_Taillight`, splitters/wings → `CarbonFibre`.
   Edit the JSON (or reassign `usemtl` groups) to change any material without re-modelling.
 
-## The three racing cars
-The reference images were style targets only; these are original low-poly **racing** designs (box + chamfer + cylinder):
-1. **Race1_GT** — low, wide GT endurance coupe: flake-red paint, tinted glass canopy, carbon rear wing + front splitter,
-   fat rubber slicks on chrome hubs, emissive head/taillights.
-2. **Race2_OpenWheel** — flake-blue formula single-seater: tapered nose, carbon front/rear wings, headrest + airbox,
-   four exposed rubber tyres.
-3. **Race3_Rally** — pearl rally hatch: raised ride height, carbon roof spoiler + front light bar, glass greenhouse,
-   chunky rubber tyres on steel hubs, emissive lights.
+## The three cars
+The reference images were style targets only; these are original low-poly designs, each a distinct body class:
+1. **MuscleCar74** — blue fastback muscle car: long hood, raked windshield, fastback roofline, raised fender haunches,
+   tinted windshield/backlight + side DLO glass, chrome hub caps, emissive head/taillights.
+2. **Sedan** — pearl three-box notchback saloon: long wheelbase, upright greenhouse, separate trunk volume.
+3. **Hatchback** — red compact hot hatch: short overhangs, steep tailgate, tall greenhouse over the rear axle.
 
 ## Build & render
 ```bash
@@ -49,10 +55,25 @@ VehiclePhysics/CarModelling/BuildConsole.sh /tmp/sa-build
     VehiclePhysics/CarModelling/Cars/MuscleCar74.scr
 ```
 
-## Modelling approach (why box + chamfer)
-SolidArc's Boolean support is intentionally *bounded* (robust for coincident axis-aligned boxes; general
-box-minus-cylinder wheel-arch cuts refuse transactionally rather than guessing). So the low-poly bodies are shaped with
-the robust, exact operations: **`box`** primitives, **`chamfer`** for every slope (raked nose, windshield, fastback/
-hatch, rocker bevels), and **`cylinder`** wheels/lights. Per-body colour for the previews uses the `matcap` studios
-(`plastic-blue`, `plastic-white`, `pearl`, `carbon`, `steel`, `chrome`, …). Final engine materials (clearcoat-with-flakes
-paint, rubber, glass, chrome, emissive) are bound at mesh-export time — see `Meshes/` once a car is selected.
+## Modelling approach (real CAD: silhouette extrude + boolean wheel arches)
+Each body is built the way a CAD user would, using SolidArc's exact NURBS/B-rep operations:
+
+1. **Side silhouette → solid.** A closed `polyline` on the `xz` workplane traces the car's profile (nose, hood, cowl,
+   windshield, roof, backlight, deck, haunches, tail); `extrude` sweeps it across the car's width into a solid.
+2. **Wheel arches by boolean subtraction.** Two full-width `cylinder` tunnels (one per axle) are combined with
+   `boolean union` into a single cutter, and one `boolean subtract` carves both arches — leaving a closed, manifold
+   solid (χ=2, genus 0). The silhouette's beltline is kept **above** each arch top across the wheel footprint, so the
+   tunnels never sever the body, and the raised fender haunches over the axles read as real arches.
+3. **No intersecting geometry.** The tyres (`cylinder`, `rubber`) sit **concentrically inside** the arches with radial
+   clearance and top clearance below the fender band — they do **not** intersect the body, which matters for the Jolt
+   collision pass. Hub caps, side glass and lights are placed **flush against or just outside** the body surface, again
+   without interpenetration.
+4. **Per-face materials.** Glass is assigned to the windshield/backlight (and tailgate) faces of the single solid via
+   `matcap … --face=…`; separate parts get rubber / chrome / emissive studios. Final engine materials
+   (System-B `AutomotiveFlakePaint`, `Rubber_Tyre`, `Glass_Tinted`, `Metal_Chrome`, emissive) are bound in the exported
+   `.materials.json`.
+
+> **Kernel notes (robustness).** Booleans in this kernel want **exactly one body per side**, so multiple cutters are
+> `union`ed first and subtracted once (chaining subtracts onto already-curved faces, or blind pockets whose end-cap lands
+> inside the body, are unreliable — they can flip inside/outside classification). Through-cutters (both caps outside the
+> body) subtract cleanly; nudging a cutter to non-round coordinates avoids seam/edge singularities.

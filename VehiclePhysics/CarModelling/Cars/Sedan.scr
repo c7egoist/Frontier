@@ -1,37 +1,46 @@
-box (0,0,0.36) (4.35,1.92,1.00) --name=BodyRaw
-chamfer BodyRaw 0.26 --edges=5,7 --name=Body
-box (1.10,0.16,1.00) (3.35,1.78,1.52) --name=GlassRaw
-chamfer GlassRaw 0.34 --edges=5,7 --name=Glass
-box (1.55,0.26,1.52) (3.05,1.68,1.58) --name=Roof
-cylinder (0.95,-0.05,0.40) 0.40 0.28 --axis=(0,1,0) --name=WheelFL
-cylinder (0.95,1.72,0.40) 0.40 0.28 --axis=(0,1,0) --name=WheelFR
-cylinder (3.50,-0.05,0.40) 0.40 0.28 --axis=(0,1,0) --name=WheelRL
-cylinder (3.50,1.72,0.40) 0.40 0.28 --axis=(0,1,0) --name=WheelRR
-cylinder (0.95,-0.09,0.40) 0.14 0.05 --axis=(0,1,0) --name=HubFL
-cylinder (0.95,2.00,0.40) 0.14 0.05 --axis=(0,1,0) --name=HubFR
-cylinder (3.50,-0.09,0.40) 0.14 0.05 --axis=(0,1,0) --name=HubRL
-cylinder (3.50,2.00,0.40) 0.14 0.05 --axis=(0,1,0) --name=HubRR
-cylinder (0.00,0.30,0.74) 0.13 0.10 --axis=(1,0,0) --name=HLa
-cylinder (0.00,0.62,0.74) 0.13 0.10 --axis=(1,0,0) --name=HLb
-cylinder (0.00,1.30,0.74) 0.13 0.10 --axis=(1,0,0) --name=HLc
-cylinder (0.00,1.62,0.74) 0.13 0.10 --axis=(1,0,0) --name=HLd
-box (-0.02,0.72,0.55) (0.05,1.20,0.84) --name=Grille
-matcap Body plastic-blue
-matcap Glass carbon
-matcap Roof plastic-blue
-matcap WheelFL carbon
-matcap WheelFR carbon
-matcap WheelRL carbon
-matcap WheelRR carbon
-matcap HubFL steel
-matcap HubFR steel
-matcap HubRL steel
-matcap HubRR steel
-matcap HLa chrome
-matcap HLb chrome
-matcap HLc chrome
-matcap HLd chrome
-matcap Grille carbon
+# =====================================================================
+#  Sedan — low-poly pearl three-box notchback saloon (reference: blue sedan)
+#  Same robust method as MuscleCar74: silhouette -> extrude -> unioned
+#  arch tunnels -> single subtract. Longer wheelbase, upright greenhouse,
+#  separate trunk volume. Wheels sit inside the arches (no intersection).
+#  Run:  SolidArc --continue --proofs Proofs Cars/Sedan.scr
+# =====================================================================
+workplane xz
+polyline (0.10,0.32) (4.60,0.32) (4.72,0.54) (4.50,0.82) (4.02,0.96) (3.55,1.06) (3.30,1.02) (3.05,1.34) (2.10,1.40) (1.55,1.02) (1.30,1.00) (1.05,1.06) (0.62,0.94) (0.32,0.72) (0.10,0.50) --closed --name=Sil
+extrude Sil 1.92 --direction=(0,1,0) --name=B0
+
+cylinder (1.05,-0.45,0.360) 0.43 2.82 --axis=(0,1,0) --name=AF
+cylinder (3.60,-0.45,0.360) 0.42 2.82 --axis=(0,1,0) --name=AR
+boolean union AF -- AR --name=Cutter
+boolean subtract B0 -- Cutter --name=Body
+
+# paint (pearl) + glass (windshield f10, backlight f8)
+matcap Body pearl
+matcap Body glass --face=8,10
+
+cylinder (1.05,-0.02,0.360) 0.35 0.30 --axis=(0,1,0) --name=WFL
+cylinder (1.05,1.64,0.360) 0.35 0.30 --axis=(0,1,0) --name=WFR
+cylinder (3.60,-0.02,0.360) 0.34 0.30 --axis=(0,1,0) --name=WRL
+cylinder (3.60,1.64,0.360) 0.34 0.30 --axis=(0,1,0) --name=WRR
+matcap WFL WFR WRL WRR rubber
+
+cylinder (1.05,-0.07,0.360) 0.17 0.06 --axis=(0,1,0) --name=HFL
+cylinder (1.05,1.92,0.360) 0.17 0.06 --axis=(0,1,0) --name=HFR
+cylinder (3.60,-0.07,0.360) 0.16 0.06 --axis=(0,1,0) --name=HRL
+cylinder (3.60,1.92,0.360) 0.16 0.06 --axis=(0,1,0) --name=HRR
+matcap HFL HFR HRL HRR chrome
+
+box (1.60,-0.015,1.04) (3.00,0.0,1.34) --name=GLL
+box (1.60,1.92,1.04) (3.00,1.935,1.34) --name=GLR
+matcap GLL GLR glass
+
+box (0.03,0.24,0.56) (0.10,0.66,0.74) --name=HLA
+box (0.03,1.28,0.56) (0.10,1.70,0.74) --name=HLB
+matcap HLA HLB headlight
+box (4.72,0.20,0.56) (4.78,1.74,0.76) --name=TL
+matcap TL taillight
+
 view iso
 view fit
-render CarB_Sedan --size=760x560
+render sedan --size=1200x850
+export Meshes/Sedan.obj

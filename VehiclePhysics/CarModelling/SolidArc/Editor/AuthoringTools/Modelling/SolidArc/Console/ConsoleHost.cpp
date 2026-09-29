@@ -4084,10 +4084,13 @@ void ConsoleHost::Register() noexcept
         return true;
     });
 
-    Add("export", "export <path.obj> [--chord=t] — tessellate every solid to a Wavefront OBJ (+ .mtl + .materials.json). "
+    Add("export", "export <path.obj> [--chord=t] [--weld[=eps]] — tessellate every solid to a Wavefront OBJ (+ .mtl + .materials.json). "
                   "Faces are grouped by their per-face matcap material (usemtl); the JSON manifest binds each studio to a "
                   "Frontier engine material (AutomotiveFlakePaint / Rubber_Tyre / Glass_Tinted / metals / emissive) and is "
-                  "meant to be hand-edited.", [=, this](const CommandLine& C)
+                  "meant to be hand-edited. By default coincident vertices are KEPT DUPLICATED so low-poly edges stay crisp "
+                  "(each face carries its own normals). Pass --weld to merge coincident position+normal vertices within each "
+                  "body (welded seams, smaller mesh); --weld=eps sets the merge tolerance in metres (default 1e-5).",
+                  [=, this](const CommandLine& C)
     {
         if (!Need(C, 1, "export")) return false;
         std::filesystem::path ObjPath = C.Arguments[0];
@@ -4097,40 +4100,90 @@ void ConsoleHost::Register() noexcept
         std::filesystem::path MtlPath  = Dir / (Stem + ".mtl");
         std::filesystem::path JsonPath = Dir / (Stem + ".materials.json");
         const double Chord = C.SwitchNumber("chord").value_or(2e-3);
+        // Weld toggle: default OFF (duplicated faces / sharp edges). `--weld` or `--weld=eps` merges coincident verts.
+        const bool   Weld    = C.Switch("weld") || C.SwitchNumber("weld").has_value() || C.SwitchText("weld").has_value();
+        const double WeldEps = std::max(1e-9, C.SwitchNumber("weld").value_or(1e-5));
         std::error_code Ec; if (!Dir.empty()) std::filesystem::create_directories(Dir, Ec);
 
         std::ofstream Obj(ObjPath);
         if (!Obj) return Refuse("export: cannot write %s", ObjPath.string().c_str());
         Obj << "# SolidArc mesh export — units: metres, Y up matches source; per-face materials via usemtl.\n";
+        Obj << "# vertices: " << (Weld ? "welded (coincident position+normal merged per body)" : "duplicated per face (sharp low-poly edges)") << "\n";
         Obj << "mtllib " << (Stem + ".mtl") << "\n";
 
         std::set<int> Used;
-        size_t VBase = 0, TriCount = 0; int Solids = 0;
+        size_t VBase = 0, TriCount = 0, WeldedVerts = 0, RawVerts = 0; int Solids = 0;
         for (const SceneFigure& F : Scene.Figures())
         {
             if (F.Classification != FigureClassification::Body || F.Hidden || F.Construction) continue;
             ++Solids;
             const std::string Obj_o = SanitizeName(F.Name);
-            Obj << "o " << Obj_o << "\n";
             const BrepBody& B = F.Body;
+
+            // Gather this body's triangles into one vertex pool. When welding, collapse vertices that share a
+            // position (within WeldEps) into a single shared vertex whose normal is the AVERAGE of the incident
+            // faces — turning the faceted, per-face-duplicated seams into smooth shared topology. Default (no weld)
+            // keeps every face's own vertices/normals, preserving the crisp low-poly creases. Per-face material kept.
+            std::vector<Vec3> P, N;
+            std::vector<std::array<int,3>> Tris; std::vector<int> TriMat;
+            std::map<std::tuple<long long,long long,long long>, int> WeldMap;
+            const double Inv = 1.0 / WeldEps;
+            auto Quantize = [&](double V) { return (long long)std::llround(V * Inv); };
+
             for (size_t Fi = 0; Fi < B.Faces.size(); ++Fi)
             {
                 const int St = int(F.MatcapForFace(int(Fi)));
                 Used.insert(St);
                 BrepBody::FaceTriangles T = B.TessellateFace(int(Fi), Chord);
                 if (T.Positions.empty() || T.Triangles.empty()) continue;
-                for (const Vec3& P : T.Positions) Obj << "v " << P.X << ' ' << P.Y << ' ' << P.Z << "\n";
-                for (const Vec3& N : T.Normals)   Obj << "vn " << N.X << ' ' << N.Y << ' ' << N.Z << "\n";
-                Obj << "g " << Obj_o << "_f" << Fi << "\n";
-                Obj << "usemtl " << MatcapName(uint8_t(St)) << "\n";
+                RawVerts += T.Positions.size();
+                std::vector<int> Local(T.Positions.size());
+                for (size_t J = 0; J < T.Positions.size(); ++J)
+                {
+                    const Vec3& Vp = T.Positions[J];
+                    const Vec3& Vn = J < T.Normals.size() ? T.Normals[J] : Vec3{0,0,1};
+                    if (Weld)
+                    {
+                        auto Key = std::make_tuple(Quantize(Vp.X), Quantize(Vp.Y), Quantize(Vp.Z));
+                        auto It = WeldMap.find(Key);
+                        if (It != WeldMap.end()) { Local[J] = It->second; N[It->second] = N[It->second] + Vn; continue; }
+                        Local[J] = int(P.size()); WeldMap.emplace(Key, Local[J]);
+                    }
+                    else Local[J] = int(P.size());
+                    P.push_back(Vp); N.push_back(Vn);
+                }
                 for (size_t K = 0; K + 2 < T.Triangles.size(); K += 3)
                 {
-                    const size_t A = VBase + T.Triangles[K] + 1, D = VBase + T.Triangles[K + 1] + 1, E = VBase + T.Triangles[K + 2] + 1;
+                    Tris.push_back({ Local[T.Triangles[K]], Local[T.Triangles[K + 1]], Local[T.Triangles[K + 2]] });
+                    TriMat.push_back(St);
+                }
+            }
+            if (P.empty() || Tris.empty()) continue;
+            if (Weld) for (Vec3& Vn : N)   // renormalise the averaged normals
+            {
+                const double L = std::sqrt(Vn.X*Vn.X + Vn.Y*Vn.Y + Vn.Z*Vn.Z);
+                if (L > 1e-12) { Vn.X /= L; Vn.Y /= L; Vn.Z /= L; }
+            }
+            WeldedVerts += P.size();
+
+            Obj << "o " << Obj_o << "\n";
+            for (const Vec3& Vp : P) Obj << "v " << Vp.X << ' ' << Vp.Y << ' ' << Vp.Z << "\n";
+            for (const Vec3& Vn : N) Obj << "vn " << Vn.X << ' ' << Vn.Y << ' ' << Vn.Z << "\n";
+            // Emit faces grouped by material so viewers keep the usemtl runs contiguous.
+            std::set<int> Mats(TriMat.begin(), TriMat.end());
+            for (int M : Mats)
+            {
+                Obj << "g " << Obj_o << "_" << MatcapName(uint8_t(M)) << "\n";
+                Obj << "usemtl " << MatcapName(uint8_t(M)) << "\n";
+                for (size_t Ti = 0; Ti < Tris.size(); ++Ti)
+                {
+                    if (TriMat[Ti] != M) continue;
+                    const size_t A = VBase + Tris[Ti][0] + 1, D = VBase + Tris[Ti][1] + 1, E = VBase + Tris[Ti][2] + 1;
                     Obj << "f " << A << "//" << A << ' ' << D << "//" << D << ' ' << E << "//" << E << "\n";
                     ++TriCount;
                 }
-                VBase += T.Positions.size();
             }
+            VBase += P.size();
         }
         Obj.close();
 
@@ -4174,8 +4227,14 @@ void ConsoleHost::Register() noexcept
         }
         Js.close();
 
-        Row("export %s  %d solids  %zu tris  %zu materials  (+ %s, %s)", ObjPath.string().c_str(), Solids, TriCount, Used.size(),
-            (Stem + ".mtl").c_str(), (Stem + ".materials.json").c_str());
+        if (Weld)
+            Row("export %s  %d solids  %zu tris  %zu verts (welded from %zu, eps=%.0e)  %zu materials  (+ %s, %s)",
+                ObjPath.string().c_str(), Solids, TriCount, WeldedVerts, RawVerts, WeldEps, Used.size(),
+                (Stem + ".mtl").c_str(), (Stem + ".materials.json").c_str());
+        else
+            Row("export %s  %d solids  %zu tris  %zu verts (duplicated, sharp edges)  %zu materials  (+ %s, %s)",
+                ObjPath.string().c_str(), Solids, TriCount, WeldedVerts, Used.size(),
+                (Stem + ".mtl").c_str(), (Stem + ".materials.json").c_str());
         return true;
     });
     Add("tint", "tint <figure...> r g b — body colour 0..1", [=, this](const CommandLine& C)
