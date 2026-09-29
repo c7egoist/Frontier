@@ -160,6 +160,11 @@ both at proportional CPU cost. For Phase 3 (traction, braking, cornering grip) `
 `Mz` mainly affects steering *feel*, so shipping with a documented qualitative `Mz` is the right trade. It is asserted by
 sign only in the validator, with the limitation called out in the test name and the file header.
 
+> **Corroborated by the project owner (2026-09-29).** Independent testing on the owner's side also produced a very small
+> `Mz`, and *forcing* the magnitude up (e.g. by scaling the aligning term) introduced **incorrect behaviour** elsewhere
+> rather than a faithful trail. This confirms the decision here: keep `Mz` emergent (correct sign, honest magnitude) and
+> resolve it later through mesh resolution / a tread-stiffness gradient — do **not** apply an artificial magnitude gain.
+
 ---
 
 ## 6. How this plugs into the vehicle

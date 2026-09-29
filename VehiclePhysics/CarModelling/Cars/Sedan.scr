@@ -1,0 +1,37 @@
+box (0,0,0.36) (4.35,1.92,1.00) --name=BodyRaw
+chamfer BodyRaw 0.26 --edges=5,7 --name=Body
+box (1.10,0.16,1.00) (3.35,1.78,1.52) --name=GlassRaw
+chamfer GlassRaw 0.34 --edges=5,7 --name=Glass
+box (1.55,0.26,1.52) (3.05,1.68,1.58) --name=Roof
+cylinder (0.95,-0.05,0.40) 0.40 0.28 --axis=(0,1,0) --name=WheelFL
+cylinder (0.95,1.72,0.40) 0.40 0.28 --axis=(0,1,0) --name=WheelFR
+cylinder (3.50,-0.05,0.40) 0.40 0.28 --axis=(0,1,0) --name=WheelRL
+cylinder (3.50,1.72,0.40) 0.40 0.28 --axis=(0,1,0) --name=WheelRR
+cylinder (0.95,-0.09,0.40) 0.14 0.05 --axis=(0,1,0) --name=HubFL
+cylinder (0.95,2.00,0.40) 0.14 0.05 --axis=(0,1,0) --name=HubFR
+cylinder (3.50,-0.09,0.40) 0.14 0.05 --axis=(0,1,0) --name=HubRL
+cylinder (3.50,2.00,0.40) 0.14 0.05 --axis=(0,1,0) --name=HubRR
+cylinder (0.00,0.30,0.74) 0.13 0.10 --axis=(1,0,0) --name=HLa
+cylinder (0.00,0.62,0.74) 0.13 0.10 --axis=(1,0,0) --name=HLb
+cylinder (0.00,1.30,0.74) 0.13 0.10 --axis=(1,0,0) --name=HLc
+cylinder (0.00,1.62,0.74) 0.13 0.10 --axis=(1,0,0) --name=HLd
+box (-0.02,0.72,0.55) (0.05,1.20,0.84) --name=Grille
+matcap Body plastic-blue
+matcap Glass carbon
+matcap Roof plastic-blue
+matcap WheelFL carbon
+matcap WheelFR carbon
+matcap WheelRL carbon
+matcap WheelRR carbon
+matcap HubFL steel
+matcap HubFR steel
+matcap HubRL steel
+matcap HubRR steel
+matcap HLa chrome
+matcap HLb chrome
+matcap HLc chrome
+matcap HLd chrome
+matcap Grille carbon
+view iso
+view fit
+render CarB_Sedan --size=760x560

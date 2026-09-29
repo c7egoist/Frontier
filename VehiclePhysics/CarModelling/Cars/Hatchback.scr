@@ -1,0 +1,33 @@
+box (0,0,0.34) (3.70,1.84,0.96) --name=BodyRaw
+chamfer BodyRaw 0.30 --edges=7 --name=Body
+box (1.00,0.15,0.96) (3.35,1.72,1.46) --name=GlassRaw
+chamfer GlassRaw 0.46 --edges=7 --name=Glass
+box (1.45,0.24,1.46) (2.70,1.62,1.52) --name=Roof
+cylinder (0.92,-0.04,0.40) 0.40 0.26 --axis=(0,1,0) --name=WheelFL
+cylinder (0.92,1.70,0.40) 0.40 0.26 --axis=(0,1,0) --name=WheelFR
+cylinder (2.95,-0.04,0.40) 0.40 0.26 --axis=(0,1,0) --name=WheelRL
+cylinder (2.95,1.70,0.40) 0.40 0.26 --axis=(0,1,0) --name=WheelRR
+cylinder (0.92,-0.08,0.40) 0.16 0.05 --axis=(0,1,0) --name=HubFL
+cylinder (0.92,1.96,0.40) 0.16 0.05 --axis=(0,1,0) --name=HubFR
+cylinder (2.95,-0.08,0.40) 0.16 0.05 --axis=(0,1,0) --name=HubRL
+cylinder (2.95,1.96,0.40) 0.16 0.05 --axis=(0,1,0) --name=HubRR
+box (-0.02,0.18,0.66) (0.05,0.52,0.86) --name=HLl
+box (-0.02,1.32,0.66) (0.05,1.66,0.86) --name=HLr
+box (-0.02,0.58,0.58) (0.04,1.26,0.82) --name=Grille
+matcap Body plastic-red
+matcap Glass carbon
+matcap Roof plastic-red
+matcap WheelFL carbon
+matcap WheelFR carbon
+matcap WheelRL carbon
+matcap WheelRR carbon
+matcap HubFL chrome
+matcap HubFR chrome
+matcap HubRL chrome
+matcap HubRR chrome
+matcap HLl steel
+matcap HLr steel
+matcap Grille carbon
+view iso
+view fit
+render CarC_Hatch --size=760x560
