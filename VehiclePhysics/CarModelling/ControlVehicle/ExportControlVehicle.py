@@ -12,15 +12,15 @@
 #   Outputs (written next to the .blend):
 #       ControlVehicle_Body.glb     — body only, modifiers applied, +Y up (glTF convention)
 #       ControlVehicle_Body.obj     — same, OBJ
-#       ControlVehicle_Collision.obj — the UCX_ convex hull, if present (handy for the physics broadphase proxy)
 #       ControlVehicle_Bounds.txt   — measured bounding boxes → feed exact TyreRadius / CoMHeight back into VehicleGeometry.h
 #
 #   WHAT IS EXCLUDED, AND WHY:
-#     • Wheels  — RubberFL*, RimFL*  : the sim builds PROCEDURAL wheels at the four Socket_AxleMount_* points instead.
-#     • Ground  — Plane*                : scene backdrop, not part of the car.
-#     • Cameras — Camera*               : the "Chassis_Mount_Exterior"/"Cockpit_Mount_Internal" sockets are camera rigs.
-#     • Collision — UCX_*               : exported SEPARATELY (not part of the visual body).
-#     • Empties — Socket_*, Empty       : transforms only; already extracted into VehicleGeometry.h::ControlVehicleSockets.
+#     • Wheels    — RubberFL*, RimFL*  : the sim builds PROCEDURAL wheels at the four Socket_AxleMount_* points instead.
+#     • Ground    — Plane*              : scene backdrop, not part of the car.
+#     • Cameras   — Camera*             : the "Chassis_Mount_Exterior"/"Cockpit_Mount_Internal" sockets are camera rigs.
+#     • Collision — UCX_*               : DROPPED entirely — that was Unreal's collision convention; Frontier uses its own
+#                                         collision, so the imported hull is useless. Not exported.
+#     • Empties   — Socket_*, Empty     : transforms only; already extracted into VehicleGeometry.h::ControlVehicleSockets.
 #
 #   ORIENTATION: the model's Blender axes already match our physics body frame (+X forward, +Y left, +Z up); no rotation is
 #   applied to the mesh data. The glTF exporter re-maps to +Y-up as usual for glTF; the OBJ is left Z-up to match the sim.
@@ -108,14 +108,7 @@ def main():
         forward_axis="X", up_axis="Z",   # keep the sim's Z-up body frame
     )
 
-    # ---- export collision hull separately, if present ----
-    if collision:
-        select_only(collision)
-        bpy.ops.wm.obj_export(
-            filepath=os.path.join(HERE, "ControlVehicle_Collision.obj"),
-            export_selected_objects=True, apply_modifiers=True,
-            forward_axis="X", up_axis="Z",
-        )
+    # UCX_ collision hull is intentionally NOT exported — Unreal-only convention, Frontier rolls its own collision.
 
     print("Export complete →", HERE)
 

@@ -83,4 +83,6 @@ Vertical scalars that need **applied-modifier mesh bounds** (`Mass`, exact `CoMH
 blender ControlVehicle.blend --background --python ExportControlVehicle.py
 ```
 
-It writes `ControlVehicle_Body.glb` / `.obj` (body only, wheels excluded, modifiers applied), the `UCX_` collision hull separately, and `ControlVehicle_Bounds.txt` with the measured body height and per-wheel radius/width. Copy the measured `TyreRadius` and body height back into `VehicleGeometry.h` to close out the vertical numbers.
+It writes `ControlVehicle_Body.glb` / `.obj` (body only, wheels excluded, modifiers applied) and `ControlVehicle_Bounds.txt` with the measured body height and per-wheel radius/width. Copy the measured `TyreRadius` and body height back into `VehicleGeometry.h` to close out the vertical numbers.
+
+> **UCX_ collision is dropped on purpose.** `UCX_ControlVehicle_00` was Unreal's collision-mesh convention; Frontier uses its own collision, so the imported hull is useless and is not exported. (And for the field test-drive below, the car body carries **no** collision at all — only the wheels contact the ground.)
