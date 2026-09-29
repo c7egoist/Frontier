@@ -99,7 +99,7 @@ Only the emoji below may appear anywhere: source, comments, Markdown, chat, comm
 filenames. Never invent one, never borrow one from outside the table.
 
 📦 is the one module marker (project directive) — it is used for the file-header banner and the first `///`
-annotation line. 🧩 is retired: it does not appear anywhere in the tree and must not be reintroduced.
+annotation line. The former puzzle-piece marker is retired: it appears nowhere in the tree and must never be reintroduced.
 
 | Category      | Emoji            | Means                                | Where it may appear                     |
 |---------------|------------------|--------------------------------------|-----------------------------------------|

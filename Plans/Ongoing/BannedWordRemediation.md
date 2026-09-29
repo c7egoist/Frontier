@@ -49,10 +49,10 @@ what we own without permanently diverging the copied Frontier engine code from u
 ## Decisions (2026-09-30 session)
 
 - 🔴 **`Test` is banned** (project directive). Replacements as above; recorded in `SKILL-Naming.md`.
-- 🔴 **Banner emoji is `📦`; `🧩` is retired** (project directive — "we already used it a lot"). `🧩` was replaced by
-  `📦` **repo-wide** (14 files incl. FlattenedEngine, shaders, StarFix, governance docs) and removed from the
-  `SKILL-Formatting.md` whitelist. `📦` is the one module marker for both the file-header banner and the first `///`
-  line; `🧩` must not be reintroduced anywhere (source, docs, or chat).
+- 🔴 **Banner emoji is `📦`; the former puzzle-piece marker is retired** (project directive — "we already used it a
+  lot"). It was replaced by `📦` **repo-wide** (14 files incl. FlattenedEngine, shaders, StarFix, governance docs) and
+  removed from the `SKILL-Formatting.md` whitelist. `📦` is the one module marker for both the file-header banner and
+  the first `///` line; the retired glyph must not be reintroduced anywhere (source, docs, or chat).
 - **`DrivingScheme`** replaces the interim `DrivingLayer` (better name for the retired `Model`).
 
 ## Phases
@@ -97,5 +97,5 @@ mirrors the equations documented in the comments and is the correct domain vocab
 ## Deferred to the formatting pass (Phase 5)
 
 Items found during Phase 2 but out of the banned-**word** scope: internal trailing-underscore snake_case members and
-single-letter params across the rest of the layer. (The banner emoji is settled — `📦` everywhere, `🧩` retired.)
+single-letter params across the rest of the layer. (The banner emoji is settled — `📦` everywhere; the old marker retired.)
 Batched together so the diff is one mechanical style sweep rather than scattered noise across feature phases.
