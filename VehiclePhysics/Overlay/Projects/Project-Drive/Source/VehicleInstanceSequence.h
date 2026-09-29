@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                   VEHICLEINSTANCESEQUENCE.H
 //============================================================================================================================================
-// 🧩 Project-Drive's engine ⇄ project seam — the bridge from the live VehicleSolver to renderer instance
+// 📦 Project-Drive's engine ⇄ project seam — the bridge from the live VehicleSolver to renderer instance
 //    transforms, exactly the role PhysicsInstanceSequence plays for the drop scene in Project-Zero.
 //
 //    RigidBodySolver / VisibilityExchange know nothing about vehicles; VehicleSolver knows nothing about

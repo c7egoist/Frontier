@@ -269,7 +269,7 @@ static void Layer2_Drivetrain()
 
     // NOTE (faithful GRIT behaviour): GRIT's default turbo constants (quadratic shaft friction TurboFrictionQuadratic
     // capping shaft speed) leave the shaft well below the boost-map's operating range in a free-rev, so absolute boost
-    // is small (~0.02 bar here). We reproduce that exactly; the test verifies dynamics (spool up, decay on lift), not a
+    // is small (~0.02 bar here). We reproduce that exactly; the check verifies dynamics (spool up, decay on lift), not a
     // tuned boost magnitude — retuning is a spec-authoring task, not a port-correctness one.
     const float peakBoost = boostTrace.back();
     // Sustained lift: shaft spins down via friction → turbo rpm falls → boost decays.

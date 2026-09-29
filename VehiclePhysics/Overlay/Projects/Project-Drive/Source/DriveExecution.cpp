@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                      GAMEEXECUTION.CPP
 //============================================================================================================================================
-// 🧩 Project-Zero entry point — opens the Vulkan window, makes a glTF level resident, runs the ReSTIR render loop.
+// 📦 Project-Zero entry point — opens the Vulkan window, makes a glTF level resident, runs the ReSTIR render loop.
 //
 //    Scene selection (R2): `Project-Zero.exe [--scene <file.gltf|glb|shaderball|materials|showroom|showcase>] [--scale <float>]`
 //        showroom — P0 spatial-interface level, exported once from ShowroomStructure then imported like any other

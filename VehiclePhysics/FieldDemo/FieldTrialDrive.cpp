@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// FieldTestDrive.cpp — drive the REAL ControlVehicle geometry across an open field (flat + speed bumps + a launch ramp),
+// FieldTrialDrive.cpp — drive the REAL ControlVehicle geometry across an open field (flat + speed bumps + a launch ramp),
 //                      with NO body collision (only the wheels touch the ground), and dump per-frame telemetry to JSON.
 //
 //   This is a visual/behavioural demo, not a pass/fail suite. It reuses the exact same VehicleController + XPBD soft-tyre
@@ -8,7 +8,7 @@
 //   suspension work the speed bumps, the car launch off the ramp, and the steering turn the front wheels through cones.
 //
 //   Build:
-//     g++ -std=c++17 -O2 FieldTestDrive.cpp ../Overlay/Engine/PhysicalDynamics/Vehicle/VehicleController.cpp \
+//     g++ -std=c++17 -O2 FieldTrialDrive.cpp ../Overlay/Engine/PhysicalDynamics/Vehicle/VehicleController.cpp \
 //         ../Overlay/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp \
 //         ../Overlay/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp \
 //         ../Overlay/Engine/PhysicalDynamics/Vehicle/XPBDSoftTyre.cpp \
@@ -172,7 +172,7 @@ int main()
 
     // ---- human-readable report ----
     const float airDur = airFrames * dt;
-    std::printf("========================= FIELD TEST-DRIVE — what happened =========================\n");
+    std::printf("========================= FIELD TRIAL-DRIVE — what happened =========================\n");
     std::printf(" Vehicle: real ControlVehicle geometry (wheelbase %.3f m, track %.3f m, tyreR %.2f m), procedural wheels.\n", g.Wheelbase,g.TrackFront,g.TyreRadius);
     std::printf(" Course : flat -> cone slalom -> 3 speed bumps (44/47/50 m) -> launch ramp (68-76 m, ~1.35 m) -> land -> brake.\n\n");
     std::printf("  Top speed reached ............... %.1f m/s  (%.0f km/h)\n", maxSpeed, maxSpeed*3.6f);

@@ -53,7 +53,7 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
 {
     Instancing = Configuration;
     Config = Frontier::Vehicle::VehicleSolverConfiguration{};
-    Config.Model = Frontier::Vehicle::DrivingLayer::PacejkaDrivetrain;
+    Config.Model = Frontier::Vehicle::DrivingScheme::PacejkaDrivetrain;
     Frontier::Vehicle::ApplyGeometry(Config, Geometry);
     Config.Aero.Enabled = true;
 

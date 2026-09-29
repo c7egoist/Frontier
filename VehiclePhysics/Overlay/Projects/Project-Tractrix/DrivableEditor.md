@@ -19,7 +19,7 @@ Frontier checkout via `Build/DuplicateFromProjectZero.py`, and **you build and d
 | Hierarchy / outliner | `TriangleSpanRecord` → one glTF node per object → `OutlinerPanel` | named spans: Ground, Checker Pad, Ramp, Speed Bump 1‑3, Cone 1‑8, ControlVehicle, Wheel FL/FR/RL/RR |
 | Sun / sky | `Project-Zero` celestial sky + `SunInspectorPanel` (inherited unchanged) | — (comes free with the duplicate) |
 | Materials | OpenPBR `MaterialSlabDescriptor` + `AutomotiveFlakePaint.slang` (System B) | body = `SlateAutomotiveProfile`/`SlateGlintDensity` + GGX `Coat*` clearcoat |
-| Rigid bodies / terrain | `RigidBodySolver` (Jolt, +Z up) + heightfield seam | `TractrixTestTrack` (already committed) |
+| Rigid bodies / terrain | `RigidBodySolver` (Jolt, +Z up) + heightfield seam | `TractrixProvingGround` (already committed) |
 | Vehicle physics | engine‑agnostic `Vehicle::VehicleController` (+ XPBD soft tyre) | already ported (`Engine/PhysicalDynamics/Vehicle/`) |
 | Physics → render | `PhysicsInstanceSequence` (poses → `InstanceRecord::World`) | **`VehicleInstanceSequence`** (chassis + per‑wheel spin/steer) — *next* |
 | Editor camera | `FlyThroughSolver : CameraProjection` (WASD + RMB look) | inherited |

@@ -4,7 +4,7 @@
 //
 //    The engine-side assembly that turns the Phase 0–3 parts into a playable scene inside Project-Tractrix:
 //
-//        RigidBodySolver (Jolt)  ──creates──▶  TractrixTestTrack heightfield + a box chassis body
+//        RigidBodySolver (Jolt)  ──creates──▶  TractrixProvingGround heightfield + a box chassis body
 //              ▲                                     │
 //              │ StepOnce()                          │ hooks (read pose / apply force at point / ground sample)
 //        VehiclePhysicsThread (240 Hz)  ──drives──▶  VehicleSolver (chassis + 4 XPBD soft tyres)
@@ -21,7 +21,7 @@
 
 #pragma once
 
-#include "TractrixTestTrack.h"
+#include "TractrixProvingGround.h"
 
 #include "../../../Engine/PhysicalDynamics/RigidBodySolver.h"
 #include "../../../Engine/PhysicalDynamics/VehiclePhysicsThread.h"
@@ -137,7 +137,7 @@ public:
 
     [[nodiscard]] const RigidBodySolver&     Solver() const noexcept { return solver_; }
     [[nodiscard]] RigidBodyIdentity          Chassis() const noexcept { return chassis_; }
-    [[nodiscard]] const TractrixTestTrack&   Track() const noexcept { return track_; }
+    [[nodiscard]] const TractrixProvingGround&   Track() const noexcept { return track_; }
     [[nodiscard]] VehiclePhysicsThreadMetrics ThreadMetrics() const noexcept { return thread_.QueryMetrics(); }
 
 private:
@@ -156,7 +156,7 @@ private:
     RigidBodySolver                                              solver_;
     VehiclePhysicsThread                                         thread_;
     Frontier::Vehicle::VehicleSolver                         controller_;
-    TractrixTestTrack                                            track_;
+    TractrixProvingGround                                            track_;
     RigidBodyIdentity                                            chassis_ = InvalidRigidBody;
     DataChannel<Frontier::Vehicle::DriverInput>                  inputChannel_;
     DataChannel<Frontier::Vehicle::VehicleTelemetry>            telemetryChannel_;

@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleDrivingTests.cpp — rigorous "drive it around" physics validation (headless)
+// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleDrivingChecks.cpp — rigorous "drive it around" physics validation (headless)
 //============================================================================================================================================
 //
 //    Beyond the pass/fail invariants in VehicleSceneValidation.cpp, this harness DRIVES the car through the manoeuvres a
@@ -14,7 +14,7 @@
 //
 //    Everything runs on the same mock rigid-box chassis + mock heightfield GroundQuery used by VehicleSceneValidation, so
 //    it needs no Jolt/Unreal. Build & run:
-//        g++ -std=c++17 -O2 -Wall -Wextra VehicleDrivingTests.cpp VehicleSolver.cpp XPBDSoftTyre.cpp \
+//        g++ -std=c++17 -O2 -Wall -Wextra VehicleDrivingChecks.cpp VehicleSolver.cpp XPBDSoftTyre.cpp \
 //            PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o vdrive && ./vdrive
 //
 //============================================================================================================================================
@@ -40,7 +40,7 @@ struct MockChassis
     float Mass = 1200.0f;
     Vec3  InvInertiaDiag{};
     Vec3  Gravity{0, 0, -9.81f};
-    float LinearDamping  = 0.0f;    // NB: no artificial air drag — we test the vehicle model's own forces only
+    float LinearDamping  = 0.0f;    // NB: no artificial air drag — we check the vehicle model's own forces only
     float AngularDamping = 0.05f;
     Vec3  ForceAccum{};
     Vec3  TorqueAccum{};
@@ -96,13 +96,13 @@ static void KnownLimitation(const char* name, bool ok, double got, double want)
 
 static VehicleGeometry Geo() { return VehicleGeometry{}; }   // documented GT3-class estimates
 
-static VehicleSolverConfiguration MakeConfig(DrivingLayer model)
+static VehicleSolverConfiguration MakeConfig(DrivingScheme model)
 {
     VehicleSolverConfiguration c;
-    c.ActiveLayer = model;
+    c.ActiveScheme = model;
     ApplyGeometry(c, Geo());   // real wheel offsets / CoM height / mass — low CoM ⇒ car slides before it rolls
     // This suite measures the CAR's mechanical behaviour (top speed, braking, slopes, drift). Aerodynamics is a
-    // separate axis validated by AeroIntegrationTests.cpp, so disable it here to keep these thresholds pure.
+    // separate axis validated by AeroIntegrationChecks.cpp, so disable it here to keep these thresholds pure.
     c.Aero.Enabled = false;
     return c;
 }
@@ -151,7 +151,7 @@ int main()
     std::printf(" NOTE: no aerodynamic drag/downforce, no fuel, no nitro, no tyre/brake heat in model.\n");
     std::printf("=====================================================================================\n\n");
 
-    const DrivingLayer M = DrivingLayer::PacejkaDrivetrain;
+    const DrivingScheme M = DrivingScheme::PacejkaDrivetrain;
     const VehicleSolverConfiguration cfg = MakeConfig(M);
 
     //--------------------------------------------------------------------------------------------------------------
@@ -200,7 +200,7 @@ int main()
         // NOTE on scope: this mock's tyre contact reports a VERTICAL load (Fz ≈ m·g), so the static-friction cap μ·Fz
         //   is measured against gravity's vertical component, not the slope-normal load. A breakaway angle therefore
         //   cannot emerge from this simplified harness — the arctan(μ) slide limit appears in the REAL engine, where the
-        //   Jolt heightfield supplies true slope-normal contacts. What this test validates is the behaviour that IS
+        //   Jolt heightfield supplies true slope-normal contacts. What this check validates is the behaviour that IS
         //   representable and was previously missing: a braked car now HOLDS stationary on a grade (zero creep) instead
         //   of trickling downhill because the slip model gave no force at rest.
         int held = 0, checked = 0;
@@ -240,7 +240,7 @@ int main()
         const float grade = 0.20f;
         // Spawn lifted along the grade: with the real 3.396 m wheelbase the front axle sits ~grade·(half-wheelbase)
         //    up-slope, so an unlifted spawn would bury the front wheel and fire a penetration spike. Lift by
-        //    grade·1.7 (≈ half-wheelbase) + rest ride, mirroring the parking test.
+        //    grade·1.7 (≈ half-wheelbase) + rest ride, mirroring the parking check.
         Rig r; r.Build(cfg, Slope(grade), {0, 0, 0.40f + grade * 1.7f});
         r.Run(DriverInput{}, 1.0f, dt);
         const float x0 = r.chassis.Position.x, z0 = r.chassis.Position.z;

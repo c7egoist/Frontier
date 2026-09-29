@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                      CHASECAMERASOLVER.H
 //============================================================================================================================================
-// 🧩 Project-Drive's player/vehicle camera — a CameraProjection that trails the car, the counterpart to Project-Zero's
+// 📦 Project-Drive's player/vehicle camera — a CameraProjection that trails the car, the counterpart to Project-Zero's
 //    FlyThroughSolver (the editor fly camera). The host owns BOTH and toggles which one drives the render (C key):
 //    the fly camera for editing, the chase camera for driving.
 //

@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                     TRACTRIXDRIVESCENE.H
 //============================================================================================================================================
-// 🧩 Project-Tractrix's drivable authoring level (`--scene drive`). The exact ShowroomStructure discipline — an analytic
+// 📦 Project-Tractrix's drivable authoring level (`--scene drive`). The exact ShowroomStructure discipline — an analytic
 //    world-space triangle soup with per-object spans and OpenPBR materials, exported once through SceneCodec::Encode — but
 //    the furniture is a driving course instead of a Cornell box:
 //

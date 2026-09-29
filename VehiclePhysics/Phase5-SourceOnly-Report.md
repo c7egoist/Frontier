@@ -69,7 +69,7 @@ Ride height (for the ground-effect terms) is derived each step from a ground sam
   DOWN, front+rear split consistent, ground effect (splitter rises as ride height drops; underbody factor peaks at the
   optimum and falls off above *and* below it), adaptive wing active past threshold, aero-brake gate + handbrake
   suppression + below-threshold no-deploy, sideslip loss + side-force, master switch, plausible GT3 magnitudes @200 km/h.
-- **`AeroIntegrationTests.cpp` — 8/8 (drives the whole car).** Aero vs no-aero:
+- **`AeroIntegrationChecks.cpp` — 8/8 (drives the whole car).** Aero vs no-aero:
   - **terminal speed 50.3 vs 60.1 m/s** — drag lowers top speed;
   - **coast-down (6 s) sheds 52.9 vs 35.5 m/s** — drag decelerates faster;
   - **sustained cornering 1.78 g vs 1.20 g** — downforce raises grip (measured on a roll-locked planar fixture so the
@@ -77,7 +77,7 @@ Ride height (for the ground-effect terms) is derived each step from a ground sam
   - front/rear wheels each receive multi-kN downforce at speed; telemetry exposes it.
 
 Build: `g++ -std=c++17 -O2 AerodynamicsValidation.cpp Aerodynamics.cpp -o aero && ./aero`
-and `g++ -std=c++17 -O2 AeroIntegrationTests.cpp VehicleController.cpp Aerodynamics.cpp XPBDSoftTyre.cpp
+and `g++ -std=c++17 -O2 AeroIntegrationChecks.cpp VehicleController.cpp Aerodynamics.cpp XPBDSoftTyre.cpp
 PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o aerodrive && ./aerodrive`.
 
 ---
@@ -110,11 +110,11 @@ currently runs an AMT and auto-shifts). Convenience `Apply(controller, dt)` does
 Config mirrors GRIT's `FVehicleInputConfig`: per-axis sensitivity, per-axis dead-zone, device-switch threshold.
 
 ### Validation
-- **`VehicleInputTests.cpp` — 16/16.** W ramps + release decay, S brake, Space handbrake, A/D steer sign + self-centre,
+- **`VehicleInputChecks.cpp` — 16/16.** W ramps + release decay, S brake, Space handbrake, A/D steer sign + self-centre,
   edge-triggered shift pulses (delivered once, consumed), gamepad dead-zone + direct pass-through, wheel rotation-range
   mapping, sensitivity scaling.
 
-Build: `g++ -std=c++17 -O2 VehicleInputTests.cpp Aerodynamics.cpp XPBDSoftTyre.cpp PacejkaTyreModel.cpp
+Build: `g++ -std=c++17 -O2 VehicleInputChecks.cpp Aerodynamics.cpp XPBDSoftTyre.cpp PacejkaTyreModel.cpp
 TyreSlipDynamics.cpp Drivetrain.cpp VehicleController.cpp -o input && ./input`.
 
 ---
@@ -124,10 +124,10 @@ TyreSlipDynamics.cpp Drivetrain.cpp VehicleController.cpp -o input && ./input`.
 | Suite | Result |
 |-------|--------|
 | `AerodynamicsValidation.cpp` | **23/23** |
-| `AeroIntegrationTests.cpp` | **8/8** |
-| `VehicleInputTests.cpp` | **16/16** |
+| `AeroIntegrationChecks.cpp` | **8/8** |
+| `VehicleInputChecks.cpp` | **16/16** |
 | `VehicleSceneValidation.cpp` (Phase-3, both models, aero integrated) | **38/38** |
-| `VehicleDrivingTests.cpp` (mechanical diagnostics, aero disabled) | **10 pass · 3 known-limitations** |
+| `VehicleDrivingChecks.cpp` (mechanical diagnostics, aero disabled) | **10 pass · 3 known-limitations** |
 
 The 3 "known-limitations" are pre-existing placeholder-box artefacts (imperfect full-brake stop ~1.1 m/s; park-slope
 critical angle 26.6° below `arctan μ`; high-CoM box rolls in a hard drift) — reported honestly, tracked here, and to be

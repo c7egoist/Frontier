@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 🧩 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.h — drivable vehicle: rigid chassis + four XPBD soft tyres (Phase 3)
+// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.h — drivable vehicle: rigid chassis + four XPBD soft tyres (Phase 3)
 //============================================================================================================================================
 //
 //    Phase 3 assembles the pieces built in Phases 0–2 into one drivable vehicle:
@@ -44,7 +44,7 @@
 namespace Frontier::Vehicle {
 
 // Which in-plane tyre-force model the solver runs.
-enum class DrivingLayer
+enum class DrivingScheme
 {
     SimpleFrictionCircle,   // Phase-3 arcade layer: throttle/brake/steer → forces clamped to μ·Fz (no wheel spin)
     PacejkaDrivetrain,      // production: engine→clutch→gearbox→diff→wheel-spin→Pacejka slip forces (Phases 1+2 combined)
@@ -118,10 +118,10 @@ struct VehicleSolverConfiguration
     uint32_t TyreSubsteps       = 8u;            // [-]   XPBD substeps per fixed step
     Vec3     Gravity            = {0.0f, 0.0f, -9.81f};
 
-    //-- Production driving layer (DrivingLayer::PacejkaDrivetrain) --------------------------------------------------------
+    //-- Production driving layer (DrivingScheme::PacejkaDrivetrain) --------------------------------------------------------
     //   These are ignored by the SimpleFrictionCircle path. They wire the Phase-1 slip/drivetrain models onto the same
     //   Fz-from-soft-tyre / direct-heightfield-contact path used above.
-    DrivingLayer           ActiveLayer   = DrivingLayer::PacejkaDrivetrain;
+    DrivingScheme           ActiveScheme   = DrivingScheme::PacejkaDrivetrain;
     PacejkaParameters      TyrePacejka;                                     // MF6.1 slip-force spec (defaults = Phase-1)
     SlipSolver             SlipSolverSelection = SlipSolver::RelaxationLength;   // zero-speed-stable transient tyre integrator
     float    WheelInertia           = 1.2f;      // [kg·m²] rotational inertia of one wheel+tyre about its spin axis
@@ -154,7 +154,7 @@ struct VehicleSolverConfiguration
     //-- Brakes + ABS (disk thermal model, ported from GRIT BrakingSpecifications; ABS is a standard slip modulator) -------
     //   When UseBrakeThermalModel is true the foot brake torque comes from the hydraulic/thermal disk model (with fade)
     //   and, if Abs.Enabled, is modulated to keep each wheel near its peak-grip slip. When false, the legacy constant
-    //   MaxBrakeTorquePerWheel path is used (keeps existing scenes/tests unchanged). The handbrake always uses the
+    //   MaxBrakeTorquePerWheel path is used (keeps existing scenes/checks unchanged). The handbrake always uses the
     //   constant HandbrakeTorque path (mechanical, no ABS).
     bool               UseBrakeThermalModel = false;
     BrakingParameters  Brakes = BrakingParameters::DefaultGT3();
@@ -209,7 +209,7 @@ struct VehicleTelemetry
     float    BoostBar          = 0.0f;
     float    ParasiticDrag_Nm  = 0.0f;   // supercharger crank load (0 for turbo/NA)
     int      GearIndex         = 0;      // index into Transmission.GearRatios (3 = 1st)
-    bool     PacejkaActive     = false;  // true when running DrivingLayer::PacejkaDrivetrain
+    bool     PacejkaActive     = false;  // true when running DrivingScheme::PacejkaDrivetrain
     AeroForces Aero{};                   // aerodynamics computed this step (drag/downforce/side/moments breakdown)
 };
 
@@ -242,7 +242,7 @@ public:
 private:
     [[nodiscard]] static float Clamp(float Amount, float Lower, float Upper) noexcept { return Amount < Lower ? Lower : (Amount > Upper ? Upper : Amount); }
 
-    // The two driving layers Step() dispatches to (selected by ActiveConfiguration.ActiveLayer).
+    // The two driving layers Step() dispatches to (selected by ActiveConfiguration.ActiveScheme).
     void StepSimple(float Δτ) noexcept;   // Phase-3 friction-circle layer (validated fallback)
     void StepPacejka(float Δτ) noexcept;  // production drivetrain + Pacejka slip layer
 

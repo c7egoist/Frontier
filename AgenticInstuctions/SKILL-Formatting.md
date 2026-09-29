@@ -10,13 +10,13 @@ come first. Check output against this file before returning it. Naming is govern
 
 - Ruler above and below the title: `//===…`, **exactly 142 characters**.
 - Title line: filename in ALL CAPS, strictly centred between the rulers.
-- Immediately below: `// 🧩 [single-line module description]`, then exactly 1 blank line.
+- Immediately below: `// 📦 [single-line module description]`, then exactly 1 blank line.
 
 ```cpp
 //============================================================================================================================================
 //                                                          BOUNDARYSTRUCTURE.H
 //============================================================================================================================================
-// 🧩 Radial-edge boundary representation — generational tokens over vertex, edge, loop and face records.
+// 📦 Radial-edge boundary representation — generational tokens over vertex, edge, loop and face records.
 ```
 
 ## 2. Section banners
@@ -98,9 +98,14 @@ derived by the indexer and a hand-written copy will silently rot.
 Only the emoji below may appear anywhere: source, comments, Markdown, chat, commit messages,
 filenames. Never invent one, never borrow one from outside the table.
 
+📦 is the standard file-header banner marker (project directive — it is already the marker across most of the
+tree, so new and edited files use it). 🧩 remains accepted in file headers that already carry it (much of the
+Frontier engine tree) and for the first `///` annotation line; do not mass-convert 🧩 headers just to switch markers.
+
 | Category      | Emoji            | Means                                | Where it may appear                     |
 |---------------|------------------|--------------------------------------|-----------------------------------------|
-| Module        | 🧩               | Module / annotation-block description | File header line; first `///` line       |
+| Module        | 📦               | File-header banner (standard marker) | File header line                         |
+| Module        | 🧩               | Module / annotation-block description | First `///` line; accepted in file headers already using it |
 | Notes         | 📝               | Implementation note                  | Comment above code                       |
 | Notes         | 💡               | Insight, non-obvious reasoning       | Comment, Markdown                        |
 | Notes         | ⚠️               | Warning — correct but easy to misuse | Comment, Markdown                        |

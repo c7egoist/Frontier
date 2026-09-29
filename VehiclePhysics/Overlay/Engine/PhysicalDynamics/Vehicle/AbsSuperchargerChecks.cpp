@@ -1,13 +1,13 @@
 //============================================================================================================================================
-// AbsSuperchargerTests.cpp — end-to-end proof that ABS and the supercharger change how the CAR drives.
+// AbsSuperchargerChecks.cpp — end-to-end proof that ABS and the supercharger change how the CAR drives.
 //   Drives the full VehicleSolver (PacejkaDrivetrain + XPBD soft tyres + disk brakes) on the same mock rigid chassis
-//   used by AeroIntegrationTests / VehicleSceneValidation. No Jolt.
+//   used by AeroIntegrationChecks / VehicleSceneValidation. No Jolt.
 //
 //   ABS:          hard braking with ABS on keeps the wheels from locking (slip stays near the grip peak) and the disks
 //                 heat up, versus an identical car with ABS off whose wheels lock solid.
 //   Supercharger: a blown car out-accelerates the naturally-aspirated version and reports boost + parasitic drag.
 //
-//   Build: g++ -std=c++17 -O2 AbsSuperchargerTests.cpp VehicleSolver.cpp VehicleGeometry.cpp Aerodynamics.cpp \
+//   Build: g++ -std=c++17 -O2 AbsSuperchargerChecks.cpp VehicleSolver.cpp VehicleGeometry.cpp Aerodynamics.cpp \
 //                XPBDSoftTyre.cpp PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o /tmp/abs && /tmp/abs
 //============================================================================================================================================
 
@@ -96,7 +96,7 @@ struct Rig
 VehicleSolverConfiguration BaseConfig()
 {
     VehicleSolverConfiguration c;
-    c.ActiveLayer = DrivingLayer::PacejkaDrivetrain;
+    c.ActiveScheme = DrivingScheme::PacejkaDrivetrain;
     c.Aero.Enabled = false;                 // isolate brakes/engine from aero
     ApplyGeometry(c, Geo());
     return c;
@@ -106,7 +106,7 @@ VehicleSolverConfiguration BaseConfig()
 int main()
 {
     const float dt = 1.0f / 240.0f;
-    std::printf("\n=== ABS + Supercharger end-to-end drive tests ===\n\n");
+    std::printf("\n=== ABS + Supercharger end-to-end drive checks ===\n\n");
 
     //--------------------------------------------------------------------------------------------------------------
     // A. ABS vs no-ABS: hard braking from speed.

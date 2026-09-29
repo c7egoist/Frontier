@@ -117,7 +117,7 @@ a thin driving layer turns throttle/brake/steer into in-plane forces bounded by 
 | Item | Where | Status |
 |------|-------|--------|
 | Vehicle controller (chassis + 4 soft tyres + driving layer) | `Vehicle/VehicleController.{h,cpp}` | ✅ engine-agnostic (hook-based) |
-| Procedural Jolt-heightfield track + direct node sampler | `Projects/Project-Tractrix/Source/TractrixTestTrack.h` | ✅ |
+| Procedural Jolt-heightfield track + direct node sampler | `Projects/Project-Tractrix/Source/TractrixProvingGround.h` | ✅ |
 | Scene assembly (solver + track + controller + thread) | `Projects/Project-Tractrix/Source/TractrixVehicleScene.h` | ✅ in-tree |
 | Headless drive test (mock chassis + mock heightfield) | `Vehicle/VehicleSceneValidation.cpp` | ✅ **19/19 pass** |
 
@@ -134,9 +134,9 @@ up-to-date `source-only` branch, one subsystem at a time (drivable-first). **Thi
 | **Aerodynamics** (faithful port of `ComputeAerodynamicForces`) | `Vehicle/Aerodynamics.{h,cpp}` | ✅ wing/splitter/canards/diffuser/skirts/vortex/body |
 | Aero wired into the driving layer (drag→chassis, downforce→wheel Fz) | `Vehicle/VehicleController.{h,cpp}` | ✅ |
 | Aero physics invariants | `Vehicle/AerodynamicsValidation.cpp` | ✅ **23/23** |
-| Aero end-to-end drive proof (on/off compare) | `Vehicle/AeroIntegrationTests.cpp` | ✅ **8/8** |
+| Aero end-to-end drive proof (on/off compare) | `Vehicle/AeroIntegrationChecks.cpp` | ✅ **8/8** |
 | **Engine-agnostic input controller** (WASD + gamepad/wheel) | `Vehicle/VehicleInputController.h` | ✅ |
-| Input invariants | `Vehicle/VehicleInputTests.cpp` | ✅ **16/16** |
+| Input invariants | `Vehicle/VehicleInputChecks.cpp` | ✅ **16/16** |
 
 ## Phase 6 — Real geometry data block + closed-loop aero  ✅ **COMPLETE** (see `Phase6-Geometry-and-ClosedLoop-Aero.md`)
 Removes the last placeholder dimensions and the three "known limitations" carried out of Phase 5.
@@ -146,8 +146,8 @@ Removes the last placeholder dimensions and the three "known limitations" carrie
 | **Geometry as authored DATA** (GT3-class, no sockets) | `Vehicle/VehicleGeometry.{h,cpp}` | ✅ wheels/aero points/inertia/CoM all derived |
 | **Closed-loop aero** (real patch downforce → tyre compresses → measured `Fz`; squat→ground-effect) | `Vehicle/VehicleController.cpp` | ✅ no `Fz` injection, no pitch double-count |
 | **Low-speed static friction** (brake-to-rest + slope hold) + declutch-under-brake | `Vehicle/VehicleController.cpp` | ✅ |
-| Driving validation (brake/park/rollover reframed physical) | `Vehicle/VehicleDrivingTests.cpp` | ✅ **12/12, 0 known-limitations** |
-| Aero drive proof rebuilt on real geometry | `Vehicle/AeroIntegrationTests.cpp` | ✅ **8/8** |
+| Driving validation (brake/park/rollover reframed physical) | `Vehicle/VehicleDrivingChecks.cpp` | ✅ **12/12, 0 known-limitations** |
+| Aero drive proof rebuilt on real geometry | `Vehicle/AeroIntegrationChecks.cpp` | ✅ **8/8** |
 
 ## Phase 7 — ABS + Supercharger  ✅ **COMPLETE** (see `Phase7-ABS-and-Supercharger.md`)
 Fuel deferred by request (custom energy/density fuels + control unit + mixing + nitrous — its own milestone).
@@ -159,7 +159,7 @@ Fuel deferred by request (custom energy/density fuels + control unit + mixing + 
 | **Disk-brake thermal model** (hydraulics + fade + heat/cooling) | `Vehicle/BrakingSystem.h` | ✅ port of GRIT BrakingSpecifications |
 | **ABS** (proportional slip regulator, per-wheel) | `Vehicle/BrakingSystem.h` + `VehicleController` (`UseBrakeThermalModel`) | ✅ |
 | Brake/thermal/ABS unit checks | `Vehicle/BrakingValidation.cpp` | ✅ **16/16** |
-| End-to-end ABS + supercharger drive proof | `Vehicle/AbsSuperchargerTests.cpp` | ✅ **11/11** |
+| End-to-end ABS + supercharger drive proof | `Vehicle/AbsSuperchargerChecks.cpp` | ✅ **11/11** |
 
 ## Real vehicle geometry — `ControlVehicle.blend`  ✅ **COMPLETE** (see `CarModelling/ControlVehicle/ControlVehicle-Geometry-Extraction.md`)
 The GT3-class *estimates* from Phase 6 are replaced by the **actual authored vehicle** — the "PROTO-X" wedge coupe from

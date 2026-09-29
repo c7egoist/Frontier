@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                        DRIVERINPUTINTEGRATOR.H
 //============================================================================================================================================
-// 🧩 Engine-agnostic driver input → DriverInput mapper: ramps digital keys and shapes analog axes into a DriverCommand.
+// 📦 Engine-agnostic driver input → DriverInput mapper: ramps digital keys and shapes analog axes into a DriverCommand.
 //
 //    Turns raw device input (keyboard keys, gamepad axes, or a racing wheel + pedals) into the normalised
 //    `DriverInput` the vehicle dynamics consume. It is deliberately ENGINE-AGNOSTIC and header-only: the game layer

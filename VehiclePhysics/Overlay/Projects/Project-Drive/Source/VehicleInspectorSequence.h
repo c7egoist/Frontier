@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                    VEHICLEINSPECTORSEQUENCE.H
 //============================================================================================================================================
-// 🧩 Project-Drive's vehicle inspector — the project-owned exchange around the native Inspector draw, the counterpart
+// 📦 Project-Drive's vehicle inspector — the project-owned exchange around the native Inspector draw, the counterpart
 //    to Project-Zero's EditorInspectorSequence / CameraInspectorBinding. The vehicle is one outliner node that
 //    expands into a row per subsystem (Chassis, Engine, Turbo, Gearbox, Tyre-long, Tyre-lat, Aero, plus a live
 //    read-out), each keyed into the family-6 inspector-key space so it survives moves and renames. Selecting a row

@@ -35,7 +35,7 @@ its boost tracks engine rpm **instantly** and it **taxes the crank** with parasi
 The drivetrain `Step` now branches on `InductionType`; the turbo path is unchanged. Telemetry
 gains `ParasiticDrag_Nm`, and `TurboRPM`/`BoostBar` report the charger when blown.
 
-**End-to-end (AbsSuperchargerTests):** a supercharged GT3 out-accelerates the NA car from a
+**End-to-end (AbsSuperchargerChecks):** a supercharged GT3 out-accelerates the NA car from a
 standing start (83.7 m vs 79.1 m in 6 s; 32.5 vs 29.6 m/s), running 0.80 bar of boost and 73 N·m of
 parasitic drag; the NA car reports zero boost and zero drag.
 
@@ -64,7 +64,7 @@ and, if `Abs.Enabled`, is modulated per wheel using the slip κ already computed
 handbrake keeps its mechanical constant-torque path (no ABS). Per-wheel telemetry gains brake
 torque, line pressure, disk temperature and an `AbsActive` flag.
 
-**End-to-end (AbsSuperchargerTests), hard stop from 40 m/s:**
+**End-to-end (AbsSuperchargerChecks), hard stop from 40 m/s:**
 
 | | mean \|slip\| | ABS duty | stop distance | peak disk temp |
 |---|---|---|---|---|
@@ -82,12 +82,12 @@ disks heat up as expected.
 |---|---|
 | `BrakingValidation` (disk/thermal/ABS unit) | **16 / 16** |
 | `SuperchargerValidation` (drivetrain unit) | **13 / 13** |
-| `AbsSuperchargerTests` (end-to-end) | **11 / 11** |
+| `AbsSuperchargerChecks` (end-to-end) | **11 / 11** |
 | `AerodynamicsValidation` | 23 / 23 |
-| `AeroIntegrationTests` | 8 / 8 |
-| `VehicleDrivingTests` | 12 / 12, 0 known-limitations |
+| `AeroIntegrationChecks` | 8 / 8 |
+| `VehicleDrivingChecks` | 12 / 12, 0 known-limitations |
 | `VehicleSceneValidation` | 38 / 38 |
-| `VehicleInputTests` | 16 / 16 |
+| `VehicleInputChecks` | 16 / 16 |
 | `XPBDTyreValidation` | 14 / 14 |
 | `VehicleValidation` (Pacejka/slip/drivetrain core) | 35 / 35 |
 
@@ -98,7 +98,7 @@ g++ -std=c++17 -O2 SuperchargerValidation.cpp Drivetrain.cpp -o super
 # braking unit (header-only)
 g++ -std=c++17 -O2 BrakingValidation.cpp -o brakes
 # end-to-end ABS + supercharger
-g++ -std=c++17 -O2 AbsSuperchargerTests.cpp VehicleController.cpp VehicleGeometry.cpp Aerodynamics.cpp \
+g++ -std=c++17 -O2 AbsSuperchargerChecks.cpp VehicleController.cpp VehicleGeometry.cpp Aerodynamics.cpp \
     XPBDSoftTyre.cpp PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o abs
 ```
 
@@ -106,7 +106,7 @@ g++ -std=c++17 -O2 AbsSuperchargerTests.cpp VehicleController.cpp VehicleGeometr
 * **`BrakingSystem.h`** (new) — disk-brake hydraulics + thermal fade + proportional-slip ABS.
 * **`BrakingValidation.cpp`** (new) — brake/thermal/ABS unit checks.
 * **`SuperchargerValidation.cpp`** (new) — supercharger drivetrain unit checks.
-* **`AbsSuperchargerTests.cpp`** (new) — end-to-end drive proof.
+* **`AbsSuperchargerChecks.cpp`** (new) — end-to-end drive proof.
 * `Drivetrain.{h,cpp}` — `InductionType`, `SuperchargerParameters`, `StepSupercharger`, branch in
   `Step`, parasitic drag into the engine load, new outputs.
 * `VehicleController.{h,cpp}` — induction/supercharger/brakes config, `BrakingSystem` member,

@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSceneValidation.cpp — headless Phase-3 drive test (no Jolt, no Unreal)
+// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSceneValidation.cpp — headless Phase-3 drive check (no Jolt, no Unreal)
 //============================================================================================================================================
 //
 //    Proves the Phase-3 `VehicleSolver` end-to-end in the sandbox by driving it against a MOCK rigid-box chassis
@@ -96,7 +96,7 @@ struct MockChassis
 };
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                            test harness plumbing
+//                                            check harness plumbing
 //------------------------------------------------------------------------------------------------------------------------
 static int g_pass = 0, g_fail = 0;
 static void Check(const char* name, bool ok, double got, double want)
@@ -107,11 +107,11 @@ static void Check(const char* name, bool ok, double got, double want)
 static void CheckBool(const char* name, bool ok) { std::printf("  [%s] %s\n", ok ? "PASS" : "FAIL", name); if (ok) ++g_pass; else ++g_fail; }
 [[nodiscard]] static bool Finite(const Vec3& v) noexcept { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 
-// Build the standard 4-wheel RWD test vehicle around a chassis half-extent of (2.0, 0.85, 0.35).
-static VehicleSolverConfiguration MakeConfig(DrivingLayer model)
+// Build the standard 4-wheel RWD check vehicle around a chassis half-extent of (2.0, 0.85, 0.35).
+static VehicleSolverConfiguration MakeConfig(DrivingScheme model)
 {
     VehicleSolverConfiguration c;
-    c.ActiveLayer = model;
+    c.ActiveScheme = model;
     c.ChassisMass = 1200.0f;
     c.Tyre = SoftTyreParameters{};                 // Phase-2 calibrated defaults (R=0.34, etc.)
     const float zoff = -0.55f;                      // hub sits below the CoM (box floats above the wheels)
@@ -164,7 +164,7 @@ struct Rig
 static bool FlatGround(const Vec3& p, float& gz, Vec3& n) { (void)p; gz = 0.0f; n = {0, 0, 1}; return true; }
 
 // Runs the full 5-scenario invariant suite for one driving model and returns {passed, failed} for that model.
-static void RunSuite(DrivingLayer model, const char* label)
+static void RunSuite(DrivingScheme model, const char* label)
 {
     const float dt = 1.0f / 240.0f;
     const VehicleSolverConfiguration cfg = MakeConfig(model);
@@ -173,7 +173,7 @@ static void RunSuite(DrivingLayer model, const char* label)
     std::printf("############################################################\n");
     std::printf("# DRIVING MODEL: %s\n", label);
     std::printf("############################################################\n");
-    std::printf("Phase-3 VehicleSolver drive test  (mock chassis + mock heightfield, dt=1/%.0f Hz)\n", 1.0f / dt);
+    std::printf("Phase-3 VehicleSolver drive check  (mock chassis + mock heightfield, dt=1/%.0f Hz)\n", 1.0f / dt);
     std::printf("chassis %.0f kg, 4 wheels, RWD, front-steer, soft XPBD tyres (R=%.2f m)\n\n",
                 cfg.ChassisMass, cfg.Tyre.Radius);
 
@@ -274,10 +274,10 @@ int main()
 {
     // Validate BOTH driving layers against the same physical invariants: the production Pacejka+drivetrain model and the
     //    original friction-circle fallback. Both must settle, accelerate, brake to a stop, steer, and hold a slope.
-    RunSuite(DrivingLayer::PacejkaDrivetrain,    "PacejkaDrivetrain (production: MF6.1 slip + engine/clutch/gearbox/diff + wheel spin)");
-    RunSuite(DrivingLayer::SimpleFrictionCircle, "SimpleFrictionCircle (Phase-3 arcade fallback)");
+    RunSuite(DrivingScheme::PacejkaDrivetrain,    "PacejkaDrivetrain (production: MF6.1 slip + engine/clutch/gearbox/diff + wheel spin)");
+    RunSuite(DrivingScheme::SimpleFrictionCircle, "SimpleFrictionCircle (Phase-3 arcade fallback)");
 
     std::printf("========================================\n");
-    std::printf("Phase-3 drive test (both models): %d passed, %d failed\n", g_pass, g_fail);
+    std::printf("Phase-3 drive check (both models): %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }

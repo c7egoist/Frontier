@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                        DRIVERINPUTEXCHANGE.H
 //============================================================================================================================================
-// 🧩 The seam that crosses Frontier's device polling into the engine-agnostic DriverInputIntegrator.
+// 📦 The seam that crosses Frontier's device polling into the engine-agnostic DriverInputIntegrator.
 //
 //    The integrator does all the feel work (digital ramps, self-centring steer, dead-zones, analog shaping); this
 //    exchange only forwards the raw button readings and edge-detects the discrete pulses (shift up/down, reset) so they

@@ -1,12 +1,12 @@
 //============================================================================================================================================
-// AeroIntegrationTests.cpp — end-to-end proof that the ported aerodynamics changes how the CAR drives.
+// AeroIntegrationChecks.cpp — end-to-end proof that the ported aerodynamics changes how the CAR drives.
 //   Drives the full VehicleSolver (PacejkaDrivetrain + XPBD soft tyres) on a mock rigid chassis, comparing an
 //   aero-equipped GT3 against an identical car with aero disabled. Confirms the two headline effects:
 //       • DRAG      → lower terminal speed + faster coast-down
 //       • DOWNFORCE → more cornering grip (higher sustained lateral acceleration before the tyres let go)
 //   No engine, no Jolt — same mock-chassis harness as VehicleSceneValidation.
 //
-//   Build:  g++ -std=c++17 -O2 AeroIntegrationTests.cpp VehicleSolver.cpp Aerodynamics.cpp XPBDSoftTyre.cpp \
+//   Build:  g++ -std=c++17 -O2 AeroIntegrationChecks.cpp VehicleSolver.cpp Aerodynamics.cpp XPBDSoftTyre.cpp \
 //                 PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o /tmp/aerodrive && /tmp/aerodrive
 //============================================================================================================================================
 
@@ -87,7 +87,7 @@ VehicleGeometry Geo() { return VehicleGeometry{}; }   // documented GT3-class es
 VehicleSolverConfiguration MakeConfig(bool aero)
 {
     VehicleSolverConfiguration c;
-    c.ActiveLayer = DrivingLayer::PacejkaDrivetrain;
+    c.ActiveScheme = DrivingScheme::PacejkaDrivetrain;
     c.Aero = AerodynamicPackage::DefaultGT3();
     ApplyGeometry(c, Geo());                 // real wheel offsets, aero force points, CoM-above-floor, mass
     if (!aero) c.Aero.Enabled = false;
@@ -123,7 +123,7 @@ struct Rig
 int main()
 {
     const float dt = 1.0f / 240.0f;
-    std::printf("\n=== Aerodynamics integration drive tests (aero ON vs OFF) ===\n\n");
+    std::printf("\n=== Aerodynamics integration drive checks (aero ON vs OFF) ===\n\n");
 
     // ---- 1. TOP SPEED: aero drag must lower terminal velocity -----------------------------------------------------
     float vTopAero = 0.0f, vTopNoAero = 0.0f;

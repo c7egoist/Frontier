@@ -1,6 +1,6 @@
 //============================================================================================================================================
-// VehicleInputTests.cpp — invariants for the engine-agnostic DriverInputIntegrator (WASD + gamepad/wheel).
-//   Build:  g++ -std=c++17 -O2 -Wall -Wextra VehicleInputTests.cpp -o /tmp/input && /tmp/input
+// VehicleInputChecks.cpp — invariants for the engine-agnostic DriverInputIntegrator (WASD + gamepad/wheel).
+//   Build:  g++ -std=c++17 -O2 -Wall -Wextra VehicleInputChecks.cpp -o /tmp/input && /tmp/input
 //============================================================================================================================================
 
 #include "DriverInputIntegrator.h"

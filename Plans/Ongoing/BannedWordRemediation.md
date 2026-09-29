@@ -41,15 +41,28 @@ what we own without permanently diverging the copied Frontier engine code from u
 | `Set*Key` / `Set*Axis` | `Forward*Key` / `Forward*Axis` | States the mechanism (forwards a device reading) |
 | `Update(dt)` | `Advance(Δτ)` | `Update` banned; delta-time uses the real glyph `Δτ` |
 | `k…` / `a…` member prefixes | full PascalCase noun phrases | Zero shorthand, zero `k` prefixes |
+| `DrivingModel` / field `Model` | `DrivingScheme` / `ActiveScheme` | `Model` banned; it selects the tyre-force computation scheme |
+| `…Tests` / `RunTests` | `…Checks` / `RunChecks` | `Test` banned; a verification suite asserting invariants |
+| `TestTrack` | `ProvingGround` | `Test` banned; the domain noun for the circuit a car is exercised on |
+| `TestDrive` | `TrialDrive` | `Test` banned; `Trial` is the domain noun (cf. `InterfaceTrial`) |
+
+## Decisions (2026-09-30 session)
+
+- 🔴 **`Test` is banned** (project directive). Replacements as above; recorded in `SKILL-Naming.md`.
+- 🔴 **Banner emoji is `📦`, not `🧩`** (project directive — "we already used it a lot"). Reverted the earlier
+  `📦`→`🧩` change across the vehicle work (11 files) and whitelisted `📦` in `SKILL-Formatting.md`. `🧩` stays valid
+  for headers already using it (Frontier engine tree) and for the first `///` line — do NOT mass-convert either way.
+- **`DrivingScheme`** replaces the interim `DrivingLayer` (better name for the retired `Model`).
 
 ## Phases
 
 | Phase | Files | Status |
 |-------|-------|--------|
 | 1 — driver input layer | `DriverInputIntegrator.h` (was `VehicleInputController.h`), `DriverInputExchange.h` (was `VehicleInputBridge.h`) + callers (`DriveExecution.cpp`, `VehicleInstanceSequence.h`, `TractrixVehicleScene.h`, `VehicleInputTests.cpp`) | 🟢 done — g++ syntax-clean |
-| 2 — vehicle dynamics core (class API) | `VehicleController.{h,cpp}` → `VehicleSolver.{h,cpp}`; `VehicleControllerConfig`→`VehicleSolverConfiguration`; `SetInput`→`AssignInput`; `IsBuilt`→`Constructed`; `DrivingModel`→`DrivingLayer` (field `Model`→`ActiveLayer`); `SlipSolverKind`→`SlipSolverSelection`. 17 referencing files + BOTH build lists (`ProjectDrive.cmake`, `ToolchainSequence.ps1`) updated | 🟢 done — g++ syntax-clean |
+| 2 — vehicle dynamics core (class API) | `VehicleController.{h,cpp}` → `VehicleSolver.{h,cpp}`; `VehicleControllerConfig`→`VehicleSolverConfiguration`; `SetInput`→`AssignInput`; `IsBuilt`→`Constructed`; `DrivingModel`→`DrivingScheme` (field `Model`→`ActiveScheme` — was briefly `DrivingLayer`/`ActiveLayer`, renamed on user feedback); `SlipSolverKind`→`SlipSolverSelection`. 17 referencing files + BOTH build lists (`ProjectDrive.cmake`, `ToolchainSequence.ps1`) updated | 🟢 done — g++ syntax-clean |
 | 3 — powertrain subsystems | `Drivetrain.{h,cpp}`, `PacejkaTyreModel.{h,cpp}` (`Model`), `TyreSlipDynamics::SetSolver`, `BrakingSystem` (`UseBrakeThermalModel` bool `Use` prefix + `Model`), tyre models | ⬜ pending |
-| 5 — formatting pass | banner emoji `📦`→`🧩` (remaining ~18 vehicle files); internal snake_case members→PascalCase + single-letter params across the rest of the layer | ⬜ deferred (`VehicleSolver.{h,cpp}` already done, see below) |
+| 4 — `Test` ban (project directive) | Files renamed: `*Tests.cpp`→`*Checks.cpp` (Abs/Aero/VehicleDriving/VehicleInput), `TractrixTestTrack.h`→`TractrixProvingGround.h`, `FieldTestDrive.cpp`→`FieldTrialDrive.cpp`; tokens + prose + `TractrixVehicleScene.h` include/type/member updated; SKILL-Naming banned addendum + rationale updated. Not in any build list ⇒ no toolchain edit. External `RunFluidGpuTest`/`IsDepthTested`/CLI `--fluid-*-test` left (base-engine) | 🟢 done — g++ syntax-clean |
+| 5 — formatting pass | internal snake_case members→PascalCase + single-letter params across the rest of the layer (banner emoji is **📦**, see decisions below — no emoji churn) | ⬜ deferred (`VehicleSolver.{h,cpp}` already done, see below) |
 | 3 — instance / scene seams | `VehicleInstanceSequence`, `DriveSceneStructure`, `ChaseCameraSolver` | 🚧 |
 | 4 — our identifiers in the copied host | `DriveExecution.cpp` (`IsDrive`→`DriveSelected`, etc.) | 🚧 |
 | 5 — formatting pass | 142/122 rulers, `///` annotation blocks, aligned columns, emoji whitelist across the authored layer | 🚧 |

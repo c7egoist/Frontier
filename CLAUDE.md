@@ -116,6 +116,11 @@ self-checks so a regression fails loudly.
 - No exceptions across a unit seam. No `new`/`delete` outside an extent slicer.
 - Vendor spellings are verbatim: `VkBuffer`, `VkPipeline`, `ImDrawData`.
 - Do not reference any rules outside of the project or memory.
+- 🚧 **Direction (not yet built): one engine binary; projects are opened by it.** The engine is to be built as a
+  single `Frontier.exe` bundling all shared systems (sun/sky, physics, rendering, host…); a project is then opened by
+  it — `Frontier.exe ProjectZero.<ext>` — instead of each project being its own executable that relies on Project-Zero
+  for everything. See [`Docs/2026-09-30-EngineBinaryAndProjectLoading.md`](Docs/2026-09-30-EngineBinaryAndProjectLoading.md).
+  The change itself still has to be done; treat it as the target when touching project/host wiring.
 
 ---
 

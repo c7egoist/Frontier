@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 📦 Projects/Project-Tractrix/Source/TractrixTestTrack.h — procedural Jolt-heightfield test track (Phase 3)
+// 📦 Projects/Project-Tractrix/Source/TractrixProvingGround.h — procedural Jolt-heightfield proving ground (Phase 3)
 //============================================================================================================================================
 //
 //    The Phase-3 drivable scene needs ground. The user locked terrain to a **Jolt heightfield**, so this generates one
@@ -27,7 +27,7 @@
 
 namespace Frontier::Tractrix {
 
-class TractrixTestTrack
+class TractrixProvingGround
 {
 public:
     uint32_t          SampleCount = 128u;                 // per side; MUST be a multiple of 8 (Jolt block constraint)
@@ -61,7 +61,7 @@ public:
     {
         if (heights_.empty()) Generate();
         HeightfieldDescription D;
-        D.Name        = "Tractrix.TestTrack";
+        D.Name        = "Tractrix.ProvingGround";
         D.Samples     = heights_.data();
         D.SampleCount = SampleCount;
         D.Origin      = Origin;

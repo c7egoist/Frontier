@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 🧩 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.cpp — Phase 3 drivable vehicle implementation
+// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.cpp — Phase 3 drivable vehicle implementation
 //============================================================================================================================================
 
 #include "VehicleSolver.h"
@@ -69,7 +69,7 @@ void VehicleSolver::Build(const VehicleSolverConfiguration& config, const Hooks&
 void VehicleSolver::Step(float Δτ) noexcept
 {
     if (!ConstructionComplete || Δτ <= 0.0f) return;
-    if (ActiveConfiguration.ActiveLayer == DrivingLayer::PacejkaDrivetrain) StepPacejka(Δτ);
+    if (ActiveConfiguration.ActiveScheme == DrivingScheme::PacejkaDrivetrain) StepPacejka(Δτ);
     else                                                  StepSimple(Δτ);
 }
 

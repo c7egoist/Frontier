@@ -176,7 +176,7 @@ names are rejected on the same ground as categorical ones. Neighbouring spelling
 are rejected with it: `Preamble`, `Epilogue`, `Header`, `Common`, `Global`, `Misc`.
 
 Banned addendum words — Cadence, Binding, Submission, Footprint, Region, Tree, Vacancy, Ordinates,
-Ordinal, Draft, Draught, Paint.
+Ordinal, Test, Draft, Draught, Paint.
 
 ⚠️ `Draft` and `Draught` are banned as **imprecise state words**, not as spellings of each other. Both mean
 "provisional" — a thing that is not finished yet — which describes the moment a mechanism is observed rather
@@ -210,6 +210,21 @@ layout inputs, and `TypographyMetrics` for measured text. Examples: `ControlCent
 sequence — first, second, nth — which distinguishes nothing about the mechanism. State the mechanism instead: a
 countable position is a `Slot` or an `Index`, a monotonic counter is a `Number`, an ordered workflow is a
 `Sequence`. So `SlotOrdinal` → `SlotIndex`, `RecordingOrdinal` → `RecordingNumber`, `ImageOrdinal` → `ImageIndex`.
+
+`Test` is banned (project directive). It names the *activity* of trying something, not the mechanism that carries it
+— every routine that runs is, in that loose sense, a trial of something, so the word distinguishes nothing. State
+what the code actually does and to what standard:
+
+| Retired         | Replacement                        | Mechanism the replacement states                       |
+|-----------------|------------------------------------|--------------------------------------------------------|
+| `…Tests`        | `…Checks` / `…Verification`        | Invariants asserted against a subsystem                |
+| `RunTests`      | `RunChecks`                        | The verification suite executes                        |
+| `TestTrack`     | `ProvingGround`                    | The circuit a vehicle is exercised on                  |
+| `TestDrive`     | `TrialDrive`                       | One driven trial of the vehicle                        |
+
+The rendered-artefact discipline is already `VisualProof` and scene checks are already `…Validation`; unit and
+integration suites are `…Checks`. `Trial` (as in `InterfaceTrial`, `TrialDrive`) and `ProvingGround` are the
+domain nouns for a driven attempt and the place it happens, and neither carries the banned word.
 
 ## Mathematical Vocabulary Exemption
 

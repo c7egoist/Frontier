@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                      NATIVEDRIVEPROOF.CPP
 //============================================================================================================================================
-// 🧩 Headless CPU mirror of the Project-Drive scene — the proof that `Project-Zero.exe --scene drive` shows the right
+// 📦 Headless CPU mirror of the Project-Drive scene — the proof that `Project-Zero.exe --scene drive` shows the right
 //    thing. It builds the SAME geometry the app loads (checker pad + ramp + speed bumps + cones from DriveCourse, the
 //    real ControlVehicle shell, and the four procedural wheels), then renders it with a dependency-free CPU path:
 //    a BVH-traced G-buffer, sharp DIRECT sun (next-event + shadow ray) + sky, a world-space SURFEL field for the

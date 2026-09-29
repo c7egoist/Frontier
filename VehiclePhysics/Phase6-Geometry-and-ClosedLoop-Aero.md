@@ -37,8 +37,8 @@ Derived by the struct: front/rear axle X, hub local-Z, CoM-above-floor, the full
 
 `ApplyGeometry(config, geom)` stamps the four `WheelMount`s (front steer, rear drive — RWD),
 every aero device's `ForceApplicationPoint_COM`, the CoM-above-floor ride-height reference, the
-tyre radius, and mass onto a `VehicleControllerConfig`. Both `AeroIntegrationTests` and
-`VehicleDrivingTests` now build their rigs through it, and set the mock chassis inertia from
+tyre radius, and mass onto a `VehicleControllerConfig`. Both `AeroIntegrationChecks` and
+`VehicleDrivingChecks` now build their rigs through it, and set the mock chassis inertia from
 `geom.InvInertia()`. Nothing downstream hard-codes a dimension — swap in a specific car's measured
 numbers at any time.
 
@@ -75,7 +75,7 @@ Because our tyre is a compliant XPBD soft body, we can do the real thing:
   produced by the forces themselves. Applying `aero.PitchMoment_Nm` on top would double-count it.
 * Drag, body side-force and the **yaw + roll** moments still act at the CoM.
 
-Result (`AeroIntegrationTests`, 8/8): aero cuts terminal speed 60→49.5 m/s, adds ~14.7 kN total
+Result (`AeroIntegrationChecks`, 8/8): aero cuts terminal speed 60→49.5 m/s, adds ~14.7 kN total
 downforce (front ~6.8 kN, rear ~7.5 kN measured at the wheels), and lifts sustained cornering grip
 from 1.38 g to 1.95 g — all through real tyre load, not an injected number.
 
@@ -118,10 +118,10 @@ test documents it inline rather than asserting a number the mock can't generate.
 | Suite | Result |
 |---|---|
 | `AerodynamicsValidation` (unit) | **23 / 23** |
-| `AeroIntegrationTests` (closed-loop) | **8 / 8** |
-| `VehicleDrivingTests` | **12 / 12, 0 known-limitations** |
+| `AeroIntegrationChecks` (closed-loop) | **8 / 8** |
+| `VehicleDrivingChecks` | **12 / 12, 0 known-limitations** |
 | `VehicleSceneValidation` (both models) | **38 / 38** |
-| `VehicleInputTests` | **16 / 16** |
+| `VehicleInputChecks` | **16 / 16** |
 | `XPBDTyreValidation` (Phase 2) | 14 / 14 |
 
 Build (integrated):
@@ -135,7 +135,7 @@ g++ -std=c++17 -O2 <TEST>.cpp VehicleController.cpp VehicleGeometry.cpp \
 * **`VehicleGeometry.cpp`** (new) — `MakeWheelMounts` / `ApplyGeometry`.
 * `VehicleController.cpp` — closed-loop aero (real patch downforce, measured `Fz`, no pitch
   double-count), low-speed stiction, declutch-under-brake.
-* `AeroIntegrationTests.cpp`, `VehicleDrivingTests.cpp` — build through `VehicleGeometry`, real
+* `AeroIntegrationChecks.cpp`, `VehicleDrivingChecks.cpp` — build through `VehicleGeometry`, real
   inertia; brake/park/rollover reframed to physical, harness-valid assertions.
 
 ## Next phases

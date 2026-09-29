@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                      DRIVESCENESTRUCTURE.H
 //============================================================================================================================================
-// 🧩 The `--scene drive` level author — the drivable course + the real ControlVehicle + four procedural wheels,
+// 📦 The `--scene drive` level author — the drivable course + the real ControlVehicle + four procedural wheels,
 //    built once into a world-space triangle soup and exported through SceneCodec::Encode, then imported like any glTF.
 //    This is the exact export-once pattern ShowcaseStructure uses; only the contents differ.
 //
