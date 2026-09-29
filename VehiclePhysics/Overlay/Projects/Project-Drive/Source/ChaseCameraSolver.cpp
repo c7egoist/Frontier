@@ -1,5 +1,5 @@
 //============================================================================================================================================
-//                                                     CHASECAMERASOLVER.CPP
+// 📦 Projects/Project-Drive/Source/ChaseCameraSolver.cpp — chase camera that trails the vehicle (implementation)
 //============================================================================================================================================
 #include "ChaseCameraSolver.h"
 #include <cmath>

@@ -1,5 +1,5 @@
 //============================================================================================================================================
-//                                                     DRIVESCENEAUTHOR.CPP
+// 📦 Projects/Project-Drive/Source/DriveSceneAuthor.cpp — builds the `--scene drive` level: course, ControlVehicle, wheels
 //============================================================================================================================================
 #include "DriveSceneAuthor.h"
 #include "../../../Engine/ContentInterchange/AutomotiveShowcasePresets.h"

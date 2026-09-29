@@ -1,5 +1,5 @@
 //============================================================================================================================================
-//                                                  VEHICLEINSTANCESEQUENCE.CPP
+// 📦 Projects/Project-Drive/Source/VehicleInstanceSequence.cpp — engine⇄project seam: VehicleSolver → renderer instances
 //============================================================================================================================================
 #include "VehicleInstanceSequence.h"
 #include "DriveCourse.h"
