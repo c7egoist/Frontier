@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.cpp — Phase 3 drivable vehicle implementation
+// 🧩 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.cpp — Phase 3 drivable vehicle implementation
 //============================================================================================================================================
 
 #include "VehicleSolver.h"
@@ -10,75 +10,75 @@
 namespace Frontier::Vehicle {
 
 namespace {
-[[nodiscard]] inline float Sign(float v) noexcept { return v > 0.0f ? 1.0f : (v < 0.0f ? -1.0f : 0.0f); }
-[[nodiscard]] inline Vec3  PlanarNormalized(const Vec3& v) noexcept
+[[nodiscard]] inline float Sign(float Amount) noexcept { return Amount > 0.0f ? 1.0f : (Amount < 0.0f ? -1.0f : 0.0f); }
+[[nodiscard]] inline Vec3  PlanarNormalized(const Vec3& Vector) noexcept
 {
-    Vec3 p{v.x, v.y, 0.0f};
-    const float l = p.Length();
-    return (l > 1e-6f) ? Vec3{p.x / l, p.y / l, 0.0f} : Vec3{0, 0, 0};
+    Vec3 Planar{Vector.x, Vector.y, 0.0f};
+    const float Magnitude = Planar.Length();
+    return (Magnitude > 1e-6f) ? Vec3{Planar.x / Magnitude, Planar.y / Magnitude, 0.0f} : Vec3{0, 0, 0};
 }
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
 void VehicleSolver::Build(const VehicleSolverConfiguration& config, const Hooks& hooks, const ChassisState& initial) noexcept
 {
-    config_ = config;
-    hooks_  = hooks;
-    input_  = {};
-    steerAngle_ = 0.0f;
-    telemetry_ = {};
+    ActiveConfiguration = config;
+    ChassisHooks  = hooks;
+    DriverCommand  = {};
+    SteerAngle = 0.0f;
+    CurrentTelemetry = {};
 
-    tyres_.clear();
-    tyres_.resize(config_.Wheels.size());
-    for (size_t i = 0; i < config_.Wheels.size(); ++i)
+    SoftTyres.clear();
+    SoftTyres.resize(ActiveConfiguration.Wheels.size());
+    for (size_t i = 0; i < ActiveConfiguration.Wheels.size(); ++i)
     {
-        const WheelMount& w = config_.Wheels[i];
+        const WheelMount& w = ActiveConfiguration.Wheels[i];
         const Vec3 hub = initial.Position + initial.Orientation.Rotate(w.LocalOffset);
-        tyres_[i].Build(config_.Tyre, hub, initial.Orientation);
+        SoftTyres[i].Build(ActiveConfiguration.Tyre, hub, initial.Orientation);
     }
-    telemetry_.WheelCount = static_cast<uint32_t>(tyres_.size());
+    CurrentTelemetry.WheelCount = static_cast<uint32_t>(SoftTyres.size());
 
     // ── Production driving layer (PacejkaDrivetrain) setup ───────────────────────────────────────────────────────────
-    //   Wire the Phase-1 slip + drivetrain models. The slip integrator holds a const reference to pacejka_, so pacejka_
-    //   must be configured (and must outlive slip_) before the first Step. All per-wheel spin/deflection state is zeroed.
-    pacejka_.SetParameters(config_.TyrePacejka);
-    slip_ = std::make_unique<TyreSlipDynamics>(pacejka_);
-    slip_->SetSolver(config_.SlipSolverSelection);
+    //   Wire the Phase-1 slip + drivetrain models. The slip integrator holds a const reference to PacejkaTyre, so PacejkaTyre
+    //   must be configured (and must outlive SlipDynamics) before the first Step. All per-wheel spin/deflection state is zeroed.
+    PacejkaTyre.SetParameters(ActiveConfiguration.TyrePacejka);
+    SlipDynamics = std::make_unique<TyreSlipDynamics>(PacejkaTyre);
+    SlipDynamics->SetSolver(ActiveConfiguration.SlipSolverSelection);
 
-    drivetrain_.SetEngine(config_.Engine);
-    drivetrain_.SetTurbo(config_.Turbo);
-    drivetrain_.SetTransmission(config_.Transmission);
-    drivetrain_.SetClutch(config_.Clutch);
-    drivetrain_.SetDifferential(config_.Differential);
-    drivetrain_.SetInduction(config_.Induction);
-    drivetrain_.SetSupercharger(config_.Supercharger);
-    drivetrain_.SetRaceTune(config_.RaceTune);
-    drivetrain_.Reset(config_.Engine.IdleRPM);
-    braking_.Configure(config_.Wheels.size(), config_.Brakes, config_.Abs);
+    Powertrain.SetEngine(ActiveConfiguration.Engine);
+    Powertrain.SetTurbo(ActiveConfiguration.Turbo);
+    Powertrain.SetTransmission(ActiveConfiguration.Transmission);
+    Powertrain.SetClutch(ActiveConfiguration.Clutch);
+    Powertrain.SetDifferential(ActiveConfiguration.Differential);
+    Powertrain.SetInduction(ActiveConfiguration.Induction);
+    Powertrain.SetSupercharger(ActiveConfiguration.Supercharger);
+    Powertrain.SetRaceTune(ActiveConfiguration.RaceTune);
+    Powertrain.Reset(ActiveConfiguration.Engine.IdleRPM);
+    BrakingHydraulics.Configure(ActiveConfiguration.Wheels.size(), ActiveConfiguration.Brakes, ActiveConfiguration.Abs);
 
-    gearIndex_  = config_.Transmission.NeutralIndex;       // start in neutral (auto-clutch engages 1st on throttle)
-    shiftTimer_ = config_.ShiftCooldownSeconds;
-    wheelOmega_.assign(config_.Wheels.size(), 0.0f);
-    slipState_.assign(config_.Wheels.size(), SlipState{});
+    GearIndex  = ActiveConfiguration.Transmission.NeutralIndex;       // start in neutral (auto-clutch engages 1st on throttle)
+    ShiftTimer = ActiveConfiguration.ShiftCooldownSeconds;
+    WheelSpin.assign(ActiveConfiguration.Wheels.size(), 0.0f);
+    SlipDeflections.assign(ActiveConfiguration.Wheels.size(), SlipState{});
 
-    built_ = !tyres_.empty() && static_cast<bool>(hooks_.ReadChassis) &&
-             static_cast<bool>(hooks_.ApplyForceAtPoint) && static_cast<bool>(hooks_.Ground);
+    ConstructionComplete = !SoftTyres.empty() && static_cast<bool>(ChassisHooks.ReadChassis) &&
+             static_cast<bool>(ChassisHooks.ApplyForceAtPoint) && static_cast<bool>(ChassisHooks.Ground);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-void VehicleSolver::Step(float dt) noexcept
+void VehicleSolver::Step(float Δτ) noexcept
 {
-    if (!built_ || dt <= 0.0f) return;
-    if (config_.ActiveLayer == DrivingLayer::PacejkaDrivetrain) StepPacejka(dt);
-    else                                                  StepSimple(dt);
+    if (!ConstructionComplete || Δτ <= 0.0f) return;
+    if (ActiveConfiguration.ActiveLayer == DrivingLayer::PacejkaDrivetrain) StepPacejka(Δτ);
+    else                                                  StepSimple(Δτ);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
 // SimpleFrictionCircle — the validated Phase-3 arcade layer (kept as a selectable fallback).
 //------------------------------------------------------------------------------------------------------------------------
-void VehicleSolver::StepSimple(float dt) noexcept
+void VehicleSolver::StepSimple(float Δτ) noexcept
 {
-    const ChassisState cs = hooks_.ReadChassis();
+    const ChassisState cs = ChassisHooks.ReadChassis();
 
     // Chassis basis in world.
     const Vec3 forward = cs.Orientation.Rotate({1.0f, 0.0f, 0.0f});
@@ -87,27 +87,27 @@ void VehicleSolver::StepSimple(float dt) noexcept
     const float forwardVel = Dot(cs.LinearVelocity, forward);
 
     // First-order steer smoothing toward the commanded lock.
-    const float targetSteer = Clamp(input_.Steer, -1.0f, 1.0f) * config_.MaxSteerAngleRad;
-    const float alpha = std::min(1.0f, dt * config_.SteerRatePerSecond);
-    steerAngle_ += (targetSteer - steerAngle_) * alpha;
+    const float targetSteer = Clamp(DriverCommand.Steer, -1.0f, 1.0f) * ActiveConfiguration.MaxSteerAngleRad;
+    const float alpha = std::min(1.0f, Δτ * ActiveConfiguration.SteerRatePerSecond);
+    SteerAngle += (targetSteer - SteerAngle) * alpha;
 
-    telemetry_.Chassis = cs;
-    telemetry_.SpeedMetresPerSecond = speed;
-    telemetry_.ForwardSpeed = forwardVel;
-    telemetry_.TotalVerticalLoad = 0.0f;
-    telemetry_.WheelsInContact = 0u;
+    CurrentTelemetry.Chassis = cs;
+    CurrentTelemetry.SpeedMetresPerSecond = speed;
+    CurrentTelemetry.ForwardSpeed = forwardVel;
+    CurrentTelemetry.TotalVerticalLoad = 0.0f;
+    CurrentTelemetry.WheelsInContact = 0u;
 
-    const float mu = config_.GripCoefficient;
+    const float mu = ActiveConfiguration.GripCoefficient;
 
-    for (size_t i = 0; i < tyres_.size(); ++i)
+    for (size_t i = 0; i < SoftTyres.size(); ++i)
     {
-        const WheelMount& wheel = config_.Wheels[i];
-        XPBDSoftTyre&     tyre  = tyres_[i];
+        const WheelMount& wheel = ActiveConfiguration.Wheels[i];
+        XPBDSoftTyre&     tyre  = SoftTyres[i];
 
         // Rest hub world transform (the tyre models the compliance; the hub follows the chassis rigidly).
         const Vec3 armLocal = wheel.LocalOffset;
         const Vec3 hub = cs.Position + cs.Orientation.Rotate(armLocal);
-        const Quat steerQ  = wheel.Steered ? Quat::AxisAngle(up, steerAngle_) : Quat{0, 0, 0, 1};
+        const Quat steerQ  = wheel.Steered ? Quat::AxisAngle(up, SteerAngle) : Quat{0, 0, 0, 1};
         const Quat hubRot  = QuatNormalize(QuatMul(steerQ, cs.Orientation));
 
         // Hub velocity from rigid-body kinematics (v + ω × r).
@@ -119,12 +119,12 @@ void VehicleSolver::StepSimple(float dt) noexcept
         //    reports the vertical load Fz through direct node-vs-heightfield contact; the in-plane forces are the driving
         //    layer below, bounded by that load. Vertical (Z) slip is left untouched so contact still resolves normally.
         const Vec3 surfaceVel{hubVel.x, hubVel.y, 0.0f};
-        tyre.Step(dt, config_.TyreSubsteps, hub, hubRot, surfaceVel, hooks_.Ground);
+        tyre.Step(Δτ, ActiveConfiguration.TyreSubsteps, hub, hubRot, surfaceVel, ChassisHooks.Ground);
         const TyreReaction& reaction = tyre.Reaction();
 
         const float Fz    = std::max(0.0f, reaction.Force.z);
         const bool  onGnd = reaction.ContactCount > 0u && Fz > 1.0f;
-        const Vec3  patch = onGnd ? reaction.PatchCentre : Vec3{hub.x, hub.y, hub.z - config_.Tyre.Radius};
+        const Vec3  patch = onGnd ? reaction.PatchCentre : Vec3{hub.x, hub.y, hub.z - ActiveConfiguration.Tyre.Radius};
 
         // Wheel planar axes (with steer).
         const Vec3 wf = PlanarNormalized(hubRot.Rotate({1.0f, 0.0f, 0.0f}));
@@ -134,22 +134,22 @@ void VehicleSolver::StepSimple(float dt) noexcept
 
         // Longitudinal demand: engine (driven) minus a braking magnitude that always OPPOSES motion and can never
         //    reverse the car — the braking force is clamped to at most what brings this wheel's share to a standstill
-        //    this step (mass·|v|/dt / wheels), so brakes + rolling resistance decelerate cleanly to zero and hold.
-        const float engine = wheel.Driven ? input_.Throttle * config_.DriveForcePerWheel : 0.0f;
+        //    this step (mass·|v|/Δτ / wheels), so brakes + rolling resistance decelerate cleanly to zero and hold.
+        const float engine = wheel.Driven ? DriverCommand.Throttle * ActiveConfiguration.DriveForcePerWheel : 0.0f;
         float brakeMag = 0.0f;
-        if (wheel.Braked)                        brakeMag += input_.Brake * config_.BrakeForcePerWheel;
-        if (input_.Handbrake && !wheel.Steered)  brakeMag += config_.HandbrakeForce;
-        brakeMag += config_.RollingResistance * Fz;
-        const float wheelCount = static_cast<float>(std::max<size_t>(1, tyres_.size()));
-        const float maxStopForce = std::fabs(vLong) * config_.ChassisMass / (dt * wheelCount);
+        if (wheel.Braked)                        brakeMag += DriverCommand.Brake * ActiveConfiguration.BrakeForcePerWheel;
+        if (DriverCommand.Handbrake && !wheel.Steered)  brakeMag += ActiveConfiguration.HandbrakeForce;
+        brakeMag += ActiveConfiguration.RollingResistance * Fz;
+        const float wheelCount = static_cast<float>(std::max<size_t>(1, SoftTyres.size()));
+        const float maxStopForce = std::fabs(vLong) * ActiveConfiguration.ChassisMass / (Δτ * wheelCount);
         const float brakeApplied = std::min(brakeMag, maxStopForce);
         float longDemand = engine - brakeApplied * Sign(vLong);
 
         // Lateral demand: a load-scaled linear cornering force opposing side-slip velocity (damped, so it settles).
-        const float loadFraction = (config_.ChassisMass > 1.0f)
-                                 ? Fz / (config_.ChassisMass * 9.81f / std::max<size_t>(1, tyres_.size()))
+        const float loadFraction = (ActiveConfiguration.ChassisMass > 1.0f)
+                                 ? Fz / (ActiveConfiguration.ChassisMass * 9.81f / std::max<size_t>(1, SoftTyres.size()))
                                  : 1.0f;
-        float latDemand = -config_.CorneringStiffness * loadFraction * vLat;
+        float latDemand = -ActiveConfiguration.CorneringStiffness * loadFraction * vLat;
 
         // Friction circle: clamp the combined in-plane force to μ·Fz.
         Vec3 planar = wf * longDemand + wl * latDemand;
@@ -164,27 +164,27 @@ void VehicleSolver::StepSimple(float dt) noexcept
         if (onGnd)
         {
             const float vVert = hubVel.z;
-            verticalForce = std::max(0.0f, Fz - config_.SuspensionDamping * vVert);
+            verticalForce = std::max(0.0f, Fz - ActiveConfiguration.SuspensionDamping * vVert);
         }
 
         // Apply the tyre's vertical reaction (plus damper) and the driving force at the contact patch.
         const Vec3 wheelForce = Vec3{0.0f, 0.0f, verticalForce} + planar;
-        hooks_.ApplyForceAtPoint(wheelForce, patch);
+        ChassisHooks.ApplyForceAtPoint(wheelForce, patch);
 
         // Telemetry.
-        WheelTelemetry& wt = telemetry_.Wheels[std::min<size_t>(i, telemetry_.Wheels.size() - 1)];
+        WheelTelemetry& wt = CurrentTelemetry.Wheels[std::min<size_t>(i, CurrentTelemetry.Wheels.size() - 1)];
         wt.HubPosition       = hub;
         wt.HubRotation       = hubRot;
         wt.ContactPoint      = patch;
         wt.VerticalLoad      = Fz;
         wt.LongitudinalForce = Dot(planar, wf);
         wt.LateralForce      = Dot(planar, wl);
-        wt.SteerAngleRad     = wheel.Steered ? steerAngle_ : 0.0f;
+        wt.SteerAngleRad     = wheel.Steered ? SteerAngle : 0.0f;
         wt.ContactCount      = reaction.ContactCount;
         wt.InContact         = onGnd;
 
-        telemetry_.TotalVerticalLoad += Fz;
-        if (onGnd) ++telemetry_.WheelsInContact;
+        CurrentTelemetry.TotalVerticalLoad += Fz;
+        if (onGnd) ++CurrentTelemetry.WheelsInContact;
     }
 }
 
@@ -203,9 +203,9 @@ void VehicleSolver::StepSimple(float dt) noexcept
 //   The relaxation-length slip solver keeps this stable through standstill (no velocity-in-denominator singularity), so
 //   the vehicle can launch from rest, hold under braking, and settle without the arcade friction-circle clamp.
 //------------------------------------------------------------------------------------------------------------------------
-void VehicleSolver::StepPacejka(float dt) noexcept
+void VehicleSolver::StepPacejka(float Δτ) noexcept
 {
-    const ChassisState cs = hooks_.ReadChassis();
+    const ChassisState cs = ChassisHooks.ReadChassis();
 
     const Vec3 forward = cs.Orientation.Rotate({1.0f, 0.0f, 0.0f});
     const Vec3 up      = cs.Orientation.Rotate({0.0f, 0.0f, 1.0f});
@@ -213,22 +213,22 @@ void VehicleSolver::StepPacejka(float dt) noexcept
     const float forwardVel = Dot(cs.LinearVelocity, forward);
 
     // First-order steer smoothing toward the commanded lock.
-    const float targetSteer = Clamp(input_.Steer, -1.0f, 1.0f) * config_.MaxSteerAngleRad;
-    const float steerBlend  = std::min(1.0f, dt * config_.SteerRatePerSecond);
-    steerAngle_ += (targetSteer - steerAngle_) * steerBlend;
+    const float targetSteer = Clamp(DriverCommand.Steer, -1.0f, 1.0f) * ActiveConfiguration.MaxSteerAngleRad;
+    const float steerBlend  = std::min(1.0f, Δτ * ActiveConfiguration.SteerRatePerSecond);
+    SteerAngle += (targetSteer - SteerAngle) * steerBlend;
 
-    const float Reff = (config_.EffectiveRadius > 0.01f) ? config_.EffectiveRadius : config_.Tyre.Radius;
-    const float Iw   = std::max(0.05f, config_.WheelInertia);
+    const float Reff = (ActiveConfiguration.EffectiveRadius > 0.01f) ? ActiveConfiguration.EffectiveRadius : ActiveConfiguration.Tyre.Radius;
+    const float Iw   = std::max(0.05f, ActiveConfiguration.WheelInertia);
 
     // ── Drivetrain step: gather driven-wheel spin as rpm feedback, split left/right by hub Y sign ────────────────────
     float sumRpm = 0.0f; int nDriven = 0;
     float leftRpm = 0.0f, rightRpm = 0.0f; bool haveL = false, haveR = false;
-    for (size_t i = 0; i < config_.Wheels.size(); ++i)
+    for (size_t i = 0; i < ActiveConfiguration.Wheels.size(); ++i)
     {
-        if (!config_.Wheels[i].Driven) continue;
-        const float rpm = wheelOmega_[i] * Drivetrain::kRadToRpm;
+        if (!ActiveConfiguration.Wheels[i].Driven) continue;
+        const float rpm = WheelSpin[i] * Drivetrain::kRadToRpm;
         sumRpm += rpm; ++nDriven;
-        if (config_.Wheels[i].LocalOffset.y > 0.0f) { leftRpm = rpm; haveL = true; }
+        if (ActiveConfiguration.Wheels[i].LocalOffset.y > 0.0f) { leftRpm = rpm; haveL = true; }
         else                                        { rightRpm = rpm; haveR = true; }
     }
     const float drivenAvgRpm = (nDriven > 0) ? sumRpm / static_cast<float>(nDriven) : 0.0f;
@@ -238,57 +238,57 @@ void VehicleSolver::StepPacejka(float dt) noexcept
     // Auto-clutch: an AMT holds NEUTRAL at a standstill (clutch open) and engages 1st only when the driver asks for
     //    drive. Without this the clutch would transmit full idle-slip torque in gear and the car would creep off with no
     //    throttle. Brakes act directly on the wheels, so they still work in neutral.
-    const int neutral   = config_.Transmission.NeutralIndex;
+    const int neutral   = ActiveConfiguration.Transmission.NeutralIndex;
     const int firstGear = neutral + 1;
-    const int lastGear  = static_cast<int>(config_.Transmission.GearRatios.size()) - 1;
-    const float throttleCmd = Clamp(input_.Throttle, 0.0f, 1.0f);
-    if (gearIndex_ == neutral && (throttleCmd > 0.05f || forwardVel > 1.0f))
-        gearIndex_ = firstGear;
+    const int lastGear  = static_cast<int>(ActiveConfiguration.Transmission.GearRatios.size()) - 1;
+    const float throttleCmd = Clamp(DriverCommand.Throttle, 0.0f, 1.0f);
+    if (GearIndex == neutral && (throttleCmd > 0.05f || forwardVel > 1.0f))
+        GearIndex = firstGear;
 
     DrivetrainInputs di;
     di.Throttle       = throttleCmd;
-    di.GearIndex      = gearIndex_;
-    di.dt             = dt;
+    di.GearIndex      = GearIndex;
+    di.dt             = Δτ;
     di.DrivenWheelRPM = drivenAvgRpm;
     di.LeftWheelRPM   = leftRpm;
     di.RightWheelRPM  = rightRpm;
-    const DrivetrainOutputs dOut = drivetrain_.Step(di);
+    const DrivetrainOutputs dOut = Powertrain.Step(di);
     const int gearUsed = di.GearIndex;   // gear the drive torque was produced in — Ieff must match it (below)
 
     // ── Automatic gearbox (AMT): up/down-shift on engine rpm with a cooldown, drop to neutral once nearly stopped ─────
-    shiftTimer_ += dt;
-    if (gearIndex_ != neutral)
+    ShiftTimer += Δτ;
+    if (GearIndex != neutral)
     {
-        if (shiftTimer_ >= config_.ShiftCooldownSeconds)
+        if (ShiftTimer >= ActiveConfiguration.ShiftCooldownSeconds)
         {
-            if (dOut.EngineRPM > config_.UpshiftRPM && gearIndex_ < lastGear && throttleCmd > 0.1f)
+            if (dOut.EngineRPM > ActiveConfiguration.UpshiftRPM && GearIndex < lastGear && throttleCmd > 0.1f)
             {
-                ++gearIndex_; shiftTimer_ = 0.0f;
+                ++GearIndex; ShiftTimer = 0.0f;
             }
-            else if (dOut.EngineRPM < config_.DownshiftRPM && gearIndex_ > firstGear)
+            else if (dOut.EngineRPM < ActiveConfiguration.DownshiftRPM && GearIndex > firstGear)
             {
-                --gearIndex_; shiftTimer_ = 0.0f;
+                --GearIndex; ShiftTimer = 0.0f;
             }
         }
         // Declutch once nearly stopped, OR when braking firmly at low speed — otherwise idle creep through the clutch
         //    fights the brake and the car settles at a crawl instead of coming fully to rest (as a real driver would
         //    clutch in / the auto would decouple against the held brake).
         const bool nearlyStopped = speed < 0.5f && throttleCmd < 0.05f;
-        const bool brakingToStop = input_.Brake > 0.4f && throttleCmd < 0.05f && speed < 3.0f;
-        if (nearlyStopped || brakingToStop) gearIndex_ = neutral;
+        const bool brakingToStop = DriverCommand.Brake > 0.4f && throttleCmd < 0.05f && speed < 3.0f;
+        if (nearlyStopped || brakingToStop) GearIndex = neutral;
     }
 
-    telemetry_.Chassis = cs;
-    telemetry_.SpeedMetresPerSecond = speed;
-    telemetry_.ForwardSpeed = forwardVel;
-    telemetry_.TotalVerticalLoad = 0.0f;
-    telemetry_.WheelsInContact = 0u;
-    telemetry_.EngineRPM = dOut.EngineRPM;
-    telemetry_.TurboRPM  = dOut.TurboRPM;
-    telemetry_.BoostBar  = dOut.BoostPressure_Bar;
-    telemetry_.ParasiticDrag_Nm = dOut.ParasiticDrag_Nm;
-    telemetry_.GearIndex = gearIndex_;
-    telemetry_.PacejkaActive = true;
+    CurrentTelemetry.Chassis = cs;
+    CurrentTelemetry.SpeedMetresPerSecond = speed;
+    CurrentTelemetry.ForwardSpeed = forwardVel;
+    CurrentTelemetry.TotalVerticalLoad = 0.0f;
+    CurrentTelemetry.WheelsInContact = 0u;
+    CurrentTelemetry.EngineRPM = dOut.EngineRPM;
+    CurrentTelemetry.TurboRPM  = dOut.TurboRPM;
+    CurrentTelemetry.BoostBar  = dOut.BoostPressure_Bar;
+    CurrentTelemetry.ParasiticDrag_Nm = dOut.ParasiticDrag_Nm;
+    CurrentTelemetry.GearIndex = GearIndex;
+    CurrentTelemetry.PacejkaActive = true;
 
     // ── Aerodynamics (GRIT source-only port, physically CLOSED-LOOP) ─────────────────────────────────────────────────
     //   Compute the whole aero package ONCE per step from the chassis state. Drag, side-force and the YAW/ROLL moments
@@ -301,39 +301,39 @@ void VehicleSolver::StepPacejka(float dt) noexcept
     //   height above the sampled ground, so it responds to squat.
     AeroForces aero{};
     int nFrontWheels = 0, nRearWheels = 0;
-    for (const WheelMount& w : config_.Wheels) { if (w.LocalOffset.x > 0.0f) ++nFrontWheels; else ++nRearWheels; }
-    if (config_.Aero.Enabled)
+    for (const WheelMount& w : ActiveConfiguration.Wheels) { if (w.LocalOffset.x > 0.0f) ++nFrontWheels; else ++nRearWheels; }
+    if (ActiveConfiguration.Aero.Enabled)
     {
         const Vec3  right   = cs.Orientation.Rotate({0.0f, 1.0f, 0.0f});
         const float yawRate = Dot(cs.AngularVelocity, up);
         float groundZ = 0.0f; Vec3 groundN{0.0f, 0.0f, 1.0f};
-        float rideHeight = config_.Aero.FloorDiffuser.RideHeightOptimum_m;
-        if (hooks_.Ground(cs.Position, groundZ, groundN))
-            rideHeight = std::max(0.005f, (cs.Position.z - groundZ) - config_.Aero.ComHeightAboveFloor_m);
+        float rideHeight = ActiveConfiguration.Aero.FloorDiffuser.RideHeightOptimum_m;
+        if (ChassisHooks.Ground(cs.Position, groundZ, groundN))
+            rideHeight = std::max(0.005f, (cs.Position.z - groundZ) - ActiveConfiguration.Aero.ComHeightAboveFloor_m);
 
         aero = ComputeAerodynamicForces(
-            config_.Aero, cs.LinearVelocity, rideHeight, forward, right, up,
-            Clamp(input_.Brake, 0.0f, 1.0f), input_.Handbrake ? 1.0f : 0.0f, throttleCmd, yawRate);
+            ActiveConfiguration.Aero, cs.LinearVelocity, rideHeight, forward, right, up,
+            Clamp(DriverCommand.Brake, 0.0f, 1.0f), DriverCommand.Handbrake ? 1.0f : 0.0f, throttleCmd, yawRate);
 
         // Drag (opposes velocity) + body side-force → chassis at the CoM.
-        hooks_.ApplyForceAtPoint(aero.DragForceWorld, cs.Position);
-        hooks_.ApplyForceAtPoint(aero.SideForceWorld, cs.Position);
+        ChassisHooks.ApplyForceAtPoint(aero.DragForceWorld, cs.Position);
+        ChassisHooks.ApplyForceAtPoint(aero.SideForceWorld, cs.Position);
         // Yaw + roll moments about the CoM (roll↦body-X/forward, yaw↦body-Z/up). Pitch is produced by the axle-applied
         // downforce below, so it is intentionally omitted here.
-        if (hooks_.ApplyTorque)
-            hooks_.ApplyTorque(forward * aero.RollMoment_Nm + up * aero.YawMoment_Nm);
+        if (ChassisHooks.ApplyTorque)
+            ChassisHooks.ApplyTorque(forward * aero.RollMoment_Nm + up * aero.YawMoment_Nm);
     }
     const float frontDownforcePerWheel = (nFrontWheels > 0) ? std::max(0.0f, aero.FrontDownforce_N) / static_cast<float>(nFrontWheels) : 0.0f;
     const float rearDownforcePerWheel  = (nRearWheels  > 0) ? std::max(0.0f, aero.RearDownforce_N)  / static_cast<float>(nRearWheels)  : 0.0f;
-    telemetry_.Aero = aero;
+    CurrentTelemetry.Aero = aero;
 
-    for (size_t i = 0; i < tyres_.size(); ++i)
+    for (size_t i = 0; i < SoftTyres.size(); ++i)
     {
-        const WheelMount& wheel = config_.Wheels[i];
-        XPBDSoftTyre&     tyre  = tyres_[i];
+        const WheelMount& wheel = ActiveConfiguration.Wheels[i];
+        XPBDSoftTyre&     tyre  = SoftTyres[i];
 
         const Vec3 hub    = cs.Position + cs.Orientation.Rotate(wheel.LocalOffset);
-        const Quat steerQ = wheel.Steered ? Quat::AxisAngle(up, steerAngle_) : Quat{0, 0, 0, 1};
+        const Quat steerQ = wheel.Steered ? Quat::AxisAngle(up, SteerAngle) : Quat{0, 0, 0, 1};
         const Quat hubRot = QuatNormalize(QuatMul(steerQ, cs.Orientation));
 
         const Vec3 r      = hub - cs.Position;
@@ -343,12 +343,12 @@ void VehicleSolver::StepPacejka(float dt) noexcept
         //    the belt velocity so the soft tyre itself contributes no in-plane drag — all traction/cornering comes from
         //    the Pacejka slip forces below, applied on top.
         const Vec3 surfaceVel{hubVel.x, hubVel.y, 0.0f};
-        tyre.Step(dt, config_.TyreSubsteps, hub, hubRot, surfaceVel, hooks_.Ground);
+        tyre.Step(Δτ, ActiveConfiguration.TyreSubsteps, hub, hubRot, surfaceVel, ChassisHooks.Ground);
         const TyreReaction& reaction = tyre.Reaction();
 
         const float Fz    = std::max(0.0f, reaction.Force.z);
         const bool  onGnd = reaction.ContactCount > 0u && Fz > 1.0f;
-        const Vec3  patch = onGnd ? reaction.PatchCentre : Vec3{hub.x, hub.y, hub.z - config_.Tyre.Radius};
+        const Vec3  patch = onGnd ? reaction.PatchCentre : Vec3{hub.x, hub.y, hub.z - ActiveConfiguration.Tyre.Radius};
 
         // Aero downforce for THIS wheel (front axle vs rear axle share). Applied as a REAL downward force at the patch
         //    below (closed loop) — it presses the tyre, the tyre compresses, and its Fz rises over the next steps, so
@@ -373,22 +373,22 @@ void VehicleSolver::StepPacejka(float dt) noexcept
             WheelKinematics K;
             K.Vx        = Vx;
             K.Vsy       = Vsy;
-            K.OmegaR    = wheelOmega_[i] * Reff;
+            K.OmegaR    = WheelSpin[i] * Reff;
             K.CamberRad = 0.0f;
             K.Fz_N      = Fz;
-            const SlipResult sr = slip_->Step(K, slipState_[i], dt);
+            const SlipResult sr = SlipDynamics->Step(K, SlipDeflections[i], Δτ);
             Fx = sr.Forces.Fx; Fy = sr.Forces.Fy; kappa = sr.Kappa; alpha = sr.AlphaRad;
 
             // Lateral contact damping: viscous carcass damping opposing the lateral slide velocity (physical, +wl frame).
             //    Reacted on the chassis (it is a real tyre force) and faded out with speed so fast cornering stays pure
             //    Pacejka.
-            const float fade = 1.0f / (1.0f + (speed / std::max(0.1f, config_.ContactDampingFadeSpeed)) *
-                                              (speed / std::max(0.1f, config_.ContactDampingFadeSpeed)));
-            Fy -= config_.LateralDampingCoefficient * fade * VlatHub;
+            const float fade = 1.0f / (1.0f + (speed / std::max(0.1f, ActiveConfiguration.ContactDampingFadeSpeed)) *
+                                              (speed / std::max(0.1f, ActiveConfiguration.ContactDampingFadeSpeed)));
+            Fy -= ActiveConfiguration.LateralDampingCoefficient * fade * VlatHub;
 
             // Numerical safety net only (NOT the arcade clamp): keep the combined force inside a generous friction
             //    circle so a transient slip spike can never inject unbounded energy. Well-behaved slip stays untouched.
-            const float grip = config_.GripCoefficient * Fz * 1.3f;
+            const float grip = ActiveConfiguration.GripCoefficient * Fz * 1.3f;
             const float pmag = std::sqrt(Fx * Fx + Fy * Fy);
             if (grip > 0.0f && pmag > grip) { const float s = grip / pmag; Fx *= s; Fy *= s; }
 
@@ -405,9 +405,9 @@ void VehicleSolver::StepPacejka(float dt) noexcept
                 const float blend = 1.0f - std::min(1.0f, speed / crawl);
                 if (blend > 0.0f)
                 {
-                    const float share   = config_.ChassisMass / static_cast<float>(std::max<size_t>(1, tyres_.size()));
-                    const float maxHold = config_.GripCoefficient * Fz;         // static friction cap μ·Fz
-                    const float hold    = Clamp(-Vx * share / dt, -maxHold, maxHold);
+                    const float share   = ActiveConfiguration.ChassisMass / static_cast<float>(std::max<size_t>(1, SoftTyres.size()));
+                    const float maxHold = ActiveConfiguration.GripCoefficient * Fz;         // static friction cap μ·Fz
+                    const float hold    = Clamp(-Vx * share / Δτ, -maxHold, maxHold);
                     Fx = Fx * (1.0f - blend) + hold * blend;
                 }
             }
@@ -415,13 +415,13 @@ void VehicleSolver::StepPacejka(float dt) noexcept
 
         // Suspension damper (shock absorber) on vertical hub velocity; tyre can only push, so clamp non-negative.
         float verticalForce = Fz;
-        if (onGnd) verticalForce = std::max(0.0f, Fz - config_.SuspensionDamping * hubVel.z);
+        if (onGnd) verticalForce = std::max(0.0f, Fz - ActiveConfiguration.SuspensionDamping * hubVel.z);
 
         const Vec3 planar = wf * Fx + wl * Fy;
         // Tyre reaction (world +Z up) + in-plane forces + aero downforce (real, along body −up). The downforce presses
         //    the chassis onto the patch; the tyre reacts by compressing, raising Fz next step — the closed loop.
         const Vec3 aeroDownVec = up * (-aeroDownforce);
-        hooks_.ApplyForceAtPoint(Vec3{0.0f, 0.0f, verticalForce} + planar + aeroDownVec, patch);
+        ChassisHooks.ApplyForceAtPoint(Vec3{0.0f, 0.0f, verticalForce} + planar + aeroDownVec, patch);
 
         // ── Wheel spin ODE:  Iw·ω̇ = T_drive − Fx·Reff − T_brake·sign(ω) − T_roll ───────────────────────────────────
         float driveTq = 0.0f;
@@ -431,20 +431,20 @@ void VehicleSolver::StepPacejka(float dt) noexcept
         float brakeTq = 0.0f;
         if (wheel.Braked)
         {
-            if (config_.UseBrakeThermalModel)
+            if (ActiveConfiguration.UseBrakeThermalModel)
             {
                 // Hydraulic/thermal disk model with ABS. ABS watches this wheel's slip κ (computed above) and, above the
                 //    ABS min speed, pulses the line pressure to hold slip near the peak-grip target — the brake torque is
                 //    still applied through the anti-reversal cap below, so a modulated wheel decelerates without locking.
                 BrakeWheelInput bi;
-                bi.PedalCommand = Clamp(input_.Brake, 0.0f, 1.0f);
-                bi.WheelOmega   = wheelOmega_[i];
+                bi.PedalCommand = Clamp(DriverCommand.Brake, 0.0f, 1.0f);
+                bi.WheelOmega   = WheelSpin[i];
                 bi.SlipRatio    = kappa;
                 bi.Airspeed     = speed;
                 bi.Braked       = true;
-                const BrakeWheelOutput bo = braking_.Step(i, bi, dt);
+                const BrakeWheelOutput bo = BrakingHydraulics.Step(i, bi, Δτ);
                 brakeTq += bo.BrakeTorque_Nm;
-                WheelTelemetry& bt = telemetry_.Wheels[std::min<size_t>(i, telemetry_.Wheels.size() - 1)];
+                WheelTelemetry& bt = CurrentTelemetry.Wheels[std::min<size_t>(i, CurrentTelemetry.Wheels.size() - 1)];
                 bt.BrakeTorque_Nm   = bo.BrakeTorque_Nm;
                 bt.BrakePressure_Pa = bo.Pressure_Pa;
                 bt.BrakeTemp_K      = bo.Temperature_K;
@@ -452,21 +452,21 @@ void VehicleSolver::StepPacejka(float dt) noexcept
             }
             else
             {
-                brakeTq += input_.Brake * config_.MaxBrakeTorquePerWheel;
+                brakeTq += DriverCommand.Brake * ActiveConfiguration.MaxBrakeTorquePerWheel;
             }
         }
-        if (input_.Handbrake && !wheel.Steered) brakeTq += config_.HandbrakeTorque;
-        const float rollTq = config_.RollingResistance * Fz * Reff;
+        if (DriverCommand.Handbrake && !wheel.Steered) brakeTq += ActiveConfiguration.HandbrakeTorque;
+        const float rollTq = ActiveConfiguration.RollingResistance * Fz * Reff;
 
         // Effective spin inertia. A driven wheel is rigidly geared to the engine + gearbox through a stiff clutch, so its
         //    effective rotational inertia is the wheel PLUS the drivetrain inertia reflected through (gear·finalDrive)².
         //    This is not just realism: with only the bare wheel inertia the stiff clutch coupling makes explicit Euler at
-        //    240 Hz blow up (dt ≫ 2·I/c). The reflected inertia (~40 kg·m² in 1st) keeps the integration stable.
+        //    240 Hz blow up (Δτ ≫ 2·I/c). The reflected inertia (~40 kg·m² in 1st) keeps the integration stable.
         float Ieff = Iw;
         if (wheel.Driven && nDriven > 0)
         {
-            const float g = config_.Transmission.RatioAt(gearUsed) * config_.Transmission.FinalDriveRatio;
-            Ieff += config_.Engine.EngineInertia * g * g / static_cast<float>(nDriven);
+            const float g = ActiveConfiguration.Transmission.RatioAt(gearUsed) * ActiveConfiguration.Transmission.FinalDriveRatio;
+            Ieff += ActiveConfiguration.Engine.EngineInertia * g * g / static_cast<float>(nDriven);
         }
 
         // ── Semi-implicit wheel-spin integration with low-speed stabilisation ───────────────────────────────────────
@@ -475,45 +475,45 @@ void VehicleSolver::StepPacejka(float dt) noexcept
         //   limit cycle no explicit damping can tame without itself going unstable. So the spin is integrated IMPLICITLY
         //   with a viscous pull toward the kinematic free-rolling speed ω_roll = Vx/Reff:
         //
-        //        (Iw/dt + b)·ω¹ = (Iw/dt)·ω⁰ + T_drive − Fx·Reff + b·ω_roll
+        //        (Iw/Δτ + b)·ω¹ = (Iw/Δτ)·ω⁰ + T_drive − Fx·Reff + b·ω_roll
         //
         //   This is unconditionally stable for any b. b is strong at low speed (kills the relay) and FADES OUT with
         //   speed (fade → 0), so at speed the wheel spins/locks under the full slip dynamics with no artificial pull.
         //   ω_roll → drive still produces slip = (T_drive − Fx·Reff)/b, i.e. genuine wheelspin/launch behaviour.
-        const float spinFade = 1.0f / (1.0f + (speed / std::max(0.1f, config_.ContactDampingFadeSpeed)) *
-                                              (speed / std::max(0.1f, config_.ContactDampingFadeSpeed)));
-        const float b        = onGnd ? config_.SpinDampingCoefficient * spinFade : 0.0f;   // [N·m per rad/s]
-        const float omegaRoll = onGnd ? Vx / Reff : wheelOmega_[i];
+        const float spinFade = 1.0f / (1.0f + (speed / std::max(0.1f, ActiveConfiguration.ContactDampingFadeSpeed)) *
+                                              (speed / std::max(0.1f, ActiveConfiguration.ContactDampingFadeSpeed)));
+        const float b        = onGnd ? ActiveConfiguration.SpinDampingCoefficient * spinFade : 0.0f;   // [N·m per rad/s]
+        const float omegaRoll = onGnd ? Vx / Reff : WheelSpin[i];
 
-        const float omega0 = wheelOmega_[i];
-        const float invMass = 1.0f / (Ieff / dt + b);
-        float omega1 = ((Ieff / dt) * omega0 + driveTq - Fx * Reff + b * omegaRoll) * invMass;
+        const float omega0 = WheelSpin[i];
+        const float invMass = 1.0f / (Ieff / Δτ + b);
+        float omega1 = ((Ieff / Δτ) * omega0 + driveTq - Fx * Reff + b * omegaRoll) * invMass;
 
         // Brake + rolling resistance oppose spin but can never drive it through zero (anti-reversal): cap the resistive
         //    torque at exactly what brings ω to rest this step. A locked wheel then stays locked (κ → −1) while the car
         //    is moving, and the vehicle brakes cleanly to a standstill and holds there.
-        const float resist = std::min(brakeTq + rollTq, std::fabs(omega1) * Ieff / dt);
-        omega1 -= resist * Sign(omega1) * (dt / Ieff);
-        wheelOmega_[i] = omega1;
+        const float resist = std::min(brakeTq + rollTq, std::fabs(omega1) * Ieff / Δτ);
+        omega1 -= resist * Sign(omega1) * (Δτ / Ieff);
+        WheelSpin[i] = omega1;
 
         // Telemetry.
-        WheelTelemetry& wt = telemetry_.Wheels[std::min<size_t>(i, telemetry_.Wheels.size() - 1)];
+        WheelTelemetry& wt = CurrentTelemetry.Wheels[std::min<size_t>(i, CurrentTelemetry.Wheels.size() - 1)];
         wt.HubPosition       = hub;
         wt.HubRotation       = hubRot;
         wt.ContactPoint      = patch;
         wt.VerticalLoad      = Fz;
         wt.LongitudinalForce = Fx;
         wt.LateralForce      = Fy;
-        wt.SteerAngleRad     = wheel.Steered ? steerAngle_ : 0.0f;
+        wt.SteerAngleRad     = wheel.Steered ? SteerAngle : 0.0f;
         wt.ContactCount      = reaction.ContactCount;
         wt.InContact         = onGnd;
-        wt.WheelOmega        = wheelOmega_[i];
+        wt.WheelOmega        = WheelSpin[i];
         wt.SlipRatio         = kappa;
         wt.SlipAngleRad      = alpha;
         wt.AeroDownforce     = aeroDownforce;
 
-        telemetry_.TotalVerticalLoad += Fz;
-        if (onGnd) ++telemetry_.WheelsInContact;
+        CurrentTelemetry.TotalVerticalLoad += Fz;
+        if (onGnd) ++CurrentTelemetry.WheelsInContact;
     }
 }
 

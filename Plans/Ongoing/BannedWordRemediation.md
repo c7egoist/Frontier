@@ -43,7 +43,7 @@ what we own without permanently diverging the copied Frontier engine code from u
 | 1 — driver input layer | `DriverInputIntegrator.h` (was `VehicleInputController.h`), `DriverInputExchange.h` (was `VehicleInputBridge.h`) + callers (`DriveExecution.cpp`, `VehicleInstanceSequence.h`, `TractrixVehicleScene.h`, `VehicleInputTests.cpp`) | 🟢 done — g++ syntax-clean |
 | 2 — vehicle dynamics core (class API) | `VehicleController.{h,cpp}` → `VehicleSolver.{h,cpp}`; `VehicleControllerConfig`→`VehicleSolverConfiguration`; `SetInput`→`AssignInput`; `IsBuilt`→`Constructed`; `DrivingModel`→`DrivingLayer` (field `Model`→`ActiveLayer`); `SlipSolverKind`→`SlipSolverSelection`. 17 referencing files + BOTH build lists (`ProjectDrive.cmake`, `ToolchainSequence.ps1`) updated | 🟢 done — g++ syntax-clean |
 | 3 — powertrain subsystems | `Drivetrain.{h,cpp}`, `PacejkaTyreModel.{h,cpp}` (`Model`), `TyreSlipDynamics::SetSolver`, `BrakingSystem` (`UseBrakeThermalModel` bool `Use` prefix + `Model`), tyre models | ⬜ pending |
-| 5 — formatting pass | banner emoji `📦`→`🧩` (~20 vehicle files); internal snake_case members (`config_`,`input_`,…)→PascalCase; single-letter params (`v`,`c`,`dt`) | ⬜ deferred |
+| 5 — formatting pass | banner emoji `📦`→`🧩` (remaining ~18 vehicle files); internal snake_case members→PascalCase + single-letter params across the rest of the layer | ⬜ deferred (`VehicleSolver.{h,cpp}` already done, see below) |
 | 3 — instance / scene seams | `VehicleInstanceSequence`, `DriveSceneStructure`, `ChaseCameraSolver` | 🚧 |
 | 4 — our identifiers in the copied host | `DriveExecution.cpp` (`IsDrive`→`DriveSelected`, etc.) | 🚧 |
 | 5 — formatting pass | 142/122 rulers, `///` annotation blocks, aligned columns, emoji whitelist across the authored layer | 🚧 |
@@ -60,6 +60,19 @@ source lists, so Phase 1 needed only a comment fix in `ProjectDrive.cmake`.
 `VehicleController` → **`VehicleSolver`** (solves the coupled longitudinal/lateral/yaw dynamics). `VehicleIntegrator`
 was considered and rejected. Applied across all 17 referencing files and both build lists. `Step`/`Build`/`SlipSolver`
 were kept — they are not on the banned list (`SlipSolver` uses the approved `Solver` suffix).
+
+## `VehicleSolver.{h,cpp}` — fully compliant (formatting completed early)
+
+Beyond the Phase-2 banned-word renames, the two `VehicleSolver` files were finished to full SKILL compliance:
+banner emoji `📦`→`🧩`; every private member moved off trailing-underscore snake_case to PascalCase
+(`config_`→`ActiveConfiguration`, `input_`→`DriverCommand`, `telemetry_`→`CurrentTelemetry`, `tyres_`→`SoftTyres`,
+`built_`→`ConstructionComplete`, `slip_`→`SlipDynamics`, `slipState_`→`SlipDeflections` (drops banned `State`),
+`drivetrain_`→`Powertrain`, `braking_`→`BrakingHydraulics`, `wheelOmega_`→`WheelSpin`, `pacejka_`→`PacejkaTyre`,
+`hooks_`→`ChassisHooks`, `steerAngle_`→`SteerAngle`, `gearIndex_`→`GearIndex`, `shiftTimer_`→`ShiftTimer`);
+single-letter params fixed (`Clamp(v,lo,hi)`→`(Amount,Lower,Upper)`, `Sign(v)`→`Sign(Amount)`,
+`PlanarNormalized(v)`→`(Vector)`, `Step(dt)`→`Step(Δτ)`). All members are private, so no external caller changed.
+Local **physics notation** (`Fx`,`Fy`,`Fz`,`Vx`,`Vsy`,`Iw`,`Reff`,`kappa`,`alpha`,`omega0/1`) was deliberately kept — it
+mirrors the equations documented in the comments and is the correct domain vocabulary, not banned shorthand.
 
 ## Deferred to the formatting pass (Phase 5)
 

@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.h — drivable vehicle: rigid chassis + four XPBD soft tyres (Phase 3)
+// 🧩 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.h — drivable vehicle: rigid chassis + four XPBD soft tyres (Phase 3)
 //============================================================================================================================================
 //
 //    Phase 3 assembles the pieces built in Phases 0–2 into one drivable vehicle:
@@ -20,7 +20,7 @@
 //
 //    Call order per fixed physics step (on the Phase-0 physics thread):
 //        solver.AssignInput(input);
-//        solver.Step(dt);          // reads chassis, steps tyres, applies wheel forces to the chassis
+//        solver.Step(Δτ);          // reads chassis, steps tyres, applies wheel forces to the chassis
 //        solver.StepOnce();            // integrates the chassis with those forces
 //
 //    Frame conventions (match RigidBodySolver + XPBDSoftTyre): right-handed, +Z up, chassis-local +X forward, +Y left,
@@ -230,39 +230,39 @@ public:
     // Builds one soft tyre per wheel mount at its current world hub. `initial` seeds the hub placement.
     void Build(const VehicleSolverConfiguration& config, const Hooks& hooks, const ChassisState& initial) noexcept;
 
-    void AssignInput(const DriverInput& input) noexcept { input_ = input; }
+    void AssignInput(const DriverInput& input) noexcept { DriverCommand = input; }
 
     // One fixed physics step: read chassis, step every tyre (nodes vs heightfield), apply wheel forces at the patches.
-    void Step(float dt) noexcept;
+    void Step(float Δτ) noexcept;
 
-    [[nodiscard]] const VehicleTelemetry& Telemetry() const noexcept { return telemetry_; }
-    [[nodiscard]] const std::vector<XPBDSoftTyre>& Tyres() const noexcept { return tyres_; }
-    [[nodiscard]] bool Constructed() const noexcept { return built_; }
+    [[nodiscard]] const VehicleTelemetry& Telemetry() const noexcept { return CurrentTelemetry; }
+    [[nodiscard]] const std::vector<XPBDSoftTyre>& Tyres() const noexcept { return SoftTyres; }
+    [[nodiscard]] bool Constructed() const noexcept { return ConstructionComplete; }
 
 private:
-    [[nodiscard]] static float Clamp(float v, float lo, float hi) noexcept { return v < lo ? lo : (v > hi ? hi : v); }
+    [[nodiscard]] static float Clamp(float Amount, float Lower, float Upper) noexcept { return Amount < Lower ? Lower : (Amount > Upper ? Upper : Amount); }
 
-    // The two driving layers Step() dispatches to (selected by config_.ActiveLayer).
-    void StepSimple(float dt) noexcept;   // Phase-3 friction-circle layer (validated fallback)
-    void StepPacejka(float dt) noexcept;  // production drivetrain + Pacejka slip layer
+    // The two driving layers Step() dispatches to (selected by ActiveConfiguration.ActiveLayer).
+    void StepSimple(float Δτ) noexcept;   // Phase-3 friction-circle layer (validated fallback)
+    void StepPacejka(float Δτ) noexcept;  // production drivetrain + Pacejka slip layer
 
-    VehicleSolverConfiguration    config_;
-    Hooks                      hooks_;
-    std::vector<XPBDSoftTyre>  tyres_;
-    DriverInput                input_;
-    VehicleTelemetry           telemetry_;
-    float                      steerAngle_ = 0.0f;  // filtered steer (rad)
-    bool                       built_ = false;
+    VehicleSolverConfiguration    ActiveConfiguration;
+    Hooks                      ChassisHooks;
+    std::vector<XPBDSoftTyre>  SoftTyres;
+    DriverInput                DriverCommand;
+    VehicleTelemetry           CurrentTelemetry;
+    float                      SteerAngle = 0.0f;  // filtered steer (rad)
+    bool                       ConstructionComplete = false;
 
     // Production driving-layer state (PacejkaDrivetrain):
-    PacejkaTyreModel                  pacejka_;      // Magic-Formula tyre (shared by all wheels)
-    std::unique_ptr<TyreSlipDynamics> slip_;         // transient slip integrator (holds a const ref to pacejka_)
-    Drivetrain                        drivetrain_;    // engine → clutch → gearbox → differential
-    BrakingSystem                     braking_;       // per-wheel disk-brake hydraulics + thermal + ABS
-    std::vector<float>                wheelOmega_;    // [rad/s] per-wheel spin
-    std::vector<SlipState>            slipState_;     // per-wheel relaxation-length deflection state
-    int                               gearIndex_ = 3; // current gear (3 = 1st)
-    float                             shiftTimer_ = 0.0f;
+    PacejkaTyreModel                  PacejkaTyre;      // Magic-Formula tyre (shared by all wheels)
+    std::unique_ptr<TyreSlipDynamics> SlipDynamics;         // transient slip integrator (holds a const ref to PacejkaTyre)
+    Drivetrain                        Powertrain;    // engine → clutch → gearbox → differential
+    BrakingSystem                     BrakingHydraulics;       // per-wheel disk-brake hydraulics + thermal + ABS
+    std::vector<float>                WheelSpin;    // [rad/s] per-wheel spin
+    std::vector<SlipState>            SlipDeflections;     // per-wheel relaxation-length deflection state
+    int                               GearIndex = 3; // current gear (3 = 1st)
+    float                             ShiftTimer = 0.0f;
 };
 
 } // namespace Frontier::Vehicle
