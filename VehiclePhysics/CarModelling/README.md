@@ -1,15 +1,17 @@
 # CarModelling — low-poly cars for Project-Tractrix, authored in SolidArc
 
-This directory vendors the **SolidArc** parametric NURBS/B-rep modelling tool (from
-`streamlinkinbox/Frontier@arena/01a0ce66-frontier`) and uses it to model low-poly car bodies for the Project-Tractrix
-vehicle (Thread M, Phase 3). SolidArc is a standalone, dependency-free C++20 console modeller: geometry is authored by
-text commands / `.scr` scripts, solids are B-reps of trimmed NURBS faces, and visuals are written as PNG proofs by its
-software rasteriser (no GUI, no GPU required here).
+This directory holds the low-poly car bodies for the Project-Tractrix vehicle (Thread M, Phase 3) and the scripts that
+author them. The modelling tool itself — **SolidArc** (from `streamlinkinbox/Frontier@arena/01a0ce66-frontier`) — is a
+shared authoring tool and now lives under the engine tree at **`Engine/AuthoringTools/SolidArc`** (moved out of this
+directory). SolidArc is a standalone, dependency-free C++20 console modeller: geometry is authored by text commands /
+`.scr` scripts, solids are B-reps of trimmed NURBS faces, and visuals are written as PNG proofs by its software
+rasteriser (no GUI, no GPU required here).
 
 ## Layout
-- `SolidArc/` — the vendored tool source (kernel + console + presentation + interaction + docs + plans), **with local
-  Frontier additions** (see "Material system + exporter" below). The 200 MB baseline `Proofs/` gallery and the upstream
-  `.patch` were intentionally **not** vendored (references, not the tool). Upstream gate: `SolidArc/Tools/Build/CheckSolidArc.sh`.
+- `Engine/AuthoringTools/SolidArc/` (repo root) — the vendored tool source (kernel + console + presentation +
+  interaction + docs + plans), **with local Frontier additions** (see "Material system + exporter" below). The 200 MB
+  baseline `Proofs/` gallery and the upstream `.patch` were intentionally **not** vendored (references, not the tool).
+  Upstream gate: `Engine/AuthoringTools/SolidArc/Tools/Build/CheckSolidArc.sh`.
 - `BuildConsole.sh` — minimal build of just the console binary (no CMake, no verifier suite). `./BuildConsole.sh [out]`.
 - `Cars/` — `.scr` modelling scripts. **`BoxCar.scr`** is the current deliverable: a minimal placeholder — one box
   chassis + four cylinder wheels, with the box deliberately **not touching** the wheels (it floats 0.08 m above the

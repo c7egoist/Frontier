@@ -77,6 +77,9 @@ When a plan changes standing, **move the file** between these folders rather tha
   another or make one project launch another's binary.
 - Shared systems live in `Engine/` and are **reused** by projects (compiled in or linked), never duplicated
   into a project. If two projects need the same behaviour, it belongs in `Engine/`, not copied twice.
+- Shared **authoring tools** (used to make content, not shipped in a project) live under `Engine/AuthoringTools/`.
+  Example: the SolidArc NURBS/B-rep modeller is at `Engine/AuthoringTools/SolidArc` and is used to author car bodies
+  for Project-Tractrix; the per-project content and scripts that consume it stay with the project.
 
 ---
 

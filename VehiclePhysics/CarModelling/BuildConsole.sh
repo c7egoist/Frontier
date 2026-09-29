@@ -6,7 +6,8 @@
 #============================================================================================================================================
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC="$HERE/SolidArc/Editor/AuthoringTools/Modelling/SolidArc"
+REPO="$(cd "$HERE/../.." && pwd)"
+SRC="$REPO/Engine/AuthoringTools/SolidArc/Editor/AuthoringTools/Modelling/SolidArc"
 OUT="${1:-/tmp/sa-build}"
 CXX_BIN="${CXX:-g++}"
 mkdir -p "$OUT/obj" "$OUT/proofs"
