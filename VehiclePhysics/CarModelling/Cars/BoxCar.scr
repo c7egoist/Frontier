@@ -1,0 +1,32 @@
+# =====================================================================
+#  BoxCar — minimal placeholder: one box chassis + four cylinder wheels.
+#  The user will author real cars themselves; this is only the drivable
+#  proxy for Phase 3 (a box rigid body on Jolt + four soft/rigid wheels).
+#
+#  HARD CONSTRAINT: the chassis box must NOT touch the wheels.
+#    wheels: radius 0.36, centre z = 0.36  -> top of tyre at z = 0.72
+#    box   : floor at z = 0.80             -> 0.08 m clearance above the tyres
+#  Because the box's z-range [0.80,1.45] is strictly above the tyres'
+#  z-range [0.00,0.72], there is no intersection anywhere, whatever the
+#  x/y overlap. (Matches VehicleController: hubs mount below the chassis.)
+#
+#  Run: SolidArc --continue --proofs Proofs Cars/BoxCar.scr
+# =====================================================================
+
+# --- chassis: a single box, floor at z=0.80 (clear of the wheels) ---
+box (0.30,0.05,0.80) (4.10,1.75,1.45) --name=Chassis
+matcap Chassis plastic-blue
+
+# --- four wheels: cylinders on the +Y (axle) axis, tyres clear of box ---
+cylinder (1.00,-0.05,0.36) 0.36 0.30 --axis=(0,1,0) --name=WFL
+cylinder (1.00, 1.55,0.36) 0.36 0.30 --axis=(0,1,0) --name=WFR
+cylinder (3.40,-0.05,0.36) 0.36 0.30 --axis=(0,1,0) --name=WRL
+cylinder (3.40, 1.55,0.36) 0.36 0.30 --axis=(0,1,0) --name=WRR
+matcap WFL WFR WRL WRR rubber
+
+list
+view iso
+view fit
+render boxcar --size=1100x800
+# default export keeps sharp/duplicated faces; add --weld for smooth.
+export Meshes/BoxCar.obj

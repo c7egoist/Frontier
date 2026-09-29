@@ -31,7 +31,7 @@ const char* ClassName(FigureClassification K) noexcept { return K == FigureClass
 
 // ── Studio → export material table ────────────────────────────────────────────────────────────────────────────────
 // Maps each matcap studio (the SolidArc "material system") to (a) a Wavefront MTL description for portable viewers and
-//    (b) the real Frontier engine material it should bind to. The .materials.json manifest written next to the OBJ carries
+//    (b) the real Frontier engine material it should bind to. The .materials.toml manifest written next to the OBJ carries
 //    this table so the paint / rubber / glass / chrome / emissive assignment is trivially editable after export.
 struct StudioMaterial
 {
@@ -4084,11 +4084,11 @@ void ConsoleHost::Register() noexcept
         return true;
     });
 
-    Add("export", "export <path.obj> [--chord=t] [--weld[=eps]] — tessellate every solid to a Wavefront OBJ (+ .mtl + .materials.json). "
-                  "Faces are grouped by their per-face matcap material (usemtl); the JSON manifest binds each studio to a "
+    Add("export", "export <path.obj> [--chord=t] [--weld[=eps]] — tessellate every solid to a Wavefront OBJ (+ .mtl + .materials.toml). "
+                  "Faces are grouped by their per-face matcap material (usemtl); the TOML manifest binds each studio to a "
                   "Frontier engine material (AutomotiveFlakePaint / Rubber_Tyre / Glass_Tinted / metals / emissive) and is "
                   "meant to be hand-edited. By default coincident vertices are KEPT DUPLICATED so low-poly edges stay crisp "
-                  "(each face carries its own normals). Pass --weld to merge coincident position+normal vertices within each "
+                  "(each face carries its own normals). Pass --weld to merge coincident vertices (position, averaged normals) within each "
                   "body (welded seams, smaller mesh); --weld=eps sets the merge tolerance in metres (default 1e-5).",
                   [=, this](const CommandLine& C)
     {
@@ -4098,7 +4098,7 @@ void ConsoleHost::Register() noexcept
         const std::string Stem   = ObjPath.stem().string();
         std::filesystem::path Dir = ObjPath.parent_path();
         std::filesystem::path MtlPath  = Dir / (Stem + ".mtl");
-        std::filesystem::path JsonPath = Dir / (Stem + ".materials.json");
+        std::filesystem::path TomlPath = Dir / (Stem + ".materials.toml");
         const double Chord = C.SwitchNumber("chord").value_or(2e-3);
         // Weld toggle: default OFF (duplicated faces / sharp edges). `--weld` or `--weld=eps` merges coincident verts.
         const bool   Weld    = C.Switch("weld") || C.SwitchNumber("weld").has_value() || C.SwitchText("weld").has_value();
@@ -4206,35 +4206,36 @@ void ConsoleHost::Register() noexcept
         Mtl.close();
 
         // Manifest: the editable studio → Frontier-material binding (System B AutomotiveFlakePaint for paint, etc.).
-        std::ofstream Js(JsonPath);
-        if (Js)
+        //   Written as TOML — each studio is a [materials.<studio>] table; hand-edit freely.
+        std::ofstream Tm(TomlPath);
+        if (Tm)
         {
-            Js << "{\n  \"mesh\": \"" << (Stem + ".obj") << "\",\n";
-            Js << "  \"note\": \"Edit freely: 'frontier' is the engine material each usemtl group binds to; paints use System B AutomotiveFlakePaint.\",\n";
-            Js << "  \"materials\": {\n";
-            bool First = true;
+            Tm << "# SolidArc material manifest for " << (Stem + ".obj") << "\n";
+            Tm << "# Edit freely: 'frontier' is the engine material each usemtl group binds to; paints use System B AutomotiveFlakePaint.\n";
+            Tm << "mesh = \"" << (Stem + ".obj") << "\"\n\n";
             for (int St : Used)
             {
                 const StudioMaterial& M = StudioMat(St);
-                if (!First) Js << ",\n"; First = false;
-                Js << "    \"" << M.Studio << "\": { \"frontier\": \"" << M.Frontier << "\", "
-                   << "\"baseColor\": [" << M.Kd[0] << ", " << M.Kd[1] << ", " << M.Kd[2] << "], "
-                   << "\"metallic\": " << M.Metallic << ", \"roughness\": " << M.Roughness << ", "
-                   << "\"emissive\": " << M.Emissive << ", \"opacity\": " << M.Alpha << ", "
-                   << "\"flakes\": " << (M.Flakes ? "true" : "false") << " }";
+                Tm << "[materials." << M.Studio << "]\n";
+                Tm << "frontier   = \"" << M.Frontier << "\"\n";
+                Tm << "baseColor  = [" << M.Kd[0] << ", " << M.Kd[1] << ", " << M.Kd[2] << "]\n";
+                Tm << "metallic   = " << M.Metallic << "\n";
+                Tm << "roughness  = " << M.Roughness << "\n";
+                Tm << "emissive   = " << M.Emissive << "\n";
+                Tm << "opacity    = " << M.Alpha << "\n";
+                Tm << "flakes     = " << (M.Flakes ? "true" : "false") << "\n\n";
             }
-            Js << "\n  }\n}\n";
         }
-        Js.close();
+        Tm.close();
 
         if (Weld)
             Row("export %s  %d solids  %zu tris  %zu verts (welded from %zu, eps=%.0e)  %zu materials  (+ %s, %s)",
                 ObjPath.string().c_str(), Solids, TriCount, WeldedVerts, RawVerts, WeldEps, Used.size(),
-                (Stem + ".mtl").c_str(), (Stem + ".materials.json").c_str());
+                (Stem + ".mtl").c_str(), (Stem + ".materials.toml").c_str());
         else
             Row("export %s  %d solids  %zu tris  %zu verts (duplicated, sharp edges)  %zu materials  (+ %s, %s)",
                 ObjPath.string().c_str(), Solids, TriCount, WeldedVerts, Used.size(),
-                (Stem + ".mtl").c_str(), (Stem + ".materials.json").c_str());
+                (Stem + ".mtl").c_str(), (Stem + ".materials.toml").c_str());
         return true;
     });
     Add("tint", "tint <figure...> r g b — body colour 0..1", [=, this](const CommandLine& C)

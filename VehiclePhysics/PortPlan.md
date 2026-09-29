@@ -100,9 +100,22 @@ Pacejka with slip/cornering stiffness in-band · correct load sensitivity. **Kno
 sign but ~10× small magnitude (contact-patch length under-resolves the pneumatic trail) — documented, closes with finer
 meshing. Build: `g++ -std=c++17 -O2 XPBDSoftTyre.cpp PacejkaTyreModel.cpp XPBDTyreValidation.cpp -o xpbdval && ./xpbdval`.
 
-## Phase 3 — Low-poly drivable scene
-A low-poly car on a Jolt-heightfield test track inside Project-Tractrix, driven by the physics thread. Low-poly is
-acceptable per the user.
+## Phase 3 — Low-poly drivable scene  ✅ **COMPLETE** (see `Phase3-Drivable-Scene.md`)
+A drivable car on a **Jolt-heightfield** test track inside Project-Tractrix, driven by the Phase-0 physics thread. The
+chassis is a rigid box; each corner is a Phase-2 **XPBD soft tyre** whose nodes contact the heightfield **directly**
+(no raycast). The soft tyre carries the vertical load (it is the suspension spring, with an added shock-absorber term);
+a thin driving layer turns throttle/brake/steer into in-plane forces bounded by the friction circle `μ·Fz`.
+
+| Item | Where | Status |
+|------|-------|--------|
+| Vehicle controller (chassis + 4 soft tyres + driving layer) | `Vehicle/VehicleController.{h,cpp}` | ✅ engine-agnostic (hook-based) |
+| Procedural Jolt-heightfield track + direct node sampler | `Projects/Project-Tractrix/Source/TractrixTestTrack.h` | ✅ |
+| Scene assembly (solver + track + controller + thread) | `Projects/Project-Tractrix/Source/TractrixVehicleScene.h` | ✅ in-tree |
+| Headless drive test (mock chassis + mock heightfield) | `Vehicle/VehicleSceneValidation.cpp` | ✅ **19/19 pass** |
+
+Placeholder car = **box + four wheels** (`CarModelling/Cars/BoxCar.scr`), box not touching the wheels (the user will
+author real bodywork). Validated invariants: settles carrying exactly `1.000·mg` on 4 wheels with no sink-through;
+accelerates; brakes to a dead stop without reversing; steers/yaws while upright; rests stably on a 6 % slope.
 
 ## Phase 4 — EOS networking  *(deferred — "tomorrow")*
 Server-authoritative simulation + client prediction/reconciliation, porting GRIT's EpicAdapter/EOS seam

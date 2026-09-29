@@ -11,12 +11,13 @@ software rasteriser (no GUI, no GPU required here).
   Frontier additions** (see "Material system + exporter" below). The 200 MB baseline `Proofs/` gallery and the upstream
   `.patch` were intentionally **not** vendored (references, not the tool). Upstream gate: `SolidArc/Tools/Build/CheckSolidArc.sh`.
 - `BuildConsole.sh` — minimal build of just the console binary (no CMake, no verifier suite). `./BuildConsole.sh [out]`.
-- `Cars/` — `.scr` modelling scripts, one per car (the deliverable): `MuscleCar74.scr` (blue fastback),
-  `Sedan.scr` (pearl notchback), `Hatchback.scr` (red hot hatch). Each script models the car, renders its proof, and
-  exports its mesh.
-- `Proofs/` — rendered preview PNGs (`muscle.png`, `sedan.png`, `hatch.png`) and the `AllCars.png` contact sheet.
-- `Meshes/` — exported `<Car>.obj` + `<Car>.mtl` + `<Car>.materials.json` for each car (default = sharp/duplicated
-  faces). `MuscleCar74_welded.obj` is a welded (smooth) export demonstrating the `--weld` toggle.
+- `Cars/` — `.scr` modelling scripts. **`BoxCar.scr`** is the current deliverable: a minimal placeholder — one box
+  chassis + four cylinder wheels, with the box deliberately **not touching** the wheels (it floats 0.08 m above the
+  tyres, matching the Phase-3 `VehicleController` where the hubs mount below the chassis). The user authors real bodywork
+  themselves; earlier detailed car studies were dropped at their request.
+- `Proofs/` — rendered preview PNGs (`boxcar.png`).
+- `Meshes/` — exported `<Car>.obj` + `<Car>.mtl` + `<Car>.materials.toml` (default = sharp/duplicated faces; `--weld`
+  gives a smooth, vertex-merged variant).
 
 ## Material system + exporter (Frontier additions to SolidArc)
 SolidArc's matcap studios *are* the material system. This checkout extends them for a racing game and adds mesh export:
@@ -32,27 +33,27 @@ SolidArc's matcap studios *are* the material system. This checkout extends them 
   - **Duplicated vs welded (edge sharpness) is a toggle.** By **default** coincident vertices are **kept duplicated** so
     every face carries its own normals and the low-poly creases stay crisp (the intended look). Passing **`--weld`**
     merges vertices that share a position within each body and averages their normals — producing smooth, shared
-    topology with a smaller vertex count (e.g. MuscleCar74: 4609 → 3065 verts). `--weld=eps` sets the merge tolerance
+    topology with a smaller vertex count (e.g. the muscle-car study: 4609 → 3065 verts). `--weld=eps` sets the merge tolerance
     in metres (default `1e-5`).
   It also writes:
   - a portable **`.mtl`** (Kd/Ks/Ns/d + a `# frontier <Material>` tag per studio) for any OBJ viewer, and
-  - an editable **`.materials.json`** manifest binding each studio to the real **Frontier engine material** — paints →
+  - an editable **`.materials.toml`** manifest binding each studio to the real **Frontier engine material** — paints →
     **System B `AutomotiveFlakePaint`** (clear-coat + metallic flakes), tyres → `Rubber_Tyre`, windows → `Glass_Tinted`,
     trim → `Metal_Chrome`/`Metal_Steel`, lights → `Emissive_Headlight`/`Emissive_Taillight`, splitters/wings → `CarbonFibre`.
   Edit the JSON (or reassign `usemtl` groups) to change any material without re-modelling.
 
-## The three cars
-The reference images were style targets only; these are original low-poly designs, each a distinct body class:
-1. **MuscleCar74** — blue fastback muscle car: long hood, raked windshield, fastback roofline, raised fender haunches,
-   tinted windshield/backlight + side DLO glass, chrome hub caps, emissive head/taillights.
-2. **Sedan** — pearl three-box notchback saloon: long wheelbase, upright greenhouse, separate trunk volume.
-3. **Hatchback** — red compact hot hatch: short overhangs, steep tailgate, tall greenhouse over the rear axle.
+## The placeholder car (BoxCar)
+Per the user, the deliverable here is just a **box + four wheels** — a physics proxy, not styled bodywork (the user
+authors real cars themselves). The one hard constraint: the **chassis box must not touch the wheels**. `BoxCar.scr`
+guarantees this by construction — the tyres occupy z ∈ [0.00, 0.72] and the box floor sits at z = 0.80, so their
+z-ranges never overlap (0.08 m clearance) regardless of any x/y overlap. This mirrors the Phase-3 `VehicleController`,
+where each hub mounts below the chassis CoM and the box floats clear of the tyres.
 
 ## Build & render
 ```bash
 VehiclePhysics/CarModelling/BuildConsole.sh /tmp/sa-build
 /tmp/sa-build/SolidArc --continue --proofs VehiclePhysics/CarModelling/Proofs \
-    VehiclePhysics/CarModelling/Cars/MuscleCar74.scr
+    VehiclePhysics/CarModelling/Cars/BoxCar.scr
 ```
 
 ## Modelling approach (real CAD: silhouette extrude + boolean wheel arches)
@@ -71,7 +72,7 @@ Each body is built the way a CAD user would, using SolidArc's exact NURBS/B-rep 
 4. **Per-face materials.** Glass is assigned to the windshield/backlight (and tailgate) faces of the single solid via
    `matcap … --face=…`; separate parts get rubber / chrome / emissive studios. Final engine materials
    (System-B `AutomotiveFlakePaint`, `Rubber_Tyre`, `Glass_Tinted`, `Metal_Chrome`, emissive) are bound in the exported
-   `.materials.json`.
+   `.materials.toml`.
 
 > **Kernel notes (robustness).** Booleans in this kernel want **exactly one body per side**, so multiple cutters are
 > `union`ed first and subtracted once (chaining subtracts onto already-curved faces, or blind pockets whose end-cap lands
