@@ -61,6 +61,27 @@ Port from GRIT, on rigid wheels that probe the heightfield via `CastCylinder` / 
 
 ---
 
+## Phase 1 — Vehicle-model port + validation  **(delivered)**
+
+Pure-C++, sandbox-compilable port of GRIT's force models under `Overlay/Engine/PhysicalDynamics/Vehicle/`, with a
+headless 3-layer validation harness. **See `Phase1-Port-and-Validation.md` for the full writeup.**
+
+| Item | Where | Status |
+|------|-------|--------|
+| Pacejka MF6.1 (Fx/Fy/Mz + combined slip) | `Vehicle/PacejkaTyreModel.{h,cpp}` | ✅ line-for-line from GRIT source |
+| Contact-slip solvers (Newton ref + relaxation-length) | `Vehicle/TyreSlipDynamics.{h,cpp}` | ✅ |
+| Strut spring (lin/prog/digr) + damper | `Vehicle/SuspensionModel.h` | ✅ |
+| Drivetrain (engine RK4, turbo STAGE 1–7, clutch, gearbox, 4-mode diff) | `Vehicle/Drivetrain.{h,cpp}` | ✅ |
+| Validation harness (35 checks) | `Vehicle/VehicleValidation.cpp` | ✅ 35/35 pass |
+
+**Researched improvement:** transient **relaxation-length** tyre solver (Pacejka & Besselink 1997) added alongside the
+GRIT-faithful Newton reference — matches steady state exactly, ~15× fewer force evals/step, and is unconditionally stable
+at low speed where the raw Magic Formula diverges. Recommended as the production path.
+
+> **GRIT-fidelity caveat:** GRIT needs Unreal+Chaos and cannot run in-sandbox, so "vs GRIT" = equation/constant fidelity
+> (re-read from source) + an independent oracle sweep (< 0.5 N) + physics invariants. A live telemetry diff needs
+> user-supplied GRIT `TelemetryLogger` logs.
+
 ## Phase 2 — XPBD soft tyre replaces the analytic tyre
 
 Extend `XPBDTyreSolver` to a calibrated multi-ring carcass: inflation-pressure volume constraint, sidewall + tread-band
