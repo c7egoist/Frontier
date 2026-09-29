@@ -423,7 +423,7 @@ private:
     [[nodiscard]] bool  RebuildSwapchain()      noexcept;
     [[nodiscard]] uint32_t ResolvePresentMode() const noexcept;   // VkPresentModeKHR as uint32_t (header stays Vulkan-free)
 
-    void                RecordComputeCommands(uint32_t ImageOrdinal,
+    void                RecordComputeCommands(uint32_t ImageIndex,
                                               const DispatchConfiguration& Dispatch) noexcept;
     void                WriteDescriptorSet()   noexcept;
     void                ConstructSceneBuffers() noexcept;

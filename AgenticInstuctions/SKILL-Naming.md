@@ -79,8 +79,8 @@ The recording cycle uses the following closed spellings. `Rotation` remains rese
 | `CycleScheduler` | Orders completion-gated reuse of recording slots |
 | `CycleSlot` | Fence and semaphores ordering one reusable position |
 | `RecordingSlotCount` | Number of reusable recording positions |
-| `SlotOrdinal` | One position within that count |
-| `RecordingOrdinal` | Monotonic recording number counted from bring-up |
+| `SlotIndex` | One position within that count |
+| `RecordingNumber` | Monotonic recording number counted from bring-up |
 | `PerSlot` | Content replicated once for every reusable position |
 | `RecordedSlot` | Measurements retained for one reusable position |
 | `TimestampsPerSlot` | Timestamp count claimed by each reusable position |
@@ -176,7 +176,7 @@ names are rejected on the same ground as categorical ones. Neighbouring spelling
 are rejected with it: `Preamble`, `Epilogue`, `Header`, `Common`, `Global`, `Misc`.
 
 Banned addendum words — Cadence, Binding, Submission, Footprint, Region, Tree, Vacancy, Ordinates,
-Draft, Draught, Paint.
+Ordinal, Draft, Draught, Paint.
 
 ⚠️ `Draft` and `Draught` are banned as **imprecise state words**, not as spellings of each other. Both mean
 "provisional" — a thing that is not finished yet — which describes the moment a mechanism is observed rather
@@ -205,6 +205,11 @@ so the units are `SketchToolset` and `TextureToolset`.
 `Configuration` for user and panel configuration, `Context` for live interaction data, `LayoutProfile` for shared
 layout inputs, and `TypographyMetrics` for measured text. Examples: `ControlCentreConfiguration`,
 `LayerStackContext`, `ThemeProfile`, `LayoutProfile`, `TypographyProfile`, and `TypographyMetrics`.
+
+`Ordinal` is banned too (project directive). Like `Prelude` it states only *where* something sits in an abstract
+sequence — first, second, nth — which distinguishes nothing about the mechanism. State the mechanism instead: a
+countable position is a `Slot` or an `Index`, a monotonic counter is a `Number`, an ordered workflow is a
+`Sequence`. So `SlotOrdinal` → `SlotIndex`, `RecordingOrdinal` → `RecordingNumber`, `ImageOrdinal` → `ImageIndex`.
 
 ## Mathematical Vocabulary Exemption
 

@@ -2137,8 +2137,8 @@ bool BuildLevel()
             const bool IsSwatch = R.Material >= First && R.Material < First + static_cast<int>(MaterialSwatchStructure::kSwatchCount);
             if (IsSwatch)
             {
-                const uint32_t Ordinal = static_cast<uint32_t>(R.Material - First);
-                if (Ordinal / MaterialSwatchStructure::kSwatchColumns != Row) continue;
+                const uint32_t SwatchIndex = static_cast<uint32_t>(R.Material - First);
+                if (SwatchIndex / MaterialSwatchStructure::kSwatchColumns != Row) continue;
             }
         }
         g_Tris.push_back(R);

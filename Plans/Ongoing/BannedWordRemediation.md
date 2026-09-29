@@ -13,9 +13,15 @@ what we own without permanently diverging the copied Frontier engine code from u
 
 ## Clarifications
 
-- 🔴 `Ordinal` is **not** banned — `SlotOrdinal` / `RecordingOrdinal` are approved recording-cycle vocabulary. The
-  banned word is `Ordinates` (a mathematical coordinate); there are **zero** in the tree. The lone `Ordinal` hit,
-  `QueryHousingOrdinal()`, is compliant.
+- 🔴 **`Ordinal` IS banned** (project directive, 2026-09-30 — reverses the earlier reading), alongside `Ordinates`.
+  Replace positional-sequence words with the mechanism: `Slot` / `Index` for a countable position, `Number` for a
+  monotonic counter, `Sequence` for an ordered workflow. Recorded in `SKILL-Naming.md` (banned addendum + rationale;
+  the `SlotOrdinal`/`RecordingOrdinal` examples became `SlotIndex`/`RecordingNumber`).
+  - Authored occurrences fixed: `ImageOrdinal` → `ImageIndex` (param, `SwapchainExchange.h`); swatch `Ordinal` →
+    `SwatchIndex` (local, `MaterialLevelViewport.cpp`). `Ordinates`: **zero** in the tree.
+  - `QueryHousingOrdinal()` (`GameExecution.cpp`, `DriveExecution.cpp`) is a **base-engine API call** — the method is
+    defined on `Frontier::ProjectZero::InterfaceTrialSequence`, whose definition is **not vendored in this repo**.
+    Renaming the call here would break it, so it is left as-is (Tier-2/external) and flagged for base-engine remediation.
 - `Controller`, `Bridge`, `Manager`, `Model` (as a container), `flag`, `state`, `value`, `Config` (shorthand) are the
   high-frequency banned tokens in the authored layer. `Update`, `Get`, `Set` are banned verbs.
 - Booleans drop `is` / `has` / `can` / `have` and state the property as a noun phrase (`ThrottleKeyDown`, not
