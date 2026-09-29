@@ -1,5 +1,5 @@
 //============================================================================================================================================
-//                                                     TRACTRIXDRIVESCENE.CPP
+// 📦 Projects/Project-Tractrix/Source/TractrixDriveScene.cpp — builds the `--scene drive` drivable level (see header)
 //============================================================================================================================================
 // See TractrixDriveScene.h. Layout (camera behind the car at −X looking +X, Z up, metres):
 //

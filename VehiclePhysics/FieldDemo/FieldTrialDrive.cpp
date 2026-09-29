@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// FieldTrialDrive.cpp — drive the REAL ControlVehicle geometry across an open field (flat + speed bumps + a launch ramp),
+// 📦 FieldDemo/FieldTrialDrive.cpp — drive the REAL ControlVehicle geometry across an open field (flat + speed bumps + a launch ramp),
 //                      with NO body collision (only the wheels touch the ground), and dump per-frame telemetry to JSON.
 //
 //   This is a visual/behavioural demo, not a pass/fail suite. It reuses the exact same VehicleController + XPBD soft-tyre
