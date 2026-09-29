@@ -9,6 +9,13 @@ Two independent things are covered here:
 
 ## 1. Project-Drive headless references
 
+> **These two tools are NOT the editor.** They are headless CPU *verification* tools — they print to the console
+> and write files, they never open a window. The drivable editor window (viewport + ImGui + sun/sky + the driving
+> scene, "like Project-Zero") is the **`Project-Zero.exe --scene drive`** windowed app: add Project-Drive to the
+> Project-Zero build and apply the `GameExecution.cpp` hooks in **`Docs\DriveEditorWiring.md`** (Milestone 1 opens
+> the window with your car + course; Milestone 2 makes it drive). Frontier ships every sub-project inside the single
+> `Project-Zero` binary and selects the level with `--scene` — there is no separate editor executable.
+
 `ToolchainSequence.ps1` drives `cl.exe` directly (no CMake). It builds two standalone CPU tools that link
 **only** the vehicle physics sources plus `Projects\Project-Drive\Source` — no Vulkan, Jolt, ImGui or GLFW:
 

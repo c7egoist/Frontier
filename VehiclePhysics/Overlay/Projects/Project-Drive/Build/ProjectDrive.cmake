@@ -19,6 +19,7 @@ set(PROJECT_DRIVE_VEHICLE "${CMAKE_CURRENT_SOURCE_DIR}/Engine/PhysicalDynamics/V
 
 set(PROJECT_DRIVE_SOURCES
     # ---- project integration layer (this folder) ----
+    ${PROJECT_DRIVE_ROOT}/Source/DriveSceneStructure.cpp       # one-shot glTF exporter (course + car), --scene drive
     ${PROJECT_DRIVE_ROOT}/Source/VehicleInstanceSequence.cpp   # physics -> InstanceRecord World rows
     ${PROJECT_DRIVE_ROOT}/Source/ChaseCameraSolver.cpp         # player/vehicle camera (CameraProjection)
     # VehicleInputBridge.h and VehicleInspectorSequence.h are header-only.
