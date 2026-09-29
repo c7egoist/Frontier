@@ -1,5 +1,5 @@
 //============================================================================================================================================
-//                                                      DRIVESCENESTRUCTURE.H
+//                                                      DRIVESCENEAUTHOR.H
 //============================================================================================================================================
 // 📦 The `--scene drive` level author — the drivable course + the real ControlVehicle + four procedural wheels,
 //    built once into a world-space triangle soup and exported through SceneCodec::Encode, then imported like any glTF.
@@ -39,9 +39,9 @@ namespace Drive {
 inline constexpr uint32_t kDriveSceneRevision = 1u;
 
 // True when the file at Path was written by this revision (cheap header scan). Missing/older ⇒ false ⇒ re-export.
-[[nodiscard]] bool DriveSceneIsCurrent(const std::string& Path) noexcept;
+[[nodiscard]] bool DriveSceneMatchesRevision(const std::string& Path) noexcept;
 
-class DriveSceneStructure
+class DriveSceneAuthor
 {
 public:
     // Fills the triangle soup: authors the 9 materials, then appends body, four wheels, and the course (in that

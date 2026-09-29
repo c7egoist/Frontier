@@ -52,15 +52,15 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
                                         const VehicleInstanceConfiguration& Configuration) noexcept
 {
     Instancing = Configuration;
-    Config = Frontier::Vehicle::VehicleSolverConfiguration{};
-    Config.Model = Frontier::Vehicle::DrivingScheme::PacejkaDrivetrain;
-    Frontier::Vehicle::ApplyGeometry(Config, Geometry);
-    Config.Aero.Enabled = true;
+    ActiveConfiguration = Frontier::Vehicle::VehicleSolverConfiguration{};
+    ActiveConfiguration.ActiveScheme = Frontier::Vehicle::DrivingScheme::PacejkaDrivetrain;
+    Frontier::Vehicle::ApplyGeometry(ActiveConfiguration, Geometry);
+    ActiveConfiguration.Aero.Enabled = true;
 
     SpawnPosition = Vec3{0.0f, 0.0f, Instancing.SpawnHeight};
     Body = VehicleChassisBody{};
     Body.Position       = SpawnPosition;
-    Body.Mass           = Config.ChassisMass;
+    Body.Mass           = ActiveConfiguration.ChassisMass;
     Body.InvInertiaDiag = Geometry.InvInertia();
 
     VehicleSolver::Hooks h;
@@ -73,7 +73,7 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
         float nx, ny, nz; CourseNormal(p.x, p.y, nx, ny, nz);
         n = Vec3{nx, ny, nz}; return true;
     };
-    Controller.Build(Config, h, Body.State());
+    Controller.Build(ActiveConfiguration, h, Body.State());
 
     WheelSpin.assign(Instancing.WheelCount, 0.0f);
     ChassisState_ = Body.State();
@@ -84,7 +84,7 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
 
 void VehicleInstanceSequence::Reconfigure(const Frontier::Vehicle::VehicleSolverConfiguration& Edited) noexcept
 {
-    Config = Edited;
+    ActiveConfiguration = Edited;
     // Rebuild so a curve / geometry / tyre edit rebinds the soft tyres at the current chassis pose.
     VehicleSolver::Hooks h;
     h.ReadChassis       = [this]{ return Body.State(); };
@@ -96,7 +96,7 @@ void VehicleInstanceSequence::Reconfigure(const Frontier::Vehicle::VehicleSolver
         float nx, ny, nz; CourseNormal(p.x, p.y, nx, ny, nz);
         n = Vec3{nx, ny, nz}; return true;
     };
-    Controller.Build(Config, h, Body.State());
+    Controller.Build(ActiveConfiguration, h, Body.State());
 }
 
 void VehicleInstanceSequence::ResetToSpawn() noexcept
@@ -108,7 +108,7 @@ void VehicleInstanceSequence::ResetToSpawn() noexcept
     Body.ForceAccum      = Vec3{};
     Body.TorqueAccum     = Vec3{};
     std::fill(WheelSpin.begin(), WheelSpin.end(), 0.0f);
-    Reconfigure(Config);          // rebinds the tyres at the spawn pose using the current config
+    Reconfigure(ActiveConfiguration);          // rebinds the tyres at the spawn pose using the current config
     ChassisState_ = Body.State();
 }
 

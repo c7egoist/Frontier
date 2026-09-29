@@ -50,7 +50,7 @@ int RunProjectFluidPreview();
 #include "EditorFeedSequence.h"
 #include "EditorInspectorSequence.h"
 // ── Project-Drive: this app's OWN scene + vehicle + camera + input (its own editor content) ──────────────────────────
-#include "DriveSceneStructure.h"
+#include "DriveSceneAuthor.h"
 #include "VehicleInstanceSequence.h"
 #include "ChaseCameraSolver.h"
 #include "DriverInputExchange.h"
@@ -313,14 +313,14 @@ int main(int argc, char** argv)
             else                                    std::cerr << "[Scene] Showroom export failed: " << Error << "\n";
         }
 
-        // Project-Drive course level — generated headless (DriveSceneStructure), then imported like any other level.
-        //    DriveSceneIsCurrent invalidates a stale DriveCourse.gltf when Construct() changes (kDriveSceneRevision).
+        // Project-Drive course level — generated headless (DriveSceneAuthor), then imported like any other level.
+        //    DriveSceneMatchesRevision invalidates a stale DriveCourse.gltf when Construct() changes (kDriveSceneRevision).
         const bool IsDrive = ScenePath.find("DriveCourse.gltf") != std::string::npos;
-        if (IsDrive && (!std::filesystem::exists(ScenePath, FsError) || !Frontier::Drive::DriveSceneIsCurrent(ScenePath)))
+        if (IsDrive && (!std::filesystem::exists(ScenePath, FsError) || !Frontier::Drive::DriveSceneMatchesRevision(ScenePath)))
         {
             std::filesystem::create_directories(std::filesystem::path(ScenePath).parent_path(), FsError);
             std::string Error;
-            Frontier::Drive::DriveSceneStructure Course; Course.Construct();
+            Frontier::Drive::DriveSceneAuthor Course; Course.Construct();
             if (Course.Export(ScenePath, &Error)) std::cerr << "[Scene] Exported the drive course to " << ScenePath << "\n";
             else                                   std::cerr << "[Scene] Drive course export failed: " << Error << "\n";
         }
@@ -781,7 +781,7 @@ int main(int argc, char** argv)
     if (DriveScene)
     {
         Frontier::Vehicle::VehicleGeometry            Geo;             // real ControlVehicle socket geometry
-        Frontier::Drive::VehicleInstanceConfiguration VehicleConfig;   // body=0, wheels 1..4 (DriveSceneStructure order)
+        Frontier::Drive::VehicleInstanceConfiguration VehicleConfig;   // body=0, wheels 1..4 (DriveSceneAuthor order)
         Vehicle.Construct(Geo, VehicleConfig);
         Logger.RecordMessage(Frontier::DiagnosticSeverity::Information, "Drive",
                              "Vehicle live over the drive course - press P to toggle Play (drive) / Edit (fly camera).");

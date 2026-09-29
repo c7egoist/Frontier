@@ -33,7 +33,7 @@ list(REMOVE_ITEM PROJECT_DRIVE_SOURCES Projects/Project-Zero/Source/GameExecutio
 list(APPEND PROJECT_DRIVE_SOURCES
     # ---- this app's own entry point + scene/vehicle/camera layer ----
     ${PROJECT_DRIVE_ROOT}/Source/DriveExecution.cpp            # own main(): window, editor, drive loop, chase camera
-    ${PROJECT_DRIVE_ROOT}/Source/DriveSceneStructure.cpp       # headless glTF exporter (flat plane + grid + ramp + bumps + car)
+    ${PROJECT_DRIVE_ROOT}/Source/DriveSceneAuthor.cpp       # headless glTF exporter (flat plane + grid + ramp + bumps + car)
     ${PROJECT_DRIVE_ROOT}/Source/VehicleInstanceSequence.cpp   # vehicle physics → InstanceRecord World rows
     ${PROJECT_DRIVE_ROOT}/Source/ChaseCameraSolver.cpp         # player/vehicle camera (CameraProjection)
     # DriverInputExchange.h, VehicleInspectorSequence.h, DriverInputIntegrator.h are header-only.

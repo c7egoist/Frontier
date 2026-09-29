@@ -87,8 +87,8 @@ public:
     //-- Chase/player camera + inspector read the live state through these ---------------------------------------
     [[nodiscard]] const Frontier::Vehicle::ChassisState&   Chassis()   const noexcept { return ChassisState_; }
     [[nodiscard]] const Frontier::Vehicle::VehicleTelemetry& Telemetry() const noexcept { return Controller.Telemetry(); }
-    [[nodiscard]] Frontier::Vehicle::VehicleSolverConfiguration& Configuration() noexcept { return Config; }
-    [[nodiscard]] const Frontier::Vehicle::VehicleSolverConfiguration& Configuration() const noexcept { return Config; }
+    [[nodiscard]] Frontier::Vehicle::VehicleSolverConfiguration& Configuration() noexcept { return ActiveConfiguration; }
+    [[nodiscard]] const Frontier::Vehicle::VehicleSolverConfiguration& Configuration() const noexcept { return ActiveConfiguration; }
 
     // Apply an inspector edit to the live config (rebuilds the tyres so curve/geometry edits take effect).
     void Reconfigure(const Frontier::Vehicle::VehicleSolverConfiguration& Edited) noexcept;
@@ -100,7 +100,7 @@ private:
                            float Out[16]) noexcept;
 
     VehicleInstanceConfiguration            Instancing;
-    Frontier::Vehicle::VehicleSolverConfiguration Config;
+    Frontier::Vehicle::VehicleSolverConfiguration ActiveConfiguration;
     Frontier::Vehicle::VehicleSolver    Controller;
     VehicleChassisBody                      Body;
     Frontier::Vehicle::ChassisState         ChassisState_{};

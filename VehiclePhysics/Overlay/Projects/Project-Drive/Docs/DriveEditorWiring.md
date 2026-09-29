@@ -24,7 +24,7 @@ a small set of **drive-specific edits**, each marked with a `Project-Drive:` com
 1. **Includes** — the drive scene / vehicle / camera / input / inspector headers.
 2. **Default scene** — `ScenePath = "Projects/Project-Drive/Content/Scenes/DriveCourse.gltf"`, plus a `--scene drive`
    alias.
-3. **Scene generation** — if the course glTF is missing or stale, `DriveSceneStructure::Construct()`/`Export()`
+3. **Scene generation** — if the course glTF is missing or stale, `DriveSceneAuthor::Construct()`/`Export()`
    writes it (flat plane + grid/checker + ramp + speed bumps + car), exactly like `ShowroomStructure` does for the
    showroom.
 4. **Camera framing** — a drive-course branch places the editor camera behind/above the spawn pad.
@@ -41,7 +41,7 @@ a small set of **drive-specific edits**, each marked with a `Project-Drive:` com
 
 | File | Role | Mirrors |
 |---|---|---|
-| `DriveSceneStructure.{h,cpp}` | One-shot exporter: emits the course + the real ControlVehicle body + 4 procedural wheels as a glTF level, body given the cobalt **flake clearcoat**, wheels the rubber material. Same `Construct()`/`Export()`/`…IsCurrent()` contract as `ShowcaseStructure`. Instance order is the contract: **0 = body, 1..4 = wheels FL,FR,RL,RR**. | `ShowroomStructure` / `ShowcaseStructure` |
+| `DriveSceneAuthor.{h,cpp}` | One-shot exporter: emits the course + the real ControlVehicle body + 4 procedural wheels as a glTF level, body given the cobalt **flake clearcoat**, wheels the rubber material. Same `Construct()`/`Export()`/`…IsCurrent()` contract as `ShowcaseStructure`. Instance order is the contract: **0 = body, 1..4 = wheels FL,FR,RL,RR**. | `ShowroomStructure` / `ShowcaseStructure` |
 | `VehicleInstanceSequence.{h,cpp}` | Owns the live `VehicleController` + a collider-free chassis integrator; steps physics at 240 Hz and writes the body + 4 wheel `InstanceRecord::World` rows, then refreshes the flat triangles for the accel structure. | `PhysicsInstanceSequence` |
 | `ChaseCameraSolver.{h,cpp}` | A `CameraProjection` that trails the car (spring lag, speed-reactive FOV). Available for a dedicated chase camera; the entry point currently repositions the fly camera directly in Play mode. | `FlyThroughSolver` |
 | `VehicleInputBridge.h` | Forwards `InputExchange` (W/A/S/D, Space, Shift/Ctrl, R) into the engine-agnostic `VehicleInputController`; edge-detects the discrete pulses. | new (thin) |
@@ -51,7 +51,7 @@ a small set of **drive-specific edits**, each marked with a `Project-Drive:` com
 
 * **Chassis has no collider** — only the wheels contact the ground (`VehicleInstanceSequence` owns a collider-free
   integrator + the XPBD soft tyres). Jolt is linked for the course/ground collider only.
-* **Instance layout is a contract** between `DriveSceneStructure` (which authors the rows) and
+* **Instance layout is a contract** between `DriveSceneAuthor` (which authors the rows) and
   `VehicleInstanceSequence` (which rewrites them): row 0 = body, rows 1..4 = wheels FL, FR, RL, RR, rows 5+ = course.
 * **Shared code, not a shared binary** — the Project-Zero renderer/editor `.cpp`s are compiled *into*
   `Project-Drive.exe`. Nothing at runtime reaches for `Project-Zero.exe`.

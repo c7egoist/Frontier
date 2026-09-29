@@ -1,7 +1,7 @@
 //============================================================================================================================================
-//                                                     DRIVESCENESTRUCTURE.CPP
+//                                                     DRIVESCENEAUTHOR.CPP
 //============================================================================================================================================
-#include "DriveSceneStructure.h"
+#include "DriveSceneAuthor.h"
 #include "../../../Engine/ContentInterchange/AutomotiveShowcasePresets.h"
 #include "../../../Engine/ContentInterchange/SceneCodec.h"
 #include "DriveCourse.h"
@@ -29,7 +29,7 @@ MaterialDescriptor MakeMaterial(const char* Name, const MaterialSlabDescriptor& 
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------ span bookkeeping (verbatim ShowcaseStructure pattern)
-DriveSceneStructure::SpanScope::~SpanScope() noexcept
+DriveSceneAuthor::SpanScope::~SpanScope() noexcept
 {
     if (Spans == nullptr || Triangles == nullptr || Span >= Spans->size()) return;
     TriangleSpanRecord& S = (*Spans)[Span];
@@ -37,7 +37,7 @@ DriveSceneStructure::SpanScope::~SpanScope() noexcept
     S.TriangleCount = Now >= S.FirstTriangle ? Now - S.FirstTriangle : 0u;
 }
 
-DriveSceneStructure::SpanScope DriveSceneStructure::OpenSpan(const char* Name, bool Dynamic) noexcept
+DriveSceneAuthor::SpanScope DriveSceneAuthor::OpenSpan(const char* Name, bool Dynamic) noexcept
 {
     TriangleSpanRecord S;
     S.FirstTriangle = static_cast<uint32_t>(Triangles.size());
@@ -50,7 +50,7 @@ DriveSceneStructure::SpanScope DriveSceneStructure::OpenSpan(const char* Name, b
 }
 
 //------------------------------------------------------------------------------------------------------------------------ triangle emit
-void DriveSceneStructure::AppendTriangle(const Vector3 P[3], const Vector3 N[3], const float Uv[3][2], uint32_t Material) noexcept
+void DriveSceneAuthor::AppendTriangle(const Vector3 P[3], const Vector3 N[3], const float Uv[3][2], uint32_t Material) noexcept
 {
     TriangleIndex T{};
     T.VertexAlphaX = P[0].x; T.VertexAlphaY = P[0].y; T.VertexAlphaZ = P[0].z;
@@ -64,7 +64,7 @@ void DriveSceneStructure::AppendTriangle(const Vector3 P[3], const Vector3 N[3],
     CornerNormals.push_back(N[0]); CornerNormals.push_back(N[1]); CornerNormals.push_back(N[2]);
 }
 
-void DriveSceneStructure::AppendFace(const Vector3& A, const Vector3& B, const Vector3& C, uint32_t Material) noexcept
+void DriveSceneAuthor::AppendFace(const Vector3& A, const Vector3& B, const Vector3& C, uint32_t Material) noexcept
 {
     const Vector3 N = Normalize(Cross(Sub(B, A), Sub(C, A)));
     const Vector3 P[3] = { A, B, C }; const Vector3 Ns[3] = { N, N, N };
@@ -73,7 +73,7 @@ void DriveSceneStructure::AppendFace(const Vector3& A, const Vector3& B, const V
 }
 
 //------------------------------------------------------------------------------------------------------------------------ vehicle body (ControlVehicleMesh, shifted so local origin = centre of mass)
-void DriveSceneStructure::AppendVehicleBody(float ComHeight, uint32_t Material) noexcept
+void DriveSceneAuthor::AppendVehicleBody(float ComHeight, uint32_t Material) noexcept
 {
     using namespace Frontier::Drive::ControlVehicleMesh;
     auto P = [&](uint32_t i)
@@ -83,7 +83,7 @@ void DriveSceneStructure::AppendVehicleBody(float ComHeight, uint32_t Material) 
 }
 
 //------------------------------------------------------------------------------------------------------------------------ procedural wheel (cylinder centred at origin, axle along +Y — the spin axis)
-void DriveSceneStructure::AppendWheel(const Vector3& C, float Radius, float HalfWidth, uint32_t Segments, uint32_t Material) noexcept
+void DriveSceneAuthor::AppendWheel(const Vector3& C, float Radius, float HalfWidth, uint32_t Segments, uint32_t Material) noexcept
 {
     const Vector3 SideL{ C.x, C.y + HalfWidth, C.z };   // +Y face centre
     const Vector3 SideR{ C.x, C.y - HalfWidth, C.z };   // -Y face centre
@@ -107,7 +107,7 @@ void DriveSceneStructure::AppendWheel(const Vector3& C, float Radius, float Half
 }
 
 //------------------------------------------------------------------------------------------------------------------------ static course (world space; reuses the shared DriveCourse geometry)
-void DriveSceneStructure::AppendCourse() noexcept
+void DriveSceneAuthor::AppendCourse() noexcept
 {
     EmitCourseTriangles([&](float ax,float ay,float az, float bx,float by,float bz,
                             float cx,float cy,float cz, uint32_t m)
@@ -115,7 +115,7 @@ void DriveSceneStructure::AppendCourse() noexcept
 }
 
 //------------------------------------------------------------------------------------------------------------------------ materials (index-aligned with DriveCourse.h Materials enum)
-void DriveSceneStructure::AuthorMaterials() noexcept
+void DriveSceneAuthor::AuthorMaterials() noexcept
 {
     Materials.clear();
     auto Dielectric = [](float r, float g, float b, float rough) {
@@ -146,7 +146,7 @@ void DriveSceneStructure::AuthorMaterials() noexcept
 }
 
 //------------------------------------------------------------------------------------------------------------------------ Construct + Export
-void DriveSceneStructure::Construct() noexcept
+void DriveSceneAuthor::Construct() noexcept
 {
     Triangles.clear(); CornerNormals.clear(); Spans.clear();
     AuthorMaterials();
@@ -171,7 +171,7 @@ void DriveSceneStructure::Construct() noexcept
       AppendCourse(); }
 }
 
-bool DriveSceneStructure::Export(const std::string& Path, std::string* Error) const noexcept
+bool DriveSceneAuthor::Export(const std::string& Path, std::string* Error) const noexcept
 {
     SceneEncodeConfiguration Configuration;
     Configuration.Name           = "DriveCourse.r" + std::to_string(kDriveSceneRevision);
@@ -182,7 +182,7 @@ bool DriveSceneStructure::Export(const std::string& Path, std::string* Error) co
 }
 
 //------------------------------------------------------------------------------------------------------------------------ revision check (cheap header scan for the stamped scene name)
-bool DriveSceneIsCurrent(const std::string& Path) noexcept
+bool DriveSceneMatchesRevision(const std::string& Path) noexcept
 {
     std::ifstream f(Path, std::ios::binary);
     if (!f) return false;

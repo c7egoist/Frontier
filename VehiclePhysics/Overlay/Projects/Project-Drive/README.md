@@ -59,7 +59,7 @@ The five `GameExecution.cpp` hooks and the `--scene drive` alias are spelled out
 the CMake integration is `Build/ProjectDrive.cmake`.
 
 ## Remaining (authoring, not code — you build/drive)
-1. `DriveCourse.gltf` + its one-shot `DriveSceneStructure` exporter (course + body + procedural wheels, instance
+1. `DriveCourse.gltf` + its one-shot `DriveSceneAuthor` exporter (course + body + procedural wheels, instance
    order body=0 / wheels=1..4), the same pattern as `ShowcaseStructure`. All geometry already exists as data.
 2. Assign the flake clearcoat material to the body instance, rubber to the wheels.
 3. Paste the five hooks from `Docs/DriveEditorWiring.md` into `GameExecution.cpp`.

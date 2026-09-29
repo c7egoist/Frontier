@@ -9,10 +9,10 @@ namespace Frontier {
 namespace Drive {
 
 ChaseCameraSolver::ChaseCameraSolver() noexcept
-    : CameraProjection(), Config{} {}
+    : CameraProjection(), ActiveConfiguration{} {}
 
-ChaseCameraSolver::ChaseCameraSolver(const ChaseCameraConfiguration& InitialConfig) noexcept
-    : CameraProjection(), Config(InitialConfig) {}
+ChaseCameraSolver::ChaseCameraSolver(const ChaseCameraConfiguration& InitialConfiguration) noexcept
+    : CameraProjection(), ActiveConfiguration(InitialConfiguration) {}
 
 // Yaw/pitch that make ForwardVector point from the eye at AimPoint. Matches CameraProjection's convention:
 //    ForwardVector = { sinYaw·cosPitch, cosYaw·cosPitch, sinPitch } in a +Z-up world (forward default +Y).
@@ -30,13 +30,13 @@ void ChaseCameraSolver::OrientToward(const Vector3& AimPoint) noexcept
 void ChaseCameraSolver::SnapTo(const Vector3& TargetPosition, const Vector3& TargetForward) noexcept
 {
     const Vector3 idealEye{
-        TargetPosition.x - TargetForward.x * Config.FollowDistance,
-        TargetPosition.y - TargetForward.y * Config.FollowDistance,
-        TargetPosition.z - TargetForward.z * Config.FollowDistance + Config.FollowHeight };
+        TargetPosition.x - TargetForward.x * ActiveConfiguration.FollowDistance,
+        TargetPosition.y - TargetForward.y * ActiveConfiguration.FollowDistance,
+        TargetPosition.z - TargetForward.z * ActiveConfiguration.FollowDistance + ActiveConfiguration.FollowHeight };
     AssignSpatialLocation(idealEye);
-    Vector3 aim = TargetPosition; aim.z += Config.LookAtHeight;
+    Vector3 aim = TargetPosition; aim.z += ActiveConfiguration.LookAtHeight;
     OrientToward(aim);
-    AssignFieldOfView(Config.BaseFieldOfView);
+    AssignFieldOfView(ActiveConfiguration.BaseFieldOfView);
     Seeded = true;
 }
 
@@ -48,24 +48,24 @@ void ChaseCameraSolver::AdvanceChase(const Vector3& TargetPosition, const Vector
 
     // Ideal eye: behind the car along its forward, lifted by FollowHeight.
     const Vector3 idealEye{
-        TargetPosition.x - TargetForward.x * Config.FollowDistance,
-        TargetPosition.y - TargetForward.y * Config.FollowDistance,
-        TargetPosition.z - TargetForward.z * Config.FollowDistance + Config.FollowHeight };
+        TargetPosition.x - TargetForward.x * ActiveConfiguration.FollowDistance,
+        TargetPosition.y - TargetForward.y * ActiveConfiguration.FollowDistance,
+        TargetPosition.z - TargetForward.z * ActiveConfiguration.FollowDistance + ActiveConfiguration.FollowHeight };
 
     // Critically-damped exponential follow (frame-rate independent).
-    const float a = 1.0f - std::exp(-Config.PositionSpring * DeltaSeconds);
+    const float a = 1.0f - std::exp(-ActiveConfiguration.PositionSpring * DeltaSeconds);
     const Vector3 eye{
         SpatialLocation.x + (idealEye.x - SpatialLocation.x) * a,
         SpatialLocation.y + (idealEye.y - SpatialLocation.y) * a,
         SpatialLocation.z + (idealEye.z - SpatialLocation.z) * a };
     AssignSpatialLocation(eye);
 
-    Vector3 aim = TargetPosition; aim.z += Config.LookAtHeight;
+    Vector3 aim = TargetPosition; aim.z += ActiveConfiguration.LookAtHeight;
     OrientToward(aim);
 
     // Speed-reactive FOV.
-    const float k = std::clamp(SpeedMetresPerSecond / std::max(1.0f, Config.SpeedForFullFov), 0.0f, 1.0f);
-    AssignFieldOfView(Config.BaseFieldOfView + Config.SpeedFieldOfView * k);
+    const float k = std::clamp(SpeedMetresPerSecond / std::max(1.0f, ActiveConfiguration.SpeedForFullFov), 0.0f, 1.0f);
+    AssignFieldOfView(ActiveConfiguration.BaseFieldOfView + ActiveConfiguration.SpeedFieldOfView * k);
 }
 
 void ChaseCameraSolver::AdvanceProjection(float DeltaSeconds) noexcept { (void)DeltaSeconds; }

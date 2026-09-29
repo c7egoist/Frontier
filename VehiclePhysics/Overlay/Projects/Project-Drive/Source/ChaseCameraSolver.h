@@ -32,7 +32,7 @@ class ChaseCameraSolver : public Frontier::CameraProjection
 {
 public:
     ChaseCameraSolver() noexcept;
-    explicit ChaseCameraSolver(const ChaseCameraConfiguration& InitialConfig) noexcept;
+    explicit ChaseCameraSolver(const ChaseCameraConfiguration& InitialConfiguration) noexcept;
     ~ChaseCameraSolver() noexcept override = default;
 
     // Feed the chassis pose (world) + its speed each frame; the eye springs toward the ideal chase pose and aims at
@@ -42,8 +42,8 @@ public:
 
     void AdvanceProjection(float DeltaSeconds) noexcept override;
 
-    void AssignConfiguration(const ChaseCameraConfiguration& NewConfig) noexcept { Config = NewConfig; }
-    [[nodiscard]] const ChaseCameraConfiguration& QueryConfiguration() const noexcept { return Config; }
+    void AssignConfiguration(const ChaseCameraConfiguration& NewConfiguration) noexcept { ActiveConfiguration = NewConfiguration; }
+    [[nodiscard]] const ChaseCameraConfiguration& QueryConfiguration() const noexcept { return ActiveConfiguration; }
 
     // Snap straight to the ideal pose (used when switching to the chase camera or after a vehicle reset).
     void SnapTo(const Vector3& TargetPosition, const Vector3& TargetForward) noexcept;
@@ -51,7 +51,7 @@ public:
 private:
     void OrientToward(const Vector3& AimPoint) noexcept;
 
-    ChaseCameraConfiguration Config;
+    ChaseCameraConfiguration ActiveConfiguration;
     bool                     Seeded = false;
 };
 

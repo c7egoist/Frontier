@@ -685,7 +685,7 @@ $EngineRelative = @(
     'Projects\\Project-Zero\\Source\\EditorFeedSequence.cpp'
     # ── Project-Drive's OWN entry point replaces Project-Zero's GameExecution.cpp (Project-Drive is a separate .exe) ──
     'Projects\Project-Drive\Source\DriveExecution.cpp'         # own main(): window, editor, drive loop, chase camera
-    'Projects\Project-Drive\Source\DriveSceneStructure.cpp'    # headless glTF exporter: flat plane + grid + ramp + bumps + car
+    'Projects\Project-Drive\Source\DriveSceneAuthor.cpp'    # headless glTF exporter: flat plane + grid + ramp + bumps + car
     'Projects\Project-Drive\Source\VehicleInstanceSequence.cpp' # vehicle physics -> InstanceRecord World rows
     'Projects\Project-Drive\Source\ChaseCameraSolver.cpp'      # player/vehicle camera (CameraProjection)
     'Engine\PhysicalDynamics\Vehicle\VehicleSolver.cpp'    # real vehicle solver (XPBD soft tyres, RWD)

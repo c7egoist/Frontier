@@ -72,7 +72,7 @@ int main(int argc, char** argv)
     const int   stride = 4;                                  // record at 60 Hz
 
     VehicleGeometry g;                                       // real ControlVehicle socket geometry
-    VehicleSolverConfiguration cfg; cfg.Model = DrivingScheme::PacejkaDrivetrain;
+    VehicleSolverConfiguration cfg; cfg.ActiveScheme = DrivingScheme::PacejkaDrivetrain;
     ApplyGeometry(cfg, g);
     cfg.Aero.Enabled = true;
 

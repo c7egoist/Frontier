@@ -96,5 +96,5 @@ The window opens with the editor camera looking down the course. Controls:
 
 In Play mode the fly camera becomes a chase camera that trails the chassis; in Edit mode it is a free editor camera.
 On first launch the app generates `Projects\Project-Drive\Content\Scenes\DriveCourse.gltf` (flat plane + grid/checker
-+ ramp + speed bumps + the car). Delete that file to regenerate it after changing `DriveSceneStructure::Construct()`
++ ramp + speed bumps + the car). Delete that file to regenerate it after changing `DriveSceneAuthor::Construct()`
 (the revision counter also invalidates a stale file automatically).
