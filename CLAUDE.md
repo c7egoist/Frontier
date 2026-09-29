@@ -1,87 +1,131 @@
-# CLAUDE.md
+# Slate — Agent Instructions
 
-Project guidance and living design references for Frontier / Project‑Zero work.
+Vulkan-based engine and painting application. `Engine/` holds engine source, `Docs/` holds specification
+and planning documents, `ExternalPackages/` holds vendored dependencies (never edit).
+
+---
+
+## 🔴 Read before writing code — and only then
+
+These files are authoritative and override all defaults. Read them **before the first line of C, C++,
+shader, or engine Markdown you produce** in a session:
+
+- `AgenticInstuctions/SKILL-Naming.md` — ALL naming (banned words + how to construct a name)
+- `AgenticInstuctions/SKILL-Formatting.md` — formatting, alignment, and the approved emoji whitelist
+
+**Do not load `AgenticInstuctions/SKILL-ResearchFirst.md` or `Mimo.md`.** Those are for the
+Mimo general-purpose agent only. This file is for code work only.
+
+**Do not read them for non-code work.** Questions, explanations, planning discussion, file searches,
+and chat-only answers do not touch these files. The trigger is *generating code or engine documents*,
+not *talking about them*.
+
+Once read, they bind everything downstream: identifiers, folder names, headers, alignment, emoji.
+Check output against them before returning it.
+
+---
+
+## 🔴 Scratch folder — keep the workspace clean
+
+All disposable agent output goes in `_AgentScratch/` — never beside source, never at repo root.
+`logs/` (build logs, command output) · `build/` (throwaway `.obj`, compile probes) · `tmp/` (staging,
+scratch `.cpp`, experiments, self-invented probes and drivers).
+
+- Fully git-ignored; nothing in it is ever committed.
+- A requested prototype is **not** scratch — write it to its real destination directly. Never leave the
+  only copy of a deliverable in scratch.
+
+---
+
+## 🔴 Where documents may be written
+
+Plans, notes, reports, and summaries go in chat. Write a file only on explicit instruction.
+`AgenticInstuctions/` holds skill files only — nothing else goes there.
+
+`Docs/Technical Engine Directory Structure & Architectur.md` is the layer map (L0…L6). Stay close to it
+and update it whenever a folder or subsystem is added, moved, or renamed.
+
+### 🔴 README discipline — stop the sprawl
+
+- A README is written **only** to explain **how to use** an entity / subsystem / tool we deliver — nothing
+  else. One README per delivered thing, living in `Docs/`. Do not scatter READMEs beside source, at repo
+  root, or inside content folders, and do not invent a new README for scratch, probes, or intermediate work.
+- Everything else — what has been done, what was tried, what did not work, what was rejected, performance
+  measurements with the **date** each was taken, and any important notes — goes in a **notes** document in
+  `Docs/`, alongside any relevant images. Keep it factual and dated; do not open a fresh file per attempt.
+
+### 🔴 Plans live in `Plans/`, sorted by standing
+
+Plans are the one document family that is filed rather than kept in chat, and each belongs in exactly one
+subfolder by its current standing:
+
+| Folder            | Holds                                                              |
+|-------------------|-------------------------------------------------------------------|
+| `Plans/Ongoing`   | Plans actively being worked                                         |
+| `Plans/Completed` | Plans whose work has shipped (dated when it moved here)             |
+| `Plans/Deferred`  | Plans intentionally postponed (for example deferred fuel/thermal)  |
+| `Plans/Research`  | Research and investigation notes that precede a plan               |
+
+When a plan changes standing, **move the file** between these folders rather than leaving a stale copy.
+
+---
+
+## 🔴 Projects and shared systems
+
+- `Projects/` is where projects go. **Each project is different and is never a copy of another** — it has
+  its own `Host` entry point, window, scene, content, and build target. Do not clone one project into
+  another or make one project launch another's binary.
+- Shared systems live in `Engine/` and are **reused** by projects (compiled in or linked), never duplicated
+  into a project. If two projects need the same behaviour, it belongs in `Engine/`, not copied twice.
+
+---
+
+## 🔴 Visual proof for every C++ class / entity added to a project
+
+Every time a C++ class or entity is added to a project, deliver a **visual proof** in `VisualProof/<Feature>/`
+— a rendered image, a log, or some other visible artefact that shows the thing actually working. "It
+compiles" is not proof. The proof is a CPU mirror where possible (dependency-free, no window), and it
+self-checks so a regression fails loudly.
+
+---
+
+## Build & tooling
+
+- **Shell = PowerShell.** Run every `.bat` and `.ps1` through the PowerShell tool, never Bash (Bash
+  mangles Windows paths and `cmd` parsing). Use PowerShell syntax (`$env:VAR`, `$null`).
+- Build configuration is build-system agnostic (`Module.toml` + orchestration scripts). CMake is not
+  used.
+- 🔴 **When you change the build, update every toolchain — not just CMake/g++.** The primary target is
+  **MSVC** via the PowerShell orchestration scripts. Adding a source, include path, define, or link
+  library to one toolchain and forgetting the MSVC path is the single most common way a build breaks on the
+  user's machine. A build change is not done until the MSVC path, the `Module.toml`/orchestration path, and
+  any CMake/g++ helper paths all carry it.
+- Ask before building or running any test, probe, or validation executable. "It compiles" is not a
+  deliverable unless it was asked for.
+
+---
+
+## C++ & Architecture Rules
+
+- C++20 standard, `/MD` in every configuration, `SLATE_DEBUG` for debug selection, `_DEBUG` never.
+- Every exported computation carries `SLATE_DECLARES_PRECISION(...)` naming what it claims and what it consumes. The transitivity rule is a `static_assert`, not a review item.
+- Identities are `Identity<Subject>` with distinct tags. A `PartitionIdentity` must not be passable where an `OwnerIdentity` is expected — conflict 15 was exactly that mistake surviving the whole series.
+- Absence carries a reason. Use `Deliver<T>` with a `Refusal`, not `std::optional`, wherever a document says something is rejected or reported.
+- A `Convergent` computation returns `ConvergentResult<T>` and never a bare value. `02` §5: a solver that returns its last iterate at the ceiling is indistinguishable from one that converged.
+- Prefer `constexpr` and compile-time checks over runtime validation wherever a gate can be expressed that way. Half of `00` §11 is mechanisable in the type system.
+- No exceptions across a unit seam. No `new`/`delete` outside an extent slicer.
+- Vendor spellings are verbatim: `VkBuffer`, `VkPipeline`, `ImDrawData`.
+- Do not reference any rules outside of the project or memory.
+
+---
 
 ## Design references
+
 - **Entity + Editor System** — [`Docs/EntityEditorSystem.md`](Docs/EntityEditorSystem.md)
-  How every entity we add carries its editor‑side presence: user‑chosen SVG icon + folder, a user‑designed
-  inspector (declarative slider components *or* a hand‑drawn panel), and an optional dedicated editor window that
-  opens the entity in isolation (Unreal asset‑editor style). All `#if FRONTIER_EDITOR`‑guarded, compiled out of
-  shipping. **Design only — no code yet.**
+  How every entity we add carries its editor-side presence: user-chosen SVG icon + folder, a user-designed
+  inspector (declarative slider components or a hand-drawn panel), and an optional dedicated editor window that
+  opens the entity in isolation (Unreal asset-editor style). All `#if FRONTIER_EDITOR`-guarded, compiled out of
+  shipping. Design only — no code yet.
 - **Rendering pipeline report** — [`Docs/RenderingPipelineReport.md`](Docs/RenderingPipelineReport.md)
-  What the frame is made of (the ReSTIR kernel is 92–99 % of it), why the Nanite/draw‑call idea won't help here
+  What the frame is made of (the ReSTIR kernel is 92–99 % of it), why the Nanite/draw-call idea won't help here
   (cluster culling + indirect draws already exist), and where the real performance wins are.
-
-## Standing conventions
-- **Proofs are CPU mirrors, and they live in `Exhibits/` — never `Diagnostics/` or any ad-hoc folder.** Every GPU/
-  visual feature ships a dependency-free C++ "native proof" that renders the *same* data on the CPU (no Vulkan, no
-  GLFW, no window). The proof source + its runner go in `Exhibits/Workbench/<Feature>/`; the rendered PNG(s) +
-  `NativeProof.json` provenance go in `Exhibits/Gallery/<Feature>/`. Write PNGs through
-  `Engine/ContentInterchange/PngWriteCounterpart.h` (include the same-dir `PngWriteCounterpart.h` forwarder, as the
-  Editor/AutomotiveShowcase proofs do). The proof must self-gate with `Check()` and exit non-zero on failure.
-  Reference example for a scene mirror: `Exhibits/Workbench/Drive/NativeDriveProof.cpp` + `Exhibits/Gallery/Drive/`.
-  (`Diagnostics/` is for a *run's* telemetry logs — CSV/timing — not for visual proofs.)
-- Editor‑side code for any entity lives behind `#if FRONTIER_EDITOR`; the runtime entity must not depend on any
-  editor symbol (dependency is one‑directional: editor → runtime, never the reverse).
-- Icons are SVG, registered via `Engine/DisplayPresentation/IconSymbols.inc`
-  (`FRONTIER_ICON(Symbol, "file.svg")`, regenerated by `ImportApprovedIcons.py`) and rasterised by `IconArt`.
-- Editor panels borrow the project's live figures each tick and edit in place — no duplicate model, no bus.
-
-## Naming & style rules (hard)
-- **"set" and "get" are BANNED words** in prose and in naming. Use verbs like *Assign*, *Query*, *Read*, *Write*,
-  *Access*, *Reconfigure*, *Refresh*. This is why the codebase reads `AssignSpatialLocation`, `QueryInstances`,
-  `AccessMaterials`, etc.
-- **"flakes" ≠ "noise".** Flakes are deliberate metallic sparkle (System B, `AutomotiveFlakePaint.slang`); noise is
-  an artifact. Never conflate them when describing or tuning the paint.
-- Frontier is a **C++20** codebase. Do not drop translation units to C++17 (defaulted `operator==`, concepts,
-  designated initializers, etc. are used).
-- Write the fastest, most performant code the algorithm allows — do not self-limit to what a general-purpose engine
-  (e.g. Unreal) would do. Always verify algorithm correctness *and* execution order before claiming done.
-
-## Build & platform
-- **Windows is the primary target and does NOT use CMake.** Each windowed app builds with a direct MSVC toolchain
-  script, `Projects/<Project>/Build/ToolchainSequence.ps1`, driving `cl.exe`/`link.exe` with `/std:c++20 /EHsc
-  /permissive- /Zc:__cplusplus /fp:precise`. The root `CMakeLists.txt` *rejects* `WIN32 AND MSVC` on purpose.
-- **Linux/macOS use CMake** (IDE integration and Linux builds only): `cmake -S . -B build && cmake --build build`.
-- **Jolt header gotcha:** `BodyFilter` / `IgnoreSingleBodyFilter` live at `Jolt/Physics/Body/BodyFilter.h` (under
-  `Body/`, **not** `Collision/`). An `#include <Jolt/Physics/Collision/BodyFilter.h>` is wrong and fails with C1083
-  even when `ExternalPackages/jolt` is on the include path. Jolt derives `JPH_USE_AVX/SSE4_2/…` from the compiler's
-  `__AVX__` macros, so the ISA flags (`FRONTIER_PHYSICS_FLAGS` / the `-Isa` script arg) must match across every
-  target that includes `<Jolt/Jolt.h>` or `RegisterTypes()` aborts at launch.
-
-## Project-Drive (the driving app)
-- **Project-Drive is its OWN standalone windowed executable** (`Project-Drive.exe`), a *sibling* of Project-Zero —
-  **not** a `--scene` mode of it. It has its own `main()` (`Projects/Project-Drive/Source/DriveExecution.cpp`), its
-  own window, its own scene, its own toolchain (`Build/ToolchainSequence.ps1`) and CMake target
-  (`Build/ProjectDrive.cmake`, one-line `include(...)` into the root `CMakeLists.txt`), and its own `Content/`. It
-  reuses Project-Zero's renderer/editor `.cpp`s as *shared source compiled into itself* but never launches or links
-  against the Project-Zero binary.
-- The build is the Project-Zero source batch **minus `GameExecution.cpp`, plus `DriveExecution.cpp`** + the drive
-  layer (`DriveSceneStructure`, `VehicleInstanceSequence`, `ChaseCameraSolver`, header-only `VehicleInputBridge` /
-  `VehicleInspectorSequence`) + the vehicle physics `.cpp`s under `Engine/PhysicalDynamics/Vehicle/`.
-- **The editor is C++ (Frontier's ImGui editor), never JavaScript/three.js.** A JS editor was explicitly rejected.
-- Controls: **P** toggles Play (drive) / Edit (fly camera); **W/S** throttle-brake, **A/D** steer, **Space**
-  handbrake, **Left-Shift/Left-Ctrl** shift up/down, **R** reset. In Play the fly camera becomes a chase camera.
-- Default scene is a flat plane with grid/checker + a ramp + speed bumps, generated on first launch by
-  `DriveSceneStructure` to `Content/Scenes/DriveCourse.gltf`. Instance-row order is a contract: **0 = body,
-  1..4 = wheels (FL, FR, RL, RR), 5+ = course.**
-
-## Vehicle & driving conventions (Project-Tractrix / Thread M)
-- Codename **Project-Tractrix**. Spec headers are sourced from `SultanAladin/GRIT` branch `source-only`; the physics
-  is implemented inline (not linked from GRIT).
-- **Tyre is an XPBD soft-body** (`XPBDSoftTyre`), with visible XPBD tyres in the scene. EOS is deferred.
-- **The car body has NO collider** — only the wheels contact the ground. **Drop `UCX_` collision entirely.** Terrain
-  is **locked to a Jolt heightfield.** The `Mz` aligning torque must be **emergent** (no artificial gain).
-- **Do NOT import wheels — create procedural wheels.** The body mesh is the `ControlVehicle.blend` /
-  ControlIntegrator vehicle (not `.blend1`); fix socket + vehicle orientation; convert to OBJ/glTF.
-- **Geometry dimensions are never arbitrary** — derive them from the real vehicle (`VehicleGeometry` carries the
-  ControlVehicle socket dimensions) via a shared data block both the physics and the mesh read. Aero ↔ suspension
-  must be a physically **closed loop**.
-- The input controller is **engine-agnostic** (WASD + Space handbrake + Shift/Ctrl shift; document gamepad/wheel
-  later). `VehicleInputBridge` is the only seam between device polling and the controller.
-- **Export sidecar format is `.toml`, never `.json`.**
-- **Deferred subsystems** (roadmaps, not code): fuel → `VehiclePhysics/Deferred-Fuel-System.md`; thermal
-  (coolant/oil) → `VehiclePhysics/Deferred-Thermal-System.md`.
-
-> Note: this file is delivered here in the Slate deliverables repo. To have it guide agents on the Frontier repo,
-> copy `CLAUDE.md` and the `Docs/` folder to the Frontier repo root (paths above are relative and will resolve there).
