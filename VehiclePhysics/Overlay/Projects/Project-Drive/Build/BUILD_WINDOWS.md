@@ -1,66 +1,100 @@
-# Building on Windows (Visual Studio / MSVC, no CMake)
+# Building Project-Drive — its OWN standalone windowed app
 
-Two independent things are covered here:
+Project-Drive is a **separate executable** (`Project-Drive.exe`), a sibling of Project-Zero — **not** a `--scene`
+mode of it. It has its own entry point (`Projects\Project-Drive\Source\DriveExecution.cpp` → `int main`), opens its
+own visible window, generates and loads its own scene (`DriveCourse`), and lets you drive. It compiles the
+Project-Zero renderer/editor translation units straight into itself as shared code (so it is a full ReSTIR editor with
+viewport + outliner + inspectors + sun/sky), but it never launches or links against the Project-Zero binary.
 
-1. **Project-Drive headless tools** — build them with `ToolchainSequence.ps1` (this folder).
-2. **The Jolt include fix** for the Project-Zero windowed app that was failing with `C1083` on `RigidBodySolver.cpp`.
-
----
-
-## 1. Project-Drive headless references
-
-> **These two tools are NOT the editor.** They are headless CPU *verification* tools — they print to the console
-> and write files, they never open a window. The drivable editor window (viewport + ImGui + sun/sky + the driving
-> scene, "like Project-Zero") is the **`Project-Zero.exe --scene drive`** windowed app: add Project-Drive to the
-> Project-Zero build and apply the `GameExecution.cpp` hooks in **`Docs\DriveEditorWiring.md`** (Milestone 1 opens
-> the window with your car + course; Milestone 2 makes it drive). Frontier ships every sub-project inside the single
-> `Project-Zero` binary and selects the level with `--scene` — there is no separate editor executable.
-
-`ToolchainSequence.ps1` drives `cl.exe` directly (no CMake). It builds two standalone CPU tools that link
-**only** the vehicle physics sources plus `Projects\Project-Drive\Source` — no Vulkan, Jolt, ImGui or GLFW:
-
-| Executable            | Sources                                                        | Output (in `Diagnostics\`)               |
-|-----------------------|---------------------------------------------------------------|------------------------------------------|
-| `DriveTelemetry.exe`  | `DriveTelemetry.cpp` + the 7 `Engine\PhysicalDynamics\Vehicle\*.cpp` | `telemetry.csv`, `timing.log`, `run.log` |
-| `SurfelReference.exe` | `SurfelReference.cpp` (single TU)                              | `drive_gi.ppm`, `surfel_timing.log`      |
-
-Run from the repository root:
-
-```powershell
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Configuration Debug
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Rebuild
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Run:$false   # build only
-```
-
-The script imports the MSVC x64 environment from `vcvarsall.bat` automatically (same probe order as
-Project-Zero), so you do **not** need a "Developer PowerShell" prompt. Flags mirror the engine standard:
-`/std:c++20 /EHsc /permissive- /Zc:__cplusplus /fp:precise /O2 /MD`. Binaries land in
-`Projects\Project-Drive\Build\Output\Windows\<Configuration>\`.
-
-> Frontier is a **C++20** codebase (`Engine\ContentInterchange\MaterialDescriptor.h` uses a defaulted
-> `operator==`). Do not drop these tools to `/std:c++17` if you later have them include engine content headers.
+> **Overlay note.** This folder is an *overlay* dropped onto a checkout of the Frontier engine. The two build entry
+> points below live here; the only thing you touch in the engine tree itself is the **one-line CMake include** in
+> §3 (Windows needs no engine-tree edit at all).
 
 ---
 
-## 2. Project-Zero: `RigidBodySolver.cpp` cannot open `Jolt/Physics/Collision/BodyFilter.h`
+## 1. Windows (MSVC, no CMake) — `ToolchainSequence.ps1`
 
-```
-Engine\PhysicalDynamics\RigidBodySolver.cpp(35): fatal error C1083:
-    Cannot open include file: 'Jolt/Physics/Collision/BodyFilter.h'
-```
-
-Cause: the Jolt package root (`ExternalPackages\jolt`) is on the **linker** path but is absent from the
-**include** list in `Get-IncludePaths` inside `Projects\Project-Zero\Build\ToolchainSequence.ps1`. Jolt
-headers are included as `#include <Jolt/...>`, so the compiler needs `ExternalPackages\jolt` as an `/I` root.
-
-Fix — add this one line to the array returned by `Get-IncludePaths` (it sits alongside the other
-`$PackageRoot` includes, and matches what the top-level CMake `FRONTIER_ENGINE_INCLUDES` already does):
+This is the primary Windows path. It drives `cl.exe` / `link.exe` directly and is a fork of Project-Zero's own
+windowed toolchain script, with the entry point swapped to `DriveExecution.cpp` and the vehicle/scene/camera layer
+added. From the **repository root**:
 
 ```powershell
-"/I$(Join-Path $PackageRoot 'jolt')"
+powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1                 # Release build + does not run
+powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Run            # build then launch the window
+powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Configuration Debug -Run
+powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Rebuild -Run
+powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Development:$false   # ship build: editor compiles out
 ```
 
-This is a pre-existing Project-Zero issue and is unrelated to Project-Drive — none of the vehicle sources or
-the Project-Drive integration TUs include Jolt. The batch aborted on `RigidBodySolver.cpp` before it ever
-reached a Vehicle translation unit; once the include path is present, the build proceeds.
+* Imports the MSVC x64 environment from `vcvarsall.bat` automatically (same probe order as Project-Zero) — no
+  "Developer PowerShell" prompt required.
+* Flags mirror the engine standard: `/std:c++20 /EHsc /permissive- /Zc:__cplusplus /fp:precise` plus `/O2 /MD`
+  (Release) or `/Zi /MDd` (Debug).
+* Compiles the full Vulkan + Slang + ImGui + editor stack, lowers the shader table to SPIR-V, and links
+  `vulkan-1 / glfw3dll / thorvg / Jolt`.
+* Output: `Projects\Project-Drive\Build\Output\Windows\<Configuration>\Binary\Project-Drive.exe`, and a mirror at
+  `Build\Project-Drive.exe` so `.\Build\Project-Drive.exe` runs from the repository root.
+
+The script needs the same locked dependencies Project-Zero uses (`python3 Tools\Bootstrap.py`, Vulkan SDK on
+`VULKAN_SDK`). It reuses Project-Zero's prebuilt GLFW/ThorVG/Jolt if present.
+
+---
+
+## 2. Linux (CMake) — `ToolchainSequence.sh`
+
+For IDE integration / Linux desktops. Requires the one-line CMake include from §3 first. From anywhere:
+
+```bash
+Projects/Project-Drive/Build/ToolchainSequence.sh                 # configure + build (Release) + run
+RUN=0 Projects/Project-Drive/Build/ToolchainSequence.sh           # build only
+CONFIG=Debug Projects/Project-Drive/Build/ToolchainSequence.sh
+```
+
+It runs `cmake --build <dir> --target Project-Drive` and launches the binary from the repository root.
+
+---
+
+## 3. CMake integration — one line in the root `CMakeLists.txt`
+
+`ProjectDrive.cmake` defines the standalone `Project-Drive` target by cloning the `PROJECT_ZERO_SOURCES` batch,
+removing `GameExecution.cpp`, and adding `DriveExecution.cpp` + the drive layer + the vehicle physics `.cpp`s. It
+mirrors every Project-Zero target property (definitions, include dirs, link libraries, the `ReSTIRViewportSpirv`
+dependency, icon staging).
+
+Add **one line at the very end** of the engine's root `CMakeLists.txt` — after the `Project-Zero` target, the `Jolt`
+library, Vulkan/GLFW/ThorVG, `ReSTIRViewportSpirv`, and the `FRONTIER_*`/`EXT`/`IMGUI_*` variables are all defined:
+
+```cmake
+include(Projects/Project-Drive/Build/ProjectDrive.cmake)
+```
+
+Then configure and build the target as usual:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --target Project-Drive -j
+```
+
+No other engine-tree edit is required; the SIMD/per-file source properties Project-Zero sets are source-scoped in the
+same directory and are inherited by the shared translation units automatically.
+
+---
+
+## 4. Driving
+
+The window opens with the editor camera looking down the course. Controls:
+
+| Key            | Action                                                             |
+|----------------|-------------------------------------------------------------------|
+| **P**          | Toggle **Play** (drive the car) / **Edit** (fly the editor camera) |
+| **W / S**      | Throttle / brake-reverse (Play mode)                              |
+| **A / D**      | Steer left / right (Play mode)                                    |
+| **Space**      | Handbrake (Play mode)                                             |
+| **Left-Shift / Left-Ctrl** | Shift up / down                                      |
+| **R**          | Reset the car to the spawn pose                                   |
+| **WASD + RMB** | Fly / steer the editor camera (Edit mode)                        |
+
+In Play mode the fly camera becomes a chase camera that trails the chassis; in Edit mode it is a free editor camera.
+On first launch the app generates `Projects\Project-Drive\Content\Scenes\DriveCourse.gltf` (flat plane + grid/checker
++ ramp + speed bumps + the car). Delete that file to regenerate it after changing `DriveSceneStructure::Construct()`
+(the revision counter also invalidates a stale file automatically).
