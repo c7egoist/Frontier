@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                      RESTIRINTEGRATOR.H
 //============================================================================================================================================
-// 🧩 Drives the interim progressive path-tracing kernel (RIS direct lighting + one NEE bounce, running-mean accumulation).
+// 📦 Drives the interim progressive path-tracing kernel (RIS direct lighting + one NEE bounce, running-mean accumulation).
 //    🚧 Not yet ReSTIR proper — see the status block at the top of Engine/Shaders/ReSTIRViewport.slang and plan v2.1.
 
 #pragma once

@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                   SURFELGIRESOLVE.SLANG
 //============================================================================================================================================
-// 🧩 GTX path, pass 2 of 2 — per-pixel resolve. Reads the visibility raster's G-buffer (SurfaceImage = world position,
+// 📦 GTX path, pass 2 of 2 — per-pixel resolve. Reads the visibility raster's G-buffer (SurfaceImage = world position,
 //    NormalImage = normal — the SAME pair SurfaceResolve.slang produces for the ReSTIR kernel), evaluates the material,
 //    and composes the final pixel from three separable terms:
 //        direct  = sun NEE, shadow-ray tested        (always — sharp)

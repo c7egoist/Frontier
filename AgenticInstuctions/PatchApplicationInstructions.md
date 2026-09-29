@@ -207,7 +207,7 @@ Ensure the following output is achieved:
 ## 4. Key Rules to Avoid Errors
 
 1. **Avoid Console Encoding Crashes**:
-   - In Python scripts, avoid raw printing of special Unicode characters (e.g. `🔴`, `📝`, `🧩`) directly to Windows `cp1252` console stdout. Use `repr()` or `ascii()` when logging strings in scripts.
+   - In Python scripts, avoid raw printing of special Unicode characters (e.g. `🔴`, `📝`, `📦`) directly to Windows `cp1252` console stdout. Use `repr()` or `ascii()` when logging strings in scripts.
 2. **Never Stage Temporary Files**:
    - Always delete helper `.py` files and extracted scratch files before running `git add`.
 3. **Preserve Line Endings**:

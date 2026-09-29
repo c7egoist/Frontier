@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                      SWAPCHAINEXCHANGE.H
 //============================================================================================================================================
-// 🧩 Vulkan instance, surface, device, swapchain and recording-slot transport across the hardware vendor edge.
+// 📦 Vulkan instance, surface, device, swapchain and recording-slot transport across the hardware vendor edge.
 
 #pragma once
 

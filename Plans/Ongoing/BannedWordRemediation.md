@@ -49,9 +49,10 @@ what we own without permanently diverging the copied Frontier engine code from u
 ## Decisions (2026-09-30 session)
 
 - 🔴 **`Test` is banned** (project directive). Replacements as above; recorded in `SKILL-Naming.md`.
-- 🔴 **Banner emoji is `📦`, not `🧩`** (project directive — "we already used it a lot"). Reverted the earlier
-  `📦`→`🧩` change across the vehicle work (11 files) and whitelisted `📦` in `SKILL-Formatting.md`. `🧩` stays valid
-  for headers already using it (Frontier engine tree) and for the first `///` line — do NOT mass-convert either way.
+- 🔴 **Banner emoji is `📦`; `🧩` is retired** (project directive — "we already used it a lot"). `🧩` was replaced by
+  `📦` **repo-wide** (14 files incl. FlattenedEngine, shaders, StarFix, governance docs) and removed from the
+  `SKILL-Formatting.md` whitelist. `📦` is the one module marker for both the file-header banner and the first `///`
+  line; `🧩` must not be reintroduced anywhere (source, docs, or chat).
 - **`DrivingScheme`** replaces the interim `DrivingLayer` (better name for the retired `Model`).
 
 ## Phases
@@ -83,7 +84,7 @@ were kept — they are not on the banned list (`SlipSolver` uses the approved `S
 ## `VehicleSolver.{h,cpp}` — fully compliant (formatting completed early)
 
 Beyond the Phase-2 banned-word renames, the two `VehicleSolver` files were finished to full SKILL compliance:
-banner emoji `📦`→`🧩`; every private member moved off trailing-underscore snake_case to PascalCase
+banner emoji is `📦`; every private member moved off trailing-underscore snake_case to PascalCase
 (`config_`→`ActiveConfiguration`, `input_`→`DriverCommand`, `telemetry_`→`CurrentTelemetry`, `tyres_`→`SoftTyres`,
 `built_`→`ConstructionComplete`, `slip_`→`SlipDynamics`, `slipState_`→`SlipDeflections` (drops banned `State`),
 `drivetrain_`→`Powertrain`, `braking_`→`BrakingHydraulics`, `wheelOmega_`→`WheelSpin`, `pacejka_`→`PacejkaTyre`,
@@ -95,6 +96,6 @@ mirrors the equations documented in the comments and is the correct domain vocab
 
 ## Deferred to the formatting pass (Phase 5)
 
-Items found during Phase 2 but out of the banned-**word** scope: the `📦` file-banner emoji (used consistently across
-~20 vehicle files — whitelist allows `🧩`), internal trailing-underscore snake_case members, and single-letter params.
+Items found during Phase 2 but out of the banned-**word** scope: internal trailing-underscore snake_case members and
+single-letter params across the rest of the layer. (The banner emoji is settled — `📦` everywhere, `🧩` retired.)
 Batched together so the diff is one mechanical style sweep rather than scattered noise across feature phases.

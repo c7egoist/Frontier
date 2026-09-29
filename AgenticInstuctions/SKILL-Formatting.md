@@ -52,7 +52,7 @@ Keys are lowercase ASCII in fixed order — prose, `in`, `out`, `err`, `use`, `c
 `note`, `tag` — values aligned into a column. Full key semantics live in `SKILL-SymbolIndex.md`.
 
 ```cpp
-/// 🧩 Walks the radial ring of ActiveEdge and returns every face incident to it.
+/// 📦 Walks the radial ring of ActiveEdge and returns every face incident to it.
 /// in    ActiveEdge   [-]  edge token; a stale generation yields an empty result
 /// out   FaceSpan     [-]  faces in radial order, empty when the edge is vacant
 /// err   returns an empty span for a stale or vacant token; never throws
@@ -98,14 +98,12 @@ derived by the indexer and a hand-written copy will silently rot.
 Only the emoji below may appear anywhere: source, comments, Markdown, chat, commit messages,
 filenames. Never invent one, never borrow one from outside the table.
 
-📦 is the standard file-header banner marker (project directive — it is already the marker across most of the
-tree, so new and edited files use it). 🧩 remains accepted in file headers that already carry it (much of the
-Frontier engine tree) and for the first `///` annotation line; do not mass-convert 🧩 headers just to switch markers.
+📦 is the one module marker (project directive) — it is used for the file-header banner and the first `///`
+annotation line. 🧩 is retired: it does not appear anywhere in the tree and must not be reintroduced.
 
 | Category      | Emoji            | Means                                | Where it may appear                     |
 |---------------|------------------|--------------------------------------|-----------------------------------------|
-| Module        | 📦               | File-header banner (standard marker) | File header line                         |
-| Module        | 🧩               | Module / annotation-block description | First `///` line; accepted in file headers already using it |
+| Module        | 📦               | File-header banner / module description | File header line; first `///` line     |
 | Notes         | 📝               | Implementation note                  | Comment above code                       |
 | Notes         | 💡               | Insight, non-obvious reasoning       | Comment, Markdown                        |
 | Notes         | ⚠️               | Warning — correct but easy to misuse | Comment, Markdown                        |

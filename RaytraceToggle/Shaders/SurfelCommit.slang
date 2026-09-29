@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 🧩 Engine/Shaders/SurfelCommit.slang — Jacobi commit for the surfel field (pass 1.5 of the GI stage).
+// 📦 Engine/Shaders/SurfelCommit.slang — Jacobi commit for the surfel field (pass 1.5 of the GI stage).
 //============================================================================================================================================
 // SurfelIrradianceUpdate.slang writes each surfel's new running-mean irradiance into IrradianceNew and leaves the
 //    previous value in Irradiance untouched, because GatherField() during the update reads NEIGHBOURS' Irradiance

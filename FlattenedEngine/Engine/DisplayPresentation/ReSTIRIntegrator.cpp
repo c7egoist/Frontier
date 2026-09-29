@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                     RESTIRINTEGRATOR.CPP
 //============================================================================================================================================
-// 🧩 Accumulates ReSTIR DI+GI radiance by numerically integrating light transport paths on the GPU compute pipeline.
+// 📦 Accumulates ReSTIR DI+GI radiance by numerically integrating light transport paths on the GPU compute pipeline.
 
 #include "ReSTIRIntegrator.h"
 #include <algorithm>

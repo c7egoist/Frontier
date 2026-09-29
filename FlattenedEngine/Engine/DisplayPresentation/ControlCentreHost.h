@@ -1,7 +1,7 @@
 //============================================================================================================================================
 // 📦 Frontier/DisplayPresentation/ControlCentreHost.h — Top Notch Control Centre: Drawer Locomotion, Notch Travel and Overlay Recording
 //============================================================================================================================================
-// 🧩 The pull-down shade behind a notch that hangs from the top edge of the display.
+// 📦 The pull-down shade behind a notch that hangs from the top edge of the display.
 //
 //    Geometry  (from the Notch reference, ArcNotch.tsx):
 //      • notch handle 400 × 36 px, SVG outline

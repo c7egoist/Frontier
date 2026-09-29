@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                               SURFELIRRADIANCEUPDATE.SLANG
 //============================================================================================================================================
-// 🧩 GTX global-illumination path, pass 1 of 2 — the persistent world-space surfel field's temporal irradiance update.
+// 📦 GTX global-illumination path, pass 1 of 2 — the persistent world-space surfel field's temporal irradiance update.
 //    Dispatched ONE thread per live surfel when the "Raytracing" quick tile is OFF and "Global Illumination" is ON
 //    (see the mode matrix in RaytraceToggle/PortingGuide.md). It does NOT run in the raytraced ReSTIR path, and it does
 //    NOT run in the plain visibility-raster mode (GI off) — the host skips the whole surfel graph there.

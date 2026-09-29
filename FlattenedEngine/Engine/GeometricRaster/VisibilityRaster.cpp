@@ -1,7 +1,7 @@
 //============================================================================================================================================
 //                                                      VISIBILITYRASTER.CPP
 //============================================================================================================================================
-// 🧩 The visibility buffer, rasterized on the CPU. Pass one keeps the nearest triangle per pixel; the shadow
+// 📦 The visibility buffer, rasterized on the CPU. Pass one keeps the nearest triangle per pixel; the shadow
 //    pass keeps the nearest depth per texel from each light tap; the shade pass spends the two buffers with no
 //    ray query anywhere. Taps are fixed and stratified (deterministic across runs).
 //
