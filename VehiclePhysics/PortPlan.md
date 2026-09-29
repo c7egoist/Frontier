@@ -82,12 +82,23 @@ at low speed where the raw Magic Formula diverges. Recommended as the production
 > (re-read from source) + an independent oracle sweep (< 0.5 N) + physics invariants. A live telemetry diff needs
 > user-supplied GRIT `TelemetryLogger` logs.
 
-## Phase 2 — XPBD soft tyre replaces the analytic tyre
+## Phase 2 — XPBD soft tyre replaces the analytic tyre  ✅ **COMPLETE** (see `Phase2-XPBD-Soft-Tyre.md`)
 
-Extend `XPBDTyreSolver` to a calibrated multi-ring carcass: inflation-pressure volume constraint, sidewall + tread-band
-constraints, tread-block friction with relaxation length, thermal coupling. Calibrate against, then cross-validate with,
-the Phase-1 Pacejka baseline before switching the vehicle over. Tyre nodes become the ground-contact primitive (they
-touch the heightfield directly — no raycast).
+A calibrated **multi-ring XPBD carcass** (320 nodes = 5 rings × 64 segments) with hoop / lateral / shear / spoke
+compliant constraints, an inflation-pressure body-force as the primary load carrier, direct node-vs-ground contact
+(**no raycast** — the Phase-3 heightfield primitive), and a **compliant tread-bristle brush** for friction. The emergent
+contact force was calibrated to, then **cross-validated against, the Phase-1 Pacejka baseline**.
+
+| Item | Where | Status |
+|------|-------|--------|
+| Multi-ring soft carcass + pressure + contact | `Vehicle/XPBDSoftTyre.{h,cpp}` | ✅ ships pre-calibrated |
+| Brush-model tread friction (bristle stick/slip) | `Vehicle/XPBDSoftTyre.cpp` | ✅ gradual build-up, μ-cone saturation |
+| Cross-validation vs Pacejka | `Vehicle/XPBDTyreValidation.cpp` | ✅ **14/14 pass** |
+
+Results at Fz ≈ 5.25 kN: correct signs everywhere · free-roll residual < 4 % load · Fx & Fy peaks within 0.5–1.3× of
+Pacejka with slip/cornering stiffness in-band · correct load sensitivity. **Known limitation:** `Mz` has the correct
+sign but ~10× small magnitude (contact-patch length under-resolves the pneumatic trail) — documented, closes with finer
+meshing. Build: `g++ -std=c++17 -O2 XPBDSoftTyre.cpp PacejkaTyreModel.cpp XPBDTyreValidation.cpp -o xpbdval && ./xpbdval`.
 
 ## Phase 3 — Low-poly drivable scene
 A low-poly car on a Jolt-heightfield test track inside Project-Tractrix, driven by the physics thread. Low-poly is
