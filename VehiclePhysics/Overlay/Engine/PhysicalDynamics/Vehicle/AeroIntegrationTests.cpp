@@ -11,6 +11,7 @@
 //============================================================================================================================================
 
 #include "VehicleController.h"
+#include "VehicleGeometry.h"
 
 #include <cmath>
 #include <cstdio>
@@ -27,7 +28,7 @@ void Check(const char* name, bool ok, double got, const char* rel, double ref)
 
 struct MockChassis
 {
-    Vec3  Position{0, 0, 1.0f};
+    Vec3  Position{0, 0, 0.40f};
     Quat  Orientation{0, 0, 0, 1};
     Vec3  LinearVelocity{};
     Vec3  AngularVelocity{};
@@ -81,27 +82,15 @@ struct MockChassis
 
 XPBDSoftTyre::GroundQuery Flat() { return [](const Vec3&, float& gz, Vec3& n){ gz = 0; n = {0,0,1}; return true; }; }
 
+VehicleGeometry Geo() { return VehicleGeometry{}; }   // documented GT3-class estimates
+
 VehicleControllerConfig MakeConfig(bool aero)
 {
     VehicleControllerConfig c;
     c.Model = DrivingModel::PacejkaDrivetrain;
-    c.ChassisMass = 1200.0f;
-    const float z = -0.55f;
-    c.Wheels = {
-        WheelMount{ Vec3{ 1.30f,  0.78f, z}, true,  false, true },
-        WheelMount{ Vec3{ 1.30f, -0.78f, z}, true,  false, true },
-        WheelMount{ Vec3{-1.30f,  0.78f, z}, false, true,  true },
-        WheelMount{ Vec3{-1.30f, -0.78f, z}, false, true,  true },
-    };
-    if (aero)
-    {
-        c.Aero = AerodynamicPackage::DefaultGT3();
-        c.Aero.ComHeightAboveFloor_m = 0.80f;  // box CoM rests ≈0.89 m up → aero ride height ≈0.09 m
-    }
-    else
-    {
-        c.Aero.Enabled = false;
-    }
+    c.Aero = AerodynamicPackage::DefaultGT3();
+    ApplyGeometry(c, Geo());                 // real wheel offsets, aero force points, CoM-above-floor, mass
+    if (!aero) c.Aero.Enabled = false;
     return c;
 }
 
@@ -114,7 +103,7 @@ struct Rig
         chassis = MockChassis{};
         chassis.Position = spawn;
         chassis.Mass = cfg.ChassisMass;
-        chassis.SetBoxInertia({2.0f, 0.85f, 0.35f});
+        chassis.InvInertiaDiag = Geo().InvInertia();   // real GT3-class inertia tensor
         VehicleController::Hooks h;
         h.ReadChassis       = [this]{ return chassis.State(); };
         h.ApplyForceAtPoint = [this](const Vec3& f, const Vec3& p){ chassis.ApplyForceAtPoint(f, p); };
@@ -139,8 +128,8 @@ int main()
     // ---- 1. TOP SPEED: aero drag must lower terminal velocity -----------------------------------------------------
     float vTopAero = 0.0f, vTopNoAero = 0.0f;
     {
-        Rig a; a.Build(MakeConfig(true),  {0, 0, 1.0f});
-        Rig b; b.Build(MakeConfig(false), {0, 0, 1.0f});
+        Rig a; a.Build(MakeConfig(true),  {0, 0, 0.40f});
+        Rig b; b.Build(MakeConfig(false), {0, 0, 0.40f});
         a.Run({1.0f, 0.0f, 0.0f, false}, 45.0f, dt);
         b.Run({1.0f, 0.0f, 0.0f, false}, 45.0f, dt);
         vTopAero   = a.controller.Telemetry().ForwardSpeed;
@@ -153,13 +142,14 @@ int main()
 
     // ---- 2. COAST-DOWN: with throttle released, aero drag decelerates the car faster -----------------------------
     {
-        Rig a; a.Build(MakeConfig(true),  {0, 0, 1.0f}); a.chassis.LinearVelocity = {70.0f, 0, 0};
-        Rig b; b.Build(MakeConfig(false), {0, 0, 1.0f}); b.chassis.LinearVelocity = {70.0f, 0, 0};
-        a.Run({0.0f, 0.0f, 0.0f, false}, 6.0f, dt);
-        b.Run({0.0f, 0.0f, 0.0f, false}, 6.0f, dt);
-        const float dvAero   = 70.0f - a.controller.Telemetry().ForwardSpeed;
-        const float dvNoAero = 70.0f - b.controller.Telemetry().ForwardSpeed;
-        Check("aero car sheds more speed while coasting (6 s)", dvAero > dvNoAero + 1.0f, dvAero, ">", dvNoAero);
+        // Short window so neither car crosses zero (engine overrun braking is strong); compare final speed directly.
+        Rig a; a.Build(MakeConfig(true),  {0, 0, 0.40f}); a.chassis.LinearVelocity = {55.0f, 0, 0};
+        Rig b; b.Build(MakeConfig(false), {0, 0, 0.40f}); b.chassis.LinearVelocity = {55.0f, 0, 0};
+        a.Run({0.0f, 0.0f, 0.0f, false}, 2.5f, dt);
+        b.Run({0.0f, 0.0f, 0.0f, false}, 2.5f, dt);
+        const float vAero   = a.controller.Telemetry().ForwardSpeed;
+        const float vNoAero = b.controller.Telemetry().ForwardSpeed;
+        Check("aero car is slower after coasting (drag) ", vAero < vNoAero - 1.0f, vAero, "<", vNoAero);
     }
 
     // ---- 3. DOWNFORCE → cornering grip: sustained lateral accel is higher with aero ------------------------------
@@ -168,7 +158,7 @@ int main()
         // lateral acceleration the tyres can hold in steady state (average over the last second). Downforce lifts Fz,
         // so the grip-limited plateau is higher for the aero car.
         auto SustainedLateralG = [&](bool aero) {
-            Rig r; r.Build(MakeConfig(aero), {0, 0, 1.0f});
+            Rig r; r.Build(MakeConfig(aero), {0, 0, 0.40f});
             r.chassis.PlanarOnly = true;
             r.Run({1.0f, 0.0f, 0.0f, false}, 18.0f, dt);      // reach ~high speed straight
             r.controller.SetInput({0.6f, 0.0f, 1.0f, false}); // full lock, maintain throttle
@@ -197,7 +187,7 @@ int main()
 
     // ---- 4. Downforce is actually reaching the wheels (telemetry sanity) ------------------------------------------
     {
-        Rig a; a.Build(MakeConfig(true), {0, 0, 1.0f});
+        Rig a; a.Build(MakeConfig(true), {0, 0, 0.40f});
         a.Run({1.0f, 0.0f, 0.0f, false}, 20.0f, dt);
         const auto& t = a.controller.Telemetry();
         float frontDf = 0.0f, rearDf = 0.0f;

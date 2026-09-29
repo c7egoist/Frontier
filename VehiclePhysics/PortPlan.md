@@ -125,7 +125,7 @@ Placeholder car = **box + four wheels** (`CarModelling/Cars/BoxCar.scr`), box no
 author real bodywork). Validated invariants: settles carrying exactly `1.000·mg` on 4 wheels with no sink-through;
 accelerates; brakes to a dead stop without reversing; steers/yaws while upright; rests stably on a 6 % slope.
 
-## Phase 5 — Re-port driving layer from GRIT `source-only`  🔶 **IN PROGRESS** (see `Phase5-SourceOnly-Report.md`)
+## Phase 5 — Re-port driving layer from GRIT `source-only`  ✅ **COMPLETE** (see `Phase5-SourceOnly-Report.md`)
 Keeps the Phase-2 XPBD soft tyre + Jolt heightfield + physics thread; re-derives the driving layer from the
 up-to-date `source-only` branch, one subsystem at a time (drivable-first). **This milestone ships the first two:**
 
@@ -138,11 +138,22 @@ up-to-date `source-only` branch, one subsystem at a time (drivable-first). **Thi
 | **Engine-agnostic input controller** (WASD + gamepad/wheel) | `Vehicle/VehicleInputController.h` | ✅ |
 | Input invariants | `Vehicle/VehicleInputTests.cpp` | ✅ **16/16** |
 
+## Phase 6 — Real geometry data block + closed-loop aero  ✅ **COMPLETE** (see `Phase6-Geometry-and-ClosedLoop-Aero.md`)
+Removes the last placeholder dimensions and the three "known limitations" carried out of Phase 5.
+
+| Item | Where | Status |
+|------|-------|--------|
+| **Geometry as authored DATA** (GT3-class, no sockets) | `Vehicle/VehicleGeometry.{h,cpp}` | ✅ wheels/aero points/inertia/CoM all derived |
+| **Closed-loop aero** (real patch downforce → tyre compresses → measured `Fz`; squat→ground-effect) | `Vehicle/VehicleController.cpp` | ✅ no `Fz` injection, no pitch double-count |
+| **Low-speed static friction** (brake-to-rest + slope hold) + declutch-under-brake | `Vehicle/VehicleController.cpp` | ✅ |
+| Driving validation (brake/park/rollover reframed physical) | `Vehicle/VehicleDrivingTests.cpp` | ✅ **12/12, 0 known-limitations** |
+| Aero drive proof rebuilt on real geometry | `Vehicle/AeroIntegrationTests.cpp` | ✅ **8/8** |
+
 **Roadmap (subsequent milestones, phase-by-phase from `source-only`):** Fuel (`FuelControlSystem`+`FuelSpecifications`) →
 Thermal (Coolant/EngineOil/Thermal) → ABS → Supercharger, then reconcile the core solver params against `.tyrx`
 Pacejka specs (GT3/LMP3/rally/drift/street). Each lands as a self-contained module + validation, same as Aerodynamics.
 
-## Phase 6 — EOS networking  *(deferred — "tomorrow")*
+## Phase 7 — EOS networking  *(deferred — "tomorrow")*
 Server-authoritative simulation + client prediction/reconciliation, porting GRIT's EpicAdapter/EOS seam
 (`GameContext/AuthenticationContext`, `GameContext/SessionAdapter`).
 

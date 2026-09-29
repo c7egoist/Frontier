@@ -266,7 +266,12 @@ void VehicleController::StepPacejka(float dt) noexcept
                 --gearIndex_; shiftTimer_ = 0.0f;
             }
         }
-        if (speed < 0.5f && throttleCmd < 0.05f) gearIndex_ = neutral;   // roll to a stop → declutch
+        // Declutch once nearly stopped, OR when braking firmly at low speed — otherwise idle creep through the clutch
+        //    fights the brake and the car settles at a crawl instead of coming fully to rest (as a real driver would
+        //    clutch in / the auto would decouple against the held brake).
+        const bool nearlyStopped = speed < 0.5f && throttleCmd < 0.05f;
+        const bool brakingToStop = input_.Brake > 0.4f && throttleCmd < 0.05f && speed < 3.0f;
+        if (nearlyStopped || brakingToStop) gearIndex_ = neutral;
     }
 
     telemetry_.Chassis = cs;
@@ -280,11 +285,15 @@ void VehicleController::StepPacejka(float dt) noexcept
     telemetry_.GearIndex = gearIndex_;
     telemetry_.PacejkaActive = true;
 
-    // ── Aerodynamics (GRIT source-only port) ────────────────────────────────────────────────────────────────────────
-    //   Compute the whole aero package ONCE per step from the chassis state. Drag, side-force and the aero moments act
-    //   on the chassis directly; the front/rear DOWNFORCE is split across the front/rear wheels and injected into the
-    //   per-axle tyre load Fz below (more Fz ⇒ more grip), matching GRIT's rule of applying downforce to WHEEL LOADS,
-    //   not the chassis. Ride height is derived from a ground sample under the CoM so ground-effect terms respond to squat.
+    // ── Aerodynamics (GRIT source-only port, physically CLOSED-LOOP) ─────────────────────────────────────────────────
+    //   Compute the whole aero package ONCE per step from the chassis state. Drag, side-force and the YAW/ROLL moments
+    //   act on the chassis directly. DOWNFORCE is applied as a REAL downward force at each wheel's contact patch (front/
+    //   rear share) inside the loop below — so the soft tyre physically compresses, its Fz rises, the car squats, and the
+    //   lower ride height feeds back into the ground-effect terms next step. This is the closed loop a compliant tyre
+    //   makes possible (no analytic load-transfer solver, no free vertical momentum): grip EMERGES from the higher Fz.
+    //   The front/rear split applied at the axles also produces the aero pitch moment via the lever arms, so we do NOT
+    //   additionally apply aero.PitchMoment_Nm here (that would double-count it). Ride height comes from the live CoM
+    //   height above the sampled ground, so it responds to squat.
     AeroForces aero{};
     int nFrontWheels = 0, nRearWheels = 0;
     for (const WheelMount& w : config_.Wheels) { if (w.LocalOffset.x > 0.0f) ++nFrontWheels; else ++nRearWheels; }
@@ -304,12 +313,10 @@ void VehicleController::StepPacejka(float dt) noexcept
         // Drag (opposes velocity) + body side-force → chassis at the CoM.
         hooks_.ApplyForceAtPoint(aero.DragForceWorld, cs.Position);
         hooks_.ApplyForceAtPoint(aero.SideForceWorld, cs.Position);
-        // Aero moments about the CoM: pitch↦body-Y(right), roll↦body-X(forward), yaw↦body-Z(up).
+        // Yaw + roll moments about the CoM (roll↦body-X/forward, yaw↦body-Z/up). Pitch is produced by the axle-applied
+        // downforce below, so it is intentionally omitted here.
         if (hooks_.ApplyTorque)
-        {
-            const Vec3 torque = right * aero.PitchMoment_Nm + forward * aero.RollMoment_Nm + up * aero.YawMoment_Nm;
-            hooks_.ApplyTorque(torque);
-        }
+            hooks_.ApplyTorque(forward * aero.RollMoment_Nm + up * aero.YawMoment_Nm);
     }
     const float frontDownforcePerWheel = (nFrontWheels > 0) ? std::max(0.0f, aero.FrontDownforce_N) / static_cast<float>(nFrontWheels) : 0.0f;
     const float rearDownforcePerWheel  = (nRearWheels  > 0) ? std::max(0.0f, aero.RearDownforce_N)  / static_cast<float>(nRearWheels)  : 0.0f;
@@ -338,11 +345,10 @@ void VehicleController::StepPacejka(float dt) noexcept
         const bool  onGnd = reaction.ContactCount > 0u && Fz > 1.0f;
         const Vec3  patch = onGnd ? reaction.PatchCentre : Vec3{hub.x, hub.y, hub.z - config_.Tyre.Radius};
 
-        // Aero downforce for THIS wheel (front axle vs rear axle share). Added to the GRIP load only — never to the
-        //    vertical force pushed on the chassis — so the tyre generates more lateral/longitudinal force at speed
-        //    without the aero injecting free vertical momentum into the body. Only counts while the tyre is loaded.
+        // Aero downforce for THIS wheel (front axle vs rear axle share). Applied as a REAL downward force at the patch
+        //    below (closed loop) — it presses the tyre, the tyre compresses, and its Fz rises over the next steps, so
+        //    grip emerges from the genuine load. We therefore feed the MEASURED Fz to the slip model, not an injected one.
         const float aeroDownforce = onGnd ? ((wheel.LocalOffset.x > 0.0f) ? frontDownforcePerWheel : rearDownforcePerWheel) : 0.0f;
-        const float FzGrip = Fz + aeroDownforce;
 
         // Wheel planar axes (with steer) and the slip-velocity components in that frame.
         const Vec3  wf  = PlanarNormalized(hubRot.Rotate({1.0f, 0.0f, 0.0f}));
@@ -364,7 +370,7 @@ void VehicleController::StepPacejka(float dt) noexcept
             K.Vsy       = Vsy;
             K.OmegaR    = wheelOmega_[i] * Reff;
             K.CamberRad = 0.0f;
-            K.Fz_N      = FzGrip;
+            K.Fz_N      = Fz;
             const SlipResult sr = slip_->Step(K, slipState_[i], dt);
             Fx = sr.Forces.Fx; Fy = sr.Forces.Fy; kappa = sr.Kappa; alpha = sr.AlphaRad;
 
@@ -377,9 +383,29 @@ void VehicleController::StepPacejka(float dt) noexcept
 
             // Numerical safety net only (NOT the arcade clamp): keep the combined force inside a generous friction
             //    circle so a transient slip spike can never inject unbounded energy. Well-behaved slip stays untouched.
-            const float grip = config_.GripCoefficient * FzGrip * 1.3f;
+            const float grip = config_.GripCoefficient * Fz * 1.3f;
             const float pmag = std::sqrt(Fx * Fx + Fy * Fy);
             if (grip > 0.0f && pmag > grip) { const float s = grip / pmag; Fx *= s; Fy *= s; }
+
+            // ── Low-speed longitudinal STATIC friction (stiction) ──────────────────────────────────────────────────
+            //   The transient slip model gives Fx → 0 as slip → 0, and the low-speed spin stabiliser holds the wheel
+            //   near free-rolling, so at a crawl the tyre cannot represent the STATIC friction that actually (a) brings
+            //   a braked car fully to rest and holds it, and (b) keeps a parked car from sliding down a grade up to
+            //   arctan(μ). Blend in a direct arresting force — the reaction that pins this wheel's mass share, capped by
+            //   available grip μ·Fz — whenever the car is NOT being driven. It fades out with speed (blend→0 by ~2 m/s),
+            //   so launches and all normal driving keep pure Pacejka behaviour. Only engages while braking/coasting.
+            if (throttleCmd < 0.05f)
+            {
+                const float crawl = 2.0f;   // [m/s] below this, stiction takes over from the slip model
+                const float blend = 1.0f - std::min(1.0f, speed / crawl);
+                if (blend > 0.0f)
+                {
+                    const float share   = config_.ChassisMass / static_cast<float>(std::max<size_t>(1, tyres_.size()));
+                    const float maxHold = config_.GripCoefficient * Fz;         // static friction cap μ·Fz
+                    const float hold    = Clamp(-Vx * share / dt, -maxHold, maxHold);
+                    Fx = Fx * (1.0f - blend) + hold * blend;
+                }
+            }
         }
 
         // Suspension damper (shock absorber) on vertical hub velocity; tyre can only push, so clamp non-negative.
@@ -387,7 +413,10 @@ void VehicleController::StepPacejka(float dt) noexcept
         if (onGnd) verticalForce = std::max(0.0f, Fz - config_.SuspensionDamping * hubVel.z);
 
         const Vec3 planar = wf * Fx + wl * Fy;
-        hooks_.ApplyForceAtPoint(Vec3{0.0f, 0.0f, verticalForce} + planar, patch);
+        // Tyre reaction (world +Z up) + in-plane forces + aero downforce (real, along body −up). The downforce presses
+        //    the chassis onto the patch; the tyre reacts by compressing, raising Fz next step — the closed loop.
+        const Vec3 aeroDownVec = up * (-aeroDownforce);
+        hooks_.ApplyForceAtPoint(Vec3{0.0f, 0.0f, verticalForce} + planar + aeroDownVec, patch);
 
         // ── Wheel spin ODE:  Iw·ω̇ = T_drive − Fx·Reff − T_brake·sign(ω) − T_roll ───────────────────────────────────
         float driveTq = 0.0f;
