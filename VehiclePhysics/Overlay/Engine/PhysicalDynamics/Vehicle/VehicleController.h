@@ -29,13 +29,24 @@
 #pragma once
 
 #include "XPBDSoftTyre.h"
+#include "PacejkaTyreModel.h"
+#include "TyreSlipDynamics.h"
+#include "Drivetrain.h"
 
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <vector>
 
 namespace Frontier::Vehicle {
+
+// Which in-plane tyre-force model the controller runs.
+enum class DrivingModel
+{
+    SimpleFrictionCircle,   // Phase-3 arcade layer: throttle/brake/steer → forces clamped to μ·Fz (no wheel spin)
+    PacejkaDrivetrain,      // production: engine→clutch→gearbox→diff→wheel-spin→Pacejka slip forces (Phases 1+2 combined)
+};
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                          quaternion helpers (compose / normalise)
@@ -104,6 +115,32 @@ struct VehicleControllerConfig
     float    GripCoefficient    = 1.15f;         // [-]   friction-circle μ for the driving layer (grip = μ·Fz)
     uint32_t TyreSubsteps       = 8u;            // [-]   XPBD substeps per fixed step
     Vec3     Gravity            = {0.0f, 0.0f, -9.81f};
+
+    //-- Production driving layer (DrivingModel::PacejkaDrivetrain) --------------------------------------------------------
+    //   These are ignored by the SimpleFrictionCircle path. They wire the Phase-1 slip/drivetrain models onto the same
+    //   Fz-from-soft-tyre / direct-heightfield-contact path used above.
+    DrivingModel           Model         = DrivingModel::PacejkaDrivetrain;
+    PacejkaParameters      TyrePacejka;                                     // MF6.1 slip-force spec (defaults = Phase-1)
+    SlipSolver             SlipSolverKind = SlipSolver::RelaxationLength;   // zero-speed-stable transient tyre integrator
+    float    WheelInertia           = 1.2f;      // [kg·m²] rotational inertia of one wheel+tyre about its spin axis
+    float    EffectiveRadius        = 0.0f;      // [m]  rolling radius; <= 0 ⇒ fall back to Tyre.Radius (0.34 m)
+    float    MaxBrakeTorquePerWheel = 2600.0f;   // [N·m] foot-brake torque at full pedal, per braked wheel
+    float    HandbrakeTorque        = 4200.0f;   // [N·m] extra torque on the rear (non-steered) wheels when latched
+    float    UpshiftRPM             = 6800.0f;   // [rpm] AMT auto-upshift threshold
+    float    DownshiftRPM           = 2600.0f;   // [rpm] AMT auto-downshift threshold
+    float    ShiftCooldownSeconds   = 0.35f;     // [s]   minimum dwell between gear changes
+    // Contact/tread damping. At low speed the Magic-Formula deflection spring + wheel inertia form an UNDAMPED oscillator
+    //    (the relaxation σ-decay term → 0 as Vx → 0), which explicit integration amplifies. These viscous terms model the
+    //    carcass/tread damping that suppresses it. They vanish at the steady-state operating point (slip speed → 0), so
+    //    they do not alter the physical tyre forces — they only keep the transient stable.
+    float    SpinDampingCoefficient    = 1400.0f;  // [N per m/s] longitudinal slip-speed damping on wheel spin
+    float    LateralDampingCoefficient = 1600.0f;  // [N per m/s] lateral slip-speed damping on the contact patch
+    float    ContactDampingFadeSpeed   = 6.0f;     // [m/s] damping fades out above this hub speed (pure Pacejka at speed)
+    EngineParameters       Engine        = EngineParameters::DefaultGTR();
+    TurbochargerParameters Turbo         = TurbochargerParameters::DefaultGTR();
+    TransmissionParameters Transmission;                                   // GT-R 6-speed defaults
+    ClutchParameters       Clutch;
+    DifferentialParameters Differential;
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -120,6 +157,10 @@ struct WheelTelemetry
     float    SteerAngleRad = 0.0f;  // [rad]
     uint32_t ContactCount = 0u;     // [-] tyre nodes touching ground
     bool     InContact = false;
+    // Production layer (PacejkaDrivetrain) — per-wheel spin & slip state:
+    float    WheelOmega   = 0.0f;   // [rad/s] wheel spin (+ = rolling forward)
+    float    SlipRatio    = 0.0f;   // [-]  longitudinal slip κ
+    float    SlipAngleRad = 0.0f;   // [rad] lateral slip angle α
 };
 
 struct VehicleTelemetry
@@ -131,6 +172,12 @@ struct VehicleTelemetry
     uint32_t WheelCount        = 0u;
     uint32_t WheelsInContact   = 0u;
     std::array<WheelTelemetry, 8> Wheels{};
+    // Production layer (PacejkaDrivetrain) — powertrain state:
+    float    EngineRPM         = 0.0f;
+    float    TurboRPM          = 0.0f;
+    float    BoostBar          = 0.0f;
+    int      GearIndex         = 0;      // index into Transmission.GearRatios (3 = 1st)
+    bool     PacejkaActive     = false;  // true when running DrivingModel::PacejkaDrivetrain
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -162,6 +209,10 @@ public:
 private:
     [[nodiscard]] static float Clamp(float v, float lo, float hi) noexcept { return v < lo ? lo : (v > hi ? hi : v); }
 
+    // The two driving layers Step() dispatches to (selected by config_.Model).
+    void StepSimple(float dt) noexcept;   // Phase-3 friction-circle layer (validated fallback)
+    void StepPacejka(float dt) noexcept;  // production drivetrain + Pacejka slip layer
+
     VehicleControllerConfig    config_;
     Hooks                      hooks_;
     std::vector<XPBDSoftTyre>  tyres_;
@@ -169,6 +220,15 @@ private:
     VehicleTelemetry           telemetry_;
     float                      steerAngle_ = 0.0f;  // filtered steer (rad)
     bool                       built_ = false;
+
+    // Production driving-layer state (PacejkaDrivetrain):
+    PacejkaTyreModel                  pacejka_;      // Magic-Formula tyre (shared by all wheels)
+    std::unique_ptr<TyreSlipDynamics> slip_;         // transient slip integrator (holds a const ref to pacejka_)
+    Drivetrain                        drivetrain_;    // engine → clutch → gearbox → differential
+    std::vector<float>                wheelOmega_;    // [rad/s] per-wheel spin
+    std::vector<SlipState>            slipState_;     // per-wheel relaxation-length deflection state
+    int                               gearIndex_ = 3; // current gear (3 = 1st)
+    float                             shiftTimer_ = 0.0f;
 };
 
 } // namespace Frontier::Vehicle

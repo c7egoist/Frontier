@@ -108,9 +108,10 @@ static void CheckBool(const char* name, bool ok) { std::printf("  [%s] %s\n", ok
 [[nodiscard]] static bool Finite(const Vec3& v) noexcept { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 
 // Build the standard 4-wheel RWD test vehicle around a chassis half-extent of (2.0, 0.85, 0.35).
-static VehicleControllerConfig MakeConfig()
+static VehicleControllerConfig MakeConfig(DrivingModel model)
 {
     VehicleControllerConfig c;
+    c.Model = model;
     c.ChassisMass = 1200.0f;
     c.Tyre = SoftTyreParameters{};                 // Phase-2 calibrated defaults (R=0.34, etc.)
     const float zoff = -0.55f;                      // hub sits below the CoM (box floats above the wheels)
@@ -162,12 +163,16 @@ struct Rig
 // Flat ground at z = 0.
 static bool FlatGround(const Vec3& p, float& gz, Vec3& n) { (void)p; gz = 0.0f; n = {0, 0, 1}; return true; }
 
-int main()
+// Runs the full 5-scenario invariant suite for one driving model and returns {passed, failed} for that model.
+static void RunSuite(DrivingModel model, const char* label)
 {
     const float dt = 1.0f / 240.0f;
-    const VehicleControllerConfig cfg = MakeConfig();
+    const VehicleControllerConfig cfg = MakeConfig(model);
     const float weight = cfg.ChassisMass * 9.81f;
 
+    std::printf("############################################################\n");
+    std::printf("# DRIVING MODEL: %s\n", label);
+    std::printf("############################################################\n");
     std::printf("Phase-3 VehicleController drive test  (mock chassis + mock heightfield, dt=1/%.0f Hz)\n", 1.0f / dt);
     std::printf("chassis %.0f kg, 4 wheels, RWD, front-steer, soft XPBD tyres (R=%.2f m)\n\n",
                 cfg.ChassisMass, cfg.Tyre.Radius);
@@ -261,7 +266,18 @@ int main()
 
     //--------------------------------------------------------------------------------------------------------------
     std::printf("rest ride height (flat) = %.3f m\n", restZ);
+    std::printf("----------------------------------------\n");
+    std::printf("[%s] subtotal so far: %d passed, %d failed\n\n", label, g_pass, g_fail);
+}
+
+int main()
+{
+    // Validate BOTH driving layers against the same physical invariants: the production Pacejka+drivetrain model and the
+    //    original friction-circle fallback. Both must settle, accelerate, brake to a stop, steer, and hold a slope.
+    RunSuite(DrivingModel::PacejkaDrivetrain,    "PacejkaDrivetrain (production: MF6.1 slip + engine/clutch/gearbox/diff + wheel spin)");
+    RunSuite(DrivingModel::SimpleFrictionCircle, "SimpleFrictionCircle (Phase-3 arcade fallback)");
+
     std::printf("========================================\n");
-    std::printf("Phase-3 drive test: %d passed, %d failed\n", g_pass, g_fail);
+    std::printf("Phase-3 drive test (both models): %d passed, %d failed\n", g_pass, g_fail);
     return g_fail == 0 ? 0 : 1;
 }
