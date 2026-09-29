@@ -153,22 +153,22 @@ public:
     void Step(float dt, uint32_t substeps, const Vec3& hubPos, const Quat& hubRot,
               const Vec3& surfaceVelocity, const GroundQuery& ground) noexcept;
 
-    [[nodiscard]] const std::vector<SoftTyreNode>& Nodes() const noexcept { return nodes_; }
-    [[nodiscard]] const SoftTyreParameters&        Params() const noexcept { return params_; }
-    [[nodiscard]] const TyreReaction&              Reaction() const noexcept { return reaction_; }
-    [[nodiscard]] bool Constructed() const noexcept { return !nodes_.empty(); }
+    [[nodiscard]] const std::vector<SoftTyreNode>& Nodes() const noexcept { return NodeRecords; }
+    [[nodiscard]] const SoftTyreParameters&        Params() const noexcept { return Parameters; }
+    [[nodiscard]] const TyreReaction&              Reaction() const noexcept { return ContactReaction; }
+    [[nodiscard]] bool Constructed() const noexcept { return !NodeRecords.empty(); }
 
-    [[nodiscard]] uint32_t Index(uint32_t ring, uint32_t seg) const noexcept { return ring * params_.SegmentCount + seg; }
+    [[nodiscard]] uint32_t Index(uint32_t ring, uint32_t seg) const noexcept { return ring * Parameters.SegmentCount + seg; }
 
 private:
     struct Edge { uint32_t a, b; float rest, compliance; };
 
     void BuildEdges() noexcept;
 
-    SoftTyreParameters        params_;
-    std::vector<SoftTyreNode>  nodes_;
-    std::vector<Edge>          edges_;
-    TyreReaction               reaction_;
+    SoftTyreParameters        Parameters;
+    std::vector<SoftTyreNode>  NodeRecords;
+    std::vector<Edge>          ConstraintEdges;
+    TyreReaction               ContactReaction;
 };
 
 } // namespace Frontier::Vehicle

@@ -315,8 +315,8 @@ int main(int argc, char** argv)
 
         // Project-Drive course level — generated headless (DriveSceneAuthor), then imported like any other level.
         //    DriveSceneMatchesRevision invalidates a stale DriveCourse.gltf when Construct() changes (kDriveSceneRevision).
-        const bool IsDrive = ScenePath.find("DriveCourse.gltf") != std::string::npos;
-        if (IsDrive && (!std::filesystem::exists(ScenePath, FsError) || !Frontier::Drive::DriveSceneMatchesRevision(ScenePath)))
+        const bool DriveSelected = ScenePath.find("DriveCourse.gltf") != std::string::npos;
+        if (DriveSelected && (!std::filesystem::exists(ScenePath, FsError) || !Frontier::Drive::DriveSceneMatchesRevision(ScenePath)))
         {
             std::filesystem::create_directories(std::filesystem::path(ScenePath).parent_path(), FsError);
             std::string Error;

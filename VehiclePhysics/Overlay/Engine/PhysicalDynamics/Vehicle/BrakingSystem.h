@@ -133,24 +133,24 @@ class BrakingSystem
 public:
     void Configure(std::size_t nWheels, const BrakingParameters& bp, const AbsParameters& abs)
     {
-        params_ = bp; abs_ = abs;
-        wheels_.assign(std::max<std::size_t>(1, nWheels), BrakeWheelState{});
-        for (auto& w : wheels_) w.Temperature_K = bp.AmbientTemp;
+        Parameters = bp; AntilockParameters = abs;
+        WheelRecords.assign(std::max<std::size_t>(1, nWheels), BrakeWheelState{});
+        for (auto& w : WheelRecords) w.Temperature_K = bp.AmbientTemp;
     }
     void Reset()
     {
-        for (auto& w : wheels_) { w = BrakeWheelState{}; w.Temperature_K = params_.AmbientTemp; }
+        for (auto& w : WheelRecords) { w = BrakeWheelState{}; w.Temperature_K = Parameters.AmbientTemp; }
     }
 
-    [[nodiscard]] const BrakingParameters& Params() const noexcept { return params_; }
+    [[nodiscard]] const BrakingParameters& Params() const noexcept { return Parameters; }
     [[nodiscard]] const BrakeWheelState&   State(std::size_t i) const noexcept
     {
-        return wheels_[std::min(i, wheels_.size() - 1)];
+        return WheelRecords[std::min(i, WheelRecords.size() - 1)];
     }
 
     BrakeWheelOutput Step(std::size_t i, const BrakeWheelInput& in, float dt)
     {
-        BrakeWheelState& w = wheels_[std::min(i, wheels_.size() - 1)];
+        BrakeWheelState& w = WheelRecords[std::min(i, WheelRecords.size() - 1)];
         BrakeWheelOutput out{};
         if (!in.Braked) { out.Pressure_Pa = w.Pressure_Pa; out.Temperature_K = w.Temperature_K; return CoolOnly(w, in, dt, out); }
 
@@ -160,31 +160,31 @@ public:
         //   Cut the commanded pressure in proportion to how far |slip| overshoots the target, clamped to [DumpFloor, 1].
         //   This holds the wheel near the μ–slip peak instead of letting it lock.
         float absScale = 1.0f;
-        const bool absEligible = abs_.Enabled && pedal > 0.05f && (in.Airspeed > abs_.MinSpeed);
+        const bool absEligible = AntilockParameters.Enabled && pedal > 0.05f && (in.Airspeed > AntilockParameters.MinSpeed);
         if (absEligible)
         {
-            const float over = std::fabs(in.SlipRatio) - abs_.SlipTarget;
-            if (over > 0.0f) absScale = std::clamp(1.0f - abs_.Gain * over, abs_.DumpFloor, 1.0f);
+            const float over = std::fabs(in.SlipRatio) - AntilockParameters.SlipTarget;
+            if (over > 0.0f) absScale = std::clamp(1.0f - AntilockParameters.Gain * over, AntilockParameters.DumpFloor, 1.0f);
         }
         w.AbsActive = absEligible && (absScale < 0.95f);
 
-        const float commanded = absScale * pedal * params_.MaxBrakePressure;
+        const float commanded = absScale * pedal * Parameters.MaxBrakePressure;
 
         // Hydraulic line dynamics: slew toward the command at rise/fall rate.
         if (commanded > w.Pressure_Pa)
-            w.Pressure_Pa = std::min(commanded, w.Pressure_Pa + params_.PressureRiseRate * dt);
+            w.Pressure_Pa = std::min(commanded, w.Pressure_Pa + Parameters.PressureRiseRate * dt);
         else
-            w.Pressure_Pa = std::max(commanded, w.Pressure_Pa - params_.PressureFallRate * dt);
+            w.Pressure_Pa = std::max(commanded, w.Pressure_Pa - Parameters.PressureFallRate * dt);
 
         // Torque from pressure × temperature-faded friction.
-        w.FrictionCoeff = params_.FrictionCoefficient(w.Temperature_K);
-        w.Torque_Nm     = params_.BrakeTorque(w.Pressure_Pa, w.Temperature_K);
+        w.FrictionCoeff = Parameters.FrictionCoefficient(w.Temperature_K);
+        w.Torque_Nm     = Parameters.BrakeTorque(w.Pressure_Pa, w.Temperature_K);
 
         // Thermal update: generation from the actual dissipated power, convective cooling boosted by airspeed.
-        w.HeatGen_W = params_.HeatGeneration(w.Torque_Nm, in.WheelOmega);
-        w.Cooling_W = params_.CoolingRate(w.Temperature_K, in.Airspeed);
-        const float dT = (w.HeatGen_W - w.Cooling_W) / (params_.DiskMass * params_.SpecificHeatCapacity);
-        w.Temperature_K = std::max(params_.AmbientTemp, w.Temperature_K + dT * dt);
+        w.HeatGen_W = Parameters.HeatGeneration(w.Torque_Nm, in.WheelOmega);
+        w.Cooling_W = Parameters.CoolingRate(w.Temperature_K, in.Airspeed);
+        const float dT = (w.HeatGen_W - w.Cooling_W) / (Parameters.DiskMass * Parameters.SpecificHeatCapacity);
+        w.Temperature_K = std::max(Parameters.AmbientTemp, w.Temperature_K + dT * dt);
 
         out.BrakeTorque_Nm = w.Torque_Nm;
         out.Pressure_Pa    = w.Pressure_Pa;
@@ -198,24 +198,24 @@ private:
     BrakeWheelOutput CoolOnly(BrakeWheelState& w, const BrakeWheelInput& in, float dt, BrakeWheelOutput& out)
     {
         // Pedal released: bleed pressure off and cool the disk.
-        w.Pressure_Pa = std::max(0.0f, w.Pressure_Pa - params_.PressureFallRate * dt);
+        w.Pressure_Pa = std::max(0.0f, w.Pressure_Pa - Parameters.PressureFallRate * dt);
         w.AbsActive = false;
-        w.Torque_Nm = params_.BrakeTorque(w.Pressure_Pa, w.Temperature_K);
-        w.HeatGen_W = params_.HeatGeneration(w.Torque_Nm, in.WheelOmega);
-        w.Cooling_W = params_.CoolingRate(w.Temperature_K, in.Airspeed);
-        const float dT = (w.HeatGen_W - w.Cooling_W) / (params_.DiskMass * params_.SpecificHeatCapacity);
-        w.Temperature_K = std::max(params_.AmbientTemp, w.Temperature_K + dT * dt);
+        w.Torque_Nm = Parameters.BrakeTorque(w.Pressure_Pa, w.Temperature_K);
+        w.HeatGen_W = Parameters.HeatGeneration(w.Torque_Nm, in.WheelOmega);
+        w.Cooling_W = Parameters.CoolingRate(w.Temperature_K, in.Airspeed);
+        const float dT = (w.HeatGen_W - w.Cooling_W) / (Parameters.DiskMass * Parameters.SpecificHeatCapacity);
+        w.Temperature_K = std::max(Parameters.AmbientTemp, w.Temperature_K + dT * dt);
         out.BrakeTorque_Nm = w.Torque_Nm;
         out.Pressure_Pa    = w.Pressure_Pa;
         out.Temperature_K  = w.Temperature_K;
-        out.FrictionCoeff  = params_.FrictionCoefficient(w.Temperature_K);
+        out.FrictionCoeff  = Parameters.FrictionCoefficient(w.Temperature_K);
         out.AbsActive      = false;
         return out;
     }
 
-    BrakingParameters params_{};
-    AbsParameters     abs_{};
-    std::vector<BrakeWheelState> wheels_;
+    BrakingParameters Parameters{};
+    AbsParameters     AntilockParameters{};
+    std::vector<BrakeWheelState> WheelRecords;
 };
 
 } // namespace Frontier::Vehicle
