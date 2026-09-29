@@ -51,6 +51,52 @@ TurbochargerParameters TurbochargerParameters::DefaultGTR()
     return T;
 }
 
+// GRIT SuperchargerSpecifications preset-1 (twin-screw). Curves are in CHARGER rpm (= engine rpm × 3.2).
+SuperchargerParameters SuperchargerParameters::DefaultTwinScrew()
+{
+    SuperchargerParameters S;
+    S.DriveType = SuperchargerDriveType::TwinScrew;
+    const float B[6][2] = {{2000,0.0f},{5000,0.15f},{10000,0.38f},{15000,0.62f},{20000,0.82f},{24000,0.95f}};
+    for (auto& p : B) S.BoostPressureCurve.Add(p[0], p[1]);
+    const float M[4][2] = {{0.0f,1.0f},{0.4f,1.25f},{0.8f,1.55f},{1.2f,1.75f}};
+    for (auto& p : M) S.TorqueMultiplierCurve.Add(p[0], p[1]);
+    const float D[6][2] = {{2000,5.0f},{5000,10.0f},{10000,24.0f},{15000,45.0f},{20000,68.0f},{24000,82.0f}};
+    for (auto& p : D) S.ParasiticDragCurve.Add(p[0], p[1]);
+
+    S.ChargerInertia = 0.015f; S.ChargerFrictionCoeff = 0.003f; S.ChargerFrictionQuadratic = 0.00008f;
+    S.DriveRatio = 3.2f; S.MaxBoost_Base = 0.8f; S.MaxBoost_Race = 1.2f;
+    S.BypassValveRate = 8.0f; S.CompressorEfficiency = 0.72f; S.ParasiticLossFactor = 0.08f;
+    return S;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//   Belt-driven supercharger. Boost tracks the crank instantly (no spool): charger rpm = engine rpm × DriveRatio, boost
+//   from the curve, capped at the tune ceiling by the recirculation (bypass) valve. Off-throttle the bypass vents boost
+//   so the blower recirculates instead of compressing against a closed throttle — that also drops the parasitic drag to
+//   its ParasiticLossFactor floor. Returns the torque multiplier; writes the parasitic crank load.
+//------------------------------------------------------------------------------------------------------------------------
+float Drivetrain::StepSupercharger(float engineRPM, float throttle, float dt, float& parasiticDrag_Nm) noexcept
+{
+    const float thr        = Clampf(throttle, 0.0f, 1.0f);
+    const float chargerRPM = Super.ChargerRPM(engineRPM);
+    const float maxBoost   = RaceTune ? Super.MaxBoost_Race : Super.MaxBoost_Base;
+
+    // Raw displacement boost from the curve, capped at the tune ceiling, gated by throttle (bypass recirculates the rest).
+    const float rawBoost    = Super.BoostPressureCurve.Sample(chargerRPM);
+    const float targetBoost = std::min(rawBoost, maxBoost) * thr;
+
+    // Recirculation valve slews the delivered boost toward the target at BypassValveRate [Bar/s] (first-order, rate-limited).
+    const float dBoostMax = Super.BypassValveRate * dt;
+    SuperBoostBar += Clampf(targetBoost - SuperBoostBar, -dBoostMax, dBoostMax);
+    SuperBoostBar  = Clampf(SuperBoostBar, 0.0f, maxBoost);
+
+    // Parasitic crank drag: full curve value while compressing under throttle; falls to the residual floor when bypassed.
+    const float dragFull = Super.ParasiticDragCurve.Sample(chargerRPM);
+    parasiticDrag_Nm     = dragFull * (Super.ParasiticLossFactor + (1.0f - Super.ParasiticLossFactor) * thr);
+
+    return Super.TorqueMultiplierCurve.Sample(SuperBoostBar);
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 Drivetrain::Drivetrain()
 {
@@ -66,6 +112,7 @@ void Drivetrain::Reset(float engineRPM) noexcept
     BoostBar = 0.0f;
     BovPosition = 0.0f;
     WastegatePosition = 0.0f;
+    SuperBoostBar = 0.0f;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -256,9 +303,25 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
     const float throttle = Clampf(In.Throttle, 0.0f, 1.0f);
     const float engineRPM0 = EngineOmega * kRadToRpm;
 
-    // 1) Turbo spool (uses last-step engine rpm).
-    SpoolTurbo(engineRPM0, throttle, dt);
-    const float boostMult = Turbo.TorqueMultiplierCurve.Sample(BoostBar);
+    // 1) Forced induction (uses last-step engine rpm). Turbo spools off the exhaust; the supercharger tracks the crank
+    //    instantly and taxes it with parasitic drag; NA has neither. boostMult scales the engine torque curve.
+    float boostMult      = 1.0f;
+    float parasiticDrag  = 0.0f;
+    float reportBoostBar = 0.0f;
+    float reportForcedRPM= 0.0f;
+    if (Induction == InductionType::Turbocharged)
+    {
+        SpoolTurbo(engineRPM0, throttle, dt);
+        boostMult      = Turbo.TorqueMultiplierCurve.Sample(BoostBar);
+        reportBoostBar = BoostBar;
+        reportForcedRPM= TurboOmegaRad * kRadToRpm;
+    }
+    else if (Induction == InductionType::Supercharged)
+    {
+        boostMult      = StepSupercharger(engineRPM0, throttle, dt, parasiticDrag);
+        reportBoostBar = SuperBoostBar;
+        reportForcedRPM= Super.ChargerRPM(engineRPM0);
+    }
 
     // 2) Clutch: compute transmitted torque from slip between engine and gearbox input.
     const float gearRatio = Trans.RatioAt(In.GearIndex);
@@ -274,8 +337,8 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
     float clutchTorque = Clampf(slipRPM * kRpmToRad * k, -capacity, capacity);
     const bool locked = (engagement > Clutch.LockupEngagement) && (std::fabs(slipRPM) < Clutch.LockupSlipRPM);
 
-    // 3) Engine dynamics — RK4 on ω with the clutch reaction as load.
-    const float clutchLoad = clutchTorque;   // torque the clutch pulls off the crank
+    // 3) Engine dynamics — RK4 on ω with the clutch reaction + supercharger parasitic drag as load.
+    const float clutchLoad = clutchTorque + parasiticDrag;   // torque pulled off the crank (clutch + blower drag)
     auto f = [&](float w) noexcept { return NetEngineTorque(w, throttle, boostMult, clutchLoad) * Engine.InvEngineInertia; };
     const float w0 = EngineOmega;
     const float k1 = f(w0);
@@ -303,9 +366,10 @@ DrivetrainOutputs Drivetrain::Step(const DrivetrainInputs& In) noexcept
 
     Out.EngineRPM = rpmNew;
     Out.EngineTorque_Nm = NetEngineTorque(EngineOmega, throttle, boostMult, 0.0f);
-    Out.TurboRPM = TurboOmegaRad * kRadToRpm;
-    Out.BoostPressure_Bar = BoostBar;
+    Out.TurboRPM = reportForcedRPM;
+    Out.BoostPressure_Bar = reportBoostBar;
     Out.BoostMultiplier = boostMult;
+    Out.ParasiticDrag_Nm = parasiticDrag;
     Out.ClutchTorque_Nm = clutchTorque;
     Out.ClutchLocked = locked;
     Out.GearboxOutputTorque_Nm = gearboxOutTorque;

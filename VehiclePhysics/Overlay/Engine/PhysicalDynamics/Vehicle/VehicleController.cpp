@@ -50,7 +50,11 @@ void VehicleController::Build(const VehicleControllerConfig& config, const Hooks
     drivetrain_.SetTransmission(config_.Transmission);
     drivetrain_.SetClutch(config_.Clutch);
     drivetrain_.SetDifferential(config_.Differential);
+    drivetrain_.SetInduction(config_.Induction);
+    drivetrain_.SetSupercharger(config_.Supercharger);
+    drivetrain_.SetRaceTune(config_.RaceTune);
     drivetrain_.Reset(config_.Engine.IdleRPM);
+    braking_.Configure(config_.Wheels.size(), config_.Brakes, config_.Abs);
 
     gearIndex_  = config_.Transmission.NeutralIndex;       // start in neutral (auto-clutch engages 1st on throttle)
     shiftTimer_ = config_.ShiftCooldownSeconds;
@@ -282,6 +286,7 @@ void VehicleController::StepPacejka(float dt) noexcept
     telemetry_.EngineRPM = dOut.EngineRPM;
     telemetry_.TurboRPM  = dOut.TurboRPM;
     telemetry_.BoostBar  = dOut.BoostPressure_Bar;
+    telemetry_.ParasiticDrag_Nm = dOut.ParasiticDrag_Nm;
     telemetry_.GearIndex = gearIndex_;
     telemetry_.PacejkaActive = true;
 
@@ -424,7 +429,32 @@ void VehicleController::StepPacejka(float dt) noexcept
             driveTq = (wheel.LocalOffset.y > 0.0f) ? dOut.LeftDriveTorque_Nm : dOut.RightDriveTorque_Nm;
 
         float brakeTq = 0.0f;
-        if (wheel.Braked)                       brakeTq += input_.Brake * config_.MaxBrakeTorquePerWheel;
+        if (wheel.Braked)
+        {
+            if (config_.UseBrakeThermalModel)
+            {
+                // Hydraulic/thermal disk model with ABS. ABS watches this wheel's slip κ (computed above) and, above the
+                //    ABS min speed, pulses the line pressure to hold slip near the peak-grip target — the brake torque is
+                //    still applied through the anti-reversal cap below, so a modulated wheel decelerates without locking.
+                BrakeWheelInput bi;
+                bi.PedalCommand = Clamp(input_.Brake, 0.0f, 1.0f);
+                bi.WheelOmega   = wheelOmega_[i];
+                bi.SlipRatio    = kappa;
+                bi.Airspeed     = speed;
+                bi.Braked       = true;
+                const BrakeWheelOutput bo = braking_.Step(i, bi, dt);
+                brakeTq += bo.BrakeTorque_Nm;
+                WheelTelemetry& bt = telemetry_.Wheels[std::min<size_t>(i, telemetry_.Wheels.size() - 1)];
+                bt.BrakeTorque_Nm   = bo.BrakeTorque_Nm;
+                bt.BrakePressure_Pa = bo.Pressure_Pa;
+                bt.BrakeTemp_K      = bo.Temperature_K;
+                bt.AbsActive        = bo.AbsActive;
+            }
+            else
+            {
+                brakeTq += input_.Brake * config_.MaxBrakeTorquePerWheel;
+            }
+        }
         if (input_.Handbrake && !wheel.Steered) brakeTq += config_.HandbrakeTorque;
         const float rollTq = config_.RollingResistance * Fz * Reff;
 

@@ -33,6 +33,7 @@
 #include "TyreSlipDynamics.h"
 #include "Drivetrain.h"
 #include "Aerodynamics.h"
+#include "BrakingSystem.h"
 
 #include <array>
 #include <cstdint>
@@ -143,6 +144,22 @@ struct VehicleControllerConfig
     ClutchParameters       Clutch;
     DifferentialParameters Differential;
 
+    //-- Forced induction (Fuel deferred; ABS + Supercharger ported from GRIT `source-only`) -------------------------------
+    //   Induction selects turbo (default), a belt-driven supercharger, or NA. RaceTune raises the boost ceiling on
+    //   race fuel. See Drivetrain.h / SuperchargerParameters::DefaultTwinScrew().
+    InductionType          Induction     = InductionType::Turbocharged;
+    SuperchargerParameters Supercharger  = SuperchargerParameters::DefaultTwinScrew();
+    bool                   RaceTune      = false;
+
+    //-- Brakes + ABS (disk thermal model, ported from GRIT BrakingSpecifications; ABS is a standard slip modulator) -------
+    //   When UseBrakeThermalModel is true the foot brake torque comes from the hydraulic/thermal disk model (with fade)
+    //   and, if Abs.Enabled, is modulated to keep each wheel near its peak-grip slip. When false, the legacy constant
+    //   MaxBrakeTorquePerWheel path is used (keeps existing scenes/tests unchanged). The handbrake always uses the
+    //   constant HandbrakeTorque path (mechanical, no ABS).
+    bool               UseBrakeThermalModel = false;
+    BrakingParameters  Brakes = BrakingParameters::DefaultGT3();
+    AbsParameters      Abs;
+
     //-- Aerodynamics (first subsystem re-ported from GRIT `source-only`; see Aerodynamics.h) -----------------------------
     //   Drag + side-force + aero moments are applied to the chassis; the front/rear downforce is added to the per-axle
     //   tyre vertical load Fz that feeds the Pacejka slip model (GRIT's "downforce → wheel loads → grip" rule). Set
@@ -170,6 +187,11 @@ struct WheelTelemetry
     float    SlipRatio    = 0.0f;   // [-]  longitudinal slip κ
     float    SlipAngleRad = 0.0f;   // [rad] lateral slip angle α
     float    AeroDownforce = 0.0f;  // [N] aero downforce added to this wheel's grip load this step
+    // Brakes (only populated when UseBrakeThermalModel is on):
+    float    BrakeTorque_Nm  = 0.0f;   // [N·m] foot-brake torque this wheel this step
+    float    BrakePressure_Pa= 0.0f;   // [Pa]  hydraulic line pressure
+    float    BrakeTemp_K     = 293.15f;// [K]   disk temperature
+    bool     AbsActive       = false;  // [-]   ABS dumping pressure on this wheel this step
 };
 
 struct VehicleTelemetry
@@ -183,8 +205,9 @@ struct VehicleTelemetry
     std::array<WheelTelemetry, 8> Wheels{};
     // Production layer (PacejkaDrivetrain) — powertrain state:
     float    EngineRPM         = 0.0f;
-    float    TurboRPM          = 0.0f;
+    float    TurboRPM          = 0.0f;   // turbo shaft rpm, or supercharger charger rpm when blown
     float    BoostBar          = 0.0f;
+    float    ParasiticDrag_Nm  = 0.0f;   // supercharger crank load (0 for turbo/NA)
     int      GearIndex         = 0;      // index into Transmission.GearRatios (3 = 1st)
     bool     PacejkaActive     = false;  // true when running DrivingModel::PacejkaDrivetrain
     AeroForces Aero{};                   // aerodynamics computed this step (drag/downforce/side/moments breakdown)
@@ -235,6 +258,7 @@ private:
     PacejkaTyreModel                  pacejka_;      // Magic-Formula tyre (shared by all wheels)
     std::unique_ptr<TyreSlipDynamics> slip_;         // transient slip integrator (holds a const ref to pacejka_)
     Drivetrain                        drivetrain_;    // engine → clutch → gearbox → differential
+    BrakingSystem                     braking_;       // per-wheel disk-brake hydraulics + thermal + ABS
     std::vector<float>                wheelOmega_;    // [rad/s] per-wheel spin
     std::vector<SlipState>            slipState_;     // per-wheel relaxation-length deflection state
     int                               gearIndex_ = 3; // current gear (3 = 1st)

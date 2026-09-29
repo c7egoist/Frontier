@@ -81,6 +81,45 @@ struct TurbochargerParameters
     static TurbochargerParameters DefaultGTR();
 };
 
+// Forced-induction selection. A supercharger is BELT-driven off the crank, so its boost tracks engine rpm with no lag
+//   (unlike the turbo's exhaust-spool), and it robs crank torque as parasitic drag. A blown engine trades the turbo's
+//   lag for an instant, RPM-proportional boost and a permanent parasitic tax.
+enum class InductionType
+{
+    NaturallyAspirated,   // no forced induction (boostMult = 1)
+    Turbocharged,         // exhaust-driven turbo (default, spool dynamics)
+    Supercharged,         // belt-driven supercharger (instant boost, parasitic drag)
+};
+
+// Port of GRIT's FSuperchargerSpecifications (source-only Components/SuperchargerSpecifications.h). Positive-displacement
+//   or centrifugal blower geared to the crank at DriveRatio; boost from charger-rpm curve, torque gain from a boost
+//   curve, and a parasitic-drag curve that loads the crank. A bypass (recirculation) valve regulates boost to the tune
+//   ceiling and vents off-throttle so the blower is not compressing against a closed throttle.
+enum class SuperchargerDriveType { Roots, TwinScrew, Centrifugal };
+
+struct SuperchargerParameters
+{
+    SuperchargerDriveType DriveType = SuperchargerDriveType::TwinScrew;
+
+    Curve BoostPressureCurve;      // charger rpm → Bar
+    Curve TorqueMultiplierCurve;   // Bar → multiplier
+    Curve ParasiticDragCurve;      // charger rpm → N·m (crank load)
+
+    float ChargerInertia          = 0.015f;   // [kg·m²]
+    float ChargerFrictionCoeff    = 0.003f;   // [N·m·s/rad]
+    float ChargerFrictionQuadratic= 0.00008f; // [N·m·s²/rad²]
+    float DriveRatio              = 3.2f;     // charger rpm = engine rpm × DriveRatio
+    float MaxBoost_Base           = 0.8f;     // [Bar] pump-fuel tune ceiling
+    float MaxBoost_Race           = 1.2f;     // [Bar] race-fuel tune ceiling
+    float BypassValveRate         = 8.0f;     // [Bar/s] recirculation valve slew
+    float CompressorEfficiency    = 0.72f;    // [-]
+    float ParasiticLossFactor     = 0.08f;    // [-] residual drag fraction when fully bypassed (off-throttle)
+
+    [[nodiscard]] float ChargerRPM(float engineRPM) const noexcept { return engineRPM * DriveRatio; }
+
+    static SuperchargerParameters DefaultTwinScrew();
+};
+
 struct TransmissionParameters
 {
     // Index layout: [0]=R2, [1]=R1, [2]=N(0), [3..]=1st..6th
@@ -136,9 +175,10 @@ struct DrivetrainOutputs
 {
     float EngineRPM = 0.0f;
     float EngineTorque_Nm = 0.0f;     // net engine torque after braking, before clutch
-    float TurboRPM = 0.0f;
+    float TurboRPM = 0.0f;            // turbo shaft rpm (0 when supercharged/NA) — also carries charger rpm when blown
     float BoostPressure_Bar = 0.0f;
     float BoostMultiplier = 1.0f;
+    float ParasiticDrag_Nm = 0.0f;    // supercharger crank load (0 when NA/turbo)
     float ClutchTorque_Nm = 0.0f;     // torque transmitted through clutch
     bool  ClutchLocked = false;
     float GearboxOutputTorque_Nm = 0.0f;   // after gear × final drive × efficiency
@@ -157,6 +197,9 @@ public:
     void SetTransmission(const TransmissionParameters& P) noexcept { Trans = P; }
     void SetClutch(const ClutchParameters& P) noexcept { Clutch = P; }
     void SetDifferential(const DifferentialParameters& P) noexcept { Diff = P; }
+    void SetInduction(InductionType t) noexcept { Induction = t; }
+    void SetSupercharger(const SuperchargerParameters& P) noexcept { Super = P; }
+    void SetRaceTune(bool race) noexcept { RaceTune = race; }
 
     void Reset(float engineRPM) noexcept;
 
@@ -176,19 +219,25 @@ public:
 private:
     float NetEngineTorque(float omega, float throttle, float boostMult, float clutchLoad) const noexcept;
     void  SpoolTurbo(float engineRPM, float throttle, float dt) noexcept;
+    // Belt-driven supercharger: returns the torque multiplier for this step and writes the parasitic crank drag.
+    float StepSupercharger(float engineRPM, float throttle, float dt, float& parasiticDrag_Nm) noexcept;
     void  Differentiate(float driveTorque, float leftRPM, float rightRPM, float& outL, float& outR) const noexcept;
 
     EngineParameters       Engine;
     TurbochargerParameters Turbo;
+    SuperchargerParameters Super;
     TransmissionParameters Trans;
     ClutchParameters       Clutch;
     DifferentialParameters Diff;
+    InductionType          Induction = InductionType::Turbocharged;
+    bool                   RaceTune  = false;
 
     float EngineOmega   = 73.3f;   // rad/s (~700 rpm)
     float TurboOmegaRad = 0.0f;    // rad/s (turbo shaft speed)
     float BoostBar      = 0.0f;    // bar
     float BovPosition   = 0.0f;    // [0..1]
     float WastegatePosition = 0.0f;// [0..1]
+    float SuperBoostBar = 0.0f;    // bar (supercharger, bypass-regulated)
 };
 
 } // namespace Frontier::Vehicle

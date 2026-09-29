@@ -149,11 +149,24 @@ Removes the last placeholder dimensions and the three "known limitations" carrie
 | Driving validation (brake/park/rollover reframed physical) | `Vehicle/VehicleDrivingTests.cpp` | ✅ **12/12, 0 known-limitations** |
 | Aero drive proof rebuilt on real geometry | `Vehicle/AeroIntegrationTests.cpp` | ✅ **8/8** |
 
-**Roadmap (subsequent milestones, phase-by-phase from `source-only`):** Fuel (`FuelControlSystem`+`FuelSpecifications`) →
-Thermal (Coolant/EngineOil/Thermal) → ABS → Supercharger, then reconcile the core solver params against `.tyrx`
-Pacejka specs (GT3/LMP3/rally/drift/street). Each lands as a self-contained module + validation, same as Aerodynamics.
+## Phase 7 — ABS + Supercharger  ✅ **COMPLETE** (see `Phase7-ABS-and-Supercharger.md`)
+Fuel deferred by request (custom energy/density fuels + control unit + mixing + nitrous — its own milestone).
 
-## Phase 7 — EOS networking  *(deferred — "tomorrow")*
+| Item | Where | Status |
+|------|-------|--------|
+| **Supercharger** (belt-driven, instant boost, parasitic drag, bypass/tune caps) | `Vehicle/Drivetrain.{h,cpp}` (`InductionType`, `SuperchargerParameters`) | ✅ port of GRIT SuperchargerSpecifications |
+| Supercharger unit checks | `Vehicle/SuperchargerValidation.cpp` | ✅ **13/13** |
+| **Disk-brake thermal model** (hydraulics + fade + heat/cooling) | `Vehicle/BrakingSystem.h` | ✅ port of GRIT BrakingSpecifications |
+| **ABS** (proportional slip regulator, per-wheel) | `Vehicle/BrakingSystem.h` + `VehicleController` (`UseBrakeThermalModel`) | ✅ |
+| Brake/thermal/ABS unit checks | `Vehicle/BrakingValidation.cpp` | ✅ **16/16** |
+| End-to-end ABS + supercharger drive proof | `Vehicle/AbsSuperchargerTests.cpp` | ✅ **11/11** |
+
+**Roadmap (subsequent milestones, phase-by-phase from `source-only`):** **Fuel** (`FuelControlSystem`+`FuelSpecifications`;
+custom energy/density fuels, metering, mixing, nitrous — deferred, its own milestone) → Thermal (Coolant/EngineOil), then
+reconcile the core solver params against `.tyrx` Pacejka specs (GT3/LMP3/rally/drift/street) and a performance pass. Each
+lands as a self-contained module + validation, same as Aerodynamics.
+
+## Phase 8 — EOS networking  *(deferred — "tomorrow")*
 Server-authoritative simulation + client prediction/reconciliation, porting GRIT's EpicAdapter/EOS seam
 (`GameContext/AuthenticationContext`, `GameContext/SessionAdapter`).
 
