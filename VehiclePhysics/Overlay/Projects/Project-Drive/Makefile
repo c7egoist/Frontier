@@ -11,17 +11,17 @@
 #  Explicit file lists only — never glob Source/ (Project-Zero's rot-guard rule).
 
 CXX       := g++
-CXXFLAGS  := -std=c++17 -O2 -Wall -Wextra
+CXXFLAGS  := -std=c++20 -O2 -Wall -Wextra
 VEHICLE   := ../../Engine/PhysicalDynamics/Vehicle
 BIN       := bin
 DIAG      := Diagnostics
 
 VEHICLE_SRCS := \
-	$(VEHICLE)/VehicleController.cpp \
+	$(VEHICLE)/VehicleSolver.cpp \
 	$(VEHICLE)/VehicleGeometry.cpp \
 	$(VEHICLE)/Aerodynamics.cpp \
 	$(VEHICLE)/XPBDSoftTyre.cpp \
-	$(VEHICLE)/PacejkaTyreModel.cpp \
+	$(VEHICLE)/PacejkaMagicFormula.cpp \
 	$(VEHICLE)/TyreSlipDynamics.cpp \
 	$(VEHICLE)/Drivetrain.cpp
 

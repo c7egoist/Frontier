@@ -776,7 +776,7 @@ int main(int argc, char** argv)
     const bool DriveScene = Level.QueryName().find("DriveCourse") != std::string::npos;
     Frontier::Drive::VehicleInstanceSequence   Vehicle;
     Frontier::Drive::DriverInputExchange       DriveInput;
-    Frontier::Vehicle::DriverInputIntegrator    DriveController;
+    Frontier::Vehicle::DriverInputIntegrator    ActiveDriverInputIntegrator;
     bool PlayMode = false, PlayKeyHeld = false;
     if (DriveScene)
     {
@@ -1736,7 +1736,7 @@ int main(int argc, char** argv)
 
             Frontier::Vehicle::DriverInput DriverState{};
             if (PlayMode)
-                DriverState = DriveInput.Poll(Input, DriveController, Δτ).Drive; // W/S throttle-brake · A/D steer · Space handbrake · R reset
+                DriverState = DriveInput.Poll(Input, ActiveDriverInputIntegrator, Δτ).Drive; // W/S throttle-brake · A/D steer · Space handbrake · R reset
 
             // Always step the physics (in Edit mode with zero input the car simply rests on its tyres), then upload the
             //    refreshed body(0)+wheel(1..4) rows through the exact same path the D3 instance-motion feature ships.

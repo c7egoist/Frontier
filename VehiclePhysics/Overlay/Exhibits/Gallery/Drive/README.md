@@ -1,29 +1,32 @@
-# Project-Drive — scene CPU mirror (proof)
+# Project-Drive — CPU scene evidence
 
-These images are the **CPU mirror proof** for `Project-Zero.exe --scene drive`: a dependency-free C++ render of the
-*same* geometry the windowed app loads, so the scene can be verified without a GPU or a window. Source and runner live
-in [`Exhibits/Workbench/Drive/`](../../Workbench/Drive/); this folder holds the rendered output and its provenance.
+This gallery contains durable visual evidence for the Project-Drive scene. The primary proof is a dependency-free C++
+CPU mirror of the same course and ControlVehicle geometry the windowed application loads; it needs no GPU, window, or
+external package. Its source and runner are in [`Exhibits/Workbench/Drive/`](../../Workbench/Drive/).
 
 | File | What it shows |
 |---|---|
-| `drive_scene.png` | The default course from the editor's opening camera — checker pad, grey ramp, yellow speed bump, orange cones, and the real ControlVehicle (cobalt flake-clearcoat body + four procedural wheels) under sun + sky with world-space **surfel GI**. |
-| `drive_body_flakes.png` | Three-quarter front close-up of the body so the **clearcoat + metallic flake** term reads (the flakes are the sparse cobalt sparkle across the panels). |
-| `NativeProof.json` | Build + run provenance: the exact `g++ -std=c++20 -Wall -Wextra -Werror` compile (Release **and** Debug), the render invocations, and the sha256 of every source input and rendered output. `gpuExecution: false`. |
+| `DriveScene.png` | The current opening camera: checker pad, grey ramp, yellow speed bump, orange cones, and the real ControlVehicle under sun, sky, surfel GI, and flake clearcoat. |
+| `DriveBodyFlakes.png` | Three-quarter front close-up proving the clearcoat and sparse metallic flakes on the body. |
+| `DriveSceneProvenance.json` | Portable Release and Debug compile/run records plus SHA-256 hashes for the CPU proof sources and its two generated PNGs. |
+| `DriveSceneSurfelGi.png` | The Project-Drive headless `SurfelReference` render at 800×450. |
+| `DriveScenePreview.png` | The earlier CPU raster preview of the Tractrix course geometry. |
+| `BoxCar.png` | The SolidArc render of the BoxCar chassis and four wheels, with the required body-to-tyre clearance. |
 
-## What it proves
-- The drive scene is assembled correctly: **5,640 triangles** — course 2,092 + ControlVehicle body 2,780 (matches
-  `ControlVehicleMesh::kTriangleCount`) + 4 wheels 768 — with the instance-order contract (body first, then wheels).
-- Direct sun (next-event + shadow ray) and sky are correct; the surfel field carries the indirect bounce and the
-  contact shadows under the car and ramp read the way the Vulkan ReSTIR path produces them.
-- The flake clearcoat is present on the body (not flat candy paint).
+## What the current CPU proof verifies
+
+- The scene assembles as 5,640 triangles: course 2,092, ControlVehicle body 2,780, and wheels 768.
+- The body, course, and four wheels are present; every rendered pixel is finite; and the scene covers a meaningful part
+  of the camera frame.
+- Direct sun, sky, world-space surfel indirect light, and the body flake clearcoat are all exercised.
 
 ## Regenerate
-```
-python3 Exhibits/Workbench/Drive/RunProof.py          # from the repository root
-```
-The proof self-gates with `Check()` (scene non-empty, body/course/wheels present, body triangle count matches the
-mesh, every pixel finite, scene covers a sensible fraction of frame). A failed gate is a non-zero exit.
 
-> This is the *render* proof. The *physics* is proven separately by the headless `DriveTelemetry` reference
-> (real ControlVehicle over this course), and the flake material has its own close-up study in
-> `Exhibits/Gallery/AutomotiveFlakes/`.
+From `VehiclePhysics/Overlay`:
+
+```python
+python3 Exhibits/Workbench/Drive/DriveSceneProof.py
+```
+
+The runner compiles the proof with C++20 in Release and Debug using `-Wall -Wextra -Werror`, runs both self-gating
+renders, emits the flake close-up, and refreshes `DriveSceneProvenance.json`. A failed gate returns a non-zero exit.

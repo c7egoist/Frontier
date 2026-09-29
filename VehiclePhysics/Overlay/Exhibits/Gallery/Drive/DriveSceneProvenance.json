@@ -1,0 +1,78 @@
+{
+  "proof": "Project-Drive scene CPU mirror (course + ControlVehicle + wheels, sun/sky, surfel GI, flake clearcoat)",
+  "gpuExecution": false,
+  "windowsExecution": false,
+  "modes": [
+    {
+      "mode": "Release",
+      "compile": {
+        "command": [
+          "g++",
+          "-std=c++20",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-O2",
+          "-pthread",
+          "Exhibits/Workbench/Drive/DriveSceneProof.cpp",
+          "-o",
+          "Exhibits/Gallery/Drive/.DriveSceneProof-Release"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      "render": {
+        "command": [
+          "Exhibits/Gallery/Drive/.DriveSceneProof-Release",
+          "--out",
+          "Exhibits/Gallery/Drive",
+          "--name",
+          "DriveScene"
+        ],
+        "exit": 0,
+        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 2 ms | surfel-gi 827 ms | shade 274 ms | total 1103 ms\n  7 checks passed -> Exhibits/Gallery/Drive/DriveScene.png\n"
+      }
+    },
+    {
+      "mode": "Debug",
+      "compile": {
+        "command": [
+          "g++",
+          "-std=c++20",
+          "-Wall",
+          "-Wextra",
+          "-Werror",
+          "-O0",
+          "-g",
+          "-pthread",
+          "Exhibits/Workbench/Drive/DriveSceneProof.cpp",
+          "-o",
+          "Exhibits/Gallery/Drive/.DriveSceneProof-Debug"
+        ],
+        "exit": 0,
+        "output": ""
+      },
+      "render": {
+        "command": [
+          "Exhibits/Gallery/Drive/.DriveSceneProof-Debug",
+          "--out",
+          "Exhibits/Gallery/Drive",
+          "--name",
+          "DriveScene"
+        ],
+        "exit": 0,
+        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 27 ms | surfel-gi 4034 ms | shade 1362 ms | total 5423 ms\n  7 checks passed -> Exhibits/Gallery/Drive/DriveScene.png\n"
+      }
+    }
+  ],
+  "sha256": {
+    "Exhibits/Workbench/Drive/DriveSceneProof.cpp": "47eb68ae4f5db218d39959560266fcb42e25130958bb78890cd825a4b34a189d",
+    "Exhibits/Workbench/Drive/PngWriteCodec.h": "c626ad5fc91143d3b7f53fcce6301a706a9bc4167a61d12d099fd0779d16263a",
+    "Projects/Project-Drive/Source/DriveCourse.h": "92776f00a028b1078b9eac0e7dd6e59e89c0ff38633f1c2ed216674d50186e1c",
+    "Projects/Project-Drive/Source/ControlVehicleMesh.inl": "ddb759aed9ad727883d0021d5390528ed3bd509aaadb7b697704d65a017301ab"
+  },
+  "outputs": {
+    "Exhibits/Gallery/Drive/DriveScene.png": "659311bebc4231d8bbd82e63b0e136d37ebc18c35efe832af076c1b827cc1973",
+    "Exhibits/Gallery/Drive/DriveBodyFlakes.png": "077048b43ee9c0018ab258f8b2476f4b8b98cb969d70ef467dd3a1ee7a680d80"
+  }
+}

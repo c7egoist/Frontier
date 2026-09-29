@@ -31,8 +31,8 @@ a small set of **drive-specific edits**, each marked with a `Project-Drive:` com
 5. **Config path** — `Projects/Project-Drive/Content/Frontier.config.toml` (defaults tolerated if absent).
 6. **Vehicle bring-up** — after the scene loads, a `VehicleInstanceSequence` is constructed from the real
    `VehicleGeometry` (ControlVehicle dimensions).
-7. **Drive loop** — in the per-frame loop, **P** toggles Play/Edit; in Play the `VehicleInputBridge` feeds W/A/S/D +
-   Space + Shift/Ctrl + R into the controller, `VehicleInstanceSequence::AdvanceVehicle` steps the physics and writes
+7. **Drive loop** — in the per-frame loop, **P** toggles Play/Edit; in Play the `DriverInputExchange` feeds W/A/S/D +
+   Space + Shift/Ctrl + R into the vehicle solver, `VehicleInstanceSequence::AdvanceVehicle` steps the physics and writes
    the body(0) + wheel(1..4) `InstanceRecord::World` rows, `Surface.RefreshInstances` uploads them (the same path the
    D3 instance-motion feature ships), and the fly camera is repositioned as a chase camera trailing the chassis. In
    Edit mode W/A/S/D fly the editor camera instead.
@@ -42,9 +42,9 @@ a small set of **drive-specific edits**, each marked with a `Project-Drive:` com
 | File | Role | Mirrors |
 |---|---|---|
 | `DriveSceneAuthor.{h,cpp}` | One-shot exporter: emits the course + the real ControlVehicle body + 4 procedural wheels as a glTF level, body given the cobalt **flake clearcoat**, wheels the rubber material. Same `Construct()`/`Export()`/`…IsCurrent()` contract as `ShowcaseStructure`. Instance order is the contract: **0 = body, 1..4 = wheels FL,FR,RL,RR**. | `ShowroomStructure` / `ShowcaseStructure` |
-| `VehicleInstanceSequence.{h,cpp}` | Owns the live `VehicleController` + a collider-free chassis integrator; steps physics at 240 Hz and writes the body + 4 wheel `InstanceRecord::World` rows, then refreshes the flat triangles for the accel structure. | `PhysicsInstanceSequence` |
+| `VehicleInstanceSequence.{h,cpp}` | Owns the live `VehicleSolver` + a collider-free chassis integrator; steps physics at 240 Hz and writes the body + 4 wheel `InstanceRecord::World` rows, then refreshes the flat triangles for the accel structure. | `PhysicsInstanceSequence` |
 | `ChaseCameraSolver.{h,cpp}` | A `CameraProjection` that trails the car (spring lag, speed-reactive FOV). Available for a dedicated chase camera; the entry point currently repositions the fly camera directly in Play mode. | `FlyThroughSolver` |
-| `VehicleInputBridge.h` | Forwards `InputExchange` (W/A/S/D, Space, Shift/Ctrl, R) into the engine-agnostic `VehicleInputController`; edge-detects the discrete pulses. | new (thin) |
+| `DriverInputExchange.h` | Forwards `InputExchange` (W/A/S/D, Space, Shift/Ctrl, R) into the engine-agnostic `DriverInputIntegrator`; edge-detects the discrete pulses. | new (thin) |
 | `VehicleInspectorSequence.h` | Builds/applies an `EditorSheet` per subsystem (Chassis, Engine, Turbo, Gearbox, Tyre-long, Tyre-lat, Aero, Live) — **all curves editable**. | `EditorInspectorSequence` |
 
 ## Design notes

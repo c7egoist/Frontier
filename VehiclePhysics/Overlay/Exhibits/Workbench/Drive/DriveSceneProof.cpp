@@ -6,17 +6,17 @@
 //    real ControlVehicle shell, and the four procedural wheels), then renders it with a dependency-free CPU path:
 //    a BVH-traced G-buffer, sharp DIRECT sun (next-event + shadow ray) + sky, a world-space SURFEL field for the
 //    INDIRECT bounce, and a clearcoat-with-metallic-flakes term on the body so the flake paint is visible in the proof.
-//    No Vulkan, no GLFW, no window. Writes an 8-bit RGB PNG through the engine's PngWriteCounterpart and gates the
+//    No Vulkan, no GLFW, no window. Writes an 8-bit RGB PNG through the dependency-free PngWriteCodec and gates the
 //    result (scene non-empty, body/course/wheels covered, every pixel finite). Mirror of Exhibits/Workbench/Editor.
 //
-//    Output: Exhibits/Gallery/Drive/drive_scene.png    Runner: RunProof.py
+//    Output: Exhibits/Gallery/Drive/DriveScene.png    Runner: DriveSceneProof.py
 //
 //    Build (plain g++, no GPU):
-//      g++ -std=c++20 -O2 -pthread Exhibits/Workbench/Drive/NativeDriveProof.cpp -o DriveProof && ./DriveProof
+//      g++ -std=c++20 -O2 -pthread Exhibits/Workbench/Drive/DriveSceneProof.cpp -o DriveSceneProof && ./DriveSceneProof
 
 #include "../../../Projects/Project-Drive/Source/DriveCourse.h"
 #include "../../../Projects/Project-Drive/Source/ControlVehicleMesh.inl"
-#include "PngWriteCounterpart.h"
+#include "PngWriteCodec.h"
 
 #include <algorithm>
 #include <chrono>
@@ -220,7 +220,7 @@ static inline float aces(float x){x*=0.9f;return std::min(1.0f,std::max(0.0f,(x*
 static inline uint8_t enc(float v){return (uint8_t)std::lround(std::pow(aces(v),1.0f/2.2f)*255.0f);}
 
 int main(int argc,char**argv){ try {
-    int W=960,H=540,FRAMES=28,RAYS=8; std::string outDir="Exhibits/Gallery/Drive"; std::string name="drive_scene";
+    int W=960,H=540,FRAMES=28,RAYS=8; std::string outDir="Exhibits/Gallery/Drive"; std::string name="DriveScene";
     V eye{-11,-8.5,4.8}, look{3,0,0.6}; float fovDeg=55.0f;
     for(int i=1;i<argc;++i){ std::string a=argv[i]; auto nx=[&](int d){return i+1<argc?std::atoi(argv[++i]):d;};
         auto nf=[&](float d){return i+1<argc?(float)std::atof(argv[++i]):d;};
@@ -301,14 +301,14 @@ int main(int argc,char**argv){ try {
     std::vector<unsigned char> rgb((size_t)W*H*3);
     for(int i=0;i<W*H;++i){ rgb[i*3+0]=enc(img[i].x); rgb[i*3+1]=enc(img[i].y); rgb[i*3+2]=enc(img[i].z); }
     const std::string png=outDir+"/"+name+".png";
-    Check(PngWriteCounterpart::WritePng(png.c_str(), W, H, 3, rgb.data(), W*3)==1, "PNG write failed");
+    Check(PngWriteCodec::EncodeRgbFile(png.c_str(), W, H, 3, rgb.data(), W*3), "PNG write failed");
 
     auto tEnd=Clock::now();
     auto ms=[&](Clock::time_point a,Clock::time_point b){ return std::chrono::duration<double,std::milli>(b-a).count(); };
-    std::printf("NativeDriveProof: %zu tris (course %zu, body %zu, wheels %zu), %zu surfels, %dx%d, %d GI frames\n",
+    std::printf("DriveSceneProof: %zu tris (course %zu, body %zu, wheels %zu), %zu surfels, %dx%d, %d GI frames\n",
                 tris.size(), scene.course, scene.body, scene.wheels, sf.size(), W, H, FRAMES);
     std::printf("  bvh %.0f ms | surfel-gi %.0f ms | shade %.0f ms | total %.0f ms\n",
                 ms(t0,tBVH), ms(tBVH,tGI), ms(tGI,tEnd), ms(t0,tEnd));
     std::printf("  %u checks passed -> %s\n", g_Checks, png.c_str());
     return 0;
-} catch(const std::exception& e){ std::fprintf(stderr,"NativeDriveProof FAILED: %s\n", e.what()); return 1; } }
+} catch(const std::exception& e){ std::fprintf(stderr,"DriveSceneProof FAILED: %s\n", e.what()); return 1; } }

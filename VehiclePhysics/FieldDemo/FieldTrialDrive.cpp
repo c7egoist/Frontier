@@ -2,23 +2,19 @@
 // 📦 FieldDemo/FieldTrialDrive.cpp — drive the REAL ControlVehicle geometry across an open field (flat + speed bumps + a launch ramp),
 //                      with NO body collision (only the wheels touch the ground), and dump per-frame telemetry to JSON.
 //
-//   This is a visual/behavioural demo, not a pass/fail suite. It reuses the exact same VehicleController + XPBD soft-tyre
+//   This is a visual/behavioural demo, not a pass/fail suite. It reuses the exact same VehicleSolver + XPBD soft-tyre
 //   + Pacejka drivetrain + the socket-derived VehicleGeometry that the validation suites use. The output field_drive.json
 //   is played back by viewer.html (side view + top view + HUD) so you can actually SEE the procedural wheels spin, the
 //   suspension work the speed bumps, the car launch off the ramp, and the steering turn the front wheels through cones.
 //
-//   Build:
-//     g++ -std=c++17 -O2 FieldTrialDrive.cpp ../Overlay/Engine/PhysicalDynamics/Vehicle/VehicleController.cpp \
-//         ../Overlay/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp \
-//         ../Overlay/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp \
-//         ../Overlay/Engine/PhysicalDynamics/Vehicle/XPBDSoftTyre.cpp \
-//         ../Overlay/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp \
-//         ../Overlay/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp \
-//         ../Overlay/Engine/PhysicalDynamics/Vehicle/Drivetrain.cpp -I../Overlay/Engine/PhysicalDynamics/Vehicle \
+//   Build (from FieldDemo):
+//     g++ -std=c++20 -O2 FieldTrialDrive.cpp <Vehicle source set> -I../Overlay/Engine/PhysicalDynamics/Vehicle
 //         -o fielddrive && ./fielddrive
+//     Vehicle source set: VehicleSolver.cpp, VehicleGeometry.cpp, Aerodynamics.cpp, XPBDSoftTyre.cpp,
+//         PacejkaMagicFormula.cpp, TyreSlipDynamics.cpp, and Drivetrain.cpp.
 //============================================================================================================================================
 
-#include "VehicleController.h"
+#include "VehicleSolver.h"
 #include "VehicleGeometry.h"
 
 #include <cmath>
@@ -80,13 +76,13 @@ int main()
 {
     const float dt = 1.0f/240.0f;
     VehicleGeometry g;                                // real ControlVehicle socket geometry
-    VehicleControllerConfig cfg; cfg.Model = DrivingModel::PacejkaDrivetrain;
+    VehicleSolverConfiguration cfg; cfg.ActiveScheme = DrivingScheme::PacejkaDrivetrain;
     ApplyGeometry(cfg, g);
     cfg.Aero.Enabled = true;                          // aero ON — show downforce doing something at speed
 
     MockChassis ch; ch.Position = {0,0,0.42f}; ch.Mass = cfg.ChassisMass; ch.InvInertiaDiag = g.InvInertia();
-    VehicleController ctl;
-    VehicleController::Hooks h;
+    VehicleSolver ctl;
+    VehicleSolver::Hooks h;
     h.ReadChassis       = [&]{ return ch.State(); };
     h.ApplyForceAtPoint = [&](const Vec3& f, const Vec3& p){ ch.ApplyForceAtPoint(f,p); };
     h.ApplyTorque       = [&](const Vec3& t){ ch.ApplyTorque(t); };
@@ -117,7 +113,7 @@ int main()
     for (int s=0; s<=steps; ++s)
     {
         const float t = s*dt;
-        ctl.SetInput(InputAt(t));
+        ctl.AssignInput(InputAt(t));
         ctl.Step(dt); ch.Integrate(dt);
         const auto& tl = ctl.Telemetry();
 

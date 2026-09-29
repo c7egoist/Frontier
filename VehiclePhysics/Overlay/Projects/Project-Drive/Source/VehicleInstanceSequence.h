@@ -14,7 +14,7 @@
 //    heightfield query, never a raycast. This keeps the vehicle physics fully project-owned and identical between
 //    the Vulkan app and the headless reference.
 //
-//    Per frame the host calls AdvanceVehicle(): it steps the controller at a FIXED sub-step (240 Hz) accumulating
+//    Per frame the host calls AdvanceVehicle(): it steps the solver at a FIXED sub-step (240 Hz) accumulating
 //    the frame's wall time, then writes World rows —
 //        instance BodyInstance      = T(chassis) · R(chassis)                       (mesh baked object-local)
 //        instance WheelInstance[i]  = T(hub_i) · R(chassis) · R(steer_i,Z) · R(spin_i,Y)
@@ -66,7 +66,7 @@ struct VehicleChassisBody
 class VehicleInstanceSequence
 {
 public:
-    // Brings the controller up over the DriveCourse ground and seeds the chassis at the spawn pose. `geometry`
+    // Brings the solver up over the DriveCourse ground and seeds the chassis at the spawn pose. `geometry`
     //    supplies the real ControlVehicle socket layout; `config` is filled from it via ApplyGeometry.
     void Construct(const Frontier::Vehicle::VehicleGeometry& Geometry,
                    const VehicleInstanceConfiguration& Configuration) noexcept;
@@ -86,7 +86,7 @@ public:
 
     //-- Chase/player camera + inspector read the live state through these ---------------------------------------
     [[nodiscard]] const Frontier::Vehicle::ChassisState&   Chassis()   const noexcept { return ChassisState_; }
-    [[nodiscard]] const Frontier::Vehicle::VehicleTelemetry& Telemetry() const noexcept { return Controller.Telemetry(); }
+    [[nodiscard]] const Frontier::Vehicle::VehicleTelemetry& Telemetry() const noexcept { return ActiveVehicleSolver.Telemetry(); }
     [[nodiscard]] Frontier::Vehicle::VehicleSolverConfiguration& Configuration() noexcept { return ActiveConfiguration; }
     [[nodiscard]] const Frontier::Vehicle::VehicleSolverConfiguration& Configuration() const noexcept { return ActiveConfiguration; }
 
@@ -101,7 +101,7 @@ private:
 
     VehicleInstanceConfiguration            Instancing;
     Frontier::Vehicle::VehicleSolverConfiguration ActiveConfiguration;
-    Frontier::Vehicle::VehicleSolver    Controller;
+    Frontier::Vehicle::VehicleSolver    ActiveVehicleSolver;
     VehicleChassisBody                      Body;
     Frontier::Vehicle::ChassisState         ChassisState_{};
     Frontier::Vehicle::Vec3                 SpawnPosition{0.0f,0.0f,0.42f};

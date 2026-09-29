@@ -20,12 +20,12 @@ Frontier checkout via `Build/DuplicateFromProjectZero.py`, and **you build and d
 | Sun / sky | `Project-Zero` celestial sky + `SunInspectorPanel` (inherited unchanged) | — (comes free with the duplicate) |
 | Materials | OpenPBR `MaterialSlabDescriptor` + `AutomotiveFlakePaint.slang` (System B) | body = `SlateAutomotiveProfile`/`SlateGlintDensity` + GGX `Coat*` clearcoat |
 | Rigid bodies / terrain | `RigidBodySolver` (Jolt, +Z up) + heightfield seam | `TractrixProvingGround` (already committed) |
-| Vehicle physics | engine‑agnostic `Vehicle::VehicleController` (+ XPBD soft tyre) | already ported (`Engine/PhysicalDynamics/Vehicle/`) |
+| Vehicle physics | engine‑agnostic `Vehicle::VehicleSolver` (+ XPBD soft tyre) | already ported (`Engine/PhysicalDynamics/Vehicle/`) |
 | Physics → render | `PhysicsInstanceSequence` (poses → `InstanceRecord::World`) | **`VehicleInstanceSequence`** (chassis + per‑wheel spin/steer) — *next* |
 | Editor camera | `FlyThroughSolver : CameraProjection` (WASD + RMB look) | inherited |
 | Player / chase camera | `CameraProjection` subclass | **`ChaseCameraSolver`** — *next* |
 | Vehicle inspector + curves | project `EditorSheet`/`EditorPropertyGroup` via `EditorInspectorSequence.h` | **`VehicleInspectorSheet`** + curve widget — *next* |
-| Play → drive | `GameExecution` main loop + `InputExchange` + `VehicleInputController` | **`--scene drive` + Play mode wiring** — *next* |
+| Play → drive | `GameExecution` main loop + `InputExchange` + `DriverInputIntegrator` | **`--scene drive` + Play mode wiring** — *next* |
 
 ## Status
 
@@ -47,7 +47,7 @@ Frontier checkout via `Build/DuplicateFromProjectZero.py`, and **you build and d
     those `World` rows. Wheel rest origins match the GRIT hub table; chassis spawn lifts the shell so the wheels
     rest on the pad at frame zero.
   - Verified: builds clean under `-Wall -Wextra` against engine‑shaped headers; a CPU raster of the generated
-    triangles is `CarModelling/Proofs/DriveScene-preview.png`.
+    triangles is `../../Exhibits/Gallery/Drive/DriveScenePreview.png`.
 - **CMake**: `TractrixDriveScene.cpp` added to `PROJECT_TRACTRIX_SOURCES`.
 
 ### Remaining (next passes, in order)
@@ -61,9 +61,9 @@ Frontier checkout via `Build/DuplicateFromProjectZero.py`, and **you build and d
 3. **Vehicle inspector + curve editor** — a project `EditorSheet` bound through `EditorInspectorSequence.h`:
    engine/tyre/aero/brake read‑outs plus an ImGui **curve widget** editing *all* the vehicle curves (engine
    torque, tyre Fx/Fy vs slip, brake fade, aero Cl/Cd, spring/damper), writing straight into the live
-   `VehicleControllerConfig`.
+   `VehicleSolverConfiguration`.
 4. **`GameExecution` wiring** — register `--scene drive` (build `TractrixDriveScene`, spawn
-   `TractrixVehicleScene`), pump `InputExchange`→`VehicleInputController`→`scene.SetInput` on Play, drive
+   `TractrixVehicleScene`), pump `InputExchange`→`DriverInputIntegrator`→`scene.AssignInput` on Play, drive
    `VehicleInstanceSequence`, and add the Play/Pause + camera toggle to the control strip.
 
 ## Build & drive (on your machine)

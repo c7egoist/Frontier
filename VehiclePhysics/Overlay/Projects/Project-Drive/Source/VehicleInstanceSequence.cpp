@@ -73,7 +73,7 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
         float nx, ny, nz; CourseNormal(p.x, p.y, nx, ny, nz);
         n = Vec3{nx, ny, nz}; return true;
     };
-    Controller.Build(ActiveConfiguration, h, Body.State());
+    ActiveVehicleSolver.Build(ActiveConfiguration, h, Body.State());
 
     WheelSpin.assign(Instancing.WheelCount, 0.0f);
     ChassisState_ = Body.State();
@@ -96,7 +96,7 @@ void VehicleInstanceSequence::Reconfigure(const Frontier::Vehicle::VehicleSolver
         float nx, ny, nz; CourseNormal(p.x, p.y, nx, ny, nz);
         n = Vec3{nx, ny, nz}; return true;
     };
-    Controller.Build(ActiveConfiguration, h, Body.State());
+    ActiveVehicleSolver.Build(ActiveConfiguration, h, Body.State());
 }
 
 void VehicleInstanceSequence::ResetToSpawn() noexcept
@@ -118,13 +118,13 @@ void VehicleInstanceSequence::AdvanceVehicle(const Frontier::Vehicle::DriverInpu
 {
     if (!Built) return;
 
-    Controller.AssignInput(Input);
+    ActiveVehicleSolver.AssignInput(Input);
     Accumulator += std::min(std::max(DeltaSeconds, 0.0f), Instancing.MaxFrameSeconds);
     const float h = Instancing.SubStepSeconds;
-    const auto& tel = Controller.Telemetry();
+    const auto& tel = ActiveVehicleSolver.Telemetry();
     while (Accumulator >= h)
     {
-        Controller.Step(h);   // reads chassis, steps tyres, applies wheel forces
+        ActiveVehicleSolver.Step(h);   // reads chassis, steps tyres, applies wheel forces
         Body.Integrate(h);    // integrates the chassis with those forces (no body collision)
         for (uint32_t w = 0; w < Instancing.WheelCount && w < tel.Wheels.size(); ++w)
             WheelSpin[w] += tel.Wheels[w].WheelOmega * h;   // visual spin only
@@ -158,7 +158,7 @@ void VehicleInstanceSequence::WriteBodyRow(std::vector<InstanceRecord>& Rows) no
 
 void VehicleInstanceSequence::WriteWheelRows(std::vector<InstanceRecord>& Rows) noexcept
 {
-    const auto& tel = Controller.Telemetry();
+    const auto& tel = ActiveVehicleSolver.Telemetry();
     for (uint32_t w = 0; w < Instancing.WheelCount; ++w)
     {
         const uint32_t idx = Instancing.FirstWheel + w;

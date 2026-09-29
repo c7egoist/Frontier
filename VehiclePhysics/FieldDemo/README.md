@@ -6,7 +6,7 @@ and the wheels are **procedural** (the `.blend`'s `RubberFL*`/`RimFL*` meshes ar
 
 | File | What it is |
 |---|---|
-| `FieldTrialDrive.cpp` | Drives the sim (same `VehicleController` + XPBD soft tyre + Pacejka drivetrain + socket-derived `VehicleGeometry` as the validation suites) over the field terrain and dumps per-frame telemetry. |
+| `FieldTrialDrive.cpp` | Drives the sim (same `VehicleSolver` + XPBD soft tyre + Pacejka drivetrain + socket-derived `VehicleGeometry` as the validation suites) over the field terrain and dumps per-frame telemetry. |
 | `field_drive.json` | The recorded run (60 Hz): chassis pose, per-wheel hub position / spin / steer / contact / load, plus the terrain profile and cone positions. |
 | `viewer.html` | Canvas playback — **side view** (wheels spin, suspension works the bumps, ramp launch) + **top-down** (front wheels steer through the cones, path trail) + a live HUD. |
 | `ControlVehicle_concept.png` | Illustrative concept render of the PROTO-X wedge (styling only — **not** the real mesh or a real engine render). |
@@ -15,8 +15,8 @@ and the wheels are **procedural** (the `.blend`'s `RubberFL*`/`RimFL*` meshes ar
 ```bash
 # 1. regenerate the telemetry (optional — field_drive.json is checked in)
 V=../Overlay/Engine/PhysicalDynamics/Vehicle
-g++ -std=c++17 -O2 FieldTrialDrive.cpp $V/VehicleController.cpp $V/VehicleGeometry.cpp $V/Aerodynamics.cpp \
-    $V/XPBDSoftTyre.cpp $V/PacejkaTyreModel.cpp $V/TyreSlipDynamics.cpp $V/Drivetrain.cpp -I$V -o fielddrive && ./fielddrive
+g++ -std=c++20 -O2 FieldTrialDrive.cpp $V/VehicleSolver.cpp $V/VehicleGeometry.cpp $V/Aerodynamics.cpp \
+    $V/XPBDSoftTyre.cpp $V/PacejkaMagicFormula.cpp $V/TyreSlipDynamics.cpp $V/Drivetrain.cpp -I$V -o fielddrive && ./fielddrive
 # 2. view
 python3 -m http.server 8000    # open viewer.html
 ```

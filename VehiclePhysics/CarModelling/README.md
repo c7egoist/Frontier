@@ -10,14 +10,14 @@ rasteriser (no GUI, no GPU required here).
 ## Layout
 - `Engine/AuthoringTools/SolidArc/` (repo root) — the vendored tool source (kernel + console + presentation +
   interaction + docs + plans), **with local Frontier additions** (see "Material system + exporter" below). The 200 MB
-  baseline `Proofs/` gallery and the upstream `.patch` were intentionally **not** vendored (references, not the tool).
+  baseline proof gallery and the upstream `.patch` were intentionally **not** vendored (references, not the tool).
   Upstream gate: `Engine/AuthoringTools/SolidArc/Tools/Build/CheckSolidArc.sh`.
 - `BuildConsole.sh` — minimal build of just the console binary (no CMake, no verifier suite). `./BuildConsole.sh [out]`.
 - `Cars/` — `.scr` modelling scripts. **`BoxCar.scr`** is the current deliverable: a minimal placeholder — one box
   chassis + four cylinder wheels, with the box deliberately **not touching** the wheels (it floats 0.08 m above the
-  tyres, matching the Phase-3 `VehicleController` where the hubs mount below the chassis). The user authors real bodywork
+  tyres, matching the Phase-3 `VehicleSolver` where the hubs mount below the chassis). The user authors real bodywork
   themselves; earlier detailed car studies were dropped at their request.
-- `Proofs/` — rendered preview PNGs (`boxcar.png`).
+- `../Overlay/Exhibits/Gallery/Drive/` — durable rendered evidence (`BoxCar.png`, the drive preview, and the CPU surfel-GI render).
 - `Meshes/` — exported `<Car>.obj` + `<Car>.mtl` + `<Car>.materials.toml` (default = sharp/duplicated faces; `--weld`
   gives a smooth, vertex-merged variant).
 
@@ -48,13 +48,13 @@ SolidArc's matcap studios *are* the material system. This checkout extends them 
 Per the user, the deliverable here is just a **box + four wheels** — a physics proxy, not styled bodywork (the user
 authors real cars themselves). The one hard constraint: the **chassis box must not touch the wheels**. `BoxCar.scr`
 guarantees this by construction — the tyres occupy z ∈ [0.00, 0.72] and the box floor sits at z = 0.80, so their
-z-ranges never overlap (0.08 m clearance) regardless of any x/y overlap. This mirrors the Phase-3 `VehicleController`,
+z-ranges never overlap (0.08 m clearance) regardless of any x/y overlap. This mirrors the Phase-3 `VehicleSolver`,
 where each hub mounts below the chassis CoM and the box floats clear of the tyres.
 
 ## Build & render
 ```bash
 VehiclePhysics/CarModelling/BuildConsole.sh /tmp/sa-build
-/tmp/sa-build/SolidArc --continue --proofs VehiclePhysics/CarModelling/Proofs \
+/tmp/sa-build/SolidArc --continue --proofs VehiclePhysics/Overlay/Exhibits/Gallery/Drive \
     VehiclePhysics/CarModelling/Cars/BoxCar.scr
 ```
 
