@@ -13,6 +13,14 @@ Project guidance and living design references for Frontier / Project‑Zero work
   (cluster culling + indirect draws already exist), and where the real performance wins are.
 
 ## Standing conventions
+- **Proofs are CPU mirrors, and they live in `Exhibits/` — never `Diagnostics/` or any ad-hoc folder.** Every GPU/
+  visual feature ships a dependency-free C++ "native proof" that renders the *same* data on the CPU (no Vulkan, no
+  GLFW, no window). The proof source + its runner go in `Exhibits/Workbench/<Feature>/`; the rendered PNG(s) +
+  `NativeProof.json` provenance go in `Exhibits/Gallery/<Feature>/`. Write PNGs through
+  `Engine/ContentInterchange/PngWriteCounterpart.h` (include the same-dir `PngWriteCounterpart.h` forwarder, as the
+  Editor/AutomotiveShowcase proofs do). The proof must self-gate with `Check()` and exit non-zero on failure.
+  Reference example for a scene mirror: `Exhibits/Workbench/Drive/NativeDriveProof.cpp` + `Exhibits/Gallery/Drive/`.
+  (`Diagnostics/` is for a *run's* telemetry logs — CSV/timing — not for visual proofs.)
 - Editor‑side code for any entity lives behind `#if FRONTIER_EDITOR`; the runtime entity must not depend on any
   editor symbol (dependency is one‑directional: editor → runtime, never the reverse).
 - Icons are SVG, registered via `Engine/DisplayPresentation/IconSymbols.inc`
