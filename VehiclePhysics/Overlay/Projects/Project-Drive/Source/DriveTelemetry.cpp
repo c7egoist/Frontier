@@ -2,7 +2,7 @@
 // 📦 Projects/Project-Drive/Source/DriveTelemetry.cpp — headless physics reference: drive the course, write telemetry + timings
 //============================================================================================================================================
 //
-//    Project-Drive's headless CPU reference for the PHYSICS half (the Vulkan app runs the same VehicleController live). It
+//    Project-Drive's headless CPU reference for the PHYSICS half (the Vulkan app runs the same VehicleSolver live). It
 //    drives the REAL ControlVehicle (socket-derived VehicleGeometry, XPBD soft tyres, Pacejka drivetrain, aero) over the
 //    shared DriveCourse with NO body collision — only the wheels touch the ground — and writes, into Diagnostics/:
 //
@@ -13,7 +13,7 @@
 //    Build (plain g++, no GPU — the sandbox stand-in, mirroring Project-Zero's Makefile discipline):
 //        see Projects/Project-Drive/Makefile  (target: DriveTelemetry)
 
-#include "VehicleController.h"
+#include "VehicleSolver.h"
 #include "VehicleGeometry.h"
 #include "DriveCourse.h"
 
@@ -72,7 +72,7 @@ int main(int argc, char** argv)
     const int   stride = 4;                                  // record at 60 Hz
 
     VehicleGeometry g;                                       // real ControlVehicle socket geometry
-    VehicleControllerConfig cfg; cfg.Model = DrivingModel::PacejkaDrivetrain;
+    VehicleSolverConfiguration cfg; cfg.Model = DrivingLayer::PacejkaDrivetrain;
     ApplyGeometry(cfg, g);
     cfg.Aero.Enabled = true;
 
@@ -82,8 +82,8 @@ int main(int argc, char** argv)
     ch.Mass = cfg.ChassisMass;
     ch.InvInertiaDiag = g.InvInertia();
 
-    VehicleController ctl;
-    VehicleController::Hooks h;
+    VehicleSolver ctl;
+    VehicleSolver::Hooks h;
     h.ReadChassis       = [&]{ return ch.State(); };
     h.ApplyForceAtPoint = [&](const Vec3& f, const Vec3& p){ ch.ApplyForceAtPoint(f,p); };
     h.ApplyTorque       = [&](const Vec3& t){ ch.ApplyTorque(t); };
@@ -129,7 +129,7 @@ int main(int argc, char** argv)
     for (int s = 0; s <= steps; ++s)
     {
         const float t = s*dt;
-        ctl.SetInput(InputAt(t));
+        ctl.AssignInput(InputAt(t));
 
         const auto p0 = Clock::now();
         ctl.Step(dt);

@@ -9,7 +9,7 @@
 //============================================================================================================================================
 
 #include "VehicleGeometry.h"
-#include "VehicleController.h"   // WheelMount, VehicleControllerConfig (full definitions)
+#include "VehicleSolver.h"   // WheelMount, VehicleSolverConfiguration (full definitions)
 
 namespace Frontier::Vehicle {
 
@@ -32,7 +32,7 @@ std::vector<WheelMount> MakeWheelMounts(const VehicleGeometry& g)
     };
 }
 
-void ApplyGeometry(VehicleControllerConfig& c, const VehicleGeometry& g)
+void ApplyGeometry(VehicleSolverConfiguration& c, const VehicleGeometry& g)
 {
     c.ChassisMass = g.Mass;
     c.Wheels      = MakeWheelMounts(g);

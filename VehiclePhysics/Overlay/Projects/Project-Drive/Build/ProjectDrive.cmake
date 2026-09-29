@@ -39,7 +39,7 @@ list(APPEND PROJECT_DRIVE_SOURCES
     # DriverInputExchange.h, VehicleInspectorSequence.h, DriverInputIntegrator.h are header-only.
 
     # ---- real vehicle physics (shared engine sources; the headless DriveTelemetry links the same set) ----
-    ${PROJECT_DRIVE_VEHICLE}/VehicleController.cpp
+    ${PROJECT_DRIVE_VEHICLE}/VehicleSolver.cpp
     ${PROJECT_DRIVE_VEHICLE}/VehicleGeometry.cpp
     ${PROJECT_DRIVE_VEHICLE}/Aerodynamics.cpp
     ${PROJECT_DRIVE_VEHICLE}/XPBDSoftTyre.cpp

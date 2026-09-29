@@ -14,12 +14,12 @@
 //
 //    Everything runs on the same mock rigid-box chassis + mock heightfield GroundQuery used by VehicleSceneValidation, so
 //    it needs no Jolt/Unreal. Build & run:
-//        g++ -std=c++17 -O2 -Wall -Wextra VehicleDrivingTests.cpp VehicleController.cpp XPBDSoftTyre.cpp \
+//        g++ -std=c++17 -O2 -Wall -Wextra VehicleDrivingTests.cpp VehicleSolver.cpp XPBDSoftTyre.cpp \
 //            PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o vdrive && ./vdrive
 //
 //============================================================================================================================================
 
-#include "VehicleController.h"
+#include "VehicleSolver.h"
 #include "VehicleGeometry.h"
 
 #include <cmath>
@@ -96,10 +96,10 @@ static void KnownLimitation(const char* name, bool ok, double got, double want)
 
 static VehicleGeometry Geo() { return VehicleGeometry{}; }   // documented GT3-class estimates
 
-static VehicleControllerConfig MakeConfig(DrivingModel model)
+static VehicleSolverConfiguration MakeConfig(DrivingLayer model)
 {
-    VehicleControllerConfig c;
-    c.Model = model;
+    VehicleSolverConfiguration c;
+    c.ActiveLayer = model;
     ApplyGeometry(c, Geo());   // real wheel offsets / CoM height / mass — low CoM ⇒ car slides before it rolls
     // This suite measures the CAR's mechanical behaviour (top speed, braking, slopes, drift). Aerodynamics is a
     // separate axis validated by AeroIntegrationTests.cpp, so disable it here to keep these thresholds pure.
@@ -110,14 +110,14 @@ static VehicleControllerConfig MakeConfig(DrivingModel model)
 struct Rig
 {
     MockChassis chassis;
-    VehicleController controller;
-    void Build(const VehicleControllerConfig& cfg, XPBDSoftTyre::GroundQuery g, const Vec3& spawn)
+    VehicleSolver controller;
+    void Build(const VehicleSolverConfiguration& cfg, XPBDSoftTyre::GroundQuery g, const Vec3& spawn)
     {
         chassis = MockChassis{};
         chassis.Position = spawn;
         chassis.Mass = cfg.ChassisMass;
         chassis.InvInertiaDiag = Geo().InvInertia();
-        VehicleController::Hooks h;
+        VehicleSolver::Hooks h;
         h.ReadChassis       = [this]{ return chassis.State(); };
         h.ApplyForceAtPoint = [this](const Vec3& f, const Vec3& p){ chassis.ApplyForceAtPoint(f, p); };
         h.ApplyTorque       = [this](const Vec3& t){ chassis.ApplyTorque(t); };
@@ -127,7 +127,7 @@ struct Rig
     void Run(const DriverInput& in, float seconds, float dt)
     {
         const int steps = int(seconds / dt);
-        controller.SetInput(in);
+        controller.AssignInput(in);
         for (int s = 0; s < steps; ++s) { controller.Step(dt); chassis.Integrate(dt); }
     }
 };
@@ -151,8 +151,8 @@ int main()
     std::printf(" NOTE: no aerodynamic drag/downforce, no fuel, no nitro, no tyre/brake heat in model.\n");
     std::printf("=====================================================================================\n\n");
 
-    const DrivingModel M = DrivingModel::PacejkaDrivetrain;
-    const VehicleControllerConfig cfg = MakeConfig(M);
+    const DrivingLayer M = DrivingLayer::PacejkaDrivetrain;
+    const VehicleSolverConfiguration cfg = MakeConfig(M);
 
     //--------------------------------------------------------------------------------------------------------------
     // A. DRIVE-AROUND: launch → run through the box → terminal velocity → coast → brake.
@@ -164,7 +164,7 @@ int main()
         r.Run(DriverInput{}, 1.0f, dt);                       // settle
         float peak = 0.0f;
         const int steps = int(18.0f / dt);
-        r.controller.SetInput(DriverInput{1.0f, 0, 0, false});
+        r.controller.AssignInput(DriverInput{1.0f, 0, 0, false});
         for (int s = 0; s < steps; ++s)
         {
             r.controller.Step(dt); r.chassis.Integrate(dt);
@@ -264,7 +264,7 @@ int main()
         r.Run(DriverInput{0.7f, 0, 0, false}, 3.0f, dt);        // build speed straight
         // Provoke: hard throttle + steer.
         DriverInput drift{}; drift.Throttle = 1.0f; drift.Steer = 0.6f;
-        r.controller.SetInput(drift);
+        r.controller.AssignInput(drift);
         float maxRearSlip = 0.0f, maxYaw = 0.0f; bool spun = false;
         const int steps = int(3.0f / dt);
         float yawPrev = Yaw(r.chassis), yawAccum = 0.0f;
@@ -302,7 +302,7 @@ int main()
             r.Run(DriverInput{0.5f, 0, 0, false}, 4.0f, dt);    // reach speed
             // Hold a steady corner; measure lateral acceleration = v * yawRate.
             DriverInput corner{}; corner.Throttle = 0.35f; corner.Steer = steer;
-            r.controller.SetInput(corner);
+            r.controller.AssignInput(corner);
             float latAccSum = 0; int n = 0; bool rolled = false; float vAvg = 0;
             const int steps = int(3.0f / dt);
             for (int s = 0; s < steps; ++s)

@@ -30,7 +30,7 @@
 
 #pragma once
 
-#include "VehicleController.h"   // DriverInput
+#include "VehicleSolver.h"   // DriverInput
 
 #include <algorithm>
 #include <cmath>
@@ -75,7 +75,7 @@ struct InputConfiguration
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     DRIVER COMMAND
 //------------------------------------------------------------------------------------------------------------------------
-// 📝 `Drive` feeds VehicleController::AssignInput; ShiftUp/ShiftDown/SelectedGear are consumed by a manual-gearbox
+// 📝 `Drive` feeds VehicleSolver::AssignInput; ShiftUp/ShiftDown/SelectedGear are consumed by a manual-gearbox
 //    layer (the current dynamics run an AMT and auto-shift, so these are latched for the phase that wires manual shift).
 
 struct DriverCommand

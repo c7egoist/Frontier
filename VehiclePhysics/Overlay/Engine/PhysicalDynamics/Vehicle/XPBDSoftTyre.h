@@ -156,7 +156,7 @@ public:
     [[nodiscard]] const std::vector<SoftTyreNode>& Nodes() const noexcept { return nodes_; }
     [[nodiscard]] const SoftTyreParameters&        Params() const noexcept { return params_; }
     [[nodiscard]] const TyreReaction&              Reaction() const noexcept { return reaction_; }
-    [[nodiscard]] bool IsBuilt() const noexcept { return !nodes_.empty(); }
+    [[nodiscard]] bool Constructed() const noexcept { return !nodes_.empty(); }
 
     [[nodiscard]] uint32_t Index(uint32_t ring, uint32_t seg) const noexcept { return ring * params_.SegmentCount + seg; }
 

@@ -41,7 +41,9 @@ what we own without permanently diverging the copied Frontier engine code from u
 | Phase | Files | Status |
 |-------|-------|--------|
 | 1 — driver input layer | `DriverInputIntegrator.h` (was `VehicleInputController.h`), `DriverInputExchange.h` (was `VehicleInputBridge.h`) + callers (`DriveExecution.cpp`, `VehicleInstanceSequence.h`, `TractrixVehicleScene.h`, `VehicleInputTests.cpp`) | 🟢 done — g++ syntax-clean |
-| 2 — vehicle dynamics core | `VehicleController.{h,cpp}` (`Controller`→`VehicleSolver`?), `AssignInput` for `SetInput`, `Drivetrain.{h,cpp}`, tyre models | 🚧 next |
+| 2 — vehicle dynamics core (class API) | `VehicleController.{h,cpp}` → `VehicleSolver.{h,cpp}`; `VehicleControllerConfig`→`VehicleSolverConfiguration`; `SetInput`→`AssignInput`; `IsBuilt`→`Constructed`; `DrivingModel`→`DrivingLayer` (field `Model`→`ActiveLayer`); `SlipSolverKind`→`SlipSolverSelection`. 17 referencing files + BOTH build lists (`ProjectDrive.cmake`, `ToolchainSequence.ps1`) updated | 🟢 done — g++ syntax-clean |
+| 3 — powertrain subsystems | `Drivetrain.{h,cpp}`, `PacejkaTyreModel.{h,cpp}` (`Model`), `TyreSlipDynamics::SetSolver`, `BrakingSystem` (`UseBrakeThermalModel` bool `Use` prefix + `Model`), tyre models | ⬜ pending |
+| 5 — formatting pass | banner emoji `📦`→`🧩` (~20 vehicle files); internal snake_case members (`config_`,`input_`,…)→PascalCase; single-letter params (`v`,`c`,`dt`) | ⬜ deferred |
 | 3 — instance / scene seams | `VehicleInstanceSequence`, `DriveSceneStructure`, `ChaseCameraSolver` | 🚧 |
 | 4 — our identifiers in the copied host | `DriveExecution.cpp` (`IsDrive`→`DriveSelected`, etc.) | 🚧 |
 | 5 — formatting pass | 142/122 rulers, `///` annotation blocks, aligned columns, emoji whitelist across the authored layer | 🚧 |
@@ -53,8 +55,14 @@ lists are unaffected. When a **file** is renamed (Phase 1 renamed two header fil
 including the MSVC `ToolchainSequence.ps1` and any `Module.toml`, not only CMake/g++. Header-only files are not in the
 source lists, so Phase 1 needed only a comment fix in `ProjectDrive.cmake`.
 
-## Open naming question for Phase 2
+## Phase 2 decision (resolved)
 
-`VehicleController` is the biggest ripple (`Controller` banned, referenced across the whole layer + both projects).
-Candidate: `VehicleSolver` (solves the coupled longitudinal/lateral/yaw dynamics) or `VehicleIntegrator` (time-steps
-the state). Decide before executing Phase 2 to avoid a second rename.
+`VehicleController` → **`VehicleSolver`** (solves the coupled longitudinal/lateral/yaw dynamics). `VehicleIntegrator`
+was considered and rejected. Applied across all 17 referencing files and both build lists. `Step`/`Build`/`SlipSolver`
+were kept — they are not on the banned list (`SlipSolver` uses the approved `Solver` suffix).
+
+## Deferred to the formatting pass (Phase 5)
+
+Items found during Phase 2 but out of the banned-**word** scope: the `📦` file-banner emoji (used consistently across
+~20 vehicle files — whitelist allows `🧩`), internal trailing-underscore snake_case members, and single-letter params.
+Batched together so the diff is one mechanical style sweep rather than scattered noise across feature phases.

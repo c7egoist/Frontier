@@ -1,16 +1,16 @@
 //============================================================================================================================================
 // AeroIntegrationTests.cpp — end-to-end proof that the ported aerodynamics changes how the CAR drives.
-//   Drives the full VehicleController (PacejkaDrivetrain + XPBD soft tyres) on a mock rigid chassis, comparing an
+//   Drives the full VehicleSolver (PacejkaDrivetrain + XPBD soft tyres) on a mock rigid chassis, comparing an
 //   aero-equipped GT3 against an identical car with aero disabled. Confirms the two headline effects:
 //       • DRAG      → lower terminal speed + faster coast-down
 //       • DOWNFORCE → more cornering grip (higher sustained lateral acceleration before the tyres let go)
 //   No engine, no Jolt — same mock-chassis harness as VehicleSceneValidation.
 //
-//   Build:  g++ -std=c++17 -O2 AeroIntegrationTests.cpp VehicleController.cpp Aerodynamics.cpp XPBDSoftTyre.cpp \
+//   Build:  g++ -std=c++17 -O2 AeroIntegrationTests.cpp VehicleSolver.cpp Aerodynamics.cpp XPBDSoftTyre.cpp \
 //                 PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o /tmp/aerodrive && /tmp/aerodrive
 //============================================================================================================================================
 
-#include "VehicleController.h"
+#include "VehicleSolver.h"
 #include "VehicleGeometry.h"
 
 #include <cmath>
@@ -84,10 +84,10 @@ XPBDSoftTyre::GroundQuery Flat() { return [](const Vec3&, float& gz, Vec3& n){ g
 
 VehicleGeometry Geo() { return VehicleGeometry{}; }   // documented GT3-class estimates
 
-VehicleControllerConfig MakeConfig(bool aero)
+VehicleSolverConfiguration MakeConfig(bool aero)
 {
-    VehicleControllerConfig c;
-    c.Model = DrivingModel::PacejkaDrivetrain;
+    VehicleSolverConfiguration c;
+    c.ActiveLayer = DrivingLayer::PacejkaDrivetrain;
     c.Aero = AerodynamicPackage::DefaultGT3();
     ApplyGeometry(c, Geo());                 // real wheel offsets, aero force points, CoM-above-floor, mass
     if (!aero) c.Aero.Enabled = false;
@@ -97,14 +97,14 @@ VehicleControllerConfig MakeConfig(bool aero)
 struct Rig
 {
     MockChassis chassis;
-    VehicleController controller;
-    void Build(const VehicleControllerConfig& cfg, const Vec3& spawn)
+    VehicleSolver controller;
+    void Build(const VehicleSolverConfiguration& cfg, const Vec3& spawn)
     {
         chassis = MockChassis{};
         chassis.Position = spawn;
         chassis.Mass = cfg.ChassisMass;
         chassis.InvInertiaDiag = Geo().InvInertia();   // real GT3-class inertia tensor
-        VehicleController::Hooks h;
+        VehicleSolver::Hooks h;
         h.ReadChassis       = [this]{ return chassis.State(); };
         h.ApplyForceAtPoint = [this](const Vec3& f, const Vec3& p){ chassis.ApplyForceAtPoint(f, p); };
         h.ApplyTorque       = [this](const Vec3& t){ chassis.ApplyTorque(t); };
@@ -114,7 +114,7 @@ struct Rig
     void Run(const DriverInput& in, float seconds, float dt)
     {
         const int steps = int(seconds / dt);
-        controller.SetInput(in);
+        controller.AssignInput(in);
         for (int s = 0; s < steps; ++s) { controller.Step(dt); chassis.Integrate(dt); }
     }
 };
@@ -161,7 +161,7 @@ int main()
             Rig r; r.Build(MakeConfig(aero), {0, 0, 0.40f});
             r.chassis.PlanarOnly = true;
             r.Run({1.0f, 0.0f, 0.0f, false}, 18.0f, dt);      // reach ~high speed straight
-            r.controller.SetInput({0.6f, 0.0f, 1.0f, false}); // full lock, maintain throttle
+            r.controller.AssignInput({0.6f, 0.0f, 1.0f, false}); // full lock, maintain throttle
             const int steps = int(4.0f / dt);
             const int tail  = int(1.0f / dt);
             double sum = 0.0; int n = 0;

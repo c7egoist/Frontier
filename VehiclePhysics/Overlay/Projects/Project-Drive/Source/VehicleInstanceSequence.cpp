@@ -14,7 +14,7 @@ using Frontier::Vehicle::Vec3;
 using Frontier::Vehicle::Quat;
 using Frontier::Vehicle::QuatMul;
 using Frontier::Vehicle::QuatNormalize;
-using Frontier::Vehicle::VehicleController;
+using Frontier::Vehicle::VehicleSolver;
 
 //------------------------------------------------------------------------------------------------------------------------ chassis body (identical integrator to DriveTelemetry / FieldDemo)
 Quat VehicleChassisBody::Conjugate() const noexcept
@@ -52,8 +52,8 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
                                         const VehicleInstanceConfiguration& Configuration) noexcept
 {
     Instancing = Configuration;
-    Config = Frontier::Vehicle::VehicleControllerConfig{};
-    Config.Model = Frontier::Vehicle::DrivingModel::PacejkaDrivetrain;
+    Config = Frontier::Vehicle::VehicleSolverConfiguration{};
+    Config.Model = Frontier::Vehicle::DrivingLayer::PacejkaDrivetrain;
     Frontier::Vehicle::ApplyGeometry(Config, Geometry);
     Config.Aero.Enabled = true;
 
@@ -63,7 +63,7 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
     Body.Mass           = Config.ChassisMass;
     Body.InvInertiaDiag = Geometry.InvInertia();
 
-    VehicleController::Hooks h;
+    VehicleSolver::Hooks h;
     h.ReadChassis       = [this]{ return Body.State(); };
     h.ApplyForceAtPoint = [this](const Vec3& f, const Vec3& p){ Body.ApplyForceAtPoint(f, p); };
     h.ApplyTorque       = [this](const Vec3& t){ Body.ApplyTorque(t); };
@@ -82,11 +82,11 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
     Built = true;
 }
 
-void VehicleInstanceSequence::Reconfigure(const Frontier::Vehicle::VehicleControllerConfig& Edited) noexcept
+void VehicleInstanceSequence::Reconfigure(const Frontier::Vehicle::VehicleSolverConfiguration& Edited) noexcept
 {
     Config = Edited;
     // Rebuild so a curve / geometry / tyre edit rebinds the soft tyres at the current chassis pose.
-    VehicleController::Hooks h;
+    VehicleSolver::Hooks h;
     h.ReadChassis       = [this]{ return Body.State(); };
     h.ApplyForceAtPoint = [this](const Vec3& f, const Vec3& p){ Body.ApplyForceAtPoint(f, p); };
     h.ApplyTorque       = [this](const Vec3& t){ Body.ApplyTorque(t); };
@@ -118,7 +118,7 @@ void VehicleInstanceSequence::AdvanceVehicle(const Frontier::Vehicle::DriverInpu
 {
     if (!Built) return;
 
-    Controller.SetInput(Input);
+    Controller.AssignInput(Input);
     Accumulator += std::min(std::max(DeltaSeconds, 0.0f), Instancing.MaxFrameSeconds);
     const float h = Instancing.SubStepSeconds;
     const auto& tel = Controller.Telemetry();

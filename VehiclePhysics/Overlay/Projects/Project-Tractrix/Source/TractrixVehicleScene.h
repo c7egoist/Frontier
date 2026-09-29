@@ -7,17 +7,17 @@
 //        RigidBodySolver (Jolt)  ──creates──▶  TractrixTestTrack heightfield + a box chassis body
 //              ▲                                     │
 //              │ StepOnce()                          │ hooks (read pose / apply force at point / ground sample)
-//        VehiclePhysicsThread (240 Hz)  ──drives──▶  VehicleController (chassis + 4 XPBD soft tyres)
+//        VehiclePhysicsThread (240 Hz)  ──drives──▶  VehicleSolver (chassis + 4 XPBD soft tyres)
 //              ▲                                     │
 //              │ DataChannel<DriverInput>            │ DataChannel<VehicleTelemetry>
-//        game thread: SetInput() / Telemetry()  ◀────┘
+//        game thread: AssignInput() / Telemetry()  ◀────┘
 //
 //    Threading: the solver and controller live entirely on the physics thread (touched only inside Step()). The game
 //    thread hands input in and reads a telemetry snapshot out through the Phase-0 lock-free DataChannels. Rendering reads
 //    the chassis + wheel transforms straight out of the telemetry snapshot (no extra solver access needed).
 //
 //    This TU includes RigidBodySolver.h and therefore only compiles inside the Frontier tree (Jolt headers present). The
-//    engine-agnostic VehicleController it drives is separately validated headless (VehicleSceneValidation.cpp).
+//    engine-agnostic VehicleSolver it drives is separately validated headless (VehicleSceneValidation.cpp).
 
 #pragma once
 
@@ -25,7 +25,7 @@
 
 #include "../../../Engine/PhysicalDynamics/RigidBodySolver.h"
 #include "../../../Engine/PhysicalDynamics/VehiclePhysicsThread.h"
-#include "../../../Engine/PhysicalDynamics/Vehicle/VehicleController.h"
+#include "../../../Engine/PhysicalDynamics/Vehicle/VehicleSolver.h"
 
 namespace Frontier::Tractrix {
 
@@ -79,7 +79,7 @@ public:
         if (chassis_ == InvalidRigidBody) { solver_.Retire(); return false; }
 
         // Controller config: 4 wheels, RWD, front-steer. Soft tyre uses the Phase-2 calibrated defaults.
-        Frontier::Vehicle::VehicleControllerConfig vc;
+        Frontier::Vehicle::VehicleSolverConfiguration vc;
         vc.ChassisMass = settings_.ChassisMass;
         const float z  = -settings_.HubDrop;
         const float hx = settings_.HalfWheelBase, hy = settings_.HalfTrack;
@@ -90,7 +90,7 @@ public:
             {{-hx, -hy, z}, false, true,  true},
         };
 
-        Frontier::Vehicle::VehicleController::Hooks hooks;
+        Frontier::Vehicle::VehicleSolver::Hooks hooks;
         hooks.ReadChassis = [this]() -> Frontier::Vehicle::ChassisState
         {
             RigidBodyPose pose{};
@@ -113,7 +113,7 @@ public:
 
         Frontier::Vehicle::ChassisState initial{ ToVehicle(spawn), {0,0,0,1}, {0,0,0}, {0,0,0} };
         controller_.Build(vc, hooks, initial);
-        if (!controller_.IsBuilt()) { solver_.Retire(); return false; }
+        if (!controller_.Constructed()) { solver_.Retire(); return false; }
 
         VehiclePhysicsThreadConfiguration tc;
         tc.StepHz = settings_.PhysicsHz;
@@ -126,11 +126,11 @@ public:
     //   Feed a `DriverInput` here every game frame. To turn raw device state (WASD keys, a gamepad, or a racing wheel)
     //   into that `DriverInput`, use the engine-agnostic `Frontier::Vehicle::DriverInputIntegrator`
     //   (Engine/PhysicalDynamics/Vehicle/DriverInputIntegrator.h): push button/axis state into it, call Advance(Δτ),
-    //   and forward the resulting `DriverCommand::Drive` to SetInput(). Its ShiftUp/ShiftDown pulses are reserved for
+    //   and forward the resulting `DriverCommand::Drive` to AssignInput(). Its ShiftUp/ShiftDown pulses are reserved for
     //   the manual-gearbox phase (the controller currently auto-shifts). Example:
     //       input.ForwardThrottleKey(wDown); input.ForwardSteerLeftKey(aDown); ...
-    //       scene.SetInput(input.Advance(Δτ).Drive);
-    void SetInput(const Frontier::Vehicle::DriverInput& input) noexcept { inputChannel_.Write(input); }
+    //       scene.AssignInput(input.Advance(Δτ).Drive);
+    void AssignInput(const Frontier::Vehicle::DriverInput& input) noexcept { inputChannel_.Write(input); }
 
     // Physics thread → game/render thread (latest snapshot; false before the first step completes).
     [[nodiscard]] bool Telemetry(Frontier::Vehicle::VehicleTelemetry& out) const noexcept { return telemetryChannel_.Peek(out); }
@@ -146,7 +146,7 @@ private:
     void Step(uint64_t /*index*/, float dt) noexcept
     {
         Frontier::Vehicle::DriverInput in;
-        if (inputChannel_.Peek(in)) controller_.SetInput(in);
+        if (inputChannel_.Peek(in)) controller_.AssignInput(in);
         controller_.Step(dt);
         solver_.StepOnce();
         telemetryChannel_.Write(controller_.Telemetry());
@@ -155,7 +155,7 @@ private:
     Settings                                                     settings_{};
     RigidBodySolver                                              solver_;
     VehiclePhysicsThread                                         thread_;
-    Frontier::Vehicle::VehicleController                         controller_;
+    Frontier::Vehicle::VehicleSolver                         controller_;
     TractrixTestTrack                                            track_;
     RigidBodyIdentity                                            chassis_ = InvalidRigidBody;
     DataChannel<Frontier::Vehicle::DriverInput>                  inputChannel_;

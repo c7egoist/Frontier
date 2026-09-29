@@ -1,8 +1,8 @@
 //============================================================================================================================================
-// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleController.cpp — Phase 3 drivable vehicle implementation
+// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.cpp — Phase 3 drivable vehicle implementation
 //============================================================================================================================================
 
-#include "VehicleController.h"
+#include "VehicleSolver.h"
 
 #include <algorithm>
 #include <cmath>
@@ -20,7 +20,7 @@ namespace {
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
-void VehicleController::Build(const VehicleControllerConfig& config, const Hooks& hooks, const ChassisState& initial) noexcept
+void VehicleSolver::Build(const VehicleSolverConfiguration& config, const Hooks& hooks, const ChassisState& initial) noexcept
 {
     config_ = config;
     hooks_  = hooks;
@@ -43,7 +43,7 @@ void VehicleController::Build(const VehicleControllerConfig& config, const Hooks
     //   must be configured (and must outlive slip_) before the first Step. All per-wheel spin/deflection state is zeroed.
     pacejka_.SetParameters(config_.TyrePacejka);
     slip_ = std::make_unique<TyreSlipDynamics>(pacejka_);
-    slip_->SetSolver(config_.SlipSolverKind);
+    slip_->SetSolver(config_.SlipSolverSelection);
 
     drivetrain_.SetEngine(config_.Engine);
     drivetrain_.SetTurbo(config_.Turbo);
@@ -66,17 +66,17 @@ void VehicleController::Build(const VehicleControllerConfig& config, const Hooks
 }
 
 //------------------------------------------------------------------------------------------------------------------------
-void VehicleController::Step(float dt) noexcept
+void VehicleSolver::Step(float dt) noexcept
 {
     if (!built_ || dt <= 0.0f) return;
-    if (config_.Model == DrivingModel::PacejkaDrivetrain) StepPacejka(dt);
+    if (config_.ActiveLayer == DrivingLayer::PacejkaDrivetrain) StepPacejka(dt);
     else                                                  StepSimple(dt);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
 // SimpleFrictionCircle — the validated Phase-3 arcade layer (kept as a selectable fallback).
 //------------------------------------------------------------------------------------------------------------------------
-void VehicleController::StepSimple(float dt) noexcept
+void VehicleSolver::StepSimple(float dt) noexcept
 {
     const ChassisState cs = hooks_.ReadChassis();
 
@@ -203,7 +203,7 @@ void VehicleController::StepSimple(float dt) noexcept
 //   The relaxation-length slip solver keeps this stable through standstill (no velocity-in-denominator singularity), so
 //   the vehicle can launch from rest, hold under braking, and settle without the arcade friction-circle clamp.
 //------------------------------------------------------------------------------------------------------------------------
-void VehicleController::StepPacejka(float dt) noexcept
+void VehicleSolver::StepPacejka(float dt) noexcept
 {
     const ChassisState cs = hooks_.ReadChassis();
 

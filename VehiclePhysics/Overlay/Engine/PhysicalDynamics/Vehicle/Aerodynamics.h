@@ -21,7 +21,7 @@
 //        right-handed, +Z up, body-local +X forward, +Y left. Downforce is stored POSITIVE (a magnitude that
 //        pushes the car DOWN); `LiftForceWorld = -up · TotalDownforce`. Drag opposes the velocity direction.
 //
-//    HOW THE CONTROLLER APPLIES THESE (see VehicleController::StepPacejka):
+//    HOW THE CONTROLLER APPLIES THESE (see VehicleSolver::StepPacejka):
 //        • Drag + side-force + aero moments  → applied to the CHASSIS rigid body.
 //        • Downforce                         → added to the per-axle tyre vertical load Fz that feeds the Pacejka
 //          slip model (Front/RearDownforce split across front/rear wheels), i.e. "more Fz ⇒ more grip".

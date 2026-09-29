@@ -2,7 +2,7 @@
 // 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSceneValidation.cpp — headless Phase-3 drive test (no Jolt, no Unreal)
 //============================================================================================================================================
 //
-//    Proves the Phase-3 `VehicleController` end-to-end in the sandbox by driving it against a MOCK rigid-box chassis
+//    Proves the Phase-3 `VehicleSolver` end-to-end in the sandbox by driving it against a MOCK rigid-box chassis
 //    integrator and a MOCK heightfield GroundQuery (flat + sloped). This mirrors how `TractrixVehicleScene` wires the
 //    controller to the real `RigidBodySolver` + Jolt heightfield in-engine, but with a self-contained semi-implicit-Euler
 //    box so no Jolt/Vulkan is needed. It checks the physical invariants a drivable car must satisfy:
@@ -14,11 +14,11 @@
 //        5. rests stably on a sloped heightfield (handbrake on) without sinking or exploding.
 //
 //    Build & run (sandbox):
-//        g++ -std=c++17 -O2 -Wall -Wextra VehicleSceneValidation.cpp VehicleController.cpp XPBDSoftTyre.cpp -o vscene && ./vscene
+//        g++ -std=c++17 -O2 -Wall -Wextra VehicleSceneValidation.cpp VehicleSolver.cpp XPBDSoftTyre.cpp -o vscene && ./vscene
 //
 //============================================================================================================================================
 
-#include "VehicleController.h"
+#include "VehicleSolver.h"
 
 #include <cmath>
 #include <cstdint>
@@ -108,10 +108,10 @@ static void CheckBool(const char* name, bool ok) { std::printf("  [%s] %s\n", ok
 [[nodiscard]] static bool Finite(const Vec3& v) noexcept { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 
 // Build the standard 4-wheel RWD test vehicle around a chassis half-extent of (2.0, 0.85, 0.35).
-static VehicleControllerConfig MakeConfig(DrivingModel model)
+static VehicleSolverConfiguration MakeConfig(DrivingLayer model)
 {
-    VehicleControllerConfig c;
-    c.Model = model;
+    VehicleSolverConfiguration c;
+    c.ActiveLayer = model;
     c.ChassisMass = 1200.0f;
     c.Tyre = SoftTyreParameters{};                 // Phase-2 calibrated defaults (R=0.34, etc.)
     const float zoff = -0.55f;                      // hub sits below the CoM (box floats above the wheels)
@@ -127,17 +127,17 @@ static VehicleControllerConfig MakeConfig(DrivingModel model)
 struct Rig
 {
     MockChassis chassis;
-    VehicleController controller;
+    VehicleSolver controller;
     XPBDSoftTyre::GroundQuery ground;
 
-    void Build(const VehicleControllerConfig& cfg, XPBDSoftTyre::GroundQuery g)
+    void Build(const VehicleSolverConfiguration& cfg, XPBDSoftTyre::GroundQuery g)
     {
         chassis = MockChassis{};
         chassis.Mass = cfg.ChassisMass;
         chassis.SetBoxInertia({2.0f, 0.85f, 0.35f});
         ground = std::move(g);
 
-        VehicleController::Hooks hooks;
+        VehicleSolver::Hooks hooks;
         hooks.ReadChassis        = [this]() { return chassis.State(); };
         hooks.ApplyForceAtPoint  = [this](const Vec3& f, const Vec3& p) { chassis.ApplyForceAtPoint(f, p); };
         hooks.ApplyTorque        = [this](const Vec3& t) { chassis.ApplyTorque(t); };
@@ -149,7 +149,7 @@ struct Rig
     bool Run(const DriverInput& input, float seconds, float dt)
     {
         const int steps = static_cast<int>(seconds / dt);
-        controller.SetInput(input);
+        controller.AssignInput(input);
         for (int s = 0; s < steps; ++s)
         {
             controller.Step(dt);
@@ -164,16 +164,16 @@ struct Rig
 static bool FlatGround(const Vec3& p, float& gz, Vec3& n) { (void)p; gz = 0.0f; n = {0, 0, 1}; return true; }
 
 // Runs the full 5-scenario invariant suite for one driving model and returns {passed, failed} for that model.
-static void RunSuite(DrivingModel model, const char* label)
+static void RunSuite(DrivingLayer model, const char* label)
 {
     const float dt = 1.0f / 240.0f;
-    const VehicleControllerConfig cfg = MakeConfig(model);
+    const VehicleSolverConfiguration cfg = MakeConfig(model);
     const float weight = cfg.ChassisMass * 9.81f;
 
     std::printf("############################################################\n");
     std::printf("# DRIVING MODEL: %s\n", label);
     std::printf("############################################################\n");
-    std::printf("Phase-3 VehicleController drive test  (mock chassis + mock heightfield, dt=1/%.0f Hz)\n", 1.0f / dt);
+    std::printf("Phase-3 VehicleSolver drive test  (mock chassis + mock heightfield, dt=1/%.0f Hz)\n", 1.0f / dt);
     std::printf("chassis %.0f kg, 4 wheels, RWD, front-steer, soft XPBD tyres (R=%.2f m)\n\n",
                 cfg.ChassisMass, cfg.Tyre.Radius);
 
@@ -274,8 +274,8 @@ int main()
 {
     // Validate BOTH driving layers against the same physical invariants: the production Pacejka+drivetrain model and the
     //    original friction-circle fallback. Both must settle, accelerate, brake to a stop, steer, and hold a slope.
-    RunSuite(DrivingModel::PacejkaDrivetrain,    "PacejkaDrivetrain (production: MF6.1 slip + engine/clutch/gearbox/diff + wheel spin)");
-    RunSuite(DrivingModel::SimpleFrictionCircle, "SimpleFrictionCircle (Phase-3 arcade fallback)");
+    RunSuite(DrivingLayer::PacejkaDrivetrain,    "PacejkaDrivetrain (production: MF6.1 slip + engine/clutch/gearbox/diff + wheel spin)");
+    RunSuite(DrivingLayer::SimpleFrictionCircle, "SimpleFrictionCircle (Phase-3 arcade fallback)");
 
     std::printf("========================================\n");
     std::printf("Phase-3 drive test (both models): %d passed, %d failed\n", g_pass, g_fail);

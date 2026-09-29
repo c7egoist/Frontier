@@ -1,10 +1,10 @@
 //============================================================================================================================================
 //                                                   VEHICLEINSTANCESEQUENCE.H
 //============================================================================================================================================
-// 🧩 Project-Drive's engine ⇄ project seam — the bridge from the live VehicleController to renderer instance
+// 🧩 Project-Drive's engine ⇄ project seam — the bridge from the live VehicleSolver to renderer instance
 //    transforms, exactly the role PhysicsInstanceSequence plays for the drop scene in Project-Zero.
 //
-//    RigidBodySolver / VisibilityExchange know nothing about vehicles; VehicleController knows nothing about
+//    RigidBodySolver / VisibilityExchange know nothing about vehicles; VehicleSolver knows nothing about
 //    InstanceRecord rows. This class is the one place they meet, and it lives in the PROJECT because deciding that
 //    "instance 0 is the car body and instances 1..4 are its wheels" is game semantics.
 //
@@ -24,7 +24,7 @@
 #pragma once
 
 #include "../../../Engine/GeometricRaster/SceneStructure.h"   // InstanceRecord, TriangleIndex
-#include "../../../Engine/PhysicalDynamics/Vehicle/VehicleController.h"
+#include "../../../Engine/PhysicalDynamics/Vehicle/VehicleSolver.h"
 #include "../../../Engine/PhysicalDynamics/Vehicle/VehicleGeometry.h"
 
 #include <cstdint>
@@ -87,11 +87,11 @@ public:
     //-- Chase/player camera + inspector read the live state through these ---------------------------------------
     [[nodiscard]] const Frontier::Vehicle::ChassisState&   Chassis()   const noexcept { return ChassisState_; }
     [[nodiscard]] const Frontier::Vehicle::VehicleTelemetry& Telemetry() const noexcept { return Controller.Telemetry(); }
-    [[nodiscard]] Frontier::Vehicle::VehicleControllerConfig& Configuration() noexcept { return Config; }
-    [[nodiscard]] const Frontier::Vehicle::VehicleControllerConfig& Configuration() const noexcept { return Config; }
+    [[nodiscard]] Frontier::Vehicle::VehicleSolverConfiguration& Configuration() noexcept { return Config; }
+    [[nodiscard]] const Frontier::Vehicle::VehicleSolverConfiguration& Configuration() const noexcept { return Config; }
 
     // Apply an inspector edit to the live config (rebuilds the tyres so curve/geometry edits take effect).
-    void Reconfigure(const Frontier::Vehicle::VehicleControllerConfig& Edited) noexcept;
+    void Reconfigure(const Frontier::Vehicle::VehicleSolverConfiguration& Edited) noexcept;
 
 private:
     void WriteBodyRow(std::vector<InstanceRecord>& Rows) noexcept;
@@ -100,8 +100,8 @@ private:
                            float Out[16]) noexcept;
 
     VehicleInstanceConfiguration            Instancing;
-    Frontier::Vehicle::VehicleControllerConfig Config;
-    Frontier::Vehicle::VehicleController    Controller;
+    Frontier::Vehicle::VehicleSolverConfiguration Config;
+    Frontier::Vehicle::VehicleSolver    Controller;
     VehicleChassisBody                      Body;
     Frontier::Vehicle::ChassisState         ChassisState_{};
     Frontier::Vehicle::Vec3                 SpawnPosition{0.0f,0.0f,0.42f};

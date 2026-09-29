@@ -688,7 +688,7 @@ $EngineRelative = @(
     'Projects\Project-Drive\Source\DriveSceneStructure.cpp'    # headless glTF exporter: flat plane + grid + ramp + bumps + car
     'Projects\Project-Drive\Source\VehicleInstanceSequence.cpp' # vehicle physics -> InstanceRecord World rows
     'Projects\Project-Drive\Source\ChaseCameraSolver.cpp'      # player/vehicle camera (CameraProjection)
-    'Engine\PhysicalDynamics\Vehicle\VehicleController.cpp'    # real vehicle controller (XPBD soft tyres, RWD)
+    'Engine\PhysicalDynamics\Vehicle\VehicleSolver.cpp'    # real vehicle solver (XPBD soft tyres, RWD)
     'Engine\PhysicalDynamics\Vehicle\VehicleGeometry.cpp'      # ControlVehicle dimensions -> wheel mounts / config
     'Engine\PhysicalDynamics\Vehicle\Aerodynamics.cpp'
     'Engine\PhysicalDynamics\Vehicle\XPBDSoftTyre.cpp'

@@ -6,7 +6,7 @@
 //    expands into a row per subsystem (Chassis, Engine, Turbo, Gearbox, Tyre-long, Tyre-lat, Aero, plus a live
 //    read-out), each keyed into the family-6 inspector-key space so it survives moves and renames. Selecting a row
 //    builds that subsystem's EditorSheet; committing writes the edits straight back into the live
-//    VehicleControllerConfig, and the host then calls VehicleInstanceSequence::Reconfigure to rebind the tyres.
+//    VehicleSolverConfiguration, and the host then calls VehicleInstanceSequence::Reconfigure to rebind the tyres.
 //
 //    ALL CURVES ARE EDITABLE. The native inspector's widget vocabulary is scalar (Slider/Switch/Select/Readout) —
 //    it has no spline canvas — so every curve is exposed as its control set, which is exactly what defines it:
@@ -20,7 +20,7 @@
 #pragma once
 
 #include "../../../Engine/Editor/EditorInstance.h"
-#include "../../../Engine/PhysicalDynamics/Vehicle/VehicleController.h"
+#include "../../../Engine/PhysicalDynamics/Vehicle/VehicleSolver.h"
 
 #include <cmath>
 #include <cstdint>
@@ -126,7 +126,7 @@ inline bool ReadSwitch(const EditorSheet& Sheet, const char* Label, bool Old) no
 
 //------------------------------------------------------------------------------------------------------------------------ BUILD one subsystem's sheet
 inline void BuildVehicleSheet(VehicleSection S,
-                              const Frontier::Vehicle::VehicleControllerConfig& C,
+                              const Frontier::Vehicle::VehicleSolverConfiguration& C,
                               const Frontier::Vehicle::VehicleTelemetry& Tel,
                               EditorSheet& Sheet) noexcept
 {
@@ -276,7 +276,7 @@ inline void BuildVehicleSheet(VehicleSection S,
 
 //------------------------------------------------------------------------------------------------------------------------ APPLY the committed sheet back into the live config
 inline void ApplyVehicleSheet(VehicleSection S, const EditorSheet& Sheet,
-                              Frontier::Vehicle::VehicleControllerConfig& C) noexcept
+                              Frontier::Vehicle::VehicleSolverConfiguration& C) noexcept
 {
     using namespace detail;
     char lbl[28];

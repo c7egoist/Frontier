@@ -38,8 +38,8 @@
 
 namespace Frontier::Vehicle {
 
-struct WheelMount;                 // fwd (defined in VehicleController.h)
-struct VehicleControllerConfig;    // fwd
+struct WheelMount;                 // fwd (defined in VehicleSolver.h)
+struct VehicleSolverConfiguration;    // fwd
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
 // Raw socket coordinates lifted verbatim from ControlVehicle.blend (metres, model-origin frame = +X fwd, +Y left, +Z up).
@@ -113,6 +113,6 @@ struct VehicleGeometry
 [[nodiscard]] std::vector<WheelMount> MakeWheelMounts(const VehicleGeometry& g);
 
 // Stamp geometry onto a controller config: wheels, aero device force points, CoM-above-floor and mass.
-void ApplyGeometry(VehicleControllerConfig& config, const VehicleGeometry& g);
+void ApplyGeometry(VehicleSolverConfiguration& config, const VehicleGeometry& g);
 
 } // namespace Frontier::Vehicle

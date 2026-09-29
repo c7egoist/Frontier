@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleController.h — drivable vehicle: rigid chassis + four XPBD soft tyres (Phase 3)
+// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleSolver.h — drivable vehicle: rigid chassis + four XPBD soft tyres (Phase 3)
 //============================================================================================================================================
 //
 //    Phase 3 assembles the pieces built in Phases 0–2 into one drivable vehicle:
@@ -16,11 +16,11 @@
 //    Vec3/Quat from XPBDSoftTyre.h). It never mentions Jolt: it reaches the rigid chassis through a small set of `Hooks`
 //    (read chassis pose, apply force at a world point, apply torque) and reaches the ground through the tyre's GroundQuery.
 //    In the engine `TractrixVehicleScene` binds those hooks to `RigidBodySolver`; the headless `VehicleSceneValidation`
-//    binds them to a mock box integrator, so the whole controller compiles and is validated in the sandbox without Jolt.
+//    binds them to a mock box integrator, so the whole solver compiles and is validated in the sandbox without Jolt.
 //
 //    Call order per fixed physics step (on the Phase-0 physics thread):
-//        controller.SetInput(input);
-//        controller.Step(dt);          // reads chassis, steps tyres, applies wheel forces to the chassis
+//        solver.AssignInput(input);
+//        solver.Step(dt);          // reads chassis, steps tyres, applies wheel forces to the chassis
 //        solver.StepOnce();            // integrates the chassis with those forces
 //
 //    Frame conventions (match RigidBodySolver + XPBDSoftTyre): right-handed, +Z up, chassis-local +X forward, +Y left,
@@ -43,8 +43,8 @@
 
 namespace Frontier::Vehicle {
 
-// Which in-plane tyre-force model the controller runs.
-enum class DrivingModel
+// Which in-plane tyre-force model the solver runs.
+enum class DrivingLayer
 {
     SimpleFrictionCircle,   // Phase-3 arcade layer: throttle/brake/steer → forces clamped to μ·Fz (no wheel spin)
     PacejkaDrivetrain,      // production: engine→clutch→gearbox→diff→wheel-spin→Pacejka slip forces (Phases 1+2 combined)
@@ -53,7 +53,7 @@ enum class DrivingModel
 //------------------------------------------------------------------------------------------------------------------------
 //                                          quaternion helpers (compose / normalise)
 //------------------------------------------------------------------------------------------------------------------------
-// XPBDSoftTyre.h's Quat only ships AxisAngle + Rotate; the controller also needs Hamilton product and renormalisation to
+// XPBDSoftTyre.h's Quat only ships AxisAngle + Rotate; the solver also needs Hamilton product and renormalisation to
 //    build a steered hub rotation (yaw ∘ chassis) and to keep the mock chassis quaternion unit.
 [[nodiscard]] inline Quat QuatMul(const Quat& a, const Quat& b) noexcept
 {
@@ -100,7 +100,7 @@ struct WheelMount
     bool Braked  = true;        //      wheels the brake acts on
 };
 
-struct VehicleControllerConfig
+struct VehicleSolverConfiguration
 {
     float ChassisMass = 1200.0f;                 // [kg] informational; the solver owns the real mass
     SoftTyreParameters Tyre;                     // shared soft-tyre parameters (Phase-2 calibration by default)
@@ -118,12 +118,12 @@ struct VehicleControllerConfig
     uint32_t TyreSubsteps       = 8u;            // [-]   XPBD substeps per fixed step
     Vec3     Gravity            = {0.0f, 0.0f, -9.81f};
 
-    //-- Production driving layer (DrivingModel::PacejkaDrivetrain) --------------------------------------------------------
+    //-- Production driving layer (DrivingLayer::PacejkaDrivetrain) --------------------------------------------------------
     //   These are ignored by the SimpleFrictionCircle path. They wire the Phase-1 slip/drivetrain models onto the same
     //   Fz-from-soft-tyre / direct-heightfield-contact path used above.
-    DrivingModel           Model         = DrivingModel::PacejkaDrivetrain;
+    DrivingLayer           ActiveLayer   = DrivingLayer::PacejkaDrivetrain;
     PacejkaParameters      TyrePacejka;                                     // MF6.1 slip-force spec (defaults = Phase-1)
-    SlipSolver             SlipSolverKind = SlipSolver::RelaxationLength;   // zero-speed-stable transient tyre integrator
+    SlipSolver             SlipSolverSelection = SlipSolver::RelaxationLength;   // zero-speed-stable transient tyre integrator
     float    WheelInertia           = 1.2f;      // [kg·m²] rotational inertia of one wheel+tyre about its spin axis
     float    EffectiveRadius        = 0.0f;      // [m]  rolling radius; <= 0 ⇒ fall back to Tyre.Radius (0.34 m)
     float    MaxBrakeTorquePerWheel = 2600.0f;   // [N·m] foot-brake torque at full pedal, per braked wheel
@@ -209,14 +209,14 @@ struct VehicleTelemetry
     float    BoostBar          = 0.0f;
     float    ParasiticDrag_Nm  = 0.0f;   // supercharger crank load (0 for turbo/NA)
     int      GearIndex         = 0;      // index into Transmission.GearRatios (3 = 1st)
-    bool     PacejkaActive     = false;  // true when running DrivingModel::PacejkaDrivetrain
+    bool     PacejkaActive     = false;  // true when running DrivingLayer::PacejkaDrivetrain
     AeroForces Aero{};                   // aerodynamics computed this step (drag/downforce/side/moments breakdown)
 };
 
 //------------------------------------------------------------------------------------------------------------------------
-//                                                 VEHICLE CONTROLLER
+// VEHICLE SOLVER
 //------------------------------------------------------------------------------------------------------------------------
-class VehicleController
+class VehicleSolver
 {
 public:
     struct Hooks
@@ -228,25 +228,25 @@ public:
     };
 
     // Builds one soft tyre per wheel mount at its current world hub. `initial` seeds the hub placement.
-    void Build(const VehicleControllerConfig& config, const Hooks& hooks, const ChassisState& initial) noexcept;
+    void Build(const VehicleSolverConfiguration& config, const Hooks& hooks, const ChassisState& initial) noexcept;
 
-    void SetInput(const DriverInput& input) noexcept { input_ = input; }
+    void AssignInput(const DriverInput& input) noexcept { input_ = input; }
 
     // One fixed physics step: read chassis, step every tyre (nodes vs heightfield), apply wheel forces at the patches.
     void Step(float dt) noexcept;
 
     [[nodiscard]] const VehicleTelemetry& Telemetry() const noexcept { return telemetry_; }
     [[nodiscard]] const std::vector<XPBDSoftTyre>& Tyres() const noexcept { return tyres_; }
-    [[nodiscard]] bool IsBuilt() const noexcept { return built_; }
+    [[nodiscard]] bool Constructed() const noexcept { return built_; }
 
 private:
     [[nodiscard]] static float Clamp(float v, float lo, float hi) noexcept { return v < lo ? lo : (v > hi ? hi : v); }
 
-    // The two driving layers Step() dispatches to (selected by config_.Model).
+    // The two driving layers Step() dispatches to (selected by config_.ActiveLayer).
     void StepSimple(float dt) noexcept;   // Phase-3 friction-circle layer (validated fallback)
     void StepPacejka(float dt) noexcept;  // production drivetrain + Pacejka slip layer
 
-    VehicleControllerConfig    config_;
+    VehicleSolverConfiguration    config_;
     Hooks                      hooks_;
     std::vector<XPBDSoftTyre>  tyres_;
     DriverInput                input_;

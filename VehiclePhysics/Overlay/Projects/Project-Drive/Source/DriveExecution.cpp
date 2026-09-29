@@ -772,7 +772,7 @@ int main(int argc, char** argv)
 
     // ── Project-Drive: this app's own drivable vehicle over the drive course ─────────────────────────────────────────
     //    The chassis has NO collider by design (only the wheels contact the ground); VehicleInstanceSequence owns the
-    //    real VehicleController + a collider-free integrator and writes the body(0) + wheel(1..4) rows each frame.
+    //    real VehicleSolver + a collider-free integrator and writes the body(0) + wheel(1..4) rows each frame.
     const bool DriveScene = Level.QueryName().find("DriveCourse") != std::string::npos;
     Frontier::Drive::VehicleInstanceSequence   Vehicle;
     Frontier::Drive::DriverInputExchange       DriveInput;

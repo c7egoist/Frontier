@@ -1,17 +1,17 @@
 //============================================================================================================================================
 // AbsSuperchargerTests.cpp — end-to-end proof that ABS and the supercharger change how the CAR drives.
-//   Drives the full VehicleController (PacejkaDrivetrain + XPBD soft tyres + disk brakes) on the same mock rigid chassis
+//   Drives the full VehicleSolver (PacejkaDrivetrain + XPBD soft tyres + disk brakes) on the same mock rigid chassis
 //   used by AeroIntegrationTests / VehicleSceneValidation. No Jolt.
 //
 //   ABS:          hard braking with ABS on keeps the wheels from locking (slip stays near the grip peak) and the disks
 //                 heat up, versus an identical car with ABS off whose wheels lock solid.
 //   Supercharger: a blown car out-accelerates the naturally-aspirated version and reports boost + parasitic drag.
 //
-//   Build: g++ -std=c++17 -O2 AbsSuperchargerTests.cpp VehicleController.cpp VehicleGeometry.cpp Aerodynamics.cpp \
+//   Build: g++ -std=c++17 -O2 AbsSuperchargerTests.cpp VehicleSolver.cpp VehicleGeometry.cpp Aerodynamics.cpp \
 //                XPBDSoftTyre.cpp PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o /tmp/abs && /tmp/abs
 //============================================================================================================================================
 
-#include "VehicleController.h"
+#include "VehicleSolver.h"
 #include "VehicleGeometry.h"
 
 #include <cmath>
@@ -71,14 +71,14 @@ VehicleGeometry Geo() { return VehicleGeometry{}; }
 struct Rig
 {
     MockChassis chassis;
-    VehicleController controller;
-    void Build(const VehicleControllerConfig& cfg, const Vec3& spawn)
+    VehicleSolver controller;
+    void Build(const VehicleSolverConfiguration& cfg, const Vec3& spawn)
     {
         chassis = MockChassis{};
         chassis.Position = spawn;
         chassis.Mass = cfg.ChassisMass;
         chassis.InvInertiaDiag = Geo().InvInertia();
-        VehicleController::Hooks h;
+        VehicleSolver::Hooks h;
         h.ReadChassis       = [this]{ return chassis.State(); };
         h.ApplyForceAtPoint = [this](const Vec3& f, const Vec3& p){ chassis.ApplyForceAtPoint(f, p); };
         h.ApplyTorque       = [this](const Vec3& t){ chassis.ApplyTorque(t); };
@@ -88,15 +88,15 @@ struct Rig
     void Run(const DriverInput& in, float seconds, float dt)
     {
         const int steps = int(seconds / dt);
-        controller.SetInput(in);
+        controller.AssignInput(in);
         for (int s = 0; s < steps; ++s) { controller.Step(dt); chassis.Integrate(dt); }
     }
 };
 
-VehicleControllerConfig BaseConfig()
+VehicleSolverConfiguration BaseConfig()
 {
-    VehicleControllerConfig c;
-    c.Model = DrivingModel::PacejkaDrivetrain;
+    VehicleSolverConfiguration c;
+    c.ActiveLayer = DrivingLayer::PacejkaDrivetrain;
     c.Aero.Enabled = false;                 // isolate brakes/engine from aero
     ApplyGeometry(c, Geo());
     return c;
@@ -114,13 +114,13 @@ int main()
     std::printf("[A] Hard braking from ~40 m/s — ABS on vs off (disk-brake thermal model)\n");
     auto brakeRun = [&](bool absOn, float& meanSlip, float& absFrac, float& stopDist, float& maxTemp)
     {
-        VehicleControllerConfig c = BaseConfig();
+        VehicleSolverConfiguration c = BaseConfig();
         c.UseBrakeThermalModel = true;
         c.Abs.Enabled = absOn;
         Rig r; r.Build(c, {0, 0, 0.40f});
         r.Run(DriverInput{}, 1.0f, dt);                          // settle
         r.chassis.LinearVelocity = {40.0f, 0, 0};
-        r.controller.SetInput(DriverInput{0.0f, 1.0f, 0.0f, false}); // full brake, no throttle
+        r.controller.AssignInput(DriverInput{0.0f, 1.0f, 0.0f, false}); // full brake, no throttle
         const float x0 = r.chassis.Position.x;
         double slipSum = 0.0; long slipN = 0; maxTemp = 0.0f; int absSteps = 0, total = 0;
         const int steps = int(6.0f / dt);
@@ -161,7 +161,7 @@ int main()
     std::printf("\n[B] Standing-start acceleration — supercharged vs naturally-aspirated\n");
     auto launch = [&](InductionType ind, float& dist, float& vEnd, float& boost, float& drag)
     {
-        VehicleControllerConfig c = BaseConfig();
+        VehicleSolverConfiguration c = BaseConfig();
         c.Induction = ind;
         if (ind == InductionType::Supercharged) c.Supercharger = SuperchargerParameters::DefaultTwinScrew();
         Rig r; r.Build(c, {0, 0, 0.40f});
