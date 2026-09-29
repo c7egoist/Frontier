@@ -124,12 +124,12 @@ public:
 
     // Game thread → physics thread.
     //   Feed a `DriverInput` here every game frame. To turn raw device state (WASD keys, a gamepad, or a racing wheel)
-    //   into that `DriverInput`, use the engine-agnostic `Frontier::Vehicle::VehicleInputController`
-    //   (Engine/PhysicalDynamics/Vehicle/VehicleInputController.h): push button/axis state into it, call Update(dt),
+    //   into that `DriverInput`, use the engine-agnostic `Frontier::Vehicle::DriverInputIntegrator`
+    //   (Engine/PhysicalDynamics/Vehicle/DriverInputIntegrator.h): push button/axis state into it, call Advance(Δτ),
     //   and forward the resulting `DriverCommand::Drive` to SetInput(). Its ShiftUp/ShiftDown pulses are reserved for
     //   the manual-gearbox phase (the controller currently auto-shifts). Example:
-    //       input.SetThrottleKey(wDown); input.SetSteerLeftKey(aDown); ...
-    //       scene.SetInput(input.Update(dt).Drive);
+    //       input.ForwardThrottleKey(wDown); input.ForwardSteerLeftKey(aDown); ...
+    //       scene.SetInput(input.Advance(Δτ).Drive);
     void SetInput(const Frontier::Vehicle::DriverInput& input) noexcept { inputChannel_.Write(input); }
 
     // Physics thread → game/render thread (latest snapshot; false before the first step completes).

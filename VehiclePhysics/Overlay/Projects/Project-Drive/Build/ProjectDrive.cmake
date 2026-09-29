@@ -36,7 +36,7 @@ list(APPEND PROJECT_DRIVE_SOURCES
     ${PROJECT_DRIVE_ROOT}/Source/DriveSceneStructure.cpp       # headless glTF exporter (flat plane + grid + ramp + bumps + car)
     ${PROJECT_DRIVE_ROOT}/Source/VehicleInstanceSequence.cpp   # vehicle physics → InstanceRecord World rows
     ${PROJECT_DRIVE_ROOT}/Source/ChaseCameraSolver.cpp         # player/vehicle camera (CameraProjection)
-    # VehicleInputBridge.h, VehicleInspectorSequence.h, VehicleInputController.h are header-only.
+    # DriverInputExchange.h, VehicleInspectorSequence.h, DriverInputIntegrator.h are header-only.
 
     # ---- real vehicle physics (shared engine sources; the headless DriveTelemetry links the same set) ----
     ${PROJECT_DRIVE_VEHICLE}/VehicleController.cpp

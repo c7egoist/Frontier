@@ -53,7 +53,7 @@ int RunProjectFluidPreview();
 #include "DriveSceneStructure.h"
 #include "VehicleInstanceSequence.h"
 #include "ChaseCameraSolver.h"
-#include "VehicleInputBridge.h"
+#include "DriverInputExchange.h"
 #include "VehicleInspectorSequence.h"
 #include "../../../Engine/DeviceExchange/InterfaceExchange.h"
 #include "../../../Engine/DeviceExchange/GizmoExchange.h"
@@ -775,8 +775,8 @@ int main(int argc, char** argv)
     //    real VehicleController + a collider-free integrator and writes the body(0) + wheel(1..4) rows each frame.
     const bool DriveScene = Level.QueryName().find("DriveCourse") != std::string::npos;
     Frontier::Drive::VehicleInstanceSequence   Vehicle;
-    Frontier::Drive::VehicleInputBridge        DriveInput;
-    Frontier::Vehicle::VehicleInputController   DriveController;
+    Frontier::Drive::DriverInputExchange       DriveInput;
+    Frontier::Vehicle::DriverInputIntegrator    DriveController;
     bool PlayMode = false, PlayKeyHeld = false;
     if (DriveScene)
     {

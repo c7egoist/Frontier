@@ -71,7 +71,7 @@ public:
     void Construct(const Frontier::Vehicle::VehicleGeometry& Geometry,
                    const VehicleInstanceConfiguration& Configuration) noexcept;
 
-    // The one call the frame loop makes. Consumes `input` (already mapped from the device by VehicleInputBridge),
+    // The one call the frame loop makes. Consumes `input` (already mapped from the device by DriverInputExchange),
     //    advances the physics by whole sub-steps covering DeltaSeconds, and writes the body + wheel World rows into
     //    Rows (which must be the full instance list). Rolls PreviousWorld first.
     void AdvanceVehicle(const Frontier::Vehicle::DriverInput& Input,
@@ -81,7 +81,7 @@ public:
     //    acceleration structure (shadows, reflections, GI) follows the car once refitted. Rest is captured once.
     void RefreshBodyFacets(std::vector<TriangleIndex>& Facets, const std::vector<InstanceRecord>& Instances) noexcept;
 
-    // R — teleport back to the spawn pose with zero velocity (VehicleInputBridge maps the reset key here).
+    // R — teleport back to the spawn pose with zero velocity (DriverInputExchange maps the reset key here).
     void ResetToSpawn() noexcept;
 
     //-- Chase/player camera + inspector read the live state through these ---------------------------------------
