@@ -1,8 +1,16 @@
 # GRIT → Frontier Vehicle Physics Port — Plan of Record
 
 **Codename:** `Project-Tractrix` (a duplicate of Project-Zero as the host showcase).
-**Source project:** `SultanAladin/GRIT` (`main`) — Chaos PBD vehicle, line-trace suspension, Pacejka tyres, full drivetrain, EpicAdapter/EOS.
+**Source project:** `SultanAladin/GRIT` — Chaos PBD vehicle, line-trace suspension, Pacejka tyres, full drivetrain, EpicAdapter/EOS.
 **Target project:** `SultanAladin/Frontier-` (`main`) — Jolt 5.6.x rigid-body engine (`Engine/PhysicalDynamics/RigidBodySolver.{h,cpp}`).
+
+> ### ⚠ SOURCE-OF-TRUTH CORRECTION (2026-09-29)
+> The authoritative GRIT source is branch **`source-only`** (`e61b15c`, 2026-09-29) — **not** `main`
+> (`f89d924`, 2026-01-09, **8 months stale**). `source-only`'s `VehicleFramework/VehicleSolver.cpp` is **8,413 lines**
+> and contains subsystems missing from `main`: **Aerodynamics**, Fuel, Coolant/EngineOil/Thermal, Turbo+Supercharger,
+> ABS, Pacejka `.tyrx` tyre specs, and a real input `Controllers/VehicleController` (UE Enhanced Input). Phases 0–3
+> were built against stale `main`; from **Phase 5** onward the driving layer is **re-ported from `source-only`**, keeping
+> the Phase-2 XPBD soft tyre. See `Phase5-SourceOnly-Report.md`.
 
 > This is a **re-implementation**, not a code copy. Chaos ↔ Jolt differ in units (cm → m, ÷100), handedness
 > (LH → RH), and force units (N/cm → N/m). The *model math* (Pacejka, strut, drivetrain ODEs) ports close to
@@ -117,7 +125,24 @@ Placeholder car = **box + four wheels** (`CarModelling/Cars/BoxCar.scr`), box no
 author real bodywork). Validated invariants: settles carrying exactly `1.000·mg` on 4 wheels with no sink-through;
 accelerates; brakes to a dead stop without reversing; steers/yaws while upright; rests stably on a 6 % slope.
 
-## Phase 4 — EOS networking  *(deferred — "tomorrow")*
+## Phase 5 — Re-port driving layer from GRIT `source-only`  🔶 **IN PROGRESS** (see `Phase5-SourceOnly-Report.md`)
+Keeps the Phase-2 XPBD soft tyre + Jolt heightfield + physics thread; re-derives the driving layer from the
+up-to-date `source-only` branch, one subsystem at a time (drivable-first). **This milestone ships the first two:**
+
+| Item | Where | Status |
+|------|-------|--------|
+| **Aerodynamics** (faithful port of `ComputeAerodynamicForces`) | `Vehicle/Aerodynamics.{h,cpp}` | ✅ wing/splitter/canards/diffuser/skirts/vortex/body |
+| Aero wired into the driving layer (drag→chassis, downforce→wheel Fz) | `Vehicle/VehicleController.{h,cpp}` | ✅ |
+| Aero physics invariants | `Vehicle/AerodynamicsValidation.cpp` | ✅ **23/23** |
+| Aero end-to-end drive proof (on/off compare) | `Vehicle/AeroIntegrationTests.cpp` | ✅ **8/8** |
+| **Engine-agnostic input controller** (WASD + gamepad/wheel) | `Vehicle/VehicleInputController.h` | ✅ |
+| Input invariants | `Vehicle/VehicleInputTests.cpp` | ✅ **16/16** |
+
+**Roadmap (subsequent milestones, phase-by-phase from `source-only`):** Fuel (`FuelControlSystem`+`FuelSpecifications`) →
+Thermal (Coolant/EngineOil/Thermal) → ABS → Supercharger, then reconcile the core solver params against `.tyrx`
+Pacejka specs (GT3/LMP3/rally/drift/street). Each lands as a self-contained module + validation, same as Aerodynamics.
+
+## Phase 6 — EOS networking  *(deferred — "tomorrow")*
 Server-authoritative simulation + client prediction/reconciliation, porting GRIT's EpicAdapter/EOS seam
 (`GameContext/AuthenticationContext`, `GameContext/SessionAdapter`).
 

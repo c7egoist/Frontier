@@ -280,6 +280,41 @@ void VehicleController::StepPacejka(float dt) noexcept
     telemetry_.GearIndex = gearIndex_;
     telemetry_.PacejkaActive = true;
 
+    // ── Aerodynamics (GRIT source-only port) ────────────────────────────────────────────────────────────────────────
+    //   Compute the whole aero package ONCE per step from the chassis state. Drag, side-force and the aero moments act
+    //   on the chassis directly; the front/rear DOWNFORCE is split across the front/rear wheels and injected into the
+    //   per-axle tyre load Fz below (more Fz ⇒ more grip), matching GRIT's rule of applying downforce to WHEEL LOADS,
+    //   not the chassis. Ride height is derived from a ground sample under the CoM so ground-effect terms respond to squat.
+    AeroForces aero{};
+    int nFrontWheels = 0, nRearWheels = 0;
+    for (const WheelMount& w : config_.Wheels) { if (w.LocalOffset.x > 0.0f) ++nFrontWheels; else ++nRearWheels; }
+    if (config_.Aero.Enabled)
+    {
+        const Vec3  right   = cs.Orientation.Rotate({0.0f, 1.0f, 0.0f});
+        const float yawRate = Dot(cs.AngularVelocity, up);
+        float groundZ = 0.0f; Vec3 groundN{0.0f, 0.0f, 1.0f};
+        float rideHeight = config_.Aero.FloorDiffuser.RideHeightOptimum_m;
+        if (hooks_.Ground(cs.Position, groundZ, groundN))
+            rideHeight = std::max(0.005f, (cs.Position.z - groundZ) - config_.Aero.ComHeightAboveFloor_m);
+
+        aero = ComputeAerodynamicForces(
+            config_.Aero, cs.LinearVelocity, rideHeight, forward, right, up,
+            Clamp(input_.Brake, 0.0f, 1.0f), input_.Handbrake ? 1.0f : 0.0f, throttleCmd, yawRate);
+
+        // Drag (opposes velocity) + body side-force → chassis at the CoM.
+        hooks_.ApplyForceAtPoint(aero.DragForceWorld, cs.Position);
+        hooks_.ApplyForceAtPoint(aero.SideForceWorld, cs.Position);
+        // Aero moments about the CoM: pitch↦body-Y(right), roll↦body-X(forward), yaw↦body-Z(up).
+        if (hooks_.ApplyTorque)
+        {
+            const Vec3 torque = right * aero.PitchMoment_Nm + forward * aero.RollMoment_Nm + up * aero.YawMoment_Nm;
+            hooks_.ApplyTorque(torque);
+        }
+    }
+    const float frontDownforcePerWheel = (nFrontWheels > 0) ? std::max(0.0f, aero.FrontDownforce_N) / static_cast<float>(nFrontWheels) : 0.0f;
+    const float rearDownforcePerWheel  = (nRearWheels  > 0) ? std::max(0.0f, aero.RearDownforce_N)  / static_cast<float>(nRearWheels)  : 0.0f;
+    telemetry_.Aero = aero;
+
     for (size_t i = 0; i < tyres_.size(); ++i)
     {
         const WheelMount& wheel = config_.Wheels[i];
@@ -303,6 +338,12 @@ void VehicleController::StepPacejka(float dt) noexcept
         const bool  onGnd = reaction.ContactCount > 0u && Fz > 1.0f;
         const Vec3  patch = onGnd ? reaction.PatchCentre : Vec3{hub.x, hub.y, hub.z - config_.Tyre.Radius};
 
+        // Aero downforce for THIS wheel (front axle vs rear axle share). Added to the GRIP load only — never to the
+        //    vertical force pushed on the chassis — so the tyre generates more lateral/longitudinal force at speed
+        //    without the aero injecting free vertical momentum into the body. Only counts while the tyre is loaded.
+        const float aeroDownforce = onGnd ? ((wheel.LocalOffset.x > 0.0f) ? frontDownforcePerWheel : rearDownforcePerWheel) : 0.0f;
+        const float FzGrip = Fz + aeroDownforce;
+
         // Wheel planar axes (with steer) and the slip-velocity components in that frame.
         const Vec3  wf  = PlanarNormalized(hubRot.Rotate({1.0f, 0.0f, 0.0f}));
         const Vec3  wl  = PlanarNormalized(hubRot.Rotate({0.0f, 1.0f, 0.0f}));
@@ -323,7 +364,7 @@ void VehicleController::StepPacejka(float dt) noexcept
             K.Vsy       = Vsy;
             K.OmegaR    = wheelOmega_[i] * Reff;
             K.CamberRad = 0.0f;
-            K.Fz_N      = Fz;
+            K.Fz_N      = FzGrip;
             const SlipResult sr = slip_->Step(K, slipState_[i], dt);
             Fx = sr.Forces.Fx; Fy = sr.Forces.Fy; kappa = sr.Kappa; alpha = sr.AlphaRad;
 
@@ -336,7 +377,7 @@ void VehicleController::StepPacejka(float dt) noexcept
 
             // Numerical safety net only (NOT the arcade clamp): keep the combined force inside a generous friction
             //    circle so a transient slip spike can never inject unbounded energy. Well-behaved slip stays untouched.
-            const float grip = config_.GripCoefficient * Fz * 1.3f;
+            const float grip = config_.GripCoefficient * FzGrip * 1.3f;
             const float pmag = std::sqrt(Fx * Fx + Fy * Fy);
             if (grip > 0.0f && pmag > grip) { const float s = grip / pmag; Fx *= s; Fy *= s; }
         }
@@ -410,6 +451,7 @@ void VehicleController::StepPacejka(float dt) noexcept
         wt.WheelOmega        = wheelOmega_[i];
         wt.SlipRatio         = kappa;
         wt.SlipAngleRad      = alpha;
+        wt.AeroDownforce     = aeroDownforce;
 
         telemetry_.TotalVerticalLoad += Fz;
         if (onGnd) ++telemetry_.WheelsInContact;

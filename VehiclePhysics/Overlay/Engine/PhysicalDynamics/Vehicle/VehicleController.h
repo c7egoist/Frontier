@@ -32,6 +32,7 @@
 #include "PacejkaTyreModel.h"
 #include "TyreSlipDynamics.h"
 #include "Drivetrain.h"
+#include "Aerodynamics.h"
 
 #include <array>
 #include <cstdint>
@@ -141,6 +142,13 @@ struct VehicleControllerConfig
     TransmissionParameters Transmission;                                   // GT-R 6-speed defaults
     ClutchParameters       Clutch;
     DifferentialParameters Differential;
+
+    //-- Aerodynamics (first subsystem re-ported from GRIT `source-only`; see Aerodynamics.h) -----------------------------
+    //   Drag + side-force + aero moments are applied to the chassis; the front/rear downforce is added to the per-axle
+    //   tyre vertical load Fz that feeds the Pacejka slip model (GRIT's "downforce → wheel loads → grip" rule). Set
+    //   `Aero.Enabled = false` (or use AerodynamicPackage::DefaultBody()) to disable the winged devices. Only the
+    //   PacejkaDrivetrain driving layer consumes aero; SimpleFrictionCircle ignores it.
+    AerodynamicPackage     Aero = AerodynamicPackage::DefaultGT3();
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -161,6 +169,7 @@ struct WheelTelemetry
     float    WheelOmega   = 0.0f;   // [rad/s] wheel spin (+ = rolling forward)
     float    SlipRatio    = 0.0f;   // [-]  longitudinal slip κ
     float    SlipAngleRad = 0.0f;   // [rad] lateral slip angle α
+    float    AeroDownforce = 0.0f;  // [N] aero downforce added to this wheel's grip load this step
 };
 
 struct VehicleTelemetry
@@ -178,6 +187,7 @@ struct VehicleTelemetry
     float    BoostBar          = 0.0f;
     int      GearIndex         = 0;      // index into Transmission.GearRatios (3 = 1st)
     bool     PacejkaActive     = false;  // true when running DrivingModel::PacejkaDrivetrain
+    AeroForces Aero{};                   // aerodynamics computed this step (drag/downforce/side/moments breakdown)
 };
 
 //------------------------------------------------------------------------------------------------------------------------
