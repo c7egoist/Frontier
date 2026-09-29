@@ -7,7 +7,7 @@
 //   No engine, no Jolt — same mock-chassis harness as VehicleSceneValidation.
 //
 //   Build:  g++ -std=c++17 -O2 AeroIntegrationChecks.cpp VehicleSolver.cpp Aerodynamics.cpp XPBDSoftTyre.cpp \
-//                 PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o /tmp/aerodrive && /tmp/aerodrive
+//                 PacejkaMagicFormula.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o /tmp/aerodrive && /tmp/aerodrive
 //============================================================================================================================================
 
 #include "VehicleSolver.h"
@@ -41,7 +41,7 @@ struct MockChassis
     Vec3  ForceAccum{};
     Vec3  TorqueAccum{};
 
-    void SetBoxInertia(const Vec3& h) noexcept
+    void AssignBoxInertia(const Vec3& h) noexcept
     {
         const float fx = 2 * h.x, fy = 2 * h.y, fz = 2 * h.z;
         InvInertiaDiag = {1.0f / (Mass * (fy * fy + fz * fz) / 12.0f),

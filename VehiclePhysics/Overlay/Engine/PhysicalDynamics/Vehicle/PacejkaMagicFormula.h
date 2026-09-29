@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 📦 Frontier/PhysicalDynamics/Vehicle/PacejkaTyreModel.h — Pacejka Magic-Formula (MF6.1) tyre force model
+// 📦 Frontier/PhysicalDynamics/Vehicle/PacejkaMagicFormula.h — Pacejka Magic-Formula (MF6.1) tyre force model
 //============================================================================================================================================
 //
 //    Phase-1 port of GRIT's tyre force model (SultanAladin/GRIT: VehicleSolver.cpp ComputePacejka*/ApplyCombinedSlip and
@@ -84,7 +84,7 @@ struct PacejkaParameters
 //                                          PRECOMPUTED CACHE (mirrors GRIT FPacejkaPrecomputedCache)
 //------------------------------------------------------------------------------------------------------------------------
 
-struct PacejkaCache
+struct PacejkaCoefficients
 {
     float Fz0 = 5.0f, InvFz0 = 0.2f, Ly = 1.3f;
     float MuLoadSensitivityLong = 0.08f, MuLoadSensitivityLat = 0.12f, MuLoadMinFactor = 0.60f;
@@ -122,12 +122,12 @@ struct TyreForces
 //                                                  MODEL
 //------------------------------------------------------------------------------------------------------------------------
 
-class PacejkaTyreModel
+class PacejkaMagicFormula
 {
 public:
-    void SetParameters(const PacejkaParameters& P) noexcept { Params = P; Prepare(); }
-    [[nodiscard]] const PacejkaParameters& GetParameters() const noexcept { return Params; }
-    [[nodiscard]] const PacejkaCache&      GetCache()      const noexcept { return Cache; }
+    void AssignParameters(const PacejkaParameters& P) noexcept { Params = P; Prepare(); }
+    [[nodiscard]] const PacejkaParameters& QueryParameters() const noexcept { return Params; }
+    [[nodiscard]] const PacejkaCoefficients&      QueryCoefficients()      const noexcept { return Cache; }
 
     // Pure-slip longitudinal force. kappa [-], camber [rad], Fz [N].
     [[nodiscard]] float LongitudinalForce(float SlipRatio, float CamberRad, float Fz_N) const noexcept;
@@ -147,7 +147,7 @@ private:
     void Prepare() noexcept;   // build Cache from Params (mirrors GRIT FPacejkaPrecomputedCache::Initialize)
 
     PacejkaParameters Params;
-    PacejkaCache      Cache;
+    PacejkaCoefficients      Cache;
 };
 
 } // namespace Frontier::Vehicle

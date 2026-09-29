@@ -33,7 +33,7 @@ int main()
 
     // ---- 1. Naturally aspirated: no boost, no parasitic drag ----
     {
-        Drivetrain dt; dt.SetInduction(InductionType::NaturallyAspirated); dt.Reset(700.0f);
+        Drivetrain dt; dt.AssignInduction(InductionType::NaturallyAspirated); dt.Reset(700.0f);
         const auto o = RevInNeutral(dt, 1.0f, 1.0f);
         Check("NA boost multiplier is unity", std::fabs(o.BoostMultiplier - 1.0f) < 1e-4f, o.BoostMultiplier, 1.0);
         Check("NA has no parasitic drag", std::fabs(o.ParasiticDrag_Nm) < 1e-4f, o.ParasiticDrag_Nm, 0.0);
@@ -42,8 +42,8 @@ int main()
 
     // ---- 2. Supercharger produces boost + a torque multiplier + parasitic drag ----
     {
-        Drivetrain dt; dt.SetInduction(InductionType::Supercharged);
-        dt.SetSupercharger(SuperchargerParameters::DefaultTwinScrew()); dt.Reset(700.0f);
+        Drivetrain dt; dt.AssignInduction(InductionType::Supercharged);
+        dt.AssignSupercharger(SuperchargerParameters::DefaultTwinScrew()); dt.Reset(700.0f);
         const auto o = RevInNeutral(dt, 1.0f, 1.5f);
         Check("supercharger builds boost", o.BoostPressure_Bar > 0.2f, o.BoostPressure_Bar, 0.5);
         Check("boost gives a torque multiplier > 1", o.BoostMultiplier > 1.05f, o.BoostMultiplier, 1.2);
@@ -54,12 +54,12 @@ int main()
 
     // ---- 3. Boost is capped by the tune (base vs race octane ceiling) ----
     {
-        Drivetrain base; base.SetInduction(InductionType::Supercharged);
-        base.SetSupercharger(SuperchargerParameters::DefaultTwinScrew()); base.SetRaceTune(false); base.Reset(700.0f);
+        Drivetrain base; base.AssignInduction(InductionType::Supercharged);
+        base.AssignSupercharger(SuperchargerParameters::DefaultTwinScrew()); base.AssignRaceTune(false); base.Reset(700.0f);
         const auto ob = RevInNeutral(base, 1.0f, 5.0f);
 
-        Drivetrain race; race.SetInduction(InductionType::Supercharged);
-        race.SetSupercharger(SuperchargerParameters::DefaultTwinScrew()); race.SetRaceTune(true); race.Reset(700.0f);
+        Drivetrain race; race.AssignInduction(InductionType::Supercharged);
+        race.AssignSupercharger(SuperchargerParameters::DefaultTwinScrew()); race.AssignRaceTune(true); race.Reset(700.0f);
         const auto orr = RevInNeutral(race, 1.0f, 5.0f);
 
         Check("base tune caps boost at MaxBoost_Base (0.8 bar)", ob.BoostPressure_Bar <= 0.8f + 1e-3f, ob.BoostPressure_Bar, 0.8);
@@ -69,21 +69,21 @@ int main()
 
     // ---- 4. Parasitic drag scales with throttle (bypass recirculates off-throttle) ----
     {
-        Drivetrain hi; hi.SetInduction(InductionType::Supercharged);
-        hi.SetSupercharger(SuperchargerParameters::DefaultTwinScrew()); hi.Reset(4000.0f);
+        Drivetrain hi; hi.AssignInduction(InductionType::Supercharged);
+        hi.AssignSupercharger(SuperchargerParameters::DefaultTwinScrew()); hi.Reset(4000.0f);
         const auto ohi = RevInNeutral(hi, 1.0f, 0.05f);       // WOT
 
-        Drivetrain lo; lo.SetInduction(InductionType::Supercharged);
-        lo.SetSupercharger(SuperchargerParameters::DefaultTwinScrew()); lo.Reset(4000.0f);
+        Drivetrain lo; lo.AssignInduction(InductionType::Supercharged);
+        lo.AssignSupercharger(SuperchargerParameters::DefaultTwinScrew()); lo.Reset(4000.0f);
         const auto olo = RevInNeutral(lo, 0.0f, 0.05f);       // closed throttle
         Check("full-throttle parasitic drag exceeds closed-throttle (bypass)", ohi.ParasiticDrag_Nm > olo.ParasiticDrag_Nm + 2.0f, ohi.ParasiticDrag_Nm, olo.ParasiticDrag_Nm);
     }
 
     // ---- 5. Supercharger has far less lag than the turbo (early boost after tip-in) ----
     {
-        Drivetrain turbo; turbo.SetInduction(InductionType::Turbocharged); turbo.Reset(4000.0f);
-        Drivetrain super; super.SetInduction(InductionType::Supercharged);
-        super.SetSupercharger(SuperchargerParameters::DefaultTwinScrew()); super.Reset(4000.0f);
+        Drivetrain turbo; turbo.AssignInduction(InductionType::Turbocharged); turbo.Reset(4000.0f);
+        Drivetrain super; super.AssignInduction(InductionType::Supercharged);
+        super.AssignSupercharger(SuperchargerParameters::DefaultTwinScrew()); super.Reset(4000.0f);
         const auto ot = RevInNeutral(turbo, 1.0f, 0.15f);
         const auto os = RevInNeutral(super, 1.0f, 0.15f);
         Check("supercharger boost leads the turbo shortly after tip-in", os.BoostPressure_Bar > ot.BoostPressure_Bar, os.BoostPressure_Bar, ot.BoostPressure_Bar);
@@ -91,9 +91,9 @@ int main()
 
     // ---- 6. Supercharged engine makes more torque than NA at the same rpm ----
     {
-        Drivetrain na; na.SetInduction(InductionType::NaturallyAspirated); na.Reset(700.0f);
-        Drivetrain sc; sc.SetInduction(InductionType::Supercharged);
-        sc.SetSupercharger(SuperchargerParameters::DefaultTwinScrew()); sc.Reset(700.0f);
+        Drivetrain na; na.AssignInduction(InductionType::NaturallyAspirated); na.Reset(700.0f);
+        Drivetrain sc; sc.AssignInduction(InductionType::Supercharged);
+        sc.AssignSupercharger(SuperchargerParameters::DefaultTwinScrew()); sc.Reset(700.0f);
         const auto ona = RevInNeutral(na, 1.0f, 1.0f);
         const auto osc = RevInNeutral(sc, 1.0f, 1.0f);
         // Compare peak torque potential (engine torque output field is net, before clutch); boosted should exceed NA.

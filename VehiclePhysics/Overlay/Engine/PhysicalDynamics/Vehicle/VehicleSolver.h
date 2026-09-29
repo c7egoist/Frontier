@@ -29,7 +29,7 @@
 #pragma once
 
 #include "XPBDSoftTyre.h"
-#include "PacejkaTyreModel.h"
+#include "PacejkaMagicFormula.h"
 #include "TyreSlipDynamics.h"
 #include "Drivetrain.h"
 #include "Aerodynamics.h"
@@ -152,11 +152,11 @@ struct VehicleSolverConfiguration
     bool                   RaceTune      = false;
 
     //-- Brakes + ABS (disk thermal model, ported from GRIT BrakingSpecifications; ABS is a standard slip modulator) -------
-    //   When UseBrakeThermalModel is true the foot brake torque comes from the hydraulic/thermal disk model (with fade)
+    //   When BrakeThermalEnabled is true the foot brake torque comes from the hydraulic/thermal disk model (with fade)
     //   and, if Abs.Enabled, is modulated to keep each wheel near its peak-grip slip. When false, the legacy constant
     //   MaxBrakeTorquePerWheel path is used (keeps existing scenes/checks unchanged). The handbrake always uses the
     //   constant HandbrakeTorque path (mechanical, no ABS).
-    bool               UseBrakeThermalModel = false;
+    bool               BrakeThermalEnabled = false;
     BrakingParameters  Brakes = BrakingParameters::DefaultGT3();
     AbsParameters      Abs;
 
@@ -187,7 +187,7 @@ struct WheelTelemetry
     float    SlipRatio    = 0.0f;   // [-]  longitudinal slip κ
     float    SlipAngleRad = 0.0f;   // [rad] lateral slip angle α
     float    AeroDownforce = 0.0f;  // [N] aero downforce added to this wheel's grip load this step
-    // Brakes (only populated when UseBrakeThermalModel is on):
+    // Brakes (only populated when BrakeThermalEnabled is on):
     float    BrakeTorque_Nm  = 0.0f;   // [N·m] foot-brake torque this wheel this step
     float    BrakePressure_Pa= 0.0f;   // [Pa]  hydraulic line pressure
     float    BrakeTemp_K     = 293.15f;// [K]   disk temperature
@@ -255,7 +255,7 @@ private:
     bool                       ConstructionComplete = false;
 
     // Production driving-layer state (PacejkaDrivetrain):
-    PacejkaTyreModel                  PacejkaTyre;      // Magic-Formula tyre (shared by all wheels)
+    PacejkaMagicFormula                  PacejkaTyre;      // Magic-Formula tyre (shared by all wheels)
     std::unique_ptr<TyreSlipDynamics> SlipDynamics;         // transient slip integrator (holds a const ref to PacejkaTyre)
     Drivetrain                        Powertrain;    // engine → clutch → gearbox → differential
     BrakingSystem                     BrakingHydraulics;       // per-wheel disk-brake hydraulics + thermal + ABS

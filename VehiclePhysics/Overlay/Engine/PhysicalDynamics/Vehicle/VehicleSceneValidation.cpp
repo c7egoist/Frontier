@@ -45,7 +45,7 @@ struct MockChassis
     Vec3  ForceAccum{};
     Vec3  TorqueAccum{};
 
-    void SetBoxInertia(const Vec3& halfExtents) noexcept
+    void AssignBoxInertia(const Vec3& halfExtents) noexcept
     {
         const float fx = 2.0f * halfExtents.x, fy = 2.0f * halfExtents.y, fz = 2.0f * halfExtents.z;
         const float Ixx = (1.0f / 12.0f) * Mass * (fy * fy + fz * fz);
@@ -134,7 +134,7 @@ struct Rig
     {
         chassis = MockChassis{};
         chassis.Mass = cfg.ChassisMass;
-        chassis.SetBoxInertia({2.0f, 0.85f, 0.35f});
+        chassis.AssignBoxInertia({2.0f, 0.85f, 0.35f});
         ground = std::move(g);
 
         VehicleSolver::Hooks hooks;

@@ -43,7 +43,7 @@ list(APPEND PROJECT_DRIVE_SOURCES
     ${PROJECT_DRIVE_VEHICLE}/VehicleGeometry.cpp
     ${PROJECT_DRIVE_VEHICLE}/Aerodynamics.cpp
     ${PROJECT_DRIVE_VEHICLE}/XPBDSoftTyre.cpp
-    ${PROJECT_DRIVE_VEHICLE}/PacejkaTyreModel.cpp
+    ${PROJECT_DRIVE_VEHICLE}/PacejkaMagicFormula.cpp
     ${PROJECT_DRIVE_VEHICLE}/TyreSlipDynamics.cpp
     ${PROJECT_DRIVE_VEHICLE}/Drivetrain.cpp
 )

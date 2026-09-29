@@ -8,7 +8,7 @@
 //   Supercharger: a blown car out-accelerates the naturally-aspirated version and reports boost + parasitic drag.
 //
 //   Build: g++ -std=c++17 -O2 AbsSuperchargerChecks.cpp VehicleSolver.cpp VehicleGeometry.cpp Aerodynamics.cpp \
-//                XPBDSoftTyre.cpp PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o /tmp/abs && /tmp/abs
+//                XPBDSoftTyre.cpp PacejkaMagicFormula.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o /tmp/abs && /tmp/abs
 //============================================================================================================================================
 
 #include "VehicleSolver.h"
@@ -115,7 +115,7 @@ int main()
     auto brakeRun = [&](bool absOn, float& meanSlip, float& absFrac, float& stopDist, float& maxTemp)
     {
         VehicleSolverConfiguration c = BaseConfig();
-        c.UseBrakeThermalModel = true;
+        c.BrakeThermalEnabled = true;
         c.Abs.Enabled = absOn;
         Rig r; r.Build(c, {0, 0, 0.40f});
         r.Run(DriverInput{}, 1.0f, dt);                          // settle

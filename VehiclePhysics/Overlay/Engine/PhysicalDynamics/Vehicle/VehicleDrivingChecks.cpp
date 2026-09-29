@@ -15,7 +15,7 @@
 //    Everything runs on the same mock rigid-box chassis + mock heightfield GroundQuery used by VehicleSceneValidation, so
 //    it needs no Jolt/Unreal. Build & run:
 //        g++ -std=c++17 -O2 -Wall -Wextra VehicleDrivingChecks.cpp VehicleSolver.cpp XPBDSoftTyre.cpp \
-//            PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o vdrive && ./vdrive
+//            PacejkaMagicFormula.cpp TyreSlipDynamics.cpp Drivetrain.cpp -o vdrive && ./vdrive
 //
 //============================================================================================================================================
 
@@ -45,7 +45,7 @@ struct MockChassis
     Vec3  ForceAccum{};
     Vec3  TorqueAccum{};
 
-    void SetBoxInertia(const Vec3& h) noexcept
+    void AssignBoxInertia(const Vec3& h) noexcept
     {
         const float fx = 2 * h.x, fy = 2 * h.y, fz = 2 * h.z;
         const float Ixx = Mass * (fy * fy + fz * fz) / 12.0f;

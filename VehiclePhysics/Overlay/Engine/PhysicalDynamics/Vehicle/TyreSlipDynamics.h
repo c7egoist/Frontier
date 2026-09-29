@@ -2,7 +2,7 @@
 // 📦 Frontier/PhysicalDynamics/Vehicle/TyreSlipDynamics.h — slip-state solvers for the Pacejka tyre
 //============================================================================================================================================
 //
-//    Two interchangeable ways to turn wheel/hub kinematics into the (slip-ratio κ, slip-angle α) that feed PacejkaTyreModel:
+//    Two interchangeable ways to turn wheel/hub kinematics into the (slip-ratio κ, slip-angle α) that feed PacejkaMagicFormula:
 //
 //      • Solver A — NewtonReference: a bit-faithful port of GRIT's SolveContactSlip (VehicleSolver.cpp). Each substep runs a
 //        finite-difference Newton iteration (up to 12 iters, 24 Magic-Formula force evaluations per wheel) that solves the
@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "PacejkaTyreModel.h"
+#include "PacejkaMagicFormula.h"
 
 namespace Frontier::Vehicle {
 
@@ -67,14 +67,14 @@ struct SlipResult
 class TyreSlipDynamics
 {
 public:
-    explicit TyreSlipDynamics(const PacejkaTyreModel& Model) noexcept : Tyre(Model) {}
+    explicit TyreSlipDynamics(const PacejkaMagicFormula& Formula) noexcept : Tyre(Formula) {}
 
-    void SetSolver(SlipSolver S) noexcept { Solver = S; }
-    [[nodiscard]] SlipSolver GetSolver() const noexcept { return Solver; }
+    void AssignSolver(SlipSolver S) noexcept { Solver = S; }
+    [[nodiscard]] SlipSolver QuerySolver() const noexcept { return Solver; }
 
     // When true, force outputs are additionally passed through a first-order lag (relaxation solver only) — models the
     // build-up of the friction force itself, on top of the slip-state lag. Off by default (state lag already captures it).
-    void SetForceLag(bool Enable) noexcept { LagForces = Enable; }
+    void AssignForceLag(bool Enable) noexcept { LagForces = Enable; }
 
     // Advance one wheel by dt. State is read/written for the relaxation solver; ignored by the Newton solver.
     SlipResult Step(const WheelKinematics& K, SlipState& State, float dt) const noexcept;
@@ -86,7 +86,7 @@ private:
     SlipResult StepNewton(const WheelKinematics& K, float dt) const noexcept;
     SlipResult StepRelaxation(const WheelKinematics& K, SlipState& State, float dt) const noexcept;
 
-    const PacejkaTyreModel& Tyre;
+    const PacejkaMagicFormula& Tyre;
     SlipSolver Solver = SlipSolver::NewtonReference;
     bool LagForces = false;
 };

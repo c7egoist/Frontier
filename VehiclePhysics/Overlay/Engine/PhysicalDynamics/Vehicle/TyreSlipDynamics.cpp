@@ -18,7 +18,7 @@
 //        implicit step nonlinear and coupled — hence the Newton loop (≤ 12 iters, ≈ 2 force evals per iter for the FD
 //        Jacobian ≈ 24 MF evals/wheel). This is the robust, expensive reference.
 //        NOTE: this is a faithful reconstruction of GRIT's *algorithm*; GRIT itself needs Unreal/Chaos and cannot be
-//        compiled in this sandbox, so the line-level source could not be copied. The *force* law it drives (PacejkaTyreModel)
+//        compiled in this sandbox, so the line-level source could not be copied. The *force* law it drives (PacejkaMagicFormula)
 //        IS a line-level port and is validated against the GRIT formula in VehicleValidation.cpp.
 //
 //      • RelaxationLength (Solver B): a semi-implicit exponential update of the same linear ODE — exact over the step for
@@ -68,7 +68,7 @@ SlipResult TyreSlipDynamics::Step(const WheelKinematics& K, SlipState& State, fl
 SlipResult TyreSlipDynamics::StepNewton(const WheelKinematics& K, float dt) const noexcept
 {
     SlipResult R;
-    const PacejkaParameters& P = Tyre.GetParameters();
+    const PacejkaParameters& P = Tyre.QueryParameters();
 
     float sx0, sy0;
     RelaxationLengths(P, K.Fz_N, sx0, sy0);
@@ -157,7 +157,7 @@ SlipResult TyreSlipDynamics::StepNewton(const WheelKinematics& K, float dt) cons
 SlipResult TyreSlipDynamics::StepRelaxation(const WheelKinematics& K, SlipState& State, float dt) const noexcept
 {
     SlipResult R;
-    const PacejkaParameters& P = Tyre.GetParameters();
+    const PacejkaParameters& P = Tyre.QueryParameters();
 
     float sx, sy;
     RelaxationLengths(P, K.Fz_N, sx, sy);

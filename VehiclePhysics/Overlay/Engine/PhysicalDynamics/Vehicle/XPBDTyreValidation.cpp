@@ -3,11 +3,11 @@
 //============================================================================================================================================
 //
 //    Phase-2 gate: the calibrated multi-ring XPBD soft tyre (XPBDSoftTyre) must reproduce the Phase-1 analytic Magic-Formula
-//    tyre (PacejkaTyreModel) before it can replace it in the vehicle. This headless harness rolls the soft carcass on a
+//    tyre (PacejkaMagicFormula) before it can replace it in the vehicle. This headless harness rolls the soft carcass on a
 //    moving flat-track ("belt") to steady state and compares the EMERGENT contact force to Pacejka at the same vertical load.
 //
 //    Build & run (in-sandbox, no Unreal / no Jolt):
-//        g++ -std=c++17 -O2 XPBDSoftTyre.cpp PacejkaTyreModel.cpp XPBDTyreValidation.cpp -o xpbdval && ./xpbdval
+//        g++ -std=c++17 -O2 XPBDSoftTyre.cpp PacejkaMagicFormula.cpp XPBDTyreValidation.cpp -o xpbdval && ./xpbdval
 //
 //    What "matches" means here — and its honest limits. The XPBD tyre is an emergent brush-on-elastic-carcass model, not a
 //    curve fit, so we validate the PHYSICS, not bit-equality:
@@ -21,7 +21,7 @@
 //    but ~10× small. Finer circumferential meshing (or a tread-stiffness gradient) closes it, at proportional cost.
 
 #include "XPBDSoftTyre.h"
-#include "PacejkaTyreModel.h"
+#include "PacejkaMagicFormula.h"
 
 #include <cmath>
 #include <cstdio>
@@ -105,7 +105,7 @@ int main()
     std::printf("========================================================================\n");
 
     SoftTyreParameters P;   // ships pre-calibrated (see XPBDSoftTyre.h defaults)
-    PacejkaTyreModel M; PacejkaParameters pp; M.SetParameters(pp);
+    PacejkaMagicFormula M; PacejkaParameters pp; M.AssignParameters(pp);
 
     // ── stability / build ────────────────────────────────────────────────────────────────────────────────────────
     std::printf("\n[1] Build & numerical stability\n");

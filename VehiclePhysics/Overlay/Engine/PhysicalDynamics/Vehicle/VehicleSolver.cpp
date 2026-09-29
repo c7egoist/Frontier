@@ -41,18 +41,18 @@ void VehicleSolver::Build(const VehicleSolverConfiguration& config, const Hooks&
     // ── Production driving layer (PacejkaDrivetrain) setup ───────────────────────────────────────────────────────────
     //   Wire the Phase-1 slip + drivetrain models. The slip integrator holds a const reference to PacejkaTyre, so PacejkaTyre
     //   must be configured (and must outlive SlipDynamics) before the first Step. All per-wheel spin/deflection state is zeroed.
-    PacejkaTyre.SetParameters(ActiveConfiguration.TyrePacejka);
+    PacejkaTyre.AssignParameters(ActiveConfiguration.TyrePacejka);
     SlipDynamics = std::make_unique<TyreSlipDynamics>(PacejkaTyre);
-    SlipDynamics->SetSolver(ActiveConfiguration.SlipSolverSelection);
+    SlipDynamics->AssignSolver(ActiveConfiguration.SlipSolverSelection);
 
-    Powertrain.SetEngine(ActiveConfiguration.Engine);
-    Powertrain.SetTurbo(ActiveConfiguration.Turbo);
-    Powertrain.SetTransmission(ActiveConfiguration.Transmission);
-    Powertrain.SetClutch(ActiveConfiguration.Clutch);
-    Powertrain.SetDifferential(ActiveConfiguration.Differential);
-    Powertrain.SetInduction(ActiveConfiguration.Induction);
-    Powertrain.SetSupercharger(ActiveConfiguration.Supercharger);
-    Powertrain.SetRaceTune(ActiveConfiguration.RaceTune);
+    Powertrain.AssignEngine(ActiveConfiguration.Engine);
+    Powertrain.AssignTurbo(ActiveConfiguration.Turbo);
+    Powertrain.AssignTransmission(ActiveConfiguration.Transmission);
+    Powertrain.AssignClutch(ActiveConfiguration.Clutch);
+    Powertrain.AssignDifferential(ActiveConfiguration.Differential);
+    Powertrain.AssignInduction(ActiveConfiguration.Induction);
+    Powertrain.AssignSupercharger(ActiveConfiguration.Supercharger);
+    Powertrain.AssignRaceTune(ActiveConfiguration.RaceTune);
     Powertrain.Reset(ActiveConfiguration.Engine.IdleRPM);
     BrakingHydraulics.Configure(ActiveConfiguration.Wheels.size(), ActiveConfiguration.Brakes, ActiveConfiguration.Abs);
 
@@ -431,7 +431,7 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
         float brakeTq = 0.0f;
         if (wheel.Braked)
         {
-            if (ActiveConfiguration.UseBrakeThermalModel)
+            if (ActiveConfiguration.BrakeThermalEnabled)
             {
                 // Hydraulic/thermal disk model with ABS. ABS watches this wheel's slip κ (computed above) and, above the
                 //    ABS min speed, pulses the line pressure to hold slip near the peak-grip target — the brake torque is

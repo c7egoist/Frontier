@@ -192,14 +192,14 @@ class Drivetrain
 public:
     Drivetrain();
 
-    void SetEngine(const EngineParameters& P) noexcept { Engine = P; }
-    void SetTurbo(const TurbochargerParameters& P) noexcept { Turbo = P; }
-    void SetTransmission(const TransmissionParameters& P) noexcept { Trans = P; }
-    void SetClutch(const ClutchParameters& P) noexcept { Clutch = P; }
-    void SetDifferential(const DifferentialParameters& P) noexcept { Diff = P; }
-    void SetInduction(InductionType t) noexcept { Induction = t; }
-    void SetSupercharger(const SuperchargerParameters& P) noexcept { Super = P; }
-    void SetRaceTune(bool race) noexcept { RaceTune = race; }
+    void AssignEngine(const EngineParameters& P) noexcept { Engine = P; }
+    void AssignTurbo(const TurbochargerParameters& P) noexcept { Turbo = P; }
+    void AssignTransmission(const TransmissionParameters& P) noexcept { Trans = P; }
+    void AssignClutch(const ClutchParameters& P) noexcept { Clutch = P; }
+    void AssignDifferential(const DifferentialParameters& P) noexcept { Diff = P; }
+    void AssignInduction(InductionType t) noexcept { Induction = t; }
+    void AssignSupercharger(const SuperchargerParameters& P) noexcept { Super = P; }
+    void AssignRaceTune(bool race) noexcept { RaceTune = race; }
 
     void Reset(float engineRPM) noexcept;
 
@@ -208,10 +208,10 @@ public:
     [[nodiscard]] float EngineRPM() const noexcept { return EngineOmega * kRadToRpm; }
     [[nodiscard]] float TurboRPM()  const noexcept { return TurboOmegaRad * kRadToRpm; }
 
-    [[nodiscard]] const EngineParameters&        GetEngine() const noexcept { return Engine; }
-    [[nodiscard]] const TurbochargerParameters&  GetTurbo()  const noexcept { return Turbo; }
-    [[nodiscard]] const TransmissionParameters&  GetTransmission() const noexcept { return Trans; }
-    [[nodiscard]] const ClutchParameters&        GetClutch() const noexcept { return Clutch; }
+    [[nodiscard]] const EngineParameters&        QueryEngine() const noexcept { return Engine; }
+    [[nodiscard]] const TurbochargerParameters&  QueryTurbo()  const noexcept { return Turbo; }
+    [[nodiscard]] const TransmissionParameters&  QueryTransmission() const noexcept { return Trans; }
+    [[nodiscard]] const ClutchParameters&        QueryClutch() const noexcept { return Clutch; }
 
     static constexpr float kRpmToRad = 0.104719755f;   // 2π/60
     static constexpr float kRadToRpm = 9.54929658f;    // 60/2π

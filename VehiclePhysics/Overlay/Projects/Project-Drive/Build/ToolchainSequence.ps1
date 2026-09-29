@@ -692,7 +692,7 @@ $EngineRelative = @(
     'Engine\PhysicalDynamics\Vehicle\VehicleGeometry.cpp'      # ControlVehicle dimensions -> wheel mounts / config
     'Engine\PhysicalDynamics\Vehicle\Aerodynamics.cpp'
     'Engine\PhysicalDynamics\Vehicle\XPBDSoftTyre.cpp'
-    'Engine\PhysicalDynamics\Vehicle\PacejkaTyreModel.cpp'
+    'Engine\PhysicalDynamics\Vehicle\PacejkaMagicFormula.cpp'
     'Engine\PhysicalDynamics\Vehicle\TyreSlipDynamics.cpp'
     'Engine\PhysicalDynamics\Vehicle\Drivetrain.cpp'
     # ── Added 2026-09-18. The Windows link failed with 14 unresolved externals because the nine TUs below were in the

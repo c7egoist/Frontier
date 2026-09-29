@@ -4,20 +4,20 @@
 //
 //    Standalone (no Unreal, no Jolt) verification of the ported vehicle physics. Compile & run in-sandbox:
 //
-//        g++ -std=c++17 -O2 PacejkaTyreModel.cpp TyreSlipDynamics.cpp Drivetrain.cpp VehicleValidation.cpp -o vehval && ./vehval
+//        g++ -std=c++17 -O2 PacejkaMagicFormula.cpp TyreSlipDynamics.cpp Drivetrain.cpp VehicleValidation.cpp -o vehval && ./vehval
 //
 //    Three validation layers (see Phase1-Port-and-Validation.md for the rationale and the honesty caveat about not being
 //    able to run GRIT itself in this sandbox):
 //
 //      LAYER 1  Port-fidelity oracle — an independent, straight-from-the-equations re-implementation of the GRIT Magic
-//               Formula (no precomputed cache) is swept over the input space and compared to PacejkaTyreModel. This proves
+//               Formula (no precomputed cache) is swept over the input space and compared to PacejkaMagicFormula. This proves
 //               the cache-based port reproduces the GRIT force law exactly.
 //      LAYER 2  Physics invariants — MF peak location/magnitude, friction-ellipse containment, load-sensitivity
 //               monotonicity, self-aligning-torque sign, and drivetrain torque/energy/spool/clutch/shift behaviour.
 //      LAYER 3  Solver comparison — Newton reference vs relaxation-length ODE: steady-state agreement, transient time
 //               constant, and low-speed stability where naïve instantaneous slip diverges.
 
-#include "PacejkaTyreModel.h"
+#include "PacejkaMagicFormula.h"
 #include "TyreSlipDynamics.h"
 #include "SuspensionModel.h"
 #include "Drivetrain.h"
@@ -101,7 +101,7 @@ static void Layer1_PortFidelity()
 {
     std::printf("\nLAYER 1 — Port fidelity vs independent GRIT-equation oracle\n");
     PacejkaParameters P;
-    PacejkaTyreModel M; M.SetParameters(P);
+    PacejkaMagicFormula M; M.AssignParameters(P);
 
     float maxErrLon = 0.f, maxErrLat = 0.f;
     const float Fz_list[] = {2000.f, 4000.f, 5000.f, 8000.f, 12000.f};
@@ -136,7 +136,7 @@ static void Layer2_TyreInvariants()
 {
     std::printf("\nLAYER 2a — Tyre-model physics invariants\n");
     PacejkaParameters P;
-    PacejkaTyreModel M; M.SetParameters(P);
+    PacejkaMagicFormula M; M.AssignParameters(P);
     const float Fz = P.Fz0 * 1000.f;   // reference load
 
     // Peak longitudinal force near a small positive slip ratio.
@@ -281,7 +281,7 @@ static void Layer2_Drivetrain()
           "peak=" + std::to_string(peakBoost) + " after=" + std::to_string(outLift.BoostPressure_Bar));
 
     // Torque multiplier from boost >= 1 (turbo never reduces torque).
-    Check("Boost torque multiplier >= 1", DT.GetTurbo().TorqueMultiplierCurve.Sample(1.2f) >= 1.f, "");
+    Check("Boost torque multiplier >= 1", DT.QueryTurbo().TorqueMultiplierCurve.Sample(1.2f) >= 1.f, "");
 
     // Gear ratio crossover: at equal clutch torque, lower gear delivers more wheel torque than higher gear.
     Drivetrain DT2; DT2.Reset(4000.f);
@@ -297,20 +297,20 @@ static void Layer2_Drivetrain()
     // Clutch lockup at steady matched speeds.
     Drivetrain DT3; DT3.Reset(3000.f);
     DrivetrainInputs lock; lock.Throttle = 0.3f; lock.GearIndex = 5; lock.dt = dt;
-    lock.DrivenWheelRPM = 3000.f / (std::fabs(DT3.GetTransmission().RatioAt(5)) * DT3.GetTransmission().FinalDriveRatio);
+    lock.DrivenWheelRPM = 3000.f / (std::fabs(DT3.QueryTransmission().RatioAt(5)) * DT3.QueryTransmission().FinalDriveRatio);
     DrivetrainOutputs ol{};
     for (int i = 0; i < 20; ++i) ol = DT3.Step(lock);
     Check("Clutch reports lockup when engine & gearbox speeds match", ol.ClutchLocked,
           "slip-based; clutchT=" + std::to_string(ol.ClutchTorque_Nm));
 
     // Differential split conserves total torque (Open).
-    DifferentialParameters dp; dp.Mode = DifferentialMode::Open; DT3.SetDifferential(dp);
+    DifferentialParameters dp; dp.Mode = DifferentialMode::Open; DT3.AssignDifferential(dp);
     auto od = DT3.Step(lock);
     Check("Open differential conserves total drive torque",
           Close(od.LeftDriveTorque_Nm + od.RightDriveTorque_Nm, od.GearboxOutputTorque_Nm, 1e-4f, 1e-2f), "");
 
     // LSD biases torque toward the slower wheel.
-    DifferentialParameters lsd; lsd.Mode = DifferentialMode::LimitedSlip; lsd.LockingFactor = 0.5f; DT3.SetDifferential(lsd);
+    DifferentialParameters lsd; lsd.Mode = DifferentialMode::LimitedSlip; lsd.LockingFactor = 0.5f; DT3.AssignDifferential(lsd);
     DrivetrainInputs spin = lock; spin.LeftWheelRPM = 400.f; spin.RightWheelRPM = 200.f;   // left spinning faster
     auto osp = DT3.Step(spin);
     Check("LSD sends more torque to the slower (right) wheel",
@@ -325,9 +325,9 @@ static void Layer3_SolverComparison()
 {
     std::printf("\nLAYER 3 — Newton reference vs relaxation-length ODE\n");
     PacejkaParameters P;
-    PacejkaTyreModel M; M.SetParameters(P);
-    TyreSlipDynamics newton(M); newton.SetSolver(SlipSolver::NewtonReference);
-    TyreSlipDynamics relax(M);  relax.SetSolver(SlipSolver::RelaxationLength);
+    PacejkaMagicFormula M; M.AssignParameters(P);
+    TyreSlipDynamics newton(M); newton.AssignSolver(SlipSolver::NewtonReference);
+    TyreSlipDynamics relax(M);  relax.AssignSolver(SlipSolver::RelaxationLength);
 
     const float dt = 1.f / 240.f;
     const float Fz = 4000.f;

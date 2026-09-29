@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// 📦 Frontier/PhysicalDynamics/Vehicle/PacejkaTyreModel.cpp
+// 📦 Frontier/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp
 //============================================================================================================================================
 //
 //    Faithful re-implementation of GRIT's MF6.1 tyre force evaluation. Every stage below mirrors the corresponding stage in
@@ -7,7 +7,7 @@
 //    copy are limited to: UE math → std math (FMath::Sin/Cos/Atan/Tan are the real functions in the force path), and the
 //    precomputed-cache access pattern (identical values).
 
-#include "PacejkaTyreModel.h"
+#include "PacejkaMagicFormula.h"
 
 #include <algorithm>
 
@@ -26,9 +26,9 @@ inline float MapClamped(float inA, float inB, float outA, float outB, float v) n
 }
 } // namespace
 
-void PacejkaTyreModel::Prepare() noexcept
+void PacejkaMagicFormula::Prepare() noexcept
 {
-    PacejkaCache& C = Cache;
+    PacejkaCoefficients& C = Cache;
     const PacejkaParameters& P = Params;
 
     C.Fz0    = std::max(P.Fz0, 0.001f);
@@ -76,10 +76,10 @@ void PacejkaTyreModel::Prepare() noexcept
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  LONGITUDINAL (Fx)
 //------------------------------------------------------------------------------------------------------------------------
-float PacejkaTyreModel::LongitudinalForce(float SlipRatio, float CamberRad, float Fz_N) const noexcept
+float PacejkaMagicFormula::LongitudinalForce(float SlipRatio, float CamberRad, float Fz_N) const noexcept
 {
     if (Fz_N < kSmall) return 0.0f;
-    const PacejkaCache& C = Cache;
+    const PacejkaCoefficients& C = Cache;
 
     constexpr float KAPPA_MAX_BRAKE = -0.92f, KAPPA_MAX_DRIVE = 1.5f;
     SlipRatio = Clampf(SlipRatio, KAPPA_MAX_BRAKE, KAPPA_MAX_DRIVE);
@@ -112,10 +112,10 @@ float PacejkaTyreModel::LongitudinalForce(float SlipRatio, float CamberRad, floa
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  LATERAL (Fy)
 //------------------------------------------------------------------------------------------------------------------------
-float PacejkaTyreModel::LateralForce(float SlipAngleRad, float CamberRad, float Fz_N) const noexcept
+float PacejkaMagicFormula::LateralForce(float SlipAngleRad, float CamberRad, float Fz_N) const noexcept
 {
     if (Fz_N < kSmall) return 0.0f;
-    const PacejkaCache& C = Cache;
+    const PacejkaCoefficients& C = Cache;
 
     constexpr float ALPHA_MAX = 1.3f;
     SlipAngleRad = Clampf(SlipAngleRad, -ALPHA_MAX, ALPHA_MAX);
@@ -155,10 +155,10 @@ float PacejkaTyreModel::LateralForce(float SlipAngleRad, float CamberRad, float 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  SELF-ALIGNING TORQUE (Mz)
 //------------------------------------------------------------------------------------------------------------------------
-float PacejkaTyreModel::SelfAligningTorque(float SlipAngleRad, float SlipRatio, float LateralForceN,
+float PacejkaMagicFormula::SelfAligningTorque(float SlipAngleRad, float SlipRatio, float LateralForceN,
                                            float CamberRad, float Fz_N) const noexcept
 {
-    const PacejkaCache& C = Cache;
+    const PacejkaCoefficients& C = Cache;
     if (!C.Initialized || Fz_N < kSmall) return 0.0f;
 
     constexpr float KAPPA_MAX_BRAKE = -0.92f, KAPPA_MAX_DRIVE = 1.5f, ALPHA_MAX = 1.3f;
@@ -208,10 +208,10 @@ float PacejkaTyreModel::SelfAligningTorque(float SlipAngleRad, float SlipRatio, 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  COMBINED SLIP WEIGHTING
 //------------------------------------------------------------------------------------------------------------------------
-void PacejkaTyreModel::ApplyCombinedSlip(float SlipRatio, float SlipAngleRad, float CamberRad, float Fz_N,
+void PacejkaMagicFormula::ApplyCombinedSlip(float SlipRatio, float SlipAngleRad, float CamberRad, float Fz_N,
                                          float& InOutFx, float& InOutFy) const noexcept
 {
-    const PacejkaCache& C = Cache;
+    const PacejkaCoefficients& C = Cache;
     if (Fz_N < kSmall || !C.Initialized) { InOutFx = 0.0f; InOutFy = 0.0f; return; }
 
     constexpr float KAPPA_MAX_BRAKE = -0.92f, KAPPA_MAX_DRIVE = 1.5f, ALPHA_MAX = 1.3f;
@@ -256,7 +256,7 @@ void PacejkaTyreModel::ApplyCombinedSlip(float SlipRatio, float SlipAngleRad, fl
 //------------------------------------------------------------------------------------------------------------------------
 //                                                  FULL COMBINED
 //------------------------------------------------------------------------------------------------------------------------
-TyreForces PacejkaTyreModel::Combined(float SlipRatio, float SlipAngleRad, float CamberRad, float Fz_N) const noexcept
+TyreForces PacejkaMagicFormula::Combined(float SlipRatio, float SlipAngleRad, float CamberRad, float Fz_N) const noexcept
 {
     TyreForces Out;
     Out.Fx = LongitudinalForce(SlipRatio, CamberRad, Fz_N);

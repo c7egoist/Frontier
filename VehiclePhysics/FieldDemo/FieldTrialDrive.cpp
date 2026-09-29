@@ -12,7 +12,7 @@
 //         ../Overlay/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp \
 //         ../Overlay/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp \
 //         ../Overlay/Engine/PhysicalDynamics/Vehicle/XPBDSoftTyre.cpp \
-//         ../Overlay/Engine/PhysicalDynamics/Vehicle/PacejkaTyreModel.cpp \
+//         ../Overlay/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp \
 //         ../Overlay/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp \
 //         ../Overlay/Engine/PhysicalDynamics/Vehicle/Drivetrain.cpp -I../Overlay/Engine/PhysicalDynamics/Vehicle \
 //         -o fielddrive && ./fielddrive
