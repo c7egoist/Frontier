@@ -48,6 +48,7 @@ set(PROJECT_TRACTRIX_SOURCES
     Projects/Project-Tractrix/Source/CelestialSequence.cpp
     Projects/Project-Tractrix/Source/CommandLine.cpp
     Projects/Project-Tractrix/Source/ShowroomStructure.cpp
+    Projects/Project-Tractrix/Source/TractrixDriveScene.cpp   # `--scene drive`: checker pad + ramp + bumps + ControlVehicle shell + wheels
     Engine/DisplayPresentation/DiagnosticInspector.cpp
     Engine/DisplayPresentation/ReSTIRIntegrator.cpp
     Engine/DisplayPresentation/ShadingTableCodec.cpp
