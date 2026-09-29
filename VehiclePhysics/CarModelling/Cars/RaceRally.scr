@@ -1,0 +1,38 @@
+box (0,0,0.40) (3.85,1.94,1.02) --name=BodyRaw
+chamfer BodyRaw 0.30 --edges=7 --name=Body
+box (1.00,0.16,1.02) (3.45,1.78,1.52) --name=GlassRaw
+chamfer GlassRaw 0.44 --edges=7 --name=Glass
+box (1.50,0.26,1.52) (2.85,1.68,1.58) --name=Roof
+box (3.30,0.30,1.50) (3.58,1.64,1.66) --name=Spoiler
+box (0.60,0.30,1.06) (0.78,1.64,1.20) --name=LightBar
+cylinder (0.92,-0.05,0.44) 0.44 0.30 --axis=(0,1,0) --name=WheelFL
+cylinder (0.92,1.76,0.44) 0.44 0.30 --axis=(0,1,0) --name=WheelFR
+cylinder (2.98,-0.05,0.44) 0.44 0.30 --axis=(0,1,0) --name=WheelRL
+cylinder (2.98,1.76,0.44) 0.44 0.30 --axis=(0,1,0) --name=WheelRR
+cylinder (0.92,-0.09,0.44) 0.16 0.05 --axis=(0,1,0) --name=HubFL
+cylinder (0.92,2.02,0.44) 0.16 0.05 --axis=(0,1,0) --name=HubFR
+cylinder (2.98,-0.09,0.44) 0.16 0.05 --axis=(0,1,0) --name=HubRL
+cylinder (2.98,2.02,0.44) 0.16 0.05 --axis=(0,1,0) --name=HubRR
+box (-0.02,0.20,0.62) (0.06,0.55,0.86) --name=HLl
+box (-0.02,1.39,0.62) (0.06,1.74,0.86) --name=HLr
+box (3.83,0.25,0.66) (3.90,1.69,0.86) --name=TL
+matcap Body pearl
+matcap Glass glass
+matcap Roof pearl
+matcap Spoiler carbon
+matcap LightBar carbon
+matcap WheelFL rubber
+matcap WheelFR rubber
+matcap WheelRL rubber
+matcap WheelRR rubber
+matcap HubFL steel
+matcap HubFR steel
+matcap HubRL steel
+matcap HubRR steel
+matcap HLl headlight
+matcap HLr headlight
+matcap TL taillight
+view iso
+view fit
+render Race3_Rally --size=820x600
+export /home/user/Slate/VehiclePhysics/CarModelling/Meshes/Race3_Rally.obj

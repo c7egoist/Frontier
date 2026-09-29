@@ -18,6 +18,8 @@
 #include <cstdarg>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
+#include <set>
 
 namespace Frontier
 {
@@ -26,6 +28,46 @@ namespace
 {
 const float Backdrop[4] = { 0.0f, 0.0f, 0.0f, 1.0f };                              // Phase 20: black background per user request
 const char* ClassName(FigureClassification K) noexcept { return K == FigureClassification::Curve ? "curve" : "surface"; }
+
+// ── Studio → export material table ────────────────────────────────────────────────────────────────────────────────
+// Maps each matcap studio (the SolidArc "material system") to (a) a Wavefront MTL description for portable viewers and
+//    (b) the real Frontier engine material it should bind to. The .materials.json manifest written next to the OBJ carries
+//    this table so the paint / rubber / glass / chrome / emissive assignment is trivially editable after export.
+struct StudioMaterial
+{
+    const char* Studio;                 // matcap studio name (== OBJ usemtl group)
+    float Kd[3];                        // base colour
+    float Metallic, Roughness, Emissive, Alpha;
+    const char* Frontier;              // Frontier engine material to bind
+    bool  Flakes;                       // clear-coat metallic flakes (System B AutomotiveFlakePaint)
+};
+const StudioMaterial kStudioMaterials[] = {
+    { "steel",         {0.62f,0.66f,0.72f}, 1.0f, 0.35f, 0.0f, 1.00f, "Metal_Steel",          false },
+    { "chrome",        {0.92f,0.94f,0.97f}, 1.0f, 0.05f, 0.0f, 1.00f, "Metal_Chrome",         false },
+    { "gold",          {1.00f,0.78f,0.34f}, 1.0f, 0.25f, 0.0f, 1.00f, "Metal_Gold",           false },
+    { "copper",        {0.95f,0.55f,0.40f}, 1.0f, 0.30f, 0.0f, 1.00f, "Metal_Copper",         false },
+    { "plastic-white", {0.90f,0.91f,0.93f}, 0.0f, 0.30f, 0.0f, 1.00f, "AutomotiveFlakePaint", true  },
+    { "plastic-red",   {0.85f,0.16f,0.14f}, 0.0f, 0.25f, 0.0f, 1.00f, "AutomotiveFlakePaint", true  },
+    { "plastic-blue",  {0.16f,0.36f,0.85f}, 0.0f, 0.25f, 0.0f, 1.00f, "AutomotiveFlakePaint", true  },
+    { "clay",          {0.70f,0.62f,0.55f}, 0.0f, 0.85f, 0.0f, 1.00f, "Plastic_Interior",     false },
+    { "pearl",         {0.93f,0.90f,0.95f}, 0.3f, 0.15f, 0.0f, 1.00f, "AutomotiveFlakePaint", true  },
+    { "carbon",        {0.10f,0.11f,0.12f}, 0.6f, 0.40f, 0.0f, 1.00f, "CarbonFibre",          false },
+    { "rubber",        {0.045f,0.045f,0.05f},0.0f,0.95f, 0.0f, 1.00f, "Rubber_Tyre",          false },
+    { "glass",         {0.03f,0.05f,0.07f}, 0.0f, 0.04f, 0.0f, 0.25f, "Glass_Tinted",         false },
+    { "headlight",     {0.95f,0.96f,1.00f}, 0.0f, 0.20f, 1.0f, 1.00f, "Emissive_Headlight",   false },
+    { "taillight",     {0.90f,0.05f,0.05f}, 0.0f, 0.25f, 0.8f, 1.00f, "Emissive_Taillight",   false },
+};
+const StudioMaterial& StudioMat(int Layer) noexcept
+{
+    int N = int(sizeof(kStudioMaterials) / sizeof(kStudioMaterials[0]));
+    return kStudioMaterials[(Layer >= 0 && Layer < N) ? Layer : 0];
+}
+std::string SanitizeName(const std::string& S) noexcept
+{
+    std::string O; O.reserve(S.size());
+    for (char C : S) O += (std::isalnum(static_cast<unsigned char>(C)) || C == '_' || C == '-' || C == '.') ? C : '_';
+    return O.empty() ? std::string("Object") : O;
+}
 }
 
 ConsoleHost::ConsoleHost(std::string ProofFolder, uint32_t Width, uint32_t Height) noexcept
@@ -1229,7 +1271,9 @@ void ConsoleHost::DrawBody(const SceneFigure& Figure) noexcept
         const bool FaceSel = Figure.FaceSelected(int(F));
         const bool FaceHover = FigureHover && (Mode == SelectMode::Face ? SceneDocument::FaceOf(HoverPick) == int(F) : Mode == SelectMode::Whole);
         D.Highlight = (Figure.Selected || FaceSel) ? 2.0f : (FaceHover ? 1.0f : 0.0f);
-        D.Matcap = Figure.Matcap;
+        D.Matcap = Figure.MatcapForFace(int(F));                                        // per-face override, else whole-figure
+        // Emissive studios (headlight/taillight) glow a little in the preview so lights read as lit.
+        if (D.Matcap == 12 || D.Matcap == 13) D.Emissive = 0.6f;
         D.Shading = static_cast<uint8_t>(Shading);
         Surface->DrawSurface(S, D);
     }
@@ -4002,7 +4046,8 @@ void ConsoleHost::Register() noexcept
             N.c_str(), E.X, E.Y, E.Z, View.Pivot.X, View.Pivot.Y, View.Pivot.Z, View.Distance, ScalarCriteria::Degrees(View.Yaw), ScalarCriteria::Degrees(View.Pitch), View.Orthographic ? "ortho" : "persp");
         return true;
     });
-    Add("matcap", "matcap <figure...> <name|index>  ·  matcap list — per-figure studio (steel chrome gold copper plastic-white plastic-red plastic-blue clay pearl carbon)", [=, this](const CommandLine& C)
+    Add("matcap", "matcap <figure...> <name|index> [--face=i,j,…]  ·  matcap list — per-figure or per-face studio "
+                  "(steel chrome gold copper plastic-white plastic-red plastic-blue clay pearl carbon rubber glass headlight taillight)", [=, this](const CommandLine& C)
     {
         if (C.Count() == 1 && C.Arguments[0] == "list") { for (int I = 0; I < MatcapCount(); ++I) Row("%d  %s", I, MatcapName(uint8_t(I))); return true; }
         if (C.Count() < 2) return Refuse("matcap: figure and a studio name required");
@@ -4012,7 +4057,125 @@ void ConsoleHost::Register() noexcept
         if (Layer < 0) if (auto N = CommandCodec::ParseNumber(Name)) Layer = int(*N);
         if (Layer < 0 || Layer >= MatcapCount()) return Refuse("matcap: unknown studio '%s' (try matcap list)", Name.c_str());
         CommandLine Sub = C; Sub.Arguments.pop_back();
-        for (SceneFigure* I : ResolveMany(Sub, 0)) { I->Matcap = uint8_t(Layer); Row("#%u %s → %s", I->Identity, I->Name.c_str(), MatcapName(uint8_t(Layer))); }
+        // Optional --face=i,j,… : set a per-face override instead of the whole figure. --face=all clears overrides back to
+        //    the whole-figure studio. Without the flag, the whole-figure studio is set (unchanged behaviour).
+        std::optional<std::string> FaceSpec = C.SwitchText("face");
+        for (SceneFigure* I : ResolveMany(Sub, 0))
+        {
+            if (I->Classification != FigureClassification::Body || !FaceSpec)
+            {
+                I->Matcap = uint8_t(Layer);
+                Row("#%u %s → %s", I->Identity, I->Name.c_str(), MatcapName(uint8_t(Layer)));
+                continue;
+            }
+            if (*FaceSpec == "all" || *FaceSpec == "reset") { I->FaceMatcap.clear(); I->Matcap = uint8_t(Layer);
+                Row("#%u %s → %s (all faces)", I->Identity, I->Name.c_str(), MatcapName(uint8_t(Layer))); continue; }
+            int Applied = 0;
+            std::stringstream Ss(*FaceSpec); std::string Tok;
+            while (std::getline(Ss, Tok, ','))
+            {
+                if (Tok.empty()) continue;
+                int Face = std::atoi(Tok.c_str());
+                if (Face < 0 || Face >= int(I->Body.Faces.size())) { Refuse("matcap: %s has no face %d", I->Name.c_str(), Face); continue; }
+                I->FaceMatcap[Face] = uint8_t(Layer); ++Applied;
+            }
+            Row("#%u %s → %s on %d face(s)", I->Identity, I->Name.c_str(), MatcapName(uint8_t(Layer)), Applied);
+        }
+        return true;
+    });
+
+    Add("export", "export <path.obj> [--chord=t] — tessellate every solid to a Wavefront OBJ (+ .mtl + .materials.json). "
+                  "Faces are grouped by their per-face matcap material (usemtl); the JSON manifest binds each studio to a "
+                  "Frontier engine material (AutomotiveFlakePaint / Rubber_Tyre / Glass_Tinted / metals / emissive) and is "
+                  "meant to be hand-edited.", [=, this](const CommandLine& C)
+    {
+        if (!Need(C, 1, "export")) return false;
+        std::filesystem::path ObjPath = C.Arguments[0];
+        if (ObjPath.extension() != ".obj") ObjPath += ".obj";
+        const std::string Stem   = ObjPath.stem().string();
+        std::filesystem::path Dir = ObjPath.parent_path();
+        std::filesystem::path MtlPath  = Dir / (Stem + ".mtl");
+        std::filesystem::path JsonPath = Dir / (Stem + ".materials.json");
+        const double Chord = C.SwitchNumber("chord").value_or(2e-3);
+        std::error_code Ec; if (!Dir.empty()) std::filesystem::create_directories(Dir, Ec);
+
+        std::ofstream Obj(ObjPath);
+        if (!Obj) return Refuse("export: cannot write %s", ObjPath.string().c_str());
+        Obj << "# SolidArc mesh export — units: metres, Y up matches source; per-face materials via usemtl.\n";
+        Obj << "mtllib " << (Stem + ".mtl") << "\n";
+
+        std::set<int> Used;
+        size_t VBase = 0, TriCount = 0; int Solids = 0;
+        for (const SceneFigure& F : Scene.Figures())
+        {
+            if (F.Classification != FigureClassification::Body || F.Hidden || F.Construction) continue;
+            ++Solids;
+            const std::string Obj_o = SanitizeName(F.Name);
+            Obj << "o " << Obj_o << "\n";
+            const BrepBody& B = F.Body;
+            for (size_t Fi = 0; Fi < B.Faces.size(); ++Fi)
+            {
+                const int St = int(F.MatcapForFace(int(Fi)));
+                Used.insert(St);
+                BrepBody::FaceTriangles T = B.TessellateFace(int(Fi), Chord);
+                if (T.Positions.empty() || T.Triangles.empty()) continue;
+                for (const Vec3& P : T.Positions) Obj << "v " << P.X << ' ' << P.Y << ' ' << P.Z << "\n";
+                for (const Vec3& N : T.Normals)   Obj << "vn " << N.X << ' ' << N.Y << ' ' << N.Z << "\n";
+                Obj << "g " << Obj_o << "_f" << Fi << "\n";
+                Obj << "usemtl " << MatcapName(uint8_t(St)) << "\n";
+                for (size_t K = 0; K + 2 < T.Triangles.size(); K += 3)
+                {
+                    const size_t A = VBase + T.Triangles[K] + 1, D = VBase + T.Triangles[K + 1] + 1, E = VBase + T.Triangles[K + 2] + 1;
+                    Obj << "f " << A << "//" << A << ' ' << D << "//" << D << ' ' << E << "//" << E << "\n";
+                    ++TriCount;
+                }
+                VBase += T.Positions.size();
+            }
+        }
+        Obj.close();
+
+        // Companion MTL: one material per studio actually used, with portable Kd/Ks/Ns/d for any OBJ viewer.
+        std::ofstream Mtl(MtlPath);
+        if (Mtl) for (int St : Used)
+        {
+            const StudioMaterial& M = StudioMat(St);
+            const float Spec = 0.04f + 0.9f * M.Metallic;
+            const float Ns   = (1.0f - M.Roughness) * (1.0f - M.Roughness) * 900.0f + 4.0f;
+            Mtl << "newmtl " << M.Studio << "\n";
+            Mtl << "Kd " << M.Kd[0] << ' ' << M.Kd[1] << ' ' << M.Kd[2] << "\n";
+            Mtl << "Ks " << Spec << ' ' << Spec << ' ' << Spec << "\n";
+            Mtl << "Ns " << Ns << "\n";
+            if (M.Emissive > 0.0f) Mtl << "Ke " << (M.Kd[0]*M.Emissive) << ' ' << (M.Kd[1]*M.Emissive) << ' ' << (M.Kd[2]*M.Emissive) << "\n";
+            Mtl << "d "  << M.Alpha << "\n";
+            Mtl << "illum " << (M.Metallic > 0.5f ? 3 : 2) << "\n";
+            Mtl << "# frontier " << M.Frontier << (M.Flakes ? "  flakes=true" : "") << "\n\n";
+        }
+        Mtl.close();
+
+        // Manifest: the editable studio → Frontier-material binding (System B AutomotiveFlakePaint for paint, etc.).
+        std::ofstream Js(JsonPath);
+        if (Js)
+        {
+            Js << "{\n  \"mesh\": \"" << (Stem + ".obj") << "\",\n";
+            Js << "  \"note\": \"Edit freely: 'frontier' is the engine material each usemtl group binds to; paints use System B AutomotiveFlakePaint.\",\n";
+            Js << "  \"materials\": {\n";
+            bool First = true;
+            for (int St : Used)
+            {
+                const StudioMaterial& M = StudioMat(St);
+                if (!First) Js << ",\n"; First = false;
+                Js << "    \"" << M.Studio << "\": { \"frontier\": \"" << M.Frontier << "\", "
+                   << "\"baseColor\": [" << M.Kd[0] << ", " << M.Kd[1] << ", " << M.Kd[2] << "], "
+                   << "\"metallic\": " << M.Metallic << ", \"roughness\": " << M.Roughness << ", "
+                   << "\"emissive\": " << M.Emissive << ", \"opacity\": " << M.Alpha << ", "
+                   << "\"flakes\": " << (M.Flakes ? "true" : "false") << " }";
+            }
+            Js << "\n  }\n}\n";
+        }
+        Js.close();
+
+        Row("export %s  %d solids  %zu tris  %zu materials  (+ %s, %s)", ObjPath.string().c_str(), Solids, TriCount, Used.size(),
+            (Stem + ".mtl").c_str(), (Stem + ".materials.json").c_str());
         return true;
     });
     Add("tint", "tint <figure...> r g b — body colour 0..1", [=, this](const CommandLine& C)

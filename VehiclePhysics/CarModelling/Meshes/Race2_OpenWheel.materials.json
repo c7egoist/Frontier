@@ -1,0 +1,10 @@
+{
+  "mesh": "Race2_OpenWheel.obj",
+  "note": "Edit freely: 'frontier' is the engine material each usemtl group binds to; paints use System B AutomotiveFlakePaint.",
+  "materials": {
+    "chrome": { "frontier": "Metal_Chrome", "baseColor": [0.92, 0.94, 0.97], "metallic": 1, "roughness": 0.05, "emissive": 0, "opacity": 1, "flakes": false },
+    "plastic-blue": { "frontier": "AutomotiveFlakePaint", "baseColor": [0.16, 0.36, 0.85], "metallic": 0, "roughness": 0.25, "emissive": 0, "opacity": 1, "flakes": true },
+    "carbon": { "frontier": "CarbonFibre", "baseColor": [0.1, 0.11, 0.12], "metallic": 0.6, "roughness": 0.4, "emissive": 0, "opacity": 1, "flakes": false },
+    "rubber": { "frontier": "Rubber_Tyre", "baseColor": [0.045, 0.045, 0.05], "metallic": 0, "roughness": 0.95, "emissive": 0, "opacity": 1, "flakes": false }
+  }
+}

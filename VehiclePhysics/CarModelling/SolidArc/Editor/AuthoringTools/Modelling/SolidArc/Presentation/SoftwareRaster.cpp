@@ -35,7 +35,7 @@ inline float log(float A) { return std::log(A); }
 #undef out
 // ---- Matcap pre-render: every studio sample once into a 128×128 RGB layer (≈ 0.6 ms per layer), sampled bilinearly. ----
 constexpr int MatcapSize = 128;
-constexpr int MatcapLayers = 10;
+constexpr int MatcapLayers = 14;   // 0-9 studios + Frontier car studios: 10 rubber, 11 glass, 12 headlight, 13 taillight
 struct MatcapSheet
 {
     std::vector<float> Texels;                                                          // [-] Layers × Size × Size × 3
@@ -570,7 +570,8 @@ std::vector<uint8_t> DeflateFixed(const std::vector<uint8_t>& Raw) noexcept
 
 const char* MatcapName(uint8_t Layer) noexcept
 {
-    static const char* Names[] = { "steel", "chrome", "gold", "copper", "plastic-white", "plastic-red", "plastic-blue", "clay", "pearl", "carbon" };
+    static const char* Names[] = { "steel", "chrome", "gold", "copper", "plastic-white", "plastic-red", "plastic-blue", "clay", "pearl", "carbon",
+                                   "rubber", "glass", "headlight", "taillight" };
     return Layer < SlangMirror::MatcapLayers ? Names[Layer] : "?";
 }
 int MatcapCount() noexcept { return SlangMirror::MatcapLayers; }

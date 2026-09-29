@@ -1,0 +1,46 @@
+# ── Racing car 1 — GT endurance coupe (low, wide, rear wing + splitter) ─────────
+box (0,0,0.30) (4.60,2.00,0.80) --name=BodyRaw
+chamfer BodyRaw 0.42 --edges=5,7 --name=Body
+# Glass canopy (tinted bubble)
+box (1.55,0.28,0.80) (3.05,1.72,1.18) --name=CanopyRaw
+chamfer CanopyRaw 0.28 --edges=5,7 --name=Canopy
+# Rear wing: two pillars + a wide plane
+box (4.20,0.42,1.02) (4.36,0.58,1.46) --name=WingPL
+box (4.20,1.42,1.02) (4.36,1.58,1.46) --name=WingPR
+box (4.02,0.10,1.44) (4.74,1.90,1.56) --name=Wing
+# Front splitter
+box (-0.18,0.08,0.28) (0.38,1.92,0.36) --name=Splitter
+# Fat slick tyres + chrome hubs
+cylinder (1.05,-0.08,0.45) 0.45 0.34 --axis=(0,1,0) --name=WheelFL
+cylinder (1.05,1.74,0.45) 0.45 0.34 --axis=(0,1,0) --name=WheelFR
+cylinder (3.55,-0.08,0.45) 0.45 0.34 --axis=(0,1,0) --name=WheelRL
+cylinder (3.55,1.74,0.45) 0.45 0.34 --axis=(0,1,0) --name=WheelRR
+cylinder (1.05,-0.12,0.45) 0.17 0.06 --axis=(0,1,0) --name=HubFL
+cylinder (1.05,2.08,0.45) 0.17 0.06 --axis=(0,1,0) --name=HubFR
+cylinder (3.55,-0.12,0.45) 0.17 0.06 --axis=(0,1,0) --name=HubRL
+cylinder (3.55,2.08,0.45) 0.17 0.06 --axis=(0,1,0) --name=HubRR
+# Lights
+box (-0.02,0.28,0.52) (0.10,0.66,0.74) --name=HLl
+box (-0.02,1.34,0.52) (0.10,1.72,0.74) --name=HLr
+box (4.55,0.30,0.54) (4.64,1.70,0.72) --name=TL
+matcap Body plastic-red
+matcap Canopy glass
+matcap WingPL carbon
+matcap WingPR carbon
+matcap Wing carbon
+matcap Splitter carbon
+matcap WheelFL rubber
+matcap WheelFR rubber
+matcap WheelRL rubber
+matcap WheelRR rubber
+matcap HubFL chrome
+matcap HubFR chrome
+matcap HubRL chrome
+matcap HubRR chrome
+matcap HLl headlight
+matcap HLr headlight
+matcap TL taillight
+view iso
+view fit
+render Race1_GT --size=820x600
+export /home/user/Slate/VehiclePhysics/CarModelling/Meshes/Race1_GT.obj

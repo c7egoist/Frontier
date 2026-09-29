@@ -41,7 +41,11 @@ float3 MatcapStudioSample(uint Layer, float3 N)
     else if (Layer == 6u) { Albedo = float3(0.16, 0.36, 0.85); Metal = 0.0; Rough = 0.25; }              // plastic blue
     else if (Layer == 7u) { Albedo = float3(0.70, 0.62, 0.55); Metal = 0.0; Rough = 0.85; }              // clay
     else if (Layer == 8u) { Albedo = float3(0.93, 0.90, 0.95); Metal = 0.3; Rough = 0.15; EnvTint = float3(0.95, 0.9, 1.05); } // pearl
-    else                  { Albedo = float3(0.10, 0.11, 0.12); Metal = 0.6; Rough = 0.40; }              // carbon
+    else if (Layer == 9u) { Albedo = float3(0.10, 0.11, 0.12); Metal = 0.6; Rough = 0.40; }              // carbon
+    else if (Layer == 10u){ Albedo = float3(0.045, 0.045, 0.05); Metal = 0.0; Rough = 0.95; }            // rubber (matte tyre)
+    else if (Layer == 11u){ Albedo = float3(0.03, 0.05, 0.07); Metal = 0.0; Rough = 0.04; }              // glass (dark tinted, glossy)
+    else if (Layer == 12u){ Albedo = float3(0.95, 0.96, 1.00); Metal = 0.0; Rough = 0.20; }              // headlight (emissive white)
+    else                  { Albedo = float3(0.90, 0.05, 0.05); Metal = 0.0; Rough = 0.25; }              // taillight (emissive red)
 
     // Environment radiance seen in the reflection, blurred by roughness.
     float  Blur = Rough * Rough;
@@ -62,5 +66,8 @@ float3 MatcapStudioSample(uint Layer, float3 N)
 
     float3 Colour = lerp(Dielectric, Metallic, Metal);
     if (Layer == 9u) Colour += float3(1.0, 1.0, 1.0) * (pow(saturate(dot(R, Key)), 40.0) * 0.35);            // carbon: clear-coat sheen
+    // Emissive studios: add a self-lit floor so the light reads as glowing regardless of the studio reflection.
+    if (Layer == 12u) Colour += float3(0.85, 0.87, 0.95) * 0.9;                                              // headlight glow
+    if (Layer == 13u) Colour += float3(0.80, 0.06, 0.06) * 0.9;                                              // taillight glow
     return Colour;
 }
