@@ -238,7 +238,10 @@ int main()
     std::printf("[C] Hill climb — full throttle UP a 20%% grade (11.3 deg)\n");
     {
         const float grade = 0.20f;
-        Rig r; r.Build(cfg, Slope(grade), {0, 0, 0.40f});
+        // Spawn lifted along the grade: with the real 3.396 m wheelbase the front axle sits ~grade·(half-wheelbase)
+        //    up-slope, so an unlifted spawn would bury the front wheel and fire a penetration spike. Lift by
+        //    grade·1.7 (≈ half-wheelbase) + rest ride, mirroring the parking test.
+        Rig r; r.Build(cfg, Slope(grade), {0, 0, 0.40f + grade * 1.7f});
         r.Run(DriverInput{}, 1.0f, dt);
         const float x0 = r.chassis.Position.x, z0 = r.chassis.Position.z;
         r.Run(DriverInput{1.0f, 0, 0, false}, 8.0f, dt);

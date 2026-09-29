@@ -161,10 +161,31 @@ Fuel deferred by request (custom energy/density fuels + control unit + mixing + 
 | Brake/thermal/ABS unit checks | `Vehicle/BrakingValidation.cpp` | ✅ **16/16** |
 | End-to-end ABS + supercharger drive proof | `Vehicle/AbsSuperchargerTests.cpp` | ✅ **11/11** |
 
+## Real vehicle geometry — `ControlVehicle.blend`  ✅ **COMPLETE** (see `CarModelling/ControlVehicle/ControlVehicle-Geometry-Extraction.md`)
+The GT3-class *estimates* from Phase 6 are replaced by the **actual authored vehicle** — the "PROTO-X" wedge coupe from
+`SultanAladin/Frontier-` commit `28ec065`. The `.blend` (Blender 5.2) was parsed **without Blender** (its new 32-byte
+block header decoded; SDNA + `Object` blocks read) to lift every socket transform.
+
+| Item | Where | Status |
+|------|-------|--------|
+| `.blend` copied into the workspace (not `.blend1`) | `CarModelling/ControlVehicle/ControlVehicle.blend` | ✅ |
+| Socket extractor (no Blender needed) | `CarModelling/ControlVehicle/ParseBlendSockets.py` | ✅ |
+| **Horizontal geometry from real sockets** (wheelbase **3.396 m**, track **2.095 m**, 49.1/50.9 split) | `Vehicle/VehicleGeometry.{h,cpp}` (`ControlVehicleSockets`) | ✅ |
+| Axis check: model is already +X fwd / +Y left / +Z up — **no reorientation** | — | ✅ |
+| Wheels **excluded**; procedural wheels at the four `Socket_AxleMount_*` | `Vehicle/VehicleGeometry.cpp` | ✅ |
+| Aero force points derived from wing/skirt/plate sockets | `Vehicle/VehicleGeometry.cpp` | ✅ |
+| GRIT vs model comparison (WB 3.0→3.396, track 1.6→2.095) | extraction `.md` §4 | ✅ |
+| Body → OBJ/glTF export (needs local Blender; wheels excluded, bounds measured) | `CarModelling/ControlVehicle/ExportControlVehicle.py` | ⏳ run locally |
+| All Thread-M suites re-verified on real geometry | driving 12/12 · aero 8/8+23/23 · abs+super 11/11 · braking 16/16 · super 13/13 · scene 38/38 · core 35/35 · input 16/16 · xpbd 14/14 | ✅ |
+
+Vertical scalars (`Mass`, exact `CoMHeight`, `TyreRadius`, ride height) need applied-modifier mesh bounds → emitted by
+`ExportControlVehicle.py`; documented GT/muscle-class values until then.
+
 **Roadmap (subsequent milestones, phase-by-phase from `source-only`):** **Fuel** (`FuelControlSystem`+`FuelSpecifications`;
-custom energy/density fuels, metering, mixing, nitrous — deferred, its own milestone) → Thermal (Coolant/EngineOil), then
-reconcile the core solver params against `.tyrx` Pacejka specs (GT3/LMP3/rally/drift/street) and a performance pass. Each
-lands as a self-contained module + validation, same as Aerodynamics.
+custom energy/density fuels, metering, mixing, nitrous — deferred; roadmap in `Deferred-Fuel-System.md`) → **Thermal**
+(Coolant/EngineOil engine loop — deferred; roadmap in `Deferred-Thermal-System.md`), then reconcile the core solver params
+against `.tyrx` Pacejka specs (GT3/LMP3/rally/drift/street) and a performance pass. Each lands as a self-contained module
++ validation, same as Aerodynamics.
 
 ## Phase 8 — EOS networking  *(deferred — "tomorrow")*
 Server-authoritative simulation + client prediction/reconciliation, porting GRIT's EpicAdapter/EOS seam
