@@ -41,13 +41,13 @@ namespace Frontier::Vehicle {
 struct WheelMount;                 // fwd (defined in VehicleSolver.h)
 struct VehicleSolverConfiguration;    // fwd
 
-//--------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------
 // Raw socket coordinates lifted verbatim from ControlVehicle.blend (metres, model-origin frame = +X fwd, +Y left, +Z up).
 // The model origin sits on the longitudinal/lateral centreline at roughly hub height; CoM is placed at CoMHeight above
 // ground by the dynamics. These constants exist so every derived offset below is traceable to the authored asset — nothing
 // here is invented. (Camera-mount "sockets" Chassis_Mount_Exterior / Cockpit_Mount_Internal are omitted: they mark the
 // external/interior CAMERA rigs, not chassis hard-points.)
-//--------------------------------------------------------------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------------------------------------------
 namespace ControlVehicleSockets {
     // Axle mounts (wheel centres). Front at +X, rear at −X; left +Y, right −Y.
     inline const Vec3 AxleMount_FL { +1.7274f, +1.0475f, +0.0914f };

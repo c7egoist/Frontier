@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// AerodynamicsValidation.cpp — headless invariants for the GRIT source-only aerodynamics port.
+// 📦 Frontier/PhysicalDynamics/Vehicle/AerodynamicsValidation.cpp — headless invariants for the GRIT source-only aerodynamics port.
 //   Verifies the physics of Aerodynamics.cpp against closed-form expectations (drag ∝ V², ground effect,
 //   DRS adaptation, sideslip loss, downforce sign, front/rear split, aero-brake deploy). No engine, no Jolt.
 //

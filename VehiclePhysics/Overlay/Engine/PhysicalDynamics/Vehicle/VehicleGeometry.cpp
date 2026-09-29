@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// VehicleGeometry.cpp — derive wheel mounts + aero force points from the authored VehicleGeometry.
+// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleGeometry.cpp — derive wheel mounts + aero force points from the authored VehicleGeometry.
 //
 //   Horizontal positions are lifted straight from ControlVehicle.blend sockets (see ControlVehicleSockets). The model
 //   origin lies on the vehicle centreline (X = Y = 0) at roughly hub height, so socket X/Y ARE the CoM-relative offsets

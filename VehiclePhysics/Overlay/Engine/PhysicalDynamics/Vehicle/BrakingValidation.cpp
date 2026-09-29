@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// BrakingValidation.cpp — unit checks for the disk-brake hydraulic/thermal model + ABS modulator.
+// 📦 Frontier/PhysicalDynamics/Vehicle/BrakingValidation.cpp — unit checks for the disk-brake hydraulic/thermal model + ABS modulator.
 //   Build: g++ -std=c++17 -O2 BrakingValidation.cpp -o brakes && ./brakes
 //============================================================================================================================================
 

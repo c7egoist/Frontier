@@ -142,7 +142,9 @@ static XPBDSoftTyre::GroundQuery Slope(float grade)
 [[nodiscard]] static float UpZ(const MockChassis& m) { return m.Orientation.Rotate({0,0,1}).z; }
 [[nodiscard]] static float Yaw(const MockChassis& m) { const Vec3 f = m.Orientation.Rotate({1,0,0}); return std::atan2(f.y, f.x); }
 
-//========================================================================================================================
+//------------------------------------------------------------------------------------------------------------------------
+//                                                   DRIVING SCENARIOS
+//------------------------------------------------------------------------------------------------------------------------
 int main()
 {
     const float dt = 1.0f / 240.0f;

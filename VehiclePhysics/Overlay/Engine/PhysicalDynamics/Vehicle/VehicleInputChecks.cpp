@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// VehicleInputChecks.cpp — invariants for the engine-agnostic DriverInputIntegrator (WASD + gamepad/wheel).
+// 📦 Frontier/PhysicalDynamics/Vehicle/VehicleInputChecks.cpp — invariants for the engine-agnostic DriverInputIntegrator (WASD + gamepad/wheel).
 //   Build:  g++ -std=c++17 -O2 -Wall -Wextra VehicleInputChecks.cpp -o /tmp/input && /tmp/input
 //============================================================================================================================================
 

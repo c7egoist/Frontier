@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// AbsSuperchargerChecks.cpp — end-to-end proof that ABS and the supercharger change how the CAR drives.
+// 📦 Frontier/PhysicalDynamics/Vehicle/AbsSuperchargerChecks.cpp — end-to-end proof that ABS and the supercharger change how the CAR drives.
 //   Drives the full VehicleSolver (PacejkaDrivetrain + XPBD soft tyres + disk brakes) on the same mock rigid chassis
 //   used by AeroIntegrationChecks / VehicleSceneValidation. No Jolt.
 //

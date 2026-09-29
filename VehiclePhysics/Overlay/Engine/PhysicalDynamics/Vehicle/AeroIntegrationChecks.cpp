@@ -1,5 +1,5 @@
 //============================================================================================================================================
-// AeroIntegrationChecks.cpp — end-to-end proof that the ported aerodynamics changes how the CAR drives.
+// 📦 Frontier/PhysicalDynamics/Vehicle/AeroIntegrationChecks.cpp — end-to-end proof that the ported aerodynamics changes how the CAR drives.
 //   Drives the full VehicleSolver (PacejkaDrivetrain + XPBD soft tyres) on a mock rigid chassis, comparing an
 //   aero-equipped GT3 against an identical car with aero disabled. Confirms the two headline effects:
 //       • DRAG      → lower terminal speed + faster coast-down
