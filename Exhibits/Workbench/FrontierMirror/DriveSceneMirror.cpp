@@ -221,13 +221,20 @@ struct TyreDiagnostics
     float CentroidOffset = 0.0f;   // [m] how far the centroid sits from the supplied hub position
 };
 
-TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, const Vec3& HubVelocity)
+TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, const Vec3& HubVelocity,
+                            const Quat& HubRotation)
 {
     TyreDiagnostics D;
     const auto& Nodes = Tyre.Nodes();
     if (Nodes.empty()) return D;
     const float Rest = Tyre.Params().Radius;
-    const Vec3 Axis{0.0f, 1.0f, 0.0f};
+    // The wheel's ACTUAL spin axis, not world +Y. Radius means "distance from the spin axis", so projecting
+    //    onto a fixed axis measures the wrong quantity the moment the car yaws or the wheel steers -- and it
+    //    manufactures scatter that grows exactly when the car starts turning. That is precisely what this
+    //    function reported for several passes: ~13 mm of "carcass deformation" appearing at ~7 m/s, while the
+    //    solver's own residuals showed every constraint family satisfied to under a millimetre. Two
+    //    measurements of the same tyre disagreed by an order of magnitude, and the broken one was this.
+    const Vec3 Axis = HubRotation.Rotate({0.0f, 1.0f, 0.0f}).Normalized();
     float MinR = 1e30f, MaxR = -1e30f, SumR = 0.0f, SumSq = 0.0f;
     for (const auto& N : Nodes)
     {
@@ -648,7 +655,8 @@ int main(int ArgumentCount, char** ArgumentValues)
                 "time_s,wheel,speed_mps,max_squash_m,mean_radius_m,radial_spread_m,"
                 "max_radial_speed_mps,rms_radial_speed_mps,contacts,normal_load_N,strut_m,"
                 "offpatch_spread_m,dominant_mode,dominant_amp_m,rms_deviation_m,outliers,"
-                "crown_radius_m,shoulder_radius_m,rms_about_centroid_m,centroid_offset_m\n");
+                "crown_radius_m,shoulder_radius_m,rms_about_centroid_m,centroid_offset_m,"
+                "res_spoke_rms_m,res_shear_rms_m,res_hoop_rms_m,res_lateral_rms_m,res_diag_rms_m,res_contact_max_m\n");
     }
 
     for (int S = 0; S <= Steps; ++S)
@@ -677,14 +685,17 @@ int main(int ArgumentCount, char** ArgumentValues)
                 //    all about whether the carcass is ringing.
                 const Vec3 HubVel = (S > 0) ? (WT.HubPosition - PrevHub[W]) * (1.0f / Dt) : Vec3{0.0f, 0.0f, 0.0f};
                 PrevHub[W] = WT.HubPosition;
-                const TyreDiagnostics D = MeasureTyre(Solver.Tyres()[W], WT.HubPosition, HubVel);
+                const TyreDiagnostics D = MeasureTyre(Solver.Tyres()[W], WT.HubPosition, HubVel, WT.HubRotation);
+                const auto& Res = Solver.Tyres()[W].Residual();
                 std::fprintf(TyreLogFile,
-                    "%.5f,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.2f,%.6f,%.6f,%u,%.6f,%.6f,%u,%.6f,%.6f,%.6f,%.6f\n",
+                    "%.5f,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.2f,%.6f,%.6f,%u,%.6f,%.6f,%u,%.6f,%.6f,%.6f,%.6f,"
+                    "%.7f,%.7f,%.7f,%.7f,%.7f,%.7f\n",
                     T, W, Telemetry.SpeedMetresPerSecond,
                     D.MaxSquash, D.MeanRadius, D.RadialSpread,
                     D.MaxRadialSpeed, D.RmsRadialSpeed, D.Contacts, D.NormalLoad, WT.StrutCompression,
                     D.OffPatchSpread, D.DominantMode, D.DominantAmplitude, D.RmsDeviation, D.Outliers, D.CrownRadius, D.ShoulderRadius,
-                    D.RmsAboutCentroid, D.CentroidOffset);
+                    D.RmsAboutCentroid, D.CentroidOffset,
+                    Res.SpokeRms, Res.ShearRms, Res.HoopRms, Res.LateralRms, Res.DiagonalRms, Res.ContactMax);
                 WorstSpread = std::max(WorstSpread, D.RadialSpread);
                 WorstOffPatch = std::max(WorstOffPatch, D.OffPatchSpread);
                 WorstRms    = std::max(WorstRms, D.RmsRadialSpeed);

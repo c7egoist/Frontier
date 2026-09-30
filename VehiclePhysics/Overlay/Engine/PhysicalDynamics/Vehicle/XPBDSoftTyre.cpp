@@ -86,19 +86,19 @@ void XPBDSoftTyre::BuildEdges() noexcept
             // Hoop (circumferential, same ring) — always present.
             {
                 const uint32_t j = Index(r, sn);
-                ConstraintEdges.push_back({i, j, restLen(i, j), Parameters.HoopCompliance, DerivedDamping(Parameters.HoopCompliance, Parameters.HoopDampingRatio)});
+                ConstraintEdges.push_back({i, j, restLen(i, j), Parameters.HoopCompliance, DerivedDamping(Parameters.HoopCompliance, Parameters.HoopDampingRatio), EdgeFamily::Hoop});
             }
             if (r + 1u < R)
             {
                 // Lateral (same segment, next ring).
                 const uint32_t j = Index(r + 1u, s);
-                ConstraintEdges.push_back({i, j, restLen(i, j), Parameters.LateralCompliance, DerivedDamping(Parameters.LateralCompliance, Parameters.LateralDampingRatio)});
+                ConstraintEdges.push_back({i, j, restLen(i, j), Parameters.LateralCompliance, DerivedDamping(Parameters.LateralCompliance, Parameters.LateralDampingRatio), EdgeFamily::Lateral});
                 // Shear diagonal (next segment, next ring).
                 const uint32_t k = Index(r + 1u, sn);
-                ConstraintEdges.push_back({i, k, restLen(i, k), Parameters.ShearCompliance, DerivedDamping(Parameters.ShearCompliance, Parameters.ShearDampingRatio)});
+                ConstraintEdges.push_back({i, k, restLen(i, k), Parameters.ShearCompliance, DerivedDamping(Parameters.ShearCompliance, Parameters.ShearDampingRatio), EdgeFamily::Diagonal});
                 // Anti-diagonal (this ring's next seg ↔ next ring's this seg) for symmetric shear.
                 const uint32_t a = Index(r, sn), b = Index(r + 1u, s);
-                ConstraintEdges.push_back({a, b, restLen(a, b), Parameters.ShearCompliance, DerivedDamping(Parameters.ShearCompliance, Parameters.ShearDampingRatio)});
+                ConstraintEdges.push_back({a, b, restLen(a, b), Parameters.ShearCompliance, DerivedDamping(Parameters.ShearCompliance, Parameters.ShearDampingRatio), EdgeFamily::Diagonal});
             }
         }
 }
@@ -356,6 +356,64 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
                 if (Vn > 0.0f) node.Velocity -= node.ContactNormal * Vn;   // e = 0, no bounce
             }
         }
+    }
+
+    // ── residual measurement: what is STILL violated once the solve has finished? ───────────────────────────
+    // Taken after the final substep, so this is the error the frame actually ships, not a mid-solve snapshot.
+    {
+        ConstraintResidual = SoftTyreResidual{};
+        const Vec3 axisNow = hubRot.Rotate({0, 1, 0}).Normalized();
+        const float spokeRest = Parameters.Radius - Parameters.RimRadius;
+
+        double SpokeSq = 0.0, ShearSq = 0.0; uint32_t SpokeN = 0u, ShearN = 0u;
+        for (const SoftTyreNode& node : NodeRecords)
+        {
+            if (node.InverseMass <= 0.0f) continue;
+            const Vec3 anchor = hubPos + hubRot.Rotate(node.BeadLocal);
+            const float C = (node.Position - anchor).Length() - spokeRest;
+            ConstraintResidual.SpokeMax = std::max(ConstraintResidual.SpokeMax, std::fabs(C));
+            SpokeSq += static_cast<double>(C) * C; ++SpokeN;
+
+            const Vec3 restWorld = hubPos + hubRot.Rotate(node.TreadLocal);
+            const Vec3 offset = node.Position - restWorld;
+            Vec3 radial = restWorld - hubPos;
+            radial = radial - axisNow * Dot(radial, axisNow);
+            const float rl = radial.Length();
+            if (rl > 1e-6f)
+            {
+                radial = radial * (1.0f / rl);
+                const Vec3 tangent = Cross(axisNow, radial);
+                const float Ct = Dot(offset, tangent), Ca = Dot(offset, axisNow);
+                const float Cs = std::sqrt(Ct * Ct + Ca * Ca);
+                ConstraintResidual.ShearMax = std::max(ConstraintResidual.ShearMax, Cs);
+                ShearSq += static_cast<double>(Cs) * Cs; ++ShearN;
+            }
+        }
+        if (SpokeN) ConstraintResidual.SpokeRms = std::sqrt(static_cast<float>(SpokeSq / SpokeN));
+        if (ShearN) ConstraintResidual.ShearRms = std::sqrt(static_cast<float>(ShearSq / ShearN));
+
+        double Sq[3] = {0.0, 0.0, 0.0}; uint32_t Cnt[3] = {0u, 0u, 0u};
+        float Mx[3] = {0.0f, 0.0f, 0.0f};
+        for (const Edge& e : ConstraintEdges)
+        {
+            const float C = (NodeRecords[e.b].Position - NodeRecords[e.a].Position).Length() - e.rest;
+            const uint32_t F = static_cast<uint32_t>(e.family);
+            Mx[F] = std::max(Mx[F], std::fabs(C));
+            Sq[F] += static_cast<double>(C) * C; ++Cnt[F];
+        }
+        ConstraintResidual.HoopMax = Mx[0]; ConstraintResidual.LateralMax = Mx[1]; ConstraintResidual.DiagonalMax = Mx[2];
+        if (Cnt[0]) ConstraintResidual.HoopRms     = std::sqrt(static_cast<float>(Sq[0] / Cnt[0]));
+        if (Cnt[1]) ConstraintResidual.LateralRms  = std::sqrt(static_cast<float>(Sq[1] / Cnt[1]));
+        if (Cnt[2]) ConstraintResidual.DiagonalRms = std::sqrt(static_cast<float>(Sq[2] / Cnt[2]));
+
+        if (ground)
+            for (const SoftTyreNode& node : NodeRecords)
+            {
+                float gz = 0.0f; Vec3 nrm{0, 0, 1};
+                if (!ground(node.Position, gz, nrm)) continue;
+                const float pen = gz - node.Position.z;
+                if (pen > ConstraintResidual.ContactMax) ConstraintResidual.ContactMax = pen;
+            }
     }
 
     const float inv = 1.0f / static_cast<float>(substeps);

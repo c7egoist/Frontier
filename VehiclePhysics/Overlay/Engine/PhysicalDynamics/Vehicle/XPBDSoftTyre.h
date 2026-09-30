@@ -181,6 +181,24 @@ struct SoftTyreNode
     float TreadLambda   = 0.0f;   // tread bristle tangential constraint
 };
 
+// ── per-constraint-family residual, measured AFTER the solve ────────────────────────────────────────────────
+// Every structural hypothesis about the residual carcass scatter has been eliminated by measurement (contact
+// patch, standing wave, outliers, profile, push-out velocity, friction, substep count, measurement centre,
+// band drift). What has never been looked at directly is the obvious thing: WHICH constraint is actually left
+// violated at the end of a step, and by how much. A constraint family with a large residual is one the solver
+// is failing to satisfy; that is a far better lead than another parameter sweep.
+//
+// C is in metres for every family here, so the numbers are directly comparable.
+struct SoftTyreResidual
+{
+    float SpokeMax = 0.0f,   SpokeRms = 0.0f;      // sidewall radial
+    float ShearMax = 0.0f,   ShearRms = 0.0f;      // sidewall tangential + axial
+    float HoopMax = 0.0f,    HoopRms = 0.0f;       // tread band circumferential
+    float LateralMax = 0.0f, LateralRms = 0.0f;    // carcass lateral
+    float DiagonalMax = 0.0f,DiagonalRms = 0.0f;   // diagonal shear
+    float ContactMax = 0.0f;                       // deepest remaining penetration
+};
+
 // Aggregate ground-on-tyre reaction over the last Step (the force the tyre transmits to the car).
 struct TyreReaction
 {
@@ -206,13 +224,16 @@ public:
     [[nodiscard]] const std::vector<SoftTyreNode>& Nodes() const noexcept { return NodeRecords; }
     [[nodiscard]] const SoftTyreParameters&        Params() const noexcept { return Parameters; }
     [[nodiscard]] const TyreReaction&              Reaction() const noexcept { return ContactReaction; }
+    [[nodiscard]] const SoftTyreResidual&          Residual() const noexcept { return ConstraintResidual; }
     [[nodiscard]] bool Constructed() const noexcept { return !NodeRecords.empty(); }
 
     [[nodiscard]] uint32_t Index(uint32_t ring, uint32_t seg) const noexcept { return ring * Parameters.SegmentCount + seg; }
 
 private:
     // `lambda` is the edge's XPBD multiplier, reset at the top of every substep (see SoftTyreNode).
-    struct Edge { uint32_t a, b; float rest, compliance, damping; float lambda = 0.0f; };   // damping = β, derived
+    // Family tags the edge so residuals can be reported per constraint type rather than as one blur.
+    enum class EdgeFamily : uint32_t { Hoop = 0u, Lateral = 1u, Diagonal = 2u };
+    struct Edge { uint32_t a, b; float rest, compliance, damping; EdgeFamily family; float lambda = 0.0f; };
 
     void BuildEdges() noexcept;
 
@@ -227,6 +248,7 @@ private:
     std::vector<SoftTyreNode>  NodeRecords;
     std::vector<Edge>          ConstraintEdges;
     TyreReaction               ContactReaction;
+    SoftTyreResidual           ConstraintResidual;
 };
 
 } // namespace Frontier::Vehicle
