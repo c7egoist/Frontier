@@ -1,0 +1,13 @@
+#============================================================================================================================================
+#                                                  PROJECTDRIVE.FRONTIER
+#============================================================================================================================================
+# 📦 Project-Drive declarative opening read by Frontier.exe before shared facilities are constructed.
+
+[Project]
+ProjectName             = "ProjectDrive"
+ProjectFormatNumber     = 1
+ContentLocation         = "Content"
+OpeningScene            = "Content/Scenes/DriveCourse.gltf"
+CodeImage               = "Build/ProjectDrive.dll"
+CodeInterchangeNumber   = 2
+InterfaceFingerprint    = 0xdd4363893c94c8f0

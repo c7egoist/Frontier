@@ -1,0 +1,18 @@
+{
+  "proof": "Project-Zero M10 Material Library level CPU mirror",
+  "execution": "CPU mirror of the shared scene/material/sky/camera data \u2014 not a native Vulkan/Slang shader or ImGui capture.",
+  "source": {
+    "repository": "https://github.com/SultanAladin/Frontier-.git",
+    "revision": "28ec0657a23ed6bbf680f17cc06b464a53639dae"
+  },
+  "scene": "The M10 material-library level: 63,854 triangles, 49 material records/slabs, six emissive triangles; default product camera (0,-5,2.6), yaw 0\u00b0, pitch -13\u00b0, FoV 55\u00b0.",
+  "command": "./MaterialLevelViewport --out <Exhibits>/MaterialLibrary_CPU_Mirror.png --width 480 --height 270 --spp 8 --bounce 6 --sun 17.93 --fog clear --view default --exposure 1.05 --threads 1",
+  "results": {
+    "filmMean": 1.6448,
+    "nonFiniteOrOutOfRangeSamples": 0,
+    "estimator": "Brute-force accumulation with NEE and MIS for lamps, sun disc, and sky on a missed ray."
+  },
+  "sha256": {
+    "MaterialLibrary_CPU_Mirror.png": "4bb59ea9c3bf4ad571d0d2d7acc739b45ca044ad1cbf1eb59b59eb957af05a81"
+  }
+}
