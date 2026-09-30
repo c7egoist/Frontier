@@ -1,0 +1,101 @@
+{
+  "proof": "Project-Zero default level (the 20 x 20 = 400-material showcase grid) through the engine's own CPU paths.",
+  "execution": "CPU render by the engine's own translation units \u2014 not a native Vulkan, Slang, or ImGui capture.",
+  "renderer": "Frontier engine sources, built and run headless. No renderer is authored in Slate.",
+  "source": {
+    "repository": "https://github.com/SultanAladin/Frontier-.git",
+    "revision": "28ec0657a23ed6bbf680f17cc06b464a53639dae"
+  },
+  "scene": "Engine/ContentInterchange/ShowcaseStructure r6 \u2014 kShowcaseGridSide = 20, so 400 spheres and 400 material records across the OpenPBR lobe set, on the authored ground plane with the level's own emissive luminaires and the Project-Zero interface panel. This is what Project-Zero.exe opens with no --scene argument.",
+  "commands": [
+    "g++ -std=c++20 -O2 -Wall -Wextra -DFRONTIER_CPU_PORT -pthread -ffunction-sections -fdata-sections -Wl,--gc-sections -I. -IEngine -IEngine/GeometricRaster -IEngine/ContentInterchange -IEngine/DeviceExchange -IEngine/DisplayPresentation -IEngine/Shaders -IProjects/Project-Zero/Source -IExternalPackages/stb -IExternalPackages/vulkan-headers/include /home/user/Slate/Exhibits/Workbench/FrontierMirror/ShowcaseRasterMirror.cpp Engine/GeometricRaster/VisibilityRaster.cpp Engine/GeometricRaster/SceneStructure.cpp Engine/GeometricRaster/GeometryStructure.cpp Engine/GeometricRaster/CameraProjection.cpp Engine/GeometricRaster/StarCatalogueIndex.cpp Engine/ContentInterchange/ShowcaseStructure.cpp Engine/ContentInterchange/MaterialIndex.cpp Engine/ContentInterchange/AssetResolution.cpp Engine/ContentInterchange/SpaceExport.cpp Engine/ContentInterchange/SpaceCodec.cpp Engine/ContentInterchange/TextureIndex.cpp Engine/DisplayPresentation/CelestialSolver.cpp Engine/DeviceExchange/OrientationClassifier.cpp Projects/Project-Zero/Source/CelestialSequence.cpp -o /home/user/Slate/_AgentScratch/Frontier/.cache/ShowcaseRasterMirror",
+    "/home/user/Slate/_AgentScratch/Frontier/.cache/ShowcaseRasterMirror --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_default_VisibilityRaster_CPU_Reference.png --view default --width 640 --height 360 --sun 15.0",
+    "/home/user/Slate/_AgentScratch/Frontier/.cache/ShowcaseRasterMirror --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_grid400_VisibilityRaster_CPU_Reference.png --view grid400 --width 640 --height 360 --sun 15.0",
+    "/home/user/Slate/_AgentScratch/Frontier/.cache/ShowcaseRasterMirror --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_metals_VisibilityRaster_CPU_Reference.png --view metals --width 640 --height 360 --sun 15.0",
+    "/home/user/Slate/_AgentScratch/Frontier/.cache/ShowcaseRasterMirror --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_glass_VisibilityRaster_CPU_Reference.png --view glass --width 640 --height 360 --sun 15.0",
+    "/home/user/Slate/_AgentScratch/Frontier/.cache/ShowcaseRasterMirror --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_glints_VisibilityRaster_CPU_Reference.png --view glints --width 640 --height 360 --sun 15.0",
+    "make MaterialLevelViewport",
+    "/home/user/Slate/_AgentScratch/Frontier/Projects/Project-Zero/Host/MaterialLevelViewport --level showcase --view default --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_default_ReSTIR_CPU_Reference.png --width 640 --height 360 --spp 12 --bounce 5 --threads 2 --restir",
+    "/home/user/Slate/_AgentScratch/Frontier/Projects/Project-Zero/Host/MaterialLevelViewport --level showcase --view grid400 --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_grid400_ReSTIR_CPU_Reference.png --width 640 --height 360 --spp 12 --bounce 5 --threads 2 --restir",
+    "/home/user/Slate/_AgentScratch/Frontier/Projects/Project-Zero/Host/MaterialLevelViewport --level showcase --view metals --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_metals_ReSTIR_CPU_Reference.png --width 640 --height 360 --spp 12 --bounce 5 --threads 2 --restir",
+    "/home/user/Slate/_AgentScratch/Frontier/Projects/Project-Zero/Host/MaterialLevelViewport --level showcase --view default --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_default_Reference_CPU_Reference.png --width 640 --height 360 --spp 12 --bounce 5 --threads 2",
+    "/home/user/Slate/_AgentScratch/Frontier/Projects/Project-Zero/Host/MaterialLevelViewport --level showcase --view grid400 --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_grid400_Reference_CPU_Reference.png --width 640 --height 360 --spp 12 --bounce 5 --threads 2",
+    "/home/user/Slate/_AgentScratch/Frontier/Projects/Project-Zero/Host/MaterialLevelViewport --level showcase --view metals --out /home/user/Slate/Exhibits/Gallery/ProjectZero/Showcase/Showcase_metals_Reference_CPU_Reference.png --width 640 --height 360 --spp 12 --bounce 5 --threads 2"
+  ],
+  "results": {
+    "Showcase_default_VisibilityRaster_CPU_Reference.png": {
+      "caption": "the product's entry shot \u2014 the whole grid as Project-Zero.exe opens it",
+      "gatesPassed": 10,
+      "seconds": 2.67
+    },
+    "Showcase_grid400_VisibilityRaster_CPU_Reference.png": {
+      "caption": "all 400 spheres from above: the complete 20 x 20 material matrix",
+      "gatesPassed": 10,
+      "seconds": 0.86
+    },
+    "Showcase_metals_VisibilityRaster_CPU_Reference.png": {
+      "caption": "row 0, the anisotropic metal polish ladder, at eye level",
+      "gatesPassed": 10,
+      "seconds": 3.44
+    },
+    "Showcase_glass_VisibilityRaster_CPU_Reference.png": {
+      "caption": "row 1, the IOR 1.30 -> 2.42 transmissive ramp",
+      "gatesPassed": 10,
+      "seconds": 3.03
+    },
+    "Showcase_glints_VisibilityRaster_CPU_Reference.png": {
+      "caption": "row 12, the glint-flake density ramp",
+      "gatesPassed": 10,
+      "seconds": 3.32
+    },
+    "Showcase_default_ReSTIR_CPU_Reference.png": {
+      "caption": "the product's entry shot",
+      "film": "[material-level] film: mean 0.1454, 0 non-finite/out-of-range samples",
+      "seconds": 19.77
+    },
+    "Showcase_grid400_ReSTIR_CPU_Reference.png": {
+      "caption": "all 400 spheres from above",
+      "film": "[material-level] film: mean 0.0839, 0 non-finite/out-of-range samples",
+      "seconds": 24.74
+    },
+    "Showcase_metals_ReSTIR_CPU_Reference.png": {
+      "caption": "row 0, the anisotropic metal polish ladder",
+      "film": "[material-level] film: mean 0.1978, 0 non-finite/out-of-range samples",
+      "seconds": 23.34
+    },
+    "Showcase_default_Reference_CPU_Reference.png": {
+      "caption": "the product's entry shot",
+      "film": "[material-level] film: mean 0.1349, 0 non-finite/out-of-range samples",
+      "seconds": 92.73
+    },
+    "Showcase_grid400_Reference_CPU_Reference.png": {
+      "caption": "all 400 spheres from above",
+      "film": "[material-level] film: mean 0.0700, 0 non-finite/out-of-range samples",
+      "seconds": 92.81
+    },
+    "Showcase_metals_Reference_CPU_Reference.png": {
+      "caption": "row 0, the anisotropic metal polish ladder",
+      "film": "[material-level] film: mean 0.1759, 0 non-finite/out-of-range samples",
+      "seconds": 95.4
+    }
+  },
+  "sha256": {
+    "Showcase_default_ReSTIR_CPU_Reference.png": "ea34e595fd66a71224916a57b9f1b862ce6821fe3b3e8f58cd781c6e1eb3d203",
+    "Showcase_default_Reference_CPU_Reference.png": "e5213c48dd5fa365a70f5e66f8306693f73e5b36d0ed433fe1a9efc6e95ec483",
+    "Showcase_default_VisibilityRaster_CPU_Reference.png": "87b1a7474a0c6ebd3cc7867a2d80f7097372bb76a6ae5677ff06784781177ac1",
+    "Showcase_glass_VisibilityRaster_CPU_Reference.png": "ce2d1a2106fd4790383266cf6562c69a6c378808799e4cc265e898363b2ab440",
+    "Showcase_glints_VisibilityRaster_CPU_Reference.png": "c33599b474a5750866814bef0fc2f083330e04ab65ffd522a8f8860f2814393b",
+    "Showcase_grid400_ReSTIR_CPU_Reference.png": "f34a1772027b00be922f583b18f7381d8bea7d23a3a87982a971087fc2cf9bb5",
+    "Showcase_grid400_Reference_CPU_Reference.png": "005d68ecce6b15594c93e9b7256b6b5d9e943c59591a61f25208d1bf2b28c9f9",
+    "Showcase_grid400_VisibilityRaster_CPU_Reference.png": "4b32007f7ab8036754fab82c40aebdfd992fdaca778c429ffb1b761b40a18edb",
+    "Showcase_metals_ReSTIR_CPU_Reference.png": "4ec72728742045f450cd2e169b12022d9dbe6b6d205ebc739a574fd46cab45fa",
+    "Showcase_metals_Reference_CPU_Reference.png": "6b033fe86fd600c2003a9bd692c36c877ffb56ccaa91184331304af73b8ca8f2",
+    "Showcase_metals_VisibilityRaster_CPU_Reference.png": "9979c29261c155006ff9b9b055271388190ed52bc3db5f253ef24344185626c2"
+  },
+  "paths": {
+    "visibilityRaster": "Engine/GeometricRaster/VisibilityRaster.cpp (RT off, GI off) with the sky from Projects/Project-Zero/Source/CelestialSequence::ApplyTo \u2014 the engine's own atmosphere, twilight, star, moon and fog model, not a gradient.",
+    "reSTIR": "Projects/Project-Zero/Host/MaterialLevelViewport --restir \u2014 ReSTIRViewport.slang's reservoir arithmetic transcribed 1:1 as C++ under FRONTIER_CPU_PORT.",
+    "reference": "Projects/Project-Zero/Host/MaterialLevelViewport \u2014 brute-force NEE + power-heuristic MIS through Engine/Shaders/MaterialEvaluation.slang compiled 1:1 as C++.",
+    "surfelGlobalIllumination": "NOT RENDERED. The engine has no CPU surfel path: SurfelIrradianceUpdate.slang and SurfelGIResolve.slang are GLSL compute awaiting the host port described in RaytraceToggle/PortingGuide.md. Claiming a surfel sheet here would be a lookalike, which is exactly what this rewrite removes."
+  }
+}
