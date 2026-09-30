@@ -4,13 +4,13 @@
 // See ShowroomStructure.h. Layout (camera at −Y looking +Y, Z up, metres):
 //
 //        room      4.0 wide (X ±2.0) · 5.0 deep (Y −2.0 … +3.0) · 3.0 tall (Z 0 … 3.0), open face at −Y
-//        walls     left red, right green (Cornell's, so colour bleed reads the same), rear / floor / ceiling white
+//        walls     left red, right green (so colour bleed reads clearly), rear / floor / ceiling white
 //        inlay     deep blue floor rectangle + amber strip along the rear base — saturated neighbours for the panel
 //        plinth    0.9 × 0.5 × 0.35 dark dielectric, centred under the panel
 //        chrome    r = 0.34 sphere on the plinth (metalness 1, roughness 0.08) — reflects the panel back at the eye
 //        pillar    0.34 × 0.34 × 1.5 matte column, left rear
 //        copper    r = 0.28 rough copper sphere on a short stand, right rear
-//        luminaire 1.2 × 1.0 ceiling panel (Cornell's ~32 nit) + a dimmer 0.8 × 0.3 rear strip for rim separation
+//        luminaire 1.2 × 1.0 ceiling panel (~32 nit) + a dimmer 0.8 × 0.3 rear strip for rim separation
 //
 // The interface panel hangs at (0, 1.55, 1.32), tilted ≈ 12° toward the eye — in front of the rear wall, above the
 //    chrome sphere, so its own light is visible both directly and in reflection.
@@ -121,7 +121,7 @@ void ShowroomStructure::Construct(uint32_t DropBodyCount) noexcept
 
     // ── Materials ────────────────────────────────────────────────────────────────────────────────────────────────
     {
-        MaterialDescriptor D = MakeMaterial("showroom_white");           // 0 — Cornell's neutral
+        MaterialDescriptor D = MakeMaterial("showroom_white");           // 0 — the neutral
         SetColour(D.Slabs[0].BaseColor, 0.73f, 0.73f, 0.73f);
         D.Slabs[0].SpecularWeight = 0.0f;
         Materials.push_back(D);
@@ -169,7 +169,7 @@ void ShowroomStructure::Construct(uint32_t DropBodyCount) noexcept
         D.Slabs[0].SpecularRoughness = 0.38f;
         Materials.push_back(D);
 
-        D = MakeMaterial("luminaire");                                    // 9 — Cornell's ceiling panel
+        D = MakeMaterial("luminaire");                                    // 9 — the ceiling panel
         SetColour(D.Slabs[0].BaseColor, 1.0f, 1.0f, 1.0f);
         D.Slabs[0].SpecularWeight    = 0.0f;
         D.Slabs[0].EmissionLuminance = 32.0f;
@@ -297,7 +297,7 @@ void ShowroomStructure::Construct(uint32_t DropBodyCount) noexcept
         }
     }
 
-    // ── Luminaires, appended LAST (the convention the Cornell box and shader ball share) ─────────────────────────
+    // ── Luminaires, appended LAST (the convention every analytical level here shares) ─────────────────────────
     // Ceiling panel, facing down (−Z).
     {
         const auto PanelSpan = OpenSpan("Ceiling Panel");

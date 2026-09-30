@@ -7,7 +7,7 @@
 //    sky), and a persistent field of world-space SURFELS carries only the INDIRECT (bounced) light, temporally averaged
 //    through a world-space hash grid so it converges and holds still (no boil).
 //
-//    Unlike the Cornell reference, the geometry here is a TRIANGLE SOUP (checker pad + ramp + bumps + cones from
+//    Unlike a closed-room reference, the geometry here is a TRIANGLE SOUP (checker pad + ramp + bumps + cones from
 //    DriveCourse, plus the real ControlVehicle shell and procedural wheels), so this file adds a compact BVH over the
 //    triangles for closest-hit and shadow queries. Output → Diagnostics/: drive_gi.ppm (tonemapped) + surfel_timing.log.
 //

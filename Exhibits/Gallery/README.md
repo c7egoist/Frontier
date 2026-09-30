@@ -14,11 +14,11 @@
 ```text
 Gallery/
 ├── CodeImages/                 Dynamic code-image ABI lifecycle result and provenance
-├── Drive/                      Canonical Project-Drive materials, Surfel/ReSTIR, XPBD, motion and editor-state CPU references
-├── ProjectZero/                Fresh Project-Zero showcase and M10 material-library CPU mirrors
+├── Drive/                      Project-Drive driven by the real VehicleSolver: driving GIFs, material angles, run graphs
+├── Editor/                     The engine's own EditorProof, run headless — eight editor phases
+├── ProjectZero/                The 20 x 20 material grid through the visibility raster, ReSTIR DI and a reference path trace
 ├── ReflectionReservoir/        Baseline, ReSTIR, and high-sample reflection reference
-├── RenderModes/CurrentUi/      Cornell plain-raster / Surfel-GI / ray-traced comparison
-└── SurfelGi/Cornell/           Cornell Surfel-GI convergence, coverage, and diagnostic views
+└── RenderModes/CurrentUi/      Material-grid plain-raster / Surfel-GI / ray-traced comparison
 ```
 
 The files in this hierarchy are intentionally portable PNG, text/CSV, Markdown, and JSON artifacts.

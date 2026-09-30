@@ -113,7 +113,10 @@ int main(int argc, char** argv)
     FILE* csv = std::fopen(csvPath.c_str(), "w");
     if (!csv) { std::fprintf(stderr, "[DriveTelemetry] cannot write %s\n", csvPath.c_str()); return 1; }
 
-    std::fprintf(csv, "t,x,y,z,speed_mps,fwd_mps,rpm,gear,boost_bar,throttle,brake,steer,airborne");
+    // The aero columns are the solver's OWN AeroForces breakdown (Aerodynamics.h), recorded so the sheets can
+    //    plot drag and downforce against speed instead of asserting them.
+    std::fprintf(csv, "t,x,y,z,speed_mps,fwd_mps,rpm,gear,boost_bar,throttle,brake,steer,airborne,"
+                      "aero_drag_N,aero_downforce_N,aero_front_N,aero_rear_N,aero_side_N,aero_pitch_Nm");
     for (int w = 0; w < 4; ++w)
         std::fprintf(csv, ",w%d_load_N,w%d_slip,w%d_slipang,w%d_steer,w%d_omega,w%d_contact,w%d_braketemp_K,w%d_abs",
                      w,w,w,w,w,w,w,w);
@@ -156,6 +159,9 @@ int main(int argc, char** argv)
                          t, ch.Position.x, ch.Position.y, ch.Position.z,
                          tl.SpeedMetresPerSecond, tl.ForwardSpeed, tl.EngineRPM, tl.GearIndex, tl.BoostBar,
                          in.Throttle, in.Brake, in.Steer, airborne?1:0);
+            std::fprintf(csv, ",%.2f,%.2f,%.2f,%.2f,%.2f,%.2f",
+                         tl.Aero.TotalDrag_N, tl.Aero.TotalDownforce_N, tl.Aero.FrontDownforce_N,
+                         tl.Aero.RearDownforce_N, tl.Aero.SideForce_N, tl.Aero.PitchMoment_Nm);
             for (int w=0; w<4; ++w)
             {
                 const auto& wt = tl.Wheels[w];

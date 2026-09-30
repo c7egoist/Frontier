@@ -2809,7 +2809,7 @@ void SwapchainExchange::UploadInstanceTraversal(const InstanceAcceleration& Inst
     //    TLAS leaf it reads BlasPlacements[blas].NodeOffset/LeafOffset and then indexes CwbvhNodes/CwbvhTris — the same
     //    buffers at bindings 8 and 9 used by the world-space path. Therefore, while TlasInstanceCount > 0, bindings
     //    8/9 must be the InstanceAcceleration shared BLAS blobs, not the stale world-space whole-scene CWBVH. The
-    //    Cornell box/single-instance path worked because TlasInstanceCount stayed 0 and the shader never took this arm.
+    //    The single-instance path worked because TlasInstanceCount stayed 0 and the shader never took this arm.
     if (!Vulkan || !Vulkan->Device) return;
 
     const std::vector<float>&    BlasNodes  = Instances.QueryNodeBlob();

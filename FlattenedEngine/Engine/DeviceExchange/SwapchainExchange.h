@@ -48,7 +48,7 @@ static constexpr float    kLuminanceLog2High      =  30.0f;   // 1e9 cd/m², abo
 //    It used to be a percentile window — the middle 75 % — and a percentile cannot tell a bright outlier from a
 //    bright subject, because both are just "the top of the distribution".
 //
-//    That distinction is the whole problem. A Cornell frame with the roof oculus in shot is two populations: a
+//    That distinction is the whole problem. An interior frame with a roof oculus in shot is two populations: a
 //    room near 1 cd/m² and a hole showing sky at thousands. Walking about changes how much of the frame the
 //    hole covers, the bright mode slid into and out of the average, and the reading swung 2 to 4.7 stops as the
 //    camera moved. Exposure is global, so the SKY pumped along with the room — which is the tell, because a sky

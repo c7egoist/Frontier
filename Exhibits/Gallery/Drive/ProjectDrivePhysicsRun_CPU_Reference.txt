@@ -8,5 +8,5 @@ Project-Drive — headless physics reference
   Max susp. travel . 0.371 m
   Min chassis up ... 0.939 (1.0 = level; dips while cornering / airborne)
   Final X .......... 173.9 m
-  Physics .......... 975.07 us/step, 4.3x real-time
-  Wrote ............ telemetry.csv, timing.log, run.log in Exhibits/Gallery/Drive/.physics
+  Physics .......... 1102.21 us/step, 3.8x real-time
+  Wrote ............ telemetry.csv, timing.log, run.log in /home/user/Slate/_AgentScratch/build/drive/telemetry

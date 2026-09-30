@@ -256,7 +256,7 @@ void MeasurePlacement(const PlacementRecord& P, const SceneStructure& Level,
     if (N > 0.0) { Normal[0] = static_cast<float>(Nx / N); Normal[1] = static_cast<float>(Ny / N); Normal[2] = static_cast<float>(Nz / N); }
 }
 
-// The emission direction snapped to its dominant world axis — "-Z (nadir)" for the Cornell luminaire.
+// The emission direction snapped to its dominant world axis — "-Z (nadir)" for a ceiling luminaire.
 void FormatDirection(char Text[48], const float D[3]) noexcept
 {
     const float Ax = std::fabs(D[0]), Ay = std::fabs(D[1]), Az = std::fabs(D[2]);

@@ -3,7 +3,7 @@
 //============================================================================================================================================
 // 📦 Project-Tractrix's drivable authoring level (`--scene drive`). The exact ShowroomStructure discipline — an analytic
 //    world-space triangle soup with per-object spans and OpenPBR materials, exported once through SceneCodec::Encode — but
-//    the furniture is a driving course instead of a Cornell box:
+//    the furniture is a driving course instead of an interior room:
 //
 //        • a flat CHECKER / grid pad the car spawns on (visible speed reference under the wheels);
 //        • a RAMP (wedge) ahead of the spawn for jumps;

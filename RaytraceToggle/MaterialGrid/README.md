@@ -50,7 +50,7 @@ Rendered 660×480, 130 frames, 44 spp (raytraced), surfel field converged to ~44
 cd ../CpuMirror
 g++ -std=c++20 -O2 -pthread ModeMatrix.cpp -o ModeMatrix
 ./ModeMatrix --scene grid --w 660 --h 480 --frames 130 --rays 8 --direct 48 --spp 44
-# writes mode_{plainraster,surfelgi,raytraced}.ppm   (--scene cornell for the box)
+# writes mode_{plainraster,surfelgi,raytraced}.ppm   (--scene grid|glint|emissive; grid is the default)
 ```
 
 ---

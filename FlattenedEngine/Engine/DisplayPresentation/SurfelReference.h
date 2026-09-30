@@ -3,7 +3,7 @@
 //============================================================================================================================================
 // 📦 Deterministic, Vulkan-free reference for the shared Surfel-GI field.
 //
-// This is engine code, rather than a Project-Drive/Cornell executable, so every project can use the same CPU oracle
+// This is engine code, rather than a per-project executable, so every project can use the same CPU oracle
 // when validating the GPU SurfelGIStage. The owner supplies scene-specific ray/lighting evaluation through the small
 // callback; this class owns the renderer-independent parts that must match on every project: persistent placement,
 // the spatial hash, Jacobi-style running mean, and irradiance gathering.

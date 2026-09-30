@@ -2,7 +2,7 @@
 //                                                  EDITORFEEDSEQUENCE.H
 //============================================================================================================================================
 // 🧩 The development editor's live feed: the outliner roster and the inspector sheet, both read off the loaded
-//    level every tick. No tables, no scene names — the same walk feeds the Cornell box, the showroom and the
+//    level every tick. No tables, no scene names — the same walk feeds the material grid, the showroom and the
 //    shader ball, because every figure comes from placements, instances, materials or the camera.
 //
 //    Roster layout (preorder, folders always in this order):

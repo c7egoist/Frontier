@@ -48,7 +48,7 @@ layout(std430, binding = 2) readonly buffer SurfelGridNextExtent { int  SurfelGr
 // Shared CWBVH blobs (identical bindings to the ReSTIR kernel's 8/9) — TraversalCWBVH.slang traces these.
 layout(std430, binding = 8) readonly buffer TraversalNodeExtent { vec4 CwbvhNodes[]; };
 layout(std430, binding = 9) readonly buffer TraversalLeafExtent { vec4 CwbvhTris[];  };
-uint TlasInstanceCount = 0u;   // single-blob world here (GTX Cornell/showcase); the two-level path plugs in as in ReSTIRViewport.
+uint TlasInstanceCount = 0u;   // single-blob world here (the showcase grid); the two-level path plugs in as in ReSTIRViewport.
 #include "TraversalCWBVH.slang"
 
 //------------------------------------------------------------------------------------------------------------------------

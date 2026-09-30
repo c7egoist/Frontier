@@ -187,7 +187,7 @@ std::vector<TriangleIndex> ReSTIRIntegrator::BuildTriangleIndex(
         Record.VertexGammaX  = Triangle.VertexGamma.x;
         Record.VertexGammaY  = Triangle.VertexGamma.y;
         Record.VertexGammaZ  = Triangle.VertexGamma.z;
-        // R4a: no per-face normal or UVs in the analytical Cornell soup (flat-shaded, untextured)
+        // R4a: no per-face normal or UVs in the analytical triangle soup (flat-shaded, untextured)
         Records.push_back(Record);
     }
     return Records;

@@ -629,7 +629,7 @@ bool AlphaMaskCutOut(uint primitive, vec3 hitPos)
 //    to the same element by moving `low` on every `<=`, which keeps empty instances resolving exactly as before
 //    instead of handing the primitive to whichever duplicate the search happened to land on first.
 //
-//    Cornell has two instances, where this is a wash. It is O(instances) per ray hit that matters: every closest
+//    A two-instance level is a wash. It is O(instances) per ray hit that matters: every closest
 //    hit on every candidate and bounce ray pays it, so on a real scene the walk is a per-ray tax proportional to
 //    scene complexity.
 uint InstanceOfPrimitive(uint flatPrimitive)
@@ -1080,7 +1080,7 @@ void ResampleCandidate(inout Reservoir res, vec3 point, uint light, vec2 uv, flo
 // One direct-light candidate, sun or lamp — the initial loop and the extras loop both draw through here, so the
 //    two cannot drift into different estimators. Weights answer w = p̂/p EXACTLY, both continuous pdfs included:
 //    a mesh sample's pdf is p_coin·p_light·(1/area) and a sun sample's is p_coin·(1/Ω). The kernel used to divide
-//    by the pick alone, which paid every lamp's contribution divided by its area (the Cornell lamp rendered 2.5x
+//    by the pick alone, which paid every lamp's contribution divided by its area (a ceiling lamp rendered 2.5x
 //    too bright) — the CPU raster never had this bug (Tap.Weight carries the area), and the SunDirectProof pins
 //    the corrected scale against quadrature. HitPos anchors the sun's far point; SunUp (any direct radiance)
 //    decides whether the coin is flipped at all.

@@ -2,7 +2,7 @@
 steps                 2880
 fixed_dt_s            0.004167 (240 Hz)
 sim_time_s            12.000
-wall_time_ms          2815.17
-physics_total_ms      2808.21
-physics_per_step_us   975.07
-realtime_factor       4.3x
+wall_time_ms          3185.82
+physics_total_ms      3174.37
+physics_per_step_us   1102.21
+realtime_factor       3.8x

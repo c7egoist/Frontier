@@ -1,6 +1,7 @@
 # Raytracing toggle + Surfel GI + reflection modes — engine integration
 
-Wires the proven surfel GI (`../SurfelGI/`) into the real Frontier pipeline as a selectable render path,
+Wires the proven surfel GI (`CpuMirror/ModeMatrix.cpp`, rendered on the material grid) into the real Frontier
+pipeline as a selectable render path,
 adds a **Raytracing** quick tile, and turns **Reflections** into a 3-way mode (Off / Sky / Raytraced).
 
 ## The mode matrix (what the tiles do)

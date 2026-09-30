@@ -167,39 +167,6 @@ static Scene buildEmissiveTest(){
     return S;
 }
 
-static Scene buildCornell(){
-    Scene S; V white{0.75f,0.75f,0.75f}, red{0.75f,0.15f,0.15f}, green{0.15f,0.6f,0.15f}, zero{0,0,0};
-    // room [0,1]^3, front (z=0 side, -z) open toward camera
-    S.q.push_back({{0,0,0},{1,0,0},{0,0,1},{0,1,0},  white, zero}); // floor
-    S.q.push_back({{0,1,0},{1,0,0},{0,0,1},{0,-1,0}, white, zero}); // ceiling
-    S.q.push_back({{0,0,1},{1,0,0},{0,1,0},{0,0,-1}, white, zero}); // back
-    S.q.push_back({{0,0,0},{0,1,0},{0,0,1},{1,0,0},  red,   zero}); // left  (red)
-    S.q.push_back({{1,0,0},{0,1,0},{0,0,1},{-1,0,0}, green, zero}); // right (green)
-    // area light on the ceiling
-    S.light=(int)S.q.size();
-    S.q.push_back({{0.35f,0.999f,0.35f},{0.30f,0,0},{0,0,0.30f},{0,-1,0}, zero, {18,18,18}});
-    // two boxes (axis-aligned; 5 faces each, bottom omitted)
-    auto box=[&](V mn,V mx){
-        float dx=mx.x-mn.x, dy=mx.y-mn.y, dz=mx.z-mn.z;
-        S.q.push_back({{mn.x,mx.y,mn.z},{dx,0,0},{0,0,dz},{0,1,0},  white,zero}); // top
-        S.q.push_back({{mx.x,mn.y,mn.z},{0,dy,0},{0,0,dz},{1,0,0},  white,zero}); // +x
-        S.q.push_back({{mn.x,mn.y,mn.z},{0,dy,0},{0,0,dz},{-1,0,0}, white,zero}); // -x
-        S.q.push_back({{mn.x,mn.y,mx.z},{dx,0,0},{0,dy,0},{0,0,1},  white,zero}); // +z
-        S.q.push_back({{mn.x,mn.y,mn.z},{dx,0,0},{0,dy,0},{0,0,-1}, white,zero}); // -z
-    };
-    box({0.12f,0.0f,0.66f},{0.33f,0.55f,0.84f}); // tall box, back-left corner (flat-surface reference)
-    // ---- curved analytic primitives (the point of this scene) ----
-    V ivory{0.80f,0.78f,0.72f}, pale{0.72f,0.72f,0.78f};
-    auto sph=[&](V c,float r,Mat m){ Sphere s; s.c=c; s.r=r; s.m=m; S.s.push_back(s); };
-    Mat metalM; metalM.base=ivory; metalM.metal=1.f; metalM.rough=0.04f;
-    Mat diffM;  diffM.base=pale;   diffM.rough=1.f;  diffM.spec=0.f;
-    Mat whiteM; whiteM.base=white; whiteM.rough=1.f; whiteM.spec=0.f;
-    sph({0.66f,0.20f,0.55f},0.20f, metalM);   // big sphere = POLISHED METAL -> shows reflection modes
-    sph({0.34f,0.13f,0.34f},0.13f, diffM);    // medium sphere, front-left -> red bleed
-    sph({0.72f,0.62f,0.32f},0.085f,whiteM);   // small floating sphere -> curvature test
-    return S;
-}
-
 // A close-up row of glint-flake spheres, density ramping 0.6 -> 8 left to right, over the studio checker floor. The
 //    dedicated sheet for verifying that flakes SPARKLE on the non-raytraced paths (plain raster + surfel GI), not only
 //    under the path tracer. Same flake body as row 12 of the showcase grid, just larger and camera-close.
@@ -490,7 +457,7 @@ static inline V diffuseAlbedo(const Mat& m){
 
 int main(int argc,char**argv){
     int W=480,H=480, FRAMES=320, RAYS=8, DIRECT=64, SPP=32, AA=1;
-    std::string sceneName="cornell";
+    std::string sceneName="grid";   // the product default: the showcase material grid
     bool useSlab=false;                                       // --slabs: shade via the layered multi-slab stack (#29)
     for(int i=1;i<argc;++i){ std::string a=argv[i];
         auto nx=[&](int d){ return i+1<argc?atoi(argv[++i]):d; };
@@ -502,19 +469,15 @@ int main(int argc,char**argv){
     }
     Cam cam; cam.aspect=(float)W/H; cam.W=W; cam.H=H;
     Scene S;
-    if(sceneName=="grid"){
-        S=buildShowcaseGrid();
-        lookAt(cam, V{0.0f, 12.5f, -19.0f}, V{0.0f, 0.4f, 1.5f}, 44.0f);   // angled look over the 15x15 showcase field
-    } else if(sceneName=="glint"){
+    if(sceneName=="glint"){
         S=buildGlintSheet();
         lookAt(cam, V{0.0f, 3.4f, -8.5f}, V{0.0f, 0.55f, 0.0f}, 40.0f);    // close row of flake spheres over the checker
     } else if(sceneName=="emissive"){
         S=buildEmissiveTest();
         lookAt(cam, V{0.0f, 3.6f, -7.2f}, V{0.0f, 1.0f, 0.6f}, 44.0f);     // emissive-sphere-only-lit GI test
     } else {
-        S=buildCornell();
-        cam.eye={0.5f,0.5f,-1.55f}; cam.fwd={0,0,1}; cam.right={1,0,0}; cam.up={0,1,0};
-        cam.tanHalf=std::tan(21.0f*PI/180.0f);
+        S=buildShowcaseGrid();
+        lookAt(cam, V{0.0f, 12.5f, -19.0f}, V{0.0f, 0.4f, 1.5f}, 44.0f);   // angled look over the showcase field
     }
 
     // ---- 1. VISIBILITY PASS -> G-buffer ----
@@ -528,8 +491,8 @@ int main(int argc,char**argv){
     });
 
     // ---- 2. SURFEL FIELD ----
-    // surfel field scale follows the scene: the Cornell box is ~1 m, the material grid ~40 m.
-    const bool  bigScene = (sceneName=="grid");
+    // surfel field scale follows the scene: the material grid is ~40 m, the close sheets ~1 m.
+    const bool  bigScene = (sceneName!="glint" && sceneName!="emissive");
     const float RMIN = bigScene?0.22f:0.035f, RMAX = bigScene?0.70f:0.090f, COVERAGE_TARGET=2.4f;
     const float RADFAC = bigScene?0.055f:0.030f;
     const int   SPAWN_BUDGET = bigScene?4000:1200;      // max new surfels per frame
