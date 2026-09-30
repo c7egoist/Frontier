@@ -1,6 +1,6 @@
 # GRIT → Frontier Vehicle Physics Port — Plan of Record
 
-**Codename:** `Project-Tractrix` (a duplicate of Project-Zero as the host showcase).
+**Codename:** `Project-Tractrix` (an independent project opened by Frontier.exe).
 **Source project:** `SultanAladin/GRIT` — Chaos PBD vehicle, line-trace suspension, Pacejka tyres, full drivetrain, EpicAdapter/EOS.
 **Target project:** `SultanAladin/Frontier-` (`main`) — Jolt 5.6.x rigid-body engine (`Engine/PhysicalDynamics/RigidBodySolver.{h,cpp}`).
 
@@ -20,12 +20,12 @@
 
 ## Phase 0 — Seam + thread + soft-tyre skeleton  **(this deliverable)**
 
-Everything here is delivered as a path-mirrored `Overlay/` tree plus a duplication script; nothing is committed into
-the Frontier repo by this deliverable (see `README.md` for how to apply it).
+Everything here is delivered as a path-mirrored `Overlay/` tree plus a standalone project-specification creator;
+nothing is committed into the Frontier repo by this deliverable (see `README.md` for how to apply it).
 
 | Item | Where | Status |
 |------|-------|--------|
-| Duplicate Project-Zero → Project-Tractrix | `Overlay/Projects/Project-Tractrix/Build/DuplicateFromProjectZero.py` | ✅ script + CMake snippet |
+| Independent Project-Tractrix specification and code image | `Overlay/Projects/Project-Tractrix/{ProjectTractrix.frontier,Build/CreateProjectSpecification.py}` | ✅ |
 | Jolt seam: explicit single step | `RigidBodySolver::StepOnce()` | ✅ |
 | Jolt seam: forces/torques (incl. at-point) | `ApplyForce / ApplyForceAtPoint / ApplyTorque / ApplyAngularImpulse` | ✅ |
 | Jolt seam: body queries | `QueryBodyMass / QueryCenterOfMass / QueryPointVelocity` | ✅ |

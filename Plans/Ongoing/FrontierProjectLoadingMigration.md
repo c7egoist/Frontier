@@ -6,8 +6,9 @@ Make `Frontier.exe` the sole windowed executable. It owns the reusable engine fa
 from a `.frontier` specification and, when required, a project DLL. `Project-Zero` becomes one project opened by
 Frontier, never the executable or source donor for another project.
 
-This document records the selected delivery shape and the ordered work needed to reach it. It does not claim that
-`Frontier.exe` exists in this checkout.
+This document records the selected delivery shape and its implementation status. The source and build-route migration
+now exists in this checkout; a full Windows/Vulkan execution remains unverified because no build or runtime probe has
+been authorized in this session.
 
 ## Selected delivery shape
 
@@ -126,6 +127,22 @@ The project supplies callbacks that:
 Engine facilities retain all Vulkan, ImGui, window, swapchain, allocator, and thread ownership. Project code never
 starts a window, creates a second renderer, or reaches into another project's source folder. ABI compatibility is
 established with a number, a structure-size check, and a generated interface hash before any callback runs.
+
+## Implementation status
+
+- 🟢 `Engine/ProjectInterchange/` now decodes and validates `.frontier` streams, resolves project-local locations,
+  loads optional code images, and verifies the versioned C ABI before project callbacks run.
+- 🟢 `Engine/Host/FrontierExecution.cpp` is the sole Frontier windowed entry. The former Project-Zero host runtime,
+  editor feed, camera, celestial, scene, and presentation support are compiled from `Engine/Host/` by `Frontier`.
+- 🟢 ProjectZero and ProjectDrive now have independent specifications and narrow C ABI image entries. The CMake and
+  PowerShell routes compile shared source into `Frontier.exe` once and link the code images separately.
+- 🟢 Project-Drive no longer defines a `PROJECT_ZERO_SOURCES` derivative, a `DriveExecution.cpp` target, or a windowed
+  project target. Project-Tractrix's creator now emits a standalone specification and image instead of copying a project.
+- 🟢 `Tools/Build/ProjectOwnershipChecks.py` rejects restored project window entries, cross-project source includes,
+  copied `GameExecution.cpp`, Project-Zero batch reuse, and invalid project specifications.
+- 🚧 No CMake, MSVC, shader, CPU reference, or Vulkan-device invocation has run for this migration. The session rule
+  requires explicit approval before such a build or verification executable starts; the local environment also lacks
+  the Windows/Vulkan toolchain.
 
 ## Migration sequence
 

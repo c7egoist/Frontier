@@ -1,2 +1,2 @@
-# DriveCourse.gltf is generated here on first launch by DriveSceneAuthor::Construct()/Export()
-# (see Projects/Project-Drive/Source/DriveExecution.cpp). Delete DriveCourse.gltf to regenerate it.
+# Project-Drive opening-scene location declared by ProjectDrive.frontier.
+# Project-specific authoring may generate DriveCourse.gltf here; Frontier.exe remains its sole renderer.

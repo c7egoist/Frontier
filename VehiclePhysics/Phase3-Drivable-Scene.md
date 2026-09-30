@@ -101,8 +101,8 @@ dynamics, not a bug; the cornering test uses a realistic input.)
    1–2 `Vehicle/` modules) and add `VehicleController.cpp` to the Project-Tractrix source list. The production model links
    the already-vendored Phase-1/2 units `PacejkaTyreModel.cpp`, `TyreSlipDynamics.cpp` and `Drivetrain.cpp` (also add
    them to the source list if the project does not already build them).
-2. Copy `Overlay/Projects/Project-Tractrix/Source/TractrixProvingGround.h` and `TractrixVehicleScene.h` into the duplicated
-   project (see `Overlay/Projects/Project-Tractrix/Build/DuplicateFromProjectZero.py`).
+2. Add `Overlay/Projects/Project-Tractrix/Source/TractrixProvingGround.h` and `TractrixVehicleScene.h` to the
+   independent Project-Tractrix code-image source set; do not copy another project host.
 3. In the project bootstrap: `TractrixVehicleScene scene; scene.Bring();` then each game tick `scene.SetInput(input);`
    and read `scene.Telemetry(t)` to place the chassis box + four wheels for rendering.
 

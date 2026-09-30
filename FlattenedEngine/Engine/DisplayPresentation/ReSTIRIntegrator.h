@@ -14,8 +14,8 @@
 #include "../ContentInterchange/MaterialDescriptor.h"
 #include "DenoiseGuide.h"
 #include "ExposureIntegrator.h"
-#include "../../Projects/Project-Zero/Source/RayTracingSolver.h"
-#include "../../Projects/Project-Zero/Source/FlyThroughSolver.h"
+#include "../Host/RayTracingSolver.h"
+#include "../Host/FlyThroughSolver.h"
 #include <cmath>
 #include <cstdint>
 #include <vector>

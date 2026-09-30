@@ -1,51 +1,51 @@
 //============================================================================================================================================
 //                                              ENGINE BINARY + PROJECT LOADING — DIRECTION NOTE
 //============================================================================================================================================
-// 📦 Dated design note (2026-09-30). Records the intended architecture; the change itself is NOT yet done.
+// 📦 Dated architecture note (2026-09-30) for Frontier.exe project opening and code-image ownership.
 
 # Engine as one binary; projects opened by it
 
-**Status:** 🚧 direction noted — **not yet implemented**. This is a forward decision to build against, not a description
-of the current tree. Filed here (dated note, not a README) per the notes policy in `CLAUDE.md`.
+**Status:** 🚧 source migration delivered; build and device execution remain pending explicit authorization and a complete
+toolchain.
 
-## The direction
+## The runtime shape
 
-Build the engine as a **single binary** — `Frontier.exe` — that contains all the **shared systems** compiled once:
-sun/sky, physics, rendering, ReSTIR GI, device/swapchain, input, the editor host, and so on. A **project** is then a
-thing the engine **opens**, not its own executable:
+`Frontier.exe` is the sole windowed host. It reads a `ProjectName.frontier` stream, resolves content and opening-scene
+locations relative to that stream, optionally loads a project code image, then brings up the shared window, device,
+renderer, editor, input, camera, celestial, and GPU/CPU Surfel-GI facilities once.
 
+```text
+Frontier.exe Projects/Project-Zero/ProjectZero.frontier
+Frontier.exe Projects/Project-Drive/ProjectDrive.frontier
 ```
-Frontier.exe ProjectZero.<ext>
-Frontier.exe ProjectDrive.<ext>
-```
 
-The engine boots, reads the named project (its scene, content, configuration, and project-specific code), and runs it.
+A project is therefore content and project behaviour opened by the engine, not a second executable. Project-Zero is one
+such project and is no longer the source batch or runtime donor for Project-Drive or a new project.
 
-## Why (and how it fits the existing rules)
+## Code-image edge
 
-- Today each project tends to be a standalone executable that pulls in **Project-Zero's** host (`GameExecution.cpp`)
-  for everything — window, Vulkan host, editor, scene loop. That couples every project to Project-Zero and duplicates
-  the host per project.
-- The governance already says: **shared systems live in `Engine/` and are reused, never copied; each project is
-  different and never a copy of another.** One engine binary is the natural conclusion — the shared host/systems are
-  compiled **once** into `Frontier.exe`; a project carries only what makes it that project.
+A project image exports `ConstructProjectInterchange`, the versioned C ABI declared in
+`Engine/ProjectInterchange/ProjectInterchange.h`. The host requires an exact interchange number, interface fingerprint,
+and structure size before invoking project code. Only C-layout records and C function references cross this edge:
 
-## Decisions recorded on 2026-09-30
+- the host provides project paths, display-cycle duration, read-only input readings, scene mutation receptions, camera
+  requests, rendering preferences, panel declarations, and diagnostic publication;
+- project code provides construction, per-cycle simulation, and retirement callbacks;
+- no C++ standard-library record, exception, allocator ownership, Vulkan reference, or ImGui record crosses the edge.
 
-- **Project specification** — each project uses `ProjectName.frontier`, a declarative file naming its content, opening
-  scene, launch configuration, DLL, and interchange number.
-- **Project-specific C++** — each project delivers a dynamic DLL through the versioned `CodeInterchange` C ABI. An
-  edit to a project rebuilds that DLL without rebuilding `Frontier.exe`.
-- **Host extraction** — reusable window, Vulkan, editor, renderer, camera, input, and celestial work move from
-  `GameExecution.cpp` into the engine-owned `FrontierHost` executable.
-- **Toolchains** — update every build route together: PowerShell/MSVC first, then `Module.toml` and orchestration,
-  then any CMake or g++ support route. Shared translation units compile into `Frontier.exe` only.
+ProjectZero and ProjectDrive have independent `.frontier` streams and image construction entries. A Project-Drive image
+relink does not name shared Frontier translation units in CMake or the primary PowerShell batch.
 
-## Current standing
+## Authoring rule
 
-The implementation is not in this partial Slate checkout. The exact migration sequence, C ABI guarantee, source
-ownership, and completion evidence are in
-[`Plans/Ongoing/FrontierProjectLoadingMigration.md`](../Plans/Ongoing/FrontierProjectLoadingMigration.md).
+A new project starts with a project specification and a minimal C ABI image. The standalone creator is
+`Projects/Project-Tractrix/Build/CreateProjectSpecification.py`; it does not copy `GameExecution.cpp`, an existing
+project source tree, a renderer, an editor, or a windowed entry. `Tools/Build/ProjectOwnershipChecks.py` records the
+static gates that prevent those boundaries from returning.
 
-Existing standalone project executables remain compatibility paths during migration. They must not be copied or used
-as the creation pattern for a new project.
+## Current evidence boundary
+
+This source delivery wires the ownership and build descriptions but has not been built or run in this session: the
+repository instruction requires authorization before a build, probe, or verification executable is started, and the
+local environment lacks the Windows/Vulkan toolchain. Runtime proof still requires a Windows device run that opens both
+specifications, shows common shared facilities, and records the shared GPU Surfel dispatches against the CPU reference.

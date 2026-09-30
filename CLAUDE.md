@@ -80,9 +80,10 @@ When a plan changes standing, **move the file** between these folders rather tha
   simulation, camera behaviour, and editor panels. Changing it must not rebuild shared engine translation units.
 - `Project-Zero` is a project opened by Frontier, not a host source donor. Do not copy `GameExecution.cpp`, use
   `PROJECT_ZERO_SOURCES`, include another project's source, or launch a new project through Project-Zero.
-- Until the migration lands, existing standalone project executables are legacy compatibility paths only. Do not use
-  them as a pattern for new work; follow
-  [`Plans/Ongoing/FrontierProjectLoadingMigration.md`](Plans/Ongoing/FrontierProjectLoadingMigration.md).
+- The migration is active in the build routes: create and open projects through `Frontier.exe ProjectName.frontier`.
+  `Tools/Build/ProjectOwnershipChecks.py` rejects a returned project windowed entry, copied `GameExecution.cpp`,
+  `PROJECT_ZERO_SOURCES` reuse, project-to-project source include, or a non-Zero specification that resolves through
+  Project-Zero.
 - Shared authoring tools used to make content, not shipped in a project, live under `Engine/AuthoringTools/`.
   Example: SolidArc lives at `Engine/AuthoringTools/SolidArc`; project content and scripts consuming it stay with
   that project.

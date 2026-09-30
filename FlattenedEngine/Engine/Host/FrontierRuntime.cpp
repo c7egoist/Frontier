@@ -1,70 +1,70 @@
 //============================================================================================================================================
 //                                                      GAMEEXECUTION.CPP
 //============================================================================================================================================
-// 📦 Project-Zero entry point — opens the Vulkan window, makes a glTF level resident, runs the ReSTIR render loop.
+// 📦 Shared Frontier runtime — opens the Vulkan window, makes the selected project scene resident, and runs ReSTIR.
 //
-//    Scene selection (R2): `Project-Zero.exe [--scene <file.gltf|glb|shaderball|materials|showroom|showcase>] [--scale <float>]`
+//    Scene selection: `Frontier.exe ProjectName.frontier [--scene <file.gltf|glb>] [--scale <float>]`
 //        showroom — P0 spatial-interface level, exported once from ShowroomStructure then imported like any other
 //        materials — the material library level (M10): 42 swatch spheres (plastics → coat → metals → glass →
 //                    subsurface → cloth/specials) plus three sign panels, exported once from MaterialSwatchStructure
 //        showcase — the default level: a 6x6 grid of OpenPBR spheres (anisotropic metals, IOR glass, subsurface,
 //                    coat, cloth/fuzz, thin film, haziness, EON, emission, glints) over a scattered field of boxes,
 //                    cylinders and cones, lit by two area luminaires. Exported once from ShowcaseStructure.
-//        default  Projects/Project-Zero/Content/Scenes/Showcase.gltf — regenerated from ShowcaseStructure when the
-//                 file is missing OR was written by an older kShowcaseRevision
-//                 (the Cornell box stays one --scene path away, untouched as the reference).
-//        Sponza   Projects/Project-Zero/Content/Scenes/Sponza/Sponza.gltf (fetched by the build script, not committed).
+//        the selected .frontier opening scene is authoritative; an explicit --scene supplies an alternate file.
 
-#include "../../../Engine/DeviceExchange/SwapchainExchange.h"
-#include "../../../Engine/DisplayPresentation/ReSTIRIntegrator.h"
-#include "../../../Engine/DisplayPresentation/ShadingTableCodec.h"
-#include "../../../Engine/DisplayPresentation/RenderScheduler.h"
-#include "../../../Engine/DisplayPresentation/CelestialTier.h"
+#include "../DeviceExchange/SwapchainExchange.h"
+#include "../DisplayPresentation/ReSTIRIntegrator.h"
+#include "../DisplayPresentation/ShadingTableCodec.h"
+#include "../DisplayPresentation/RenderScheduler.h"
+#include "../DisplayPresentation/CelestialTier.h"
 #include "CelestialSequence.h"
-#include "../../../Engine/Editor/EditorInstance.h"
-#include "../../../Engine/DeviceExchange/DiagnosticMetrics.h"
-#include "../../../Engine/DisplayPresentation/ControlCentreHost.h"
-#include "../../../Engine/DisplayPresentation/PixelSpace.h"
-#include "../../../Engine/DisplayPresentation/FidelityClassifier.h"
-#include "../../../Engine/DisplayPresentation/NotificationQueue.h"
-#include "../../../Engine/DisplayPresentation/TelemetryMetrics.h"
-#include "../../../Engine/DisplayPresentation/TypefaceRegistry.h"
-#include "../../../Engine/DisplayPresentation/ConfigurationRegistry.h"
-#include "../../../Engine/DisplayPresentation/DiagnosticInspector.h"
-#include "../../../Engine/ContentInterchange/ContentCodec.h"
-#include "../../../Engine/ContentInterchange/AssetResolution.h"
-#include "../../../Engine/GeometricRaster/SceneStructure.h"
-#include "../../../Engine/GeometricRaster/TraversalIndex.h"
-#include "../../../Engine/GeometricRaster/InstanceAcceleration.h"   // D6/D7 two-level: BLASes + instance top level
+#include "../Editor/EditorInstance.h"
+#include "../DeviceExchange/DiagnosticMetrics.h"
+#include "../DisplayPresentation/ControlCentreHost.h"
+#include "../DisplayPresentation/PixelSpace.h"
+#include "../DisplayPresentation/FidelityClassifier.h"
+#include "../DisplayPresentation/NotificationQueue.h"
+#include "../DisplayPresentation/TelemetryMetrics.h"
+#include "../DisplayPresentation/TypefaceRegistry.h"
+#include "../DisplayPresentation/ConfigurationRegistry.h"
+#include "../DisplayPresentation/DiagnosticInspector.h"
+#include "../ContentInterchange/ContentCodec.h"
+#include "../ContentInterchange/AssetResolution.h"
+#include "../GeometricRaster/SceneStructure.h"
+#include "../GeometricRaster/TraversalIndex.h"
+#include "../GeometricRaster/InstanceAcceleration.h"   // D6/D7 two-level: BLASes + instance top level
 #include "FlyThroughSolver.h"
 #include "RayTracingSolver.h"
-#include "../../../Engine/ContentInterchange/ShaderballPreview.h"
-#include "../../../Engine/ContentInterchange/ShaderBallStructure.h"
-#include "../../../Engine/ContentInterchange/ShowcaseStructure.h"
+#include "../ContentInterchange/ShaderballPreview.h"
+#include "../ContentInterchange/ShaderBallStructure.h"
+#include "../ContentInterchange/ShowcaseStructure.h"
 #include "WaterBodySequence.h"
 #include "StartupLog.h"
-#include "../../Project-Fluid/Source/GpuSurfaceExtractor.h"
+#include "../../Projects/Project-Fluid/Source/GpuSurfaceExtractor.h"
 int RunProjectFluidPreview();
-#include "../../../Engine/ContentInterchange/MaterialSwatchStructure.h"
+#include "../ContentInterchange/MaterialSwatchStructure.h"
 #include "ShowroomStructure.h"
 #include "EditorFeedSequence.h"
 #include "EditorInspectorSequence.h"
-#include "../../../Engine/DeviceExchange/InterfaceExchange.h"
-#include "../../../Engine/DeviceExchange/GizmoExchange.h"
-#include "../../../Engine/SpatialInterface/InterfaceSequence.h"
-#include "../../../Engine/SpatialInterface/InterfacePointerProjection.h"
-#include "../../../Engine/GeometricRaster/ClipProjection.h"
-#include "../../../Engine/DisplayPresentation/SkyDomeSheet.h"   // #26A: kSkyDomeSide for the lazy bake in ④d
+#include "../DeviceExchange/InterfaceExchange.h"
+#include "../DeviceExchange/GizmoExchange.h"
+#include "../SpatialInterface/InterfaceSequence.h"
+#include "../SpatialInterface/InterfacePointerProjection.h"
+#include "../GeometricRaster/ClipProjection.h"
+#include "../DisplayPresentation/SkyDomeSheet.h"   // #26A: kSkyDomeSide for the lazy bake in ④d
 #include "InterfaceTrialSequence.h"
 #include "InstanceMotionSequence.h"
 #include "PerformanceTelemetrySequence.h"
-#include "../../../Engine/DeviceExchange/TelemetryProbe.h"   // dev/debug-only in-RAM probe; every FRONTIER_PROBE_* call compiles out of ship builds
+#include "../DeviceExchange/TelemetryProbe.h"   // dev/debug-only in-RAM probe; every FRONTIER_PROBE_* call compiles out of ship builds
 #include "PhysicsInstanceSequence.h"
 #include "InterfaceAudioSequence.h"
-#include "../../../Engine/SpatialInterface/InterfaceScreenSequence.h"
-#include "../../../Engine/SpatialInterface/InterfaceTextProjection.h"
-#include "../../../Engine/SpatialInterface/InterfaceVectorCodec.h"
-#include "../../../Engine/SpatialInterface/InterfaceLightProjection.h"
+#include "FrontierRuntime.h"
+#include "../ProjectInterchange/CodeInterchange.h"
+#include "../ProjectInterchange/ProjectSpecification.h"
+#include "../SpatialInterface/InterfaceScreenSequence.h"
+#include "../SpatialInterface/InterfaceTextProjection.h"
+#include "../SpatialInterface/InterfaceVectorCodec.h"
+#include "../SpatialInterface/InterfaceLightProjection.h"
 
 #include <algorithm>
 #include <chrono>
@@ -139,12 +139,18 @@ void ApplyGizmoDemand(const Frontier::GizmoDemand& Demand, const Frontier::Gizmo
 } // namespace
 #endif
 
-int main(int argc, char** argv)
+int Frontier::RunFrontierRuntime(
+    int argc,
+    char** argv,
+    const ProjectSpecification& ResolvedSpecification,
+    CodeInterchange& ActiveInterchange)
 {
     // Dev/debug-only in-RAM telemetry probe (TelemetryProbe.h): pins the boot epoch FIRST so every startup phase,
     //    shader load and frame row is measured against the true start of main. Ship builds compile this to nothing.
     FRONTIER_PROBE_BOOT();
-    Frontier::ProjectZero::StartupLog Startup;
+    Frontier::HostRuntime::StartupLog Startup;
+    const auto StartupTime = Frontier::HostRuntime::StartupLog::Now();
+    const std::string ProjectName = ResolvedSpecification.ProjectName;
     for(int I=1;I<argc;++I){
         if(std::strcmp(argv[I],"--fluid-gpu-test")==0||std::strcmp(argv[I],"--fluid-cpu-test")==0)
             return Frontier::ProjectFluid::RunFluidGpuTest(argc,argv);
@@ -156,7 +162,7 @@ int main(int argc, char** argv)
     constexpr uint32_t kDropBodyCount = 12u;
 
     // Showcase is the default level (the Cornell box stays one --scene path away, untouched as the reference).
-    std::string ScenePath  = "Projects/Project-Zero/Content/Scenes/Showcase.gltf";
+    std::string ScenePath  = ResolvedSpecification.OpeningSceneLocation.string();
     float       SceneScale = 1.0f;
     bool        WaterSnapshot = false; // opt-in load-time Ripple mesh, not live GPU simulation
     bool        AnimateInstances = false;   // D3: --animate drives instance transforms from a scripted path
@@ -170,15 +176,7 @@ int main(int argc, char** argv)
         if (std::strcmp(argv[I], "--scene") == 0) ScenePath  = argv[++I];
         if (std::strcmp(argv[I], "--scale") == 0) SceneScale = static_cast<float>(std::atof(argv[++I]));
     }
-    if (ScenePath == "shaderball") ScenePath = "Projects/Project-Zero/Content/Scenes/ShaderBall.gltf";   // R4b material test level
-    if (ScenePath == "materials")  ScenePath = "Projects/Project-Zero/Content/Scenes/Materials.gltf";    // M10 material library level
-    if (ScenePath == "showroom")   ScenePath = "Projects/Project-Zero/Content/Scenes/Showroom.gltf";     // P0 spatial-interface level
-    // The open-air scene.
-    if (ScenePath == "outdoor")    ScenePath = "Projects/Project-Zero/Content/Scenes/Outdoor.gltf";
-    // The showcase field (default level).
-    if (ScenePath == "showcase")   ScenePath = "Projects/Project-Zero/Content/Scenes/Showcase.gltf";
     bool DropScene = false;
-    if (ScenePath == "drop") { ScenePath = "Projects/Project-Zero/Content/Scenes/ShowroomDrop.gltf"; DropScene = true; }   // D4 physics level
 
     // Anchor every repository-relative path to the content root before anything opens a file. Levels are exported
     //    once and then imported forever, so a run whose working directory is not the repository root would otherwise
@@ -195,7 +193,7 @@ int main(int argc, char** argv)
     //──────────────────────────────────────────────────────────────────────────
     Frontier::DiagnosticConfiguration DiagnosticConfig{};
     DiagnosticConfig.DestinationFolder          = "Diagnostics";
-    DiagnosticConfig.OutputFileStem             = "ProjectZero_TelemetryReport";
+    DiagnosticConfig.OutputFileStem             = ProjectName + "_TelemetryReport";
     DiagnosticConfig.FileExtension              = ".md";
     DiagnosticConfig.TimestampPrefixEnabled     = true;
     DiagnosticConfig.ConsoleEchoEnabled         = true;    // 💡 mirror telemetry into the console so a failed bring-up is visible
@@ -203,15 +201,15 @@ int main(int argc, char** argv)
 
     Frontier::DiagnosticMetrics Logger(DiagnosticConfig);
     if (!Logger.InitializeSink())
-        std::cerr << "[Project-Zero] Telemetry sink could not be opened; continuing with console output only.\n";
+        std::cerr << "[" << ProjectName << "] Telemetry sink could not be opened; continuing with console output only.\n";
     Logger.RecordMessage(Frontier::DiagnosticSeverity::Information,
-                         "Bootstrap", "Project-Zero windowed ReSTIR renderer starting.");
+                         "Bootstrap", (ProjectName + " windowed Frontier renderer starting.").c_str());
 
     //──────────────────────────────────────────────────────────────────────────
     // Scene — glTF level made resident (R2). The Cornell box is exported once from the analytical solver so the
     //    reference image goes through the same import path as any other level.
     //──────────────────────────────────────────────────────────────────────────
-    Frontier::ProjectZero::RayTracingSolver Scene;   // CPU reference geometry (Cornell exporter + ImGui scene section)
+    Frontier::HostRuntime::RayTracingSolver Scene;   // CPU reference geometry (Cornell exporter + ImGui scene section)
     {
         std::error_code FsError;
         const bool IsCornell = ScenePath.find("CornellBox.gltf") != std::string::npos;
@@ -233,7 +231,7 @@ int main(int argc, char** argv)
         if (IsOutdoor && !std::filesystem::exists(ScenePath, FsError))
         {
             std::filesystem::create_directories(std::filesystem::path(ScenePath).parent_path(), FsError);
-            Frontier::ProjectZero::RayTracingSolver Open;
+            Frontier::HostRuntime::RayTracingSolver Open;
             Open.ConstructOutdoorScene();
             std::string Error;
             // The scene name rides the encode configuration (the file stem becomes the level name at import,
@@ -300,7 +298,7 @@ int main(int argc, char** argv)
         {
             std::filesystem::create_directories(std::filesystem::path(ScenePath).parent_path(), FsError);
             std::string Error;
-            Frontier::ProjectZero::ShowroomStructure Showroom; Showroom.Construct(DropScene ? kDropBodyCount : 0u);
+            Frontier::HostRuntime::ShowroomStructure Showroom; Showroom.Construct(DropScene ? kDropBodyCount : 0u);
             if (Showroom.Export(ScenePath, &Error)) std::cerr << "[Scene] Exported the showroom level to " << ScenePath << "\n";
             else                                    std::cerr << "[Scene] Showroom export failed: " << Error << "\n";
         }
@@ -308,7 +306,7 @@ int main(int argc, char** argv)
 
     Startup.Mark("BuiltInSceneReady");
     Frontier::ConfigurationRegistry Configuration;
-    if (!Configuration.Load("Projects/Project-Zero/Content/Frontier.config.toml"))
+    if (!Configuration.Load((ResolvedSpecification.ContentLocation / "Frontier.config.toml").string()))
         std::cerr << "[Configuration] " << Configuration.QueryPath() << ": " << Configuration.QueryLastError() << " - using defaults\n";
 
     Frontier::SceneStructure Level;
@@ -330,7 +328,7 @@ int main(int argc, char** argv)
     bool TextureDecodeStarted = false;
     {
         FRONTIER_PROBE_PHASE_BEGIN("SceneDecode");
-        Startup.Mark("SceneDecode:begin"); const auto SceneDecodeStart=Frontier::ProjectZero::StartupLog::Now();
+        Startup.Mark("SceneDecode:begin"); const auto SceneDecodeStart=Frontier::HostRuntime::StartupLog::Now();
         Frontier::SceneDecodeConfiguration Decode;
         Decode.UniformScale = SceneScale;
         Decode.SlabLimit    = Configuration.Query().Backend.SlabLimit;
@@ -339,14 +337,14 @@ int main(int argc, char** argv)
         {
             Logger.RecordMessage(Frontier::DiagnosticSeverity::Fatal, "Scene", ("Cannot import " + ScenePath + ": " + Error).c_str());
             Logger.TerminateSink();
-            std::cerr << "\nProject-Zero could not import the scene. Press Enter to close this console.\n";
+            std::cerr << "\n" << ProjectName << " could not import the scene. Press Enter to close this console.\n";
             std::cin.get();
             return 1;
         }
         if (!Error.empty()) std::cerr << "[Scene] " << Error << "\n";
         if (WaterSnapshot) {
             try {
-                const auto Water=Frontier::ProjectZero::AppendPondSnapshot(Level);
+                const auto Water=Frontier::HostRuntime::AppendPondSnapshot(Level);
                 Level.Finalise(Decode.SlabLimit,nullptr);
                 std::cerr << "[Water] Ripple snapshot: " << Water.InstanceCount
                           << " mesh instance(s), normal scene picking/materials; simulation is not live.\n";
@@ -374,7 +372,7 @@ int main(int argc, char** argv)
                       (size_t)Level.QueryMaterials().QueryCount(), Level.QueryLuminaires().size(), Lo.x, Lo.y, Lo.z, Hi.x, Hi.y, Hi.z);
         Logger.RecordMessage(Frontier::DiagnosticSeverity::Information, "Scene", Line);
         FRONTIER_PROBE_PHASE_END("SceneDecode");
-        Startup.Mark("SceneDecode:end",Frontier::ProjectZero::StartupLog::Elapsed(SceneDecodeStart));
+        Startup.Mark("SceneDecode:end",Frontier::HostRuntime::StartupLog::Elapsed(SceneDecodeStart));
         const Frontier::MaterialIndexMetrics& M = Level.QueryMaterials().QueryMetrics();
         std::snprintf(Line, sizeof(Line), "Materials: %u descriptors -> %u records, %u slabs (limit %u, %u folded), %zu placements, %zu cameras, %zu punctual lights",
                       M.DescriptorCount, M.DescriptorCount, M.SlabCount, M.SlabLimit, M.FoldedCount, Level.QueryPlacements().size(), Level.QueryCameras().size(), Level.QueryPunctualLuminaires().size());
@@ -388,12 +386,12 @@ int main(int argc, char** argv)
         {
             TextureDecodeAsyncResult Result;
             FRONTIER_PROBE_PHASE_BEGIN("TextureDecode");
-        Startup.Mark("TextureDecode:begin"); const auto TextureDecodeStart=Frontier::ProjectZero::StartupLog::Now();
+        Startup.Mark("TextureDecode:begin"); const auto TextureDecodeStart=Frontier::HostRuntime::StartupLog::Now();
             Result.DecodeFailureCount = Textures.Decode(TextureEdgeLimit, &Result.Report);
             for (const Frontier::TextureDescriptor& T : Textures.QueryTextures())
                 Result.DeepestLevelCount = std::max(Result.DeepestLevelCount, T.LevelCount);   // R6 row 3: LOD census for the F3 popup
             FRONTIER_PROBE_PHASE_END("TextureDecode");
-        Startup.Mark("TextureDecode:end",Frontier::ProjectZero::StartupLog::Elapsed(TextureDecodeStart));
+        Startup.Mark("TextureDecode:end",Frontier::HostRuntime::StartupLog::Elapsed(TextureDecodeStart));
             return Result;
         });
         TextureDecodeStarted = true;
@@ -413,9 +411,9 @@ int main(int argc, char** argv)
     Frontier::PlanePlacement PanelPlacementForLight;
     if (ShowroomLevelForLight)
     {
-        const Frontier::Vector3 LightAnchor = Frontier::ProjectZero::ShowroomStructure::QueryPanelOrigin();
+        const Frontier::Vector3 LightAnchor = Frontier::HostRuntime::ShowroomStructure::QueryPanelOrigin();
         PanelPlacementForLight.Origin    = Frontier::PlaneOrigin{ LightAnchor.x, LightAnchor.y, LightAnchor.z };
-        PanelPlacementForLight.RotationX = 1.57079633f + Frontier::ProjectZero::ShowroomStructure::QueryPanelTilt();
+        PanelPlacementForLight.RotationX = 1.57079633f + Frontier::HostRuntime::ShowroomStructure::QueryPanelTilt();
         PanelPlacementForLight.Scale     = 2.2f;
     }
     else if (ShowcaseLevelForLight)
@@ -442,7 +440,7 @@ int main(int argc, char** argv)
     {
         Frontier::InterfaceStructure RestFigures;
         Frontier::MotionIntegrator   RestMotion;
-        Frontier::ProjectZero::InterfaceTrialSequence RestTrial;
+        Frontier::HostRuntime::InterfaceTrialSequence RestTrial;
         RestTrial.AssignPanelPlacement(PanelPlacementForLight);
         RestTrial.Construct(RestFigures, RestMotion);
         RestTrial.AdvanceTrial(RestFigures, RestMotion, 1.5, true);   // mid-loop: buttons lit, bar part filled
@@ -458,7 +456,7 @@ int main(int argc, char** argv)
         //    upright (tilt 0), so there the up axis IS world +Z.
         const float HalfWidth  = 0.115f * PanelPlacementForLight.Scale;   // [m]
         const float HalfHeight = 0.072f * PanelPlacementForLight.Scale;   // [m]
-        const float Tilt = ShowroomLevelForLight ? Frontier::ProjectZero::ShowroomStructure::QueryPanelTilt() : 0.0f;
+        const float Tilt = ShowroomLevelForLight ? Frontier::HostRuntime::ShowroomStructure::QueryPanelTilt() : 0.0f;
 
         Frontier::PanelProxyRequest Proxy;
         Proxy.Tier    = PanelTier;
@@ -513,10 +511,10 @@ int main(int argc, char** argv)
         TraversalBuildFuture = std::async(std::launch::async, [&Traversal, &Level, &Startup, HighQuality]()
         {
             FRONTIER_PROBE_PHASE_BEGIN("CwbvhBuild");
-        Startup.Mark("CwbvhBuild:begin"); const auto CwbvhBuildStart=Frontier::ProjectZero::StartupLog::Now();
+        Startup.Mark("CwbvhBuild:begin"); const auto CwbvhBuildStart=Frontier::HostRuntime::StartupLog::Now();
             Traversal.BuildBottomLevel(Level.QueryFlatTriangles(), HighQuality);
             FRONTIER_PROBE_PHASE_END("CwbvhBuild");
-        Startup.Mark("CwbvhBuild:end",Frontier::ProjectZero::StartupLog::Elapsed(CwbvhBuildStart));
+        Startup.Mark("CwbvhBuild:end",Frontier::HostRuntime::StartupLog::Elapsed(CwbvhBuildStart));
         });
         TraversalBuildStarted = true;
     }
@@ -524,7 +522,7 @@ int main(int argc, char** argv)
     //──────────────────────────────────────────────────────────────────────────
     // Camera — Unreal-style fly-through, right-handed +Z up
     //──────────────────────────────────────────────────────────────────────────
-    Frontier::ProjectZero::FlyThroughConfiguration CameraConfig
+    Frontier::HostRuntime::FlyThroughConfiguration CameraConfig
     {
         2.5f,       // [m/s]    base flight speed
         3.0f,       // [-]      Shift boost multiplier
@@ -534,7 +532,7 @@ int main(int argc, char** argv)
     };
 
     // Z-up: stand 1.95 m in front of the open face (Y < 0), eye height 1 m, looking along +Y into the box.
-    Frontier::ProjectZero::FlyThroughSolver Camera(CameraConfig);
+    Frontier::HostRuntime::FlyThroughSolver Camera(CameraConfig);
     // Pulled back and raised for the larger room (X ±2, Y 0-4, Z 0-3) so the whole box and the roof aperture are
     //    in frame from the default position.
     Camera.AssignSpatialLocation(Frontier::Vector3{ 0.0f, -3.30f, 1.55f });
@@ -631,7 +629,7 @@ int main(int argc, char** argv)
     {
         1280u,
         720u,
-        "Project-Zero  |  ReSTIR GI  |  Frontier Engine",
+        (ProjectName + "  |  Frontier Engine").c_str(),
         false       // validation layers — false for zero-overhead startup and runtime
     };
 
@@ -642,30 +640,30 @@ int main(int argc, char** argv)
     Surface.AssignRayTracingRequest(static_cast<Frontier::RayTracingRequestCategory>(Configuration.Query().Backend.RayTracingTier));
 
     FRONTIER_PROBE_PHASE_BEGIN("VulkanBringUp");
-        Startup.Mark("VulkanBringUp:begin"); const auto VulkanBringUpStart=Frontier::ProjectZero::StartupLog::Now();
+        Startup.Mark("VulkanBringUp:begin"); const auto VulkanBringUpStart=Frontier::HostRuntime::StartupLog::Now();
     if (!Surface.Bring())
     {
         Logger.RecordMessage(Frontier::DiagnosticSeverity::Fatal,
                              "Bootstrap", "SwapchainExchange bring-up failed - see the [SwapchainExchange] lines above for the failing stage.");
         Logger.TerminateSink();
-        std::cerr << "\nProject-Zero could not open its window. Press Enter to close this console.\n";
+        std::cerr << "\n" << ProjectName << " could not open its window. Press Enter to close this console.\n";
         std::cin.get();
         return 1;
     }
 
     FRONTIER_PROBE_PHASE_END("VulkanBringUp");
-        Startup.Mark("VulkanBringUp:end",Frontier::ProjectZero::StartupLog::Elapsed(VulkanBringUpStart));
+        Startup.Mark("VulkanBringUp:end",Frontier::HostRuntime::StartupLog::Elapsed(VulkanBringUpStart));
     Logger.RecordMessage(Frontier::DiagnosticSeverity::Information,
                          "Bootstrap", "Window and Vulkan swapchain ready.");
 
     {
         FRONTIER_PROBE_PHASE_BEGIN("ShadingTableBake");
-        Startup.Mark("ShadingTableBake:begin"); const auto ShadingTableBakeStart=Frontier::ProjectZero::StartupLog::Now();
+        Startup.Mark("ShadingTableBake:begin"); const auto ShadingTableBakeStart=Frontier::HostRuntime::StartupLog::Now();
         const Frontier::ShadingTableSet Tables = Frontier::ShadingTableCodec::Bake();   // R4b: GGX energy + LTC sheen LUTs
         Startup.Mark("ShadingLutPayload",-1,(Tables.Energy.size()+Tables.Sheen.size())*sizeof(float));
         Surface.UploadShadingTables(Tables.Energy.data(), Tables.Sheen.data(), Frontier::ShadingTableSet::kResolution);
         FRONTIER_PROBE_PHASE_END("ShadingTableBake");
-        Startup.Mark("ShadingTableBake:end",Frontier::ProjectZero::StartupLog::Elapsed(ShadingTableBakeStart));
+        Startup.Mark("ShadingTableBake:end",Frontier::HostRuntime::StartupLog::Elapsed(ShadingTableBakeStart));
     }
     if (TraversalBuildStarted && TraversalBuildFuture.valid())
     {
@@ -704,7 +702,7 @@ int main(int argc, char** argv)
     }
 
     FRONTIER_PROBE_PHASE_BEGIN("SceneUpload");
-        Startup.Mark("SceneUpload:begin"); const auto SceneUploadStart=Frontier::ProjectZero::StartupLog::Now();
+        Startup.Mark("SceneUpload:begin"); const auto SceneUploadStart=Frontier::HostRuntime::StartupLog::Now();
     uint64_t TexturePayload=0,TextureCapacity=0;
     for(const auto& T:Textures.QueryTextures()){TexturePayload+=T.Texels.size();TextureCapacity+=T.Texels.capacity();}
     Startup.Mark("DecodedTexturePayload",-1,TexturePayload);
@@ -712,7 +710,7 @@ int main(int argc, char** argv)
     Startup.Mark("CpuGeometryPayload",-1,Level.QueryVertices().size()*sizeof(Frontier::VertexRecord)+Level.QueryIndices().size()*sizeof(uint32_t)+Level.QueryFlatTriangles().size()*sizeof(Frontier::TriangleIndex));
     Surface.UploadScene(Level, Traversal, &Textures);
     FRONTIER_PROBE_PHASE_END("SceneUpload");
-        Startup.Mark("SceneUpload:end",Frontier::ProjectZero::StartupLog::Elapsed(SceneUploadStart));
+        Startup.Mark("SceneUpload:end",Frontier::HostRuntime::StartupLog::Elapsed(SceneUploadStart));
 
     //──────────────────────────────────────────────────────────────────────────
     // D3 — scripted instance motion (--animate), proving the transform path before physics
@@ -729,7 +727,7 @@ int main(int argc, char** argv)
     Startup.Mark("CpuAnimationMirrorCapacity",-1,AnimatedInstances.capacity()*sizeof(Frontier::InstanceRecord)+TracedFacets.capacity()*sizeof(Frontier::TriangleIndex));
     bool  TraceMovingBodies      = false;
     float RefitMillisecondsPeak  = 0.0f;   // [ms]
-    Frontier::ProjectZero::InstanceMotionSequence InstanceMotion;
+    Frontier::HostRuntime::InstanceMotionSequence InstanceMotion;
     bool   InstanceMotionReady = false;
     double InstanceMotionElapsed = 0.0;   // [s]
 
@@ -737,9 +735,9 @@ int main(int argc, char** argv)
     //    with Jolt poses through exactly the same RefreshInstances upload, which is why D3 was worth proving first.
     // The editor feed doubles as the scene census: the physics bridge and the scripted driver ask it where
     //    the dynamic bodies live, so no ordinal arithmetic here can drift from the file.
-    Frontier::ProjectZero::EditorFeedSequence Feed;
+    Frontier::HostRuntime::EditorFeedSequence Feed;
     Frontier::RigidBodySolver                       BodySolver;
-    Frontier::ProjectZero::PhysicsInstanceSequence  BodyBridge;
+    Frontier::HostRuntime::PhysicsInstanceSequence  BodyBridge;
     bool PhysicsReady = false;
 
     if (DropScene && !AnimatedInstances.empty())
@@ -751,11 +749,11 @@ int main(int argc, char** argv)
             && BodyCount == kDropBodyCount;
         if (BodiesFound && BodySolver.Bring(SolverConfiguration))
         {
-            Frontier::ProjectZero::PhysicsInstanceConfiguration BridgeConfiguration;
+            Frontier::HostRuntime::PhysicsInstanceConfiguration BridgeConfiguration;
             // Drop bodies are the level's only dynamic placements, so the animated span IS the body run.
             BridgeConfiguration.DropCount         = kDropBodyCount;
             BridgeConfiguration.FirstDropInstance = FirstBody;
-            BridgeConfiguration.BodyRadius        = Frontier::ProjectZero::ShowroomStructure::QueryDropRadius();
+            BridgeConfiguration.BodyRadius        = Frontier::HostRuntime::ShowroomStructure::QueryDropRadius();
             PhysicsReady = BodyBridge.Construct(BodySolver, BridgeConfiguration);
             // Refit needs a binned-SAH tree; a spatial-split (HighQuality) build cuts triangles and cannot be
             //    refitted, so the drop level knowingly trades a little traversal speed for movable geometry.
@@ -782,7 +780,7 @@ int main(int argc, char** argv)
     {
         // Drive the dynamic span the builders flagged, so the static scenery proves, in the same frame,
         //    that untouched rows really are untouched. A level with no flagged objects idles.
-        Frontier::ProjectZero::InstanceMotionConfiguration MotionConfiguration;
+        Frontier::HostRuntime::InstanceMotionConfiguration MotionConfiguration;
         uint32_t FirstAnimated = 0u, AnimatedCount = 0u;
         if (Feed.QueryAnimatedSpan(&FirstAnimated, &AnimatedCount, Level))
         {
@@ -881,7 +879,7 @@ int main(int argc, char** argv)
     //──────────────────────────────────────────────────────────────────────────
     Frontier::RenderScheduler Panel;
     // The sky, the weather and everything that carries them. Prepared once; ticked with the frame.
-    Frontier::ProjectZero::CelestialSequence Celestial;
+    Frontier::HostRuntime::CelestialSequence Celestial;
     Celestial.Prepare();
     // #26A the baked-dome boolean, seeded from [render] sky_dome_baked. OFF by default — the analytic march is
     //    the resting rule (the editor's own), and identical bytes to the pre-bake build. When ON, ④d below
@@ -954,16 +952,16 @@ int main(int argc, char** argv)
     // Typefaces: every static face under EngineContent/FontArchives, loaded once into the dynamic atlas (Vulkan backend
     //    rasterises glyphs on demand). The Fonts tab reads the registry; PixelSpace text honours the applied face.
     Frontier::TypefaceRegistry Typefaces;
-    Startup.Mark("Fonts:begin");const auto FontStart=Frontier::ProjectZero::StartupLog::Now();
+    Startup.Mark("Fonts:begin");const auto FontStart=Frontier::HostRuntime::StartupLog::Now();
     (void)Typefaces.Load("EngineContent/FontArchives");
-    Startup.Mark("Fonts:end",Frontier::ProjectZero::StartupLog::Elapsed(FontStart));
+    Startup.Mark("Fonts:end",Frontier::HostRuntime::StartupLog::Elapsed(FontStart));
     Frontier::TypefaceRegistry::Install(&Typefaces);
 
     Frontier::ControlCentreHost ControlCentre;
-    ControlCentre.AssignProjectName("Project-Zero");
-    Startup.Mark("ControlCentre:begin");const auto ControlStart=Frontier::ProjectZero::StartupLog::Now();
+    ControlCentre.AssignProjectName(ProjectName.c_str());
+    Startup.Mark("ControlCentre:begin");const auto ControlStart=Frontier::HostRuntime::StartupLog::Now();
     (void)ControlCentre.Initialize(Surface.QueryWidth(), Surface.QueryHeight());
-    Startup.Mark("ControlCentre:end",Frontier::ProjectZero::StartupLog::Elapsed(ControlStart));
+    Startup.Mark("ControlCentre:end",Frontier::HostRuntime::StartupLog::Elapsed(ControlStart));
 
     // The hosts are seeded from the configuration loaded before bring-up; every Apply / debounced dashboard change
     //    writes the file back.
@@ -1176,7 +1174,7 @@ int main(int argc, char** argv)
     Frontier::InterfaceStructure     InterfaceFigures;
     Frontier::InterfaceSequence      InterfaceCompose;
     Frontier::MotionIntegrator       InterfaceMotion;
-    Frontier::ProjectZero::InterfaceTrialSequence InterfaceTrial;
+    Frontier::HostRuntime::InterfaceTrialSequence InterfaceTrial;
     bool     InterfaceReady        = false;
     uint32_t InterfaceGeneration   = 0xFFFFFFFFu;   // forces the first Resize
     double   InterfaceElapsed      = 0.0;           // [s]
@@ -1201,7 +1199,7 @@ int main(int argc, char** argv)
     //    the drag writes the centre back. Translate only: a fog's extent is its own inspector figure, and a
     //    turn or a stretch of a centre point means nothing.
     bool     GizmoVolumeLive = false;
-    Frontier::ProjectZero::CelestialEntity GizmoVolumeEntity{};
+    Frontier::HostRuntime::CelestialEntity GizmoVolumeEntity{};
     float    GizmoVolumeSeized[3] = { 0.0f, 0.0f, 0.0f };
     bool     GizmoKeyGHeld = false, GizmoKeyRHeld = false, GizmoKeySHeld = false;
     // The vertex staging the CPU composes into and the GPU draws from. The heaviest mode is scale: three
@@ -1217,7 +1215,7 @@ int main(int argc, char** argv)
     // Filled once per frame just before RecordAndPresent; the overlay callback reads it during recording.
     Frontier::InterfaceViewClip InterfaceViewOfFrame{};
 
-    Frontier::ProjectZero::InterfaceAudioSequence InterfaceAudio;
+    Frontier::HostRuntime::InterfaceAudioSequence InterfaceAudio;
     bool InterfaceAudioReady = false;
 
     // P3/P4: the director and the second screen it switches to. Screen 0 is the live trial panel; screen 1 is a
@@ -1234,7 +1232,7 @@ int main(int argc, char** argv)
     bool PointerHeldLastFrame = false;
 
     FRONTIER_PROBE_PHASE_BEGIN("InterfaceBringUp");
-        Startup.Mark("InterfaceBringUp:begin"); const auto InterfaceBringUpStart=Frontier::ProjectZero::StartupLog::Now();
+        Startup.Mark("InterfaceBringUp:begin"); const auto InterfaceBringUpStart=Frontier::HostRuntime::StartupLog::Now();
     if (Interface.Bring(Surface.QueryDevice(), Surface.QueryPhysicalDevice(),
                         Surface.QueryCycleSlotCount(), Surface.QueryColourFormat(), Surface.QueryDepthFormat()))
     {
@@ -1252,11 +1250,11 @@ int main(int argc, char** argv)
 
         if (ShowroomLevel)
         {
-            const Frontier::Vector3 Anchor = Frontier::ProjectZero::ShowroomStructure::QueryPanelOrigin();
+            const Frontier::Vector3 Anchor = Frontier::HostRuntime::ShowroomStructure::QueryPanelOrigin();
             Frontier::PlanePlacement PanelPlacement;
             PanelPlacement.Origin = Frontier::PlaneOrigin{ Anchor.x, Anchor.y, Anchor.z };
             // π/2 stands the panel up (local +Y → world +Z); the showroom's tilt then leans it back toward the eye.
-            PanelPlacement.RotationX = 1.57079633f + Frontier::ProjectZero::ShowroomStructure::QueryPanelTilt();
+            PanelPlacement.RotationX = 1.57079633f + Frontier::HostRuntime::ShowroomStructure::QueryPanelTilt();
             PanelPlacement.Scale     = 2.2f;   // the trial layout is authored at ~0.14 m across; this reads at 2 m
             InterfaceTrial.AssignPanelPlacement(PanelPlacement);
             PanelPlacementForScreens = PanelPlacement;
@@ -1332,7 +1330,7 @@ int main(int argc, char** argv)
 
         // Bind the panel to the audio transport: turning the progress bar changes the engine note. Failure is not
         //    fatal — a machine with no sound device still renders the scene, it just does so quietly.
-        Frontier::ProjectZero::InterfaceAudioConfiguration AudioConfiguration;
+        Frontier::HostRuntime::InterfaceAudioConfiguration AudioConfiguration;
         AudioConfiguration.UseNullDriver = SilentAudio;
         std::string AudioError;
         InterfaceAudioReady = InterfaceAudio.Construct(AudioConfiguration, &AudioError);
@@ -1353,7 +1351,7 @@ int main(int argc, char** argv)
                              "Spatial interface unavailable - the scene renders without the panel.");
     }
     FRONTIER_PROBE_PHASE_END("InterfaceBringUp");
-        Startup.Mark("InterfaceBringUp:end",Frontier::ProjectZero::StartupLog::Elapsed(InterfaceBringUpStart));
+        Startup.Mark("InterfaceBringUp:end",Frontier::HostRuntime::StartupLog::Elapsed(InterfaceBringUpStart));
 
 #ifdef FRONTIER_DEVELOPMENT
     // The transform gizmo's device side, beside the interface it composites with. Development only: the
@@ -1409,7 +1407,7 @@ int main(int argc, char** argv)
 #ifdef FRONTIER_DEVELOPMENT
     // Row ↔ instance spans for GPU picking: the packed id the visibility image hands back names an instance;
     //    the span holding it names the outliner row, and the reverse walk feeds the outline's ordinals.
-    std::vector<Frontier::ProjectZero::EditorFeedSequence::RosterSpan> RosterSpans(Frontier::kMaxEditorInstances);
+    std::vector<Frontier::HostRuntime::EditorFeedSequence::RosterSpan> RosterSpans(Frontier::kMaxEditorInstances);
     uint32_t RosterSpanCount = 0u;
     bool     PickAwaited     = false;   // a tap flew with the frame; watch for its answer
     bool     PickAdditiveAwaited = false;   // Shift rode the tap: extend the picks rather than replace them
@@ -1422,18 +1420,18 @@ int main(int argc, char** argv)
     uint32_t                 AppliedOrbit = 0u;
 
 #ifdef FRONTIER_DEVELOPMENT
-    Frontier::ProjectZero::EditorInspectorSequence InspectorSession{Feed,Celestial,Camera,Level,AnimatedInstances,SceneInstances.data(),SceneRowCount,PickedSheet};
-    Panel.AssignInspectorExchange(&Frontier::ProjectZero::EditorInspectorSequence::Exchange,&InspectorSession);
+    Frontier::HostRuntime::EditorInspectorSequence InspectorSession{Feed,Celestial,Camera,Level,AnimatedInstances,SceneInstances.data(),SceneRowCount,PickedSheet};
+    Panel.AssignInspectorExchange(&Frontier::HostRuntime::EditorInspectorSequence::Exchange,&InspectorSession);
     Panel.AssignInspectorWorkspace(false);
-    Panel.AssignBillboardExchange(&Frontier::ProjectZero::EditorInspectorSequence::Billboards,&InspectorSession);
+    Panel.AssignBillboardExchange(&Frontier::HostRuntime::EditorInspectorSequence::Billboards,&InspectorSession);
 #endif
 
     // The performance reporter: owns the 5 s window, the prose lines and the measurement rows. See the block at the
     //    end of the loop, and PerformanceTelemetrySequence.h for why rows exist at all.
-    Frontier::ProjectZero::PerformanceTelemetrySequence PerformanceTelemetry{ 5.0f };
+    Frontier::HostRuntime::PerformanceTelemetrySequence PerformanceTelemetry{ 5.0f };
 
     Startup.Mark("FrameLoopReady"); uint32_t StartupFrames=0;
-    auto LastMemorySample = Frontier::ProjectZero::StartupLog::Now();
+    auto LastMemorySample = Frontier::HostRuntime::StartupLog::Now();
     while (!Surface.CloseRequested() && !Panel.Convert<bool>())
     {
         const auto  NowTime = Clock::now();
@@ -1450,6 +1448,28 @@ int main(int argc, char** argv)
 
         // ① Poll input — GLFW callbacks forward into Input
         Surface.PollInput(Input);
+
+        FrontierProjectInputReading ProjectInput{};
+        ProjectInput.StructureSize = sizeof(FrontierProjectInputReading);
+        ProjectInput.PointerX = Input.QueryCursorPositionX();
+        ProjectInput.PointerY = Input.QueryCursorPositionY();
+        ProjectInput.MoveAxisX = (Input.IsKeyPressed(Frontier::VirtualKeyCategory::KeyD) ? 1.0f : 0.0f) -
+                                 (Input.IsKeyPressed(Frontier::VirtualKeyCategory::KeyA) ? 1.0f : 0.0f);
+        ProjectInput.MoveAxisY = (Input.IsKeyPressed(Frontier::VirtualKeyCategory::KeyW) ? 1.0f : 0.0f) -
+                                 (Input.IsKeyPressed(Frontier::VirtualKeyCategory::KeyS) ? 1.0f : 0.0f);
+        ProjectInput.PrimaryPressed = Input.IsMouseButtonPressed(Frontier::MouseButtonCategory::ButtonLeft) ? 1u : 0u;
+        ProjectInput.SecondaryPressed = Input.IsMouseButtonPressed(Frontier::MouseButtonCategory::ButtonRight) ? 1u : 0u;
+
+        std::string ProjectRefusal;
+        if (!ActiveInterchange.AdvanceProject(
+                static_cast<float>(Frontier::HostRuntime::StartupLog::Elapsed(StartupTime) / 1000.0),
+                Δτ,
+                &ProjectInput,
+                ProjectRefusal))
+        {
+            Logger.RecordMessage(Frontier::DiagnosticSeverity::Error, "Project", ProjectRefusal.c_str());
+            break;
+        }
 
         // ①b Control Centre owns the pointer while hovered / grabbed / pulled down; the camera never sees those clicks
         //    Display → UI Scale: the overlay lives in logical pixels (physical ÷ scale); the pointer is mapped the same way.
@@ -1563,7 +1583,7 @@ int main(int argc, char** argv)
                 const bool First = AppliedInputRevision == 0u;
                 AppliedInputRevision = I.QueryRevision();
                 const Frontier::InputPreferences& P = I.QueryApplied();
-                Frontier::ProjectZero::FlyThroughConfiguration C = Camera.QueryConfiguration();
+                Frontier::HostRuntime::FlyThroughConfiguration C = Camera.QueryConfiguration();
                 C.MouseSensitivity = 0.00125f * (0.25f + (P.MouseSensitivity / 100.0f) * 1.75f);
                 C.InvertPitch      = P.InvertPitch;
                 Camera.AssignConfiguration(C);
@@ -1662,9 +1682,9 @@ int main(int argc, char** argv)
                     for (char C : D.Name)
                         Safe += ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z') || (C >= '0' && C <= '9') || C == '-' || C == '_') ? C : '_';
                     if (Safe.empty()) Safe = "material";
-                    const std::string Out = "Projects/Project-Zero/Diagnostics/MaterialPreview_" + Safe + ".png";
+                    const std::string Out = (ResolvedSpecification.ContentLocation / "Diagnostics" / ("MaterialPreview_" + Safe + ".png")).string();
                     std::error_code PreviewDirs;
-                    std::filesystem::create_directories("Projects/Project-Zero/Diagnostics", PreviewDirs);
+                    std::filesystem::create_directories(ResolvedSpecification.ContentLocation / "Diagnostics", PreviewDirs);
                     Frontier::ShaderballPreviewRequest Req;
                     Req.Material = &D; Req.Selection = Sel; Req.Size = 160; Req.Spp = 6; Req.OutPath = Out.c_str();
                     const auto T0 = std::chrono::steady_clock::now();
@@ -1742,7 +1762,7 @@ int main(int argc, char** argv)
             SceneRowCount += Celestial.AppendRoster(SceneInstances.data(), SceneRowCount, Frontier::kMaxEditorInstances);
             Frontier::ViewportOrbit Home;
             float Middle[3] = { 0.0f, 0.0f, 0.0f };
-            Frontier::ProjectZero::QueryLevelCentre(Level, Middle);
+            Frontier::HostRuntime::QueryLevelCentre(Level, Middle);
             const Frontier::Vector3 At = Camera.Convert<Frontier::Vector3>();
             const float Dx = At.x - Middle[0], Dy = At.y - Middle[1], Dz = At.z - Middle[2];
             Home.Yaw      = Camera.QueryYawRadians();
@@ -2542,14 +2562,15 @@ int main(int argc, char** argv)
                 //    through to the bake — which then re-writes the file for the next launch. The path is
                 //    Build/Space (gitignored, the regenerable-artifact convention): 1.3 MB of bytes any
                 //    machine can re-derive never enters the repository; PackProject.sh ships them.
-                const char* DomePath = "Projects/Project-Zero/Build/Space/SkyDome.environment";
+                const std::string DomeText = (ResolvedSpecification.ContentLocation / "Build" / "Space" / "SkyDome.environment").string();
+                const char* DomePath = DomeText.c_str();
                 std::vector<uint16_t> DomeHalves;
                 const bool FromFile = !ExplicitDomeBake && Celestial.LoadSkyDome(DomePath, DomeHalves);
                 if (!FromFile)
                 {
                     Celestial.BakeSkyDome(DomeHalves);
                     std::error_code DirectoryTrouble;
-                    std::filesystem::create_directories("Projects/Project-Zero/Build/Space", DirectoryTrouble);
+                    std::filesystem::create_directories(ResolvedSpecification.ContentLocation / "Build" / "Space", DirectoryTrouble);
                     if (!Celestial.SaveSkyDome(DomePath, DomeHalves))
                         Logger.RecordMessage(Frontier::DiagnosticSeverity::Warning, "Sky",
                                              "The baked dome could not be persisted - next launch pays the bake again.");
@@ -2721,8 +2742,8 @@ int main(int argc, char** argv)
         if(StartupFrames==120)Startup.Mark("After120Frames");
         // Sample after presentation, not on a background thread: this measures the render-loop
         // process without pretending that a sample is attributable to one asynchronous job.
-        if (Frontier::ProjectZero::StartupLog::Elapsed(LastMemorySample) >= 10000.0)
-        { Startup.Mark("RuntimeMemory"); LastMemorySample = Frontier::ProjectZero::StartupLog::Now(); }
+        if (Frontier::HostRuntime::StartupLog::Elapsed(LastMemorySample) >= 10000.0)
+        { Startup.Mark("RuntimeMemory"); LastMemorySample = Frontier::HostRuntime::StartupLog::Now(); }
         FRONTIER_PROBE_LAP(RecordAndPresent);
 
         Integrator.IncrementAccumulationIndex();
@@ -2742,11 +2763,11 @@ int main(int argc, char** argv)
         // Performance telemetry — CPU frame pacing and the GPU stage timings
         //──────────────────────────────────────────────────────────────────────
         // PerformanceTelemetrySequence owns the cadence, the prose and the measurement ROWS that land in
-        //    ProjectZero_TelemetryReport. See its header: the report used to carry no performance or GPU entries at
+        //    Frontier_TelemetryReport. See its header: the report used to carry no performance or GPU entries at
         //    all, because everything the frame loop knew was written with RecordMessage (a sentence) and never with
         //    RecordMeasurement (a row).
         {
-            Frontier::ProjectZero::PerformanceWorkload Workload;
+            Frontier::HostRuntime::PerformanceWorkload Workload;
             Workload.CpuCelestialTickMs=CpuCelestialTickMs;
             Workload.CpuSunMoonSolveMs=Celestial.CpuSunMoonSolveMs;
             Workload.CpuSkyPackUploadMs=CpuSkyPackUploadMs;
@@ -2760,14 +2781,14 @@ int main(int argc, char** argv)
             Workload.CloudSteps=Celestial.Budget.Volumetrics.CloudSteps;
             Workload.LocalSteps=Celestial.Budget.Volumetrics.LocalSteps;
             Workload.LightTaps=Celestial.Budget.Volumetrics.LightTaps;
-            auto Shown=[&](Frontier::ProjectZero::CelestialEntity E){return Celestial.Enabled&&Celestial.Shown[uint32_t(E)];};
-            Workload.SunShown=Shown(Frontier::ProjectZero::CelestialEntity::Sun);
-            Workload.SkyShown=Shown(Frontier::ProjectZero::CelestialEntity::Sky);
-            Workload.CloudActive=Shown(Frontier::ProjectZero::CelestialEntity::CloudLayer)&&Celestial.Cloud.Enabled;
-            Workload.LocalCloudActive=Shown(Frontier::ProjectZero::CelestialEntity::LocalCloud)&&Celestial.LocalCloud.Enabled;
-            Workload.FogActive=(Shown(Frontier::ProjectZero::CelestialEntity::LocalFog)&&Celestial.LocalFog.Enabled)
-                ||(Shown(Frontier::ProjectZero::CelestialEntity::HeightFog)&&Celestial.Fog.HeightEnabled)
-                ||(Shown(Frontier::ProjectZero::CelestialEntity::AtmosphericFog)&&Celestial.Fog.AerialEnabled);
+            auto Shown=[&](Frontier::HostRuntime::CelestialEntity E){return Celestial.Enabled&&Celestial.Shown[uint32_t(E)];};
+            Workload.SunShown=Shown(Frontier::HostRuntime::CelestialEntity::Sun);
+            Workload.SkyShown=Shown(Frontier::HostRuntime::CelestialEntity::Sky);
+            Workload.CloudActive=Shown(Frontier::HostRuntime::CelestialEntity::CloudLayer)&&Celestial.Cloud.Enabled;
+            Workload.LocalCloudActive=Shown(Frontier::HostRuntime::CelestialEntity::LocalCloud)&&Celestial.LocalCloud.Enabled;
+            Workload.FogActive=(Shown(Frontier::HostRuntime::CelestialEntity::LocalFog)&&Celestial.LocalFog.Enabled)
+                ||(Shown(Frontier::HostRuntime::CelestialEntity::HeightFog)&&Celestial.Fog.HeightEnabled)
+                ||(Shown(Frontier::HostRuntime::CelestialEntity::AtmosphericFog)&&Celestial.Fog.AerialEnabled);
             Workload.RenderWidth     = RenderWidth;
             Workload.RenderHeight    = RenderHeight;
             Workload.PresentMode     = Surface.QueryPresentModeName();
@@ -2824,7 +2845,7 @@ int main(int argc, char** argv)
     Surface.Retire();
 
     // Dev/debug probe: THE one and only disk write of the probe's life. Every frame row, startup phase, shader
-    //    load and event recorded above is released to Diagnostics/ProjectZero_TelemetryProbe.{md,csv} now that
+    //    load and event recorded above is released to Diagnostics/Frontier_TelemetryProbe.{md,csv} now that
     //    the application is closing. Ship builds compile this to nothing.
     FRONTIER_PROBE_SAVE("Diagnostics");
 

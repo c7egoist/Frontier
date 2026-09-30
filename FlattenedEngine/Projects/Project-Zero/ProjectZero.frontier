@@ -1,0 +1,13 @@
+#============================================================================================================================================
+#                                                   PROJECTZERO.FRONTIER
+#============================================================================================================================================
+# 📦 Project-Zero declarative opening read by Frontier.exe before shared facilities are constructed.
+
+[Project]
+ProjectName             = "ProjectZero"
+ProjectFormatNumber     = 1
+ContentLocation         = "Content"
+OpeningScene            = "Content/Scenes/Showcase.gltf"
+CodeImage               = "Build/ProjectZero.dll"
+CodeInterchangeNumber   = 1
+InterfaceFingerprint    = 0x4f0b3cbd4fd15f29

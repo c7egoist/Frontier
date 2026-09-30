@@ -14,7 +14,7 @@ your Frontier checkout to the base commit below, then **copy these files over th
 git clone <Frontier> && cd Frontier-
 git checkout 2fbe5c5            # or fast-forward main to it
 # from the repo root, overlay the full files:
-cp -R /path/to/Slate/FlattenedEngine/{Engine,Projects,Docs,CMakeLists.txt} .
+cp -R /path/to/Slate/FlattenedEngine/{Engine,Projects,Docs,Tools,CMakeLists.txt} .
 git status                      # review; these are the flattened equivalents of the .patch set
 ```
 
@@ -33,7 +33,8 @@ against that exact commit.
 | Roadmap section E | `Docs/Roadmap.md` |
 | Star sizing — **Gaussian profile (DEFAULT)** | `PostRecords.slang`, `VisibilityRaster.cpp` |
 | Showcase host — System B flake paint **+** denoise detail-guide | `MaterialLevelViewport.cpp` |
-| Denoiser detail-guide ("Smart" keeps flakes at Standard) | `DenoiseGuide.h` *(new file)*, `SwapchainExchange.h` (bits 12–14), `ReSTIRIntegrator.{h,cpp}`, `ControlCentreHost.{h,cpp}`, `GameExecution.cpp` |
+| Denoiser detail-guide ("Smart" keeps flakes at Standard) | `DenoiseGuide.h` *(new file)*, `SwapchainExchange.h` (bits 12–14), `ReSTIRIntegrator.{h,cpp}`, `ControlCentreHost.{h,cpp}`, `Engine/Host/FrontierRuntime.cpp` |
+| Frontier.exe project opening and isolated project code images | `Engine/{Host,ProjectInterchange}/`, `Projects/{Project-Zero,Project-Drive}/*.frontier`, `Tools/Build/`, `CMakeLists.txt` |
 
 ## Two mutually-exclusive choices (already decided in the default tree)
 

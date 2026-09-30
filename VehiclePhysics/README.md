@@ -17,28 +17,22 @@ VehiclePhysics/
     │   ├── VehiclePhysicsThread.h/.cpp  # NEW: dedicated fixed-rate physics thread + lock-free GT↔PT conduits
     │   └── XPBDTyreSolver.h/.cpp        # NEW: soft-body (rigid-XPBD) tyre ring skeleton
     └── Projects/Project-Tractrix/
-        ├── Build/DuplicateFromProjectZero.py   # stands up Project-Tractrix + overlays the seam
-        ├── Build/ProjectTractrix.cmake         # CMake target registration (duplicate of the Project-Zero target)
-        └── Source/ProjectTractrixIdentity.h    # project identity constants
+        ├── Build/CreateProjectSpecification.py # creates a specification + C ABI code-image starting point
+        ├── Build/ProjectTractrix.cmake         # CMake code-image registration
+        ├── ProjectTractrix.frontier             # Frontier.exe opening specification
+        └── Source/ProjectTractrixInterchange.cpp # project code-image entry
 ```
-
-> The overlay deliberately does **not** carry a full copy of Project-Zero (~100 files incl. binary content). The script
-> reproduces that copy in your own Frontier checkout, then overlays the engine seam on top — deterministic and small.
 
 ## How to apply (in your Frontier checkout)
 
 ```bash
-# from anywhere; pass your Frontier repo root (or let it auto-detect)
-python3 /path/to/VehiclePhysics/Overlay/Projects/Project-Tractrix/Build/DuplicateFromProjectZero.py /path/to/Frontier
-
-# then register the target — add ONE line to the top-level CMakeLists.txt, after the Project-Zero block:
-#   include("${CMAKE_CURRENT_SOURCE_DIR}/Projects/Project-Tractrix/Build/ProjectTractrix.cmake")
+# create an independent project shape without copying an existing project
+python3 /path/to/VehiclePhysics/Overlay/Projects/Project-Tractrix/Build/CreateProjectSpecification.py Project-Example --root /path/to/Frontier
 ```
 
-The script (1) copies `Projects/Project-Zero` → `Projects/Project-Tractrix`, (2) overlays the extended
-`RigidBodySolver` and the two new physics modules into `Engine/PhysicalDynamics/`, (3) rewrites the project's
-user-facing identity strings, and (4) prints the CMake wiring step. It is idempotent; re-run with `--force` to replace an
-existing `Project-Tractrix` copy.
+Project-Tractrix and every newly created project are opened by `Frontier.exe ProjectName.frontier`. The shared window,
+device, renderer, editor, camera, input, celestial environment, and GPU/CPU Surfel-GI facilities remain engine-owned;
+the project C ABI code image carries only project semantics.
 
 ## What was verified
 

@@ -1,100 +1,35 @@
-# Building Project-Drive — its OWN standalone windowed app
+# Project-Drive through Frontier.exe
 
-Project-Drive is a **separate executable** (`Project-Drive.exe`), a sibling of Project-Zero — **not** a `--scene`
-mode of it. It has its own entry point (`Projects\Project-Drive\Source\DriveExecution.cpp` → `int main`), opens its
-own visible window, generates and loads its own scene (`DriveCourse`), and lets you drive. It compiles the
-Project-Zero renderer/editor translation units straight into itself as shared code (so it is a full ReSTIR editor with
-viewport + outliner + inspectors + sun/sky), but it never launches or links against the Project-Zero binary.
+Project-Drive is opened by `Frontier.exe`; it is not a windowed executable. The shared host owns the window, Vulkan
+estate, renderer, editor, input, camera facilities, celestial environment, and shared GPU/CPU Surfel GI.
 
-> **Overlay note.** This folder is an *overlay* dropped onto a checkout of the Frontier engine. The two build entry
-> points below live here; the only thing you touch in the engine tree itself is the **one-line CMake include** in
-> §3 (Windows needs no engine-tree edit at all).
+## Windows build route
 
----
-
-## 1. Windows (MSVC, no CMake) — `ToolchainSequence.ps1`
-
-This is the primary Windows path. It drives `cl.exe` / `link.exe` directly and is a fork of Project-Zero's own
-windowed toolchain script, with the entry point swapped to `DriveExecution.cpp` and the vehicle/scene/camera layer
-added. From the **repository root**:
+The authoritative MSVC route builds `Frontier.exe`, `ProjectZero.dll`, and `ProjectDrive.dll` without compiling the
+shared host source into either project image:
 
 ```powershell
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1                 # Release build + does not run
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Run            # build then launch the window
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Configuration Debug -Run
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Rebuild -Run
-powershell -File Projects\Project-Drive\Build\ToolchainSequence.ps1 -Development:$false   # ship build: editor compiles out
+powershell -File Tools\Build\ToolchainSequence.ps1
 ```
 
-* Imports the MSVC x64 environment from `vcvarsall.bat` automatically (same probe order as Project-Zero) — no
-  "Developer PowerShell" prompt required.
-* Flags mirror the engine standard: `/std:c++20 /EHsc /permissive- /Zc:__cplusplus /fp:precise` plus `/O2 /MD`
-  (Release) or `/Zi /MDd` (Debug).
-* Compiles the full Vulkan + Slang + ImGui + editor stack, lowers the shader table to SPIR-V, and links
-  `vulkan-1 / glfw3dll / thorvg / Jolt`.
-* Output: `Projects\Project-Drive\Build\Output\Windows\<Configuration>\Binary\Project-Drive.exe`, and a mirror at
-  `Build\Project-Drive.exe` so `.\Build\Project-Drive.exe` runs from the repository root.
+`Projects\Project-Drive\Build\ToolchainSequence.ps1` forwards to that route for compatibility. It does not define a
+second target or invoke a second windowed process.
 
-The script needs the same locked dependencies Project-Zero uses (`python3 Tools\Bootstrap.py`, Vulkan SDK on
-`VULKAN_SDK`). It reuses Project-Zero's prebuilt GLFW/ThorVG/Jolt if present.
+The project code image is staged at `Projects\Project-Drive\Build\ProjectDrive.dll`. Its declarative opening is
+`Projects\Project-Drive\ProjectDrive.frontier`.
 
----
+## Opening the project
 
-## 2. Linux (CMake) — `ToolchainSequence.sh`
-
-For IDE integration / Linux desktops. Requires the one-line CMake include from §3 first. From anywhere:
-
-```bash
-Projects/Project-Drive/Build/ToolchainSequence.sh                 # configure + build (Release) + run
-RUN=0 Projects/Project-Drive/Build/ToolchainSequence.sh           # build only
-CONFIG=Debug Projects/Project-Drive/Build/ToolchainSequence.sh
+```text
+Frontier.exe Projects/Project-Drive/ProjectDrive.frontier
 ```
 
-It runs `cmake --build <dir> --target Project-Drive` and launches the binary from the repository root.
+The opening specification owns the content root and opening scene. It must not resolve either through Project-Zero.
+Project-specific vehicle behaviour belongs behind `ProjectDriveInterchange.cpp`; it requests shared camera, render,
+scene, panel, and diagnostic facilities through the versioned C ABI. No Vulkan, ImGui, C++ standard-library record,
+exception, or allocator ownership crosses that edge.
 
----
+## CMake route
 
-## 3. CMake integration — one line in the root `CMakeLists.txt`
-
-`ProjectDrive.cmake` defines the standalone `Project-Drive` target by cloning the `PROJECT_ZERO_SOURCES` batch,
-removing `GameExecution.cpp`, and adding `DriveExecution.cpp` + the drive layer + the vehicle physics `.cpp`s. It
-mirrors every Project-Zero target property (definitions, include dirs, link libraries, the `ReSTIRViewportSpirv`
-dependency, icon staging).
-
-Add **one line at the very end** of the engine's root `CMakeLists.txt` — after the `Project-Zero` target, the `Jolt`
-library, Vulkan/GLFW/ThorVG, `ReSTIRViewportSpirv`, and the `FRONTIER_*`/`EXT`/`IMGUI_*` variables are all defined:
-
-```cmake
-include(Projects/Project-Drive/Build/ProjectDrive.cmake)
-```
-
-Then configure and build the target as usual:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target Project-Drive -j
-```
-
-No other engine-tree edit is required; the SIMD/per-file source properties Project-Zero sets are source-scoped in the
-same directory and are inherited by the shared translation units automatically.
-
----
-
-## 4. Driving
-
-The window opens with the editor camera looking down the course. Controls:
-
-| Key            | Action                                                             |
-|----------------|-------------------------------------------------------------------|
-| **P**          | Toggle **Play** (drive the car) / **Edit** (fly the editor camera) |
-| **W / S**      | Throttle / brake-reverse (Play mode)                              |
-| **A / D**      | Steer left / right (Play mode)                                    |
-| **Space**      | Handbrake (Play mode)                                             |
-| **Left-Shift / Left-Ctrl** | Shift up / down                                      |
-| **R**          | Reset the car to the spawn pose                                   |
-| **WASD + RMB** | Fly / steer the editor camera (Edit mode)                        |
-
-In Play mode the fly camera becomes a chase camera that trails the chassis; in Edit mode it is a free editor camera.
-On first launch the app generates `Projects\Project-Drive\Content\Scenes\DriveCourse.gltf` (flat plane + grid/checker
-+ ramp + speed bumps + the car). Delete that file to regenerate it after changing `DriveSceneAuthor::Construct()`
-(the revision counter also invalidates a stale file automatically).
+`ProjectDrive.cmake` defines only `ProjectDrive.dll`. It does not use a Project-Zero source batch, `DriveExecution.cpp`,
+or a project `main`. The top-level CMake registration defines the same `ProjectDrive` image directly.

@@ -2,12 +2,10 @@
 // 📦 Project-Tractrix/ProjectTractrixIdentity.h — project identity constants for the vehicle showcase
 //============================================================================================================================================
 //
-//    Project-Tractrix is a duplicate of Project-Zero (the "Project-Zero | ReSTIR GI" sphere-grid showcase) used as the host
-//    for the GRIT vehicle-physics port. The name is a nod to the tractrix curve — the path a towed point traces behind a
-//    moving one, the classic model of a trailing wheel's caster/steer geometry — and stays deliberately technical.
+//    Project-Tractrix is an independent vehicle project opened by Frontier.exe. The name refers to the tractrix curve:
+//    the path a towed point traces behind a moving one, the classic model of a trailing wheel's caster geometry.
 //
-//    The DuplicateFromProjectZero.py script rewrites the user-facing identity strings inside GameExecution.cpp /
-//    CpuReferenceMain.cpp; these constants exist for new vehicle code that needs the project name without hard-coding it.
+//    These constants identify project-owned behaviour. FrontierHost supplies the window title and all shared facilities.
 
 #pragma once
 
