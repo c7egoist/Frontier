@@ -1,0 +1,141 @@
+diff --git a/Engine/DisplayPresentation/VolumetricMedia.h b/Engine/DisplayPresentation/VolumetricMedia.h
+index 5a0a2a8..b60373d 100644
+--- a/Engine/DisplayPresentation/VolumetricMedia.h
++++ b/Engine/DisplayPresentation/VolumetricMedia.h
+@@ -194,12 +194,23 @@ public:
+         float DriftX = 0.0f, DriftY = 0.0f;
+         if (Cloud.FollowWind)
+         {
+-            float Drift[3] = { 0.0f, 0.0f, 0.0f };
+-            WindField::SampleStep(Wind, Altitude, Drift);
+-            // Parentheses are load-bearing: Drift *= (Time * 0.8) is the pre-split order, and the reassociated
+-            //    (Drift * Time) * 0.8 rounds differently in the last ulp (caught by the split's proof test).
+-            DriftX = Drift[0] * (Time * 0.8f);
+-            DriftY = Drift[1] * (Time * 0.8f);
++            // BULK translation at the reference (mid-slab) altitude — uniform across height, so it slides the
++            //    deck rigidly and preserves its shape. GPU twin: WeatherMedia.slang::WeatherDrift.
++            const float MidSlab = (Base + Top) * 0.5f;
++            float Bulk[3] = { 0.0f, 0.0f, 0.0f };
++            WindField::SampleStep(Wind, MidSlab, Bulk);
++            // Parentheses are load-bearing: Bulk *= (Time * 0.8) is the pre-split order, and the reassociated
++            //    (Bulk * Time) * 0.8 rounds differently in the last ulp (caught by the split's proof test).
++            DriftX = Bulk[0] * (Time * 0.8f);
++            DriftY = Bulk[1] * (Time * 0.8f);
++            if (Wind.Advection > 0.5f)   // SHEAR mode: a bounded, coherent lean (time capped at 45 s)
++            {
++                float Local[3] = { 0.0f, 0.0f, 0.0f };
++                WindField::SampleStep(Wind, Altitude, Local);
++                const float Hold = (Time < 45.0f ? Time : 45.0f) * 0.8f;
++                DriftX += (Local[0] - Bulk[0]) * Hold;
++                DriftY += (Local[1] - Bulk[1]) * Hold;
++            }
+         }
+         // The field also EVOLVES, not merely slides: Time × EvolutionRate walks each octave through the noise
+         //    at its own rate. Wind is both the wind and the stirring, which is why the rate reads it.
+diff --git a/Engine/DisplayPresentation/WeatherConstantRecord.h b/Engine/DisplayPresentation/WeatherConstantRecord.h
+index 653e46e..121bb54 100644
+--- a/Engine/DisplayPresentation/WeatherConstantRecord.h
++++ b/Engine/DisplayPresentation/WeatherConstantRecord.h
+@@ -39,6 +39,7 @@ inline WeatherConstantRecord PackWeatherConstants(const CloudLayerSettings& C,
+     //    (WeatherEvolve / VolumetricMedia::EvolutionRate) even on a still day, and a still day was exactly
+     //    when the sky used to be a frozen photograph.
+     if(Volumes)W[3][0]=Time;
++    W[3][2]=(MediaWinds?MediaWinds[0]:Wind).Advection;   // 0 translate / 1 shear (shared across media)
+     (void)Moving;
+     return R;
+ }
+diff --git a/Engine/DisplayPresentation/WindField.h b/Engine/DisplayPresentation/WindField.h
+index feed1ca..dcfed70 100644
+--- a/Engine/DisplayPresentation/WindField.h
++++ b/Engine/DisplayPresentation/WindField.h
+@@ -51,6 +51,7 @@ struct WindSettings
+     float GustPhase = 0.0f;    // [rad] advanced by the frame clock, so the CPU and GPU twins agree
+     float Turbulence= 0.30f;   // [0..1] curl-noise swirl
+     float Steadiness= 1.0f;    // [0..1] panel's Steadiness — scales gust and turbulence together
++    float Advection = 0.0f;    // [0/1] 0 = rigid translation (shape preserved); 1 = bounded altitude shear (lean)
+ };
+ 
+ class WindField
+diff --git a/Engine/Editor/WeatherInspectorPanel.cpp b/Engine/Editor/WeatherInspectorPanel.cpp
+index c421ef7..d4b46e7 100644
+--- a/Engine/Editor/WeatherInspectorPanel.cpp
++++ b/Engine/Editor/WeatherInspectorPanel.cpp
+@@ -41,7 +41,7 @@ void WindPanel(Panel& U,float W){
+  float Rad=Bearing*Pi/180,Length=Speed/40*R;Arrow(U,CX,CY,std::sin(Rad)*Length,-std::cos(Rad)*Length,Accent);U.D->AddCircleFilled(U.At(CX,CY),4,Accent);
+  std::snprintf(T,sizeof(T),"%.1f m/s   /   %.0f°",double(Speed),double(Bearing));U.Text(24,163,T,24);
+  U.Wrap(24,535,CW-48,"Drag outward for speed, around for bearing. Blows TOWARD N = +Y, E = +X. Outer ring = 40 m/s.");U.Wrap(24,587,CW-48,"Arrow keys: bearing / speed · Home: calm");
+- U.Card(X2,Y2,CW,530,"Flow");const char* Names[]={"Speed","Bearing","Shear","Veer"};for(int I=0;I<4;++I)U.Slider(X2+24,Y2+65+I*83,CW-48,Names[I]);unsigned Force=WindField::BeaufortForce(Speed);std::snprintf(T,sizeof(T),"Beaufort %u · %s",Force,WindField::BeaufortName(Force));U.Wrap(X2+24,Y2+435,CW-48,T);U.Wrap(X2+24,Y2+477,CW-48,"Shear changes speed with altitude; veer turns the flow clockwise per kilometre.");
++ U.Card(X2,Y2,CW,600,"Flow");const char* Names[]={"Speed","Bearing","Shear","Veer"};for(int I=0;I<4;++I)U.Slider(X2+24,Y2+65+I*83,CW-48,Names[I]);U.Tile(X2+24,Y2+400,std::min(150.f,CW-48.f),"Air shear",&Find(U.Sheet,"Air shear")->On);unsigned Force=WindField::BeaufortForce(Speed);std::snprintf(T,sizeof(T),"Beaufort %u · %s",Force,WindField::BeaufortName(Force));U.Wrap(X2+24,Y2+495,CW-48,T);U.Wrap(X2+24,Y2+537,CW-48,"Air shear off = wind slides the cloud rigidly; on = it leans with altitude (a bounded, coherent tilt).");
+  float Y=Y2+546,Y3=Wide?Y:Y+388;U.Card(0,Y,CW,372,"Variation");const char* Variation[]={"Gust","Turbulence","Steadiness"};for(int I=0;I<3;++I)U.Slider(24,Y+65+I*83,CW-48,Variation[I]);
+  U.Card(X2,Y3,CW,372,"Gust envelope");float L=X2+24,RR=X2+CW-24,Top=Y3+82,Bottom=Y3+220;float Previous=0;for(int I=0;I<=96;++I){auto Q=A;Q.GustPhase=I/96.f*2*Pi;float G=WindField::SampleGust(Q);float YY=Bottom-(G-.0f)/2*(Bottom-Top);if(I)U.D->AddLine(U.At(L+(RR-L)*(I-1)/96,Previous),U.At(L+(RR-L)*I/96,YY),Accent,1.5f);Previous=YY;}
+  U.Wrap(L,Y3+242,CW-48,"Actual shared gust model · phase 0–2π · vertical scale 0–2×. Steadiness scales variation in this backend: 0 removes gust and swirl.");float V[3];WindField::SampleStep(A,1000,V);std::snprintf(T,sizeof(T),"1 km flow: X %.1f / Y %.1f m/s",double(V[0]),double(V[1]));U.Wrap(L,Y3+315,CW-48,T);
+diff --git a/Engine/Shaders/WeatherMedia.slang b/Engine/Shaders/WeatherMedia.slang
+index 06752a8..76018e2 100644
+--- a/Engine/Shaders/WeatherMedia.slang
++++ b/Engine/Shaders/WeatherMedia.slang
+@@ -2,12 +2,34 @@
+ #define FRONTIER_WEATHER_MEDIA
+ // Live camera-ray media. WeatherConstantRecord supplies binding-24 rows.
+ // Density matches VolumetricMedia; overlapping media share extinction/source terms.
++// Reference altitude (km) each medium advects its BULK translation at: mid-slab for the deck, centre for a
++//    local puff. Sliding the whole medium at ONE altitude keeps its shape rigid; the optional shear term below
++//    adds the height-dependent lean on top of that.
++float WeatherRefKm(int medium)
++{
++    if(medium==0){float base,top;CloudShadowExtent(Weather[0].x,Weather[0].y,Weather[1].z,base,top);return (base+top)*0.5*.001;}
++    int b=medium==1?4:9;return max(Weather[b].z,0.0)*.001;
++}
++// Wind advection. Weather[3].z is the mode: 0 = TRANSLATE (rigid slide, shape preserved), 1 = SHEAR (bounded
++//    lean). The bulk is the wind at the reference altitude integrated over the clock — uniform across height, so
++//    it can only move the field, never distort it. Shear adds the height-relative velocity difference, but its
++//    time growth is CAPPED at 45 s so the medium leans to a steady tilt instead of being stretched without limit
++//    into decorrelated noise (the "wind ruins the shape" report: unbounded shear x clock tears a cloud's top and
++//    bottom apart until adjacent heights sample unrelated noise). Twin: VolumetricMedia::CloudDensity.
+ vec2 WeatherDrift(int medium, float z, float factor)
+ {
+-    float km=max(z,0.0)*.001;
+     vec4 wind=Weather[18+medium];
+-    float a=radians(wind.y+wind.w*km);
+-    return vec2(sin(a),cos(a))*wind.x*(1.0+wind.z*km)*(Weather[3].x*factor);
++    float refKm=WeatherRefKm(medium);
++    float aR=radians(wind.y+wind.w*refKm);
++    vec2  bulk=vec2(sin(aR),cos(aR))*(wind.x*(1.0+wind.z*refKm));
++    vec2  drift=bulk*(Weather[3].x*factor);
++    if(Weather[3].z>0.5){
++        float km=max(z,0.0)*.001;
++        float aZ=radians(wind.y+wind.w*km);
++        vec2  local=vec2(sin(aZ),cos(aZ))*(wind.x*(1.0+wind.z*km));
++        drift+=(local-bulk)*(min(Weather[3].x,45.0)*factor);
++    }
++    return drift;
+ }
+ // Seconds the weather clock has run, and how far that has walked each medium through its noise. Weather[3].x
+ //    is the clock (packed whenever any volume is enabled, not only when something drifts), and the rate is the
+diff --git a/Projects/Project-Zero/Source/CelestialSequence.cpp b/Projects/Project-Zero/Source/CelestialSequence.cpp
+index 224fe2e..756e0d5 100644
+--- a/Projects/Project-Zero/Source/CelestialSequence.cpp
++++ b/Projects/Project-Zero/Source/CelestialSequence.cpp
+@@ -1263,6 +1263,7 @@ void CelestialSequence::BuildWindSheet(EditorSheet& Sheet,const WindSettings& So
+         Push(Flow, MakeSlider("Bearing", 0.0f, 360.0f, SourceWind.Bearing, 0, "deg"));
+         Push(Flow, MakeSlider("Shear", 0.0f, 2.0f, SourceWind.Shear, 2, "/km"));
+         Push(Flow, MakeSlider("Veer", -60.0f, 60.0f, SourceWind.Veer, 0, "d/km"));
++        Push(Flow, MakeSwitch("Air shear", SourceWind.Advection > 0.5f));   // off = rigid translation, on = altitude lean
+ 
+         EditorPropertyGroup& Gust = OpenGroup(Sheet, "Gust");
+         Push(Gust, MakeSlider("Gust", 0.0f, 1.0f, SourceWind.Gust, 2, ""));
+@@ -1536,6 +1537,7 @@ void CelestialSequence::ApplySheet(CelestialEntity Entity, const EditorSheet& Sh
+         Wind.Gust       = Safe("Gust", Wind.Gust, 0.0f, 1.0f);
+         Wind.Turbulence = Safe("Turbulence", Wind.Turbulence, 0.0f, 1.0f);
+         Wind.Steadiness = Safe("Steadiness", Wind.Steadiness, 0.0f, 1.0f);
++        Wind.Advection  = ReadSwitch(Sheet, "Air shear", Wind.Advection > 0.5f) ? 1.0f : 0.0f;
+         break;
+     }
+     case CelestialEntity::Precipitation:
+@@ -1829,6 +1831,7 @@ void CelestialSequence::ApplyWindComponentSheet(uint32_t Id,const EditorSheet& S
+     V.Speed=Safe("Speed",V.Speed,0,40);V.Bearing=Safe("Bearing",V.Bearing,0,360);
+     V.Shear=Safe("Shear",V.Shear,0,2);V.Veer=Safe("Veer",V.Veer,-60,60);
+     V.Gust=Safe("Gust",V.Gust,0,1);V.Turbulence=Safe("Turbulence",V.Turbulence,0,1);V.Steadiness=Safe("Steadiness",V.Steadiness,0,1);
++    V.Advection=ReadSwitch(Sheet,"Air shear",V.Advection>0.5f)?1.0f:0.0f;
+ }
+ void CelestialSequence::SynchronizeWindRows(EditorInstance* Rows,uint32_t& Count,uint32_t Capacity) noexcept {
+     if(!Rows)return;

@@ -1,0 +1,16 @@
+diff --git a/Engine/GeometricRaster/VisibilityRaster.cpp b/Engine/GeometricRaster/VisibilityRaster.cpp
+index 0458720..0f952db 100644
+--- a/Engine/GeometricRaster/VisibilityRaster.cpp
++++ b/Engine/GeometricRaster/VisibilityRaster.cpp
+@@ -758,7 +758,10 @@ void VisibilityRaster::Shade(const SceneStructure& Level, const float Eye[3], co
+                     //    blur because it only appears in motion. The resolution is to keep the ENERGY inside
+                     //    roughly one pixel while letting a small skirt handle the sub-pixel positioning: a half
+                     //    pixel core, a skirt of a third of a pixel, cut off at 1.6 pixels.
+-                    const float Radius = std::fmax(Celestial_.StarSize * 0.0002f, PixelAngle * 0.5f);
++                    // #34 STAR SIZE CAP (twin of PostRecords.slang::StarAlong): half-pixel floor kept, plus a
++                    //    1.2-render-pixel ceiling so a large StarSize can no longer balloon a star (and its
++                    //    luminance-boosted 1.6*Radius skirt) into a big disc. clamp(size, 0.5px, 1.2px).
++                    const float Radius = std::clamp(Celestial_.StarSize * 0.0002f, PixelAngle * 0.5f, PixelAngle * 1.2f);
+                     if (Angle > Radius * 1.6f) continue;
+                     // Flat-topped core so the star is at full intensity where it lands, then a tight Gaussian
+                     //    edge. The narrow skirt is what keeps it a point rather than a smudge.
