@@ -36,14 +36,16 @@ The current source confirms that the following are common rendering facilities a
 
 The visibility raster is therefore already a common prerequisite of the ReSTIR route; it is not project-specific.
 
-Surfel GI is a required shared GPU and CPU facility. The CPU side is already present in `SurfelReference.cpp`,
-`SurfelGI.cpp`, and the render-mode CPU mirror. The GPU side is already authored in
+Surfel GI is a required shared GPU and CPU facility. `Engine/DisplayPresentation/SurfelReference.{h,cpp}` is the
+Vulkan-free, deterministic shared field oracle (persistent placement, hash-grid gather, and Jacobi running mean);
+its scene-measurement callback keeps scene-specific CPU tracing outside the engine. `SurfelReference.cpp`,
+`SurfelGI.cpp`, and the render-mode CPU mirror remain fixtures built on the same contract. The GPU side is authored in
 `SurfelIrradianceUpdate.slang`, `SurfelCommit.slang`, `SurfelGIResolve.slang`, and `SurfelGIStage`.
 
-The migration must move that GPU compute route into `Engine/`, wire it through the one Frontier host, and retain the
-CPU implementation as the deterministic reference. It is not optional and it must not remain Project-Zero-specific.
-The GPU route uses the shared visibility images for primary surfaces, persistent world-space surfels for indirect
-light, and the existing CWBVH traversal for its rays.
+The migration must keep the GPU compute route in `Engine/`, wire it through the one Frontier host, and retain the
+shared CPU implementation as the deterministic reference. It is not optional and it must not remain
+Project-Zero-specific. The GPU route uses the shared visibility images for primary surfaces, persistent world-space
+surfels for indirect light, and the existing CWBVH traversal for its rays.
 
 The source snapshot also does not establish a separate moon facility. The extraction must identify the existing
 celestial inputs and place any sun, sky, moon, and star presentation used by projects in the engine layer.
@@ -129,9 +131,9 @@ established with a number, a structure-size check, and a generated interface has
 
 ### 1. Receive the complete Frontier source and build graph
 
-This Slate checkout cannot produce the real executable: `FlattenedEngine/` contains only 24 tracked source files,
-Project-Zero has only three tracked files, and the complete `Module.toml` plus top-level Frontier build graph are not
-present. Bring the complete Frontier checkout into the working copy before editing its production build.
+This Slate checkout cannot produce the real executable by itself: `FlattenedEngine/` is a sparse full-file overlay,
+Project-Zero has only selected tracked source files, and the complete `Module.toml` plus production dependency graph
+are not present. Overlay it on the complete Frontier checkout before editing or building the production host.
 
 ### 2. Extract `FrontierHost`
 

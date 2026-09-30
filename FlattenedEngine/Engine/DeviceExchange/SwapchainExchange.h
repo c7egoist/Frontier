@@ -13,6 +13,7 @@
 #include "RayTracingCapabilitySet.h"
 #include "OrientationClassifier.h"
 #include "VisibilityExchange.h"
+#include "SurfelGIStage.h"
 #include "TriangleSpan.h"
 #include <cstdint>
 #include <string>
@@ -418,6 +419,8 @@ private:
     [[nodiscard]] bool  BringCycleSlots()       noexcept;
     [[nodiscard]] bool  BringImGui()            noexcept;
     [[nodiscard]] bool  BringVisibility()       noexcept;
+    [[nodiscard]] bool  BringSurfelGIStage()   noexcept;
+    void                BuildSurfelSamples(const SceneStructure& Scene) noexcept;
 
     void                RetireSwapchain()       noexcept;
     [[nodiscard]] bool  RebuildSwapchain()      noexcept;
@@ -450,6 +453,9 @@ private:
     bool                    FullscreenActive;    // [-]   window currently covers the primary monitor
     RayTracingCapabilitySet Capabilities;        // [-]   probed in BringPhysicalDevice
     VisibilityExchange      Visibility;          // [-]   R2 resident scene + cull / raster / HiZ / resolve
+    SurfelGIStage           SurfelStage;         // [-]   shared non-raytraced indirect-light compute route
+    std::vector<SurfaceSample> SurfelSamples;    // [-]   persistent seed candidates derived from shared geometry
+    float                   SurfelGridOrigin[3] = { 0.0f, 0.0f, 0.0f };
     bool                    TraversalResident = false;
     uint64_t                TraversalNodeCapacity = 0u;   // [B] allocation size, so a refit refresh cannot overrun
     uint64_t                TraversalLeafCapacity = 0u;   // [B]   // [-]   R3 CWBVH uploaded (kernel refuses to run without it)

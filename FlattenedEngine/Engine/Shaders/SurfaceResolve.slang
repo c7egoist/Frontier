@@ -37,6 +37,7 @@ layout(set = 0, binding = 12, rgba8)   uniform writeonly image2D OutputImage;
 //    correctly (metals reflect, dielectrics diffuse). x = metalness, y = specular roughness, zw = 0. rgba16f is
 //    plenty for two 0..1 scalars and matches NormalImage's format. Written every pixel (background = 0,1).
 layout(set = 0, binding = 14, rgba16f) uniform writeonly image2D MaterialImage;
+layout(set = 0, binding = 15, rgba8)   uniform writeonly image2D AlbedoImage;
 
 // R6 row 3: prev-frame reservoirs for the M / W / Age debug views — the same buffer the kernel reads as
 //    binding 16 (written per frame by VisibilityExchange::RecordFrame), so the views show the last completed
@@ -164,6 +165,8 @@ void main()
         float AuxMetal = AuxHit ? Materials[Material].Emissive.w : 0.0;
         float AuxRough = AuxHit ? Materials[Material].Albedo.w   : 1.0;
         imageStore(MaterialImage, ivec2(Pixel), vec4(AuxMetal, AuxRough, 0.0, 0.0));
+        vec3 Albedo = AuxHit ? Materials[Material].Albedo.xyz : vec3(0.0);
+        imageStore(AlbedoImage, ivec2(Pixel), vec4(Albedo, 1.0));
     }
 
     uint View = Control.z;

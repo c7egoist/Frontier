@@ -602,6 +602,7 @@ $EngineRelative = @(
     'Engine\DisplayPresentation\IconArt.cpp'
     'Engine\DisplayPresentation\IconPresentation.cpp'
     'Engine\DisplayPresentation\VectorCodec.cpp'
+    'Engine\DisplayPresentation\SurfelReference.cpp'
     'Engine\DisplayPresentation\ControlCentreHost.cpp'
     'Engine\DisplayPresentation\FontCodec.cpp'
     'Engine\DisplayPresentation\PixelSpace.cpp'

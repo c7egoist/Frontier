@@ -9,14 +9,14 @@
 //    • per-frame surfel logging (spawned / live / recycled / coverage), as the task requires.
 //
 // Everything device-specific is passed in through SurfelStageInit so this file compiles against the engine's existing
-//    Vulkan objects without reaching into SwapchainExchange internals. Wire-up (three call sites) is in the porting
-//    guide: BringSurfelStage() in the bring-up list, RecordFrame() before the ReSTIR dispatch, and Destroy() in teardown.
+//    Vulkan objects without reaching into SwapchainExchange internals. The stage owns its short-lived descriptor pool:
+//    it must never consume the ReSTIR pool's one descriptor set or leave dangling CWBVH bindings after a scene reload.
 //
 // The binding contract MUST match the shaders in ../Shaders:
 //    Update  : b0 Surfels(rw)  b1 GridHead(ro)  b2 GridNext(ro)  b8 CwbvhNodes  b9 CwbvhTris   push SurfelUpdateConstants
 //    Commit  : b0 Surfels(rw)                                                                   push {uvec4 Counts}
 //    Resolve : b0 Output(w) b1 Surface(ro) b2 Normal(ro) b3 Albedo(ro) b4 MaterialAux(ro)
-//              b5 SkyCube  b8 CwbvhNodes b9 CwbvhTris  b10 Surfels(ro) b11 GridHead(ro) b12 GridNext(ro)  push ResolveConstants
+//              b8 CwbvhNodes b9 CwbvhTris  b10 Surfels(ro) b11 GridHead(ro) b12 GridNext(ro)  push ResolveConstants
 //------------------------------------------------------------------------------------------------------------------------
 
 #pragma once
@@ -51,7 +51,6 @@ namespace Frontier
     {
         VkDevice                         Device            = VK_NULL_HANDLE;
         VkPhysicalDeviceMemoryProperties MemoryProperties  {};
-        VkDescriptorPool                 DescriptorPool    = VK_NULL_HANDLE;   // must offer STORAGE_BUFFER + STORAGE_IMAGE + SAMPLED headroom
 
         // Shared acceleration structure blobs — the SAME buffers the ReSTIR kernel binds at 8/9.
         VkBuffer                         CwbvhNodeBuffer   = VK_NULL_HANDLE;
@@ -63,8 +62,6 @@ namespace Frontier
         VkImageView                      NormalImageView   = VK_NULL_HANDLE;   // rgba16f
         VkImageView                      AlbedoImageView   = VK_NULL_HANDLE;   // rgba8
         VkImageView                      MaterialAuxView   = VK_NULL_HANDLE;   // rgba16f (SurfaceResolve aux — this patch)
-        VkImageView                      SkyCubeView       = VK_NULL_HANDLE;   // samplerCube environment
-        VkSampler                        SkyCubeSampler    = VK_NULL_HANDLE;
 
         uint32_t                         MaxSurfels        = 262144u;          // pool ceiling (SPAWN_BUDGET grows toward it)
         uint32_t                         GridHashSize      = 131072u;          // hash table cells (prime-ish, > live surfels)
@@ -98,22 +95,24 @@ namespace Frontier
         bool Bring(const SurfelStageInit& Init) noexcept;               // allocate SSBOs + build pipelines/sets
         void Destroy() noexcept;
 
-        // Host-side field maintenance: age the field, spawn from the supplied surface samples up to the budget,
-        //    recycle the oldest dead slots, then build the hash grid (GridHead/GridNext) on the CPU and upload all
-        //    three buffers. Logs spawned/live/recycled/coverage. Call once per frame before RecordFrame().
+        // Host-side topology maintenance: spawn/recycle from supplied surface samples up to the budget and rebuild
+        //    the CPU hash grid. The GPU owns age and irradiance once resident, so steady frames do not re-upload the
+        //    seed field or reset its running mean. Logs spawned/live/recycled/coverage; call before RecordFrame().
         void UpdateField(const std::vector<SurfaceSample>& Samples, const SurfelFrameParams& Params) noexcept;
 
         // Record update → commit → resolve into an already-begun command buffer, with the two compute→compute
-        //    barriers. Bind order and push blocks match the shaders. Presents into OutputImage.
-        void RecordFrame(VkCommandBuffer Command, const SurfelFrameParams& Params) noexcept;
+        //    barriers. Bind order and push blocks match the shaders. Returns false without writing when the field
+        //    has no live samples, so the caller can retain its normal renderer as a safe fallback.
+        [[nodiscard]] bool RecordFrame(VkCommandBuffer Command, const SurfelFrameParams& Params) noexcept;
 
+        [[nodiscard]] bool IsReady() const noexcept { return I.Device != VK_NULL_HANDLE && UpdatePipeline != VK_NULL_HANDLE && ResolvePipeline != VK_NULL_HANDLE; }
         uint32_t LiveSurfelCount() const noexcept { return LiveCount; }
 
     private:
         bool CreateBuffers() noexcept;
         bool CreatePipelines() noexcept;
         bool WriteDescriptors() noexcept;
-        void UploadBuffers() noexcept;                                  // CPU mirror → device SSBOs (staging copy)
+        void UploadBuffers() noexcept;                                  // CPU topology mirror → staging SSBOs, only after a spawn/recycle
 
         SurfelStageInit          I{};
         // SSBOs (device local) + host-visible staging mirrors.
@@ -124,6 +123,7 @@ namespace Frontier
         VkDeviceMemory           HeadMem   = VK_NULL_HANDLE, HeadStageMem   = VK_NULL_HANDLE;
         VkDeviceMemory           NextMem   = VK_NULL_HANDLE, NextStageMem   = VK_NULL_HANDLE;
 
+        VkDescriptorPool         DescriptorPool = VK_NULL_HANDLE;             // private: 3 sets / 11 SSBO / 5 storage-image descriptors
         VkDescriptorSetLayout    UpdateLayout = VK_NULL_HANDLE, CommitLayout = VK_NULL_HANDLE, ResolveLayout = VK_NULL_HANDLE;
         VkPipelineLayout         UpdatePipeLayout = VK_NULL_HANDLE, CommitPipeLayout = VK_NULL_HANDLE, ResolvePipeLayout = VK_NULL_HANDLE;
         VkPipeline               UpdatePipeline = VK_NULL_HANDLE, CommitPipeline = VK_NULL_HANDLE, ResolvePipeline = VK_NULL_HANDLE;
@@ -135,5 +135,6 @@ namespace Frontier
         std::vector<int32_t>     HostGridNext;                          // per-surfel next in chain (+1; 0 = end)
         uint32_t                 LiveCount = 0u;
         uint64_t                 FrameCounter = 0u;
+        bool                     FieldUploadPending = false;             // never overwrite GPU irradiance once the stable field is resident
     };
 }

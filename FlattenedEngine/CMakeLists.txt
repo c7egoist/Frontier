@@ -193,6 +193,7 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/DisplayPresentation/IconArt.cpp
     Engine/DisplayPresentation/IconPresentation.cpp
     Engine/DisplayPresentation/VectorCodec.cpp
+    Engine/DisplayPresentation/SurfelReference.cpp
     Engine/DisplayPresentation/FontCodec.cpp
     Engine/DisplayPresentation/ConfigurationRegistry.cpp
     Engine/DisplayPresentation/ControlCentreHost.cpp

@@ -64,9 +64,6 @@ namespace
     { return { b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
     VkDescriptorSetLayoutBinding StorageImage(uint32_t b) noexcept
     { return { b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
-    VkDescriptorSetLayoutBinding SampledImage(uint32_t b) noexcept
-    { return { b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
-
     // Matches CellHash() in SurfelIrradianceUpdate.slang / SurfelGIResolve.slang exactly.
     inline uint32_t CellHash(int cx, int cy, int cz, uint32_t hashSize) noexcept
     {
@@ -83,12 +80,20 @@ namespace
 bool SurfelGIStage::Bring(const SurfelStageInit& Init) noexcept
 {
     I = Init;
+    if (I.Device == VK_NULL_HANDLE || I.CwbvhNodeBuffer == VK_NULL_HANDLE || I.CwbvhLeafBuffer == VK_NULL_HANDLE ||
+        I.OutputImageView == VK_NULL_HANDLE || I.SurfaceImageView == VK_NULL_HANDLE || I.NormalImageView == VK_NULL_HANDLE ||
+        I.AlbedoImageView == VK_NULL_HANDLE || I.MaterialAuxView == VK_NULL_HANDLE || I.GridCellSize <= 0.0f)
+    {
+        std::cerr << "[SurfelGIStage] deferred: scene traversal or visibility targets are not resident.\n";
+        I = {};
+        return false;
+    }
     HostSurfels.reserve(I.MaxSurfels);
     HostGridHead.assign(I.GridHashSize, 0);
     HostGridNext.assign(I.MaxSurfels, 0);
-    if (!CreateBuffers())   { std::cerr << "[SurfelGIStage] buffer allocation failed\n";  return false; }
-    if (!CreatePipelines()) { std::cerr << "[SurfelGIStage] pipeline creation failed\n"; return false; }
-    if (!WriteDescriptors()){ std::cerr << "[SurfelGIStage] descriptor write failed\n";  return false; }
+    if (!CreateBuffers())   { std::cerr << "[SurfelGIStage] buffer allocation failed\n"; Destroy(); return false; }
+    if (!CreatePipelines()) { std::cerr << "[SurfelGIStage] pipeline creation failed\n"; Destroy(); return false; }
+    if (!WriteDescriptors()){ std::cerr << "[SurfelGIStage] descriptor write failed\n"; Destroy(); return false; }
     std::cerr << "[SurfelGIStage] up: max=" << I.MaxSurfels << " grid=" << I.GridHashSize
               << " cell=" << I.GridCellSize << " m\n";
     return true;
@@ -138,13 +143,22 @@ bool SurfelGIStage::CreatePipelines() noexcept
         return R == VK_SUCCESS;
     };
 
+    std::array<VkDescriptorPoolSize, 2> PoolSizes{{
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 11u }, // update 5 + commit 1 + resolve 5
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   5u },
+    }};
+    VkDescriptorPoolCreateInfo PoolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    PoolInfo.maxSets       = 3u;
+    PoolInfo.poolSizeCount = static_cast<uint32_t>(PoolSizes.size());
+    PoolInfo.pPoolSizes    = PoolSizes.data();
+    if (vkCreateDescriptorPool(I.Device, &PoolInfo, nullptr, &DescriptorPool) != VK_SUCCESS) return false;
+
     // push blocks: update/resolve = 6×vec4/uvec4 = 96 B; commit = one uvec4 = 16 B (see the shaders).
     if (!BuildLayout({ StorageBuffer(0), StorageBuffer(1), StorageBuffer(2), StorageBuffer(8), StorageBuffer(9) },
                      96u, UpdateLayout, UpdatePipeLayout)) return false;
     if (!BuildLayout({ StorageBuffer(0) }, 16u, CommitLayout, CommitPipeLayout)) return false;
     if (!BuildLayout({ StorageImage(0), StorageImage(1), StorageImage(2), StorageImage(3), StorageImage(4),
-                       SampledImage(5), StorageBuffer(8), StorageBuffer(9),
-                       StorageBuffer(10), StorageBuffer(11), StorageBuffer(12) },
+                       StorageBuffer(8), StorageBuffer(9), StorageBuffer(10), StorageBuffer(11), StorageBuffer(12) },
                      96u, ResolveLayout, ResolvePipeLayout)) return false;
 
     return BuildPipeline("SurfelIrradianceUpdate.spv", UpdatePipeLayout,  UpdatePipeline)
@@ -159,7 +173,7 @@ bool SurfelGIStage::WriteDescriptors() noexcept
     for (size_t i = 0; i < 3; ++i)
     {
         VkDescriptorSetAllocateInfo AI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-        AI.descriptorPool = I.DescriptorPool; AI.descriptorSetCount = 1u; AI.pSetLayouts = &Layouts[i];
+        AI.descriptorPool = DescriptorPool; AI.descriptorSetCount = 1u; AI.pSetLayouts = &Layouts[i];
         if (vkAllocateDescriptorSets(I.Device, &AI, Sets[i]) != VK_SUCCESS) return false;
     }
 
@@ -169,23 +183,19 @@ bool SurfelGIStage::WriteDescriptors() noexcept
     const VkDescriptorBufferInfo Nodes  = Buf(I.CwbvhNodeBuffer), Tris = Buf(I.CwbvhLeafBuffer);
     const VkDescriptorImageInfo  Out = Img(I.OutputImageView), Surf = Img(I.SurfaceImageView), Norm = Img(I.NormalImageView);
     const VkDescriptorImageInfo  Alb = Img(I.AlbedoImageView), Aux = Img(I.MaterialAuxView);
-    const VkDescriptorImageInfo  Sky{ I.SkyCubeSampler, I.SkyCubeView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
 
     std::vector<VkWriteDescriptorSet> W;
     auto WB = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorBufferInfo* i)
     { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, i, nullptr }); };
     auto WI = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorImageInfo* i)
     { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, i, nullptr, nullptr }); };
-    auto WS = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorImageInfo* i)
-    { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, i, nullptr, nullptr }); };
-
     // Update: b0 Surfels, b1 Head, b2 Next, b8 Nodes, b9 Tris
     WB(UpdateSet, 0, &Surfel); WB(UpdateSet, 1, &Head); WB(UpdateSet, 2, &Next); WB(UpdateSet, 8, &Nodes); WB(UpdateSet, 9, &Tris);
     // Commit: b0 Surfels
     WB(CommitSet, 0, &Surfel);
-    // Resolve: images 0-4, sky 5, nodes/tris 8/9, surfels 10, head 11, next 12
+    // Resolve: images 0-4, nodes/tris 8/9, surfels 10, head 11, next 12.
     WI(ResolveSet, 0, &Out); WI(ResolveSet, 1, &Surf); WI(ResolveSet, 2, &Norm); WI(ResolveSet, 3, &Alb); WI(ResolveSet, 4, &Aux);
-    WS(ResolveSet, 5, &Sky); WB(ResolveSet, 8, &Nodes); WB(ResolveSet, 9, &Tris);
+    WB(ResolveSet, 8, &Nodes); WB(ResolveSet, 9, &Tris);
     WB(ResolveSet, 10, &Surfel); WB(ResolveSet, 11, &Head); WB(ResolveSet, 12, &Next);
 
     vkUpdateDescriptorSets(I.Device, static_cast<uint32_t>(W.size()), W.data(), 0u, nullptr);
@@ -197,16 +207,17 @@ bool SurfelGIStage::WriteDescriptors() noexcept
 //========================================================================================================================
 void SurfelGIStage::UpdateField(const std::vector<SurfaceSample>& Samples, const SurfelFrameParams& Params) noexcept
 {
+    if (!IsReady()) return;
     ++FrameCounter;
     const float cell = I.GridCellSize;
 
-    // 1) age the live field; recycle slots that have not been re-seen for a long time (simple staleness recycle).
-    for (auto& s : HostSurfels)
-        if (s.Albedo[3] > 0.5f) s.NormalAge[3] += 1.0f;
+    // 1) The GPU owns age and irradiance after the first upload. Keeping the CPU mirror structural-only is
+    // essential: uploading it again every frame would reset the GPU running mean to zero and defeat persistence.
 
     // 2) spawn: for each supplied surface sample, if no live surfel already covers it (within its radius on the
     //    tangent plane) allocate one — reusing a dead slot when available, else growing the pool up to MaxSurfels.
     uint32_t spawned = 0u, recycled = 0u;
+    bool topologyChanged = false;
     auto radiusAt = [&](const float* /*p*/) { return cell; };   // one surfel per cell; caller scales cell to the scene
     for (const SurfaceSample& q : Samples)
     {
@@ -238,8 +249,8 @@ void SurfelGIStage::UpdateField(const std::vector<SurfaceSample>& Samples, const
         // reuse a dead slot if one exists, else append
         bool placed = false;
         for (uint32_t k = 0; k < HostSurfels.size(); ++k)
-            if (HostSurfels[k].Albedo[3] < 0.5f) { HostSurfels[k] = s; ++recycled; placed = true; break; }
-        if (!placed && HostSurfels.size() < I.MaxSurfels) { HostSurfels.push_back(s); ++spawned; }
+            if (HostSurfels[k].Albedo[3] < 0.5f) { HostSurfels[k] = s; ++recycled; placed = true; topologyChanged = true; break; }
+        if (!placed && HostSurfels.size() < I.MaxSurfels) { HostSurfels.push_back(s); ++spawned; topologyChanged = true; }
     }
 
     // 3) build the hash grid on the host: clear heads, then prepend each live surfel to its cell chain (+1 encoding).
@@ -259,7 +270,13 @@ void SurfelGIStage::UpdateField(const std::vector<SurfaceSample>& Samples, const
         HostGridHead[h]  = int32_t(i) + 1;         // we are the new head (+1-encoded)
     }
 
-    UploadBuffers();
+    // Stage a structural refresh only on population changes. The compute passes retain and refine Irradiance on
+    // ordinary frames; a full host upload on every frame would make the advertised running mean non-persistent.
+    if (topologyChanged)
+    {
+        FieldUploadPending = true;
+        UploadBuffers();
+    }
 
     // 4) log (task requirement). Throttle to once a second at 60 fps so the console is readable.
     if (FrameCounter <= 3 || (FrameCounter % 60u) == 0u)
@@ -275,6 +292,7 @@ void SurfelGIStage::UpdateField(const std::vector<SurfaceSample>& Samples, const
 
 void SurfelGIStage::UploadBuffers() noexcept
 {
+    if (!FieldUploadPending) return;
     auto Copy = [&](VkDeviceMemory Mem, const void* Src, VkDeviceSize Bytes)
     {
         if (Bytes == 0) return;
@@ -295,22 +313,37 @@ void SurfelGIStage::UploadBuffers() noexcept
 //========================================================================================================================
 // Per-frame recording: (upload) → update → commit → resolve
 //========================================================================================================================
-void SurfelGIStage::RecordFrame(VkCommandBuffer Command, const SurfelFrameParams& Params) noexcept
+bool SurfelGIStage::RecordFrame(VkCommandBuffer Command, const SurfelFrameParams& Params) noexcept
 {
-    if (LiveCount == 0u) return;   // nothing to shade this frame; caller falls back to raster fill
+    if (!IsReady() || Command == VK_NULL_HANDLE || LiveCount == 0u || Params.RenderWidth == 0u || Params.RenderHeight == 0u)
+        return false;   // nothing to shade this frame; caller falls back to the existing renderer
 
-    // 0) copy the CPU mirror into the device SSBOs, then barrier transfer→compute.
-    auto CopyBuf = [&](VkBuffer Stage, VkBuffer Dst, VkDeviceSize Bytes)
-    { VkBufferCopy R{ 0, 0, Bytes }; vkCmdCopyBuffer(Command, Stage, Dst, 1u, &R); };
-    CopyBuf(SurfelStage, SurfelBuffer, VkDeviceSize(HostSurfels.size()) * sizeof(GpuSurfel));
-    CopyBuf(HeadStage,   HeadBuffer,   VkDeviceSize(HostGridHead.size()) * sizeof(int32_t));
-    CopyBuf(NextStage,   NextBuffer,   VkDeviceSize(HostSurfels.size()) * sizeof(int32_t));
+    // 0) Upload only when the field topology changed. In steady state the GPU's Irradiance is authoritative;
+    // copying the CPU seed every frame would erase its running mean. A compute→compute barrier still makes the
+    // previous submission's commit visible before this frame's Jacobi update.
+    if (FieldUploadPending)
+    {
+        auto CopyBuf = [&](VkBuffer Stage, VkBuffer Dst, VkDeviceSize Bytes)
+        { VkBufferCopy R{ 0, 0, Bytes }; vkCmdCopyBuffer(Command, Stage, Dst, 1u, &R); };
+        CopyBuf(SurfelStage, SurfelBuffer, VkDeviceSize(HostSurfels.size()) * sizeof(GpuSurfel));
+        CopyBuf(HeadStage,   HeadBuffer,   VkDeviceSize(HostGridHead.size()) * sizeof(int32_t));
+        CopyBuf(NextStage,   NextBuffer,   VkDeviceSize(HostSurfels.size()) * sizeof(int32_t));
 
-    VkMemoryBarrier ToCompute{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
-    ToCompute.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    ToCompute.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
-    vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                         0u, 1u, &ToCompute, 0u, nullptr, 0u, nullptr);
+        VkMemoryBarrier ToCompute{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+        ToCompute.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        ToCompute.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0u, 1u, &ToCompute, 0u, nullptr, 0u, nullptr);
+        FieldUploadPending = false;
+    }
+    else
+    {
+        VkMemoryBarrier PreviousCommit{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+        PreviousCommit.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        PreviousCommit.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0u, 1u, &PreviousCommit, 0u, nullptr, 0u, nullptr);
+    }
 
     VkMemoryBarrier ComputeRW{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
     ComputeRW.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -358,6 +391,7 @@ void SurfelGIStage::RecordFrame(VkCommandBuffer Command, const SurfelFrameParams
     vkCmdBindDescriptorSets(Command, VK_PIPELINE_BIND_POINT_COMPUTE, ResolvePipeLayout, 0u, 1u, &ResolveSet, 0u, nullptr);
     vkCmdPushConstants(Command, ResolvePipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(rp), &rp);
     vkCmdDispatch(Command, Gx, Gy, 1u);
+    return true;
 }
 
 //========================================================================================================================
@@ -373,7 +407,15 @@ void SurfelGIStage::Destroy() noexcept
     DP(UpdatePipeline); DP(CommitPipeline); DP(ResolvePipeline);
     auto DPL = [&](VkPipelineLayout& l){ if (l) vkDestroyPipelineLayout(I.Device, l, nullptr); l=VK_NULL_HANDLE; };
     DPL(UpdatePipeLayout); DPL(CommitPipeLayout); DPL(ResolvePipeLayout);
+    // Descriptor sets die with their private pool; release it before their layouts to keep validation lifetime
+    // ordering explicit on scene replacement and swapchain resize.
+    if (DescriptorPool) vkDestroyDescriptorPool(I.Device, DescriptorPool, nullptr);
+    DescriptorPool = VK_NULL_HANDLE;
+    UpdateSet = CommitSet = ResolveSet = VK_NULL_HANDLE;
     auto DSL = [&](VkDescriptorSetLayout& l){ if (l) vkDestroyDescriptorSetLayout(I.Device, l, nullptr); l=VK_NULL_HANDLE; };
     DSL(UpdateLayout); DSL(CommitLayout); DSL(ResolveLayout);
+    HostSurfels.clear(); HostGridHead.clear(); HostGridNext.clear();
+    LiveCount = 0u; FrameCounter = 0u; FieldUploadPending = false;
+    I = {};
 }
 }

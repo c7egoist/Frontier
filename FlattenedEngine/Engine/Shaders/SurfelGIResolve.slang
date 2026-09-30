@@ -33,8 +33,7 @@ layout(rgba8,   binding = 0) uniform writeonly image2D OutputImage;   // tone-ma
 layout(rgba32f, binding = 1) uniform readonly  image2D SurfaceImage;  // xyz = world position, w = visibility id bits
 layout(rgba16f, binding = 2) uniform readonly  image2D NormalImage;   // xyz = geometric normal
 layout(rgba8,   binding = 3) uniform readonly  image2D AlbedoImage;   // xyz = base colour (PORT: SurfaceResolve primary albedo)
-layout(rgba16f, binding = 4) uniform readonly  image2D MaterialAux;   // x = metalness, y = roughness (PORT: SurfaceResolve aux)
-layout(binding  = 5) uniform samplerCube SkyCube;                     // environment for "reflect the sky"
+layout(rgba16f, binding = 4) uniform readonly  image2D MaterialAux;   // x = metalness, y = roughness (SurfaceResolve aux)
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    SURFEL FIELD (read-only here)
@@ -123,13 +122,12 @@ vec3 Reflection(vec3 P, vec3 N, vec3 V, vec3 f0, float roughness, uint mode)
     if (mode == kReflectSky)
     {
         // reflect the sky dome only — no scene rays. Roughness widens toward the ambient (cheap gloss).
-        vec3 skyR = textureLod(SkyCube, R, roughness * 6.0).xyz;
-        return skyR;
+        return PC.SkyAmbient.xyz;
     }
     // kReflectRaytraced — one reflection ray against the CWBVH; miss → sky, hit → sun direct + surfel indirect at the hit.
     vec3 rD = 1.0 / R;
     TraversalHit h = TraverseClosest(P + N*1e-3, R, rD, 1e30);
-    if (h.t >= 1e29) return textureLod(SkyCube, R, 0.0).xyz;
+    if (h.t >= 1e29) return PC.SkyAmbient.xyz;
     vec3 hp = P + R * h.t; vec3 hN = -R;   // PORT: decode hit normal/albedo like the kernel; stand-in here.
     return SunDirect(hp, hN) * kInvPi + kInvPi * GatherField(hp, hN);
 }
@@ -147,8 +145,8 @@ void main()
     if (dot(N, N) < 1e-6)
     {
         vec3 V = normalize(P - PC.CameraEye.xyz);
-        vec3 sky = textureLod(SkyCube, V, 0.0).xyz;
-        imageStore(OutputImage, pixel, vec4(pow(sky/(sky+vec3(1.0)), vec3(1.0/2.2)), 1.0));
+        vec3 sky = PC.SkyAmbient.xyz;
+        imageStore(OutputImage, pixel, vec4(pow(sky / (sky + vec3(1.0)), vec3(1.0 / 2.2)), 1.0));
         return;
     }
 

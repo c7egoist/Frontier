@@ -63,7 +63,7 @@ the CMake integration is `Build/ProjectDrive.cmake`.
    order body=0 / wheels=1..4), the same pattern as `ShowcaseStructure`. All geometry already exists as data.
 2. Assign the flake clearcoat material to the body instance, rubber to the wheels.
 3. Paste the five hooks from `Docs/DriveEditorWiring.md` into `GameExecution.cpp`.
-4. Port the shared Surfel-GI GPU compute route into `Frontier.exe`; the CPU reference here is its oracle.
+4. Overlay the shared engine Surfel-GI route (`FlattenedEngine/Engine/DeviceExchange/SurfelGIStage.{h,cpp}`, `SwapchainExchange.cpp`, and `VisibilityExchange.{h,cpp}`) into the Frontier host; this Project-Drive reference remains a scene-specific fixture/oracle, not a renderer owner.
 
 ## Run it
 ```sh
