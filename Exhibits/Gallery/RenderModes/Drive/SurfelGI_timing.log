@@ -1,0 +1,10 @@
+# Project-Drive SurfelReference timing
+resolution        800x450
+triangles         5784
+bvh_nodes         2047
+surfels           1
+gi_frames         28 (rays/surfel 8)
+build_bvh_ms      2.4
+surfel_gi_ms      425.7
+final_shade_ms    153.7
+total_ms          581.7

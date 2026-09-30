@@ -1,0 +1,20 @@
+{
+ "proof": "Current render-mode intent CPU mirror",
+ "execution": "CPU mirror \u2014 not a native Vulkan/Slang shader or ImGui capture.",
+ "scene": "The 20 x 20 material grid \u2014 the default level. Identical geometry, camera and material data across plain raster, surfel-GI and raytraced presentations, so the only variable is the render mode.",
+ "command": "./ModeMatrix --scene grid --w 480 --h 480 --frames 320 --rays 8 --direct 64 --spp 32",
+ "results": {
+  "frames": 320,
+  "surfelCount": 32462,
+  "meanFrameToFrameDifference": 1e-05,
+  "selfChecks": "render completed and all three render-mode outputs were written."
+ },
+ "sceneChange": "Re-rendered on the 20 x 20 material grid. The closed-room reference scene is removed from this repository; RaytraceToggle/CpuMirror/ModeMatrix.cpp offers grid, glint and emissive, with grid the default.",
+ "sha256": {
+  "ModeMatrix_CPU_Mirror_Comparison.png": "2825ff1adfcf7268801e6900bb9d3e9d066583077abdb4adee4ad6be8592a352",
+  "PlainRaster_CPU_Mirror.png": "0030a50b5d1b525b65a2665bc3f203490667af34816cc34bc224a43d23df0479",
+  "RayTraced_CPU_Mirror.png": "9b745864ac40ce50788c26b7ee6495205eed9509a2034e79808425477c122cab",
+  "SurfelGi_CPU_Mirror.png": "685357e777317411e86aba6abc63869021d2ec139c96a00d1282625efcee09f3",
+  "SurfelGi_FrameDifference_x20_CPU_Mirror.png": "8ebe090deece8bf914e262957b73a31856883b3c305e09c0e936caff09eea9a2"
+ }
+}
