@@ -1,0 +1,12 @@
+Project-Drive — headless physics reference
+  Vehicle .......... real ControlVehicle (socket geometry, XPBD soft tyres, Pacejka drivetrain, aero ON)
+  Course ........... checker pad + ramp (6.0 m run, 1.35 m crest) + 3 speed bumps + 8 cones
+  Sim .............. 12.0 s @ 240 Hz (2880 steps), recorded at 60 Hz
+  Peak speed ....... 36.31 m/s (130.7 km/h)
+  Takeoff speed .... 11.04 m/s (ramp launch)
+  Airborne ......... 0.57 s
+  Max susp. travel . 0.531 m
+  Min chassis up ... 0.948 (1.0 = level; dips while cornering / airborne)
+  Final X .......... 182.9 m
+  Physics .......... 4608.69 us/step, 0.9x real-time
+  Wrote ............ telemetry.csv, timing.log, run.log in /home/user/Slate/_AgentScratch/build/drive/telemetry

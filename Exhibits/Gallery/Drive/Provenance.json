@@ -1,0 +1,99 @@
+{
+  "proof": "Project-Drive driven on the CPU by the engine's own vehicle solver and visibility raster.",
+  "execution": "CPU render by the engine's own translation units \u2014 not a native Vulkan, Slang, or ImGui capture.",
+  "renderer": "Frontier engine sources, built and run headless. No renderer is authored in Slate.",
+  "source": {
+    "repository": "https://github.com/SultanAladin/Frontier-.git",
+    "revision": "28ec0657a23ed6bbf680f17cc06b464a53639dae"
+  },
+  "scene": "Projects/Project-Drive/Source/DriveSceneAuthor \u2014 the app's own course, ControlVehicle shell, four wheels and twelve authored materials, in the app's own span order.",
+  "commands": [
+    "DriveTelemetry /home/user/Slate/_AgentScratch/build/drive/telemetry",
+    "/usr/bin/python3 Exhibits/Workbench/Drive/DriveTelemetryGraphs.py",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveChaseRun --width 480 --height 270 --fps 10 --sun 13.0 --camera chase --seconds 12",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveTracksideRun --width 480 --height 270 --fps 10 --sun 13.0 --camera trackside --seconds 12",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveOrbitWhileDriving --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --seconds 12 --orbit-period 5 --orbit-radius 9 --orbit-height 2.6",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDTyreDeformation --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveMaterialTurntable --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --freeze 3.0 --seconds 9 --orbit-period 6 --orbit-radius 6.5 --orbit-height 2.4",
+    "XPBDTyreProof /home/user/Slate/Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
+  ],
+  "results": {
+    "physics": [
+      "  Peak speed ....... 36.31 m/s (130.7 km/h)",
+      "  Takeoff speed .... 11.04 m/s (ramp launch)",
+      "  Airborne ......... 0.57 s",
+      "  Max susp. travel . 0.531 m",
+      "  Min chassis up ... 0.948 (1.0 = level; dips while cornering / airborne)",
+      "  Final X .......... 182.9 m",
+      "  Physics .......... 4608.69 us/step, 0.9x real-time",
+      "  Wrote ............ telemetry.csv, timing.log, run.log in /home/user/Slate/_AgentScratch/build/drive/telemetry"
+    ],
+    "ProjectDriveChaseRun": [
+      "[drive-scene] camera 'chase': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.31 m/s (130.7 km/h), peak aero downforce 7547 N, final X 182.90 m"
+    ],
+    "ProjectDriveTracksideRun": [
+      "[drive-scene] camera 'trackside': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.31 m/s (130.7 km/h), peak aero downforce 7547 N, final X 182.90 m"
+    ],
+    "ProjectDriveOrbitWhileDriving": [
+      "[drive-scene] camera 'orbit': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.31 m/s (130.7 km/h), peak aero downforce 7547 N, final X 182.90 m"
+    ],
+    "ProjectDriveXPBDTyreDeformation": [
+      "[drive-scene] camera 'wheel': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.31 m/s (130.7 km/h), peak aero downforce 7547 N, final X 182.90 m"
+    ],
+    "ProjectDriveMaterialTurntable": [
+      "[drive-scene] camera 'orbit': 91 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 7.60 m/s (27.4 km/h), peak aero downforce 341 N, final X 7.90 m"
+    ]
+  },
+  "sha256": {
+    "ProjectDriveAeroAgainstSpeed_CPU_Reference.png": "65b8ee1e367b81b3c792403ad763e6583e021e22213f27060d6a77f6c05d8c3f",
+    "ProjectDriveAerodynamics_CPU_Reference.png": "1973933d3d527a82048660ded6fa4094b0d2d4985dc01dfc3ab03e4b076ac107",
+    "ProjectDriveChaseRun_CPU_Reference.gif": "63c125d6890a91ff63de1e571e317af676401b3434a4c9b2f69db6406c37ec4b",
+    "ProjectDriveDriverInputs_CPU_Reference.png": "54ee18f2fe9e450f0a886b660797668de7524dd9a7523a43be55e3940796b389",
+    "ProjectDriveMaterialAngleFarSide_CPU_Reference.png": "2d3c6e35985eb338306decfee9990a192109de3dbe8e99af07e86e2ad5c47005",
+    "ProjectDriveMaterialAngleFrontQuarter_CPU_Reference.png": "010be13676254a517f2b304d21d3087238e10d5d1a7ca98f04aa70a618754098",
+    "ProjectDriveMaterialAngleFront_CPU_Reference.png": "7d557a9ca39dc98d8515d00e386ca84d9b43f300129fbf67f909c0b907fa21a4",
+    "ProjectDriveMaterialAngleRearQuarter_CPU_Reference.png": "39155f9ab625909ae21aa06b4f2daa5d16b817304c0d42bee0578c0c8cd11241",
+    "ProjectDriveMaterialAngleRear_CPU_Reference.png": "b9c1ac09e6e516016438e647369591d1ae644da0bbec4fac43a0339573f9eecd",
+    "ProjectDriveMaterialAngleSide_CPU_Reference.png": "01e4fea92b73bfba18d6d9c728b03ad1161baf7a43f866fbba887af0b1e9591b",
+    "ProjectDriveMaterialTurntable_CPU_Reference.gif": "868a3bf145dafbd225acc1d7b03fbb27dfd5a613afffc7aaf85fc78a109bb8b8",
+    "ProjectDriveOrbitWhileDriving_CPU_Reference.gif": "b4e0525cf0499e5f93596e3f8962140d9d179bc86aec272e0baa85f20d6cd7f7",
+    "ProjectDrivePhysicsRun_CPU_Reference.txt": "e83cafd22cfe5935634ddf79b7691041e4b1745d87afc9ed9d5752de9f902f63",
+    "ProjectDrivePhysicsTelemetry_CPU_Reference.csv": "312a4324b3c3b7411ee680ad23082097d112c4e671efc422c4726ebbb10f172d",
+    "ProjectDrivePhysicsTiming_CPU_Reference.txt": "4d3f2213444095c155022ea38a8875bbc02a24e0db9c9cbb7c8bf8fc2d5cf63f",
+    "ProjectDrivePowertrain_CPU_Reference.png": "38d1d1717477c55610c4a10e47bfcc34080aee68de920d930f88267d30b8a3e2",
+    "ProjectDriveSpeedVsTime_CPU_Reference.png": "82ed79b9c9954d26de802639364f7175204bb738801b6104778298de245dc889",
+    "ProjectDriveSteering_CPU_Reference.png": "f10c4223c99d98edc75b54c7b4e560df3da2e94701b5b6cee3a5ea5e9eeb279f",
+    "ProjectDriveTracksideRun_CPU_Reference.gif": "4ab39d797a84f1a189ff92dd2363e191d0416d347b4836ea74d999f54cc456aa",
+    "ProjectDriveTyreLoads_CPU_Reference.png": "15e475d49f8bb5653aec060d151e1b487e68cfff9450cb6e6e1b1e3d79b8422b",
+    "ProjectDriveXPBDTyreDeformation_CPU_Reference.gif": "7a642d85acea8132faa92dc3634fdb7f8e63ad64a07af61ee8ae1ac413b26579"
+  },
+  "stages": {
+    "level": "Projects/Project-Drive/Source/DriveSceneAuthor (VehiclePhysics/Overlay)",
+    "physics": "Engine/PhysicalDynamics/Vehicle/VehicleSolver \u2014 PacejkaDrivetrain, XPBD soft tyres, Aerodynamics",
+    "camera": "Projects/Project-Drive/Source/ChaseCameraSolver, the app's own chase camera",
+    "sky": "Projects/Project-Zero/Source/CelestialSequence at local hour 13.0 \u2014 the engine's real sun, sky, atmosphere, star and moon model",
+    "raster": "Engine/GeometricRaster/VisibilityRaster \u2014 the shipped RT-off / GI-off render path"
+  },
+  "executionBoundary": {
+    "nativeFrontierVulkanSlangImGuiCapture": false,
+    "description": "Every frame is rendered on the CPU by the engine's own translation units, built from the pinned checkout with VehiclePhysics/Overlay applied. No renderer, material model, sky or camera is authored in Slate. This is not a Vulkan swapchain capture; it is the same code the GPU path shades from, run headless."
+  },
+  "sequences": {
+    "ProjectDriveChaseRun": "The full scripted run from the app's own ChaseCameraSolver: settle, full throttle, slalom, ramp, brake.",
+    "ProjectDriveTracksideRun": "The same run from a fixed post beside the course, so the speed reads as motion through frame.",
+    "ProjectDriveOrbitWhileDriving": "The same run with the eye circling the moving car: the body, wheels and course from every azimuth at speed.",
+    "ProjectDriveXPBDTyreDeformation": "The front-left tyre for the whole run, close enough to read the carcass. The surface is rebuilt every frame from XPBDSoftTyre's own particle lattice, so the contact patch flattening, the shoulders bulging and the shiver over the bumps are the deformation the solver resolved \u2014 not a cylinder being squashed for the camera.",
+    "ProjectDriveMaterialTurntable": "The car held at the pose the solver produced three seconds into the run, circled once, to show the twelve authored Project-Drive materials from every angle."
+  },
+  "retired": {
+    "sheets": [
+      "ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
+    ],
+    "reason": "Exhibits/Workbench/Drive/DriveSceneProof.cpp was a bespoke raytracer written in Slate. It did not run any engine code, so its sheets were not evidence about Project-Drive. It is deleted and its output is superseded by the sequences above."
+  }
+}
