@@ -154,6 +154,7 @@ struct SoftTyreNode
     // Brush/bristle state for the compliant tread friction.
     Vec3  BristleAnchor{};      // world root of the tread bristle on the ground (carried by the belt while stuck)
     bool  InContact = false;    // was this node in contact on the previous substep (bristle alive)?
+    Vec3  ContactNormal{0.0f, 0.0f, 1.0f};   // surface normal where it touched, for the velocity pass
 
     // ── XPBD Lagrange multipliers ────────────────────────────────────────────────────────────────────────────
     // Macklin et al., "XPBD: Position-Based Simulation of Compliant Constrained Dynamics", eq. 18:

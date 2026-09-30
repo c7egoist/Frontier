@@ -205,6 +205,18 @@ struct TyreDiagnostics
     float RmsRadialSpeed = 0.0f;   // [m/s]
     uint32_t Contacts = 0u;
     float NormalLoad = 0.0f;    // [N]
+
+    // ── is the out-of-roundness the CONTACT PATCH, or a standing wave? ──────────────────────────────────────
+    // A loaded tyre is legitimately not round: it has a flat spot where it meets the road, and that flat spot
+    // is most of the out-of-roundness in this log. It is not a defect. What WOULD be a defect is the carcass
+    // ringing AWAY from the patch. So the patch is excluded and the remainder measured on its own.
+    float OffPatchSpread = 0.0f;   // [m] max−min radius over nodes well away from the contact arc
+    uint32_t DominantMode = 0u;    // [-] circumferential harmonic with the largest amplitude
+    float DominantAmplitude = 0.0f;// [m] that harmonic's amplitude on the centre ring
+    float RmsDeviation = 0.0f;     // [m] RMS |r − mean| over every node
+    uint32_t Outliers = 0u;        // [-] nodes more than 10 mm off the mean radius
+    float CrownRadius = 0.0f;      // [m] mean radius of the centre ring
+    float ShoulderRadius = 0.0f;   // [m] mean radius of the two edge rings
 };
 
 TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, const Vec3& HubVelocity)
@@ -229,8 +241,90 @@ TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, c
     }
     const float Count = static_cast<float>(Nodes.size());
     D.MeanRadius = SumR / Count;
+
+    const uint32_t Segments = Tyre.Params().SegmentCount, Rings = Tyre.Params().RingCount;
+
+    // Contact arc: the mean angular position of the nodes actually touching, then a generous band either side
+    //    so the flat spot AND its shoulders are removed before the rest is measured.
+    float Cx = 0.0f, Cy = 0.0f; uint32_t Touching = 0u;
+    for (uint32_t r = 0; r < Rings; ++r)
+        for (uint32_t sg = 0; sg < Segments; ++sg)
+            if (Nodes[r * Segments + sg].InContact)
+            {
+                const float A = 6.28318531f * static_cast<float>(sg) / static_cast<float>(Segments);
+                Cx += std::cos(A); Cy += std::sin(A); ++Touching;
+            }
+    if (Touching > 0u)
+    {
+        const float PatchAngle = std::atan2(Cy, Cx);
+        float OffMin = 1e30f, OffMax = -1e30f;
+        for (uint32_t r = 0; r < Rings; ++r)
+            for (uint32_t sg = 0; sg < Segments; ++sg)
+            {
+                const float A = 6.28318531f * static_cast<float>(sg) / static_cast<float>(Segments);
+                const float Delta = std::fabs(std::atan2(std::sin(A - PatchAngle), std::cos(A - PatchAngle)));
+                if (Delta < 0.7854f) continue;             // exclude ±45° about the patch
+                const Vec3 Rel2 = Nodes[r * Segments + sg].Position - HubPosition;
+                const float Rr = (Rel2 - Axis * Dot(Rel2, Axis)).Length();
+                OffMin = std::min(OffMin, Rr); OffMax = std::max(OffMax, Rr);
+            }
+        if (OffMax > OffMin) D.OffPatchSpread = OffMax - OffMin;
+    }
+
+    // Circumferential harmonics on the centre ring. A flat spot spreads energy broadly over low modes; a
+    //    standing wave in the tread band is a sharp peak at one higher mode. This separates them.
+    {
+        const uint32_t Mid = (Rings / 2u) * Segments;
+        for (uint32_t m = 2u; m <= 48u; ++m)   // up to mode 48: short-wavelength tread ripple lives well above 8
+        {
+            float Re = 0.0f, Im = 0.0f;
+            for (uint32_t sg = 0; sg < Segments; ++sg)
+            {
+                const Vec3 Rel2 = Nodes[Mid + sg].Position - HubPosition;
+                const float Rr = (Rel2 - Axis * Dot(Rel2, Axis)).Length();
+                const float A = 6.28318531f * static_cast<float>(m) * static_cast<float>(sg) / static_cast<float>(Segments);
+                Re += Rr * std::cos(A); Im += Rr * std::sin(A);
+            }
+            const float Amp = 2.0f * std::sqrt(Re * Re + Im * Im) / static_cast<float>(Segments);
+            if (Amp > D.DominantAmplitude) { D.DominantAmplitude = Amp; D.DominantMode = m; }
+        }
+    }
     D.RadialSpread = MaxR - MinR;
     D.RmsRadialSpeed = std::sqrt(SumSq / Count);
+
+    // Broad distortion or a few launched nodes? RMS says how much the WHOLE carcass is off; the outlier count
+    //    says how many nodes carry it. A 60 mm spread with a 2 mm RMS and a handful of outliers is a few
+    //    particles misbehaving, not a deformed tyre, and those are very different bugs.
+    {
+        float SumDev = 0.0f;
+        for (const auto& N2 : Nodes)
+        {
+            const Vec3 Rel2 = N2.Position - HubPosition;
+            const float Rr = (Rel2 - Axis * Dot(Rel2, Axis)).Length();
+            const float Dv = Rr - D.MeanRadius;
+            SumDev += Dv * Dv;
+            if (std::fabs(Dv) > 0.010f) ++D.Outliers;
+        }
+        D.RmsDeviation = std::sqrt(SumDev / Count);
+    }
+
+    // Circumferential harmonics are computed on the CENTRE ring, and they stayed under 3 mm even out to mode
+    //    48 while the whole-lattice RMS ran to 13 mm. So the deviation is not around the circumference at all
+    //    -- it is ACROSS THE WIDTH. Crown against shoulders tests that directly.
+    {
+        auto RingMean = [&](uint32_t r)
+        {
+            float Sum = 0.0f;
+            for (uint32_t sg = 0; sg < Segments; ++sg)
+            {
+                const Vec3 Rel2 = Nodes[r * Segments + sg].Position - HubPosition;
+                Sum += (Rel2 - Axis * Dot(Rel2, Axis)).Length();
+            }
+            return Sum / static_cast<float>(Segments);
+        };
+        D.CrownRadius = RingMean(Rings / 2u);
+        D.ShoulderRadius = 0.5f * (RingMean(0u) + RingMean(Rings - 1u));
+    }
     D.Contacts = Tyre.Reaction().ContactCount;
     D.NormalLoad = Tyre.Reaction().Force.z;
     return D;
@@ -505,7 +599,7 @@ int main(int ArgumentCount, char** ArgumentValues)
 
     // ── the carcass log ─────────────────────────────────────────────────────────────────────────────────────
     std::FILE* TyreLogFile = nullptr;
-    float WorstSpread = 0.0f, WorstRms = 0.0f;
+    float WorstSpread = 0.0f, WorstRms = 0.0f, WorstOffPatch = 0.0f;
     Vec3  PrevHub[4]{};
     if (!TyreLog.empty())
     {
@@ -513,7 +607,9 @@ int main(int ArgumentCount, char** ArgumentValues)
         if (TyreLogFile != nullptr)
             std::fprintf(TyreLogFile,
                 "time_s,wheel,speed_mps,max_squash_m,mean_radius_m,radial_spread_m,"
-                "max_radial_speed_mps,rms_radial_speed_mps,contacts,normal_load_N,strut_m\n");
+                "max_radial_speed_mps,rms_radial_speed_mps,contacts,normal_load_N,strut_m,"
+                "offpatch_spread_m,dominant_mode,dominant_amp_m,rms_deviation_m,outliers,"
+                "crown_radius_m,shoulder_radius_m\n");
     }
 
     for (int S = 0; S <= Steps; ++S)
@@ -544,11 +640,13 @@ int main(int ArgumentCount, char** ArgumentValues)
                 PrevHub[W] = WT.HubPosition;
                 const TyreDiagnostics D = MeasureTyre(Solver.Tyres()[W], WT.HubPosition, HubVel);
                 std::fprintf(TyreLogFile,
-                    "%.5f,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.2f,%.6f\n",
+                    "%.5f,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.2f,%.6f,%.6f,%u,%.6f,%.6f,%u,%.6f,%.6f\n",
                     T, W, Telemetry.SpeedMetresPerSecond,
                     D.MaxSquash, D.MeanRadius, D.RadialSpread,
-                    D.MaxRadialSpeed, D.RmsRadialSpeed, D.Contacts, D.NormalLoad, WT.StrutCompression);
+                    D.MaxRadialSpeed, D.RmsRadialSpeed, D.Contacts, D.NormalLoad, WT.StrutCompression,
+                    D.OffPatchSpread, D.DominantMode, D.DominantAmplitude, D.RmsDeviation, D.Outliers, D.CrownRadius, D.ShoulderRadius);
                 WorstSpread = std::max(WorstSpread, D.RadialSpread);
+                WorstOffPatch = std::max(WorstOffPatch, D.OffPatchSpread);
                 WorstRms    = std::max(WorstRms, D.RmsRadialSpeed);
             }
         }
@@ -743,8 +841,9 @@ int main(int ArgumentCount, char** ArgumentValues)
         // The ringing summary, printed so a run says whether the carcass was quiet without opening the CSV.
         //    RMS RADIAL node speed is the wobble metric: it is zero for rigid rotation and for translation, so a
         //    settled tyre reads near zero however fast the car is going.
-        std::printf("[drive-scene] tyre log: worst out-of-roundness %.2f mm, worst RMS radial node speed %.1f mm/s -> %s\n",
-                    WorstSpread * 1000.0f, WorstRms * 1000.0f, TyreLog.c_str());
+        std::printf("[drive-scene] tyre log: out-of-roundness %.2f mm total, %.2f mm away from the contact patch; "
+                    "worst RMS radial node speed %.1f mm/s -> %s\n",
+                    WorstSpread * 1000.0f, WorstOffPatch * 1000.0f, WorstRms * 1000.0f, TyreLog.c_str());
     }
 
     if (Still)

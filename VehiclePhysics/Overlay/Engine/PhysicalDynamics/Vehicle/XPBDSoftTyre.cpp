@@ -251,6 +251,7 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
                 // ── Tread bristle: a compliant tangential spring rooted on the ground, carried by the belt while stuck.
                 //    Its stiffness (1/α_tread) sets the slip stiffness; the μ·N cone caps it (sliding).
                 const Vec3 footPt{node.Position.x, node.Position.y, gz};
+                node.ContactNormal = normal;
                 if (!node.InContact) { node.BristleAnchor = footPt; node.InContact = true; }
                 else                 { node.BristleAnchor += beltDisp; node.BristleAnchor.z = gz; }
 
@@ -294,11 +295,31 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
             }
         }
 
-        // ── velocity update ──────────────────────────────────────────────────────────────────────────────────────
+        // ── velocity update, then the velocity-level pass ────────────────────────────────────────────────────────
+        // PBDBodies (Müller et al., "Detailed Rigid Body Simulation with XPBD") Algorithm 2: the position solve
+        //    is followed by SolveVelocities, and for contact that step is not optional.
+        //
+        //    Deriving velocity as (x − xprev)/h attributes the CONTACT PUSH-OUT to motion. A node that arrives
+        //    below the surface — at 36 m/s and 8 substeps it can travel ~19 mm between solves, most of a 25 mm
+        //    segment — is pushed back out in one go, and the divide then reports that push-out as tens of m/s
+        //    of outward velocity. The node is launched, its neighbours follow through the lattice, and the
+        //    carcass goes lumpy. That is exactly what the log showed: at rest the tyre was round to 0.01 mm
+        //    away from the patch, but under load the off-patch spread ran to 60–130 mm while NO circumferential
+        //    harmonic exceeded ~2 mm. Not a standing wave — individual nodes being flung.
+        //
+        //    Restitution is zero here: a tyre carcass does not bounce off the road. So any OUTWARD normal
+        //    velocity on a node that is in contact is an artefact of the projection and is removed. Inward
+        //    motion is left alone, because that is the tyre genuinely being loaded.
         for (SoftTyreNode& node : NodeRecords)
         {
             if (node.InverseMass <= 0.0f) { node.Velocity = {0, 0, 0}; continue; }
             node.Velocity = (node.Position - node.Previous) * (1.0f / h);
+
+            if (node.InContact)
+            {
+                const float Vn = Dot(node.Velocity, node.ContactNormal);
+                if (Vn > 0.0f) node.Velocity -= node.ContactNormal * Vn;   // e = 0, no bounce
+            }
         }
     }
 
