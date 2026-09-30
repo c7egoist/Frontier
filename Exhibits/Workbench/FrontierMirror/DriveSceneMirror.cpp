@@ -184,6 +184,67 @@ std::vector<Part> SlicePartsByMaterial(const DC::DriveSceneAuthor& Author)
 //
 //    Nodes are in WORLD space; the part is drawn under the hub's own pose matrix, so they come back to hub-local
 //    first. That keeps the wheel a normal dynamic instance rather than a special case in the renderer.
+// ── XPBD tyre diagnostics ───────────────────────────────────────────────────────────────────────────────────
+// The carcass was visibly wobbling under a car that drove correctly, and a GIF is a poor instrument for telling
+//    "the tyre is rolling over a bump" from "the tyre is ringing". These are the numbers that separate them.
+//
+//    RestSpeed is the one that matters. A settled tyre under steady load has nodes that are nearly stationary IN
+//    THE HUB FRAME; a ringing one does not, however steady the hub is. Radial spread (max − min node radius)
+//    says how out-of-round the carcass currently is, which is the wobble you actually see.
+struct TyreDiagnostics
+{
+    float MaxSquash = 0.0f;     // [m]   peak |r − rest|
+    float MeanRadius = 0.0f;    // [m]
+    float RadialSpread = 0.0f;  // [m]   max r − min r : out-of-roundness
+    // RADIAL speed, not hub-relative speed. Hub-relative speed is dominated by the wheel's own rotation -- a
+    //    node at r = 0.5 m on a wheel rolling at 36 m/s is doing 36 m/s in the hub frame and is perfectly
+    //    healthy. dr/dt is zero for rigid rotation AND for translation, so what is left is the carcass
+    //    breathing: exactly the wobble. (Measured hub-relative first; the log showed it tracking road speed
+    //    almost exactly, which is the giveaway that it was reading rotation.)
+    float MaxRadialSpeed = 0.0f;   // [m/s]
+    float RmsRadialSpeed = 0.0f;   // [m/s]
+    uint32_t Contacts = 0u;
+    float NormalLoad = 0.0f;    // [N]
+};
+
+TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, const Vec3& HubVelocity)
+{
+    TyreDiagnostics D;
+    const auto& Nodes = Tyre.Nodes();
+    if (Nodes.empty()) return D;
+    const float Rest = Tyre.Params().Radius;
+    const Vec3 Axis{0.0f, 1.0f, 0.0f};
+    float MinR = 1e30f, MaxR = -1e30f, SumR = 0.0f, SumSq = 0.0f;
+    for (const auto& N : Nodes)
+    {
+        const Vec3 Rel = N.Position - HubPosition;
+        const Vec3 Radial = Rel - Axis * Dot(Rel, Axis);
+        const float R = Radial.Length();
+        MinR = std::min(MinR, R); MaxR = std::max(MaxR, R); SumR += R;
+        D.MaxSquash = std::max(D.MaxSquash, std::fabs(Rest - R));
+        const Vec3 RadialDir = (R > 1e-6f) ? Radial * (1.0f / R) : Vec3{0.0f, 0.0f, 1.0f};
+        const float RadialSpeed = std::fabs(Dot(N.Velocity - HubVelocity, RadialDir));
+        D.MaxRadialSpeed = std::max(D.MaxRadialSpeed, RadialSpeed);
+        SumSq += RadialSpeed * RadialSpeed;
+    }
+    const float Count = static_cast<float>(Nodes.size());
+    D.MeanRadius = SumR / Count;
+    D.RadialSpread = MaxR - MinR;
+    D.RmsRadialSpeed = std::sqrt(SumSq / Count);
+    D.Contacts = Tyre.Reaction().ContactCount;
+    D.NormalLoad = Tyre.Reaction().Force.z;
+    return D;
+}
+
+// --debug-lattice: draw the solver's PARTICLES instead of the skin stretched over them. A skinned tyre hides
+//    which nodes are misbehaving; markers do not. Node colour is by state, using material slots that already
+//    exist so no new authoring is needed:
+//        red  (MatTaillight) — in contact with the ground this substep
+//        blue (MatHub)       — more than 10 mm off the rest radius, i.e. deformed
+//        dark (MatTyre)      — at rest radius, doing nothing
+//    Each marker is a 6-triangle octahedron; at 9x128 that is 1152 markers per wheel, which the raster eats.
+bool g_DebugLattice = false;
+
 void RebuildWheelParts(const XPBDSoftTyre& Tyre, const Quat& HubRotation, const Vec3& HubPosition,
                        uint32_t Span, std::vector<Part>& Parts)
 {
@@ -206,11 +267,55 @@ void RebuildWheelParts(const XPBDSoftTyre& Tyre, const Quat& HubRotation, const 
     Lattice.SpokeCount = DC::kDriveWheelSpokeCount;
 
     Part* ByMaterial[3] = { nullptr, nullptr, nullptr };
-    const uint32_t Slots[3] = { DC::MatTyre, DC::MatHub, DC::MatBrake };
+    const uint32_t Slots[3] = { DC::MatTyre, DC::MatHub, g_DebugLattice ? DC::MatTaillight : DC::MatBrake };
     for (unsigned K = 0; K < 3u; ++K)
     {
         Parts.push_back(Part{ Span, Slots[K], {}, {}, /*Dynamic=*/true });
         ByMaterial[K] = &Parts.back();
+    }
+
+    if (g_DebugLattice)
+    {
+        // Deviation is measured against the carcass's OWN mean radius, not the unloaded rest radius. A
+        //    pressurised tyre sits uniformly larger than rest -- here +5.8 mm, which is exactly the
+        //    120.7 N node pressure force over the 20 kN/m sidewall -- and that is correct, not deformation.
+        //    Colouring against rest painted the entire tyre "deformed" and hid the thing worth seeing.
+        const Vec3 Axis{0.0f, 1.0f, 0.0f};
+        float MeanR = 0.0f;
+        for (uint32_t N = 0; N < Rings * Segments; ++N)
+        {
+            const Vec3 Rel = Nodes[N].Position - HubPosition;
+            MeanR += (Rel - Axis * Dot(Rel, Axis)).Length();
+        }
+        MeanR /= static_cast<float>(Rings * Segments);
+        const float Rest = MeanR;
+        const float M = 0.012f;   // marker half-extent [m]
+        const Vec3 Dir[6] = { { M,0,0}, {-M,0,0}, {0, M,0}, {0,-M,0}, {0,0, M}, {0,0,-M} };
+        const int Face[8][3] = { {0,2,4},{2,1,4},{1,3,4},{3,0,4},{2,0,5},{1,2,5},{3,1,5},{0,3,5} };
+        for (uint32_t N = 0; N < Rings * Segments; ++N)
+        {
+            const Vec3 Rel = Nodes[N].Position - HubPosition;
+            const Vec3 Radial = Rel - Axis * Dot(Rel, Axis);
+            const float Deviation = std::fabs(Radial.Length() - Rest);
+            Part* Target = Nodes[N].InContact ? ByMaterial[2] : (Deviation > 0.010f ? ByMaterial[1] : ByMaterial[0]);
+            const Vec3 C{ Tread[N * 3u + 0u], Tread[N * 3u + 1u], Tread[N * 3u + 2u] };   // hub-local
+            for (const auto& F : Face)
+            {
+                const Vec3 P[3] = { C + Dir[F[0]], C + Dir[F[1]], C + Dir[F[2]] };
+                const Vec3 E1 = P[1] - P[0], E2 = P[2] - P[0];
+                Vec3 Nl = Cross(E1, E2); const float L = Nl.Length();
+                if (L > 1e-12f) Nl = Nl * (1.0f / L);
+                for (unsigned K = 0; K < 3u; ++K)
+                {
+                    VertexRecord V{};
+                    V.SpatialLocation = { P[K].x, P[K].y, P[K].z };
+                    V.NormalDirection = { Nl.x, Nl.y, Nl.z };
+                    Target->Order.push_back(static_cast<uint32_t>(Target->Corners.size()));
+                    Target->Corners.push_back(V);
+                }
+            }
+        }
+        return;   // markers INSTEAD of the skin: the point is to see the particles
     }
 
     DC::EmitWheelSurface(Lattice, DC::MatTyre, DC::MatHub, DC::MatBrake,
@@ -296,6 +401,8 @@ int main(int ArgumentCount, char** ArgumentValues)
     uint32_t Width = 480u, Height = 270u, Fps = 20u;
     float Seconds = 12.0f, SunHour = 15.0f, Freeze = 0.0f;
     bool  Still = false;   // one frozen pose for a material sheet; see the motion-gate note at the gates
+    std::string TyreLog;   // --tyre-log <csv>: per-frame XPBD carcass diagnostics
+    bool  DebugLattice = false;   // --debug-lattice: draw the XPBD nodes themselves instead of the tyre skin
     float OrbitPeriod = 6.0f, OrbitRadius = 8.0f, OrbitHeight = 2.2f;
 
     for (int I = 1; I < ArgumentCount; ++I)
@@ -314,6 +421,8 @@ int main(int ArgumentCount, char** ArgumentValues)
         else if (A == "--sun")        SunHour    = static_cast<float>(std::atof(Next("--sun")));
         else if (A == "--freeze")       Freeze      = static_cast<float>(std::atof(Next("--freeze")));
         else if (A == "--still")        Still       = true;
+        else if (A == "--tyre-log")     TyreLog     = Next("--tyre-log");
+        else if (A == "--debug-lattice") { DebugLattice = true; g_DebugLattice = true; }
         else if (A == "--orbit-period") OrbitPeriod = static_cast<float>(std::atof(Next("--orbit-period")));
         else if (A == "--orbit-radius") OrbitRadius = static_cast<float>(std::atof(Next("--orbit-radius")));
         else if (A == "--orbit-height") OrbitHeight = static_cast<float>(std::atof(Next("--orbit-height")));
@@ -394,6 +503,19 @@ int main(int ArgumentCount, char** ArgumentValues)
     uint32_t PeakContactNodes = 0u;
     unsigned NonBlack = 0u;
 
+    // ── the carcass log ─────────────────────────────────────────────────────────────────────────────────────
+    std::FILE* TyreLogFile = nullptr;
+    float WorstSpread = 0.0f, WorstRms = 0.0f;
+    Vec3  PrevHub[4]{};
+    if (!TyreLog.empty())
+    {
+        TyreLogFile = std::fopen(TyreLog.c_str(), "wb");
+        if (TyreLogFile != nullptr)
+            std::fprintf(TyreLogFile,
+                "time_s,wheel,speed_mps,max_squash_m,mean_radius_m,radial_spread_m,"
+                "max_radial_speed_mps,rms_radial_speed_mps,contacts,normal_load_N,strut_m\n");
+    }
+
     for (int S = 0; S <= Steps; ++S)
     {
         const float T = static_cast<float>(S) * Dt;
@@ -408,6 +530,28 @@ int main(int ArgumentCount, char** ArgumentValues)
         }
         const auto& Telemetry = Solver.Telemetry();
         PeakSpeed = std::max(PeakSpeed, Telemetry.SpeedMetresPerSecond);
+
+        // ── XPBD carcass log ────────────────────────────────────────────────────────────────────────────────
+        if (TyreLogFile != nullptr)
+        {
+            for (uint32_t W = 0; W < Telemetry.WheelCount && W < 4u; ++W)
+            {
+                const auto& WT = Telemetry.Wheels[W];
+                // The telemetry carries no hub velocity, so difference the hub pose. This must be measured in
+                //    the HUB frame: every node of a wheel doing 30 m/s is doing 30 m/s, which says nothing at
+                //    all about whether the carcass is ringing.
+                const Vec3 HubVel = (S > 0) ? (WT.HubPosition - PrevHub[W]) * (1.0f / Dt) : Vec3{0.0f, 0.0f, 0.0f};
+                PrevHub[W] = WT.HubPosition;
+                const TyreDiagnostics D = MeasureTyre(Solver.Tyres()[W], WT.HubPosition, HubVel);
+                std::fprintf(TyreLogFile,
+                    "%.5f,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.2f,%.6f\n",
+                    T, W, Telemetry.SpeedMetresPerSecond,
+                    D.MaxSquash, D.MeanRadius, D.RadialSpread,
+                    D.MaxRadialSpeed, D.RmsRadialSpeed, D.Contacts, D.NormalLoad, WT.StrutCompression);
+                WorstSpread = std::max(WorstSpread, D.RadialSpread);
+                WorstRms    = std::max(WorstRms, D.RmsRadialSpeed);
+            }
+        }
         PeakDownforce = std::max(PeakDownforce, Telemetry.Aero.TotalDownforce_N);
 
         // Suspension envelope over the run: where it rides, how far it travels, and whether it is stuck on a stop.
@@ -593,6 +737,16 @@ int main(int ArgumentCount, char** ArgumentValues)
     // first moments of the run to hold one pose, so there is no stroke and no distance to assert; claiming
     // those gates passed would be a lie, and asserting them would fail a render that is behaving correctly.
     // --still states that intent explicitly rather than letting a short --freeze quietly weaken the suite.
+    if (TyreLogFile != nullptr)
+    {
+        std::fclose(TyreLogFile);
+        // The ringing summary, printed so a run says whether the carcass was quiet without opening the CSV.
+        //    RMS RADIAL node speed is the wobble metric: it is zero for rigid rotation and for translation, so a
+        //    settled tyre reads near zero however fast the car is going.
+        std::printf("[drive-scene] tyre log: worst out-of-roundness %.2f mm, worst RMS radial node speed %.1f mm/s -> %s\n",
+                    WorstSpread * 1000.0f, WorstRms * 1000.0f, TyreLog.c_str());
+    }
+
     if (Still)
     {
         std::printf("[drive-scene] skip  3 motion gates (--still: one frozen pose, nothing is meant to move)\n");

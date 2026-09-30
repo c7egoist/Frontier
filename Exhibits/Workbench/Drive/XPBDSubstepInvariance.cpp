@@ -46,6 +46,7 @@ struct Settled
     float Deflection = 0.0f;   // peak radial squash [m]
     float NormalLoad = 0.0f;   // vertical ground reaction [N]
     uint32_t Contacts = 0u;
+    float MaxSpeed = 0.0f;     // fastest node at the end of the settle [m/s] — is it actually AT REST?
 };
 
 Settled SettleAt(uint32_t substeps, float hubHeight, float seconds)
@@ -98,6 +99,8 @@ Settled SettleAt(uint32_t substeps, float hubHeight, float seconds)
         const float squash = std::fabs(rest - r);
         if (squash > out.Deflection) out.Deflection = squash;
     }
+    for (const SoftTyreNode& n : tyre.Nodes())
+        out.MaxSpeed = std::fmax(out.MaxSpeed, n.Velocity.Length());
     out.NormalLoad = samples ? static_cast<float>(loadAccum / samples) : 0.0f;
     out.Contacts = samples ? static_cast<uint32_t>(contactAccum / samples + 0.5) : 0u;
     return out;
@@ -117,12 +120,12 @@ int main()
 
     const uint32_t schedule[] = {4u, 8u, 16u, 32u};
     std::vector<Settled> results;
-    std::printf("\n%-10s %-16s %-16s %s\n", "substeps", "deflection [mm]", "load [N]", "contacts");
+    std::printf("\n%-10s %-16s %-16s %-10s %s\n", "substeps", "deflection [mm]", "load [N]", "contacts", "rest [mm/s]");
     for (uint32_t s : schedule)
     {
-        const Settled r = SettleAt(s, hubHeight, 0.35f);
+        const Settled r = SettleAt(s, hubHeight, 1.60f);
         results.push_back(r);
-        std::printf("%-10u %-16.3f %-16.1f %u\n", s, r.Deflection * 1000.0f, r.NormalLoad, r.Contacts);
+        std::printf("%-10u %-16.3f %-16.1f %-10u %.3f\n", s, r.Deflection * 1000.0f, r.NormalLoad, r.Contacts, r.MaxSpeed * 1000.0f);
     }
 
     // The invariance itself. A PBD solver's deflection walks monotonically with the substep count; XPBD's
@@ -141,6 +144,14 @@ int main()
                 deflSpread * 100.0f, minDefl * 1000.0f, maxDefl * 1000.0f);
     std::printf("[xpbd-invariance] load spread       %.2f%% (%.1f..%.1f N)\n",
                 loadSpread * 100.0f, minLoad, maxLoad);
+
+    // Comparing "settled" states is only meaningful if they ARE settled. With Rayleigh damping the approach is
+    // slower (that is what damping does), so this is asserted rather than assumed -- the earlier 0.35 s window
+    // was comparing three different points on a transient and calling the spread a stiffness error.
+    float worstRest = 0.0f;
+    for (const Settled& r : results) worstRest = std::fmax(worstRest, r.MaxSpeed);
+    std::printf("[xpbd-invariance] fastest node at the end of the settle: %.3f mm/s\n", worstRest * 1000.0f);
+    Check(worstRest < 0.010f, "the lattice actually came to rest before being measured (<10 mm/s)");
 
     Check(maxDefl > 0.001f, "the carcass actually deflected under load (>1 mm)");
     Check(deflSpread < 0.05f, "deflection is substep-invariant to within 5% (XPBD, not PBD)");
@@ -167,7 +178,7 @@ int main()
     {
         SoftTyreParameters soft;
         soft.RingCount = 5u; soft.SegmentCount = 64u;
-        const float baseline = SettleAt(16u, hubHeight, 0.35f).Deflection;
+        const float baseline = SettleAt(16u, hubHeight, 1.60f).Deflection;
         std::printf("[xpbd-invariance] baseline deflection at 16 substeps %.3f mm\n", baseline * 1000.0f);
         Check(baseline > 0.001f, "the 16-substep baseline is a real measurement");
     }

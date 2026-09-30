@@ -111,6 +111,31 @@ struct SoftTyreParameters
     // rubber-tread shear that lets the contact force build gradually before the cone limit, exactly like a brush model.
     float    TreadTangentialCompliance = 9.0e-7f;
 
+    // ── Rayleigh damping, as DAMPING RATIOS ─────────────────────────────────────────────────────────────────
+    // XPBD §5. The elastic solve alone dissipates only what the implicit discretisation happens to lose, which
+    // for a 1152-node pressurised lattice is nowhere near enough: the carcass rings, and that ring is visible
+    // as the tyre wobbling under a car that is otherwise driving correctly. The paper folds a Rayleigh
+    // dissipation potential D = ½ Ċᵀ β Ċ into the same Gauss-Seidel update (eq. 26):
+    //
+    //     Δλ = (−C − α̃λ − γ ∇C·(x − xⁿ)) / ((1 + γ) Σw|∇C|² + α̃),      γ = α̃ β̃ / Δt,  β̃ = Δt² β
+    //
+    // so γ reduces to α·β/Δt.
+    //
+    // These are RATIOS (ζ), not β itself, and β is derived at Build time as β = 2ζ√(k·m) with k = 1/α and m the
+    // per-node mass. Authoring β directly was a mistake worth recording: the first attempt hand-picked values
+    // like β_hoop = 14 N·s/m and commented them "ζ ≈ 0.9", but the real critical coefficient for that
+    // constraint is 2√(k·m) = 2√(2.5e6 × 0.0104) ≈ 322, so the tyre was running at ζ ≈ 0.04 — essentially
+    // undamped — and went on ringing. A ratio cannot drift out of step with the stiffness it damps.
+    float    SpokeDampingRatio   = 0.70f;   // sidewall radial
+    float    HoopDampingRatio    = 0.90f;   // tread-band hoop — this is the visible ringing mode
+    float    LateralDampingRatio = 0.90f;   // carcass lateral
+    float    ShearDampingRatio   = 0.90f;   // diagonal shear
+    float    TreadDampingRatio   = 0.80f;   // tread bristle
+    // Contact stays UNDAMPED, as in the paper: XPBD §6 assumes zero compliance in contact and stores no
+    // multiplier for it. Damping a near-rigid unilateral constraint mostly fights the push-out, and measurably
+    // made the settled load schedule-dependent when tried.
+    float    ContactDampingRatio = 0.0f;
+
     // Friction
     float    FrictionCoefficient = 2.2f;   // Coulomb μ (calibrated so emergent peak ≈ Pacejka D-factor at the ~0.6
                                            // patch-utilisation of this mesh resolution; see the validation report)
@@ -175,9 +200,15 @@ public:
 
 private:
     // `lambda` is the edge's XPBD multiplier, reset at the top of every substep (see SoftTyreNode).
-    struct Edge { uint32_t a, b; float rest, compliance; float lambda = 0.0f; };
+    struct Edge { uint32_t a, b; float rest, compliance, damping; float lambda = 0.0f; };   // damping = β, derived
 
     void BuildEdges() noexcept;
+
+    // β = 2ζ√(k·m), k = 1/compliance, m = per-node mass. Derived once in Build so the ratio and the stiffness
+    //    can never fall out of step.
+    [[nodiscard]] float DerivedDamping(float compliance, float ratio) const noexcept;
+
+    float SpokeBeta = 0.0f, ContactBeta = 0.0f, TreadBeta = 0.0f;   // the non-edge constraints' derived β
 
     SoftTyreParameters        Parameters;
     std::vector<SoftTyreNode>  NodeRecords;

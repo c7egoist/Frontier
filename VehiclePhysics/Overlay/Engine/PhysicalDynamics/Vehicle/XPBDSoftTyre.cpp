@@ -51,8 +51,21 @@ void XPBDSoftTyre::Build(const SoftTyreParameters& params, const Vec3& hubPos, c
         }
     }
 
+    SpokeBeta   = DerivedDamping(Parameters.SpokeCompliance, Parameters.SpokeDampingRatio);
+    ContactBeta = DerivedDamping(Parameters.ContactCompliance, Parameters.ContactDampingRatio);
+    TreadBeta   = DerivedDamping(Parameters.TreadTangentialCompliance, Parameters.TreadDampingRatio);
+
     BuildEdges();
     ContactReaction = TyreReaction{};
+}
+
+float XPBDSoftTyre::DerivedDamping(float compliance, float ratio) const noexcept
+{
+    if (!(compliance > 0.0f) || !(ratio > 0.0f) || NodeRecords.empty()) return 0.0f;
+    const float perNodeMass = (Parameters.TotalMass > 0.0f)
+                            ? Parameters.TotalMass / static_cast<float>(NodeRecords.size()) : 0.0f;
+    if (!(perNodeMass > 0.0f)) return 0.0f;
+    return 2.0f * ratio * std::sqrt(perNodeMass / compliance);   // 2ζ√(k·m), k = 1/α
 }
 
 void XPBDSoftTyre::BuildEdges() noexcept
@@ -71,19 +84,19 @@ void XPBDSoftTyre::BuildEdges() noexcept
             // Hoop (circumferential, same ring) — always present.
             {
                 const uint32_t j = Index(r, sn);
-                ConstraintEdges.push_back({i, j, restLen(i, j), Parameters.HoopCompliance});
+                ConstraintEdges.push_back({i, j, restLen(i, j), Parameters.HoopCompliance, DerivedDamping(Parameters.HoopCompliance, Parameters.HoopDampingRatio)});
             }
             if (r + 1u < R)
             {
                 // Lateral (same segment, next ring).
                 const uint32_t j = Index(r + 1u, s);
-                ConstraintEdges.push_back({i, j, restLen(i, j), Parameters.LateralCompliance});
+                ConstraintEdges.push_back({i, j, restLen(i, j), Parameters.LateralCompliance, DerivedDamping(Parameters.LateralCompliance, Parameters.LateralDampingRatio)});
                 // Shear diagonal (next segment, next ring).
                 const uint32_t k = Index(r + 1u, sn);
-                ConstraintEdges.push_back({i, k, restLen(i, k), Parameters.ShearCompliance});
+                ConstraintEdges.push_back({i, k, restLen(i, k), Parameters.ShearCompliance, DerivedDamping(Parameters.ShearCompliance, Parameters.ShearDampingRatio)});
                 // Anti-diagonal (this ring's next seg ↔ next ring's this seg) for symmetric shear.
                 const uint32_t a = Index(r, sn), b = Index(r + 1u, s);
-                ConstraintEdges.push_back({a, b, restLen(a, b), Parameters.ShearCompliance});
+                ConstraintEdges.push_back({a, b, restLen(a, b), Parameters.ShearCompliance, DerivedDamping(Parameters.ShearCompliance, Parameters.ShearDampingRatio)});
             }
         }
 }
@@ -111,6 +124,7 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
     float contactAccum = 0.0f;
 
     const float alphaContact = Parameters.ContactCompliance * invH2;
+    const float gammaContact = Parameters.ContactCompliance * ContactBeta / h;
 
     for (uint32_t sub = 0u; sub < substeps; ++sub)
     {
@@ -145,6 +159,7 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
         // XPBD eq. 18 throughout: Δλ = (−C − α̃λ)/(Σw|∇C|² + α̃), Δx = w ∇C Δλ, λ += Δλ.  |∇C| = 1 for a
         // distance constraint, so the denominator is Σw + α̃.
         const float alphaSpoke = Parameters.SpokeCompliance * invH2;
+        const float gammaSpoke = Parameters.SpokeCompliance * SpokeBeta / h;   // γ = α·β/Δt
         const float spokeRest = Parameters.Radius - Parameters.RimRadius;
         for (SoftTyreNode& node : NodeRecords)
         {
@@ -155,7 +170,11 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
             if (dist < 1e-6f) continue;
             const Vec3 dir = d * (1.0f / dist);
             const float C = dist - spokeRest;
-            const float dLambda = (-C - alphaSpoke * node.SpokeLambda) / (node.InverseMass + alphaSpoke);
+            // eq. 26: the damping term measures how fast the constraint is being violated THIS substep, as
+            // ∇C·(x − xⁿ), and resists it. Without it the lattice is a pure spring network and rings.
+            const float cDot = Dot(dir, node.Position - node.Previous);
+            const float dLambda = (-C - alphaSpoke * node.SpokeLambda - gammaSpoke * cDot)
+                                / ((1.0f + gammaSpoke) * node.InverseMass + alphaSpoke);
             node.SpokeLambda += dLambda;
             node.Position += dir * (dLambda * node.InverseMass);
         }
@@ -173,7 +192,10 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
             const Vec3 dir = d * (1.0f / dist);
             const float C = dist - e.rest;
             const float alpha = e.compliance * invH2;
-            const float dLambda = (-C - alpha * e.lambda) / (wsum + alpha);
+            const float gamma = e.compliance * e.damping / h;                      // γ = α·β/Δt (eq. 26)
+            const float cDot = Dot(dir, (B.Position - B.Previous) - (A.Position - A.Previous));
+            const float dLambda = (-C - alpha * e.lambda - gamma * cDot)
+                                / ((1.0f + gamma) * wsum + alpha);
             e.lambda += dLambda;
             A.Position -= dir * (dLambda * A.InverseMass);
             B.Position += dir * (dLambda * B.InverseMass);
@@ -188,6 +210,7 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
             // α/h² in the position correction two lines later, so the cone threshold and the correction it
             // guarded were computed against different stiffnesses and disagreed by a factor of Δτ².
             const float alphaTread = Parameters.TreadTangentialCompliance * invH2;
+            const float gammaTread = Parameters.TreadTangentialCompliance * TreadBeta / h;
             for (SoftTyreNode& node : NodeRecords)
             {
                 if (node.InverseMass <= 0.0f) continue;
@@ -204,8 +227,12 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
                 // Normal push-out.  C = −penetration (violated while the node is below the surface), and the
                 // constraint is UNILATERAL, so the accumulated multiplier is clamped at zero: the ground may
                 // push, never pull.  Without the clamp a contact that is separating applies a suction force.
-                const float dLambdaN = (penetration - alphaContact * node.ContactLambda)
-                                     / (node.InverseMass + alphaContact);
+                // Sign care: this numerator is +penetration, i.e. C = −penetration and ∇C = −n. The eq. 26
+                //    damping term −γ ∇C·Δx therefore comes out as +γ (n·Δx), not −. Getting it backwards makes
+                //    the damper PUMP the contact instead of bleeding it, which is what it did on the first try.
+                const float cDotN = Dot(normal, node.Position - node.Previous);
+                const float dLambdaN = (penetration - alphaContact * node.ContactLambda + gammaContact * cDotN)
+                                     / ((1.0f + gammaContact) * node.InverseMass + alphaContact);
                 const float newLambdaN = std::max(0.0f, node.ContactLambda + dLambdaN);
                 const float appliedN = newLambdaN - node.ContactLambda;
                 node.ContactLambda = newLambdaN;
@@ -236,8 +263,9 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
                     // Tangential constraint C = |deflection|, solved with the same eq. 18 as every other
                     // constraint. The resulting force is λ/Δτ², so the stick/slide test and the correction are
                     // now derived from ONE solve rather than two differently-scaled expressions.
-                    const float dLambdaT = (-deflLen - alphaTread * node.TreadLambda)
-                                         / (node.InverseMass + alphaTread);
+                    const float cDotT = Dot(tdir, node.Position - node.Previous);
+                    const float dLambdaT = (-deflLen - alphaTread * node.TreadLambda - gammaTread * cDotT)
+                                         / ((1.0f + gammaTread) * node.InverseMass + alphaTread);
                     const float lambdaT = node.TreadLambda + dLambdaT;
                     const float fStick = std::fabs(lambdaT) * invH2;
                     const float fCone  = Parameters.FrictionCoefficient * normalMag;
