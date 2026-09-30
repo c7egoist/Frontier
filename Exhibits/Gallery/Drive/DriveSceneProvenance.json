@@ -30,7 +30,7 @@
           "DriveScene"
         ],
         "exit": 0,
-        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 2 ms | surfel-gi 862 ms | shade 241 ms | total 1105 ms\n  7 checks passed -> Exhibits/Gallery/Drive/DriveScene.png\n"
+        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 3 ms | surfel-gi 812 ms | shade 265 ms | total 1080 ms\n  7 checks passed -> Exhibits/Gallery/Drive/DriveScene.png\n"
       }
     },
     {
@@ -61,15 +61,15 @@
           "DriveScene"
         ],
         "exit": 0,
-        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 25 ms | surfel-gi 4207 ms | shade 1403 ms | total 5636 ms\n  7 checks passed -> Exhibits/Gallery/Drive/DriveScene.png\n"
+        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 29 ms | surfel-gi 4205 ms | shade 1344 ms | total 5577 ms\n  7 checks passed -> Exhibits/Gallery/Drive/DriveScene.png\n"
       }
     }
   ],
   "sha256": {
-    "Exhibits/Workbench/Drive/DriveSceneProof.cpp": "5f91a5484cafd8c8f629fe1558fb0f5b901256b6572cc32a015d01d9dcc5f4c1",
+    "Exhibits/Workbench/Drive/DriveSceneProof.cpp": "b69030509bcc9329c90421f7cab1b04fd5503155396d8939f5d9f3b08db85efd",
     "Exhibits/Workbench/Drive/PngWriteCodec.h": "c626ad5fc91143d3b7f53fcce6301a706a9bc4167a61d12d099fd0779d16263a",
-    "Projects/Project-Drive/Source/DriveCourse.h": "92776f00a028b1078b9eac0e7dd6e59e89c0ff38633f1c2ed216674d50186e1c",
-    "Projects/Project-Drive/Source/ControlVehicleMesh.inl": "ddb759aed9ad727883d0021d5390528ed3bd509aaadb7b697704d65a017301ab"
+    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/DriveCourse.h": "92776f00a028b1078b9eac0e7dd6e59e89c0ff38633f1c2ed216674d50186e1c",
+    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/ControlVehicleMesh.inl": "ddb759aed9ad727883d0021d5390528ed3bd509aaadb7b697704d65a017301ab"
   },
   "outputs": {
     "Exhibits/Gallery/Drive/DriveScene.png": "659311bebc4231d8bbd82e63b0e136d37ebc18c35efe832af076c1b827cc1973",

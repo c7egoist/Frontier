@@ -17,7 +17,7 @@ rasteriser (no GUI, no GPU required here).
   chassis + four cylinder wheels, with the box deliberately **not touching** the wheels (it floats 0.08 m above the
   tyres, matching the Phase-3 `VehicleSolver` where the hubs mount below the chassis). The user authors real bodywork
   themselves; earlier detailed car studies were dropped at their request.
-- `../Overlay/Exhibits/Gallery/Drive/` — durable rendered evidence (`BoxCar.png`, the drive preview, and the CPU surfel-GI render).
+- `../../Exhibits/Gallery/Drive/` — durable rendered evidence (`BoxCar.png`, the drive preview, and the CPU surfel-GI render).
 - `Meshes/` — exported `<Car>.obj` + `<Car>.mtl` + `<Car>.materials.toml` (default = sharp/duplicated faces; `--weld`
   gives a smooth, vertex-merged variant).
 
@@ -54,7 +54,7 @@ where each hub mounts below the chassis CoM and the box floats clear of the tyre
 ## Build & render
 ```bash
 VehiclePhysics/CarModelling/BuildConsole.sh /tmp/sa-build
-/tmp/sa-build/SolidArc --continue --proofs VehiclePhysics/Overlay/Exhibits/Gallery/Drive \
+/tmp/sa-build/SolidArc --continue --proofs Exhibits/Gallery/Drive \
     VehiclePhysics/CarModelling/Cars/BoxCar.scr
 ```
 

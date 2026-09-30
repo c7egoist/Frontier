@@ -22,7 +22,7 @@ external package. Its source and runner are in [`Exhibits/Workbench/Drive/`](../
 
 ## Regenerate
 
-From `VehiclePhysics/Overlay`:
+From the repository root:
 
 ```python
 python3 Exhibits/Workbench/Drive/DriveSceneProof.py

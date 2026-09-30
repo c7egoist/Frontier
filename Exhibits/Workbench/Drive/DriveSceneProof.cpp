@@ -14,8 +14,8 @@
 //    Build (plain g++, no GPU):
 //      g++ -std=c++20 -O2 -pthread Exhibits/Workbench/Drive/DriveSceneProof.cpp -o DriveSceneProof && ./DriveSceneProof
 
-#include "../../../Projects/Project-Drive/Source/DriveCourse.h"
-#include "../../../Projects/Project-Drive/Source/ControlVehicleMesh.inl"
+#include "../../../VehiclePhysics/Overlay/Projects/Project-Drive/Source/DriveCourse.h"
+#include "../../../VehiclePhysics/Overlay/Projects/Project-Drive/Source/ControlVehicleMesh.inl"
 #include "PngWriteCodec.h"
 
 #include <algorithm>

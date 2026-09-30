@@ -11,7 +11,7 @@ verified as far as is possible without a GPU** in this sandbox:
 | `Patches/BuildDispatch_FeatureBits.patch` | Packs the feature bits in `BuildDispatch` — `kFeatureRaytracing` (bit 11) + the 2-bit reflection mode (bits 15-16) — and adds the matching `DispatchFeature` enum values. | `git apply --check` **clean** |
 | `Patches/RaytracingIcon.patch` | The dedicated **Raytracing tile icon** (`RaytracingBeam`) — enum value + baked glyph path. | `git apply --check` clean; table size ↔ enum `Count` consistent (41 ↔ 41) |
 | `../Shaders/SurfelCommit.slang` | Tiny Jacobi-commit pass (`Irradiance = IrradianceNew`) so the whole stage stays on-GPU (no per-frame readback). | glslang → SPIR-V **1 700 B** (PASS) |
-| `../Exhibits/ShaderCompilation/HostWiringShaderCompilationProvenance.txt` | glslang lowering log for all four shaders touched this round. | — |
+| `../../Exhibits/ShaderCompilation/HostWiringShaderCompilationProvenance.txt` | glslang lowering log for all four shaders touched this round. | — |
 | `IconPreview/RaytracingIcon.png` | Preview of the new tile glyph beside the sparkles glyph it replaces. | — |
 
 The four patches apply **cleanly together** on a pristine `SultanAladin/Frontier-@main` tree, on top of the

@@ -10,7 +10,7 @@
 #  z-range [0.00,0.72], there is no intersection anywhere, whatever the
 #  x/y overlap. (Matches VehicleSolver: hubs mount below the chassis.)
 #
-#  Run from CarModelling: SolidArc --continue --proofs ../Overlay/Exhibits/Gallery/Drive Cars/BoxCar.scr
+#  Run from CarModelling: SolidArc --continue --proofs ../../Exhibits/Gallery/Drive Cars/BoxCar.scr
 # =====================================================================
 
 # --- chassis: a single box, floor at z=0.80 (clear of the wheels) ---

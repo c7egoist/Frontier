@@ -59,5 +59,5 @@ a small set of **drive-specific edits**, each marked with a `Project-Drive:` com
 ## Verifying without the GPU app
 
 The physics and lighting were proved headlessly by the CPU mirrors under
-`Overlay/Exhibits/Workbench/Drive/` (native proof) with rendered output in `Overlay/Exhibits/Gallery/Drive/`, per
+`Exhibits/Workbench/Drive/` (native proof) with rendered output in `Exhibits/Gallery/Drive/`, per
 the repo's proofs-in-Exhibits convention. Those are verification artifacts, not the app.

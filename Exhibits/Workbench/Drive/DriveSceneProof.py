@@ -20,8 +20,8 @@ SourcePath = WorkbenchPath / "DriveSceneProof.cpp"
 InputPaths = [
     SourcePath,
     WorkbenchPath / "PngWriteCodec.h",
-    RepositoryRoot / "Projects/Project-Drive/Source/DriveCourse.h",
-    RepositoryRoot / "Projects/Project-Drive/Source/ControlVehicleMesh.inl",
+    RepositoryRoot / "VehiclePhysics/Overlay/Projects/Project-Drive/Source/DriveCourse.h",
+    RepositoryRoot / "VehiclePhysics/Overlay/Projects/Project-Drive/Source/ControlVehicleMesh.inl",
 ]
 OutputPaths = [
     GalleryPath / "DriveScene.png",

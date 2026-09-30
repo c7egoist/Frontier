@@ -47,7 +47,7 @@ Frontier checkout via `Build/DuplicateFromProjectZero.py`, and **you build and d
     those `World` rows. Wheel rest origins match the GRIT hub table; chassis spawn lifts the shell so the wheels
     rest on the pad at frame zero.
   - Verified: builds clean under `-Wall -Wextra` against engine‑shaped headers; a CPU raster of the generated
-    triangles is `../../Exhibits/Gallery/Drive/DriveScenePreview.png`.
+    triangles is `../../../../Exhibits/Gallery/Drive/DriveScenePreview.png`.
 - **CMake**: `TractrixDriveScene.cpp` added to `PROJECT_TRACTRIX_SOURCES`.
 
 ### Remaining (next passes, in order)
