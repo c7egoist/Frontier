@@ -4,7 +4,7 @@
 
 ## Naming and execution truthfulness
 
-- `*_CPU_Mirror.png` means a CPU-rendered mirror/reference. It is **not** represented as a native Vulkan, Slang, or ImGui capture.
+- `*_CPU_Reference.*` is the current canonical name for a CPU-rendered reference. It is **not** represented as a native Vulkan, Slang, or ImGui capture. Older retained galleries may use the synonymous legacy `*_CPU_Mirror.*` suffix.
 - Each gallery contains `Provenance.json`, which identifies the scene, command, measured results, execution boundary, and SHA-256 values for durable sibling artifacts.
 - `*_FrameDifference_x20_CPU_Mirror.png` visualises twenty-times-amplified temporal change for inspection.
 - Native GPU/UI captures should use a clearly separate `*_Native_*` name and state the capture environment in provenance.
@@ -14,8 +14,7 @@
 ```text
 Gallery/
 ├── CodeImages/                 Dynamic code-image ABI lifecycle result and provenance
-├── Drive/                      Project-Drive opening/flake CPU scene proof
-├── ProjectDriveCpuReference/   Real ControlVehicle telemetry + CPU Surfel-GI reference
+├── Drive/                      Canonical Project-Drive materials, Surfel/ReSTIR, XPBD, motion and editor-state CPU references
 ├── ProjectZero/                Fresh Project-Zero showcase and M10 material-library CPU mirrors
 ├── ReflectionReservoir/        Baseline, ReSTIR, and high-sample reflection reference
 ├── RenderModes/CurrentUi/      Cornell plain-raster / Surfel-GI / ray-traced comparison
