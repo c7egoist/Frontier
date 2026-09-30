@@ -1,0 +1,7 @@
+Project-Drive editor declarations are verified by Exhibits/Gallery/CodeImages/AbiContract_CPU_Check.txt.
+This file intentionally replaces the previous fake ImGui-looking PNG sheet: the project code image
+declares C-layout panels and subjects only; Frontier.exe owns the actual editor rendering.
+
+Panels: DriveOutliner, ControlVehicle, XPBDTyres, VehicleDynamics, DriveRenderModes.
+Subjects: ControlVehicle, ControlVehicle.Body, ControlVehicle.XPBDTyre.FL, ControlVehicle.XPBDTyre.FR,
+ControlVehicle.XPBDTyre.RL, ControlVehicle.XPBDTyre.RR, DriveCourse, DriveCourse.Ramp, DriveCourse.Slalom.

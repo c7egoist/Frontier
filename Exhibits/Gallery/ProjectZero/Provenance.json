@@ -1,0 +1,33 @@
+{
+  "proof": "Project-Zero material-grid CPU reference gallery. The old soil-plain showcase closed-room exhibits were removed from the canonical gallery; Project-Zero default now opens the material grid scene.",
+  "executionBoundary": {
+    "nativeFrontierVulkanSlangImGuiCapture": false,
+    "description": "Material-grid visibility, Surfel-GI, ray-traced and angle sheets are CPU references. The visibility/Surfel/ray-traced trio was regenerated from RaytraceToggle/CpuMirror/ModeMatrix.cpp with --scene grid. The ReSTIR viewport and standard-tier sheet are retained CPU mirrors from the earlier MaterialLevelViewport proof path, restored after checking older commits, not native Vulkan/Slang captures."
+  },
+  "defaultScene": "FlattenedEngine/Projects/Project-Zero/ProjectZero.frontier opens Content/Scenes/Materials.gltf.",
+  "commands": [
+    "g++ -std=c++20 -O2 -pthread RaytraceToggle/CpuMirror/ModeMatrix.cpp -o _AgentScratch/tmp/ModeMatrix",
+    "_AgentScratch/tmp/ModeMatrix --scene grid --w 660 --h 480 --frames 80 --rays 6 --direct 32 --spp 10 --aa 2",
+    "convert mode_plainraster.ppm ProjectZeroMaterialGridVisibility_CPU_Reference.png",
+    "convert mode_surfelgi.ppm ProjectZeroMaterialGridSurfelGI_CPU_Reference.png",
+    "convert mode_raytraced.ppm ProjectZeroMaterialGridRayTraced_CPU_Reference.png"
+  ],
+  "olderCommitReferences": {
+    "ProjectZeroMaterialGridReSTIR_CPU_Reference.png": "origin/arena/01a0bbc7-slate:Exhibits/Gallery/Materials/RestirSheet_StandardTier.png",
+    "ProjectZeroMaterialGridReSTIRViewport_CPU_Reference.png": "origin/arena/01a0bbc7-slate:Exhibits/Gallery/Materials/MaterialLibrary_View.png",
+    "ProjectZeroMaterialGridAngle*.png": "origin/arena/01a0b5cf-slate:Exhibits/Gallery/Materials/Showcase_*.png"
+  },
+  "outputs": {
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridAngleDefault_CPU_Reference.png": "19a76a3f93025dc9f75f72acba3d3320cb07b15a108074be9a538dbab858ce22",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridAngleGlass_CPU_Reference.png": "0cde46cb5fe0659705db8ec999c37b18f5c586e077919a7183b0e6940befe80b",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridAngleMetals_CPU_Reference.png": "0cba351d31b28fc656cb179a642d82357bc8a6d31df45e246fcb392bb6d6a541",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridAngleWide_CPU_Reference.png": "aada0a95810d548d0457e4b5db4d67dac68dd933bf5fec153fccb9e5a16d4090",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridRayTraced_CPU_Reference.png": "77544afc618e177f21b26bc120f0105fe6a5a024c5057f706605d99de0f715f3",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridReSTIRViewport_CPU_Reference.png": "9761cdfbb7a8a5807cf3fb8be04b46ae820934a7f710d1024e5af62e442fb085",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridReSTIR_CPU_Reference.png": "461b7077ebd30e1db1fe65ceb130095e101537e52ffc6b43ade85e67950e8604",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridSurfelGI_CPU_Reference.png": "9f02be5a8026ea8e0520278962deda4ff54eb542cd8ab1c4771697dc51a23f2a",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridSurfelGI_FrameDifference_x20_CPU_Reference.png": "f3854ef1ac939238f30b23e0c7dc9177400130e6b9e3786b8646173fabe88476",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridVisibility_CPU_Reference.png": "00672129875f6d81adad717ae36fa5a60da57cf4cbb653f25ecd92f7d1db7cd1",
+    "Exhibits/Gallery/ProjectZero/ProjectZeroMaterialGridWide_CPU_Reference.png": "4bb59ea9c3bf4ad571d0d2d7acc739b45ca044ad1cbf1eb59b59eb957af05a81"
+  }
+}
