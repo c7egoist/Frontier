@@ -336,18 +336,68 @@ def main():
         soff, slen, ssingle = pick(attrs, 'sharp_edge', 0)
         sharp_any = bool(attrs.get('sharp_edge'))
 
+        # authored UVs (corner domain, float2) ---------------------------------------------------------------
+        # These matter for more than texturing: the engine's finite-flake lobe is placed through the UV
+        # parameterisation (SlateGlintUvScale), so without real UVs a flake field has nothing to vary over.
+        uv_corner = None
+        for o2, l2 in attrs.get('UVMap', []):
+            if l2 == totloop * 8:
+                uv_corner = list(struct.unpack(E + '%df' % (totloop * 2), B.d[o2:o2 + l2]))
+                break
+
         # triangulate (fan) and carry the material slot per triangle ----------------------------------------
         M = object_matrix(B, OBJ, ob)
         world = [xform(M, v) for v in verts]
-        tris, tmat = [], []
-        for f, mi in zip(faces, fmat):
+        tris, tmat, tuv = [], [], []
+        # corner index of face i starts at offs[i]; after the Mirror pass the mirrored half has no authored
+        # corner data, so it reuses its source corner's UV (the modifier's own behaviour without a UV offset).
+        for fi, (f, mi) in enumerate(zip(faces, fmat)):
+            base_corner = offs[fi] if fi < totpoly else None
             for k in range(1, len(f) - 1):
                 tris.append([f[0], f[k], f[k + 1]])
                 tmat.append(mi)
+                if uv_corner is not None and base_corner is not None:
+                    idxs = [base_corner + 0, base_corner + k, base_corner + k + 1]
+                    tuv.append([[uv_corner[2 * c], uv_corner[2 * c + 1]]
+                                if 2 * c + 1 < len(uv_corner) else [0.0, 0.0] for c in idxs])
+                else:
+                    tuv.append(None)
+
+        # ---- smooth normals, reproducing "Smooth by Angle" -------------------------------------------------
+        # Blender's modifier splits the normal where adjacent faces meet above the threshold; below it the
+        # faces share one averaged normal.  Area-weighted accumulation, then a per-corner test against the
+        # face's own normal, gets the same result without needing the edge topology.
+        import math as _m
+        fnorm = []
+        for t in tris:
+            a, b_, c = (world[t[0]], world[t[1]], world[t[2]])
+            e1 = [b_[i] - a[i] for i in range(3)]
+            e2 = [c[i] - a[i] for i in range(3)]
+            n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]
+            fnorm.append(n)                                   # unnormalised => area weighted
+        acc = [[0.0, 0.0, 0.0] for _ in world]
+        for t, n in zip(tris, fnorm):
+            for vi in t:
+                for i in range(3):
+                    acc[vi][i] += n[i]
+        thresh = _m.cos(smoothresh if 0.0 < smoothresh < _m.pi else _m.radians(30.0))
+        cnorm = []
+        for t, n in zip(tris, fnorm):
+            ln = _m.sqrt(sum(x * x for x in n)) or 1.0
+            fu = [x / ln for x in n]
+            row = []
+            for vi in t:
+                s = acc[vi]
+                ls = _m.sqrt(sum(x * x for x in s))
+                su = [x / ls for x in s] if ls > 1e-12 else fu
+                row.append(su if sum(su[i] * fu[i] for i in range(3)) >= thresh else fu)
+            cnorm.append(row)
 
         used = sorted(set(tmat))
+        have_uv = sum(1 for u in tuv if u is not None)
         objects.append({
             'name': name, 'verts': world, 'tris': tris, 'tri_material': tmat,
+            'tri_uv': tuv, 'corner_normals': cnorm, 'uv_coverage': have_uv,
             'slots': slots, 'smoothresh': smoothresh, 'mirrored': mirrored,
             'has_sharp_edges': sharp_any,
             'slot_histogram': {(slots[i] if i < len(slots) else 'slot%d' % i): tmat.count(i) for i in used},
@@ -384,8 +434,8 @@ def main():
             i.get('Coat Roughness'), i.get('Transmission Weight'), i.get('Emission Strength')))
     print('\nobjects (%d):' % len(objects))
     for o in objects:
-        print('   %-22s verts=%-6d tris=%-6d mirror=%-5s sharp=%-5s  %s' % (
-            o['name'], len(o['verts']), len(o['tris']), o['mirrored'], o['has_sharp_edges'], o['slot_histogram']))
+        print('   %-22s verts=%-6d tris=%-6d mirror=%-5s uv=%-6d  %s' % (
+            o['name'], len(o['verts']), len(o['tris']), o['mirrored'], o['uv_coverage'], o['slot_histogram']))
     total_tris = sum(len(o['tris']) for o in objects)
     miss_tris = sum(unassigned.values())
     print('\ngates:')

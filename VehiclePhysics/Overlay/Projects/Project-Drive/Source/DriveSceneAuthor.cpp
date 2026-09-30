@@ -88,12 +88,25 @@ void DriveSceneAuthor::AppendVehicleBody(float ComHeight, uint32_t Material) noe
     Geometry.CoMHeight = ComHeight;
     const float Rebase = Geometry.CoMModelZ();
     auto Local = [&](const Vector3& P) { return Vector3{P.x, P.y, P.z - Rebase}; };
+    // 🔴 Use the AUTHORED corner normals and texture coordinates, not AppendFace's flat-normal/degenerate-UV
+    //    fallback.  AppendFace writes { N, N, N } and a constant { (0,0), (1,0), (0,1) } per triangle, which
+    //    costs two visible things: the shell renders faceted rather than Smooth-by-Angle (the banding that
+    //    reads as overlapping geometry), and every triangle shares one UV triangle, so the finite-flake lobe
+    //    -- which is placed through the UV parameterisation via SlateGlintUvScale -- repeats identically per
+    //    triangle and reads as blotching instead of metallic sparkle.  Both streams are in the .blend.
     for (uint32_t t = 0; t < kTriangleCount; ++t)
     {
-        const Vector3 A = Raw(kTriangles[t*3+0]);
-        const Vector3 B = Raw(kTriangles[t*3+1]);
-        const Vector3 C = Raw(kTriangles[t*3+2]);
-        AppendFace(Local(A), Local(B), Local(C), kTriangleMaterial[t]);
+        const Vector3 P[3] = { Local(Raw(kTriangles[t*3+0])),
+                               Local(Raw(kTriangles[t*3+1])),
+                               Local(Raw(kTriangles[t*3+2])) };
+        const Vector3 Ns[3] = {
+            Vector3{ kCornerNormals[t*9+0], kCornerNormals[t*9+1], kCornerNormals[t*9+2] },
+            Vector3{ kCornerNormals[t*9+3], kCornerNormals[t*9+4], kCornerNormals[t*9+5] },
+            Vector3{ kCornerNormals[t*9+6], kCornerNormals[t*9+7], kCornerNormals[t*9+8] } };
+        const float Uv[3][2] = { { kTexcoords[t*6+0], kTexcoords[t*6+1] },
+                                 { kTexcoords[t*6+2], kTexcoords[t*6+3] },
+                                 { kTexcoords[t*6+4], kTexcoords[t*6+5] } };
+        AppendTriangle(P, Ns, Uv, kTriangleMaterial[t]);
     }
 }
 
@@ -166,13 +179,24 @@ void DriveSceneAuthor::AuthorMaterials() noexcept
     // artist chose, base (0.68, 0.80, 0.00) linear.  Coat Weight 1.0 and Coat Roughness 0.03 are likewise the
     // authored values and override the preset's roughness sweep.
     MaterialSlabDescriptor paint;
-    AuthorAutomotiveShowcase(paint, 4u /* Metallic Cobalt = plain metallic flake */, 0.35f);
-    paint.BaseColor[0] = 0.680005f; paint.BaseColor[1] = 0.800458f; paint.BaseColor[2] = 0.0f;
-    paint.BaseMetalness  = 0.85f;        // flake basecoat: the flakes are the reflector, the binder is thin
-    paint.CoatWeight     = 1.0f;         // authored Coat Weight
-    paint.CoatRoughness  = 0.03f;        // authored Coat Roughness — a hard, freshly polished clear
-    paint.CoatIor        = 1.5f;
-    paint.CoatColor[0] = 1.0f; paint.CoatColor[1] = 1.0f; paint.CoatColor[2] = 1.0f;
+    AuthorAutomotiveShowcase(paint, 4u /* Metallic Cobalt = plain metallic flake */, 0.50f);
+    // Take the preset VERBATIM and override exactly one thing: the hue.  How the preset gets its depth matters
+    // and is easy to get wrong -- its saturation comes from a DARK, saturated base at high metalness
+    // (cobalt is 0.014, 0.045, 0.13), not from a bright pigment.  Handing it the authored 0.68/0.80/0.00
+    // directly, at either metalness 0 or 0.85, renders a pale washed sage: measured saturation 0.29 against the
+    // authored 1.00, because a bright base under a full clearcoat is mostly sky reflection.  So carry the
+    // artist's HUE at the preset's own value instead, which is the same ratio the cobalt entry uses.
+    paint.BaseColor[0] = 0.5100f; paint.BaseColor[1] = 0.6000f; paint.BaseColor[2] = 0.0150f;
+    // The preset's F82 tint is BLUISH (0.72, 0.77, 0.82) because its family is cobalt.  Left alone it tints
+    // every flake highlight blue, and against this level's bright open sky that beat the pigment outright --
+    // measured green-minus-blue went NEGATIVE (-0.038), i.e. the yellow-green car rendered blue-grey.  A
+    // metal's specular tint has to share the metal's hue.
+    paint.SpecularColor[0] = 0.86f; paint.SpecularColor[1] = 0.95f; paint.SpecularColor[2] = 0.34f;
+    paint.BaseMetalness  = 1.0f;         // the flakes are the reflector; the pigment rides in the coat
+    paint.CoatRoughness  = 0.03f;        // authored Coat Roughness -- a harder clear than the preset's sweep
+    // The preset's UV scale of 1 is tuned for the showcase's ~1 m spheres.  The car is 6.2 m long, so at scale 1
+    // each flake smears across whole panels and reads as blotchy noise rather than sparkle.
+    paint.SlateGlintUvScale = 8.0f;
     Materials.push_back(MakeMaterial("MetalicCoat — metallic-flake basecoat under clearcoat", paint));  // 6
 
     // 7 — Glass.  The .blend expresses the glazing as Alpha 0.087 over a black base, which is an EEVEE alpha

@@ -44,18 +44,27 @@ AXLE_FL = (1.7274, 1.0475, 0.0914)    # Socket_AxleMount_FL, the hub-local origi
 
 
 def gather(names, origin=None):
-    """Merge the named objects into one vertex/triangle/material stream, optionally rebased about `origin`."""
-    verts, tris, mats = [], [], []
+    """Merge the named objects into one vertex/triangle/material stream, optionally rebased about `origin`.
+
+    Corner normals and texture coordinates travel with the triangles.  Both are load-bearing: flat normals
+    facet the shell, and the engine's finite-flake lobe is placed through the UV parameterisation, so a
+    degenerate UV per triangle turns metallic sparkle into per-triangle blotching."""
+    verts, tris, mats, norms, uvs = [], [], [], [], []
     for n in names:
         o = OBJ[n]
         base = len(verts)
         for v in o['verts']:
             verts.append(v if origin is None else [v[i] - origin[i] for i in range(3)])
-        for t, mi in zip(o['tris'], o['tri_material']):
+        cn = o.get('corner_normals') or []
+        tu = o.get('tri_uv') or []
+        for k, (t, mi) in enumerate(zip(o['tris'], o['tri_material'])):
             tris.append([t[0] + base, t[1] + base, t[2] + base])
             slots = o['slots']
             mats.append(SLOT.get(slots[mi], UNASSIGNED) if mi < len(slots) else UNASSIGNED)
-    return verts, tris, mats
+            norms.append(cn[k] if k < len(cn) else [[0.0, 0.0, 1.0]] * 3)
+            u = tu[k] if k < len(tu) else None
+            uvs.append(u if u else [[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    return verts, tris, mats, norms, uvs
 
 
 def fmt_floats(vals, per_line=12):
@@ -80,7 +89,7 @@ def fmt_ints(vals, per_line=18, suffix='u'):
     return '\n'.join(out).rstrip(',')
 
 
-def emit(path, ns, verts, tris, mats, note):
+def emit(path, ns, verts, tris, mats, norms, uvs, note):
     xs = [v[0] for v in verts]; ys = [v[1] for v in verts]; zs = [v[2] for v in verts]
     flat = [c for v in verts for c in v]
     idx = [i for t in tris for i in t]
@@ -102,26 +111,32 @@ def emit(path, ns, verts, tris, mats, note):
         f.write('inline constexpr float kPositions[] = {\n%s\n};\n' % fmt_floats(flat))
         f.write('inline constexpr uint32_t kTriangles[] = {\n%s\n};\n' % fmt_ints(idx))
         f.write('inline constexpr uint32_t kTriangleMaterial[] = {\n%s\n};\n' % fmt_ints(mats))
+        f.write('// Three corner normals per triangle, reproducing the .blend\'s Smooth by Angle shading.\n')
+        f.write('inline constexpr float kCornerNormals[] = {\n%s\n};\n'
+                % fmt_floats([c for tri in norms for n3 in tri for c in n3]))
+        f.write('// Three authored UVs per triangle -- the flake lobe is placed through these.\n')
+        f.write('inline constexpr float kTexcoords[] = {\n%s\n};\n'
+                % fmt_floats([c for tri in uvs for uv in tri for c in uv]))
         f.write('} } } // namespace Frontier::Drive::%s\n' % ns)
     return used
 
 
 def main():
     # ---- body ------------------------------------------------------------------------------------------------
-    v, t, m = gather(BODY)
-    used = emit(os.path.join(DST, 'ControlVehicleMesh.inl'), 'ControlVehicleMesh', v, t, m,
+    v, t, m, nn, uu = gather(BODY)
+    used = emit(os.path.join(DST, 'ControlVehicleMesh.inl'), 'ControlVehicleMesh', v, t, m, nn, uu,
                 'Body group in the MODEL frame; ground is model Z -0.41715.')
     hist = {u: m.count(u) for u in used}
     print('ControlVehicleMesh.inl   %d verts / %d tris   families %s' % (len(v), len(t), hist))
 
     # ---- wheel (rim + tyre, hub-local) -----------------------------------------------------------------------
-    vr, tr, mr = gather(['RimFL'], AXLE_FL)
-    ur = emit(os.path.join(DST, 'ControlVehicleRimMesh.inl'), 'ControlVehicleRimMesh', vr, tr, mr,
+    vr, tr, mr, nr, ur2 = gather(['RimFL'], AXLE_FL)
+    ur = emit(os.path.join(DST, 'ControlVehicleRimMesh.inl'), 'ControlVehicleRimMesh', vr, tr, mr, nr, ur2,
               'Authored RimFL in HUB-LOCAL coordinates about Socket_AxleMount_FL (1.7274, 1.0475, 0.0914).')
     print('ControlVehicleRimMesh.inl  %d verts / %d tris   families %s' % (len(vr), len(tr), {u: mr.count(u) for u in ur}))
 
-    vt, tt, mt = gather(['RubberFL'], AXLE_FL)
-    ut = emit(os.path.join(DST, 'ControlVehicleTyreMesh.inl'), 'ControlVehicleTyreMesh', vt, tt, mt,
+    vt, tt, mt, nt, ut2 = gather(['RubberFL'], AXLE_FL)
+    ut = emit(os.path.join(DST, 'ControlVehicleTyreMesh.inl'), 'ControlVehicleTyreMesh', vt, tt, mt, nt, ut2,
               'Authored RubberFL in HUB-LOCAL coordinates about Socket_AxleMount_FL (1.7274, 1.0475, 0.0914).')
     zs = [p[2] for p in vt]; ys = [p[1] for p in vt]
     print('ControlVehicleTyreMesh.inl %d verts / %d tris   families %s' % (len(vt), len(tt), {u: mt.count(u) for u in ut}))
