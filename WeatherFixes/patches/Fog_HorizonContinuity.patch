@@ -1,0 +1,16 @@
+diff --git a/Engine/Shaders/ReSTIRViewport.slang b/Engine/Shaders/ReSTIRViewport.slang
+index 6730846..070d987 100644
+--- a/Engine/Shaders/ReSTIRViewport.slang
++++ b/Engine/Shaders/ReSTIRViewport.slang
+@@ -1333,6 +1333,11 @@ void ResolveSurface(uvec2 pixel, vec3 radiance, vec3 normal, float depth, uint i
+         vec3 direction=normalize(CameraForward+CameraRight*(ndc.x*FieldOfViewTanHalf*extent.x/extent.y)-CameraUp*(ndc.y*FieldOfViewTanHalf));
+         float distance=100000.0;
+         if(surfaceHit){vec3 delta=weatherSurface.xyz-CameraOrigin;distance=length(delta);direction=delta/max(distance,1e-6);}
++        // FOG horizon continuity: a sky-miss ray pointing below the horizon integrates fog to the implicit ground
++        //    plane at z=0 (the height-fog reference) instead of the full 100000 sky distance. Without this, past the
++        //    edge of the finite ground mesh the fog thickness jumps from "ground hit" to "sky", drawing a ring/wall
++        //    around the camera — the low-quality "cylinder". z=0 matches WeatherColumn's own z-reference.
++        else if(direction.z<-1e-4){float g=-CameraOrigin.z/direction.z; if(g>0.0) distance=min(g,100000.0);}
+         // The march's sub-step offset: hashed from the pixel AND the accumulation index, so a held camera
+         //    keeps re-sampling different planes and the banding averages away instead of standing still.
+         uint weatherSeed=(uint(pixel.x)*73856093u)^(uint(pixel.y)*19349663u)^(FrameIndex*83492791u);

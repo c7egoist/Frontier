@@ -1,0 +1,17 @@
+diff --git a/Engine/Shaders/PostRecords.slang b/Engine/Shaders/PostRecords.slang
+index 92a34c6..38dd967 100644
+--- a/Engine/Shaders/PostRecords.slang
++++ b/Engine/Shaders/PostRecords.slang
+@@ -157,7 +157,11 @@ vec3 StarAlong(vec3 Direction, float SkyLuminance)
+     //    magnitude 0) with the measured 5.73 energy normalisation.
+     vec3 col = vec3(0.0);
+     uvec2 Bucket = StarCells[Cell];
+-    float Radius = max(PostStar.z * 0.0002, PostSpare0.x * 0.5);
++    // #34 STAR SIZE CAP: keep the half-pixel floor, ADD a 1.2-render-pixel ceiling. Without an upper bound a large
++    //    StarSize (or a wide pixel spread on low tiers) balloons a star into a disc; and because a bright star's skirt
++    //    runs to 1.6*Radius and is scaled by its luminance, an uncapped Radius is exactly why bright stars read as big
++    //    circles. Capping Radius caps that skirt with it. Ceiling 1.2 px -> footprint <= ~1.9 px radius.
++    float Radius = clamp(PostStar.z * 0.0002, PostSpare0.x * 0.5, PostSpare0.x * 1.2);
+     for (uint I = 0u; I < Bucket.y; ++I)
+     {
+         StarEntry Star = StarStars[Bucket.x + I];
