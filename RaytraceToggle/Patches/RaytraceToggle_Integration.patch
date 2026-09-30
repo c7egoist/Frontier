@@ -1,0 +1,212 @@
+diff --git a/Engine/DisplayPresentation/ControlCentreHost.cpp b/Engine/DisplayPresentation/ControlCentreHost.cpp
+index 4ac429b..ac2daac 100644
+--- a/Engine/DisplayPresentation/ControlCentreHost.cpp
++++ b/Engine/DisplayPresentation/ControlCentreHost.cpp
+@@ -830,6 +830,7 @@ constexpr QuickTileStructure TileTable[static_cast<size_t>(QuickTileCategory::Co
+     { QuickTileCategory::Notifications,      ControlCentreIconCategory::NotificationsBell,    "Notifications",       false },
+     { QuickTileCategory::Quality,            ControlCentreIconCategory::SlidersQuality,       "Quality",             true  },
+     { QuickTileCategory::PatchGeometry, ControlCentreIconCategory::SlidersQuality, "Patch Geometry", true },
++    { QuickTileCategory::Raytracing,    ControlCentreIconCategory::RaytracingBeam,       "Raytracing",    false },
+ };
+ 
+ constexpr uint32_t GridColumns = 4u;
+@@ -909,7 +910,8 @@ bool ControlCentreHost::IsTileActive(QuickTileCategory Tile) const noexcept
+     switch (Tile)
+     {
+         case QuickTileCategory::GlobalIllumination: return Settings.GlobalIllumination && Settings.GiBounces > 0u;
+-        case QuickTileCategory::Reflections:        return Settings.ReflectionBounces > 0u;
++        case QuickTileCategory::Reflections:        return Settings.ReflectionMode != ReflectionModeCategory::Off;
++        case QuickTileCategory::Raytracing:         return Settings.Raytracing;
+         case QuickTileCategory::AntiAliasing:       return Settings.AntiAliasing;
+         case QuickTileCategory::FrameRateOverlay:   return Settings.FrameRateOverlay;
+         case QuickTileCategory::Notifications:      return Settings.Notifications;
+@@ -928,8 +930,9 @@ void ControlCentreHost::ToggleTile(QuickTileCategory Tile) noexcept
+             Settings.GlobalIllumination = (Settings.GiBounces > 0u);
+             break;
+         case QuickTileCategory::Reflections:
+-            Settings.ReflectionBounces = (Settings.ReflectionBounces + 1u) % 5u;
++            Settings.ReflectionMode = NextReflectionMode(Settings.ReflectionMode);   // Off -> Sky -> Raytraced
+             break;
++        case QuickTileCategory::Raytracing:         Settings.Raytracing         = !Settings.Raytracing;         break;
+         case QuickTileCategory::AntiAliasing:       Settings.AntiAliasing       = !Settings.AntiAliasing;       break;
+         case QuickTileCategory::FrameRateOverlay:   Settings.FrameRateOverlay   = !Settings.FrameRateOverlay; NotificationPage.MirrorFrameRateOverlay(Settings.FrameRateOverlay); break;
+         case QuickTileCategory::Notifications:      Settings.Notifications      = !Settings.Notifications;      break;
+@@ -1091,10 +1094,9 @@ void ControlCentreHost::ConstructTileLayout(PixelSpace& Surface, uint32_t Slot,
+     { Label = Settings.PatchDebug == 0u ? "Patches: Off" : Settings.PatchDebug == 1u ? "Patch Tiles" : "Tiles + Wireframe"; }
+     else if (Tile.Category == QuickTileCategory::Reflections)
+     {
+-        if (Settings.ReflectionBounces == 0u) std::snprintf(DynamicLabel, sizeof(DynamicLabel), "Refl: Off");
+-        else if (Settings.ReflectionBounces == 1u) std::snprintf(DynamicLabel, sizeof(DynamicLabel), "Refl: 1 Bounce");
+-        else std::snprintf(DynamicLabel, sizeof(DynamicLabel), "Refl: %u Bounces", Settings.ReflectionBounces);
+-        Label = DynamicLabel;
++        Label = Settings.ReflectionMode == ReflectionModeCategory::Off ? "Refl: Off"
++              : Settings.ReflectionMode == ReflectionModeCategory::Sky ? "Refl: Sky"
++              :                                                          "Refl: Raytraced";
+     }
+     else if (Tile.Category == QuickTileCategory::GlobalIllumination)
+     {
+@@ -1525,15 +1527,14 @@ float ControlCentreHost::ConstructRenderPageLayout(PixelSpace& Surface, const Pl
+     {
+         const PlaneExtent Ctl = ControlKit::ControlRow(Surface, Content2.MinimumX, Row2Y, Content2.Width(), "Reflections",
+                                                        ControlKit::Palette().TextDim, Opacity);
+-        char ReflLabel[32];
+-        if (Settings.ReflectionBounces == 0u) std::snprintf(ReflLabel, sizeof(ReflLabel), "Off");
+-        else if (Settings.ReflectionBounces == 1u) std::snprintf(ReflLabel, sizeof(ReflLabel), "1 Bounce");
+-        else std::snprintf(ReflLabel, sizeof(ReflLabel), "%u Bounces", Settings.ReflectionBounces);
++        const char* ReflLabel = Settings.ReflectionMode == ReflectionModeCategory::Off ? "Off"
++                              : Settings.ReflectionMode == ReflectionModeCategory::Sky ? "Sky"
++                              :                                                          "Raytraced";
+         ButtonStructure Btn{}; Btn.Label = ReflLabel; Btn.Tone = ButtonToneCategory::Secondary; Btn.Height = RowH;
+         const PlaneExtent BtnExt = Spanning(Ctl.MinimumX, Row2Y, std::min(Ctl.Width(), 160.0f), RowH);
+         if (ControlKit::PillButton(Surface, BtnExt, Btn, Inner, Opacity).Clicked)
+         {
+-            Settings.ReflectionBounces = (Settings.ReflectionBounces + 1u) % 5u;
++            Settings.ReflectionMode = NextReflectionMode(Settings.ReflectionMode);   // Off -> Sky -> Raytraced
+             ++Settings.Revision;
+         }
+         Row2Y += RowH + RowGap;
+diff --git a/Engine/DisplayPresentation/ControlCentreHost.h b/Engine/DisplayPresentation/ControlCentreHost.h
+index fb08baa..d3953c7 100644
+--- a/Engine/DisplayPresentation/ControlCentreHost.h
++++ b/Engine/DisplayPresentation/ControlCentreHost.h
+@@ -103,7 +103,8 @@ enum class QuickTileCategory : uint32_t
+     Notifications      = 4,
+     Quality            = 5,
+     PatchGeometry      = 6,
+-    Count              = 7
++    Raytracing         = 7,   // master: ReSTIR raytraced path on/off. Off -> surfel GI (GI on) / plain visibility raster (GI off)
++    Count              = 8
+ };
+ 
+ // One entry of the 4 × 2 quick-settings grid. Slots ≥ Count are empty and draw nothing.
+@@ -115,10 +116,20 @@ struct QuickTileStructure
+     bool                      Cycles;     // [-]    true: each tap advances an enum; false: toggle
+ };
+ 
++// Reflection technique. No screen-space reflections by design — a reflection is either ray-traced against the scene, or
++//    the sky dome sampled along the reflection vector (cheap gloss, no rays), or off. Cycled by the Reflections tile;
++//    the host degrades Raytraced -> Sky whenever the raytracing budget is not actually running (see GameExecution matrix).
++enum class ReflectionModeCategory : uint32_t { Off = 0, Sky = 1, Raytraced = 2, Count = 3 };
++[[nodiscard]] constexpr ReflectionModeCategory NextReflectionMode(ReflectionModeCategory M) noexcept
++{
++    return static_cast<ReflectionModeCategory>((static_cast<uint32_t>(M) + 1u) % static_cast<uint32_t>(ReflectionModeCategory::Count));
++}
++
+ // Everything the dashboard controls, read by the project each frame and pushed into the renderer.
+ struct ControlCentreSettings
+ {
+     bool             GlobalIllumination = true;
++    bool             Raytracing         = true;   // ReSTIR raytraced path. Off -> surfel GI (GI on) / plain visibility raster (GI off)
+     bool             AntiAliasing       = true;
+     bool             FrameRateOverlay   = false;
+     bool             Notifications      = true;
+@@ -127,7 +138,8 @@ struct ControlCentreSettings
+     // Shadow map side, chosen on the Render page. Auto follows the Quality tier (256 … 2048); any other entry
+     //    pins the map at that side and outranks the tier. The filter itself is always the tier's.
+     ShadowResolutionCategory ShadowResolution = ShadowResolutionCategory::FollowQualityTier;
+-    uint32_t         ReflectionBounces  = 3u;       // [-] 0 = Off, 1, 2, 3, 4
++    uint32_t         ReflectionBounces  = 3u;       // [-] raytraced reflection depth used when ReflectionMode == Raytraced
++    ReflectionModeCategory ReflectionMode = ReflectionModeCategory::Raytraced;  // [-] Off / Sky / Raytraced (the Reflections tile)
+     uint32_t         GiBounces          = 2u;       // [-] 0 = Off, 1, 2, 3, 4
+     bool             SkyAmbient         = true;     // [-] Physical sky ambient illumination
+     bool             SkyReservoir       = true;     // [-] #27B: sky-light reuse — the dome rides the DI reservoir
+diff --git a/Engine/DisplayPresentation/ReSTIRIntegrator.h b/Engine/DisplayPresentation/ReSTIRIntegrator.h
+index 51876be..a78421d 100644
+--- a/Engine/DisplayPresentation/ReSTIRIntegrator.h
++++ b/Engine/DisplayPresentation/ReSTIRIntegrator.h
+@@ -49,6 +49,10 @@ struct ReSTIRIntegratorConfiguration
+     bool        TemporalReprojection = true; // [-]   R7a: back-project the running mean through the motion vectors
+                                              //       (false = the pre-R7a same-pixel accumulator, kept as an identity switch)
+     uint32_t    MaxReflectionBounces = 3u;  // [-]   max specular reflection bounces (0 = off, 1, 2, 3, 4)
++    uint32_t    ReflectionMode      = 2u;   // [-]   0 = Off, 1 = Sky, 2 = Raytraced (Reflections tile). Packed into FeatureFlags bits 15-16.
++    uint32_t    RenderPath          = 0u;   // [-]   0 = raytraced ReSTIR kernel, 1 = surfel GI, 2 = plain visibility raster.
++                                            //       The HOST selects which dispatch runs; the kernel reads this only to early-out
++                                            //       when it is not the active path. bit 11 = kFeatureRaytracing mirrors RenderPath==0.
+     uint32_t    MaxGiBounces         = 2u;  // [-]   max diffuse GI bounces (0 = off, 1, 2, 3, 4)
+     bool        SkyAmbientEnabled    = true; // [-]   physical atmospheric sky dome ambient direct illumination
+     bool        SkyReservoir         = true; // [-]   #27B: the sky as a DI reservoir candidate (kSkyLightIndex) — sky
+@@ -141,6 +145,8 @@ public:
+     void AssignMaxGiBounces(uint32_t Bounces) noexcept { if (ActiveConfiguration.MaxGiBounces != Bounces) { ActiveConfiguration.MaxGiBounces = Bounces; ResetAccumulation("GI bounces"); } }
+     void AssignSkyAmbient(bool On) noexcept { if (ActiveConfiguration.SkyAmbientEnabled != On) { ActiveConfiguration.SkyAmbientEnabled = On; ResetAccumulation("sky ambient"); } }
+     void AssignSkyReservoir(bool On) noexcept { if (ActiveConfiguration.SkyReservoir != On) { ActiveConfiguration.SkyReservoir = On; ResetAccumulation("sky reservoir"); } }
++    void AssignReflectionMode(uint32_t Mode) noexcept { if (ActiveConfiguration.ReflectionMode != Mode) { ActiveConfiguration.ReflectionMode = Mode; ResetAccumulation("reflection mode"); } }
++    void AssignRenderPath(uint32_t Path) noexcept { if (ActiveConfiguration.RenderPath != Path) { ActiveConfiguration.RenderPath = Path; ResetAccumulation("render path"); } }
+ 
+     // ⚠️ THE INCREMENT MUST NOT SWALLOW THE RESET. The frame loop reads the index for the dispatch,
+     //    the §8 record comparisons reset it when the sky changes, and the loop unconditionally increments it
+diff --git a/Engine/Shaders/ReSTIRViewport.slang b/Engine/Shaders/ReSTIRViewport.slang
+index 6730846..bc68a4f 100644
+--- a/Engine/Shaders/ReSTIRViewport.slang
++++ b/Engine/Shaders/ReSTIRViewport.slang
+@@ -532,6 +532,12 @@ const uint kFeatureGiReuse            = 256u; // bit 8: the indirect half's pool
+ //    what it did before this existed, which is what makes the exhibit's A/B a comparison rather than a rewrite.
+ const uint kFeatureTemporalIdentity   = 512u; // bit 9: D10 — identity-based validation of the reprojected history
+ const uint kFeatureSkyReservoir       = 1024u; // bit 10: #27 stage B — the sky as a DI reservoir candidate species
++const uint kFeatureRaytracing         = 2048u; // bit 11: RenderPath==0 mirror — this raytraced kernel is the active path (host also gates the dispatch)
++// Reflections mode occupies bits 15-16 (0 = Off, 1 = Sky, 2 = Raytraced). Shift/mask so the kernel can honour "sky only"
++//    (skip scene reflection rays, sample the sky dome) vs "raytraced" without a second push field. bits 12-14 are the
++//    denoise-guide field (separate delivery); 13/14 shift here would collide, so reflections take 15-16.
++const uint kReflectionModeShift       = 15u;
++const uint kReflectionModeMask        = 3u;
+                                               //     beside the sun and the lamps (kSkyLightIndex). Sky-visibility
+                                               //     variance then reuses through the temporal and spatial merges
+                                               //     like every other light — the fix for the measured 4.45x sky
+diff --git a/Projects/Project-Zero/Source/GameExecution.cpp b/Projects/Project-Zero/Source/GameExecution.cpp
+index d562c32..334ec2b 100644
+--- a/Projects/Project-Zero/Source/GameExecution.cpp
++++ b/Projects/Project-Zero/Source/GameExecution.cpp
+@@ -1036,9 +1036,51 @@ int main(int argc, char** argv)
+         Integrator.AssignExtraCandidateCount(Criteria.ReSTIRExtraCandidateCount);
+         Integrator.AssignSpatialTapCount(Criteria.ReSTIRSpatialTapCount);
+         Integrator.AssignDenoiseLevelCount(Criteria.DenoiseLevelCount);
+-        Integrator.AssignGlobalIllumination(S.GlobalIllumination && S.GiBounces > 0u);
+-        Integrator.AssignMaxReflectionBounces(S.ReflectionBounces);
+-        Integrator.AssignMaxGiBounces(S.GlobalIllumination ? S.GiBounces : 0u);
++        // ── Render-path decision matrix (Raytracing tile × Global Illumination tile) ──────────────────────────────────
++        //    RT ON            -> raytraced ReSTIR kernel (GI and/or raytraced reflections).
++        //    RT OFF + GI ON   -> surfel GI (visibility raster primary + persistent world-space surfel indirect).
++        //    RT OFF + GI OFF  -> plain visibility raster (materials + direct + sky ambient; no GI, no rays).
++        //    Guard: RT ON + GI OFF + Reflections OFF is flat and pointless, so it falls back to the plain raster —
++        //           which looks better than a raytraced path carrying neither GI nor reflections.
++        const bool GiActive = S.GlobalIllumination && S.GiBounces > 0u;
++        bool       RtActive = S.Raytracing;
++        if (RtActive && !GiActive && S.ReflectionMode == Frontier::ReflectionModeCategory::Off)
++            RtActive = false;                                   // the guard: degrade to plain raster
++        // Raytraced reflections need the raytracing budget; without it, degrade to sky reflections (never SSR).
++        Frontier::ReflectionModeCategory EffReflMode = S.ReflectionMode;
++        if (!RtActive && EffReflMode == Frontier::ReflectionModeCategory::Raytraced)
++            EffReflMode = Frontier::ReflectionModeCategory::Sky;
++        const uint32_t RenderPath = RtActive ? 0u : (GiActive ? 1u : 2u);   // 0 raytraced / 1 surfel GI / 2 plain raster
++        Integrator.AssignRenderPath(RenderPath);
++        Integrator.AssignReflectionMode(static_cast<uint32_t>(EffReflMode));
++        {
++            const char* PathName = RenderPath == 0u ? "raytraced ReSTIR kernel"
++                                 : RenderPath == 1u ? "surfel GI (raster primary + surfel indirect)"
++                                 :                     "plain visibility raster (no GI)";
++            const char* ReflName = EffReflMode == Frontier::ReflectionModeCategory::Off ? "off"
++                                 : EffReflMode == Frontier::ReflectionModeCategory::Sky ? "sky" : "raytraced";
++            const char* Note = (RtActive != S.Raytracing)          ? " [RT guard: fell back to raster]"
++                             : (EffReflMode != S.ReflectionMode)    ? " [reflections degraded raytraced -> sky]" : "";
++            char PathLine[288];
++            std::snprintf(PathLine, sizeof(PathLine),
++                          "Render path: %s | reflections: %s%s. (Raytracing tile %s, GI %s.)",
++                          PathName, ReflName, Note, S.Raytracing ? "on" : "off", GiActive ? "on" : "off");
++            Logger.RecordMessage(Frontier::DiagnosticSeverity::Information, "RenderPath", PathLine);
++        }
++        if (RenderPath == 1u)   // surfel-GI diagnostics (the user's requested logs)
++        {
++            char SurfelLine[300];
++            std::snprintf(SurfelLine, sizeof(SurfelLine),
++                          "Surfel GI active: persistent world-space field, coverage-driven spawn, per-frame running-mean "
++                          "irradiance update (Jacobi, firefly-clamped). Passes: SurfelIrradianceUpdate + SurfelGIResolve. "
++                          "Tier '%s' sets the ray/coverage budget. Anti-flicker: surfels never move + running mean.",
++                          Frontier::FidelityLabel(S.Quality));
++            Logger.RecordMessage(Frontier::DiagnosticSeverity::Information, "SurfelGI", SurfelLine);
++        }
++
++        Integrator.AssignGlobalIllumination(GiActive);
++        Integrator.AssignMaxReflectionBounces(EffReflMode == Frontier::ReflectionModeCategory::Raytraced ? S.ReflectionBounces : 0u);
++        Integrator.AssignMaxGiBounces(GiActive ? S.GiBounces : 0u);
+         Integrator.AssignSkyAmbient(S.SkyAmbient);
+         Integrator.AssignSkyReservoir(S.SkyReservoir);   // #27B: sky-light reuse rides the same settings gesture
+         Integrator.AssignAntiAliasing(S.AntiAliasing);
