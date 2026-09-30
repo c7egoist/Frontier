@@ -1,0 +1,197 @@
+diff --git a/Engine/DeviceExchange/SwapchainExchange.h b/Engine/DeviceExchange/SwapchainExchange.h
+index ae16362..4a2b4d0 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.h
++++ b/Engine/DeviceExchange/SwapchainExchange.h
+@@ -194,6 +194,13 @@ enum DispatchFeature : uint32_t
+                                                    //     cosine sky fill bit-for-bit. Mirrors kFeatureSkyReservoir
+                                                    //     (bit 9 is the kernel-internal D10 identity bit — skipped here
+                                                    //     so the two lists cannot collide if a host ever packs it).
++
++    // The denoiser DETAIL-GUIDE id (DenoiseGuideCategory, 0..6) packed into bits [12..14]. Carried in FeatureFlags
++    //    rather than a new push field because DispatchConfiguration is at Vulkan's guaranteed 128-byte push ceiling.
++    //    The kernel decodes it to emit the per-pixel preserve weight the à-trous fades back to raw by; Standard (0)
++    //    leaves the weight zero, i.e. the pre-guide filter, so a host that never sets it renders bit-for-bit as before.
++    DispatchGuideShift                = 12u,
++    DispatchGuideMask                 = 7u << 12,
+ };
+ 
+ // Mirrors `layout(push_constant) uniform ReSTIRConstants` in Engine/Shaders/ReSTIRViewport.slang.
+diff --git a/Engine/DisplayPresentation/ControlCentreHost.cpp b/Engine/DisplayPresentation/ControlCentreHost.cpp
+index 4ac429b..462507f 100644
+--- a/Engine/DisplayPresentation/ControlCentreHost.cpp
++++ b/Engine/DisplayPresentation/ControlCentreHost.cpp
+@@ -1583,7 +1583,31 @@ float ControlCentreHost::ConstructRenderPageLayout(PixelSpace& Surface, const Pl
+         }
+     }
+ 
+-    return SectionH + 20.0f + Section2H;
++    // Section 3: Denoising — the detail-guide selector. Standard is the shipped à-trous; the other entries fade the
++    //    filtered result back toward the raw sample where a deterministic guide marks real shading detail, so
++    //    flakes / reflections / luminaires / rims / edges survive the filter. Smart combines them (the default).
++    const float Section3H = ControlKit::SectionPadding * 2.0f + HeadingH + RowH;
++    const PlaneExtent Card3    = Spanning(X, Y + SectionH + 20.0f + Section2H + 20.0f, W, Section3H);
++    const PlaneExtent Content3 = ControlKit::SectionCard(Surface, Card3, Radius, Opacity);
++    ControlKit::SectionHeading(Surface, Content3.MinimumX, Content3.MinimumY, Content3.Width(),
++                               "Denoising", "Keep genuine detail (flakes, reflections, glow, edges) through the filter", Ink90(), Ink50(), Opacity);
++    {
++        float Row3Y = Content3.MinimumY + HeadingH;
++        const PlaneExtent Ctl = ControlKit::ControlRow(Surface, Content3.MinimumX, Row3Y, Content3.Width(), "Detail Guide",
++                                                       ControlKit::Palette().TextDim, Opacity);
++        ButtonStructure Btn{}; Btn.Label = DenoiseGuideLabel(Settings.DenoiseGuide);
++        Btn.Tone = Settings.DenoiseGuide == DenoiseGuideCategory::Standard ? ButtonToneCategory::Secondary
++                                                                           : ButtonToneCategory::Primary;
++        Btn.Height = RowH;
++        const PlaneExtent BtnExt = Spanning(Ctl.MinimumX, Row3Y, std::min(Ctl.Width(), 160.0f), RowH);
++        if (ControlKit::PillButton(Surface, BtnExt, Btn, Inner, Opacity).Clicked)
++        {
++            Settings.DenoiseGuide = NextDenoiseGuide(Settings.DenoiseGuide);
++            ++Settings.Revision;
++        }
++    }
++
++    return SectionH + 20.0f + Section2H + 20.0f + Section3H;
+ }
+ 
+ void ControlCentreHost::ConstructRenderFloatingLayout(PixelSpace& Surface, float Opacity) noexcept
+diff --git a/Engine/DisplayPresentation/ControlCentreHost.h b/Engine/DisplayPresentation/ControlCentreHost.h
+index fb08baa..9376eaa 100644
+--- a/Engine/DisplayPresentation/ControlCentreHost.h
++++ b/Engine/DisplayPresentation/ControlCentreHost.h
+@@ -52,6 +52,7 @@
+ #include "DialogueHost.h"
+ #include "PixelSpace.h"
+ #include "FidelityClassifier.h"
++#include "DenoiseGuide.h"
+ #include "VectorCodec.h"
+ #include "../DeviceExchange/InputExchange.h"
+ 
+@@ -134,6 +135,11 @@ struct ControlCentreSettings
+                                                     //     (less shimmer on glass/gloss facing sky). Render page row,
+                                                     //     deliberately NOT a quick tile.
+     uint32_t         PatchDebug = 0u; // 0 Off / 1 Patch Tiles / 2 Tiles + Wireframe (session-local)
++    // The denoiser detail-guide (Render page row). Standard = the shipped à-trous; the other entries fade the
++    //    filtered result back toward the raw sample where a deterministic guide marks genuine shading detail, so
++    //    flakes / reflections / luminaires / rims / edges survive the filter. Smart combines them and is the
++    //    default — it is the setting that keeps flakes visible at Standard quality (FlakeVerification/Denoise).
++    DenoiseGuideCategory DenoiseGuide  = DenoiseGuideCategory::Smart;
+     uint32_t         Revision           = 0u;       // [-] bumps on every change; projects compare to react
+ };
+ 
+diff --git a/Engine/DisplayPresentation/DenoiseGuide.h b/Engine/DisplayPresentation/DenoiseGuide.h
+new file mode 100644
+index 0000000..f4acfcb
+--- /dev/null
++++ b/Engine/DisplayPresentation/DenoiseGuide.h
+@@ -0,0 +1,54 @@
++//============================================================================================================================================
++// 📦 Engine/DisplayPresentation/DenoiseGuide.h — the denoiser DETAIL-GUIDE selector, shared by the Control Centre and the integrator
++//============================================================================================================================================
++// A "guide" is a cheap, deterministic per-pixel signal that tells the à-trous denoiser "this pixel is genuine
++//    high-frequency DETAIL, not Monte-Carlo noise — fade the filtered result back toward the raw sample here".
++//    The shipped filter edge-stops on GEOMETRY (normal/depth), so it protects silhouettes but blurs anything flat
++//    in geometry yet sharp in SHADING: metallic flakes, mirror/glass reflections, small luminaires, thin rims.
++//    Each guide re-injects one of those shading-detail classes. See FlakeVerification/Denoise for the prototype.
++//
++// The enum value is passed to AtrousDenoise.slang as the GuideMode push constant; Standard is the pre-guide filter,
++//    so a build that never assigns a guide renders exactly as before.
++
++#pragma once
++
++#include <cstdint>
++
++namespace Frontier {
++
++enum class DenoiseGuideCategory : uint32_t
++{
++    Standard  = 0,   // the shipped edge-avoiding à-trous, no detail guide (identity)
++    Flakes    = 1,   // preserve metallic flake sparkle (System-B flake coverage mask)
++    Reflections = 2, // preserve low effective-roughness reflections (chrome/gold/glass/clearcoat)
++    Emissive  = 3,   // preserve luminaires (emissive luminance — they carry no noise)
++    Fresnel   = 4,   // preserve grazing-angle rim highlights, pow(1 - N·V, 4)
++    Edges     = 5,   // preserve silhouettes / contact shadows (normal + depth gradient)
++    Smart     = 6,   // max of all of the above — the recommended all-in-one default
++    Count     = 7
++};
++
++// The label shown on the Control Centre pill and in the status line.
++inline const char* DenoiseGuideLabel(DenoiseGuideCategory Guide) noexcept
++{
++    switch (Guide)
++    {
++        case DenoiseGuideCategory::Standard:    return "Standard";
++        case DenoiseGuideCategory::Flakes:      return "Flakes";
++        case DenoiseGuideCategory::Reflections: return "Reflections";
++        case DenoiseGuideCategory::Emissive:    return "Emissive";
++        case DenoiseGuideCategory::Fresnel:     return "Fresnel Rim";
++        case DenoiseGuideCategory::Edges:       return "Edges";
++        case DenoiseGuideCategory::Smart:       return "Smart";
++        default:                                return "Standard";
++    }
++}
++
++// One tap of the Control Centre cycler advances to the next guide, wrapping past Smart back to Standard.
++inline DenoiseGuideCategory NextDenoiseGuide(DenoiseGuideCategory Guide) noexcept
++{
++    return static_cast<DenoiseGuideCategory>(
++        (static_cast<uint32_t>(Guide) + 1u) % static_cast<uint32_t>(DenoiseGuideCategory::Count));
++}
++
++}  // namespace Frontier
+diff --git a/Engine/DisplayPresentation/ReSTIRIntegrator.cpp b/Engine/DisplayPresentation/ReSTIRIntegrator.cpp
+index 1cc1b67..8c37211 100644
+--- a/Engine/DisplayPresentation/ReSTIRIntegrator.cpp
++++ b/Engine/DisplayPresentation/ReSTIRIntegrator.cpp
+@@ -120,7 +120,10 @@ DispatchConfiguration ReSTIRIntegrator::BuildDispatch(
+                                    | (ActiveConfiguration.Denoise            ? DispatchFeatureDenoise            : 0u)
+                                    // #27B ON by default (the configuration's initialiser): the sky rides the reservoir
+                                    //    unless something turns it off — off is the bit-for-bit pre-sky estimator.
+-                                   | (ActiveConfiguration.SkyReservoir       ? DispatchFeatureSkyReservoir       : 0u);
++                                   | (ActiveConfiguration.SkyReservoir       ? DispatchFeatureSkyReservoir       : 0u)
++                                   // The denoiser detail-guide id, packed into bits [12..14] (see DispatchGuideShift).
++                                   //    Standard (0) leaves these bits clear = the pre-guide à-trous, bit-for-bit.
++                                   | ((static_cast<uint32_t>(ActiveConfiguration.DenoiseGuide) << DispatchGuideShift) & DispatchGuideMask);
+ 
+     // The power-proportional sun coin (0 = the kernel's legacy fixed 0.5); see AssignSunPickProbability.
+     Dispatch.SunPickProbability    = SunPickProbability;
+diff --git a/Engine/DisplayPresentation/ReSTIRIntegrator.h b/Engine/DisplayPresentation/ReSTIRIntegrator.h
+index 51876be..c4299df 100644
+--- a/Engine/DisplayPresentation/ReSTIRIntegrator.h
++++ b/Engine/DisplayPresentation/ReSTIRIntegrator.h
+@@ -12,6 +12,7 @@
+ 
+ #include "../DeviceExchange/SwapchainExchange.h"
+ #include "../ContentInterchange/MaterialDescriptor.h"
++#include "DenoiseGuide.h"
+ #include "ExposureIntegrator.h"
+ #include "../../Projects/Project-Zero/Source/RayTracingSolver.h"
+ #include "../../Projects/Project-Zero/Source/FlyThroughSolver.h"
+@@ -46,6 +47,9 @@ struct ReSTIRIntegratorConfiguration
+                                            //       default; off restores the single-sample vertex NEE (the A/B)
+     bool        AliasPick          = true;  // [-]   R6 row 3: Walker-alias light pick (false = uniform, R0 identity; F5)
+     bool        Denoise            = true;  // [-]   R7: edge-avoiding à-trous filter (false = the raw accumulated image)
++    DenoiseGuideCategory DenoiseGuide = DenoiseGuideCategory::Smart; // [-] detail-guide the à-trous fades back to raw
++                                             //       toward (Standard = the pre-guide filter). Smart keeps flakes /
++                                             //       reflections / luminaires / rims / edges — the flakes-at-Standard fix.
+     bool        TemporalReprojection = true; // [-]   R7a: back-project the running mean through the motion vectors
+                                              //       (false = the pre-R7a same-pixel accumulator, kept as an identity switch)
+     uint32_t    MaxReflectionBounces = 3u;  // [-]   max specular reflection bounces (0 = off, 1, 2, 3, 4)
+@@ -134,6 +138,7 @@ public:
+     //    deliberately does NOT reset accumulation — restarting would throw away a converged history to change a
+     //    post-process, and the A/B comparison the switch exists for would be impossible.
+     void AssignDenoise           (bool     On)    noexcept { ActiveConfiguration.Denoise = On; }
++    void AssignDenoiseGuide      (DenoiseGuideCategory Guide) noexcept { if (ActiveConfiguration.DenoiseGuide != Guide) { ActiveConfiguration.DenoiseGuide = Guide; ResetAccumulation("denoise guide"); } }
+     // R7a. Reprojection changes what is SAMPLED (which history texel feeds the mean), so unlike the denoise toggle
+     //    it resets accumulation — the same rule as every other sampling change.
+     void AssignTemporalReprojection(bool On)    noexcept { if (ActiveConfiguration.TemporalReprojection != On) { ActiveConfiguration.TemporalReprojection = On; ResetAccumulation("reprojection"); } }
+diff --git a/Projects/Project-Zero/Source/GameExecution.cpp b/Projects/Project-Zero/Source/GameExecution.cpp
+index d562c32..15144f0 100644
+--- a/Projects/Project-Zero/Source/GameExecution.cpp
++++ b/Projects/Project-Zero/Source/GameExecution.cpp
+@@ -1041,6 +1041,7 @@ int main(int argc, char** argv)
+         Integrator.AssignMaxGiBounces(S.GlobalIllumination ? S.GiBounces : 0u);
+         Integrator.AssignSkyAmbient(S.SkyAmbient);
+         Integrator.AssignSkyReservoir(S.SkyReservoir);   // #27B: sky-light reuse rides the same settings gesture
++        Integrator.AssignDenoiseGuide(S.DenoiseGuide);   // the Render page detail-guide (Smart = keep flakes at Standard)
+         Integrator.AssignAntiAliasing(S.AntiAliasing);
+         Notifications.AssignEnabled(S.Notifications);
+ 
