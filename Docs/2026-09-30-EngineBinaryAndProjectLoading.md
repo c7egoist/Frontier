@@ -30,18 +30,22 @@ The engine boots, reads the named project (its scene, content, configuration, an
   different and never a copy of another.** One engine binary is the natural conclusion — the shared host/systems are
   compiled **once** into `Frontier.exe`; a project carries only what makes it that project.
 
-## Open questions to resolve when we do the change
+## Decisions recorded on 2026-09-30
 
-- **Project format / extension** — what `ProjectZero.<ext>` actually is: a manifest (scene + content + config) plus a
-  registration entry point, versus a loadable module.
-- **Project-specific C++** — static project modules linked into the engine at build time, or dynamic plugins the engine
-  loads at runtime. This decides the entry/registration seam a project implements.
-- **Host refactor** — extract the reusable window/Vulkan/editor host out of `GameExecution.cpp` into the engine binary
-  so projects stop depending on Project-Zero for the host.
-- 🔴 **Toolchains** — this reshapes the build. When implemented, update **every** toolchain together, MSVC first
-  (PowerShell orchestration), then `Module.toml`/orchestration, then any CMake/g++ helpers — per the build rule.
+- **Project specification** — each project uses `ProjectName.frontier`, a declarative file naming its content, opening
+  scene, launch configuration, DLL, and interchange number.
+- **Project-specific C++** — each project delivers a dynamic DLL through the versioned `CodeInterchange` C ABI. An
+  edit to a project rebuilds that DLL without rebuilding `Frontier.exe`.
+- **Host extraction** — reusable window, Vulkan, editor, renderer, camera, input, and celestial work move from
+  `GameExecution.cpp` into the engine-owned `FrontierHost` executable.
+- **Toolchains** — update every build route together: PowerShell/MSVC first, then `Module.toml` and orchestration,
+  then any CMake or g++ support route. Shared translation units compile into `Frontier.exe` only.
 
-## What is NOT changing yet
+## Current standing
 
-Nothing in the build is changed by this note. Current standalone project executables keep working until the engine
-binary + project-loading seam is designed and landed.
+The implementation is not in this partial Slate checkout. The exact migration sequence, C ABI guarantee, source
+ownership, and completion evidence are in
+[`Plans/Ongoing/FrontierProjectLoadingMigration.md`](../Plans/Ongoing/FrontierProjectLoadingMigration.md).
+
+Existing standalone project executables remain compatibility paths during migration. They must not be copied or used
+as the creation pattern for a new project.

@@ -70,16 +70,22 @@ When a plan changes standing, **move the file** between these folders rather tha
 
 ---
 
-## 🔴 Projects and shared systems
+## 🔴 Projects and shared facilities
 
-- `Projects/` is where projects go. **Each project is different and is never a copy of another** — it has
-  its own `Host` entry point, window, scene, content, and build target. Do not clone one project into
-  another or make one project launch another's binary.
-- Shared systems live in `Engine/` and are **reused** by projects (compiled in or linked), never duplicated
-  into a project. If two projects need the same behaviour, it belongs in `Engine/`, not copied twice.
-- Shared **authoring tools** (used to make content, not shipped in a project) live under `Engine/AuthoringTools/`.
-  Example: the SolidArc NURBS/B-rep modeller is at `Engine/AuthoringTools/SolidArc` and is used to author car bodies
-  for Project-Tractrix; the per-project content and scripts that consume it stay with the project.
+- `Projects/` is where projects go. Each project owns its `ProjectName.frontier` specification, content, and
+  project-specific code image. It is never a copy of another project.
+- `Frontier.exe` is the sole windowed host. It owns the window, device, renderer, global editor, input, camera,
+  celestial environment, and shared engine facilities. A project never owns a windowed `main` or its own renderer.
+- A project DLL crosses the versioned `CodeInterchange` C ABI. It carries only project-specific scene construction,
+  simulation, camera behaviour, and editor panels. Changing it must not rebuild shared engine translation units.
+- `Project-Zero` is a project opened by Frontier, not a host source donor. Do not copy `GameExecution.cpp`, use
+  `PROJECT_ZERO_SOURCES`, include another project's source, or launch a new project through Project-Zero.
+- Until the migration lands, existing standalone project executables are legacy compatibility paths only. Do not use
+  them as a pattern for new work; follow
+  [`Plans/Ongoing/FrontierProjectLoadingMigration.md`](Plans/Ongoing/FrontierProjectLoadingMigration.md).
+- Shared authoring tools used to make content, not shipped in a project, live under `Engine/AuthoringTools/`.
+  Example: SolidArc lives at `Engine/AuthoringTools/SolidArc`; project content and scripts consuming it stay with
+  that project.
 
 ---
 
@@ -119,11 +125,11 @@ self-checks so a regression fails loudly.
 - No exceptions across a unit seam. No `new`/`delete` outside an extent slicer.
 - Vendor spellings are verbatim: `VkBuffer`, `VkPipeline`, `ImDrawData`.
 - Do not reference any rules outside of the project or memory.
-- 🚧 **Direction (not yet built): one engine binary; projects are opened by it.** The engine is to be built as a
-  single `Frontier.exe` bundling all shared systems (sun/sky, physics, rendering, host…); a project is then opened by
-  it — `Frontier.exe ProjectZero.<ext>` — instead of each project being its own executable that relies on Project-Zero
-  for everything. See [`Docs/2026-09-30-EngineBinaryAndProjectLoading.md`](Docs/2026-09-30-EngineBinaryAndProjectLoading.md).
-  The change itself still has to be done; treat it as the target when touching project/host wiring.
+- 🚧 **Direction: one engine binary; projects are opened by it.** `Frontier.exe` bundles shared engine facilities
+  once and opens `ProjectName.frontier`. Project-specific C++ arrives through a versioned project DLL, so editing a
+  project does not rebuild the engine executable. `Project-Zero` is one project, never another project's host.
+  The implementation sequence and C ABI guarantee are in
+  [`Plans/Ongoing/FrontierProjectLoadingMigration.md`](Plans/Ongoing/FrontierProjectLoadingMigration.md).
 
 ---
 
