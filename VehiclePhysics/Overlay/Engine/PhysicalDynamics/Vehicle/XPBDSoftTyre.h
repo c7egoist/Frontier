@@ -103,6 +103,15 @@ struct SoftTyreParameters
     // Compliances [m/N]  (α = 1/stiffness). Lower ⇒ stiffer. Values below are the Phase-2 calibration (see
     // XPBDTyreValidation.cpp) that best-matches the Phase-1 Pacejka baseline at ~5 kN load.
     float    SpokeCompliance   = 5.0e-5f;  // sidewall radial (soft enough for a multi-node contact patch)
+    // The sidewall also resists TANGENTIAL and AXIAL motion, and until now nothing modelled that. The spoke
+    // was a bare distance constraint: it pinned |node − bead| and said nothing about direction, so the whole
+    // tread band was free to slide bodily around on its constraint spheres. Measured: the lattice centroid
+    // drifted up to 14.6 mm from the hub at speed, and the nodes' radii about the hub then scattered by ~13 mm
+    // RMS even though the band itself was still round about its own centroid. A real tyre is soft radially and
+    // an order of magnitude stiffer in shear -- that is what a belted carcass IS -- so these are much lower.
+    float    SpokeTangentialCompliance = 2.0e-5f;  // belt wind-up about the axle
+    float    SpokeLateralCompliance    = 2.0e-5f;  // sidewall lateral (steer/camber path)
+    float    SpokeShearDampingRatio    = 0.90f;
     float    HoopCompliance    = 4.0e-7f;  // tread-band circumferential
     float    LateralCompliance = 3.0e-7f;  // carcass lateral
     float    ShearCompliance   = 5.0e-7f;  // diagonal shear (patch)
@@ -166,6 +175,8 @@ struct SoftTyreNode
     // (and with it the −α̃λ term) degrades XPBD back to PBD: the effective stiffness then depends on iteration
     // and substep count, which is the exact defect XPBD was published to remove.  These are the accumulators.
     float SpokeLambda   = 0.0f;   // sidewall radial constraint
+    float SpokeTangentialLambda = 0.0f;   // sidewall tangential (belt wind-up)
+    float SpokeLateralLambda    = 0.0f;   // sidewall axial
     float ContactLambda = 0.0f;   // ground non-penetration (unilateral: λ ≥ 0)
     float TreadLambda   = 0.0f;   // tread bristle tangential constraint
 };
@@ -209,7 +220,8 @@ private:
     //    can never fall out of step.
     [[nodiscard]] float DerivedDamping(float compliance, float ratio) const noexcept;
 
-    float SpokeBeta = 0.0f, ContactBeta = 0.0f, TreadBeta = 0.0f;   // the non-edge constraints' derived β
+    float SpokeBeta = 0.0f, ContactBeta = 0.0f, TreadBeta = 0.0f;
+    float SpokeTangentialBeta = 0.0f, SpokeLateralBeta = 0.0f;   // the non-edge constraints' derived β
 
     SoftTyreParameters        Parameters;
     std::vector<SoftTyreNode>  NodeRecords;

@@ -52,6 +52,8 @@ void XPBDSoftTyre::Build(const SoftTyreParameters& params, const Vec3& hubPos, c
     }
 
     SpokeBeta   = DerivedDamping(Parameters.SpokeCompliance, Parameters.SpokeDampingRatio);
+    SpokeTangentialBeta = DerivedDamping(Parameters.SpokeTangentialCompliance, Parameters.SpokeShearDampingRatio);
+    SpokeLateralBeta    = DerivedDamping(Parameters.SpokeLateralCompliance, Parameters.SpokeShearDampingRatio);
     ContactBeta = DerivedDamping(Parameters.ContactCompliance, Parameters.ContactDampingRatio);
     TreadBeta   = DerivedDamping(Parameters.TreadTangentialCompliance, Parameters.TreadDampingRatio);
 
@@ -132,7 +134,8 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
         // XPBD §3.2: λ is zeroed at the START of each substep and accumulated across that substep's iterations.
         // Carrying it between substeps would make the constraint remember a force it has already applied.
         for (SoftTyreNode& node : NodeRecords)
-        { node.SpokeLambda = 0.0f; node.ContactLambda = 0.0f; node.TreadLambda = 0.0f; }
+        { node.SpokeLambda = 0.0f; node.ContactLambda = 0.0f; node.TreadLambda = 0.0f;
+          node.SpokeTangentialLambda = 0.0f; node.SpokeLateralLambda = 0.0f; }
         for (Edge& e : ConstraintEdges) e.lambda = 0.0f;
 
         // ── predict: gravity + inflation-pressure body force ──────────────────────────────────────────────────────
@@ -160,6 +163,10 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
         // distance constraint, so the denominator is Σw + α̃.
         const float alphaSpoke = Parameters.SpokeCompliance * invH2;
         const float gammaSpoke = Parameters.SpokeCompliance * SpokeBeta / h;   // γ = α·β/Δt
+        const float alphaSpokeTangential = Parameters.SpokeTangentialCompliance * invH2;
+        const float alphaSpokeLateral    = Parameters.SpokeLateralCompliance * invH2;
+        const float gammaSpokeTangential = Parameters.SpokeTangentialCompliance * SpokeTangentialBeta / h;
+        const float gammaSpokeLateral    = Parameters.SpokeLateralCompliance * SpokeLateralBeta / h;
         const float spokeRest = Parameters.Radius - Parameters.RimRadius;
         for (SoftTyreNode& node : NodeRecords)
         {
@@ -177,6 +184,34 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
                                 / ((1.0f + gammaSpoke) * node.InverseMass + alphaSpoke);
             node.SpokeLambda += dLambda;
             node.Position += dir * (dLambda * node.InverseMass);
+
+            // ── shear spokes: hold the node on its own radial LINE, not just its distance sphere ─────────────
+            // Radially soft, tangentially and axially stiff. Without these the band drifts off the hub (14.6 mm
+            // measured) and every node's radius about the hub reads scattered even when the band is round.
+            const Vec3 RestWorld = hubPos + hubRot.Rotate(node.TreadLocal);
+            const Vec3 Offset = node.Position - RestWorld;
+            const Vec3 AxisDir = axisWorld;
+            Vec3 RadialDir = RestWorld - hubPos;
+            RadialDir = RadialDir - AxisDir * Dot(RadialDir, AxisDir);
+            const float RadialLen = RadialDir.Length();
+            if (RadialLen > 1e-6f)
+            {
+                RadialDir = RadialDir * (1.0f / RadialLen);
+                const Vec3 TangentDir = Cross(AxisDir, RadialDir);   // unit: both are unit and orthogonal
+                const Vec3 ShearDir[2] = { TangentDir, AxisDir };
+                const float ShearAlpha[2] = { alphaSpokeTangential, alphaSpokeLateral };
+                const float ShearGamma[2] = { gammaSpokeTangential, gammaSpokeLateral };
+                float* ShearLambda[2] = { &node.SpokeTangentialLambda, &node.SpokeLateralLambda };
+                for (int K = 0; K < 2; ++K)
+                {
+                    const float Cs = Dot(Offset, ShearDir[K]);
+                    const float CsDot = Dot(ShearDir[K], node.Position - node.Previous);
+                    const float dL = (-Cs - ShearAlpha[K] * (*ShearLambda[K]) - ShearGamma[K] * CsDot)
+                                   / ((1.0f + ShearGamma[K]) * node.InverseMass + ShearAlpha[K]);
+                    *ShearLambda[K] += dL;
+                    node.Position += ShearDir[K] * (dL * node.InverseMass);
+                }
+            }
         }
 
         // ── project: internal lattice edges (hoop / lateral / shear) ─────────────────────────────────────────────

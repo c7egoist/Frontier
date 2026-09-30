@@ -217,6 +217,8 @@ struct TyreDiagnostics
     uint32_t Outliers = 0u;        // [-] nodes more than 10 mm off the mean radius
     float CrownRadius = 0.0f;      // [m] mean radius of the centre ring
     float ShoulderRadius = 0.0f;   // [m] mean radius of the two edge rings
+    float RmsAboutCentroid = 0.0f; // [m] RMS |r − mean| measured about the node CENTROID, not the hub
+    float CentroidOffset = 0.0f;   // [m] how far the centroid sits from the supplied hub position
 };
 
 TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, const Vec3& HubVelocity)
@@ -324,6 +326,32 @@ TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, c
         };
         D.CrownRadius = RingMean(Rings / 2u);
         D.ShoulderRadius = 0.5f * (RingMean(0u) + RingMean(Rings - 1u));
+    }
+
+    // Everything above measures radius about the hub position the TELEMETRY reports, and VehicleSolver.h:188
+    //    documents that as "rest hub, follows chassis" -- i.e. where the hub would be with the suspension at
+    //    rest, not where the wheel centre actually is. Measuring a circle's radii about a point that is offset
+    //    from its true centre by d manufactures an apparent variation of ±d and nothing else. So the same
+    //    spread is recomputed about the lattice's OWN centroid; if that collapses, the scatter was never in
+    //    the tyre, it was in the ruler.
+    {
+        Vec3 Centroid{0.0f, 0.0f, 0.0f};
+        for (const auto& N2 : Nodes) Centroid += N2.Position;
+        Centroid = Centroid * (1.0f / Count);
+        D.CentroidOffset = (Centroid - HubPosition).Length();
+
+        float SumR2 = 0.0f;
+        std::vector<float> Radii; Radii.reserve(Nodes.size());
+        for (const auto& N2 : Nodes)
+        {
+            const Vec3 Rel2 = N2.Position - Centroid;
+            const float Rr = (Rel2 - Axis * Dot(Rel2, Axis)).Length();
+            Radii.push_back(Rr); SumR2 += Rr;
+        }
+        const float MeanC = SumR2 / Count;
+        float SumDev2 = 0.0f;
+        for (float Rr : Radii) SumDev2 += (Rr - MeanC) * (Rr - MeanC);
+        D.RmsAboutCentroid = std::sqrt(SumDev2 / Count);
     }
     D.Contacts = Tyre.Reaction().ContactCount;
     D.NormalLoad = Tyre.Reaction().Force.z;
@@ -496,6 +524,9 @@ int main(int ArgumentCount, char** ArgumentValues)
     float Seconds = 12.0f, SunHour = 15.0f, Freeze = 0.0f;
     bool  Still = false;   // one frozen pose for a material sheet; see the motion-gate note at the gates
     std::string TyreLog;   // --tyre-log <csv>: per-frame XPBD carcass diagnostics
+    float TyreMu = -1.0f;         // --tyre-mu <v>       : override Coulomb μ (bench)
+    float TreadAlpha = -1.0f;     // --tread-alpha <v>   : override tread tangential compliance (bench)
+    uint32_t TyreSubsteps = 0u;   // --tyre-substeps <n> : override XPBD substeps (bench)
     bool  DebugLattice = false;   // --debug-lattice: draw the XPBD nodes themselves instead of the tyre skin
     float OrbitPeriod = 6.0f, OrbitRadius = 8.0f, OrbitHeight = 2.2f;
 
@@ -516,6 +547,9 @@ int main(int ArgumentCount, char** ArgumentValues)
         else if (A == "--freeze")       Freeze      = static_cast<float>(std::atof(Next("--freeze")));
         else if (A == "--still")        Still       = true;
         else if (A == "--tyre-log")     TyreLog     = Next("--tyre-log");
+        else if (A == "--tyre-mu")      TyreMu      = static_cast<float>(std::atof(Next("--tyre-mu")));
+        else if (A == "--tread-alpha")  TreadAlpha  = static_cast<float>(std::atof(Next("--tread-alpha")));
+        else if (A == "--tyre-substeps") TyreSubsteps = static_cast<uint32_t>(std::atoi(Next("--tyre-substeps")));
         else if (A == "--debug-lattice") { DebugLattice = true; g_DebugLattice = true; }
         else if (A == "--orbit-period") OrbitPeriod = static_cast<float>(std::atof(Next("--orbit-period")));
         else if (A == "--orbit-radius") OrbitRadius = static_cast<float>(std::atof(Next("--orbit-radius")));
@@ -547,6 +581,11 @@ int main(int ArgumentCount, char** ArgumentValues)
     Configuration.ActiveScheme = DrivingScheme::PacejkaDrivetrain;
     ApplyGeometry(Configuration, Geometry);
     Configuration.Aero.Enabled = true;
+    // Bench overrides, so a hypothesis about the carcass can be TESTED rather than argued about. Defaults are
+    //    negative meaning "leave the calibrated value alone", so a normal run is bit-identical without them.
+    if (TyreMu >= 0.0f)        Configuration.Tyre.FrictionCoefficient = TyreMu;
+    if (TreadAlpha > 0.0f)     Configuration.Tyre.TreadTangentialCompliance = TreadAlpha;
+    if (TyreSubsteps > 0u)     Configuration.TyreSubsteps = TyreSubsteps;
 
     MockChassis Chassis;
     // Resting CoM height from the geometry, never a literal — see DriveTelemetry.cpp for what a stale one costs.
@@ -609,7 +648,7 @@ int main(int ArgumentCount, char** ArgumentValues)
                 "time_s,wheel,speed_mps,max_squash_m,mean_radius_m,radial_spread_m,"
                 "max_radial_speed_mps,rms_radial_speed_mps,contacts,normal_load_N,strut_m,"
                 "offpatch_spread_m,dominant_mode,dominant_amp_m,rms_deviation_m,outliers,"
-                "crown_radius_m,shoulder_radius_m\n");
+                "crown_radius_m,shoulder_radius_m,rms_about_centroid_m,centroid_offset_m\n");
     }
 
     for (int S = 0; S <= Steps; ++S)
@@ -640,11 +679,12 @@ int main(int ArgumentCount, char** ArgumentValues)
                 PrevHub[W] = WT.HubPosition;
                 const TyreDiagnostics D = MeasureTyre(Solver.Tyres()[W], WT.HubPosition, HubVel);
                 std::fprintf(TyreLogFile,
-                    "%.5f,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.2f,%.6f,%.6f,%u,%.6f,%.6f,%u,%.6f,%.6f\n",
+                    "%.5f,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.2f,%.6f,%.6f,%u,%.6f,%.6f,%u,%.6f,%.6f,%.6f,%.6f\n",
                     T, W, Telemetry.SpeedMetresPerSecond,
                     D.MaxSquash, D.MeanRadius, D.RadialSpread,
                     D.MaxRadialSpeed, D.RmsRadialSpeed, D.Contacts, D.NormalLoad, WT.StrutCompression,
-                    D.OffPatchSpread, D.DominantMode, D.DominantAmplitude, D.RmsDeviation, D.Outliers, D.CrownRadius, D.ShoulderRadius);
+                    D.OffPatchSpread, D.DominantMode, D.DominantAmplitude, D.RmsDeviation, D.Outliers, D.CrownRadius, D.ShoulderRadius,
+                    D.RmsAboutCentroid, D.CentroidOffset);
                 WorstSpread = std::max(WorstSpread, D.RadialSpread);
                 WorstOffPatch = std::max(WorstOffPatch, D.OffPatchSpread);
                 WorstRms    = std::max(WorstRms, D.RmsRadialSpeed);
