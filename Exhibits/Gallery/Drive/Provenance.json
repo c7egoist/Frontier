@@ -1,0 +1,98 @@
+{
+  "proof": "Project-Drive driven on the CPU by the engine's own vehicle solver and visibility raster.",
+  "execution": "CPU render by the engine's own translation units \u2014 not a native Vulkan, Slang, or ImGui capture.",
+  "renderer": "Frontier engine sources, built and run headless. No renderer is authored in Slate.",
+  "source": {
+    "repository": "https://github.com/SultanAladin/Frontier-.git",
+    "revision": "28ec0657a23ed6bbf680f17cc06b464a53639dae"
+  },
+  "scene": "Projects/Project-Drive/Source/DriveSceneAuthor \u2014 the app's own course, ControlVehicle shell, four wheels and twelve authored materials, in the app's own span order.",
+  "commands": [
+    "DriveTelemetry /home/user/Slate/_AgentScratch/build/drive/telemetry",
+    "/usr/bin/python3 Exhibits/Workbench/Drive/DriveTelemetryGraphs.py",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveChaseRun --width 480 --height 270 --fps 10 --sun 13.0 --camera chase --seconds 12",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveTracksideRun --width 480 --height 270 --fps 10 --sun 13.0 --camera trackside --seconds 12",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveOrbitWhileDriving --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --seconds 12 --orbit-period 5 --orbit-radius 9 --orbit-height 2.6",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveMaterialTurntable --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --freeze 3.0 --seconds 9 --orbit-period 6 --orbit-radius 6.5 --orbit-height 2.4",
+    "XPBDTyreProof Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
+  ],
+  "results": {
+    "physics": [
+      "  Peak speed ....... 34.13 m/s (122.9 km/h)",
+      "  Takeoff speed .... 12.60 m/s (ramp launch)",
+      "  Airborne ......... 0.91 s",
+      "  Max susp. travel . 0.371 m",
+      "  Min chassis up ... 0.939 (1.0 = level; dips while cornering / airborne)",
+      "  Final X .......... 173.9 m",
+      "  Physics .......... 1102.21 us/step, 3.8x real-time",
+      "  Wrote ............ telemetry.csv, timing.log, run.log in /home/user/Slate/_AgentScratch/build/drive/telemetry"
+    ],
+    "ProjectDriveChaseRun": [
+      "[drive-scene] camera 'chase': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 34.13 m/s (122.9 km/h), peak aero downforce 6547 N, final X 173.94 m"
+    ],
+    "ProjectDriveTracksideRun": [
+      "[drive-scene] camera 'trackside': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 34.13 m/s (122.9 km/h), peak aero downforce 6547 N, final X 173.94 m"
+    ],
+    "ProjectDriveOrbitWhileDriving": [
+      "[drive-scene] camera 'orbit': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 34.13 m/s (122.9 km/h), peak aero downforce 6547 N, final X 173.94 m"
+    ],
+    "ProjectDriveMaterialTurntable": [
+      "[drive-scene] camera 'orbit': 91 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 7.93 m/s (28.5 km/h), peak aero downforce 373 N, final X 7.80 m"
+    ]
+  },
+  "sha256": {
+    "ProjectDriveAeroAgainstSpeed_CPU_Reference.png": "b544b7041fa4cca7d516273ab031b2e69a4dc82172ae7ec299ebac48c3bd2097",
+    "ProjectDriveAerodynamics_CPU_Reference.png": "a5c09c47368d9c4b357449505c83601e47d7c61640e3d73a61fcf0255903c372",
+    "ProjectDriveChaseRun_CPU_Reference.gif": "d6d4ed0b74476d6364094a8ab7130f09588a657bc349806e744e95612810babd",
+    "ProjectDriveDriverInputs_CPU_Reference.png": "54ee18f2fe9e450f0a886b660797668de7524dd9a7523a43be55e3940796b389",
+    "ProjectDriveMaterialAngleFarSide_CPU_Reference.png": "891cc0dc311599603bf377aaf331e83bc260a5c3b49c005e307baf5e02b93522",
+    "ProjectDriveMaterialAngleFrontQuarter_CPU_Reference.png": "ce58836155a7d4a54a717461a6569dae9a705e513d7a8977dbf660caa521c812",
+    "ProjectDriveMaterialAngleFront_CPU_Reference.png": "f263c11aa87fa51a8f36de98ac4c014784ccdbeda73c2a4902c57849b8dff341",
+    "ProjectDriveMaterialAngleRearQuarter_CPU_Reference.png": "3c46f4245dc247b58184c1bd288314a718c7475563bb90bff833e3e8990b7f05",
+    "ProjectDriveMaterialAngleRear_CPU_Reference.png": "6bd9bb0bc55c27204c7a1d48af6527e860b9d0532b4e28d0d87eed23804f4e27",
+    "ProjectDriveMaterialAngleSide_CPU_Reference.png": "230c72617f84f1d97e2743a4feda81eee338ed90af680d3e718d83bf404979c3",
+    "ProjectDriveMaterialTurntable_CPU_Reference.gif": "bfda266048b1081d18f4c98100c1b14e6203ac08cc182066705d63ecda84097b",
+    "ProjectDriveOrbitWhileDriving_CPU_Reference.gif": "081ba12ce2385a75a8f55eb978cbd9ae14100a4f4e8e75c1f22266b52dc2ac48",
+    "ProjectDrivePhysicsRun_CPU_Reference.txt": "1f4b0f22f2ecce7426aacd2233f031ea603a94694e6abb54377b9de4124a7064",
+    "ProjectDrivePhysicsTelemetry_CPU_Reference.csv": "8852d42c34b47f419a14db4422842304c02aa1f622faf5efe21d9cdda8a94d64",
+    "ProjectDrivePhysicsTiming_CPU_Reference.txt": "7d0acd8459b9b8f3fcbca8f07ecb7a32cab0aa0735bcf73c2c8a5883dc627c3e",
+    "ProjectDrivePowertrain_CPU_Reference.png": "1dced59e5ae4cbe52eba7a3dec453561c39840389d662cd8169f7a02e6c7e39f",
+    "ProjectDriveSpeedVsTime_CPU_Reference.png": "c87e4d80d4138a423296adde8ddac20f5a5a90ef761f6b6be0dd6a11cce9087c",
+    "ProjectDriveSteering_CPU_Reference.png": "3e4c9e48c12d0a9355d90ee7379ef4a21a44a8964d2ca75554c99600dbf1b57e",
+    "ProjectDriveTracksideRun_CPU_Reference.gif": "aaf53305ed568d031702fa569950f8574304ef4eb769ca9ac218c07e1dfc1d08",
+    "ProjectDriveTyreLoads_CPU_Reference.png": "2761323d2e059bad17e8eeeb29ec6291fb17a0f92089268db3b17340fa4d2eb5",
+    "ProjectDriveXPBDTyreDeformation_CPU_Reference.png": "58f0bf38a563a12a82bb4c58dd1714faf81b16e03ff6965f0300a046c8cef760"
+  },
+  "stages": {
+    "level": "Projects/Project-Drive/Source/DriveSceneAuthor (VehiclePhysics/Overlay)",
+    "physics": "Engine/PhysicalDynamics/Vehicle/VehicleSolver \u2014 PacejkaDrivetrain, XPBD soft tyres, Aerodynamics",
+    "camera": "Projects/Project-Drive/Source/ChaseCameraSolver, the app's own chase camera",
+    "sky": "Projects/Project-Zero/Source/CelestialSequence at local hour 13.0 \u2014 the engine's real sun, sky, atmosphere, star and moon model",
+    "raster": "Engine/GeometricRaster/VisibilityRaster \u2014 the shipped RT-off / GI-off render path",
+    "tyre": "Engine/PhysicalDynamics/Vehicle/XPBDSoftTyre via Exhibits/Workbench/Drive/XPBDTyreProof.cpp \u2014 5 rings x 64 segments settled against the ground, contact patch and resolved load gated."
+  },
+  "executionBoundary": {
+    "nativeFrontierVulkanSlangImGuiCapture": false,
+    "description": "Every frame is rendered on the CPU by the engine's own translation units, built from the pinned checkout with VehiclePhysics/Overlay applied. No renderer, material model, sky or camera is authored in Slate. This is not a Vulkan swapchain capture; it is the same code the GPU path shades from, run headless."
+  },
+  "sequences": {
+    "ProjectDriveChaseRun": "The full scripted run from the app's own ChaseCameraSolver: settle, full throttle, slalom, ramp, brake.",
+    "ProjectDriveTracksideRun": "The same run from a fixed post beside the course, so the speed reads as motion through frame.",
+    "ProjectDriveOrbitWhileDriving": "The same run with the eye circling the moving car: the body, wheels and course from every azimuth at speed.",
+    "ProjectDriveMaterialTurntable": "The car held at the pose the solver produced three seconds into the run, circled once, to show the twelve authored Project-Drive materials from every angle."
+  },
+  "retired": {
+    "sheets": [
+      "ProjectDriveAutomotiveMaterials_CPU_Reference.png",
+      "ProjectDriveSurfelGI_CPU_Reference.png",
+      "ProjectDriveReSTIR_CPU_Reference.png",
+      "ProjectDrivePhysicsMotion_CPU_Reference.png",
+      "ProjectDriveVehicleEditor_CPU_Reference.png"
+    ],
+    "reason": "Exhibits/Workbench/Drive/DriveSceneProof.cpp was a bespoke raytracer written in Slate. It did not run any engine code, so its sheets were not evidence about Project-Drive. It is deleted and its output is superseded by the sequences above."
+  }
+}

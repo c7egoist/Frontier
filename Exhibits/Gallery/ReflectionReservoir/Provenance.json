@@ -1,0 +1,16 @@
+{
+  "proof": "Glossy reflection reservoir CPU reference",
+  "execution": "CPU reference/mirror \u2014 not a native Vulkan/Slang shader or ImGui capture.",
+  "scene": "Roughness-ramped glossy floor under a sky dome with a sharp sun disc; baseline 1-spp GGX, ReSTIR sky candidate/spatial reuse, and 512-spp reference.",
+  "command": "./ReflectReSTIR --w 640 --h 400 --M 8 --spatial 3 --neighbors 5 --ref 512",
+  "results": {
+    "baselineRmse": 0.2357,
+    "restirRmse": 0.0931,
+    "errorReduction": "2.53x lower at approximately one effective sample"
+  },
+  "sha256": {
+    "GlossyReflection_Baseline_CPU_Mirror.png": "bb620cec077fb4c2fbdedbc10ec403b1cf5364e1d2fd1291adf7f926358f9466",
+    "GlossyReflection_ReSTIR_CPU_Mirror.png": "3545672a390530464b6401ba396a3cbbdb3400594436055801a66a85899cf044",
+    "GlossyReflection_Reference_CPU_Mirror.png": "c1a734a0b3ff3d8f847c6396425ece2b99571a3e191d3498e734d7b335afecb4"
+  }
+}

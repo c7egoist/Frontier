@@ -1,0 +1,96 @@
+diff --git a/Projects/Project-Zero/Host/MaterialLevelViewport.cpp b/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
+index 56d7a22..98fc14b 100644
+--- a/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
++++ b/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
+@@ -87,6 +87,7 @@ inline vec4 FetchSheenFull(float mu, float alpha)
+ 
+ #define FRONTIER_AUTOMOTIVE_SHOWCASE 1
+ #include "MaterialEvaluation.slang"   // the shipped OpenPBR lobe set, compiled 1:1 as C++ (see the file's own header)
++#include "AutomotiveFlakePaint.slang"  // System B: finite hash-placed flakes + footprint LOD (A/B against the System A glint hook)
+ 
+ // ── The spatial interface's figure evaluation, compiled 1:1 as C++ (the R4b discipline, same as the lobe set) ──────
+ // InterfaceSignedDistance.slang needs three GLSL builtins the material shim never met (GLSL's two-argument atan is
+@@ -186,6 +187,39 @@ std::vector<bool>              g_MatCutAway;   // [-] the material's constant op
+ std::vector<float>             g_MatGlintDensity;
+ std::vector<float>             g_MatGlintUvScale;
+ bool g_MatGlintsOff = false;   // [-] DIAGNOSTIC (--no-glints): the pre-M6 surface, the A/B arm for the glint sheets
++bool g_FlakesSystemB = false;  // [-] --flakes-systemb: drive the flake normal from System B (AutomotiveFlakePaint.slang,
++                               //     finite hash-placed + footprint-LOD) instead of System A's sine-band signal.
++
++// System B flake normal for the ReSTIR path. Uses AutomotivePrepareFlakes (finite cells + ray-cone footprint LOD)
++//    to place a discrete metallic flake at this hit, then perturbs the shading normal by that flake's microfacet
++//    slope. Sub-footprint flakes (s.Unresolved -> 1) contribute NO perturbation, so distant flakes converge to a
++//    smooth surface instead of aliasing — the whole reason System B exists. This is the same "perturb the normal,
++//    then run OpenPBR" architecture the engine already uses for flakes, only the flake FIELD is System B's.
++static vec3 SystemBFlakeNormal(const vec3& normal, const vec3& worldPos, float footprintMetres,
++                               float density, float uvScale)
++{
++    AutomotivePaintParameters p = AutomotivePaintDefaults();
++    p.Density = density < 0.0f ? 0.0f : (density > 16.0f ? 16.0f : density);   // glint density 1..8 -> flakes/cell
++    // Bigger uv_scale -> higher frequency -> smaller flakes. Map the library's ~12..36 (already x3) to ~2.0..0.8 mm,
++    //    the coarse end the model allows (DiameterMm is clamped to 2 mm inside AutomotivePrepareFlakes) so the flakes
++    //    are large enough to resolve against a close-up pixel footprint instead of dissolving to a uniform sheen.
++    float diam = 30.0f / (uvScale < 0.001f ? 0.001f : uvScale);
++    p.DiameterMm = diam < 0.4f ? 0.4f : (diam > 2.0f ? 2.0f : diam);
++    // Object-locked UV from world position (metres) — stable frame-to-frame, unlike raw screen noise.
++    vec2 uv(worldPos.x + worldPos.z * 0.37f, worldPos.y + worldPos.z * 0.11f);
++    float fp = footprintMetres < 1e-5f ? 1e-5f : footprintMetres;
++    vec2 dx(fp, 0.0f), dy(0.0f, fp);
++    AutomotiveFlakeSurface s = AutomotivePrepareFlakes(p, uv, dx, dy);
++    float w = s.Weight * (1.0f - s.Unresolved);       // resolved coverage only
++    if (!(w > 0.0f)) return normal;
++    // Inline orthonormal tangent frame (this helper precedes ShadingFrame's definition).
++    vec3 up = std::abs(normal.z) < 0.999f ? vec3(0.0f, 0.0f, 1.0f) : vec3(1.0f, 0.0f, 0.0f);
++    vec3 t = normalize(cross(up, normal));
++    vec3 b = cross(normal, t);
++    // A flake facet with tangent-space slope (sx,sy) has normal ~ (-sx,-sy,1); blend in by coverage.
++    vec3 pert = normalize(normal - (t * (s.Slope.x * w) + b * (s.Slope.y * w)));
++    return pert;
++}
+ 
+ Frontier::ProjectZero::SkyFogIntegrator g_Sky;
+ vec3  g_SunDirRender(0.0f, 0.0f, 1.0f);   // [-] unit vector toward the sun, render frame (Y-up)
+@@ -353,6 +387,7 @@ Viewpoint ShowcaseViewpointFor(const std::string& Name)
+     if (Name == "wide")   return { Frontier::Vector3{  0.0f, -22.0f, 11.0f }, -18.0f,  0.0f, 62.0f };  // 15×15 grid + scattered ring
+     if (Name == "panel")  return { Frontier::Vector3{ 2.35f, -5.60f, 1.35f },  -4.0f,  8.0f, 42.0f };  // the interface panel, close
+     if (Name == "glints") return { Frontier::Vector3{ -1.0f, 12.70f, 1.60f },  -7.0f,  0.0f, 50.0f };  // M6: row 12 (Y +16.2), density 1 → 8 x uv_scale 4 → 12
++    if (Name == "flake1") return { Frontier::Vector3{ -9.75f, 15.20f, 1.75f }, -40.0f,  0.0f, 34.0f };  // close-up: row 12 col 3 flake sphere (fireflies-vs-flakes)
+     return { Frontier::Vector3{ 0.0f, -15.0f, 8.00f }, -21.0f, 0.0f, 55.0f };                          // the product's entry shot (r4)
+ }
+ 
+@@ -1745,8 +1780,11 @@ vec3 Radiance(vec3 O, vec3 D, Rng& R, int Bounces, bool SkipPrimaryDirect = fals
+         if (!g_MatGlintsOff && g_MatGlintDensity[T.Material] > 0.0f && Mat.AutomotiveData.x == 0.0f)
+         {
+             const float GlintCoverage = 1.0f - expf(-g_MatGlintDensity[T.Material] * 0.25f);
+-            const vec3 Gn = AutomotiveApplyTriCoatFlakeNormal(Ns, O + D * H.T, GlintCoverage,
+-                                                              g_MatGlintUvScale[T.Material] * 3.0f, 0.37f);
++            const vec3 Gn = g_FlakesSystemB
++                ? SystemBFlakeNormal(Ns, O + D * H.T, H.T * g_AutomotiveRaySpread,
++                                     g_MatGlintDensity[T.Material], g_MatGlintUvScale[T.Material] * 3.0f)
++                : AutomotiveApplyTriCoatFlakeNormal(Ns, O + D * H.T, GlintCoverage,
++                                                    g_MatGlintUvScale[T.Material] * 3.0f, 0.37f);
+             if (dot(Gn, Ng) > 0.0f) Ns = Gn;
+         }
+         vec3 Tt, Bt;
+@@ -2329,8 +2367,11 @@ SequenceResult RenderSequence(const Viewpoint& VP, int Width, int Height, int Sp
+                     if (!g_MatGlintsOff && g_MatGlintDensity[Tri.Material] > 0.0f && g_Mat[Tri.Material].AutomotiveData.x == 0.0f)
+                     {
+                         const float GlintCoverage = 1.0f - expf(-g_MatGlintDensity[Tri.Material] * 0.25f);
+-                        const vec3 Gn = AutomotiveApplyTriCoatFlakeNormal(Surf.Ns, Surf.P, GlintCoverage,
+-                                                                          g_MatGlintUvScale[Tri.Material] * 3.0f, 0.37f);
++                        const vec3 Gn = g_FlakesSystemB
++                            ? SystemBFlakeNormal(Surf.Ns, Surf.P, Surf.Depth * g_AutomotiveRaySpread,
++                                                 g_MatGlintDensity[Tri.Material], g_MatGlintUvScale[Tri.Material] * 3.0f)
++                            : AutomotiveApplyTriCoatFlakeNormal(Surf.Ns, Surf.P, GlintCoverage,
++                                                               g_MatGlintUvScale[Tri.Material] * 3.0f, 0.37f);
+                         if (dot(Gn, Surf.Ng) > 0.0f) Surf.Ns = Gn;
+                     }
+                     ShadingFrame(Surf.Ns, Surf.T, Surf.B);
+@@ -3048,6 +3089,7 @@ int main(int ArgumentCount, char** ArgumentValues)
+         else if (A == "--restir-no-gi-reuse")      g_RestirGiReuse = false;
+         else if (A == "--restir-final-visibility") g_RestirFinalVisibility = true;   // the pre-reuse arm: re-trace the merged selection
+         else if (A == "--no-glints") g_MatGlintsOff = true;   // M6's A/B: the pre-glint surface
++        else if (A == "--flakes-systemb") g_FlakesSystemB = true;   // System B flake field instead of System A
+         else if (A == "--restir-dead-skip") g_RestirDeadSkip = true;   // #6's refused arm (adaptive-M bias, +9 % RMSE): kept for re-measurement
+         else if (A == "--restir-no-identity")      g_RestirIdentity = false;
+         else if (A == "--drift")        g_RestirDrift = static_cast<float>(std::atof(Next("--drift")));
