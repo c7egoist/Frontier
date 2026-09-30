@@ -24,8 +24,8 @@ InputPaths = [
     RepositoryRoot / "VehiclePhysics/Overlay/Projects/Project-Drive/Source/ControlVehicleMesh.inl",
 ]
 OutputPaths = [
-    GalleryPath / "DriveScene.png",
-    GalleryPath / "DriveBodyFlakes.png",
+    GalleryPath / "ProjectDriveOpening_CPU_Mirror.png",
+    GalleryPath / "ProjectDriveBodyFlakes_CPU_Mirror.png",
 ]
 
 
@@ -69,7 +69,7 @@ def CompileAndRender(ModeName: str, OptimisationFlags: list[str]) -> dict:
         "--out",
         RepositoryRelativePath(GalleryPath),
         "--name",
-        "DriveScene",
+        "ProjectDriveOpening_CPU_Mirror",
     ])
     BinaryPath.unlink(missing_ok=True)
     return {"mode": ModeName, "compile": CompileReport, "render": RenderReport}
@@ -92,7 +92,7 @@ def RenderCloseup() -> None:
         "--out",
         RepositoryRelativePath(GalleryPath),
         "--name",
-        "DriveBodyFlakes",
+        "ProjectDriveBodyFlakes_CPU_Mirror",
         "--frames",
         "20",
         "--eye",
@@ -119,6 +119,7 @@ def RunDriveSceneProof() -> None:
 
     Provenance = {
         "proof": "Project-Drive scene CPU mirror (course + ControlVehicle + wheels, sun/sky, surfel GI, flake clearcoat)",
+        "execution": "CPU mirror — not a native Frontier Vulkan, Slang, or ImGui capture.",
         "gpuExecution": False,
         "windowsExecution": False,
         "modes": ModeReports,
@@ -132,7 +133,7 @@ def RunDriveSceneProof() -> None:
             for OutputPath in OutputPaths
         },
     }
-    ProvenancePath = GalleryPath / "DriveSceneProvenance.json"
+    ProvenancePath = GalleryPath / "Provenance.json"
     ProvenancePath.write_text(json.dumps(Provenance, indent=2) + "\n")
     print(f"Wrote {RepositoryRelativePath(ProvenancePath)} and {len(OutputPaths)} PNGs.")
 

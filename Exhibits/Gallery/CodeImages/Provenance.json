@@ -1,0 +1,20 @@
+{
+  "proof": "Frontier project code-image C ABI revision-2 lifecycle check",
+  "execution": "Linux C++ ABI check only; no native Frontier/Vulkan/UI execution.",
+  "runner": "Exhibits/Workbench/CodeImages/RunAbiContractCheck.sh",
+  "contract": {
+    "revision": 2,
+    "fingerprint": "0xdd4363893c94c8f0"
+  },
+  "checks": [
+    "Loads both independently linked project code images with dlopen.",
+    "Accepts the current revision/fingerprint and exact C-layout interchange.",
+    "Refuses a revision-1 request before callbacks run.",
+    "Calls construct, cycle advance, and retirement callbacks.",
+    "Receives Project-Drive Vehicle Dynamics panel through the host C callback."
+  ],
+  "sha256": {
+    "AbiContract_CPU_Check.txt": "5184863e9e6024a32b250f73458e681164d5316bf2cda198bae766c1ca33d995",
+    "Exhibits/Workbench/CodeImages/CodeImageAbiCheck.cpp": "c1dd92efd09ac9f61f0234cebce70f7d047c7bb6a6d9c7a8eb6443d4eb29d4e4"
+  }
+}

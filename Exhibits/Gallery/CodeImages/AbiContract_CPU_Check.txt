@@ -1,0 +1,4 @@
+[ABI] accepted revision 2 fingerprint 0xdd4363893c94c8f0: ./ProjectZero.so
+  received panel: Vehicle Dynamics (VehicleDynamics)
+[ABI] accepted revision 2 fingerprint 0xdd4363893c94c8f0: ./ProjectDrive.so
+[ABI] all code-image lifecycle checks passed

@@ -1,0 +1,8 @@
+# Project-Drive DriveTelemetry timing
+steps                 2880
+fixed_dt_s            0.004167 (240 Hz)
+sim_time_s            12.000
+wall_time_ms          4134.74
+physics_total_ms      4111.49
+physics_per_step_us   1427.60
+realtime_factor       2.9x

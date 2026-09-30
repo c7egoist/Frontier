@@ -13,7 +13,15 @@ from pathlib import Path
 
 
 WindowedEntryPattern = re.compile(r"\bint\s+main\s*\(")
-WindowedFacilityPattern = re.compile(r"SwapchainExchange|glfw|imgui_impl|Vulkan", re.IGNORECASE)
+# A project-side CPU evidence harness can legitimately include Vulkan-shaped headers or
+# shared engine structures while still being headless. Gate actual window/swapchain
+# ownership instead of the broad word "Vulkan", which previously rejected those
+# headless references as false project hosts.
+WindowedFacilityPattern = re.compile(
+    r"SwapchainExchange|glfw(?:Init|CreateWindow|WindowHint|MakeContextCurrent)|"
+    r"ImGui_Impl|vkCreate(?:Win32|Xcb|Xlib|Wayland|Metal|Android)?SurfaceKHR|vkCreateSwapchainKHR",
+    re.IGNORECASE,
+)
 ProjectSourcePattern = re.compile(r"(?:Projects[\\/]|\.\.[\\/])+Project-[A-Za-z0-9-]+[\\/]Source")
 
 
@@ -25,13 +33,18 @@ def RecordFailure(Failures: list[str], Explanation: str) -> None:
     Failures.append(Explanation)
 
 
+def RemoveCppComments(SourceText: str) -> str:
+    """Prevent prose describing a swapchain from being classified as a swapchain owner."""
+    return re.sub(r"//[^\n]*|/\*.*?\*/", "", SourceText, flags=re.DOTALL)
+
+
 def CheckWindowedEntries(RepositoryRoot: Path, Failures: list[str]) -> None:
     ExpectedEntry = RepositoryRoot / "Engine" / "Host" / "FrontierExecution.cpp"
     if not ExpectedEntry.is_file() or not WindowedEntryPattern.search(ReadText(ExpectedEntry)):
         RecordFailure(Failures, "Engine/Host/FrontierExecution.cpp must be the sole Frontier.exe entry")
 
     for SourceLocation in sorted((RepositoryRoot / "Projects").glob("**/*.cpp")):
-        SourceText = ReadText(SourceLocation)
+        SourceText = RemoveCppComments(ReadText(SourceLocation))
         if WindowedEntryPattern.search(SourceText) and WindowedFacilityPattern.search(SourceText):
             RecordFailure(Failures, f"windowed project entry remains: {SourceLocation.relative_to(RepositoryRoot)}")
 
@@ -67,7 +80,28 @@ def CheckProjectSourceCrossing(RepositoryRoot: Path, Failures: list[str]) -> Non
                 )
 
 
+def ReadCodeInterchangeContract(RepositoryRoot: Path, Failures: list[str]) -> tuple[int, int] | None:
+    HeaderLocation = RepositoryRoot / "Engine" / "ProjectInterchange" / "ProjectInterchange.h"
+    if not HeaderLocation.is_file():
+        RecordFailure(Failures, "Engine/ProjectInterchange/ProjectInterchange.h must declare the code-image contract")
+        return None
+
+    HeaderText = ReadText(HeaderLocation)
+    NumberMatch = re.search(r"FrontierCodeInterchangeNumber\s*=\s*(\d+)u", HeaderText)
+    FingerprintMatch = re.search(r"FrontierCodeInterchangeFingerprint\s*=\s*UINT64_C\((0x[0-9a-fA-F]+)\)", HeaderText)
+    if NumberMatch is None or FingerprintMatch is None:
+        RecordFailure(Failures, "ProjectInterchange.h must expose a numeric interchange number and UINT64_C fingerprint")
+        return None
+
+    return int(NumberMatch.group(1)), int(FingerprintMatch.group(1), 0)
+
+
 def CheckProjectSpecifications(RepositoryRoot: Path, Failures: list[str]) -> None:
+    ExpectedContract = ReadCodeInterchangeContract(RepositoryRoot, Failures)
+    if ExpectedContract is None:
+        return
+
+    ExpectedNumber, ExpectedFingerprint = ExpectedContract
     for SpecificationLocation in sorted((RepositoryRoot / "Projects").glob("**/*.frontier")):
         Properties: dict[str, str] = {}
         ProjectSection = False
@@ -100,6 +134,23 @@ def CheckProjectSpecifications(RepositoryRoot: Path, Failures: list[str]) -> Non
                 + ", ".join(MissingProperties),
             )
             continue
+
+        try:
+            ActualNumber = int(Properties["CodeInterchangeNumber"], 0)
+            ActualFingerprint = int(Properties["InterfaceFingerprint"], 0)
+        except ValueError:
+            RecordFailure(
+                Failures,
+                f"invalid code-image contract values in {SpecificationLocation.relative_to(RepositoryRoot)}",
+            )
+            continue
+
+        if (ActualNumber, ActualFingerprint) != (ExpectedNumber, ExpectedFingerprint):
+            RecordFailure(
+                Failures,
+                f"code-image contract mismatch in {SpecificationLocation.relative_to(RepositoryRoot)}: "
+                f"expected revision {ExpectedNumber}, fingerprint 0x{ExpectedFingerprint:016x}",
+            )
 
         if ProjectName != "ProjectZero":
             for PropertyName in ("OpeningScene", "CodeImage"):

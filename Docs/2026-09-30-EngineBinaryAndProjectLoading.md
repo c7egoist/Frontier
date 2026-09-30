@@ -5,8 +5,8 @@
 
 # Engine as one binary; projects opened by it
 
-**Status:** 🚧 source migration delivered; build and device execution remain pending explicit authorization and a complete
-toolchain.
+**Status:** 🚧 source migration delivered and CPU validation/evidence has run; native device execution remains pending a complete
+toolchain and Vulkan-capable display environment.
 
 ## The runtime shape
 
@@ -34,7 +34,9 @@ and structure size before invoking project code. Only C-layout records and C fun
 - no C++ standard-library record, exception, allocator ownership, Vulkan reference, or ImGui record crosses the edge.
 
 ProjectZero and ProjectDrive have independent `.frontier` streams and image construction entries. A Project-Drive image
-relink does not name shared Frontier translation units in CMake or the primary PowerShell batch.
+relink does not name shared Frontier translation units in CMake or the primary PowerShell batch. The current edge is
+**C ABI revision 2**, fingerprint `0xdd4363893c94c8f0`; the revision/fingerprint changed with the host-reception
+payloads so a stale revision-1 image is rejected before any callback runs.
 
 ## Authoring rule
 

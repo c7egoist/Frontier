@@ -1,5 +1,6 @@
 {
   "proof": "Project-Drive scene CPU mirror (course + ControlVehicle + wheels, sun/sky, surfel GI, flake clearcoat)",
+  "execution": "CPU mirror \u2014 not a native Frontier Vulkan, Slang, or ImGui capture.",
   "gpuExecution": false,
   "windowsExecution": false,
   "modes": [
@@ -27,10 +28,10 @@
           "--out",
           "Exhibits/Gallery/Drive",
           "--name",
-          "DriveScene"
+          "ProjectDriveOpening_CPU_Mirror"
         ],
         "exit": 0,
-        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 3 ms | surfel-gi 812 ms | shade 265 ms | total 1080 ms\n  7 checks passed -> Exhibits/Gallery/Drive/DriveScene.png\n"
+        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 4 ms | surfel-gi 1190 ms | shade 274 ms | total 1468 ms\n  7 checks passed -> Exhibits/Gallery/Drive/ProjectDriveOpening_CPU_Mirror.png\n"
       }
     },
     {
@@ -58,10 +59,10 @@
           "--out",
           "Exhibits/Gallery/Drive",
           "--name",
-          "DriveScene"
+          "ProjectDriveOpening_CPU_Mirror"
         ],
         "exit": 0,
-        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 29 ms | surfel-gi 4205 ms | shade 1344 ms | total 5577 ms\n  7 checks passed -> Exhibits/Gallery/Drive/DriveScene.png\n"
+        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 63 ms | surfel-gi 7360 ms | shade 2328 ms | total 9750 ms\n  7 checks passed -> Exhibits/Gallery/Drive/ProjectDriveOpening_CPU_Mirror.png\n"
       }
     }
   ],
@@ -72,7 +73,7 @@
     "VehiclePhysics/Overlay/Projects/Project-Drive/Source/ControlVehicleMesh.inl": "ddb759aed9ad727883d0021d5390528ed3bd509aaadb7b697704d65a017301ab"
   },
   "outputs": {
-    "Exhibits/Gallery/Drive/DriveScene.png": "659311bebc4231d8bbd82e63b0e136d37ebc18c35efe832af076c1b827cc1973",
-    "Exhibits/Gallery/Drive/DriveBodyFlakes.png": "077048b43ee9c0018ab258f8b2476f4b8b98cb969d70ef467dd3a1ee7a680d80"
+    "Exhibits/Gallery/Drive/ProjectDriveOpening_CPU_Mirror.png": "659311bebc4231d8bbd82e63b0e136d37ebc18c35efe832af076c1b827cc1973",
+    "Exhibits/Gallery/Drive/ProjectDriveBodyFlakes_CPU_Mirror.png": "077048b43ee9c0018ab258f8b2476f4b8b98cb969d70ef467dd3a1ee7a680d80"
   }
 }

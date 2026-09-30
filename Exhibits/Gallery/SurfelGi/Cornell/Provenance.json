@@ -1,0 +1,28 @@
+{
+  "proof": "Standalone Cornell Surfel-GI CPU convergence mirror",
+  "execution": "CPU mirror \u2014 not a native Vulkan/Slang shader or ImGui capture.",
+  "scene": "Cornell box surfel field; combined, direct, indirect, coverage, distribution, flicker, and convergence views.",
+  "command": "./SurfelGI --w 512 --h 512 --frames 300 --rays 10 --direct 96",
+  "results": {
+    "frames": 300,
+    "finalSurfelCount": 8630,
+    "convergenceFrames": [
+      20,
+      60,
+      160,
+      300
+    ]
+  },
+  "sha256": {
+    "Cornell_Convergence_Frame160_CPU_Mirror.png": "1796e87e3134e9f9acd9bcd4c213e66f2219b14e4e028bc6f1cb3947d4312b97",
+    "Cornell_Convergence_Frame20_CPU_Mirror.png": "63ab83a201ca04e44cd2450e50719255260b5920b91de37d90300fca37269c32",
+    "Cornell_Convergence_Frame300_CPU_Mirror.png": "81c5f69d5865e2e7ec49cc755c861c0eb416863de481d47fb2ec25e3b82b07d0",
+    "Cornell_Convergence_Frame60_CPU_Mirror.png": "42ebde31622c38f4ab39ad0ea38ea653fb650dae3f3af8777fff5372b28d183d",
+    "Cornell_Direct_Lighting_CPU_Mirror.png": "4fd48fc44418163e266a500c7a5d273a66767e4cd96dd6be840b66d06e5c3ac3",
+    "Cornell_FrameDifference_x20_CPU_Mirror.png": "32ed46c5375501c9e4040d61b7bebb8f9f5ef99e1cfd660f9e16d9c4726f815e",
+    "Cornell_Indirect_Lighting_CPU_Mirror.png": "6e966675227e924cb69cecdda555740c0627915fc46169aec0d8a8d28049585d",
+    "Cornell_SurfelCoverage_CPU_Mirror.png": "decac2efcecbae1c00d6f72f0f30eba7e095cdee42d87a89fb42b4db7438970f",
+    "Cornell_SurfelDistribution_CPU_Mirror.png": "767c7dea154d8dd7d86d0b307d31003b4670b476a99e34a043582514a9af8a9c",
+    "Cornell_SurfelGi_CPU_Mirror.png": "81c5f69d5865e2e7ec49cc755c861c0eb416863de481d47fb2ec25e3b82b07d0"
+  }
+}

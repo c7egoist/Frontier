@@ -1,0 +1,19 @@
+{
+  "proof": "Project-Drive ControlVehicle physics and Surfel-GI CPU reference",
+  "execution": "CPU mirror/reference \u2014 no native Frontier Vulkan, Slang, or ImGui execution available in this environment.",
+  "scene": "Checker pad, 6 m ramp/1.35 m crest, three bumps, eight cones, socket-geometry vehicle with XPBD tyres, Pacejka drivetrain, and aero.",
+  "commands": [
+    "make clean && make run (VehiclePhysics/Overlay/Projects/Project-Drive)"
+  ],
+  "results": {
+    "simulation": "12.0 s at 240 Hz; peak speed 34.13 m/s; airborne 0.91 s; final X 173.9 m.",
+    "surfelGi": "800x450; 5,640 triangles; 11,639 surfels; 24 frames; 1,413.1 ms."
+  },
+  "sha256": {
+    "DriveCourseSurfelGi_CPU_Mirror.png": "8f5a4558c2bc7ede0b981f43ce00fe4f4cd4f97089525f3f397f133212564476",
+    "DriveTelemetry.csv": "be534e50c484c896329a2ef3caff4162d0a6381c70af10ce3043b7ea1cfe737d",
+    "PhysicsTiming.txt": "134fdffb28b5ee37636836bc9d794d49abea18aaaa3ae968140b3d6150b9dedd",
+    "SimulationRun.txt": "c77f6aa2deb735a1013019cdee0a5a98b34337d02696b28653b302752ed70216",
+    "SurfelGiTiming.txt": "be365c56599e91da373780f7a4b66ebcb55002d556206d1337697213e5144e99"
+  }
+}

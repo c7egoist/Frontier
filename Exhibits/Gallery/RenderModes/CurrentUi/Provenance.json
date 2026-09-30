@@ -1,0 +1,19 @@
+{
+  "proof": "Current render-mode intent CPU mirror",
+  "execution": "CPU mirror \u2014 not a native Vulkan/Slang shader or ImGui capture.",
+  "scene": "Cornell scene, identical geometry/camera/material data across plain raster, surfel-GI, and raytraced presentations.",
+  "command": "./ModeMatrix --scene cornell --w 480 --h 480 --frames 320 --rays 8 --direct 64 --spp 32",
+  "results": {
+    "frames": 320,
+    "surfelCount": 8503,
+    "meanFrameToFrameDifference": 2e-05,
+    "selfChecks": "render completed and all three render-mode outputs were written."
+  },
+  "sha256": {
+    "ModeMatrix_CPU_Mirror_Comparison.png": "9a0e3a31a40d31127c25e66f02b16d26cd803fed805ef9a71999b855d8596362",
+    "PlainRaster_CPU_Mirror.png": "09d3a3de9cc0d19772df73e1d4a3cce4f5e6b21803dbbd803434acaf6443fd95",
+    "RayTraced_CPU_Mirror.png": "e23cbeb7ac51f48fe5ec4847d82e2c32ea1635a1008421efe012035ac7243a31",
+    "SurfelGi_CPU_Mirror.png": "3d6660ff7d8706af4a3e3c77c12fd19af12d2b503aae33abf347f0278b169d44",
+    "SurfelGi_FrameDifference_x20_CPU_Mirror.png": "bcbb1f13657cffcea2c33c491fa7bb758e692a8b7061ee7dce8c6e871b0c7d57"
+  }
+}

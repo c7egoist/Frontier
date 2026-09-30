@@ -7,8 +7,8 @@ from a `.frontier` specification and, when required, a project DLL. `Project-Zer
 Frontier, never the executable or source donor for another project.
 
 This document records the selected delivery shape and its implementation status. The source and build-route migration
-now exists in this checkout; a full Windows/Vulkan execution remains unverified because no build or runtime probe has
-been authorized in this session.
+now exists in this checkout; CPU mirrors and code-image ABI checks have run. A full Windows/Vulkan execution remains
+unverified because this environment has no Windows/Vulkan toolchain, device, or display runtime.
 
 ## Selected delivery shape
 
@@ -91,7 +91,8 @@ ProjectFormatNumber       = 1
 ContentLocation           = "Content"
 OpeningScene              = "Content/Scenes/DriveCourse.gltf"
 CodeImage                 = "Build/ProjectDrive.dll"
-CodeInterchangeNumber     = 1
+CodeInterchangeNumber     = 2
+InterfaceFingerprint      = 0xdd4363893c94c8f0  # revision-2 C-layout contract
 ```
 
 The host accepts a project path from the command line:
@@ -140,9 +141,9 @@ established with a number, a structure-size check, and a generated interface has
   project target. Project-Tractrix's creator now emits a standalone specification and image instead of copying a project.
 - 🟢 `Tools/Build/ProjectOwnershipChecks.py` rejects restored project window entries, cross-project source includes,
   copied `GameExecution.cpp`, Project-Zero batch reuse, and invalid project specifications.
-- 🚧 No CMake, MSVC, shader, CPU reference, or Vulkan-device invocation has run for this migration. The session rule
-  requires explicit approval before such a build or verification executable starts; the local environment also lacks
-  the Windows/Vulkan toolchain.
+- 🟡 Available Linux C++ CPU references and proof renderers have run successfully; durable outputs and provenance are
+  under `Exhibits/Gallery/`. CMake, PowerShell/MSVC, Slang/Vulkan tools, a Vulkan device, and a display runtime are
+  absent, so no native Frontier/Vulkan UI/shader execution has been claimed.
 
 ## Migration sequence
 
