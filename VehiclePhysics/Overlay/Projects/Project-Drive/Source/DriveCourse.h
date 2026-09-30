@@ -38,11 +38,27 @@ struct CourseConstants
     static constexpr float ConeHeight     = 0.55f;
 };
 
-// Material ids the emitter tags each triangle with (the renderer maps these to albedo / paint).
+// Material ids the emitter tags each triangle with.  The first six belong to the static course; the remainder
+// are the ControlVehicle palette.  Keep this order in step with DriveSceneAuthor::AuthorMaterials and the CPU
+// reference renderers.  `ControlVehicle.blend` names its original material families MAGlass, MAMetalicCoat,
+// MAPlastic and MARubber; the flattened body export has no polygon-slot stream, so its source-space classifier
+// restores those four material families without turning the whole shell into a single paint slab.
 enum CourseMaterial : uint32_t
 {
-    MatCheckerLight = 0u, MatCheckerDark = 1u, MatSurround = 2u, MatRamp = 3u,
-    MatBump = 4u, MatCone = 5u, MatBodyPaint = 6u, MatTyre = 7u, MatHub = 8u, MatCount = 9u
+    MatCheckerLight = 0u,
+    MatCheckerDark  = 1u,
+    MatSurround     = 2u,
+    MatRamp         = 3u,
+    MatBump         = 4u,
+    MatCone         = 5u,
+
+    MatBodyPaint    = 6u,  // MAMetalicCoat: cobalt base, dense finite flakes, dielectric clearcoat
+    MatVehicleGlass = 7u,  // MAGlass: cockpit glazing
+    MatVehiclePlastic = 8u,// MAPlastic / MAPlastic2: splitter, lower trim and grille regions
+    MatTyre          = 9u, // MARubber / MAStandardRubber.002
+    MatHub           = 10u,// exposed wheel/rim metal
+    MatBrake         = 11u,// brake disc / caliper metal
+    MatCount         = 12u
 };
 
 // --- terrain sample (the tyre ground query) ---------------------------------------------------------------------------

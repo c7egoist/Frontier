@@ -42,7 +42,8 @@ provenance = {
         "Accepts the current revision/fingerprint and exact C-layout interchange.",
         "Refuses a revision-1 request before callbacks run.",
         "Calls construct, cycle advance, and retirement callbacks.",
-        "Receives Project-Drive Vehicle Dynamics panel through the host C callback.",
+        "Receives five Project-Drive C-layout panel declarations, including ControlVehicle, XPBD tyres and Surfel GI / ReSTIR.",
+        "Receives nine stable C-layout vehicle/course scene-subject declarations and one ControlVehicle diagnostic.",
     ],
     "sha256": {
         "AbiContract_CPU_Check.txt": hashlib.sha256(log.read_bytes()).hexdigest(),

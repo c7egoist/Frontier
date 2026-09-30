@@ -64,37 +64,66 @@ static V MaterialAlbedo(uint32_t m)
         case DC::MatRamp:         return {0.45f,0.45f,0.47f};
         case DC::MatBump:         return {0.72f,0.54f,0.06f};
         case DC::MatCone:         return {0.86f,0.30f,0.05f};
-        case DC::MatBodyPaint:    return {0.05f,0.09f,0.38f};   // cobalt candy base; coat + flakes added on top
-        case DC::MatTyre:         return {0.03f,0.03f,0.035f};
-        case DC::MatHub:          return {0.78f,0.79f,0.82f};
-        default:                  return {0.8f,0.1f,0.8f};
+        case DC::MatBodyPaint:     return {0.020f,0.050f,0.30f}; // MAMetalicCoat; coat + dense finite flakes below
+        case DC::MatVehicleGlass:  return {0.012f,0.042f,0.075f};
+        case DC::MatVehiclePlastic:return {0.010f,0.012f,0.016f};
+        case DC::MatTyre:          return {0.010f,0.012f,0.014f};
+        case DC::MatHub:           return {0.42f,0.44f,0.50f};
+        case DC::MatBrake:         return {0.30f,0.070f,0.020f};
+        default:                   return {0.8f,0.1f,0.8f};
     }
 }
 
 //------------------------------------------------------------------------------------------------------------------------ scene build
+// ControlVehicle.blend supplies MAGlass, MAMetalicCoat and MAPlastic families.  The checked-in, dependency-free
+// mesh extraction flattens its topology but not its authored source-space regions, so this is the same documented
+// classifier used by DriveSceneAuthor rather than a body-wide paint fallback.
+static uint32_t ClassifyControlVehicleMaterial(V a,V b,V c)
+{
+    const V p=(a+b+c)*(1.0f/3.0f), n=norm(cross(b-a,c-a)); const float side=std::fabs(p.y);
+    if(p.z>0.62f&&p.z<1.31f&&p.x>-2.05f&&p.x<1.62f&&(side>0.47f||std::fabs(n.x)>0.48f)) return DC::MatVehicleGlass;
+    if(p.z<0.16f||(side>0.98f&&p.z<0.46f)||(p.x>2.72f&&p.z<0.50f)||(p.x<-2.72f&&p.z<0.57f)) return DC::MatVehiclePlastic;
+    return DC::MatBodyPaint;
+}
 static void EmitCar(std::vector<Tri>& tris, V offset)
 {
     using namespace Frontier::Drive::ControlVehicleMesh;
-    auto P=[&](uint32_t i){ return V{kPositions[i*3+0],kPositions[i*3+1],kPositions[i*3+2]}+offset; };
-    for(uint32_t t=0;t<kTriangleCount;++t){
-        Tri T; T.a=P(kTriangles[t*3+0]); T.b=P(kTriangles[t*3+1]); T.c=P(kTriangles[t*3+2]);
-        T.n=norm(cross(T.b-T.a,T.c-T.a)); T.mat=DC::MatBodyPaint; tris.push_back(T);
+    auto Raw=[&](uint32_t i){ return V{kPositions[i*3+0],kPositions[i*3+1],kPositions[i*3+2]}; };
+    for(uint32_t t=0;t<kTriangleCount;++t){ V a=Raw(kTriangles[t*3+0]), b=Raw(kTriangles[t*3+1]), c=Raw(kTriangles[t*3+2]);
+        Tri T; T.a=a+offset; T.b=b+offset; T.c=c+offset; T.n=norm(cross(T.b-T.a,T.c-T.a));
+        T.mat=ClassifyControlVehicleMaterial(a,b,c); tris.push_back(T);
     }
 }
+// A visibly load-bearing tyre silhouette: a flattened contact patch, rounded shoulders, tread blocks, alloy rim
+// and warm brake disc.  The companion XPBD proof below validates the exact carcass-node deformation; this renderer
+// keeps the rendered tyre recognisable at the opening camera instead of a rigid flat black cylinder.
 static void EmitWheel(std::vector<Tri>& tris, V centre, float R, float hw, uint32_t seg)
 {
-    const float yL=centre.y-hw, yR=centre.y+hw, hubR=R*0.45f;
-    auto addq=[&](V a,V b,V c,V d,uint32_t m){ Tri t1{a,b,c,norm(cross(b-a,c-a)),m}; Tri t2{a,c,d,norm(cross(c-a,d-a)),m};
-        tris.push_back(t1); tris.push_back(t2); };
+    const float rim=R*0.58f, disc=R*0.39f, cap=R*0.14f;
+    auto tyrePoint=[&](float a,float y){
+        const float c=std::cos(a), sn=std::sin(a);
+        const float contact=std::max(0.0f,(-sn-0.72f)/0.28f);       // lower 28% is an actual flat contact patch
+        const float radius=R*(1.0f+0.050f*contact*contact);         // loaded sidewall bulges around the patch
+        const float z=sn < -0.72f ? -R*0.72f : radius*sn;
+        return V{centre.x+radius*c, y, centre.z+z};
+    };
+    auto ring=[&](float a,float r,float y){return V{centre.x+r*std::cos(a),y,centre.z+r*std::sin(a)};};
+    auto addq=[&](V a,V b,V c,V d,uint32_t m){ Tri t1{a,b,c,norm(cross(b-a,c-a)),m}; Tri t2{a,c,d,norm(cross(c-a,d-a)),m}; tris.push_back(t1); tris.push_back(t2); };
     for(uint32_t s=0;s<seg;++s){
-        float a0=2*PI*s/seg, a1=2*PI*(s+1)/seg;
-        V o0{centre.x+R*std::cos(a0),0,centre.z+R*std::sin(a0)}, o1{centre.x+R*std::cos(a1),0,centre.z+R*std::sin(a1)};
-        addq({o0.x,yL,o0.z},{o1.x,yL,o1.z},{o1.x,yR,o1.z},{o0.x,yR,o0.z}, DC::MatTyre);            // tread
-        V h0{centre.x+hubR*std::cos(a0),0,centre.z+hubR*std::sin(a0)}, h1{centre.x+hubR*std::cos(a1),0,centre.z+hubR*std::sin(a1)};
-        Tri f0{{centre.x,yR,centre.z},{h0.x,yR,h0.z},{h1.x,yR,h1.z},{0,1,0},DC::MatHub}; tris.push_back(f0);
-        Tri f1{{centre.x,yL,centre.z},{h1.x,yL,h1.z},{h0.x,yL,h0.z},{0,-1,0},DC::MatHub}; tris.push_back(f1);
-        addq({h0.x,yR,h0.z},{o0.x,yR,o0.z},{o1.x,yR,o1.z},{h1.x,yR,h1.z}, DC::MatTyre);              // R sidewall
-        addq({h0.x,yL,h0.z},{h1.x,yL,h1.z},{o1.x,yL,o1.z},{o0.x,yL,o0.z}, DC::MatTyre);              // L sidewall
+        const float a0=2*PI*s/seg,a1=2*PI*(s+1)/seg;
+        const V oL0=tyrePoint(a0,-hw),oL1=tyrePoint(a1,-hw),oR0=tyrePoint(a0,hw),oR1=tyrePoint(a1,hw);
+        const V rL0=ring(a0,rim,-hw),rL1=ring(a1,rim,-hw),rR0=ring(a0,rim,hw),rR1=ring(a1,rim,hw);
+        const V dL0=ring(a0,disc,-hw-0.003f),dL1=ring(a1,disc,-hw-0.003f),dR0=ring(a0,disc,hw+0.003f),dR1=ring(a1,disc,hw+0.003f);
+        const V cL0=ring(a0,cap,-hw-0.006f),cL1=ring(a1,cap,-hw-0.006f),cR0=ring(a0,cap,hw+0.006f),cR1=ring(a1,cap,hw+0.006f);
+        addq(oL0,oL1,oR1,oR0,DC::MatTyre);           // tread band
+        addq(oL0,rL0,rL1,oL1,DC::MatTyre);           // left sidewall
+        addq(rR1,rR0,oR0,oR1,DC::MatTyre);           // right sidewall
+        addq(rL0,dL0,dL1,rL1,DC::MatHub);            // rim faces
+        addq(dR1,dR0,rR0,rR1,DC::MatHub);
+        addq(dL0,cL0,cL1,dL1,DC::MatBrake);          // brake discs
+        addq(cR1,cR0,dR0,dR1,DC::MatBrake);
+        // alternating tread grooves are narrow raised blocks: coarse enough to read at the proof resolution.
+        if((s&3u)==0u){ const float am=(a0+a1)*0.5f, w=0.022f; V g0=tyrePoint(am-w,-hw),g1=tyrePoint(am+w,-hw),g2=tyrePoint(am+w,hw),g3=tyrePoint(am-w,hw); addq(g0,g1,g2,g3,DC::MatVehiclePlastic); }
     }
 }
 struct BuildResult { std::vector<Tri> tris; size_t course=0, body=0, wheels=0; };
@@ -109,7 +138,7 @@ static BuildResult BuildScene()
     EmitCar(R.tris, V{0,0,spawnZ});
     R.body=R.tris.size()-R.course;
     const float hub[4][3]={{1.7274f,1.0475f,0.0914f},{1.7274f,-1.0475f,0.0914f},{-1.6686f,1.0475f,0.0914f},{-1.6686f,-1.0475f,0.0914f}};
-    for(int w=0;w<4;++w) EmitWheel(R.tris, V{hub[w][0],hub[w][1],hub[w][2]+spawnZ}, 0.34f, 0.1175f, 24u);
+    for(int w=0;w<4;++w) EmitWheel(R.tris, V{hub[w][0],hub[w][1],hub[w][2]+spawnZ-0.030f}, 0.34f, 0.145f, 64u);
     R.wheels=R.tris.size()-R.course-R.body;
     return R;
 }
@@ -175,26 +204,53 @@ static V DirectLight(const BVH& bvh, V P, V N, V albedo){
     c = c + albedo * (SkyColour(V{0,0,1}) * (0.35f*(0.5f+0.5f*N.z)));
     return c;
 }
-// Clearcoat + metallic flakes on the body — a tight coat highlight plus sparse per-cell metallic glints, so the
-//    flake paint (System B) is visible in the proof rather than reading as flat candy paint.
-static V BodyCoatAndFlakes(const BVH& bvh, V P, V N, V viewDir){
-    if(dot(N,SUN_DIR)<=0 || bvh.anyHit(P+N*0.002f, SUN_DIR, 1e4f)) return {0,0,0};
-    const V H = norm(SUN_DIR + viewDir);
-    const float ndh = std::max(0.0f, dot(N,H));
-    const float fres = 0.04f + 0.96f*std::pow(1.0f-std::max(0.0f,dot(N,viewDir)),5.0f);
-    V coat = V{1,1,1} * (std::pow(ndh,220.0f) * 0.9f * fres);          // sharp clearcoat sun highlight
-    V flake{0,0,0};
-    const float density=780.0f;                                        // ~1.3 mm flake cells
-    const int cx=(int)std::floor(P.x*density), cy=(int)std::floor(P.y*density), cz=(int)std::floor(P.z*density);
-    uint32_t h=hashi((uint32_t)cx*73856093u ^ (uint32_t)cy*19349663u ^ (uint32_t)cz*83492791u);
-    if((h & 0xFFu) < 44u){                                             // ~17% of cells carry a flake
-        RNG r(h); V micro=norm(N + V{r.f()-0.5f,r.f()-0.5f,r.f()-0.5f}*0.85f);
-        const float mdh=std::max(0.0f,dot(micro,H));
-        const V tint{0.60f,0.70f,1.0f};                               // cobalt metallic sparkle
-        flake = tint * (std::pow(mdh,900.0f) * 9.0f);
+// CPU ReSTIR-DI mirror: build a per-pixel weighted reservoir from finite sun-disc candidates, then shade the
+// chosen candidate once.  This is a reference implementation of the selection path only; it is visibly and
+// separately labelled in provenance and must not be mistaken for the native Vulkan/Slang ReSTIR dispatch.
+static V RestirDirectMirror(const BVH& bvh,V P,V N,V albedo,uint32_t seed){
+    RNG rng(seed); V tangent=norm(std::fabs(SUN_DIR.z)>0.9f?cross(SUN_DIR,{0,1,0}):cross(SUN_DIR,{0,0,1})); V bitangent=cross(SUN_DIR,tangent);
+    V chosen=SUN_DIR; float selectedWeight=0.0f, weightSum=0.0f;
+    for(int candidate=0;candidate<12;++candidate){
+        const float r=0.028f*std::sqrt(rng.f()), a=2.0f*PI*rng.f(); V light=norm(SUN_DIR+tangent*(r*std::cos(a))+bitangent*(r*std::sin(a)));
+        const float w=std::max(0.0f,dot(N,light)); weightSum+=w;
+        if(w>0.0f&&rng.f()*weightSum<w){chosen=light;selectedWeight=w;}
     }
-    return (coat + flake) * SUN_COL;
+    V c=albedo*(SkyColour({0,0,1})*(0.28f*(0.5f+0.5f*N.z)));
+    if(selectedWeight>0.0f&&!bvh.anyHit(P+N*0.002f,chosen,1e4f)) c=c+albedo*INV_PI*(SUN_COL*selectedWeight);
+    return c;
 }
+// Dense finite-flake cobalt paint.  The old proof only fired a sparse, extremely sharp glint condition, so a
+// painted panel read as flat blue except for a few accidental pixels.  Here every paint panel receives a high-density
+// 0.9--1.5 mm metal-flake population, coloured aggregate sparkle AND occasional hot microfacets beneath a clearly
+// separate low-roughness dielectric clearcoat.  This is intentionally a close-camera proof setting: flakes must be
+// legible, not merely mentioned in metadata.
+static V BodyCoatAndFlakes(const BVH& bvh, V P, V N, V viewDir){
+    const float ndv=std::max(0.0f,dot(N,viewDir));
+    const float fres=0.04f+0.96f*std::pow(1.0f-ndv,5.0f);
+    const V H=norm(SUN_DIR+viewDir);
+    const bool sun=dot(N,SUN_DIR)>0.0f && !bvh.anyHit(P+N*0.002f,SUN_DIR,1e4f);
+
+    // Clearcoat is a broad sky reflection plus a tight direct reflection.  It stays visible on the whole body,
+    // including panels not exactly aligned with the sun.
+    V coat=SkyColour(N)*(0.10f*fres) + V{1.0f,1.0f,1.0f}*(sun?std::pow(std::max(0.0f,dot(N,H)),35.0f)*(1.65f+2.2f*fres):0.0f);
+
+    const float cells=520.0f; // finite cells around 1.9 mm: dense but still individually legible in the close proof
+    const int cx=(int)std::floor(P.x*cells), cy=(int)std::floor(P.y*cells), cz=(int)std::floor(P.z*cells);
+    uint32_t h=hashi((uint32_t)cx*73856093u^(uint32_t)cy*19349663u^(uint32_t)cz*83492791u);
+    const float pick=(float)(h&0xffffu)*(1.0f/65535.0f);
+    const float grain=(float)((h>>16u)&0xffu)*(1.0f/255.0f);
+    V flake{0,0,0};
+    if(pick<0.76f) // 76% finite-flake coverage: unmistakable dense automotive metallic population
+    {
+        RNG r(h^0x91e10da5u);
+        const V micro=norm(N+V{r.f()-0.5f,r.f()-0.5f,r.f()-0.5f}*0.52f);
+        const float glint=sun?std::pow(std::max(0.0f,dot(micro,H)),150.0f)*9.0f:0.0f;
+        const V silverBlue{0.42f+0.38f*grain,0.62f+0.30f*grain,0.90f+0.10f*grain};
+        flake=silverBlue*(0.012f+0.070f*grain+0.28f*glint); // dense but physically modest aggregate metallic grain
+    }
+    return coat+flake;
+}
+
 static V hemi(V N, float u1, float u2){ float r=std::sqrt(u1), th=2*PI*u2; V t=norm(std::fabs(N.x)>0.9f?cross(N,{0,1,0}):cross(N,{1,0,0})); V b=cross(N,t);
     return norm(t*(r*std::cos(th))+b*(r*std::sin(th))+N*std::sqrt(std::max(0.0f,1-u1))); }
 
@@ -219,17 +275,50 @@ static V rayDir(const Cam& c,float px,float py){ float u=(2*(px+0.5f)/c.W-1)*c.t
 static inline float aces(float x){x*=0.9f;return std::min(1.0f,std::max(0.0f,(x*(2.51f*x+0.03f))/(x*(2.43f*x+0.59f)+0.14f)));}
 static inline uint8_t enc(float v){return (uint8_t)std::lround(std::pow(aces(v),1.0f/2.2f)*255.0f);}
 
+// A label is burned into every beauty frame so the PNG itself, not only its name and provenance, makes the
+// CPU-reference boundary clear.  This deliberately tiny 5x7 type avoids a runtime font/rendering dependency.
+static unsigned char LabelGlyph(char c, int row)
+{
+    switch(c) {
+    case 'A':{static const unsigned char g[]={14,17,17,31,17,17,17};return g[row];} case 'C':{static const unsigned char g[]={14,17,16,16,16,17,14};return g[row];}
+    case 'D':{static const unsigned char g[]={30,17,17,17,17,17,30};return g[row];} case 'E':{static const unsigned char g[]={31,16,16,30,16,16,31};return g[row];} case 'F':{static const unsigned char g[]={31,16,16,30,16,16,16};return g[row];}
+    case 'G':{static const unsigned char g[]={14,17,16,23,17,17,14};return g[row];} case 'I':{static const unsigned char g[]={31,4,4,4,4,4,31};return g[row];}
+    case 'K':{static const unsigned char g[]={17,18,20,24,20,18,17};return g[row];} case 'L':{static const unsigned char g[]={16,16,16,16,16,16,31};return g[row];}
+    case 'N':{static const unsigned char g[]={17,25,21,19,17,17,17};return g[row];} case 'O':{static const unsigned char g[]={14,17,17,17,17,17,14};return g[row];}
+    case 'P':{static const unsigned char g[]={30,17,17,30,16,16,16};return g[row];} case 'R':{static const unsigned char g[]={30,17,17,30,20,18,17};return g[row];}
+    case 'S':{static const unsigned char g[]={15,16,16,14,1,1,30};return g[row];} case 'T':{static const unsigned char g[]={31,4,4,4,4,4,4};return g[row];}
+    case 'U':{static const unsigned char g[]={17,17,17,17,17,17,14};return g[row];} case 'V':{static const unsigned char g[]={17,17,17,17,17,10,4};return g[row];}
+    case '-':{static const unsigned char g[]={0,0,0,31,0,0,0};return g[row];} case '/':{static const unsigned char g[]={1,2,2,4,8,8,16};return g[row];}
+    case ' ': return 0; default: return 0;
+    }
+}
+static void BurnReferenceLabel(std::vector<unsigned char>& rgb,int W,const std::string& label)
+{
+    const int x0=14,y0=14,h=34,w=std::min(W-28,static_cast<int>(label.size())*12+22);
+    for(int y=y0;y<y0+h;++y) for(int x=x0;x<x0+w;++x) { const size_t i=static_cast<size_t>(y*W+x)*3u; rgb[i+0]=8;rgb[i+1]=22;rgb[i+2]=39; }
+    int x=x0+10; constexpr int scale=2;
+    for(char raw:label) { const char c=raw>='a'&&raw<='z'?static_cast<char>(raw-'a'+'A'):raw;
+        for(int row=0;row<7;++row) { const unsigned char bits=LabelGlyph(c,row); for(int col=0;col<5;++col) if(bits&(1u<<(4-col)))
+            for(int yy=0;yy<scale;++yy) for(int xx=0;xx<scale;++xx) { const int px=x+col*scale+xx,py=y0+10+row*scale+yy; const size_t i=static_cast<size_t>(py*W+px)*3u; rgb[i+0]=122;rgb[i+1]=231;rgb[i+2]=241; } }
+        x+=6*scale;
+    }
+}
+
 int main(int argc,char**argv){ try {
     int W=960,H=540,FRAMES=28,RAYS=8; std::string outDir="Exhibits/Gallery/Drive"; std::string name="DriveScene";
+    std::string renderMode="surfel"; // "surfel" = field GI; "restir" = CPU DI reservoir mirror
     V eye{-11,-8.5,4.8}, look{3,0,0.6}; float fovDeg=55.0f;
     for(int i=1;i<argc;++i){ std::string a=argv[i]; auto nx=[&](int d){return i+1<argc?std::atoi(argv[++i]):d;};
         auto nf=[&](float d){return i+1<argc?(float)std::atof(argv[++i]):d;};
         if(a=="--w")W=nx(W); else if(a=="--h")H=nx(H); else if(a=="--frames")FRAMES=nx(FRAMES); else if(a=="--rays")RAYS=nx(RAYS);
         else if(a=="--out")outDir=(i+1<argc?argv[++i]:outDir); else if(a=="--name")name=(i+1<argc?argv[++i]:name);
+        else if(a=="--render-mode")renderMode=(i+1<argc?argv[++i]:renderMode);
         else if(a=="--eye"){ eye.x=nf(eye.x); eye.y=nf(eye.y); eye.z=nf(eye.z); }
         else if(a=="--look"){ look.x=nf(look.x); look.y=nf(look.y); look.z=nf(look.z); }
         else if(a=="--fov")fovDeg=nf(fovDeg); }
     std::error_code ec; std::filesystem::create_directories(outDir, ec);
+    Check(renderMode=="surfel" || renderMode=="restir", "--render-mode must be surfel or restir");
+    const bool RestirMode = renderMode=="restir";
     using Clock=std::chrono::steady_clock; auto t0=Clock::now();
 
     BuildResult scene=BuildScene();
@@ -271,7 +360,8 @@ int main(int argc,char**argv){ try {
             acc=acc*(1.0f/RAYS); acc=acc*s.albedo; s.Enew=acc; });
         for(auto& s:sf){ s.age++; float a=1.0f/std::min(s.age,64u); s.E=s.E*(1.0f-a)+s.Enew*a; } };
 
-    for(int f=0;f<FRAMES;++f){ spawnPass(f); temporal(f); }
+    if(!RestirMode)
+        for(int f=0;f<FRAMES;++f){ spawnPass(f); temporal(f); }
     auto tGI=Clock::now();
 
     auto gatherE=[&](V P,V N){ V e{0,0,0}; float wsum=0;
@@ -285,7 +375,8 @@ int main(int argc,char**argv){ try {
     par(W*H,[&](int i){ int x=i%W,y=i/W; V rd=rayDir(cam,(float)x,(float)y); (void)x;(void)y;
         if(!gV[i]){ img[i]=SkyColour(rd); return; }
         V P=gP[i],N=gN[i],A=gA[i];
-        V c=DirectLight(bvh,P,N,A) + gatherE(P,N)*INV_PI;
+        V c=RestirMode ? RestirDirectMirror(bvh,P,N,A,hashi(static_cast<uint32_t>(i)*0x9e3779b9u))
+                         : DirectLight(bvh,P,N,A) + gatherE(P,N)*INV_PI;
         if(gBody[i]) c=c+BodyCoatAndFlakes(bvh,P,N,rd*-1.0f);
         img[i]=c; });
 
@@ -300,13 +391,14 @@ int main(int argc,char**argv){ try {
     // encode + write PNG through the engine writer
     std::vector<unsigned char> rgb((size_t)W*H*3);
     for(int i=0;i<W*H;++i){ rgb[i*3+0]=enc(img[i].x); rgb[i*3+1]=enc(img[i].y); rgb[i*3+2]=enc(img[i].z); }
+    BurnReferenceLabel(rgb,W,RestirMode ? "CPU RESTIR-DI REFERENCE - NOT VULKAN/SLANG" : "CPU SURFEL-GI REFERENCE - NOT VULKAN/SLANG");
     const std::string png=outDir+"/"+name+".png";
     Check(PngWriteCodec::EncodeRgbFile(png.c_str(), W, H, 3, rgb.data(), W*3), "PNG write failed");
 
     auto tEnd=Clock::now();
     auto ms=[&](Clock::time_point a,Clock::time_point b){ return std::chrono::duration<double,std::milli>(b-a).count(); };
-    std::printf("DriveSceneProof: %zu tris (course %zu, body %zu, wheels %zu), %zu surfels, %dx%d, %d GI frames\n",
-                tris.size(), scene.course, scene.body, scene.wheels, sf.size(), W, H, FRAMES);
+    std::printf("DriveSceneProof [%s CPU reference]: %zu tris (course %zu, body %zu, wheels %zu), %zu surfels, %dx%d, %d GI frames\n",
+                renderMode.c_str(), tris.size(), scene.course, scene.body, scene.wheels, sf.size(), W, H, RestirMode ? 0 : FRAMES);
     std::printf("  bvh %.0f ms | surfel-gi %.0f ms | shade %.0f ms | total %.0f ms\n",
                 ms(t0,tBVH), ms(tBVH,tGI), ms(tGI,tEnd), ms(t0,tEnd));
     std::printf("  %u checks passed -> %s\n", g_Checks, png.c_str());

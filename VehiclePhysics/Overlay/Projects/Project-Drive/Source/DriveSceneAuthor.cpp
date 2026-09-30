@@ -26,6 +26,33 @@ Vector3 Normalize(const Vector3& v) noexcept
 // One OpenPBR slab wrapped in a named material.
 MaterialDescriptor MakeMaterial(const char* Name, const MaterialSlabDescriptor& Slab) noexcept
 { MaterialDescriptor m; m.Name = Name; m.Slabs.push_back(Slab); return m; }
+
+// The original ControlVehicle .blend owns four named appearance families: MAGlass, MAMetalicCoat,
+// MAPlastic/MAPlastic2 and MARubber.  The dependency-free body extraction deliberately flattened the mesh to
+// positions and triangles (there is no Blender material-index stream in ControlVehicleMesh.inl), so recover the
+// authored families from their unambiguous source-space regions.  This is intentionally a small, documented mapping
+// rather than an all-body paint fallback: the cabin glazing, lower trim/splitter/grille and painted shell stay
+// separate material batches in every exported DriveCourse scene.
+uint32_t ClassifyControlVehicleFace(const Vector3& A, const Vector3& B, const Vector3& C) noexcept
+{
+    const Vector3 P{ (A.x + B.x + C.x) / 3.0f, (A.y + B.y + C.y) / 3.0f, (A.z + B.z + C.z) / 3.0f };
+    const Vector3 N = Normalize(Cross(Sub(B, A), Sub(C, A)));
+    const float Side = std::fabs(P.y);
+
+    // Dark, slightly blue cockpit glazing: side windows plus the forward/back sloped screen surfaces.
+    const bool CockpitEnvelope = P.z > 0.62f && P.z < 1.31f && P.x > -2.05f && P.x < 1.62f;
+    const bool GlazingFacing = Side > 0.47f || std::fabs(N.x) > 0.48f;
+    if (CockpitEnvelope && GlazingFacing)
+        return MatVehicleGlass;
+
+    // Plastic undertray/side-skirt, lower fascia and the two bumper/grille end regions.
+    const bool LowerTrim = P.z < 0.16f || (Side > 0.98f && P.z < 0.46f);
+    const bool EndFascia = (P.x > 2.72f && P.z < 0.50f) || (P.x < -2.72f && P.z < 0.57f);
+    if (LowerTrim || EndFascia)
+        return MatVehiclePlastic;
+
+    return MatBodyPaint;
+}
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------ span bookkeeping (verbatim ShowcaseStructure pattern)
@@ -75,34 +102,60 @@ void DriveSceneAuthor::AppendFace(const Vector3& A, const Vector3& B, const Vect
 //------------------------------------------------------------------------------------------------------------------------ vehicle body (ControlVehicleMesh, shifted so local origin = centre of mass)
 void DriveSceneAuthor::AppendVehicleBody(float ComHeight, uint32_t Material) noexcept
 {
+    (void)Material; // retained in the declaration for source compatibility; per-face family assignment is authoritative.
     using namespace Frontier::Drive::ControlVehicleMesh;
-    auto P = [&](uint32_t i)
-    { return Vector3{ kPositions[i*3+0], kPositions[i*3+1], kPositions[i*3+2] - ComHeight }; };
+    auto Raw = [&](uint32_t i)
+    { return Vector3{ kPositions[i*3+0], kPositions[i*3+1], kPositions[i*3+2] }; };
+    auto Local = [&](const Vector3& P) { return Vector3{P.x, P.y, P.z - ComHeight}; };
     for (uint32_t t = 0; t < kTriangleCount; ++t)
-        AppendFace(P(kTriangles[t*3+0]), P(kTriangles[t*3+1]), P(kTriangles[t*3+2]), Material);
+    {
+        const Vector3 A = Raw(kTriangles[t*3+0]);
+        const Vector3 B = Raw(kTriangles[t*3+1]);
+        const Vector3 C = Raw(kTriangles[t*3+2]);
+        AppendFace(Local(A), Local(B), Local(C), ClassifyControlVehicleFace(A, B, C));
+    }
 }
 
-//------------------------------------------------------------------------------------------------------------------------ procedural wheel (cylinder centred at origin, axle along +Y — the spin axis)
+//------------------------------------------------------------------------------------------------------------------------ procedural wheel (axle along +Y) with material-separated rubber, rim/hub and disc
 void DriveSceneAuthor::AppendWheel(const Vector3& C, float Radius, float HalfWidth, uint32_t Segments, uint32_t Material) noexcept
 {
-    const Vector3 SideL{ C.x, C.y + HalfWidth, C.z };   // +Y face centre
-    const Vector3 SideR{ C.x, C.y - HalfWidth, C.z };   // -Y face centre
+    (void)Material;
+    const float RimRadius = Radius * 0.57f;
+    const float DiscRadius = Radius * 0.39f;
+    const float CapRadius = Radius * 0.15f;
+    auto Point = [&](const Vector3& D, float RadiusAt, float Y)
+    { return Vector3{C.x + D.x * RadiusAt, C.y + Y, C.z + D.z * RadiusAt}; };
+    auto Quad = [&](const Vector3& A, const Vector3& B, const Vector3& D, const Vector3& E, uint32_t Slot)
+    {
+        const Vector3 P0[3] = {A,B,D}; const Vector3 P1[3] = {A,D,E};
+        const Vector3 N0 = Normalize(Cross(Sub(B,A),Sub(D,A)));
+        const Vector3 N1 = Normalize(Cross(Sub(D,A),Sub(E,A)));
+        const Vector3 Ns0[3] = {N0,N0,N0}; const Vector3 Ns1[3] = {N1,N1,N1};
+        const float U0[3][2]={{0,0},{1,0},{1,1}}, U1[3][2]={{0,0},{1,1},{0,1}};
+        AppendTriangle(P0,Ns0,U0,Slot); AppendTriangle(P1,Ns1,U1,Slot);
+    };
+
     for (uint32_t i = 0; i < Segments; ++i)
     {
         const float a0 = 2.0f * kPi * float(i)      / float(Segments);
         const float a1 = 2.0f * kPi * float(i + 1u) / float(Segments);
         const Vector3 d0{ std::cos(a0), 0.0f, std::sin(a0) }, d1{ std::cos(a1), 0.0f, std::sin(a1) };
-        const Vector3 oL0{ C.x + d0.x*Radius, C.y + HalfWidth, C.z + d0.z*Radius };
-        const Vector3 oL1{ C.x + d1.x*Radius, C.y + HalfWidth, C.z + d1.z*Radius };
-        const Vector3 oR0{ C.x + d0.x*Radius, C.y - HalfWidth, C.z + d0.z*Radius };
-        const Vector3 oR1{ C.x + d1.x*Radius, C.y - HalfWidth, C.z + d1.z*Radius };
-        const float u0 = float(i)/float(Segments), u1 = float(i+1u)/float(Segments);
-        // tread (two tris), smooth radial normals
-        { const Vector3 P[3]={oR0,oR1,oL1}; const Vector3 N[3]={d0,d1,d1}; const float Uv[3][2]={{u0,0},{u1,0},{u1,1}}; AppendTriangle(P,N,Uv,Material); }
-        { const Vector3 P[3]={oR0,oL1,oL0}; const Vector3 N[3]={d0,d1,d0}; const float Uv[3][2]={{u0,0},{u1,1},{u0,1}}; AppendTriangle(P,N,Uv,Material); }
-        // side walls (fans to the two face centres)
-        { const Vector3 P[3]={SideL,oL0,oL1}; const Vector3 N[3]={{0,1,0},{0,1,0},{0,1,0}}; const float Uv[3][2]={{.5f,.5f},{u0,1},{u1,1}}; AppendTriangle(P,N,Uv,Material); }
-        { const Vector3 P[3]={SideR,oR1,oR0}; const Vector3 N[3]={{0,-1,0},{0,-1,0},{0,-1,0}}; const float Uv[3][2]={{.5f,.5f},{u1,0},{u0,0}}; AppendTriangle(P,N,Uv,Material); }
+        const Vector3 outerL0 = Point(d0, Radius,    HalfWidth), outerL1 = Point(d1, Radius,    HalfWidth);
+        const Vector3 outerR0 = Point(d0, Radius,   -HalfWidth), outerR1 = Point(d1, Radius,   -HalfWidth);
+        const Vector3 rimL0   = Point(d0, RimRadius, HalfWidth), rimL1   = Point(d1, RimRadius, HalfWidth);
+        const Vector3 rimR0   = Point(d0, RimRadius,-HalfWidth), rimR1   = Point(d1, RimRadius,-HalfWidth);
+        const Vector3 discL0  = Point(d0, DiscRadius,HalfWidth + 0.002f), discL1 = Point(d1, DiscRadius,HalfWidth + 0.002f);
+        const Vector3 discR0  = Point(d0, DiscRadius,-HalfWidth - 0.002f),discR1 = Point(d1, DiscRadius,-HalfWidth - 0.002f);
+        const Vector3 capL0   = Point(d0, CapRadius, HalfWidth + 0.004f), capL1  = Point(d1, CapRadius, HalfWidth + 0.004f);
+        const Vector3 capR0   = Point(d0, CapRadius,-HalfWidth - 0.004f), capR1  = Point(d1, CapRadius,-HalfWidth - 0.004f);
+
+        Quad(outerR0, outerR1, outerL1, outerL0, MatTyre);      // dense tread band
+        Quad(outerL0, outerL1, rimL1, rimL0, MatTyre);          // tyre sidewall
+        Quad(rimR1, rimR0, outerR0, outerR1, MatTyre);
+        Quad(rimL0, rimL1, discL1, discL0, MatHub);              // machined rim face
+        Quad(discR1, discR0, rimR0, rimR1, MatHub);
+        Quad(discL0, discL1, capL1, capL0, MatBrake);            // brake disc / caliper field
+        Quad(capR1, capR0, discR0, discR1, MatBrake);
     }
 }
 
@@ -129,20 +182,43 @@ void DriveSceneAuthor::AuthorMaterials() noexcept
     Materials.push_back(MakeMaterial("Speed bump",    Dielectric(0.90f,0.72f,0.08f, 0.45f))); // 4
     Materials.push_back(MakeMaterial("Cone",          Dielectric(0.95f,0.35f,0.05f, 0.40f))); // 5
 
-    // 6 — flake clearcoat body paint (System B automotive finite-flake, profile 4 "Metallic Cobalt").
-    MaterialSlabDescriptor paint;
-    AuthorAutomotiveShowcase(paint, /*profile=*/4u, /*sweep=*/0.5f);
-    Materials.push_back(MakeMaterial("Body — cobalt flake clearcoat", paint));               // 6
+    // 6 — System-B cobalt automotive paint.  Use a deliberately high finite-flake population (not a sparse
+    // glint accent): each painted panel has 6.0 density, 1 mm-scale UV placement and a distinct low-roughness
+    // dielectric clearcoat.  The settings are the same OpenPBR fields used by the ReSTIR material evaluator.
+    MaterialSlabDescriptor paint = Dielectric(0.018f, 0.045f, 0.28f, 0.28f);
+    paint.SlateAutomotiveProfile = 1.0f;
+    paint.SlateAutomotiveSweep   = 0.0f;
+    paint.SlateGlintDensity      = 6.0f;
+    paint.SlateGlintUvScale      = 1.0f;
+    paint.CoatWeight             = 1.0f;
+    paint.CoatColor[0] = 1.0f; paint.CoatColor[1] = 1.0f; paint.CoatColor[2] = 1.0f;
+    paint.CoatRoughness = 0.055f;
+    paint.CoatIor       = 1.5f;
+    Materials.push_back(MakeMaterial("MAMetalicCoat — dense cobalt finite-flake clearcoat", paint)); // 6
 
-    // 7 — tyre rubber.
-    MaterialSlabDescriptor tyre = Dielectric(0.015f,0.015f,0.016f, 0.75f);
+    // 7 — the source's MAGlass family: tinted, high-IOR glazing with a clear reflected lobe.
+    MaterialSlabDescriptor glass = Dielectric(0.018f,0.050f,0.085f,0.055f);
+    glass.SpecularIor = 1.52f;
+    glass.CoatWeight = 1.0f; glass.CoatRoughness = 0.025f; glass.CoatIor = 1.52f;
+    Materials.push_back(MakeMaterial("MAGlass — smoked cockpit glazing", glass));                   // 7
+
+    // 8 — MAPlastic / MAPlastic2.  It is non-metallic and visibly rougher than paint; no accidental body-wide coat.
+    MaterialSlabDescriptor plastic = Dielectric(0.012f,0.014f,0.018f,0.46f);
+    plastic.CoatWeight = 0.0f;
+    Materials.push_back(MakeMaterial("MAPlastic — lower trim, splitter and grille", plastic));       // 8
+
+    // 9 — MARubber / MAStandardRubber.002 tyre sidewall and tread.
+    MaterialSlabDescriptor tyre = Dielectric(0.012f,0.013f,0.015f,0.82f);
     tyre.CoatWeight = 0.0f;
-    Materials.push_back(MakeMaterial("Tyre rubber", tyre));                                   // 7
+    Materials.push_back(MakeMaterial("MARubber — XPBD tyre carcass", tyre));                           // 9
 
-    // 8 — hub (metallic, kept for the Materials-enum alignment even though the wheel is one primitive).
-    MaterialSlabDescriptor hub; hub.BaseColor[0]=0.62f; hub.BaseColor[1]=0.63f; hub.BaseColor[2]=0.66f;
-    hub.BaseMetalness=1.0f; hub.SpecularRoughness=0.25f;
-    Materials.push_back(MakeMaterial("Wheel hub", hub));                                      // 8
+    // 10 / 11 — wheel and brake treatments stay physically distinct from the rubber.
+    MaterialSlabDescriptor hub; hub.BaseColor[0]=0.42f; hub.BaseColor[1]=0.44f; hub.BaseColor[2]=0.49f;
+    hub.BaseMetalness=1.0f; hub.SpecularRoughness=0.16f;
+    Materials.push_back(MakeMaterial("Wheel hub — machined alloy", hub));                              // 10
+    MaterialSlabDescriptor brake; brake.BaseColor[0]=0.30f; brake.BaseColor[1]=0.075f; brake.BaseColor[2]=0.025f;
+    brake.BaseMetalness=0.82f; brake.SpecularRoughness=0.29f;
+    Materials.push_back(MakeMaterial("Brake disc and caliper", brake));                               // 11
 }
 
 //------------------------------------------------------------------------------------------------------------------------ Construct + Export
@@ -156,15 +232,15 @@ void DriveSceneAuthor::Construct() noexcept
     const float radius = geo.TyreRadius;
     const float halfW  = 0.1175f;              // matches the physics wheel half-width
 
-    // span 0 — body (dynamic) -> instance 0
-    { auto s = OpenSpan("Vehicle body", /*Dynamic=*/true); (void)s;
-      AppendVehicleBody(comH, /*MatBodyPaint=*/6u); }
+    // span 0 — body (dynamic) -> instance 0.  Its faces are partitioned into MAMetalicCoat, MAGlass and MAPlastic.
+    { auto s = OpenSpan("ControlVehicle — paint / glass / plastic", /*Dynamic=*/true); (void)s;
+      AppendVehicleBody(comH, MatBodyPaint); }
 
-    // spans 1..4 — wheels (dynamic) -> instances 1..4 (FL, FR, RL, RR); each centred at the origin.
-    const char* wheelNames[4] = { "Wheel FL", "Wheel FR", "Wheel RL", "Wheel RR" };
+    // spans 1..4 — wheels (dynamic) -> instances 1..4 (FL, FR, RL, RR).  Every wheel emits MARubber + hub + brake.
+    const char* wheelNames[4] = { "XPBD Tyre FL", "XPBD Tyre FR", "XPBD Tyre RL", "XPBD Tyre RR" };
     for (int w = 0; w < 4; ++w)
     { auto s = OpenSpan(wheelNames[w], /*Dynamic=*/true); (void)s;
-      AppendWheel(Vector3{0,0,0}, radius, halfW, /*Segments=*/24u, /*MatTyre=*/7u); }
+      AppendWheel(Vector3{0,0,0}, radius, halfW, /*Segments=*/48u, MatTyre); }
 
     // span 5 — course (static) -> instances 5.. (one per material used)
     { auto s = OpenSpan("Course", /*Dynamic=*/false); (void)s;

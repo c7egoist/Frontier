@@ -1,4 +1,18 @@
 [ABI] accepted revision 2 fingerprint 0xdd4363893c94c8f0: ./ProjectZero.so
+  received panel: Project-Drive Outliner (DriveOutliner)
+  received panel: ControlVehicle Inspector (ControlVehicle)
+  received panel: XPBD Tyres (XPBDTyres)
   received panel: Vehicle Dynamics (VehicleDynamics)
+  received panel: Surfel GI / ReSTIR (DriveRenderModes)
+  received scene subject: ControlVehicle
+  received scene subject: ControlVehicle.Body
+  received scene subject: ControlVehicle.XPBDTyre.FL
+  received scene subject: ControlVehicle.XPBDTyre.FR
+  received scene subject: ControlVehicle.XPBDTyre.RL
+  received scene subject: ControlVehicle.XPBDTyre.RR
+  received scene subject: DriveCourse
+  received scene subject: DriveCourse.Ramp
+  received scene subject: DriveCourse.Slalom
+  received diagnostic: ControlVehicle
 [ABI] accepted revision 2 fingerprint 0xdd4363893c94c8f0: ./ProjectDrive.so
 [ABI] all code-image lifecycle checks passed

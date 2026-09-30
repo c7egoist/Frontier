@@ -56,21 +56,34 @@ static V MaterialAlbedo(uint32_t m)
         case DC::MatRamp:         return {0.45f,0.45f,0.47f};
         case DC::MatBump:         return {0.72f,0.54f,0.06f};
         case DC::MatCone:         return {0.86f,0.30f,0.05f};
-        case DC::MatBodyPaint:    return {0.06f,0.10f,0.42f};   // candy blue base (flakes/coat are the Vulkan path)
-        case DC::MatTyre:         return {0.03f,0.03f,0.035f};
-        case DC::MatHub:          return {0.78f,0.79f,0.82f};
+        case DC::MatBodyPaint:    return {0.025f,0.055f,0.34f}; // cobalt metallic base; finite flakes/coat are native material lobes
+        case DC::MatVehicleGlass: return {0.018f,0.050f,0.085f};
+        case DC::MatVehiclePlastic:return {0.012f,0.014f,0.018f};
+        case DC::MatTyre:         return {0.012f,0.013f,0.015f};
+        case DC::MatHub:          return {0.42f,0.44f,0.49f};
+        case DC::MatBrake:        return {0.30f,0.075f,0.025f};
         default:                  return {0.8f,0.1f,0.8f};
     }
 }
 
 //------------------------------------------------------------------------------------------------------------------------ scene build
+static uint32_t ClassifyControlVehicleMaterial(V a, V b, V c)
+{
+    const V p=(a+b+c)*(1.0f/3.0f), n=norm(cross(b-a,c-a));
+    const float side=std::fabs(p.y);
+    if (p.z > 0.62f && p.z < 1.31f && p.x > -2.05f && p.x < 1.62f && (side > 0.47f || std::fabs(n.x) > 0.48f))
+        return DC::MatVehicleGlass;
+    if (p.z < 0.16f || (side > 0.98f && p.z < 0.46f) || (p.x > 2.72f && p.z < 0.50f) || (p.x < -2.72f && p.z < 0.57f))
+        return DC::MatVehiclePlastic;
+    return DC::MatBodyPaint;
+}
 static void EmitCar(std::vector<Tri>& tris, V offset)
 {
     using namespace Frontier::Drive::ControlVehicleMesh;
-    auto P=[&](uint32_t i){ return V{kPositions[i*3+0],kPositions[i*3+1],kPositions[i*3+2]}+offset; };
-    for(uint32_t t=0;t<kTriangleCount;++t){
-        Tri T; T.a=P(kTriangles[t*3+0]); T.b=P(kTriangles[t*3+1]); T.c=P(kTriangles[t*3+2]);
-        T.n=norm(cross(T.b-T.a,T.c-T.a)); T.mat=DC::MatBodyPaint; tris.push_back(T);
+    auto Raw=[&](uint32_t i){ return V{kPositions[i*3+0],kPositions[i*3+1],kPositions[i*3+2]}; };
+    for(uint32_t t=0;t<kTriangleCount;++t){ V a=Raw(kTriangles[t*3+0]),b=Raw(kTriangles[t*3+1]),c=Raw(kTriangles[t*3+2]);
+        Tri T; T.a=a+offset; T.b=b+offset; T.c=c+offset; T.n=norm(cross(T.b-T.a,T.c-T.a));
+        T.mat=ClassifyControlVehicleMaterial(a,b,c); tris.push_back(T);
     }
 }
 static void EmitWheel(std::vector<Tri>& tris, V centre, float R, float hw, uint32_t seg)

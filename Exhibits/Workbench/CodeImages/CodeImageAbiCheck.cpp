@@ -9,19 +9,54 @@ namespace
 {
 
 int PanelCount = 0;
+int SceneMutationCount = 0;
+int DiagnosticCount = 0;
+bool HostRecordInvalid = false;
 
 void FRONTIER_CODE_IMAGE_CALL ReceivePanel(const FrontierProjectPanel* Panel, void*)
 {
-    if (Panel != nullptr && Panel->StructureSize >= sizeof(FrontierProjectPanel) &&
-        Panel->StableName != nullptr && Panel->DisplayName != nullptr)
+    if (Panel == nullptr || Panel->StructureSize < sizeof(FrontierProjectPanel) ||
+        Panel->StableName == nullptr || Panel->DisplayName == nullptr)
     {
-        ++PanelCount;
-        std::printf("  received panel: %s (%s)\n", Panel->DisplayName, Panel->StableName);
+        HostRecordInvalid = true;
+        return;
     }
+    ++PanelCount;
+    std::printf("  received panel: %s (%s)\n", Panel->DisplayName, Panel->StableName);
 }
 
-bool CheckImage(const char* Path, bool RequiresPanel)
+void FRONTIER_CODE_IMAGE_CALL ReceiveSceneMutation(const FrontierProjectSceneMutation* Mutation, void*)
 {
+    if (Mutation == nullptr || Mutation->StructureSize < sizeof(FrontierProjectSceneMutation) ||
+        Mutation->MutationNumber != 1u || Mutation->SubjectName == nullptr ||
+        Mutation->Transform[0] != 1.0f || Mutation->Transform[5] != 1.0f ||
+        Mutation->Transform[10] != 1.0f || Mutation->Transform[15] != 1.0f)
+    {
+        HostRecordInvalid = true;
+        return;
+    }
+    ++SceneMutationCount;
+    std::printf("  received scene subject: %s\n", Mutation->SubjectName);
+}
+
+void FRONTIER_CODE_IMAGE_CALL ReceiveDiagnostic(const FrontierProjectDiagnostic* Diagnostic, void*)
+{
+    if (Diagnostic == nullptr || Diagnostic->StructureSize < sizeof(FrontierProjectDiagnostic) ||
+        Diagnostic->SubjectName == nullptr || Diagnostic->Explanation == nullptr)
+    {
+        HostRecordInvalid = true;
+        return;
+    }
+    ++DiagnosticCount;
+    std::printf("  received diagnostic: %s\n", Diagnostic->SubjectName);
+}
+
+bool CheckImage(const char* Path, int ExpectedPanels, int ExpectedMutations, int ExpectedDiagnostics)
+{
+    PanelCount = 0;
+    SceneMutationCount = 0;
+    DiagnosticCount = 0;
+    HostRecordInvalid = false;
     void* Image = dlopen(Path, RTLD_NOW | RTLD_LOCAL);
     if (Image == nullptr)
     {
@@ -65,7 +100,9 @@ bool CheckImage(const char* Path, bool RequiresPanel)
     FrontierProjectHostInterchange Host{};
     Host.StructureSize = sizeof(Host);
     Host.InputReading = &Input;
+    Host.ReceiveSceneMutation = &ReceiveSceneMutation;
     Host.ReceivePanel = &ReceivePanel;
+    Host.ReceiveDiagnostic = &ReceiveDiagnostic;
     FrontierProjectLaunch Launch{};
     Launch.StructureSize = sizeof(Launch);
     Launch.ProjectName = "AbiContractCheck";
@@ -96,9 +133,12 @@ bool CheckImage(const char* Path, bool RequiresPanel)
     }
     Interchange.RetireProject(ProjectRecord);
 
-    if (RequiresPanel != (PanelCount != 0))
+    if (HostRecordInvalid || PanelCount != ExpectedPanels || SceneMutationCount != ExpectedMutations ||
+        DiagnosticCount != ExpectedDiagnostics)
     {
-        std::fprintf(stderr, "[ABI] panel callback expectation failed for %s\n", Path);
+        std::fprintf(stderr, "[ABI] host callback expectation failed for %s (panels %d/%d, subjects %d/%d, diagnostics %d/%d)\n",
+                     Path, PanelCount, ExpectedPanels, SceneMutationCount, ExpectedMutations,
+                     DiagnosticCount, ExpectedDiagnostics);
         dlclose(Image);
         return false;
     }
@@ -113,9 +153,10 @@ bool CheckImage(const char* Path, bool RequiresPanel)
 
 int main()
 {
-    bool Passed = CheckImage("./ProjectZero.so", false);
-    PanelCount = 0;
-    Passed = CheckImage("./ProjectDrive.so", true) && Passed;
+    bool Passed = CheckImage("./ProjectZero.so", 0, 0, 0);
+    // Project-Drive declares five granular host-owned panels, the vehicle/course outliner subjects, and its
+    // C-layout diagnostic. This verifies the expanded declarations without passing any ImGui/Vulkan objects.
+    Passed = CheckImage("./ProjectDrive.so", 5, 9, 1) && Passed;
     std::printf("[ABI] %s\n", Passed ? "all code-image lifecycle checks passed" : "code-image lifecycle check failed");
     return Passed ? 0 : 1;
 }

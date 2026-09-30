@@ -6,14 +6,14 @@
 //    This is the exact export-once pattern ShowcaseStructure uses; only the contents differ.
 //
 //    INSTANCE-ORDER CONTRACT (the decode makes one instance per node×primitive, in span-append order):
-//        span 0  "Vehicle body"  — 1 material  -> instance 0      (dynamic; VehicleInstanceSequence body)
-//        span 1  "Wheel FL"      — 1 material  -> instance 1      (dynamic; wheel 0)
-//        span 2  "Wheel FR"      — 1 material  -> instance 2      (dynamic; wheel 1)
-//        span 3  "Wheel RL"      — 1 material  -> instance 3      (dynamic; wheel 2)
-//        span 4  "Wheel RR"      — 1 material  -> instance 4      (dynamic; wheel 3)
-//        span 5  "Course"        — 6 materials -> instances 5..10 (static)
-//    That is exactly what VehicleInstanceConfiguration defaults to (BodyInstance 0, FirstWheel 1, WheelCount 4), so
-//    the physics writes World rows into the right instances without either side inspecting the other.
+//        span 0  "Vehicle body"  — paint + glass + plastic -> instance 0 (dynamic; VehicleInstanceSequence body)
+//        span 1  "Wheel FL"      — rubber + hub + brake -> instance 1 (dynamic; wheel 0)
+//        span 2  "Wheel FR"      — rubber + hub + brake -> instance 2 (dynamic; wheel 1)
+//        span 3  "Wheel RL"      — rubber + hub + brake -> instance 3 (dynamic; wheel 2)
+//        span 4  "Wheel RR"      — rubber + hub + brake -> instance 4 (dynamic; wheel 3)
+//        span 5  "Course"        — 6 materials -> static instances
+//    SceneCodec preserves these material partitions inside their spans; VehicleInstanceSequence still addresses the
+//    body and four wheel spans by the same stable instance ordinal, not by a per-material instance count.
 //
 //    Object-local origins (so the live World = T(pose)·R(pose) places each part correctly, no rest subtraction):
 //        • body  — ControlVehicleMesh shifted down by the geometry's CoM height, so local origin = centre of mass.
@@ -36,7 +36,7 @@ namespace Frontier {
 namespace Drive {
 
 // Bump whenever Construct() changes what the level contains, so an older DriveCourse.gltf is regenerated.
-inline constexpr uint32_t kDriveSceneRevision = 1u;
+inline constexpr uint32_t kDriveSceneRevision = 2u;
 
 // True when the file at Path was written by this revision (cheap header scan). Missing/older ⇒ false ⇒ re-export.
 [[nodiscard]] bool DriveSceneMatchesRevision(const std::string& Path) noexcept;
@@ -44,8 +44,8 @@ inline constexpr uint32_t kDriveSceneRevision = 1u;
 class DriveSceneAuthor
 {
 public:
-    // Fills the triangle soup: authors the 9 materials, then appends body, four wheels, and the course (in that
-    //    span order — the instance-order contract above).
+    // Fills the triangle soup: authors the 12-material course / ControlVehicle palette, then appends body, four
+    //    wheels, and the course (in that span order — the instance-order contract above).
     void Construct() noexcept;
 
     // Writes DriveCourse.gltf at Path (embedded buffer, smooth normals, texcoords, spans). Error gets the message.

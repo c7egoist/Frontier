@@ -1,32 +1,29 @@
-# Project-Drive — CPU scene evidence
+# Project-Drive evidence gallery
 
-This gallery contains durable visual evidence for the Project-Drive scene. The primary proof is a dependency-free C++
-CPU mirror of the same course and ControlVehicle geometry the windowed application loads; it needs no GPU, window, or
-external package. Its source and runner are in [`Exhibits/Workbench/Drive/`](../../Workbench/Drive/).
+All Project-Drive proof material lives in this one central gallery directory. The suite is rerun by:
 
-| File | What it shows |
-|---|---|
-| `ProjectDriveOpening_CPU_Mirror.png` | The current opening camera: checker pad, grey ramp, yellow speed bump, orange cones, and the real ControlVehicle under sun, sky, surfel GI, and flake clearcoat. |
-| `ProjectDriveBodyFlakes_CPU_Mirror.png` | Three-quarter front close-up proving the clearcoat and sparse metallic flakes on the body. |
-| `Provenance.json` | Portable Release and Debug compile/run records plus SHA-256 hashes for the CPU proof sources and its two generated PNGs. Explicitly a CPU mirror, not a native Vulkan/Slang/ImGui capture. |
-| `../ProjectDriveCpuReference/DriveCourseSurfelGi_CPU_Mirror.png` | The freshly rebuilt Project-Drive headless `SurfelReference` render at 800×450. |
-| `DriveScenePreview.png` | The earlier CPU raster preview of the Tractrix course geometry. |
-| `BoxCar.png` | The SolidArc render of the BoxCar chassis and four wheels, with the required body-to-tyre clearance. |
-
-## What the current CPU proof verifies
-
-- The scene assembles as 5,640 triangles: course 2,092, ControlVehicle body 2,780, and wheels 768.
-- The body, course, and four wheels are present; every rendered pixel is finite; and the scene covers a meaningful part
-  of the camera frame.
-- Direct sun, sky, world-space surfel indirect light, and the body flake clearcoat are all exercised.
-
-## Regenerate
-
-From the repository root:
-
-```python
+```bash
 python3 Exhibits/Workbench/Drive/DriveSceneProof.py
 ```
 
-The runner compiles the proof with C++20 in Release and Debug using `-Wall -Wextra -Werror`, runs both self-gating
-renders, emits the flake close-up, and refreshes `Provenance.json`. A failed gate returns a non-zero exit.
+## Evidence map
+
+| Artefact | What it proves | Execution boundary |
+|---|---|---|
+| `ProjectDriveAutomotiveMaterials_CPU_Reference.png` | ControlVehicle close view with dense cobalt finite flakes over every painted panel, a visible separate clearcoat response, and distinct dark glazing / plastic / rubber / alloy treatment. | CPU Surfel-GI reference; **not** a native Vulkan/Slang capture. |
+| `ProjectDriveSurfelGI_CPU_Reference.png` | The complete car and course through the CPU Surfel-GI branch. | CPU reference; **not** native Frontier GPU output. |
+| `ProjectDriveReSTIR_CPU_Reference.png` | The complete car and course through the finite-sun-candidate CPU ReSTIR-DI reservoir branch. | CPU mirror; **not** the native Vulkan/Slang ReSTIR dispatch. |
+| `ProjectDriveXPBDTyreDeformation_CPU_Reference.png` | Actual settled `XPBDSoftTyre` nodes (5 rings × 64 segments), flattened multi-node contact patch, resolved load and explicit proof gate. | CPU reference; **not** ImGui/Vulkan output. |
+| `ProjectDrivePhysicsMotion_CPU_Reference.png` | Exact 12-second `DriveTelemetry` chassis trajectory, ramp launch/airborne sample and speed trace. | CPU reference based on the real `VehicleSolver` telemetry. |
+| `ProjectDriveVehicleEditor_CPU_Reference.png` | Project-declared vehicle outliner plus an inspector-state sheet for body/glass/plastic, XPBD tyre settings, live vehicle telemetry and reconfigure actions. | CPU state-sheet reference derived from `ProjectDriveInterchange.cpp`, `VehicleInspectorSequence.h` and telemetry; **not** an ImGui capture. |
+| `ProjectDrivePhysicsTelemetry_CPU_Reference.csv` | Raw 60 Hz vehicle telemetry from the 240 Hz fixed-step run. | CPU `VehicleSolver` reference. |
+| `ProjectDrivePhysicsRun_CPU_Reference.txt` | Human-readable run summary (peak speed, airborne duration, final travel). | CPU `VehicleSolver` reference. |
+| `ProjectDrivePhysicsTiming_CPU_Reference.txt` | Fixed-step / real-time-factor timing record. | CPU `VehicleSolver` reference. |
+| `Provenance.json` | Commands, SHA-256 input/output ledger and native-vs-reference boundary for every artefact. | Metadata. |
+
+## Truthfulness rule
+
+The native Frontier/Vulkan/Slang/ImGui executable is not available in this sandbox. The suite therefore labels every
+output `CPU_Reference` and `Provenance.json` names the precise CPU algorithm. These files show the actual shared
+course, extracted `ControlVehicleMesh`, `XPBDSoftTyre` and `VehicleSolver` code paths where applicable, but never
+represent a CPU mirror or state sheet as a native GPU/editor capture.

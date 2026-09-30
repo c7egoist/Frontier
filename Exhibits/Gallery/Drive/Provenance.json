@@ -1,79 +1,205 @@
 {
-  "proof": "Project-Drive scene CPU mirror (course + ControlVehicle + wheels, sun/sky, surfel GI, flake clearcoat)",
-  "execution": "CPU mirror \u2014 not a native Frontier Vulkan, Slang, or ImGui capture.",
-  "gpuExecution": false,
-  "windowsExecution": false,
-  "modes": [
+  "proof": "Project-Drive automotive materials, Surfel GI, ReSTIR-DI mirror, XPBD tyre deformation, vehicle movement and editor state suite.",
+  "executionBoundary": {
+    "nativeFrontierVulkanSlangImGuiCapture": false,
+    "description": "All PNGs are headless CPU references. The Surfel image uses the suite's CPU surfel field. The ReSTIR image is a CPU finite-sun-candidate reservoir mirror, not the native Vulkan/Slang ReSTIR dispatch. The editor sheet is a CPU state reference derived from Project-Drive panel declarations, VehicleInspectorSequence and actual DriveTelemetry, not an ImGui capture."
+  },
+  "checks": {
+    "automotiveMaterials": "Dense finite flakes and separate clearcoat are applied only to MatBodyPaint; glass, plastic, rubber, hub and brake have distinct material IDs.",
+    "xpbd": "XPBD proof gates 5 rings x 64 segments, multi-node contact and positive resolved vertical reaction.",
+    "physics": "DriveTelemetry runs the real VehicleSolver, XPBDSoftTyre, Pacejka drivetrain, aero and shared DriveCourse heightfield at 240 Hz for 12 seconds.",
+    "renderModes": "Separate car images were rendered through the CPU Surfel-GI and CPU ReSTIR-DI-reservoir reference branches."
+  },
+  "commands": [
     {
-      "mode": "Release",
-      "compile": {
-        "command": [
-          "g++",
-          "-std=c++20",
-          "-Wall",
-          "-Wextra",
-          "-Werror",
-          "-O2",
-          "-pthread",
-          "Exhibits/Workbench/Drive/DriveSceneProof.cpp",
-          "-o",
-          "Exhibits/Gallery/Drive/.DriveSceneProof-Release"
-        ],
-        "exit": 0,
-        "output": ""
-      },
-      "render": {
+      "build": "release",
+      "compile": "passed"
+    },
+    {
+      "material_closeup": {
         "command": [
           "Exhibits/Gallery/Drive/.DriveSceneProof-Release",
           "--out",
           "Exhibits/Gallery/Drive",
           "--name",
-          "ProjectDriveOpening_CPU_Mirror"
+          "ProjectDriveAutomotiveMaterials_CPU_Reference",
+          "--render-mode",
+          "surfel",
+          "--frames",
+          "24",
+          "--w",
+          "960",
+          "--h",
+          "540",
+          "--eye",
+          "-3.2",
+          "-3.0",
+          "1.4",
+          "--look",
+          "0.2",
+          "0.0",
+          "0.45",
+          "--fov",
+          "42.0"
         ],
         "exit": 0,
-        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 4 ms | surfel-gi 1190 ms | shade 274 ms | total 1468 ms\n  7 checks passed -> Exhibits/Gallery/Drive/ProjectDriveOpening_CPU_Mirror.png\n"
+        "output": "DriveSceneProof [surfel CPU reference]: 8584 tris (course 2092, body 2780, wheels 3712), 1677 surfels, 960x540, 24 GI frames\n  bvh 4 ms | surfel-gi 571 ms | shade 382 ms | total 957 ms\n  8 checks passed -> Exhibits/Gallery/Drive/ProjectDriveAutomotiveMaterials_CPU_Reference.png\n"
       }
     },
     {
-      "mode": "Debug",
-      "compile": {
+      "surfel_gi": {
         "command": [
-          "g++",
-          "-std=c++20",
-          "-Wall",
-          "-Wextra",
-          "-Werror",
-          "-O0",
-          "-g",
-          "-pthread",
-          "Exhibits/Workbench/Drive/DriveSceneProof.cpp",
-          "-o",
-          "Exhibits/Gallery/Drive/.DriveSceneProof-Debug"
+          "Exhibits/Gallery/Drive/.DriveSceneProof-Release",
+          "--out",
+          "Exhibits/Gallery/Drive",
+          "--name",
+          "ProjectDriveSurfelGI_CPU_Reference",
+          "--render-mode",
+          "surfel",
+          "--frames",
+          "28",
+          "--w",
+          "960",
+          "--h",
+          "540",
+          "--eye",
+          "-5.3",
+          "-4.6",
+          "2.6",
+          "--look",
+          "0.2",
+          "0.0",
+          "0.48",
+          "--fov",
+          "46.0"
         ],
         "exit": 0,
-        "output": ""
-      },
-      "render": {
+        "output": "DriveSceneProof [surfel CPU reference]: 8584 tris (course 2092, body 2780, wheels 3712), 8606 surfels, 960x540, 28 GI frames\n  bvh 4 ms | surfel-gi 766 ms | shade 313 ms | total 1083 ms\n  8 checks passed -> Exhibits/Gallery/Drive/ProjectDriveSurfelGI_CPU_Reference.png\n"
+      }
+    },
+    {
+      "restir_di": {
+        "command": [
+          "Exhibits/Gallery/Drive/.DriveSceneProof-Release",
+          "--out",
+          "Exhibits/Gallery/Drive",
+          "--name",
+          "ProjectDriveReSTIR_CPU_Reference",
+          "--render-mode",
+          "restir",
+          "--frames",
+          "1",
+          "--w",
+          "960",
+          "--h",
+          "540",
+          "--eye",
+          "-5.3",
+          "-4.6",
+          "2.6",
+          "--look",
+          "0.2",
+          "0.0",
+          "0.48",
+          "--fov",
+          "46.0"
+        ],
+        "exit": 0,
+        "output": "DriveSceneProof [restir CPU reference]: 8584 tris (course 2092, body 2780, wheels 3712), 0 surfels, 960x540, 0 GI frames\n  bvh 4 ms | surfel-gi 284 ms | shade 337 ms | total 625 ms\n  8 checks passed -> Exhibits/Gallery/Drive/ProjectDriveReSTIR_CPU_Reference.png\n"
+      }
+    },
+    {
+      "build": "debug",
+      "compile": "passed",
+      "smoke": {
         "command": [
           "Exhibits/Gallery/Drive/.DriveSceneProof-Debug",
           "--out",
           "Exhibits/Gallery/Drive",
           "--name",
-          "ProjectDriveOpening_CPU_Mirror"
+          ".ProjectDriveDebugSmoke",
+          "--render-mode",
+          "surfel",
+          "--frames",
+          "4",
+          "--w",
+          "960",
+          "--h",
+          "540",
+          "--eye",
+          "-5.3",
+          "-4.6",
+          "2.6",
+          "--look",
+          "0.2",
+          "0.0",
+          "0.48",
+          "--fov",
+          "46.0"
         ],
         "exit": 0,
-        "output": "DriveSceneProof: 5640 tris (course 2092, body 2780, wheels 768), 14209 surfels, 960x540, 28 GI frames\n  bvh 63 ms | surfel-gi 7360 ms | shade 2328 ms | total 9750 ms\n  7 checks passed -> Exhibits/Gallery/Drive/ProjectDriveOpening_CPU_Mirror.png\n"
+        "output": "DriveSceneProof [surfel CPU reference]: 8584 tris (course 2092, body 2780, wheels 3712), 5093 surfels, 960x540, 4 GI frames\n  bvh 49 ms | surfel-gi 1856 ms | shade 2069 ms | total 3975 ms\n  8 checks passed -> Exhibits/Gallery/Drive/.ProjectDriveDebugSmoke.png\n"
+      }
+    },
+    {
+      "xpbd_tyre": {
+        "command": [
+          "Exhibits/Gallery/Drive/.XPBDTyreProof",
+          "Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
+        ],
+        "exit": 0,
+        "output": "XPBDTyreProof: 320 nodes, 39 contact nodes, Fz 19357.4 N -> Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png\n"
+      }
+    },
+    {
+      "vehicle_physics": {
+        "command": [
+          "Exhibits/Gallery/Drive/.DriveTelemetry",
+          "Exhibits/Gallery/Drive/.physics"
+        ],
+        "exit": 0,
+        "output": "Project-Drive \u2014 headless physics reference\n  Vehicle .......... real ControlVehicle (socket geometry, XPBD soft tyres, Pacejka drivetrain, aero ON)\n  Course ........... checker pad + ramp (6.0 m run, 1.35 m crest) + 3 speed bumps + 8 cones\n  Sim .............. 12.0 s @ 240 Hz (2880 steps), recorded at 60 Hz\n  Peak speed ....... 34.13 m/s (122.9 km/h)\n  Takeoff speed .... 12.60 m/s (ramp launch)\n  Airborne ......... 0.91 s\n  Max susp. travel . 0.371 m\n  Min chassis up ... 0.939 (1.0 = level; dips while cornering / airborne)\n  Final X .......... 173.9 m\n  Physics .......... 975.07 us/step, 4.3x real-time\n  Wrote ............ telemetry.csv, timing.log, run.log in Exhibits/Gallery/Drive/.physics\n"
+      }
+    },
+    {
+      "physics_sheets": {
+        "command": [
+          "/usr/bin/python3",
+          "Exhibits/Workbench/Drive/DriveEvidenceSheets.py",
+          "Exhibits/Gallery/Drive/.physics/telemetry.csv"
+        ],
+        "exit": 0,
+        "output": "Rendered CPU-reference motion and editor sheets.\n"
       }
     }
   ],
   "sha256": {
-    "Exhibits/Workbench/Drive/DriveSceneProof.cpp": "b69030509bcc9329c90421f7cab1b04fd5503155396d8939f5d9f3b08db85efd",
-    "Exhibits/Workbench/Drive/PngWriteCodec.h": "c626ad5fc91143d3b7f53fcce6301a706a9bc4167a61d12d099fd0779d16263a",
-    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/DriveCourse.h": "92776f00a028b1078b9eac0e7dd6e59e89c0ff38633f1c2ed216674d50186e1c",
-    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/ControlVehicleMesh.inl": "ddb759aed9ad727883d0021d5390528ed3bd509aaadb7b697704d65a017301ab"
+    "Exhibits/Workbench/Drive/DriveSceneProof.cpp": "b20403a0de8c8a2954f6d3f3f684b03cde46781c8f90905da5306c10936d2f73",
+    "Exhibits/Workbench/Drive/XPBDTyreProof.cpp": "3b892210e45afcf1ce65ca716db22a9b7fcc43c31c10487c9b15de9944dd1de3",
+    "Exhibits/Workbench/Drive/DriveEvidenceSheets.py": "387f4a1d6c50d58ee223b95c6c4e10c18a9d8d84ebf7221afa5dff41460c3a2f",
+    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/DriveCourse.h": "e3378deb1a8c45907af939a6aaa2a6d0a3d6b1002da3098df50184f2971fcab9",
+    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/ControlVehicleMesh.inl": "ddb759aed9ad727883d0021d5390528ed3bd509aaadb7b697704d65a017301ab",
+    "VehiclePhysics/Overlay/Engine/PhysicalDynamics/Vehicle/XPBDSoftTyre.cpp": "3c88ad4c223bbfe108990354a5b96de71e4c2313691efa8ace192c187c94b9fe",
+    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/DriveTelemetry.cpp": "de9a1060ecc360b53d82a33b77c919f6538c5f431756c91e1e22b72d8eff1a8d",
+    "VehiclePhysics/Overlay/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp": "07c40b73d6a95e54669f9ec364bc98a703139b3b20fd90139002bc3be7407b25",
+    "VehiclePhysics/Overlay/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp": "20877ed6860b3cad806fcb992996bbdb4df47df46e918cced17bb9c76b2054aa",
+    "VehiclePhysics/Overlay/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp": "5892828fddbe4148409a3a7ef7d52829f37d5b0b983aef427fcbc737264d5e0b",
+    "VehiclePhysics/Overlay/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp": "eb267d4913c987adb789b86173db4f65365677776f16c2b6f8a27b939c535773",
+    "VehiclePhysics/Overlay/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp": "611282b76022c39d7dbfb9ca6177107f41fb9f563dddb10148e7b5616283b102",
+    "VehiclePhysics/Overlay/Engine/PhysicalDynamics/Vehicle/Drivetrain.cpp": "2c8b4fccf03aa7a7c0dfb0439a80c8cdccdb57252343b61f89bba39748283446",
+    "FlattenedEngine/Projects/Project-Drive/Source/ProjectDriveInterchange.cpp": "2158ccfb9eff8e25454d9bf70be55779c26155d6fed2422f2dbc0303207a5c17",
+    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/DriveSceneAuthor.cpp": "5f0abc354d55a188f6ca5a150212bdea8e1476a12eae4f5951c531f2d7f05e1d",
+    "VehiclePhysics/Overlay/Projects/Project-Drive/Source/VehicleInspectorSequence.h": "6ba012eb5def392e774ff6433c3373bcebd524a3a21aa2218a3420bf11ea1adf"
   },
   "outputs": {
-    "Exhibits/Gallery/Drive/ProjectDriveOpening_CPU_Mirror.png": "659311bebc4231d8bbd82e63b0e136d37ebc18c35efe832af076c1b827cc1973",
-    "Exhibits/Gallery/Drive/ProjectDriveBodyFlakes_CPU_Mirror.png": "077048b43ee9c0018ab258f8b2476f4b8b98cb969d70ef467dd3a1ee7a680d80"
+    "Exhibits/Gallery/Drive/ProjectDriveAutomotiveMaterials_CPU_Reference.png": "3a10e6533f59c5694471460fc03a43f8d0819e240465988e1c73d0fcd6ea2baf",
+    "Exhibits/Gallery/Drive/ProjectDriveSurfelGI_CPU_Reference.png": "1458a7d9679d657725a5fa580ba406ac251276d8cff66b4ad871180528fd5aca",
+    "Exhibits/Gallery/Drive/ProjectDriveReSTIR_CPU_Reference.png": "3ca884ffb38267748c22d6ce6916c15787cf8be266df1eb72ddfc1b5d55d646f",
+    "Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png": "58f0bf38a563a12a82bb4c58dd1714faf81b16e03ff6965f0300a046c8cef760",
+    "Exhibits/Gallery/Drive/ProjectDrivePhysicsMotion_CPU_Reference.png": "1411705c6a7a5209dd5ad0a917be4f4b58e4311cbfab4073295faf55f7de9d03",
+    "Exhibits/Gallery/Drive/ProjectDriveVehicleEditor_CPU_Reference.png": "ee4f8ef7715e50b985ef86447eef76954765901d98dfb304d76a8323c7ae9093",
+    "Exhibits/Gallery/Drive/ProjectDrivePhysicsTelemetry_CPU_Reference.csv": "be534e50c484c896329a2ef3caff4162d0a6381c70af10ce3043b7ea1cfe737d",
+    "Exhibits/Gallery/Drive/ProjectDrivePhysicsRun_CPU_Reference.txt": "a94342be9ee242b57b1c0e9b6dca5ac4ed7df92da6f6a643c205d8cf3fe61d00",
+    "Exhibits/Gallery/Drive/ProjectDrivePhysicsTiming_CPU_Reference.txt": "2d92af9afbd246aae14997d99a158e734de0e05ff6266648d01ce440d1cf0f4b"
   }
 }
