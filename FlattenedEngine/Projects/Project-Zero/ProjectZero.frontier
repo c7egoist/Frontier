@@ -7,7 +7,7 @@
 ProjectName             = "ProjectZero"
 ProjectFormatNumber     = 1
 ContentLocation         = "Content"
-OpeningScene            = "Content/Scenes/Showcase.gltf"
+OpeningScene            = "Content/Scenes/Materials.gltf"
 CodeImage               = "Build/ProjectZero.dll"
 CodeInterchangeNumber   = 2
 InterfaceFingerprint    = 0xdd4363893c94c8f0

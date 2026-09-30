@@ -161,7 +161,7 @@ int Frontier::RunFrontierRuntime(
     //    on instance ordinals without either having to inspect the other.
     constexpr uint32_t kDropBodyCount = 12u;
 
-    // Showcase is the default level (the Cornell box stays one --scene path away, untouched as the reference).
+    // Project-Zero opens the material library by default; specialised levels remain opt-in through --scene.
     std::string ScenePath  = ResolvedSpecification.OpeningSceneLocation.string();
     float       SceneScale = 1.0f;
     bool        WaterSnapshot = false; // opt-in load-time Ripple mesh, not live GPU simulation
@@ -206,27 +206,11 @@ int Frontier::RunFrontierRuntime(
                          "Bootstrap", (ProjectName + " windowed Frontier renderer starting.").c_str());
 
     //──────────────────────────────────────────────────────────────────────────
-    // Scene — glTF level made resident (R2). The Cornell box is exported once from the analytical solver so the
-    //    reference image goes through the same import path as any other level.
+    // Scene — glTF level made resident (R2). Built-in levels are exported once and imported through the same path.
     //──────────────────────────────────────────────────────────────────────────
-    Frontier::HostRuntime::RayTracingSolver Scene;   // CPU reference geometry (Cornell exporter + ImGui scene section)
+    Frontier::HostRuntime::RayTracingSolver Scene;   // CPU reference geometry for the editor scene section
     {
         std::error_code FsError;
-        const bool IsCornell = ScenePath.find("CornellBox.gltf") != std::string::npos;
-        if (IsCornell && !std::filesystem::exists(ScenePath, FsError))
-        {
-            std::filesystem::create_directories(std::filesystem::path(ScenePath).parent_path(), FsError);
-            std::string Error;
-            Frontier::SceneEncodeConfiguration CornellNaming{};
-            CornellNaming.Name  = "CornellBox";
-            CornellNaming.Spans = &Scene.QuerySpans();
-            if (Frontier::SceneCodec::Encode(ScenePath, Frontier::ReSTIRIntegrator::BuildTriangleIndex(Scene),
-                                             Frontier::ReSTIRIntegrator::BuildMaterialDescriptors(Scene), &Error,
-                                             CornellNaming))
-                std::cerr << "[Scene] Exported the Cornell box to " << ScenePath << "\n";
-            else
-                std::cerr << "[Scene] Cornell export failed: " << Error << "\n";
-        }
         const bool IsOutdoor = ScenePath.find("Outdoor.gltf") != std::string::npos;
         if (IsOutdoor && !std::filesystem::exists(ScenePath, FsError))
         {
@@ -235,8 +219,7 @@ int Frontier::RunFrontierRuntime(
             Open.ConstructOutdoorScene();
             std::string Error;
             // The scene name rides the encode configuration (the file stem becomes the level name at import,
-            //    and the camera branch below keys off that) — without it the outdoor scene would load with the
-            //    Cornell camera, indoors-facing.
+            //    and the camera branch below keys off that).
             Frontier::SceneEncodeConfiguration OutdoorNaming{};
             OutdoorNaming.Name  = "Outdoor";
             OutdoorNaming.Spans = &Open.QuerySpans();
@@ -250,7 +233,7 @@ int Frontier::RunFrontierRuntime(
 
         // The showcase is authored as OpenPBR slabs (ShowcaseStructure), NOT through the analytical solver. The old
         //    path went through ReSTIRIntegrator::BuildMaterialDescriptors, which pins SpecularWeight = 0 to protect the
-        //    Cornell reference — so every showcase object arrived Lambertian, and the level carried no emissive
+        //    old neutral reference — so every showcase object arrived Lambertian, and the level carried no emissive
         //    triangle at all ("0 luminaires"), which is what left it with neither shadows nor indirect light.
         //
         //    kShowcaseRevision is stamped into the file name so an existing Showcase.gltf from the previous structure
@@ -291,8 +274,7 @@ int Frontier::RunFrontierRuntime(
             if (Library.Export(ScenePath, &Error)) std::cerr << "[Scene] Exported the material library level to " << ScenePath << "\n";
             else                                   std::cerr << "[Scene] Material library export failed: " << Error << "\n";
         }
-        // P0 spatial-interface level. Same export-once-then-import discipline: the Cornell box stays the untouched
-        //    bit-identity reference, and the showroom is a separate file the renderer only ever sees as glTF.
+        // P0 spatial-interface level. Same export-once-then-import discipline: the showroom is a separate file the renderer only ever sees as glTF.
         const bool IsShowroom = ScenePath.find("Showroom.gltf") != std::string::npos || DropScene;
         if (IsShowroom && !std::filesystem::exists(ScenePath, FsError))
         {
@@ -576,7 +558,7 @@ int Frontier::RunFrontierRuntime(
         Camera.AssignSpatialLocation(Frontier::Vector3{ 0.0f, -1.70f, 1.45f });
         Camera.AssignOrientationEuler(0.0f, 0.0f, 0.0f);
     }
-    else if (Level.QueryName() != "CornellBox")
+    else
     {
         // Other levels: start at the centre of the bounds at ~eye height, looking along +Y; flight speed scales with the level.
         const Frontier::Vector3 Lo = Level.QueryBoundsMinimum(), Hi = Level.QueryBoundsMaximum();
@@ -716,7 +698,7 @@ int Frontier::RunFrontierRuntime(
     // D3 — scripted instance motion (--animate), proving the transform path before physics
     //──────────────────────────────────────────────────────────────────────────
     // Off by default: with no flag the instance rows are never rewritten and the renderer behaves exactly as it
-    //    did, which keeps the Cornell box a valid bit-identity reference. D4 replaces the scripted driver with
+    //    did. D4 replaces the scripted driver with
     //    RigidBodySolver poses and the upload below does not change.
     std::vector<Frontier::InstanceRecord> AnimatedInstances = Level.QueryInstances();
 

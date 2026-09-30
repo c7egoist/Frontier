@@ -1,11 +1,10 @@
 //============================================================================================================================================
 //                                                      SHOWROOMSTRUCTURE.H
 //============================================================================================================================================
-// 🧩 Project-Zero's spatial-interface level (`--scene showroom`): the Cornell box widened and furnished, so a 3D
+// 🧩 Project-Zero's spatial-interface level (`--scene showroom`): the showroom widened and furnished, so a 3D
 //    interface panel can be judged against saturated neighbours, a mirror, and real colour bleed.
 //
-//    The original CornellBox.gltf is deliberately left untouched — it is the bit-identity reference for the open GPU
-//    verification, and a second level is cheaper than a disputed baseline. The showroom keeps Cornell's red and green
+//    The showroom keeps the reference room's red and green
 //    side walls (so colour bleed still reads the familiar way) and adds a plinth, a chrome sphere, a matte pillar, a
 //    rough copper stand, a deep-blue floor inlay, an amber strip, and a dimmer rear luminaire for rim separation.
 //
@@ -28,7 +27,7 @@ class ShowroomStructure
 {
 public:
     // Fills the world-space soup. Triangles carry UVs; CornerNormals holds three smooth normals per triangle.
-    //    The emissive quads are appended last, the luminaire convention the Cornell box and shader ball share.
+    //    The emissive quads are appended last, the luminaire convention the room and shader ball share.
     //
     //    DropBodyCount > 0 appends that many spheres above the floor, each with its OWN material so the codec
     //    gives each one its OWN instance — the renderer moves instances, not triangles, so a body that shares a

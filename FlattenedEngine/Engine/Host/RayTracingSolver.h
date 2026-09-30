@@ -36,9 +36,7 @@ public:
     RayTracingSolver() noexcept;
     ~RayTracingSolver() noexcept = default;
 
-    void                    ConstructCornellBoxScene() noexcept;
-
-    // An OPEN scene: ground and horizon with nothing overhead. Where the Cornell box is a closed room,
+    // An OPEN scene: ground and horizon with nothing overhead.
     //    this is the framing complement — most of the default view misses geometry.
     void                    ConstructOutdoorScene() noexcept;
 

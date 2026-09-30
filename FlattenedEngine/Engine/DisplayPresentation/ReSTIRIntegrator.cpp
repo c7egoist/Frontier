@@ -212,7 +212,7 @@ std::vector<MaterialDescriptor> ReSTIRIntegrator::BuildMaterialDescriptors(
         S.BaseColor[0] = Material.AlbedoColor.x; S.BaseColor[1] = Material.AlbedoColor.y; S.BaseColor[2] = Material.AlbedoColor.z;
         S.SpecularRoughness = Material.RoughnessValue;
         S.BaseMetalness     = Material.MetallicValue;
-        S.SpecularWeight    = 0.0f;   // R4b pin (approved): the analytical Cornell box is Lambertian — no dielectric lobe, so R3/R4a images stay the reference
+        S.SpecularWeight    = 0.0f;   // R4b pin (approved): the analytical room is Lambertian — no dielectric lobe, so R3/R4a images stay the reference
         const float E[3] = { Material.EmissiveRadiance.x, Material.EmissiveRadiance.y, Material.EmissiveRadiance.z };
         const float Peak = std::max({ E[0], E[1], E[2], 0.0f });
         if (Peak > 0.0f) { S.EmissionLuminance = Peak; S.EmissionColor[0] = E[0] / Peak; S.EmissionColor[1] = E[1] / Peak; S.EmissionColor[2] = E[2] / Peak; }
