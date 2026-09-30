@@ -48,8 +48,8 @@ Rendered 660×480, 130 frames, 44 spp (raytraced), surfel field converged to ~44
 ### Reproduce
 ```bash
 cd ../CpuMirror
-g++ -O2 -std=c++17 -pthread ModeMatrix.cpp -o modematrix
-./modematrix --scene grid --w 660 --h 480 --frames 130 --rays 8 --direct 48 --spp 44
+g++ -std=c++20 -O2 -pthread ModeMatrix.cpp -o ModeMatrix
+./ModeMatrix --scene grid --w 660 --h 480 --frames 130 --rays 8 --direct 48 --spp 44
 # writes mode_{plainraster,surfelgi,raytraced}.ppm   (--scene cornell for the box)
 ```
 
@@ -89,7 +89,7 @@ fine sparkle. That was three compounding problems, all now fixed:
 
 Reproduce (the committed sheet):
 ```bash
-./modematrix --scene glint --w 560 --h 390 --aa 3 --frames 200 --spp 16
+./ModeMatrix --scene glint --w 560 --h 390 --aa 3 --frames 200 --spp 16
 ```
 
 ## Materials through the multi-slab (layered) path (#29)
@@ -111,5 +111,5 @@ a blend. **Every one of the 15 families still resolves correctly through the sta
 and the small differences are an *improvement* — the layered path conserves energy (the coat no longer double-counts
 with the base). Reproduce:
 ```bash
-./modematrix --scene grid --slabs --w 560 --h 410 --frames 110 --rays 6 --direct 36 --spp 26
+./ModeMatrix --scene grid --slabs --w 560 --h 410 --frames 110 --rays 6 --direct 36 --spp 26
 ```

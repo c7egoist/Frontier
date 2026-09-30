@@ -115,7 +115,7 @@ PATH=/tmp/glslang-build/StandAlone:$PATH bash Tools/Build/CheckShaders.sh   # �
 
 ## 8. What is verified vs. what remains
 
-- ✅ Shaders lower to SPIR-V (`Patches/shader_compile_proof.txt`).
+- ✅ Shaders lower to SPIR-V (`Exhibits/ShaderCompilation/IntegrationShaderCompilationProvenance.txt`).
 - ✅ C++ patch `git apply --check`-clean on `main`.
 - ✅ All three modes + reflection modes proven in `CpuMirror/ModeMatrix.cpp`.
 - ⏳ Host surfel-buffer allocation + grid build + the two dispatches (§4), the `MaterialAux` target (§5),

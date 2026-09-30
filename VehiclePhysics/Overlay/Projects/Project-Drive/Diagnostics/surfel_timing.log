@@ -4,7 +4,7 @@ triangles         5640
 bvh_nodes         2047
 surfels           11639
 gi_frames         24 (rays/surfel 8)
-build_bvh_ms      1.7
-surfel_gi_ms      586.3
-final_shade_ms    143.3
-total_ms          731.3
+build_bvh_ms      1.6
+surfel_gi_ms      596.1
+final_shade_ms    144.3
+total_ms          742.0

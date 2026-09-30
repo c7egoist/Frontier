@@ -24,18 +24,18 @@ requirement, and it is what the CPU mirror proves.
 
 | Path | What |
 |---|---|
-| `CpuMirror/ModeMatrix.cpp` | Runnable CPU mirror. Renders the same scene in all three modes + a polished-metal sphere so reflections (sky vs raytraced) are visible. Self-contained: `g++ -O2 -std=c++17 -pthread`. |
+| `CpuMirror/ModeMatrix.cpp` | Runnable CPU mirror. Renders the same scene in all three modes + a polished-metal sphere so reflections (sky vs raytraced) are visible. Self-contained: `g++ -std=c++20 -O2 -pthread`. |
 | `CpuMirror/RenderModeMatrix.png` | The proof image (plain raster · surfel GI · raytraced). |
 | `Shaders/SurfelIrradianceUpdate.slang` | GPU pass 1 — per-surfel temporal irradiance update (CWBVH rays, running mean, Jacobi). |
 | `Shaders/SurfelGIResolve.slang` | GPU pass 2 — per-pixel resolve (G-buffer → direct + surfel indirect + reflection → tone-map). Also serves the plain-raster mode. |
 | `Patches/RaytraceToggle_Integration.patch` | The C++/kernel edits (Control Centre tile + reflection mode, integrator config, GameExecution decision matrix + surfel logs, kernel feature bits). `git apply`-clean on `main`. |
-| `Patches/shader_compile_proof.txt` | glslang lowering both new shaders + the patched kernel to SPIR-V. |
+| `Exhibits/ShaderCompilation/IntegrationShaderCompilationProvenance.txt` | glslang lowering both new shaders + the patched kernel to SPIR-V. |
 | `PortingGuide.md` | Step-by-step: every edit, the feature-bit map, the dispatch order, and the host-side surfel buffer wiring that finishes the port. |
 
 ## Proof status
 
 - **Shaders lower to SPIR-V** — verified with the repo's own `Tools/Build/CheckShaders.sh` toolchain
-  (glslang built via `Tools/Build/BuildGlslang.sh`). See `Patches/shader_compile_proof.txt`.
+  (glslang built via `Tools/Build/BuildGlslang.sh`). See `Exhibits/ShaderCompilation/IntegrationShaderCompilationProvenance.txt`.
 - **C++ patch applies clean** — `git apply --check` passes on `SultanAladin/Frontier-@main`.
 - **Behaviour proven on CPU** — `CpuMirror/ModeMatrix.cpp` renders all three modes correctly, with
   sky-vs-raytraced reflections and a ~0.00002 frame-to-frame surfel diff (no flicker).
@@ -66,7 +66,7 @@ The only step that genuinely still needs your GPU is the `MaterialImage` storage
 
 ```sh
 cd CpuMirror
-g++ -O2 -std=c++17 -pthread ModeMatrix.cpp -o modematrix
-./modematrix --w 440 --h 440 --frames 300 --rays 10 --direct 96 --spp 48
+g++ -std=c++20 -O2 -pthread ModeMatrix.cpp -o ModeMatrix
+./ModeMatrix --w 440 --h 440 --frames 300 --rays 10 --direct 96 --spp 48
 # writes mode_raytraced.ppm / mode_surfelgi.ppm / mode_plainraster.ppm
 ```

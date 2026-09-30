@@ -1,6 +1,8 @@
 //============================================================================================================================================
-//  SurfelGI.cpp — pure C++ surfel-based global illumination on a Cornell box.
-//
+//                                                               MODEMATRIX.CPP
+//============================================================================================================================================
+// 📦 Dependency-free CPU mirror of plain-raster, surfel-GI, and raytraced material presentation.
+
 //  Architecture (matches the engine you want on GTX-class cards):
 //     1. VISIBILITY PASS  -> a G-buffer (world position, normal, albedo) from PRIMARY visibility. On the GPU this
 //        is your hardware VisibilityRaster; here it is a primary-ray cast that produces the identical G-buffer, so
@@ -21,9 +23,8 @@
 //                           (b) world-space radius scales with view distance so the SCREEN footprint is uniform,
 //                           (c) spawns are budgeted per frame and filled over many frames -> even, gap-free layout.
 //
-//  Build:  g++ -O2 -std=c++17 -pthread SurfelGI.cpp -o surfelgi
-//  Run:    ./surfelgi              (writes .ppm files; convert to png with ImageMagick)
-//============================================================================================================================================
+//  Build:  g++ -std=c++20 -O2 -pthread ModeMatrix.cpp -o ModeMatrix
+//  Run:    ./ModeMatrix             (writes .ppm files; convert to PNG with ImageMagick)
 
 #include <cstdio>
 #include <cstdint>
