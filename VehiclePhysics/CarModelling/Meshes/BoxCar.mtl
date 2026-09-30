@@ -1,0 +1,16 @@
+newmtl plastic-blue
+Kd 0.16 0.36 0.85
+Ks 0.04 0.04 0.04
+Ns 510.25
+d 1
+illum 2
+# frontier AutomotiveFlakePaint  flakes=true
+
+newmtl rubber
+Kd 0.045 0.045 0.05
+Ks 0.04 0.04 0.04
+Ns 6.25
+d 1
+illum 2
+# frontier Rubber_Tyre
+
