@@ -14,7 +14,7 @@ your Frontier checkout to the base commit below, then **copy these files over th
 git clone <Frontier> && cd Frontier-
 git checkout 2fbe5c5            # or fast-forward main to it
 # from the repo root, overlay the full files:
-cp -R /path/to/Slate/FlattenedEngine/{Engine,Projects,Docs} .
+cp -R /path/to/Slate/FlattenedEngine/{Engine,Projects,Docs,CMakeLists.txt} .
 git status                      # review; these are the flattened equivalents of the .patch set
 ```
 
@@ -25,7 +25,7 @@ against that exact commit.
 
 | Area | Files |
 |---|---|
-| Render-mode matrix / RT toggle (RayQuery), feature-bit dispatch, RT icon | `ReSTIRViewport.slang`, `ReSTIRIntegrator.{h,cpp}`, `SwapchainExchange.h`, `ControlCentreHost.{h,cpp}`, `GameExecution.cpp` |
+| Render-mode matrix / RT toggle, GPU Surfel-GI source + build registration | `SurfelIrradianceUpdate.slang`, `SurfelCommit.slang`, `SurfelGIResolve.slang`, `SurfelGIStage.{h,cpp}`, `CMakeLists.txt`, `ToolchainSequence.ps1` |
 | Surface/material resolve + material aux | `SurfaceResolve.slang` |
 | ReSTIR viewport RayQuery integration | `ReSTIRViewport.slang` |
 | Weather fixes (fog horizon continuity + wind translate/shear mode) | `ReSTIRViewport.slang`, `WeatherMedia.slang`, `VolumetricMedia.h`, `WeatherConstantRecord.h`, `WindField.h`, `WeatherInspectorPanel.cpp`, `VectorCodec.{h,cpp}`, `CelestialSequence.cpp` |
