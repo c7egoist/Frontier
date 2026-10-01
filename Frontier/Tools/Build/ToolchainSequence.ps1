@@ -650,6 +650,9 @@ $EngineRelative = @(
     'Engine\ContentInterchange\SceneCodec.cpp'
     'Engine\ContentInterchange\ShaderBallStructure.cpp'
     'Engine\ContentInterchange\ShowcaseStructure.cpp'
+    # ShowcaseStructure::BringGridMesh calls ShaderBallGeometry::LoadResolved — without this TU link.exe
+    #    reports an unresolved external for Frontier.exe.
+    'Engine\ContentInterchange\ShaderBallGeometry.cpp'
     'Engine\ContentInterchange\AssetResolution.cpp'
     'Engine\ContentInterchange\MaterialSwatchStructure.cpp'
     'Engine\ContentInterchange\FbxCodec.cpp'

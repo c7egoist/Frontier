@@ -181,6 +181,9 @@ set(FRONTIER_ENGINE_SOURCES
     Engine/ContentInterchange/SceneCodec.cpp
     Engine/ContentInterchange/ShaderBallStructure.cpp
     Engine/ContentInterchange/ShowcaseStructure.cpp
+    # ShowcaseStructure::BringGridMesh calls ShaderBallGeometry::LoadResolved — without this TU the
+    #    exe link fails with an unresolved external.
+    Engine/ContentInterchange/ShaderBallGeometry.cpp
     Engine/ContentInterchange/AssetResolution.cpp
     Engine/ContentInterchange/MaterialSwatchStructure.cpp
     Engine/ContentInterchange/FbxCodec.cpp
