@@ -55,3 +55,34 @@ as its gate.
 - `References/GeometryWorkspaceAndMaterialProcessingPlan.md` — from `SultanAladin/Slate`. Defines the
   contracts a GPU paint evaluator must satisfy, including the `PaintedTiles` layer source kind.
 - `Plans/Ongoing/ProceduralTyreAndSurfacePainting.md` — the four-phase plan these feed into.
+
+## TreadMeshProof — the Phase 1 gate
+
+The C++ gate for the ported builder, against `Engine/ContentInterchange/Tyre`. Build and run:
+
+```
+g++ -std=c++20 -O2 -w -o _AgentScratch/build/tyre/TreadMeshProof \
+    Exhibits/Workbench/Tyre/TreadMeshProof.cpp \
+    Frontier/Engine/ContentInterchange/Tyre/TyreMeshStructure.cpp
+./_AgentScratch/build/tyre/TreadMeshProof
+```
+
+It sweeps the moulded cross-section on the off-road preset — 285/70 R17, outer radius 415.40 mm — at
+360 × 64 and audits the result.
+
+| Measure              | Result | Expected | Why that number                                        |
+|----------------------|--------|----------|---------------------------------------------------------|
+| positions            | 23 400 | 23 400   | 360 × 65, so the wrap column welded onto column 0        |
+| triangles            | 46 080 | 46 080   | 360 × 64 quads                                           |
+| non-manifold edges   | 0      | 0        | —                                                        |
+| degenerate           | 0      | 0        | —                                                        |
+| duplicate faces      | 0      | 0        | —                                                        |
+| boundary edges       | 720    | 720      | 2 × 360, exactly the two rim openings and nothing else   |
+
+⚠️ The wrap is closed by **welding**, not by taking the ring index modulo the step count. θ = 2π and
+θ = 0 produce cosines differing in the last bits, and the mesh is watertight only if the weld recognises
+them as one point. Index arithmetic would close the seam without testing anything.
+
+The proof carries a negative control for the same reason. Displacing the wrap column by ten weld
+tolerances opens exactly 128 edges — 64 × 2, one per quad on each of the two triangles that used to
+share the seam. A ledger that always answered "clean" would pass the positive control and prove nothing.
