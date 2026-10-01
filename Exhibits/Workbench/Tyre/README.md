@@ -46,3 +46,12 @@ independent triangle soup and relies on separately triangulated polygons happeni
 shared vertices. Closing them needs a shared vertex pool with an explicit index buffer, which is a change
 to how the builder is organised rather than another patch. That belongs in the C++ port, with this audit
 as its gate.
+
+## Related references
+
+- `References/PaintingSurface/` — the surface-painting prototype, vendored from `SultanAladin/Frontier`
+  at `4a77bfd` (`Documentation/Prototypes/PaintingSurface`). No written plan for texture painting exists
+  in either upstream repository; this prototype is the design record.
+- `References/GeometryWorkspaceAndMaterialProcessingPlan.md` — from `SultanAladin/Slate`. Defines the
+  contracts a GPU paint evaluator must satisfy, including the `PaintedTiles` layer source kind.
+- `Plans/Ongoing/ProceduralTyreAndSurfacePainting.md` — the four-phase plan these feed into.
