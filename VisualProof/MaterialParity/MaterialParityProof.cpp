@@ -127,9 +127,9 @@ void AuditShaders() noexcept
 
     struct Pass { const char* Label; const char* Path; bool NeedsResolve; };
     const Pass kPasses[3] = {
-        { "ReSTIR kernel",   "VehiclePhysics/Overlay/Engine/Shaders/ReSTIRViewport.slang",        true },
-        { "Surfel update",   "VehiclePhysics/Overlay/Engine/Shaders/SurfelIrradianceUpdate.slang", true },
-        { "Surfel resolve",  "VehiclePhysics/Overlay/Engine/Shaders/SurfelGIResolve.slang",        true } };
+        { "ReSTIR kernel",   "Frontier/Engine/Shaders/ReSTIRViewport.slang",        true },
+        { "Surfel update",   "Frontier/Engine/Shaders/SurfelIrradianceUpdate.slang", true },
+        { "Surfel resolve",  "Frontier/Engine/Shaders/SurfelGIResolve.slang",        true } };
 
     for (const Pass& P : kPasses)
     {
@@ -161,8 +161,8 @@ void AuditShaders() noexcept
     }
 
     // The two surfel passes must bind the same scene the kernel does, or they cannot decode anything.
-    for (const char* Path : { "VehiclePhysics/Overlay/Engine/Shaders/SurfelIrradianceUpdate.slang",
-                              "VehiclePhysics/Overlay/Engine/Shaders/SurfelGIResolve.slang" })
+    for (const char* Path : { "Frontier/Engine/Shaders/SurfelIrradianceUpdate.slang",
+                              "Frontier/Engine/Shaders/SurfelGIResolve.slang" })
     {
         const std::string Code = StripComments(ReadWhole(Path));
         const auto Has = [&Code](const char* Needle) { return Code.find(Needle) != std::string::npos; };

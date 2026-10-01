@@ -88,7 +88,7 @@ MSVC, the primary toolchain:
 g++, same seven translation units — if one list changes, both must:
 
 ```bash
-F=_AgentScratch/Frontier
+F=Frontier
 g++ -std=c++20 -O2 -w -DFRONTIER_CPU_PORT -pthread \
     -I$F/Engine -I$F -I$F/ExternalPackages/vulkan-headers/include \
     VisualProof/MaterialParity/MaterialParityProof.cpp \

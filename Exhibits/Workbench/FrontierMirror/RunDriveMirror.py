@@ -15,7 +15,7 @@ What this produces, and where each piece comes from:
                 circles it, so the authored Project-Drive materials are shown from every azimuth.
 
 The engine is not vendored into Slate; it is cloned at the revision `EngineCheckout` pins, the
-`VehiclePhysics/Overlay` tree is seated on top of it the way the overlay README says to apply it, and the
+`Frontier/` tree is the engine itself — nothing is seated, overlaid or patched — and the
 gallery provenance records the revision, the commands and the sha256 of every published file.
 """
 from __future__ import annotations
@@ -34,8 +34,7 @@ from DriveTelemetryGraphs import render as render_graphs  # noqa: E402
 
 ROOT = Checkout.ROOT
 SCRATCH = ROOT / "_AgentScratch"
-SEAT = SCRATCH / "DriveSeat"
-OVERLAY = ROOT / "VehiclePhysics/Overlay"
+SEAT = Checkout.ENGINE                   # the engine tree itself; nothing is seated or overlaid any more
 GALLERY = ROOT / "Exhibits/Gallery/Drive"
 MIRROR = ROOT / "Exhibits/Workbench/FrontierMirror/DriveSceneMirror.cpp"
 BUILD = SCRATCH / "build/drive"
@@ -103,28 +102,12 @@ def log(message: str) -> None:
 
 
 def seat_overlay() -> Path:
-    """Clone the pinned engine, then lay VehiclePhysics/Overlay over a private copy of it.
+    """Resolve the engine tree.  Kept as a name because callers import it; it no longer seats or overlays.
 
-    The overlay path-mirrors the engine root, so applying it is how Project-Drive exists at all.  The copy is
-    hard-linked off the pinned checkout and every overlaid file is unlinked before it is written, so the shared
-    checkout the other mirrors build from is never modified.
+    Project-Drive is part of `Frontier/` now — there is no private copy to build, no overlay to lay over it and
+    no hard-link dance to get wrong.  Dependencies are still installed, which is the one documented exception.
     """
-    engine = Checkout.seat()
-    if not SEAT.exists():
-        log(f"seating a private engine copy at {SEAT.relative_to(ROOT)}")
-        Checkout.run(["cp", "-al", str(engine), str(SEAT)], cwd=SCRATCH)
-    overlaid = 0
-    for source in sorted(OVERLAY.rglob("*")):
-        if not source.is_file():
-            continue
-        target = SEAT / source.relative_to(OVERLAY)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if target.exists():
-            target.unlink()                      # break the hard link rather than write through it
-        shutil.copyfile(source, target)
-        overlaid += 1
-    log(f"overlaid {overlaid} VehiclePhysics files onto the checkout")
-    return SEAT
+    return Checkout.seat()
 
 
 def compile_binary(name: str, sources: list[str], includes: list[str]) -> Path:
@@ -239,7 +222,7 @@ def main() -> int:
               "four wheels and twelve authored materials, in the app's own span order.",
         commands=commands, results=results, outputs=outputs)
     provenance["stages"] = {
-        "level": "Projects/Project-Drive/Source/DriveSceneAuthor (VehiclePhysics/Overlay)",
+        "level": "Projects/Project-Drive/Source/DriveSceneAuthor",
         "physics": "Engine/PhysicalDynamics/Vehicle/VehicleSolver — PacejkaDrivetrain, XPBD soft tyres, Aerodynamics",
         "camera": "Projects/Project-Drive/Source/ChaseCameraSolver, the app's own chase camera",
         "sky": "Projects/Project-Zero/Source/CelestialSequence at local hour " + SUN_HOUR +
@@ -249,7 +232,7 @@ def main() -> int:
     provenance["executionBoundary"] = {
         "nativeFrontierVulkanSlangImGuiCapture": False,
         "description": "Every frame is rendered on the CPU by the engine's own translation units, built from the "
-                       "pinned checkout with VehiclePhysics/Overlay applied. No renderer, material model, sky or "
+                       "flattened Frontier/ engine tree. No renderer, material model, sky or "
                        "camera is authored in Slate. This is not a Vulkan swapchain capture; it is the same code "
                        "the GPU path shades from, run headless.",
     }

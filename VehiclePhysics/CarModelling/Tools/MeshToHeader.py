@@ -2,7 +2,7 @@
 """MeshToHeader.py — turn the extracted ControlVehicle body geometry into a C++ include.
 
 Input : VehiclePhysics/CarModelling/ControlVehicle/controlvehicle_mesh.json
-Output: VehiclePhysics/Overlay/Projects/Project-Tractrix/Source/ControlVehicleMesh.inl
+Output: Frontier/Projects/Project-Tractrix/Source/ControlVehicleMesh.inl
 
 The .inl declares, in namespace Frontier::Tractrix::ControlVehicleMesh, two constexpr
 arrays the drive scene bakes into the world-space triangle soup:
@@ -17,7 +17,7 @@ import json, pathlib, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 SRC  = ROOT / "VehiclePhysics/CarModelling/ControlVehicle/controlvehicle_mesh.json"
-DST  = ROOT / "VehiclePhysics/Overlay/Projects/Project-Tractrix/Source/ControlVehicleMesh.inl"
+DST  = ROOT / "Frontier/Projects/Project-Tractrix/Source/ControlVehicleMesh.inl"
 BODY = "ControlVehicle"
 
 def main():

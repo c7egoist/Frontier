@@ -73,11 +73,11 @@ $B --view default --path surfel --turntable 24 --out turntable.gif
 $B --view default --path surfel --cycle --out cycle.gif
 ```
 
-Built from a private engine seat with `VehiclePhysics/Overlay` applied, because the pinned checkout is r6 and the
+Built directly from the flattened `Frontier/` engine tree — no seat, no overlay, no patch step — because the
 grid work is r7:
 
 ```bash
-S=_AgentScratch/ShowcaseSeat
+S=Frontier
 g++ -std=c++20 -O2 -w -DFRONTIER_CPU_PORT -pthread \
     -IExhibits/Workbench/FrontierMirror -I$S/Engine -I$S -I$S/ExternalPackages/vulkan-headers/include \
     Exhibits/Workbench/FrontierMirror/ShowcaseTransportMirror.cpp \

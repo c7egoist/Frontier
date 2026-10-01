@@ -14,7 +14,7 @@
 [CmdletBinding()]
 param(
     [switch] $NoRun,
-    [string] $Engine = "$PSScriptRoot\..\..\_AgentScratch\Frontier"
+    [string] $Engine = "$PSScriptRoot\..\..\Frontier"
 )
 
 $ErrorActionPreference = 'Stop'

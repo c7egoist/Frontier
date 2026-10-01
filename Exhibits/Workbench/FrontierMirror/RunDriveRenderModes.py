@@ -44,7 +44,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import EngineCheckout as Checkout  # noqa: E402
 import RunDriveMirror as Drive  # noqa: E402
-import DriveLevelPatch  # noqa: E402
 
 ROOT = Checkout.ROOT
 SEAT = Drive.SEAT
@@ -180,8 +179,7 @@ def main() -> int:
     parser.add_argument("--reuse", type=int, default=12, help="ReSTIR temporal reuse frames per rendered frame")
     args = parser.parse_args()
 
-    Drive.seat_overlay()
-    DriveLevelPatch.main(str(SEAT))
+    Drive.seat_overlay()                 # resolves Frontier/; the drive level is built into the tree
     stage = stage_denoise()
 
     GALLERY.mkdir(parents=True, exist_ok=True)

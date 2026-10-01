@@ -28,7 +28,7 @@ for the 400-ball grid, against 1.1 GB for duplicating the topology itself.
 
 ## Where the source lives
 
-`VehiclePhysics/Overlay/Engine/GeometricRaster/SceneStructure.{h,cpp}` — the overlay is the durable layer. The
+`Frontier/Engine/GeometricRaster/SceneStructure.{h,cpp}` — the engine tree is the durable layer. The
 engine checkout under `_AgentScratch/` is gitignored and is replaced whenever it is re-seated, so a change made
 only there is lost. `RunDriveMirror.py` lays the overlay over a private copy of the pinned checkout; the proof's
 build scripts compile the checkout's copy, so re-seat before building if the overlay has moved ahead.
@@ -74,13 +74,13 @@ self-checks and returns non-zero on any failure.
 
 ```bash
 g++ -std=c++20 -O2 -w \
-    -I_AgentScratch/Frontier/Engine -I_AgentScratch/Frontier \
-    -I_AgentScratch/Frontier/ExternalPackages/vulkan-headers/include \
+    -IFrontier/Engine -IFrontier \
+    -IFrontier/ExternalPackages/vulkan-headers/include \
     VisualProof/SharedTopology/SharedTopologyProof.cpp \
-    _AgentScratch/Frontier/Engine/GeometricRaster/SceneStructure.cpp \
-    _AgentScratch/Frontier/Engine/GeometricRaster/GeometryStructure.cpp \
-    _AgentScratch/Frontier/Engine/DeviceExchange/OrientationClassifier.cpp \
-    _AgentScratch/Frontier/Engine/ContentInterchange/MaterialIndex.cpp \
+    Frontier/Engine/GeometricRaster/SceneStructure.cpp \
+    Frontier/Engine/GeometricRaster/GeometryStructure.cpp \
+    Frontier/Engine/DeviceExchange/OrientationClassifier.cpp \
+    Frontier/Engine/ContentInterchange/MaterialIndex.cpp \
     -o _AgentScratch/build/topology/SharedTopologyProof
 ./_AgentScratch/build/topology/SharedTopologyProof
 ```
