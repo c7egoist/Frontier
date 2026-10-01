@@ -261,6 +261,7 @@ static inline uint8_t enc(float v){return (uint8_t)std::lround(std::pow(aces(v),
 int main(int argc,char**argv){
     int W=800,H=450,FRAMES=28,RAYS=8; std::string outDir="Projects/Project-Drive/Diagnostics";
     std::string outName="drive_gi.ppm";
+    int REFLECT=1;   // --reflect off|sky|raytraced  (ReflectionModeCategory; default Sky, as RT-off degrades to)
     float eyeX=-6.40f,eyeY=-5.40f,eyeZ=2.20f, aimX=0.0f,aimY=0.0f,aimZ=0.70f, fovDeg=46.0f;
     for(int i=1;i<argc;++i){ std::string a=argv[i]; auto nx=[&](int d){return i+1<argc?std::atoi(argv[++i]):d;};
         auto nf=[&](float d){return i+1<argc?(float)std::atof(argv[++i]):d;};
@@ -269,6 +270,7 @@ int main(int argc,char**argv){
         else if(a=="--aim"){aimX=nf(aimX);aimY=nf(aimY);aimZ=nf(aimZ);}
         else if(a=="--fov")fovDeg=nf(fovDeg);
         else if(a=="--name")outName=(i+1<argc?argv[++i]:outName);
+        else if(a=="--reflect"){ std::string v=(i+1<argc?argv[++i]:"sky"); REFLECT = v=="off"?0:(v=="raytraced"?2:1); }
         else if(a=="--out")outDir=(i+1<argc?argv[++i]:outDir); }
     using Clock=std::chrono::steady_clock; auto t0=Clock::now();
 
@@ -359,8 +361,34 @@ int main(int argc,char**argv){
         if(!gV[i]){ img[i]=SkyColour(rd); return; }
         V P=gP[i],N=gN[i],A=gA[i];
         V direct=DirectLight(bvh,P,N,gM[i],rd*-1.0f);
+
+        // ── reflections: Off / Sky / Raytraced ──────────────────────────────────────────────────────────────
+        // ControlCentreHost's ReflectionModeCategory, mirrored. There is deliberately NO screen-space option:
+        //    a reflection is either traced against the scene or it is the sky dome sampled along the mirror
+        //    vector. In surfel mode the raytracing budget is by definition absent, so GameExecution degrades
+        //    Raytraced -> Sky; the mode is still accepted here so the CPU proof can show both.
+        V reflection{0,0,0};
+        if (REFLECT != 0)
+        {
+            const V R = rd - N*(2.0f*dot(rd,N));
+            if (REFLECT == 2)   // raytraced: one mirror ray, shaded, with the sky as the miss
+            {
+                int ti2; float t2;
+                if (bvh.closest(P + N*0.002f, R, 1e4f, ti2, t2))
+                {
+                    const V HP = P + R*t2; V HN = tris[ti2].n; if (dot(HN,R) > 0) HN = HN*-1.0f;
+                    reflection = DirectLight(bvh, HP, HN, tris[ti2].mat, R*-1.0f) + gatherE(HP,HN)*INV_PI;
+                }
+                else reflection = SkyColour(R);
+            }
+            else reflection = SkyColour(R);   // sky dome along the mirror vector, no rays
+            // Weighted by the material's own specular response, so a rough tyre does not mirror like glass.
+            const ShadingRecord& m = MaterialFor(gM[i]);
+            const float F = m.SpecularWeight * (1.0f - m.SpecularRoughness);
+            reflection = reflection * std::max(0.0f, F);
+        }
         V indirect=gatherE(P,N)*INV_PI; // gathered irradiance -> outgoing radiance
-        img[i]=direct+indirect;
+        img[i]=direct+indirect+reflection;
         (void)x;(void)y; });
 
     // write PPM
