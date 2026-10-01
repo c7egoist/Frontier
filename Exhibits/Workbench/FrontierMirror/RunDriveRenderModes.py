@@ -88,6 +88,14 @@ MLV_SOURCES = [
     "Engine/ContentInterchange/AssetResolution.cpp",
     "Engine/ContentInterchange/SpaceCodec.cpp",
     "Engine/ContentInterchange/SpaceExport.cpp",
+    # AtmosphereModel's parameters arrive through CelestialSequence::ApplyTo(VisibilityRaster&), so the raster
+    # and its scene deps are linked purely to read the sky settings back out of QueryCelestial.
+    "Engine/GeometricRaster/VisibilityRaster.cpp",
+    "Engine/GeometricRaster/SceneStructure.cpp",
+    "Engine/GeometricRaster/GeometryStructure.cpp",
+    "Engine/GeometricRaster/CameraProjection.cpp",
+    "Engine/DeviceExchange/OrientationClassifier.cpp",
+    "Engine/ContentInterchange/TextureIndex.cpp",
 ]
 SURFEL_SOURCES = [
     # The GI-on / RT-off path. Its gather, radius rule and spawn policy are the shipped ones --

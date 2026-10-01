@@ -20,6 +20,9 @@
 // ONE material model for every CPU render path -- see the header of this file for why this is not optional.
 #include "ContentInterchange/UnifiedMaterialEvaluation.h"
 #include "CelestialSequence.h"
+#include "GeometricRaster/VisibilityRaster.h"
+#include "DisplayPresentation/AtmosphereModel.h"
+#include "DisplayPresentation/CelestialTier.h"
 #include "ControlVehicleMesh.inl"
 
 #include <algorithm>
@@ -227,19 +230,51 @@ struct BVH{
 // standing instruction for this project is explicit that Project-Drive must not have a flat sky.
 static V   SUN_DIR = norm(V{-0.496f, 0.868f, 0.012f});   // replaced at startup by the solved direction
 static V   SUN_COL = V{1.0f,0.95f,0.85f}*3.0f;           // replaced at startup by the solved radiance
-static V   SKY_ZENITH{0.35f,0.5f,0.85f}, SKY_HORIZON{0.7f,0.75f,0.8f};
+// ── the engine's own sky, baked into a dome LUT ────────────────────────────────────────────────────────────
+// Previously an analytic two-colour gradient. The engine integrates a real atmosphere -- Rayleigh, Mie, ozone,
+//    planet shadow -- through AtmosphereModel::Integrate, and that is a plain static function, so nothing had
+//    to be extracted: the only thing the surfel path was missing was the Medium/Light parameters. Those come
+//    out of CelestialSequence::ApplyTo via VisibilityRaster::QueryCelestial, which is how the raster gets them,
+//    so both paths now march the SAME air.
+//
+//    Marching per ray would be ruinous here (29k surfels x 8 rays x 64 frames, each a nested
+//    sample x light-sample integral), so it is baked once into a lat-long dome and sampled bilinearly. That
+//    is exactly the trade the engine itself offers as its baked sky dome.
+static Frontier::VisibilityRaster::CelestialSettings g_Sky;
+static bool g_SkyBaked = false;
+static constexpr int kDomeU = 128, kDomeV = 64;
+static std::vector<V> g_Dome;
 
-// Analytic dome anchored to the SOLVED sun: zenith/horizon tints and a forward-scattering lobe about the sun,
-//    scaled by the solved radiance. The engine's full atmosphere march lives inside VisibilityRaster::SkyAlong
-//    as a lambda over its own pixel grid and is not callable from here, so this is an approximation of the
-//    dome -- but it is anchored to the real sun rather than invented, and the SUN itself, which carries the
-//    overwhelming majority of the energy outdoors, is exact.
+static V DomeFetch(V d){
+    const float u = (std::atan2(d.y, d.x) + PI) * (1.0f/(2.0f*PI));
+    const float v = std::acos(std::max(-1.0f, std::min(1.0f, d.z))) * (1.0f/PI);
+    float fu = u*(kDomeU-1), fv = v*(kDomeV-1);
+    int iu=(int)fu, iv=(int)fv; float tu=fu-iu, tv=fv-iv;
+    int iu1=(iu+1)%kDomeU, iv1=std::min(iv+1,kDomeV-1);
+    iu=std::max(0,std::min(iu,kDomeU-1)); iv=std::max(0,std::min(iv,kDomeV-1));
+    const V a=g_Dome[iv*kDomeU+iu], b=g_Dome[iv*kDomeU+iu1];
+    const V c=g_Dome[iv1*kDomeU+iu], e=g_Dome[iv1*kDomeU+iu1];
+    return (a*(1-tu)+b*tu)*(1-tv) + (c*(1-tu)+e*tu)*tv;
+}
+
+static void BakeDome(){
+    g_Dome.assign((size_t)kDomeU*kDomeV, V{0,0,0});
+    for(int iv=0; iv<kDomeV; ++iv) for(int iu=0; iu<kDomeU; ++iu){
+        const float phi = (iu/(float)(kDomeU-1))*2.0f*PI - PI;
+        const float th  = (iv/(float)(kDomeV-1))*PI;
+        const float st=std::sin(th);
+        float dir[3]={st*std::cos(phi), st*std::sin(phi), std::cos(th)};
+        const Frontier::AtmosphereSample S = Frontier::AtmosphereModel::Integrate(
+            g_Sky.Medium, g_Sky.Light, g_Sky.CameraHeight, dir, g_Sky.SampleCount, g_Sky.LightSampleCount);
+        g_Dome[(size_t)iv*kDomeU+iu] = V{S.Radiance[0], S.Radiance[1], S.Radiance[2]};
+    }
+    g_SkyBaked = true;
+}
+
 static V SkyColour(V d){
-    const float t = std::max(0.0f, d.z);
-    V base = SKY_ZENITH*t + SKY_HORIZON*(1.0f-t);
-    const float c = std::max(0.0f, dot(norm(d), SUN_DIR));
-    const float lobe = 0.25f * c*c*c*c;                  // the brightening around the sun
-    return base * (1.0f + lobe);
+    if (g_SkyBaked) return DomeFetch(norm(d));
+    const float t = std::max(0.0f, d.z);                 // fallback only if the sky never came up
+    return V{0.35f,0.5f,0.85f}*t + V{0.7f,0.75f,0.8f}*(1.0f-t);
 }
 // `wo` points towards the viewer.  The BSDF is the engine's; only the transport around it is this file's.
 static V DirectLight(const BVH& bvh, V P, V N, uint32_t mat, V wo){
@@ -396,6 +431,17 @@ int main(int argc,char**argv){
         //    (5.22, 4.56, 3.53): warm, because a 32.5-degree sun has come a long way through the air.
         const V Rad{R.SunDirect[0], R.SunDirect[1], R.SunDirect[2]};
         if (len(Rad) > 1e-6f) SUN_COL = Rad;
+
+        // The same atmosphere the raster is handed, read back through the public accessor and baked.
+        Frontier::VisibilityRaster Probe;
+        Frontier::CelestialBudget Budget;
+        Budget.AtmosphereSamples = 16u; Budget.AtmosphereLightSamples = 6u;
+        Sky.ApplyTo(Probe, Budget);
+        g_Sky = Probe.QueryCelestial();
+        if (g_Sky.Enabled) BakeDome();
+        std::printf("SurfelReference: sky %s (%dx%d dome, %u/%u atmosphere samples)\n",
+                    g_SkyBaked ? "from AtmosphereModel" : "FALLBACK gradient",
+                    kDomeU, kDomeV, g_Sky.SampleCount, g_Sky.LightSampleCount);
         std::printf("SurfelReference: sun hour %.2f -> dir (%.3f %.3f %.3f), radiance (%.2f %.2f %.2f)\n",
                     sunHour, SUN_DIR.x, SUN_DIR.y, SUN_DIR.z, SUN_COL.x, SUN_COL.y, SUN_COL.z);
     }

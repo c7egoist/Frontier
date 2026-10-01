@@ -86,7 +86,15 @@ inline vec4 FetchSheenFull(float mu, float alpha)
 }
 
 #define FRONTIER_AUTOMOTIVE_SHOWCASE 1
+// INTERNAL LINKAGE. MaterialEvaluation.slang is shader text: its functions are written at namespace scope
+//    with external linkage, which is fine while exactly one translation unit in a binary includes it. The
+//    moment two do -- here, VisibilityRaster and SurfelReference in the same link -- the linker reports
+//    multiple definition of EvaluateBsdf, SampleBsdf, PdfBsdf and the rest. An anonymous namespace gives each
+//    TU its own copy, which is what an inline function would have done had the shader been written as one.
+//    Nothing crosses a TU boundary here: every caller evaluates the lobe set locally.
+namespace {
 #include "Shaders/MaterialEvaluation.slang"   // the shipped OpenPBR lobe set, compiled 1:1 as C++
+}
 
 namespace Frontier::UnifiedMaterial {
 
