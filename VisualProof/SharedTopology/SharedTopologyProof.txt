@@ -1,0 +1,58 @@
+================================================================================
+ SHARED TOPOLOGY — one mesh, many placements
+================================================================================
+
+Stand-in mesh: 9216 triangles, 4753 vertices (0.29 MB of VertexRecord per copy)
+
+① SHARING — storage must not grow with the placement count
+
+   placements   vertices    indices   instances   clusters      vertex+index MB
+   ----------   --------   --------   ---------   --------      ---------------
+            1       4753      40254           2         72                0.444
+  PASS  one topology registered no matter how many placements
+  PASS  the topology counts its placements
+            4       4753      40254           8        288                0.444
+  PASS  one topology registered no matter how many placements
+  PASS  the topology counts its placements
+           16       4753      40254          32       1152                0.444
+  PASS  one topology registered no matter how many placements
+  PASS  the topology counts its placements
+           64       4753      40254         128       4608                0.444
+  PASS  one topology registered no matter how many placements
+  PASS  the topology counts its placements
+          400       4753      40254         800      28800                0.444
+  PASS  one topology registered no matter how many placements
+  PASS  the topology counts its placements
+  PASS  400 placements store exactly as many vertices as 1
+  PASS  400 placements store exactly as many indices as 1
+
+   Not allocated by sharing, at 400 placements: 177.0 MB
+
+② EQUIVALENCE — the placed scene must be geometrically identical to copy-per-placement
+   one placement = 2 InstanceRecord(s) (the 8192-triangle span)
+   compared 73728 world-space triangles across 8 placements
+   worst vertex disagreement: 0.000e+00 m
+  PASS  every placement produced the same triangle count as its own-copy twin
+  PASS  every world-space vertex is bit-identical to copy-per-placement
+
+③ MATERIAL — differing only by material must not fork the topology
+  PASS  two materials, one topology
+  PASS  both placements point at the same vertex span
+  PASS  every partition points at the same index span in both placements
+  PASS  the materials stayed different
+
+④ FORK — a placement can be given private topology, and cutting it leaves its siblings alone
+  PASS  the fork is a new topology
+  PASS  the fork allocated exactly one private copy of the vertex span
+  PASS  the forked placement no longer shares the vertex span
+  PASS  its siblings still share with each other
+   worst vertex disagreement across the fork: 0.000e+00 m
+  PASS  forking did not change the triangle count
+  PASS  forking did not move a single vertex — a fork is a copy, not a rebuild
+   after the cut — moved on the forked placement: 0.500 m,  moved on its siblings: 0.000e+00 m
+  PASS  the cut actually changed the forked placement
+  PASS  the cut moved nothing on any sibling — the fork is deep
+
+================================================================================
+ ALL CHECKS PASSED
+================================================================================

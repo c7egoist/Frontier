@@ -85,9 +85,12 @@ bool SurfelGIStage::Bring(const SurfelStageInit& Init) noexcept
     I = Init;
     if (I.Device == VK_NULL_HANDLE || I.CwbvhNodeBuffer == VK_NULL_HANDLE || I.CwbvhLeafBuffer == VK_NULL_HANDLE ||
         I.OutputImageView == VK_NULL_HANDLE || I.SurfaceImageView == VK_NULL_HANDLE || I.NormalImageView == VK_NULL_HANDLE ||
-        I.AlbedoImageView == VK_NULL_HANDLE || I.MaterialAuxView == VK_NULL_HANDLE || I.GridCellSize <= 0.0f)
+        I.TriangleBuffer == VK_NULL_HANDLE || I.MaterialBuffer == VK_NULL_HANDLE || I.InstanceBuffer == VK_NULL_HANDLE ||
+        I.SlabBuffer == VK_NULL_HANDLE || I.VertexBuffer == VK_NULL_HANDLE || I.IndexBuffer == VK_NULL_HANDLE ||
+        I.EnergyLutView == VK_NULL_HANDLE || I.SheenLutView == VK_NULL_HANDLE || I.GridCellSize <= 0.0f)
     {
-        std::cerr << "[SurfelGIStage] deferred: scene traversal or visibility targets are not resident.\n";
+        std::cerr << "[SurfelGIStage] deferred: scene traversal, visibility targets, scene buffers or shading "
+                     "tables are not resident.\n";
         I = {};
         return false;
     }
