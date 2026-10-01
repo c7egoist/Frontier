@@ -118,6 +118,30 @@ DriverInput InputAt(float Seconds) noexcept
     return Input;
 }
 
+// --scenario kerb: drive up the pad and lean the car onto the kerb so the LEFT SHOULDER strikes its vertical
+//    face. Nothing else in the course has a vertical surface, so this is the only way the sidewall contact
+//    path gets exercised by the real vehicle rather than by a unit rig.
+//
+//    Geometry that sets the numbers: the kerb's inner face is at y = +3.20 m and the tyre's outer shoulder
+//    sits at y = half-track 1.0475 + half-width 0.1979 = 1.245 m from the car's centreline. So the chassis
+//    has to reach about y = 1.95 m for the shoulder to touch, and a gentle sustained left lean gets there
+//    without the slalom's oscillation masking the moment of contact.
+//    Steering is CLOSED-LOOP on lateral position. Open loop does not work here: a fixed 0.065 of steer held
+//    for 3.5 s put the car at y = 22.5 m, nineteen metres past the kerb, because nothing was bringing it
+//    back. A proportional term holds it against the face instead, which is what a driver leaning on a kerb
+//    actually does, and makes the test independent of speed and of the exact steering ratio.
+DriverInput KerbInputAt(float Seconds, float CurrentY) noexcept
+{
+    DriverInput Input{};
+    if (Seconds < 0.8f) return Input;
+    Input.Throttle = 0.35f;
+    const float TargetY = DC::KerbConstants::CentreY - 1.21f;   // shoulder just inside the face
+    const float Error = TargetY - CurrentY;
+    Input.Steer = std::max(-0.09f, std::min(0.09f, 0.055f * Error));
+    if (Seconds > 10.0f) { Input.Throttle = 0.0f; Input.Brake = 0.5f; }
+    return Input;
+}
+
 //------------------------------------------------------------------------------------------------------------------------ the level
 // One SceneStructure mesh per (span, material) pair.  Spans 0..4 are the body and four wheels and are DYNAMIC —
 //    the author emits them in object-local space so the live world transform places them; span 5 is the course and
@@ -561,6 +585,7 @@ int main(int ArgumentCount, char** ArgumentValues)
     float Seconds = 12.0f, SunHour = 15.0f, Freeze = 0.0f;
     bool  Still = false;   // one frozen pose for a material sheet; see the motion-gate note at the gates
     std::string TyreLog;   // --tyre-log <csv>: per-frame XPBD carcass diagnostics
+    std::string Scenario = "default";   // --scenario kerb : lean onto the kerb and strike it side-on
     float Exposure = 1.05f;       // --exposure <v>      : matches MaterialLevelViewport's default exactly
     float TyreMu = -1.0f;         // --tyre-mu <v>       : override Coulomb μ (bench)
     float TreadAlpha = -1.0f;     // --tread-alpha <v>   : override tread tangential compliance (bench)
@@ -585,6 +610,7 @@ int main(int ArgumentCount, char** ArgumentValues)
         else if (A == "--freeze")       Freeze      = static_cast<float>(std::atof(Next("--freeze")));
         else if (A == "--still")        Still       = true;
         else if (A == "--tyre-log")     TyreLog     = Next("--tyre-log");
+        else if (A == "--scenario")     Scenario    = Next("--scenario");
         else if (A == "--exposure")     Exposure    = static_cast<float>(std::atof(Next("--exposure")));
         else if (A == "--tyre-mu")      TyreMu      = static_cast<float>(std::atof(Next("--tyre-mu")));
         else if (A == "--tread-alpha")  TreadAlpha  = static_cast<float>(std::atof(Next("--tread-alpha")));
@@ -697,6 +723,8 @@ int main(int ArgumentCount, char** ArgumentValues)
     // ── the carcass log ─────────────────────────────────────────────────────────────────────────────────────
     std::FILE* TyreLogFile = nullptr;
     float WorstSpread = 0.0f, WorstRms = 0.0f, WorstOffPatch = 0.0f;
+    float PeakKerbLateral = 0.0f;   // [N] strongest −Y reaction seen on any wheel (the kerb pushing back)
+    float PeakChassisY = 0.0f;      // [m] how far the car leaned toward the kerb
     Vec3  PrevHub[4]{};
     if (!TyreLog.empty())
     {
@@ -719,12 +747,18 @@ int main(int ArgumentCount, char** ArgumentValues)
         const bool Frozen = Freeze > 0.0f && T > Freeze;
         if (!Frozen)
         {
-            Solver.AssignInput(InputAt(T));
+            Solver.AssignInput(Scenario == "kerb" ? KerbInputAt(T, Chassis.State().Position.y) : InputAt(T));
             Solver.Step(Dt);
             Chassis.Integrate(Dt);
         }
         const auto& Telemetry = Solver.Telemetry();
         PeakSpeed = std::max(PeakSpeed, Telemetry.SpeedMetresPerSecond);
+        PeakChassisY = std::max(PeakChassisY, Chassis.State().Position.y);
+        // A kerb strike is a reaction pointing back OFF the kerb, i.e. −Y. Tracked unconditionally: it was
+        //    first written inside the --tyre-log block, so the gate measured nothing unless a CSV was asked
+        //    for, and duly reported 0 N.
+        for (uint32_t W = 0; W < 4u; ++W)
+            PeakKerbLateral = std::max(PeakKerbLateral, -Solver.Tyres()[W].Reaction().Force.y);
 
         // ── XPBD carcass log ────────────────────────────────────────────────────────────────────────────────
         if (TyreLogFile != nullptr)
@@ -948,6 +982,19 @@ int main(int ArgumentCount, char** ArgumentValues)
         std::printf("[drive-scene] tyre log: out-of-roundness %.2f mm total, %.2f mm away from the contact patch; "
                     "worst RMS radial node speed %.1f mm/s -> %s\n",
                     WorstSpread * 1000.0f, WorstOffPatch * 1000.0f, WorstRms * 1000.0f, TyreLog.c_str());
+    }
+
+    if (Scenario == "kerb")
+    {
+        std::printf("[drive-scene] kerb: car leaned to y = %.2f m (face at %.2f m), peak lateral reaction %.0f N\n",
+                    static_cast<double>(PeakChassisY),
+                    static_cast<double>(DC::KerbConstants::CentreY),
+                    static_cast<double>(PeakKerbLateral));
+        // Reaching the kerb at all is the precondition; the lateral reaction is the thing being proven. A
+        //    heightfield ground query cannot produce one no matter how hard the car leans, because its contact
+        //    normal is always +Z -- so a non-trivial −Y reaction IS the surface-query path working.
+        Check(PeakChassisY > 1.6f, "the car actually reached the kerb");
+        Check(PeakKerbLateral > 200.0f, "the kerb pushed back SIDEWAYS on the tyre (lateral reaction > 200 N)");
     }
 
     if (Still)
