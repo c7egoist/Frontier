@@ -104,14 +104,44 @@ g++ -std=c++20 -O2 -w -pthread -o ImpactProof \
     Frontier/Engine/PhysicalDynamics/Vehicle/XPBDSoftTyre.cpp
 ```
 
-## Separate observation, not fixed
+## The ramp jump
 
-While building the drop harness, a quarter car coupled to the tyre by explicit force exchange showed a
-coefficient of restitution of 1.3 to 1.6 — it gained energy on every impact. The tyre itself is not the cause:
-a quasi-static compress-and-release loop is dissipative at every rate tested, returning 0.81 to 0.97 of the
-work put in. Refining only the coupling timestep drives restitution to 0.95, so this is an artefact of
-exchanging force once per frame at 60 Hz.
+`VisualProof/XPBDTyreImpact/XPBDTyreRampRender.cpp` drives the production stack — `VehicleSolver` with the
+Pacejka driving layer, four XPBD soft tyres and a 1500 kg chassis — up a 1.45 m ramp at 97 km/h, off the lip,
+and down onto the flat. The hubs are welded to the body (`SuspensionEnabled = false`) so the tyre carries the
+whole landing with no strut to hide the impact behind. It writes one BMP per rendered step; the GIF is
+assembled from those.
 
-`VehicleSolver` couples the tyre to the chassis the same way at the same rate, so a real landing may well
-launch the car for this reason. That is a change to the vehicle coupling rather than to the tyre, and it has
-not been touched here.
+The car reaches 3.17 m, is airborne for about 1.7 s and lands at roughly 7 m/s vertical:
+
+| Measure                  | Disabled | Enabled  |
+| ------------------------ | -------- | -------- |
+| Peak sag on landing      | 301.3 mm | 128.9 mm |
+| Worst incursion past rim | 176.3 mm | 3.9 mm   |
+
+Without the constraint the belt ends up 176 mm inside a 200 mm rim — very nearly at the wheel centre, the
+carcass completely inverted. With it the tyre pancakes onto the flange at 129 mm and rolls away.
+
+```text
+VisualProof/XPBDTyreImpact/XPBDTyreRampLanding.gif    the landing, with the fix
+VisualProof/XPBDTyreImpact/XPBDTyreRampRender.cpp     the harness that produces the frames
+```
+
+Two things worth recording about the harness, because both cost time:
+
+- The chassis is integrated in the harness itself, and 60 Hz explicit integration does not survive against a
+  tyre this stiff — the car gained energy on every contact and launched itself off a flat road. The loop runs
+  at 240 Hz and emits every eighth step.
+- `Quat` is `{x, y, z, w}` with w LAST. Writing the quaternion integration as though w came first scrambles the
+  axes and flips the car 180 degrees on the spot, which presents as the tyres appearing in the wrong place.
+
+## A note on landing stability
+
+An earlier draft of this document suggested `VehicleSolver` might launch the car on landings, on the strength
+of a quarter-car rig that showed a coefficient of restitution of 1.3 to 1.6. That was wrong, and the rig was at
+fault rather than the vehicle.
+
+The tyre itself is dissipative at every rate tested — a quasi-static compress-and-release loop returns 0.81 to
+0.97 of the work put in. The rig bolted a sprung mass rigidly to the hub and exchanged force once per frame at
+60 Hz; refining only that timestep drives restitution to 0.95. The real solver puts a spring and damper strut
+between hub and chassis, which absorbs the landing, and the car is stable in practice.
