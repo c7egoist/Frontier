@@ -85,3 +85,24 @@ Run against the flattened tree after the merge, all green:
 | `VisualProof/SharedTopology` | 25 / 25 passed |
 | `ShowcaseTransportMirror` | renders; BLAS 67 832 triangles, TLAS 381 placements |
 | `Frontier/Tools/Build/CheckSolidArc.sh` | compiles and passes |
+
+## Follow-up cleanup
+
+- `MaterialLevelViewport::TranscribeShadingRecord` deleted. It was byte-identical to
+  `Frontier::UnifiedMaterial::MakeShadingRecord`, which had already been lifted out of it into
+  `ContentInterchange/UnifiedMaterialEvaluation.h`; both call sites now use the shared one, so there is a single
+  `MaterialSlabRecord` → `ShadingRecord` transcription.
+- `ShowcaseRasterMirror` bumped r6 → r7. It is **not** redundant against `ShowcaseTransportMirror`: this one
+  drives the engine's shipped `GeometricRaster/VisibilityRaster` and the real `Host/CelestialSequence` sky, which
+  is the product's GI-OFF / RT-OFF mode. The transport mirror authors its own BVH raster for comparing transports.
+  It was also moved onto `Frontier::HostRuntime`, and its r7 source list gained `ShaderBallGeometry` and
+  `ShadingTableCodec`.
+- `RunProjectZeroMirror` prose corrected: 400 **placements**, being 380 ShaderBalls plus the 20 emissive spheres
+  of row 8 — not "400 spheres".
+
+### ⚠️ The relocation also moved the mirrors' sources
+
+The eleven `.cpp` files pruned from `Projects/Project-Zero/Source/` all exist at `Engine/Host/`, under namespace
+`Frontier::HostRuntime` rather than `Frontier::ProjectZero`. Nothing was lost, but the orchestration scripts named
+the pre-relocation paths and had to be repointed. If another consumer surfaces, the file is at `Engine/Host/` and
+the namespace changed with it.

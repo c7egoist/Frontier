@@ -2,7 +2,8 @@
 """Render Project-Zero's DEFAULT level — the 20 x 20 material grid — through the engine's own CPU paths.
 
 What the product opens with no `--scene` argument is `Engine/ContentInterchange/ShowcaseStructure`: r6,
-`kShowcaseGridSide` = 20, so 400 spheres and 400 materials across the whole OpenPBR lobe set.  Three render paths
+`kShowcaseGridSide` = 20, so 400 placements and 400 materials across the whole OpenPBR lobe set — 380
+ShaderBalls plus the 20 emissive spheres of row 8.  Three render paths
 are exercised, and every one of them is engine code:
 
   visibility raster   Engine/GeometricRaster/VisibilityRaster           RT off, GI off — the plain mode
@@ -37,14 +38,14 @@ MIRROR = ROOT / "Exhibits/Workbench/FrontierMirror/ShowcaseRasterMirror.cpp"
 #    carrying more than the entry framing.
 RASTER_VIEWS = [
     ("default", "the product's entry shot — the whole grid as Project-Zero.exe opens it"),
-    ("grid400", "all 400 spheres from above: the complete 20 x 20 material matrix"),
+    ("grid400", "all 400 placements from above: the complete 20 x 20 material matrix"),
     ("metals",  "row 0, the anisotropic metal polish ladder, at eye level"),
     ("glass",   "row 1, the IOR 1.30 -> 2.42 transmissive ramp"),
     ("glints",  "row 12, the glint-flake density ramp"),
 ]
 TRACED_VIEWS = [
     ("default", "the product's entry shot"),
-    ("grid400", "all 400 spheres from above"),
+    ("grid400", "all 400 placements from above"),
     ("metals",  "row 0, the anisotropic metal polish ladder"),
 ]
 
@@ -52,14 +53,16 @@ RASTER_SOURCES = [
     "Engine/GeometricRaster/VisibilityRaster.cpp", "Engine/GeometricRaster/SceneStructure.cpp",
     "Engine/GeometricRaster/GeometryStructure.cpp", "Engine/GeometricRaster/CameraProjection.cpp",
     "Engine/GeometricRaster/StarCatalogueIndex.cpp", "Engine/ContentInterchange/ShowcaseStructure.cpp",
+    # r7: the grid places ShaderBalls and the raster shades through the shared energy tables.
+    "Engine/ContentInterchange/ShaderBallGeometry.cpp", "Engine/DisplayPresentation/ShadingTableCodec.cpp",
     "Engine/ContentInterchange/MaterialIndex.cpp", "Engine/ContentInterchange/AssetResolution.cpp",
     "Engine/ContentInterchange/SpaceExport.cpp", "Engine/ContentInterchange/SpaceCodec.cpp",
     "Engine/ContentInterchange/TextureIndex.cpp", "Engine/DisplayPresentation/CelestialSolver.cpp",
-    "Engine/DeviceExchange/OrientationClassifier.cpp", "Projects/Project-Zero/Source/CelestialSequence.cpp",
+    "Engine/DeviceExchange/OrientationClassifier.cpp", "Engine/Host/CelestialSequence.cpp",
 ]
 RASTER_INCLUDES = [
     ".", "Engine", "Engine/GeometricRaster", "Engine/ContentInterchange", "Engine/DeviceExchange",
-    "Engine/DisplayPresentation", "Engine/Shaders", "Projects/Project-Zero/Source",
+    "Engine/DisplayPresentation", "Engine/Shaders", "Engine/Host",
     "ExternalPackages/stb", "ExternalPackages/vulkan-headers/include",
 ]
 
@@ -139,7 +142,7 @@ def main() -> int:
 
     record = Checkout.provenance(
         proof="Project-Zero default level (the 20 x 20 = 400-material showcase grid) through the engine's own CPU paths.",
-        scene=("Engine/ContentInterchange/ShowcaseStructure r6 — kShowcaseGridSide = 20, so 400 spheres and 400 "
+        scene=("Engine/ContentInterchange/ShowcaseStructure r7 — kShowcaseGridSide = 20, so 400 placements and 400 "
                "material records across the OpenPBR lobe set, on the authored ground plane with the level's own "
                "emissive luminaires and the Project-Zero interface panel. This is what Project-Zero.exe opens with "
                "no --scene argument."),

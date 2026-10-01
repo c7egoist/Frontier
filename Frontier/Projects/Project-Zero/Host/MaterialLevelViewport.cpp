@@ -293,59 +293,14 @@ struct Rng
         return static_cast<float>(W) * (1.0f / 4294967296.0f);
     }
 };
-
 //------------------------------------------------------------------------------------------------------------------------
 //                                     DESCRIPTOR RECORDS → SHADING RECORD
 //------------------------------------------------------------------------------------------------------------------------
-// A transcription of ReSTIRViewport.slang's `ResolveMaterial` for the constants-only case (no textures bound). Every
-//    line below corresponds to a line of that function; the channel fetches all resolve to their documented default
-//    (`SampleChannel*` with no slot returns vec4(1.0) / vec4(1.0, 0.5, 1.0, 1.0) for anisotropy), which is why the folds
-//    collapse to plain multiplies. Keeping the shape of the kernel's code — rather than writing "the obvious fold" —
-//    is what makes this the engine's material model instead of a lookalike.
+// 📝 This host used to carry its own `TranscribeShadingRecord`. It was the third hand-written copy of the same
+//    MaterialSlabRecord → ShadingRecord mapping, so it was lifted into
+//    `Frontier::UnifiedMaterial::MakeShadingRecord` (ContentInterchange/UnifiedMaterialEvaluation.h) and the
+//    copy here deleted. There is now ONE transcription and every CPU path calls it.
 
-ShadingRecord TranscribeShadingRecord(const MaterialSlabRecord& S, uint32_t Selection)
-{
-    ShadingRecord m;
-    m.AutomotiveData=vec4(S.Reserved0,S.Reserved1,0.0f,0.0f);m.AutomotiveDensity=S.SlateGlintDensity;
-    m.BaseColor          = vec3(S.BaseWeight * S.BaseColorR, S.BaseWeight * S.BaseColorG, S.BaseWeight * S.BaseColorB);
-    m.Metalness          = S.BaseMetalness;
-    m.DiffuseRoughness   = S.BaseDiffuseRoughness;
-    m.SpecularWeight     = S.SpecularWeight;
-    m.SpecularColor      = vec3(S.SpecularColorR, S.SpecularColorG, S.SpecularColorB);
-    m.SpecularRoughness  = S.SpecularRoughness;
-    m.SpecularAnisotropy = S.SpecularRoughnessAnisotropy;                 // × anisoTex.z (=1 unbound)
-    m.AnisotropyAngle    = S.AnisotropyRotation;                          // atan(1,0)=0 + Slate2.x
-    m.SpecularIor        = S.SpecularIor;
-    m.ThinFilmWeight     = S.ThinFilmWeight;
-    m.ThinFilmThickness  = S.ThinFilmThickness;
-    m.ThinFilmIor        = S.ThinFilmIor;
-    m.HazinessWeight     = S.SlateHazinessWeight;
-    m.HazinessRoughness  = S.SlateHazinessRoughness;
-    m.CoatWeight         = S.CoatWeight;
-    m.CoatColor          = vec3(S.CoatColorR, S.CoatColorG, S.CoatColorB);
-    m.CoatRoughness      = S.CoatRoughness;
-    m.CoatAnisotropy     = S.CoatRoughnessAnisotropy;
-    m.CoatIor            = S.CoatIor;
-    m.CoatDarkening      = S.CoatDarkening;
-    m.CoatTangent        = vec3(1.0f, 0.0f, 0.0f);                        // identity (no coat normal texture bound)
-    m.CoatNormal         = vec3(0.0f, 0.0f, 1.0f);
-    m.FuzzWeight         = S.FuzzWeight;
-    m.FuzzColor          = vec3(S.FuzzColorR, S.FuzzColorG, S.FuzzColorB);
-    m.FuzzRoughness      = S.FuzzRoughness;
-    m.Emission           = vec3(S.EmissionLuminance * S.EmissionColorR, S.EmissionLuminance * S.EmissionColorG,
-                                S.EmissionLuminance * S.EmissionColorB);
-    m.TransmissionWeight = S.TransmissionWeight;
-    m.TransmissionColor  = vec3(S.TransmissionColorR, S.TransmissionColorG, S.TransmissionColorB);
-    m.TransmissionDepth  = S.TransmissionDepth;
-    m.TransmissionThickness = 0.0f;                                       // tracer-side: the true chord, or the no-exit fallback
-    m.Selection          = Selection;
-    m.SssWeight          = S.SubsurfaceWeight;
-    m.SssColor           = vec3(S.SubsurfaceColorR, S.SubsurfaceColorG, S.SubsurfaceColorB);
-    m.SssRadius          = S.SubsurfaceRadius;
-    m.SssRadiusScale     = vec3(S.SubsurfaceRadiusScaleR, S.SubsurfaceRadiusScaleG, S.SubsurfaceRadiusScaleB);
-    m.SssThickness       = 0.0f;                                          // filled per hit by SssChord
-    return m;
-}
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                     CAMERA
@@ -2031,7 +1986,7 @@ bool BuildInterfacePanel(uint16_t ObjectId)
     {
         const uint32_t Selection = (R.Flags & Frontier::kMaterialReflectanceMask) >> Frontier::kMaterialReflectanceShift;
         const MaterialSlabRecord& S = Slabs[std::min(static_cast<size_t>(R.SlabOffset), Slabs.size() - 1u)];
-        g_Mat.push_back(TranscribeShadingRecord(S, Selection));
+        g_Mat.push_back(Frontier::UnifiedMaterial::MakeShadingRecord(S, Selection));
         g_MatFlags.push_back(R.Flags);
         g_MatCutoff.push_back(R.AlphaCutoff);
         g_MatCutAway.push_back(false);
@@ -2106,7 +2061,7 @@ bool BuildLevel()
     {
         const uint32_t Selection = (Records[I].Flags & Frontier::kMaterialReflectanceMask) >> Frontier::kMaterialReflectanceShift;
         const MaterialSlabRecord& S = Slabs[std::min(static_cast<size_t>(Records[I].SlabOffset), Slabs.size() - 1u)];
-        g_Mat[I] = TranscribeShadingRecord(S, Selection);
+        g_Mat[I] = Frontier::UnifiedMaterial::MakeShadingRecord(S, Selection);
         g_MatGlintDensity[I]=S.SlateGlintDensity;g_MatGlintUvScale[I]=S.SlateGlintUvScale;
         g_MatFlags[I] = Records[I].Flags;
         g_MatCutoff[I] = Records[I].AlphaCutoff;

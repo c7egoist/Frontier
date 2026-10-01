@@ -4,11 +4,12 @@
 // 📦 The GI-OFF / RT-OFF render mode of the product, run on the CPU with the engine's OWN code — nothing here is a
 //    lookalike renderer.  Every stage below is a shipped engine translation unit:
 //
-//      level    Engine/ContentInterchange/ShowcaseStructure   — the DEFAULT level (`--scene showcase`), r6,
-//                                                                kShowcaseGridSide² = 20 × 20 = 400 material spheres
+//      level    Engine/ContentInterchange/ShowcaseStructure   — the DEFAULT level (`--scene showcase`), r7,
+//                                                                kShowcaseGridSide² = 20 × 20 = 400 placements:
+//                                                                380 ShaderBalls + the 20 emissive spheres of row 8
 //      scene    Engine/GeometricRaster/SceneStructure         — the same registration/Finalise the app performs
 //      raster   Engine/GeometricRaster/VisibilityRaster       — the shipped visibility buffer + direct-only shade
-//      sky      Projects/Project-Zero/Source/CelestialSequence — the real sun/sky/twilight/star/moon/cloud/fog model,
+//      sky      Engine/Host/CelestialSequence                  — the real sun/sky/twilight/star/moon/cloud/fog model,
 //                                                                handed to the raster through its own ApplyTo
 //      tone     Engine/DisplayPresentation/ColourTransfer     — the engine's single linear → display definition
 //
@@ -39,7 +40,7 @@
 #include <vector>
 
 using namespace Frontier;
-using namespace Frontier::ProjectZero;
+using namespace Frontier::HostRuntime;
 
 namespace {
 
@@ -213,7 +214,7 @@ int main(int ArgumentCount, char** ArgumentValues)
     ShowcaseStructure Showcase;
     Showcase.Construct();
     Check(kShowcaseGridSide == 20u, "the default level is the 20 x 20 material grid");
-    Check(kShowcaseRevision == 6u,  "the level is the current r6 revision");
+    Check(kShowcaseRevision == 7u,  "the level is the current r7 revision");
     Check(!Showcase.QueryTriangles().empty(), "ShowcaseStructure produced geometry");
 
     auto Level = std::make_unique<SceneStructure>();
