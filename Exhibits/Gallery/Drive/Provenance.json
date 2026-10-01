@@ -14,66 +14,78 @@
     "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveTracksideRun --width 480 --height 270 --fps 10 --sun 13.0 --camera trackside --seconds 12",
     "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveOrbitWhileDriving --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --seconds 12 --orbit-period 5 --orbit-radius 9 --orbit-height 2.6",
     "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDTyreDeformation --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDRimCollapse --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05 --rim-stop 0",
     "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveMaterialTurntable --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --freeze 3.0 --seconds 9 --orbit-period 6 --orbit-radius 6.5 --orbit-height 2.4",
     "XPBDTyreProof /home/user/Slate/Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
   ],
   "results": {
     "physics": [
-      "  Peak speed ....... 36.31 m/s (130.7 km/h)",
-      "  Takeoff speed .... 11.04 m/s (ramp launch)",
-      "  Airborne ......... 0.57 s",
-      "  Max susp. travel . 0.531 m",
-      "  Min chassis up ... 0.948 (1.0 = level; dips while cornering / airborne)",
-      "  Final X .......... 182.9 m",
-      "  Physics .......... 4608.69 us/step, 0.9x real-time",
+      "  Peak speed ....... 36.47 m/s (131.3 km/h)",
+      "  Takeoff speed .... 11.17 m/s (ramp launch)",
+      "  Airborne ......... 0.58 s",
+      "  Max susp. travel . 0.516 m",
+      "  Min chassis up ... 0.947 (1.0 = level; dips while cornering / airborne)",
+      "  Final X .......... 184.0 m",
+      "  Physics .......... 6535.58 us/step, 0.6x real-time",
       "  Wrote ............ telemetry.csv, timing.log, run.log in /home/user/Slate/_AgentScratch/build/drive/telemetry"
     ],
     "ProjectDriveChaseRun": [
       "[drive-scene] camera 'chase': 120 frames at 10 fps, 480x270",
-      "[drive-scene] run: peak speed 36.31 m/s (130.7 km/h), peak aero downforce 7547 N, final X 182.90 m"
+      "[drive-scene] run: peak speed 36.47 m/s (131.3 km/h), peak aero downforce 7630 N, final X 183.99 m",
+      "[drive-scene] flange: tread closed to 358.9 mm of a 359.6 mm flange (149.7 of 149.0 mm sidewall, 100%); intrusion 0.72 mm, arrival 13.63 mm -> unresolved 0.718 mm, rim stop on"
     ],
     "ProjectDriveTracksideRun": [
       "[drive-scene] camera 'trackside': 120 frames at 10 fps, 480x270",
-      "[drive-scene] run: peak speed 36.31 m/s (130.7 km/h), peak aero downforce 7547 N, final X 182.90 m"
+      "[drive-scene] run: peak speed 36.47 m/s (131.3 km/h), peak aero downforce 7630 N, final X 183.99 m",
+      "[drive-scene] flange: tread closed to 358.9 mm of a 359.6 mm flange (149.7 of 149.0 mm sidewall, 100%); intrusion 0.72 mm, arrival 13.63 mm -> unresolved 0.718 mm, rim stop on"
     ],
     "ProjectDriveOrbitWhileDriving": [
       "[drive-scene] camera 'orbit': 120 frames at 10 fps, 480x270",
-      "[drive-scene] run: peak speed 36.31 m/s (130.7 km/h), peak aero downforce 7547 N, final X 182.90 m"
+      "[drive-scene] run: peak speed 36.47 m/s (131.3 km/h), peak aero downforce 7630 N, final X 183.99 m",
+      "[drive-scene] flange: tread closed to 358.9 mm of a 359.6 mm flange (149.7 of 149.0 mm sidewall, 100%); intrusion 0.72 mm, arrival 13.63 mm -> unresolved 0.718 mm, rim stop on"
     ],
     "ProjectDriveXPBDTyreDeformation": [
       "[drive-scene] camera 'wheel': 120 frames at 10 fps, 480x270",
-      "[drive-scene] run: peak speed 36.31 m/s (130.7 km/h), peak aero downforce 7547 N, final X 182.90 m"
+      "[drive-scene] run: peak speed 36.47 m/s (131.3 km/h), peak aero downforce 7630 N, final X 183.99 m",
+      "[drive-scene] flange: tread closed to 358.9 mm of a 359.6 mm flange (149.7 of 149.0 mm sidewall, 100%); intrusion 0.72 mm, arrival 13.63 mm -> unresolved 0.718 mm, rim stop on"
+    ],
+    "ProjectDriveXPBDRimCollapse": [
+      "[drive-scene] camera 'wheel': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.46 m/s (131.3 km/h), peak aero downforce 7625 N, final X 183.71 m",
+      "[drive-scene] flange: tread closed to 342.1 mm of a 359.6 mm flange (166.5 of 149.0 mm sidewall, 112%); intrusion 17.51 mm, arrival 0.00 mm -> unresolved 0.000 mm, rim stop OFF"
     ],
     "ProjectDriveMaterialTurntable": [
       "[drive-scene] camera 'orbit': 91 frames at 10 fps, 480x270",
-      "[drive-scene] run: peak speed 7.60 m/s (27.4 km/h), peak aero downforce 341 N, final X 7.90 m"
+      "[drive-scene] run: peak speed 7.66 m/s (27.6 km/h), peak aero downforce 346 N, final X 7.95 m",
+      "[drive-scene] flange: tread closed to 488.6 mm of a 359.6 mm flange (19.9 of 149.0 mm sidewall, 13%); intrusion 0.00 mm, arrival 0.00 mm -> unresolved 0.000 mm, rim stop on"
     ]
   },
   "sha256": {
-    "ProjectDriveAeroAgainstSpeed_CPU_Reference.png": "65b8ee1e367b81b3c792403ad763e6583e021e22213f27060d6a77f6c05d8c3f",
-    "ProjectDriveAerodynamics_CPU_Reference.png": "1973933d3d527a82048660ded6fa4094b0d2d4985dc01dfc3ab03e4b076ac107",
-    "ProjectDriveChaseRun_CPU_Reference.gif": "63c125d6890a91ff63de1e571e317af676401b3434a4c9b2f69db6406c37ec4b",
+    "ProjectDriveAeroAgainstSpeed_CPU_Reference.png": "8419d9abd4e6158be0c1e707814de057184b157fce6ddec9f4321ecc798e680b",
+    "ProjectDriveAerodynamics_CPU_Reference.png": "5860d6909a0819e4b5aa3f434d6b266955cdd4e6a076333e9f442a057dd71730",
+    "ProjectDriveChaseRun_CPU_Reference.gif": "a55834ae079200cec6b8141f4a18a051b0f58093acd682cf15352bc620ef06c8",
     "ProjectDriveDriverInputs_CPU_Reference.png": "54ee18f2fe9e450f0a886b660797668de7524dd9a7523a43be55e3940796b389",
-    "ProjectDriveMaterialAngleFarSide_CPU_Reference.png": "2d3c6e35985eb338306decfee9990a192109de3dbe8e99af07e86e2ad5c47005",
-    "ProjectDriveMaterialAngleFrontQuarter_CPU_Reference.png": "010be13676254a517f2b304d21d3087238e10d5d1a7ca98f04aa70a618754098",
-    "ProjectDriveMaterialAngleFront_CPU_Reference.png": "7d557a9ca39dc98d8515d00e386ca84d9b43f300129fbf67f909c0b907fa21a4",
-    "ProjectDriveMaterialAngleRearQuarter_CPU_Reference.png": "39155f9ab625909ae21aa06b4f2daa5d16b817304c0d42bee0578c0c8cd11241",
-    "ProjectDriveMaterialAngleRear_CPU_Reference.png": "b9c1ac09e6e516016438e647369591d1ae644da0bbec4fac43a0339573f9eecd",
-    "ProjectDriveMaterialAngleSide_CPU_Reference.png": "01e4fea92b73bfba18d6d9c728b03ad1161baf7a43f866fbba887af0b1e9591b",
-    "ProjectDriveMaterialTurntable_CPU_Reference.gif": "868a3bf145dafbd225acc1d7b03fbb27dfd5a613afffc7aaf85fc78a109bb8b8",
-    "ProjectDriveOrbitWhileDriving_CPU_Reference.gif": "b4e0525cf0499e5f93596e3f8962140d9d179bc86aec272e0baa85f20d6cd7f7",
-    "ProjectDrivePhysicsRun_CPU_Reference.txt": "e83cafd22cfe5935634ddf79b7691041e4b1745d87afc9ed9d5752de9f902f63",
-    "ProjectDrivePhysicsTelemetry_CPU_Reference.csv": "312a4324b3c3b7411ee680ad23082097d112c4e671efc422c4726ebbb10f172d",
-    "ProjectDrivePhysicsTiming_CPU_Reference.txt": "4d3f2213444095c155022ea38a8875bbc02a24e0db9c9cbb7c8bf8fc2d5cf63f",
-    "ProjectDrivePowertrain_CPU_Reference.png": "38d1d1717477c55610c4a10e47bfcc34080aee68de920d930f88267d30b8a3e2",
-    "ProjectDriveSpeedVsTime_CPU_Reference.png": "82ed79b9c9954d26de802639364f7175204bb738801b6104778298de245dc889",
-    "ProjectDriveSteering_CPU_Reference.png": "f10c4223c99d98edc75b54c7b4e560df3da2e94701b5b6cee3a5ea5e9eeb279f",
-    "ProjectDriveTracksideRun_CPU_Reference.gif": "4ab39d797a84f1a189ff92dd2363e191d0416d347b4836ea74d999f54cc456aa",
-    "ProjectDriveTyreLoads_CPU_Reference.png": "15e475d49f8bb5653aec060d151e1b487e68cfff9450cb6e6e1b1e3d79b8422b",
-    "ProjectDriveXPBDTyreDeformation_CPU_Reference.gif": "7a642d85acea8132faa92dc3634fdb7f8e63ad64a07af61ee8ae1ac413b26579"
+    "ProjectDriveMaterialAngleFarSide_CPU_Reference.png": "72b551e4263093cdf774a7f2b68de929be9b1e1d1b7fd316d2bf1c167b0d8a71",
+    "ProjectDriveMaterialAngleFrontQuarter_CPU_Reference.png": "cc7d0b17595a7178cdcdaff69d0ece468ff6e6a66caed036e90952169dbdc1f8",
+    "ProjectDriveMaterialAngleFront_CPU_Reference.png": "c5b8caa9dac2b3816d1c5456820707b8b67bcbe4ed3fa9bf38c73de1b581e4fd",
+    "ProjectDriveMaterialAngleRearQuarter_CPU_Reference.png": "8f497de711ab682ae95596f2d49705c2873bb43909d962b1bf60ca327a7ca336",
+    "ProjectDriveMaterialAngleRear_CPU_Reference.png": "2e66ad5b770453139b6dd5b7f0b70981281af9b87df0eddf22f6c5d8b1896dc8",
+    "ProjectDriveMaterialAngleSide_CPU_Reference.png": "4937783215d0d181987be2e877b1ff1c29900808bf97d6b26019f519be526db3",
+    "ProjectDriveMaterialTurntable_CPU_Reference.gif": "a26dfc18612bad0c107f9a09f2093630efb3dde18cd3cd51396b60028e673519",
+    "ProjectDriveOrbitWhileDriving_CPU_Reference.gif": "807fe52c10a3d1557c9ac235ff776dad09cf22a0ac497be02bdc7b8d3694a7e1",
+    "ProjectDrivePhysicsRun_CPU_Reference.txt": "cdc7340fdc7f40bbd48ca2d3a11e22225192047b7db053298cb24926aa47c99f",
+    "ProjectDrivePhysicsTelemetry_CPU_Reference.csv": "5c7c27f0dad21825848c348a9b090b41e44784123edd25a6c839cc20ba5a8538",
+    "ProjectDrivePhysicsTiming_CPU_Reference.txt": "cedf1f27540a93d21e368b73dfc3e2f3629ebea7f9365e7e4ebe1928e3cdb1e4",
+    "ProjectDrivePowertrain_CPU_Reference.png": "aa335741852744e893b8d17fe92767e139a7522149838ddb8e97d6d77c2411e5",
+    "ProjectDriveSpeedVsTime_CPU_Reference.png": "f4d8709e7fb88167abef81b14cb1cb0cba45704aad526c1a313d357b6bc89623",
+    "ProjectDriveSteering_CPU_Reference.png": "0c86aaf2112e963b5ba709d31866a88f399be72857ef55d79ad48096ee180639",
+    "ProjectDriveTracksideRun_CPU_Reference.gif": "efdab36b239bb63c97cbadc035ba1e0b880426757a3c5b595afe0711c1b433e6",
+    "ProjectDriveTyreLoads_CPU_Reference.png": "989739335c56a90f3793620758a5fa4c9fea5f01777d17f989c07f9839e7c427",
+    "ProjectDriveXPBDRimCollapse_CPU_Reference.gif": "bc7e1db9d32707468f07107e39421e61fb23921c1cbd1c1f9196b9f9f166a6e1",
+    "ProjectDriveXPBDTyreDeformation_CPU_Reference.gif": "2133571b0e5343e3f4831046b4bd55098f22722481a0094903191de1c7146169"
   },
   "stages": {
-    "level": "Projects/Project-Drive/Source/DriveSceneAuthor (VehiclePhysics/Overlay)",
+    "level": "Projects/Project-Drive/Source/DriveSceneAuthor",
     "physics": "Engine/PhysicalDynamics/Vehicle/VehicleSolver \u2014 PacejkaDrivetrain, XPBD soft tyres, Aerodynamics",
     "camera": "Projects/Project-Drive/Source/ChaseCameraSolver, the app's own chase camera",
     "sky": "Projects/Project-Zero/Source/CelestialSequence at local hour 13.0 \u2014 the engine's real sun, sky, atmosphere, star and moon model",
@@ -81,13 +93,14 @@
   },
   "executionBoundary": {
     "nativeFrontierVulkanSlangImGuiCapture": false,
-    "description": "Every frame is rendered on the CPU by the engine's own translation units, built from the pinned checkout with VehiclePhysics/Overlay applied. No renderer, material model, sky or camera is authored in Slate. This is not a Vulkan swapchain capture; it is the same code the GPU path shades from, run headless."
+    "description": "Every frame is rendered on the CPU by the engine's own translation units, built from the flattened Frontier/ engine tree. No renderer, material model, sky or camera is authored in Slate. This is not a Vulkan swapchain capture; it is the same code the GPU path shades from, run headless."
   },
   "sequences": {
     "ProjectDriveChaseRun": "The full scripted run from the app's own ChaseCameraSolver: settle, full throttle, slalom, ramp, brake.",
     "ProjectDriveTracksideRun": "The same run from a fixed post beside the course, so the speed reads as motion through frame.",
     "ProjectDriveOrbitWhileDriving": "The same run with the eye circling the moving car: the body, wheels and course from every azimuth at speed.",
     "ProjectDriveXPBDTyreDeformation": "The front-left tyre for the whole run, close enough to read the carcass. The surface is rebuilt every frame from XPBDSoftTyre's own particle lattice, so the contact patch flattening, the shoulders bulging and the shiver over the bumps are the deformation the solver resolved \u2014 not a cylinder being squashed for the camera.",
+    "ProjectDriveXPBDRimCollapse": "The defeated control for the sequence above: the identical run with the rim-bottoming constraint switched off at the command line, so the only difference between the two GIFs is the constraint under test. The sidewall is tension-only, so with nothing to stop it the belt keeps going once it runs out of sidewall and the tread ends up 17.5 mm INSIDE the rim it is mounted on \u2014 the carcass occupying the wheel. With the constraint on, the same landing stops at the flange with 0.72 mm left, which is the constraint's own compliance answering the load rather than the tread passing through steel.",
     "ProjectDriveMaterialTurntable": "The car held at the pose the solver produced three seconds into the run, circled once, to show the twelve authored Project-Drive materials from every angle."
   },
   "retired": {
