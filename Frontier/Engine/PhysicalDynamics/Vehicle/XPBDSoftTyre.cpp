@@ -53,6 +53,7 @@ void XPBDSoftTyre::Build(const SoftTyreParameters& params, const Vec3& hubPos, c
     SpokeLateralBeta    = DerivedDamping(Parameters.SpokeLateralCompliance, Parameters.SpokeShearDampingRatio);
     ContactBeta = DerivedDamping(Parameters.ContactCompliance, Parameters.ContactDampingRatio);
     TreadBeta   = DerivedDamping(Parameters.TreadTangentialCompliance, Parameters.TreadDampingRatio);
+    RimBeta     = DerivedDamping(Parameters.RimBottomingCompliance, Parameters.RimBottomingDampingRatio);
 
     BuildEdges();
     BuildGasSurface();
@@ -230,7 +231,7 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const HubMotion& motion,
         // XPBD §3.2: λ is zeroed at the START of each substep and accumulated across that substep's iterations.
         // Carrying it between substeps would make the constraint remember a force it has already applied.
         for (SoftTyreNode& node : NodeRecords)
-        { node.SpokeLambda = 0.0f; node.ContactLambda = 0.0f; node.TreadLambda = 0.0f;
+        { node.SpokeLambda = 0.0f; node.ContactLambda = 0.0f; node.TreadLambda = 0.0f; node.RimLambda = 0.0f;
           node.SpokeTangentialLambda = 0.0f; node.SpokeLateralLambda = 0.0f; }
         for (Edge& e : ConstraintEdges) e.lambda = 0.0f;
 
@@ -453,6 +454,46 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const HubMotion& motion,
                         }
                     }
                 }
+
+            // ── project: rim bottoming (the carcass runs out of sidewall and meets the flange) ───────────────────────
+            // Unilateral, like the ground: the flange may push the tread out, never pull it in. C = r − rimLimit
+            // measured PERPENDICULAR to the spin axis, so camber and steer do not leak into it.
+            //
+            // 📝 This is the constraint that was missing. Without it the tension-only sidewall carries nothing in
+            //    compression, the gas is far too soft, and the belt collapses straight through the rim — which is
+            //    the spiking on landings. With it the rate goes near-vertical at the flange, which is both the
+            //    correct bottoming behaviour and the reaction that stops the car.
+            if (Parameters.RimBottoming)
+            {
+                const float alphaRim = Parameters.RimBottomingCompliance * invH2;
+                const float gammaRim = Parameters.RimBottomingCompliance * RimBeta / h;
+                const float rimLimit = Parameters.RimRadius + Parameters.RimBottomingClearance;
+                for (SoftTyreNode& node : NodeRecords)
+                {
+                    if (node.InverseMass <= 0.0f) continue;
+                    const Vec3  rel     = node.Position - hubPos;
+                    const Vec3  radial  = rel - axisWorld * Dot(rel, axisWorld);
+                    const float rLen    = radial.Length();
+                    if (rLen < 1e-6f) continue;
+                    const float C = rLen - rimLimit;
+                    if (C >= 0.0f) { node.RimLambda = 0.0f; continue; }   // clear of the flange: carries nothing
+                    const Vec3 dir = radial * (1.0f / rLen);
+
+                    // eq. 26 again, and the hub's own travel is subtracted for the same reason it is on the
+                    // spoke: the flange moves with the wheel, so the rate that matters is the node closing on
+                    // the RIM, not the node moving through the world.
+                    const Vec3  relPrev    = node.Previous - hubPosPrev;
+                    const Vec3  radialPrev = relPrev - axisWorld * Dot(relPrev, axisWorld);
+                    const float cDot = Dot(dir, (node.Position - node.Previous) - (hubPos - hubPosPrev))
+                                     - (rLen - radialPrev.Length());
+                    const float dLambda = (-C - alphaRim * node.RimLambda - gammaRim * cDot)
+                                        / ((1.0f + gammaRim) * node.InverseMass + alphaRim);
+                    const float newLambda = std::max(0.0f, node.RimLambda + dLambda);
+                    const float applied   = newLambda - node.RimLambda;
+                    node.RimLambda = newLambda;
+                    node.Position += dir * (applied * node.InverseMass);
+                }
+            }
             }
         }
 
@@ -566,6 +607,18 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const HubMotion& motion,
                 const float pen = Dot(sp - node.Position, nrm.Normalized());
                 if (pen > ConstraintResidual.ContactMax) ConstraintResidual.ContactMax = pen;
             }
+
+        if (Parameters.RimBottoming)
+        {
+            const float rimLimit = Parameters.RimRadius + Parameters.RimBottomingClearance;
+            for (const SoftTyreNode& node : NodeRecords)
+            {
+                const Vec3  rel    = node.Position - hubPos;
+                const float rLen   = (rel - axisWorld * Dot(rel, axisWorld)).Length();
+                const float breach = rimLimit - rLen;
+                if (breach > ConstraintResidual.RimMax) ConstraintResidual.RimMax = breach;
+            }
+        }
     }
 
     const float inv = 1.0f / static_cast<float>(substeps);

@@ -165,6 +165,25 @@ struct SoftTyreParameters
     // Tread tangential (bristle) compliance — sets the slip STIFFNESS (initial slope of Fx/κ, Fy/α). This is the
     // rubber-tread shear that lets the contact force build gradually before the cone limit, exactly like a brush model.
     float    TreadTangentialCompliance = 9.0e-7f;
+    // ── Rim bottoming ───────────────────────────────────────────────────────────────────────────────────────
+    // A tyre runs out of sidewall. Past that the carcass is pinched between the road and the rim flange and the
+    //    rate goes almost vertical — that hard stop is what keeps a landing from driving the wheel through the
+    //    road, and it is why a bottomed tyre thumps instead of swallowing the bump.
+    //
+    //    ⚠️ Nothing modelled it. The radial spoke is tension-only (it buckles, correctly), the gas is far too
+    //    soft to stand in for steel, and no constraint named the rim at all, so the tread simply kept
+    //    collapsing: measured on a flat-ground sweep, a 160 mm deflection put the tread band at 180 mm radius
+    //    against a 200 mm rim — 20 mm INSIDE the wheel — and 180 mm put it 40 mm inside. The belt passing
+    //    through its own rim is the spiking seen on landings, and Fz stayed linear throughout, so the car was
+    //    never given the reaction that should have stopped it.
+    //
+    //    The constraint is unilateral and stiff: a node may not approach the spin axis closer than
+    //    RimRadius + RimBottomingClearance. The clearance is the tread and carcass thickness that is still
+    //    there to be squeezed when the belt reaches the flange.
+    bool     RimBottoming            = true;      // [-]   false restores the old unbounded collapse
+    float    RimBottomingClearance   = 0.015f;    // [m]   tread + carcass thickness held off the flange
+    float    RimBottomingCompliance  = 2.0e-8f;   // [m/N] rubber pinched on steel: stiffer than ground contact
+    float    RimBottomingDampingRatio = 1.00f;    // [-]   a pinch is strongly dissipative, not a spring
 
     // ── Rayleigh damping, as DAMPING RATIOS ─────────────────────────────────────────────────────────────────
     // XPBD §5. The elastic solve alone dissipates only what the implicit discretisation happens to lose, which
@@ -226,6 +245,7 @@ struct SoftTyreNode
     float SpokeLateralLambda    = 0.0f;   // sidewall axial
     float ContactLambda = 0.0f;   // ground non-penetration (unilateral: λ ≥ 0)
     float TreadLambda   = 0.0f;   // tread bristle tangential constraint
+    float RimLambda     = 0.0f;   // rim-flange bottoming (unilateral: λ ≥ 0)
 };
 
 // ── per-constraint-family residual, measured AFTER the solve ────────────────────────────────────────────────
@@ -244,6 +264,7 @@ struct SoftTyreResidual
     float LateralMax = 0.0f, LateralRms = 0.0f;    // carcass lateral
     float DiagonalMax = 0.0f,DiagonalRms = 0.0f;   // diagonal shear
     float ContactMax = 0.0f;                       // deepest remaining penetration
+    float RimMax = 0.0f;                           // deepest remaining rim-flange interference
 };
 
 // Aggregate ground-on-tyre reaction over the last Step (the force the tyre transmits to the car).
@@ -355,7 +376,7 @@ private:
     //    can never fall out of step.
     [[nodiscard]] float DerivedDamping(float compliance, float ratio) const noexcept;
 
-    float SpokeBeta = 0.0f, ContactBeta = 0.0f, TreadBeta = 0.0f;
+    float SpokeBeta = 0.0f, ContactBeta = 0.0f, TreadBeta = 0.0f, RimBeta = 0.0f;
     float SpokeTangentialBeta = 0.0f, SpokeLateralBeta = 0.0f;   // the non-edge constraints' derived β
 
     float SpinAngle     = 0.0f;   // [rad] carcass rotation about hub-local +Y, accumulated across steps
