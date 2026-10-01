@@ -233,11 +233,39 @@ static V DirectLight(const BVH& bvh, V P, V N, uint32_t mat, V wo){
     const vec3 e = m.Emission;
     return c + V{e.x,e.y,e.z};
 }
+static V hemiUniform(V N, float u1, float u2){ float z=u1, rr=std::sqrt(std::max(0.0f,1.0f-z*z)), th=2*PI*u2;
+    V t=norm(std::fabs(N.x)>0.9f?cross(N,{0,1,0}):cross(N,{1,0,0})); V b=cross(N,t);
+    return norm(t*(rr*std::cos(th))+b*(rr*std::sin(th))+N*z); }
 static V hemi(V N, float u1, float u2){ float r=std::sqrt(u1), th=2*PI*u2; V t=norm(std::fabs(N.x)>0.9f?cross(N,{0,1,0}):cross(N,{1,0,0})); V b=cross(N,t);
     return norm(t*(r*std::cos(th))+b*(r*std::sin(th))+N*std::sqrt(std::max(0.0f,1-u1))); }
 
 //------------------------------------------------------------------------------------------------------------------------ surfels
-struct Surfel{ V pos,n,albedo; float radius; V E{0,0,0},Enew{0,0,0}; uint32_t age=0; };
+// GIBS (SIGGRAPH 2021, the basis of the W298/SurfelGI reference) stores DIRECTIONAL irradiance per surfel as
+//    L1 spherical harmonics -- 4 coefficients per channel -- not a single RGB. That is the difference between
+//    a surfel that lights every nearby normal identically and one that lights a wall and the floor beneath it
+//    differently. With a flat value the only directionality left is the dot(N, surfel.n) weight, which is why
+//    the bounce reads as a uniform wash over curved bodywork.
+struct Sh3 { V c[4]{{0,0,0},{0,0,0},{0,0,0},{0,0,0}}; };
+inline Sh3 operator*(const Sh3& a, float k){ Sh3 r; for(int i=0;i<4;++i) r.c[i]=a.c[i]*k; return r; }
+inline Sh3 operator+(const Sh3& a, const Sh3& b){ Sh3 r; for(int i=0;i<4;++i) r.c[i]=a.c[i]+b.c[i]; return r; }
+
+struct Surfel{ V pos,n,albedo; float radius; Sh3 E, Enew; uint32_t age=0; };
+
+// Project a radiance sample arriving from direction d into L1 SH.
+inline void ShAccumulate(Sh3& sh, V d, V L, float w)
+{
+    sh.c[0] = sh.c[0] + L*(0.282095f*w);
+    sh.c[1] = sh.c[1] + L*(0.488603f*d.y*w);
+    sh.c[2] = sh.c[2] + L*(0.488603f*d.z*w);
+    sh.c[3] = sh.c[3] + L*(0.488603f*d.x*w);
+}
+
+// Evaluate irradiance along N, with the Lambert convolution (A0 = pi, A1 = 2pi/3).
+inline V ShIrradiance(const Sh3& sh, V N)
+{
+    const float A0=3.14159265f*0.282095f, A1=2.0943951f*0.488603f;
+    return sh.c[0]*A0 + sh.c[1]*(A1*N.y) + sh.c[2]*(A1*N.z) + sh.c[3]*(A1*N.x);
+}
 // Cell size is RMAX + eps so the 3x3x3 cell walk in gatherEcov cannot miss a contributing surfel.
 struct Grid{ float cell=0.701f; std::vector<std::vector<int>> cells; int nx,ny,nz; V lo;
     void build(V mn,V mx){ lo=mn; nx=std::max(1,(int)((mx.x-mn.x)/cell)+1); ny=std::max(1,(int)((mx.y-mn.y)/cell)+1); nz=std::max(1,(int)((mx.z-mn.z)/cell)+1);
@@ -305,7 +333,7 @@ int main(int argc,char**argv){
     const float RMIN=0.22f, RMAX=0.70f, RADFAC=0.055f, COVERAGE_TARGET=2.4f;
     const int   SPAWN_BUDGET=4000;
     auto radiusAt=[&](V P){ float d=len(P-cam.eye); return std::min(RMAX,std::max(RMIN,RADFAC*d)); };
-    auto gatherEcov=[&](V P,V N,float& covOut){ V e{0,0,0}; float wsum=0;
+    auto gatherEcov=[&](V P,V N,float& covOut){ Sh3 e; float wsum=0;
         // search 3x3x3 neighbourhood
         for(int dz=-1;dz<=1;++dz)for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx){
             V q=P+V{(float)dx,(float)dy,(float)dz}*grid.cell; int c=grid.index(q); if(c<0||c>=(int)grid.cells.size())continue;
@@ -319,7 +347,7 @@ int main(int argc,char**argv){
                 float planar=std::fabs(dot(d,S.n)); if(planar>S.radius*0.5f) continue;
                 float wd=1.0f-dist/S.radius; wd*=wd;                          // SQUARED falloff, as the shader
                 float w=wn*wd; e=e+S.E*w; wsum+=w; } }
-        covOut=wsum; return wsum>1e-4f? e*(1.0f/wsum): V{0,0,0}; };
+        covOut=wsum; return wsum>1e-4f? ShIrradiance(e*(1.0f/wsum), N) : V{0,0,0}; };
     auto gatherE=[&](V P,V N){ float c; return gatherEcov(P,N,c); };
     auto gatherCoverage=[&](V P,V N){ float c; gatherEcov(P,N,c); return c; };
 
@@ -336,7 +364,9 @@ int main(int argc,char**argv){
             if(cov>=COVERAGE_TARGET) continue;
             if(rr.f() > (1.0f-cov/COVERAGE_TARGET)*0.9f+0.1f) continue;
             Surfel s; s.pos=P; s.n=gN[i]; s.albedo=gA[i]; s.radius=radiusAt(P);
-            s.E=gatherE(P,gN[i]);   // WARM START from the existing field, so a new surfel never pops black
+            // WARM START, isotropically: the gather hands back irradiance, so invert the L0 term to seed a
+            //    flat SH of the same magnitude rather than letting a new surfel pop black.
+            { const V E0=gatherE(P,gN[i]); s.E.c[0]=E0*(1.0f/(3.14159265f*0.282095f)); }
             s.age=4u;
             --budget;
             sf.push_back(s); grid.add((int)sf.size()-1,P); } };
@@ -344,12 +374,18 @@ int main(int argc,char**argv){
     // one temporal step: each surfel casts hemisphere rays, gathers direct at the hit, running-mean into E
     auto temporal=[&](int frame){ int n=(int)sf.size();
         par(n,[&](int si){ Surfel& s=sf[si]; RNG r(hashi((uint32_t)si*2246822519u ^ (uint32_t)frame*3266489917u));
-            V acc{0,0,0}; for(int k=0;k<RAYS;++k){ V d=hemi(s.n,r.f(),r.f()); int ti; float t;
+            Sh3 sh; const float w=6.28318531f/(float)RAYS;   // uniform hemisphere: pdf = 1/2pi
+            for(int k=0;k<RAYS;++k){ V d=hemiUniform(s.n,r.f(),r.f()); int ti; float t; V L;
                 if(bvh.closest(s.pos+s.n*0.003f,d,1e4f,ti,t)){ V P=s.pos+d*t; V N=tris[ti].n; if(dot(N,d)>0)N=N*-1.0f;
-                    acc=acc+DirectLight(bvh,P,N,tris[ti].mat,d*-1.0f); }
-                else acc=acc+SkyColour(d); }
-            acc=acc*(1.0f/RAYS); acc=acc*s.albedo; // bounce carries the surfel's own albedo (color bleed)
-            s.Enew=acc; });
+                    L=DirectLight(bvh,P,N,tris[ti].mat,d*-1.0f); }
+                else L=SkyColour(d);
+                // Firefly clamp. One ray landing on the emissive tail lamp otherwise injects a bright blob that
+                //    the running mean then takes dozens of frames to forget -- visible as a lingering hot patch.
+                const float m=std::max(L.x,std::max(L.y,L.z)); const float kClamp=8.0f;
+                if(m>kClamp) L=L*(kClamp/m);
+                ShAccumulate(sh,d,L*s.albedo,w);   // the bounce carries the surfel's own albedo (colour bleed)
+            }
+            s.Enew=sh; });
         for(auto& s:sf){ s.age++; float a=1.0f/std::min(s.age,64u); s.E=s.E*(1.0f-a)+s.Enew*a; } };
 
     for(int f=0;f<FRAMES;++f){ spawnPass(f); temporal(f); }
@@ -382,12 +418,28 @@ int main(int argc,char**argv){
                 else reflection = SkyColour(R);
             }
             else reflection = SkyColour(R);   // sky dome along the mirror vector, no rays
-            // Weighted by the material's own specular response, so a rough tyre does not mirror like glass.
+            // Weighted by SCHLICK FRESNEL, not by the raw specular weight. The first version used
+            //    SpecularWeight * (1 - SpecularRoughness), which is ~0.9 for almost every material here, so
+            //    nine tenths of the sky dome was added to every surface in the scene and the frame washed out
+            //    to near-white. Reflectance at normal incidence is ~0.04 for a dielectric and only approaches
+            //    1 at grazing angles -- that angular falloff is the whole character of a reflection.
             const ShadingRecord& m = MaterialFor(gM[i]);
-            const float F = m.SpecularWeight * (1.0f - m.SpecularRoughness);
-            reflection = reflection * std::max(0.0f, F);
+            const float CosTheta = std::min(1.0f, std::fabs(dot(N, rd*-1.0f)));
+            const float Fc = (1.0f-CosTheta)*(1.0f-CosTheta)*(1.0f-CosTheta)*(1.0f-CosTheta)*(1.0f-CosTheta);
+            V F0{0.04f,0.04f,0.04f};
+            F0 = F0*(1.0f-m.Metalness) + V{m.BaseColor.x,m.BaseColor.y,m.BaseColor.z}*m.Metalness;
+            const V Fr = F0 + (V{1,1,1}-F0)*Fc;
+            const float Gloss = (1.0f-m.SpecularRoughness)*(1.0f-m.SpecularRoughness);
+            reflection = V{reflection.x*Fr.x, reflection.y*Fr.y, reflection.z*Fr.z} * Gloss;
         }
-        V indirect=gatherE(P,N)*INV_PI; // gathered irradiance -> outgoing radiance
+        // Indirect must be modulated by the material it LANDS on: outgoing = albedo/pi * irradiance. This
+        //    was missing, so bounce light was added as a flat glow of the same colour and strength to every
+        //    surface regardless of what it was made of -- which is most of why the GI read as a wash.
+        //    RaytraceToggle/CpuMirror/ModeMatrix.cpp has it right as `dalb*INV_PI*E`.
+        const ShadingRecord& mr = MaterialFor(gM[i]);
+        const V dalb{ mr.BaseColor.x*(1.0f-mr.Metalness), mr.BaseColor.y*(1.0f-mr.Metalness),
+                      mr.BaseColor.z*(1.0f-mr.Metalness) };
+        V indirect=dalb*(gatherE(P,N)*INV_PI);
         img[i]=direct+indirect+reflection;
         (void)x;(void)y; });
 
