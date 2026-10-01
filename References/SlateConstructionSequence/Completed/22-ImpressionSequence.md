@@ -1,5 +1,10 @@
 # 22 — ImpressionSequence
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 A stroke is an ordered sequence of resolved brush impressions against a surface's parametric domain. It is
 recorded in the domain, committed as a transaction, and undone by its inverse — which means a stroke survives a
 change of working resolution, and undoing one costs the extents it touched rather than the surface it touched.
@@ -10,8 +15,8 @@ change of working resolution, and undoing one costs the extents it touched rathe
 
 | Field       | Value                                                                          |
 |-------------|---------------------------------------------------------------------------------|
-| Units       | `SlateCompute.lib` (resolution), `SlateDocument.lib` (persistence)              |
-| Layers      | `Layer4_Compute`, `Layer3_Document`                                             |
+| Subsystem   | `Engine/ContentInterchange` (persistence), `Engine/DeviceExchange` + `Engine/Shaders` (resolution)|
+| Origin      | `SlateCompute.lib` (resolution), `SlateDocument.lib` (persistence) · `Layer4_Compute`, `Layer3_Document` (Slate CAD)|
 | Upstream    | `04` (timestamped input), `10` (transactions), `20` (the domain), `56` (layers), `58` (the brush), `74` (intersection), `76` (intent) |
 | Downstream  | `18` samples the result; `24` transfers it                                      |
 | Unblocks    | Painting that persists, undoes and survives a resolution change                 |

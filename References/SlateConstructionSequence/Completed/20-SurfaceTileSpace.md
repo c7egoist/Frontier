@@ -1,5 +1,10 @@
 # 20 — SurfaceTileSpace
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 Painting in Slate is resolution-independent. A stroke is recorded against the surface's parametric domain, not
 against a pixel population, and the pixels that back it are a residency decision made independently and revisable
 without touching the stroke. Working extents exceed what fits on a device, so residency is demand-driven: the
@@ -12,8 +17,8 @@ recorded against the domain can.
 
 | Field       | Value                                                                     |
 |-------------|----------------------------------------------------------------------------|
-| Unit        | `SlateCompute.lib`                                                         |
-| Layer       | `Layer4_Compute`                                                           |
+| Subsystem   | `Engine/DeviceExchange` + `Engine/Shaders`                                    |
+| Origin      | `SlateCompute.lib` · `Layer4_Compute` (Slate CAD)                             |
 | Upstream    | `02` (surface space), `06` (extents, transfers), `56` (layer content), `68` (the domain) |
 | Downstream  | `22` paints into it; `24` transfers into it; `70` resolves into it; `18` samples it |
 | Unblocks    | Resolution-independent paintable surfaces                                  |

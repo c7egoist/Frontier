@@ -1,5 +1,10 @@
 # 54 — TilingSpecification
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 A repeating pattern is a declaration of plane symmetry plus content placed within one cell of it. Textiles —
 herringbone, twill, houndstooth, basket weave — are all this, and none of them is noise. The mechanism is periodic
 and deterministic, and the reason to say so first is that pattern generation reaches for noise by habit.
@@ -8,8 +13,8 @@ and deterministic, and the reason to say so first is that pattern generation rea
 
 | Field       | Value                                                                        |
 |-------------|-------------------------------------------------------------------------------|
-| Unit        | `SlateDocument.lib`                                                           |
-| Layer       | `Layer3_Document`                                                             |
+| Subsystem   | `Engine/ContentInterchange`                                                   |
+| Origin      | `SlateDocument.lib` · `Layer3_Document` (Slate CAD)                           |
 | Upstream    | `02` (`LatticeProjection`), `10`, `36`, `52` (outlines), `50` (imagery)       |
 | Downstream  | `70` resolves it; `56` holds it as a layer; `82` previews it                  |
 | Unblocks    | Repeating pattern definition — textiles and weaves                            |

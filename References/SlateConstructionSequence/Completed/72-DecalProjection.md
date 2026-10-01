@@ -1,5 +1,10 @@
 # 72 — DecalProjection
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 Placed content is text, imagery or vector outlines positioned on a surface and remaining editable afterwards. The
 four rulings that decide its behaviour are in `00` §10.1 and are **not** restated here — this document supplies the
 mechanism those rulings govern.
@@ -8,8 +13,8 @@ mechanism those rulings govern.
 
 | Field       | Value                                                                        |
 |-------------|-------------------------------------------------------------------------------|
-| Units       | `SlateDocument.lib` (the placement), `SlateCompute.lib` (resolution via `70`) |
-| Layers      | `Layer3_Document`, `Layer4_Compute`                                           |
+| Subsystem   | `Engine/ContentInterchange` (persistence), `Engine/DeviceExchange` + `Engine/Shaders` (resolution)|
+| Origin      | `SlateDocument.lib` (the placement), `SlateCompute.lib` (resolution via `70`) · `Layer3_Document`, `Layer4_Compute` (Slate CAD)|
 | Upstream    | `00` §10.1, `10` (transactions), `12` (enclosure), `46`, `50`, `52`, `54`, `56` |
 | Downstream  | `70` resolves it; `78` manipulates it; `26` outlines it; `12` presents it; `82` previews it |
 | Unblocks    | Placed, re-editable text, imagery and vector content                          |

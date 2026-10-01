@@ -1,5 +1,10 @@
 # 56 — SurfaceLayerSequence
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 `20` §4 states that painted texels are authored content, that they live here, and that a resident tile is a derived
 projection of what this document holds. This is that document. It owns the ordered content of a surface: what was
 painted, what was placed onto it, what is resolved into it analytically, and the order in which all of it is read.
@@ -11,8 +16,8 @@ sequence position.
 
 | Field       | Value                                                                          |
 |-------------|---------------------------------------------------------------------------------|
-| Unit        | `SlateDocument.lib`                                                             |
-| Layer       | `Layer3_Document`                                                               |
+| Subsystem   | `Engine/ContentInterchange`                                                   |
+| Origin      | `SlateDocument.lib` · `Layer3_Document` (Slate CAD)                           |
 | Upstream    | `02`, `10` (population, transactions), `36` (working space), `42` (channels), `68` (the domain) |
 | Downstream  | `20` reconstructs from it; `22` paints into it; `70` resolves into it; `72` places into it; `50` emits it |
 | Unblocks    | Surface content that is ordered, revisable and resolution-independent          |

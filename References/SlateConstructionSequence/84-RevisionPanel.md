@@ -1,5 +1,10 @@
 # 84 — RevisionPanel
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer5` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 `10` §2.3 declares `RevisionSequence` scrubbable in both directions and `10` §2.4 declares that every transaction
 carries a description supplied at Open. Neither of those properties reaches the artist until something presents
 them. This document is that presentation: the sequence made visible, navigable and truthful about what it holds.
@@ -8,8 +13,8 @@ them. This document is that presentation: the sequence made visible, navigable a
 
 | Field       | Value                                                                        |
 |-------------|-------------------------------------------------------------------------------|
-| Unit        | `SlateUI.lib`                                                                 |
-| Layer       | `Layer5_Interface`                                                            |
+| Subsystem   | `Engine/Editor` + `Engine/SpatialInterface`                                 |
+| Origin      | `SlateUI.lib` · `Layer5_Interface` (Slate CAD)                              |
 | Upstream    | `10` (`RevisionSequence`, the lifecycle), `12` (selection), `48` (sessions), `76` |
 | Downstream  | `14` presents it as `RevisionPanel` — `14` §1                                 |
 | Unblocks    | Undo the artist can see and scrub                                             |

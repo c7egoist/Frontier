@@ -1,5 +1,10 @@
 # 50 — AssetInterchange
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 Topology and imagery arrive from files other programs wrote, and painted channels leave for programs Slate does
 not control. This document is both directions. The export half is the one that matters commercially: a painting
 application whose output cannot be loaded by the renderer the artist actually ships in is a painting application
@@ -9,8 +14,8 @@ nobody uses twice.
 
 | Field       | Value                                                                        |
 |-------------|-------------------------------------------------------------------------------|
-| Unit        | `SlateDocument.lib`                                                          |
-| Layer       | `Layer3_Document`                                                            |
+| Subsystem   | `Engine/ContentInterchange`                                                   |
+| Origin      | `SlateDocument.lib` · `Layer3_Document` (Slate CAD)                           |
 | Upstream    | `04` (`StorageExchange`), `10` (codecs, population), `34`, `36`, `42`, `48`  |
 | Downstream  | `38` (conditioning), `56`, `72`, `20`, `86`                                  |
 | Unblocks    | Topology and imagery in; painted channels **out**                            |

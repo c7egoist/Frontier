@@ -1,5 +1,10 @@
 # 14 — InterfacePanel
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer5` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 `SlateUI.lib` is the whole of `Layer5_Interface`. It links all four units beneath it and is linked only by a host.
 It owns exactly one copy of ImGui, and that copy does not escape: no ImGui spelling appears in any signature the
 host can see, in any other unit, or in any shared header.
@@ -13,8 +18,8 @@ context. Each step looks small and the sum is that ImGui became the application'
 
 | Field       | Value                                                                      |
 |-------------|-----------------------------------------------------------------------------|
-| Unit        | `SlateUI.lib`                                                               |
-| Layer       | `Layer5_Interface`                                                          |
+| Subsystem   | `Engine/Editor` + `Engine/SpatialInterface`                                 |
+| Origin      | `SlateUI.lib` · `Layer5_Interface` (Slate CAD)                              |
 | Upstream    | `04` (window, input, clipboard), `06` (device), `08` (final recording), `10`, `12`, `42`, `46`, `56`, `58`, `66` (`DisplaySurface`), `68`, `76`, `84`, `86` |
 | Downstream  | `32` assembles it into a host                                              |
 | Unblocks    | A visible, interactive application                                          |

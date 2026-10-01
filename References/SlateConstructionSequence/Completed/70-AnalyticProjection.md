@@ -1,5 +1,10 @@
 # 70 — AnalyticProjection
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 Some content is a description rather than texels: an outline, a repeating pattern, a placed source with a
 transform. `20` §2.1 names this as the third reconstruction source for a promoted tile, and its cost is bounded by
 resolution work rather than by transfer. This document is what performs that resolution.
@@ -8,8 +13,8 @@ resolution work rather than by transfer. This document is what performs that res
 
 | Field       | Value                                                                        |
 |-------------|-------------------------------------------------------------------------------|
-| Unit        | `SlateCompute.lib`                                                            |
-| Layer       | `Layer4_Compute`                                                              |
+| Subsystem   | `Engine/DeviceExchange` + `Engine/Shaders`                                    |
+| Origin      | `SlateCompute.lib` · `Layer4_Compute` (Slate CAD)                             |
 | Upstream    | `02` (`LatticeProjection`, `PlanarClassifier`), `20` (tiles, budget), `52`, `54`, `56`, `72` |
 | Downstream  | `20` promotes what it resolves; `18` samples it; `82` previews through it     |
 | Unblocks    | Resolution-free sources resolved at promotion                                 |

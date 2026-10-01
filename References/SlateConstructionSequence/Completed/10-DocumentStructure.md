@@ -1,5 +1,10 @@
 # 10 — DocumentStructure
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 `SlateDocument.lib` holds everything the engine can contain, name, persist and revise — and it holds none of it on
 a device. It is a peer of `SlateVulkan`, linking neither it nor anything above it. That peer relationship is
 the load-bearing property of the whole partition: a document model that cannot compile without a `VkDevice` has
@@ -12,8 +17,8 @@ This is one of the two units `04-UnitDirectoryStructure.md` omits. It exists bec
 
 | Field       | Value                                                                          |
 |-------------|---------------------------------------------------------------------------------|
-| Unit        | `SlateDocument.lib`                                                             |
-| Layers      | `Layer2_Format`, `Layer3_Document`                                              |
+| Subsystem   | `Engine/ContentInterchange`                                                   |
+| Origin      | `SlateDocument.lib` · `Layer2_Format`, `Layer3_Document` (Slate CAD)          |
 | Upstream    | `02` (transforms, tolerances), `04` (streams)                                   |
 | Downstream  | `12` linearises it; `14` presents it; `20`, `22`, `24` author into it           |
 | Unblocks    | Anything the engine can hold, name, save or undo                                |

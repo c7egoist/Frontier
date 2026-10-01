@@ -1,5 +1,10 @@
 # 58 — BrushSpecification
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 `22` resolves a stroke against a brush and does not own one. Every reference to "the brush" anywhere in the
 sequence resolves here — `00` §10 conflict 12 records that before this document those references named nothing.
 A brush is a declaration: a shape, a spacing, a channel set, and a set of dynamics that read input axes.
@@ -8,8 +13,8 @@ A brush is a declaration: a shape, a spacing, a channel set, and a set of dynami
 
 | Field       | Value                                                                          |
 |-------------|---------------------------------------------------------------------------------|
-| Unit        | `SlateDocument.lib`                                                             |
-| Layer       | `Layer3_Document`                                                               |
+| Subsystem   | `Engine/ContentInterchange`                                                   |
+| Origin      | `SlateDocument.lib` · `Layer3_Document` (Slate CAD)                           |
 | Upstream    | `02` (sampling, `CurveSolver`), `10` (persistence), `36` (working space), `42` (channels), `50`/`52` (shape sources) |
 | Downstream  | `22` resolves strokes against it; `76` holds the active one; `82` previews it   |
 | Unblocks    | The brush every stroke in `22` is resolved against                              |

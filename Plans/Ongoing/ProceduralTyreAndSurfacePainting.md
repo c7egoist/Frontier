@@ -158,7 +158,10 @@ thing is the *stroke*, not the texels it happens to light up, and texels are a d
 residency decision.
 
 The architecture lives in a numbered specification sequence in `SultanAladin/Slate`, vendored here as
-`References/SlateConstructionSequence/`. The painting story spans these documents:
+`References/SlateConstructionSequence/` and **adapted for this tree** — Slate CAD builds `Slate*.lib` units
+behind a `Layer1`–`Layer5` split, which this flat engine does not have, so the thirteen painting documents now
+carry a Frontier subsystem in their position table and keep the original unit as `Origin`. The subsystem map is
+`Docs/SurfacePaintingArchitecture.md`. The painting story spans these documents:
 
 | Doc | What it fixes |
 |---|---|
@@ -218,15 +221,18 @@ returns to the same state.
 Phase 1 first, because Phase 2 cannot be gated until the mesh is actually closed — a watertightness
 assertion on a deformed mesh is meaningless if the rest mesh already has thirteen thousand open edges.
 Phase 3 can start its HTML prototype in parallel with Phase 1 since it shares no code. Phase 4 depends on Phase 1 for charts, and on the construction
-sequence being implemented — the tyre is its first surface, not its driver.
+sequence being implemented — the tyre is its first surface, not its driver. Implementation order within Phase 4
+follows the sequence's own numbering: `20` (the domain and its residency) before `22` (strokes against it),
+because a stroke needs a domain to be recorded against.
 
 ## Open questions
 
-1. **Naming.** Phase 4 now uses the names the construction sequence already fixed. Phases 1–3 use the
-   closed suffix list from `SKILL-Naming`: `Specification`, `Solver`,
-   `Structure`, `Codec`, `Index`, `Panel`, `Host`, `Projection`, `Depot`. The neighbouring SolidArc tool
-   ships `FigureRecipe`, `SceneDocument` and `OutlinerAdapter`, none of which are on that list. The rule
-   and local consistency disagree; the rule is followed above, but that is a decision to confirm.
+1. **Naming — resolved.** The construction sequence's names were checked against the closed suffix list in
+   `SKILL-Naming` and are already compliant: `Sequence` is defined as "ordered workflow — strokes, layer
+   order, revisions", `Space` as "spatial subdivision — tile", `Depot` as "a store of derived, evictable,
+   reconstructible artefacts". So `ImpressionSequence`, `SurfaceTileSpace` and `UvSurfaceDepot` need no
+   renaming. Only the neighbouring SolidArc tool is off-list (`FigureRecipe`, `SceneDocument`,
+   `OutlinerAdapter`); it is treated as legacy and not copied.
 2. **Triangle budget.** One tread is 67,665 triangles at `polyDetail 6`, so four wheels is roughly 270k
    before the sidewalls. Acceptable for a hero vehicle, needs LODs before traffic. The target wants
    setting before Phase 1 rather than after.

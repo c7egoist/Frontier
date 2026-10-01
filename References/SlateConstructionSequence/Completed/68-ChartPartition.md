@@ -1,5 +1,10 @@
 # 68 — ChartPartition
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 Every paintable surface addresses a parametric domain, and that domain has to exist before anything subdivides it,
 paints into it or transfers through it. This document produces it: where the topology is cut, how each piece is
 flattened, how the pieces are arranged, and what the distortion of the result is.
@@ -10,8 +15,8 @@ flattened, how the pieces are arranged, and what the distortion of the result is
 
 | Field       | Value                                                                                     |
 |-------------|--------------------------------------------------------------------------------------------|
-| Unit        | `SlateCompute.lib`                                                                         |
-| Layer       | `Layer4_Compute`                                                                           |
+| Subsystem   | `Engine/DeviceExchange` + `Engine/Shaders`                                    |
+| Origin      | `SlateCompute.lib` · `Layer4_Compute` (Slate CAD)                             |
 | Upstream    | `02` (`UnwrapSolver`, `PlanarClassifier`), `10` (topology), `34` (off-tick solving), `38`   |
 | Downstream  | `20` subdivides the domain; `22` paints into it; `24` transfers through it; `18` §1.1 derives its basis from it |
 | Unblocks    | Seams and unwrap, ahead of the domain that needs them                                      |

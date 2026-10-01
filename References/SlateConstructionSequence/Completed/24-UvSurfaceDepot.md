@@ -1,5 +1,10 @@
 # 24 — UvSurfaceDepot
 
+> 🏷️ **Adapted for Frontier.** Written for Slate CAD, whose units are `Slate*.lib` behind a numbered
+> `Layer1`–`Layer4` split. This tree has neither: the engine is flat under `Frontier/Engine/<Subsystem>`.
+> The `Position In The Sequence` section below carries the Frontier subsystem and keeps the original unit
+> and layer as `Origin`. The mechanism in the body is unchanged and remains authoritative.
+
 Transfer moves attributes from a dense source topology onto a sparse working topology through the parametric
 domain. It is Tier C — it converges against a declared criterion — and it is held to reporting which criterion
 terminated it.
@@ -12,8 +17,8 @@ Mathematical Vocabulary. ⚠️ `Bake` is banned; the operation is transfer, and
 
 | Field       | Value                                                                        |
 |-------------|-------------------------------------------------------------------------------|
-| Unit        | `SlateCompute.lib`                                                            |
-| Layer       | `Layer4_Compute`                                                              |
+| Subsystem   | `Engine/DeviceExchange` + `Engine/Shaders`                                    |
+| Origin      | `SlateCompute.lib` · `Layer4_Compute` (Slate CAD)                             |
 | Upstream    | `02` (`LinearSolver`, Tier A predicates), `10`, `68` (the domain), `20` (`SurfaceDepot`) |
 | Downstream  | `18` samples the transferred result                                           |
 | Unblocks    | Attributes moved between topologies                                           |
