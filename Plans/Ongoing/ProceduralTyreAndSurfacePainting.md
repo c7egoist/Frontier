@@ -51,7 +51,7 @@ another patch to it.
 ```
 Frontier/Engine/ContentInterchange/Tyre/
     TreadSpecification.h            carcass parameters: width, aspect, rim, depth, crown, shoulder, wear
-    TreadPatternSpecification.h     the layer stack: circ, lateral, chevron, sipe, dimple, hex, noise
+    TreadPatternSpecification.h     the layer sequence: circ, lateral, chevron, sipe, dimple, hex, noise
     TreadRegionSolver.{h,cpp}       boolean stack to depth-ordered floor pieces
     TreadMeshSolver.{h,cpp}         pieces to one indexed watertight mesh
     TyreProfileSpecification.h      crown, shoulder arc, sidewall bezier, bead seat
@@ -108,7 +108,7 @@ References/TyreEditor.html          outliner rows, the asset window, the inspect
 ```
 
 The prototype answers the layout questions — what belongs in the always-present inspector versus the
-separate asset window, how the layer stack reads, which values want sliders and which want numeric entry —
+separate asset window, how the layer sequence reads, which values want sliders and which want numeric entry —
 and only then does the C++ get written against the answer.
 
 ### Then, against the SolidArc template
@@ -130,7 +130,7 @@ Frontier/Engine/Editor/TyreInspectorPanel.{h,cpp}
 That signature matches `RecordCameraInspector` exactly, so the quick sliders land in the existing
 inspector while the full editor is a separate window — the split the brief asked for.
 
-Outliner rows: **Tyre** with children **Carcass**, **Tread pattern** (the layer stack), **Sidewall decals**
+Outliner rows: **Tyre** with children **Carcass**, **Tread pattern** (its layer sequence), **Sidewall decals**
 and **XPBD lattice**, using role bits in the shape of `SolidArcOutlinerFilter`.
 
 ### Inflation pressure
@@ -151,73 +151,79 @@ so the measurement exists; what is new is the parameter it is swept against.
 
 ## Phase 4 — Surface painting
 
-In the editor this behaves like a painting application. Outside the editor the result is baked to one
-texture set per variant and nothing paints at runtime.
+**This phase does not get designed here. It already is designed.** An earlier version of this plan
+proposed baking the painted result to an atlas as the source of truth, with decals and strokes
+composited into it. That is wrong, and the correction matters enough to state plainly: the authored
+thing is the *stroke*, not the texels it happens to light up, and texels are a derived, revisable
+residency decision.
 
-### What already exists, and was found rather than assumed
+The architecture lives in a numbered specification sequence in `SultanAladin/Slate`, vendored here as
+`References/SlateConstructionSequence/`. The painting story spans these documents:
 
-There is **no written plan** for texture painting in either `SultanAladin/Frontier` or
-`SultanAladin/Slate`. There is something better: a 31-file working prototype, now vendored here.
+| Doc | What it fixes |
+|---|---|
+| `20-SurfaceTileSpace` | Painting is resolution-independent. A stroke is recorded against the surface's parametric domain, not a pixel population. Residency is demand-driven, promotion budget-bounded, tiles 128 texels per edge with a 4-texel border. |
+| `22-ImpressionSequence` | A stroke is an ordered sequence of resolved brush impressions in the domain, committed as a transaction and undone by its inverse. A stroke therefore survives a change of working resolution. |
+| `24-UvSurfaceDepot` | The UV surfaces themselves. |
+| `56-SurfaceLayerSequence` | The ordered content of a surface: painted, placed, and analytically resolved, and the order it is read in. |
+| `58-BrushSpecification` | What a brush is. |
+| `68-ChartPartition` | Chart layout. |
+| `70-AnalyticProjection` | Content that is a description rather than texels — outlines, patterns, placed sources. |
+| `72-DecalProjection` | Placed text, imagery and vector outlines that stay editable. |
+| `54-TilingSpecification` | Repeating pattern as a declaration of plane symmetry. |
+| `10-DocumentStructure` §2.3–2.4 | `RevisionSequence`, scrubbable in both directions; every transaction invertible. |
+| `84-RevisionPanel` | Scrubbing the history: backward replays inverses, forward replays operations. |
+| `50-AssetInterchange` | Where baked channels go when they leave for other programs. |
 
-```
-References/PaintingSurface/              the prototype, from SultanAladin/Frontier @ 4a77bfd
-    Deposit/        DabFootprint, PaintPass, SnapshotStore, StrokeRecord
-    Ingest/         AtlasGroundTruth, SurfaceUpload, WavefrontDecode
-    Instruments/    StrokeDriver, SurfacePick
-    Interface/      ToolMenu, LayerInspector, MaterialShelf, DesignTokens
-    Layers/         LayerStack, LayerKinds, LayerMask, LayerComposite, ChannelSet,
-                    ChannelPreview, GeneratorPass, MaterialSwatch
-    Projection/     OrbitProjection, SurfaceCapture, SurfaceRasterization
-References/GeometryWorkspaceAndMaterialProcessingPlan.md
-```
+Three consequences for this work.
 
-The prototype has already settled two things worth keeping verbatim.
+**The history is the asset.** Strokes, decals and placed content are stored as structure, so the paint
+history can be rewritten and the same surface re-resolved at a different resolution without repainting.
+Baking is an *export* path under `50-AssetInterchange`, not the representation.
 
-**Layer kinds are capabilities, not labels.** `paint`, `fill`, `material`, `generator`, where only `paint`
-accepts brush strokes. Its own comment makes the point that this has to be enforced in the stroke path
-rather than shown in the UI, because otherwise a stroke aimed at a material layer is swallowed silently
-and reads to the user as painting having randomly stopped working.
+**Evaluation is device-side.** `20` and `22`'s resolution half both sit in `SlateCompute.lib` /
+`Layer4_Compute`. Texels are produced on the GPU against a demand-driven, budget-bounded tile residency,
+which is what keeps a repaint off the CPU rather than spiking it.
 
-**The channel set is fixed and ordered:** `baseColour, metallic, roughness, emission, normal, height`.
+**The names already exist, and so do the bans.** The earlier draft of this plan invented
+`PaintLayerDepot`, `LayerCompositeSolver`, `SurfaceBakeSolver` and `TyreChartProjection`. All four are
+withdrawn — the sequence already names these things. `Stack` is banned (`56`): the ordered content of a
+surface is a `SurfaceLayerSequence` and a position in it is a sequence position. `Stamp` is banned
+(`22`): one resolved brush placement is an `ImpressionSample`. `Mip` and `Table` are banned too.
 
-`GeometryWorkspaceAndMaterialProcessingPlan.md` is the second half of the answer. It is not a paint plan,
-but it defines the contracts a paint evaluator has to satisfy — it already lists `PaintedTiles` alongside
-`Constant`, `ImportedImage`, `ProceduralNode` and `Reference` as a layer source kind, and states that the
-full procedural and paint compositing stack waits on an evaluator delivery. That is the interface this
-phase delivers against, so the two documents should be read together.
+### What this phase actually delivers
 
-### Work
+Not a new subsystem — the tyre as the **first surface** to go through the existing one:
 
-```
-Frontier/Engine/ContentInterchange/Surface/
-    TyreChartProjection.{h,cpp}     cylindrical tread, planar-polar sidewalls, packed to one atlas
-    PaintLayerDepot.{h,cpp}         stored layers, matching the prototype's four kinds
-    LayerCompositeSolver.{h,cpp}    the compositor, channel order fixed as above
-    SurfaceBakeSolver.{h,cpp}       layer stack to the shipped texture set
-```
-
-A decal and a brush stroke are the same thing — a layer — so the sidewall decal stack already on
-`arena/01a0f767-slate` (commit `38440b0`) folds in as the first layer type rather than a parallel system.
-
-Baking rather than shading from the stack is the right default: 400 instances sharing one topology also
-share one baked atlas, which is the same argument that decided the cage question.
+1. Tyre charts produced through `68-ChartPartition` and held in `24-UvSurfaceDepot`, rather than a
+   bespoke tyre-only projection. The generated tread already emits `u = x/circ`, `v = (y+A)/(2A)`;
+   that becomes a chart contribution, not a private UV convention.
+2. The sidewall decal work on `arena/01a0f767-slate` (commit `38440b0`) re-expressed as
+   `72-DecalProjection` placements, so lettering stays editable instead of being burnt in.
+3. The tread pattern itself is a candidate for `70-AnalyticProjection` — it is a description, not
+   texels, which is exactly what that document is for.
+4. The `References/PaintingSurface/` prototype remains useful as the **interface** record — its layer
+   kinds, its channel order, and its insistence that paintability is enforced in the stroke path. It is
+   not the architecture; `20`, `22` and `56` are.
 
 ### Gate
 
-Chart injectivity and no overlap in the atlas; a painted stroke round-trips through bake and reload
-unchanged; the composite matches the prototype's output for the same layer stack, which gives a reference
-to compare against instead of judging it by eye.
+Re-resolve a painted tyre at two working resolutions from the same `ImpressionSequence` and compare:
+the result must agree within filtering tolerance, which is the property the whole design exists to buy.
+Then scrub the `RevisionSequence` backward and forward across a paint session and assert the surface
+returns to the same state.
 
 ## Order, and why
 
 Phase 1 first, because Phase 2 cannot be gated until the mesh is actually closed — a watertightness
 assertion on a deformed mesh is meaningless if the rest mesh already has thirteen thousand open edges.
-Phase 3 can start its HTML prototype in parallel with Phase 1 since it shares no code. Phase 4 depends on
-Phase 1 for charts.
+Phase 3 can start its HTML prototype in parallel with Phase 1 since it shares no code. Phase 4 depends on Phase 1 for charts, and on the construction
+sequence being implemented — the tyre is its first surface, not its driver.
 
 ## Open questions
 
-1. **Naming.** This plan uses the closed suffix list from `SKILL-Naming`: `Specification`, `Solver`,
+1. **Naming.** Phase 4 now uses the names the construction sequence already fixed. Phases 1–3 use the
+   closed suffix list from `SKILL-Naming`: `Specification`, `Solver`,
    `Structure`, `Codec`, `Index`, `Panel`, `Host`, `Projection`, `Depot`. The neighbouring SolidArc tool
    ships `FigureRecipe`, `SceneDocument` and `OutlinerAdapter`, none of which are on that list. The rule
    and local consistency disagree; the rule is followed above, but that is a decision to confirm.
