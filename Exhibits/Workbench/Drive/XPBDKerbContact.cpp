@@ -86,11 +86,12 @@ struct Outcome
     float ShoulderFraction = 0.0f;  // [-] share of contacting nodes on the outer two rings
 };
 
-Outcome PressIntoKerb(const XPBDSoftTyre::GroundQuery& Query)
+Outcome PressIntoKerb(const XPBDSoftTyre::GroundQuery& Query, float Friction = 2.2f)
 {
     SoftTyreParameters params;
     params.RingCount = 5u;
     params.SegmentCount = 64u;
+    params.FrictionCoefficient = Friction;
 
     XPBDSoftTyre tyre;
     // Hub placed so the tyre's shoulder overlaps the kerb face by ~25 mm, rolling radius clear of the floor.
@@ -134,6 +135,15 @@ int main()
     const Outcome Flat = PressIntoKerb(HeightfieldOnly);
     const Outcome Real = PressIntoKerb(KerbSurface);
 
+    // ── the wall's OWN reaction, with the tread friction switched off ───────────────────────────────────────
+    // The claim under test is about the QUERY: a heightfield has nowhere to report a vertical face, so its
+    // contact normal is +Z everywhere and the surface it describes cannot push sideways at all. Tread friction
+    // can and does produce a lateral force in both rigs — it is a real force, it is just not the wall — and at
+    // μ = 2.2 on a carcass pressed hard onto a step it is large enough to drown the thing being measured.
+    // Running both queries frictionless isolates the normal reaction, which is what the claim is about.
+    const Outcome FlatBare = PressIntoKerb(HeightfieldOnly, 0.0f);
+    const Outcome RealBare = PressIntoKerb(KerbSurface, 0.0f);
+
     std::printf("\n%-22s %-16s %s\n", "", "heightfield", "surface query");
     std::printf("%-22s %-16.1f %.1f\n",   "lateral force [N]",   Flat.LateralForce,  Real.LateralForce);
     std::printf("%-22s %-16.1f %.1f\n",   "vertical force [N]",  Flat.VerticalForce, Real.VerticalForce);
@@ -143,14 +153,17 @@ int main()
     std::printf("%-22s %-16.0f %.0f\n",   "on the shoulder [%]", Flat.ShoulderFraction * 100.0f,
                                                                  Real.ShoulderFraction * 100.0f);
 
-    // The heightfield's contact normal is always +Z, so its reaction can only ever lift. It still shows some
-    //    lateral force -- that is tread FRICTION, not the wall -- which is why the gate is about which term
-    //    DOMINATES rather than whether a lateral number exists at all.
-    Check(Flat.VerticalForce > 2.0f * std::fabs(Flat.LateralForce),
-          "the heightfield lifts the tyre OVER the kerb instead of stopping it (the defect)");
+    std::printf("\nfrictionless (the wall's own reaction, with no tread force in the way)\n");
+    std::printf("%-22s %-16.1f %.1f\n", "lateral force [N]",  FlatBare.LateralForce,  RealBare.LateralForce);
+    std::printf("%-22s %-16.1f %.1f\n", "vertical force [N]", FlatBare.VerticalForce, RealBare.VerticalForce);
+
+    Check(std::fabs(FlatBare.LateralForce) < 1.0f,
+          "a heightfield has NO lateral reaction to give: its normal is +Z everywhere (the defect)");
+    Check(FlatBare.VerticalForce > 1000.0f,
+          "all the heightfield can do is lift the tyre OVER the kerb");
+    Check(RealBare.LateralForce > 2.0f * RealBare.VerticalForce,
+          "the surface query's own reaction against a vertical face is mostly lateral");
     Check(Real.LateralForce > 100.0f, "the surface query pushes the tyre off the kerb sideways");
-    Check(Real.LateralForce > 2.0f * Real.VerticalForce,
-          "against a vertical face the reaction is mostly lateral, not a lift");
     Check(Real.ShoulderSquash > 0.005f,
           "the wall actually deforms the carcass laterally (shoulder pressed in >5 mm)");
     Check(Real.Contacts > 0u, "nodes actually registered contact with the face");

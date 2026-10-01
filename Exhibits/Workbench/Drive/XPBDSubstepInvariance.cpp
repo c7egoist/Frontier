@@ -46,14 +46,17 @@ struct Settled
     float Deflection = 0.0f;   // peak radial squash [m]
     float NormalLoad = 0.0f;   // vertical ground reaction [N]
     uint32_t Contacts = 0u;
-    float MaxSpeed = 0.0f;     // fastest node at the end of the settle [m/s] — is it actually AT REST?
+    float Drift = 0.0f;        // [m/s] furthest any node travels in one 240 Hz frame — is it actually AT REST?
+    float GaugePressure = 0.0f;// [Pa]  what the gas law made of the squashed volume
+    float PatchPressure = 0.0f;// [Pa]  reaction / contact patch area
 };
 
-Settled SettleAt(uint32_t substeps, float hubHeight, float seconds)
+Settled SettleAt(uint32_t substeps, float hubHeight, float seconds, float inflation = 110000.0f)
 {
     SoftTyreParameters params;
     params.RingCount = 5u;
     params.SegmentCount = 64u;
+    params.InflationPressure = inflation;
 
     XPBDSoftTyre tyre;
     const Vec3 hub{0.0f, 0.0f, hubHeight};
@@ -101,10 +104,27 @@ Settled SettleAt(uint32_t substeps, float hubHeight, float seconds)
         const float squash = std::fabs(rest - r);
         if (squash > out.Deflection) out.Deflection = squash;
     }
-    for (const SoftTyreNode& n : tyre.Nodes())
-        out.MaxSpeed = std::fmax(out.MaxSpeed, n.Velocity.Length());
+
+    // ── "at rest" measured over a FIXED window, not over one substep ─────────────────────────────────────────
+    // Node velocity is derived as (x − xⁿ)/Δτ, so at 32 substeps a six-micron residual reads as 44 mm/s while
+    // the same carcass at 4 substeps reads 0.08 mm/s. That is the divisor talking, not the tyre. How far a
+    // node actually TRAVELS in one 240 Hz frame is the same physical question with no Δτ in it.
+    std::vector<Vec3> before;
+    before.reserve(tyre.Nodes().size());
+    for (const SoftTyreNode& n : tyre.Nodes()) before.push_back(n.Position);
+    tyre.Step(dt, substeps, hub, rot, Vec3{0.0f, 0.0f, 0.0f}, ground);
+    for (size_t i = 0; i < before.size(); ++i)
+        out.Drift = std::fmax(out.Drift, (tyre.Nodes()[i].Position - before[i]).Length() / dt);
+
     out.NormalLoad = samples ? static_cast<float>(loadAccum / samples) : 0.0f;
     out.Contacts = samples ? static_cast<uint32_t>(contactAccum / samples + 0.5) : 0u;
+    out.GaugePressure = tyre.Reaction().GaugePressure;
+
+    // Contact patch area from the node pitch the lattice was built with.
+    const float nodeArea = (2.0f * 3.14159265f * params.Radius / static_cast<float>(params.SegmentCount))
+                         * (params.Width / static_cast<float>(params.RingCount));
+    const float patch = static_cast<float>(out.Contacts) * nodeArea;
+    out.PatchPressure = (patch > 0.0f) ? out.NormalLoad / patch : 0.0f;
     return out;
 }
 
@@ -122,12 +142,15 @@ int main()
 
     const uint32_t schedule[] = {4u, 8u, 16u, 32u};
     std::vector<Settled> results;
-    std::printf("\n%-10s %-16s %-16s %-10s %s\n", "substeps", "deflection [mm]", "load [N]", "contacts", "rest [mm/s]");
+    std::printf("\n%-10s %-16s %-16s %-10s %-12s %s\n",
+                "substeps", "deflection [mm]", "load [N]", "contacts", "drift [mm/s]", "gauge [kPa]");
     for (uint32_t s : schedule)
     {
         const Settled r = SettleAt(s, hubHeight, 1.60f);
         results.push_back(r);
-        std::printf("%-10u %-16.3f %-16.1f %-10u %.3f\n", s, r.Deflection * 1000.0f, r.NormalLoad, r.Contacts, r.MaxSpeed * 1000.0f);
+        std::printf("%-10u %-16.3f %-16.1f %-10u %-12.3f %.1f\n",
+                    s, r.Deflection * 1000.0f, r.NormalLoad, r.Contacts, r.Drift * 1000.0f,
+                    r.GaugePressure * 0.001f);
     }
 
     // The invariance itself. A PBD solver's deflection walks monotonically with the substep count; XPBD's
@@ -151,9 +174,9 @@ int main()
     // slower (that is what damping does), so this is asserted rather than assumed -- the earlier 0.35 s window
     // was comparing three different points on a transient and calling the spread a stiffness error.
     float worstRest = 0.0f;
-    for (const Settled& r : results) worstRest = std::fmax(worstRest, r.MaxSpeed);
-    std::printf("[xpbd-invariance] fastest node at the end of the settle: %.3f mm/s\n", worstRest * 1000.0f);
-    Check(worstRest < 0.010f, "the lattice actually came to rest before being measured (<10 mm/s)");
+    for (const Settled& r : results) worstRest = std::fmax(worstRest, r.Drift);
+    std::printf("[xpbd-invariance] furthest a node travels in one 240 Hz frame: %.3f mm/s\n", worstRest * 1000.0f);
+    Check(worstRest < 0.010f, "the lattice actually came to rest before being measured (<10 mm/s over a frame)");
 
     Check(maxDefl > 0.001f, "the carcass actually deflected under load (>1 mm)");
     Check(deflSpread < 0.05f, "deflection is substep-invariant to within 5% (XPBD, not PBD)");
@@ -184,6 +207,28 @@ int main()
         std::printf("[xpbd-invariance] baseline deflection at 16 substeps %.3f mm\n", baseline * 1000.0f);
         Check(baseline > 0.001f, "the 16-substep baseline is a real measurement");
     }
+
+    // ── is it a PNEUMATIC tyre? ──────────────────────────────────────────────────────────────────────────────
+    // A membrane tread cannot carry bending, so the average contact pressure of a real tyre is its inflation
+    // pressure, and the load it carries scales with that pressure. Both failed outright before the gas was
+    // integrated over the enclosed surface and the sidewall was made tension-only: at 50 kPa the patch
+    // pressure read 2.12x the gauge pressure, because the load was going through a sidewall in COMPRESSION,
+    // which is a thing a sidewall cannot do.
+    std::printf("\n%-16s %-14s %-14s %-14s %s\n",
+                "inflation[kPa]", "load [N]", "contacts", "patch p [kPa]", "patch p / gauge");
+    float lightLoad = 0.0f, heavyLoad = 0.0f, worstRatio = 0.0f;
+    for (float kPa : {50.0f, 110.0f, 200.0f})
+    {
+        const Settled r = SettleAt(16u, probe.Radius - 0.010f, 1.60f, kPa * 1000.0f);
+        const float ratio = (r.GaugePressure > 0.0f) ? r.PatchPressure / r.GaugePressure : 0.0f;
+        std::printf("%-16.0f %-14.1f %-14u %-14.1f %.3f\n",
+                    kPa, r.NormalLoad, r.Contacts, r.PatchPressure * 0.001f, ratio);
+        if (kPa == 50.0f)  lightLoad = r.NormalLoad;
+        if (kPa == 200.0f) heavyLoad = r.NormalLoad;
+        worstRatio = std::fmax(worstRatio, std::fabs(ratio - 1.0f));
+    }
+    Check(worstRatio < 0.25f, "contact pressure equals inflation pressure to within 25% (it is pneumatic)");
+    Check(heavyLoad > 2.5f * lightLoad, "the load the tyre carries scales with the gas, not with the sidewall");
 
     std::printf("\n[xpbd-invariance] %d gates passed, %d failed\n", g_Checks, g_Failures);
     return g_Failures == 0 ? 0 : 1;

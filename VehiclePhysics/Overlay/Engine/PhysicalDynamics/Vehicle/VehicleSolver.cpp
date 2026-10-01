@@ -225,12 +225,16 @@ void VehicleSolver::StepSimple(float Δτ) noexcept
         const Vec3 r      = hub - cs.Position;
         const Vec3 hubVel = cs.LinearVelocity + Cross(cs.AngularVelocity, r);
 
-        // Free-rolling reference: present the hub's PLANAR velocity as the belt/surface velocity so the loaded tyre does
-        //    not manufacture spurious drag from the hub simply translating (this tyre models no wheel spin). It then
-        //    reports the vertical load Fz through direct node-vs-heightfield contact; the in-plane forces are the driving
-        //    layer below, bounded by that load. Vertical (Z) slip is left untouched so contact still resolves normally.
-        const Vec3 surfaceVel{hubVel.x, hubVel.y, 0.0f};
-        tyre.Step(Δτ, ActiveConfiguration.TyreSubsteps, hub, hubRot, surfaceVel, ChassisHooks.Ground);
+        // The carcass ROLLS: the hub is handed its travel and its spin, and the road is a road — static ground,
+        //    not a belt moving at hub speed. The belt was a stand-in for a tyre that could not rotate, and it
+        //    made every contacting node scrub at road speed. The in-plane forces the carcass now generates are
+        //    its own; this scheme still takes only Fz from it and drives through the friction-circle layer below.
+        HubMotion motion;
+        motion.Position       = hub;
+        motion.Orientation    = hubRot;
+        motion.LinearVelocity = hubVel;
+        motion.SpinRate       = WheelSpin[i];
+        tyre.Step(Δτ, ActiveConfiguration.TyreSubsteps, motion, Vec3{0.0f, 0.0f, 0.0f}, ChassisHooks.Ground);
         const TyreReaction& reaction = tyre.Reaction();
 
         const float Fz    = std::max(0.0f, reaction.Force.z);
@@ -457,11 +461,16 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
         Vec3 hubVel = cs.LinearVelocity + Cross(cs.AngularVelocity, r);
         if (ActiveConfiguration.SuspensionEnabled) hubVel += axisUp * StrutRate[i];
 
-        // Vertical load Fz from the soft tyre (direct node-vs-heightfield contact). Present the hub's PLANAR velocity as
-        //    the belt velocity so the soft tyre itself contributes no in-plane drag — all traction/cornering comes from
-        //    the Pacejka slip forces below, applied on top.
-        const Vec3 surfaceVel{hubVel.x, hubVel.y, 0.0f};
-        tyre.Step(Δτ, ActiveConfiguration.TyreSubsteps, hub, hubRot, surfaceVel, ChassisHooks.Ground);
+        // Vertical load Fz from the soft tyre, which now rolls: hub travel and wheel spin go in, the ground is
+        //    static. WheelSpin is this wheel's own rotation, integrated at the foot of this routine from the
+        //    drivetrain and brake torques, so the carcass turns at the rate the rest of the model believes it
+        //    does. Traction and cornering still come from the Pacejka layer below; only Fz is read back here.
+        HubMotion motion;
+        motion.Position       = hub;
+        motion.Orientation    = hubRot;
+        motion.LinearVelocity = hubVel;
+        motion.SpinRate       = WheelSpin[i];
+        tyre.Step(Δτ, ActiveConfiguration.TyreSubsteps, motion, Vec3{0.0f, 0.0f, 0.0f}, ChassisHooks.Ground);
         const TyreReaction& reaction = tyre.Reaction();
 
         const float Fz    = std::max(0.0f, reaction.Force.z);

@@ -76,6 +76,20 @@ struct Quat
         const float h = 0.5f * angleRad, s = std::sin(h);
         return {a.x * s, a.y * s, a.z * s, std::cos(h)};
     }
+    // Hamilton product. (a ∘ b).Rotate(v) == a.Rotate(b.Rotate(v)) — b is applied first, so the carcass's own
+    // spin composes on the RIGHT of the hub frame: it is a rotation of the material, inside the hub's axes.
+    [[nodiscard]] Quat operator*(const Quat& o) const noexcept
+    {
+        return { w * o.x + x * o.w + y * o.z - z * o.y,
+                 w * o.y - x * o.z + y * o.w + z * o.x,
+                 w * o.z + x * o.y - y * o.x + z * o.w,
+                 w * o.w - x * o.x - y * o.y - z * o.z };
+    }
+    [[nodiscard]] Quat Normalized() const noexcept
+    {
+        const float l = std::sqrt(x * x + y * y + z * z + w * w);
+        return (l > 1e-12f) ? Quat{x / l, y / l, z / l, w / l} : Quat{};
+    }
     [[nodiscard]] Vec3 Rotate(const Vec3& v) const noexcept
     {
         const Vec3 u{x, y, z};
@@ -96,13 +110,45 @@ struct SoftTyreParameters
     uint32_t RingCount    = 9u;      // [-] rings across the width (≥ 2)
     uint32_t SegmentCount = 128u;    // [-] particles per ring around the circumference (≥ 8)
     float    TotalMass    = 12.0f;   // [kg] carcass mass over all particles
+    // Gauss-Seidel sweeps inside each substep. See the comment on the sweep loop in Step: one sweep leaves
+    // the ground reaction — the only number the vehicle consumes — short of the lattice's own elastic state,
+    // and the shortfall is a function of the schedule, which is the very dependence XPBD exists to remove.
+    uint32_t SolverIterations = 1u;  // [-]  sweeps per substep
 
-    // Inflation
-    float    InflationPressure = 110000.0f;  // [Pa] gauge pressure — primary load carrier (calibrated vs Pacejka)
+    // ── Inflation: a real gas inside a closed surface ───────────────────────────────────────────────────────
+    // This used to be a per-node body force P·A along the outward radial, with A the node's REST patch area.
+    // It was measured and it does not carry load. Summed over a closed ring those forces cancel to within a
+    // rounding error: at 40 mm of squash the vertical component of the whole inflation field was +60 N against
+    // a 37.4 kN ground reaction — 0.16%. Every newton the tyre carried came from compressing the sidewall
+    // spokes, so `InflationPressure` was very nearly an inert number and the carcass was a spring mattress
+    // with a rigid rim, not a pneumatic tyre.
+    //
+    // The load path a real tyre uses is the gas pushing on the RIM: over the flattened contact patch the
+    // pressure that would have pushed the tread down is missing, so the net gas force on the wheel is p·A_patch
+    // upward. That path only exists if the pressure is integrated over the ENCLOSED SURFACE — tread band, both
+    // sidewalls, and the rim barrel that closes it. The force on a node is then the exact geometric gradient
+    //
+    //     f_i = p ∂V/∂x_i,     V = ⅙ Σ_tri x₀·(x₁ × x₂),     ∂V/∂x₀ = ⅙ (x₁ × x₂)
+    //
+    // which is p × (the area-weighted normal of the surface that node carries) in the DEFORMED configuration.
+    // It reproduces p·A on every patch, and because V is translation-invariant the forces on the free nodes sum
+    // to exactly minus the force on the kinematic rim — the missing load path, now present.
+    float    InflationPressure    = 110000.0f;   // [Pa] gauge pressure at the rest volume
+    float    AtmosphericPressure  = 101325.0f;   // [Pa] outside pressure — sets how the gas law stiffens
+    // Boyle's law at constant temperature: p_abs·V = p_abs0·V0. Squashing the carcass shrinks V, so the gauge
+    // pressure RISES, and the tyre stiffens progressively the way an air spring does. A tyre whose gas is
+    // modelled as a fixed pressure has no bottoming-out behaviour at all.
+    bool     GasCompressible      = true;        // [-]  false pins the gauge pressure at InflationPressure
 
     // Compliances [m/N]  (α = 1/stiffness). Lower ⇒ stiffer. Values below are the Phase-2 calibration (see
     // XPBDTyreValidation.cpp) that best-matches the Phase-1 Pacejka baseline at ~5 kN load.
     float    SpokeCompliance   = 5.0e-5f;  // sidewall radial (soft enough for a multi-node contact patch)
+    // A sidewall is a cord membrane. It pulls and it cannot push: load it in compression and it BUCKLES, which
+    // is why a flat tyre collapses rather than standing on its sidewalls. The radial spoke is therefore
+    // tension-only — slack whenever the tread node sits closer to the rim than its rest radius. Left
+    // bilateral, the sidewall takes the whole contact patch in compression and the inflation pressure is
+    // bypassed; that is exactly what the measurement above found.
+    bool     SidewallTensionOnly = true;   // [-] false restores the old bilateral (run-flat) sidewall
     // The sidewall also resists TANGENTIAL and AXIAL motion, and until now nothing modelled that. The spoke
     // was a bare distance constraint: it pinned |node − bead| and said nothing about direction, so the whole
     // tread band was free to slide bodily around on its constraint spheres. Measured: the lattice centroid
@@ -156,14 +202,15 @@ struct SoftTyreParameters
 struct SoftTyreNode
 {
     Vec3  Position, Previous, Velocity;
-    Vec3  TreadLocal;   // rest tread position in hub-local frame
-    Vec3  BeadLocal;    // rim/bead anchor in hub-local frame
+    Vec3  TreadLocal;   // rest tread position in the carcass's MATERIAL frame (rotates with the wheel)
+    Vec3  BeadLocal;    // rim/bead anchor in the same material frame
     float InverseMass = 0.0f;
-    float Area = 0.0f;  // surface area this node represents (for the pressure force)
     // Brush/bristle state for the compliant tread friction.
     Vec3  BristleAnchor{};      // world root of the tread bristle on the ground (carried by the belt while stuck)
     bool  InContact = false;    // was this node in contact on the previous substep (bristle alive)?
     Vec3  ContactNormal{0.0f, 0.0f, 1.0f};   // surface normal where it touched, for the velocity pass
+    Vec3  ContactPoint{};       // surface point it was resolved against, for the torque arm and patch centre
+    Vec3  TreadDirection{};     // unit direction of the bristle deflection; friction acts along −this
 
     // ── XPBD Lagrange multipliers ────────────────────────────────────────────────────────────────────────────
     // Macklin et al., "XPBD: Position-Based Simulation of Compliant Constrained Dynamics", eq. 18:
@@ -206,6 +253,37 @@ struct TyreReaction
     float Mz = 0.0f;      // self-aligning torque about vertical through the contact centre
     uint32_t ContactCount = 0u;
     Vec3  PatchCentre{};  // world centre of the contact patch
+    float EnclosedVolume = 0.0f;   // [m³] gas volume at the end of the step
+    float GaugePressure  = 0.0f;   // [Pa] gauge pressure the gas law produced from that volume
+    // Net gas force on the free carcass nodes. For a closed surface this is exactly minus the gas force on
+    // the kinematic rim, so its vertical component IS the pneumatic load path — p·A_patch when the patch is
+    // flat, and a direct check that the inflation is carrying the tyre rather than the sidewall.
+    Vec3  InflationForce{};        // [N]
+};
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                           THE HUB IS A KINEMATIC BODY
+//------------------------------------------------------------------------------------------------------------------------
+//    The hub used to enter Step as one frozen pose held for the whole frame, and the carcass never rotated at
+//    all: the wheel's spin lived in VehicleSolver's Pacejka layer and was never handed to the soft body, so
+//    the road was faked as a belt sliding under a stationary sock.
+//
+//    Both are measurable defects rather than simplifications. Frozen pose: at 36 m/s and a 240 Hz step the
+//    anchors teleport 150 mm — nine node spacings — between frames, and the whole lattice is yanked after them
+//    in a single substep. Measured on a flat floor at 30 mm of commanded squash, the shipped path reached
+//    318 mm of squash and 138 mm RMS node scatter at 36 m/s, i.e. it had come apart; walking the same hub
+//    across the substeps held it at 60 mm. No spin: the contact patch is forever the same material nodes, so
+//    there is no rolling, no centrifugal growth, no standing wave, and a procedural tread pattern would sit
+//    still while the car drove.
+//
+//    The hub is therefore an ordinary XPBD kinematic body: a pose at the END of the step, plus the velocities
+//    needed to walk it backwards through the substeps.
+struct HubMotion
+{
+    Vec3  Position{};            // [m]     hub centre at the END of this step
+    Quat  Orientation{};         // [-]     hub frame at the END of this step — steer and camber, never spin
+    Vec3  LinearVelocity{};      // [m/s]   hub translation rate, walks the kinematic frame across the substeps
+    float SpinRate = 0.0f;       // [rad/s] wheel rotation about hub-local +Y (+ = rolling toward +X)
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -226,10 +304,18 @@ public:
 
     void Build(const SoftTyreParameters& params, const Vec3& hubPos, const Quat& hubRot) noexcept;
 
-    // Advance by dt using `substeps` XPBD substeps with the hub held kinematic at (hubPos,hubRot).
-    // `surfaceVelocity` is the velocity of the ground surface itself (belt/flat-track); pass {0,0,0} for static ground.
-    void Step(float dt, uint32_t substeps, const Vec3& hubPos, const Quat& hubRot,
+    // Advance by dt using `substeps` XPBD substeps against a kinematic hub that TRANSLATES and SPINS across
+    // them. `surfaceVelocity` is the velocity of the ground surface itself — {0,0,0} for a road, non-zero only
+    // for a flat-track belt rig.
+    void Step(float dt, uint32_t substeps, const HubMotion& hub,
               const Vec3& surfaceVelocity, const GroundQuery& ground) noexcept;
+
+    // A hub held still: the settle, kerb and calibration rigs, where the wheel neither travels nor rolls.
+    void Step(float dt, uint32_t substeps, const Vec3& hubPos, const Quat& hubRot,
+              const Vec3& surfaceVelocity, const GroundQuery& ground) noexcept
+    {
+        Step(dt, substeps, HubMotion{hubPos, hubRot, Vec3{}, 0.0f}, surfaceVelocity, ground);
+    }
 
     [[nodiscard]] const std::vector<SoftTyreNode>& Nodes() const noexcept { return NodeRecords; }
     [[nodiscard]] const SoftTyreParameters&        Params() const noexcept { return Parameters; }
@@ -239,13 +325,31 @@ public:
 
     [[nodiscard]] uint32_t Index(uint32_t ring, uint32_t seg) const noexcept { return ring * Parameters.SegmentCount + seg; }
 
+    // The carcass's own rotation, accumulated from SpinRate. A procedural tread pattern is authored in the
+    // material frame and posed with this, so the pattern rolls with the wheel instead of standing still.
+    [[nodiscard]] float CarcassAngle() const noexcept { return SpinAngle; }
+    [[nodiscard]] Quat  MaterialFrame(const Quat& hubRot) const noexcept
+    {
+        return (hubRot * Quat::AxisAngle(Vec3{0.0f, 1.0f, 0.0f}, SpinAngle)).Normalized();
+    }
+    [[nodiscard]] float RestVolume() const noexcept { return GasRestVolume; }
+
 private:
     // `lambda` is the edge's XPBD multiplier, reset at the top of every substep (see SoftTyreNode).
     // Family tags the edge so residuals can be reported per constraint type rather than as one blur.
     enum class EdgeFamily : uint32_t { Hoop = 0u, Lateral = 1u, Diagonal = 2u };
     struct Edge { uint32_t a, b; float rest, compliance, damping; EdgeFamily family; float lambda = 0.0f; };
 
+    // One triangle of the closed gas surface. A vertex index below NodeRecords.size() is a free tread node;
+    // anything above it is a kinematic bead vertex, which carries volume but takes no force.
+    struct SurfaceTriangle { uint32_t a, b, c; };
+
     void BuildEdges() noexcept;
+    void BuildGasSurface() noexcept;
+
+    // Rebuilds the bead vertices from the hub frame, measures the enclosed volume, and leaves ∂V/∂x in
+    // InflationGradient. Returns the volume.
+    [[nodiscard]] float MeasureInflation(const Vec3& hubPos, const Quat& frame) noexcept;
 
     // β = 2ζ√(k·m), k = 1/compliance, m = per-node mass. Derived once in Build so the ratio and the stiffness
     //    can never fall out of step.
@@ -254,11 +358,18 @@ private:
     float SpokeBeta = 0.0f, ContactBeta = 0.0f, TreadBeta = 0.0f;
     float SpokeTangentialBeta = 0.0f, SpokeLateralBeta = 0.0f;   // the non-edge constraints' derived β
 
-    SoftTyreParameters        Parameters;
-    std::vector<SoftTyreNode>  NodeRecords;
-    std::vector<Edge>          ConstraintEdges;
-    TyreReaction               ContactReaction;
-    SoftTyreResidual           ConstraintResidual;
+    float SpinAngle     = 0.0f;   // [rad] carcass rotation about hub-local +Y, accumulated across steps
+    float GasRestVolume = 0.0f;   // [m³]  enclosed volume of the undeformed carcass
+
+    SoftTyreParameters            Parameters;
+    std::vector<SoftTyreNode>     NodeRecords;
+    std::vector<Edge>             ConstraintEdges;
+    std::vector<SurfaceTriangle>  GasSurface;          // closed: tread band + both sidewalls + rim barrel
+    std::vector<Vec3>             BeadLocalVertices;   // material-frame rim vertices (two circles)
+    std::vector<Vec3>             BeadWorldVertices;   // the same, posed by the hub this substep
+    std::vector<Vec3>             InflationGradient;   // ∂V/∂x per free node [m²]
+    TyreReaction                  ContactReaction;
+    SoftTyreResidual              ConstraintResidual;
 };
 
 } // namespace Frontier::Vehicle
