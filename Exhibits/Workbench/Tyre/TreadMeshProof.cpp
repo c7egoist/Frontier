@@ -6,6 +6,7 @@
 #include "../../../Frontier/Engine/ContentInterchange/Tyre/TreadSpecification.h"
 #include "../../../Frontier/Engine/ContentInterchange/Tyre/TyreProfileSpecification.h"
 #include "../../../Frontier/Engine/ContentInterchange/Tyre/TyreMeshStructure.h"
+#include "../../../Frontier/Engine/ContentInterchange/Tyre/TreadRegionSolver.h"
 
 #include <cmath>
 #include <cstdio>
@@ -87,6 +88,55 @@ static void SweepProfile(TyreMeshStructure&        Mesh,
 }
 
 //------------------------------------------------------------------------------------------------------------------------
+//                                                    OFF-ROAD PRESET
+//------------------------------------------------------------------------------------------------------------------------
+
+/// 📦 The "Grizzly Magnum" off-road pattern from the browser prototype, layer for layer.
+/// note  Carried over verbatim so the C++ gate and the .mjs audit measure the same tread. It is the busiest
+///       preset the generator ships — three zig-zag circumferential grooves, three lateral sets and 56
+///       sipes — and it is the one the prototype tore open worst.
+/// tag   proof
+static TreadPatternSpecification GrizzlyMagnum()
+{
+    TreadPatternSpecification Pattern;
+    Pattern.Name = "Grizzly Magnum";
+
+    auto Circumferential = [](float Seat, float Width, float Zig, float ZigCount)
+    {
+        TreadLayerSpecification Layer;
+        Layer.Kind = TreadLayerKind::Circumferential;
+        Layer.Position = Seat;  Layer.Width = Width;  Layer.Zig = Zig;  Layer.ZigCount = ZigCount;
+        Layer.DepthFraction = 1.0f;
+        return Layer;
+    };
+    auto Lateral = [](float Count, float Angle, float Width, float From, float To, float Phase)
+    {
+        TreadLayerSpecification Layer;
+        Layer.Kind = TreadLayerKind::Lateral;
+        Layer.Count = Count;  Layer.Angle = Angle;  Layer.Width = Width;
+        Layer.From  = From;   Layer.To    = To;     Layer.Phase = Phase;
+        Layer.DepthFraction = 1.0f;
+        return Layer;
+    };
+
+    Pattern.Layers.push_back(Circumferential( 0.00f, 12.0f, 6.0f, 28.0f));
+    Pattern.Layers.push_back(Circumferential( 0.55f, 11.0f, 5.0f, 28.0f));
+    Pattern.Layers.push_back(Circumferential(-0.55f, 11.0f, 5.0f, 28.0f));
+    Pattern.Layers.push_back(Lateral(28.0f,  18.0f, 12.0f,  0.3f,  1.3f, 0.00f));
+    Pattern.Layers.push_back(Lateral(28.0f, -18.0f, 12.0f, -1.3f, -0.3f, 0.50f));
+    Pattern.Layers.push_back(Lateral(28.0f,   0.0f,  9.0f, -0.3f,  0.3f, 0.25f));
+
+    TreadLayerSpecification Sipe;
+    Sipe.Kind  = TreadLayerKind::Sipe;
+    Sipe.Count = 56.0f;  Sipe.Angle = 12.0f;  Sipe.Width = 1.5f;
+    Sipe.From  = -1.3f;  Sipe.To    = 1.3f;   Sipe.Zig   = 2.0f;
+    Sipe.DepthFraction = 0.4f;
+    Pattern.Layers.push_back(Sipe);
+
+    return Pattern;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
 //                                                          GATE
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -144,6 +194,42 @@ int main()
     const uint32_t Opened = Torn.BoundaryEdge > Clean.BoundaryEdge ? Torn.BoundaryEdge - Clean.BoundaryEdge : 0u;
     std::printf("  %-34s %10u\n", "boundary edges", Torn.BoundaryEdge);
     Expect("seam edges opened", Opened, AcrossSteps * 2u);
+
+    // 📝 ③ The boolean stage. Floor pieces must tile the tread exactly once: every square millimetre
+    //    covered, none covered twice. The mesh stage reads that as licence to emit each piece independently
+    //    and still expect a closed surface, so it is checked before any triangle is built.
+    std::printf("\n③ Boolean stage — floor pieces must partition the tread\n");
+    const TreadPatternSpecification Pattern = GrizzlyMagnum();
+    const TreadRegionResult Regions = SolveTreadRegions(Pattern, Specification, Derived);
+
+    uint32_t ContourCount = 0u;
+    for (const TreadFloorPiece& Piece : Regions.Pieces)
+        ContourCount += static_cast<uint32_t>(Piece.Contours.size());
+
+    std::printf("  %-34s %10zu\n",      "floor pieces",    Regions.Pieces.size());
+    std::printf("  %-34s %10u\n",       "contours",        ContourCount);
+    std::printf("  %-34s %10.1f mm\u00b2\n", "domain area",     Regions.DomainArea);
+    std::printf("  %-34s %10.1f mm\n",   "contour length",  Regions.BoundaryLength);
+
+    std::printf("  depths [mm]:");
+    for (const float Level : Regions.Levels)
+        std::printf(" %.2f", static_cast<double>(Level));
+    std::printf("\n");
+
+    // \U0001F4DD The tolerance is derived, not chosen. Two pieces meeting along a shared boundary can disagree
+    //    by one integer unit of the boolean stage, which is one micrometre, so the worst sliver area the
+    //    whole arrangement can produce is its total contour length times that width. Anything under this is
+    //    the arithmetic's own resolution; anything over it is a real hole in the tread.
+    const double Tolerance = Regions.BoundaryLength * static_cast<double>(TyreMeshStructure::WeldTolerance);
+
+    std::printf("  %-34s %10.4f mm\u00b2  (tolerance %.4f)\n", "gap",     Regions.GapArea,     Tolerance);
+    std::printf("  %-34s %10.4f mm\u00b2\n",                   "spill",   Regions.ExcessArea);
+    std::printf("  %-34s %10.4f mm\u00b2\n",                   "overlap", Regions.OverlapArea);
+
+    Expect("pieces present",    static_cast<uint32_t>(Regions.Pieces.size() >= 2u), 1u);
+    Expect("no gap",            static_cast<uint32_t>(Regions.GapArea     <= Tolerance), 1u);
+    Expect("no spill",          static_cast<uint32_t>(Regions.ExcessArea  <= Tolerance), 1u);
+    Expect("no overlap",        static_cast<uint32_t>(Regions.OverlapArea <= Tolerance), 1u);
 
     std::printf("\n%s\n", Failures == 0 ? "GATE PASSED" : "GATE FAILED");
     return Failures == 0 ? 0 : 1;

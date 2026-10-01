@@ -61,9 +61,12 @@ as its gate.
 The C++ gate for the ported builder, against `Engine/ContentInterchange/Tyre`. Build and run:
 
 ```
-g++ -std=c++20 -O2 -w -o _AgentScratch/build/tyre/TreadMeshProof \
+CL=Frontier/ExternalPackages/clipper2/CPP/Clipper2Lib        # python3 Frontier/Tools/Bootstrap.py --package clipper2
+g++ -std=c++20 -O2 -w -I $CL/include -o _AgentScratch/build/tyre/TreadMeshProof \
     Exhibits/Workbench/Tyre/TreadMeshProof.cpp \
-    Frontier/Engine/ContentInterchange/Tyre/TyreMeshStructure.cpp
+    Frontier/Engine/ContentInterchange/Tyre/TyreMeshStructure.cpp \
+    Frontier/Engine/ContentInterchange/Tyre/TreadRegionSolver.cpp \
+    $CL/src/clipper.engine.cpp $CL/src/clipper.offset.cpp $CL/src/clipper.rectclip.cpp
 ./_AgentScratch/build/tyre/TreadMeshProof
 ```
 
@@ -86,3 +89,37 @@ them as one point. Index arithmetic would close the seam without testing anythin
 The proof carries a negative control for the same reason. Displacing the wrap column by ten weld
 tolerances opens exactly 128 edges — 64 × 2, one per quad on each of the two triangles that used to
 share the seam. A ledger that always answered "clean" would pass the positive control and prove nothing.
+
+### ③ The boolean stage must partition the tread
+
+The floor pieces have to tile the tread exactly once — every square millimetre covered, none covered
+twice — because the mesh stage reads that as licence to emit each piece independently and still expect a
+closed surface. On the same off-road preset, 7 layers in and 3 floors out at 0, 6 and 15 mm:
+
+| Measure            | Result        | Bound        |
+|--------------------|---------------|--------------|
+| floor pieces       | 3             | ≥ 2          |
+| contours           | 609           | —            |
+| domain area        | 756 320.3 mm² | —            |
+| gap                | −0.0003 mm²   | 127.86 mm²   |
+| spill              | 0.0000 mm²    | 127.86 mm²   |
+| overlap            | 2.4900 mm²    | 127.86 mm²   |
+
+⚠️ Gaps and overlaps are measured as **set operations against the domain**, never by comparing a sum of
+piece areas against it. Two pieces meeting along a shared boundary produce sliver artifacts one integer
+unit wide whose signed areas are tiny and of either sign — one measured −0.157 mm² during development,
+which is how the artifact announced itself. A sum double-counts those, and a sum is also blind to a gap
+that happens to equal an overlap elsewhere. The set difference is blind to neither.
+
+💡 The tolerance is derived rather than chosen. Two pieces meeting along a boundary can disagree by one
+integer unit of the boolean stage, so the worst sliver area the arrangement can produce is its total
+internal contour length — 127 857 mm here — times that one-unit width. Measured overlap is 2% of that
+bound. The length is summed over the **pieces**, not over their union: slivers form where two pieces
+meet, and the union has no such boundary, its contour being merely the rim of the domain.
+
+💡 The boolean stage runs at 1000 integer units per millimetre, so one unit is one micrometre —
+deliberately the same figure as `TyreMeshStructure::WeldTolerance`. Any sliver the arithmetic can produce
+is then narrower than a weld and collapses to nothing when the mesh stage welds it. The two tolerances
+are one choice, not two. Raising the resolution from the prototype's 0.01 mm to 0.001 mm dropped measured
+overlap from 24 mm² to 2.49, which is what confirmed the residue was resolution noise and not a real
+double-covering.
