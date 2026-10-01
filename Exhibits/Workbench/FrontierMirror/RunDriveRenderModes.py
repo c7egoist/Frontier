@@ -81,6 +81,13 @@ MLV_SOURCES = [
     # VehicleGeometry, which neither stock level needs.
     "Projects/Project-Drive/Source/DriveSceneAuthor.cpp",
     "Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp",
+    # the engine's own celestial solver: the surfel path takes the SAME sun the raster is given
+    "Engine/DisplayPresentation/CelestialSolver.cpp",
+    "Projects/Project-Zero/Source/CelestialSequence.cpp",
+    "Engine/GeometricRaster/StarCatalogueIndex.cpp",
+    "Engine/ContentInterchange/AssetResolution.cpp",
+    "Engine/ContentInterchange/SpaceCodec.cpp",
+    "Engine/ContentInterchange/SpaceExport.cpp",
 ]
 SURFEL_SOURCES = [
     # The GI-on / RT-off path. Its gather, radius rule and spawn policy are the shipped ones --
@@ -209,8 +216,9 @@ def main() -> int:
     # with GPU shaders (SurfelIrradianceUpdate / SurfelGIResolve), not a stand-in for ReSTIR.
     surfel = compile_binary("SurfelReference", SURFEL_SOURCES,
                             ["Projects/Project-Drive/Source", "Engine/PhysicalDynamics/Vehicle", "Engine",
-                             "Engine/Shaders", "ExternalPackages/vulkan-headers/include",
-                             "ExternalPackages/stb", "."])
+                             "Engine/Shaders", "Projects/Project-Zero/Source", "Engine/DisplayPresentation",
+                             "Engine/GeometricRaster", "Engine/DeviceExchange", "Engine/ContentInterchange",
+                             "ExternalPackages/vulkan-headers/include", "ExternalPackages/stb", "."])
     sf_frames = Drive.SCRATCH / "tmp/rendermodes-surfel"
     if sf_frames.exists():
         shutil.rmtree(sf_frames)
@@ -224,7 +232,7 @@ def main() -> int:
         Checkout.run([str(surfel), "--w", str(args.width), "--h", str(args.height),
                       "--frames", str(args.gi_frames), "--rays", "8",
                       "--eye", f"{ex:.4f}", f"{ey:.4f}", "2.20",
-                      "--aim", "0", "0", "0.70", "--fov", "46",
+                      "--aim", "0", "0", "0.70", "--fov", "46", "--sun", SUN_HOUR,
                       "--name", f"turn_{i:04d}.ppm"], cwd=SEAT, quiet=True)
         ppm = diag / f"turn_{i:04d}.ppm"
         write_png_from_ppm(ppm, sf_frames / f"frame_{i:04d}.png")

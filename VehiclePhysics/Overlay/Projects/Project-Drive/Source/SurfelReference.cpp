@@ -19,6 +19,7 @@
 #include "ContentInterchange/MaterialIndex.h"
 // ONE material model for every CPU render path -- see the header of this file for why this is not optional.
 #include "ContentInterchange/UnifiedMaterialEvaluation.h"
+#include "CelestialSequence.h"
 #include "ControlVehicleMesh.inl"
 
 #include <algorithm>
@@ -212,9 +213,34 @@ struct BVH{
 };
 
 //------------------------------------------------------------------------------------------------------------------------ lighting
-static const V   SUN_DIR = norm(V{-0.35f,-0.30f,0.88f});     // points TOWARD the sun (up-ish)
-static const V   SUN_COL = V{1.0f,0.95f,0.85f}*3.0f;
-static V SkyColour(V d){ float t=std::max(0.0f,d.z); return V{0.35f,0.5f,0.85f}*t + V{0.7f,0.75f,0.8f}*(1.0f-t); }
+// ── the real sun and sky, not a hand-picked one ────────────────────────────────────────────────────────────
+// These were hardcoded: SUN_DIR = norm(-0.35, -0.30, 0.88) and SUN_COL = (1, .95, .85) * 3.
+//
+// That sun is almost straight up (z = 0.88) and weak. The engine's actual sun at the Drive scene's hour is
+// nearly HORIZONTAL -- CelestialSequence solves (-0.496, 0.868, 0.012) for Johannesburg at 13:00 -- and far
+// brighter. An overhead sun lights every face of a car at a similar angle, which is precisely why the body
+// read as flat untextured colour with no shading gradient, no specular and no real contact shadow, while the
+// raster and ReSTIR sheets of the same car had all three.
+//
+// It also explains why this looked fine in a Cornell box and terrible here: a closed box is lit by an area
+// light inside it, so the sky and the sun never enter the picture. Outdoors they ARE the picture. And the
+// standing instruction for this project is explicit that Project-Drive must not have a flat sky.
+static V   SUN_DIR = norm(V{-0.496f, 0.868f, 0.012f});   // replaced at startup by the solved direction
+static V   SUN_COL = V{1.0f,0.95f,0.85f}*3.0f;           // replaced at startup by the solved radiance
+static V   SKY_ZENITH{0.35f,0.5f,0.85f}, SKY_HORIZON{0.7f,0.75f,0.8f};
+
+// Analytic dome anchored to the SOLVED sun: zenith/horizon tints and a forward-scattering lobe about the sun,
+//    scaled by the solved radiance. The engine's full atmosphere march lives inside VisibilityRaster::SkyAlong
+//    as a lambda over its own pixel grid and is not callable from here, so this is an approximation of the
+//    dome -- but it is anchored to the real sun rather than invented, and the SUN itself, which carries the
+//    overwhelming majority of the energy outdoors, is exact.
+static V SkyColour(V d){
+    const float t = std::max(0.0f, d.z);
+    V base = SKY_ZENITH*t + SKY_HORIZON*(1.0f-t);
+    const float c = std::max(0.0f, dot(norm(d), SUN_DIR));
+    const float lobe = 0.25f * c*c*c*c;                  // the brightening around the sun
+    return base * (1.0f + lobe);
+}
 // `wo` points towards the viewer.  The BSDF is the engine's; only the transport around it is this file's.
 static V DirectLight(const BVH& bvh, V P, V N, uint32_t mat, V wo){
     const ShadingRecord& m = MaterialFor(mat);
@@ -226,10 +252,15 @@ static V DirectLight(const BVH& bvh, V P, V N, uint32_t mat, V wo){
                                                                 vec3(SUN_DIR.x,SUN_DIR.y,SUN_DIR.z));
         c = V{f.x,f.y,f.z} * (SUN_COL*ndl);                    // sun, direct + shadowed
     }
-    // Cheap sky-dome ambient, through the same lobes so a coated or transmissive slab does not pick it up as
-    // though it were flat Lambert albedo.  One direction, no rays: this is still the GI-off direct term.
-    const vec3 fa = Frontier::UnifiedMaterial::AmbientResponse(m, vec3(N.x,N.y,N.z), vec3(wo.x,wo.y,wo.z));
-    c = c + V{fa.x,fa.y,fa.z} * (SkyColour(V{0,0,1}) * (0.35f*(0.5f+0.5f*N.z)));
+    // NO analytic sky ambient here. It used to add an UNOCCLUDED sky term to every surface, and the resolve
+    //    then added the surfel indirect on top -- but the surfel field already carries the sky, because a
+    //    surfel ray that hits nothing returns SkyColour(d). So the sky was counted twice, and the half that
+    //    was counted without occlusion filled every shadow and flattened the whole frame. That is the main
+    //    reason the car read as untextured colour with no shading gradient.
+    //
+    //    RaytraceToggle/CpuMirror/ModeMatrix.cpp draws the line in the same place: sky ambient belongs to the
+    //    PLAIN-RASTER mode (`amb = dalb*SKY_AMBIENT`), while surfel mode takes its ambient from the field
+    //    (`lit = direct + dalb*INV_PI*E`). One or the other, never both.
     const vec3 e = m.Emission;
     return c + V{e.x,e.y,e.z};
 }
@@ -333,6 +364,7 @@ static inline uint8_t enc(float v){return (uint8_t)std::lround(std::pow(aces(v),
 int main(int argc,char**argv){
     int W=800,H=450,FRAMES=28,RAYS=8; std::string outDir="Projects/Project-Drive/Diagnostics";
     std::string outName="drive_gi.ppm";
+    float sunHour=13.0f;   // --sun <h> : the same hour the other render modes are given
     int REFLECT=1;   // --reflect off|sky|raytraced  (ReflectionModeCategory; default Sky, as RT-off degrades to)
     float eyeX=-6.40f,eyeY=-5.40f,eyeZ=2.20f, aimX=0.0f,aimY=0.0f,aimZ=0.70f, fovDeg=46.0f;
     for(int i=1;i<argc;++i){ std::string a=argv[i]; auto nx=[&](int d){return i+1<argc?std::atoi(argv[++i]):d;};
@@ -342,9 +374,31 @@ int main(int argc,char**argv){
         else if(a=="--aim"){aimX=nf(aimX);aimY=nf(aimY);aimZ=nf(aimZ);}
         else if(a=="--fov")fovDeg=nf(fovDeg);
         else if(a=="--name")outName=(i+1<argc?argv[++i]:outName);
+        else if(a=="--sun")sunHour=nf(sunHour);
         else if(a=="--reflect"){ std::string v=(i+1<argc?argv[++i]:"sky"); REFLECT = v=="off"?0:(v=="raytraced"?2:1); }
         else if(a=="--out")outDir=(i+1<argc?argv[++i]:outDir); }
     using Clock=std::chrono::steady_clock; auto t0=Clock::now();
+
+    // The engine's own celestial solver supplies the sun, exactly as DriveSceneMirror gives it to the raster,
+    //    so the three render modes cannot be lit by three different suns.
+    {
+        Frontier::ProjectZero::CelestialSequence Sky;
+        Sky.Prepare();
+        Sky.Observation.LocalHours = sunHour;
+        Sky.Prepare();
+        const Frontier::SkyConstantRecord R = Sky.PackSkyRecord();
+        const V Dir{R.SunDirection[0], R.SunDirection[1], R.SunDirection[2]};
+        if (len(Dir) > 1e-4f) SUN_DIR = norm(Dir);
+        // SunDirect, NOT SunRadiance. SkyConstantRecord.h labels SunDirect "panel direct-sun factor" -- it is
+        //    the quantity a surface shades with, already carrying the gain, the colour and the atmospheric
+        //    transmittance. SunRadiance (22.0 flat white here) is the disc's own radiance for the sky march,
+        //    and using it to shade blew every upward-facing surface to white. SunDirect at this hour is
+        //    (5.22, 4.56, 3.53): warm, because a 32.5-degree sun has come a long way through the air.
+        const V Rad{R.SunDirect[0], R.SunDirect[1], R.SunDirect[2]};
+        if (len(Rad) > 1e-6f) SUN_COL = Rad;
+        std::printf("SurfelReference: sun hour %.2f -> dir (%.3f %.3f %.3f), radiance (%.2f %.2f %.2f)\n",
+                    sunHour, SUN_DIR.x, SUN_DIR.y, SUN_DIR.z, SUN_COL.x, SUN_COL.y, SUN_COL.z);
+    }
 
     g_Materials.Build();   // the authored slabs, flattened by the engine's own MaterialIndex
     std::vector<Tri> tris=BuildScene();
