@@ -6,69 +6,51 @@ thing that changes between them is how light is carried.
 | artefact | GI | RT | what is actually running |
 |---|---|---|---|
 | `..._VisibilityRaster_CPU_Reference.gif` | off | off | `Engine/GeometricRaster/VisibilityRaster` |
+| `..._SurfelGI_CPU_Reference.gif` | **on** | off | `Project-Drive/Source/SurfelReference` — surfel indirect + sky reflections |
 | `..._ReSTIR_DirectOnly_CPU_Reference.gif` | off | **on** | `MaterialLevelViewport --restir --bounce 1` |
 | `..._ReSTIR_GlobalIllumination_CPU_Reference.gif` | **on** | **on** | `MaterialLevelViewport --restir --bounce 4` |
 | `..._ReferencePathTracer_CPU_Reference.png` | — | — | the same host with no `--restir`: the oracle |
 
-## There is no Surfel GI in Frontier
+These are the four cells of the mode matrix in `RaytraceToggle/README.md`:
 
-A `SurfelReference.cpp` lived in the Project-Drive overlay and was published here as the "GI on" column.
-Grepping the entire pinned engine for `surfel` returns only coincidental bytes inside `.blend` archives — no
-shader, no header, no dispatch, nothing. **It mirrored nothing**, which makes it exactly the self-invented
-renderer the project rules forbid, and it is why its output never looked like the rest of the engine.
-
-Frontier expresses global illumination through `DispatchFeatureGlobalIllumination` and
-`ReSTIRIntegratorConfiguration::MaxGiBounces`, and the CPU mirror exposes precisely that as `--bounce`
-(`MaterialLevelViewport.cpp:2538` — `if (Bounces > 1) Indirect += Radiance(...)`). So GI on/off is now **one
-estimator with the bounce count changed**, which is what the product actually does. The file has been deleted.
-
-Measured on frame 0 of the turntable, mean pixel level in the shadowed underbody:
-
-| | frame mean | shadowed underbody |
+| Raytracing | Global Illumination | render path |
 |---|---|---|
-| raster (GI off, RT off) | 163.5 | 107.8 |
-| ReSTIR, GI off | 156.7 | 90.8 |
-| ReSTIR, GI on | 157.9 | **101.8** |
+| ON | on or off | raytraced ReSTIR kernel |
+| OFF | **ON** | **Surfel GI** — visibility-raster primary + surfel indirect |
+| OFF | OFF | plain visibility raster |
 
-Indirect light lifts the shadowed underbody by **+12%** while barely moving the frame mean — which is the
-signature of GI: it fills what the sun cannot reach and leaves lit surfaces alone.
+## Correction: I previously deleted the Surfel GI and called it invented
 
-All four are existing engine code executed on the CPU. Nothing here is a renderer written for the proof.
-Regenerate with:
+An earlier pass grepped the *pinned Frontier checkout* for `surfel`, found nothing, and concluded the path was
+a self-invented renderer. That was wrong, and the conclusion was drawn from the wrong place. Surfel GI is a
+**Slate feature awaiting upstream integration**, and it has real GPU shaders here in the repo:
 
-```
-python3 Exhibits/Workbench/FrontierMirror/RunDriveRenderModes.py \
-    --width 480 --height 270 --spp 8 --bounce 5 --frames 24 --fps 12 --reuse 12 --gi-frames 20
-```
+- `RaytraceToggle/Shaders/SurfelIrradianceUpdate.slang` — per-surfel temporal irradiance update
+- `RaytraceToggle/Shaders/SurfelGIResolve.slang` — per-pixel resolve
+- `RaytraceToggle/Shaders/SurfelCommit.slang`
+- `RaytraceToggle/CpuMirror/ModeMatrix.cpp` — the proven CPU mirror of all three modes
+- `RaytraceToggle/Patches/RaytraceToggle_Integration.patch` — the engine wiring
 
-## Why the car is frozen
+It is absent from the pinned checkout only because the patch has not landed upstream yet. The file is restored.
 
-The turntable orbits a **stationary** car. These three artefacts exist to isolate light transport, so pose,
-materials, sun and camera path have to be identical and the only free variable may be the transport. A driving
-car would confound the comparison — and the two ray-traced hosts render the level's static pose anyway, so a
-driving raster would not even be the same scene.
+## What was actually wrong with it
 
-Proof that the vehicle actually drives is a **separate** set of artefacts in `Exhibits/Gallery/Drive/`
-(`ChaseRun`, `TracksideRun`, `OrbitWhileDriving`, plus the telemetry graphs), where the motion gates apply.
+`SurfelReference.cpp` had drifted from `SurfelGIResolve.slang` in four ways, which is why it looked wrong on
+the vehicle while looking acceptable on a large flat floor:
 
-## One material model
+| | shipped shader / ModeMatrix | Drive copy (before) |
+|---|---|---|
+| surfel radius | `clamp(0.055 × distance_to_eye, 0.22, 0.70)` | **fixed `0.9f`** — a stub |
+| planar cutoff | `abs(dot(d, s.n)) < r × 0.5` | **absent** |
+| distance falloff | `(1 − dist/r)²` | `(1 − dist/r)` |
+| spawning | coverage-driven, warm-started | 4% of pixels, fixed 0.75 m dedupe |
 
-All three evaluate the **same** BSDF: the engine's OpenPBR lobe set from `Engine/Shaders/MaterialEvaluation.slang`,
-reached through `Engine/ContentInterchange/UnifiedMaterialEvaluation.h`. Coat, metal flakes, thin film, fuzz,
-transmission and the energy-compensation terms are identical in all three columns.
+The missing **planar cutoff** is the one that matters most: without it a surfel lying on the ground lights a
+point on the car's flank merely because the two are within a radius of each other. A floor has no neighbouring
+surface at a different orientation to leak from, which is exactly why the floor looked fine. The fixed 0.9 m
+radius compounded it — one footprint that size blankets a 4.4 m car in a handful of surfels.
 
-They did not used to be, and the comparison was invalid because of it:
-
-| path | material model before |
-|---|---|
-| VisibilityRaster | hand-rolled Lambert + one GGX lobe, off `MaterialRecord`'s flattened 64-byte header |
-| SurfelReference | a `switch` returning one flat RGB constant per family, shaded pure Lambert |
-| MaterialLevelViewport | the real lobe set |
-
-`VisibilityRaster.h` even documented its reduction as though it were a property of rasterisation
-(*"direct-only lookdev PBR — Lambert plus a GGX"*). It never was. **Rasterisation decides how visibility is
-resolved; it places no constraint on which BSDF you evaluate once a pixel knows its triangle.** A raster path
-can evaluate the full lobe set, and now does.
+All four now match the shader. Surfel count over the same frame went from ~2,000 to 14,651.
 
 ## What to look for
 

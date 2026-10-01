@@ -82,6 +82,17 @@ MLV_SOURCES = [
     "Projects/Project-Drive/Source/DriveSceneAuthor.cpp",
     "Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp",
 ]
+SURFEL_SOURCES = [
+    # The GI-on / RT-off path. Its gather, radius rule and spawn policy are the shipped ones --
+    # RaytraceToggle/Shaders/SurfelGIResolve.slang + SurfelIrradianceUpdate.slang, mirrored on CPU by
+    # RaytraceToggle/CpuMirror/ModeMatrix.cpp. See the note in SurfelReference.cpp for what had drifted.
+    "Projects/Project-Drive/Source/SurfelReference.cpp",
+    "Projects/Project-Drive/Source/DriveSceneAuthor.cpp",
+    "Engine/ContentInterchange/MaterialIndex.cpp",
+    "Engine/DisplayPresentation/ShadingTableCodec.cpp",
+    "Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp",
+]
+
 MLV_INCLUDES = [
     "Engine",   # UnifiedMaterialEvaluation.h is included as ContentInterchange/... by every render path
 
@@ -96,6 +107,26 @@ MLV_INCLUDES = [
 
 def log(message: str) -> None:
     print(f"[render-modes] {message}", flush=True)
+
+
+def write_png_from_ppm(source: Path, target: Path) -> None:
+    """SurfelReference writes a binary P6 PPM (it has no PNG dependency); the gallery wants PNG."""
+    import struct, zlib
+    data = source.read_bytes()
+    head = data.index(b'255\n') + 4
+    fields = data[:head].split()
+    width, height = int(fields[1]), int(fields[2])
+    pixels = data[head:head + width * height * 3]
+    raw = b''.join(b'\x00' + pixels[y * width * 3:(y + 1) * width * 3] for y in range(height))
+
+    def chunk(tag: bytes, payload: bytes) -> bytes:
+        return (struct.pack('>I', len(payload)) + tag + payload
+                + struct.pack('>I', zlib.crc32(tag + payload) & 0xffffffff))
+
+    target.write_bytes(b'\x89PNG\r\n\x1a\n'
+                       + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+                       + chunk(b'IDAT', zlib.compress(raw, 6))
+                       + chunk(b'IEND', b''))
 
 
 def stage_denoise() -> Path:
@@ -130,6 +161,7 @@ def main() -> int:
     parser.add_argument("--view", default="default")
     parser.add_argument("--frames", type=int, default=24, help="turntable frames per GIF")
     parser.add_argument("--fps", type=int, default=12)
+    parser.add_argument("--gi-frames", type=int, default=48, help="surfel temporal frames per rendered frame")
     parser.add_argument("--reuse", type=int, default=12, help="ReSTIR temporal reuse frames per rendered frame")
     args = parser.parse_args()
 
@@ -171,7 +203,40 @@ def main() -> int:
     Drive.assemble_gif(frames, raster_gif, args.fps)
     produced.append((raster_gif.name, "VisibilityRaster — GI OFF, RT OFF. The engine's full OpenPBR lobe set under shadow-mapped direct light, with no ray queries and no bounce."))
 
-    # ------------------------------------------------------------------ 2/3. ReSTIR, GI off then GI on
+    # ------------------------------------------------------- 2. Surfel GI: bounce + reflection, RT OFF
+    # The mode matrix in RaytraceToggle/README.md: Raytracing OFF + Global Illumination ON selects the surfel
+    # path -- visibility-raster primary, surfel indirect, sky reflections. It is a real shipped render mode
+    # with GPU shaders (SurfelIrradianceUpdate / SurfelGIResolve), not a stand-in for ReSTIR.
+    surfel = compile_binary("SurfelReference", SURFEL_SOURCES,
+                            ["Projects/Project-Drive/Source", "Engine/PhysicalDynamics/Vehicle", "Engine",
+                             "Engine/Shaders", "ExternalPackages/vulkan-headers/include",
+                             "ExternalPackages/stb", "."])
+    sf_frames = Drive.SCRATCH / "tmp/rendermodes-surfel"
+    if sf_frames.exists():
+        shutil.rmtree(sf_frames)
+    sf_frames.mkdir(parents=True, exist_ok=True)
+    log(f"rendering the Surfel GI turntable ({turn} frames, {args.gi_frames} GI frames each)")
+    diag = SEAT / "Projects/Project-Drive/Diagnostics"
+    for i, deg in enumerate(azimuths()):
+        rad = math.radians(deg)
+        ex = -6.40 * math.cos(rad) - -5.40 * math.sin(rad)
+        ey = -6.40 * math.sin(rad) + -5.40 * math.cos(rad)
+        Checkout.run([str(surfel), "--w", str(args.width), "--h", str(args.height),
+                      "--frames", str(args.gi_frames), "--rays", "8",
+                      "--eye", f"{ex:.4f}", f"{ey:.4f}", "2.20",
+                      "--aim", "0", "0", "0.70", "--fov", "46",
+                      "--name", f"turn_{i:04d}.ppm"], cwd=SEAT, quiet=True)
+        ppm = diag / f"turn_{i:04d}.ppm"
+        write_png_from_ppm(ppm, sf_frames / f"frame_{i:04d}.png")
+        ppm.unlink()
+    surfel_gif = GALLERY / "ProjectDriveRenderMode_SurfelGI_CPU_Reference.gif"
+    Drive.assemble_gif(sf_frames, surfel_gif, args.fps)
+    shutil.copyfile(diag / "surfel_timing.log", GALLERY / "SurfelGI_timing.log")
+    produced.append((surfel_gif.name,
+                     "SurfelReference — GI ON, RT OFF. Visibility-raster primary plus a persistent "
+                     "world-space surfel field carrying the bounced light, with sky reflections."))
+
+    # ------------------------------------------------------------------ 3/4. ReSTIR, GI off then GI on
     mlv = compile_binary("MaterialLevelViewport", MLV_SOURCES, [*MLV_INCLUDES, str(stage)])
     # --bounce IS the engine's global-illumination switch. MaterialLevelViewport.cpp:2538 reads
     #     if (Bounces > 1) Indirect += Radiance(...)
@@ -220,7 +285,7 @@ def main() -> int:
                      "MaterialEvaluation.slang compiled 1:1 as C++. The oracle, not a shipped real-time path."))
 
     # A GIF supersedes the still of the same mode; leaving both behind is how a gallery grows stale copies.
-    for mode in ("VisibilityRaster", "ReSTIR_DirectOnly", "ReSTIR_GlobalIllumination"):
+    for mode in ("VisibilityRaster", "SurfelGI", "ReSTIR_DirectOnly", "ReSTIR_GlobalIllumination"):
         stale = GALLERY / f"ProjectDriveRenderMode_{mode}_CPU_Reference.png"
         if stale.exists() and (GALLERY / f"ProjectDriveRenderMode_{mode}_CPU_Reference.gif").exists():
             stale.unlink()
