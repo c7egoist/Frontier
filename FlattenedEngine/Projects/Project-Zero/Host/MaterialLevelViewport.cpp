@@ -393,11 +393,15 @@ Viewpoint ShowcaseViewpointFor(const std::string& Name)
 {
     // R6 review cameras use the actual 400-sphere scene, not a separate studio.
     if (Name == "grid400") return { Frontier::Vector3{0.0f,-9.0f,42.0f},-62.0f,0.0f,44.0f };
+    // r7: all five automotive families live on ROW 15, four contiguous columns each (4f .. 4f+3), sweeping the
+    //    family's parameter 0 → 1 inside the block. Before r7 each family owned a whole row (15 + f) and these
+    //    cameras stood at the end of it looking along +X. Now they look BROADSIDE at one four-ball block.
     const char* PaintViews[5]={"paint-candy","paint-glitter","paint-iridescent","paint-cobalt","paint-copper"};
     for(int family=0;family<5;++family){
-        const float rowY=-1.8f+1.5f*static_cast<float>(15+family);
-        if(Name==PaintViews[family])return {Frontier::Vector3{-16.2f,rowY,1.25f},-18.5f,90.0f,42.0f};
-        if(Name==std::string(PaintViews[family])+"-macro")return {Frontier::Vector3{-14.99f,rowY,.60f},0.0f,90.0f,40.0f};
+        const float rowY=-1.8f+1.5f*15.0f;
+        const float blockX=-14.25f+1.5f*(4.0f*static_cast<float>(family)+1.5f);
+        if(Name==PaintViews[family])return {Frontier::Vector3{blockX,rowY-4.6f,1.55f},-11.0f,0.0f,46.0f};
+        if(Name==std::string(PaintViews[family])+"-macro")return {Frontier::Vector3{blockX-2.25f,rowY-1.55f,.60f},0.0f,0.0f,40.0f};
     }
 
     if (Name == "grid")   return { Frontier::Vector3{  0.0f, -9.50f, 4.20f }, -10.0f,  0.0f, 55.0f };  // closer on the grid's front rows

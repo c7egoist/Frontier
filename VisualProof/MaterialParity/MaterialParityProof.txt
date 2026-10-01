@@ -1,0 +1,64 @@
+================================================================================
+ MATERIAL PARITY — one material model, three render paths
+================================================================================
+
+① THE CLAIM ABOUT THE SHADERS — checked against the source, comments stripped
+
+  PASS  ReSTIR kernel decodes the hit through ResolveMaterial
+  PASS  ReSTIR kernel evaluates the shared lobe stack (ResolveLayers + EvaluateBsdf)
+  PASS  ReSTIR kernel includes the shared decode, not a private copy
+  PASS  ReSTIR kernel has no `hitN = -wi` stand-in normal
+  PASS  ReSTIR kernel has no hardcoded dielectric F0 of 0.04 in its shading
+  PASS  ReSTIR kernel reads no rgba8 albedo G-buffer
+  PASS  Surfel update decodes the hit through ResolveMaterial
+  PASS  Surfel update evaluates the shared lobe stack (ResolveLayers + EvaluateBsdf)
+  PASS  Surfel update includes the shared decode, not a private copy
+  PASS  Surfel update has no `hitN = -wi` stand-in normal
+  PASS  Surfel update has no hardcoded dielectric F0 of 0.04 in its shading
+  PASS  Surfel update reads no rgba8 albedo G-buffer
+  PASS  Surfel resolve decodes the hit through ResolveMaterial
+  PASS  Surfel resolve evaluates the shared lobe stack (ResolveLayers + EvaluateBsdf)
+  PASS  Surfel resolve includes the shared decode, not a private copy
+  PASS  Surfel resolve has no `hitN = -wi` stand-in normal
+  PASS  Surfel resolve has no hardcoded dielectric F0 of 0.04 in its shading
+  PASS  Surfel resolve reads no rgba8 albedo G-buffer
+  PASS  Surfel update binds the kernel's scene buffers and bindless table
+  PASS  Surfel resolve binds the kernel's scene buffers and bindless table
+
+Building the showcase level (r7) ...
+  PASS  the grid published instanced shader-ball placements
+  PASS  the shader ball asset loaded
+  mesh: 35897 vertices, 67832 triangles from Exhibits/Assets/ShaderBall/ShaderBall.mesh
+  chose 19 placements (column 9, one per family)
+  scene: 1288810 triangles (19 balls at full resolution)
+  BVH: 1004755 nodes
+
+② PARITY — transport held identical (direct sun only, no GI, no reflections, no shadow rays)
+   If the three paths evaluate the same material, these images are the same image.
+
+   pair                       max |Δ| per channel      mean |Δ|
+   ------------------------   --------------------   -----------
+   raster  vs surfel                     0.000e+00     0.000e+00
+   raster  vs restir                     0.000e+00     0.000e+00
+   surfel  vs restir                     0.000e+00     0.000e+00
+
+  PASS  raster and surfel agree to the bit with transport held
+  PASS  raster and restir agree to the bit with transport held
+  PASS  surfel and restir agree to the bit with transport held
+
+③ TRANSPORT — each path's own. The images must now DIFFER, or ② proved nothing.
+
+   raster  vs surfel  (own transport)   max  2.090e+03   mean  3.374e-02
+   surfel  vs restir  (own transport)   max  1.592e+02   mean  3.308e-03
+
+  PASS  enabling GI actually changed the surfel image (transport differs)
+  PASS  surfel and restir transports differ from each other
+  PASS  the hemispherical material response is path-independent by construction
+
+   sheet: VisualProof/MaterialParity/MaterialParitySheet.png
+          rows 1-3 = raster / surfel / restir with transport HELD  (must be identical)
+          rows 4-6 = the same three with their OWN transport       (must differ)
+
+================================================================================
+ ALL CHECKS PASSED
+================================================================================

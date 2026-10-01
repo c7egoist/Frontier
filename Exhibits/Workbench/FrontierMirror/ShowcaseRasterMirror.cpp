@@ -115,6 +115,39 @@ uint32_t BuildLevel(SceneStructure& Level, const ShowcaseStructure& Showcase)
         Level.AttachInstances(Place, First, 1u);
         ++Registered;
     }
+    // ── the instanced grid ──────────────────────────────────────────────────────────────────────────────────
+    // Showcase revision 7 stops flattening the grid balls into Triangles and publishes them as placements over
+    //    shared geometry instead. One RegisterTopology for the whole 20×20 grid, then one PlaceTopology per
+    //    slot: 380 placements over ONE copy of the 67 832-triangle mesh. Registering per placement instead
+    //    would be 380 copies of 1.9 MB.
+    //
+    //    ⚠️ A placement is several InstanceRecords, not one — the 8 192-triangle span limit cuts the ball into
+    //    9 of them. PlaceTopology returns the FIRST; the count comes from QueryTopologyPartitions.
+    const auto& Geometry   = Showcase.QueryGridGeometry();
+    const auto& Placements = Showcase.QueryGridPlacements();
+    std::vector<uint32_t> Topology(Geometry.size(), 0u);
+    for (size_t G = 0u; G < Geometry.size(); ++G)
+    {
+        GeometryStructure Mesh;
+        if (Geometry[G].Vertices == nullptr || Geometry[G].Indices == nullptr) continue;
+        Mesh.AppendVertices(Geometry[G].Vertices->data(), Geometry[G].Vertices->size());
+        Mesh.AppendIndices(Geometry[G].Indices->data(), Geometry[G].Indices->size());
+        Topology[G] = Level.RegisterTopology(Mesh);
+    }
+    for (const InstancedPlacementRecord& P : Placements)
+    {
+        if (P.Geometry >= Topology.size()) continue;
+        Matrix4x4 World;
+        std::memcpy(&World.Columns[0][0], P.World, sizeof(float) * 16u);
+        const uint32_t Slab  = P.Material < Slot.size() ? Slot[P.Material] : 0u;
+        const uint32_t First = Level.PlaceTopology(Topology[P.Geometry], World, Slab, 0u);
+        const uint32_t Count = Level.QueryTopologyPartitions(Topology[P.Geometry]);
+        const uint32_t Place = Level.RegisterPlacement(P.Name.empty() ? "GridBall" : P.Name,
+                                                       0xFFFFFFFFu, World, World);
+        Level.AttachInstances(Place, First, Count);
+        ++Registered;
+    }
+
     Level.AssignName("Showcase");
     Level.Finalise();
     return Registered;
@@ -135,12 +168,16 @@ Viewpoint ShowcaseViewpointFor(const std::string& Name)
     if (Name == "wide")    return {   0.0f, -22.00f, 11.00f, -18.0f,  0.0f, 62.0f };   // grid + the scattered ring
     if (Name == "panel")   return {  2.35f,  -5.60f,  1.35f,  -4.0f,  8.0f, 42.0f };   // the interface panel, close
     if (Name == "glints")  return {  -1.0f,  12.70f,  1.60f,  -7.0f,  0.0f, 50.0f };   // row 12: the glint ramp
+    // r7: all five automotive families live on ROW 15, four contiguous columns each (4f .. 4f+3), sweeping the
+    //    family's parameter 0 → 1 inside the block. Before r7 each family owned a whole row (15 + f) and these
+    //    cameras stood at the end of it looking along +X. Now they look BROADSIDE at one four-ball block.
     const char* PaintViews[5] = { "paint-candy", "paint-glitter", "paint-iridescent", "paint-cobalt", "paint-copper" };
     for (int Family = 0; Family < 5; ++Family)
     {
-        const float RowY = -1.8f + 1.5f * static_cast<float>(15 + Family);
-        if (Name == PaintViews[Family])                            return { -16.20f, RowY, 1.25f, -18.5f, 90.0f, 42.0f };
-        if (Name == std::string(PaintViews[Family]) + "-macro")     return { -14.99f, RowY, 0.60f,   0.0f, 90.0f, 40.0f };
+        const float RowY   = -1.8f + 1.5f * 15.0f;
+        const float BlockX = -14.25f + 1.5f * (4.0f * static_cast<float>(Family) + 1.5f);
+        if (Name == PaintViews[Family])                            return { BlockX, RowY - 4.60f, 1.55f, -11.0f, 0.0f, 46.0f };
+        if (Name == std::string(PaintViews[Family]) + "-macro")     return { BlockX - 2.25f, RowY - 1.55f, 0.60f, 0.0f, 0.0f, 40.0f };
     }
     return { 0.0f, -15.00f, 8.00f, -21.0f, 0.0f, 55.0f };                               // the product's entry shot
 }

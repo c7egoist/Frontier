@@ -222,6 +222,63 @@ inline vec3 ToLocal(const vec3& V, const vec3& T, const vec3& B, const vec3& N) 
 // hemispherical reflectance because it IS an estimate of that integral.
 namespace Frontier::UnifiedMaterial {
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                           SLAB RECORD → SHADING RECORD
+//------------------------------------------------------------------------------------------------------------------------
+// The device-side MaterialSlabRecord unpacked into the evaluator's ShadingRecord. Lifted out of
+//    MaterialLevelViewport::TranscribeShadingRecord so there is ONE transcription rather than one per host —
+//    it was the third hand-written copy of this mapping, after the kernel's ResolveMaterial and the surfel
+//    passes' (which did not have one at all, and approximated instead).
+//
+//    ⚠️ This is the no-texture case: a slab's constant channels only. ResolveMaterial on the device also folds
+//    in the bound textures and the surface frame; a host that has textures must do the same after calling this.
+//    CoatTangent / CoatNormal are the identity frame for the same reason.
+
+[[nodiscard]] inline ShadingRecord MakeShadingRecord(const MaterialSlabRecord& S, uint32_t Selection) noexcept
+{
+    ShadingRecord m;
+    m.AutomotiveData=vec4(S.Reserved0,S.Reserved1,0.0f,0.0f);m.AutomotiveDensity=S.SlateGlintDensity;
+    m.BaseColor          = vec3(S.BaseWeight * S.BaseColorR, S.BaseWeight * S.BaseColorG, S.BaseWeight * S.BaseColorB);
+    m.Metalness          = S.BaseMetalness;
+    m.DiffuseRoughness   = S.BaseDiffuseRoughness;
+    m.SpecularWeight     = S.SpecularWeight;
+    m.SpecularColor      = vec3(S.SpecularColorR, S.SpecularColorG, S.SpecularColorB);
+    m.SpecularRoughness  = S.SpecularRoughness;
+    m.SpecularAnisotropy = S.SpecularRoughnessAnisotropy;                 // × anisoTex.z (=1 unbound)
+    m.AnisotropyAngle    = S.AnisotropyRotation;                          // atan(1,0)=0 + Slate2.x
+    m.SpecularIor        = S.SpecularIor;
+    m.ThinFilmWeight     = S.ThinFilmWeight;
+    m.ThinFilmThickness  = S.ThinFilmThickness;
+    m.ThinFilmIor        = S.ThinFilmIor;
+    m.HazinessWeight     = S.SlateHazinessWeight;
+    m.HazinessRoughness  = S.SlateHazinessRoughness;
+    m.CoatWeight         = S.CoatWeight;
+    m.CoatColor          = vec3(S.CoatColorR, S.CoatColorG, S.CoatColorB);
+    m.CoatRoughness      = S.CoatRoughness;
+    m.CoatAnisotropy     = S.CoatRoughnessAnisotropy;
+    m.CoatIor            = S.CoatIor;
+    m.CoatDarkening      = S.CoatDarkening;
+    m.CoatTangent        = vec3(1.0f, 0.0f, 0.0f);                        // identity (no coat normal texture bound)
+    m.CoatNormal         = vec3(0.0f, 0.0f, 1.0f);
+    m.FuzzWeight         = S.FuzzWeight;
+    m.FuzzColor          = vec3(S.FuzzColorR, S.FuzzColorG, S.FuzzColorB);
+    m.FuzzRoughness      = S.FuzzRoughness;
+    m.Emission           = vec3(S.EmissionLuminance * S.EmissionColorR, S.EmissionLuminance * S.EmissionColorG,
+                                S.EmissionLuminance * S.EmissionColorB);
+    m.TransmissionWeight = S.TransmissionWeight;
+    m.TransmissionColor  = vec3(S.TransmissionColorR, S.TransmissionColorG, S.TransmissionColorB);
+    m.TransmissionDepth  = S.TransmissionDepth;
+    m.TransmissionThickness = 0.0f;                                       // tracer-side: the true chord, or the no-exit fallback
+    m.Selection          = Selection;
+    m.SssWeight          = S.SubsurfaceWeight;
+    m.SssColor           = vec3(S.SubsurfaceColorR, S.SubsurfaceColorG, S.SubsurfaceColorB);
+    m.SssRadius          = S.SubsurfaceRadius;
+    m.SssRadiusScale     = vec3(S.SubsurfaceRadiusScaleR, S.SubsurfaceRadiusScaleG, S.SubsurfaceRadiusScaleB);
+    m.SssThickness       = 0.0f;                                          // filled per hit by SssChord
+    return m;
+}
+
+
 [[nodiscard]] inline vec3 AmbientResponse(const ShadingRecord& m, const vec3& N, const vec3& woWorld) noexcept
 {
     vec3 T, B;
