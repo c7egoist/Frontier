@@ -1,0 +1,2299 @@
+//============================================================================================================================================
+//                                                    VIEWPORTPANEL.CPP
+//============================================================================================================================================
+// 🧩 Development editor viewport — the scene column.
+
+#include "ViewportPanel.h"
+
+#include "ControlPanel.h"
+#include "EditorInstance.h"
+
+#include <imgui.h>
+#include <imgui_internal.h>   // ImGuiWindow: the SkipItems early-out
+
+#include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+
+namespace Frontier {
+
+namespace {
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                          TOKENS
+//------------------------------------------------------------------------------------------------------------------------
+
+constexpr ImU32 kView   = IM_COL32(7, 9, 12, 255);
+constexpr ImU32 kGreen  = IM_COL32(0x34, 0xC7, 0x59, 255);
+constexpr float kConsoleH = 40.0f;   // the command bar's own height, reserved and drawn
+constexpr ImU32 kTile   = IM_COL32(34, 34, 34, 255);
+constexpr ImU32 kField  = IM_COL32(0, 0, 0, 255);
+constexpr ImU32 kText   = IM_COL32(240, 240, 240, 255);
+constexpr ImU32 kDim    = IM_COL32(136, 136, 136, 255);
+constexpr ImU32 kFaint  = IM_COL32(92, 92, 92, 255);
+constexpr ImU32 kStroke = IM_COL32(255, 255, 255, 13);
+constexpr ImU32 kStrong = IM_COL32(46, 46, 46, 255);
+constexpr ImU32 kWash   = IM_COL32(255, 255, 255, 5);
+constexpr ImU32 kInset  = IM_COL32(26, 26, 26, 255);
+constexpr ImU32 kHover  = IM_COL32(34, 34, 34, 255);
+constexpr ImU32 kSeated = IM_COL32(42, 42, 42, 255);
+constexpr ImU32 kOk     = IM_COL32(34, 197, 94, 255);
+constexpr ImU32 kDanger = IM_COL32(239, 68, 68, 255);
+constexpr ImU32 kAmber  = IM_COL32(245, 158, 11, 255);
+constexpr ImU32 kHi     = IM_COL32(108, 119, 255, 255);
+constexpr ImU32 kPrimaryBg   = IM_COL32(108, 119, 255, 33);    // the standing row's indigo wash
+constexpr ImU32 kPrimaryOn   = IM_COL32(108, 119, 255, 61);    // picked by keys, it deepens
+constexpr ImU32 kPrimaryEdge = IM_COL32(108, 119, 255, 87);    // its indigo hem
+constexpr ImU32 kBadBg       = IM_COL32(239, 68, 68, 26);      // the unheard line's red wash
+constexpr ImU32 kBadEdge     = IM_COL32(239, 68, 68, 77);
+constexpr ImU32 kBadTitle    = IM_COL32(255, 180, 180, 255);
+
+constexpr uint32_t kEdit      = 0u;
+constexpr uint32_t kPlay      = 1u;
+constexpr uint32_t kSimulate  = 2u;
+
+constexpr ImU32 kMenuHover = IM_COL32(20, 20, 20, 255);
+constexpr ImU32 kMenuSel   = IM_COL32(24, 24, 24, 255);
+
+constexpr float kOrbitPi = 3.14159265359f;
+
+// The rail: 44 px of controls over a 2 px convergence hairline (Docs/Design/ViewportHeader.html, option A).
+constexpr float kBarHeight      = 44.0f;
+constexpr float kHairlineHeight = 2.0f;
+
+// The views menu's rows: two projections, then the six compass snaps. Home (viewpoint 0) keeps the seated
+//    figures; each snap carries the euler that faces its side, in the solver's own convention (yaw 0 faces
+//    +Y, positive pitch looks up), so a pick poses the fly camera with no conversion at all.
+const char* kSnapNames[7] = { "", "Front", "Back", "Right", "Left", "Top", "Bottom" };
+struct SnapEuler
+{
+    float Yaw;
+    float Pitch;
+};
+constexpr SnapEuler kSnaps[7] = {
+    { 0.0f, 0.0f },                    // home: unused, the seated figures stay
+    { 0.0f, 0.0f },                    // front: faces +Y
+    { kOrbitPi, 0.0f },                // back: faces −Y
+    { -kOrbitPi * 0.5f, 0.0f },        // right: faces −X
+    { kOrbitPi * 0.5f, 0.0f },         // left: faces +X
+    { 0.0f, -kOrbitPi * 0.5f },        // top: faces −Z
+    { 0.0f, kOrbitPi * 0.5f },         // bottom: faces +Z
+};
+
+// A gizmo pad tap snaps its view: the pad on +X looks back down −X, which reads right.
+constexpr uint32_t kPadViews[6] = { 3u, 4u, 2u, 1u, 5u, 6u };
+
+// The orbit's basis, the solver's formula: forward off yaw and pitch, right off forward × +Z, up off
+//    right × forward. At the poles the first cross collapses, so east stays east off the yaw alone.
+void OrbitBasis(float Yaw, float Pitch, float F[3], float R[3], float U[3]) noexcept
+{
+    const float Cy = std::cos(Yaw), Sy = std::sin(Yaw);
+    const float Cp = std::cos(Pitch), Sp = std::sin(Pitch);
+    F[0] = Sy * Cp; F[1] = Cy * Cp; F[2] = Sp;
+    float Rx = F[1], Ry = -F[0];
+    const float Rl = std::sqrt(Rx * Rx + Ry * Ry);
+    if (Rl < 1e-4f) { Rx = Cy; Ry = -Sy; }
+    else            { Rx /= Rl; Ry /= Rl; }
+    R[0] = Rx; R[1] = Ry; R[2] = 0.0f;
+    U[0] = Ry * F[2]; U[1] = -Rx * F[2]; U[2] = Rx * F[1] - Ry * F[0];
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    TRANSPORT GLYPHS
+//------------------------------------------------------------------------------------------------------------------------
+
+// The run glyphs, traced from the reference icon sheet (24-space, stroked at 1.9): filled here, because
+//    at thirteen pixels a filled mark reads where an outline ghosts.
+ImVec2 GlyphDot(const ImVec2& Centre, float Size, float X, float Y) noexcept
+{
+    const float S = Size / 24.0f;
+    return ImVec2(Centre.x + (X - 12.0f) * S, Centre.y + (Y - 12.0f) * S);
+}
+
+// The warning triangle the foot strips hang off a Poor realtime band: three strokes, the upright bar,
+//    and its dot. One painter, copied to each strip's file, so the three feet warn alike.
+void FootWarn(ImDrawList* Draw, const ImVec2& At, float Size, ImU32 Tint) noexcept
+{
+    Draw->AddTriangle(ImVec2(At.x + Size * 0.5f, At.y), ImVec2(At.x + Size, At.y + Size),
+        ImVec2(At.x, At.y + Size), Tint, 1.5f);
+    Draw->AddLine(ImVec2(At.x + Size * 0.5f, At.y + Size * 0.34f),
+        ImVec2(At.x + Size * 0.5f, At.y + Size * 0.62f), Tint, 1.5f);
+    Draw->AddCircleFilled(ImVec2(At.x + Size * 0.5f, At.y + Size * 0.78f), 1.2f, Tint);
+}
+
+void PlayGlyph(ImDrawList* Draw, const ImVec2& Centre, float Size, ImU32 Tint) noexcept
+{
+    Draw->AddTriangleFilled(GlyphDot(Centre, Size, 6.0f, 4.0f), GlyphDot(Centre, Size, 6.0f, 20.0f),
+        GlyphDot(Centre, Size, 20.0f, 12.0f), Tint);
+}
+
+void PauseGlyph(ImDrawList* Draw, const ImVec2& Centre, float Size, ImU32 Tint) noexcept
+{
+    const float S = Size / 24.0f;
+    Draw->AddRectFilled(GlyphDot(Centre, Size, 6.0f, 4.0f), GlyphDot(Centre, Size, 10.0f, 20.0f), Tint, S);
+    Draw->AddRectFilled(GlyphDot(Centre, Size, 14.0f, 4.0f), GlyphDot(Centre, Size, 18.0f, 20.0f), Tint, S);
+}
+
+void StopGlyph(ImDrawList* Draw, const ImVec2& Centre, float Size, ImU32 Tint) noexcept
+{
+    Draw->AddRectFilled(GlyphDot(Centre, Size, 6.0f, 6.0f), GlyphDot(Centre, Size, 18.0f, 18.0f),
+        Tint, 2.0f * Size / 24.0f);
+}
+
+void StepGlyph(ImDrawList* Draw, const ImVec2& Centre, float Size, ImU32 Tint) noexcept
+{
+    Draw->AddTriangleFilled(GlyphDot(Centre, Size, 7.0f, 5.0f), GlyphDot(Centre, Size, 7.0f, 19.0f),
+        GlyphDot(Centre, Size, 16.0f, 12.0f), Tint);
+    Draw->AddRectFilled(GlyphDot(Centre, Size, 17.0f, 5.0f), GlyphDot(Centre, Size, 19.0f, 19.0f), Tint, 0.0f);
+}
+
+void SimGlyph(ImDrawList* Draw, const ImVec2& Centre, float Size, ImU32 Tint) noexcept
+{
+    // The clock face with its arrow: the arc walks the long way round (east through south, west, north),
+    //    leaving the north-east quadrant for the arrowhead.
+    const float S = Size / 24.0f;
+    Draw->PathArcTo(Centre, 9.0f * S, 0.0f, 4.71239f, 0);
+    Draw->PathStroke(Tint, 1.9f * S, 0);
+    Draw->AddLine(GlyphDot(Centre, Size, 12.0f, 12.0f), GlyphDot(Centre, Size, 12.0f, 7.0f), Tint, 1.9f * S);
+    Draw->AddLine(GlyphDot(Centre, Size, 12.0f, 12.0f), GlyphDot(Centre, Size, 15.5f, 14.0f), Tint, 1.9f * S);
+    Draw->AddTriangleFilled(GlyphDot(Centre, Size, 17.0f, 3.0f), GlyphDot(Centre, Size, 21.0f, 5.0f),
+        GlyphDot(Centre, Size, 17.0f, 7.0f), Tint);
+}
+
+void CommandGlyph(ImDrawList* Draw, const ImVec2& Centre, float Size, ImU32 Tint) noexcept
+{
+    // The console's loop, vertex for vertex from the sheet; the corners stand in for the sheet's arcs.
+    constexpr float Loop[10][2] = { { 6.0f, 3.0f }, { 3.0f, 6.0f }, { 3.0f, 18.0f }, { 6.0f, 15.0f },
+        { 18.0f, 15.0f }, { 21.0f, 18.0f }, { 21.0f, 6.0f }, { 18.0f, 9.0f }, { 6.0f, 9.0f }, { 6.0f, 3.0f } };
+    for (uint32_t i = 0u; i < 10u; ++i)
+    {
+        Draw->PathLineTo(GlyphDot(Centre, Size, Loop[i][0], Loop[i][1]));
+    }
+    Draw->PathStroke(Tint, 1.9f * Size / 24.0f, ImDrawFlags_Closed);
+}
+
+void CloseGlyph(ImDrawList* Draw, const ImVec2& Centre, float Size, ImU32 Tint) noexcept
+{
+    // The bad row's cross: two strokes corner to corner of the fourteen box.
+    const float S = Size / 24.0f;
+    Draw->AddLine(GlyphDot(Centre, Size, 7.0f, 7.0f), GlyphDot(Centre, Size, 17.0f, 17.0f), Tint, 1.9f * S);
+    Draw->AddLine(GlyphDot(Centre, Size, 17.0f, 7.0f), GlyphDot(Centre, Size, 7.0f, 17.0f), Tint, 1.9f * S);
+}
+
+void RunGlyph(uint32_t Icon, ImDrawList* Draw, const ImVec2& Centre, float Size, ImU32 Tint) noexcept
+{
+    if (Icon == 0u)      { PlayGlyph(Draw, Centre, Size, Tint); }
+    else if (Icon == 1u) { SimGlyph(Draw, Centre, Size, Tint); }
+    else if (Icon == 2u) { PauseGlyph(Draw, Centre, Size, Tint); }
+    else if (Icon == 3u) { StepGlyph(Draw, Centre, Size, Tint); }
+    else if (Icon == 4u) { StopGlyph(Draw, Centre, Size, Tint); }
+    else                 { CommandGlyph(Draw, Centre, Size, Tint); }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                     SPACED CAPS
+//------------------------------------------------------------------------------------------------------------------------
+
+// Letterspaced caps, the footer labels and chips: the reference spaces its micro-caps by a pixel and change.
+float SpacedCapsWidth(ImFont* Font, const char* Text, float Tracking) noexcept
+{
+    ImGui::PushFont(Font);
+    float Advance = 0.0f;
+    for (const char* P = Text; *P != '\0';)
+    {
+        // Whole glyphs at a time: the middle dot walks through untouched.
+        uint32_t Len = 1u;
+        const unsigned char Lead = static_cast<unsigned char>(*P);
+        if ((Lead & 0xE0u) == 0xC0u)      { Len = 2u; }
+        else if ((Lead & 0xF0u) == 0xE0u) { Len = 3u; }
+        else if ((Lead & 0xF8u) == 0xF0u) { Len = 4u; }
+        char Upper[8] = {};
+        for (uint32_t i = 0u; i < Len && P[i] != '\0'; ++i)
+        {
+            Upper[i] = (i == 0u) ? static_cast<char>(std::toupper(Lead)) : P[i];
+        }
+        Advance += Font->CalcTextSizeA(Font->LegacySize, FLT_MAX, 0.0f, Upper).x + Tracking;
+        P += Len;
+    }
+    ImGui::PopFont();
+    return Advance > 0.0f ? Advance - Tracking : 0.0f;
+}
+
+void SpacedCaps(ImDrawList* Draw, ImFont* Font, const char* Text, const ImVec2& At, ImU32 Tint,
+                float Tracking) noexcept
+{
+    ImGui::PushFont(Font);
+    float Advance = 0.0f;
+    for (const char* P = Text; *P != '\0';)
+    {
+        uint32_t Len = 1u;
+        const unsigned char Lead = static_cast<unsigned char>(*P);
+        if ((Lead & 0xE0u) == 0xC0u)      { Len = 2u; }
+        else if ((Lead & 0xF0u) == 0xE0u) { Len = 3u; }
+        else if ((Lead & 0xF8u) == 0xF0u) { Len = 4u; }
+        char Upper[8] = {};
+        for (uint32_t i = 0u; i < Len && P[i] != '\0'; ++i)
+        {
+            Upper[i] = (i == 0u) ? static_cast<char>(std::toupper(Lead)) : P[i];
+        }
+        Draw->AddText(ImVec2(At.x + Advance, At.y), Tint, Upper);
+        Advance += Font->CalcTextSizeA(Font->LegacySize, FLT_MAX, 0.0f, Upper).x + Tracking;
+        P += Len;
+    }
+    ImGui::PopFont();
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                  QUICK COMMANDS
+//------------------------------------------------------------------------------------------------------------------------
+
+struct QuickCommand
+{
+    const char* Label;
+    const char* Sub;
+};
+
+constexpr QuickCommand kQuick[6] = {
+    { "Play \xe2\x80\x94 run through a camera", "transport" },
+    { "Simulate \xe2\x80\x94 run the world", "transport" },
+    { "Pause / resume", "transport" },
+    { "Step one frame", "transport" },
+    { "Stop and restore", "transport" },
+    { "Realtime viewport", "viewport" },
+};
+
+// The empty line offers nine sayable things, ours named for the Cornell shelf.
+constexpr const char* kExamples[9] = {
+    "find tall box",
+    "rotate tall box 40 degrees on z",
+    "move sphere 2 m on x",
+    "add sphere at x 3 y 2 z -1",
+    "enable physics on selected objects",
+    "isolate selection",
+    "set time to golden hour",
+    "hide moon",
+    "scale cone 2x",
+};
+
+// The verb words the line listens for: pipe-kept keys, a usage, and the help the row hangs right.
+struct VerbWord
+{
+    const char* Keys;
+    const char* Usage;
+    const char* Help;
+};
+
+constexpr VerbWord kVerbs[15] = {
+    { "find|locate|select|where is|go to|show me|pick", "find <entity>",
+      "select it, reveal it in the tree and frame it" },
+    { "rotate|turn|spin|yaw|pitch|roll", "rotate <entity> 40 degrees on z",
+      "degrees by default, radians if you say so" },
+    { "move|translate|shift|nudge|push|place|put", "move <entity> 2 m on x",
+      "or \"move cube to x 4 y 1 z 0\"" },
+    { "scale|resize|grow|shrink", "scale <entity> 2x", "uniform, or add \"on y\" for one axis" },
+    { "add|create|spawn|new|insert|drop", "add sphere at x 3 y 2 z -1", "any entity type, anywhere" },
+    { "enable physics|disable physics|turn on physics|turn off physics|add physics|remove physics|physics",
+      "enable physics on <entity>", "bodies fall and settle while the world runs" },
+    { "exit isolation|unisolate|leave isolation|clear isolation|show everything", "exit isolation",
+      "bring the rest of the world back" },
+    { "delete from ram|remove from ram|delete from memory|purge|wipe|free|destroy|nuke",
+      "delete from ram <entity>", "deletes it and disposes its GPU + RAM buffers for good" },
+    { "hide|unhide|show", "hide <entity>", "visibility, same as the eye in the outliner" },
+    { "frame|focus|look at|zoom to", "frame <entity|everything>", "" },
+    { "set time|time|set the time|make it", "set time to golden hour",
+      "a clock time, or sunrise / noon / dusk / midnight" },
+    { "play|run", "play", "run the world through a camera" },
+    { "close popups|close all popups|clear popups", "close popups", "" },
+    { "set|make", "set roughness of <entity> to 0.2", "any property on any entity" },
+    { "help|commands|what can i say|?", "help", "" },
+};
+
+
+bool InfixMatch(const char* Label, const char* Text) noexcept
+{
+    if (Text[0] == '\0')
+    {
+        return true;
+    }
+    for (const char* P = Label; *P != '\0'; ++P)
+    {
+        const char* A = P;
+        const char* B = Text;
+        while (*A != '\0' && *B != '\0'
+            && std::tolower(static_cast<unsigned char>(*A)) == std::tolower(static_cast<unsigned char>(*B)))
+        {
+            ++A;
+            ++B;
+        }
+        if (*B == '\0')
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool StartsFolded(const char* Str, const char* Prefix) noexcept
+{
+    while (*Prefix != '\0')
+    {
+        if (*Str == '\0'
+            || std::tolower(static_cast<unsigned char>(*Str)) != std::tolower(static_cast<unsigned char>(*Prefix)))
+        {
+            return false;
+        }
+        ++Str;
+        ++Prefix;
+    }
+    return true;
+}
+
+// A verb word answers when one of its pipe-kept keys opens with the typed word, or — past two
+//    letters — carries the typed first word inside.
+bool KeysHit(const char* Keys, const char* Text, const char* First) noexcept
+{
+    const size_t Eaten = std::strlen(Text);
+    const char* At = Keys;
+    for (;;)
+    {
+        const char* Bar = std::strchr(At, '|');
+        const size_t Span = (Bar != nullptr) ? static_cast<size_t>(Bar - At) : std::strlen(At);
+        char Key[32] = {};
+        if (Span < sizeof(Key))
+        {
+            std::strncpy(Key, At, Span);
+            if (StartsFolded(Key, Text) || (Eaten > 2u && InfixMatch(Key, First)))
+            {
+                return true;
+            }
+        }
+        if (Bar == nullptr)
+        {
+            return false;
+        }
+        At = Bar + 1;
+    }
+}
+
+// While the word still grows into a verb key, the line withholds its scold.
+bool GrowingWord(const char* Text) noexcept
+{
+    if (Text[0] == '\0')
+    {
+        return false;
+    }
+    for (uint32_t v = 0u; v < 15u; ++v)
+    {
+        const char* At = kVerbs[v].Keys;
+        for (;;)
+        {
+            const char* Bar = std::strchr(At, '|');
+            const size_t Span = (Bar != nullptr) ? static_cast<size_t>(Bar - At) : std::strlen(At);
+            char Key[32] = {};
+            if (Span < sizeof(Key))
+            {
+                std::strncpy(Key, At, Span);
+                if (StartsFolded(Key, Text) && std::strlen(Key) != std::strlen(Text))
+                {
+                    return true;
+                }
+            }
+            if (Bar == nullptr)
+            {
+                break;
+            }
+            At = Bar + 1;
+        }
+    }
+    return false;
+}
+
+// The usage sheds its bracketed tail: 'find <entity>' offers 'find '.
+void VerbInsert(const char* Usage, char* Out, size_t OutSize) noexcept
+{
+    size_t Eaten = 0u;
+    while (Usage[Eaten] != '\0' && Usage[Eaten] != '<' && Eaten + 1u < OutSize)
+    {
+        Out[Eaten] = Usage[Eaten];
+        ++Eaten;
+    }
+    while (Eaten > 0u && Out[Eaten - 1u] == ' ')
+    {
+        --Eaten;
+    }
+    if (Eaten + 1u < OutSize)
+    {
+        Out[Eaten] = ' ';
+        ++Eaten;
+    }
+    Out[Eaten] = '\0';
+}
+
+// The completion a row pours into the line: examples whole, usages shed, entries found.
+void SugInsertText(uint32_t Sort, uint32_t At, const char* EntryLabel, char* Out, size_t OutSize) noexcept
+{
+    if (Sort == 1u)
+    {
+        std::snprintf(Out, OutSize, "%s", kExamples[At]);
+    }
+    else if (Sort == 2u)
+    {
+        VerbInsert(kVerbs[At].Usage, Out, OutSize);
+    }
+    else if (Sort == 3u)
+    {
+        std::snprintf(Out, OutSize, "find %s", EntryLabel);
+    }
+    else
+    {
+        Out[0] = '\0';
+    }
+}
+
+
+} // namespace
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                           WIRING
+//------------------------------------------------------------------------------------------------------------------------
+
+void ViewportPanel::AssignControls(ControlPanel* Controls) noexcept
+{
+    Controls_ = Controls;
+}
+
+void ViewportPanel::AssignTabOpen(bool* Open) noexcept
+{
+    TabOpen_ = Open;
+}
+
+void ViewportPanel::AssignWindowTitle(const char* Title) noexcept
+{
+    WindowTitle_ = (Title != nullptr && Title[0] != '\0') ? Title : "Viewport";
+}
+
+void ViewportPanel::AssignView(const unsigned char* Rgba, uint32_t Width, uint32_t Height) noexcept
+{
+    ViewRgba_    = (Rgba != nullptr && Width > 0u && Height > 0u) ? Rgba : nullptr;
+    ViewTexture_ = static_cast<ImTextureID>(reinterpret_cast<uintptr_t>(ViewRgba_));
+    ViewW_       = (ViewRgba_ != nullptr) ? Width : 0u;
+    ViewH_       = (ViewRgba_ != nullptr) ? Height : 0u;
+}
+
+void ViewportPanel::AssignViewTexture(ImTextureID View, uint32_t Width, uint32_t Height, uint32_t StorageWidth, uint32_t StorageHeight) noexcept
+{
+    ViewTexture_ = View;
+    ViewW_       = Width;
+    ViewH_       = Height;
+    StorageW_    = (StorageWidth > 0u) ? StorageWidth : Width;
+    StorageH_    = (StorageHeight > 0u) ? StorageHeight : Height;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                           RECORD
+//------------------------------------------------------------------------------------------------------------------------
+
+void ViewportPanel::SeatViewportOrbit(const ViewportOrbit& Seated) noexcept
+{
+    Orbit_ = Seated;
+    Home_  = Seated;
+}
+
+void ViewportPanel::AssignReadout(const EditorReadout* Readout) noexcept
+{
+    Readout_ = Readout;
+}
+
+void ViewportPanel::Record(EditorInstance* Instances, uint32_t InstanceCount) noexcept
+{
+    IM_ASSERT(Controls_ != nullptr);
+    if (!ImGui::Begin(WindowTitle_, TabOpen_, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
+    {
+        ImGui::End();
+        return;
+    }
+
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10.0f, 0.0f));
+    RecordBar();
+    RecordView();
+    RecordCommand(Instances, InstanceCount);
+    RecordFooter(Instances, InstanceCount);
+    ImGui::PopStyleVar();
+    ImGui::End();
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                         TRANSPORT
+//------------------------------------------------------------------------------------------------------------------------
+
+void ViewportPanel::SetTransport(uint32_t Mode) noexcept
+{
+    // A run is always realtime; coming home unpauses. The world snapshot the reference keeps belongs to
+    //    the engine wiring, so the UI keeps the mode machine and its two rules.
+    Transport_ = Mode;
+    if (Mode == kEdit)
+    {
+        Paused_ = false;
+    }
+    else
+    {
+        Realtime_ = true;
+        Paused_   = false;
+    }
+}
+
+void ViewportPanel::SetPaused(bool Paused) noexcept
+{
+    Paused_ = Paused;
+}
+
+void ViewportPanel::SetRealtime(bool Realtime) noexcept
+{
+    Realtime_ = Realtime;
+}
+
+void ViewportPanel::StepOnce() noexcept
+{
+    // One tick past the pause.
+    if (!Paused_)
+    {
+        Paused_ = true;
+    }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                         HEADER BAR
+//------------------------------------------------------------------------------------------------------------------------
+
+void ViewportPanel::RecordSolidArcBar() noexcept
+{
+    const float RowWidth = ImGui::GetContentRegionAvail().x;
+    ImDrawList* Draw  = ImGui::GetWindowDrawList();
+    ImFont*     Small = Controls_->QuerySmall() != nullptr ? Controls_->QuerySmall() : ImGui::GetFont();
+
+    constexpr float kToolPx = 9.0f;
+    constexpr float kToolH = 22.0f;
+    constexpr float kGap = 4.0f;
+    auto TextWidth = [Small, kToolPx](const char* Text) noexcept -> float
+    {
+        return Small->CalcTextSizeA(kToolPx, FLT_MAX, 0.0f, Text).x;
+    };
+    auto TextAt = [Draw, Small, kToolPx, kToolH](const char* Text, float X, float Y, ImU32 Tint) noexcept
+    {
+        const ImVec2 T = Small->CalcTextSizeA(kToolPx, FLT_MAX, 0.0f, Text);
+        Draw->AddText(Small, kToolPx, ImVec2(X, Y + (kToolH - T.y) * 0.5f), Tint, Text);
+    };
+    auto GroupWidth = [&](const char* const* Labels, uint32_t Count) noexcept -> float
+    {
+        float W = 0.0f;
+        for (uint32_t I = 0u; I < Count; ++I)
+            W += TextWidth(Labels[I]) + 6.0f;
+        return W;
+    };
+
+    const char* const SelectLabels[] = { "Body 1", "Face 2", "Edge 3", "Vertex 4" };
+    const char* const ShadeLabels[]  = { "Wire", "Flat", "Plastic", "Matcap" };
+    const char* const GizmoLabels[]  = { "Move G", "Rotate ⇧R", "Scale S" };
+    const char* const ViewLabels[]   = { "Top 7", "Front 1", "Right 3", "Iso", "Ortho 5" };
+
+    const float ConstructW = TextWidth("Construct") + 22.0f;
+    const float SelectW = GroupWidth(SelectLabels, 4u);
+    const float CombineW = TextWidth("⇧ combine") + 12.0f;
+    const float ShadeW = GroupWidth(ShadeLabels, 4u);
+    const float GizmoW = GroupWidth(GizmoLabels, 3u);
+    const float ViewW = GroupWidth(ViewLabels, 5u);
+    const float ToolSpan = ConstructW + SelectW + CombineW + ShadeW + GizmoW + ViewW + kGap * 5.0f;
+    const bool Wrap = ToolSpan > RowWidth - 20.0f;
+    const float BarH = Wrap ? 72.0f : 38.0f;
+
+    ImGui::Dummy(ImVec2(RowWidth, BarH));
+    const ImVec2 Cursor = ImGui::GetItemRectMin();
+    const float StartX = Cursor.x + 10.0f;
+    const float EndX = Cursor.x + RowWidth - 10.0f;
+    const float Row1 = Cursor.y + 8.0f;
+    const float Row2 = Cursor.y + 42.0f;
+    float X = StartX;
+    float Y = Row1;
+
+    auto Seat = [&](float W) noexcept -> bool
+    {
+        if (X + W > EndX && Wrap && Y == Row1)
+        {
+            X = StartX;
+            Y = Row2;
+        }
+        return X + W <= EndX;
+    };
+    auto Advance = [&]() noexcept { X += kGap; };
+
+    auto Pill = [&](const char* Id, const char* Label, bool On, float W, ImU32 Accent, bool Enabled = true) noexcept -> bool
+    {
+        if (!Seat(W))
+            return false;
+        ImGui::SetCursorScreenPos(ImVec2(X, Y));
+        ImGui::InvisibleButton(Id, ImVec2(W, kToolH));
+        const bool Hot = Enabled && ImGui::IsItemHovered();
+        const bool Clicked = Enabled && Hot && ImGui::IsMouseClicked(0);
+        const ImU32 Fill = On ? IM_COL32(255, 255, 255, 34) : (Hot ? IM_COL32(255, 255, 255, 20) : IM_COL32(0, 0, 0, 95));
+        Draw->AddRectFilled(ImVec2(X, Y), ImVec2(X + W, Y + kToolH), Fill, kToolH * 0.5f);
+        Draw->AddRect(ImVec2(X, Y), ImVec2(X + W, Y + kToolH), Hot ? IM_COL32(255, 255, 255, 44) : kStroke, kToolH * 0.5f);
+        if (Accent != 0u)
+        {
+            Draw->AddLine(ImVec2(X + 10.0f, Y + kToolH * 0.5f), ImVec2(X + 18.0f, Y + kToolH * 0.5f), Accent, 1.5f);
+            Draw->AddLine(ImVec2(X + 14.0f, Y + kToolH * 0.5f - 4.0f), ImVec2(X + 14.0f, Y + kToolH * 0.5f + 4.0f), Accent, 1.5f);
+            TextAt(Label, X + 24.0f, Y, Enabled ? kText : kFaint);
+        }
+        else
+        {
+            const ImVec2 T = Small->CalcTextSizeA(kToolPx, FLT_MAX, 0.0f, Label);
+            TextAt(Label, X + (W - T.x) * 0.5f, Y, Enabled ? (On ? kText : kDim) : kFaint);
+        }
+        X += W;
+        Advance();
+        return Clicked;
+    };
+
+    auto Segments = [&](const char* Prefix, const char* const* Labels, uint32_t Count, uint32_t ActiveMask, float W) noexcept -> int
+    {
+        if (!Seat(W))
+            return -1;
+        Draw->AddRectFilled(ImVec2(X, Y), ImVec2(X + W, Y + kToolH), IM_COL32(0, 0, 0, 95), kToolH * 0.5f);
+        Draw->AddRect(ImVec2(X, Y), ImVec2(X + W, Y + kToolH), kStroke, kToolH * 0.5f);
+        int Pick = -1;
+        float SX = X;
+        for (uint32_t I = 0u; I < Count; ++I)
+        {
+            const float SW = TextWidth(Labels[I]) + 6.0f;
+            char Id[64] = {};
+            std::snprintf(Id, sizeof(Id), "%s_%u", Prefix, I);
+            ImGui::SetCursorScreenPos(ImVec2(SX, Y));
+            ImGui::InvisibleButton(Id, ImVec2(SW, kToolH));
+            const bool Hot = ImGui::IsItemHovered();
+            const bool On = (ActiveMask & (1u << I)) != 0u;
+            if (On || Hot)
+                Draw->AddRectFilled(ImVec2(SX + 1.0f, Y + 1.0f), ImVec2(SX + SW - 1.0f, Y + kToolH - 1.0f),
+                                    On ? IM_COL32(255, 255, 255, 38) : IM_COL32(255, 255, 255, 18), 10.0f);
+            if (I > 0u)
+                Draw->AddLine(ImVec2(SX, Y + 5.0f), ImVec2(SX, Y + kToolH - 5.0f), kStroke);
+            const ImVec2 T = Small->CalcTextSizeA(kToolPx, FLT_MAX, 0.0f, Labels[I]);
+            TextAt(Labels[I], SX + (SW - T.x) * 0.5f, Y, On ? kText : kDim);
+            if (Hot && ImGui::IsMouseClicked(0))
+                Pick = static_cast<int>(I);
+            SX += SW;
+        }
+        X += W;
+        Advance();
+        return Pick;
+    };
+
+    if (Pill("##solidarc_construct", "Construct", false, ConstructW, IM_COL32(79, 216, 224, 255)))
+    {
+        // The catalogue opens in the SolidArc document host; this chip keeps the viewport-side affordance live.
+    }
+
+    const int SelectPick = Segments("##solidarc_sel", SelectLabels, 4u, SolidArcSelectMask_, SelectW);
+    if (SelectPick >= 0)
+    {
+        const uint32_t Bit = 1u << static_cast<uint32_t>(SelectPick);
+        if (ImGui::GetIO().KeyShift)
+        {
+            SolidArcSelectMask_ ^= Bit;
+            if (SolidArcSelectMask_ == 0u)
+                SolidArcSelectMask_ = Bit;
+        }
+        else
+        {
+            SolidArcSelectMask_ = Bit;
+        }
+    }
+    (void)Pill("##solidarc_combine", "⇧ combine", false, CombineW, 0u, false);
+
+    const int ShadePick = Segments("##solidarc_shade", ShadeLabels, 4u, 1u << SolidArcShade_, ShadeW);
+    if (ShadePick >= 0)
+        SolidArcShade_ = static_cast<uint32_t>(ShadePick);
+
+    const int GizmoPick = Segments("##solidarc_gizmo", GizmoLabels, 3u, 1u << SolidArcGizmo_, GizmoW);
+    if (GizmoPick >= 0)
+        SolidArcGizmo_ = static_cast<uint32_t>(GizmoPick);
+
+    uint32_t ViewMask = 1u << SolidArcView_;
+    if (Orbit_.Ortho)
+        ViewMask |= 1u << 4u;
+    const int ViewPick = Segments("##solidarc_view", ViewLabels, 5u, ViewMask, ViewW);
+    if (ViewPick >= 0)
+    {
+        const uint32_t I = static_cast<uint32_t>(ViewPick);
+        SolidArcView_ = I;
+        if (I == 0u)
+        {
+            Orbit_.Yaw = kSnaps[5].Yaw; Orbit_.Pitch = kSnaps[5].Pitch; Orbit_.ViewPoint = 5u;
+        }
+        else if (I == 1u)
+        {
+            Orbit_.Yaw = kSnaps[1].Yaw; Orbit_.Pitch = kSnaps[1].Pitch; Orbit_.ViewPoint = 1u;
+        }
+        else if (I == 2u)
+        {
+            Orbit_.Yaw = kSnaps[3].Yaw; Orbit_.Pitch = kSnaps[3].Pitch; Orbit_.ViewPoint = 3u;
+        }
+        else if (I == 3u)
+        {
+            Orbit_.Yaw = 0.7853982f; Orbit_.Pitch = 0.5235988f; Orbit_.ViewPoint = 0u;
+        }
+        else
+        {
+            Orbit_.Ortho = !Orbit_.Ortho;
+        }
+        ++Orbit_.Revision;
+    }
+
+    Draw->AddLine(ImVec2(Cursor.x, Cursor.y + BarH), ImVec2(Cursor.x + RowWidth, Cursor.y + BarH), kStroke);
+}
+
+void ViewportPanel::RecordBar() noexcept
+{
+    if (Chrome_ == ViewportPanelChrome::SolidArcCad)
+    {
+        RecordSolidArcBar();
+        return;
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════════════════════════════════
+    //  THE RAIL — three zones (Docs/Design/ViewportHeader.html, option A)
+    // ══════════════════════════════════════════════════════════════════════════════════════════════════════
+    //  left   the scene      brand · panel pair · Add
+    //  centre the run        Edit | Simulate | Play, and pause/step/stop ONLY while something runs
+    //  right  the view       projection · markers · status (Live / Static / Held + samples) · settings
+    //
+    //  What this replaced, and why: five transport buttons of which three were dead whenever the world was
+    //  stopped (which is most of the time), plus the state written in three places at once — the highlighted
+    //  run button, the Realtime pill and a separate Edit/Play/Paused chip. The mode pill IS the state, so it
+    //  is said once; the three run-only buttons arrive when they mean something and leave when they do not.
+    //  The freed pixels went to the two facts this renderer actually has and never showed: how many samples
+    //  the frame has accumulated, and whether it is still converging (the hairline under the rail).
+    //
+    //  Nothing about the transport's BEHAVIOUR moved: SetTransport / SetPaused / StepOnce / SetRealtime keep
+    //  their rules (step waits on pause, stop waits on a run, realtime rests while running) and their keys.
+
+    const float RowWidth = ImGui::GetContentRegionAvail().x;
+    ImGui::Dummy(ImVec2(RowWidth, kBarHeight + kHairlineHeight));
+    const ImVec2 Cursor = ImGui::GetItemRectMin();
+
+    ImDrawList* Draw  = ImGui::GetWindowDrawList();
+    ImFont*     Ui    = Controls_->QueryUi();
+    ImFont*     Small = Controls_->QuerySmall();
+    ImFont*     Mono  = Controls_->QueryMono();
+
+    const ImVec2 TileMin(Cursor.x, Cursor.y + 8.0f);
+    const ImVec2 TileMax(Cursor.x + 28.0f, Cursor.y + 36.0f);
+    Draw->AddRectFilled(TileMin, TileMax, kTile, 8.0f);
+    Draw->AddRect(TileMin, TileMax, kStroke, 8.0f);
+    ImGui::PushFont(Ui);
+    const ImVec2 FGlyph = Ui->CalcTextSizeA(Ui->LegacySize, FLT_MAX, 0.0f, "F");
+    Draw->AddText(ImVec2(Cursor.x + (28.0f - FGlyph.x) * 0.5f, Cursor.y + 8.0f + (28.0f - FGlyph.y) * 0.5f),
+        kText, "F");
+    ImGui::PopFont();
+
+    // The hairline is drawn whatever the width: it is also the rail's bottom rule.
+    const float HairY = Cursor.y + kBarHeight;
+    const ImVec2 WinPos  = ImGui::GetWindowPos();
+    const ImVec2 WinSize = ImGui::GetWindowSize();
+    {
+        const float Target   = RenderTarget_ > 0u ? static_cast<float>(RenderTarget_) : 256.0f;
+        float       Fraction = static_cast<float>(RenderSamples_) / Target;
+        const bool  Refining = Fraction >= 1.0f;
+        Fraction = Fraction < 0.0f ? 0.0f : (Fraction > 1.0f ? 1.0f : Fraction);
+        Draw->AddLine(ImVec2(WinPos.x, HairY), ImVec2(WinPos.x + WinSize.x, HairY), kStroke);
+        if (RenderSamples_ > 0u)
+        {
+            // Teal while the first pass fills, blue once it is past the initial accumulation and only
+            //    refining — the same distinction the notification makes ("refinement continues").
+            const ImU32 Ink = Refining ? IM_COL32(79, 154, 216, 255) : IM_COL32(89, 201, 165, 255);
+            Draw->AddRectFilled(ImVec2(WinPos.x, HairY), ImVec2(WinPos.x + WinSize.x * Fraction, HairY + kHairlineHeight), Ink);
+        }
+    }
+    ImGui::SetCursorScreenPos(ImVec2(Cursor.x, Cursor.y + kBarHeight + kHairlineHeight));
+
+    // Degenerate stages hold the bar's height and rest: the rail needs ~560 px, and narrower columns keep
+    //    the brand alone rather than tripping a cursor-boundary assert on the way past the right edge.
+    if (RowWidth < 560.0f)
+    {
+        return;
+    }
+
+    const float BtnY = Cursor.y + 9.0f;                  // 26 px controls, centred in the 44 px rail
+    const bool  Running = (Transport_ != kEdit);
+
+    // ── measuring ─────────────────────────────────────────────────────────────────────────────────────────
+    // Labels retire in one order as the column narrows — markers, then add, then the projection, then the
+    //    two inactive modes — and the measurement below is the only place that order lives.
+    const char* ModeLabels[3] = { "Edit", "Simulate", "Play" };
+    const char* PlayLabel     = (Transport_ == kPlay && Paused_) ? "Paused" : "Play";
+    const char* SimLabel      = (Transport_ == kSimulate && Paused_) ? "Paused" : "Simulate";
+    ModeLabels[1] = SimLabel;
+    ModeLabels[2] = PlayLabel;
+
+    char ViewLabel[32] = {};
+    if (Orbit_.ViewPoint == 0u)
+        std::snprintf(ViewLabel, sizeof(ViewLabel), "%s", Orbit_.Ortho ? "Orthographic" : "Perspective");
+    else
+        std::snprintf(ViewLabel, sizeof(ViewLabel), "%s %s", kSnapNames[Orbit_.ViewPoint],
+                      Orbit_.Ortho ? "Ortho" : "Persp");
+    char ViewShort[16] = {};
+    std::snprintf(ViewShort, sizeof(ViewShort), "%s", Orbit_.Ortho ? "Ortho" : "Persp");
+    char FovLabel[12] = {};
+    if (FieldOfView_ > 1.0f && !Orbit_.Ortho) std::snprintf(FovLabel, sizeof(FovLabel), "%.0f\xc2\xb0", static_cast<double>(FieldOfView_));
+
+    // The status reads the run first, then the clock: one label, never two.
+    const char* StatusLabel = Paused_ ? "Held" : (Running ? "Running" : (Realtime_ ? "Live" : "Static"));
+    char SampleText[16] = {};
+    if (RenderSamples_ >= 1000u)
+        std::snprintf(SampleText, sizeof(SampleText), "%u %03u", RenderSamples_ / 1000u, RenderSamples_ % 1000u);
+    else
+        std::snprintf(SampleText, sizeof(SampleText), "%u", RenderSamples_);
+    ImGui::PushFont(Mono);
+    const float SampleW = Mono->CalcTextSizeA(Mono->LegacySize, FLT_MAX, 0.0f, SampleText).x;
+    ImGui::PopFont();
+
+    const float TransportW = 11.0f + 3.0f * 28.0f + 2.0f * 2.0f + 4.0f;   // rule + pause/step/stop
+    float AddW = 0.0f, MarkW = 0.0f, ViewW = 0.0f, StatusW = 0.0f;
+    float ModeW[3] = { 0.0f, 0.0f, 0.0f }, ModePillW = 0.0f;
+    float LeftW = 0.0f, CentreW = 0.0f, RightW = 0.0f;
+    uint32_t Squeeze = 0u;
+    for (;; ++Squeeze)
+    {
+        AddW  = Squeeze >= 2u ? 28.0f : SpacedCapsWidth(Small, "Add", 1.1f) + 34.0f;
+        MarkW = Squeeze >= 1u ? 28.0f : SpacedCapsWidth(Small, "Markers", 1.1f) + 34.0f;
+        ViewW = (Squeeze >= 3u ? SpacedCapsWidth(Small, ViewShort, 1.1f)
+                               : SpacedCapsWidth(Small, ViewLabel, 1.1f)) + 34.0f;
+        if (FovLabel[0] && Squeeze < 3u) ViewW += SpacedCapsWidth(Small, FovLabel, 1.1f) + 8.0f;
+        for (uint32_t M = 0u; M < 3u; ++M)
+        {
+            const bool Selected = (M == 0u && !Running) || (M == 1u && Transport_ == kSimulate) || (M == 2u && Transport_ == kPlay);
+            ModeW[M] = (Squeeze >= 4u && !Selected && M > 0u)
+                     ? 26.0f
+                     : SpacedCapsWidth(Small, ModeLabels[M], 1.1f) + (M > 0u ? 30.0f : 24.0f);
+        }
+        ModePillW = ModeW[0] + ModeW[1] + ModeW[2] + 4.0f * 2.0f;
+        StatusW   = 9.0f + 7.0f + 8.0f + SpacedCapsWidth(Small, StatusLabel, 1.1f) + 8.0f + SampleW + 10.0f;
+        LeftW     = 28.0f + 10.0f + 56.0f + 6.0f + AddW;                       // brand · panel pair · add
+        CentreW   = ModePillW + TransportW * TransportOpen_;
+        RightW    = ViewW + 4.0f + MarkW + 12.0f + StatusW + 4.0f + 28.0f;
+        if (LeftW + CentreW + RightW + 40.0f <= RowWidth || Squeeze >= 4u) break;
+    }
+
+    // ── the centre's arrival ──────────────────────────────────────────────────────────────────────────────
+    {
+        const float Want = Running ? 1.0f : 0.0f;
+        const float Step = ImGui::GetIO().DeltaTime / 0.18f;
+        if (TransportOpen_ < Want) TransportOpen_ = std::min(Want, TransportOpen_ + Step);
+        else if (TransportOpen_ > Want) TransportOpen_ = std::max(Want, TransportOpen_ - Step);
+    }
+
+    // ── shared pill ───────────────────────────────────────────────────────────────────────────────────────
+    const auto Pill = [&](const char* Id, float X, float W, bool On, ImU32 OnBg, ImU32 Edge, bool* OutHot) -> bool
+    {
+        ImGui::SetCursorScreenPos(ImVec2(X, BtnY));
+        ImGui::InvisibleButton(Id, ImVec2(W, 26.0f));
+        const bool Hot = ImGui::IsItemHovered();
+        if (OutHot) *OutHot = Hot;
+        const ImU32 Bg = On ? OnBg : (Hot ? kHover : IM_COL32(255, 255, 255, 8));
+        Draw->AddRectFilled(ImVec2(X, BtnY), ImVec2(X + W, BtnY + 26.0f), Bg, 13.0f);
+        Draw->AddRect(ImVec2(X, BtnY), ImVec2(X + W, BtnY + 26.0f), On ? Edge : kStroke, 13.0f);
+        return Hot && ImGui::IsMouseClicked(0);
+    };
+
+    // ══ LEFT ══════════════════════════════════════════════════════════════════════════════════════════════
+    float X = Cursor.x + 38.0f;
+
+    // The two dock toggles, now one segmented pair rather than two loose discs.
+    {
+        const float PairW = 56.0f;
+        Draw->AddRectFilled(ImVec2(X, BtnY), ImVec2(X + PairW, BtnY + 26.0f), IM_COL32(18, 20, 22, 255), 13.0f);
+        Draw->AddRect(ImVec2(X, BtnY), ImVec2(X + PairW, BtnY + 26.0f), kStroke, 13.0f);
+        bool* Docks[2] = { &DockLeft_, &DockRight_ };
+        for (uint32_t i = 0u; i < 2u; ++i)
+        {
+            const float SegX = X + 2.0f + static_cast<float>(i) * 26.0f;
+            ImGui::SetCursorScreenPos(ImVec2(SegX, BtnY + 2.0f));
+            char DockId[10] = {};
+            std::snprintf(DockId, sizeof(DockId), "##dk%u", i);
+            ImGui::InvisibleButton(DockId, ImVec2(26.0f, 22.0f));
+            const bool Hot = ImGui::IsItemHovered();
+            if (Hot)
+            {
+                ImGui::SetTooltip("%s", i == 0u ? "Outliner column" : "Inspector column");
+                if (ImGui::IsMouseClicked(0)) *Docks[i] = !*Docks[i];
+            }
+            if (*Docks[i])      Draw->AddRectFilled(ImVec2(SegX, BtnY + 2.0f), ImVec2(SegX + 26.0f, BtnY + 24.0f), kStrong, 11.0f);
+            else if (Hot)       Draw->AddRectFilled(ImVec2(SegX, BtnY + 2.0f), ImVec2(SegX + 26.0f, BtnY + 24.0f), kHover, 11.0f);
+            const ImVec2 C(SegX + 13.0f, BtnY + 13.0f);
+            Draw->AddRect(ImVec2(C.x - 6.0f, C.y - 5.0f), ImVec2(C.x + 6.0f, C.y + 5.0f),
+                *Docks[i] ? kDim : kFaint, 2.0f, 0, 1.4f);
+            const float BarX = (i == 0u) ? (C.x - 6.0f) : (C.x + 3.0f);
+            Draw->AddRectFilled(ImVec2(BarX, C.y - 5.0f), ImVec2(BarX + 3.0f, C.y + 5.0f), *Docks[i] ? kText : kFaint);
+        }
+        X += PairW + 6.0f;
+    }
+
+    // Add.
+    {
+        bool AddHot = false;
+        const float AddX = X;
+        if (Pill("##addbutton", AddX, AddW, false, 0u, kStroke, &AddHot)) ImGui::OpenPopup("##addmenu");
+        if (AddHot) ImGui::SetTooltip("Add an object  (Shift A)");
+        const ImU32 Ink = AddHot ? kText : kDim;
+        const ImVec2 PlusC(AddX + (Squeeze >= 2u ? 14.0f : 15.0f), BtnY + 13.0f);
+        Draw->AddLine(ImVec2(PlusC.x - 4.0f, PlusC.y), ImVec2(PlusC.x + 4.0f, PlusC.y), Ink, 1.6f);
+        Draw->AddLine(ImVec2(PlusC.x, PlusC.y - 4.0f), ImVec2(PlusC.x, PlusC.y + 4.0f), Ink, 1.6f);
+        if (Squeeze < 2u)
+        {
+            ImGui::PushFont(Small);
+            const float CapH = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, "Add").y;
+            ImGui::PopFont();
+            SpacedCaps(Draw, Small, "Add", ImVec2(AddX + 26.0f, BtnY + (26.0f - CapH) * 0.5f), Ink, 1.1f);
+        }
+        X = AddX;   // the add menu's popup body below anchors on X / BtnY
+    ImGui::SetNextWindowPos(ImVec2(X, BtnY + 33.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(220.0f, 0.0f), ImGuiCond_Appearing);
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.06f, 0.07f, 0.08f, 0.98f));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.25f, 0.25f, 0.28f, 0.8f));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 12.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 8.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 4.0f));
+    if (ImGui::BeginPopup("##addmenu"))
+    {
+        ImGui::PushFont(Small);
+        if (ImGui::BeginMenu("Lights"))
+        {
+            if (ImGui::MenuItem("Directional Light (Sun)")) {}
+            if (ImGui::MenuItem("Point Light")) {}
+            if (ImGui::MenuItem("Spot Light")) {}
+            if (ImGui::MenuItem("Rect / Area Light")) {}
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("World & Celestial"))
+        {
+            if (ImGui::MenuItem("Atmosphere Medium")) {}
+            if (ImGui::MenuItem("Sky Atmosphere")) {}
+            if (ImGui::MenuItem("Cloud Layer")) {}
+            if (ImGui::MenuItem("Local Volumetric Fog")) {}
+            if (ImGui::MenuItem("Wind Field")) {}
+            if (ImGui::MenuItem("Rainbow")) {}
+            if (ImGui::MenuItem("Lens Flare")) {}
+            if (ImGui::MenuItem("Moon / Satellite")) {}
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Cameras"))
+        {
+            if (ImGui::MenuItem("Main Camera")) {}
+            if (ImGui::MenuItem("Cine Camera (35mm)")) {}
+            if (ImGui::MenuItem("Cine Camera (50mm)")) {}
+            if (ImGui::MenuItem("Cine Camera (85mm)")) {}
+            if (ImGui::MenuItem("Post Process Volume")) {}
+            ImGui::EndMenu();
+        }
+        if (ImGui::BeginMenu("Geometry Primitives"))
+        {
+            if (ImGui::MenuItem("Plane / Ground")) {}
+            if (ImGui::MenuItem("Cube / Box")) {}
+            if (ImGui::MenuItem("Sphere")) {}
+            if (ImGui::MenuItem("Cylinder")) {}
+            if (ImGui::MenuItem("Cone")) {}
+            if (ImGui::MenuItem("Torus")) {}
+            ImGui::EndMenu();
+        }
+        ImGui::PopFont();
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(2);
+        X = AddX + AddW;
+    }
+
+    // ══ CENTRE ════════════════════════════════════════════════════════════════════════════════════════════
+    const float RightX  = Cursor.x + RowWidth - RightW;
+    float       CentreX = Cursor.x + (RowWidth - CentreW) * 0.5f;
+    CentreX = std::max(CentreX, X + 16.0f);
+    CentreX = std::min(CentreX, RightX - CentreW - 16.0f);
+
+    {
+        // The mode pill. Three segments over the existing Transport_/Paused_ state — no new state at all.
+        const float PillX = CentreX;
+        Draw->AddRectFilled(ImVec2(PillX, BtnY), ImVec2(PillX + ModePillW, BtnY + 26.0f), IM_COL32(18, 20, 22, 255), 13.0f);
+        Draw->AddRect(ImVec2(PillX, BtnY), ImVec2(PillX + ModePillW, BtnY + 26.0f), kStroke, 13.0f);
+        float SegX = PillX + 2.0f;
+        for (uint32_t M = 0u; M < 3u; ++M)
+        {
+            const bool Selected = (M == 0u && !Running) || (M == 1u && Transport_ == kSimulate) || (M == 2u && Transport_ == kPlay);
+            const bool Glyphed  = (Squeeze >= 4u && !Selected && M > 0u);
+            const float SegW    = ModeW[M];
+            ImGui::SetCursorScreenPos(ImVec2(SegX, BtnY + 2.0f));
+            char SegId[12] = {};
+            std::snprintf(SegId, sizeof(SegId), "##mode%u", M);
+            ImGui::InvisibleButton(SegId, ImVec2(SegW, 22.0f));
+            const bool Hot = ImGui::IsItemHovered();
+            if (Hot)
+            {
+                ImGui::SetTooltip("%s", M == 0u ? "Edit \xe2\x80\x94 the editor owns the world  (Esc)"
+                                      : M == 1u ? "Simulate \xe2\x80\x94 run the world, keep the editor camera  (Alt S)"
+                                                : "Play \xe2\x80\x94 run the world through a scene camera  (Alt P)");
+                if (ImGui::IsMouseClicked(0))
+                {
+                    if (M == 0u)      SetTransport(kEdit);
+                    else if (M == 1u) SetTransport(Transport_ == kSimulate ? kEdit : kSimulate);
+                    else              SetTransport(Transport_ == kPlay ? kEdit : kPlay);
+                }
+            }
+            ImU32 SegBg = IM_COL32(0, 0, 0, 0), SegInk = kDim;
+            if (Selected && Paused_ && M > 0u)      { SegBg = IM_COL32(245, 158, 11, 56); SegInk = IM_COL32(246, 198, 106, 255); }
+            else if (Selected && M == 2u)           { SegBg = IM_COL32(34, 197, 94, 56);  SegInk = IM_COL32(126, 231, 165, 255); }
+            else if (Selected && M == 1u)           { SegBg = IM_COL32(108, 119, 255, 56); SegInk = IM_COL32(174, 180, 255, 255); }
+            else if (Selected)                      { SegBg = kStrong; SegInk = kText; }
+            else if (Hot)                           { SegBg = kHover;  SegInk = kText; }
+            if (SegBg != IM_COL32(0, 0, 0, 0))
+                Draw->AddRectFilled(ImVec2(SegX, BtnY + 2.0f), ImVec2(SegX + SegW, BtnY + 24.0f), SegBg, 11.0f);
+            float TextX = SegX + 12.0f;
+            if (Glyphed)
+            {
+                // The tightest rail keeps the two runs as their own glyphs — the same play / simulate marks
+                //    the old five-button strip drew, so nothing has to be re-learned.
+                RunGlyph(M == 1u ? 1u : 0u, Draw, ImVec2(SegX + SegW * 0.5f, BtnY + 13.0f), 12.0f, SegInk);
+            }
+            else if (M > 0u)
+            {
+                Draw->AddCircleFilled(ImVec2(SegX + 11.0f, BtnY + 13.0f), 3.0f,
+                    Selected ? SegInk : IM_COL32(92, 92, 92, 255));
+                TextX = SegX + 20.0f;
+            }
+            if (!Glyphed)
+            {
+                ImGui::PushFont(Small);
+                const float CapH = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, ModeLabels[M]).y;
+                ImGui::PopFont();
+                SpacedCaps(Draw, Small, ModeLabels[M], ImVec2(TextX, BtnY + (26.0f - CapH) * 0.5f), SegInk, 1.1f);
+            }
+            SegX += SegW + 2.0f;
+        }
+
+        // Pause / step / stop — only while something runs, and eased in with the pill's own width.
+        if (TransportOpen_ > 0.002f)
+        {
+            Draw->PushClipRect(ImVec2(PillX + ModePillW, BtnY - 2.0f),
+                               ImVec2(PillX + ModePillW + TransportW * TransportOpen_ + 1.0f, BtnY + 28.0f), true);
+            float TX = PillX + ModePillW + 4.0f;
+            Draw->AddLine(ImVec2(TX + 3.0f, BtnY + 6.0f), ImVec2(TX + 3.0f, BtnY + 20.0f), kStroke);
+            TX += 11.0f;
+            struct Run { const char* Id; uint32_t Icon; const char* Tip; };
+            static constexpr Run kRuns[3] = {
+                { "##tpause", 2u, "Pause / resume  (P)" },
+                { "##tstep",  3u, "Advance one frame  (.)" },
+                { "##tstop",  4u, "Stop \xe2\x80\x94 restore the editor  (Esc)" },
+            };
+            const bool Arriving = TransportOpen_ < 0.6f;   // half-drawn buttons do not take clicks
+            for (uint32_t i = 0u; i < 3u; ++i)
+            {
+                const bool Disabled = Arriving || (i == 1u && !Paused_) || (i != 1u && !Running);
+                ImGui::SetCursorScreenPos(ImVec2(TX, BtnY));
+                ImGui::InvisibleButton(kRuns[i].Id, ImVec2(28.0f, 26.0f));
+                const bool Hot = ImGui::IsItemHovered() && !Disabled;
+                if (Hot)
+                {
+                    ImGui::SetTooltip("%s", kRuns[i].Tip);
+                    if (ImGui::IsMouseClicked(0))
+                    {
+                        if (i == 0u)      SetPaused(!Paused_);
+                        else if (i == 1u) StepOnce();
+                        else              SetTransport(kEdit);
+                    }
+                }
+                ImU32 Bg = IM_COL32(0, 0, 0, 0), Ink = kDim;
+                if (Disabled)                 Ink = IM_COL32(136, 136, 136, 70);
+                else if (i == 0u && Paused_)  { Bg = kAmber; Ink = IM_COL32(26, 18, 4, 255); }
+                else if (Hot && i == 2u)      { Bg = IM_COL32(239, 68, 68, 41); Ink = IM_COL32(255, 155, 155, 255); }
+                else if (Hot)                 { Bg = kHover; Ink = kText; }
+                if (Bg != IM_COL32(0, 0, 0, 0))
+                    Draw->AddRectFilled(ImVec2(TX, BtnY), ImVec2(TX + 28.0f, BtnY + 26.0f), Bg, 13.0f);
+                RunGlyph(i == 0u && Paused_ ? 0u : kRuns[i].Icon, Draw, ImVec2(TX + 14.0f, BtnY + 13.0f), 13.0f, Ink);
+                TX += 30.0f;
+            }
+            Draw->PopClipRect();
+        }
+    }
+
+    // ══ RIGHT ═════════════════════════════════════════════════════════════════════════════════════════════
+    X = RightX;
+
+    // The projection pill and its menu.
+    {
+        bool ViewHot = false;
+        const float ViewX = X;
+        if (Pill("##viewbutton", ViewX, ViewW, false, 0u, kStroke, &ViewHot)) ImGui::OpenPopup("##viewmenu");
+        ImGui::PushFont(Small);
+        const float CapH = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, "X").y;
+        ImGui::PopFont();
+        const char* Shown = Squeeze >= 3u ? ViewShort : ViewLabel;
+        SpacedCaps(Draw, Small, Shown, ImVec2(ViewX + 12.0f, BtnY + (26.0f - CapH) * 0.5f), ViewHot ? kText : kDim, 1.1f);
+        if (FovLabel[0] && Squeeze < 3u)
+            SpacedCaps(Draw, Small, FovLabel,
+                ImVec2(ViewX + 12.0f + SpacedCapsWidth(Small, Shown, 1.1f) + 8.0f, BtnY + (26.0f - CapH) * 0.5f), kFaint, 1.1f);
+        X = ViewX;   // the views menu's popup body below anchors on X / BtnY / ViewW
+    const float ViewTurnTarget = ViewMenuWasOpen_ ? 1.0f : 0.0f;
+    const float ViewTurnStep   = ImGui::GetIO().DeltaTime / 0.2f;
+    if (ViewChevronAnim_ < ViewTurnTarget)
+    {
+        ViewChevronAnim_ += ViewTurnStep;
+        if (ViewChevronAnim_ > ViewTurnTarget)
+            ViewChevronAnim_ = ViewTurnTarget;
+    }
+    else if (ViewChevronAnim_ > ViewTurnTarget)
+    {
+        ViewChevronAnim_ -= ViewTurnStep;
+        if (ViewChevronAnim_ < ViewTurnTarget)
+            ViewChevronAnim_ = ViewTurnTarget;
+    }
+    const float ViewTurn   = ViewChevronAnim_ * ViewChevronAnim_ * (3.0f - 2.0f * ViewChevronAnim_);
+    const float ViewChevX  = X + ViewW - 15.0f;
+    const float ViewChevY  = BtnY + 14.0f;
+    const float ViewTipY   = ViewChevY - 1.5f + ViewTurn * 4.0f;
+    const float ViewElbowY = ViewChevY + 2.5f - ViewTurn * 4.0f;
+    Draw->AddLine(ImVec2(ViewChevX - 4.0f, ViewTipY), ImVec2(ViewChevX, ViewElbowY), kDim, 1.8f);
+    Draw->AddLine(ImVec2(ViewChevX, ViewElbowY), ImVec2(ViewChevX + 4.0f, ViewTipY), kDim, 1.8f);
+
+    const double ViewMenuNow = ImGui::GetTime();
+    float ViewMenuFade = 1.0f;
+    if (ViewMenuWasOpen_)
+    {
+        float T = static_cast<float>((ViewMenuNow - ViewMenuOpenedAt_) / 0.14);
+        T            = T < 0.0f ? 0.0f : (T > 1.0f ? 1.0f : T);
+        ViewMenuFade = T * T * (3.0f - 2.0f * T);
+    }
+    ImGui::SetNextWindowPos(ImVec2(X, BtnY + 33.0f), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(190.0f, 0.0f), ImGuiCond_Appearing);
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, ImVec4(0.0f, 0.0f, 0.0f, ViewMenuFade));
+    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.180f, 0.180f, 0.180f, ViewMenuFade));
+    ImGui::PushStyleVar(ImGuiStyleVar_PopupRounding, 20.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(6.0f, 6.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 2.0f));
+    const bool ViewMenuOpen = ImGui::BeginPopup("##viewmenu");
+    if (ViewMenuOpen && !ViewMenuWasOpen_)
+    {
+        ViewMenuOpenedAt_ = ViewMenuNow;
+        ViewMenuFade      = 0.0f;
+    }
+    ViewMenuWasOpen_ = ViewMenuOpen;
+    if (ViewMenuOpen)
+    {
+        ImDrawList* MenuDraw = ImGui::GetWindowDrawList();
+        ImGui::PushFont(Small);
+        const float MenuWidth = ImGui::GetContentRegionAvail().x;
+        for (uint32_t r = 0u; r < 8u; ++r)
+        {
+            if (r == 2u)
+            {
+                ImGui::Dummy(ImVec2(MenuWidth, 7.0f));
+                const ImVec2 SepMin = ImGui::GetItemRectMin();
+                const ImVec2 SepMax = ImGui::GetItemRectMax();
+                MenuDraw->AddLine(ImVec2(SepMin.x + 8.0f, (SepMin.y + SepMax.y) * 0.5f),
+                    ImVec2(SepMax.x - 8.0f, (SepMin.y + SepMax.y) * 0.5f),
+                    ControlPanel::FadeTint(kStroke, ViewMenuFade));
+            }
+            char RowLabel[24] = {};
+            bool Ticked = false;
+            if (r == 0u)
+            {
+                std::snprintf(RowLabel, sizeof(RowLabel), "Perspective");
+                Ticked = !Orbit_.Ortho;
+            }
+            else if (r == 1u)
+            {
+                std::snprintf(RowLabel, sizeof(RowLabel), "Orthographic");
+                Ticked = Orbit_.Ortho;
+            }
+            else
+            {
+                std::snprintf(RowLabel, sizeof(RowLabel), "%s", kSnapNames[r - 1u]);
+                Ticked = Orbit_.ViewPoint == r - 1u;
+            }
+            ImGui::Dummy(ImVec2(MenuWidth, 28.0f));
+            const ImVec2 RowMin = ImGui::GetItemRectMin();
+            const ImVec2 RowMax = ImGui::GetItemRectMax();
+            ImGui::SetCursorScreenPos(RowMin);
+            char RowId[12] = {};
+            std::snprintf(RowId, sizeof(RowId), "##v%ui", r);
+            ImGui::InvisibleButton(RowId, ImVec2(MenuWidth, 28.0f));
+            const bool Hovered = ImGui::IsItemHovered();
+            if (Hovered && ImGui::IsMouseClicked(0))
+            {
+                if (r < 2u)
+                {
+                    Orbit_.Yaw      = Home_.Yaw;
+                    Orbit_.Pitch    = Home_.Pitch;
+                    Orbit_.Distance = Home_.Distance;
+                    Orbit_.Target[0] = Home_.Target[0];
+                    Orbit_.Target[1] = Home_.Target[1];
+                    Orbit_.Target[2] = Home_.Target[2];
+                    Orbit_.Ortho     = (r == 1u);
+                    Orbit_.ViewPoint = 0u;
+                }
+                else
+                {
+                    Orbit_.Yaw       = kSnaps[r - 1u].Yaw;
+                    Orbit_.Pitch     = kSnaps[r - 1u].Pitch;
+                    Orbit_.ViewPoint = r - 1u;
+                }
+                ++Orbit_.Revision;
+                ImGui::CloseCurrentPopup();
+            }
+            if (Ticked)
+                MenuDraw->AddRectFilled(RowMin, RowMax, ControlPanel::FadeTint(kMenuSel, ViewMenuFade), 14.0f);
+            else if (Hovered)
+                MenuDraw->AddRectFilled(RowMin, RowMax, ControlPanel::FadeTint(kMenuHover, ViewMenuFade), 14.0f);
+            if (Ticked)
+                MenuDraw->AddCircleFilled(ImVec2(RowMin.x + 16.0f, (RowMin.y + RowMax.y) * 0.5f), 3.5f,
+                    ControlPanel::FadeTint(kHi, ViewMenuFade));
+            const ImVec2 OptGlyph = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, RowLabel);
+            MenuDraw->AddText(ImVec2(RowMin.x + 30.0f, RowMin.y + (28.0f - OptGlyph.y) * 0.5f),
+                ControlPanel::FadeTint(Ticked || Hovered ? kText : kDim, ViewMenuFade), RowLabel);
+        }
+        ImGui::PopFont();
+        ImGui::EndPopup();
+    }
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(2);
+        X = ViewX + ViewW + 4.0f;
+    }
+
+    // Markers.
+    {
+        bool MarkHot = false;
+        if (Pill("##markers", X, MarkW, MarkersOn_, kStrong, kStrong, &MarkHot)) MarkersOn_ = !MarkersOn_;
+        if (MarkHot) ImGui::SetTooltip("Volume markers in the view");
+        const ImU32 Ink = MarkersOn_ ? kText : (MarkHot ? kText : kDim);
+        Draw->AddCircle(ImVec2(X + 15.0f, BtnY + 13.0f), 5.0f, Ink, 16, 1.4f);
+        Draw->AddCircleFilled(ImVec2(X + 15.0f, BtnY + 13.0f), 1.6f, Ink);
+        if (Squeeze < 1u)
+        {
+            ImGui::PushFont(Small);
+            const float CapH = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, "Markers").y;
+            ImGui::PopFont();
+            SpacedCaps(Draw, Small, "Markers", ImVec2(X + 26.0f, BtnY + (26.0f - CapH) * 0.5f), Ink, 1.1f);
+        }
+        X += MarkW + 6.0f;
+    }
+
+    Draw->AddLine(ImVec2(X + 3.0f, BtnY + 5.0f), ImVec2(X + 3.0f, BtnY + 21.0f), kStroke);
+    X += 12.0f;
+
+    // The status: the clock, the run and the sample count in one readout. Clicking it toggles realtime, which
+    //    is what the separate Realtime pill used to do — the label already says which state that is.
+    {
+        bool StatusHot = false;
+        ImGui::SetCursorScreenPos(ImVec2(X, BtnY));
+        ImGui::InvisibleButton("##status", ImVec2(StatusW, 26.0f));
+        StatusHot = ImGui::IsItemHovered();
+        if (StatusHot)
+        {
+            ImGui::SetTooltip("%u accumulated samples \xc2\xb7 last restart: %s\n%s",
+                RenderSamples_, RenderRestart_ ? RenderRestart_ : "none",
+                Running ? "The world is running" : "Click to hold the clock (realtime on/off)  (Ctrl R)");
+            if (ImGui::IsMouseClicked(0) && !Running) SetRealtime(!Realtime_);
+        }
+        if (StatusHot) Draw->AddRectFilled(ImVec2(X, BtnY), ImVec2(X + StatusW, BtnY + 26.0f), kHover, 13.0f);
+        Draw->AddRect(ImVec2(X, BtnY), ImVec2(X + StatusW, BtnY + 26.0f), kStroke, 13.0f);
+
+        const ImVec2 Led(X + 13.0f, BtnY + 13.0f);
+        ImU32 LedInk = kOk, Halo = IM_COL32(34, 197, 94, 70);
+        if (Paused_)        { LedInk = kAmber; Halo = IM_COL32(245, 158, 11, 70); }
+        else if (Running)   { LedInk = kHi;    Halo = IM_COL32(108, 119, 255, 70); }
+        else if (!Realtime_){ LedInk = IM_COL32(92, 92, 92, 255); Halo = IM_COL32(0, 0, 0, 0); }
+        if (Halo != IM_COL32(0, 0, 0, 0)) Draw->AddCircleFilled(Led, 6.0f, Halo);
+        Draw->AddCircleFilled(Led, 3.0f, LedInk);
+
+        ImGui::PushFont(Small);
+        const float CapH = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, StatusLabel).y;
+        ImGui::PopFont();
+        SpacedCaps(Draw, Small, StatusLabel, ImVec2(X + 22.0f, BtnY + (26.0f - CapH) * 0.5f), kDim, 1.1f);
+        ImGui::PushFont(Mono);
+        const ImVec2 NumSize = Mono->CalcTextSizeA(Mono->LegacySize, FLT_MAX, 0.0f, SampleText);
+        Draw->AddText(Mono, Mono->LegacySize, ImVec2(X + StatusW - 10.0f - NumSize.x, BtnY + (26.0f - NumSize.y) * 0.5f),
+            RenderSamples_ > 0u ? kText : kFaint, SampleText);
+        ImGui::PopFont();
+        X += StatusW + 4.0f;
+    }
+
+    // The gear: slides the Control Centre shade open and shut through the shared open figure.
+    {
+        const float GX = X;
+        ImGui::SetCursorScreenPos(ImVec2(GX, BtnY));
+        ImGui::InvisibleButton("##tsettings", ImVec2(28.0f, 26.0f));
+        const bool GearHot = ImGui::IsItemHovered();
+        if (GearHot)
+        {
+            ImGui::SetTooltip("Viewport settings");
+            if (ImGui::IsMouseClicked(0) && ShadeOpen_ != nullptr) *ShadeOpen_ = !*ShadeOpen_;
+        }
+        const bool GearOn = (ShadeOpen_ != nullptr && *ShadeOpen_);
+        if (GearHot || GearOn)
+            Draw->AddCircleFilled(ImVec2(GX + 14.0f, BtnY + 13.0f), 12.0f, GearHot ? kHover : IM_COL32(255, 255, 255, 16));
+        const ImVec2 GearC(GX + 14.0f, BtnY + 13.0f);
+        const ImU32  GearTint = (GearHot || GearOn) ? kText : kDim;
+        Draw->AddCircle(GearC, 5.0f, GearTint, 24, 1.4f);
+        for (uint32_t Tooth = 0u; Tooth < 8u; ++Tooth)
+        {
+            const float A = static_cast<float>(Tooth) * 0.7853982f;
+            Draw->AddLine(ImVec2(GearC.x + 5.6f * std::cos(A), GearC.y + 5.6f * std::sin(A)),
+                          ImVec2(GearC.x + 8.2f * std::cos(A), GearC.y + 8.2f * std::sin(A)), GearTint, 1.6f);
+        }
+        Draw->AddCircleFilled(GearC, 1.6f, GearTint);
+    }
+
+    ImGui::SetCursorScreenPos(ImVec2(Cursor.x, Cursor.y + kBarHeight + kHairlineHeight));
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                          THE VIEW
+//------------------------------------------------------------------------------------------------------------------------
+
+void ViewportPanel::RecordView() noexcept
+{
+    const float RowWidth = ImGui::GetContentRegionAvail().x;
+    // The view reaches exactly the foot's top row, taking the room the shut console leaves.
+    const float ViewH =
+        Controls_->QueryFootTop() - ImGui::GetCursorScreenPos().y - (ConsoleOpen_ ? kConsoleH : 0.0f);
+    if (ViewH < 40.0f)
+    {
+        return;
+    }
+
+    ImGui::Dummy(ImVec2(RowWidth, ViewH));
+    const ImVec2 Min = ImGui::GetItemRectMin();
+    const ImVec2 Max = ImGui::GetItemRectMax();
+
+    ImDrawList* Draw  = ImGui::GetWindowDrawList();
+    ImFont*     Ui    = Controls_->QueryUi();
+    ImFont*     Small = Controls_->QuerySmall();
+    Draw->AddRectFilled(Min, Max, kView, 12.0f);
+    if (ViewTexture_ != static_cast<ImTextureID>(0))
+    {
+        const float UMax = (StorageW_ > 0u && ViewW_ > 0u) ? std::min(1.0f, static_cast<float>(ViewW_) / static_cast<float>(StorageW_)) : 1.0f;
+        const float VMax = (StorageH_ > 0u && ViewH_ > 0u) ? std::min(1.0f, static_cast<float>(ViewH_) / static_cast<float>(StorageH_)) : 1.0f;
+        Draw->AddImage(ViewTexture_, Min, Max, ImVec2(0.0f, 0.0f), ImVec2(UMax, VMax));
+    }
+    Draw->AddRect(Min, Max, kStroke, 12.0f);
+
+    if (ViewTexture_ == static_cast<ImTextureID>(0))
+    {
+        ImGui::PushFont(Ui);
+        const ImVec2 HintGlyph = Ui->CalcTextSizeA(Ui->LegacySize, FLT_MAX, 0.0f, "The Cornell Box renders here");
+        Draw->AddText(ImVec2(Min.x + (RowWidth - HintGlyph.x) * 0.5f, Min.y + ViewH * 0.5f - 22.0f),
+            kDim, "The Cornell Box renders here");
+        ImGui::PopFont();
+        ImGui::PushFont(Small);
+        const ImVec2 SubGlyph = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, "in the engine build");
+        Draw->AddText(ImVec2(Min.x + (RowWidth - SubGlyph.x) * 0.5f, Min.y + ViewH * 0.5f + 2.0f),
+            kFaint, "in the engine build");
+        ImGui::PopFont();
+    }
+
+    // The orbit gizmo, Blender's compass: the three axes through the orbit's basis, pads on all six
+    //    ends, letters on the positive three. A pad tap snaps its view, a drag orbits, and the wheel
+    //    dollies over the view. Front pads read bright, back pads dim, and the hot pad rings.
+    float Gf[3], Gr[3], Gu[3];
+    OrbitBasis(Orbit_.Yaw, Orbit_.Pitch, Gf, Gr, Gu);
+    const ImVec2 OrbC(Max.x - 52.0f, Max.y - 52.0f);
+    constexpr float kArm = 20.0f;
+    struct PadDot { float X; float Y; bool Front; };
+    PadDot Pads[6];
+    constexpr float kAxes[6][3] = { { 1.0f, 0.0f, 0.0f }, { -1.0f, 0.0f, 0.0f },
+                                    { 0.0f, 1.0f, 0.0f }, { 0.0f, -1.0f, 0.0f },
+                                    { 0.0f, 0.0f, 1.0f }, { 0.0f, 0.0f, -1.0f } };
+    for (uint32_t i = 0u; i < 6u; ++i)
+    {
+        const float Dx = kAxes[i][0] * Gr[0] + kAxes[i][1] * Gr[1] + kAxes[i][2] * Gr[2];
+        const float Dy = kAxes[i][0] * Gu[0] + kAxes[i][1] * Gu[1] + kAxes[i][2] * Gu[2];
+        const float Toward = -(kAxes[i][0] * Gf[0] + kAxes[i][1] * Gf[1] + kAxes[i][2] * Gf[2]);
+        Pads[i].X     = OrbC.x + Dx * kArm;
+        Pads[i].Y     = OrbC.y - Dy * kArm;
+        Pads[i].Front = Toward > 0.0f;
+    }
+    ImGui::SetCursorScreenPos(ImVec2(OrbC.x - 48.0f, OrbC.y - 48.0f));
+    ImGui::InvisibleButton("##orb", ImVec2(96.0f, 96.0f));
+    const bool OrbHover = ImGui::IsItemHovered();
+    OrbHot_ = 0u;
+    if (OrbHover || OrbHeld_)
+    {
+        const ImVec2 Mouse = ImGui::GetIO().MousePos;
+        float Best = 14.0f * 14.0f;
+        for (uint32_t i = 0u; i < 6u; ++i)
+        {
+            const float Hx = Mouse.x - Pads[i].X, Hy = Mouse.y - Pads[i].Y;
+            const float D2 = Hx * Hx + Hy * Hy;
+            if (D2 < Best) { Best = D2; OrbHot_ = i + 1u; }
+        }
+    }
+    if (OrbHover && ImGui::IsMouseClicked(0))
+    {
+        OrbHeld_  = true;
+        OrbMoved_ = false;
+        OrbDownX_ = ImGui::GetIO().MousePos.x;
+        OrbDownY_ = ImGui::GetIO().MousePos.y;
+    }
+    if (OrbHeld_)
+    {
+        if (!ImGui::IsMouseDown(0))
+        {
+            if (!OrbMoved_ && OrbHot_ > 0u)
+            {
+                const uint32_t V = kPadViews[OrbHot_ - 1u];
+                Orbit_.Yaw       = kSnaps[V].Yaw;
+                Orbit_.Pitch     = kSnaps[V].Pitch;
+                Orbit_.ViewPoint = V;
+                ++Orbit_.Revision;
+            }
+            OrbHeld_ = false;
+        }
+        else
+        {
+            const ImVec2 Mouse = ImGui::GetIO().MousePos;
+            if (!OrbMoved_ && (std::fabs(Mouse.x - OrbDownX_) + std::fabs(Mouse.y - OrbDownY_)) > 4.0f)
+                OrbMoved_ = true;
+            if (OrbMoved_)
+            {
+                const ImVec2 Delta = ImGui::GetIO().MouseDelta;
+                Orbit_.Yaw   -= Delta.x * 0.008f;
+                Orbit_.Pitch += Delta.y * 0.008f;
+                if (Orbit_.Pitch > 1.55f)  Orbit_.Pitch = 1.55f;
+                if (Orbit_.Pitch < -1.55f) Orbit_.Pitch = -1.55f;
+                while (Orbit_.Yaw > kOrbitPi)  Orbit_.Yaw -= 2.0f * kOrbitPi;
+                while (Orbit_.Yaw < -kOrbitPi) Orbit_.Yaw += 2.0f * kOrbitPi;
+                Orbit_.ViewPoint = 0u;
+                ++Orbit_.Revision;
+            }
+        }
+    }
+    constexpr ImU32 kAxisTint[3] = { IM_COL32(239, 83, 80, 255),
+                                     IM_COL32(105, 208, 109, 255),
+                                     IM_COL32(91, 140, 255, 255) };
+    for (uint32_t a = 0u; a < 3u; ++a)
+        Draw->AddLine(ImVec2(Pads[2u * a].X, Pads[2u * a].Y),
+            ImVec2(Pads[2u * a + 1u].X, Pads[2u * a + 1u].Y),
+            ControlPanel::FadeTint(kAxisTint[a], 0.55f), 2.0f);
+    for (uint32_t i = 0u; i < 6u; ++i)
+    {
+        const ImU32 Tint = ControlPanel::FadeTint(kAxisTint[i / 2u], Pads[i].Front ? 1.0f : 0.35f);
+        Draw->AddCircleFilled(ImVec2(Pads[i].X, Pads[i].Y), 7.0f, Tint);
+        if (OrbHot_ == i + 1u)
+            Draw->AddCircle(ImVec2(Pads[i].X, Pads[i].Y), 10.0f, IM_COL32(255, 255, 255, 200), 0, 1.6f);
+    }
+    const char* kAxisNames[3] = { "X", "Y", "Z" };
+    ImGui::PushFont(Small);
+    for (uint32_t a = 0u; a < 3u; ++a)
+    {
+        const ImU32 Tint = ControlPanel::FadeTint(kAxisTint[a], Pads[2u * a].Front ? 1.0f : 0.4f);
+        Draw->AddText(ImVec2(Pads[2u * a].X + 9.0f, Pads[2u * a].Y - 7.0f), Tint, kAxisNames[a]);
+    }
+    ImGui::PopFont();
+
+    const bool BillboardHover=MarkersOn_?Billboards.Draw(Draw,Min,Max,!OrbHover&&!OrbHeld_&&!CanvasDragging_):(Billboards.ClearFrame(),false);
+
+    // CAD canvas interaction (SolidArc): clicking and dragging across the CAD viewport canvas
+    //    orbits the camera, middle-drag or Shift+left-drag pans the target, and scroll wheel dollies.
+    //    For standard game viewports, RMB look and WASD flight are handled by the FlyThrough camera.
+    if (Chrome_ == ViewportPanelChrome::SolidArcCad)
+    {
+        const bool CanvasHover = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(Min, Max) && !OrbHover && !OrbHeld_ && !BillboardHover;
+        if (CanvasHover && (ImGui::IsMouseClicked(0) || ImGui::IsMouseClicked(1) || ImGui::IsMouseClicked(2)))
+        {
+            CanvasDragging_ = true;
+        }
+        if (CanvasDragging_)
+        {
+            if (!ImGui::IsMouseDown(0) && !ImGui::IsMouseDown(1) && !ImGui::IsMouseDown(2))
+            {
+                CanvasDragging_ = false;
+            }
+            else
+            {
+                const ImVec2 Delta = ImGui::GetIO().MouseDelta;
+                if (Delta.x != 0.0f || Delta.y != 0.0f)
+                {
+                    if (ImGui::IsMouseDown(2) || (ImGui::IsMouseDown(0) && ImGui::GetIO().KeyShift))
+                    {
+                        const float PanFactor = std::max(0.1f, Orbit_.Distance) * 0.002f;
+                        Orbit_.Target[0] += (-Gr[0] * Delta.x + Gu[0] * Delta.y) * PanFactor;
+                        Orbit_.Target[1] += (-Gr[1] * Delta.x + Gu[1] * Delta.y) * PanFactor;
+                        Orbit_.Target[2] += (-Gr[2] * Delta.x + Gu[2] * Delta.y) * PanFactor;
+                    }
+                    else
+                    {
+                        Orbit_.Yaw   -= Delta.x * 0.0055f;
+                        Orbit_.Pitch += Delta.y * 0.0055f;
+                        if (Orbit_.Pitch > 1.55f)  Orbit_.Pitch = 1.55f;
+                        if (Orbit_.Pitch < -1.55f) Orbit_.Pitch = -1.55f;
+                        while (Orbit_.Yaw > kOrbitPi)  Orbit_.Yaw -= 2.0f * kOrbitPi;
+                        while (Orbit_.Yaw < -kOrbitPi) Orbit_.Yaw += 2.0f * kOrbitPi;
+                        Orbit_.ViewPoint = 0u;
+                    }
+                    ++Orbit_.Revision;
+                }
+            }
+        }
+    }
+
+    // The wheel dollies over the view in both chromes: crowd the target or back off, the compass snap
+    //    staying put. Gate 9 drives this over the game chrome, so it must not hide in the CAD branch.
+    if (ImGui::IsMouseHoveringRect(Min, Max) && ImGui::GetIO().MouseWheel != 0.0f)
+    {
+        Orbit_.Distance *= ImGui::GetIO().MouseWheel > 0.0f ? 0.88f : 1.13f;
+        if (Orbit_.Distance < 0.2f)   Orbit_.Distance = 0.2f;
+        if (Orbit_.Distance > 120.0f) Orbit_.Distance = 120.0f;
+        ++Orbit_.Revision;
+    }
+
+    // The view's pointer, published for the game: the live aim every hovered tick, and the tap on the click
+    //    that lands on the scene itself — never on the compass, and never while another widget holds the
+    //    pointer. Fractions rather than pixels, so the game maps them onto whatever it renders at.
+    AimLive_ = false;
+    {
+        const ImVec2 Mouse   = ImGui::GetIO().MousePos;
+        const float  Across  = Max.x - Min.x;
+        const float  Down    = Max.y - Min.y;
+        const bool   OverView = ImGui::IsWindowHovered() && ImGui::IsMouseHoveringRect(Min, Max) && !OrbHover && !OrbHeld_ && !BillboardHover;
+        if (OverView && Across > 1.0f && Down > 1.0f)
+        {
+            AimLive_ = true;
+            AimU_    = (Mouse.x - Min.x) / Across;
+            AimV_    = (Mouse.y - Min.y) / Down;
+            if (Chrome_ == ViewportPanelChrome::FrontierGame && ImGui::IsMouseClicked(0))
+            {
+                TapLive_     = true;
+                TapAdditive_ = ImGui::GetIO().KeyShift;
+                TapU_        = AimU_;
+                TapV_        = AimV_;
+            }
+        }
+    }
+
+    LastW_ = Max.x - Min.x;
+    LastH_ = Max.y - Min.y;
+    ImGui::SetCursorScreenPos(ImVec2(Min.x, Max.y));
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                    THE VIEW'S POINTER
+//------------------------------------------------------------------------------------------------------------------------
+
+bool ViewportPanel::QueryViewTap(float* AcrossU, float* DownV, bool* Additive) noexcept
+{
+    if (!TapLive_)
+        return false;
+    TapLive_ = false;
+    if (AcrossU)  *AcrossU  = TapU_;
+    if (DownV)    *DownV    = TapV_;
+    if (Additive) *Additive = TapAdditive_;
+    return true;
+}
+
+bool ViewportPanel::QueryViewAim(float* AcrossU, float* DownV) const noexcept
+{
+    if (!AimLive_)
+        return false;
+    if (AcrossU) *AcrossU = AimU_;
+    if (DownV)   *DownV   = AimV_;
+    return true;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                       COMMAND LINE
+//------------------------------------------------------------------------------------------------------------------------
+
+void ViewportPanel::RecordCommand(EditorInstance* Instances, uint32_t InstanceCount) noexcept
+{
+    if ((ImGui::GetIO().KeyCtrl || ImGui::GetIO().KeySuper) && ImGui::IsKeyPressed(ImGuiKey_K, false))
+    {
+        // Ctrl+K raises the console and lands the caret; a second chord sends it home.
+        ConsoleOpen_  = !ConsoleOpen_;
+        FocusCommand_ = ConsoleOpen_;
+        SugShut_      = false;
+    }
+    if (!ConsoleOpen_)
+    {
+        return;
+    }
+
+    const float RowWidth = ImGui::GetContentRegionAvail().x;
+    ImGui::Dummy(ImVec2(RowWidth, kConsoleH));
+    const ImVec2 Min = ImGui::GetItemRectMin();
+    const ImVec2 Max = ImGui::GetItemRectMax();
+
+    ImDrawList* Draw  = ImGui::GetWindowDrawList();
+    ImFont*     Ui    = Controls_->QueryUi();
+    ImFont*     Small = Controls_->QuerySmall();
+    const ImVec2 WinPos  = ImGui::GetWindowPos();
+    const ImVec2 WinSize = ImGui::GetWindowSize();
+    const float  WinX    = WinPos.x;
+    const float  WinX1   = WinPos.x + WinSize.x;
+    Draw->AddRectFilled(ImVec2(WinX, Min.y), ImVec2(WinX1, Max.y), IM_COL32(0, 0, 0, 255));
+    Draw->AddLine(ImVec2(WinX, Min.y), ImVec2(WinX1, Min.y), kStroke);
+
+    if (std::strcmp(CommandText_, LastPaint_) != 0)
+    {
+        SugShut_ = false;   // moved text reopens the stack a run had shut
+        std::snprintf(LastPaint_, sizeof(LastPaint_), "%s", CommandText_);
+    }
+
+    const double Now    = ImGui::GetTime();
+    const bool   EchoOn = (CommandEcho_[0] != '\0') && (Now < EchoUntil_);
+
+    // The right cluster first, so the field takes the middle: run, kbd, echo.
+    const ImVec2 RunMin(WinX1 - 8.0f - 28.0f, Min.y + 6.0f);
+    ImFont* MonoSmall = Controls_->QueryMonoSmall();
+    ImGui::PushFont(MonoSmall);
+    const ImVec2 CmdGlyph = MonoSmall->CalcTextSizeA(MonoSmall->LegacySize, FLT_MAX, 0.0f, "\xe2\x8c\x98");
+    ImGui::PopFont();
+    ImGui::PushFont(Small);
+    const ImVec2 KbdGlyph = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, "K");
+    ImGui::PopFont();
+    const ImVec2 KbdSize(CmdGlyph.x + KbdGlyph.x + 12.0f, KbdGlyph.y + 4.0f);
+    const ImVec2 KbdMin(RunMin.x - 10.0f - KbdSize.x, Min.y + (kConsoleH - KbdSize.y) * 0.5f);
+    float EchoW = 0.0f;
+    if (EchoOn)
+    {
+        ImGui::PushFont(Small);
+        EchoW = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, CommandEcho_).x;
+        ImGui::PopFont();
+        if (EchoW > RowWidth * 0.42f)
+        {
+            EchoW = RowWidth * 0.42f;
+        }
+    }
+    const float FieldX0 = WinX + 10.0f + 20.0f + 10.0f;
+    const float FieldX1 = (EchoOn ? (KbdMin.x - 10.0f - EchoW) : KbdMin.x) - 10.0f;
+
+    const bool BadShown = (SugCount_ > 0u && SugRows_[0].Sort == 4u);
+    const ImU32 PromptTint = BadShown ? kDanger : (CommandFocus_ ? kHi : kFaint);
+    CommandGlyph(Draw, ImVec2(WinX + 20.0f, Min.y + 20.0f), 14.0f, PromptTint);
+
+    ImGui::SetCursorScreenPos(ImVec2(FieldX0, Min.y + 9.0f));
+    ImGui::PushItemWidth(FieldX1 - FieldX0);
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, 4.0f));
+    ImGui::PushFont(Ui);
+    if (FocusCommand_)
+    {
+        ImGui::SetKeyboardFocusHere();
+        FocusCommand_ = false;
+    }
+    static constexpr char kPlaceholder[] = "Say what you want \xe2\x80\x94 \xe2\x80\x9crotate cube 40 degrees on Z\xe2\x80\x9d, " "\xe2\x80\x9c" "add sphere at x 3 y 2 z -1\xe2\x80\x9d";
+    const bool Done = ImGui::InputTextWithHint("##cmd", kPlaceholder, CommandText_, sizeof(CommandText_),
+        ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackCompletion
+            | ImGuiInputTextFlags_CallbackHistory | ImGuiInputTextFlags_CallbackAlways,
+        &ViewportPanel::ConsoleCallback, this);
+    const bool Focused = ImGui::IsItemFocused();
+    if ((CommandFocus_ || Focused) && ImGui::IsKeyPressed(ImGuiKey_Escape, false))
+    {
+        // Clear and shut; the caret rests where it was, and the stack stays shut till the text moves.
+        CommandText_[0] = '\0';
+        Ghost_[0]       = '\0';
+        SugShut_        = true;
+        SugUntil_       = 0.0;
+    }
+    if (CommandFocus_ && !Focused)
+    {
+        SugUntil_ = Now + 0.12;
+    }
+    CommandFocus_ = Focused;
+    ImGui::PopFont();
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
+    ImGui::PopItemWidth();
+
+    if (Done)
+    {
+        // Enter runs the standing row, even on an empty line — the reference's own quirk, kept.
+        RunSugRow(SugIndex_, Instances, InstanceCount);
+    }
+
+    if (Focused && Ghost_[0] != '\0')
+    {
+        ImGui::PushFont(Ui);
+        const ImVec2 TypedW = Ui->CalcTextSizeA(Ui->LegacySize, FLT_MAX, 0.0f, CommandText_);
+        Draw->AddText(ImVec2(FieldX0 + 2.0f + TypedW.x, Min.y + 9.0f + 4.0f),
+            IM_COL32(92, 92, 92, 166), Ghost_);
+        ImGui::PopFont();
+    }
+
+    if (EchoOn)
+    {
+        ImGui::PushFont(Small);
+        const ImVec2 EchoGlyph = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, CommandEcho_);
+        Draw->PushClipRect(ImVec2(FieldX1 + 10.0f, Min.y), ImVec2(KbdMin.x - 10.0f, Max.y), true);
+        Draw->AddText(ImVec2(FieldX1 + 10.0f, Min.y + (kConsoleH - EchoGlyph.y) * 0.5f), kDim, CommandEcho_);
+        Draw->PopClipRect();
+        ImGui::PopFont();
+    }
+
+    ImGui::SetCursorScreenPos(KbdMin);
+    ImGui::InvisibleButton("##kcmd", KbdSize);
+    if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(0))
+    {
+        FocusCommand_ = true;
+        SugShut_      = false;
+    }
+    Draw->AddRectFilled(KbdMin, ImVec2(KbdMin.x + KbdSize.x, KbdMin.y + KbdSize.y), kField, 6.0f);
+    Draw->AddRect(KbdMin, ImVec2(KbdMin.x + KbdSize.x, KbdMin.y + KbdSize.y), kStroke, 6.0f);
+    ImGui::PushFont(Small);
+    Draw->AddText(MonoSmall, MonoSmall->LegacySize, ImVec2(KbdMin.x + 6.0f, KbdMin.y + 2.0f), kFaint,
+        "\xe2\x8c\x98");
+    Draw->AddText(ImVec2(KbdMin.x + 6.0f + CmdGlyph.x, KbdMin.y + 2.0f), kFaint, "K");
+    ImGui::PopFont();
+
+    ImGui::SetCursorScreenPos(RunMin);
+    ImGui::InvisibleButton("##cmdrun", ImVec2(28.0f, 28.0f));
+    const bool RunHot = ImGui::IsItemHovered();
+    if (RunHot)
+    {
+        ImGui::SetTooltip("Run  (Enter)");
+        if (ImGui::IsMouseClicked(0))
+        {
+            RunSugRow(SugIndex_, Instances, InstanceCount);
+        }
+    }
+    const ImVec2 RunCentre(RunMin.x + 14.0f, RunMin.y + 14.0f);
+    if (RunHot)
+    {
+        Draw->AddCircleFilled(RunCentre, 14.0f, kHover);
+    }
+    PlayGlyph(Draw, RunCentre, 13.0f, RunHot ? kText : kDim);
+
+    const bool SugOpen = (Focused && !SugShut_) || (Now < SugUntil_);
+    if (SugOpen)
+    {
+        PaintSuggestions(Instances, InstanceCount);
+
+        // The stack rises out of the console with eight pixels of air on three sides: the head caps,
+        //    then rows with their glyph, title, and right-hung sub.
+        constexpr float kRowH = 36.0f, kHeadH = 24.0f, kPad = 6.0f;
+        const float StackH  = kPad + kHeadH + static_cast<float>(SugCount_) * kRowH + kPad;
+        const float StackX0 = WinX + 8.0f;
+        const float StackX1 = WinX1 - 8.0f;
+        const float StackY1 = Min.y - 6.0f;
+        const float StackY0 = StackY1 - StackH;
+        Draw->AddRectFilled(ImVec2(StackX0, StackY0), ImVec2(StackX1, StackY1),
+            IM_COL32(0, 0, 0, 255), 18.0f);
+        Draw->AddRect(ImVec2(StackX0, StackY0), ImVec2(StackX1, StackY1), kStrong, 18.0f);
+
+        const char* Head = (SugCount_ == 0u) ? "Nothing matches \xe2\x80\x94 try \xe2\x80\x9chelp\xe2\x80\x9d"
+            : (CommandText_[0] != '\0' ? "What this will do" : "Say something like");
+        SpacedCaps(Draw, Small, Head, ImVec2(StackX0 + 16.0f, StackY0 + 13.0f), kFaint, 1.3f);
+
+        for (uint32_t r = 0u; r < SugCount_; ++r)
+        {
+            const float RowY0 = StackY0 + kPad + kHeadH + static_cast<float>(r) * kRowH;
+            const ImVec2 RowMin(StackX0 + kPad, RowY0);
+            const ImVec2 RowMax(StackX1 - kPad, RowY0 + kRowH);
+            ImGui::SetCursorScreenPos(RowMin);
+            char SugId[10] = {};
+            std::snprintf(SugId, sizeof(SugId), "##sug%u", r);
+            ImGui::InvisibleButton(SugId, ImVec2(RowMax.x - RowMin.x, kRowH));
+            const bool RowHot = ImGui::IsItemHovered();
+
+            const uint32_t Sort = SugRows_[r].Sort;
+            const uint32_t At   = SugRows_[r].At;
+            const bool Bad      = (Sort == 4u);
+            const bool On       = (r == SugIndex_);
+            // The standing row carries the indigo till the English reader lands; the keys deepen it, and
+            //    the pointer leaves it alone. Grey rows keep the old rule: hover beats picked.
+            const bool Primary = (r == 0u && CommandText_[0] != '\0');
+            if (Primary)
+            {
+                Draw->AddRectFilled(RowMin, RowMax, Bad ? kBadBg : (On ? kPrimaryOn : kPrimaryBg), 13.0f);
+                Draw->AddRect(RowMin, RowMax, Bad ? kBadEdge : kPrimaryEdge, 13.0f);
+            }
+            else if (RowHot)
+            {
+                Draw->AddRectFilled(RowMin, RowMax, IM_COL32(27, 27, 27, 255), 13.0f);
+            }
+            else if (On)
+            {
+                Draw->AddRectFilled(RowMin, RowMax, kSeated, 13.0f);
+            }
+
+            const char* EntryLabel = (Sort == 3u && At < InstanceCount) ? Instances[At].Label : "";
+            char EntrySub[64] = {};
+            const char* Title = "";
+            const char* Sub   = "";
+            if (Sort == 0u)
+            {
+                Title = QuickLabels_[At];
+                Sub   = kQuick[At].Sub;
+            }
+            else if (Sort == 1u)
+            {
+                Title = kExamples[At];
+                Sub   = "try this";
+            }
+            else if (Sort == 2u)
+            {
+                Title = kVerbs[At].Usage;
+                Sub   = kVerbs[At].Help[0] != '\0' ? kVerbs[At].Help : "command";
+            }
+            else if (Sort == 3u)
+            {
+                Title = EntryLabel;
+                std::snprintf(EntrySub, sizeof(EntrySub), "%s \xc2\xb7 find and frame",
+                    At < InstanceCount ? EditorInstanceLabel(Instances[At].Category) : "");
+                Sub = EntrySub;
+            }
+            else
+            {
+                Title = "I did not understand that";
+                Sub   = "not understood";
+            }
+
+            const ImVec2 IconCentre(RowMin.x + 19.0f, RowY0 + kRowH * 0.5f);
+            if (Sort == 3u && At < InstanceCount)
+            {
+                const float* Tint = Instances[At].Tint;
+                Draw->AddCircleFilled(IconCentre, 5.0f,
+                    IM_COL32(static_cast<int>(Tint[0] * 255.0f), static_cast<int>(Tint[1] * 255.0f),
+                        static_cast<int>(Tint[2] * 255.0f), 255));
+            }
+            else if (Bad)
+            {
+                CloseGlyph(Draw, IconCentre, 14.0f, kDim);
+            }
+            else
+            {
+                CommandGlyph(Draw, IconCentre, 14.0f, kDim);
+            }
+
+            ImGui::PushFont(Ui);
+            const ImVec2 TitleGlyph = Ui->CalcTextSizeA(Ui->LegacySize, FLT_MAX, 0.0f, Title);
+            Draw->AddText(ImVec2(RowMin.x + 37.0f, RowY0 + (kRowH - TitleGlyph.y) * 0.5f),
+                Bad ? kBadTitle : kText, Title);
+            ImGui::PopFont();
+            ImGui::PushFont(Small);
+            const ImVec2 SubGlyph = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, Sub);
+            ImGui::PopFont();
+            const float SubW = SpacedCapsWidth(Small, Sub, 0.7f);
+            SpacedCaps(Draw, Small, Sub,
+                ImVec2(RowMax.x - 12.0f - SubW, RowY0 + (kRowH - SubGlyph.y) * 0.5f), kFaint, 0.7f);
+
+            if (RowHot)
+            {
+                SugIndex_ = r;
+                if (ImGui::IsMouseClicked(0))
+                {
+                    RunSugRow(r, Instances, InstanceCount);
+                    break;   // the run repaints the rows; the rest redraw next tick, shut
+                }
+            }
+        }
+    }
+    ImGui::SetCursorScreenPos(ImVec2(Min.x, Max.y));
+}
+
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                      SUGGESTIONS
+//------------------------------------------------------------------------------------------------------------------------
+
+void ViewportPanel::PaintSuggestions(EditorInstance* Instances, uint32_t InstanceCount) noexcept
+{
+    if (std::strcmp(CommandText_, "help") == 0)
+    {
+        // The reference's help clears the line and shows the whole table.
+        CommandText_[0] = '\0';
+    }
+    for (uint32_t i = 0u; i < 6u; ++i)
+    {
+        if (i == 5u)
+        {
+            std::snprintf(QuickLabels_[i], sizeof(QuickLabels_[i]), "Realtime viewport: turn %s",
+                Realtime_ ? "off" : "on");
+        }
+        else
+        {
+            std::snprintf(QuickLabels_[i], sizeof(QuickLabels_[i]), "%s", kQuick[i].Label);
+        }
+    }
+
+    if (std::strcmp(CommandText_, LastSugText_) != 0)
+    {
+        // Fresh text re-seats the standing row, the way a repaint does.
+        SugIndex_ = 0u;
+        std::snprintf(LastSugText_, sizeof(LastSugText_), "%s", CommandText_);
+    }
+
+    SugCount_ = 0u;
+    if (CommandText_[0] == '\0')
+    {
+        for (uint32_t i = 0u; i < 9u; ++i)
+        {
+            SugRows_[SugCount_].Sort = 1u;
+            SugRows_[SugCount_].At   = static_cast<uint8_t>(i);
+            ++SugCount_;
+        }
+    }
+    else
+    {
+        char First[128] = {};
+        size_t Span = 0u;
+        while (CommandText_[Span] != '\0' && CommandText_[Span] != ' ' && Span + 1u < sizeof(First))
+        {
+            First[Span] = CommandText_[Span];
+            ++Span;
+        }
+        // Verb words first, then entries, then the quick rows: five entries and five quick at most,
+        //    nine rows in all. The tables share no titles, so no doubles survive the merge.
+        for (uint32_t v = 0u; v < 15u && SugCount_ < 9u; ++v)
+        {
+            if (KeysHit(kVerbs[v].Keys, CommandText_, First))
+            {
+                SugRows_[SugCount_].Sort = 2u;
+                SugRows_[SugCount_].At   = static_cast<uint8_t>(v);
+                ++SugCount_;
+            }
+        }
+        uint32_t Entries = 0u;
+        for (uint32_t i = 0u; i < InstanceCount && SugCount_ < 9u && Entries < 5u; ++i)
+        {
+            if (InfixMatch(Instances[i].Label, CommandText_))
+            {
+                SugRows_[SugCount_].Sort = 3u;
+                SugRows_[SugCount_].At   = static_cast<uint8_t>(i);
+                ++SugCount_;
+                ++Entries;
+            }
+        }
+        uint32_t Quicks = 0u;
+        for (uint32_t i = 0u; i < 6u && SugCount_ < 9u && Quicks < 5u; ++i)
+        {
+            if (InfixMatch(QuickLabels_[i], CommandText_))
+            {
+                SugRows_[SugCount_].Sort = 0u;
+                SugRows_[SugCount_].At   = static_cast<uint8_t>(i);
+                ++SugCount_;
+                ++Quicks;
+            }
+        }
+        if (SugCount_ == 0u && !GrowingWord(CommandText_))
+        {
+            // Nothing answers and no verb still grows: the red row says so.
+            SugRows_[0].Sort = 4u;
+            SugRows_[0].At   = 0u;
+            SugCount_        = 1u;
+        }
+    }
+    if (SugCount_ > 0u && SugIndex_ >= SugCount_)
+    {
+        SugIndex_ = 0u;
+    }
+
+    Ghost_[0] = '\0';
+    if (CommandText_[0] != '\0' && SugCount_ > 0u)
+    {
+        // The ghost completes only what a row offers to pour: examples, usages, found entries.
+        const size_t Eaten = std::strlen(CommandText_);
+        char Offer[128] = {};
+        for (uint32_t r = 0u; r < SugCount_; ++r)
+        {
+            const uint32_t Sort = SugRows_[r].Sort;
+            const uint32_t At   = SugRows_[r].At;
+            const char* EntryLabel = (Sort == 3u && At < InstanceCount) ? Instances[At].Label : "";
+            SugInsertText(Sort, At, EntryLabel, Offer, sizeof(Offer));
+            if (Offer[0] != '\0' && StartsFolded(Offer, CommandText_) && std::strlen(Offer) > Eaten)
+            {
+                std::snprintf(Ghost_, sizeof(Ghost_), "%s", Offer + Eaten);
+                break;
+            }
+        }
+    }
+}
+
+void ViewportPanel::RunSugRow(uint32_t Row, EditorInstance* Instances, uint32_t InstanceCount) noexcept
+{
+    if (Row >= SugCount_)
+    {
+        return;
+    }
+    const uint32_t Sort = SugRows_[Row].Sort;
+    const uint32_t At   = SugRows_[Row].At;
+    if (Sort == 4u)
+    {
+        // The red row never runs; it says the line went unheard and keeps it.
+        std::snprintf(CommandEcho_, sizeof(CommandEcho_), "I did not understand that");
+        EchoUntil_ = ImGui::GetTime() + 3.2;
+        return;
+    }
+    if (Sort == 1u || Sort == 2u || Sort == 3u)
+    {
+        // An offer, not an action: the line drinks it and the caret parks past its tail.
+        const char* EntryLabel = (Sort == 3u && At < InstanceCount) ? Instances[At].Label : "";
+        char Offer[128] = {};
+        SugInsertText(Sort, At, EntryLabel, Offer, sizeof(Offer));
+        std::snprintf(CommandText_, sizeof(CommandText_), "%s", Offer);
+        CaretToEnd_ = true;
+        SugShut_    = false;
+        PaintSuggestions(Instances, InstanceCount);
+        return;
+    }
+
+    const uint32_t Cmd = At;
+    if (Cmd == 0u)      { SetTransport(kPlay); }
+    else if (Cmd == 1u) { SetTransport(kSimulate); }
+    else if (Cmd == 2u) { SetPaused(!Paused_); }
+    else if (Cmd == 3u) { StepOnce(); }
+    else if (Cmd == 4u) { SetTransport(kEdit); }
+    else if (Cmd == 5u) { SetRealtime(!Realtime_); }
+
+    if (CommandText_[0] != '\0'
+        && (PastCount_ == 0u || std::strcmp(CommandText_, CommandPast_[PastCount_ - 1u]) != 0))
+    {
+        if (PastCount_ == 8u)
+        {
+            for (uint32_t i = 0u; i < 7u; ++i)
+            {
+                std::snprintf(CommandPast_[i], sizeof(CommandPast_[i]), "%s", CommandPast_[i + 1u]);
+            }
+            --PastCount_;
+        }
+        std::snprintf(CommandPast_[PastCount_], sizeof(CommandPast_[PastCount_]), "%s", CommandText_);
+        ++PastCount_;
+    }
+    PastAt_ = -1;
+    std::snprintf(CommandEcho_, sizeof(CommandEcho_), "%s", QuickLabels_[Cmd]);
+    EchoUntil_ = ImGui::GetTime() + 3.2;
+    CommandText_[0] = '\0';
+    Ghost_[0]       = '\0';
+    SugShut_        = true;
+    PaintSuggestions(Instances, InstanceCount);
+}
+
+int ViewportPanel::ConsoleCallback(ImGuiInputTextCallbackData* Edit) noexcept
+{
+    auto* Self = static_cast<ViewportPanel*>(Edit->UserData);
+    if (Edit->EventFlag == ImGuiInputTextFlags_CallbackAlways)
+    {
+        if (Self->CaretToEnd_)
+        {
+            Edit->CursorPos      = Edit->BufTextLen;
+            Edit->SelectionStart = Edit->CursorPos;
+            Edit->SelectionEnd   = Edit->CursorPos;
+            Self->CaretToEnd_    = false;
+        }
+        return 0;
+    }
+    if (Edit->EventFlag == ImGuiInputTextFlags_CallbackCompletion)
+    {
+        if (Self->Ghost_[0] != '\0')
+        {
+            Edit->InsertChars(Edit->BufTextLen, Self->Ghost_);
+        }
+    }
+    else if (Edit->EventFlag == ImGuiInputTextFlags_CallbackHistory)
+    {
+        if (Self->CommandText_[0] == '\0' && Self->PastCount_ > 0u)
+        {
+            // An empty line walks the earlier lines, newest first.
+            if (Edit->EventKey == ImGuiKey_UpArrow)
+            {
+                if (Self->PastAt_ + 1 < static_cast<int32_t>(Self->PastCount_))
+                {
+                    ++Self->PastAt_;
+                }
+            }
+            else if (Self->PastAt_ > -1)
+            {
+                --Self->PastAt_;
+            }
+            const char* Line = (Self->PastAt_ < 0)
+                ? ""
+                : Self->CommandPast_[Self->PastCount_ - 1u - static_cast<uint32_t>(Self->PastAt_)];
+            Edit->DeleteChars(0, Edit->BufTextLen);
+            Edit->InsertChars(0, Line);
+        }
+        else
+        {
+            if (Edit->EventKey == ImGuiKey_UpArrow)
+            {
+                if (Self->SugIndex_ > 0u)
+                {
+                    --Self->SugIndex_;
+                }
+            }
+            else if (Self->SugIndex_ + 1u < Self->SugCount_)
+            {
+                ++Self->SugIndex_;
+            }
+        }
+    }
+    return 0;
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                           FOOTER
+//------------------------------------------------------------------------------------------------------------------------
+
+void ViewportPanel::RecordFooter(EditorInstance* Instances, uint32_t InstanceCount) noexcept
+{
+    const float RowWidth = ImGui::GetContentRegionAvail().x;
+    // Pinned to the sill: whatever the content above ends at, the foot opens on the shared top row.
+    const float FootTop = Controls_->QueryFootTop();
+    if (ImGui::GetCursorScreenPos().y < FootTop)
+    {
+        ImGui::SetCursorScreenPos(ImVec2(ImGui::GetCursorScreenPos().x, FootTop));
+    }
+    ImGui::Dummy(ImVec2(RowWidth, kEditorFooterH));
+    const ImVec2 Cursor = ImGui::GetItemRectMin();
+
+    ImDrawList* Draw  = ImGui::GetWindowDrawList();
+    ImFont*     Small = Controls_->QuerySmall();
+    const ImVec2 FootPos = ImGui::GetWindowPos();
+    const ImVec2 FootSize = ImGui::GetWindowSize();
+    const float  FootX0 = FootPos.x;
+    const float  FootX1 = FootPos.x + FootSize.x;
+    // The footer sits on the panel's own sill: its hem runs edge to edge and its wash pours exactly
+    //    the shared forty, no further — the three panels' hems draw one unbroken line.
+    Draw->AddRectFilled(ImVec2(FootX0, Cursor.y), ImVec2(FootX1, Cursor.y + kEditorFooterH), kWash);
+    Draw->AddLine(ImVec2(FootX0, Cursor.y), ImVec2(FootX1, Cursor.y), kStroke);
+
+    // The counters. The triangle figure rides the readout the project seats; unseated it keeps the
+    //    reference's own resting dash, and physics and isolation hide at zero, under the show rule.
+    const char* Dash = "\xe2\x80\x94";
+    char PerfText[16] = {}, PerfSub[16] = {}, EntsText[16] = {}, EntsSub[32] = {};
+    const float Fps = ImGui::GetIO().Framerate;
+    std::snprintf(PerfText, sizeof(PerfText), "%.0f", static_cast<double>(Fps));
+    std::snprintf(PerfSub, sizeof(PerfSub), "%.1f ms",
+        static_cast<double>(Fps > 0.0f ? 1000.0f / Fps : 0.0f));
+    uint32_t Shown = 0u;
+    for (uint32_t i = 0u; i < InstanceCount; ++i)
+    {
+        if (Instances[i].Visible)
+        {
+            ++Shown;
+        }
+    }
+    std::snprintf(EntsText, sizeof(EntsText), "%u", InstanceCount);
+    std::snprintf(EntsSub, sizeof(EntsSub), "%u visible", Shown);
+    struct Counter
+    {
+        const char* Label;
+        const char* Text;
+        const char* Sub;
+        bool        Warn;
+        bool        Dim;
+        bool        Opt;
+    };
+    char CamText[32] = {};
+    std::snprintf(CamText, sizeof(CamText), "%+.0f\xc2\xb0 %+.0f\xc2\xb0 %.1fm",
+        static_cast<double>(Orbit_.Yaw * 57.29578f), static_cast<double>(Orbit_.Pitch * 57.29578f),
+        static_cast<double>(Orbit_.Distance));
+    const uint32_t TriTotal = (Readout_ != nullptr) ? Readout_->Triangles : 0u;
+    char             TrisText[16] = {};
+    const char*      TrisFig = Dash;
+    if (TriTotal > 0u)
+    {
+        std::snprintf(TrisText, sizeof(TrisText), "%u", TriTotal);
+        TrisFig = TrisText;
+    }
+    const EditorFpsBand FpsBand = EditorFpsBandFor(Fps);
+    const Counter Counters[4] = {
+        { "FPS", PerfText, PerfSub, FpsBand == EditorFpsBand::Poor, false, false },
+        { "TRIS", TrisFig, "", false, false, false },
+        { "INSTANCES", EntsText, EntsSub, false, false, false },
+        { "CAMERA", CamText, "", false, false, true },
+    };
+
+    ImGui::PushFont(Small);
+    const float DotW  = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, " \xc2\xb7 ").x;
+    const float TextH = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, "Ag").y;
+    ImGui::PopFont();
+    const auto CounterWidth = [&](const Counter& Cell, bool WithSub) -> float
+    {
+        float W = SpacedCapsWidth(Small, Cell.Label, 1.2f) + 6.0f;
+        if (Cell.Warn)
+        {
+            W += 13.0f;   // the warning triangle and its air
+        }
+        ImGui::PushFont(Small);
+        W += Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, Cell.Text).x;
+        if (WithSub && Cell.Sub[0] != '\0')
+        {
+            W += DotW + Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, Cell.Sub).x;
+        }
+        ImGui::PopFont();
+        return W;
+    };
+
+    // fitStats: the camera cell steps aside first, then the secondary halves.
+    uint32_t Mode = 2u;
+    for (uint32_t Try = 0u; Try < 3u; ++Try)
+    {
+        const bool KeepCam = (Try == 0u);
+        const bool KeepSub = (Try < 2u);
+        float W = 4.0f;
+        for (uint32_t i = 0u; i < 4u; ++i)
+        {
+            if (Counters[i].Opt && !KeepCam)
+            {
+                continue;
+            }
+            W += CounterWidth(Counters[i], KeepSub) + 20.0f;
+        }
+        W -= 10.0f;   // the last cell keeps its left pad only
+        if (W <= FootSize.x || Try == 2u)
+        {
+            Mode = Try;
+            break;
+        }
+    }
+
+    const bool  KeepCam = (Mode == 0u);
+    const bool  KeepSub = (Mode < 2u);
+    const float FootH   = kEditorFooterH;
+    const float TextY   = Cursor.y + (FootH - TextH) * 0.5f;
+    const float MidY    = Cursor.y + FootH * 0.5f;
+    float X = FootX0 + 4.0f;
+    bool First = true;
+    for (uint32_t i = 0u; i < 4u; ++i)
+    {
+        if (Counters[i].Opt && !KeepCam)
+        {
+            continue;
+        }
+        if (!First)
+        {
+            Draw->AddLine(ImVec2(X - 10.0f, MidY - 6.0f), ImVec2(X - 10.0f, MidY + 6.0f), kStroke);
+        }
+        First = false;
+        const float LabelW = SpacedCapsWidth(Small, Counters[i].Label, 1.2f);
+        SpacedCaps(Draw, Small, Counters[i].Label, ImVec2(X, TextY), kFaint, 1.2f);
+        float FigX = X + LabelW + 6.0f;
+        if (Counters[i].Warn)
+        {
+            FootWarn(Draw, ImVec2(FigX, MidY - 5.0f), 10.0f, kAmber);
+            FigX += 13.0f;
+        }
+        const ImU32 TextTint = Counters[i].Warn ? kAmber
+            : ((i == 0u && FpsBand == EditorFpsBand::Good) ? kGreen : (Counters[i].Dim ? kDim : kText));
+        ImGui::PushFont(Small);
+        Draw->AddText(ImVec2(FigX, TextY), TextTint, Counters[i].Text);
+        const float TextW = Small->CalcTextSizeA(Small->LegacySize, FLT_MAX, 0.0f, Counters[i].Text).x;
+        if (KeepSub && Counters[i].Sub[0] != '\0')
+        {
+            char Joined[48] = {};
+            std::snprintf(Joined, sizeof(Joined), " \xc2\xb7 %s", Counters[i].Sub);
+            Draw->AddText(ImVec2(FigX + TextW, TextY), kFaint, Joined);
+        }
+        ImGui::PopFont();
+        X += CounterWidth(Counters[i], KeepSub) + 20.0f;
+    }
+}
+
+} // namespace Frontier

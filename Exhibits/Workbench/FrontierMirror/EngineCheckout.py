@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Seat the Frontier engine checkout that every mirror in this folder renders through.
+"""Resolve the Frontier engine tree that every mirror in this folder renders through.
 
-Slate holds overlays and proof tooling, not the engine.  The program whose behaviour these proofs claim to show
-is `SultanAladin/Frontier-`, so a proof that does not build that tree is not evidence of anything.  This module
-clones it at a pinned revision into `_AgentScratch/` (git-ignored, never committed), installs the pinned
-third-party archives through the engine's own `Tools/Bootstrap.py`, and hands back the path.
+The engine is no longer cloned, seated, overlaid, or patched.  `Frontier/` at the repository root IS the engine:
+one flat tree carrying the upstream base plus every change this work produced, buildable as-is.  This module only
+resolves that path and makes sure the pinned third-party archives are installed into it, because dependencies are
+the one thing still fetched rather than committed.
 
-Nothing in this file renders, shades, or models anything.  It only stands up the engine so the engine can.
+Nothing in this file renders, shades, or models anything.  It only locates the engine so the engine can.
 """
 from __future__ import annotations
 
@@ -19,10 +19,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 SCRATCH = ROOT / "_AgentScratch"
-ENGINE = SCRATCH / "Frontier"
+ENGINE = ROOT / "Frontier"
 
-# The revision the retained Exhibits/Gallery provenance already names.  Bump deliberately, never silently:
-#    every gallery Provenance.json records the revision its sheets were rendered from.
+# The upstream commit `Frontier/` was flattened from.  It is provenance for the gallery sheets, not a fetch target:
+#    nothing clones this any more.  Every gallery Provenance.json records the base its sheets were rendered from.
 ENGINE_REPOSITORY = "https://github.com/SultanAladin/Frontier-.git"
 ENGINE_REVISION = "28ec0657a23ed6bbf680f17cc06b464a53639dae"
 
@@ -43,29 +43,21 @@ def run(command: list[str], cwd: Path, quiet: bool = False) -> subprocess.Comple
 
 
 def seat(refresh: bool = False) -> Path:
-    """Clone (or reuse) the pinned engine and install its pinned dependencies.  Returns the checkout root."""
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    if refresh and ENGINE.exists():
-        run(["rm", "-rf", str(ENGINE)], cwd=SCRATCH)
-    if not (ENGINE / ".git").exists():
-        print(f"[engine] cloning {ENGINE_REPOSITORY} @ {ENGINE_REVISION[:12]}")
-        run(["git", "init", "-q", str(ENGINE)], cwd=SCRATCH)
-        run(["git", "remote", "add", "origin", ENGINE_REPOSITORY], cwd=ENGINE)
-        run(["git", "fetch", "-q", "--depth", "1", "origin", ENGINE_REVISION], cwd=ENGINE)
-        run(["git", "checkout", "-q", "FETCH_HEAD"], cwd=ENGINE)
-    head = run(["git", "rev-parse", "HEAD"], cwd=ENGINE, quiet=True).stdout.strip()
-    if head != ENGINE_REVISION:
-        raise RuntimeError(f"engine checkout is {head}, expected the pinned {ENGINE_REVISION}")
-    print(f"[engine] seated at {head}")
+    """Resolve the in-repository engine tree and install its pinned dependencies.  Returns the engine root.
 
-    # The engine installs its own pinned third-party archives; `--profile proof` is the five the CPU proofs need.
-    if not (ENGINE / "ExternalPackages/imgui/imgui.cpp").exists():
+    There is nothing to seat: `Frontier/` is committed.  `refresh` only forces the dependency install to re-run.
+    """
+    if not (ENGINE / "CMakeLists.txt").exists():
+        raise RuntimeError(f"the engine tree is missing at {ENGINE}")
+
+    # Dependencies are the documented exception to the flatten: fetched into the tree, never committed.
+    if refresh or not (ENGINE / "ExternalPackages/imgui/imgui.cpp").exists():
         print("[engine] installing pinned dependencies (profile: proof)")
         run([sys.executable, "Tools/Bootstrap.py", "--profile", "proof"], cwd=ENGINE)
 
     # ThorVG's static library backs the editor's icon presentation; the engine's own proof builder makes it.
     pin = ENGINE / "ExternalPackages/thorvg/.frontier-proof-pin"
-    if not pin.exists():
+    if not pin.exists() and (ENGINE / "ExternalPackages/Dependencies.lock.json").exists():
         lock = json.loads((ENGINE / "ExternalPackages/Dependencies.lock.json").read_text())
         revision = next(p["revision"] for p in lock["packages"] if p["name"] == "thorvg")
         pin.write_text(revision)
@@ -78,6 +70,7 @@ def seat(refresh: bool = False) -> Path:
         headers = ENGINE / "ExternalPackages/vulkan-headers"
         if (headers / "include/vulkan/vulkan.h").exists():
             (VULKAN_CACHE / "Vulkan-Headers").symlink_to(headers)
+    print(f"[engine] {ENGINE}")
     return ENGINE
 
 
