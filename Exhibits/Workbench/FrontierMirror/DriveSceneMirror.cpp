@@ -219,6 +219,14 @@ struct TyreDiagnostics
     float ShoulderRadius = 0.0f;   // [m] mean radius of the two edge rings
     float RmsAboutCentroid = 0.0f; // [m] RMS |r − mean| measured about the node CENTROID, not the hub
     float CentroidOffset = 0.0f;   // [m] how far the centroid sits from the supplied hub position
+
+    // ── LATERAL behaviour (along the spin axis) ─────────────────────────────────────────────────────────────
+    // Reported symptom: the bulge appears to travel sideways and the carcass looks like it breathes in and out
+    // across its width. Radial metrics cannot see that at all -- they project the axial component away by
+    // construction -- so it needs its own measurement.
+    float SectionWidth = 0.0f;     // [m] max − min axial extent, against the authored Width
+    float RmsAxialDeviation = 0.0f;// [m] RMS |axial − rest axial| per node
+    float MaxAxialDeviation = 0.0f;// [m]
 };
 
 TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, const Vec3& HubVelocity,
@@ -360,6 +368,22 @@ TyreDiagnostics MeasureTyre(const XPBDSoftTyre& Tyre, const Vec3& HubPosition, c
         for (float Rr : Radii) SumDev2 += (Rr - MeanC) * (Rr - MeanC);
         D.RmsAboutCentroid = std::sqrt(SumDev2 / Count);
     }
+
+    // Axial: how far each node sits along the spin axis against where it is supposed to sit. TreadLocal.y is
+    //    the authored rest offset for that ring, and the hub frame makes the two directly comparable.
+    {
+        float MinA = 1e30f, MaxA = -1e30f, SumA2 = 0.0f;
+        for (const auto& N2 : Nodes)
+        {
+            const float Axial = Dot(N2.Position - HubPosition, Axis);
+            MinA = std::min(MinA, Axial); MaxA = std::max(MaxA, Axial);
+            const float Dev = Axial - N2.TreadLocal.y;
+            SumA2 += Dev * Dev;
+            D.MaxAxialDeviation = std::max(D.MaxAxialDeviation, std::fabs(Dev));
+        }
+        D.SectionWidth = MaxA - MinA;
+        D.RmsAxialDeviation = std::sqrt(SumA2 / Count);
+    }
     D.Contacts = Tyre.Reaction().ContactCount;
     D.NormalLoad = Tyre.Reaction().Force.z;
     return D;
@@ -409,13 +433,21 @@ void RebuildWheelParts(const XPBDSoftTyre& Tyre, const Quat& HubRotation, const 
         //    pressurised tyre sits uniformly larger than rest -- here +5.8 mm, which is exactly the
         //    120.7 N node pressure force over the 20 kN/m sidewall -- and that is correct, not deformation.
         //    Colouring against rest painted the entire tyre "deformed" and hid the thing worth seeing.
-        const Vec3 Axis{0.0f, 1.0f, 0.0f};
-        float MeanR = 0.0f;
-        for (uint32_t N = 0; N < Rings * Segments; ++N)
+        // FRAME DISCIPLINE. Radius is measured from the hub-local Tread[] positions, where the spin axis
+        //    really is {0,1,0}. The first version took (Position − HubPosition), which is a WORLD vector, and
+        //    projected it onto the hub-local axis anyway. The two frames agree only while the car points
+        //    along +X, so as it yawed the error rotated through the lattice and lit a band of markers that
+        //    swept sideways across the tread and breathed in and out with the steering. That reads exactly
+        //    like a bulge travelling laterally, and it was reported as one. It is not motion at all: measured
+        //    properly the carcass holds its width to 0.02 mm and its crown-to-shoulder radius to 0.01 mm.
+        //    Same class of bug as the one already fixed in MeasureTyre, in the other place it was copied to.
+        auto LocalRadius = [&](uint32_t N)
         {
-            const Vec3 Rel = Nodes[N].Position - HubPosition;
-            MeanR += (Rel - Axis * Dot(Rel, Axis)).Length();
-        }
+            const float X = Tread[N * 3u + 0u], Z = Tread[N * 3u + 2u];
+            return std::sqrt(X * X + Z * Z);
+        };
+        float MeanR = 0.0f;
+        for (uint32_t N = 0; N < Rings * Segments; ++N) MeanR += LocalRadius(N);
         MeanR /= static_cast<float>(Rings * Segments);
         const float Rest = MeanR;
         const float M = 0.012f;   // marker half-extent [m]
@@ -423,9 +455,7 @@ void RebuildWheelParts(const XPBDSoftTyre& Tyre, const Quat& HubRotation, const 
         const int Face[8][3] = { {0,2,4},{2,1,4},{1,3,4},{3,0,4},{2,0,5},{1,2,5},{3,1,5},{0,3,5} };
         for (uint32_t N = 0; N < Rings * Segments; ++N)
         {
-            const Vec3 Rel = Nodes[N].Position - HubPosition;
-            const Vec3 Radial = Rel - Axis * Dot(Rel, Axis);
-            const float Deviation = std::fabs(Radial.Length() - Rest);
+            const float Deviation = std::fabs(LocalRadius(N) - Rest);
             Part* Target = Nodes[N].InContact ? ByMaterial[2] : (Deviation > 0.010f ? ByMaterial[1] : ByMaterial[0]);
             const Vec3 C{ Tread[N * 3u + 0u], Tread[N * 3u + 1u], Tread[N * 3u + 2u] };   // hub-local
             for (const auto& F : Face)
@@ -674,7 +704,8 @@ int main(int ArgumentCount, char** ArgumentValues)
                 "max_radial_speed_mps,rms_radial_speed_mps,contacts,normal_load_N,strut_m,"
                 "offpatch_spread_m,dominant_mode,dominant_amp_m,rms_deviation_m,outliers,"
                 "crown_radius_m,shoulder_radius_m,rms_about_centroid_m,centroid_offset_m,"
-                "res_spoke_rms_m,res_shear_rms_m,res_hoop_rms_m,res_lateral_rms_m,res_diag_rms_m,res_contact_max_m\n");
+                "res_spoke_rms_m,res_shear_rms_m,res_hoop_rms_m,res_lateral_rms_m,res_diag_rms_m,res_contact_max_m,"
+                "section_width_m,rms_axial_dev_m,max_axial_dev_m\n");
     }
 
     for (int S = 0; S <= Steps; ++S)
@@ -707,13 +738,14 @@ int main(int ArgumentCount, char** ArgumentValues)
                 const auto& Res = Solver.Tyres()[W].Residual();
                 std::fprintf(TyreLogFile,
                     "%.5f,%u,%.4f,%.6f,%.6f,%.6f,%.6f,%.6f,%u,%.2f,%.6f,%.6f,%u,%.6f,%.6f,%u,%.6f,%.6f,%.6f,%.6f,"
-                    "%.7f,%.7f,%.7f,%.7f,%.7f,%.7f\n",
+                    "%.7f,%.7f,%.7f,%.7f,%.7f,%.7f,%.6f,%.6f,%.6f\n",
                     T, W, Telemetry.SpeedMetresPerSecond,
                     D.MaxSquash, D.MeanRadius, D.RadialSpread,
                     D.MaxRadialSpeed, D.RmsRadialSpeed, D.Contacts, D.NormalLoad, WT.StrutCompression,
                     D.OffPatchSpread, D.DominantMode, D.DominantAmplitude, D.RmsDeviation, D.Outliers, D.CrownRadius, D.ShoulderRadius,
                     D.RmsAboutCentroid, D.CentroidOffset,
-                    Res.SpokeRms, Res.ShearRms, Res.HoopRms, Res.LateralRms, Res.DiagonalRms, Res.ContactMax);
+                    Res.SpokeRms, Res.ShearRms, Res.HoopRms, Res.LateralRms, Res.DiagonalRms, Res.ContactMax,
+                    D.SectionWidth, D.RmsAxialDeviation, D.MaxAxialDeviation);
                 WorstSpread = std::max(WorstSpread, D.RadialSpread);
                 WorstOffPatch = std::max(WorstOffPatch, D.OffPatchSpread);
                 WorstRms    = std::max(WorstRms, D.RmsRadialSpeed);
