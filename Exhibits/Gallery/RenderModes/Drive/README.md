@@ -5,10 +5,33 @@ thing that changes between them is how light is carried.
 
 | artefact | GI | RT | what is actually running |
 |---|---|---|---|
-| `ProjectDriveRenderMode_VisibilityRaster_CPU_Reference.gif` | off | off | `Engine/GeometricRaster/VisibilityRaster` |
-| `ProjectDriveRenderMode_SurfelGI_CPU_Reference.gif` | **on** | off | `Projects/Project-Drive/Source/SurfelReference` |
-| `ProjectDriveRenderMode_ReSTIR_CPU_Reference.gif` | **on** | **on** | `Projects/Project-Zero/Host/MaterialLevelViewport --restir` |
-| `ProjectDriveRenderMode_ReferencePathTracer_CPU_Reference.png` | — | — | the same host with no flag: the oracle |
+| `..._VisibilityRaster_CPU_Reference.gif` | off | off | `Engine/GeometricRaster/VisibilityRaster` |
+| `..._ReSTIR_DirectOnly_CPU_Reference.gif` | off | **on** | `MaterialLevelViewport --restir --bounce 1` |
+| `..._ReSTIR_GlobalIllumination_CPU_Reference.gif` | **on** | **on** | `MaterialLevelViewport --restir --bounce 4` |
+| `..._ReferencePathTracer_CPU_Reference.png` | — | — | the same host with no `--restir`: the oracle |
+
+## There is no Surfel GI in Frontier
+
+A `SurfelReference.cpp` lived in the Project-Drive overlay and was published here as the "GI on" column.
+Grepping the entire pinned engine for `surfel` returns only coincidental bytes inside `.blend` archives — no
+shader, no header, no dispatch, nothing. **It mirrored nothing**, which makes it exactly the self-invented
+renderer the project rules forbid, and it is why its output never looked like the rest of the engine.
+
+Frontier expresses global illumination through `DispatchFeatureGlobalIllumination` and
+`ReSTIRIntegratorConfiguration::MaxGiBounces`, and the CPU mirror exposes precisely that as `--bounce`
+(`MaterialLevelViewport.cpp:2538` — `if (Bounces > 1) Indirect += Radiance(...)`). So GI on/off is now **one
+estimator with the bounce count changed**, which is what the product actually does. The file has been deleted.
+
+Measured on frame 0 of the turntable, mean pixel level in the shadowed underbody:
+
+| | frame mean | shadowed underbody |
+|---|---|---|
+| raster (GI off, RT off) | 163.5 | 107.8 |
+| ReSTIR, GI off | 156.7 | 90.8 |
+| ReSTIR, GI on | 157.9 | **101.8** |
+
+Indirect light lifts the shadowed underbody by **+12%** while barely moving the frame mean — which is the
+signature of GI: it fills what the sun cannot reach and leaves lit surfaces alone.
 
 All four are existing engine code executed on the CPU. Nothing here is a renderer written for the proof.
 Regenerate with:

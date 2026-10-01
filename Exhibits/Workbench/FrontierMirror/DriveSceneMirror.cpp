@@ -531,6 +531,7 @@ int main(int ArgumentCount, char** ArgumentValues)
     float Seconds = 12.0f, SunHour = 15.0f, Freeze = 0.0f;
     bool  Still = false;   // one frozen pose for a material sheet; see the motion-gate note at the gates
     std::string TyreLog;   // --tyre-log <csv>: per-frame XPBD carcass diagnostics
+    float Exposure = 1.05f;       // --exposure <v>      : matches MaterialLevelViewport's default exactly
     float TyreMu = -1.0f;         // --tyre-mu <v>       : override Coulomb μ (bench)
     float TreadAlpha = -1.0f;     // --tread-alpha <v>   : override tread tangential compliance (bench)
     uint32_t TyreSubsteps = 0u;   // --tyre-substeps <n> : override XPBD substeps (bench)
@@ -554,6 +555,7 @@ int main(int ArgumentCount, char** ArgumentValues)
         else if (A == "--freeze")       Freeze      = static_cast<float>(std::atof(Next("--freeze")));
         else if (A == "--still")        Still       = true;
         else if (A == "--tyre-log")     TyreLog     = Next("--tyre-log");
+        else if (A == "--exposure")     Exposure    = static_cast<float>(std::atof(Next("--exposure")));
         else if (A == "--tyre-mu")      TyreMu      = static_cast<float>(std::atof(Next("--tyre-mu")));
         else if (A == "--tread-alpha")  TreadAlpha  = static_cast<float>(std::atof(Next("--tread-alpha")));
         else if (A == "--tyre-substeps") TyreSubsteps = static_cast<uint32_t>(std::atoi(Next("--tyre-substeps")));
@@ -626,6 +628,22 @@ int main(int ArgumentCount, char** ArgumentValues)
     Budget.AtmosphereSamples = 16u;
     Budget.AtmosphereLightSamples = 6u;
     auto Raster = std::make_unique<VisibilityRaster>();
+
+    // ── one shared transfer, explicitly ─────────────────────────────────────────────────────────────────────
+    // VisibilityRaster.h:80 says the transfer "must agree" with the ReSTIR kernel's, and VisibilityRaster.cpp
+    //    carries the scar of the last time it did not: "the same radiance reached the screen up to 49/255
+    //    apart depending on which path drew it". The mirror never called AssignColourTransfer at all, so the
+    //    raster ran on a default-constructed one (ACES, but exposure 1.0) while MaterialLevelViewport renders
+    //    at exposure 1.05. Small, but it is exactly the drift the header warns about, and it is the reason a
+    //    raster sheet sits slightly darker than the ray-traced sheet of the same scene. Now stated, not
+    //    inherited -- and overridable so the two can be matched from the command line.
+    {
+        ColourTransfer Transfer;
+        Transfer.ToneMap    = Frontier::ToneMapCategory::Aces;
+        Transfer.Exposure   = Exposure;
+        Transfer.Saturation = 1.0f;
+        Raster->AssignColourTransfer(Transfer);
+    }
 
     DC::ChaseCameraSolver Chase;
     Chase.AssignAspectRatio(static_cast<float>(Width) / static_cast<float>(Height));

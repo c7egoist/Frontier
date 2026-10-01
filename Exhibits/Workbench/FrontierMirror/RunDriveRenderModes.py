@@ -3,11 +3,18 @@
 
     visibility raster   Engine/GeometricRaster/VisibilityRaster
                         shadow-mapped direct light, no ray queries, no bounce. GI off / RT off.
-    Surfel GI           Projects/Project-Drive/Source/SurfelReference
-                        the engine's GTX split: sharp direct (sun NEE + sky) plus a persistent world-space
-                        surfel field carrying only the bounced light, temporally averaged through a hash grid.
-    ReSTIR              Projects/Project-Zero/Host/MaterialLevelViewport --restir
-                        the CPU transcription of ReSTIRViewport.slang's reservoir resampling.
+    ReSTIR direct       MaterialLevelViewport --restir --bounce 1
+                        traced direct light, reservoir resampling, no diffuse bounce. RT on / GI off.
+    ReSTIR + GI         MaterialLevelViewport --restir --bounce 4
+                        the same estimator with diffuse bounces. RT on / GI on.
+
+⚠️ THERE IS NO SURFEL GI IN FRONTIER. A SurfelReference.cpp lived in the Project-Drive overlay and was
+published here as the "GI on" column, but grepping the entire pinned engine for "surfel" returns only
+coincidental bytes inside .blend archives -- no shader, no header, no dispatch. It mirrored nothing, which
+makes it precisely the self-invented renderer the project rules forbid. The engine expresses GI through
+DispatchFeatureGlobalIllumination / ReSTIRIntegratorConfiguration::MaxGiBounces, and the CPU mirror exposes
+exactly that as --bounce (MaterialLevelViewport.cpp:2538, `if (Bounces > 1) Indirect += Radiance(...)`).
+So GI on/off is now one estimator with the bounce count changed, which is what the product actually does.
     reference           Projects/Project-Zero/Host/MaterialLevelViewport
                         brute-force NEE + power-heuristic MIS through the same MaterialEvaluation.slang
                         compiled 1:1 as C++. The oracle the other three are judged against.
@@ -85,67 +92,10 @@ MLV_INCLUDES = [
     "ExternalPackages/vulkan-headers/include", "ExternalPackages/stb",
 ]
 
-SURFEL_SOURCES = [
-    # SurfelReference now shades through the engine's own lobe set (UnifiedMaterialEvaluation.h) driven by the
-    # SAME authored slabs the other two paths read, so it links the material index and the LUT codec.
-    "Projects/Project-Drive/Source/SurfelReference.cpp",
-    "Projects/Project-Drive/Source/DriveSceneAuthor.cpp",
-    "Engine/ContentInterchange/MaterialIndex.cpp",
-    "Engine/DisplayPresentation/ShadingTableCodec.cpp",
-    "Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp",
-]
 
 
 def log(message: str) -> None:
     print(f"[render-modes] {message}", flush=True)
-
-
-def gate_not_degenerate(ppm: Path, label: str, minimum_colours: int = 64) -> bool:
-    """Refuse to publish a render that carries no picture.
-
-    A renderer that returns one flat colour for every pixel still writes a perfectly valid PNG, and a sheet
-    of them looks like a deliverable until somebody opens it. This counts distinct pixel values and declines
-    to publish below a floor, so a broken transport path is reported as a gap rather than shipped as a proof.
-    """
-    data = ppm.read_bytes()
-    body = data[data.index(b'255\n') + 4:] if b'255\n' in data[:32] else data[15:]
-    colours = {body[i:i + 3] for i in range(0, len(body) - 2, 3)}
-    if len(colours) >= minimum_colours:
-        return True
-    log(f"REFUSING to publish {label}: only {len(colours)} distinct pixel value(s) in the whole frame")
-    log(f"   the render path is broken, not merely unlit -- see the note in SurfelReference.cpp BuildScene()")
-    return False
-
-
-def write_png_from_ppm(source: Path, target: Path) -> None:
-    """SurfelReference writes a binary P6 PPM (it has no PNG dependency); the gallery wants PNG."""
-    import struct, zlib
-    data = source.read_bytes()
-    fields, offset = [], 0
-    while len(fields) < 4:
-        while offset < len(data) and data[offset:offset + 1].isspace():
-            offset += 1
-        if data[offset:offset + 1] == b'#':
-            while offset < len(data) and data[offset] != 0x0A:
-                offset += 1
-            continue
-        start = offset
-        while offset < len(data) and not data[offset:offset + 1].isspace():
-            offset += 1
-        fields.append(data[start:offset])
-    offset += 1
-    width, height = int(fields[1]), int(fields[2])
-    pixels = data[offset:offset + width * height * 3]
-    raw = b''.join(b'\x00' + pixels[y * width * 3:(y + 1) * width * 3] for y in range(height))
-
-    def chunk(tag: bytes, payload: bytes) -> bytes:
-        return (struct.pack('>I', len(payload)) + tag + payload
-                + struct.pack('>I', zlib.crc32(tag + payload) & 0xffffffff))
-
-    target.write_bytes(b'\x89PNG\r\n\x1a\n'
-                       + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
-                       + chunk(b'IDAT', zlib.compress(raw, 6))
-                       + chunk(b'IEND', b''))
 
 
 def stage_denoise() -> Path:
@@ -181,7 +131,6 @@ def main() -> int:
     parser.add_argument("--frames", type=int, default=24, help="turntable frames per GIF")
     parser.add_argument("--fps", type=int, default=12)
     parser.add_argument("--reuse", type=int, default=12, help="ReSTIR temporal reuse frames per rendered frame")
-    parser.add_argument("--gi-frames", type=int, default=16, help="Surfel GI temporal frames per rendered frame")
     args = parser.parse_args()
 
     Drive.seat_overlay()
@@ -214,7 +163,7 @@ def main() -> int:
     Checkout.run([str(raster), "--frames-out", str(frames), "--width", str(args.width),
                   "--height", str(args.height), "--fps", str(args.fps),
                   "--seconds", f"{turn / args.fps:.3f}", "--still",
-                  "--camera", "orbit", "--sun", SUN_HOUR,
+                  "--camera", "orbit", "--sun", SUN_HOUR, "--exposure", "1.05",
                   "--orbit-period", f"{turn / args.fps:.3f}",
                   "--orbit-radius", "8.37", "--orbit-height", "2.20"],
                  cwd=SEAT, quiet=True)
@@ -222,64 +171,36 @@ def main() -> int:
     Drive.assemble_gif(frames, raster_gif, args.fps)
     produced.append((raster_gif.name, "VisibilityRaster — GI OFF, RT OFF. The engine's full OpenPBR lobe set under shadow-mapped direct light, with no ray queries and no bounce."))
 
-    # ---------------------------------------------------------------------------------- 2. Surfel GI
-    surfel = compile_binary("SurfelReference", SURFEL_SOURCES,
-                            ["Projects/Project-Drive/Source", "Engine/PhysicalDynamics/Vehicle", "Engine", "Engine/Shaders",
-                             "ExternalPackages/vulkan-headers/include", "ExternalPackages/stb", "."])
-    sf_frames = Drive.SCRATCH / "tmp/rendermodes-surfel"
-    if sf_frames.exists():
-        shutil.rmtree(sf_frames)
-    sf_frames.mkdir(parents=True, exist_ok=True)
-    log(f"rendering the Surfel GI turntable ({turn} frames)")
-    diag = SEAT / "Projects/Project-Drive/Diagnostics"
-    degenerate = 0
-    for i, deg in enumerate(azimuths()):
-        rad = math.radians(deg)
-        # Rotate the default eye about the car so all three modes sweep the SAME circle.
-        ex = -6.40 * math.cos(rad) - -5.40 * math.sin(rad)
-        ey = -6.40 * math.sin(rad) + -5.40 * math.cos(rad)
-        Checkout.run([str(surfel), "--w", str(args.width), "--h", str(args.height),
-                      "--frames", str(args.gi_frames), "--rays", "8",
-                      "--eye", f"{ex:.4f}", f"{ey:.4f}", "2.20",
-                      "--aim", "0", "0", "0.70", "--fov", "46",
-                      "--name", f"turn_{i:04d}.ppm"], cwd=SEAT, quiet=True)
-        ppm = diag / f"turn_{i:04d}.ppm"
-        if not gate_not_degenerate(ppm, f"Surfel GI frame {i}"):
-            degenerate += 1
-        write_png_from_ppm(ppm, sf_frames / f"frame_{i:04d}.png")
-        ppm.unlink()
-    if degenerate:
-        log(f"NOT publishing Surfel GI: {degenerate}/{turn} frames carried no picture")
-    else:
-        surfel_gif = GALLERY / "ProjectDriveRenderMode_SurfelGI_CPU_Reference.gif"
-        Drive.assemble_gif(sf_frames, surfel_gif, args.fps)
-        shutil.copyfile(diag / "surfel_timing.log", GALLERY / "SurfelGI_timing.log")
-        produced.append((surfel_gif.name,
-                         "SurfelReference — GI ON, RT OFF. Sharp direct light plus a persistent world-space "
-                         "surfel field carrying only the bounced term, temporally averaged through a hash grid."))
-
-    # ---------------------------------------------------------------------------------- 3. ReSTIR
+    # ------------------------------------------------------------------ 2/3. ReSTIR, GI off then GI on
     mlv = compile_binary("MaterialLevelViewport", MLV_SOURCES, [*MLV_INCLUDES, str(stage)])
-    rt_frames = Drive.SCRATCH / "tmp/rendermodes-restir"
-    if rt_frames.exists():
-        shutil.rmtree(rt_frames)
-    rt_frames.mkdir(parents=True, exist_ok=True)
-    log(f"rendering the ReSTIR turntable ({turn} frames @ {args.spp} spp, "
-        f"{args.reuse} frames of reuse, {args.bounce} bounces)")
-    # ReSTIR converges through TEMPORAL REUSE, not sample count: one frame of reservoirs is one candidate per
-    # pixel however high --spp goes, which is why a single frame stays noisy at any sample count.
-    for i, deg in enumerate(azimuths()):
-        Checkout.run([str(mlv), "--level", "drive", "--view", f"orbit@{deg:.3f}",
-                      "--out", str(rt_frames / f"frame_{i:04d}.png"),
-                      "--width", str(args.width), "--height", str(args.height),
-                      "--spp", str(args.spp), "--bounce", str(args.bounce),
-                      "--sun", SUN_HOUR, "--restir", "--frames", str(args.reuse)],
-                     cwd=SEAT, quiet=True)
-    restir_gif = GALLERY / "ProjectDriveRenderMode_ReSTIR_CPU_Reference.gif"
-    Drive.assemble_gif(rt_frames, restir_gif, args.fps)
-    produced.append((restir_gif.name,
-                     "MaterialLevelViewport --restir — GI ON, RT ON. The CPU transcription of "
-                     "ReSTIRViewport.slang's reservoir resampling, with temporal reuse."))
+    # --bounce IS the engine's global-illumination switch. MaterialLevelViewport.cpp:2538 reads
+    #     if (Bounces > 1) Indirect += Radiance(...)
+    # so --bounce 1 is traced DIRECT light only (RT on, GI off) and --bounce 4 adds the diffuse bounces
+    # (RT on, GI on). That mirrors DispatchFeatureGlobalIllumination / ReSTIRIntegratorConfiguration's
+    # MaxGiBounces, which is how the shipped renderer expresses the same toggle.
+    for tag, bounces, caption in (
+        ("ReSTIR_DirectOnly", 1,
+         "MaterialLevelViewport --restir --bounce 1 — RT ON, GI OFF. Traced direct light with reservoir "
+         "resampling, and no diffuse bounce at all."),
+        ("ReSTIR_GlobalIllumination", max(2, args.bounce),
+         "MaterialLevelViewport --restir --bounce N — RT ON, GI ON. The same estimator with the diffuse "
+         "bounces enabled; the difference against the column above IS the global illumination."),
+    ):
+        frames_dir = Drive.SCRATCH / f"tmp/rendermodes-{tag.lower()}"
+        if frames_dir.exists():
+            shutil.rmtree(frames_dir)
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        log(f"rendering the {tag} turntable ({turn} frames @ {args.spp} spp, {bounces} bounces)")
+        for i, deg in enumerate(azimuths()):
+            Checkout.run([str(mlv), "--level", "drive", "--view", f"orbit@{deg:.3f}",
+                          "--out", str(frames_dir / f"frame_{i:04d}.png"),
+                          "--width", str(args.width), "--height", str(args.height),
+                          "--spp", str(args.spp), "--bounce", str(bounces),
+                          "--sun", SUN_HOUR, "--restir", "--frames", str(args.reuse)],
+                         cwd=SEAT, quiet=True)
+        gif = GALLERY / f"ProjectDriveRenderMode_{tag}_CPU_Reference.gif"
+        Drive.assemble_gif(frames_dir, gif, args.fps)
+        produced.append((gif.name, caption))
 
     # ---------------------------------------------------------------------------- 4. the oracle, as one still
     # Not one of the three modes asked for; kept as the reference the other three are judged against, and a
@@ -299,7 +220,7 @@ def main() -> int:
                      "MaterialEvaluation.slang compiled 1:1 as C++. The oracle, not a shipped real-time path."))
 
     # A GIF supersedes the still of the same mode; leaving both behind is how a gallery grows stale copies.
-    for mode in ("VisibilityRaster", "SurfelGI", "ReSTIR"):
+    for mode in ("VisibilityRaster", "ReSTIR_DirectOnly", "ReSTIR_GlobalIllumination"):
         stale = GALLERY / f"ProjectDriveRenderMode_{mode}_CPU_Reference.png"
         if stale.exists() and (GALLERY / f"ProjectDriveRenderMode_{mode}_CPU_Reference.gif").exists():
             stale.unlink()
