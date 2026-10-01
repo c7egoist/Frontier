@@ -149,9 +149,9 @@ established with a number, a structure-size check, and a generated interface has
 
 ### 1. Receive the complete Frontier source and build graph
 
-This Slate checkout cannot produce the real executable by itself: `FlattenedEngine/` is a sparse full-file overlay,
-Project-Zero has only selected tracked source files, and the complete `Module.toml` plus production dependency graph
-are not present. Overlay it on the complete Frontier checkout before editing or building the production host.
+✅ Done. `Frontier/` at the repository root is the complete engine and build graph: the upstream base with every
+change merged in, buildable directly. There is no overlay to apply and no checkout to seat — dependencies are
+fetched by `Frontier/Tools/Bootstrap.py`. See `Docs/FlattenedEngineTree.md`.
 
 ### 2. Extract `FrontierHost`
 
