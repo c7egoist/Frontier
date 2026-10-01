@@ -98,7 +98,7 @@ fi
 # The Cornell feed is project code, but it speaks the editor's vocabulary across the seam, so the same §3 list
 #    holds between its landmarks (FillCornellInstances down to main). The project's older systems above and below
 #    keep their grandfathered words; this range does not.
-FeedBad="$(sed -n '/^void FillCornellInstances/,/^int main/p' Projects/Project-Zero/Source/GameExecution.cpp \
+FeedBad="$(sed -n '/^void FillCornellInstances/,/^int main/p' Engine/Host/FrontierRuntime.cpp \
     | sed '$d' | grep -nE '\b(Manager|Handler|Processor|Controller|Service|Utility|Helper|Node|Frame|Module|Core|System|Backend|Pass|Stage|Harness|Shell|Entity|Element|Subsystem|Hierarchy|Data|Info|Object|Item|Thing|Kind|Base|flag|state|value|Parent|Child|Sibling|Table|Map|Block|Digest|Model|Handle|Store|Bridge|Atlas|Substrate|Fabric|Cache|Evaluator|Evaluate|Journal|Resolver|Mesh|Pool|Registry|Catalog|Repository|Directory|Vault|Arena|Inventory|Ledger|Plan|Filter|Grid|Array|Dispatcher|Memory|Buffer|Pipeline|Flow|Composite|Compose|Composition|Allocation|Tier|Nesting|Stratum|Mip|Messenger|Probe|Blend|History|Bake|Stamp|Contract|Outcome|Prelude|Cadence|Binding|Submission|Footprint|Region|Tree|Vacancy|Ordinates|Draft|Draught|Paint|Depot|Ordinal|Actor|Source|API|Kit|kit|kind|Record)\b' \
     | grep -vE 'Im[A-Z]' || true)"
 if [[ -n "$FeedBad" ]]; then
@@ -181,7 +181,7 @@ fi
 if ! grep -q "uint32_t Triangles" Engine/Editor/EditorInstance.h; then
     echo "  the readout lost its triangle total"; Fail=1
 fi
-if ! grep -q "EditorFooter.Triangles = Level.QueryTriangleCount()" Projects/Project-Zero/Source/GameExecution.cpp; then
+if ! grep -q "EditorFooter.Triangles = Level.QueryTriangleCount()" Engine/Host/FrontierRuntime.cpp; then
     echo "  the feed no longer seats the triangle total"; Fail=1
 fi
 

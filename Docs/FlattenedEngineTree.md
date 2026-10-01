@@ -106,3 +106,57 @@ The eleven `.cpp` files pruned from `Projects/Project-Zero/Source/` all exist at
 `Frontier::HostRuntime` rather than `Frontier::ProjectZero`. Nothing was lost, but the orchestration scripts named
 the pre-relocation paths and had to be repointed. If another consumer surfaces, the file is at `Engine/Host/` and
 the namespace changed with it.
+
+## Windows build (the route that actually works)
+
+**CMake is not the Windows route.** `CMakeLists.txt` hard-errors under `WIN32 AND MSVC` and redirects you. CMake is
+for Linux/macOS and IDE integration only.
+
+```powershell
+cd Frontier
+python Tools\Bootstrap.py --profile proof        # dependencies; prints "Frontier ready."
+powershell -File Tools\Build\ToolchainSequence.ps1 -Run
+```
+
+Useful switches: `-Configuration Debug`, `-Rebuild`, `-Isa AVX|AVX2` (must match `BuildJolt.ps1` or
+`RegisterTypes()` aborts on a library/client mismatch), `-Development:$false` for a ship build without the editor.
+
+### Why you saw two output folders — it is by design
+
+| Artefact | Lands in |
+|---|---|
+| `Frontier.exe` and its payload | `Frontier/Build/Output/Windows/<Configuration>/Binary` |
+| object files | `Frontier/Build/Output/Windows/<Configuration>/Object` |
+| `ProjectZero.dll` | `Frontier/Projects/Project-Zero/Build` |
+| `ProjectDrive.dll` | `Frontier/Projects/Project-Drive/Build` |
+
+The project code images are deliberately separate `/DLL` links placed beside their project, so editing project
+semantics does not relink `Frontier.exe`. `-FluidOpenMP` adds a `-FluidOpenMP` suffix to the output root to keep
+objects built in a different compiler mode isolated. The CMake presets write somewhere else again
+(`Frontier/build/<preset>`), which is the other folder you remember.
+
+`Frontier.exe` is launched from the repository root with a project specification:
+
+```text
+Frontier.exe Projects\Project-Zero\ProjectZero.frontier
+```
+
+### Faults found and fixed on 2026-10-01
+
+- **`ShaderBallGeometry.cpp` was in neither source list.** `ShowcaseStructure::BringGridMesh` calls
+  `ShaderBallGeometry::LoadResolved`, so `Frontier.exe` failed to link with an unresolved external on both build
+  paths. Added to `CMakeLists.txt` and `ToolchainSequence.ps1`.
+- **`Tools/Build/CheckBuildSourceList.sh` was reporting a false RED** and hiding the above. It parsed
+  `Projects/Project-Zero/Build/ToolchainSequence.ps1`, which is now only a forwarding shim, so it saw zero
+  PowerShell TUs; and it never read `FRONTIER_HOST_SOURCES`. Both fixed — run this gate with any build change.
+- **The dependency manifest was being ignored.** Slate's ignore rule covered all of
+  `Frontier/ExternalPackages/`, including `Dependencies.lock.json`, so `Tools/Bootstrap.py` could not run from a
+  fresh clone. The rule now mirrors the engine's own: ignore the contents, track the lock file and README.
+
+### Known gap: Project-Drive has no simulation linked
+
+`ProjectDrive.dll` is a thin C-ABI shim — it registers panels and scene subjects and nothing else. The nine
+vehicle physics TUs (`Engine/PhysicalDynamics/Vehicle/*` plus `VehiclePhysicsThread.cpp` and
+`XPBDTyreSolver.cpp`) are compiled into **no** image, and no built translation unit references them. Project-Drive
+will load and show its panels; it will not drive. These are recorded as explicit allowlist entries in the gate
+rather than left as silent omissions.

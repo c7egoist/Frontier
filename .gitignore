@@ -18,6 +18,10 @@ __pycache__/
 *.pyc
 
 # Engine dependencies: fetched by Frontier/Tools/Bootstrap.py, never committed
-Frontier/ExternalPackages/
+# Dependencies are fetched by Frontier/Tools/Bootstrap.py, never committed — but the lock file and README
+#    ARE the manifest and must be tracked, exactly as the engine's own .gitignore does it.
+Frontier/ExternalPackages/*
+!Frontier/ExternalPackages/Dependencies.lock.json
+!Frontier/ExternalPackages/README.md
 Frontier/.cache/
 Frontier/build/
