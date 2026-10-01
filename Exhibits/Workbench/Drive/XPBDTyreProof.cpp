@@ -67,8 +67,8 @@ int main(int argc,char**argv)
     SoftTyreParameters p; p.RingCount=5u; p.SegmentCount=64u;
     const float hubZ=p.Radius-0.032f;
     XPBDSoftTyre tyre; tyre.Build(p,{0,0,hubZ},Quat{});
-    auto ground=[](const Vec3&,float& z,Vec3& n){z=0.0f;n={0,0,1};return true;};
-    for(int i=0;i<850;++i) tyre.Step(1.0f/1800.0f,12u,{0,0,hubZ},Quat{},{0,0,0},ground);
+    auto ground=[](const Vec3& q,Vec3& s,Vec3& n){s={q.x,q.y,0.0f};n={0,0,1};return true;};
+    for(int i=0;i<850;++i) tyre.Step(1.0f/1800.0f,12u,Vec3{0,0,hubZ},Quat{},Vec3{0,0,0},ground);
     const TyreReaction r=tyre.Reaction();
     if(tyre.Nodes().size()!=p.RingCount*p.SegmentCount || r.ContactCount<9u || !(r.Force.z>100.0f)) { std::fprintf(stderr,"XPBD proof gate failed: nodes=%zu contacts=%u fz=%.1f\n",tyre.Nodes().size(),r.ContactCount,r.Force.z); return 1; }
 

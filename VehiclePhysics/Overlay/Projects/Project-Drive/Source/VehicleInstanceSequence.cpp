@@ -67,11 +67,15 @@ void VehicleInstanceSequence::Construct(const Frontier::Vehicle::VehicleGeometry
     h.ReadChassis       = [this]{ return Body.State(); };
     h.ApplyForceAtPoint = [this](const Vec3& f, const Vec3& p){ Body.ApplyForceAtPoint(f, p); };
     h.ApplyTorque       = [this](const Vec3& t){ Body.ApplyTorque(t); };
-    h.Ground            = [](const Vec3& p, float& gz, Vec3& n)
+    h.Ground            = [](const Vec3& p, Vec3& s, Vec3& n)
     {
-        gz = CourseHeight(p.x, p.y);
-        float nx, ny, nz; CourseNormal(p.x, p.y, nx, ny, nz);
-        n = Vec3{nx, ny, nz}; return true;
+        // The surface query, not a height: CourseSurface answers with the nearest point ON the course and
+        //    its outward normal, so a kerb's vertical face can stop a tyre sideways instead of lifting it.
+        float Sx, Sy, Sz, Nx, Ny, Nz;
+        CourseSurface(p.x, p.y, p.z, Sx, Sy, Sz, Nx, Ny, Nz);
+        s = Vec3{Sx, Sy, Sz};
+        n = Vec3{Nx, Ny, Nz};
+        return true;
     };
     ActiveVehicleSolver.Build(ActiveConfiguration, h, Body.State());
 
@@ -90,11 +94,15 @@ void VehicleInstanceSequence::Reconfigure(const Frontier::Vehicle::VehicleSolver
     h.ReadChassis       = [this]{ return Body.State(); };
     h.ApplyForceAtPoint = [this](const Vec3& f, const Vec3& p){ Body.ApplyForceAtPoint(f, p); };
     h.ApplyTorque       = [this](const Vec3& t){ Body.ApplyTorque(t); };
-    h.Ground            = [](const Vec3& p, float& gz, Vec3& n)
+    h.Ground            = [](const Vec3& p, Vec3& s, Vec3& n)
     {
-        gz = CourseHeight(p.x, p.y);
-        float nx, ny, nz; CourseNormal(p.x, p.y, nx, ny, nz);
-        n = Vec3{nx, ny, nz}; return true;
+        // The surface query, not a height: CourseSurface answers with the nearest point ON the course and
+        //    its outward normal, so a kerb's vertical face can stop a tyre sideways instead of lifting it.
+        float Sx, Sy, Sz, Nx, Ny, Nz;
+        CourseSurface(p.x, p.y, p.z, Sx, Sy, Sz, Nx, Ny, Nz);
+        s = Vec3{Sx, Sy, Sz};
+        n = Vec3{Nx, Ny, Nz};
+        return true;
     };
     ActiveVehicleSolver.Build(ActiveConfiguration, h, Body.State());
 }

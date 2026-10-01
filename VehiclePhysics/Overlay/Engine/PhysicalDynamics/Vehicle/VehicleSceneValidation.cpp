@@ -161,7 +161,7 @@ struct Rig
 };
 
 // Flat ground at z = 0.
-static bool FlatGround(const Vec3& p, float& gz, Vec3& n) { (void)p; gz = 0.0f; n = {0, 0, 1}; return true; }
+static bool FlatGround(const Vec3& p, Vec3& s, Vec3& n) { s = {p.x, p.y, 0.0f}; n = {0, 0, 1}; return true; }
 
 // Runs the full 5-scenario invariant suite for one driving model and returns {passed, failed} for that model.
 static void RunSuite(DrivingScheme model, const char* label)
@@ -243,10 +243,10 @@ static void RunSuite(DrivingScheme model, const char* label)
     // 5) REST on a sloped heightfield (handbrake), no sink / no explosion
     //--------------------------------------------------------------------------------------------------------------
     std::printf("[5] rest on a 6%% slope heightfield (handbrake, 3 s)\n");
-    auto Slope = [](const Vec3& p, float& gz, Vec3& n) -> bool
+    auto Slope = [](const Vec3& p, Vec3& s, Vec3& n) -> bool
     {
         const float grade = 0.06f;                    // z rises 6% with +x
-        gz = grade * p.x;
+        s = Vec3{p.x, p.y, grade * p.x};
         n = Vec3{-grade, 0.0f, 1.0f}.Normalized();
         return true;
     };

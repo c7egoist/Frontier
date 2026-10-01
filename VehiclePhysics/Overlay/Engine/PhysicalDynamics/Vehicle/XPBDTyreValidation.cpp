@@ -38,7 +38,7 @@ static void Check(const char* name, bool ok, const std::string& detail = "")
 }
 
 static XPBDSoftTyre::GroundQuery g_flat =
-    [](const Vec3& p, float& gz, Vec3& n) { (void)p; gz = 0.0f; n = {0, 0, 1}; return true; };
+    [](const Vec3& p, Vec3& s, Vec3& n) { s = {p.x, p.y, 0.0f}; n = {0, 0, 1}; return true; };
 
 struct Measured { double Fx = 0, Fy = 0, Fz = 0, Mz = 0; };
 

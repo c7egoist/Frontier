@@ -132,11 +132,11 @@ struct Rig
     }
 };
 
-static XPBDSoftTyre::GroundQuery Flat() { return [](const Vec3&, float& gz, Vec3& n){ gz = 0; n = {0,0,1}; return true; }; }
+static XPBDSoftTyre::GroundQuery Flat() { return [](const Vec3& p, Vec3& s, Vec3& n){ s = {p.x,p.y,0}; n = {0,0,1}; return true; }; }
 // Slope rising with +x at the given grade (tan of the incline angle). +x is up-slope.
 static XPBDSoftTyre::GroundQuery Slope(float grade)
 {
-    return [grade](const Vec3& p, float& gz, Vec3& n){ gz = grade * p.x; n = Vec3{-grade, 0.0f, 1.0f}.Normalized(); return true; };
+    return [grade](const Vec3& p, Vec3& s, Vec3& n){ s = {p.x, p.y, grade * p.x}; n = Vec3{-grade, 0.0f, 1.0f}.Normalized(); return true; };
 }
 
 [[nodiscard]] static float UpZ(const MockChassis& m) { return m.Orientation.Rotate({0,0,1}).z; }

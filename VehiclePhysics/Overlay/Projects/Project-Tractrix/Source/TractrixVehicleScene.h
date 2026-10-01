@@ -106,9 +106,15 @@ public:
         {
             solver_.ApplyTorque(chassis_, FromVehicle(t));
         };
-        hooks.Ground = [this](const Frontier::Vehicle::Vec3& p, float& gz, Frontier::Vehicle::Vec3& n)
+        hooks.Ground = [this](const Frontier::Vehicle::Vec3& p,
+                              Frontier::Vehicle::Vec3& s, Frontier::Vehicle::Vec3& n)
         {
-            return track_.Sample(p, gz, n);
+            // TrackSurface answers with a HEIGHT, so the surface point is the one directly below: the
+            //    reduction a heightfield is, and valid here because this track has no vertical faces.
+            float gz = 0.0f;
+            if (!track_.Sample(p, gz, n)) return false;
+            s = Frontier::Vehicle::Vec3{p.x, p.y, gz};
+            return true;
         };
 
         Frontier::Vehicle::ChassisState initial{ ToVehicle(spawn), {0,0,0,1}, {0,0,0}, {0,0,0} };

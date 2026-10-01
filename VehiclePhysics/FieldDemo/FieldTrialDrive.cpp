@@ -86,7 +86,8 @@ int main()
     h.ReadChassis       = [&]{ return ch.State(); };
     h.ApplyForceAtPoint = [&](const Vec3& f, const Vec3& p){ ch.ApplyForceAtPoint(f,p); };
     h.ApplyTorque       = [&](const Vec3& t){ ch.ApplyTorque(t); };
-    h.Ground            = [](const Vec3& p, float& gz, Vec3& n){ gz = TerrainZ(p.x); float s = TerrainSlope(p.x);
+    h.Ground            = [](const Vec3& p, Vec3& sp, Vec3& n){ sp = Vec3{p.x, p.y, TerrainZ(p.x)};
+                                                                 const float s = TerrainSlope(p.x);
                                                                  n = Vec3{-s,0.0f,1.0f}.Normalized(); return true; };
     ctl.Build(cfg, h, ch.State());
 

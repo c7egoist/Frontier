@@ -89,11 +89,15 @@ int main(int argc, char** argv)
     h.ReadChassis       = [&]{ return ch.State(); };
     h.ApplyForceAtPoint = [&](const Vec3& f, const Vec3& p){ ch.ApplyForceAtPoint(f,p); };
     h.ApplyTorque       = [&](const Vec3& t){ ch.ApplyTorque(t); };
-    h.Ground            = [](const Vec3& p, float& gz, Vec3& n)
+    h.Ground            = [](const Vec3& p, Vec3& s, Vec3& n)
     {
-        gz = DC::CourseHeight(p.x, p.y);
-        float nx,ny,nz; DC::CourseNormal(p.x, p.y, nx,ny,nz);
-        n = Vec3{nx,ny,nz}; return true;
+        // The surface query, not a height: CourseSurface answers with the nearest point ON the course and
+        //    its outward normal, so a kerb's vertical face can stop a tyre sideways instead of lifting it.
+        float Sx, Sy, Sz, Nx, Ny, Nz;
+        DC::CourseSurface(p.x, p.y, p.z, Sx, Sy, Sz, Nx, Ny, Nz);
+        s = Vec3{Sx, Sy, Sz};
+        n = Vec3{Nx, Ny, Nz};
+        return true;
     };
     ctl.Build(cfg, h, ch.State());
 
