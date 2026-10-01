@@ -19,7 +19,62 @@
     "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveKerbStrike --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --scenario kerb --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05",
     "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveKerbStrike_LatticeDebug --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --scenario kerb --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05 --debug-lattice --height 300",
     "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveMaterialTurntable --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --freeze 3.0 --seconds 9 --orbit-period 6 --orbit-radius 6.5 --orbit-height 2.4",
-    "XPBDTyreProof /home/user/Slate/Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
+    "XPBDTyreProof /home/user/Slate/Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png",
+    [
+      "DriveSceneMirror",
+      "--frames-out",
+      "/home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDRimCollapse",
+      "--width",
+      "480",
+      "--height",
+      "270",
+      "--fps",
+      "10",
+      "--sun",
+      "13.0",
+      "--camera",
+      "wheel",
+      "--wheel",
+      "0",
+      "--seconds",
+      "12",
+      "--orbit-period",
+      "9",
+      "--orbit-radius",
+      "2.5",
+      "--orbit-height",
+      "1.05",
+      "--rim-stop",
+      "0"
+    ],
+    [
+      "DriveSceneMirror",
+      "--frames-out",
+      "/home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDLatticeDebug",
+      "--width",
+      "480",
+      "--height",
+      "270",
+      "--fps",
+      "10",
+      "--sun",
+      "13.0",
+      "--camera",
+      "wheel",
+      "--wheel",
+      "0",
+      "--seconds",
+      "12",
+      "--orbit-period",
+      "9",
+      "--orbit-radius",
+      "2.5",
+      "--orbit-height",
+      "1.05",
+      "--debug-lattice",
+      "--height",
+      "300"
+    ]
   ],
   "results": {
     "physics": [
@@ -132,5 +187,12 @@
       "ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
     ],
     "reason": "Exhibits/Workbench/Drive/DriveSceneProof.cpp was a bespoke raytracer written in Slate. It did not run any engine code, so its sheets were not evidence about Project-Drive. It is deleted and its output is superseded by the sequences above."
+  },
+  "partialRebuild": {
+    "sequences": [
+      "ProjectDriveXPBDLatticeDebug",
+      "ProjectDriveXPBDRimCollapse"
+    ],
+    "note": "Re-rendered the sequences listed here only. Every other entry is carried over from the last full pass; the physics run, graphs, turntable stills and tyre sheet were not re-run."
   }
 }

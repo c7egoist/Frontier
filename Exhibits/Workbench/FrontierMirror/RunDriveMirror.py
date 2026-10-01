@@ -158,10 +158,23 @@ def assemble_gif(frames: Path, target: Path, fps: int) -> None:
                   "-layers", "OptimizeTransparency", str(target)], cwd=ROOT, quiet=True)
 
 
+
+def _touches(command: list[str], names: list[str]) -> bool:
+    """prose: Does a recorded command line belong to one of the named sequences?
+    in:    command - a provenance command, already split into arguments
+    in:    names   - sequence names this pass re-rendered
+    out:   True when the command rendered one of them, so the stale copy can be dropped
+    use:   Keeping the superseded command next to the fresh one would make the provenance self-contradictory.
+    tag:   drive, provenance"""
+    joined = " ".join(command)
+    return any(f"frames-{name}" in joined for name in names)
+
+
 def main() -> int:
     width = "480"
     height = "270"
     fps = 10
+    only: list[str] = []
     for index, argument in enumerate(sys.argv):
         if argument == "--width":
             width = sys.argv[index + 1]
@@ -169,6 +182,20 @@ def main() -> int:
             height = sys.argv[index + 1]
         elif argument == "--fps":
             fps = int(sys.argv[index + 1])
+        elif argument == "--only":
+            only = [n for n in sys.argv[index + 1].split(",") if n]
+
+    # 📝 --only re-renders a named subset and leaves the rest of the gallery alone. A full pass is nine sequences
+    #    plus the telemetry run and its graphs, which is around half an hour on two cores; when a change only
+    #    moves the carcass there is no reason to re-roll the chase camera or replot the powertrain. The physics
+    #    run, the graphs, the turntable stills and the tyre sheet are all skipped, and the provenance entries for
+    #    the named sequences are merged into the published file rather than the file being rewritten from one
+    #    partial pass — a provenance that silently dropped eight sequences would be worse than a slow rebuild.
+    known = {entry[0] for entry in SEQUENCES}
+    unknown = [name for name in only if name not in known]
+    if unknown:
+        raise SystemExit(f"--only: unknown sequence(s) {', '.join(unknown)}; known: {', '.join(sorted(known))}")
+    partial = bool(only)
 
     seat_overlay()
     GALLERY.mkdir(parents=True, exist_ok=True)
@@ -176,31 +203,36 @@ def main() -> int:
     results: dict[str, object] = {}
     outputs: list[Path] = []
 
+    if partial:
+        log(f"partial rebuild: {', '.join(only)} (physics, graphs, stills and tyre sheet skipped)")
+
     # ── 1. the physics run ───────────────────────────────────────────────────────────────────────────────────────
-    telemetry_binary = compile_binary("DriveTelemetry",
+    telemetry_binary = None if partial else compile_binary("DriveTelemetry",
                                       ["Projects/Project-Drive/Source/DriveTelemetry.cpp", *VEHICLE_SOURCES],
                                       [VEHICLE, "Projects/Project-Drive/Source"])
     run_dir = BUILD / "telemetry"
-    run_dir.mkdir(parents=True, exist_ok=True)
-    log("running the vehicle")
-    physics = Checkout.run([str(telemetry_binary), str(run_dir)], cwd=SEAT, quiet=True)
-    commands.append([str(telemetry_binary.name), str(run_dir)])
-    results["physics"] = physics.stdout.strip().splitlines()[-8:]
-    for source, published in (("telemetry.csv", "ProjectDrivePhysicsTelemetry_CPU_Reference.csv"),
-                              ("run.log", "ProjectDrivePhysicsRun_CPU_Reference.txt"),
-                              ("timing.log", "ProjectDrivePhysicsTiming_CPU_Reference.txt")):
-        shutil.copyfile(run_dir / source, GALLERY / published)
-        outputs.append(GALLERY / published)
+    if not partial:
+      run_dir.mkdir(parents=True, exist_ok=True)
+      log("running the vehicle")
+      physics = Checkout.run([str(telemetry_binary), str(run_dir)], cwd=SEAT, quiet=True)
+      commands.append([str(telemetry_binary.name), str(run_dir)])
+      results["physics"] = physics.stdout.strip().splitlines()[-8:]
+      for source, published in (("telemetry.csv", "ProjectDrivePhysicsTelemetry_CPU_Reference.csv"),
+                                ("run.log", "ProjectDrivePhysicsRun_CPU_Reference.txt"),
+                                ("timing.log", "ProjectDrivePhysicsTiming_CPU_Reference.txt")):
+          shutil.copyfile(run_dir / source, GALLERY / published)
+          outputs.append(GALLERY / published)
 
     # ── 2. the graphs that prove it ran ──────────────────────────────────────────────────────────────────────────
-    log("plotting the run")
-    outputs += render_graphs(GALLERY / "ProjectDrivePhysicsTelemetry_CPU_Reference.csv", GALLERY)
-    commands.append([sys.executable, "Exhibits/Workbench/Drive/DriveTelemetryGraphs.py"])
+    if not partial:
+        log("plotting the run")
+        outputs += render_graphs(GALLERY / "ProjectDrivePhysicsTelemetry_CPU_Reference.csv", GALLERY)
+        commands.append([sys.executable, "Exhibits/Workbench/Drive/DriveTelemetryGraphs.py"])
 
     # ── 3. the rendered sequences ────────────────────────────────────────────────────────────────────────────────
     mirror = compile_binary("DriveSceneMirror", [str(MIRROR), *ENGINE_SOURCES, *VEHICLE_SOURCES], INCLUDES)
     sequence_notes: dict[str, str] = {}
-    for name, flags, caption in SEQUENCES:
+    for name, flags, caption in [e for e in SEQUENCES if not only or e[0] in only]:
         frames = BUILD / f"frames-{name}"
         if frames.exists():
             shutil.rmtree(frames)
@@ -221,7 +253,7 @@ def main() -> int:
         outputs.append(target)
         log(f"wrote {target.name} ({target.stat().st_size // 1024} KiB)")
 
-        if name == "ProjectDriveMaterialTurntable":
+        if name == "ProjectDriveMaterialTurntable" and not partial:
             for index, angle in ANGLE_STILLS.items():
                 source = frames / f"frame_{index:04d}.png"
                 if not source.exists():
@@ -232,17 +264,18 @@ def main() -> int:
             log(f"lifted {len(ANGLE_STILLS)} material angles out of the turntable")
 
     # ── 4. the soft tyre, from the engine's own XPBD solver ─────────────────────────────────────────────────────
-    tyre_binary = compile_binary("XPBDTyreProof",
+    tyre_binary = None if partial else compile_binary("XPBDTyreProof",
                                  [str(ROOT / "Exhibits/Workbench/Drive/XPBDTyreProof.cpp"),
                                   f"{VEHICLE}/XPBDSoftTyre.cpp"], [VEHICLE])
     tyre_sheet = GALLERY / "ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
-    log("deforming the soft tyre")
-    Checkout.run([str(tyre_binary), str(tyre_sheet)], cwd=SEAT, quiet=True)
-    commands.append([tyre_binary.name, str(tyre_sheet)])
-    outputs.append(tyre_sheet)
+    if not partial:
+        log("deforming the soft tyre")
+        Checkout.run([str(tyre_binary), str(tyre_sheet)], cwd=SEAT, quiet=True)
+        commands.append([tyre_binary.name, str(tyre_sheet)])
+        outputs.append(tyre_sheet)
 
     # ── 5. retire what the hand-written raytracer left behind ────────────────────────────────────────────────────
-    retired = [name for name in SUPERSEDED if (GALLERY / name).exists()]
+    retired = [] if partial else [name for name in SUPERSEDED if (GALLERY / name).exists()]
     for name in retired:
         (GALLERY / name).unlink()
     if retired:
@@ -276,7 +309,24 @@ def main() -> int:
                   "not run any engine code, so its sheets were not evidence about Project-Drive. It is deleted and "
                   "its output is superseded by the sequences above.",
     }
-    (GALLERY / "Provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
+    # 📝 A partial pass only knows about the sequences it re-rendered, so it merges into the published file
+    #    instead of replacing it. Anything it did not touch keeps the entry from the pass that did, and the
+    #    merged file records which keys this pass is actually accountable for.
+    published = GALLERY / "Provenance.json"
+    if partial and published.exists():
+        merged = json.loads(published.read_text())
+        for section in ("results", "sequences"):
+            if isinstance(merged.get(section), dict) and isinstance(provenance.get(section), dict):
+                merged[section].update(provenance[section])
+        merged.setdefault("commands", [])
+        merged["commands"] = [c for c in merged["commands"] if not _touches(c, only)] + commands
+        merged["partialRebuild"] = {
+            "sequences": only,
+            "note": "Re-rendered the sequences listed here only. Every other entry is carried over from the "
+                    "last full pass; the physics run, graphs, turntable stills and tyre sheet were not re-run.",
+        }
+        provenance = merged
+    published.write_text(json.dumps(provenance, indent=2) + "\n")
     log(f"published {len(outputs)} artefacts to {GALLERY.relative_to(ROOT)}")
     return 0
 
