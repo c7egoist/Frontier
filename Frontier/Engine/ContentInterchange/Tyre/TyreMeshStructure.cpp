@@ -5,6 +5,7 @@
 
 #include "TyreMeshStructure.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace Frontier {
@@ -84,6 +85,20 @@ void TyreMeshStructure::AddTriangle(uint32_t                A,
     Corners.push_back(CornerC);
 }
 
+void TyreMeshStructure::AddQuad(uint32_t                A,
+                                uint32_t                B,
+                                uint32_t                C,
+                                uint32_t                D,
+                                const TyreCornerRecord& CornerA,
+                                const TyreCornerRecord& CornerB,
+                                const TyreCornerRecord& CornerC,
+                                const TyreCornerRecord& CornerD) noexcept
+{
+    AddTriangle(A, B, C, CornerA, CornerB, CornerC);
+    AddTriangle(A, C, D, CornerA, CornerC, CornerD);
+    ++QuadTally;
+}
+
 void TyreMeshStructure::Reserve(uint32_t PositionCount, uint32_t TriangleCount) noexcept
 {
     Positions.reserve(PositionCount);
@@ -97,7 +112,151 @@ void TyreMeshStructure::Clear() noexcept
     Corners.clear();
     Indices.clear();
     CellIndex.clear();
+    QuadTally = 0u;
 }
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                   T-JUNCTION REPAIR
+//------------------------------------------------------------------------------------------------------------------------
+
+uint32_t TyreMeshStructure::RepairJunctions() noexcept
+{
+    if (Indices.size() < 3u || Positions.empty())
+        return 0u;
+
+    // 📝 ① A coarse grid, not the weld grid. Welding buckets at one micrometre, and walking a six
+    //    millimetre edge through micrometre cells would visit six thousand of them. This index exists to
+    //    answer "which points are near this edge", so its cell is sized to the edges being asked about.
+    constexpr float CoarseCell = 1.0f;   // [mm]  - lookup cell for the near-edge query
+
+    std::unordered_map<uint64_t, std::vector<uint32_t>> Coarse;
+    Coarse.reserve(Positions.size());
+    const float Inverse = 1.0f / CoarseCell;
+    for (uint32_t Point = 0; Point < Positions.size(); ++Point)
+    {
+        const TyrePositionRecord& Record = Positions[Point];
+        Coarse[CellKey(static_cast<int64_t>(std::floor(Record.X * Inverse)),
+                       static_cast<int64_t>(std::floor(Record.Y * Inverse)),
+                       static_cast<int64_t>(std::floor(Record.Z * Inverse)))].push_back(Point);
+    }
+
+    const float Tolerance = WeldTolerance;
+    const float Squared   = Tolerance * Tolerance;
+
+    std::vector<uint32_t>         Rebuilt;
+    std::vector<TyreCornerRecord> RebuiltCorners;
+    Rebuilt.reserve(Indices.size());
+    RebuiltCorners.reserve(Corners.size());
+    uint32_t Splits = 0u;
+
+    std::vector<std::pair<float, uint32_t>> OnEdge;
+    std::vector<uint32_t>                   Ring;
+    std::vector<TyreCornerRecord>           RingCorner;
+
+    for (size_t Face = 0; Face + 2u < Indices.size(); Face += 3u)
+    {
+        Ring.clear();
+        RingCorner.clear();
+
+        for (uint32_t Side = 0; Side < 3u; ++Side)
+        {
+            const uint32_t Start = Indices[Face + Side];
+            const uint32_t End   = Indices[Face + (Side + 1u) % 3u];
+            Ring.push_back(Start);
+            RingCorner.push_back(Corners[Face + Side]);
+
+            const TyrePositionRecord& A = Positions[Start];
+            const TyrePositionRecord& B = Positions[End];
+            const float Dx = B.X - A.X, Dy = B.Y - A.Y, Dz = B.Z - A.Z;
+            const float Length = Dx * Dx + Dy * Dy + Dz * Dz;
+            if (Length <= Squared)
+                continue;
+
+            // 📝 ② Sweep the coarse cells the edge's extent touches and keep any point that lies on it.
+            OnEdge.clear();
+            const int64_t X0 = static_cast<int64_t>(std::floor(std::fmin(A.X, B.X) * Inverse)) - 1;
+            const int64_t X1 = static_cast<int64_t>(std::floor(std::fmax(A.X, B.X) * Inverse)) + 1;
+            const int64_t Y0 = static_cast<int64_t>(std::floor(std::fmin(A.Y, B.Y) * Inverse)) - 1;
+            const int64_t Y1 = static_cast<int64_t>(std::floor(std::fmax(A.Y, B.Y) * Inverse)) + 1;
+            const int64_t Z0 = static_cast<int64_t>(std::floor(std::fmin(A.Z, B.Z) * Inverse)) - 1;
+            const int64_t Z1 = static_cast<int64_t>(std::floor(std::fmax(A.Z, B.Z) * Inverse)) + 1;
+
+            for (int64_t Cz = Z0; Cz <= Z1; ++Cz)
+            for (int64_t Cy = Y0; Cy <= Y1; ++Cy)
+            for (int64_t Cx = X0; Cx <= X1; ++Cx)
+            {
+                const auto Bucket = Coarse.find(CellKey(Cx, Cy, Cz));
+                if (Bucket == Coarse.end())
+                    continue;
+
+                for (const uint32_t Candidate : Bucket->second)
+                {
+                    if (Candidate == Start || Candidate == End)
+                        continue;
+
+                    const TyrePositionRecord& P = Positions[Candidate];
+                    const float Along = ((P.X - A.X) * Dx + (P.Y - A.Y) * Dy + (P.Z - A.Z) * Dz) / Length;
+                    if (Along <= 0.0f || Along >= 1.0f)
+                        continue;
+
+                    const float Ex = A.X + Dx * Along - P.X;
+                    const float Ey = A.Y + Dy * Along - P.Y;
+                    const float Ez = A.Z + Dz * Along - P.Z;
+                    if (Ex * Ex + Ey * Ey + Ez * Ez > Squared)
+                        continue;
+
+                    OnEdge.emplace_back(Along, Candidate);
+                }
+            }
+
+            if (OnEdge.empty())
+                continue;
+
+            std::sort(OnEdge.begin(), OnEdge.end(),
+                      [](const auto& L, const auto& R) { return L.first < R.first; });
+            OnEdge.erase(std::unique(OnEdge.begin(), OnEdge.end(),
+                                     [](const auto& L, const auto& R) { return L.second == R.second; }),
+                         OnEdge.end());
+
+            const TyreCornerRecord& Head = Corners[Face + Side];
+            const TyreCornerRecord& Tail = Corners[Face + (Side + 1u) % 3u];
+            for (const auto& Insert : OnEdge)
+            {
+                // 📝 📐 The inserted corner is interpolated, not copied. It sits on the edge, so its
+                //    attributes are the edge's attributes at that parameter; copying either end would
+                //    kink the normal and show as a facet seam along an otherwise flat floor.
+                const float Mix = Insert.first;
+                TyreCornerRecord Blend;
+                Blend.NormalX = Head.NormalX + (Tail.NormalX - Head.NormalX) * Mix;
+                Blend.NormalY = Head.NormalY + (Tail.NormalY - Head.NormalY) * Mix;
+                Blend.NormalZ = Head.NormalZ + (Tail.NormalZ - Head.NormalZ) * Mix;
+                Blend.U       = Head.U + (Tail.U - Head.U) * Mix;
+                Blend.V       = Head.V + (Tail.V - Head.V) * Mix;
+                Blend.Group   = Head.Group;
+                Ring.push_back(Insert.second);
+                RingCorner.push_back(Blend);
+                ++Splits;
+            }
+        }
+
+        // 📝 ③ Fan the expanded ring. Inserted points are collinear with the edge they came from, so the
+        //    ring is still convex and a fan from its first vertex cannot produce an inverted triangle.
+        for (size_t Corner = 1u; Corner + 1u < Ring.size(); ++Corner)
+        {
+            Rebuilt.push_back(Ring[0]);
+            Rebuilt.push_back(Ring[Corner]);
+            Rebuilt.push_back(Ring[Corner + 1u]);
+            RebuiltCorners.push_back(RingCorner[0]);
+            RebuiltCorners.push_back(RingCorner[Corner]);
+            RebuiltCorners.push_back(RingCorner[Corner + 1u]);
+        }
+    }
+
+    Indices.swap(Rebuilt);
+    Corners.swap(RebuiltCorners);
+    return Splits;
+}
+
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                 WATERTIGHTNESS LEDGER
@@ -108,6 +267,8 @@ TyreMeshMetrics TyreMeshStructure::QueryMetrics() const noexcept
     TyreMeshMetrics Metrics;
     Metrics.PositionCount = static_cast<uint32_t>(Positions.size());
     Metrics.TriangleCount = static_cast<uint32_t>(Indices.size() / 3u);
+    Metrics.QuadCount     = QuadTally;
+    Metrics.LooseTriangle = Metrics.TriangleCount - QuadTally * 2u;
 
     // 📝 ① Count how many triangles use each undirected edge. An edge is keyed by its two position
     //    indices in ascending order, so the two triangles that share it agree on the key by construction.

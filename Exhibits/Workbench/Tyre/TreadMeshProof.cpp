@@ -7,6 +7,7 @@
 #include "../../../Frontier/Engine/ContentInterchange/Tyre/TyreProfileSpecification.h"
 #include "../../../Frontier/Engine/ContentInterchange/Tyre/TyreMeshStructure.h"
 #include "../../../Frontier/Engine/ContentInterchange/Tyre/TreadRegionSolver.h"
+#include "../../../Frontier/Engine/ContentInterchange/Tyre/TreadMeshSolver.h"
 
 #include <cmath>
 #include <cstdio>
@@ -230,6 +231,35 @@ int main()
     Expect("no gap",            static_cast<uint32_t>(Regions.GapArea     <= Tolerance), 1u);
     Expect("no spill",          static_cast<uint32_t>(Regions.ExcessArea  <= Tolerance), 1u);
     Expect("no overlap",        static_cast<uint32_t>(Regions.OverlapArea <= Tolerance), 1u);
+
+    // \U0001F4DD \u2463 The mesh stage. Floors clipped to the grid, walls extruded from the outlines, all of it
+    //    welded into one pool. This is where the prototype's 13 167 interior cracks were, so the number
+    //    that matters is the boundary count: it must be the two rim openings and nothing else.
+    std::printf("\n\u2463 Mesh stage \u2014 quad-dominant tread, welded\n");
+
+    TreadMeshSettings Settings;
+    TyreMeshStructure Tread;
+    const TreadMeshMetrics Built = SolveTreadMesh(Regions, Specification, Derived, Settings, Tread);
+    const uint32_t         Splits = Tread.RepairJunctions();
+    const TyreMeshMetrics  Audit  = Tread.QueryMetrics();
+
+    std::printf("  %-34s %10u\n",     "floor quads",      Built.FloorQuad);
+    std::printf("  %-34s %10u\n",     "wall quads",       Built.WallQuad);
+    std::printf("  %-34s %10u\n",     "floor triangles",  Built.FloorTriangle);
+    std::printf("  %-34s %9.1f %%\n", "quad fraction",    Built.QuadFraction * 100.0);
+    std::printf("  %-34s %10u\n",     "T-junctions repaired", Splits);
+    std::printf("  %-34s %10u\n",     "positions",        Audit.PositionCount);
+    std::printf("  %-34s %10u\n",     "triangles",        Audit.TriangleCount);
+    std::printf("  %-34s %10u\n",     "boundary edges",   Audit.BoundaryEdge);
+    std::printf("  %-34s %10u\n",     "non-manifold",     Audit.NonManifoldEdge);
+    std::printf("  %-34s %10u\n",     "degenerate",       Audit.DegenerateCount);
+
+    // \U0001F4DD \U0001F6A7 Stage \u2463 does not pass yet and must not pretend to. The acceptance criterion is that the
+    //    only open edges are the two rim openings where the sidewall will attach. Everything above is
+    //    reported so the gap is visible rather than inferred.
+    const uint32_t RimOpening = 1206u;
+    Expect("tread closed but for the rim", Audit.BoundaryEdge, RimOpening);
+    Expect("no non-manifold edges",        Audit.NonManifoldEdge, 0u);
 
     std::printf("\n%s\n", Failures == 0 ? "GATE PASSED" : "GATE FAILED");
     return Failures == 0 ? 0 : 1;

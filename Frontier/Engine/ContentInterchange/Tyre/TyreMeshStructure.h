@@ -50,6 +50,8 @@ struct TyreMeshMetrics
     uint32_t NonManifoldEdge  = 0u;   // [-]  - edges incident to three or more triangles
     uint32_t DegenerateCount  = 0u;   // [-]  - triangles with a repeated index or zero area
     uint32_t DuplicateCount   = 0u;   // [-]  - triangles repeating an existing corner triple
+    uint32_t QuadCount        = 0u;   // [-]  - faces recorded as quads rather than loose triangles
+    uint32_t LooseTriangle    = 0u;   // [-]  - faces recorded as triangles in their own right
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -94,7 +96,37 @@ public:
                      const TyreCornerRecord& CornerB,
                      const TyreCornerRecord& CornerC) noexcept;
 
-    /// 📦 Measures watertightness over the position topology.
+    /// 📦 Records one quad as two triangles, and remembers that it was a quad.
+    /// in    A, B, C, D     [-]  position indices in ring order, counter-clockwise seen from outside
+    /// in    CornerA…D     [-]  shading attributes, one per ring position
+    /// note  💡 The engine draws triangles, so a quad is split here rather than carried. What is kept is the
+    ///       count: quad fraction is the measure of whether the tread really has the topology it claims,
+    ///       and it cannot be recovered from an index buffer after the fact.
+    /// cost  ✔️
+    /// tag   api, allocating, nonthrowing
+    void AddQuad(uint32_t                A,
+                 uint32_t                B,
+                 uint32_t                C,
+                 uint32_t                D,
+                 const TyreCornerRecord& CornerA,
+                 const TyreCornerRecord& CornerB,
+                 const TyreCornerRecord& CornerC,
+                 const TyreCornerRecord& CornerD) noexcept;
+
+/// 📦 Splits every edge that another welded position happens to lie on.
+    /// out   uint32_t  [-]  edges split; zero means the mesh had no T-junctions to begin with
+    /// cost  🔴
+    /// note  💡 A T-junction is the crack welding cannot close. Two faces can share a span of space without
+    ///       sharing an edge: one spans it with a single edge while its neighbour, cut by something the
+    ///       first never saw, spans it with two. Every vertex is welded, every position agrees, and the
+    ///       edge ledger still reports three one-sided edges. The only repair is to give the longer edge
+    ///       the vertex it is missing, which is what this does.
+    /// note  ⚠️ Run once after the mesh is complete and before any audit. Faces added afterwards can
+    ///       reintroduce junctions, and nothing re-checks.
+    /// tag   api, allocating, nonthrowing
+    uint32_t RepairJunctions() noexcept;
+
+        /// 📦 Measures watertightness over the position topology.
     /// out   TyreMeshMetrics  [-]  counts; zero cracks means every interior edge has exactly two triangles
     /// cost  🚩
     /// note  Builds an edge ledger over the index buffer each call. Linear in triangles, not cached, because
@@ -122,6 +154,7 @@ private:
     std::vector<TyreCornerRecord>                   Corners;
     std::vector<uint32_t>                           Indices;
     std::unordered_map<uint64_t, std::vector<uint32_t>> CellIndex;   // quantised cell → candidate positions
+    uint32_t                                        QuadTally = 0u;
 };
 
 }   // namespace Frontier

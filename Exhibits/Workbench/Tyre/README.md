@@ -123,3 +123,49 @@ is then narrower than a weld and collapses to nothing when the mesh stage welds 
 are one choice, not two. Raising the resolution from the prototype's 0.01 mm to 0.001 mm dropped measured
 overlap from 24 mm² to 2.49, which is what confirmed the residue was resolution noise and not a real
 double-covering.
+
+## ④ The mesh stage — quad-dominant, and not yet closed
+
+🚧 **This gate fails on purpose.** The tread builds, but it is not watertight, and the proof asserts the
+real acceptance criterion rather than reporting numbers and passing.
+
+| Measure              | Now     | Required |
+|----------------------|---------|----------|
+| floor quads          | 15 081  | —        |
+| wall quads           | 15 840  | —        |
+| floor triangles      | 48 798  | —        |
+| quad fraction        | 38.8 %  | —        |
+| T-junctions repaired | 7 612   | —        |
+| boundary edges       | 17 143  | 1 206    |
+| non-manifold         | 5 185   | 0        |
+
+The structure is right and three parts of it are settled.
+
+- **Groove walls are pure quads.** Extruding one outline edge gives exactly one quad, so the 15 840 wall
+  faces needed no triangulation at all.
+- **Only a piece's outer contours raise walls.** A hole in a piece is the outline of a deeper piece
+  sitting inside it, and that deeper piece raises the same wall from its own outer contour. Extruding
+  both gave one outline two walls and three faces on one edge.
+- **Walls are extruded from grid-subdivided outlines.** The floors are produced by clipping against the
+  grid, so their boundary already carries a vertex at every grid crossing; a wall from the raw contour
+  spans those in one edge and leaves a T-junction at each. Fixing this alone moved wall quads from
+  3 912 to 15 840 and boundary edges from 36 860 to 23 755.
+
+### What is still open, and why
+
+Boundary edges were classified by position rather than guessed at. Of 24 085 before the repair pass,
+1 206 are the legitimate rim openings and **4 205 + 3 737 sit on the crown floor itself** — not on walls.
+That is the quad grid's own T-junction: a whole-cell quad carries two vertices on a shared grid line
+while the cut cell beside it carries three, because a groove outline crosses there.
+
+`TyreMeshStructure::RepairJunctions` was written for exactly this and finds 7 612 of them, taking
+boundary edges to 17 143. It is not sufficient, and the non-manifold count rising as it runs says the
+repair is now fighting the cause rather than removing it.
+
+💡 The cause is that **each cell is clipped independently**. Two cells sharing a grid line are two
+separate boolean problems that happen to agree, which is the same mistake the browser prototype made one
+level up — it triangulated each floor piece independently and relied on the pieces agreeing. The fix is
+structural, not another repair: per floor piece, emit whole interior cells as quads, then take the
+**entire remaining boundary band as one region** — the piece minus the union of those whole cells — and
+triangulate it once. One triangulation cannot disagree with itself, and the band's inner boundary is by
+construction the outline of the quad cells it meets.
