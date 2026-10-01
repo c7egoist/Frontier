@@ -51,7 +51,7 @@ SOURCES = [
     "Engine/DeviceExchange/InputExchange.cpp", "Engine/GeometricRaster/StarCatalogueIndex.cpp",
     "Engine/GeometricRaster/CameraProjection.cpp", "Engine/DeviceExchange/OrientationClassifier.cpp",
     # the viewport's scene + camera, so the sheet's viewport is the engine's own trace
-    "Projects/Project-Zero/Source/RayTracingSolver.cpp", "Projects/Project-Zero/Source/FlyThroughSolver.cpp",
+    "Engine/Host/RayTracingSolver.cpp", "Engine/Host/FlyThroughSolver.cpp",
     # the patched vendor the application ships
     "ExternalPackages/imgui/imgui.cpp", "ExternalPackages/imgui/imgui_draw.cpp",
     "ExternalPackages/imgui/imgui_tables.cpp", "ExternalPackages/imgui/imgui_widgets.cpp",

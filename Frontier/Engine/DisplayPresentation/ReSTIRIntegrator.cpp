@@ -28,7 +28,7 @@ ReSTIRIntegrator::ReSTIRIntegrator(ReSTIRIntegratorConfiguration InitialConfigur
 //                                                OBSERVE CAMERA
 //============================================================================================================================================
 
-void ReSTIRIntegrator::ObserveCamera(const ProjectZero::FlyThroughSolver& Camera,
+void ReSTIRIntegrator::ObserveCamera(const HostRuntime::FlyThroughSolver& Camera,
                                      uint32_t ViewportWidth, uint32_t ViewportHeight) noexcept
 {
     const Vector3& Origin  = Camera.QuerySpatialLocation();
@@ -59,7 +59,7 @@ void ReSTIRIntegrator::ObserveCamera(const ProjectZero::FlyThroughSolver& Camera
 //============================================================================================================================================
 
 DispatchConfiguration ReSTIRIntegrator::BuildDispatch(
-    const ProjectZero::FlyThroughSolver& Camera,
+    const HostRuntime::FlyThroughSolver& Camera,
     uint32_t                             ViewportWidth,
     uint32_t                             ViewportHeight,
     uint32_t                             AlphaMaskedMaterialCount,
@@ -146,7 +146,7 @@ DispatchConfiguration ReSTIRIntegrator::BuildDispatch(
 //                                               SCENE RECORD BUILDERS
 //============================================================================================================================================
 
-uint32_t ReSTIRIntegrator::CountLuminaireTriangles(const ProjectZero::RayTracingSolver& Scene) noexcept
+uint32_t ReSTIRIntegrator::CountLuminaireTriangles(const HostRuntime::RayTracingSolver& Scene) noexcept
 {
     const auto& Triangles = Scene.QueryTriangles();
     const auto& Materials = Scene.QueryMaterials();
@@ -167,7 +167,7 @@ uint32_t ReSTIRIntegrator::CountLuminaireTriangles(const ProjectZero::RayTracing
 }
 
 std::vector<TriangleIndex> ReSTIRIntegrator::BuildTriangleIndex(
-    const ProjectZero::RayTracingSolver& Scene) noexcept
+    const HostRuntime::RayTracingSolver& Scene) noexcept
 {
     const auto& Triangles = Scene.QueryTriangles();
 
@@ -194,7 +194,7 @@ std::vector<TriangleIndex> ReSTIRIntegrator::BuildTriangleIndex(
 }
 
 std::vector<MaterialDescriptor> ReSTIRIntegrator::BuildMaterialDescriptors(
-    const ProjectZero::RayTracingSolver& Scene) noexcept
+    const HostRuntime::RayTracingSolver& Scene) noexcept
 {
     const auto& Materials = Scene.QueryMaterials();
 

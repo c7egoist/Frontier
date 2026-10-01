@@ -417,7 +417,7 @@ int main(int argc,char**argv){
     // The engine's own celestial solver supplies the sun, exactly as DriveSceneMirror gives it to the raster,
     //    so the three render modes cannot be lit by three different suns.
     {
-        Frontier::ProjectZero::CelestialSequence Sky;
+        Frontier::HostRuntime::CelestialSequence Sky;
         Sky.Prepare();
         Sky.Observation.LocalHours = sunHour;
         Sky.Prepare();

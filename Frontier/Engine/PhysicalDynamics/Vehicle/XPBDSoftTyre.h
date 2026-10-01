@@ -265,6 +265,7 @@ struct SoftTyreResidual
     float DiagonalMax = 0.0f,DiagonalRms = 0.0f;   // diagonal shear
     float ContactMax = 0.0f;                       // deepest remaining penetration
     float RimMax = 0.0f;                           // deepest remaining rim-flange interference
+    float RimArrival = 0.0f;                       // deepest interference the projection was HANDED this step
 };
 
 // Aggregate ground-on-tyre reaction over the last Step (the force the tyre transmits to the car).

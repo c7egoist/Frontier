@@ -11,8 +11,8 @@
 
 #include "ReSTIRIntegrator.h"
 #include "../Editor/EditorHost.h"
-#include "../../Projects/Project-Zero/Source/FlyThroughSolver.h"
-#include "../../Projects/Project-Zero/Source/RayTracingSolver.h"
+#include "../Host/FlyThroughSolver.h"
+#include "../Host/RayTracingSolver.h"
 #include <cstdint>
 #include <functional>
 
@@ -41,8 +41,8 @@ public:
     using OverlayHook = std::function<void()>;
 
     void Present(ReSTIRIntegrator&                       Integrator,
-                 const ProjectZero::FlyThroughSolver&    Camera,
-                 const ProjectZero::RayTracingSolver&    Scene,
+                 const HostRuntime::FlyThroughSolver&    Camera,
+                 const HostRuntime::RayTracingSolver&    Scene,
                  uint32_t                                ViewportWidth,
                  uint32_t                                ViewportHeight,
                  EditorInstance*                           Instances,
@@ -129,9 +129,9 @@ private:
     EditorHost Editor_;
 #endif
 
-    void SectionCamera  (const ProjectZero::FlyThroughSolver& Camera) noexcept;
+    void SectionCamera  (const HostRuntime::FlyThroughSolver& Camera) noexcept;
     void SectionReSTIR  (ReSTIRIntegrator& Integrator, uint32_t ViewportWidth, uint32_t ViewportHeight) noexcept;
-    void SectionScene   (const ProjectZero::RayTracingSolver& Scene) noexcept;
+    void SectionScene   (const HostRuntime::RayTracingSolver& Scene) noexcept;
 };
 
 template<>

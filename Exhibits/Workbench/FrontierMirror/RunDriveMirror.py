@@ -56,11 +56,11 @@ ENGINE_SOURCES = [
     "Engine/DisplayPresentation/CelestialSolver.cpp", "Engine/DeviceExchange/OrientationClassifier.cpp",
     # VisibilityRaster now evaluates the engine's own OpenPBR lobe set, which indexes the energy/sheen LUTs.
     "Engine/DisplayPresentation/ShadingTableCodec.cpp",
-    "Projects/Project-Zero/Source/CelestialSequence.cpp",
+    "Engine/Host/CelestialSequence.cpp",
     "Projects/Project-Drive/Source/DriveSceneAuthor.cpp", "Projects/Project-Drive/Source/ChaseCameraSolver.cpp",
 ]
 INCLUDES = [".", "Engine", "Engine/GeometricRaster", "Engine/ContentInterchange", "Engine/DeviceExchange",
-            "Engine/DisplayPresentation", "Engine/Shaders", VEHICLE, "Projects/Project-Zero/Source",
+            "Engine/DisplayPresentation", "Engine/Shaders", VEHICLE, "Engine/Host", "Projects/Project-Zero/Source",
             "Projects/Project-Drive/Source", "ExternalPackages/stb", "ExternalPackages/vulkan-headers/include"]
 
 # Each entry is one published GIF: the flags handed to the mirror, and the caption the README carries.
@@ -77,6 +77,15 @@ SEQUENCES = [
      "The front-left tyre for the whole run, close enough to read the carcass. The surface is rebuilt every frame "
      "from XPBDSoftTyre's own particle lattice, so the contact patch flattening, the shoulders bulging and the "
      "shiver over the bumps are the deformation the solver resolved \u2014 not a cylinder being squashed for the camera."),
+    ("ProjectDriveXPBDRimCollapse", ["--camera", "wheel", "--wheel", "0", "--seconds", "12",
+                                     "--orbit-period", "9", "--orbit-radius", "2.5", "--orbit-height", "1.05",
+                                     "--rim-stop", "0"],
+     "The defeated control for the sequence above: the identical run with the rim-bottoming constraint switched "
+     "off at the command line, so the only difference between the two GIFs is the constraint under test. The "
+     "sidewall is tension-only, so with nothing to stop it the belt keeps going once it runs out of sidewall and "
+     "the tread ends up 17.5 mm INSIDE the rim it is mounted on \u2014 the carcass occupying the wheel. With the "
+     "constraint on, the same landing stops at the flange with 0.72 mm left, which is the constraint's own "
+     "compliance answering the load rather than the tread passing through steel."),
     ("ProjectDriveMaterialTurntable", ["--camera", "orbit", "--freeze", "3.0", "--seconds", "9",
                                        "--orbit-period", "6", "--orbit-radius", "6.5", "--orbit-height", "2.4"],
      "The car held at the pose the solver produced three seconds into the run, circled once, to show the "
@@ -181,7 +190,10 @@ def main() -> int:
         rendered = Checkout.run(command, cwd=SEAT, quiet=True)
         commands.append([mirror.name, *command[1:]])
         sequence_notes[name] = caption
-        results[name] = [line for line in rendered.stdout.splitlines() if "run:" in line or "camera" in line]
+        # "flange:" is carried too: it is the line that says how close the tread came to the rim it is
+        #    mounted on, which is the whole point of the rim-bottoming pair below.
+        results[name] = [line for line in rendered.stdout.splitlines()
+                         if "run:" in line or "camera" in line or "flange:" in line]
 
         target = GALLERY / f"{name}_CPU_Reference.gif"
         assemble_gif(frames, target, fps)

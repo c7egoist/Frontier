@@ -79,7 +79,7 @@ public:
 
     // Construct the DispatchConfiguration from live camera state and scene counts
     [[nodiscard]] DispatchConfiguration
-    BuildDispatch(const ProjectZero::FlyThroughSolver& Camera,
+    BuildDispatch(const HostRuntime::FlyThroughSolver& Camera,
                   uint32_t                             ViewportWidth,
                   uint32_t                             ViewportHeight,
                   uint32_t                             AlphaMaskedMaterialCount,   // R4b: materials flagged MaterialFlagAlphaMask
@@ -87,14 +87,14 @@ public:
 
     // Count emissive triangles in the scene (used to set LuminaireTriangleCount each frame)
     [[nodiscard]] static uint32_t
-    CountLuminaireTriangles(const ProjectZero::RayTracingSolver& Scene) noexcept;
+    CountLuminaireTriangles(const HostRuntime::RayTracingSolver& Scene) noexcept;
 
     // Build GPU triangle and material records from the CPU scene
     [[nodiscard]] static std::vector<TriangleIndex>
-    BuildTriangleIndex(const ProjectZero::RayTracingSolver& Scene) noexcept;
+    BuildTriangleIndex(const HostRuntime::RayTracingSolver& Scene) noexcept;
 
     [[nodiscard]] static std::vector<MaterialDescriptor>
-    BuildMaterialDescriptors(const ProjectZero::RayTracingSolver& Scene) noexcept;
+    BuildMaterialDescriptors(const HostRuntime::RayTracingSolver& Scene) noexcept;
 
     // Mutable configuration — updated live by RenderScheduler
     // Any parameter change invalidates the temporal history; the accumulation restarts at index 0.
@@ -186,7 +186,7 @@ public:
 
     // Compares the camera pose against the one used for the running history; a moved or turned camera
     //    (or a resized viewport) restarts accumulation so no stale radiance is blended in.
-    void ObserveCamera(const ProjectZero::FlyThroughSolver& Camera, uint32_t ViewportWidth, uint32_t ViewportHeight) noexcept;
+    void ObserveCamera(const HostRuntime::FlyThroughSolver& Camera, uint32_t ViewportWidth, uint32_t ViewportHeight) noexcept;
 
     // D6/D7 — how many top-level instances the resident two-level structure carries. The integrator never holds the
     //    structure itself (DisplayPresentation sits above DeviceExchange and below the project), so the project assigns

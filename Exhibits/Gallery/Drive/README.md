@@ -15,7 +15,7 @@ python3 Exhibits/Workbench/FrontierMirror/RunDriveMirror.py --width 480 --height
 | Level | `Projects/Project-Drive/Source/DriveSceneAuthor` | the app's own course, `ControlVehicleMesh` shell, four wheels and twelve authored materials, in the app's own span order |
 | Physics | `Engine/PhysicalDynamics/Vehicle/VehicleSolver` | PacejkaDrivetrain, XPBD soft tyres, closed-loop `Aerodynamics`, 240 Hz fixed step |
 | Camera | `Projects/Project-Drive/Source/ChaseCameraSolver` | the app's own spring chase camera |
-| Sky | `Projects/Project-Zero/Source/CelestialSequence` | the real sun / sky / atmosphere / star / moon model at local hour 13.0 |
+| Sky | `Engine/Host/CelestialSequence` | the real sun / sky / atmosphere / star / moon model at local hour 13.0 |
 | Raster | `Engine/GeometricRaster/VisibilityRaster` | the shipped raytracing-off, global-illumination-off render path |
 
 The body and all four wheels are re-registered every frame from the solver's own pose telemetry, so the car in a
@@ -29,6 +29,47 @@ sequence is wherever the physics put it. The sequences **are** the run, not an a
 | `ProjectDriveTracksideRun_CPU_Reference.gif` | The same run from a fixed post beside the course, past the cones and the ramp. |
 | `ProjectDriveOrbitWhileDriving_CPU_Reference.gif` | The same run with the eye circling the moving car — the body, wheels and course from every azimuth at speed. |
 | `ProjectDriveMaterialTurntable_CPU_Reference.gif` | The car held at the pose the solver produced three seconds in, circled once. |
+
+## The tyre, and the rim it is mounted on
+
+The sidewall of `XPBDSoftTyre` is tension-only: it holds the belt out against the gas, and carries nothing at
+all in compression. That is correct for a sidewall and wrong for a wheel, because a real tyre runs out of
+sidewall and then sits on the rim flange, and from that point the rate is effectively vertical. Without that
+limit the belt simply keeps going once the sidewall is spent, and the tread ends up inside the wheel it is
+mounted on.
+
+`RimBottoming` is the unilateral constraint that supplies the limit, projected last in each sweep so it is the
+final word on where the tread may be. The pair below is the evidence, and it is a controlled pair: same course,
+same scripted inputs, same seed, the constraint toggled from the command line with `--rim-stop` and nothing
+else. Both runs reach 36.5 m/s and finish within 0.3 m of each other, so the difference in the tread is the
+constraint and not a different lap.
+
+| Artefact | What it shows |
+|---|---|
+| `ProjectDriveXPBDTyreDeformation_CPU_Reference.gif` | The front-left tyre for the whole run, close enough to read the carcass, with the flange constraint on. The surface is rebuilt every frame from the solver's own particle lattice. |
+| `ProjectDriveXPBDRimCollapse_CPU_Reference.gif` | The defeated control: the identical run with `--rim-stop 0`. |
+| `ProjectDriveXPBDLatticeDebug_CPU_Reference.gif` | The same carcass drawn as the lattice itself rather than a skin, so the nodes and the contact patch are visible directly. |
+
+The numbers come from the mirror's own `flange:` line, which is in `Provenance.json` for both runs. The tyre is
+a 508.6 mm tread radius on a 344.6 mm rim, so there is 149.0 mm of sidewall between the two once the 15 mm of
+tread and carcass thickness is allowed for:
+
+| Run | Closest the tread came to the axis | Against the 359.6 mm flange | Sidewall used |
+|---|---|---|---|
+| `--rim-stop 1` (shipped) | 358.9 mm | 0.72 mm short of it | 100% |
+| `--rim-stop 0` (defeated) | 342.1 mm | 17.51 mm **through** it | 112% |
+
+Two things are worth reading off that table rather than inferring. The shipped run uses 100% of the sidewall
+and no more: the scripted ramp landing is hard enough to put the tread on the flange, which is why this course
+can prove the constraint at all. And the 0.72 mm is not leakage — it is the constraint's own compliance
+answering the load, which is what a soft constraint does. The mirror gates on it (`intrusion < 2 mm`), so a
+regression that removed or weakened the limit fails the proof instead of quietly shipping.
+
+The `flange:` line also separates ARRIVAL from RESIDUAL — how deep a node already was when the projection first
+saw it, against what was still unresolved afterwards. On this run that is 13.6 mm arriving and 0.72 mm left,
+i.e. the projection resolves ~95% of a breach per sweep. Keeping the two apart is what distinguishes a
+constraint that is under-converging from one that is never handed the problem, and it is cheaper than another
+parameter sweep.
 
 ## Material angles
 
@@ -58,7 +99,6 @@ Nothing is modelled or smoothed; these are the numbers the solver wrote.
 | `ProjectDrivePhysicsTelemetry_CPU_Reference.csv` | 60 Hz samples of the 240 Hz run: pose, speed, powertrain, the six aero columns and per-wheel load / slip / steer / omega / brake temperature. |
 | `ProjectDrivePhysicsRun_CPU_Reference.txt` | Run summary: peak speed, airborne duration, suspension travel, final travel. |
 | `ProjectDrivePhysicsTiming_CPU_Reference.txt` | Fixed-step and real-time-factor timing. |
-| `ProjectDriveXPBDTyreDeformation_CPU_Reference.png` | Settled `XPBDSoftTyre` nodes, 5 rings × 64 segments, with the flattened contact patch and resolved load. |
 | `Provenance.json` | Engine repository and revision, every command, and a sha256 for every published file. |
 
 ## Execution boundary

@@ -590,6 +590,7 @@ int main(int ArgumentCount, char** ArgumentValues)
     float TyreMu = -1.0f;         // --tyre-mu <v>       : override Coulomb μ (bench)
     float TreadAlpha = -1.0f;     // --tread-alpha <v>   : override tread tangential compliance (bench)
     uint32_t TyreSubsteps = 0u;   // --tyre-substeps <n> : override XPBD substeps (bench)
+    int   RimStop = -1;           // --rim-stop 0|1      : override the rim-flange hard stop (bench, −1 = leave alone)
     bool  DebugLattice = false;   // --debug-lattice: draw the XPBD nodes themselves instead of the tyre skin
     float OrbitPeriod = 6.0f, OrbitRadius = 8.0f, OrbitHeight = 2.2f;
 
@@ -615,6 +616,7 @@ int main(int ArgumentCount, char** ArgumentValues)
         else if (A == "--tyre-mu")      TyreMu      = static_cast<float>(std::atof(Next("--tyre-mu")));
         else if (A == "--tread-alpha")  TreadAlpha  = static_cast<float>(std::atof(Next("--tread-alpha")));
         else if (A == "--tyre-substeps") TyreSubsteps = static_cast<uint32_t>(std::atoi(Next("--tyre-substeps")));
+        else if (A == "--rim-stop")     RimStop     = std::atoi(Next("--rim-stop"));
         else if (A == "--debug-lattice") { DebugLattice = true; g_DebugLattice = true; }
         else if (A == "--orbit-period") OrbitPeriod = static_cast<float>(std::atof(Next("--orbit-period")));
         else if (A == "--orbit-radius") OrbitRadius = static_cast<float>(std::atof(Next("--orbit-radius")));
@@ -651,6 +653,13 @@ int main(int ArgumentCount, char** ArgumentValues)
     if (TyreMu >= 0.0f)        Configuration.Tyre.FrictionCoefficient = TyreMu;
     if (TreadAlpha > 0.0f)     Configuration.Tyre.TreadTangentialCompliance = TreadAlpha;
     if (TyreSubsteps > 0u)     Configuration.TyreSubsteps = TyreSubsteps;
+    if (RimStop >= 0)          Configuration.Tyre.RimBottoming = (RimStop != 0);
+
+    // The flange the tread may not pass through, stated once so the report and the gate cannot drift apart.
+    //    Below this radius the carcass would be occupying the wheel it is mounted on, which is the collapse the
+    //    rim-bottoming constraint exists to stop. `--rim-stop 0` removes it so the A/B can be rendered.
+    const float FlangeRadius = Configuration.Tyre.RimRadius + Configuration.Tyre.RimBottomingClearance;
+    const float SidewallTravel = Configuration.Tyre.Radius - FlangeRadius;
 
     MockChassis Chassis;
     // Resting CoM height from the geometry, never a literal — see DriveTelemetry.cpp for what a stale one costs.
@@ -676,12 +685,12 @@ int main(int ArgumentCount, char** ArgumentValues)
     Solver.Build(Configuration, Hooks, Chassis.State());
 
     // 3 ── the real sky and the shipped raster
-    auto Sky = std::make_unique<Frontier::ProjectZero::CelestialSequence>();
+    auto Sky = std::make_unique<Frontier::HostRuntime::CelestialSequence>();
     Sky->Prepare();
     Sky->Observation.LocalHours = SunHour;
-    for (auto Entity : { Frontier::ProjectZero::CelestialEntity::Atmosphere, Frontier::ProjectZero::CelestialEntity::Sun,
-                         Frontier::ProjectZero::CelestialEntity::Sky,        Frontier::ProjectZero::CelestialEntity::Stars,
-                         Frontier::ProjectZero::CelestialEntity::Moons })
+    for (auto Entity : { Frontier::HostRuntime::CelestialEntity::Atmosphere, Frontier::HostRuntime::CelestialEntity::Sun,
+                         Frontier::HostRuntime::CelestialEntity::Sky,        Frontier::HostRuntime::CelestialEntity::Stars,
+                         Frontier::HostRuntime::CelestialEntity::Moons })
         Sky->Shown[static_cast<uint32_t>(Entity)] = true;
     Frontier::CelestialBudget Budget;
     Budget.AtmosphereSamples = 16u;
@@ -719,6 +728,9 @@ int main(int ArgumentCount, char** ArgumentValues)
     uint32_t OnBumpStop = 0u, StrutSamples = 0u;
     uint32_t PeakContactNodes = 0u;
     unsigned NonBlack = 0u;
+    float MinTreadRadius = 1.0e9f;   // [m] closest any tread node came to the hub axis over the whole run
+    float WorstRimResidual = 0.0f;   // [m] deepest rim interference the solver still had left at end of step
+    float WorstRimArrival  = 0.0f;   // [m] deepest rim interference the projection was handed to begin with
 
     // ── the carcass log ─────────────────────────────────────────────────────────────────────────────────────
     std::FILE* TyreLogFile = nullptr;
@@ -759,6 +771,25 @@ int main(int ArgumentCount, char** ArgumentValues)
         //    for, and duly reported 0 N.
         for (uint32_t W = 0; W < 4u; ++W)
             PeakKerbLateral = std::max(PeakKerbLateral, -Solver.Tyres()[W].Reaction().Force.y);
+
+        //-------------------------------------------------------------------------------------------- the flange
+        // How close the tread came to the wheel it is mounted on, sampled at the SOLVER rate. The carcass
+        //    measurement further down runs on the frame cadence, which is 24 steps apart at 10 fps -- a landing
+        //    loads and releases the sidewall inside that window, so a frame-rate sample can miss the entire
+        //    impact and report a tyre that never squashed. The one number that decides whether the hard stop
+        //    works cannot be read from a sample that coarse.
+        for (uint32_t W = 0; W < Telemetry.WheelCount && W < 4u; ++W)
+        {
+            const auto& WT = Telemetry.Wheels[W];
+            const Quat Inverse{ -WT.HubRotation.x, -WT.HubRotation.y, -WT.HubRotation.z, WT.HubRotation.w };
+            for (const auto& Node : Solver.Tyres()[W].Nodes())
+            {
+                const Vec3 Local = Inverse.Rotate(Node.Position - WT.HubPosition);
+                MinTreadRadius = std::min(MinTreadRadius, std::sqrt(Local.x * Local.x + Local.z * Local.z));
+            }
+            WorstRimResidual = std::max(WorstRimResidual, Solver.Tyres()[W].Residual().RimMax);
+            WorstRimArrival  = std::max(WorstRimArrival,  Solver.Tyres()[W].Residual().RimArrival);
+        }
 
         // ── XPBD carcass log ────────────────────────────────────────────────────────────────────────────────
         if (TyreLogFile != nullptr)
@@ -967,6 +998,33 @@ int main(int ArgumentCount, char** ArgumentValues)
     Check(BumpFraction < 0.25f, "the struts are springing, not riding their bump stops");
     Check(PeakDeflection < 0.5f * Configuration.Tyre.Radius, "the squash stayed physical (under half the tread radius)");
     Check(PeakContactNodes > 0u, "tread nodes reached the ground and formed a contact patch");
+
+    //------------------------------------------------------------------------------------------- the flange gate
+    // A soft tyre with no rim is not a tyre, it is a bag. The sidewall has a finite amount of travel in it and
+    //    then the tread is resting on the wheel, and every impact past that point is steel through rubber, not
+    //    more sidewall. This reports how much of that travel the run actually used and refuses to pass a run
+    //    that spent it -- which is exactly what an unconstrained carcass does on a hard landing.
+    const float SidewallUsed = Configuration.Tyre.Radius - MinTreadRadius;
+    const float Intrusion    = std::max(0.0f, FlangeRadius - MinTreadRadius);
+    std::printf("[drive-scene] flange: tread closed to %.1f mm of a %.1f mm flange (%.1f of %.1f mm sidewall, "
+                "%.0f%%); intrusion %.2f mm, arrival %.2f mm -> unresolved %.3f mm, rim stop %s\n",
+                static_cast<double>(MinTreadRadius) * 1000.0, static_cast<double>(FlangeRadius) * 1000.0,
+                static_cast<double>(SidewallUsed) * 1000.0, static_cast<double>(SidewallTravel) * 1000.0,
+                100.0 * static_cast<double>(SidewallUsed) / static_cast<double>(SidewallTravel),
+                static_cast<double>(Intrusion) * 1000.0, static_cast<double>(WorstRimArrival) * 1000.0,
+                static_cast<double>(WorstRimResidual) * 1000.0,
+                Configuration.Tyre.RimBottoming ? "on" : "OFF");
+    // Keyed on what the OPERATOR asked for, not on what the parameter happens to say. Gating on
+    //    `Tyre.RimBottoming` instead would mean a regression that flipped the default to false deleted the gate
+    //    along with the constraint, and the proof would go quiet at exactly the moment it was needed. Only an
+    //    explicit `--rim-stop 0` -- the published defeated control, which is SUPPOSED to collapse -- is excused.
+    if (RimStop != 0)
+    {
+        // 2 mm of give is the constraint's own compliance answering a load, not a failure: it is a soft
+        //    constraint by construction, so a hard enough hit always shows a little. Passing THROUGH the flange
+        //    is the thing being excluded.
+        Check(Intrusion < 0.002f, "the tread never passed through the rim flange (hard stop held)");
+    }
     Check(NonBlack == Written, "every frame carries light");
 
     // The motion gates below only mean anything for a driven sequence.  A still sheet freezes the sim on the

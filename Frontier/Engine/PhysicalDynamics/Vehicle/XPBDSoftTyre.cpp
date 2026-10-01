@@ -197,6 +197,7 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const HubMotion& motion,
     const float invH2 = 1.0f / h2;
 
     const uint32_t iterations = std::max<uint32_t>(1u, Parameters.SolverIterations);
+    float RimArrivalAccum = 0.0f;   // [m] deepest flange interference handed to the projection this step
     const Quat hubRot    = motion.Orientation;
     const Vec3 axisWorld = hubRot.Rotate({0, 1, 0}).Normalized();   // spin axis in world
 
@@ -476,6 +477,10 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const HubMotion& motion,
                     const float rLen    = radial.Length();
                     if (rLen < 1e-6f) continue;
                     const float C = rLen - rimLimit;
+                    // How deep the node already was when the flange first saw it this sweep. Separating
+                    //    ARRIVAL from RESIDUAL is the only way to tell an under-converged projection
+                    //    (big arrival, big residual) from one that is never handed the problem at all.
+                    if (-C > RimArrivalAccum) RimArrivalAccum = -C;
                     if (C >= 0.0f) { node.RimLambda = 0.0f; continue; }   // clear of the flange: carries nothing
                     const Vec3 dir = radial * (1.0f / rLen);
 
@@ -555,6 +560,7 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const HubMotion& motion,
     // Taken after the final substep, so this is the error the frame actually ships, not a mid-solve snapshot.
     {
         ConstraintResidual = SoftTyreResidual{};
+        ConstraintResidual.RimArrival = RimArrivalAccum;
         const Vec3 axisNow = hubRot.Rotate({0, 1, 0}).Normalized();
         const float spokeRest = Parameters.Radius - Parameters.RimRadius;
 

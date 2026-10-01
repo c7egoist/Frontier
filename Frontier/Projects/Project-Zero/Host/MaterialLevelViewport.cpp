@@ -1896,7 +1896,7 @@ float TotalLightPower()
 //    way any authored emitter is. ObjectId is the span ordinal the proxy's triangles report as their instance.
 bool BuildInterfacePanel(uint16_t ObjectId)
 {
-    using Frontier::ProjectZero::InterfaceTrialSequence;
+    using Frontier::HostRuntime::InterfaceTrialSequence;
 
     // ── The panel, composed by the engine's own pipeline ────────────────────────────────────────────────────────
     // Placement is the berth ShowcaseStructure authors: upright (local +Y onto world +Z), face along −Y toward the

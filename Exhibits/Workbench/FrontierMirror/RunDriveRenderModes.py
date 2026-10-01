@@ -74,7 +74,7 @@ MLV_SOURCES = [
     "Engine/SpatialInterface/InterfacePointerProjection.cpp",
     "Engine/SpatialInterface/PaletteConfiguration.cpp",
     "Engine/DisplayPresentation/MotionIntegrator.cpp",
-    "Projects/Project-Zero/Source/InterfaceTrialSequence.cpp",
+    "Engine/Host/InterfaceTrialSequence.cpp",
     "Projects/Project-Zero/Source/SkyFogIntegrator.cpp",
     # ...plus the Drive level and what it drags in.  DriveSceneAuthor resolves its geometry through
     # VehicleGeometry, which neither stock level needs.
@@ -82,7 +82,7 @@ MLV_SOURCES = [
     "Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp",
     # the engine's own celestial solver: the surfel path takes the SAME sun the raster is given
     "Engine/DisplayPresentation/CelestialSolver.cpp",
-    "Projects/Project-Zero/Source/CelestialSequence.cpp",
+    "Engine/Host/CelestialSequence.cpp",
     "Engine/GeometricRaster/StarCatalogueIndex.cpp",
     "Engine/ContentInterchange/AssetResolution.cpp",
     "Engine/ContentInterchange/SpaceCodec.cpp",
@@ -110,7 +110,7 @@ SURFEL_SOURCES = [
 MLV_INCLUDES = [
     "Engine",   # UnifiedMaterialEvaluation.h is included as ContentInterchange/... by every render path
 
-    HOST, "Projects/Project-Zero/Shaders", "Projects/Project-Zero/Source", "Engine/Shaders",
+    HOST, "Projects/Project-Zero/Shaders", "Engine/Host", "Projects/Project-Zero/Source", "Engine/Shaders",
     "Engine/DisplayPresentation", "Engine/ContentInterchange", "Engine/DeviceExchange",
     "Engine/GeometricRaster", "Exhibits/Workbench/Materials", "Exhibits/Workbench/Editor",
     "Projects/Project-Drive/Source", "Engine/PhysicalDynamics/Vehicle",

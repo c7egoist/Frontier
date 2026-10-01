@@ -104,44 +104,39 @@ g++ -std=c++20 -O2 -w -pthread -o ImpactProof \
     Frontier/Engine/PhysicalDynamics/Vehicle/XPBDSoftTyre.cpp
 ```
 
-## The ramp jump
+## On the real vehicle
 
-`VisualProof/XPBDTyreImpact/XPBDTyreRampRender.cpp` drives the production stack — `VehicleSolver` with the
-Pacejka driving layer, four XPBD soft tyres and a 1500 kg chassis — up a 1.45 m ramp at 97 km/h, off the lip,
-and down onto the flat. The hubs are welded to the body (`SuspensionEnabled = false`) so the tyre carries the
-whole landing with no strut to hide the impact behind. It writes one BMP per rendered step; the GIF is
-assembled from those.
+The harness above is a single tyre on a rig. The constraint is also proven on the whole car, in the gallery
+that Project-Drive already publishes, because a rig cannot show that the limit is reached by a vehicle
+actually driving a course rather than by a number chosen to reach it.
 
-The car reaches 3.17 m, is airborne for about 1.7 s and lands at roughly 7 m/s vertical:
+`Exhibits/Gallery/Drive/` carries a controlled pair of GIFs of the real front-left tyre — same course, same
+scripted inputs, the constraint toggled with `--rim-stop` and nothing else:
 
-| Measure                  | Disabled | Enabled  |
-| ------------------------ | -------- | -------- |
-| Peak sag on landing      | 301.3 mm | 128.9 mm |
-| Worst incursion past rim | 176.3 mm | 3.9 mm   |
+| Run | Closest the tread came to the axis | Against the 359.6 mm flange | Sidewall used |
+|---|---|---|---|
+| `ProjectDriveXPBDTyreDeformation_CPU_Reference.gif` (shipped) | 358.9 mm | 0.72 mm short of it | 100% |
+| `ProjectDriveXPBDRimCollapse_CPU_Reference.gif` (defeated) | 342.1 mm | 17.51 mm **through** it | 112% |
 
-Without the constraint the belt ends up 176 mm inside a 200 mm rim — very nearly at the wheel centre, the
-carcass completely inverted. With it the tyre pancakes onto the flange at 129 mm and rolls away.
+The scripted ramp landing spends exactly the sidewall the tyre has and then meets the flange, so the course
+proves the constraint without anything being staged for it. `DriveSceneMirror` gates on the intrusion, so a
+regression fails the gallery build. Rebuild both with:
 
-```text
-VisualProof/XPBDTyreImpact/XPBDTyreRampLanding.gif    the landing, with the fix
-VisualProof/XPBDTyreImpact/XPBDTyreRampRender.cpp     the harness that produces the frames
+```bash
+python3 Exhibits/Workbench/FrontierMirror/RunDriveMirror.py --width 480 --height 270 --fps 10
 ```
 
-Two things worth recording about the harness, because both cost time:
+## Landing energy beyond the course
 
-- The chassis is integrated in the harness itself, and 60 Hz explicit integration does not survive against a
-  tyre this stiff — the car gained energy on every contact and launched itself off a flat road. The loop runs
-  at 240 Hz and emits every eighth step.
-- `Quat` is `{x, y, z, w}` with w LAST. Writing the quaternion integration as though w came first scrambles the
-  axes and flips the car 180 degrees on the spot, which presents as the tyres appearing in the wrong place.
+Driving the car off the ramp much faster than the scripted run does — a long run-up at 160 km/h — does not
+produce a better proof, and the measurement says why rather than leaving it as an impression. At that energy
+the flange projection is handed a node already 341.6 mm inside the rim in a single 0.52 ms substep, which is
+an arrival rate of roughly 650 m/s. Nothing travels that far in a substep by moving: the impact has already
+gone non-physical somewhere upstream of the tyre, and the carcass is being handed the wreckage.
 
-## A note on landing stability
-
-An earlier draft of this document suggested `VehicleSolver` might launch the car on landings, on the strength
-of a quarter-car rig that showed a coefficient of restitution of 1.3 to 1.6. That was wrong, and the rig was at
-fault rather than the vehicle.
-
-The tyre itself is dissipative at every rate tested — a quasi-static compress-and-release loop returns 0.81 to
-0.97 of the work put in. The rig bolted a sprung mass rigidly to the hub and exchanged force once per frame at
-60 Hz; refining only that timestep drives restitution to 0.95. The real solver puts a spring and damper strut
-between hub and chassis, which absorbs the landing, and the car is stable in practice.
+The projection behaves identically there — it resolves ~95% of the breach per sweep, exactly as it does on the
+scripted landing — so the 19 mm left over is 5% of an absurd arrival, not a weaker constraint. Raising substeps
+(8, 16, 32) or sweeps (1, 2, 4) scatters the result (19.9 / 43.7 / 31.2 mm and 19.1 / 42.9 / 10.3 mm) instead
+of reducing it, which is the signature of a chaotic trajectory being re-rolled rather than of a solve
+converging. That is a limit of the vehicle and contact model at that energy, not of rim bottoming, and it is
+recorded here so the next person does not spend the sweep again.
