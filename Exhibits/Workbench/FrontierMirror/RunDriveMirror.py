@@ -86,6 +86,27 @@ SEQUENCES = [
      "the tread ends up 17.5 mm INSIDE the rim it is mounted on \u2014 the carcass occupying the wheel. With the "
      "constraint on, the same landing stops at the flange with 0.72 mm left, which is the constraint's own "
      "compliance answering the load rather than the tread passing through steel."),
+    # 📝 The three below were published by hand in fc3728c and were never wired into this script, so the one
+    #    documented rebuild command did not touch them and they silently kept showing pre-fix behaviour while
+    #    everything around them was regenerated. An artefact with no generator is the same defect as a proof
+    #    that runs no engine code: it stops being evidence the moment the code moves underneath it.
+    ("ProjectDriveXPBDLatticeDebug", ["--camera", "wheel", "--wheel", "0", "--seconds", "12",
+                                      "--orbit-period", "9", "--orbit-radius", "2.5", "--orbit-height", "1.05",
+                                      "--debug-lattice", "--height", "300"],
+     "The same front-left tyre as the deformation sequence, drawn as the XPBD lattice itself rather than a "
+     "skin: every node the solver integrates, with the ones in ground contact picked out, so the contact "
+     "patch and the sidewall travel can be read directly off the particles."),
+    ("ProjectDriveKerbStrike", ["--camera", "wheel", "--wheel", "0", "--seconds", "12", "--scenario", "kerb",
+                                "--orbit-period", "9", "--orbit-radius", "2.5", "--orbit-height", "1.05"],
+     "The car leaned onto the kerb's vertical face until the tyre strikes it side-on. This is the hardest "
+     "case the course offers the carcass: the flange projection is handed a 46.7 mm breach, against 13.6 mm "
+     "for the ramp landing."),
+    ("ProjectDriveKerbStrike_LatticeDebug", ["--camera", "wheel", "--wheel", "0", "--seconds", "12",
+                                             "--scenario", "kerb", "--orbit-period", "9", "--orbit-radius", "2.5",
+                                             "--orbit-height", "1.05", "--debug-lattice", "--height", "300"],
+     "The kerb strike as the lattice, which is where the rim-bottoming constraint is easiest to see: without "
+     "it the tread folds 76.0 mm inside the rim it is mounted on, and with it the carcass stops on the "
+     "flange with 0.67 mm left."),
     ("ProjectDriveMaterialTurntable", ["--camera", "orbit", "--freeze", "3.0", "--seconds", "9",
                                        "--orbit-period", "6", "--orbit-radius", "6.5", "--orbit-height", "2.4"],
      "The car held at the pose the solver produced three seconds into the run, circled once, to show the "

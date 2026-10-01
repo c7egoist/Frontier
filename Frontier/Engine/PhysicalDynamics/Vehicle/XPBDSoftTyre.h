@@ -183,7 +183,18 @@ struct SoftTyreParameters
     bool     RimBottoming            = true;      // [-]   false restores the old unbounded collapse
     float    RimBottomingClearance   = 0.015f;    // [m]   tread + carcass thickness held off the flange
     float    RimBottomingCompliance  = 2.0e-8f;   // [m/N] rubber pinched on steel: stiffer than ground contact
-    float    RimBottomingDampingRatio = 1.00f;    // [-]   a pinch is strongly dissipative, not a spring
+    // 📝 Quarter-critical, and that number is measured rather than assumed. XPBD's damped solve carries γ in
+    //    the denominator (Δλ = (−C − α̃λ − γĊ)/((1+γ)w + α̃)), so the fraction of a breach a sweep can recover
+    //    is 1/(1+γ) — at ζ = 1.0 that is 95%, and ground contact re-drives the node every sweep, so the
+    //    leftover 5% never converges away however many sweeps are spent (measured: 2.40 → 1.73 → 1.63 mm for
+    //    1, 2, 3 sweeps, with the residual holding at ~5% of arrival throughout). On the kerb strike that left
+    //    the tread 2.40 mm inside the flange. Dropping ζ moves it in proportion — 1.28 mm at 0.5, 0.67 mm at
+    //    0.25, 0.29 mm at 0.1 — and the dissipation the high ratio was there to provide does not show up in
+    //    any measurement: peak Fz is 30.3 kN at every ratio, and the carcass ringing metric has no trend
+    //    (3218 / 3617 / 3859 / 3026 mm/s), with ζ = 1.0 actually the worst on off-patch spread. So the heavy
+    //    ratio was buying nothing and costing position accuracy. 0.25 keeps real damping and puts the kerb
+    //    strike (0.67 mm) on the same footing as the ramp landing (0.72 mm).
+    float    RimBottomingDampingRatio = 0.25f;    // [-]   a pinch dissipates, but not at the cost of holding
 
     // ── Rayleigh damping, as DAMPING RATIOS ─────────────────────────────────────────────────────────────────
     // XPBD §5. The elastic solve alone dissipates only what the implicit discretisation happens to lose, which

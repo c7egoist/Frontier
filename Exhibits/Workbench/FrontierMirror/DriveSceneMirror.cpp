@@ -591,6 +591,8 @@ int main(int ArgumentCount, char** ArgumentValues)
     float TreadAlpha = -1.0f;     // --tread-alpha <v>   : override tread tangential compliance (bench)
     uint32_t TyreSubsteps = 0u;   // --tyre-substeps <n> : override XPBD substeps (bench)
     int   RimStop = -1;           // --rim-stop 0|1      : override the rim-flange hard stop (bench, −1 = leave alone)
+    uint32_t TyreIterations = 0u; // --tyre-iterations <n> : override XPBD sweeps per substep (bench)
+    float RimDamping = -1.0f;     // --rim-damping <z>   : override the flange damping ratio (bench)
     bool  DebugLattice = false;   // --debug-lattice: draw the XPBD nodes themselves instead of the tyre skin
     float OrbitPeriod = 6.0f, OrbitRadius = 8.0f, OrbitHeight = 2.2f;
 
@@ -617,6 +619,8 @@ int main(int ArgumentCount, char** ArgumentValues)
         else if (A == "--tread-alpha")  TreadAlpha  = static_cast<float>(std::atof(Next("--tread-alpha")));
         else if (A == "--tyre-substeps") TyreSubsteps = static_cast<uint32_t>(std::atoi(Next("--tyre-substeps")));
         else if (A == "--rim-stop")     RimStop     = std::atoi(Next("--rim-stop"));
+        else if (A == "--tyre-iterations") TyreIterations = static_cast<uint32_t>(std::atoi(Next("--tyre-iterations")));
+        else if (A == "--rim-damping")  RimDamping  = static_cast<float>(std::atof(Next("--rim-damping")));
         else if (A == "--debug-lattice") { DebugLattice = true; g_DebugLattice = true; }
         else if (A == "--orbit-period") OrbitPeriod = static_cast<float>(std::atof(Next("--orbit-period")));
         else if (A == "--orbit-radius") OrbitRadius = static_cast<float>(std::atof(Next("--orbit-radius")));
@@ -654,6 +658,8 @@ int main(int ArgumentCount, char** ArgumentValues)
     if (TreadAlpha > 0.0f)     Configuration.Tyre.TreadTangentialCompliance = TreadAlpha;
     if (TyreSubsteps > 0u)     Configuration.TyreSubsteps = TyreSubsteps;
     if (RimStop >= 0)          Configuration.Tyre.RimBottoming = (RimStop != 0);
+    if (TyreIterations > 0u)   Configuration.Tyre.SolverIterations = TyreIterations;
+    if (RimDamping >= 0.0f)    Configuration.Tyre.RimBottomingDampingRatio = RimDamping;
 
     // The flange the tread may not pass through, stated once so the report and the gate cannot drift apart.
     //    Below this radius the carcass would be occupying the wheel it is mounted on, which is the collapse the
