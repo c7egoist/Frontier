@@ -249,7 +249,51 @@ struct Sh3 { V c[4]{{0,0,0},{0,0,0},{0,0,0},{0,0,0}}; };
 inline Sh3 operator*(const Sh3& a, float k){ Sh3 r; for(int i=0;i<4;++i) r.c[i]=a.c[i]*k; return r; }
 inline Sh3 operator+(const Sh3& a, const Sh3& b){ Sh3 r; for(int i=0;i<4;++i) r.c[i]=a.c[i]+b.c[i]; return r; }
 
-struct Surfel{ V pos,n,albedo; float radius; Sh3 E, Enew; uint32_t age=0; };
+// ── radial depth: moment-based visibility (webgiya's "Radial Depth" pass) ──────────────────────────────────
+// The planar cutoff is a crude proxy for visibility: it rejects surfels whose offset along their own normal is
+//    large, which stops floor-to-flank leaks but says nothing about whether anything is actually BETWEEN the
+//    surfel and the point being shaded. A surfel on the ground still leaks under the car, because the shading
+//    point is coplanar-ish with it and simply occluded.
+//
+//    So each surfel also stores depth MOMENTS in a few directional bins -- mean distance and mean squared
+//    distance to whatever its rays hit. At gather time Chebyshev's inequality turns those two numbers into a
+//    probability that the shading point is visible from the surfel:
+//
+//        d <= mu                      -> fully visible
+//        otherwise  sigma2 = mu2 - mu*mu,  p = sigma2 / (sigma2 + (d - mu)^2)
+//
+//    Same machinery DDGI uses for probe visibility. It is what stops indirect light bleeding through geometry,
+//    which is the difference between "soft" and "dirty".
+constexpr int kDepthBins = 8;
+
+struct Surfel{
+    V pos,n,albedo; float radius; Sh3 E, Enew; uint32_t age=0;
+    float dMean[kDepthBins]{}, dMean2[kDepthBins]{}; uint32_t dCount[kDepthBins]{};
+};
+
+// Bin a direction into the hemisphere around N: 4 azimuth sectors x 2 elevation rings.
+inline int DepthBin(V N, V d)
+{
+    V t = norm(std::fabs(N.x)>0.9f ? cross(N,{0,1,0}) : cross(N,{1,0,0}));
+    V b = cross(N,t);
+    const float e = dot(d,N);                       // 0..1 over the hemisphere
+    const int ring = e > 0.70710678f ? 1 : 0;       // 45 degrees splits the two rings
+    const float az = std::atan2(dot(d,b), dot(d,t)) + PI;
+    const int sector = std::min(3, (int)(az / (PI*0.5f)));
+    return ring*4 + sector;
+}
+
+// Chebyshev visibility of a point at distance `dist` in direction `dir` from this surfel.
+inline float RadialVisibility(const Surfel& s, V dir, float dist)
+{
+    const int k = DepthBin(s.n, dir);
+    if (s.dCount[k] == 0u) return 1.0f;             // nothing measured that way yet: do not invent occlusion
+    const float mu = s.dMean[k], mu2 = s.dMean2[k];
+    if (dist <= mu + 1e-3f) return 1.0f;
+    const float sigma2 = std::max(1e-6f, mu2 - mu*mu);
+    const float dd = dist - mu;
+    return sigma2 / (sigma2 + dd*dd);
+}
 
 // Project a radiance sample arriving from direction d into L1 SH.
 inline void ShAccumulate(Sh3& sh, V d, V L, float w)
@@ -346,7 +390,9 @@ int main(int argc,char**argv){
                 //    surface at a different orientation to leak from.
                 float planar=std::fabs(dot(d,S.n)); if(planar>S.radius*0.5f) continue;
                 float wd=1.0f-dist/S.radius; wd*=wd;                          // SQUARED falloff, as the shader
-                float w=wn*wd; e=e+S.E*w; wsum+=w; } }
+                float vis=1.0f;
+                if(dist>1e-4f) vis=RadialVisibility(S, d*(-1.0f/dist), dist);   // surfel -> shading point
+                float w=wn*wd*vis; if(w<=0) continue; e=e+S.E*w; wsum+=w; } }
         covOut=wsum; return wsum>1e-4f? ShIrradiance(e*(1.0f/wsum), N) : V{0,0,0}; };
     auto gatherE=[&](V P,V N){ float c; return gatherEcov(P,N,c); };
     auto gatherCoverage=[&](V P,V N){ float c; gatherEcov(P,N,c); return c; };
@@ -376,9 +422,17 @@ int main(int argc,char**argv){
         par(n,[&](int si){ Surfel& s=sf[si]; RNG r(hashi((uint32_t)si*2246822519u ^ (uint32_t)frame*3266489917u));
             Sh3 sh; const float w=6.28318531f/(float)RAYS;   // uniform hemisphere: pdf = 1/2pi
             for(int k=0;k<RAYS;++k){ V d=hemiUniform(s.n,r.f(),r.f()); int ti; float t; V L;
+                float hitDist=1e4f;
                 if(bvh.closest(s.pos+s.n*0.003f,d,1e4f,ti,t)){ V P=s.pos+d*t; V N=tris[ti].n; if(dot(N,d)>0)N=N*-1.0f;
-                    L=DirectLight(bvh,P,N,tris[ti].mat,d*-1.0f); }
+                    L=DirectLight(bvh,P,N,tris[ti].mat,d*-1.0f); hitDist=t; }
                 else L=SkyColour(d);
+                {   // running mean of depth and depth^2 in this direction's bin
+                    const int k=DepthBin(s.n,d);
+                    const float dClamp=std::min(hitDist, s.radius*4.0f);
+                    const uint32_t c=++s.dCount[k]; const float a=1.0f/(float)std::min(c,256u);
+                    s.dMean[k]  += (dClamp        - s.dMean[k])  * a;
+                    s.dMean2[k] += (dClamp*dClamp - s.dMean2[k]) * a;
+                }
                 // Firefly clamp. One ray landing on the emissive tail lamp otherwise injects a bright blob that
                 //    the running mean then takes dozens of frames to forget -- visible as a lingering hot patch.
                 const float m=std::max(L.x,std::max(L.y,L.z)); const float kClamp=8.0f;
