@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <vector>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -64,6 +65,8 @@ namespace
     { return { b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
     VkDescriptorSetLayoutBinding StorageImage(uint32_t b) noexcept
     { return { b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
+    VkDescriptorSetLayoutBinding Sampled(uint32_t b, uint32_t Count = 1u) noexcept
+    { return { b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, Count, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
     // Matches CellHash() in SurfelIrradianceUpdate.slang / SurfelGIResolve.slang exactly.
     inline uint32_t CellHash(int cx, int cy, int cz, uint32_t hashSize) noexcept
     {
@@ -143,23 +146,67 @@ bool SurfelGIStage::CreatePipelines() noexcept
         return R == VK_SUCCESS;
     };
 
-    std::array<VkDescriptorPoolSize, 2> PoolSizes{{
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 11u }, // update 5 + commit 1 + resolve 5
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,   5u },
+    // Both shading passes carry the full scene now, so the pool has to cover it: 6 scene SSBOs each, the two
+    //    shading LUTs each, and one variable-count bindless table each. The table is the expensive entry — it is
+    //    sized by the device's slot capacity exactly as the ReSTIR set is.
+    const uint32_t Slots = I.TextureCapacity;                      // 0 ⇒ no descriptor indexing; the table is 1 slot
+    const uint32_t TableSize = Slots > 0u ? Slots : 1u;
+    std::array<VkDescriptorPoolSize, 3> PoolSizes{{
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,        24u },                 // update 11 + commit 1 + resolve 11 (+slack)
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          4u },                 // resolve: output, surface, normal (+slack)
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2u * TableSize + 8u },// two LUTs + the sky cube + two tables
     }};
     VkDescriptorPoolCreateInfo PoolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     PoolInfo.maxSets       = 3u;
+    PoolInfo.flags         = Slots > 0u ? VkDescriptorPoolCreateFlags(VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT) : 0u;
     PoolInfo.poolSizeCount = static_cast<uint32_t>(PoolSizes.size());
     PoolInfo.pPoolSizes    = PoolSizes.data();
     if (vkCreateDescriptorPool(I.Device, &PoolInfo, nullptr, &DescriptorPool) != VK_SUCCESS) return false;
 
+    // The bindless table is the LAST binding in both shading sets (31), variable-count and partially bound, which
+    //    is what VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT requires. Matching the kernel's set exactly
+    //    means the same SPIR-V declaration compiles against either.
+    auto BuildShadingLayout = [&](std::vector<VkDescriptorSetLayoutBinding> Bindings,
+                                  VkDescriptorSetLayout& SetLayout, VkPipelineLayout& PipeLayout)
+    {
+        Bindings.push_back(Sampled(31u, TableSize));
+        std::vector<VkDescriptorBindingFlags> Flags(Bindings.size(), 0u);
+        if (Slots > 0u) Flags.back() = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+                                     | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT
+                                     | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+        VkDescriptorSetLayoutBindingFlagsCreateInfo FlagsInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
+        FlagsInfo.bindingCount = static_cast<uint32_t>(Flags.size());
+        FlagsInfo.pBindingFlags = Flags.data();
+        VkDescriptorSetLayoutCreateInfo LI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+        LI.pNext = Slots > 0u ? &FlagsInfo : nullptr;
+        LI.flags = Slots > 0u ? VkDescriptorSetLayoutCreateFlags(VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) : 0u;
+        LI.bindingCount = static_cast<uint32_t>(Bindings.size()); LI.pBindings = Bindings.data();
+        if (vkCreateDescriptorSetLayout(I.Device, &LI, nullptr, &SetLayout) != VK_SUCCESS) return false;
+        VkPushConstantRange Push{ VK_SHADER_STAGE_COMPUTE_BIT, 0u, 96u };
+        VkPipelineLayoutCreateInfo PI{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+        PI.setLayoutCount = 1u; PI.pSetLayouts = &SetLayout; PI.pushConstantRangeCount = 1u; PI.pPushConstantRanges = &Push;
+        return vkCreatePipelineLayout(I.Device, &PI, nullptr, &PipeLayout) == VK_SUCCESS;
+    };
+
     // push blocks: update/resolve = 6×vec4/uvec4 = 96 B; commit = one uvec4 = 16 B (see the shaders).
-    if (!BuildLayout({ StorageBuffer(0), StorageBuffer(1), StorageBuffer(2), StorageBuffer(8), StorageBuffer(9) },
-                     96u, UpdateLayout, UpdatePipeLayout)) return false;
+    // Update  — 0/1/2 surfel field · 3/4/5 tri/mat/inst · 8/9 CWBVH · 10/11/12 slab/vtx/idx · 13/14 LUTs · 31 table.
+    if (!BuildShadingLayout({ StorageBuffer(0), StorageBuffer(1), StorageBuffer(2),
+                              StorageBuffer(3), StorageBuffer(4), StorageBuffer(5),
+                              StorageBuffer(8), StorageBuffer(9),
+                              StorageBuffer(10), StorageBuffer(11), StorageBuffer(12),
+                              Sampled(13), Sampled(14) },
+                            UpdateLayout, UpdatePipeLayout)) return false;
     if (!BuildLayout({ StorageBuffer(0) }, 16u, CommitLayout, CommitPipeLayout)) return false;
-    if (!BuildLayout({ StorageImage(0), StorageImage(1), StorageImage(2), StorageImage(3), StorageImage(4),
-                       StorageBuffer(8), StorageBuffer(9), StorageBuffer(10), StorageBuffer(11), StorageBuffer(12) },
-                     96u, ResolveLayout, ResolvePipeLayout)) return false;
+    // Resolve — 0/1/2 images · 8/9 CWBVH · 10/11/12 surfel field · 13/14 LUTs · 15–20 scene · 31 table.
+    //    3 (albedo) and 4 (material aux) are GONE: the slab is decoded from SurfaceImage.w instead of being
+    //    re-encoded into an rgba8 and an rgba16f on the way past.
+    if (!BuildShadingLayout({ StorageImage(0), StorageImage(1), StorageImage(2),
+                              StorageBuffer(8), StorageBuffer(9),
+                              StorageBuffer(10), StorageBuffer(11), StorageBuffer(12),
+                              Sampled(13), Sampled(14),
+                              StorageBuffer(15), StorageBuffer(16), StorageBuffer(17),
+                              StorageBuffer(18), StorageBuffer(19), StorageBuffer(20) },
+                            ResolveLayout, ResolvePipeLayout)) return false;
 
     return BuildPipeline("SurfelIrradianceUpdate.spv", UpdatePipeLayout,  UpdatePipeline)
         && BuildPipeline("SurfelCommit.spv",           CommitPipeLayout,  CommitPipeline)
@@ -170,9 +217,15 @@ bool SurfelGIStage::WriteDescriptors() noexcept
 {
     std::array<VkDescriptorSetLayout, 3> Layouts{ UpdateLayout, CommitLayout, ResolveLayout };
     std::array<VkDescriptorSet*, 3>      Sets{ &UpdateSet, &CommitSet, &ResolveSet };
+    // The two shading sets end in a variable-count bindless table, so their allocation has to say how many slots
+    //    it actually wants. The commit set (index 1) has no table and must not carry the chain.
+    const uint32_t VariableCount = I.TextureCapacity > 0u ? I.TextureCapacity : 1u;
+    VkDescriptorSetVariableDescriptorCountAllocateInfo VariableInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO };
+    VariableInfo.descriptorSetCount = 1u; VariableInfo.pDescriptorCounts = &VariableCount;
     for (size_t i = 0; i < 3; ++i)
     {
         VkDescriptorSetAllocateInfo AI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        AI.pNext = (i != 1u && I.TextureCapacity > 0u) ? &VariableInfo : nullptr;
         AI.descriptorPool = DescriptorPool; AI.descriptorSetCount = 1u; AI.pSetLayouts = &Layouts[i];
         if (vkAllocateDescriptorSets(I.Device, &AI, Sets[i]) != VK_SUCCESS) return false;
     }
@@ -182,21 +235,55 @@ bool SurfelGIStage::WriteDescriptors() noexcept
     const VkDescriptorBufferInfo Surfel = Buf(SurfelBuffer), Head = Buf(HeadBuffer), Next = Buf(NextBuffer);
     const VkDescriptorBufferInfo Nodes  = Buf(I.CwbvhNodeBuffer), Tris = Buf(I.CwbvhLeafBuffer);
     const VkDescriptorImageInfo  Out = Img(I.OutputImageView), Surf = Img(I.SurfaceImageView), Norm = Img(I.NormalImageView);
-    const VkDescriptorImageInfo  Alb = Img(I.AlbedoImageView), Aux = Img(I.MaterialAuxView);
+    // The scene the two shading passes decode — the same handles the ReSTIR kernel binds, borrowed, not copied.
+    const VkDescriptorBufferInfo Tri   = Buf(I.TriangleBuffer), Mat = Buf(I.MaterialBuffer), Inst = Buf(I.InstanceBuffer);
+    const VkDescriptorBufferInfo Slab  = Buf(I.SlabBuffer), Vtx = Buf(I.VertexBuffer), Idx = Buf(I.IndexBuffer);
+    auto Tex = [&](VkImageView v){ return VkDescriptorImageInfo{ I.TableSampler, v, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL }; };
+    const VkDescriptorImageInfo  Energy = Tex(I.EnergyLutView), Sheen = Tex(I.SheenLutView);
+    // The bindless table. Unused slots repeat slot 0 rather than staying null: PARTIALLY_BOUND permits null, but
+    //    only where the shader provably never indexes it, and kMaterialTextureNone is the only guard there is.
+    std::vector<VkDescriptorImageInfo> Table;
+    if (I.TextureCapacity > 0u && I.TextureCount > 0u)
+    {
+        Table.resize(I.TextureCapacity);
+        for (uint32_t Slot = 0u; Slot < I.TextureCapacity; ++Slot)
+            Table[Slot] = VkDescriptorImageInfo{ I.TextureSampler,
+                                                 I.TextureViews[Slot < I.TextureCount ? Slot : 0u],
+                                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    }
 
     std::vector<VkWriteDescriptorSet> W;
     auto WB = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorBufferInfo* i)
     { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, i, nullptr }); };
     auto WI = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorImageInfo* i)
     { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, i, nullptr, nullptr }); };
-    // Update: b0 Surfels, b1 Head, b2 Next, b8 Nodes, b9 Tris
-    WB(UpdateSet, 0, &Surfel); WB(UpdateSet, 1, &Head); WB(UpdateSet, 2, &Next); WB(UpdateSet, 8, &Nodes); WB(UpdateSet, 9, &Tris);
+    auto WS = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorImageInfo* i)
+    { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, i, nullptr, nullptr }); };
+    auto WTable = [&](VkDescriptorSet s)
+    {
+        if (Table.empty()) return;
+        W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, 31u, 0u,
+                      static_cast<uint32_t>(Table.size()), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                      Table.data(), nullptr, nullptr });
+    };
+
+    // Update: b0/1/2 surfel field · b3/4/5 tri/mat/inst · b8/9 CWBVH · b10/11/12 slab/vtx/idx · b13/14 LUTs · b31 table
+    WB(UpdateSet, 0, &Surfel); WB(UpdateSet, 1, &Head); WB(UpdateSet, 2, &Next);
+    WB(UpdateSet, 3, &Tri); WB(UpdateSet, 4, &Mat); WB(UpdateSet, 5, &Inst);
+    WB(UpdateSet, 8, &Nodes); WB(UpdateSet, 9, &Tris);
+    WB(UpdateSet, 10, &Slab); WB(UpdateSet, 11, &Vtx); WB(UpdateSet, 12, &Idx);
+    WS(UpdateSet, 13, &Energy); WS(UpdateSet, 14, &Sheen); WTable(UpdateSet);
     // Commit: b0 Surfels
     WB(CommitSet, 0, &Surfel);
-    // Resolve: images 0-4, nodes/tris 8/9, surfels 10, head 11, next 12.
-    WI(ResolveSet, 0, &Out); WI(ResolveSet, 1, &Surf); WI(ResolveSet, 2, &Norm); WI(ResolveSet, 3, &Alb); WI(ResolveSet, 4, &Aux);
+    // Resolve: images 0/1/2 · b8/9 CWBVH · b10/11/12 surfel field · b13/14 LUTs · b15–20 scene · b31 table.
+    //    The albedo and material-aux images are gone with the approximation that needed them.
+    WI(ResolveSet, 0, &Out); WI(ResolveSet, 1, &Surf); WI(ResolveSet, 2, &Norm);
     WB(ResolveSet, 8, &Nodes); WB(ResolveSet, 9, &Tris);
     WB(ResolveSet, 10, &Surfel); WB(ResolveSet, 11, &Head); WB(ResolveSet, 12, &Next);
+    WS(ResolveSet, 13, &Energy); WS(ResolveSet, 14, &Sheen);
+    WB(ResolveSet, 15, &Tri); WB(ResolveSet, 16, &Mat); WB(ResolveSet, 17, &Inst);
+    WB(ResolveSet, 18, &Slab); WB(ResolveSet, 19, &Vtx); WB(ResolveSet, 20, &Idx);
+    WTable(ResolveSet);
 
     vkUpdateDescriptorSets(I.Device, static_cast<uint32_t>(W.size()), W.data(), 0u, nullptr);
     return true;

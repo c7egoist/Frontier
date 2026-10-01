@@ -16,11 +16,21 @@
 //        after the dispatch (or bind them ping-pong).
 //    Anti-flicker levers, all here: persistent surfels · running mean 1/min(age,cap) · firefly clamp · Jacobi.
 //
-// ⚠️ PORT SEAMS (marked `// PORT:` below). This file lowers to SPIR-V today (Tools/Build/CheckShaders.sh) and carries
-//    the real bindings + the real traversal helper. Two hooks tie it to the engine's existing kernel code:
-//      (1) hit shading uses the sun term + a surfel-field gather; wiring the full GpuLuminaire list + OpenPBR albedo
-//          decode is the SAME code the ReSTIR kernel already runs (ReSTIRViewport.slang §DI / MaterialEvaluation.slang).
-//      (2) the surfel hash grid is a head/next linked list; the host builds it each frame from the surfel positions.
+//    HIT SHADING.  A bounce reads the material it actually struck. The hit's triangle, instance and primitive go
+//    through SceneMaterialResolve.slang — the SAME decode ReSTIRViewport.slang runs on its own bounce vertices —
+//    and the outgoing radiance is MaterialEvaluation.slang's EvaluateBsdf against the sun, plus the surfel field's
+//    previous irradiance through the material's own diffuse response, plus emission.
+//
+//    This replaced `vec3 hitN = -wi;` and no material decode at all. That stand-in had two consequences worth
+//    stating plainly, because they are what a reader would otherwise mistake for a tuning problem:
+//      • every bounce was achromatic. Lo was the sun term times 1/π with no base colour anywhere, so a surfel over
+//        red carpet and a surfel over grey concrete gathered identical light. Colour bleeding was not weak, it was
+//        structurally absent.
+//      • the cosine term was geometry-blind. dot(-wi, L) depends only on where the ray pointed, so a wall and the
+//        floor it meets returned the same N·L, and a surface facing away from the sun was still lit by it.
+//
+// ⚠️ PORT SEAM (one left): the surfel hash grid is a head/next linked list the host builds each frame from the
+//    surfel positions.
 //    NOTE: GLSL source lowered by the build scripts (glslang/glslc -fshader-stage=compute --target-env=vulkan1.2).
 
 #version 460
@@ -45,11 +55,31 @@ layout(std430, binding = 0) buffer SurfelExtent      { GpuSurfel Surfels[];     
 layout(std430, binding = 1) readonly buffer SurfelGridHeadExtent { int  SurfelGridHead[]; };  // per-cell first surfel (+1; 0 = empty)
 layout(std430, binding = 2) readonly buffer SurfelGridNextExtent { int  SurfelGridNext[]; };  // per-surfel next in cell chain (+1; 0 = end)
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                              THE SCENE, AS THE ReSTIR KERNEL SEES IT
+//------------------------------------------------------------------------------------------------------------------------
+// Same records, same slot numbers, same decode. A bounce here resolves its material through exactly the arithmetic
+//    the raytraced path uses for its own bounce vertices, so the two cannot drift apart by accident.
+#include "SceneShadingRecords.slang"
+
+layout(std430, binding = 3)  readonly buffer TriangleExtent     { GpuTriangle     Triangles[];     };
+layout(std430, binding = 4)  readonly buffer MaterialExtent     { GpuMaterial     Materials[];     };
+layout(std430, binding = 5)  readonly buffer InstanceExtent     { GpuInstance     Instances[];     };
+layout(std430, binding = 10) readonly buffer MaterialSlabExtent { GpuMaterialSlab MaterialSlabs[]; };
+layout(std430, binding = 11) readonly buffer VertexExtent       { GpuVertex       Vertices[];      };
+layout(std430, binding = 12) readonly buffer IndexExtent        { uint            Indices[];       };
+
 // Shared CWBVH blobs (identical bindings to the ReSTIR kernel's 8/9) — TraversalCWBVH.slang traces these.
 layout(std430, binding = 8) readonly buffer TraversalNodeExtent { vec4 CwbvhNodes[]; };
 layout(std430, binding = 9) readonly buffer TraversalLeafExtent { vec4 CwbvhTris[];  };
 uint TlasInstanceCount = 0u;   // single-blob world here (the showcase grid); the two-level path plugs in as in ReSTIRViewport.
 #include "TraversalCWBVH.slang"
+
+const uint kMaterialTextureNone = 0xFFFFFFFFu;
+#define FRONTIER_AUTOMOTIVE_SHOWCASE 1
+#include "MaterialEvaluation.slang"      // 13 = EnergyLut, 14 = SheenLut, declared inside
+layout(binding = 31) uniform sampler2D Textures[];   // bindless table, as in ReSTIRViewport (last binding in the set)
+#include "SceneMaterialResolve.slang"
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PUSH CONSTANTS
@@ -154,22 +184,44 @@ void main()
             continue;
         }
         vec3 hp = O + wi * h.t;
-        // PORT: decode the hit's geometric normal + albedo from h (triangle → material slab), exactly as the ReSTIR
-        //       kernel does. Here we shade the bounce with the sun term against the incoming direction's opposite as a
-        //       stand-in normal and gather the surfel field — structurally identical, materially approximate.
-        vec3 hitN = -wi;
-        // sun direct at the hit (shadow-ray tested)
-        vec3 Lo = vec3(0.0);
+
+        // ── what did we hit? ────────────────────────────────────────────────────────────────────────────────
+        // The real triangle, the real instance, the real slab, through the shared decode. `wo` points back
+        //    along the ray towards this surfel, which is the direction the bounce radiance has to leave in.
+        // Single-blob world: the traversal's primitive IS the flat triangle index, and the one instance row
+        //    carries the transform the vertex lookup needs.
+        uint         flatPrim = h.primitive;
+        GpuInstance  inst     = Instances[0];
+        GpuMaterial  mat      = Materials[TriangleMaterial(flatPrim)];
+        vec3 wo = -wi;
+        SurfaceFrame F;
+        ShadingRecord m = ResolveMaterial(mat, inst, LocalPrimitive(flatPrim, 0u), hp, wo,
+                                          s.PositionRadius.w, F);
+        vec3 hitN   = F.Normal;
+        vec3 woLoc  = ToLocal(F, wo);
+        if (woLoc.z <= 0.0) continue;                  // grazing / backfacing: nothing leaves towards us
+        ResolvedLayers layers = ResolveLayers(m, woLoc);
+
+        vec3 Lo = F.Emission;                          // the hit emits: lamps bleed into the field
+
+        // ── sun, through the material's own BSDF ────────────────────────────────────────────────────────────
         vec3 L = normalize(PC.SunDirectionRadiance.xyz);
-        float ndl = max(dot(hitN, L), 0.0);
-        if (ndl > 0.0)
+        vec3 wiLoc = ToLocal(F, L);
+        if (wiLoc.z > 0.0)
         {
-            vec3 sO = hp + hitN * 1e-3; vec3 srD = 1.0 / L;
+            vec3 sO = hp + F.Geometric * 1e-3; vec3 srD = 1.0 / L;
             bool shadowed = TraverseOccluded(sO, L, srD, 1e30);   // single-blob world (TlasInstanceCount==0); two-level: TraverseInstancesOccluded
-            if (!shadowed) Lo += PC.SunColour.xyz * (PC.SunDirectionRadiance.w * ndl * kInvPi);
+            if (!shadowed)
+                Lo += EvaluateBsdf(m, layers, woLoc, wiLoc)
+                    * (PC.SunColour.xyz * PC.SunDirectionRadiance.w) * wiLoc.z;
         }
-        // multi-bounce: neighbouring surfels' previous irradiance at the hit
-        Lo += kInvPi * GatherField(hp, hitN);
+
+        // ── multi-bounce: the field's previous irradiance, through the same material ────────────────────────
+        // AmbientResponse is ∫ f·cos dω for this slab, so E/π × response is the radiance a surface of THIS
+        //    material returns under that irradiance. The previous `kInvPi * GatherField(...)` was a bare
+        //    Lambert of albedo 1 — white, whatever the bounce landed on.
+        Lo += AmbientResponse(m, layers, woLoc) * (kInvPi * GatherField(hp, hitN));
+
         // firefly clamp on the sample
         Lo = min(Lo, vec3(firefly));
         meas += Lo;

@@ -455,6 +455,7 @@ private:
     VisibilityExchange      Visibility;          // [-]   R2 resident scene + cull / raster / HiZ / resolve
     SurfelGIStage           SurfelStage;         // [-]   shared non-raytraced indirect-light compute route
     std::vector<SurfaceSample> SurfelSamples;    // [-]   persistent seed candidates derived from shared geometry
+    std::vector<VkImageView>   SurfelTextureViews;// [-]  bindless table lent to the surfel passes; outlives Bring()
     float                   SurfelGridOrigin[3] = { 0.0f, 0.0f, 0.0f };
     bool                    TraversalResident = false;
     uint64_t                TraversalNodeCapacity = 0u;   // [B] allocation size, so a refit refresh cannot overrun

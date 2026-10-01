@@ -510,8 +510,9 @@ int main(int argc,char**argv){
             if(cov>=COVERAGE_TARGET) continue;
             if(rr.f() > (1.0f-cov/COVERAGE_TARGET)*0.9f+0.1f) continue;
             Surfel s; s.pos=P; s.n=gN[i]; s.albedo=gA[i]; s.radius=radiusAt(P);
-            // WARM START, isotropically: the gather hands back irradiance, so invert the L0 term to seed a
-            //    flat SH of the same magnitude rather than letting a new surfel pop black.
+            // WARM START, isotropically: the gather hands back irradiance and s.E now STORES irradiance, so
+            //    inverting the L0 term seeds a flat SH of the right magnitude rather than letting a new surfel
+            //    pop black. (While E was albedo-premultiplied these two were different quantities.)
             { const V E0=gatherE(P,gN[i]); s.E.c[0]=E0*(1.0f/(3.14159265f*0.282095f)); }
             s.age=4u;
             --budget;
@@ -537,7 +538,13 @@ int main(int argc,char**argv){
                 //    the running mean then takes dozens of frames to forget -- visible as a lingering hot patch.
                 const float m=std::max(L.x,std::max(L.y,L.z)); const float kClamp=8.0f;
                 if(m>kClamp) L=L*(kClamp/m);
-                ShAccumulate(sh,d,L*s.albedo,w);   // the bounce carries the surfel's own albedo (colour bleed)
+                // IRRADIANCE, not radiosity. `L` is already the radiance LEAVING the hit surface — DirectLight
+                //    evaluated that surface's own BSDF, so the colour bleed is in it. Multiplying by the SURFEL's
+                //    albedo here and again by the receiver's albedo at gather time applied the albedo twice: on
+                //    this scene's rubber (0.037) the indirect came out 27x too dark, and because the squaring is
+                //    per channel it also shifted hue — the cone's (0.95, 0.35, 0.05) bounced as (1.00, 0.12, 0.00).
+                //    ModeMatrix.cpp and SurfelIrradianceUpdate.slang both accumulate the bare radiance; so does this.
+                ShAccumulate(sh,d,L,w);
             }
             s.Enew=sh; });
         for(auto& s:sf){ s.age++; float a=1.0f/std::min(s.age,64u); s.E=s.E*(1.0f-a)+s.Enew*a; } };
@@ -567,7 +574,14 @@ int main(int argc,char**argv){
                 if (bvh.closest(P + N*0.002f, R, 1e4f, ti2, t2))
                 {
                     const V HP = P + R*t2; V HN = tris[ti2].n; if (dot(HN,R) > 0) HN = HN*-1.0f;
-                    reflection = DirectLight(bvh, HP, HN, tris[ti2].mat, R*-1.0f) + gatherE(HP,HN)*INV_PI;
+                    // The indirect term at the REFLECTED hit goes through that hit's material too, matching
+                    //    SurfelGIResolve.slang's ShadeHit. Bare `gatherE*INV_PI` would make every reflected
+                    //    surface bounce light like a white Lambertian regardless of what it is.
+                    const vec3 hresp = Frontier::UnifiedMaterial::AmbientResponse(MaterialFor(tris[ti2].mat),
+                                                                                  vec3(HN.x,HN.y,HN.z),
+                                                                                  vec3(-R.x,-R.y,-R.z));
+                    const V hbounce{hresp.x,hresp.y,hresp.z};
+                    reflection = DirectLight(bvh, HP, HN, tris[ti2].mat, R*-1.0f) + hbounce*(gatherE(HP,HN)*INV_PI);
                 }
                 else reflection = SkyColour(R);
             }
@@ -586,14 +600,15 @@ int main(int argc,char**argv){
             const float Gloss = (1.0f-m.SpecularRoughness)*(1.0f-m.SpecularRoughness);
             reflection = V{reflection.x*Fr.x, reflection.y*Fr.y, reflection.z*Fr.z} * Gloss;
         }
-        // Indirect must be modulated by the material it LANDS on: outgoing = albedo/pi * irradiance. This
-        //    was missing, so bounce light was added as a flat glow of the same colour and strength to every
-        //    surface regardless of what it was made of -- which is most of why the GI read as a wash.
-        //    RaytraceToggle/CpuMirror/ModeMatrix.cpp has it right as `dalb*INV_PI*E`.
+        // Indirect is modulated by the material it LANDS on, through the ENGINE's material model rather than a
+        //    hand-rolled Lambert. AmbientResponse is the integral of f.cos over the hemisphere for this slab, so
+        //    outgoing = E/pi * response, and a clearcoated or metallic surface responds to bounce light the way
+        //    it responds to any other light. `BaseColor*(1-Metalness)/pi` could not: it has no coat, no sheen,
+        //    no transmission, no F82 tint, and it is the one thing UnifiedMaterialEvaluation.h exists to forbid.
         const ShadingRecord& mr = MaterialFor(gM[i]);
-        const V dalb{ mr.BaseColor.x*(1.0f-mr.Metalness), mr.BaseColor.y*(1.0f-mr.Metalness),
-                      mr.BaseColor.z*(1.0f-mr.Metalness) };
-        V indirect=dalb*(gatherE(P,N)*INV_PI);
+        const vec3 resp = Frontier::UnifiedMaterial::AmbientResponse(mr, vec3(N.x,N.y,N.z),
+                                                                     vec3(-rd.x,-rd.y,-rd.z));
+        V indirect = V{resp.x,resp.y,resp.z}*(gatherE(P,N)*INV_PI);
         img[i]=direct+indirect+reflection;
         (void)x;(void)y; });
 

@@ -60,8 +60,25 @@ namespace Frontier
         VkImageView                      OutputImageView   = VK_NULL_HANDLE;   // rgba8   (present target)
         VkImageView                      SurfaceImageView  = VK_NULL_HANDLE;   // rgba32f (world pos + vis id)
         VkImageView                      NormalImageView   = VK_NULL_HANDLE;   // rgba16f
-        VkImageView                      AlbedoImageView   = VK_NULL_HANDLE;   // rgba8
-        VkImageView                      MaterialAuxView   = VK_NULL_HANDLE;   // rgba16f (SurfaceResolve aux — this patch)
+
+        // ── The scene, as the ReSTIR kernel sees it ─────────────────────────────────────────────────────────────
+        // Both surfel passes now decode the real hit triangle and evaluate the real OpenPBR slab, so they need the
+        //    same six scene SSBOs, the same two shading LUTs and the same bindless texture table the kernel binds.
+        //    These are BORROWED handles — SwapchainExchange owns them and rebinds the stage whenever they change.
+        //    Before this they were absent, and the passes approximated the material instead of reading it.
+        VkBuffer                         TriangleBuffer    = VK_NULL_HANDLE;   // GpuTriangle[]     — flat primitives
+        VkBuffer                         MaterialBuffer    = VK_NULL_HANDLE;   // GpuMaterial[]     — slab headers
+        VkBuffer                         InstanceBuffer    = VK_NULL_HANDLE;   // GpuInstance[]     — transforms + slab index
+        VkBuffer                         SlabBuffer        = VK_NULL_HANDLE;   // GpuMaterialSlab[] — the OpenPBR parameters
+        VkBuffer                         VertexBuffer      = VK_NULL_HANDLE;   // GpuVertex[]       — normals, tangents, UVs
+        VkBuffer                         IndexBuffer       = VK_NULL_HANDLE;   // uint[]            — per-instance indices
+        VkSampler                        TableSampler      = VK_NULL_HANDLE;   // clamped bilinear for the two LUTs
+        VkImageView                      EnergyLutView     = VK_NULL_HANDLE;   // binding 13 — Kulla–Conty E(μ,α)
+        VkImageView                      SheenLutView      = VK_NULL_HANDLE;   // binding 14 — LTC sheen table
+        VkSampler                        TextureSampler    = VK_NULL_HANDLE;   // repeat trilinear for the bindless table
+        const VkImageView*               TextureViews      = nullptr;          // binding 31 — the bindless table itself
+        uint32_t                         TextureCount      = 0u;               // [-] entries in TextureViews
+        uint32_t                         TextureCapacity   = 0u;               // [-] 0 ⇒ no descriptor indexing on this device
 
         uint32_t                         MaxSurfels        = 262144u;          // pool ceiling (SPAWN_BUDGET grows toward it)
         uint32_t                         GridHashSize      = 131072u;          // hash table cells (prime-ish, > live surfels)

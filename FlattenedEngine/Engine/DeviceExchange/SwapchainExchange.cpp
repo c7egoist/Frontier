@@ -3052,8 +3052,32 @@ bool SwapchainExchange::BringSurfelGIStage() noexcept
     Init.OutputImageView  = Vulkan->StorageImageView;
     Init.SurfaceImageView = static_cast<VkImageView>(Visibility.QuerySurfaceView());
     Init.NormalImageView  = static_cast<VkImageView>(Visibility.QueryNormalView());
-    Init.AlbedoImageView  = static_cast<VkImageView>(Visibility.QueryAlbedoView());
-    Init.MaterialAuxView  = static_cast<VkImageView>(Visibility.QueryMaterialAuxView());
+    // ── the scene, lent to the surfel passes ────────────────────────────────────────────────────────────────
+    // Both passes decode the real hit and evaluate the real slab now, so they borrow exactly what the kernel
+    //    binds. Same buffers, same LUTs, same bindless table — not copies, not a reduced G-buffer encoding.
+    //    This function already runs after UploadTriangles/UploadMaterials/UploadTraversal, so the handles are
+    //    current; any later reupload calls it again and the descriptors are rewritten.
+    Init.TriangleBuffer   = static_cast<VkBuffer>(Visibility.QueryFlatTriangleBuffer());
+    Init.MaterialBuffer   = static_cast<VkBuffer>(Visibility.QueryMaterialBuffer());
+    Init.InstanceBuffer   = static_cast<VkBuffer>(Visibility.QueryInstanceBuffer());
+    Init.SlabBuffer       = Vulkan->SlabBuffer;
+    Init.VertexBuffer     = static_cast<VkBuffer>(Visibility.QueryVertexBuffer());
+    Init.IndexBuffer      = static_cast<VkBuffer>(Visibility.QueryIndexBuffer());
+    Init.TableSampler     = Vulkan->TableSampler;
+    Init.EnergyLutView    = Vulkan->ShadingTables[0].View;
+    Init.SheenLutView     = Vulkan->ShadingTables[1].View;
+    Init.TextureSampler   = Vulkan->TextureSampler;
+    SurfelTextureViews.clear();
+    SurfelTextureViews.reserve(Vulkan->Textures.size());
+    for (const VulkanRecord::ResidentTexture& T : Vulkan->Textures) SurfelTextureViews.push_back(T.View);
+    Init.TextureViews     = SurfelTextureViews.data();
+    Init.TextureCount     = static_cast<uint32_t>(SurfelTextureViews.size());
+    Init.TextureCapacity  = Vulkan->DescriptorIndexing ? kTextureSlotCapacity : 0u;
+    // Every scene buffer has to be real before the passes can decode anything. Missing one is the deferred
+    //    bring-up state the CWBVH check above describes, not a failure.
+    if (!Init.TriangleBuffer || !Init.MaterialBuffer || !Init.InstanceBuffer
+     || !Init.SlabBuffer     || !Init.VertexBuffer   || !Init.IndexBuffer
+     || !Init.EnergyLutView  || !Init.SheenLutView) return true;
     Init.GridCellSize     = 0.25f;
     return SurfelStage.Bring(Init);
 }
