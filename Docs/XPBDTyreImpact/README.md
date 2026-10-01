@@ -115,8 +115,15 @@ scripted inputs, the constraint toggled with `--rim-stop` and nothing else:
 
 | Run | Closest the tread came to the axis | Against the 359.6 mm flange | Sidewall used |
 |---|---|---|---|
-| `ProjectDriveXPBDTyreDeformation_CPU_Reference.gif` (shipped) | 358.9 mm | 0.72 mm short of it | 100% |
-| `ProjectDriveXPBDRimCollapse_CPU_Reference.gif` (defeated) | 342.1 mm | 17.51 mm **through** it | 112% |
+| Ramp landing, shipped | 359.4 mm | 0.19 mm short of it | 100% |
+| Ramp landing, defeated | 342.1 mm | 17.51 mm **through** it | 112% |
+| Kerb strike, shipped | 358.9 mm | 0.67 mm short of it | 100% |
+| Kerb strike, defeated | 283.6 mm | 76.04 mm **through** it | 151% |
+
+The kerb strike is the harder case and the one that caught a real defect: at the original damping ratio of 1.0
+the tread still ended up 2.40 mm inside the flange, because XPBD's damped solve recovers only 1/(1+γ) of a
+breach per sweep and ground contact re-drives the node every sweep. The ratio is now 0.25. See `XPBDSoftTyre.h`
+for the measurements behind that number.
 
 The scripted ramp landing spends exactly the sidewall the tyre has and then meets the flange, so the course
 proves the constraint without anything being staged for it. `DriveSceneMirror` gates on the intrusion, so a

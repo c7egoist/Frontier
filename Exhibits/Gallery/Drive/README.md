@@ -49,6 +49,8 @@ constraint and not a different lap.
 | `ProjectDriveXPBDTyreDeformation_CPU_Reference.gif` | The front-left tyre for the whole run, close enough to read the carcass, with the flange constraint on. The surface is rebuilt every frame from the solver's own particle lattice. |
 | `ProjectDriveXPBDRimCollapse_CPU_Reference.gif` | The defeated control: the identical run with `--rim-stop 0`. |
 | `ProjectDriveXPBDLatticeDebug_CPU_Reference.gif` | The same carcass drawn as the lattice itself rather than a skin, so the nodes and the contact patch are visible directly. |
+| `ProjectDriveKerbStrike_CPU_Reference.gif` | The car leaned onto the kerb's vertical face until the tyre strikes it side-on — the hardest case the course offers the carcass. |
+| `ProjectDriveKerbStrike_LatticeDebug_CPU_Reference.gif` | The kerb strike as the lattice, which is where the flange is easiest to read off the particles. |
 
 The numbers come from the mirror's own `flange:` line, which is in `Provenance.json` for both runs. The tyre is
 a 508.6 mm tread radius on a 344.6 mm rim, so there is 149.0 mm of sidewall between the two once the 15 mm of
@@ -56,8 +58,10 @@ tread and carcass thickness is allowed for:
 
 | Run | Closest the tread came to the axis | Against the 359.6 mm flange | Sidewall used |
 |---|---|---|---|
-| `--rim-stop 1` (shipped) | 358.9 mm | 0.72 mm short of it | 100% |
-| `--rim-stop 0` (defeated) | 342.1 mm | 17.51 mm **through** it | 112% |
+| Ramp landing, `--rim-stop 1` (shipped) | 359.4 mm | 0.19 mm short of it | 100% |
+| Ramp landing, `--rim-stop 0` (defeated) | 342.1 mm | 17.51 mm **through** it | 112% |
+| Kerb strike, `--rim-stop 1` (shipped) | 358.9 mm | 0.67 mm short of it | 100% |
+| Kerb strike, `--rim-stop 0` (defeated) | 283.6 mm | 76.04 mm **through** it | 151% |
 
 Two things are worth reading off that table rather than inferring. The shipped run uses 100% of the sidewall
 and no more: the scripted ramp landing is hard enough to put the tread on the flange, which is why this course
@@ -65,11 +69,22 @@ can prove the constraint at all. And the 0.72 mm is not leakage — it is the co
 answering the load, which is what a soft constraint does. The mirror gates on it (`intrusion < 2 mm`), so a
 regression that removed or weakened the limit fails the proof instead of quietly shipping.
 
-The `flange:` line also separates ARRIVAL from RESIDUAL — how deep a node already was when the projection first
-saw it, against what was still unresolved afterwards. On this run that is 13.6 mm arriving and 0.72 mm left,
-i.e. the projection resolves ~95% of a breach per sweep. Keeping the two apart is what distinguishes a
-constraint that is under-converging from one that is never handed the problem, and it is cheaper than another
-parameter sweep.
+The kerb is the harder of the two by a wide margin — the flange projection is handed a 46.7 mm breach against
+13.6 mm for the ramp — and it is the case that caught a real defect. The constraint originally ran at a damping
+ratio of 1.0, and XPBD's damped solve carries γ in the denominator, so one sweep can only recover 1/(1+γ) of a
+breach: 95%. Ground contact re-drives the node every sweep, so that last 5% is an equilibrium and not something
+more sweeps grind away (2.40 / 1.73 / 1.63 mm for 1 / 2 / 3 sweeps). On the kerb that left the tread 2.40 mm
+inside the flange. The ratio is now 0.25, which holds it at 0.67 mm; `XPBDSoftTyre.h` carries the measurement
+showing the heavy ratio was not buying any dissipation to pay for it.
+
+The `flange:` line separates ARRIVAL from RESIDUAL — how deep a node already was when the projection first saw
+it, against what was still unresolved afterwards. Keeping the two apart is what distinguishes a constraint that
+is under-converging from one that is never handed the problem, and it is what localised the defect above
+instead of another parameter sweep.
+
+Every sequence here is produced by `RunDriveMirror.py`. The kerb pair and the lattice-debug view used to be
+hand-run and were therefore silently showing pre-fix behaviour long after the constraint landed; they are in
+`SEQUENCES` now so the single rebuild command cannot leave them behind again.
 
 ## Material angles
 
