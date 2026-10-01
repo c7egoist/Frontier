@@ -73,8 +73,11 @@ public:
         return Body;
     }
 
-    // Analytic bilinear height + normal at a world point. Matches XPBDSoftTyre::GroundQuery's signature.
-    [[nodiscard]] bool Sample(const Frontier::Vehicle::Vec3& p, float& outGroundZ, Frontier::Vehicle::Vec3& outNormal) const noexcept
+    // Analytic surface point + normal at a world point. Matches XPBDSoftTyre::GroundQuery's signature, which
+    //    is now a SURFACE query rather than a height (see XPBDSoftTyre.h for why). A heightfield is the
+    //    trivial case of it: the nearest point is straight down the column, so only the return shape changed.
+    [[nodiscard]] bool Sample(const Frontier::Vehicle::Vec3& p, Frontier::Vehicle::Vec3& outPoint,
+                              Frontier::Vehicle::Vec3& outNormal) const noexcept
     {
         // Sample the analytic field directly (identical to the grid the Jolt body was built from between samples,
         //    up to the bilinear/continuous difference). This is what the tyre nodes contact.
@@ -82,8 +85,8 @@ public:
         const float e  = 0.35f;                                   // finite-difference step for the surface normal
         const float hx = (HeightForWorld(p.x + e, p.y) - HeightForWorld(p.x - e, p.y)) / (2.0f * e);
         const float hy = (HeightForWorld(p.x, p.y + e) - HeightForWorld(p.x, p.y - e)) / (2.0f * e);
-        outGroundZ = Origin.z + h * HeightScale;
-        outNormal  = Frontier::Vehicle::Vec3{-hx, -hy, 1.0f}.Normalized();
+        outPoint  = Frontier::Vehicle::Vec3{p.x, p.y, Origin.z + h * HeightScale};
+        outNormal = Frontier::Vehicle::Vec3{-hx, -hy, 1.0f}.Normalized();
         return true;
     }
 

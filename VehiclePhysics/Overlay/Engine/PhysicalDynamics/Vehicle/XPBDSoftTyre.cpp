@@ -249,11 +249,9 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
             for (SoftTyreNode& node : NodeRecords)
             {
                 if (node.InverseMass <= 0.0f) continue;
-                float gz = 0.0f; Vec3 normal{0, 0, 1};
-                bool onGround = ground(node.Position, gz, normal);
+                Vec3 surfPt{}; Vec3 normal{0, 0, 1};
+                bool onGround = ground(node.Position, surfPt, normal);
                 normal = onGround ? normal.Normalized() : Vec3{0, 0, 1};
-
-                const Vec3 surfPt{node.Position.x, node.Position.y, gz};
                 const float penetration = onGround ? Dot(surfPt - node.Position, normal) : -1.0f;
                 if (penetration <= 0.0f) { node.InContact = false; continue; }   // release the bristle
 
@@ -279,16 +277,22 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
                 const Vec3 normalForce = normal * (node.ContactLambda * invH2);   // ground → tyre
                 const float normalMag = normalForce.Length();
                 sumForce += normalForce;
-                const Vec3 rvec = surfPt - Vec3{hubPos.x, hubPos.y, gz};
+                const Vec3 rvec = surfPt - Vec3{hubPos.x, hubPos.y, surfPt.z};
                 sumTorqueRef += Cross(rvec, normalForce);
                 sumPatch += surfPt; patchN += 1.0f;
 
                 // ── Tread bristle: a compliant tangential spring rooted on the ground, carried by the belt while stuck.
                 //    Its stiffness (1/α_tread) sets the slip stiffness; the μ·N cone caps it (sliding).
-                const Vec3 footPt{node.Position.x, node.Position.y, gz};
+                const Vec3 footPt = surfPt;   // the actual contact point, wall or floor
                 node.ContactNormal = normal;
                 if (!node.InContact) { node.BristleAnchor = footPt; node.InContact = true; }
-                else                 { node.BristleAnchor += beltDisp; node.BristleAnchor.z = gz; }
+                else
+                {
+                    // Carry the anchor with the belt, then re-seat it ONTO the surface. Pinning only .z
+                    //    assumed the surface was a floor; projecting along the normal works for a wall too.
+                    node.BristleAnchor += beltDisp;
+                    node.BristleAnchor += normal * Dot(surfPt - node.BristleAnchor, normal);
+                }
 
                 Vec3 defl = footPt - node.BristleAnchor;             // tangential deflection
                 defl -= normal * Dot(defl, normal);
@@ -409,9 +413,9 @@ void XPBDSoftTyre::Step(float dt, uint32_t substeps, const Vec3& hubPos, const Q
         if (ground)
             for (const SoftTyreNode& node : NodeRecords)
             {
-                float gz = 0.0f; Vec3 nrm{0, 0, 1};
-                if (!ground(node.Position, gz, nrm)) continue;
-                const float pen = gz - node.Position.z;
+                Vec3 sp{}; Vec3 nrm{0, 0, 1};
+                if (!ground(node.Position, sp, nrm)) continue;
+                const float pen = Dot(sp - node.Position, nrm.Normalized());
                 if (pen > ConstraintResidual.ContactMax) ConstraintResidual.ContactMax = pen;
             }
     }

@@ -61,9 +61,11 @@ Settled SettleAt(uint32_t substeps, float hubHeight, float seconds)
     tyre.Build(params, hub, rot);
 
     // Flat ground at z = 0.
-    auto ground = [](const Vec3& p, float& outZ, Vec3& outNormal) -> bool
+    // The ground contract is a SURFACE query now (nearest point + normal), not a height. A flat floor is the
+    //    trivial implementation: drop straight down the column.
+    auto ground = [](const Vec3& p, Vec3& outPoint, Vec3& outNormal) -> bool
     {
-        (void)p; outZ = 0.0f; outNormal = Vec3{0.0f, 0.0f, 1.0f}; return true;
+        outPoint = Vec3{p.x, p.y, 0.0f}; outNormal = Vec3{0.0f, 0.0f, 1.0f}; return true;
     };
 
     // A fixed WALL-CLOCK duration at a fixed outer timestep, so the only thing varying between runs is how

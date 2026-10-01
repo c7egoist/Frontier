@@ -70,9 +70,36 @@ enum CourseMaterial : uint32_t
 };
 
 // --- terrain sample (the tyre ground query) ---------------------------------------------------------------------------
+// --- kerb ---------------------------------------------------------------------------------------------------
+// A raised kerb running alongside the pad, with a genuine VERTICAL face. It exists so that lateral contact can
+//    be tested at all: the rest of the course (pad, ramp, speed bumps, cones) is pure heightfield, every
+//    surface of it faces upward, and a tyre can never be struck side-on by any of it.
+struct KerbConstants
+{
+    static constexpr float CentreY   = 3.20f;    // [m] kerb inner face, +Y side of the pad
+    static constexpr float Height    = 0.120f;   // [m] standard kerb upstand
+    static constexpr float Depth     = 0.300f;   // [m] how far it extends in +Y
+    static constexpr float NearX     = -14.0f;   // [m] runs alongside the slalom
+    static constexpr float FarX      =  26.0f;
+};
+
+[[nodiscard]] inline bool WithinKerb(float x, float y) noexcept
+{
+    using K = KerbConstants;
+    return x >= K::NearX && x <= K::FarX && y >= K::CentreY && y <= K::CentreY + K::Depth;
+}
+
+// Nearest point on the course surface, with its outward normal. This is what the tyre's contact query needs:
+//    a heightfield can only ever answer "how high is the floor here", which pushes a node UP when what should
+//    happen is that it is stopped sideways by a wall.
+inline void CourseSurface(float x, float y, float z, float& outX, float& outY, float& outZ,
+                          float& nx, float& ny, float& nz) noexcept;
+
 [[nodiscard]] inline float CourseHeight(float x, float y) noexcept
 {
     using C = CourseConstants;
+    // The kerb is part of the drawn surface too, so the renderer and the physics agree on where it is.
+    if (WithinKerb(x, y)) return KerbConstants::Height;
     // Ramp wedge (sits on the pad; past the crest the ground drops back to 0 so the car launches).
     if (x >= C::RampNearX && x <= C::RampNearX + C::RampRunX && std::fabs(y) <= C::RampHalfWidth)
         return C::RampRise * (x - C::RampNearX) / C::RampRunX;
@@ -103,6 +130,42 @@ inline void CourseNormal(float x, float y, float& nx, float& ny, float& nz) noex
     if (l > 0.0f) { nx /= l; ny /= l; nz /= l; }
 }
 
+// Nearest point on the course surface plus its outward normal.
+//
+//    Off the kerb this is the heightfield answer it always was: straight down the column to CourseHeight.
+//    On or beside the kerb it is a real box query -- the node is pushed out through whichever face it is
+//    closest to, so the vertical inner face stops a tyre SIDEWAYS instead of launching it upward. That is the
+//    whole reason the contact contract was widened from a height to a point.
+inline void CourseSurface(float x, float y, float z, float& outX, float& outY, float& outZ,
+                          float& nx, float& ny, float& nz) noexcept
+{
+    using K = KerbConstants;
+    const float Base = CourseHeight(x, y);
+
+    const bool InSpan  = (x >= K::NearX && x <= K::FarX);
+    const float KerbTop = Base + K::Height;
+    if (InSpan && y >= K::CentreY - 0.5f && y <= K::CentreY + K::Depth + 0.5f && z < KerbTop)
+    {
+        // Distance to each face of the kerb box, choosing the smallest push-out.
+        const float DistInner = y - K::CentreY;                 // negative = outside, on the track side
+        const float DistOuter = (K::CentreY + K::Depth) - y;
+        const float DistTop   = KerbTop - z;
+
+        if (DistInner > 0.0f && DistOuter > 0.0f)
+        {
+            // Inside the footprint: leave by the nearest face.
+            if (DistTop <= DistInner && DistTop <= DistOuter)
+            { outX = x; outY = y; outZ = KerbTop; nx = 0.0f; ny = 0.0f; nz = 1.0f; return; }
+            if (DistInner <= DistOuter)
+            { outX = x; outY = K::CentreY; outZ = z; nx = 0.0f; ny = -1.0f; nz = 0.0f; return; }
+            outX = x; outY = K::CentreY + K::Depth; outZ = z; nx = 0.0f; ny = 1.0f; nz = 0.0f; return;
+        }
+    }
+
+    outX = x; outY = y; outZ = Base;
+    CourseNormal(x, y, nx, ny, nz);
+}
+
 // Cone base centre for slalom cone `k` (matches TractrixDriveScene).
 inline void ConeOrigin(int k, float& x, float& y) noexcept
 {
@@ -127,6 +190,19 @@ inline void EmitCourseTriangles(Add add) noexcept
     };
 
     // Surround plane under everything.
+    // ── the kerb, drawn as a real box ──────────────────────────────────────────────────────────────────────
+    // CourseHeight() and CourseSurface() already know about the kerb; this is the render side agreeing with
+    //    them, which is the whole contract at the top of this file ("the wheels rest exactly on the surface
+    //    the renderer draws"). It is emitted as a box rather than a raised heightfield cell precisely because
+    //    its INNER FACE is the point: that vertical wall is the thing the tyre is meant to strike.
+    {
+        using K = KerbConstants;
+        const float Y0 = K::CentreY, Y1 = K::CentreY + K::Depth, H = K::Height;
+        quad(K::NearX, Y0, H,  K::FarX, Y0, H,  K::FarX, Y1, H,  K::NearX, Y1, H, MatSurround);   // top
+        quad(K::NearX, Y0, 0.0f, K::FarX, Y0, 0.0f, K::FarX, Y0, H, K::NearX, Y0, H, MatSurround);// inner face
+        quad(K::NearX, Y1, 0.0f, K::FarX, Y1, 0.0f, K::FarX, Y1, H, K::NearX, Y1, H, MatSurround);// outer face
+    }
+
     const float G = C::PadHalfExtent * 4.0f;
     quad(-G,-G,-0.02f,  G,-G,-0.02f,  G,G,-0.02f,  -G,G,-0.02f, MatSurround);
 

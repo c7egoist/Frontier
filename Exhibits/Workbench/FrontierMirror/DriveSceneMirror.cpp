@@ -637,11 +637,14 @@ int main(int ArgumentCount, char** ArgumentValues)
     Hooks.ReadChassis       = [&] { return Chassis.State(); };
     Hooks.ApplyForceAtPoint = [&](const Vec3& Force, const Vec3& Point) { Chassis.ApplyForceAtPoint(Force, Point); };
     Hooks.ApplyTorque       = [&](const Vec3& Torque) { Chassis.ApplyTorque(Torque); };
-    Hooks.Ground            = [](const Vec3& Point, float& GroundZ, Vec3& Normal)
+    Hooks.Ground            = [](const Vec3& Point, Vec3& SurfacePoint, Vec3& Normal)
     {
-        GroundZ = DC::CourseHeight(Point.x, Point.y);
-        float Nx, Ny, Nz; DC::CourseNormal(Point.x, Point.y, Nx, Ny, Nz);
-        Normal = Vec3{ Nx, Ny, Nz };
+        // The surface query, not a height. CourseSurface answers with the nearest point ON the course and its
+        //    outward normal, so the kerb's vertical face can stop a tyre sideways instead of launching it.
+        float Sx, Sy, Sz, Nx, Ny, Nz;
+        DC::CourseSurface(Point.x, Point.y, Point.z, Sx, Sy, Sz, Nx, Ny, Nz);
+        SurfacePoint = Vec3{ Sx, Sy, Sz };
+        Normal       = Vec3{ Nx, Ny, Nz };
         return true;
     };
     Solver.Build(Configuration, Hooks, Chassis.State());

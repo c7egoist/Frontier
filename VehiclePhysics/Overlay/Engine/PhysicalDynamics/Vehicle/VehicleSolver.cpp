@@ -417,10 +417,12 @@ void VehicleSolver::StepPacejka(float Δτ) noexcept
     {
         const Vec3  right   = cs.Orientation.Rotate({0.0f, 1.0f, 0.0f});
         const float yawRate = Dot(cs.AngularVelocity, up);
-        float groundZ = 0.0f; Vec3 groundN{0.0f, 0.0f, 1.0f};
+        // Ride height wants the floor under the car, and the surface query now returns a point rather than a
+        //    height, so take its z. Directly below the CoM that is the same number it always was.
+        Vec3 groundPt{}; Vec3 groundN{0.0f, 0.0f, 1.0f};
         float rideHeight = ActiveConfiguration.Aero.FloorDiffuser.RideHeightOptimum_m;
-        if (ChassisHooks.Ground(cs.Position, groundZ, groundN))
-            rideHeight = std::max(0.005f, (cs.Position.z - groundZ) - ActiveConfiguration.Aero.ComHeightAboveFloor_m);
+        if (ChassisHooks.Ground(cs.Position, groundPt, groundN))
+            rideHeight = std::max(0.005f, (cs.Position.z - groundPt.z) - ActiveConfiguration.Aero.ComHeightAboveFloor_m);
 
         aero = ComputeAerodynamicForces(
             ActiveConfiguration.Aero, cs.LinearVelocity, rideHeight, forward, right, up,

@@ -212,7 +212,17 @@ struct TyreReaction
 class XPBDSoftTyre
 {
 public:
-    using GroundQuery = std::function<bool(const Vec3& p, float& outGroundZ, Vec3& outNormal)>;
+    // ── the ground contract: a SURFACE query, not a heightfield ─────────────────────────────────────────────
+    // This used to be bool(p, float& outGroundZ, Vec3& outNormal) -- one height per (x, y) column. That cannot
+    // express a vertical face. Against a kerb a node beside the wall reads the LOW ground and passes straight
+    // through it, and a node over the kerb's footprint is pushed UP instead of being blocked sideways. No
+    // amount of extra bristles helps, because the query they consult has nowhere to report a side wall.
+    //
+    // It now returns the nearest point ON THE SURFACE plus its outward normal. The solver already computed
+    // penetration as Dot(surfacePoint - position, normal), so the contact, friction and reaction code is
+    // unchanged -- it was only ever the QUERY that was flattened. A heightfield implementation stays trivial:
+    // return {p.x, p.y, Height(p.x, p.y)}.
+    using GroundQuery = std::function<bool(const Vec3& p, Vec3& outSurfacePoint, Vec3& outNormal)>;
 
     void Build(const SoftTyreParameters& params, const Vec3& hubPos, const Quat& hubRot) noexcept;
 
