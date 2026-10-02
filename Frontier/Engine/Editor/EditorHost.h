@@ -95,6 +95,9 @@ public:
 
     // The outliner's foot strip figures; the project refreshes the struct in place each tick.
     void AssignReadout(const EditorReadout* Readout) noexcept;
+
+    // The shared widget vocabulary, so a tool window drawn beside the panels uses the same sliders they do.
+    [[nodiscard]] ControlPanel& QueryControls() noexcept { return Controls_; }
     // Bumps when a drag reparents a row: the project re-reads the roster order.
     [[nodiscard]] uint32_t QueryOrderRevision() const noexcept;
     [[nodiscard]] float QueryViewWidth() const noexcept;

@@ -8,8 +8,8 @@
   },
   "scene": "No imported level: EditorHost's own showcase mirror, driven through the engine's tick order for ten ticks, then one sheet per interaction phase (tabs, category menu, tab menu, a narrowed outline, the palette over the console, the views menu, the inspector, the shade).",
   "commands": [
-    "g++ -std=c++20 -O2 -DFRONTIER_DEVELOPMENT -DTVG_STATIC -pthread -I. -IEngine -IExternalPackages/imgui -IEngine/Editor -IEngine/DisplayPresentation -IEngine/ContentInterchange -IEngine/DeviceExchange -IEngine/GeometricRaster -IEngine/Shaders -IExternalPackages/tomlpp/include -IExternalPackages/thorvg/inc -IExhibits/Workbench/Editor -IExhibits/Workbench/Editor/Counterparts -IExhibits/Workbench/IconArt Exhibits/Workbench/Editor/EditorProof.cpp Engine/Editor/EditorHost.cpp Engine/Editor/ControlPanel.cpp Engine/Editor/OutlinerPanel.cpp Engine/Editor/ViewportPanel.cpp Engine/Editor/InspectorPanel.cpp Engine/Editor/ShadeTick.cpp Engine/Editor/SunInspectorPanel.cpp Engine/Editor/StarsInspectorPanel.cpp Engine/Editor/AtmosphereSkyInspectorPanel.cpp Engine/Editor/CameraInspectorPanel.cpp Engine/Editor/CloudsInspectorPanel.cpp Engine/Editor/FogInspectorPanel.cpp Engine/Editor/LensFlareInspectorPanel.cpp Engine/Editor/MoonInspectorPanel.cpp Engine/Editor/WeatherInspectorPanel.cpp Engine/DisplayPresentation/ControlCentreHost.cpp Engine/DisplayPresentation/PixelSpace.cpp Engine/DisplayPresentation/MotionIntegrator.cpp Engine/DisplayPresentation/ThemeStructure.cpp Engine/DisplayPresentation/ControlKit.cpp Engine/DisplayPresentation/AppearanceInspector.cpp Engine/DisplayPresentation/ConfigurationInspector.cpp Engine/DisplayPresentation/DialogueHost.cpp Engine/DisplayPresentation/FidelityClassifier.cpp Engine/DisplayPresentation/VectorCodec.cpp Engine/DisplayPresentation/NotificationQueue.cpp Engine/DisplayPresentation/TelemetryMetrics.cpp Engine/DisplayPresentation/TypefaceRegistry.cpp Engine/DisplayPresentation/GlyphSpace.cpp Engine/DisplayPresentation/FontCodec.cpp Engine/DisplayPresentation/MaterialInspector.cpp Engine/DisplayPresentation/IconArt.cpp Engine/DisplayPresentation/IconPresentation.cpp Engine/ContentInterchange/AssetResolution.cpp Engine/ContentInterchange/MaterialIndex.cpp Engine/DeviceExchange/InputExchange.cpp Engine/GeometricRaster/StarCatalogueIndex.cpp Engine/GeometricRaster/CameraProjection.cpp Engine/DeviceExchange/OrientationClassifier.cpp Projects/Project-Zero/Source/RayTracingSolver.cpp Projects/Project-Zero/Source/FlyThroughSolver.cpp ExternalPackages/imgui/imgui.cpp ExternalPackages/imgui/imgui_draw.cpp ExternalPackages/imgui/imgui_tables.cpp ExternalPackages/imgui/imgui_widgets.cpp .cache/icon-art/release/libthorvg.a -o /home/user/Slate/_AgentScratch/Frontier/.cache/EditorProof",
-    "/home/user/Slate/_AgentScratch/Frontier/.cache/EditorProof"
+    "g++ -std=c++20 -O2 -DFRONTIER_DEVELOPMENT -DTVG_STATIC -pthread -I. -IEngine -IExternalPackages/imgui -IEngine/Editor -IEngine/DisplayPresentation -IEngine/ContentInterchange -IEngine/DeviceExchange -IEngine/GeometricRaster -IEngine/Shaders -IExternalPackages/tomlpp/include -IExternalPackages/thorvg/inc -IExhibits/Workbench/Editor -IExhibits/Workbench/Editor/Counterparts -IExhibits/Workbench/IconArt Exhibits/Workbench/Editor/EditorProof.cpp Engine/Editor/EditorHost.cpp Engine/Editor/ControlPanel.cpp Engine/Editor/OutlinerPanel.cpp Engine/Editor/ViewportPanel.cpp Engine/Editor/InspectorPanel.cpp Engine/Editor/ShadeTick.cpp Engine/Editor/SunInspectorPanel.cpp Engine/Editor/StarsInspectorPanel.cpp Engine/Editor/AtmosphereSkyInspectorPanel.cpp Engine/Editor/CameraInspectorPanel.cpp Engine/Editor/CloudsInspectorPanel.cpp Engine/Editor/FogInspectorPanel.cpp Engine/Editor/LensFlareInspectorPanel.cpp Engine/Editor/MoonInspectorPanel.cpp Engine/Editor/WeatherInspectorPanel.cpp Engine/DisplayPresentation/ControlCentreHost.cpp Engine/DisplayPresentation/PixelSpace.cpp Engine/DisplayPresentation/MotionIntegrator.cpp Engine/DisplayPresentation/ThemeStructure.cpp Engine/DisplayPresentation/ControlKit.cpp Engine/DisplayPresentation/AppearanceInspector.cpp Engine/DisplayPresentation/ConfigurationInspector.cpp Engine/DisplayPresentation/DialogueHost.cpp Engine/DisplayPresentation/FidelityClassifier.cpp Engine/DisplayPresentation/VectorCodec.cpp Engine/DisplayPresentation/NotificationQueue.cpp Engine/DisplayPresentation/TelemetryMetrics.cpp Engine/DisplayPresentation/TypefaceRegistry.cpp Engine/DisplayPresentation/GlyphSpace.cpp Engine/DisplayPresentation/FontCodec.cpp Engine/DisplayPresentation/MaterialInspector.cpp Engine/DisplayPresentation/IconArt.cpp Engine/DisplayPresentation/IconPresentation.cpp Engine/ContentInterchange/AssetResolution.cpp Engine/ContentInterchange/MaterialIndex.cpp Engine/DeviceExchange/InputExchange.cpp Engine/GeometricRaster/StarCatalogueIndex.cpp Engine/GeometricRaster/CameraProjection.cpp Engine/DeviceExchange/OrientationClassifier.cpp Engine/Host/RayTracingSolver.cpp Engine/Host/FlyThroughSolver.cpp ExternalPackages/imgui/imgui.cpp ExternalPackages/imgui/imgui_draw.cpp ExternalPackages/imgui/imgui_tables.cpp ExternalPackages/imgui/imgui_widgets.cpp .cache/icon-art/release/libthorvg.a -o /home/user/Slate/Frontier/.cache/EditorProof",
+    "/home/user/Slate/Frontier/.cache/EditorProof"
   ],
   "results": {
     "sheets": [
@@ -24,7 +24,7 @@
     ],
     "phaseLines": 44,
     "gateFailures": [
-      "[EditorProof] [FAIL] the views menu never opened",
+      "[EditorProof] [FAIL] the theme fell back to the raster default",
       "[EditorProof] [FAIL] the views menu never posed snap 5",
       "[EditorProof] [FAIL] the views menu never posed snap 1",
       "[EditorProof] [FAIL] the views menu never posed snap 2",
@@ -44,13 +44,13 @@
     "note": "The sheets are real ImDrawData rasterised by the proof's own CPU rasteriser \u2014 the widgets, theme, fonts, icons and viewport trace are the engine's. Any gate listed in gateFailures is an upstream editor regression the sheet still faithfully records; it is not a rendering substitution."
   },
   "sha256": {
-    "EditorProof_Filtered_CPU_Reference.png": "72786df6dce251414eb4d81f23876e29a0b086cc30e5bb9d852fe871273cf984",
-    "EditorProof_Inspector_CPU_Reference.png": "fdc0682aa889bb66af82e29954d0a9dc92656180e8af9837e3e8b6d6688263df",
-    "EditorProof_Menu_CPU_Reference.png": "373edc97f336a922fef03168aacf4411ad0af5c631e1f18843d60f1cb48f51e5",
-    "EditorProof_Palette_CPU_Reference.png": "27b7490daf811b2ec212bd1bc130bc571d34a4462a2071054946f4b4dd2f071b",
-    "EditorProof_Shade_CPU_Reference.png": "6628c71b8336d492ad553854d4199bb6fced71d550bdad389cd025efe8affb09",
-    "EditorProof_TabMenu_CPU_Reference.png": "bb29ca55232636fe8a5e884cdece4d03d23f875aea754c48e641022db9b0e11e",
-    "EditorProof_Tabs_CPU_Reference.png": "268c6975b210bad53a5a99f043ed3a66e30f60ced158e9556972e05e013f9781",
-    "EditorProof_Views_CPU_Reference.png": "42c1284efb1098cffb164cdefa5543176e895efa3677b6c43121d83ff3065d17"
+    "EditorProof_Filtered_CPU_Reference.png": "5c4c83afdd238c6da4f1dd494f87f08c7e77aa97e59b9cb37a6595a003d74168",
+    "EditorProof_Inspector_CPU_Reference.png": "3ee3962b39821691dd3f9c1060f95a08c729ff92435a8bc0419af2c0c86a7d5c",
+    "EditorProof_Menu_CPU_Reference.png": "baddd8ff6198a8f531067ef0ba148cc730e021b67f5cf8030a14a4c2b5459322",
+    "EditorProof_Palette_CPU_Reference.png": "7e0259f7ac0b6cd7c7c1e4108458174ff66117b1a01a9b9037d2f038ca2bcbae",
+    "EditorProof_Shade_CPU_Reference.png": "9949fea4a4b406ee87b2d6bc96efd890e255b2ddfd9980cda05d428e0b39ae82",
+    "EditorProof_TabMenu_CPU_Reference.png": "f3335e8571df4f5d03c9e314a4ed78be16f5e2014b681be2d2ee5567a2aeef74",
+    "EditorProof_Tabs_CPU_Reference.png": "6babbd372bd98174002a1837ad5e6b832446b9976ae419901deaedf96093ead0",
+    "EditorProof_Views_CPU_Reference.png": "fdae0edc7e3ad4cf93eddfd18a0fe01820c0119b6feff9d2d3d343fb2bd96aff"
   }
 }

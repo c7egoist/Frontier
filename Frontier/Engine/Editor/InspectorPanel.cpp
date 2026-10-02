@@ -4,6 +4,7 @@
 // 🧩 Development editor inspector — the picked instance as a property sheet.
 
 #include "InspectorPanel.h"
+#include "TyreInspectorPanel.h"
 
 #include "ControlPanel.h"
 #include "SunInspectorPanel.h"
@@ -135,6 +136,12 @@ void InspectorPanel::Record(EditorInstance* Picked, uint32_t PickedIndex, Editor
         return;
     }
 
+    if(Sheet->Appearance==EditorSheetAppearance::Tyre||Sheet->Appearance==EditorSheetAppearance::TyreTread
+       ||Sheet->Appearance==EditorSheetAppearance::TyreLattice){
+        ImGui::BeginChild("##tyre-properties",ImVec2(0,ImMax(0.f,Controls_->QueryFootTop()-ImGui::GetCursorScreenPos().y)),false);
+        ImGui::PushID(static_cast<int>(PickedIndex));RecordTyreInspector(*Controls_,*Picked,*Sheet);ImGui::PopID();
+        ImGui::EndChild();RecordFooter(Picked);if(!Embedded)ImGui::End();return;
+    }
     if(Sheet->Appearance==EditorSheetAppearance::Camera){
         ImGui::BeginChild("##camera-properties",ImVec2(0,ImMax(0.f,Controls_->QueryFootTop()-ImGui::GetCursorScreenPos().y)),false);
         ImGui::PushID(static_cast<int>(PickedIndex));RecordCameraInspector(*Controls_,*Picked,*Sheet);ImGui::PopID();
