@@ -1,7 +1,19 @@
-# Liger — proper CAD body (SolidArc)
+# Liger — proper CAD model (SolidArc)
 
-`Liger_Body_Shell.arc` rebuilds `Body_Main_Shell` as a **real NURBS surface body**, not a loft between sparse curves.
-Replay it with `SolidArc --continue Liger_Body_Shell.arc`.
+All three Liger meshes are rebuilt as **real NURBS surfaces**, not lofts between sparse curves. Replay any file with `SolidArc --continue <file>.arc`.
+
+| File | Part | Result |
+|---|---|---|
+| `Liger_Body_Shell.arc` | `Body_Main_Shell` | 30 faces sewn into one manifold sheet (details below) |
+| `Liger_Front_Cowl.arc` | `Body_Front_Cowl` | 12 bicubic patches, sewn into one manifold sheet. Mean 0.12 cm, max 0.47 cm |
+| `Liger_Roof_Glass_Frame.arc` | `Body_Roof_Glass_Frame` | 6 ribbon patches. Mean 0.13 cm, max 0.56 cm |
+| `Liger_Full_Vehicle.arc` | all of the above | one replay script with tints |
+
+* **Cowl:** a zero-thickness folded sheet with a lip / 45° slope / nose arc / long lower face section swept along Y. It has sheared ends and a notch in the lower edge.
+* **Frame:** flat ribbons stored as triangle strips. Each branch of the strip tree becomes one cubic ribbon through the strip's transverse sections.
+  * The ribbons are not sewn. They only touch at the two T-junctions.
+  * They lie on the body surface, so they z-fight in the viewport, which is correct.
+* **Orientation:** every frame ribbon has its normal pointing up. The cowl is oriented with its convex side outward, so its lower face shows pink from above.
 
 * 15 bicubic B-spline patches are fitted to the mesh. Each is mirrored about the centreline, giving 30 faces.
 * `sew` merges them into **one manifold, consistently oriented sheet**: V44 E73 F30, `manifold yes, oriented yes`, no T-junctions.
@@ -17,7 +29,7 @@ Replay it with `SolidArc --continue Liger_Body_Shell.arc`.
 3. **Fit.** A constrained least-squares bicubic B-spline net is fitted with the boundary rows fixed to the shared rails.
 4. **Export.** `export_arc.py` writes `patch … --degree=3` commands. Mirrored copies reverse the point order so the normals stay outward.
 
-Run from `pipeline/` with `LIGER_MESH_DIR=<path to Vehicles/Liger/mesh>` set, e.g. `python full_layout.py` for the per-patch deviation table and `python export_arc.py` to regenerate the `.arc` files.
+Run from `pipeline/` with `LIGER_MESH_DIR=<path to Vehicles/Liger/mesh>` set. `python export_all.py` rebuilds every part and rewrites all the `.arc` files here, and prints the per-patch deviation tables. It needs numpy, scipy and numba.
 
 ## Accuracy (distance from fitted surface to mesh, cm)
 | Patches | mean | p99 | max |
@@ -33,7 +45,6 @@ About 0.17 cm is the noise floor of the metric, set by the mesh sample spacing.
 ## Known gaps
 * **Rear deck.** There is a 6.5–13 cm vertical riser between canopy and spoiler plate that a single smooth patch cannot follow. The error is confined to a ~3 cm strip. Fix: add a ruled riser patch and a separate plate rim.
 * **Arch liners.** The tunnel liner behind the front arch (NQ1) and the nose notch are approximate. A few small liner slivers render pink (back faces) from certain angles.
-* **Parts not yet converted:** `Body_Front_Cowl` and `Body_Roof_Glass_Frame` (low-poly ribbons and a wedge, which need their own parametrisation).
 * The body is an open shell (no underside), like the source mesh. Add thickness with `solidify` per patch if a solid is needed.
 
 `proofs/` has kernel renders of the sewn body and of the patch layout (each patch tinted).
