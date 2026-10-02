@@ -34,6 +34,7 @@ struct TreadMeshMetrics
     uint32_t FloorTriangle = 0u;   // [-]  - triangles on the floors, cells a groove edge cut
     uint32_t WallQuad      = 0u;   // [-]  - quads forming groove walls
     double   QuadFraction  = 0.0;  // [-]  - quads over all faces, the topology claim made measurable
+    uint32_t BandFailure   = 0u;   // [-]  - row bands the triangulator refused; must be 0
 };
 
 //------------------------------------------------------------------------------------------------------------------------

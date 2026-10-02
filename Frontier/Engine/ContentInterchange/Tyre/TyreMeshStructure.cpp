@@ -239,16 +239,56 @@ uint32_t TyreMeshStructure::RepairJunctions() noexcept
             }
         }
 
-        // 📝 ③ Fan the expanded ring. Inserted points are collinear with the edge they came from, so the
-        //    ring is still convex and a fan from its first vertex cannot produce an inverted triangle.
-        for (size_t Corner = 1u; Corner + 1u < Ring.size(); ++Corner)
+        // 📝 ③ Fan to a centre point, never to a ring vertex.
+        //    ⚠️ A fan from Ring[0] recreates the very edge it just split. Splitting A–B at P gives the
+        //    ring A,P,B,C, and the fan's first triangle is A,P,B — which closes through B–A. The
+        //    neighbour across that edge has already been split into A–P and P–B, so the recreated A–B
+        //    has one user, and the T-junction comes back as a non-manifold edge instead. That is exactly
+        //    what the repair's rising non-manifold count was reporting.
+        //    A centre point cannot do this: every edge it creates ends at the centre, and every ring edge
+        //    is used by exactly one fan triangle.
+        if (Ring.size() == 3u)
         {
             Rebuilt.push_back(Ring[0]);
-            Rebuilt.push_back(Ring[Corner]);
-            Rebuilt.push_back(Ring[Corner + 1u]);
+            Rebuilt.push_back(Ring[1]);
+            Rebuilt.push_back(Ring[2]);
             RebuiltCorners.push_back(RingCorner[0]);
-            RebuiltCorners.push_back(RingCorner[Corner]);
-            RebuiltCorners.push_back(RingCorner[Corner + 1u]);
+            RebuiltCorners.push_back(RingCorner[1]);
+            RebuiltCorners.push_back(RingCorner[2]);
+            continue;
+        }
+
+        float Cx = 0.0f, Cy = 0.0f, Cz = 0.0f;
+        TyreCornerRecord Middle = RingCorner[0];
+        float Mnx = 0.0f, Mny = 0.0f, Mnz = 0.0f, Mu = 0.0f, Mv = 0.0f;
+        for (size_t Step = 0; Step < Ring.size(); ++Step)
+        {
+            const TyrePositionRecord& Point = Positions[Ring[Step]];
+            Cx += Point.X;  Cy += Point.Y;  Cz += Point.Z;
+            Mnx += RingCorner[Step].NormalX;
+            Mny += RingCorner[Step].NormalY;
+            Mnz += RingCorner[Step].NormalZ;
+            Mu  += RingCorner[Step].U;
+            Mv  += RingCorner[Step].V;
+        }
+        const float Share = 1.0f / static_cast<float>(Ring.size());
+        Middle.NormalX = Mnx * Share;
+        Middle.NormalY = Mny * Share;
+        Middle.NormalZ = Mnz * Share;
+        Middle.U       = Mu * Share;
+        Middle.V       = Mv * Share;
+
+        const uint32_t Centre = WeldPosition(Cx * Share, Cy * Share, Cz * Share);
+
+        for (size_t Step = 0; Step < Ring.size(); ++Step)
+        {
+            const size_t Next = (Step + 1u) % Ring.size();
+            Rebuilt.push_back(Ring[Step]);
+            Rebuilt.push_back(Ring[Next]);
+            Rebuilt.push_back(Centre);
+            RebuiltCorners.push_back(RingCorner[Step]);
+            RebuiltCorners.push_back(RingCorner[Next]);
+            RebuiltCorners.push_back(Middle);
         }
     }
 

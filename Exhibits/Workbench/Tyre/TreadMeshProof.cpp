@@ -240,6 +240,7 @@ int main()
     TreadMeshSettings Settings;
     TyreMeshStructure Tread;
     const TreadMeshMetrics Built = SolveTreadMesh(Regions, Specification, Derived, Settings, Tread);
+    const TyreMeshMetrics  Raw    = Tread.QueryMetrics();
     const uint32_t         Splits = Tread.RepairJunctions();
     const TyreMeshMetrics  Audit  = Tread.QueryMetrics();
 
@@ -247,6 +248,8 @@ int main()
     std::printf("  %-34s %10u\n",     "wall quads",       Built.WallQuad);
     std::printf("  %-34s %10u\n",     "floor triangles",  Built.FloorTriangle);
     std::printf("  %-34s %9.1f %%\n", "quad fraction",    Built.QuadFraction * 100.0);
+    std::printf("  %-34s %10u  %10u\n", "boundary  raw / repaired", Raw.BoundaryEdge, Audit.BoundaryEdge);
+    std::printf("  %-34s %10u  %10u\n", "non-manif raw / repaired", Raw.NonManifoldEdge, Audit.NonManifoldEdge);
     std::printf("  %-34s %10u\n",     "T-junctions repaired", Splits);
     std::printf("  %-34s %10u\n",     "positions",        Audit.PositionCount);
     std::printf("  %-34s %10u\n",     "triangles",        Audit.TriangleCount);

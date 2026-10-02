@@ -7,9 +7,10 @@
 #include "TyreProfileSpecification.h"
 
 #include "clipper2/clipper.h"
-#include "clipper2/clipper.triangulation.h"
+#include "mapbox/earcut.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace Frontier {
@@ -158,63 +159,116 @@ struct WeldedPoint
     return Result;
 }
 
-/// 📦 Inserts a vertex wherever a contour crosses a grid line.
-/// note  💡 This is what closes the mesh. The floors are produced by clipping against the grid, so their
-///       boundary already carries a vertex at every grid crossing. A wall extruded from the raw contour
-///       would span those crossings in one edge and leave a T-junction at each — the floor side split,
-///       the wall side not — and every one of them reads as a crack. Both sides must see the same points.
-[[nodiscard]] std::vector<TreadContourPoint> SubdivideByGrid(const std::vector<TreadContourPoint>& Points,
-                                                             double                     Circumference,
-                                                             int                        Columns,
-                                                             const std::vector<double>& Lateral) noexcept
+/// 📦 Inserts a vertex wherever a path crosses a grid line, in the boolean stage's own integer space.
+/// note  ⚠️ The band and the walls must both be subdivided, and by the same lines. A vertex one side has
+///       and the other lacks is a T-junction, and a T-junction is the one crack welding cannot close.
+[[nodiscard]] Path64 SubdivideGrid(const Path64&              Loop,
+                                   double                     Circumference,
+                                   int                        Columns,
+                                   const std::vector<double>& Lateral) noexcept
 {
-    std::vector<TreadContourPoint> Result;
-    const size_t Count = Points.size();
+    Path64 Result;
+    const size_t Count = Loop.size();
     Result.reserve(Count * 2u);
+    const double Pitch = Circumference / Columns;
 
     for (size_t Step = 0; Step < Count; ++Step)
     {
-        const TreadContourPoint& From = Points[Step];
-        const TreadContourPoint& To   = Points[(Step + 1u) % Count];
+        const Point64& From = Loop[Step];
+        const Point64& To   = Loop[(Step + 1u) % Count];
         Result.push_back(From);
 
-        const double Dx = static_cast<double>(To.Circumferential) - From.Circumferential;
-        const double Dy = static_cast<double>(To.Lateral)         - From.Lateral;
-        std::vector<double> Crossings;
+        const double Ax = static_cast<double>(From.x), Ay = static_cast<double>(From.y);
+        const double Dx = static_cast<double>(To.x) - Ax, Dy = static_cast<double>(To.y) - Ay;
 
-        if (std::fabs(Dx) > 1.0e-9)
+        // 📝 A crossing carries the grid coordinate it lies on, snapped with the identical
+        //    expression the cell grid uses, and only the other coordinate is interpolated.
+        //    ⚠️ Interpolating both is what broke the seam. Circumference * Line / Columns and
+        //    Ax + Dx * Fraction are the same real number reached by different arithmetic, so they
+        //    disagree in the last bit and llround turns that into one integer — one micrometre, which
+        //    is precisely WeldTolerance, so the two sides fail to weld. Worse, the error depends on
+        //    Ax and Dx, so an edge walked in +x rounds differently from one walked in −x: one side of
+        //    a groove closed and the other opened.
+        struct GridCut
         {
-            const double Pitch = Circumference / Columns;
-            const double Low   = std::min(From.Circumferential, To.Circumferential);
-            const double High  = std::max(From.Circumferential, To.Circumferential);
-            for (int Line = static_cast<int>(std::floor(Low / Pitch)) + 1;
-                 Line * Pitch < High; ++Line)
+            double  Fraction;   // [0..1]  - position along this edge
+            int64_t Snapped;    // [µm]    - the exact grid coordinate
+            bool    Across;     // []      - true when Snapped is lateral, false when circumferential
+        };
+        std::vector<GridCut> Crossings;
+
+        if (std::fabs(Dx) > 0.5)
+        {
+            const double Low  = std::min(Ax, static_cast<double>(To.x)) / ClipperScale;
+            const double High = std::max(Ax, static_cast<double>(To.x)) / ClipperScale;
+            for (int Line = static_cast<int>(std::floor(Low / Pitch)) + 1; Line * Pitch < High; ++Line)
             {
-                const double Fraction = (Line * Pitch - From.Circumferential) / Dx;
+                const int64_t Snapped  = Unit(Circumference * Line / Columns);
+                const double  Fraction = (static_cast<double>(Snapped) - Ax) / Dx;
                 if (Fraction > 1.0e-9 && Fraction < 1.0 - 1.0e-9)
-                    Crossings.push_back(Fraction);
+                    Crossings.push_back(GridCut{ Fraction, Snapped, false });
             }
         }
 
-        if (std::fabs(Dy) > 1.0e-9)
+        if (std::fabs(Dy) > 0.5)
         {
             for (const double Line : Lateral)
             {
-                const double Fraction = (Line - From.Lateral) / Dy;
+                const int64_t Snapped  = Unit(Line);
+                const double  Fraction = (static_cast<double>(Snapped) - Ay) / Dy;
                 if (Fraction > 1.0e-9 && Fraction < 1.0 - 1.0e-9)
-                    Crossings.push_back(Fraction);
+                    Crossings.push_back(GridCut{ Fraction, Snapped, true });
             }
         }
 
-        std::sort(Crossings.begin(), Crossings.end());
-        for (const double Fraction : Crossings)
+        std::sort(Crossings.begin(), Crossings.end(),
+                  [](const GridCut& Left, const GridCut& Right)
+                  { return Left.Fraction < Right.Fraction; });
+
+        for (const GridCut& Crossing : Crossings)
         {
-            Result.push_back(TreadContourPoint{
-                static_cast<float>(From.Circumferential + Dx * Fraction),
-                static_cast<float>(From.Lateral + Dy * Fraction) });
+            const Point64 Cut = Crossing.Across
+                ? Point64(static_cast<int64_t>(std::llround(Ax + Dx * Crossing.Fraction)), Crossing.Snapped)
+                : Point64(Crossing.Snapped, static_cast<int64_t>(std::llround(Ay + Dy * Crossing.Fraction)));
+            if (Cut != Result.back())
+                Result.push_back(Cut);
         }
     }
     return Result;
+}
+
+/// 📦 One outer loop with the holes that belong to it, ready to triangulate.
+struct BandFigure
+{
+    Path64              Outer;
+    std::vector<Path64> Holes;
+};
+
+/// 📦 Flattens a Clipper nesting tree into outer-plus-holes figures.
+/// note  ⚠️ Orientation alone cannot do this. A negative area says "this is a hole", not "this is a hole
+///       in that one", and a block band routinely holds several islands each with their own holes. Handing
+///       a triangulator the wrong pairing fills a groove in or cuts a tread block away.
+void CollectFigures(const Clipper2Lib::PolyPath64& Node, std::vector<BandFigure>& Figures) noexcept
+{
+    for (const auto& Child : Node)
+    {
+        if (Child->IsHole())
+        {
+            for (const auto& Inner : *Child)
+                CollectFigures(*Inner, Figures);
+            continue;
+        }
+
+        BandFigure Figure;
+        Figure.Outer = Child->Polygon();
+        for (const auto& Hole : *Child)
+        {
+            Figure.Holes.push_back(Hole->Polygon());
+            for (const auto& Inner : *Hole)
+                CollectFigures(*Inner, Figures);
+        }
+        Figures.push_back(std::move(Figure));
+    }
 }
 
 }   // namespace
@@ -259,6 +313,17 @@ TreadMeshMetrics SolveTreadMesh(const TreadRegionResult&  Regions,
             if (RowPaths.empty())
                 continue;
 
+            // 📝 ② Work a block at a time. A cell the outline never entered is emitted as one quad;
+            //    everything the quads leave behind in that block is then taken as ONE region and
+            //    triangulated once.
+            //    💡 This is the correction that matters. Clipping each cell separately and triangulating
+            //    each result made two cells sharing a grid line into two boolean problems that merely
+            //    happened to agree — the same mistake the browser prototype made one level up, where it
+            //    triangulated each floor piece independently. A single triangulation cannot disagree with
+            //    itself, and the band's inner boundary is by construction the outline of the quads it meets.
+            //    ⚠️ The band is cut at block edges rather than taken a whole row at a time, because a row
+            //    band spans the entire circumference and the triangulator exhausts memory on it. Block
+            //    edges are grid lines and both sides are subdivided by the same lines, so the seam closes.
             for (int Block = 0; Block < Columns; Block += BlockWidth)
             {
                 const int    Last = std::min(Columns, Block + BlockWidth);
@@ -269,6 +334,8 @@ TreadMeshMetrics SolveTreadMesh(const TreadRegionResult&  Regions,
                 if (BlockPaths.empty())
                     continue;
 
+                Paths64 Whole;
+
                 for (int Column = Block; Column < Last; ++Column)
                 {
                     const double X0 = Circumference * Column / Columns;
@@ -276,59 +343,108 @@ TreadMeshMetrics SolveTreadMesh(const TreadRegionResult&  Regions,
                     const Path64 Cell = CellPath(X0, Y0, X1, Y1);
                     const Paths64 Clipped = Clipper2Lib::Intersect(BlockPaths, Paths64{ Cell },
                                                                    FillRule::NonZero);
-                    if (Clipped.empty())
+                    if (Clipped.size() != 1u || Clipped.front().size() != 4u)
+                        continue;
+                    if (std::fabs(std::fabs(Clipper2Lib::Area(Clipped.front()))
+                                  - std::fabs(Clipper2Lib::Area(Cell))) > 1.0)
                         continue;
 
-                    // 📝 ② A cell the outline never touched comes back as the cell itself, and that is the
-                    //    common case away from a groove. It is emitted as one quad. Only a cell a groove
-                    //    edge actually cut needs triangulating, so triangles appear exactly at the edges.
-                    const bool Whole = Clipped.size() == 1u && Clipped.front().size() == 4u
-                                     && std::fabs(std::fabs(Clipper2Lib::Area(Clipped.front()))
-                                                  - std::fabs(Clipper2Lib::Area(Cell))) < 1.0;
-
-                    if (Whole)
+                    std::vector<WeldedPoint> Ring;
+                    Ring.reserve(4u);
+                    for (const Point64& Vertex : Clipped.front())
                     {
-                        std::vector<WeldedPoint> Ring;
-                        Ring.reserve(4u);
-                        for (const Point64& Vertex : Clipped.front())
+                        Ring.push_back(Weld(static_cast<double>(Vertex.x) / ClipperScale,
+                                            static_cast<double>(Vertex.y) / ClipperScale,
+                                            Depth, Derived, Specification, Mesh));
+                    }
+                    Mesh.AddQuad(Ring[0].Index, Ring[1].Index, Ring[2].Index, Ring[3].Index,
+                                 Ring[0].Attribute, Ring[1].Attribute,
+                                 Ring[2].Attribute, Ring[3].Attribute);
+                    ++Metrics.FloorQuad;
+                    Whole.push_back(Cell);
+                }
+
+                Paths64 Band = Whole.empty()
+                             ? BlockPaths
+                             : Clipper2Lib::Difference(BlockPaths,
+                                                       Clipper2Lib::Union(Whole, FillRule::NonZero),
+                                                       FillRule::NonZero);
+                if (Band.empty())
+                    continue;
+
+                Clipper2Lib::Clipper64 Divider;
+                Divider.AddSubject(BlockPaths);
+                if (!Whole.empty())
+                    Divider.AddClip(Clipper2Lib::Union(Whole, FillRule::NonZero));
+                Clipper2Lib::PolyTree64 Tree;
+                Divider.Execute(Whole.empty() ? Clipper2Lib::ClipType::Union
+                                              : Clipper2Lib::ClipType::Difference,
+                                FillRule::NonZero, Tree);
+
+                std::vector<BandFigure> Figures;
+                CollectFigures(Tree, Figures);
+
+                Paths64 Facets;
+                for (const BandFigure& Figure : Figures)
+                {
+                    std::vector<std::vector<std::array<double, 2>>> Rings;
+                    std::vector<Point64>                            Lookup;
+
+                    auto Append = [&](const Path64& Loop)
+                    {
+                        const Path64 Dense = SubdivideGrid(Loop, Circumference, Columns, Lateral);
+                        if (Dense.size() < 3u)
+                            return;
+                        std::vector<std::array<double, 2>> Ring;
+                        Ring.reserve(Dense.size());
+                        for (const Point64& Vertex : Dense)
                         {
-                            Ring.push_back(Weld(static_cast<double>(Vertex.x) / ClipperScale,
-                                                static_cast<double>(Vertex.y) / ClipperScale,
-                                                Depth, Derived, Specification, Mesh));
+                            Ring.push_back({ static_cast<double>(Vertex.x),
+                                             static_cast<double>(Vertex.y) });
+                            Lookup.push_back(Vertex);
                         }
-                        Mesh.AddQuad(Ring[0].Index, Ring[1].Index, Ring[2].Index, Ring[3].Index,
-                                     Ring[0].Attribute, Ring[1].Attribute,
-                                     Ring[2].Attribute, Ring[3].Attribute);
-                        ++Metrics.FloorQuad;
+                        Rings.push_back(std::move(Ring));
+                    };
+
+                    Append(Figure.Outer);
+                    for (const Path64& Hole : Figure.Holes)
+                        Append(Hole);
+                    if (Rings.empty() || Rings.front().size() < 3u)
+                        continue;
+
+                    const std::vector<uint32_t> Woven = mapbox::earcut<uint32_t>(Rings);
+                    if (Woven.empty())
+                    {
+                        ++Metrics.BandFailure;
                         continue;
                     }
 
-                    // 📝 ③ A cut cell is triangulated as a whole, holes and all. Fanning each returned loop
-                    //    separately would fill the holes in: Clipper returns an inner loop as its own path,
-                    //    and a fan over it is a solid patch where there should be a groove.
-                    Paths64 Triangles;
-                    if (Clipper2Lib::Triangulate(Clipped, Triangles) != Clipper2Lib::TriangulateResult::success)
+                    for (size_t Step = 0; Step + 2u < Woven.size(); Step += 3u)
+                    {
+                        Facets.push_back(Path64{ Lookup[Woven[Step]],
+                                                 Lookup[Woven[Step + 1u]],
+                                                 Lookup[Woven[Step + 2u]] });
+                    }
+                }
+
+                for (const Path64& Facet : Facets)
+                {
+                    if (Facet.size() != 3u)
+                        continue;
+                    if (std::fabs(Clipper2Lib::Area(Facet)) < ClipperScale * ClipperScale * 1.0e-4)
                         continue;
 
-                    for (const Path64& Facet : Triangles)
+                    std::vector<WeldedPoint> Ring;
+                    Ring.reserve(3u);
+                    for (const Point64& Vertex : Facet)
                     {
-                        if (Facet.size() != 3u)
-                            continue;
-                        if (std::fabs(Clipper2Lib::Area(Facet)) < ClipperScale * ClipperScale * 1.0e-3)
-                            continue;
-
-                        std::vector<WeldedPoint> Ring;
-                        Ring.reserve(3u);
-                        for (const Point64& Vertex : Facet)
-                        {
-                            Ring.push_back(Weld(static_cast<double>(Vertex.x) / ClipperScale,
-                                                static_cast<double>(Vertex.y) / ClipperScale,
-                                                Depth, Derived, Specification, Mesh));
-                        }
-                        Mesh.AddTriangle(Ring[0].Index, Ring[1].Index, Ring[2].Index,
-                                         Ring[0].Attribute, Ring[1].Attribute, Ring[2].Attribute);
-                        ++Metrics.FloorTriangle;
+                        Ring.push_back(Weld(static_cast<double>(Vertex.x) / ClipperScale,
+                                            static_cast<double>(Vertex.y) / ClipperScale,
+                                            Depth, Derived, Specification, Mesh));
                     }
+                    Mesh.AddTriangle(Ring[0].Index, Ring[1].Index, Ring[2].Index,
+                                     Ring[0].Attribute, Ring[1].Attribute, Ring[2].Attribute);
+                    ++Metrics.FloorTriangle;
                 }
             }
         }
@@ -358,14 +474,22 @@ TreadMeshMetrics SolveTreadMesh(const TreadRegionResult&  Regions,
             if (Contour.Hole)
                 continue;
 
-            const std::vector<TreadContourPoint> Dense =
-                SubdivideByGrid(Contour.Points, Circumference, Columns, Lateral);
+            Path64 Raw;
+            Raw.reserve(Contour.Points.size());
+            for (const TreadContourPoint& Point : Contour.Points)
+                Raw.push_back(Point64(Unit(Point.Circumferential), Unit(Point.Lateral)));
+
+            const Path64 Dense = SubdivideGrid(Raw, Circumference, Columns, Lateral);
             const size_t Count = Dense.size();
 
             for (size_t Step = 0; Step < Count; ++Step)
             {
-                const TreadContourPoint& From = Dense[Step];
-                const TreadContourPoint& To   = Dense[(Step + 1u) % Count];
+                const TreadContourPoint From{
+                    static_cast<float>(static_cast<double>(Dense[Step].x) / ClipperScale),
+                    static_cast<float>(static_cast<double>(Dense[Step].y) / ClipperScale) };
+                const TreadContourPoint To{
+                    static_cast<float>(static_cast<double>(Dense[(Step + 1u) % Count].x) / ClipperScale),
+                    static_cast<float>(static_cast<double>(Dense[(Step + 1u) % Count].y) / ClipperScale) };
 
                 const WeldedPoint TopFrom = Weld(From.Circumferential, From.Lateral, Upper,
                                                  Derived, Specification, Mesh);
