@@ -101,6 +101,16 @@ class Patch:
             du=np.diff(X,axis=0)[:,:-1]; dv=np.diff(X,axis=1)[:-1]
             jac=du[...,0]*dv[...,1]-du[...,1]*dv[...,0]
             self.fold=float((np.sign(jac)!=np.sign(np.median(jac))).mean())
+            if self.fold>0:                # thin/wedge quads: untangle the parameter grid by local Laplace smoothing around folded cells (boundary fixed)
+                from scipy.ndimage import binary_dilation
+                for it in range(400):
+                    bad=(np.sign(jac)!=np.sign(np.median(jac)))
+                    if not bad.any(): break
+                    m=np.zeros(X.shape[:2],bool); m[:-1,:-1]|=bad; m[1:,:-1]|=bad; m[:-1,1:]|=bad; m[1:,1:]|=bad
+                    m=binary_dilation(m,iterations=3); m[0,:]=m[-1,:]=False; m[:,0]=m[:,-1]=False
+                    Y=X.copy(); Y[1:-1,1:-1]=0.25*(X[2:,1:-1]+X[:-2,1:-1]+X[1:-1,2:]+X[1:-1,:-2]); X=np.where(m[...,None],Y,X)
+                    du=np.diff(X,axis=0)[:,:-1]; dv=np.diff(X,axis=1)[:-1]; jac=du[...,0]*dv[...,1]-du[...,1]*dv[...,0]
+                self.fold=float((np.sign(jac)!=np.sign(np.median(jac))).mean())
             H=S.ray(X.reshape(-1,2),self.axis,self.pick,eps=0.6).reshape(nu,nv,3)
         self.miss=float(np.isnan(H[...,0]).mean())
         G=fill_nan(H.copy())
