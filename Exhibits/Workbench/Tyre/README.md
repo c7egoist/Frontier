@@ -58,14 +58,14 @@ as its gate.
 
 ## TreadMeshProof — the Phase 1 gate
 
-The C++ gate for the ported builder, against `Engine/ContentInterchange/Tyre`. Build and run:
+The C++ gate for the ported builder, against `Engine/Generators/Tyre`. Build and run:
 
 ```
 CL=Frontier/ExternalPackages/clipper2/CPP/Clipper2Lib        # python3 Frontier/Tools/Bootstrap.py --package clipper2
 g++ -std=c++20 -O2 -w -I $CL/include -o _AgentScratch/build/tyre/TreadMeshProof \
     Exhibits/Workbench/Tyre/TreadMeshProof.cpp \
-    Frontier/Engine/ContentInterchange/Tyre/TyreMeshStructure.cpp \
-    Frontier/Engine/ContentInterchange/Tyre/TreadRegionSolver.cpp \
+    Frontier/Engine/Generators/Tyre/TyreMeshStructure.cpp \
+    Frontier/Engine/Generators/Tyre/TreadRegionSolver.cpp \
     $CL/src/clipper.engine.cpp $CL/src/clipper.offset.cpp $CL/src/clipper.rectclip.cpp
 ./_AgentScratch/build/tyre/TreadMeshProof
 ```

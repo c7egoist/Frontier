@@ -415,26 +415,26 @@ namespace {
 using Field = TreadLayerField;
 using Descriptor = TreadLayerFieldDescriptor;
 
-const Descriptor kPosition { Field::Position,      "Across position",  -1.3f,  1.3f, 0.01f };
-const Descriptor kWidth    { Field::Width,         "Width (mm)",        0.5f, 30.0f, 0.1f  };
-const Descriptor kDepth    { Field::DepthFraction, "Depth (×tread)",    0.05f, 1.0f, 0.01f };
-const Descriptor kZig      { Field::Zig,           "Zig-zag (mm)",      0.0f, 12.0f, 0.1f  };
-const Descriptor kZigCount { Field::ZigCount,      "Zig-zag count",     4.0f, 240.0f, 1.0f };
-const Descriptor kCount    { Field::Count,         "Count around",      2.0f, 300.0f, 1.0f };
-const Descriptor kAngle    { Field::Angle,         "Angle (°)",       -80.0f, 80.0f, 1.0f  };
-const Descriptor kFrom     { Field::From,          "From (across)",    -1.3f,  1.3f, 0.01f };
-const Descriptor kTo       { Field::To,            "To (across)",      -1.3f,  1.3f, 0.01f };
-const Descriptor kPhase    { Field::Phase,         "Phase",             0.0f,  1.0f, 0.01f };
-const Descriptor kCurve    { Field::Curve,         "Curvature",        -1.5f,  1.5f, 0.01f };
-const Descriptor kRows     { Field::Rows,          "Rows",              1.0f, 14.0f, 1.0f  };
-const Descriptor kRadius   { Field::Radius,        "Radius (mm)",       0.5f, 15.0f, 0.1f  };
-const Descriptor kSize     { Field::Size,          "Cell size (mm)",    4.0f, 40.0f, 0.5f  };
-const Descriptor kRotate   { Field::Rotate,        "Cell rotation (°)", 0.0f, 60.0f, 1.0f  };
-const Descriptor kAmount   { Field::Amount,        "Amount",            0.0f,  0.5f, 0.01f };
-const Descriptor kScale    { Field::Scale,         "Scale",             1.0f, 12.0f, 0.5f  };
-const Descriptor kMirror   { Field::Mirror,        "Mirror (V)",        0.0f,  1.0f, 1.0f, true };
-const Descriptor kStagger  { Field::Stagger,       "Stagger rows",      0.0f,  1.0f, 1.0f, true };
-const Descriptor kRing     { Field::Ring,          "Rings instead of dots", 0.0f, 1.0f, 1.0f, true };
+const Descriptor PositionField { Field::Position,      "Across position",  -1.3f,  1.3f, 0.01f };
+const Descriptor WidthField    { Field::Width,         "Width (mm)",        0.5f, 30.0f, 0.1f  };
+const Descriptor DepthField    { Field::DepthFraction, "Depth (×tread)",    0.05f, 1.0f, 0.01f };
+const Descriptor ZigField      { Field::Zig,           "Zig-zag (mm)",      0.0f, 12.0f, 0.1f  };
+const Descriptor ZigCountField { Field::ZigCount,      "Zig-zag count",     4.0f, 240.0f, 1.0f };
+const Descriptor CountField    { Field::Count,         "Count around",      2.0f, 300.0f, 1.0f };
+const Descriptor AngleField    { Field::Angle,         "Angle (°)",       -80.0f, 80.0f, 1.0f  };
+const Descriptor FromField     { Field::From,          "From (across)",    -1.3f,  1.3f, 0.01f };
+const Descriptor ToField       { Field::To,            "To (across)",      -1.3f,  1.3f, 0.01f };
+const Descriptor PhaseField    { Field::Phase,         "Phase",             0.0f,  1.0f, 0.01f };
+const Descriptor CurveField    { Field::Curve,         "Curvature",        -1.5f,  1.5f, 0.01f };
+const Descriptor RowsField     { Field::Rows,          "Rows",              1.0f, 14.0f, 1.0f  };
+const Descriptor RadiusField   { Field::Radius,        "Radius (mm)",       0.5f, 15.0f, 0.1f  };
+const Descriptor SizeField     { Field::Size,          "Cell size (mm)",    4.0f, 40.0f, 0.5f  };
+const Descriptor RotateField   { Field::Rotate,        "Cell rotation (°)", 0.0f, 60.0f, 1.0f  };
+const Descriptor AmountField   { Field::Amount,        "Amount",            0.0f,  0.5f, 0.01f };
+const Descriptor ScaleField    { Field::Scale,         "Scale",             1.0f, 12.0f, 0.5f  };
+const Descriptor MirrorField   { Field::Mirror,        "Mirror (V)",        0.0f,  1.0f, 1.0f, true };
+const Descriptor StaggerField  { Field::Stagger,       "Stagger rows",      0.0f,  1.0f, 1.0f, true };
+const Descriptor RingField     { Field::Ring,          "Rings instead of dots", 0.0f, 1.0f, 1.0f, true };
 
 }   // namespace
 
@@ -443,18 +443,18 @@ std::vector<TreadLayerFieldDescriptor> DescribeLayerFields(TreadLayerKind Kind)
     switch (Kind)
     {
         case TreadLayerKind::Circumferential:
-            return { kPosition, kWidth, kDepth, kZig, kZigCount };
+            return { PositionField, WidthField, DepthField, ZigField, ZigCountField };
         case TreadLayerKind::Lateral:
         case TreadLayerKind::Sipe:
-            return { kCount, kAngle, kWidth, kDepth, kFrom, kTo, kPhase, kMirror, kCurve, kZig };
+            return { CountField, AngleField, WidthField, DepthField, FromField, ToField, PhaseField, MirrorField, CurveField, ZigField };
         case TreadLayerKind::Chevron:
-            return { kCount, kAngle, kWidth, kDepth, kFrom, kTo, kPhase, kMirror, kCurve, kZig };
+            return { CountField, AngleField, WidthField, DepthField, FromField, ToField, PhaseField, MirrorField, CurveField, ZigField };
         case TreadLayerKind::Dimple:
-            return { kRows, kCount, kRadius, kDepth, kFrom, kTo, kStagger, kRing };
+            return { RowsField, CountField, RadiusField, DepthField, FromField, ToField, StaggerField, RingField };
         case TreadLayerKind::Hexagon:
-            return { kSize, kWidth, kDepth, kFrom, kTo, kRotate };
+            return { SizeField, WidthField, DepthField, FromField, ToField, RotateField };
         case TreadLayerKind::Noise:
-            return { kAmount, kScale };
+            return { AmountField, ScaleField };
         default:
             return {};
     }
@@ -573,12 +573,12 @@ private:
     uint32_t State_ = 1u;
 };
 
-const std::vector<std::string> kPrefixes = {
+const std::vector<std::string> NamePrefixes = {
     "Grizzly", "Vortex", "Phantom", "Raptor", "Kestrel", "Nomad", "Viper", "Comet", "Ghost", "Ember",
     "Frost", "Monsoon", "Talon", "Rogue", "Sabre", "Nitro", "Onyx", "Havoc", "Quasar", "Slate",
     "Cobra", "Tempest", "Falcon"
 };
-const std::vector<std::string> kSuffixes = {
+const std::vector<std::string> NameSuffixes = {
     "Magnum", "R1", "GT", "Zero", "Cut", "Sport", "X", "Drift", "Evo", "Nova",
     "S3", "Grip", "Blade", "Trail", "RS", "TC", "Rain", "Ice"
 };
@@ -597,9 +597,9 @@ std::string RandomTyreName(uint32_t Seed)
     }
     if (Which < 0.35f)
     {
-        return R.Pick(kPrefixes) + " " + R.Pick(kSuffixes) + " " + std::to_string(R.Whole(2, 9));
+        return R.Pick(NamePrefixes) + " " + R.Pick(NameSuffixes) + " " + std::to_string(R.Whole(2, 9));
     }
-    return R.Pick(kPrefixes) + " " + R.Pick(kSuffixes);
+    return R.Pick(NamePrefixes) + " " + R.Pick(NameSuffixes);
 }
 
 void RandomiseTyreDesign(TreadSpecification& Carcass, TreadPatternSpecification& Pattern,
@@ -610,15 +610,15 @@ void RandomiseTyreDesign(TreadSpecification& Carcass, TreadPatternSpecification&
 
     // ① the canonical size for the category, jittered by one step either way
     struct Canonical { const char* Kind; float Width; float Aspect; float Rim; float Depth; };
-    static const Canonical kSizes[10] = {
+    static const Canonical CanonicalSizes[10] = {
         { "Slick",      305.0f, 30.0f, 19.0f,  4.0f }, { "Semi-slick", 265.0f, 35.0f, 18.0f,  5.0f },
         { "Drift",      235.0f, 40.0f, 18.0f,  6.0f }, { "Street",     205.0f, 55.0f, 16.0f,  8.0f },
         { "Grip / UHP", 255.0f, 35.0f, 19.0f,  7.0f }, { "Wet",        245.0f, 45.0f, 18.0f, 10.0f },
         { "Winter",     215.0f, 60.0f, 16.0f, 10.0f }, { "Rally",      235.0f, 70.0f, 15.0f, 14.0f },
         { "Off-road",   285.0f, 70.0f, 17.0f, 15.0f }, { "Drag",       375.0f, 50.0f, 15.0f,  4.0f }
     };
-    const Canonical* Size = &kSizes[0];
-    for (const Canonical& Entry : kSizes)
+    const Canonical* Size = &CanonicalSizes[0];
+    for (const Canonical& Entry : CanonicalSizes)
     {
         if (Kind == Entry.Kind)
         {
@@ -640,20 +640,20 @@ void RandomiseTyreDesign(TreadSpecification& Carcass, TreadPatternSpecification&
     const int Grooves = Smooth ? 0
                       : (Kind == "Semi-slick" || Kind == "Drift") ? R.Whole(1, 2)
                                                                   : R.Whole(2, 4);
-    const std::vector<std::vector<float>> kSeats = {
+    const std::vector<std::vector<float>> GrooveSeats = {
         {}, { 0.0f }, { -0.3f, 0.3f }, { -0.5f, 0.0f, 0.5f }, { -0.6f, -0.2f, 0.2f, 0.6f }
     };
     const float Zig = (Kind == "Off-road" || Kind == "Rally") ? R.Between(3.0f, 7.0f)
                     : (Kind == "Winter")                      ? R.Between(0.0f, 2.0f)
                                                               : 0.0f;
-    for (const float Seat : kSeats[size_t(Grooves)])
+    for (const float Seat : GrooveSeats[size_t(Grooves)])
     {
         Pattern.Layers.push_back(Circ(Seat, R.Between(5.0f, 11.0f), Zig, float(R.Whole(22, 80))));
     }
 
     // ③ the blocks, in one of five families
-    static const std::vector<std::string> kStyles = { "sym", "dir", "asym", "hex", "dot" };
-    const std::string Style = R.Pick(kStyles);
+    static const std::vector<std::string> BlockStyles = { "sym", "dir", "asym", "hex", "dot" };
+    const std::string Style = R.Pick(BlockStyles);
     if (Smooth)
     {
         Pattern.Layers.push_back(Dimple(2, float(R.Whole(3, 6)), 2.5f, 0.7f, -0.6f, 0.6f, false));

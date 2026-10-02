@@ -8,11 +8,11 @@
 #include <cstdint>
 #include <string>
 
-#include "ContentInterchange/Tyre/RimSpecification.h"
-#include "ContentInterchange/Tyre/TreadPatternRaster.h"
-#include "ContentInterchange/Tyre/TreadPatternSpecification.h"
-#include "ContentInterchange/Tyre/TreadSpecification.h"
-#include "ContentInterchange/Tyre/TyreAppearanceSpecification.h"
+#include "Generators/Tyre/RimSpecification.h"
+#include "Generators/Tyre/TreadPatternRaster.h"
+#include "Generators/Tyre/TreadPatternSpecification.h"
+#include "Generators/Tyre/TreadSpecification.h"
+#include "Generators/Tyre/TyreAppearanceSpecification.h"
 
 namespace Frontier {
 

@@ -8,8 +8,8 @@
 #include "EditorHost.h"
 #include "ControlPanel.h"
 #include "EditorInstance.h"
-#include "TyreGeneratorWindow.h"
-#include "../../../Engine/ContentInterchange/Tyre/TyrePresetLibrary.h"
+#include "../../../Engine/Generators/Tyre/TyreGeneratorWindow.h"
+#include "../../../Engine/Generators/Tyre/TyrePresetLibrary.h"
 #include "TyreInspectorPanel.h"
 #include "../../../Projects/Project-Drive/Source/TyreGeneratorSequence.h"
 

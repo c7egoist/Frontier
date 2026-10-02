@@ -12,9 +12,11 @@
 #include <imgui_internal.h>   // DockBuilder*: the first-seat columns are built, not dragged
 
 #include "../DisplayPresentation/FidelityClassifier.h"
+#include "../ContentInterchange/AssetResolution.h"   // ResolveAssetText: faces come from the content folder
 
 #include <algorithm>
 #include <cstdio>
+#include <string>
 
 namespace Frontier {
 
@@ -427,20 +429,27 @@ void EditorHost::ApplyTheme() noexcept
     Tints[ImGuiCol_DockingPreview]        = ImVec4(1.000f, 1.000f, 1.000f, 0.12f);
     Tints[ImGuiCol_TextSelectedBg]        = ImVec4(0.424f, 0.467f, 1.000f, 0.35f);
 
-    // Faces. Outfit carries the chrome — the celestial page's own face, its 300 body weight, 300 title and
-    //    200 census numerals — and JetBrains Mono the figures, as the page's --mono. Each archive is probed
-    //    before it is read, so a missing archive falls back to the raster default instead of tripping an
-    //    assert — and the proof gates the seated count, so the fallback never passes silently. The seated
-    //    size is a base: the panels ask each face for the page's own pixel size at draw time.
+    // Faces. Every face comes out of the content folder — `EngineContent/Fonts/` — and nowhere else, so the
+    //    editor reads what is actually shipped rather than what a path string wishes were shipped. DM Sans
+    //    carries the chrome: Light for the body and the title, Regular for the small label and the figures.
+    //    📝 The content folder holds no monospaced face, so the figure columns are seated from DM Sans
+    //    Regular. Figures there are proportional, so a changing number can shimmer by a fraction of a pixel;
+    //    drop a mono face into `EngineContent/Fonts/` and point `FigureFacePath` at it to settle them.
+    //    Paths run through `ResolveAssetText`, which walks up from the executable and the working directory
+    //    to the nearest ancestor holding `EngineContent` — bare relative paths only worked when the host
+    //    happened to be launched from the repository root. Each archive is still probed before it is read,
+    //    so a missing archive falls back to the raster default instead of tripping an assert — and the proof
+    //    gates the seated count, so the fallback never passes silently. The seated size is a base: the
+    //    panels ask each face for the page's own pixel size at draw time.
     if (!FontsSeated_)
     {
         FontsSeated_ = true;
         ImGuiIO& IO = ImGui::GetIO();
-        const char* SansFaces    = "EngineContent/FontArchives/Outfit/Outfit-Light.ttf";
-        const char* SmallFaces   = "EngineContent/FontArchives/Outfit/Outfit-Regular.ttf";
-        const char* MonoFaces    = "EngineContent/FontArchives/JetBrainsMono/JetBrainsMono-Regular.ttf";
-        const char* TitleFaces   = "EngineContent/FontArchives/Outfit/Outfit-Light.ttf";
-        const char* DisplayFaces = "EngineContent/FontArchives/Outfit/Outfit-ExtraLight.ttf";
+        const std::string BodyFacePath    = ResolveAssetText("EngineContent/Fonts/SunReference/DMSans-Light.ttf");
+        const std::string LabelFacePath   = ResolveAssetText("EngineContent/Fonts/SunReference/DMSans-Regular.ttf");
+        const std::string FigureFacePath  = ResolveAssetText("EngineContent/Fonts/SunReference/DMSans-Regular.ttf");
+        const std::string TitleFacePath   = ResolveAssetText("EngineContent/Fonts/SunReference/DMSans-Light.ttf");
+        const std::string DisplayFacePath = ResolveAssetText("EngineContent/Fonts/SunReference/DMSans-Light.ttf");
 
         // The chrome faces carry the punctuation the panels speak: the middot, the degree sign, the
         //    multiplication sign, the em dash, the curly quotes, the ellipsis, and the command key.
@@ -457,12 +466,12 @@ void EditorHost::ApplyTheme() noexcept
             return IO.Fonts->AddFontFromFileTTF(Path, Size, nullptr, Ranges);
         };
 
-        ImFont* Ui        = SeatFace(SansFaces, 13.0f, SansRanges);
-        ImFont* Small     = SeatFace(SmallFaces, 11.0f, SansRanges);
-        ImFont* Mono      = SeatFace(MonoFaces, 13.0f, SansRanges);
-        ImFont* MonoSmall = SeatFace(MonoFaces, 11.0f, SansRanges);
-        ImFont* Title     = SeatFace(TitleFaces, 20.0f, SansRanges);
-        ImFont* Display   = SeatFace(DisplayFaces, 30.0f, SansRanges);
+        ImFont* Ui        = SeatFace(BodyFacePath.c_str(), 13.0f, SansRanges);
+        ImFont* Small     = SeatFace(LabelFacePath.c_str(), 11.0f, SansRanges);
+        ImFont* Mono      = SeatFace(FigureFacePath.c_str(), 13.0f, SansRanges);
+        ImFont* MonoSmall = SeatFace(FigureFacePath.c_str(), 11.0f, SansRanges);
+        ImFont* Title     = SeatFace(TitleFacePath.c_str(), 20.0f, SansRanges);
+        ImFont* Display   = SeatFace(DisplayFacePath.c_str(), 30.0f, SansRanges);
         FontCount_ = (Ui != nullptr ? 1 : 0) + (Small != nullptr ? 1 : 0)
                    + (Mono != nullptr ? 1 : 0) + (MonoSmall != nullptr ? 1 : 0);
         if (Ui != nullptr)

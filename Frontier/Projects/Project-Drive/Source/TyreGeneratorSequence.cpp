@@ -19,11 +19,11 @@ namespace {
 // The outliner's own category colours, so nothing here is invented: a row's tint is the colour the panel already
 //    uses for that kind of thing, and the selection bar picks it up for free.
 
-constexpr float kBodies[3]   = { 0.874f, 0.902f, 0.961f };   // #DFE6F5
-constexpr float kGeometry[3] = { 0.886f, 0.910f, 0.941f };   // #E2E8F0
-constexpr float kSky[3]      = { 0.353f, 0.663f, 1.000f };   // #5AA9FF
-constexpr float kCamera[3]   = { 0.204f, 0.780f, 0.349f };   // #34C759
-constexpr float kPeriwinkle[3] = { 0.424f, 0.467f, 1.000f }; // #6C77FF
+constexpr float BodiesTint[3]   = { 0.874f, 0.902f, 0.961f };   // #DFE6F5
+constexpr float GeometryTint[3] = { 0.886f, 0.910f, 0.941f };   // #E2E8F0
+constexpr float SkyTint[3]      = { 0.353f, 0.663f, 1.000f };   // #5AA9FF
+constexpr float CameraTint[3]   = { 0.204f, 0.780f, 0.349f };   // #34C759
+constexpr float PeriwinkleTint[3] = { 0.424f, 0.467f, 1.000f }; // #6C77FF
 
 void Seat(EditorInstance& Row, const char* Label, uint64_t Key, uint32_t Depth,
           EditorInstanceCategory Category, const float Tint[3], EditorGlyph Glyph) noexcept
@@ -209,7 +209,7 @@ uint32_t TyreGeneratorSequence::FillRoster(EditorInstance* Rows, uint32_t First,
     }
     EditorInstance& Tyre = Rows[First + Written++];
     Seat(Tyre, "Tyre", TyreInspectorKey(TyreSection::Tyre), Depth,
-         EditorInstanceCategory::Geometry, kBodies, EditorGlyph::Orbit);
+         EditorInstanceCategory::Geometry, BodiesTint, EditorGlyph::Orbit);
     std::snprintf(Tyre.Meta, sizeof(Tyre.Meta), "%s", Document.Pattern.Name.c_str());
     Tyre.Component = false;
     Tyre.Dynamic   = true;
@@ -223,7 +223,7 @@ uint32_t TyreGeneratorSequence::FillRoster(EditorInstance* Rows, uint32_t First,
     }
     EditorInstance& Carcass = Rows[First + Written++];
     Seat(Carcass, "Carcass", TyreInspectorKey(TyreSection::Carcass), Depth + 1u,
-         EditorInstanceCategory::Geometry, kGeometry, EditorGlyph::Flat);
+         EditorInstanceCategory::Geometry, GeometryTint, EditorGlyph::Flat);
     std::snprintf(Carcass.Meta, sizeof(Carcass.Meta), "%g/%gR%g",
                   double(Document.Tread.Width), double(Document.Tread.Aspect), double(Document.Tread.Rim));
 
@@ -234,7 +234,7 @@ uint32_t TyreGeneratorSequence::FillRoster(EditorInstance* Rows, uint32_t First,
     }
     EditorInstance& Pattern = Rows[First + Written++];
     Seat(Pattern, "Tread pattern", TyreInspectorKey(TyreSection::Pattern), Depth + 1u,
-         EditorInstanceCategory::Geometry, kSky, EditorGlyph::Lattice);
+         EditorInstanceCategory::Geometry, SkyTint, EditorGlyph::Lattice);
     std::snprintf(Pattern.Meta, sizeof(Pattern.Meta), "%u layers", unsigned(Document.Pattern.Layers.size()));
     Pattern.KidCount = uint32_t(Document.Pattern.Layers.size());
     std::snprintf(Pattern.Tag, sizeof(Pattern.Tag), "%s", "Generator");
@@ -248,7 +248,7 @@ uint32_t TyreGeneratorSequence::FillRoster(EditorInstance* Rows, uint32_t First,
         const TreadLayerSpecification& Layer = Document.Pattern.Layers[I];
         EditorInstance& Row = Rows[First + Written++];
         Seat(Row, KindLabel(Layer.Kind), TyreInspectorKey(TyreSection::Layer, I), Depth + 2u,
-             EditorInstanceCategory::Geometry, kSky, EditorGlyph::Sliders);
+             EditorInstanceCategory::Geometry, SkyTint, EditorGlyph::Sliders);
         std::snprintf(Row.Meta, sizeof(Row.Meta), "%.1f mm",
                       double(Layer.DepthFraction * Document.Tread.TreadDepth));
         if (Layer.Kind == TreadLayerKind::Noise)
@@ -264,7 +264,7 @@ uint32_t TyreGeneratorSequence::FillRoster(EditorInstance* Rows, uint32_t First,
     }
     EditorInstance& Decals = Rows[First + Written++];
     Seat(Decals, "Sidewall decals", TyreInspectorKey(TyreSection::Decals), Depth + 1u,
-         EditorInstanceCategory::Geometry, kCamera, EditorGlyph::Palette);
+         EditorInstanceCategory::Geometry, CameraTint, EditorGlyph::Palette);
     Decals.Standing = EditorStanding::Warn;
     std::snprintf(Decals.StandingNote, sizeof(Decals.StandingNote), "%s", "Phase 4");
     std::snprintf(Decals.Meta, sizeof(Decals.Meta), "%s", "0 placed");
@@ -276,7 +276,7 @@ uint32_t TyreGeneratorSequence::FillRoster(EditorInstance* Rows, uint32_t First,
     }
     EditorInstance& Lattice = Rows[First + Written++];
     Seat(Lattice, "XPBD lattice", TyreInspectorKey(TyreSection::Lattice), Depth + 1u,
-         EditorInstanceCategory::Geometry, kPeriwinkle, EditorGlyph::Lattice);
+         EditorInstanceCategory::Geometry, PeriwinkleTint, EditorGlyph::Lattice);
     std::snprintf(Lattice.Meta, sizeof(Lattice.Meta), "%ux%u",
                   unsigned(Document.Carcass.Rings), unsigned(Document.Carcass.Segments));
     Lattice.Physics = true;

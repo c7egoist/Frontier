@@ -25,3 +25,4 @@ Frontier/ExternalPackages/*
 !Frontier/ExternalPackages/README.md
 Frontier/.cache/
 Frontier/build/
+image-search/

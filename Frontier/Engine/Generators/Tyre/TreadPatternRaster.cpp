@@ -234,7 +234,7 @@ void DrawLayers(DepthCanvas& Canvas, const TreadPatternSpecification& Pattern,
             {
                 const float Lean  = std::tan(Layer.Angle * π / 180.0f);
                 const int   Count = std::max(1, int(std::lround(Layer.Count)));
-                constexpr int kSteps = 14;
+                constexpr int StepsAlongSlot = 14;
 
                 for (int I = 0; I < Count; ++I)
                 {
@@ -244,10 +244,10 @@ void DrawLayers(DepthCanvas& Canvas, const TreadPatternSpecification& Pattern,
                     {
                         const float Sign = (S == 0) ? 1.0f : -1.0f;
                         std::vector<float> Points;
-                        Points.reserve(size_t(kSteps + 1) * 2u);
-                        for (int J = 0; J <= kSteps; ++J)
+                        Points.reserve(size_t(StepsAlongSlot + 1) * 2u);
+                        for (int J = 0; J <= StepsAlongSlot; ++J)
                         {
-                            const float Across = Layer.From + (Layer.To - Layer.From) * float(J) / float(kSteps);
+                            const float Across = Layer.From + (Layer.To - Layer.From) * float(J) / float(StepsAlongSlot);
                             const float Y      = (Layer.Mirror ? Sign * Across : Across) * Half;
                             const float Reach  = Layer.Mirror ? std::abs(Across) : Across;
                             float X = Base + Reach * Half * Lean + Layer.Curve * Reach * Reach * Half * 0.5f;

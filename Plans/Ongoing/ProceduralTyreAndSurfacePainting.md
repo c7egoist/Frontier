@@ -49,7 +49,7 @@ another patch to it.
 ### Files
 
 ```
-Frontier/Engine/ContentInterchange/Tyre/
+Frontier/Engine/Generators/Tyre/
     TreadSpecification.h            carcass parameters: width, aspect, rim, depth, crown, shoulder, wear
     TreadPatternSpecification.h     the layer sequence: circ, lateral, chevron, sipe, dimple, hex, noise
     TreadRegionSolver.{h,cpp}       boolean stack to depth-ordered floor pieces

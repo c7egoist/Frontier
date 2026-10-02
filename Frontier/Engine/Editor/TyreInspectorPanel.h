@@ -6,8 +6,8 @@
 
 #pragma once
 
-#include "../ContentInterchange/Tyre/TreadSpecification.h"
-#include "../ContentInterchange/Tyre/TreadPatternSpecification.h"
+#include "../Generators/Tyre/TreadSpecification.h"
+#include "../Generators/Tyre/TreadPatternSpecification.h"
 
 namespace Frontier {
 

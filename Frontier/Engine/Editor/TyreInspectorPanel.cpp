@@ -9,7 +9,7 @@
 #include "ControlPanel.h"
 #include "EditorInstance.h"
 
-#include "../ContentInterchange/Tyre/TyreProfileSpecification.h"
+#include "../Generators/Tyre/TyreProfileSpecification.h"
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -28,19 +28,19 @@ namespace {
 //------------------------------------------------------------------------------------------------------------------------
 // The inspector's own seats, so the tyre page cannot drift from the pages beside it.
 
-constexpr ImU32 kInset  = IM_COL32(26, 26, 26, 255);    // the card seat
-constexpr ImU32 kStroke = IM_COL32(255, 255, 255, 13);  // rgba(255,255,255,.05)
-constexpr ImU32 kText   = IM_COL32(240, 240, 240, 255);
-constexpr ImU32 kDim    = IM_COL32(136, 136, 136, 255);
-constexpr ImU32 kFaint  = IM_COL32(92, 92, 92, 255);
-constexpr ImU32 kFigure = IM_COL32(255, 255, 255, 255);
-constexpr ImU32 kFraction = IM_COL32(94, 94, 94, 255);  // the dimmed decimal of a display figure
-constexpr ImU32 kSeated = IM_COL32(42, 42, 42, 255);
+constexpr ImU32 CardInsetTint  = IM_COL32(26, 26, 26, 255);    // the card seat
+constexpr ImU32 StrokeTint = IM_COL32(255, 255, 255, 13);  // rgba(255,255,255,.05)
+constexpr ImU32 TextTint   = IM_COL32(240, 240, 240, 255);
+constexpr ImU32 DimTint    = IM_COL32(136, 136, 136, 255);
+constexpr ImU32 FaintTint  = IM_COL32(92, 92, 92, 255);
+constexpr ImU32 FigureColumnWidth = IM_COL32(255, 255, 255, 255);
+constexpr ImU32 FractionColumnWidth = IM_COL32(94, 94, 94, 255);  // the dimmed decimal of a display figure
+constexpr ImU32 SeatedFaceSize = IM_COL32(42, 42, 42, 255);
 
-constexpr float kCardRadius = 18.0f;
-constexpr float kCardPadX   = 17.0f;
-constexpr float kBarW       = 3.0f;
-constexpr float kBarH       = 13.0f;
+constexpr float CardCornerRadius = 18.0f;
+constexpr float CardSidePad   = 17.0f;
+constexpr float MeterWidth       = 3.0f;
+constexpr float MeterHeight       = 13.0f;
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                       SHEET READS
@@ -94,7 +94,7 @@ void SplitFigure(float Value, uint32_t Decimals, char* Whole, size_t WholeSize, 
 //    it strokes where the solver will cut, it does not run the boolean partition. TreadRegionSolver remains the
 //    geometry of record; this exists so the generator shows the tyre while it is being authored.
 
-constexpr float kPi = 3.14159265358979323846f;
+constexpr float HalfTurnRadians = 3.14159265358979323846f;
 
 struct GrooveStroke
 {
@@ -159,7 +159,7 @@ void CollectGrooves(const TreadLayerSpecification& Layer, const TreadSpecificati
     // The lateral family: Lateral, Chevron, Sipe — and Hexagon, previewed as its two lattice diagonals.
     const int   Count = Layer.Count < 1.0f ? 1 : int(Layer.Count + 0.5f);
     const int   Steps = (Layer.Curve != 0.0f) ? 8 : 1;
-    const float Lean  = std::tan((Layer.Angle < -75.0f ? -75.0f : (Layer.Angle > 75.0f ? 75.0f : Layer.Angle)) * kPi / 180.0f);
+    const float Lean  = std::tan((Layer.Angle < -75.0f ? -75.0f : (Layer.Angle > 75.0f ? 75.0f : Layer.Angle)) * HalfTurnRadians / 180.0f);
     const bool  Mirrored = (Layer.Kind == TreadLayerKind::Chevron) && Layer.Mirror;
 
     for (int I = 0; I < Count; ++I)
@@ -232,7 +232,7 @@ void DrawTyreFace(ImDrawList* Draw, ImVec2 Centre, float Pixels, const TreadSpec
             Wrapped.reserve(Stroke.Points.size());
             for (const ImVec2& P : Stroke.Points)
             {
-                const float Angle  = (P.x / Derived.Circumference) * 2.0f * kPi - kPi * 0.5f;
+                const float Angle  = (P.x / Derived.Circumference) * 2.0f * HalfTurnRadians - HalfTurnRadians * 0.5f;
                 const float Across = 0.5f + 0.5f * (P.y / Derived.AcrossHalf);
                 const float Radius = BandInner + (BandOuter - BandInner) * Across;
                 Wrapped.push_back(ImVec2(Centre.x + std::cos(Angle) * Radius, Centre.y + std::sin(Angle) * Radius));
@@ -282,14 +282,14 @@ void DrawTyreSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, const TreadSpecif
     auto At = [&](float Lateral, float Radius) noexcept -> ImVec2
     { return ImVec2(Origin.x + Lateral * Scale, Origin.y + (Derived.OuterRadius - Radius) * Scale); };
 
-    constexpr int kSamples = 96;
+    constexpr int SectionSamples = 96;
 
     // the rubber body
     std::vector<ImVec2> Body;
-    Body.reserve(kSamples + 3);
-    for (int I = 0; I <= kSamples; ++I)
+    Body.reserve(SectionSamples + 3);
+    for (int I = 0; I <= SectionSamples; ++I)
     {
-        const float Lateral = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I) / float(kSamples);
+        const float Lateral = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I) / float(SectionSamples);
         const TyreProfileSample S = EvaluateTyreProfile(Lateral, Specification, Derived);
         Body.push_back(At(S.Lateral, S.Radius));
     }
@@ -306,9 +306,9 @@ void DrawTyreSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, const TreadSpecif
         }
         const float Depth = Layer.DepthFraction * Specification.TreadDepth;
         ImVec2 Last{};
-        for (int I = 0; I <= kSamples; ++I)
+        for (int I = 0; I <= SectionSamples; ++I)
         {
-            const float Lateral = -Derived.TreadHalf + 2.0f * Derived.TreadHalf * float(I) / float(kSamples);
+            const float Lateral = -Derived.TreadHalf + 2.0f * Derived.TreadHalf * float(I) / float(SectionSamples);
             const TyreProfileSample S = EvaluateTyreProfile(Lateral, Specification, Derived);
             const ImVec2 Point = At(S.Lateral, S.Radius - Depth * S.ContactWeight);
             if (I > 0 && (I % 2) == 0)
@@ -320,10 +320,10 @@ void DrawTyreSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, const TreadSpecif
     }
 
     // the moulded surface
-    for (int I = 1; I <= kSamples; ++I)
+    for (int I = 1; I <= SectionSamples; ++I)
     {
-        const float A = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I - 1) / float(kSamples);
-        const float B = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I)     / float(kSamples);
+        const float A = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I - 1) / float(SectionSamples);
+        const float B = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I)     / float(SectionSamples);
         const TyreProfileSample SA = EvaluateTyreProfile(A, Specification, Derived);
         const TyreProfileSample SB = EvaluateTyreProfile(B, Specification, Derived);
         Draw->AddLine(At(SA.Lateral, SA.Radius), At(SB.Lateral, SB.Radius), IM_COL32(255, 255, 255, 230), 1.6f);
@@ -344,7 +344,7 @@ void RecordProperty(ControlPanel& Controls, EditorProperty& Property, float Labe
     const float  RowWidth = ImGui::GetContentRegionAvail().x;
 
     constexpr float RowHeight = 30.0f;
-    Draw->AddText(ImVec2(Origin.x, Origin.y + (RowHeight - ImGui::GetFontSize()) * 0.5f), kDim, Property.Label);
+    Draw->AddText(ImVec2(Origin.x, Origin.y + (RowHeight - ImGui::GetFontSize()) * 0.5f), DimTint, Property.Label);
 
     ImGui::SetCursorScreenPos(ImVec2(Origin.x + LabelWidth, Origin.y));
     ImGui::PushID(Property.Label);
@@ -400,7 +400,7 @@ float RecordCard(ControlPanel& Controls, EditorPropertyGroup& Group, ImU32 Tint,
     // The card's height has to be known before its seat is filled, so it is measured from what it will hold.
     //    The caption is MEASURED, not assumed: a two-line caption and a four-line caption are both common, and
     //    guessing one height for both is what put prose through the first slider.
-    const float CaptionWrap = Width - kCardPadX * 2.0f;
+    const float CaptionWrap = Width - CardSidePad * 2.0f;
     float CaptionHeight = 0.0f;
     if (HasCaption)
     {
@@ -412,14 +412,14 @@ float RecordCard(ControlPanel& Controls, EditorPropertyGroup& Group, ImU32 Tint,
     Height += CaptionHeight;
     Height += float(Group.PropertyCount) * 36.0f + 12.0f;
 
-    Draw->AddRectFilled(Origin, ImVec2(Origin.x + Width, Origin.y + Height), kInset, kCardRadius);
-    Draw->AddRect(Origin, ImVec2(Origin.x + Width, Origin.y + Height), kStroke, kCardRadius);
+    Draw->AddRectFilled(Origin, ImVec2(Origin.x + Width, Origin.y + Height), CardInsetTint, CardCornerRadius);
+    Draw->AddRect(Origin, ImVec2(Origin.x + Width, Origin.y + Height), StrokeTint, CardCornerRadius);
 
     // ① the tint bar and the title
     const float TitleY = Origin.y + 15.0f;
-    Draw->AddRectFilled(ImVec2(Origin.x + kCardPadX, TitleY),
-                        ImVec2(Origin.x + kCardPadX + kBarW, TitleY + kBarH), Tint, 1.5f);
-    Draw->AddText(ImVec2(Origin.x + kCardPadX + kBarW + 9.0f, TitleY - 1.0f), kText, Group.Title);
+    Draw->AddRectFilled(ImVec2(Origin.x + CardSidePad, TitleY),
+                        ImVec2(Origin.x + CardSidePad + MeterWidth, TitleY + MeterHeight), Tint, 1.5f);
+    Draw->AddText(ImVec2(Origin.x + CardSidePad + MeterWidth + 9.0f, TitleY - 1.0f), TextTint, Group.Title);
 
     float Cursor = TitleY + 20.0f;
 
@@ -431,17 +431,17 @@ float RecordCard(ControlPanel& Controls, EditorPropertyGroup& Group, ImU32 Tint,
         ImFont* Font = ImGui::GetFont();
         const float Size = 30.0f;
         const ImVec2 WholeSize = Font->CalcTextSizeA(Size, FLT_MAX, 0.0f, Whole);
-        Draw->AddText(Font, Size, ImVec2(Origin.x + kCardPadX, Cursor), kFigure, Whole);
-        float Pen = Origin.x + kCardPadX + WholeSize.x;
+        Draw->AddText(Font, Size, ImVec2(Origin.x + CardSidePad, Cursor), FigureColumnWidth, Whole);
+        float Pen = Origin.x + CardSidePad + WholeSize.x;
         if (Fraction[0] != '\0')
         {
             const ImVec2 FractionSize = Font->CalcTextSizeA(Size, FLT_MAX, 0.0f, Fraction);
-            Draw->AddText(Font, Size, ImVec2(Pen, Cursor), kFraction, Fraction);
+            Draw->AddText(Font, Size, ImVec2(Pen, Cursor), FractionColumnWidth, Fraction);
             Pen += FractionSize.x;
         }
         if (Headline->Unit[0] != '\0')
         {
-            Draw->AddText(Font, 12.0f, ImVec2(Pen + 5.0f, Cursor + Size - 15.0f), kDim, Headline->Unit);
+            Draw->AddText(Font, 12.0f, ImVec2(Pen + 5.0f, Cursor + Size - 15.0f), DimTint, Headline->Unit);
         }
         Cursor += 42.0f;
     }
@@ -449,14 +449,14 @@ float RecordCard(ControlPanel& Controls, EditorPropertyGroup& Group, ImU32 Tint,
     // ③ the caption, which is the card's one line of prose
     if (HasCaption)
     {
-        Draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(Origin.x + kCardPadX, Cursor), kDim,
+        Draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(Origin.x + CardSidePad, Cursor), DimTint,
                       Group.Caption, nullptr, CaptionWrap);
         Cursor += CaptionHeight;
     }
 
     // ④ the properties
-    const float Inner = Width - kCardPadX * 2.0f;
-    ImGui::SetCursorScreenPos(ImVec2(Origin.x + kCardPadX, Cursor));
+    const float Inner = Width - CardSidePad * 2.0f;
+    ImGui::SetCursorScreenPos(ImVec2(Origin.x + CardSidePad, Cursor));
     ImGui::PushID(Group.Title);
     ImGui::BeginChild("##card-rows", ImVec2(Inner, Height - (Cursor - Origin.y) - 8.0f),
                       ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);

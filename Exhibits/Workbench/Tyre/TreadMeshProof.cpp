@@ -3,11 +3,11 @@
 //============================================================================================================================================
 // 📦 Phase 1 gate: sweeps the moulded profile through TyreMeshStructure and audits the result for cracks.
 
-#include "../../../Frontier/Engine/ContentInterchange/Tyre/TreadSpecification.h"
-#include "../../../Frontier/Engine/ContentInterchange/Tyre/TyreProfileSpecification.h"
-#include "../../../Frontier/Engine/ContentInterchange/Tyre/TyreMeshStructure.h"
-#include "../../../Frontier/Engine/ContentInterchange/Tyre/TreadRegionSolver.h"
-#include "../../../Frontier/Engine/ContentInterchange/Tyre/TreadMeshSolver.h"
+#include "../../../Frontier/Engine/Generators/Tyre/TreadSpecification.h"
+#include "../../../Frontier/Engine/Generators/Tyre/TyreProfileSpecification.h"
+#include "../../../Frontier/Engine/Generators/Tyre/TyreMeshStructure.h"
+#include "../../../Frontier/Engine/Generators/Tyre/TreadRegionSolver.h"
+#include "../../../Frontier/Engine/Generators/Tyre/TreadMeshSolver.h"
 
 #include <cmath>
 #include <cstdio>

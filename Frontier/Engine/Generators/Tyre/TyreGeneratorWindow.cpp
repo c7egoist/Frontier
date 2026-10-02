@@ -13,9 +13,9 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
-#include "ContentInterchange/Tyre/TyreProfileSpecification.h"
-#include "ContentInterchange/Tyre/TyrePresetLibrary.h"
-#include "ControlPanel.h"
+#include "Generators/Tyre/TyreProfileSpecification.h"
+#include "Generators/Tyre/TyrePresetLibrary.h"
+#include "../../Editor/ControlPanel.h"
 
 namespace Frontier {
 
@@ -28,34 +28,34 @@ constexpr float π = 3.14159265358979323846f;
 //------------------------------------------------------------------------------------------------------------------------
 // 📝 The generator's own :root, as bytes. Nothing here is invented — every value is the stylesheet's.
 
-constexpr ImU32 kBackdrop = IM_COL32(0x0C, 0x0D, 0x0F, 255);
-constexpr ImU32 kCard     = IM_COL32(0x17, 0x18, 0x1B, 255);
-constexpr ImU32 kCard2    = IM_COL32(0x1E, 0x20, 0x24, 255);
-constexpr ImU32 kCard3    = IM_COL32(0x25, 0x27, 0x2C, 255);
-constexpr ImU32 kLine     = IM_COL32(255, 255, 255, 15);
-constexpr ImU32 kText     = IM_COL32(0xE6, 0xE7, 0xEA, 255);
-constexpr ImU32 kMuted    = IM_COL32(0x8A, 0x8D, 0x94, 255);
-constexpr ImU32 kDim      = IM_COL32(0x5C, 0x5F, 0x66, 255);
-constexpr ImU32 kWhite    = IM_COL32(255, 255, 255, 255);
-constexpr ImU32 kGreen    = IM_COL32(0x38, 0xC4, 0x6D, 255);
-constexpr ImU32 kYellow   = IM_COL32(0xD6, 0xC9, 0x3A, 255);
-constexpr ImU32 kRed      = IM_COL32(0xE5, 0x42, 0x3F, 255);
-constexpr ImU32 kOrange   = IM_COL32(0xF0, 0xA0, 0x4B, 255);
-constexpr ImU32 kTrack    = IM_COL32(0x2D, 0x30, 0x36, 255);
-constexpr ImU32 kViewport = IM_COL32(0x0B, 0x0C, 0x0E, 255);
-constexpr ImU32 kCanvas   = IM_COL32(0x11, 0x11, 0x11, 255);
+constexpr ImU32 BackdropTint = IM_COL32(0x0C, 0x0D, 0x0F, 255);
+constexpr ImU32 CardTint     = IM_COL32(0x17, 0x18, 0x1B, 255);
+constexpr ImU32 CardRaisedTint    = IM_COL32(0x1E, 0x20, 0x24, 255);
+constexpr ImU32 CardHoverTint    = IM_COL32(0x25, 0x27, 0x2C, 255);
+constexpr ImU32 HairlineTint     = IM_COL32(255, 255, 255, 15);
+constexpr ImU32 TextTint     = IM_COL32(0xE6, 0xE7, 0xEA, 255);
+constexpr ImU32 MutedTint    = IM_COL32(0x8A, 0x8D, 0x94, 255);
+constexpr ImU32 DimTint      = IM_COL32(0x5C, 0x5F, 0x66, 255);
+constexpr ImU32 WhiteTint    = IM_COL32(255, 255, 255, 255);
+constexpr ImU32 GreenTint    = IM_COL32(0x38, 0xC4, 0x6D, 255);
+constexpr ImU32 YellowTint   = IM_COL32(0xD6, 0xC9, 0x3A, 255);
+constexpr ImU32 RedTint      = IM_COL32(0xE5, 0x42, 0x3F, 255);
+constexpr ImU32 OrangeTint   = IM_COL32(0xF0, 0xA0, 0x4B, 255);
+constexpr ImU32 TrackTint    = IM_COL32(0x2D, 0x30, 0x36, 255);
+constexpr ImU32 ViewportTint = IM_COL32(0x0B, 0x0C, 0x0E, 255);
+constexpr ImU32 CanvasTint   = IM_COL32(0x11, 0x11, 0x11, 255);
 
-constexpr float kCardRadius  = 22.0f;
-constexpr float kCardPadX    = 18.0f;
-constexpr float kCardPadTop  = 18.0f;
-constexpr float kCardPadBot  = 14.0f;
-constexpr float kLabelWidth  = 118.0f;
-constexpr float kValueWidth  = 54.0f;
-constexpr float kRowHeight   = 26.0f;
-constexpr float kRowGap      = 6.0f;
-constexpr float kLeftColumn  = 320.0f;
-constexpr float kRightColumn = 340.0f;
-constexpr float kGutter      = 10.0f;
+constexpr float CardCornerRadius  = 22.0f;
+constexpr float CardSidePad    = 18.0f;
+constexpr float CardHeadPad  = 18.0f;
+constexpr float CardFootPad  = 14.0f;
+constexpr float LabelColumnWidth  = 118.0f;
+constexpr float FigureColumnWidth  = 54.0f;
+constexpr float RowHeight   = 26.0f;
+constexpr float RowGap      = 6.0f;
+constexpr float ControlColumnWidth  = 320.0f;
+constexpr float PatternColumnWidth = 340.0f;
+constexpr float ColumnGutter      = 10.0f;
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                       TEXT HELPERS
@@ -107,36 +107,36 @@ public:
         Width_ = ImGui::GetContentRegionAvail().x;
         Bar_   = Bar;
 
-        const float TitleY = Min_.y + kCardPadTop;
-        Draw_->AddRectFilled(ImVec2(Min_.x + kCardPadX, TitleY + 1.0f),
-                             ImVec2(Min_.x + kCardPadX + 3.0f, TitleY + 17.0f), Bar, 2.0f);
-        Ink(Draw_, 15.0f, ImVec2(Min_.x + kCardPadX + 13.0f, TitleY), kText, Title);
+        const float TitleY = Min_.y + CardHeadPad;
+        Draw_->AddRectFilled(ImVec2(Min_.x + CardSidePad, TitleY + 1.0f),
+                             ImVec2(Min_.x + CardSidePad + 3.0f, TitleY + 17.0f), Bar, 2.0f);
+        Ink(Draw_, 15.0f, ImVec2(Min_.x + CardSidePad + 13.0f, TitleY), TextTint, Title);
         if (Right != nullptr && Right[0] != '\0')
         {
-            InkRight(Draw_, 13.0f, Min_.x + Width_ - kCardPadX, TitleY + 2.0f, kMuted, Right);
+            InkRight(Draw_, 13.0f, Min_.x + Width_ - CardSidePad, TitleY + 2.0f, MutedTint, Right);
         }
 
-        ImGui::SetCursorScreenPos(ImVec2(Min_.x + kCardPadX, TitleY + 18.0f + 12.0f));
+        ImGui::SetCursorScreenPos(ImVec2(Min_.x + CardSidePad, TitleY + 18.0f + 12.0f));
         ImGui::PushClipRect(ImVec2(Min_.x, Min_.y), ImVec2(Min_.x + Width_, Min_.y + 4000.0f), true);
-        ImGui::PushItemWidth(Width_ - 2.0f * kCardPadX);
+        ImGui::PushItemWidth(Width_ - 2.0f * CardSidePad);
     }
 
     void End()
     {
         ImGui::PopItemWidth();
         ImGui::PopClipRect();
-        const float Bottom = ImGui::GetCursorScreenPos().y + kCardPadBot;
+        const float Bottom = ImGui::GetCursorScreenPos().y + CardFootPad;
 
         Splitter_.SetCurrentChannel(Draw_, 0);
-        Draw_->AddRectFilled(Min_, ImVec2(Min_.x + Width_, Bottom), kCard, kCardRadius);
+        Draw_->AddRectFilled(Min_, ImVec2(Min_.x + Width_, Bottom), CardTint, CardCornerRadius);
         Splitter_.Merge(Draw_);
 
         ImGui::SetCursorScreenPos(Min_);
         ImGui::Dummy(ImVec2(Width_, Bottom - Min_.y));
-        ImGui::Dummy(ImVec2(Width_, kGutter - ImGui::GetStyle().ItemSpacing.y));
+        ImGui::Dummy(ImVec2(Width_, ColumnGutter - ImGui::GetStyle().ItemSpacing.y));
     }
 
-    [[nodiscard]] float ContentWidth() const noexcept { return Width_ - 2.0f * kCardPadX; }
+    [[nodiscard]] float ContentWidth() const noexcept { return Width_ - 2.0f * CardSidePad; }
 
 private:
     ImDrawListSplitter Splitter_;
@@ -159,14 +159,14 @@ void SectionLabel(const char* Text)
     for (const char* C = Text; *C != '\0'; ++C)
     {
         const char One[2] = { char(std::toupper(static_cast<unsigned char>(*C))), '\0' };
-        Ink(Draw, 11.0f, ImVec2(X, At.y + 8.0f), kDim, One, gFaces.Small);
+        Ink(Draw, 11.0f, ImVec2(X, At.y + 8.0f), DimTint, One, gFaces.Small);
         X += Measure(11.0f, One, gFaces.Small).x + 1.6f;
     }
     ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 24.0f));
 }
 
 /// 📦 A paragraph of guidance, wrapped. The generator calls it `.hint`.
-void Hint(const char* Text, ImU32 Colour = kMuted, float Size = 12.0f)
+void Hint(const char* Text, ImU32 Colour = MutedTint, float Size = 12.0f)
 {
     ImDrawList* Draw = ImGui::GetWindowDrawList();
     const ImVec2 At    = ImGui::GetCursorScreenPos();
@@ -180,9 +180,9 @@ void Hint(const char* Text, ImU32 Colour = kMuted, float Size = 12.0f)
 ///    that a label like "Coloured tread stripes" runs straight under its own switch.
 void RowLabel(ImDrawList* Draw, float X, float Y, const char* Text) noexcept
 {
-    if (Measure(13.0f, Text).x <= kLabelWidth)
+    if (Measure(13.0f, Text).x <= LabelColumnWidth)
     {
-        Ink(Draw, 13.0f, ImVec2(X, Y), kMuted, Text);
+        Ink(Draw, 13.0f, ImVec2(X, Y), MutedTint, Text);
         return;
     }
     char Clipped[96];
@@ -192,13 +192,13 @@ void RowLabel(ImDrawList* Draw, float X, float Y, const char* Text) noexcept
     {
         std::memcpy(Clipped, Text, Keep);
         std::memcpy(Clipped + Keep, "...", 4u);
-        if (Measure(13.0f, Clipped).x <= kLabelWidth)
+        if (Measure(13.0f, Clipped).x <= LabelColumnWidth)
         {
             break;
         }
         --Keep;
     }
-    Ink(Draw, 13.0f, ImVec2(X, Y), kMuted, Clipped);
+    Ink(Draw, 13.0f, ImVec2(X, Y), MutedTint, Clipped);
 }
 
 /// 📦 The label-track-figure row every scalar control in the generator is built on.
@@ -210,16 +210,16 @@ bool Slider(const char* Id, const char* Label, float* Value, float Minimum, floa
     ImDrawList* Draw = ImGui::GetWindowDrawList();
     const ImVec2 At   = ImGui::GetCursorScreenPos();
     const float  Full = ImGui::GetContentRegionAvail().x;
-    const float  Mid  = At.y + kRowHeight * 0.5f;
+    const float  Mid  = At.y + RowHeight * 0.5f;
 
     RowLabel(Draw, At.x, Mid - 8.0f, Label);
 
-    const float TrackX0 = At.x + kLabelWidth + 8.0f;
-    const float TrackX1 = At.x + Full - kValueWidth - 8.0f;
+    const float TrackX0 = At.x + LabelColumnWidth + 8.0f;
+    const float TrackX1 = At.x + Full - FigureColumnWidth - 8.0f;
     const float TrackW  = std::max(16.0f, TrackX1 - TrackX0);
 
     ImGui::SetCursorScreenPos(ImVec2(TrackX0, At.y));
-    ImGui::InvisibleButton(Id, ImVec2(TrackW, kRowHeight));
+    ImGui::InvisibleButton(Id, ImVec2(TrackW, RowHeight));
     bool Changed = false;
     if (ImGui::IsItemActive())
     {
@@ -237,18 +237,18 @@ bool Slider(const char* Id, const char* Label, float* Value, float Minimum, floa
         }
     }
 
-    Draw->AddRectFilled(ImVec2(TrackX0, Mid - 1.0f), ImVec2(TrackX0 + TrackW, Mid + 1.0f), kTrack, 1.0f);
+    Draw->AddRectFilled(ImVec2(TrackX0, Mid - 1.0f), ImVec2(TrackX0 + TrackW, Mid + 1.0f), TrackTint, 1.0f);
     const float Fraction = (Maximum > Minimum) ? std::clamp((*Value - Minimum) / (Maximum - Minimum), 0.0f, 1.0f)
                                                : 0.0f;
     const float ThumbX = TrackX0 + TrackW * Fraction;
-    Draw->AddCircleFilled(ImVec2(ThumbX, Mid), 9.0f, kCard, 16);
-    Draw->AddCircleFilled(ImVec2(ThumbX, Mid), 6.0f, kWhite, 16);
+    Draw->AddCircleFilled(ImVec2(ThumbX, Mid), 9.0f, CardTint, 16);
+    Draw->AddCircleFilled(ImVec2(ThumbX, Mid), 6.0f, WhiteTint, 16);
 
     char Figure[48];
     std::snprintf(Figure, sizeof(Figure), "%s%.*f", Prefix, Decimals, double(*Value));
-    InkRight(Draw, 13.0f, At.x + Full, Mid - 8.0f, kText, Figure, gFaces.Mono);
+    InkRight(Draw, 13.0f, At.x + Full, Mid - 8.0f, TextTint, Figure, gFaces.Mono);
 
-    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + kRowHeight + kRowGap));
+    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + RowHeight + RowGap));
     return Changed;
 }
 
@@ -258,11 +258,11 @@ bool Choice(const char* Id, const char* Label, int* Picked, const std::vector<st
     ImDrawList* Draw = ImGui::GetWindowDrawList();
     const ImVec2 At   = ImGui::GetCursorScreenPos();
     const float  Full = ImGui::GetContentRegionAvail().x;
-    const float  Mid  = At.y + kRowHeight * 0.5f;
+    const float  Mid  = At.y + RowHeight * 0.5f;
 
     RowLabel(Draw, At.x, Mid - 8.0f, Label);
 
-    const float PillX = At.x + kLabelWidth + 8.0f;
+    const float PillX = At.x + LabelColumnWidth + 8.0f;
     const float PillW = std::max(40.0f, At.x + Full - PillX);
     ImGui::SetCursorScreenPos(ImVec2(PillX, Mid - 13.0f));
     ImGui::InvisibleButton(Id, ImVec2(PillW, 26.0f));
@@ -273,12 +273,12 @@ bool Choice(const char* Id, const char* Label, int* Picked, const std::vector<st
     }
 
     Draw->AddRectFilled(ImVec2(PillX, Mid - 13.0f), ImVec2(PillX + PillW, Mid + 13.0f),
-                        Hovered ? kCard3 : kCard2, 13.0f);
+                        Hovered ? CardHoverTint : CardRaisedTint, 13.0f);
     const char* Shown = (*Picked >= 0 && *Picked < int(Options.size())) ? Options[size_t(*Picked)].c_str() : "—";
-    Ink(Draw, 13.0f, ImVec2(PillX + 13.0f, Mid - 8.0f), kText, Shown);
+    Ink(Draw, 13.0f, ImVec2(PillX + 13.0f, Mid - 8.0f), TextTint, Shown);
     Draw->AddTriangleFilled(ImVec2(PillX + PillW - 18.0f, Mid - 2.0f),
                             ImVec2(PillX + PillW - 10.0f, Mid - 2.0f),
-                            ImVec2(PillX + PillW - 14.0f, Mid + 3.0f), kMuted);
+                            ImVec2(PillX + PillW - 14.0f, Mid + 3.0f), MutedTint);
 
     bool Changed = false;
     if (ImGui::BeginPopup(Id))
@@ -294,7 +294,7 @@ bool Choice(const char* Id, const char* Label, int* Picked, const std::vector<st
         ImGui::EndPopup();
     }
 
-    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + kRowHeight + kRowGap));
+    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + RowHeight + RowGap));
     return Changed;
 }
 
@@ -304,11 +304,11 @@ bool Check(const char* Id, const char* Label, bool* On)
     ImDrawList* Draw = ImGui::GetWindowDrawList();
     const ImVec2 At   = ImGui::GetCursorScreenPos();
     const float  Full = ImGui::GetContentRegionAvail().x;
-    const float  Mid  = At.y + kRowHeight * 0.5f;
+    const float  Mid  = At.y + RowHeight * 0.5f;
 
     RowLabel(Draw, At.x, Mid - 8.0f, Label);
 
-    const float SwitchX = At.x + kLabelWidth + 8.0f;
+    const float SwitchX = At.x + LabelColumnWidth + 8.0f;
     ImGui::SetCursorScreenPos(ImVec2(SwitchX, Mid - 10.0f));
     ImGui::InvisibleButton(Id, ImVec2(34.0f, 20.0f));
     bool Changed = false;
@@ -319,11 +319,11 @@ bool Check(const char* Id, const char* Label, bool* On)
     }
 
     Draw->AddRectFilled(ImVec2(SwitchX, Mid - 10.0f), ImVec2(SwitchX + 34.0f, Mid + 10.0f),
-                        *On ? kGreen : kTrack, 10.0f);
+                        *On ? GreenTint : TrackTint, 10.0f);
     const float KnobX = *On ? SwitchX + 24.0f : SwitchX + 10.0f;
-    Draw->AddCircleFilled(ImVec2(KnobX, Mid), 7.0f, *On ? kWhite : IM_COL32(0x9A, 0x9D, 0xA4, 255), 16);
+    Draw->AddCircleFilled(ImVec2(KnobX, Mid), 7.0f, *On ? WhiteTint : IM_COL32(0x9A, 0x9D, 0xA4, 255), 16);
 
-    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + kRowHeight + kRowGap));
+    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + RowHeight + RowGap));
     return Changed;
 }
 
@@ -332,11 +332,11 @@ bool Swatch(const char* Id, const char* Label, uint32_t* Argb)
 {
     ImDrawList* Draw = ImGui::GetWindowDrawList();
     const ImVec2 At   = ImGui::GetCursorScreenPos();
-    const float  Mid  = At.y + kRowHeight * 0.5f;
+    const float  Mid  = At.y + RowHeight * 0.5f;
 
     RowLabel(Draw, At.x, Mid - 8.0f, Label);
 
-    const float ChipX = At.x + kLabelWidth + 8.0f;
+    const float ChipX = At.x + LabelColumnWidth + 8.0f;
     ImGui::SetCursorScreenPos(ImVec2(ChipX, Mid - 14.0f));
     ImGui::InvisibleButton(Id, ImVec2(28.0f, 28.0f));
     if (ImGui::IsItemClicked())
@@ -345,12 +345,12 @@ bool Swatch(const char* Id, const char* Label, uint32_t* Argb)
     }
 
     const ImU32 Shown = IM_COL32((*Argb >> 16) & 0xFFu, (*Argb >> 8) & 0xFFu, *Argb & 0xFFu, 255);
-    Draw->AddCircleFilled(ImVec2(ChipX + 14.0f, Mid), 14.0f, kTrack, 24);
+    Draw->AddCircleFilled(ImVec2(ChipX + 14.0f, Mid), 14.0f, TrackTint, 24);
     Draw->AddCircleFilled(ImVec2(ChipX + 14.0f, Mid), 13.0f, Shown, 24);
 
     char Hex[16];
     std::snprintf(Hex, sizeof(Hex), "#%06X", unsigned(*Argb & 0x00FFFFFFu));
-    Ink(Draw, 13.0f, ImVec2(ChipX + 36.0f, Mid - 7.0f), kDim, Hex, gFaces.Mono);
+    Ink(Draw, 13.0f, ImVec2(ChipX + 36.0f, Mid - 7.0f), DimTint, Hex, gFaces.Mono);
 
     bool Changed = false;
     if (ImGui::BeginPopup(Id))
@@ -368,7 +368,7 @@ bool Swatch(const char* Id, const char* Label, uint32_t* Argb)
         ImGui::EndPopup();
     }
 
-    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + kRowHeight + kRowGap));
+    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + RowHeight + RowGap));
     return Changed;
 }
 
@@ -378,11 +378,11 @@ bool TextField(const char* Id, const char* Label, std::string* Value)
     ImDrawList* Draw = ImGui::GetWindowDrawList();
     const ImVec2 At   = ImGui::GetCursorScreenPos();
     const float  Full = ImGui::GetContentRegionAvail().x;
-    const float  Mid  = At.y + kRowHeight * 0.5f;
+    const float  Mid  = At.y + RowHeight * 0.5f;
 
     RowLabel(Draw, At.x, Mid - 8.0f, Label);
 
-    const float FieldX = At.x + kLabelWidth + 8.0f;
+    const float FieldX = At.x + LabelColumnWidth + 8.0f;
     const float FieldW = std::max(40.0f, At.x + Full - FieldX);
 
     char Buffer[128];
@@ -391,10 +391,10 @@ bool TextField(const char* Id, const char* Label, std::string* Value)
     ImGui::SetCursorScreenPos(ImVec2(FieldX, Mid - 13.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 13.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(13.0f, 5.0f));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, kCard2);
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, kCard3);
-    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, kCard3);
-    ImGui::PushStyleColor(ImGuiCol_Text, kText);
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, CardRaisedTint);
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, CardHoverTint);
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, CardHoverTint);
+    ImGui::PushStyleColor(ImGuiCol_Text, TextTint);
     ImGui::SetNextItemWidth(FieldW);
     const bool Changed = ImGui::InputText(Id, Buffer, sizeof(Buffer));
     ImGui::PopStyleColor(4);
@@ -404,7 +404,7 @@ bool TextField(const char* Id, const char* Label, std::string* Value)
         *Value = Buffer;
     }
 
-    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + kRowHeight + kRowGap));
+    ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + RowHeight + RowGap));
     return Changed;
 }
 
@@ -419,12 +419,12 @@ bool Button(const char* Label, bool Primary, float Width = 0.0f, float Height = 
     const bool Hovered = ImGui::IsItemHovered();
     const bool Clicked = ImGui::IsItemClicked();
 
-    const ImU32 Fill = Primary ? (Hovered ? IM_COL32(0xE8, 0xE8, 0xE8, 255) : kWhite)
-                               : (Hovered ? kCard3 : kCard2);
+    const ImU32 Fill = Primary ? (Hovered ? IM_COL32(0xE8, 0xE8, 0xE8, 255) : WhiteTint)
+                               : (Hovered ? CardHoverTint : CardRaisedTint);
     Draw->AddRectFilled(At, ImVec2(At.x + W, At.y + Height), Fill, Height * 0.5f);
     const ImVec2 Size = Measure(13.0f, Label);
     Ink(Draw, 13.0f, ImVec2(At.x + (W - Size.x) * 0.5f, At.y + (Height - Size.y) * 0.5f),
-        Primary ? IM_COL32(0x11, 0x11, 0x11, 255) : kText, Label);
+        Primary ? IM_COL32(0x11, 0x11, 0x11, 255) : TextTint, Label);
     return Clicked;
 }
 
@@ -455,7 +455,7 @@ void DrawMap(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, const TreadMaterialMap& M
     const float H = Max.y - Min.y;
     if (Map.Width == 0u || Map.Height == 0u || W < 2.0f || H < 2.0f)
     {
-        Draw->AddRectFilled(Min, Max, kCanvas, 10.0f);
+        Draw->AddRectFilled(Min, Max, CanvasTint, 10.0f);
         return;
     }
 
@@ -566,14 +566,14 @@ struct ProfileHandle
     const float Cos45 = std::cos(π * 0.25f);
     const ProfileHandle Seeds[4] = {
         { "tread",    D.TreadHalf,                        D.OuterRadius - S.Crown,
-          "tread edge / crown", kGreen,  false },
+          "tread edge / crown", GreenTint,  false },
         { "shoulder", D.TreadHalf + D.ShoulderRadius * Sin45,
           D.OuterRadius - S.Crown - D.ShoulderRadius + D.ShoulderRadius * Cos45,
-          "shoulder radius",    kYellow, false },
+          "shoulder radius",    YellowTint, false },
         { "bulge",    D.HalfWidth * (0.6f + 0.4f * S.Bulge), D.RimRadius + D.SectionHeight * 0.52f,
-          "sidewall bulge",     kOrange, false },
+          "sidewall bulge",     OrangeTint, false },
         { "depth",    0.0f,                               D.OuterRadius - S.TreadDepth,
-          "tread depth",        kRed,    false }
+          "tread depth",        RedTint,    false }
     };
 
     std::vector<ProfileHandle> Handles;
@@ -596,7 +596,7 @@ struct ProfileHandle
 bool DrawCrossSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, TreadSpecification& S, const char* Id)
 {
     const TreadDerivedValues D = DeriveTreadValues(S);
-    Draw->AddRectFilled(Min, Max, kCanvas, 14.0f);
+    Draw->AddRectFilled(Min, Max, CanvasTint, 14.0f);
 
     const float W = Max.x - Min.x;
     const float H = Max.y - Min.y;
@@ -620,14 +620,14 @@ bool DrawCrossSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, TreadSpecificati
     // ② the carcass outline, moulded surface across the top and the sidewall bezier down each side
     const float Worn = S.Wear * S.TreadDepth;
     std::vector<ImVec2> Outline;
-    constexpr int kTread = 40;
-    constexpr int kSide  = 22;
+    constexpr int TreadSamples = 40;
+    constexpr int SidewallSamples  = 22;
     const auto Push = [&](float Lateral, float Radius) { Outline.push_back(ImVec2(X(Lateral), Y(Radius))); };
 
     std::vector<ImVec2> Surface;   // the moulded line only, kept for the dashed floor below it
-    for (int I = -kTread; I <= kTread; ++I)
+    for (int I = -TreadSamples; I <= TreadSamples; ++I)
     {
-        const float Lateral = float(I) / float(kTread) * D.AcrossHalf;
+        const float Lateral = float(I) / float(TreadSamples) * D.AcrossHalf;
         const TyreProfileSample Sample = EvaluateTyreProfile(Lateral, S, D);
         Surface.push_back(ImVec2(X(Sample.Lateral), Y(Sample.Radius - Worn * Sample.ContactWeight)));
     }
@@ -644,9 +644,9 @@ bool DrawCrossSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, TreadSpecificati
     for (int Side = 0; Side < 2; ++Side)
     {
         const float Sign = (Side == 0) ? 1.0f : -1.0f;
-        for (int I = 1; I <= kSide; ++I)
+        for (int I = 1; I <= SidewallSamples; ++I)
         {
-            const float T = float(I) / float(kSide);
+            const float T = float(I) / float(SidewallSamples);
             const float M = 1.0f - T;
             const float Lateral = M * M * M * P0.x + 3.0f * M * M * T * P1.x + 3.0f * M * T * T * P2.x + T * T * T * P3.x;
             const float Radius  = M * M * M * P0.y + 3.0f * M * M * T * P1.y + 3.0f * M * T * T * P2.y + T * T * T * P3.y;
@@ -670,19 +670,19 @@ bool DrawCrossSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, TreadSpecificati
         }
         (void)Sign;
     }
-    Draw->AddConvexPolyFilled(Outline.data(), int(Outline.size()), kCard2);
-    Draw->AddPolyline(Outline.data(), int(Outline.size()), kText, ImDrawFlags_Closed, 1.2f);
+    Draw->AddConvexPolyFilled(Outline.data(), int(Outline.size()), CardRaisedTint);
+    Draw->AddPolyline(Outline.data(), int(Outline.size()), TextTint, ImDrawFlags_Closed, 1.2f);
 
     // ③ the floor the pattern cuts to, dashed, under the moulded surface
     for (size_t I = 1; I < Surface.size(); I += 2u)
     {
-        const float LateralA = (float(int(I) - 1 - kTread) / float(kTread)) * D.AcrossHalf;
-        const float LateralB = (float(int(I) - kTread) / float(kTread)) * D.AcrossHalf;
+        const float LateralA = (float(int(I) - 1 - TreadSamples) / float(TreadSamples)) * D.AcrossHalf;
+        const float LateralB = (float(int(I) - TreadSamples) / float(TreadSamples)) * D.AcrossHalf;
         const TyreProfileSample A = EvaluateTyreProfile(LateralA, S, D);
         const TyreProfileSample B = EvaluateTyreProfile(LateralB, S, D);
         Draw->AddLine(ImVec2(X(A.Lateral), Y(A.Radius - (S.TreadDepth + Worn) * A.ContactWeight)),
                       ImVec2(X(B.Lateral), Y(B.Radius - (S.TreadDepth + Worn) * B.ContactWeight)),
-                      kYellow, 1.0f);
+                      YellowTint, 1.0f);
     }
 
     // ④ the handles, each one a direct grip on the parameter it names
@@ -739,15 +739,15 @@ bool DrawCrossSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, TreadSpecificati
     char Figure[96];
     std::snprintf(Figure, sizeof(Figure), "%g mm", double(S.Width));
     const ImVec2 WidthSize = Measure(11.0f, Figure);
-    Ink(Draw, 11.0f, ImVec2(OX - WidthSize.x * 0.5f, Y(D.OuterRadius) - 22.0f), kMuted, Figure);
+    Ink(Draw, 11.0f, ImVec2(OX - WidthSize.x * 0.5f, Y(D.OuterRadius) - 22.0f), MutedTint, Figure);
     std::snprintf(Figure, sizeof(Figure), "rim %g\" · %.0f mm", double(S.Rim), double(D.BeadHalf * 2.0f));
     const ImVec2 RimSize = Measure(11.0f, Figure);
-    Ink(Draw, 11.0f, ImVec2(OX - RimSize.x * 0.5f, OY - 16.0f), kMuted, Figure);
+    Ink(Draw, 11.0f, ImVec2(OX - RimSize.x * 0.5f, OY - 16.0f), MutedTint, Figure);
     std::snprintf(Figure, sizeof(Figure), "%.0f mm", double(D.SectionHeight));
-    Ink(Draw, 11.0f, ImVec2(X(D.HalfWidth) + 10.0f, (Y(D.OuterRadius) + Y(D.RimRadius)) * 0.5f), kMuted, Figure);
+    Ink(Draw, 11.0f, ImVec2(X(D.HalfWidth) + 10.0f, (Y(D.OuterRadius) + Y(D.RimRadius)) * 0.5f), MutedTint, Figure);
     std::snprintf(Figure, sizeof(Figure), "crown %.1f · R%.0f · depth %g",
                   double(S.Crown), double(D.ShoulderRadius), double(S.TreadDepth));
-    InkRight(Draw, 11.0f, Max.x - 8.0f, Min.y + 6.0f, kDim, Figure);
+    InkRight(Draw, 11.0f, Max.x - 8.0f, Min.y + 6.0f, DimTint, Figure);
 
     ImGui::SetCursorScreenPos(Min);
     ImGui::Dummy(ImVec2(W, H));
@@ -806,12 +806,12 @@ void DrawRimSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, const RimSpecifica
                           Colour, 1.0f);
         }
     };
-    Datum(Seat, kGreen);
-    Datum(Well, kRed);
+    Datum(Seat, GreenTint);
+    Datum(Well, RedTint);
 
-    Ink(Draw, 11.0f, ImVec2(Min.x + 10.0f, Min.y + 6.0f),  kYellow, "flange");
-    Ink(Draw, 11.0f, ImVec2(Min.x + 10.0f, Min.y + 20.0f), kGreen,  "bead seat");
-    Ink(Draw, 11.0f, ImVec2(Min.x + 10.0f, Min.y + 34.0f), kRed,    "drop well");
+    Ink(Draw, 11.0f, ImVec2(Min.x + 10.0f, Min.y + 6.0f),  YellowTint, "flange");
+    Ink(Draw, 11.0f, ImVec2(Min.x + 10.0f, Min.y + 20.0f), GreenTint,  "bead seat");
+    Ink(Draw, 11.0f, ImVec2(Min.x + 10.0f, Min.y + 34.0f), RedTint,    "drop well");
 
     ImGui::SetCursorScreenPos(Min);
     ImGui::Dummy(ImVec2(W, H));
@@ -910,20 +910,20 @@ void RecordTyrePage(TyreGeneratorState& State)
         char Right[48];
         std::snprintf(Right, sizeof(Right), "%.0f mm rim", double(D.RimRadius * 2.0f));
         Card Panel;
-        Panel.Begin("Tyre size", kGreen, Right);
+        Panel.Begin("Tyre size", GreenTint, Right);
 
         // the marked size, set as one headline with the aspect dimmed the way a sidewall prints it
         const ImVec2 At = ImGui::GetCursorScreenPos();
         char Head[16];
         std::snprintf(Head, sizeof(Head), "%g", double(S.Width));
         float X = At.x;
-        Ink(Draw, 42.0f, ImVec2(X, At.y), kWhite, Head);
+        Ink(Draw, 42.0f, ImVec2(X, At.y), WhiteTint, Head);
         X += Measure(42.0f, Head).x;
         std::snprintf(Head, sizeof(Head), "/%g", double(S.Aspect));
-        Ink(Draw, 42.0f, ImVec2(X, At.y), kDim, Head);
+        Ink(Draw, 42.0f, ImVec2(X, At.y), DimTint, Head);
         X += Measure(42.0f, Head).x;
         std::snprintf(Head, sizeof(Head), " R%g", double(S.Rim));
-        Ink(Draw, 16.0f, ImVec2(X + 4.0f, At.y + 24.0f), kDim, Head);
+        Ink(Draw, 16.0f, ImVec2(X + 4.0f, At.y + 24.0f), DimTint, Head);
         ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 54.0f));
 
         const ImVec2 Pills = ImGui::GetCursorScreenPos();
@@ -931,10 +931,10 @@ void RecordTyrePage(TyreGeneratorState& State)
         float PX = Pills.x;
         char Capsule1[48];
         std::snprintf(Capsule1, sizeof(Capsule1), "sidewall %.0f mm", double(D.SectionHeight));
-        Capsule(Draw, ImVec2(PX, Pills.y), Capsule1, kCard2, kMuted, &Advance);
+        Capsule(Draw, ImVec2(PX, Pills.y), Capsule1, CardRaisedTint, MutedTint, &Advance);
         PX += Advance;
         std::snprintf(Capsule1, sizeof(Capsule1), "tread %.0f mm", double(D.TreadHalf * 2.0f));
-        Capsule(Draw, ImVec2(PX, Pills.y), Capsule1, kCard2, kMuted, &Advance);
+        Capsule(Draw, ImVec2(PX, Pills.y), Capsule1, CardRaisedTint, MutedTint, &Advance);
         PX += Advance;
         if (S.Wear > 0.0f)
         {
@@ -947,7 +947,7 @@ void RecordTyrePage(TyreGeneratorState& State)
         const bool Illegal = Left < 1.6f;
         Capsule(Draw, ImVec2(PX, Pills.y), Capsule1,
                 Illegal ? IM_COL32(0xE5, 0x42, 0x3F, 36) : IM_COL32(0x38, 0xC4, 0x6D, 31),
-                Illegal ? kRed : kGreen, &Advance);
+                Illegal ? RedTint : GreenTint, &Advance);
         ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 29.0f));
 
         SectionLabel("Size");
@@ -958,9 +958,9 @@ void RecordTyrePage(TyreGeneratorState& State)
         SectionLabel("Tread mesh");
         {
             const ImVec2 Row = ImGui::GetCursorScreenPos();
-            Ink(Draw, 13.0f, ImVec2(Row.x, Row.y + 5.0f), kMuted, "Mesh mode");
-            Ink(Draw, 13.0f, ImVec2(Row.x + kLabelWidth + 8.0f, Row.y + 5.0f), kText, "Polygon topology");
-            ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, kRowHeight + kRowGap));
+            Ink(Draw, 13.0f, ImVec2(Row.x, Row.y + 5.0f), MutedTint, "Mesh mode");
+            Ink(Draw, 13.0f, ImVec2(Row.x + LabelColumnWidth + 8.0f, Row.y + 5.0f), TextTint, "Polygon topology");
+            ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, RowHeight + RowGap));
         }
         if (Slider("##detail",  "Polygon detail (mm)", &S.PolygonDetail,   3.0f,   16.0f, 0.5f, 1)) { State.Touch(); }
         if (Slider("##around",  "Segments around",     &S.SegmentsAround, 180.0f, 1440.0f, 20.0f, 0)) { State.Touch(); }
@@ -977,13 +977,13 @@ void RecordTyrePage(TyreGeneratorState& State)
         else                       { std::snprintf(Right, sizeof(Right), "%.0f%%", double(S.Wear * 100.0f)); }
 
         Card Panel;
-        Panel.Begin("Tyre condition", kGreen, Right);
+        Panel.Begin("Tyre condition", GreenTint, Right);
 
         const ImVec2 Head = ImGui::GetCursorScreenPos();
-        Ink(Draw, 13.0f, ImVec2(Head.x, Head.y + 7.0f), kMuted, "Tread wear");
+        Ink(Draw, 13.0f, ImVec2(Head.x, Head.y + 7.0f), MutedTint, "Tread wear");
         char Percent[16];
         std::snprintf(Percent, sizeof(Percent), "%.0f%%", double(S.Wear * 100.0f));
-        InkRight(Draw, 20.0f, Head.x + ImGui::GetContentRegionAvail().x, Head.y, kWhite, Percent);
+        InkRight(Draw, 20.0f, Head.x + ImGui::GetContentRegionAvail().x, Head.y, WhiteTint, Percent);
         ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 26.0f));
 
         // the wear slider runs the full width, with no label column: it is the card's only control
@@ -997,16 +997,16 @@ void RecordTyrePage(TyreGeneratorState& State)
                 S.Wear = std::clamp((ImGui::GetIO().MousePos.x - Row.x) / W, 0.0f, 1.0f);
                 State.Touch();
             }
-            Draw->AddRectFilled(ImVec2(Row.x, Mid - 1.0f), ImVec2(Row.x + W, Mid + 1.0f), kTrack, 1.0f);
+            Draw->AddRectFilled(ImVec2(Row.x, Mid - 1.0f), ImVec2(Row.x + W, Mid + 1.0f), TrackTint, 1.0f);
             const float ThumbX = Row.x + W * S.Wear;
-            Draw->AddCircleFilled(ImVec2(ThumbX, Mid), 9.0f, kCard, 16);
-            Draw->AddCircleFilled(ImVec2(ThumbX, Mid), 6.0f, kWhite, 16);
+            Draw->AddCircleFilled(ImVec2(ThumbX, Mid), 9.0f, CardTint, 16);
+            Draw->AddCircleFilled(ImVec2(ThumbX, Mid), 6.0f, WhiteTint, 16);
             ImGui::SetCursorScreenPos(ImVec2(Row.x, Row.y + 24.0f));
         }
 
         char Note[80];
         std::snprintf(Note, sizeof(Note), "%.1f mm worn · %.1f mm remaining", double(Worn), double(Left));
-        Hint(Note, kDim, 11.0f);
+        Hint(Note, DimTint, 11.0f);
         Panel.End();
     }
 
@@ -1015,7 +1015,7 @@ void RecordTyrePage(TyreGeneratorState& State)
     //----------------------------------------------------------------------------------------------------------
     {
         Card Panel;
-        Panel.Begin("Cross-section", kYellow, "drag the handles");
+        Panel.Begin("Cross-section", YellowTint, "drag the handles");
         const ImVec2 At = ImGui::GetCursorScreenPos();
         const float  W  = ImGui::GetContentRegionAvail().x;
         if (DrawCrossSection(Draw, At, ImVec2(At.x + W, At.y + 210.0f), S, "##section"))
@@ -1037,7 +1037,7 @@ void RecordTyrePage(TyreGeneratorState& State)
     //----------------------------------------------------------------------------------------------------------
     {
         Card Panel;
-        Panel.Begin("Tread materials", kRed, "");
+        Panel.Begin("Tread materials", RedTint, "");
 
         // the four-way channel switch sits on the title row, right-aligned
         {
@@ -1053,7 +1053,7 @@ void RecordTyrePage(TyreGeneratorState& State)
             }
             const float X0 = Row.x + W - Total;
             const float Y0 = Row.y - 42.0f;
-            Draw->AddRectFilled(ImVec2(X0, Y0), ImVec2(X0 + Total, Y0 + 26.0f), kCard2, 13.0f);
+            Draw->AddRectFilled(ImVec2(X0, Y0), ImVec2(X0 + Total, Y0 + 26.0f), CardRaisedTint, 13.0f);
             float X = X0 + 3.0f;
             for (int I = 0; I < 4; ++I)
             {
@@ -1068,10 +1068,10 @@ void RecordTyrePage(TyreGeneratorState& State)
                 const bool On = int(State.TreadChannel) == I;
                 if (On)
                 {
-                    Draw->AddRectFilled(ImVec2(X, Y0 + 3.0f), ImVec2(X + Widths[I], Y0 + 23.0f), kCard3, 10.0f);
+                    Draw->AddRectFilled(ImVec2(X, Y0 + 3.0f), ImVec2(X + Widths[I], Y0 + 23.0f), CardHoverTint, 10.0f);
                 }
                 const ImVec2 Size = Measure(11.0f, Names[I]);
-                Ink(Draw, 11.0f, ImVec2(X + (Widths[I] - Size.x) * 0.5f, Y0 + 7.0f), On ? kWhite : kMuted, Names[I]);
+                Ink(Draw, 11.0f, ImVec2(X + (Widths[I] - Size.x) * 0.5f, Y0 + 7.0f), On ? WhiteTint : MutedTint, Names[I]);
                 X += Widths[I];
             }
             ImGui::SetCursorScreenPos(Row);
@@ -1095,7 +1095,7 @@ void RecordTyrePage(TyreGeneratorState& State)
         DrawMap(Draw, Strip, ImVec2(Strip.x + W, Strip.y + 26.0f), State.Map, 1.0f, Brighten);
         Draw->PopClipRect();
         Draw->AddRect(ImVec2(Strip.x + 1.0f, Strip.y + 1.0f),
-                      ImVec2(Strip.x + W * Fraction - 1.0f, Strip.y + 25.0f), kWhite, 0.0f, 0, 2.0f);
+                      ImVec2(Strip.x + W * Fraction - 1.0f, Strip.y + 25.0f), WhiteTint, 0.0f, 0, 2.0f);
         ImGui::Dummy(ImVec2(W, 32.0f));
 
         char Dims[160];
@@ -1103,7 +1103,7 @@ void RecordTyrePage(TyreGeneratorState& State)
                       "Showing %.0f mm of %.0f mm circumference · map %u×%u @ %.2f px/mm",
                       double(float(State.Field.Width) * Fraction / std::max(0.0001f, State.Field.Pixels)),
                       double(D.Circumference), State.Field.Width, State.Field.Height, double(State.Field.Pixels));
-        Hint(Dims, kMuted, 12.0f);
+        Hint(Dims, MutedTint, 12.0f);
         Panel.End();
     }
 }
@@ -1121,7 +1121,7 @@ void RecordRimPage(TyreGeneratorState& State)
 
     {
         Card Panel;
-        Panel.Begin("Rim generator", kOrange, "");
+        Panel.Begin("Rim generator", OrangeTint, "");
 
         SectionLabel("Tyre fit");
         if (Slider("##rimdia", "Rim diameter (in)",   &S.Rim,              13.0f, 24.0f, 1.0f,  0)) { State.Touch(); }
@@ -1174,7 +1174,7 @@ void RecordRimPage(TyreGeneratorState& State)
 
     {
         Card Panel;
-        Panel.Begin("Rim cross-section", kYellow, "procedural profile");
+        Panel.Begin("Rim cross-section", YellowTint, "procedural profile");
         const ImVec2 At = ImGui::GetCursorScreenPos();
         const float  W  = ImGui::GetContentRegionAvail().x;
         DrawRimSection(Draw, At, ImVec2(At.x + W, At.y + 190.0f), R, D);
@@ -1199,7 +1199,7 @@ void RecordLookPage(TyreGeneratorState& State)
 
     {
         Card Panel;
-        Panel.Begin("Compound & look", kYellow, "");
+        Panel.Begin("Compound & look", YellowTint, "");
         if (Swatch("##rubber", "Rubber colour", &A.Rubber))              { State.Touch(); }
         if (Check("##letter",  "Show sidewall decals", &A.Lettering))    { State.Touch(); }
         if (TextField("##brand", "Brand", &A.Brand))                     { State.Touch(); }
@@ -1230,7 +1230,7 @@ void RecordLookPage(TyreGeneratorState& State)
         char Right[32];
         std::snprintf(Right, sizeof(Right), "%zu layers", A.Decals.size());
         Card Panel;
-        Panel.Begin("Sidewall decals", kRed, Right);
+        Panel.Begin("Sidewall decals", RedTint, Right);
         Hint("Build the sidewall lettering as editable text layers. Select a layer to change its copy, "
              "typeface, size, colour and placement.");
         if (Button("Add text decal", true))
@@ -1261,10 +1261,10 @@ void RecordLookPage(TyreGeneratorState& State)
             const bool Picked = (State.PickedDecal == I);
             const float Fade = Decal.Enabled ? 1.0f : 0.48f;
 
-            Draw->AddRectFilled(Row, ImVec2(Row.x + W, Row.y + 36.0f), kCard2, 12.0f);
+            Draw->AddRectFilled(Row, ImVec2(Row.x + W, Row.y + 36.0f), CardRaisedTint, 12.0f);
             if (Picked)
             {
-                Draw->AddRect(Row, ImVec2(Row.x + W, Row.y + 36.0f), kWhite, 13.0f, 0, 1.0f);
+                Draw->AddRect(Row, ImVec2(Row.x + W, Row.y + 36.0f), WhiteTint, 13.0f, 0, 1.0f);
             }
             const ImU32 Chip = IM_COL32((Decal.Colour >> 16) & 0xFFu, (Decal.Colour >> 8) & 0xFFu,
                                         Decal.Colour & 0xFFu, ImU8(255.0f * Fade));
@@ -1279,7 +1279,7 @@ void RecordLookPage(TyreGeneratorState& State)
 
         ImGui::Dummy(ImVec2(W, 10.0f));
         Draw->AddLine(ImGui::GetCursorScreenPos(),
-                      ImVec2(ImGui::GetCursorScreenPos().x + W, ImGui::GetCursorScreenPos().y), kLine, 1.0f);
+                      ImVec2(ImGui::GetCursorScreenPos().x + W, ImGui::GetCursorScreenPos().y), HairlineTint, 1.0f);
         ImGui::Dummy(ImVec2(W, 10.0f));
 
         if (State.PickedDecal >= 0 && State.PickedDecal < int(A.Decals.size()))
@@ -1317,7 +1317,7 @@ void RecordLookPage(TyreGeneratorState& State)
             if (Check("##drepeat",  "Repeat around", &Decal.Repeat)) { State.Touch(); }
             if (Check("##denable",  "Enabled",  &Decal.Enabled))  { State.Touch(); }
             Hint("Tokens: {brand} {name} {size} {type} {depth} {serial}. They resolve against the document "
-                 "when the sidewall is rasterised, so a size line never goes stale.", kDim, 11.0f);
+                 "when the sidewall is rasterised, so a size line never goes stale.", DimTint, 11.0f);
         }
         else
         {
@@ -1334,7 +1334,7 @@ void RecordLookPage(TyreGeneratorState& State)
 void RecordExportPage(TyreGeneratorState& State)
 {
     Card Panel;
-    Panel.Begin("Export", kRed, "");
+    Panel.Begin("Export", RedTint, "");
     Hint("Textures are exported at the current map resolution. GLB is in metres, Y-up, tyre axis along X.");
 
     // 📝 A wrapping button row needs its own cursor. Reading the live cursor inside the loop reads the
@@ -1378,7 +1378,7 @@ void RecordViewport(TyreGeneratorState& State, ImVec2 Min, ImVec2 Max)
     const float Worn = S.Wear * S.TreadDepth;
     const float Left = S.TreadDepth - Worn;
 
-    Draw->AddRectFilled(Min, Max, kViewport, kCardRadius);
+    Draw->AddRectFilled(Min, Max, ViewportTint, CardCornerRadius);
 
     const float Room = Max.x - Min.x;
     // 📝 The generator's overlays are laid out for a wide centre column. Below that the two blocks would
@@ -1392,14 +1392,14 @@ void RecordViewport(TyreGeneratorState& State, ImVec2 Min, ImVec2 Max)
         const float  W = std::max(Narrow ? 196.0f : 230.0f,
                                   Measure(NameSize, State.Document.Name.c_str()).x + 40.0f);
         Draw->AddRectFilled(At, ImVec2(At.x + W, At.y + 108.0f), IM_COL32(0x17, 0x18, 0x1B, 199), 20.0f);
-        Draw->AddRectFilled(ImVec2(At.x + 18.0f, At.y + 17.0f), ImVec2(At.x + 21.0f, At.y + 31.0f), kGreen, 1.5f);
-        Ink(Draw, 13.0f, ImVec2(At.x + 29.0f, At.y + 16.0f), kMuted, State.Document.Kind.c_str());
+        Draw->AddRectFilled(ImVec2(At.x + 18.0f, At.y + 17.0f), ImVec2(At.x + 21.0f, At.y + 31.0f), GreenTint, 1.5f);
+        Ink(Draw, 13.0f, ImVec2(At.x + 29.0f, At.y + 16.0f), MutedTint, State.Document.Kind.c_str());
         Draw->PushClipRect(At, ImVec2(At.x + W, At.y + 108.0f), true);
-        Ink(Draw, NameSize, ImVec2(At.x + 18.0f, At.y + 38.0f), kWhite, State.Document.Name.c_str());
+        Ink(Draw, NameSize, ImVec2(At.x + 18.0f, At.y + 38.0f), WhiteTint, State.Document.Name.c_str());
         Draw->PopClipRect();
         char Marked[48];
         std::snprintf(Marked, sizeof(Marked), "%g/%g R%g", double(S.Width), double(S.Aspect), double(S.Rim));
-        Ink(Draw, 15.0f, ImVec2(At.x + 18.0f, At.y + 80.0f), kMuted, Marked);
+        Ink(Draw, 15.0f, ImVec2(At.x + 18.0f, At.y + 80.0f), MutedTint, Marked);
     }
 
     // ② the four readout tiles, top right, in two columns
@@ -1410,7 +1410,7 @@ void RecordViewport(TyreGeneratorState& State, ImVec2 Min, ImVec2 Max)
         const float X0 = Max.x - 16.0f - TileW * float(Columns) - 8.0f * float(Columns - 1);
         const float Y0 = Min.y + 16.0f;
         const float Diameter = (D.OuterRadius - Worn) * 2.0f;
-        const ImU32 Health = (Left < 1.6f) ? kRed : (Left < 3.0f) ? kYellow : kGreen;
+        const ImU32 Health = (Left < 1.6f) ? RedTint : (Left < 3.0f) ? YellowTint : GreenTint;
 
         char Values[4][24];
         char Units[4][24];
@@ -1425,7 +1425,7 @@ void RecordViewport(TyreGeneratorState& State, ImVec2 Min, ImVec2 Max)
         std::snprintf(Units[3],  sizeof(Units[3]),  "k tris");
 
         const char* Labels[4] = { "Overall Ø", "Tread left", "Circumference", "Tread mesh" };
-        const ImU32 Dots[4]   = { kYellow, Health, kYellow, kGreen };
+        const ImU32 Dots[4]   = { YellowTint, Health, YellowTint, GreenTint };
 
         for (int I = 0; I < 4; ++I)
         {
@@ -1434,10 +1434,10 @@ void RecordViewport(TyreGeneratorState& State, ImVec2 Min, ImVec2 Max)
             Draw->AddRectFilled(ImVec2(X, Y), ImVec2(X + TileW, Y + TileH), IM_COL32(0x17, 0x18, 0x1B, 209), 18.0f);
             Draw->PushClipRect(ImVec2(X, Y), ImVec2(X + TileW, Y + TileH), true);
             Draw->AddCircleFilled(ImVec2(X + 17.0f, Y + 18.0f), 3.5f, Dots[I], 10);
-            Ink(Draw, 11.0f, ImVec2(X + 27.0f, Y + 12.0f), kMuted, Labels[I], gFaces.Small);
-            Ink(Draw, 26.0f, ImVec2(X + 14.0f, Y + 30.0f), kWhite, Values[I]);
+            Ink(Draw, 11.0f, ImVec2(X + 27.0f, Y + 12.0f), MutedTint, Labels[I], gFaces.Small);
+            Ink(Draw, 26.0f, ImVec2(X + 14.0f, Y + 30.0f), WhiteTint, Values[I]);
             const float Advance = Measure(26.0f, Values[I]).x;
-            Ink(Draw, 11.0f, ImVec2(X + 17.0f + Advance, Y + 44.0f), kDim, Units[I], gFaces.Small);
+            Ink(Draw, 11.0f, ImVec2(X + 17.0f + Advance, Y + 44.0f), DimTint, Units[I], gFaces.Small);
             Draw->PopClipRect();
         }
     }
@@ -1481,10 +1481,10 @@ void RecordViewport(TyreGeneratorState& State, ImVec2 Min, ImVec2 Max)
             }
             if (On)
             {
-                Draw->AddRectFilled(ImVec2(X, Y0 + 6.0f), ImVec2(X + Widths[I], Y0 + 32.0f), kCard2, 13.0f);
+                Draw->AddRectFilled(ImVec2(X, Y0 + 6.0f), ImVec2(X + Widths[I], Y0 + 32.0f), CardRaisedTint, 13.0f);
             }
             const ImVec2 Size = Measure(13.0f, Labels[I]);
-            Ink(Draw, 13.0f, ImVec2(X + (Widths[I] - Size.x) * 0.5f, Y0 + 12.0f), On ? kWhite : kMuted, Labels[I]);
+            Ink(Draw, 13.0f, ImVec2(X + (Widths[I] - Size.x) * 0.5f, Y0 + 12.0f), On ? WhiteTint : MutedTint, Labels[I]);
             X += Widths[I] + 4.0f;
         }
     }
@@ -1519,7 +1519,7 @@ void RecordPatternColumn(TyreGeneratorState& State)
         char Right[24];
         std::snprintf(Right, sizeof(Right), "%zu designs", TyrePresets().size());
         Card Panel;
-        Panel.Begin("Tread presets", kGreen, Right);
+        Panel.Begin("Tread presets", GreenTint, Right);
 
         const float W = ImGui::GetContentRegionAvail().x;
         const float CellW = (W - 8.0f) * 0.5f;
@@ -1543,22 +1543,22 @@ void RecordPatternColumn(TyreGeneratorState& State)
             ImGui::PopID();
 
             const bool Active = (Presets[size_t(I)].Name == State.Document.Name);
-            Draw->AddRectFilled(ImVec2(X, Y), ImVec2(X + CellW, Y + 80.0f), Hovered ? kCard3 : kCard2, 16.0f);
+            Draw->AddRectFilled(ImVec2(X, Y), ImVec2(X + CellW, Y + 80.0f), Hovered ? CardHoverTint : CardRaisedTint, 16.0f);
             if (Active)
             {
-                Draw->AddRect(ImVec2(X, Y), ImVec2(X + CellW, Y + 80.0f), kWhite, 16.0f, 0, 1.0f);
+                Draw->AddRect(ImVec2(X, Y), ImVec2(X + CellW, Y + 80.0f), WhiteTint, 16.0f, 0, 1.0f);
             }
             Draw->PushClipRect(ImVec2(X + 8.0f, Y + 8.0f), ImVec2(X + CellW - 8.0f, Y + 46.0f), true);
             DrawDepthThumbnail(Draw, ImVec2(X + 8.0f, Y + 8.0f), ImVec2(X + CellW - 8.0f, Y + 46.0f),
                                Thumbnails[size_t(I)]);
             Draw->PopClipRect();
-            Ink(Draw, 13.0f, ImVec2(X + 8.0f, Y + 50.0f), kWhite, Presets[size_t(I)].Name.c_str());
+            Ink(Draw, 13.0f, ImVec2(X + 8.0f, Y + 50.0f), WhiteTint, Presets[size_t(I)].Name.c_str());
             // the category, letterspaced small caps the way the generator sets it
             float TX = X + 8.0f;
             for (const char* C = Presets[size_t(I)].Kind.c_str(); *C != '\0'; ++C)
             {
                 const char One[2] = { char(std::toupper(static_cast<unsigned char>(*C))), '\0' };
-                Ink(Draw, 11.0f, ImVec2(TX, Y + 65.0f), kMuted, One);
+                Ink(Draw, 11.0f, ImVec2(TX, Y + 65.0f), MutedTint, One);
                 TX += Measure(11.0f, One).x + 1.0f;
             }
         }
@@ -1589,7 +1589,7 @@ void RecordPatternColumn(TyreGeneratorState& State)
     static int sAddKind = 0;
     {
         Card Panel;
-        Panel.Begin("Tread editor", kYellow, "");
+        Panel.Begin("Tread editor", YellowTint, "");
         if (TextField("##pname", "Name", &State.Document.Name)) { State.Touch(); }
         {
             int Picked = 0;
@@ -1613,7 +1613,7 @@ void RecordPatternColumn(TyreGeneratorState& State)
             }
             const ImVec2 Row = ImGui::GetCursorScreenPos();
             const float  W   = ImGui::GetContentRegionAvail().x;
-            ImGui::PushClipRect(Row, ImVec2(Row.x + W - 58.0f, Row.y + kRowHeight), true);
+            ImGui::PushClipRect(Row, ImVec2(Row.x + W - 58.0f, Row.y + RowHeight), true);
             Choice("##addlayer", "Add layer", &sAddKind, Names);
             ImGui::PopClipRect();
             ImGui::SetCursorScreenPos(ImVec2(Row.x + W - 54.0f, Row.y));
@@ -1623,7 +1623,7 @@ void RecordPatternColumn(TyreGeneratorState& State)
                 State.PickedLayer = int(P.Layers.size()) - 1;
                 State.Touch();
             }
-            ImGui::SetCursorScreenPos(ImVec2(Row.x, Row.y + kRowHeight + kRowGap));
+            ImGui::SetCursorScreenPos(ImVec2(Row.x, Row.y + RowHeight + RowGap));
         }
 
         const float W = ImGui::GetContentRegionAvail().x;
@@ -1644,20 +1644,20 @@ void RecordPatternColumn(TyreGeneratorState& State)
                 State.PickedLayer = I;
             }
             const bool Picked = (State.PickedLayer == I);
-            Draw->AddRectFilled(Row, ImVec2(Row.x + W, Row.y + 32.0f), kCard2, 12.0f);
+            Draw->AddRectFilled(Row, ImVec2(Row.x + W, Row.y + 32.0f), CardRaisedTint, 12.0f);
             if (Picked)
             {
-                Draw->AddRect(Row, ImVec2(Row.x + W, Row.y + 32.0f), kWhite, 13.0f, 0, 1.0f);
+                Draw->AddRect(Row, ImVec2(Row.x + W, Row.y + 32.0f), WhiteTint, 13.0f, 0, 1.0f);
             }
             const ImU32 Chip = IM_COL32((Entry.Colour >> 16) & 0xFFu, (Entry.Colour >> 8) & 0xFFu,
                                         Entry.Colour & 0xFFu, 255);
             Draw->AddRectFilled(ImVec2(Row.x + 13.0f, Row.y + 9.0f), ImVec2(Row.x + 15.0f, Row.y + 23.0f), Chip, 1.5f);
 
             Draw->PushClipRect(Row, ImVec2(Row.x + W - 92.0f, Row.y + 32.0f), true);
-            Ink(Draw, 13.0f, ImVec2(Row.x + 23.0f, Row.y + 8.0f), kText, Entry.Label);
+            Ink(Draw, 13.0f, ImVec2(Row.x + 23.0f, Row.y + 8.0f), TextTint, Entry.Label);
             const std::string Summary = SummariseLayer(Layer);
             Ink(Draw, 11.0f, ImVec2(Row.x + 27.0f + Measure(13.0f, Entry.Label).x, Row.y + 9.0f),
-                kMuted, Summary.c_str());
+                MutedTint, Summary.c_str());
             Draw->PopClipRect();
 
             // the four row actions, as glyph-free vector marks
@@ -1680,9 +1680,9 @@ void RecordPatternColumn(TyreGeneratorState& State)
                 }
                 if (Over)
                 {
-                    Draw->AddRectFilled(ImVec2(BX, Row.y + 6.0f), ImVec2(BX + 20.0f, Row.y + 26.0f), kCard3, 6.0f);
+                    Draw->AddRectFilled(ImVec2(BX, Row.y + 6.0f), ImVec2(BX + 20.0f, Row.y + 26.0f), CardHoverTint, 6.0f);
                 }
-                const ImU32 Mark = Over ? kWhite : kMuted;
+                const ImU32 Mark = Over ? WhiteTint : MutedTint;
                 const float CX = BX + 10.0f;
                 const float CY = Row.y + 16.0f;
                 if (std::strcmp(Marks[B], "copy") == 0)
@@ -1744,7 +1744,7 @@ void RecordPatternColumn(TyreGeneratorState& State)
     //----------------------------------------------------------------------------------------------------------
     {
         Card Panel;
-        Panel.Begin("Layer properties", kRed, "");
+        Panel.Begin("Layer properties", RedTint, "");
         if (State.PickedLayer < 0 || State.PickedLayer >= int(P.Layers.size()))
         {
             Hint("Select a layer to edit it. Layers are drawn in order; deeper cuts win. "
@@ -1813,7 +1813,7 @@ void RecordTyreGeneratorWindow(ControlPanel& Controls, TyreGeneratorState& State
 
     ImGui::SetNextWindowSize(ImVec2(1520.0f, 850.0f), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(900.0f, 520.0f), ImVec2(FLT_MAX, FLT_MAX));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, kBackdrop);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, BackdropTint);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 10.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 14.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 0.0f));
@@ -1861,11 +1861,11 @@ void RecordTyreGeneratorWindow(ControlPanel& Controls, TyreGeneratorState& State
             const bool On = int(State.Tab) == I;
             if (On)
             {
-                Draw->AddRectFilled(ImVec2(X, At.y + 12.0f), ImVec2(X + W, At.y + 48.0f), kCard2, 18.0f);
+                Draw->AddRectFilled(ImVec2(X, At.y + 12.0f), ImVec2(X + W, At.y + 48.0f), CardRaisedTint, 18.0f);
             }
             const ImVec2 Size = Measure(13.0f, Tabs[I]);
             Ink(Draw, 13.0f, ImVec2(X + (W - Size.x) * 0.5f, At.y + 22.0f),
-                On ? kText : (Over ? kText : kMuted), Tabs[I]);
+                On ? TextTint : (Over ? TextTint : MutedTint), Tabs[I]);
             X += W + 4.0f;
         }
         ImGui::SetCursorScreenPos(ImVec2(At.x, At.y + 60.0f));
@@ -1876,9 +1876,9 @@ void RecordTyreGeneratorWindow(ControlPanel& Controls, TyreGeneratorState& State
     //----------------------------------------------------------------------------------------------------------
     const float BodyHeight = ImGui::GetContentRegionAvail().y;
     const float TotalWidth = ImGui::GetContentRegionAvail().x;
-    const float CentreWidth = std::max(240.0f, TotalWidth - kLeftColumn - kRightColumn - 2.0f * kGutter);
+    const float CentreWidth = std::max(240.0f, TotalWidth - ControlColumnWidth - PatternColumnWidth - 2.0f * ColumnGutter);
 
-    ImGui::BeginChild("left", ImVec2(kLeftColumn, BodyHeight), ImGuiChildFlags_None,
+    ImGui::BeginChild("left", ImVec2(ControlColumnWidth, BodyHeight), ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoBackground);
     switch (State.Tab)
     {
@@ -1889,7 +1889,7 @@ void RecordTyreGeneratorWindow(ControlPanel& Controls, TyreGeneratorState& State
     }
     ImGui::EndChild();
 
-    ImGui::SameLine(0.0f, kGutter);
+    ImGui::SameLine(0.0f, ColumnGutter);
     {
         const ImVec2 At = ImGui::GetCursorScreenPos();
         ImGui::BeginChild("viewport", ImVec2(CentreWidth, BodyHeight), ImGuiChildFlags_None,
@@ -1900,8 +1900,8 @@ void RecordTyreGeneratorWindow(ControlPanel& Controls, TyreGeneratorState& State
         ImGui::EndChild();
     }
 
-    ImGui::SameLine(0.0f, kGutter);
-    ImGui::BeginChild("right", ImVec2(kRightColumn, BodyHeight), ImGuiChildFlags_None,
+    ImGui::SameLine(0.0f, ColumnGutter);
+    ImGui::BeginChild("right", ImVec2(PatternColumnWidth, BodyHeight), ImGuiChildFlags_None,
                       ImGuiWindowFlags_NoBackground);
     RecordPatternColumn(State);
     ImGui::EndChild();

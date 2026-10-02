@@ -17,8 +17,8 @@
 
 #pragma once
 
-#include "../../../Engine/ContentInterchange/Tyre/TreadSpecification.h"
-#include "../../../Engine/ContentInterchange/Tyre/TreadPatternSpecification.h"
+#include "../../../Engine/Generators/Tyre/TreadSpecification.h"
+#include "../../../Engine/Generators/Tyre/TreadPatternSpecification.h"
 #include "../../../Engine/Editor/EditorInstance.h"
 
 #include <cstdint>

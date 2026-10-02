@@ -29,11 +29,11 @@ GALLERY = ROOT / "Exhibits/Gallery/Editor"
 SOURCES = [
     "Exhibits/Workbench/Editor/TyreGeneratorProof.cpp",
     "Engine/Editor/TyreInspectorPanel.cpp",
-    "Engine/Editor/TyreGeneratorWindow.cpp",
-    "Engine/ContentInterchange/Tyre/TreadPatternRaster.cpp",
-    "Engine/ContentInterchange/Tyre/TyrePresetLibrary.cpp",
-    "Engine/ContentInterchange/Tyre/TyreAppearanceSpecification.cpp",
-    "Engine/ContentInterchange/Tyre/RimSpecification.cpp",
+    "Engine/Generators/Tyre/TyreGeneratorWindow.cpp",
+    "Engine/Generators/Tyre/TreadPatternRaster.cpp",
+    "Engine/Generators/Tyre/TyrePresetLibrary.cpp",
+    "Engine/Generators/Tyre/TyreAppearanceSpecification.cpp",
+    "Engine/Generators/Tyre/RimSpecification.cpp",
     "Projects/Project-Drive/Source/TyreGeneratorSequence.cpp",
     # the editor itself
     "Engine/Editor/EditorHost.cpp", "Engine/Editor/ControlPanel.cpp", "Engine/Editor/OutlinerPanel.cpp",
