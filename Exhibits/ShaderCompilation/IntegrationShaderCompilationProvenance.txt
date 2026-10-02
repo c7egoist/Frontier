@@ -1,0 +1,10 @@
+Shader lowering proof — glslang Glslang Version: 11:16.0.0
+Date: Mon Sep 28 19:38:18 UTC 2026   Repo: SultanAladin/Frontier- @ 2fbe5c5 + RaytraceToggle patch
+Command: glslang -V --target-env vulkan1.2 -S comp -DFRONTIER_SHADER_TOOLCHAIN=1 -IEngine -IEngine/Shaders
+-----------------------------------------------------------------------------------------
+  PASS  SurfelIrradianceUpdate.slang -> 41172 bytes SPIR-V
+  PASS  SurfelGIResolve.slang        -> 43260 bytes SPIR-V
+  PASS  ReSTIRViewport.slang         -> 521212 bytes SPIR-V
+  PASS  AtrousDenoise.slang          -> 22912 bytes SPIR-V
+  PASS  SurfaceResolve.slang         -> 30408 bytes SPIR-V
+  PASS  VisibilityRaster.frag.slang  -> 8640 bytes SPIR-V

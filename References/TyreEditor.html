@@ -1,0 +1,1407 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tyre Generator — editor layout prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>
+/* ══════════════════════════════════════════════════════════════════════════════════════════
+   Tokens and metrics quoted from the panels that draw the editor:
+     OutlinerPanel.cpp    the :root ladder, row metrics, category tints
+     InspectorPanel.cpp   card inset + 18 px corner, header wash
+     ControlPanel.cpp     SliderPill geometry and greys
+     EditorHost.cpp       the six seated faces
+   Card composition follows the supplied references: a tint bar before the title, a light
+   display figure with the fraction dimmed, the unit trailing small, a trend arrow in the
+   corner, and a tinted plot seated at the foot of the card.
+   ══════════════════════════════════════════════════════════════════════════════════════════ */
+:root{
+  --glass:#0f1012; --inset:#1a1a1a; --card:#1c1c1d; --field:#000; --cell:#222;
+  --hover:#222; --seated:#2a2a2a; --strong:#2e2e2e;
+  --t1:rgba(255,255,255,.94); --t2:rgba(255,255,255,.56); --t3:rgba(255,255,255,.32);
+  --g2:rgba(255,255,255,.045); --g3:rgba(255,255,255,.08);
+  --stroke:rgba(255,255,255,.05); --stroke2:rgba(255,255,255,.13); --wash:rgba(255,255,255,.02);
+  --selbg:rgba(255,255,255,.09); --tilebg:rgba(255,255,255,.035); --tileico:rgba(255,255,255,.06);
+  --text:#f0f0f0; --dim:#888; --faint:#5c5c5c;
+  --green:#34C759; --red:#FF3B30; --orange:#FFB454; --amber:#F59E0B;
+  --hi:#6C77FF; --fill:#4a4a4a; --thumb:#e0e0e0; --knob-off:#bdbdbd; --knob-on:#111;
+  --sky:#5AA9FF; --bodies:#DFE6F5; --geometry:#E2E8F0; --lights:#FFB454; --camera:#34C759;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{background:#09090b;color:var(--text);font:300 13px/1.5 "Outfit","Segoe UI",system-ui,sans-serif;
+  overflow:hidden;-webkit-font-smoothing:antialiased}
+svg{display:block;flex:0 0 auto}
+.ico16{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.ico14{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.ico12{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.ico20{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+
+/* ── shell ──────────────────────────────────────────────────────────────── */
+.app{display:grid;grid-template-columns:316px 1fr 364px;height:100%;background:#09090b;
+  transition:padding .18s ease}
+.app.dock-right{padding-right:var(--dockw,560px)}
+.app.dock-bottom{padding-bottom:var(--dockh,340px)}
+.panel{background:var(--glass);display:flex;flex-direction:column;min-width:0;min-height:0}
+.panel + .panel{border-left:1px solid var(--stroke)}
+
+.tabstrip{display:flex;align-items:flex-end;height:32px;flex:0 0 auto}
+.tab{display:flex;align-items:center;gap:9px;height:32px;padding:0 13px;font-size:12px;color:var(--t2);
+  user-select:none;white-space:nowrap;cursor:default}
+.tab.on{color:var(--t1);background:var(--glass)}
+.tab.wide{flex:1;justify-content:center;background:rgba(255,255,255,.03)}
+.tab .x{color:var(--t3);cursor:pointer;display:grid;place-items:center}
+.tab .x:hover{color:var(--text)}
+.plus{width:26px;height:22px;margin:0 0 4px 8px;border-radius:7px;background:var(--g3);display:grid;
+  place-items:center;color:var(--t2);cursor:pointer}
+.plus:hover{background:var(--stroke2);color:var(--text)}
+
+/* ── outliner ───────────────────────────────────────────────────────────── */
+.ohead{display:flex;align-items:center;gap:10px;padding:20px 22px 12px}
+.ohead h1{font:300 20px/1 "Outfit",sans-serif;color:var(--t1)}
+.ohead .sub{font-size:11px;color:var(--t3);flex:1;align-self:flex-end;padding-bottom:2px}
+.round{width:26px;height:26px;border-radius:50%;background:var(--g2);border:1px solid var(--stroke);
+  display:grid;place-items:center;color:var(--t2);cursor:pointer;flex:0 0 auto}
+.round:hover{background:var(--g3);color:var(--text)}
+
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 14px 12px}
+.stile{background:var(--card);border:1px solid var(--stroke);border-radius:18px;padding:13px 15px 11px;position:relative}
+.stile .ico{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;margin-bottom:16px}
+.stile.ok .ico{background:var(--green);color:#0B1A12}
+.stile.warn .ico{background:rgba(255,59,48,.16);color:var(--red)}
+.stile .lab{font-size:11.5px;color:var(--t2)}
+.stile .num{position:absolute;right:15px;bottom:9px;font:200 26px/1 "Outfit",sans-serif;color:var(--t1)}
+
+.searchrow{display:flex;gap:10px;padding:0 14px 10px}
+.search{flex:1;display:flex;align-items:center;gap:9px;height:34px;padding:0 13px;border-radius:17px;
+  background:var(--tilebg);border:1px solid var(--stroke);color:var(--t3)}
+.search input{flex:1;background:none;border:none;outline:none;color:var(--text);font:300 11.5px "Outfit",sans-serif}
+.search input::placeholder{color:var(--t3)}
+.filterbtn{display:flex;align-items:center;height:34px;border-radius:17px;background:var(--tilebg);
+  border:1px solid var(--stroke);color:var(--t2);font-size:11.5px;cursor:pointer;user-select:none}
+.filterbtn .l{display:flex;align-items:center;gap:7px;padding:0 10px 0 12px}
+.filterbtn .n{min-width:15px;height:15px;border-radius:8px;background:var(--g3);color:var(--t1);font-size:9.5px;
+  display:grid;place-items:center;padding:0 4px}
+.filterbtn .c{padding:0 9px;border-left:1px solid var(--stroke);color:var(--t3);height:100%;display:grid;place-items:center}
+.filterbtn:hover{background:var(--g3);color:var(--text)}
+
+.chips{display:flex;flex-wrap:wrap;gap:7px;padding:0 14px 10px}
+.fchip{display:flex;align-items:center;gap:7px;height:23px;padding:0 9px;border-radius:12px;background:var(--tilebg);
+  border:1px solid var(--stroke);font-size:10.5px;color:var(--t2);cursor:pointer;user-select:none}
+.fchip .dot{width:6px;height:6px;border-radius:50%}
+.fchip .x{color:var(--t3);display:grid;place-items:center}
+.fchip:hover{background:var(--g3);color:var(--text)}
+.fchip.off{opacity:.42}
+
+.tree{flex:1;overflow:auto;padding:2px 10px 10px}
+.node{display:flex;align-items:center;height:39px;border-radius:7px;cursor:pointer;user-select:none;
+  padding-right:8px;position:relative}
+.node:hover{background:var(--g2)}
+.node.sel{background:var(--selbg)}
+.node.sel::before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:3px;border-radius:2px;
+  background:var(--rowtint,var(--t2))}
+.node .chev{width:14px;display:grid;place-items:center;color:var(--t3);flex:0 0 auto}
+.node .ico{width:30px;height:30px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+  background:var(--g2);color:var(--rowtint,var(--t2));margin-right:9px}
+.node .nm{flex:1;font-size:12.5px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.node .meta{font:400 10.5px/1 "JetBrains Mono",monospace;color:var(--t3);margin-right:9px;white-space:nowrap}
+.node .badge{width:16px;height:16px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+  background:var(--green);color:#0B1A12}
+.node .badge.warn{background:rgba(255,180,84,.18);color:var(--orange)}
+.node .eyeb{width:24px;display:grid;place-items:center;color:var(--t3);flex:0 0 auto;opacity:0}
+.node:hover .eyeb,.node.sel .eyeb{opacity:1}
+.node .eyeb:hover{color:var(--text)}
+.node .tagpill{font-size:8.5px;letter-spacing:.06em;color:var(--t3);border:1px solid var(--stroke2);
+  border-radius:3px;padding:1px 4px;margin-right:8px}
+.node.off{opacity:.45}
+
+/* ── foot band ──────────────────────────────────────────────────────────── */
+.foot{flex:0 0 auto;background:var(--wash);border-top:1px solid var(--stroke);padding:7px 14px 8px;
+  display:flex;gap:18px;align-items:flex-end}
+.foot .k{font-size:8.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--t3);display:block}
+.foot .v{font:400 11px/1.3 "JetBrains Mono",monospace;color:var(--t2)}
+.foot .sp{flex:1}
+
+/* ── viewport ───────────────────────────────────────────────────────────── */
+.vptools{display:flex;align-items:center;gap:8px;padding:9px 13px 10px;flex:0 0 auto}
+.navpills{display:flex;align-items:center;gap:3px}
+.npill{height:30px;padding:0 15px;border-radius:15px;display:grid;place-items:center;font-size:12px;
+  color:var(--t2);cursor:pointer;user-select:none}
+.npill:hover{color:var(--text)}
+.npill.on{background:#2b2b2c;color:var(--t1)}
+.tbtn{height:28px;min-width:28px;padding:0 9px;border-radius:9px;background:var(--g2);border:1px solid var(--stroke);
+  color:var(--t2);display:grid;place-items:center;cursor:pointer;user-select:none;font-size:11px}
+.tbtn:hover{background:var(--g3);color:var(--text)}
+.vpsp{flex:1}
+.dotpill{display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-radius:14px;background:var(--g2);
+  border:1px solid var(--stroke);font-size:10.5px;color:var(--t2);letter-spacing:.06em}
+.dotpill .d{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.dotpill .n{font-family:"JetBrains Mono",monospace;color:var(--t3)}
+
+.stage{flex:1;display:grid;grid-template-columns:1fr 296px;gap:10px;min-height:0;margin:0 13px 10px}
+.vcard{background:var(--card);border:1px solid var(--stroke);border-radius:20px;position:relative;overflow:hidden;
+  display:flex;flex-direction:column;min-height:0}
+.vcard .vhead{display:flex;align-items:center;gap:9px;padding:13px 16px 0;flex:0 0 auto}
+.vcard .vbar{width:3px;height:13px;border-radius:2px;background:var(--rowtint,var(--geometry))}
+.vcard .vt{font-size:12px;color:var(--t2);flex:1}
+.vcard .vact{color:var(--t3);cursor:pointer;display:grid;place-items:center}
+.vcard .vact:hover{color:var(--text)}
+.cbody{flex:1;min-height:0;position:relative;display:flex;align-items:center;justify-content:center}
+canvas{display:block;max-width:100%;max-height:100%}
+.cread{position:absolute;right:14px;bottom:11px;text-align:right;font:400 10px/1.7 "JetBrains Mono",monospace;
+  color:var(--t3);pointer-events:none}
+.chint{position:absolute;left:14px;bottom:11px;font-size:10px;color:var(--t3);pointer-events:none}
+.rail{display:grid;grid-template-rows:1fr 1fr;gap:10px;min-height:0}
+
+/* ── inspector ──────────────────────────────────────────────────────────── */
+.ihead{display:flex;align-items:center;gap:12px;padding:13px 16px;background:var(--wash);min-height:56px;flex:0 0 auto}
+.ihead .tile{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;flex:0 0 auto}
+.ihead .who{flex:1;min-width:0}
+.ihead .who .n{font-size:13.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ihead .who .t{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t3);margin-top:2px}
+.ibody{flex:1;overflow:auto;padding:12px 14px 18px}
+
+/* the reference card */
+.mcard{background:var(--card);border:1px solid var(--stroke);border-radius:20px;padding:15px 17px 16px;
+  margin-bottom:12px;position:relative}
+.mhead{display:flex;align-items:center;gap:9px}
+.mbar{width:3px;height:13px;border-radius:2px;background:var(--mt,var(--geometry));flex:0 0 auto}
+.mtitle{font-size:12.5px;color:var(--t1);flex:1}
+.mtrend{color:var(--t3);cursor:default;display:grid;place-items:center}
+.mcard.collapsible .mhead{cursor:pointer;user-select:none}
+.mcard.collapsible .mhead:hover .mtitle{color:#fff}
+.metric{display:flex;align-items:baseline;gap:3px;margin:14px 0 2px}
+.metric .i{font:200 40px/1 "Outfit",sans-serif;color:#fff;letter-spacing:-1px}
+.metric .f{font:200 40px/1 "Outfit",sans-serif;color:#5e5e5e;letter-spacing:-1px}
+.metric .u{font:300 13px "Outfit",sans-serif;color:var(--dim);margin-left:4px}
+.mnote{font-size:11px;color:var(--dim);line-height:1.6;margin-top:9px}
+.mbadge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 10px;border-radius:11px;
+  font:400 10.5px "JetBrains Mono",monospace;margin-top:10px}
+.kindrow{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.kchip{display:flex;align-items:baseline;gap:6px;height:28px;padding:0 12px;border-radius:14px;
+  background:var(--g2);border:1px solid var(--stroke)}
+.kchip b{font:400 12px "JetBrains Mono",monospace;color:var(--t1);font-weight:400}
+.kchip span{font-size:11px;color:var(--t3)}
+.mplot{margin-top:14px;border-radius:10px;overflow:hidden;position:relative}
+.mplot canvas{width:100%;display:block}
+
+.row{display:flex;align-items:center;gap:10px;min-height:30px;margin:8px 0}
+.row .lab{width:88px;flex:0 0 auto;font-size:11.5px;color:var(--dim)}
+.row .ctl{flex:1;display:flex;align-items:center;gap:10px;min-width:0}
+.row .kindtag{font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--t3);
+  border:1px solid var(--stroke);border-radius:3px;padding:0 3px;flex:0 0 auto}
+.kv{display:flex;align-items:center;min-height:26px}
+.kv .k{flex:1;color:var(--dim);font-size:10px;letter-spacing:.1em;text-transform:uppercase}
+.kv .v{font:400 11px "JetBrains Mono",monospace;color:var(--t2)}
+
+/* SliderPill — 92 px split pill, 34 px unit cell, 10 px gap, 26 px track, 24 px knob */
+.pill{display:flex;align-items:stretch;width:92px;height:28px;border-radius:14px;border:1px solid var(--stroke);
+  overflow:hidden;flex:0 0 auto}
+.pill input{width:58px;background:var(--field);border:none;outline:none;color:var(--text);
+  font:400 12px/1 "JetBrains Mono",monospace;text-align:center;padding:0}
+.pill .unit{width:34px;background:var(--inset);border-left:1px solid var(--stroke);display:grid;place-items:center;
+  font-size:10px;color:var(--faint)}
+.track{flex:1;height:26px;border-radius:13px;background:var(--field);border:1px solid var(--stroke);
+  position:relative;cursor:ew-resize;min-width:58px}
+.track .fl{position:absolute;left:1px;top:1px;bottom:1px;border-radius:12px;background:var(--fill)}
+.track .kb{position:absolute;top:0;width:24px;height:24px;border-radius:50%;background:var(--thumb)}
+.track:hover .kb{background:#fff}
+.switch{width:44px;height:24px;border-radius:12px;background:var(--cell);border:1px solid var(--stroke);
+  position:relative;cursor:pointer;flex:0 0 auto}
+.switch .kb{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--knob-off);
+  transition:all .13s}
+.switch.on{background:var(--thumb)}
+.switch.on .kb{left:22px;background:var(--knob-on)}
+.segs{display:flex;flex-wrap:wrap;gap:7px;margin-top:4px}
+.seg{height:25px;padding:0 12px;border-radius:13px;background:transparent;border:1px solid var(--stroke);
+  color:var(--t3);font-size:10px;letter-spacing:.08em;display:grid;place-items:center;cursor:pointer;user-select:none}
+.seg:hover{background:var(--g2);color:var(--t2)}
+.seg.on{background:var(--seated);color:var(--t1);border-color:var(--stroke2)}
+select.sel{height:28px;border-radius:14px;background:var(--field);border:1px solid var(--stroke);color:var(--text);
+  font:400 11.5px "JetBrains Mono",monospace;padding:0 10px;outline:none;flex:1;min-width:0}
+select.sel:focus{border-color:var(--hi)}
+
+/* ── dockable asset window ──────────────────────────────────────────────── */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:38;display:none}
+.scrim.open{display:block}
+.window{position:fixed;width:880px;height:584px;left:170px;top:84px;z-index:40;display:none;
+  background:var(--glass);border:1px solid var(--stroke2);border-radius:12px;
+  box-shadow:0 30px 80px rgba(0,0,0,.78);flex-direction:column;overflow:hidden}
+.window.open{display:flex}
+.window.dock-right{left:auto;right:0;top:0;bottom:0;height:auto;width:var(--dockw,560px);border-radius:0;
+  border-top:none;border-right:none;border-bottom:none;box-shadow:-20px 0 50px rgba(0,0,0,.5)}
+.window.dock-bottom{left:0;right:0;top:auto;bottom:0;width:auto;height:var(--dockh,340px);border-radius:0;
+  border-left:none;border-right:none;border-bottom:none;box-shadow:0 -20px 50px rgba(0,0,0,.5)}
+.window.full{left:0;top:0;right:0;bottom:0;width:auto;height:auto;border-radius:0;border:none}
+.wtitle{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px 0 13px;cursor:grab;flex:0 0 auto;
+  background:var(--wash);border-bottom:1px solid var(--stroke);user-select:none}
+.wtitle.drag{cursor:grabbing}
+.window.dock-right .wtitle,.window.dock-bottom .wtitle,.window.full .wtitle{cursor:default}
+.wtitle .t{font-size:12.5px;color:var(--t1)}
+.wtitle .s{font:400 10.5px "JetBrains Mono",monospace;color:var(--t3)}
+.wtitle .sp{flex:1}
+.wbtn{width:24px;height:24px;border-radius:7px;display:grid;place-items:center;color:var(--t3);cursor:pointer}
+.wbtn:hover{background:var(--g3);color:var(--text)}
+.wbtn.on{background:var(--seated);color:var(--t1)}
+.wgrip{position:absolute;right:0;bottom:0;width:16px;height:16px;cursor:nwse-resize;z-index:2}
+.window.dock-right .wgrip,.window.dock-bottom .wgrip,.window.full .wgrip{display:none}
+.dockedge{position:absolute;z-index:3;background:transparent}
+.window.dock-right .dockedge{left:-3px;top:0;bottom:0;width:6px;cursor:ew-resize}
+.window.dock-bottom .dockedge{top:-3px;left:0;right:0;height:6px;cursor:ns-resize}
+
+.wbody{flex:1;min-height:0;display:flex;flex-direction:column}
+.wtabs{display:flex;height:31px;flex:0 0 auto;border-bottom:1px solid var(--stroke);padding-left:6px}
+.wtab{padding:0 15px;display:grid;place-items:center;font-size:11.5px;color:var(--t2);cursor:pointer;
+  user-select:none;border-bottom:2px solid transparent}
+.wtab:hover{color:var(--text)}
+.wtab.on{color:var(--t1);border-bottom-color:var(--sky)}
+.wcontent{flex:1;min-height:0;overflow:auto}
+.split{display:grid;grid-template-columns:330px 1fr;height:100%;min-height:0}
+.seq{border-right:1px solid var(--stroke);overflow:auto;min-height:0}
+.seqhead{display:flex;align-items:center;gap:8px;padding:12px 14px 9px;position:sticky;top:0;background:var(--glass);z-index:1}
+.seqhead .t{flex:1;font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--t2)}
+.sbtn{height:25px;padding:0 11px;border-radius:13px;background:var(--g2);border:1px solid var(--stroke);
+  color:var(--t2);font-size:11px;display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none}
+.sbtn:hover{background:var(--g3);color:var(--text)}
+.lay{display:flex;align-items:center;gap:9px;height:48px;padding:0 14px;margin:0 8px;border-radius:8px;
+  cursor:pointer;user-select:none;position:relative}
+.lay:hover{background:var(--g2)}
+.lay.sel{background:var(--selbg)}
+.lay.sel::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:2px;background:var(--sky)}
+.lay .grip,.lay .eyeb{color:var(--t3);display:grid;place-items:center;flex:0 0 auto}
+.lay .grip{cursor:grab}
+.lay.off{opacity:.42}
+.lay.off .eyeb{color:var(--red)}
+.lay .gl{width:22px;display:grid;place-items:center;color:var(--sky);flex:0 0 auto}
+.lay .bd{flex:1;min-width:0}
+.lay .l1{display:flex;align-items:baseline;gap:7px}
+.lay .kn{font-size:12px;color:var(--t1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lay .dp{margin-left:auto;font:400 10px "JetBrains Mono",monospace;color:var(--t3)}
+.bars{display:flex;gap:5px;align-items:center;margin-top:6px}
+.bar{height:3px;border-radius:2px;background:var(--field);border:1px solid var(--stroke);position:relative;overflow:hidden}
+.bar i{position:absolute;top:0;bottom:0;background:var(--fill);border-radius:2px}
+.bar.d{width:46px}.bar.s{flex:1}
+.params{overflow:auto;min-height:0;padding:12px 16px 24px}
+.empty{padding:34px 20px;color:var(--t3);font-size:11.5px;line-height:1.7;text-align:center}
+
+.notes{padding:18px 26px 32px;max-width:720px}
+.notes h3{font:400 13px "Outfit",sans-serif;color:var(--t1);margin:20px 0 8px}
+.notes h3:first-child{margin-top:0}
+.notes p{font-size:11.5px;color:var(--dim);line-height:1.7;margin-bottom:9px}
+.notes strong{color:var(--t1);font-weight:400}
+.notes em{color:var(--t2);font-style:italic}
+.notes table{border-collapse:collapse;width:100%;margin:9px 0 13px;font-size:11px}
+.notes th,.notes td{border:1px solid var(--stroke2);padding:6px 9px;text-align:left;vertical-align:top;color:var(--dim)}
+.notes th{color:var(--t3);font-size:9px;letter-spacing:.1em;text-transform:uppercase;background:var(--wash)}
+.notes td.k{color:var(--t1);white-space:nowrap}
+.notes code{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--t2);background:var(--field);
+  border:1px solid var(--stroke);padding:1px 5px;border-radius:4px}
+body.sologenerator .app,body.sologenerator .scrim{display:none}
+</style>
+</head>
+<body>
+
+<div class="app" id="app">
+
+  <!-- ══ OUTLINER ══════════════════════════════════════════════════════ -->
+  <div class="panel">
+    <div class="tabstrip">
+      <div class="tab on">Outliner <span class="x" data-i="x"></span></div>
+      <div class="plus" data-i="plus"></div>
+    </div>
+    <div class="ohead">
+      <h1>Outliner</h1><span class="sub" id="o-sub">—</span>
+      <span class="round" data-i="menu"></span>
+    </div>
+    <div class="stats">
+      <div class="stile ok"><div class="ico" data-i="check"></div><div class="lab">Visible</div><div class="num" id="o-vis">0</div></div>
+      <div class="stile warn"><div class="ico" data-i="alert"></div><div class="lab">Hidden</div><div class="num" id="o-hid">0</div></div>
+    </div>
+    <div class="searchrow">
+      <label class="search"><span data-i="search"></span><input placeholder="Search  Ctrl+Shift+F"></label>
+      <div class="filterbtn"><span class="l"><span data-i="filter"></span>Filter <span class="n" id="o-fn">4</span></span><span class="c" data-i="chevDown"></span></div>
+    </div>
+    <div class="chips" id="o-chips"></div>
+    <div class="tree" id="o-tree"></div>
+    <div class="foot">
+      <div><span class="k">Pattern</span><span class="v" id="f-pat">—</span></div>
+      <div><span class="k">Layers</span><span class="v" id="f-lay">—</span></div>
+      <div><span class="k">Pressure</span><span class="v" id="f-psi">—</span></div>
+      <div><span class="k">Lattice</span><span class="v" id="f-lat">—</span></div>
+    </div>
+  </div>
+
+  <!-- ══ VIEWPORT ══════════════════════════════════════════════════════ -->
+  <div class="panel">
+    <div class="tabstrip">
+      <div class="tab on">Viewport <span class="x" data-i="x"></span></div>
+      <div class="tab wide">Tyre · <span id="vp-name">—</span></div>
+    </div>
+    <div class="vptools">
+      <div class="navpills" id="vp-modes"></div>
+      <div class="vpsp"></div>
+      <div class="tbtn" id="vp-spin" title="Auto-rotate"><span data-i="rotate"></span></div>
+      <div class="tbtn" id="vp-reset" title="Reset view"><span data-i="target"></span></div>
+      <div class="dotpill"><span class="d"></span>LIVE<span class="n" id="vp-rev">0</span></div>
+      <div class="tbtn" data-i="settings"></div>
+    </div>
+    <div class="stage">
+      <div class="vcard" style="--rowtint:var(--bodies)">
+        <div class="vhead"><span class="vbar"></span><span class="vt">Tyre · solid</span>
+          <span class="vact" id="vp-open" title="Open Tyre Generator" data-i="external"></span></div>
+        <div class="cbody"><canvas id="solid"></canvas>
+          <div class="chint">Drag to orbit · double-click to edit</div>
+          <div class="cread" id="solid-read"></div></div>
+      </div>
+      <div class="rail">
+        <div class="vcard" style="--rowtint:var(--geometry)">
+          <div class="vhead"><span class="vbar"></span><span class="vt">Cross-section</span></div>
+          <div class="cbody"><canvas id="section"></canvas><div class="cread" id="sec-read"></div></div>
+        </div>
+        <div class="vcard" style="--rowtint:var(--sky)">
+          <div class="vhead"><span class="vbar"></span><span class="vt">Developed tread</span></div>
+          <div class="cbody"><canvas id="plan"></canvas><div class="cread" id="plan-read"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="foot">
+      <div><span class="k">Domain</span><span class="v" id="s-dom">—</span></div>
+      <div><span class="k">Circumference</span><span class="v" id="s-circ">—</span></div>
+      <div><span class="k">Outer Ø</span><span class="v" id="s-dia">—</span></div>
+      <div><span class="k">Floors</span><span class="v" id="s-flo">—</span></div>
+      <div class="sp"></div>
+      <div><span class="k">Facets</span><span class="v" id="s-fac">—</span></div>
+    </div>
+  </div>
+
+  <!-- ══ INSPECTOR ═════════════════════════════════════════════════════ -->
+  <div class="panel">
+    <div class="tabstrip"><div class="tab on">Inspector <span class="x" data-i="x"></span></div></div>
+    <div class="ihead">
+      <div class="tile" id="i-tile"></div>
+      <div class="who"><div class="n" id="i-name">Tyre</div><div class="t" id="i-type">GENERATED BODY</div></div>
+      <span class="round" data-i="lock"></span><span class="round" data-i="eye"></span>
+    </div>
+    <div class="ibody" id="i-body"></div>
+    <div class="foot"><div><span class="v" id="i-foot">—</span></div><div class="sp"></div>
+      <div><span class="v" id="i-foot2">—</span></div></div>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+
+<!-- ══ DOCKABLE ASSET WINDOW ═══════════════════════════════════════════ -->
+<div class="window" id="generator">
+  <div class="dockedge" id="dockedge"></div>
+  <div class="wtitle" id="generator-title">
+    <span style="color:var(--sky)" data-i="layers"></span>
+    <span class="t">Tyre Generator</span><span class="s" id="generator-sub">—</span>
+    <span class="sp"></span>
+    <span class="wbtn" id="dk-float" title="Float"  data-i="window"></span>
+    <span class="wbtn" id="dk-right" title="Dock right" data-i="dockRight"></span>
+    <span class="wbtn" id="dk-bottom" title="Dock bottom" data-i="dockBottom"></span>
+    <span class="wbtn" id="dk-full" title="Maximise" data-i="maximize"></span>
+    <span class="wbtn" id="dk-pop" title="Open in a new window" data-i="external"></span>
+    <span class="wbtn" id="generator-close" title="Close" data-i="x"></span>
+  </div>
+  <div class="wbody">
+    <div class="wtabs" id="generator-tabs"></div>
+    <div class="wcontent" id="generator-content"></div>
+  </div>
+  <div class="wgrip" id="wgrip"></div>
+</div>
+
+<script>
+"use strict";
+const DEG = Math.PI/180, CUT = 80*DEG;
+const clamp=(v,a,b)=>v<a?a:v>b?b:v, fmt=(v,d=2)=>Number(v).toFixed(d);
+
+/* ═══ icons — stroked paths, no emoji ════════════════════════════════════ */
+const ICONS = {
+  check:'<polyline points="3.5 8.5 6.5 11.5 12.5 4.5"/>',
+  alert:'<path d="M8 2.6 14.4 13.4H1.6Z"/><path d="M8 6.6v3"/><path d="M8 11.6h.01"/>',
+  search:'<circle cx="7.2" cy="7.2" r="4.3"/><path d="m10.6 10.6 2.7 2.7"/>',
+  filter:'<path d="M2.5 4h11M4.5 8h7M6.5 12h3"/>',
+  chevDown:'<polyline points="4 6.5 8 10.5 12 6.5"/>',
+  chevRight:'<polyline points="6.5 4 10.5 8 6.5 12"/>',
+  plus:'<path d="M8 3.5v9M3.5 8h9"/>',
+  x:'<path d="m4 4 8 8M12 4l-8 8"/>',
+  menu:'<path d="M3 5h10M3 8h10M3 11h10"/>',
+  lock:'<rect x="3.5" y="7" width="9" height="6" rx="1.6"/><path d="M5.6 7V5.3a2.4 2.4 0 0 1 4.8 0V7"/>',
+  eye:'<path d="M1.6 8S3.9 3.8 8 3.8 14.4 8 14.4 8 12.1 12.2 8 12.2 1.6 8 1.6 8Z"/><circle cx="8" cy="8" r="1.8"/>',
+  eyeOff:'<path d="M3 3l10 10"/><path d="M6.3 6.4A1.8 1.8 0 0 0 8 9.8"/><path d="M1.6 8S3.9 3.8 8 3.8c1 0 1.9.25 2.7.63M13.3 10.2c.7-.9 1.1-1.7 1.1-2.2 0 0-1-1.9-2.8-3"/>',
+  settings:'<circle cx="8" cy="8" r="2.1"/><path d="M8 1.9v1.6M8 12.5v1.6M14.1 8h-1.6M3.5 8H1.9M12.3 3.7l-1.1 1.1M4.8 11.2l-1.1 1.1M12.3 12.3l-1.1-1.1M4.8 4.8 3.7 3.7"/>',
+  grip:'<circle cx="6" cy="4" r=".9"/><circle cx="10" cy="4" r=".9"/><circle cx="6" cy="8" r=".9"/><circle cx="10" cy="8" r=".9"/><circle cx="6" cy="12" r=".9"/><circle cx="10" cy="12" r=".9"/>',
+  tyre:'<circle cx="8" cy="8" r="6.2"/><circle cx="8" cy="8" r="2.4"/><path d="M8 1.8v3.8M8 10.4v3.8M1.8 8h3.8M10.4 8h3.8"/>',
+  disc:'<ellipse cx="8" cy="8" rx="6.2" ry="3.2"/><path d="M1.8 8v0"/><circle cx="8" cy="8" r="1.4"/>',
+  grid:'<rect x="2.4" y="2.4" width="11.2" height="11.2" rx="1.6"/><path d="M2.4 6.1h11.2M2.4 9.9h11.2M6.1 2.4v11.2M9.9 2.4v11.2"/>',
+  pen:'<path d="M11.2 2.6 13.4 4.8 5.6 12.6 2.4 13.6l1-3.2Z"/><path d="M9.9 3.9 12.1 6.1"/>',
+  lattice:'<rect x="2.4" y="2.4" width="11.2" height="11.2" rx="1.8"/><circle cx="5.6" cy="5.6" r=".9"/><circle cx="10.4" cy="5.6" r=".9"/><circle cx="5.6" cy="10.4" r=".9"/><circle cx="10.4" cy="10.4" r=".9"/><path d="M5.6 5.6h4.8M5.6 10.4h4.8M5.6 5.6v4.8M10.4 5.6v4.8"/>',
+  layers:'<path d="M8 2.2 14 5.4 8 8.6 2 5.4Z"/><path d="m2 8.8 6 3.2 6-3.2"/>',
+  upRight:'<path d="M4.6 11.4 11.4 4.6"/><path d="M6.2 4.6h5.2v5.2"/>',
+  downRight:'<path d="M4.6 4.6 11.4 11.4"/><path d="M11.4 6.2v5.2H6.2"/>',
+  external:'<path d="M9.4 2.6h4v4"/><path d="M13.4 2.6 7.6 8.4"/><path d="M12 9.6v3a.9.9 0 0 1-.9.9H3.5a.9.9 0 0 1-.9-.9V5a.9.9 0 0 1 .9-.9h3"/>',
+  maximize:'<rect x="2.8" y="2.8" width="10.4" height="10.4" rx="1.6"/>',
+  window:'<rect x="2.4" y="3.4" width="11.2" height="9.2" rx="1.6"/><path d="M2.4 6.2h11.2"/>',
+  dockRight:'<rect x="2.4" y="3.4" width="11.2" height="9.2" rx="1.6"/><path d="M9.6 3.4v9.2"/>',
+  dockBottom:'<rect x="2.4" y="3.4" width="11.2" height="9.2" rx="1.6"/><path d="M2.4 9.6h11.2"/>',
+  rotate:'<path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.7"/><path d="M13.4 2.6v3.2h-3.2"/>',
+  target:'<circle cx="8" cy="8" r="5.4"/><circle cx="8" cy="8" r="1.5"/>',
+  trash:'<path d="M3.2 4.6h9.6"/><path d="M5.6 4.6V3.4h4.8v1.2"/><path d="M4.4 4.6l.6 8.2h6l.6-8.2"/>',
+  copy:'<rect x="5.4" y="5.4" width="8" height="8" rx="1.4"/><path d="M10.6 5.4V4a1.4 1.4 0 0 0-1.4-1.4H4a1.4 1.4 0 0 0-1.4 1.4v5.2A1.4 1.4 0 0 0 4 10.6h1.4"/>',
+  /* layer kinds */
+  kCirc:'<path d="M2.4 5.2h11.2M2.4 8h11.2M2.4 10.8h11.2"/>',
+  kLat:'<path d="M4.4 2.8 2.4 13.2M8.4 2.8 6.4 13.2M12.4 2.8l-2 10.4"/>',
+  kChev:'<path d="M2.6 10.4 8 5.2l5.4 5.2"/><path d="M2.6 13 8 7.8 13.4 13"/>',
+  kSipe:'<path d="M4 3v2.4M4 7.2v2.4M4 11.4v1.6M8 3v2.4M8 7.2v2.4M8 11.4v1.6M12 3v2.4M12 7.2v2.4M12 11.4v1.6"/>',
+  kDimp:'<circle cx="5" cy="5.4" r="1.7"/><circle cx="11" cy="5.4" r="1.7"/><circle cx="5" cy="10.6" r="1.7"/><circle cx="11" cy="10.6" r="1.7"/>',
+  kHex:'<path d="M8 2.4 13 5.2v5.6L8 13.6 3 10.8V5.2Z"/>',
+  kNoise:'<path d="M1.8 8.6c1.3-3.4 2.3 2.4 3.4-1.4s2.2 3.6 3.4 0 2.3 2 3.5-.6"/>'
+};
+function icon(name, cls = 'ico16') {
+  return `<svg class="${cls}" viewBox="0 0 16 16">${ICONS[name] || ''}</svg>`;
+}
+const KIND_ICON = { Circumferential:'kCirc', Lateral:'kLat', Chevron:'kChev', Sipe:'kSipe',
+  Dimple:'kDimp', Hexagon:'kHex', Noise:'kNoise' };
+function hydrate(root = document) {
+  root.querySelectorAll('[data-i]').forEach(e => {
+    const n = e.dataset.i; if (!n) return;
+    e.innerHTML = icon(n, e.classList.contains('ico20') ? 'ico20' : 'ico16');
+    e.removeAttribute('data-i');
+  });
+}
+
+/* ═══ model — mirrors the C++ field for field ════════════════════════════ */
+const Carcass = { Width:285, Aspect:70, Rim:17, TreadDepth:15, Wear:0, WearBias:0,
+  TreadFraction:0.92, Crown:3, Shoulder:14, Bulge:1, RimWidthFraction:0.78 };
+const Xpbd = { InflationPressure:240, RimStopClearance:6, RimBottomingDampingRatio:0.25,
+  Iterations:8, Rings:16, Segments:72, HoopCompliance:1.0e-7, SpokeCompliance:4.0e-7,
+  Visible:true, Locked:false, Dynamic:true, Physics:true };
+const KINDS = ['Circumferential','Lateral','Chevron','Sipe','Dimple','Hexagon','Noise'];
+
+function newLayer(kind){ return { Kind:kind, Enabled:true, DepthFraction:1, Width:8, Position:0, Zig:0,
+  ZigCount:8, Angle:0, Count:48, Phase:0, Mirror:false, From:-1, To:1, Curve:0, Rows:1, Stagger:false,
+  Radius:3, Ring:false, Size:8, Rotate:0 }; }
+function grizzly(){ const L=[],add=(k,o)=>{const l=newLayer(k);Object.assign(l,o);L.push(l);};
+  add('Circumferential',{Position:-0.52,Width:17,Zig:7,ZigCount:26});
+  add('Circumferential',{Position:0.52,Width:17,Zig:7,ZigCount:26});
+  add('Circumferential',{Position:0,Width:12,Zig:4,ZigCount:26,DepthFraction:0.9});
+  add('Chevron',{Count:26,Angle:26,Width:13,From:-0.95,To:0.95,Mirror:true,Curve:0.25});
+  add('Lateral',{Count:26,Angle:-14,Width:7,From:-0.5,To:0.5,Phase:0.5,DepthFraction:0.55});
+  add('Sipe',{Count:52,Angle:8,Width:1.6,From:-0.82,To:0.82,DepthFraction:0.4});
+  add('Dimple',{Count:26,Rows:2,Radius:3.4,Stagger:true,From:-0.3,To:0.3,DepthFraction:0.35});
+  return { Name:'Grizzly Magnum', Layers:L }; }
+const Pattern = grizzly();
+
+/* ═══ DeriveTreadValues / EvaluateTyreProfile, verbatim ══════════════════ */
+function derive(c){ const RimRadius=c.Rim*25.4/2, SectionHeight=c.Width*c.Aspect/100;
+  const OuterRadius=RimRadius+SectionHeight, HalfWidth=c.Width/2, TreadHalf=HalfWidth*c.TreadFraction;
+  const ShoulderRadius=Math.min(c.Shoulder,SectionHeight*0.6), ShoulderExtent=ShoulderRadius*Math.sin(CUT);
+  return { RimRadius, SectionHeight, OuterRadius, HalfWidth, TreadHalf, ShoulderRadius, ShoulderExtent,
+    AcrossHalf:TreadHalf+ShoulderExtent, Circumference:2*Math.PI*OuterRadius, BeadHalf:HalfWidth*c.RimWidthFraction }; }
+function profile(y,c,d){ const a=Math.abs(y);
+  if(a<=d.TreadHalf){ const t=y/d.TreadHalf; return {lateral:y,radius:d.OuterRadius-c.Crown*t*t,weight:1}; }
+  const s=Math.sign(y)||1, phi=Math.min(CUT,Math.asin(Math.min(1,(a-d.TreadHalf)/d.ShoulderRadius)));
+  return { lateral:s*(d.TreadHalf+d.ShoulderRadius*Math.sin(phi)),
+    radius:d.OuterRadius-c.Crown-d.ShoulderRadius+d.ShoulderRadius*Math.cos(phi),
+    weight:Math.max(0,(Math.cos(phi)-Math.cos(CUT))/(1-Math.cos(CUT))) }; }
+
+/* ═══ layer geometry in the developed domain ════════════════════════════ */
+function layerGeometry(L,c,d){
+  const TH=d.TreadHalf, C=d.Circumference, out={strokes:[],discs:[],width:L.Width};
+  const tri=t=>{const u=(t%1+1)%1;return u<.5?4*u-1:3-4*u;};
+  if(L.Kind==='Circumferential'){ const seat=L.Position*TH,pts=[],n=L.Zig>0?Math.max(64,Math.round(L.ZigCount*8)):2;
+    for(let i=0;i<=n;i++){const t=i/n;pts.push([seat+L.Zig*tri(t*L.ZigCount),t*C]);} out.strokes.push(pts); return out; }
+  if(L.Kind==='Dimple'){ const rows=Math.max(1,Math.round(L.Rows)),n=Math.max(1,Math.round(L.Count));
+    for(let r=0;r<rows;r++){ const f=rows===1?0.5:r/(rows-1), x=(L.From+(L.To-L.From)*f)*TH;
+      for(let i=0;i<n;i++){const off=(L.Stagger&&r%2)?0.5:0; out.discs.push([x,((i+off+L.Phase)/n)*C,L.Radius,!!L.Ring]);}}
+    return out; }
+  if(L.Kind==='Hexagon'){ const s=Math.max(1,L.Size),rot=L.Rotate*DEG,x0=L.From*TH,x1=L.To*TH;
+    const dx=s*1.5,dy=s*Math.sqrt(3),cols=Math.ceil((x1-x0)/dx)+2,rowsN=Math.ceil(C/dy)+2;
+    for(let i=-1;i<cols;i++)for(let j=-1;j<rowsN;j++){ const cx=x0+i*dx,cy=j*dy+(i%2?dy/2:0),ring=[];
+      for(let k=0;k<=6;k++){const a=rot+k*60*DEG;ring.push([clamp(cx+s*Math.cos(a),x0,x1),cy+s*Math.sin(a)]);}
+      out.strokes.push(ring);} return out; }
+  const n=Math.max(1,Math.round(L.Count)), steps=(L.Curve!==0||L.Zig!==0)?8:1;
+  const lean=Math.tan(clamp(L.Angle,-75,75)*DEG), halves=L.Kind==='Chevron'&&L.Mirror?[1,-1]:[0];
+  for(let i=0;i<n;i++){ const base=((i+L.Phase)/n)*C;
+    for(const h of halves){ let a=L.From*TH,b=L.To*TH;
+      if(h===1){a=0;b=L.To*TH;} if(h===-1){a=L.From*TH;b=0;}
+      const pts=[];
+      for(let s=0;s<=steps;s++){ const t=s/steps,x=a+(b-a)*t,sgn=h===-1?-1:1;
+        const bow=L.Curve*(b-a)*0.5*(1-(2*t-1)*(2*t-1));
+        pts.push([x,base+sgn*((x-a)*lean+bow)]); }
+      out.strokes.push(pts); } }
+  return out;
+}
+
+/* ═══ depth field ════════════════════════════════════════════════════════
+   The pattern is rasterised once into a height map over the developed domain
+   (x circumferential, y lateral). The solid view then samples it, so the 3-D
+   tread is the pattern itself rather than a decorative stand-in.
+   ══════════════════════════════════════════════════════════════════════ */
+const MASK_LAT = 192, MASK_CIRC = 1024;     /* across the tread, around the tyre */
+const maskCv = document.createElement('canvas');
+maskCv.width = MASK_LAT; maskCv.height = MASK_CIRC;
+let maskData = null;
+
+function buildMask(){
+  const d = derive(Carcass), c = Carcass, g = maskCv.getContext('2d', { willReadFrequently:true });
+  g.setTransform(1,0,0,1,0,0);
+  g.fillStyle = '#000'; g.fillRect(0,0,MASK_LAT,MASK_CIRC);
+  const sx = MASK_CIRC / d.Circumference, sy = MASK_LAT / (2*d.TreadHalf);
+  const X = y => (y + d.TreadHalf) * sy, Y = x => x * sx;     /* lateral → px x, circ → px y */
+  const ordered = Pattern.Layers.filter(L => L.Enabled && L.Kind !== 'Noise')
+                                .sort((a,b) => a.DepthFraction - b.DepthFraction);
+  g.lineJoin = 'round'; g.lineCap = 'round';
+  for (const L of ordered){
+    const geo = layerGeometry(L, c, d);
+    const lev = Math.round(clamp(L.DepthFraction,0,1) * 255);
+    g.strokeStyle = g.fillStyle = `rgb(${lev},${lev},${lev})`;
+    g.lineWidth = Math.max(1, geo.width * sy);
+    for (const pts of geo.strokes) for (const rep of [-1,0,1]){
+      g.beginPath();
+      pts.forEach(([px,py],k)=>{ const yy=Y(py+rep*d.Circumference);
+        k ? g.lineTo(X(px),yy) : g.moveTo(X(px),yy); });
+      g.stroke();
+    }
+    for (const [cx,cy,r,ring] of geo.discs) for (const rep of [-1,0,1]){
+      g.beginPath(); g.arc(X(cx), Y(cy+rep*d.Circumference), r*sy, 0, 7);
+      if (ring){ g.lineWidth = Math.max(1, geo.width*sy); g.stroke(); } else g.fill();
+    }
+  }
+  maskData = g.getImageData(0,0,MASK_LAT,MASK_CIRC).data;
+}
+/* u = circumferential 0..1, v = lateral 0..1 across the patterned band */
+function sampleDepth(u,v){
+  if (!maskData) return 0;
+  const px = clamp(Math.round(v*(MASK_LAT-1)),0,MASK_LAT-1);
+  const py = clamp(Math.round(((u%1)+1)%1*(MASK_CIRC-1)),0,MASK_CIRC-1);
+  return maskData[(py*MASK_LAT+px)*4] / 255;
+}
+
+/* ═══ the solid view — a lathe of the real section, displaced by the mask ══ */
+const solidCv = document.getElementById('solid');
+const view = { yaw:-0.62, pitch:0.30, dist:3.05, spin:false };
+let dragging = false, facetCount = 0;
+
+/* bead → shoulder → crown → shoulder → bead, as {lateral, radius, weight, tread} */
+function sectionPoints(c,d,NV){
+  const pts = [];
+  const sideN = Math.max(6, Math.round(NV*0.22));
+  const shoulder = profile(d.AcrossHalf,c,d);
+  const push = (lat,rad,w,tread)=>pts.push({lat,rad,w,tread});
+  /* left sidewall, bead up to the shoulder */
+  for (let k=0;k<sideN;k++){
+    const u = k/sideN, r = d.RimRadius + (shoulder.radius - d.RimRadius) * Math.sin(u*Math.PI/2);
+    const bulge = 1 + 0.13*c.Bulge*Math.sin(u*Math.PI);   /* 1 at bead and at shoulder, so both seams close */
+    push(-(d.BeadHalf + (d.AcrossHalf-d.BeadHalf)*u) * bulge, r, 0, false);
+  }
+  /* the moulded surface */
+  const M = NV;
+  for (let k=0;k<=M;k++){
+    const y = -d.AcrossHalf + 2*d.AcrossHalf*k/M, p = profile(y,c,d);
+    push(p.lateral, p.radius, p.weight, Math.abs(y) <= d.TreadHalf);
+  }
+  /* right sidewall, shoulder down to the bead */
+  for (let k=sideN-1;k>=0;k--){
+    const u = k/sideN, r = d.RimRadius + (shoulder.radius - d.RimRadius) * Math.sin(u*Math.PI/2);
+    const bulge = 1 + 0.13*c.Bulge*Math.sin(u*Math.PI);
+    push((d.BeadHalf + (d.AcrossHalf-d.BeadHalf)*u) * bulge, r, 0, false);
+  }
+  return pts;
+}
+
+function drawSolid(){
+  const c = Carcass, d = derive(c), wrap = solidCv.parentElement;
+  const W = Math.max(260, wrap.clientWidth), H = Math.max(200, wrap.clientHeight);
+  const dpr = Math.min(2, devicePixelRatio||1);
+  solidCv.width = W*dpr; solidCv.height = H*dpr;
+  solidCv.style.width = W+'px'; solidCv.style.height = H+'px';
+  const g = solidCv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  g.clearRect(0,0,W,H);
+
+  const NU = dragging ? 110 : 232;
+  const NV = dragging ? 22  : 40;
+  const sec = sectionPoints(c,d,NV);
+  const R = d.OuterRadius;
+
+  const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw);
+  const cp = Math.cos(view.pitch), sp = Math.sin(view.pitch);
+  const scale = Math.min(W,H) * 0.86;
+  const cxp = W/2, cyp = H/2;
+
+  const rot = (x,y,z)=>{
+    const x1 = x*cy + z*sy, z1 = -x*sy + z*cy;
+    const y2 = y*cp - z1*sp, z2 = y*sp + z1*cp;
+    return [x1,y2,z2];
+  };
+  const proj = (x,y,z)=>{
+    const f = 1/(view.dist - z/R*0.52);
+    return [cxp + x/R*f*scale, cyp - y/R*f*scale, z];
+  };
+
+  /* vertex grid */
+  const NVt = sec.length;
+  const P = new Array(NU*NVt);
+  for (let i=0;i<NU;i++){
+    const th = i/NU*Math.PI*2, ct = Math.cos(th), st = Math.sin(th);
+    const u = i/NU;
+    for (let j=0;j<NVt;j++){
+      const s = sec[j];
+      let rad = s.rad;
+      if (s.tread){
+        const v = (s.lat + d.TreadHalf) / (2*d.TreadHalf);
+        rad -= sampleDepth(u,v) * c.TreadDepth * s.w;
+        rad -= c.Wear * c.TreadDepth * clamp(1 + c.WearBias*(s.lat/d.TreadHalf),0,2) * 0.0;
+      }
+      const [rx,ry,rz] = rot(s.lat, rad*ct, rad*st);
+      const sc = proj(rx,ry,rz);
+      P[i*NVt+j] = { x:sc[0], y:sc[1], z:rz, wx:rx, wy:ry, wz:rz, tread:s.tread,
+                     dep: s.tread ? sampleDepth(u,(s.lat+d.TreadHalf)/(2*d.TreadHalf)) : 0 };
+    }
+  }
+
+  /* quads, back to front */
+  const quads = [];
+  for (let i=0;i<NU;i++){
+    const i2 = (i+1)%NU;
+    for (let j=0;j<NVt-1;j++){
+      const a=P[i*NVt+j], b=P[i2*NVt+j], c2=P[i2*NVt+j+1], e=P[i*NVt+j+1];
+      const ux=b.wx-a.wx, uy=b.wy-a.wy, uz=b.wz-a.wz;
+      const vx=e.wx-a.wx, vy=e.wy-a.wy, vz=e.wz-a.wz;
+      let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      const len=Math.hypot(nx,ny,nz)||1; nx/=len; ny/=len; nz/=len;
+      if (nz <= 0.02) continue;                       /* back-face cull */
+      quads.push({a,b,c:c2,e,nx,ny,nz,z:(a.z+b.z+c2.z+e.z)*0.25,dep:(a.dep+b.dep+c2.dep+e.dep)*0.25});
+    }
+  }
+  quads.sort((p,q)=>p.z-q.z);
+  facetCount = quads.length;
+
+  /* rubber shading: a key light, a cool rim, and depth as occlusion */
+  const LX=-0.42, LY=0.70, LZ=0.58;
+  for (const q of quads){
+    const lam = Math.max(0, q.nx*LX + q.ny*LY + q.nz*LZ);
+    const rim = Math.pow(1 - clamp(q.nz,0,1), 2.6);
+    const ao  = 1 - 0.62*q.dep;
+    let base = (16 + 118*Math.pow(lam,0.9)) * ao;
+    base += 30*rim*ao;
+    const spec = Math.pow(lam, 22) * 44 * (1-q.dep);
+    g.beginPath();
+    g.moveTo(q.a.x,q.a.y); g.lineTo(q.b.x,q.b.y); g.lineTo(q.c.x,q.c.y); g.lineTo(q.e.x,q.e.y);
+    g.closePath();
+    if (vmode === 'Wire'){
+      g.strokeStyle = `rgba(226,232,240,${0.10 + 0.5*lam})`; g.lineWidth = 0.5; g.stroke();
+      continue;
+    }
+    if (vmode === 'Depth'){
+      const h = q.dep;                                   /* cold at the surface, warm in the floor */
+      const r2 = 30 + 210*h, g2 = 70 + 90*h*(1-h)*2, b2 = 190 - 150*h;
+      g.fillStyle = `rgb(${r2|0},${g2|0},${b2|0})`; g.fill();
+      continue;
+    }
+    const r = clamp(base+spec, 0, 255), gg = clamp(base*1.005+spec, 0, 255), bb = clamp(base*1.04+spec*1.1, 0, 255);
+    g.fillStyle = `rgb(${r|0},${gg|0},${bb|0})`;
+    g.fill();
+    if (!dragging){ g.strokeStyle = g.fillStyle; g.lineWidth = 0.6; g.stroke(); }
+  }
+
+  /* the wheel face, so the bead opening does not read as a hole */
+  for (const sgn of [-1,1]){
+    const lat = sgn*d.BeadHalf;
+    const ring = [];
+    for (let i=0;i<=48;i++){ const th=i/48*Math.PI*2;
+      const [rx,ry,rz] = rot(lat, d.RimRadius*Math.cos(th), d.RimRadius*Math.sin(th));
+      ring.push(proj(rx,ry,rz).concat(rz)); }
+    const [nx,ny,nz] = rot(sgn,0,0);
+    if (nz <= 0) continue;
+    g.beginPath(); ring.forEach((p,k)=>k?g.lineTo(p[0],p[1]):g.moveTo(p[0],p[1])); g.closePath();
+    g.fillStyle = '#17171a'; g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.10)'; g.lineWidth = 1; g.stroke();
+  }
+
+  document.getElementById('solid-read').innerHTML =
+    `${(facetCount/1000).toFixed(1)}k facets · ${NU}×${NVt}<br>yaw ${(view.yaw/DEG).toFixed(0)}° pitch ${(view.pitch/DEG).toFixed(0)}°`;
+  const fc = document.getElementById('s-fac'); if (fc) fc.textContent = (facetCount/1000).toFixed(1)+'k';
+}
+
+/* orbit */
+(function(){
+  let px=0, py=0, down=false;
+  solidCv.addEventListener('pointerdown', e=>{ down=true; dragging=true; px=e.clientX; py=e.clientY;
+    solidCv.setPointerCapture(e.pointerId); });
+  solidCv.addEventListener('pointermove', e=>{
+    if(!down) return;
+    view.yaw += (e.clientX-px)*0.0092; view.pitch = clamp(view.pitch + (e.clientY-py)*0.0075, -1.25, 1.25);
+    px=e.clientX; py=e.clientY; drawSolid();
+  });
+  const up=()=>{ if(!down) return; down=false; dragging=false; drawSolid(); };
+  solidCv.addEventListener('pointerup', up);
+  solidCv.addEventListener('pointercancel', up);
+  solidCv.addEventListener('dblclick', openGenerator);
+  solidCv.addEventListener('wheel', e=>{ e.preventDefault();
+    view.dist = clamp(view.dist + e.deltaY*0.0016, 1.9, 5.4); drawSolid(); }, {passive:false});
+})();
+
+/* ═══ cross-section ═════════════════════════════════════════════════════ */
+const secCv = document.getElementById('section');
+function drawSection(){
+  const d=derive(Carcass), c=Carcass, wrap=secCv.parentElement;
+  const W=Math.max(180,wrap.clientWidth), H=Math.max(120,wrap.clientHeight);
+  const dpr=Math.min(2,devicePixelRatio||1);
+  secCv.width=W*dpr; secCv.height=H*dpr; secCv.style.width=W+'px'; secCv.style.height=H+'px';
+  const g=secCv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  const span=2*d.AcrossHalf*1.12, depthSpan=c.Crown+d.ShoulderRadius+c.TreadDepth*1.7+8;
+  const s=Math.min((W-28)/span,(H-34)/depthSpan), ox=W/2, oy=20;
+  const X=y=>ox+y*s, Y=r=>oy+(d.OuterRadius-r)*s;
+
+  g.beginPath();
+  for(let i=0;i<=240;i++){ const y=-d.AcrossHalf+2*d.AcrossHalf*i/240,p=profile(y,c,d);
+    i?g.lineTo(X(p.lateral),Y(p.radius)):g.moveTo(X(p.lateral),Y(p.radius)); }
+  g.lineTo(X(d.AcrossHalf),H-6); g.lineTo(X(-d.AcrossHalf),H-6); g.closePath();
+  g.fillStyle='rgba(255,255,255,.05)'; g.fill();
+
+  const depths=[...new Set(Pattern.Layers.filter(L=>L.Enabled&&L.Kind!=='Noise')
+    .map(L=>+(L.DepthFraction*c.TreadDepth).toFixed(2)))].sort((a,b)=>a-b);
+  g.lineWidth=1;
+  for(const dep of depths){
+    g.beginPath();
+    for(let i=0;i<=160;i++){ const y=-d.TreadHalf+2*d.TreadHalf*i/160,p=profile(y,c,d);
+      const r=p.radius-dep*p.weight; i?g.lineTo(X(p.lateral),Y(r)):g.moveTo(X(p.lateral),Y(r)); }
+    g.strokeStyle=`rgba(226,232,240,${0.16+0.5*(dep/Math.max(1,c.TreadDepth))})`;
+    g.setLineDash([4,3]); g.stroke(); g.setLineDash([]);
+  }
+  if(c.Wear>0){
+    g.beginPath();
+    for(let i=0;i<=160;i++){ const y=-d.TreadHalf+2*d.TreadHalf*i/160,p=profile(y,c,d);
+      const r=p.radius-c.Wear*c.TreadDepth*clamp(1+c.WearBias*(y/d.TreadHalf),0,2);
+      i?g.lineTo(X(p.lateral),Y(r)):g.moveTo(X(p.lateral),Y(r)); }
+    g.strokeStyle='rgba(255,180,84,.95)'; g.lineWidth=1.6; g.stroke();
+  }
+  g.beginPath();
+  for(let i=0;i<=240;i++){ const y=-d.AcrossHalf+2*d.AcrossHalf*i/240,p=profile(y,c,d);
+    i?g.lineTo(X(p.lateral),Y(p.radius)):g.moveTo(X(p.lateral),Y(p.radius)); }
+  g.strokeStyle='rgba(255,255,255,.94)'; g.lineWidth=1.5; g.stroke();
+  g.strokeStyle='rgba(255,255,255,.13)'; g.setLineDash([2,4]); g.lineWidth=1;
+  g.beginPath(); g.moveTo(ox,8); g.lineTo(ox,H-6); g.stroke(); g.setLineDash([]);
+  document.getElementById('sec-read').innerHTML =
+    `R ${fmt(d.OuterRadius,1)} · crown ${fmt(c.Crown,1)}<br>shoulder ${fmt(d.ShoulderRadius,1)} cut 80°`;
+}
+
+/* ═══ developed tread ═══════════════════════════════════════════════════ */
+const planCv=document.getElementById('plan');
+function drawPlan(){
+  const d=derive(Carcass), wrap=planCv.parentElement;
+  const W=Math.max(180,wrap.clientWidth), H=Math.max(110,wrap.clientHeight);
+  const dpr=Math.min(2,devicePixelRatio||1);
+  planCv.width=W*dpr; planCv.height=H*dpr; planCv.style.width=W+'px'; planCv.style.height=H+'px';
+  const g=planCv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0); g.clearRect(0,0,W,H);
+  const across=2*d.AcrossHalf, s=(W-26)/across, shown=Math.min(d.Circumference,(H-18)/s);
+  const ox=W/2, oy=9, X=x=>ox+x*s;
+  g.fillStyle='rgba(255,255,255,.055)'; g.fillRect(X(-d.AcrossHalf),oy,across*s,shown*s);
+  /* the same height map the solid view samples, so the two can never disagree */
+  g.save();
+  g.beginPath(); g.rect(X(-d.TreadHalf),oy,2*d.TreadHalf*s,shown*s); g.clip();
+  g.globalCompositeOperation='multiply'; g.filter='invert(1)';
+  g.drawImage(maskCv, 0,0, MASK_LAT, MASK_CIRC*shown/d.Circumference,
+                      X(-d.TreadHalf), oy, 2*d.TreadHalf*s, shown*s);
+  g.filter='none'; g.globalCompositeOperation='source-over';
+  g.restore();
+  g.strokeStyle='rgba(90,169,255,.30)'; g.setLineDash([3,4]); g.lineWidth=1;
+  for(const x of [-d.TreadHalf,d.TreadHalf]){ g.beginPath(); g.moveTo(X(x),oy); g.lineTo(X(x),oy+shown*s); g.stroke(); }
+  g.setLineDash([]);
+  g.strokeStyle='rgba(255,255,255,.12)'; g.strokeRect(X(-d.AcrossHalf),oy,across*s,shown*s);
+  document.getElementById('plan-read').innerHTML =
+    `${fmt(shown,0)} / ${fmt(d.Circumference,0)} mm<br>band ${fmt(2*d.TreadHalf,1)} mm`;
+}
+
+/* ═══ controls ══════════════════════════════════════════════════════════ */
+function control(obj,f,onChange){
+  const r=document.createElement('div'); r.className='row';
+  const l=document.createElement('span'); l.className='lab'; l.textContent=f.label;
+  const ctl=document.createElement('div'); ctl.className='ctl';
+  const kt=document.createElement('span'); kt.className='kindtag'; kt.textContent=f.ui;
+  r.append(l,ctl,kt);
+
+  if(f.ui==='toggle'){
+    const sw=document.createElement('div'); sw.className='switch'+(obj[f.key]?' on':'');
+    sw.innerHTML='<div class="kb"></div>';
+    sw.onclick=()=>{obj[f.key]=!obj[f.key];sw.classList.toggle('on',obj[f.key]);onChange();};
+    ctl.append(sw); return r;
+  }
+  if(f.ui==='choice'){
+    const s=document.createElement('select'); s.className='sel';
+    for(const o of f.options){const e=document.createElement('option');e.value=e.textContent=o;s.append(e);}
+    s.value=obj[f.key]; s.onchange=()=>{obj[f.key]=s.value;onChange();};
+    ctl.append(s); return r;
+  }
+  const dp=f.dp??2;
+  const pill=document.createElement('div'); pill.className='pill';
+  const inp=document.createElement('input');
+  inp.value=f.fmtv?f.fmtv(obj[f.key]):fmt(obj[f.key],dp);
+  const unit=document.createElement('span'); unit.className='unit'; unit.textContent=f.unit||'';
+  pill.append(inp,unit); ctl.append(pill);
+
+  let track=null,fill=null,knob=null;
+  const paint=()=>{ inp.value=f.fmtv?f.fmtv(obj[f.key]):fmt(obj[f.key],dp);
+    if(!track) return;
+    const t=clamp((obj[f.key]-f.min)/(f.max-f.min),0,1), travel=track.clientWidth-24;
+    knob.style.left=(t*travel)+'px'; fill.style.width=Math.max(0,t*travel+12)+'px'; };
+  if(f.ui==='slider'){
+    track=document.createElement('div'); track.className='track';
+    fill=document.createElement('div'); fill.className='fl';
+    knob=document.createElement('div'); knob.className='kb';
+    track.append(fill,knob); ctl.append(track);
+    const grab=ev=>{ const b=track.getBoundingClientRect(), travel=b.width-24;
+      const t=clamp((ev.clientX-b.left-12)/travel,0,1);
+      let v=f.min+t*(f.max-f.min); if(f.step) v=Math.round(v/f.step)*f.step;
+      obj[f.key]=clamp(v,f.min,f.max); paint(); onChange(); };
+    track.onpointerdown=ev=>{track.setPointerCapture(ev.pointerId);grab(ev);};
+    track.onpointermove=ev=>{if(track.hasPointerCapture(ev.pointerId))grab(ev);};
+    requestAnimationFrame(paint);
+  }
+  inp.onchange=()=>{ let v=parseFloat(inp.value); if(!isFinite(v)) v=obj[f.key];
+    if(f.min!==undefined) v=clamp(v,f.min,f.max??1e9); obj[f.key]=v; paint(); onChange(); };
+
+  if(f.note){ const w=document.createElement('div'); w.append(r);
+    const n=document.createElement('div'); n.className='mnote'; n.textContent=f.note;
+    n.style.margin='-3px 0 10px 98px'; w.append(n); return w; }
+  return r;
+}
+
+/* the reference card */
+function mcard(o){
+  const el=document.createElement('div');
+  el.className='mcard'+(o.collapsible?' collapsible':'');
+  el.style.setProperty('--mt', o.tint||'var(--geometry)');
+  const head=document.createElement('div'); head.className='mhead';
+  head.innerHTML=`<span class="mbar"></span><span class="mtitle">${o.title}</span>`;
+  if(o.trend) head.insertAdjacentHTML('beforeend',`<span class="mtrend">${icon(o.trend,'ico14')}</span>`);
+  el.append(head);
+  const body=document.createElement('div'); el.append(body);
+  if(o.value!==undefined){
+    const [i,frac]=String(o.value).split('.');
+    const m=document.createElement('div'); m.className='metric';
+    m.innerHTML=`<span class="i">${i}</span>${frac!==undefined?`<span class="f">.${frac}</span>`:''}`+
+      (o.unit?`<span class="u">${o.unit}</span>`:'');
+    body.append(m);
+  }
+  if(o.badge){ const b=document.createElement('div'); b.className='mbadge';
+    b.style.background=o.badgeBg||'rgba(255,255,255,.07)'; b.style.color=o.badgeFg||'var(--t2)';
+    b.textContent=o.badge; body.append(b); }
+  if(o.note){ const n=document.createElement('div'); n.className='mnote'; n.textContent=o.note; body.append(n); }
+  if(o.collapsible){ let open=true;
+    head.onclick=()=>{ open=!open; body.style.display=open?'':'none'; }; }
+  el.body=body;
+  return el;
+}
+
+/* a small plot in the card foot, in the manner of the references */
+function plot(el,kind){
+  const holder=document.createElement('div'); holder.className='mplot';
+  const cv=document.createElement('canvas'); holder.append(cv); el.body.append(holder);
+  requestAnimationFrame(()=>{
+    const W=holder.clientWidth||260, H=kind==='band'?74:62, dpr=Math.min(2,devicePixelRatio||1);
+    cv.width=W*dpr; cv.height=H*dpr; cv.style.height=H+'px';
+    const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+    if(kind==='band'){
+      g.fillStyle='rgba(255,180,84,.08)'; g.fillRect(0,14,W,H-14);
+      g.strokeStyle='rgba(255,255,255,.55)'; g.lineWidth=1;
+      g.beginPath(); g.moveTo(0,14); g.lineTo(W,14); g.stroke();
+      const t=clamp(Carcass.Wear,0,1);
+      g.fillStyle='#FF3B30'; g.beginPath(); g.arc(6+t*(W-12),14,4,0,7); g.fill();
+      const pts=[[0.17,0.58],[0.34,0.74],[0.5,0.42],[0.66,0.63],[0.82,0.5]];
+      g.fillStyle='rgba(255,255,255,.80)';
+      for(const [px,py] of pts){ g.beginPath(); g.arc(px*W,14+py*(H-20),3,0,7); g.fill(); }
+      g.strokeStyle='rgba(255,255,255,.85)'; g.lineWidth=1.4;
+      g.beginPath(); g.arc(W-22,H-16,8,0,7); g.stroke();
+      g.fillStyle='rgba(255,255,255,.9)'; g.beginPath(); g.arc(W-22,H-16,3,0,7); g.fill();
+    } else {
+      /* efficiency-style trace with a dashed target */
+      g.strokeStyle='rgba(255,255,255,.16)'; g.setLineDash([3,4]); g.lineWidth=1;
+      g.beginPath(); g.moveTo(0,16); g.lineTo(W,16); g.stroke(); g.setLineDash([]);
+      let seed=7; const rnd=()=>((seed=seed*16807%2147483647)/2147483647);
+      g.strokeStyle='rgba(255,255,255,.55)'; g.lineWidth=1.1; g.beginPath();
+      for(let i=0;i<=W;i+=2){
+        const base=0.52+0.26*Math.sin(i/W*4.1)+0.07*Math.sin(i/W*17);
+        const y=H-8-(base+0.05*(rnd()-0.5))*(H-26);
+        i?g.lineTo(i,y):g.moveTo(i,y);
+      }
+      g.stroke();
+      g.fillStyle='rgba(255,255,255,.9)';
+      for(const px of [0.44,0.63,0.82]){ const base=0.52+0.26*Math.sin(px*4.1)+0.07*Math.sin(px*17);
+        g.beginPath(); g.arc(px*W,H-8-base*(H-26),2.6,0,7); g.fill(); }
+    }
+  });
+}
+
+/* ═══ inspector ═════════════════════════════════════════════════════════ */
+const F = {
+  pressure:{key:'InflationPressure',label:'Pressure',unit:'kPa',ui:'slider',min:80,max:420,step:5,dp:0,obj:Xpbd},
+  depth:{key:'TreadDepth',label:'Depth',unit:'mm',ui:'slider',min:2,max:22,step:0.1,dp:1,obj:Carcass},
+  wear:{key:'Wear',label:'Wear',unit:'—',ui:'slider',min:0,max:1,step:0.01,obj:Carcass},
+  bias:{key:'WearBias',label:'Bias',unit:'—',ui:'slider',min:-1,max:1,step:0.01,obj:Carcass},
+  clear:{key:'RimStopClearance',label:'Clearance',unit:'mm',ui:'slider',min:0,max:20,step:0.5,dp:1,obj:Xpbd},
+  damp:{key:'RimBottomingDampingRatio',label:'Damping',unit:'—',ui:'slider',min:0,max:1.5,step:0.05,obj:Xpbd},
+  iters:{key:'Iterations',label:'Iterations',unit:'—',ui:'number',min:1,max:64,dp:0,obj:Xpbd},
+  rings:{key:'Rings',label:'Rings',unit:'—',ui:'number',min:4,max:48,dp:0,obj:Xpbd},
+  segs:{key:'Segments',label:'Segments',unit:'—',ui:'number',min:12,max:192,dp:0,obj:Xpbd,
+    note:'Changes topology — lattice, skin binding and the shared mesh all rebuild. Committed on Enter or blur.'},
+  hoop:{key:'HoopCompliance',label:'Hoop',unit:'m/N',ui:'number',obj:Xpbd,fmtv:v=>(+v).toExponential(1)},
+  spoke:{key:'SpokeCompliance',label:'Spoke',unit:'m/N',ui:'number',obj:Xpbd,fmtv:v=>(+v).toExponential(1)},
+  width:{key:'Width',label:'Width',unit:'mm',ui:'number',min:125,max:395,dp:0,obj:Carcass},
+  aspect:{key:'Aspect',label:'Aspect',unit:'%',ui:'number',min:25,max:90,dp:0,obj:Carcass},
+  rim:{key:'Rim',label:'Rim',unit:'in',ui:'number',min:10,max:26,dp:0,obj:Carcass},
+  tfrac:{key:'TreadFraction',label:'Tread frac',unit:'—',ui:'slider',min:0.6,max:1,step:0.01,obj:Carcass},
+  crown:{key:'Crown',label:'Crown',unit:'mm',ui:'slider',min:0,max:10,step:0.1,dp:1,obj:Carcass},
+  shoulder:{key:'Shoulder',label:'Shoulder',unit:'mm',ui:'slider',min:2,max:40,step:0.5,dp:1,obj:Carcass},
+  bulge:{key:'Bulge',label:'Bulge',unit:'—',ui:'slider',min:0.4,max:1.8,step:0.01,obj:Carcass},
+  bead:{key:'RimWidthFraction',label:'Bead seat',unit:'—',ui:'slider',min:0.5,max:0.95,step:0.01,obj:Carcass}
+};
+const TINT = { Tyre:'var(--bodies)', Carcass:'var(--geometry)', 'Tread pattern':'var(--sky)',
+  'Sidewall decals':'var(--camera)', 'XPBD lattice':'var(--hi)', Layer:'var(--sky)' };
+const TICON = { Tyre:'tyre', Carcass:'disc', 'Tread pattern':'grid', 'Sidewall decals':'pen',
+  'XPBD lattice':'lattice', Layer:'grid' };
+
+function renderInspector(){
+  const d=derive(Carcass), body=document.getElementById('i-body'); body.innerHTML='';
+  const sel=selection, tint=TINT[sel]||'var(--geometry)';
+
+  document.getElementById('i-name').textContent = sel==='Layer'?`Layer ${selectedLayer+1}`:sel;
+  document.getElementById('i-type').textContent =
+    ({Tyre:'GENERATED BODY',Carcass:'GEOMETRY','Tread pattern':'LAYER SEQUENCE',
+      'Sidewall decals':'DECAL SET','XPBD lattice':'SOLVER',Layer:'GROOVE LAYER'})[sel]||'BODY';
+  const tile=document.getElementById('i-tile'), rgb=ROWS_TINT[sel]||'226,232,240';
+  tile.innerHTML=icon(TICON[sel]||'tyre','ico20');
+  tile.style.background=`rgba(${rgb},.14)`;
+  tile.style.border=`1px solid rgba(${rgb},.42)`;
+  tile.style.color=`rgb(${rgb})`;
+
+  const push=el=>body.append(el);
+
+  if(sel==='Carcass'){
+    const a=mcard({title:'Marked size',tint,value:`${Carcass.Width}.${Carcass.Aspect}`,unit:`R${Carcass.Rim}`,
+      note:'A marked size is a standards value, not a continuum. Numeric entry — 285 is a real tyre, 284.6 is not.'});
+    for(const f of [F.width,F.aspect,F.rim]) a.body.append(control(Carcass,f,refresh));
+    push(a);
+    const b=mcard({title:'Moulded shape',tint,collapsible:true});
+    for(const f of [F.tfrac,F.crown,F.shoulder,F.bulge,F.bead]) b.body.append(control(Carcass,f,refresh));
+    push(b);
+  } else if(sel==='Tread pattern'||sel==='Layer'){
+    const counts={}; for(const L of Pattern.Layers) counts[L.Kind]=(counts[L.Kind]||0)+1;
+    const a=mcard({title:'Tread pattern',tint,value:String(Pattern.Layers.length),unit:'layers',trend:'upRight',
+      note:'Ordered, reorderable and arbitrarily long, so it lives in the asset window where it has room to be read.'});
+    const kr=document.createElement('div'); kr.className='kindrow';
+    for(const [k,n] of Object.entries(counts))
+      kr.insertAdjacentHTML('beforeend',`<span class="kchip"><b>${n}</b><span>${k}</span></span>`);
+    a.body.append(kr);
+    const btn=document.createElement('div'); btn.className='sbtn';
+    btn.style.cssText+='display:inline-flex;margin-top:13px';
+    btn.innerHTML=icon('external','ico14')+'<span>Edit in Tyre Generator</span>';
+    btn.onclick=openGenerator; a.body.append(btn);
+    push(a);
+    const b=mcard({title:'Depth and wear',tint:'var(--orange)',value:fmt(Carcass.TreadDepth,1),unit:'mm',
+      trend:Carcass.Wear>0?'downRight':'upRight',
+      badge:`${(Carcass.Wear*100).toFixed(0)}% worn`,badgeBg:'rgba(255,180,84,.14)',badgeFg:'#FFB454'});
+    for(const f of [F.depth,F.wear,F.bias]) b.body.append(control(Carcass,f,refresh));
+    plot(b,'band'); push(b);
+  } else if(sel==='XPBD lattice'){
+    const a=mcard({title:'Solver',tint,value:`${Xpbd.Rings}`,unit:`× ${Xpbd.Segments} nodes`});
+    for(const f of [F.iters,F.rings,F.segs]) a.body.append(control(Xpbd,f,refresh));
+    push(a);
+    const b=mcard({title:'Compliance override',tint,collapsible:true,
+      note:'Normally derived from inflation pressure. Exposed because the parity harness and the ramp study both pin them.'});
+    for(const f of [F.hoop,F.spoke]) b.body.append(control(Xpbd,f,refresh));
+    push(b);
+  } else if(sel==='Sidewall decals'){
+    push(mcard({title:'Sidewall decals',tint,value:'0',unit:'placements',
+      badge:'phase 4',badgeBg:'rgba(255,180,84,.14)',badgeFg:'#FFB454',
+      note:'Lettering becomes 72-DecalProjection placements so it stays editable instead of being burnt in.'}));
+  } else {
+    const a=mcard({title:'Inflation',tint,value:fmt(Xpbd.InflationPressure,0),unit:'kPa',trend:'upRight',
+      note:'The authored value. Hoop and spoke compliance derive from it, so the slider means something physical.'});
+    a.body.append(control(Xpbd,F.pressure,refresh)); plot(a,'trace'); push(a);
+    const b=mcard({title:'Tread',tint:'var(--orange)',value:fmt(Carcass.TreadDepth,1),unit:'mm',
+      trend:Carcass.Wear>0?'downRight':'upRight'});
+    for(const f of [F.depth,F.wear,F.bias]) b.body.append(control(Carcass,f,refresh));
+    plot(b,'band'); push(b);
+    const c=mcard({title:'Rim bottoming',tint:'var(--red)',value:fmt(Xpbd.RimStopClearance,1),unit:'mm',
+      note:'Part 4 settled the damping ratio at 0.25. At 1.00 the stop pumped energy back into the carcass on the ramp landing.'});
+    for(const f of [F.clear,F.damp]) c.body.append(control(Xpbd,f,refresh)); push(c);
+    const e=mcard({title:'Solver',tint,collapsible:true});
+    for(const f of [F.iters,F.rings,F.segs]) e.body.append(control(Xpbd,f,refresh)); push(e);
+  }
+
+  const inst=mcard({title:'Instance',tint});
+  const segs=document.createElement('div'); segs.className='segs';
+  for(const [k,l] of [['Visible','VISIBLE'],['Locked','LOCKED'],['Dynamic','DYNAMIC'],['Physics','PHYSICS']]){
+    const e=document.createElement('div'); e.className='seg'+(Xpbd[k]?' on':''); e.textContent=l;
+    e.onclick=()=>{Xpbd[k]=!Xpbd[k];refresh();}; segs.append(e);
+  }
+  inst.body.append(segs);
+  for(const [k,v] of [['TYPE','Generated'],['SOURCE','TreadMeshSolver'],['ID','#'+(401+Pattern.Layers.length)]]){
+    const r=document.createElement('div'); r.className='kv';
+    r.innerHTML=`<span class="k">${k}</span><span class="v">${v}</span>`; inst.body.append(r);
+  }
+  push(inst);
+
+  document.getElementById('i-foot').textContent=`${sel.toLowerCase()} · ${Xpbd.Dynamic?'dynamic':'static'}`;
+  document.getElementById('i-foot2').textContent=`Ø ${fmt(2*d.OuterRadius,0)} mm`;
+}
+
+/* ═══ outliner ══════════════════════════════════════════════════════════ */
+const ROWS_TINT={Tyre:'223,230,245',Carcass:'226,232,240','Tread pattern':'90,169,255',
+  'Sidewall decals':'52,199,89','XPBD lattice':'108,119,255',Layer:'90,169,255'};
+const FILTERS=['Carcass','Pattern','Decals','Lattice'];
+const FILTER_TINT={Carcass:'#E2E8F0',Pattern:'#5AA9FF',Decals:'#34C759',Lattice:'#6C77FF'};
+const active=new Set(FILTERS);
+let selection='Tyre', selectedLayer=-1;
+
+function renderChips(){
+  const h=document.getElementById('o-chips'); h.innerHTML='';
+  for(const n of FILTERS){
+    const c=document.createElement('div'); c.className='fchip'+(active.has(n)?'':' off');
+    c.innerHTML=`<span class="dot" style="background:${FILTER_TINT[n]}"></span>${n}<span class="x">${icon('x','ico12')}</span>`;
+    c.onclick=()=>{active.has(n)?active.delete(n):active.add(n);refresh();};
+    h.append(c);
+  }
+  document.getElementById('o-fn').textContent=active.size;
+}
+function renderTree(){
+  const host=document.getElementById('o-tree'); host.innerHTML='';
+  let vis=0,hid=0;
+  const node=(depth,ic,name,meta,tint,sel,onClick,opts={})=>{
+    const r=document.createElement('div');
+    r.className='node'+(sel?' sel':'')+(opts.off?' off':'');
+    if(tint) r.style.setProperty('--rowtint',`rgb(${tint})`);
+    r.style.paddingLeft=(depth*15)+'px';
+    r.innerHTML=
+      `<span class="chev">${opts.chev?icon(opts.chev,'ico12'):''}</span>`+
+      `<span class="ico">${icon(ic,'ico14')}</span>`+
+      `<span class="nm">${name}</span>`+
+      (opts.tag?`<span class="tagpill">${opts.tag}</span>`:'')+
+      `<span class="meta">${meta||''}</span>`+
+      `<span class="badge${opts.warn?' warn':''}">${icon(opts.warn?'alert':'check','ico12')}</span>`+
+      `<span class="eyeb">${icon(opts.off?'eyeOff':'eye','ico14')}</span>`;
+    r.onclick=onClick; if(opts.dbl) r.ondblclick=opts.dbl;
+    host.append(r); opts.off?hid++:vis++;
+    return r;
+  };
+  node(0,'tyre','Tyre',Pattern.Name,ROWS_TINT.Tyre,selection==='Tyre',
+    ()=>{selection='Tyre';selectedLayer=-1;refresh();},{chev:'chevDown',dbl:openGenerator});
+  if(active.has('Carcass'))
+    node(1,'disc','Carcass',`${Carcass.Width}/${Carcass.Aspect}R${Carcass.Rim}`,ROWS_TINT.Carcass,
+      selection==='Carcass',()=>{selection='Carcass';selectedLayer=-1;refresh();},{dbl:openGenerator});
+  if(active.has('Pattern')){
+    node(1,'grid','Tread pattern',`${Pattern.Layers.length} layers`,ROWS_TINT['Tread pattern'],
+      selection==='Tread pattern',()=>{selection='Tread pattern';selectedLayer=-1;refresh();},
+      {chev:'chevDown',dbl:openGenerator});
+    Pattern.Layers.forEach((L,i)=>{
+      node(2,KIND_ICON[L.Kind],L.Kind,fmt(L.DepthFraction*Carcass.TreadDepth,1)+' mm',ROWS_TINT.Layer,
+        selectedLayer===i,()=>{selection='Layer';selectedLayer=i;refresh();},
+        {off:!L.Enabled,dbl:openGenerator,tag:L.Kind==='Noise'?'FIELD':null});
+    });
+  }
+  if(active.has('Decals'))
+    node(1,'pen','Sidewall decals','phase 4',ROWS_TINT['Sidewall decals'],selection==='Sidewall decals',
+      ()=>{selection='Sidewall decals';selectedLayer=-1;refresh();},{warn:true});
+  if(active.has('Lattice'))
+    node(1,'lattice','XPBD lattice',`${Xpbd.Rings}×${Xpbd.Segments}`,ROWS_TINT['XPBD lattice'],
+      selection==='XPBD lattice',()=>{selection='XPBD lattice';selectedLayer=-1;refresh();});
+  document.getElementById('o-vis').textContent=vis;
+  document.getElementById('o-hid').textContent=hid;
+  document.getElementById('o-sub').textContent=`${Pattern.Name} · ${vis+hid} nodes`;
+}
+
+/* ═══ dockable asset window ═════════════════════════════════════════════ */
+const generator=document.getElementById('generator'), appEl=document.getElementById('app');
+let dock='float';
+function applyDock(){
+  generator.classList.remove('dock-right','dock-bottom','full');
+  appEl.classList.remove('dock-right','dock-bottom');
+  if(dock!=='float'&&dock!=='window') generator.classList.add(dock);
+  if(dock==='dock-right'||dock==='dock-bottom') appEl.classList.add(dock);
+  document.getElementById('scrim').classList.toggle('open', dock==='float'&&generator.classList.contains('open'));
+  for(const [id,v] of [['dk-float','float'],['dk-right','dock-right'],['dk-bottom','dock-bottom'],['dk-full','full']])
+    document.getElementById(id).classList.toggle('on',dock===v);
+  requestAnimationFrame(()=>{drawSolid();drawSection();drawPlan();});
+}
+function openGenerator(){ generator.classList.add('open'); applyDock(); renderGenerator(); }
+function closeGenerator(){ generator.classList.remove('open'); appEl.classList.remove('dock-right','dock-bottom');
+  document.getElementById('scrim').classList.remove('open');
+  requestAnimationFrame(()=>{drawSolid();drawSection();drawPlan();}); }
+
+let generatorTab='Pattern';
+const TABS=['Pattern','Carcass','Notes'];
+const LF={
+  common:[{key:'Kind',label:'Kind',ui:'choice',options:KINDS},
+    {key:'DepthFraction',label:'Depth',unit:'×',ui:'slider',min:0.05,max:1,step:0.01},
+    {key:'Width',label:'Width',unit:'mm',ui:'slider',min:0.5,max:40,step:0.1,dp:1}],
+  Circumferential:[{key:'Position',label:'Seat',unit:'×',ui:'slider',min:-1,max:1,step:0.01},
+    {key:'Zig',label:'Zig',unit:'mm',ui:'slider',min:0,max:30,step:0.5,dp:1},
+    {key:'ZigCount',label:'Periods',unit:'—',ui:'number',min:1,max:200,dp:0}],
+  lateral:[{key:'Count',label:'Repeats',unit:'—',ui:'number',min:1,max:400,dp:0,
+      note:'Discrete, and it multiplies the boolean cost. Numeric entry.'},
+    {key:'Angle',label:'Lean',unit:'°',ui:'slider',min:-70,max:70,step:0.5,dp:1},
+    {key:'Phase',label:'Phase',unit:'×',ui:'slider',min:0,max:1,step:0.01},
+    {key:'From',label:'From',unit:'×',ui:'slider',min:-1,max:1,step:0.01},
+    {key:'To',label:'To',unit:'×',ui:'slider',min:-1,max:1,step:0.01},
+    {key:'Curve',label:'Bow',unit:'—',ui:'slider',min:-1,max:1,step:0.01}],
+  Chevron:[{key:'Mirror',label:'Mirror',ui:'toggle'}],
+  Dimple:[{key:'Count',label:'Per row',unit:'—',ui:'number',min:1,max:400,dp:0},
+    {key:'Rows',label:'Rows',unit:'—',ui:'number',min:1,max:12,dp:0},
+    {key:'Radius',label:'Radius',unit:'mm',ui:'slider',min:0.5,max:20,step:0.1,dp:1},
+    {key:'From',label:'From',unit:'×',ui:'slider',min:-1,max:1,step:0.01},
+    {key:'To',label:'To',unit:'×',ui:'slider',min:-1,max:1,step:0.01},
+    {key:'Stagger',label:'Stagger',ui:'toggle'},{key:'Ring',label:'Annulus',ui:'toggle'}],
+  Hexagon:[{key:'Size',label:'Cell R',unit:'mm',ui:'slider',min:2,max:40,step:0.5,dp:1},
+    {key:'Rotate',label:'Rotate',unit:'°',ui:'slider',min:0,max:60,step:0.5,dp:1},
+    {key:'From',label:'From',unit:'×',ui:'slider',min:-1,max:1,step:0.01},
+    {key:'To',label:'To',unit:'×',ui:'slider',min:-1,max:1,step:0.01}]
+};
+function fieldsFor(k){ const f=[...LF.common];
+  if(k==='Circumferential') f.push(...LF.Circumferential);
+  else if(k==='Dimple') f.push(...LF.Dimple);
+  else if(k==='Hexagon') f.push(...LF.Hexagon);
+  else if(k==='Noise'){}
+  else { f.push(...LF.lateral); if(k==='Chevron') f.push(...LF.Chevron); }
+  return f; }
+
+function renderGenerator(){
+  document.getElementById('generator-sub').textContent=
+    `${Pattern.Name} · ${Carcass.Width}/${Carcass.Aspect} R${Carcass.Rim}`;
+  const tabs=document.getElementById('generator-tabs'); tabs.innerHTML='';
+  for(const t of TABS){ const e=document.createElement('div');
+    e.className='wtab'+(generatorTab===t?' on':''); e.textContent=t;
+    e.onclick=()=>{generatorTab=t;renderGenerator();}; tabs.append(e); }
+  const host=document.getElementById('generator-content'); host.innerHTML='';
+
+  if(generatorTab==='Notes'){ host.append(notesPanel()); return; }
+  if(generatorTab==='Carcass'){
+    const pad=document.createElement('div'); pad.style.cssText='padding:14px 16px;max-width:470px';
+    const a=mcard({title:'Marked size',tint:'var(--geometry)'});
+    for(const f of [F.width,F.aspect,F.rim]) a.body.append(control(Carcass,f,refresh));
+    const b=mcard({title:'Moulded shape',tint:'var(--geometry)'});
+    for(const f of [F.tfrac,F.crown,F.shoulder,F.bulge,F.bead]) b.body.append(control(Carcass,f,refresh));
+    pad.append(a,b); host.append(pad); return;
+  }
+
+  const split=document.createElement('div'); split.className='split';
+  const seq=document.createElement('div'); seq.className='seq';
+  const params=document.createElement('div'); params.className='params';
+  const sh=document.createElement('div'); sh.className='seqhead';
+  sh.innerHTML='<span class="t">Layer sequence · cut order</span>';
+  const addBtn=document.createElement('div'); addBtn.className='sbtn';
+  addBtn.innerHTML=icon('plus','ico14')+'<span>Layer</span>';
+  addBtn.onclick=()=>{Pattern.Layers.push(newLayer('Lateral'));
+    selectedLayer=Pattern.Layers.length-1;selection='Layer';refresh();};
+  sh.append(addBtn); seq.append(sh);
+
+  Pattern.Layers.forEach((L,i)=>{
+    const e=document.createElement('div');
+    e.className='lay'+(i===selectedLayer?' sel':'')+(L.Enabled?'':' off');
+    e.draggable=true;
+    e.ondragstart=ev=>ev.dataTransfer.setData('text/plain',i);
+    e.ondragover=ev=>ev.preventDefault();
+    e.ondrop=ev=>{ev.preventDefault();const from=+ev.dataTransfer.getData('text/plain');
+      if(from===i)return; const [m]=Pattern.Layers.splice(from,1); Pattern.Layers.splice(i,0,m);
+      selectedLayer=i;refresh();};
+    e.onclick=()=>{selectedLayer=i;selection='Layer';refresh();};
+    const span=Math.abs(L.To-L.From)/2, left=(Math.min(L.From,L.To)+1)/2;
+    e.innerHTML=
+      `<span class="grip">${icon('grip','ico14')}</span>`+
+      `<span class="eyeb">${icon(L.Enabled?'eye':'eyeOff','ico14')}</span>`+
+      `<span class="gl">${icon(KIND_ICON[L.Kind],'ico16')}</span>`+
+      `<span class="bd"><span class="l1"><span class="kn">${L.Kind}</span>`+
+      `<span class="dp">${fmt(L.DepthFraction*Carcass.TreadDepth,1)} mm</span></span>`+
+      `<span class="bars"><span class="bar d"><i style="left:0;width:${(L.DepthFraction*100).toFixed(0)}%"></i></span>`+
+      `<span class="bar s"><i style="left:${(left*100).toFixed(0)}%;width:${(span*100).toFixed(0)}%"></i></span></span></span>`;
+    e.querySelector('.eyeb').onclick=ev=>{ev.stopPropagation();L.Enabled=!L.Enabled;refresh();};
+    seq.append(e);
+  });
+
+  if(selectedLayer<0||selectedLayer>=Pattern.Layers.length){
+    params.innerHTML=`<div class="empty">Select a layer.<br><br>Order is read, not decorative — the region
+      solver groups layers by depth and unions each group, so two layers at the same depth merge into one
+      floor rather than cutting each other.</div>`;
+  } else {
+    const L=Pattern.Layers[selectedLayer];
+    const card=mcard({title:`Layer ${selectedLayer+1} · ${L.Kind}`,tint:'var(--sky)'});
+    if(L.Kind==='Noise'){ const n=document.createElement('div'); n.className='mnote';
+      n.textContent='Noise carries no polygons. It perturbs the depth field only, so the region solver skips '+
+        'it and the mesh solver applies it after the floors are placed. A noise layer in the boolean stack '+
+        'would produce an unbounded number of microscopic pieces.';
+      card.body.append(n); }
+    for(const f of fieldsFor(L.Kind)) card.body.append(control(L,f,refresh));
+    const del=document.createElement('div'); del.className='sbtn'; del.style.cssText+='display:inline-flex;margin-top:12px';
+    del.innerHTML=icon('trash','ico14')+'<span>Remove layer</span>';
+    del.onclick=()=>{Pattern.Layers.splice(selectedLayer,1);selectedLayer=-1;refresh();};
+    card.body.append(del);
+    params.append(card);
+  }
+  split.append(seq,params); host.append(split);
+}
+
+function notesPanel(){
+  const d=document.createElement('div'); d.className='notes';
+  d.innerHTML=`
+<h3>What this prototype is for</h3>
+<p>The plan holds Phase 3 to an HTML prototype before any C++, and names three questions: what belongs in the
+always-present inspector versus the separate asset window, how the layer sequence reads, and which values want
+sliders versus numeric entry. The answers are <em>encoded</em>, not described — every control's widget comes
+from a <code>ui</code> field on the schema, so what ports is data.</p>
+
+<h3>1 · Inspector versus asset window</h3>
+<p>The split is <strong>cardinality</strong>, not importance. A quick value is one scalar with a fixed home and
+can sit in a strip that is always visible. The layer sequence is ordered, reorderable and arbitrarily long — it
+cannot. Marked size lives in the asset window despite being three scalars, because it is committed rather than
+scrubbed.</p>
+
+<h3>2 · How the layer sequence reads</h3>
+<p>A row carries what you need to judge the layer without opening it: kind icon, kind name, cut depth in
+millimetres, a depth bar as a fraction of tread depth, and a span bar for the lateral reach. Depth is shown in
+millimetres and stored as a fraction — the number you read is physical, the number you store survives a change
+of tread depth.</p>
+
+<h3>3 · Sliders versus numeric entry</h3>
+<table>
+<tr><th>Widget</th><th>When</th><th>Drawn as</th></tr>
+<tr><td class="k">slider</td><td>Continuous, bounded, found by watching the viewport</td><td><code>SliderPill</code> with its track</td></tr>
+<tr><td class="k">number</td><td>Discrete, standards-defined or topology-changing; committed on Enter or blur</td><td>the same 92 px pill, no track</td></tr>
+<tr><td class="k">toggle</td><td>Boolean</td><td>the switch</td></tr>
+<tr><td class="k">choice</td><td>Enumeration</td><td>the seated select</td></tr>
+</table>
+<p>The load-bearing rule is the second. Dragging a slider through <code>Count</code> from 48 to 52 asks for five
+full boolean rebuilds and four of them are garbage nobody wanted.</p>
+
+<h3>4 · The solid view is the pattern, not a stand-in</h3>
+<p>The layer sequence is rasterised once into a height map over the developed domain, 1024 × 192. The lathe then
+revolves the real cross-section — <code>EvaluateTyreProfile</code> for the moulded surface, a bulged sidewall
+down to the bead — and displaces each tread vertex by the sampled depth times that sample's
+<code>ContactWeight</code>, which is why grooves fade out across the shoulder exactly as they do in the solver.
+The developed view paints the same map, so the two can never disagree. Facets are back-face culled and painted
+back to front; the grid drops while you drag and returns when you let go.</p>
+
+<h3>5 · Chrome is reproduced from the panels, not themed</h3>
+<table>
+<tr><th>Component</th><th>Source</th><th>Quoted</th></tr>
+<tr><td class="k">Outliner rows</td><td><code>OutlinerPanel.cpp</code></td><td>39 px row, 7 px radius and gap, 14 px chevron, 30 px icon, 16 px badge, 24 px eye, 316 px resting width</td></tr>
+<tr><td class="k">Cards</td><td><code>InspectorPanel.cpp</code></td><td><code>kInset</code> rgb(26,26,26), 18 px corner, <code>kStroke</code> white .05, 56 px header wash</td></tr>
+<tr><td class="k">Sliders</td><td><code>ControlPanel.cpp</code></td><td>92 px split pill, 34 px unit cell, 10 px gap, 26 px track, 24 px knob, <code>kFill</code> #4a4a4a, <code>kThumb</code> #e0e0e0</td></tr>
+<tr><td class="k">Type</td><td><code>EditorHost.cpp</code></td><td>Outfit Light 13 / Regular 11, JetBrains Mono 13 and 11, Outfit Light 20, ExtraLight 30</td></tr>
+</table>
+<p><code>OutlinerPanel.cpp</code>'s token block says what the surface is — <em>"the page's :root, as bytes over
+white"</em> — so every grey is white at low alpha over the dark glass <code>rgba(15,16,18,.74)</code>. Row tint
+is per object, and the tints are the category colours already in that file, so none were invented. Icons are
+stroked paths; there are no emoji in the surface.</p>
+
+<h3>6 · What this deliberately does not do</h3>
+<p>No boolean solver and no welded mesh. The height map is a raster of the layer strokes, not
+<code>TreadRegionSolver</code>'s partition, so it shows where grooves are and how deep, not the exact floor
+polygons. The geometry of record stays <code>TreadRegionSolver</code> and <code>TreadMeshSolver</code>, whose
+gate is still red on watertightness.</p>
+
+<h3>7 · What the C++ gets once this is settled</h3>
+<p>Outliner rows <strong>Tyre → Carcass, Tread pattern, Sidewall decals, XPBD lattice</strong> with role bits
+shaped like <code>SolidArcOutlinerFilter</code>. The inspector entry point is
+<code>void RecordTyreInspector(ControlPanel&amp;, EditorInstance&amp;, EditorSheet&amp;)</code>, matching
+<code>RecordCameraInspector</code>, so the quick strip lands in the existing panel while Tyre Generator is a
+separate dockable host — the split the brief asked for.</p>`;
+  return d;
+}
+
+/* ── window drag, resize, dock ─────────────────────────────────────────── */
+(function(){
+  const t=document.getElementById('generator-title');
+  let dx=0,dy=0,on=false;
+  t.addEventListener('mousedown',e=>{
+    if(e.target.closest('.wbtn')||dock!=='float') return;
+    on=true;t.classList.add('drag');dx=e.clientX-generator.offsetLeft;dy=e.clientY-generator.offsetTop;e.preventDefault();});
+  addEventListener('mousemove',e=>{ if(!on)return;
+    generator.style.left=clamp(e.clientX-dx,-240,innerWidth-200)+'px';
+    generator.style.top=clamp(e.clientY-dy,0,innerHeight-44)+'px'; });
+  addEventListener('mouseup',()=>{on=false;t.classList.remove('drag');});
+
+  const grip=document.getElementById('wgrip');
+  let rs=false,sw=0,sh=0,sx=0,sy=0;
+  grip.addEventListener('pointerdown',e=>{rs=true;sx=e.clientX;sy=e.clientY;
+    sw=generator.offsetWidth;sh=generator.offsetHeight;grip.setPointerCapture(e.pointerId);e.preventDefault();});
+  grip.addEventListener('pointermove',e=>{ if(!rs)return;
+    generator.style.width=clamp(sw+e.clientX-sx,520,innerWidth-40)+'px';
+    generator.style.height=clamp(sh+e.clientY-sy,320,innerHeight-40)+'px'; });
+  grip.addEventListener('pointerup',()=>{rs=false;renderGenerator();});
+
+  const edge=document.getElementById('dockedge');
+  let de=false;
+  edge.addEventListener('pointerdown',e=>{de=true;edge.setPointerCapture(e.pointerId);e.preventDefault();});
+  edge.addEventListener('pointermove',e=>{ if(!de)return;
+    if(dock==='dock-right'){ const w=clamp(innerWidth-e.clientX,360,innerWidth-420);
+      generator.style.setProperty('--dockw',w+'px'); appEl.style.setProperty('--dockw',w+'px'); }
+    if(dock==='dock-bottom'){ const h=clamp(innerHeight-e.clientY,220,innerHeight-220);
+      generator.style.setProperty('--dockh',h+'px'); appEl.style.setProperty('--dockh',h+'px'); }
+    drawSolid(); drawSection(); drawPlan(); });
+  edge.addEventListener('pointerup',()=>{de=false;});
+})();
+const setDock=v=>{dock=v;applyDock();};
+document.getElementById('dk-float').onclick=()=>setDock('float');
+document.getElementById('dk-right').onclick=()=>setDock('dock-right');
+document.getElementById('dk-bottom').onclick=()=>setDock('dock-bottom');
+document.getElementById('dk-full').onclick=()=>setDock(dock==='full'?'float':'full');
+document.getElementById('dk-pop').onclick=()=>
+  open(location.pathname+'?generator=1','TyreGenerator','width=1040,height=680,menubar=no,toolbar=no');
+document.getElementById('generator-close').onclick=closeGenerator;
+document.getElementById('scrim').onclick=closeGenerator;
+document.getElementById('vp-open').onclick=openGenerator;
+addEventListener('keydown',e=>{ if(e.key==='Escape'&&dock==='float') closeGenerator(); });
+
+/* ── viewport mode pills ───────────────────────────────────────────────── */
+const MODES=['Solid','Wire','Depth']; let vmode='Solid';
+(function(){ const h=document.getElementById('vp-modes');
+  for(const m of MODES){ const e=document.createElement('div');
+    e.className='npill'+(m===vmode?' on':''); e.textContent=m;
+    e.onclick=()=>{vmode=m;[...h.children].forEach(c=>c.classList.toggle('on',c.textContent===m));drawSolid();};
+    h.append(e);} })();
+document.getElementById('vp-reset').onclick=()=>{view.yaw=-0.62;view.pitch=0.30;view.dist=3.05;drawSolid();};
+document.getElementById('vp-spin').onclick=function(){ view.spin=!view.spin;
+  this.classList.toggle('on',view.spin); if(view.spin) tick(); };
+function tick(){ if(!view.spin) return; view.yaw+=0.006; drawSolid(); requestAnimationFrame(tick); }
+
+/* ═══ refresh ═══════════════════════════════════════════════════════════ */
+let pending=false, revision=0;
+function refresh(){
+  if(pending) return; pending=true;
+  requestAnimationFrame(()=>{
+    pending=false;
+    buildMask();
+    const d=derive(Carcass);
+    const depths=new Set(Pattern.Layers.filter(L=>L.Enabled&&L.Kind!=='Noise')
+      .map(L=>+(L.DepthFraction*Carcass.TreadDepth).toFixed(2)));
+    document.getElementById('vp-name').textContent=`${Carcass.Width}/${Carcass.Aspect} R${Carcass.Rim}`;
+    document.getElementById('vp-rev').textContent=++revision;
+    document.getElementById('f-pat').textContent=Pattern.Name;
+    document.getElementById('f-lay').textContent=Pattern.Layers.length;
+    document.getElementById('f-psi').textContent=fmt(Xpbd.InflationPressure,0)+' kPa';
+    document.getElementById('f-lat').textContent=`${Xpbd.Rings}×${Xpbd.Segments}`;
+    document.getElementById('s-dom').textContent=`${fmt(2*d.AcrossHalf,1)} mm`;
+    document.getElementById('s-circ').textContent=`${fmt(d.Circumference,0)} mm`;
+    document.getElementById('s-dia').textContent=`${fmt(2*d.OuterRadius,0)} mm`;
+    document.getElementById('s-flo').textContent=depths.size+1;
+    renderChips(); renderTree(); renderInspector(); hydrate();
+    if(generator.classList.contains('open')) renderGenerator();
+    drawSolid(); drawSection(); drawPlan();
+  });
+}
+addEventListener('resize',()=>{drawSolid();drawSection();drawPlan();});
+
+hydrate();
+if(new URLSearchParams(location.search).has('generator')){
+  document.body.classList.add('sologenerator');
+  generator.classList.add('open','full'); dock='full';
+}
+refresh();
+</script>
+</body>
+</html>

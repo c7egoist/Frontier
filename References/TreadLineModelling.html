@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tread by swept line — modelling prototype</title>
+<style>
+@font-face{font-family:"Slate Sans";src:url("../Frontier/EngineContent/Fonts/SunReference/DMSans-Light.ttf") format("truetype");font-weight:300;font-display:swap}
+@font-face{font-family:"Slate Sans";src:url("../Frontier/EngineContent/Fonts/SunReference/DMSans-Regular.ttf") format("truetype");font-weight:400;font-display:swap}
+
+:root{
+  --bg:#0c0d0f; --card:#17181b; --card2:#1e2024; --card3:#25272c;
+  --line:rgba(255,255,255,.06); --txt:#e6e7ea; --mut:#8a8d94; --dim:#5c5f66;
+  --green:#38c46d; --yellow:#d6c93a; --red:#e5423f; --orange:#f0a04b; --blue:#4fc3f7;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--txt);font:300 13px/1.45 "Slate Sans",system-ui,sans-serif;
+     height:100vh;overflow:hidden;-webkit-font-smoothing:antialiased}
+#app{display:grid;grid-template-columns:330px 1fr 360px;grid-template-rows:60px 1fr;height:100vh;gap:10px;padding:10px}
+header{grid-column:1/-1;display:flex;align-items:center;gap:16px}
+.mark{width:30px;height:30px;border-radius:50%;
+      background:conic-gradient(from 210deg,#e6e7ea 0 10%,transparent 0 12.5%);
+      -webkit-mask:radial-gradient(circle,transparent 52%,#000 54%);mask:radial-gradient(circle,transparent 52%,#000 54%)}
+h1{font-size:15px;font-weight:400;letter-spacing:.2px}
+h1 small{display:block;font-size:11px;color:var(--dim);letter-spacing:.3px}
+.steps{display:flex;gap:4px;margin-left:auto}
+.steps button{background:none;border:0;color:var(--mut);font:400 12px "Slate Sans",system-ui;padding:9px 15px;
+              border-radius:18px;cursor:pointer;display:flex;align-items:center;gap:7px}
+.steps button .n{width:17px;height:17px;border-radius:50%;background:var(--card3);color:var(--dim);
+                 font-size:10px;display:grid;place-items:center}
+.steps button.on{background:var(--card2);color:var(--txt)}
+.steps button.on .n{background:var(--green);color:#0c0d0f}
+
+aside{overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;gap:10px;padding-right:2px}
+aside::-webkit-scrollbar{width:6px}aside::-webkit-scrollbar-thumb{background:var(--card3);border-radius:3px}
+.card{background:var(--card);border-radius:22px;padding:18px 18px 15px}
+.card h2{font-size:14px;font-weight:400;display:flex;align-items:center;gap:10px;margin-bottom:13px}
+.card h2::before{content:"";width:3px;height:15px;border-radius:2px;background:var(--bar,var(--green))}
+.card h2 .r{margin-left:auto;font-size:11px;color:var(--mut);font-weight:300}
+.sec{font-size:10px;letter-spacing:1.4px;text-transform:uppercase;color:var(--dim);margin:15px 0 8px}
+.sec:first-child{margin-top:0}
+.row{display:flex;align-items:center;gap:9px;margin:7px 0;min-height:24px}
+.row label{flex:0 0 120px;font-size:12px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row input[type=range]{flex:1;-webkit-appearance:none;background:none;height:18px}
+.row input[type=range]::-webkit-slider-runnable-track{height:2px;background:#2d3036;border-radius:1px}
+.row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+       background:#fff;margin-top:-5px;border:3px solid var(--card);box-shadow:0 0 0 1px #2d3036}
+.row .val{flex:0 0 52px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
+.row select{flex:1;background:var(--card2);border:0;color:var(--txt);font:300 12px "Slate Sans",system-ui;
+            padding:6px 11px;border-radius:13px;cursor:pointer}
+.row input[type=checkbox]{appearance:none;width:34px;height:20px;border-radius:10px;background:#2d3036;position:relative;cursor:pointer}
+.row input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#9a9da4;transition:.14s}
+.row input[type=checkbox]:checked{background:var(--green)}
+.row input[type=checkbox]:checked::after{left:17px;background:#fff}
+.hint{font-size:11.5px;color:var(--mut);line-height:1.55;margin:9px 0 2px}
+.hint code{font-family:ui-monospace,monospace;font-size:10.5px;background:var(--card2);padding:1px 5px;border-radius:5px;color:var(--txt)}
+
+.presets{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.preset{background:var(--card2);border-radius:14px;padding:8px;cursor:pointer;border:1px solid transparent}
+.preset:hover{background:var(--card3)}
+.preset.on{border-color:#fff}
+.preset canvas{width:100%;height:46px;display:block;border-radius:8px;background:#111}
+.preset .n{font-size:11.5px;margin-top:6px}
+.preset .t{font-size:9.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--mut)}
+
+#view{position:relative;background:#0b0c0e;border-radius:22px;overflow:hidden}
+#view canvas{display:block}
+.float{position:absolute;background:rgba(23,24,27,.86);border-radius:18px;backdrop-filter:blur(7px)}
+#stage{top:14px;left:14px;padding:13px 17px;max-width:360px}
+#stage .k{font-size:10px;letter-spacing:1.3px;text-transform:uppercase;color:var(--green)}
+#stage .h{font-size:21px;font-weight:300;margin:3px 0 5px}
+#stage .d{font-size:11.5px;color:var(--mut);line-height:1.5}
+#audit{top:14px;right:14px;padding:13px 15px;min-width:208px}
+#audit .t{font-size:10px;letter-spacing:1.3px;text-transform:uppercase;color:var(--dim);margin-bottom:9px}
+#audit .l{display:flex;justify-content:space-between;gap:16px;font-size:11.5px;margin:4px 0}
+#audit .l span:last-child{font-variant-numeric:tabular-nums;color:var(--txt)}
+#audit .verdict{margin-top:10px;padding-top:9px;border-top:1px solid var(--line);font-size:11.5px;display:flex;align-items:center;gap:7px}
+#audit .verdict i{width:7px;height:7px;border-radius:50%;background:var(--green)}
+#viewbar{bottom:14px;left:14px;padding:6px;display:flex;gap:4px}
+#viewbar button{background:none;border:0;color:var(--mut);font:300 12px "Slate Sans",system-ui;padding:7px 13px;border-radius:14px;cursor:pointer}
+#viewbar button.on{background:var(--card2);color:#fff}
+
+canvas.sheet{width:100%;display:block;border-radius:14px;background:#111;cursor:crosshair}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:9px}
+.legend span{font-size:10.5px;color:var(--mut);display:flex;align-items:center;gap:5px}
+.legend i{width:9px;height:2px;border-radius:1px}
+.btns{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
+.btns button{flex:1;background:var(--card2);border:0;color:var(--txt);font:300 12px "Slate Sans",system-ui;
+             padding:9px 13px;border-radius:15px;cursor:pointer;white-space:nowrap}
+.btns button:hover{background:var(--card3)}
+.btns button.p{background:#fff;color:#111}
+.nodes{margin-top:9px;display:flex;flex-direction:column;gap:5px}
+.node{display:flex;align-items:center;gap:8px;background:var(--card2);border-radius:11px;padding:6px 10px;font-size:11.5px}
+.node.on{outline:1px solid #fff}
+.node .i{width:3px;height:14px;border-radius:2px;background:var(--blue)}
+.node .f{font-variant-numeric:tabular-nums;color:var(--mut);font-size:10.5px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="mark"></div>
+    <h1>Tread by swept line<small>modelling prototype — no booleans anywhere</small></h1>
+    <div class="steps" id="steps"></div>
+  </header>
+
+  <aside>
+    <div class="card" style="--bar:var(--green)">
+      <h2>Tread pattern<span class="r" id="laneCount"></span></h2>
+      <div class="presets" id="presets"></div>
+      <div class="hint">Each preset is a set of <b>lanes</b> (ribs) and, for each lane, one traced
+        element — a line with a taper. Nothing is cut out of anything.</div>
+    </div>
+
+    <div class="card" style="--bar:var(--yellow)">
+      <h2>Carcass</h2>
+      <div class="row"><label>Section width (mm)</label><input type="range" id="width" min="135" max="405" step="5"><span class="val"></span></div>
+      <div class="row"><label>Aspect ratio (%)</label><input type="range" id="aspect" min="20" max="85" step="5"><span class="val"></span></div>
+      <div class="row"><label>Rim diameter (in)</label><input type="range" id="rim" min="12" max="24" step="1"><span class="val"></span></div>
+      <div class="row"><label>Tread depth (mm)</label><input type="range" id="depth" min="2" max="20" step="0.5"><span class="val"></span></div>
+      <div class="row"><label>Crown drop (mm)</label><input type="range" id="crown" min="0" max="8" step="0.1"><span class="val"></span></div>
+      <div class="row"><label>Shoulder radius (mm)</label><input type="range" id="shoulder" min="4" max="40" step="1"><span class="val"></span></div>
+      <div class="row"><label>Tread width fraction</label><input type="range" id="treadFrac" min="0.7" max="0.98" step="0.01"><span class="val"></span></div>
+    </div>
+
+    <div class="card" style="--bar:var(--orange)">
+      <h2>Sweep</h2>
+      <div class="sec">Circular array</div>
+      <div class="row"><label>Pitch count</label><input type="range" id="pitches" min="12" max="110" step="1"><span class="val"></span></div>
+      <div class="row"><label>Samples per pitch</label><input type="range" id="samples" min="4" max="48" step="1"><span class="val"></span></div>
+      <div class="row"><label>Pitch jitter</label><input type="range" id="jitter" min="0" max="0.35" step="0.01"><span class="val"></span></div>
+      <div class="sec">Section</div>
+      <div class="row"><label>Draft angle (°)</label><input type="range" id="draft" min="0" max="25" step="1"><span class="val"></span></div>
+      <div class="row"><label>Edge round (mm)</label><input type="range" id="round" min="0" max="3" step="0.1"><span class="val"></span></div>
+      <div class="row"><label>Cap the band</label><input type="checkbox" id="cap" checked></div>
+      <div class="hint">Jitter is the real pitch sequence: equal pitches sing one note, so a mould varies
+        them. It costs nothing here because every pitch is bridged to its neighbour anyway.</div>
+    </div>
+  </aside>
+
+  <main id="view">
+    <div class="float" id="stage"></div>
+    <div class="float" id="audit"></div>
+    <div class="float" id="viewbar">
+      <button data-v="solid" class="on">Solid</button>
+      <button data-v="wire">Wire</button>
+      <button data-v="quads">Quads</button>
+      <button data-v="lanes">Lanes</button>
+      <button data-v="spin">Spin</button>
+    </div>
+  </main>
+
+  <aside>
+    <div class="card" style="--bar:var(--blue)">
+      <h2>One pitch, flat<span class="r">drag the nodes</span></h2>
+      <canvas class="sheet" id="pitchSheet" width="640" height="420"></canvas>
+      <div class="legend">
+        <span><i style="background:var(--blue)"></i>traced line</span>
+        <span><i style="background:var(--green)"></i>ribbon edges</span>
+        <span><i style="background:var(--orange)"></i>lane seam</span>
+        <span><i style="background:var(--red)"></i>floor</span>
+      </div>
+      <div class="hint">Horizontal is one pitch of circumference, vertical is across the tread. The ribbon
+        edges are <code>centre ± halfWidth(t)</code> measured along the line's normal, which is the taper.</div>
+    </div>
+
+    <div class="card" style="--bar:var(--yellow)">
+      <h2>Lane<span class="r" id="laneWhich"></span></h2>
+      <div class="row"><label>Edit lane</label><select id="laneSel"></select></div>
+      <div class="nodes" id="nodes"></div>
+      <div class="btns">
+        <button id="addNode">Add node</button>
+        <button id="delNode">Delete node</button>
+      </div>
+    </div>
+
+    <div class="card" style="--bar:var(--red)">
+      <h2>Node<span class="r" id="nodeWhich"></span></h2>
+      <div class="row"><label>Along pitch</label><input type="range" id="nT" min="0" max="1" step="0.005"><span class="val"></span></div>
+      <div class="row"><label>Across (lateral)</label><input type="range" id="nY" min="-1" max="1" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Half width</label><input type="range" id="nW" min="0.01" max="0.9" step="0.01"><span class="val"></span></div>
+      <div class="row"><label>Height (×depth)</label><input type="range" id="nH" min="0" max="1" step="0.02"><span class="val"></span></div>
+      <div class="hint">Height 0 is the groove floor, 1 is the moulded surface. A lateral groove is a node
+        at height 0; a sipe is a narrow dip; a tie bar is a node that stops short of 0.</div>
+    </div>
+
+    <div class="card" style="--bar:var(--green)">
+      <h2>Cross-section at t<span class="r" id="secWhere"></span></h2>
+      <canvas class="sheet" id="secSheet" width="640" height="240"></canvas>
+      <div class="hint">This closed loop is what gets swept. Adjacent lanes share their seam point, so the
+        whole band is one surface and the bridge is implicit.</div>
+    </div>
+  </aside>
+</div>
+
+<script type="importmap">
+{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+const TAU = Math.PI * 2;
+const BELT = 11;                                   // [mm] - how thick the tread ring is under its floor
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+// =====================================================================================================================
+//  STATE
+//  A lane is a strip of the tread running all the way round. Its element is a traced line: a list of nodes
+//  carrying lateral position, half width and height. Everything else is derived.
+// =====================================================================================================================
+const T = { width: 245, aspect: 45, rim: 18, depth: 9, crown: 2.2, shoulder: 17, treadFrac: 0.9 };
+const S = { pitches: 46, samples: 16, jitter: 0.12, draft: 8, round: 0.8, cap: true };
+const UI = { step: 0, lane: 0, node: 0, view: 'solid', spin: false, preset: 0 };
+
+let LANES = [];
+
+// ---------------------------------------------------------------------------------------------------------------------
+//  PATTERNS.  Lateral coordinates are fractions of the patterned half width, so one pattern survives a
+//  change of section width without being re-authored.
+// ---------------------------------------------------------------------------------------------------------------------
+const node = (t, y, w, h) => ({ t, y, w, h });
+
+// A rib: one continuous band, no height variation. The quietest thing a tyre can have.
+const rib = (y, w) => ({ seam: [y - w * 1.25, y + w * 1.25], nodes: [node(0, y, w, 1), node(1, y, w, 1)] });
+
+// A block row: the element rises, runs, and drops into the lateral groove before the next pitch.
+const blocks = (y, w, gap = 0.22, h = 1) => ({
+  seam: [y - w * 1.3, y + w * 1.3],
+  nodes: [node(0, y, w, 0), node(gap * 0.5, y, w, h), node(1 - gap * 0.5, y, w, h), node(1, y, w, 0)]
+});
+
+// A directional element: the line walks outboard as it advances, which is the arrowhead.
+const vee = (y0, y1, w, h = 1) => ({
+  seam: [Math.min(y0, y1) - w * 1.5, Math.max(y0, y1) + w * 1.5],
+  nodes: [node(0, y0, w * 0.55, 0), node(0.14, y0, w, h), node(0.62, (y0 + y1) / 2, w * 0.95, h),
+          node(0.9, y1, w * 0.7, h), node(1, y1, w * 0.5, 0)]
+});
+
+// A lug: wide, tapered, deep gaps. Off-road treads are mostly void.
+const lug = (y, w, h = 1) => ({
+  seam: [y - w * 1.75, y + w * 1.75],
+  nodes: [node(0, y, w * 0.3, 0), node(0.1, y, w * 0.8, h), node(0.3, y, w, h),
+          node(0.55, y, w, h), node(0.72, y, w * 0.75, h), node(0.85, y, w * 0.35, 0), node(1, y, w * 0.3, 0)]
+});
+
+// A siped block: the same block, cut by two narrow dips that do not reach the floor.
+const siped = (y, w, h = 1) => ({
+  seam: [y - w * 1.3, y + w * 1.3],
+  nodes: [node(0, y, w, 0), node(0.1, y, w, h), node(0.37, y, w, h), node(0.4, y, w, 0.42),
+          node(0.43, y, w, h), node(0.63, y, w, h), node(0.66, y, w, 0.42), node(0.69, y, w, h),
+          node(0.9, y, w, h), node(1, y, w, 0)]
+});
+
+const PRESETS = [
+  { name: 'Five rib', kind: 'Highway', build: () => [
+      rib(-0.78, 0.17), blocks(-0.42, 0.15, 0.3), rib(0, 0.19), blocks(0.42, 0.15, 0.3), rib(0.78, 0.17) ] },
+  { name: 'Block row', kind: 'All-season', build: () => [
+      blocks(-0.76, 0.17, 0.26), siped(-0.38, 0.16), siped(0, 0.17), siped(0.38, 0.16), blocks(0.76, 0.17, 0.26) ] },
+  { name: 'Directional', kind: 'Wet', build: () => [
+      vee(-1.0, -0.62, 0.15), vee(-0.58, -0.2, 0.15), rib(0, 0.1), vee(0.2, 0.58, 0.15), vee(0.62, 1.0, 0.15) ] },
+  { name: 'Lugged', kind: 'Off-road', build: () => [
+      lug(-0.74, 0.21), lug(-0.26, 0.21), lug(0.26, 0.21), lug(0.74, 0.21) ] },
+  { name: 'Asymmetric', kind: 'Grip', build: () => [
+      rib(-0.8, 0.16), rib(-0.45, 0.14), siped(-0.08, 0.16), blocks(0.34, 0.19, 0.18), blocks(0.78, 0.17, 0.18) ] },
+  { name: 'Winter', kind: 'Snow', build: () => [
+      siped(-0.8, 0.16), siped(-0.4, 0.16), siped(0, 0.16), siped(0.4, 0.16), siped(0.8, 0.16) ] },
+];
+
+function applyPreset(i) {
+  UI.preset = i; UI.lane = 0; UI.node = 0;
+  LANES = PRESETS[i].build().map(l => ({ seam: l.seam.slice(), nodes: l.nodes.map(n => ({ ...n })) }));
+  // Lanes must tile: each lane's outboard seam IS the next lane's inboard seam, or the band has a crack.
+  for (let k = 0; k < LANES.length - 1; k++) {
+    const mid = (LANES[k].seam[1] + LANES[k + 1].seam[0]) / 2;
+    LANES[k].seam[1] = mid; LANES[k + 1].seam[0] = mid;
+  }
+  LANES[0].seam[0] = Math.min(LANES[0].seam[0], -1.02);
+  LANES[LANES.length - 1].seam[1] = Math.max(LANES[LANES.length - 1].seam[1], 1.02);
+  rebuildAll();
+}
+
+// =====================================================================================================================
+//  CARCASS
+// =====================================================================================================================
+function dims() {
+  const Rrim = T.rim * 25.4 / 2, H = T.width * T.aspect / 100, Rout = Rrim + H;
+  const halfW = T.width / 2, treadHalf = halfW * T.treadFrac;
+  const sr = Math.min(T.shoulder, H * 0.6), shoulderExt = sr * Math.sin(80 * Math.PI / 180);
+  return { Rrim, H, Rout, halfW, treadHalf, sr, acrossHalf: treadHalf + shoulderExt, circ: TAU * Rout };
+}
+
+// The moulded surface: a crown parabola inboard, a shoulder arc outboard, cut at 80° so it never turns
+// parallel to the axis. Identical to the engine's EvaluateTyreProfile.
+function surfaceAt(lateralMm, d) {
+  const a = Math.abs(lateralMm), cut = 80 * Math.PI / 180;
+  if (a <= d.treadHalf) {
+    const k = a / d.treadHalf;
+    return { r: d.Rout - T.crown * k * k, w: 1 };
+  }
+  const phi = Math.min(cut, Math.asin(Math.min(1, (a - d.treadHalf) / d.sr)));
+  return { r: d.Rout - T.crown - d.sr + d.sr * Math.cos(phi),
+           w: Math.max(0, (Math.cos(phi) - Math.cos(cut)) / (1 - Math.cos(cut))) };
+}
+
+// =====================================================================================================================
+//  THE TRACED LINE  →  a cross-section
+//  Sampling the node list at t gives the element's lateral centre, half width and height there. Those three
+//  numbers are the whole tread model: the line, the taper, and how proud of the floor it stands.
+// =====================================================================================================================
+function sampleLane(lane, t) {
+  const n = lane.nodes;
+  if (t <= n[0].t) return { y: n[0].y, w: n[0].w, h: n[0].h };
+  for (let i = 0; i < n.length - 1; i++) {
+    if (t <= n[i + 1].t) {
+      const span = n[i + 1].t - n[i].t || 1e-6, k = (t - n[i].t) / span;
+      // Smoothstep so a mould's cutter path is tangent-continuous; linear would crease the walls.
+      const s = k * k * (3 - 2 * k);
+      return { y: n[i].y + (n[i + 1].y - n[i].y) * s,
+               w: n[i].w + (n[i + 1].w - n[i].w) * s,
+               h: n[i].h + (n[i + 1].h - n[i].h) * s };
+    }
+  }
+  const last = n[n.length - 1];
+  return { y: last.y, w: last.w, h: last.h };
+}
+
+// One closed-ended cross-section of a lane, in (lateral fraction, height fraction).
+// ⚠️ The point count is CONSTANT whatever the sample says. Two consecutive rings have to agree on how many
+//    points they carry or they cannot be bridged with quads, and a varying count is what forces everyone
+//    else back to booleans.
+function laneSection(lane, t) {
+  const s = sampleLane(lane, t);
+  const draft = Math.tan(S.draft * Math.PI / 180) * 0.14;      // wall lean, as a lateral fraction
+  const w = Math.max(0.012, s.w);
+  const inner = clamp(s.y - w, lane.seam[0], lane.seam[1]);
+  const outer = clamp(s.y + w, lane.seam[0], lane.seam[1]);
+  const topIn = clamp(inner + draft * s.h, lane.seam[0], lane.seam[1]);
+  const topOut = clamp(outer - draft * s.h, lane.seam[0], lane.seam[1]);
+  const mid = (topIn + topOut) / 2;
+  return [
+    { y: lane.seam[0], h: 0 },                                  // 0  seam, shared with the lane inboard
+    { y: inner,        h: 0 },                                  // 1  floor up to the foot of the wall
+    { y: topIn,        h: s.h },                                // 2  up the inboard wall
+    { y: mid - (mid - topIn) * 0.4,  h: s.h },                  // 3  across the crown of the element
+    { y: mid + (topOut - mid) * 0.4, h: s.h },                  // 4
+    { y: topOut,       h: s.h },                                // 5  down the outboard wall
+    { y: outer,        h: 0 },                                  // 6
+    { y: lane.seam[1], h: 0 },                                  // 7  seam, shared with the lane outboard
+  ];
+}
+const RING = 8;
+
+// =====================================================================================================================
+//  THE SWEEP
+//  ① the pattern gives lanes; ② each lane's line gives a section; ③ the circular array repeats it;
+//  ④ the carcass profile places it; ⑤ ring i bridges to ring i+1 and lane j to lane j+1. All quads.
+// =====================================================================================================================
+function pitchOffsets() {
+  // A real mould varies the pitch so the tyre does not sing one note. The sequence still closes exactly.
+  const raw = [];
+  for (let p = 0; p < S.pitches; p++) {
+    raw.push(1 + S.jitter * Math.sin(p * 2.399963 + 1.7) * 0.5 + S.jitter * Math.sin(p * 0.7 + 0.3) * 0.5);
+  }
+  const total = raw.reduce((a, b) => a + b, 0);
+  const out = [0];
+  for (let p = 0; p < raw.length; p++) out.push(out[p] + raw[p] / total);
+  return out;                                   // length pitches+1, 0 … 1
+}
+
+function buildTread() {
+  const d = dims();
+  const offs = pitchOffsets();
+  const steps = [];                              // every ring's position round the tyre, 0 … 1
+  const ts = [];                                 // and where it sits inside its own pitch
+  for (let p = 0; p < S.pitches; p++) {
+    for (let s = 0; s < S.samples; s++) {
+      const k = s / S.samples;
+      steps.push(offs[p] + (offs[p + 1] - offs[p]) * k);
+      ts.push(k);
+    }
+  }
+  const ringCount = steps.length;
+
+  const position = [], normal = [], uv = [], index = [];
+  const laneBase = [];
+  let vert = 0;
+
+  // ── ③ + ④  place every ring of every lane ──────────────────────────────────────────────────────────
+  for (let L = 0; L < LANES.length; L++) {
+    laneBase.push(vert);
+    const lane = LANES[L];
+    for (let i = 0; i < ringCount; i++) {
+      const theta = steps[i] * TAU;
+      const ct = Math.cos(theta), st = Math.sin(theta);
+      const section = laneSection(lane, ts[i]);
+      for (let k = 0; k < RING; k++) {
+        const pt = section[k];
+        const lateral = pt.y * d.treadHalf;
+        const base = surfaceAt(lateral, d);
+        // height 0 is the groove floor, 1 the moulded surface; the shoulder weight fades the pattern out
+        const r = base.r - T.depth * (1 - pt.h) * base.w;
+        position.push(lateral, r * ct, r * st);
+        normal.push(0, ct, st);
+        uv.push(steps[i], (pt.y + 1) / 2);
+        vert++;
+      }
+    }
+  }
+
+  // ── ⑤ bridge ring i to ring i+1, wrapping the last to the first ────────────────────────────────────
+  for (let L = 0; L < LANES.length; L++) {
+    const b = laneBase[L];
+    for (let i = 0; i < ringCount; i++) {
+      const i0 = b + i * RING, i1 = b + ((i + 1) % ringCount) * RING;
+      for (let k = 0; k < RING - 1; k++) {
+        const a = i0 + k, bb = i0 + k + 1, c = i1 + k, e = i1 + k + 1;
+        index.push(a, bb, e, a, e, c);
+      }
+    }
+  }
+
+  // ── ⑤ bridge lane j's outboard seam to lane j+1's inboard seam ─────────────────────────────────────
+  //    The two seams are at the same lateral fraction and the same height, so this seals to nothing wider
+  //    than a float's last bit — but it still has to be stitched, or the band is two surfaces, not one.
+  for (let L = 0; L < LANES.length - 1; L++) {
+    const b0 = laneBase[L], b1 = laneBase[L + 1];
+    for (let i = 0; i < ringCount; i++) {
+      const n = (i + 1) % ringCount;
+      const a = b0 + i * RING + (RING - 1), bb = b0 + n * RING + (RING - 1);
+      const c = b1 + i * RING, e = b1 + n * RING;
+      index.push(a, bb, e, a, e, c);
+    }
+  }
+
+  // ── close the band into a solid: a skirt down each lateral edge, then one inner face across ───────
+  //    ⚠️ A skirt alone does not close anything — it just moves the open loop outwards. The band is a
+  //    SHEET with two boundary loops by nature, and those loops are where it meets the sidewalls. To
+  //    prove the sweep seals, the two skirts have to be joined to each other by an inner face, and then
+  //    the audit has a right to expect zero boundary edges.
+  if (S.cap) {
+    const inner = [];
+    for (const [L, k, sign] of [[0, 0, -1], [LANES.length - 1, RING - 1, 1]]) {
+      const b = laneBase[L];
+      const skirt = vert;
+      for (let i = 0; i < ringCount; i++) {
+        const theta = steps[i] * TAU, ct = Math.cos(theta), st = Math.sin(theta);
+        const lateral = sign * d.acrossHalf;
+        const r = surfaceAt(lateral, d).r - T.depth;
+        position.push(lateral, r * ct, r * st); normal.push(sign, 0, 0); uv.push(steps[i], sign > 0 ? 1 : 0); vert++;
+      }
+      const floor = vert;
+      for (let i = 0; i < ringCount; i++) {
+        const theta = steps[i] * TAU, ct = Math.cos(theta), st = Math.sin(theta);
+        const lateral = sign * d.acrossHalf;
+        const r = d.Rout - T.depth - BELT;
+        position.push(lateral, r * ct, r * st); normal.push(sign, 0, 0); uv.push(steps[i], sign > 0 ? 1 : 0); vert++;
+      }
+      inner.push(floor);
+      for (let i = 0; i < ringCount; i++) {
+        const n = (i + 1) % ringCount;
+        const a = b + i * RING + k, bb = b + n * RING + k;
+        if (sign < 0) { index.push(a, skirt + i, skirt + n, a, skirt + n, bb); index.push(skirt + i, floor + i, floor + n, skirt + i, floor + n, skirt + n); }
+        else          { index.push(a, bb, skirt + n, a, skirt + n, skirt + i); index.push(skirt + i, skirt + n, floor + n, skirt + i, floor + n, floor + i); }
+      }
+    }
+    // the inner face, joining the two skirts: the underside the belt package would be bonded to
+    for (let i = 0; i < ringCount; i++) {
+      const n = (i + 1) % ringCount;
+      index.push(inner[0] + i, inner[1] + i, inner[1] + n, inner[0] + i, inner[1] + n, inner[0] + n);
+    }
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(index);
+  g.computeVertexNormals();
+  g.computeBoundingSphere();
+  return { geometry: g, ringCount, lanes: LANES.length, quads: index.length / 6, verts: vert, index, position };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+//  THE AUDIT.  The only question that matters: is the surface closed and is every edge shared by exactly two
+//  triangles? Counting it honestly is the difference between a tread that skins and one that leaks.
+// ---------------------------------------------------------------------------------------------------------------------
+function audit(mesh) {
+  const use = new Map();
+  const idx = mesh.index;
+  for (let i = 0; i < idx.length; i += 3) {
+    for (let e = 0; e < 3; e++) {
+      const a = idx[i + e], b = idx[i + (e + 1) % 3];
+      const key = a < b ? a * 4294967296 + b : b * 4294967296 + a;
+      use.set(key, (use.get(key) || 0) + 1);
+    }
+  }
+  let boundary = 0, nonManifold = 0;
+  for (const c of use.values()) { if (c === 1) boundary++; else if (c > 2) nonManifold++; }
+  return { boundary, nonManifold, edges: use.size, tris: idx.length / 3 };
+}
+
+// =====================================================================================================================
+//  SCENE
+// =====================================================================================================================
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 1, 20000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.05).texture;
+scene.add(new THREE.DirectionalLight(0xffffff, 1.6).translateX(600).translateY(900).translateZ(500));
+scene.add(new THREE.AmbientLight(0xffffff, 0.35));
+
+const rubber = new THREE.MeshStandardMaterial({ color: 0x1b1b1d, roughness: 0.82, metalness: 0.02,
+                                                flatShading: false, side: THREE.DoubleSide });
+const laneMat = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.02, vertexColors: true,
+                                                 side: THREE.DoubleSide });
+let group = new THREE.Group(); scene.add(group);
+let built = null;
+
+function rebuildAll() {
+  group.clear();
+  built = buildTread();
+  const d = dims();
+
+  const useLaneColour = UI.view === 'lanes';
+  if (useLaneColour) {
+    const colours = [];
+    const per = built.verts;
+    const ringVerts = built.ringCount * RING;
+    for (let v = 0; v < per; v++) {
+      const L = Math.min(LANES.length - 1, Math.floor(v / ringVerts));
+      const c = new THREE.Color().setHSL((L * 0.17) % 1, 0.55, 0.55);
+      colours.push(c.r, c.g, c.b);
+    }
+    built.geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
+  }
+
+  const mesh = new THREE.Mesh(built.geometry, useLaneColour ? laneMat : rubber);
+  mesh.visible = UI.view !== 'quads';
+  group.add(mesh);
+
+  if (UI.view === 'wire' || UI.view === 'quads') {
+    const wire = new THREE.LineSegments(new THREE.WireframeGeometry(built.geometry),
+      new THREE.LineBasicMaterial({ color: UI.view === 'quads' ? 0x4fc3f7 : 0x6f7480,
+                                    transparent: true, opacity: UI.view === 'quads' ? 0.9 : 0.35 }));
+    group.add(wire);
+  }
+
+  group.position.y = 0;
+  if (!controls.userData.seated) {
+    controls.userData.seated = true;
+    controls.target.set(0, 0, 0);
+    camera.position.set(d.Rout * 1.5, d.Rout * 0.85, d.Rout * 1.7);
+  }
+
+  const a = audit(built);
+  paintAudit(a);
+  drawPitchSheet();
+  drawSection();
+  paintNodes();
+}
+
+function paintAudit(a) {
+  const sealed = a.boundary === 0 && a.nonManifold === 0;
+  const expected = S.cap ? 'closed band' : `${built.ringCount * 2} open (uncapped edges)`;
+  document.getElementById('audit').innerHTML =
+    `<div class="t">Mesh audit</div>
+     <div class="l"><span>Lanes</span><span>${built.lanes}</span></div>
+     <div class="l"><span>Rings</span><span>${built.ringCount}</span></div>
+     <div class="l"><span>Vertices</span><span>${built.verts.toLocaleString()}</span></div>
+     <div class="l"><span>Quads</span><span>${built.quads.toLocaleString()}</span></div>
+     <div class="l"><span>Triangles</span><span>${a.tris.toLocaleString()}</span></div>
+     <div class="l"><span>Boundary edges</span><span style="color:${a.boundary ? 'var(--yellow)' : 'var(--green)'}">${a.boundary}</span></div>
+     <div class="l"><span>Non-manifold</span><span style="color:${a.nonManifold ? 'var(--red)' : 'var(--green)'}">${a.nonManifold}</span></div>
+     <div class="verdict"><i style="background:${sealed ? 'var(--green)' : a.nonManifold ? 'var(--red)' : 'var(--yellow)'}"></i>
+       ${sealed ? 'Watertight — every edge shared by two faces' : a.nonManifold ? 'Non-manifold, the sweep is wrong' : expected}</div>`;
+}
+
+// =====================================================================================================================
+//  THE FLAT SHEETS
+// =====================================================================================================================
+const sheet = document.getElementById('pitchSheet');
+const sheetDrag = { node: null, lane: 0 };
+
+function sheetFrame() {
+  const c = sheet, ctx = c.getContext('2d');
+  const W = c.width, H = c.height, pad = 26;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, W, H);
+  return { ctx, W, H, X: t => pad + t * (W - pad * 2), Y: y => H / 2 - y * (H / 2 - pad) };
+}
+
+function drawPitchSheet() {
+  const { ctx, W, H, X, Y } = sheetFrame();
+
+  // the lane seams first, so everything else reads as sitting inside one
+  for (let L = 0; L < LANES.length; L++) {
+    const lane = LANES[L];
+    ctx.fillStyle = L % 2 ? 'rgba(255,255,255,.022)' : 'rgba(255,255,255,.045)';
+    ctx.fillRect(X(0), Y(lane.seam[1]), X(1) - X(0), Y(lane.seam[0]) - Y(lane.seam[1]));
+    ctx.strokeStyle = 'rgba(240,160,75,.45)'; ctx.lineWidth = 1;
+    for (const s of lane.seam) { ctx.beginPath(); ctx.moveTo(X(0), Y(s)); ctx.lineTo(X(1), Y(s)); ctx.stroke(); }
+  }
+
+  // the ribbon of every lane: the two offset rails, filled, shaded by height
+  const steps = 96;
+  for (let L = 0; L < LANES.length; L++) {
+    const lane = LANES[L], active = L === UI.lane;
+    const top = [], bot = [];
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps, s = sampleLane(lane, t);
+      top.push([X(t), Y(s.y + Math.max(0.012, s.w))]);
+      bot.push([X(t), Y(s.y - Math.max(0.012, s.w))]);
+    }
+    ctx.beginPath();
+    top.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    for (let i = bot.length - 1; i >= 0; i--) ctx.lineTo(bot[i][0], bot[i][1]);
+    ctx.closePath();
+    ctx.fillStyle = active ? 'rgba(56,196,109,.20)' : 'rgba(230,231,234,.07)';
+    ctx.fill();
+    ctx.strokeStyle = active ? '#38c46d' : 'rgba(230,231,234,.3)'; ctx.lineWidth = active ? 1.6 : 1;
+    ctx.stroke();
+
+    // the height, read as the darkness of a band laid along the line
+    for (let i = 0; i < steps; i++) {
+      const t = i / steps, s = sampleLane(lane, t);
+      const q = Math.round(30 + s.h * 150);
+      ctx.strokeStyle = `rgba(${q},${q},${q},${active ? 0.95 : 0.5})`;
+      ctx.lineWidth = Math.max(1.5, (Y(s.y - s.w) - Y(s.y + s.w)) * 0.55);
+      ctx.beginPath(); ctx.moveTo(X(t), Y(s.y)); ctx.lineTo(X((i + 1) / steps), Y(sampleLane(lane, (i + 1) / steps).y)); ctx.stroke();
+    }
+
+    // the traced line itself
+    ctx.strokeStyle = active ? '#4fc3f7' : 'rgba(79,195,247,.35)';
+    ctx.lineWidth = active ? 1.6 : 1; ctx.setLineDash([4, 3]); ctx.beginPath();
+    for (let i = 0; i <= steps; i++) { const t = i / steps, s = sampleLane(lane, t); i ? ctx.lineTo(X(t), Y(s.y)) : ctx.moveTo(X(t), Y(s.y)); }
+    ctx.stroke(); ctx.setLineDash([]);
+
+    if (active) for (let i = 0; i < lane.nodes.length; i++) {
+      const n = lane.nodes[i], on = i === UI.node;
+      ctx.beginPath(); ctx.arc(X(n.t), Y(n.y), on ? 7 : 5, 0, TAU);
+      ctx.fillStyle = '#111'; ctx.fill();
+      ctx.lineWidth = 2; ctx.strokeStyle = on ? '#fff' : '#4fc3f7'; ctx.stroke();
+    }
+  }
+
+  // the sample rings the sweep will actually place
+  ctx.strokeStyle = 'rgba(255,255,255,.1)';
+  for (let s = 0; s <= S.samples; s++) { const x = X(s / S.samples); ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, H - 12); ctx.stroke(); }
+
+  ctx.fillStyle = '#8a8d94'; ctx.font = '300 11px "Slate Sans",system-ui';
+  ctx.fillText('one pitch →', 10, 15);
+  ctx.textAlign = 'right'; ctx.fillText(`${S.samples} rings · ${LANES.length} lanes`, W - 10, 15);
+  ctx.textAlign = 'left';
+}
+
+function drawSection() {
+  const c = document.getElementById('secSheet'), ctx = c.getContext('2d');
+  const W = c.width, H = c.height, pad = 22;
+  ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#111'; ctx.fillRect(0, 0, W, H);
+  const t = LANES[UI.lane] ? LANES[UI.lane].nodes[Math.min(UI.node, LANES[UI.lane].nodes.length - 1)].t : 0;
+  document.getElementById('secWhere').textContent = `t = ${t.toFixed(3)}`;
+
+  const X = y => W / 2 + y * (W / 2 - pad) / 1.12;
+  const Y = h => H - pad - h * (H - pad * 2);
+
+  ctx.strokeStyle = 'rgba(229,66,63,.5)'; ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(pad, Y(0)); ctx.lineTo(W - pad, Y(0)); ctx.stroke(); ctx.setLineDash([]);
+
+  for (let L = 0; L < LANES.length; L++) {
+    const sec = laneSection(LANES[L], t), on = L === UI.lane;
+    ctx.beginPath();
+    sec.forEach((p, i) => i ? ctx.lineTo(X(p.y), Y(p.h)) : ctx.moveTo(X(p.y), Y(p.h)));
+    ctx.lineTo(X(sec[sec.length - 1].y), Y(0)); ctx.lineTo(X(sec[0].y), Y(0)); ctx.closePath();
+    ctx.fillStyle = on ? 'rgba(56,196,109,.2)' : 'rgba(230,231,234,.06)'; ctx.fill();
+    ctx.strokeStyle = on ? '#38c46d' : 'rgba(230,231,234,.33)'; ctx.lineWidth = on ? 1.7 : 1; ctx.stroke();
+    for (const p of sec) {
+      ctx.beginPath(); ctx.arc(X(p.y), Y(p.h), on ? 3 : 2, 0, TAU);
+      ctx.fillStyle = on ? '#fff' : 'rgba(255,255,255,.4)'; ctx.fill();
+    }
+  }
+  ctx.fillStyle = '#5c5f66'; ctx.font = '300 10.5px "Slate Sans",system-ui';
+  ctx.fillText('floor', 8, Y(0) - 5);
+  ctx.fillText('moulded surface', 8, Y(1) + 12);
+  ctx.textAlign = 'right'; ctx.fillText(`${RING} points per ring, always`, W - 8, 15); ctx.textAlign = 'left';
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+//  DRAGGING ON THE FLAT SHEET
+// ---------------------------------------------------------------------------------------------------------------------
+sheet.addEventListener('pointerdown', e => {
+  const r = sheet.getBoundingClientRect(), pad = 26;
+  const px = (e.clientX - r.left) * sheet.width / r.width, py = (e.clientY - r.top) * sheet.height / r.height;
+  const t = clamp((px - pad) / (sheet.width - pad * 2), 0, 1);
+  const y = clamp((sheet.height / 2 - py) / (sheet.height / 2 - pad), -1.15, 1.15);
+  let best = null, bd = 0.08;
+  for (let L = 0; L < LANES.length; L++) for (let i = 0; i < LANES[L].nodes.length; i++) {
+    const n = LANES[L].nodes[i], dd = Math.hypot((n.t - t) * 1.2, n.y - y);
+    if (dd < bd) { bd = dd; best = [L, i]; }
+  }
+  if (!best) { for (let L = 0; L < LANES.length; L++) if (y >= LANES[L].seam[0] && y <= LANES[L].seam[1]) { UI.lane = L; UI.node = 0; } rebuildAll(); seatNodeControls(); return; }
+  UI.lane = best[0]; UI.node = best[1];
+  sheetDrag.node = best; sheet.setPointerCapture(e.pointerId);
+  rebuildAll(); seatNodeControls();
+});
+sheet.addEventListener('pointermove', e => {
+  if (!sheetDrag.node) return;
+  const r = sheet.getBoundingClientRect(), pad = 26;
+  const px = (e.clientX - r.left) * sheet.width / r.width, py = (e.clientY - r.top) * sheet.height / r.height;
+  const [L, i] = sheetDrag.node, lane = LANES[L], n = lane.nodes[i];
+  const lo = i === 0 ? 0 : lane.nodes[i - 1].t + 0.002;
+  const hi = i === lane.nodes.length - 1 ? 1 : lane.nodes[i + 1].t - 0.002;
+  n.t = clamp((px - pad) / (sheet.width - pad * 2), lo, hi);
+  n.y = clamp((sheet.height / 2 - py) / (sheet.height / 2 - pad), lane.seam[0] + n.w, lane.seam[1] - n.w);
+  rebuildAll(); seatNodeControls();
+});
+const endDrag = () => { sheetDrag.node = null; };
+sheet.addEventListener('pointerup', endDrag); sheet.addEventListener('pointercancel', endDrag);
+
+// =====================================================================================================================
+//  CONTROLS
+// =====================================================================================================================
+const STEPS = [
+  { n: 'Pattern',  d: 'Lay the tread out as lanes. Each lane is a strip that runs the whole way round, and lanes tile across the tread with no gap. This is the only place the pattern type matters.' },
+  { n: 'Trace',    d: 'Trace one element per lane with a line. The line carries three numbers at each node: where it sits across the tread, how wide it is there, and how proud of the floor it stands. The width is the taper.' },
+  { n: 'Array',    d: 'Repeat the traced pitch around the circumference. The pitch length is varied so the tyre does not sing one note, and the sequence still closes exactly on itself.' },
+  { n: 'Fit',      d: 'Place every ring on the carcass. Lateral stays lateral; the radius comes from the crown parabola and the shoulder arc, and the height lifts off the groove floor towards the moulded surface.' },
+  { n: 'Bridge',   d: 'Stitch ring i to ring i+1 and lane j to lane j+1. Every face is a quad and every edge is shared by exactly two of them, so the band is watertight because of how it was built, not because it was repaired.' },
+];
+
+function paintSteps() {
+  document.getElementById('steps').innerHTML = STEPS.map((s, i) =>
+    `<button data-s="${i}" class="${i === UI.step ? 'on' : ''}"><span class="n">${i + 1}</span>${s.n}</button>`).join('');
+  document.querySelectorAll('.steps button').forEach(b => b.onclick = () => {
+    UI.step = +b.dataset.s; paintSteps();
+    UI.view = ['lanes', 'lanes', 'quads', 'wire', 'solid'][UI.step];
+    document.querySelectorAll('#viewbar button').forEach(x => x.classList.toggle('on', x.dataset.v === UI.view));
+    rebuildAll();
+  });
+  const s = STEPS[UI.step];
+  document.getElementById('stage').innerHTML =
+    `<div class="k">Step ${UI.step + 1} of ${STEPS.length}</div><div class="h">${s.n}</div><div class="d">${s.d}</div>`;
+}
+
+function paintPresets() {
+  document.getElementById('presets').innerHTML = PRESETS.map((p, i) =>
+    `<div class="preset ${i === UI.preset ? 'on' : ''}" data-p="${i}"><canvas width="240" height="92"></canvas>
+     <div class="n">${p.name}</div><div class="t">${p.kind}</div></div>`).join('');
+  document.querySelectorAll('.preset').forEach((el, i) => {
+    el.onclick = () => applyPreset(i);
+    const ctx = el.querySelector('canvas').getContext('2d');
+    ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 240, 92);
+    const lanes = PRESETS[i].build();
+    for (const lane of lanes) for (let rep = 0; rep < 3; rep++) for (let s = 0; s < 40; s++) {
+      const t = s / 40, sm = sampleLane(lane, t);
+      const q = Math.round(26 + sm.h * 150);
+      ctx.fillStyle = `rgb(${q},${q},${q})`;
+      const x = (rep + t) / 3 * 240, y = 46 - sm.y * 40, h = Math.max(1.4, sm.w * 80);
+      ctx.fillRect(x, y - h / 2, 240 / 3 / 40 + 1, h);
+    }
+  });
+  document.getElementById('laneCount').textContent = `${LANES.length} lanes`;
+}
+
+function paintNodes() {
+  const lane = LANES[UI.lane]; if (!lane) return;
+  document.getElementById('laneWhich').textContent = `${UI.lane + 1} of ${LANES.length}`;
+  document.getElementById('laneSel').innerHTML = LANES.map((l, i) => `<option value="${i}" ${i === UI.lane ? 'selected' : ''}>Lane ${i + 1} · seam ${l.seam[0].toFixed(2)} → ${l.seam[1].toFixed(2)}</option>`).join('');
+  document.getElementById('nodes').innerHTML = lane.nodes.map((n, i) =>
+    `<div class="node ${i === UI.node ? 'on' : ''}" data-n="${i}"><span class="i"></span>
+      <span>Node ${i + 1}</span>
+      <span class="f" style="margin-left:auto">t ${n.t.toFixed(2)} · y ${n.y.toFixed(2)} · w ${n.w.toFixed(2)} · h ${n.h.toFixed(2)}</span></div>`).join('');
+  document.querySelectorAll('.node').forEach(el => el.onclick = () => { UI.node = +el.dataset.n; paintNodes(); seatNodeControls(); drawPitchSheet(); drawSection(); });
+  document.getElementById('nodeWhich').textContent = `${UI.node + 1} of ${lane.nodes.length}`;
+}
+
+function seatNodeControls() {
+  const lane = LANES[UI.lane]; if (!lane) return;
+  UI.node = Math.min(UI.node, lane.nodes.length - 1);
+  const n = lane.nodes[UI.node];
+  for (const [id, v, dp] of [['nT', n.t, 3], ['nY', n.y, 2], ['nW', n.w, 2], ['nH', n.h, 2]]) {
+    const el = document.getElementById(id);
+    el.value = v; el.parentElement.querySelector('.val').textContent = (+v).toFixed(dp);
+  }
+}
+
+for (const [id, obj, key, dp] of [
+  ['width', T, 'width', 0], ['aspect', T, 'aspect', 0], ['rim', T, 'rim', 0], ['depth', T, 'depth', 1],
+  ['crown', T, 'crown', 1], ['shoulder', T, 'shoulder', 0], ['treadFrac', T, 'treadFrac', 2],
+  ['pitches', S, 'pitches', 0], ['samples', S, 'samples', 0], ['jitter', S, 'jitter', 2],
+  ['draft', S, 'draft', 0], ['round', S, 'round', 1]]) {
+  const el = document.getElementById(id);
+  el.value = obj[key];
+  el.parentElement.querySelector('.val').textContent = obj[key].toFixed(dp);
+  el.oninput = () => { obj[key] = parseFloat(el.value); el.parentElement.querySelector('.val').textContent = obj[key].toFixed(dp); rebuildAll(); };
+}
+document.getElementById('cap').onchange = e => { S.cap = e.target.checked; rebuildAll(); };
+
+for (const [id, key, dp] of [['nT', 't', 3], ['nY', 'y', 2], ['nW', 'w', 2], ['nH', 'h', 2]]) {
+  const el = document.getElementById(id);
+  el.oninput = () => {
+    const lane = LANES[UI.lane], n = lane.nodes[UI.node];
+    let v = parseFloat(el.value);
+    if (key === 't') {
+      const lo = UI.node === 0 ? 0 : lane.nodes[UI.node - 1].t + 0.002;
+      const hi = UI.node === lane.nodes.length - 1 ? 1 : lane.nodes[UI.node + 1].t - 0.002;
+      v = clamp(v, lo, hi);
+    }
+    n[key] = v;
+    el.parentElement.querySelector('.val').textContent = v.toFixed(dp);
+    rebuildAll();
+  };
+}
+document.getElementById('laneSel').onchange = e => { UI.lane = +e.target.value; UI.node = 0; paintNodes(); seatNodeControls(); rebuildAll(); };
+document.getElementById('addNode').onclick = () => {
+  const lane = LANES[UI.lane], i = UI.node, a = lane.nodes[i], b = lane.nodes[Math.min(i + 1, lane.nodes.length - 1)];
+  lane.nodes.splice(i + 1, 0, { t: (a.t + b.t) / 2 || Math.min(1, a.t + 0.05), y: (a.y + b.y) / 2, w: (a.w + b.w) / 2, h: (a.h + b.h) / 2 });
+  UI.node = i + 1; rebuildAll(); seatNodeControls();
+};
+document.getElementById('delNode').onclick = () => {
+  const lane = LANES[UI.lane];
+  if (lane.nodes.length <= 2) return;
+  lane.nodes.splice(UI.node, 1); UI.node = Math.max(0, UI.node - 1); rebuildAll(); seatNodeControls();
+};
+document.querySelectorAll('#viewbar button').forEach(b => b.onclick = () => {
+  if (b.dataset.v === 'spin') { UI.spin = !UI.spin; b.classList.toggle('on', UI.spin); return; }
+  UI.view = b.dataset.v;
+  document.querySelectorAll('#viewbar button[data-v]:not([data-v=spin])').forEach(x => x.classList.toggle('on', x.dataset.v === UI.view));
+  rebuildAll();
+});
+
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(view);
+
+let last = performance.now();
+renderer.setAnimationLoop(now => {
+  const dt = (now - last) / 1000; last = now;
+  if (UI.spin) group.rotation.x -= dt * 0.5;
+  controls.update(); renderer.render(scene, camera);
+});
+
+applyPreset(0);
+paintPresets(); paintSteps(); seatNodeControls(); resize();
+</script>
+</body>
+</html>

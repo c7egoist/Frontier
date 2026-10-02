@@ -1,0 +1,19 @@
+{
+  "proof": "Project-Zero fresh CPU showcase mirror",
+  "execution": "CPU mirror/reference \u2014 not a native Frontier Vulkan, Slang, or ImGui capture.",
+  "source": {
+    "repository": "https://github.com/SultanAladin/Frontier-.git",
+    "revision": "28ec0657a23ed6bbf680f17cc06b464a53639dae"
+  },
+  "scene": "Project-Zero soil plain, one hundred analytical shapes, sunset sky, moon, stars, clouds, ground mist, ReSTIR DI plus GI.",
+  "command": "make clean && make all && ./bin/Project-Zero-CpuReference --width 640 --height 480 --bounce 8 --passes 2 --fog morning",
+  "results": {
+    "viewport": "640x480",
+    "renderDurationMs": 9476.81,
+    "spatialResamplingPasses": 2
+  },
+  "sha256": {
+    "ProjectZeroShowcase_CPU_Mirror.png": "a9c06aa14381f4086648be4712ef4823f7caf65ad9462c28cdeb071a2d8966ed",
+    "ProjectZeroShowcase_Telemetry.md": "3969dcc4043a2d362fcbf1db91e74b49fb4ba80cb221f7520f30847e16d265f3"
+  }
+}

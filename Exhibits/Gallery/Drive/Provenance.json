@@ -1,0 +1,198 @@
+{
+  "proof": "Project-Drive driven on the CPU by the engine's own vehicle solver and visibility raster.",
+  "execution": "CPU render by the engine's own translation units \u2014 not a native Vulkan, Slang, or ImGui capture.",
+  "renderer": "Frontier engine sources, built and run headless. No renderer is authored in Slate.",
+  "source": {
+    "repository": "https://github.com/SultanAladin/Frontier-.git",
+    "revision": "28ec0657a23ed6bbf680f17cc06b464a53639dae"
+  },
+  "scene": "Projects/Project-Drive/Source/DriveSceneAuthor \u2014 the app's own course, ControlVehicle shell, four wheels and twelve authored materials, in the app's own span order.",
+  "commands": [
+    "DriveTelemetry /home/user/Slate/_AgentScratch/build/drive/telemetry",
+    "/usr/bin/python3 Exhibits/Workbench/Drive/DriveTelemetryGraphs.py",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveChaseRun --width 480 --height 270 --fps 10 --sun 13.0 --camera chase --seconds 12",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveTracksideRun --width 480 --height 270 --fps 10 --sun 13.0 --camera trackside --seconds 12",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveOrbitWhileDriving --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --seconds 12 --orbit-period 5 --orbit-radius 9 --orbit-height 2.6",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDTyreDeformation --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDRimCollapse --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05 --rim-stop 0",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDLatticeDebug --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05 --debug-lattice --height 300",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveKerbStrike --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --scenario kerb --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveKerbStrike_LatticeDebug --width 480 --height 270 --fps 10 --sun 13.0 --camera wheel --wheel 0 --seconds 12 --scenario kerb --orbit-period 9 --orbit-radius 2.5 --orbit-height 1.05 --debug-lattice --height 300",
+    "DriveSceneMirror --frames-out /home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveMaterialTurntable --width 480 --height 270 --fps 10 --sun 13.0 --camera orbit --freeze 3.0 --seconds 9 --orbit-period 6 --orbit-radius 6.5 --orbit-height 2.4",
+    "XPBDTyreProof /home/user/Slate/Exhibits/Gallery/Drive/ProjectDriveXPBDTyreDeformation_CPU_Reference.png",
+    [
+      "DriveSceneMirror",
+      "--frames-out",
+      "/home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDRimCollapse",
+      "--width",
+      "480",
+      "--height",
+      "270",
+      "--fps",
+      "10",
+      "--sun",
+      "13.0",
+      "--camera",
+      "wheel",
+      "--wheel",
+      "0",
+      "--seconds",
+      "12",
+      "--orbit-period",
+      "9",
+      "--orbit-radius",
+      "2.5",
+      "--orbit-height",
+      "1.05",
+      "--rim-stop",
+      "0"
+    ],
+    [
+      "DriveSceneMirror",
+      "--frames-out",
+      "/home/user/Slate/_AgentScratch/build/drive/frames-ProjectDriveXPBDLatticeDebug",
+      "--width",
+      "480",
+      "--height",
+      "270",
+      "--fps",
+      "10",
+      "--sun",
+      "13.0",
+      "--camera",
+      "wheel",
+      "--wheel",
+      "0",
+      "--seconds",
+      "12",
+      "--orbit-period",
+      "9",
+      "--orbit-radius",
+      "2.5",
+      "--orbit-height",
+      "1.05",
+      "--debug-lattice",
+      "--height",
+      "300"
+    ]
+  ],
+  "results": {
+    "physics": [
+      "  Peak speed ....... 36.46 m/s (131.3 km/h)",
+      "  Takeoff speed .... 11.17 m/s (ramp launch)",
+      "  Airborne ......... 0.58 s",
+      "  Max susp. travel . 0.516 m",
+      "  Min chassis up ... 0.947 (1.0 = level; dips while cornering / airborne)",
+      "  Final X .......... 183.8 m",
+      "  Physics .......... 6437.96 us/step, 0.6x real-time",
+      "  Wrote ............ telemetry.csv, timing.log, run.log in /home/user/Slate/_AgentScratch/build/drive/telemetry"
+    ],
+    "ProjectDriveChaseRun": [
+      "[drive-scene] camera 'chase': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.46 m/s (131.3 km/h), peak aero downforce 7628 N, final X 183.80 m",
+      "[drive-scene] flange: tread closed to 359.4 mm of a 359.6 mm flange (149.1 of 149.0 mm sidewall, 100%); intrusion 0.19 mm, arrival 13.55 mm -> unresolved 0.193 mm, rim stop on"
+    ],
+    "ProjectDriveTracksideRun": [
+      "[drive-scene] camera 'trackside': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.46 m/s (131.3 km/h), peak aero downforce 7628 N, final X 183.80 m",
+      "[drive-scene] flange: tread closed to 359.4 mm of a 359.6 mm flange (149.1 of 149.0 mm sidewall, 100%); intrusion 0.19 mm, arrival 13.55 mm -> unresolved 0.193 mm, rim stop on"
+    ],
+    "ProjectDriveOrbitWhileDriving": [
+      "[drive-scene] camera 'orbit': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.46 m/s (131.3 km/h), peak aero downforce 7628 N, final X 183.80 m",
+      "[drive-scene] flange: tread closed to 359.4 mm of a 359.6 mm flange (149.1 of 149.0 mm sidewall, 100%); intrusion 0.19 mm, arrival 13.55 mm -> unresolved 0.193 mm, rim stop on"
+    ],
+    "ProjectDriveXPBDTyreDeformation": [
+      "[drive-scene] camera 'wheel': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.46 m/s (131.3 km/h), peak aero downforce 7628 N, final X 183.80 m",
+      "[drive-scene] flange: tread closed to 359.4 mm of a 359.6 mm flange (149.1 of 149.0 mm sidewall, 100%); intrusion 0.19 mm, arrival 13.55 mm -> unresolved 0.193 mm, rim stop on"
+    ],
+    "ProjectDriveXPBDRimCollapse": [
+      "[drive-scene] camera 'wheel': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 36.46 m/s (131.3 km/h), peak aero downforce 7625 N, final X 183.71 m",
+      "[drive-scene] flange: tread closed to 342.1 mm of a 359.6 mm flange (166.5 of 149.0 mm sidewall, 112%); intrusion 17.51 mm, arrival 0.00 mm -> unresolved 0.000 mm, rim stop OFF"
+    ],
+    "ProjectDriveXPBDLatticeDebug": [
+      "[drive-scene] camera 'wheel': 120 frames at 10 fps, 480x300",
+      "[drive-scene] run: peak speed 36.46 m/s (131.3 km/h), peak aero downforce 7628 N, final X 183.80 m",
+      "[drive-scene] flange: tread closed to 359.4 mm of a 359.6 mm flange (149.1 of 149.0 mm sidewall, 100%); intrusion 0.19 mm, arrival 13.55 mm -> unresolved 0.193 mm, rim stop on"
+    ],
+    "ProjectDriveKerbStrike": [
+      "[drive-scene] camera 'wheel': 120 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 11.71 m/s (42.1 km/h), peak aero downforce 695 N, final X 60.07 m",
+      "[drive-scene] flange: tread closed to 358.9 mm of a 359.6 mm flange (149.6 of 149.0 mm sidewall, 100%); intrusion 0.67 mm, arrival 46.71 mm -> unresolved 0.673 mm, rim stop on"
+    ],
+    "ProjectDriveKerbStrike_LatticeDebug": [
+      "[drive-scene] camera 'wheel': 120 frames at 10 fps, 480x300",
+      "[drive-scene] run: peak speed 11.71 m/s (42.1 km/h), peak aero downforce 695 N, final X 60.07 m",
+      "[drive-scene] flange: tread closed to 358.9 mm of a 359.6 mm flange (149.6 of 149.0 mm sidewall, 100%); intrusion 0.67 mm, arrival 46.71 mm -> unresolved 0.673 mm, rim stop on"
+    ],
+    "ProjectDriveMaterialTurntable": [
+      "[drive-scene] camera 'orbit': 91 frames at 10 fps, 480x270",
+      "[drive-scene] run: peak speed 7.66 m/s (27.6 km/h), peak aero downforce 346 N, final X 7.95 m",
+      "[drive-scene] flange: tread closed to 488.6 mm of a 359.6 mm flange (19.9 of 149.0 mm sidewall, 13%); intrusion 0.00 mm, arrival 0.00 mm -> unresolved 0.000 mm, rim stop on"
+    ]
+  },
+  "sha256": {
+    "ProjectDriveAeroAgainstSpeed_CPU_Reference.png": "8dcb407f7d7127f1d91156aa442b75fa3313ec36147442a8015917c7f28469db",
+    "ProjectDriveAerodynamics_CPU_Reference.png": "61f7585e8e40aaf03a05ceccb73a249f63d8bea1c2ae4fd83c6c19c6e820c614",
+    "ProjectDriveChaseRun_CPU_Reference.gif": "380ab924db12f32750dc13d0d279b24b98e97b84874a293410556155b7117a8b",
+    "ProjectDriveDriverInputs_CPU_Reference.png": "54ee18f2fe9e450f0a886b660797668de7524dd9a7523a43be55e3940796b389",
+    "ProjectDriveKerbStrike_CPU_Reference.gif": "206e541f21645fa96730802cd48d0a05ca5db7f8205d654e5e5d8be835dd8240",
+    "ProjectDriveKerbStrike_LatticeDebug_CPU_Reference.gif": "51dd9359b4ed045178d75f037856dee4b53b03f2f16181eb91a58a3f77654d57",
+    "ProjectDriveMaterialAngleFarSide_CPU_Reference.png": "72b551e4263093cdf774a7f2b68de929be9b1e1d1b7fd316d2bf1c167b0d8a71",
+    "ProjectDriveMaterialAngleFrontQuarter_CPU_Reference.png": "cc7d0b17595a7178cdcdaff69d0ece468ff6e6a66caed036e90952169dbdc1f8",
+    "ProjectDriveMaterialAngleFront_CPU_Reference.png": "c5b8caa9dac2b3816d1c5456820707b8b67bcbe4ed3fa9bf38c73de1b581e4fd",
+    "ProjectDriveMaterialAngleRearQuarter_CPU_Reference.png": "8f497de711ab682ae95596f2d49705c2873bb43909d962b1bf60ca327a7ca336",
+    "ProjectDriveMaterialAngleRear_CPU_Reference.png": "2e66ad5b770453139b6dd5b7f0b70981281af9b87df0eddf22f6c5d8b1896dc8",
+    "ProjectDriveMaterialAngleSide_CPU_Reference.png": "4937783215d0d181987be2e877b1ff1c29900808bf97d6b26019f519be526db3",
+    "ProjectDriveMaterialTurntable_CPU_Reference.gif": "a26dfc18612bad0c107f9a09f2093630efb3dde18cd3cd51396b60028e673519",
+    "ProjectDriveOrbitWhileDriving_CPU_Reference.gif": "9dd20055fff035cf0e4e191bb85b7d6a8592c0ca4f159ad992cd7c2a57e156f1",
+    "ProjectDrivePhysicsRun_CPU_Reference.txt": "faa98f1927727af971b1342629c470bd95616c7ee17cf1d3779978dc96c1572b",
+    "ProjectDrivePhysicsTelemetry_CPU_Reference.csv": "b63169992e30992898ae8765fee794fd7399cedbf6eb05e1b3f515efe959647f",
+    "ProjectDrivePhysicsTiming_CPU_Reference.txt": "d6cfbf7c99b4cd814502988ed431d6b746392d5ccdbd72f042d5b4894e1d3f7c",
+    "ProjectDrivePowertrain_CPU_Reference.png": "fe746c1687e452eb5854183fed7cd3a479e168b9f44c26b173cbbc7a65476584",
+    "ProjectDriveSpeedVsTime_CPU_Reference.png": "1fe4bf1ec947dfad31889a11a67552183e9cbb638a403946bc823d8f88b033dd",
+    "ProjectDriveSteering_CPU_Reference.png": "a96fb39ed13d6d9f09e8500b4352ea36bca6063948d1c3e45ca8ece1b890e474",
+    "ProjectDriveTracksideRun_CPU_Reference.gif": "0193ef7dc1ef6e3fca3765bee21d2d03cd750ef04de5cabaab19a3b143f80573",
+    "ProjectDriveTyreLoads_CPU_Reference.png": "0ece360ba481b5255a340edf38976ed34eeb63afd3f86b2e849936d8ebe36b97",
+    "ProjectDriveXPBDLatticeDebug_CPU_Reference.gif": "61b93b05a7809737db134a9a907d217e21cc9434abafb2cef6d2380a4f4e76ac",
+    "ProjectDriveXPBDRimCollapse_CPU_Reference.gif": "bc7e1db9d32707468f07107e39421e61fb23921c1cbd1c1f9196b9f9f166a6e1",
+    "ProjectDriveXPBDTyreDeformation_CPU_Reference.gif": "fcf5095d225557aca7d33ea6195bd6216ffe1e4519976029b8181e0b648483c5"
+  },
+  "stages": {
+    "level": "Projects/Project-Drive/Source/DriveSceneAuthor",
+    "physics": "Engine/PhysicalDynamics/Vehicle/VehicleSolver \u2014 PacejkaDrivetrain, XPBD soft tyres, Aerodynamics",
+    "camera": "Projects/Project-Drive/Source/ChaseCameraSolver, the app's own chase camera",
+    "sky": "Projects/Project-Zero/Source/CelestialSequence at local hour 13.0 \u2014 the engine's real sun, sky, atmosphere, star and moon model",
+    "raster": "Engine/GeometricRaster/VisibilityRaster \u2014 the shipped RT-off / GI-off render path"
+  },
+  "executionBoundary": {
+    "nativeFrontierVulkanSlangImGuiCapture": false,
+    "description": "Every frame is rendered on the CPU by the engine's own translation units, built from the flattened Frontier/ engine tree. No renderer, material model, sky or camera is authored in Slate. This is not a Vulkan swapchain capture; it is the same code the GPU path shades from, run headless."
+  },
+  "sequences": {
+    "ProjectDriveChaseRun": "The full scripted run from the app's own ChaseCameraSolver: settle, full throttle, slalom, ramp, brake.",
+    "ProjectDriveTracksideRun": "The same run from a fixed post beside the course, so the speed reads as motion through frame.",
+    "ProjectDriveOrbitWhileDriving": "The same run with the eye circling the moving car: the body, wheels and course from every azimuth at speed.",
+    "ProjectDriveXPBDTyreDeformation": "The front-left tyre for the whole run, close enough to read the carcass. The surface is rebuilt every frame from XPBDSoftTyre's own particle lattice, so the contact patch flattening, the shoulders bulging and the shiver over the bumps are the deformation the solver resolved \u2014 not a cylinder being squashed for the camera.",
+    "ProjectDriveXPBDRimCollapse": "The defeated control for the sequence above: the identical run with the rim-bottoming constraint switched off at the command line, so the only difference between the two GIFs is the constraint under test. The sidewall is tension-only, so with nothing to stop it the belt keeps going once it runs out of sidewall and the tread ends up 17.5 mm INSIDE the rim it is mounted on \u2014 the carcass occupying the wheel. With the constraint on, the same landing stops at the flange with 0.72 mm left, which is the constraint's own compliance answering the load rather than the tread passing through steel.",
+    "ProjectDriveXPBDLatticeDebug": "The same front-left tyre as the deformation sequence, drawn as the XPBD lattice itself rather than a skin: every node the solver integrates, with the ones in ground contact picked out, so the contact patch and the sidewall travel can be read directly off the particles.",
+    "ProjectDriveKerbStrike": "The car leaned onto the kerb's vertical face until the tyre strikes it side-on. This is the hardest case the course offers the carcass: the flange projection is handed a 46.7 mm breach, against 13.6 mm for the ramp landing.",
+    "ProjectDriveKerbStrike_LatticeDebug": "The kerb strike as the lattice, which is where the rim-bottoming constraint is easiest to see: without it the tread folds 76.0 mm inside the rim it is mounted on, and with it the carcass stops on the flange with 0.67 mm left.",
+    "ProjectDriveMaterialTurntable": "The car held at the pose the solver produced three seconds into the run, circled once, to show the twelve authored Project-Drive materials from every angle."
+  },
+  "retired": {
+    "sheets": [
+      "ProjectDriveXPBDTyreDeformation_CPU_Reference.png"
+    ],
+    "reason": "Exhibits/Workbench/Drive/DriveSceneProof.cpp was a bespoke raytracer written in Slate. It did not run any engine code, so its sheets were not evidence about Project-Drive. It is deleted and its output is superseded by the sequences above."
+  },
+  "partialRebuild": {
+    "sequences": [
+      "ProjectDriveXPBDLatticeDebug",
+      "ProjectDriveXPBDRimCollapse"
+    ],
+    "note": "Re-rendered the sequences listed here only. Every other entry is carried over from the last full pass; the physics run, graphs, turntable stills and tyre sheet were not re-run."
+  }
+}

@@ -1,0 +1,257 @@
+I read the repo (CLAUDE.md, 08-RenderSchedule, 40-SpatialSubdivision, 64-SampleIntegrator, the full Completed/ set) and both SKILL files, since this refinement necessarily proposes identifiers and code. Everything below is checked against them.
+
+One housekeeping note: Plan is on your banned-structural-word list, so what follows is a construction sequence amendment, and it goes in chat only, per CLAUDE.md.
+
+Part 0 — Corrections to the plan you were given
+Four of its claims survive verification, three do not, and two are repo-contradicted.
+
+Stands: Pascal ray query. NVIDIA's Vulkan driver page has carried, since the 2021 KHR ray-tracing release, a non-RTX support list naming Pascal: GeForce GTX 1060 6GB and above alongside Volta, for VK_KHR_acceleration_structure / VK_KHR_ray_query / VK_KHR_ray_tracing_pipeline. Emulated traversal on SM cores, no RT cores. The vulkaninfo check first is correct advice.
+
+Refines: which Vulkan. The current page (developer.nvidia.com/vulkan-driver) now enumerates Vulkan 1.4 support for Turing and above only — Blackwell, Ada, Ampere, Turing, and it lists GTX 16-series under Turing. Pascal is not on that list because it is frozen on branch 580 (Vulkan 1.3). So the plan's "target Vulkan 1.3" is right, but the reason is stronger than stated: your Pascal target is not merely unlikely to get 1.4, it is excluded from the 1.4 support list today. Build the device request as 1.3 core + explicitly named extensions, never a 1.4 baseline.
+
+Stands: ReSTIR PT Enhanced. Lin, Kettunen, Wyman, I3D 2026, 🏆 Best Paper. Abstract confirms 2–3×, reciprocal neighbour selection, footprint-based reconnection criteria, duplication maps, unified DI+GI reservoirs. research.nvidia.com/labs/rtr/publication/lin2026restirptenhanced · 10.1145/3804494
+
+Stands: SER and OMM dates. VK_EXT_ray_tracing_invocation_reorder entered NVIDIA's beta driver 14 November 2025; VK_KHR_opacity_micromap entered 7 May 2026 (596.50). Both confirmed in the beta release-note log on that same page. Consequence the plan missed: SER is exposed through HitObject in ray-tracing-pipeline shaders, not inline ray query. That is the real reason your top tier needs a second execution model — which is exactly what you meant by "we need pipelines".
+
+Falls: "you already have SVGF and blue noise." I found no denoiser and no sampling-sequence document anywhere in Completed/. 64-SampleIntegrator is temporal accumulation with reprojection and rejection — a different thing, and it explicitly states its weight is count-derived, not an exponential average. 02 §6 gives you sub-pixel offsets, not an Owen-scrambled Sobol or blue-noise sequence. Treat the spatial denoiser and the sampling sequence as new work, not a retune. This is the single largest schedule error in the plan you were given.
+
+Falls: "the restructure is stage 8, split one radiance target into four." 08 §2 already declares RadianceSurface, ReflectionSurface (half), OcclusionSurface (half) and DirectOcclusionSurface. You are not splitting one signal into four from scratch; you are re-partitioning an existing five-target set and retiring one of them — see Part 5.
+
+The repo-specific finding nobody gave you. 08 §2 pins DirectOcclusionSurface to RGBA8 with a declared capacity of exactly four illuminants, and 60-OcclusionProjection produces it. ReSTIR DI exists precisely to remove that cap. So ③ in your current ordering is not a stage ReSTIR sits beside — it is a stage ReSTIR replaces on tiers that can trace, and remains as on tiers that cannot. That single fact gives you your capability substitution for free, in the exact mechanism 08 §5 already declares. It is worth more than the vulkaninfo check.
+
+Part 1 — The four capability tiers
+Two traversal APIs, four performance tiers, three resampling configurations. Selection belongs in the existing VendorClassifier ("scores vendor implementations into a capability set"), not in a new module.
+
+Tier	Spelling	Hardware	Traversal mechanism	Resampling configuration
+T0	ScreenTraced	Maxwell, Kepler, GCN/Polaris/Vega, Adreno < 750, Mali < Immortalis, any 3 GB Pascal	Depth-extremum pyramid march + illuminant depth atlas. No rays.	Resampled direct illumination, atlas visibility · probe-resampled indirect over the world hash
+T1	ComputeTraced	Same hardware, opt-in	Own compressed wide traversal in compute	T2's algorithms at reduced candidate counts
+T2	DriverTraced	Pascal 6 GB+, GTX 16-series, low-end RDNA2	VK_KHR_ray_query, inline, in compute	Resampled DI + resampled GI + world illuminant subdivision + world radiance hash
+T3	HardwareTraced	RTX 20+, RDNA2+, Arc, Immortalis G715+	Ray query and ray-tracing pipeline with HitObject	Unified DI+GI path resampling — the 2026 enhanced formulation
+⚠️ T1 is not on the critical path. It is a benchmark harness for T0 hardware and a fallback if driver-emulated traversal on Pascal measures worse than your own. Build it in Phase 6, gated on a measurement, exactly as the original plan said — but note it serves T0 hardware, not Pascal, which is the correction that makes it worth building at all.
+
+💡 T3 is not "T2 plus speed". It is the only tier that carries a second VkPipeline species (ray tracing pipeline, shader binding table, HitObject reorder). Everything T0–T2 runs as compute with inline ray query. Keep the T3 shader entry points in separate translation units so the SBT never contaminates the compute path.
+
+Part 2 — Top-level architecture
+Six new construction documents, one retirement, two amendments. Numbering continues your even sequence; the layer assignments follow DOC/Technical Engine Directory Structure & Architectur.md, which must be updated when these land.
+
+№	Document	Unit	Layer	Owns
+88	IntersectionExtension	SlateVulkan.lib	Layer2_Device	Negotiates and holds VK_KHR_acceleration_structure, VK_KHR_ray_query, optionally VK_KHR_ray_tracing_pipeline, VK_EXT_ray_tracing_invocation_reorder, VK_KHR_opacity_micromap. Owns TLAS/BLAS extents, refit, and the Refusal when absent.
+90	ReservoirDepot	SlateCompute.lib	Layer4_Compute	Reservoir storage, both cycle slots, both signals. Derived, evictable, reconstructible — the Depot suffix is exact.
+92	ResamplingSequence	SlateCompute.lib	Layer4_Compute	Candidate generation, temporal resampling, spatial resampling, shade. The weighted-reservoir mathematics and the MIS weights.
+94	RadianceIndex	SlateCompute.lib	Layer4_Compute	World-space spatial-hash radiance store. Index is the exact suffix — "slot ledger, interning, spatial hashing".
+96	EmissionSpace	SlateCompute.lib	Layer4_Compute	World-space subdivision holding per-cell illuminant reservoirs, for secondary hits that are off-screen.
+98	VarianceIntegrator	SlateCompute.lib	Layer4_Compute	First and second radiance moments, variance-driven edge-avoiding wavelet reconstruction, per-signal parameters.
+—	60-OcclusionProjection	—	—	🔴 Demoted to T0 only. On T2/T3 it produces nothing; 92 produces shadowed direct radiance directly.
+Two amendments: 08-RenderSchedule §2 (target set) and §3 (ordering) — Part 5. And 40-SpatialSubdivision gains a device-side companion for T1 only; its host-side OctantSpace/BoundingStructure/TraversalSequence are untouched, because 74 still answers pointer picks on the host and must keep doing so.
+
+⚠️ Subject-uniqueness gate: Illuminant is already taken by 44-IlluminantPopulation. That is why 96 is EmissionSpace and not IlluminantSpace. Check Radiance against 18 before 94 is written — 18 produces RadianceSurface but that is a target spelling, not a module, so I believe it clears.
+
+Part 3 — One resampling core, three seams
+🔴 This is the single most important structural decision in the whole document, and every plan you were shown missed it.
+
+You do not write three ReSTIRs. Weighted reservoir sampling, the temporal rule, the spatial rule, the M-cap, the MIS weight, the pairwise combination — all identical across T0, T2, T3. What differs is exactly three functions. Specialize those and nothing else.
+
+Seam	T0	T2	T3
+ClassifyOcclusion	Illuminant depth-atlas lookup, then screen-space depth-pyramid march for contact scale	RayQueryKHR with terminate-on-first-hit	Same, or HitObject in the T3 pipeline
+ResolveTargetDensity	Unshadowed p̂ — reflectance × emitted radiance × geometry	Same, plus visibility reuse from the retained reservoir	Full path contribution, unified over direct and indirect
+ProjectSample	Reprojection only, Jacobian = 1	Single-vertex reconnection, closed-form solid-angle Jacobian	Reconnection · random replay · hybrid shift, with extent-based reconnection criteria
+Everything else is one body of code, specialized in Slang by a constant, compiled to four SPIR-V permutations. That collapses your maintenance surface from three renderers to one renderer and nine small functions.
+
+📐 The reservoir, shared in a .slang.h header so host and device agree:
+
+Copy//  💾 32 bytes for the direct reservoir, 48 for the indirect. Both 16-byte aligned for coalesced access.
+struct DirectReservoir
+{
+    uint32_t    ChosenEmitter;         // [-]   - Identity<Emitter>, packed; 0xFFFFFFFF when vacant
+    uint32_t    ChosenPosition;        // [-]   - barycentric pair, 2×16-bit unorm on the emitter's face
+    float       WeightSum;             // [-]   - Σ wᵢ over every candidate this reservoir has seen
+    float       ContributionWeight;    // [-]   - W = WeightSum / (M · p̂(chosen)); 0 when p̂ = 0
+    uint16_t    CandidateCount;        // [-]   - M, saturating at ResamplingCeiling
+    uint16_t    RotationAge;           // [-]   - rotations survived; feeds the duplication test
+    uint32_t    ReconstructionSeed;    // [-]   - reproduces the candidate stream for validation
+};
+Note the spellings: no Sample collision with 64's SampleIntegrator, no history, no flag, no count as a bare word. M is CandidateCount; W is ContributionWeight; p̂ appears in comments as a real Unicode glyph per SKILL-Formatting §5.
+
+The core update, which every tier calls unchanged:
+
+Copy/// 🧩 Accumulates one candidate into a reservoir by weighted reservoir sampling; replaces on ξ < wᵢ/WeightSum.
+/// in    ActiveReservoir   [-]  updated in place; vacant reservoirs are a legal input
+/// in    CandidateWeight   [-]  wᵢ = p̂(candidate) / p(candidate); zero candidates are absorbed, not skipped
+/// in    ξ                 [-]  uniform on [0,1), from the decorrelated sequence
+/// out   Replaced          [-]  the candidate became the chosen one
+/// err   never refuses; a non-finite weight is clamped and reported through 86
+/// cost  ✔️
+/// pre   CandidateWeight ≥ 0 and finite
+/// post  ActiveReservoir.CandidateCount increased by exactly one
+/// tag   device, shared, nonallocating
+bool Accumulate(inout DirectReservoir ActiveReservoir, EmitterCandidate Candidate, float CandidateWeight, float ξ);
+⚠️ Zero-weight candidates are absorbed, not skipped. Skipping them corrupts M and biases every downstream MIS weight. This is the most common ReSTIR bug and it produces an image that looks merely "a bit bright", so it survives review.
+
+Host-side capability resolution, in your existing idiom:
+
+Copy/// 🧩 Scores the device into one of four traversal capabilities; refuses when even the screen-traced path is unmet.
+/// in    ActiveExchange       [-]  the negotiated VulkanExchange
+/// out   TraversalCapability  [-]  ScreenTraced | ComputeTraced | DriverTraced | HardwareTraced
+/// err   Refusal::CapabilityUnmet when compute or the depth-extremum pyramid cannot be constructed
+/// tag   api, host
+SLATE_DECLARES_PRECISION(TierA, TierA)
+Deliver<TraversalCapability> ClassifyTraversal(const VulkanExchange& ActiveExchange);
+🔴 Deliver<T> with a Refusal, never std::optional — absence here carries a reason, and the reason is what 86-DiagnosticPanel shows the artist when their card cannot trace.
+
+Part 4 — Algorithms, in the order you will implement them, with sources
+✔️ low · 🚩 medium · 🔴 high — cost rises left to right, measured on a 1060 6GB at 960×540.
+
+⚙️	Algorithm	Where	Tier	Cost	Source
+1	Weighted reservoir sampling + RIS	92	all	✔️	Chao 1982; Talbot 2005
+2	Spatiotemporal reservoir resampling, direct	92	all	🚩	Bitterli et al. 2020
+3	Reference implementation to read, not vendor	—	all	—	NVIDIA-RTX/RTXDI · Bevy Solari 0.17 · 0.18
+4	Pairwise MIS for spatial reuse	92	all	✔️	Bitterli 2022 thesis; Hedström et al. 2026 when kernels grow
+5	Visible-normal GGX sampling	18, 30	all	✔️	Heitz 2018, JCGT · bounded VNDF, Dupuy 2023
+6	Owen-scrambled Sobol / spatiotemporal blue noise	new, 02 §6 consumer	all	✔️	Heitz & Belcour 2019; Wolfe et al. 2022
+7	Grid-based illuminant reservoirs	96	T2, T3	✔️	Boksansky et al., Ray Tracing Gems II ch. 23
+8	Resampled indirect, single-vertex reconnection	92	T2	🚩	Ouyang et al. 2021 · derivation walkthrough
+9	Spatially hashed radiance store	94	T2, T3	✔️	NVIDIA-RTX/SHARC · RTXGI 2.0
+10	Variance-guided edge-avoiding reconstruction	98	all	🚩	SVGF, Schied 2017; A-SVGF 2018
+11	Generalized RIS, shift mappings, Jacobians	92	T3	🔴	Lin et al. 2022
+12	Reciprocal neighbours, extent-based reconnection, duplication indices, unified reservoirs	92	T3	🔴	Lin, Kettunen, Wyman 2026
+13	Compressed wide traversal	40 device companion	T1	🔴	Ylitie et al. 2017
+14	Watertight ray-triangle	T1 traversal leaf	T1	✔️	Woop et al. 2013, JCGT
+15	Single-launch near-SAH construction	34 background	T1	🚩	Benthin et al., H-PLOC, HPG 2024
+16	Production denoiser, swap-in	replaces 98	T3	🚩	NVIDIA-RTX/NRD
+17	Reflective depth injection into the world hash	94	T0	✔️	Dachsbacher & Stamminger 2005
+18	Screen-space probes, cascade-structured	92 T0 indirect	T0	🚩	Sparse radiance probes, arXiv 2607.20384
+19	Reservoir direct lighting without hardware rays, shipped	prior art for T0	T0	—	MegaLights, UE 5.5 · Arm's mobile analysis
+20	Mobile ray query, when it exists	88	T3-mobile	—	Kosarevsky et al. 2025 · Turnip VK_KHR_ray_query
+💡 Row 20 corrects a framing in your message: "no ray query" is not the same as "mobile". Adreno via Turnip and Mali Immortalis G715+ expose VK_KHR_ray_query; a 2016 desktop Polaris card does not. T0 is a capability tier, not a form factor tier, and naming it ScreenTraced rather than Mobile is what keeps that straight in the code.
+
+Part 5 — Amendments to 08-RenderSchedule
+§2 — target set
+Retire one, add six, keep the rest. Every one of these is a 08 §6 gate violation if added without amending the table, so this is the amendment text.
+
+Target	Format	Extent	Produced by	Amended by	Consumed by
+DirectDiffuseSurface	RGBA16F	display	92	—	98, 64
+DirectSpecularSurface	RGBA16F	half	92	—	98, 64
+IndirectDiffuseSurface	RGBA16F	half	92	—	98, 64
+IndirectSpecularSurface	RGBA16F	half	30	—	98, 64
+MomentSurface	RG16F × 4	display	98	—	98 next rotation
+RoughnessSurface	RG8	display	16	—	92, 30, 98
+RadianceSurface	RGBA16F	display	98 resolve	62 ⑤·ii	64
+DirectOcclusionSurface	RGBA8	display	60	—	🔴 T0 only
+🔴 RadianceSurface survives but changes producer: 98 composites the four reconstructed signals into it, and 62's transmissive amendment still lands on it afterwards. That keeps 64 and 66 completely unchanged, which is the whole point of routing it this way rather than four-way-compositing inside 66.
+
+🔴 The four-signal split is not stylistic. Four different temporal responses and four different kernel extents. Direct diffuse tolerates wide reuse; indirect specular tolerates almost none. Reconstructing them merged is the mechanism behind every "path tracer that looks like Vaseline", and it is not recoverable downstream because the merge is not invertible.
+
+💾 At 540p internal: four signals ≈ 16 MB, moments ≈ 8 MB, direct reservoirs ×2 slots ≈ 18 MB, indirect reservoirs ×2 at half ≈ 25 MB, radiance hash 8 MB, emission space 4 MB, wavelet ping-pong 8 MB. ≈ 87 MB for the renderer above your existing target set and geometry. Comfortable at 6 GB, and the reason the 3 GB 1060 is a T0 device — it falls below NVIDIA's 6 GB threshold for the ray-tracing extensions anyway, so both constraints agree.
+
+§3 — ordering
+Copy  ┌─ ①    28  SkyAtmosphere ──────────── conditional, unchanged
+  │
+  ├─ ②·a  88  IntersectionExtension ──── TLAS refit, async compute, overlapped with ②·b
+  ├─ ②·b  16  VisibilityIndex ────────── + RoughnessSurface  ── primary rays are never traced
+  │
+  ├─ ③    96  EmissionSpace ──────────── world illuminant reservoirs; T2/T3 only
+  ├─ ④    60  OcclusionProjection ────── 🔴 T0 only; substituted away on T2/T3
+  │
+  ├─ ⑤·i  92  ResamplingSequence 1 ───── direct: candidates → temporal → spatial → shade
+  │                                       DirectDiffuseSurface, DirectSpecularSurface
+  ├─ ⑤·ii 92  ResamplingSequence 2 ───── indirect, half extent → IndirectDiffuseSurface
+  │                                       injects into 94 while tracing
+  ├─ ⑥    94  RadianceIndex ──────────── compaction and decay; reads its own previous rotation
+  │
+  ├─ ⑦    30  SpecularProjection ─────── half extent, VNDF, strict reuse rejection
+  │
+  ├─ ⑧·i  62  TransmissionSequence 1 ─── TransmissionIndex, unchanged
+  ├─ ⑨    98  VarianceIntegrator ─────── moments, wavelet ×4 signals, upsample, composite
+  │                                       produces RadianceSurface
+  ├─ ⑧·ii 62  TransmissionSequence 2 ─── amends RadianceSurface, back to front
+  │
+  ├─ ⑩    64  SampleIntegrator ───────── AccumulationSurface, unchanged
+  ├─ ⑪    66  DisplayProjection ──────── ── display-referred line, unchanged ──
+  └─ ⑫…⑯  26, 80, 80, 14, present ────── unchanged
+Three ordering facts that are not obvious.
+
+92 contributes two recordings and they cannot be merged, for exactly the reason 08 §3.2 already gives for 62 and 80: the indirect recording reads the direct reservoirs the first recording is still writing. Your schedule already has the precedent and the gate; this is the third instance of it.
+
+98 runs before 62's second recording, not after. Denoising a signal that already has transmissive occupants composited into it smears the glass. 62 §6 says it never writes depth, so it has no reconstruction guidance to offer — it must land on the reconstructed image.
+
+🔴 64 stays, and this is where Slate beats a game engine. In a game the camera never stops, so the denoiser is the whole answer. Slate is an editor; the artist holds still constantly. 64's count-derived weight converges toward a true reference while they do. So 98 must read 64's stored CandidateCount and decay its own kernel extent toward zero as the count rises. Still workspace → the wavelet reconstruction fades out and the image sharpens into a genuine progressive render. Moving workspace → full reconstruction. No plan you were given contains this, and it is the highest-value ten lines in the entire amendment.
+
+Part 6 — T0 in detail: the cheapest resampling that is still resampling
+For hardware with no ray query at all. Biased, leaky, and honest about both.
+
+Direct. Full weighted reservoir sampling over the illuminant population, unchanged from Bitterli. The only change is ClassifyOcclusion. Instead of a shadow ray:
+
+① A single depth atlas holds the N most significant illuminants, N ≈ 8–16, tiled, refreshed round-robin at one to four tiles per rotation. ② p̂ during resampling is unshadowed — reflectance × emitted radiance × geometry term. No visibility at all in the target function. This is what makes it cheap; you are resampling a distribution that ignores occlusion. ③ Visibility is applied once, at shade time, from the atlas, plus a short screen-space march down the depth-extremum pyramid for contact-scale occlusion the atlas resolution cannot express. ④ 🔴 If shade-time visibility is zero, kill the reservoir — set ContributionWeight to zero and CandidateCount to one. This is Bitterli's visibility reuse, and without it the temporal chain keeps re-selecting an occluded emitter forever and you get a stable, confident, wrong shadow.
+
+Cost: one atlas lookup and roughly eight to sixteen pyramid steps per pixel. No traversal, no acceleration structure, no VK_KHR_*. Runs on anything with compute. This is structurally what MegaLights does on its non-hardware-ray-traced path, and Arm's mobile writeup is the best public description of the tradeoff.
+
+Indirect. Screen-space probes on a sparse lattice — one probe per 8×8 or 16×16 pixels, each with a small spherical parameterization, say 8×8 directions. Each probe's directions are traced by marching the depth-extremum pyramid. On a march miss, fall back to 94's world hash rather than to the sky, and inject reflective-depth samples from the same illuminant atlas into that hash each rotation so the hash has content the screen never saw. Reservoirs live per probe direction, resampled temporally against the probe's reprojected position and spatially against adjacent probes. Interpolate to pixels with depth-and-normal weights.
+
+Named failure modes, so you recognize them rather than debug them. Off-screen indirect is as good as the hash and no better — thin. Contact shadows from anything off-screen are absent. Grazing-angle reflections degrade to the hash, which is blurry. Light leaks through geometry thinner than the hash cell. These are the same failures Lumen's software path has, for the same structural reason, and the correct response is to ship T0 as the compatibility tier and never as the reference.
+
+Part 7 — T3 in detail: the RTX tier
+Everything T2 has, plus:
+
+Unified reservoirs. Direct and indirect share one reservoir species rather than two, per the 2026 paper. This is the change that saves the most bandwidth and it is also the most invasive — it is why T3 is Phase 7 and not Phase 4.
+
+Reciprocal neighbour selection. Halves spatial reuse cost by making the neighbour relation symmetric so each pair is resampled once instead of twice.
+
+Extent-based reconnection criteria. Replaces the fixed distance-and-roughness thresholds with a criterion derived from the ray differential extent. This is what makes shift mappings stop producing fireflies at glossy chains.
+
+Duplication indices. Tracks which reservoirs descend from a common ancestor and suppresses the resulting spatiotemporal correlation. (Map is banned; Index is both correct and the right suffix.)
+
+Reordering, Ada and later only. VK_EXT_ray_tracing_invocation_reorder, and it requires the ray-tracing-pipeline path. Turing and Ampere do not have the hardware; the extension is not merely slow there, it is absent. Gate on the extension, never on RTX-in-the-device-name.
+
+Opacity micromaps, Ada and later. VK_KHR_opacity_micromap, driver 596.50, May 2026. Only pays for itself with alpha-tested foliage.
+
+Denoiser. Swap 98 for NRD ReBLUR on diffuse and ReLAX on specular, or DLSS Ray Reconstruction where available. 98 stays compiled for T0–T2.
+
+Part 8 — Honest budget, per tier
+960×540 internal → 1080p, ~500K triangles, ~50 illuminants. ±40% until you have 86 reporting real timestamps.
+
+Recording	T0, GTX 970-class	T2, 1060 6GB	T3, RTX 3060
+16 G-buffer + roughness	0.7 ms	0.6 ms	0.4 ms
+88 refit, async, largely hidden	—	0.5 ms	0.2 ms
+96 emission space	—	0.3 ms	0.2 ms
+92 direct	2.2 ms	3.0 ms	1.1 ms
+92 indirect, half	3.5 ms	5.5 ms	1.8 ms
+94 radiance hash	0.6 ms	0.8 ms	0.5 ms
+30 specular, half	1.8 ms	2.5 ms	0.9 ms
+98 reconstruction ×4 + upsample	4.5 ms	4.5 ms	3.0 ms
+64, 66, post	1.2 ms	1.2 ms	0.9 ms
+Total	≈ 14.5 ms · 69 Hz	≈ 18.9 ms · 53 Hz	≈ 9.0 ms · 111 Hz
+⏱️ T0 is faster than T2 and much worse looking. That is the correct and expected shape of the result — do not read the T0 column as a reason to ship it on Pascal.
+
+⚠️ At 1M+ triangles with alpha-tested foliage, T2 lands at 25–35 ms. Knobs, in descending effectiveness: internal extent, indirect at quarter extent, bounce ceiling, specular gated harder by roughness, CandidateCount ceiling from 64 to 32.
+
+🔴 The plan's original 55–62 FPS estimate for T2 was optimistic by roughly one denoiser, because it assumed you already had one. I have added ~2 ms and dropped it to 53 Hz.
+
+Part 9 — Build order
+Every phase ends at something on screen that can be compared against a reference. Do not advance on "it compiles" — CLAUDE.md says so explicitly and it is right.
+
+Phase 0 — one afternoon. vulkaninfo | Select-String -Pattern "rayQuery|accelerationStructure" in PowerShell, per CLAUDE.md's shell rule. Then 86-DiagnosticPanel gains a GPU timestamp readout, because 08 §5 already declares that absent timestamp queries report unavailable, not zero, and you will optimize only what it reports.
+
+Phase 1 — 1 week if ray query is present, 3 if not. 88-IntersectionExtension. Negotiation, Deliver<TraversalCapability>, TLAS/BLAS extents, refit through 34 at Background priority exactly as 40 §4 specifies for host rebuilds. Deliverable: an ambient-occlusion image, traced, correct.
+
+Phase 2 — 1–2 weeks. Ground truth. Verify 18-ReflectanceIntegrator and 64-SampleIntegrator against a 1000-sample progressive reference. Add the Owen-scrambled sequence as a consumer of 02 §6 — this is new work, not a retune. Add multiple-importance sampling with the power heuristic and compensation. 🔴 Without this reference image every later phase is guesswork; it is the cheapest insurance in the whole sequence.
+
+Phase 3 — 2 weeks. 90-ReservoirDepot and 92 recording ⑤·i. Temporal reprojection reads MotionSurface and reuses 64 §4's rejection rules verbatim — occupant identity from 16 §4.1, never partition identity; depth bound; neighbourhood bound. Spatial reuse with pairwise MIS, CandidateCount capped 32–64. Milestone: one sample per pixel, 100+ illuminants, matching the Phase 2 reference. DirectOcclusionSurface's four-illuminant cap is now visibly obsolete.
+
+Phase 4 — 3 weeks. 96, 92 ⑤·ii, 94. Milestone: multi-bounce indirect at one sample per pixel.
+
+Phase 5 — 2 weeks. 98-VarianceIntegrator. Four signals, four parameter sets, bilateral upsample, and the 64-count-driven kernel decay from Part 5. This is the phase where it stops looking like Lumen and starts looking better than it.
+
+Phase 6 — 2 weeks, T0. ScreenTraced. Ships the editor to everyone else. Optionally ComputeTraced benchmarked head-to-head — only if 86 says traversal dominates.
+
+Phase 7 — 2 weeks, T3. Ray-tracing pipeline, unified reservoirs, the 2026 enhancements, reorder on Ada, NRD.
+
+Part 10 — What I still need, and one thing to stop believing
+Two answers unblock the first code drop, and one is five minutes.
+
+The vulkaninfo result for rayQuery and accelerationStructure on the 1060, plus the driver branch. If it is 580.x and reports true, Phase 1 is a week.
+
+Scene scale: triangle count, how much is skinned or topology-dynamic, and illuminant count. Under ~200K static and you skip a construction kernel for months; 5M with heavy skinning moves H-PLOC from Phase 6 to Phase 1.
+
+And the thing to stop believing: the plan told you 40-SpatialSubdivision gives you a head start on device traversal. It does not. Read 40 again — it is explicitly a host-side structure whose entire justification is that 74 answers pointer picks without reading back a device target, and its BoundingStructure lives in object space specifically so occupant motion is a refit. That is a correct and valuable design, and it is nearly orthogonal to a device BVH consumed by ray query. You have a good picking structure. You do not yet have a tracing structure. Budget T1 accordingly, and let the driver own traversal on T2 and T3 where it can.
+
+Give me those two answers and the first drop is 88-IntersectionExtension plus 90-ReservoirDepot, written to their real destinations in Slate's conventions — headers ruled at 142, banners at 122, Deliver<T> throughout, Greek glyphs where the mathematics has them.
