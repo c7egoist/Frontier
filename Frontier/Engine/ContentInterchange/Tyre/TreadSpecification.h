@@ -31,6 +31,10 @@ struct TreadSpecification
     float    Bulge         = 1.0f;     // [-]    - sidewall convexity multiplier
     float    RimWidthFraction = 0.78f; // [-]    - bead seat half width as a fraction of the half width
 
+    float    SegmentsAround = 720.0f;  // [-]    - lathe segments around the circumference
+    float    SegmentsAcross = 96.0f;   // [-]    - profile samples across the moulded surface
+    float    PolygonDetail  = 6.0f;    // [mm]   - target edge length where the tread is triangulated
+
     [[nodiscard]] bool IsValid() const noexcept
     {
         return Width > 0.0f && Aspect > 0.0f && Rim > 0.0f && TreadDepth >= 0.0f

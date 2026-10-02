@@ -66,6 +66,9 @@ struct TreadLayerSpecification
 
     float    Size        = 8.0f;    // [mm]  - Hexagon: circumradius of one cell
     float    Rotate      = 0.0f;    // [deg] - Hexagon: lattice rotation
+
+    float    Amount      = 0.06f;   // [-]   - Noise: depth perturbation, as a fraction of TreadDepth
+    float    Scale       = 3.0f;    // [mm]  - Noise: feature size of the perturbation
 };
 
 //------------------------------------------------------------------------------------------------------------------------
