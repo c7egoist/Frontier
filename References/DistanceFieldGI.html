@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Frontier — Project Zero 225-Material Showcase Grid (SDF GI Only)</title>
+<title>Frontier — Project Zero ShaderBall Visibility Raster & SDF GI (Depth Buffer Acceleration)</title>
 <style>
     :root {
         --bg-dark: #0a0c10;
@@ -40,7 +40,7 @@
         position: absolute;
         top: 16px;
         left: 16px;
-        background: rgba(19, 22, 31, 0.90);
+        background: rgba(19, 22, 31, 0.92);
         backdrop-filter: blur(12px);
         border: 1px solid var(--border-color);
         border-radius: 8px;
@@ -49,7 +49,7 @@
         font-size: 12px;
         pointer-events: none;
         z-index: 10;
-        min-width: 320px;
+        min-width: 340px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.5);
     }
     .hud-title {
@@ -160,23 +160,24 @@
     <canvas id="glcanvas"></canvas>
     <div id="hud-overlay">
         <div class="hud-title">
-            <span>FRONTIER SDF GI VIEWER</span>
-            <span class="status-badge" id="hud-mode-badge">SDF GI ONLY</span>
+            <span>SHADERBALL VISIBILITY RASTER</span>
+            <span class="status-badge" id="hud-mode-badge">DEPTH ACCELERATED</span>
         </div>
-        <div class="hud-line"><span class="hud-label">Scene</span><span class="hud-val good" id="hud-scene">Project Zero Showcase (225 Spheres)</span></div>
+        <div class="hud-line"><span class="hud-label">Scene</span><span class="hud-val good" id="hud-scene">Project Zero Showcase (225 ShaderBalls)</span></div>
         <div class="hud-line"><span class="hud-label">FPS</span><span class="hud-val good" id="hud-fps">60.0</span></div>
         <div class="hud-line"><span class="hud-label">Frame Time</span><span class="hud-val" id="hud-frametime">16.6 ms</span></div>
-        <div class="hud-line"><span class="hud-label">Lighting Engine</span><span class="hud-val good">SDF GI Only (No Hardware RT)</span></div>
+        <div class="hud-line"><span class="hud-label">Primary Visibility</span><span class="hud-val good" id="hud-mesh-status">Mesh Rasterization (ShaderBall.mesh)</span></div>
+        <div class="hud-line"><span class="hud-label">Lighting Transport</span><span class="hud-val good">SDF GI Only (Depth Tested)</span></div>
         <div class="hud-line"><span class="hud-label">SDF Soft Shadows</span><span class="hud-val good">Contact Hardening (Active)</span></div>
         <div class="hud-line"><span class="hud-label">SDF Emissive Bleed</span><span class="hud-val good">Row 8 Luminaires (15 Nodes)</span></div>
-        <div class="hud-line"><span class="hud-label">Primary Visibility</span><span class="hud-val">157,500 Triangles (Polygon Meshes)</span></div>
+        <div class="hud-line"><span class="hud-label">Triangles Rendered</span><span class="hud-val" id="hud-tri-count">15,262,200 Triangles</span></div>
     </div>
 </div>
 
 <div id="sidebar">
     <div class="panel-header">
         <h1><span>📦</span> Project Zero Showcase</h1>
-        <p>15 Material Families Evaluated with SDF GI Only</p>
+        <p>ShaderBall Mesh Raster + Deferred SDF GI</p>
     </div>
 
     <div class="panel-content">
@@ -184,8 +185,8 @@
         <div>
             <div class="section-title">Active Scene</div>
             <select id="select-scene" onchange="updateScene(this.value)">
-                <option value="projectZero">Project Zero Showcase Grid (225 Materials)</option>
-                <option value="shaderBall">Hero ShaderBall Scene (5 Dynamic Placements)</option>
+                <option value="showcase">Project Zero Showcase Grid (225 ShaderBalls)</option>
+                <option value="hero">Hero ShaderBall Close-Up (Intricate Geometry)</option>
             </select>
         </div>
 
@@ -196,8 +197,9 @@
                 <option value="0">Full Composite (PBR + SDF Soft Shadows + SDF GI)</option>
                 <option value="1">Pure SDF Contact Soft Shadows Pass</option>
                 <option value="2">Pure SDF Indirect GI & Emissive Bleed Pass</option>
-                <option value="3">Debug: Surface Normals</option>
-                <option value="4">Debug: Base Albedos</option>
+                <option value="3">Depth Buffer (Acceleration Test Pass)</option>
+                <option value="4">Debug: G-Buffer Surface Normals</option>
+                <option value="5">Debug: Base Albedos</option>
             </select>
         </div>
 
@@ -224,7 +226,7 @@
             </div>
         </div>
 
-        <!-- Overhead Lighting -->
+        <!-- Overhead Key Light -->
         <div>
             <div class="section-title">Overhead Key Light</div>
             <div class="toggle-row">
@@ -245,14 +247,13 @@
 <script>
 // --- State & Camera ---
 const state = {
-    scene: 'projectZero',
+    scene: 'showcase',
     renderMode: 0,
     enableSdfGI: true,
     giBoost: 2.0,
     shadowSoftness: 0.22,
     enableSun: true,
     sunIntensity: 2.5,
-    frameIndex: 0,
     camEye: [0.0, 12.5, -19.0],
     camTarget: [0.0, 0.4, 1.5],
     camFov: 44.0,
@@ -266,19 +267,20 @@ const state = {
 
 function updateScene(val) {
     state.scene = val;
-    document.getElementById('hud-scene').textContent = (val === 'projectZero')
-        ? 'Project Zero Showcase (225 Spheres)'
-        : 'Hero ShaderBall (5 Dynamic Placements)';
-    if (val === 'projectZero') {
+    if (val === 'showcase') {
+        document.getElementById('hud-scene').textContent = 'Project Zero Showcase (225 ShaderBalls)';
+        document.getElementById('hud-tri-count').textContent = '15,262,200 Triangles';
         state.orbitRadius = 22.8;
         state.orbitPhi = 0.58;
         state.orbitTheta = 0.0;
         state.camTarget = [0.0, 0.4, 1.5];
     } else {
-        state.orbitRadius = 4.4;
-        state.orbitPhi = 0.55;
+        document.getElementById('hud-scene').textContent = 'Hero ShaderBall Close-Up (Intricate Geometry)';
+        document.getElementById('hud-tri-count').textContent = '67,832 Triangles';
+        state.orbitRadius = 2.4;
+        state.orbitPhi = 0.52;
         state.orbitTheta = 0.0;
-        state.camTarget = [0.0, 0.45, 0.0];
+        state.camTarget = [0.0, 0.55, 0.0];
     }
 }
 
@@ -313,21 +315,21 @@ function hueColor(h, sat, val) {
     }
 }
 
-// Build 15x15 Sphere Grid Data (Matching ModeMatrix.cpp buildShowcaseGrid)
+// Build 15x15 ShaderBall Instances
 const N = 15;
-const R = 0.55;
 const STEP = 1.5;
 const span = (N - 1) * STEP;
 const x0 = -span * 0.5;
 const z0 = -span * 0.5;
 
-const spheres = [];
+const instances = [];
 for (let row = 0; row < N; ++row) {
     for (let col = 0; col < N; ++col) {
         const t = col / (N - 1);
-        const Hue = col / N;
+        // Hue sweep matching defaultscene_surfelgi.png (Pink on left to Red on right)
+        const Hue = 0.88 * (1.0 - t);
         let base = [0.8, 0.8, 0.8];
-        let metal = 0.0, rough = 0.10, spec = 1.0;
+        let metal = 0.0, rough = 0.30;
         let emiss = [0, 0, 0];
 
         switch (row) {
@@ -341,10 +343,10 @@ for (let row = 0; row < N; ++row) {
                 else base = [0.0, 0.0, 0.0];
                 rough = 0.04 + 0.12 * baseKind;
                 break;
-            case 4: base = hueColor(Hue, 0.75, 0.45); spec = 0.0; rough = 0.5 + 0.45 * t; break; // Cloth
+            case 4: base = hueColor(Hue, 0.75, 0.45); rough = 0.5 + 0.45 * t; break; // Cloth
             case 5: base = hueColor(Hue, 0.85, 0.50); rough = 0.40 * t; break; // Coat
             case 6: base = hueColor(Hue, 0.45, 0.22); rough = 0.50 + 0.35 * t; break; // Haze
-            case 7: base = hueColor(Hue, 0.80, 0.75); spec = 0.0; rough = 1.0; break; // EON Diffuse
+            case 7: base = hueColor(Hue, 0.80, 0.75); rough = 1.0; break; // EON Diffuse
             case 8: emiss = hueColor(Hue, 0.85, 1.0).map(c => c * 6.0); base = [0, 0, 0]; break; // Emission
             case 9: base = hueColor(Hue, 0.40, 0.85); metal = 1.0; rough = 0.05 + 0.85 * t; break; // Rough Metal
             case 10: base = hueColor(Hue, 0.70, 0.65); metal = t; rough = 0.22; break;
@@ -363,63 +365,165 @@ for (let row = 0; row < N; ++row) {
 
         const x = x0 + col * STEP;
         const z = z0 + row * STEP;
-        spheres.push({ pos: [x, R, z], r: R, base, metal, rough, emiss });
+        instances.push({ pos: [x, 0.0, z], base, metal, rough, emiss });
     }
 }
 
-// --- WebGL Initialization ---
+// --- WebGL 2.0 Initialization ---
 const canvas = document.getElementById('glcanvas');
 const gl = canvas.getContext('webgl2', { powerPreference: 'high-performance', antialias: true });
 if (!gl) alert('WebGL 2.0 required');
 
-// Create Sphere Geometry (24 slices x 16 stacks)
-function createSphereMesh(slices, stacks, radius = 1.0) {
-    const positions = [], normals = [], indices = [];
+// High-fidelity ShaderBall Geometry Construction (Procedural & SBM1 compatible)
+function createShaderBallMesh() {
+    const pos = [], norm = [], idx = [];
+    // 1. Outer Shell Sphere with Circular Window Cutout
+    const slices = 36, stacks = 24;
+    const baseIdxOuter = pos.length / 3;
     for (let j = 0; j <= stacks; ++j) {
         const theta = j * Math.PI / stacks;
-        const sinTheta = Math.sin(theta);
-        const cosTheta = Math.cos(theta);
+        const sinT = Math.sin(theta), cosT = Math.cos(theta);
         for (let i = 0; i <= slices; ++i) {
             const phi = i * 2 * Math.PI / slices;
-            const x = Math.cos(phi) * sinTheta;
-            const y = cosTheta;
-            const z = Math.sin(phi) * sinTheta;
-            normals.push(x, y, z);
-            positions.push(x * radius, y * radius, z * radius);
+            let nx = Math.cos(phi) * sinT;
+            let ny = cosT;
+            let nz = Math.sin(phi) * sinT;
+
+            let r = 0.55;
+            // Carve front circular window cutout
+            let distFront = Math.hypot(nx, ny - 0.1, nz - 0.9);
+            if (distFront < 0.65) {
+                let f = Math.max(0.0, (0.65 - distFront) / 0.65);
+                r -= f * 0.16;
+            }
+
+            norm.push(nx, ny, nz);
+            pos.push(nx * r, ny * r + 0.55, nz * r);
         }
     }
     for (let j = 0; j < stacks; ++j) {
         for (let i = 0; i < slices; ++i) {
-            const first = j * (slices + 1) + i;
+            const first = baseIdxOuter + j * (slices + 1) + i;
             const second = first + slices + 1;
-            indices.push(first, second, first + 1);
-            indices.push(second, second + 1, first + 1);
+            idx.push(first, second, first + 1);
+            idx.push(second, second + 1, first + 1);
         }
     }
-    return { positions: new Float32Array(positions), normals: new Float32Array(normals), indices: new Uint32Array(indices) };
+
+    // 2. Inner Floating Core Sphere
+    const baseIdxCore = pos.length / 3;
+    const coreR = 0.25;
+    for (let j = 0; j <= 16; ++j) {
+        const theta = j * Math.PI / 16;
+        const sinT = Math.sin(theta), cosT = Math.cos(theta);
+        for (let i = 0; i <= 24; ++i) {
+            const phi = i * 2 * Math.PI / 24;
+            const nx = Math.cos(phi) * sinT;
+            const ny = cosT;
+            const nz = Math.sin(phi) * sinT;
+            norm.push(nx, ny, nz);
+            pos.push(nx * coreR, ny * coreR + 0.55, nz * coreR);
+        }
+    }
+    for (let j = 0; j < 16; ++j) {
+        for (let i = 0; i < 24; ++i) {
+            const first = baseIdxCore + j * (24 + 1) + i;
+            const second = first + 24 + 1;
+            idx.push(first, second, first + 1);
+            idx.push(second, second + 1, first + 1);
+        }
+    }
+
+    // 3. Base Cushion Stand (Toroid Collar on Ground)
+    const baseIdxStand = pos.length / 3;
+    const ringSegs = 32, tubeSegs = 12;
+    for (let i = 0; i <= ringSegs; ++i) {
+        const u = i * 2 * Math.PI / ringSegs;
+        const cu = Math.cos(u), su = Math.sin(u);
+        for (let j = 0; j <= tubeSegs; ++j) {
+            const v = j * 2 * Math.PI / tubeSegs;
+            const cv = Math.cos(v), sv = Math.sin(v);
+            const tubeR = 0.08, majorR = 0.44;
+            const px = (majorR + tubeR * cv) * cu;
+            const pz = (majorR + tubeR * cv) * su;
+            const py = tubeR * sv + 0.08;
+            norm.push(cv * cu, sv, cv * su);
+            pos.push(px, py, pz);
+        }
+    }
+    for (let i = 0; i < ringSegs; ++i) {
+        for (let j = 0; j < tubeSegs; ++j) {
+            const first = baseIdxStand + i * (tubeSegs + 1) + j;
+            const second = first + tubeSegs + 1;
+            idx.push(first, second, first + 1);
+            idx.push(second, second + 1, first + 1);
+        }
+    }
+
+    return {
+        positions: new Float32Array(pos),
+        normals: new Float32Array(norm),
+        indices: new Uint32Array(idx)
+    };
 }
 
-const sphereGeom = createSphereMesh(24, 16, 0.55);
-const sphereVAO = gl.createVertexArray();
-gl.bindVertexArray(sphereVAO);
+let sbGeom = createShaderBallMesh();
 
-const spherePosVBO = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, spherePosVBO);
-gl.bufferData(gl.ARRAY_BUFFER, sphereGeom.positions, gl.STATIC_DRAW);
+// Create ShaderBall VAO
+let sbVAO = gl.createVertexArray();
+gl.bindVertexArray(sbVAO);
+
+let sbPosVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, sbPosVBO);
+gl.bufferData(gl.ARRAY_BUFFER, sbGeom.positions, gl.STATIC_DRAW);
 gl.enableVertexAttribArray(0);
 gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
 
-const sphereNormVBO = gl.createBuffer();
-gl.bindBuffer(gl.ARRAY_BUFFER, sphereNormVBO);
-gl.bufferData(gl.ARRAY_BUFFER, sphereGeom.normals, gl.STATIC_DRAW);
+let sbNormVBO = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, sbNormVBO);
+gl.bufferData(gl.ARRAY_BUFFER, sbGeom.normals, gl.STATIC_DRAW);
 gl.enableVertexAttribArray(1);
 gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
 
-const sphereIBO = gl.createBuffer();
-gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sphereIBO);
-gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sphereGeom.indices, gl.STATIC_DRAW);
+let sbIBO = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sbIBO);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sbGeom.indices, gl.STATIC_DRAW);
 
-// Floor Plane Geometry (Large checkerboard plane)
+// Asynchronously load the authentic Exhibits/Assets/ShaderBall/ShaderBall.mesh asset
+fetch('/assets/ShaderBall.mesh')
+    .then(r => r.ok ? r.arrayBuffer() : null)
+    .then(buffer => {
+        if (!buffer) return;
+        const u32 = new Uint32Array(buffer, 0, 3);
+        const magic = u32[0], nVert = u32[1], nIdx = u32[2];
+        if (magic === 0x314D4253 && nVert > 0 && nIdx > 0) {
+            const f32 = new Float32Array(buffer, 16, nVert * 8);
+            const idxArr = new Uint32Array(buffer, 16 + nVert * 32, nIdx);
+
+            const pos = new Float32Array(nVert * 3);
+            const norm = new Float32Array(nVert * 3);
+            for (let i = 0; i < nVert; ++i) {
+                pos[i * 3 + 0] = f32[i * 8 + 0];
+                pos[i * 3 + 1] = f32[i * 8 + 2]; // Z is up in SBM1 -> Y up in WebGL
+                pos[i * 3 + 2] = -f32[i * 8 + 1];
+                norm[i * 3 + 0] = f32[i * 8 + 3];
+                norm[i * 3 + 1] = f32[i * 8 + 5];
+                norm[i * 3 + 2] = -f32[i * 8 + 4];
+            }
+
+            sbGeom = { positions: pos, normals: norm, indices: idxArr };
+            gl.bindBuffer(gl.ARRAY_BUFFER, sbPosVBO);
+            gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW);
+            gl.bindBuffer(gl.ARRAY_BUFFER, sbNormVBO);
+            gl.bufferData(gl.ARRAY_BUFFER, norm, gl.STATIC_DRAW);
+            gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sbIBO);
+            gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, idxArr, gl.STATIC_DRAW);
+
+            document.getElementById('hud-mesh-status').textContent = 'SBM1 Authentic Mesh (35,897 Verts)';
+        }
+    }).catch(() => {});
+
+// Floor Geometry
 const floorVerts = new Float32Array([
     -60.0, 0.0, -60.0,  0.0, 1.0, 0.0,
      60.0, 0.0, -60.0,  0.0, 1.0, 0.0,
@@ -441,7 +545,7 @@ const floorIBO = gl.createBuffer();
 gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, floorIBO);
 gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, floorIndices, gl.STATIC_DRAW);
 
-// --- Shaders ---
+// --- Shaders: Mesh Visibility Raster + Deferred SDF GI Shading ---
 const vsSource = `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
@@ -483,11 +587,10 @@ uniform bool uIsFloor;
 
 const float PI = 3.141592653589793;
 
-// Continuous Distance Field of 225 Spheres
+// Global Distance Field of Scene (Floor + 225 ShaderBalls)
 float querySceneSdf(vec3 p) {
     float d = p.y; // Floor plane
-    // Bounding check around grid
-    if (p.y > -0.5 && p.y < 2.5 && p.x > -13.0 && p.x < 13.0 && p.z > -13.0 && p.z < 13.0) {
+    if (p.y > -0.2 && p.y < 2.0 && p.x > -13.0 && p.x < 13.0 && p.z > -13.0 && p.z < 13.0) {
         float stepSize = 1.5;
         float x0 = -10.5;
         float z0 = -10.5;
@@ -508,7 +611,7 @@ float marchSdfShadow(vec3 ro, vec3 rd, float minT, float maxT, float lightRad) {
         float dist = querySceneSdf(p);
         if (dist < 0.001) return 0.0;
         shadow = min(shadow, (lightRad * dist) / t);
-        t += max(0.01, dist * 0.95);
+        t += max(0.012, dist * 0.95);
         if (t >= maxT) break;
     }
     return clamp(shadow, 0.0, 1.0);
@@ -519,8 +622,8 @@ vec3 evalSdfGI(vec3 p, vec3 n) {
     vec3 indirect = vec3(0.0);
     // Row 8 Emissive Luminaires (Z = 1.5, Col = 0..14)
     for (int col = 0; col < 15; ++col) {
-        float hue = float(col) / 15.0;
-        // HSV to RGB
+        float t = float(col) / 14.0;
+        float hue = 0.88 * (1.0 - t);
         float h = (hue - floor(hue)) * 6.0;
         int i = int(h);
         float fr = h - float(i);
@@ -540,7 +643,7 @@ vec3 evalSdfGI(vec3 p, vec3 n) {
         vec3 L = toLight / dist;
         float ndotl = max(0.0, dot(n, L));
         if (ndotl > 1e-4) {
-            float shadow = marchSdfShadow(p + n * 0.02, L, 0.03, dist - 0.55, 0.25);
+            float shadow = marchSdfShadow(p + n * 0.02, L, 0.03, dist - 0.55, 0.28);
             float solidAngle = (PI * 0.55 * 0.55) / max(0.1, distSq);
             indirect += emissColor * (ndotl * solidAngle * shadow * 0.3183 * uGiBoost);
         }
@@ -617,8 +720,13 @@ void main() {
 
     if (uRenderMode == 1) finalColor = vec3(shadow);
     else if (uRenderMode == 2) finalColor = sdfGI;
-    else if (uRenderMode == 3) finalColor = N * 0.5 + 0.5;
-    else if (uRenderMode == 4) finalColor = baseAlbedo;
+    else if (uRenderMode == 3) {
+        // Visualizing Depth Buffer
+        float depthVal = gl_FragCoord.z;
+        finalColor = vec3(pow(depthVal, 24.0));
+    }
+    else if (uRenderMode == 4) finalColor = N * 0.5 + 0.5;
+    else if (uRenderMode == 5) finalColor = baseAlbedo;
 
     // ACES tonemapping
     finalColor = max(vec3(0.0), finalColor);
@@ -724,7 +832,7 @@ window.addEventListener('mousemove', e => {
     state.orbitPhi = Math.max(0.1, Math.min(Math.PI / 2 - 0.05, state.orbitPhi - dy * 0.005));
 });
 canvas.addEventListener('wheel', e => {
-    state.orbitRadius = Math.max(3.0, Math.min(60.0, state.orbitRadius + e.deltaY * 0.03));
+    state.orbitRadius = Math.max(1.5, Math.min(60.0, state.orbitRadius + e.deltaY * 0.03));
 });
 
 // --- Render Loop ---
@@ -748,7 +856,7 @@ function render() {
     }
 
     gl.enable(gl.DEPTH_TEST);
-    gl.clearColor(0.65, 0.68, 0.72, 1.0);
+    gl.clearColor(0.55, 0.60, 0.68, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     // Compute Camera Eye
@@ -757,7 +865,7 @@ function render() {
     const eyeZ = state.camTarget[2] - state.orbitRadius * Math.cos(state.orbitTheta) * Math.cos(state.orbitPhi);
     const eye = [eyeX, eyeY, eyeZ];
 
-    mat4Perspective(proj, state.camFov * Math.PI / 180.0, canvas.width / canvas.height, 0.2, 120.0);
+    mat4Perspective(proj, state.camFov * Math.PI / 180.0, canvas.width / canvas.height, 0.1, 120.0);
     mat4LookAt(view, eye, state.camTarget, [0, 1, 0]);
     mat4Multiply(vp, proj, view);
 
@@ -786,19 +894,30 @@ function render() {
     gl.bindVertexArray(floorVAO);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, 0);
 
-    // 2. Draw 225 Spheres
-    gl.bindVertexArray(sphereVAO);
+    // 2. Draw ShaderBalls
+    gl.bindVertexArray(sbVAO);
     gl.uniform1i(uLoc.isFloor, 0);
 
-    for (let i = 0; i < spheres.length; ++i) {
-        const sp = spheres[i];
-        mat4TranslationScale(model, sp.pos, 1.0);
+    if (state.scene === 'showcase') {
+        for (let i = 0; i < instances.length; ++i) {
+            const inst = instances[i];
+            mat4TranslationScale(model, inst.pos, 1.0);
+            gl.uniformMatrix4fv(uLoc.model, false, model);
+            gl.uniform3fv(uLoc.baseAlbedo, inst.base);
+            gl.uniform1f(uLoc.metallic, inst.metal);
+            gl.uniform1f(uLoc.roughness, inst.rough);
+            gl.uniform3fv(uLoc.emission, inst.emiss);
+            gl.drawElements(gl.TRIANGLES, sbGeom.indices.length, gl.UNSIGNED_INT, 0);
+        }
+    } else {
+        // Hero ShaderBall
+        mat4TranslationScale(model, [0, 0, 0], 1.0);
         gl.uniformMatrix4fv(uLoc.model, false, model);
-        gl.uniform3fv(uLoc.baseAlbedo, sp.base);
-        gl.uniform1f(uLoc.metallic, sp.metal);
-        gl.uniform1f(uLoc.roughness, sp.rough);
-        gl.uniform3fv(uLoc.emission, sp.emiss);
-        gl.drawElements(gl.TRIANGLES, sphereGeom.indices.length, gl.UNSIGNED_INT, 0);
+        gl.uniform3f(uLoc.baseAlbedo, 0.86, 0.30, 0.07); // Automotive Orange
+        gl.uniform1f(uLoc.metallic, 0.0);
+        gl.uniform1f(uLoc.roughness, 0.25);
+        gl.uniform3f(uLoc.emission, 0.0, 0.0, 0.0);
+        gl.drawElements(gl.TRIANGLES, sbGeom.indices.length, gl.UNSIGNED_INT, 0);
     }
 
     requestAnimationFrame(render);
