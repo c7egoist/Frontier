@@ -29,6 +29,11 @@ GALLERY = ROOT / "Exhibits/Gallery/Editor"
 SOURCES = [
     "Exhibits/Workbench/Editor/TyreGeneratorProof.cpp",
     "Engine/Editor/TyreInspectorPanel.cpp",
+    "Engine/Editor/TyreGeneratorWindow.cpp",
+    "Engine/ContentInterchange/Tyre/TreadPatternRaster.cpp",
+    "Engine/ContentInterchange/Tyre/TyrePresetLibrary.cpp",
+    "Engine/ContentInterchange/Tyre/TyreAppearanceSpecification.cpp",
+    "Engine/ContentInterchange/Tyre/RimSpecification.cpp",
     "Projects/Project-Drive/Source/TyreGeneratorSequence.cpp",
     # the editor itself
     "Engine/Editor/EditorHost.cpp", "Engine/Editor/ControlPanel.cpp", "Engine/Editor/OutlinerPanel.cpp",
@@ -64,7 +69,7 @@ INCLUDES = [
     "ExternalPackages/tomlpp/include", "ExternalPackages/thorvg/inc", "ExternalPackages/stb",
     "Exhibits/Workbench/Editor", "Exhibits/Workbench/Editor/Counterparts", "Exhibits/Workbench/IconArt",
 ]
-SHEETS = ["Tyre", "Carcass", "Lattice", "Generator"]
+SHEETS = ["Tyre", "Carcass", "Lattice", "Generator", "Rim", "Look", "Export"]
 
 
 def main() -> int:

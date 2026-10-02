@@ -28,22 +28,4 @@ struct EditorSheet;
 /// tag   api
 void RecordTyreInspector(ControlPanel& Controls, EditorInstance& Picked, EditorSheet& Sheet);
 
-//------------------------------------------------------------------------------------------------------------------------
-//                                                      TYRE FORGE
-//------------------------------------------------------------------------------------------------------------------------
-
-/// 📦 Draws the whole tyre generator as its own ImGui window: the carcass, the layer sequence, a viewport that
-///    shows the tyre the specification describes, and the picked layer's parameters.
-/// in    Controls       [-]   the shared widget vocabulary
-/// in    Specification  [-]   the carcass the preview is lathed from
-/// in    Pattern        [-]   the layer sequence the preview cuts into it
-/// in    Sheet          [-]   group 0 is the sequence, group 1 the picked layer
-/// in    Open           [-]   the window's open flag; the title bar's close button clears it
-/// note  ⚠️ Call this OUTSIDE the inspector's Begin/End pair — it opens a top-level window, which is the point.
-/// note  The preview is drawn from the SAME DeriveTreadValues and EvaluateTyreProfile the mesh solver uses, so
-///       the picture and the geometry cannot disagree about the shape; only about tessellation.
-/// tag   api
-void RecordTyreGeneratorWindow(ControlPanel& Controls, const TreadSpecification& Specification,
-                               const TreadPatternSpecification& Pattern, EditorSheet& Sheet, bool* Open);
-
 }   // namespace Frontier

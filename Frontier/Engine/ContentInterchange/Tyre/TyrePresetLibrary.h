@@ -107,6 +107,28 @@ struct TreadLayerFieldDescriptor
 /// tag   api, nonthrowing
 void WriteLayerField(TreadLayerSpecification& Layer, TreadLayerField Field, float Value) noexcept;
 
+//------------------------------------------------------------------------------------------------------------------------
+//                                                     GENERATED DESIGNS
+//------------------------------------------------------------------------------------------------------------------------
+
+/// 📦 A plausible tyre model name.
+/// in    Seed  [-]  any value; the same seed always yields the same name
+/// tag   api, allocating, nonthrowing
+[[nodiscard]] std::string RandomTyreName(uint32_t Seed);
+
+/// 📦 Invents a whole design: a category, a carcass sized for it, and a layer sequence built the way that
+///    category's treads are built.
+/// in    Seed      [-]  any value; the same seed always yields the same tyre
+/// out   Carcass   [-]  seated from the category's canonical size, jittered
+/// out   Pattern   [-]  the invented layer sequence
+/// out   Kind      [-]  the category chosen
+/// out   Name      [-]  a name to match
+/// note  The grooves come first and the siping last, because that is the order a tread is actually designed
+///       in: the water channels decide the block layout, and the sipes are cut into whatever blocks remain.
+/// tag   api, allocating, nonthrowing
+void RandomiseTyreDesign(TreadSpecification& Carcass, TreadPatternSpecification& Pattern,
+                         std::string& Kind, std::string& Name, uint32_t Seed);
+
 /// 📦 Mirrors a layer about the centreline, which is the one edit that is a whole button rather than a field.
 /// note  Mirroring is not negating Position alone: the lateral span reverses end for end, the lean flips
 ///       unless the layer is already mirrored about the centre itself, and the phase moves half a repeat so

@@ -8,6 +8,8 @@
 #include "EditorHost.h"
 #include "ControlPanel.h"
 #include "EditorInstance.h"
+#include "TyreGeneratorWindow.h"
+#include "../../../Engine/ContentInterchange/Tyre/TyrePresetLibrary.h"
 #include "TyreInspectorPanel.h"
 #include "../../../Projects/Project-Drive/Source/TyreGeneratorSequence.h"
 
@@ -80,9 +82,14 @@ void RasterizeList(const ImDrawList* List, const unsigned char* Sheet, int Sheet
 
         for (unsigned int E = 0; E < Cmd.ElemCount; E += 3u)
         {
-            const ImDrawVert& A = List->VtxBuffer[List->IdxBuffer[Offset + E + 0u]];
-            const ImDrawVert& B = List->VtxBuffer[List->IdxBuffer[Offset + E + 1u]];
-            const ImDrawVert& D = List->VtxBuffer[List->IdxBuffer[Offset + E + 2u]];
+            // ⚠️ VtxOffset is not optional. The backend advertises RendererHasVtxOffset, so once a list
+            //    passes 65 536 vertices ImGui starts a fresh command whose indices are relative to this
+            //    offset. Ignoring it does not drop the overflow — it silently reads the WRONG vertices,
+            //    which is why a long preset grid used to go blank partway down instead of failing loudly.
+            const unsigned int Base = Cmd.VtxOffset;
+            const ImDrawVert& A = List->VtxBuffer[Base + List->IdxBuffer[Offset + E + 0u]];
+            const ImDrawVert& B = List->VtxBuffer[Base + List->IdxBuffer[Offset + E + 1u]];
+            const ImDrawVert& D = List->VtxBuffer[Base + List->IdxBuffer[Offset + E + 2u]];
 
             float MinX = A.pos.x, MaxX = A.pos.x, MinY = A.pos.y, MaxY = A.pos.y;
             MinX = B.pos.x < MinX ? B.pos.x : MinX;  MaxX = B.pos.x > MaxX ? B.pos.x : MaxX;
@@ -179,7 +186,7 @@ int main()
 {
     ImGui::CreateContext();
     ImGuiIO& IO = ImGui::GetIO();
-    IO.DisplaySize = ImVec2(1280.0f, 720.0f);
+    IO.DisplaySize = ImVec2(1600.0f, 900.0f);
     IO.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
     IO.DeltaTime   = 1.0f / 60.0f;
     IO.IniFilename = nullptr;
@@ -198,7 +205,7 @@ int main()
     int SheetW = 0, SheetH = 0;
     IO.Fonts->GetTexDataAsRGBA32(&Sheet, &SheetW, &SheetH);
 
-    if (!Editor.SeatShade(1280u, 720u))
+    if (!Editor.SeatShade(1600u, 900u))
     {
         std::fprintf(stderr, "[TyreGeneratorProof] [FAIL] the shade never seated\n");
         return 1;
@@ -228,13 +235,29 @@ int main()
          Rows[RowCount - 2u].Standing == Frontier::EditorStanding::Warn, Rows[RowCount - 2u].StandingNote);
 
     // ② the sheets the inspector will draw
-    struct Phase { const char* Name; uint64_t Key; };
+    struct Phase { const char* Name; uint64_t Key; int Page; };   // Page -1 keeps the generator closed
     const Phase Phases[] = {
-        { "Tyre",    Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Tyre) },
-        { "Carcass", Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Carcass) },
-        { "Lattice", Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Lattice) },
-        { "Generator",   Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Layer, 3u) },
+        { "Tyre",      Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Tyre),       -1 },
+        { "Carcass",   Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Carcass),    -1 },
+        { "Lattice",   Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Lattice),    -1 },
+        { "Generator", Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Layer, 3u),   0 },
+        { "Rim",       Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Layer, 3u),   1 },
+        { "Look",      Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Layer, 3u),   2 },
+        { "Export",    Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Layer, 3u),   3 },
     };
+
+    // The application's own state, seated from the preset the project document carries.
+    Frontier::TyreGeneratorState App;
+    App.Document.Appearance.Decals = Frontier::DefaultSidewallDecals();
+    for (int I = 0; I < int(Frontier::TyrePresets().size()); ++I)
+    {
+        if (Frontier::TyrePresets()[size_t(I)].Name == "Grizzly Magnum")
+        {
+            Frontier::ApplyTyrePreset(App, I);
+        }
+    }
+    App.PickedLayer = 3;
+    App.PickedDecal = 1;
 
     for (const Phase& P : Phases)
     {
@@ -290,7 +313,11 @@ int main()
         Gate(PickName, Picked != Frontier::kNoEditorInstance && Editor.QueryPickedInstance() == Picked,
              Picked != Frontier::kNoEditorInstance ? Rows[Picked].Label : "not found");
 
-        const bool GeneratorOpen = std::strcmp(P.Name, "Generator") == 0;
+        const bool GeneratorOpen = P.Page >= 0;
+        if (GeneratorOpen)
+        {
+            App.Tab = Frontier::TyreGeneratorTab(P.Page);
+        }
 
         // ten ticks so every easing in the panels has settled before the shutter
         for (int Tick = 0; Tick < 10; ++Tick)
@@ -300,8 +327,7 @@ int main()
             if (GeneratorOpen)
             {
                 bool Open = true;
-                Frontier::RecordTyreGeneratorWindow(Editor.QueryControls(), Generator.Document.Tread,
-                                                    Generator.Document.Pattern, Built, &Open);
+                Frontier::RecordTyreGeneratorWindow(Editor.QueryControls(), App, &Open);
             }
             ImGui::Render();
         }

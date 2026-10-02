@@ -534,4 +534,174 @@ TreadLayerSpecification MirrorLayer(const TreadLayerSpecification& Layer) noexce
     return Copy;
 }
 
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                     GENERATED DESIGNS
+//------------------------------------------------------------------------------------------------------------------------
+
+namespace {
+
+/// 📦 A small deterministic generator. Deterministic matters: a design the user liked has to be reachable
+///    again from the same seed, and a clock-seeded generator makes that impossible.
+class Roll
+{
+public:
+    explicit Roll(uint32_t Seed) noexcept : State_(Seed * 2654435761u + 1u) {}
+
+    [[nodiscard]] float Unit() noexcept
+    {
+        State_ ^= State_ << 13;
+        State_ ^= State_ >> 17;
+        State_ ^= State_ << 5;
+        return float(State_ & 0x00FFFFFFu) / float(0x01000000u);
+    }
+
+    [[nodiscard]] float Between(float Low, float High) noexcept { return Low + Unit() * (High - Low); }
+
+    [[nodiscard]] int Whole(int Low, int High) noexcept
+    {
+        return Low + int(Unit() * float(High - Low + 1)) % std::max(1, High - Low + 1);
+    }
+
+    template <typename T>
+    [[nodiscard]] const T& Pick(const std::vector<T>& From) noexcept
+    {
+        return From[size_t(Whole(0, int(From.size()) - 1))];
+    }
+
+private:
+    uint32_t State_ = 1u;
+};
+
+const std::vector<std::string> kPrefixes = {
+    "Grizzly", "Vortex", "Phantom", "Raptor", "Kestrel", "Nomad", "Viper", "Comet", "Ghost", "Ember",
+    "Frost", "Monsoon", "Talon", "Rogue", "Sabre", "Nitro", "Onyx", "Havoc", "Quasar", "Slate",
+    "Cobra", "Tempest", "Falcon"
+};
+const std::vector<std::string> kSuffixes = {
+    "Magnum", "R1", "GT", "Zero", "Cut", "Sport", "X", "Drift", "Evo", "Nova",
+    "S3", "Grip", "Blade", "Trail", "RS", "TC", "Rain", "Ice"
+};
+
+}   // namespace
+
+std::string RandomTyreName(uint32_t Seed)
+{
+    Roll R(Seed);
+    const float Which = R.Unit();
+    if (Which < 0.2f)
+    {
+        static const std::vector<std::string> Letters = { "G", "Z", "K", "V", "T", "X", "R", "Q" };
+        static const std::vector<std::string> Tails   = { "Zero", "One", "Force", "Edge", "Line" };
+        return R.Pick(Letters) + R.Pick(Tails);
+    }
+    if (Which < 0.35f)
+    {
+        return R.Pick(kPrefixes) + " " + R.Pick(kSuffixes) + " " + std::to_string(R.Whole(2, 9));
+    }
+    return R.Pick(kPrefixes) + " " + R.Pick(kSuffixes);
+}
+
+void RandomiseTyreDesign(TreadSpecification& Carcass, TreadPatternSpecification& Pattern,
+                         std::string& Kind, std::string& Name, uint32_t Seed)
+{
+    Roll R(Seed);
+    Kind = R.Pick(TyreKinds());
+
+    // ① the canonical size for the category, jittered by one step either way
+    struct Canonical { const char* Kind; float Width; float Aspect; float Rim; float Depth; };
+    static const Canonical kSizes[10] = {
+        { "Slick",      305.0f, 30.0f, 19.0f,  4.0f }, { "Semi-slick", 265.0f, 35.0f, 18.0f,  5.0f },
+        { "Drift",      235.0f, 40.0f, 18.0f,  6.0f }, { "Street",     205.0f, 55.0f, 16.0f,  8.0f },
+        { "Grip / UHP", 255.0f, 35.0f, 19.0f,  7.0f }, { "Wet",        245.0f, 45.0f, 18.0f, 10.0f },
+        { "Winter",     215.0f, 60.0f, 16.0f, 10.0f }, { "Rally",      235.0f, 70.0f, 15.0f, 14.0f },
+        { "Off-road",   285.0f, 70.0f, 17.0f, 15.0f }, { "Drag",       375.0f, 50.0f, 15.0f,  4.0f }
+    };
+    const Canonical* Size = &kSizes[0];
+    for (const Canonical& Entry : kSizes)
+    {
+        if (Kind == Entry.Kind)
+        {
+            Size = &Entry;
+        }
+    }
+    Carcass.Width      = Size->Width + float(R.Whole(-2, 2)) * 10.0f;
+    Carcass.Aspect     = Size->Aspect + float(R.Whole(-1, 1)) * 5.0f;
+    Carcass.Rim        = Size->Rim;
+    Carcass.TreadDepth = Size->Depth;
+    Carcass.Crown      = R.Between(1.0f, 3.0f);
+    Carcass.Shoulder   = R.Between(12.0f, 26.0f);
+    Carcass.Wear       = 0.0f;
+
+    // ② the water channels, which decide where the blocks can be
+    Pattern.Name = Name;
+    Pattern.Layers.clear();
+    const bool Smooth = (Kind == "Slick" || Kind == "Drag");
+    const int Grooves = Smooth ? 0
+                      : (Kind == "Semi-slick" || Kind == "Drift") ? R.Whole(1, 2)
+                                                                  : R.Whole(2, 4);
+    const std::vector<std::vector<float>> kSeats = {
+        {}, { 0.0f }, { -0.3f, 0.3f }, { -0.5f, 0.0f, 0.5f }, { -0.6f, -0.2f, 0.2f, 0.6f }
+    };
+    const float Zig = (Kind == "Off-road" || Kind == "Rally") ? R.Between(3.0f, 7.0f)
+                    : (Kind == "Winter")                      ? R.Between(0.0f, 2.0f)
+                                                              : 0.0f;
+    for (const float Seat : kSeats[size_t(Grooves)])
+    {
+        Pattern.Layers.push_back(Circ(Seat, R.Between(5.0f, 11.0f), Zig, float(R.Whole(22, 80))));
+    }
+
+    // ③ the blocks, in one of five families
+    static const std::vector<std::string> kStyles = { "sym", "dir", "asym", "hex", "dot" };
+    const std::string Style = R.Pick(kStyles);
+    if (Smooth)
+    {
+        Pattern.Layers.push_back(Dimple(2, float(R.Whole(3, 6)), 2.5f, 0.7f, -0.6f, 0.6f, false));
+        Pattern.Layers.push_back(Noise(0.04f, 2.0f));
+    }
+    else if (Style == "dir")
+    {
+        Pattern.Layers.push_back(Chev(float(R.Whole(30, 50)), float(R.Whole(35, 65)),
+                                      R.Between(4.0f, 9.0f), R.Between(0.05f, 0.3f), 1.3f,
+                                      R.Between(0.0f, 0.6f)));
+    }
+    else if (Style == "asym")
+    {
+        Pattern.Layers.push_back(Lat(float(R.Whole(40, 64)), float(R.Whole(10, 30)), R.Between(3.0f, 5.0f),
+                                     -1.3f, R.Between(-0.3f, -0.1f), 0.0f));
+        Pattern.Layers.push_back(Lat(float(R.Whole(16, 26)), -float(R.Whole(15, 40)), R.Between(4.0f, 7.0f),
+                                     R.Between(0.2f, 0.5f), 1.3f, 0.0f, 0.3f));
+    }
+    else if (Style == "hex")
+    {
+        Pattern.Layers.push_back(Hex(R.Between(10.0f, 24.0f), R.Between(3.0f, 7.0f),
+                                     R.Between(0.7f, 1.0f), -1.3f, 1.3f));
+    }
+    else if (Style == "dot")
+    {
+        Layer Dots = Dimple(float(R.Whole(3, 8)), float(R.Whole(40, 100)), R.Between(2.0f, 5.0f),
+                            R.Between(0.4f, 0.9f), -1.1f, 1.1f, true);
+        Dots.Ring = R.Unit() < 0.3f;
+        Pattern.Layers.push_back(Dots);
+    }
+    else
+    {
+        const float Angle = float(R.Whole(-30, 30));
+        const float Count = float(R.Whole(20, 64));
+        Pattern.Layers.push_back(Lat(Count,  Angle, R.Between(4.0f, 10.0f),  0.2f,  1.3f, 0.0f));
+        Pattern.Layers.push_back(Lat(Count, -Angle, R.Between(4.0f, 10.0f), -1.3f, -0.2f, 0.5f));
+    }
+
+    // ④ the siping, cut into whatever blocks the first three steps left standing
+    if (Kind == "Winter" || (Kind == "Street" && R.Unit() < 0.7f))
+    {
+        Pattern.Layers.push_back(Sipe(float(R.Whole(100, 220)), float(R.Whole(-30, 30)), 1.1f,
+                                      R.Between(0.4f, 0.7f), -1.3f, 1.3f, false,
+                                      R.Between(0.0f, 2.0f), 0.5f));
+    }
+
+    Name = RandomTyreName(Seed * 2246822519u + 7u);
+    Pattern.Name = Name;
+}
+
 }   // namespace Frontier
