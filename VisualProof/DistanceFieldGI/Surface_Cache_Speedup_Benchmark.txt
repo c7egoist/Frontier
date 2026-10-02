@@ -1,0 +1,10 @@
+================================================================================
+ SURFACE CACHE DIRECT RADIANCE BAKING BENCHMARK REPORT
+================================================================================
+Resolution:                   1280x720 (921,600 pixels)
+Atlas Size:                   256x256 (65,536 texels across 4 cards)
+Async Slice Budget:           16,384 texels/frame (4 frames total)
+Mode A (Per-Ray Shadow March): 433.104 ms
+Mode B (Surface Cache Lookup): 297.892 ms
+Speedup Factor:               1.4539x Faster
+================================================================================
