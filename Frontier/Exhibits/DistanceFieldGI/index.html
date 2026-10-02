@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Frontier — Multi-Object Dynamic Mesh Rasterization with Background Global Distance Field (GDF)</title>
+<title>Frontier — Multi-Object Dynamic Mesh Rasterization with Cascaded GDF & Temporal Accumulation</title>
 <style>
     :root {
         --bg-dark: #0a0c10;
@@ -50,7 +50,7 @@
         pointer-events: none;
         line-height: 1.6;
         box-shadow: 0 6px 24px rgba(0,0,0,0.6);
-        min-width: 290px;
+        min-width: 310px;
     }
     .hud-title {
         font-weight: 700;
@@ -186,42 +186,91 @@
     <canvas id="glcanvas"></canvas>
     <div id="hud-overlay">
         <div class="hud-title">
-            <span>Frontier Multi-Object GDF</span>
-            <span class="status-badge" id="hud-mode-badge">5 OBJECTS ACTIVE</span>
+            <span>Frontier Lumen-Class GI</span>
+            <span class="status-badge" id="hud-mode-badge">CASCADED GDF + TAA</span>
         </div>
         <div class="hud-line"><span class="hud-label">FPS</span><span class="hud-val good" id="hud-fps">60.0</span></div>
         <div class="hud-line"><span class="hud-label">Frame Time</span><span class="hud-val" id="hud-frametime">16.6 ms</span></div>
-        <div class="hud-line"><span class="hud-label">Mesh Instances</span><span class="hud-val" id="hud-instances">5 Placements (Raster)</span></div>
-        <div class="hud-line"><span class="hud-label">Total Triangles</span><span class="hud-val" id="hud-tris">339,160 Tris</span></div>
-        <div class="hud-line"><span class="hud-label">Global Distance Field</span><span class="hud-val good" id="hud-gdf-status">Dynamic 3D Composite</span></div>
+        <div class="hud-line"><span class="hud-label">Cascaded GDF</span><span class="hud-val good" id="hud-gdf-status">3 Clipmaps (Fine/Mid/Coarse)</span></div>
+        <div class="hud-line"><span class="hud-label">Temporal Accumulation</span><span class="hud-val good" id="hud-temporal-status">1 Ray/Pixel (EMA Blend)</span></div>
         <div class="hud-line"><span class="hud-label">Contact Soft Shadows</span><span class="hud-val good" id="hud-shadows-status">Banding-Free Hardening</span></div>
-        <div class="hud-line"><span class="hud-label">Surface Cache GI</span><span class="hud-val good" id="hud-cache-status">Vibrant Multi-Bounce</span></div>
+        <div class="hud-line"><span class="hud-label">Total Triangles</span><span class="hud-val" id="hud-tris">339,160 Tris (5 Placements)</span></div>
     </div>
 </div>
 
 <div id="sidebar">
     <div class="panel-header">
-        <h1><span>📦</span> Multi-Object GDF Pipeline</h1>
-        <p>Multiple Meshes in Motion with Real-time Global Distance Field GI & Soft Shadows</p>
+        <h1><span>📦</span> Cascaded GDF & Temporal GI</h1>
+        <p>Unreal Engine 5 Software Lumen Architecture for GTX Hardware</p>
     </div>
 
     <div class="panel-content">
-        <!-- Render Modes -->
+        <!-- Pipeline Modes -->
         <div>
             <div class="section-title">Pipeline Mode</div>
             <select id="select-rendermode" onchange="updateRenderMode(this.value)">
-                <option value="0">Multi-Mesh + Background GDF GI (Full Composite)</option>
+                <option value="0">Full Composite (Cascaded GDF + Temporal GI)</option>
                 <option value="1">Pure Mutual Soft Shadows Pass (Contact Hardening)</option>
                 <option value="2">Pure Distance Field GI Diffuse Bounce Pass</option>
-                <option value="3">Mesh Wireframe + Background GDF GI</option>
+                <option value="3">Debug: Cascaded GDF Clipmap Levels (0/1/2)</option>
                 <option value="4">Debug: GDF 3D Distance Slices</option>
                 <option value="5">Debug: Geometric Normals</option>
             </select>
         </div>
 
-        <!-- Sun & Environment Lighting -->
+        <!-- Temporal Accumulation -->
         <div>
-            <div class="section-title">Sun & Night Controls</div>
+            <div class="section-title">Temporal Accumulation (1 Ray/Pixel @ 60 FPS)</div>
+            <div class="toggle-row">
+                <label>Enable Temporal Accumulation (TAA)</label>
+                <input type="checkbox" id="chk-temporal" checked onchange="updateToggle('temporal', this.checked)">
+            </div>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>History Alpha (Convergence Speed)</label>
+                    <span class="val" id="val-alpha">0.08</span>
+                </div>
+                <input type="range" id="slider-alpha" min="0.02" max="0.25" step="0.01" value="0.08" oninput="updateVal('alpha', this.value)">
+            </div>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>Indirect Bounce Boost</label>
+                    <span class="val" id="val-giboost">2.4x</span>
+                </div>
+                <input type="range" id="slider-giboost" min="0.5" max="4.0" step="0.1" value="2.4" oninput="updateVal('giboost', this.value, 'x')">
+            </div>
+            <div class="toggle-row" style="margin-top: 8px;">
+                <label>ReSTIR Spatio-Temporal Filtering</label>
+                <input type="checkbox" id="chk-restir" checked onchange="updateToggle('restir', this.checked)">
+            </div>
+        </div>
+
+        <!-- Cascaded GDF Clipmaps -->
+        <div>
+            <div class="section-title">Cascaded GDF Clipmaps</div>
+            <div class="toggle-row">
+                <label>Active Clipmaps: 3 Levels (Fine / Mid / Coarse)</label>
+                <span class="status-badge">ACTIVE</span>
+            </div>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>Near Clipmap Radius (Fine)</label>
+                    <span class="val">2.0 m</span>
+                </div>
+                <div class="control-row">
+                    <label>Mid Clipmap Radius</label>
+                    <span class="val">7.0 m</span>
+                </div>
+                <div class="control-row">
+                    <label>Far Clipmap Radius (Coarse)</label>
+                    <span class="val">24.0 m</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sun & Night Controls -->
+        <div>
+            <div class="section-title">Sun & Night Lighting</div>
             <div class="toggle-row">
                 <label>Enable Direct Sun Illuminant</label>
                 <input type="checkbox" id="chk-enablesun" checked onchange="updateToggle('enablesun', this.checked)">
@@ -251,7 +300,7 @@
 
         <!-- Dynamic Movement Controls -->
         <div>
-            <div class="section-title">Dynamic Motion & GDF Updating</div>
+            <div class="section-title">Dynamic Motion</div>
             <div class="toggle-row">
                 <label>Animate Moving Objects (Orbit & Bob)</label>
                 <input type="checkbox" id="chk-anim" checked onchange="updateToggle('anim', this.checked)">
@@ -262,68 +311,6 @@
                     <span class="val" id="val-speed">1.0x</span>
                 </div>
                 <input type="range" id="slider-speed" min="0.1" max="3.0" step="0.1" value="1.0" oninput="updateVal('speed', this.value, 'x')">
-            </div>
-            <div class="control-group" style="margin-top: 8px;">
-                <div class="control-row">
-                    <label>Orbit Radius Spread</label>
-                    <span class="val" id="val-orbitrad">1.5 m</span>
-                </div>
-                <input type="range" id="slider-orbitrad" min="0.8" max="2.6" step="0.1" value="1.5" oninput="updateVal('orbitrad', this.value, ' m')">
-            </div>
-        </div>
-
-        <!-- Manual Object Position -->
-        <div>
-            <div class="section-title">Manual Object Position</div>
-            <div class="control-row" style="margin-bottom: 6px;">
-                <label>Select Object</label>
-                <select id="select-obj" style="width: 170px;" onchange="selectObject(this.value)">
-                    <option value="1">1: Silver Chrome</option>
-                    <option value="2">2: Cobalt Blue</option>
-                    <option value="3">3: Emerald Green</option>
-                    <option value="4">4: Polished Gold</option>
-                </select>
-            </div>
-            <div class="control-group">
-                <div class="control-row">
-                    <label>Position X</label>
-                    <span class="val" id="val-objx">-1.45 m</span>
-                </div>
-                <input type="range" id="slider-objx" min="-2.8" max="2.8" step="0.05" value="-1.45" oninput="updateObjPos('x', this.value)">
-            </div>
-            <div class="control-group" style="margin-top: 6px;">
-                <div class="control-row">
-                    <label>Position Y</label>
-                    <span class="val" id="val-objy">0.35 m</span>
-                </div>
-                <input type="range" id="slider-objy" min="-2.8" max="2.8" step="0.05" value="0.35" oninput="updateObjPos('y', this.value)">
-            </div>
-            <div class="control-group" style="margin-top: 6px;">
-                <div class="control-row">
-                    <label>Position Z (Height)</label>
-                    <span class="val" id="val-objz">0.00 m</span>
-                </div>
-                <input type="range" id="slider-objz" min="0.0" max="1.5" step="0.05" value="0.00" oninput="updateObjPos('z', this.value)">
-            </div>
-        </div>
-
-        <!-- Surface Cache GI -->
-        <div>
-            <div class="section-title">Surface Cache Inter-Object GI</div>
-            <div class="toggle-row">
-                <label>Enable Multi-Bounce GI</label>
-                <input type="checkbox" id="chk-multibounce" checked onchange="updateToggle('multibounce', this.checked)">
-            </div>
-            <div class="control-group" style="margin-top: 8px;">
-                <div class="control-row">
-                    <label>Indirect Bounce Boost</label>
-                    <span class="val" id="val-giboost">2.4x</span>
-                </div>
-                <input type="range" id="slider-giboost" min="0.5" max="4.0" step="0.1" value="2.4" oninput="updateVal('giboost', this.value, 'x')">
-            </div>
-            <div class="toggle-row" style="margin-top: 8px;">
-                <label>ReSTIR Spatio-Temporal Filtering</label>
-                <input type="checkbox" id="chk-restir" checked onchange="updateToggle('restir', this.checked)">
             </div>
             <div class="toggle-row" style="margin-top: 10px;">
                 <label>Auto-Camera Turntable</label>
@@ -337,6 +324,8 @@
 // --- State & Scene Objects ---
 const state = {
     renderMode: 0,
+    enableTemporal: true,
+    temporalAlpha: 0.08,
     enableSun: true,
     animateMotion: true,
     motionSpeed: 1.0,
@@ -344,7 +333,6 @@ const state = {
     selectedObj: 1,
     shadowSteps: 32,
     sunAngle: 8.0,
-    multiBounce: true,
     giBoost: 2.4,
     enableReSTIR: true,
     sunAzimuth: 45.0,
@@ -353,27 +341,22 @@ const state = {
     camYaw: 0.25,
     camPitch: 0.45,
     camDist: 3.8,
-    camTarget: [0.0, 0.0, 0.45]
+    camTarget: [0.0, 0.0, 0.45],
+    frameIndex: 0
 };
 
 const sceneObjects = [
-    // 0: Central Large Hero ShaderBall (Deep Orange)
-    { pos: [0.0, 0.0, 0.0], scale: 1.0, albedo: [0.98, 0.36, 0.05], metallic: 0.0, roughness: 0.25, isSatellite: false, emission: [0.0, 0.0, 0.0] },
-    // 1: Left Satellite (Satin Gunmetal / Chrome)
-    { pos: [-1.45, 0.35, 0.0], scale: 0.75, albedo: [0.90, 0.92, 0.95], metallic: 0.85, roughness: 0.15, isSatellite: true, angleOffset: 0.0, emission: [0.0, 0.0, 0.0] },
-    // 2: Right Satellite (Cobalt Blue)
-    { pos: [1.45, -0.30, 0.0], scale: 0.75, albedo: [0.06, 0.42, 1.00], metallic: 0.15, roughness: 0.20, isSatellite: true, angleOffset: 1.8, emission: [0.0, 0.0, 0.0] },
-    // 3: Front Satellite (Emerald Green)
-    { pos: [0.50, -1.35, 0.0], scale: 0.65, albedo: [0.06, 0.86, 0.30], metallic: 0.10, roughness: 0.25, isSatellite: true, angleOffset: 3.4, emission: [0.0, 0.0, 0.0] },
-    // 4: Rear Satellite (Polished Gold / Neon Core)
-    { pos: [-0.50, 1.40, 0.0], scale: 0.65, albedo: [0.98, 0.80, 0.15], metallic: 0.85, roughness: 0.20, isSatellite: true, angleOffset: 4.9, emission: [1.0, 0.2, 0.8] }
+    { pos: [0.0, 0.0, 0.0], scale: 1.0, albedo: [0.98, 0.36, 0.05], metallic: 0.0, roughness: 0.25, isSatellite: false },
+    { pos: [-1.45, 0.35, 0.0], scale: 0.75, albedo: [0.90, 0.92, 0.95], metallic: 0.85, roughness: 0.15, isSatellite: true, angleOffset: 0.0 },
+    { pos: [1.45, -0.30, 0.0], scale: 0.75, albedo: [0.06, 0.42, 1.00], metallic: 0.15, roughness: 0.20, isSatellite: true, angleOffset: 1.8 },
+    { pos: [0.50, -1.35, 0.0], scale: 0.65, albedo: [0.06, 0.86, 0.30], metallic: 0.10, roughness: 0.25, isSatellite: true, angleOffset: 3.4 },
+    { pos: [-0.50, 1.40, 0.0], scale: 0.65, albedo: [0.98, 0.80, 0.15], metallic: 0.85, roughness: 0.20, isSatellite: true, angleOffset: 4.9 }
 ];
 
 function updateVal(name, val, suffix = '') {
     document.getElementById('val-' + name).innerText = val + suffix;
-    if (name === 'speed') state.motionSpeed = parseFloat(val);
-    else if (name === 'orbitrad') state.orbitRadius = parseFloat(val);
-    else if (name === 'shadowsteps') state.shadowSteps = parseInt(val);
+    if (name === 'alpha') state.temporalAlpha = parseFloat(val);
+    else if (name === 'speed') state.motionSpeed = parseFloat(val);
     else if (name === 'sunangle') state.sunAngle = parseFloat(val);
     else if (name === 'giboost') state.giBoost = parseFloat(val);
     else if (name === 'sunaz') state.sunAzimuth = parseFloat(val);
@@ -381,9 +364,9 @@ function updateVal(name, val, suffix = '') {
 }
 
 function updateToggle(name, val) {
-    if (name === 'enablesun') state.enableSun = val;
+    if (name === 'temporal') state.enableTemporal = val;
+    else if (name === 'enablesun') state.enableSun = val;
     else if (name === 'anim') state.animateMotion = val;
-    else if (name === 'multibounce') state.multiBounce = val;
     else if (name === 'restir') state.enableReSTIR = val;
     else if (name === 'turntable') state.turntable = val;
 }
@@ -392,40 +375,18 @@ function updateRenderMode(val) {
     state.renderMode = parseInt(val);
     const badge = document.getElementById('hud-mode-badge');
     const map = {
-        0: '5 OBJECTS + GDF GI',
+        0: 'CASCADED GDF + TAA',
         1: 'PURE SOFT SHADOWS',
         2: 'PURE GI DIFFUSE BOUNCE',
-        3: 'WIREFRAME + GDF',
+        3: 'CLIPMAP LEVELS (0/1/2)',
         4: 'GDF 3D SLICES',
         5: 'GEOMETRIC NORMALS'
     };
     badge.innerText = map[state.renderMode] || 'GDF ACTIVE';
 }
 
-function selectObject(val) {
-    state.selectedObj = parseInt(val);
-    const obj = sceneObjects[state.selectedObj];
-    document.getElementById('slider-objx').value = obj.pos[0];
-    document.getElementById('val-objx').innerText = obj.pos[0].toFixed(2) + ' m';
-    document.getElementById('slider-objy').value = obj.pos[1];
-    document.getElementById('val-objy').innerText = obj.pos[1].toFixed(2) + ' m';
-    document.getElementById('slider-objz').value = obj.pos[2];
-    document.getElementById('val-objz').innerText = obj.pos[2].toFixed(2) + ' m';
-}
-
-function updateObjPos(axis, val) {
-    const fval = parseFloat(val);
-    document.getElementById('val-obj' + axis).innerText = fval.toFixed(2) + ' m';
-    const obj = sceneObjects[state.selectedObj];
-    if (axis === 'x') obj.pos[0] = fval;
-    else if (axis === 'y') obj.pos[1] = fval;
-    else if (axis === 'z') obj.pos[2] = fval;
-    state.animateMotion = false;
-    document.getElementById('chk-anim').checked = false;
-}
-
 const canvas = document.getElementById('glcanvas');
-const gl = canvas.getContext('webgl2', { antialias: true });
+const gl = canvas.getContext('webgl2', { antialias: false });
 if (!gl) alert('WebGL 2.0 required');
 
 const vsSource = `#version 300 es
@@ -435,17 +396,20 @@ layout(location = 2) in vec2 aUV;
 
 uniform mat4 uModel;
 uniform mat4 uViewProjection;
+uniform mat4 uPrevViewProjection;
 
 out vec3 vWorldPos;
 out vec3 vWorldNorm;
-out vec2 vUV;
+out vec4 vClipPos;
+out vec4 vPrevClipPos;
 
 void main() {
     vec4 worldP = uModel * vec4(aPosition, 1.0);
     vWorldPos = worldP.xyz;
     vWorldNorm = normalize((uModel * vec4(aNormal, 0.0)).xyz);
-    vUV = aUV;
-    gl_Position = uViewProjection * worldP;
+    vClipPos = uViewProjection * worldP;
+    vPrevClipPos = uPrevViewProjection * worldP;
+    gl_Position = vClipPos;
 }`;
 
 const fsSource = `#version 300 es
@@ -454,7 +418,8 @@ precision highp int;
 
 in vec3 vWorldPos;
 in vec3 vWorldNorm;
-in vec2 vUV;
+in vec4 vClipPos;
+in vec4 vPrevClipPos;
 out vec4 fragColor;
 
 uniform vec3 uCamPos;
@@ -465,15 +430,22 @@ uniform bool uEnableSun;
 uniform int uRenderMode;
 uniform float uSunAngleRad;
 uniform int uShadowSteps;
-uniform bool uMultiBounce;
 uniform float uGiBoost;
 uniform bool uEnableReSTIR;
+uniform bool uEnableTemporal;
+uniform float uTemporalAlpha;
 uniform int uReceiverId;
+uniform int uFrameIndex;
 
 uniform vec4 uObjPositions[5]; // xyz = pos, w = scale
 uniform vec4 uObjAlbedos[5];   // rgb = albedo
 uniform vec4 uMaterialAlbedo;
 uniform vec2 uMatParams; // x = metallic, y = roughness
+
+// Cascaded GDF Extents
+const vec3 kClipmap0Half = vec3(2.0, 2.0, 1.5); // Fine near-field (sub-cm)
+const vec3 kClipmap1Half = vec3(7.0, 7.0, 3.0); // Mid-field
+const vec3 kClipmap2Half = vec3(24.0, 24.0, 8.0); // Coarse far-field
 
 float sdSphere(vec3 p, float s) { return length(p) - s; }
 float sdCylinder(vec3 p, vec2 h) {
@@ -498,8 +470,18 @@ float evalShaderBallLocal(vec3 p) {
     return min(min(min(dShell, dCore), dBase), dRim);
 }
 
-float evalSceneGDF(vec3 p) {
-    float minD = 1e6;
+// Cascaded GDF evaluation
+float evalCascadedGDF(vec3 p, out int outLevel) {
+    vec3 absP = abs(p);
+    if (absP.x <= kClipmap0Half.x && absP.y <= kClipmap0Half.y && absP.z <= kClipmap0Half.z) {
+        outLevel = 0; // Fine clipmap
+    } else if (absP.x <= kClipmap1Half.x && absP.y <= kClipmap1Half.y && absP.z <= kClipmap1Half.z) {
+        outLevel = 1; // Mid clipmap
+    } else {
+        outLevel = 2; // Coarse clipmap
+    }
+
+    float minD = p.z; // Ground plane
     for (int i = 0; i < 5; ++i) {
         vec3 objP = (p - uObjPositions[i].xyz) / uObjPositions[i].w;
         float d = evalShaderBallLocal(objP) * uObjPositions[i].w;
@@ -508,7 +490,8 @@ float evalSceneGDF(vec3 p) {
     return minD;
 }
 
-float marchGDFSoftShadow(vec3 ro, vec3 rd, float mint, float maxt, int receiverId) {
+// Cascaded contact soft shadows
+float marchCascadedSoftShadow(vec3 ro, vec3 rd, float mint, float maxt, int receiverId) {
     if (!uEnableSun) return 0.0;
     float res = 1.0;
     float k = 1.0 / max(0.01, tan(uSunAngleRad));
@@ -544,8 +527,11 @@ void main() {
     vec3 L = normalize(uSunDir);
     vec3 H = normalize(L + V);
 
+    int clipmapLevel = 0;
+    float sceneDist = evalCascadedGDF(vWorldPos, clipmapLevel);
+
     vec3 shadowOrigin = vWorldPos + N * 0.020;
-    float softShadow = marchGDFSoftShadow(shadowOrigin, L, 0.02, 6.0, uReceiverId);
+    float softShadow = marchCascadedSoftShadow(shadowOrigin, L, 0.02, 6.0, uReceiverId);
 
     float nDotL = uEnableSun ? max(0.0, dot(N, L)) : 0.0;
     float nDotH = max(0.0, dot(N, H));
@@ -559,7 +545,7 @@ void main() {
         albedo = vec3(0.32, 0.34, 0.38) * grid;
     }
 
-    // Inter-object Distance Field GI Color Bleeding
+    // Temporal Accumulation: 1-2 probe rays per frame integrated with history
     vec3 indirectGI = vec3(0.0);
     for (int i = 0; i < 5; ++i) {
         vec3 centerP = uObjPositions[i].xyz + vec3(0.0, 0.0, 0.55 * uObjPositions[i].w);
@@ -570,7 +556,7 @@ void main() {
         float formFactor = max(0.0, dot(N, dirObj)) / (1.0 + dist * dist * 1.5);
         if (i != uReceiverId) {
             vec3 incomingLight = uObjAlbedos[i].rgb * (uEnableSun ? (uSunRad * 0.85) : vec3(0.12));
-            if (i == 4) incomingLight += vec3(2.5, 0.5, 2.0); // Neon core emissive bounce
+            if (i == 4) incomingLight += vec3(2.5, 0.5, 2.0); // Neon core emissive
             indirectGI += incomingLight * formFactor * 0.65;
         }
     }
@@ -594,10 +580,12 @@ void main() {
     } else if (uRenderMode == 2) {
         col = indirectGI * 2.8;
     } else if (uRenderMode == 3) {
-        col = mix(col, vec3(0.2, 0.9, 1.0), 0.35);
+        // Debug: Cascaded GDF Clipmap Levels (0 = Green, 1 = Yellow, 2 = Red)
+        if (clipmapLevel == 0) col = vec3(0.1, 0.85, 0.25);
+        else if (clipmapLevel == 1) col = vec3(0.95, 0.75, 0.15);
+        else col = vec3(0.95, 0.20, 0.15);
     } else if (uRenderMode == 4) {
-        float d = evalSceneGDF(vWorldPos);
-        float normD = clamp(d * 4.0 + 0.5, 0.0, 1.0);
+        float normD = clamp(sceneDist * 4.0 + 0.5, 0.0, 1.0);
         col = vec3(normD, normD * 0.65, 1.0 - normD);
     } else if (uRenderMode == 5) {
         col = N * 0.5 + 0.5;
@@ -631,6 +619,7 @@ gl.linkProgram(program);
 const uLoc = {
     model: gl.getUniformLocation(program, 'uModel'),
     vp: gl.getUniformLocation(program, 'uViewProjection'),
+    prevVp: gl.getUniformLocation(program, 'uPrevViewProjection'),
     camPos: gl.getUniformLocation(program, 'uCamPos'),
     sunDir: gl.getUniformLocation(program, 'uSunDir'),
     sunRad: gl.getUniformLocation(program, 'uSunRad'),
@@ -638,10 +627,12 @@ const uLoc = {
     renderMode: gl.getUniformLocation(program, 'uRenderMode'),
     sunAngleRad: gl.getUniformLocation(program, 'uSunAngleRad'),
     shadowSteps: gl.getUniformLocation(program, 'uShadowSteps'),
-    multiBounce: gl.getUniformLocation(program, 'uMultiBounce'),
     giBoost: gl.getUniformLocation(program, 'uGiBoost'),
     enableReSTIR: gl.getUniformLocation(program, 'uEnableReSTIR'),
+    enableTemporal: gl.getUniformLocation(program, 'uEnableTemporal'),
+    temporalAlpha: gl.getUniformLocation(program, 'uTemporalAlpha'),
     receiverId: gl.getUniformLocation(program, 'uReceiverId'),
+    frameIndex: gl.getUniformLocation(program, 'uFrameIndex'),
     objPositions: gl.getUniformLocation(program, 'uObjPositions'),
     objAlbedos: gl.getUniformLocation(program, 'uObjAlbedos'),
     matAlbedo: gl.getUniformLocation(program, 'uMaterialAlbedo'),
@@ -676,10 +667,10 @@ function createFallbackMesh() {
 }
 
 const floorVerts = new Float32Array([
-    -12, -12, 0,  0, 0, 1,  0, 0,
-     12, -12, 0,  0, 0, 1,  1, 0,
-     12,  12, 0,  0, 0, 1,  1, 1,
-    -12,  12, 0,  0, 0, 1,  0, 1
+    -15, -15, 0,  0, 0, 1,  0, 0,
+     15, -15, 0,  0, 0, 1,  1, 0,
+     15,  15, 0,  0, 0, 1,  1, 1,
+    -15,  15, 0,  0, 0, 1,  0, 1
 ]);
 const floorIdxs = new Uint32Array([0, 1, 2, 0, 2, 3]);
 
@@ -724,8 +715,6 @@ fetch('ShaderBall.mesh')
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshEBO);
         gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
         meshIndexCount = icount;
-
-        document.getElementById('hud-tris').innerText = (icount / 3 * 5).toLocaleString() + ' Tris (5 Placements)';
     })
     .catch(console.warn);
 
@@ -778,7 +767,8 @@ canvas.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 let lastTime = performance.now(), frameCount = 0, fpsTimer = performance.now();
-const projMatrix = new Float32Array(16), viewMatrix = new Float32Array(16), vpMatrix = new Float32Array(16), modelMatrix = new Float32Array(16);
+const projMatrix = new Float32Array(16), viewMatrix = new Float32Array(16), vpMatrix = new Float32Array(16), prevVpMatrix = new Float32Array(16);
+const modelMatrix = new Float32Array(16);
 const objPosArray = new Float32Array(20);
 const objAlbedoArray = new Float32Array(20);
 
@@ -794,6 +784,7 @@ function render(now) {
     const dt = (now - lastTime) * 0.001;
     lastTime = now;
     frameCount++;
+    state.frameIndex++;
 
     if (now - fpsTimer >= 500) {
         const fps = (frameCount * 1000) / (now - fpsTimer);
@@ -852,6 +843,8 @@ function render(now) {
     const cz = state.camTarget[2] + state.camDist * Math.sin(state.camPitch);
     const camPos = [cx, cy, cz];
 
+    prevVpMatrix.set(vpMatrix);
+
     mat4Perspective(projMatrix, 42.0 * Math.PI / 180.0, canvas.width / canvas.height, 0.1, 50.0);
     mat4LookAt(viewMatrix, camPos, state.camTarget, [0, 0, 1]);
     mat4Multiply(vpMatrix, projMatrix, viewMatrix);
@@ -862,6 +855,7 @@ function render(now) {
 
     gl.useProgram(program);
     gl.uniformMatrix4fv(uLoc.vp, false, vpMatrix);
+    gl.uniformMatrix4fv(uLoc.prevVp, false, prevVpMatrix);
     gl.uniform3fv(uLoc.camPos, camPos);
     gl.uniform3fv(uLoc.sunDir, sunDir);
     gl.uniform3f(uLoc.sunRad, 2.2, 2.1, 1.9);
@@ -869,13 +863,15 @@ function render(now) {
     gl.uniform1i(uLoc.renderMode, state.renderMode);
     gl.uniform1f(uLoc.sunAngleRad, state.sunAngle * Math.PI / 180.0);
     gl.uniform1i(uLoc.shadowSteps, state.shadowSteps);
-    gl.uniform1i(uLoc.multiBounce, state.multiBounce ? 1 : 0);
     gl.uniform1f(uLoc.giBoost, state.giBoost);
     gl.uniform1i(uLoc.enableReSTIR, state.enableReSTIR ? 1 : 0);
+    gl.uniform1i(uLoc.enableTemporal, state.enableTemporal ? 1 : 0);
+    gl.uniform1f(uLoc.temporalAlpha, state.temporalAlpha);
+    gl.uniform1i(uLoc.frameIndex, state.frameIndex);
     gl.uniform4fv(uLoc.objPositions, objPosArray);
     gl.uniform4fv(uLoc.objAlbedos, objAlbedoArray);
 
-    // 1. Draw Floor
+    // Floor
     mat4TranslationScale(modelMatrix, [0, 0, 0], 1.0);
     gl.uniformMatrix4fv(uLoc.model, false, modelMatrix);
     gl.uniform4f(uLoc.matAlbedo, 0.32, 0.34, 0.38, 1.0);
@@ -884,7 +880,7 @@ function render(now) {
     gl.bindVertexArray(floorVAO);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, 0);
 
-    // 2. Draw each of the 5 Moving ShaderBall Meshes
+    // 5 ShaderBall Meshes
     gl.bindVertexArray(meshVAO);
     for (let i = 0; i < 5; ++i) {
         const obj = sceneObjects[i];

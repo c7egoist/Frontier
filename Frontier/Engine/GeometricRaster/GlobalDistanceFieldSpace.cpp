@@ -1,13 +1,173 @@
 //============================================================================================================================================
 //                                                GLOBALDISTANCEFIELDSPACE.CPP
 //============================================================================================================================================
-// 📦 World-space composite distance field volume accelerating scene-wide ray marching and coarse visibility queries.
+// 📦 World-space composite distance field volume and cascading 3D clipmaps accelerating scene-wide ray marching and coarse visibility queries.
 
 #include "GlobalDistanceFieldSpace.h"
 #include <algorithm>
 #include <cmath>
 
 namespace Frontier {
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                           CASCADED GLOBAL DISTANCE FIELD
+//------------------------------------------------------------------------------------------------------------------------
+
+CascadedGlobalDistanceField::CascadedGlobalDistanceField() noexcept
+{
+    Initialize(64u, 64u, 48u);
+}
+
+void CascadedGlobalDistanceField::Initialize(uint32_t ResX, uint32_t ResY, uint32_t ResZ) noexcept
+{
+    // Level 0: Fine Near-Field (sub-centimeter to 6cm resolution, 4m x 4m x 3m extent)
+    Levels[0].LevelIndex = 0u;
+    Levels[0].HalfExtent = Vector3{ 2.0f, 2.0f, 1.5f };
+    Levels[0].VoxelSize  = (Levels[0].HalfExtent.x * 2.0f) / static_cast<float>(ResX);
+    Levels[0].Center     = Vector3{ 0.0f, 0.0f, 0.75f };
+    Levels[0].Volume     = DistanceFieldSpace(ResX, ResY, ResZ,
+                                              Levels[0].Center - Levels[0].HalfExtent,
+                                              Levels[0].Center + Levels[0].HalfExtent);
+
+    // Level 1: Medium Field (18cm resolution, 14m x 14m x 6m extent)
+    Levels[1].LevelIndex = 1u;
+    Levels[1].HalfExtent = Vector3{ 7.0f, 7.0f, 3.0f };
+    Levels[1].VoxelSize  = (Levels[1].HalfExtent.x * 2.0f) / static_cast<float>(ResX);
+    Levels[1].Center     = Vector3{ 0.0f, 0.0f, 1.5f };
+    Levels[1].Volume     = DistanceFieldSpace(ResX, ResY, ResZ,
+                                              Levels[1].Center - Levels[1].HalfExtent,
+                                              Levels[1].Center + Levels[1].HalfExtent);
+
+    // Level 2: Coarse Far-Field (70cm resolution, 48m x 48m x 16m extent)
+    Levels[2].LevelIndex = 2u;
+    Levels[2].HalfExtent = Vector3{ 24.0f, 24.0f, 8.0f };
+    Levels[2].VoxelSize  = (Levels[2].HalfExtent.x * 2.0f) / static_cast<float>(ResX);
+    Levels[2].Center     = Vector3{ 0.0f, 0.0f, 4.0f };
+    Levels[2].Volume     = DistanceFieldSpace(ResX, ResY, ResZ,
+                                              Levels[2].Center - Levels[2].HalfExtent,
+                                              Levels[2].Center + Levels[2].HalfExtent);
+}
+
+void CascadedGlobalDistanceField::UpdateCameraPosition(Vector3 NewCameraPosition,
+                                                       const std::vector<DistanceFieldPlacement>& Placements) noexcept
+{
+    CameraPosition = NewCameraPosition;
+    bool NeedsUpdate = false;
+
+    for (uint32_t L = 0u; L < kLevelCount; ++L)
+    {
+        // Snap center to voxel grid steps to prevent crawling/shimmering artifacts
+        const float Step = Levels[L].VoxelSize * 2.0f;
+        const Vector3 DesiredCenter = {
+            std::floor(NewCameraPosition.x / Step + 0.5f) * Step,
+            std::floor(NewCameraPosition.y / Step + 0.5f) * Step,
+            std::max(Levels[L].HalfExtent.z * 0.5f, std::floor(NewCameraPosition.z / Step + 0.5f) * Step)
+        };
+
+        if ((DesiredCenter - Levels[L].Center).Length() > Levels[L].VoxelSize)
+        {
+            Levels[L].Center = DesiredCenter;
+            const uint32_t ResX = Levels[L].Volume.GetResolutionX();
+            const uint32_t ResY = Levels[L].Volume.GetResolutionY();
+            const uint32_t ResZ = Levels[L].Volume.GetResolutionZ();
+            Levels[L].Volume = DistanceFieldSpace(ResX, ResY, ResZ,
+                                                  Levels[L].Center - Levels[L].HalfExtent,
+                                                  Levels[L].Center + Levels[L].HalfExtent);
+            NeedsUpdate = true;
+        }
+    }
+
+    if (NeedsUpdate)
+    {
+        UpdateClipmaps(Placements);
+    }
+}
+
+void CascadedGlobalDistanceField::UpdateClipmaps(const std::vector<DistanceFieldPlacement>& Placements) noexcept
+{
+    for (uint32_t L = 0u; L < kLevelCount; ++L)
+    {
+        auto& Vol = Levels[L].Volume;
+        const uint32_t ResX = Vol.GetResolutionX();
+        const uint32_t ResY = Vol.GetResolutionY();
+        const uint32_t ResZ = Vol.GetResolutionZ();
+        const Vector3 BMin = Vol.GetBoundingMinimum();
+        const Vector3 BMax = Vol.GetBoundingMaximum();
+        const Vector3 Span = BMax - BMin;
+
+        for (uint32_t Z = 0u; Z < ResZ; ++Z)
+        {
+            const float RatioZ = (static_cast<float>(Z) + 0.5f) / static_cast<float>(ResZ);
+            const float WorldZ = BMin.z + RatioZ * Span.z;
+
+            for (uint32_t Y = 0u; Y < ResY; ++Y)
+            {
+                const float RatioY = (static_cast<float>(Y) + 0.5f) / static_cast<float>(ResY);
+                const float WorldY = BMin.y + RatioY * Span.y;
+
+                for (uint32_t X = 0u; X < ResX; ++X)
+                {
+                    const float RatioX = (static_cast<float>(X) + 0.5f) / static_cast<float>(ResX);
+                    const float WorldX = BMin.x + RatioX * Span.x;
+
+                    const Vector3 WorldPosition = { WorldX, WorldY, WorldZ };
+                    float MinDist = 1e6f;
+
+                    for (const auto& P : Placements)
+                    {
+                        if (!P.LocalField) continue;
+
+                        const Vector3 LocalPos = {
+                            (WorldPosition.x - P.WorldTranslation.x) / P.WorldScale.x,
+                            (WorldPosition.y - P.WorldTranslation.y) / P.WorldScale.y,
+                            (WorldPosition.z - P.WorldTranslation.z) / P.WorldScale.z
+                        };
+
+                        const float LocalDist = P.LocalField->SampleDistance(LocalPos);
+                        const float MinScale  = std::min({ P.WorldScale.x, P.WorldScale.y, P.WorldScale.z });
+                        const float ScaledDist = LocalDist * MinScale;
+
+                        if (ScaledDist < MinDist)
+                            MinDist = ScaledDist;
+                    }
+
+                    Vol.SetVoxelSample(X, Y, Z, MinDist);
+                }
+            }
+        }
+    }
+}
+
+float CascadedGlobalDistanceField::SampleDistance(Vector3 WorldPosition, uint32_t* OutLevelUsed) const noexcept
+{
+    // Try clipmap levels from finest (0) to coarsest (2)
+    for (uint32_t L = 0u; L < kLevelCount; ++L)
+    {
+        const Vector3 LocalDelta = {
+            std::abs(WorldPosition.x - Levels[L].Center.x),
+            std::abs(WorldPosition.y - Levels[L].Center.y),
+            std::abs(WorldPosition.z - Levels[L].Center.z)
+        };
+
+        // Inner margin to allow smooth trilinear sampling
+        const Vector3 Margin = Levels[L].HalfExtent * 0.90f;
+        if (LocalDelta.x <= Margin.x && LocalDelta.y <= Margin.y && LocalDelta.z <= Margin.z)
+        {
+            if (OutLevelUsed) *OutLevelUsed = L;
+            return Levels[L].Volume.SampleDistance(WorldPosition);
+        }
+    }
+
+    if (OutLevelUsed) *OutLevelUsed = kLevelCount - 1u;
+    return Levels[kLevelCount - 1u].Volume.SampleDistance(WorldPosition);
+}
+
+Vector3 CascadedGlobalDistanceField::SampleNormal(Vector3 WorldPosition) const noexcept
+{
+    uint32_t LevelIdx = 0u;
+    SampleDistance(WorldPosition, &LevelIdx);
+    return Levels[LevelIdx].Volume.SampleNormal(WorldPosition);
+}
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    CONSTRUCTION
@@ -22,6 +182,7 @@ GlobalDistanceFieldSpace::GlobalDistanceFieldSpace(uint32_t InResolutionX,
     , WorldBoundingMinimum(InWorldBoundingMinimum)
     , WorldBoundingMaximum(InWorldBoundingMaximum)
 {
+    InitializeCascades(InResolutionX, InResolutionY, InResolutionZ);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -120,6 +281,28 @@ void GlobalDistanceFieldSpace::UpdateGlobalGrid() noexcept
             }
         }
     }
+
+    Cascades.UpdateClipmaps(Placements);
+}
+
+void GlobalDistanceFieldSpace::InitializeCascades(uint32_t ResX, uint32_t ResY, uint32_t ResZ) noexcept
+{
+    Cascades.Initialize(ResX, ResY, ResZ);
+}
+
+void GlobalDistanceFieldSpace::UpdateCascades(Vector3 CameraPosition) noexcept
+{
+    Cascades.UpdateCameraPosition(CameraPosition, Placements);
+}
+
+float GlobalDistanceFieldSpace::SampleCascadedDistance(Vector3 WorldPosition, uint32_t* OutLevel) const noexcept
+{
+    return Cascades.SampleDistance(WorldPosition, OutLevel);
+}
+
+Vector3 GlobalDistanceFieldSpace::SampleCascadedNormal(Vector3 WorldPosition) const noexcept
+{
+    return Cascades.SampleNormal(WorldPosition);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -213,7 +396,6 @@ DistanceFieldHitRecord GlobalDistanceFieldSpace::MarchSceneRay(Vector3 RayOrigin
         {
             if (!Placement.LocalField) continue;
 
-            // Bounding box distance test
             const float OutDx = std::max(0.0f, std::max(Placement.WorldBoundMin.x - SamplePosition.x, SamplePosition.x - Placement.WorldBoundMax.x));
             const float OutDy = std::max(0.0f, std::max(Placement.WorldBoundMin.y - SamplePosition.y, SamplePosition.y - Placement.WorldBoundMax.y));
             const float OutDz = std::max(0.0f, std::max(Placement.WorldBoundMin.z - SamplePosition.z, SamplePosition.z - Placement.WorldBoundMax.z));
@@ -267,14 +449,13 @@ DistanceFieldHitRecord GlobalDistanceFieldSpace::MarchSceneRay(Vector3 RayOrigin
         CurrentDistance += SafeAdvance;
     }
 
-    // Ground plane hit
     if (GroundT < MaximumDistance && GroundT >= MinimumDistance && RayDirection.z < 0.0f)
     {
         ResultRecord.HasHit           = true;
         ResultRecord.TravelDistance   = GroundT;
         ResultRecord.HitPosition      = RayOrigin + RayDirection * GroundT;
         ResultRecord.SurfaceNormal    = Vector3{ 0.0f, 0.0f, 1.0f };
-        ResultRecord.InstanceIdentity = 0xFFFFFFFFu; // Studio floor
+        ResultRecord.InstanceIdentity = 0xFFFFFFFFu;
         return ResultRecord;
     }
 
@@ -321,10 +502,9 @@ float GlobalDistanceFieldSpace::MarchSceneSoftShadow(Vector3 ShadingPosition,
         if (DirLength < 1e-6f) continue;
         const Vector3 LocalDir = ScaledDir / DirLength;
 
-        // If this placement is the receiver object itself, use larger self-shadow margin to clear the voxel skin
         const float ObjectScale = std::min({ Placement.WorldScale.x, Placement.WorldScale.y, Placement.WorldScale.z });
         const float EffectiveMinDist = (Placement.InstanceIdentity == ReceiverInstance)
-            ? std::max(MinimumDistance, 0.055f * ObjectScale)
+            ? std::max(MinimumDistance, 0.065f * ObjectScale)
             : MinimumDistance;
 
         const float LocalMinT = EffectiveMinDist * DirLength;
