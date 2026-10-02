@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Tyre Forge — editor layout prototype</title>
+<title>Tyre Generator — editor layout prototype</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
@@ -299,7 +299,7 @@ select.sel:focus{border-color:var(--hi)}
 .notes td.k{color:var(--t1);white-space:nowrap}
 .notes code{font-family:"JetBrains Mono",monospace;font-size:10.5px;color:var(--t2);background:var(--field);
   border:1px solid var(--stroke);padding:1px 5px;border-radius:4px}
-body.soloforge .app,body.soloforge .scrim{display:none}
+body.sologenerator .app,body.sologenerator .scrim{display:none}
 </style>
 </head>
 <body>
@@ -351,7 +351,7 @@ body.soloforge .app,body.soloforge .scrim{display:none}
     <div class="stage">
       <div class="vcard" style="--rowtint:var(--bodies)">
         <div class="vhead"><span class="vbar"></span><span class="vt">Tyre · solid</span>
-          <span class="vact" id="vp-open" title="Open Tyre Forge" data-i="external"></span></div>
+          <span class="vact" id="vp-open" title="Open Tyre Generator" data-i="external"></span></div>
         <div class="cbody"><canvas id="solid"></canvas>
           <div class="chint">Drag to orbit · double-click to edit</div>
           <div class="cread" id="solid-read"></div></div>
@@ -394,22 +394,22 @@ body.soloforge .app,body.soloforge .scrim{display:none}
 <div class="scrim" id="scrim"></div>
 
 <!-- ══ DOCKABLE ASSET WINDOW ═══════════════════════════════════════════ -->
-<div class="window" id="forge">
+<div class="window" id="generator">
   <div class="dockedge" id="dockedge"></div>
-  <div class="wtitle" id="forge-title">
+  <div class="wtitle" id="generator-title">
     <span style="color:var(--sky)" data-i="layers"></span>
-    <span class="t">Tyre Forge</span><span class="s" id="forge-sub">—</span>
+    <span class="t">Tyre Generator</span><span class="s" id="generator-sub">—</span>
     <span class="sp"></span>
     <span class="wbtn" id="dk-float" title="Float"  data-i="window"></span>
     <span class="wbtn" id="dk-right" title="Dock right" data-i="dockRight"></span>
     <span class="wbtn" id="dk-bottom" title="Dock bottom" data-i="dockBottom"></span>
     <span class="wbtn" id="dk-full" title="Maximise" data-i="maximize"></span>
     <span class="wbtn" id="dk-pop" title="Open in a new window" data-i="external"></span>
-    <span class="wbtn" id="forge-close" title="Close" data-i="x"></span>
+    <span class="wbtn" id="generator-close" title="Close" data-i="x"></span>
   </div>
   <div class="wbody">
-    <div class="wtabs" id="forge-tabs"></div>
-    <div class="wcontent" id="forge-content"></div>
+    <div class="wtabs" id="generator-tabs"></div>
+    <div class="wcontent" id="generator-content"></div>
   </div>
   <div class="wgrip" id="wgrip"></div>
 </div>
@@ -741,7 +741,7 @@ function drawSolid(){
   const up=()=>{ if(!down) return; down=false; dragging=false; drawSolid(); };
   solidCv.addEventListener('pointerup', up);
   solidCv.addEventListener('pointercancel', up);
-  solidCv.addEventListener('dblclick', openForge);
+  solidCv.addEventListener('dblclick', openGenerator);
   solidCv.addEventListener('wheel', e=>{ e.preventDefault();
     view.dist = clamp(view.dist + e.deltaY*0.0016, 1.9, 5.4); drawSolid(); }, {passive:false});
 })();
@@ -1000,8 +1000,8 @@ function renderInspector(){
     a.body.append(kr);
     const btn=document.createElement('div'); btn.className='sbtn';
     btn.style.cssText+='display:inline-flex;margin-top:13px';
-    btn.innerHTML=icon('external','ico14')+'<span>Edit in Tyre Forge</span>';
-    btn.onclick=openForge; a.body.append(btn);
+    btn.innerHTML=icon('external','ico14')+'<span>Edit in Tyre Generator</span>';
+    btn.onclick=openGenerator; a.body.append(btn);
     push(a);
     const b=mcard({title:'Depth and wear',tint:'var(--orange)',value:fmt(Carcass.TreadDepth,1),unit:'mm',
       trend:Carcass.Wear>0?'downRight':'upRight',
@@ -1091,18 +1091,18 @@ function renderTree(){
     return r;
   };
   node(0,'tyre','Tyre',Pattern.Name,ROWS_TINT.Tyre,selection==='Tyre',
-    ()=>{selection='Tyre';selectedLayer=-1;refresh();},{chev:'chevDown',dbl:openForge});
+    ()=>{selection='Tyre';selectedLayer=-1;refresh();},{chev:'chevDown',dbl:openGenerator});
   if(active.has('Carcass'))
     node(1,'disc','Carcass',`${Carcass.Width}/${Carcass.Aspect}R${Carcass.Rim}`,ROWS_TINT.Carcass,
-      selection==='Carcass',()=>{selection='Carcass';selectedLayer=-1;refresh();},{dbl:openForge});
+      selection==='Carcass',()=>{selection='Carcass';selectedLayer=-1;refresh();},{dbl:openGenerator});
   if(active.has('Pattern')){
     node(1,'grid','Tread pattern',`${Pattern.Layers.length} layers`,ROWS_TINT['Tread pattern'],
       selection==='Tread pattern',()=>{selection='Tread pattern';selectedLayer=-1;refresh();},
-      {chev:'chevDown',dbl:openForge});
+      {chev:'chevDown',dbl:openGenerator});
     Pattern.Layers.forEach((L,i)=>{
       node(2,KIND_ICON[L.Kind],L.Kind,fmt(L.DepthFraction*Carcass.TreadDepth,1)+' mm',ROWS_TINT.Layer,
         selectedLayer===i,()=>{selection='Layer';selectedLayer=i;refresh();},
-        {off:!L.Enabled,dbl:openForge,tag:L.Kind==='Noise'?'FIELD':null});
+        {off:!L.Enabled,dbl:openGenerator,tag:L.Kind==='Noise'?'FIELD':null});
     });
   }
   if(active.has('Decals'))
@@ -1117,24 +1117,24 @@ function renderTree(){
 }
 
 /* ═══ dockable asset window ═════════════════════════════════════════════ */
-const forge=document.getElementById('forge'), appEl=document.getElementById('app');
+const generator=document.getElementById('generator'), appEl=document.getElementById('app');
 let dock='float';
 function applyDock(){
-  forge.classList.remove('dock-right','dock-bottom','full');
+  generator.classList.remove('dock-right','dock-bottom','full');
   appEl.classList.remove('dock-right','dock-bottom');
-  if(dock!=='float'&&dock!=='window') forge.classList.add(dock);
+  if(dock!=='float'&&dock!=='window') generator.classList.add(dock);
   if(dock==='dock-right'||dock==='dock-bottom') appEl.classList.add(dock);
-  document.getElementById('scrim').classList.toggle('open', dock==='float'&&forge.classList.contains('open'));
+  document.getElementById('scrim').classList.toggle('open', dock==='float'&&generator.classList.contains('open'));
   for(const [id,v] of [['dk-float','float'],['dk-right','dock-right'],['dk-bottom','dock-bottom'],['dk-full','full']])
     document.getElementById(id).classList.toggle('on',dock===v);
   requestAnimationFrame(()=>{drawSolid();drawSection();drawPlan();});
 }
-function openForge(){ forge.classList.add('open'); applyDock(); renderForge(); }
-function closeForge(){ forge.classList.remove('open'); appEl.classList.remove('dock-right','dock-bottom');
+function openGenerator(){ generator.classList.add('open'); applyDock(); renderGenerator(); }
+function closeGenerator(){ generator.classList.remove('open'); appEl.classList.remove('dock-right','dock-bottom');
   document.getElementById('scrim').classList.remove('open');
   requestAnimationFrame(()=>{drawSolid();drawSection();drawPlan();}); }
 
-let forgeTab='Pattern';
+let generatorTab='Pattern';
 const TABS=['Pattern','Carcass','Notes'];
 const LF={
   common:[{key:'Kind',label:'Kind',ui:'choice',options:KINDS},
@@ -1170,17 +1170,17 @@ function fieldsFor(k){ const f=[...LF.common];
   else { f.push(...LF.lateral); if(k==='Chevron') f.push(...LF.Chevron); }
   return f; }
 
-function renderForge(){
-  document.getElementById('forge-sub').textContent=
+function renderGenerator(){
+  document.getElementById('generator-sub').textContent=
     `${Pattern.Name} · ${Carcass.Width}/${Carcass.Aspect} R${Carcass.Rim}`;
-  const tabs=document.getElementById('forge-tabs'); tabs.innerHTML='';
+  const tabs=document.getElementById('generator-tabs'); tabs.innerHTML='';
   for(const t of TABS){ const e=document.createElement('div');
-    e.className='wtab'+(forgeTab===t?' on':''); e.textContent=t;
-    e.onclick=()=>{forgeTab=t;renderForge();}; tabs.append(e); }
-  const host=document.getElementById('forge-content'); host.innerHTML='';
+    e.className='wtab'+(generatorTab===t?' on':''); e.textContent=t;
+    e.onclick=()=>{generatorTab=t;renderGenerator();}; tabs.append(e); }
+  const host=document.getElementById('generator-content'); host.innerHTML='';
 
-  if(forgeTab==='Notes'){ host.append(notesPanel()); return; }
-  if(forgeTab==='Carcass'){
+  if(generatorTab==='Notes'){ host.append(notesPanel()); return; }
+  if(generatorTab==='Carcass'){
     const pad=document.createElement('div'); pad.style.cssText='padding:14px 16px;max-width:470px';
     const a=mcard({title:'Marked size',tint:'var(--geometry)'});
     for(const f of [F.width,F.aspect,F.rim]) a.body.append(control(Carcass,f,refresh));
@@ -1308,40 +1308,40 @@ gate is still red on watertightness.</p>
 <p>Outliner rows <strong>Tyre → Carcass, Tread pattern, Sidewall decals, XPBD lattice</strong> with role bits
 shaped like <code>SolidArcOutlinerFilter</code>. The inspector entry point is
 <code>void RecordTyreInspector(ControlPanel&amp;, EditorInstance&amp;, EditorSheet&amp;)</code>, matching
-<code>RecordCameraInspector</code>, so the quick strip lands in the existing panel while Tyre Forge is a
+<code>RecordCameraInspector</code>, so the quick strip lands in the existing panel while Tyre Generator is a
 separate dockable host — the split the brief asked for.</p>`;
   return d;
 }
 
 /* ── window drag, resize, dock ─────────────────────────────────────────── */
 (function(){
-  const t=document.getElementById('forge-title');
+  const t=document.getElementById('generator-title');
   let dx=0,dy=0,on=false;
   t.addEventListener('mousedown',e=>{
     if(e.target.closest('.wbtn')||dock!=='float') return;
-    on=true;t.classList.add('drag');dx=e.clientX-forge.offsetLeft;dy=e.clientY-forge.offsetTop;e.preventDefault();});
+    on=true;t.classList.add('drag');dx=e.clientX-generator.offsetLeft;dy=e.clientY-generator.offsetTop;e.preventDefault();});
   addEventListener('mousemove',e=>{ if(!on)return;
-    forge.style.left=clamp(e.clientX-dx,-240,innerWidth-200)+'px';
-    forge.style.top=clamp(e.clientY-dy,0,innerHeight-44)+'px'; });
+    generator.style.left=clamp(e.clientX-dx,-240,innerWidth-200)+'px';
+    generator.style.top=clamp(e.clientY-dy,0,innerHeight-44)+'px'; });
   addEventListener('mouseup',()=>{on=false;t.classList.remove('drag');});
 
   const grip=document.getElementById('wgrip');
   let rs=false,sw=0,sh=0,sx=0,sy=0;
   grip.addEventListener('pointerdown',e=>{rs=true;sx=e.clientX;sy=e.clientY;
-    sw=forge.offsetWidth;sh=forge.offsetHeight;grip.setPointerCapture(e.pointerId);e.preventDefault();});
+    sw=generator.offsetWidth;sh=generator.offsetHeight;grip.setPointerCapture(e.pointerId);e.preventDefault();});
   grip.addEventListener('pointermove',e=>{ if(!rs)return;
-    forge.style.width=clamp(sw+e.clientX-sx,520,innerWidth-40)+'px';
-    forge.style.height=clamp(sh+e.clientY-sy,320,innerHeight-40)+'px'; });
-  grip.addEventListener('pointerup',()=>{rs=false;renderForge();});
+    generator.style.width=clamp(sw+e.clientX-sx,520,innerWidth-40)+'px';
+    generator.style.height=clamp(sh+e.clientY-sy,320,innerHeight-40)+'px'; });
+  grip.addEventListener('pointerup',()=>{rs=false;renderGenerator();});
 
   const edge=document.getElementById('dockedge');
   let de=false;
   edge.addEventListener('pointerdown',e=>{de=true;edge.setPointerCapture(e.pointerId);e.preventDefault();});
   edge.addEventListener('pointermove',e=>{ if(!de)return;
     if(dock==='dock-right'){ const w=clamp(innerWidth-e.clientX,360,innerWidth-420);
-      forge.style.setProperty('--dockw',w+'px'); appEl.style.setProperty('--dockw',w+'px'); }
+      generator.style.setProperty('--dockw',w+'px'); appEl.style.setProperty('--dockw',w+'px'); }
     if(dock==='dock-bottom'){ const h=clamp(innerHeight-e.clientY,220,innerHeight-220);
-      forge.style.setProperty('--dockh',h+'px'); appEl.style.setProperty('--dockh',h+'px'); }
+      generator.style.setProperty('--dockh',h+'px'); appEl.style.setProperty('--dockh',h+'px'); }
     drawSolid(); drawSection(); drawPlan(); });
   edge.addEventListener('pointerup',()=>{de=false;});
 })();
@@ -1351,11 +1351,11 @@ document.getElementById('dk-right').onclick=()=>setDock('dock-right');
 document.getElementById('dk-bottom').onclick=()=>setDock('dock-bottom');
 document.getElementById('dk-full').onclick=()=>setDock(dock==='full'?'float':'full');
 document.getElementById('dk-pop').onclick=()=>
-  open(location.pathname+'?forge=1','TyreForge','width=1040,height=680,menubar=no,toolbar=no');
-document.getElementById('forge-close').onclick=closeForge;
-document.getElementById('scrim').onclick=closeForge;
-document.getElementById('vp-open').onclick=openForge;
-addEventListener('keydown',e=>{ if(e.key==='Escape'&&dock==='float') closeForge(); });
+  open(location.pathname+'?generator=1','TyreGenerator','width=1040,height=680,menubar=no,toolbar=no');
+document.getElementById('generator-close').onclick=closeGenerator;
+document.getElementById('scrim').onclick=closeGenerator;
+document.getElementById('vp-open').onclick=openGenerator;
+addEventListener('keydown',e=>{ if(e.key==='Escape'&&dock==='float') closeGenerator(); });
 
 /* ── viewport mode pills ───────────────────────────────────────────────── */
 const MODES=['Solid','Wire','Depth']; let vmode='Solid';
@@ -1390,16 +1390,16 @@ function refresh(){
     document.getElementById('s-dia').textContent=`${fmt(2*d.OuterRadius,0)} mm`;
     document.getElementById('s-flo').textContent=depths.size+1;
     renderChips(); renderTree(); renderInspector(); hydrate();
-    if(forge.classList.contains('open')) renderForge();
+    if(generator.classList.contains('open')) renderGenerator();
     drawSolid(); drawSection(); drawPlan();
   });
 }
 addEventListener('resize',()=>{drawSolid();drawSection();drawPlan();});
 
 hydrate();
-if(new URLSearchParams(location.search).has('forge')){
-  document.body.classList.add('soloforge');
-  forge.classList.add('open','full'); dock='full';
+if(new URLSearchParams(location.search).has('generator')){
+  document.body.classList.add('sologenerator');
+  generator.classList.add('open','full'); dock='full';
 }
 refresh();
 </script>

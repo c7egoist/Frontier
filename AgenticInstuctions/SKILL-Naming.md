@@ -145,6 +145,16 @@ Banned OO / AI tropes — Manager, Handler, Processor, Controller, Service, Util
 Module, Core, System, Backend, Pass, Stage, Harness, Shell, Entity, Element, Subsystem, Hierarchy, Data,
 Info (use Information), Object, Item, Thing, Kind, Base, flag, state, value.
 
+Banned grandiose branding words — Forge, Nexus, Apex, Hub, Studio, Suite, Engine (as a product name),
+Vertex (as branding), Prime, Ultra, Pro, Max, Zenith, Pinnacle, Summit, Vanguard, Catalyst, Quantum,
+Synergy, Fusion, Genesis, Odyssey, Horizon (as branding), Titan, Atlas (already barred structurally).
+
+⚠️ These are the words a language model reaches for when it wants a name to sound impressive rather than to
+say what the thing does. `Forge` tells a reader nothing: it does not say the tool authors a tyre, edits a
+specification or generates a mesh — it only signals that something important supposedly happens inside.
+Name the mechanism: a tool that generates a tyre is a `TyreGenerator`, the panel that draws it is a
+`TyreGeneratorPanel`, the project seam that feeds it is a `TyreGeneratorSequence`.
+
 ⚠️ `Kind` is banned in prose as well as in identifiers, because it is the word that gets reached for when a
 mechanism has not yet been named. State the discriminating mechanism instead: a recording declares a `Command`,
 a decal declares its `Source`, a layer declares its `Content`. Neighbouring vague spellings — `Type`, `Sort`,

@@ -27,9 +27,9 @@ ROOT = Checkout.ROOT
 GALLERY = ROOT / "Exhibits/Gallery/Editor"
 
 SOURCES = [
-    "Exhibits/Workbench/Editor/TyreForgeProof.cpp",
+    "Exhibits/Workbench/Editor/TyreGeneratorProof.cpp",
     "Engine/Editor/TyreInspectorPanel.cpp",
-    "Projects/Project-Drive/Source/TyreForgeSequence.cpp",
+    "Projects/Project-Drive/Source/TyreGeneratorSequence.cpp",
     # the editor itself
     "Engine/Editor/EditorHost.cpp", "Engine/Editor/ControlPanel.cpp", "Engine/Editor/OutlinerPanel.cpp",
     "Engine/Editor/ViewportPanel.cpp", "Engine/Editor/InspectorPanel.cpp", "Engine/Editor/ShadeTick.cpp",
@@ -64,7 +64,7 @@ INCLUDES = [
     "ExternalPackages/tomlpp/include", "ExternalPackages/thorvg/inc", "ExternalPackages/stb",
     "Exhibits/Workbench/Editor", "Exhibits/Workbench/Editor/Counterparts", "Exhibits/Workbench/IconArt",
 ]
-SHEETS = ["Tyre", "Carcass", "Lattice", "Forge"]
+SHEETS = ["Tyre", "Carcass", "Lattice", "Generator"]
 
 
 def main() -> int:
@@ -75,12 +75,12 @@ def main() -> int:
     Checkout.run([sys.executable, "Tools/Build/ApplyImGuiPatches.py"], cwd=engine, quiet=True)
     Checkout.run([sys.executable, "Tools/Build/ApplyImGuiPatches.py", "--verify"], cwd=engine, quiet=True)
 
-    binary = engine / ".cache/TyreForgeProof"
+    binary = engine / ".cache/TyreGeneratorProof"
     binary.parent.mkdir(parents=True, exist_ok=True)
     compile_command = ["g++", "-std=c++20", "-O2", "-DFRONTIER_DEVELOPMENT", "-DTVG_STATIC", "-pthread",
                        *[f"-I{path}" for path in INCLUDES], *SOURCES,
                        ".cache/icon-art/release/libthorvg.a", "-o", str(binary)]
-    print("[tyreforge] compiling Engine/Editor + the patched vendor ImGui (headless: no Vulkan, no GLFW)")
+    print("[tyregenerator] compiling Engine/Editor + the patched vendor ImGui (headless: no Vulkan, no GLFW)")
     Checkout.run(compile_command, cwd=engine, quiet=True)
 
     # The proof writes into the engine checkout's own gallery; it gates each sheet as it goes.
@@ -96,23 +96,23 @@ def main() -> int:
 
     written: list[Path] = []
     for sheet in SHEETS:
-        produced = destination / f"TyreForgeProof_{sheet}.png"
+        produced = destination / f"TyreGeneratorProof_{sheet}.png"
         if not produced.exists():
-            print(f"[tyreforge] MISSING {produced.name}")
+            print(f"[tyregenerator] MISSING {produced.name}")
             continue
-        target = GALLERY / f"TyreForgeProof_{sheet}_CPU_Reference.png"
+        target = GALLERY / f"TyreGeneratorProof_{sheet}_CPU_Reference.png"
         shutil.copyfile(produced, target)
         written.append(target)
-        print(f"[tyreforge] {sheet:<10} -> {target.name}")
+        print(f"[tyregenerator] {sheet:<10} -> {target.name}")
 
     if not written:
-        raise RuntimeError("the tyre forge proof produced no sheets")
+        raise RuntimeError("the tyre generator proof produced no sheets")
 
-    gates = sum(1 for line in log.splitlines() if "[FAIL]" not in line and "TyreForgeProof]" in line)
+    gates = sum(1 for line in log.splitlines() if "[FAIL]" not in line and "TyreGeneratorProof]" in line)
     failures = [line.strip() for line in log.splitlines() if "[FAIL]" in line]
     record = Checkout.provenance(
         proof="The tyre's editor surfaces, rasterised from the real EditorHost tick through the real patched ImGui.",
-        scene=("No imported level: the roster is TyreForgeSequence::FillRoster over the Grizzly Magnum preset, "
+        scene=("No imported level: the roster is TyreGeneratorSequence::FillRoster over the Grizzly Magnum preset, "
                "driven through EditorHost for ten ticks per phase, one sheet per picked tyre row."),
         commands=[compile_command, run_command], results={
             "sheets": [path.name for path in written],
@@ -123,10 +123,10 @@ def main() -> int:
                      "an upstream editor regression the sheet still faithfully records; it is not a rendering "
                      "substitution."),
         }, outputs=written)
-    (GALLERY / "TyreForgeProvenance.json").write_text(json.dumps(record, indent=2) + "\n")
-    print(f"[tyreforge] wrote {len(written)} sheets + Provenance.json under {GALLERY.relative_to(ROOT)}")
+    (GALLERY / "TyreGeneratorProvenance.json").write_text(json.dumps(record, indent=2) + "\n")
+    print(f"[tyregenerator] wrote {len(written)} sheets + Provenance.json under {GALLERY.relative_to(ROOT)}")
     if failures:
-        print(f"[tyreforge] NOTE {len(failures)} upstream editor gates failed; recorded in Provenance.json")
+        print(f"[tyregenerator] NOTE {len(failures)} upstream editor gates failed; recorded in Provenance.json")
     return 0
 
 

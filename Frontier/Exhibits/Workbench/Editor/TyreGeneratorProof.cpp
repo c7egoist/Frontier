@@ -1,15 +1,15 @@
 //============================================================================================================================================
-//                                                       TYREFORGEPROOF.CPP
+//                                                       TYREGENERATORPROOF.CPP
 //============================================================================================================================================
 // 📦 Headless visual proof of the tyre's editor surfaces. Drives the REAL EditorHost over a roster built by the
-//    REAL TyreForgeSequence, draws the REAL TyreInspectorPanel and Tyre Forge window, and rasterises the
+//    REAL TyreGeneratorSequence, draws the REAL TyreInspectorPanel and Tyre Generator window, and rasterises the
 //    resulting ImDrawData. Nothing here draws a widget; it drives the editor and photographs what came out.
 
 #include "EditorHost.h"
 #include "ControlPanel.h"
 #include "EditorInstance.h"
 #include "TyreInspectorPanel.h"
-#include "../../../Projects/Project-Drive/Source/TyreForgeSequence.h"
+#include "../../../Projects/Project-Drive/Source/TyreGeneratorSequence.h"
 
 #include "../../../Engine/DisplayPresentation/TypefaceRegistry.h"
 
@@ -151,7 +151,7 @@ void Gate(const char* Name, bool Pass, const char* Detail = "") noexcept
     {
         ++gFailures;
     }
-    std::printf("[TyreForgeProof] %s  %s%s%s\n", Pass ? "PASS" : "[FAIL]", Name,
+    std::printf("[TyreGeneratorProof] %s  %s%s%s\n", Pass ? "PASS" : "[FAIL]", Name,
                 Detail[0] ? "  -- " : "", Detail);
 }
 
@@ -184,7 +184,7 @@ int main()
     IO.DeltaTime   = 1.0f / 60.0f;
     IO.IniFilename = nullptr;
     IO.LogFilename = nullptr;
-    IO.ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // Tyre Forge is dockable because the host docks
+    IO.ConfigFlags |= ImGuiConfigFlags_DockingEnable;   // Tyre Generator is dockable because the host docks
     IO.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
 
     Frontier::EditorHost Editor;
@@ -200,7 +200,7 @@ int main()
 
     if (!Editor.SeatShade(1280u, 720u))
     {
-        std::fprintf(stderr, "[TyreForgeProof] [FAIL] the shade never seated\n");
+        std::fprintf(stderr, "[TyreGeneratorProof] [FAIL] the shade never seated\n");
         return 1;
     }
 
@@ -211,11 +211,11 @@ int main()
     Editor.AssignReadout(&Readout);
 
     // ① the real sequence, seated with the same preset the tread mesh gate runs
-    Frontier::Drive::TyreForgeSequence Forge;
-    Frontier::Drive::SeatGrizzlyMagnum(Forge.Document);
+    Frontier::Drive::TyreGeneratorSequence Generator;
+    Frontier::Drive::SeatGrizzlyMagnum(Generator.Document);
 
     Frontier::EditorInstance Rows[Frontier::kMaxEditorInstances] = {};
-    const uint32_t RowCount = Forge.FillRoster(Rows, 0u, Frontier::kMaxEditorInstances, 0u);
+    const uint32_t RowCount = Generator.FillRoster(Rows, 0u, Frontier::kMaxEditorInstances, 0u);
 
     Gate("roster carries the tyre and its parts", RowCount == 12u,
          [&]{ static char T[48]; std::snprintf(T, sizeof(T), "%u rows", unsigned(RowCount)); return T; }());
@@ -233,13 +233,13 @@ int main()
         { "Tyre",    Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Tyre) },
         { "Carcass", Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Carcass) },
         { "Lattice", Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Lattice) },
-        { "Forge",   Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Layer, 3u) },
+        { "Generator",   Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Layer, 3u) },
     };
 
     for (const Phase& P : Phases)
     {
         Frontier::EditorSheet Built{};
-        const bool Ok = Forge.BuildSheet(P.Key, &Built);
+        const bool Ok = Generator.BuildSheet(P.Key, &Built);
         char Detail[64];
         std::snprintf(Detail, sizeof(Detail), "%u cards", unsigned(Built.GroupCount));
         char Name[64];
@@ -251,16 +251,16 @@ int main()
     {
         Frontier::EditorSheet Built{};
         const uint64_t Key = Frontier::Drive::TyreInspectorKey(Frontier::Drive::TyreSection::Tyre);
-        (void)Forge.BuildSheet(Key, &Built);
+        (void)Generator.BuildSheet(Key, &Built);
         Built.Groups[0].Properties[0].Figure = 310.0f;
-        const bool Changed = Forge.ApplySheet(Key, Built);
+        const bool Changed = Generator.ApplySheet(Key, Built);
         Gate("an edited sheet reaches the document",
-             Changed && std::fabs(Forge.Document.Carcass.InflationPressure - 310.0f) < 0.01f,
+             Changed && std::fabs(Generator.Document.Carcass.InflationPressure - 310.0f) < 0.01f,
              "pressure 240 -> 310 kPa");
-        const float Hoop = Forge.Document.Carcass.HoopCompliance();
+        const float Hoop = Generator.Document.Carcass.HoopCompliance();
         Gate("compliance follows pressure", Hoop < 1.0e-7f,
              [&]{ static char T[48]; std::snprintf(T, sizeof(T), "hoop %.3e m/N", double(Hoop)); return T; }());
-        Forge.Document.Carcass.InflationPressure = 240.0f;
+        Generator.Document.Carcass.InflationPressure = 240.0f;
     }
 
     // ④ drive the real editor and photograph each phase
@@ -268,7 +268,7 @@ int main()
     for (const Phase& P : Phases)
     {
         Frontier::EditorSheet Built{};
-        if (!Forge.BuildSheet(P.Key, &Built))
+        if (!Generator.BuildSheet(P.Key, &Built))
         {
             continue;
         }
@@ -290,17 +290,18 @@ int main()
         Gate(PickName, Picked != Frontier::kNoEditorInstance && Editor.QueryPickedInstance() == Picked,
              Picked != Frontier::kNoEditorInstance ? Rows[Picked].Label : "not found");
 
-        const bool ForgeOpen = std::strcmp(P.Name, "Forge") == 0;
+        const bool GeneratorOpen = std::strcmp(P.Name, "Generator") == 0;
 
         // ten ticks so every easing in the panels has settled before the shutter
         for (int Tick = 0; Tick < 10; ++Tick)
         {
             ImGui::NewFrame();
             Editor.Record(Rows, RowCount, &Built);
-            if (ForgeOpen)
+            if (GeneratorOpen)
             {
                 bool Open = true;
-                Frontier::RecordTyreForgeWindow(Editor.QueryControls(), Built, &Open);
+                Frontier::RecordTyreGeneratorWindow(Editor.QueryControls(), Generator.Document.Tread,
+                                                    Generator.Document.Pattern, Built, &Open);
             }
             ImGui::Render();
         }
@@ -313,7 +314,7 @@ int main()
         }
 
         char Path[160];
-        std::snprintf(Path, sizeof(Path), "Exhibits/Gallery/Editor/TyreForgeProof_%s.png", P.Name);
+        std::snprintf(Path, sizeof(Path), "Exhibits/Gallery/Editor/TyreGeneratorProof_%s.png", P.Name);
         stbi_write_png(Path, Target.Width, Target.Height, 4, Target.Pixels.data(), Target.Width * 4);
 
         const double Ink = InkFraction(Target);
@@ -321,9 +322,9 @@ int main()
         std::snprintf(Name, sizeof(Name), "%s sheet rasterises", P.Name);
         std::snprintf(Detail, sizeof(Detail), "%.1f%% of the surface drawn", Ink * 100.0);
         Gate(Name, Ink > 0.25, Detail);
-        std::printf("[TyreForgeProof] wrote %s\n", Path);
+        std::printf("[TyreGeneratorProof] wrote %s\n", Path);
     }
 
-    std::printf("[TyreForgeProof] %d/%d gates passed\n", gChecks - gFailures, gChecks);
+    std::printf("[TyreGeneratorProof] %d/%d gates passed\n", gChecks - gFailures, gChecks);
     return gFailures == 0 ? 0 : 1;
 }

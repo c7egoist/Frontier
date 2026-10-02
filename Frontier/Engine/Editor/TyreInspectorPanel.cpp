@@ -2,18 +2,22 @@
 //                                                      TYREINSPECTORPANEL.CPP
 //============================================================================================================================================
 // 📦 Draws the tyre's two editor surfaces from one property sheet: the quick strip in the shared Inspector, and
-//    Tyre Forge, the dockable asset window that owns the tread layer sequence.
+//    Tyre Generator, the dockable asset window that owns the tread layer sequence.
 
 #include "TyreInspectorPanel.h"
 
 #include "ControlPanel.h"
 #include "EditorInstance.h"
 
+#include "../ContentInterchange/Tyre/TyreProfileSpecification.h"
+
 #include "imgui.h"
 #include "imgui_internal.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 namespace Frontier {
 
@@ -80,6 +84,250 @@ void SplitFigure(float Value, uint32_t Decimals, char* Whole, size_t WholeSize, 
         }
     }
     return nullptr;
+}
+
+
+//------------------------------------------------------------------------------------------------------------------------
+//                                                     TREAD PREVIEW
+//------------------------------------------------------------------------------------------------------------------------
+// The grooves as centreline polylines in the developed domain (x circumferential, y lateral). This is a PREVIEW:
+//    it strokes where the solver will cut, it does not run the boolean partition. TreadRegionSolver remains the
+//    geometry of record; this exists so the generator shows the tyre while it is being authored.
+
+constexpr float kPi = 3.14159265358979323846f;
+
+struct GrooveStroke
+{
+    std::vector<ImVec2> Points;   // x = circumferential [mm], y = lateral [mm]
+    float Width = 8.0f;           // [mm]
+};
+
+[[nodiscard]] float ZigWave(float Phase) noexcept
+{
+    const float Wrapped = Phase - std::floor(Phase);
+    return (Wrapped < 0.5f) ? (4.0f * Wrapped - 1.0f) : (3.0f - 4.0f * Wrapped);
+}
+
+void CollectGrooves(const TreadLayerSpecification& Layer, const TreadSpecification& Specification,
+                    const TreadDerivedValues& Derived, std::vector<GrooveStroke>& Out) noexcept
+{
+    const float Half = Derived.TreadHalf;
+    const float Loop = Derived.Circumference;
+    (void)Specification;
+
+    if (Layer.Kind == TreadLayerKind::Noise)
+    {
+        return;                                            // carries no polygons, by design
+    }
+
+    if (Layer.Kind == TreadLayerKind::Circumferential)
+    {
+        GrooveStroke Stroke;
+        Stroke.Width = Layer.Width;
+        const int Steps = (Layer.Zig > 0.0f) ? int(Layer.ZigCount * 8.0f) + 1 : 2;
+        for (int I = 0; I <= Steps; ++I)
+        {
+            const float T = float(I) / float(Steps);
+            Stroke.Points.push_back(ImVec2(T * Loop, Layer.Position * Half + Layer.Zig * ZigWave(T * Layer.ZigCount)));
+        }
+        Out.push_back(std::move(Stroke));
+        return;
+    }
+
+    if (Layer.Kind == TreadLayerKind::Dimple)
+    {
+        const int Rows  = Layer.Rows  < 1.0f ? 1 : int(Layer.Rows + 0.5f);
+        const int Count = Layer.Count < 1.0f ? 1 : int(Layer.Count + 0.5f);
+        for (int R = 0; R < Rows; ++R)
+        {
+            const float Fraction = (Rows == 1) ? 0.5f : float(R) / float(Rows - 1);
+            const float Lateral  = (Layer.From + (Layer.To - Layer.From) * Fraction) * Half;
+            for (int I = 0; I < Count; ++I)
+            {
+                const float Offset = (Layer.Stagger && (R % 2) != 0) ? 0.5f : 0.0f;
+                const float Around = (float(I) + Offset + Layer.Phase) / float(Count) * Loop;
+                GrooveStroke Disc;
+                Disc.Width = Layer.Radius * 2.0f;
+                Disc.Points.push_back(ImVec2(Around, Lateral));
+                Disc.Points.push_back(ImVec2(Around, Lateral));   // a dot: stroked round, it reads as the disc
+                Out.push_back(std::move(Disc));
+            }
+        }
+        return;
+    }
+
+    // The lateral family: Lateral, Chevron, Sipe — and Hexagon, previewed as its two lattice diagonals.
+    const int   Count = Layer.Count < 1.0f ? 1 : int(Layer.Count + 0.5f);
+    const int   Steps = (Layer.Curve != 0.0f) ? 8 : 1;
+    const float Lean  = std::tan((Layer.Angle < -75.0f ? -75.0f : (Layer.Angle > 75.0f ? 75.0f : Layer.Angle)) * kPi / 180.0f);
+    const bool  Mirrored = (Layer.Kind == TreadLayerKind::Chevron) && Layer.Mirror;
+
+    for (int I = 0; I < Count; ++I)
+    {
+        const float Base = (float(I) + Layer.Phase) / float(Count) * Loop;
+        for (int Side = 0; Side < (Mirrored ? 2 : 1); ++Side)
+        {
+            float From = Layer.From * Half;
+            float To   = Layer.To * Half;
+            float Sign = 1.0f;
+            if (Mirrored)
+            {
+                if (Side == 0) { From = 0.0f; To = Layer.To * Half; }
+                else           { From = Layer.From * Half; To = 0.0f; Sign = -1.0f; }
+            }
+            GrooveStroke Stroke;
+            Stroke.Width = Layer.Width;
+            for (int S = 0; S <= Steps; ++S)
+            {
+                const float T       = float(S) / float(Steps);
+                const float Lateral = From + (To - From) * T;
+                const float Bow     = Layer.Curve * (To - From) * 0.5f * (1.0f - (2.0f * T - 1.0f) * (2.0f * T - 1.0f));
+                Stroke.Points.push_back(ImVec2(Base + Sign * ((Lateral - From) * Lean + Bow), Lateral));
+            }
+            Out.push_back(std::move(Stroke));
+        }
+    }
+}
+
+/// 📦 Draws the tyre face-on: the moulded annulus with the pattern wrapped around it, which is the one view
+///    that reads as "a tyre" at a glance.
+void DrawTyreFace(ImDrawList* Draw, ImVec2 Centre, float Pixels, const TreadSpecification& Specification,
+                  const TreadPatternSpecification& Pattern, int PickedLayer) noexcept
+{
+    const TreadDerivedValues Derived = DeriveTreadValues(Specification);
+    const float Scale = Pixels / Derived.OuterRadius;             // [px/mm]
+    const float Outer = Derived.OuterRadius * Scale;
+    const float Bead  = Derived.RimRadius * Scale;
+
+    Draw->AddCircleFilled(Centre, Outer, IM_COL32(28, 28, 30, 255), 96);
+    Draw->AddCircle(Centre, Outer, IM_COL32(255, 255, 255, 46), 96, 1.2f);
+
+    // The tread band, as a ring: the pattern is drawn inside it, wrapped by angle.
+    const float BandOuter = Outer;
+    const float BandInner = Outer * 0.80f;
+    Draw->AddCircleFilled(Centre, BandOuter, IM_COL32(54, 54, 58, 255), 96);
+    Draw->AddCircleFilled(Centre, BandInner, IM_COL32(20, 20, 22, 255), 96);
+
+    std::vector<GrooveStroke> Strokes;
+    for (uint32_t L = 0; L < uint32_t(Pattern.Layers.size()); ++L)
+    {
+        const TreadLayerSpecification& Layer = Pattern.Layers[L];
+        Strokes.clear();
+        CollectGrooves(Layer, Specification, Derived, Strokes);
+
+        const bool  Picked = (int(L) == PickedLayer);
+        const float Depth  = Layer.DepthFraction;
+        const ImU32 Tint   = Picked ? IM_COL32(0x5A, 0xA9, 0xFF, 235)
+                                    : IM_COL32(10, 10, 12, ImU8(170 + 85 * Depth));
+
+        for (const GrooveStroke& Stroke : Strokes)
+        {
+            if (Stroke.Points.size() < 2u)
+            {
+                continue;
+            }
+            // Lateral maps across the band; circumference maps to angle.
+            const float Thickness = (Stroke.Width * Scale) * 0.55f;
+            std::vector<ImVec2> Wrapped;
+            Wrapped.reserve(Stroke.Points.size());
+            for (const ImVec2& P : Stroke.Points)
+            {
+                const float Angle  = (P.x / Derived.Circumference) * 2.0f * kPi - kPi * 0.5f;
+                const float Across = 0.5f + 0.5f * (P.y / Derived.AcrossHalf);
+                const float Radius = BandInner + (BandOuter - BandInner) * Across;
+                Wrapped.push_back(ImVec2(Centre.x + std::cos(Angle) * Radius, Centre.y + std::sin(Angle) * Radius));
+            }
+            if (Wrapped.size() == 2u && Stroke.Points[0].x == Stroke.Points[1].x)
+            {
+                Draw->AddCircleFilled(Wrapped[0], Thickness, Tint, 10);   // a dimple
+            }
+            else
+            {
+                Draw->AddPolyline(Wrapped.data(), int(Wrapped.size()), Tint, ImDrawFlags_None,
+                                  Thickness < 1.0f ? 1.0f : Thickness);
+            }
+        }
+    }
+
+    // The wheel face, so the bore does not read as a hole in the picture.
+    Draw->AddCircleFilled(Centre, Bead, IM_COL32(23, 23, 26, 255), 64);
+    Draw->AddCircle(Centre, Bead, IM_COL32(255, 255, 255, 30), 64, 1.0f);
+    Draw->AddCircle(Centre, BandInner, IM_COL32(255, 255, 255, 20), 96, 1.0f);
+}
+
+/// 📦 The px/mm the cross-section draws at: the width decides it alone, so the drawing fills its box instead of
+///    leaving the dead band a min(x,y) fit leaves under a shape far wider than it is deep.
+[[nodiscard]] float SectionScale(float Width, const TreadSpecification& Specification) noexcept
+{
+    const TreadDerivedValues Derived = DeriveTreadValues(Specification);
+    return (Width - 18.0f) / (2.0f * Derived.AcrossHalf * 1.10f);
+}
+
+/// 📦 The height that cross-section then needs, which is what the viewport reserves for it.
+[[nodiscard]] float MeasureTyreSection(float Width, const TreadSpecification& Specification) noexcept
+{
+    const TreadDerivedValues Derived = DeriveTreadValues(Specification);
+    const float Deep = Specification.Crown + Derived.ShoulderRadius + Specification.TreadDepth * 1.7f + 6.0f;
+    return Deep * SectionScale(Width, Specification) + 22.0f;
+}
+
+/// 📦 Draws the moulded cross-section from EvaluateTyreProfile, with a dashed floor per distinct cut depth.
+void DrawTyreSection(ImDrawList* Draw, ImVec2 Min, ImVec2 Max, const TreadSpecification& Specification,
+                     const TreadPatternSpecification& Pattern) noexcept
+{
+    const TreadDerivedValues Derived = DeriveTreadValues(Specification);
+    const float Scale = SectionScale(Max.x - Min.x, Specification);
+    const ImVec2 Origin(( Min.x + Max.x) * 0.5f, Min.y + 14.0f);
+
+    auto At = [&](float Lateral, float Radius) noexcept -> ImVec2
+    { return ImVec2(Origin.x + Lateral * Scale, Origin.y + (Derived.OuterRadius - Radius) * Scale); };
+
+    constexpr int kSamples = 96;
+
+    // the rubber body
+    std::vector<ImVec2> Body;
+    Body.reserve(kSamples + 3);
+    for (int I = 0; I <= kSamples; ++I)
+    {
+        const float Lateral = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I) / float(kSamples);
+        const TyreProfileSample S = EvaluateTyreProfile(Lateral, Specification, Derived);
+        Body.push_back(At(S.Lateral, S.Radius));
+    }
+    Body.push_back(ImVec2(At(Derived.AcrossHalf, 0.0f).x, Max.y - 6.0f));
+    Body.push_back(ImVec2(At(-Derived.AcrossHalf, 0.0f).x, Max.y - 6.0f));
+    Draw->AddConvexPolyFilled(Body.data(), int(Body.size()), IM_COL32(255, 255, 255, 12));
+
+    // one dashed floor per distinct depth the pattern cuts
+    for (const TreadLayerSpecification& Layer : Pattern.Layers)
+    {
+        if (Layer.Kind == TreadLayerKind::Noise)
+        {
+            continue;
+        }
+        const float Depth = Layer.DepthFraction * Specification.TreadDepth;
+        ImVec2 Last{};
+        for (int I = 0; I <= kSamples; ++I)
+        {
+            const float Lateral = -Derived.TreadHalf + 2.0f * Derived.TreadHalf * float(I) / float(kSamples);
+            const TyreProfileSample S = EvaluateTyreProfile(Lateral, Specification, Derived);
+            const ImVec2 Point = At(S.Lateral, S.Radius - Depth * S.ContactWeight);
+            if (I > 0 && (I % 2) == 0)
+            {
+                Draw->AddLine(Last, Point, IM_COL32(0x5A, 0xA9, 0xFF, 90), 1.0f);
+            }
+            Last = Point;
+        }
+    }
+
+    // the moulded surface
+    for (int I = 1; I <= kSamples; ++I)
+    {
+        const float A = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I - 1) / float(kSamples);
+        const float B = -Derived.AcrossHalf + 2.0f * Derived.AcrossHalf * float(I)     / float(kSamples);
+        const TyreProfileSample SA = EvaluateTyreProfile(A, Specification, Derived);
+        const TyreProfileSample SB = EvaluateTyreProfile(B, Specification, Derived);
+        Draw->AddLine(At(SA.Lateral, SA.Radius), At(SB.Lateral, SB.Radius), IM_COL32(255, 255, 255, 230), 1.6f);
+    }
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -259,28 +507,49 @@ void RecordTyreInspector(ControlPanel& Controls, EditorInstance& Picked, EditorS
 //                                                      TYRE FORGE
 //------------------------------------------------------------------------------------------------------------------------
 
-void RecordTyreForgeWindow(ControlPanel& Controls, EditorSheet& Sheet, bool* Open)
+void RecordTyreGeneratorWindow(ControlPanel& Controls, const TreadSpecification& Specification,
+                               const TreadPatternSpecification& Pattern, EditorSheet& Sheet, bool* Open)
 {
     if (Open != nullptr && !*Open)
     {
         return;
     }
 
-    ImGui::SetNextWindowSize(ImVec2(760.0f, 520.0f), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(220.0f, 120.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Tyre Forge", Open, ImGuiWindowFlags_NoScrollbar))
+    ImGui::SetNextWindowSize(ImVec2(1060.0f, 620.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(120.0f, 60.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(620.0f, 380.0f), ImVec2(FLT_MAX, FLT_MAX));
+    if (!ImGui::Begin("Tyre Generator", Open, ImGuiWindowFlags_NoScrollbar))
     {
         ImGui::End();
         return;
     }
 
+    const TreadDerivedValues Derived = DeriveTreadValues(Specification);
     ImDrawList* Draw = ImGui::GetWindowDrawList();
     const float Full = ImGui::GetContentRegionAvail().x;
-    const float SequenceWidth = (Full > 620.0f) ? 300.0f : Full;   // one column once the dock is narrow
+    const float Wide = Full > 900.0f;
 
-    // ① the layer sequence — group 0, one property per layer, read as cut order
-    ImGui::BeginChild("sequence", ImVec2(SequenceWidth, 0.0f), ImGuiChildFlags_None,
-                      ImGuiWindowFlags_NoScrollbar);
+    // Which layer is open: the sequence marks it, so the preview and the parameters agree about it.
+    int Picked = -1;
+    if (Sheet.GroupCount > 0)
+    {
+        for (uint32_t I = 0; I < Sheet.Groups[0].PropertyCount; ++I)
+        {
+            if (Sheet.Groups[0].Properties[I].On)
+            {
+                Picked = int(I);
+                break;
+            }
+        }
+    }
+
+    const float SequenceWidth = Wide ? 290.0f : 250.0f;
+    const float ParameterWidth = Wide ? 300.0f : 0.0f;
+
+    //----------------------------------------------------------------------------------------------------------
+    // ① the layer sequence — ordered, reorderable, arbitrarily long, which is why it is here and not in a strip
+    //----------------------------------------------------------------------------------------------------------
+    ImGui::BeginChild("sequence", ImVec2(SequenceWidth, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
     {
         const ImVec2 At = ImGui::GetCursorScreenPos();
         Draw->AddText(ImGui::GetFont(), 10.0f, ImVec2(At.x + 4.0f, At.y + 4.0f), kDim, "LAYER SEQUENCE / CUT ORDER");
@@ -292,31 +561,29 @@ void RecordTyreForgeWindow(ControlPanel& Controls, EditorSheet& Sheet, bool* Ope
             for (uint32_t I = 0; I < Sequence.PropertyCount; ++I)
             {
                 EditorProperty& Layer = Sequence.Properties[I];
-                const ImVec2 Row = ImGui::GetCursorScreenPos();
+                const ImVec2 Row  = ImGui::GetCursorScreenPos();
                 const float  RowW = ImGui::GetContentRegionAvail().x - 6.0f;
 
                 ImGui::PushID(int(I));
                 ImGui::InvisibleButton("##layer", ImVec2(RowW, 42.0f));
                 const bool Hot = ImGui::IsItemHovered();
-                const bool Picked = Layer.On;
-                if (Hot || Picked)
+                if (Hot || Layer.On)
                 {
                     Draw->AddRectFilled(Row, ImVec2(Row.x + RowW, Row.y + 42.0f),
-                                        Picked ? IM_COL32(255, 255, 255, 23) : IM_COL32(255, 255, 255, 11), 7.0f);
+                                        Layer.On ? IM_COL32(255, 255, 255, 23) : IM_COL32(255, 255, 255, 11), 7.0f);
                 }
-                if (Picked)
+                if (Layer.On)
                 {
                     Draw->AddRectFilled(ImVec2(Row.x, Row.y + 7.0f), ImVec2(Row.x + kBarW, Row.y + 35.0f),
                                         IM_COL32(0x5A, 0xA9, 0xFF, 255), 1.5f);
                 }
                 Draw->AddText(ImVec2(Row.x + 14.0f, Row.y + 7.0f), kText, Layer.Label);
 
-                // depth in millimetres, right-aligned, and the depth bar beneath it
                 char Depth[20];
                 std::snprintf(Depth, sizeof(Depth), "%.1f mm", double(Layer.Figure));
-                const ImVec2 DepthSize = ImGui::GetFont()->CalcTextSizeA(10.0f, FLT_MAX, 0.0f, Depth);
-                Draw->AddText(ImGui::GetFont(), 10.0f, ImVec2(Row.x + RowW - DepthSize.x - 10.0f, Row.y + 9.0f),
-                              kFaint, Depth);
+                const ImVec2 Size = ImGui::GetFont()->CalcTextSizeA(10.0f, FLT_MAX, 0.0f, Depth);
+                Draw->AddText(ImGui::GetFont(), 10.0f, ImVec2(Row.x + RowW - Size.x - 10.0f, Row.y + 9.0f), kFaint, Depth);
+
                 const float Fraction = (Layer.Maximum > Layer.Minimum)
                                      ? (Layer.Figure - Layer.Minimum) / (Layer.Maximum - Layer.Minimum) : 0.0f;
                 Draw->AddRectFilled(ImVec2(Row.x + 14.0f, Row.y + 28.0f), ImVec2(Row.x + 62.0f, Row.y + 31.0f),
@@ -332,16 +599,64 @@ void RecordTyreForgeWindow(ControlPanel& Controls, EditorSheet& Sheet, bool* Ope
     }
     ImGui::EndChild();
 
-    // ② the picked layer's parameters — group 1 onward
-    if (Full > 620.0f)
+    //----------------------------------------------------------------------------------------------------------
+    // ② the viewport — the tyre the specification actually describes, face-on over its own cross-section
+    //----------------------------------------------------------------------------------------------------------
+    ImGui::SameLine();
+    const float ViewportWidth = ImGui::GetContentRegionAvail().x - ParameterWidth - (Wide ? 8.0f : 0.0f);
+    ImGui::BeginChild("viewport", ImVec2(ViewportWidth, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar);
+    {
+        const ImVec2 Min = ImGui::GetCursorScreenPos();
+        const ImVec2 Avail = ImGui::GetContentRegionAvail();
+        const ImVec2 Max(Min.x + Avail.x, Min.y + Avail.y);
+
+        Draw->AddRectFilled(Min, Max, kInset, kCardRadius);
+        Draw->AddRect(Min, Max, kStroke, kCardRadius);
+        Draw->AddRectFilled(ImVec2(Min.x + 15.0f, Min.y + 14.0f), ImVec2(Min.x + 15.0f + kBarW, Min.y + 14.0f + kBarH),
+                            IM_COL32(0xDF, 0xE6, 0xF5, 255), 1.5f);
+        Draw->AddText(ImVec2(Min.x + 15.0f + kBarW + 9.0f, Min.y + 13.0f), kText, "Tyre");
+
+        char Marked[48];
+        std::snprintf(Marked, sizeof(Marked), "%g/%g R%g  %s",
+                      double(Specification.Width), double(Specification.Aspect), double(Specification.Rim),
+                      Pattern.Name.c_str());
+        const ImVec2 MarkedSize = ImGui::GetFont()->CalcTextSizeA(11.0f, FLT_MAX, 0.0f, Marked);
+        Draw->AddText(ImGui::GetFont(), 11.0f, ImVec2(Max.x - MarkedSize.x - 16.0f, Min.y + 15.0f), kDim, Marked);
+
+        // the face, over the section
+        const float SectionHeight = MeasureTyreSection(Avail.x - 20.0f, Specification);
+        const float FaceHeight = (Max.y - Min.y) - SectionHeight - 54.0f;
+        const float FaceRadius = ((FaceHeight < (Max.x - Min.x) ? FaceHeight : (Max.x - Min.x)) * 0.5f) - 10.0f;
+        if (FaceRadius > 30.0f)
+        {
+            const ImVec2 Centre((Min.x + Max.x) * 0.5f, Min.y + 40.0f + FaceHeight * 0.5f);
+            DrawTyreFace(Draw, Centre, FaceRadius, Specification, Pattern, Picked);
+        }
+        DrawTyreSection(Draw, ImVec2(Min.x + 10.0f, Max.y - SectionHeight - 10.0f),
+                        ImVec2(Max.x - 10.0f, Max.y - 10.0f), Specification, Pattern);
+
+        char Figures[96];
+        std::snprintf(Figures, sizeof(Figures), "outer %.0f mm   circumference %.0f mm   %u layers",
+                      double(2.0f * Derived.OuterRadius), double(Derived.Circumference),
+                      unsigned(Pattern.Layers.size()));
+        Draw->AddText(ImGui::GetFont(), 10.0f, ImVec2(Min.x + 16.0f, Max.y - SectionHeight - 26.0f), kFaint, Figures);
+
+        ImGui::Dummy(Avail);
+    }
+    ImGui::EndChild();
+
+    //----------------------------------------------------------------------------------------------------------
+    // ③ the picked layer's parameters
+    //----------------------------------------------------------------------------------------------------------
+    if (Wide)
     {
         ImGui::SameLine();
         ImGui::BeginChild("parameters", ImVec2(0.0f, 0.0f));
-        ImGui::Dummy(ImVec2(0.0f, 4.0f));
-        const float Width = ImGui::GetContentRegionAvail().x - 16.0f;
+        ImGui::Dummy(ImVec2(0.0f, 2.0f));
+        const float Width = ImGui::GetContentRegionAvail().x - 10.0f;
         for (uint32_t I = 1; I < Sheet.GroupCount; ++I)
         {
-            ImGui::SetCursorPosX(8.0f);
+            ImGui::SetCursorPosX(4.0f);
             RecordCard(Controls, Sheet.Groups[I], IM_COL32(0x5A, 0xA9, 0xFF, 255), Width);
         }
         ImGui::EndChild();

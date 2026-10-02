@@ -1,5 +1,5 @@
 //============================================================================================================================================
-//                                                      TYREFORGESEQUENCE.H
+//                                                      TYREGENERATORSEQUENCE.H
 //============================================================================================================================================
 // 📦 Project-Drive's tyre authoring seam — the project-owned exchange that turns the generated tyre into outliner
 //    rows and inspector sheets, the counterpart to VehicleInspectorSequence for the vehicle's dynamics.
@@ -10,7 +10,7 @@
 //
 //    Split of surfaces, settled by the HTML prototype in References/TyreEditor.html:
 //        • the always-present Inspector gets the quick values — one scalar with a fixed home
-//        • Tyre Forge, a separate dockable window, gets the layer sequence — ordered and arbitrarily long
+//        • Tyre Generator, a separate dockable window, gets the layer sequence — ordered and arbitrarily long
 //    The widget each value wants is decided HERE, when the sheet is filled, not by the panel that draws it.
 //    A slider is continuous, bounded and found by watching the viewport; a type-in is discrete, standards-defined
 //    or topology-changing, because dragging a slider through a repeat count asks for a boolean rebuild per step.
@@ -36,7 +36,7 @@ enum class TyreSection : uint32_t
 {
     Tyre = 1u,      // the generated body: inflation, tread depth, rim bottoming
     Carcass,        // the marked size and the moulded shape
-    Pattern,        // the tread layer sequence — opens Tyre Forge
+    Pattern,        // the tread layer sequence — opens Tyre Generator
     Layer,          // one groove layer; the layer ordinal rides in the low byte
     Decals,         // sidewall lettering, phase 4
     Lattice,        // the XPBD solver lattice
@@ -99,7 +99,7 @@ struct TyreDocument
     TreadSpecification          Tread{};
     TreadPatternSpecification   Pattern{};
     TyreCarcassAuthoring        Carcass{};
-    uint32_t                    PickedLayer = 0u;   // [idx] the layer Tyre Forge has open
+    uint32_t                    PickedLayer = 0u;   // [idx] the layer Tyre Generator has open
 };
 
 /// 📦 Seats the off-road preset the tread mesh gate runs against — 285/70 R17 "Grizzly Magnum".
@@ -112,7 +112,7 @@ void SeatGrizzlyMagnum(TyreDocument& Document) noexcept;
 //                                                       THE SEAM
 //------------------------------------------------------------------------------------------------------------------------
 
-class TyreForgeSequence
+class TyreGeneratorSequence
 {
 public:
     /// 📦 Appends the tyre's rows in preorder under the row the caller has already written for the wheel.
@@ -126,7 +126,7 @@ public:
                                       uint32_t Depth = 0u) const noexcept;
 
     /// 📦 Fills the sheet for a tyre row. Returns false when the key is not ours.
-    /// note  Group 0 of the Pattern sheet is the layer sequence, which is what Tyre Forge reads; the quick strip
+    /// note  Group 0 of the Pattern sheet is the layer sequence, which is what Tyre Generator reads; the quick strip
     ///       never draws it, because an arbitrarily long ordered list does not belong in a strip.
     /// tag   api, nonallocating
     [[nodiscard]] bool BuildSheet(uint64_t Key, EditorSheet* Sheet) const noexcept;

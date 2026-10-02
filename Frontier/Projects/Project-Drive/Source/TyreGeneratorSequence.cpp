@@ -1,9 +1,9 @@
 //============================================================================================================================================
-//                                                     TYREFORGESEQUENCE.CPP
+//                                                     TYREGENERATORSEQUENCE.CPP
 //============================================================================================================================================
 // 📦 Builds the tyre's outliner rows and inspector sheets, and writes edited sheets back into the document.
 
-#include "TyreForgeSequence.h"
+#include "TyreGeneratorSequence.h"
 
 #include <cstdio>
 #include <cstring>
@@ -190,7 +190,7 @@ void SeatGrizzlyMagnum(TyreDocument& Document) noexcept
 //                                                       THE ROSTER
 //------------------------------------------------------------------------------------------------------------------------
 
-uint32_t TyreForgeSequence::FillRoster(EditorInstance* Rows, uint32_t First, uint32_t Capacity,
+uint32_t TyreGeneratorSequence::FillRoster(EditorInstance* Rows, uint32_t First, uint32_t Capacity,
                                        uint32_t Depth) const noexcept
 {
     if (Rows == nullptr || First >= Capacity)
@@ -237,7 +237,7 @@ uint32_t TyreForgeSequence::FillRoster(EditorInstance* Rows, uint32_t First, uin
          EditorInstanceCategory::Geometry, kSky, EditorGlyph::Lattice);
     std::snprintf(Pattern.Meta, sizeof(Pattern.Meta), "%u layers", unsigned(Document.Pattern.Layers.size()));
     Pattern.KidCount = uint32_t(Document.Pattern.Layers.size());
-    std::snprintf(Pattern.Tag, sizeof(Pattern.Tag), "%s", "Forge");
+    std::snprintf(Pattern.Tag, sizeof(Pattern.Tag), "%s", "Generator");
 
     for (uint32_t I = 0; I < uint32_t(Document.Pattern.Layers.size()); ++I)
     {
@@ -289,7 +289,7 @@ uint32_t TyreForgeSequence::FillRoster(EditorInstance* Rows, uint32_t First, uin
 //                                                       THE SHEETS
 //------------------------------------------------------------------------------------------------------------------------
 
-bool TyreForgeSequence::BuildSheet(uint64_t Key, EditorSheet* Sheet) const noexcept
+bool TyreGeneratorSequence::BuildSheet(uint64_t Key, EditorSheet* Sheet) const noexcept
 {
     if (Sheet == nullptr || !IsTyreKey(Key))
     {
@@ -352,7 +352,7 @@ bool TyreForgeSequence::BuildSheet(uint64_t Key, EditorSheet* Sheet) const noexc
     {
         Sheet->Appearance = EditorSheetAppearance::TyreTread;
 
-        // Group 0 IS the layer sequence. Tyre Forge reads it; the quick strip skips it, because an ordered list
+        // Group 0 IS the layer sequence. Tyre Generator reads it; the quick strip skips it, because an ordered list
         //    of arbitrary length is the one thing a strip cannot hold.
         EditorPropertyGroup& Sequence = OpenGroup(*Sheet, "Layer sequence");
         const uint32_t Picked = (TyreSectionOf(Key) == TyreSection::Layer) ? TyreOrdinalOf(Key)
@@ -448,7 +448,7 @@ bool TyreForgeSequence::BuildSheet(uint64_t Key, EditorSheet* Sheet) const noexc
 //                                                      THE WRITE-BACK
 //------------------------------------------------------------------------------------------------------------------------
 
-bool TyreForgeSequence::ApplySheet(uint64_t Key, const EditorSheet& Sheet) noexcept
+bool TyreGeneratorSequence::ApplySheet(uint64_t Key, const EditorSheet& Sheet) noexcept
 {
     if (!IsTyreKey(Key) || Sheet.GroupCount == 0u)
     {
