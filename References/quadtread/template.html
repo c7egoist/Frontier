@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quad Tread AAA — trace · mirror · crown · array</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0c0e;--card:#16171b;--card2:#1d1f24;--card3:#25272d;--line:rgba(255,255,255,.07);
+    --txt:#e7e8ec;--mut:#8b8e96;--dim:#5c5f67;--green:#38c46d;--blue:#4f9cf0;--orange:#f0a04b;--gold:#e9c477;--red:#e2564f;
+    font-family:"Outfit",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;font-weight:300;letter-spacing:.01em;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);overflow:hidden}
+  #app{display:grid;grid-template-columns:340px 1fr;grid-template-rows:54px 1fr;height:100vh;gap:10px;padding:10px;
+       background:radial-gradient(1200px 600px at 62% -12%,#191b20 0%,var(--bg) 62%)}
+  header{grid-column:1/3;display:flex;align-items:center;gap:12px;padding:0 6px}
+  header h1{font-size:16px;font-weight:400;margin:0}
+  .badge{background:var(--card2);border:1px solid var(--line);color:var(--green);border-radius:999px;padding:5px 13px;font-size:11.5px;white-space:nowrap}
+  .badge.warn{color:var(--orange)} .badge.bad{color:var(--red)}
+  header .stats{margin-left:auto;display:flex;gap:15px;color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+  header .stats b{color:var(--txt);font-weight:500}
+  aside{display:flex;flex-direction:column;gap:10px;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:#2a2c31 transparent}
+  .card{background:var(--card);border-radius:18px;padding:15px 15px 11px;flex:0 0 auto}
+  .card h2{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:400;margin:0 0 10px}
+  .card h2::before{content:"";width:3px;height:15px;border-radius:2px;background:var(--bar,var(--green))}
+  .card h2 .r{margin-left:auto;color:var(--mut);font-size:11.5px;font-weight:300}
+  .steps{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .step{background:var(--card2);border:1px solid transparent;border-radius:12px;padding:9px 11px;cursor:pointer;transition:.15s}
+  .step:hover{border-color:var(--line);background:var(--card3)}
+  .step.on{border-color:var(--green);background:var(--card3)}
+  .step .n{color:var(--dim);font-size:10.5px} .step.on .n{color:var(--green)}
+  .step .t{font-weight:400;font-size:12.5px;margin-top:2px}
+  #stageDesc{color:var(--mut);font-size:11.6px;line-height:1.5;margin-top:10px;min-height:66px}
+  .row{display:flex;align-items:center;gap:9px;margin:6px 0}
+  .row label{flex:0 0 112px;color:var(--mut);font-size:12px}
+  .row .val{flex:0 0 44px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
+  .row input[type=range]{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:18px;background:transparent;cursor:pointer}
+  .row input[type=range]::-webkit-slider-runnable-track{height:2px;background:#33363c;border-radius:2px}
+  .row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-5px;box-shadow:0 0 0 3px var(--card)}
+  .row input[type=range]::-moz-range-track{height:2px;background:#33363c;border-radius:2px}
+  .row input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#fff}
+  .row input[type=checkbox]{appearance:none;width:33px;height:19px;border-radius:999px;background:#2d3036;position:relative;cursor:pointer;transition:.2s;flex:0 0 33px}
+  .row input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:13px;height:13px;border-radius:50%;background:#9a9da4;transition:.2s}
+  .row input[type=checkbox]:checked{background:var(--green)} .row input[type=checkbox]:checked::after{left:17px;background:#fff}
+  .presets{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .presets button{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;cursor:pointer;transition:.15s;text-align:left}
+  .presets button small{display:block;color:var(--dim);font-size:10px;margin-top:1px}
+  .presets button:hover{background:var(--card3)}
+  .presets button.on{border-color:var(--green)} .presets button.on small{color:var(--green)}
+  #desc{color:var(--mut);font-size:11.5px;line-height:1.5;min-height:44px;margin-top:8px}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:4px 9px;font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
+  .chip b{color:var(--txt);font-weight:500} .chip.ok{color:var(--green);border-color:rgba(56,196,109,.35)} .chip.no{color:var(--red);border-color:rgba(226,86,79,.4)}
+  .btns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .btns button{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:7px 13px;font:inherit;font-size:12px;cursor:pointer;transition:.15s}
+  .btns button:hover{background:var(--card3);border-color:rgba(255,255,255,.16)}
+  #stage{position:relative;border-radius:18px;overflow:hidden;background:#000}
+  #stage canvas{display:block;width:100%;height:100%}
+  #hud{position:absolute;left:14px;bottom:12px;display:flex;gap:14px;color:var(--mut);font-size:11.5px;pointer-events:none;text-shadow:0 1px 3px #000}
+  #hud i{font-style:normal} #hud .k{color:var(--gold)} #hud .w{color:var(--green)}
+  .note{color:var(--dim);font-size:11px;line-height:1.5;margin-top:8px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Quad Tread AAA</h1>
+    <span class="badge" id="verdict">building…</span>
+    <span class="badge" style="color:var(--gold)" id="chain"></span>
+    <div class="stats">
+      <span>quads <b id="sQ">–</b></span><span>tris <b id="sT">–</b></span>
+      <span>verts <b id="sV">–</b></span><span>grid <b id="sG">–</b></span>
+      <span>pitch <b id="sP">–</b></span>
+    </div>
+  </header>
+
+  <aside>
+    <div class="card">
+      <h2>Construction<span class="r">four steps, one topology</span></h2>
+      <div class="steps">
+        <div class="step" data-stage="1"><div class="n">STEP 1</div><div class="t">Trace</div></div>
+        <div class="step" data-stage="2"><div class="n">STEP 2</div><div class="t">Mirror · flip</div></div>
+        <div class="step" data-stage="3"><div class="n">STEP 3</div><div class="t">Crown align</div></div>
+        <div class="step" data-stage="4"><div class="n">STEP 4</div><div class="t">Array · bridge</div></div>
+      </div>
+      <div id="stageDesc"></div>
+    </div>
+
+    <div class="card" style="--bar:var(--gold)">
+      <h2>Design<span class="r">12 archetypes</span></h2>
+      <div class="presets" id="presets"></div>
+      <div id="desc"></div>
+    </div>
+
+    <div class="card" style="--bar:var(--blue)">
+      <h2>Tyre<span class="r">mm · inches</span></h2>
+      <div id="tyreRows"></div>
+    </div>
+
+    <div class="card">
+      <h2>Pattern<span class="r">applied to the design</span></h2>
+      <div id="patRows"></div>
+      <div class="row"><label>variable pitch</label><input type="checkbox" id="vp"><span class="val" id="vpv"></span></div>
+    </div>
+
+    <div class="card" style="--bar:var(--orange)">
+      <h2>Display</h2>
+      <div id="dispRows"></div>
+    </div>
+
+    <div class="card" style="--bar:var(--green)">
+      <h2>Topology audit<span class="r">one pitch, seam wrapped</span></h2>
+      <div class="chips" id="audit"></div>
+      <div class="note">Checked on the mesh as built: <code>open</code> must equal the two rim loops (2 × columns) with the
+      band left open, or zero once the tube is closed. Anything else is a hole. The rest must all be zero.</div>
+    </div>
+
+    <div class="card">
+      <h2>Export</h2>
+      <div class="btns">
+        <button id="bxGlb">.glb</button><button id="bObj">.obj (quads)</button><button id="bJson">stats json</button>
+      </div>
+      <div class="note">The OBJ keeps one <code>f a b c d</code> per face — four indices, no triangles — so the quad
+      topology survives the round trip. Sources and the node-side checks that certified this mesh live in
+      <code>References/quadtread/</code> (<code>node verify.mjs</code>, <code>node run12.mjs</code>).</div>
+    </div>
+  </aside>
+
+  <div id="stage"><div id="hud"><i class="k">■ authored outline</i><i class="w">■ quad flow, one pitch</i><i id="hudS"></i></div></div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+/* ==================================================================================================================
+   QUAD TREAD AAA — a tread that is MODELLED, never displaced. No height map, no texture lookup, no per-vertex
+   raster probe: every groove, block, sipe, tie bar, hook and chamfer below is a traced outline in a design, and the
+   mesh is built from those traces.
+
+   THE GRID. One pitch is a grid: rows are x stations (every lane edge, every feature edge, every turning point of
+   every serration, refined where two features are about to pass each other), columns are circumferential positions
+   evaluated at each row. Every column is evaluated at every row, so a feature that dies out mid-pitch leaves a
+   harmless phantom loop instead of a T-junction, and both bands meeting at a row share that row's vertex set
+   exactly. Cells carry a LEVEL — the deepest feature containing them — and levels stack into a vertical chain
+   (top, chamfer land, sipe, relief, floor…) which every node carries in full, so walls that turn a corner, meet a
+   third level, or fade out at a block edge share vertices and cannot tear.
+
+   STEP 1  TRACE   one authored half of one pitch, flat: skins, walls, floors, all quads.
+   STEP 2  MIRROR  the same half reflected through the centreline. Nothing is re-authored: mirroring is a property of
+                   the trace, and the two halves share the centre row's vertices.
+   STEP 3  CROWN   that pitch bent onto the wheel: lateral mm follow the crown and shoulder, circumferential mm
+                   become angle, depth runs along the profile normal. Same topology, new positions.
+   STEP 4  ARRAY   the pitch repeated pitch-count times. The last column of a tile IS the first column of the next,
+                   so ridges bridge each other across the seam by construction, and a blocked rib simply carries on
+                   across the array. The skirt runs off the shoulder; the cap closes the band into a tube.
+
+   Orientation is not guessed: the mesh is oriented by propagating from one seed face per component, which is the
+   only way two wall strips meeting at a block corner are guaranteed to agree. Everything above is verified by the
+   audit panel — closed, manifold, consistently wound, all quads — on every design and on 37 parameter extremes.
+   ================================================================================================================== */
+
+/*<<<CORE — generated from References/quadtread/{quadcore.mjs,quadmesh.mjs,designs.mjs} by build_html.mjs. Do not edit here. */
+/*CORE*/
+/*>>>CORE*/
+
+// ------------------------------------------------- state -----------------------------------------------------------
+const T = { ...BASE_T };
+let design = DESIGNS[0].id, stage = 4, useVP = true;
+const D = () => {
+  const d = DESIGNS.find(x => x.id === design);
+  if (useVP || !d.pitchSeq) return d;
+  const { pitchSeq, ...rest } = d; return rest;          // variable pitch is a mapper stretch, never a topology change
+};
+
+const STAGE_TEXT = {
+  1: 'Step 1 — Trace. One authored half of one pitch, laid flat. Each lane outline is walked by quads: skins at the level the cell sits at, a wall quad per step of the level chain down every edge, chamfer lands on the blocks. Nothing here is sampled from a height field.',
+  2: 'Step 2 — Mirror. The half is reflected through the centreline. The centre rib ends exactly on that row, so the two halves meet vertex for vertex — no seam, no stitching, no second authoring pass. Lane stacks may instead be authored per side (Asym UHP) or carried through a point reflection (All-Terrain, Mud Claw).',
+  3: 'Step 3 — Crown. The pitch is bent onto the wheel: lateral mm follow the meridian of the crown and the shoulder roundover, circumferential mm become wheel angle, and a level’s depth is measured along the profile normal so a groove floor curves instead of flattening. Topology untouched.',
+  4: 'Step 4 — Array + bridge. The pitch repeats at exact spacing (circumference ÷ count). The last column of one tile is literally the first column of the next, so walls and skins across the seam are the same faces, blocked ribs bridge themselves, and the skirt plus the cap turn the band into a closed tube.',
+};
+
+// ------------------------------------------------- scene -----------------------------------------------------------
+const host = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+host.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0b0d);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 4000);
+camera.position.set(430, 300, 430);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08; controls.target.set(0, 0, 0);
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.05).texture;
+}
+const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(260, 420, 200); scene.add(key);
+const rim = new THREE.DirectionalLight(0x89b7ff, 0.55); rim.position.set(-320, -140, -260); scene.add(rim);
+const group = new THREE.Group(); scene.add(group);
+const grid = new THREE.GridHelper(1200, 24, 0x1d2026, 0x15171c); grid.rotation.x = Math.PI / 2; scene.add(grid);
+
+const MAT = {
+  block: new THREE.MeshPhysicalMaterial({ color: 0x191b1f, roughness: 0.66, metalness: 0.0, clearcoat: 0.3, clearcoatRoughness: 0.55, side: THREE.DoubleSide }),
+  floor: new THREE.MeshPhysicalMaterial({ color: 0x141519, roughness: 0.78, clearcoat: 0.15, side: THREE.DoubleSide }),
+  wall: new THREE.MeshPhysicalMaterial({ color: 0x20232a, roughness: 0.72, clearcoat: 0.1, side: THREE.DoubleSide }),
+  cap: new THREE.MeshPhysicalMaterial({ color: 0x2b2e36, roughness: 0.8, side: THREE.DoubleSide }),
+};
+const MAT_TINT = { ...MAT, cap: new THREE.MeshPhysicalMaterial({ color: 0x27506e, roughness: 0.6, side: THREE.DoubleSide }) };
+const wireMat = new THREE.LineBasicMaterial({ color: 0x38c46d, transparent: true, opacity: 0.3, depthWrite: false });
+const outMat = new THREE.LineBasicMaterial({ color: 0xe9c477, transparent: true, opacity: 0.95, depthWrite: false });
+
+let last = null;
+function clearGroup() {
+  for (let i = group.children.length - 1; i >= 0; i--) {
+    const o = group.children[i];
+    if (o.geometry && o.userData.own) o.geometry.dispose();
+    group.remove(o);
+  }
+}
+
+function rebuild() {
+  const d0 = performance.now();
+  clearGroup();
+  let B;
+  try { B = buildTread(T, D(), { stage }); } catch (e) { fail(String(e && e.message || e)); return; }
+  last = B;
+  const s = B.stats;
+  const posAttr = new THREE.BufferAttribute(B.wp, 3);
+  posAttr.setUsage(THREE.StaticDrawUsage);
+  const mats = T.tint ? MAT_TINT : MAT;
+  const names = ['block skin', 'void floors', 'walls + chamfers', 'skirt / cap'];
+  for (let g = 0; g < 4; g++) {
+    const set = B.groups[g];
+    if (!set || !set.quads) continue;
+    const tri = new Int32Array(set.quads * 6);
+    const idx = set.idx;
+    for (let q = 0; q < set.quads; q++) {
+      const o = q * 4, t = q * 6;
+      tri[t] = idx[o]; tri[t + 1] = idx[o + 1]; tri[t + 2] = idx[o + 2];
+      tri[t + 3] = idx[o]; tri[t + 4] = idx[o + 2]; tri[t + 5] = idx[o + 3];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', posAttr);
+    geo.setIndex(new THREE.BufferAttribute(tri, 1));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mats[[0, 1, 2, 3][g]] ? mats[[0, 1, 2, 3][g]] : mats.block);
+    mesh.name = names[g]; mesh.userData.own = true;
+    group.add(mesh);
+  }
+  if (T.wire && B.wire.length) {
+    const wg = new THREE.BufferGeometry();
+    wg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(B.wire), 3));
+    const ls = new THREE.LineSegments(wg, wireMat); ls.userData.own = true; group.add(ls);
+  }
+  if (T.outline && B.outlinePos.length) {
+    const og = new THREE.BufferGeometry();
+    og.setAttribute('position', new THREE.BufferAttribute(new Float32Array(B.outlinePos), 3));
+    const os2 = new THREE.LineSegments(og, outMat); os2.userData.own = true; group.add(os2);
+  }
+  for (const k in MAT) { MAT[k].flatShading = T.flat; MAT[k].needsUpdate = true; }
+  for (const k in MAT_TINT) { MAT_TINT[k].flatShading = T.flat; }
+  const box = new THREE.Box3().setFromObject(group);
+  if (!box.isEmpty()) {
+    const sph = box.getBoundingSphere(new THREE.Sphere());
+    controls.target.copy(sph.center);
+    if (!rebuild.once) { camera.position.copy(sph.center).add(new THREE.Vector3(1.02, 0.72, 1.02).multiplyScalar(sph.radius * 1.9)); rebuild.once = true; }
+  }
+  reportAudit(B, performance.now() - d0);
+}
+
+function fail(msg) {
+  const v = document.getElementById('verdict');
+  v.textContent = 'build failed: ' + msg; v.className = 'badge bad';
+}
+
+function reportAudit(B, ms) {
+  const s = B.stats, want = stage === 1 ? null : (T.cap ? 0 : 2 * s.cols);
+  const chips = [];
+  const chip = (label, val, ok) => chips.push(`<span class="chip ${ok === undefined ? '' : ok ? 'ok' : 'no'}">${label} <b>${val}</b></span>`);
+  chip('quads / pitch', s.quadsTile.toLocaleString());
+  chip('rows', s.rows); chip('cols', s.cols); chip('verts', s.verts.toLocaleString());
+  const closed = want === null || s.open === want;
+  chip('open edges', s.open + (want === null ? '' : ' / ' + want), closed);
+  chip('non-manifold', s.nonManifold, s.nonManifold === 0);
+  chip('winding conflicts', s.inconsistent, s.inconsistent === 0);
+  chip('degenerate', s.degenerate, s.degenerate === 0);
+  chip('pinched verts', s.pinched, s.pinched === 0);
+  chip('level chain', s.levels.join('→'));
+  chip('row splits', s.splits + ' in ' + s.passes + ' passes');
+  chip('mirrored faces', s.mirroredFaces.toLocaleString());
+  document.getElementById('audit').innerHTML = chips.join('');
+  document.getElementById('sQ').textContent = s.quads.toLocaleString();
+  document.getElementById('sT').textContent = (s.tris || s.quads * 2).toLocaleString();
+  document.getElementById('sV').textContent = s.verts.toLocaleString();
+  document.getElementById('sG').textContent = s.rows + '×' + s.cols;
+  document.getElementById('sP').textContent = (s.variablePitch ? s.pitchMin.toFixed(1) + '–' + s.pitchMax.toFixed(1) : s.pitch.toFixed(1)) + ' mm';
+  document.getElementById('chain').textContent = 'levels ' + s.levels.join(' · ');
+  const ok = closed && !s.nonManifold && !s.inconsistent && !s.degenerate && !s.pinched;
+  const v = document.getElementById('verdict');
+  v.className = 'badge ' + (ok ? '' : 'warn');
+  v.textContent = ok
+    ? (stage === 1 ? 'authored half · open by construction' : stage === 2 ? 'closed band, both halves' : stage === 3 ? 'one pitch on the crown, watertight' : T.cap ? 'ring closed into a tube — 0 open edges' : 'ring: only the 2 rim loops are open')
+    : `check: open ${s.open} want ${want} nm ${s.nonManifold} wind ${s.inconsistent}`;
+  document.getElementById('hudS').textContent = `quads ${s.quadsTile.toLocaleString()} × ${s.tiles} pitches · ${ms.toFixed(0)} ms`;
+  document.getElementById('vpv').textContent = B.stats.variablePitch ? 'on' : '—';
+}
+
+// ------------------------------------------------- controls --------------------------------------------------------
+const SLIDERS = {
+  tyre: [['width', 'section width', 120, 355, 5, ' mm'], ['aspect', 'aspect ratio', 25, 90, 1, ''], ['rim', 'rim dia', 12, 26, 1, '"'],
+         ['treadFrac', 'tread fraction', 0.5, 0.98, 0.01, ''], ['crown', 'crown rise', 0, 7, 0.1, ' mm'],
+         ['shoulderLen', 'shoulder run', 0, 34, 1, ' mm'], ['shoulderDrop', 'shoulder drop', 0, 9, 0.2, ' mm']],
+  pat: [['pitches', 'pitch count', 1, 121, 1, ''], ['chevron', 'chevron angle', 0, 42, 1, '°'], ['depth', 'tread depth', 1, 22, 0.5, ' mm'],
+        ['cham', 'chamfer', 0, 2.4, 0.05, ' mm'], ['bevel', 'bevel height', 0, 3.5, 0.05, ' mm'],
+        ['sipeDepthF', 'sipe depth ×', 0, 0.95, 0.01, ''], ['xsub', 'row spacing', 1, 16, 0.5, ' mm'],
+        ['usub', 'col refine', 0, 24, 1, ''], ['xmin', 'min kerf', 0, 6, 0.1, ' mm'], ['ugap', 'min gap', 0, 4, 0.05, ' mm'],
+        ['skirtLen', 'skirt length', 0, 26, 1, ' mm']],
+  disp: [['skirt', 'shoulder skirt'], ['cap', 'close into a tube'], ['wire', 'quad flow (1 pitch)'], ['outline', 'authored outline'],
+         ['tint', 'tint closed tube'], ['flat', 'flat shading'], ['spin', 'auto rotate']],
+};
+const inputs = {}, valEls = {};
+function rows(holder, defs) {
+  const el = document.getElementById(holder);
+  for (const [k, label, min, max, step, unit] of defs) {
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><span class="val"></span>`;
+    const inp = row.querySelector('input'), val = row.querySelector('.val');
+    const show = () => val.textContent = (step < 1 ? (+T[k]).toFixed(2).replace(/\.?0+$/, '') : T[k]) + unit;
+    inp.value = T[k]; show();
+    inp.oninput = () => { T[k] = +inp.value; show(); rebuild(); };
+    inputs[k] = inp; valEls[k] = show;
+    el.appendChild(row);
+  }
+}
+function toggles(holder, defs) {
+  const el = document.getElementById(holder);
+  for (const [k, label] of defs) {
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label>${label}</label><input type="checkbox">`;
+    const inp = row.querySelector('input');
+    inp.checked = !!T[k];
+    inp.onchange = () => { T[k] = inp.checked; rebuild(); };
+    inputs[k] = inp;
+    el.appendChild(row);
+  }
+}
+rows('tyreRows', SLIDERS.tyre);
+rows('patRows', SLIDERS.pat);
+toggles('dispRows', SLIDERS.disp);
+document.getElementById('vp').onchange = e => { useVP = e.target.checked; rebuild(); };
+document.getElementById('vp').checked = true;
+
+const ph = document.getElementById('presets');
+for (const d of DESIGNS) {
+  const b = document.createElement('button');
+  b.dataset.preset = d.id;
+  b.innerHTML = `${d.label}<small>${d.tag}</small>`;
+  b.onclick = () => { design = d.id; syncPresets(); rebuild(); };
+  ph.appendChild(b);
+}
+function syncPresets() {
+  const d = DESIGNS.find(x => x.id === design);
+  document.querySelectorAll('[data-preset]').forEach(b => b.classList.toggle('on', b.dataset.preset === design));
+  document.getElementById('desc').textContent = d.desc;
+  if (d.carcass) { Object.assign(T, d.carcass); for (const k in d.carcass) { if (inputs[k]) inputs[k].value = T[k]; if (valEls[k]) valEls[k](); } }
+  const vp = document.getElementById('vp');
+  vp.disabled = !d.pitchSeq; vp.parentElement.style.opacity = d.pitchSeq ? 1 : 0.4;
+}
+
+const stepEls = [...document.querySelectorAll('.step')];
+function setStage(s) {
+  stage = s;
+  stepEls.forEach(el => el.classList.toggle('on', +el.dataset.stage === s));
+  document.getElementById('stageDesc').textContent = STAGE_TEXT[s];
+  rebuild();
+}
+stepEls.forEach(el => el.onclick = () => setStage(+el.dataset.stage));
+
+// ------------------------------------------------- export ----------------------------------------------------------
+const save = (blob, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
+document.getElementById('bObj').onclick = () => { if (last) save(new Blob([toOBJ(last)], { type: 'text/plain' }), `quad-tread-${design}-s${stage}.obj`); };
+document.getElementById('bJson').onclick = () => { if (last) save(new Blob([JSON.stringify({ T, design, stage, stats: last.stats }, null, 1)], { type: 'application/json' }), `quad-tread-${design}.json`); };
+document.getElementById('bxGlb').onclick = () => {
+  if (!last) return;
+  new GLTFExporter().parse(group, buf => save(new Blob([buf], { type: 'model/gltf-binary' }), `quad-tread-${design}.glb`), e => fail('glb: ' + e), { binary: true, onlyVisible: true });
+};
+
+// ------------------------------------------------- loop ------------------------------------------------------------
+function resize() {
+  const w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h, false); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(host);
+let t0 = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now(), dt = (now - t0) / 1000; t0 = now;
+  if (T.spin) group.rotation.z += dt * 0.28;
+  controls.update();
+  renderer.render(scene, camera);
+});
+resize();
+syncPresets();
+setStage(4);
+</script>
+</body>
+</html>

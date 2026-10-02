@@ -1,0 +1,1647 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Quad Tread AAA — trace · mirror · crown · array</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b0c0e;--card:#16171b;--card2:#1d1f24;--card3:#25272d;--line:rgba(255,255,255,.07);
+    --txt:#e7e8ec;--mut:#8b8e96;--dim:#5c5f67;--green:#38c46d;--blue:#4f9cf0;--orange:#f0a04b;--gold:#e9c477;--red:#e2564f;
+    font-family:"Outfit",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;font-weight:300;letter-spacing:.01em;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);overflow:hidden}
+  #app{display:grid;grid-template-columns:340px 1fr;grid-template-rows:54px 1fr;height:100vh;gap:10px;padding:10px;
+       background:radial-gradient(1200px 600px at 62% -12%,#191b20 0%,var(--bg) 62%)}
+  header{grid-column:1/3;display:flex;align-items:center;gap:12px;padding:0 6px}
+  header h1{font-size:16px;font-weight:400;margin:0}
+  .badge{background:var(--card2);border:1px solid var(--line);color:var(--green);border-radius:999px;padding:5px 13px;font-size:11.5px;white-space:nowrap}
+  .badge.warn{color:var(--orange)} .badge.bad{color:var(--red)}
+  header .stats{margin-left:auto;display:flex;gap:15px;color:var(--mut);font-size:12px;font-variant-numeric:tabular-nums}
+  header .stats b{color:var(--txt);font-weight:500}
+  aside{display:flex;flex-direction:column;gap:10px;overflow-y:auto;min-height:0;scrollbar-width:thin;scrollbar-color:#2a2c31 transparent}
+  .card{background:var(--card);border-radius:18px;padding:15px 15px 11px;flex:0 0 auto}
+  .card h2{display:flex;align-items:center;gap:9px;font-size:14px;font-weight:400;margin:0 0 10px}
+  .card h2::before{content:"";width:3px;height:15px;border-radius:2px;background:var(--bar,var(--green))}
+  .card h2 .r{margin-left:auto;color:var(--mut);font-size:11.5px;font-weight:300}
+  .steps{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .step{background:var(--card2);border:1px solid transparent;border-radius:12px;padding:9px 11px;cursor:pointer;transition:.15s}
+  .step:hover{border-color:var(--line);background:var(--card3)}
+  .step.on{border-color:var(--green);background:var(--card3)}
+  .step .n{color:var(--dim);font-size:10.5px} .step.on .n{color:var(--green)}
+  .step .t{font-weight:400;font-size:12.5px;margin-top:2px}
+  #stageDesc{color:var(--mut);font-size:11.6px;line-height:1.5;margin-top:10px;min-height:66px}
+  .row{display:flex;align-items:center;gap:9px;margin:6px 0}
+  .row label{flex:0 0 112px;color:var(--mut);font-size:12px}
+  .row .val{flex:0 0 44px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums}
+  .row input[type=range]{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:18px;background:transparent;cursor:pointer}
+  .row input[type=range]::-webkit-slider-runnable-track{height:2px;background:#33363c;border-radius:2px}
+  .row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-5px;box-shadow:0 0 0 3px var(--card)}
+  .row input[type=range]::-moz-range-track{height:2px;background:#33363c;border-radius:2px}
+  .row input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#fff}
+  .row input[type=checkbox]{appearance:none;width:33px;height:19px;border-radius:999px;background:#2d3036;position:relative;cursor:pointer;transition:.2s;flex:0 0 33px}
+  .row input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:13px;height:13px;border-radius:50%;background:#9a9da4;transition:.2s}
+  .row input[type=checkbox]:checked{background:var(--green)} .row input[type=checkbox]:checked::after{left:17px;background:#fff}
+  .presets{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .presets button{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:12px;padding:8px 10px;font:inherit;font-size:12px;cursor:pointer;transition:.15s;text-align:left}
+  .presets button small{display:block;color:var(--dim);font-size:10px;margin-top:1px}
+  .presets button:hover{background:var(--card3)}
+  .presets button.on{border-color:var(--green)} .presets button.on small{color:var(--green)}
+  #desc{color:var(--mut);font-size:11.5px;line-height:1.5;min-height:44px;margin-top:8px}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{background:var(--card2);border:1px solid var(--line);border-radius:999px;padding:4px 9px;font-size:11px;color:var(--mut);font-variant-numeric:tabular-nums}
+  .chip b{color:var(--txt);font-weight:500} .chip.ok{color:var(--green);border-color:rgba(56,196,109,.35)} .chip.no{color:var(--red);border-color:rgba(226,86,79,.4)}
+  .btns{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .btns button{background:var(--card2);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:7px 13px;font:inherit;font-size:12px;cursor:pointer;transition:.15s}
+  .btns button:hover{background:var(--card3);border-color:rgba(255,255,255,.16)}
+  #stage{position:relative;border-radius:18px;overflow:hidden;background:#000}
+  #stage canvas{display:block;width:100%;height:100%}
+  #hud{position:absolute;left:14px;bottom:12px;display:flex;gap:14px;color:var(--mut);font-size:11.5px;pointer-events:none;text-shadow:0 1px 3px #000}
+  #hud i{font-style:normal} #hud .k{color:var(--gold)} #hud .w{color:var(--green)}
+  .note{color:var(--dim);font-size:11px;line-height:1.5;margin-top:8px}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Quad Tread AAA</h1>
+    <span class="badge" id="verdict">building…</span>
+    <span class="badge" style="color:var(--gold)" id="chain"></span>
+    <div class="stats">
+      <span>quads <b id="sQ">–</b></span><span>tris <b id="sT">–</b></span>
+      <span>verts <b id="sV">–</b></span><span>grid <b id="sG">–</b></span>
+      <span>pitch <b id="sP">–</b></span>
+    </div>
+  </header>
+
+  <aside>
+    <div class="card">
+      <h2>Construction<span class="r">four steps, one topology</span></h2>
+      <div class="steps">
+        <div class="step" data-stage="1"><div class="n">STEP 1</div><div class="t">Trace</div></div>
+        <div class="step" data-stage="2"><div class="n">STEP 2</div><div class="t">Mirror · flip</div></div>
+        <div class="step" data-stage="3"><div class="n">STEP 3</div><div class="t">Crown align</div></div>
+        <div class="step" data-stage="4"><div class="n">STEP 4</div><div class="t">Array · bridge</div></div>
+      </div>
+      <div id="stageDesc"></div>
+    </div>
+
+    <div class="card" style="--bar:var(--gold)">
+      <h2>Design<span class="r">12 archetypes</span></h2>
+      <div class="presets" id="presets"></div>
+      <div id="desc"></div>
+    </div>
+
+    <div class="card" style="--bar:var(--blue)">
+      <h2>Tyre<span class="r">mm · inches</span></h2>
+      <div id="tyreRows"></div>
+    </div>
+
+    <div class="card">
+      <h2>Pattern<span class="r">applied to the design</span></h2>
+      <div id="patRows"></div>
+      <div class="row"><label>variable pitch</label><input type="checkbox" id="vp"><span class="val" id="vpv"></span></div>
+    </div>
+
+    <div class="card" style="--bar:var(--orange)">
+      <h2>Display</h2>
+      <div id="dispRows"></div>
+    </div>
+
+    <div class="card" style="--bar:var(--green)">
+      <h2>Topology audit<span class="r">one pitch, seam wrapped</span></h2>
+      <div class="chips" id="audit"></div>
+      <div class="note">Checked on the mesh as built: <code>open</code> must equal the two rim loops (2 × columns) with the
+      band left open, or zero once the tube is closed. Anything else is a hole. The rest must all be zero.</div>
+    </div>
+
+    <div class="card">
+      <h2>Export</h2>
+      <div class="btns">
+        <button id="bxGlb">.glb</button><button id="bObj">.obj (quads)</button><button id="bJson">stats json</button>
+      </div>
+      <div class="note">The OBJ keeps one <code>f a b c d</code> per face — four indices, no triangles — so the quad
+      topology survives the round trip. Sources and the node-side checks that certified this mesh live in
+      <code>References/quadtread/</code> (<code>node verify.mjs</code>, <code>node run12.mjs</code>).</div>
+    </div>
+  </aside>
+
+  <div id="stage"><div id="hud"><i class="k">■ authored outline</i><i class="w">■ quad flow, one pitch</i><i id="hudS"></i></div></div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+
+/* ==================================================================================================================
+   QUAD TREAD AAA — a tread that is MODELLED, never displaced. No height map, no texture lookup, no per-vertex
+   raster probe: every groove, block, sipe, tie bar, hook and chamfer below is a traced outline in a design, and the
+   mesh is built from those traces.
+
+   THE GRID. One pitch is a grid: rows are x stations (every lane edge, every feature edge, every turning point of
+   every serration, refined where two features are about to pass each other), columns are circumferential positions
+   evaluated at each row. Every column is evaluated at every row, so a feature that dies out mid-pitch leaves a
+   harmless phantom loop instead of a T-junction, and both bands meeting at a row share that row's vertex set
+   exactly. Cells carry a LEVEL — the deepest feature containing them — and levels stack into a vertical chain
+   (top, chamfer land, sipe, relief, floor…) which every node carries in full, so walls that turn a corner, meet a
+   third level, or fade out at a block edge share vertices and cannot tear.
+
+   STEP 1  TRACE   one authored half of one pitch, flat: skins, walls, floors, all quads.
+   STEP 2  MIRROR  the same half reflected through the centreline. Nothing is re-authored: mirroring is a property of
+                   the trace, and the two halves share the centre row's vertices.
+   STEP 3  CROWN   that pitch bent onto the wheel: lateral mm follow the crown and shoulder, circumferential mm
+                   become angle, depth runs along the profile normal. Same topology, new positions.
+   STEP 4  ARRAY   the pitch repeated pitch-count times. The last column of a tile IS the first column of the next,
+                   so ridges bridge each other across the seam by construction, and a blocked rib simply carries on
+                   across the array. The skirt runs off the shoulder; the cap closes the band into a tube.
+
+   Orientation is not guessed: the mesh is oriented by propagating from one seed face per component, which is the
+   only way two wall strips meeting at a block corner are guaranteed to agree. Everything above is verified by the
+   audit panel — closed, manifold, consistently wound, all quads — on every design and on 37 parameter extremes.
+   ================================================================================================================== */
+
+/*<<<CORE — generated from References/quadtread/{quadcore.mjs,quadmesh.mjs,designs.mjs} by build_html.mjs. Do not edit here. */
+// ===================================================================================================================
+//  quadcore — AAA tread pattern compiler (the grammar + the trace)
+//
+//  Nothing here displaces geometry. No height map, no texture, no raster probe, no per-vertex image lookup.
+//
+//  A design authors ONE pattern element per rib row, on ONE side of the tyre only. The engine mirrors / flips /
+//  translates that element to complete the pitch; the pitch is then circularly arrayed by the mesher.
+//
+//  Everything is expressed as exact piecewise-linear functions on the (u, x) domain of one pitch:
+//      u  fraction of one pitch, periodic
+//      x  developed lateral position across the tread, mm, signed (centre = 0)
+//  A lug outline is a pair of boundary trajectories u = f(x); a circumferential groove wall is a lateral
+//  boundary curve x = g(u). The mesher puts a grid line on every key of every one of those functions, so the
+//  outline is traced by quad edges with no approximation, and no sampling of anything.
+// ===================================================================================================================
+
+const TAU = Math.PI * 2;
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const lerp = (a, b, t) => a + (b - a) * t;
+const wrap01 = v => v - Math.floor(v);
+const EPS = 1e-9;
+
+// ------------------------------------------------------------- levels ---------------------------------------------
+// d      = depth of the level as a fraction of the tread depth, measured inward along the crown normal
+// inset  = how far that level's skin is pulled inside its own outline (this is what makes a chamfer / draft)
+const LEVELS = {
+  top:    { d: 0.00, inset: 1.0, label: 'block top' },
+  kerf:   { d: 0.14, inset: 0.0, label: 'wear scribe' },
+  relief: { d: 0.45, inset: 0.0, label: 'relief ledge' },
+  sipe:   { d: 0.62, inset: 0.0, label: 'sipe floor' },
+  pit:    { d: 0.78, inset: 0.0, label: 'stud pit' },
+  floor:  { d: 1.00, inset: 0.0, label: 'groove floor' },
+};
+const depthFrac = l => LEVELS[l] ? LEVELS[l].d : 1;
+
+function levels(T) {
+  const out = {};
+  for (const [name, L] of Object.entries(LEVELS)) {
+    let d = L.d * T.depth;
+    if (name === 'sipe') d = T.sipeDepthF * T.depth;
+    if (name === 'kerf') d = 0.16 * T.depth;
+    out[name] = { name, depth: d, inset: L.inset * T.cham, label: L.label };
+  }
+  return out;
+}
+
+// ------------------------------------------------------------- wave -----------------------------------------------
+// A periodic displacement with an integer number of cycles per pitch — so it is exactly periodic and the array
+// can never see a seam. tri=1 → triangle (a serrated wall / a 3D sawtooth sipe), tri=0 → sine (a scallop).
+function waveAt(w, u) {
+  if (!w || !w.a) return 0;
+  const p = wrap01(u * (w.cyc || 1) + (w.ph || 0));
+  return w.a * (w.tri === 0 ? Math.sin(p * TAU) : (p < 0.5 ? 4 * p - 1 : 3 - 4 * p));
+}
+// where a wave turns around: these become grid lines, so the wave is traced rather than sampled
+function waveTurns(w) {
+  const out = [];
+  if (!w || !w.a) return out;
+  const cyc = Math.max(1, Math.round(w.cyc || 1));
+  for (let k = 0; k <= 2 * cyc; k++) out.push(k / (2 * cyc));
+  return out;
+}
+
+// ------------------------------------------------------------- profiles ------------------------------------------
+function profile(keys, fallback = 0) {
+  if (!keys || !keys.length) return () => fallback;
+  const k = [...keys].sort((a, b) => a[0] - b[0]);
+  return t => {
+    if (t <= k[0][0]) return k[0][1];
+    const n = k.length;
+    if (t >= k[n - 1][0]) return k[n - 1][1];
+    for (let i = 0; i < n - 1; i++) {
+      if (t <= k[i + 1][0] + 1e-12) return lerp(k[i][1], k[i + 1][1], (t - k[i][0]) / Math.max(EPS, k[i + 1][0] - k[i][0]));
+    }
+    return k[n - 1][1];
+  };
+}
+const edgeProfile = (v, dv) => (Array.isArray(v) ? profile([[0, v[0]], [1, v[1]]]) : profile([[0, v], [1, v + (dv || 0)]]));
+
+// ===================================================================================================================
+//  GRAMMAR
+//
+//  design = { id, label, tag, desc, carcass:{}, shear:'v'|'z'|'none', mir:'mirror'|'point'|'copy', shift:0.5,
+//             wrap:0..1, lanes:[lane], lanesL:[lane] }          // lanes authored centre → out, RIGHT half
+//
+//  lane   = { w:share, kind:'rib'|'groove', base?:level, chev:1, mir?, shift?, edge?:wave,
+//             cuts:[cut], blocks?:{}, sipes?:{}, tie?:{} }
+//  cut    = { level, at:[t0,t1], phase,
+//             u0:[a,b]|u0:a du0:n, u1:[a,b]|u1:b du1:n,   // the two edges, from t0 to t1 (a taper)
+//             keys:[[t,u0,u1]...],                        // literal trace of a reference outline
+//             lKeys:[[t,du]], rKeys:[[t,du]],             // per-edge offsets → hooked / notched / dogboned
+//             bow, zig:{a,cyc,ph,tri,side}, zigL, zigR, samples }
+// ===================================================================================================================
+
+function cutEnds(c) {
+  let pL, pR;
+  if (c.keys) { pL = profile(c.keys.map(k => [k[0], k[1]])); pR = profile(c.keys.map(k => [k[0], k[2]])); }
+  else { pL = edgeProfile(c.u0 ?? 0.06, c.du0); pR = edgeProfile(c.u1 ?? 0.14, c.du1); }
+  const lp = c.lKeys ? profile(c.lKeys) : null;
+  const rp = c.rKeys ? profile(c.rKeys) : null;
+  const bow = c.bow || 0;
+  const zL = c.zigL || (c.zig && (c.zig.side !== 'R') ? c.zig : null);
+  const zR = c.zigR || (c.zig && (c.zig.side !== 'L') ? c.zig : null);
+  const zigF = (z, t) => {
+    if (!z || !z.a) return 0;
+    const p = wrap01(t * (z.cyc || 1) + (z.ph || 0));
+    return z.a * (z.tri === 0 ? Math.sin(p * TAU) : (p < 0.5 ? 4 * p - 1 : 3 - 4 * p));
+  };
+  return [
+    t => pL(t) + (lp ? lp(t) : 0) + bow * 4 * t * (1 - t) + zigF(zL, t),
+    t => pR(t) + (rp ? rp(t) : 0) + bow * 4 * t * (1 - t) + zigF(zR, t),
+  ];
+}
+
+// every t where the shape turns or keys: these become grid rows, so the trace is exact inside every band
+function cutTStations(c) {
+  const [ta, tb] = c.at || [0, 1];
+  const set = new Set([0, 1]);
+  const push = t => { if (isFinite(t) && t >= -1e-9 && t <= 1 + 1e-9) set.add(clamp(t, 0, 1)); };
+  if (c.keys) for (const k of c.keys) push(k[0]);
+  if (c.lKeys) for (const k of c.lKeys) push(k[0]);
+  if (c.rKeys) for (const k of c.rKeys) push(k[0]);
+  for (const w of [c.zigL, c.zigR, c.zig]) for (const t of waveTurns(w)) push(t);
+  const n = Math.max(1, Math.round(c.samples ?? 2));
+  for (let k = 0; k <= n; k++) push(k / n);
+  return [...set].sort((a, b) => a - b).map(t => ta + (tb - ta) * t);
+}
+
+// ------------------------------------------------------------------ generators -----------------------------------
+function gaps({ n = 1, w = 0.16, at = [0, 1], phase = 0, level = 'floor', taper = 0, bow = 0, zig, zigL, zigR, keys, samples, samplesPerEdge = 0 }) {
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const c = (k + phase) / n, h = w / 2;
+    out.push({
+      level, at, bow, samples: samples ?? (zig ? Math.max(2, Math.round((zig.cyc || 1) * 2)) : 2),
+      u0: [c - h, c - h + taper], u1: [c + h, c + h + taper],
+      zig, zigL, zigR,
+      keys: keys ? keys.map(kk => [kk[0], kk[1] + c, kk[2] + c]) : null,
+      samplesPerEdge,
+    });
+  }
+  return out;
+}
+function sipes({ n = 1, w = 0.026, at = [0, 1], phase = 0, level = 'sipe', du = 0, zig, samples = 4 }) {
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const c = (k + phase) / n;
+    out.push({ level, at, u0: [c - w / 2, c - w / 2 + du], u1: [c + w / 2, c + w / 2 + du], zig, samples: zig ? Math.max(2, (zig.cyc || 1) * 2) : samples });
+  }
+  return out;
+}
+function tieBars({ n = 1, w = 0.05, at = [0.3, 0.7], phase = 0, du = 0, level = 'top' }) {
+  const out = [];
+  for (let k = 0; k < n; k++) {
+    const c = (k + phase) / n;
+    out.push({ level, at, u0: [c - w / 2, c - w / 2 + du], u1: [c + w / 2, c + w / 2 + du], samples: 1, over: 1 });
+  }
+  return out;
+}
+function laneCuts(lane) {
+  const out = [];
+  if (lane.blocks) out.push(...gaps(lane.blocks));
+  if (lane.cuts) out.push(...lane.cuts);
+  if (lane.tie) out.push(...tieBars(lane.tie));
+  if (lane.sipes) out.push(...sipes(lane.sipes));
+  return out;
+}
+
+// ===================================================================================================================
+//  CARCASS
+// ===================================================================================================================
+function carcass(T) {
+  const Rd = T.rim * 25.4 / 2;
+  const R = Rd + (T.width * T.aspect) / 100;
+  const halfW = (T.width * T.treadFrac) / 2;
+  return { Rd, R, halfW, circ: TAU * R, pitch: (TAU * R) / T.pitches };
+}
+
+// ===================================================================================================================
+//  COMPILE
+// ===================================================================================================================
+function gapMergeRows(rows, gap) {
+  const out = [];
+  for (const r of rows) {
+    const last = out[out.length - 1];
+    if (last && r.x - last.x < gap) { if (r.wig && (!last.wig || Math.abs(r.wig.a) > Math.abs(last.wig.a))) last.wig = r.wig; last.x = (last.x + r.x) / 2; }
+    else out.push({ ...r });
+  }
+  return out;
+}
+
+function compile(T, D) {
+  const G = carcass(T);
+  const wrapLen = (D.wrap || 0) * T.shoulderLen;
+  const xMaxR = G.halfW + wrapLen;
+  const xMaxL = D.lanesL ? G.halfW + (D.wrapL ?? D.wrap ?? 0) * T.shoulderLen : xMaxR;
+  const k = Math.tan((T.chevron * Math.PI) / 180) / Math.max(EPS, G.pitch);   // pitch fraction per mm
+  const shearMode = D.shear || 'v';
+
+  // shear(x) is accumulated lane by lane, so a chevron arm stays continuous across a lane boundary
+  const makeShear = stack => {
+    const total = stack.reduce((a, l) => a + l.w, 0) || 1;
+    const rows = [];
+    let acc = 0;
+    for (const l of stack) { rows.push({ from: acc / total, to: (acc + l.w) / total, mul: l.chev ?? 1 }); acc += l.w; }
+    return x => {
+      if (shearMode === 'none' || !k) return 0;
+      const span = x >= 0 ? xMaxR : xMaxL;
+      const a = clamp(Math.abs(x) / Math.max(EPS, span), 0, 1);
+      let s = 0;
+      for (const r of rows) s += clamp(a - r.from, 0, r.to - r.from) * r.mul;
+      const u = s * k * span;
+      return shearMode === 'z' ? Math.sign(x) * u : u;
+    };
+  };
+
+  // ---- lane stacks → pieces (each piece is one side of one lane, with its u transform) -------------------------
+  const sR = makeShear(D.lanes);
+  const sL = makeShear(D.lanesL || D.lanes);
+  // the drift lives in the mapper, not in the trace: in the developed frame a chevron arm is a straight line, so
+  // no trajectory can ever overtake another across the pitch seam and the tile's two edge loops stay identical
+  const shearAt = x => (x >= 0 ? sR(x) : sL(x));
+  const pieces = [];
+  const addStack = (stack, side) => {
+    const total = stack.reduce((a, l) => a + l.w, 0) || 1;
+    const span = side === 'L' ? xMaxL : xMaxR;
+    const shear = makeShear(stack);
+    let acc = 0;
+    for (const lane of stack) {
+      const a = (acc / total) * span, b = ((acc + lane.w) / total) * span;
+      acc += lane.w;
+      const push = (xa, xb, flip, shift, flipU, tag) => pieces.push({
+        lane, side, tag, xa, xb, flip, shift, flipU, shear,
+        tOf: x => clamp(flip ? (xb - x) / Math.max(EPS, xb - xa) : (x - xa) / Math.max(EPS, xb - xa), 0, 1),
+      });
+      if (side === 'L') push(-b, -a, true, 0, false, 'L');
+      else {
+        push(a, b, false, 0, false, 'R');
+        if (!D.lanesL) {
+          const mir = lane.mir ?? D.mir ?? 'mirror';
+          const shift = lane.shift ?? D.shift ?? 0.5;
+          if (mir === 'mirror') push(-b, -a, true, shift, false, 'M');
+          else if (mir === 'point') push(-b, -a, true, shift, true, 'M');
+          else if (mir === 'copy') push(-b, -a, false, shift, false, 'M');
+        }
+      }
+    }
+  };
+  addStack(D.lanes, 'R');
+  if (D.lanesL) addStack(D.lanesL, 'L');
+
+  // ---- cuts → trajectories --------------------------------------------------------------------------------------
+  const cuts = [];
+  for (const p of pieces) {
+    for (const c of laneCuts(p.lane)) {
+      const [fL, fR] = cutEnds(c);
+      const [ta, tb] = c.at || [0, 1];
+      const at = t => (p.flip ? p.xb - t * (p.xb - p.xa) : p.xa + t * (p.xb - p.xa));
+      const xa = at(ta), xb = at(tb);
+      const x0 = Math.min(xa, xb), x1 = Math.max(xa, xb);
+      const ph = c.phase || 0;
+      // NOTE: the chevron drift is NOT applied here. Everything is authored and meshed in the developed frame,
+      // where a chevron arm is a straight line, so no trajectory can ever overtake another through the pitch seam.
+      // The drift is re-applied by the mapper (see makeMapper), which turns the tile into the slanted strip it is.
+      const ev = f => x => {
+        let u = f(p.tOf(x));
+        if (p.flipU) u = -u;
+        return wrap01(u + p.shift + ph);
+      };
+      cuts.push({
+        level: c.level || 'floor', x0, x1, piece: p, lane: p.lane,
+        uL: ev(fL), uR: ev(fR),
+        xStations: cutTStations(c).map(at),
+        edgeZig: (c.zig && c.zig.side === 'E') ? c.zig : null,
+        over: c.over ? 1 : 0,
+      });
+    }
+  }
+
+  // ---- rows: lane edges + every cut station + crown subdivision; a row may carry a serration --------------------
+  let rows = [];
+  const addRow = (x, wig) => { if (isFinite(x)) rows.push({ x, wig: wig || null }); };
+  addRow(0, null); addRow(xMaxR, null); addRow(-xMaxL, null);
+  if (xMaxR > G.halfW) addRow(G.halfW, null);
+  if (xMaxL > G.halfW) addRow(-G.halfW, null);
+  for (const p of pieces) {
+    const e = p.lane.edge;
+    const wig = e && e.a ? { a: e.a, cyc: e.cyc, ph: e.ph, tri: e.tri, sgn: p.flip ? -1 : 1, phAdj: p.flip ? -(p.shift || 0) : 0 } : null;
+    addRow(p.xa, wig);
+    addRow(p.xb, wig ? { ...wig, sgn: -wig.sgn, phAdj: wig.phAdj ? -wig.phAdj : 0 } : null);
+    const span = Math.abs(p.xb - p.xa), dir = Math.sign(p.xb - p.xa) || 1;
+    const n = Math.max(1, Math.round(span / Math.max(0.5, T.xsub)));
+    for (let i = 0; i <= n; i++) addRow(p.xa + dir * (span * i) / n, i === 0 ? wig : null);
+  }
+  for (const c of cuts) for (const x of c.xStations) addRow(x, null);
+  // The merge gap keeps sliver bands out of the mesh; it has to stay inside sane bounds or the rows either touch
+  // (zero-height bands, degenerate quads) or eat the pattern (bands too thick for the trace to resolve).
+  rows = gapMergeRows(rows.sort((a, b) => a.x - b.x), clamp(T.xmin, 0.08, 0.9 * Math.max(0.5, T.xsub)));
+  // drop anything outside the domain
+  rows = rows.filter(r => r.x >= -xMaxL - 1e-6 && r.x <= xMaxR + 1e-6);
+  const xs = rows.map(r => r.x);
+
+  // ---- columns ------------------------------------------------------------------------------------------------
+  const cols = [];
+  const globals = [{ kind: 'seam', id: 'seam', x0: -1e9, x1: 1e9, evalAt: () => 0 }];
+  const nuni = T.usub > 0 ? Math.max(2, Math.round(G.pitch / T.usub)) : 1;
+  for (let i = 1; i < nuni; i++) { const u = i / nuni; globals.push({ kind: 'uni', id: `u${i}`, x0: -1e9, x1: 1e9, evalAt: () => u }); }
+  let fid = 0;
+  for (const c of cuts) {
+    for (const which of ['L', 'R']) {
+      const f = which === 'L' ? c.uL : c.uR;
+      cols.push({ kind: 'feat', id: `f${fid++}`, x0: c.x0, x1: c.x1, cut: c, which, evalAt: x => f(clamp(x, c.x0, c.x1)), lvl: c.level });
+    }
+  }
+  // a serrated row needs its turning points as columns too, else the serration is only sampled at row ends
+  const turns = new Set();
+  for (const r of rows) if (r.wig) for (const u of waveTurns(r.wig)) turns.add(wrap01(u - (r.wig.phAdj || 0)));
+  let tid = 0;
+  for (const u of turns) cols.push({ kind: 'turn', id: `t${tid++}`, x0: -1e9, x1: 1e9, evalAt: () => u });
+
+  return { T, D, G, xMaxR, xMaxL, xs, rows, cols, globals, cuts, pieces, shearMode, slope: k, shearAt };
+}
+
+
+// ===================================================================================================================
+//  quadmesh — curvilinear all-quad mesher for a compiled tread pattern
+//
+//  One pitch of the tread = a REGULAR grid: M lateral rows × K circumferential columns, periodic in u.
+//    · column i is a feature boundary trajectory u = f(x), evaluated exactly at every row it spans
+//    · row j is a lateral boundary curve x = g(u), resolved against the columns by a fixed point
+//  Every band spans the same K columns, so cell [b][i] always touches [b][i±1] and [b±1][i]: two neighbours can
+//  never disagree about an edge. The grid is conforming by construction and every face is a quad by construction,
+//  while an outline is still traced exactly — its edges ARE the grid lines. Rank 0 of every row is the seam
+//  column, so a tile is a clean strip whose left loop IS the next tile's right loop: the circular array needs no
+//  bridging, the pitch seam is exact by construction.
+//
+//  A cell carries a level (block top / relief ledge / sipe / groove floor / scribe). Where adjacent cells differ
+//  the shared edge emits a drafted wall with a top chamfer ring, so the band is one continuous surface and
+//  overlapping elements union for free — the union is decided per cell, never by a boolean.
+// ===================================================================================================================
+
+// ===================================================================================================================
+//  GRID — one tile of the pattern in the developed frame (u, x), before the crown and the chevron are applied
+// ===================================================================================================================
+function buildGrid(T, D) {
+  const C = compile(T, D);
+  const LV = levels(T);
+  let xs = C.xs.slice();
+  const src = C.rows.map(r => ({ x: r.x, wig: r.wig }));
+
+  // shoulder skirt: plain rubber running off the edge, on the same K columns, so the rim stays a clean loop
+  // Every feature must end one row *inside* the grid, otherwise a level region runs off the edge of the domain
+  // and its wall strip cannot close. The skirt does that and gives the shoulder rubber to run off with, so the
+  // rim stays a single clean loop; even with the skirt switched off a token margin row is kept on each side.
+  const skirtLen = Math.max(0.6, T.skirt ? Math.max(0, T.skirtLen) : 0);
+  if (skirtLen > 0.05) {
+    const n = Math.max(1, Math.round(skirtLen / Math.max(1, T.xsub)));
+    const pre = [], post = [];
+    for (let i = 1; i <= n; i++) post.push(xs[xs.length - 1] + (skirtLen * i) / n);
+    for (let i = n; i >= 1; i--) pre.push(xs[0] - (skirtLen * i) / n);
+    xs = [...pre, ...xs, ...post];
+  }
+  const cols = [...C.globals, ...C.cols];
+  const K = cols.length;
+  const pitch = C.G.pitch;
+  const seamAt = cols.findIndex(c => c.kind === 'seam');
+  const isSeam = cols.map((c, i) => i === seamAt);
+  const domLo = -C.xMaxL, domHi = C.xMaxR;
+
+  const wigFor = x => {
+    for (const r of src) if (r.wig && Math.abs(r.x - x) < 1e-3) return r.wig;
+    for (const r of src) if (r.wig && Math.abs(-r.x - x) < 1e-3) return { ...r.wig, sgn: -r.wig.sgn, phAdj: -(r.wig.phAdj || 0) };
+    return null;
+  };
+
+  // ---- rows, refined until every band has the same column order at both of its rows ------------------------------
+  // Every column is evaluated at every row (clamped to the x-range of the feature that owns it), and the row's
+  // nodes are sorted: so the node SET of a row is shared by the two bands that meet there and they can never
+  // disagree about a vertex. Where the ORDER of two rows differs, two features were about to pass each other
+  // inside that band — a single quad would twist — so that band is split by inserting a row at its middle, and
+  // the sweep repeats. After refinement the rank→column map is identical at both ends of every band, so
+  // neighbour matching by rank is exact, every face is a planar-enough quad, and nothing inverts.
+  // A minimum separation between columns, so two feature edges that meet do not fold a cell down to zero width.
+  const gap = Math.max(0.02, T.ugap) / pitch;
+  let rowsWork = xs.slice();
+  let uu = [], xx = [], ordOf = [], cells = [], isMir = [], collisions = 0, refinePasses = 0;
+
+  // one sweep of every row: each column is evaluated at that row, the serration fixed point is solved for the
+  // wiggle the row carries, and the row is then sorted and spaced so no cell can fold inside out
+  const sweep = () => {
+    uu = []; xx = []; ordOf = [];
+    for (let j = 0; j < rowsWork.length; j++) {
+      const x0 = rowsWork[j], wig = wigFor(x0);
+      const raw = [];
+      for (let i = 0; i < K; i++) {
+        let x = x0, u = cols[i].evalAt(x);
+        if (wig && wig.a) for (let it = 0; it < 4; it++) { x = x0 + wig.sgn * waveAt(wig, wrap01(u + (wig.phAdj || 0))); u = cols[i].evalAt(x); }
+        raw.push({ i, u: isSeam[i] ? 0 : wrap01(u), x });
+      }
+      raw.sort((a, b) => (a.u - b.u) || (isSeam[a.i] ? -1 : isSeam[b.i] ? 1 : 0) || (a.i - b.i));
+      raw[0].u = 0;
+      for (let i = 1; i < K; i++) if (raw[i].u < raw[i - 1].u + gap) raw[i].u = raw[i - 1].u + gap;
+      if (raw[K - 1].u > 1 - gap * 0.5) {
+        for (let i = K - 2; i >= 1; i--) { if (raw[i + 1].u - raw[i].u < gap) raw[i].u = raw[i + 1].u - gap; else break; }
+        for (let i = 1; i < K; i++) raw[i].u = Math.max(raw[i].u, i * gap);
+      }
+      uu.push(raw.map(r => r.u)); xx.push(raw.map(r => r.x)); ordOf.push(raw.map(r => r.i));
+    }
+  };
+  const centreOf = (b, i) => {
+    const cq = (i + 1) % K, up = cq === 0 ? 1 : 0;
+    return { u: (uu[b][i] + uu[b][cq] + up) / 2, x: (xx[b][i] + xx[b][cq] + xx[b + 1][i] + xx[b + 1][cq]) / 4 };
+  };
+  const ownerOf = x => C.pieces.find(p => x >= Math.min(p.xa, p.xb) - 1e-7 && x <= Math.max(p.xa, p.xb) + 1e-7) || null;
+  // the level of every cell of every band: the deepest feature that contains the cell's centre, with the lane
+  // floor as the base and tie bars as an override
+  const evalCells = () => {
+    cells = []; isMir = [];
+    for (let b = 0; b + 1 < rowsWork.length; b++) {
+      const xm = (rowsWork[b] + rowsWork[b + 1]) / 2;
+      const owner = (xm > domLo - 1e-6 && xm < domHi + 1e-6) ? ownerOf(xm) : null;
+      const base = owner ? (owner.lane.base || (owner.lane.kind === 'groove' ? 'floor' : 'top')) : 'top';
+      const act = owner ? C.cuts.filter(c => c.piece === owner && c.x0 <= rowsWork[b + 1] + 1e-7 && c.x1 >= rowsWork[b] - 1e-7) : [];
+      const ev = act.map(c => [c.uL(xm), c.uR(xm), c.level, depthFrac(c.level), c.over || 0]);
+      const row = new Array(K);
+      for (let i = 0; i < K; i++) {
+        const cq = (i + 1) % K;
+        const mid = wrap01((uu[b][i] + uu[b][cq] + (cq === 0 ? 1 : 0)) / 2);
+        let level = base, best = depthFrac(base);
+        for (const [l0, l1, name, dep] of ev) {
+          if (wrap01(mid - l0) <= wrap01(l1 - l0) + 1e-12 && dep > best) { best = dep; level = name; }
+        }
+        for (const [l0, l1, name, dep, ov] of ev) {
+          if (ov && wrap01(mid - l0) <= wrap01(l1 - l0) + 1e-12) { level = name; break; }
+        }
+        row[i] = level;
+      }
+      cells.push(row);
+      isMir.push(owner ? owner.tag === 'M' : false);
+    }
+  };
+
+  // Where a wall has to be emitted across a row, rank i of the row below and rank i of the row above must name the
+  // same column pair — otherwise the wall would follow one trajectory along its top edge and another along its
+  // bottom, and would not line up with either skin. That is the only case worth splitting a band for, and it also
+  // catches the diagonal contact between two levels, which would pinch the surface at a single vertex. Splitting
+  // everything else would double the rows for no geometric gain.
+  const rowCap = Math.max(rowsWork.length * 2.2, rowsWork.length + 48);
+  sweep(); evalCells();
+  let splits = 0;
+  for (let pass = 0; pass < 8; pass++) {
+    const ins = [];
+    collisions = 0;
+    for (let b = 0; b + 1 < cells.length; b++) {
+      const A = cells[b], Bs = cells[b + 1], o = ordOf[b], o2 = ordOf[b + 1];
+      if (rowsWork[b + 1] - rowsWork[b] < 0.25) continue;
+      let need = -1;
+      for (let i = 0; i < K; i++) {
+        const iq = (i + 1) % K;
+        if (A[i] !== Bs[i] && (o[i] !== o2[i] || o[iq] !== o2[iq])) { need = 1; break; }
+        if (A[i] !== A[iq] && A[i] === Bs[iq] && A[iq] === Bs[i] && Bs[i] !== Bs[iq]) { need = 1; break; }
+      }
+      if (need > 0) { collisions++; if (rowsWork.length + ins.length < rowCap) ins.push((rowsWork[b] + rowsWork[b + 1]) / 2); }
+    }
+    refinePasses = pass;
+    splits += collisions;
+    if (!ins.length) break;
+    rowsWork = [...rowsWork, ...ins].sort((a, b) => a - b);
+    sweep(); evalCells();
+  }
+  const M = rowsWork.length;
+  xs = rowsWork;
+  const order = uu.map((_, j) => uu[j].map((_, i) => i));
+
+  // A transversal crossing can still leave two levels touching at one node (the grid cannot resolve every crossing,
+  // and a level field cannot be made monotone around a point). Repainting the smallest cell of such a 2x2 turns the
+  // touch into an ordinary one-cell step: sub-millimetre here, because the rows around a crossing are already fine.
+  // ---- the marching-cubes ambiguity ------------------------------------------------------------------------------
+  // Two feature boundaries crossing transversally can leave the same pair of levels touching at a single node: a
+  // pinch, where the surface closes but the fan around that vertex is not a disk. Repainting the smallest cell of
+  // such a 2x2 turns the touch into an ordinary one-cell step. The refinement above has already shrunk the rows
+  // there, so the snap is sub-millimetre and the silhouette is untouched.
+  let pinchFix = 0;
+  const frozen = cells.map(row => new Uint8Array(K));   // a repaired 2x2 stays put, so the pass cannot oscillate
+  const areaOf = (b, i) => {
+    const i2 = (i + 1) % K;
+    const w = wrap01(uu[b][i2] - uu[b][i]) * pitch;
+    const h = Math.abs(xs[Math.min(b + 1, M - 1)] - xs[b]);
+    return w * h;
+  };
+  for (let pass = 0; pass < 14; pass++) {
+    let n = 0;
+    for (let b = 0; b + 1 < cells.length; b++) {
+      for (let i = 0; i < K; i++) {
+        const i2 = (i + 1) % K;
+        const bl = cells[b][i], br = cells[b][i2], tl = cells[b + 1][i], tr = cells[b + 1][i2];
+        if (!(bl === tr && br === tl && bl !== br)) continue;
+        const id = [[b, i], [b, i2], [b + 1, i], [b + 1, i2]];
+        const free = id.map((c2, k) => ({ c: c2, k })).filter(o2 => !frozen[o2.c[0]][o2.c[1]]);
+        if (!free.length) continue;
+        free.sort((p, q) => areaOf(p.c[0], p.c[1]) - areaOf(q.c[0], q.c[1]));
+        const mi = free[0].k;
+        const was = cells[id[mi][0]][id[mi][1]];
+        const nb = [[b, mi === 0 || mi === 1 ? i2 : i], [b, mi === 0 || mi === 1 ? i : i2]];
+        const keep = cells[nb[0][0]][nb[0][1]], keep2 = cells[nb[1][0]][nb[1][1]];
+        const pick = areaOf(nb[0][0], nb[0][1]) >= areaOf(nb[1][0], nb[1][1]) ? keep : keep2;
+        cells[id[mi][0]][id[mi][1]] = pick;
+        frozen[id[mi][0]][id[mi][1]] = 1;      // only the cell that moved is off limits again, so a chain of
+        n++;                                   // diagonal contacts can be unwound one step at a time
+      }
+    }
+    pinchFix += n;
+    if (!n) break;
+  }
+
+  // ---- the vertical chain: every node carries one ring per level, in depth order -------------------------------
+  // A wall is not one quad from the shallow skin down to the deep one — it follows the chain of levels between
+  // them. The chain is the same at both ends of every wall, so strips that turn a corner or meet a third level
+  // still close, and a level that reaches a node only on one side keeps its ring pinned to the surface there.
+  // Elsewhere that ring is interpolated along the chain, which is what lets a sipe fade out at a block edge
+  // instead of tearing the wall.
+  const usedLv = ['top'];
+  for (const row of cells) for (const l of row) if (!usedLv.includes(l)) usedLv.push(l);
+  const lvIdx = {}; usedLv.forEach((l, n) => { lvIdx[l] = n; });
+  const chain0 = usedLv.map(l => ({ lvl: l, name: l, depth: LV[l].depth, inset: LV[l].inset || 0 })).sort((a, b) => a.depth - b.depth);
+  const alias = {};
+  const chain = [];
+  for (const c of chain0) {
+    const prev = chain[chain.length - 1];
+    if (prev && c.depth - prev.depth < 1e-4) { alias[c.lvl] = prev.lvl; continue; }   // same depth = same terrace
+    chain.push(c);
+  }
+  for (const k2 in alias) for (const row of cells) for (let i = 0; i < K; i++) if (row[i] === k2) row[i] = alias[k2];
+  if (T.bevel > 0.01) {
+    const ti = chain.findIndex(c => c.lvl === 'top' && c.inset > 0.001);
+    if (ti >= 0) chain.splice(ti + 1, 0, { lvl: 'top', name: 'cham', depth: chain[ti].depth + T.bevel, inset: 0, cham: true });
+  }
+  const NC = chain.length, kOf = {};
+  chain.forEach((c, k) => { if (!(c.lvl in kOf)) kOf[c.lvl] = k; });
+
+  // A node moves toward the centre of the cells that share its level; interior nodes cancel themselves out, so
+  // only outline nodes move. That is the whole trick behind a drafted wall with no extra bookkeeping.
+  const acc = []; for (let j = 0; j < M; j++) acc.push(new Map());
+  const pres = []; for (let j = 0; j < M; j++) pres.push(new Int32Array(K));
+  for (let b = 0; b < cells.length; b++) {
+    for (let i = 0; i < K; i++) {
+      const lv = cells[b][i], cc = centreOf(b, i), cq = (i + 1) % K, bit = 1 << lvIdx[lv];
+      const put = (j, i2) => {
+        pres[j][i2] |= bit;
+        let dum = (cc.u - uu[j][i2]) * pitch;
+        const dx = cc.x - xx[j][i2];
+        while (dum > 0.5 * pitch) dum -= pitch;
+        while (dum < -0.5 * pitch) dum += pitch;
+        const len = Math.hypot(dum, dx);
+        if (len < 1e-9) return;
+        const key = i2 + '|' + lv, m = acc[j];
+        const e = m.get(key) || { du: 0, dx: 0 };
+        e.du += dum / len; e.dx += dx / len;
+        m.set(key, e);
+      };
+      put(b, i); put(b + 1, i); put(b, cq); put(b + 1, cq);
+    }
+  }
+  const duOf = new Float64Array(M * K * NC), dxOf = new Float64Array(M * K * NC);
+  for (let j = 0; j < M; j++) {
+    for (let i = 0; i < K; i++) {
+      const n = (j * K + i) * NC, pts = [], p = pres[j][i];
+      for (let k = 0; k < NC; k++) {
+        const c = chain[k];
+        if (!((p >> lvIdx[c.lvl]) & 1)) continue;
+        let du = 0, dx = 0;
+        if (c.inset > 0) {
+          const e = acc[j].get(i + '|' + c.lvl);
+          if (e) { const len = Math.hypot(e.du, e.dx); if (len > 1e-6) { du = (e.du / len) * (c.inset / pitch); dx = (e.dx / len) * c.inset; } }
+        }
+        pts.push({ k, du, dx, depth: c.depth });
+      }
+      for (let k = 0; k < NC; k++) {
+        const hit = pts.find(q => q.k === k);
+        if (hit) { duOf[n + k] = hit.du; dxOf[n + k] = hit.dx; continue; }
+        if (!pts.length) continue;
+        const d = chain[k].depth;
+        let lo = null, hi = null;
+        for (const q of pts) {
+          if (q.depth <= d && (!lo || q.depth > lo.depth)) lo = q;
+          if (q.depth >= d && (!hi || q.depth < hi.depth)) hi = q;
+        }
+        const a0 = lo || hi, a1 = hi || lo;
+        const f = (lo && hi && hi.depth - lo.depth > 1e-9) ? (d - lo.depth) / (hi.depth - lo.depth) : 0;
+        duOf[n + k] = a0.du + (a1.du - a0.du) * f;
+        dxOf[n + k] = a0.dx + (a1.dx - a0.dx) * f;
+      }
+    }
+  }
+  const ringId = new Map(), ringList = [];
+  const ring = (j, i, k) => {
+    const key = j + '|' + i + '|' + k;
+    let id = ringId.get(key);
+    if (id !== undefined) return id;
+    const n = j * K + i;
+    id = ringList.length; ringId.set(key, id);
+    ringList.push({ u: uu[j][i] + duOf[n + k], x: xx[j][i] + dxOf[n + k], depth: chain[k].depth, lvl: chain[k].lvl, name: chain[k].name, k, j, i });
+    return id;
+  };
+  const capId = new Map();
+  const capRing = (j, i) => {
+    const key = j + '|' + i;
+    let id = capId.get(key);
+    if (id !== undefined) return id;
+    id = ringList.length; capId.set(key, id);
+    ringList.push({ u: uu[j][i], x: xx[j][i], depth: T.depth + T.skin, lvl: 'cap', name: 'cap', j, i });
+    return id;
+  };
+
+  // ---- the trace itself, as polylines through the nodes each feature edge owns ----------------------------------
+  const outline = [];
+  for (let ci = 0; ci < cols.length; ci++) {
+    const c = cols[ci];
+    if (c.kind !== 'feat') continue;
+    let seg = [];
+    for (let j = 0; j < M; j++) {
+      const inside = c.x0 - 1e-6 <= xs[j] && xs[j] <= c.x1 + 1e-6;
+      const i = inside ? ordOf[j].indexOf(ci) : -1;
+      if (i < 0) { if (seg.length > 1) outline.push(seg); seg = []; continue; }
+      seg.push([uu[j][i], xx[j][i]]);
+    }
+    if (seg.length > 1) outline.push(seg);
+  }
+  return { C, T, LV, xs, M, K, cols, order, uu, xx, ordOf, cells, isMir, ring, capRing, ringList, chain, kOf, collisions, refinePasses, splits, pinchFix, pitch, outline, skirtLen, domLo, domHi };
+}
+
+// ===================================================================================================================
+//  MAPPER — (u, x, depth) → mm on the tyre.
+//  The lateral axis follows the developed meridian of the crown profile, and a level's depth is measured along
+//  the profile normal, so a groove floor curves with the crown instead of flattening out. The chevron drift lives
+//  here rather than in the trace: in the frame a pitch is a straight strip, on the tyre it is a slanted one.
+// ===================================================================================================================
+function makeMapper(T, drift, pitchSeq) {
+  const G = carcass(T);
+  const dr = drift || (() => 0);
+  const halfW = G.halfW, shLen = Math.max(1e-6, T.shoulderLen);
+  const over = (T.skirt ? Math.max(0, T.skirtLen) : 0) + 6;
+  const rOf = x => {
+    const a = Math.abs(x);
+    let r = G.R - T.crown * Math.pow(clamp(a / Math.max(1e-6, halfW), 0, 1), 2);
+    if (a > halfW) {
+      const q = clamp((a - halfW) / shLen, 0, 1);
+      r -= T.shoulderDrop * (0.3 * q + 0.7 * q * q);
+      if (a > halfW + shLen) r -= (a - halfW - shLen) * 1.2;
+    }
+    return r;
+  };
+  const span = halfW + shLen + over, N = 900, h = span / N;
+  const arc = new Float64Array(N + 1);
+  for (let i = 1; i <= N; i++) {
+    const drr = (rOf(i * h) - rOf((i - 1) * h)) / h;
+    arc[i] = arc[i - 1] + Math.hypot(h, drr * h);
+  }
+  const arcAt = x => {
+    const a = clamp(Math.abs(x), 0, N * h), i = Math.min(N - 1, Math.floor(a / h)), t = a / h - i;
+    return (arc[i] + (arc[i + 1] - arc[i]) * t) * (x < 0 ? -1 : 1);
+  };
+  const nrm = x => {
+    const dv = 2e-3, d = (rOf(x + dv) - rOf(x - dv)) / (2 * dv), inv = 1 / Math.hypot(1, d);
+    return [inv, -d * inv];
+  };
+  const tiles = Math.max(1, T.pitches), P = G.pitch;
+  // Variable pitch: a repeating sequence of relative pitch lengths. Only the ANGLES are stretched, the tile is
+  // still one row of the same grid, so the topology and the seam bridging are untouched — which is exactly how a
+  // real tread trades even spacing for a spread-out hum instead of a single loud note.
+  const seq = (pitchSeq && pitchSeq.length > 1) ? pitchSeq.filter(v => v > 0) : null;
+  let cw = null, total = tiles;
+  if (seq) {
+    cw = new Float64Array(tiles + 1);
+    for (let t = 0; t < tiles; t++) cw[t + 1] = cw[t] + seq[t % seq.length];
+    total = cw[tiles];
+  }
+  const angFrac = v => {
+    if (!seq) return v / tiles;
+    const t = Math.max(0, Math.min(tiles - 1, Math.floor(v))), fr = clamp(v - t, 0, 1);
+    return (cw[t] + fr * seq[t % seq.length]) / total;
+  };
+  const stretch = seq ? total / tiles : 1;
+  return {
+    G, P, tiles, rOf, arcAt, nrm, stretch, seq,
+    pitchOf: t => P * (seq ? seq[t % seq.length] : 1),
+    curved(uAbs, x, depth) {
+      const th = TAU * (angFrac(uAbs) + dr(x) / tiles), n = nrm(x);
+      const r = rOf(x) - depth * n[0];
+      return [r * Math.cos(th), r * Math.sin(th), arcAt(x) - depth * n[1]];
+    },
+    flat(uAbs, x, depth) { return [(uAbs + dr(x)) * P, x, -depth]; },
+    outCurved(x) { const n = nrm(x); return [n[0], 0, n[1]]; },
+  };
+}
+
+// ===================================================================================================================
+//  MESH
+// ===================================================================================================================
+function buildTread(T, D, opt = {}) {
+  const stage = opt.stage ?? 4;
+  const flat = stage <= 2;                                  // stages 1-2: the developed tile, drawn flat
+  const tiles = stage >= 4 ? Math.max(1, T.pitches) : 1;    // stage 3: one tile, already on the crown
+  const onlyAuthored = stage === 1;                          // step 1: the single element, before it is mirrored
+  const grid = buildGrid(T, D);
+  const LV = grid.LV, M = grid.M, K = grid.K, cells = grid.cells;
+  const map = makeMapper(T, grid.C.shearAt, D.pitchSeq);
+  const place = (uAbs, x, depth) => (flat ? map.flat(uAbs, x, depth) : map.curved(uAbs, x, depth));
+  const outRef = x => (flat ? [0, 0, 1] : map.outCurved(x));
+  const rimRef = side => (flat ? [0, -side, 0] : [0, 0, side]);
+
+  // ---------------------------------------------------------------- faces --------------------------------------
+  // A corner is (ring, tile copy): the seam column of tile t is literally the same ring one copy along, which is
+  // why the array cannot come apart at a pitch boundary.
+  const F = [];
+  const quad = (c, role, set, mir, ref, tile) => F.push({ c, role, set, mir, ref, tile });
+  const RL = grid.ringList;
+  const posOf = (r, t) => { const R = RL[r]; return R ? place(R.u + t, R.x, R.depth) : [0, 0, 0]; };
+  const avg = (a, b) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
+  const cellCentre = (b, i) => {
+    const cq = (i + 1) % K, up = cq === 0 ? 1 : 0;
+    return {
+      u: (grid.uu[b][i] + grid.uu[b][cq] + up) / 2,
+      x: (grid.xx[b][i] + grid.xx[b][cq] + grid.xx[b + 1][i] + grid.xx[b + 1][cq]) / 4, up,
+    };
+  };
+  // A wall steps down the chain of levels between the two cells, one quad per step, so the bevel land, the wall
+  // below it and any level that only reaches one end of the run all share the same vertices. Winding is not decided
+  // here: propagation from the skin faces does that, which is the only way two strips meeting at a corner agree.
+  // Two rules can reach the same edge — the wall between horizontally adjacent cells and the wall between
+  // vertically adjacent ones meet on the same node pair wherever two levels touch diagonally. The first one there
+  // already closes the surface, so the second is dropped instead of doubling up into a non-manifold edge.
+  const wallSeen = new Set();
+  const NODEKEY = 16777216;
+  const wall = (t, j1, i1, j2, i2, sh, dp) => {
+    const kS = grid.kOf[sh], kD = grid.kOf[dp];
+    if (t !== 0) wallSeen.clear();
+    for (let k = kS; k < kD; k++) {
+      const n1 = j1 * K + i1, n2 = j2 * K + i2;
+      const wk = (Math.min(n1, n2) * NODEKEY + Math.max(n1, n2)) * 8 + k;
+      if (wallSeen.has(wk)) continue;
+      wallSeen.add(wk);
+      const a = grid.ring(j1, i1, k), b = grid.ring(j2, i2, k);
+      const c = grid.ring(j2, i2, k + 1), d2 = grid.ring(j1, i1, k + 1);
+      quad([[a, t], [b, t], [c, t], [d2, t]], grid.chain[k].name === 'cham' ? 'chamfer' : 'wall', 2, 0, null, t);
+    }
+  };
+
+  let perTile = 0;
+  for (let t = 0; t < tiles; t++) {
+    for (let b = 0; b < cells.length; b++) {
+      if (onlyAuthored && grid.isMir[b]) continue;
+      const row = cells[b], mir = grid.isMir[b] ? 1 : 0;
+      for (let i = 0; i < K; i++) {
+        const cq = (i + 1) % K, d = cq === 0 ? 1 : 0;
+        const lvl = row[i];
+        const kk = grid.kOf[lvl];
+        const r1 = grid.ring(b, i, kk), r2 = grid.ring(b, cq, kk);
+        const r3 = grid.ring(b + 1, cq, kk), r4 = grid.ring(b + 1, i, kk);
+        const cc = cellCentre(b, i);
+        quad([[r1, t], [r2, t + d], [r3, t + d], [r4, t]], 'skin', lvl === 'top' ? 0 : 1, mir, outRef(cc.x), t);
+        const lR = row[cq];
+        if (lR !== lvl) {
+          const shallowIsL = LV[lvl].depth <= LV[lR].depth;
+          wall(t + d, b, cq, b + 1, cq, shallowIsL ? lvl : lR, shallowIsL ? lR : lvl);
+        }
+        if (b + 1 < cells.length) {
+          const lU = cells[b + 1][i];
+          if (lU !== lvl) {
+            const shallowIsL = LV[lvl].depth <= LV[lU].depth;
+            wall(t + d, b + 1, i, b + 1, cq, shallowIsL ? lvl : lU, shallowIsL ? lU : lvl);
+          }
+        }
+      }
+      }
+
+      // ---- rims + inner land: closes the band into a watertight quad tube --------------------------------------
+    // The outer rows of a tread are a boundary, not a wall: this drops each rim loop down onto the carcass and
+    // lands it, so the whole pitch is a sealed tube of quads and the array has no open seam left anywhere.
+    if (T.cap) {
+      for (const side of [-1, 1]) {
+        const j = side < 0 ? 0 : M - 1, b = side < 0 ? 0 : cells.length - 1;
+        for (let i = 0; i < K; i++) {
+          const cq = (i + 1) % K, d = cq === 0 ? 1 : 0, lvl = cells[b][i];
+          if (onlyAuthored && grid.isMir[b]) continue;
+          const a1 = grid.ring(j, i, grid.kOf[lvl]), a2 = grid.ring(j, cq, grid.kOf[lvl]);
+          const c1 = grid.capRing(j, i), c2 = grid.capRing(j, cq);
+          quad([[a1, t], [a2, t + d], [c2, t + d], [c1, t]], 'rimwall', 3, 0, rimRef(side), t);
+        }
+      }
+      for (let b = 0; b < M - 1; b++) {
+        if (onlyAuthored && grid.isMir[b]) continue;
+        for (let i = 0; i < K; i++) {
+          const cq = (i + 1) % K, d = cq === 0 ? 1 : 0;
+          const c1 = grid.capRing(b, i), c2 = grid.capRing(b, cq), c3 = grid.capRing(b + 1, cq), c4 = grid.capRing(b + 1, i);
+          quad([[c1, t], [c2, t + d], [c3, t + d], [c4, t]], 'cap', 3, 0, null, t);
+        }
+      }
+    }
+    if (t === 0) perTile = F.length;      // one period of the ring, seam walls included
+  }
+
+  // ---------------------------------------------------------------- geometry -----------------------------------
+  const nRings = RL.length;
+  const copies = tiles + 1;
+  const pos = new Float64Array(copies * nRings * 3);
+  for (let t = 0; t < copies; t++) {
+    for (let r = 0; r < nRings; r++) {
+      const R = RL[r], p = place(R.u + t, R.x, R.depth), o = (t * nRings + r) * 3;
+      pos[o] = p[0]; pos[o + 1] = p[1]; pos[o + 2] = p[2];
+    }
+  }
+  const VI = (r, t) => t * nRings + r;
+
+  // weld coincident copies (the array seam), orient every face against its own reference direction
+  const weld = new Map(); const wp = []; const Q = 2e4;
+  const weldOf = new Int32Array(copies * nRings);
+  for (let v = 0; v < copies * nRings; v++) {
+    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    const key = Math.round(x * Q) + '_' + Math.round(y * Q) + '_' + Math.round(z * Q);
+    let w = weld.get(key);
+    if (w === undefined) { w = wp.length / 3; weld.set(key, w); wp.push(x, y, z); }
+    weldOf[v] = w;
+  }
+  const nFace = F.length;
+  // Orientation and topology checks run on ONE PERIOD of the array. Every other copy is the same ring of faces
+  // shifted around the tyre, and the seam wall that closes tile t is emitted while walking tile t, so the first
+  // `perTile` faces are a complete, closed surface on their own: no hashing, no dedupe, no 48-fold memory.
+  const KEY = 100000000;
+  const ek = (a, b) => (a < b ? a * KEY + b : b * KEY + a);
+  const ringC = f => F[f].c.map(c2 => c2[0]);
+  const weldC = f => F[f].c.map(c2 => weldOf[VI(c2[0], c2[1])]);
+  const faceV = new Array(perTile);
+  for (let u = 0; u < perTile; u++) faceV[u] = ringC(u);
+  const byEdge = new Map();
+  for (let u = 0; u < perTile; u++) {
+    const p = faceV[u];
+    for (let k = 0; k < 4; k++) {
+      const a = p[k], b = p[(k + 1) % 4];
+      if (a === b) continue;
+      const key = ek(a, b);
+      const e = byEdge.get(key);
+      if (e) e.push(u); else byEdge.set(key, [u]);
+    }
+  }
+  const trav = (p, rev, lo, hi) => {          // +1 low->high, -1 high->low, 0 absent
+    const q = rev ? [p[0], p[3], p[2], p[1]] : p;
+    for (let k = 0; k < 4; k++) { const a = q[k], b = q[(k + 1) % 4]; if (a === lo && b === hi) return 1; if (a === hi && b === lo) return -1; }
+    return 0;
+  };
+  const faceEdges = p => { const o = []; for (let k = 0; k < 4; k++) { const a = p[k], b = p[(k + 1) % 4]; if (a !== b) o.push(ek(a, b)); } return o; };
+  const nbrs = new Map();
+  for (const [, v] of byEdge) {
+    if (v.length !== 2) continue;
+    (nbrs.get(v[0]) || nbrs.set(v[0], []).get(v[0])).push(v[1]);
+    (nbrs.get(v[1]) || nbrs.set(v[1], []).get(v[1])).push(v[0]);
+  }
+  const posOfV = i2 => [wp[i2 * 3], wp[i2 * 3 + 1], wp[i2 * 3 + 2]];
+  const geomNormal = f => {
+    const P = weldC(f).map(posOfV);
+    const ux = [P[1][0] - P[0][0], P[1][1] - P[0][1], P[1][2] - P[0][2]];
+    const vx = [P[2][0] - P[0][0], P[2][1] - P[0][1], P[2][2] - P[0][2]];
+    const n = [ux[1] * vx[2] - ux[2] * vx[1], ux[2] * vx[0] - ux[0] * vx[2], ux[0] * vx[1] - ux[1] * vx[0]];
+    const l = Math.hypot(n[0], n[1], n[2]) || 1;
+    return [n[0] / l, n[1] / l, n[2] / l];
+  };
+  // The geometry decides the outward side of one seed face per connected component; every other face follows from
+  // it, which is the only way two wall strips that meet at a block corner are guaranteed to agree.
+  const flip = new Int8Array(perTile).fill(-1);
+  const queue = [];
+  for (let u = 0; u < perTile; u++) {
+    if (flip[u] >= 0) continue;
+    const q = F[u];
+    if (q.ref) { const n = geomNormal(u); flip[u] = (n[0] * q.ref[0] + n[1] * q.ref[1] + n[2] * q.ref[2] < 0) ? 1 : 0; } else flip[u] = 0;
+    queue.push(u);
+    for (let head = 0; head < queue.length; head++) {
+      const cur = queue[head], ce = faceEdges(faceV[cur]);
+      for (const nb of nbrs.get(cur) || []) {
+        if (flip[nb] >= 0) continue;
+        const ne = faceEdges(faceV[nb]);
+        let shared = -1;
+        for (const k2 of ne) if (ce.includes(k2)) { shared = k2; break; }
+        if (shared < 0) continue;
+        const lo = Math.floor(shared / KEY), hi = shared - lo * KEY;
+        const dC = trav(faceV[cur], flip[cur], lo, hi), dN = trav(faceV[nb], 0, lo, hi);
+        flip[nb] = !dC || !dN ? 0 : (dN === -dC ? 0 : 1);
+        queue.push(nb);
+      }
+    }
+    queue.length = 0;
+  }
+  let flipped = 0;
+  for (let f = 0; f < nFace; f++) {
+    if (flip[f % perTile] !== 1) continue;
+    const c = F[f].c;
+    F[f].c = [c[0], c[3], c[2], c[1]];
+    flipped++;
+  }
+  const wv = new Int32Array(nFace * 4);
+  for (let f = 0; f < nFace; f++) {
+    const c = F[f].c, o = f * 4;
+    for (let k = 0; k < 4; k++) wv[o + k] = weldOf[VI(c[k][0], c[k][1])];
+  }
+  for (let u = 0; u < perTile; u++) faceV[u] = ringC(u);      // the audit reads the final winding
+
+  // Render sets, flat: 0 block skin, 1 void floors, 2 walls + chamfers, 3 the closed tube. Positions and face
+  // normals go straight into typed arrays because a full ring is a million quads and an object per face does not
+  // survive that.
+  // Indexed sets: one shared position buffer for the whole ring, four indices per quad per set. A full 48 pitch
+  // tread is a million quads, and a mesh of that size only fits in the browser (and in RAM here) when it is indexed.
+  const groups = [0, 1, 2, 3].map(() => ({ idx: null, idxN: 0, quads: 0, mirrored: 0, pos: null, nrm: null }));
+  for (let f = 0; f < nFace; f++) { groups[F[f].set].quads++; if (F[f].mir) groups[F[f].set].mirrored++; }
+  for (const g of groups) g.idx = new Int32Array(g.quads * 4);
+  let degenerate = 0;
+  for (let f = 0; f < nFace; f++) {
+    const g = groups[F[f].set], o = f * 4, q = g.idxN;
+    g.idxN = q + 4;
+    for (let k = 0; k < 4; k++) g.idx[q + k] = wv[o + k];
+    if (f < perTile) {                                  // flatness of one copy is enough to certify the mesh
+      const P = [0, 1, 2, 3].map(k => { const vi = wv[o + k]; return [wp[vi * 3], wp[vi * 3 + 1], wp[vi * 3 + 2]]; });
+      const ux = [P[1][0] - P[0][0], P[1][1] - P[0][1], P[1][2] - P[0][2]];
+      const vx = [P[2][0] - P[0][0], P[2][1] - P[0][1], P[2][2] - P[0][2]];
+      if (Math.hypot(ux[1] * vx[2] - ux[2] * vx[1], ux[2] * vx[0] - ux[0] * vx[2], ux[0] * vx[1] - ux[1] * vx[0]) < 1e-7) degenerate++;
+    }
+  }
+  for (const g of groups) { g.pos = new Float32Array(wp); g.nrm = null; }
+  // The overlay that proves the topology: the quad flow itself, taken from the grid (one polyline per row and per
+  // column of the ring) instead of from the faces, so it costs M*K and lands exactly on the vertices that were used.
+  const wire = [];
+  {
+    const lvlOf = (b, i) => cells[Math.min(b, cells.length - 1)][i];
+    const put = (j, i, t) => posOf(grid.ring(j, i, grid.kOf[lvlOf(j, i)]), t);
+    for (let t = 0; t < 1; t++) {          // one pitch: the wireframe is the unit of work, not the whole ring
+      for (let j = 0; j < M; j++) {
+        for (let i = 0; i < K; i++) {
+          const cq = (i + 1) % K, d = cq === 0 ? 1 : 0;
+          if (i + 1 < K) {
+            const a = put(j, i, t), b2 = put(j, cq, t + d);
+            wire.push(a[0], a[1], a[2], b2[0], b2[1], b2[2]);
+          }
+          if (j + 1 < M) {
+            const a = put(j, i, t), b2 = put(j + 1, i, t);
+            wire.push(a[0], a[1], a[2], b2[0], b2[1], b2[2]);
+          }
+        }
+      }
+    }
+  }
+  const outlinePos = [];
+  for (const seg of grid.outline) {
+    for (let s = 0; s + 1 < seg.length; s++) {
+      for (const pt of [seg[s], seg[s + 1]]) { const p = place(pt[0], pt[1], -0.3); outlinePos.push(p[0], p[1], p[2]); }
+    }
+  }
+
+  // ---------------------------------------------------------------- audit --------------------------------------
+  // Closed = every edge used twice; manifold = never more; oriented = the two users agree on direction. Rim loops
+  // are the only boundary a tread is allowed to have with the cap switched off, so `open` is read against 2K.
+  const edge = new Map(), vFac = new Map(), vEdg = new Map();
+  const bump = (m, k) => m.set(k, (m.get(k) || 0) + 1);
+  for (let f = 0; f < perTile; f++) {
+    const r4 = faceV[f];
+    for (const a of r4) bump(vFac, a);
+    for (let k2 = 0; k2 < 4; k2++) {
+      const a = r4[k2], b = r4[(k2 + 1) % 4];
+      if (a === b) continue;
+      const key = a < b ? a + '_' + b : b + '_' + a;
+      const e = edge.get(key) || { n: 0, dir: 0 };
+      e.n++; e.dir += a < b ? 1 : -1;
+      edge.set(key, e);
+    }
+  }
+  let open = 0, nonManifold = 0, inconsistent = 0;
+  for (const [key, e] of edge) {
+    if (e.n === 1) open++; else if (e.n > 2) nonManifold++; else if (e.dir !== 0) inconsistent++;
+    const [a, b] = key.split('_').map(Number);
+    bump(vEdg, a); bump(vEdg, b);
+  }
+  let pinched = 0;
+  const rimRings = new Set();
+  for (let i = 0; i < K; i++) { rimRings.add(grid.ring(0, i, grid.kOf[cells[0][i]])); rimRings.add(grid.ring(M - 1, i, grid.kOf[cells[cells.length - 1][i]])); }
+  for (const [v, nf] of vFac) if (!rimRings.has(v) && (vEdg.get(v) || 0) !== nf) pinched++;
+  const stats = {
+    quads: F.length, quadsTile: perTile, verts: wp.length / 3, rings: nRings, nodes: M * K, rows: M, cols: K,
+    degenerate, open, nonManifold, inconsistent, pinched, splits: grid.splits, passes: grid.refinePasses,
+    flipped, levels: grid.chain.map(c => c.name),
+    mirroredFaces: groups.reduce((a, g) => a + g.mirrored, 0), tris: nFace * 2,
+    tiles, pitch: grid.pitch, pitchMin: map.seq ? Math.min(...Array.from({ length: tiles }, (_, t) => map.pitchOf(t))) : grid.pitch,
+    pitchMax: map.seq ? Math.max(...Array.from({ length: tiles }, (_, t) => map.pitchOf(t))) : grid.pitch, variablePitch: !!map.seq, rimA: K, rimB: K,
+  };
+  return { grid, map, RL, groups, wire, outlinePos, stats, wp, wv, period: faceV, F, nRings, tiles, flat, place, LV, T, weldOf, pos, cellCentre };
+}
+
+// ===================================================================================================================
+//  OBJ — real quad faces (f with four indices), welded
+// ===================================================================================================================
+function toOBJ(B) {
+  const { wp, wv, F, stats } = B;
+  let s = `# quad tread — outlines traced with quads, no displacement of any kind\n`;
+  s += `# rows ${stats.rows} cols ${stats.cols} tiles ${stats.tiles}  faces ${stats.quads} (all quads)\n`;
+  s += `# open edges ${stats.open}  non-manifold ${stats.nonManifold}  degenerate ${stats.degenerate}\n`;
+  s += `o tread\n`;
+  for (let i = 0; i < wp.length; i += 3) s += `v ${wp[i].toFixed(5)} ${wp[i + 1].toFixed(5)} ${wp[i + 2].toFixed(5)}\n`;
+  const names = ['block', 'void', 'wall', 'cap'];
+  for (let g = 0; g < 4; g++) {
+    let head = '';
+    let body = '';
+    for (let f = 0; f < F.length; f++) {
+      if (F[f].set !== g) continue;
+      const o = f * 4;
+      body += `f ${wv[o] + 1} ${wv[o + 1] + 1} ${wv[o + 2] + 1} ${wv[o + 3] + 1}\n`;
+    }
+    if (!body) continue;
+    s += head + `g ${names[g]}\n` + body;
+  }
+  return s;
+}
+
+
+const BASE_T = {
+  width: 245, aspect: 45, rim: 17, treadFrac: 0.88,
+  depth: 9, crown: 2.5, shoulderLen: 12, shoulderDrop: 3,
+  pitches: 48, chevron: 24, cham: 0.8, bevel: 1.2, sipeDepthF: 0.62,
+  xsub: 6, usub: 9, xmin: 0.9, ugap: 0.7, skin: 2.2,
+  skirt: true, skirtLen: 9, cap: false, wire: true, outline: true, tint: true, flat: false, spin: false,
+};
+
+/* 12 tread designs in the grammar. Every one is authored centre → out on the right half; the left half comes from
+ * mirroring (or an explicit override). Nothing here is a heightfield: each feature is a traced outline with a
+ * level, so the mesh is built from the trace.                                                   */
+const DESIGNS = [
+  {
+    id: 'wetV', label: 'Wet V', tag: 'summer / directional',
+    desc: 'Four chevron ribs with siped shoulders and hooked block trailing edges. Water goes rearward through the ' +
+          'tapered main grooves; the hooks bite on lane change.',
+    shear: 'v', mir: 'mirror', shift: 0.5, wrap: 0.25,
+    lanes: [
+      { w: 0.16, kind: 'rib', base: 'top', sipes: { n: 3, w: 0.02, at: [0.1, 0.9] } },
+      { w: 0.11, kind: 'groove', edge: { a: 0.012, cyc: 2 } },
+      { w: 0.31, kind: 'rib', chev: 1, blocks: { n: 4, w: 0.30, at: [0.05, 0.95], taper: 0.10, level: 'floor',
+          keys: [[0, 0.06, 0.36], [0.35, 0.03, 0.33], [0.62, 0.10, 0.30], [1, 0.04, 0.28]], samples: 3 },
+        sipes: { n: 2, w: 0.024, at: [0.15, 0.85] } },
+      { w: 0.10, kind: 'groove' },
+      { w: 0.32, kind: 'rib', chev: 1, blocks: { n: 3, w: 0.42, at: [0.08, 0.92], taper: -0.12, level: 'floor',
+          keys: [[0, 0.05, 0.47], [0.45, 0.12, 0.44], [1, 0.02, 0.40]] },
+        sipes: { n: 4, w: 0.018, at: [0.2, 0.8], zig: { a: 0.012, cyc: 2 } } },
+    ],
+  },
+  {
+    id: 'asymUHP', label: 'Asym UHP', tag: 'ultra high performance',
+    desc: 'Outboard: three stiff arrows for cornering. Inboard: wide continuous grooves for aquaplaning. Modelled as ' +
+          'two stacks, not mirrored, so each side keeps its own function.',
+    shear: 'v', mir: 'copy', wrap: 0.18, wrapL: 0.3,
+    lanes: [
+      { w: 0.34, kind: 'rib', chev: 0.55, blocks: { n: 3, w: 0.5, at: [0.04, 0.96], taper: 0.06, level: 'floor',
+          keys: [[0, 0.04, 0.5], [0.5, 0.1, 0.46], [1, 0.02, 0.44]] }, sipes: { n: 2, w: 0.02, at: [0.3, 0.7] } },
+      { w: 0.09, kind: 'groove' },
+      { w: 0.30, kind: 'rib', chev: 0.55, blocks: { n: 3, w: 0.46, level: 'relief', at: [0.1, 0.9] },
+        cuts: [{ level: 'floor', at: [0.15, 0.85], u0: 0.30, du0: 0.06, u1: 0.40, du1: 0.02, samples: 2 }] },
+      { w: 0.08, kind: 'groove' },
+      { w: 0.19, kind: 'rib', base: 'top', sipes: { n: 5, w: 0.016, at: [0.05, 0.95] } },
+    ],
+    lanesL: [
+      { w: 0.20, kind: 'rib', chev: 0.2, sipes: { n: 6, w: 0.02, at: [0.02, 0.98] } },
+      { w: 0.13, kind: 'groove' },
+      { w: 0.26, kind: 'rib', chev: 0.35, blocks: { n: 4, w: 0.3, at: [0.03, 0.97], level: 'floor', taper: 0.14 },
+        sipes: { n: 3, w: 0.022, at: [0.1, 0.9], zig: { a: 0.02, cyc: 3 } } },
+      { w: 0.13, kind: 'groove' },
+      { w: 0.28, kind: 'rib', chev: 0.2, blocks: { n: 4, w: 0.26, at: [0.05, 0.95], level: 'sipe' } },
+    ],
+  },
+  {
+    id: 'herringbone', label: 'Herringbone', tag: 'mirror across the centre rib',
+    desc: 'One chevron arm authored from the centreline out, then reflected about the centre rib — the two halves ' +
+          'meet point for point because they share the same column set.',
+    shear: 'z', mir: 'mirror', shift: 0.5,
+    lanes: [
+      { w: 0.10, kind: 'rib', base: 'top' },
+      { w: 0.90, kind: 'rib', chev: 1, blocks: { n: 2, w: 0.34, at: [0.02, 0.98], level: 'floor', taper: 0.22,
+          keys: [[0, 0.02, 0.36], [0.4, 0.16, 0.30], [0.75, 0.06, 0.34], [1, 0.20, 0.24]] },
+        sipes: { n: 3, w: 0.02, at: [0.2, 0.8] } },
+    ],
+  },
+  {
+    id: 'allTerrain', label: 'All-Terrain 50/50', tag: 'block ratio void',
+    desc: 'Half void, half rubber: stacked lugs with kerf notches on the shoulders, tie bars at the floor so the ' +
+          'blocks brace each other, and a wear scribe across the centre rib.',
+    shear: 'v', mir: 'point', shift: 0.5, wrap: 0.4, wrapL: 0.4,
+    lanes: [
+      { w: 0.12, kind: 'rib', base: 'top', sipes: { n: 2, w: 0.03, at: [0.2, 0.8] },
+        cuts: [{ level: 'kerf', at: [0.45, 0.55], u0: 0.1, u1: 0.9, samples: 1 }] },
+      { w: 0.16, kind: 'groove' },
+      { w: 0.42, kind: 'rib', chev: 0.35, blocks: { n: 2, w: 0.58, at: [0.0, 1.0], level: 'floor', taper: 0.1,
+          keys: [[0, 0.0, 0.62], [0.3, 0.06, 0.5], [0.7, 0.02, 0.56], [1, 0.1, 0.44]] },
+        tie: { n: 2, w: 0.07, at: [0.25, 0.75] },
+        sipes: { n: 4, w: 0.026, at: [0.1, 0.9], zig: { a: 0.014, cyc: 2 } } },
+      { w: 0.16, kind: 'groove' },
+      { w: 0.14, kind: 'rib', chev: 0.2, blocks: { n: 3, w: 0.4, at: [0.05, 0.95], level: 'floor' } },
+    ],
+  },
+  {
+    id: 'winterSipe', label: 'Winter Sipe Field', tag: 'sipe density',
+    desc: 'Three rows of 3-D blocks, every block carrying five zig-zag sipes at two depths, so the biting edges keep ' +
+          'multiplying across the whole tread face.',
+    shear: 'z', mir: 'mirror', shift: 0.5,
+    lanes: [
+      { w: 0.20, kind: 'rib', chev: 0, sipes: { n: 7, w: 0.014, at: [0.02, 0.98], zig: { a: 0.03, cyc: 4 } } },
+      { w: 0.08, kind: 'groove' },
+      { w: 0.44, kind: 'rib', chev: 0.6, blocks: { n: 3, w: 0.30, at: [0.04, 0.96], level: 'relief', taper: 0.08 },
+        sipes: { n: 3, w: 0.022, at: [0.06, 0.94], zig: { a: 0.01, cyc: 2 } } },
+      { w: 0.08, kind: 'groove' },
+      { w: 0.20, kind: 'rib', chev: 0, sipes: { n: 7, w: 0.014, at: [0.02, 0.98], zig: { a: 0.03, cyc: 4 } } },
+    ],
+  },
+  {
+    id: 'rally', label: 'Rally Gravel', tag: 'notched chevrons',
+    desc: 'Chevron arms with a notch cut into the trailing edge (a stone ejector) over a relief ledge, so the arm ' +
+          'itself is two levels deep and the notch is traced, not chopped.',
+    shear: 'v', mir: 'mirror', shift: 0.5, wrap: 0.3,
+    lanes: [
+      { w: 0.14, kind: 'rib', base: 'top' },
+      { w: 0.10, kind: 'groove' },
+      { w: 0.46, kind: 'rib', chev: 1, blocks: { n: 3, w: 0.36, at: [0.03, 0.97], level: 'floor', taper: 0.12,
+          keys: [[0, 0.05, 0.4], [0.3, 0.0, 0.34], [0.5, 0.22, 0.34], [0.52, 0.0, 0.34], [1, 0.1, 0.3]] },
+        cuts: [{ level: 'relief', at: [0.1, 0.9], u0: 0.44, du0: 0.1, u1: 0.52, du1: 0.06, samples: 2 }] },
+      { w: 0.10, kind: 'groove' },
+      { w: 0.20, kind: 'rib', chev: 1, blocks: { n: 3, w: 0.3, at: [0.05, 0.95], level: 'relief' } },
+    ],
+  },
+  {
+    id: 'mudClaw', label: 'Mud Claw', tag: 'hooked lugs',
+    desc: 'Full-width claws: each lug is one edge zig-zagged into a hook and the other straight, with a scooped ' +
+          'undercut at the trailing face for self-cleaning in mud.',
+    shear: 'z', mir: 'point', shift: 0.5, wrap: 0.5, wrapL: 0.5,
+    lanes: [
+      { w: 0.30, kind: 'rib', chev: 0.15, blocks: { n: 2, w: 0.62, at: [-0.1, 1.1], level: 'floor',
+          zig: { a: 0.11, cyc: 3, tri: 0 }, zigR: { a: 0.07, cyc: 2 }, samples: 4 },
+        cuts: [{ level: 'relief', at: [0.55, 1], u0: 0.06, u1: 0.3, samples: 1 }] },
+      { w: 0.14, kind: 'groove' },
+      { w: 0.28, kind: 'rib', chev: 0.15, blocks: { n: 2, w: 0.55, at: [-0.1, 1.1], level: 'floor',
+          zig: { a: 0.09, cyc: 2 } } },
+      { w: 0.14, kind: 'groove' },
+      { w: 0.14, kind: 'rib', base: 'top', sipes: { n: 3, w: 0.03, at: [0.1, 0.9] } },
+    ],
+  },
+  {
+    id: 'semiSlick', label: 'Track Semi-Slick', tag: 'dry grip',
+    desc: 'A land as wide as the rules allow, two thin extraction grooves, and arrows that only appear on the ' +
+          'shoulder wrap — the kerf scribe wears flat and reads as a tread-wear bar.',
+    shear: 'v', mir: 'mirror', shift: 0.5, wrap: 0.6,
+    lanes: [
+      { w: 0.42, kind: 'rib', base: 'top', cuts: [{ level: 'kerf', at: [0.3, 0.7], u0: 0.46, u1: 0.54, samples: 1 }] },
+      { w: 0.05, kind: 'groove' },
+      { w: 0.20, kind: 'rib', base: 'top', sipes: { n: 4, w: 0.016, at: [0.05, 0.95] } },
+      { w: 0.05, kind: 'groove' },
+      { w: 0.28, kind: 'rib', chev: 0.9, blocks: { n: 2, w: 0.5, at: [0.1, 0.9], level: 'relief', taper: 0.2 } },
+    ],
+  },
+  {
+    id: 'touring', label: 'Touring Quiet', tag: 'variable pitch ready',
+    desc: 'Five ribs with four pitch lengths and shallow sipes only on the centre ribs — built for the pitch sequence ' +
+          'to be stretched per tile, which changes the angles and never the topology.',
+    shear: 'v', mir: 'mirror', shift: 0.5,
+    pitchSeq: [1, 0.82, 1.14, 0.9, 1.05, 0.78],
+    lanes: [
+      { w: 0.14, kind: 'rib', base: 'top', sipes: { n: 4, w: 0.018, at: [0.04, 0.96] } },
+      { w: 0.06, kind: 'groove' },
+      { w: 0.22, kind: 'rib', chev: 0.3, blocks: { n: 3, w: 0.3, at: [0.06, 0.94], level: 'sipe', taper: 0.08 },
+        sipes: { n: 3, w: 0.02, at: [0.15, 0.85] } },
+      { w: 0.06, kind: 'groove' },
+      { w: 0.24, kind: 'rib', chev: 0.45, blocks: { n: 3, w: 0.32, at: [0.06, 0.94], level: 'floor', taper: 0.1 },
+        sipes: { n: 2, w: 0.022, at: [0.2, 0.8] } },
+      { w: 0.06, kind: 'groove' },
+      { w: 0.16, kind: 'rib', chev: 0.2, blocks: { n: 4, w: 0.22, at: [0.02, 0.98], level: 'sipe' } },
+    ],
+  },
+  {
+    id: 'offRoad', label: 'Off-Road Open', tag: 'mud / rock',
+    desc: 'Shoulder lugs wrap the block onto the sidewall (wrap 0.75 of the shoulder length) so the edge bites; the ' +
+          'voids are merged at the floor so mud has one channel to leave through.',
+    shear: 'z', mir: 'point', shift: 0.5, wrap: 0.75, wrapL: 0.75,
+    lanes: [
+      { w: 0.30, kind: 'rib', chev: 0.2, blocks: { n: 2, w: 0.7, at: [-0.15, 1.15], level: 'floor',
+          keys: [[0, 0.0, 0.75], [0.35, 0.12, 0.62], [0.65, 0.02, 0.7], [1, 0.16, 0.58]] },
+        tie: { n: 1, w: 0.09, at: [0.45, 0.55] } },
+      { w: 0.22, kind: 'groove' },
+      { w: 0.26, kind: 'rib', chev: 0.35, blocks: { n: 2, w: 0.6, at: [-0.1, 1.1], level: 'floor', taper: 0.16 } },
+      { w: 0.22, kind: 'groove' },
+    ],
+  },
+  {
+    id: 'sandPaddle', label: 'Sand Paddle', tag: 'point-symmetric',
+    desc: 'One paddle authored, then carried across the centreline by a point reflection, so the flotation face is ' +
+          'continuous while the voids still stagger by half a pitch.',
+    shear: 'none', mir: 'point', shift: 0.5,
+    lanes: [
+      { w: 0.44, kind: 'rib', chev: 0.1, blocks: { n: 3, w: 0.5, at: [0.0, 1.0], level: 'floor', taper: 0.0,
+          keys: [[0, 0.02, 0.46], [0.5, 0.14, 0.34], [1, 0.0, 0.46]] } },
+      { w: 0.12, kind: 'groove' },
+      { w: 0.44, kind: 'rib', chev: 0.1, sipes: { n: 6, w: 0.02, at: [0.02, 0.98] } },
+    ],
+  },
+  {
+    id: 'studded', label: 'Studded Ice', tag: 'winter / studs',
+    desc: 'Pits moulded into the blocks for 12 mm studs (a fifth level, shallower than the sipe field), plus dense ' +
+          'siping across a soft compound rib pattern.',
+    shear: 'v', mir: 'mirror', shift: 0.5,
+    lanes: [
+      { w: 0.18, kind: 'rib', base: 'top', sipes: { n: 8, w: 0.014, at: [0.02, 0.98], zig: { a: 0.02, cyc: 3 } } },
+      { w: 0.07, kind: 'groove' },
+      { w: 0.36, kind: 'rib', chev: 0.4, blocks: { n: 4, w: 0.24, at: [0.03, 0.97], level: 'floor' },
+        cuts: [
+          { level: 'pit', at: [0.25, 0.75], u0: 0.30, du0: 0.04, u1: 0.40, du1: 0.04, samples: 2,
+            keys: null },
+          { level: 'pit', at: [0.25, 0.75], u0: 0.62, du0: 0.04, u1: 0.72, du1: 0.04, samples: 2 },
+        ],
+        sipes: { n: 4, w: 0.018, at: [0.1, 0.9] } },
+      { w: 0.07, kind: 'groove' },
+      { w: 0.25, kind: 'rib', chev: 0.75, blocks: { n: 4, w: 0.26, at: [0.05, 0.95], level: 'floor', taper: 0.1 },
+        cuts: [{ level: 'pit', at: [0.3, 0.7], u0: 0.36, u1: 0.52, samples: 2 }],
+        sipes: { n: 3, w: 0.02, at: [0.15, 0.85] } },
+    ],
+  },
+];
+
+/*>>>CORE*/
+
+// ------------------------------------------------- state -----------------------------------------------------------
+const T = { ...BASE_T };
+let design = DESIGNS[0].id, stage = 4, useVP = true;
+const D = () => {
+  const d = DESIGNS.find(x => x.id === design);
+  if (useVP || !d.pitchSeq) return d;
+  const { pitchSeq, ...rest } = d; return rest;          // variable pitch is a mapper stretch, never a topology change
+};
+
+const STAGE_TEXT = {
+  1: 'Step 1 — Trace. One authored half of one pitch, laid flat. Each lane outline is walked by quads: skins at the level the cell sits at, a wall quad per step of the level chain down every edge, chamfer lands on the blocks. Nothing here is sampled from a height field.',
+  2: 'Step 2 — Mirror. The half is reflected through the centreline. The centre rib ends exactly on that row, so the two halves meet vertex for vertex — no seam, no stitching, no second authoring pass. Lane stacks may instead be authored per side (Asym UHP) or carried through a point reflection (All-Terrain, Mud Claw).',
+  3: 'Step 3 — Crown. The pitch is bent onto the wheel: lateral mm follow the meridian of the crown and the shoulder roundover, circumferential mm become wheel angle, and a level’s depth is measured along the profile normal so a groove floor curves instead of flattening. Topology untouched.',
+  4: 'Step 4 — Array + bridge. The pitch repeats at exact spacing (circumference ÷ count). The last column of one tile is literally the first column of the next, so walls and skins across the seam are the same faces, blocked ribs bridge themselves, and the skirt plus the cap turn the band into a closed tube.',
+};
+
+// ------------------------------------------------- scene -----------------------------------------------------------
+const host = document.getElementById('stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+host.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0b0d);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.5, 4000);
+camera.position.set(430, 300, 430);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.08; controls.target.set(0, 0, 0);
+{
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(new RoomEnvironment(renderer), 0.05).texture;
+}
+const key = new THREE.DirectionalLight(0xffffff, 1.5); key.position.set(260, 420, 200); scene.add(key);
+const rim = new THREE.DirectionalLight(0x89b7ff, 0.55); rim.position.set(-320, -140, -260); scene.add(rim);
+const group = new THREE.Group(); scene.add(group);
+const grid = new THREE.GridHelper(1200, 24, 0x1d2026, 0x15171c); grid.rotation.x = Math.PI / 2; scene.add(grid);
+
+const MAT = {
+  block: new THREE.MeshPhysicalMaterial({ color: 0x191b1f, roughness: 0.66, metalness: 0.0, clearcoat: 0.3, clearcoatRoughness: 0.55, side: THREE.DoubleSide }),
+  floor: new THREE.MeshPhysicalMaterial({ color: 0x141519, roughness: 0.78, clearcoat: 0.15, side: THREE.DoubleSide }),
+  wall: new THREE.MeshPhysicalMaterial({ color: 0x20232a, roughness: 0.72, clearcoat: 0.1, side: THREE.DoubleSide }),
+  cap: new THREE.MeshPhysicalMaterial({ color: 0x2b2e36, roughness: 0.8, side: THREE.DoubleSide }),
+};
+const MAT_TINT = { ...MAT, cap: new THREE.MeshPhysicalMaterial({ color: 0x27506e, roughness: 0.6, side: THREE.DoubleSide }) };
+const wireMat = new THREE.LineBasicMaterial({ color: 0x38c46d, transparent: true, opacity: 0.3, depthWrite: false });
+const outMat = new THREE.LineBasicMaterial({ color: 0xe9c477, transparent: true, opacity: 0.95, depthWrite: false });
+
+let last = null;
+function clearGroup() {
+  for (let i = group.children.length - 1; i >= 0; i--) {
+    const o = group.children[i];
+    if (o.geometry && o.userData.own) o.geometry.dispose();
+    group.remove(o);
+  }
+}
+
+function rebuild() {
+  const d0 = performance.now();
+  clearGroup();
+  let B;
+  try { B = buildTread(T, D(), { stage }); } catch (e) { fail(String(e && e.message || e)); return; }
+  last = B;
+  const s = B.stats;
+  const posAttr = new THREE.BufferAttribute(B.wp, 3);
+  posAttr.setUsage(THREE.StaticDrawUsage);
+  const mats = T.tint ? MAT_TINT : MAT;
+  const names = ['block skin', 'void floors', 'walls + chamfers', 'skirt / cap'];
+  for (let g = 0; g < 4; g++) {
+    const set = B.groups[g];
+    if (!set || !set.quads) continue;
+    const tri = new Int32Array(set.quads * 6);
+    const idx = set.idx;
+    for (let q = 0; q < set.quads; q++) {
+      const o = q * 4, t = q * 6;
+      tri[t] = idx[o]; tri[t + 1] = idx[o + 1]; tri[t + 2] = idx[o + 2];
+      tri[t + 3] = idx[o]; tri[t + 4] = idx[o + 2]; tri[t + 5] = idx[o + 3];
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', posAttr);
+    geo.setIndex(new THREE.BufferAttribute(tri, 1));
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, mats[[0, 1, 2, 3][g]] ? mats[[0, 1, 2, 3][g]] : mats.block);
+    mesh.name = names[g]; mesh.userData.own = true;
+    group.add(mesh);
+  }
+  if (T.wire && B.wire.length) {
+    const wg = new THREE.BufferGeometry();
+    wg.setAttribute('position', new THREE.BufferAttribute(new Float32Array(B.wire), 3));
+    const ls = new THREE.LineSegments(wg, wireMat); ls.userData.own = true; group.add(ls);
+  }
+  if (T.outline && B.outlinePos.length) {
+    const og = new THREE.BufferGeometry();
+    og.setAttribute('position', new THREE.BufferAttribute(new Float32Array(B.outlinePos), 3));
+    const os2 = new THREE.LineSegments(og, outMat); os2.userData.own = true; group.add(os2);
+  }
+  for (const k in MAT) { MAT[k].flatShading = T.flat; MAT[k].needsUpdate = true; }
+  for (const k in MAT_TINT) { MAT_TINT[k].flatShading = T.flat; }
+  const box = new THREE.Box3().setFromObject(group);
+  if (!box.isEmpty()) {
+    const sph = box.getBoundingSphere(new THREE.Sphere());
+    controls.target.copy(sph.center);
+    if (!rebuild.once) { camera.position.copy(sph.center).add(new THREE.Vector3(1.02, 0.72, 1.02).multiplyScalar(sph.radius * 1.9)); rebuild.once = true; }
+  }
+  reportAudit(B, performance.now() - d0);
+}
+
+function fail(msg) {
+  const v = document.getElementById('verdict');
+  v.textContent = 'build failed: ' + msg; v.className = 'badge bad';
+}
+
+function reportAudit(B, ms) {
+  const s = B.stats, want = stage === 1 ? null : (T.cap ? 0 : 2 * s.cols);
+  const chips = [];
+  const chip = (label, val, ok) => chips.push(`<span class="chip ${ok === undefined ? '' : ok ? 'ok' : 'no'}">${label} <b>${val}</b></span>`);
+  chip('quads / pitch', s.quadsTile.toLocaleString());
+  chip('rows', s.rows); chip('cols', s.cols); chip('verts', s.verts.toLocaleString());
+  const closed = want === null || s.open === want;
+  chip('open edges', s.open + (want === null ? '' : ' / ' + want), closed);
+  chip('non-manifold', s.nonManifold, s.nonManifold === 0);
+  chip('winding conflicts', s.inconsistent, s.inconsistent === 0);
+  chip('degenerate', s.degenerate, s.degenerate === 0);
+  chip('pinched verts', s.pinched, s.pinched === 0);
+  chip('level chain', s.levels.join('→'));
+  chip('row splits', s.splits + ' in ' + s.passes + ' passes');
+  chip('mirrored faces', s.mirroredFaces.toLocaleString());
+  document.getElementById('audit').innerHTML = chips.join('');
+  document.getElementById('sQ').textContent = s.quads.toLocaleString();
+  document.getElementById('sT').textContent = (s.tris || s.quads * 2).toLocaleString();
+  document.getElementById('sV').textContent = s.verts.toLocaleString();
+  document.getElementById('sG').textContent = s.rows + '×' + s.cols;
+  document.getElementById('sP').textContent = (s.variablePitch ? s.pitchMin.toFixed(1) + '–' + s.pitchMax.toFixed(1) : s.pitch.toFixed(1)) + ' mm';
+  document.getElementById('chain').textContent = 'levels ' + s.levels.join(' · ');
+  const ok = closed && !s.nonManifold && !s.inconsistent && !s.degenerate && !s.pinched;
+  const v = document.getElementById('verdict');
+  v.className = 'badge ' + (ok ? '' : 'warn');
+  v.textContent = ok
+    ? (stage === 1 ? 'authored half · open by construction' : stage === 2 ? 'closed band, both halves' : stage === 3 ? 'one pitch on the crown, watertight' : T.cap ? 'ring closed into a tube — 0 open edges' : 'ring: only the 2 rim loops are open')
+    : `check: open ${s.open} want ${want} nm ${s.nonManifold} wind ${s.inconsistent}`;
+  document.getElementById('hudS').textContent = `quads ${s.quadsTile.toLocaleString()} × ${s.tiles} pitches · ${ms.toFixed(0)} ms`;
+  document.getElementById('vpv').textContent = B.stats.variablePitch ? 'on' : '—';
+}
+
+// ------------------------------------------------- controls --------------------------------------------------------
+const SLIDERS = {
+  tyre: [['width', 'section width', 120, 355, 5, ' mm'], ['aspect', 'aspect ratio', 25, 90, 1, ''], ['rim', 'rim dia', 12, 26, 1, '"'],
+         ['treadFrac', 'tread fraction', 0.5, 0.98, 0.01, ''], ['crown', 'crown rise', 0, 7, 0.1, ' mm'],
+         ['shoulderLen', 'shoulder run', 0, 34, 1, ' mm'], ['shoulderDrop', 'shoulder drop', 0, 9, 0.2, ' mm']],
+  pat: [['pitches', 'pitch count', 1, 121, 1, ''], ['chevron', 'chevron angle', 0, 42, 1, '°'], ['depth', 'tread depth', 1, 22, 0.5, ' mm'],
+        ['cham', 'chamfer', 0, 2.4, 0.05, ' mm'], ['bevel', 'bevel height', 0, 3.5, 0.05, ' mm'],
+        ['sipeDepthF', 'sipe depth ×', 0, 0.95, 0.01, ''], ['xsub', 'row spacing', 1, 16, 0.5, ' mm'],
+        ['usub', 'col refine', 0, 24, 1, ''], ['xmin', 'min kerf', 0, 6, 0.1, ' mm'], ['ugap', 'min gap', 0, 4, 0.05, ' mm'],
+        ['skirtLen', 'skirt length', 0, 26, 1, ' mm']],
+  disp: [['skirt', 'shoulder skirt'], ['cap', 'close into a tube'], ['wire', 'quad flow (1 pitch)'], ['outline', 'authored outline'],
+         ['tint', 'tint closed tube'], ['flat', 'flat shading'], ['spin', 'auto rotate']],
+};
+const inputs = {}, valEls = {};
+function rows(holder, defs) {
+  const el = document.getElementById(holder);
+  for (const [k, label, min, max, step, unit] of defs) {
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><span class="val"></span>`;
+    const inp = row.querySelector('input'), val = row.querySelector('.val');
+    const show = () => val.textContent = (step < 1 ? (+T[k]).toFixed(2).replace(/\.?0+$/, '') : T[k]) + unit;
+    inp.value = T[k]; show();
+    inp.oninput = () => { T[k] = +inp.value; show(); rebuild(); };
+    inputs[k] = inp; valEls[k] = show;
+    el.appendChild(row);
+  }
+}
+function toggles(holder, defs) {
+  const el = document.getElementById(holder);
+  for (const [k, label] of defs) {
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label>${label}</label><input type="checkbox">`;
+    const inp = row.querySelector('input');
+    inp.checked = !!T[k];
+    inp.onchange = () => { T[k] = inp.checked; rebuild(); };
+    inputs[k] = inp;
+    el.appendChild(row);
+  }
+}
+rows('tyreRows', SLIDERS.tyre);
+rows('patRows', SLIDERS.pat);
+toggles('dispRows', SLIDERS.disp);
+document.getElementById('vp').onchange = e => { useVP = e.target.checked; rebuild(); };
+document.getElementById('vp').checked = true;
+
+const ph = document.getElementById('presets');
+for (const d of DESIGNS) {
+  const b = document.createElement('button');
+  b.dataset.preset = d.id;
+  b.innerHTML = `${d.label}<small>${d.tag}</small>`;
+  b.onclick = () => { design = d.id; syncPresets(); rebuild(); };
+  ph.appendChild(b);
+}
+function syncPresets() {
+  const d = DESIGNS.find(x => x.id === design);
+  document.querySelectorAll('[data-preset]').forEach(b => b.classList.toggle('on', b.dataset.preset === design));
+  document.getElementById('desc').textContent = d.desc;
+  if (d.carcass) { Object.assign(T, d.carcass); for (const k in d.carcass) { if (inputs[k]) inputs[k].value = T[k]; if (valEls[k]) valEls[k](); } }
+  const vp = document.getElementById('vp');
+  vp.disabled = !d.pitchSeq; vp.parentElement.style.opacity = d.pitchSeq ? 1 : 0.4;
+}
+
+const stepEls = [...document.querySelectorAll('.step')];
+function setStage(s) {
+  stage = s;
+  stepEls.forEach(el => el.classList.toggle('on', +el.dataset.stage === s));
+  document.getElementById('stageDesc').textContent = STAGE_TEXT[s];
+  rebuild();
+}
+stepEls.forEach(el => el.onclick = () => setStage(+el.dataset.stage));
+
+// ------------------------------------------------- export ----------------------------------------------------------
+const save = (blob, name) => { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); };
+document.getElementById('bObj').onclick = () => { if (last) save(new Blob([toOBJ(last)], { type: 'text/plain' }), `quad-tread-${design}-s${stage}.obj`); };
+document.getElementById('bJson').onclick = () => { if (last) save(new Blob([JSON.stringify({ T, design, stage, stats: last.stats }, null, 1)], { type: 'application/json' }), `quad-tread-${design}.json`); };
+document.getElementById('bxGlb').onclick = () => {
+  if (!last) return;
+  new GLTFExporter().parse(group, buf => save(new Blob([buf], { type: 'model/gltf-binary' }), `quad-tread-${design}.glb`), e => fail('glb: ' + e), { binary: true, onlyVisible: true });
+};
+
+// ------------------------------------------------- loop ------------------------------------------------------------
+function resize() {
+  const w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h, false); renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(host);
+let t0 = performance.now();
+renderer.setAnimationLoop(() => {
+  const now = performance.now(), dt = (now - t0) / 1000; t0 = now;
+  if (T.spin) group.rotation.z += dt * 0.28;
+  controls.update();
+  renderer.render(scene, camera);
+});
+resize();
+syncPresets();
+setStage(4);
+</script>
+</body>
+</html>
