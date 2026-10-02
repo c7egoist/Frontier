@@ -581,6 +581,7 @@ void SwapchainExchange::Retire() noexcept
     if (Vulkan->ImGuiRenderPass)     vkDestroyRenderPass     (Vulkan->Device, Vulkan->ImGuiRenderPass,     nullptr);
     if (Vulkan->ImGuiDescriptorPool) vkDestroyDescriptorPool (Vulkan->Device, Vulkan->ImGuiDescriptorPool, nullptr);
 
+    DistanceFieldStage.Destroy();
     SurfelStage.Destroy();
     Visibility.Retire();
     RetireSwapchain();
@@ -3018,6 +3019,8 @@ void SwapchainExchange::UploadScene(const SceneStructure& Scene, const Traversal
     BuildSurfelSamples(Scene);
     // UploadTraversal may replace both CWBVH handles. Rebind the stage only after those handles and the
     // shared visibility targets exist, so no descriptor ever points at an old or null traversal buffer.
+    if (!BringDistanceFieldGIStage())
+        std::cerr << "[DistanceFieldGIStage] unavailable after scene upload; retaining the established renderer as fallback.\n";
     if (!BringSurfelGIStage())
         std::cerr << "[SurfelGIStage] unavailable after scene upload; retaining the established renderer as fallback.\n";
 
@@ -3036,6 +3039,40 @@ bool SwapchainExchange::BringVisibility() noexcept
     if (!Visibility.Resize(Configuration.Width, Configuration.Height, Vulkan->StorageImageView)) return false;
     WriteDescriptorSet();
     return true;
+}
+
+bool SwapchainExchange::BringDistanceFieldGIStage() noexcept
+{
+    DistanceFieldStage.Destroy();
+    if (!Vulkan->TraversalNodeBuffer || !Vulkan->TraversalLeafBuffer || !Visibility.IsReady()) return true;
+    DistanceFieldStageInit Init{};
+    Init.Device           = Vulkan->Device;
+    Init.MemoryProperties = Vulkan->MemoryProperties;
+    Init.CwbvhNodeBuffer  = Vulkan->TraversalNodeBuffer;
+    Init.CwbvhLeafBuffer  = Vulkan->TraversalLeafBuffer;
+    Init.OutputImageView  = Vulkan->StorageImageView;
+    Init.SurfaceImageView = static_cast<VkImageView>(Visibility.QuerySurfaceView());
+    Init.NormalImageView  = static_cast<VkImageView>(Visibility.QueryNormalView());
+    Init.TriangleBuffer   = static_cast<VkBuffer>(Visibility.QueryFlatTriangleBuffer());
+    Init.MaterialBuffer   = static_cast<VkBuffer>(Visibility.QueryMaterialBuffer());
+    Init.InstanceBuffer   = static_cast<VkBuffer>(Visibility.QueryInstanceBuffer());
+    Init.SlabBuffer       = Vulkan->SlabBuffer;
+    Init.VertexBuffer     = static_cast<VkBuffer>(Visibility.QueryVertexBuffer());
+    Init.IndexBuffer      = static_cast<VkBuffer>(Visibility.QueryIndexBuffer());
+    Init.TableSampler     = Vulkan->TableSampler;
+    Init.EnergyLutView    = Vulkan->ShadingTables[0].View;
+    Init.SheenLutView     = Vulkan->ShadingTables[1].View;
+    Init.TextureSampler   = Vulkan->TextureSampler;
+    SurfelTextureViews.clear();
+    SurfelTextureViews.reserve(Vulkan->Textures.size());
+    for (const VulkanRecord::ResidentTexture& T : Vulkan->Textures) SurfelTextureViews.push_back(T.View);
+    Init.TextureViews     = SurfelTextureViews.data();
+    Init.TextureCount     = static_cast<uint32_t>(SurfelTextureViews.size());
+    Init.TextureCapacity  = Vulkan->DescriptorIndexing ? kTextureSlotCapacity : 0u;
+    if (!Init.TriangleBuffer || !Init.MaterialBuffer || !Init.InstanceBuffer
+     || !Init.SlabBuffer     || !Init.VertexBuffer   || !Init.IndexBuffer
+     || !Init.EnergyLutView  || !Init.SheenLutView) return true;
+    return DistanceFieldStage.Bring(Init);
 }
 
 bool SwapchainExchange::BringSurfelGIStage() noexcept
@@ -3351,11 +3388,40 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
     Frame.RenderHeight = RenderHeight;
     Visibility.RecordFrame(Command, Vulkan->ActiveSlot, Frame);
 
-    // Shared non-raytraced GI route: visibility wrote position, normal, albedo and material auxiliary images.
-    const bool SurfelPathRequested = (Dispatch.FeatureFlags & DispatchFeatureRaytracing) == 0u
-                                  && (Dispatch.FeatureFlags & DispatchFeatureGlobalIllumination) != 0u;
-    bool SurfelPathRecorded = false;
-    if (Frame.DebugView == DebugViewCategory::Off && SurfelPathRequested && SurfelStage.IsReady())
+    // Shared non-raytraced GI route (RenderPath == 1): Distance Field GI replaces Surfel GI!
+    const bool NonRaytracedGIRequested = (Dispatch.FeatureFlags & DispatchFeatureRaytracing) == 0u
+                                      && (Dispatch.FeatureFlags & DispatchFeatureGlobalIllumination) != 0u;
+    bool NonRaytracedGIRecorded = false;
+
+    // 1) Distance Field GI (Primary non-raytraced GI stage)
+    if (Frame.DebugView == DebugViewCategory::Off && NonRaytracedGIRequested && DistanceFieldStage.IsReady())
+    {
+        DistanceFieldFrameParams DfParams{};
+        const SkyTransportPrefix* Sky = static_cast<const SkyTransportPrefix*>(Vulkan->SkyMapped);
+        if (Sky)
+        {
+            for (uint32_t Channel = 0u; Channel < 3u; ++Channel)
+            {
+                DfParams.SunDirection[Channel] = Sky->SunDirection[Channel];
+                DfParams.SunColour[Channel]    = Sky->SunRadiance[Channel];
+                DfParams.SkyAmbient[Channel]   = Sky->SunRadiance[Channel] * 0.04f;
+            }
+            DfParams.SunRadiance = Sky->SunRadiance[3] > 0.0f ? 1.0f : 0.0f;
+        }
+        DfParams.CameraEye[0]   = Dispatch.CameraOriginX;
+        DfParams.CameraEye[1]   = Dispatch.CameraOriginY;
+        DfParams.CameraEye[2]   = Dispatch.CameraOriginZ;
+        DfParams.Exposure       = Dispatch.Exposure;
+        DfParams.FrameIndex     = Dispatch.AccumulationIndex;
+        DfParams.FeatureFlags   = Dispatch.FeatureFlags;
+        DfParams.ReflectionMode = (Dispatch.FeatureFlags & DispatchFeatureReflectionMask) >> DispatchFeatureReflectionShift;
+        DfParams.RenderWidth    = RenderWidth;
+        DfParams.RenderHeight   = RenderHeight;
+        NonRaytracedGIRecorded = DistanceFieldStage.RecordFrame(Command, DfParams);
+    }
+
+    // 2) Surfel GI (Retained fallback if Distance Field GI is unavailable)
+    if (Frame.DebugView == DebugViewCategory::Off && NonRaytracedGIRequested && !NonRaytracedGIRecorded && SurfelStage.IsReady())
     {
         SurfelFrameParams SurfelParams{};
         const SkyTransportPrefix* Sky = static_cast<const SkyTransportPrefix*>(Vulkan->SkyMapped);
@@ -3380,7 +3446,7 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
         SurfelParams.RenderWidth   = RenderWidth;
         SurfelParams.RenderHeight  = RenderHeight;
         SurfelStage.UpdateField(SurfelSamples, SurfelParams);
-        SurfelPathRecorded = SurfelStage.RecordFrame(Command, SurfelParams);
+        NonRaytracedGIRecorded = SurfelStage.RecordFrame(Command, SurfelParams);
     }
 
     // R10 ①d — the GI-off shadow stage. With Global Illumination off the ReSTIR kernel is not dispatched at all:
@@ -3396,7 +3462,7 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
     // ShadowResolve has no celestial bindings. Use the existing compute fallback when
     // weather is active; the GI feature flag remains OFF (zero secondary bounces).
     // Disabling weather restores the map-only path. This costs direct shadow rays.
-    if (Frame.DebugView == DebugViewCategory::Off && !SurfelPathRecorded && GlobalIlluminationOff && !Vulkan->PostWeatherActive && ShadowFrameValid && Visibility.IsShadowReady())
+    if (Frame.DebugView == DebugViewCategory::Off && !NonRaytracedGIRecorded && GlobalIlluminationOff && !Vulkan->PostWeatherActive && ShadowFrameValid && Visibility.IsShadowReady())
     {
         ShadowFrameConfiguration Shadow = ShadowFrame;
         if (Visibility.PlaceShadowTaps(Shadow))
@@ -3960,6 +4026,7 @@ bool SwapchainExchange::RebuildSwapchain() noexcept
 
     if (!BringSwapchain() || !BringStorageImage()) return false;
     if (!Visibility.Resize(Configuration.Width, Configuration.Height, Vulkan->StorageImageView)) return false;
+    (void)BringDistanceFieldGIStage();
     if (!BringSurfelGIStage()) return false;
 
     // Every view handed out by the device seam has just been destroyed and recreated. Bumping the generation is how

@@ -14,6 +14,7 @@
 #include "OrientationClassifier.h"
 #include "VisibilityExchange.h"
 #include "SurfelGIStage.h"
+#include "DistanceFieldGIStage.h"
 #include "TriangleSpan.h"
 #include <cstdint>
 #include <string>
@@ -420,6 +421,7 @@ private:
     [[nodiscard]] bool  BringImGui()            noexcept;
     [[nodiscard]] bool  BringVisibility()       noexcept;
     [[nodiscard]] bool  BringSurfelGIStage()   noexcept;
+    [[nodiscard]] bool  BringDistanceFieldGIStage() noexcept;
     void                BuildSurfelSamples(const SceneStructure& Scene) noexcept;
 
     void                RetireSwapchain()       noexcept;
@@ -454,6 +456,7 @@ private:
     RayTracingCapabilitySet Capabilities;        // [-]   probed in BringPhysicalDevice
     VisibilityExchange      Visibility;          // [-]   R2 resident scene + cull / raster / HiZ / resolve
     SurfelGIStage           SurfelStage;         // [-]   shared non-raytraced indirect-light compute route
+    DistanceFieldGIStage    DistanceFieldStage;  // [-]   shared non-raytraced distance-field GI route (RenderPath == 1)
     std::vector<SurfaceSample> SurfelSamples;    // [-]   persistent seed candidates derived from shared geometry
     std::vector<VkImageView>   SurfelTextureViews;// [-]  bindless table lent to the surfel passes; outlives Bring()
     float                   SurfelGridOrigin[3] = { 0.0f, 0.0f, 0.0f };

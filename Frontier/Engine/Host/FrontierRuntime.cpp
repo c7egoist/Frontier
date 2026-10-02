@@ -1030,32 +1030,31 @@ int Frontier::RunFrontierRuntime(
         Frontier::ReflectionModeCategory EffReflMode = S.ReflectionMode;
         if (!RtActive && EffReflMode == Frontier::ReflectionModeCategory::Raytraced)
             EffReflMode = Frontier::ReflectionModeCategory::Sky;
-        const uint32_t RenderPath = RtActive ? 0u : (GiActive ? 1u : 2u);   // 0 raytraced / 1 surfel GI / 2 plain raster
+        const uint32_t RenderPath = RtActive ? 0u : (GiActive ? 1u : 2u);   // 0 raytraced ReSTIR / 1 Distance Field GI / 2 plain raster
         Integrator.AssignRenderPath(RenderPath);
         Integrator.AssignReflectionMode(static_cast<uint32_t>(EffReflMode));
         {
             const char* PathName = RenderPath == 0u ? "raytraced ReSTIR kernel"
-                                 : RenderPath == 1u ? "surfel GI (raster primary + surfel indirect)"
-                                 :                     "plain visibility raster (no GI)";
+                                 : RenderPath == 1u ? "Distance Field GI (raster primary + SDF indirect)"
+                                 :                    "plain visibility raster (no GI)";
             const char* ReflName = EffReflMode == Frontier::ReflectionModeCategory::Off ? "off"
                                  : EffReflMode == Frontier::ReflectionModeCategory::Sky ? "sky" : "raytraced";
             const char* Note = (RtActive != S.Raytracing)          ? " [RT guard: fell back to raster]"
-                             : (EffReflMode != S.ReflectionMode)    ? " [reflections degraded raytraced -> sky]" : "";
+                             : (EffReflMode != S.ReflectionMode)   ? " [reflections degraded raytraced -> sky]" : "";
             char PathLine[288];
             std::snprintf(PathLine, sizeof(PathLine),
                           "Render path: %s | reflections: %s%s. (Raytracing tile %s, GI %s.)",
                           PathName, ReflName, Note, S.Raytracing ? "on" : "off", GiActive ? "on" : "off");
             Logger.RecordMessage(Frontier::DiagnosticSeverity::Information, "RenderPath", PathLine);
         }
-        if (RenderPath == 1u)   // surfel-GI diagnostics (the user's requested logs)
+        if (RenderPath == 1u)   // Distance Field GI diagnostics
         {
-            char SurfelLine[300];
-            std::snprintf(SurfelLine, sizeof(SurfelLine),
-                          "Surfel GI active: persistent world-space field, coverage-driven spawn, per-frame running-mean "
-                          "irradiance update (Jacobi, firefly-clamped). Passes: SurfelIrradianceUpdate + SurfelGIResolve. "
-                          "Tier '%s' sets the ray/coverage budget. Anti-flicker: surfels never move + running mean.",
-                          Frontier::FidelityLabel(S.Quality));
-            Logger.RecordMessage(Frontier::DiagnosticSeverity::Information, "SurfelGI", SurfelLine);
+            char SdfLine[300];
+            std::snprintf(SdfLine, sizeof(SdfLine),
+                          "Distance Field GI active: Cascaded GDF clipmaps, Surface Cache atlas, monotonic contact soft shadows "
+                          "(k*H/t), and multi-bounce emissive bleed. Evaluated against depth buffer. Specular reflection mode: %s.",
+                          EffReflMode == Frontier::ReflectionModeCategory::Raytraced ? "raytraced (mesh BVH, no SDF blocks)" : "sky");
+            Logger.RecordMessage(Frontier::DiagnosticSeverity::Information, "SdfGI", SdfLine);
         }
 
         Integrator.AssignGlobalIllumination(GiActive);

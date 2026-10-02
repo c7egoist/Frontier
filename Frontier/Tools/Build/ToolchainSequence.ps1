@@ -588,6 +588,7 @@ $EngineRelative = @(
     #    renamed/deleted entry; `Tools/Build/CheckBuildSourceList.sh` catches an absent one and holds the CMake
     #    agreement, so run it with any build-system change.
     'Engine\DeviceExchange\SwapchainExchange.cpp'
+    'Engine\DeviceExchange\DistanceFieldGIStage.cpp'
     'Engine\DeviceExchange\SurfelGIStage.cpp'
     'Engine\DeviceExchange\RayTracingCapabilitySet.cpp'
     'Engine\DeviceExchange\InputExchange.cpp'

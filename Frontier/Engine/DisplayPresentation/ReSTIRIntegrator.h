@@ -54,7 +54,7 @@ struct ReSTIRIntegratorConfiguration
                                              //       (false = the pre-R7a same-pixel accumulator, kept as an identity switch)
     uint32_t    MaxReflectionBounces = 3u;  // [-]   max specular reflection bounces (0 = off, 1, 2, 3, 4)
     uint32_t    ReflectionMode      = 2u;   // [-]   0 = Off, 1 = Sky, 2 = Raytraced (Reflections tile). Packed into FeatureFlags bits 15-16.
-    uint32_t    RenderPath          = 0u;   // [-]   0 = raytraced ReSTIR kernel, 1 = surfel GI, 2 = plain visibility raster.
+    uint32_t    RenderPath          = 0u;   // [-]   0 = raytraced ReSTIR kernel, 1 = Distance Field GI (SDF GI), 2 = plain visibility raster.
                                             //       The HOST selects which dispatch runs; the kernel reads this only to early-out
                                             //       when it is not the active path. bit 11 = kFeatureRaytracing mirrors RenderPath==0.
     uint32_t    MaxGiBounces         = 2u;  // [-]   max diffuse GI bounces (0 = off, 1, 2, 3, 4)

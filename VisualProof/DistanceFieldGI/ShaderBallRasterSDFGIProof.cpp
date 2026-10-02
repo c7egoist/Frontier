@@ -367,22 +367,29 @@ public:
         return shaderBallSDF.LoadFromFile(path, &err);
     }
 
-    float Sample(const Vec3& p) const {
-        float d = p.z; // Floor plane at z = 0
-
+    float SampleObjects(const Vec3& p) const {
+        float d = 1e6f;
         // Bounding check around the 15x15 showcase field
-        if (p.z > -0.2f && p.z < 1.4f && p.x > -12.5f && p.x < 12.5f && p.y > -12.5f && p.y < 12.5f) {
-            float col = std::clamp(std::round((p.x - x0) / step), 0.0f, 14.0f);
-            float row = std::clamp(std::round((p.y - y0) / step), 0.0f, 14.0f);
-            Vec3 center{x0 + col * step, y0 + row * step, 0.0f};
-            Vec3 localP = p - center;
+        // Evaluates 2x2 neighborhood to eliminate Voronoi boundary clamping artifacts & floor rings
+        if (p.z > -0.2f && p.z < 2.0f && p.x > -13.0f && p.x < 13.0f && p.y > -13.0f && p.y < 13.0f) {
+            int c0 = std::clamp(static_cast<int>(std::floor((p.x - x0) / step)), 0, 13);
+            int r0 = std::clamp(static_cast<int>(std::floor((p.y - y0) / step)), 0, 13);
 
-            // Sample the baked 96^3 ShaderBall SDF
-            Frontier::Vector3 fLocal{localP.x, localP.y, localP.z};
-            float ballDist = shaderBallSDF.SampleDistance(fLocal);
-            d = std::min(d, ballDist);
+            for (int r = r0; r <= r0 + 1; ++r) {
+                for (int c = c0; c <= c0 + 1; ++c) {
+                    Vec3 center{x0 + static_cast<float>(c) * step, y0 + static_cast<float>(r) * step, 0.0f};
+                    Vec3 localP = p - center;
+                    Frontier::Vector3 fLocal{localP.x, localP.y, localP.z};
+                    float ballDist = shaderBallSDF.SampleDistance(fLocal);
+                    d = std::min(d, ballDist);
+                }
+            }
         }
         return d;
+    }
+
+    float Sample(const Vec3& p) const {
+        return std::min(p.z, SampleObjects(p));
     }
 
     float MarchSoftShadow(const Vec3& ro, const Vec3& rd, float minT, float maxT, float lightRad) const {
@@ -390,7 +397,7 @@ public:
         float t = minT;
         for (int i = 0; i < 48; ++i) {
             Vec3 p = ro + rd * t;
-            float dist = Sample(p);
+            float dist = SampleObjects(p);
             if (dist < 0.001f) return 0.0f;
             shadow = std::min(shadow, (lightRad * dist) / t);
             t += std::max(0.012f, dist * 0.95f);
@@ -422,14 +429,16 @@ public:
             }
         }
 
-        // 4-tap distance field Ambient Occlusion
+        // Continuous distance field Ambient Occlusion from scene geometry
         float aoAcc = 0.0f;
-        for (int j = 1; j <= 4; ++j) {
+        for (int j = 1; j <= 5; ++j) {
             float sDist = 0.08f * j;
-            float d = Sample(p + n * sDist);
-            aoAcc += (sDist - std::max(0.0f, d)) / sDist;
+            float d = SampleObjects(p + n * sDist);
+            if (d < sDist) {
+                aoAcc += (sDist - d) / sDist;
+            }
         }
-        float ao = std::clamp(1.0f - aoAcc * 0.25f, 0.0f, 1.0f);
+        float ao = std::clamp(1.0f - aoAcc * 0.20f, 0.0f, 1.0f);
 
         // Soft ambient sky fill weighted by AO
         indirect = indirect + Vec3{0.16f, 0.22f, 0.32f} * (ao * 0.45f);

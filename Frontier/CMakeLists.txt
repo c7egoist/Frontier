@@ -291,6 +291,7 @@ set(FRONTIER_HOST_SOURCES
     Engine/Host/FlyThroughSolver.cpp
     Engine/Host/EditorFeedSequence.cpp
     Engine/DeviceExchange/SwapchainExchange.cpp
+    Engine/DeviceExchange/DistanceFieldGIStage.cpp
     Engine/DeviceExchange/SurfelGIStage.cpp
     Engine/DeviceExchange/RayTracingCapabilitySet.cpp
     Engine/DeviceExchange/VisibilityExchange.cpp
