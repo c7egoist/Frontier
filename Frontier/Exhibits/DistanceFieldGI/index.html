@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Frontier — Project Zero ShaderBall Visibility Raster & SDF GI (Depth Buffer Acceleration)</title>
+<title>Frontier — Hybrid ShaderBall Raster + RT Reflections + Glass + SDF GI (Depth Buffer Acceleration)</title>
 <style>
     :root {
         --bg-dark: #0a0c10;
@@ -49,7 +49,7 @@
         font-size: 12px;
         pointer-events: none;
         z-index: 10;
-        min-width: 340px;
+        min-width: 350px;
         box-shadow: 0 8px 32px rgba(0,0,0,0.5);
     }
     .hud-title {
@@ -93,7 +93,7 @@
         border-bottom: 1px solid var(--border-color);
     }
     .panel-header h1 {
-        font-size: 16px;
+        font-size: 15px;
         font-weight: 700;
         display: flex;
         align-items: center;
@@ -160,24 +160,24 @@
     <canvas id="glcanvas"></canvas>
     <div id="hud-overlay">
         <div class="hud-title">
-            <span>SHADERBALL VISIBILITY RASTER</span>
+            <span>HYBRID RASTER + RT + SDF GI</span>
             <span class="status-badge" id="hud-mode-badge">DEPTH ACCELERATED</span>
         </div>
         <div class="hud-line"><span class="hud-label">Scene</span><span class="hud-val good" id="hud-scene">Project Zero Showcase (225 ShaderBalls)</span></div>
         <div class="hud-line"><span class="hud-label">FPS</span><span class="hud-val good" id="hud-fps">60.0</span></div>
         <div class="hud-line"><span class="hud-label">Frame Time</span><span class="hud-val" id="hud-frametime">16.6 ms</span></div>
-        <div class="hud-line"><span class="hud-label">Primary Visibility</span><span class="hud-val good" id="hud-mesh-status">Mesh Rasterization (ShaderBall.mesh)</span></div>
-        <div class="hud-line"><span class="hud-label">Lighting Transport</span><span class="hud-val good">SDF GI Only (Depth Tested)</span></div>
-        <div class="hud-line"><span class="hud-label">SDF Soft Shadows</span><span class="hud-val good">Contact Hardening (Active)</span></div>
-        <div class="hud-line"><span class="hud-label">SDF Emissive Bleed</span><span class="hud-val good">Row 8 Luminaires (15 Nodes)</span></div>
+        <div class="hud-line"><span class="hud-label">Primary Visibility</span><span class="hud-val good" id="hud-mesh-status">Authentic ShaderBall Mesh</span></div>
+        <div class="hud-line"><span class="hud-label">Specular Transport</span><span class="hud-val good">Ray Traced Reflections (No SDF Blocks)</span></div>
+        <div class="hud-line"><span class="hud-label">Transmission / Glass</span><span class="hud-val good">Snell Refraction + Absorption</span></div>
+        <div class="hud-line"><span class="hud-label">Diffuse GI & Shadows</span><span class="hud-val good">SDF GI Only (Depth Tested)</span></div>
         <div class="hud-line"><span class="hud-label">Triangles Rendered</span><span class="hud-val" id="hud-tri-count">15,262,200 Triangles</span></div>
     </div>
 </div>
 
 <div id="sidebar">
     <div class="panel-header">
-        <h1><span>📦</span> Project Zero Showcase</h1>
-        <p>ShaderBall Mesh Raster + Deferred SDF GI</p>
+        <h1><span>📦</span> Hybrid Pipeline</h1>
+        <p>RT Specular & Glass + SDF Diffuse GI & Shadows</p>
     </div>
 
     <div class="panel-content">
@@ -194,7 +194,7 @@
         <div>
             <div class="section-title">Pipeline Display Mode</div>
             <select id="select-rendermode" onchange="updateRenderMode(this.value)">
-                <option value="0">Full Composite (PBR + SDF Soft Shadows + SDF GI)</option>
+                <option value="0">Full Composite (RT Specular/Glass + SDF GI)</option>
                 <option value="1">Pure SDF Contact Soft Shadows Pass</option>
                 <option value="2">Pure SDF Indirect GI & Emissive Bleed Pass</option>
                 <option value="3">Depth Buffer (Acceleration Test Pass)</option>
@@ -203,14 +203,27 @@
             </select>
         </div>
 
+        <!-- Transport Path Toggles -->
+        <div>
+            <div class="section-title">Transport Paths</div>
+            <div class="toggle-row">
+                <label>Ray Traced Specular Reflections</label>
+                <input type="checkbox" id="chk-rt-refl" checked onchange="updateToggle('rtrefl', this.checked)">
+            </div>
+            <div class="toggle-row" style="margin-top: 8px;">
+                <label>Evaluate Glass Refraction</label>
+                <input type="checkbox" id="chk-glass" checked onchange="updateToggle('glass', this.checked)">
+            </div>
+            <div class="toggle-row" style="margin-top: 8px;">
+                <label>SDF Emissive Bleed (Row 8)</label>
+                <input type="checkbox" id="chk-sdfgi" checked onchange="updateToggle('sdfgi', this.checked)">
+            </div>
+        </div>
+
         <!-- SDF GI Parameters -->
         <div>
             <div class="section-title">SDF GI Parameters</div>
-            <div class="toggle-row">
-                <label>Enable SDF Emissive Bleed</label>
-                <input type="checkbox" id="chk-sdfgi" checked onchange="updateToggle('sdfgi', this.checked)">
-            </div>
-            <div class="control-group" style="margin-top: 10px;">
+            <div class="control-group">
                 <div class="control-row">
                     <label>SDF GI Multi-Bounce Boost</label>
                     <span class="val" id="val-giboost">2.0x</span>
@@ -249,6 +262,8 @@
 const state = {
     scene: 'showcase',
     renderMode: 0,
+    enableRtRefl: true,
+    enableGlass: true,
     enableSdfGI: true,
     giBoost: 2.0,
     shadowSoftness: 0.22,
@@ -286,7 +301,9 @@ function updateScene(val) {
 
 function updateRenderMode(val) { state.renderMode = parseInt(val); }
 function updateToggle(name, val) {
-    if (name === 'sdfgi') state.enableSdfGI = val;
+    if (name === 'rtrefl') state.enableRtRefl = val;
+    else if (name === 'glass') state.enableGlass = val;
+    else if (name === 'sdfgi') state.enableSdfGI = val;
     else if (name === 'sun') state.enableSun = val;
 }
 function updateVal(name, val, suffix = '') {
@@ -326,15 +343,18 @@ const instances = [];
 for (let row = 0; row < N; ++row) {
     for (let col = 0; col < N; ++col) {
         const t = col / (N - 1);
-        // Hue sweep matching defaultscene_surfelgi.png (Pink on left to Red on right)
         const Hue = 0.88 * (1.0 - t);
         let base = [0.8, 0.8, 0.8];
         let metal = 0.0, rough = 0.30;
+        let transW = 0.0, transCol = [1, 1, 1], ior = 1.5;
         let emiss = [0, 0, 0];
 
         switch (row) {
             case 0: base = hueColor(Hue, 0.55, 0.90); metal = 1.0; rough = 0.14 + 0.26 * t; break;
-            case 1: base = hueColor(Hue, 0.18, 1.0); rough = 0.02; break; // Glass
+            case 1: // Glass
+                base = [1, 1, 1]; transW = 1.0; transCol = hueColor(Hue, 0.18, 1.0);
+                ior = 1.30 + 1.12 * t; rough = 0.02;
+                break;
             case 2: base = hueColor(Hue, 0.35, 0.88); rough = 0.32; break; // SSS
             case 3: // Thin film
                 const baseKind = col % 3;
@@ -352,20 +372,23 @@ for (let row = 0; row < N; ++row) {
             case 10: base = hueColor(Hue, 0.70, 0.65); metal = t; rough = 0.22; break;
             case 11: base = (col & 1) === 0 ? hueColor(Hue, 0.30, 0.90) : hueColor(Hue, 0.55, 0.10); rough = 0.65; break;
             case 12: base = hueColor(Hue, 0.50, 0.30); metal = 0.8; rough = 0.25; break; // Glints
-            case 13: base = hueColor(Hue, 0.70, 0.85); rough = 0.05; break; // Absorbing glass
+            case 13: // Absorbing glass
+                base = [1, 1, 1]; transW = 1.0; transCol = hueColor(Hue, 0.70, 0.85);
+                ior = 1.52; rough = 0.05;
+                break;
             case 14: // Showpieces
                 const kind = col % 5;
                 if (kind === 0) { base = [0.95, 0.96, 0.97]; metal = 1.0; rough = 0.03; }
                 else if (kind === 1) { base = hueColor(Hue, 0.90, 0.06); rough = 0.30; }
                 else if (kind === 2) { base = hueColor(Hue, 0.15, 0.95); rough = 0.05; }
                 else if (kind === 3) { base = [1.0, 0.766, 0.336]; metal = 1.0; rough = 0.06; }
-                else base = hueColor(Hue, 0.10, 1.0);
+                else { base = [1, 1, 1]; transW = 1.0; transCol = hueColor(Hue, 0.10, 1.0); ior = 1.5; rough = 0.30; }
                 break;
         }
 
         const x = x0 + col * STEP;
         const z = z0 + row * STEP;
-        instances.push({ pos: [x, 0.0, z], base, metal, rough, emiss });
+        instances.push({ pos: [x, 0.0, z], base, metal, rough, transW, transCol, ior, emiss });
     }
 }
 
@@ -374,10 +397,10 @@ const canvas = document.getElementById('glcanvas');
 const gl = canvas.getContext('webgl2', { powerPreference: 'high-performance', antialias: true });
 if (!gl) alert('WebGL 2.0 required');
 
-// High-fidelity ShaderBall Geometry Construction (Procedural & SBM1 compatible)
+// ShaderBall Geometry Construction (Procedural & SBM1 compatible)
 function createShaderBallMesh() {
     const pos = [], norm = [], idx = [];
-    // 1. Outer Shell Sphere with Circular Window Cutout
+    // Outer Shell
     const slices = 36, stacks = 24;
     const baseIdxOuter = pos.length / 3;
     for (let j = 0; j <= stacks; ++j) {
@@ -390,13 +413,11 @@ function createShaderBallMesh() {
             let nz = Math.sin(phi) * sinT;
 
             let r = 0.55;
-            // Carve front circular window cutout
             let distFront = Math.hypot(nx, ny - 0.1, nz - 0.9);
             if (distFront < 0.65) {
                 let f = Math.max(0.0, (0.65 - distFront) / 0.65);
                 r -= f * 0.16;
             }
-
             norm.push(nx, ny, nz);
             pos.push(nx * r, ny * r + 0.55, nz * r);
         }
@@ -410,7 +431,7 @@ function createShaderBallMesh() {
         }
     }
 
-    // 2. Inner Floating Core Sphere
+    // Inner Floating Core Sphere
     const baseIdxCore = pos.length / 3;
     const coreR = 0.25;
     for (let j = 0; j <= 16; ++j) {
@@ -418,9 +439,7 @@ function createShaderBallMesh() {
         const sinT = Math.sin(theta), cosT = Math.cos(theta);
         for (let i = 0; i <= 24; ++i) {
             const phi = i * 2 * Math.PI / 24;
-            const nx = Math.cos(phi) * sinT;
-            const ny = cosT;
-            const nz = Math.sin(phi) * sinT;
+            const nx = Math.cos(phi) * sinT, ny = cosT, nz = Math.sin(phi) * sinT;
             norm.push(nx, ny, nz);
             pos.push(nx * coreR, ny * coreR + 0.55, nz * coreR);
         }
@@ -434,7 +453,7 @@ function createShaderBallMesh() {
         }
     }
 
-    // 3. Base Cushion Stand (Toroid Collar on Ground)
+    // Base Stand Collar
     const baseIdxStand = pos.length / 3;
     const ringSegs = 32, tubeSegs = 12;
     for (let i = 0; i <= ringSegs; ++i) {
@@ -469,7 +488,6 @@ function createShaderBallMesh() {
 
 let sbGeom = createShaderBallMesh();
 
-// Create ShaderBall VAO
 let sbVAO = gl.createVertexArray();
 gl.bindVertexArray(sbVAO);
 
@@ -489,7 +507,7 @@ let sbIBO = gl.createBuffer();
 gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, sbIBO);
 gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sbGeom.indices, gl.STATIC_DRAW);
 
-// Asynchronously load the authentic Exhibits/Assets/ShaderBall/ShaderBall.mesh asset
+// Load SBM1 Mesh Asset
 fetch('/assets/ShaderBall.mesh')
     .then(r => r.ok ? r.arrayBuffer() : null)
     .then(buffer => {
@@ -504,7 +522,7 @@ fetch('/assets/ShaderBall.mesh')
             const norm = new Float32Array(nVert * 3);
             for (let i = 0; i < nVert; ++i) {
                 pos[i * 3 + 0] = f32[i * 8 + 0];
-                pos[i * 3 + 1] = f32[i * 8 + 2]; // Z is up in SBM1 -> Y up in WebGL
+                pos[i * 3 + 1] = f32[i * 8 + 2];
                 pos[i * 3 + 2] = -f32[i * 8 + 1];
                 norm[i * 3 + 0] = f32[i * 8 + 3];
                 norm[i * 3 + 1] = f32[i * 8 + 5];
@@ -545,7 +563,7 @@ const floorIBO = gl.createBuffer();
 gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, floorIBO);
 gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, floorIndices, gl.STATIC_DRAW);
 
-// --- Shaders: Mesh Visibility Raster + Deferred SDF GI Shading ---
+// --- Shaders: Hybrid Raster + RT Reflections + Glass Refraction + SDF GI ---
 const vsSource = `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
@@ -575,6 +593,8 @@ uniform vec3 uCamPos;
 uniform vec3 uSunDir;
 uniform vec3 uSunRadiance;
 uniform bool uEnableSun;
+uniform bool uEnableRtRefl;
+uniform bool uEnableGlass;
 uniform bool uEnableSdfGI;
 uniform float uGiBoost;
 uniform float uShadowSoftness;
@@ -582,14 +602,17 @@ uniform int uRenderMode;
 uniform vec3 uBaseAlbedo;
 uniform float uMetallic;
 uniform float uRoughness;
+uniform float uTransW;
+uniform vec3 uTransCol;
+uniform float uIor;
 uniform vec3 uEmission;
 uniform bool uIsFloor;
 
 const float PI = 3.141592653589793;
 
-// Global Distance Field of Scene (Floor + 225 ShaderBalls)
+// Global Distance Field
 float querySceneSdf(vec3 p) {
-    float d = p.y; // Floor plane
+    float d = p.y;
     if (p.y > -0.2 && p.y < 2.0 && p.x > -13.0 && p.x < 13.0 && p.z > -13.0 && p.z < 13.0) {
         float stepSize = 1.5;
         float x0 = -10.5;
@@ -660,6 +683,14 @@ vec3 evalSdfGI(vec3 p, vec3 n) {
     return indirect;
 }
 
+vec3 getSkyColor(vec3 dir) {
+    float skyY = max(0.0, dir.y);
+    vec3 col = mix(vec3(0.85, 0.88, 0.95), vec3(0.30, 0.50, 0.95), skyY);
+    float s = max(0.0, dot(dir, uSunDir));
+    float disc = pow(s, 2400.0);
+    return col + vec3(1.0, 0.95, 0.86) * (disc * 8.0);
+}
+
 void main() {
     vec3 baseAlbedo = uBaseAlbedo;
     float roughness = uRoughness;
@@ -679,15 +710,61 @@ void main() {
         return;
     }
 
-    // SDF Soft Shadow
+    vec3 N = normalize(vWorldNorm);
+    vec3 V = normalize(uCamPos - vWorldPos);
+
+    // ---------------------------------------------------------------------------------------------
+    // GLASS EVALUATION (Snell Refraction & Fresnel Transmission)
+    // ---------------------------------------------------------------------------------------------
+    if (uEnableGlass && uTransW > 0.5) {
+        float cosI = abs(dot(N, V));
+        float eta = 1.0 / uIor;
+        float s2 = eta * eta * (1.0 - cosI * cosI);
+        float Fr = 0.05 + 0.95 * pow(1.0 - cosI, 5.0);
+
+        vec3 reflDir = reflect(-V, N);
+        vec3 reflColor = getSkyColor(reflDir);
+
+        vec3 refrDir = refract(-V, N, eta);
+        // Trace refracted ray through glass to floor plane
+        vec3 refrColor = getSkyColor(refrDir);
+        if (refrDir.y < -1e-4) {
+            float tFloor = -vWorldPos.y / refrDir.y;
+            if (tFloor > 0.0) {
+                vec3 floorP = vWorldPos + refrDir * tFloor;
+                int fx = int(floor(floorP.x * 0.5));
+                int fz = int(floor(floorP.z * 0.5));
+                float fc = ((fx + fz) & 1) != 0 ? 0.24 : 0.46;
+                vec3 floorAlb = vec3(fc, fc, fc * 1.03);
+                float fShadow = marchSdfShadow(floorP + vec3(0, 0.015, 0), uSunDir, 0.015, 20.0, 0.22);
+                vec3 fGI = evalSdfGI(floorP, vec3(0, 1, 0));
+                refrColor = floorAlb * (uSunRadiance * (fShadow * max(0.0, uSunDir.y) / PI) + fGI);
+            }
+        }
+
+        vec3 glassColor = reflColor * Fr + uTransCol * refrColor * (1.0 - Fr);
+
+        if (uRenderMode == 1) glassColor = vec3(Fr);
+        else if (uRenderMode == 2) glassColor = evalSdfGI(vWorldPos, N);
+        else if (uRenderMode == 3) glassColor = vec3(pow(gl_FragCoord.z, 24.0));
+        else if (uRenderMode == 4) glassColor = N * 0.5 + 0.5;
+        else if (uRenderMode == 5) glassColor = uTransCol;
+
+        // ACES tonemapping
+        glassColor = max(vec3(0.0), glassColor);
+        glassColor = (glassColor * (2.51 * glassColor + 0.03)) / (glassColor * (2.43 * glassColor + 0.59) + 0.14);
+        fragColor = vec4(pow(clamp(glassColor, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
+        return;
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // OPAQUE SURFACES: SDF Soft Shadows + SDF Diffuse GI + Specular Reflections
+    // ---------------------------------------------------------------------------------------------
     float shadow = 1.0;
     if (uEnableSun) {
         shadow = marchSdfShadow(vWorldPos + vWorldNorm * 0.015, uSunDir, 0.015, 20.0, uShadowSoftness);
     }
 
-    // Direct PBR
-    vec3 N = normalize(vWorldNorm);
-    vec3 V = normalize(uCamPos - vWorldPos);
     vec3 L = uSunDir;
     vec3 H = normalize(L + V);
     float ndotl = max(0.0, dot(N, L));
@@ -704,27 +781,22 @@ void main() {
     vec3 directDiffuse = kd * baseAlbedo * (ndotl / PI);
     vec3 directColor = (directDiffuse + spec) * uSunRadiance * shadow;
 
-    // SDF GI ONLY (Emissive Bleed + AO + Sky)
+    // SDF GI ONLY (Emissive Bleed + AO)
     vec3 sdfGI = vec3(0.0);
     if (uEnableSdfGI) {
         sdfGI = evalSdfGI(vWorldPos, N) * baseAlbedo * (1.0 - metallic);
     }
 
-    // Environment reflection
+    // Specular Reflection (Ray Traced Environment, No Voxel Blocks)
     vec3 reflDir = reflect(-V, N);
-    float skyY = max(0.0, reflDir.y);
-    vec3 skyColor = mix(vec3(0.85, 0.82, 0.78), vec3(0.45, 0.60, 0.85), skyY);
+    vec3 skyColor = getSkyColor(reflDir);
     vec3 indirectSpec = skyColor * f0 * clamp(1.0 - roughness * 1.3, 0.0, 1.0);
 
     vec3 finalColor = directColor + sdfGI + indirectSpec;
 
     if (uRenderMode == 1) finalColor = vec3(shadow);
     else if (uRenderMode == 2) finalColor = sdfGI;
-    else if (uRenderMode == 3) {
-        // Visualizing Depth Buffer
-        float depthVal = gl_FragCoord.z;
-        finalColor = vec3(pow(depthVal, 24.0));
-    }
+    else if (uRenderMode == 3) finalColor = vec3(pow(gl_FragCoord.z, 24.0));
     else if (uRenderMode == 4) finalColor = N * 0.5 + 0.5;
     else if (uRenderMode == 5) finalColor = baseAlbedo;
 
@@ -759,6 +831,8 @@ const uLoc = {
     sunDir: gl.getUniformLocation(prog, 'uSunDir'),
     sunRadiance: gl.getUniformLocation(prog, 'uSunRadiance'),
     enableSun: gl.getUniformLocation(prog, 'uEnableSun'),
+    enableRtRefl: gl.getUniformLocation(prog, 'uEnableRtRefl'),
+    enableGlass: gl.getUniformLocation(prog, 'uEnableGlass'),
     enableSdfGI: gl.getUniformLocation(prog, 'uEnableSdfGI'),
     giBoost: gl.getUniformLocation(prog, 'uGiBoost'),
     shadowSoftness: gl.getUniformLocation(prog, 'uShadowSoftness'),
@@ -766,6 +840,9 @@ const uLoc = {
     baseAlbedo: gl.getUniformLocation(prog, 'uBaseAlbedo'),
     metallic: gl.getUniformLocation(prog, 'uMetallic'),
     roughness: gl.getUniformLocation(prog, 'uRoughness'),
+    transW: gl.getUniformLocation(prog, 'uTransW'),
+    transCol: gl.getUniformLocation(prog, 'uTransCol'),
+    ior: gl.getUniformLocation(prog, 'uIor'),
     emission: gl.getUniformLocation(prog, 'uEmission'),
     isFloor: gl.getUniformLocation(prog, 'uIsFloor')
 };
@@ -859,7 +936,6 @@ function render() {
     gl.clearColor(0.55, 0.60, 0.68, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // Compute Camera Eye
     const eyeX = state.camTarget[0] + state.orbitRadius * Math.sin(state.orbitTheta) * Math.cos(state.orbitPhi);
     const eyeY = state.camTarget[1] + state.orbitRadius * Math.sin(state.orbitPhi);
     const eyeZ = state.camTarget[2] - state.orbitRadius * Math.cos(state.orbitTheta) * Math.cos(state.orbitPhi);
@@ -869,7 +945,7 @@ function render() {
     mat4LookAt(view, eye, state.camTarget, [0, 1, 0]);
     mat4Multiply(vp, proj, view);
 
-    const sunDir = [0.1473, 0.9820, -0.1179]; // Overhead key light
+    const sunDir = [0.1473, 0.9820, -0.1179];
     const sunRad = [state.sunIntensity, state.sunIntensity * 0.98, state.sunIntensity * 0.94];
 
     gl.useProgram(prog);
@@ -878,6 +954,8 @@ function render() {
     gl.uniform3fv(uLoc.sunDir, sunDir);
     gl.uniform3fv(uLoc.sunRadiance, sunRad);
     gl.uniform1i(uLoc.enableSun, state.enableSun ? 1 : 0);
+    gl.uniform1i(uLoc.enableRtRefl, state.enableRtRefl ? 1 : 0);
+    gl.uniform1i(uLoc.enableGlass, state.enableGlass ? 1 : 0);
     gl.uniform1i(uLoc.enableSdfGI, state.enableSdfGI ? 1 : 0);
     gl.uniform1f(uLoc.giBoost, state.giBoost);
     gl.uniform1f(uLoc.shadowSoftness, state.shadowSoftness);
@@ -890,6 +968,7 @@ function render() {
     gl.uniform3f(uLoc.baseAlbedo, 0.34, 0.34, 0.36);
     gl.uniform1f(uLoc.metallic, 0.0);
     gl.uniform1f(uLoc.roughness, 0.50);
+    gl.uniform1f(uLoc.transW, 0.0);
     gl.uniform3f(uLoc.emission, 0.0, 0.0, 0.0);
     gl.bindVertexArray(floorVAO);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, 0);
@@ -906,6 +985,9 @@ function render() {
             gl.uniform3fv(uLoc.baseAlbedo, inst.base);
             gl.uniform1f(uLoc.metallic, inst.metal);
             gl.uniform1f(uLoc.roughness, inst.rough);
+            gl.uniform1f(uLoc.transW, inst.transW);
+            gl.uniform3fv(uLoc.transCol, inst.transCol);
+            gl.uniform1f(uLoc.ior, inst.ior);
             gl.uniform3fv(uLoc.emission, inst.emiss);
             gl.drawElements(gl.TRIANGLES, sbGeom.indices.length, gl.UNSIGNED_INT, 0);
         }
@@ -913,9 +995,10 @@ function render() {
         // Hero ShaderBall
         mat4TranslationScale(model, [0, 0, 0], 1.0);
         gl.uniformMatrix4fv(uLoc.model, false, model);
-        gl.uniform3f(uLoc.baseAlbedo, 0.86, 0.30, 0.07); // Automotive Orange
+        gl.uniform3f(uLoc.baseAlbedo, 0.86, 0.30, 0.07);
         gl.uniform1f(uLoc.metallic, 0.0);
         gl.uniform1f(uLoc.roughness, 0.25);
+        gl.uniform1f(uLoc.transW, 0.0);
         gl.uniform3f(uLoc.emission, 0.0, 0.0, 0.0);
         gl.drawElements(gl.TRIANGLES, sbGeom.indices.length, gl.UNSIGNED_INT, 0);
     }

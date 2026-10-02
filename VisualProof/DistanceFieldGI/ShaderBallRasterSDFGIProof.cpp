@@ -1,8 +1,10 @@
 //============================================================================================================================================
 //                                            SHADERBALLRASTERSDFGIPROOF.CPP
 //============================================================================================================================================
-// 📦 Primary Visibility Raster of authentic ShaderBall meshes (225 instances / 15.2M triangles)
-//    with Deferred Shading evaluated strictly against the Depth Buffer using SDF GI & SDF Soft Shadows.
+// 📦 Hybrid Renderer:
+//    - Primary Visibility & Sharp Specular Reflections / Glass Transmission via Triangle Mesh BVH Ray Tracing
+//    - Diffuse Indirect GI, Row 8 Emissive Bleed, Contact Soft Shadows, and AO via Continuous SDF (Global Distance Field)
+//    - Shading accelerated against the Depth Buffer
 
 #include <iostream>
 #include <fstream>
@@ -182,7 +184,13 @@ struct PBRMaterial {
     float metallic = 0.0f;
     float roughness = 0.3f;
     float specular = 1.0f;
+    float ior = 1.5f;
+    float transW = 0.0f;
+    Vec3 transCol{1.0f, 1.0f, 1.0f};
+    float transDepth = 1.0f;
     Vec3 emission{0.0f, 0.0f, 0.0f};
+    float coatW = 0.0f;
+    float coatRough = 0.0f;
     int familyId = 0;
 };
 
@@ -194,7 +202,7 @@ struct ShaderBallInstance {
     int col = 0;
 };
 
-// HSV to RGB conversion matching ModeMatrix.cpp
+// HSV to RGB conversion
 Vec3 HueColor(float h, float sat, float val) {
     h = h - std::floor(h);
     float x = h * 6.0f;
@@ -214,7 +222,6 @@ Vec3 HueColor(float h, float sat, float val) {
 }
 
 // Build 225 ShaderBall Instances across 15 Material Families
-// col = 0 (left) -> Pink/Magenta, col = 14 (right) -> Red
 std::vector<ShaderBallInstance> BuildShowcaseShaderBalls(const AABB& localBounds) {
     const int N = 15;
     const float STEP = 1.5f;
@@ -228,8 +235,7 @@ std::vector<ShaderBallInstance> BuildShowcaseShaderBalls(const AABB& localBounds
     for (int row = 0; row < N; ++row) {
         for (int col = 0; col < N; ++col) {
             float t = static_cast<float>(col) / static_cast<float>(N - 1);
-            // Hue sweep matching defaultscene_surfelgi.png:
-            // Left (col 0): Pink (~0.88), Center (col 7): Cyan (~0.50), Right (col 14): Red (0.00)
+            // Hue sweep matching defaultscene_surfelgi.png (Pink on left to Red on right)
             float hue = 0.88f * (1.0f - t);
 
             PBRMaterial mat{};
@@ -242,9 +248,12 @@ std::vector<ShaderBallInstance> BuildShowcaseShaderBalls(const AABB& localBounds
                     mat.roughness = 0.14f + 0.26f * t;
                     break;
                 case 1: // Transmissive glass
-                    mat.baseColor = HueColor(hue, 0.18f, 1.0f);
+                    mat.baseColor = {1.0f, 1.0f, 1.0f};
+                    mat.transW = 1.0f;
+                    mat.transCol = HueColor(hue, 0.18f, 1.0f);
+                    mat.transDepth = 3.0f;
+                    mat.ior = 1.30f + 1.12f * t;
                     mat.roughness = 0.02f;
-                    mat.specular = 1.0f;
                     break;
                 case 2: // Subsurface scattering
                     mat.baseColor = HueColor(hue, 0.35f, 0.88f);
@@ -256,6 +265,8 @@ std::vector<ShaderBallInstance> BuildShowcaseShaderBalls(const AABB& localBounds
                     else if (baseKind == 1) { mat.baseColor = {1.0f, 0.766f, 0.336f}; mat.metallic = 1.0f; }
                     else mat.baseColor = {0.0f, 0.0f, 0.0f};
                     mat.roughness = 0.04f + 0.12f * baseKind;
+                    mat.coatW = 1.0f;
+                    mat.coatRough = 0.05f;
                     break;
                 }
                 case 4: // Cloth / velvet
@@ -265,12 +276,15 @@ std::vector<ShaderBallInstance> BuildShowcaseShaderBalls(const AABB& localBounds
                     break;
                 case 5: // Clear coat / car paint
                     mat.baseColor = HueColor(hue, 0.85f, 0.50f);
-                    mat.roughness = 0.40f * t;
-                    mat.specular = 1.0f;
+                    mat.roughness = 0.45f;
+                    mat.coatW = 1.0f;
+                    mat.coatRough = 0.40f * t;
                     break;
                 case 6: // Haziness
                     mat.baseColor = HueColor(hue, 0.45f, 0.22f);
-                    mat.roughness = 0.50f + 0.35f * t;
+                    mat.roughness = 0.10f;
+                    mat.coatW = 0.6f;
+                    mat.coatRough = 0.50f + 0.35f * t;
                     break;
                 case 7: // EON diffuse
                     mat.baseColor = HueColor(hue, 0.80f, 0.75f);
@@ -301,16 +315,28 @@ std::vector<ShaderBallInstance> BuildShowcaseShaderBalls(const AABB& localBounds
                     mat.roughness = 0.25f;
                     break;
                 case 13: // Absorbing tinted glass
-                    mat.baseColor = HueColor(hue, 0.70f, 0.85f);
+                    mat.baseColor = {1.0f, 1.0f, 1.0f};
+                    mat.transW = 1.0f;
+                    mat.transCol = HueColor(hue, 0.70f, 0.85f);
+                    mat.transDepth = 0.10f + 0.50f * t;
+                    mat.ior = 1.52f;
                     mat.roughness = 0.05f;
                     break;
                 case 14: { // Showpieces
                     int kind = col % 5;
                     if (kind == 0) { mat.baseColor = {0.95f, 0.96f, 0.97f}; mat.metallic = 1.0f; mat.roughness = 0.03f; }
-                    else if (kind == 1) { mat.baseColor = HueColor(hue, 0.90f, 0.06f); mat.roughness = 0.30f; }
-                    else if (kind == 2) { mat.baseColor = HueColor(hue, 0.15f, 0.95f); mat.roughness = 0.05f; }
+                    else if (kind == 1) { mat.baseColor = HueColor(hue, 0.90f, 0.06f); mat.roughness = 0.30f; mat.coatW = 1.0f; }
+                    else if (kind == 2) { mat.baseColor = HueColor(hue, 0.15f, 0.95f); mat.roughness = 0.05f; mat.coatW = 1.0f; }
                     else if (kind == 3) { mat.baseColor = {1.0f, 0.766f, 0.336f}; mat.metallic = 1.0f; mat.roughness = 0.06f; }
-                    else mat.baseColor = HueColor(hue, 0.10f, 1.0f);
+                    else {
+                        // Frosted glass
+                        mat.baseColor = {1.0f, 1.0f, 1.0f};
+                        mat.transW = 1.0f;
+                        mat.transCol = HueColor(hue, 0.10f, 1.0f);
+                        mat.ior = 1.5f;
+                        mat.roughness = 0.30f;
+                        mat.transDepth = 2.5f;
+                    }
                     break;
                 }
             }
@@ -327,34 +353,6 @@ std::vector<ShaderBallInstance> BuildShowcaseShaderBalls(const AABB& localBounds
     }
     return instances;
 }
-
-// ------------------------------------------------------------------------------------------------
-// G-Buffer (Visibility Raster Output)
-// ------------------------------------------------------------------------------------------------
-struct GBuffer {
-    int width = 0, height = 0;
-    std::vector<float> depth;
-    std::vector<Vec3> position;
-    std::vector<Vec3> normal;
-    std::vector<Vec3> albedo;
-    std::vector<float> metallic;
-    std::vector<float> roughness;
-    std::vector<Vec3> emission;
-    std::vector<uint8_t> valid;
-    std::vector<uint8_t> isFloor;
-
-    GBuffer(int w, int h)
-        : width(w), height(h),
-          depth(w * h, 1e30f),
-          position(w * h, Vec3{}),
-          normal(w * h, Vec3{0, 0, 1}),
-          albedo(w * h, Vec3{}),
-          metallic(w * h, 0.0f),
-          roughness(w * h, 0.5f),
-          emission(w * h, Vec3{}),
-          valid(w * h, 0),
-          isFloor(w * h, 0) {}
-};
 
 // ------------------------------------------------------------------------------------------------
 // Continuous Scene Distance Field (Evaluated for SDF GI & Soft Shadows)
@@ -418,7 +416,6 @@ public:
             float ndotl = std::max(0.0f, n.Dot(L));
 
             if (ndotl > 1e-4f) {
-                // SDF shadow ray march towards luminaire
                 float shadow = MarchSoftShadow(p + n * 0.02f, L, 0.03f, dist - 0.55f, 0.28f);
                 float solidAngle = (kPi * 0.55f * 0.55f) / std::max(0.1f, distSq);
                 indirect = indirect + lumColor * (ndotl * solidAngle * shadow * kInvPi * giBoost);
@@ -439,6 +436,248 @@ public:
         return indirect;
     }
 };
+
+// ------------------------------------------------------------------------------------------------
+// Ray Tracing Hit & Scene Intersection (For Specular Reflections & Glass Refraction)
+// ------------------------------------------------------------------------------------------------
+struct SceneHit {
+    bool hit = false;
+    float t = 1e30f;
+    Vec3 p;
+    Vec3 n;
+    PBRMaterial mat;
+    bool isFloor = false;
+};
+
+// Ray-Scene Intersect against Floor + 225 ShaderBall BVH instances
+SceneHit TraceScene(const Vec3& ro, const Vec3& rd, const MeshBVH& bvh, const std::vector<ShaderBallInstance>& instances, float maxDist = 1e30f) {
+    SceneHit result{};
+    result.t = maxDist;
+    Vec3 invD{1.0f / rd.x, 1.0f / rd.y, 1.0f / rd.z};
+
+    // 1. Floor plane at z = 0
+    if (rd.z < -1e-5f) {
+        float tf = -ro.z / rd.z;
+        if (tf > 1e-4f && tf < result.t) {
+            result.hit = true;
+            result.t = tf;
+            result.p = ro + rd * tf;
+            result.n = Vec3{0, 0, 1};
+            result.isFloor = true;
+            int cx = static_cast<int>(std::floor(result.p.x * 0.5f));
+            int cy = static_cast<int>(std::floor(result.p.y * 0.5f));
+            float c = ((cx + cy) & 1) ? 0.24f : 0.46f;
+            result.mat.baseColor = Vec3{c, c, c * 1.03f};
+            result.mat.roughness = 0.50f;
+            result.mat.metallic = 0.0f;
+        }
+    }
+
+    // 2. 225 ShaderBall Instances
+    int hitInst = -1, hitTri = -1;
+    float hitU = 0.0f, hitV = 0.0f;
+
+    for (size_t i = 0; i < instances.size(); ++i) {
+        const auto& inst = instances[i];
+        if (bvh.Slab(inst.bounds, ro, invD, result.t)) {
+            Vec3 localO = ro - inst.position;
+            float t = result.t, tu, tv;
+            int triIdx = bvh.Closest(localO, rd, t, tu, tv);
+            if (triIdx >= 0 && t < result.t) {
+                result.hit = true;
+                result.t = t;
+                result.isFloor = false;
+                hitInst = static_cast<int>(i);
+                hitTri = triIdx;
+                hitU = tu;
+                hitV = tv;
+            }
+        }
+    }
+
+    if (hitInst >= 0 && hitTri >= 0) {
+        const auto& inst = instances[hitInst];
+        const auto& tri = bvh.tris[hitTri];
+        result.p = ro + rd * result.t;
+        float w = 1.0f - hitU - hitV;
+        result.n = (tri.na * w + tri.nb * hitU + tri.nc * hitV).Normalized();
+
+        Vec3 localP = result.p - inst.position;
+        Vec3 coreCenter{0.08f, -0.08f, 0.55f};
+        float distToCore = (localP - coreCenter).Length();
+
+        if (distToCore < 0.24f) {
+            // Inner core sphere
+            result.mat.baseColor = Vec3{0.22f, 0.24f, 0.27f};
+            result.mat.metallic = 0.85f;
+            result.mat.roughness = 0.20f;
+        } else if (localP.z < 0.12f) {
+            // Cushion base stand
+            result.mat.baseColor = Vec3{0.14f, 0.14f, 0.16f};
+            result.mat.metallic = 0.0f;
+            result.mat.roughness = 0.65f;
+        } else {
+            // Outer shell
+            result.mat = inst.material;
+        }
+    }
+
+    return result;
+}
+
+// Fresnel Dielectric
+float FresnelDielectric(float cosI, float eta) {
+    cosI = std::abs(cosI);
+    float s2 = eta * eta * (1.0f - cosI * cosI);
+    if (s2 > 1.0f) return 1.0f; // Total internal reflection
+    float cosT = std::sqrt(std::max(0.0f, 1.0f - s2));
+    float rs = (eta * cosI - cosT) / (eta * cosI + cosT);
+    float rp = (cosI - eta * cosT) / (cosI + eta * cosT);
+    return 0.5f * (rs * rs + rp * rp);
+}
+
+// Refract vector
+bool RefractVec(const Vec3& d, const Vec3& n, float eta, Vec3& out) {
+    float ci = -d.Dot(n);
+    float s2 = eta * eta * (1.0f - ci * ci);
+    if (s2 > 1.0f) return false;
+    out = (d * eta + n * (eta * ci - std::sqrt(std::max(0.0f, 1.0f - s2)))).Normalized();
+    return true;
+}
+
+// Sky Color
+Vec3 SkyColor(const Vec3& dir) {
+    float t = std::max(0.0f, dir.z);
+    Vec3 horizon{0.85f, 0.88f, 0.95f};
+    Vec3 zenith{0.30f, 0.50f, 0.95f};
+    Vec3 ground{0.22f, 0.20f, 0.18f};
+    if (dir.z < 0.0f) return ground;
+    Vec3 col = horizon * (1.0f - t) + zenith * t;
+    Vec3 sunDir = Vec3{0.1473f, -0.1179f, 0.9820f}.Normalized();
+    float s = std::max(0.0f, dir.Dot(sunDir));
+    float disc = std::pow(s, 3200.0f);
+    float glow = std::pow(s, 9.0f);
+    return col + Vec3{1.0f, 0.95f, 0.86f} * (disc * 10.0f + glow * 0.28f);
+}
+
+// Shading function merging Ray Traced reflections/transmission with SDF GI
+Vec3 ShadeSurface(const SceneHit& hit, const Vec3& rayDir, const MeshBVH& bvh,
+                 const std::vector<ShaderBallInstance>& instances,
+                 const SceneDistanceField& sdf, const Vec3& sunDir, const Vec3& sunRad,
+                 int depth = 0) {
+    if (!hit.hit) return SkyColor(rayDir);
+
+    if (hit.mat.emission.Length() > 0.1f) return hit.mat.emission;
+
+    const Vec3 P = hit.p;
+    const Vec3 N = hit.n;
+    const PBRMaterial& m = hit.mat;
+
+    // ---------------------------------------------------------------------------------------------
+    // GLASS EVALUATION (Snell's Law Refraction & Fresnel Transmission via Mesh BVH Ray Tracing)
+    // ---------------------------------------------------------------------------------------------
+    if (m.transW > 0.5f && depth < 4) {
+        bool entering = rayDir.Dot(N) < 0.0f;
+        Vec3 n = entering ? N : N * -1.0f;
+        float eta = entering ? (1.0f / m.ior) : m.ior;
+        float Fr = FresnelDielectric(rayDir.Dot(n), eta);
+
+        // 1. Ray Traced Reflection
+        Vec3 reflDir = (rayDir - n * (2.0f * rayDir.Dot(n))).Normalized();
+        SceneHit reflHit = TraceScene(P + n * 1e-3f, reflDir, bvh, instances);
+        Vec3 reflColor = ShadeSurface(reflHit, reflDir, bvh, instances, sdf, sunDir, sunRad, depth + 1);
+
+        // 2. Ray Traced Refraction
+        Vec3 refrDir;
+        bool ok = RefractVec(rayDir, n, eta, refrDir);
+        Vec3 refrColor;
+        if (!ok) {
+            refrColor = reflColor; // Total internal reflection
+        } else {
+            SceneHit refrHit = TraceScene(P - n * 1e-3f, refrDir, bvh, instances);
+            refrColor = ShadeSurface(refrHit, refrDir, bvh, instances, sdf, sunDir, sunRad, depth + 1);
+
+            // Beer-Lambert absorption through glass volume
+            if (!entering) {
+                float d = refrHit.t;
+                Vec3 absorb{
+                    std::exp(-(1.0f - m.transCol.x) * d / std::max(m.transDepth, 1e-3f)),
+                    std::exp(-(1.0f - m.transCol.y) * d / std::max(m.transDepth, 1e-3f)),
+                    std::exp(-(1.0f - m.transCol.z) * d / std::max(m.transDepth, 1e-3f))
+                };
+                refrColor = refrColor * absorb;
+            }
+        }
+
+        Vec3 tint = entering ? Vec3{1, 1, 1} : m.transCol;
+        return reflColor * Fr + tint * refrColor * (1.0f - Fr);
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // OPAQUE SURFACES: SDF Soft Shadows + SDF Diffuse Indirect GI + RT Specular Reflections
+    // ---------------------------------------------------------------------------------------------
+    // 1. SDF Contact Soft Shadow
+    float shadow = sdf.MarchSoftShadow(P + N * 0.015f, sunDir, 0.015f, 25.0f, 0.22f);
+
+    // 2. Direct Sun Illumination
+    Vec3 V = (rayDir * -1.0f).Normalized();
+    Vec3 L = sunDir;
+    Vec3 Hdir = (L + V).Normalized();
+
+    float ndotl = std::max(0.0f, N.Dot(L));
+    float ndoth = std::max(0.0f, N.Dot(Hdir));
+    float ndotv = std::max(1e-4f, N.Dot(V));
+
+    float alpha = m.roughness * m.roughness;
+    float alphaSq = alpha * alpha;
+    float dDenom = ndoth * ndoth * (alphaSq - 1.0f) + 1.0f;
+    float d = alphaSq / (kPi * dDenom * dDenom + 1e-4f);
+
+    Vec3 f0 = Vec3{0.04f, 0.04f, 0.04f} * (1.0f - m.metallic) + m.baseColor * m.metallic;
+    float hDotL = std::max(0.0f, Hdir.Dot(L));
+    Vec3 f = f0 + (Vec3{1.0f, 1.0f, 1.0f} - f0) * std::pow(1.0f - hDotL, 5.0f);
+    Vec3 spec = f * (d * 0.25f / (ndotv + 1e-3f));
+    Vec3 kd = (Vec3{1.0f, 1.0f, 1.0f} - f) * (1.0f - m.metallic);
+
+    Vec3 directDiffuse = kd * m.baseColor * (ndotl * kInvPi);
+    Vec3 directRadiance = (directDiffuse + spec) * sunRad * shadow;
+
+    // 3. SDF Indirect GI (Emissive Bleed + AO evaluated from Distance Field)
+    Vec3 indirectGI = sdf.EvalIndirectGI(P, N, 2.0f);
+    Vec3 indirectDiffuse = m.baseColor * (1.0f - m.metallic) * indirectGI;
+
+    // 4. Ray Traced Specular Reflection (Eliminates Blocky SDF Reflection Artifacts!)
+    Vec3 reflColor{0, 0, 0};
+    if (depth < 2 && (m.metallic > 0.05f || m.roughness < 0.35f || m.coatW > 0.1f)) {
+        Vec3 R = (rayDir - N * (2.0f * rayDir.Dot(N))).Normalized();
+        SceneHit rHit = TraceScene(P + N * 1e-3f, R, bvh, instances);
+        if (rHit.hit) {
+            // Evaluate hit surface direct + SDF GI
+            float rShadow = sdf.MarchSoftShadow(rHit.p + rHit.n * 0.015f, sunDir, 0.015f, 25.0f, 0.22f);
+            float rNdotL = std::max(0.0f, rHit.n.Dot(sunDir));
+            Vec3 rDirect = rHit.mat.baseColor * (rNdotL * kInvPi) * sunRad * rShadow;
+            Vec3 rIndirect = rHit.mat.baseColor * sdf.EvalIndirectGI(rHit.p, rHit.n, 2.0f);
+            reflColor = rDirect + rIndirect + rHit.mat.emission;
+        } else {
+            reflColor = SkyColor(R);
+        }
+    } else {
+        Vec3 R = (rayDir - N * (2.0f * rayDir.Dot(N))).Normalized();
+        reflColor = SkyColor(R);
+    }
+
+    Vec3 specLobe = reflColor * f0 * std::clamp(1.0f - m.roughness * 1.2f, 0.0f, 1.0f);
+
+    // Clear Coat Lobe (Car Paint / Haze)
+    Vec3 coatLobe{0, 0, 0};
+    if (m.coatW > 0.0f) {
+        float fCoat = m.coatW * (0.05f + 0.95f * std::pow(1.0f - ndotv, 5.0f));
+        Vec3 R = (rayDir - N * (2.0f * rayDir.Dot(N))).Normalized();
+        coatLobe = SkyColor(R) * fCoat * std::clamp(1.0f - m.coatRough * 1.2f, 0.0f, 1.0f);
+    }
+
+    return directRadiance + indirectDiffuse + specLobe + coatLobe;
+}
 
 // ACES Tone Mapping
 Vec3 TonemapACES(const Vec3& x) {
@@ -476,7 +715,7 @@ void WritePng(const std::string& path, int w, int h, const std::vector<Vec3>& hd
 
 int main(int argc, char** argv) {
     std::cout << "================================================================================\n";
-    std::cout << " SHADERBALL VISIBILITY RASTER + SDF GI ONLY (DEPTH BUFFER SHADING)\n";
+    std::cout << " HYBRID SHADERBALL RASTER / RT REFLECTIONS + GLASS + SDF GI & SOFT SHADOWS\n";
     std::cout << "================================================================================\n";
 
     // 1. Load authentic ShaderBall mesh
@@ -533,7 +772,6 @@ int main(int argc, char** argv) {
         { 1120, 840, "VisualProof/DistanceFieldGI/ShaderBall_Showcase_Raster_SDF_GI_4x3.png", {}, {}, false },
         { 1280, 720, "VisualProof/DistanceFieldGI/ShaderBall_Showcase_Raster_SDF_GI.png", {}, {}, false },
         { 1280, 720, "VisualProof/DistanceFieldGI/Surface_Cache_Scene_Render.png", {}, {}, false },
-        // Close-up hero angle demonstrating intricate ShaderBall geometry (cutouts, inner floating core, base stand)
         { 1280, 720, "VisualProof/DistanceFieldGI/ShaderBall_Closeup_Raster_SDF_GI.png",
           Vec3{0.0f, -2.2f, 1.45f}, Vec3{0.0f, 0.0f, 0.55f}, true }
     };
@@ -554,9 +792,10 @@ int main(int argc, char** argv) {
         auto t0 = std::chrono::high_resolution_clock::now();
 
         // -----------------------------------------------------------------------------------------
-        // PASS 1: VISIBILITY RASTER -> G-BUFFER (Depth, Normal, Material)
+        // PASS 1: PRIMARY VISIBILITY RASTER -> DEPTH BUFFER & INITIAL HITS
         // -----------------------------------------------------------------------------------------
-        GBuffer gb(W, H);
+        std::vector<SceneHit> primaryHits(W * H);
+        std::vector<Vec3> rayDirs(W * H);
 
         #pragma omp parallel for schedule(dynamic, 16)
         for (int y = 0; y < H; ++y) {
@@ -566,104 +805,23 @@ int main(int argc, char** argv) {
                 float v = (1.0f - (static_cast<float>(y) + 0.5f) / static_cast<float>(H) * 2.0f) * halfH;
 
                 Vec3 rayDir = (cFwd + cRgt * u + cUp * v).Normalized();
-                Vec3 invD{1.0f / rayDir.x, 1.0f / rayDir.y, 1.0f / rayDir.z};
-
-                float bestT = 1e30f;
-                int hitInst = -1;
-                int hitTri = -1;
-                float hitU = 0.0f, hitV = 0.0f;
-                bool hitFloor = false;
-
-                // 1. Raycast Floor Plane at z = 0
-                if (rayDir.z < -1e-4f) {
-                    float tf = -cEye.z / rayDir.z;
-                    if (tf > 0.0f && tf < bestT) {
-                        bestT = tf;
-                        hitFloor = true;
-                    }
-                }
-
-                // 2. Raycast 225 ShaderBall Instances using BVH
-                for (size_t i = 0; i < instances.size(); ++i) {
-                    const auto& inst = instances[i];
-                    if (bvh.Slab(inst.bounds, cEye, invD, bestT)) {
-                        Vec3 localO = cEye - inst.position;
-                        float t = bestT, tu, tv;
-                        int triIdx = bvh.Closest(localO, rayDir, t, tu, tv);
-                        if (triIdx >= 0 && t < bestT) {
-                            bestT = t;
-                            hitInst = static_cast<int>(i);
-                            hitTri = triIdx;
-                            hitU = tu;
-                            hitV = tv;
-                            hitFloor = false;
-                        }
-                    }
-                }
-
-                if (bestT < 1e29f) {
-                    gb.valid[pixIdx] = 1;
-                    gb.depth[pixIdx] = bestT;
-                    Vec3 hitPos = cEye + rayDir * bestT;
-                    gb.position[pixIdx] = hitPos;
-
-                    if (hitFloor) {
-                        gb.isFloor[pixIdx] = 1;
-                        gb.normal[pixIdx] = Vec3{0, 0, 1};
-                        int cx = static_cast<int>(std::floor(hitPos.x * 0.5f));
-                        int cy = static_cast<int>(std::floor(hitPos.y * 0.5f));
-                        float c = ((cx + cy) & 1) ? 0.24f : 0.46f;
-                        gb.albedo[pixIdx] = Vec3{c, c, c * 1.03f};
-                        gb.roughness[pixIdx] = 0.50f;
-                        gb.metallic[pixIdx] = 0.0f;
-                    } else if (hitInst >= 0 && hitTri >= 0) {
-                        const auto& inst = instances[hitInst];
-                        const auto& tri = bvh.tris[hitTri];
-                        float w = 1.0f - hitU - hitV;
-                        Vec3 smoothN = (tri.na * w + tri.nb * hitU + tri.nc * hitV).Normalized();
-                        gb.normal[pixIdx] = smoothN;
-
-                        // ShaderBall internal multi-part classification:
-                        // - Inner core sphere: satin gunmetal
-                        // - Cushion base stand: matte dark rubber
-                        // - Outer shell: material family PBR
-                        Vec3 localP = hitPos - inst.position;
-                        Vec3 coreCenter{0.08f, -0.08f, 0.55f};
-                        float distToCore = (localP - coreCenter).Length();
-
-                        if (distToCore < 0.24f) {
-                            // Inner core sphere
-                            gb.albedo[pixIdx] = Vec3{0.22f, 0.24f, 0.27f};
-                            gb.metallic[pixIdx] = 0.85f;
-                            gb.roughness[pixIdx] = 0.20f;
-                        } else if (localP.z < 0.12f) {
-                            // Base stand
-                            gb.albedo[pixIdx] = Vec3{0.14f, 0.14f, 0.16f};
-                            gb.metallic[pixIdx] = 0.0f;
-                            gb.roughness[pixIdx] = 0.65f;
-                        } else {
-                            // Outer shell
-                            gb.albedo[pixIdx] = inst.material.baseColor;
-                            gb.metallic[pixIdx] = inst.material.metallic;
-                            gb.roughness[pixIdx] = inst.material.roughness;
-                            gb.emission[pixIdx] = inst.material.emission;
-                        }
-                    }
-                }
+                rayDirs[pixIdx] = rayDir;
+                primaryHits[pixIdx] = TraceScene(cEye, rayDir, bvh, instances);
             }
         }
 
         // -----------------------------------------------------------------------------------------
-        // PASS 2: DEFERRED SDF GI & SDF SHADOWS (EVALUATED AGAINST DEPTH BUFFER)
+        // PASS 2: DEFERRED SHADING (ACCELERATED BY DEPTH BUFFER: SKIPS NON-GEOMETRY PIXELS)
         // -----------------------------------------------------------------------------------------
-        std::vector<Vec3> hdr(W * H, Vec3{0.03f, 0.04f, 0.06f});
+        std::vector<Vec3> hdr(W * H);
 
         #pragma omp parallel for schedule(dynamic, 16)
         for (int i = 0; i < W * H; ++i) {
-            // "u can use the depth buffer to help increase performance of the GI;
-            //  (so we only render against depth buffer)"
-            if (gb.valid[i] == 0) {
-                // Background sky pixel
+            const auto& hit = primaryHits[i];
+            const Vec3& rd = rayDirs[i];
+
+            if (!hit.hit) {
+                // Depth buffer bypass: render sky directly without SDF queries!
                 int x = i % W;
                 int y = i / W;
                 float u = ((static_cast<float>(x) + 0.5f) / static_cast<float>(W) * 2.0f - 1.0f) * halfW;
@@ -673,55 +831,8 @@ int main(int argc, char** argv) {
                 continue;
             }
 
-            // Emissive luminaire bypass
-            if (gb.emission[i].Length() > 0.1f) {
-                hdr[i] = gb.emission[i];
-                continue;
-            }
-
-            const Vec3 P = gb.position[i];
-            const Vec3 N = gb.normal[i];
-            const Vec3 Alb = gb.albedo[i];
-            const float Rough = gb.roughness[i];
-            const float Metal = gb.metallic[i];
-
-            // 1. SDF Contact Soft Shadow
-            float shadow = sceneSDF.MarchSoftShadow(P + N * 0.015f, sunDir, 0.015f, 25.0f, 0.22f);
-
-            // 2. Direct Sun Illumination (Cook-Torrance OpenPBR)
-            Vec3 V = (cEye - P).Normalized();
-            Vec3 L = sunDir;
-            Vec3 Hdir = (L + V).Normalized();
-
-            float ndotl = std::max(0.0f, N.Dot(L));
-            float ndoth = std::max(0.0f, N.Dot(Hdir));
-            float ndotv = std::max(1e-4f, N.Dot(V));
-
-            float alpha = Rough * Rough;
-            float alphaSq = alpha * alpha;
-            float dDenom = ndoth * ndoth * (alphaSq - 1.0f) + 1.0f;
-            float d = alphaSq / (kPi * dDenom * dDenom + 1e-4f);
-
-            Vec3 f0 = Vec3{0.04f, 0.04f, 0.04f} * (1.0f - Metal) + Alb * Metal;
-            float hDotL = std::max(0.0f, Hdir.Dot(L));
-            Vec3 f = f0 + (Vec3{1.0f, 1.0f, 1.0f} - f0) * std::pow(1.0f - hDotL, 5.0f);
-            Vec3 spec = f * (d * 0.25f / (ndotv + 1e-3f));
-            Vec3 kd = (Vec3{1.0f, 1.0f, 1.0f} - f) * (1.0f - Metal);
-
-            Vec3 directDiffuse = kd * Alb * (ndotl * kInvPi);
-            Vec3 directRadiance = (directDiffuse + spec) * sunRadiance * shadow;
-
-            // 3. SDF GI ONLY (Emissive Bleed + Ambient Occlusion from Distance Field)
-            Vec3 indirectGI = sceneSDF.EvalIndirectGI(P, N, 2.0f);
-            Vec3 indirectDiffuse = Alb * (1.0f - Metal) * indirectGI;
-
-            // 4. Specular Environment Reflection
-            Vec3 reflDir = N * (2.0f * N.Dot(V)) - V;
-            float skyFactor = std::max(0.0f, reflDir.z);
-            Vec3 skyRadiance = Vec3{0.85f, 0.82f, 0.78f} * (1.0f - skyFactor) + Vec3{0.45f, 0.60f, 0.85f} * skyFactor;
-            Vec3 indirectSpec = skyRadiance * f0 * std::clamp(1.0f - Rough * 1.3f, 0.0f, 1.0f);
-
-            hdr[i] = directRadiance + indirectDiffuse + indirectSpec;
+            // Shade surface: evaluates glass transmission, RT specular reflections, and SDF GI
+            hdr[i] = ShadeSurface(hit, rd, bvh, instances, sceneSDF, sunDir, sunRadiance);
         }
 
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -731,7 +842,7 @@ int main(int argc, char** argv) {
         WritePng(tgt.filename, W, H, hdr);
     }
 
-    std::cout << "All ShaderBall visibility raster + SDF GI proof renders completed successfully!\n";
+    std::cout << "All Hybrid ShaderBall renders completed successfully!\n";
     std::cout << "================================================================================\n";
     return 0;
 }
