@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tread Forge — mirrored quad tread construction</title>
+<style>
+  :root {
+    --bg: #0b0e11;
+    --panel: #13181d;
+    --panel-2: #192027;
+    --panel-3: #202a32;
+    --line: rgba(224,238,242,.10);
+    --line-strong: rgba(224,238,242,.18);
+    --text: #e8f0f2;
+    --muted: #899aa2;
+    --dim: #52616a;
+    --mint: #65e6b0;
+    --cyan: #57c9ed;
+    --amber: #f4b86b;
+    --pink: #e78ab2;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+  body { overflow: hidden; }
+  button, input { font: inherit; }
+  #app {
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 334px minmax(0, 1fr);
+    grid-template-rows: 62px minmax(0, 1fr);
+    gap: 10px;
+    padding: 10px;
+    background:
+      radial-gradient(900px 520px at 74% -14%, rgba(38,93,103,.26), transparent 65%),
+      radial-gradient(500px 440px at -10% 100%, rgba(40,61,65,.17), transparent 70%),
+      var(--bg);
+  }
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 8px;
+    min-width: 0;
+  }
+  header h1 { margin: 0; font-size: 17px; letter-spacing: .02em; font-weight: 560; white-space: nowrap; }
+  header .sub { color: var(--muted); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; }
+  .badge {
+    border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 11px;
+    color: var(--mint); background: rgba(26,59,53,.45); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; white-space: nowrap;
+  }
+  .badge.safe { color: var(--cyan); background: rgba(23,56,71,.42); }
+  header .head-stats { margin-left: auto; display: flex; gap: 17px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+  header .head-stats b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+  aside {
+    min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #2d3b43 transparent;
+    display: flex; flex-direction: column; gap: 9px; padding-right: 1px;
+  }
+  .card { background: rgba(19,24,29,.94); border: 1px solid rgba(224,238,242,.055); border-radius: 15px; padding: 13px 14px 12px; }
+  .card h2 { display: flex; align-items: baseline; gap: 9px; margin: 0 0 10px; font-size: 12px; font-weight: 650; letter-spacing: .09em; text-transform: uppercase; }
+  .card h2::before { content: ""; width: 3px; height: 13px; border-radius: 3px; background: var(--mint); display: inline-block; }
+  .card.cyan h2::before { background: var(--cyan); }
+  .card.amber h2::before { background: var(--amber); }
+  .card.pink h2::before { background: var(--pink); }
+  .card h2 small { margin-left: auto; color: var(--dim); font-size: 9px; font-weight: 500; letter-spacing: .05em; }
+  .library { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .pattern {
+    min-width: 0; border: 1px solid var(--line); color: var(--text); background: var(--panel-2); border-radius: 10px;
+    text-align: left; cursor: pointer; padding: 9px 9px 8px; transition: .16s ease; position: relative; overflow: hidden;
+  }
+  .pattern::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 2px; background: transparent; }
+  .pattern:hover { background: var(--panel-3); border-color: var(--line-strong); transform: translateY(-1px); }
+  .pattern.active { border-color: var(--mint); background: #1c292b; }
+  .pattern.active::after { background: var(--mint); }
+  .pattern .name { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 11px; font-weight: 600; }
+  .pattern .tag { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted); font-size: 9px; margin-top: 3px; }
+  #patternDescription { color: var(--muted); line-height: 1.42; font-size: 10.5px; margin-top: 10px; min-height: 45px; }
+  .transform-strip { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; margin-top: 9px; }
+  .transform-strip span { background: #182229; border: 1px solid var(--line); border-radius: 8px; padding: 6px 4px; text-align: center; color: var(--cyan); font-size: 9px; line-height: 1.2; }
+  .transform-strip b { display: block; color: var(--text); font-size: 10px; font-weight: 600; margin-bottom: 2px; }
+  .stage-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .stage-btn { border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); border-radius: 9px; cursor: pointer; padding: 8px 9px; text-align: left; }
+  .stage-btn:hover { background: var(--panel-3); color: var(--text); }
+  .stage-btn.active { border-color: var(--cyan); color: var(--text); background: #192a31; }
+  .stage-btn .num { color: var(--dim); font-size: 9px; letter-spacing: .08em; }
+  .stage-btn.active .num { color: var(--cyan); }
+  .stage-btn .label { display: block; font-size: 11px; font-weight: 600; margin-top: 2px; }
+  #stageDescription { color: var(--muted); font-size: 10.5px; line-height: 1.42; margin-top: 9px; min-height: 43px; }
+  #blueprint { display: block; width: 100%; height: 156px; border-radius: 10px; background: #0e1418; border: 1px solid var(--line); }
+  .row { display: flex; align-items: center; gap: 8px; min-height: 25px; margin: 4px 0; }
+  .row label { flex: 0 0 111px; color: var(--muted); font-size: 10.5px; }
+  .row .value { flex: 0 0 47px; text-align: right; color: var(--text); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+  input[type=range] { flex: 1; min-width: 0; height: 17px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+  input[type=range]::-webkit-slider-runnable-track { height: 2px; border-radius: 2px; background: #3a4950; }
+  input[type=range]::-webkit-slider-thumb { appearance: none; -webkit-appearance: none; width: 11px; height: 11px; border-radius: 50%; margin-top: -4.5px; background: var(--mint); box-shadow: 0 0 0 3px rgba(101,230,176,.11); }
+  input[type=range]::-moz-range-track { height: 2px; border-radius: 2px; background: #3a4950; }
+  input[type=range]::-moz-range-thumb { width: 11px; height: 11px; border: 0; border-radius: 50%; background: var(--mint); }
+  .toggle-row { display: flex; align-items: center; min-height: 25px; }
+  .toggle-row label { color: var(--muted); font-size: 10.5px; flex: 1; }
+  input[type=checkbox] { appearance: none; width: 30px; height: 18px; border-radius: 999px; background: #304047; position: relative; cursor: pointer; transition: .16s; }
+  input[type=checkbox]::after { content: ""; width: 12px; height: 12px; position: absolute; left: 3px; top: 3px; border-radius: 50%; background: #82929a; transition: .16s; }
+  input[type=checkbox]:checked { background: #299c78; }
+  input[type=checkbox]:checked::after { left: 15px; background: white; }
+  .button-row { display: flex; gap: 6px; margin-top: 9px; }
+  .button-row button { flex: 1; border: 1px solid var(--line-strong); color: var(--text); background: var(--panel-2); border-radius: 999px; padding: 8px 9px; cursor: pointer; font-size: 10px; }
+  .button-row button:hover { background: var(--panel-3); }
+  .button-row button.primary { color: #07120f; background: var(--mint); border-color: var(--mint); font-weight: 700; }
+  .audit { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .audit div { background: #10171b; border: 1px solid var(--line); border-radius: 8px; padding: 7px 8px; }
+  .audit span { display: block; color: var(--dim); font-size: 9px; }
+  .audit b { display: block; color: var(--text); font-size: 12px; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  #viewport { min-width: 0; min-height: 0; position: relative; overflow: hidden; border: 1px solid rgba(224,238,242,.075); border-radius: 16px; background: #0d1215; }
+  #viewport canvas { display: block; width: 100%; height: 100%; }
+  .view-corner { position: absolute; left: 15px; top: 14px; pointer-events: none; }
+  .view-corner .eyebrow { color: var(--cyan); font-size: 9px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; }
+  .view-corner h3 { margin: 4px 0 0; font-size: 18px; letter-spacing: .01em; font-weight: 500; }
+  .view-corner p { margin: 5px 0 0; max-width: 290px; color: var(--muted); font-size: 10px; line-height: 1.4; }
+  .view-help { position: absolute; right: 14px; bottom: 12px; color: #5f7078; font-size: 10px; pointer-events: none; }
+  .legend { position: absolute; right: 14px; top: 14px; display: flex; gap: 9px; color: var(--muted); font-size: 9px; pointer-events: none; }
+  .legend i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; background: var(--mint); }
+  .legend i.blue { background: var(--cyan); }
+  .legend i.dark { background: #2c3940; }
+  .toast { position: absolute; left: 50%; bottom: 31px; transform: translate(-50%, 12px); opacity: 0; pointer-events: none; border: 1px solid var(--line-strong); border-radius: 999px; padding: 8px 14px; color: var(--text); background: rgba(15,23,26,.94); font-size: 10px; transition: .2s; }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  @media (max-width: 930px) {
+    body { overflow: auto; }
+    #app { height: auto; min-height: 100vh; grid-template-columns: 1fr; grid-template-rows: auto auto minmax(540px, 72vh); }
+    header { grid-column: 1; flex-wrap: wrap; gap: 8px; }
+    header .head-stats { width: 100%; margin-left: 0; }
+    aside { overflow: visible; display: grid; grid-template-columns: 1fr 1fr; align-content: start; }
+    aside .card:last-child { grid-column: 1 / -1; }
+  }
+  @media (max-width: 600px) { aside { display: flex; } .badge { display: none; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Tread Forge</h1>
+    <span class="sub">mirrored quad construction</span>
+    <span class="badge">100% quad faces</span>
+    <span class="badge safe">no height field</span>
+    <div class="head-stats">
+      <span>faces <b id="headFaces">0</b></span>
+      <span>instances <b id="headInstances">0</b></span>
+      <span>pitch <b id="headPitch">0</b> mm</span>
+    </div>
+  </header>
+
+  <aside>
+    <section class="card cyan">
+      <h2>Pattern library <small>vector traces</small></h2>
+      <div id="patternLibrary" class="library"></div>
+      <div id="patternDescription"></div>
+      <div class="transform-strip" aria-label="construction operations">
+        <span><b>01</b>trace</span>
+        <span><b>02</b>mirror</span>
+        <span><b>03</b>flip / translate</span>
+        <span><b>04</b>circular array</span>
+      </div>
+    </section>
+
+    <section class="card cyan">
+      <h2>Construction view <small>same topology</small></h2>
+      <div id="stageList" class="stage-list"></div>
+      <div id="stageDescription"></div>
+      <canvas id="blueprint" width="600" height="312"></canvas>
+    </section>
+
+    <section class="card amber">
+      <h2>Carcass fit <small>millimetres</small></h2>
+      <div id="fitControls"></div>
+    </section>
+
+    <section class="card">
+      <h2>Trace controls <small>authored geometry</small></h2>
+      <div id="traceControls"></div>
+    </section>
+
+    <section class="card pink">
+      <h2>Display & audit</h2>
+      <div id="displayControls"></div>
+      <div class="audit">
+        <div><span>quad faces</span><b id="auditQuads">0</b></div>
+        <div><span>triangles</span><b id="auditTriangles">0</b></div>
+        <div><span>source lugs</span><b id="auditSource">0</b></div>
+        <div><span>open rim loops</span><b id="auditOpen">2</b></div>
+      </div>
+      <div class="button-row">
+        <button id="exportObj" class="primary">Export OBJ</button>
+        <button id="exportRecipe">Trace JSON</button>
+        <button id="resetView">Reset view</button>
+      </div>
+    </section>
+  </aside>
+
+  <main id="viewport">
+    <div class="view-corner">
+      <div class="eyebrow" id="viewStage">04 / quad audit</div>
+      <h3 id="viewTitle">Vanguard Apex</h3>
+      <p id="viewBlurb">One vector motif is mirrored across the tread centre, point-flipped into the second half-pitch, then arrayed at exact circumferential spacing.</p>
+    </div>
+    <div class="legend"><span><i></i>source / lug</span><span><i class="blue"></i>trace edge</span><span><i class="dark"></i>groove floor</span></div>
+    <div class="view-help">drag orbit · wheel zoom · right drag pan</div>
+    <div id="toast" class="toast"></div>
+  </main>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+/*
+  TREAD FORGE
+  ------------
+  This file is deliberately a vector construction, not a height-field viewer.
+  Each source lug is a traced 2-D polygon. A quad fan fills its top and bottom,
+  and each perimeter edge is split into wall quads. The source is transformed
+  into its mirrored / point-flipped copies before it is moved by a whole pitch
+  and mapped onto the tyre circumference. There is no image sampling,
+  displacement lookup, or texture-driven vertex motion in this implementation.
+*/
+
+const TAU = Math.PI * 2;
+const $ = id => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const fmt = (n, digits = 0) => Number(n).toFixed(digits).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+
+// Small vector trace helpers. Their output is a traced polygon, never a height sample.
+function path(points) { return points.map(p => [p[0], p[1]]); }
+function piece(id, points, height = 1, tone = 'rubber') { return { id, points: path(points), height, tone }; }
+function diamond(cx, cy, rx, ry, lean = 0) {
+  return [[cx - rx * .9, cy - ry * .12], [cx - rx * .12 + lean, cy - ry],
+          [cx + rx, cy - ry * .16], [cx + rx * .18 + lean, cy + ry],
+          [cx - rx * .82, cy + ry * .14]];
+}
+function chamfer(cx, cy, rx, ry, cut = .22, lean = 0) {
+  const x = (n, d = 0) => cx + n * rx + lean * d;
+  const y = n => cy + n * ry;
+  return [[x(-1 + cut), y(-1)], [x(1 - cut), y(-1)], [x(1), y(-1 + cut)], [x(1), y(1 - cut)],
+          [x(1 - cut), y(1)], [x(-1 + cut), y(1)], [x(-1), y(1 - cut)], [x(-1), y(-1 + cut)]];
+}
+function beam(x0, y0, x1, y1, w0, w1 = w0, trim = .18) {
+  const dx = x1 - x0, dy = y1 - y0, len = Math.hypot(dx, dy) || 1;
+  const tx = dx / len, ty = dy / len, nx = -ty, ny = tx;
+  const s0 = Math.min(len * trim, w0 * .75), s1 = Math.min(len * trim, w1 * .75);
+  // A six-sided, tapered bar: diagonal, chamfered, and intentionally not a box.
+  return [
+    [x0 - tx * s0 + nx * w0 * .54, y0 - ty * s0 + ny * w0 * .54],
+    [x1 + tx * s1 + nx * w1 * .54, y1 + ty * s1 + ny * w1 * .54],
+    [x1 + tx * s1, y1 + ty * s1],
+    [x1 + tx * s1 - nx * w1, y1 + ty * s1 - ny * w1],
+    [x0 - tx * s0 - nx * w0 * .54, y0 - ty * s0 - ny * w0 * .54],
+    [x0 - tx * s0, y0 - ty * s0]
+  ];
+}
+
+/*
+  Every pattern is authored on one right-hand source half. The editor never
+  replaces these outlines with rectangles. `pointFlip` completes the opposite
+  half-pitch by flipping the source around its construction point; `mirror`
+  reflects it across the tread centre. `grooves` are also polygons, so the
+  visible voids have a real floor instead of a painted height texture.
+*/
+const PATTERNS = {
+  apex: {
+    label: 'Vanguard Apex', tag: 'directional · mirrored V',
+    description: 'A long directional V made from swept, chamfered lugs. The authored right-half trace is reflected across the centreline, point-flipped at the half-pitch, and repeated as a true circular array.',
+    note: 'swept chevrons · centre spine · shoulder barbs', mirror: true, pointFlip: true,
+    settings: { width: 265, aspect: 45, rim: 19, coverage: .90, depth: 11, crown: 3.2, shoulderDrop: 4.5, pitches: 36, sweep: 3 },
+    pieces: [
+      piece('centre spine', beam(.07, .05, .14, .95, .070, .078), 1.08),
+      piece('inner lead', beam(.16, .13, .47, .43, .095, .105), 1.02),
+      piece('inner return', beam(.16, .87, .47, .57, .095, .105), 1.02),
+      piece('outer lead', beam(.46, .15, .86, .39, .085, .105), 1.00),
+      piece('outer return', beam(.46, .85, .86, .61, .085, .105), 1.00),
+      piece('shoulder barb A', chamfer(.89, .18, .085, .12, .28, .008), .96, 'accent'),
+      piece('shoulder barb B', chamfer(.89, .82, .085, .12, .28, -.008), .96, 'accent')
+    ],
+    grooves: [piece('inner sipe', beam(.245, .27, .39, .41, .018, .018), .04, 'groove'), piece('outer sipe', beam(.60, .28, .77, .37, .016, .016), .04, 'groove')]
+  },
+  lattice: {
+    label: 'Crosslink Lattice', tag: 'interlocking · X blocks',
+    description: 'A dense crossing pattern assembled from individually traced diagonal members and faceted diamonds. It uses a point flip rather than copying a rectangular tile, so the joints rotate into one another around the tyre.',
+    note: 'cross bars · diamonds · staggered shoulders', mirror: true, pointFlip: true,
+    settings: { width: 275, aspect: 55, rim: 20, coverage: .91, depth: 13, crown: 2.6, shoulderDrop: 4.8, pitches: 32, sweep: -2 },
+    pieces: [
+      piece('lower diagonal', beam(.06, .10, .53, .46, .075, .11), 1.05),
+      piece('upper diagonal', beam(.06, .90, .53, .54, .075, .11), 1.05),
+      piece('crossing lead', beam(.38, .08, .94, .36, .085, .105), 1.02),
+      piece('crossing return', beam(.38, .92, .94, .64, .085, .105), 1.02),
+      piece('crown diamond', diamond(.34, .50, .14, .18, .018), 1.08, 'accent'),
+      piece('shoulder diamond', diamond(.82, .19, .11, .12, -.01), .94),
+      piece('shoulder diamond 2', diamond(.82, .81, .11, .12, .01), .94)
+    ],
+    grooves: [piece('cross slot A', beam(.25, .49, .43, .49, .018, .018), .03, 'groove'), piece('cross slot B', beam(.69, .47, .83, .43, .014, .014), .03, 'groove')]
+  },
+  ice: {
+    label: 'Ice Shard', tag: 'winter · dense siping',
+    description: 'A winter layout with small faceted shards, offset rows, and real narrow floor gaps between the biting edges. No stamped rectangles: each shard has its own traced angle and chamfer.',
+    note: 'faceted shards · offset rows · narrow voids', mirror: true, pointFlip: true,
+    settings: { width: 225, aspect: 55, rim: 17, coverage: .88, depth: 9.5, crown: 3.4, shoulderDrop: 4.2, pitches: 44, sweep: 0 },
+    pieces: [
+      piece('shard 01', diamond(.12, .12, .10, .085, -.01), .98),
+      piece('shard 02', beam(.18, .08, .39, .28, .055, .065), 1.00),
+      piece('shard 03', diamond(.17, .43, .11, .09, .02), 1.03, 'accent'),
+      piece('shard 04', beam(.21, .55, .43, .77, .055, .068), 1.00),
+      piece('shard 05', diamond(.16, .86, .105, .08, -.02), .98),
+      piece('shard 06', beam(.43, .08, .62, .27, .064, .074), 1.02),
+      piece('shard 07', diamond(.45, .47, .12, .12, .02), 1.05, 'accent'),
+      piece('shard 08', beam(.46, .59, .68, .84, .064, .075), 1.01),
+      piece('shoulder shard', chamfer(.86, .21, .105, .13, .3, -.01), .96),
+      piece('shoulder shard 2', chamfer(.86, .78, .105, .13, .3, .01), .96)
+    ],
+    grooves: [piece('sipe 01', beam(.27, .20, .36, .26, .012, .012), .025, 'groove'), piece('sipe 02', beam(.28, .68, .38, .76, .012, .012), .025, 'groove'), piece('sipe 03', beam(.54, .38, .64, .44, .012, .012), .025, 'groove'), piece('sipe 04', beam(.72, .64, .82, .69, .012, .012), .025, 'groove')]
+  },
+  claw: {
+    label: 'Mud Claw', tag: 'terrain · hooked lugs',
+    description: 'Wide open mud-terrain claws built from long tapered lugs and hooked shoulder caps. The second half-pitch is end-for-end flipped, keeping the bite direction but preventing a copy-pasted brick rhythm.',
+    note: 'deep lugs · open voids · hooked shoulders', mirror: true, pointFlip: true,
+    settings: { width: 305, aspect: 70, rim: 17, coverage: .94, depth: 17, crown: 2.4, shoulderDrop: 6.5, pitches: 27, sweep: 5 },
+    pieces: [
+      piece('inner talon', beam(.06, .10, .40, .37, .115, .145), 1.13, 'accent'),
+      piece('inner toe', beam(.29, .36, .63, .53, .12, .15), 1.12),
+      piece('outer claw', beam(.51, .50, .91, .34, .14, .12), 1.10, 'accent'),
+      piece('lower talon', beam(.07, .90, .39, .64, .11, .14), 1.12),
+      piece('lower toe', beam(.31, .64, .63, .55, .11, .14), 1.10),
+      piece('shoulder hook', chamfer(.90, .22, .11, .17, .23, -.018), 1.08, 'accent'),
+      piece('shoulder hook 2', chamfer(.90, .78, .11, .17, .23, .018), 1.08, 'accent')
+    ],
+    grooves: [piece('mud void', beam(.16, .47, .32, .48, .028, .028), .02, 'groove'), piece('mud void 2', beam(.67, .66, .85, .56, .026, .026), .02, 'groove')]
+  },
+  aqua: {
+    label: 'Aqua Sweep', tag: 'wet · open V channel',
+    description: 'A directional wet pattern with a deliberately open centre channel and swept arms that carry water toward the shoulders. The source remains mirrored, while the end translation keeps every V pointing the same way.',
+    note: 'open centre channel · swept arms · water exits', mirror: true, pointFlip: false,
+    settings: { width: 245, aspect: 40, rim: 18, coverage: .89, depth: 10, crown: 3.6, shoulderDrop: 4.5, pitches: 34, sweep: 8 },
+    pieces: [
+      piece('inner V upper', beam(.08, .10, .47, .36, .075, .095), 1.04),
+      piece('inner V lower', beam(.08, .90, .47, .64, .075, .095), 1.04),
+      piece('flow arm upper', beam(.42, .14, .92, .38, .075, .105), 1.00, 'accent'),
+      piece('flow arm lower', beam(.42, .86, .92, .62, .075, .105), 1.00, 'accent'),
+      piece('shoulder outlet', chamfer(.91, .18, .075, .13, .32, .015), .94),
+      piece('shoulder outlet 2', chamfer(.91, .82, .075, .13, .32, -.015), .94)
+    ],
+    grooves: [piece('centre water floor', chamfer(.18, .50, .12, .31, .34, 0), .015, 'groove'), piece('outer water floor', beam(.57, .48, .86, .48, .022, .022), .02, 'groove')]
+  },
+  rally: {
+    label: 'Rally Zed', tag: 'gravel · asymmetric Z',
+    description: 'An asymmetric gravel pattern made from a Z-shaped source and offset shoulder shards. The source is reflected for left/right balance, then point-flipped so adjacent halves interlock instead of lining up as columns.',
+    note: 'Z trace · offset bite edges · gravel voids', mirror: true, pointFlip: true,
+    settings: { width: 235, aspect: 60, rim: 16, coverage: .91, depth: 12.5, crown: 2.8, shoulderDrop: 5, pitches: 38, sweep: -4 },
+    pieces: [
+      piece('Z upper', beam(.06, .10, .41, .29, .075, .105), 1.05),
+      piece('Z middle', beam(.37, .30, .68, .67, .085, .11), 1.08, 'accent'),
+      piece('Z lower', beam(.63, .68, .95, .88, .075, .105), 1.03),
+      piece('inside shard', diamond(.23, .72, .10, .105, -.018), .99),
+      piece('outside shard', diamond(.76, .27, .115, .10, .018), 1.01),
+      piece('shoulder tooth', chamfer(.91, .16, .075, .11, .25, -.01), .96),
+      piece('shoulder tooth 2', chamfer(.91, .84, .075, .11, .25, .01), .96)
+    ],
+    grooves: [piece('Z slot upper', beam(.18, .21, .35, .30, .016, .016), .025, 'groove'), piece('Z slot lower', beam(.66, .70, .79, .79, .016, .016), .025, 'groove')]
+  }
+};
+
+const STAGES = [
+  { id: 'source', num: '01', label: 'Trace', short: 'flat source', description: 'One authored vector half is shown flat. The faceted outlines are the actual input to the mesh builder; there is no raster or height sample behind them.' },
+  { id: 'fit', num: '02', label: 'Align', short: 'one pitch', description: 'The exact same source vertices are mapped onto the crown and shoulder profile. Only positions change; the quad topology is preserved.' },
+  { id: 'array', num: '03', label: 'Translate + array', short: 'circumference', description: 'The completed motif is translated by one exact pitch around the tyre. Every copy uses the same angular spacing: circumference divided by pitch count.' },
+  { id: 'audit', num: '04', label: 'Quad audit', short: 'final tread', description: 'Full tread preview with the source copy highlighted. The exporter emits four-index faces only; the open loops are the two lateral tread rims.' }
+];
+
+const state = {
+  pattern: 'apex', stage: 'audit',
+  width: 265, aspect: 45, rim: 19, coverage: .90, depth: 11, crown: 3.2, shoulderDrop: 4.5,
+  pitches: 36, sweep: 3,
+  wire: true, sourceHighlight: true, base: true, spin: false,
+};
+const D = {};
+let lastBuild = null;
+
+// ------------------------------ dimensions and mapping ------------------------------------------------------------
+function derive() {
+  D.halfW = state.width * state.coverage / 2;
+  D.rimRadius = state.rim * 25.4 / 2;
+  D.sidewall = state.width * state.aspect / 100;
+  // This is a construction radius. The base is below the traced tread surface.
+  D.coreRadius = D.rimRadius + D.sidewall - state.depth * .38;
+  D.circRadius = D.coreRadius + state.depth + state.crown * .48;
+  D.circ = TAU * D.circRadius;
+  D.pitch = D.circ / state.pitches;
+  D.shoulderLen = Math.min(state.width * .10, D.halfW * .32);
+}
+function shoulderFactor(x) {
+  const a = Math.abs(x), edge = Math.max(0, (a - (D.halfW - D.shoulderLen)) / Math.max(D.shoulderLen, .001));
+  return edge * edge;
+}
+function baseRadius(x) {
+  const n = clamp(Math.abs(x) / Math.max(D.halfW, .001), 0, 1);
+  const crown = state.crown * (1 - n * n) * .45;
+  return D.coreRadius + crown - state.shoulderDrop * shoulderFactor(x) * .35;
+}
+function radiusAt(x, level) { return baseRadius(x) + state.depth * level; }
+function profileNormal(x, y, level, flat) {
+  if (flat) return V(0, 1, 0);
+  const e = Math.max(.15, D.halfW * .003);
+  const dr = (radiusAt(x + e, level) - radiusAt(x - e, level)) / (2 * e);
+  const th = y / D.circ * TAU;
+  return V(dr, Math.cos(th), Math.sin(th)).normalize();
+}
+function normalizedSourcePoint(raw, variant) {
+  let u = clamp(raw[0], .01, .99), q = clamp(raw[1], .01, .99);
+  if (variant.flip) { u = 1 - u; q = 1 - q; }
+  const v = variant.half ? .5 + q * .5 : q * .5;
+  // `sweep` adds a tiny authored skew to the whole motif; it is a planar
+  // transform before mapping, not a radial displacement.
+  const skew = Math.tan(state.sweep * Math.PI / 180) * (u - .5) * .08;
+  return { u: variant.side * u, v: clamp(v + skew, .01, .99) };
+}
+function pointOnTread(uv, tile, level, flat) {
+  const x = uv.u * D.halfW;
+  const along = (tile + uv.v) * D.pitch;
+  if (flat) return V(x, level * state.depth, along - D.pitch * .25);
+  const theta = along / D.circ * TAU;
+  const r = radiusAt(x, level);
+  return V(x, r * Math.cos(theta), r * Math.sin(theta));
+}
+function variantList(pattern, sourceOnly = false) {
+  if (sourceOnly) return [{ side: 1, half: 0, flip: false, name: 'source' }];
+  const sides = pattern.mirror ? [1, -1] : [1];
+  const first = sides.map(side => ({ side, half: 0, flip: false, name: side > 0 ? 'right' : 'mirror' }));
+  const second = pattern.pointFlip
+    ? sides.map(side => ({ side, half: 1, flip: true, name: side > 0 ? 'flip mirror' : 'point flip' }))
+    : sides.map(side => ({ side, half: 1, flip: false, name: side > 0 ? 'translated right' : 'translated mirror' }));
+  return first.concat(second);
+}
+
+// ------------------------------ all-quad mesh builder -------------------------------------------------------------
+function makeBuilder() {
+  const sets = {
+    rubber: { pos: [], nrm: [], quads: 0 },
+    accent: { pos: [], nrm: [], quads: 0 },
+    groove: { pos: [], nrm: [], quads: 0 },
+    source: { pos: [], nrm: [], quads: 0 },
+    base: { pos: [], nrm: [], quads: 0 }
+  };
+  const vertices = [], faces = [], edges = [], edgeSeen = new Set(), vertexMap = new Map();
+  const key = p => `${Math.round(p.x * 10000)},${Math.round(p.y * 10000)},${Math.round(p.z * 10000)}`;
+  function objVertex(p) {
+    const k = key(p), found = vertexMap.get(k);
+    if (found !== undefined) return found;
+    const id = vertices.length + 1;
+    vertices.push([p.x, p.y, p.z]); vertexMap.set(k, id); return id;
+  }
+  function edge(a, b) {
+    const ka = key(a), kb = key(b), k = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+    if (edgeSeen.has(k)) return;
+    edgeSeen.add(k); edges.push(a.x, a.y, a.z, b.x, b.y, b.z);
+  }
+  function quad(setName, points, expected) {
+    if (points.some(p => !Number.isFinite(p.x + p.y + p.z))) return;
+    let p = points.slice();
+    let a = V().subVectors(p[1], p[0]), b = V().subVectors(p[3], p[0]);
+    let n = V().crossVectors(a, b);
+    if (n.lengthSq() < 1e-12) return;
+    if (expected && n.dot(expected) < 0) { p = [p[0], p[3], p[2], p[1]]; n.negate(); }
+    n.normalize();
+    const set = sets[setName] || sets.rubber;
+    // BufferGeometry is rendered as two triangles, but the source/export face
+    // is recorded once, with four indices. This keeps the quad audit honest.
+    for (const tri of [[0, 1, 2], [0, 2, 3]]) for (const i of tri) {
+      set.pos.push(p[i].x, p[i].y, p[i].z); set.nrm.push(n.x, n.y, n.z);
+    }
+    set.quads++;
+    faces.push([objVertex(p[0]), objVertex(p[1]), objVertex(p[2]), objVertex(p[3])]);
+    edge(p[0], p[1]); edge(p[1], p[2]); edge(p[2], p[3]); edge(p[3], p[0]);
+  }
+  return { sets, vertices, faces, edges, quad };
+}
+function signedArea(points) {
+  let a = 0; for (let i = 0; i < points.length; i++) { const p = points[i], q = points[(i + 1) % points.length]; a += p[0] * q[1] - q[0] * p[1]; }
+  return a * .5;
+}
+function averageUv(uvs) {
+  const r = { u: 0, v: 0 }; for (const p of uvs) { r.u += p.u; r.v += p.v; }
+  r.u /= uvs.length; r.v /= uvs.length; return r;
+}
+function fitTrace(points) {
+  // Keep the authored outline inside the source cell without point-by-point
+  // clipping. This matters for steep lugs: clipping every endpoint separately
+  // can collapse a real edge and create a zero-area face.
+  let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
+  for (const [u, v] of points) { minU = Math.min(minU, u); maxU = Math.max(maxU, u); minV = Math.min(minV, v); maxV = Math.max(maxV, v); }
+  const scaleU = Math.min(1, .94 / Math.max(maxU - minU, .0001));
+  const scaleV = Math.min(1, .94 / Math.max(maxV - minV, .0001));
+  const moveAxis = (value, lo, hi, scale) => {
+    const centre = (lo + hi) * .5, scaled = (value - centre) * scale + centre;
+    const scaledLo = (lo - centre) * scale + centre, scaledHi = (hi - centre) * scale + centre;
+    const shift = scaledLo < .03 ? .03 - scaledLo : scaledHi > .97 ? .97 - scaledHi : 0;
+    return scaled + shift;
+  };
+  return points.map(([u, v]) => [moveAxis(u, minU, maxU, scaleU), moveAxis(v, minV, maxV, scaleV)]);
+}
+function sideExpected(a, b, flat, tile) {
+  const du = b.u - a.u, dv = b.v - a.v;
+  if (flat) return V(dv, 0, -du).normalize();
+  const x = (a.u + b.u) * .5 * D.halfW, y = (tile + (a.v + b.v) * .5) * D.pitch;
+  const tangent = V(0, -Math.sin(y / D.circ * TAU), Math.cos(y / D.circ * TAU));
+  return V(dv, 0, 0).addScaledVector(tangent, -du).normalize();
+}
+function addBlock(B, item, variant, tile, flat, setName) {
+  let source = fitTrace(item.points).map(p => normalizedSourcePoint(p, variant));
+  // Winding is part of the trace. Normalize it once so the centre quad fan
+  // stays inside the convex/faceted authored lug regardless of input order.
+  const rawForArea = source.map(p => [p.u, p.v]);
+  if (signedArea(rawForArea) < 0) source.reverse();
+  const level = item.height;
+  const top = source.map(p => pointOnTread(p, tile, level, flat));
+  const bottom = source.map(p => pointOnTread(p, tile, 0, flat));
+  const centreUv = averageUv(source);
+  const topCentre = pointOnTread(centreUv, tile, level, flat);
+  const bottomCentre = pointOnTread(centreUv, tile, 0, flat);
+  const up = profileNormal(centreUv.u * D.halfW, (tile + centreUv.v) * D.pitch, level, flat);
+  const down = up.clone().negate();
+
+  // Quad fan: each perimeter edge gets a midpoint, then connects to a shared
+  // centre. It is a genuine four-corner face, not a triangle with a duplicated index.
+  for (let i = 0; i < source.length; i++) {
+    const next = (i + 1) % source.length, prev = (i - 1 + source.length) % source.length;
+    const nextUv = { u: (source[i].u + source[next].u) * .5, v: (source[i].v + source[next].v) * .5 };
+    const prevUv = { u: (source[prev].u + source[i].u) * .5, v: (source[prev].v + source[i].v) * .5 };
+    B.quad(setName, [top[i], pointOnTread(nextUv, tile, level, flat), topCentre, pointOnTread(prevUv, tile, level, flat)], up);
+    B.quad(setName, [bottom[i], pointOnTread(prevUv, tile, 0, flat), bottomCentre, pointOnTread(nextUv, tile, 0, flat)], down);
+  }
+  // Split every outline edge at its midpoint. This gives the wall its own
+  // matching loop and keeps the traced diagonal edges visibly quad-built.
+  for (let i = 0; i < source.length; i++) {
+    const j = (i + 1) % source.length, a = source[i], b = source[j];
+    const mid = { u: (a.u + b.u) * .5, v: (a.v + b.v) * .5 };
+    const topMid = pointOnTread(mid, tile, level, flat), bottomMid = pointOnTread(mid, tile, 0, flat);
+    const exp = sideExpected(a, b, flat, tile);
+    B.quad(setName, [top[i], topMid, bottomMid, bottom[i]], exp);
+    B.quad(setName, [topMid, top[j], bottom[j], bottomMid], exp);
+  }
+}
+function addBase(B, flat, tiles) {
+  const cols = 14, rows = flat ? 5 : Math.max(8, tiles * 6);
+  if (flat) {
+    // The flat source board is only a construction aid, not a carcass mesh.
+    for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+      const x0 = (i / cols) * D.halfW, x1 = ((i + 1) / cols) * D.halfW;
+      const v0 = (j / rows) * .5, v1 = ((j + 1) / rows) * .5;
+      const a = { u: x0 / D.halfW, v: v0 }, b = { u: x1 / D.halfW, v: v0 }, c = { u: x1 / D.halfW, v: v1 }, d = { u: x0 / D.halfW, v: v1 };
+      B.quad('base', [pointOnTread(a, 0, -.035, true), pointOnTread(b, 0, -.035, true), pointOnTread(c, 0, -.035, true), pointOnTread(d, 0, -.035, true)], V(0, 1, 0));
+    }
+    return;
+  }
+  for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
+    const x0 = -D.halfW + (i / cols) * 2 * D.halfW, x1 = -D.halfW + ((i + 1) / cols) * 2 * D.halfW;
+    const y0 = (j / rows) * tiles * D.pitch, y1 = ((j + 1) / rows) * tiles * D.pitch;
+    const p = (x, y) => { const uv = { u: x / D.halfW, v: y / D.pitch }; return pointOnTread(uv, 0, -.035, false); };
+    const a = p(x0, y0), b = p(x1, y0), c = p(x1, y1), d = p(x0, y1);
+    B.quad('base', [a, b, c, d], profileNormal((x0 + x1) * .5, (y0 + y1) * .5, -.035, false));
+  }
+}
+function buildModel() {
+  derive();
+  const pattern = PATTERNS[state.pattern];
+  const flat = state.stage === 'source';
+  const sourceOnly = flat;
+  const tiles = state.stage === 'source' || state.stage === 'fit' ? 1 : state.pitches;
+  const variants = variantList(pattern, sourceOnly);
+  const B = makeBuilder();
+  if (state.base) addBase(B, flat, tiles);
+  for (let tile = 0; tile < tiles; tile++) {
+    for (const variant of variants) {
+      const highlight = state.sourceHighlight && tile === 0;
+      for (const item of pattern.pieces) {
+        const set = highlight ? 'source' : item.tone;
+        addBlock(B, item, variant, tile, flat, set);
+      }
+      for (const item of pattern.grooves || []) addBlock(B, item, variant, tile, flat, 'groove');
+    }
+  }
+  const quadCount = Object.values(B.sets).reduce((n, s) => n + s.quads, 0);
+  return { ...B, flat, tiles, variants, quadCount, sourcePieces: pattern.pieces.length, instanceCount: tiles * variants.length };
+}
+
+// ------------------------------ three.js view --------------------------------------------------------------------
+const view = $('viewport');
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.08;
+view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#0d1215');
+const camera = new THREE.PerspectiveCamera(42, 1, .1, 10000);
+camera.position.set(280, 250, 390);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = .08; controls.minDistance = 30; controls.maxDistance = 2400;
+scene.add(new THREE.HemisphereLight(0xc6e8ed, 0x0a1015, 1.2));
+const keyLight = new THREE.DirectionalLight(0xffffff, 2.0); keyLight.position.set(280, 420, 360); scene.add(keyLight);
+const fillLight = new THREE.DirectionalLight(0x63c6e5, .75); fillLight.position.set(-400, 100, -300); scene.add(fillLight);
+const edgeLight = new THREE.DirectionalLight(0xf1b36d, .55); edgeLight.position.set(100, -250, 450); scene.add(edgeLight);
+const materials = {
+  rubber: new THREE.MeshStandardMaterial({ color: '#252d31', roughness: .78, metalness: .02, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+  accent: new THREE.MeshStandardMaterial({ color: '#34444a', roughness: .72, metalness: .02, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+  groove: new THREE.MeshStandardMaterial({ color: '#10171a', roughness: .94, metalness: 0, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+  source: new THREE.MeshStandardMaterial({ color: '#277e70', roughness: .69, metalness: .02, polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+  base: new THREE.MeshStandardMaterial({ color: '#171e22', roughness: .9, metalness: 0, side: THREE.DoubleSide }),
+};
+const wireMaterial = new THREE.LineBasicMaterial({ color: '#65e6b0', transparent: true, opacity: .52 });
+const group = new THREE.Group(); scene.add(group);
+let meshObjects = [], wireObject = null, lastViewKey = '';
+function meshFor(set, material) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(set.pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(set.nrm, 3));
+  g.computeBoundingSphere();
+  return new THREE.Mesh(g, material);
+}
+function clearMeshes() {
+  for (const m of meshObjects) { group.remove(m); m.geometry.dispose(); }
+  meshObjects = [];
+  if (wireObject) { group.remove(wireObject); wireObject.geometry.dispose(); wireObject = null; }
+}
+function fitCamera(reset = false) {
+  const box = new THREE.Box3().setFromObject(group);
+  if (box.isEmpty()) return;
+  const centre = box.getCenter(V()), size = box.getSize(V()), d = Math.max(size.x, size.y, size.z, 1);
+  controls.target.copy(centre);
+  if (reset || lastViewKey === '') {
+    if (lastBuild.flat) camera.position.set(centre.x + d * .55, centre.y + d * 1.16, centre.z + d * 1.35);
+    else camera.position.set(centre.x + d * 1.18, centre.y + d * .60, centre.z + d * 1.16);
+  }
+  camera.near = Math.max(.01, d / 200); camera.far = d * 30; camera.updateProjectionMatrix();
+}
+function rebuild(resetCamera = false) {
+  const B = buildModel(); lastBuild = B; clearMeshes();
+  for (const name of ['base', 'rubber', 'accent', 'groove', 'source']) {
+    const set = B.sets[name];
+    if (!set.pos.length) continue;
+    const m = meshFor(set, materials[name]); group.add(m); meshObjects.push(m);
+  }
+  const wg = new THREE.BufferGeometry(); wg.setAttribute('position', new THREE.Float32BufferAttribute(B.edges, 3));
+  wireObject = new THREE.LineSegments(wg, wireMaterial); wireObject.visible = state.wire; group.add(wireObject);
+  updateUiStats(B); drawBlueprint();
+  const viewKey = `${state.pattern}|${state.stage}`;
+  if (resetCamera || viewKey !== lastViewKey) { fitCamera(true); lastViewKey = viewKey; }
+}
+function resize() {
+  const w = view.clientWidth, h = view.clientHeight; if (!w || !h) return;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(view);
+window.addEventListener('resize', resize);
+renderer.setAnimationLoop(() => {
+  if (state.spin) group.rotation.x += .0022;
+  controls.update(); renderer.render(scene, camera);
+});
+
+// ------------------------------ blueprint / UI ------------------------------------------------------------------
+function drawBlueprint() {
+  const canvas = $('blueprint'), ctx = canvas.getContext('2d'), cssW = canvas.clientWidth || 300, cssH = canvas.clientHeight || 156;
+  const ratio = Math.min(window.devicePixelRatio || 1, 2); canvas.width = Math.round(cssW * ratio); canvas.height = Math.round(cssH * ratio); ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+  const W = cssW, H = cssH, pattern = PATTERNS[state.pattern];
+  ctx.clearRect(0, 0, W, H); ctx.fillStyle = '#0e1418'; ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = 'rgba(190,220,226,.07)'; ctx.lineWidth = 1;
+  for (let x = 0; x <= W; x += 18) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 0; y <= H; y += 18) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  const mid = W * .5, margin = 16, half = W * .42, cellH = (H - 48) / 2, top = 25;
+  function xy(p, row, side = 1, flip = false) {
+    let u = clamp(p[0], .01, .99), q = clamp(p[1], .01, .99); if (flip) { u = 1 - u; q = 1 - q; }
+    return [mid + side * u * half, top + row * (cellH + 15) + q * cellH];
+  }
+  function drawPoly(points, row, side, flip, fill, stroke) {
+    ctx.beginPath(); points.forEach((p, i) => { const q = xy(p, row, side, flip); i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]); }); ctx.closePath();
+    ctx.fillStyle = fill; ctx.fill(); ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke();
+  }
+  ctx.save(); ctx.setLineDash([3, 3]); ctx.strokeStyle = 'rgba(87,201,237,.55)'; ctx.strokeRect(mid - half, top, half * 2, cellH); ctx.strokeRect(mid - half, top + cellH + 15, half * 2, cellH); ctx.restore();
+  ctx.strokeStyle = 'rgba(101,230,176,.55)'; ctx.beginPath(); ctx.moveTo(mid, 10); ctx.lineTo(mid, H - 8); ctx.stroke();
+  for (const item of pattern.pieces) {
+    drawPoly(item.points, 0, 1, false, item.tone === 'accent' ? 'rgba(87,201,237,.66)' : 'rgba(101,230,176,.58)', '#9ff3d0');
+    drawPoly(item.points, 0, -1, false, 'rgba(101,230,176,.09)', 'rgba(101,230,176,.38)');
+    const flip = pattern.pointFlip;
+    drawPoly(item.points, 1, 1, flip, 'rgba(87,201,237,.14)', 'rgba(87,201,237,.55)');
+    drawPoly(item.points, 1, -1, flip, 'rgba(87,201,237,.12)', 'rgba(87,201,237,.48)');
+  }
+  ctx.fillStyle = '#7f929b'; ctx.font = '9px ui-monospace, SFMono-Regular, Menlo, monospace';
+  ctx.fillText('SOURCE + MIRROR', 8, 14); ctx.fillStyle = '#57c9ed'; ctx.fillText(pattern.pointFlip ? 'POINT FLIP → PITCH' : 'TRANSLATE → PITCH', 8, H - 8);
+  ctx.fillStyle = '#65e6b0'; ctx.fillText('axis', mid + 5, 14);
+}
+function updateUiStats(B) {
+  const p = PATTERNS[state.pattern];
+  $('headFaces').textContent = B.quadCount.toLocaleString(); $('headInstances').textContent = B.instanceCount.toLocaleString(); $('headPitch').textContent = fmt(D.pitch, 1);
+  $('auditQuads').textContent = B.quadCount.toLocaleString(); $('auditTriangles').textContent = '0'; $('auditSource').textContent = p.pieces.length.toString();
+  $('viewTitle').textContent = p.label; $('viewStage').textContent = `${STAGES.findIndex(s => s.id === state.stage) + 1}`.padStart(2, '0') + ` / ${STAGES.find(s => s.id === state.stage).label.toLowerCase()}`;
+  $('viewBlurb').textContent = p.description;
+  $('patternDescription').textContent = p.description;
+  $('stageDescription').textContent = STAGES.find(s => s.id === state.stage).description;
+}
+function toast(message) { const t = $('toast'); t.textContent = message; t.classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => t.classList.remove('show'), 2200); }
+function download(filename, blob) { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1800); }
+function exportObj() {
+  if (!lastBuild) return;
+  const p = PATTERNS[state.pattern]; let out = '# Tread Forge quad export\n# traced polygons; no height field; every face below has four indices\n';
+  out += `# pattern ${state.pattern} | stage ${state.stage} | quads ${lastBuild.faces.length} | pitch ${D.pitch.toFixed(4)} mm\no tread_${state.pattern}\n`;
+  for (const v of lastBuild.vertices) out += `v ${v[0].toFixed(5)} ${v[1].toFixed(5)} ${v[2].toFixed(5)}\n`;
+  for (const f of lastBuild.faces) out += `f ${f[0]} ${f[1]} ${f[2]} ${f[3]}\n`;
+  download(`tread-forge-${state.pattern}-quads.obj`, new Blob([out], { type: 'text/plain' })); toast('OBJ exported — every f line has 4 indices');
+}
+function exportRecipe() {
+  const p = PATTERNS[state.pattern];
+  const recipe = { format: 'tread-forge-vector-quad-v1', noHeightmap: true, pattern: state.pattern, source: p.pieces, grooves: p.grooves || [], operations: { trace: 'source polygons', mirrorAcrossTreadCentre: p.mirror, pointFlipAtHalfPitch: p.pointFlip, translateByPitch: true, circularArray: state.pitches }, carcass: { ...state }, derived: { pitchMm: D.pitch, circumferenceMm: D.circ, quadFaces: lastBuild?.faces.length || 0 } };
+  download(`tread-forge-${state.pattern}-trace.json`, new Blob([JSON.stringify(recipe, null, 2)], { type: 'application/json' })); toast('Vector trace recipe exported');
+}
+
+const sliderDefs = [
+  ['width', 'section width', 175, 345, 1, ' mm'], ['aspect', 'aspect ratio', 30, 80, 1, '%'], ['rim', 'rim diameter', 14, 22, 1, ' in'],
+  ['coverage', 'tread coverage', .72, .98, .01, ''], ['depth', 'tread depth', 4, 20, .5, ' mm'], ['crown', 'crown bulge', 0, 7, .1, ' mm'], ['shoulderDrop', 'shoulder drop', 0, 10, .1, ' mm']
+];
+const traceDefs = [['pitches', 'circular pitches', 16, 72, 1, ''], ['sweep', 'source sweep', -12, 12, .5, '°']];
+const inputRefs = {}, valueRefs = {};
+function makeSliders(holderId, defs) {
+  const holder = $(holderId);
+  for (const [key, label, min, max, step, unit] of defs) {
+    const row = document.createElement('div'); row.className = 'row';
+    row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><span class="value"></span>`;
+    const input = row.querySelector('input'), value = row.querySelector('.value'); input.value = state[key];
+    const updateValue = () => { value.textContent = fmt(state[key], step < 1 ? 1 : 0) + unit; };
+    input.oninput = () => { state[key] = Number(input.value); updateValue(); rebuild(); };
+    inputRefs[key] = input; valueRefs[key] = updateValue; updateValue(); holder.appendChild(row);
+  }
+}
+function makeToggles() {
+  const holder = $('displayControls');
+  [['wire', 'quad wire overlay'], ['sourceHighlight', 'highlight source copy'], ['base', 'show modeled tread base'], ['spin', 'auto rotate']].forEach(([key, label]) => {
+    const row = document.createElement('div'); row.className = 'toggle-row'; row.innerHTML = `<label>${label}</label><input type="checkbox" ${state[key] ? 'checked' : ''}>`;
+    row.querySelector('input').onchange = e => { state[key] = e.target.checked; if (key === 'wire') { if (wireObject) wireObject.visible = state.wire; } else rebuild(); };
+    holder.appendChild(row);
+  });
+}
+function makePatterns() {
+  const holder = $('patternLibrary');
+  for (const [key, p] of Object.entries(PATTERNS)) {
+    const b = document.createElement('button'); b.className = 'pattern'; b.dataset.pattern = key; b.innerHTML = `<span class="name">${p.label}</span><span class="tag">${p.tag}</span>`;
+    b.onclick = () => applyPattern(key); holder.appendChild(b);
+  }
+}
+function makeStages() {
+  const holder = $('stageList');
+  for (const s of STAGES) {
+    const b = document.createElement('button'); b.className = 'stage-btn'; b.dataset.stage = s.id; b.innerHTML = `<span class="num">${s.num}</span><span class="label">${s.label}</span>`;
+    b.onclick = () => { state.stage = s.id; updateStageButtons(); rebuild(true); }; holder.appendChild(b);
+  }
+}
+function updateStageButtons() { document.querySelectorAll('.stage-btn').forEach(b => b.classList.toggle('active', b.dataset.stage === state.stage)); }
+function applyPattern(key) {
+  state.pattern = key; const settings = PATTERNS[key].settings; Object.assign(state, settings);
+  for (const k in inputRefs) if (k in state) { inputRefs[k].value = state[k]; valueRefs[k](); }
+  document.querySelectorAll('.pattern').forEach(b => b.classList.toggle('active', b.dataset.pattern === key));
+  rebuild(true);
+}
+$('exportObj').onclick = exportObj; $('exportRecipe').onclick = exportRecipe; $('resetView').onclick = () => { lastViewKey = ''; fitCamera(true); toast('Camera reset'); };
+
+makePatterns(); makeStages(); makeSliders('fitControls', sliderDefs); makeSliders('traceControls', traceDefs); makeToggles();
+resize(); updateStageButtons(); applyPattern('apex');
+</script>
+</body>
+</html>
