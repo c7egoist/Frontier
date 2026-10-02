@@ -1,0 +1,1115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tyre Forge — editor layout prototype</title>
+<style>
+:root{
+  --ink:#e9e4ef; --muted:#9a93a6; --faint:#6b6477;
+  --accent:#b79dd0; --accent-bright:#e2d0f4; --accent-dim:#5a4a70;
+  --bg:#141218; --panel:#1b1922; --card:#211e2a; --line:#2e2a39; --line-soft:#262232;
+  --warn:#d9a05b; --good:#7fba8c;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--ink);
+  font:13px/1.5 "Inter","Segoe UI",system-ui,sans-serif;
+  overflow:hidden;
+}
+.mono{font-family:"JetBrains Mono",ui-monospace,"Cascadia Code",Consolas,monospace}
+
+/* ── chrome ─────────────────────────────────────────────────────── */
+header.chrome{
+  height:38px;display:flex;align-items:center;gap:18px;padding:0 14px;
+  background:var(--panel);border-bottom:1px solid var(--line);
+}
+header.chrome .mark{font-weight:600;letter-spacing:.3px;color:var(--accent-bright)}
+header.chrome .sep{width:1px;height:18px;background:var(--line)}
+header.chrome nav{display:flex;gap:14px}
+header.chrome nav span{color:var(--muted);cursor:default}
+header.chrome nav span:hover{color:var(--ink)}
+header.chrome .right{margin-left:auto;display:flex;gap:10px;align-items:center}
+
+main{display:grid;grid-template-columns:268px 1fr 364px;height:calc(100% - 38px)}
+aside,section{min-width:0;min-height:0;overflow:auto}
+aside{background:var(--panel)}
+#outliner{border-right:1px solid var(--line)}
+#inspector{border-left:1px solid var(--line)}
+
+.panel-head{
+  position:sticky;top:0;z-index:2;background:var(--panel);
+  padding:11px 14px 9px;border-bottom:1px solid var(--line-soft);
+}
+.breadcrumb{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.panel-title{font-size:14px;margin-top:3px}
+
+/* ── outliner ───────────────────────────────────────────────────── */
+.filter{display:flex;flex-wrap:wrap;gap:4px;padding:9px 12px;border-bottom:1px solid var(--line-soft)}
+.chip{
+  font-size:10.5px;padding:2.5px 8px;border-radius:9px;cursor:pointer;
+  border:1px solid var(--line);color:var(--muted);background:transparent;user-select:none;
+}
+.chip.on{border-color:var(--accent-dim);background:#2a2237;color:var(--accent-bright)}
+.rows{padding:5px 0}
+.row{
+  display:flex;align-items:center;gap:7px;padding:3.5px 12px 3.5px 0;cursor:pointer;
+  border-left:2px solid transparent;user-select:none;
+}
+.row:hover{background:#221f2b}
+.row.sel{background:#2a2338;border-left-color:var(--accent)}
+.row .tw{width:13px;text-align:center;color:var(--faint);font-size:9px}
+.row .ic{width:15px;text-align:center;font-size:11px;opacity:.85}
+.row .nm{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .tag{font-size:9.5px;color:var(--faint);letter-spacing:.04em}
+.row.dim .nm{color:var(--muted)}
+
+/* ── viewport ───────────────────────────────────────────────────── */
+#viewport{background:#101016;display:flex;flex-direction:column}
+.vp-bar{
+  display:flex;align-items:center;gap:12px;padding:7px 14px;
+  border-bottom:1px solid var(--line);background:#16141c;
+}
+.vp-bar .label{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.vp-bar .spacer{flex:1}
+.canvases{flex:1;display:grid;grid-template-columns:1fr 300px;gap:0;min-height:0}
+.canvas-wrap{position:relative;min-height:0;display:flex;align-items:center;justify-content:center}
+.canvas-wrap + .canvas-wrap{border-left:1px solid var(--line)}
+canvas{display:block;max-width:100%;max-height:100%}
+.canvas-tag{
+  position:absolute;left:10px;top:8px;font-size:10px;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--faint);pointer-events:none;
+}
+.readout{
+  position:absolute;right:10px;bottom:8px;text-align:right;font-size:10.5px;
+  color:var(--muted);pointer-events:none;line-height:1.65;
+}
+
+/* ── inspector ──────────────────────────────────────────────────── */
+.card{background:var(--card);border:1px solid var(--line-soft);border-radius:7px;margin:11px 13px;padding:12px 13px}
+.card > h4{
+  font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--faint);font-weight:500;margin-bottom:10px;
+}
+.hero{display:flex;align-items:baseline;gap:7px;margin:-2px 0 9px}
+.hero .v{font-size:27px;letter-spacing:-.5px}
+.hero .u{font-size:12px;color:var(--muted)}
+.prose{font-size:11.5px;color:var(--muted);line-height:1.62;margin-top:9px}
+.prose.tight{margin-top:6px}
+
+.field{margin:11px 0}
+.field:first-of-type{margin-top:4px}
+.flabel{display:flex;align-items:baseline;gap:6px;margin-bottom:4px}
+.flabel .n{flex:1;font-size:11.5px}
+.flabel .val{font-size:11.5px;color:var(--accent-bright);font-variant-numeric:tabular-nums}
+.flabel .un{font-size:10px;color:var(--faint)}
+.kind{
+  font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);
+  border:1px solid var(--line);border-radius:3px;padding:0 3.5px;
+}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:16px;background:transparent;cursor:ew-resize;
+}
+input[type=range]::-webkit-slider-runnable-track{height:3px;background:#332d40;border-radius:2px}
+input[type=range]::-moz-range-track{height:3px;background:#332d40;border-radius:2px}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:12px;height:12px;border-radius:50%;
+  background:var(--accent);margin-top:-4.5px;border:2px solid #18141f;
+}
+input[type=range]::-moz-range-thumb{
+  width:12px;height:12px;border-radius:50%;background:var(--accent);border:2px solid #18141f;
+}
+input[type=number],input[type=text],select{
+  width:100%;background:#16131d;border:1px solid var(--line);color:var(--ink);
+  border-radius:4px;padding:4px 7px;font:inherit;font-size:11.5px;
+}
+input[type=number]:focus,select:focus{outline:none;border-color:var(--accent-dim);background:#1b1724}
+.numwrap{display:flex;align-items:center;gap:6px}
+.numwrap .un{font-size:10px;color:var(--faint);white-space:nowrap}
+.toggle{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none;font-size:11.5px}
+.toggle .box{
+  width:26px;height:14px;border-radius:8px;background:#332d40;position:relative;transition:background .13s;
+}
+.toggle .box::after{
+  content:"";position:absolute;left:2px;top:2px;width:10px;height:10px;border-radius:50%;
+  background:#8d859c;transition:all .13s;
+}
+.toggle.on .box{background:var(--accent-dim)}
+.toggle.on .box::after{left:14px;background:var(--accent-bright)}
+.adv-head{
+  display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;
+  font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint);
+}
+.adv-head:hover{color:var(--muted)}
+.disclaim{font-size:10.5px;color:var(--faint);line-height:1.6;margin:14px 13px 24px;padding-top:11px;border-top:1px solid var(--line-soft)}
+
+/* ── asset window ───────────────────────────────────────────────── */
+.window{
+  position:fixed;width:792px;height:560px;left:150px;top:92px;z-index:40;display:none;
+  background:var(--panel);border:1px solid #3a3348;border-radius:9px;
+  box-shadow:0 26px 70px rgba(0,0,0,.66),0 0 0 1px rgba(0,0,0,.35);
+  flex-direction:column;overflow:hidden;
+}
+.window.open{display:flex}
+.titlebar{
+  display:flex;align-items:center;gap:9px;padding:0 11px;height:34px;cursor:grab;
+  background:#221e2c;border-bottom:1px solid var(--line);user-select:none;flex:0 0 auto;
+}
+.titlebar.drag{cursor:grabbing}
+.titlebar .t{font-size:12px}
+.titlebar .sub{font-size:10.5px;color:var(--faint)}
+.titlebar .sp{flex:1}
+.xbtn{
+  width:20px;height:20px;border-radius:4px;display:grid;place-items:center;
+  color:var(--muted);cursor:pointer;font-size:13px;
+}
+.xbtn:hover{background:#342c44;color:var(--ink)}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--line);background:#1d1a25;flex:0 0 auto}
+.tab{
+  padding:7px 15px;font-size:11.5px;color:var(--muted);cursor:pointer;
+  border-bottom:2px solid transparent;user-select:none;
+}
+.tab:hover{color:var(--ink)}
+.tab.on{color:var(--accent-bright);border-bottom-color:var(--accent)}
+.wbody{flex:1;min-height:0;overflow:auto}
+.split{display:grid;grid-template-columns:306px 1fr;height:100%;min-height:0}
+.seq{border-right:1px solid var(--line);overflow:auto;min-height:0}
+.seq-head{
+  display:flex;align-items:center;gap:7px;padding:8px 11px;border-bottom:1px solid var(--line-soft);
+  position:sticky;top:0;background:var(--panel);z-index:1;
+}
+.seq-head .t{flex:1;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.btn{
+  font-size:11px;padding:3px 9px;border-radius:4px;border:1px solid var(--line);
+  background:#231f2e;color:var(--muted);cursor:pointer;user-select:none;
+}
+.btn:hover{border-color:var(--accent-dim);color:var(--accent-bright);background:#2a2337}
+.btn.ghost{background:transparent}
+.lay{
+  display:flex;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;
+  border-left:2px solid transparent;border-bottom:1px solid #221f2b;user-select:none;
+}
+.lay:hover{background:#221f2b}
+.lay.sel{background:#2a2338;border-left-color:var(--accent)}
+.lay .grip{color:#4e4660;font-size:11px;cursor:grab;letter-spacing:-1px}
+.lay .body{flex:1;min-width:0}
+.lay .ln1{display:flex;align-items:baseline;gap:6px}
+.lay .kn{font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lay .dp{font-size:10px;color:var(--faint);font-variant-numeric:tabular-nums;margin-left:auto}
+.bars{display:flex;gap:3px;margin-top:4px;align-items:center}
+.bar{height:3px;border-radius:2px;background:#302a3d;position:relative;overflow:hidden}
+.bar i{position:absolute;top:0;bottom:0;background:var(--accent-dim);border-radius:2px}
+.bar.depth{width:48px}
+.bar.span{flex:1}
+.lay.off{opacity:.42}
+.eye{width:16px;text-align:center;font-size:10px;color:var(--faint)}
+.params{overflow:auto;min-height:0;padding:3px 0 20px}
+.psec{padding:11px 15px 4px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--faint)}
+.prow{display:grid;grid-template-columns:116px 1fr 64px;gap:9px;align-items:center;padding:4px 15px}
+.prow > .pl{font-size:11.5px;color:var(--ink)}
+.prow > .pv{font-size:11px;color:var(--accent-bright);text-align:right;font-variant-numeric:tabular-nums}
+.empty{padding:28px 18px;color:var(--faint);font-size:11.5px;line-height:1.65;text-align:center}
+
+.notes{padding:16px 22px 30px;max-width:720px}
+.notes h3{font-size:13px;margin:18px 0 7px;color:var(--accent-bright);font-weight:600}
+.notes h3:first-child{margin-top:2px}
+.notes p{font-size:11.5px;color:var(--muted);line-height:1.68;margin-bottom:8px}
+.notes table{border-collapse:collapse;width:100%;margin:8px 0 12px;font-size:11px}
+.notes th,.notes td{border:1px solid var(--line);padding:5px 8px;text-align:left;vertical-align:top}
+.notes th{color:var(--faint);font-weight:500;letter-spacing:.05em;text-transform:uppercase;font-size:9.5px;background:#1e1b26}
+.notes td.k{color:var(--accent-bright);white-space:nowrap}
+.notes code{font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--accent);background:#1e1a27;padding:1px 4px;border-radius:3px}
+.scrim{position:fixed;inset:0;background:rgba(8,6,12,.52);z-index:39;display:none}
+.scrim.open{display:block}
+</style>
+</head>
+<body>
+
+<header class="chrome">
+  <span class="mark">Frontier</span>
+  <span class="sep"></span>
+  <nav><span>File</span><span>Edit</span><span>Window</span><span>Build</span><span>Help</span></nav>
+  <div class="right">
+    <span class="btn ghost" id="open-forge">Open Tyre Forge ⧉</span>
+  </div>
+</header>
+
+<main>
+  <!-- ── outliner ─────────────────────────────────────────────── -->
+  <aside id="outliner">
+    <div class="panel-head">
+      <div class="breadcrumb">Outliner</div>
+      <div class="panel-title">Project Zero · Drive</div>
+    </div>
+    <div class="filter" id="filters"></div>
+    <div class="rows" id="rows"></div>
+  </aside>
+
+  <!-- ── viewport ─────────────────────────────────────────────── -->
+  <section id="viewport">
+    <div class="vp-bar">
+      <span class="label">Viewport</span>
+      <span class="spacer"></span>
+      <span class="label" id="vp-size">—</span>
+    </div>
+    <div class="canvases">
+      <div class="canvas-wrap">
+        <canvas id="plan"></canvas>
+        <div class="canvas-tag">Developed tread · circumferential ↓ · lateral →</div>
+        <div class="readout" id="plan-read"></div>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="section"></canvas>
+        <div class="canvas-tag">Cross-section</div>
+        <div class="readout" id="sec-read"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── inspector ────────────────────────────────────────────── -->
+  <aside id="inspector">
+    <div class="panel-head">
+      <div class="breadcrumb">Inspector / Scene / Tyre</div>
+      <div class="panel-title" id="insp-title">Tyre</div>
+    </div>
+    <div id="insp-body"></div>
+    <div class="disclaim" id="insp-disclaim"></div>
+  </aside>
+</main>
+
+<div class="scrim" id="scrim"></div>
+
+<!-- ── asset window ───────────────────────────────────────────── -->
+<div class="window" id="forge">
+  <div class="titlebar" id="forge-title">
+    <span style="color:var(--accent)">◈</span>
+    <span class="t">Tyre Forge</span>
+    <span class="sub" id="forge-sub">—</span>
+    <span class="sp"></span>
+    <span class="sub">separate asset window</span>
+    <span class="xbtn" id="forge-close">✕</span>
+  </div>
+  <div class="tabs" id="forge-tabs"></div>
+  <div class="wbody" id="forge-body"></div>
+</div>
+
+<script>
+"use strict";
+const DEG = Math.PI / 180, CUT = 80 * DEG;
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const fmt = (v, d = 2) => Number(v).toFixed(d).replace(/\.?0+$/, m => m.includes('.') ? '' : m);
+
+/* ═══ model ═══════════════════════════════════════════════════════
+   Mirrors the C++ exactly:
+     TreadSpecification        Frontier/Engine/ContentInterchange/Tyre/TreadSpecification.h
+     TreadLayerSpecification   .../TreadPatternSpecification.h
+   The XPBD block is the Phase 3 proposal: InflationPressure becomes the
+   authored value and the compliances become an advanced override.
+   ═══════════════════════════════════════════════════════════════ */
+
+const Carcass = {
+  Width: 285, Aspect: 70, Rim: 17, TreadDepth: 15, Wear: 0, WearBias: 0,
+  TreadFraction: 0.92, Crown: 3, Shoulder: 14, Bulge: 1, RimWidthFraction: 0.78
+};
+
+const Xpbd = {
+  InflationPressure: 240, RimStopClearance: 6, RimBottomingDampingRatio: 0.25,
+  Iterations: 8, Rings: 16, Segments: 72,
+  HoopCompliance: 1.0e-7, SpokeCompliance: 4.0e-7
+};
+
+const KINDS = ['Circumferential', 'Lateral', 'Chevron', 'Sipe', 'Dimple', 'Hexagon', 'Noise'];
+const GLYPH = { Circumferential: '≡', Lateral: '⫽', Chevron: '⋀', Sipe: '⋮', Dimple: '⬤', Hexagon: '⬡', Noise: '∿' };
+
+function newLayer(kind) {
+  return {
+    Kind: kind, Enabled: true, DepthFraction: 1, Width: 8,
+    Position: 0, Zig: 0, ZigCount: 8,
+    Angle: 0, Count: 48, Phase: 0, Mirror: false, From: -1, To: 1, Curve: 0,
+    Rows: 1, Stagger: false, Radius: 3, Ring: false,
+    Size: 8, Rotate: 0
+  };
+}
+
+/* The off-road preset the C++ gate runs against — "Grizzly Magnum" 285/70 R17. */
+function grizzly() {
+  const L = [];
+  const add = (k, o) => { const l = newLayer(k); Object.assign(l, o); L.push(l); };
+  add('Circumferential', { Position: -0.52, Width: 17, Zig: 7, ZigCount: 26, DepthFraction: 1 });
+  add('Circumferential', { Position: 0.52, Width: 17, Zig: 7, ZigCount: 26, DepthFraction: 1 });
+  add('Circumferential', { Position: 0, Width: 12, Zig: 4, ZigCount: 26, DepthFraction: 0.9 });
+  add('Chevron', { Count: 26, Angle: 26, Width: 13, From: -0.95, To: 0.95, Mirror: true, Curve: 0.25, DepthFraction: 1 });
+  add('Lateral', { Count: 26, Angle: -14, Width: 7, From: -0.5, To: 0.5, Phase: 0.5, DepthFraction: 0.55 });
+  add('Sipe', { Count: 52, Angle: 8, Width: 1.6, From: -0.82, To: 0.82, DepthFraction: 0.4 });
+  add('Dimple', { Count: 26, Rows: 2, Radius: 3.4, Stagger: true, From: -0.3, To: 0.3, DepthFraction: 0.35 });
+  return { Name: 'Grizzly Magnum', Layers: L };
+}
+const Pattern = grizzly();
+
+/* ═══ derived values — DeriveTreadValues, verbatim ═══════════════ */
+function derive(c) {
+  const RimRadius = c.Rim * 25.4 / 2;
+  const SectionHeight = c.Width * c.Aspect / 100;
+  const OuterRadius = RimRadius + SectionHeight;
+  const HalfWidth = c.Width / 2;
+  const TreadHalf = HalfWidth * c.TreadFraction;
+  const ShoulderRadius = Math.min(c.Shoulder, SectionHeight * 0.6);
+  const ShoulderExtent = ShoulderRadius * Math.sin(CUT);
+  return {
+    RimRadius, SectionHeight, OuterRadius, HalfWidth, TreadHalf, ShoulderRadius,
+    ShoulderExtent, AcrossHalf: TreadHalf + ShoulderExtent,
+    Circumference: 2 * Math.PI * OuterRadius, BeadHalf: HalfWidth * c.RimWidthFraction
+  };
+}
+
+/* ═══ profile — EvaluateTyreProfile, verbatim ════════════════════ */
+function profile(y, c, d) {
+  const a = Math.abs(y);
+  if (a <= d.TreadHalf) {
+    const t = y / d.TreadHalf;
+    return { lateral: y, radius: d.OuterRadius - c.Crown * t * t, weight: 1 };
+  }
+  const s = Math.sign(y) || 1;
+  const phi = Math.min(CUT, Math.asin(Math.min(1, (a - d.TreadHalf) / d.ShoulderRadius)));
+  return {
+    lateral: s * (d.TreadHalf + d.ShoulderRadius * Math.sin(phi)),
+    radius: d.OuterRadius - c.Crown - d.ShoulderRadius + d.ShoulderRadius * Math.cos(phi),
+    weight: Math.max(0, (Math.cos(phi) - Math.cos(CUT)) / (1 - Math.cos(CUT)))
+  };
+}
+
+/* ═══ layer geometry in the developed domain ═════════════════════
+   x = lateral [mm], y = circumferential [mm]. Strokes only — this is a
+   layout prototype, not the boolean solver. It exists to make the
+   inspector's sliders mean something while they are being judged.
+   ═══════════════════════════════════════════════════════════════ */
+function layerGeometry(L, c, d) {
+  const TH = d.TreadHalf, C = d.Circumference, out = { strokes: [], discs: [], width: L.Width };
+  const tri = t => { const u = (t % 1 + 1) % 1; return u < .5 ? 4 * u - 1 : 3 - 4 * u; };
+
+  if (L.Kind === 'Circumferential') {
+    const seat = L.Position * TH, pts = [];
+    const n = L.Zig > 0 ? Math.max(48, Math.round(L.ZigCount * 8)) : 2;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      pts.push([seat + L.Zig * tri(t * L.ZigCount), t * C]);
+    }
+    out.strokes.push(pts);
+    return out;
+  }
+
+  if (L.Kind === 'Dimple') {
+    const rows = Math.max(1, Math.round(L.Rows)), n = Math.max(1, Math.round(L.Count));
+    for (let r = 0; r < rows; r++) {
+      const f = rows === 1 ? 0.5 : r / (rows - 1);
+      const x = (L.From + (L.To - L.From) * f) * TH;
+      for (let i = 0; i < n; i++) {
+        const off = (L.Stagger && r % 2) ? 0.5 : 0;
+        out.discs.push([x, ((i + off + L.Phase) / n) * C, L.Radius, !!L.Ring]);
+      }
+    }
+    return out;
+  }
+
+  if (L.Kind === 'Hexagon') {
+    const s = Math.max(1, L.Size), rot = L.Rotate * DEG;
+    const x0 = L.From * TH, x1 = L.To * TH;
+    const dx = s * 1.5, dy = s * Math.sqrt(3);
+    const cols = Math.ceil((x1 - x0) / dx) + 2, rowsN = Math.ceil(C / dy) + 2;
+    for (let i = -1; i < cols; i++) {
+      for (let j = -1; j < rowsN; j++) {
+        const cx = x0 + i * dx, cy = j * dy + (i % 2 ? dy / 2 : 0);
+        const ring = [];
+        for (let k = 0; k <= 6; k++) {
+          const a = rot + k * 60 * DEG;
+          const px = cx + s * Math.cos(a), py = cy + s * Math.sin(a);
+          ring.push([clamp(px, x0, x1), py]);
+        }
+        out.strokes.push(ring);
+      }
+    }
+    return out;
+  }
+
+  /* Lateral family: Lateral, Chevron, Sipe */
+  const n = Math.max(1, Math.round(L.Count));
+  const steps = (L.Curve !== 0 || L.Zig !== 0) ? 8 : 1;
+  const lean = Math.tan(clamp(L.Angle, -75, 75) * DEG);
+  const halves = L.Kind === 'Chevron' && L.Mirror ? [1, -1] : [0];
+
+  for (let i = 0; i < n; i++) {
+    const base = ((i + L.Phase) / n) * C;
+    for (const h of halves) {
+      let a = L.From * TH, b = L.To * TH;
+      if (h === 1) { a = 0; b = L.To * TH; }
+      if (h === -1) { a = L.From * TH; b = 0; }
+      const pts = [];
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps, x = a + (b - a) * t;
+        const sgn = h === -1 ? -1 : 1;
+        const bow = L.Curve * (b - a) * 0.5 * (1 - (2 * t - 1) * (2 * t - 1));
+        pts.push([x, base + sgn * ((x - a) * lean + bow)]);
+      }
+      out.strokes.push(pts);
+    }
+  }
+  return out;
+}
+
+/* ═══ plan-view render ═══════════════════════════════════════════ */
+const planCv = document.getElementById('plan'), secCv = document.getElementById('section');
+
+function drawPlan() {
+  const d = derive(Carcass), c = Carcass;
+  const wrap = planCv.parentElement;
+  const W = Math.max(260, wrap.clientWidth - 24), H = Math.max(200, wrap.clientHeight - 24);
+  const dpr = window.devicePixelRatio || 1;
+  planCv.width = W * dpr; planCv.height = H * dpr;
+  planCv.style.width = W + 'px'; planCv.style.height = H + 'px';
+  const g = planCv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+
+  const across = 2 * d.AcrossHalf;
+  const sx = (W - 36) / across;
+  const shown = Math.min(d.Circumference, (H - 30) / sx);
+  const s = sx;
+  const ox = W / 2, oy = 16;
+  const X = x => ox + x * s, Y = y => oy + y * s;
+
+  /* carcass band: patterned crown, then the shoulder roll-off */
+  g.fillStyle = '#211d29';
+  g.fillRect(X(-d.AcrossHalf), oy, across * s, shown * s);
+  g.fillStyle = '#272230';
+  g.fillRect(X(-d.TreadHalf), oy, 2 * d.TreadHalf * s, shown * s);
+
+  /* shoulder weight fade */
+  for (const sgn of [-1, 1]) {
+    const grd = g.createLinearGradient(X(sgn * d.TreadHalf), 0, X(sgn * d.AcrossHalf), 0);
+    grd.addColorStop(0, 'rgba(16,14,20,0)'); grd.addColorStop(1, 'rgba(16,14,20,.72)');
+    g.fillStyle = grd;
+    g.fillRect(Math.min(X(sgn * d.TreadHalf), X(sgn * d.AcrossHalf)), oy, d.ShoulderExtent * s, shown * s);
+  }
+
+  /* layers, deepest last so the reading matches the boolean order */
+  const ordered = Pattern.Layers
+    .map((L, i) => ({ L, i }))
+    .filter(o => o.L.Enabled && o.L.Kind !== 'Noise')
+    .sort((a, b) => a.L.DepthFraction - b.L.DepthFraction);
+
+  g.save();
+  g.beginPath(); g.rect(X(-d.AcrossHalf), oy, across * s, shown * s); g.clip();
+
+  for (const { L, i } of ordered) {
+    const geo = layerGeometry(L, c, d);
+    const depth = L.DepthFraction;
+    const shade = Math.round(26 + (1 - depth) * 46);
+    const sel = i === selectedLayer;
+    g.strokeStyle = sel ? 'rgba(226,208,244,.95)' : `rgb(${shade},${shade - 2},${shade + 6})`;
+    g.fillStyle = g.strokeStyle;
+    g.lineWidth = Math.max(0.7, geo.width * s);
+    g.lineJoin = 'round'; g.lineCap = 'round';
+
+    for (const pts of geo.strokes) {
+      for (const rep of [-1, 0, 1]) {
+        g.beginPath();
+        pts.forEach(([px, py], k) => {
+          const yy = Y(py + rep * d.Circumference);
+          k ? g.lineTo(X(px), yy) : g.moveTo(X(px), yy);
+        });
+        g.stroke();
+      }
+    }
+    for (const [cx, cy, r, ring] of geo.discs) {
+      for (const rep of [-1, 0, 1]) {
+        g.beginPath(); g.arc(X(cx), Y(cy + rep * d.Circumference), r * s, 0, 7);
+        if (ring) { g.lineWidth = Math.max(0.7, geo.width * s); g.stroke(); } else g.fill();
+      }
+    }
+  }
+  g.restore();
+
+  /* tread-edge guides */
+  g.strokeStyle = 'rgba(183,157,208,.3)'; g.lineWidth = 1; g.setLineDash([3, 4]);
+  for (const x of [-d.TreadHalf, d.TreadHalf]) {
+    g.beginPath(); g.moveTo(X(x), oy); g.lineTo(X(x), oy + shown * s); g.stroke();
+  }
+  g.setLineDash([]);
+  g.strokeStyle = 'rgba(120,110,138,.5)';
+  g.strokeRect(X(-d.AcrossHalf), oy, across * s, shown * s);
+
+  document.getElementById('plan-read').innerHTML =
+    `${fmt(shown, 0)} mm of ${fmt(d.Circumference, 0)} mm shown<br>` +
+    `tread band ${fmt(2 * d.TreadHalf, 1)} mm · moulded ${fmt(across, 1)} mm`;
+}
+
+/* ═══ cross-section render ═══════════════════════════════════════ */
+function drawSection() {
+  const d = derive(Carcass), c = Carcass;
+  const wrap = secCv.parentElement;
+  const W = Math.max(200, wrap.clientWidth - 20), H = Math.max(180, wrap.clientHeight - 20);
+  const dpr = window.devicePixelRatio || 1;
+  secCv.width = W * dpr; secCv.height = H * dpr;
+  secCv.style.width = W + 'px'; secCv.style.height = H + 'px';
+  const g = secCv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, W, H);
+
+  const span = 2 * d.AcrossHalf * 1.12;
+  const depthSpan = c.Crown + d.ShoulderRadius + c.TreadDepth * 1.6 + 6;
+  const s = Math.min((W - 30) / span, (H - 46) / depthSpan);
+  const ox = W / 2, oy = 26;
+  const X = y => ox + y * s, Y = r => oy + (d.OuterRadius - r) * s;
+
+  /* rubber body below the moulded surface */
+  g.beginPath();
+  for (let i = 0; i <= 240; i++) {
+    const y = -d.AcrossHalf + (2 * d.AcrossHalf) * i / 240, p = profile(y, c, d);
+    i ? g.lineTo(X(p.lateral), Y(p.radius)) : g.moveTo(X(p.lateral), Y(p.radius));
+  }
+  g.lineTo(X(d.AcrossHalf), H - 12); g.lineTo(X(-d.AcrossHalf), H - 12); g.closePath();
+  g.fillStyle = '#231f2c'; g.fill();
+
+  /* groove floors, drawn at each distinct depth the pattern uses */
+  const depths = [...new Set(Pattern.Layers.filter(L => L.Enabled && L.Kind !== 'Noise')
+    .map(L => +(L.DepthFraction * c.TreadDepth).toFixed(2)))].sort((a, b) => a - b);
+  g.lineWidth = 1;
+  for (const dep of depths) {
+    g.beginPath();
+    for (let i = 0; i <= 160; i++) {
+      const y = -d.TreadHalf + (2 * d.TreadHalf) * i / 160, p = profile(y, c, d);
+      const r = p.radius - dep * p.weight;
+      i ? g.lineTo(X(p.lateral), Y(r)) : g.moveTo(X(p.lateral), Y(r));
+    }
+    const a = 0.2 + 0.6 * (dep / Math.max(1, c.TreadDepth));
+    g.strokeStyle = `rgba(183,157,208,${a})`; g.setLineDash([4, 3]); g.stroke(); g.setLineDash([]);
+  }
+
+  /* wear line */
+  if (c.Wear > 0) {
+    g.beginPath();
+    for (let i = 0; i <= 160; i++) {
+      const y = -d.TreadHalf + (2 * d.TreadHalf) * i / 160, p = profile(y, c, d);
+      const bias = 1 + c.WearBias * (y / d.TreadHalf);
+      const r = p.radius - c.Wear * c.TreadDepth * clamp(bias, 0, 2);
+      i ? g.lineTo(X(p.lateral), Y(r)) : g.moveTo(X(p.lateral), Y(r));
+    }
+    g.strokeStyle = 'rgba(217,160,91,.9)'; g.lineWidth = 1.6; g.stroke();
+  }
+
+  /* moulded surface */
+  g.beginPath();
+  for (let i = 0; i <= 240; i++) {
+    const y = -d.AcrossHalf + (2 * d.AcrossHalf) * i / 240, p = profile(y, c, d);
+    i ? g.lineTo(X(p.lateral), Y(p.radius)) : g.moveTo(X(p.lateral), Y(p.radius));
+  }
+  g.strokeStyle = '#cfc3dd'; g.lineWidth = 1.8; g.stroke();
+
+  /* centreline + tread edges */
+  g.strokeStyle = 'rgba(120,110,138,.4)'; g.lineWidth = 1; g.setLineDash([2, 4]);
+  g.beginPath(); g.moveTo(ox, 10); g.lineTo(ox, H - 12); g.stroke();
+  g.setLineDash([]);
+
+  document.getElementById('sec-read').innerHTML =
+    `R<sub>outer</sub> ${fmt(d.OuterRadius, 1)} mm · crown drop ${fmt(c.Crown, 1)} mm<br>` +
+    `shoulder arc R ${fmt(d.ShoulderRadius, 1)} mm cut at 80°`;
+}
+
+/* ═══ control factory — the schema drives the widget ═════════════
+   ui is declared per field, never inferred at the call site. This is the
+   question the prototype exists to answer, so it is data, not styling.
+     slider  continuous, bounded, wants scrubbing against the viewport
+     number  discrete, standards-defined, or topology-changing
+     toggle  boolean
+     choice  enumeration
+   ═══════════════════════════════════════════════════════════════ */
+function control(obj, f, onChange) {
+  const wrap = document.createElement('div'); wrap.className = 'field';
+  const head = document.createElement('div'); head.className = 'flabel';
+  const n = document.createElement('span'); n.className = 'n'; n.textContent = f.label;
+  const k = document.createElement('span'); k.className = 'kind'; k.textContent = f.ui;
+  const val = document.createElement('span'); val.className = 'val';
+  const un = document.createElement('span'); un.className = 'un'; un.textContent = f.unit || '';
+  head.append(n, k, val, un); wrap.append(head);
+
+  const show = () => {
+    val.textContent = f.ui === 'toggle' ? (obj[f.key] ? 'on' : 'off')
+      : f.fmtv ? f.fmtv(obj[f.key]) : fmt(obj[f.key], f.dp ?? 2);
+  };
+
+  if (f.ui === 'slider') {
+    const i = document.createElement('input');
+    i.type = 'range'; i.min = f.min; i.max = f.max; i.step = f.step ?? 0.01; i.value = obj[f.key];
+    i.oninput = () => { obj[f.key] = +i.value; show(); onChange(); };
+    wrap.append(i);
+  } else if (f.ui === 'number') {
+    const row = document.createElement('div'); row.className = 'numwrap';
+    const i = document.createElement('input');
+    i.type = 'number'; i.value = obj[f.key];
+    if (f.min !== undefined) i.min = f.min; if (f.max !== undefined) i.max = f.max;
+    i.step = f.step ?? 1;
+    /* committed on change, not on every keystroke — these rebuild topology */
+    i.onchange = () => { obj[f.key] = clamp(+i.value, f.min ?? -1e9, f.max ?? 1e9); i.value = obj[f.key]; show(); onChange(); };
+    row.append(i); wrap.append(row);
+    head.removeChild(val); head.removeChild(un);
+    const u2 = document.createElement('span'); u2.className = 'un'; u2.textContent = f.unit || '';
+    row.append(u2);
+  } else if (f.ui === 'toggle') {
+    const t = document.createElement('div'); t.className = 'toggle' + (obj[f.key] ? ' on' : '');
+    const b = document.createElement('div'); b.className = 'box';
+    t.append(b);
+    t.onclick = () => { obj[f.key] = !obj[f.key]; t.classList.toggle('on', obj[f.key]); show(); onChange(); };
+    wrap.append(t);
+  } else if (f.ui === 'choice') {
+    const sl = document.createElement('select');
+    for (const o of f.options) { const e = document.createElement('option'); e.value = e.textContent = o; sl.append(e); }
+    sl.value = obj[f.key];
+    sl.onchange = () => { obj[f.key] = sl.value; show(); onChange(); };
+    wrap.append(sl);
+  }
+  show();
+  if (f.note) { const p = document.createElement('div'); p.className = 'prose tight'; p.textContent = f.note; wrap.append(p); }
+  return wrap;
+}
+
+/* ═══ inspector — the always-present quick values ════════════════ */
+const INSPECTOR = {
+  Tyre: [
+    { card: 'Inflation', hero: () => [fmt(Xpbd.InflationPressure, 0), 'kPa'],
+      prose: 'The authored value. Hoop and spoke compliance are derived from it, so the slider means something physical. Raw compliances move to the advanced override below.',
+      fields: [
+        { key: 'InflationPressure', label: 'Inflation pressure', unit: 'kPa', ui: 'slider', min: 80, max: 420, step: 5, dp: 0, obj: Xpbd,
+          note: 'Scrubbing this is the whole point of the quick strip — contact patch and vertical rate respond live.' }
+      ] },
+    { card: 'Tread', hero: () => [fmt(Carcass.TreadDepth, 1), 'mm'],
+      fields: [
+        { key: 'TreadDepth', label: 'Tread depth', unit: 'mm', ui: 'slider', min: 2, max: 22, step: 0.1, dp: 1, obj: Carcass },
+        { key: 'Wear', label: 'Wear', unit: '0–1', ui: 'slider', min: 0, max: 1, step: 0.01, obj: Carcass,
+          note: 'Fraction cut away to the wear bar. Pattern depths are fractions of tread depth, so a worn tyre is the same pattern, not a re-authored one.' },
+        { key: 'WearBias', label: 'Wear bias', unit: 'in ↔ out', ui: 'slider', min: -1, max: 1, step: 0.01, obj: Carcass }
+      ] },
+    { card: 'Rim bottoming', hero: () => [fmt(Xpbd.RimStopClearance, 1), 'mm'],
+      prose: 'Part 4 settled the damping ratio at 0.25. At 1.00 the stop pumped energy back into the carcass on the ramp landing.',
+      fields: [
+        { key: 'RimStopClearance', label: 'Stop clearance', unit: 'mm', ui: 'slider', min: 0, max: 20, step: 0.5, dp: 1, obj: Xpbd },
+        { key: 'RimBottomingDampingRatio', label: 'Damping ratio', unit: '-', ui: 'slider', min: 0, max: 1.5, step: 0.05, obj: Xpbd }
+      ] },
+    { card: 'Solver', advanced: false,
+      fields: [
+        { key: 'Iterations', label: 'Iterations', unit: 'per step', ui: 'number', min: 1, max: 64, step: 1, dp: 0, obj: Xpbd,
+          note: 'Discrete and costed. A slider invites scrubbing through forty rebuilds nobody wanted.' },
+        { key: 'Rings', label: 'Rings', unit: 'count', ui: 'number', min: 4, max: 48, step: 1, dp: 0, obj: Xpbd },
+        { key: 'Segments', label: 'Segments', unit: 'count', ui: 'number', min: 12, max: 192, step: 1, dp: 0, obj: Xpbd,
+          note: 'Changes topology — the lattice, the skin binding and the shared mesh all rebuild. Committed on Enter or blur, never per keystroke.' }
+      ] },
+    { card: 'Compliance override', advanced: true,
+      prose: 'Normally derived from inflation pressure. Exposed because the parity harness and the ramp study both need to pin them.',
+      fields: [
+        { key: 'HoopCompliance', label: 'Hoop', unit: 'm/N', ui: 'number', step: 1e-8, obj: Xpbd, fmtv: v => (+v).toExponential(1) },
+        { key: 'SpokeCompliance', label: 'Spoke', unit: 'm/N', ui: 'number', step: 1e-8, obj: Xpbd, fmtv: v => (+v).toExponential(1) }
+      ] }
+  ],
+  Carcass: [
+    { card: 'Marked size', hero: () => [`${Carcass.Width}/${Carcass.Aspect} R${Carcass.Rim}`, ''],
+      prose: 'A marked size is a standards value, not a continuum. Numeric entry, because 285 is a real tyre and 284.6 is not.',
+      fields: [
+        { key: 'Width', label: 'Section width', unit: 'mm', ui: 'number', min: 125, max: 395, step: 5, dp: 0, obj: Carcass },
+        { key: 'Aspect', label: 'Aspect', unit: '%', ui: 'number', min: 25, max: 90, step: 5, dp: 0, obj: Carcass },
+        { key: 'Rim', label: 'Rim', unit: 'in', ui: 'number', min: 10, max: 26, step: 1, dp: 0, obj: Carcass }
+      ] },
+    { card: 'Moulded shape',
+      fields: [
+        { key: 'TreadFraction', label: 'Tread fraction', unit: '-', ui: 'slider', min: 0.6, max: 1, step: 0.01, obj: Carcass },
+        { key: 'Crown', label: 'Crown drop', unit: 'mm', ui: 'slider', min: 0, max: 10, step: 0.1, dp: 1, obj: Carcass },
+        { key: 'Shoulder', label: 'Shoulder radius', unit: 'mm', ui: 'slider', min: 2, max: 40, step: 0.5, dp: 1, obj: Carcass,
+          note: 'Capped against 60% of section height, then cut at 80° so the surface never turns parallel to the axis.' },
+        { key: 'Bulge', label: 'Sidewall bulge', unit: '-', ui: 'slider', min: 0.4, max: 1.8, step: 0.01, obj: Carcass },
+        { key: 'RimWidthFraction', label: 'Bead seat fraction', unit: '-', ui: 'slider', min: 0.5, max: 0.95, step: 0.01, obj: Carcass }
+      ] }
+  ]
+};
+
+function renderInspector() {
+  const body = document.getElementById('insp-body');
+  const which = (selection === 'Carcass') ? 'Carcass' : 'Tyre';
+  document.getElementById('insp-title').textContent =
+    selection === 'Tread pattern' ? 'Tyre · tread pattern' : (selection || 'Tyre');
+  body.innerHTML = '';
+
+  if (selection === 'Tread pattern' || selection === 'Layer') {
+    const c = document.createElement('div'); c.className = 'card';
+    c.innerHTML = `<h4>Tread pattern</h4>
+      <div class="hero"><span class="v">${Pattern.Layers.length}</span><span class="u">layers</span></div>
+      <div class="prose">The layer sequence is not a quick value. It is ordered, reorderable and
+      arbitrarily long, so it belongs in the asset window where it has room to be read.</div>`;
+    const b = document.createElement('span'); b.className = 'btn'; b.style.marginTop = '11px';
+    b.style.display = 'inline-block'; b.textContent = 'Edit in Tyre Forge ⧉';
+    b.onclick = openForge; c.append(b);
+    body.append(c);
+  }
+
+  for (const grp of INSPECTOR[which]) {
+    const c = document.createElement('div'); c.className = 'card';
+    const h = document.createElement('h4'); h.textContent = grp.card;
+    if (grp.advanced) {
+      h.className = 'adv-head';
+      let open = false;
+      const hold = document.createElement('div'); hold.style.display = 'none';
+      h.textContent = '▸ ' + grp.card;
+      h.onclick = () => { open = !open; hold.style.display = open ? '' : 'none'; h.textContent = (open ? '▾ ' : '▸ ') + grp.card; };
+      c.append(h);
+      if (grp.prose) { const p = document.createElement('div'); p.className = 'prose'; p.textContent = grp.prose; hold.append(p); }
+      for (const f of grp.fields) hold.append(control(f.obj, f, refresh));
+      c.append(hold); body.append(c); continue;
+    }
+    c.append(h);
+    if (grp.hero) {
+      const [v, u] = grp.hero();
+      const hero = document.createElement('div'); hero.className = 'hero';
+      hero.innerHTML = `<span class="v">${v}</span><span class="u">${u}</span>`;
+      c.append(hero);
+    }
+    if (grp.prose) { const p = document.createElement('div'); p.className = 'prose'; p.textContent = grp.prose; c.append(p); }
+    for (const f of grp.fields) c.append(control(f.obj, f, refresh));
+    body.append(c);
+  }
+
+  document.getElementById('insp-disclaim').textContent =
+    'Layout prototype. No solver, no boolean stage and no renderer runs here — the plan view strokes groove ' +
+    'centrelines to make the sliders legible while the layout is being judged. Geometry of record is ' +
+    'TreadRegionSolver and TreadMeshSolver.';
+}
+
+/* ═══ outliner ═══════════════════════════════════════════════════ */
+const FILTERS = ['Carcass', 'Pattern', 'Decals', 'Lattice'];
+const active = new Set(FILTERS);
+let selection = 'Tyre', selectedLayer = -1;
+
+function renderFilters() {
+  const f = document.getElementById('filters'); f.innerHTML = '';
+  for (const name of FILTERS) {
+    const c = document.createElement('span');
+    c.className = 'chip' + (active.has(name) ? ' on' : '');
+    c.textContent = name;
+    c.onclick = () => { active.has(name) ? active.delete(name) : active.add(name); renderFilters(); renderRows(); };
+    f.append(c);
+  }
+}
+
+function renderRows() {
+  const host = document.getElementById('rows'); host.innerHTML = '';
+  const row = (depth, glyph, name, tag, sel, onClick, dim) => {
+    const r = document.createElement('div');
+    r.className = 'row' + (sel ? ' sel' : '') + (dim ? ' dim' : '');
+    r.innerHTML = `<span class="tw"></span>`;
+    r.firstChild.style.marginLeft = (depth * 13) + 'px';
+    const ic = document.createElement('span'); ic.className = 'ic'; ic.textContent = glyph;
+    const nm = document.createElement('span'); nm.className = 'nm'; nm.textContent = name;
+    const tg = document.createElement('span'); tg.className = 'tag'; tg.textContent = tag || '';
+    r.append(ic, nm, tg);
+    r.onclick = onClick;
+    host.append(r);
+    return r;
+  };
+
+  row(0, '🜨', 'Drive scene', '', false, () => {}, true);
+  const tyre = row(1, '◎', 'Tyre · ' + Pattern.Name, 'generated', selection === 'Tyre',
+    () => { selection = 'Tyre'; selectedLayer = -1; refresh(); });
+  tyre.ondblclick = openForge;
+
+  if (active.has('Carcass'))
+    row(2, '⬭', 'Carcass', `${Carcass.Width}/${Carcass.Aspect}R${Carcass.Rim}`,
+      selection === 'Carcass', () => { selection = 'Carcass'; selectedLayer = -1; refresh(); });
+
+  if (active.has('Pattern')) {
+    const p = row(2, '▦', 'Tread pattern', `${Pattern.Layers.length} layers`,
+      selection === 'Tread pattern', () => { selection = 'Tread pattern'; selectedLayer = -1; refresh(); });
+    p.ondblclick = openForge;
+    Pattern.Layers.forEach((L, i) => {
+      row(3, GLYPH[L.Kind], L.Kind, fmt(L.DepthFraction * Carcass.TreadDepth, 1) + ' mm',
+        selectedLayer === i, () => { selection = 'Layer'; selectedLayer = i; openForge(); refresh(); }, !L.Enabled);
+    });
+  }
+
+  if (active.has('Decals'))
+    row(2, '✎', 'Sidewall decals', 'phase 4', selection === 'Decals',
+      () => { selection = 'Decals'; selectedLayer = -1; refresh(); }, true);
+
+  if (active.has('Lattice'))
+    row(2, '⊞', 'XPBD lattice', `${Xpbd.Rings}×${Xpbd.Segments}`, selection === 'Lattice',
+      () => { selection = 'Lattice'; selectedLayer = -1; refresh(); });
+}
+
+/* ═══ asset window ═══════════════════════════════════════════════ */
+let forgeTab = 'Pattern';
+const TABS = ['Pattern', 'Carcass', 'Notes'];
+
+function openForge() {
+  document.getElementById('forge').classList.add('open');
+  document.getElementById('scrim').classList.add('open');
+  renderForge();
+}
+function closeForge() {
+  document.getElementById('forge').classList.remove('open');
+  document.getElementById('scrim').classList.remove('open');
+}
+
+const LAYER_FIELDS = {
+  common: [
+    { key: 'Kind', label: 'Kind', ui: 'choice', options: KINDS },
+    { key: 'DepthFraction', label: 'Depth', unit: '× depth', ui: 'slider', min: 0.05, max: 1, step: 0.01 },
+    { key: 'Width', label: 'Groove width', unit: 'mm', ui: 'slider', min: 0.5, max: 40, step: 0.1, dp: 1 }
+  ],
+  Circumferential: [
+    { key: 'Position', label: 'Lateral seat', unit: '× half', ui: 'slider', min: -1, max: 1, step: 0.01 },
+    { key: 'Zig', label: 'Zig amplitude', unit: 'mm', ui: 'slider', min: 0, max: 30, step: 0.5, dp: 1 },
+    { key: 'ZigCount', label: 'Zig periods', unit: 'count', ui: 'number', min: 1, max: 200, step: 1, dp: 0 }
+  ],
+  lateralFamily: [
+    { key: 'Count', label: 'Repeats', unit: 'around', ui: 'number', min: 1, max: 400, step: 1, dp: 0,
+      note: 'Discrete, and it multiplies the boolean cost. Numeric entry.' },
+    { key: 'Angle', label: 'Lean', unit: '°', ui: 'slider', min: -70, max: 70, step: 0.5, dp: 1 },
+    { key: 'Phase', label: 'Phase', unit: '× pitch', ui: 'slider', min: 0, max: 1, step: 0.01 },
+    { key: 'From', label: 'Lateral from', unit: '× half', ui: 'slider', min: -1, max: 1, step: 0.01 },
+    { key: 'To', label: 'Lateral to', unit: '× half', ui: 'slider', min: -1, max: 1, step: 0.01 },
+    { key: 'Curve', label: 'Bow', unit: '-', ui: 'slider', min: -1, max: 1, step: 0.01 }
+  ],
+  Chevron: [{ key: 'Mirror', label: 'Mirror about centreline', ui: 'toggle' }],
+  Dimple: [
+    { key: 'Count', label: 'Per row', unit: 'around', ui: 'number', min: 1, max: 400, step: 1, dp: 0 },
+    { key: 'Rows', label: 'Rows', unit: 'count', ui: 'number', min: 1, max: 12, step: 1, dp: 0 },
+    { key: 'Radius', label: 'Radius', unit: 'mm', ui: 'slider', min: 0.5, max: 20, step: 0.1, dp: 1 },
+    { key: 'From', label: 'Lateral from', unit: '× half', ui: 'slider', min: -1, max: 1, step: 0.01 },
+    { key: 'To', label: 'Lateral to', unit: '× half', ui: 'slider', min: -1, max: 1, step: 0.01 },
+    { key: 'Stagger', label: 'Stagger rows', ui: 'toggle' },
+    { key: 'Ring', label: 'Cut an annulus', ui: 'toggle' }
+  ],
+  Hexagon: [
+    { key: 'Size', label: 'Cell circumradius', unit: 'mm', ui: 'slider', min: 2, max: 40, step: 0.5, dp: 1 },
+    { key: 'Rotate', label: 'Lattice rotation', unit: '°', ui: 'slider', min: 0, max: 60, step: 0.5, dp: 1 },
+    { key: 'From', label: 'Lateral from', unit: '× half', ui: 'slider', min: -1, max: 1, step: 0.01 },
+    { key: 'To', label: 'Lateral to', unit: '× half', ui: 'slider', min: -1, max: 1, step: 0.01 }
+  ],
+  Noise: []
+};
+
+function fieldsFor(kind) {
+  const f = [...LAYER_FIELDS.common];
+  if (kind === 'Circumferential') f.push(...LAYER_FIELDS.Circumferential);
+  else if (kind === 'Dimple') f.push(...LAYER_FIELDS.Dimple);
+  else if (kind === 'Hexagon') f.push(...LAYER_FIELDS.Hexagon);
+  else if (kind === 'Noise') { /* depth perturbation only */ }
+  else {
+    f.push(...LAYER_FIELDS.lateralFamily);
+    if (kind === 'Chevron') f.push(...LAYER_FIELDS.Chevron);
+  }
+  return f;
+}
+
+function renderForge() {
+  document.getElementById('forge-sub').textContent =
+    `${Pattern.Name} · ${Carcass.Width}/${Carcass.Aspect} R${Carcass.Rim}`;
+
+  const tabs = document.getElementById('forge-tabs'); tabs.innerHTML = '';
+  for (const t of TABS) {
+    const e = document.createElement('div');
+    e.className = 'tab' + (forgeTab === t ? ' on' : '');
+    e.textContent = t;
+    e.onclick = () => { forgeTab = t; renderForge(); };
+    tabs.append(e);
+  }
+
+  const body = document.getElementById('forge-body'); body.innerHTML = '';
+
+  if (forgeTab === 'Notes') { body.append(notesPanel()); return; }
+
+  if (forgeTab === 'Carcass') {
+    const host = document.createElement('div'); host.style.maxWidth = '470px';
+    for (const grp of INSPECTOR.Carcass) {
+      const c = document.createElement('div'); c.className = 'card';
+      const h = document.createElement('h4'); h.textContent = grp.card; c.append(h);
+      if (grp.prose) { const p = document.createElement('div'); p.className = 'prose'; p.textContent = grp.prose; c.append(p); }
+      for (const f of grp.fields) c.append(control(f.obj, f, refresh));
+      host.append(c);
+    }
+    body.append(host); return;
+  }
+
+  /* Pattern tab: sequence on the left, parameters on the right */
+  const split = document.createElement('div'); split.className = 'split';
+  const seq = document.createElement('div'); seq.className = 'seq';
+  const params = document.createElement('div'); params.className = 'params';
+
+  const head = document.createElement('div'); head.className = 'seq-head';
+  head.innerHTML = `<span class="t">Layer sequence · cut order</span>`;
+  const addBtn = document.createElement('span'); addBtn.className = 'btn'; addBtn.textContent = '+ Layer';
+  addBtn.onclick = () => {
+    Pattern.Layers.push(newLayer('Lateral'));
+    selectedLayer = Pattern.Layers.length - 1; refresh();
+  };
+  head.append(addBtn); seq.append(head);
+
+  Pattern.Layers.forEach((L, i) => {
+    const e = document.createElement('div');
+    e.className = 'lay' + (i === selectedLayer ? ' sel' : '') + (L.Enabled ? '' : ' off');
+    e.draggable = true;
+    e.ondragstart = ev => ev.dataTransfer.setData('text/plain', i);
+    e.ondragover = ev => ev.preventDefault();
+    e.ondrop = ev => {
+      ev.preventDefault();
+      const from = +ev.dataTransfer.getData('text/plain');
+      if (from === i) return;
+      const [m] = Pattern.Layers.splice(from, 1);
+      Pattern.Layers.splice(i, 0, m);
+      selectedLayer = i; refresh();
+    };
+    e.onclick = () => { selectedLayer = i; selection = 'Layer'; refresh(); };
+
+    const span = Math.abs(L.To - L.From) / 2, left = (Math.min(L.From, L.To) + 1) / 2;
+    e.innerHTML =
+      `<span class="grip">⠿</span>
+       <span class="eye">${L.Enabled ? '◉' : '○'}</span>
+       <span style="width:15px;text-align:center;opacity:.8">${GLYPH[L.Kind]}</span>
+       <span class="body">
+         <span class="ln1"><span class="kn">${L.Kind}</span>
+           <span class="dp">${fmt(L.DepthFraction * Carcass.TreadDepth, 1)} mm</span></span>
+         <span class="bars">
+           <span class="bar depth"><i style="left:0;width:${(L.DepthFraction * 100).toFixed(0)}%"></i></span>
+           <span class="bar span"><i style="left:${(left * 100).toFixed(0)}%;width:${(span * 100).toFixed(0)}%"></i></span>
+         </span>
+       </span>`;
+    e.querySelector('.eye').onclick = ev => { ev.stopPropagation(); L.Enabled = !L.Enabled; refresh(); };
+    seq.append(e);
+  });
+
+  if (selectedLayer < 0 || selectedLayer >= Pattern.Layers.length) {
+    params.innerHTML = `<div class="empty">Select a layer.<br><br>
+      Order is read, not decorative — the region solver groups layers by depth and unions each group,
+      so two layers at the same depth merge into one floor rather than cutting each other.</div>`;
+  } else {
+    const L = Pattern.Layers[selectedLayer];
+    const sec = document.createElement('div'); sec.className = 'psec';
+    sec.textContent = `Layer ${selectedLayer + 1} · ${L.Kind}`;
+    params.append(sec);
+    const host = document.createElement('div'); host.style.padding = '0 15px';
+    if (L.Kind === 'Noise') {
+      const w = document.createElement('div'); w.className = 'prose';
+      w.textContent = 'Noise carries no polygons. It perturbs the depth field only, so the region solver skips it ' +
+        'and the mesh solver applies it after the floors are placed. A noise layer in the boolean stack would ' +
+        'produce an unbounded number of microscopic pieces.';
+      host.append(w);
+    }
+    for (const f of fieldsFor(L.Kind)) host.append(control(L, f, refresh));
+    params.append(host);
+  }
+
+  split.append(seq, params); body.append(split);
+}
+
+function notesPanel() {
+  const d = document.createElement('div'); d.className = 'notes';
+  d.innerHTML = `
+<h3>What this prototype is for</h3>
+<p>The plan says the editor surface is prototyped in HTML before any C++ is written, and names three
+questions to answer: what belongs in the always-present inspector versus the separate asset window, how the
+layer sequence reads, and which values want sliders versus numeric entry. Those are answered below, and the
+answers are encoded in the prototype rather than described — every control's widget comes from a
+<code>ui</code> field on the schema, so the answer is data that ports.</p>
+
+<h3>1 · Inspector versus asset window</h3>
+<p>The split is <em>cardinality</em>, not importance. A quick value is one scalar with a fixed home; it can
+sit in a strip that is always visible beside the viewport. The layer sequence is ordered, reorderable and
+arbitrarily long — it cannot be a strip, and squeezing it into one is what makes procedural tools unusable.</p>
+<table>
+<tr><th>Always-present inspector</th><th>Separate asset window</th></tr>
+<tr><td>Inflation pressure, tread depth, wear and bias, rim bottoming clearance and damping, solver
+iterations, ring and segment counts, compliance override</td>
+<td>Marked size, moulded shape, and the whole tread layer sequence with per-layer parameters</td></tr>
+<tr><td>Scrubbed against the viewport, one value at a time</td><td>Composed, reordered, added to and removed from</td></tr>
+</table>
+<p>Marked size sits in the asset window rather than the strip even though it is only three scalars, because
+changing it invalidates every derived radius and the whole mesh — it is not a value you scrub while
+watching, it is a decision you commit.</p>
+
+<h3>2 · How the layer sequence reads</h3>
+<p>A row shows what a reader needs to judge the layer without opening it: kind glyph, kind name, cut depth in
+millimetres, a depth bar as a fraction of tread depth, and a span bar showing the lateral reach from
+<code>From</code> to <code>To</code> against the full tread width. Depth is shown in millimetres and
+authored as a fraction, which is the point of storing it as a fraction — the number you read is physical,
+the number you store survives a change of tread depth.</p>
+<p>Order is cut order and is shown as such. The solver groups by depth and unions each group, so the
+sequence is not a stack of overrides and must not be drawn like one.</p>
+
+<h3>3 · Sliders versus numeric entry</h3>
+<table>
+<tr><th>Widget</th><th>When</th><th>Examples</th></tr>
+<tr><td class="k">slider</td><td>Continuous, bounded, and the right value is found by watching the viewport</td>
+<td>Inflation pressure, wear, crown drop, lean angle, lateral seat, bow, depth fraction</td></tr>
+<tr><td class="k">number</td><td>Discrete, standards-defined, or topology-changing. Committed on Enter or
+blur, never per keystroke</td><td>Section width, aspect, rim, repeat counts, rows, zig periods, solver
+iterations, rings, segments, compliances</td></tr>
+<tr><td class="k">toggle</td><td>Boolean</td><td>Mirror, stagger, ring, layer enable</td></tr>
+<tr><td class="k">choice</td><td>Enumeration</td><td>Layer kind</td></tr>
+</table>
+<p>The load-bearing rule is the second one. Dragging a slider through <code>Count</code> from 48 to 52
+asks for five full boolean rebuilds of a pattern that takes seconds each, and four of them are garbage
+nobody wanted to see. Anything that changes how much geometry exists is numeric entry.</p>
+
+<h3>4 · What this prototype deliberately does not do</h3>
+<p>No boolean solver, no mesh, no renderer. The plan view strokes groove centrelines so the sliders are
+legible while the layout is judged; it is not the pattern and must never be mistaken for it. The geometry of
+record is <code>TreadRegionSolver</code> and <code>TreadMeshSolver</code>, whose gate is still red on
+watertightness.</p>
+
+<h3>5 · What the C++ gets, once this is settled</h3>
+<p>Outliner rows <strong>Tyre → Carcass, Tread pattern (its layer sequence), Sidewall decals, XPBD
+lattice</strong>, with role bits shaped like <code>SolidArcOutlinerFilter</code>. The inspector entry point is
+<code>void RecordTyreInspector(ControlPanel&amp;, EditorInstance&amp;, EditorSheet&amp;)</code>, matching
+<code>RecordCameraInspector</code> so the quick strip lands in the existing panel while the asset window is
+a separate host, which is the split the brief asked for.</p>
+`;
+  return d;
+}
+
+/* ═══ window dragging ════════════════════════════════════════════ */
+(function () {
+  const w = document.getElementById('forge'), t = document.getElementById('forge-title');
+  let dx = 0, dy = 0, on = false;
+  t.addEventListener('mousedown', e => {
+    if (e.target.id === 'forge-close') return;
+    on = true; t.classList.add('drag');
+    dx = e.clientX - w.offsetLeft; dy = e.clientY - w.offsetTop;
+    e.preventDefault();
+  });
+  addEventListener('mousemove', e => {
+    if (!on) return;
+    w.style.left = clamp(e.clientX - dx, -200, innerWidth - 180) + 'px';
+    w.style.top = clamp(e.clientY - dy, 0, innerHeight - 40) + 'px';
+  });
+  addEventListener('mouseup', () => { on = false; t.classList.remove('drag'); });
+})();
+
+document.getElementById('forge-close').onclick = closeForge;
+document.getElementById('open-forge').onclick = openForge;
+document.getElementById('scrim').onclick = closeForge;
+addEventListener('keydown', e => { if (e.key === 'Escape') closeForge(); });
+
+/* ═══ refresh ════════════════════════════════════════════════════ */
+let pending = false;
+function refresh() {
+  if (pending) return;
+  pending = true;
+  requestAnimationFrame(() => {
+    pending = false;
+    const d = derive(Carcass);
+    document.getElementById('vp-size').textContent =
+      `${Carcass.Width}/${Carcass.Aspect} R${Carcass.Rim} · Ø ${fmt(2 * d.OuterRadius, 0)} mm · ${Pattern.Layers.length} layers`;
+    renderFilters(); renderRows(); renderInspector();
+    if (document.getElementById('forge').classList.contains('open')) renderForge();
+    drawPlan(); drawSection();
+  });
+}
+addEventListener('resize', () => { drawPlan(); drawSection(); });
+refresh();
+</script>
+</body>
+</html>
