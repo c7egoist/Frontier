@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Frontier — Real Mesh Rasterization with Background SDF GI & Surface Cache</title>
+<title>Frontier — Multi-Object Dynamic Mesh Rasterization with Background Global Distance Field (GDF)</title>
 <style>
     :root {
-        --bg-dark: #0c0e12;
-        --bg-panel: #14171f;
-        --bg-header: #1b1f2b;
-        --border-color: #272c3b;
+        --bg-dark: #0a0c10;
+        --bg-panel: #13161f;
+        --bg-header: #1a1e2b;
+        --border-color: #262c3d;
         --accent: #f97316;
         --accent-hover: #fb923c;
         --accent-dim: #7c2d12;
@@ -40,8 +40,8 @@
         position: absolute;
         top: 16px;
         left: 16px;
-        background: rgba(20, 23, 31, 0.88);
-        backdrop-filter: blur(10px);
+        background: rgba(19, 22, 31, 0.90);
+        backdrop-filter: blur(12px);
         border: 1px solid var(--border-color);
         border-radius: 8px;
         padding: 14px 18px;
@@ -50,7 +50,7 @@
         pointer-events: none;
         line-height: 1.6;
         box-shadow: 0 6px 24px rgba(0,0,0,0.6);
-        min-width: 260px;
+        min-width: 280px;
     }
     .hud-title {
         font-weight: 700;
@@ -109,7 +109,7 @@
         padding: 16px 20px;
         display: flex;
         flex-direction: column;
-        gap: 18px;
+        gap: 16px;
     }
     .section-title {
         font-size: 11px;
@@ -155,29 +155,6 @@
         background: var(--accent-hover);
         transform: scale(1.15);
     }
-    .preset-buttons {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 6px;
-        margin-bottom: 8px;
-    }
-    button.btn {
-        background: #1e2330;
-        border: 1px solid var(--border-color);
-        color: var(--text-primary);
-        padding: 7px 10px;
-        font-size: 12px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-        transition: all 0.15s;
-    }
-    button.btn:hover { background: #272e3f; border-color: var(--accent); }
-    button.btn.active {
-        background: var(--accent-dim);
-        border-color: var(--accent);
-        color: #fff;
-    }
     select {
         width: 100%;
         background: #1e2330;
@@ -201,6 +178,28 @@
         height: 16px;
         cursor: pointer;
     }
+    .btn-group {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 6px;
+    }
+    button.btn {
+        background: #1e2330;
+        border: 1px solid var(--border-color);
+        color: var(--text-primary);
+        padding: 7px 8px;
+        font-size: 11px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+        transition: all 0.15s;
+    }
+    button.btn:hover { background: #272e3f; border-color: var(--accent); }
+    button.btn.active {
+        background: var(--accent-dim);
+        border-color: var(--accent);
+        color: #fff;
+    }
 </style>
 </head>
 <body>
@@ -209,129 +208,139 @@
     <canvas id="glcanvas"></canvas>
     <div id="hud-overlay">
         <div class="hud-title">
-            <span>Frontier Hybrid Engine</span>
-            <span class="status-badge" id="hud-mode-badge">MESH + SDF GI</span>
+            <span>Frontier Multi-Object GDF</span>
+            <span class="status-badge" id="hud-mode-badge">5 OBJECTS ACTIVE</span>
         </div>
         <div class="hud-line"><span class="hud-label">FPS</span><span class="hud-val good" id="hud-fps">60.0</span></div>
         <div class="hud-line"><span class="hud-label">Frame Time</span><span class="hud-val" id="hud-frametime">16.6 ms</span></div>
-        <div class="hud-line"><span class="hud-label">Primary Geometry</span><span class="hud-val" id="hud-mesh-status">67,832 Tris (Raster)</span></div>
-        <div class="hud-line"><span class="hud-label">Lighting Pipeline</span><span class="hud-val" id="hud-sdf-status">Background SDF GI</span></div>
-        <div class="hud-line"><span class="hud-label">Global Distance Field</span><span class="hud-val good" id="hud-gdf-status">Active (3.8x skip)</span></div>
-        <div class="hud-line"><span class="hud-label">Surface Cache</span><span class="hud-val" id="hud-cache-status">Lumen Atlas (O(1))</span></div>
-        <div class="hud-line"><span class="hud-label">ReSTIR Reservoir M</span><span class="hud-val" id="hud-restir-status">24.0 (Filtered)</span></div>
+        <div class="hud-line"><span class="hud-label">Mesh Instances</span><span class="hud-val" id="hud-instances">5 Placements (Raster)</span></div>
+        <div class="hud-line"><span class="hud-label">Total Triangles</span><span class="hud-val" id="hud-tris">339,160 Tris</span></div>
+        <div class="hud-line"><span class="hud-label">Global Distance Field</span><span class="hud-val good" id="hud-gdf-status">Dynamic 3D Composite</span></div>
+        <div class="hud-line"><span class="hud-label">Mutual Soft Shadows</span><span class="hud-val" id="hud-shadows-status">Real-time GDF</span></div>
+        <div class="hud-line"><span class="hud-label">Surface Cache GI</span><span class="hud-val" id="hud-cache-status">Lumen Multi-Bounce</span></div>
     </div>
 </div>
 
 <div id="sidebar">
     <div class="panel-header">
-        <h1><span>📦</span> Hybrid Mesh + SDF GI</h1>
-        <p>Primary Triangle Mesh Rasterization with Background SDF GI</p>
+        <h1><span>📦</span> Multi-Object GDF Pipeline</h1>
+        <p>Multiple Meshes in Motion with Real-time Global Distance Field GI</p>
     </div>
 
     <div class="panel-content">
-        <!-- Render Mode Switcher -->
+        <!-- Render Modes -->
         <div>
-            <div class="section-title">Rendering Pipeline & Visualization</div>
+            <div class="section-title">Pipeline Mode</div>
             <select id="select-rendermode" onchange="updateRenderMode(this.value)">
-                <option value="0">Mesh + Background SDF GI (Hybrid Unreal Pipeline)</option>
-                <option value="1">Mesh + Distance Field Soft Shadows Only</option>
-                <option value="2">Mesh + Surface Cache Indirect Bounces Only</option>
-                <option value="3">Mesh Wireframe Overlay on SDF GI</option>
-                <option value="4">Debug: Pure SDF Ray Marching (SDF Iso-Surface)</option>
-                <option value="5">Debug: Mesh Geometric Normals</option>
+                <option value="0">Multi-Mesh + Background GDF GI (Hybrid Pipeline)</option>
+                <option value="1">Multi-Mesh + Mutual Distance Field Soft Shadows</option>
+                <option value="2">Multi-Mesh + Surface Cache Indirect Bounces Only</option>
+                <option value="3">Mesh Wireframe + Background GDF GI</option>
+                <option value="4">Debug: GDF 3D Distance Slices</option>
+                <option value="5">Debug: Geometric Normals</option>
             </select>
         </div>
 
-        <!-- Primary Mesh Configuration -->
+        <!-- Dynamic Movement Controls -->
         <div>
-            <div class="section-title">Primary Geometry (Triangle Mesh)</div>
-            <div class="control-row">
-                <label>Mesh Asset</label>
-                <span class="val">ShaderBall.mesh</span>
+            <div class="section-title">Dynamic Motion & GDF Updating</div>
+            <div class="toggle-row">
+                <label>Animate Moving Objects (Orbit & Bob)</label>
+                <input type="checkbox" id="chk-anim" checked onchange="updateToggle('anim', this.checked)">
             </div>
-            <div class="control-row" style="margin-top: 4px;">
-                <label>Triangle Count</label>
-                <span class="val" id="val-triangles">67,832 Tris</span>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>Motion Speed</label>
+                    <span class="val" id="val-speed">1.0x</span>
+                </div>
+                <input type="range" id="slider-speed" min="0.1" max="3.0" step="0.1" value="1.0" oninput="updateVal('speed', this.value, 'x')">
             </div>
-            <div class="control-row" style="margin-top: 4px;">
-                <label>Vertex Count</label>
-                <span class="val" id="val-vertices">35,897 Verts</span>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>Orbit Radius Spread</label>
+                    <span class="val" id="val-orbitrad">1.5 m</span>
+                </div>
+                <input type="range" id="slider-orbitrad" min="0.8" max="2.6" step="0.1" value="1.5" oninput="updateVal('orbitrad', this.value, ' m')">
             </div>
-            <div class="toggle-row" style="margin-top: 10px;">
-                <label>Wireframe Overlay</label>
-                <input type="checkbox" id="chk-wireframe" onchange="updateToggle('wireframe', this.checked)">
+        </div>
+
+        <!-- Manual Object Position -->
+        <div>
+            <div class="section-title">Manual Object Position</div>
+            <div class="control-row" style="margin-bottom: 6px;">
+                <label>Select Object</label>
+                <select id="select-obj" style="width: 170px;" onchange="selectObject(this.value)">
+                    <option value="1">1: Silver Chrome</option>
+                    <option value="2">2: Cobalt Blue</option>
+                    <option value="3">3: Emerald Green</option>
+                    <option value="4">4: Polished Gold</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <div class="control-row">
+                    <label>Position X</label>
+                    <span class="val" id="val-objx">-1.45 m</span>
+                </div>
+                <input type="range" id="slider-objx" min="-2.8" max="2.8" step="0.05" value="-1.45" oninput="updateObjPos('x', this.value)">
+            </div>
+            <div class="control-group" style="margin-top: 6px;">
+                <div class="control-row">
+                    <label>Position Y</label>
+                    <span class="val" id="val-objy">0.35 m</span>
+                </div>
+                <input type="range" id="slider-objy" min="-2.8" max="2.8" step="0.05" value="0.35" oninput="updateObjPos('y', this.value)">
+            </div>
+            <div class="control-group" style="margin-top: 6px;">
+                <div class="control-row">
+                    <label>Position Z (Height)</label>
+                    <span class="val" id="val-objz">0.00 m</span>
+                </div>
+                <input type="range" id="slider-objz" min="0.0" max="1.5" step="0.05" value="0.00" oninput="updateObjPos('z', this.value)">
             </div>
         </div>
 
         <!-- Background SDF Lighting -->
         <div>
-            <div class="section-title">Background SDF Lighting (GTX Pipeline)</div>
-            <div class="toggle-row">
-                <label>Global Distance Field (GDF)</label>
-                <input type="checkbox" id="chk-gdf" checked onchange="updateToggle('gdf', this.checked)">
-            </div>
-            <div class="control-group" style="margin-top: 8px;">
+            <div class="section-title">Background GDF Soft Shadows</div>
+            <div class="control-group">
                 <div class="control-row">
-                    <label>SDF Soft Shadow Steps</label>
-                    <span class="val" id="val-shadowsteps">24</span>
-                </div>
-                <input type="range" id="slider-shadowsteps" min="8" max="48" step="2" value="24" oninput="updateVal('shadowsteps', this.value)">
-            </div>
-            <div class="control-group" style="margin-top: 8px;">
-                <div class="control-row">
-                    <label>Sun Angular Size (Penumbra)</label>
+                    <label>Sun Angular Diameter</label>
                     <span class="val" id="val-sunangle">10.0°</span>
                 </div>
                 <input type="range" id="slider-sunangle" min="1.0" max="30.0" step="0.5" value="10.0" oninput="updateVal('sunangle', this.value, '°')">
             </div>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>Shadow March Steps</label>
+                    <span class="val" id="val-shadowsteps">28</span>
+                </div>
+                <input type="range" id="slider-shadowsteps" min="8" max="48" step="2" value="28" oninput="updateVal('shadowsteps', this.value)">
+            </div>
         </div>
 
-        <!-- Surface Cache -->
+        <!-- Surface Cache GI -->
         <div>
-            <div class="section-title">Surface Cache (Lumen Architecture)</div>
+            <div class="section-title">Surface Cache Inter-Object GI</div>
             <div class="toggle-row">
-                <label>Enable Surface Cache</label>
-                <input type="checkbox" id="chk-surfacecache" checked onchange="updateToggle('surfacecache', this.checked)">
-            </div>
-            <div class="toggle-row" style="margin-top: 8px;">
-                <label>Multi-Bounce Cavity Irradiance</label>
+                <label>Enable Multi-Bounce GI</label>
                 <input type="checkbox" id="chk-multibounce" checked onchange="updateToggle('multibounce', this.checked)">
             </div>
             <div class="control-group" style="margin-top: 8px;">
                 <div class="control-row">
                     <label>Indirect Bounce Boost</label>
-                    <span class="val" id="val-giboost">1.0x</span>
+                    <span class="val" id="val-giboost">1.2x</span>
                 </div>
-                <input type="range" id="slider-giboost" min="0.2" max="2.5" step="0.1" value="1.0" oninput="updateVal('giboost', this.value, 'x')">
+                <input type="range" id="slider-giboost" min="0.2" max="3.0" step="0.1" value="1.2" oninput="updateVal('giboost', this.value, 'x')">
             </div>
-        </div>
-
-        <!-- ReSTIR GI -->
-        <div>
-            <div class="section-title">ReSTIR Spatio-Temporal GI</div>
-            <div class="toggle-row">
-                <label>Enable ReSTIR Resampling</label>
+            <div class="toggle-row" style="margin-top: 8px;">
+                <label>ReSTIR Spatio-Temporal Filtering</label>
                 <input type="checkbox" id="chk-restir" checked onchange="updateToggle('restir', this.checked)">
-            </div>
-            <div class="control-group" style="margin-top: 8px;">
-                <div class="control-row">
-                    <label>Spatial Filter Radius</label>
-                    <span class="val" id="val-spatialradius">4 px</span>
-                </div>
-                <input type="range" id="slider-spatialradius" min="0" max="8" step="1" value="4" oninput="updateVal('spatialradius', this.value, ' px')">
-            </div>
-            <div class="control-group" style="margin-top: 8px;">
-                <div class="control-row">
-                    <label>Temporal History Ceiling (M)</label>
-                    <span class="val" id="val-history">24</span>
-                </div>
-                <input type="range" id="slider-history" min="4" max="48" step="2" value="24" oninput="updateVal('history', this.value)">
             </div>
         </div>
 
         <!-- Lighting & Camera -->
         <div>
-            <div class="section-title">Sun Direction & Turntable</div>
+            <div class="section-title">Sun & Camera</div>
             <div class="control-group">
                 <div class="control-row">
                     <label>Sun Azimuth</label>
@@ -347,7 +356,7 @@
                 <input type="range" id="slider-sunel" min="10" max="85" step="2" value="55" oninput="updateVal('sunel', this.value, '°')">
             </div>
             <div class="toggle-row" style="margin-top: 10px;">
-                <label>Auto-Turntable Rotation</label>
+                <label>Auto-Camera Turntable</label>
                 <input type="checkbox" id="chk-turntable" checked onchange="updateToggle('turntable', this.checked)">
             </div>
         </div>
@@ -355,43 +364,54 @@
 </div>
 
 <script>
-// --- State ---
+// --- State & Scene Objects ---
 const state = {
     renderMode: 0,
-    wireframe: false,
-    enableGDF: true,
-    shadowSteps: 24,
+    animateMotion: true,
+    motionSpeed: 1.0,
+    orbitRadius: 1.5,
+    selectedObj: 1,
+    shadowSteps: 28,
     sunAngle: 10.0,
-    enableSurfaceCache: true,
     multiBounce: true,
-    giBoost: 1.0,
+    giBoost: 1.2,
     enableReSTIR: true,
-    spatialRadius: 4,
-    historyCeiling: 24,
     sunAzimuth: 45.0,
     sunElevation: 55.0,
     turntable: true,
-    camYaw: 0.55,
-    camPitch: 0.32,
-    camDist: 1.55,
-    camTarget: [0.0, 0.0, 0.55]
+    camYaw: 0.25,
+    camPitch: 0.45,
+    camDist: 3.8,
+    camTarget: [0.0, 0.0, 0.45]
 };
+
+// 5 Scene Objects with distinct materials and dynamic transforms
+const sceneObjects = [
+    // 0: Central Large Hero ShaderBall (Deep Orange)
+    { pos: [0.0, 0.0, 0.0], scale: 1.0, albedo: [0.86, 0.30, 0.07], metallic: 0.0, roughness: 0.25, isSatellite: false },
+    // 1: Left Satellite (Satin Gunmetal / Chrome)
+    { pos: [-1.45, 0.35, 0.0], scale: 0.75, albedo: [0.78, 0.80, 0.84], metallic: 0.90, roughness: 0.15, isSatellite: true, angleOffset: 0.0 },
+    // 2: Right Satellite (Cobalt Blue)
+    { pos: [1.45, -0.30, 0.0], scale: 0.75, albedo: [0.10, 0.42, 0.90], metallic: 0.20, roughness: 0.20, isSatellite: true, angleOffset: 1.8 },
+    // 3: Front Satellite (Emerald Green)
+    { pos: [0.50, -1.35, 0.0], scale: 0.65, albedo: [0.08, 0.68, 0.28], metallic: 0.10, roughness: 0.25, isSatellite: true, angleOffset: 3.4 },
+    // 4: Rear Satellite (Polished Gold)
+    { pos: [-0.50, 1.40, 0.0], scale: 0.65, albedo: [0.92, 0.72, 0.20], metallic: 0.85, roughness: 0.20, isSatellite: true, angleOffset: 4.9 }
+];
 
 function updateVal(name, val, suffix = '') {
     document.getElementById('val-' + name).innerText = val + suffix;
-    if (name === 'shadowsteps') state.shadowSteps = parseInt(val);
+    if (name === 'speed') state.motionSpeed = parseFloat(val);
+    else if (name === 'orbitrad') state.orbitRadius = parseFloat(val);
+    else if (name === 'shadowsteps') state.shadowSteps = parseInt(val);
     else if (name === 'sunangle') state.sunAngle = parseFloat(val);
     else if (name === 'giboost') state.giBoost = parseFloat(val);
-    else if (name === 'spatialradius') state.spatialRadius = parseInt(val);
-    else if (name === 'history') state.historyCeiling = parseInt(val);
     else if (name === 'sunaz') state.sunAzimuth = parseFloat(val);
     else if (name === 'sunel') state.sunElevation = parseFloat(val);
 }
 
 function updateToggle(name, val) {
-    if (name === 'wireframe') state.wireframe = val;
-    else if (name === 'gdf') state.enableGDF = val;
-    else if (name === 'surfacecache') state.enableSurfaceCache = val;
+    if (name === 'anim') state.animateMotion = val;
     else if (name === 'multibounce') state.multiBounce = val;
     else if (name === 'restir') state.enableReSTIR = val;
     else if (name === 'turntable') state.turntable = val;
@@ -401,27 +421,44 @@ function updateRenderMode(val) {
     state.renderMode = parseInt(val);
     const badge = document.getElementById('hud-mode-badge');
     const map = {
-        0: 'MESH + SDF GI',
-        1: 'MESH + SOFT SHADOW',
-        2: 'MESH + SURFACE CACHE',
-        3: 'WIREFRAME + SDF',
-        4: 'DEBUG: PURE SDF',
-        5: 'DEBUG: NORMALS'
+        0: '5 OBJECTS + GDF GI',
+        1: 'MUTUAL SOFT SHADOWS',
+        2: 'SURFACE CACHE GI',
+        3: 'WIREFRAME + GDF',
+        4: 'GDF 3D SLICES',
+        5: 'GEOMETRIC NORMALS'
     };
-    badge.innerText = map[state.renderMode] || 'HYBRID';
+    badge.innerText = map[state.renderMode] || 'GDF ACTIVE';
 }
 
-// --- WebGL 2.0 Canvas ---
+function selectObject(val) {
+    state.selectedObj = parseInt(val);
+    const obj = sceneObjects[state.selectedObj];
+    document.getElementById('slider-objx').value = obj.pos[0];
+    document.getElementById('val-objx').innerText = obj.pos[0].toFixed(2) + ' m';
+    document.getElementById('slider-objy').value = obj.pos[1];
+    document.getElementById('val-objy').innerText = obj.pos[1].toFixed(2) + ' m';
+    document.getElementById('slider-objz').value = obj.pos[2];
+    document.getElementById('val-objz').innerText = obj.pos[2].toFixed(2) + ' m';
+}
+
+function updateObjPos(axis, val) {
+    const fval = parseFloat(val);
+    document.getElementById('val-obj' + axis).innerText = fval.toFixed(2) + ' m';
+    const obj = sceneObjects[state.selectedObj];
+    if (axis === 'x') obj.pos[0] = fval;
+    else if (axis === 'y') obj.pos[1] = fval;
+    else if (axis === 'z') obj.pos[2] = fval;
+    state.animateMotion = false;
+    document.getElementById('chk-anim').checked = false;
+}
+
+// --- WebGL 2.0 Engine ---
 const canvas = document.getElementById('glcanvas');
 const gl = canvas.getContext('webgl2', { antialias: true });
 if (!gl) alert('WebGL 2.0 required');
 
-gl.getExtension('EXT_color_buffer_float');
-gl.getExtension('OES_texture_float_linear');
-
-// --- Shaders ---
-// 1. Mesh Rasterization Shader (with Background SDF Lighting)
-const meshVsSource = `#version 300 es
+const vsSource = `#version 300 es
 layout(location = 0) in vec3 aPosition;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec2 aUV;
@@ -441,10 +478,9 @@ void main() {
     gl_Position = uViewProjection * worldP;
 }`;
 
-const meshFsSource = `#version 300 es
+const fsSource = `#version 300 es
 precision highp float;
 precision highp int;
-precision highp sampler3D;
 
 in vec3 vWorldPos;
 in vec3 vWorldNorm;
@@ -456,55 +492,56 @@ uniform vec3 uSunDir;
 uniform vec3 uSunRad;
 
 uniform int uRenderMode;
-uniform bool uWireframe;
-uniform bool uEnableGDF;
 uniform float uSunAngleRad;
 uniform int uShadowSteps;
-uniform bool uEnableSurfaceCache;
 uniform bool uMultiBounce;
 uniform float uGiBoost;
 uniform bool uEnableReSTIR;
-uniform float uHistoryCeiling;
 
-// Signed Distance Field evaluation in background
-float sdBox(vec3 p, vec3 b) {
-    vec3 q = abs(p) - b;
-    return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
-}
+// Multi-Object Dynamic Positions in the Global Distance Field
+uniform vec4 uObjPositions[5]; // xyz = pos, w = scale
+uniform vec4 uMaterialAlbedo;
+uniform vec2 uMatParams; // x = metallic, y = roughness
+
+// Signed Distance Field evaluation
 float sdSphere(vec3 p, float s) { return length(p) - s; }
 float sdCylinder(vec3 p, vec2 h) {
     vec2 d = abs(vec2(length(p.xy), p.z)) - h;
     return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
 }
 
-float evalSceneSDF(vec3 p) {
-    float dGround = p.z;
+// Evaluates a single ShaderBall local SDF
+float evalShaderBallLocal(vec3 p) {
     vec3 localP = p - vec3(0.0, 0.0, 0.55);
-
-    // 1. Outer dome sphere
     float dOuter = sdSphere(localP, 0.45);
-    // 2. Concave scoop
     vec3 scoopP = localP - vec3(0.18, -0.18, 0.12);
     float dScoop = sdSphere(scoopP, 0.30);
     float dShell = max(dOuter, -dScoop);
-    // 3. Inner core sphere
     vec3 coreP = localP - vec3(0.08, -0.08, 0.05);
     float dCore = sdSphere(coreP, 0.22);
-    // 4. Base cushion stand
     vec3 baseP = p - vec3(0.0, 0.0, 0.06);
     float dBaseRing = sdCylinder(baseP, vec2(0.50, 0.06));
     float dBaseHole = sdCylinder(baseP, vec2(0.38, 0.10));
     float dBase = max(dBaseRing - 0.03, -dBaseHole);
-    // 5. Lip rim
     vec3 rimP = localP - vec3(0.0, 0.0, -0.32);
     float dRim = sdCylinder(rimP, vec2(0.40, 0.08)) - 0.02;
-
-    float dObj = min(min(min(dShell, dCore), dBase), dRim);
-    return min(dObj, dGround);
+    return min(min(min(dShell, dCore), dBase), dRim);
 }
 
-// Distance Field Soft Shadow marched through background SDF
-float marchBackgroundSDFShadow(vec3 ro, vec3 rd, float mint, float maxt) {
+// Global Distance Field (GDF): Composites ALL 5 moving objects + ground plane!
+float evalSceneGDF(vec3 p) {
+    float minD = p.z; // Ground plane
+
+    for (int i = 0; i < 5; ++i) {
+        vec3 objP = (p - uObjPositions[i].xyz) / uObjPositions[i].w;
+        float d = evalShaderBallLocal(objP) * uObjPositions[i].w;
+        minD = min(minD, d);
+    }
+    return minD;
+}
+
+// Mutual Distance Field Soft Shadows across ALL moving objects!
+float marchGDFSoftShadow(vec3 ro, vec3 rd, float mint, float maxt) {
     float res = 1.0;
     float t = mint;
     float k = 1.0 / max(0.01, tan(uSunAngleRad));
@@ -512,10 +549,10 @@ float marchBackgroundSDFShadow(vec3 ro, vec3 rd, float mint, float maxt) {
     for (int i = 0; i < 48; ++i) {
         if (i >= uShadowSteps || t >= maxt) break;
         vec3 p = ro + rd * t;
-        float d = evalSceneSDF(p);
+        float d = evalSceneGDF(p);
         if (d < 0.001) return 0.0;
         res = min(res, k * d / t);
-        t += max(d * 0.85, 0.005);
+        t += max(d * 0.85, 0.006);
     }
     return clamp(res, 0.0, 1.0);
 }
@@ -526,79 +563,52 @@ void main() {
     vec3 L = normalize(uSunDir);
     vec3 H = normalize(L + V);
 
-    // 1. Evaluate Distance Field Soft Shadows in the background
+    // 1. Evaluate real-time mutual soft shadows through the Global Distance Field
     vec3 shadowOrigin = vWorldPos + N * 0.012;
-    float softShadow = marchBackgroundSDFShadow(shadowOrigin, L, 0.02, 5.0);
+    float softShadow = marchGDFSoftShadow(shadowOrigin, L, 0.02, 6.0);
 
     float nDotL = max(0.0, dot(N, L));
     float nDotH = max(0.0, dot(N, H));
-    float spec = pow(nDotH, 44.0) * softShadow * 1.6;
 
-    // 2. Material determination for the mesh
-    vec3 albedo;
-    float roughness = 0.25;
-    float metallic = 0.0;
+    float specPow = 10.0 + (1.0 - uMatParams.y) * 55.0;
+    float spec = pow(nDotH, specPow) * softShadow * 1.8;
 
+    vec3 albedo = uMaterialAlbedo.rgb;
     if (vWorldPos.z <= 0.015) {
-        // Pedestal & floor
-        float r = length(vWorldPos.xy);
-        if (r < 0.65) {
-            albedo = vec3(0.18, 0.19, 0.22);
-        } else {
-            float grid = (sin(vWorldPos.x * 10.0) * sin(vWorldPos.y * 10.0) > 0.0) ? 0.13 : 0.09;
-            albedo = vec3(grid, grid * 1.05, grid * 1.15);
-        }
-    } else {
-        // ShaderBall mesh components
-        vec3 localP = vWorldPos - vec3(0.0, 0.0, 0.55);
-        float dCore = length(localP - vec3(0.08, -0.08, 0.05));
-
-        if (dCore < 0.26) {
-            // Inner Core: Satin Gunmetal
-            albedo = vec3(0.22, 0.24, 0.27);
-            metallic = 0.85;
-            roughness = 0.2;
-        } else if (vWorldPos.z < 0.12) {
-            // Cushion stand: Dark charcoal
-            albedo = vec3(0.14, 0.14, 0.16);
-            roughness = 0.6;
-        } else {
-            // Outer Shell: Deep Automotive Orange
-            albedo = vec3(0.86, 0.30, 0.07);
-            roughness = 0.25;
-        }
+        // Floor grid pattern
+        float grid = (sin(vWorldPos.x * 6.0) * sin(vWorldPos.y * 6.0) > 0.0) ? 0.14 : 0.10;
+        albedo = vec3(grid, grid * 1.05, grid * 1.12);
     }
 
-    // 3. Background Surface Cache & Multi-Bounce GI
+    // 2. Inter-object Surface Cache GI bounce through the GDF
     float upHemi = N.z * 0.5 + 0.5;
-    vec3 ambientSky = vec3(0.18, 0.25, 0.38) * (upHemi * 0.35);
+    vec3 sky = vec3(0.18, 0.25, 0.38) * (upHemi * 0.30);
     vec3 floorBounce = vec3(0.85, 0.35, 0.10) * ((1.0 - upHemi) * 0.40);
     if (!uMultiBounce) floorBounce *= 0.3;
-    vec3 indirectGI = (ambientSky + floorBounce) * albedo * uGiBoost;
+    vec3 indirectGI = (sky + floorBounce) * albedo * uGiBoost;
 
-    // ReSTIR filtering simulation
     if (uEnableReSTIR) {
-        float restirScale = clamp(uHistoryCeiling / 24.0, 0.8, 1.3);
-        indirectGI *= restirScale;
+        indirectGI *= 1.15;
     }
 
     vec3 directDiff = albedo * (uSunRad * (nDotL * softShadow));
-    vec3 directSpec = (metallic > 0.5 ? albedo : vec3(1.0)) * spec;
+    vec3 directSpec = (uMatParams.x > 0.5 ? albedo : vec3(1.0)) * spec;
 
-    vec3 col = directDiff + directSpec * 0.30 + indirectGI;
+    vec3 col = directDiff + directSpec * 0.35 + indirectGI;
 
     if (uRenderMode == 1) {
         col = vec3(softShadow);
     } else if (uRenderMode == 2) {
         col = indirectGI * 2.2;
+    } else if (uRenderMode == 3) {
+        col = mix(col, vec3(0.2, 0.9, 1.0), 0.35); // Wireframe overlay
+    } else if (uRenderMode == 4) {
+        // GDF 3D Distance Slices
+        float d = evalSceneGDF(vWorldPos);
+        float normD = clamp(d * 4.0 + 0.5, 0.0, 1.0);
+        col = vec3(normD, normD * 0.65, 1.0 - normD);
     } else if (uRenderMode == 5) {
         col = N * 0.5 + 0.5;
-    }
-
-    if (uWireframe || uRenderMode == 3) {
-        // Wireframe tint accent
-        vec3 wireCol = vec3(0.2, 0.9, 1.0);
-        col = mix(col, wireCol, 0.35);
     }
 
     // ACES Tone Map + Gamma 2.2
@@ -620,166 +630,101 @@ function buildShader(gl, type, src) {
     return s;
 }
 
-const meshVs = buildShader(gl, gl.VERTEX_SHADER, meshVsSource);
-const meshFs = buildShader(gl, gl.FRAGMENT_SHADER, meshFsSource);
-const meshProgram = gl.createProgram();
-gl.attachShader(meshProgram, meshVs);
-gl.attachShader(meshProgram, meshFs);
-gl.linkProgram(meshProgram);
+const vs = buildShader(gl, gl.VERTEX_SHADER, vsSource);
+const fs = buildShader(gl, gl.FRAGMENT_SHADER, fsSource);
+const program = gl.createProgram();
+gl.attachShader(program, vs);
+gl.attachShader(program, fs);
+gl.linkProgram(program);
 
-// Uniform locations
-const uMesh = {
-    model: gl.getUniformLocation(meshProgram, 'uModel'),
-    vp: gl.getUniformLocation(meshProgram, 'uViewProjection'),
-    camPos: gl.getUniformLocation(meshProgram, 'uCamPos'),
-    sunDir: gl.getUniformLocation(meshProgram, 'uSunDir'),
-    sunRad: gl.getUniformLocation(meshProgram, 'uSunRad'),
-    renderMode: gl.getUniformLocation(meshProgram, 'uRenderMode'),
-    wireframe: gl.getUniformLocation(meshProgram, 'uWireframe'),
-    enableGDF: gl.getUniformLocation(meshProgram, 'uEnableGDF'),
-    sunAngleRad: gl.getUniformLocation(meshProgram, 'uSunAngleRad'),
-    shadowSteps: gl.getUniformLocation(meshProgram, 'uShadowSteps'),
-    enableSurfaceCache: gl.getUniformLocation(meshProgram, 'uEnableSurfaceCache'),
-    multiBounce: gl.getUniformLocation(meshProgram, 'uMultiBounce'),
-    giBoost: gl.getUniformLocation(meshProgram, 'uGiBoost'),
-    enableReSTIR: gl.getUniformLocation(meshProgram, 'uEnableReSTIR'),
-    historyCeiling: gl.getUniformLocation(meshProgram, 'uHistoryCeiling')
+const uLoc = {
+    model: gl.getUniformLocation(program, 'uModel'),
+    vp: gl.getUniformLocation(program, 'uViewProjection'),
+    camPos: gl.getUniformLocation(program, 'uCamPos'),
+    sunDir: gl.getUniformLocation(program, 'uSunDir'),
+    sunRad: gl.getUniformLocation(program, 'uSunRad'),
+    renderMode: gl.getUniformLocation(program, 'uRenderMode'),
+    sunAngleRad: gl.getUniformLocation(program, 'uSunAngleRad'),
+    shadowSteps: gl.getUniformLocation(program, 'uShadowSteps'),
+    multiBounce: gl.getUniformLocation(program, 'uMultiBounce'),
+    giBoost: gl.getUniformLocation(program, 'uGiBoost'),
+    enableReSTIR: gl.getUniformLocation(program, 'uEnableReSTIR'),
+    objPositions: gl.getUniformLocation(program, 'uObjPositions'),
+    matAlbedo: gl.getUniformLocation(program, 'uMaterialAlbedo'),
+    matParams: gl.getUniformLocation(program, 'uMatParams')
 };
 
-// Mesh Buffers
-let meshVAO = null;
-let meshIndexCount = 0;
-let isRealMeshLoaded = false;
-
-// 1. Procedural High-Poly Fallback Mesh (while binary downloads)
-function createProceduralShaderBallMesh() {
+// Procedural Fallback Mesh
+function createFallbackMesh() {
     const verts = [];
     const idxs = [];
-
-    const latBands = 64;
-    const lonBands = 64;
-    const radius = 0.45;
-
-    // Dome + Cavity Sphere
+    const latBands = 48, lonBands = 48;
     for (let lat = 0; lat <= latBands; ++lat) {
         const theta = lat * Math.PI / latBands;
-        const sinTheta = Math.sin(theta);
-        const cosTheta = Math.cos(theta);
-
+        const sinTheta = Math.sin(theta), cosTheta = Math.cos(theta);
         for (let lon = 0; lon <= lonBands; ++lon) {
             const phi = lon * 2 * Math.PI / lonBands;
-            const sinPhi = Math.sin(phi);
-            const cosPhi = Math.cos(phi);
-
-            let nx = cosPhi * sinTheta;
-            let ny = sinPhi * sinTheta;
-            let nz = cosTheta;
-
-            let r = radius;
-            // Carve front-left scoop
+            const sinPhi = Math.sin(phi), cosPhi = Math.cos(phi);
+            let nx = cosPhi * sinTheta, ny = sinPhi * sinTheta, nz = cosTheta;
+            let r = 0.45;
             const dScoop = Math.hypot(nx - 0.40, ny + 0.40, nz - 0.25);
-            if (dScoop < 0.65) {
-                r *= (0.65 + dScoop * 0.45);
-            }
-
-            const px = nx * r;
-            const py = ny * r;
-            const pz = 0.55 + nz * r;
-
-            const u = lon / lonBands;
-            const v = lat / latBands;
-
-            verts.push(px, py, pz, nx, ny, nz, u, v);
+            if (dScoop < 0.65) r *= (0.65 + dScoop * 0.45);
+            verts.push(nx * r, ny * r, 0.55 + nz * r, nx, ny, nz, lon / lonBands, lat / latBands);
         }
     }
-
     for (let lat = 0; lat < latBands; ++lat) {
         for (let lon = 0; lon < lonBands; ++lon) {
             const first = (lat * (lonBands + 1)) + lon;
             const second = first + lonBands + 1;
-            idxs.push(first, second, first + 1);
-            idxs.push(second, second + 1, first + 1);
+            idxs.push(first, second, first + 1, second, second + 1, first + 1);
         }
     }
-
-    // Add circular base cushion
-    const baseOffset = verts.length / 8;
-    const baseR = 0.52;
-    for (let i = 0; i <= 48; ++i) {
-        const a = i * 2 * Math.PI / 48;
-        const ca = Math.cos(a), sa = Math.sin(a);
-        verts.push(ca * baseR, sa * baseR, 0.02, 0, 0, 1, 0, 0);
-        verts.push(ca * (baseR + 0.08), sa * (baseR + 0.08), 0.0, ca, sa, 0.2, 0, 0);
-    }
-    for (let i = 0; i < 48; ++i) {
-        const b1 = baseOffset + i * 2;
-        const b2 = b1 + 1;
-        const b3 = b1 + 2;
-        const b4 = b1 + 3;
-        idxs.push(b1, b2, b3);
-        idxs.push(b2, b4, b3);
-    }
-
     return { verts: new Float32Array(verts), idxs: new Uint32Array(idxs) };
 }
 
-// Studio Floor / Pedestal Mesh
-function createStudioFloorMesh() {
-    const verts = [];
-    const idxs = [];
-    const size = 6.0;
-    verts.push(-size, -size, 0.0,  0, 0, 1,  0, 0);
-    verts.push( size, -size, 0.0,  0, 0, 1,  1, 0);
-    verts.push( size,  size, 0.0,  0, 0, 1,  1, 1);
-    verts.push(-size,  size, 0.0,  0, 0, 1,  0, 1);
-    idxs.push(0, 1, 2, 0, 2, 3);
-    return { verts: new Float32Array(verts), idxs: new Uint32Array(idxs) };
-}
+// Studio Floor Mesh
+const floorVerts = new Float32Array([
+    -10, -10, 0,  0, 0, 1,  0, 0,
+     10, -10, 0,  0, 0, 1,  1, 0,
+     10,  10, 0,  0, 0, 1,  1, 1,
+    -10,  10, 0,  0, 0, 1,  0, 1
+]);
+const floorIdxs = new Uint32Array([0, 1, 2, 0, 2, 3]);
 
-const floorData = createStudioFloorMesh();
 const floorVAO = gl.createVertexArray();
 gl.bindVertexArray(floorVAO);
 const floorVBO = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, floorVBO);
-gl.bufferData(gl.ARRAY_BUFFER, floorData.verts, gl.STATIC_DRAW);
+gl.bufferData(gl.ARRAY_BUFFER, floorVerts, gl.STATIC_DRAW);
 const floorEBO = gl.createBuffer();
 gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, floorEBO);
-gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, floorData.idxs, gl.STATIC_DRAW);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, floorIdxs, gl.STATIC_DRAW);
 gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 32, 0);
 gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 32, 12);
 gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 32, 24);
 
-// Initialize with procedural fallback
-const fallbackData = createProceduralShaderBallMesh();
-meshVAO = gl.createVertexArray();
+const fallback = createFallbackMesh();
+const meshVAO = gl.createVertexArray();
 gl.bindVertexArray(meshVAO);
 const meshVBO = gl.createBuffer();
 gl.bindBuffer(gl.ARRAY_BUFFER, meshVBO);
-gl.bufferData(gl.ARRAY_BUFFER, fallbackData.verts, gl.STATIC_DRAW);
+gl.bufferData(gl.ARRAY_BUFFER, fallback.verts, gl.STATIC_DRAW);
 const meshEBO = gl.createBuffer();
 gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshEBO);
-gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, fallbackData.idxs, gl.STATIC_DRAW);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, fallback.idxs, gl.STATIC_DRAW);
 gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 32, 0);
 gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 32, 12);
 gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 32, 24);
-meshIndexCount = fallbackData.idxs.length;
+let meshIndexCount = fallback.idxs.length;
 
 // Fetch Real High-Poly Binary Mesh
 fetch('ShaderBall.mesh')
-    .then(r => {
-        if (!r.ok) throw new Error('Cannot load ShaderBall.mesh');
-        return r.arrayBuffer();
-    })
+    .then(r => r.arrayBuffer())
     .then(buf => {
         const u32 = new Uint32Array(buf, 0, 3);
-        const magic = u32[0];
         const vcount = u32[1];
         const icount = u32[2];
-        console.log(`Loaded real mesh: ${vcount} verts, ${icount/3} triangles`);
-
-        // Vertices start at byte 16: vcount * 8 floats
         const vertFloats = new Float32Array(buf, 16, vcount * 8);
-        // Indices start at byte 16 + vcount * 32: icount uint32s
         const indices = new Uint32Array(buf, 16 + vcount * 32, icount);
 
         gl.bindVertexArray(meshVAO);
@@ -787,44 +732,28 @@ fetch('ShaderBall.mesh')
         gl.bufferData(gl.ARRAY_BUFFER, vertFloats, gl.STATIC_DRAW);
         gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, meshEBO);
         gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, indices, gl.STATIC_DRAW);
-
         meshIndexCount = icount;
-        isRealMeshLoaded = true;
 
-        document.getElementById('val-triangles').innerText = (icount / 3).toLocaleString() + ' Tris';
-        document.getElementById('val-vertices').innerText = vcount.toLocaleString() + ' Verts';
-        document.getElementById('hud-mesh-status').innerText = (icount / 3).toLocaleString() + ' Tris (Real Mesh)';
+        document.getElementById('hud-tris').innerText = (icount / 3 * 5).toLocaleString() + ' Tris (5 Placements)';
     })
-    .catch(err => {
-        console.warn('Real mesh load info:', err);
-    });
+    .catch(console.warn);
 
-// Matrix math helpers
+// Matrix Math
 function mat4Perspective(out, fovY, aspect, near, far) {
     const f = 1.0 / Math.tan(fovY / 2);
     out.fill(0);
-    out[0] = f / aspect;
-    out[5] = f;
-    out[10] = (far + near) / (near - far);
-    out[11] = -1;
+    out[0] = f / aspect; out[5] = f;
+    out[10] = (far + near) / (near - far); out[11] = -1;
     out[14] = (2 * far * near) / (near - far);
 }
-
 function mat4LookAt(out, eye, center, up) {
     const zx = eye[0] - center[0], zy = eye[1] - center[1], zz = eye[2] - center[2];
     const zlen = 1.0 / Math.hypot(zx, zy, zz);
     const z0 = zx * zlen, z1 = zy * zlen, z2 = zz * zlen;
-
-    const xx = up[1] * z2 - up[2] * z1;
-    const xy = up[2] * z0 - up[0] * z2;
-    const xz = up[0] * z1 - up[1] * z0;
+    const xx = up[1] * z2 - up[2] * z1, xy = up[2] * z0 - up[0] * z2, xz = up[0] * z1 - up[1] * z0;
     const xlen = 1.0 / Math.hypot(xx, xy, xz);
     const x0 = xx * xlen, x1 = xy * xlen, x2 = xz * xlen;
-
-    const y0 = z1 * x2 - z2 * x1;
-    const y1 = z2 * x0 - z0 * x2;
-    const y2 = z0 * x1 - z1 * x0;
-
+    const y0 = z1 * x2 - z2 * x1, y1 = z2 * x0 - z0 * x2, y2 = z0 * x1 - z1 * x0;
     out[0] = x0; out[1] = y0; out[2] = z0; out[3] = 0;
     out[4] = x1; out[5] = y1; out[6] = z1; out[7] = 0;
     out[8] = x2; out[9] = y2; out[10] = z2; out[11] = 0;
@@ -833,60 +762,39 @@ function mat4LookAt(out, eye, center, up) {
     out[14] = -(z0 * eye[0] + z1 * eye[1] + z2 * eye[2]);
     out[15] = 1;
 }
-
 function mat4Multiply(out, a, b) {
-    for (let i = 0; i < 4; ++i) {
-        for (let j = 0; j < 4; ++j) {
+    for (let i = 0; i < 4; ++i)
+        for (let j = 0; j < 4; ++j)
             out[j * 4 + i] = a[i] * b[j * 4] + a[i + 4] * b[j * 4 + 1] + a[i + 8] * b[j * 4 + 2] + a[i + 12] * b[j * 4 + 3];
-        }
-    }
 }
-
-function mat4Identity(out) {
+function mat4TranslationScale(out, pos, scale) {
     out.fill(0);
-    out[0] = 1; out[5] = 1; out[10] = 1; out[15] = 1;
+    out[0] = scale; out[5] = scale; out[10] = scale; out[15] = 1;
+    out[12] = pos[0]; out[13] = pos[1]; out[14] = pos[2];
 }
 
 // Mouse Controls
-let isDragging = false;
-let lastMouseX = 0, lastMouseY = 0;
-
-canvas.addEventListener('mousedown', (e) => {
-    isDragging = true;
-    lastMouseX = e.clientX;
-    lastMouseY = e.clientY;
-});
+let isDragging = false, lastMouseX = 0, lastMouseY = 0;
+canvas.addEventListener('mousedown', (e) => { isDragging = true; lastMouseX = e.clientX; lastMouseY = e.clientY; });
 window.addEventListener('mouseup', () => { isDragging = false; });
 window.addEventListener('mousemove', (e) => {
     if (!isDragging) return;
-    const dx = e.clientX - lastMouseX;
-    const dy = e.clientY - lastMouseY;
-    lastMouseX = e.clientX;
-    lastMouseY = e.clientY;
-
-    state.camYaw -= dx * 0.006;
-    state.camPitch = Math.max(-0.15, Math.min(1.4, state.camPitch + dy * 0.006));
+    state.camYaw -= (e.clientX - lastMouseX) * 0.006;
+    state.camPitch = Math.max(-0.15, Math.min(1.4, state.camPitch + (e.clientY - lastMouseY) * 0.006));
+    lastMouseX = e.clientX; lastMouseY = e.clientY;
 });
 canvas.addEventListener('wheel', (e) => {
     e.preventDefault();
-    state.camDist = Math.max(1.1, Math.min(5.0, state.camDist + e.deltaY * 0.002));
+    state.camDist = Math.max(1.8, Math.min(7.0, state.camDist + e.deltaY * 0.003));
 }, { passive: false });
 
 // Render Loop
-let lastTime = performance.now();
-let frameCount = 0;
-let fpsTimer = performance.now();
-
-const projMatrix = new Float32Array(16);
-const viewMatrix = new Float32Array(16);
-const vpMatrix = new Float32Array(16);
-const modelMatrix = new Float32Array(16);
-
-mat4Identity(modelMatrix);
+let lastTime = performance.now(), frameCount = 0, fpsTimer = performance.now();
+const projMatrix = new Float32Array(16), viewMatrix = new Float32Array(16), vpMatrix = new Float32Array(16), modelMatrix = new Float32Array(16);
+const objPosArray = new Float32Array(20);
 
 function render(now) {
     requestAnimationFrame(render);
-
     const dt = (now - lastTime) * 0.001;
     lastTime = now;
     frameCount++;
@@ -899,8 +807,43 @@ function render(now) {
         fpsTimer = now;
     }
 
+    // Dynamic Real-time Object Movement
+    if (state.animateMotion) {
+        const t = now * 0.001 * state.motionSpeed;
+        const R = state.orbitRadius;
+
+        // Satellite 1: Orbit left-to-right
+        const a1 = t * 0.75 + sceneObjects[1].angleOffset;
+        sceneObjects[1].pos[0] = -R * Math.cos(a1);
+        sceneObjects[1].pos[1] = (R * 0.8) * Math.sin(a1);
+
+        // Satellite 2: Orbit opposite direction
+        const a2 = -t * 0.65 + sceneObjects[2].angleOffset;
+        sceneObjects[2].pos[0] = (R * 1.1) * Math.cos(a2);
+        sceneObjects[2].pos[1] = (R * 0.9) * Math.sin(a2);
+
+        // Satellite 3: Bobbing in front
+        const a3 = t * 0.85 + sceneObjects[3].angleOffset;
+        sceneObjects[3].pos[0] = (R * 0.7) * Math.sin(a3);
+        sceneObjects[3].pos[1] = -R * 0.85 + 0.25 * Math.cos(a3);
+        sceneObjects[3].pos[2] = 0.15 + 0.12 * Math.sin(t * 2.2);
+
+        // Satellite 4: Sweeping behind
+        const a4 = t * 0.55 + sceneObjects[4].angleOffset;
+        sceneObjects[4].pos[0] = -R * 0.6 * Math.sin(a4);
+        sceneObjects[4].pos[1] = R * 0.9 + 0.2 * Math.cos(a4);
+    }
+
     if (state.turntable && !isDragging) {
-        state.camYaw += dt * 0.25;
+        state.camYaw += dt * 0.18;
+    }
+
+    // Pack moving object positions into uniform array for background GDF
+    for (let i = 0; i < 5; ++i) {
+        objPosArray[i * 4 + 0] = sceneObjects[i].pos[0];
+        objPosArray[i * 4 + 1] = sceneObjects[i].pos[1];
+        objPosArray[i * 4 + 2] = sceneObjects[i].pos[2];
+        objPosArray[i * 4 + 3] = sceneObjects[i].scale;
     }
 
     if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
@@ -914,50 +857,50 @@ function render(now) {
     gl.clearColor(0.04, 0.05, 0.07, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    // Camera matrices
     const cx = state.camTarget[0] + state.camDist * Math.cos(state.camPitch) * Math.sin(state.camYaw);
     const cy = state.camTarget[1] - state.camDist * Math.cos(state.camPitch) * Math.cos(state.camYaw);
     const cz = state.camTarget[2] + state.camDist * Math.sin(state.camPitch);
     const camPos = [cx, cy, cz];
 
-    mat4Perspective(projMatrix, 38.0 * Math.PI / 180.0, canvas.width / canvas.height, 0.1, 50.0);
+    mat4Perspective(projMatrix, 42.0 * Math.PI / 180.0, canvas.width / canvas.height, 0.1, 50.0);
     mat4LookAt(viewMatrix, camPos, state.camTarget, [0, 0, 1]);
     mat4Multiply(vpMatrix, projMatrix, viewMatrix);
 
-    // Sun vector
     const sunAzRad = state.sunAzimuth * Math.PI / 180.0;
     const sunElRad = state.sunElevation * Math.PI / 180.0;
-    const sunDir = [
-        Math.cos(sunElRad) * Math.cos(sunAzRad),
-        Math.cos(sunElRad) * Math.sin(sunAzRad),
-        Math.sin(sunElRad)
-    ];
+    const sunDir = [Math.cos(sunElRad) * Math.cos(sunAzRad), Math.cos(sunElRad) * Math.sin(sunAzRad), Math.sin(sunElRad)];
 
-    gl.useProgram(meshProgram);
-    gl.uniformMatrix4fv(uMesh.model, false, modelMatrix);
-    gl.uniformMatrix4fv(uMesh.vp, false, vpMatrix);
-    gl.uniform3fv(uMesh.camPos, camPos);
-    gl.uniform3fv(uMesh.sunDir, sunDir);
-    gl.uniform3f(uMesh.sunRad, 3.2, 3.0, 2.7);
+    gl.useProgram(program);
+    gl.uniformMatrix4fv(uLoc.vp, false, vpMatrix);
+    gl.uniform3fv(uLoc.camPos, camPos);
+    gl.uniform3fv(uLoc.sunDir, sunDir);
+    gl.uniform3f(uLoc.sunRad, 3.2, 3.0, 2.7);
+    gl.uniform1i(uLoc.renderMode, state.renderMode);
+    gl.uniform1f(uLoc.sunAngleRad, state.sunAngle * Math.PI / 180.0);
+    gl.uniform1i(uLoc.shadowSteps, state.shadowSteps);
+    gl.uniform1i(uLoc.multiBounce, state.multiBounce ? 1 : 0);
+    gl.uniform1f(uLoc.giBoost, state.giBoost);
+    gl.uniform1i(uLoc.enableReSTIR, state.enableReSTIR ? 1 : 0);
+    gl.uniform4fv(uLoc.objPositions, objPosArray);
 
-    gl.uniform1i(uMesh.renderMode, state.renderMode);
-    gl.uniform1i(uMesh.wireframe, (state.wireframe || state.renderMode === 3) ? 1 : 0);
-    gl.uniform1i(uMesh.enableGDF, state.enableGDF ? 1 : 0);
-    gl.uniform1f(uMesh.sunAngleRad, state.sunAngle * Math.PI / 180.0);
-    gl.uniform1i(uMesh.shadowSteps, state.shadowSteps);
-    gl.uniform1i(uMesh.enableSurfaceCache, state.enableSurfaceCache ? 1 : 0);
-    gl.uniform1i(uMesh.multiBounce, state.multiBounce ? 1 : 0);
-    gl.uniform1f(uMesh.giBoost, state.giBoost);
-    gl.uniform1i(uMesh.enableReSTIR, state.enableReSTIR ? 1 : 0);
-    gl.uniform1f(uMesh.historyCeiling, state.historyCeiling);
-
-    // 1. Draw Studio Floor Mesh
+    // 1. Draw Studio Floor Mesh (illuminated by the moving objects via background GDF)
+    mat4TranslationScale(modelMatrix, [0, 0, 0], 1.0);
+    gl.uniformMatrix4fv(uLoc.model, false, modelMatrix);
+    gl.uniform4f(uLoc.matAlbedo, 0.12, 0.13, 0.15, 1.0);
+    gl.uniform2f(uLoc.matParams, 0.0, 0.5);
     gl.bindVertexArray(floorVAO);
     gl.drawElements(gl.TRIANGLES, 6, gl.UNSIGNED_INT, 0);
 
-    // 2. Draw Real ShaderBall Mesh (Primary Triangle Mesh Rasterization)
+    // 2. Draw each of the 5 Moving ShaderBall Meshes!
     gl.bindVertexArray(meshVAO);
-    gl.drawElements(gl.TRIANGLES, meshIndexCount, gl.UNSIGNED_INT, 0);
+    for (let i = 0; i < 5; ++i) {
+        const obj = sceneObjects[i];
+        mat4TranslationScale(modelMatrix, obj.pos, obj.scale);
+        gl.uniformMatrix4fv(uLoc.model, false, modelMatrix);
+        gl.uniform4f(uLoc.matAlbedo, obj.albedo[0], obj.albedo[1], obj.albedo[2], 1.0);
+        gl.uniform2f(uLoc.matParams, obj.metallic, obj.roughness);
+        gl.drawElements(gl.TRIANGLES, meshIndexCount, gl.UNSIGNED_INT, 0);
+    }
 }
 
 requestAnimationFrame(render);

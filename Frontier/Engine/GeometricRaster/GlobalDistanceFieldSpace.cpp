@@ -50,6 +50,25 @@ uint32_t GlobalDistanceFieldSpace::RegisterPlacement(const DistanceFieldSpace* L
     return Placement.InstanceIdentity;
 }
 
+void GlobalDistanceFieldSpace::UpdatePlacementTransform(uint32_t InstanceIdentity,
+                                                        Vector3 NewTranslation,
+                                                        Vector3 NewScale) noexcept
+{
+    if (InstanceIdentity >= Placements.size()) return;
+
+    auto& Placement = Placements[InstanceIdentity];
+    Placement.WorldTranslation = NewTranslation;
+    Placement.WorldScale       = NewScale;
+
+    if (Placement.LocalField)
+    {
+        const Vector3 LocalMin = Placement.LocalField->GetBoundingMinimum();
+        const Vector3 LocalMax = Placement.LocalField->GetBoundingMaximum();
+        Placement.WorldBoundMin = NewTranslation + Vector3{ LocalMin.x * NewScale.x, LocalMin.y * NewScale.y, LocalMin.z * NewScale.z };
+        Placement.WorldBoundMax = NewTranslation + Vector3{ LocalMax.x * NewScale.x, LocalMax.y * NewScale.y, LocalMax.z * NewScale.z };
+    }
+}
+
 void GlobalDistanceFieldSpace::UpdateGlobalGrid() noexcept
 {
     const uint32_t ResX = GlobalVolume.GetResolutionX();
@@ -134,9 +153,10 @@ DistanceFieldHitRecord GlobalDistanceFieldSpace::MarchSceneRay(Vector3 RayOrigin
                                                                float TransitionDistance) const noexcept
 {
     DistanceFieldHitRecord ResultRecord{};
-    ResultRecord.TravelDistance = MinimumDistance;
-    ResultRecord.StepCount      = 0u;
-    ResultRecord.HasHit         = false;
+    ResultRecord.TravelDistance   = MinimumDistance;
+    ResultRecord.StepCount        = 0u;
+    ResultRecord.InstanceIdentity = 0xFFFFFFFFu;
+    ResultRecord.HasHit           = false;
 
     float CurrentDistance = MinimumDistance;
 
@@ -151,10 +171,11 @@ DistanceFieldHitRecord GlobalDistanceFieldSpace::MarchSceneRay(Vector3 RayOrigin
             const float HitT = (0.0f - RayOrigin.z) / RayDirection.z;
             if (HitT >= MinimumDistance && HitT <= MaximumDistance)
             {
-                ResultRecord.HasHit         = true;
-                ResultRecord.TravelDistance = HitT;
-                ResultRecord.HitPosition    = RayOrigin + RayDirection * HitT;
-                ResultRecord.SurfaceNormal  = Vector3{ 0.0f, 0.0f, 1.0f };
+                ResultRecord.HasHit           = true;
+                ResultRecord.TravelDistance   = HitT;
+                ResultRecord.HitPosition      = RayOrigin + RayDirection * HitT;
+                ResultRecord.SurfaceNormal    = Vector3{ 0.0f, 0.0f, 1.0f };
+                ResultRecord.InstanceIdentity = 0xFFFFFFFFu; // ground
                 return ResultRecord;
             }
         }
@@ -198,9 +219,10 @@ DistanceFieldHitRecord GlobalDistanceFieldSpace::MarchSceneRay(Vector3 RayOrigin
 
         if (FineDistance <= SurfaceThreshold)
         {
-            ResultRecord.HasHit         = true;
-            ResultRecord.TravelDistance = CurrentDistance;
-            ResultRecord.HitPosition    = SamplePosition;
+            ResultRecord.HasHit           = true;
+            ResultRecord.TravelDistance   = CurrentDistance;
+            ResultRecord.HitPosition      = SamplePosition;
+            ResultRecord.InstanceIdentity = NearestPlacement ? NearestPlacement->InstanceIdentity : 0xFFFFFFFFu;
 
             if (NearestPlacement && NearestPlacement->LocalField)
             {

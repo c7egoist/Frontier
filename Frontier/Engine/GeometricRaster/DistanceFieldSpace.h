@@ -27,6 +27,7 @@ struct DistanceFieldHitRecord
     Vector3                 SurfaceNormal;                      // [-] normalized surface gradient normal
     float                   TravelDistance;                     // [m] ray parametric distance to hit
     uint32_t                StepCount;                          // [-] sphere tracing steps evaluated
+    uint32_t                InstanceIdentity;                   // [-] identity of hit placement instance
     bool                    HasHit;                             // [-] true when ray intersected surface threshold
 };
 

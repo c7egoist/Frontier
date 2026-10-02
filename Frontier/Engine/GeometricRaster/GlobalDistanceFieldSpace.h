@@ -50,6 +50,11 @@ public:
                                Vector3 Translation,
                                Vector3 Scale = { 1.0f, 1.0f, 1.0f }) noexcept;
 
+    // Updates the transformation of an existing placement (for moving objects dynamically)
+    void UpdatePlacementTransform(uint32_t InstanceIdentity,
+                                  Vector3 NewTranslation,
+                                  Vector3 NewScale = { 1.0f, 1.0f, 1.0f }) noexcept;
+
     // Rasterizes registered local placements into the world volume grid
     void UpdateGlobalGrid() noexcept;
 
@@ -69,7 +74,7 @@ public:
                                                        float StepRelaxation     = 0.85f,
                                                        float TransitionDistance = 0.12f) const noexcept;
 
-    // Scene-wide distance field soft shadow with contact hardening
+    // Scene-wide distance field soft shadow with contact hardening across multiple objects
     [[nodiscard]] float MarchSceneSoftShadow(Vector3 ShadingPosition,
                                              Vector3 IlluminantDirection,
                                              float MinimumDistance,
