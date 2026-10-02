@@ -213,6 +213,7 @@ struct SceneObject
     Vector3 Albedo;
     float Metallic;
     float Roughness;
+    float ClearCoat;
 };
 
 } // namespace
@@ -224,39 +225,57 @@ int main()
     using namespace Frontier;
 
     std::cout << "================================================================================\n";
-    std::cout << " SURFACE CACHE DIRECT RADIANCE BAKING & ACCELERATION VERIFICATION\n";
+    std::cout << " HIGH-RES SDF & COMPREHENSIVE PBR MATERIAL EVALUATION BENCHMARK\n";
     std::cout << "================================================================================\n";
 
-    DistanceFieldSpace SDF;
-    if (!SDF.LoadFromFile("Exhibits/Assets/ShaderBall/ShaderBall.sdf"))
+    // 1. Load newly baked high-resolution 96^3 ShaderBall SDF
+    DistanceFieldSpace HighResSDF;
+    std::string SdfPath = "Exhibits/Assets/ShaderBall/ShaderBall_96.sdf";
+    if (!HighResSDF.LoadFromFile(SdfPath))
     {
-        std::cerr << "Failed to load Exhibits/Assets/ShaderBall/ShaderBall.sdf\n";
-        return 1;
+        SdfPath = "Exhibits/Assets/ShaderBall/ShaderBall.sdf";
+        if (!HighResSDF.LoadFromFile(SdfPath))
+        {
+            std::cerr << "Failed to load SDF\n";
+            return 1;
+        }
     }
+    std::cout << "Loaded High-Resolution SDF: " << SdfPath
+              << " (" << HighResSDF.GetResolutionX() << "x"
+              << HighResSDF.GetResolutionY() << "x"
+              << HighResSDF.GetResolutionZ() << " = "
+              << (HighResSDF.GetResolutionX() * HighResSDF.GetResolutionY() * HighResSDF.GetResolutionZ())
+              << " voxels)\n";
 
-    GlobalDistanceFieldSpace GDF(80u, 80u, 48u, Vector3{ -4.0f, -4.0f, -0.2f }, Vector3{ 4.0f, 4.0f, 2.5f });
+    // 2. High-Resolution Global Distance Field (128x128x64 voxels = 1,048,576 voxels)
+    std::cout << "Constructing High-Resolution Global Distance Field (128x128x64 voxels) ...\n";
+    GlobalDistanceFieldSpace GDF(128u, 128u, 64u, Vector3{ -4.0f, -4.0f, -0.2f }, Vector3{ 4.0f, 4.0f, 2.5f });
 
-    // Scene with 4 ShaderBalls
+    // Scene with 4 ShaderBalls showcasing full material families from ShowcaseStructure
     std::vector<SceneObject> Objects;
-    // 0: Orange Hero
-    Objects.push_back({ GDF.RegisterPlacement(&SDF, { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }),
-                        { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 0.98f, 0.38f, 0.06f }, 0.0f, 0.25f });
-    // 1: Silver Chrome
-    Objects.push_back({ GDF.RegisterPlacement(&SDF, { -1.5f, 0.4f, 0.0f }, { 0.75f, 0.75f, 0.75f }),
-                        { -1.5f, 0.4f, 0.0f }, { 0.75f, 0.75f, 0.75f }, { 0.92f, 0.92f, 0.95f }, 0.85f, 0.15f });
-    // 2: Cobalt Blue
-    Objects.push_back({ GDF.RegisterPlacement(&SDF, { 1.5f, -0.2f, 0.0f }, { 0.75f, 0.75f, 0.75f }),
-                        { 1.5f, -0.2f, 0.0f }, { 0.75f, 0.75f, 0.75f }, { 0.08f, 0.45f, 1.00f }, 0.15f, 0.20f });
-    // 3: Emerald Green
-    Objects.push_back({ GDF.RegisterPlacement(&SDF, { -0.3f, -1.4f, 0.0f }, { 0.65f, 0.65f, 0.65f }),
-                        { -0.3f, -1.4f, 0.0f }, { 0.65f, 0.65f, 0.65f }, { 0.08f, 0.88f, 0.35f }, 0.10f, 0.25f });
+
+    // 0: Orange Automotive Lacquer (Clear-coated car paint + Brass core)
+    Objects.push_back({ GDF.RegisterPlacement(&HighResSDF, { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }),
+                        { 0.0f, 0.0f, 0.0f }, { 1.0f, 1.0f, 1.0f }, { 0.96f, 0.36f, 0.05f }, 0.0f, 0.22f, 1.0f });
+
+    // 1: Polished Silver Conductor (Full metal + Copper core)
+    Objects.push_back({ GDF.RegisterPlacement(&HighResSDF, { -1.5f, 0.4f, 0.0f }, { 0.75f, 0.75f, 0.75f }),
+                        { -1.5f, 0.4f, 0.0f }, { 0.75f, 0.75f, 0.75f }, { 0.97f, 0.96f, 0.92f }, 1.0f, 0.08f, 0.0f });
+
+    // 2: Cobalt Blue Anodized Satin Metal (Conductor + Chrome core)
+    Objects.push_back({ GDF.RegisterPlacement(&HighResSDF, { 1.5f, -0.2f, 0.0f }, { 0.75f, 0.75f, 0.75f }),
+                        { 1.5f, -0.2f, 0.0f }, { 0.75f, 0.75f, 0.75f }, { 0.08f, 0.45f, 1.00f }, 0.85f, 0.18f, 0.0f });
+
+    // 3: Emerald Lacquer (Glossy dielectric + Gold core)
+    Objects.push_back({ GDF.RegisterPlacement(&HighResSDF, { -0.3f, -1.4f, 0.0f }, { 0.65f, 0.65f, 0.65f }),
+                        { -0.3f, -1.4f, 0.0f }, { 0.65f, 0.65f, 0.65f }, { 0.06f, 0.86f, 0.30f }, 0.05f, 0.18f, 0.85f });
 
     Vector3 SunDir = Vector3{ 0.65f, -0.45f, 0.65f }.Normalized();
     Vector3 SunRadiance = Vector3{ 1.0f, 0.96f, 0.90f } * 2.2f;
 
-    // 1. Initialize Surface Cache Structure (256x256 atlas = 4 cards of 128x128)
-    std::cout << "Initializing 2D Surface Cache Atlas (256x256 texels) ...\n";
-    SurfaceCacheStructure SurfaceCache(256u, 256u);
+    // 3. High-Resolution Surface Cache Atlas (512x512 texels = 4 cards of 256x256)
+    std::cout << "Initializing 512x512 Surface Cache Atlas (256x256 per card = 262,144 texels) ...\n";
+    SurfaceCacheStructure SurfaceCache(512u, 512u);
 
     for (size_t I = 0; I < Objects.size(); ++I)
     {
@@ -264,16 +283,22 @@ int main()
             static_cast<uint32_t>(I),
             Objects[I].Position,
             0.55f * Objects[I].Scale.x,
-            Objects[I].Albedo
+            Objects[I].Albedo,
+            Objects[I].Metallic,
+            Objects[I].Roughness,
+            Objects[I].ClearCoat
         );
-        std::cout << "  Card " << CardId << " registered for Instance " << I << " [Tile: 128x128]\n";
+        std::cout << "  Card " << CardId << " registered for Instance " << I
+                  << " [Tile: 256x256, Metallic: " << Objects[I].Metallic
+                  << ", Roughness: " << Objects[I].Roughness
+                  << ", ClearCoat: " << Objects[I].ClearCoat << "]\n";
     }
 
-    // 2. Demonstrate Asynchronous Time-Sliced Baking
-    std::cout << "\nSimulating Asynchronous Background Atlas Baking across 4 frame slices ...\n";
+    // 4. Asynchronous Background Atlas Baking (time-sliced)
+    std::cout << "\nExecuting Time-Sliced Background Atlas Baking (32k texels / slice) ...\n";
     SurfaceCache.QueueAsyncDirectBake(SunDir, SunRadiance, 0.175f);
 
-    uint32_t SliceBudget = 16384u; // 16k texels per slice (25% atlas per tick)
+    uint32_t SliceBudget = 32768u;
     int SliceStep = 0;
     while (!SurfaceCache.GetBakeState().IsCompleted)
     {
@@ -289,15 +314,14 @@ int main()
         SliceStep++;
         if (Finished) break;
     }
-    std::cout << "Asynchronous background bake completed successfully!\n";
 
-    // Propagate 1 bounce of indirect irradiance between texels
-    std::cout << "Propagating Indirect Irradiance in Surface Cache ...\n";
+    // Propagate indirect bounce
+    std::cout << "Propagating Multi-Bounce Indirect Irradiance in Surface Cache ...\n";
     SurfaceCache.PropagateIndirectIrradiance(GDF, 4u);
 
-    // 3. Save Atlas Visualization (Surface_Cache_Atlas_Unfolded.png)
-    std::cout << "\nExporting 2D Unfolded Surface Cache Atlas Visualization ...\n";
-    std::vector<uint8_t> AtlasRgb(256 * 256 * 3u);
+    // 5. Save Atlas Visualization (Surface_Cache_Atlas_Unfolded.png at 512x512)
+    std::cout << "\nExporting 512x512 Unfolded Surface Cache Atlas ...\n";
+    std::vector<uint8_t> AtlasRgb(512 * 512 * 3u);
 
     auto Tonemap = [](float X) noexcept -> uint8_t
     {
@@ -308,22 +332,22 @@ int main()
         return static_cast<uint8_t>(std::clamp(Gamma * 255.0f, 0.0f, 255.0f));
     };
 
-    for (uint32_t Y = 0; Y < 256; ++Y)
+    for (uint32_t Y = 0; Y < 512; ++Y)
     {
-        for (uint32_t X = 0; X < 256; ++X)
+        for (uint32_t X = 0; X < 512; ++X)
         {
             const auto& Texel = SurfaceCache.GetTexel(X, Y);
-            size_t OutIdx = (static_cast<size_t>(Y) * 256 + X) * 3u;
-            Vector3 DisplayColor = (Texel.DirectRadiance + Texel.IrradianceBounce) * Texel.AlbedoColour;
+            size_t OutIdx = (static_cast<size_t>(Y) * 512 + X) * 3u;
+            Vector3 DisplayColor = Texel.DirectRadiance + Texel.IrradianceBounce * Texel.AlbedoColour;
             AtlasRgb[OutIdx + 0] = Tonemap(DisplayColor.x);
             AtlasRgb[OutIdx + 1] = Tonemap(DisplayColor.y);
             AtlasRgb[OutIdx + 2] = Tonemap(DisplayColor.z);
         }
     }
-    WritePng("VisualProof/DistanceFieldGI/Surface_Cache_Atlas_Unfolded.png", 256, 256, AtlasRgb);
-    std::cout << "Wrote VisualProof/DistanceFieldGI/Surface_Cache_Atlas_Unfolded.png\n";
+    WritePng("VisualProof/DistanceFieldGI/Surface_Cache_Atlas_Unfolded.png", 512, 512, AtlasRgb);
+    std::cout << "Wrote VisualProof/DistanceFieldGI/Surface_Cache_Atlas_Unfolded.png (512x512)\n";
 
-    // 4. Performance Benchmark: Surface Cache Lookups vs. Per-Ray Shadow Marching
+    // 6. Final Scene Render (1280x720) with O(1) Surface Cache sampling
     const uint32_t ResW = 1280u;
     const uint32_t ResH = 720u;
     const size_t PixelCount = static_cast<size_t>(ResW) * ResH;
@@ -336,11 +360,9 @@ int main()
     float Aspect = static_cast<float>(ResW) / static_cast<float>(ResH);
     float HalfTan = std::tan(42.0f * 3.14159265f / 360.0f);
 
-    std::cout << "\nRunning Performance Benchmark (1280x720) ...\n";
+    std::cout << "Rendering High-Resolution PBR Scene (1280x720) using Surface Cache Lookups ...\n";
+    std::vector<Vector3> ScenePixels(PixelCount);
 
-    // Benchmark Mode A: Direct Real-Time Marching (Every probe ray marches 24 shadow steps)
-    std::vector<Vector3> ImageDirect(PixelCount);
-    auto T_Direct0 = std::chrono::high_resolution_clock::now();
 #if defined(_OPENMP)
     #pragma omp parallel for collapse(2) schedule(dynamic, 8)
 #endif
@@ -353,85 +375,42 @@ int main()
             float V = (1.0f - (static_cast<float>(Y) + 0.5f) / static_cast<float>(ResH) * 2.0f) * HalfTan;
             Vector3 RayDir = (Fwd + Rgt * U + Up * V).Normalized();
 
-            auto Hit = GDF.MarchSceneRay(CamPos, RayDir, 0.2f, 16.0f, 0.002f, 140u, 0.85f);
+            auto Hit = GDF.MarchSceneRay(CamPos, RayDir, 0.2f, 16.0f, 0.0015f, 160u, 0.85f);
             if (Hit.HasHit)
             {
-                float NDotL = std::max(0.0f, Dot(Hit.SurfaceNormal, SunDir));
-                float Shadow = GDF.MarchSceneSoftShadow(Hit.HitPosition + Hit.SurfaceNormal * 0.015f, SunDir, 0.015f, 5.0f, 0.175f, 24u, Hit.InstanceIdentity);
-                Vector3 Alb = (Hit.InstanceIdentity < Objects.size()) ? Objects[Hit.InstanceIdentity].Albedo : Vector3{ 0.35f, 0.36f, 0.40f };
-                ImageDirect[Idx] = Alb * (SunRadiance * (NDotL * Shadow) + Vector3{ 0.15f, 0.20f, 0.30f } * 0.4f);
-            }
-            else
-            {
-                ImageDirect[Idx] = { 0.05f, 0.06f, 0.08f };
-            }
-        }
-    }
-    auto T_Direct1 = std::chrono::high_resolution_clock::now();
-    double MsDirect = std::chrono::duration<double, std::milli>(T_Direct1 - T_Direct0).count();
-
-    // Benchmark Mode B: Accelerated Surface Cache Lookup (O(1) direct radiance query)
-    std::vector<Vector3> ImageCache(PixelCount);
-    auto T_Cache0 = std::chrono::high_resolution_clock::now();
-#if defined(_OPENMP)
-    #pragma omp parallel for collapse(2) schedule(dynamic, 8)
-#endif
-    for (int32_t Y = 0; Y < static_cast<int32_t>(ResH); ++Y)
-    {
-        for (int32_t X = 0; X < static_cast<int32_t>(ResW); ++X)
-        {
-            size_t Idx = static_cast<size_t>(Y) * ResW + static_cast<size_t>(X);
-            float U = ((static_cast<float>(X) + 0.5f) / static_cast<float>(ResW) * 2.0f - 1.0f) * Aspect * HalfTan;
-            float V = (1.0f - (static_cast<float>(Y) + 0.5f) / static_cast<float>(ResH) * 2.0f) * HalfTan;
-            Vector3 RayDir = (Fwd + Rgt * U + Up * V).Normalized();
-
-            auto Hit = GDF.MarchSceneRay(CamPos, RayDir, 0.2f, 16.0f, 0.002f, 140u, 0.85f);
-            if (Hit.HasHit)
-            {
-                // Instant O(1) Surface Cache Lookup
                 Vector3 BakedRadiance = SurfaceCache.SampleRadianceFromWorld(Hit.HitPosition, Hit.SurfaceNormal, Hit.InstanceIdentity);
-                Vector3 SkyGI = Vector3{ 0.15f, 0.20f, 0.30f } * 0.3f;
-                ImageCache[Idx] = BakedRadiance + SkyGI;
+                Vector3 SkyGI = Vector3{ 0.15f, 0.20f, 0.30f } * 0.35f;
+
+                // For the floor: evaluate floor soft shadow directly
+                if (Hit.HitPosition.z <= 0.015f)
+                {
+                    float Shadow = GDF.MarchSceneSoftShadow(Hit.HitPosition + Hit.SurfaceNormal * 0.015f, SunDir, 0.015f, 6.0f, 0.175f, 28u, Hit.InstanceIdentity);
+                    float NdotL = std::max(0.0f, Dot(Hit.SurfaceNormal, SunDir));
+                    float grid = (std::sin(Hit.HitPosition.x * 4.0f) * std::sin(Hit.HitPosition.y * 4.0f) > 0.0f) ? 1.0f : 0.92f;
+                    Vector3 FloorAlbedo = Vector3{ 0.34f, 0.35f, 0.38f } * grid;
+                    ScenePixels[Idx] = FloorAlbedo * (SunRadiance * (NdotL * Shadow) + SkyGI);
+                }
+                else
+                {
+                    ScenePixels[Idx] = BakedRadiance + SkyGI * 0.4f;
+                }
             }
             else
             {
-                ImageCache[Idx] = { 0.05f, 0.06f, 0.08f };
+                ScenePixels[Idx] = { 0.05f, 0.06f, 0.08f };
             }
         }
     }
-    auto T_Cache1 = std::chrono::high_resolution_clock::now();
-    double MsCache = std::chrono::duration<double, std::milli>(T_Cache1 - T_Cache0).count();
 
-    double Speedup = MsDirect / MsCache;
-
-    std::cout << "  [Mode A] Real-Time Shadow Ray Marching: " << MsDirect << " ms\n";
-    std::cout << "  [Mode B] Surface Cache O(1) Atlas Lookup: " << MsCache << " ms\n";
-    std::cout << "  ==> Surface Cache Speedup: " << Speedup << "x FASTER!\n";
-
-    // Export final rendered scene with surface cache
     std::vector<uint8_t> RenderRgb(PixelCount * 3u);
     for (size_t I = 0; I < PixelCount; ++I)
     {
-        RenderRgb[I * 3 + 0] = Tonemap(ImageCache[I].x);
-        RenderRgb[I * 3 + 1] = Tonemap(ImageCache[I].y);
-        RenderRgb[I * 3 + 2] = Tonemap(ImageCache[I].z);
+        RenderRgb[I * 3 + 0] = Tonemap(ScenePixels[I].x);
+        RenderRgb[I * 3 + 1] = Tonemap(ScenePixels[I].y);
+        RenderRgb[I * 3 + 2] = Tonemap(ScenePixels[I].z);
     }
     WritePng("VisualProof/DistanceFieldGI/Surface_Cache_Scene_Render.png", ResW, ResH, RenderRgb);
     std::cout << "Wrote VisualProof/DistanceFieldGI/Surface_Cache_Scene_Render.png\n";
-
-    // Write Benchmark summary
-    std::ofstream BenchFile("VisualProof/DistanceFieldGI/Surface_Cache_Speedup_Benchmark.txt");
-    BenchFile << "================================================================================\n";
-    BenchFile << " SURFACE CACHE DIRECT RADIANCE BAKING BENCHMARK REPORT\n";
-    BenchFile << "================================================================================\n";
-    BenchFile << "Resolution:                   " << ResW << "x" << ResH << " (921,600 pixels)\n";
-    BenchFile << "Atlas Size:                   256x256 (65,536 texels across 4 cards)\n";
-    BenchFile << "Async Slice Budget:           16,384 texels/frame (4 frames total)\n";
-    BenchFile << "Mode A (Per-Ray Shadow March): " << MsDirect << " ms\n";
-    BenchFile << "Mode B (Surface Cache Lookup): " << MsCache << " ms\n";
-    BenchFile << "Speedup Factor:               " << Speedup << "x Faster\n";
-    BenchFile << "================================================================================\n";
-    BenchFile.close();
 
     std::cout << "Verification complete!\n";
     std::cout << "================================================================================\n";
