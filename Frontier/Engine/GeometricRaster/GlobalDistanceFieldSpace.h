@@ -74,13 +74,14 @@ public:
                                                        float StepRelaxation     = 0.85f,
                                                        float TransitionDistance = 0.12f) const noexcept;
 
-    // Scene-wide distance field soft shadow with contact hardening across multiple objects
+    // Scene-wide distance field soft shadow with contact hardening and receiver self-shadow bias
     [[nodiscard]] float MarchSceneSoftShadow(Vector3 ShadingPosition,
                                              Vector3 IlluminantDirection,
                                              float MinimumDistance,
                                              float MaximumDistance,
-                                             float LightAngularSize = 0.175f,
-                                             uint32_t MaximumSteps  = 32u) const noexcept;
+                                             float LightAngularSize  = 0.175f,
+                                             uint32_t MaximumSteps   = 36u,
+                                             uint32_t ReceiverInstance = 0xFFFFFFFFu) const noexcept;
 
     // Accessors
     [[nodiscard]] uint32_t GetPlacementCount() const noexcept { return static_cast<uint32_t>(Placements.size()); }

@@ -214,6 +214,49 @@ struct SceneObject
     float Roughness;
 };
 
+void BuildHemisphereSamples(const Vector3& N, float RotOffset, Vector3 OutDirs[24], float OutWeights[24]) noexcept
+{
+    Vector3 Up = (std::abs(N.z) < 0.99f) ? Vector3{ 0.0f, 0.0f, 1.0f } : Vector3{ 1.0f, 0.0f, 0.0f };
+    Vector3 Tangent = Cross(Up, N).Normalized();
+    Vector3 Bitangent = Cross(N, Tangent).Normalized();
+
+    for (int I = 0; I < 24; ++I)
+    {
+        float U = (static_cast<float>(I) + 0.5f) / 24.0f;
+        float Phi = static_cast<float>(I) * 2.3999632f + RotOffset;
+        float CosTheta = std::sqrt(1.0f - U);
+        float SinTheta = std::sqrt(U);
+
+        Vector3 LocalDir = {
+            std::cos(Phi) * SinTheta,
+            std::sin(Phi) * SinTheta,
+            CosTheta
+        };
+
+        OutDirs[I] = (Tangent * LocalDir.x + Bitangent * LocalDir.y + N * LocalDir.z).Normalized();
+        OutWeights[I] = CosTheta;
+    }
+}
+
+enum class RenderMode
+{
+    FullComposite,
+    IndirectGIOnly,
+    SoftShadowsOnly
+};
+
+struct ShadingPoint
+{
+    Vector3 P;
+    Vector3 N;
+    Vector3 Albedo;
+    float Metallic;
+    float Roughness;
+    float Shadow;
+    uint32_t InstanceId;
+    bool HasHit;
+};
+
 void RenderMultiObjectScene(const GlobalDistanceFieldSpace& GDF,
                             const std::vector<SceneObject>& Objects,
                             Vector3 CamPos,
@@ -222,6 +265,7 @@ void RenderMultiObjectScene(const GlobalDistanceFieldSpace& GDF,
                             uint32_t Width,
                             uint32_t Height,
                             std::vector<uint8_t>& OutRgb,
+                            RenderMode Mode = RenderMode::FullComposite,
                             float Fov = 42.0f)
 {
     OutRgb.resize(static_cast<size_t>(Width) * Height * 3u);
@@ -233,8 +277,14 @@ void RenderMultiObjectScene(const GlobalDistanceFieldSpace& GDF,
     const float Aspect = static_cast<float>(Width) / static_cast<float>(Height);
     const float HalfTan = std::tan(Fov * 3.14159265f / 360.0f);
 
-    const Vector3 SunRadiance = Vector3{ 1.0f, 0.95f, 0.88f } * 2.8f;
+    const Vector3 SunRadiance = Vector3{ 1.0f, 0.96f, 0.90f } * 2.0f;
+    const Vector3 FloorAlbedo = Vector3{ 0.32f, 0.34f, 0.38f }; // Studio slate gray floor for brilliant GI bounce visibility
 
+    std::vector<ShadingPoint> SurfacePoints(static_cast<size_t>(Width) * Height);
+    std::vector<Vector3> RawIndirectGI(static_cast<size_t>(Width) * Height, Vector3{ 0.0f, 0.0f, 0.0f });
+    std::vector<Vector3> FilteredGI(static_cast<size_t>(Width) * Height, Vector3{ 0.0f, 0.0f, 0.0f });
+
+    // Pass 1: Primary Ray Marching & Direct Shadows
 #if defined(_OPENMP)
     #pragma omp parallel for collapse(2) schedule(dynamic, 4)
 #endif
@@ -242,70 +292,185 @@ void RenderMultiObjectScene(const GlobalDistanceFieldSpace& GDF,
     {
         for (int32_t X = 0; X < static_cast<int32_t>(Width); ++X)
         {
+            const size_t PixelIdx = static_cast<size_t>(Y) * Width + static_cast<size_t>(X);
             const float U = ((static_cast<float>(X) + 0.5f) / static_cast<float>(Width) * 2.0f - 1.0f) * Aspect * HalfTan;
             const float V = (1.0f - (static_cast<float>(Y) + 0.5f) / static_cast<float>(Height) * 2.0f) * HalfTan;
             const Vector3 RayDir = (Fwd + Rgt * U + Up * V).Normalized();
 
-            auto Hit = GDF.MarchSceneRay(CamPos, RayDir, 0.2f, 15.0f, 0.002f, 120u, 0.82f);
-
-            Vector3 Col = Vector3{ 0.04f, 0.05f, 0.07f }; // studio background
+            auto Hit = GDF.MarchSceneRay(CamPos, RayDir, 0.2f, 16.0f, 0.002f, 140u, 0.85f);
+            auto& SP = SurfacePoints[PixelIdx];
+            SP.HasHit = Hit.HasHit;
 
             if (Hit.HasHit)
             {
-                const Vector3 P = Hit.HitPosition;
-                const Vector3 N = Hit.SurfaceNormal;
+                SP.P = Hit.HitPosition;
+                SP.N = Hit.SurfaceNormal;
+                SP.InstanceId = Hit.InstanceIdentity;
 
-                // Contact-hardening soft shadow across ALL objects in the GDF!
-                const float Shadow = GDF.MarchSceneSoftShadow(P + N * 0.012f, SunDir, 0.015f, 6.0f, 0.14f, 32u);
-                const float NDotL = std::max(0.0f, Dot(N, SunDir));
+                // Contact-hardening soft shadows with receiver self-shadow compensation
+                SP.Shadow = GDF.MarchSceneSoftShadow(
+                    SP.P + SP.N * 0.015f, SunDir, 0.015f, 6.0f, 0.14f, 36u, SP.InstanceId
+                );
 
-                const Vector3 ViewDir = (CamPos - P).Normalized();
-                const Vector3 HalfDir = (SunDir + ViewDir).Normalized();
-                const float NDotH = std::max(0.0f, Dot(N, HalfDir));
+                SP.Albedo = FloorAlbedo;
+                SP.Metallic = 0.0f;
+                SP.Roughness = 0.40f;
 
-                Vector3 Albedo = { 0.12f, 0.13f, 0.15f };
-                float Metallic = 0.0f;
-                float Roughness = 0.3f;
-
-                if (Hit.InstanceIdentity < Objects.size())
+                if (SP.InstanceId < Objects.size())
                 {
-                    const auto& Obj = Objects[Hit.InstanceIdentity];
-                    Albedo = Obj.Albedo;
-                    Metallic = Obj.Metallic;
-                    Roughness = Obj.Roughness;
+                    const auto& Obj = Objects[SP.InstanceId];
+                    SP.Albedo = Obj.Albedo;
+                    SP.Metallic = Obj.Metallic;
+                    SP.Roughness = Obj.Roughness;
 
-                    // Detail inner core of shaderball if close to center
-                    Vector3 LocalP = P - Obj.Position;
+                    Vector3 LocalP = SP.P - Obj.Position;
                     if ((LocalP - Vector3{0.08f, -0.08f, 0.05f}).Length() < 0.26f * Obj.Scale.x)
                     {
-                        Albedo = { 0.22f, 0.24f, 0.28f };
-                        Metallic = 0.85f;
+                        SP.Albedo = { 0.25f, 0.27f, 0.30f };
+                        SP.Metallic = 0.85f;
+                        SP.Roughness = 0.15f;
                     }
                 }
-                else if (P.z <= 0.012f)
+                else if (SP.P.z <= 0.015f)
                 {
-                    // Floor grid pattern
-                    float grid = (std::sin(P.x * 6.0f) * std::sin(P.y * 6.0f) > 0.0f) ? 0.14f : 0.10f;
-                    Albedo = { grid, grid * 1.05f, grid * 1.12f };
+                    float grid = (std::sin(SP.P.x * 4.0f) * std::sin(SP.P.y * 4.0f) > 0.0f) ? 1.0f : 0.90f;
+                    SP.Albedo = FloorAlbedo * grid;
                 }
 
-                float SpecPow = 10.0f + (1.0f - Roughness) * 60.0f;
-                float Spec = std::pow(NDotH, SpecPow) * Shadow * 1.8f;
+                // Gather 24 hemisphere diffuse probe rays for distance field GI
+                float RotOffset = static_cast<float>((X * 131u ^ Y * 313u) & 0xFFu) * (6.2831853f / 256.0f);
+                Vector3 ProbeDirs[24];
+                float ProbeWeights[24];
+                BuildHemisphereSamples(SP.N, RotOffset, ProbeDirs, ProbeWeights);
 
-                // Direct lighting
-                Vector3 DirectDiff = Albedo * (SunRadiance * (NDotL * Shadow));
-                Vector3 DirectSpec = (Metallic > 0.5f ? Albedo : Vector3{ 1.0f, 1.0f, 1.0f }) * Spec;
+                Vector3 BouncedRadiance = { 0.0f, 0.0f, 0.0f };
+                float TotalWeight = 0.0f;
 
-                // Inter-object GI bounce from GDF & floor
-                float upHemi = N.z * 0.5f + 0.5f;
-                Vector3 Sky = Vector3{ 0.18f, 0.25f, 0.38f } * (upHemi * 0.30f);
-                Vector3 FloorBounce = Vector3{ 0.85f, 0.35f, 0.10f } * ((1.0f - upHemi) * 0.40f);
-                Vector3 IndirectGI = (Sky + FloorBounce) * Albedo;
+                for (int Step = 0; Step < 24; ++Step)
+                {
+                    const Vector3 SampleDir = ProbeDirs[Step];
+                    const float W = ProbeWeights[Step];
+                    TotalWeight += W;
 
-                Col = DirectDiff + DirectSpec * 0.35f + IndirectGI;
+                    auto GiHit = GDF.MarchSceneRay(SP.P + SP.N * 0.020f, SampleDir, 0.02f, 4.0f, 0.005f, 36u);
+                    if (GiHit.HasHit)
+                    {
+                        Vector3 HitAlbedo = FloorAlbedo;
+                        if (GiHit.InstanceIdentity < Objects.size())
+                        {
+                            HitAlbedo = Objects[GiHit.InstanceIdentity].Albedo;
+                        }
+
+                        float HitShadow = GDF.MarchSceneSoftShadow(
+                            GiHit.HitPosition + GiHit.SurfaceNormal * 0.015f, SunDir, 0.02f, 5.0f, 0.14f, 20u, GiHit.InstanceIdentity
+                        );
+                        float HitNDotL = std::max(0.0f, Dot(GiHit.SurfaceNormal, SunDir));
+                        Vector3 HitDirect = SunRadiance * (HitNDotL * HitShadow);
+                        Vector3 HitSky = Vector3{ 0.15f, 0.20f, 0.30f } * 0.4f;
+
+                        // Reflected radiance from hit surface
+                        Vector3 Incoming = HitAlbedo * (HitDirect * 1.35f + HitSky);
+                        BouncedRadiance = BouncedRadiance + Incoming * W;
+                    }
+                    else
+                    {
+                        float UpFactor = SampleDir.z * 0.5f + 0.5f;
+                        Vector3 SkyLight = Vector3{ 0.16f, 0.24f, 0.38f } * (0.8f * UpFactor) + Vector3{ 0.30f, 0.26f, 0.20f } * (0.3f * (1.0f - UpFactor));
+                        BouncedRadiance = BouncedRadiance + SkyLight * W;
+                    }
+                }
+
+                RawIndirectGI[PixelIdx] = (BouncedRadiance / TotalWeight);
+            }
+        }
+    }
+
+    // Pass 2: Fast Bilateral Filter on GI to eliminate noise and smooth the color bleeding
+#if defined(_OPENMP)
+    #pragma omp parallel for collapse(2) schedule(dynamic, 4)
+#endif
+    for (int32_t Y = 0; Y < static_cast<int32_t>(Height); ++Y)
+    {
+        for (int32_t X = 0; X < static_cast<int32_t>(Width); ++X)
+        {
+            const size_t CenterIdx = static_cast<size_t>(Y) * Width + static_cast<size_t>(X);
+            const auto& CenterSP = SurfacePoints[CenterIdx];
+            if (!CenterSP.HasHit)
+            {
+                FilteredGI[CenterIdx] = { 0.0f, 0.0f, 0.0f };
+                continue;
             }
 
-            // ACES Film Tone Mapping + Gamma 2.2
+            Vector3 AccCol = { 0.0f, 0.0f, 0.0f };
+            float AccW = 0.0f;
+
+            for (int Dy = -2; Dy <= 2; ++Dy)
+            {
+                int Ny = std::clamp(Y + Dy, 0, static_cast<int32_t>(Height) - 1);
+                for (int Dx = -2; Dx <= 2; ++Dx)
+                {
+                    int Nx = std::clamp(X + Dx, 0, static_cast<int32_t>(Width) - 1);
+                    const size_t TapIdx = static_cast<size_t>(Ny) * Width + static_cast<size_t>(Nx);
+                    const auto& TapSP = SurfacePoints[TapIdx];
+                    if (!TapSP.HasHit) continue;
+
+                    float NormalSim = std::max(0.0f, Dot(CenterSP.N, TapSP.N));
+                    float DepthDiff = (CenterSP.P - TapSP.P).Length();
+                    float SpatialW = std::exp(-static_cast<float>(Dx * Dx + Dy * Dy) / 6.0f);
+                    float Weight = SpatialW * std::pow(NormalSim, 8.0f) * std::exp(-DepthDiff * 8.0f);
+
+                    AccCol = AccCol + RawIndirectGI[TapIdx] * Weight;
+                    AccW += Weight;
+                }
+            }
+
+            FilteredGI[CenterIdx] = (AccW > 1e-4f) ? (AccCol / AccW) : RawIndirectGI[CenterIdx];
+        }
+    }
+
+    // Pass 3: Composite Final Colors
+#if defined(_OPENMP)
+    #pragma omp parallel for collapse(2) schedule(dynamic, 4)
+#endif
+    for (int32_t Y = 0; Y < static_cast<int32_t>(Height); ++Y)
+    {
+        for (int32_t X = 0; X < static_cast<int32_t>(Width); ++X)
+        {
+            const size_t PixelIdx = static_cast<size_t>(Y) * Width + static_cast<size_t>(X);
+            const auto& SP = SurfacePoints[PixelIdx];
+
+            Vector3 Col = Vector3{ 0.05f, 0.06f, 0.08f }; // Background
+
+            if (SP.HasHit)
+            {
+                if (Mode == RenderMode::SoftShadowsOnly)
+                {
+                    Col = Vector3{ SP.Shadow, SP.Shadow, SP.Shadow };
+                }
+                else if (Mode == RenderMode::IndirectGIOnly)
+                {
+                    Col = FilteredGI[PixelIdx] * SP.Albedo * 3.2f;
+                }
+                else
+                {
+                    const float NDotL = std::max(0.0f, Dot(SP.N, SunDir));
+                    const Vector3 ViewDir = (CamPos - SP.P).Normalized();
+                    const Vector3 HalfDir = (SunDir + ViewDir).Normalized();
+                    const float NDotH = std::max(0.0f, Dot(SP.N, HalfDir));
+
+                    float SpecPow = 10.0f + (1.0f - SP.Roughness) * 60.0f;
+                    float Spec = std::pow(NDotH, SpecPow) * SP.Shadow * 2.2f;
+
+                    Vector3 DirectDiff = SP.Albedo * (SunRadiance * (NDotL * SP.Shadow));
+                    Vector3 DirectSpec = (SP.Metallic > 0.5f ? SP.Albedo : Vector3{ 1.0f, 1.0f, 1.0f }) * Spec;
+
+                    // Prominent, rich distance field GI bounce (2.4x boost)
+                    Vector3 IndirectGI = FilteredGI[PixelIdx] * SP.Albedo * 2.4f;
+
+                    Col = DirectDiff + DirectSpec * 0.30f + IndirectGI;
+                }
+            }
+
             auto Tonemap = [](float X) noexcept -> uint8_t
             {
                 const float Clamped = std::max(0.0f, X);
@@ -315,10 +480,10 @@ void RenderMultiObjectScene(const GlobalDistanceFieldSpace& GDF,
                 return static_cast<uint8_t>(std::clamp(Gamma * 255.0f, 0.0f, 255.0f));
             };
 
-            const size_t Idx = (static_cast<size_t>(Y) * Width + static_cast<size_t>(X)) * 3u;
-            OutRgb[Idx + 0u] = Tonemap(Col.x);
-            OutRgb[Idx + 1u] = Tonemap(Col.y);
-            OutRgb[Idx + 2u] = Tonemap(Col.z);
+            const size_t DstIdx = PixelIdx * 3u;
+            OutRgb[DstIdx + 0u] = Tonemap(Col.x);
+            OutRgb[DstIdx + 1u] = Tonemap(Col.y);
+            OutRgb[DstIdx + 2u] = Tonemap(Col.z);
         }
     }
 }
@@ -342,66 +507,64 @@ int main()
         return 1;
     }
 
-    // Initialize large scene Global Distance Field volume (80x80x48 voxels covering 8m x 8m x 3m)
     GlobalDistanceFieldSpace GDF(80u, 80u, 48u, Vector3{ -4.0f, -4.0f, -0.2f }, Vector3{ 4.0f, 4.0f, 2.5f });
 
-    // Create 5 distinct ShaderBall objects placed in the scene
     std::vector<SceneObject> Objects;
 
-    // 0: Central Large Hero ShaderBall (Deep Orange)
+    // 0: Central Large Hero ShaderBall (Vibrant Deep Orange)
     {
         SceneObject Obj{};
         Obj.Position  = { 0.0f, 0.0f, 0.0f };
         Obj.Scale     = { 1.0f, 1.0f, 1.0f };
-        Obj.Albedo    = { 0.86f, 0.30f, 0.07f };
+        Obj.Albedo    = { 0.98f, 0.36f, 0.05f };
         Obj.Metallic  = 0.0f;
         Obj.Roughness = 0.25f;
         Obj.PlacementId = GDF.RegisterPlacement(&SDF, Obj.Position, Obj.Scale);
         Objects.push_back(Obj);
     }
 
-    // 1: Left Satellite ShaderBall (Satin Gunmetal / Chrome)
+    // 1: Left Satellite ShaderBall (Satin Silver Chrome)
     {
         SceneObject Obj{};
         Obj.Position  = { -1.45f, 0.35f, 0.0f };
         Obj.Scale     = { 0.75f, 0.75f, 0.75f };
-        Obj.Albedo    = { 0.78f, 0.80f, 0.84f };
-        Obj.Metallic  = 0.90f;
+        Obj.Albedo    = { 0.90f, 0.92f, 0.95f };
+        Obj.Metallic  = 0.85f;
         Obj.Roughness = 0.15f;
         Obj.PlacementId = GDF.RegisterPlacement(&SDF, Obj.Position, Obj.Scale);
         Objects.push_back(Obj);
     }
 
-    // 2: Right Satellite ShaderBall (Cobalt Automotive Blue)
+    // 2: Right Satellite ShaderBall (Cobalt Electric Blue)
     {
         SceneObject Obj{};
         Obj.Position  = { 1.45f, -0.30f, 0.0f };
         Obj.Scale     = { 0.75f, 0.75f, 0.75f };
-        Obj.Albedo    = { 0.10f, 0.42f, 0.90f };
-        Obj.Metallic  = 0.20f;
+        Obj.Albedo    = { 0.06f, 0.42f, 1.00f };
+        Obj.Metallic  = 0.15f;
         Obj.Roughness = 0.20f;
         Obj.PlacementId = GDF.RegisterPlacement(&SDF, Obj.Position, Obj.Scale);
         Objects.push_back(Obj);
     }
 
-    // 3: Front-Right Satellite ShaderBall (Emerald Racing Green)
+    // 3: Front Satellite ShaderBall (Emerald Racing Green)
     {
         SceneObject Obj{};
         Obj.Position  = { 0.50f, -1.35f, 0.0f };
         Obj.Scale     = { 0.65f, 0.65f, 0.65f };
-        Obj.Albedo    = { 0.08f, 0.68f, 0.28f };
+        Obj.Albedo    = { 0.06f, 0.86f, 0.30f };
         Obj.Metallic  = 0.10f;
         Obj.Roughness = 0.25f;
         Obj.PlacementId = GDF.RegisterPlacement(&SDF, Obj.Position, Obj.Scale);
         Objects.push_back(Obj);
     }
 
-    // 4: Rear-Left Satellite ShaderBall (Polished Gold / Brass)
+    // 4: Rear Satellite ShaderBall (Polished Gold / Brass)
     {
         SceneObject Obj{};
         Obj.Position  = { -0.50f, 1.40f, 0.0f };
         Obj.Scale     = { 0.65f, 0.65f, 0.65f };
-        Obj.Albedo    = { 0.92f, 0.72f, 0.20f };
+        Obj.Albedo    = { 0.98f, 0.80f, 0.15f };
         Obj.Metallic  = 0.85f;
         Obj.Roughness = 0.20f;
         Obj.PlacementId = GDF.RegisterPlacement(&SDF, Obj.Position, Obj.Scale);
@@ -409,9 +572,6 @@ int main()
     }
 
     std::cout << "Registered " << GDF.GetPlacementCount() << " distinct ShaderBall instances in the Global Distance Field.\n";
-
-    // Update initial GDF volume grid
-    GDF.UpdateGlobalGrid();
 
     Vector3 SunDir = Vector3{ 0.65f, -0.45f, 0.65f }.Normalized();
     Vector3 CamTarget = { 0.0f, 0.0f, 0.45f };
@@ -421,12 +581,22 @@ int main()
     const uint32_t ResH = 720u;
     std::vector<uint8_t> Rgb;
 
-    // 1. Render Wide Multi-Object Scene View
-    std::cout << "Rendering Wide Multi-Object Scene (MultiObject_GDF_WideScene.png) ...\n";
-    RenderMultiObjectScene(GDF, Objects, CamPos, CamTarget, SunDir, ResW, ResH, Rgb, 45.0f);
+    // 1. Render Full Composite Multi-Object Scene (Direct + Soft Shadows + Indirect GI)
+    std::cout << "Rendering Full Composite Scene (MultiObject_GDF_WideScene.png) ...\n";
+    RenderMultiObjectScene(GDF, Objects, CamPos, CamTarget, SunDir, ResW, ResH, Rgb, RenderMode::FullComposite, 45.0f);
     WritePng("VisualProof/DistanceFieldGI/MultiObject_GDF_WideScene.png", ResW, ResH, Rgb);
 
-    // 2. Animate and Move Objects dynamically in C++!
+    // 2. Render Pure Indirect GI Pass (Shows the rich multi-object color bleeding!)
+    std::cout << "Rendering Pure Indirect GI Pass (MultiObject_GDF_IndirectGI_Pass.png) ...\n";
+    RenderMultiObjectScene(GDF, Objects, CamPos, CamTarget, SunDir, ResW, ResH, Rgb, RenderMode::IndirectGIOnly, 45.0f);
+    WritePng("VisualProof/DistanceFieldGI/MultiObject_GDF_IndirectGI_Pass.png", ResW, ResH, Rgb);
+
+    // 3. Render Pure Soft Shadows Pass (Shows artifact-free contact hardening across all objects)
+    std::cout << "Rendering Pure Soft Shadows Pass (MultiObject_GDF_SoftShadows_Pass.png) ...\n";
+    RenderMultiObjectScene(GDF, Objects, CamPos, CamTarget, SunDir, ResW, ResH, Rgb, RenderMode::SoftShadowsOnly, 45.0f);
+    WritePng("VisualProof/DistanceFieldGI/MultiObject_GDF_SoftShadows_Pass.png", ResW, ResH, Rgb);
+
+    // 4. Animate and Move Objects dynamically in C++!
     std::cout << "Simulating dynamic object motion and real-time GDF updating in C++ ...\n";
 
     const uint32_t FrameW = 480u;
@@ -435,7 +605,6 @@ int main()
     const uint32_t SheetH = 720u;
     std::vector<uint8_t> MotionSheet(static_cast<size_t>(SheetW) * SheetH * 3u, 0u);
 
-    // 4 motion steps: t = 0.0, 0.25, 0.50, 0.75
     float TimeSteps[4] = { 0.0f, 0.8f, 1.6f, 2.4f };
 
     for (int Step = 0; Step < 4; ++Step)
@@ -443,26 +612,20 @@ int main()
         float T = TimeSteps[Step];
         std::cout << "  Motion Step " << (Step + 1) << "/4 (T=" << T << "s) ...\n";
 
-        // Orbit Left Satellite (Object 1) in an elliptical path
         float Angle1 = T * 0.9f;
         Objects[1].Position = Vector3{ -1.5f * std::cos(Angle1), 1.2f * std::sin(Angle1), 0.0f };
         GDF.UpdatePlacementTransform(Objects[1].PlacementId, Objects[1].Position, Objects[1].Scale);
 
-        // Orbit Right Satellite (Object 2) in opposite direction
         float Angle2 = -T * 0.8f + 1.2f;
         Objects[2].Position = Vector3{ 1.6f * std::cos(Angle2), 1.3f * std::sin(Angle2), 0.0f };
         GDF.UpdatePlacementTransform(Objects[2].PlacementId, Objects[2].Position, Objects[2].Scale);
 
-        // Bob Green Satellite (Object 3) up and down
         float BobHeight = 0.15f + 0.15f * std::sin(T * 2.5f);
         Objects[3].Position.z = BobHeight;
         GDF.UpdatePlacementTransform(Objects[3].PlacementId, Objects[3].Position, Objects[3].Scale);
 
-        // Update the GDF volume dynamically without re-baking any mesh SDF!
-        GDF.UpdateGlobalGrid();
-
         std::vector<uint8_t> FrameRgb;
-        RenderMultiObjectScene(GDF, Objects, CamPos, CamTarget, SunDir, FrameW, FrameH, FrameRgb, 45.0f);
+        RenderMultiObjectScene(GDF, Objects, CamPos, CamTarget, SunDir, FrameW, FrameH, FrameRgb, RenderMode::FullComposite, 45.0f);
 
         uint32_t GX = Step % 2;
         uint32_t GY = Step / 2;

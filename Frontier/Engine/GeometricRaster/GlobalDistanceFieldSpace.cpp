@@ -94,15 +94,12 @@ void GlobalDistanceFieldSpace::UpdateGlobalGrid() noexcept
                 const float WorldX = BMin.x + RatioX * Span.x;
 
                 const Vector3 WorldPosition = { WorldX, WorldY, WorldZ };
-
-                // Distance to ground plane z = 0
-                float MinimumSceneDistance = WorldPosition.z;
+                float MinimumSceneDistance = 1e6f;
 
                 for (const auto& Placement : Placements)
                 {
                     if (!Placement.LocalField) continue;
 
-                    // Inverse transform world position to local mesh space
                     const Vector3 LocalPosition = {
                         (WorldPosition.x - Placement.WorldTranslation.x) / Placement.WorldScale.x,
                         (WorldPosition.y - Placement.WorldTranslation.y) / Placement.WorldScale.y,
@@ -131,12 +128,42 @@ void GlobalDistanceFieldSpace::UpdateGlobalGrid() noexcept
 
 float GlobalDistanceFieldSpace::SampleSceneDistance(Vector3 WorldPosition) const noexcept
 {
-    return GlobalVolume.SampleDistance(WorldPosition);
+    float MinDist = 1e6f;
+    for (const auto& Placement : Placements)
+    {
+        if (!Placement.LocalField) continue;
+
+        const Vector3 LocalPosition = {
+            (WorldPosition.x - Placement.WorldTranslation.x) / Placement.WorldScale.x,
+            (WorldPosition.y - Placement.WorldTranslation.y) / Placement.WorldScale.y,
+            (WorldPosition.z - Placement.WorldTranslation.z) / Placement.WorldScale.z
+        };
+
+        const float LocalDist = Placement.LocalField->SampleDistance(LocalPosition);
+        const float MinScale  = std::min({ Placement.WorldScale.x, Placement.WorldScale.y, Placement.WorldScale.z });
+        const float ScaledDist = LocalDist * MinScale;
+
+        if (ScaledDist < MinDist)
+        {
+            MinDist = ScaledDist;
+        }
+    }
+    return MinDist;
 }
 
 Vector3 GlobalDistanceFieldSpace::SampleSceneNormal(Vector3 WorldPosition) const noexcept
 {
-    return GlobalVolume.SampleNormal(WorldPosition);
+    const float Epsilon = 0.005f;
+    const float Dx = SampleSceneDistance({ WorldPosition.x + Epsilon, WorldPosition.y, WorldPosition.z }) -
+                     SampleSceneDistance({ WorldPosition.x - Epsilon, WorldPosition.y, WorldPosition.z });
+    const float Dy = SampleSceneDistance({ WorldPosition.x, WorldPosition.y + Epsilon, WorldPosition.z }) -
+                     SampleSceneDistance({ WorldPosition.x, WorldPosition.y - Epsilon, WorldPosition.z });
+    const float Dz = SampleSceneDistance({ WorldPosition.x, WorldPosition.y, WorldPosition.z + Epsilon }) -
+                     SampleSceneDistance({ WorldPosition.x, WorldPosition.y, WorldPosition.z - Epsilon });
+
+    const Vector3 Grad = { Dx, Dy, Dz };
+    const float Len = Grad.Length();
+    return (Len > 1e-7f) ? (Grad / Len) : Vector3{ 0.0f, 0.0f, 1.0f };
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -150,7 +177,7 @@ DistanceFieldHitRecord GlobalDistanceFieldSpace::MarchSceneRay(Vector3 RayOrigin
                                                                float SurfaceThreshold,
                                                                uint32_t MaximumSteps,
                                                                float StepRelaxation,
-                                                               float TransitionDistance) const noexcept
+                                                               float /*TransitionDistance*/) const noexcept
 {
     DistanceFieldHitRecord ResultRecord{};
     ResultRecord.TravelDistance   = MinimumDistance;
@@ -158,46 +185,46 @@ DistanceFieldHitRecord GlobalDistanceFieldSpace::MarchSceneRay(Vector3 RayOrigin
     ResultRecord.InstanceIdentity = 0xFFFFFFFFu;
     ResultRecord.HasHit           = false;
 
-    float CurrentDistance = MinimumDistance;
+    // Analytical ground plane intersection at z = 0
+    float GroundT = MaximumDistance;
+    if (std::abs(RayDirection.z) > 1e-6f)
+    {
+        const float T = -RayOrigin.z / RayDirection.z;
+        if (T >= MinimumDistance && T < MaximumDistance)
+        {
+            GroundT = T;
+        }
+    }
 
-    for (uint32_t Step = 0u; Step < MaximumSteps && CurrentDistance < MaximumDistance; ++Step)
+    float CurrentDistance = MinimumDistance;
+    const float MarchLimit = std::min(MaximumDistance, GroundT);
+
+    for (uint32_t Step = 0u; Step < MaximumSteps && CurrentDistance < MarchLimit; ++Step)
     {
         ResultRecord.StepCount++;
         const Vector3 SamplePosition = RayOrigin + RayDirection * CurrentDistance;
 
-        // Ground plane collision at z = 0
-        if (SamplePosition.z <= SurfaceThreshold && RayDirection.z < -1e-4f)
-        {
-            const float HitT = (0.0f - RayOrigin.z) / RayDirection.z;
-            if (HitT >= MinimumDistance && HitT <= MaximumDistance)
-            {
-                ResultRecord.HasHit           = true;
-                ResultRecord.TravelDistance   = HitT;
-                ResultRecord.HitPosition      = RayOrigin + RayDirection * HitT;
-                ResultRecord.SurfaceNormal    = Vector3{ 0.0f, 0.0f, 1.0f };
-                ResultRecord.InstanceIdentity = 0xFFFFFFFFu; // ground
-                return ResultRecord;
-            }
-        }
-
-        // Sample coarse global distance field
-        const float CoarseDistance = GlobalVolume.SampleDistance(SamplePosition);
-
-        // When sufficiently far from surfaces, take large accelerated steps via the global field
-        if (CoarseDistance > TransitionDistance)
-        {
-            CurrentDistance += CoarseDistance * StepRelaxation;
-            continue;
-        }
-
-        // Near surface: refine against the most proximal local mesh field
-        float FineDistance = CoarseDistance;
-        const DistanceFieldPlacement* NearestPlacement = nullptr;
-        Vector3 NearestLocalPosition{};
+        // Query nearest placement
+        float NearestDistance = 1e6f;
+        const DistanceFieldPlacement* HitPlacement = nullptr;
+        Vector3 HitLocalPosition{};
 
         for (const auto& Placement : Placements)
         {
             if (!Placement.LocalField) continue;
+
+            // Bounding box distance test
+            const float OutDx = std::max(0.0f, std::max(Placement.WorldBoundMin.x - SamplePosition.x, SamplePosition.x - Placement.WorldBoundMax.x));
+            const float OutDy = std::max(0.0f, std::max(Placement.WorldBoundMin.y - SamplePosition.y, SamplePosition.y - Placement.WorldBoundMax.y));
+            const float OutDz = std::max(0.0f, std::max(Placement.WorldBoundMin.z - SamplePosition.z, SamplePosition.z - Placement.WorldBoundMax.z));
+            const float DistToBound = std::sqrt(OutDx * OutDx + OutDy * OutDy + OutDz * OutDz);
+
+            if (DistToBound > 0.35f)
+            {
+                if (DistToBound < NearestDistance)
+                    NearestDistance = DistToBound;
+                continue;
+            }
 
             const Vector3 LocalPos = {
                 (SamplePosition.x - Placement.WorldTranslation.x) / Placement.WorldScale.x,
@@ -209,36 +236,46 @@ DistanceFieldHitRecord GlobalDistanceFieldSpace::MarchSceneRay(Vector3 RayOrigin
             const float MinScale  = std::min({ Placement.WorldScale.x, Placement.WorldScale.y, Placement.WorldScale.z });
             const float ScaledDist = LocalDist * MinScale;
 
-            if (ScaledDist < FineDistance)
+            if (ScaledDist < NearestDistance)
             {
-                FineDistance = ScaledDist;
-                NearestPlacement = &Placement;
-                NearestLocalPosition = LocalPos;
+                NearestDistance = ScaledDist;
+                HitPlacement = &Placement;
+                HitLocalPosition = LocalPos;
             }
         }
 
-        if (FineDistance <= SurfaceThreshold)
+        if (NearestDistance <= SurfaceThreshold)
         {
             ResultRecord.HasHit           = true;
             ResultRecord.TravelDistance   = CurrentDistance;
             ResultRecord.HitPosition      = SamplePosition;
-            ResultRecord.InstanceIdentity = NearestPlacement ? NearestPlacement->InstanceIdentity : 0xFFFFFFFFu;
+            ResultRecord.InstanceIdentity = HitPlacement ? HitPlacement->InstanceIdentity : 0u;
 
-            if (NearestPlacement && NearestPlacement->LocalField)
+            if (HitPlacement && HitPlacement->LocalField)
             {
-                const Vector3 LocalNormal = NearestPlacement->LocalField->SampleNormal(NearestLocalPosition);
-                ResultRecord.SurfaceNormal = LocalNormal.Normalized();
+                const Vector3 LocalNorm = HitPlacement->LocalField->SampleNormal(HitLocalPosition);
+                ResultRecord.SurfaceNormal = LocalNorm.Normalized();
             }
             else
             {
-                ResultRecord.SurfaceNormal = GlobalVolume.SampleNormal(SamplePosition);
+                ResultRecord.SurfaceNormal = Vector3{ 0.0f, 0.0f, 1.0f };
             }
-
             return ResultRecord;
         }
 
-        const float SafeAdvance = std::max(FineDistance * StepRelaxation, SurfaceThreshold * 0.5f);
+        const float SafeAdvance = std::max(NearestDistance * StepRelaxation, SurfaceThreshold * 0.5f);
         CurrentDistance += SafeAdvance;
+    }
+
+    // Ground plane hit
+    if (GroundT < MaximumDistance && GroundT >= MinimumDistance && RayDirection.z < 0.0f)
+    {
+        ResultRecord.HasHit           = true;
+        ResultRecord.TravelDistance   = GroundT;
+        ResultRecord.HitPosition      = RayOrigin + RayDirection * GroundT;
+        ResultRecord.SurfaceNormal    = Vector3{ 0.0f, 0.0f, 1.0f };
+        ResultRecord.InstanceIdentity = 0xFFFFFFFFu; // Studio floor
+        return ResultRecord;
     }
 
     return ResultRecord;
@@ -253,32 +290,61 @@ float GlobalDistanceFieldSpace::MarchSceneSoftShadow(Vector3 ShadingPosition,
                                                      float MinimumDistance,
                                                      float MaximumDistance,
                                                      float LightAngularSize,
-                                                     uint32_t MaximumSteps) const noexcept
+                                                     uint32_t MaximumSteps,
+                                                     uint32_t ReceiverInstance) const noexcept
 {
-    float ShadowPenumbra = 1.0f;
-    float CurrentDistance = MinimumDistance;
-    const float PenumbraScale = 1.0f / std::max(0.01f, std::tan(LightAngularSize));
+    float MinPenumbra = 1.0f;
 
-    for (uint32_t Step = 0u; Step < MaximumSteps && CurrentDistance < MaximumDistance; ++Step)
+    for (const auto& Placement : Placements)
     {
-        const Vector3 SamplePosition = ShadingPosition + IlluminantDirection * CurrentDistance;
+        if (!Placement.LocalField) continue;
 
-        // Ground plane shadow test
-        if (SamplePosition.z <= 0.001f && IlluminantDirection.z < 0.0f)
-            return 0.0f;
+        const Vector3 InvScale = {
+            1.0f / Placement.WorldScale.x,
+            1.0f / Placement.WorldScale.y,
+            1.0f / Placement.WorldScale.z
+        };
 
-        const float EvaluatedDistance = GlobalVolume.SampleDistance(SamplePosition);
-        if (EvaluatedDistance <= 0.001f)
-            return 0.0f;
+        const Vector3 LocalOrigin = {
+            (ShadingPosition.x - Placement.WorldTranslation.x) * InvScale.x,
+            (ShadingPosition.y - Placement.WorldTranslation.y) * InvScale.y,
+            (ShadingPosition.z - Placement.WorldTranslation.z) * InvScale.z
+        };
 
-        const float StepPenumbra = PenumbraScale * EvaluatedDistance / CurrentDistance;
-        ShadowPenumbra = std::min(ShadowPenumbra, StepPenumbra);
+        const Vector3 ScaledDir = {
+            IlluminantDirection.x * InvScale.x,
+            IlluminantDirection.y * InvScale.y,
+            IlluminantDirection.z * InvScale.z
+        };
 
-        const float StepAdvance = std::max(EvaluatedDistance * 0.85f, 0.004f);
-        CurrentDistance += StepAdvance;
+        const float DirLength = ScaledDir.Length();
+        if (DirLength < 1e-6f) continue;
+        const Vector3 LocalDir = ScaledDir / DirLength;
+
+        // If this placement is the receiver object itself, use larger self-shadow margin to clear the voxel skin
+        const float ObjectScale = std::min({ Placement.WorldScale.x, Placement.WorldScale.y, Placement.WorldScale.z });
+        const float EffectiveMinDist = (Placement.InstanceIdentity == ReceiverInstance)
+            ? std::max(MinimumDistance, 0.055f * ObjectScale)
+            : MinimumDistance;
+
+        const float LocalMinT = EffectiveMinDist * DirLength;
+        const float LocalMaxT = MaximumDistance * DirLength;
+
+        const float PlacementShadow = Placement.LocalField->MarchSoftShadow(
+            LocalOrigin, LocalDir, LocalMinT, LocalMaxT, LightAngularSize, MaximumSteps
+        );
+
+        if (PlacementShadow < MinPenumbra)
+        {
+            MinPenumbra = PlacementShadow;
+            if (MinPenumbra <= 0.001f)
+            {
+                return 0.0f;
+            }
+        }
     }
 
-    return std::clamp(ShadowPenumbra, 0.0f, 1.0f);
+    return std::clamp(MinPenumbra, 0.0f, 1.0f);
 }
 
 } // namespace Frontier
