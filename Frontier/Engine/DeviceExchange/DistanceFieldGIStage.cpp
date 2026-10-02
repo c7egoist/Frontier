@@ -135,8 +135,17 @@ bool DistanceFieldGIStage::CreateBuffers() noexcept
                                     InitializationData.VolumeResolution *
                                     InitializationData.VolumeResolution * sizeof(float);
     const VkBufferUsageFlags Usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    return AllocateBuffer(InitializationData.Device, InitializationData.MemoryProperties, VoxelBytes,
-                          Usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DistanceFieldBuffer, DistanceFieldMemory);
+    if (!AllocateBuffer(InitializationData.Device, InitializationData.MemoryProperties, VoxelBytes,
+                        Usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, DistanceFieldBuffer, DistanceFieldMemory))
+        return false;
+
+    // Surface Cache Atlas buffer (512x512 cards * 64 bytes per card)
+    const VkDeviceSize CacheBytes = 512ull * 512ull * 64ull;
+    if (!AllocateBuffer(InitializationData.Device, InitializationData.MemoryProperties, CacheBytes,
+                        Usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, SurfaceCacheBuffer, SurfaceCacheMemory))
+        return false;
+
+    return true;
 }
 
 bool DistanceFieldGIStage::CreatePipelines() noexcept
@@ -205,7 +214,7 @@ bool DistanceFieldGIStage::WriteDescriptors() noexcept
     const uint32_t Slots = InitializationData.TextureCapacity;
     std::vector<VkDescriptorPoolSize> PoolSizes = {
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 3u },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10u }
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 11u }
     };
     if (Slots > 0u) PoolSizes.push_back({ VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, Slots });
 
@@ -231,6 +240,69 @@ bool DistanceFieldGIStage::WriteDescriptors() noexcept
     if (vkAllocateDescriptorSets(InitializationData.Device, &AllocInfo, &DescriptorSet) != VK_SUCCESS)
         return false;
 
+    // Populate all descriptor writes for images and buffers
+    std::vector<VkWriteDescriptorSet> Writes;
+    std::vector<VkDescriptorImageInfo> StorageImages(3);
+    StorageImages[0] = { VK_NULL_HANDLE, InitializationData.OutputImageView, VK_IMAGE_LAYOUT_GENERAL };
+    StorageImages[1] = { VK_NULL_HANDLE, InitializationData.SurfaceImageView, VK_IMAGE_LAYOUT_GENERAL };
+    StorageImages[2] = { VK_NULL_HANDLE, InitializationData.NormalImageView, VK_IMAGE_LAYOUT_GENERAL };
+
+    for (uint32_t i = 0u; i < 3u; ++i)
+    {
+        VkWriteDescriptorSet W{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        W.dstSet = DescriptorSet;
+        W.dstBinding = i;
+        W.descriptorCount = 1u;
+        W.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        W.pImageInfo = &StorageImages[i];
+        Writes.push_back(W);
+    }
+
+    struct BufferBinding { uint32_t Binding; VkBuffer Buffer; };
+    std::vector<BufferBinding> BufferMap = {
+        { 3u, DistanceFieldBuffer },
+        { 4u, SurfaceCacheBuffer },
+        { 8u, InitializationData.CwbvhNodeBuffer },
+        { 9u, InitializationData.CwbvhLeafBuffer },
+        { 10u, InitializationData.TriangleBuffer },
+        { 11u, InitializationData.MaterialBuffer },
+        { 12u, InitializationData.InstanceBuffer },
+        { 13u, InitializationData.SlabBuffer },
+        { 14u, InitializationData.VertexBuffer },
+        { 15u, InitializationData.IndexBuffer }
+    };
+
+    std::vector<VkDescriptorBufferInfo> BufferInfos(BufferMap.size());
+    for (size_t i = 0u; i < BufferMap.size(); ++i)
+    {
+        BufferInfos[i] = { BufferMap[i].Buffer, 0u, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet W{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        W.dstSet = DescriptorSet;
+        W.dstBinding = BufferMap[i].Binding;
+        W.descriptorCount = 1u;
+        W.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        W.pBufferInfo = &BufferInfos[i];
+        Writes.push_back(W);
+    }
+
+    std::vector<VkDescriptorImageInfo> TextureInfos;
+    if (Slots > 0u && InitializationData.TextureCount > 0u && InitializationData.TextureViews)
+    {
+        TextureInfos.resize(InitializationData.TextureCount);
+        for (uint32_t i = 0u; i < InitializationData.TextureCount; ++i)
+        {
+            TextureInfos[i] = { InitializationData.TextureSampler, InitializationData.TextureViews[i], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        }
+        VkWriteDescriptorSet W{ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        W.dstSet = DescriptorSet;
+        W.dstBinding = 16u;
+        W.descriptorCount = InitializationData.TextureCount;
+        W.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+        W.pImageInfo = TextureInfos.data();
+        Writes.push_back(W);
+    }
+
+    vkUpdateDescriptorSets(InitializationData.Device, static_cast<uint32_t>(Writes.size()), Writes.data(), 0u, nullptr);
     return true;
 }
 
