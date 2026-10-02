@@ -4,7 +4,7 @@ All three Liger meshes are rebuilt as **real NURBS surfaces**, not lofts between
 
 | File | Part | Result |
 |---|---|---|
-| `Liger_Body_Shell.arc` | `Body_Main_Shell` | 30 faces sewn into one manifold sheet (details below) |
+| `Liger_Body_Shell.arc` | `Body_Main_Shell` | 30 faces sewn into one manifold sheet (30 open edges: underside, arch holes, nose notch, deck slot) |
 | `Liger_Front_Cowl.arc` | `Body_Front_Cowl` | 12 bicubic patches, sewn into one manifold sheet. Mean 0.12 cm, max 0.47 cm |
 | `Liger_Roof_Glass_Frame.arc` | `Body_Roof_Glass_Frame` | 6 ribbon patches. Mean 0.13 cm, max 0.56 cm |
 | `Liger_Full_Vehicle.arc` | all of the above | one replay script with tints |
@@ -17,7 +17,7 @@ All three Liger meshes are rebuilt as **real NURBS surfaces**, not lofts between
 
 * 15 bicubic B-spline patches are fitted to the mesh. Each is mirrored about the centreline, giving 30 faces.
 * `sew` merges them into **one manifold, consistently oriented sheet**: V44 E73 F30, `manifold yes, oriented yes`, no T-junctions.
-* The 26 open edges are all intentional: the underside perimeter, both wheel-arch holes and the nose notch, 13 per side.
+* The 30 open edges are all intentional: the underside perimeter, both wheel-arch holes and the nose notch (13 per side), plus the plate-rim and canopy-edge edges of the rear slot (2 per side).
 * Units are metres. X is forward, Z is up, and the **centreline is at Y = 0**. The Blender Y of the centreline was −47.718 cm, so add −0.47718 m to Y to get back to the original coordinates.
 * `Liger_Body_Patches_Unsewn.arc` has the same patches before `sew`, for editing individual faces.
 
@@ -36,15 +36,15 @@ Run from `pipeline/` with `LIGER_MESH_DIR=<path to Vehicles/Liger/mesh>` set. `p
 |---|---|---|---|
 | Canopy ×3, shoulders ×3, hood A, tail, arch sectors, door wall | 0.17–0.20 | 0.40–0.45 | 0.5–0.85 |
 | Hood B | 0.20 | 0.71 | 1.13 |
-| Nose face (NQ2) | 0.26 | 1.75 | 7.5 |
-| Rear deck | 0.37 | 4.0 | 6.0 |
-| Front-arch liner (NQ1) | 0.76 | 5.5 | 7.5 |
+| Nose face (NQ2) | 0.27 | 3.1 | 8.6 |
+| Rear deck (spoiler plate) | 0.17 | 0.42 | 1.9 |
+| Front-arch liner (NQ1) | 0.84 | 5.8 | 8.6 |
 
 About 0.17 cm is the noise floor of the metric, set by the mesh sample spacing.
 
 ## Known gaps
-* **Rear deck.** There is a 6.5–13 cm vertical riser between canopy and spoiler plate that a single smooth patch cannot follow. The error is confined to a ~3 cm strip. Fix: add a ruled riser patch and a separate plate rim.
-* **Arch liners.** The tunnel liner behind the front arch (NQ1) and the nose notch are approximate. A few small liner slivers render pink (back faces) from certain angles.
+* **Rear deck slot.** The source mesh has no riser wall between the spoiler plate and the canopy. The plate is a separate overhanging sheet with an open slot under it, and the floor at z ≈ 85 is not modelled. The CAD reproduces this: the plate rim and the canopy edge are free edges (the 4 extra open edges), and the slot looks dark from above. Add a floor patch if a closed tail is wanted.
+* **Arch liners.** The tunnel liner behind the front arch (NQ1) and the nose notch are approximate (the error sits on the NQ1/NQ2 shared cut). A few small liner slivers render pink (back faces) from certain angles.
 * The body is an open shell (no underside), like the source mesh. Add thickness with `solidify` per patch if a solid is needed.
 
 `proofs/` has kernel renders of the sewn body and of the patch layout (each patch tinted).

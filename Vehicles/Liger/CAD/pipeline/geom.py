@@ -6,7 +6,8 @@ def build_samples(V,T,spacing=0.35,seed=1):
     rng=np.random.default_rng(seed)
     a,b,c=V[T[:,0]],V[T[:,1]],V[T[:,2]]
     A=0.5*np.linalg.norm(np.cross(b-a,c-a),axis=1)
-    n=np.maximum(1,np.round(A/spacing**2)).astype(int)
+    me=np.maximum(np.maximum(np.linalg.norm(b-a,axis=1),np.linalg.norm(c-b,axis=1)),np.linalg.norm(a-c,axis=1))
+    n=np.maximum(np.maximum(1,np.round(A/spacing**2)),np.ceil(me/spacing)).astype(int)   # slivers need >= len/spacing samples
     idx=np.repeat(np.arange(len(T)),n)
     r1=np.sqrt(rng.random(len(idx))); r2=rng.random(len(idx))
     P=a[idx]*(1-r1)[:,None]+b[idx]*(r1*(1-r2))[:,None]+c[idx]*(r1*r2)[:,None]

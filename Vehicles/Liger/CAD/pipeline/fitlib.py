@@ -40,6 +40,12 @@ class Rail:
         self.err=np.linalg.norm(B@C-D,axis=1).max()
     def pt(self,t): return self.cs(t)               # dense (true) curve
     def spl(self,t): return basis_full(np.atleast_1d(t),self.n)@self.C
+class DegRail:
+    """zero-length rail (a collapsed patch edge): all n poles at one point"""
+    def __init__(self,name,pt,n):
+        self.name=name; self.n=n; self.length=0.0; self.P=np.array([pt,pt]); self.C=np.tile(np.asarray(pt,float),(n,1)); self.err=0.0
+    def pt(self,t): t=np.atleast_1d(t); return np.tile(self.C[0],(len(t),1)) if t.ndim else self.C[0]
+    def spl(self,t): return self.pt(t)
 def lift(S,xy,axis=2,pick='max',eps=0.6):
     H=S.ray(np.asarray(xy,float),axis,pick,eps=eps); return H
 def fill_nan(G):

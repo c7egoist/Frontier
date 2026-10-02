@@ -62,6 +62,8 @@ class Layout:
     def _add(self,a,b,P,n):
         key=frozenset((a,b)); assert key not in self.rspec,('dup rail',a,b)
         self.rspec[key]=dict(a=a,b=b,P=P,n=n)
+    def rail_degenerate(self,a):
+        self._add(a,a,np.array([self.nodes[a],self.nodes[a]]),None); self.rspec[frozenset((a,a))]['deg']=True
     def quad(self,name,c,axis=2,pick='max',nu=None,nv=None):
         self.quads.append(dict(name=name,c=c,axis=axis,pick=pick,nu=nu,nv=nv))
     # ---- solve pole counts, fit rails, build patches
@@ -84,7 +86,7 @@ class Layout:
             g=find(k); grp[g]=max(grp.get(g,0),s['n'] or auto)
         for k,s in self.rspec.items():
             n=grp[find(k)]
-            self.rails[k]=Rail(s['a']+'-'+s['b'],s['P'],n,flat_y=False)
+            self.rails[k]=DegRail(s['a']+'-'+s['b'],s['P'][0],n) if s.get('deg') else Rail(s['a']+'-'+s['b'],s['P'],n,flat_y=False)
     def build(self):
         for q in self.quads:
             p00,p10,p11,p01=q['c']

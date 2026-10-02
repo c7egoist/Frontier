@@ -8,7 +8,7 @@ def arcpts(c,r0,r1,a0,a1,n=12):
 def build_all(S,xcut=160.0):
     L=Layout(S)
     L.master_plan('CL',[(-181.1,0),(0,0),(259.8,0)],flat_y=True,step=1.0)
-    Vfull=[(-139.5,-73),(-134,-69.5),(-120,-66.5),(-90,-66),(-60,-70),(-30,-75),(0,-80.5),(40,-84),(80,-84.5),(120,-83.5),(140,-80),(155,-77),(165,-72),(172,-64),(178,-55),(183,-45),(187,-35),(190,-22),(192,-10),(192,0)]
+    Vfull=[(-138.5,-77.5),(-136.6,-73.5),(-133.5,-70),(-120,-66.5),(-90,-66),(-60,-70),(-30,-75),(0,-80.5),(40,-84),(80,-84.5),(120,-83.5),(140,-80),(155,-77),(165,-72),(172,-64),(178,-55),(183,-45),(187,-35),(190,-22),(192,-10),(192,0)]
     Vs=snap(S,np.array(Vfull,float),win=3.0)
     L.master_plan('V',Vs,step=1.0)
     H=np.load('out_half.npy'); O=np.r_[H[:88],H[176:]]
@@ -19,9 +19,9 @@ def build_all(S,xcut=160.0):
     LP=np.load('loop_half.npy').copy(); LP[0,1]=0; LP[-1,1]=0
     L.master_pts('LOOP',LP)
     # --- nodes on CL / V / OUT
-    L.node_on('n2','CL',(-181.1,0)); L.node_on('A','CL',(-147,0)); L.node_on('Cx1','CL',(-64,0)); L.node_on('Cx2','CL',(xcut,0))
+    L.node_on('n2','CL',(-181.1,0)); L.node_on('A','CL',(-148.4,0)); L.node_on('Ap','CL',(-149.0,0)); L.node_on('Cx1','CL',(-64,0)); L.node_on('Cx2','CL',(xcut,0))
     L.node_on('E','CL',(192,0)); L.node_on('N0','CL',(259.8,0))
-    L.node_on('B','V',(-139.5,-73)); L.node_on('V64','V',(-64,-70)); L.node_on('V160','V',(xcut,-75)); L.node_on('G','V',(178,-55))
+    L.node_on('B','V',(-138.5,-77.5)); L.node_on('V64','V',(-64,-70)); L.node_on('V160','V',(xcut,-75)); L.node_on('G','V',(178,-55))
     L.nodes['E']=L.masters['CL'][L.nodes['E#'][1]]; L.masters['V'][-1]=L.nodes['E']
     L.node_on('aL','OUT',(-150,-100)); L.node_on('aR','OUT',(-64,-107)); L.node_on('aF','OUT',(xcut,-111)); L.node_on('X','OUT',(205,-113))
     L.nodes['n2']=L.masters['OUT'][0].copy(); L.masters['CL'][0]=L.nodes['n2']
@@ -31,16 +31,18 @@ def build_all(S,xcut=160.0):
     nE=L.nodes['E'].copy()
     # rails on CL
     L.nodes['n2#']=('CL',0); L.nodes['N0#']=('CL',len(L.masters['CL'])-1)
-    for a,b in (('n2','A'),('A','Cx1'),('Cx1','Cx2'),('Cx2','E'),('E','N0')): L.rail_master(a,b,'CL')
+    for a,b in (('n2','Ap'),('A','Cx1'),('Cx1','Cx2'),('Cx2','E'),('E','N0')): L.rail_master(a,b,'CL')
     L.nodes['E#']=('V',len(L.masters['V'])-1)
     for a,b in (('B','V64'),('V64','V160'),('V160','G'),('G','E')): L.rail_master(a,b,'V')
     L.nodes['n2#']=('OUT',0); L.nodes['N0#']=('OUT',len(L.masters['OUT'])-1)
     for a,b in (('n2','aL'),('aL','aR'),('aR','aF'),('aF','X'),('X','N0')): L.rail_master(a,b,'OUT')
     # top-family cuts
-    L.rail_line('A','B',via=[(-147.4,-30),(-145.5,-48),(-143,-60),(-140.5,-69)])
+    L.rail_line('A','B',via=[(-148.3,-10),(-148.1,-20),(-147.8,-30),(-147.1,-40),(-146.3,-50),(-145.7,-55),(-144.7,-60),(-143.3,-65),(-141.5,-70),(-140.4,-73),(-139.6,-75),(-138.9,-77)])      # canopy-side edge of the riser
+    L.rail_line('Ap','B',via=[(-148.9,-10),(-148.7,-20),(-148.4,-30),(-147.7,-40),(-146.9,-50),(-146.3,-55),(-145.3,-60),(-143.9,-65),(-142.1,-70),(-141.0,-73),(-140.2,-75),(-139.3,-77)])    # spoiler-plate rim
+    # NOTE: the mesh has NO riser wall between plate and canopy: the plate is a separate overhanging sheet (open slot, floor at z~85 not modelled)
     for a,b in (('B','aL'),('Cx1','V64'),('V64','aR'),('Cx2','V160'),('V160','aF'),('G','X')): L.rail_line(a,b)
     L.quad('Cn1',['A','Cx1','V64','B']); L.quad('Cn2',['Cx1','Cx2','V160','V64']); L.quad('Cn3',['Cx2','E','G','V160'])
-    L.quad('Deck',['A','n2','aL','B']); L.quad('Sh_rear',['B','V64','aR','aL']); L.quad('Sh_door',['V64','V160','aF','aR'])
+    L.quad('Deck',['Ap','n2','aL','B']); L.quad('Sh_rear',['B','V64','aR','aL']); L.quad('Sh_door',['V64','V160','aF','aR'])
     L.quad('Hood_a',['V160','G','X','aF']); L.quad('Hood_b',['G','E','N0','X'])
     # --- loop nodes
     for nm,idx in (('n1',0),('Tb',26),('P3',60),('NL',96),('NR',126),('Pbr',188),('Pbro',212),('Pfbl',268),('Pfbr',444),('K1',464),('K2',504),('N6',len(LP)-1)): reg(nm,'LOOP',idx)
@@ -66,7 +68,10 @@ def build_all(S,xcut=160.0):
     L.rail_line('NL','aL',axis=1,pick='min'); L.rail_line('NR','aR',axis=1,pick='min')
     aR_=ang('aR',CR); aP=ang('Pbro',CR); pts=arcpts(CR,rad('aR',CR),rad('Pbro',CR),aR_,aP,14)[1:-1]
     L.rail_line('aR','Pbro',axis=1,pick='min',via=[tuple(p) for p in pts])
-    L.rail_line('K2','X',axis=None)
+    k2,xx=L.nodes['K2'],L.nodes['X']
+    th=lambda p:np.arctan2(p[2]-CF[1],p[0]-CF[0]); rr=lambda p:np.hypot(p[2]-CF[1],p[0]-CF[0])
+    t=np.linspace(0,1,24); a=th(k2)+t*(th(xx)-th(k2)); r=rr(k2)+t*(rr(xx)-rr(k2)); y=k2[1]+t*(xx[1]-k2[1])
+    Pk=np.stack([CF[0]+r*np.cos(a),y,CF[1]+r*np.sin(a)],1); Pk[0]=k2; Pk[-1]=xx; L._add('K2','X',Pk,None)
     # tail / nose centre-line faces (x-ray)
     L.rail_line('n1','n2',axis=0,pick='min'); L.rail_line('N6','N0',axis=0,pick='max')
     # wall quads
