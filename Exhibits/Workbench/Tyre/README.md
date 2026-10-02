@@ -169,3 +169,70 @@ structural, not another repair: per floor piece, emit whole interior cells as qu
 **entire remaining boundary band as one region** — the piece minus the union of those whole cells — and
 triangulate it once. One triangulation cannot disagree with itself, and the band's inner boundary is by
 construction the outline of the quad cells it meets.
+
+## ④ continued — the floors close, one contour orientation at a time
+
+The band rewrite landed, and with it two defects were found and fixed. Neither was the one the previous
+section predicted, and the prediction itself was only half right.
+
+### The triangulator
+
+Clipper2's `Triangulate` is beta. Handed a whole row band it exhausted three gigabytes and the process was
+killed; scoped down to one block it was still killed. It was replaced with `earcut`, with nesting taken from
+a Clipper `PolyTree64` so each outer loop is triangulated with the holes that actually belong to it. Pairing
+loops by orientation alone is not enough — a negative area says "this is a hole", not "this is a hole in
+that one", and a block band routinely holds several islands.
+
+### The defect that mattered: the same number computed twice
+
+The isolation run is the whole story.
+
+| case                                            | open edges | excess over the rim |
+|-------------------------------------------------|-----------:|--------------------:|
+| no pattern at all                                |        870 |                   0 |
+| one circumferential groove, edges on grid lines  |        870 |                   0 |
+| one circumferential groove, edges mid-cell       |      1 686 |                 816 |
+| one circumferential groove, edges 0.04 off a line|      2 162 |               1 292 |
+
+With no pattern the mesh is already exactly closed: 870 open edges is 2 × 435 columns, the two rim openings,
+with no non-manifold and no degenerate faces. The quad grid was never the problem. Cracks appeared only where
+a groove forced a band — and vanished when the groove happened to land on grid lines.
+
+The repair pass reported **zero** T-junctions against those cracks, which ruled out the predicted cause.
+Dumping the open edges showed every one of them at lateral −3.0000 exactly, in two rings, one on the crown
+floor and one on the groove floor — and nothing at all at +3.0000. One side of a groove closed, the other
+did not.
+
+The cell grid puts a column line at `Unit(Circumference * Column / Columns)`. The subdivision pass put it at
+`llround(Ax + Dx * Fraction)`. Those are the same real number reached by different arithmetic, so they
+disagree in the last bit, and `llround` turns that into one integer — one micrometre, which is exactly
+`WeldTolerance`, so the two sides fail to weld. Because the error depends on `Ax` and `Dx`, an edge walked in
+`+x` rounded differently from one walked in `−x`, which is why a rectangle closed along one side and opened
+along the other.
+
+A crossing now carries the grid coordinate it lies on, snapped with the identical expression the cell grid
+uses, and only the other coordinate is interpolated. All three cases above go to 870 — the rim and nothing
+else.
+
+### What is still open
+
+The full Grizzly Magnum pattern is better but not closed: raw open edges 24 268 → 22 348. Grading by contour
+orientation says where the rest lives.
+
+| contour orientation                | excess open edges |
+|------------------------------------|------------------:|
+| circumferential, parallel to columns |                 0 |
+| lateral, straight across             |               252 |
+| lateral, diagonal                    |             1 289 |
+
+Contours parallel to the column grid are exact. Contours that cross it are not, and diagonals are worst. The
+cause is the same species as the one just fixed, one level up: where a diagonal contour crosses a grid line,
+the floor gets that intersection from Clipper's exact integer arithmetic while the wall gets it from an
+interpolation of the raw contour. Snapping fixed the axis-aligned case because there the shared coordinate
+*is* a grid coordinate; on a diagonal the shared coordinate is an intersection, and only one of the two
+producers computes it exactly.
+
+The fix is architectural and is the last one this stage needs: **a wall must be extruded from the floor's own
+boundary, not recomputed from the raw contour.** The floor boundary is already the exact Clipper result, so
+deriving the wall from it makes disagreement impossible rather than merely unlikely. The gate stays failing
+until it is in.
