@@ -1,0 +1,42 @@
+================================================================================
+ DISTANCE FIELD GLOBAL ILLUMINATION PROOF — GTX Architecture
+================================================================================
+
+① GATE 1: SDF BAKE & GEOMETRY FIDELITY
+  PASS  ShaderBall signed distance field container loaded
+        resolution: 64x64x64 voxels
+        bounds: min (-0.637102, -0.597715, -0.080000) max (0.637102, 0.597715, 1.180000)
+  PASS  zero-crossing holds: interior samples 58504 (22.317505%), exterior 203640
+  PASS  surface normal gradient length = 1.000000 (unit gradient holds)
+
+② GATE 2: GLOBAL DISTANCE FIELD COMPOSITING & SCENE TRAVERSAL
+  PASS  Global Distance Field volume initialized and updated
+        registered placements: 1
+  PASS  hierarchical scene ray hit at distance 1.986098 m
+        traversal evaluated in 32 steps (O(1) accelerated traversal holds)
+
+③ GATE 3: SURFACE CACHE PARAMETERIZATION & MULTI-BOUNCE PROPAGATION
+  PASS  Surface Cache atlas populated: direct illuminant + indirect irradiance active
+        sample surface radiance = (1.320619, 0.593167, 0.284379)
+  PASS  instant O(1) texture-cache lookup validated without secondary ray traversal
+
+④ GATE 4: DISTANCE FIELD SOFT SHADOWS & CONTACT HARDENING
+        near-contact penumbra factor: 0.000000
+        distant receiver penumbra factor: 0.932940
+  PASS  contact hardening verified: sharp near ground occluder, widening smoothly with distance
+
+⑤ GATE 5: ReSTIR GI SPATIO-TEMPORAL RESERVOIR RESAMPLING
+  PASS  ReSTIR candidate folding and unbiased weight estimation holds (M=2.000000, W=1.127778)
+
+Rendering 6-panel visual comparison sheet (1920x1080)...
+  sheet: VisualProof/DistanceFieldGI/DistanceFieldGISheet.png
+         panel 1 (top-left)     = Full Global Illumination (Direct + Soft Shadows + ReSTIR GI)
+         panel 2 (top-center)   = Indirect Diffuse GI Only (Surface Cache bounces)
+         panel 3 (top-right)    = Distance Field Soft Shadows (Contact-hardening penumbras)
+         panel 4 (bottom-left)  = Surface Cache Atlas (Parameterised radiance cache)
+         panel 5 (bottom-center)= Signed Distance Field Volume Slices (Iso-surface distance)
+         panel 6 (bottom-right) = Numerical Surface Normal Gradients
+
+================================================================================
+ ALL CHECKS PASSED
+================================================================================
