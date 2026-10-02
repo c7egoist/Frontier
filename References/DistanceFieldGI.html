@@ -195,7 +195,7 @@
         <div class="hud-line"><span class="hud-label">Total Triangles</span><span class="hud-val" id="hud-tris">339,160 Tris</span></div>
         <div class="hud-line"><span class="hud-label">Global Distance Field</span><span class="hud-val good" id="hud-gdf-status">Dynamic 3D Composite</span></div>
         <div class="hud-line"><span class="hud-label">Contact Soft Shadows</span><span class="hud-val good" id="hud-shadows-status">Banding-Free Hardening</span></div>
-        <div class="hud-line"><span class="hud-label">Surface Cache GI</span><span class="hud-val good" id="hud-cache-status">Vibrant Color Bleed</span></div>
+        <div class="hud-line"><span class="hud-label">Surface Cache GI</span><span class="hud-val good" id="hud-cache-status">Vibrant Multi-Bounce</span></div>
     </div>
 </div>
 
@@ -217,6 +217,36 @@
                 <option value="4">Debug: GDF 3D Distance Slices</option>
                 <option value="5">Debug: Geometric Normals</option>
             </select>
+        </div>
+
+        <!-- Sun & Environment Lighting -->
+        <div>
+            <div class="section-title">Sun & Night Controls</div>
+            <div class="toggle-row">
+                <label>Enable Direct Sun Illuminant</label>
+                <input type="checkbox" id="chk-enablesun" checked onchange="updateToggle('enablesun', this.checked)">
+            </div>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>Sun Elevation Angle</label>
+                    <span class="val" id="val-sunel">55°</span>
+                </div>
+                <input type="range" id="slider-sunel" min="5" max="85" step="1" value="55" oninput="updateVal('sunel', this.value, '°')">
+            </div>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>Sun Azimuth Angle</label>
+                    <span class="val" id="val-sunaz">45°</span>
+                </div>
+                <input type="range" id="slider-sunaz" min="0" max="360" step="5" value="45" oninput="updateVal('sunaz', this.value, '°')">
+            </div>
+            <div class="control-group" style="margin-top: 8px;">
+                <div class="control-row">
+                    <label>Sun Angular Diameter</label>
+                    <span class="val" id="val-sunangle">8.0°</span>
+                </div>
+                <input type="range" id="slider-sunangle" min="1.0" max="25.0" step="0.5" value="8.0" oninput="updateVal('sunangle', this.value, '°')">
+            </div>
         </div>
 
         <!-- Dynamic Movement Controls -->
@@ -277,25 +307,6 @@
             </div>
         </div>
 
-        <!-- Background SDF Lighting -->
-        <div>
-            <div class="section-title">Background GDF Soft Shadows</div>
-            <div class="control-group">
-                <div class="control-row">
-                    <label>Sun Angular Diameter</label>
-                    <span class="val" id="val-sunangle">8.0°</span>
-                </div>
-                <input type="range" id="slider-sunangle" min="1.0" max="25.0" step="0.5" value="8.0" oninput="updateVal('sunangle', this.value, '°')">
-            </div>
-            <div class="control-group" style="margin-top: 8px;">
-                <div class="control-row">
-                    <label>Shadow March Steps</label>
-                    <span class="val" id="val-shadowsteps">32</span>
-                </div>
-                <input type="range" id="slider-shadowsteps" min="8" max="48" step="2" value="32" oninput="updateVal('shadowsteps', this.value)">
-            </div>
-        </div>
-
         <!-- Surface Cache GI -->
         <div>
             <div class="section-title">Surface Cache Inter-Object GI</div>
@@ -314,25 +325,6 @@
                 <label>ReSTIR Spatio-Temporal Filtering</label>
                 <input type="checkbox" id="chk-restir" checked onchange="updateToggle('restir', this.checked)">
             </div>
-        </div>
-
-        <!-- Lighting & Camera -->
-        <div>
-            <div class="section-title">Sun & Camera</div>
-            <div class="control-group">
-                <div class="control-row">
-                    <label>Sun Azimuth</label>
-                    <span class="val" id="val-sunaz">45°</span>
-                </div>
-                <input type="range" id="slider-sunaz" min="0" max="360" step="5" value="45" oninput="updateVal('sunaz', this.value, '°')">
-            </div>
-            <div class="control-group" style="margin-top: 8px;">
-                <div class="control-row">
-                    <label>Sun Elevation</label>
-                    <span class="val" id="val-sunel">55°</span>
-                </div>
-                <input type="range" id="slider-sunel" min="10" max="85" step="2" value="55" oninput="updateVal('sunel', this.value, '°')">
-            </div>
             <div class="toggle-row" style="margin-top: 10px;">
                 <label>Auto-Camera Turntable</label>
                 <input type="checkbox" id="chk-turntable" checked onchange="updateToggle('turntable', this.checked)">
@@ -345,6 +337,7 @@
 // --- State & Scene Objects ---
 const state = {
     renderMode: 0,
+    enableSun: true,
     animateMotion: true,
     motionSpeed: 1.0,
     orbitRadius: 1.5,
@@ -365,15 +358,15 @@ const state = {
 
 const sceneObjects = [
     // 0: Central Large Hero ShaderBall (Deep Orange)
-    { pos: [0.0, 0.0, 0.0], scale: 1.0, albedo: [0.98, 0.36, 0.05], metallic: 0.0, roughness: 0.25, isSatellite: false },
+    { pos: [0.0, 0.0, 0.0], scale: 1.0, albedo: [0.98, 0.36, 0.05], metallic: 0.0, roughness: 0.25, isSatellite: false, emission: [0.0, 0.0, 0.0] },
     // 1: Left Satellite (Satin Gunmetal / Chrome)
-    { pos: [-1.45, 0.35, 0.0], scale: 0.75, albedo: [0.90, 0.92, 0.95], metallic: 0.85, roughness: 0.15, isSatellite: true, angleOffset: 0.0 },
+    { pos: [-1.45, 0.35, 0.0], scale: 0.75, albedo: [0.90, 0.92, 0.95], metallic: 0.85, roughness: 0.15, isSatellite: true, angleOffset: 0.0, emission: [0.0, 0.0, 0.0] },
     // 2: Right Satellite (Cobalt Blue)
-    { pos: [1.45, -0.30, 0.0], scale: 0.75, albedo: [0.06, 0.42, 1.00], metallic: 0.15, roughness: 0.20, isSatellite: true, angleOffset: 1.8 },
+    { pos: [1.45, -0.30, 0.0], scale: 0.75, albedo: [0.06, 0.42, 1.00], metallic: 0.15, roughness: 0.20, isSatellite: true, angleOffset: 1.8, emission: [0.0, 0.0, 0.0] },
     // 3: Front Satellite (Emerald Green)
-    { pos: [0.50, -1.35, 0.0], scale: 0.65, albedo: [0.06, 0.86, 0.30], metallic: 0.10, roughness: 0.25, isSatellite: true, angleOffset: 3.4 },
-    // 4: Rear Satellite (Polished Gold)
-    { pos: [-0.50, 1.40, 0.0], scale: 0.65, albedo: [0.98, 0.80, 0.15], metallic: 0.85, roughness: 0.20, isSatellite: true, angleOffset: 4.9 }
+    { pos: [0.50, -1.35, 0.0], scale: 0.65, albedo: [0.06, 0.86, 0.30], metallic: 0.10, roughness: 0.25, isSatellite: true, angleOffset: 3.4, emission: [0.0, 0.0, 0.0] },
+    // 4: Rear Satellite (Polished Gold / Neon Core)
+    { pos: [-0.50, 1.40, 0.0], scale: 0.65, albedo: [0.98, 0.80, 0.15], metallic: 0.85, roughness: 0.20, isSatellite: true, angleOffset: 4.9, emission: [1.0, 0.2, 0.8] }
 ];
 
 function updateVal(name, val, suffix = '') {
@@ -388,7 +381,8 @@ function updateVal(name, val, suffix = '') {
 }
 
 function updateToggle(name, val) {
-    if (name === 'anim') state.animateMotion = val;
+    if (name === 'enablesun') state.enableSun = val;
+    else if (name === 'anim') state.animateMotion = val;
     else if (name === 'multibounce') state.multiBounce = val;
     else if (name === 'restir') state.enableReSTIR = val;
     else if (name === 'turntable') state.turntable = val;
@@ -466,6 +460,7 @@ out vec4 fragColor;
 uniform vec3 uCamPos;
 uniform vec3 uSunDir;
 uniform vec3 uSunRad;
+uniform bool uEnableSun;
 
 uniform int uRenderMode;
 uniform float uSunAngleRad;
@@ -473,9 +468,8 @@ uniform int uShadowSteps;
 uniform bool uMultiBounce;
 uniform float uGiBoost;
 uniform bool uEnableReSTIR;
-uniform int uReceiverId; // -1 for floor, 0..4 for shaderballs
+uniform int uReceiverId;
 
-// Multi-Object Dynamic Positions in the Global Distance Field
 uniform vec4 uObjPositions[5]; // xyz = pos, w = scale
 uniform vec4 uObjAlbedos[5];   // rgb = albedo
 uniform vec4 uMaterialAlbedo;
@@ -487,7 +481,6 @@ float sdCylinder(vec3 p, vec2 h) {
     return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
 }
 
-// Local SDF of a single ShaderBall
 float evalShaderBallLocal(vec3 p) {
     vec3 localP = p - vec3(0.0, 0.0, 0.55);
     float dOuter = sdSphere(localP, 0.45);
@@ -505,7 +498,6 @@ float evalShaderBallLocal(vec3 p) {
     return min(min(min(dShell, dCore), dBase), dRim);
 }
 
-// Global Distance Field (GDF): Composites all 5 moving objects
 float evalSceneGDF(vec3 p) {
     float minD = 1e6;
     for (int i = 0; i < 5; ++i) {
@@ -516,8 +508,8 @@ float evalSceneGDF(vec3 p) {
     return minD;
 }
 
-// Contact-hardening soft shadows with receiver self-shadow compensation
 float marchGDFSoftShadow(vec3 ro, vec3 rd, float mint, float maxt, int receiverId) {
+    if (!uEnableSun) return 0.0;
     float res = 1.0;
     float k = 1.0 / max(0.01, tan(uSunAngleRad));
 
@@ -528,10 +520,7 @@ float marchGDFSoftShadow(vec3 ro, vec3 rd, float mint, float maxt, int receiverI
         float proj = dot(toCenter, rd);
         float perp2 = dot(toCenter, toCenter) - proj * proj;
 
-        // Skip object if ray doesn't pass near its bounding sphere
-        if (perp2 > 0.65 * objScale * 0.65 * objScale && proj > 0.0) {
-            continue;
-        }
+        if (perp2 > 0.65 * objScale * 0.65 * objScale && proj > 0.0) continue;
 
         float tStart = (obj == receiverId) ? max(mint, 0.065 * objScale) : mint;
         float t = tStart;
@@ -555,11 +544,10 @@ void main() {
     vec3 L = normalize(uSunDir);
     vec3 H = normalize(L + V);
 
-    // 1. Artifact-free mutual soft shadow with contact hardening
     vec3 shadowOrigin = vWorldPos + N * 0.020;
     float softShadow = marchGDFSoftShadow(shadowOrigin, L, 0.02, 6.0, uReceiverId);
 
-    float nDotL = max(0.0, dot(N, L));
+    float nDotL = uEnableSun ? max(0.0, dot(N, L)) : 0.0;
     float nDotH = max(0.0, dot(N, H));
 
     float specPow = 10.0 + (1.0 - uMatParams.y) * 55.0;
@@ -568,10 +556,10 @@ void main() {
     vec3 albedo = uMaterialAlbedo.rgb;
     if (vWorldPos.z <= 0.015) {
         float grid = (sin(vWorldPos.x * 4.0) * sin(vWorldPos.y * 4.0) > 0.0) ? 1.0 : 0.92;
-        albedo = vec3(0.32, 0.34, 0.38) * grid; // Slate gray studio floor
+        albedo = vec3(0.32, 0.34, 0.38) * grid;
     }
 
-    // 2. TRUE Inter-Object Distance Field GI Color Bleeding
+    // Inter-object Distance Field GI Color Bleeding
     vec3 indirectGI = vec3(0.0);
     for (int i = 0; i < 5; ++i) {
         vec3 centerP = uObjPositions[i].xyz + vec3(0.0, 0.0, 0.55 * uObjPositions[i].w);
@@ -581,23 +569,23 @@ void main() {
 
         float formFactor = max(0.0, dot(N, dirObj)) / (1.0 + dist * dist * 1.5);
         if (i != uReceiverId) {
-            float bounceShadow = marchGDFSoftShadow(centerP + vec3(0.0, 0.0, 0.1), L, 0.05, 5.0, i);
-            vec3 bouncedRad = uObjAlbedos[i].rgb * (uSunRad * (0.65 * bounceShadow) + vec3(0.15));
-            indirectGI += bouncedRad * formFactor * 0.45;
+            vec3 incomingLight = uObjAlbedos[i].rgb * (uEnableSun ? (uSunRad * 0.85) : vec3(0.12));
+            if (i == 4) incomingLight += vec3(2.5, 0.5, 2.0); // Neon core emissive bounce
+            indirectGI += incomingLight * formFactor * 0.65;
         }
     }
 
-    // Ambient sky contribution
-    float upHemi = N.z * 0.5 + 0.5;
-    vec3 sky = vec3(0.16, 0.24, 0.38) * (upHemi * 0.30);
-    indirectGI = (indirectGI + sky) * albedo * uGiBoost;
-
-    if (uEnableReSTIR) {
-        indirectGI *= 1.15;
+    if (uEnableSun) {
+        float upHemi = N.z * 0.5 + 0.5;
+        vec3 sky = vec3(0.16, 0.24, 0.38) * (upHemi * 0.30);
+        indirectGI += sky;
     }
 
-    vec3 directDiff = albedo * (uSunRad * (nDotL * softShadow));
-    vec3 directSpec = (uMatParams.x > 0.5 ? albedo : vec3(1.0)) * spec;
+    indirectGI = indirectGI * albedo * uGiBoost;
+    if (uEnableReSTIR) indirectGI *= 1.15;
+
+    vec3 directDiff = uEnableSun ? (albedo * (uSunRad * (nDotL * softShadow))) : vec3(0.0);
+    vec3 directSpec = uEnableSun ? ((uMatParams.x > 0.5 ? albedo : vec3(1.0)) * spec) : vec3(0.0);
 
     vec3 col = directDiff + directSpec * 0.30 + indirectGI;
 
@@ -615,7 +603,6 @@ void main() {
         col = N * 0.5 + 0.5;
     }
 
-    // ACES Tone Map + Gamma 2.2
     vec3 mapped = (col * (2.51 * col + 0.03)) / (col * (2.43 * col + 0.59) + 0.14);
     vec3 srgb = pow(clamp(mapped, 0.0, 1.0), vec3(1.0 / 2.2));
 
@@ -647,6 +634,7 @@ const uLoc = {
     camPos: gl.getUniformLocation(program, 'uCamPos'),
     sunDir: gl.getUniformLocation(program, 'uSunDir'),
     sunRad: gl.getUniformLocation(program, 'uSunRad'),
+    enableSun: gl.getUniformLocation(program, 'uEnableSun'),
     renderMode: gl.getUniformLocation(program, 'uRenderMode'),
     sunAngleRad: gl.getUniformLocation(program, 'uSunAngleRad'),
     shadowSteps: gl.getUniformLocation(program, 'uShadowSteps'),
@@ -877,6 +865,7 @@ function render(now) {
     gl.uniform3fv(uLoc.camPos, camPos);
     gl.uniform3fv(uLoc.sunDir, sunDir);
     gl.uniform3f(uLoc.sunRad, 2.2, 2.1, 1.9);
+    gl.uniform1i(uLoc.enableSun, state.enableSun ? 1 : 0);
     gl.uniform1i(uLoc.renderMode, state.renderMode);
     gl.uniform1f(uLoc.sunAngleRad, state.sunAngle * Math.PI / 180.0);
     gl.uniform1i(uLoc.shadowSteps, state.shadowSteps);
