@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#eeece5" />
+    <meta name="description" content="A true 3D polygon-first rock fracture growth prototype." />
+    <title>Fracture Lab — 3D Polygon Growth Study</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="#top" aria-label="Fracture Lab home">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="brand-name">FIELD<span>/</span>FORM</span>
+        </a>
+        <div class="topbar-meta">
+          <span class="topbar-label">PROCEDURAL GEOLOGY / 001</span>
+          <span class="status-chip"><span class="status-dot"></span> TRUE 3D POLYHEDRA</span>
+        </div>
+      </header>
+
+      <main id="top">
+        <section class="intro" aria-labelledby="page-title">
+          <div class="intro-copy">
+            <p class="eyebrow"><span class="eyebrow-rule"></span> FRACTURE STUDY 01 &nbsp;·&nbsp; ROCK JOINTS</p>
+            <h1 id="page-title">Cracks that <em>grow</em><br class="desktop-break" /> through the rock.</h1>
+            <p class="intro-description">
+              A true 3D polygon study: assemble cliffs from convex rock forms and fuse them into a sealed mesh.
+              Switch to a single rock to inspect the actual polygonal fracture faces — no image-based cracks.
+            </p>
+          </div>
+            <div class="intro-note">
+            <span class="note-index">01 / 03</span>
+            <p>A curved low-poly cliff body sets the silhouette; mixed-size 3D rock forms follow its ridges and hollows before fusing into one sealed mesh.</p>
+            <span class="note-tag">3D · POLYGON FIRST · SEALED</span>
+          </div>
+        </section>
+
+        <section class="workspace" aria-label="3D rock fracture generator">
+          <div class="stage-card">
+            <div class="stage-header">
+              <div class="stage-heading">
+                <span class="section-kicker">LIVE SPECIMEN</span>
+                <span class="stage-title" id="stage-title">Layered sedimentary escarpment</span>
+              </div>
+              <div class="stage-header-right">
+                <div class="view-switch" role="group" aria-label="Choose specimen view">
+                  <button class="view-button" id="block-view-button" type="button" aria-pressed="false">Rock</button>
+                  <button class="view-button is-active" id="cliff-view-button" type="button" aria-pressed="true">Cliff</button>
+                </div>
+                <span class="vector-badge"><span class="vector-icon" aria-hidden="true"></span> 3D POLYHEDRA</span>
+              </div>
+            </div>
+
+            <div class="canvas-wrap" id="canvas-wrap">
+              <canvas id="fracture-canvas" aria-label="Interactive three-dimensional cliff formed from sealed polygonal rock geometry"></canvas>
+              <div class="canvas-overlay canvas-overlay-left">
+                <span class="overlay-label" id="overlay-label">POLYGON-FIRST ROCK FORMS / FUSED FIELD</span>
+                <span class="overlay-coordinate" id="overlay-coordinate">TRUE 3D <span>·</span> SEALED JOINTS <span>·</span> NO CRACK MAPS</span>
+              </div>
+              <div class="canvas-overlay canvas-overlay-right">
+                <span class="overlay-swatch"></span>
+                <span id="canvas-mode-label">ORBIT · DRAG / ZOOM · SCROLL</span>
+              </div>
+              <div class="canvas-empty-state" id="canvas-empty-state" hidden>
+                <span class="empty-mark">∅</span>
+                <span>No valid fracture planes. Reduce density or generate a new seed.</span>
+              </div>
+            </div>
+
+            <div class="growth-bar">
+              <button class="play-button" id="play-button" type="button" aria-label="Replay crack propagation">
+                <span class="play-icon" aria-hidden="true"></span>
+                <span id="play-label">Replay growth</span>
+              </button>
+              <div class="timeline-block">
+                <div class="timeline-topline">
+                  <label for="growth-range" id="timeline-label">3D FRACTURE SEQUENCE</label>
+                  <span id="growth-readout">SEALED SHELL / BUILDING</span>
+                </div>
+                <input id="growth-range" type="range" min="0" max="1" step="0.01" value="1" aria-label="Scrub the three-dimensional fracture propagation sequence" />
+                <div class="timeline-ends"><span id="timeline-start">NUCLEATION</span><span id="timeline-end">ARREST / ABUTMENT</span></div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="controls-card" aria-label="3D fracture controls">
+            <div class="controls-heading">
+              <div>
+                <p class="section-kicker">INPUT PARAMETERS</p>
+                <h2>Rock behavior</h2>
+              </div>
+              <span class="control-index">A—I</span>
+            </div>
+
+            <div class="formation-picker" id="cliff-type-group">
+              <div class="control-label-row">
+                <label for="cliff-type-select">Cliff formation</label>
+                <span class="formation-badge">3 PROFILES</span>
+              </div>
+              <select id="cliff-type-select" class="formation-select">
+                <option value="layered" selected>Layered sedimentary</option>
+                <option value="basalt">Columnar basalt</option>
+                <option value="breccia">Breccia / talus</option>
+              </select>
+              <p class="formation-description" id="cliff-type-description"></p>
+              <div class="rock-mix"><span>ROCK SHAPE MIX</span><strong id="cliff-rock-mix"></strong></div>
+            </div>
+
+            <div class="base-controls" id="cliff-base-controls">
+              <div class="control-group">
+                <div class="control-label-row">
+                  <label for="cliff-contour-range">Ridge silhouette</label>
+                  <output id="cliff-contour-output" for="cliff-contour-range">78%</output>
+                </div>
+                <input id="cliff-contour-range" class="parameter-range" type="range" min="0" max="100" value="78" />
+                <div class="range-captions"><span>SUBTLE</span><span>STRONGLY SHAPED</span></div>
+              </div>
+              <div class="control-group control-group-last">
+                <div class="control-label-row">
+                  <label for="cliff-relief-range">3D face relief</label>
+                  <output id="cliff-relief-output" for="cliff-relief-range">62%</output>
+                </div>
+                <input id="cliff-relief-range" class="parameter-range" type="range" min="0" max="100" value="62" />
+                <div class="range-captions"><span>FLATTER</span><span>MORE RELIEF</span></div>
+              </div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label id="density-label" for="density-range">Rock packing</label>
+                <output id="density-output" for="density-range">58</output>
+              </div>
+              <input id="density-range" class="parameter-range" type="range" min="0" max="100" value="58" />
+              <div class="range-captions"><span id="density-low">SPARSE</span><span id="density-high">DENSE</span></div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="wander-range">Local deflection</label>
+                <output id="wander-output" for="wander-range">48%</output>
+              </div>
+              <input id="wander-range" class="parameter-range" type="range" min="0" max="100" value="48" />
+              <div class="range-captions"><span>COHERENT SET</span><span>VARIABLE STRESS</span></div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="angle-range">Dominant set · azimuth</label>
+                <output id="angle-output" for="angle-range">−8°</output>
+              </div>
+              <input id="angle-range" class="parameter-range" type="range" min="-55" max="55" value="-8" />
+              <div class="range-captions"><span>−55°</span><span>+55°</span></div>
+            </div>
+
+            <div class="control-group control-group-last">
+              <div class="control-label-row">
+                <label id="gap-label" for="gap-range">Sealed joint relief</label>
+                <output id="gap-output" for="gap-range">32%</output>
+              </div>
+              <input id="gap-range" class="parameter-range" type="range" min="0" max="100" value="32" />
+              <div class="range-captions"><span id="gap-low">CLOSED</span><span id="gap-high">WIDEN TO INSPECT</span></div>
+            </div>
+
+            <div class="control-group">
+              <div class="control-label-row">
+                <label for="surface-detail-range">Geologic stamp detail</label>
+                <output id="surface-detail-output" for="surface-detail-range">58%</output>
+              </div>
+              <input id="surface-detail-range" class="parameter-range" type="range" min="0" max="100" value="58" />
+              <div class="range-captions"><span>SUBTLE</span><span>PRONOUNCED</span></div>
+            </div>
+
+            <div class="seed-row">
+              <div class="seed-copy">
+                <label for="seed-input">Specimen seed</label>
+                <span>Same seed = same geometry</span>
+              </div>
+              <input id="seed-input" type="number" min="1" max="999999" value="2417" aria-label="Specimen seed" />
+              <button class="icon-button" id="random-seed-button" type="button" aria-label="Generate a new random seed" title="New seed">
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.8 7.2A6.2 6.2 0 0 0 4.4 6M4.2 12.8a6.2 6.2 0 0 0 11.4 1.2M4.4 3.8V6H2.1M15.6 16.2V14h2.3" /></svg>
+              </button>
+            </div>
+
+            <button class="generate-button" id="generate-button" type="button">
+              <span>Generate fractures</span>
+              <span class="button-arrow" aria-hidden="true">↗</span>
+            </button>
+
+            <div class="stats-grid" aria-live="polite">
+              <div class="stat-cell"><span class="stat-label">JOINT PLANES</span><strong id="fracture-count">—</strong></div>
+              <div class="stat-cell"><span class="stat-label">POLYHEDRA</span><strong id="fragment-count">—</strong></div>
+              <div class="stat-cell"><span class="stat-label">SETS</span><strong id="generation-count">—</strong></div>
+            </div>
+
+            <div class="legend" id="growth-legend">
+              <p class="section-kicker">GROWTH ORDER</p>
+              <div class="legend-row"><span class="legend-line legend-primary"></span><span>Early, through-going plane</span><span class="legend-stage">01</span></div>
+              <div class="legend-row"><span class="legend-line legend-secondary"></span><span>Later cross-set</span><span class="legend-stage">02</span></div>
+              <div class="legend-row"><span class="legend-line legend-abutting"></span><span>Abuts an older joint</span><span class="legend-stage">T</span></div>
+            </div>
+          </aside>
+        </section>
+
+        <section class="method-strip" aria-label="How this three-dimensional prototype works">
+          <div class="method-title">
+            <span class="section-kicker">MODEL NOTE</span>
+            <strong id="method-heading">A sealed cliff shell.<br />Built from 3D rock forms.</strong>
+          </div>
+          <p id="method-copy">
+            Variable-size convex polyhedra follow a faceted 3D cliff base and fuse into one sealed mesh. Height, curvature, and ambient occlusion shape the color; bedding and mineral marks are structured shader stamps, not crack maps or random texture noise.
+          </p>
+          <div class="method-caveat"><span class="caveat-dot"></span><span id="method-caveat-copy">A geometric union prototype; the exported rock recipe preserves individual 3D forms for later SDF erosion.</span></div>
+        </section>
+
+        <footer class="footer">
+          <span>FIELD/FORM &nbsp;·&nbsp; 3D POLYHEDRAL FRACTURE STUDY</span>
+          <span class="footer-sources">READING: <a href="https://psgt.earth.lsa.umich.edu/chapter/4/joints.html" target="_blank" rel="noreferrer">UMICH · JOINTS</a> <span>↗</span> &nbsp; <a href="https://www.files.ethz.ch/structuralgeology/jpb/files/english/4joints.pdf" target="_blank" rel="noreferrer">ETH · FRACTURE SETS</a> <span>↗</span></span>
+          <div class="export-actions">
+            <button class="export-button" id="export-button" type="button"><span id="export-label">EXPORT SEALED CLIFF STL</span><span aria-hidden="true">↓</span></button>
+            <button class="export-button" id="export-recipe-button" type="button">ROCK RECIPE JSON <span aria-hidden="true">↓</span></button>
+          </div>
+        </footer>
+      </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
