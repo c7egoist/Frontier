@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCliffNetworks,
+  buildSealedRockMesh,
   faceArea,
   generateFractureNetwork,
   makeRockPolyhedron,
   networkToJSON,
+  polyhedronVertices,
   polyhedronVolume,
 } from '../fracture-core.js';
 
@@ -52,6 +54,33 @@ test('sequential plane cuts create closed 3D polyhedra and conserve volume', () 
   assert.ok(Math.abs(network.rootVolume - fragmentVolume) / network.rootVolume < 1e-8, 'fragments must conserve the source rock volume');
 });
 
+test('rock generator produces distinct, closed 3D archetypes with strong shape variation', () => {
+  const archetypes = ['slab', 'blocky', 'jagged', 'columnar', 'rubble', 'spire'];
+  const aspectRatios = new Map();
+
+  for (const rockType of archetypes) {
+    const faces = makeRockPolyhedron(101, { x: 1.2, y: 1.0, z: 1.0 }, rockType);
+    assertClosedPolyhedron(faces);
+    const verts = polyhedronVertices(faces);
+    const spanX = Math.max(...verts.map((v) => v.x)) - Math.min(...verts.map((v) => v.x));
+    const spanY = Math.max(...verts.map((v) => v.y)) - Math.min(...verts.map((v) => v.y));
+    aspectRatios.set(rockType, spanY / spanX);
+  }
+
+  assert.ok(aspectRatios.get('slab') < aspectRatios.get('blocky') * 0.72, 'slab archetype should be noticeably flatter than blocky');
+  assert.ok(aspectRatios.get('spire') > aspectRatios.get('slab') * 1.6, 'spire archetype should be much taller than slab');
+});
+
+test('opened joints seal into a closed 2-manifold rock mesh with no open interior holes', () => {
+  for (const rockType of ['blocky', 'slab', 'jagged', 'columnar']) {
+    const outline = makeRockPolyhedron(77, { x: 1.2, y: 1.0, z: 0.95 }, rockType);
+    const network = generateFractureNetwork(outline, { seed: 77, density: 64, wander: 52, angle: -12 });
+    const sealedFaces = buildSealedRockMesh(network.finalPieces, { gapDistance: 0.055, grooveInset: 0.28 });
+    assert.ok(sealedFaces.length > outline.length, 'sealed mesh should include beveled 3D crack walls');
+    assertClosedPolyhedron(sealedFaces);
+  }
+});
+
 test('each joint is an explicit 3D plane face with a surface trace', () => {
   const network = generateFractureNetwork(makeRockPolyhedron(123), { seed: 123, density: 68, wander: 85, angle: -19 });
 
@@ -76,11 +105,12 @@ test('cliff stack fractures independent 3D rocks and keeps each rock volume', ()
   }
 });
 
-test('export includes true 3D vertices, fracture faces, and plane normals', () => {
+test('export includes true 3D vertices, sealed mesh faces, fracture faces, and plane normals', () => {
   const network = generateFractureNetwork(makeRockPolyhedron(9), { seed: 9, density: 44 });
   const payload = networkToJSON(network);
 
   assert.equal(payload.seed, 9);
+  assert.ok(payload.sealedMeshFaces.length > 0);
   assert.equal(payload.fragments.length, network.finalPieces.length);
   assert.equal(payload.joints.length, network.events.length);
   assert.ok(payload.fragments.every((fragment) => fragment.faces.every((face) => face.vertices.every((point) => point.length === 3))));

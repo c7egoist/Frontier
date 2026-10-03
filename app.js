@@ -1,14 +1,47 @@
 import {
+  buildSealedRockMesh,
   generateFractureNetwork,
   makeRockPolyhedron,
   networkToJSON,
   polyhedronVertices,
 } from './fracture-core.js';
-import { buildCliffMesh, cliffTypeInfo } from './cliff-core.js';
+import {
+  buildCliffMesh,
+  cliffTypeInfo,
+  sampleSatMap,
+  satmapInfo,
+} from './cliff-core.js';
 
 const canvas = document.querySelector('#fracture-canvas');
 const canvasWrap = document.querySelector('#canvas-wrap');
 const gl = canvas.getContext('webgl', { antialias: true, alpha: false, powerPreference: 'high-performance' });
+
+const ROCK_ARCHETYPE_INFO = {
+  blocky: {
+    size: { x: 1.24, y: 1.08, z: 1.02 },
+    description: 'Chunky multi-faceted cliff block with planar cleavage faces and sealed 3D fracture grooves.',
+  },
+  slab: {
+    size: { x: 1.52, y: 0.56, z: 1.28 },
+    description: 'Flat, wide stratified rock plate / cantilevered overhang shelf with sharp perimeter facets.',
+  },
+  jagged: {
+    size: { x: 1.28, y: 1.16, z: 1.04 },
+    description: 'Craggy, high-contrast angular outcrop with sharp directional prows and steep shear facets.',
+  },
+  columnar: {
+    size: { x: 0.88, y: 1.46, z: 0.86 },
+    description: 'Polygonal 5–7 sided basalt prism with crisp vertical faces and chiseled cross-joint caps.',
+  },
+  spire: {
+    size: { x: 0.94, y: 1.44, z: 0.88 },
+    description: 'Steep upward-tapering alpine crag pinnacle with fluted vertical facets and a narrow crest.',
+  },
+  rubble: {
+    size: { x: 1.12, y: 0.88, z: 0.96 },
+    description: 'Asymmetric broken talus boulder and angular scree wedge for cliff-toe aprons.',
+  },
+};
 
 const elements = {
   blockButton: document.querySelector('#block-view-button'),
@@ -19,6 +52,12 @@ const elements = {
   overlayCoordinate: document.querySelector('#overlay-coordinate'),
   cliffType: document.querySelector('#cliff-type-select'),
   cliffTypeGroup: document.querySelector('#cliff-type-group'),
+  rockType: document.querySelector('#rock-type-select'),
+  rockTypeGroup: document.querySelector('#rock-type-group'),
+  rockTypeDescription: document.querySelector('#rock-type-description'),
+  satmap: document.querySelector('#satmap-select'),
+  satmapRamp: document.querySelector('#satmap-ramp'),
+  satmapDescription: document.querySelector('#satmap-description'),
   cliffBaseControls: document.querySelector('#cliff-base-controls'),
   cliffContour: document.querySelector('#cliff-contour-range'),
   cliffContourOutput: document.querySelector('#cliff-contour-output'),
@@ -93,42 +132,52 @@ const meshFragmentSource = `
   varying vec3 vNormal;
   varying vec3 vColor;
   varying vec3 vWorldPosition;
+
   float narrowStamp(float phase, float sharpness) {
     return pow(max(0.0, cos(phase)), sharpness);
   }
+
   void main() {
     vec3 normal = normalize(vNormal);
-    float diffuse = max(dot(normal, normalize(uLightDirection)), 0.0);
-    float light = 0.54 + 0.64 * diffuse;
+    vec3 keyDir = normalize(uLightDirection);
+    vec3 fillDir = normalize(vec3(0.66, 0.28, 0.48));
+    vec3 backDir = normalize(vec3(0.12, -0.78, -0.60));
+
+    // Crisp 3-point directional lighting so adjacent flat polygon facets pop with sharp contrast
+    float keyDiffuse = max(dot(normal, keyDir), 0.0);
+    float fillDiffuse = max(dot(normal, fillDir), 0.0);
+    float backDiffuse = max(dot(normal, backDir), 0.0);
+    float skyHemi = 0.5 + 0.5 * normal.y;
+    float light = 0.34 + 0.62 * keyDiffuse + 0.18 * fillDiffuse + 0.08 * skyHemi + 0.05 * backDiffuse;
+
     float detail = clamp(uSurfaceDetail, 0.0, 1.0);
-    float height = smoothstep(-4.2, 3.5, vWorldPosition.y);
-    float exposure = 0.87 + 0.16 * height + 0.035 * max(normal.y, 0.0);
+    float height = smoothstep(-4.4, 3.8, vWorldPosition.y);
+    float exposure = 0.90 + 0.14 * height + 0.05 * max(normal.y, 0.0);
     vec3 color = vColor * exposure;
     float stamp = 0.0;
 
     if (uMaterialType >= -0.5 && uMaterialType < 0.5) {
-      // A few broad mineral seams: directional structure, not stochastic noise.
-      float phase = dot(vWorldPosition, vec3(0.72, 0.19, 0.67)) * 5.8;
-      phase += 0.24 * sin(vWorldPosition.y * 1.7 + vWorldPosition.z * 0.8);
-      stamp = -0.12 * narrowStamp(phase, 18.0) + 0.035 * sin(phase * 0.38);
+      float phase = dot(vWorldPosition, vec3(0.72, 0.24, 0.65)) * 6.2;
+      phase += 0.28 * sin(vWorldPosition.y * 1.9 + vWorldPosition.z * 0.9);
+      stamp = -0.14 * narrowStamp(phase, 18.0) + 0.045 * sin(phase * 0.42);
     } else if (uMaterialType >= 0.5 && uMaterialType < 1.5) {
-      // Fine bedding seams with gently bent beds and pale inter-layer bands.
-      float phase = vWorldPosition.y * 7.6;
-      phase += 0.26 * sin(vWorldPosition.x * 0.58) + 0.12 * sin(vWorldPosition.z * 0.9);
-      float seam = narrowStamp(phase, 24.0);
-      float halo = narrowStamp(phase - 0.30, 5.0);
-      stamp = -0.15 * seam + 0.055 * halo;
+      // Sedimentary SatMap micro-strata seams and inter-bedding highlights
+      float phase = vWorldPosition.y * 8.2;
+      phase += 0.34 * sin(vWorldPosition.x * 0.54) + 0.18 * sin(vWorldPosition.z * 0.95);
+      float seam = narrowStamp(phase, 22.0);
+      float halo = narrowStamp(phase - 0.32, 5.0);
+      stamp = -0.16 * seam + 0.065 * halo;
     } else if (uMaterialType >= 1.5 && uMaterialType < 2.5) {
-      // Basalt's long column faces and sparse cross-joint staining.
-      float columnPhase = vWorldPosition.x * 8.4 + 0.25 * sin(vWorldPosition.z * 1.4);
+      // Basalt column prism face accents and cross-joint oxidation bands
+      float columnPhase = vWorldPosition.x * 8.6 + 0.28 * sin(vWorldPosition.z * 1.5);
       float columnSeam = narrowStamp(columnPhase, 16.0);
-      float crossJoint = narrowStamp(vWorldPosition.y * 3.4 + 0.15 * sin(vWorldPosition.x), 22.0);
-      stamp = -0.13 * columnSeam - 0.08 * crossJoint;
+      float crossJoint = narrowStamp(vWorldPosition.y * 3.8 + 0.18 * sin(vWorldPosition.x), 20.0);
+      stamp = -0.14 * columnSeam - 0.09 * crossJoint;
     } else if (uMaterialType >= 2.5) {
-      // Breccia gets sparse diagonal mineral veins, independent of the block layout.
-      float phase = dot(vWorldPosition, vec3(0.64, 0.28, 0.72)) * 6.2;
-      phase += 0.22 * sin(vWorldPosition.y * 1.2 + vWorldPosition.x * 0.36);
-      stamp = -0.15 * narrowStamp(phase, 20.0) + 0.025 * sin(phase * 0.31);
+      // Crag / breccia conjugate mineral veins and shear banding
+      float phase = dot(vWorldPosition, vec3(0.64, 0.32, 0.70)) * 6.4;
+      phase += 0.26 * sin(vWorldPosition.y * 1.4 + vWorldPosition.x * 0.42);
+      stamp = -0.16 * narrowStamp(phase, 20.0) + 0.035 * sin(phase * 0.35);
     }
 
     color *= 1.0 + stamp * detail;
@@ -183,9 +232,9 @@ let frameHandle = 0;
 let dragging = false;
 let lastPointerX = 0;
 let lastPointerY = 0;
-let yaw = 0.72;
-let pitch = 0.36;
-let cameraDistance = 5.4;
+let yaw = 0.56;
+let pitch = 0.26;
+let cameraDistance = 15.8;
 let groundHeight = -1.29;
 
 if (!gl) {
@@ -215,7 +264,7 @@ if (!gl) {
   gl.enable(gl.DEPTH_TEST);
   gl.depthFunc(gl.LEQUAL);
   gl.disable(gl.CULL_FACE);
-  gl.clearColor(32 / 255, 39 / 255, 36 / 255, 1);
+  gl.clearColor(28 / 255, 34 / 255, 32 / 255, 1);
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   floorBuffers = createFloorBuffers();
@@ -235,6 +284,8 @@ function currentOptions() {
     angle: Number(elements.angle.value),
     opening: Number(elements.gap.value),
     cliffType: elements.cliffType.value,
+    rockType: elements.rockType?.value ?? 'blocky',
+    satmap: elements.satmap?.value ?? 'auto',
     cliffContour: Number(elements.cliffContour.value),
     cliffRelief: Number(elements.cliffRelief.value),
     surfaceDetail: Number(elements.surfaceDetail.value),
@@ -243,12 +294,25 @@ function currentOptions() {
 
 function updateSliderFills() {
   [elements.density, elements.wander, elements.angle, elements.gap, elements.cliffContour, elements.cliffRelief, elements.surfaceDetail].forEach((slider) => {
+    if (!slider) return;
     const min = Number(slider.min);
     const max = Number(slider.max);
     const value = Number(slider.value);
     const percent = ((value - min) / (max - min)) * 100;
     slider.style.setProperty('--range-progress', `${percent}%`);
   });
+}
+
+function updateSatmapPreview() {
+  if (!elements.satmapRamp) return;
+  const info = satmapInfo(elements.satmap?.value ?? 'auto', elements.cliffType.value);
+  const gradientStops = info.stops
+    .map((hex, idx) => `${hex} ${((idx / (info.stops.length - 1)) * 100).toFixed(1)}%`)
+    .join(', ');
+  elements.satmapRamp.style.background = `linear-gradient(90deg, ${gradientStops})`;
+  if (elements.satmapDescription) {
+    elements.satmapDescription.textContent = `${info.name} — ${info.subtitle}`;
+  }
 }
 
 function updateLabels() {
@@ -260,11 +324,16 @@ function updateLabels() {
   elements.cliffContourOutput.value = `${elements.cliffContour.value}%`;
   elements.cliffReliefOutput.value = `${elements.cliffRelief.value}%`;
   elements.surfaceDetailOutput.value = `${elements.surfaceDetail.value}%`;
-  elements.densityLabel.textContent = view === 'cliff' ? 'Rock packing' : 'Fracture density';
-  elements.gapLabel.textContent = view === 'cliff' ? 'Sealed joint relief' : 'Joint opening';
+  elements.densityLabel.textContent = view === 'cliff' ? 'Rock packing & crack density' : 'Fracture density';
+  elements.gapLabel.textContent = view === 'cliff' ? 'Sealed joint opening' : 'Sealed joint opening';
   const formation = cliffTypeInfo(elements.cliffType.value);
   elements.cliffTypeDescription.textContent = formation.description;
   elements.cliffRockMix.textContent = formation.mix;
+  if (elements.rockType && elements.rockTypeDescription) {
+    const archetype = ROCK_ARCHETYPE_INFO[elements.rockType.value] ?? ROCK_ARCHETYPE_INFO.blocky;
+    elements.rockTypeDescription.textContent = archetype.description;
+  }
+  updateSatmapPreview();
   updateSliderFills();
 }
 
@@ -279,18 +348,21 @@ function rebuild() {
     cliffAssembly = buildCliffMesh(options);
     networks = [];
     elements.stageTitle.textContent = cliffAssembly.profile.name;
-    elements.canvasMode.textContent = 'ONE SEALED MESH · SDF UNION';
+    elements.canvasMode.textContent = 'SHARP POLYGON ROCKS · SEALED JOINTS';
     const minY = minimumMeshY(cliffAssembly.mesh.positions);
     groundHeight = minY - 0.025;
   } else {
     cliffAssembly = null;
-    const outline = makeRockPolyhedron(options.seed, { x: 1.17, y: 1.12, z: 0.96 });
+    const archetype = ROCK_ARCHETYPE_INFO[options.rockType] ?? ROCK_ARCHETYPE_INFO.blocky;
+    const outline = makeRockPolyhedron(options.seed, archetype.size, options.rockType);
     networks = [{
       ...generateFractureNetwork(outline, options),
+      rockType: options.rockType,
       transform: { position: [0, 0, 0], rotation: [0, 0, 0] },
     }];
-    elements.stageTitle.textContent = 'Single fractured rock volume';
-    elements.canvasMode.textContent = '3 AXES · DRAG TO ORBIT';
+    const typeLabel = elements.rockType?.selectedOptions?.[0]?.textContent ?? 'Single fractured rock volume';
+    elements.stageTitle.textContent = `${typeLabel} (sealed single mesh)`;
+    elements.canvasMode.textContent = 'SINGLE SEALED MESH · DRAG TO ORBIT';
     groundHeight = computeGroundHeight(networks);
   }
 
@@ -319,6 +391,7 @@ function rebuild() {
 function setControlMode() {
   const isCliff = view === 'cliff';
   elements.cliffTypeGroup.hidden = !isCliff;
+  if (elements.rockTypeGroup) elements.rockTypeGroup.hidden = isCliff;
   elements.cliffBaseControls.hidden = !isCliff;
   elements.play.disabled = isCliff;
   elements.growth.disabled = isCliff;
@@ -326,48 +399,48 @@ function setControlMode() {
   elements.generate.querySelector('span:first-child').textContent = isCliff ? 'Rebuild sealed cliff' : 'Generate fractures';
   elements.exportLabel.textContent = isCliff ? 'EXPORT SEALED CLIFF STL' : 'EXPORT FRACTURE POLYGONS JSON';
   elements.exportRecipe.hidden = !isCliff;
-  elements.densityLabel.textContent = isCliff ? 'Rock packing' : 'Fracture density';
-  elements.gapLabel.textContent = isCliff ? 'Sealed joint relief' : 'Joint opening';
-  elements.timelineLabel.textContent = isCliff ? 'SEALED CLIFF ASSEMBLY' : '3D FRACTURE SEQUENCE';
-  elements.timelineStart.textContent = isCliff ? 'UNION' : 'NUCLEATION';
-  elements.timelineEnd.textContent = isCliff ? 'ONE CLOSED SHELL' : 'ARREST / ABUTMENT';
-  elements.growth.setAttribute('aria-label', isCliff ? 'Timeline is not used for the fused cliff mesh' : 'Scrub the three-dimensional fracture propagation sequence');
+  elements.densityLabel.textContent = isCliff ? 'Rock packing & crack density' : 'Fracture density';
+  elements.gapLabel.textContent = 'Sealed joint opening';
+  elements.timelineLabel.textContent = isCliff ? 'SHARP CRACKED ROCK CLIFF' : '3D FRACTURE SEQUENCE';
+  elements.timelineStart.textContent = isCliff ? 'CRACKED ROCKS' : 'NUCLEATION';
+  elements.timelineEnd.textContent = isCliff ? 'WATERTIGHT SHELL' : 'ARREST / ABUTMENT';
+  elements.growth.setAttribute('aria-label', isCliff ? 'Timeline is used in single-rock view' : 'Scrub the three-dimensional fracture propagation sequence');
   elements.densityLow.textContent = isCliff ? 'LOOSE' : 'SPARSE';
   elements.densityHigh.textContent = isCliff ? 'PACKED' : 'CONNECTED';
-  elements.gapLow.textContent = isCliff ? 'SUBTLE' : 'CLOSED';
-  elements.gapHigh.textContent = isCliff ? 'DEEPER GROOVES' : 'WIDEN TO INSPECT';
+  elements.gapLow.textContent = 'HAIRLINE';
+  elements.gapHigh.textContent = 'DEEP SEALED FISSURE';
   elements.growthLegend.hidden = isCliff;
-  elements.overlayLabel.textContent = isCliff ? 'POLYGON-FIRST ROCKS / FUSED FIELD' : 'ONE ROCK / POLYHEDRAL CUTS';
+  elements.overlayLabel.textContent = isCliff ? 'SHARP CRACKED ROCKS / SEALED 3D CLIFF' : 'SINGLE SEALED ROCK / POLYHEDRAL CUTS';
   elements.overlayCoordinate.innerHTML = isCliff
-    ? 'TRUE 3D <span>·</span> SEALED JOINTS <span>·</span> NO CRACK MAPS'
-    : 'TRUE 3D <span>·</span> CLOSED FRAGMENTS <span>·</span> NO CRACK MAPS';
+    ? 'CRISP FACETS <span>·</span> SEALED JOINTS <span>·</span> SATMAP ALBEDO'
+    : 'ONE SEALED MESH <span>·</span> RECESSED FISSURES <span>·</span> SATMAP ALBEDO';
   canvas.setAttribute('aria-label', isCliff
-    ? 'Interactive three-dimensional cliff formed from sealed polygonal rock geometry'
-    : 'Interactive three-dimensional rock split into closed polygonal fracture fragments');
+    ? 'Interactive three-dimensional cliff formed from sharp sealed polygonal rock geometry'
+    : 'Interactive three-dimensional rock fractured and sealed into a single watertight polygonal mesh');
   elements.playLabel.textContent = isCliff ? 'Static cliff shell' : 'Replay growth';
   elements.blockButton.classList.toggle('is-active', !isCliff);
   elements.cliffButton.classList.toggle('is-active', isCliff);
   elements.blockButton.setAttribute('aria-pressed', String(!isCliff));
   elements.cliffButton.setAttribute('aria-pressed', String(isCliff));
   elements.methodHeading.innerHTML = isCliff
-    ? 'A sealed cliff shell.<br />Built from 3D rock forms.'
-    : 'Plane cuts in 3D.<br />Not 2D extrusions.';
+    ? 'Sharp cracked rocks.<br />Sealed 3D cliff assembly.'
+    : 'Single sealed mesh.<br />Recessed 3D fissures.';
   elements.methodCopy.textContent = isCliff
-    ? 'A seeded low-poly cliff body supplies a curved ridge, scalloped sides, and faceted depth. Variable-size rocks fuse into one closed mesh, shaded with height, curvature, ambient occlusion, and structured geological stamps—not random texture noise or crack maps.'
-    : 'A convex rock volume is cut by oriented planes one at a time. Each cut adds a shared polygonal face and produces two closed polyhedra; later cuts can terminate against older joints. Directional mineral marks add material character; joints stay geometric, with no crack maps or cell seeding.';
+    ? 'Pronounced 3D headlands, overhangs, and gullies guide high-variation rock archetypes (flat cantilevered slabs, blocky stones, jagged crags, basalt columns, spires, and talus boulders). Rocks are fractured in 3D, sealed across opened joints, and colored with multi-stop geological SatMaps.'
+    : 'A 3D rock archetype is cut sequentially by primary, secondary, and abutting planes. When joints open, fracture walls bevel inward to a sealed fissure root so the entire cracked stone remains one watertight polygonal mesh with no open interior holes.';
   elements.methodCaveat.textContent = isCliff
-    ? 'A geometric union prototype; the rock recipe preserves individual forms, palettes, and material settings for later SDF erosion.'
-    : 'True 3D mesh prototype; plane-growth heuristic, not a full elastic stress / LEFM solver.';
+    ? '100% crisp polygon facets with zero voxel blur; exports watertight STL and full rock recipe JSON for downstream SDF erosion.'
+    : 'True 3D manifold polygon mesh; plane-growth and sealed-fissure geometry ready for SDF conversion and erosion.';
 }
 
 function updateStats() {
   if (view === 'cliff' && cliffAssembly) {
-    elements.fractureCount.textContent = String(cliffAssembly.summary.jointTraces).padStart(2, '0');
+    elements.fractureCount.textContent = String(cliffAssembly.summary.crackedRocks).padStart(2, '0');
     elements.fragmentCount.textContent = String(cliffAssembly.summary.rockCount).padStart(2, '0');
-    elements.generationCount.textContent = '01';
-    elements.statLabels[0].textContent = 'SEALED JOINTS';
+    elements.generationCount.textContent = String(cliffAssembly.summary.jointTraces).padStart(2, '0');
+    elements.statLabels[0].textContent = 'CRACKED ROCKS';
     elements.statLabels[1].textContent = 'ROCK FORMS';
-    elements.statLabels[2].textContent = 'CLOSED MESH';
+    elements.statLabels[2].textContent = 'JOINT TRACES';
     return;
   }
   const fractureCount = networks.reduce((sum, network) => sum + network.events.length, 0);
@@ -377,17 +450,17 @@ function updateStats() {
   elements.fragmentCount.textContent = String(fragmentCount).padStart(2, '0');
   elements.generationCount.textContent = String(generations).padStart(2, '0');
   elements.statLabels[0].textContent = 'JOINT PLANES';
-  elements.statLabels[1].textContent = 'POLYHEDRA';
+  elements.statLabels[1].textContent = 'LOBES';
   elements.statLabels[2].textContent = 'SETS';
 }
 
 function updateGrowthReadout() {
   if (view === 'cliff' && cliffAssembly) {
-    elements.growthReadout.textContent = `SEALED SHELL / ${Math.round(cliffAssembly.mesh.triangleCount / 1000)}K TRIANGLES`;
+    elements.growthReadout.textContent = `SHARP SHELL / ${(cliffAssembly.mesh.triangleCount / 1000).toFixed(1)}K TRIS · ${cliffAssembly.summary.crackedRocks} CRACKED ROCKS`;
     return;
   }
   if (progress >= totalEvents || totalEvents === 0) {
-    elements.growthReadout.textContent = `ALL JOINTS / ${totalEvents}`;
+    elements.growthReadout.textContent = `SEALED SINGLE MESH / ${totalEvents} JOINTS`;
     return;
   }
   const activeIndex = Math.min(totalEvents, Math.floor(progress) + 1);
@@ -453,7 +526,7 @@ function togglePlayback() {
 function mountVisiblePieces(force) {
   if (!gl) return;
   if (view === 'cliff') {
-    const stateKey = `cliff:${cliffAssembly?.mesh.vertexCount ?? 0}:${cliffAssembly?.summary.triangleCount ?? 0}`;
+    const stateKey = `cliff:${cliffAssembly?.mesh.vertexCount ?? 0}:${cliffAssembly?.summary.triangleCount ?? 0}:${cliffAssembly?.satmap?.id ?? ''}`;
     if (!force && stateKey === currentStateKey) return;
     for (const record of pieceRecords) disposePieceBuffers(record.buffers);
     pieceRecords = [];
@@ -467,23 +540,21 @@ function mountVisiblePieces(force) {
         network: { transform },
         piece: null,
         gapDistance: 0,
-        buffers: createCliffBuffers(mesh),
+        buffers: createCliffBuffers(mesh, cliffAssembly.grooves),
       });
-      // The GPU buffers now own the render data; keep only light recipe metadata in JS.
       mesh.normals = null;
       mesh.colors = null;
     }
     return;
   }
 
+  const openingValue = Number(elements.gap.value);
+  const activeSatmap = satmapInfo(elements.satmap?.value ?? 'auto', elements.cliffType.value).id;
   const stateKey = networks.map((network, index) => {
     const local = clamp(progress - eventOffsets[index], 0, network.events.length);
-    return Math.min(network.events.length, Math.floor(local + 1e-7));
+    return `${Math.min(network.events.length, Math.floor(local + 1e-7))}:${openingValue}:${activeSatmap}`;
   }).join(',');
-  if (!force && stateKey === currentStateKey) {
-    updateOpeningOffsets();
-    return;
-  }
+  if (!force && stateKey === currentStateKey) return;
 
   for (const record of pieceRecords) disposePieceBuffers(record.buffers);
   pieceRecords = [];
@@ -493,19 +564,16 @@ function mountVisiblePieces(force) {
     const local = clamp(progress - eventOffsets[networkIndex], 0, network.events.length);
     const completed = Math.min(network.events.length, Math.floor(local + 1e-7));
     const pieces = network.states[Math.min(completed, network.states.length - 1)] ?? network.finalPieces;
-    pieces.forEach((piece, pieceIndex) => {
-      pieceRecords.push({ network, networkIndex, piece, pieceIndex, buffers: createPieceBuffers(piece, networkIndex, pieceIndex) });
+    const gap = gapDistance(network);
+    const sealedFaces = buildSealedRockMesh(pieces, { gapDistance: gap, grooveInset: 0.28 });
+    pieceRecords.push({
+      network,
+      networkIndex,
+      piece: null,
+      gapDistance: 0,
+      materialType: 0,
+      buffers: createSealedRockBuffers(sealedFaces, activeSatmap),
     });
-  });
-  updateOpeningOffsets();
-}
-
-function updateOpeningOffsets() {
-  if (view === 'cliff') return;
-  // Piece shifts are stored as signed sums of cut-plane normals; this slider
-  // converts that topology into a small, inspectable physical aperture.
-  pieceRecords.forEach((record) => {
-    record.gapDistance = gapDistance(record.network);
   });
 }
 
@@ -517,7 +585,7 @@ function gapDistance(network) {
   const vertices = polyhedronVertices(network.outline);
   const extent = Math.max(...vertices.map((point) => Math.hypot(point.x, point.y, point.z)));
   const opening = Number(elements.gap.value) / 100;
-  return extent * opening * 0.028;
+  return extent * (0.008 + opening * 0.058);
 }
 
 function computeGroundHeight(networkList) {
@@ -529,25 +597,45 @@ function computeGroundHeight(networkList) {
       lowest = Math.min(lowest, worldY);
     }
   }
-  return Number.isFinite(lowest) ? lowest - 0.025 : -1;
+  return Number.isFinite(lowest) ? lowest - 0.065 : -1;
 }
 
-function makeMeshColor(face, networkIndex, pieceIndex) {
-  if (face.kind === 'fracture') return hexColor('#454a43');
-  const palette = ['#858477', '#817f73', '#888679', '#7c8077', '#85887d', '#818074'];
-  const base = hexColor(palette[networkIndex % palette.length]);
-  const tint = 0.91 + face.tone * 0.12 + (pieceIndex % 4) * 0.012;
-  return base.map((channel) => clamp(channel * tint, 0, 1));
+function makeRockFaceSatMapColor(face, normal, satmapKey) {
+  const centroid = face.points.reduce(
+    (acc, pt) => ({ x: acc.x + pt.x / face.points.length, y: acc.y + pt.y / face.points.length, z: acc.z + pt.z / face.points.length }),
+    { x: 0, y: 0, z: 0 },
+  );
+  const heightNorm = clamp((centroid.y + 1.4) / 2.8, 0, 1);
+  const strataWave = 0.5 + 0.5 * Math.sin(centroid.y * 5.2 + centroid.x * 1.4);
+  if (face.kind === 'fracture') {
+    const crackT = clamp(0.05 + 0.18 * heightNorm + (face.tone ?? 0.15) * 0.22, 0.02, 0.34);
+    const base = sampleSatMap(satmapKey, crackT);
+    return base.map((c) => clamp(c * 0.58, 0.04, 1));
+  }
+  const t = clamp(0.22 + 0.45 * heightNorm + 0.18 * strataWave + ((face.tone ?? 0.5) - 0.5) * 0.18 + normal.y * 0.10, 0.08, 0.96);
+  return sampleSatMap(satmapKey, t);
 }
 
-function createCliffBuffers(mesh) {
+function createCliffBuffers(mesh, grooves = []) {
+  const edges = [];
+  for (const groove of grooves) {
+    const lift = 0.012;
+    edges.push(
+      groove.a.x + groove.normal.x * lift,
+      groove.a.y + groove.normal.y * lift,
+      groove.a.z + groove.normal.z * lift,
+      groove.b.x + groove.normal.x * lift,
+      groove.b.y + groove.normal.y * lift,
+      groove.b.z + groove.normal.z * lift,
+    );
+  }
   return {
     vertexCount: mesh.vertexCount,
     position: uploadBuffer(mesh.positions, gl.ARRAY_BUFFER),
     normal: uploadBuffer(mesh.normals, gl.ARRAY_BUFFER),
     color: uploadBuffer(mesh.colors, gl.ARRAY_BUFFER),
-    edgeCount: 0,
-    edges: null,
+    edgeCount: edges.length / 3,
+    edges: edges.length ? uploadBuffer(new Float32Array(edges), gl.ARRAY_BUFFER) : null,
   };
 }
 
@@ -557,16 +645,16 @@ function minimumMeshY(positions) {
   return Number.isFinite(minimum) ? minimum : -1;
 }
 
-function createPieceBuffers(piece, networkIndex, pieceIndex) {
+function createSealedRockBuffers(faces, satmapKey) {
   const positions = [];
   const normals = [];
   const colors = [];
   const edges = [];
 
-  for (const face of piece.faces) {
+  for (const face of faces) {
     if (face.points.length < 3) continue;
     const normal = normalForFace(face.points);
-    const color = makeMeshColor(face, networkIndex, pieceIndex);
+    const color = makeRockFaceSatMapColor(face, normal, satmapKey);
     for (let index = 1; index < face.points.length - 1; index += 1) {
       const triangle = [face.points[0], face.points[index], face.points[index + 1]];
       for (const point of triangle) {
@@ -594,8 +682,8 @@ function createPieceBuffers(piece, networkIndex, pieceIndex) {
 
 function createFloorBuffers() {
   const corners = [
-    [-10, 0, -10], [-10, 0, 10], [10, 0, 10],
-    [-10, 0, -10], [10, 0, 10], [10, 0, -10],
+    [-11, 0, -11], [-11, 0, 11], [11, 0, 11],
+    [-11, 0, -11], [11, 0, 11], [11, 0, -11],
   ];
   const positions = [];
   const normals = [];
@@ -603,13 +691,13 @@ function createFloorBuffers() {
   for (const [x, y, z] of corners) {
     positions.push(x, y, z);
     normals.push(0, 1, 0);
-    colors.push(...hexColor('#303732'));
+    colors.push(...hexColor('#2c332e'));
   }
   const edges = [
-    -10, 0.001, -10, 10, 0.001, -10,
-    10, 0.001, -10, 10, 0.001, 10,
-    10, 0.001, 10, -10, 0.001, 10,
-    -10, 0.001, 10, -10, 0.001, -10,
+    -11, 0.001, -11, 11, 0.001, -11,
+    11, 0.001, -11, 11, 0.001, 11,
+    11, 0.001, 11, -11, 0.001, 11,
+    -11, 0.001, 11, -11, 0.001, -11,
   ];
   return {
     vertexCount: positions.length / 3,
@@ -633,7 +721,7 @@ function disposePieceBuffers(buffers) {
   gl.deleteBuffer(buffers.position);
   gl.deleteBuffer(buffers.normal);
   gl.deleteBuffer(buffers.color);
-  gl.deleteBuffer(buffers.edges);
+  if (buffers.edges) gl.deleteBuffer(buffers.edges);
 }
 
 function updateActiveCrack() {
@@ -689,7 +777,7 @@ function renderFrame() {
 
   const aspect = canvasWidth / Math.max(1, canvasHeight);
   const projection = perspectiveMatrix((43 * Math.PI) / 180, aspect, 0.1, 100);
-  const cameraTarget = { x: 0, y: view === 'cliff' ? -0.08 : 0, z: 0 };
+  const cameraTarget = { x: 0, y: view === 'cliff' ? -0.18 : 0, z: 0 };
   const cosPitch = Math.cos(pitch);
   const eye = {
     x: cameraTarget.x + cameraDistance * cosPitch * Math.sin(yaw),
@@ -698,35 +786,38 @@ function renderFrame() {
   };
   const viewProjection = multiplyMatrix(projection, lookAtMatrix(eye, cameraTarget, { x: 0, y: 1, z: 0 }));
 
-  drawBuffers(floorBuffers, translationMatrix(0, groundHeight, 0), viewProjection, '#252b27', -1);
+  drawBuffers(floorBuffers, translationMatrix(0, groundHeight, 0), viewProjection, '#232925', -1, 0.7);
   for (const record of pieceRecords) {
     const shift = record.piece ? {
       x: record.piece.shift.x * record.gapDistance,
       y: record.piece.shift.y * record.gapDistance,
       z: record.piece.shift.z * record.gapDistance,
     } : { x: 0, y: 0, z: 0 };
-    drawBuffers(record.buffers, modelMatrix(record.network.transform, shift), viewProjection, '#303631', record.materialType ?? 0);
+    const edgeAlpha = record.isCliff ? 0.52 : 0.82;
+    drawBuffers(record.buffers, modelMatrix(record.network.transform, shift), viewProjection, '#221f1d', record.materialType ?? 0, edgeAlpha);
   }
   if (activeLineVisible) drawLineBuffer(activeLineBuffer, activeLineCount, activeLineModel, viewProjection, [0.84, 0.92, 0.57, 0.94]);
 }
 
-function drawBuffers(buffers, model, viewProjection, edgeColor, materialType = 0) {
+function drawBuffers(buffers, model, viewProjection, edgeColor, materialType = 0, edgeAlpha = 0.82) {
   gl.useProgram(meshProgram);
   gl.uniformMatrix4fv(meshLocations.model, false, model);
   gl.uniformMatrix4fv(meshLocations.viewProjection, false, viewProjection);
   gl.uniformMatrix3fv(meshLocations.normalMatrix, false, normalMatrix(model));
-  gl.uniform3f(meshLocations.lightDirection, -0.45, 0.84, 0.56);
+  gl.uniform3f(meshLocations.lightDirection, -0.48, 0.82, 0.58);
   gl.uniform1f(meshLocations.materialType, materialType);
   gl.uniform1f(meshLocations.surfaceDetail, Number(elements.surfaceDetail.value) / 100);
   bindAttribute(buffers.position, meshLocations.position, 3);
   bindAttribute(buffers.normal, meshLocations.normal, 3);
   bindAttribute(buffers.color, meshLocations.color, 3);
   gl.drawArrays(gl.TRIANGLES, 0, buffers.vertexCount);
-  drawLineBuffer(buffers.edges, buffers.edgeCount, model, viewProjection, [...hexColor(edgeColor), 0.86]);
+  if (buffers.edges && buffers.edgeCount > 0) {
+    drawLineBuffer(buffers.edges, buffers.edgeCount, model, viewProjection, [...hexColor(edgeColor), edgeAlpha]);
+  }
 }
 
 function drawLineBuffer(buffer, count, model, viewProjection, color) {
-  if (!count) return;
+  if (!count || !buffer) return;
   gl.useProgram(lineProgram);
   gl.uniformMatrix4fv(lineLocations.model, false, model);
   gl.uniformMatrix4fv(lineLocations.viewProjection, false, viewProjection);
@@ -823,7 +914,7 @@ function initialiseCanvas() {
   canvas.addEventListener('pointercancel', stopDragging);
   canvas.addEventListener('wheel', (event) => {
     event.preventDefault();
-    cameraDistance = clamp(cameraDistance * Math.exp(event.deltaY * 0.0011), 3.2, view === 'cliff' ? 34 : 9);
+    cameraDistance = clamp(cameraDistance * Math.exp(event.deltaY * 0.0011), 2.8, view === 'cliff' ? 34 : 9);
   }, { passive: false });
   resizeCanvas();
 }
@@ -840,9 +931,9 @@ function resizeCanvas() {
 }
 
 function resetCamera() {
-  yaw = 0.72;
-  pitch = 0.36;
-  cameraDistance = view === 'cliff' ? 16.8 : 4.45;
+  yaw = view === 'cliff' ? 0.42 : 0.68;
+  pitch = view === 'cliff' ? 0.22 : 0.34;
+  cameraDistance = view === 'cliff' ? 15.8 : 4.35;
 }
 
 function setView(nextView) {
@@ -859,7 +950,7 @@ function setView(nextView) {
 
 function scheduleRebuild() {
   window.clearTimeout(rebuildTimer);
-  rebuildTimer = window.setTimeout(rebuild, 110);
+  rebuildTimer = window.setTimeout(rebuild, 85);
 }
 
 function generateNewSeed() {
@@ -874,19 +965,20 @@ function exportPolyhedra() {
   }
   const options = currentOptions();
   const payload = {
-    format: 'field-form.fracture-polyhedra/v1',
-    title: '3D polygon-first rock fracture prototype',
+    format: 'field-form.fracture-polyhedra/v2',
+    title: 'Sharp 3D polygon-first rock fracture prototype (sealed single mesh)',
     view,
     coordinateSystem: 'right-handed local xyz; y-up; units are normalized rock-space coordinates',
     parameters: options,
-    method: 'Sequential orientation-biased plane cuts through a convex 3D rock hull. Each cut creates a shared polygon fracture face and two closed polyhedra. No crack maps, Voronoi sites, or prefractured cells.',
-    sdfNote: 'Exported fragments are closed polygon-faced solids. Union or field-convert the fragment meshes, then apply erosion in the downstream SDF stage.',
+    method: 'Sequential orientation-biased plane cuts through a varied 3D rock hull. Opened joints bevel inward to a sealed fissure root so the fractured stone is a single watertight mesh.',
+    sdfNote: 'Exported mesh is a closed manifold polygon solid. Convert directly to SDF for downstream hydraulic/thermal erosion.',
     rocks: networks.map((network) => ({
       ...networkToJSON(network),
+      rockType: network.rockType ?? options.rockType,
       transform: network.transform ?? { position: [0, 0, 0], rotation: [0, 0, 0] },
     })),
   };
-  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `fracture-3d-seed-${options.seed}-rock.json`);
+  downloadBlob(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }), `fracture-3d-seed-${options.seed}-${options.rockType}.json`);
 }
 
 function exportCliffStl() {
@@ -894,7 +986,7 @@ function exportCliffStl() {
   if (!positions?.length) return;
   const triangleCount = positions.length / 9;
   const buffer = new ArrayBuffer(84 + triangleCount * 50);
-  const header = new TextEncoder().encode('FIELD/FORM sealed polygonized SDF cliff shell');
+  const header = new TextEncoder().encode('FIELD/FORM sharp sealed 3D polygonal cliff shell');
   new Uint8Array(buffer, 0, header.length).set(header);
   const data = new DataView(buffer);
   data.setUint32(80, triangleCount, true);
@@ -921,26 +1013,30 @@ function exportCliffStl() {
     data.setUint16(offset, 0, true); offset += 2;
   }
   const { seed, type } = cliffAssembly;
-  downloadBlob(new Blob([buffer], { type: 'model/stl' }), `sealed-${type}-cliff-seed-${seed}.stl`);
+  downloadBlob(new Blob([buffer], { type: 'model/stl' }), `sharp-${type}-cliff-seed-${seed}.stl`);
 }
 
 function exportCliffRecipe() {
   if (!cliffAssembly) return;
-  const { seed, type, profile, base, recipe, grooves, summary, grid, grooveWidth, material } = cliffAssembly;
+  const { seed, type, profile, satmap, base, recipe, grooves, summary, grid, grooveWidth, material } = cliffAssembly;
   const payload = {
-    format: 'field-form.sealed-cliff-recipe/v1',
+    format: 'field-form.sealed-cliff-recipe/v2',
     title: profile.name,
     parameters: currentOptions(),
     coordinateSystem: 'right-handed xyz; y-up; normalized units',
     shell: {
-      representation: 'closed triangulated isosurface of a fused signed-distance field',
+      representation: 'watertight 2-manifold polygonal cliff assembly with 3D fractured rocks and sealed joint fissures',
       watertight: true,
       triangles: summary.triangleCount,
-      sources: ['seeded low-poly cliff base with faceted front/back relief', 'overlapping convex rock forms with per-rock color palettes', 'sealed shallow joint grooves'],
+      sources: [
+        'pronounced 3D low-poly cliff core with headlands, overhangs, and gullies',
+        'high-variation 3D fractured rock polyhedra (slab, blocky, jagged, columnar, spire, rubble) with sealed 3D joints',
+        'multi-band satellite-derived SatMap geological color ramp',
+      ],
       grid,
     },
     baseShape: {
-      type: 'seeded low-poly cliff silhouette with triangulated front and back height fields',
+      type: 'seeded low-poly cliff silhouette with pronounced 3D front/back relief and overhangs',
       parameters: base.parameters,
       silhouette: base.silhouette,
       ridge: base.ridge,
@@ -949,10 +1045,11 @@ function exportCliffRecipe() {
       grid: base.grid,
     },
     rockMix: cliffTypeInfo(type).mix,
+    satmap,
     material: {
       ...material,
       surfaceDetail: currentOptions().surfaceDetail,
-      exportNote: 'The binary STL carries geometry only; this recipe stores the per-rock base colors and structured shading settings.',
+      exportNote: 'The binary STL carries the watertight 3D polygon geometry; this recipe stores per-rock fracture metadata and SatMap colors for downstream SDF erosion.',
     },
     grooves: { count: grooves.length, width: grooveWidth, segments: grooves.map(({ a, b, normal }) => ({ a, b, normal })) },
     rockRecipe: recipe,
@@ -1086,6 +1183,8 @@ elements.density.addEventListener('input', () => { updateLabels(); scheduleRebui
 elements.wander.addEventListener('input', () => { updateLabels(); scheduleRebuild(); });
 elements.angle.addEventListener('input', () => { updateLabels(); scheduleRebuild(); });
 elements.cliffType.addEventListener('change', () => { updateLabels(); scheduleRebuild(); });
+if (elements.rockType) elements.rockType.addEventListener('change', () => { updateLabels(); rebuild(); });
+if (elements.satmap) elements.satmap.addEventListener('change', () => { updateLabels(); scheduleRebuild(); });
 elements.cliffContour.addEventListener('input', () => { updateLabels(); scheduleRebuild(); });
 elements.cliffRelief.addEventListener('input', () => { updateLabels(); scheduleRebuild(); });
 elements.surfaceDetail.addEventListener('input', updateLabels);
@@ -1093,7 +1192,7 @@ elements.gap.addEventListener('input', () => {
   updateLabels();
   if (view === 'cliff') scheduleRebuild();
   else {
-    updateOpeningOffsets();
+    mountVisiblePieces(false);
     updateActiveCrack();
   }
 });

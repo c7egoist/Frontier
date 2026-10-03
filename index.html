@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#eeece5" />
-    <meta name="description" content="A true 3D polygon-first rock fracture growth prototype." />
-    <title>Fracture Lab — 3D Polygon Growth Study</title>
+    <meta name="description" content="A true 3D polygon-first rock fracture and cliff assembly prototype with sealed joints and SatMap geological coloration." />
+    <title>Fracture Lab — Sharp 3D Polygon Cliff &amp; Fracture Study</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
@@ -19,29 +19,28 @@
           <span class="brand-name">FIELD<span>/</span>FORM</span>
         </a>
         <div class="topbar-meta">
-          <span class="topbar-label">PROCEDURAL GEOLOGY / 001</span>
-          <span class="status-chip"><span class="status-dot"></span> TRUE 3D POLYHEDRA</span>
+          <span class="topbar-label">PROCEDURAL GEOLOGY / 002</span>
+          <span class="status-chip"><span class="status-dot"></span> SHARP 3D POLYHEDRA · SATMAPS</span>
         </div>
       </header>
 
       <main id="top">
         <section class="intro" aria-labelledby="page-title">
           <div class="intro-copy">
-            <p class="eyebrow"><span class="eyebrow-rule"></span> FRACTURE STUDY 01 &nbsp;·&nbsp; ROCK JOINTS</p>
-            <h1 id="page-title">Cracks that <em>grow</em><br class="desktop-break" /> through the rock.</h1>
+            <p class="eyebrow"><span class="eyebrow-rule"></span> FRACTURE STUDY 02 &nbsp;·&nbsp; SHARP ROCKS &amp; SATMAPS</p>
+            <h1 id="page-title">Cracks that <em>grow</em><br class="desktop-break" /> through sharp rock.</h1>
             <p class="intro-description">
-              A true 3D polygon study: assemble cliffs from convex rock forms and fuse them into a sealed mesh.
-              Switch to a single rock to inspect the actual polygonal fracture faces — no image-based cracks.
+              A razor-sharp 3D polygon study: fracture varied rock archetypes along sequential planes, seal opened joints into single watertight meshes, and assemble dramatic 3D cliffs colored by multi-band geological SatMaps.
             </p>
           </div>
-            <div class="intro-note">
+          <div class="intro-note">
             <span class="note-index">01 / 03</span>
-            <p>A curved low-poly cliff body sets the silhouette; mixed-size 3D rock forms follow its ridges and hollows before fusing into one sealed mesh.</p>
-            <span class="note-tag">3D · POLYGON FIRST · SEALED</span>
+            <p>Pronounced 3D headlands, overhangs, and gullies guide fractured slabs, blocks, columns, spires, and talus boulders—colored with satellite-derived SatMap ramps.</p>
+            <span class="note-tag">SHARP POLYGONS · SEALED JOINTS · SATMAP</span>
           </div>
         </section>
 
-        <section class="workspace" aria-label="3D rock fracture generator">
+        <section class="workspace" aria-label="3D rock fracture and cliff generator">
           <div class="stage-card">
             <div class="stage-header">
               <div class="stage-heading">
@@ -53,15 +52,15 @@
                   <button class="view-button" id="block-view-button" type="button" aria-pressed="false">Rock</button>
                   <button class="view-button is-active" id="cliff-view-button" type="button" aria-pressed="true">Cliff</button>
                 </div>
-                <span class="vector-badge"><span class="vector-icon" aria-hidden="true"></span> 3D POLYHEDRA</span>
+                <span class="vector-badge"><span class="vector-icon" aria-hidden="true"></span> SHARP 3D MESH</span>
               </div>
             </div>
 
             <div class="canvas-wrap" id="canvas-wrap">
-              <canvas id="fracture-canvas" aria-label="Interactive three-dimensional cliff formed from sealed polygonal rock geometry"></canvas>
+              <canvas id="fracture-canvas" aria-label="Interactive three-dimensional cliff formed from sharp sealed polygonal rock geometry"></canvas>
               <div class="canvas-overlay canvas-overlay-left">
-                <span class="overlay-label" id="overlay-label">POLYGON-FIRST ROCK FORMS / FUSED FIELD</span>
-                <span class="overlay-coordinate" id="overlay-coordinate">TRUE 3D <span>·</span> SEALED JOINTS <span>·</span> NO CRACK MAPS</span>
+                <span class="overlay-label" id="overlay-label">SHARP CRACKED ROCKS / SEALED 3D CLIFF</span>
+                <span class="overlay-coordinate" id="overlay-coordinate">CRISP FACETS <span>·</span> SEALED JOINTS <span>·</span> SATMAP ALBEDO</span>
               </div>
               <div class="canvas-overlay canvas-overlay-right">
                 <span class="overlay-swatch"></span>
@@ -93,9 +92,9 @@
             <div class="controls-heading">
               <div>
                 <p class="section-kicker">INPUT PARAMETERS</p>
-                <h2>Rock behavior</h2>
+                <h2>Rock &amp; cliff behavior</h2>
               </div>
-              <span class="control-index">A—I</span>
+              <span class="control-index">A—J</span>
             </div>
 
             <div class="formation-picker" id="cliff-type-group">
@@ -106,37 +105,70 @@
               <select id="cliff-type-select" class="formation-select">
                 <option value="layered" selected>Layered sedimentary</option>
                 <option value="basalt">Columnar basalt</option>
-                <option value="breccia">Breccia / talus</option>
+                <option value="breccia">Breccia / crag spires</option>
               </select>
               <p class="formation-description" id="cliff-type-description"></p>
               <div class="rock-mix"><span>ROCK SHAPE MIX</span><strong id="cliff-rock-mix"></strong></div>
+            </div>
+
+            <div class="formation-picker" id="rock-type-group" hidden>
+              <div class="control-label-row">
+                <label for="rock-type-select">Rock archetype</label>
+                <span class="formation-badge">6 SHAPES</span>
+              </div>
+              <select id="rock-type-select" class="formation-select">
+                <option value="blocky" selected>Blocky jointed cliff stone</option>
+                <option value="slab">Flat stratified ledge slab</option>
+                <option value="jagged">Jagged angular crag</option>
+                <option value="columnar">Polygonal basalt column</option>
+                <option value="spire">Towering crag spire</option>
+                <option value="rubble">Broken talus boulder</option>
+              </select>
+              <p class="formation-description" id="rock-type-description">Chunky multi-faceted cliff block with planar cleavage faces and sealed 3D fracture grooves.</p>
+            </div>
+
+            <div class="formation-picker satmap-picker" id="satmap-group">
+              <div class="control-label-row">
+                <label for="satmap-select">Geological SatMap</label>
+                <span class="formation-badge">16-STOP LUT</span>
+              </div>
+              <select id="satmap-select" class="formation-select">
+                <option value="auto" selected>Auto (Formation default)</option>
+                <option value="sandstone">Utah Navajo Sandstone</option>
+                <option value="limestone">Alpine Dolomite &amp; Karst</option>
+                <option value="basalt">Icelandic Columnar Basalt</option>
+                <option value="granite">Sierra Crag &amp; Breccia</option>
+                <option value="canyon">Redbed Gorge &amp; Ironstone</option>
+              </select>
+              <div class="satmap-ramp" id="satmap-ramp" aria-hidden="true"></div>
+              <p class="formation-description satmap-description" id="satmap-description"></p>
             </div>
 
             <div class="base-controls" id="cliff-base-controls">
               <div class="control-group">
                 <div class="control-label-row">
                   <label for="cliff-contour-range">Ridge silhouette</label>
-                  <output id="cliff-contour-output" for="cliff-contour-range">78%</output>
+                  <output id="cliff-contour-output" for="cliff-contour-range">82%</output>
                 </div>
-                <input id="cliff-contour-range" class="parameter-range" type="range" min="0" max="100" value="78" />
-                <div class="range-captions"><span>SUBTLE</span><span>STRONGLY SHAPED</span></div>
+                <input id="cliff-contour-range" class="parameter-range" type="range" min="0" max="100" value="82" />
+                <div class="range-captions"><span>FLAT CROWN</span><span>PRONOUNCED CRAGS</span></div>
               </div>
               <div class="control-group control-group-last">
                 <div class="control-label-row">
-                  <label for="cliff-relief-range">3D face relief</label>
-                  <output id="cliff-relief-output" for="cliff-relief-range">62%</output>
+                  <label for="cliff-relief-range">3D face relief &amp; overhangs</label>
+                  <output id="cliff-relief-output" for="cliff-relief-range">76%</output>
                 </div>
-                <input id="cliff-relief-range" class="parameter-range" type="range" min="0" max="100" value="62" />
-                <div class="range-captions"><span>FLATTER</span><span>MORE RELIEF</span></div>
+                <input id="cliff-relief-range" class="parameter-range" type="range" min="0" max="100" value="76" />
+                <div class="range-captions"><span>SHEER WALL</span><span>DEEP ALCOVES &amp; LEDGES</span></div>
               </div>
             </div>
 
             <div class="control-group">
               <div class="control-label-row">
-                <label id="density-label" for="density-range">Rock packing</label>
-                <output id="density-output" for="density-range">58</output>
+                <label id="density-label" for="density-range">Rock packing &amp; crack density</label>
+                <output id="density-output" for="density-range">62</output>
               </div>
-              <input id="density-range" class="parameter-range" type="range" min="0" max="100" value="58" />
+              <input id="density-range" class="parameter-range" type="range" min="0" max="100" value="62" />
               <div class="range-captions"><span id="density-low">SPARSE</span><span id="density-high">DENSE</span></div>
             </div>
 
@@ -160,19 +192,19 @@
 
             <div class="control-group control-group-last">
               <div class="control-label-row">
-                <label id="gap-label" for="gap-range">Sealed joint relief</label>
-                <output id="gap-output" for="gap-range">32%</output>
+                <label id="gap-label" for="gap-range">Sealed joint opening</label>
+                <output id="gap-output" for="gap-range">42%</output>
               </div>
-              <input id="gap-range" class="parameter-range" type="range" min="0" max="100" value="32" />
-              <div class="range-captions"><span id="gap-low">CLOSED</span><span id="gap-high">WIDEN TO INSPECT</span></div>
+              <input id="gap-range" class="parameter-range" type="range" min="0" max="100" value="42" />
+              <div class="range-captions"><span id="gap-low">HAIRLINE</span><span id="gap-high">DEEP SEALED FISSURE</span></div>
             </div>
 
             <div class="control-group">
               <div class="control-label-row">
-                <label for="surface-detail-range">Geologic stamp detail</label>
-                <output id="surface-detail-output" for="surface-detail-range">58%</output>
+                <label for="surface-detail-range">SatMap strata &amp; weathering</label>
+                <output id="surface-detail-output" for="surface-detail-range">68%</output>
               </div>
-              <input id="surface-detail-range" class="parameter-range" type="range" min="0" max="100" value="58" />
+              <input id="surface-detail-range" class="parameter-range" type="range" min="0" max="100" value="68" />
               <div class="range-captions"><span>SUBTLE</span><span>PRONOUNCED</span></div>
             </div>
 
@@ -188,14 +220,14 @@
             </div>
 
             <button class="generate-button" id="generate-button" type="button">
-              <span>Generate fractures</span>
+              <span>Rebuild sealed cliff</span>
               <span class="button-arrow" aria-hidden="true">↗</span>
             </button>
 
             <div class="stats-grid" aria-live="polite">
-              <div class="stat-cell"><span class="stat-label">JOINT PLANES</span><strong id="fracture-count">—</strong></div>
-              <div class="stat-cell"><span class="stat-label">POLYHEDRA</span><strong id="fragment-count">—</strong></div>
-              <div class="stat-cell"><span class="stat-label">SETS</span><strong id="generation-count">—</strong></div>
+              <div class="stat-cell"><span class="stat-label">CRACKED ROCKS</span><strong id="fracture-count">—</strong></div>
+              <div class="stat-cell"><span class="stat-label">ROCK FORMS</span><strong id="fragment-count">—</strong></div>
+              <div class="stat-cell"><span class="stat-label">JOINT TRACES</span><strong id="generation-count">—</strong></div>
             </div>
 
             <div class="legend" id="growth-legend">
@@ -210,16 +242,16 @@
         <section class="method-strip" aria-label="How this three-dimensional prototype works">
           <div class="method-title">
             <span class="section-kicker">MODEL NOTE</span>
-            <strong id="method-heading">A sealed cliff shell.<br />Built from 3D rock forms.</strong>
+            <strong id="method-heading">Sharp cracked rocks.<br />Sealed 3D cliff assembly.</strong>
           </div>
           <p id="method-copy">
-            Variable-size convex polyhedra follow a faceted 3D cliff base and fuse into one sealed mesh. Height, curvature, and ambient occlusion shape the color; bedding and mineral marks are structured shader stamps, not crack maps or random texture noise.
+            High-variation 3D rock polyhedra (flat cantilevered slabs, blocky stones, jagged crags, polygonal columns, spires, and talus rubble) are fractured by sequential 3D planes, sealed across opened joints into single watertight meshes, and assembled onto a pronounced 3D cliff core with satellite-derived SatMap coloration.
           </p>
-          <div class="method-caveat"><span class="caveat-dot"></span><span id="method-caveat-copy">A geometric union prototype; the exported rock recipe preserves individual 3D forms for later SDF erosion.</span></div>
+          <div class="method-caveat"><span class="caveat-dot"></span><span id="method-caveat-copy">Zero voxel blur or crack textures; every rock and joint fissure is crisp 3D polygon geometry ready for downstream SDF erosion.</span></div>
         </section>
 
         <footer class="footer">
-          <span>FIELD/FORM &nbsp;·&nbsp; 3D POLYHEDRAL FRACTURE STUDY</span>
+          <span>FIELD/FORM &nbsp;·&nbsp; SHARP 3D POLYHEDRAL FRACTURE &amp; CLIFF STUDY</span>
           <span class="footer-sources">READING: <a href="https://psgt.earth.lsa.umich.edu/chapter/4/joints.html" target="_blank" rel="noreferrer">UMICH · JOINTS</a> <span>↗</span> &nbsp; <a href="https://www.files.ethz.ch/structuralgeology/jpb/files/english/4joints.pdf" target="_blank" rel="noreferrer">ETH · FRACTURE SETS</a> <span>↗</span></span>
           <div class="export-actions">
             <button class="export-button" id="export-button" type="button"><span id="export-label">EXPORT SEALED CLIFF STL</span><span aria-hidden="true">↓</span></button>

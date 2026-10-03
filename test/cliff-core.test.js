@@ -1,6 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildCliffMesh, cliffTypeInfo } from '../cliff-core.js';
+import {
+  SATMAP_PRESETS,
+  buildCliffMesh,
+  cliffTypeInfo,
+  sampleSatMap,
+  satmapInfo,
+} from '../cliff-core.js';
 
 function assertWatertightTriangleSoup(positions) {
   assert.equal(positions.length % 9, 0);
@@ -32,6 +38,7 @@ test('layered, basalt, and breccia layouts fuse into one watertight 3D mesh', ()
       resolution: { nx: 30, ny: 22, nz: 16 },
     });
     assert.ok(cliff.summary.rockCount > 100, `${cliffType} should use a clustered rock assembly`);
+    assert.ok(cliff.summary.crackedRocks > 30, `${cliffType} should build the cliff using actual 3D cracked rocks`);
     assert.ok(cliff.summary.jointTraces > 0, `${cliffType} should include polygon-first joint traces`);
     assert.equal(cliff.summary.triangleCount, cliff.mesh.triangleCount);
     assert.equal(cliff.summary.watertight, true);
@@ -58,19 +65,21 @@ test('high relief and different seeds do not open seams in the fused shell', () 
   }
 });
 
-test('cliff base has an irregular low-poly ridge and the rocks vary in scale', () => {
+test('cliff base has a pronounced low-poly ridge, deep 3D relief, and rocks vary broadly in scale', () => {
   const cliff = buildCliffMesh({
     seed: 2417,
     cliffType: 'layered',
     density: 58,
+    cliffContour: 85,
+    cliffRelief: 80,
     resolution: { nx: 28, ny: 20, nz: 14 },
   });
   const ridgeHeights = cliff.base.ridge.map(([, y]) => y);
   const frontDepths = cliff.base.frontNodes.map((point) => point.z);
   const widths = cliff.rocks.map((rock) => rock.size[0]);
-  assert.ok(Math.max(...ridgeHeights) - Math.min(...ridgeHeights) > 0.5, 'the cliff crown should not be a straight horizontal line');
-  assert.ok(Math.max(...frontDepths) - Math.min(...frontDepths) > 0.35, 'the low-poly base should curve through depth');
-  assert.ok(Math.max(...widths) / Math.min(...widths) > 2.5, 'rock widths should include visibly different scales');
+  assert.ok(Math.max(...ridgeHeights) - Math.min(...ridgeHeights) > 2.0, 'the cliff crown should have pronounced vertical silhouette movement');
+  assert.ok(Math.max(...frontDepths) - Math.min(...frontDepths) > 2.0, 'the 3D cliff face should curve strongly through depth');
+  assert.ok(Math.max(...widths) / Math.min(...widths) > 4.0, 'rock widths should span hero boulders, slabs, and smaller talus');
 });
 
 test('base contour and face-relief controls scale the low-poly form independently', () => {
@@ -80,21 +89,34 @@ test('base contour and face-relief controls scale the low-poly form independentl
   const spread = (values) => Math.max(...values) - Math.min(...values);
   assert.equal(spread(subtle.base.ridge.map(([, y]) => y)), 0);
   assert.equal(spread(subtle.base.frontNodes.map(({ z }) => z)), 0);
-  assert.ok(spread(pushed.base.ridge.map(([, y]) => y)) > 0.8);
-  assert.ok(spread(pushed.base.frontNodes.map(({ z }) => z)) > 1);
+  assert.ok(spread(pushed.base.ridge.map(([, y]) => y)) > 2.2);
+  assert.ok(spread(pushed.base.frontNodes.map(({ z }) => z)) > 2.4);
   assertWatertightTriangleSoup(subtle.mesh.positions);
   assertWatertightTriangleSoup(pushed.mesh.positions);
 });
 
-test('rock palettes and geometry-aware material data vary without crack textures', () => {
-  const cliff = buildCliffMesh({ seed: 2417, cliffType: 'layered', resolution: { nx: 26, ny: 18, nz: 12 } });
+test('rock palettes and SatMap geometry-aware material data vary without crack textures', () => {
+  const cliff = buildCliffMesh({ seed: 2417, cliffType: 'layered', satmap: 'sandstone', resolution: { nx: 26, ny: 18, nz: 12 } });
   const paletteColors = new Set(cliff.rocks.map((rock) => rock.color.map((channel) => channel.toFixed(3)).join(',')));
   assert.ok(paletteColors.size > 20, 'individual rock forms should receive visible mineral-color variation');
   assert.equal(cliff.mesh.colors.length, cliff.mesh.positions.length);
   assert.ok(Math.max(...cliff.mesh.colors) - Math.min(...cliff.mesh.colors) > 0.25);
+  assert.match(cliff.material.shading, /SatMap/i);
   assert.match(cliff.material.shading, /curvature\/AO/);
   assert.equal(cliff.material.crackTexture, false);
+  assert.equal(cliff.satmap.id, 'sandstone');
   assert.ok(cliff.recipe.every((rock) => rock.color?.length === 3), 'the recipe should retain each rock color');
+});
+
+test('SatMap presets provide distinct 16-stop geological color ramps', () => {
+  assert.ok(Object.keys(SATMAP_PRESETS).length >= 5);
+  for (const key of Object.keys(SATMAP_PRESETS)) {
+    const info = satmapInfo(key);
+    assert.equal(info.stops.length, 16);
+    const low = sampleSatMap(key, 0.05);
+    const high = sampleSatMap(key, 0.95);
+    assert.ok(Math.hypot(high[0] - low[0], high[1] - low[1], high[2] - low[2]) > 0.25, `${key} SatMap should span dark crevices to bright highlights`);
+  }
 });
 
 test('cliff profile metadata describes distinct selectable rock mixes', () => {
