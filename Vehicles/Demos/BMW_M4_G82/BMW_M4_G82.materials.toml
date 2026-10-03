@@ -1,0 +1,58 @@
+# SolidArc material manifest for BMW_M4_G82.obj
+# Edit freely: 'frontier' is the engine material each usemtl group binds to; paints use System B AutomotiveFlakePaint.
+mesh = "BMW_M4_G82.obj"
+
+[materials.steel]
+frontier   = "Metal_Steel"
+baseColor  = [0.62, 0.66, 0.72]
+metallic   = 1
+roughness  = 0.35
+emissive   = 0
+opacity    = 1
+flakes     = false
+
+[materials.chrome]
+frontier   = "Metal_Chrome"
+baseColor  = [0.92, 0.94, 0.97]
+metallic   = 1
+roughness  = 0.05
+emissive   = 0
+opacity    = 1
+flakes     = false
+
+[materials.pearl]
+frontier   = "AutomotiveFlakePaint"
+baseColor  = [0.93, 0.9, 0.95]
+metallic   = 0.3
+roughness  = 0.15
+emissive   = 0
+opacity    = 1
+flakes     = true
+
+[materials.carbon]
+frontier   = "CarbonFibre"
+baseColor  = [0.1, 0.11, 0.12]
+metallic   = 0.6
+roughness  = 0.4
+emissive   = 0
+opacity    = 1
+flakes     = false
+
+[materials.rubber]
+frontier   = "Rubber_Tyre"
+baseColor  = [0.045, 0.045, 0.05]
+metallic   = 0
+roughness  = 0.95
+emissive   = 0
+opacity    = 1
+flakes     = false
+
+[materials.headlight]
+frontier   = "Emissive_Headlight"
+baseColor  = [0.95, 0.96, 1]
+metallic   = 0
+roughness  = 0.2
+emissive   = 1
+opacity    = 1
+flakes     = false
+
