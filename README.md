@@ -9,7 +9,7 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL in a WebGPU-capable browser (a secure context is required outside localhost). `npm run build` creates the static app in `demo/`, with relative asset paths so it can be served from a subdirectory such as raw.githack. The preferred path uses WebGPU compute shaders for a 64 × 64 Verlet cloth solver and WebGPU rendering. Browsers without WebGPU use the same procedural 3D character and garment in a WebGL2 preview with a CPU cloth solver.
+Open the Vite URL in a WebGPU-capable browser (a secure context is required outside localhost). `npm run build` creates the static app in `demo/`, with relative asset paths so it can be served from a subdirectory such as raw.githack. The preferred path uses WebGPU compute shaders for the 64 × 64 Verlet cloth solver, then asynchronously stages its particle positions to the WebGL2 viewport. Browsers without WebGPU use the same procedural 3D character and garment with a CPU cloth solver.
 
 ## What is in the prototype
 

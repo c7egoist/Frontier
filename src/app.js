@@ -7,24 +7,14 @@ import {
   makeDressDetails,
   makeDressGeometry,
 } from './geometry.js';
-import { CpuClothSimulation, GpuClothSimulation } from './simulation.js';
-import { createWebGLRenderer, createWebGPURenderer } from './renderer.js';
+import { CpuClothSimulation, GpuClothSimulation, requestWebGPUDevice } from './simulation.js';
+import { createWebGLRenderer } from './renderer.js';
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 const pauseIcon = '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M6.4 4.5h2.8v11H6.4zm4.5 0h2.8v11h-2.8z" fill="currentColor"/></svg>';
 const playIcon = '<svg viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="m7 4.8 8.2 5.2L7 15.2V4.8Z" fill="currentColor"/></svg>';
-
-function replaceCanvas(oldCanvas) {
-  const replacement = document.createElement('canvas');
-  replacement.id = oldCanvas.id;
-  replacement.className = oldCanvas.className;
-  replacement.setAttribute('aria-label', oldCanvas.getAttribute('aria-label') || '3D garment viewport');
-  replacement.dataset.renderer = 'webgl';
-  oldCanvas.replaceWith(replacement);
-  return replacement;
-}
 
 function showToast(message) {
   const toast = $('#toast');
@@ -55,7 +45,7 @@ function downloadProject(state) {
     version: 1,
     project: 'Violet hour',
     exportedAt: new Date().toISOString(),
-    renderer: state.rendererType === 'webgpu' ? 'WebGPU compute + render' : 'WebGL render + CPU cloth fallback',
+    renderer: state.rendererType === 'webgpu' ? 'WebGPU cloth compute + WebGL viewport' : 'WebGL viewport + CPU cloth fallback',
     garment: {
       silhouette: state.preset.id,
       name: state.preset.title,
@@ -154,36 +144,36 @@ export async function boot(initialCanvas) {
   const status = $('#engine-status');
   const statusLabel = status.querySelector('.engine-label');
   statusLabel.textContent = 'CONNECTING WEBGPU';
-  let renderer = await createWebGPURenderer(activeCanvas, bodyGeometry, clothGeometry, dressDetails);
-  if (renderer) {
+  let renderer = null;
+  const gpuDevice = await requestWebGPUDevice();
+  if (gpuDevice) {
     try {
-      state.simulation = new GpuClothSimulation(renderer.device, clothGeometry);
-      renderer.setSimulation(state.simulation);
+      state.simulation = new GpuClothSimulation(gpuDevice, clothGeometry);
+      renderer = createWebGLRenderer(activeCanvas, bodyGeometry, clothGeometry, dressDetails);
       state.rendererType = 'webgpu';
     } catch (error) {
-      console.error('WebGPU cloth pipeline failed, falling back to WebGL.', error);
-      renderer.dispose();
+      console.error('WebGPU cloth setup failed; using the CPU cloth fallback.', error);
+      gpuDevice.destroy();
+      state.simulation = null;
       renderer = null;
     }
   }
   if (!renderer) {
-    activeCanvas = replaceCanvas(activeCanvas);
     renderer = createWebGLRenderer(activeCanvas, bodyGeometry, clothGeometry, dressDetails);
     state.simulation = new CpuClothSimulation(clothGeometry);
     state.rendererType = 'webgl';
     status.classList.add('fallback');
     statusLabel.textContent = 'WEBGL · CPU FALLBACK';
-    $('#solver-node-detail').textContent = `${CLOTH_COLS} × ${CLOTH_ROWS} PARTICLES`;
   } else {
     status.classList.remove('fallback');
-    statusLabel.textContent = 'WEBGPU · CLOTH COMPUTE';
-    $('#solver-node-detail').textContent = `${CLOTH_COLS} × ${CLOTH_ROWS} PARTICLES`;
+    statusLabel.textContent = 'WEBGPU CLOTH · WEBGL VIEW';
   }
+  $('#solver-node-detail').textContent = `${CLOTH_COLS} × ${CLOTH_ROWS} PARTICLES`;
   state.renderer = renderer;
   activeCanvas.dataset.renderer = state.rendererType;
   status.title = state.rendererType === 'webgpu'
-    ? 'WebGPU compute cloth simulation and WebGPU rendering'
-    : 'WebGL rendering with the real-time CPU cloth fallback';
+    ? 'WebGPU compute cloth solver, read back for the WebGL viewport'
+    : 'WebGL viewport with the real-time CPU cloth fallback';
 
   // The cloth is reconstructed from the silhouette profile and then settles under gravity.
   // It remains the same 64 × 64 particle mesh across all three looks for quick switching.
@@ -424,32 +414,18 @@ export async function boot(initialCanvas) {
       gravity: state.weight,
       stretch: state.stretch,
     };
-    if (state.rendererType === 'webgpu') {
-      renderer.render({
-        simulation: state.simulation,
-        dt,
-        time: state.time,
-        camera: state.rotation,
-        color: hexToRgb(state.color),
-        roughness: state.preset.roughness,
-        settings,
-        wireframe: state.wireframe,
-        showModel: state.showModel,
-      });
-    } else {
-      if (state.running) state.simulation.step(dt, state.time, settings);
-      renderer.render({
-        simulation: state.simulation,
-        dt,
-        time: state.time,
-        camera: state.rotation,
-        color: hexToRgb(state.color),
-        roughness: state.preset.roughness,
-        settings,
-        wireframe: state.wireframe,
-        showModel: state.showModel,
-      });
-    }
+    if (state.running) state.simulation.step(dt, state.time, settings);
+    renderer.render({
+      simulation: state.simulation,
+      dt,
+      time: state.time,
+      camera: state.rotation,
+      color: hexToRgb(state.color),
+      roughness: state.preset.roughness,
+      settings,
+      wireframe: state.wireframe,
+      showModel: state.showModel,
+    });
     frameCounter++;
     elapsedForFps += rawDt;
     if (elapsedForFps > 0.6) {

@@ -200,6 +200,18 @@ function cpuCollide(x, y, z) {
   return [x, Math.max(y, 0.055), z];
 }
 
+export async function requestWebGPUDevice() {
+  if (!('gpu' in navigator)) return null;
+  try {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) return null;
+    return await adapter.requestDevice();
+  } catch (error) {
+    console.warn('WebGPU device unavailable; using the CPU cloth fallback.', error);
+    return null;
+  }
+}
+
 export class CpuClothSimulation {
   constructor(geometry) {
     this.iterations = 5;
@@ -331,6 +343,8 @@ export class GpuClothSimulation {
     this.rows = geometry.rows;
     this.running = true;
     this.iterations = 5;
+    this.positions = geometry.positions.slice();
+    this.stateVersion = 0;
     const bufferUsage = GPUBufferUsage;
     this.positionBuffer = device.createBuffer({
       label: 'cloth positions',
@@ -354,6 +368,15 @@ export class GpuClothSimulation {
       size: 32,
       usage: bufferUsage.UNIFORM | bufferUsage.COPY_DST,
     });
+    this.readbackSlots = Array.from({ length: 3 }, (_, index) => ({
+      buffer: device.createBuffer({
+        label: `cloth display readback ${index + 1}`,
+        size: this.count * 16,
+        usage: bufferUsage.MAP_READ | bufferUsage.COPY_DST,
+      }),
+      busy: false,
+      version: 0,
+    }));
 
     const integrateModule = device.createShaderModule({ label: 'Verlet integrate WGSL', code: GPU_CLOTH_COMPUTE });
     const constraintModule = device.createShaderModule({ label: 'Position constraints WGSL', code: GPU_CLOTH_CONSTRAINT });
@@ -403,6 +426,8 @@ export class GpuClothSimulation {
     this.count = geometry.count;
     const rest = packVec4(geometry.restPositions);
     const initial = packVec4(geometry.positions);
+    this.positions.set(geometry.positions);
+    this.stateVersion++;
     this.device.queue.writeBuffer(this.restBuffer, 0, rest);
     this.device.queue.writeBuffer(this.positionBuffer, 0, initial);
     this.device.queue.writeBuffer(this.previousBuffer, 0, initial);
@@ -442,6 +467,37 @@ export class GpuClothSimulation {
     }
   }
 
+  step(dt, time, settings = {}) {
+    if (dt <= 0 || !settings.running) return;
+    const encoder = this.device.createCommandEncoder({ label: 'GPU cloth simulation step' });
+    this.encode(encoder, dt, time, settings);
+    const slot = this.readbackSlots.find((candidate) => !candidate.busy);
+    if (slot) {
+      slot.busy = true;
+      slot.version = this.stateVersion;
+      encoder.copyBufferToBuffer(this.positionBuffer, 0, slot.buffer, 0, this.count * 16);
+    }
+    this.device.queue.submit([encoder.finish()]);
+    if (slot) {
+      slot.buffer.mapAsync(GPUMapMode.READ).then(() => {
+        const packed = new Float32Array(slot.buffer.getMappedRange());
+        if (slot.version === this.stateVersion) {
+          for (let i = 0, j = 0; i < this.count; i++, j += 4) {
+            const target = i * 3;
+            this.positions[target] = packed[j];
+            this.positions[target + 1] = packed[j + 1];
+            this.positions[target + 2] = packed[j + 2];
+          }
+        }
+        slot.buffer.unmap();
+        slot.busy = false;
+      }).catch((error) => {
+        slot.busy = false;
+        console.warn('Cloth display readback failed.', error);
+      });
+    }
+  }
+
   destroy() {
     this.positionBuffer.destroy();
     this.previousBuffer.destroy();
@@ -449,5 +505,6 @@ export class GpuClothSimulation {
     this.scratchB.destroy();
     this.restBuffer.destroy();
     this.uniformBuffer.destroy();
+    this.readbackSlots.forEach((slot) => slot.buffer.destroy());
   }
 }
