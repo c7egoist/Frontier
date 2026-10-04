@@ -414,7 +414,21 @@ export async function boot(initialCanvas) {
       gravity: state.weight,
       stretch: state.stretch,
     };
-    if (state.running) state.simulation.step(dt, state.time, settings);
+    if (state.running) {
+      try {
+        state.simulation.step(dt, state.time, settings);
+      } catch (error) {
+        if (state.rendererType !== 'webgpu') throw error;
+        console.error('GPU cloth step failed; switching to the CPU preview.', error);
+        state.simulation = new CpuClothSimulation(clothGeometry);
+        state.rendererType = 'webgl';
+        activeCanvas.dataset.renderer = 'webgl';
+        status.classList.add('fallback');
+        statusLabel.textContent = 'WEBGL · CPU FALLBACK';
+        status.title = 'WebGPU compute failed; using the real-time CPU cloth fallback';
+        showToast('GPU compute failed — switching to the CPU cloth preview.');
+      }
+    }
     renderer.render({
       simulation: state.simulation,
       dt,
