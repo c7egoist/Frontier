@@ -1,8 +1,5 @@
 import React, { useRef } from 'react';
-import {
-  Route, Landmark, Waypoints, CircleDot, Globe, Layers,
-  Fence, Mountain, FolderDown, Download, Upload, FilePlus, Trash2, RotateCcw, Ruler, Move3d, Check,
-} from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 import type { Project, Selection, Spline, RoadPreset } from '../lib/model';
 import { PRESET_DEFS } from '../lib/model';
 import type { BuiltNetwork } from '../lib/network';
@@ -27,25 +24,11 @@ interface InspectorProps {
   onNewProject: (demo: boolean) => void;
 }
 
-function Header({
-  icon, accent, eyebrow, title, status,
-}: {
-  icon: React.ReactNode;
-  accent: string;
-  eyebrow: string;
-  title: string;
-  status?: string;
-}) {
+function Header({ type, color, title }: { type: string; color: string; title: string }) {
   return (
-    <div className="rw-object-header">
-      <div className="rw-object-icon" style={{ color: accent }}>{icon}</div>
-      <div className="obj-text">
-        <small>{eyebrow}</small>
-        <h1 title={title}>{title}</h1>
-      </div>
-      {status && (
-        <div className="obj-status"><span className="dot" />{status}</div>
-      )}
+    <div className="fw-objhead">
+      <div className="type"><span className="chip" style={{ background: color }} />{type}</div>
+      <h1 title={title}>{title}</h1>
     </div>
   );
 }
@@ -98,22 +81,23 @@ export function Inspector(props: InspectorProps) {
     reader.readAsText(file);
   };
 
+  const totalTris = network.spans.reduce((a, sp) => a + countTriangles(sp.patches), 0)
+    + network.junctions.reduce((a, j) => a + countTriangles(j.patches), 0);
+
   return (
-    <aside className="rw-inspector">
+    <aside className="fw-inspector">
       {/* ------------------------------- SPLINE ------------------------------- */}
       {spline && selection.kind === 'spline' && (
         <>
           <Header
-            icon={spline.bridge.enabled ? <Landmark size={20} /> : <Route size={20} />}
-            accent={spline.color}
-            eyebrow={spline.bridge.enabled ? (spline.bridge.type === 'arch' ? 'ARCH BRIDGE' : 'BEAM BRIDGE') : 'ROAD SPLINE'}
+            type={spline.bridge.enabled ? (spline.bridge.type === 'arch' ? 'ARCH BRIDGE' : 'BEAM BRIDGE') : 'ROAD SPLINE'}
+            color={spline.color}
             title={spline.name}
-            status={spline.visible ? 'Live' : 'Hidden'}
           />
-          <div className="rw-inspector-scroll">
-            <Section title="Alignment" icon={<Ruler size={14} />}>
-              <div className="rw-metric"><span>{splineLength(spline).toFixed(1)}</span><small>m</small></div>
-              <p className="rw-muted">{spline.nodes.length} control nodes · {(splineTris(spline) / 1000).toFixed(1)}k tris</p>
+          <div className="fw-scroll">
+            <Section title="Alignment">
+              <div className="fw-metric"><span>{splineLength(spline).toFixed(1)}</span><small>m</small></div>
+              <p className="fw-muted">{spline.nodes.length} control nodes · {(splineTris(spline) / 1000).toFixed(1)}k tris</p>
               <Divider />
               <Toggle
                 label="Closed loop"
@@ -128,7 +112,7 @@ export function Inspector(props: InspectorProps) {
               />
             </Section>
 
-            <Section title="Cross-section" icon={<Layers size={14} />}>
+            <Section title="Cross-section">
               <Select
                 label="Road preset"
                 value={spline.cross.preset}
@@ -147,13 +131,13 @@ export function Inspector(props: InspectorProps) {
                 onChange={(v) => setCross(spline.id, { width: v, preset: 'custom' })} />
               <Slider label="Lanes" min={1} max={6} step={1} value={spline.cross.lanes}
                 onChange={(v) => setCross(spline.id, { lanes: v })} />
-              <Slider label="Pavement · left" unit=" m" min={0} max={5} step={0.1} value={spline.cross.paveLeft}
+              <Slider label="Pavement · L" unit=" m" min={0} max={5} step={0.1} value={spline.cross.paveLeft}
                 onChange={(v) => setCross(spline.id, { paveLeft: v })} />
-              <Slider label="Pavement · right" unit=" m" min={0} max={5} step={0.1} value={spline.cross.paveRight}
+              <Slider label="Pavement · R" unit=" m" min={0} max={5} step={0.1} value={spline.cross.paveRight}
                 onChange={(v) => setCross(spline.id, { paveRight: v })} />
               <Slider label="Curb height" unit=" m" min={0} max={0.4} step={0.01} value={spline.cross.curbHeight}
                 onChange={(v) => setCross(spline.id, { curbHeight: v })} />
-              <Slider label="Pavement crossfall" unit=" %" min={0} max={6} step={0.5} value={spline.cross.crossfall * 100}
+              <Slider label="Crossfall" unit=" %" min={0} max={6} step={0.5} value={spline.cross.crossfall * 100}
                 onChange={(v) => setCross(spline.id, { crossfall: v / 100 })} />
             </Section>
 
@@ -166,7 +150,7 @@ export function Inspector(props: InspectorProps) {
                 onChange={(v) => setCross(spline.id, { showLaneLines: v })} />
             </Section>
 
-            <Section title="Structure" icon={<Landmark size={14} />}>
+            <Section title="Structure">
               <Toggle
                 label="Bridge"
                 hint="Elevate this spline on piers & abutments"
@@ -279,7 +263,7 @@ export function Inspector(props: InspectorProps) {
               )}
             </Section>
 
-            <Section title="Guardrails" icon={<Fence size={14} />} open={spline.rails.enabled}>
+            <Section title="Guardrails" open={spline.rails.enabled}>
               <Toggle label="Enabled" value={spline.rails.enabled}
                 onChange={(v) => setRails(spline.id, { enabled: v })} />
               {spline.rails.enabled && (
@@ -293,9 +277,11 @@ export function Inspector(props: InspectorProps) {
               )}
             </Section>
 
-            <button className="rw-btn danger block" onClick={() => props.deleteSpline(spline.id)}>
-              <Trash2 size={14} /> Delete spline
-            </button>
+            <div style={{ padding: '10px 6px' }}>
+              <button className="fw-btn danger block" onClick={() => props.deleteSpline(spline.id)}>
+                <Trash2 size={14} /> Delete spline
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -303,16 +289,11 @@ export function Inspector(props: InspectorProps) {
       {/* -------------------------------- NODE -------------------------------- */}
       {spline && node && selection.kind === 'node' && (
         <>
-          <Header
-            icon={<CircleDot size={20} />}
-            accent={spline.color}
-            eyebrow={`NODE · ${spline.name.toUpperCase()}`}
-            title={`Node ${spline.nodes.findIndex((n) => n.id === node.id) + 1}`}
-            status="Live"
-          />
-          <div className="rw-inspector-scroll">
-            <Section title="Position" icon={<Move3d size={14} />}>
-              <div className="rw-xyz">
+          <Header type={`NODE · ${spline.name.toUpperCase()}`} color={spline.color}
+            title={`Node ${spline.nodes.findIndex((n) => n.id === node.id) + 1}`} />
+          <div className="fw-scroll">
+            <Section title="Position">
+              <div className="fw-xyz">
                 {(['X', 'Y', 'Z'] as const).map((axis, i) => (
                   <div key={axis}>
                     <label>{axis}</label>
@@ -331,17 +312,18 @@ export function Inspector(props: InspectorProps) {
                   </div>
                 ))}
               </div>
-              <div className="spacer" />
               <Slider label="Height" unit=" m" min={-5} max={25} step={0.1} value={node.position[1]}
                 onChange={(v) => props.updateNodeHeight(spline.id, node.id, v)} />
-              <p className="rw-muted">Raise nodes above the ground to ramp onto bridges, or lower them into cuttings. Dragging snaps onto nearby nodes and curves.</p>
+              <p className="fw-muted">Raise nodes to ramp onto bridges, or lower them into cuttings. Dragging snaps onto nearby nodes and curves.</p>
             </Section>
-            <button className="rw-btn block" onClick={() => props.onSelect({ kind: 'spline', splineId: spline.id })}>
-              Parent spline
-            </button>
-            <button className="rw-btn danger block" onClick={() => props.deleteNode(spline.id, node.id)}>
-              <Trash2 size={14} /> Delete node
-            </button>
+            <div style={{ padding: '10px 6px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button className="fw-btn block" onClick={() => props.onSelect({ kind: 'spline', splineId: spline.id })}>
+                Parent spline
+              </button>
+              <button className="fw-btn danger block" onClick={() => props.deleteNode(spline.id, node.id)}>
+                <Trash2 size={14} /> Delete node
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -349,30 +331,25 @@ export function Inspector(props: InspectorProps) {
       {/* ------------------------------ JUNCTION ------------------------------ */}
       {junction && selection.kind === 'junction' && (
         <>
-          <Header
-            icon={<Waypoints size={20} />}
-            accent="#93c779"
-            eyebrow={junction.kind === 'crossing' ? 'AUTO JUNCTION · CROSSING' : 'AUTO JUNCTION · SHARED'}
-            title={junction.topology}
-            status="Live"
-          />
-          <div className="rw-inspector-scroll">
-            <Section title="Arms" icon={<Waypoints size={14} />}>
-              <div className="rw-metric"><span>{junction.arms.length}</span></div>
-              <p className="rw-muted">
+          <Header type={junction.kind === 'crossing' ? 'AUTO JUNCTION · CROSSING' : 'AUTO JUNCTION · SHARED'}
+            color="#8a8a8a" title={junction.topology} />
+          <div className="fw-scroll">
+            <Section title="Arms">
+              <div className="fw-metric"><span>{junction.arms.length}</span></div>
+              <p className="fw-muted">
                 {junction.kind === 'crossing'
-                  ? 'Fused where curves cross or touch at grade. Runs trim back and merge into the junction — tune it under Scene → Junctions.'
-                  : 'Fused where spline nodes coincide. Runs trim back and merge into the junction — tune it under Scene → Junctions.'}
+                  ? 'Fused where curves cross, touch, or land near each other at grade. Runs trim back and merge — tune under Scene → Junctions.'
+                  : 'Fused where spline nodes coincide. Runs trim back and merge — tune under Scene → Junctions.'}
               </p>
               <Divider />
               {junction.arms.map((a, i) => (
                 <button
                   key={i}
-                  className="rw-arm-row"
+                  className="fw-arm"
                   onClick={() => props.onSelect({ kind: 'spline', splineId: a.splineId })}
                   title={`Go to ${a.splineName}`}
                 >
-                  <span className="row-dot" style={{ background: a.color }} />
+                  <span className="chip" style={{ background: a.color }} />
                   {a.splineName}
                   <small>{a.angleDeg.toFixed(0)}°</small>
                 </button>
@@ -385,15 +362,9 @@ export function Inspector(props: InspectorProps) {
       {/* -------------------------------- SCENE ------------------------------- */}
       {selection.kind === 'scene' && (
         <>
-          <Header
-            icon={<Globe size={20} />}
-            accent="#b9b9b9"
-            eyebrow="PROJECT"
-            title={project.name}
-            status="Live"
-          />
-          <div className="rw-inspector-scroll">
-            <Section title="Ground & water" icon={<Mountain size={14} />}>
+          <Header type="PROJECT" color="#8a8a8a" title={project.name} />
+          <div className="fw-scroll">
+            <Section title="Ground & water">
               <Slider label="Ground level" unit=" m" min={-10} max={10} step={0.1} value={project.scene.groundZ}
                 onChange={(v) => props.updateProject((p) => ({ ...p, scene: { ...p.scene, groundZ: v } }))} />
               <Toggle label="Ground plane" value={project.scene.showGround}
@@ -410,28 +381,28 @@ export function Inspector(props: InspectorProps) {
                 onChange={(v) => props.updateProject((p) => ({ ...p, scene: { ...p.scene, drawHeight: v } }))} />
             </Section>
 
-            <Section title="Junctions" icon={<Waypoints size={14} />}>
+            <Section title="Junctions">
               <Slider label="Corner radius" unit=" m" min={2} max={20} step={0.5} value={project.junctions.cornerRadius}
                 onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, cornerRadius: v } }))} />
               <Slider label="Fillet steps" min={4} max={24} step={1} value={project.junctions.filletSteps}
                 onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, filletSteps: v } }))} />
-              <Slider label="Structure depth" unit=" m" min={0.5} max={4} step={0.1} value={project.junctions.depth}
+              <Slider label="Struct depth" unit=" m" min={0.5} max={4} step={0.1} value={project.junctions.depth}
                 onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, depth: v } }))} />
-              <Slider label="Structure inset" unit=" m" min={0} max={3} step={0.1} value={project.junctions.inset}
+              <Slider label="Struct inset" unit=" m" min={0} max={3} step={0.1} value={project.junctions.inset}
                 onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, inset: v } }))} />
             </Section>
 
-            <Section title="Project" icon={<FolderDown size={14} />}>
-              <div className="rw-btn-row">
-                <button className="rw-btn" onClick={exportObj} title="Export generated meshes as Wavefront OBJ">
-                  <Download size={14} /> OBJ
-                </button>
-                <button className="rw-btn" onClick={exportJson} title="Export project as JSON">
-                  <Download size={14} /> JSON
-                </button>
-                <button className="rw-btn" onClick={() => fileRef.current?.click()} title="Import project JSON">
-                  <Upload size={14} />
-                </button>
+            <Section title="Statistics">
+              <div className="fw-kv"><span>Spans</span><span>{network.spans.length}</span></div>
+              <div className="fw-kv"><span>Junctions</span><span>{network.junctions.length}</span></div>
+              <div className="fw-kv"><span>Triangles</span><span>{(totalTris / 1000).toFixed(1)}k</span></div>
+            </Section>
+
+            <Section title="Exchange">
+              <div className="fw-btnrow">
+                <button className="fw-btn" onClick={exportObj} title="Export generated meshes as Wavefront OBJ">OBJ</button>
+                <button className="fw-btn" onClick={exportJson} title="Export project as JSON">JSON</button>
+                <button className="fw-btn" onClick={() => fileRef.current?.click()} title="Import project JSON">Import</button>
                 <input
                   ref={fileRef}
                   type="file"
@@ -444,26 +415,18 @@ export function Inspector(props: InspectorProps) {
                   }}
                 />
               </div>
-              <div className="rw-btn-row">
-                <button className="rw-btn" onClick={() => props.onNewProject(false)}>
-                  <FilePlus size={14} /> New empty
-                </button>
-                <button className="rw-btn" onClick={() => props.onNewProject(true)}>
-                  <RotateCcw size={14} /> Demo scene
-                </button>
-              </div>
-              <p className="rw-muted">OBJ export contains every generated road, junction and bridge mesh.</p>
+              <p className="fw-muted">OBJ export contains every generated road, junction and bridge mesh.</p>
             </Section>
           </div>
         </>
       )}
 
-      <div className="rw-inspector-footer">
-        <button className="rw-btn primary block" onClick={props.onSave} disabled={saved} title="Save to browser (Ctrl+S)">
-          <Check size={14} /> {saved ? 'All changes saved' : 'Save changes'}
+      <div className="fw-foot">
+        <button className="fw-btn block" onClick={props.onSave} disabled={saved} title="Save to browser (Ctrl+S)">
+          {saved ? 'All changes saved' : 'Save changes'}
         </button>
-        <div className="foot-meta">
-          <span className="footer-dot" /> RoadWorks Editor
+        <div className="meta">
+          <span>RoadWorks editor</span>
           <span className="right">{network.junctions.length} junctions · {network.spans.length} spans</span>
         </div>
       </div>

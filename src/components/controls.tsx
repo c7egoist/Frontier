@@ -1,34 +1,31 @@
 import React from 'react';
 import { ChevronDown, ChevronRight, Check } from 'lucide-react';
 
-// CliffSequence-style inspector controls: details sections, amber-fill
-// sliders with output pills, checkbox rows, segmented buttons.
+// Frontier development-editor controls: tree sections, black-pill sliders
+// with the value drawn on the track, round checks, pill radios.
 
 export function Section({
   title,
-  icon,
   open = true,
   children,
 }: {
   title: string;
-  icon?: React.ReactNode;
   open?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <details className="rw-section" open={open}>
+    <details className="fw-sec" open={open}>
       <summary>
-        {icon && <span className="sec-icon">{icon}</span>}
+        <span className="caret"><ChevronRight size={13} /></span>
         {title}
-        <span className="sec-chev"><ChevronRight size={14} /></span>
       </summary>
-      <div className="rw-section-body">{children}</div>
+      <div className="fw-sec-body">{children}</div>
     </details>
   );
 }
 
 export function Divider() {
-  return <div className="rw-divider" />;
+  return <div className="fw-div" />;
 }
 
 const fmt = (v: number, step: number) =>
@@ -51,26 +48,20 @@ export function Slider({
   unit?: string;
   onChange: (v: number) => void;
 }) {
-  const fill = ((value - min) / (max - min)) * 100;
   return (
-    <div className="rw-field">
-      <div className="rw-field-head">
-        <label>{label}</label>
-        <output>{fmt(value, step)}{unit}</output>
-      </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        aria-label={label}
-        onChange={(e) => onChange(Number(e.target.value))}
-        style={{ '--Fill': `${fill}%` } as React.CSSProperties}
-      />
-      <div className="rw-range-ends">
-        <span>{min}{unit}</span>
-        <span>{max}{unit}</span>
+    <div className="fw-slider">
+      <label>{label}</label>
+      <div className="track">
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          aria-label={label}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+        <span className="val">{fmt(value, step)}{unit}</span>
       </div>
     </div>
   );
@@ -88,10 +79,10 @@ export function Toggle({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <label className="rw-check">
+    <label className="fw-check">
       <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
-      <span className="box">{value && <Check size={11} />}</span>
-      <span className="check-text">
+      <span className="box">{value && <Check size={10} />}</span>
+      <span className="ct">
         <span>{label}</span>
         {hint && <small>{hint}</small>}
       </span>
@@ -111,13 +102,9 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="rw-field">
-      {label && (
-        <div className="rw-field-head">
-          <label>{label}</label>
-        </div>
-      )}
-      <div className="rw-seg">
+    <>
+      {label && <div className="fw-fieldlab">{label}</div>}
+      <div className="fw-seg">
         {options.map((o) => (
           <button
             key={o.value}
@@ -129,7 +116,7 @@ export function Segmented<T extends string>({
           </button>
         ))}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -145,11 +132,9 @@ export function Select({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="rw-field">
-      <div className="rw-field-head">
-        <label>{label}</label>
-      </div>
-      <div className="rw-select-wrap">
+    <>
+      <div className="fw-fieldlab">{label}</div>
+      <div className="fw-select">
         <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
           {options.map((o) => (
             <option key={o.value} value={o.value}>
@@ -159,6 +144,6 @@ export function Select({
         </select>
         <ChevronDown size={14} />
       </div>
-    </div>
+    </>
   );
 }

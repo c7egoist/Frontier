@@ -26,9 +26,17 @@ import { topologyName } from './model';
 
 const JOIN_XZ = 0.25;
 const JOIN_Y = 0.6;
+/** height gate for curve touches/crossings: fuses hand-wobble, spares overpasses */
+const CROSS_Y = 1.2;
 const PER_PAIR = 60;
 /** node-to-curve touch radius (XZ) that fuses a T-joint */
 const TOUCH_XZ = 0.5;
+/** free ends seek a landing this far (XZ) across gaps */
+const SEEK_XZ_ROAD = 1.2;
+const SEEK_XZ_BRIDGE = 2.5;
+/** ... and this far vertically (bridge ends ramp down to the road) */
+const SEEK_Y_ROAD = 1.2;
+const SEEK_Y_BRIDGE = 3.5;
 /** splits closer than this (arc) merge into one group — no slivers */
 const MERGE_ARC = 0.6;
 /** splits within this of a spline end snap to the end (no stub runs) */
@@ -306,7 +314,7 @@ export function buildNetwork(project: Project): BuiltNetwork {
             };
           }
         }
-        if (best.dist < TOUCH_XZ && Math.abs(P[1] - best.y) < JOIN_Y) {
+        if (best.dist < TOUCH_XZ && Math.abs(P[1] - best.y) < CROSS_Y) {
           const gA = existingGroupAt(A.id, nsA);
           const gB = existingGroupAt(B.id, best.s);
           if (gA !== null && gA === gB) continue; // already fused here (the share itself)
@@ -349,7 +357,7 @@ export function buildNetwork(project: Project): BuiltNetwork {
           const [t, u] = hit;
           const yA = smA.pts[i][1] + (smA.pts[i + 1][1] - smA.pts[i][1]) * t;
           const yB = smB.pts[j][1] + (smB.pts[j + 1][1] - smB.pts[j][1]) * u;
-          if (Math.abs(yA - yB) >= JOIN_Y) continue;
+          if (Math.abs(yA - yB) >= CROSS_Y) continue;
           const sA = smA.lengths[i] + t * (smA.lengths[i + 1] - smA.lengths[i]);
           const sB = smB.lengths[j] + u * (smB.lengths[j + 1] - smB.lengths[j]);
           const gA = existingGroupAt(A, sA);
@@ -359,6 +367,46 @@ export function buildNetwork(project: Project): BuiltNetwork {
           const gid2 = addSplit(B, sB, gid);
           groupKind.set(gid2, 'crossing');
         }
+      }
+    }
+  }
+
+  // 4) end seeking: free ends fuse across small gaps, and bridge ends ramp
+  //    down to the network. A landing that merely sits NEAR a road still
+  //    connects instead of dangling.
+  for (const A of splines) {
+    if (A.closed) continue;
+    const smA = samples.get(A.id);
+    if (!smA) continue;
+    const seekXZ = A.bridge.enabled ? SEEK_XZ_BRIDGE : SEEK_XZ_ROAD;
+    const seekY = A.bridge.enabled ? SEEK_Y_BRIDGE : SEEK_Y_ROAD;
+    for (const ni of [0, A.nodes.length - 1]) {
+      if (existingGroupAt(A.id, nodeS(smA, ni)) !== null) continue; // already fused
+      const P = A.nodes[ni].position as Vec3;
+      let found: { splineId: string; s: number; dist: number } | null = null;
+      for (const B of splines) {
+        if (B.id === A.id) continue;
+        const smB = samples.get(B.id);
+        if (!smB) continue;
+        for (let j = 0; j < smB.pts.length - 1; j++) {
+          const a = smB.pts[j]; const b = smB.pts[j + 1];
+          if (P[0] < Math.min(a[0], b[0]) - seekXZ || P[0] > Math.max(a[0], b[0]) + seekXZ ||
+            P[2] < Math.min(a[2], b[2]) - seekXZ || P[2] > Math.max(a[2], b[2]) + seekXZ) continue;
+          const { dist, t } = pointSegXZ(P, a, b);
+          if (dist >= seekXZ || (found && dist >= found.dist)) continue;
+          const y = a[1] + (b[1] - a[1]) * t;
+          if (Math.abs(P[1] - y) >= seekY) continue;
+          found = {
+            splineId: B.id,
+            s: smB.lengths[j] + t * (smB.lengths[j + 1] - smB.lengths[j]),
+            dist,
+          };
+        }
+      }
+      if (found) {
+        const gid = addSplit(A.id, nodeS(smA, ni));
+        const gid2 = addSplit(found.splineId, found.s, gid);
+        groupKind.set(gid2, 'crossing');
       }
     }
   }
@@ -467,17 +515,19 @@ export function buildNetwork(project: Project): BuiltNetwork {
     run.trimEnd = !!run.toId && junctionGroups.has(run.toId);
   }
 
-  // --- trim + frames + cross lines (viability pass) ---
+  // --- trim + frames + cross lines ---
+  // Every run renders: junction-to-junction nubs become short chaining spans
+  // (neighboring tubs share their end sections exactly), short stubs become
+  // short capped arms. Runs are never swallowed, so the network can't gap.
   const cornerR = Math.max(2, project.junctions.cornerRadius);
   const viable: ViableRun[] = [];
   for (const run of runs) {
     const L = arcLengths(run.pts);
     const total = L[L.length - 1];
-    if (total < 1) continue;
     let s0 = 0; let s1 = total;
     if (run.trimStart) s0 = Math.min(cornerR, total * 0.49);
     if (run.trimEnd) s1 = total - Math.min(cornerR, total * 0.49);
-    if (s1 - s0 < 1.5) continue; // swallowed by junctions — skip
+    if (s1 - s0 < 0.02) continue; // degenerate crumbs only
     const road: Vec3[] = [worldToRoad(pointAt(run.pts, L, s0))];
     for (let j = 0; j < run.pts.length; j++) {
       if (L[j] > s0 + 1e-4 && L[j] < s1 - 1e-4) road.push(worldToRoad(run.pts[j]));

@@ -294,4 +294,70 @@ if (process.exitCode !== 1) ok('crossing topology');
   else ok('no snap when far from geometry');
 }
 
+// 11. never-swallow topology: chained junctions, wobble crossings, sought landings
+{
+  // two T-joints 8m apart on one road: the nub between them must chain,
+  // not gap (both junctions keep all 3 arms)
+  const p = defaultProject();
+  p.splines = [
+    straight('A', [[-20, 0, 0], [20, 0, 0]]),
+    straight('B', [[-4, 0, -20], [-4, 0, 0]]),
+    straight('C', [[4, 0, -20], [4, 0, 0]]),
+  ];
+  const n = buildNetwork(p);
+  const arms = n.junctions.map((j) => j.arms.length).sort();
+  if (n.junctions.length !== 2) fail(`chain junctions: ${n.junctions.length}`);
+  else if (arms[0] !== 3 || arms[1] !== 3) fail(`chain arms: ${arms}`);
+  else if (n.spans.length !== 5) fail(`chain spans: ${n.spans.length}`);
+  else ok('close junctions chain through a nub span (3+3 arms)');
+  n.spans.forEach((s, i) => checkPatch(`chain-span${i}`, s.patches));
+  n.junctions.forEach((j, i) => checkPatch(`chain-junction${i}`, j.patches));
+}
+{
+  // wobble crossing (1m height diff) fuses; true overpass (2.5m) separates
+  const p1 = defaultProject();
+  p1.splines = [
+    straight('A', [[-20, 0, -20], [20, 0, 20]]),
+    straight('B', [[-20, 1, 20], [20, 1, -20]]),
+  ];
+  const n1 = buildNetwork(p1);
+  if (n1.junctions.length !== 1 || n1.junctions[0].arms.length !== 4) fail('wobble crossing');
+  else ok('1m-wobble crossing fuses into a 4-arm junction');
+  const p2 = defaultProject();
+  p2.splines = [
+    straight('A', [[-20, 0, -20], [20, 0, 20]]),
+    straight('B', [[-20, 2.5, 20], [20, 2.5, -20]]),
+  ];
+  const n2 = buildNetwork(p2);
+  if (n2.junctions.length !== 0) fail(`overpass: ${n2.junctions.length}`);
+  else ok('2.5m overpass still separates');
+}
+{
+  // bridge end dangling 2m short + 2.5m above the road still lands
+  const p = defaultProject();
+  const road = straight('A', [[-20, 0, 0], [20, 0, 0]]);
+  const bridge = straight('B', [[0, 5, -20], [0, 2.5, -2]]);
+  bridge.bridge = { ...bridge.bridge, enabled: true };
+  p.splines = [road, bridge];
+  const n = buildNetwork(p);
+  const j = n.junctions[0];
+  if (n.junctions.length !== 1) fail(`sought landing: ${n.junctions.length}`);
+  else if (j.arms.length !== 3) fail(`landing arms: ${j.arms.length}`);
+  else ok('bridge end seeks and ramps onto the road (3 arms)');
+  n.spans.forEach((s, i) => checkPatch(`land-span${i}`, s.patches));
+  n.junctions.forEach((jj, i) => checkPatch(`land-junction${i}`, jj.patches));
+}
+{
+  // road end stopping ~1.1m short of a road still joins it
+  const p = defaultProject();
+  p.splines = [
+    straight('A', [[-20, 0, 0], [20, 0, 0]]),
+    straight('B', [[0, 0, -20], [0.8, 0, -0.8]]),
+  ];
+  const n = buildNetwork(p);
+  if (n.junctions.length !== 1 || n.junctions[0].arms.length !== 3) fail('road-end seek');
+  else ok('road end joins across a 1m gap');
+}
+if (process.exitCode !== 1) ok('never-swallow topology');
+
 console.log(process.exitCode === 1 ? 'GEO TEST: FAILED' : 'GEO TEST: PASSED');

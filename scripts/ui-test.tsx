@@ -5,6 +5,7 @@ import { demoProject } from '../src/lib/model';
 import { buildNetwork } from '../src/lib/network';
 import { Outliner } from '../src/components/Outliner';
 import { Inspector } from '../src/components/Inspector';
+import { emptyHistory, pushHistory, undoHistory, redoHistory } from '../src/lib/history';
 
 const project = demoProject();
 const network = buildNetwork(project);
@@ -64,5 +65,25 @@ const inspectorBridge = renderToString(
 );
 if (!inspectorBridge.includes('Pier spacing') || !inspectorBridge.includes('Guardrails')) { console.error('FAIL: bridge inspector'); process.exitCode = 1; }
 else console.log('ok: inspector bridge');
+
+// undo/redo history (pure)
+{
+  let h = emptyHistory<number>();
+  h = pushHistory(h, 1);
+  h = pushHistory(h, 2);
+  const u = undoHistory(h, 3);
+  if (!u || u.snapshot !== 2) { console.error('FAIL: undo'); process.exitCode = 1; }
+  else {
+    console.log('ok: history undo');
+    const r = redoHistory(u.history, 2);
+    if (!r || r.snapshot !== 3) { console.error('FAIL: redo'); process.exitCode = 1; }
+    else console.log('ok: history redo');
+    const cleared = pushHistory(u.history, 9);
+    if (cleared.future.length !== 0) { console.error('FAIL: push clears redo'); process.exitCode = 1; }
+    else console.log('ok: history push clears redo');
+  }
+  if (undoHistory(emptyHistory<number>(), 0) !== null) { console.error('FAIL: undo empty'); process.exitCode = 1; }
+  else console.log('ok: history empty guards');
+}
 
 console.log(process.exitCode === 1 ? 'UI TEST: FAILED' : 'UI TEST: PASSED');

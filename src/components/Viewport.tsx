@@ -292,7 +292,7 @@ export interface ViewportProps {
   onPointerUp: () => void;
 }
 
-const MODE_DOT: Record<Mode, string> = { select: '#b9b9b9', draw: '#d6a665', pan: '#717171' };
+const MODE_DOT: Record<Mode, string> = { select: '#b9b9b9', draw: '#f0f0f0', pan: '#717171' };
 const MODE_HINT: Record<Mode, React.ReactNode> = {
   select: (<span><b>Click</b> node · <b>drag</b> gizmo, snaps to roads · <b>Right-drag</b> pan · <kbd>Del</kbd> node</span>),
   draw: (<span><b>Click</b> ground to extend · <b>Click</b> a road to join it · <kbd>Esc</kbd> finish</span>),

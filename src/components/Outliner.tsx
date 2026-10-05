@@ -1,7 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  Search, Plus, Eye, EyeOff, Route, Landmark, Waypoints, X,
-} from 'lucide-react';
+import { Search, Plus, Eye, EyeOff } from 'lucide-react';
 import type { Project, Selection } from '../lib/model';
 import type { BuiltNetwork } from '../lib/network';
 
@@ -46,65 +44,50 @@ export function Outliner({
   const selSplineId = selection.kind === 'spline' || selection.kind === 'node' ? selection.splineId : null;
 
   return (
-    <aside className="rw-outliner">
-      <div className="rw-panel-header">
-        <span>OUTLINER</span>
+    <aside className="fw-outliner">
+      <div className="fw-panehead">
+        <span>Outliner</span>
         <span className="count">{project.splines.length + network.junctions.length}</span>
       </div>
 
-      <div className="rw-census">
-        <div className="tile"><b>{project.splines.length}</b><span>SPLINES</span></div>
-        <div className="tile"><b>{network.junctions.length}</b><span>JUNCTIONS</span></div>
+      <div className="fw-stats">
+        <div><b>{project.splines.length}</b><span>SPLINES</span></div>
+        <div><b>{network.junctions.length}</b><span>JUNCTIONS</span></div>
       </div>
 
-      <div className="rw-search">
-        <Search size={14} />
+      <div className="fw-search">
+        <Search size={13} />
         <input placeholder="Filter objects" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
 
-      {addOpen && (
-        <div className="rw-add-menu">
-          <p>NEW SPLINE</p>
-          <button onClick={() => { onAddSpline('road'); setAddOpen(false); }}>
-            <Route size={14} style={{ color: '#a8bbeb' }} /> Road spline
-          </button>
-          <button onClick={() => { onAddSpline('beam'); setAddOpen(false); }}>
-            <Landmark size={14} style={{ color: '#e8b65f' }} /> Beam bridge
-          </button>
-          <button onClick={() => { onAddSpline('arch'); setAddOpen(false); }}>
-            <Landmark size={14} style={{ color: '#d5a4c4' }} /> Arch bridge
-          </button>
-        </div>
-      )}
-
-      <div className="rw-entries">
+      <div className="fw-tree">
         <div>
-          <button className="rw-group-label" onClick={() => setCollapsed((c) => ({ ...c, splines: !c.splines }))}>
+          <button className="fw-group" onClick={() => setCollapsed((c) => ({ ...c, splines: !c.splines }))}>
             {collapsed.splines ? '▸' : '▾'} SPLINES
-            <span className="group-count">{splines.length}</span>
+            <span className="n">{splines.length}</span>
           </button>
           {!collapsed.splines && splines.map((s) => {
             const isBridge = s.bridge.enabled;
-            const Icon = isBridge ? Landmark : Route;
             const selected = s.id === selSplineId;
             return (
-              <div key={s.id} className={`rw-entry ${selected ? 'selected' : ''} ${s.visible ? '' : 'hidden-object'}`}>
+              <div key={s.id} className={`fw-row ${selected ? 'selected' : ''}`}>
                 <button
-                  className="row-main"
+                  className={`main ${s.visible ? '' : ''}`}
                   onClick={() => onSelect({ kind: 'spline', splineId: s.id })}
                   title={`${s.name} — ${s.nodes.length} nodes`}
+                  style={s.visible ? undefined : { opacity: 0.45 }}
                 >
-                  <Icon size={15} style={{ color: s.color, flex: 'none' }} />
-                  <span className="row-text">
+                  <span className="chip" style={{ background: s.color }} />
+                  <span className="txt">
                     <strong>{s.name}</strong>
                     <small>
                       {s.nodes.length} pts · {isBridge ? (s.bridge.type === 'arch' ? 'arch bridge' : 'beam bridge') : `${s.cross.width.toFixed(0)} m road`}
                     </small>
                   </span>
-                  {isBridge && <span className="row-badge">{s.bridge.type.toUpperCase()}</span>}
+                  {isBridge && <span className="tag">{s.bridge.type.toUpperCase()}</span>}
                 </button>
                 <button
-                  className="visibility"
+                  className="eye"
                   title={s.visible ? 'Hide' : 'Show'}
                   onClick={() => onToggleVisibility(s.id)}
                 >
@@ -114,26 +97,47 @@ export function Outliner({
             );
           })}
           {!collapsed.splines && splines.length === 0 && (
-            <div className="rw-empty-note">No splines — press <b>P</b> and click the ground.</div>
+            <div className="fw-emptynote">No splines — press <b>P</b> and click the ground.</div>
+          )}
+          {!collapsed.splines && addOpen && (
+            <div className="fw-row">
+              <button className="main" onClick={() => { onAddSpline('road'); setAddOpen(false); }}>
+                <span className="txt"><strong style={{ color: 'var(--txdim)' }}>+ Road spline</strong></span>
+              </button>
+            </div>
+          )}
+          {!collapsed.splines && addOpen && (
+            <div className="fw-row">
+              <button className="main" onClick={() => { onAddSpline('beam'); setAddOpen(false); }}>
+                <span className="txt"><strong style={{ color: 'var(--txdim)' }}>+ Beam bridge</strong></span>
+              </button>
+            </div>
+          )}
+          {!collapsed.splines && addOpen && (
+            <div className="fw-row">
+              <button className="main" onClick={() => { onAddSpline('arch'); setAddOpen(false); }}>
+                <span className="txt"><strong style={{ color: 'var(--txdim)' }}>+ Arch bridge</strong></span>
+              </button>
+            </div>
           )}
         </div>
 
         <div>
-          <button className="rw-group-label" onClick={() => setCollapsed((c) => ({ ...c, junctions: !c.junctions }))}>
+          <button className="fw-group" onClick={() => setCollapsed((c) => ({ ...c, junctions: !c.junctions }))}>
             {collapsed.junctions ? '▸' : '▾'} JUNCTIONS
-            <span className="group-count">{junctions.length}</span>
+            <span className="n">{junctions.length}</span>
           </button>
           {!collapsed.junctions && junctions.map((j) => {
             const selected = selection.kind === 'junction' && selection.junctionId === j.id;
             return (
-              <div key={j.id} className={`rw-entry ${selected ? 'selected' : ''}`}>
+              <div key={j.id} className={`fw-row ${selected ? 'selected' : ''}`}>
                 <button
-                  className="row-main"
+                  className="main"
                   onClick={() => onSelect({ kind: 'junction', junctionId: j.id })}
                   title={`${j.topology} — ${j.arms.length} arms`}
                 >
-                  <Waypoints size={15} style={{ color: '#93c779', flex: 'none' }} />
-                  <span className="row-text">
+                  <span className="chip" style={{ background: '#8a8a8a' }} />
+                  <span className="txt">
                     <strong>{j.topology}</strong>
                     <small>{j.arms.length} arms · {j.kind === 'crossing' ? 'auto · crossing' : 'shared node'}</small>
                   </span>
@@ -142,21 +146,16 @@ export function Outliner({
             );
           })}
           {!collapsed.junctions && junctions.length === 0 && (
-            <div className="rw-empty-note">Draw roads across each other — crossings fuse into junctions.</div>
+            <div className="fw-emptynote">Draw roads across each other — crossings fuse into junctions.</div>
           )}
         </div>
       </div>
 
-      <div className="rw-outliner-bottom">
-        <div className="rw-add-row">
-          <button className="rw-btn block" title="Add spline (Shift+A)" onClick={() => setAddOpen((v) => !v)}>
-            {addOpen ? <X size={14} /> : <Plus size={14} />} Spline
-          </button>
-        </div>
-        <div className="rw-caption">
-          <span>RoadWorks scene · graphite</span>
-          <span className="little-dot" />
-        </div>
+      <div className="fw-outfoot">
+        <button className="fw-btn block" title="Add spline (Shift+A)" onClick={() => setAddOpen((v) => !v)}>
+          <Plus size={14} /> Spline
+        </button>
+        <div className="cap">RoadWorks scene · frontier seating</div>
       </div>
     </aside>
   );

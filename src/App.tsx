@@ -1,14 +1,19 @@
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import type { Mode, Point3D, Project, Selection, Spline, SplineNode } from './lib/model';
 import {
   makeNode, makeSpline, defaultProject, demoProject, migrateProject, SPLINE_COLORS,
 } from './lib/model';
 import { buildNetwork, type BuiltNetwork } from './lib/network';
 import { countTriangles } from './lib/roadGeometry';
+import { networkToObj, downloadText } from './lib/exportObj';
 import { findSnapTarget } from './lib/editing';
+import {
+  emptyHistory, pushHistory, undoHistory, redoHistory, type History,
+} from './lib/history';
 import { Viewport, type ViewPreset, type ViewRequest, type FrameBounds } from './components/Viewport';
 import { Outliner, type NewSplineKind } from './components/Outliner';
 import { Inspector } from './components/Inspector';
+import { MenuBar, type MenuDef } from './components/MenuBar';
 
 const STORAGE_KEY = 'roadworks-editor:v1';
 const LEGACY_STORAGE_KEY = 'frontier-road-bridge:v1';
@@ -40,8 +45,52 @@ export default function App() {
   const [viewRequest, setViewRequest] = useState<ViewRequest>({ preset: 'iso', nonce: 0 });
   const [menuNonce, setMenuNonce] = useState(0);
   const [snapHint, setSnapHint] = useState<string | null>(null);
+  const [histNonce, setHistNonce] = useState(0);
+  const historyRef = useRef<History<Project>>(emptyHistory());
+  const projectRef = useRef(project);
+  const lastPush = useRef(0);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const dirty = useCallback(() => setSaved(false), []);
+  useEffect(() => { projectRef.current = project; });
+
+  // History push reads the pre-mutation state from the ref mirror (effects
+  // run after render, so the ref still holds it when mutators call dirty).
+  // Drags/slider streams are throttled to one snapshot per 800ms; structural
+  // edits always push.
+  const dirty = useCallback((structural = false) => {
+    const now = Date.now();
+    if (structural || now - lastPush.current > 800) {
+      lastPush.current = now;
+      historyRef.current = pushHistory(historyRef.current, structuredClone(projectRef.current));
+      setHistNonce((n) => n + 1);
+    }
+    setSaved(false);
+  }, []);
+
+  const undo = useCallback(() => {
+    const r = undoHistory(historyRef.current, structuredClone(projectRef.current));
+    if (!r) return;
+    historyRef.current = r.history;
+    setHistNonce((n) => n + 1);
+    setProject(r.snapshot);
+    setSelection({ kind: 'scene' });
+    setSnapHint(null);
+    setSaved(false);
+  }, []);
+
+  const redo = useCallback(() => {
+    const r = redoHistory(historyRef.current, structuredClone(projectRef.current));
+    if (!r) return;
+    historyRef.current = r.history;
+    setHistNonce((n) => n + 1);
+    setProject(r.snapshot);
+    setSelection({ kind: 'scene' });
+    setSnapHint(null);
+    setSaved(false);
+  }, []);
+
+  const canUndo = histNonce >= 0 && historyRef.current.past.length > 0;
+  const canRedo = histNonce >= 0 && historyRef.current.future.length > 0;
 
   // deferred rebuild keeps node-dragging smooth; meshes catch up a frame later
   const deferredProject = useDeferredValue(project);
@@ -177,14 +226,14 @@ export default function App() {
         .filter((s) => s.nodes.length > 0),
     }));
     setSelection((sel) => (sel.kind === 'node' && sel.nodeId === nodeId ? { kind: 'scene' } : sel));
-    dirty();
+    dirty(true);
   }, [dirty]);
 
   const deleteSpline = useCallback((id: string) => {
     setProject((p) => ({ ...p, splines: p.splines.filter((s) => s.id !== id) }));
     setSelection({ kind: 'scene' });
     setActiveSplineId((a) => (a === id ? null : a));
-    dirty();
+    dirty(true);
   }, [dirty]);
 
   const moveSpline = useCallback((splineId: string, dx: number, dy: number, dz: number) => {
@@ -248,7 +297,7 @@ export default function App() {
       setProject((p) => ({ ...p, splines: [...p.splines, s] }));
       setActiveSplineId(s.id);
       setSelection({ kind: 'node', splineId: s.id, nodeId: s.nodes[0].id });
-      dirty();
+      dirty(true);
       return;
     }
     let createdId = '';
@@ -263,7 +312,7 @@ export default function App() {
       }),
     }));
     if (createdId) setSelection({ kind: 'node', splineId: activeSplineId, nodeId: createdId });
-    dirty();
+    dirty(true);
   }, [activeSplineId, project.splines.length, selection, smoothAppend, dirty]);
 
   const handleGroundPointerDown = useCallback((e: any) => {
@@ -303,7 +352,7 @@ export default function App() {
         setProject((p) => ({ ...p, splines: [...p.splines, s] }));
         setActiveSplineId(s.id);
         setSelection({ kind: 'node', splineId: s.id, nodeId: s.nodes[0].id });
-        dirty();
+        dirty(true);
         return;
       }
       if (activeSplineId === splineId) {
@@ -313,7 +362,7 @@ export default function App() {
             splines: p.splines.map((s) => (s.id === splineId ? { ...s, closed: true } : s)),
           }));
           setMode('select');
-          dirty();
+          dirty(true);
         }
         return;
       }
@@ -340,7 +389,7 @@ export default function App() {
         setActiveSplineId(splineId);
         setSelection({ kind: 'node', splineId, nodeId });
         setMode('select');
-        dirty();
+        dirty(true);
         return;
       }
       // snap onto a mid-spline node without joining (shared node → junction)
@@ -371,7 +420,7 @@ export default function App() {
     setActiveSplineId(s.id);
     setSelection({ kind: 'spline', splineId: s.id });
     setMode('draw');
-    dirty();
+    dirty(true);
   }, [project.splines.length, dirty]);
 
   const save = useCallback(() => {
@@ -388,7 +437,7 @@ export default function App() {
     setProject(p);
     setSelection({ kind: 'scene' });
     setActiveSplineId(null);
-    dirty();
+    dirty(true);
   }, [dirty]);
 
   const newProject = useCallback((demo: boolean) => {
@@ -397,8 +446,36 @@ export default function App() {
     setActiveSplineId(null);
     setMode('select');
     setSnapHint(null);
-    dirty();
+    dirty(true);
   }, [dirty]);
+
+  const exportObj = useCallback(() => {
+    downloadText(
+      `${project.name.replace(/[^A-Za-z0-9-_]+/g, '_')}.obj`,
+      networkToObj(network, project.name),
+      'text/plain',
+    );
+  }, [network, project.name]);
+
+  const exportJson = useCallback(() => {
+    downloadText(
+      `${project.name.replace(/[^A-Za-z0-9-_]+/g, '_')}.road.json`,
+      JSON.stringify(project, null, 2),
+      'application/json',
+    );
+  }, [project]);
+
+  const importJsonFile = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        loadProject(JSON.parse(String(reader.result)));
+      } catch {
+        window.alert('Could not parse that project file.');
+      }
+    };
+    reader.readAsText(file);
+  }, [loadProject]);
 
   const requestView = useCallback((preset: ViewPreset) => {
     setViewRequest((r) => ({ preset, nonce: r.nonce + 1 }));
@@ -419,6 +496,90 @@ export default function App() {
     setMode('select');
   }, []);
 
+  const deleteSelected = useCallback(() => {
+    if (selection.kind === 'node') deleteNode(selection.splineId, selection.nodeId);
+    else if (selection.kind === 'spline') deleteSpline(selection.splineId);
+  }, [selection, deleteNode, deleteSpline]);
+
+  const closeSelectedLoop = useCallback(() => {
+    const id = selection.kind === 'spline' || selection.kind === 'node' ? selection.splineId : null;
+    if (!id) return;
+    updateSpline(id, (s) => (s.closed || s.nodes.length < 3 ? s : { ...s, closed: true }));
+    dirty(true);
+  }, [selection, updateSpline, dirty]);
+
+  // --- menus ------------------------------------------------------------------
+
+  const selSpline = selection.kind === 'spline' || selection.kind === 'node'
+    ? project.splines.find((s) => s.id === selection.splineId) ?? null
+    : null;
+  const menus: MenuDef[] = useMemo(() => [
+    {
+      label: 'File',
+      items: [
+        { label: 'New empty', action: () => newProject(false) },
+        { label: 'Demo scene', action: () => newProject(true) },
+        'sep',
+        { label: 'Save', shortcut: 'Ctrl+S', action: save },
+        'sep',
+        { label: 'Import JSON…', action: () => fileRef.current?.click() },
+        { label: 'Export OBJ', action: exportObj },
+        { label: 'Export JSON', action: exportJson },
+      ],
+    },
+    {
+      label: 'Edit',
+      items: [
+        { label: 'Undo', shortcut: 'Ctrl+Z', disabled: !canUndo, action: undo },
+        { label: 'Redo', shortcut: 'Ctrl+Y', disabled: !canRedo, action: redo },
+        'sep',
+        {
+          label: 'Delete selected',
+          shortcut: 'Del',
+          disabled: selection.kind !== 'node' && selection.kind !== 'spline',
+          action: deleteSelected,
+        },
+      ],
+    },
+    {
+      label: 'Spline',
+      items: [
+        { label: 'New road', shortcut: 'Shift+A', action: () => handleAddSpline('road') },
+        { label: 'New beam bridge', action: () => handleAddSpline('beam') },
+        { label: 'New arch bridge', action: () => handleAddSpline('arch') },
+        'sep',
+        {
+          label: 'Close loop',
+          disabled: !selSpline || selSpline.closed || selSpline.nodes.length < 3,
+          action: closeSelectedLoop,
+        },
+        {
+          label: 'Delete spline',
+          disabled: !selSpline,
+          action: () => { if (selSpline) deleteSpline(selSpline.id); },
+        },
+      ],
+    },
+    {
+      label: 'View',
+      items: [
+        { label: 'Isometric', shortcut: '1', action: () => requestView('iso') },
+        { label: 'Top', shortcut: '2', action: () => requestView('top') },
+        { label: 'Front', shortcut: '3', action: () => requestView('front') },
+        { label: 'Frame all', shortcut: 'F', action: () => requestView('frame') },
+        'sep',
+        {
+          label: 'Grid',
+          shortcut: 'G',
+          action: () => updateProject((p) => ({ ...p, scene: { ...p.scene, showGrid: !p.scene.showGrid } })),
+        },
+      ],
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [histNonce, selection, project.splines, selSpline, canUndo, canRedo,
+    newProject, save, exportObj, exportJson, undo, redo, deleteSelected,
+    handleAddSpline, closeSelectedLoop, deleteSpline, requestView, updateProject]);
+
   // --- keyboard ---------------------------------------------------------------
 
   useEffect(() => {
@@ -428,6 +589,19 @@ export default function App() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         save();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (typing) return; // native field undo
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        if (typing) return;
+        e.preventDefault();
+        redo();
         return;
       }
       if (typing) return;
@@ -445,9 +619,7 @@ export default function App() {
           break;
         case 'Delete':
         case 'Backspace':
-          if (selection.kind === 'node') {
-            deleteNode(selection.splineId, selection.nodeId);
-          }
+          deleteSelected();
           break;
         case 'v':
         case 'V':
@@ -485,7 +657,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selection, save, deleteNode, updateProject, requestView]);
+  }, [selection, save, deleteSelected, updateProject, requestView, undo, redo]);
 
   useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
@@ -514,54 +686,42 @@ export default function App() {
   // --- render -----------------------------------------------------------------
 
   return (
-    <div className="rw-app" onContextMenu={(e) => e.preventDefault()}>
-      <header className="rw-menubar">
-        <span className="rw-brand">RoadWorks<small>EDITOR</small></span>
-        <span className="rw-menu-sep" />
-        <input
-          className="rw-project-name"
-          value={project.name}
-          onChange={(e) => updateProject((p) => ({ ...p, name: e.target.value }))}
-          spellCheck={false}
-          title="Project name"
-        />
-        <span className="spacer" />
-        <button className={`rw-save-state ${saved ? 'saved' : ''}`} onClick={save} title="Save to browser (Ctrl+S)">
-          <span className="dot" />{saved ? 'Saved' : 'Unsaved'}
-        </button>
-        <span className="rw-live">LIVE</span>
-        <span className="rw-build">v2 · graphite</span>
-      </header>
+    <div className="fw-app" onContextMenu={(e) => e.preventDefault()}>
+      <MenuBar
+        menus={menus}
+        docName={project.name}
+        saved={saved}
+        onRename={(name) => updateProject((p) => ({ ...p, name }))}
+      />
 
-      <div className="rw-docbar">
-        <div className="rw-tabs">
+      <div className="fw-tabstrip">
+        <div className="fw-tabs">
           <button
-            className={`rw-tab ${selection.kind === 'scene' || selection.kind === 'junction' ? 'active' : ''}`}
+            className={`fw-tab ${selection.kind === 'scene' || selection.kind === 'junction' ? 'active' : ''}`}
             onClick={() => setSelection({ kind: 'scene' })}
             title="Scene"
           >
-            <span className="tab-dot" style={{ background: saved ? '#5c6068' : '#d6a665' }} />
-            Scene
+            <span className="tab-name">Scene</span>
           </button>
           {project.splines.map((s) => (
             <button
               key={s.id}
-              className={`rw-tab ${s.id === selTabId ? 'active' : ''}`}
+              className={`fw-tab ${s.id === selTabId ? 'active' : ''}`}
               onClick={() => selectFromPanel({ kind: 'spline', splineId: s.id })}
               title={s.name}
             >
               <span className="tab-dot" style={{ background: s.color }} />
-              {s.name}
-              <span className="tab-sub">{s.nodes.length} pts</span>
+              <span className="tab-name">{s.name}</span>
+              <span className="tab-sub">{s.nodes.length}</span>
             </button>
           ))}
-          <button className="rw-tab-add" title="Add spline (Shift+A)" onClick={() => setMenuNonce((n) => n + 1)}>+</button>
+          <button className="fw-tab-add" title="Add spline (Shift+A)" onClick={() => setMenuNonce((n) => n + 1)}>+</button>
         </div>
         <span className="spacer" />
-        <span className="rw-doc-note">{project.splines.length} splines · {network.junctions.length} junctions</span>
+        <span className="fw-strip-note">{project.splines.length} splines · {network.junctions.length} junctions</span>
       </div>
 
-      <div className="rw-main">
+      <div className="fw-main">
         <Outliner
           project={project}
           network={network}
@@ -610,21 +770,33 @@ export default function App() {
         />
       </div>
 
-      <footer className="rw-statusbar">
-        <span className="stat"><b>{stats.patches}</b> patches · <b>{(stats.tris / 1000).toFixed(1)}k</b> tris</span>
+      <footer className="fw-statusbar">
+        <span><b>{stats.patches}</b> patches · <b>{(stats.tris / 1000).toFixed(1)}k</b> tris</span>
         <span className="sep">|</span>
-        <span className="stat"><b>{network.spans.length}</b> spans · <b>{network.junctions.length}</b> junctions</span>
+        <span><b>{network.spans.length}</b> spans · <b>{network.junctions.length}</b> junctions</span>
         <span className="sep">|</span>
-        <span className="stat">{selectionLabel}</span>
+        <span>{selectionLabel}</span>
         {snapHint && (
           <>
             <span className="sep">|</span>
-            <span className="snap-hint">◇ {snapHint}</span>
+            <span className="snap">◇ {snapHint}</span>
           </>
         )}
         <span className="spacer" />
         <span><kbd>V</kbd> select · <kbd>P</kbd> draw · <kbd>F</kbd> frame · <kbd>Del</kbd> delete</span>
       </footer>
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".json,.road.json,application/json"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) importJsonFile(f);
+          e.target.value = '';
+        }}
+      />
     </div>
   );
 }
