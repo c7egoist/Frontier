@@ -7,13 +7,19 @@
     "skipLibCheck": true,
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
+<<<<<<< HEAD
     "isolatedModules": true,
     "moduleDetection": "force",
+=======
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+>>>>>>> ac820a6 (Road & Bridge Studio: spline road/junction/bridge generator in Slate editor theme)
     "noEmit": true,
     "jsx": "react-jsx",
     "strict": true,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+<<<<<<< HEAD
     "noFallthroughCasesInSwitch": true,
     "baseUrl": ".",
     "paths": {
@@ -22,4 +28,9 @@
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]
+=======
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"]
+>>>>>>> ac820a6 (Road & Bridge Studio: spline road/junction/bridge generator in Slate editor theme)
 }

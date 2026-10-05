@@ -1,110 +1,109 @@
-# Frontier — Road & Bridge Generator
+# Frontier — Road & Bridge Studio
 
-> Clean topology road network with **fixed pavement & curbs on curves** + **bridge system**. Slate-themed editor inspired by `Frontier/Experimental/FrontierEditor`.
+A spline-based road network + bridge generator. Draw bezier splines, get clean
+carriageways with pavements, curbs, guardrails and lane markings, auto N-way
+junction hubs where splines meet, and beam or arch bridges with piers,
+abutments and parapets — all editable live in a Slate-editor-styled studio.
 
-Live preview: `npm run dev` → http://localhost:3000 (host 0.0.0.0, allowedHosts: true)
+![status](https://img.shields.io/badge/status-working%20app-green)
 
-## What was fixed vs Roadnet V1/V2/V3
-
-### 1. Pavement & Curbs on Curves (Main Fix)
-Roadnet's original approach:
-```ts
-// naive normal offset per point
-left = center + normal * halfWidth
-```
-Problem: on tight curves, normals flip, offset lines self-intersect, pavement gaps, curb discontinuities.
-
-**Fix implemented in `src/lib/geometry.ts`:**
-- **Uniform resampling** of spline for clean topology (no stretched quads)
-- **Frenet frames** with smoothing (2-pass average, projection to stay perpendicular)
-- **Miter joins via offset line intersection**:
-  ```ts
-  function lineIntersection2D(p1,d1,p2,d2) // intersect offset lines of adjacent segments
-  // limit miter length to 3.5× offset to avoid spikes, fallback to bevel
-  ```
-- **Continuous curb extrusion**: curb is a single vertical quad strip along the offset curve, not per-segment
-- **Pavement outer lip**: small 0.5× curb height drop for realistic edge
-
-Result: Curvy Boulevard and Tight Curve Test show no gaps, even at 90°+ turns, radius >2m.
-
-### 2. Bridges
-Roadnet had `bridgeDepth` and `bridgeInset` but no pillars/girders.
-
-**New bridge system:**
-- **Auto-detect**: `isBridge || avgZ>2 || anyZ>3`
-- **Deck**: bottom face with inset, side walls from pavement outer edge down to deck bottom
-- **Girders**: 3 longitudinal beams under deck (`bridgeDepth * 0.7`)
-- **Pillars**: every `bridgePillarSpacing` (default 14-18m), cylinder with 1.15× taper, height = deckZ, footing box at ground
-- **Guard rails**: vertical quads on bridge edges, metallic material
-- Sample: **Harbor Bridge** - elevated S-curve, 6-7m high, pillars visible, deck 1.5m thick
-
-### 3. Clean Topology (kept from Roadnet)
-- Road surface as single quad strip `[leftRoad, rightRoad]` → no T-junctions
-- Pavement as `[outerRaised, innerRaised]` → consistent winding
-- Coons patch logic preserved for junctions but improved with fillet
-- Lane markings: dashed lines via segment splitting, not texture
-
-## Slate Theme
-
-Matches `Frontier/Experimental/FrontierEditor` (arena/01a0fd48-slate):
-- **Shell**: `grid-template-columns: 300px 1fr 360px`
-- **Outliner**: `#151515`, border `#2a2a2a`, brand `frontier.`, status dot, scene title `.scene`
-- **Search**: `#1c1c1c`, rounded 7px, 11px font
-- **Tree rows**: 38px, hover `#1e1e1e`, selected `#252525` with left accent bar
-- **Viewport**: radial gradient `#1a1a1a → #0e0e0e`, top bar with blur, mode pill (draw/select/bridge)
-- **Toolbar**: 56px wide, rounded 20px, `#181818`, shadow `0 20px 60px #0008`
-- **Inspector**: radial `#1e1e1e → #141414`, cards `#1e1e1e→#1a1a1a`, border `#2a2a2a`, radius 14px, DM Sans
-- **Controls**: range with `--progress` gradient, toggle pills, metric 32px thin
-- **Fonts**: DM Sans 300/400/500/600, JetBrains Mono for coords
-
-## Architecture
-
-```
-src/
-  lib/geometry.ts      # Vec3 ops, spline sampling, offset polyline with miter, RoadBuilder, Junction
-  components/
-    PatchMesh.tsx      # BufferGeometry from grid, material by type, PillarMesh
-    RoadNetwork.tsx    # Builds all splines, lane markings
-    SplineEditor.tsx   # Bezier curve display, Node/Handle gizmos, TransformControls
-  App.tsx              # Slate shell, outliner, viewport, inspector, state
-  styles/index.css     # Slate theme
-```
-
-### Key types
-```ts
-RoadSpline { id, name, nodes: SplineNode[], closed, profile: {roadWidth, laneCount, paveLeft/Right, curbHeight, isBridge, bridgeDepth, pillarSpacing, elevation}, visible }
-SplineNode { id, position: Vec3, handle1, handle2 }
-RoadBuilder.build(curve): {patches, pillars, centerLine, left/right edges}
-PatchSpec { name, grid: Vec3[][], color, alpha, type: 'road'|'pave'|'curb'|'bridge'|'rail'|'deck' }
-```
-
-## Usage
-
-- **Select (V)**: drag nodes, drag center gizmo to move whole road
-- **Draw (P)**: click ground to add points, click endpoints to close loop or join splines
-- **Bridge (B)**: toggle isBridge in inspector or elevate >2m
-- **Elevate (E)**: use elevation slider or drag Z via gizmo
-- **Outliner**: toggle visibility, search, new road (+)
-- **Inspector**: road width, lanes, pavement, curb height, bridge depth/spacing
-
-## Sample Roads
-
-1. **Curvy Boulevard**: S-curve with varying elevation, 2.5m pavements, tests pavement fix on 45° curves
-2. **Harbor Bridge**: 100m long, 6-7m high, bridge mode on, 1.8m pavements, pillars every 14m
-3. **Tight Curve Test**: 90° turn, radius ~5m, 2m pavements, demonstrates no self-intersection
-
-## Dev
+## Run
 
 ```bash
 npm install
-npm run dev    # vite --port=3000 --host=0.0.0.0 --allowedHosts true
-npm run build
+npm run dev      # http://localhost:3000
+npm run build    # production build -> dist/
 ```
 
-## Future
+Headless checks (geometry + UI smoke tests):
 
-- Junction boolean merging (currently overlap)
-- Road intersection with traffic logic
-- Export to GLTF
-- Terrain conforming
-- Bridge cable-stayed variant
+```bash
+npm test
+```
+
+## What it does
+
+- **Spline editor** — draw / select / pan modes, bezier handles with gizmos,
+  node snapping (shared nodes become junctions), closed loops, spline joining,
+  whole-spline moves.
+- **Roads** — carriageway + battered curbs + pavements with crossfall,
+  superstructure sides/bottom, W-beam guardrails with posts, dashed centre /
+  edge / lane markings, dead-end caps.
+- **Junctions** — automatic N-way hubs (Coons-patch topology ported from
+  Roadnet V3) with corner fillets, corner pavement, curb drops and rails.
+  Near-straight 2-arm joins connect directly without a hub.
+- **Bridges** — per-spline toggle:
+  - *Beam*: deck + fascia girders, single / bent / wall piers with crossheads,
+    bearings and footings, abutments with wing walls.
+  - *Arch*: parabolic ribs following the alignment, spandrel columns, thrust
+    blocks (auto-falls back to beam when the span/height doesn't suit an arch).
+- **Scene** — ground + water planes, grid, adjustable draw height.
+- **Project IO** — browser-local save (Ctrl+S), JSON export/import, and
+  **Wavefront OBJ export** of every generated mesh.
+- **Theme** — graphite 3-pane studio (outliner / viewport / inspector) in the
+  spirit of Slate's `Frontier/Experimental/FrontierEditor`.
+
+## Roadnet lineage (V2 vs V3 — which is latest?)
+
+`SultanAladin/Roadnet` contains:
+
+| Location | What it is |
+|---|---|
+| repo root (`src/`) | **V3 — the latest.** 842-line editor + 935-line geometry + `JunctionRenderer`. N-way junctions, sloped mouths, corner pavement. |
+| `RoadNetV2-main/`, `out_dir/`, `temp_dir/` | Identical copies of **V2** (776-line editor, no junction renderer). |
+
+This studio ports the **V3 road/junction topology** and fixes / extends it:
+
+1. **Topology presets never applied (V3 bug)** — the dropdown wrote lowercase
+   values (`"two lane road"`) while the width checks compared title case
+   (`'2 Lane Road'`), so *every* road built 10 m wide. Fixed with per-spline
+   presets that actually drive width + lanes.
+2. **Pavement/curbs inverting on curves (V3 bug)** — offsets were applied
+   blindly, so when `halfWidth + pavement` exceeded the local curve radius the
+   inner edge looped back on itself. Fixed with curvature-adaptive resampling
+   plus per-station offset clamping (parallel-curve inversion guard), battered
+   curb faces and pavement crossfall.
+3. **Span fold-back at junctions (V3 bug)** — spans pinned to mouth centres
+   even when the mouth radius exceeded the pair length, doubling the road back
+   over itself. Fixed with hub-aware trimming + conditional mouth pinning.
+4. **Missing pieces added** — guardrail posts on spans (V3 only had them on
+   junction corners), lane markings, dead-end caps, height-aware node clustering
+   (overpasses no longer merge with roads below), and the whole bridge
+   generator (beam + arch).
+
+## Project layout
+
+```
+src/
+  lib/
+    vec.ts            vector math (world <-> road space, beziers, Coons)
+    model.ts          project model, presets, demo scene, migration
+    roadGeometry.ts   curvature-safe spans + N-way junction hubs
+    bridgeGeometry.ts beam / arch spans, piers, abutments, parapets
+    network.ts        clustering -> junctions -> trimmed spans
+    exportObj.ts      Wavefront OBJ export
+  components/
+    Viewport.tsx      3D canvas, spline editing, HUD
+    Outliner.tsx      scene tree (splines / junctions)
+    Inspector.tsx     Slate-style card inspector
+    PatchMesh.tsx     patch -> three.js mesh
+    controls.tsx      sliders, toggles, segmented, selects
+  App.tsx             state, draw/select logic, shortcuts, persistence
+  app.css             graphite studio theme
+scripts/
+  geo-test.ts         headless generator tests (incl. curve + fold-back regressions)
+  ui-test.tsx         SSR smoke tests for outliner + inspector
+```
+
+## Shortcuts
+
+| Key | Action |
+|---|---|
+| V / P / H | Select / draw / pan mode |
+| Click (draw) | Extend spline (snaps to nodes within 2 m) |
+| Click node (draw) | Join / close loop / share node |
+| Del | Delete selected node |
+| G / F | Toggle grid / frame all |
+| Shift+A | New-spline menu |
+| Ctrl+S | Save to browser |
+| Esc | Deselect / finish drawing |

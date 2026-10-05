@@ -1,12 +1,15 @@
 {
-  "name": "frontier-roadnet",
+  "name": "frontier-road-bridge-studio",
   "private": true,
   "version": "1.0.0",
   "type": "module",
+  "description": "Frontier Road & Bridge Studio — spline-based road network and bridge generator",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview --port=3000 --host=0.0.0.0"
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port=3000 --host=0.0.0.0",
+    "lint": "tsc --noEmit",
+    "test": "npx -y tsx scripts/geo-test.ts && npx -y tsx scripts/ui-test.tsx"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -17,6 +20,7 @@
     "three": "^0.183.2"
   },
   "devDependencies": {
+    "@types/node": "^22.14.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/three": "^0.183.1",
