@@ -50,6 +50,8 @@ interface SlateGizmoProps {
   onDelta: (dx: number, dy: number, dz: number) => void;
   /** TIP distance from center in pixels (default 85). */
   pixelSize?: number;
+  /** Fired on pointer-down (grab), so the DOM selection manager keeps selection. */
+  onInteract?: () => void;
 }
 
 const HIT_MAT = {
@@ -60,7 +62,7 @@ const HIT_MAT = {
   depthTest: false,
 } as const;
 
-export function SlateGizmo({ position, onDelta, pixelSize = 85 }: SlateGizmoProps) {
+export function SlateGizmo({ position, onDelta, pixelSize = 85, onInteract }: SlateGizmoProps) {
   const group = useRef<THREE.Group>(null);
   const ring = useRef<THREE.Mesh>(null);
   const camera = useThree((s) => s.camera);
@@ -107,6 +109,7 @@ export function SlateGizmo({ position, onDelta, pixelSize = 85 }: SlateGizmoProp
     const btn = (e.nativeEvent as PointerEvent).button;
     if (btn !== 0 && btn !== undefined) return;
     e.stopPropagation();
+    onInteract?.();
     const { o, d } = rayV3(castRay(e.nativeEvent.clientX, e.nativeEvent.clientY));
     origin.current = [position[0], position[1], position[2]];
     if (kind === 'axis') {

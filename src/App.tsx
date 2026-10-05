@@ -1,11 +1,12 @@
 import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import type { Mode, Point3D, Project, Selection, Spline, SplineNode } from './lib/model';
 import {
-  generateId, makeNode, makeSpline, defaultProject, demoProject, migrateProject, SPLINE_COLORS,
+  makeNode, makeSpline, defaultProject, demoProject, migrateProject, SPLINE_COLORS,
 } from './lib/model';
 import { buildNetwork, type BuiltNetwork } from './lib/network';
 import { countTriangles } from './lib/roadGeometry';
-import { Viewport } from './components/Viewport';
+import { findSnapTarget } from './lib/editing';
+import { Viewport, type ViewPreset, type ViewRequest, type FrameBounds } from './components/Viewport';
 import { Outliner, type NewSplineKind } from './components/Outliner';
 import { Inspector } from './components/Inspector';
 
@@ -36,8 +37,9 @@ export default function App() {
   const [selection, setSelection] = useState<Selection>({ kind: 'scene' });
   const [activeSplineId, setActiveSplineId] = useState<string | null>(null);
   const [saved, setSaved] = useState(true);
-  const [viewNonce, setViewNonce] = useState(0);
+  const [viewRequest, setViewRequest] = useState<ViewRequest>({ preset: 'iso', nonce: 0 });
   const [menuNonce, setMenuNonce] = useState(0);
+  const [snapHint, setSnapHint] = useState<string | null>(null);
 
   const dirty = useCallback(() => setSaved(false), []);
 
@@ -75,6 +77,23 @@ export default function App() {
     }
     return { patches, tris };
   }, [network, project.splines]);
+
+  const frameBounds = useMemo<FrameBounds | null>(() => {
+    let min: Point3D | null = null;
+    let max: Point3D | null = null;
+    for (const s of project.splines) {
+      for (const n of s.nodes) {
+        for (const p of [n.position, n.handleIn, n.handleOut]) {
+          if (!min || !max) { min = [...p] as Point3D; max = [...p] as Point3D; continue; }
+          for (let i = 0; i < 3; i++) {
+            min[i] = Math.min(min[i], p[i]);
+            max[i] = Math.max(max[i], p[i]);
+          }
+        }
+      }
+    }
+    return min && max ? { min, max } : null;
+  }, [project.splines]);
 
   // --- mutations ------------------------------------------------------------
 
@@ -122,6 +141,26 @@ export default function App() {
     }));
     dirty();
   }, [dirty]);
+
+  /** Gizmo drag path: magnetic snap onto nearby nodes/curves + status hint. */
+  const moveNodeSnapped = useCallback((splineId: string, nodeId: string, updates: Partial<SplineNode>) => {
+    const pos = updates.position;
+    if (!pos) {
+      updateNode(splineId, nodeId, updates);
+      return;
+    }
+    const target = findSnapTarget(project, pos as Point3D, {
+      excludeNodeId: nodeId, nodeRadius: 1.5, curveRadius: 1.0,
+    });
+    if (target) {
+      const nm = project.splines.find((s) => s.id === target.splineId)?.name ?? '';
+      setSnapHint(target.kind === 'node' ? `Snapped to node · ${nm}` : `Snapped to curve · ${nm}`);
+      shiftNode(splineId, nodeId, target.point);
+    } else {
+      setSnapHint(null);
+      shiftNode(splineId, nodeId, pos as Point3D);
+    }
+  }, [project, updateNode, shiftNode]);
 
   const updateNodeHeight = useCallback((splineId: string, nodeId: string, y: number) => {
     const s = project.splines.find((x) => x.id === splineId);
@@ -228,24 +267,18 @@ export default function App() {
   }, [activeSplineId, project.splines.length, selection, smoothAppend, dirty]);
 
   const handleGroundPointerDown = useCallback((e: any) => {
-    if (mode !== 'draw' || e.button !== 0) return;
-    e.stopPropagation();
+    if (mode !== 'draw') return;
     const raw: Point3D = [e.point.x, e.point.y, e.point.z];
-    let point = raw;
-    let snapped = false;
-    let best = 2.0;
-    for (const s of project.splines) {
-      for (const n of s.nodes) {
-        const d = Math.hypot(n.position[0] - raw[0], n.position[1] - raw[1], n.position[2] - raw[2]);
-        if (d < best) {
-          best = d;
-          point = [...n.position] as Point3D;
-          snapped = true;
-        }
-      }
+    const target = findSnapTarget(project, raw, { nodeRadius: 2.0, curveRadius: 1.0 });
+    if (target) {
+      const nm = project.splines.find((s) => s.id === target.splineId)?.name ?? '';
+      setSnapHint(target.kind === 'node' ? `Snapped to node · ${nm}` : `Snapped to curve · ${nm}`);
+      appendDrawNode(target.point, true);
+    } else {
+      setSnapHint(null);
+      appendDrawNode(raw, false);
     }
-    appendDrawNode(point, snapped);
-  }, [mode, project.splines, appendDrawNode]);
+  }, [mode, project, appendDrawNode]);
 
   const handleGroundClick = useCallback(() => {
     if (mode === 'select') {
@@ -254,13 +287,11 @@ export default function App() {
     }
   }, [mode]);
 
-  const handleNodePointerDown = useCallback((e: any, splineId: string, nodeId: string, isEndpoint: boolean) => {
-    e.stopPropagation();
+  const handleNodePointerDown = useCallback((splineId: string, nodeId: string, isEndpoint: boolean) => {
     if (mode === 'pan') return;
     const selectedNodeId = selection.kind === 'node' ? selection.nodeId : null;
 
     if (mode === 'draw') {
-      if (e.button !== 0) return;
       const target = project.splines.find((s) => s.id === splineId)?.nodes.find((n) => n.id === nodeId);
       if (!target) return;
 
@@ -317,10 +348,8 @@ export default function App() {
       return;
     }
 
-    if (e.button === 0) {
-      setSelection({ kind: 'node', splineId, nodeId });
-      setActiveSplineId(splineId);
-    }
+    setSelection({ kind: 'node', splineId, nodeId });
+    setActiveSplineId(splineId);
   }, [mode, selection, activeSplineId, project.splines, appendDrawNode, dirty]);
 
   // --- outliner / project actions --------------------------------------------
@@ -367,8 +396,28 @@ export default function App() {
     setSelection({ kind: 'scene' });
     setActiveSplineId(null);
     setMode('select');
+    setSnapHint(null);
     dirty();
   }, [dirty]);
+
+  const requestView = useCallback((preset: ViewPreset) => {
+    setViewRequest((r) => ({ preset, nonce: r.nonce + 1 }));
+  }, []);
+
+  const changeMode = useCallback((m: Mode) => {
+    if (m === 'draw') {
+      setActiveSplineId(null);
+      setSelection({ kind: 'scene' });
+    }
+    setSnapHint(null);
+    setMode(m);
+  }, []);
+
+  const selectFromPanel = useCallback((s: Selection) => {
+    setSelection(s);
+    if (s.kind === 'spline' || s.kind === 'node') setActiveSplineId(s.splineId);
+    setMode('select');
+  }, []);
 
   // --- keyboard ---------------------------------------------------------------
 
@@ -391,6 +440,7 @@ export default function App() {
         case 'Escape':
           setSelection({ kind: 'scene' });
           setActiveSplineId(null);
+          setSnapHint(null);
           setMode('select');
           break;
         case 'Delete':
@@ -407,6 +457,7 @@ export default function App() {
         case 'P':
           setActiveSplineId(null);
           setSelection({ kind: 'scene' });
+          setSnapHint(null);
           setMode('draw');
           break;
         case 'h':
@@ -419,13 +470,22 @@ export default function App() {
           break;
         case 'f':
         case 'F':
-          setViewNonce((n) => n + 1);
+          requestView('frame');
+          break;
+        case '1':
+          requestView('iso');
+          break;
+        case '2':
+          requestView('top');
+          break;
+        case '3':
+          requestView('front');
           break;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selection, save, deleteNode, updateProject]);
+  }, [selection, save, deleteNode, updateProject, requestView]);
 
   useEffect(() => {
     const before = (e: BeforeUnloadEvent) => {
@@ -435,68 +495,136 @@ export default function App() {
     return () => window.removeEventListener('beforeunload', before);
   }, [saved]);
 
+  // --- chrome labels ------------------------------------------------------------
+
+  const selectionLabel = (() => {
+    if (selection.kind === 'scene') return 'Scene';
+    if (selection.kind === 'junction') {
+      const j = network.junctions.find((x) => x.id === selection.junctionId);
+      return j ? `Junction · ${j.topology}` : 'Junction';
+    }
+    const s = project.splines.find((x) => x.id === selection.splineId);
+    if (!s) return '—';
+    if (selection.kind === 'spline') return s.name;
+    const idx = s.nodes.findIndex((n) => n.id === (selection as { nodeId: string }).nodeId);
+    return `${s.name} · Node ${idx + 1}`;
+  })();
+  const selTabId = selection.kind === 'spline' || selection.kind === 'node' ? selection.splineId : null;
+
   // --- render -----------------------------------------------------------------
 
   return (
-    <div className="shell" onContextMenu={(e) => e.preventDefault()}>
-      <Outliner
-        project={project}
-        network={network}
-        selection={selection}
-        menuNonce={menuNonce}
-        onSelect={(s) => {
-          setSelection(s);
-          if (s.kind === 'spline' || s.kind === 'node') setActiveSplineId(s.splineId);
-          setMode('select');
-        }}
-        onToggleVisibility={(id) => updateSpline(id, (s) => ({ ...s, visible: !s.visible }))}
-        onAddSpline={handleAddSpline}
-        onRename={(name) => updateProject((p) => ({ ...p, name }))}
-      />
-      <Viewport
-        project={project}
-        network={network}
-        mode={mode}
-        selection={selection}
-        activeSplineId={activeSplineId}
-        viewNonce={viewNonce}
-        stats={stats}
-        onModeChange={(m) => {
-          if (m === 'draw') {
-            setActiveSplineId(null);
-            setSelection({ kind: 'scene' });
-          }
-          setMode(m);
-        }}
-        onSelect={setSelection}
-        onGroundPointerDown={handleGroundPointerDown}
-        onGroundClick={handleGroundClick}
-        onNodePointerDown={handleNodePointerDown}
-        onNodeUpdate={updateNode}
-        onSplineUpdate={moveSpline}
-        onToggleGrid={() => updateProject((p) => ({ ...p, scene: { ...p.scene, showGrid: !p.scene.showGrid } }))}
-        onFrameAll={() => setViewNonce((n) => n + 1)}
-        onDrawHeight={(h) => updateProject((p) => ({ ...p, scene: { ...p.scene, drawHeight: h } }))}
-      />
-      <Inspector
-        project={project}
-        network={network}
-        selection={selection}
-        saved={saved}
-        onSave={save}
-        onSelect={(s) => {
-          setSelection(s);
-          if (s.kind === 'spline' || s.kind === 'node') setActiveSplineId(s.splineId);
-        }}
-        updateSpline={updateSpline}
-        updateProject={updateProject}
-        deleteSpline={deleteSpline}
-        deleteNode={deleteNode}
-        updateNodeHeight={updateNodeHeight}
-        updateNodePosition={shiftNode}
-        onLoadProject={loadProject}
-        onNewProject={newProject}
-      />
+    <div className="rw-app" onContextMenu={(e) => e.preventDefault()}>
+      <header className="rw-menubar">
+        <span className="rw-brand">RoadWorks<small>EDITOR</small></span>
+        <span className="rw-menu-sep" />
+        <input
+          className="rw-project-name"
+          value={project.name}
+          onChange={(e) => updateProject((p) => ({ ...p, name: e.target.value }))}
+          spellCheck={false}
+          title="Project name"
+        />
+        <span className="spacer" />
+        <button className={`rw-save-state ${saved ? 'saved' : ''}`} onClick={save} title="Save to browser (Ctrl+S)">
+          <span className="dot" />{saved ? 'Saved' : 'Unsaved'}
+        </button>
+        <span className="rw-live">LIVE</span>
+        <span className="rw-build">v2 · graphite</span>
+      </header>
+
+      <div className="rw-docbar">
+        <div className="rw-tabs">
+          <button
+            className={`rw-tab ${selection.kind === 'scene' || selection.kind === 'junction' ? 'active' : ''}`}
+            onClick={() => setSelection({ kind: 'scene' })}
+            title="Scene"
+          >
+            <span className="tab-dot" style={{ background: saved ? '#5c6068' : '#d6a665' }} />
+            Scene
+          </button>
+          {project.splines.map((s) => (
+            <button
+              key={s.id}
+              className={`rw-tab ${s.id === selTabId ? 'active' : ''}`}
+              onClick={() => selectFromPanel({ kind: 'spline', splineId: s.id })}
+              title={s.name}
+            >
+              <span className="tab-dot" style={{ background: s.color }} />
+              {s.name}
+              <span className="tab-sub">{s.nodes.length} pts</span>
+            </button>
+          ))}
+          <button className="rw-tab-add" title="Add spline (Shift+A)" onClick={() => setMenuNonce((n) => n + 1)}>+</button>
+        </div>
+        <span className="spacer" />
+        <span className="rw-doc-note">{project.splines.length} splines · {network.junctions.length} junctions</span>
+      </div>
+
+      <div className="rw-main">
+        <Outliner
+          project={project}
+          network={network}
+          selection={selection}
+          menuNonce={menuNonce}
+          onSelect={selectFromPanel}
+          onToggleVisibility={(id) => updateSpline(id, (s) => ({ ...s, visible: !s.visible }))}
+          onAddSpline={handleAddSpline}
+          onRename={(name) => updateProject((p) => ({ ...p, name }))}
+        />
+        <Viewport
+          project={project}
+          network={network}
+          mode={mode}
+          selection={selection}
+          activeSplineId={activeSplineId}
+          viewRequest={viewRequest}
+          frameBounds={frameBounds}
+          onModeChange={changeMode}
+          onSelect={setSelection}
+          onGroundPointerDown={handleGroundPointerDown}
+          onGroundClick={handleGroundClick}
+          onNodePointerDown={handleNodePointerDown}
+          onNodeUpdate={moveNodeSnapped}
+          onSplineUpdate={moveSpline}
+          onToggleGrid={() => updateProject((p) => ({ ...p, scene: { ...p.scene, showGrid: !p.scene.showGrid } }))}
+          onViewPreset={requestView}
+          onDrawHeight={(h) => updateProject((p) => ({ ...p, scene: { ...p.scene, drawHeight: h } }))}
+          onPointerUp={() => { if (mode === 'select') setSnapHint(null); }}
+        />
+        <Inspector
+          project={project}
+          network={network}
+          selection={selection}
+          saved={saved}
+          onSave={save}
+          onSelect={selectFromPanel}
+          updateSpline={updateSpline}
+          updateProject={updateProject}
+          deleteSpline={deleteSpline}
+          deleteNode={deleteNode}
+          updateNodeHeight={updateNodeHeight}
+          updateNodePosition={shiftNode}
+          onLoadProject={loadProject}
+          onNewProject={newProject}
+        />
+      </div>
+
+      <footer className="rw-statusbar">
+        <span className="stat"><b>{stats.patches}</b> patches · <b>{(stats.tris / 1000).toFixed(1)}k</b> tris</span>
+        <span className="sep">|</span>
+        <span className="stat"><b>{network.spans.length}</b> spans · <b>{network.junctions.length}</b> junctions</span>
+        <span className="sep">|</span>
+        <span className="stat">{selectionLabel}</span>
+        {snapHint && (
+          <>
+            <span className="sep">|</span>
+            <span className="snap-hint">◇ {snapHint}</span>
+          </>
+        )}
+        <span className="spacer" />
+        <span><kbd>V</kbd> select · <kbd>P</kbd> draw · <kbd>F</kbd> frame · <kbd>Del</kbd> delete</span>
+      </footer>
     </div>
   );
 }

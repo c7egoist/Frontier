@@ -1,31 +1,38 @@
 import React from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronRight, Check } from 'lucide-react';
 
-// Slate-editor-style inspector controls.
+// CliffSequence-style inspector controls: details sections, amber-fill
+// sliders with output pills, checkbox rows, segmented buttons.
 
-export function Card({
+export function Section({
   title,
   icon,
-  color,
+  open = true,
   children,
 }: {
   title: string;
-  icon: React.ReactNode;
-  color?: string;
+  icon?: React.ReactNode;
+  open?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <section className="card" style={color ? ({ '--card-icon': color } as React.CSSProperties) : undefined}>
-      <div className="card-heading">
-        <span>
-          {icon}
-          {title}
-        </span>
-      </div>
-      {children}
-    </section>
+    <details className="rw-section" open={open}>
+      <summary>
+        {icon && <span className="sec-icon">{icon}</span>}
+        {title}
+        <span className="sec-chev"><ChevronRight size={14} /></span>
+      </summary>
+      <div className="rw-section-body">{children}</div>
+    </details>
   );
 }
+
+export function Divider() {
+  return <div className="rw-divider" />;
+}
+
+const fmt = (v: number, step: number) =>
+  Number(v).toFixed(step >= 1 ? 0 : step >= 0.1 ? 1 : 2);
 
 export function Slider({
   label,
@@ -34,7 +41,6 @@ export function Slider({
   max,
   step = 0.1,
   unit = '',
-  accent,
   onChange,
 }: {
   label: string;
@@ -43,18 +49,14 @@ export function Slider({
   max: number;
   step?: number;
   unit?: string;
-  accent?: string;
   onChange: (v: number) => void;
 }) {
-  const progress = ((value - min) / (max - min)) * 100;
+  const fill = ((value - min) / (max - min)) * 100;
   return (
-    <div className="control-block">
-      <div className="control-line">
-        <span>{label}</span>
-        <span className="val">
-          {Number(value).toFixed(step >= 1 ? 0 : step >= 0.1 ? 1 : 2)}
-          {unit}
-        </span>
+    <div className="rw-field">
+      <div className="rw-field-head">
+        <label>{label}</label>
+        <output>{fmt(value, step)}{unit}</output>
       </div>
       <input
         type="range"
@@ -64,17 +66,11 @@ export function Slider({
         value={value}
         aria-label={label}
         onChange={(e) => onChange(Number(e.target.value))}
-        style={{ '--progress': `${progress}%`, ...(accent ? { '--accent': accent } : {}) } as React.CSSProperties}
+        style={{ '--Fill': `${fill}%` } as React.CSSProperties}
       />
-      <div className="range-labels">
-        <span>
-          {min}
-          {unit}
-        </span>
-        <span>
-          {max}
-          {unit}
-        </span>
+      <div className="rw-range-ends">
+        <span>{min}{unit}</span>
+        <span>{max}{unit}</span>
       </div>
     </div>
   );
@@ -92,15 +88,14 @@ export function Toggle({
   onChange: (v: boolean) => void;
 }) {
   return (
-    <div className="toggle-row">
-      <span>
-        {label}
+    <label className="rw-check">
+      <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
+      <span className="box">{value && <Check size={11} />}</span>
+      <span className="check-text">
+        <span>{label}</span>
         {hint && <small>{hint}</small>}
       </span>
-      <button className={`toggle ${value ? 'on' : ''}`} onClick={() => onChange(!value)} aria-label={label}>
-        <span />
-      </button>
-    </div>
+    </label>
   );
 }
 
@@ -116,13 +111,13 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <div className="control-block">
+    <div className="rw-field">
       {label && (
-        <div className="control-line">
-          <span>{label}</span>
+        <div className="rw-field-head">
+          <label>{label}</label>
         </div>
       )}
-      <div className="seg">
+      <div className="rw-seg">
         {options.map((o) => (
           <button
             key={o.value}
@@ -150,12 +145,12 @@ export function Select({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="control-block">
-      <div className="control-line">
-        <span>{label}</span>
+    <div className="rw-field">
+      <div className="rw-field-head">
+        <label>{label}</label>
       </div>
-      <div className="select-wrap">
-        <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <div className="rw-select-wrap">
+        <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
           {options.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
@@ -165,28 +160,5 @@ export function Select({
         <ChevronDown size={14} />
       </div>
     </div>
-  );
-}
-
-export function NumInput({
-  value,
-  onChange,
-  step = 0.1,
-}: {
-  value: number;
-  onChange: (v: number) => void;
-  step?: number;
-}) {
-  return (
-    <input
-      className="num-input"
-      type="number"
-      step={step}
-      value={Number(value).toFixed(2)}
-      onChange={(e) => {
-        const v = Number(e.target.value);
-        if (Number.isFinite(v)) onChange(v);
-      }}
-    />
   );
 }

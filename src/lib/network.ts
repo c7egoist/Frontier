@@ -1,16 +1,19 @@
 // Network assembly — TransitArchitect-style graph build.
 //
-//  1. Sample each spline as ONE dense polyline; record node indices.
-//  2. Cluster nodes; groups become junctions by the TA rule (3+ legs, or
-//     2 legs with >= 15 degrees of deflection).
-//  3. Split splines into RUNS at shared nodes (junction runs trim back by
-//     cornerRadius; straight joins abut exactly, untrimmed).
+//  1. Sample each spline as ONE dense polyline; record node arc positions.
+//  2. Split at arc positions: shared nodes, node-on-curve touches, and
+//     curve crossings (exact XZ intersection + height match; height gaps
+//     stay overpasses). Splits closer than MERGE_ARC fuse into one group.
+//  3. Split splines into RUNS between splits; legs = run ends at a group.
+//     Groups become junctions by the TA rule (3+ legs, or 2 legs with
+//     >= 15 degrees of deflection); junction runs trim back by
+//     cornerRadius, straight joins abut exactly, untrimmed.
 //  4. Build ONE span per run (road or bridge) — no interior seams.
 //  5. Derive approach frames from span end stations and build merged
 //     junctions from them — watertight by construction.
 
 import {
-  Vec3, v_sub, v_scale, v_len, worldToRoad, cubicBezier, arcLengths,
+  Vec3, v_sub, v_scale, v_len, worldToRoad, roadToWorld, cubicBezier, arcLengths,
   left_normal,
 } from './vec';
 import {
@@ -24,6 +27,12 @@ import { topologyName } from './model';
 const JOIN_XZ = 0.25;
 const JOIN_Y = 0.6;
 const PER_PAIR = 60;
+/** node-to-curve touch radius (XZ) that fuses a T-joint */
+const TOUCH_XZ = 0.5;
+/** splits closer than this (arc) merge into one group — no slivers */
+const MERGE_ARC = 0.6;
+/** splits within this of a spline end snap to the end (no stub runs) */
+const END_SNAP = 0.6;
 
 export interface JunctionArmInfo {
   splineId: string;
@@ -36,6 +45,8 @@ export interface BuiltJunction {
   id: string;
   position: Point3D;
   topology: string;
+  /** 'shared' = built from shared nodes only; 'crossing' = a curve crossing or T-touch fused it */
+  kind: 'shared' | 'crossing';
   arms: JunctionArmInfo[];
   patches: PatchSpec[];
 }
@@ -118,18 +129,35 @@ function clusterNodes(splines: Spline[]): NodeGroup[] {
   return groups;
 }
 
-const nodeKey = (splineId: string, idx: number) => `${splineId}:${idx}`;
+// --- 2D segment helpers (plan view) -------------------------------------------
 
-// neighbor directions of a node along its spline (prev/next node indices)
-function nodeNeighbors(s: Spline, idx: number): number[] {
-  const out: number[] = [];
-  if (idx > 0) out.push(idx - 1);
-  if (idx < s.nodes.length - 1) out.push(idx + 1);
-  if (s.closed && s.nodes.length > 2) {
-    if (idx === 0) out.push(s.nodes.length - 1);
-    else if (idx === s.nodes.length - 1) out.push(0);
-  }
-  return out;
+/** Exact XZ intersection of segments ab / cd; returns [t, u] params or null. */
+function segIntersectXZ(a: Vec3, b: Vec3, c: Vec3, d: Vec3): [number, number] | null {
+  const rx = b[0] - a[0]; const rz = b[2] - a[2];
+  const sx = d[0] - c[0]; const sz = d[2] - c[2];
+  const denom = rx * sz - rz * sx;
+  if (Math.abs(denom) < 1e-12) return null;
+  const qx = c[0] - a[0]; const qz = c[2] - a[2];
+  const t = (qx * sz - qz * sx) / denom;
+  const u = (qx * rz - qz * rx) / denom;
+  if (t < -1e-6 || t > 1 + 1e-6 || u < -1e-6 || u > 1 + 1e-6) return null;
+  return [Math.min(1, Math.max(0, t)), Math.min(1, Math.max(0, u))];
+}
+
+/** XZ distance from p to segment ab + closest param. */
+function pointSegXZ(p: Vec3, a: Vec3, b: Vec3): { dist: number; t: number } {
+  const abx = b[0] - a[0]; const abz = b[2] - a[2];
+  const len2 = abx * abx + abz * abz;
+  let t = len2 < 1e-12 ? 0 : ((p[0] - a[0]) * abx + (p[2] - a[2]) * abz) / len2;
+  t = Math.min(1, Math.max(0, t));
+  const dx = p[0] - (a[0] + abx * t); const dz = p[2] - (a[2] + abz * t);
+  return { dist: Math.hypot(dx, dz), t };
+}
+
+/** Arc distance, circular for closed loops. */
+function arcDist(a: number, b: number, total: number, closed: boolean): number {
+  const d = Math.abs(a - b);
+  return closed ? Math.min(d, total - d) : d;
 }
 
 // --- frame helpers -----------------------------------------------------------
@@ -159,9 +187,10 @@ function pointAt(pts: Vec3[], lengths: number[], s: number): Vec3 {
 
 interface Run {
   spline: Spline;
-  fromNode: number;
-  toNode: number;
-  /** world dense points from fromNode to toNode (inclusive ends) */
+  /** split-group id at each end (null = free spline end) */
+  fromId: string | null;
+  toId: string | null;
+  /** world dense points from one end to the other (inclusive ends) */
   pts: Vec3[];
   trimStart: boolean;
   trimEnd: boolean;
@@ -197,109 +226,245 @@ export function buildNetwork(project: Project): BuiltNetwork {
   }
   const groups = clusterNodes(splines);
 
-  // group size per node (for caps + run splitting)
-  const groupSize = new Map<string, number>();
-  const groupOf = new Map<string, NodeGroup>();
-  for (const g of groups) {
-    for (const r of g.refs) {
-      groupSize.set(nodeKey(r.spline.id, r.index), g.refs.length);
-      groupOf.set(nodeKey(r.spline.id, r.index), g);
+  // --- splits: shared nodes + node-on-curve touches + curve crossings ---
+  // Every split carries a group id; runs break at splits and groups with
+  // 3+ run ends (or a bent degree-2 pair) become junctions. Spans can never
+  // render crossed or overlapped: any at-grade touch fuses into a junction.
+  interface Split { s: number; id: string }
+  const splits = new Map<string, Split[]>();
+  const groupKind = new Map<string, 'shared' | 'crossing'>();
+  let splitSeq = 0;
+  const remapGroup = (from: string, to: string) => {
+    if (from === to) return;
+    for (const arr of splits.values()) for (const sp of arr) if (sp.id === from) sp.id = to;
+    if (groupKind.get(from) === 'crossing') groupKind.set(to, 'crossing');
+    groupKind.delete(from);
+  };
+  const addSplit = (splineId: string, s: number, groupId?: string): string => {
+    const sm = samples.get(splineId)!;
+    let arr = splits.get(splineId);
+    if (!arr) { arr = []; splits.set(splineId, arr); }
+    for (const sp of arr) {
+      if (arcDist(sp.s, s, sm.total, sm.spline.closed) < MERGE_ARC) {
+        if (groupId && groupId !== sp.id) remapGroup(groupId, sp.id);
+        return sp.id;
+      }
     }
-  }
+    const id = groupId ?? `x:${++splitSeq}`;
+    if (!groupKind.has(id)) groupKind.set(id, 'crossing');
+    arr.push({ s, id });
+    return id;
+  };
+  const nodeS = (sm: SplineSample, idx: number) => sm.lengths[sm.nodeIdx[idx]];
+  const existingGroupAt = (splineId: string, s: number): string | null => {
+    const sm = samples.get(splineId)!;
+    const arr = splits.get(splineId);
+    if (!arr) return null;
+    for (const sp of arr) {
+      if (arcDist(sp.s, s, sm.total, sm.spline.closed) < MERGE_ARC) return sp.id;
+    }
+    return null;
+  };
 
-  // --- junction detection (TA rule) ---
-  interface JunctionCand { group: NodeGroup; legs: { spline: Spline; nodeIdx: number; nbrIdx: number }[] }
-  const candidates: JunctionCand[] = [];
+  // 1) node-node shares
+  let shareSeq = 0;
   for (const g of groups) {
     if (g.refs.length < 2) continue;
-    const legs: JunctionCand['legs'] = [];
+    const gid = `n:${++shareSeq}`;
+    groupKind.set(gid, 'shared');
     for (const r of g.refs) {
-      for (const nbr of nodeNeighbors(r.spline, r.index)) {
-        legs.push({ spline: r.spline, nodeIdx: r.index, nbrIdx: nbr });
-      }
+      const sm = samples.get(r.spline.id);
+      if (sm && sm.nodeIdx[r.index] >= 0) addSplit(r.spline.id, nodeS(sm, r.index), gid);
     }
-    if (legs.length < 2) continue;
-    let isJunction = legs.length >= 3;
-    if (!isJunction) {
-      // degree 2: junction unless nearly straight (TA: angle < 165 -> junction)
-      const dirs: [number, number][] = [];
-      for (const leg of legs) {
-        const sm = samples.get(leg.spline.id);
-        const ni = sm?.nodeIdx[leg.nodeIdx] ?? -1;
-        if (!sm || ni < 0) { dirs.push([1, 0]); continue; }
-        const forward = leg.nbrIdx === leg.nodeIdx + 1 || (leg.nbrIdx === 0 && leg.nodeIdx === sm.spline.nodes.length - 1);
-        const a = sm.pts[ni];
-        const b = forward ? sm.pts[Math.min(sm.pts.length - 1, ni + 1)] : sm.pts[Math.max(0, ni - 1)];
-        // leg direction: from the node TOWARD the neighbor (both cases)
-        const d: [number, number] = [b[0] - a[0], b[2] - a[2]];
-        const l = Math.hypot(d[0], d[1]);
-        dirs.push(l < 1e-6 ? [1, 0] : [d[0] / l, d[1] / l]);
-      }
-      const dot = Math.max(-1, Math.min(1, dirs[0][0] * dirs[1][0] + dirs[0][1] * dirs[1][1]));
-      const angleDeg = (Math.acos(dot) * 180) / Math.PI;
-      isJunction = angleDeg < 165;
-    }
-    if (isJunction) candidates.push({ group: g, legs });
-  }
-  const junctionNodes = new Set<string>();
-  for (const c of candidates) {
-    for (const r of c.group.refs) junctionNodes.add(nodeKey(r.spline.id, r.index));
   }
 
-  // --- runs: split at every shared node; trim at junction nodes ---
+  // 2) node-on-curve touches (T-joints anywhere along a curve)
+  for (const A of splines) {
+    const smA = samples.get(A.id);
+    if (!smA) continue;
+    for (let ni = 0; ni < A.nodes.length; ni++) {
+      const P = A.nodes[ni].position as Vec3;
+      const nsA = nodeS(smA, ni);
+      for (const B of splines) {
+        const smB = samples.get(B.id);
+        if (!smB || (B.id === A.id && A.nodes.length < 2)) continue;
+        let best = { dist: TOUCH_XZ, s: 0, y: 0 };
+        for (let j = 0; j < smB.pts.length - 1; j++) {
+          if (B.id === A.id) {
+            const segMid = (smB.lengths[j] + smB.lengths[j + 1]) / 2;
+            if (arcDist(segMid, nsA, smB.total, smB.spline.closed) < 1.2) continue;
+          }
+          const a = smB.pts[j]; const b = smB.pts[j + 1];
+          if (P[0] < Math.min(a[0], b[0]) - TOUCH_XZ || P[0] > Math.max(a[0], b[0]) + TOUCH_XZ ||
+            P[2] < Math.min(a[2], b[2]) - TOUCH_XZ || P[2] > Math.max(a[2], b[2]) + TOUCH_XZ) continue;
+          const { dist, t } = pointSegXZ(P, a, b);
+          if (dist < best.dist) {
+            best = {
+              dist,
+              s: smB.lengths[j] + t * (smB.lengths[j + 1] - smB.lengths[j]),
+              y: a[1] + (b[1] - a[1]) * t,
+            };
+          }
+        }
+        if (best.dist < TOUCH_XZ && Math.abs(P[1] - best.y) < JOIN_Y) {
+          const gA = existingGroupAt(A.id, nsA);
+          const gB = existingGroupAt(B.id, best.s);
+          if (gA !== null && gA === gB) continue; // already fused here (the share itself)
+          const gid = addSplit(A.id, nsA);
+          const gid2 = addSplit(B.id, best.s, gid);
+          groupKind.set(gid2, 'crossing');
+        }
+      }
+    }
+  }
+
+  // 3) curve-curve crossings (incl. self-crossings); height gaps = overpasses
+  interface SegBB { minx: number; maxx: number; minz: number; maxz: number }
+  const segBBs = new Map<string, SegBB[]>();
+  for (const [id, sm] of samples) {
+    const bbs: SegBB[] = [];
+    for (let j = 0; j < sm.pts.length - 1; j++) {
+      const a = sm.pts[j]; const b = sm.pts[j + 1];
+      bbs.push({
+        minx: Math.min(a[0], b[0]), maxx: Math.max(a[0], b[0]),
+        minz: Math.min(a[2], b[2]), maxz: Math.max(a[2], b[2]),
+      });
+    }
+    segBBs.set(id, bbs);
+  }
+  const sampleIds = [...samples.keys()];
+  for (let ai = 0; ai < sampleIds.length; ai++) {
+    for (let bi = ai; bi < sampleIds.length; bi++) {
+      const A = sampleIds[ai]; const B = sampleIds[bi];
+      const smA = samples.get(A)!; const smB = samples.get(B)!;
+      const bbA = segBBs.get(A)!; const bbB = segBBs.get(B)!;
+      const self = A === B;
+      for (let i = 0; i < smA.pts.length - 1; i++) {
+        for (let j = self ? i + 2 : 0; j < smB.pts.length - 1; j++) {
+          if (self && smA.spline.closed && i === 0 && j === smB.pts.length - 2) continue;
+          const ba = bbA[i]; const bb = bbB[j];
+          if (ba.maxx < bb.minx || bb.maxx < ba.minx || ba.maxz < bb.minz || bb.maxz < ba.minz) continue;
+          const hit = segIntersectXZ(smA.pts[i], smA.pts[i + 1], smB.pts[j], smB.pts[j + 1]);
+          if (!hit) continue;
+          const [t, u] = hit;
+          const yA = smA.pts[i][1] + (smA.pts[i + 1][1] - smA.pts[i][1]) * t;
+          const yB = smB.pts[j][1] + (smB.pts[j + 1][1] - smB.pts[j][1]) * u;
+          if (Math.abs(yA - yB) >= JOIN_Y) continue;
+          const sA = smA.lengths[i] + t * (smA.lengths[i + 1] - smA.lengths[i]);
+          const sB = smB.lengths[j] + u * (smB.lengths[j + 1] - smB.lengths[j]);
+          const gA = existingGroupAt(A, sA);
+          const gB = existingGroupAt(B, sB);
+          if (gA !== null && gA === gB) continue; // already fused here (the share itself)
+          const gid = addSplit(A, sA);
+          const gid2 = addSplit(B, sB, gid);
+          groupKind.set(gid2, 'crossing');
+        }
+      }
+    }
+  }
+
+  // --- runs: split at every split; trim flags assigned after the junction rule ---
   const runs: Run[] = [];
   for (const s of splines) {
     const sm = samples.get(s.id);
     if (!sm) continue;
-    const n = s.nodes.length;
-    const sharedIdx: number[] = [];
-    for (let i = 0; i < n; i++) {
-      if ((groupSize.get(nodeKey(s.id, i)) ?? 1) > 1) sharedIdx.push(i);
-    }
+    let arr = splits.get(s.id) ?? [];
     if (!s.closed) {
-      const bounds = [0, ...sharedIdx.filter((i) => i !== 0 && i !== n - 1), n - 1];
-      for (let k = 0; k < bounds.length - 1; k++) {
-        const a = bounds[k]; const b = bounds[k + 1];
-        if (b <= a) continue;
-        const i0 = sm.nodeIdx[a]; const i1 = sm.nodeIdx[b];
-        if (i0 < 0 || i1 < 0 || i1 <= i0) continue;
-        runs.push({
-          spline: s, fromNode: a, toNode: b,
-          pts: sm.pts.slice(i0, i1 + 1),
-          trimStart: junctionNodes.has(nodeKey(s.id, a)),
-          trimEnd: junctionNodes.has(nodeKey(s.id, b)),
-          closedLoop: false,
-        });
-      }
-    } else {
-      if (sharedIdx.length === 0) {
-        runs.push({ spline: s, fromNode: 0, toNode: 0, pts: [...sm.pts], trimStart: false, trimEnd: false, closedLoop: true });
-      } else {
-        const ring = [...sharedIdx].sort((x, y) => x - y);
-        for (let k = 0; k < ring.length; k++) {
-          const a = ring[k];
-          const b = ring[(k + 1) % ring.length];
-          let slice: Vec3[];
-          if (k < ring.length - 1) {
-            const i0 = sm.nodeIdx[a]; const i1 = sm.nodeIdx[b];
-            if (i0 < 0 || i1 < 0 || i1 <= i0) continue;
-            slice = sm.pts.slice(i0, i1 + 1);
-          } else {
-            // wrap arc: node a -> end, then start -> node b
-            const i0 = sm.nodeIdx[a]; const i1 = sm.nodeIdx[b];
-            if (i0 < 0 || i1 < 0) continue;
-            slice = [...sm.pts.slice(i0), ...sm.pts.slice(1, i1 + 1)];
-          }
-          runs.push({
-            spline: s, fromNode: a, toNode: b,
-            pts: slice,
-            trimStart: junctionNodes.has(nodeKey(s.id, a)),
-            trimEnd: junctionNodes.has(nodeKey(s.id, b)),
-            closedLoop: false,
-          });
-        }
+      for (const sp of arr) {
+        if (sp.s < END_SNAP) sp.s = 0;
+        else if (sm.total - sp.s < END_SNAP) sp.s = sm.total;
       }
     }
+    arr = [...arr].sort((a, b) => a.s - b.s);
+    const dedup: Split[] = [];
+    for (const sp of arr) {
+      const prev = dedup[dedup.length - 1];
+      if (prev && Math.abs(prev.s - sp.s) < 1e-6) remapGroup(sp.id, prev.id);
+      else dedup.push(sp);
+    }
+    if (s.closed && dedup.length > 1) {
+      const first = dedup[0]; const last = dedup[dedup.length - 1];
+      if (first.s + (sm.total - last.s) < MERGE_ARC) {
+        remapGroup(last.id, first.id);
+        dedup.pop();
+      }
+    }
+    arr = dedup;
+    const mkRun = (s0: number, s1: number, fromId: string | null, toId: string | null) => {
+      if (s1 - s0 < 0.05) return;
+      const pts: Vec3[] = [pointAt(sm.pts, sm.lengths, s0)];
+      for (let j = 0; j < sm.pts.length; j++) {
+        const L = sm.lengths[j];
+        if (L > s0 + 1e-4 && L < s1 - 1e-4) pts.push(sm.pts[j]);
+      }
+      pts.push(pointAt(sm.pts, sm.lengths, s1));
+      runs.push({ spline: s, fromId, toId, pts, trimStart: false, trimEnd: false, closedLoop: false });
+    };
+    const mkWrapRun = (s0: number, s1: number, fromId: string, toId: string) => {
+      const gt: Vec3[] = [];
+      const lt: Vec3[] = [];
+      for (let j = 0; j < sm.pts.length; j++) {
+        const L = sm.lengths[j];
+        if (L > s0 + 1e-4) gt.push(sm.pts[j]);
+        else if (L < s1 - 1e-4) lt.push(sm.pts[j]);
+      }
+      runs.push({
+        spline: s, fromId, toId,
+        pts: [pointAt(sm.pts, sm.lengths, s0), ...gt, ...lt, pointAt(sm.pts, sm.lengths, s1)],
+        trimStart: false, trimEnd: false, closedLoop: false,
+      });
+    };
+    if (!s.closed) {
+      const bounds: { s: number; id: string | null }[] = [{ s: 0, id: null }, ...arr, { s: sm.total, id: null }];
+      for (let k = 0; k < bounds.length - 1; k++) {
+        mkRun(bounds[k].s, bounds[k + 1].s, bounds[k].id, bounds[k + 1].id);
+      }
+    } else if (arr.length === 0) {
+      runs.push({ spline: s, fromId: null, toId: null, pts: [...sm.pts], trimStart: false, trimEnd: false, closedLoop: true });
+    } else if (arr.length === 1) {
+      mkWrapRun(arr[0].s, arr[0].s, arr[0].id, arr[0].id);
+    } else {
+      for (let k = 0; k < arr.length; k++) {
+        const cur = arr[k]; const nxt = arr[(k + 1) % arr.length];
+        if (k < arr.length - 1) mkRun(cur.s, nxt.s, cur.id, nxt.id);
+        else mkWrapRun(cur.s, nxt.s, cur.id, nxt.id);
+      }
+    }
+  }
+
+  // --- junction rule over run ends (TA: 3+ ends, or 2 ends bent >= 15 deg) ---
+  interface EndRef { run: Run; atStart: boolean }
+  const endsByGroup = new Map<string, EndRef[]>();
+  for (const run of runs) {
+    if (run.fromId) {
+      if (!endsByGroup.has(run.fromId)) endsByGroup.set(run.fromId, []);
+      endsByGroup.get(run.fromId)!.push({ run, atStart: true });
+    }
+    if (run.toId) {
+      if (!endsByGroup.has(run.toId)) endsByGroup.set(run.toId, []);
+      endsByGroup.get(run.toId)!.push({ run, atStart: false });
+    }
+  }
+  const arrivalDir = (run: Run, atStart: boolean): [number, number] => {
+    const p = run.pts;
+    const a = atStart ? p[0] : p[p.length - 1];
+    const b = atStart ? p[1] : p[p.length - 2];
+    const d: [number, number] = [a[0] - b[0], a[2] - b[2]];
+    const l = Math.hypot(d[0], d[1]);
+    return l < 1e-6 ? [1, 0] : [d[0] / l, d[1] / l];
+  };
+  const junctionGroups = new Set<string>();
+  for (const [gid, ends] of endsByGroup) {
+    if (ends.length >= 3) { junctionGroups.add(gid); continue; }
+    if (ends.length < 2) continue;
+    const d0 = arrivalDir(ends[0].run, ends[0].atStart);
+    const d1 = arrivalDir(ends[1].run, ends[1].atStart);
+    const dot = Math.max(-1, Math.min(1, d0[0] * d1[0] + d0[1] * d1[1]));
+    if ((Math.acos(dot) * 180) / Math.PI < 165) junctionGroups.add(gid);
+  }
+  for (const run of runs) {
+    run.trimStart = !!run.fromId && junctionGroups.has(run.fromId);
+    run.trimEnd = !!run.toId && junctionGroups.has(run.toId);
   }
 
   // --- trim + frames + cross lines (viability pass) ---
@@ -335,21 +500,15 @@ export function buildNetwork(project: Project): BuiltNetwork {
   // legs from viable runs only; junctions with <2 legs are dropped and
   // their runs un-trimmed (second pass over trim flags via leg lookup)
   interface LegRef { run: ViableRun; atStart: boolean }
-  const legsByJunction = new Map<NodeGroup, LegRef[]>();
+  const legsByJunction = new Map<string, LegRef[]>();
   for (const run of viable) {
-    if (run.trimStart) {
-      const g = groupOf.get(nodeKey(run.spline.id, run.fromNode));
-      if (g) {
-        if (!legsByJunction.has(g)) legsByJunction.set(g, []);
-        legsByJunction.get(g)!.push({ run, atStart: true });
-      }
+    if (run.trimStart && run.fromId) {
+      if (!legsByJunction.has(run.fromId)) legsByJunction.set(run.fromId, []);
+      legsByJunction.get(run.fromId)!.push({ run, atStart: true });
     }
-    if (run.trimEnd) {
-      const g = groupOf.get(nodeKey(run.spline.id, run.toNode));
-      if (g) {
-        if (!legsByJunction.has(g)) legsByJunction.set(g, []);
-        legsByJunction.get(g)!.push({ run, atStart: false });
-      }
+    if (run.trimEnd && run.toId) {
+      if (!legsByJunction.has(run.toId)) legsByJunction.set(run.toId, []);
+      legsByJunction.get(run.toId)!.push({ run, atStart: false });
     }
   }
 
@@ -385,9 +544,8 @@ export function buildNetwork(project: Project): BuiltNetwork {
   // Rails flow across the joint as one geometry: road W-beams bend onto the
   // bridge parapet faces (or rail ends) and parapets ramp down to meet them.
   for (const run of viable) {
-    const s = run.spline;
-    run.capStart = !run.trimStart && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.fromNode)) ?? 1) === 1;
-    run.capEnd = !run.trimEnd && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.toNode)) ?? 1) === 1;
+    run.capStart = !run.trimStart && !run.closedLoop && run.fromId == null;
+    run.capEnd = !run.trimEnd && !run.closedLoop && run.toId == null;
     run.landingStart = !run.trimStart && !run.closedLoop && !run.capStart;
     run.landingEnd = !run.trimEnd && !run.closedLoop && !run.capEnd;
   }
@@ -395,12 +553,11 @@ export function buildNetwork(project: Project): BuiltNetwork {
     if (!brun.spline.bridge.enabled || brun.closedLoop) continue;
     for (const atStart of [true, false]) {
       if (!(atStart ? brun.landingStart : brun.landingEnd)) continue;
-      const g = groupOf.get(nodeKey(brun.spline.id, atStart ? brun.fromNode : brun.toNode));
-      if (!g) continue;
+      const gid = atStart ? brun.fromId : brun.toId;
+      if (!gid) continue;
       const mate = viable.find((r) =>
         r !== brun && !r.spline.bridge.enabled &&
-        ((groupOf.get(nodeKey(r.spline.id, r.fromNode)) === g && !r.trimStart) ||
-          (groupOf.get(nodeKey(r.spline.id, r.toNode)) === g && !r.trimEnd)));
+        ((r.fromId === gid && !r.trimStart) || (r.toId === gid && !r.trimEnd)));
       const bi = atStart ? 0 : brun.lines.paveL.length - 1;
       const bf = atStart ? brun.frames[0] : brun.frames[brun.frames.length - 1];
       const n = bf.normal;
@@ -415,7 +572,7 @@ export function buildNetwork(project: Project): BuiltNetwork {
         else brun.rampEndH = rampH;
       }
       if (!mate || !mate.spline.rails.enabled) continue;
-      const mateAtStart = groupOf.get(nodeKey(mate.spline.id, mate.fromNode)) === g && !mate.trimStart;
+      const mateAtStart = mate.fromId === gid && !mate.trimStart;
       if (!mate.railLinks) mate.railLinks = {};
       if (mateAtStart && (mate.railLinks.startL || mate.railLinks.startR)) continue;
       if (!mateAtStart && (mate.railLinks.endL || mate.railLinks.endR)) continue;
@@ -483,7 +640,7 @@ export function buildNetwork(project: Project): BuiltNetwork {
 
   // --- junctions from span end stations (exact shared sections) ---
   let seq = 0;
-  for (const [g, legRefs] of legsByJunction) {
+  for (const [gid, legRefs] of legsByJunction) {
     const legs: JunctionLeg[] = [];
     const armInfos: JunctionArmInfo[] = [];
     let railAny = false;
@@ -530,9 +687,15 @@ export function buildNetwork(project: Project): BuiltNetwork {
       enabled: railAny, height: railH || 0.8, thickness: railT || 0.2,
       posts: railPosts, postSpacing: Number.isFinite(railPS) ? railPS : 2,
     };
+    // center: mean of leg approach points (road space) — the true crossing point
+    const center: Vec3 = [0, 0, 0];
+    for (const leg of legs) {
+      center[0] += leg.point[0]; center[1] += leg.point[1]; center[2] += leg.point[2];
+    }
+    center[0] /= legs.length; center[1] /= legs.length; center[2] /= legs.length;
     try {
       const patches = buildMergedJunction(legs, {
-        center: worldToRoad(g.position as Vec3),
+        center,
         cornerRadius: cornerR,
         filletSteps: project.junctions.filletSteps,
         depth: project.junctions.depth,
@@ -541,8 +704,9 @@ export function buildNetwork(project: Project): BuiltNetwork {
       seq += 1;
       junctions.push({
         id: `junction-${seq}`,
-        position: [...g.position] as Point3D,
+        position: roadToWorld(center) as Point3D,
         topology: topologyName(legs.length),
+        kind: groupKind.get(gid) ?? 'shared',
         arms: armInfos,
         patches,
       });

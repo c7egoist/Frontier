@@ -1,5 +1,5 @@
 // Headless geometry smoke test: node --experimental-strip-types? No — run via tsx.
-import { demoProject, migrateProject } from '../src/lib/model';
+import { demoProject, migrateProject, defaultProject, makeSpline, makeNode } from '../src/lib/model';
 import { buildNetwork } from '../src/lib/network';
 import { countTriangles } from '../src/lib/roadGeometry';
 import { networkToObj } from '../src/lib/exportObj';
@@ -7,6 +7,7 @@ import { buildFrames, buildMergedJunction } from '../src/lib/roadGeometry';
 import type { JunctionLeg } from '../src/lib/roadGeometry';
 import { Vec3, left_normal } from '../src/lib/vec';
 import { alongAxisUnderRay, touchPlaneUnderRay, snapStep } from '../src/lib/gizmoMath';
+import { findSnapTarget } from '../src/lib/editing';
 import { columnDiameter, capBeamDepth } from '../src/lib/bridgeGeometry';
 
 const fail = (msg: string) => { console.error(`FAIL: ${msg}`); process.exitCode = 1; };
@@ -199,6 +200,98 @@ else ok('obj export');
   const drop = (top[mid][2] - bot[mid][2]) - (top[last][2] - bot[last][2]);
   if (!(drop > 0.1)) fail(`parapet ramp drop: ${drop}`);
   else ok(`parapet ramps down at landing (${drop.toFixed(2)}m)`);
+}
+
+// 9. crossing topology: X-crossings and T-touches fuse into junctions
+const straight = (name: string, pts: [number, number, number][]): ReturnType<typeof makeSpline> => {
+  const s = makeSpline(name, '#ffffff');
+  s.nodes = pts.map((p) => makeNode(p));
+  return s;
+};
+{
+  // X: two diagonals crossing at origin, no shared nodes
+  const p = defaultProject();
+  p.splines = [
+    straight('A', [[-20, 0, -20], [20, 0, 20]]),
+    straight('B', [[-20, 0, 20], [20, 0, -20]]),
+  ];
+  const n = buildNetwork(p);
+  const j = n.junctions[0];
+  if (n.junctions.length !== 1) fail(`X crossing junctions: ${n.junctions.length}`);
+  else if (j.kind !== 'crossing') fail(`X kind: ${j.kind}`);
+  else if (j.arms.length !== 4) fail(`X arms: ${j.arms.length}`);
+  else if (n.spans.length !== 4) fail(`X spans: ${n.spans.length}`);
+  else ok('X-crossing fuses into a 4-arm junction (4 spans)');
+  n.spans.forEach((s, i) => checkPatch(`x-span${i}`, s.patches));
+  n.junctions.forEach((jj, i) => checkPatch(`x-junction${i}`, jj.patches));
+}
+{
+  // T: one endpoint resting exactly on another curve's midpoint
+  const p = defaultProject();
+  p.splines = [
+    straight('A', [[-20, 0, 0], [20, 0, 0]]),
+    straight('B', [[0, 0, -20], [0, 0, 0]]),
+  ];
+  const n = buildNetwork(p);
+  const j = n.junctions[0];
+  if (n.junctions.length !== 1) fail(`T touch junctions: ${n.junctions.length}`);
+  else if (j.kind !== 'crossing') fail(`T kind: ${j.kind}`);
+  else if (j.arms.length !== 3) fail(`T arms: ${j.arms.length}`);
+  else if (n.spans.length !== 3) fail(`T spans: ${n.spans.length}`);
+  else ok('T-touch fuses into a 3-arm junction (3 spans)');
+}
+{
+  // overpass: same XZ crossing at different heights stays separate
+  const p = defaultProject();
+  p.splines = [
+    straight('A', [[-20, 0, 0], [20, 0, 0]]),
+    straight('B', [[-20, 3, -20], [20, 3, 20]]),
+  ];
+  const n = buildNetwork(p);
+  if (n.junctions.length !== 0) fail(`overpass junctions: ${n.junctions.length}`);
+  else if (n.spans.length !== 2) fail(`overpass spans: ${n.spans.length}`);
+  else ok('overpass (3m height gap) forms no junction');
+}
+{
+  // moved-node regression: dissolving a shared node keeps the junction while curves cross
+  const p = defaultProject();
+  const A = straight('A', [[-20, 0, 0], [0, 0, 0], [20, 0, 0]]);
+  const B = straight('B', [[0, 0, -20], [0, 0, 0], [0, 0, 20]]);
+  p.splines = [A, B];
+  const before = buildNetwork(p);
+  if (before.junctions.length !== 1 || before.junctions[0].kind !== 'shared') {
+    fail(`shared-node setup: ${before.junctions.length} junctions`);
+  } else {
+    A.nodes[1].position = [3, 0, 0.1]; // drag the shared node away on A only
+    const after = buildNetwork(p);
+    if (after.junctions.length !== 1) fail(`moved node junctions: ${after.junctions.length}`);
+    else if (after.junctions[0].kind !== 'crossing') fail(`moved node kind: ${after.junctions[0].kind}`);
+    else if (after.junctions[0].arms.length !== 4) fail(`moved node arms: ${after.junctions[0].arms.length}`);
+    else ok('moved node keeps a 4-arm crossing junction (no overlap)');
+  }
+}
+if (process.exitCode !== 1) ok('crossing topology');
+
+// 10. magnetic snap: nodes win, curves catch, exclusion + height gates hold
+{
+  const p = defaultProject();
+  p.splines = [straight('A', [[-20, 0, 0], [20, 0, 0]])];
+  const n0 = p.splines[0].nodes[0];
+  const tNode = findSnapTarget(p, [-19.2, 0, 0.3]);
+  if (!tNode || tNode.kind !== 'node' || tNode.point[0] !== n0.position[0]) fail('node snap');
+  else ok('snap lands exactly on nodes');
+  const tCurve = findSnapTarget(p, [5, 0, 0.7], { nodeRadius: 1.5, curveRadius: 1.0 });
+  if (!tCurve || tCurve.kind !== 'curve' || Math.abs(tCurve.point[2]) > 0.05) fail('curve snap');
+  else ok('snap catches curve centerlines');
+  const tExcl = findSnapTarget(p, [-19.2, 0, 0.3], { excludeNodeId: n0.id, curveRadius: 0.05 });
+  if (tExcl) fail('excluded node still snapped');
+  else ok('dragged node excluded from targets');
+  const tHigh = findSnapTarget(p, [-19.2, 2.5, 0.3]);
+  if (tHigh) fail('height gate ignored');
+  else ok('snap height gate holds');
+  const tFar = findSnapTarget(p, [5, 0, 8]);
+  if (tFar) fail('far point snapped');
+  else ok('no snap when far from geometry');
 }
 
 console.log(process.exitCode === 1 ? 'GEO TEST: FAILED' : 'GEO TEST: PASSED');
