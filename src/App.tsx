@@ -9,12 +9,13 @@ import { Viewport } from './components/Viewport';
 import { Outliner, type NewSplineKind } from './components/Outliner';
 import { Inspector } from './components/Inspector';
 
-const STORAGE_KEY = 'frontier-road-bridge:v1';
+const STORAGE_KEY = 'roadworks-editor:v1';
+const LEGACY_STORAGE_KEY = 'frontier-road-bridge:v1';
 const EMPTY_NETWORK: BuiltNetwork = { junctions: [], spans: [] };
 
 function loadInitial(): Project {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
     if (raw) {
       const parsed = migrateProject(JSON.parse(raw));
       if (parsed.splines.length > 0) return parsed;

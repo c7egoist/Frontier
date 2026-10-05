@@ -215,12 +215,30 @@ export function Inspector(props: InspectorProps) {
                     />
                     {spline.bridge.type === 'beam' ? (
                       <>
-                        <Slider label="Girder depth" unit=" m" min={0.3} max={3} step={0.1} value={spline.bridge.girderDepth}
-                          accent={spline.color}
-                          onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, girderDepth: v } }))} />
-                        <Slider label="Pier spacing" unit=" m" min={4} max={30} step={0.5} value={spline.bridge.pierSpacing}
-                          accent={spline.color}
-                          onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, pierSpacing: v } }))} />
+                        <Segmented
+                          label="Superstructure"
+                          value={spline.bridge.superstructure}
+                          onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, superstructure: v } }))}
+                          options={[
+                            { value: 'slab', label: 'Slab' },
+                            { value: 'igirder', label: 'I-girder' },
+                            { value: 'box', label: 'Box' },
+                          ]}
+                        />
+                        {spline.bridge.superstructure !== 'slab' && (
+                          <Slider label="Girder depth" unit=" m" min={0.3} max={3} step={0.1} value={spline.bridge.girderDepth}
+                            accent={spline.color}
+                            onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, girderDepth: v } }))} />
+                        )}
+                        {spline.bridge.superstructure === 'igirder' && (
+                          <Toggle
+                            label="Diaphragms"
+                            hint="Transverse braces between girders at supports"
+                            value={spline.bridge.diaphragms}
+                            onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, diaphragms: v } }))}
+                          />
+                        )}
+                        <div className="card-divider" />
                         <Select
                           label="Pier style"
                           value={spline.bridge.pierStyle}
@@ -228,12 +246,37 @@ export function Inspector(props: InspectorProps) {
                             { value: 'single', label: 'Single column' },
                             { value: 'bent', label: 'Multi-column bent' },
                             { value: 'wall', label: 'Wall pier' },
+                            { value: 'hammerhead', label: 'Hammerhead' },
+                            { value: 'portal', label: 'Portal frame' },
                           ]}
                           onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, pierStyle: v as any } }))}
                         />
+                        <Slider label="Pier spacing" unit=" m" min={4} max={30} step={0.5} value={spline.bridge.pierSpacing}
+                          accent={spline.color}
+                          onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, pierSpacing: v } }))} />
                         <Slider label="Pier size" unit=" m" min={0.3} max={2} step={0.05} value={spline.bridge.pierSize}
                           accent={spline.color}
                           onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, pierSize: v } }))} />
+                        <Segmented
+                          label="Foundation"
+                          value={spline.bridge.foundation}
+                          onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, foundation: v } }))}
+                          options={[
+                            { value: 'spread', label: 'Spread' },
+                            { value: 'piles', label: 'Piles' },
+                          ]}
+                        />
+                        <div className="card-divider" />
+                        <Select
+                          label="Abutment"
+                          value={spline.bridge.abutment}
+                          options={[
+                            { value: 'cantilever', label: 'Full-height cantilever' },
+                            { value: 'stub', label: 'Stub' },
+                            { value: 'spill', label: 'Spill-through' },
+                          ]}
+                          onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, abutment: v as any } }))}
+                        />
                       </>
                     ) : (
                       <Slider label="Arch rise" unit=" m" min={1.5} max={12} step={0.1} value={spline.bridge.archRise}
@@ -342,11 +385,11 @@ export function Inspector(props: InspectorProps) {
               title={junction.topology}
               pill={<span className="enabled-pill"><span />Live</span>}
             />
-            <div className="section-label"><span>PROPERTIES</span><span>Generated hub</span></div>
+            <div className="section-label"><span>PROPERTIES</span><span>Generated junction</span></div>
             <div className="cards">
               <Card title="Arms" icon={<Waypoints size={16} />} color="#93c779">
                 <div className="metric"><span>{junction.arms.length}</span></div>
-                <p className="muted">Junction hubs are generated where spline nodes coincide. Tune the hub under Scene → Junctions.</p>
+                <p className="muted">Junctions are generated where spline nodes coincide. Runs trim back and merge into the junction — tune it under Scene → Junctions.</p>
                 <div className="card-divider" />
                 <div className="arms-list">
                   {junction.arms.map((a, i) => (
@@ -397,10 +440,10 @@ export function Inspector(props: InspectorProps) {
               </Card>
 
               <Card title="Junctions" icon={<Waypoints size={16} />} color="#93c779">
-                <Slider label="Fillet radius" unit=" m" min={1} max={12} step={0.5} value={project.junctions.filletRadius}
-                  onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, filletRadius: v } }))} />
-                <Slider label="Hub density" min={2} max={8} step={1} value={project.junctions.hubDiv}
-                  onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, hubDiv: v } }))} />
+                <Slider label="Corner radius" unit=" m" min={2} max={20} step={0.5} value={project.junctions.cornerRadius}
+                  onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, cornerRadius: v } }))} />
+                <Slider label="Fillet steps" min={4} max={24} step={1} value={project.junctions.filletSteps}
+                  onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, filletSteps: v } }))} />
                 <Slider label="Structure depth" unit=" m" min={0.5} max={4} step={0.1} value={project.junctions.depth}
                   onChange={(v) => props.updateProject((p) => ({ ...p, junctions: { ...p.junctions, depth: v } }))} />
                 <Slider label="Structure inset" unit=" m" min={0} max={3} step={0.1} value={project.junctions.inset}
@@ -446,7 +489,7 @@ export function Inspector(props: InspectorProps) {
         )}
 
         <div className="inspector-footer">
-          <span><span className="footer-dot" /> Frontier Studio</span>
+          <span><span className="footer-dot" /> RoadWorks Editor</span>
           <span>{network.junctions.length} junctions · {network.spans.length} spans</span>
         </div>
       </div>

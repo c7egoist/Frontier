@@ -1,9 +1,9 @@
 {
-  "name": "frontier-road-bridge-studio",
+  "name": "roadworks-editor",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Frontier Road & Bridge Studio — spline-based road network and bridge generator",
+  "description": "RoadWorks Editor — spline-based road network and bridge generator",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "tsc --noEmit && vite build",

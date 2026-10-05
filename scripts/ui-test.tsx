@@ -16,7 +16,7 @@ const outliner = renderToString(
     onSelect={noop} onToggleVisibility={noop} onAddSpline={noop} onRename={noop} />,
 );
 console.log('outliner html:', outliner.length);
-if (!outliner.includes('Frontier') || !outliner.includes('Shore Road') || !outliner.includes('4-way')) {
+if (!outliner.includes('RoadWorks') || !outliner.includes('Shore Road') || !outliner.includes('4-way')) {
   console.error('FAIL: outliner missing content'); process.exitCode = 1;
 } else console.log('ok: outliner');
 

@@ -5,14 +5,14 @@
 // offset clamping so pavement/curbs can never invert on tight radii, battered
 // curb faces, pavement crossfall, guard-rail posts, lane markings and end caps.
 //
-// The junction builder is a faithful port of Roadnet V3's
-// NWayJunctionGenerator (Coons-patch hub + quadratic corner fillets), which is
-// the clean topology we want to keep.
+// The junction builder follows the TransitArchitect (GRIT) approach: the
+// junction is generated FROM the trimmed approach frames of the adjoining
+// runs, with true arc fillets and shared boundary curves — watertight by
+// construction.
 
 import {
-  Vec3, v_add, v_sub, v_scale, v_dot, v_len, v_norm, lerp, clamp,
-  left_normal, angle_unit, sampleBezierQuadratic, sampleBezierCubic,
-  sampleLinear, coonsPatch, arcLengths,
+  Vec3, v_add, v_sub, v_scale, v_len, v_norm, lerp, clamp,
+  coonsPatch, arcLengths,
 } from './vec';
 import type { CrossSection, RailSettings } from './model';
 
@@ -46,7 +46,6 @@ export function countTriangles(patches: PatchSpec[]): number {
 
 export const COL = {
   road: '#333333',
-  hub: '#d4d4d4',
   curb: '#737373',
   pavement: '#a3a3a3',
   side: '#888888',
@@ -304,9 +303,19 @@ export function buildGuardRail(
   pointRight: boolean,
   rails: RailSettings,
   postDrop = 0,
+  /** Shift the rail line inward (onto the pavement) so posts embed in structure. */
+  baseInset = 0,
 ): PatchSpec[] {
   if (!rails.enabled || rails.height <= 0 || rails.thickness <= 0) return [];
   const out: PatchSpec[] = [];
+  if (baseInset !== 0) {
+    base = base.map((p, i) => {
+      const n = normals[i];
+      // inward == opposite of the rail offset direction
+      const s = pointRight ? 1 : -1;
+      return [p[0] + n[0] * s * baseInset, p[1] + n[1] * s * baseInset, p[2]] as Vec3;
+    });
+  }
   const hTop = rails.height * 0.8;
   const hBottom = rails.height * 0.4;
   const hMid = (hTop + hBottom) / 2;
@@ -492,19 +501,17 @@ export function buildEndCap(lines: CrossLines, atStart: boolean): PatchSpec[] {
 export interface SpanOptions extends SectionOptions {
   capStart: boolean;
   capEnd: boolean;
-  postDrop: number;
 }
 
 export function buildRoadSpan(
-  frames: StationFrame[],
+  lines: CrossLines,
   cross: CrossSection,
   rails: RailSettings,
   opt: SpanOptions,
 ): PatchSpec[] {
-  if (frames.length < 2) return [];
+  if (lines.frames.length < 2) return [];
   const out: PatchSpec[] = [];
-  const lines = computeCrossLines(frames, cross, opt);
-  const normals = frames.map((f) => f.normal);
+  const normals = lines.frames.map((f) => f.normal);
 
   out.push(patch('Road surface', [lines.roadL, lines.roadR], COL.road));
   out.push(patch('Left curb', [lines.roadL, lines.curbTopL], COL.curb));
@@ -515,8 +522,8 @@ export function buildRoadSpan(
   out.push(patch('Right side', [lines.botR, lines.paveR], COL.side));
   out.push(patch('Bottom', [lines.botR, lines.botL], COL.bottom));
 
-  out.push(...buildGuardRail(lines.paveL, normals, false, rails, opt.postDrop));
-  out.push(...buildGuardRail(lines.paveR, normals, true, rails, opt.postDrop));
+  out.push(...buildGuardRail(lines.paveL, normals, false, rails, 0.6, 0.3));
+  out.push(...buildGuardRail(lines.paveR, normals, true, rails, 0.6, 0.3));
   out.push(...buildMarkings(lines, cross));
 
   if (opt.capStart) out.push(...buildEndCap(lines, true));
@@ -525,334 +532,316 @@ export function buildRoadSpan(
 }
 
 // ---------------------------------------------------------------------------
-// N-way junction generator — faithful port of Roadnet V3's hub topology.
+// Merged N-way junction — TransitArchitect-style topology.
+//
+// Unlike the old hub (an independent island pinned to mouth centres), this
+// junction is built FROM the trimmed approach frames of the adjoining runs,
+// so every boundary curve is shared exactly with a span end: watertight by
+// construction. Corners are true tangent-continuous arcs; curb and pavement
+// corner layers are offsets of the same road fillet with pinned endpoints.
 // ---------------------------------------------------------------------------
 
-export interface ArmSpec {
-  id: string;
-  name: string;
-  angle_deg: number;
-  outer_height: number;
-  fill_color: string;
-  width: number;
-  pavement_width_left: number;
-  pavement_width_right: number;
-  curb_height: number;
-  slope?: number;
-  getZAtRadius?: (r: number) => { z: number; dz: number };
+/** Approach cross-section at a run's trimmed end, oriented into the junction. */
+export interface ApproachFrame {
+  /** Trim point (== span end centre, shared exactly). */
+  point: Vec3;
+  /** Unit arrival tangent, pointing INTO the junction. */
+  tangent: Vec3;
+  /** Unit left normal of the arrival tangent. */
+  left: Vec3;
+  roadL: Vec3;
+  roadR: Vec3;
+  curbL: Vec3;
+  curbR: Vec3;
+  paveL: Vec3;
+  paveR: Vec3;
+  /** Superstructure bottom corners (span bottom edge, shared exactly). */
+  botL: Vec3;
+  botR: Vec3;
+  /** atan2(tangent.y, tangent.x) — sort key around the junction. */
+  angle: number;
 }
 
-export function createRadialCurve(center: Vec3, edge: Vec3, dz: number, count: number): Vec3[] {
-  const dist = Math.hypot(edge[0] - center[0], edge[1] - center[1]);
-  if (dist === 0) return sampleLinear(center, edge, count);
-  const handleLen = dist / 3;
-  const dirX = (center[0] - edge[0]) / dist;
-  const dirY = (center[1] - edge[1]) / dist;
-  const p2: Vec3 = [edge[0] + dirX * handleLen, edge[1] + dirY * handleLen, edge[2] - dz * handleLen];
-  const p1: Vec3 = [center[0] - dirX * handleLen, center[1] - dirY * handleLen, center[2]];
-  return sampleBezierCubic(center, p1, p2, edge, count);
+export interface JunctionLeg extends ApproachFrame {
+  splineId: string;
+  splineName: string;
+  color: string;
 }
 
-export interface JunctionBuildOptions {
-  height: number;
-  railHeight: number;
-  railThickness: number;
-  railPosts: boolean;
-  depth: number;
-  inset: number;
-}
-
-export class NWayJunctionGenerator {
+export interface MergedJunctionOptions {
+  /** Node position (road space). */
   center: Vec3;
-  hub_div: number;
-  fillet_radius: number;
+  cornerRadius: number;
+  filletSteps: number;
+  /** Tub depth below the surface. */
+  depth: number;
+  rails: RailSettings;
+}
 
-  constructor(center: Vec3, hub_div: number, fillet_radius = 5) {
-    this.center = center;
-    this.hub_div = hub_div;
-    this.fillet_radius = fillet_radius;
+/**
+ * True circular fillet arc between two road-edge points with arrival
+ * tangents. Returns [P1, ...arc..., P2] (endpoints included).
+ */
+export function filletBetweenEdges(
+  p1: Vec3, t1: Vec3,
+  p2: Vec3, t2: Vec3,
+  radius: number,
+  steps = 8,
+): Vec3[] {
+  const straight = (): Vec3[] => [[...p1] as Vec3, [...p2] as Vec3];
+  let dax = t1[0]; let day = t1[1];
+  let dbx = t2[0]; let dby = t2[1];
+  const la = Math.hypot(dax, day);
+  const lb = Math.hypot(dbx, dby);
+  if (la < 1e-3 || lb < 1e-3) return straight();
+  dax /= la; day /= la; dbx /= lb; dby /= lb;
+
+  // intersect the OUTWARD rays (reversed arrival tangents) -> sharp corner V
+  const denom = dax * dby - day * dbx;
+  if (Math.abs(denom) < 1e-3) return straight();
+  const dx = p2[0] - p1[0];
+  const dy = p2[1] - p1[1];
+  const t = (dx * dby - dy * dbx) / denom;
+  const vx = p1[0] + dax * t;
+  const vy = p1[1] + day * t;
+  if ((vx - p1[0]) * dax + (vy - p1[1]) * day < -0.05) return straight();
+  if ((vx - p2[0]) * dbx + (vy - p2[1]) * dby < -0.05) return straight();
+
+  // VA/VB point from V back toward the trim points
+  const vax = -dax; const vay = -day;
+  const vbx = -dbx; const vby = -dby;
+  const daDist = Math.hypot(p1[0] - vx, p1[1] - vy);
+  const dbDist = Math.hypot(p2[0] - vx, p2[1] - vy);
+  const cosTheta = clamp(vax * vbx + vay * vby, -1, 1);
+  const theta = Math.acos(cosTheta);
+  if (theta < 0.02 || theta > Math.PI - 0.02) return straight();
+  const alpha = theta * 0.5;
+  const tanA = Math.tan(alpha);
+  const sinA = Math.sin(alpha);
+  if (tanA < 1e-3 || sinA < 1e-3) return straight();
+
+  let T = radius / tanA;
+  const tMax = Math.min(Math.max(daDist, 0), Math.max(dbDist, 0)) * 0.95;
+  let r = radius;
+  if (T > tMax) {
+    T = tMax;
+    r = T * tanA;
+  }
+  const tpx = vx + vax * T; const tpy = vy + vay * T;
+  const tqx = vx + vbx * T; const tqy = vy + vby * T;
+
+  let bdx = vax + vbx; let bdy = vay + vby;
+  const bl = Math.hypot(bdx, bdy);
+  if (bl < 1e-3) return straight();
+  bdx /= bl; bdy /= bl;
+  const cx = vx + bdx * (r / sinA);
+  const cy = vy + bdy * (r / sinA);
+
+  const aStart = Math.atan2(tpy - cy, tpx - cx);
+  const aEnd = Math.atan2(tqy - cy, tqx - cx);
+  let delta = aEnd - aStart;
+  while (delta > Math.PI) delta -= 2 * Math.PI;
+  while (delta < -Math.PI) delta += 2 * Math.PI;
+
+  const out: Vec3[] = [[...p1] as Vec3];
+  for (let i = 0; i <= steps; i++) {
+    const f = steps === 0 ? 0 : i / steps;
+    const a = aStart + delta * f;
+    out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r, p1[2] + (p2[2] - p1[2]) * f]);
+  }
+  out.push([...p2] as Vec3);
+  return out;
+}
+
+/**
+ * Offset a base curve toward start/end targets, interpolating width and Z,
+ * with endpoints pinned EXACTLY to the targets (the merge guarantee).
+ */
+export function offsetCurveFromTargets(base: Vec3[], startTarget: Vec3, endTarget: Vec3): Vec3[] {
+  if (base.length === 0) return [];
+  if (base.length === 1) return [[...startTarget] as Vec3];
+  const startDelta = v_sub(startTarget, base[0]);
+  const endDelta = v_sub(endTarget, base[base.length - 1]);
+  const tangentAt = (i: number): [number, number] => {
+    const a = base[Math.max(0, i - 1)];
+    const b = base[Math.min(base.length - 1, i + 1)];
+    const dx = b[0] - a[0]; const dy = b[1] - a[1];
+    const l = Math.hypot(dx, dy);
+    if (l <= 1e-3) return [1, 0];
+    return [dx / l, dy / l];
+  };
+  // pick the normal sign that agrees with the targets
+  const t0 = tangentAt(0);
+  const tn = tangentAt(base.length - 1);
+  const n0: [number, number] = [-t0[1], t0[0]];
+  const nn: [number, number] = [-tn[1], tn[0]];
+  const pos = n0[0] * startDelta[0] + n0[1] * startDelta[1] + nn[0] * endDelta[0] + nn[1] * endDelta[1];
+  const neg = -n0[0] * startDelta[0] - n0[1] * startDelta[1] - nn[0] * endDelta[0] - nn[1] * endDelta[1];
+  const sign = pos >= neg ? 1 : -1;
+
+  const total = base.length - 1;
+  const startW = Math.hypot(startDelta[0], startDelta[1]);
+  const endW = Math.hypot(endDelta[0], endDelta[1]);
+  const out: Vec3[] = [];
+  for (let i = 0; i < base.length; i++) {
+    const f = total === 0 ? 0 : i / total;
+    const t = tangentAt(i);
+    let nx = -t[1] * sign;
+    let ny = t[0] * sign;
+    const nl = Math.hypot(nx, ny);
+    if (nl <= 1e-3) {
+      nx = startW > 1e-3 ? startDelta[0] / startW : 0;
+      ny = startW > 1e-3 ? startDelta[1] / startW : 1;
+    } else {
+      nx /= nl; ny /= nl;
+    }
+    const w = (1 - f) * startW + f * endW;
+    const z = (1 - f) * startDelta[2] + f * endDelta[2];
+    const p = base[i];
+    out.push([p[0] + nx * w, p[1] + ny * w, p[2] + z]);
+  }
+  out[0] = [...startTarget] as Vec3;
+  out[out.length - 1] = [...endTarget] as Vec3;
+  return out;
+}
+
+/** Coons patch with boundary resampling to compatible counts. */
+export function coonsBlend(
+  bottom: Vec3[], top: Vec3[], left: Vec3[], right: Vec3[],
+  uSeg: number, vSeg: number,
+): Vec3[][] {
+  return coonsPatch(
+    resampleLine(bottom, uSeg + 1),
+    resampleLine(top, uSeg + 1),
+    resampleLine(left, vSeg + 1),
+    resampleLine(right, vSeg + 1),
+  );
+}
+
+/** Eased spoke from A to B (points cluster near B). */
+function easedSpoke(a: Vec3, b: Vec3, count: number, easeOut: boolean): Vec3[] {
+  const out: Vec3[] = [];
+  for (let i = 0; i < count; i++) {
+    const f = count === 1 ? 0 : i / (count - 1);
+    const e = easeOut ? 1 - Math.pow(1 - f, 1.5) : Math.pow(f, 1.5);
+    out.push(lerp(a, b, e));
+  }
+  return out;
+}
+
+/**
+ * Merged junction — every boundary curve is shared exactly with a span end
+ * (approach frames), so runs flow into the junction with no gaps or overlaps.
+ */
+export function buildMergedJunction(legs: JunctionLeg[], o: MergedJunctionOptions): PatchSpec[] {
+  const out: PatchSpec[] = [];
+  if (legs.length < 2) return out;
+  const sorted = [...legs].sort((a, b) => a.angle - b.angle);
+  const N = sorted.length;
+  const C = o.center;
+  const depth = Math.max(0.3, o.depth);
+  const drop = (p: Vec3): Vec3 => [p[0], p[1], p[2] - depth];
+  const filletR = Math.max(o.cornerRadius * 0.6, 1.5);
+
+  // 1. road fillets per corner + curb/pavement layers offset from the same
+  //    fillet, endpoints pinned to the approach cross-sections
+  const roadF: Vec3[][] = [];
+  const curbF: Vec3[][] = [];
+  const paveF: Vec3[][] = [];
+  for (let i = 0; i < N; i++) {
+    const cur = sorted[i];
+    const nxt = sorted[(i + 1) % N];
+    let f = filletBetweenEdges(cur.roadR, cur.tangent, nxt.roadL, nxt.tangent, filletR, o.filletSteps);
+    f = resampleLine(f, Math.max(o.filletSteps, f.length - 1) + 1);
+    roadF.push(f);
+    const cf = offsetCurveFromTargets(f, cur.curbR, nxt.curbL);
+    curbF.push(cf);
+    paveF.push(offsetCurveFromTargets(cf, cur.paveR, nxt.paveL));
   }
 
-  build_case(
-    arms: ArmSpec[],
-    o: JunctionBuildOptions,
-  ): { patches: PatchSpec[]; armData: { id: string; R: number; MC: Vec3 }[] } {
-    const sorted = [...arms].sort((a, b) => a.angle_deg - b.angle_deg);
-    const N = sorted.length;
-    const depth = o.depth;
-    const inset = o.inset;
-    const intersection_height = o.height;
+  // 2. interior top — same asphalt as the roads so the joints disappear
+  for (let i = 0; i < N; i++) {
+    const cur = sorted[i];
+    const nxt = sorted[(i + 1) % N];
+    const f = roadF[i];
+    const half = Math.floor((f.length - 1) / 2) + 1;
+    const h1 = f.slice(0, half);
+    const h2 = f.slice(half - 1);
+    const s1 = Math.max(1, h1.length - 1);
+    const s2 = Math.max(1, h2.length - 1);
+    out.push(patch(
+      `Junction top ${i}a`,
+      coonsBlend([cur.point, cur.roadR], [C, h1[h1.length - 1]], easedSpoke(cur.point, C, s1 + 1, true), h1, 1, s1),
+      COL.road,
+    ));
+    out.push(patch(
+      `Junction top ${i}b`,
+      coonsBlend([C, h2[0]], [nxt.point, nxt.roadL], easedSpoke(C, nxt.point, s2 + 1, false), h2, 1, s2),
+      COL.road,
+    ));
+  }
 
-    const D: Vec3[] = [];
-    const Norm: Vec3[] = [];
-    const HalfW: number[] = [];
-    const PaveL: number[] = [];
-    const PaveR: number[] = [];
+  // 3. corner curb + pavement strips (shared fillet boundaries)
+  for (let i = 0; i < N; i++) {
+    out.push(patch(`Junction curb ${i}`, [roadF[i], curbF[i]], COL.curb));
+    const mid = curbF[i].map((p, k) => lerp(p, paveF[i][k], 0.5));
+    out.push(patch(`Junction pavement ${i}`, [curbF[i], mid, paveF[i]], COL.pavement));
+  }
+
+  // 4. tub — side walls + bottom membrane, all edges shared with span ends.
+  // Side-wall bottom rims are pinned to the span bottom corners; the membrane
+  // approach edges ARE the span bottom edges (no flicker, no slots).
+  const Cd = drop(C);
+  for (let i = 0; i < N; i++) {
+    const cur = sorted[i];
+    const nxt = sorted[(i + 1) % N];
+    const base = paveF[i].map(drop);
+    base[0] = [...cur.botR] as Vec3;
+    base[base.length - 1] = [...nxt.botL] as Vec3;
+    out.push(patch(`Junction side ${i}`, [paveF[i], base], COL.side));
+    const half = Math.floor((base.length - 1) / 2) + 1;
+    const b1 = base.slice(0, half);
+    const b2 = base.slice(half - 1);
+    const s1 = Math.max(1, b1.length - 1);
+    const s2 = Math.max(1, b2.length - 1);
+    const midCur: Vec3 = [
+      (cur.botL[0] + cur.botR[0]) / 2,
+      (cur.botL[1] + cur.botR[1]) / 2,
+      (cur.botL[2] + cur.botR[2]) / 2,
+    ];
+    const midNxt: Vec3 = [
+      (nxt.botL[0] + nxt.botR[0]) / 2,
+      (nxt.botL[1] + nxt.botR[1]) / 2,
+      (nxt.botL[2] + nxt.botR[2]) / 2,
+    ];
+    out.push(patch(
+      `Junction bottom ${i}a`,
+      coonsBlend([midCur, cur.botR], [Cd, b1[b1.length - 1]], easedSpoke(midCur, Cd, s1 + 1, true), b1, 1, s1),
+      COL.bottom,
+    ));
+    out.push(patch(
+      `Junction bottom ${i}b`,
+      coonsBlend([Cd, b2[0]], [midNxt, nxt.botL], easedSpoke(Cd, midNxt, s2 + 1, false), b2, 1, s2),
+      COL.bottom,
+    ));
+  }
+
+  // 5. guardrails along the pavement fillets (posts embedded in the tub)
+  if (o.rails.enabled) {
     for (let i = 0; i < N; i++) {
-      D.push(angle_unit(sorted[i].angle_deg));
-      Norm.push(left_normal(D[i]));
-      HalfW.push(sorted[i].width * 0.5);
-      PaveL.push(sorted[i].pavement_width_left);
-      PaveR.push(sorted[i].pavement_width_right);
-    }
-
-    // Corner intersections (inner / outer / bottom)
-    const C: Vec3[] = [];
-    const C_outer: Vec3[] = [];
-    const C_bottom: Vec3[] = [];
-    for (let i = 0; i < N; i++) {
-      const next = (i + 1) % N;
-      const d1 = D[i];
-      const d2 = D[next];
-      const det = d1[0] * d2[1] - d1[1] * d2[0];
-      const intersect = (offA: number, offB: number, fallback: number, z: number): Vec3 => {
-        const p1 = v_add(this.center, v_scale(Norm[i], offA));
-        const p2 = v_add(this.center, v_scale(Norm[next], offB));
-        let c: Vec3;
-        if (Math.abs(det) < 1e-6) {
-          c = v_add(p1, v_scale(d1, fallback));
-        } else {
-          const dx = p2[0] - p1[0];
-          const dy = p2[1] - p1[1];
-          const t1 = (dx * d2[1] - dy * d2[0]) / det;
-          c = v_add(p1, v_scale(d1, t1));
-        }
-        c[2] = z;
-        return c;
-      };
-      C.push(intersect(HalfW[i], -HalfW[next], HalfW[i] * 2, 0));
-      C_outer.push(intersect(HalfW[i] + PaveL[i], -(HalfW[next] + PaveR[next]), (HalfW[i] + PaveL[i]) * 2, 0));
-      C_bottom.push(
-        intersect(
-          HalfW[i] + PaveL[i] - inset,
-          -(HalfW[next] + PaveR[next] - inset),
-          (HalfW[i] + PaveL[i] - inset) * 2,
-          intersection_height - depth,
-        ),
-      );
-    }
-
-    // Mouth radius per arm
-    const R: number[] = [];
-    for (let i = 0; i < N; i++) {
-      const prev = (i - 1 + N) % N;
-      const projL = v_dot(v_sub(C[i], this.center), D[i]);
-      const projR = v_dot(v_sub(C[prev], this.center), D[i]);
-      const projOuterL = v_dot(v_sub(C_outer[i], this.center), D[i]);
-      const projOuterR = v_dot(v_sub(C_outer[prev], this.center), D[i]);
-      R.push(Math.max(projL, projR, projOuterL, projOuterR) + this.fillet_radius);
-    }
-
-    // Mouth points
-    const MC: Vec3[] = [];
-    const ML: Vec3[] = [];
-    const MR: Vec3[] = [];
-    const ML_outer: Vec3[] = [];
-    const MR_outer: Vec3[] = [];
-    const ML_bottom: Vec3[] = [];
-    const MR_bottom: Vec3[] = [];
-    for (let i = 0; i < N; i++) {
-      const mc = v_add(this.center, v_scale(D[i], R[i]));
-      MC.push(mc);
-      ML.push(v_add(mc, v_scale(Norm[i], HalfW[i])));
-      MR.push(v_sub(mc, v_scale(Norm[i], HalfW[i])));
-      ML_outer.push(v_add(mc, v_scale(Norm[i], HalfW[i] + PaveL[i])));
-      MR_outer.push(v_sub(mc, v_scale(Norm[i], HalfW[i] + PaveR[i])));
-      const mlb = v_add(mc, v_scale(Norm[i], HalfW[i] + PaveL[i] - inset));
-      mlb[2] = intersection_height - depth;
-      ML_bottom.push(mlb);
-      const mrb = v_sub(mc, v_scale(Norm[i], HalfW[i] + PaveR[i] - inset));
-      mrb[2] = intersection_height - depth;
-      MR_bottom.push(mrb);
-    }
-
-    const P_center: Vec3 = [this.center[0], this.center[1], intersection_height];
-    const P_center_bottom: Vec3 = [this.center[0], this.center[1], intersection_height - depth];
-    const MC_bottom: Vec3[] = [];
-    let sumZ = 0;
-    const armDz: number[] = [];
-    for (let i = 0; i < N; i++) {
-      let z = intersection_height;
-      let dz = 0;
-      if (sorted[i].getZAtRadius) {
-        const res = sorted[i].getZAtRadius!(R[i]);
-        z = res.z;
-        dz = res.dz;
-      } else {
-        const slope = sorted[i].slope || 0;
-        z = intersection_height + slope * R[i];
-        dz = slope;
-      }
-      armDz.push(dz);
-      MC[i][2] = z;
-      ML[i][2] = z;
-      MR[i][2] = z;
-      ML_outer[i][2] = z;
-      MR_outer[i][2] = z;
-      ML_bottom[i][2] = z - depth;
-      MR_bottom[i][2] = z - depth;
-      sumZ += z;
-    }
-    P_center[2] = sumZ / N;
-    P_center_bottom[2] = P_center[2] - depth;
-
-    for (let i = 0; i < N; i++) {
-      const next = (i + 1) % N;
-      const z = (ML[i][2] + MR[next][2]) / 2;
-      C[i][2] = z;
-      C_outer[i][2] = z;
-      C_bottom[i][2] = z - depth;
-      MC_bottom.push([MC[i][0], MC[i][1], MC[i][2] - depth]);
-    }
-
-    const ArcMid: Vec3[] = [];
-    const ArcMid_bottom: Vec3[] = [];
-    for (let i = 0; i < N; i++) {
-      const next = (i + 1) % N;
-      ArcMid.push([
-        0.25 * ML[i][0] + 0.5 * C[i][0] + 0.25 * MR[next][0],
-        0.25 * ML[i][1] + 0.5 * C[i][1] + 0.25 * MR[next][1],
-        (ML[i][2] + C[i][2] * 2 + MR[next][2]) / 4,
-      ]);
-      ArcMid_bottom.push([
-        0.25 * ML_bottom[i][0] + 0.5 * C_bottom[i][0] + 0.25 * MR_bottom[next][0],
-        0.25 * ML_bottom[i][1] + 0.5 * C_bottom[i][1] + 0.25 * MR_bottom[next][1],
-        (ML_bottom[i][2] + C_bottom[i][2] * 2 + MR_bottom[next][2]) / 4,
-      ]);
-    }
-
-    const patches: PatchSpec[] = [];
-    const arcDz: number[] = [];
-    for (let i = 0; i < N; i++) {
-      const next = (i + 1) % N;
-      arcDz.push((armDz[i] + armDz[next]) / 2);
-    }
-
-    const railOpts: RailSettings = {
-      enabled: o.railHeight > 0,
-      height: o.railHeight,
-      thickness: o.railThickness,
-      posts: o.railPosts,
-      postSpacing: 2,
-    };
-
-    for (let i = 0; i < N; i++) {
-      const prev = (i - 1 + N) % N;
-      const next = (i + 1) % N;
-      const curbH = sorted[i].curb_height;
-
-      const fullArcPrev = sampleBezierQuadratic(ML[prev], C[prev], MR[i], 2 * this.hub_div + 1);
-      const rightArcHalf = fullArcPrev.slice(this.hub_div, 2 * this.hub_div + 1);
-      patches.push(
-        patch(
-          `Hub Right ${i}`,
-          coonsPatch(
-            createRadialCurve(P_center, ArcMid[prev], arcDz[prev], this.hub_div + 1),
-            sampleLinear(MC[i], MR[i], this.hub_div + 1),
-            createRadialCurve(P_center, MC[i], armDz[i], this.hub_div + 1),
-            rightArcHalf,
-          ),
-          COL.hub,
-        ),
-      );
-
-      const fullArcPrevB = sampleBezierQuadratic(ML_bottom[prev], C_bottom[prev], MR_bottom[i], 2 * this.hub_div + 1);
-      const rightArcHalfB = fullArcPrevB.slice(this.hub_div, 2 * this.hub_div + 1);
-      patches.push(
-        patch(
-          `Hub Right Bottom ${i}`,
-          coonsPatch(
-            createRadialCurve(P_center_bottom, ArcMid_bottom[prev], arcDz[prev], this.hub_div + 1),
-            sampleLinear(MC_bottom[i], MR_bottom[i], this.hub_div + 1),
-            createRadialCurve(P_center_bottom, MC_bottom[i], armDz[i], this.hub_div + 1),
-            rightArcHalfB,
-          ),
-          COL.bottom,
-        ),
-      );
-
-      const fullArcCurr = sampleBezierQuadratic(ML[i], C[i], MR[next], 2 * this.hub_div + 1);
-      const leftArcHalf = fullArcCurr.slice(0, this.hub_div + 1).reverse();
-      patches.push(
-        patch(
-          `Hub Left ${i}`,
-          coonsPatch(
-            createRadialCurve(P_center, ArcMid[i], arcDz[i], this.hub_div + 1).reverse(),
-            sampleLinear(ML[i], MC[i], this.hub_div + 1),
-            leftArcHalf,
-            createRadialCurve(P_center, MC[i], armDz[i], this.hub_div + 1),
-          ),
-          COL.hub,
-        ),
-      );
-
-      const fullArcCurrB = sampleBezierQuadratic(ML_bottom[i], C_bottom[i], MR_bottom[next], 2 * this.hub_div + 1);
-      const leftArcHalfB = fullArcCurrB.slice(0, this.hub_div + 1).reverse();
-      patches.push(
-        patch(
-          `Hub Left Bottom ${i}`,
-          coonsPatch(
-            createRadialCurve(P_center_bottom, ArcMid_bottom[i], arcDz[i], this.hub_div + 1).reverse(),
-            sampleLinear(ML_bottom[i], MC_bottom[i], this.hub_div + 1),
-            leftArcHalfB,
-            createRadialCurve(P_center_bottom, MC_bottom[i], armDz[i], this.hub_div + 1),
-          ),
-          COL.bottom,
-        ),
-      );
-
-      // --- corner pavement / curb / superstructure ---
-      const paveDiv = 2;
-      const fullOuterArcCurr = sampleBezierQuadratic(ML_outer[i], C_outer[i], MR_outer[next], 2 * this.hub_div + 1);
-      const curbDropGrid: Vec3[][] = [
-        fullArcCurr.map((p) => [p[0], p[1], p[2]] as Vec3),
-        fullArcCurr.map((p) => [p[0], p[1], p[2] + curbH] as Vec3),
-      ];
-      patches.push(patch(`Corner Curb ${i}`, curbDropGrid, COL.curb));
-
-      const paveBottom = fullArcCurr.map((p) => [p[0], p[1], p[2] + curbH] as Vec3);
-      const paveTop = fullOuterArcCurr.map((p) => [p[0], p[1], p[2] + curbH] as Vec3);
-      patches.push(
-        patch(
-          `Corner Pavement ${i}`,
-          coonsPatch(
-            paveBottom,
-            paveTop,
-            sampleLinear(paveBottom[0], paveTop[0], paveDiv + 1),
-            sampleLinear(paveBottom[paveBottom.length - 1], paveTop[paveTop.length - 1], paveDiv + 1),
-          ),
-          COL.pavement,
-        ),
-      );
-
-      // corner guard rail with posts along the outer arc
-      const cornerNormals: Vec3[] = [];
-      for (let k = 0; k < paveTop.length; k++) {
-        const a = paveTop[Math.max(0, k - 1)];
-        const b = paveTop[Math.min(paveTop.length - 1, k + 1)];
+      const curve = paveF[i];
+      const normals: Vec3[] = curve.map((_, k) => {
+        const a = curve[Math.max(0, k - 1)];
+        const b = curve[Math.min(curve.length - 1, k + 1)];
         let dx = b[0] - a[0];
         let dy = b[1] - a[1];
         const l = Math.hypot(dx, dy);
         if (l < 1e-9) { dx = 1; dy = 0; } else { dx /= l; dy /= l; }
-        cornerNormals.push([-dy, dx, 0] as Vec3); // left normal; pointRight flips outward
-      }
-      patches.push(...buildGuardRail(paveTop, cornerNormals, true, railOpts, curbH));
-
-      patches.push(
-        patch(
-          `Corner Side ${i}`,
-          coonsPatch(
-            paveTop,
-            fullArcCurrB,
-            sampleLinear(paveTop[0], fullArcCurrB[0], paveDiv + 1),
-            sampleLinear(paveTop[paveTop.length - 1], fullArcCurrB[fullArcCurrB.length - 1], paveDiv + 1),
-          ),
-          COL.side,
-        ),
-      );
+        return [-dy, dx, 0] as Vec3;
+      });
+      out.push(...buildGuardRail(curve, normals, true, o.rails, 0.6, 0.3));
     }
-
-    const armData = sorted.map((arm, i) => ({ id: arm.id, R: R[i], MC: MC[i] }));
-    return { patches, armData };
   }
+  return out;
 }
+

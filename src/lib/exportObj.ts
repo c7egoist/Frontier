@@ -4,7 +4,7 @@ import { roadToWorld } from './vec';
 import type { BuiltNetwork } from './network';
 
 export function networkToObj(net: BuiltNetwork, name: string): string {
-  const lines: string[] = [`# ${name} — Frontier Road & Bridge Studio`, ''];
+  const lines: string[] = [`# ${name} — RoadWorks Editor`, ''];
   let vi = 1;
   let oi = 0;
 

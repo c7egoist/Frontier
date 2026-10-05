@@ -1,25 +1,29 @@
-// Network assembly — turns project splines into junctions + spans.
+// Network assembly — TransitArchitect-style graph build.
 //
-//  1. Cluster spline nodes into groups (shared nodes become junctions).
-//     Clustering is height-aware so bridge overpasses never merge with the
-//     road below them.
-//  2. Build one N-way junction hub per multi-arm group (V3 topology).
-//  3. Trim every node-pair curve at the junction mouths and build either a
-//     road span or a bridge span from curvature-safe station frames.
+//  1. Sample each spline as ONE dense polyline; record node indices.
+//  2. Cluster nodes; groups become junctions by the TA rule (3+ legs, or
+//     2 legs with >= 15 degrees of deflection).
+//  3. Split splines into RUNS at shared nodes (junction runs trim back by
+//     cornerRadius; straight joins abut exactly, untrimmed).
+//  4. Build ONE span per run (road or bridge) — no interior seams.
+//  5. Derive approach frames from span end stations and build merged
+//     junctions from them — watertight by construction.
 
 import {
-  Vec3, v_sub, v_len, worldToRoad, dirAngleDeg, arcLengths, pointAtArc, cubicBezier,
+  Vec3, v_sub, v_scale, v_len, worldToRoad, cubicBezier, arcLengths,
+  left_normal,
 } from './vec';
 import {
-  PatchSpec, ArmSpec, NWayJunctionGenerator, buildFrames, buildRoadSpan, computeCrossLines,
+  PatchSpec, CrossLines, buildFrames, buildRoadSpan, computeCrossLines,
+  buildMergedJunction, JunctionLeg, StationFrame,
 } from './roadGeometry';
 import { buildBeamSpan, buildArchSpan } from './bridgeGeometry';
-import type { Project, Spline, SplineNode, Point3D } from './model';
+import type { Project, Spline, Point3D, RailSettings } from './model';
 import { topologyName } from './model';
 
 const JOIN_XZ = 0.25;
 const JOIN_Y = 0.6;
-const DENSE_PER_PAIR = 140;
+const PER_PAIR = 60;
 
 export interface JunctionArmInfo {
   splineId: string;
@@ -50,30 +54,15 @@ export interface BuiltNetwork {
   spans: BuiltSpan[];
 }
 
-// --- bezier pair sampling (world space) -------------------------------------
+// --- spline sampling (world space, one polyline per spline) ------------------
 
-interface PairCurve {
-  n1: SplineNode;
-  idx1: number;
-  n2: SplineNode;
-  idx2: number;
-  /** Dense world-space points + arc table + total length. */
+interface SplineSample {
+  spline: Spline;
   pts: Vec3[];
   lengths: number[];
   total: number;
-}
-
-function samplePair(n1: SplineNode, idx1: number, n2: SplineNode, idx2: number): PairCurve {
-  const p0 = n1.position as Vec3;
-  const p1 = n1.handleOut as Vec3;
-  const p2 = n2.handleIn as Vec3;
-  const p3 = n2.position as Vec3;
-  const pts: Vec3[] = [];
-  for (let i = 0; i < DENSE_PER_PAIR; i++) {
-    pts.push(cubicBezier(p0, p1, p2, p3, i / (DENSE_PER_PAIR - 1)));
-  }
-  const lengths = arcLengths(pts);
-  return { n1, idx1, n2, idx2, pts, lengths, total: lengths[lengths.length - 1] };
+  /** dense point index of each node */
+  nodeIdx: number[];
 }
 
 function splinePairs(s: Spline): Array<{ a: number; b: number }> {
@@ -83,9 +72,33 @@ function splinePairs(s: Spline): Array<{ a: number; b: number }> {
   return out;
 }
 
+function sampleSpline(s: Spline): SplineSample | null {
+  if (s.nodes.length < 2) return null;
+  const pairs = splinePairs(s);
+  const pts: Vec3[] = [];
+  const nodeIdx: number[] = new Array(s.nodes.length).fill(-1);
+  pairs.forEach(({ a, b }, pi) => {
+    const n1 = s.nodes[a];
+    const n2 = s.nodes[b];
+    if (pi === 0) nodeIdx[a] = 0;
+    else if (nodeIdx[a] < 0) nodeIdx[a] = pts.length - 1; // joint with previous pair
+    for (let i = 1; i < PER_PAIR; i++) {
+      const t = i / (PER_PAIR - 1);
+      pts.push(cubicBezier(
+        n1.position as Vec3, n1.handleOut as Vec3, n2.handleIn as Vec3, n2.position as Vec3, t,
+      ));
+    }
+    if (pi === 0) pts.unshift([...n1.position] as Vec3);
+    // closed loops: keep node 0 at index 0 (last pair re-ends there as a dup)
+    if (nodeIdx[b] < 0 || !(s.closed && b === 0)) nodeIdx[b] = pts.length - 1;
+  });
+  const lengths = arcLengths(pts);
+  return { spline: s, pts, lengths, total: lengths[lengths.length - 1], nodeIdx };
+}
+
 // --- node clustering --------------------------------------------------------
 
-interface NodeRef { spline: Spline; index: number; node: SplineNode }
+interface NodeRef { spline: Spline; index: number }
 interface NodeGroup { position: Point3D; refs: NodeRef[] }
 
 function clusterNodes(splines: Spline[]): NodeGroup[] {
@@ -98,17 +111,69 @@ function clusterNodes(splines: Spline[]): NodeGroup[] {
         const dy = gg.position[1] - node.position[1];
         return Math.hypot(dx, dz) < JOIN_XZ && Math.abs(dy) < JOIN_Y;
       });
-      if (g) g.refs.push({ spline: s, index, node });
-      else groups.push({ position: [...node.position] as Point3D, refs: [{ spline: s, index, node }] });
+      if (g) g.refs.push({ spline: s, index });
+      else groups.push({ position: [...node.position] as Point3D, refs: [{ spline: s, index }] });
     });
   }
   return groups;
 }
 
-const armId = (splineId: string, nodeIndex: number, end: 'start' | 'end') =>
-  `${splineId}-${nodeIndex}-${end}`;
+const nodeKey = (splineId: string, idx: number) => `${splineId}:${idx}`;
+
+// neighbor directions of a node along its spline (prev/next node indices)
+function nodeNeighbors(s: Spline, idx: number): number[] {
+  const out: number[] = [];
+  if (idx > 0) out.push(idx - 1);
+  if (idx < s.nodes.length - 1) out.push(idx + 1);
+  if (s.closed && s.nodes.length > 2) {
+    if (idx === 0) out.push(s.nodes.length - 1);
+    else if (idx === s.nodes.length - 1) out.push(0);
+  }
+  return out;
+}
+
+// --- frame helpers -----------------------------------------------------------
+
+/** Append a copy of the first frame at the end so closed loops wrap exactly. */
+export function closeFrames(frames: StationFrame[]): StationFrame[] {
+  if (frames.length < 3) return frames;
+  const first = frames[0];
+  const last = frames[frames.length - 1];
+  const closing = v_len(v_sub(first.center, last.center));
+  return [...frames, { ...first, s: last.s + closing }];
+}
+
+/** Point on a dense polyline at arc distance s (world). */
+function pointAt(pts: Vec3[], lengths: number[], s: number): Vec3 {
+  const total = lengths[lengths.length - 1];
+  const c = Math.min(total, Math.max(0, s));
+  let j = 0;
+  while (j < pts.length - 2 && lengths[j + 1] < c) j++;
+  const span = lengths[j + 1] - lengths[j];
+  const lt = span <= 1e-9 ? 0 : (c - lengths[j]) / span;
+  const a = pts[j]; const b = pts[j + 1];
+  return [a[0] + (b[0] - a[0]) * lt, a[1] + (b[1] - a[1]) * lt, a[2] + (b[2] - a[2]) * lt];
+}
 
 // --- main build --------------------------------------------------------------
+
+interface Run {
+  spline: Spline;
+  fromNode: number;
+  toNode: number;
+  /** world dense points from fromNode to toNode (inclusive ends) */
+  pts: Vec3[];
+  trimStart: boolean;
+  trimEnd: boolean;
+  closedLoop: boolean;
+}
+
+interface ViableRun extends Run {
+  /** road-space trimmed centerline */
+  road: Vec3[];
+  frames: StationFrame[];
+  lines: CrossLines;
+}
 
 export function buildNetwork(project: Project): BuiltNetwork {
   const junctions: BuiltJunction[] = [];
@@ -116,252 +181,295 @@ export function buildNetwork(project: Project): BuiltNetwork {
   const splines = project.splines.filter((s) => s.nodes.length >= 2);
   if (splines.length === 0) return { junctions, spans };
 
-  const byId = new Map(splines.map((s) => [s.id, s]));
+  const samples = new Map<string, SplineSample>();
+  for (const s of splines) {
+    const sm = sampleSpline(s);
+    if (sm && sm.total > 0.5) samples.set(s.id, sm);
+  }
   const groups = clusterNodes(splines);
 
-  // pair curves for every spline (world space, dense)
-  const pairCurves = new Map<string, PairCurve[]>();
-  for (const s of splines) {
-    pairCurves.set(
-      s.id,
-      splinePairs(s).map(({ a, b }) => samplePair(s.nodes[a], a, s.nodes[b], b)),
-    );
-  }
-  const findPair = (splineId: string, fromIdx: number, toIdx: number): PairCurve | undefined =>
-    pairCurves.get(splineId)?.find(
-      (pc) => (pc.idx1 === fromIdx && pc.idx2 === toIdx) || (pc.idx1 === toIdx && pc.idx2 === fromIdx),
-    );
-
-  const connectionMap = new Map<string, { R: number; MC: Vec3 }>();
-  // hub discs for trimming + node lookups
-  interface HubRec { x: number; z: number; rmax: number }
-  const hubs: HubRec[] = [];
-  const nodeHub = new Map<string, number>(); // `${splineId}:${nodeIndex}` -> hub index
-  const nodeKey = (splineId: string, idx: number) => `${splineId}:${idx}`;
+  // group size per node (for caps + run splitting)
   const groupSize = new Map<string, number>();
+  const groupOf = new Map<string, NodeGroup>();
   for (const g of groups) {
-    for (const r of g.refs) groupSize.set(nodeKey(r.spline.id, r.index), g.refs.length);
+    for (const r of g.refs) {
+      groupSize.set(nodeKey(r.spline.id, r.index), g.refs.length);
+      groupOf.set(nodeKey(r.spline.id, r.index), g);
+    }
   }
 
-  // --- junctions (only at genuinely shared nodes) ---
-  let junctionSeq = 0;
+  // --- junction detection (TA rule) ---
+  interface JunctionCand { group: NodeGroup; legs: { spline: Spline; nodeIdx: number; nbrIdx: number }[] }
+  const candidates: JunctionCand[] = [];
   for (const g of groups) {
     if (g.refs.length < 2) continue;
-    const arms: ArmSpec[] = [];
-    const armInfos: JunctionArmInfo[] = [];
-    const centerRoad = worldToRoad(g.position as Vec3);
+    const legs: JunctionCand['legs'] = [];
+    for (const r of g.refs) {
+      for (const nbr of nodeNeighbors(r.spline, r.index)) {
+        legs.push({ spline: r.spline, nodeIdx: r.index, nbrIdx: nbr });
+      }
+    }
+    if (legs.length < 2) continue;
+    let isJunction = legs.length >= 3;
+    if (!isJunction) {
+      // degree 2: junction unless nearly straight (TA: angle < 165 -> junction)
+      const dirs: [number, number][] = [];
+      for (const leg of legs) {
+        const sm = samples.get(leg.spline.id);
+        const ni = sm?.nodeIdx[leg.nodeIdx] ?? -1;
+        if (!sm || ni < 0) { dirs.push([1, 0]); continue; }
+        const forward = leg.nbrIdx === leg.nodeIdx + 1 || (leg.nbrIdx === 0 && leg.nodeIdx === sm.spline.nodes.length - 1);
+        const a = sm.pts[ni];
+        const b = forward ? sm.pts[Math.min(sm.pts.length - 1, ni + 1)] : sm.pts[Math.max(0, ni - 1)];
+        // leg direction: from the node TOWARD the neighbor (both cases)
+        const d: [number, number] = [b[0] - a[0], b[2] - a[2]];
+        const l = Math.hypot(d[0], d[1]);
+        dirs.push(l < 1e-6 ? [1, 0] : [d[0] / l, d[1] / l]);
+      }
+      const dot = Math.max(-1, Math.min(1, dirs[0][0] * dirs[1][0] + dirs[0][1] * dirs[1][1]));
+      const angleDeg = (Math.acos(dot) * 180) / Math.PI;
+      isJunction = angleDeg < 165;
+    }
+    if (isJunction) candidates.push({ group: g, legs });
+  }
+  const junctionNodes = new Set<string>();
+  for (const c of candidates) {
+    for (const r of c.group.refs) junctionNodes.add(nodeKey(r.spline.id, r.index));
+  }
 
-    for (const { spline, index, node } of g.refs) {
-      const neighbours: Array<{ target: SplineNode; targetIdx: number; handle: Point3D; end: 'start' | 'end' }> = [];
-      if (index > 0) {
-        neighbours.push({ target: spline.nodes[index - 1], targetIdx: index - 1, handle: node.handleIn, end: 'end' });
+  // --- runs: split at every shared node; trim at junction nodes ---
+  const runs: Run[] = [];
+  for (const s of splines) {
+    const sm = samples.get(s.id);
+    if (!sm) continue;
+    const n = s.nodes.length;
+    const sharedIdx: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if ((groupSize.get(nodeKey(s.id, i)) ?? 1) > 1) sharedIdx.push(i);
+    }
+    if (!s.closed) {
+      const bounds = [0, ...sharedIdx.filter((i) => i !== 0 && i !== n - 1), n - 1];
+      for (let k = 0; k < bounds.length - 1; k++) {
+        const a = bounds[k]; const b = bounds[k + 1];
+        if (b <= a) continue;
+        const i0 = sm.nodeIdx[a]; const i1 = sm.nodeIdx[b];
+        if (i0 < 0 || i1 < 0 || i1 <= i0) continue;
+        runs.push({
+          spline: s, fromNode: a, toNode: b,
+          pts: sm.pts.slice(i0, i1 + 1),
+          trimStart: junctionNodes.has(nodeKey(s.id, a)),
+          trimEnd: junctionNodes.has(nodeKey(s.id, b)),
+          closedLoop: false,
+        });
       }
-      if (index < spline.nodes.length - 1) {
-        neighbours.push({ target: spline.nodes[index + 1], targetIdx: index + 1, handle: node.handleOut, end: 'start' });
-      }
-      if (spline.closed && spline.nodes.length > 2) {
-        if (index === 0) {
-          neighbours.push({
-            target: spline.nodes[spline.nodes.length - 1],
-            targetIdx: spline.nodes.length - 1,
-            handle: node.handleIn,
-            end: 'end',
+    } else {
+      if (sharedIdx.length === 0) {
+        runs.push({ spline: s, fromNode: 0, toNode: 0, pts: [...sm.pts], trimStart: false, trimEnd: false, closedLoop: true });
+      } else {
+        const ring = [...sharedIdx].sort((x, y) => x - y);
+        for (let k = 0; k < ring.length; k++) {
+          const a = ring[k];
+          const b = ring[(k + 1) % ring.length];
+          let slice: Vec3[];
+          if (k < ring.length - 1) {
+            const i0 = sm.nodeIdx[a]; const i1 = sm.nodeIdx[b];
+            if (i0 < 0 || i1 < 0 || i1 <= i0) continue;
+            slice = sm.pts.slice(i0, i1 + 1);
+          } else {
+            // wrap arc: node a -> end, then start -> node b
+            const i0 = sm.nodeIdx[a]; const i1 = sm.nodeIdx[b];
+            if (i0 < 0 || i1 < 0) continue;
+            slice = [...sm.pts.slice(i0), ...sm.pts.slice(1, i1 + 1)];
+          }
+          runs.push({
+            spline: s, fromNode: a, toNode: b,
+            pts: slice,
+            trimStart: junctionNodes.has(nodeKey(s.id, a)),
+            trimEnd: junctionNodes.has(nodeKey(s.id, b)),
+            closedLoop: false,
           });
-        } else if (index === spline.nodes.length - 1) {
-          neighbours.push({ target: spline.nodes[0], targetIdx: 0, handle: node.handleOut, end: 'start' });
         }
       }
+    }
+  }
 
-      for (const nb of neighbours) {
-        // arm direction: handle first, neighbour node as fallback
-        const hR = worldToRoad(nb.handle as Vec3);
-        let dir = v_sub(hR, centerRoad);
-        if (Math.hypot(dir[0], dir[1]) < 0.5) {
-          dir = v_sub(worldToRoad(nb.target.position as Vec3), centerRoad);
-        }
-        if (Math.hypot(dir[0], dir[1]) < 1e-6) continue;
-        const angle = dirAngleDeg(dir);
+  // --- trim + frames + cross lines (viability pass) ---
+  const cornerR = Math.max(2, project.junctions.cornerRadius);
+  const viable: ViableRun[] = [];
+  for (const run of runs) {
+    const L = arcLengths(run.pts);
+    const total = L[L.length - 1];
+    if (total < 1) continue;
+    let s0 = 0; let s1 = total;
+    if (run.trimStart) s0 = Math.min(cornerR, total * 0.49);
+    if (run.trimEnd) s1 = total - Math.min(cornerR, total * 0.49);
+    if (s1 - s0 < 1.5) continue; // swallowed by junctions — skip
+    const road: Vec3[] = [worldToRoad(pointAt(run.pts, L, s0))];
+    for (let j = 0; j < run.pts.length; j++) {
+      if (L[j] > s0 + 1e-4 && L[j] < s1 - 1e-4) road.push(worldToRoad(run.pts[j]));
+    }
+    road.push(worldToRoad(pointAt(run.pts, L, s1)));
+    // closed loops: drop the duplicated closing point, then wrap exactly
+    let frames = buildFrames(run.closedLoop ? road.slice(0, -1) : road);
+    if (frames.length < 2) continue;
+    if (run.closedLoop) frames = closeFrames(frames);
+    const lines = computeCrossLines(frames, run.spline.cross, {
+      depth: project.junctions.depth,
+      inset: project.junctions.inset,
+    });
+    viable.push({ ...run, road, frames, lines });
+  }
 
-        // elevation profile along the arm for sloped mouths
-        const pc = findPair(spline.id, index, nb.targetIdx);
-        let getZAtRadius: ArmSpec['getZAtRadius'];
-        if (pc && pc.total > 1e-6) {
-          const road = pc.pts.map(worldToRoad);
-          const forward = pc.idx1 === index; // curve runs away from the junction?
-          getZAtRadius = (r: number) => {
-            let best = 0; let bd = Infinity;
-            for (let i = 0; i < road.length; i++) {
-              const d = Math.hypot(road[i][0] - centerRoad[0], road[i][1] - centerRoad[1]);
-              const diff = Math.abs(d - r);
-              if (diff < bd) { bd = diff; best = i; }
-            }
-            const p = road[best];
-            const q = road[forward ? Math.min(road.length - 1, best + 1) : Math.max(0, best - 1)];
-            const run = Math.hypot(q[0] - p[0], q[1] - p[1]);
-            const dz = run > 1e-6 ? (q[2] - p[2]) / run : 0;
-            return { z: p[2], dz };
-          };
-        }
-
-        const id = armId(spline.id, index, nb.end);
-        if (arms.some((a) => a.id === id)) continue;
-        arms.push({
-          id,
-          name: 'Arm',
-          angle_deg: angle,
-          outer_height: g.position[1],
-          fill_color: '#333333',
-          width: spline.cross.width,
-          pavement_width_left: spline.cross.paveLeft,
-          pavement_width_right: spline.cross.paveRight,
-          curb_height: spline.cross.curbHeight,
-        });
-        if (getZAtRadius) arms[arms.length - 1].getZAtRadius = getZAtRadius;
-        armInfos.push({ splineId: spline.id, splineName: spline.name, color: spline.color, angleDeg: angle });
+  // legs from viable runs only; junctions with <2 legs are dropped and
+  // their runs un-trimmed (second pass over trim flags via leg lookup)
+  interface LegRef { run: ViableRun; atStart: boolean }
+  const legsByJunction = new Map<NodeGroup, LegRef[]>();
+  for (const run of viable) {
+    if (run.trimStart) {
+      const g = groupOf.get(nodeKey(run.spline.id, run.fromNode));
+      if (g) {
+        if (!legsByJunction.has(g)) legsByJunction.set(g, []);
+        legsByJunction.get(g)!.push({ run, atStart: true });
       }
     }
-
-    // 2-arm straight pass-throughs join directly — no hub needed.
-    if (arms.length === 2) {
-      const a = (arms[0].angle_deg * Math.PI) / 180;
-      const b = (arms[1].angle_deg * Math.PI) / 180;
-      const between = Math.acos(Math.max(-1, Math.min(1, Math.cos(a) * Math.cos(b) + Math.sin(a) * Math.sin(b))));
-      const deflection = Math.PI - between; // 0 = perfectly straight
-      if (deflection < (25 * Math.PI) / 180) continue;
-    }
-
-    if (arms.length >= 2) {
-      try {
-        const gen = new NWayJunctionGenerator(centerRoad, project.junctions.hubDiv, project.junctions.filletRadius);
-        const res = gen.build_case(arms, {
-          height: g.position[1],
-          railHeight: 0.8,
-          railThickness: 0.2,
-          railPosts: true,
-          depth: project.junctions.depth,
-          inset: project.junctions.inset,
-        });
-        let rmax = 0;
-        for (const d of res.armData) {
-          connectionMap.set(d.id, { R: d.R, MC: d.MC });
-          rmax = Math.max(rmax, d.R);
-        }
-        const hubIdx = hubs.length;
-        hubs.push({ x: g.position[0], z: g.position[2], rmax });
-        for (const r of g.refs) nodeHub.set(nodeKey(r.spline.id, r.index), hubIdx);
-        junctionSeq += 1;
-        junctions.push({
-          id: `junction-${junctionSeq}`,
-          position: [...g.position] as Point3D,
-          topology: topologyName(arms.length),
-          arms: armInfos,
-          patches: res.patches,
-        });
-      } catch (e) {
-        console.error('junction build failed', e);
+    if (run.trimEnd) {
+      const g = groupOf.get(nodeKey(run.spline.id, run.toNode));
+      if (g) {
+        if (!legsByJunction.has(g)) legsByJunction.set(g, []);
+        legsByJunction.get(g)!.push({ run, atStart: false });
       }
     }
+  }
+
+  // drop single-leg junctions: un-trim those runs (rebuild centerline quickly)
+  for (const [g, legRefs] of legsByJunction) {
+    if (legRefs.length >= 2) continue;
+    for (const { run, atStart } of legRefs) {
+      // rebuild this run without the trim on this side
+      const L = arcLengths(run.pts);
+      const total = L[L.length - 1];
+      const ns0 = atStart ? 0 : (run.trimStart ? Math.min(cornerR, total * 0.49) : 0);
+      const ns1 = !atStart ? total : (run.trimEnd ? total - Math.min(cornerR, total * 0.49) : total);
+      const road: Vec3[] = [worldToRoad(pointAt(run.pts, L, ns0))];
+      for (let j = 0; j < run.pts.length; j++) {
+        if (L[j] > ns0 + 1e-4 && L[j] < ns1 - 1e-4) road.push(worldToRoad(run.pts[j]));
+      }
+      road.push(worldToRoad(pointAt(run.pts, L, ns1)));
+      let frames = buildFrames(road);
+      if (frames.length < 2) continue;
+      if (run.closedLoop) frames = closeFrames(frames);
+      run.frames = frames;
+      run.lines = computeCrossLines(frames, run.spline.cross, {
+        depth: project.junctions.depth,
+        inset: project.junctions.inset,
+      });
+      if (atStart) run.trimStart = false;
+      else run.trimEnd = false;
+    }
+    legsByJunction.delete(g);
   }
 
   // --- spans ---
-  for (const s of splines) {
-    const curves = pairCurves.get(s.id) ?? [];
-    for (const pc of curves) {
-      if (pc.total < 0.5) continue;
-      const conn1 = connectionMap.get(armId(s.id, pc.idx1, 'start'));
-      const conn2 = connectionMap.get(armId(s.id, pc.idx2, 'end'));
-      const h1 = nodeHub.has(nodeKey(s.id, pc.idx1)) ? hubs[nodeHub.get(nodeKey(s.id, pc.idx1))!] : null;
-      const h2 = nodeHub.has(nodeKey(s.id, pc.idx2)) ? hubs[nodeHub.get(nodeKey(s.id, pc.idx2))!] : null;
-
-      // Trim against endpoint hubs AND the opposite hub (pairs swallowed by an
-      // oversized mouth, or starting inside a hub they don't connect to).
-      // Mouth-center pinning applies only when the exit is interior to the
-      // pair — this kills the V3 fold-back bug (spans doubling over pairs
-      // shorter than the mouth radius).
-      const distHub = (p: Vec3, h: HubRec) => Math.hypot(p[0] - h.x, p[2] - h.z);
-      let s0 = 0;
-      let s1 = pc.total;
-      let pinS: Vec3 | null = null;
-      let pinE: Vec3 | null = null;
-      let dead = false;
-      const trimStart: Array<{ h: HubRec | null; r: number; pin: Vec3 | null }> = [
-        { h: h1, r: conn1?.R ?? h1?.rmax ?? 0, pin: conn1 ? ([...conn1.MC] as Vec3) : null },
-        { h: h2, r: h2?.rmax ?? 0, pin: null },
-      ];
-      for (const t of trimStart) {
-        if (!t.h || dead) continue;
-        let ex = pc.total;
-        for (let j = 0; j < pc.pts.length; j++) {
-          if (distHub(pc.pts[j], t.h) >= t.r) { ex = pc.lengths[j]; break; }
-        }
-        if (ex >= pc.total - 1e-6) { dead = true; break; }
-        if (ex > s0 + 1e-6) { s0 = ex; pinS = t.pin; }
-      }
-      const trimEnd: Array<{ h: HubRec | null; r: number; pin: Vec3 | null }> = [
-        { h: h2, r: conn2?.R ?? h2?.rmax ?? 0, pin: conn2 ? ([...conn2.MC] as Vec3) : null },
-        { h: h1, r: h1?.rmax ?? 0, pin: null },
-      ];
-      for (const t of trimEnd) {
-        if (!t.h || dead) continue;
-        let en = -1;
-        for (let j = pc.pts.length - 1; j >= 0; j--) {
-          if (distHub(pc.pts[j], t.h) >= t.r) { en = pc.lengths[j]; break; }
-        }
-        if (en < 0) { dead = true; break; }
-        if (en < s1 - 1e-6) { s1 = en; pinE = t.pin; }
-      }
-      if (dead || s1 - s0 < 1.2) continue;
-
-      // trimmed centerline in road space, pinned to junction mouths
-      const road: Vec3[] = [];
-      road.push(pinS ?? worldToRoad(pointAtArc(pc.pts, pc.lengths, s0)));
-      for (let j = 0; j < pc.pts.length; j++) {
-        if (pc.lengths[j] > s0 + 1e-4 && pc.lengths[j] < s1 - 1e-4) {
-          road.push(worldToRoad(pc.pts[j]));
-        }
-      }
-      road.push(pinE ?? worldToRoad(pointAtArc(pc.pts, pc.lengths, s1)));
-      if (road.length < 2 || v_len(v_sub(road[road.length - 1], road[0])) < 0.5) continue;
-
-      const frames = buildFrames(road);
-      if (frames.length < 2) continue;
-      const spanLen = frames[frames.length - 1].s;
-      // caps only on truly free heads (unshared nodes, away from hubs)
-      const nearHub = (p: Point3D) => hubs.some((h) => Math.hypot(p[0] - h.x, p[2] - h.z) < h.rmax + 2.5);
-      const capStart = !conn1 && (groupSize.get(nodeKey(s.id, pc.idx1)) ?? 1) === 1 && !nearHub(pc.n1.position);
-      const capEnd = !conn2 && (groupSize.get(nodeKey(s.id, pc.idx2)) ?? 1) === 1 && !nearHub(pc.n2.position);
-
-      void byId;
-
-      let kind: SpanKind = 'road';
-      let patches: PatchSpec[];
-      if (!s.bridge.enabled) {
-        patches = buildRoadSpan(frames, s.cross, s.rails, {
-          depth: project.junctions.depth,
-          inset: project.junctions.inset,
-          capStart,
-          capEnd,
-          postDrop: s.cross.curbHeight,
-        });
-      } else {
-        // bridge spans need cross lines; build once and share
-        const lines = computeCrossLines(frames, s.cross, { depth: 1.2, inset: 0.6 });
-        const groundZ = project.scene.groundZ;
-        if (s.bridge.type === 'arch') {
-          const arch = buildArchSpan(lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
-          if (arch) {
-            kind = 'arch';
-            patches = arch;
-          } else {
-            kind = 'beam';
-            patches = buildBeamSpan(lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
-          }
+  for (const run of viable) {
+    const s = run.spline;
+    const spanLen = run.frames[run.frames.length - 1].s;
+    const capStart = !run.trimStart && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.fromNode)) ?? 1) === 1;
+    const capEnd = !run.trimEnd && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.toNode)) ?? 1) === 1;
+    let kind: SpanKind = 'road';
+    let patches: PatchSpec[];
+    if (!s.bridge.enabled) {
+      patches = buildRoadSpan(run.lines, s.cross, s.rails, {
+        depth: project.junctions.depth,
+        inset: project.junctions.inset,
+        capStart,
+        capEnd,
+      });
+    } else {
+      const groundZ = project.scene.groundZ;
+      if (s.bridge.type === 'arch') {
+        const arch = buildArchSpan(run.lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
+        if (arch) {
+          kind = 'arch';
+          patches = arch;
         } else {
           kind = 'beam';
-          patches = buildBeamSpan(lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
+          patches = buildBeamSpan(run.lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
         }
+      } else {
+        kind = 'beam';
+        patches = buildBeamSpan(run.lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
       }
-      spans.push({ splineId: s.id, kind, length: spanLen, patches });
+    }
+    spans.push({ splineId: s.id, kind, length: spanLen, patches });
+  }
+
+  // --- junctions from span end stations (exact shared sections) ---
+  let seq = 0;
+  for (const [g, legRefs] of legsByJunction) {
+    const legs: JunctionLeg[] = [];
+    const armInfos: JunctionArmInfo[] = [];
+    let railAny = false;
+    let railH = 0; let railT = 0; let railPosts = false; let railPS = Infinity;
+    for (const { run, atStart } of legRefs) {
+      const s = run.spline;
+      const st = atStart ? run.frames[0] : run.frames[run.frames.length - 1];
+      const li = atStart ? 0 : run.lines.roadL.length - 1;
+      // arrival orientation: into the junction
+      const arrival = atStart ? v_scale(st.tangent, -1) : st.tangent;
+      const left = left_normal(arrival);
+      const L = run.lines;
+      const leg: JunctionLeg = {
+        point: [...st.center] as Vec3,
+        tangent: [...arrival] as Vec3,
+        left: [...left] as Vec3,
+        roadL: atStart ? [...L.roadR[li]] as Vec3 : [...L.roadL[li]] as Vec3,
+        roadR: atStart ? [...L.roadL[li]] as Vec3 : [...L.roadR[li]] as Vec3,
+        curbL: atStart ? [...L.curbTopR[li]] as Vec3 : [...L.curbTopL[li]] as Vec3,
+        curbR: atStart ? [...L.curbTopL[li]] as Vec3 : [...L.curbTopR[li]] as Vec3,
+        paveL: atStart ? [...L.paveR[li]] as Vec3 : [...L.paveL[li]] as Vec3,
+        paveR: atStart ? [...L.paveL[li]] as Vec3 : [...L.paveR[li]] as Vec3,
+        botL: atStart ? [...L.botR[li]] as Vec3 : [...L.botL[li]] as Vec3,
+        botR: atStart ? [...L.botL[li]] as Vec3 : [...L.botR[li]] as Vec3,
+        angle: Math.atan2(arrival[1], arrival[0]),
+        splineId: s.id,
+        splineName: s.name,
+        color: s.color,
+      };
+      legs.push(leg);
+      let deg = (leg.angle * 180) / Math.PI;
+      if (deg < 0) deg += 360;
+      armInfos.push({ splineId: s.id, splineName: s.name, color: s.color, angleDeg: deg });
+      if (s.rails.enabled) {
+        railAny = true;
+        railH = Math.max(railH, s.rails.height);
+        railT = Math.max(railT, s.rails.thickness);
+        railPosts = railPosts || s.rails.posts;
+        railPS = Math.min(railPS, s.rails.postSpacing);
+      }
+    }
+    if (legs.length < 2) continue;
+    const rails: RailSettings = {
+      enabled: railAny, height: railH || 0.8, thickness: railT || 0.2,
+      posts: railPosts, postSpacing: Number.isFinite(railPS) ? railPS : 2,
+    };
+    try {
+      const patches = buildMergedJunction(legs, {
+        center: worldToRoad(g.position as Vec3),
+        cornerRadius: cornerR,
+        filletSteps: project.junctions.filletSteps,
+        depth: project.junctions.depth,
+        rails,
+      });
+      seq += 1;
+      junctions.push({
+        id: `junction-${seq}`,
+        position: [...g.position] as Point3D,
+        topology: topologyName(legs.length),
+        arms: armInfos,
+        patches,
+      });
+    } catch (e) {
+      console.error('junction build failed', e);
     }
   }
 

@@ -36,20 +36,29 @@ export interface CrossSection {
 }
 
 export type BridgeType = 'beam' | 'arch';
-export type PierStyle = 'single' | 'bent' | 'wall';
+export type Superstructure = 'slab' | 'igirder' | 'box';
+export type PierStyle = 'single' | 'bent' | 'wall' | 'hammerhead' | 'portal';
+export type Foundation = 'spread' | 'piles';
+export type Abutment = 'cantilever' | 'stub' | 'spill';
 export type ParapetStyle = 'rail' | 'parapet';
 
 export interface BridgeSettings {
   enabled: boolean;
   type: BridgeType;
+  /** Beam superstructure: solid slab, I-girders or box girder. */
+  superstructure: Superstructure;
   /** Deck slab thickness below the wearing surface. */
   deckDepth: number;
   /** Longitudinal girder depth below the deck soffit. */
   girderDepth: number;
+  /** Transverse diaphragms between girders at supports. */
+  diaphragms: boolean;
   pierSpacing: number;
   pierStyle: PierStyle;
   /** Pier column diameter / wall thickness. */
   pierSize: number;
+  foundation: Foundation;
+  abutment: Abutment;
   /** Arch rise for arch bridges. */
   archRise: number;
   parapet: ParapetStyle;
@@ -77,9 +86,13 @@ export interface Spline {
 }
 
 export interface JunctionSettings {
-  filletRadius: number;
-  hubDiv: number;
+  /** Trim-back distance from the node + fillet scale. */
+  cornerRadius: number;
+  /** Segments per corner arc. */
+  filletSteps: number;
+  /** Superstructure / tub depth below the surface. */
   depth: number;
+  /** Span superstructure side inset. */
   inset: number;
 }
 
@@ -150,11 +163,15 @@ export function defaultBridge(): BridgeSettings {
   return {
     enabled: false,
     type: 'beam',
+    superstructure: 'igirder',
     deckDepth: 0.35,
     girderDepth: 1.1,
+    diaphragms: true,
     pierSpacing: 12,
     pierStyle: 'bent',
     pierSize: 0.7,
+    foundation: 'spread',
+    abutment: 'cantilever',
     archRise: 4,
     parapet: 'parapet',
     parapetHeight: 1.1,
@@ -193,7 +210,7 @@ export function defaultProject(): Project {
     version: 1,
     name: 'Untitled Crossing',
     splines: [],
-    junctions: { filletRadius: 5, hubDiv: 4, depth: 1.5, inset: 1.5 },
+    junctions: { cornerRadius: 7, filletSteps: 10, depth: 1.5, inset: 1.5 },
     scene: { groundZ: 0, showGround: true, waterLevel: -1.2, showWater: true, showGrid: true, drawHeight: 0.05 },
   };
 }

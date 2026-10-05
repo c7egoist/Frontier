@@ -54,8 +54,8 @@ export function Outliner({
             <path d="M9 4 h10 v10" />
           </svg>
         </span>
-        Frontier<span className="brand-dot">.</span>
-        <span className="version">ROAD &amp; BRIDGE</span>
+        RoadWorks<span className="brand-dot">.</span>
+        <span className="version">EDITOR</span>
       </div>
 
       <div className="scene-label">

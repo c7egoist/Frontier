@@ -1,11 +1,21 @@
-# Frontier — Road & Bridge Studio
+# RoadWorks Editor
 
 A spline-based road network + bridge generator. Draw bezier splines, get clean
 carriageways with pavements, curbs, guardrails and lane markings, auto N-way
-junction hubs where splines meet, and beam or arch bridges with piers,
-abutments and parapets — all editable live in a Slate-editor-styled studio.
+junctions where splines meet, and beam or arch bridges with procedural
+substructures — all editable live in a Slate-editor-styled studio.
 
 ![status](https://img.shields.io/badge/status-working%20app-green)
+
+## Open
+
+Live static build (no install) via raw.githack, served from this branch:
+
+```
+https://raw.githack.com/c7egoist/Frontier/arena/01a10cf3-frontier/dist/index.html
+```
+
+(`dist/` is committed on purpose with relative asset paths so this URL works.)
 
 ## Run
 
@@ -27,49 +37,35 @@ npm test
   node snapping (shared nodes become junctions), closed loops, spline joining,
   whole-spline moves.
 - **Roads** — carriageway + battered curbs + pavements with crossfall,
-  superstructure sides/bottom, W-beam guardrails with posts, dashed centre /
-  edge / lane markings, dead-end caps.
-- **Junctions** — automatic N-way hubs (Coons-patch topology ported from
-  Roadnet V3) with corner fillets, corner pavement, curb drops and rails.
-  Near-straight 2-arm joins connect directly without a hub.
-- **Bridges** — per-spline toggle:
-  - *Beam*: deck + fascia girders, single / bent / wall piers with crossheads,
-    bearings and footings, abutments with wing walls.
-  - *Arch*: parabolic ribs following the alignment, spandrel columns, thrust
-    blocks (auto-falls back to beam when the span/height doesn't suit an arch).
+  superstructure sides/bottom, W-beam guardrails with embedded posts, dashed
+  centre / edge / lane markings, dead-end caps.
+- **Junctions** — automatic merged N-way junctions: each spline is split into
+  runs at shared nodes, runs trim back by the corner radius, and the junction
+  is generated *from the span end sections*, so every boundary curve is shared
+  exactly — no gaps, no black seams. Near-straight 2-arm joins connect
+  directly without a junction.
+- **Bridges** — per-spline toggle, fully procedural matrix:
+  - *Superstructure*: solid slab, I-girders (+ diaphragms) or box girder(s).
+  - *Piers*: single column, multi-column bent, wall, hammerhead, portal frame.
+  - *Foundations*: spread footings or elevated pile caps with round piles.
+  - *Abutments*: full-height cantilever, stub, or spill-through (+ wing walls).
+  - *Arch*: parabolic ribs following the alignment, spandrel columns, mass
+    thrust blocks (auto-falls back to beam when the span/height doesn't suit).
 - **Scene** — ground + water planes, grid, adjustable draw height.
 - **Project IO** — browser-local save (Ctrl+S), JSON export/import, and
   **Wavefront OBJ export** of every generated mesh.
 - **Theme** — graphite 3-pane studio (outliner / viewport / inspector) in the
   spirit of Slate's `Frontier/Experimental/FrontierEditor`.
 
-## Roadnet lineage (V2 vs V3 — which is latest?)
+## Topology notes
 
-`SultanAladin/Roadnet` contains:
-
-| Location | What it is |
-|---|---|
-| repo root (`src/`) | **V3 — the latest.** 842-line editor + 935-line geometry + `JunctionRenderer`. N-way junctions, sloped mouths, corner pavement. |
-| `RoadNetV2-main/`, `out_dir/`, `temp_dir/` | Identical copies of **V2** (776-line editor, no junction renderer). |
-
-This studio ports the **V3 road/junction topology** and fixes / extends it:
-
-1. **Topology presets never applied (V3 bug)** — the dropdown wrote lowercase
-   values (`"two lane road"`) while the width checks compared title case
-   (`'2 Lane Road'`), so *every* road built 10 m wide. Fixed with per-spline
-   presets that actually drive width + lanes.
-2. **Pavement/curbs inverting on curves (V3 bug)** — offsets were applied
-   blindly, so when `halfWidth + pavement` exceeded the local curve radius the
-   inner edge looped back on itself. Fixed with curvature-adaptive resampling
-   plus per-station offset clamping (parallel-curve inversion guard), battered
-   curb faces and pavement crossfall.
-3. **Span fold-back at junctions (V3 bug)** — spans pinned to mouth centres
-   even when the mouth radius exceeded the pair length, doubling the road back
-   over itself. Fixed with hub-aware trimming + conditional mouth pinning.
-4. **Missing pieces added** — guardrail posts on spans (V3 only had them on
-   junction corners), lane markings, dead-end caps, height-aware node clustering
-   (overpasses no longer merge with roads below), and the whole bridge
-   generator (beam + arch).
+Road cross-sections use curvature-adaptive resampling plus per-station offset
+clamping (parallel-curve inversion guard), so pavement/curbs never loop back
+on tight curves. Junction topology follows the TransitArchitect approach
+(GRIT `Plugins/TransitArchitect`): graph edges trimmed by node radius,
+junction approach frames sorted by angle, tangent-arc fillets between
+successive approaches, two Coons halves per corner — adapted here so span end
+sections are shared verbatim with the junction.
 
 ## Project layout
 
@@ -78,9 +74,9 @@ src/
   lib/
     vec.ts            vector math (world <-> road space, beziers, Coons)
     model.ts          project model, presets, demo scene, migration
-    roadGeometry.ts   curvature-safe spans + N-way junction hubs
-    bridgeGeometry.ts beam / arch spans, piers, abutments, parapets
-    network.ts        clustering -> junctions -> trimmed spans
+    roadGeometry.ts   curvature-safe spans + merged junctions
+    bridgeGeometry.ts procedural super/substructure, beam + arch spans
+    network.ts        clustering -> runs -> spans -> merged junctions
     exportObj.ts      Wavefront OBJ export
   components/
     Viewport.tsx      3D canvas, spline editing, HUD

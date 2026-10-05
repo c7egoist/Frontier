@@ -3,8 +3,9 @@ import { demoProject, migrateProject } from '../src/lib/model';
 import { buildNetwork } from '../src/lib/network';
 import { countTriangles } from '../src/lib/roadGeometry';
 import { networkToObj } from '../src/lib/exportObj';
-import { buildFrames } from '../src/lib/roadGeometry';
-import { Vec3 } from '../src/lib/vec';
+import { buildFrames, buildMergedJunction } from '../src/lib/roadGeometry';
+import type { JunctionLeg } from '../src/lib/roadGeometry';
+import { Vec3, left_normal } from '../src/lib/vec';
 
 const fail = (msg: string) => { console.error(`FAIL: ${msg}`); process.exitCode = 1; };
 const ok = (msg: string) => console.log(`ok: ${msg}`);
@@ -28,16 +29,26 @@ console.log(`  total tris: ${tris}`);
 
 if (net.junctions.length !== 1) fail(`expected 1 junction, got ${net.junctions.length}`);
 else ok('junction count (4-way only; landing is a straight join)');
-// fold-back regression: spans must never exceed their pair curves
-const causeway = net.spans.find((s) => project.splines.find((x) => x.id === s.splineId)?.name === 'Causeway');
-if (!causeway || causeway.length > 12) fail(`causeway span wrong: ${causeway?.length}`);
+// run semantics: splines split at shared nodes, trimmed at junctions
+const spansOf = (name: string) => net.spans.filter((s) => project.splines.find((x) => x.id === s.splineId)?.name === name);
+if (spansOf('Shore Road').length !== 2) fail(`shore runs: ${spansOf('Shore Road').length}`);
+else ok('shore split into 2 runs at junction');
+if (spansOf('North Avenue').length !== 2) fail(`north runs: ${spansOf('North Avenue').length}`);
+else ok('north split into 2 runs at junction');
+if (spansOf('Lake Bridge').length !== 1) fail(`bridge runs: ${spansOf('Lake Bridge').length}`);
+else ok('bridge is a single untrimmed run to the landing');
+const causeway = spansOf('Causeway')[0];
+// causeway node0->node1 is ~8.3m; runs must never exceed their curves (fold-back)
+if (!causeway || causeway.length > 9) fail(`causeway span wrong: ${causeway?.length}`);
 else ok('no fold-back at straight join');
-const northMax = Math.max(...net.spans.filter((s) => project.splines.find((x) => x.id === s.splineId)?.name === 'North Avenue').map((s) => s.length));
-if (northMax > 10.5) fail(`north span too long: ${northMax}`);
-else ok('junction-adjacent spans trimmed, not folded');
+for (const s of spansOf('North Avenue')) {
+  // 18m/20m legs trimmed by cornerRadius 7 -> ~11m/~13m
+  if (s.length < 8 || s.length > 14) fail(`north run length wrong: ${s.length}`);
+}
+if (process.exitCode !== 1) ok('junction-adjacent runs trimmed, not folded');
 if (!net.spans.some((s) => s.kind === 'beam')) fail('expected a beam span');
 else ok('beam span present');
-if (tris < 5000) fail(`suspiciously low tri count: ${tris}`);
+if (tris < 4000) fail(`suspiciously low tri count: ${tris}`);
 else ok('tri count sane');
 
 // NaN guard
@@ -77,7 +88,45 @@ const mig = migrateProject(JSON.parse(JSON.stringify(project)));
 if (mig.splines.length !== project.splines.length) fail('migration lost splines');
 else ok('migration round-trip');
 
-// 4. OBJ export sanity
+// 4. merged-junction exactness: every approach section point must appear
+// verbatim in the junction patches (shared boundaries, no seams)
+{
+  const ct = countTriangles;
+  const mkLeg = (dx: number, dy: number, tag: string): JunctionLeg => {
+    const R = 7;
+    const t: Vec3 = [dx, dy, 0];
+    const l = left_normal(t);
+    const P: Vec3 = [-dx * R, -dy * R, 0];
+    const at = (off: number, dz: number): Vec3 => [P[0] + l[0] * off, P[1] + l[1] * off, P[2] + dz];
+    return {
+      point: P, tangent: t, left: l,
+      roadL: at(3.5, 0), roadR: at(-3.5, 0),
+      curbL: at(3.75, 0.15), curbR: at(-3.75, 0.15),
+      paveL: at(5.75, 0.15), paveR: at(-5.75, 0.15),
+      botL: at(4.25, -1.5), botR: at(-4.25, -1.5),
+      angle: Math.atan2(dy, dx), splineId: tag, splineName: tag, color: '#fff',
+    };
+  };
+  const legs = [mkLeg(1, 0, 'e'), mkLeg(0, 1, 'n'), mkLeg(-1, 0, 'w'), mkLeg(0, -1, 's')];
+  const jp = buildMergedJunction(legs, {
+    center: [0, 0, 0], cornerRadius: 7, filletSteps: 10, depth: 1.5,
+    rails: { enabled: false, height: 0.8, thickness: 0.2, posts: false, postSpacing: 2 },
+  });
+  const hasPt = (q: Vec3) => jp.some((p) => p.grid.some((row) => row.some(
+    (v) => Math.abs(v[0] - q[0]) < 1e-9 && Math.abs(v[1] - q[1]) < 1e-9 && Math.abs(v[2] - q[2]) < 1e-9,
+  )));
+  let missing = 0;
+  for (const leg of legs) {
+    for (const k of ['point', 'roadL', 'roadR', 'curbL', 'curbR', 'paveL', 'paveR', 'botL', 'botR'] as const) {
+      if (!hasPt(leg[k])) { missing++; console.error(`  missing ${leg.splineId}.${k}`); }
+    }
+  }
+  if (missing > 0) fail(`merged junction missing ${missing} shared boundary points`);
+  else ok('merged junction shares all approach sections exactly');
+  console.log(`  junction patches: ${jp.length}, tris: ${ct(jp)}`);
+}
+
+// 5. OBJ export sanity
 const obj = networkToObj(net, 'test');
 const vCount = (obj.match(/^v /gm) || []).length;
 const fCount = (obj.match(/^f /gm) || []).length;
