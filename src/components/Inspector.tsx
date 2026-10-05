@@ -258,6 +258,15 @@ export function Inspector(props: InspectorProps) {
                           accent={spline.color}
                           onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, pierSize: v } }))} />
                         <Segmented
+                          label="Column shape"
+                          value={spline.bridge.columnShape}
+                          onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, columnShape: v } }))}
+                          options={[
+                            { value: 'square', label: 'Square' },
+                            { value: 'round', label: 'Round' },
+                          ]}
+                        />
+                        <Segmented
                           label="Foundation"
                           value={spline.bridge.foundation}
                           onChange={(v) => props.updateSpline(spline.id, (s) => ({ ...s, bridge: { ...s.bridge, foundation: v } }))}

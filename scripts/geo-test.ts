@@ -7,6 +7,7 @@ import { buildFrames, buildMergedJunction } from '../src/lib/roadGeometry';
 import type { JunctionLeg } from '../src/lib/roadGeometry';
 import { Vec3, left_normal } from '../src/lib/vec';
 import { alongAxisUnderRay, touchPlaneUnderRay, snapStep } from '../src/lib/gizmoMath';
+import { columnDiameter, capBeamDepth } from '../src/lib/bridgeGeometry';
 
 const fail = (msg: string) => { console.error(`FAIL: ${msg}`); process.exitCode = 1; };
 const ok = (msg: string) => console.log(`ok: ${msg}`);
@@ -151,6 +152,53 @@ else ok('obj export');
   else ok('parallel ray miss');
   if (snapStep(0.4, 0.25) !== 0.5 || snapStep(0.1, 0.25) !== 0 || snapStep(-0.4, 0.25) !== -0.5) fail('snap steps');
   else ok('snap steps');
+}
+
+// 7. height-adaptive piers
+{
+  if (columnDiameter(0.7, 3) !== 0.7) fail('short column keeps min diameter');
+  else if (columnDiameter(0.7, 12) !== 1) fail('tall column thickens');
+  else if (capBeamDepth(10) !== 1 || capBeamDepth(4) !== 0.7 || capBeamDepth(20) !== 1.4) fail('cap depth');
+  else ok('column/cap adaptation rules');
+  const b = net.spans.find((s) => project.splines.find((x) => x.id === s.splineId)?.name === 'Lake Bridge')!;
+  const names = b.patches.map((p) => p.name);
+  if (!names.includes('Capital') || !names.includes('Plinth')) fail('missing capitals/plinths');
+  else ok('pier capitals + plinths present');
+  if (!names.some((n) => n.startsWith('Crosshead mid'))) fail('missing chamfered cap beam');
+  else ok('chamfered cap beam present');
+}
+
+// 8. landing rail link: road W-beam ends at the bridge parapet faces
+{
+  const b = net.spans.find((s) => project.splines.find((x) => x.id === s.splineId)?.name === 'Lake Bridge')!;
+  const c = net.spans.find((s) => project.splines.find((x) => x.id === s.splineId)?.name === 'Causeway')!;
+  const caps = b.patches.filter((p) => /Parapet [LR] cap/.test(p.name));
+  const centers = caps.map((p) => {
+    const pts = p.grid.flat();
+    const m: Vec3 = [0, 0, 0];
+    for (const q of pts) { m[0] += q[0]; m[1] += q[1]; m[2] += q[2]; }
+    return [m[0] / pts.length, m[1] / pts.length, m[2] / pts.length] as Vec3;
+  });
+  const strips = c.patches.filter((p) => p.name === 'Rail strip 3');
+  if (strips.length !== 2) fail(`causeway rail strips: ${strips.length}`);
+  else {
+    let worst = 0;
+    for (const st of strips) {
+      const end = st.grid[1][0]; // panel bottom corner at the joint end
+      const dMin = Math.min(...centers.map((cc) => Math.hypot(end[0] - cc[0], end[1] - cc[1], end[2] - cc[2])));
+      worst = Math.max(worst, dMin);
+    }
+    if (worst > 0.5) fail(`rail link gap: ${worst.toFixed(2)}`);
+    else ok(`road rails meet parapet faces (gap ${worst.toFixed(2)}m)`);
+  }
+  const outer = b.patches.find((p) => p.name === 'Parapet L outer')!;
+  const bot = outer.grid[0];
+  const top = outer.grid[1];
+  const mid = Math.floor(top.length / 2);
+  const last = top.length - 1;
+  const drop = (top[mid][2] - bot[mid][2]) - (top[last][2] - bot[last][2]);
+  if (!(drop > 0.1)) fail(`parapet ramp drop: ${drop}`);
+  else ok(`parapet ramps down at landing (${drop.toFixed(2)}m)`);
 }
 
 console.log(process.exitCode === 1 ? 'GEO TEST: FAILED' : 'GEO TEST: PASSED');

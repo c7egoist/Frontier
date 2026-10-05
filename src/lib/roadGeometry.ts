@@ -297,6 +297,17 @@ export function computeCrossLines(frames: StationFrame[], cross: CrossSection, o
 // Guard rails (W-beam + posts). `base` sits on the pavement/deck edge.
 // ---------------------------------------------------------------------------
 
+/** Bend a rail end onto an exact 3D target over a distance (landing links). */
+export interface RailRedirect {
+  target: Vec3;
+  length: number;
+}
+
+export interface GuardRailEnds {
+  redirectStart?: RailRedirect;
+  redirectEnd?: RailRedirect;
+}
+
 export function buildGuardRail(
   base: Vec3[],
   normals: Vec3[],
@@ -305,6 +316,7 @@ export function buildGuardRail(
   postDrop = 0,
   /** Shift the rail line inward (onto the pavement) so posts embed in structure. */
   baseInset = 0,
+  ends?: GuardRailEnds,
 ): PatchSpec[] {
   if (!rails.enabled || rails.height <= 0 || rails.thickness <= 0) return [];
   const out: PatchSpec[] = [];
@@ -314,6 +326,33 @@ export function buildGuardRail(
       // inward == opposite of the rail offset direction
       const s = pointRight ? 1 : -1;
       return [p[0] + n[0] * s * baseInset, p[1] + n[1] * s * baseInset, p[2]] as Vec3;
+    });
+  }
+  if ((ends?.redirectStart || ends?.redirectEnd) && base.length > 1) {
+    // arc positions along the base line
+    const dists: number[] = [0];
+    for (let i = 1; i < base.length; i++) {
+      dists.push(dists[i - 1] + Math.hypot(
+        base[i][0] - base[i - 1][0], base[i][1] - base[i - 1][1], base[i][2] - base[i - 1][2],
+      ));
+    }
+    const total = dists[dists.length - 1];
+    const smooth = (t: number) => {
+      const c = clamp(t, 0, 1);
+      return c * c * (3 - 2 * c);
+    };
+    base = base.map((p, i) => {
+      let w = 0;
+      let tgt: Vec3 | null = null;
+      if (ends.redirectStart && ends.redirectStart.length > 0) {
+        const wS = smooth(1 - dists[i] / ends.redirectStart.length);
+        if (wS > w) { w = wS; tgt = ends.redirectStart.target; }
+      }
+      if (ends.redirectEnd && ends.redirectEnd.length > 0) {
+        const wE = smooth(1 - (total - dists[i]) / ends.redirectEnd.length);
+        if (wE > w) { w = wE; tgt = ends.redirectEnd.target; }
+      }
+      return tgt ? lerp(p, tgt, w) : p;
     });
   }
   const hTop = rails.height * 0.8;
@@ -498,9 +537,18 @@ export function buildEndCap(lines: CrossLines, atStart: boolean): PatchSpec[] {
 // Road span builder.
 // ---------------------------------------------------------------------------
 
+export interface SpanRailLinks {
+  startL?: RailRedirect;
+  startR?: RailRedirect;
+  endL?: RailRedirect;
+  endR?: RailRedirect;
+}
+
 export interface SpanOptions extends SectionOptions {
   capStart: boolean;
   capEnd: boolean;
+  /** Landing links: bend rail ends onto the adjoining bridge geometry. */
+  railLinks?: SpanRailLinks;
 }
 
 export function buildRoadSpan(
@@ -522,8 +570,14 @@ export function buildRoadSpan(
   out.push(patch('Right side', [lines.botR, lines.paveR], COL.side));
   out.push(patch('Bottom', [lines.botR, lines.botL], COL.bottom));
 
-  out.push(...buildGuardRail(lines.paveL, normals, false, rails, 0.6, 0.3));
-  out.push(...buildGuardRail(lines.paveR, normals, true, rails, 0.6, 0.3));
+  out.push(...buildGuardRail(lines.paveL, normals, false, rails, 0.6, 0.3, {
+    redirectStart: opt.railLinks?.startL,
+    redirectEnd: opt.railLinks?.endL,
+  }));
+  out.push(...buildGuardRail(lines.paveR, normals, true, rails, 0.6, 0.3, {
+    redirectStart: opt.railLinks?.startR,
+    redirectEnd: opt.railLinks?.endR,
+  }));
   out.push(...buildMarkings(lines, cross));
 
   if (opt.capStart) out.push(...buildEndCap(lines, true));

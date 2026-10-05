@@ -38,6 +38,7 @@ export interface CrossSection {
 export type BridgeType = 'beam' | 'arch';
 export type Superstructure = 'slab' | 'igirder' | 'box';
 export type PierStyle = 'single' | 'bent' | 'wall' | 'hammerhead' | 'portal';
+export type ColumnShape = 'square' | 'round';
 export type Foundation = 'spread' | 'piles';
 export type Abutment = 'cantilever' | 'stub' | 'spill';
 export type ParapetStyle = 'rail' | 'parapet';
@@ -55,7 +56,9 @@ export interface BridgeSettings {
   diaphragms: boolean;
   pierSpacing: number;
   pierStyle: PierStyle;
-  /** Pier column diameter / wall thickness. */
+  /** Square or round pier columns. */
+  columnShape: ColumnShape;
+  /** Pier column diameter / wall thickness (minimum — grows with height). */
   pierSize: number;
   foundation: Foundation;
   abutment: Abutment;
@@ -169,6 +172,7 @@ export function defaultBridge(): BridgeSettings {
     diaphragms: true,
     pierSpacing: 12,
     pierStyle: 'bent',
+    columnShape: 'round',
     pierSize: 0.7,
     foundation: 'spread',
     abutment: 'cantilever',

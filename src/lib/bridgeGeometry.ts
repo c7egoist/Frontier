@@ -131,6 +131,50 @@ function cylinderTube(
   return [patch(name, [ring(z0), ring(z1)], color)];
 }
 
+/** Tapered round tube (column capitals, plinths) — open ends, both hidden. */
+function taperedTube(
+  x: number, y: number, z0: number, z1: number, rBot: number, rTop: number,
+  sides: number, color: string, name: string,
+): PatchSpec[] {
+  const ring = (z: number, r: number): Vec3[] => {
+    const out: Vec3[] = [];
+    for (let i = 0; i <= sides; i++) {
+      const a = (i / sides) * Math.PI * 2;
+      out.push([x + Math.cos(a) * r, y + Math.sin(a) * r, z]);
+    }
+    return out;
+  };
+  return [patch(name, [ring(z0, rBot), ring(z1, rTop)], color)];
+}
+
+/** General 8-corner solid (bottom ring + top ring, each CCW from above). */
+function hexahedron(bot: Vec3[], top: Vec3[], color: string, name: string): PatchSpec[] {
+  if (bot.length !== 4 || top.length !== 4) return [];
+  const [b0, b1, b2, b3] = bot;
+  const [t0, t1, t2, t3] = top;
+  return [
+    patch(`${name} top`, [[t0, t1], [t3, t2]], color),
+    patch(`${name} bottom`, [[b0, b1], [b3, b2]], color),
+    patch(`${name} s0`, [[b0, b1], [t0, t1]], color),
+    patch(`${name} s1`, [[b1, b2], [t1, t2]], color),
+    patch(`${name} s2`, [[b2, b3], [t2, t3]], color),
+    patch(`${name} s3`, [[b3, b0], [t3, t0]], color),
+  ];
+}
+
+/**
+ * Height-adaptive column diameter: slender columns thicken automatically so
+ * tall piers never read as sticks (slenderness capped at ~12:1).
+ */
+export function columnDiameter(minDia: number, colH: number): number {
+  return Math.max(minDia, colH / 12);
+}
+
+/** Cap-beam depth scales with the deck it carries. */
+export function capBeamDepth(deckW: number): number {
+  return clamp(deckW / 10, 0.7, 1.4);
+}
+
 function yawFromFrame(f: StationFrame): number {
   return (Math.atan2(f.normal[1], f.normal[0]) * 180) / Math.PI;
 }
@@ -203,31 +247,64 @@ function buildDeckTop(lines: CrossLines, cross: CrossSection): PatchSpec[] {
   ];
 }
 
-function buildParapets(lines: CrossLines, height: number): PatchSpec[] {
+export interface ParapetRamps {
+  /** Parapet height at the start/end (ramps down = approach bullnose). */
+  startH?: number;
+  endH?: number;
+  /** Ramp length in metres. */
+  rampLen?: number;
+}
+
+/** Parapet sweep with per-station height (landing ends ramp down to the rails). */
+function buildParapets(lines: CrossLines, height: number, ramps?: ParapetRamps): PatchSpec[] {
   const out: PatchSpec[] = [];
   const H = Math.max(0.6, height);
-  const profL: ProfilePt[] = [
-    { off: -0.03, dz: 0 }, { off: 0.24, dz: 0 }, { off: 0.24, dz: H }, { off: -0.03, dz: H },
-  ];
-  const profR: ProfilePt[] = [
-    { off: 0.03, dz: 0 }, { off: -0.24, dz: 0 }, { off: -0.24, dz: H }, { off: 0.03, dz: H },
-  ];
+  const rampLen = Math.max(0.5, ramps?.rampLen ?? 2);
+  const total = lines.frames[lines.frames.length - 1].s;
+  const smooth = (t: number) => {
+    const c = clamp(t, 0, 1);
+    return c * c * (3 - 2 * c);
+  };
+  const heights = lines.frames.map((f) => {
+    let h = H;
+    if (ramps?.startH !== undefined && f.s < rampLen) {
+      h = ramps.startH + (H - ramps.startH) * smooth(f.s / rampLen);
+    }
+    if (ramps?.endH !== undefined && f.s > total - rampLen) {
+      h = Math.min(h, ramps.endH + (H - ramps.endH) * smooth((total - f.s) / rampLen));
+    }
+    return h;
+  });
   const normals = lines.frames.map((f) => f.normal);
-  out.push(...sweepProfile(lines.paveL, normals, profL, true, COL.parapet, 'Parapet L'));
-  out.push(...sweepProfile(lines.paveR, normals, profR, true, COL.parapet, 'Parapet R'));
-  const ends = [0, lines.frames.length - 1];
-  for (const ei of ends) {
-    const mk = (base: Vec3, prof: ProfilePt[]): Vec3[] =>
-      prof.map((pt) => {
-        const p = v_add(base, v_scale(normals[ei], pt.off));
-        return [p[0], p[1], p[2] + pt.dz] as Vec3;
+
+  const side = (base: Vec3[], sgn: 1 | -1, name: string) => {
+    const at = (off: number, top: boolean): Vec3[] =>
+      base.map((p, i) => {
+        const q = v_add(p, v_scale(normals[i], sgn * off));
+        return [q[0], q[1], q[2] + (top ? heights[i] : 0)] as Vec3;
       });
-    const cL = capLoop(mk(lines.paveL[ei], profL), COL.parapet, `Parapet L cap ${ei}`);
-    const cR = capLoop(mk(lines.paveR[ei], profR), COL.parapet, `Parapet R cap ${ei}`);
-    if (cL) out.push(cL);
-    if (cR) out.push(cR);
-  }
+    const ib = at(-0.03, false);
+    const ob = at(0.24, false);
+    const ot = at(0.24, true);
+    const it = at(-0.03, true);
+    out.push(patch(`${name} outer`, [ob, ot], COL.parapet));
+    out.push(patch(`${name} top`, [ot, it], COL.parapet));
+    out.push(patch(`${name} inner`, [it, ib], COL.parapet));
+    out.push(patch(`${name} base`, [ib, ob], COL.parapet));
+    for (const ei of [0, base.length - 1]) {
+      const cap = capLoop([ib[ei], ob[ei], ot[ei], it[ei]], COL.parapet, `${name} cap ${ei}`);
+      if (cap) out.push(cap);
+    }
+  };
+  side(lines.paveL, 1, 'Parapet L');
+  side(lines.paveR, -1, 'Parapet R');
   return out;
+}
+
+/** Parapet ramp options from span landing flags (undefined = no ramps). */
+function rampOptsFor(opt: { rampStartH?: number; rampEndH?: number }): ParapetRamps | undefined {
+  if (opt.rampStartH === undefined && opt.rampEndH === undefined) return undefined;
+  return { startH: opt.rampStartH, endH: opt.rampEndH, rampLen: 2 };
 }
 
 /** Deck end plate at a free head (abutment face). */
@@ -363,15 +440,16 @@ function buildBearings(
 /** Spread footing or elevated pile cap + round piles. Returns top-of-foundation Z. */
 function buildFoundation(
   f: StationFrame, deckW: number, groundZ: number, bridge: BridgeSettings,
-  columnXs: number[],
+  columnXs: number[], dia: number,
 ): { patches: PatchSpec[]; capTopZ: number } {
   const out: PatchSpec[] = [];
   const yaw = yawFromFrame(f);
   if (bridge.foundation === 'piles') {
     const capTopZ = groundZ + 1.8;
     const capT = 0.9;
-    const capW = Math.max(2.2, deckW * 0.8);
+    const capW = Math.max(2.2, deckW * 0.8, dia * 3);
     out.push(...boxPatches([f.center[0], f.center[1], capTopZ - capT / 2], capW, 2.0, capT, yaw, COL.concreteDark, 'Pile cap'));
+    const pileR = Math.max(0.25, dia * 0.38);
     const nCols = clamp(Math.round(capW / 2.2), 2, 6);
     for (const rowOff of [-0.55, 0.55]) {
       for (let k = 0; k < nCols; k++) {
@@ -379,21 +457,56 @@ function buildFoundation(
         const lat = t * (capW / 2 - 0.6);
         const ox = f.center[0] + f.normal[0] * lat + f.tangent[0] * rowOff;
         const oy = f.center[1] + f.normal[1] * lat + f.tangent[1] * rowOff;
-        out.push(...cylinderTube(ox, oy, groundZ - 4, capTopZ - capT + 0.3, 0.28, 10, COL.concrete, 'Pile'));
+        out.push(...cylinderTube(ox, oy, groundZ - 4, capTopZ - capT + 0.3, pileR, 12, COL.concrete, 'Pile'));
       }
     }
     void columnXs;
     return { patches: out, capTopZ };
   }
-  // spread footing sized to the column layout
+  // spread footing sized to the column layout + diameter
   const spread = columnXs.length > 1
     ? Math.max(...columnXs) - Math.min(...columnXs)
     : 0;
-  const fw = Math.max(2.4, spread + 1.6, deckW * (bridge.pierStyle === 'wall' ? 0.7 : 0.4));
-  const fd = bridge.pierStyle === 'wall' ? Math.max(1.8, bridge.pierSize + 1.3) : 2.1;
+  const fw = Math.max(2.4, spread + 1.6, deckW * (bridge.pierStyle === 'wall' ? 0.7 : 0.4), dia * 3.2);
+  const fd = bridge.pierStyle === 'wall' ? Math.max(1.8, dia + 1.3) : Math.max(2.1, dia * 2.6);
+  const fh = clamp(dia * 1.3, 0.9, 1.5);
   const capTopZ = groundZ + 0.5;
-  out.push(...boxPatches([f.center[0], f.center[1], capTopZ - 0.55], fw, fd, 1.1, yaw, COL.concreteDark, 'Footing'));
+  out.push(...boxPatches([f.center[0], f.center[1], capTopZ - fh / 2], fw, fd, fh, yaw, COL.concreteDark, 'Footing'));
   return { patches: out, capTopZ };
+}
+
+/** Cap beam with chamfered ends (full-depth middle + tapered tips). */
+function buildCapBeam(
+  f: StationFrame, capW: number, capD: number, capH: number, topZ: number,
+  yawDeg: number, name: string,
+): PatchSpec[] {
+  const out: PatchSpec[] = [];
+  const L = Math.min(1.4, capW * 0.18);
+  const midW = Math.max(0.5, capW - 2 * L);
+  out.push(...boxPatches(
+    [f.center[0], f.center[1], topZ - capH / 2], midW, capD, capH, yawDeg, COL.concrete, `${name} mid`,
+  ));
+  const r = (yawDeg * Math.PI) / 180;
+  const c = Math.cos(r);
+  const s = Math.sin(r);
+  const loc = (lx: number, ly: number, z: number): Vec3 => [
+    f.center[0] + lx * c - ly * s,
+    f.center[1] + lx * s + ly * c,
+    z,
+  ];
+  for (const side of [1, -1]) {
+    const x0 = side * (midW / 2); // root (inside the middle box)
+    const x1 = side * (capW / 2); // tip
+    const dTip = capD * 0.85;
+    const zRoot = topZ - capH;
+    const zTip = topZ - capH * 0.5;
+    const bot: Vec3[] = side > 0
+      ? [loc(x0, -capD / 2, zRoot), loc(x1, -dTip / 2, zTip), loc(x1, dTip / 2, zTip), loc(x0, capD / 2, zRoot)]
+      : [loc(x1, -dTip / 2, zTip), loc(x0, -capD / 2, zRoot), loc(x0, capD / 2, zRoot), loc(x1, dTip / 2, zTip)];
+    const top: Vec3[] = bot.map((p) => [p[0], p[1], topZ] as Vec3);
+    out.push(...hexahedron(bot, top, COL.concrete, `${name} tip ${side > 0 ? '+' : '-'}`));
+  }
+  return out;
 }
 
 function buildPier(
@@ -406,16 +519,18 @@ function buildPier(
 ): PatchSpec[] {
   const out: PatchSpec[] = [];
   const yaw = yawFromFrame(f);
+  const style = bridge.pierStyle;
   const size = Math.max(0.3, bridge.pierSize);
+  const round = bridge.columnShape === 'round';
   const bearingTopZ = girderBottomZ;
   const capBeamTopZ = bearingTopZ - 0.18; // under the bearings
 
   // column layout per style
   let columnXs: number[] = [0];
-  let isWall = false;
-  let isPortal = false;
-  let isHammer = false;
-  if (bridge.pierStyle === 'bent') {
+  const isWall = style === 'wall';
+  const isPortal = style === 'portal';
+  const isHammer = style === 'hammerhead';
+  if (style === 'bent') {
     const n = clamp(Math.round(deckW / 3.5), 2, 5);
     const spread = Math.max(0.5, deckW / 2 - 0.7);
     columnXs = [];
@@ -423,55 +538,127 @@ function buildPier(
       const t = n === 1 ? 0 : (k / (n - 1)) * 2 - 1;
       columnXs.push(t * spread);
     }
-  } else if (bridge.pierStyle === 'wall') {
-    isWall = true;
-  } else if (bridge.pierStyle === 'portal') {
-    isPortal = true;
+  } else if (isPortal) {
     const spread = Math.max(0.8, deckW / 2 - 0.5);
     columnXs = [-spread, spread];
-  } else if (bridge.pierStyle === 'hammerhead') {
-    isHammer = true;
   }
 
-  // foundation first (sets the column base)
-  let fnd = buildFoundation(f, deckW, groundZ, { ...bridge, foundation: 'spread' }, columnXs);
-  if (bridge.foundation === 'piles' && capBeamTopZ - 0.8 - (groundZ + 1.8) > 1.2) {
-    fnd = buildFoundation(f, deckW, groundZ, bridge, columnXs);
-  }
+  // cap beam size (depth adapts to the deck it carries)
+  const capW = style === 'single' ? size * 2.4 : deckW + (isPortal ? 0.6 : 1.0);
+  const capD = isWall ? size + 0.5 : 0.9;
+  const capH = Math.max(capBeamDepth(deckW), isPortal ? 1.0 : 0.7);
+  const capBeamBotZ = capBeamTopZ - capH;
+
+  // foundation (piles need room) + height-adaptive column diameter
+  const usePiles = bridge.foundation === 'piles' && capBeamBotZ - (groundZ + 1.8) > 1.2;
+  const baseGuess = usePiles ? groundZ + 1.8 : groundZ + 0.5;
+  const colHGuess = Math.max(0.5, capBeamBotZ - baseGuess);
+  const dia = isWall ? size : columnDiameter(isPortal ? size * 1.15 : size, colHGuess);
+  const fnd = buildFoundation(
+    f, deckW, groundZ, usePiles ? bridge : { ...bridge, foundation: 'spread' }, columnXs, dia,
+  );
   out.push(...fnd.patches);
   const baseZ = fnd.capTopZ;
 
-  // cap beam / crosshead
-  const capW = bridge.pierStyle === 'single' ? size * 2.4 : deckW + (isPortal ? 0.6 : 1.0);
-  const capD = isWall ? size + 0.5 : 0.9;
-  const capH = isPortal ? 1.0 : 0.8;
-  const capBeamBotZ = capBeamTopZ - capH;
-  const chC: Vec3 = [f.center[0], f.center[1], capBeamTopZ - capH / 2];
-  out.push(...boxPatches(chC, capW, capD, capH, yaw, COL.concrete, isPortal ? 'Portal beam' : 'Crosshead'));
+  // cap beam (chamfered ends on the wide styles)
+  if (style === 'bent' || isWall || isHammer) {
+    out.push(...buildCapBeam(f, capW, capD, capH, capBeamTopZ, yaw, 'Crosshead'));
+  } else {
+    out.push(...boxPatches(
+      [f.center[0], f.center[1], capBeamTopZ - capH / 2], capW, capD, capH,
+      yaw, COL.concrete, isPortal ? 'Portal beam' : 'Crosshead',
+    ));
+  }
   out.push(...buildBearings(f, bearingXs.map((x) => ({ x })), bearingTopZ));
 
-  // columns / wall between cap beam and foundation
+  // shaft zone: plinth + shaft + capital per column
   const colH = capBeamBotZ - baseZ;
-  if (colH < 0.8) return out; // too shallow — foundation zone
-  const colMidZ = (capBeamBotZ + baseZ) / 2;
+  if (colH < 0.8) {
+    // too shallow for columns — solid stub pier(s), no voids
+    if (colH > 0.1) {
+      const midZ = (capBeamBotZ + baseZ) / 2;
+      if (isWall) {
+        const wallLen = Math.max(1.4, deckW * 0.72);
+        out.push(...boxPatches([f.center[0], f.center[1], midZ], wallLen * 0.9, capD * 0.9, colH, yaw, COL.concrete, 'Stub pier'));
+      } else if (isPortal) {
+        for (const cx of columnXs) {
+          const cp = v_add(f.center, v_scale(f.normal, cx));
+          out.push(...boxPatches([cp[0], cp[1], midZ], dia * 1.5, dia * 1.5, colH, yaw, COL.concrete, 'Stub pier'));
+        }
+      } else if (style === 'bent') {
+        const spread = columnXs.length > 1 ? Math.max(...columnXs) - Math.min(...columnXs) : 0;
+        out.push(...boxPatches([f.center[0], f.center[1], midZ], spread + dia, capD * 0.9, colH, yaw, COL.concrete, 'Stub pier'));
+      } else {
+        out.push(...boxPatches([f.center[0], f.center[1], midZ], dia * 1.7, dia * 1.7, colH, yaw, COL.concrete, 'Stub pier'));
+      }
+    }
+    return out;
+  }
   if (isWall) {
     const wallLen = Math.max(1.4, deckW * 0.72);
+    const colMidZ = (capBeamBotZ + baseZ) / 2;
     out.push(...taperedBox(
       [f.center[0], f.center[1], colMidZ],
-      wallLen, size + 0.45, wallLen * 0.94, size + 0.25, colH, yaw, COL.concrete, 'Wall pier',
+      wallLen, dia + 0.45, wallLen * 0.94, dia + 0.25, colH, yaw, COL.concrete, 'Wall pier',
     ));
-  } else if (isHammer) {
-    out.push(...taperedBox(
-      [f.center[0], f.center[1], colMidZ],
-      size, size, size * 1.7, size * 1.7, colH, yaw, COL.concrete, 'Hammerhead column',
-    ));
-  } else {
-    for (const cx of columnXs) {
-      const cp = v_add(f.center, v_scale(f.normal, cx));
-      const w = isPortal ? size * 1.15 : size;
-      out.push(...boxPatches([cp[0], cp[1], colMidZ], w, w, colH, yaw, COL.concrete, 'Pier column'));
-    }
+    return out;
   }
+
+  const plinthH = clamp(colH * 0.2, 0.2, 0.5);
+  const shaftAt = (cx: number, flareTop: number) => {
+    const cp = v_add(f.center, v_scale(f.normal, cx));
+    const x = cp[0]; const y = cp[1];
+    let z0 = baseZ;
+    if (colH > 0.9) {
+      // pedestal plinth on the footing (height adapts to the column)
+      if (round) out.push(...taperedTube(x, y, z0, z0 + plinthH, dia * 0.75, dia * 0.58, 14, COL.concrete, 'Plinth'));
+      else {
+        out.push(...taperedBox(
+          [x, y, z0 + plinthH / 2], dia * 1.5, dia * 1.5, dia * 1.15, dia * 1.15, plinthH, yaw, COL.concrete, 'Plinth',
+        ));
+      }
+      z0 += plinthH;
+    }
+    const capH2 = Math.min(0.8, colH * 0.25);
+    const zCap = capBeamBotZ - capH2;
+    if (zCap > z0 + 0.15) {
+      // shaft
+      if (round) out.push(...cylinderTube(x, y, z0, zCap, dia / 2, 14, COL.concrete, 'Pier column'));
+      else out.push(...boxPatches([x, y, (z0 + zCap) / 2], dia, dia, zCap - z0, yaw, COL.concrete, 'Pier column'));
+    }
+    // flared capital into the cap beam
+    if (round) out.push(...taperedTube(x, y, zCap, capBeamBotZ, dia / 2, (dia * flareTop) / 2, 14, COL.concrete, 'Capital'));
+    else {
+      out.push(...taperedBox(
+        [x, y, (zCap + capBeamBotZ) / 2], dia, dia, dia * flareTop, dia * flareTop, capH2, yaw, COL.concrete, 'Capital',
+      ));
+    }
+  };
+
+  if (isHammer) {
+    // full-height tapered column (the taper is the flare) + plinth
+    const cp = v_add(f.center, v_scale(f.normal, 0));
+    let z0 = baseZ;
+    if (colH > 0.9) {
+      if (round) out.push(...taperedTube(cp[0], cp[1], z0, z0 + plinthH, dia * 0.75, dia * 0.58, 14, COL.concrete, 'Plinth'));
+      else {
+        out.push(...taperedBox(
+          [cp[0], cp[1], z0 + plinthH / 2], dia * 1.5, dia * 1.5, dia * 1.15, dia * 1.15, plinthH, yaw, COL.concrete, 'Plinth',
+        ));
+      }
+      z0 += plinthH;
+    }
+    if (round) out.push(...taperedTube(cp[0], cp[1], z0, capBeamBotZ, dia * 0.55, dia * 0.85, 14, COL.concrete, 'Hammerhead column'));
+    else {
+      out.push(...taperedBox(
+        [cp[0], cp[1], (z0 + capBeamBotZ) / 2], dia, dia, dia * 1.7, dia * 1.7,
+        capBeamBotZ - z0, yaw, COL.concrete, 'Hammerhead column',
+      ));
+    }
+    return out;
+  }
+
+  for (const cx of columnXs) shaftAt(cx, isPortal ? 1.35 : 1.6);
   return out;
 }
 
@@ -560,6 +747,9 @@ export interface BridgeSpanOptions extends SubstructureOptions {
   landingEnd?: boolean;
   /** Closed ring run — no heads at all. */
   loop?: boolean;
+  /** Parapet end heights at landings (ramps down to the adjoining rails). */
+  rampStartH?: number;
+  rampEndH?: number;
 }
 
 /**
@@ -643,7 +833,7 @@ export function buildBeamSpan(
   }
 
   if (bridge.parapet === 'parapet') {
-    out.push(...buildParapets(lines, bridge.parapetHeight));
+    out.push(...buildParapets(lines, bridge.parapetHeight, rampOptsFor(opt)));
   } else {
     out.push(...buildGuardRail(lines.paveL, normals, false, rails, 0.3, 0.25));
     out.push(...buildGuardRail(lines.paveR, normals, true, rails, 0.3, 0.25));
@@ -793,7 +983,7 @@ export function buildArchSpan(
   }
 
   if (bridge.parapet === 'parapet') {
-    out.push(...buildParapets(lines, bridge.parapetHeight));
+    out.push(...buildParapets(lines, bridge.parapetHeight, rampOptsFor(opt)));
   } else {
     out.push(...buildGuardRail(lines.paveL, normals, false, rails, 0.3, 0.25));
     out.push(...buildGuardRail(lines.paveR, normals, true, rails, 0.3, 0.25));

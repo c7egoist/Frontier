@@ -15,7 +15,7 @@ import {
 } from './vec';
 import {
   PatchSpec, CrossLines, buildFrames, buildRoadSpan, computeCrossLines,
-  buildMergedJunction, JunctionLeg, StationFrame,
+  buildMergedJunction, JunctionLeg, StationFrame, SpanRailLinks, RailRedirect,
 } from './roadGeometry';
 import { buildBeamSpan, buildArchSpan } from './bridgeGeometry';
 import type { Project, Spline, Point3D, RailSettings } from './model';
@@ -173,6 +173,15 @@ interface ViableRun extends Run {
   road: Vec3[];
   frames: StationFrame[];
   lines: CrossLines;
+  capStart: boolean;
+  capEnd: boolean;
+  landingStart: boolean;
+  landingEnd: boolean;
+  /** road-run rail ends bent onto the adjoining bridge (set by link pass) */
+  railLinks?: SpanRailLinks;
+  /** bridge parapet end heights at landings (ramps down to the rails) */
+  rampStartH?: number;
+  rampEndH?: number;
 }
 
 export function buildNetwork(project: Project): BuiltNetwork {
@@ -317,7 +326,10 @@ export function buildNetwork(project: Project): BuiltNetwork {
       depth: project.junctions.depth,
       inset: project.junctions.inset,
     });
-    viable.push({ ...run, road, frames, lines });
+    viable.push({
+      ...run, road, frames, lines,
+      capStart: false, capEnd: false, landingStart: false, landingEnd: false,
+    });
   }
 
   // legs from viable runs only; junctions with <2 legs are dropped and
@@ -369,14 +381,73 @@ export function buildNetwork(project: Project): BuiltNetwork {
     legsByJunction.delete(g);
   }
 
+  // --- landing links: bridge-run ends <-> adjoining road-run ends ---
+  // Rails flow across the joint as one geometry: road W-beams bend onto the
+  // bridge parapet faces (or rail ends) and parapets ramp down to meet them.
+  for (const run of viable) {
+    const s = run.spline;
+    run.capStart = !run.trimStart && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.fromNode)) ?? 1) === 1;
+    run.capEnd = !run.trimEnd && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.toNode)) ?? 1) === 1;
+    run.landingStart = !run.trimStart && !run.closedLoop && !run.capStart;
+    run.landingEnd = !run.trimEnd && !run.closedLoop && !run.capEnd;
+  }
+  for (const brun of viable) {
+    if (!brun.spline.bridge.enabled || brun.closedLoop) continue;
+    for (const atStart of [true, false]) {
+      if (!(atStart ? brun.landingStart : brun.landingEnd)) continue;
+      const g = groupOf.get(nodeKey(brun.spline.id, atStart ? brun.fromNode : brun.toNode));
+      if (!g) continue;
+      const mate = viable.find((r) =>
+        r !== brun && !r.spline.bridge.enabled &&
+        ((groupOf.get(nodeKey(r.spline.id, r.fromNode)) === g && !r.trimStart) ||
+          (groupOf.get(nodeKey(r.spline.id, r.toNode)) === g && !r.trimEnd)));
+      const bi = atStart ? 0 : brun.lines.paveL.length - 1;
+      const bf = atStart ? brun.frames[0] : brun.frames[brun.frames.length - 1];
+      const n = bf.normal;
+      const deckL = brun.lines.paveL[bi];
+      const deckR = brun.lines.paveR[bi];
+      const useParapet = brun.spline.bridge.parapet === 'parapet';
+      // parapet ramps down to the road rail panel top (or a bullnose stub)
+      if (useParapet) {
+        const roadH = mate && mate.spline.rails.enabled ? mate.spline.rails.height * 0.8 : 0.45;
+        const rampH = Math.min(brun.spline.bridge.parapetHeight, Math.max(0.45, roadH));
+        if (atStart) brun.rampStartH = rampH;
+        else brun.rampEndH = rampH;
+      }
+      if (!mate || !mate.spline.rails.enabled) continue;
+      const mateAtStart = groupOf.get(nodeKey(mate.spline.id, mate.fromNode)) === g && !mate.trimStart;
+      if (!mate.railLinks) mate.railLinks = {};
+      if (mateAtStart && (mate.railLinks.startL || mate.railLinks.startR)) continue;
+      if (!mateAtStart && (mate.railLinks.endL || mate.railLinks.endR)) continue;
+      // bridge-side targets: parapet end faces (embedded) or W-beam bases
+      const tL: Vec3 = useParapet
+        ? [deckL[0] + n[0] * 0.1, deckL[1] + n[1] * 0.1, deckL[2]]
+        : [deckL[0] - n[0] * 0.25, deckL[1] - n[1] * 0.25, deckL[2]];
+      const tR: Vec3 = useParapet
+        ? [deckR[0] - n[0] * 0.1, deckR[1] - n[1] * 0.1, deckR[2]]
+        : [deckR[0] + n[0] * 0.25, deckR[1] + n[1] * 0.25, deckR[2]];
+      // pair road edges to bridge targets (2x2 match handles mirrored headings)
+      const mi = mateAtStart ? 0 : mate.lines.paveL.length - 1;
+      const mL = mate.lines.paveL[mi];
+      const mR = mate.lines.paveR[mi];
+      const dd = (a: Vec3, b: Vec3) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+      const crossed = dd(mL, tR) + dd(mR, tL) < dd(mL, tL) + dd(mR, tR);
+      const link = (t: Vec3): RailRedirect => ({ target: [...t] as Vec3, length: 3 });
+      if (mateAtStart) {
+        mate.railLinks.startL = link(crossed ? tR : tL);
+        mate.railLinks.startR = link(crossed ? tL : tR);
+      } else {
+        mate.railLinks.endL = link(crossed ? tR : tL);
+        mate.railLinks.endR = link(crossed ? tL : tR);
+      }
+    }
+  }
+
   // --- spans ---
   for (const run of viable) {
     const s = run.spline;
     const spanLen = run.frames[run.frames.length - 1].s;
-    const capStart = !run.trimStart && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.fromNode)) ?? 1) === 1;
-    const capEnd = !run.trimEnd && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.toNode)) ?? 1) === 1;
-    const landingStart = !run.trimStart && !run.closedLoop && !capStart;
-    const landingEnd = !run.trimEnd && !run.closedLoop && !capEnd;
+    const { capStart, capEnd, landingStart, landingEnd } = run;
     let kind: SpanKind = 'road';
     let patches: PatchSpec[];
     if (!s.bridge.enabled) {
@@ -385,10 +456,14 @@ export function buildNetwork(project: Project): BuiltNetwork {
         inset: project.junctions.inset,
         capStart,
         capEnd,
+        railLinks: run.railLinks,
       });
     } else {
       const groundZ = project.scene.groundZ;
-      const bopt = { groundZ, capStart, capEnd, landingStart, landingEnd, loop: run.closedLoop };
+      const bopt = {
+        groundZ, capStart, capEnd, landingStart, landingEnd, loop: run.closedLoop,
+        rampStartH: run.rampStartH, rampEndH: run.rampEndH,
+      };
       if (s.bridge.type === 'arch') {
         const arch = buildArchSpan(run.lines, s.cross, s.bridge, s.rails, bopt);
         if (arch) {
