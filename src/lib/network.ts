@@ -375,6 +375,8 @@ export function buildNetwork(project: Project): BuiltNetwork {
     const spanLen = run.frames[run.frames.length - 1].s;
     const capStart = !run.trimStart && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.fromNode)) ?? 1) === 1;
     const capEnd = !run.trimEnd && !run.closedLoop && (groupSize.get(nodeKey(s.id, run.toNode)) ?? 1) === 1;
+    const landingStart = !run.trimStart && !run.closedLoop && !capStart;
+    const landingEnd = !run.trimEnd && !run.closedLoop && !capEnd;
     let kind: SpanKind = 'road';
     let patches: PatchSpec[];
     if (!s.bridge.enabled) {
@@ -386,18 +388,19 @@ export function buildNetwork(project: Project): BuiltNetwork {
       });
     } else {
       const groundZ = project.scene.groundZ;
+      const bopt = { groundZ, capStart, capEnd, landingStart, landingEnd, loop: run.closedLoop };
       if (s.bridge.type === 'arch') {
-        const arch = buildArchSpan(run.lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
+        const arch = buildArchSpan(run.lines, s.cross, s.bridge, s.rails, bopt);
         if (arch) {
           kind = 'arch';
           patches = arch;
         } else {
           kind = 'beam';
-          patches = buildBeamSpan(run.lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
+          patches = buildBeamSpan(run.lines, s.cross, s.bridge, s.rails, bopt);
         }
       } else {
         kind = 'beam';
-        patches = buildBeamSpan(run.lines, s.cross, s.bridge, s.rails, { groundZ, capStart, capEnd });
+        patches = buildBeamSpan(run.lines, s.cross, s.bridge, s.rails, bopt);
       }
     }
     spans.push({ splineId: s.id, kind, length: spanLen, patches });

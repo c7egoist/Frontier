@@ -47,9 +47,6 @@ export const PatchMesh = React.memo(function PatchMesh({ patch }: { patch: Patch
         side={THREE.DoubleSide}
         roughness={0.85}
         metalness={0.05}
-        polygonOffset
-        polygonOffsetFactor={1}
-        polygonOffsetUnits={1}
       />
     </mesh>
   );

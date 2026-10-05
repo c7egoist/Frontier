@@ -1,15 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, useThree } from '@react-three/fiber';
-import {
-  OrbitControls, Line, Grid, TransformControls as DreiTransformControls, Html,
-} from '@react-three/drei';
+import { OrbitControls, Line, Grid, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { MousePointer2, PenTool, Hand, LayoutGrid, Focus } from 'lucide-react';
 import type { Mode, Project, Selection, Spline, SplineNode, Point3D } from '../lib/model';
 import type { BuiltNetwork } from '../lib/network';
 import { PatchMesh } from './PatchMesh';
-
-const TransformControls = DreiTransformControls as any;
+import { SlateGizmo } from './SlateGizmo';
 
 // ---------------------------------------------------------------------------
 // camera
@@ -37,48 +34,13 @@ function CameraRig({ nonce }: { nonce: number }) {
 // ---------------------------------------------------------------------------
 
 function SplineCenterGizmo({ spline, onUpdate }: { spline: Spline; onUpdate: (dx: number, dy: number, dz: number) => void }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const center = useMemo(() => {
+  const center = useMemo<Point3D>(() => {
     let cx = 0; let cy = 0; let cz = 0;
     spline.nodes.forEach((n) => { cx += n.position[0]; cy += n.position[1]; cz += n.position[2]; });
     const len = Math.max(1, spline.nodes.length);
-    return new THREE.Vector3(cx / len, cy / len, cz / len);
+    return [cx / len, cy / len + 0.5, cz / len];
   }, [spline.nodes]);
-  const prevPos = useRef(center.clone());
-  const [dragging, setDragging] = useState(false);
-
-  useEffect(() => {
-    if (!dragging && meshRef.current) {
-      meshRef.current.position.copy(center);
-      prevPos.current.copy(center);
-    }
-  }, [center, dragging]);
-
-  return (
-    <>
-      <mesh ref={meshRef} visible={false}>
-        <boxGeometry args={[1, 1, 1]} />
-      </mesh>
-      <TransformControls
-        object={meshRef}
-        mode="translate"
-        onMouseDown={() => setDragging(true)}
-        onMouseUp={() => setDragging(false)}
-        onObjectChange={() => {
-          if (meshRef.current) {
-            const curr = meshRef.current.position;
-            const dx = curr.x - prevPos.current.x;
-            const dy = curr.y - prevPos.current.y;
-            const dz = curr.z - prevPos.current.z;
-            if (dx !== 0 || dy !== 0 || dz !== 0) {
-              onUpdate(dx, dy, dz);
-              prevPos.current.copy(curr);
-            }
-          }
-        }}
-      />
-    </>
-  );
+  return <SlateGizmo position={center} onDelta={onUpdate} />;
 }
 
 function DraggableHandle({
@@ -86,13 +48,8 @@ function DraggableHandle({
 }: {
   pos: Point3D; color: string; onUpdate: (p: Point3D) => void;
 }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const [dragging, setDragging] = useState(false);
   const [selected, setSelected] = useState(false);
-
-  useEffect(() => {
-    if (!dragging && meshRef.current) meshRef.current.position.set(pos[0], pos[1], pos[2]);
-  }, [pos, dragging]);
+  const [hover, setHover] = useState(false);
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setSelected(false); };
@@ -102,26 +59,26 @@ function DraggableHandle({
 
   return (
     <>
+      <mesh position={pos} scale={hover || selected ? 1.35 : 1}>
+        <boxGeometry args={[0.24, 0.24, 0.24]} />
+        <meshBasicMaterial color={selected ? '#ffffff' : color} />
+      </mesh>
       <mesh
-        ref={meshRef}
+        position={pos}
         onPointerDown={(e) => { e.stopPropagation(); setSelected(true); }}
+        onPointerUp={(e) => e.stopPropagation()}
         onPointerMissed={() => setSelected(false)}
+        onPointerOver={(e) => { e.stopPropagation(); setHover(true); }}
+        onPointerOut={() => setHover(false)}
       >
-        <sphereGeometry args={[0.42, 12, 12]} />
-        <meshBasicMaterial color={selected ? '#ffffff' : color} depthTest={false} />
+        <sphereGeometry args={[0.55, 8, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
       </mesh>
       {selected && (
-        <TransformControls
-          object={meshRef}
-          mode="translate"
-          size={0.55}
-          onMouseDown={() => setDragging(true)}
-          onMouseUp={() => setDragging(false)}
-          onObjectChange={() => {
-            if (meshRef.current) {
-              onUpdate([meshRef.current.position.x, meshRef.current.position.y, meshRef.current.position.z]);
-            }
-          }}
+        <SlateGizmo
+          position={pos}
+          pixelSize={70}
+          onDelta={(dx, dy, dz) => onUpdate([pos[0] + dx, pos[1] + dy, pos[2] + dz])}
         />
       )}
     </>
@@ -129,50 +86,50 @@ function DraggableHandle({
 }
 
 function NodeMesh({
-  node, splineId, isSelected, isEndpoint, mode, onNodeClick, onNodeUpdate,
+  node, splineId, splineColor, isSelected, isEndpoint, mode, onNodeClick, onNodeUpdate,
 }: {
   node: SplineNode;
   splineId: string;
+  splineColor: string;
   isSelected: boolean;
   isEndpoint: boolean;
   mode: Mode;
   onNodeClick: (e: any, splineId: string, nodeId: string, isEndpoint: boolean) => void;
   onNodeUpdate: (splineId: string, nodeId: string, updates: Partial<SplineNode>) => void;
 }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  const [dragging, setDragging] = useState(false);
-  const color = isSelected ? '#ffffff' : mode === 'draw' && isEndpoint ? '#7fc97f' : '#9a9a9a';
-
-  useEffect(() => {
-    if (!dragging && meshRef.current) {
-      meshRef.current.position.set(node.position[0], node.position[1], node.position[2]);
-    }
-  }, [node.position, dragging]);
+  const [hover, setHover] = useState(false);
+  const color = isSelected ? '#ffffff' : mode === 'draw' && isEndpoint ? '#7fc97f' : splineColor;
 
   return (
     <>
-      <mesh ref={meshRef} onPointerDown={(e) => onNodeClick(e, splineId, node.id, isEndpoint)}>
-        <sphereGeometry args={[isSelected ? 0.7 : 0.55, 14, 14]} />
-        <meshBasicMaterial color={color} depthTest={false} />
+      <mesh position={node.position} scale={isSelected || hover ? 1.3 : 1}>
+        <octahedronGeometry args={[0.3, 0]} />
+        <meshBasicMaterial color={color} />
+      </mesh>
+      {isSelected && (
+        <mesh position={node.position}>
+          <octahedronGeometry args={[0.46, 0]} />
+          <meshBasicMaterial color={splineColor} wireframe transparent opacity={0.9} />
+        </mesh>
+      )}
+      <mesh
+        position={node.position}
+        onPointerDown={(e) => onNodeClick(e, splineId, node.id, isEndpoint)}
+        onPointerUp={(e) => e.stopPropagation()}
+        onPointerOver={(e) => { e.stopPropagation(); setHover(true); document.body.style.cursor = 'pointer'; }}
+        onPointerOut={() => { setHover(false); document.body.style.cursor = 'auto'; }}
+      >
+        <sphereGeometry args={[0.75, 8, 8]} />
+        <meshBasicMaterial transparent opacity={0} depthWrite={false} colorWrite={false} />
       </mesh>
       {isSelected && mode === 'select' && (
-        <TransformControls
-          object={meshRef}
-          mode="translate"
-          onMouseDown={() => setDragging(true)}
-          onMouseUp={() => setDragging(false)}
-          onObjectChange={() => {
-            if (!meshRef.current || !dragging) return;
-            const p: Point3D = [meshRef.current.position.x, meshRef.current.position.y, meshRef.current.position.z];
-            const dx = p[0] - node.position[0];
-            const dy = p[1] - node.position[1];
-            const dz = p[2] - node.position[2];
-            onNodeUpdate(splineId, node.id, {
-              position: p,
-              handleIn: [node.handleIn[0] + dx, node.handleIn[1] + dy, node.handleIn[2] + dz],
-              handleOut: [node.handleOut[0] + dx, node.handleOut[1] + dy, node.handleOut[2] + dz],
-            });
-          }}
+        <SlateGizmo
+          position={node.position}
+          onDelta={(dx, dy, dz) => onNodeUpdate(splineId, node.id, {
+            position: [node.position[0] + dx, node.position[1] + dy, node.position[2] + dz],
+            handleIn: [node.handleIn[0] + dx, node.handleIn[1] + dy, node.handleIn[2] + dz],
+            handleOut: [node.handleOut[0] + dx, node.handleOut[1] + dy, node.handleOut[2] + dz],
+          })}
         />
       )}
     </>
@@ -207,17 +164,17 @@ function SplineRenderer({
   }, [spline.nodes, spline.closed]);
 
   if (!spline.visible) return null;
-  const showHandles = isActive && mode === 'select';
 
   return (
     <group>
       {points.length > 0 && (
         <Line
           points={points}
-          color={isActive ? '#f2f2f2' : spline.color}
+          color={spline.color}
           transparent
-          opacity={isActive ? 1 : 0.55}
-          lineWidth={isActive ? 3 : 1.5}
+          opacity={isActive ? 0.95 : 0.45}
+          lineWidth={isActive ? 2 : 1.25}
+          depthTest={!isActive}
         />
       )}
       {isActive && !selectedNodeId && mode === 'select' && spline.nodes.length > 0 && (
@@ -228,12 +185,13 @@ function SplineRenderer({
       )}
       {spline.nodes.map((node, index) => {
         const isEndpoint = !spline.closed && (index === 0 || index === spline.nodes.length - 1);
+        const isSel = node.id === selectedNodeId;
         return (
           <group key={node.id}>
-            {showHandles && (
+            {isSel && isActive && mode === 'select' && (
               <>
-                <Line points={[node.position, node.handleIn]} color="#7fb2e8" lineWidth={1.5} transparent opacity={0.8} />
-                <Line points={[node.position, node.handleOut]} color="#e88a7f" lineWidth={1.5} transparent opacity={0.8} />
+                <Line points={[node.position, node.handleIn]} color="#7fb2e8" lineWidth={1} transparent opacity={0.55} />
+                <Line points={[node.position, node.handleOut]} color="#e88a7f" lineWidth={1} transparent opacity={0.55} />
                 <DraggableHandle
                   pos={node.handleIn}
                   color="#7fb2e8"
@@ -249,7 +207,8 @@ function SplineRenderer({
             <NodeMesh
               node={node}
               splineId={spline.id}
-              isSelected={node.id === selectedNodeId}
+              splineColor={spline.color}
+              isSelected={isSel}
               isEndpoint={isEndpoint}
               mode={mode}
               onNodeClick={onNodeClick}
@@ -312,7 +271,7 @@ export function Viewport(props: ViewportProps) {
         </div>
       </div>
       <div className="canvas-wrap">
-        <Canvas camera={{ position: [0, 55, 55], fov: 50 }} dpr={[1, 2]}>
+        <Canvas camera={{ position: [0, 55, 55], fov: 50, near: 0.5, far: 1500 }} dpr={[1, 2]}>
           <color attach="background" args={['#0b0b0b']} />
           <fog attach="fog" args={['#0b0b0b', 160, 520]} />
           <ambientLight intensity={0.55} />
@@ -350,7 +309,7 @@ export function Viewport(props: ViewportProps) {
             rotation={[-Math.PI / 2, 0, 0]}
             position={[0, project.scene.drawHeight, 0]}
             onPointerDown={props.onGroundPointerDown}
-            onClick={props.onGroundClick}
+            onClick={(e) => { if (e.delta < 5) props.onGroundClick(); }}
           >
             <planeGeometry args={[2000, 2000]} />
             <meshBasicMaterial visible={false} />
@@ -455,7 +414,7 @@ export function Viewport(props: ViewportProps) {
 
         <div className="hud bottom-left">
           {mode === 'select' && (
-            <span><b>Drag</b> nodes &amp; handles · <b>Right-drag</b> pan · <kbd>Del</kbd> node</span>
+            <span><b>Click</b> node · <b>drag</b> gizmo (Ctrl = snap) · <b>Right-drag</b> pan · <kbd>Del</kbd> node</span>
           )}
           {mode === 'draw' && (
             <span><b>Click</b> ground to extend · <b>Click</b> a node to join · <kbd>Esc</kbd> finish</span>

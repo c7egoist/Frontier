@@ -6,6 +6,7 @@ import { networkToObj } from '../src/lib/exportObj';
 import { buildFrames, buildMergedJunction } from '../src/lib/roadGeometry';
 import type { JunctionLeg } from '../src/lib/roadGeometry';
 import { Vec3, left_normal } from '../src/lib/vec';
+import { alongAxisUnderRay, touchPlaneUnderRay, snapStep } from '../src/lib/gizmoMath';
 
 const fail = (msg: string) => { console.error(`FAIL: ${msg}`); process.exitCode = 1; };
 const ok = (msg: string) => console.log(`ok: ${msg}`);
@@ -133,5 +134,23 @@ const fCount = (obj.match(/^f /gm) || []).length;
 console.log(`obj: ${vCount} verts, ${fCount} faces`);
 if (vCount < 1000 || fCount < 1000) fail('obj too small');
 else ok('obj export');
+
+// 6. gizmo pointer math (Slate port)
+{
+  const p1 = alongAxisUnderRay([1, 0, 0], [0, 0, 0], [3, 5, 0], [0, -1, 0]);
+  if (Math.abs(p1 - 3) > 1e-9) fail(`axis param: ${p1}`);
+  else ok('axis param under ray');
+  const inv = 1 / Math.sqrt(2);
+  const p0 = alongAxisUnderRay([1, 0, 0], [0, 0, 0], [0, 5, 5], [0, -inv, -inv]);
+  if (Math.abs(p0) > 1e-9) fail(`axis param origin: ${p0}`);
+  else ok('axis param at origin');
+  const t = touchPlaneUnderRay([0, 1, 0], [0, 0, 0], [1, 5, 2], [0, -1, 0]);
+  if (!t || Math.abs(t[0] - 1) > 1e-9 || Math.abs(t[1]) > 1e-9 || Math.abs(t[2] - 2) > 1e-9) fail(`plane touch: ${t}`);
+  else ok('plane touch under ray');
+  if (touchPlaneUnderRay([0, 1, 0], [0, 0, 0], [0, 5, 0], [1, 0, 0]) !== null) fail('parallel ray should miss');
+  else ok('parallel ray miss');
+  if (snapStep(0.4, 0.25) !== 0.5 || snapStep(0.1, 0.25) !== 0 || snapStep(-0.4, 0.25) !== -0.5) fail('snap steps');
+  else ok('snap steps');
+}
 
 console.log(process.exitCode === 1 ? 'GEO TEST: FAILED' : 'GEO TEST: PASSED');

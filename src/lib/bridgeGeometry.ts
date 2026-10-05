@@ -555,6 +555,46 @@ function buildAbutment(
 export interface BridgeSpanOptions extends SubstructureOptions {
   capStart: boolean;
   capEnd: boolean;
+  /** Bridge end meeting a road at a straight join (flush support, no backwall). */
+  landingStart?: boolean;
+  landingEnd?: boolean;
+  /** Closed ring run — no heads at all. */
+  loop?: boolean;
+}
+
+/**
+ * Flush landing support where a bridge deck runs onto a road at a straight
+ * join: wall + footing entirely below the deck (the road passes over flush)
+ * with bearings under the girder lines.
+ */
+function buildLandingSupport(
+  f: StationFrame,
+  deckW: number,
+  supportTopZ: number,
+  bearingXs: number[],
+  groundZ: number,
+  spanDir: 1 | -1,
+  massive: boolean,
+): PatchSpec[] {
+  const out: PatchSpec[] = [];
+  const yaw = yawFromFrame(f);
+  const wallTopZ = supportTopZ - 0.18; // bearings sit on the wall
+  const botZ = groundZ - 0.3;
+  const back = v_sub(f.center, v_scale(f.tangent, spanDir * 0.4));
+  const t = massive ? 1.6 : 1.0;
+  const w = deckW + (massive ? 1.6 : 0.6);
+  if (wallTopZ - botZ > 0.4) {
+    out.push(...boxPatches(
+      [back[0], back[1], (wallTopZ + botZ) / 2], w, t, wallTopZ - botZ,
+      yaw, COL.concrete, 'Landing wall',
+    ));
+  }
+  out.push(...boxPatches(
+    [back[0], back[1], groundZ - 0.1], w + 0.6, t + 0.8, 0.8,
+    yaw, COL.concreteDark, 'Landing footing',
+  ));
+  out.push(...buildBearings(f, bearingXs.map((x) => ({ x })), supportTopZ));
+  return out;
 }
 
 export function buildBeamSpan(
@@ -640,6 +680,19 @@ export function buildBeamSpan(
     const hw = halfW[idx];
     return bearingXs.map((x) => clamp(x, -(hw - 0.2), hw - 0.2));
   };
+  const landing = (atStart: boolean) => {
+    const idx = atStart ? 0 : frames.length - 1;
+    const f = frames[idx];
+    out.push(...buildDeckEndPlate(lines, atStart, slabDepth));
+    if (!solidHeads) return;
+    out.push(...buildLandingSupport(
+      f, deckWidthAt(lines, idx), f.center[2] - girderBottom, endBearings(idx),
+      opt.groundZ, atStart ? 1 : -1, false,
+    ));
+    if (superstructure === 'igirder' && bridge.diaphragms) {
+      out.push(...buildDiaphragms(f, endBearings(idx), slabDepth, girderDepth, deckWidthAt(lines, idx)));
+    }
+  };
   if (opt.capStart) {
     const f0 = frames[0];
     out.push(...buildDeckEndPlate(lines, true, slabDepth));
@@ -649,6 +702,8 @@ export function buildBeamSpan(
         out.push(...buildDiaphragms(f0, endBearings(0), slabDepth, girderDepth, deckWidthAt(lines, 0)));
       }
     }
+  } else if (opt.landingStart) {
+    landing(true);
   }
   if (opt.capEnd) {
     const last = frames.length - 1;
@@ -660,6 +715,8 @@ export function buildBeamSpan(
         out.push(...buildDiaphragms(f1, endBearings(last), slabDepth, girderDepth, deckWidthAt(lines, last)));
       }
     }
+  } else if (opt.landingEnd) {
+    landing(false);
   }
   return out;
 }
@@ -742,18 +799,34 @@ export function buildArchSpan(
     out.push(...buildGuardRail(lines.paveR, normals, true, rails, 0.3, 0.25));
   }
 
-  // mass thrust blocks at both heads (arch ends always need them)
+  // mass thrust blocks at free heads; flush landing walls at road joins
   const halfW = stationHalfWidths(lines);
   const f0 = frames[0];
   const f1 = frames[frames.length - 1];
-  out.push(...buildDeckEndPlate(lines, true, slabDepth));
-  out.push(...buildDeckEndPlate(lines, false, slabDepth));
   const bxs = (idx: number) => {
     const hw = halfW[idx];
     return [-hw * 0.5, hw * 0.5];
   };
   const thrust = { ...bridge, abutment: 'cantilever' as const };
-  out.push(...buildAbutment(f0, deckWidthAt(lines, 0) + 1.2, Math.max(f0.center[2], springZ + 2.0), bxs(0), opt.groundZ, thrust, 1));
-  out.push(...buildAbutment(f1, deckWidthAt(lines, frames.length - 1) + 1.2, Math.max(f1.center[2], springZ + 2.0), bxs(frames.length - 1), opt.groundZ, thrust, -1));
+  if (opt.capStart) {
+    out.push(...buildDeckEndPlate(lines, true, slabDepth));
+    out.push(...buildAbutment(f0, deckWidthAt(lines, 0) + 1.2, Math.max(f0.center[2], springZ + 2.0), bxs(0), opt.groundZ, thrust, 1));
+  } else if (opt.landingStart) {
+    out.push(...buildDeckEndPlate(lines, true, slabDepth));
+    out.push(...buildLandingSupport(f0, deckWidthAt(lines, 0) + 1.2, f0.center[2] - slabDepth, bxs(0), opt.groundZ, 1, true));
+  } else if (!opt.loop) {
+    // trimmed (junction) end: no plate (deck flows into the tub) but the rib
+    // springs need a wall to land on
+    out.push(...buildLandingSupport(f0, deckWidthAt(lines, 0) + 1.2, f0.center[2] - slabDepth, bxs(0), opt.groundZ, 1, true));
+  }
+  if (opt.capEnd) {
+    out.push(...buildDeckEndPlate(lines, false, slabDepth));
+    out.push(...buildAbutment(f1, deckWidthAt(lines, frames.length - 1) + 1.2, Math.max(f1.center[2], springZ + 2.0), bxs(frames.length - 1), opt.groundZ, thrust, -1));
+  } else if (opt.landingEnd) {
+    out.push(...buildDeckEndPlate(lines, false, slabDepth));
+    out.push(...buildLandingSupport(f1, deckWidthAt(lines, frames.length - 1) + 1.2, f1.center[2] - slabDepth, bxs(frames.length - 1), opt.groundZ, -1, true));
+  } else if (!opt.loop) {
+    out.push(...buildLandingSupport(f1, deckWidthAt(lines, frames.length - 1) + 1.2, f1.center[2] - slabDepth, bxs(frames.length - 1), opt.groundZ, -1, true));
+  }
   return out;
 }
