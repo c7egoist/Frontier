@@ -39,3 +39,10 @@ from the pinned mirror defold/extension-photon-realtime @ 8dad867470f2eb75aeae0c
 The Photon transport links only against the official /MD x64 static libs; until the
 owner supplies them this build links a stub that honestly reports Photon as
 unavailable and keeps all traffic on the EOS path. Photon Fusion is not used.
+
+Xsolla Shop Builder / Pay Station
+Copyright Xsolla Inc. The game client does not redistribute an Xsolla SDK binary.
+The official Windows C++ zip is unpublished; the public C# zip is not used.
+Frontier talks to Xsolla over HTTPS (Shop Builder v2 + Pay Station 4 URLs) using
+project-owned code in Source/XsollaStore.*. Merchant API keys must not ship in
+the client. Apache-2.0 vendor sources: https://github.com/xsolla/xsolla-sdk-windows

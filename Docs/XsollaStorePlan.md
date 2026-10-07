@@ -1,7 +1,30 @@
 # Xsolla Store + Premium + Nitron Economy Plan
 
-Status: research report, no code. Written 2026-10-07 after the Photon link slice.
-Read this first, then answer the open decisions at the bottom.
+Status: research report plus a REST-shaped C++ client (no vendor binaries).
+Written 2026-10-07 after the Photon link slice; SDK acquisition filled in the
+same day.
+
+## 0. Do you need to download binaries?
+
+**No.** Unlike EOS and Photon, Xsolla is not a closed native `.lib`/`.dll` you
+upload to Drive.
+
+| Piece | Status | What we do |
+|---|---|---|
+| Official C++ Windows SDK zip `com.xsolla.sdk-cpp-{version}.zip` | **Unpublished** ("coming soon" on [xsolla-sdk-windows](https://github.com/xsolla/xsolla-sdk-windows) v3.1.19) | Nothing to download. No headers, no `.lib`, no `.dll`. |
+| Official C# zip `com.xsolla.sdk-csharp-3.1.19.zip` | Public, Apache 2.0, ~1.2 MB | Unused. This app is native C++ / MSVC, not .NET. |
+| Drive upload | None (folder searched; no Xsolla files) | Do **not** fetch/hash-pin vendor binaries. |
+| Merchant API key / merchant id | Server-only | Never put `XSOLLA_API_KEY` or `XSOLLA_MERCHANT_ID` on the game client. |
+
+What **is** the SDK for Frontier: our own C++ client in `Source/XsollaStore.*`
+against Shop Builder REST (`https://store.xsolla.com/api`) and Pay Station 4
+URLs. Catalog SKUs, sandbox/live checkout URL builder (token never logged),
+fail-closed entitlement JSON for the future `ResolvePremiumAccess()` wire.
+Manifest: `Build/WindowsXsollaManifest.json` (`files: {}`, `binaries: none`).
+
+What you still do yourself (accounts, not binaries): Publisher Account, create
+the project, note the **project ID**, later `XSOLLA_PROJECT_ID`. Sandbox works
+before you sign anything.
 
 ## TL;DR answers
 
@@ -70,8 +93,9 @@ Grant flow (all server-to-server; the game client never decides):
 
 Notes:
 
-- Xsolla has a C++ store SDK with purchase validation helpers, so later the
-  native client can open checkout and verify receipts directly.
+- The official native C++ Windows SDK zip is still unpublished. This client
+  talks Shop Builder REST and opens Pay Station by URL; a vendor C++ zip can
+  replace the HTTP layer later without changing SKUs or entitlements.
 - Until your backend exists, the manual toggle stays. The backend can start
   tiny: one HTTPS endpoint + one table.
 - Xsolla Login (their auth product) is **not needed** — Epic remains the login.
@@ -171,3 +195,5 @@ Verdict: ship (1), revisit (2) only if the game demands withdrawals.
 - Crypto payments via Crypto.com Pay: [8](https://crypto.com/en/company-news/xsolla-and-crypto-com-partner-to-integrate-payment-solutions)
 - 5% revenue share, Merchant of Record: [9](https://toolradar.com/tools/xsolla)
 - Sandbox mode + test cards: [10](https://developers.xsolla.com/doc/pay-station/testing/general-info/), [11](https://developers.xsolla.com/dev-resources/testing/sandbox-mode/test-cards-in-sandbox/)
+- Windows SDK repo (C# zip public, C++ zip "coming soon"): [12](https://github.com/xsolla/xsolla-sdk-windows)
+- Shop Builder create-order + Pay Station token: [13](https://developers.xsolla.com/api/shop-builder/operation/create-order-with-item/)

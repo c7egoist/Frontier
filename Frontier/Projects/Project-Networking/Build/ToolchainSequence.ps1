@@ -42,7 +42,7 @@ if ($env:VSCMD_ARG_TGT_ARCH -ne 'x64') {
 }
 New-Item -ItemType Directory -Force $Output | Out-Null
 $Flags = @('/nologo', '/std:c++20', '/MD', '/EHsc', '/W4', '/utf-8', '/D_CRT_SECURE_NO_WARNINGS', "/I$Include", "/I$Interchange", "/I$PhotonInclude")
-$Exchange = @('EpicExchange.cpp', 'LobbyRuntime.cpp', 'SessionHistory.cpp', 'TransportRouter.cpp', 'EcomOwnership.cpp', 'EosTransport.cpp') | ForEach-Object { Join-Path $ProjectRoot "Source/$_" }
+$Exchange = @('EpicExchange.cpp', 'LobbyRuntime.cpp', 'SessionHistory.cpp', 'TransportRouter.cpp', 'EcomOwnership.cpp', 'EosTransport.cpp', 'XsollaStore.cpp') | ForEach-Object { Join-Path $ProjectRoot "Source/$_" }
 if ($PhotonLinked) {
     $Exchange += Join-Path $ProjectRoot 'Source/PhotonTransport.cpp'
     # Photon archives need these OS libs named explicitly (no #pragma comment in headers).

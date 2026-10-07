@@ -8,7 +8,9 @@ ID token, join-or-create `FrontierDevRoom`, first handshake packet, then engine
 replication packets. Photon failures fall back to EOS automatically; Ecom
 catalog-ownership tokens stay dormant until `EOS_CATALOG_ITEM_IDS` is set. No
 tokens are written to logs. Premium is a manual toggle for now; Xsolla
-entitlement will drive it later through `ResolvePremiumAccess()`.
+entitlement will drive it later through `ResolvePremiumAccess()`. The Xsolla
+slice is a REST client (`Source/XsollaStore.*`): **no vendor binaries to
+download or pin**. The C++ SDK zip is unpublished; the public C# zip is unused.
 
 Build status: CI links the official Photon Realtime Core 6.0.0.347 **/MD x64**
 archives (`Common-cpp`, `Photon-cpp`, `LoadBalancing-cpp` release_md, hash-pinned

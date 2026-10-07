@@ -48,7 +48,8 @@ target_include_directories(LoginImGui PUBLIC "${IMGUI}" "${IMGUI}/backends")
 target_link_libraries(LoginImGui PUBLIC glfw OpenGL::GL)
 set(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../Source")
 set(NETWORKING_SOURCES "${SOURCE}/EpicExchange.cpp" "${SOURCE}/LobbyRuntime.cpp" "${SOURCE}/SessionHistory.cpp"
-    "${SOURCE}/TransportRouter.cpp" "${SOURCE}/EcomOwnership.cpp" "${SOURCE}/EosTransport.cpp")
+    "${SOURCE}/TransportRouter.cpp" "${SOURCE}/EcomOwnership.cpp" "${SOURCE}/EosTransport.cpp"
+    "${SOURCE}/XsollaStore.cpp")
 if(PHOTON_LINKED)
     list(APPEND NETWORKING_SOURCES "${SOURCE}/PhotonTransport.cpp")
 else()

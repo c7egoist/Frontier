@@ -33,6 +33,8 @@ traffic over Photon Realtime with Epic authentication: the app joins (or creates
 the FrontierDevRoom room and sends a first handshake packet, then carries engine
 replication packets. Photon failures fall back to EOS automatically.
 This build links the official Photon Realtime Core 6.0.0.347 /MD x64 libs.
+Xsolla store: REST only — no vendor SDK binaries to install. Optional
+XSOLLA_PROJECT_ID and XSOLLA_SANDBOX=1; never set XSOLLA_API_KEY on the client.
 Developers: PHOTON_APP_ID,
 PHOTON_ROOM and PHOTON_APP_VERSION override the built-ins; EOS_CATALOG_ITEM_IDS
 (comma-separated) enables the Ecom ownership-token check; the dashboard currently

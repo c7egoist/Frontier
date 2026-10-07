@@ -10,6 +10,7 @@
 #include "TransportCodec.h"
 #include "PhotonTransport.h"
 #include "EcomOwnership.h"
+#include "XsollaStore.h"
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -114,9 +115,32 @@ int main(int ArgumentCount, char** Arguments)
         std::puts(Accepted ? "PASS transport codec, selection, guards and redaction" : "FAIL transport checks");
         return Accepted ? 0 : 2;
     }
+    if (ArgumentCount == 2 && std::strcmp(Arguments[1], "--xsolla-check") == 0)
+    {
+        using namespace Networking;
+        char Line[320]{};
+        DescribeXsollaConfig(Line, sizeof(Line));
+        PrintDiagnostic(Line);
+        const XsollaClientConfig Config = InspectXsollaConfig();
+        bool Accepted = std::strstr(Line, "xsolla_sdk=rest") && std::strstr(Line, "binaries=none") &&
+            std::strstr(Line, "cpp_zip=unpublished") && std::strstr(Line, "merchant_secret=") &&
+            !std::strstr(Line, "XSOLLA_API_KEY") && XsollaCatalogCount == 6;
+        char Url[256]{};
+        Accepted = !BuildPayStationUrl(Config.Sandbox, "bad token", Url, sizeof(Url)) && Accepted;
+        Accepted = BuildPayStationUrl(true, "sandboxToken_1", Url, sizeof(Url)) &&
+            std::strstr(Url, XsollaPayStationSandbox) && Accepted;
+        char Redacted[256]{};
+        Accepted = RedactPayStationUrl(Url, Redacted, sizeof(Redacted)) &&
+            std::strstr(Redacted, "token=[redacted]") && !std::strstr(Redacted, "sandboxToken_1") && Accepted;
+        XsollaEntitlement Entitlement;
+        Accepted = ParseXsollaEntitlement("{\"premium\":\"none\",\"nitron\":0}", Entitlement) &&
+            !EntitlementGrantsPremium(Entitlement) && Accepted;
+        std::puts(Accepted ? "PASS xsolla rest client, no vendor binaries" : "FAIL xsolla checks");
+        return Accepted ? 0 : 2;
+    }
     if (ArgumentCount != 1)
     {
-        std::puts("Usage: LoginHost [--sdk-check | --lifecycle-check | --platform-check | --transport-check]");
+        std::puts("Usage: LoginHost [--sdk-check | --lifecycle-check | --platform-check | --transport-check | --xsolla-check]");
         return 2;
     }
     std::puts("Project-Networking: REAL EOS login; no simulated provider");

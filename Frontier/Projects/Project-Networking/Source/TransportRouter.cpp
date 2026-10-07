@@ -3,8 +3,8 @@
 //============================================================================================================================================
 // 📦 Selects EOS vs Photon after login and ticks the active transport. Photon failures fall back
 // to EOS so login never breaks. Premium is a manual toggle (Setup switch, persisted) with a
-// FRONTIER_PREMIUM_MULTIPLAYER env override; the Xsolla entitlement check plugs into
-// ResolvePremiumAccess when that integration lands.
+// FRONTIER_PREMIUM_MULTIPLAYER env override; the Xsolla REST entitlement check
+// (Source/XsollaStore.*, no vendor binaries) plugs into ResolvePremiumAccess later.
 
 #include "TransportRouter.h"
 #include "EcomOwnership.h"
