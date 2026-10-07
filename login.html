@@ -3,130 +3,72 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#050812">
-  <title>NOIR / Login</title>
+  <meta name="theme-color" content="#000000">
+  <title>Login</title>
   <style>
     :root {
       color-scheme: dark;
-      --ink: #f4f6fb;
-      --muted: #a3adbd;
-      --quiet: #718096;
-      --line: rgba(211, 225, 247, .14);
-      --blue: #a8cefa;
-      --ice: #e2eeff;
-      --panel: rgba(8, 13, 25, .74);
+      --ink: #f4f7ff;
+      --line: rgba(190, 216, 255, .18);
+      --blue: #a9cfff;
+      --ice: #e4efff;
     }
     * { box-sizing: border-box; }
     html, body { min-width: 320px; min-height: 100%; margin: 0; }
     body {
       min-height: 100vh;
-      overflow-x: hidden;
-      background: #050812;
+      overflow: hidden;
+      background: #000;
       color: var(--ink);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       -webkit-font-smoothing: antialiased;
     }
     button, input { font: inherit; }
 
-    #particleField { position: fixed; z-index: 0; inset: 0; display: block; width: 100%; height: 100%; background: #050812; }
-    .atmosphere {
-      position: fixed; z-index: 1; inset: 0; pointer-events: none;
-      background:
-        linear-gradient(180deg, rgba(3,6,15,.26), rgba(4,8,18,.02) 43%, rgba(5,9,19,.33)),
-        radial-gradient(ellipse at 50% 40%, transparent 15%, rgba(4,7,16,.22) 88%),
-        linear-gradient(90deg, rgba(5,8,16,.2), transparent 44%, rgba(5,8,16,.17));
-    }
-    .site-shell { position: relative; z-index: 2; display:flex; min-height:100vh; flex-direction:column; width:min(1320px,calc(100% - 72px)); margin:0 auto; padding:28px 0 22px; }
-    .topbar { display:flex; align-items:center; justify-content:space-between; gap:22px; transition:opacity .5s ease, transform .6s ease; }
-    .brand { display:inline-flex; align-items:center; gap:12px; color:var(--ink); font-size:12px; font-weight:760; letter-spacing:.18em; }
-    .brand-symbol { display:grid; width:35px; height:35px; place-items:center; border:1px solid rgba(213,232,255,.28); border-radius:11px; background:linear-gradient(145deg,rgba(157,196,242,.2),rgba(114,147,207,.04)); box-shadow:inset 0 1px rgba(255,255,255,.1),0 0 26px rgba(124,171,230,.08); color:#e8f2ff; }
-    .top-status { display:inline-flex; align-items:center; gap:8px; color:rgba(219,231,249,.66); font-size:9px; letter-spacing:.15em; text-transform:uppercase; }
-    .status-dot { width:6px; height:6px; border-radius:50%; background:#cce8ff; box-shadow:0 0 11px rgba(168,214,255,.75); }
-
-    .main-layout { display:grid; flex:1; grid-template-columns:minmax(0,1fr) minmax(360px,430px); align-items:center; gap:clamp(50px,9vw,150px); padding:62px 0 66px; transition:opacity .7s ease,transform .8s cubic-bezier(.2,.72,.22,1),filter .65s ease; }
-    .intro { max-width:650px; padding-bottom:12px; }
-    .overline { display:inline-flex; align-items:center; gap:11px; margin-bottom:24px; color:rgba(209,225,247,.7); font-size:10px; font-weight:650; letter-spacing:.19em; text-transform:uppercase; }
-    .overline::before { width:25px; height:1px; background:rgba(210,230,255,.75); box-shadow:0 0 10px rgba(173,216,255,.5); content:""; }
-    h1 { max-width:700px; margin:0; font-size:clamp(52px,7.2vw,94px); font-weight:540; letter-spacing:-.072em; line-height:.99; }
-    h1 .line-two { display:block; color:rgba(235,243,255,.7); font-weight:400; }
-    h1 .glint { color:#fff; text-shadow:0 0 34px rgba(187,218,255,.22); }
-    .intro-copy { max-width:430px; margin:25px 0 0; color:rgba(199,211,231,.76); font-size:14px; line-height:1.8; }
-    .field-caption { display:flex; align-items:center; gap:13px; margin-top:36px; color:rgba(194,211,236,.67); font-size:9px; letter-spacing:.13em; text-transform:uppercase; }
-    .field-bars { display:flex; align-items:center; gap:3px; height:15px; }
-    .field-bars span { display:block; width:2px; height:var(--h); border-radius:2px; background:rgba(211,232,255,.78); box-shadow:0 0 7px rgba(159,202,255,.34); }
-    .field-separator { width:1px; height:16px; background:rgba(222,235,255,.2); }
-
-    .login-card { position:relative; width:100%; padding:35px 34px 31px; border:1px solid rgba(211,228,250,.19); border-radius:22px; background:linear-gradient(145deg,rgba(20,28,45,.78),rgba(8,13,25,.78)); box-shadow:0 28px 90px rgba(0,0,0,.37),inset 0 1px rgba(255,255,255,.075); backdrop-filter:blur(22px) saturate(120%); -webkit-backdrop-filter:blur(22px) saturate(120%); }
-    .card-topline { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:29px; }
-    .card-kicker { color:rgba(207,222,243,.62); font-size:9px; font-weight:700; letter-spacing:.16em; text-transform:uppercase; }
-    .secure { display:inline-flex; align-items:center; gap:6px; color:rgba(205,222,241,.57); font-size:9px; }
-    .login-card h2 { margin:0; color:#f5f8fd; font-size:27px; font-weight:560; letter-spacing:-.04em; }
-    .card-copy { margin:7px 0 25px; color:rgba(193,207,228,.7); font-size:12px; }
-    .field { margin-bottom:18px; }
-    .field label { display:block; margin-bottom:8px; color:rgba(221,232,247,.88); font-size:10px; font-weight:600; letter-spacing:.025em; }
+    #particleField { position: fixed; z-index: 0; inset: 0; display: block; width: 100%; height: 100%; background: #000; }
+    .atmosphere { position: fixed; z-index: 1; inset: 0; pointer-events: none; background:radial-gradient(ellipse at 50% 48%,transparent 32%,rgba(0,0,0,.28) 100%); }
+    .site-shell { position:relative; z-index:2; display:flex; width:min(1380px,calc(100% - 72px)); min-height:100vh; flex-direction:column; margin:0 auto; padding:27px 0 24px; }
+    .topbar { display:flex; align-items:center; justify-content:flex-start; min-height:38px; opacity:1; transform:translateY(0); transition:opacity .5s ease,transform .6s ease; }
+    .brand-symbol { display:grid; width:36px; height:36px; place-items:center; border:1px solid rgba(205,226,255,.26); border-radius:11px; background:linear-gradient(145deg,rgba(132,177,239,.16),rgba(75,110,176,.035)); box-shadow:inset 0 1px rgba(255,255,255,.08),0 0 24px rgba(111,159,228,.07); color:#e6f1ff; }
+    .main-layout { display:flex; flex:1; align-items:center; justify-content:flex-end; padding:42px 0 60px; transition:opacity .7s ease,transform .8s cubic-bezier(.2,.72,.22,1),filter .65s ease; }
+    .login-card { width:min(370px,100%); padding:22px; border:1px solid var(--line); border-radius:19px; background:rgba(3,6,13,.58); box-shadow:0 24px 90px rgba(0,0,0,.52),inset 0 1px rgba(255,255,255,.045); backdrop-filter:blur(15px) saturate(112%); -webkit-backdrop-filter:blur(15px) saturate(112%); }
+    .field + .field { margin-top:12px; }
     .input-wrap { position:relative; }
-    .input-icon { position:absolute; top:50%; left:13px; width:16px; height:16px; color:rgba(176,198,226,.59); transform:translateY(-50%); pointer-events:none; }
-    .field input { width:100%; height:48px; padding:0 14px 0 41px; border:1px solid rgba(202,220,245,.16); border-radius:10px; outline:none; background:rgba(5,10,20,.44); color:#f1f5fc; font-size:12px; transition:border-color .2s ease,box-shadow .2s ease,background .2s ease; }
-    .field input::placeholder { color:rgba(158,175,200,.47); }
-    .field input:focus { border-color:rgba(172,212,255,.6); background:rgba(9,16,30,.68); box-shadow:0 0 0 3px rgba(126,178,237,.09); }
-    .login-button { display:flex; width:100%; min-height:49px; align-items:center; justify-content:center; gap:10px; margin-top:9px; border:1px solid rgba(236,246,255,.7); border-radius:10px; background:linear-gradient(100deg,#edf5ff,#c9def6); box-shadow:0 6px 25px rgba(153,192,238,.15),inset 0 1px rgba(255,255,255,.8); color:#101a29; cursor:pointer; font-size:11px; font-weight:760; transition:transform .16s ease,box-shadow .16s ease,filter .16s ease; }
-    .login-button:hover:not(:disabled) { filter:brightness(1.05); transform:translateY(-1px); box-shadow:0 9px 30px rgba(153,192,238,.22); }
+    .input-icon { position:absolute; top:50%; left:14px; width:16px; height:16px; color:rgba(183,207,239,.58); transform:translateY(-50%); pointer-events:none; }
+    .field input { width:100%; height:49px; padding:0 14px 0 42px; border:1px solid rgba(190,216,255,.15); border-radius:10px; outline:none; background:rgba(1,4,10,.66); color:#f2f6ff; font-size:12px; transition:border-color .2s ease,box-shadow .2s ease,background .2s ease; }
+    .field input::placeholder { color:rgba(174,191,218,.53); }
+    .field input:focus { border-color:rgba(167,207,255,.62); background:rgba(7,13,25,.82); box-shadow:0 0 0 3px rgba(110,163,230,.09); }
+    .login-button { display:flex; width:100%; min-height:49px; align-items:center; justify-content:center; gap:10px; margin-top:14px; border:1px solid rgba(236,246,255,.78); border-radius:10px; background:linear-gradient(100deg,#eef5ff,#c8ddf8); box-shadow:0 6px 28px rgba(132,180,238,.16),inset 0 1px rgba(255,255,255,.86); color:#101a29; cursor:pointer; font-size:11px; font-weight:760; transition:transform .16s ease,box-shadow .16s ease,filter .16s ease,opacity .4s ease; }
+    .login-button:hover:not(:disabled) { filter:brightness(1.05); transform:translateY(-1px); box-shadow:0 9px 32px rgba(139,188,247,.23); }
     .login-button:focus-visible { outline:2px solid #fff; outline-offset:3px; }
-    .login-button:disabled { cursor:wait; opacity:.82; }
-    .card-footnote { margin:20px 0 0; color:rgba(177,194,218,.55); font-size:9px; line-height:1.6; text-align:center; }
-    .bottom-bar { display:flex; align-items:center; justify-content:space-between; gap:18px; color:rgba(174,192,218,.55); font-size:8px; font-weight:620; letter-spacing:.16em; text-transform:uppercase; transition:opacity .45s ease,transform .6s ease; }
+    .login-button:disabled { cursor:wait; }
+    .loading-orbit { width:15px; height:15px; border:1.5px solid rgba(17,32,52,.24); border-top-color:#172c49; border-radius:50%; animation:spin .65s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
 
-    /* Login transition: UI recedes while the particle sheet funnels into an orbital field. */
-    body.is-entering .main-layout { opacity:0; transform:translateY(-20px) scale(.978); filter:blur(9px); pointer-events:none; }
-    body.is-entering .topbar, body.is-entering .bottom-bar { opacity:0; transform:translateY(-10px); pointer-events:none; }
-    .arrival { position:fixed; z-index:4; inset:0; display:grid; place-items:center; overflow:hidden; visibility:hidden; opacity:0; background:radial-gradient(ellipse at 50% 50%,rgba(12,22,42,.08),rgba(3,6,14,.35) 70%); transition:opacity .8s ease,visibility .8s; }
+    /* The single login action triggers a cinematic particle-to-orbit transition. */
+    body.is-entering .main-layout { opacity:0; transform:translateY(-14px) scale(.98); filter:blur(10px); pointer-events:none; }
+    body.is-entering .topbar { opacity:0; transform:translateY(-9px); pointer-events:none; }
+    .arrival { position:fixed; z-index:4; inset:0; display:grid; place-items:center; overflow:hidden; visibility:hidden; opacity:0; background:radial-gradient(ellipse at 50% 50%,rgba(9,19,37,.11),rgba(0,0,0,.23) 68%); transition:opacity .85s ease,visibility .85s; }
     body.is-arrived .arrival { visibility:visible; opacity:1; }
-    .arrival::before { position:absolute; width:min(70vw,720px); aspect-ratio:1; border-radius:50%; background:radial-gradient(circle,rgba(107,153,221,.17),rgba(81,117,183,.065) 35%,transparent 70%); filter:blur(14px); content:""; }
-    .arrival-content { position:relative; z-index:1; width:min(480px,calc(100% - 36px)); padding:35px 28px; text-align:center; opacity:0; transform:translateY(18px) scale(.96); }
-    body.is-arrived .arrival-content { animation:arrive .9s cubic-bezier(.16,.72,.24,1) .12s forwards; }
-    @keyframes arrive { to { opacity:1; transform:translateY(0) scale(1); } }
-    .portal-mark { position:relative; display:grid; width:94px; height:94px; place-items:center; margin:0 auto 25px; border:1px solid rgba(209,231,255,.34); border-radius:50%; box-shadow:0 0 34px rgba(130,179,239,.19),inset 0 0 26px rgba(112,153,214,.1); }
-    .portal-mark::before,.portal-mark::after { position:absolute; inset:-11px; border:1px solid rgba(177,211,251,.19); border-radius:50%; content:""; animation:orbit 9s linear infinite; }
-    .portal-mark::after { inset:-21px; border-color:rgba(203,223,249,.1); animation-duration:15s; animation-direction:reverse; }
-    .portal-mark svg { color:#e8f3ff; filter:drop-shadow(0 0 14px rgba(181,215,255,.55)); }
+    .arrival::before { position:absolute; width:min(72vw,760px); aspect-ratio:1; border-radius:50%; background:radial-gradient(circle,rgba(67,115,193,.13),rgba(37,69,126,.055) 36%,transparent 71%); filter:blur(17px); content:""; }
+    .portal-mark { position:relative; display:grid; width:72px; height:72px; place-items:center; border:1px solid rgba(206,229,255,.4); border-radius:50%; box-shadow:0 0 30px rgba(130,180,241,.25),inset 0 0 21px rgba(118,160,223,.12); opacity:0; transform:scale(.55); }
+    .portal-mark::before,.portal-mark::after { position:absolute; inset:-12px; border:1px solid rgba(177,211,251,.2); border-radius:50%; content:""; }
+    .portal-mark::after { inset:-24px; border-color:rgba(203,223,249,.11); }
+    .portal-mark svg { color:#e8f3ff; filter:drop-shadow(0 0 13px rgba(181,215,255,.42)); }
+    body.is-arrived .portal-mark { animation:portalIn 1.05s cubic-bezier(.16,.72,.24,1) .08s forwards; }
+    body.is-arrived .portal-mark::before { animation:orbit 11s linear infinite; }
+    body.is-arrived .portal-mark::after { animation:orbit 17s linear infinite reverse; }
+    @keyframes portalIn { to { opacity:1; transform:scale(1); } }
     @keyframes orbit { to { transform:rotate(360deg); } }
-    .arrival-kicker { margin:0 0 12px; color:rgba(194,218,249,.71); font-size:9px; font-weight:700; letter-spacing:.2em; text-transform:uppercase; }
-    .arrival h2 { margin:0; color:#f5f8fd; font-size:clamp(29px,5vw,42px); font-weight:520; letter-spacing:-.055em; line-height:1.12; }
-    .arrival h2 span { display:block; color:#bfdcff; text-shadow:0 0 30px rgba(155,198,250,.32); }
-    .arrival-copy { margin:13px 0 0; color:rgba(204,218,238,.77); font-size:12px; }
-    .progress-track { width:min(230px,80%); height:2px; overflow:hidden; margin:26px auto 15px; border-radius:4px; background:rgba(221,235,254,.13); }
-    .progress-track span { display:block; width:100%; height:100%; background:linear-gradient(90deg,transparent,#d7eaff,transparent); transform:scaleX(0); transform-origin:left; }
-    body.is-arrived .progress-track span { animation:progress 2.2s cubic-bezier(.22,.66,.24,1) .2s forwards; }
-    @keyframes progress { to { transform:scaleX(1); } }
-    .prototype-label { margin:0; color:rgba(157,177,205,.55); font-size:8px; letter-spacing:.12em; text-transform:uppercase; }
 
-    @media (max-width:920px) {
-      .site-shell { width:min(100% - 48px,720px); }
-      .main-layout { grid-template-columns:minmax(0,1fr) minmax(330px,390px); gap:35px; }
-      h1 { font-size:clamp(48px,7vw,72px); }
-      .intro-copy { font-size:12px; }
-      .login-card { padding:29px 27px 25px; }
-    }
     @media (max-width:740px) {
-      .site-shell { width:min(100% - 34px,520px); padding:19px 0 16px; }
-      .main-layout { display:flex; flex-direction:column; justify-content:center; align-items:stretch; gap:29px; padding:45px 0 42px; }
-      .intro { max-width:500px; padding:0; }
-      .overline { margin-bottom:15px; }
-      h1 { font-size:clamp(45px,10vw,67px); }
-      .intro-copy { max-width:440px; margin-top:14px; }
-      .field-caption { margin-top:18px; }
-      .login-card { max-width:430px; align-self:center; padding:27px 25px 23px; }
-      .bottom-bar { font-size:7px; letter-spacing:.12em; }
+      .site-shell { width:min(100% - 34px,520px); padding:19px 0 20px; }
+      .main-layout { justify-content:center; padding:34px 0 55px; }
+      .login-card { width:min(370px,100%); }
     }
     @media (max-width:430px) {
       .site-shell { width:calc(100% - 28px); }
-      .brand { font-size:10px; }
-      .brand-symbol { width:31px; height:31px; }
-      .top-status { font-size:8px; }
-      .login-card { padding:23px 19px 21px; border-radius:17px; }
-      .card-topline { margin-bottom:22px; }
-      .login-card h2 { font-size:24px; }
-      .bottom-bar { align-items:flex-start; flex-direction:column; gap:8px; }
+      .login-card { padding:17px; border-radius:16px; }
     }
     @media (prefers-reduced-motion:reduce) {
       *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; transition-duration:.01ms!important; }
@@ -139,66 +81,34 @@
 
   <div class="site-shell">
     <header class="topbar">
-      <div class="brand" aria-label="Noir Field">
-        <span class="brand-symbol" aria-hidden="true">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 2.8 14.7 9.3 21.2 12l-6.5 2.7L12 21.2l-2.7-6.5L2.8 12l6.5-2.7L12 2.8Z" stroke="currentColor" stroke-width="1.15"/><circle cx="12" cy="12" r="2.1" fill="currentColor"/></svg>
-        </span>
-        NOIR / FIELD
+      <div class="brand-symbol" aria-hidden="true">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M12 2.8 14.7 9.3 21.2 12l-6.5 2.7L12 21.2l-2.7-6.5L2.8 12l6.5-2.7L12 2.8Z" stroke="currentColor" stroke-width="1.15"/><circle cx="12" cy="12" r="2.1" fill="currentColor"/></svg>
       </div>
-      <div class="top-status"><i class="status-dot"></i>Secure login</div>
     </header>
 
     <main class="main-layout">
-      <section class="intro" aria-labelledby="intro-title">
-        <div class="overline">A quieter place to work</div>
-        <h1 id="intro-title">Move through<br><span class="line-two">the <span class="glint">noise.</span></span></h1>
-        <p class="intro-copy">Your projects, notes, and ideas—together in one calm workspace. Log in to pick up exactly where your thinking left off.</p>
-        <div class="field-caption" aria-label="Animated particle field">
-          <span class="field-bars" aria-hidden="true"><span style="--h:5px"></span><span style="--h:11px"></span><span style="--h:8px"></span><span style="--h:14px"></span><span style="--h:6px"></span><span style="--h:10px"></span></span>
-          <span>Particle field</span><i class="field-separator"></i><span>Signal 01 / Live</span>
-        </div>
-      </section>
-
-      <section class="login-card" aria-labelledby="login-title">
-        <div class="card-topline">
-          <span class="card-kicker">Workspace access</span>
-          <span class="secure"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3.1" y="7" width="9.8" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M5.2 7V4.9a2.8 2.8 0 0 1 5.6 0V7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>Encrypted session</span>
-        </div>
-        <h2 id="login-title">Welcome back</h2>
-        <p class="card-copy">Enter your details to continue.</p>
+      <section class="login-card" aria-label="Login form">
         <form id="loginForm" autocomplete="on">
           <div class="field">
-            <label for="email">Email address</label>
             <div class="input-wrap">
               <svg class="input-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2" stroke="currentColor" stroke-width="1.35"/><path d="m3.5 5 6.5 5.1L16.5 5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>
-              <input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required>
+              <input id="email" name="email" type="email" placeholder="Email" aria-label="Email" autocomplete="email" required>
             </div>
           </div>
           <div class="field">
-            <label for="password">Password</label>
             <div class="input-wrap">
               <svg class="input-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3.2" y="8.2" width="13.6" height="9" rx="2" stroke="currentColor" stroke-width="1.35"/><path d="M6 8.2V5.8a4 4 0 0 1 8 0v2.4" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><circle cx="10" cy="12.7" r="1" fill="currentColor"/></svg>
-              <input id="password" name="password" type="password" placeholder="Enter your password" autocomplete="current-password" required>
+              <input id="password" name="password" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password" required>
             </div>
           </div>
           <button class="login-button" id="loginButton" type="submit">Login <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
         </form>
-        <p class="card-footnote">Sign-in is a visual prototype. Connect your authentication provider to enable accounts.</p>
       </section>
     </main>
-
-    <footer class="bottom-bar"><span>© 2026 Noir Field · Particle atmosphere generated in real time</span><span>Private workspace / 01</span></footer>
   </div>
 
-  <section class="arrival" id="arrival" aria-hidden="true" aria-live="polite">
-    <div class="arrival-content">
-      <div class="portal-mark" aria-hidden="true"><svg width="30" height="30" viewBox="0 0 24 24" fill="none"><path d="M12 2.8 14.7 9.3 21.2 12l-6.5 2.7L12 21.2l-2.7-6.5L2.8 12l6.5-2.7L12 2.8Z" stroke="currentColor" stroke-width="1.1"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg></div>
-      <p class="arrival-kicker">Noir / session preview</p>
-      <h2>Welcome back,<span id="welcomeName">Explorer</span></h2>
-      <p class="arrival-copy">Your workspace is ready to open.</p>
-      <div class="progress-track" aria-hidden="true"><span></span></div>
-      <p class="prototype-label">Visual transition only · authentication is not connected</p>
-    </div>
+  <section class="arrival" id="arrival" aria-hidden="true" aria-label="Login transition">
+    <div class="portal-mark" aria-hidden="true"><svg width="27" height="27" viewBox="0 0 24 24" fill="none"><path d="M12 2.8 14.7 9.3 21.2 12l-6.5 2.7L12 21.2l-2.7-6.5L2.8 12l6.5-2.7L12 2.8Z" stroke="currentColor" stroke-width="1.1"/><circle cx="12" cy="12" r="2" fill="currentColor"/></svg></div>
   </section>
 
   <script>
@@ -227,48 +137,42 @@
         canvas.style.width = width + 'px'; canvas.style.height = height + 'px';
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         const random = randomGenerator(83021 + width * 7 + height * 13);
-        columns = Math.max(72, Math.min(156, Math.round(width / 8.8)));
-        rows = Math.max(28, Math.min(46, Math.round(height / 18)));
+        columns = Math.max(76, Math.min(172, Math.round(width / 8.2)));
+        rows = Math.max(30, Math.min(48, Math.round(height / 16)));
         points = [];
         for (let row = 0; row < rows; row++) {
           const depth = row / (rows - 1);
           for (let col = 0; col < columns; col++) {
-            points.push({ col, row, depth, x: -1.12 + 2.24 * col / (columns - 1), seed: random(), size: .35 + random() * .65, tone: random() });
+            points.push({ col, row, depth, x: -1.12 + 2.24 * col / (columns - 1), seed: random(), size: .38 + random() * .7, tone: random() });
           }
         }
         bokeh = [];
-        for (let i = 0; i < 48; i++) {
+        for (let i = 0; i < 44; i++) {
           const size = random();
-          bokeh.push({
-            x: random() * width, y: random() * height * .82,
-            radius: size > .77 ? 11 + random() * 31 : 4 + random() * 12,
-            alpha: .025 + random() * .075, phase: random() * Math.PI * 2,
-            speed: .07 + random() * .22, hue: random() > .76 ? 284 : (random() > .45 ? 218 : 229)
-          });
+          bokeh.push({ x: random() * width, y: random() * height * .82, radius: size > .76 ? 12 + random() * 32 : 5 + random() * 13, alpha: .035 + random() * .09, phase: random() * Math.PI * 2, speed: .06 + random() * .2, hue: random() > .75 ? 252 : (random() > .45 ? 218 : 230) });
         }
         draw(0, 0);
       }
 
       function waveHeight(x, depth, t, seed) {
-        const drift = t * .27;
-        const broad = .16 * Math.sin(x * 3.1 + depth * 4.1 - drift);
-        const fine = .055 * Math.sin(x * 8.3 - depth * 6.5 + t * .34 + seed * 1.6);
-        const ridgeCenter = .48 * Math.sin(depth * 3.7 + t * .16);
-        const ridge = .18 * Math.exp(-Math.pow((x - ridgeCenter) * 1.9, 2)) * Math.sin(depth * 9.4 - t * .62 + x * 1.6);
-        const fold = .075 * Math.cos(x * 2.2 - depth * 7.6 + t * .2);
+        const drift = t * .25;
+        const broad = .205 * Math.sin(x * 3.0 + depth * 4.2 - drift);
+        const fine = .065 * Math.sin(x * 8.1 - depth * 6.6 + t * .31 + seed * 1.4);
+        const ridgeCenter = .5 * Math.sin(depth * 3.8 + t * .15);
+        const ridge = .235 * Math.exp(-Math.pow((x - ridgeCenter) * 1.85, 2)) * Math.sin(depth * 9.6 - t * .55 + x * 1.7);
+        const fold = .09 * Math.cos(x * 2.15 - depth * 7.4 + t * .18);
         return broad + fine + ridge + fold;
       }
 
       function screenPoint(point, t, pull) {
         const depth = point.depth;
-        const scale = .29 + depth * .96;
+        const scale = .28 + depth * 1.0;
         const wave = waveHeight(point.x, depth, t, point.seed);
-        let px = width * .5 + point.x * width * .385 * scale + smoothX * (7 + depth * 14);
-        let py = height * .475 + depth * height * .34 - wave * height * .68 * scale + smoothY * (5 + depth * 9);
-        const slowBreath = .94 + .06 * Math.sin(t * .24 + point.seed * 5 + depth * 3);
-        const alpha = (.085 + .43 * Math.pow(depth, 1.13)) * slowBreath;
-        const radius = point.size * (.48 + depth * .8);
-
+        let px = width * .5 + point.x * width * .39 * scale + smoothX * (7 + depth * 14);
+        let py = height * .455 + depth * height * .365 - wave * height * .71 * scale + smoothY * (5 + depth * 9);
+        const slowBreath = .96 + .04 * Math.sin(t * .19 + point.seed * 4 + depth * 2);
+        const alpha = (.14 + .55 * Math.pow(depth, 1.08)) * slowBreath;
+        const radius = point.size * (.5 + depth * .95);
         if (pull > 0) {
           const cx = width * .5, cy = height * .49;
           const dx = px - cx, dy = py - cy;
@@ -284,72 +188,73 @@
 
       function drawBokeh(t) {
         for (const item of bokeh) {
-          const alpha = item.alpha * (.91 + .09 * Math.sin(item.phase + t * item.speed));
+          const alpha = item.alpha * (.93 + .07 * Math.sin(item.phase + t * item.speed));
           const x = item.x + smoothX * 3, y = item.y + smoothY * 2, r = item.radius;
           const glow = ctx.createRadialGradient(x, y, 0, x, y, r);
-          glow.addColorStop(0, `hsla(${item.hue}, 50%, 84%, ${alpha})`);
-          glow.addColorStop(.45, `hsla(${item.hue}, 54%, 77%, ${alpha * .46})`);
-          glow.addColorStop(1, `hsla(${item.hue}, 60%, 68%, 0)`);
-          ctx.fillStyle = glow;
-          ctx.fillRect(x - r, y - r, r * 2, r * 2);
+          glow.addColorStop(0, `hsla(${item.hue}, 64%, 83%, ${alpha})`);
+          glow.addColorStop(.43, `hsla(${item.hue}, 68%, 75%, ${alpha * .42})`);
+          glow.addColorStop(1, `hsla(${item.hue}, 72%, 67%, 0)`);
+          ctx.fillStyle = glow; ctx.fillRect(x - r, y - r, r * 2, r * 2);
         }
       }
 
       function draw(t, pull) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, width, height);
-        const backdrop = ctx.createLinearGradient(0, 0, width * .25, height);
-        backdrop.addColorStop(0, '#050812'); backdrop.addColorStop(.48, '#070d1b'); backdrop.addColorStop(1, '#050a15');
-        ctx.fillStyle = backdrop; ctx.fillRect(0, 0, width, height);
-
-        const haze = ctx.createRadialGradient(width * .53, height * .70, 0, width * .53, height * .70, Math.max(width, height) * .73);
-        haze.addColorStop(0, 'rgba(72, 107, 158, .19)'); haze.addColorStop(.42, 'rgba(29, 50, 86, .10)'); haze.addColorStop(1, 'rgba(3, 6, 15, 0)');
+        ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, width, height);
+        const haze = ctx.createRadialGradient(width * .49, height * .68, 0, width * .49, height * .68, Math.max(width, height) * .72);
+        haze.addColorStop(0, 'rgba(60, 99, 170, .23)'); haze.addColorStop(.42, 'rgba(26, 50, 99, .12)'); haze.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = haze; ctx.fillRect(0, 0, width, height);
         drawBokeh(t);
 
         const projected = new Array(points.length);
         for (let i = 0; i < points.length; i++) projected[i] = screenPoint(points[i], t, pull);
 
-        // Very fine, low-contrast filaments connect the particle field into rolling sheets.
-        ctx.save(); ctx.lineWidth = .56;
-        for (let row = 1; row < rows; row += 3) {
+        // A finer, more visible point-cloud mesh gives the field a digital, flowing depth.
+        ctx.save(); ctx.lineWidth = .64;
+        for (let row = 1; row < rows; row += 2) {
           ctx.beginPath();
           for (let col = 0; col < columns; col++) {
             const p = projected[row * columns + col];
             if (col === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
           }
-          ctx.strokeStyle = `rgba(157, 193, 235, ${.018 + row / rows * .048})`; ctx.stroke();
+          ctx.strokeStyle = `rgba(130, 174, 240, ${.035 + row / rows * .095})`; ctx.stroke();
         }
-        for (let col = 2; col < columns; col += 8) {
+        for (let col = 2; col < columns; col += 5) {
           ctx.beginPath();
           for (let row = 0; row < rows; row++) {
             const p = projected[row * columns + col];
             if (row === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
           }
-          ctx.strokeStyle = 'rgba(177, 207, 244, .022)'; ctx.stroke();
+          ctx.strokeStyle = 'rgba(118, 157, 230, .045)'; ctx.stroke();
         }
         ctx.restore();
 
-        // Small, dense points only—no starbursts, cross flares, or sharp sparkle glows.
+        // Dense blue-violet and cool-white points; deliberately no starbursts or cross flares.
         for (let i = 0; i < projected.length; i++) {
           const p = projected[i];
-          const tint = p.tone > .92 ? '204, 199, 225' : (p.tone > .58 ? '145, 184, 233' : '215, 229, 249');
-          ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(.32, p.radius), 0, Math.PI * 2);
+          const tint = p.tone > .9 ? '218, 230, 255' : (p.tone > .64 ? '139, 164, 255' : (p.tone > .32 ? '83, 137, 235' : '160, 190, 246'));
+          ctx.beginPath(); ctx.arc(p.x, p.y, Math.max(.34, p.radius), 0, Math.PI * 2);
           ctx.fillStyle = `rgba(${tint}, ${p.alpha})`; ctx.fill();
         }
 
-        // A couple of soft, continuous blue-white wave veils add depth without glitter flares.
-        for (let band = 0; band < 2; band++) {
-          const y = height * (.70 + band * .105) + Math.sin(t * .18 + band * 1.7) * 7;
-          const ribbon = ctx.createLinearGradient(0, y - 48, width, y + 28);
-          ribbon.addColorStop(0, 'rgba(102, 147, 208, 0)');
-          ribbon.addColorStop(.48, `rgba(139, 177, 226, ${.022 - band * .006})`);
-          ribbon.addColorStop(1, 'rgba(154, 190, 235, 0)');
-          ctx.fillStyle = ribbon; ctx.fillRect(0, y - 48, width, 80);
+        // Soft curved energy ribbons follow the moving point-cloud surface.
+        for (let band = 0; band < 3; band++) {
+          const depth = .52 + band * .12;
+          ctx.beginPath();
+          for (let step = 0; step <= 100; step++) {
+            const xn = -1.12 + 2.24 * step / 100;
+            const yy = height * .455 + depth * height * .365 - waveHeight(xn, depth, t, band * .7) * height * .71 * (.28 + depth);
+            const xx = width * .5 + xn * width * .39 * (.28 + depth);
+            if (step === 0) ctx.moveTo(xx, yy); else ctx.lineTo(xx, yy);
+          }
+          const ribbon = ctx.createLinearGradient(0, height * .42, width, height * .82);
+          ribbon.addColorStop(0, 'rgba(91, 128, 219, 0)'); ribbon.addColorStop(.35, 'rgba(110, 153, 240, .18)'); ribbon.addColorStop(.58, 'rgba(205, 223, 255, .22)'); ribbon.addColorStop(.82, 'rgba(91, 132, 228, .12)'); ribbon.addColorStop(1, 'rgba(93, 129, 216, 0)');
+          ctx.strokeStyle = ribbon; ctx.lineWidth = band === 1 ? 1.2 : .8; ctx.stroke();
         }
 
-        const vignette = ctx.createRadialGradient(width * .5, height * .46, Math.min(width, height) * .22, width * .5, height * .46, Math.max(width, height) * .74);
-        vignette.addColorStop(0, 'rgba(2, 5, 13, .015)'); vignette.addColorStop(1, 'rgba(2, 5, 13, .48)');
+        const vignette = ctx.createRadialGradient(width * .5, height * .45, Math.min(width, height) * .22, width * .5, height * .45, Math.max(width, height) * .76);
+        vignette.addColorStop(0, 'rgba(0, 0, 0, 0)'); vignette.addColorStop(1, 'rgba(0, 0, 0, .42)');
         ctx.fillStyle = vignette; ctx.fillRect(0, 0, width, height);
       }
 
@@ -359,29 +264,18 @@
         smoothX += (pointerX - smoothX) * .035; smoothY += (pointerY - smoothY) * .035;
         if (!reducedMotion.matches) time += dt * (entering ? 1.35 : 1);
         const pull = entering && !reducedMotion.matches ? Math.max(0, Math.min(1, (performance.now() - transitionStart) / 1600)) : 0;
-        draw(time, pull);
-        requestAnimationFrame(animate);
-      }
-
-      function titleCaseName(email) {
-        const local = (email || '').split('@')[0].replace(/[._-]+/g, ' ').trim();
-        if (!local) return 'Explorer';
-        return local.split(/\s+/).map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+        draw(time, pull); requestAnimationFrame(animate);
       }
 
       loginForm.addEventListener('submit', (event) => {
         event.preventDefault();
         if (entering) return;
         entering = true;
-        document.getElementById('welcomeName').textContent = titleCaseName(document.getElementById('email').value);
         loginButton.disabled = true;
-        loginButton.innerHTML = 'Opening workspace <span aria-hidden="true">···</span>';
+        loginButton.innerHTML = '<span class="loading-orbit" aria-hidden="true"></span>';
         transitionStart = performance.now();
         document.body.classList.add('is-entering');
-        window.setTimeout(() => {
-          arrival.setAttribute('aria-hidden', 'false');
-          document.body.classList.add('is-arrived');
-        }, 680);
+        window.setTimeout(() => { arrival.setAttribute('aria-hidden', 'false'); document.body.classList.add('is-arrived'); }, 620);
       });
 
       window.addEventListener('pointermove', (event) => {
@@ -389,8 +283,7 @@
         pointerY = (event.clientY / Math.max(1, height) - .5) * 2;
       }, { passive: true });
       window.addEventListener('resize', resize, { passive: true });
-      resize();
-      requestAnimationFrame(animate);
+      resize(); requestAnimationFrame(animate);
     })();
   </script>
 </body>
