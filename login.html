@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#050812">
+  <title>NOIR / Sign in</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #f4f6fb;
+      --muted: #9aa5b7;
+      --quiet: #6f7c90;
+      --line: rgba(211, 225, 247, .13);
+      --glass: rgba(9, 14, 26, .71);
+      --blue: #9cc9ff;
+      --ice: #d9e8ff;
+      --pink: #efc3e1;
+      --accent: #d2e9ff;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { min-width: 320px; min-height: 100%; margin: 0; }
+    body {
+      min-height: 100vh;
+      overflow-x: hidden;
+      background: #050812;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    button, input { font: inherit; }
+
+    #particleField {
+      position: fixed;
+      z-index: 0;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      display: block;
+      background: #050812;
+    }
+
+    .atmosphere {
+      position: fixed;
+      z-index: 1;
+      inset: 0;
+      pointer-events: none;
+      background:
+        linear-gradient(180deg, rgba(3, 6, 15, .17) 0%, rgba(4, 8, 18, .03) 38%, rgba(5, 9, 19, .32) 100%),
+        radial-gradient(ellipse at 50% 39%, transparent 20%, rgba(4, 7, 16, .23) 85%),
+        linear-gradient(90deg, rgba(5, 8, 16, .13), transparent 45%, rgba(5, 8, 16, .12));
+    }
+
+    .site-shell {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      min-height: 100vh;
+      flex-direction: column;
+      width: min(1320px, calc(100% - 72px));
+      margin: 0 auto;
+      padding: 28px 0 22px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 22px;
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 760;
+      letter-spacing: .18em;
+    }
+
+    .brand-symbol {
+      display: grid;
+      width: 35px;
+      height: 35px;
+      place-items: center;
+      border: 1px solid rgba(213, 232, 255, .28);
+      border-radius: 11px;
+      background: linear-gradient(145deg, rgba(157, 196, 242, .2), rgba(114, 147, 207, .04));
+      box-shadow: inset 0 1px rgba(255,255,255,.1), 0 0 26px rgba(124, 171, 230, .08);
+      color: #e8f2ff;
+    }
+
+    .top-right {
+      display: flex;
+      align-items: center;
+      gap: 25px;
+      color: rgba(219, 231, 249, .69);
+      font-size: 10px;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .online-label { display: inline-flex; align-items: center; gap: 8px; }
+    .online-dot { width: 6px; height: 6px; border-radius: 50%; background: #cce8ff; box-shadow: 0 0 11px rgba(168, 214, 255, .9); }
+
+    .motion-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 9px;
+      border: 1px solid rgba(220, 235, 255, .15);
+      border-radius: 999px;
+      background: rgba(11, 17, 31, .34);
+      color: rgba(228, 238, 251, .77);
+      cursor: pointer;
+      font-size: 9px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      transition: background .2s ease, border-color .2s ease;
+    }
+
+    .motion-toggle:hover { border-color: rgba(220, 235, 255, .35); background: rgba(34, 48, 72, .46); }
+    .motion-toggle:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+    .motion-icon { width: 10px; height: 10px; }
+
+    .main-layout {
+      display: grid;
+      flex: 1;
+      grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
+      align-items: center;
+      gap: clamp(50px, 9vw, 150px);
+      padding: 62px 0 66px;
+    }
+
+    .intro { max-width: 650px; padding-bottom: 12px; }
+
+    .overline {
+      display: inline-flex;
+      align-items: center;
+      gap: 11px;
+      margin-bottom: 24px;
+      color: rgba(209, 225, 247, .7);
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: .19em;
+      text-transform: uppercase;
+    }
+
+    .overline::before { width: 25px; height: 1px; background: rgba(210, 230, 255, .75); box-shadow: 0 0 10px rgba(173, 216, 255, .7); content: ""; }
+
+    h1 {
+      max-width: 700px;
+      margin: 0;
+      font-size: clamp(52px, 7.2vw, 94px);
+      font-weight: 540;
+      letter-spacing: -.072em;
+      line-height: .99;
+    }
+
+    h1 .line-two { display: block; color: rgba(235, 243, 255, .7); font-weight: 400; }
+    h1 .glint { color: #fff; text-shadow: 0 0 34px rgba(187, 218, 255, .28); }
+
+    .intro-copy {
+      max-width: 430px;
+      margin: 25px 0 0;
+      color: rgba(199, 211, 231, .76);
+      font-size: 14px;
+      line-height: 1.8;
+    }
+
+    .field-caption {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      margin-top: 36px;
+      color: rgba(194, 211, 236, .67);
+      font-size: 9px;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .field-bars { display: flex; align-items: center; gap: 3px; height: 15px; }
+    .field-bars span { display: block; width: 2px; height: var(--h); border-radius: 2px; background: rgba(211, 232, 255, .78); box-shadow: 0 0 7px rgba(159, 202, 255, .42); }
+    .field-separator { width: 1px; height: 16px; background: rgba(222, 235, 255, .2); }
+
+    .login-card {
+      position: relative;
+      width: 100%;
+      padding: 34px 34px 29px;
+      border: 1px solid rgba(211, 228, 250, .19);
+      border-radius: 22px;
+      background:
+        linear-gradient(145deg, rgba(20, 28, 45, .77), rgba(8, 13, 25, .76));
+      box-shadow: 0 28px 90px rgba(0, 0, 0, .37), inset 0 1px rgba(255,255,255,.075);
+      backdrop-filter: blur(22px) saturate(120%);
+      -webkit-backdrop-filter: blur(22px) saturate(120%);
+    }
+
+    .card-topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 29px; }
+    .card-kicker { color: rgba(207, 222, 243, .62); font-size: 9px; font-weight: 700; letter-spacing: .16em; text-transform: uppercase; }
+    .secure { display: inline-flex; align-items: center; gap: 6px; color: rgba(205, 222, 241, .57); font-size: 9px; }
+    .secure svg { opacity: .72; }
+
+    .login-card h2 { margin: 0; color: #f5f8fd; font-size: 27px; font-weight: 560; letter-spacing: -.04em; }
+    .card-copy { margin: 7px 0 25px; color: rgba(193, 207, 228, .7); font-size: 12px; }
+
+    .field { margin-bottom: 17px; }
+    .field label { display: block; margin-bottom: 8px; color: rgba(221, 232, 247, .88); font-size: 10px; font-weight: 600; letter-spacing: .025em; }
+    .input-wrap { position: relative; }
+    .input-icon { position: absolute; top: 50%; left: 13px; width: 16px; height: 16px; color: rgba(176, 198, 226, .59); transform: translateY(-50%); pointer-events: none; }
+    .field input {
+      width: 100%;
+      height: 47px;
+      padding: 0 42px 0 41px;
+      border: 1px solid rgba(202, 220, 245, .16);
+      border-radius: 10px;
+      outline: none;
+      background: rgba(5, 10, 20, .44);
+      color: #f1f5fc;
+      font-size: 12px;
+      transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+    }
+
+    .field input::placeholder { color: rgba(158, 175, 200, .47); }
+    .field input:focus { border-color: rgba(172, 212, 255, .6); background: rgba(9, 16, 30, .68); box-shadow: 0 0 0 3px rgba(126, 178, 237, .09); }
+
+    .show-password {
+      position: absolute;
+      top: 50%;
+      right: 12px;
+      display: grid;
+      width: 25px;
+      height: 25px;
+      place-items: center;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: rgba(176, 198, 226, .65);
+      cursor: pointer;
+      transform: translateY(-50%);
+    }
+    .show-password:hover { color: #e5f1ff; }
+    .show-password:focus-visible { outline: 1px solid var(--blue); border-radius: 5px; }
+
+    .form-options { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 1px 0 22px; }
+    .remember { display: inline-flex; align-items: center; gap: 8px; color: rgba(194, 208, 229, .74); font-size: 10px; cursor: pointer; }
+    .remember input { width: 13px; height: 13px; margin: 0; accent-color: #c5e3ff; }
+    .text-link { color: rgba(207, 226, 249, .84); font-size: 10px; text-decoration: none; }
+    .text-link:hover { color: #fff; text-decoration: underline; text-underline-offset: 3px; }
+
+    .submit-button {
+      display: flex;
+      width: 100%;
+      min-height: 48px;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      border: 1px solid rgba(236, 246, 255, .7);
+      border-radius: 10px;
+      background: linear-gradient(100deg, #edf5ff, #c9def6);
+      box-shadow: 0 6px 25px rgba(153, 192, 238, .15), inset 0 1px rgba(255,255,255,.8);
+      color: #101a29;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 760;
+      transition: transform .16s ease, box-shadow .16s ease, filter .16s ease;
+    }
+    .submit-button:hover { filter: brightness(1.05); transform: translateY(-1px); box-shadow: 0 9px 30px rgba(153, 192, 238, .22); }
+    .submit-button:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+    .or-divider { display: flex; align-items: center; gap: 12px; margin: 21px 0; color: rgba(176, 192, 216, .47); font-size: 9px; letter-spacing: .09em; text-transform: uppercase; }
+    .or-divider::before, .or-divider::after { height: 1px; flex: 1; background: rgba(205, 222, 245, .12); content: ""; }
+    .passkey-button {
+      display: flex;
+      width: 100%;
+      min-height: 43px;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      border: 1px solid rgba(211, 228, 249, .16);
+      border-radius: 10px;
+      background: rgba(219, 233, 253, .035);
+      color: rgba(225, 236, 250, .86);
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 620;
+      transition: border-color .18s ease, background .18s ease;
+    }
+    .passkey-button:hover { border-color: rgba(211, 228, 249, .34); background: rgba(219, 233, 253, .08); }
+    .passkey-button:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+
+    .signup { margin: 22px 0 0; color: rgba(177, 194, 218, .67); font-size: 10px; text-align: center; }
+    .signup a { color: rgba(226, 238, 254, .94); font-weight: 650; text-decoration: none; }
+    .signup a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+    .bottom-bar { display: flex; align-items: center; justify-content: space-between; gap: 18px; color: rgba(174, 192, 218, .55); font-size: 8px; font-weight: 620; letter-spacing: .16em; text-transform: uppercase; }
+    .bottom-links { display: flex; gap: 20px; }
+    .bottom-links a { color: inherit; text-decoration: none; transition: color .15s ease; }
+    .bottom-links a:hover { color: rgba(231, 241, 255, .9); }
+
+    .toast {
+      position: fixed;
+      z-index: 5;
+      right: 26px;
+      bottom: 25px;
+      max-width: min(390px, calc(100vw - 40px));
+      padding: 13px 16px;
+      border: 1px solid rgba(204, 226, 252, .2);
+      border-radius: 11px;
+      background: rgba(9, 15, 28, .9);
+      box-shadow: 0 14px 45px rgba(0,0,0,.3);
+      color: #e9f2ff;
+      font-size: 11px;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(9px);
+      transition: opacity .2s ease, transform .2s ease;
+      backdrop-filter: blur(14px);
+    }
+    .toast.show { opacity: 1; transform: translateY(0); }
+
+    @media (max-width: 920px) {
+      .site-shell { width: min(100% - 48px, 720px); }
+      .main-layout { grid-template-columns: minmax(0,1fr) minmax(330px,390px); gap: 35px; }
+      h1 { font-size: clamp(48px, 7vw, 72px); }
+      .intro-copy { font-size: 12px; }
+      .login-card { padding: 29px 27px 25px; }
+    }
+    @media (max-width: 740px) {
+      .site-shell { width: min(100% - 34px, 520px); padding: 19px 0 16px; }
+      .topbar { align-items: flex-start; }
+      .top-right { gap: 0; }
+      .online-label { display: none; }
+      .main-layout { display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 29px; padding: 45px 0 42px; }
+      .intro { max-width: 500px; padding: 0; }
+      .overline { margin-bottom: 15px; }
+      h1 { font-size: clamp(45px, 10vw, 67px); }
+      .intro-copy { max-width: 440px; margin-top: 14px; }
+      .field-caption { margin-top: 18px; }
+      .login-card { max-width: 430px; align-self: center; padding: 27px 25px 23px; }
+      .bottom-bar { font-size: 7px; letter-spacing: .12em; }
+      .bottom-links { gap: 12px; }
+    }
+    @media (max-width: 430px) {
+      .site-shell { width: calc(100% - 28px); }
+      .brand { font-size: 10px; }
+      .brand-symbol { width: 31px; height: 31px; }
+      .motion-toggle { padding: 6px 8px; font-size: 8px; }
+      .login-card { padding: 23px 19px 21px; border-radius: 17px; }
+      .card-topline { margin-bottom: 22px; }
+      .login-card h2 { font-size: 24px; }
+      .form-options { margin-bottom: 18px; }
+      .bottom-bar { align-items: flex-start; flex-direction: column; gap: 8px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="particleField" aria-hidden="true"></canvas>
+  <div class="atmosphere" aria-hidden="true"></div>
+
+  <div class="site-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Noir home">
+        <span class="brand-symbol" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none">
+            <path d="M12 2.8 14.7 9.3 21.2 12l-6.5 2.7L12 21.2l-2.7-6.5L2.8 12l6.5-2.7L12 2.8Z" stroke="currentColor" stroke-width="1.15"/>
+            <circle cx="12" cy="12" r="2.1" fill="currentColor"/>
+          </svg>
+        </span>
+        NOIR / FIELD
+      </a>
+      <div class="top-right">
+        <span class="online-label"><i class="online-dot"></i>Secure access</span>
+        <button class="motion-toggle" id="motionToggle" type="button" aria-pressed="false" title="Pause or resume the particle animation">
+          <svg class="motion-icon" viewBox="0 0 12 12" fill="currentColor" aria-hidden="true"><path d="M3 2.1h2v7.8H3zM7 2.1h2v7.8H7z"/></svg>
+          <span id="motionLabel">Pause field</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="main-layout">
+      <section class="intro" aria-labelledby="intro-title">
+        <div class="overline">A quieter place to work</div>
+        <h1 id="intro-title">Move through<br><span class="line-two">the <span class="glint">noise.</span></span></h1>
+        <p class="intro-copy">Your projects, notes, and ideas—together in one calm workspace. Sign in to pick up exactly where your thinking left off.</p>
+        <div class="field-caption" aria-label="Animated particle field status">
+          <span class="field-bars" aria-hidden="true"><span style="--h:5px"></span><span style="--h:11px"></span><span style="--h:8px"></span><span style="--h:14px"></span><span style="--h:6px"></span><span style="--h:10px"></span></span>
+          <span>Particle field</span><i class="field-separator"></i><span>Signal 01 / Live</span>
+        </div>
+      </section>
+
+      <section class="login-card" aria-labelledby="login-title">
+        <div class="card-topline">
+          <span class="card-kicker">Workspace access</span>
+          <span class="secure">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3.1" y="7" width="9.8" height="7" rx="1.5" stroke="currentColor" stroke-width="1.3"/><path d="M5.2 7V4.9a2.8 2.8 0 0 1 5.6 0V7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+            Encrypted session
+          </span>
+        </div>
+        <h2 id="login-title">Welcome back</h2>
+        <p class="card-copy">Enter your details to continue.</p>
+
+        <form id="loginForm" autocomplete="on">
+          <div class="field">
+            <label for="email">Email address</label>
+            <div class="input-wrap">
+              <svg class="input-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2" stroke="currentColor" stroke-width="1.35"/><path d="m3.5 5 6.5 5.1L16.5 5" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              <input id="email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required>
+            </div>
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <div class="input-wrap">
+              <svg class="input-icon" viewBox="0 0 20 20" fill="none" aria-hidden="true"><rect x="3.2" y="8.2" width="13.6" height="9" rx="2" stroke="currentColor" stroke-width="1.35"/><path d="M6 8.2V5.8a4 4 0 0 1 8 0v2.4" stroke="currentColor" stroke-width="1.35" stroke-linecap="round"/><circle cx="10" cy="12.7" r="1" fill="currentColor"/></svg>
+              <input id="password" name="password" type="password" placeholder="Enter your password" autocomplete="current-password" required>
+              <button class="show-password" id="showPassword" type="button" aria-label="Show password" title="Show password">
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true"><path d="M2.2 10s2.7-4.3 7.8-4.3 7.8 4.3 7.8 4.3-2.7 4.3-7.8 4.3S2.2 10 2.2 10Z" stroke="currentColor" stroke-width="1.3"/><circle cx="10" cy="10" r="2.1" stroke="currentColor" stroke-width="1.3"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="form-options">
+            <label class="remember"><input type="checkbox" name="remember"> Remember me</label>
+            <a class="text-link" href="#forgot" data-message="Connect a password-reset flow here.">Forgot password?</a>
+          </div>
+          <button class="submit-button" type="submit">Sign in <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="or-divider">or</div>
+          <button class="passkey-button" id="passkeyButton" type="button"><svg width="15" height="15" viewBox="0 0 18 18" fill="none" aria-hidden="true"><circle cx="6.1" cy="9" r="3.6" stroke="currentColor" stroke-width="1.4"/><path d="M9.5 9h6m-2.2 0v2m-2.1-2v1.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>Continue with a passkey</button>
+        </form>
+        <p class="signup">New to Noir? <a href="#invite" data-message="Connect your account-creation flow here.">Create an account</a></p>
+      </section>
+    </main>
+
+    <footer class="bottom-bar">
+      <span>© 2026 Noir Field · Generated particle atmosphere</span>
+      <nav class="bottom-links" aria-label="Footer links"><a href="#privacy" data-message="Add your privacy policy link here.">Privacy</a><a href="#support" data-message="Add your support link here.">Support</a><span>01 / 03</span></nav>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite">Preview UI only — connect your authentication provider to enable sign-in.</div>
+
+  <script>
+    (() => {
+      'use strict';
+      const canvas = document.getElementById('particleField');
+      const ctx = canvas.getContext('2d', { alpha: false });
+      const motionToggle = document.getElementById('motionToggle');
+      const motionLabel = document.getElementById('motionLabel');
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      let width = 0, height = 0, dpr = 1, time = 0, lastFrame = 0;
+      let columns = 0, rows = 0, points = [], bokeh = [];
+      let paused = false;
+      let pointerX = 0, pointerY = 0, smoothX = 0, smoothY = 0;
+
+      function randomGenerator(seed) {
+        let value = seed >>> 0;
+        return () => {
+          value = (value * 1664525 + 1013904223) >>> 0;
+          return value / 4294967296;
+        };
+      }
+
+      function resize() {
+        dpr = Math.min(window.devicePixelRatio || 1, 1.75);
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = width + 'px';
+        canvas.style.height = height + 'px';
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        const rand = randomGenerator(83021 + width * 7 + height * 13);
+        columns = Math.max(76, Math.min(156, Math.round(width / 10)));
+        rows = Math.max(24, Math.min(38, Math.round(height / 22)));
+        points = [];
+        for (let row = 0; row < rows; row++) {
+          const depth = row / (rows - 1);
+          for (let col = 0; col < columns; col++) {
+            points.push({
+              col, row, depth,
+              x: -1.12 + 2.24 * col / (columns - 1),
+              seed: rand(),
+              size: .55 + rand() * .9,
+              tone: rand()
+            });
+          }
+        }
+        bokeh = [];
+        for (let i = 0; i < 74; i++) {
+          const randValue = rand();
+          bokeh.push({
+            x: rand() * width,
+            y: rand() * height * .82,
+            radius: randValue > .93 ? 2.4 + rand() * 4.2 : .5 + rand() * 2.0,
+            alpha: .035 + rand() * .17,
+            phase: rand() * Math.PI * 2,
+            speed: .1 + rand() * .7,
+            hue: rand() > .78 ? 315 : (rand() > .48 ? 215 : 228)
+          });
+        }
+        draw(0);
+      }
+
+      function waveHeight(x, depth, t, seed) {
+        const drift = t * .32;
+        const broad = .135 * Math.sin(x * 3.25 + depth * 3.9 - drift);
+        const fine = .047 * Math.sin(x * 8.6 - depth * 6.8 + t * .46 + seed * 2.2);
+        const travelingRidge = .19 * Math.exp(-Math.pow((x - .48 * Math.sin(depth * 4.0 + t * .18)) * 2.0, 2))
+          * Math.sin(depth * 10.5 - t * .86 + x * 1.8);
+        const fold = .075 * Math.cos(x * 2.1 - depth * 8.0 + t * .27);
+        return broad + fine + travelingRidge + fold;
+      }
+
+      function screenPoint(point, t) {
+        const depth = point.depth;
+        const scale = .30 + depth * .94;
+        const x = point.x;
+        const wave = waveHeight(x, depth, t, point.seed);
+        const px = width * .5 + x * width * .385 * scale + smoothX * (8 + depth * 16);
+        const py = height * .48 + depth * height * .335 - wave * height * .68 * scale + smoothY * (5 + depth * 10);
+        const glimmer = .5 + .5 * Math.sin(point.seed * 28 + t * (1.0 + point.seed) + depth * 9 + x * 5);
+        const alpha = (.075 + .53 * Math.pow(depth, 1.08)) * (.61 + glimmer * .56);
+        const radius = point.size * (.52 + depth * 1.04) * (glimmer > .95 ? 1.55 : 1);
+        return { x: px, y: py, alpha, radius, glimmer, depth, tone: point.tone };
+      }
+
+      function drawBokeh(t) {
+        for (const item of bokeh) {
+          const flicker = .64 + .36 * Math.sin(item.phase + t * item.speed);
+          const alpha = item.alpha * flicker;
+          ctx.beginPath();
+          ctx.arc(item.x + smoothX * 4, item.y + smoothY * 3, item.radius, 0, Math.PI * 2);
+          ctx.fillStyle = `hsla(${item.hue}, 58%, 86%, ${alpha})`;
+          if (item.radius > 4) {
+            ctx.shadowColor = `hsla(${item.hue}, 70%, 82%, ${alpha * .48})`;
+            ctx.shadowBlur = 14;
+          }
+          ctx.fill();
+          ctx.shadowBlur = 0;
+        }
+      }
+
+      function draw(t) {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, width, height);
+        const backdrop = ctx.createLinearGradient(0, 0, width * .25, height);
+        backdrop.addColorStop(0, '#050812');
+        backdrop.addColorStop(.48, '#070d1b');
+        backdrop.addColorStop(1, '#050a15');
+        ctx.fillStyle = backdrop;
+        ctx.fillRect(0, 0, width, height);
+
+        // A low-contrast haze gives the particle surface a soft, cinematic glow.
+        const haze = ctx.createRadialGradient(width * .53, height * .70, 0, width * .53, height * .70, Math.max(width, height) * .73);
+        haze.addColorStop(0, 'rgba(63, 99, 152, .16)');
+        haze.addColorStop(.42, 'rgba(25, 47, 83, .08)');
+        haze.addColorStop(1, 'rgba(3, 6, 15, 0)');
+        ctx.fillStyle = haze;
+        ctx.fillRect(0, 0, width, height);
+        drawBokeh(t);
+
+        const projected = new Array(points.length);
+        for (let i = 0; i < points.length; i++) projected[i] = screenPoint(points[i], t);
+
+        // Fine strands make the points read as a fluid, three-dimensional field.
+        ctx.save();
+        ctx.lineWidth = .62;
+        for (let row = 1; row < rows; row += 3) {
+          ctx.beginPath();
+          for (let col = 0; col < columns; col += 1) {
+            const p = projected[row * columns + col];
+            if (col === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+          }
+          ctx.strokeStyle = `rgba(151, 190, 236, ${.018 + row / rows * .052})`;
+          ctx.stroke();
+        }
+        for (let col = 2; col < columns; col += 7) {
+          ctx.beginPath();
+          for (let row = 0; row < rows; row += 1) {
+            const p = projected[row * columns + col];
+            if (row === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+          }
+          ctx.strokeStyle = 'rgba(170, 206, 249, .025)';
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        // Dense, softly varied particles on the moving wave surface.
+        for (let i = 0; i < projected.length; i++) {
+          const p = projected[i];
+          const bright = p.glimmer > .972;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, Math.max(.35, p.radius), 0, Math.PI * 2);
+          if (bright) {
+            const tint = p.tone > .91 ? '244, 211, 239' : (p.tone > .48 ? '206, 229, 255' : '232, 240, 255');
+            ctx.fillStyle = `rgba(${tint}, ${Math.min(.98, p.alpha + .29)})`;
+            ctx.shadowColor = `rgba(${tint}, .8)`;
+            ctx.shadowBlur = 9 + p.depth * 7;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            if (p.glimmer > .994) {
+              ctx.strokeStyle = `rgba(${tint}, .52)`;
+              ctx.lineWidth = .55;
+              ctx.beginPath(); ctx.moveTo(p.x - 3, p.y); ctx.lineTo(p.x + 3, p.y); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(p.x, p.y - 3); ctx.lineTo(p.x, p.y + 3); ctx.stroke();
+            }
+          } else {
+            const tint = p.tone > .93 ? '223, 202, 238' : (p.tone > .58 ? '147, 190, 244' : '219, 233, 255');
+            ctx.fillStyle = `rgba(${tint}, ${p.alpha})`;
+            ctx.fill();
+          }
+        }
+
+        // Soft trailing ribbons behind the brightest swells.
+        for (let band = 0; band < 3; band++) {
+          const y = height * (.68 + band * .09) + Math.sin(t * .25 + band) * 9;
+          const ribbon = ctx.createLinearGradient(0, y - 40, width, y + 22);
+          ribbon.addColorStop(0, 'rgba(100, 146, 210, 0)');
+          ribbon.addColorStop(.48, `rgba(134, 177, 231, ${.024 - band * .004})`);
+          ribbon.addColorStop(1, 'rgba(154, 190, 235, 0)');
+          ctx.fillStyle = ribbon;
+          ctx.fillRect(0, y - 42, width, 78);
+        }
+
+        // A subtle vignette keeps the form readable over the animation.
+        const vignette = ctx.createRadialGradient(width * .5, height * .46, Math.min(width, height) * .22, width * .5, height * .46, Math.max(width, height) * .74);
+        vignette.addColorStop(0, 'rgba(2, 5, 13, .02)');
+        vignette.addColorStop(1, 'rgba(2, 5, 13, .47)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      function animate(timestamp) {
+        if (!lastFrame) lastFrame = timestamp;
+        const dt = Math.min(.04, Math.max(0, (timestamp - lastFrame) / 1000));
+        lastFrame = timestamp;
+        smoothX += (pointerX - smoothX) * .035;
+        smoothY += (pointerY - smoothY) * .035;
+        if (!paused && !reducedMotion.matches) time += dt;
+        draw(time);
+        requestAnimationFrame(animate);
+      }
+
+      function setMotionState() {
+        const systemReduced = reducedMotion.matches;
+        const motionIsPaused = paused || systemReduced;
+        motionToggle.disabled = systemReduced;
+        motionToggle.setAttribute('aria-pressed', String(motionIsPaused));
+        motionLabel.textContent = systemReduced ? 'Reduced motion' : (paused ? 'Resume field' : 'Pause field');
+        motionToggle.title = systemReduced ? 'Particle animation is paused by your reduced-motion preference' : (paused ? 'Resume the particle animation' : 'Pause the particle animation');
+      }
+
+      motionToggle.addEventListener('click', () => {
+        paused = !paused;
+        setMotionState();
+      });
+      window.addEventListener('pointermove', (event) => {
+        pointerX = (event.clientX / Math.max(1, width) - .5) * 2;
+        pointerY = (event.clientY / Math.max(1, height) - .5) * 2;
+      }, { passive: true });
+      window.addEventListener('resize', resize, { passive: true });
+      reducedMotion.addEventListener?.('change', setMotionState);
+
+      // This page is a visual prototype: never send the demo form anywhere.
+      const toast = document.getElementById('toast');
+      let toastTimer;
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add('show');
+        window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(() => toast.classList.remove('show'), 3100);
+      }
+      document.getElementById('loginForm').addEventListener('submit', (event) => {
+        event.preventDefault();
+        showToast('Preview only — connect your authentication provider to enable sign-in.');
+      });
+      document.getElementById('showPassword').addEventListener('click', (event) => {
+        const field = document.getElementById('password');
+        const show = field.type === 'password';
+        field.type = show ? 'text' : 'password';
+        event.currentTarget.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+        event.currentTarget.title = show ? 'Hide password' : 'Show password';
+      });
+      document.getElementById('passkeyButton').addEventListener('click', () => showToast('Connect a passkey provider here.'));
+      document.querySelectorAll('[data-message]').forEach((link) => link.addEventListener('click', (event) => {
+        event.preventDefault(); showToast(link.dataset.message);
+      }));
+
+      resize();
+      setMotionState();
+      requestAnimationFrame(animate);
+    })();
+  </script>
+</body>
+</html>
