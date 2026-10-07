@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101719">
+  <title>Magnetic Hover — 3D Feedback Lab</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101719;
+      --panel: #172124;
+      --line: rgba(222,239,231,.11);
+      --text: #eff5f1;
+      --muted: #9caeaa;
+      --soft: #71817e;
+      --mint: #b7f27c;
+      --orange: #ffb876;
+      --coral: #ff796d;
+      --blue: #7cbce5;
+      --shadow: 0 20px 54px rgba(0,0,0,.23);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background:
+        radial-gradient(ellipse at 12% 0%, rgba(69,104,85,.16), transparent 35rem),
+        radial-gradient(ellipse at 92% 18%, rgba(49,105,111,.12), transparent 36rem),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    button, input { font: inherit; }
+    .shell { width: min(1180px, calc(100% - 44px)); margin: 0 auto; padding: 24px 0 74px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:2px 0 42px; }
+    .brand { display:inline-flex; align-items:center; gap:11px; color:var(--text); text-decoration:none; font-size:12px; font-weight:760; letter-spacing:.15em; text-transform:uppercase; }
+    .brand-mark { display:grid; width:34px; height:34px; place-items:center; border:1px solid rgba(183,242,124,.34); border-radius:10px; background:rgba(183,242,124,.08); color:var(--mint); }
+    .back-link { color:var(--muted); font-size:11px; text-decoration:none; }
+    .back-link:hover { color:var(--mint); }
+    .hero { max-width:830px; margin-bottom:24px; }
+    .eyebrow { display:inline-flex; align-items:center; gap:9px; margin:0 0 14px; color:var(--mint); font-size:11px; font-weight:760; letter-spacing:.16em; text-transform:uppercase; }
+    .eyebrow::before { width:7px; height:7px; border-radius:50%; background:var(--mint); box-shadow:0 0 16px rgba(183,242,124,.75); content:""; }
+    h1 { margin:0; font-size:clamp(36px,5.5vw,62px); font-weight:680; letter-spacing:-.057em; line-height:1.02; }
+    h1 span { color:var(--mint); }
+    .hero-copy { max-width:680px; margin:16px 0 0; color:#b3c1bd; font-size:clamp(15px,1.6vw,18px); line-height:1.62; }
+    .physics-note { display:grid; grid-template-columns:32px minmax(0,1fr); gap:12px; align-items:start; margin:0 0 17px; padding:15px 17px; border:1px solid rgba(255,184,118,.23); border-radius:14px; background:linear-gradient(100deg,rgba(255,184,118,.09),rgba(255,184,118,.025)); }
+    .note-icon { display:grid; width:28px; height:28px; place-items:center; border-radius:9px; background:rgba(255,184,118,.12); color:var(--orange); font-size:15px; font-weight:800; }
+    .physics-note p { margin:0; color:#d8dfda; font-size:12px; line-height:1.65; }
+    .physics-note strong { color:#fff; }
+    .layout { display:grid; grid-template-columns:minmax(0,1.7fr) minmax(290px,.86fr); align-items:start; gap:17px; }
+    .stack { display:grid; gap:13px; min-width:0; }
+    .card { overflow:hidden; border:1px solid var(--line); border-radius:17px; background:linear-gradient(150deg,rgba(28,40,44,.96),rgba(21,31,34,.98)); box-shadow:var(--shadow); }
+    .scene-card { padding:17px 17px 13px; }
+    .card-head { display:flex; align-items:center; justify-content:space-between; gap:15px; margin-bottom:12px; }
+    .kicker { margin:0 0 3px; color:var(--soft); font-size:10px; font-weight:760; letter-spacing:.14em; text-transform:uppercase; }
+    .card-head h2, .card-title { margin:0; font-size:16px; font-weight:640; letter-spacing:-.02em; }
+    .state-pill { display:inline-flex; align-items:center; gap:8px; flex:none; padding:7px 10px; border:1px solid rgba(183,242,124,.2); border-radius:999px; background:rgba(183,242,124,.07); color:var(--mint); font-size:10px; font-weight:760; letter-spacing:.09em; text-transform:uppercase; }
+    .state-dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
+    .state-pill[data-mode="off"] { color:var(--orange); border-color:rgba(255,184,118,.24); background:rgba(255,184,118,.07); }
+    .state-pill[data-mode="contact"] { color:#ffc178; border-color:rgba(255,184,118,.3); background:rgba(255,184,118,.1); }
+    .state-pill[data-mode="active"] .state-dot { animation:pulse 1.2s ease-in-out infinite; box-shadow:0 0 0 4px rgba(183,242,124,.1); }
+    @keyframes pulse { 50% { opacity:.35; } }
+    .canvas-frame { overflow:hidden; border:1px solid rgba(210,236,222,.09); border-radius:13px; background:#101b1e; }
+    #hoverCanvas { display:block; width:100%; aspect-ratio:12 / 7; }
+    .scene-caption { display:flex; flex-wrap:wrap; justify-content:space-between; gap:7px 16px; padding:11px 2px 0; color:var(--muted); font-size:10px; }
+    .caption-left { display:flex; flex-wrap:wrap; gap:13px; }
+    .key { display:inline-flex; align-items:center; gap:6px; }
+    .swatch { width:8px; height:8px; border-radius:50%; }
+    .key-mint { background:var(--mint); }.key-coral { background:var(--coral); }.key-blue { background:var(--blue); }
+    .stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:9px; }
+    .stat { min-width:0; padding:13px 13px 12px; border:1px solid var(--line); border-radius:13px; background:rgba(23,33,36,.82); }
+    .stat-label { display:block; margin-bottom:6px; color:var(--muted); font-size:9px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; }
+    .stat-value { display:block; overflow:hidden; color:var(--text); font-size:clamp(17px,2.2vw,22px); font-variant-numeric:tabular-nums; font-weight:680; letter-spacing:-.045em; text-overflow:ellipsis; white-space:nowrap; }
+    .stat:nth-child(2) .stat-value { color:var(--mint); }
+    .stat:nth-child(4) .stat-value { color:var(--orange); }
+    .stat-unit { display:block; margin-top:3px; color:var(--soft); font-size:9px; }
+    .controls { padding:19px; }
+    .controls h2 { margin:0; font-size:18px; font-weight:650; letter-spacing:-.03em; }
+    .controls-intro { margin:7px 0 18px; color:var(--muted); font-size:11px; line-height:1.6; }
+    .control { margin-bottom:18px; }
+    .control-top { display:flex; align-items:baseline; justify-content:space-between; gap:9px; margin-bottom:7px; }
+    .control-top label { color:#e2eae5; font-size:11px; font-weight:650; }
+    .control-value { color:var(--mint); font-size:10px; font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap; }
+    input[type=range] { display:block; width:100%; height:17px; margin:0; appearance:none; background:transparent; cursor:pointer; }
+    input[type=range]::-webkit-slider-runnable-track { height:4px; border-radius:99px; background:linear-gradient(90deg,rgba(183,242,124,.75),rgba(183,242,124,.18)); }
+    input[type=range]::-moz-range-track { height:4px; border-radius:99px; background:linear-gradient(90deg,rgba(183,242,124,.75),rgba(183,242,124,.18)); }
+    input[type=range]::-webkit-slider-thumb { width:15px; height:15px; margin-top:-5.5px; appearance:none; border:2px solid #13201b; border-radius:50%; background:var(--mint); box-shadow:0 0 0 3px rgba(183,242,124,.12); }
+    input[type=range]::-moz-range-thumb { width:12px; height:12px; border:2px solid #13201b; border-radius:50%; background:var(--mint); box-shadow:0 0 0 3px rgba(183,242,124,.12); }
+    input[type=range]:focus-visible { outline:2px solid var(--mint); outline-offset:5px; border-radius:8px; }
+    .range-foot { display:flex; justify-content:space-between; gap:8px; margin-top:2px; color:var(--soft); font-size:9px; }
+    .control-help { margin:6px 0 0; color:var(--soft); font-size:9px; line-height:1.55; }
+    .control-rule { height:1px; margin:3px 0 15px; background:var(--line); }
+    .button { min-height:40px; padding:8px 11px; border:1px solid rgba(183,242,124,.26); border-radius:10px; background:var(--mint); color:#172019; cursor:pointer; font-size:10px; font-weight:780; transition:transform .15s ease,filter .15s ease; }
+    .button:hover { filter:brightness(1.06); transform:translateY(-1px); }
+    .button:focus-visible { outline:2px solid var(--mint); outline-offset:3px; }
+    .button.secondary { border-color:var(--line); background:rgba(255,255,255,.045); color:#d5dfd9; }
+    .button.toggle-off { border-color:rgba(255,184,118,.27); background:rgba(255,184,118,.12); color:#ffd8ae; }
+    .button-row { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .button-row .wide { grid-column:1/-1; }
+    .controls-foot { margin:11px 0 0; color:var(--soft); font-size:9px; line-height:1.6; }
+    .model-card { grid-column:1/-1; padding:17px 19px; }
+    .model-card h2 { margin:0 0 9px; font-size:13px; font-weight:650; }
+    .model-card p { margin:0; color:var(--muted); font-size:10px; line-height:1.65; }
+    .model-card p + p { margin-top:8px; }
+    .model-card strong { color:#dfe9e2; font-weight:650; }
+    .explain { margin-top:50px; }
+    .explain-head { display:flex; align-items:end; justify-content:space-between; gap:20px; margin-bottom:15px; }
+    .explain-head h2 { margin:0; font-size:clamp(24px,3vw,34px); font-weight:640; letter-spacing:-.045em; }
+    .explain-head p { max-width:370px; margin:0; color:var(--muted); font-size:11px; }
+    .explain-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+    .explain-item { min-height:148px; padding:17px; border:1px solid var(--line); border-radius:14px; background:rgba(23,33,36,.7); }
+    .explain-index { display:grid; width:24px; height:24px; place-items:center; margin-bottom:14px; border:1px solid rgba(183,242,124,.23); border-radius:8px; color:var(--mint); font-size:10px; font-weight:730; }
+    .explain-item h3 { margin:0 0 6px; font-size:13px; font-weight:650; }
+    .explain-item p { margin:0; color:var(--muted); font-size:10px; line-height:1.65; }
+    .footer { display:flex; justify-content:space-between; gap:20px; margin-top:25px; padding-top:15px; border-top:1px solid var(--line); color:var(--soft); font-size:9px; }
+    .footer a { color:var(--muted); text-decoration:none; }
+    .footer a:hover { color:var(--mint); }
+    @media (max-width:900px) {
+      .layout { grid-template-columns:1fr; }
+      .controls { order:-1; }
+      .control-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 18px; }
+      .controls-intro,.control-rule,.button-row,.controls-foot { grid-column:1/-1; }
+      .control { margin-bottom:14px; }
+    }
+    @media (max-width:620px) {
+      .shell { width:min(100% - 28px,520px); padding-top:17px; }
+      .topbar { padding-bottom:32px; }
+      .back-link { max-width:128px; text-align:right; font-size:9px; }
+      .hero { margin-bottom:20px; }
+      .physics-note { padding:13px; }
+      .physics-note p { font-size:11px; }
+      .controls { padding:16px; }
+      .control-grid { grid-template-columns:1fr; }
+      .controls-intro,.control-rule,.button-row,.controls-foot { grid-column:auto; }
+      .stats { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+      .stat { padding:11px; }
+      .scene-card { padding:13px 12px 11px; }
+      .card-head { align-items:flex-start; }
+      .scene-caption { font-size:9px; }
+      .explain { margin-top:39px; }
+      .explain-head { display:block; }
+      .explain-head p { margin-top:8px; }
+      .explain-grid { grid-template-columns:1fr; gap:8px; }
+      .explain-item { min-height:0; padding:15px; }
+      .explain-index { margin-bottom:10px; }
+      .footer { display:block; line-height:1.9; }
+    }
+    @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; animation-duration:.01ms!important; transition-duration:.01ms!important; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <a class="brand" href="magnetic-hover.html" aria-label="Magnetic Hover Lab home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none"><path d="M6 4v8a6 6 0 0 0 12 0V4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/><path d="M6 4h4M14 4h4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+        </span>
+        Magnetic Hover Lab
+      </a>
+      <a class="back-link" href="index.html">← Back to the magnet-engine demo</a>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">3D feedback experiment · magnetized coin</p>
+        <h1>Can you make a coin<br><span>hover without tipping?</span></h1>
+        <p class="hero-copy">Try an active stabilizer: it senses the coin's position and tilt, then moves and tilts the magnet underneath. Nudge the coin, try to flip it, or steer the hovering point in 3D.</p>
+      </section>
+
+      <aside class="physics-note">
+        <div class="note-icon" aria-hidden="true">!</div>
+        <p><strong>This is active magnetic levitation—not a normal coin floating over one fixed magnet.</strong> The simulated coin is magnetized, with like poles facing. A passive magnet arrangement can't stably hold it in every direction (Earnshaw's theorem); the moving base uses feedback and actuators, which need external energy. An ordinary coin usually isn't a permanent magnet at all.</p>
+      </aside>
+
+      <section class="layout" aria-label="3D active magnetic levitation experiment">
+        <div class="stack">
+          <article class="card scene-card">
+            <div class="card-head">
+              <div><p class="kicker">3D perspective + top-down tracker</p><h2>Coin, moving base magnet, and feedback</h2></div>
+              <div class="state-pill" id="statePill" data-mode="active" role="status" aria-live="polite"><span class="state-dot"></span><span id="stateText">Stabilizer on</span></div>
+            </div>
+            <div class="canvas-frame"><canvas id="hoverCanvas" aria-label="Three-dimensional animation of a magnetized coin hovering over an actively moved and tilted base magnet"></canvas></div>
+            <div class="scene-caption">
+              <span class="caption-left"><span class="key"><i class="swatch key-mint"></i>feedback / correction</span><span class="key"><i class="swatch key-coral"></i>north pole</span><span class="key"><i class="swatch key-blue"></i>south pole</span></span>
+              <span>Coin is exaggerated for visibility · not to scale</span>
+            </div>
+          </article>
+
+          <div class="stats" aria-label="Live simulation measurements">
+            <div class="stat"><span class="stat-label">Hover height</span><span class="stat-value" id="heightValue">320 mm</span><span class="stat-unit">coin centre above floor</span></div>
+            <div class="stat"><span class="stat-label">Coin tilt</span><span class="stat-value" id="tiltValue">0.0°</span><span class="stat-unit">away from upright</span></div>
+            <div class="stat"><span class="stat-label">Steering error</span><span class="stat-value" id="errorValue">0 mm</span><span class="stat-unit">from requested hover point</span></div>
+            <div class="stat"><span class="stat-label">Control energy</span><span class="stat-value" id="energyValue">0.0 J</span><span class="stat-unit">illustrative actuator use</span></div>
+          </div>
+        </div>
+
+        <aside class="card controls" aria-labelledby="controlsTitle">
+          <p class="kicker">Adjust the experiment</p>
+          <h2 id="controlsTitle">Feedback controls</h2>
+          <p class="controls-intro">With feedback on, the actuator moves the magnet to keep the coin above the target and counter its tilt. Turn it off to see the passive instability.</p>
+
+          <div class="control-grid">
+            <div class="control">
+              <div class="control-top"><label for="heightRange">Target hover height</label><span class="control-value" id="heightOutput">320 mm</span></div>
+              <input id="heightRange" type="range" min="250" max="500" step="5" value="320" aria-describedby="heightHelp">
+              <div class="range-foot"><span>250 mm</span><span>500 mm</span></div>
+              <p class="control-help" id="heightHelp">The base magnet moves vertically to set the hover gap.</p>
+            </div>
+
+            <div class="control">
+              <div class="control-top"><label for="steerRange">Steer hover point (X)</label><span class="control-value" id="steerOutput">0 mm</span></div>
+              <input id="steerRange" type="range" min="-300" max="300" step="10" value="0" aria-describedby="steerHelp">
+              <div class="range-foot"><span>left</span><span>right</span></div>
+              <p class="control-help" id="steerHelp">The moving magnet pushes the coin toward this target.</p>
+            </div>
+
+            <div class="control">
+              <div class="control-top"><label for="gainRange">Stabilizer response</label><span class="control-value" id="gainOutput">72%</span></div>
+              <input id="gainRange" type="range" min="0" max="100" step="1" value="72" aria-describedby="gainHelp">
+              <div class="range-foot"><span>gentle</span><span>fast</span></div>
+              <p class="control-help" id="gainHelp">Higher response corrects faster; too much gain can cause overshoot in real hardware.</p>
+            </div>
+          </div>
+
+          <div class="control-rule"></div>
+          <div class="button-row">
+            <button class="button" id="toggleButton" type="button" aria-pressed="true">Stabilizer: ON</button>
+            <button class="button secondary" id="nudgeButton" type="button">Nudge coin</button>
+            <button class="button secondary" id="flipButton" type="button">Try to flip it</button>
+            <button class="button secondary" id="resetButton" type="button">Reset</button>
+          </div>
+          <p class="controls-foot">“Control energy” is an illustrative accounting for the moving/gimballed actuator—not a real magnet or motor power rating. Use the toggle and disturbance buttons to compare active control with a fixed magnet.</p>
+        </aside>
+
+        <article class="card model-card">
+          <h2>What makes this 3D setup different?</h2>
+          <p><strong>Vertical support alone is not enough.</strong> Repelling magnets can support an object in one direction while it drifts sideways or tips in another. The simulation gives the lower magnet an XY carriage, a height stage, and a gimbal; a feedback controller moves them to correct those errors.</p>
+          <p>This is a simplified teaching model, not a full magnetic-field calculation. The coin, magnet force, control law, and actuator energy are illustrative; a real levitator needs sensors, a fast controller, powered actuators, and careful safety limits.</p>
+        </article>
+      </section>
+
+      <section class="explain">
+        <div class="explain-head"><h2>Try these tests</h2><p>Watch both the coin and the red-topped magnet carriage. A correction is an action by the powered controller—not free energy from the permanent magnet.</p></div>
+        <div class="explain-grid">
+          <article class="explain-item"><span class="explain-index">01</span><h3>Switch the stabilizer off</h3><p>Press “Nudge coin”. The stationary repelling setup lets the coin drift away. Its vertical motion can look supported while sideways stability is lost.</p></article>
+          <article class="explain-item"><span class="explain-index">02</span><h3>Challenge the coin's tilt</h3><p>Press “Try to flip it”. With feedback on, the base magnet gimbal moves to correct the tilt; with feedback off, the simulated coin tips over.</p></article>
+          <article class="explain-item"><span class="explain-index">03</span><h3>Steer it across the stage</h3><p>Move the X target slider. The controller shifts the base magnet so its repulsive force nudges the hovering coin toward the new position.</p></article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer"><span>Magnetic Hover Lab · active feedback demonstration</span><span><a href="index.html">Return to the permanent-magnet engine simulation ↗</a></span></footer>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+      const TAU = Math.PI * 2;
+      const STEP = 1 / 480;
+      const MASS = 0.012;       // illustrative 12 g magnetized token
+      const GRAVITY = 9.81;
+      const REST_GAP = 0.18;    // illustrative magnet-centre separation at hover
+      const COIN_RADIUS = 0.052;
+      const COIN_THICKNESS = 0.009;
+      const FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      const el = (id) => document.getElementById(id);
+      const heightRange = el('heightRange');
+      const steerRange = el('steerRange');
+      const gainRange = el('gainRange');
+      const hoverCanvas = el('hoverCanvas');
+      const statePill = el('statePill');
+      const stateText = el('stateText');
+      const toggleButton = el('toggleButton');
+
+      const state = {
+        x: 0, y: 0, z: 0.32,
+        vx: 0, vy: 0, vz: 0,
+        pitch: 0, roll: 0,
+        pitchRate: 0, rollRate: 0,
+        magnetX: 0, magnetY: 0, magnetZ: 0.14,
+        magnetPitch: 0, magnetRoll: 0,
+        time: 0, controlEnergy: 0, controlPower: 0,
+        stabilizer: true, contact: false,
+        trail: [], trailTimer: 0,
+        accum: 0
+      };
+
+      function controls() {
+        return {
+          targetZ: Number(heightRange.value) / 1000,
+          targetX: Number(steerRange.value) / 1000,
+          gain: Number(gainRange.value) / 100
+        };
+      }
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+      const wrapAngle = (a) => ((a + Math.PI) % TAU + TAU) % TAU - Math.PI;
+
+      function updateLabels() {
+        const c = controls();
+        el('heightOutput').textContent = `${Math.round(c.targetZ * 1000)} mm`;
+        el('steerOutput').textContent = `${Math.round(c.targetX * 1000)} mm`;
+        el('gainOutput').textContent = `${Math.round(c.gain * 100)}%`;
+        updateStats();
+      }
+
+      function updateStats() {
+        const normalZ = Math.cos(state.pitch) * Math.cos(state.roll);
+        const tilt = Math.acos(clamp(normalZ, -1, 1)) * 180 / Math.PI;
+        const c = controls();
+        const err = Math.hypot(state.x - c.targetX, state.y);
+        el('heightValue').textContent = `${Math.round(state.z * 1000)} mm`;
+        el('tiltValue').textContent = `${tilt.toFixed(1)}°`;
+        el('errorValue').textContent = `${Math.round(err * 1000)} mm`;
+        el('energyValue').textContent = `${state.controlEnergy.toFixed(1)} J`;
+        if (state.contact) {
+          statePill.dataset.mode = 'contact';
+          stateText.textContent = 'Coin touched down';
+        } else if (state.stabilizer) {
+          statePill.dataset.mode = 'active';
+          stateText.textContent = 'Stabilizer on';
+        } else {
+          statePill.dataset.mode = 'off';
+          stateText.textContent = 'Stabilizer off';
+        }
+        toggleButton.textContent = state.stabilizer ? 'Stabilizer: ON' : 'Stabilizer: OFF';
+        toggleButton.setAttribute('aria-pressed', String(state.stabilizer));
+        toggleButton.classList.toggle('toggle-off', !state.stabilizer);
+      }
+
+      function moveServo(position, target, dt, response, maxSpeed) {
+        const speed = clamp((target - position) * response, -maxSpeed, maxSpeed);
+        return position + speed * dt;
+      }
+
+      function integrate(dt) {
+        const c = controls();
+        const active = state.stabilizer;
+        const gain = c.gain;
+        const old = {
+          mx: state.magnetX, my: state.magnetY, mz: state.magnetZ,
+          mp: state.magnetPitch, mr: state.magnetRoll
+        };
+
+        if (active) {
+          // Repulsion is laterally destabilizing. The controller moves the magnet
+          // to the far side of the position error so its push acts as a correction.
+          const xError = state.x - c.targetX;
+          const yError = state.y;
+          const xCommand = clamp(state.x + (2.25 * gain) * xError + (0.78 * gain) * state.vx, -0.78, 0.78);
+          const yCommand = clamp(state.y + (2.25 * gain) * yError + (0.78 * gain) * state.vy, -0.62, 0.62);
+          const zCommand = clamp(c.targetZ - REST_GAP - 0.78 * (state.z - c.targetZ) - 0.27 * state.vz, 0.025, 0.43);
+          const response = 4 + 10 * gain;
+          state.magnetX = moveServo(state.magnetX, xCommand, dt, response, 0.65);
+          state.magnetY = moveServo(state.magnetY, yCommand, dt, response, 0.58);
+          state.magnetZ = moveServo(state.magnetZ, zCommand, dt, response, 0.42);
+
+          // Gimbal follows the coin's tilt with the opposite corrective orientation.
+          const pitchCommand = clamp(-0.82 * state.pitch - 0.24 * state.pitchRate, -0.42, 0.42);
+          const rollCommand = clamp(-0.82 * state.roll - 0.24 * state.rollRate, -0.42, 0.42);
+          state.magnetPitch = moveServo(state.magnetPitch, pitchCommand, dt, response, 1.8);
+          state.magnetRoll = moveServo(state.magnetRoll, rollCommand, dt, response, 1.8);
+        }
+
+        const dx = state.x - state.magnetX;
+        const dy = state.y - state.magnetY;
+        const gap = Math.max(0.065, state.z - state.magnetZ);
+        const lateral2 = dx * dx + dy * dy;
+        const lateralFactor = Math.pow(gap * gap / (gap * gap + lateral2), 2.35);
+        const lift = MASS * GRAVITY * Math.pow(REST_GAP / gap, 4) * lateralFactor;
+
+        // Toy force law: vertical repulsion is restoring; lateral repulsion is unstable.
+        const ax = 12.0 * dx - 0.85 * state.vx;
+        const ay = 12.0 * dy - 0.85 * state.vy;
+        const az = lift / MASS - GRAVITY - 0.32 * state.vz;
+
+        let pitchAccel = 2.5 * Math.sin(state.pitch) - 0.65 * state.pitchRate;
+        let rollAccel = 2.5 * Math.sin(state.roll) - 0.65 * state.rollRate;
+        if (active) {
+          const attitudeGain = 4.0 + 11.0 * gain;
+          const rateGain = 2.6 + 3.0 * gain;
+          pitchAccel += -attitudeGain * wrapAngle(state.pitch) - rateGain * state.pitchRate;
+          rollAccel += -attitudeGain * wrapAngle(state.roll) - rateGain * state.rollRate;
+        }
+
+        state.vx += ax * dt; state.x += state.vx * dt;
+        state.vy += ay * dt; state.y += state.vy * dt;
+        state.vz += az * dt; state.z += state.vz * dt;
+        state.pitchRate += pitchAccel * dt; state.pitch += state.pitchRate * dt;
+        state.rollRate += rollAccel * dt; state.roll += state.rollRate * dt;
+
+        // Floor contact: the disc settles rather than passing through the stage.
+        const floorZ = COIN_RADIUS + 0.018;
+        if (state.z < floorZ) {
+          state.z = floorZ;
+          if (state.vz < 0) state.vz = -state.vz * 0.10;
+          state.vx *= 0.94; state.vy *= 0.94;
+          state.contact = true;
+        } else {
+          state.contact = false;
+        }
+
+        // Keep the teaching scene in view; the boundaries are soft visual limits.
+        if (Math.abs(state.x) > 0.92) { state.x = Math.sign(state.x) * 0.92; state.vx *= -0.18; }
+        if (Math.abs(state.y) > 0.68) { state.y = Math.sign(state.y) * 0.68; state.vy *= -0.18; }
+        state.magnetX = clamp(state.magnetX, -0.80, 0.80);
+        state.magnetY = clamp(state.magnetY, -0.63, 0.63);
+
+        const magnetSpeed = (Math.abs(state.magnetX - old.mx) + Math.abs(state.magnetY - old.my) + Math.abs(state.magnetZ - old.mz)) / dt;
+        const gimbalSpeed = (Math.abs(state.magnetPitch - old.mp) + Math.abs(state.magnetRoll - old.mr)) / dt;
+        state.controlPower = active ? 0.35 + 2.4 * magnetSpeed + 0.16 * gimbalSpeed : 0;
+        state.controlEnergy += state.controlPower * dt;
+        state.time += dt;
+
+        state.trailTimer += dt;
+        if (state.trailTimer > 0.045) {
+          state.trail.push({ x: state.x, y: state.y, z: state.z });
+          if (state.trail.length > 75) state.trail.shift();
+          state.trailTimer = 0;
+        }
+      }
+
+      function syncCanvas(canvas, logicalWidth, logicalHeight) {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const w = Math.max(1, Math.round(rect.width * dpr));
+        const h = Math.max(1, Math.round(rect.height * dpr));
+        if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(canvas.width / logicalWidth, 0, 0, canvas.height / logicalHeight, 0, 0);
+        return { ctx, scale: rect.width / logicalWidth };
+      }
+
+      function roundedRect(ctx, x, y, w, h, r) {
+        r = Math.min(r, w / 2, h / 2);
+        ctx.beginPath(); ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r);
+        ctx.arcTo(x + w, y + h, x, y + h, r); ctx.arcTo(x, y + h, x, y, r);
+        ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+      }
+
+      function project(x, y, z) {
+        return { x: 480 + (x - y) * 330, y: 360 + (x + y) * 165 - z * 360 };
+      }
+
+      function polygon(ctx, points, fill, stroke = null, lineWidth = 1) {
+        if (!points.length) return;
+        ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+        for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y);
+        ctx.closePath();
+        if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+        if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth; ctx.stroke(); }
+      }
+
+      function line3(ctx, a, b, color, width = 1, dash = []) {
+        const p = project(a[0], a[1], a[2]); const q = project(b[0], b[1], b[2]);
+        ctx.beginPath(); ctx.setLineDash(dash); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y);
+        ctx.strokeStyle = color; ctx.lineWidth = width; ctx.stroke(); ctx.setLineDash([]);
+      }
+
+      function drawBox(ctx, x, y, z, sx, sy, sz, style = {}) {
+        const hx = sx / 2, hy = sy / 2, hz = sz / 2;
+        const p = (dx, dy, dz) => project(x + dx * hx, y + dy * hy, z + dz * hz);
+        const stroke = style.stroke || 'rgba(240,248,242,.28)';
+        polygon(ctx, [p(-1,-1,-1), p(1,-1,-1), p(1,1,-1), p(-1,1,-1)], style.bottom || '#1c2a2e', stroke, 1);
+        polygon(ctx, [p(-1,-1,-1), p(-1,1,-1), p(-1,1,1), p(-1,-1,1)], style.left || '#25363a', stroke, 1);
+        polygon(ctx, [p(1,-1,-1), p(1,1,-1), p(1,1,1), p(1,-1,1)], style.right || '#34494d', stroke, 1);
+        polygon(ctx, [p(-1,1,-1), p(1,1,-1), p(1,1,1), p(-1,1,1)], style.front || '#203136', stroke, 1);
+        polygon(ctx, [p(-1,-1,1), p(1,-1,1), p(1,1,1), p(-1,1,1)], style.top || '#45595b', stroke, 1.2);
+        return p(0, 0, 1);
+      }
+
+      function drawGround(ctx, scale) {
+        const corners = [[-.56,-.56,0],[.56,-.56,0],[.56,.56,0],[-.56,.56,0]].map(v => project(...v));
+        polygon(ctx, corners, 'rgba(31,49,52,.72)', 'rgba(154,185,174,.34)', 1.4 / Math.max(scale,.3));
+        ctx.save();
+        ctx.strokeStyle = 'rgba(182,207,195,.13)';
+        ctx.lineWidth = 1 / Math.max(scale,.3);
+        for (let v = -.5; v <= .5001; v += .1) {
+          const a = project(v, -.56, 0), b = project(v, .56, 0);
+          ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+          const c = project(-.56, v, 0), d = project(.56, v, 0);
+          ctx.beginPath(); ctx.moveTo(c.x,c.y); ctx.lineTo(d.x,d.y); ctx.stroke();
+        }
+        ctx.restore();
+
+        const origin = [0,0,0];
+        line3(ctx, origin, [.38,0,0], '#ff8a76', 2.1 / Math.max(scale,.3));
+        line3(ctx, origin, [0,.38,0], '#83d7d1', 2.1 / Math.max(scale,.3));
+        line3(ctx, origin, [0,0,.42], '#7cbce5', 2.1 / Math.max(scale,.3));
+        const ox = project(.42,0,0), oy = project(0,.42,0), oz=project(0,0,.46);
+        ctx.font = `700 ${10 / Math.max(scale,.3)}px ${FONT}`; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillStyle='#ff9c8d'; ctx.fillText('X',ox.x+5,ox.y);
+        ctx.fillStyle='#9ae6df'; ctx.fillText('Y',oy.x-5,oy.y+4);
+        ctx.fillStyle='#9bd0f2'; ctx.fillText('Z',oz.x,oz.y-7);
+      }
+
+      function drawBase(ctx, scale) {
+        const bx=state.magnetX, by=state.magnetY, bz=state.magnetZ;
+        drawBox(ctx,bx,by,Math.max(.025,bz-.065),.34,.27,.045,{top:'#26373b',front:'#1c292d',left:'#172326',right:'#304145',bottom:'#10191c'});
+        const top = drawBox(ctx,bx,by,bz,.23,.17,.065,{top:'#d36b60',front:'#7e4240',left:'#713d3b',right:'#9a524b',bottom:'#2e3030'});
+        const scaleSafe=Math.max(scale,.3);
+        ctx.fillStyle='#fff1e9'; ctx.font=`800 ${14/scaleSafe}px ${FONT}`; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText('N',top.x,top.y+2);
+        const p=project(bx,by,bz+.07);
+        ctx.fillStyle='#aebdb7'; ctx.font=`700 ${9/scaleSafe}px ${FONT}`;
+        ctx.fillText('MOVING · GIMBALLED MAGNET',p.x,p.y-11);
+
+        // Gimbal arcs show the active tilt correction.
+        const c=project(bx,by,bz+.04);
+        ctx.strokeStyle='rgba(183,242,124,.68)'; ctx.lineWidth=1.6/scaleSafe;
+        ctx.beginPath(); ctx.ellipse(c.x,c.y,27/scaleSafe,9/scaleSafe,state.magnetRoll,0,TAU); ctx.stroke();
+      }
+
+      function coinAxes() {
+        const cp=Math.cos(state.pitch), sp=Math.sin(state.pitch);
+        const cr=Math.cos(state.roll), sr=Math.sin(state.roll);
+        const u=[cp,0,-sp];
+        const v=[sp*sr,cr,cp*sr];
+        const n=[sp*cr,-cp*sr,cp*cr];
+        return {u,v,n};
+      }
+
+      function coinPoint(phi, offset, basis) {
+        return [
+          state.x + COIN_RADIUS*Math.cos(phi)*basis.u[0] + COIN_RADIUS*Math.sin(phi)*basis.v[0] + offset*basis.n[0],
+          state.y + COIN_RADIUS*Math.cos(phi)*basis.u[1] + COIN_RADIUS*Math.sin(phi)*basis.v[1] + offset*basis.n[1],
+          state.z + COIN_RADIUS*Math.cos(phi)*basis.u[2] + COIN_RADIUS*Math.sin(phi)*basis.v[2] + offset*basis.n[2]
+        ];
+      }
+
+      function drawCoin(ctx, scale) {
+        const basis=coinAxes();
+        const segments=44;
+        const nearOffset=basis.n[2] >= 0 ? COIN_THICKNESS/2 : -COIN_THICKNESS/2;
+        const farOffset=-nearOffset;
+        const edge=[];
+        for(let i=0;i<segments;i++){
+          const a=TAU*i/segments, b=TAU*(i+1)/segments;
+          const p0=project(...coinPoint(a,farOffset,basis));
+          const p1=project(...coinPoint(b,farOffset,basis));
+          const p2=project(...coinPoint(b,nearOffset,basis));
+          const p3=project(...coinPoint(a,nearOffset,basis));
+          edge.push({depth:(p0.y+p1.y+p2.y+p3.y)/4,points:[p0,p1,p2,p3]});
+        }
+        edge.sort((a,b)=>a.depth-b.depth);
+        for(const seg of edge){
+          const light=seg.depth < project(state.x,state.y,state.z).y ? '#899796' : '#596869';
+          polygon(ctx,seg.points,light,'rgba(236,245,239,.42)',.8/Math.max(scale,.3));
+        }
+        const face=[];
+        for(let i=0;i<segments;i++) face.push(project(...coinPoint(TAU*i/segments,nearOffset,basis)));
+        const coinGrad=ctx.createLinearGradient(face[0].x,face[0].y,face[22].x,face[22].y);
+        coinGrad.addColorStop(0,'#d7ded8'); coinGrad.addColorStop(.48,'#929f9d'); coinGrad.addColorStop(1,'#657474');
+        polygon(ctx,face,coinGrad,'rgba(245,249,244,.86)',1.5/Math.max(scale,.3));
+
+        const inner=[];
+        for(let i=0;i<segments;i++){
+          const a=TAU*i/segments;
+          const q=[state.x+.68*COIN_RADIUS*Math.cos(a)*basis.u[0]+.68*COIN_RADIUS*Math.sin(a)*basis.v[0]+nearOffset*basis.n[0],
+                  state.y+.68*COIN_RADIUS*Math.cos(a)*basis.u[1]+.68*COIN_RADIUS*Math.sin(a)*basis.v[1]+nearOffset*basis.n[1],
+                  state.z+.68*COIN_RADIUS*Math.cos(a)*basis.u[2]+.68*COIN_RADIUS*Math.sin(a)*basis.v[2]+nearOffset*basis.n[2]];
+          inner.push(project(...q));
+        }
+        polygon(ctx,inner,'rgba(255,255,255,.035)','rgba(239,247,241,.34)',1/Math.max(scale,.3));
+        const center=project(state.x,state.y,state.z+nearOffset*basis.n[2]);
+        ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle=basis.n[2]>=0?'#314143':'#f3e3d5';
+        ctx.font=`800 ${10/Math.max(scale,.3)}px ${FONT}`; ctx.fillText(basis.n[2]>=0?'S':'N',center.x,center.y);
+      }
+
+      function drawTopView(ctx, scale) {
+        const x=20,y=20,w=160,h=126;
+        ctx.save();
+        roundedRect(ctx,x,y,w,h,12); ctx.fillStyle='rgba(12,21,23,.88)'; ctx.fill();
+        ctx.strokeStyle='rgba(211,232,220,.18)'; ctx.lineWidth=1/Math.max(scale,.3); ctx.stroke();
+        ctx.fillStyle='#9eafa8'; ctx.textAlign='left'; ctx.textBaseline='alphabetic'; ctx.font=`700 ${9/Math.max(scale,.3)}px ${FONT}`; ctx.fillText('TOP VIEW · X/Y',x+12,y+17);
+        const cx=x+w/2,cy=y+76,rw=60,rh=32;
+        ctx.strokeStyle='rgba(180,208,195,.2)'; ctx.lineWidth=1/Math.max(scale,.3);
+        ctx.beginPath(); ctx.ellipse(cx,cy,rw,rh,0,0,TAU); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx-rw,cy); ctx.lineTo(cx+rw,cy); ctx.moveTo(cx,cy-rh); ctx.lineTo(cx,cy+rh); ctx.stroke();
+        const c=controls();
+        const map=(xx,yy)=>({x:cx+clamp(xx,-.55,.55)/.55*rw,y:cy+clamp(yy,-.42,.42)/.42*rh});
+        const target=map(c.targetX,0), magnet=map(state.magnetX,state.magnetY), coin=map(state.x,state.y);
+        ctx.setLineDash([3/Math.max(scale,.3),3/Math.max(scale,.3)]); ctx.strokeStyle='rgba(183,242,124,.55)'; ctx.beginPath(); ctx.moveTo(target.x,target.y); ctx.lineTo(coin.x,coin.y); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle='#b7f27c'; ctx.beginPath(); ctx.arc(target.x,target.y,4/Math.max(scale,.3),0,TAU); ctx.fill();
+        ctx.fillStyle='#d36b60'; ctx.fillRect(magnet.x-4/Math.max(scale,.3),magnet.y-3/Math.max(scale,.3),8/Math.max(scale,.3),6/Math.max(scale,.3));
+        ctx.fillStyle='#e1e9e2'; ctx.beginPath(); ctx.arc(coin.x,coin.y,5/Math.max(scale,.3),0,TAU); ctx.fill();
+        ctx.font=`500 ${8/Math.max(scale,.3)}px ${FONT}`; ctx.textAlign='left'; ctx.fillStyle='#82938d'; ctx.fillText('target',x+11,y+116); ctx.fillStyle='#d36b60'; ctx.fillText('base',x+55,y+116); ctx.fillStyle='#e1e9e2'; ctx.fillText('coin',x+95,y+116);
+        ctx.restore();
+      }
+
+      function drawArrow(ctx,x1,y1,x2,y2,color,scale){
+        const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy); if(len<3)return;
+        const a=Math.atan2(dy,dx),head=7/Math.max(scale,.3);
+        ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2/Math.max(scale,.3);
+        ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();
+        ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-head*Math.cos(a-.48),y2-head*Math.sin(a-.48));ctx.lineTo(x2-head*Math.cos(a+.48),y2-head*Math.sin(a+.48));ctx.closePath();ctx.fill();
+      }
+
+      function drawScene() {
+        const {ctx,scale}=syncCanvas(hoverCanvas,960,560);
+        const bg=ctx.createLinearGradient(0,0,960,560); bg.addColorStop(0,'#102024');bg.addColorStop(.6,'#142327');bg.addColorStop(1,'#10191c');
+        ctx.fillStyle=bg;ctx.fillRect(0,0,960,560);
+        // Background guide dots.
+        ctx.fillStyle='rgba(207,229,217,.12)';
+        for(let x=210;x<950;x+=36)for(let y=20;y<555;y+=36){ctx.beginPath();ctx.arc(x,y,1/Math.max(scale,.3),0,TAU);ctx.fill();}
+
+        drawGround(ctx,scale);
+
+        // Coin trail, followed by the gimballed and translating magnet carriage.
+        if(state.trail.length>1){
+          ctx.beginPath();
+          state.trail.forEach((p,i)=>{const q=project(p.x,p.y,p.z);if(i===0)ctx.moveTo(q.x,q.y);else ctx.lineTo(q.x,q.y);});
+          ctx.strokeStyle='rgba(183,242,124,.32)';ctx.lineWidth=2/Math.max(scale,.3);ctx.stroke();
+        }
+        drawBase(ctx,scale);
+
+        const magTop=project(state.magnetX,state.magnetY,state.magnetZ+.04);
+        const coinCenter=project(state.x,state.y,state.z);
+        ctx.save();ctx.setLineDash([5/Math.max(scale,.3),5/Math.max(scale,.3)]);ctx.strokeStyle='rgba(183,242,124,.46)';ctx.lineWidth=1.5/Math.max(scale,.3);
+        ctx.beginPath();ctx.moveTo(magTop.x,magTop.y);ctx.lineTo(coinCenter.x,coinCenter.y);ctx.stroke();ctx.restore();
+        drawCoin(ctx,scale);
+
+        // Weight/lift arrows make the force balance visible.
+        const midX=coinCenter.x+77,midY=coinCenter.y+8;
+        drawArrow(ctx,midX,midY+33,midX,midY+67,'#ffb876',scale);
+        drawArrow(ctx,midX+18,midY+66,midX+18,midY+32,'#b7f27c',scale);
+        ctx.fillStyle='#c8d4cd';ctx.textAlign='left';ctx.textBaseline='middle';ctx.font=`700 ${9/Math.max(scale,.3)}px ${FONT}`;
+        ctx.fillText('weight',midX+8,midY+52);ctx.fillText('magnetic lift',midX+27,midY+48);
+
+        // Overlay title and live state.
+        ctx.fillStyle='rgba(10,18,20,.78)';roundedRect(ctx,758,20,180,72,11);ctx.fill();
+        ctx.strokeStyle='rgba(207,231,217,.15)';ctx.lineWidth=1/Math.max(scale,.3);ctx.stroke();
+        ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillStyle='#8ea29a';ctx.font=`700 ${9/Math.max(scale,.3)}px ${FONT}`;ctx.fillText('ACTIVE CONTROL',774,41);
+        ctx.fillStyle=state.stabilizer?'#b7f27c':'#ffb876';ctx.font=`800 ${13/Math.max(scale,.3)}px ${FONT}`;ctx.fillText(state.stabilizer?'FEEDBACK ON':'FEEDBACK OFF',774,62);
+        ctx.fillStyle='#c9d5ce';ctx.font=`600 ${9/Math.max(scale,.3)}px ${FONT}`;ctx.fillText(`magnet tilt ${(Math.hypot(state.magnetPitch,state.magnetRoll)*180/Math.PI).toFixed(0)}°`,774,80);
+
+        drawTopView(ctx,scale);
+
+        // Compact 3D axis labels and target indicator.
+        const c=controls();
+        const target=project(c.targetX,0,0);
+        ctx.strokeStyle='rgba(183,242,124,.55)';ctx.setLineDash([4/Math.max(scale,.3),4/Math.max(scale,.3)]);ctx.beginPath();ctx.moveTo(target.x,target.y-4);ctx.lineTo(target.x,target.y+9);ctx.stroke();ctx.setLineDash([]);
+        ctx.textAlign='right';ctx.textBaseline='alphabetic';ctx.fillStyle='#82958d';ctx.font=`600 ${9/Math.max(scale,.3)}px ${FONT}`;
+        ctx.fillText(`t = ${state.time.toFixed(1)} s`,936,544);
+      }
+
+      let lastFrame=0,lastUi=0;
+      function frame(timestamp){
+        if(!lastFrame)lastFrame=timestamp;
+        const elapsed=Math.min(.05,Math.max(0,(timestamp-lastFrame)/1000));lastFrame=timestamp;
+        state.accum+=elapsed;
+        let count=0;
+        while(state.accum>=STEP && count<100){integrate(STEP);state.accum-=STEP;count++;}
+        drawScene();
+        if(timestamp-lastUi>90){updateStats();lastUi=timestamp;}
+        requestAnimationFrame(frame);
+      }
+
+      heightRange.addEventListener('input',updateLabels);
+      steerRange.addEventListener('input',updateLabels);
+      gainRange.addEventListener('input',updateLabels);
+      toggleButton.addEventListener('click',()=>{state.stabilizer=!state.stabilizer;updateStats();});
+      el('nudgeButton').addEventListener('click',()=>{
+        state.vx+=.25;state.vy-=.17;state.pitchRate+=.42;state.rollRate-=.30;
+      });
+      el('flipButton').addEventListener('click',()=>{
+        state.pitch+=.95;state.roll-=.30;state.pitchRate+=1.05;state.rollRate-=.55;
+      });
+      el('resetButton').addEventListener('click',()=>{
+        const c=controls();
+        Object.assign(state,{
+          x:c.targetX,y:0,z:c.targetZ,vx:0,vy:0,vz:0,pitch:0,roll:0,pitchRate:0,rollRate:0,
+          magnetX:c.targetX,magnetY:0,magnetZ:c.targetZ-REST_GAP,magnetPitch:0,magnetRoll:0,
+          time:0,controlEnergy:0,controlPower:0,contact:false,trail:[],trailTimer:0,accum:0,stabilizer:true
+        });
+        updateStats();
+      });
+      window.addEventListener('resize',drawScene);
+      updateLabels();drawScene();requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
