@@ -1,0 +1,234 @@
+/*============================================================================================================================================
+                                                               CLIFFVOXELS.CSS
+============================================================================================================================================
+📦 Specialized style rules for the procedural Voxel Cliff generator workspace.
+*/
+
+:root {
+    --Accent-Primary: #d6a665;
+    --Accent-Gold: #e8b878;
+    --Accent-Highlight: #ffcf8f;
+    --Bg-Dark: #14161a;
+    --Bg-Panel: #1e2127;
+    --Border-Line: #2d313b;
+}
+
+/* App Header & Dock styling */
+.app-header {
+    height: 42px;
+    background: #181a1f;
+    border-bottom: 1px solid var(--Border-Line);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 14px;
+}
+
+.document-dock {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.document-tabs {
+    display: flex;
+    gap: 4px;
+}
+
+.document-tab {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: #252830;
+    color: #9aa0ad;
+    border: 1px solid #333844;
+    border-bottom: 0;
+    padding: 6px 14px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 4px 4px 0 0;
+    transition: all 0.15s ease;
+}
+
+.document-tab.active {
+    background: #2f3440;
+    color: #f3efe6;
+    border-color: #4b5263;
+    border-top: 2px solid var(--Accent-Primary);
+}
+
+.HeaderEnd {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.gas-tag {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    color: #a4abb8;
+    background: #232730;
+    padding: 3px 8px;
+    border-radius: 12px;
+    border: 1px solid #363c4a;
+}
+
+.gas-tag i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #62c073;
+    display: inline-block;
+}
+
+.document-bar {
+    height: 32px;
+    background: #14161a;
+    border-bottom: 1px solid var(--Border-Line);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 14px;
+    font-size: 11px;
+}
+
+.document-bar input {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #e2e4ea;
+    font-weight: 500;
+    padding: 2px 6px;
+    border-radius: 3px;
+    width: 140px;
+}
+
+.document-bar input:focus {
+    background: #20242c;
+    border-color: #3f4756;
+}
+
+.document-extension {
+    color: var(--Accent-Primary);
+    font-family: monospace;
+    font-size: 10px;
+}
+
+.document-note {
+    color: #69707e;
+    font-size: 10px;
+    margin-left: 8px;
+}
+
+.text-button {
+    background: none;
+    border: none;
+    color: #a2a8b6;
+    padding: 2px 6px;
+    font-size: 11px;
+}
+
+.text-button:hover {
+    color: #e0e4ee;
+    text-decoration: underline;
+}
+
+/* Scene census badges */
+.SceneCensus {
+    display: flex;
+    gap: 6px;
+    padding: 8px 10px;
+    background: #17191e;
+    border-bottom: 1px solid #23262e;
+}
+
+.CensusTile {
+    font-size: 10px;
+    color: #8c93a2;
+    background: #22262e;
+    padding: 3px 8px;
+    border-radius: 3px;
+    border: 1px solid #2f3440;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.CensusTile b {
+    color: #e2e6f0;
+}
+
+.SceneSearch {
+    padding: 6px 8px;
+    display: block;
+    background: #1c1e24;
+    border-bottom: 1px solid #282c35;
+}
+
+.SceneSearch input {
+    width: 100%;
+    background: #121418;
+    border: 1px solid #2b303b;
+    border-radius: 3px;
+    padding: 4px 8px;
+    font-size: 10px;
+    color: #cfd3dc;
+}
+
+/* Satmap Submode Dropdown / Button styling */
+.SatmapSubmenu {
+    display: flex;
+    gap: 3px;
+    margin-left: 6px;
+    background: #181b20;
+    padding: 2px;
+    border-radius: 3px;
+    border: 1px solid #323744;
+}
+
+.SatmapSubmenu button {
+    font-size: 9px;
+    padding: 2px 5px;
+    min-height: 20px;
+    background: transparent;
+    border: none;
+    color: #8e95a5;
+    border-radius: 2px;
+}
+
+.SatmapSubmenu button.Active {
+    background: #3b4252;
+    color: #f1f3f8;
+}
+
+/* Overhang indicator badge in Diagnostics */
+.OverhangBadge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: #3c2438;
+    color: #ff9ee6;
+    border: 1px solid #6b335f;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 500;
+}
+
+.OverhangBadge i {
+    font-style: normal;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+/* Stage stepper & active state */
+.StageButton.Active {
+    border-left: 3px solid var(--Accent-Primary);
+    background: #2c2822;
+}
+
+/* Range input slider track fill sync */
+input[type=range] {
+    --Fill: 50%;
+}
