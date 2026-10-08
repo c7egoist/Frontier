@@ -3,13 +3,13 @@
 ============================================================================================================================================
                                                                 INDEX.HTML
 ============================================================================================================================================
-📦 Static browser entry for the voxel SDF cliff construction workspace.
+📦 Static browser entry for the procedural Voxel SDF & WebGPU cliff construction workspace.
 -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Cliff voxels · Frontier</title>
+<title>Voxel Cliff Studio · WebGPU / WebGL · Frontier</title>
 <link rel="stylesheet" href="lib/WorkspacePanel.css">
 <link rel="stylesheet" href="lib/ThemeSpecification.css">
 <link rel="stylesheet" href="lib/MaterialPanel.css">
@@ -28,7 +28,7 @@
 <header class="app-header"><div class="document-dock"><div class="document-tabs" role="tablist" aria-label="Rock authoring views">
 <button class="document-tab active" id="GeometryTab" role="tab" aria-selected="true"><svg><use href="#RockIcon"/></svg><span>Voxel formation</span></button>
 <button class="document-tab" id="MaterialTab" role="tab" aria-selected="false"><svg><use href="#LayersIcon"/></svg><span>Grain weathering</span></button></div></div>
-<div class="HeaderEnd"><span class="gas-tag"><i></i> Voxel SDF study</span><button class="button" id="SaveActive">Save recipe</button></div></header>
+<div class="HeaderEnd"><span class="gas-tag" id="WebGPUBadge"><i></i> WebGPU / WebGL</span><button class="button" id="SaveActive">Save recipe</button></div></header>
 <div class="document-bar"><svg><use href="#RockIcon"/></svg><input id="DocumentName" value="Voxel formation" aria-label="Document name" maxlength="50"><span class="document-extension" id="DocumentExtension">.vcliff</span><span class="document-note" id="DocumentNote">Voxel SDF · staged rebuilds</span><span class="ToolbarSpace"></span><button id="OpenActive" class="text-button">Open recipe</button></div>
 <main class="Workspace" id="GeometryWorkspace">
 <aside class="Outliner">

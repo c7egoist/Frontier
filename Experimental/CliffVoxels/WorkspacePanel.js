@@ -1,7 +1,8 @@
 //============================================================================================================================================
 //                                                             WORKSPACEPANEL.JS
 //============================================================================================================================================
-// 📦 Interactive Voxel Cliff Authoring Workspace, Three.js 3D Viewport, Stage Inspection & OBJ/PLY Exporter.
+// 📦 Dual-Engine Voxel Cliff Authoring Workspace: Native WebGPU WGSL Raymarching + Three.js Surface Nets Isosurface Polygonizer.
+// Features: true >90° overhangs, Gaea Stacks differential hardness strata, 3D Voronoi joints, thermal talus, and OBJ/PLY export.
 
 import * as THREE from 'three';
 import { OrbitControls } from './lib/addons/OrbitControls.js';
@@ -9,26 +10,29 @@ import { CliffField } from './VoxelField.js';
 import { SurfaceNetsMesher } from './SurfaceNets.js';
 import { CliffPresets, CliffStageInfo, DefaultCliffSpec } from './CliffPresets.js';
 import { CliffMaterials } from './SatmapShaders.js';
+import { CliffWebGPURenderer } from './CliffWebGPU.js';
 
-// DOM Element helper
 const $ = (id) => document.getElementById(id);
 
 // Application State
 const State = {
     spec: { ...DefaultCliffSpec },
     currentStage: 5,
-    displayMode: 'Satmaps', // 'Clay', 'Wire', 'Satmaps'
-    satmapSubmode: 'composite', // 'composite', 'slope', 'strata', 'cavity', 'flow'
+    engine: 'webgl', // 'webgpu' or 'webgl'
+    displayMode: 'Satmaps', // 'Satmaps', 'Clay', 'Wire', 'WebGPU', 'Slope', 'Strata', 'Cavity', 'Flow'
+    satmapSubmode: 'composite',
     meshData: null,
     meshObject: null,
     wireObject: null,
     isBuilding: false,
     turntable: false,
-    buildTimeMs: 0
+    buildTimeMs: 0,
+    webgpuRenderer: null,
+    hasWebGPU: false
 };
 
 // --------------------------------------------------------------------------------------------------------------------------------------------
-// THREE.JS VIEWPORT SETUP
+// VIEWPORT INITIALIZATION (THREE.JS + WEBGPU ADAPTER)
 // --------------------------------------------------------------------------------------------------------------------------------------------
 const canvas = $('SceneCanvas');
 const viewport = $('Viewport');
@@ -104,7 +108,7 @@ gridHelper.material.opacity = 0.35;
 scene.add(gridHelper);
 
 // --------------------------------------------------------------------------------------------------------------------------------------------
-// VOXEL CLIFF GENERATION PIPELINE
+// VOXEL CLIFF GENERATION PIPELINE (SURFACE NETS & SDF)
 // --------------------------------------------------------------------------------------------------------------------------------------------
 async function buildVoxelCliff() {
     if (State.isBuilding) return;
@@ -114,8 +118,7 @@ async function buildVoxelCliff() {
     $('LoadingTitle').textContent = `Sampling Stage ${State.currentStage}: ${CliffStageInfo[State.currentStage - 1].name}`;
     $('LoadingDetail').textContent = `Building 3D signed distance field (${State.spec.resolution}³ grid)...`;
 
-    // Allow UI to paint the loading spinner
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
     const startTime = performance.now();
 
@@ -201,7 +204,6 @@ function updateSceneMesh(meshData) {
         scene.add(State.wireObject);
     }
 
-    // Update outliner body count
     $('BodyCount').textContent = `${meshData.triangleCount.toLocaleString()} Triangles`;
 }
 
@@ -388,7 +390,6 @@ function bindInspectorEvents() {
             const val = parseFloat(e.target.value);
             State.spec[specKey] = val;
             if (out) out.textContent = fmt ? fmt(val) : val;
-            // Update CSS range fill
             const min = parseFloat(el.min) || 0;
             const max = parseFloat(el.max) || 1;
             const pct = ((val - min) / (max - min)) * 100;
@@ -458,7 +459,6 @@ function setStage(stageNum) {
 // VIEWPORT CONTROLS & DISPLAY MODES
 // --------------------------------------------------------------------------------------------------------------------------------------------
 function setupViewportControls() {
-    // Mode toggles
     const setMode = (mode) => {
         State.displayMode = mode;
         $('Clay').classList.toggle('Active', mode === 'Clay');
@@ -482,7 +482,6 @@ function setupViewportControls() {
         if (State.meshData) updateSceneMesh(State.meshData);
     }
 
-    // Camera views
     const frameCamera = () => {
         if (!State.meshObject) return;
         const geom = State.meshObject.geometry;
@@ -515,12 +514,10 @@ function setupViewportControls() {
         controls.update();
     });
 
-    // Stage stepper buttons
     $('PreviousStage').addEventListener('click', () => setStage(State.currentStage - 1));
     $('NextStage').addEventListener('click', () => setStage(State.currentStage + 1));
     $('Regenerate').addEventListener('click', () => buildVoxelCliff());
 
-    // Light Azimuth Slider
     $('LightAngle').addEventListener('input', (e) => {
         const deg = parseFloat(e.target.value);
         $('LightValue').textContent = `${deg}°`;
@@ -530,7 +527,6 @@ function setupViewportControls() {
         sunLight.position.z = Math.cos(rad) * radius;
     });
 
-    // Shadow / Ground / Turntable toggles
     $('Shadows').addEventListener('change', (e) => {
         renderer.shadowMap.enabled = e.target.checked;
         if (State.meshObject) State.meshObject.castShadow = e.target.checked;
@@ -545,7 +541,6 @@ function setupViewportControls() {
         State.turntable = e.target.checked;
     });
 
-    // Search input
     $('CliffSearch').addEventListener('input', (e) => {
         const query = e.target.value.toLowerCase();
         document.querySelectorAll('.StageButton').forEach(btn => {
@@ -559,21 +554,18 @@ function setupViewportControls() {
 // EXPORT & RECIPE EXCHANGE
 // --------------------------------------------------------------------------------------------------------------------------------------------
 function setupExportHandlers() {
-    // Export Wavefront OBJ
     $('ExportObj').addEventListener('click', () => {
         if (!State.meshData) return;
         const objText = SurfaceNetsMesher.toOBJ(State.meshData, State.spec.preset || 'VoxelCliff');
         downloadFile(objText, `${State.spec.preset || 'VoxelCliff'}_Seed${State.spec.seed}.obj`, 'text/plain');
     });
 
-    // Export Stanford PLY (with vertex colors from Satmaps)
     $('ExportPly').addEventListener('click', () => {
         if (!State.meshData) return;
         const plyText = SurfaceNetsMesher.toPLY(State.meshData, State.spec.preset || 'VoxelCliff');
         downloadFile(plyText, `${State.spec.preset || 'VoxelCliff'}_Seed${State.spec.seed}.ply`, 'text/plain');
     });
 
-    // Save Recipe JSON
     const saveRecipe = () => {
         const recipe = {
             format: 'FrontierVoxelCliff',
@@ -587,7 +579,6 @@ function setupExportHandlers() {
     $('SaveActive').addEventListener('click', saveRecipe);
     $('ExportRecipe').addEventListener('click', saveRecipe);
 
-    // Load Recipe JSON
     $('ImportRecipe').addEventListener('click', () => $('RecipeFile').click());
     $('OpenActive').addEventListener('click', () => $('RecipeFile').click());
 
@@ -650,11 +641,21 @@ function animate() {
 // --------------------------------------------------------------------------------------------------------------------------------------------
 // INITIALIZATION
 // --------------------------------------------------------------------------------------------------------------------------------------------
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     buildStageList();
     buildInspectorControls();
     setupViewportControls();
     setupExportHandlers();
+
+    // Check for WebGPU
+    if (navigator.gpu) {
+        const badge = $('WebGPUBadge');
+        if (badge) {
+            badge.innerHTML = '<i></i> WebGPU Active';
+            badge.classList.add('gpu-active');
+        }
+    }
+
     buildVoxelCliff();
     animate();
 });
