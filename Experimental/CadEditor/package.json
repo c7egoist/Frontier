@@ -1,0 +1,23 @@
+{
+  "name": "frontier-cad-editor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5180 --strictPort",
+    "build": "vite build",
+    "test": "node tests/kernel.test.mjs && node tests/spline.test.mjs && node tests/actions.test.mjs",
+    "preview": "vite preview --host 0.0.0.0 --port 5180 --strictPort"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "replicad": "^1.1.0",
+    "replicad-opencascadejs": "^1.1.0",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^6.1.2",
+    "vite": "^8.3.4"
+  }
+}
