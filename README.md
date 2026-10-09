@@ -4,7 +4,7 @@ A self-contained HTML tool for generating **roads, paving and procedural parking
 
 ## Open
 
-Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified pedestrian-footway and curb-drain snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/bdc93cec9a35176b258207bdb3542b1f881a1c68/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
+Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified European-mobility and open-space snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/a6938accd9f49cbe8f6f02701692c38395d45ddd/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
 
 Only the root HTML is deployed, not Vite's development `index.html`. Code, fonts, procedural materials and licensing notices are embedded. WebGL2 enables the 3D view; plan editing and OBJ/JSON export also work without it.
 
