@@ -4,7 +4,7 @@ A self-contained HTML tool for generating **roads, paving and procedural parking
 
 ## Open
 
-Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [current raw.githack build](https://raw.githack.com/c7egoist/Frontier/arena/8070fd6c-frontier/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
+Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified road-only snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/25812a1608251bde48304fa82f7e0b08bd86f836/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
 
 Only the root HTML is deployed, not Vite's development `index.html`. Code, fonts, procedural materials and licensing notices are embedded. WebGL2 enables the 3D view; plan editing and OBJ/JSON export also work without it.
 
@@ -57,6 +57,8 @@ The diamond has about **5.79 m modeled clearance** and **6.49% maximum grade**. 
 | **`.road.json`** | Editable v1 graph, relative handles, settings, junction setbacks and procedural surface parameters                  |
 
 Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wireframe preview does not alter the original exported materials. No preview environment is exported. A final game's visual quality also depends on its texture resolution, material/shader integration, lighting, terrain and rendering pipeline; this editor does not claim to be a complete AAA environment renderer.
+
+The published standalone was verified byte-for-byte against the local deliverable. **74 CPU checks and 39 browser checks** pass, including the real parking controls, exports, absence of auto-generated props, mobile layout and offline use.
 
 ## Development and verification
 
