@@ -1,3 +1,4 @@
+import type { GeometryProfile } from "./quality";
 import {
   add,
   sub,
@@ -27,7 +28,13 @@ export interface Alignment {
   stations: Station[];
   length: number;
 }
-export function sampleAlignment(project: Project, road: Road): Alignment {
+export function sampleAlignment(
+  project: Project,
+  road: Road,
+  profile: Pick<GeometryProfile, "maxSegment" | "maxDeviation"> & {
+    maxDepth?: number;
+  } = { maxSegment: 2.8, maxDeviation: 0.045 },
+): Alignment {
   const points = controlPoints(project, road);
   const sampled: { p: V3; t: number }[] = [{ p: points[0], t: 0 }];
   const subdivide = (p: V3[], ta: number, tb: number, depth: number) => {
@@ -36,7 +43,10 @@ export function sampleAlignment(project: Project, road: Road): Alignment {
       nearestSegment(p[1], p[0], p[3]).distance,
       nearestSegment(p[2], p[0], p[3]).distance,
     );
-    if (depth >= 12 || (chord <= 2.8 && flatness <= 0.045))
+    if (
+      depth >= (profile.maxDepth ?? 12) ||
+      (chord <= profile.maxSegment && flatness <= profile.maxDeviation)
+    )
       sampled.push({ p: p[3], t: tb });
     else {
       const [left, right] = splitCubic(p, 0.5),

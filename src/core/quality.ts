@@ -1,0 +1,30 @@
+export type GeometryDetail = "editing" | "production";
+export interface GeometryProfile {
+  maxSegment: number;
+  maxDepth: number;
+  maxDeviation: number;
+  minCornerPoints: number;
+  cornerSegment: number;
+  maxCornerPoints: number;
+}
+/** Geometry tolerances in metres. Editing topology remains independent. */
+export const geometryProfiles: Record<GeometryDetail, GeometryProfile> = {
+  editing: {
+    maxSegment: 2.8,
+    maxDepth: 12,
+    maxDeviation: 0.045,
+    minCornerPoints: 32,
+    cornerSegment: Infinity,
+    maxCornerPoints: 32,
+  },
+  production: {
+    maxSegment: 0.75,
+    maxDepth: 14,
+    maxDeviation: 0.01,
+    minCornerPoints: 64,
+    cornerSegment: 0.35,
+    maxCornerPoints: 512,
+  },
+};
+export const normaliseDetail = (detail: unknown): GeometryDetail =>
+  detail === "production" ? "production" : "editing";

@@ -1404,3 +1404,47 @@ select:focus-visible,
   letter-spacing: 1px;
   margin-top: 7px;
 }
+
+.quality-select {
+  margin-left: auto;
+}
+.quality-select select {
+  height: 25px;
+  background: #1c1c1c;
+  border: 1px solid #333;
+  border-radius: 5px;
+  color: #999;
+  font-size: 9px;
+  padding: 2px 5px;
+}
+.quality-select + .shade-select {
+  margin-left: 8px;
+}
+.export-detail-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 13px 10px;
+  border-bottom: 1px solid #303030;
+  margin-bottom: 7px;
+  font-size: 10px;
+  color: #888;
+  gap: 10px;
+}
+.export-detail-setting select {
+  background: #282828;
+  border: 1px solid #3a3a3a;
+  color: #c0c0c0;
+  border-radius: 5px;
+  font-size: 10px;
+  padding: 6px;
+}
+@media (max-width: 699px) {
+  .quality-select select {
+    max-width: 91px;
+    font-size: 8px;
+  }
+  .quality-select + .shade-select {
+    margin-left: 6px;
+  }
+}

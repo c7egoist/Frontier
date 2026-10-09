@@ -345,6 +345,16 @@
               <div class="viewport-caption">
                 <span class="view-number">02</span><span>Perspective</span
                 ><span class="view-badge">3D</span>
+                <div class="quality-select">
+                  <select
+                    id="geometry-detail"
+                    aria-label="Preview geometry detail"
+                    title="Mesh tessellation / does not change the road graph"
+                  >
+                    <option value="editing">Editing mesh</option>
+                    <option value="production">Production mesh</option>
+                  </select>
+                </div>
                 <div class="shade-select">
                   <select id="shade-style" aria-label="3D shading style">
                     <option value="shaded">Material</option>
@@ -442,6 +452,13 @@
                 >
                   <i data-lucide="sun"></i></button
                 ><span></span
+                ><button
+                  class="icon-button"
+                  id="surface-inspect"
+                  title="Inspect selected paving, curb or parking surface"
+                  aria-label="Inspect selected surface"
+                >
+                  <i data-lucide="search"></i></button
                 ><button
                   class="icon-button"
                   id="scene-focus"
@@ -603,8 +620,10 @@
         <i data-lucide="grid-2x2"></i>Toggle grid<kbd>G</kbd></button
       ><button data-action="labels">
         <i data-lucide="tag"></i>Toggle plan labels</button
+      ><button data-action="inspect">
+        <i data-lucide="search"></i>Inspect selected surface</button
       ><button data-action="context">
-        <i data-lucide="trees"></i>Toggle terrain context
+        <i data-lucide="box"></i>Toggle studio ground
       </button>
       <hr />
       <button data-action="help">
@@ -612,10 +631,17 @@
       </button>
     </div>
     <div class="dropdown-menu export-menu" id="export-menu" hidden>
-      <span class="menu-caption">EXPORT TO YOUR ENGINE</span
-      ><button data-action="glb">
+      <span class="menu-caption">EXPORT TO YOUR ENGINE</span>
+      <label class="export-detail-setting"
+        ><span>Geometry detail</span
+        ><select id="export-detail" aria-label="Export geometry detail">
+          <option value="production">Production / 0.75 m</option>
+          <option value="editing">Editing / 2.8 m</option>
+        </select></label
+      >
+      <button data-action="glb">
         <span class="format-icon">3D</span
-        ><span>glTF binary<small>Geometry + paving materials</small></span
+        ><span>glTF binary<small>Dense geometry + PBR materials</small></span
         ><span class="recommended">GLB</span></button
       ><button data-action="obj">
         <span class="format-icon">M</span
@@ -629,7 +655,7 @@
           >JSON</span
         >
       </button>
-      <p>Y-up · meters · triangulated geometry</p>
+      <p>Y-up · meters · independent export mesh</p>
     </div>
     <div class="dropdown-menu layers-menu" id="layers-menu" hidden>
       <span class="menu-caption">VIEWPORT LAYERS</span

@@ -1,3 +1,5 @@
+import { geometryProfiles } from "./quality";
+import type { Project } from "./model";
 import type { Network } from "./geometry";
 export interface TextureAssetInfo {
   path: string;
@@ -111,4 +113,41 @@ export function exportOBJ(
     }
   }
   return { obj: lines.join("\n"), mtl: mtl.join("\n") };
+}
+
+/** Explicit engine-side lookup; OBJ names alone cannot preserve authoring metadata. */
+export function exportMeshManifest(network: Network, project: Project) {
+  return {
+    version: 1,
+    generator: "Frontier Road authoring",
+    project: project.name,
+    units: "metres",
+    upAxis: "Y",
+    geometryDetail: network.detail,
+    tolerances: {
+      maxRoadSegment: geometryProfiles[network.detail].maxSegment,
+      maxCurveDeviation: geometryProfiles[network.detail].maxDeviation,
+    },
+    bounds: network.bounds,
+    triangles: network.triangles,
+    vertices: network.vertices,
+    includesPreviewEnvironment: false,
+    objects: network.meshes.map((m) => ({
+      name: m.name.replace(/[^a-zA-Z0-9_-]/g, "_"),
+      kind: m.kind,
+      owner: {
+        id: m.owner,
+        kind: m.ownerKind,
+        name:
+          m.ownerKind === "node"
+            ? project.nodes.find((n) => n.id === m.owner)?.name
+            : m.ownerKind === "site"
+              ? project.sites?.find((s) => s.id === m.owner)?.name
+              : project.roads.find((r) => r.id === m.owner)?.name,
+      },
+      material: m.material,
+      vertices: m.positions.length / 3,
+      triangles: m.indices.length / 3,
+    })),
+  };
 }

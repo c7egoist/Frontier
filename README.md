@@ -21,7 +21,8 @@ The achromatic palette and component treatment are ported from the supplied [Sla
 
 ## Editing
 
-- **Split 2D / 3D:** select in either view; resize the split or use full 2D/3D.
+- **Split 2D / 3D:** select in either view; resize the split or use full 2D/3D. The magnifier in the 3D toolbar frames the selected curb, paving or parking edge for close-up inspection; it changes only the camera.
+- **Mesh detail:** Editing and Production preview profiles keep the same authoring graph. Production targets ≤0.75 m road segments and ≤10 mm Bézier chord deviation, with denser fillet tessellation and exact pinned approach endpoints. The Editing profile retains the previous 2.8 m / 45 mm tolerances for responsiveness.
 - **Draw:** click points in plan. Snap to shared nodes and actual cubic curves; at-grade crossings are split into shared topology, while elevated crossings remain separate.
 - **One junction pivot:** X/Z in plan, X/Y/Z in 3D. Connected approaches and relative Bézier handles follow the same node. Road pivots and numeric transforms remain editable.
 - **Merge construction:** acute-angle runout includes radius and road width. Both ends share the available trim budget rather than wasting 43% at a free end. Paving setback is adjustable; wide inward offsets cannot fold around the merge nose. Inappropriate zebras are suppressed and junction guidance is surface-clipped.
@@ -50,17 +51,19 @@ The diamond has about **5.79 m modeled clearance** and **6.49% maximum grade**. 
 
 ## Export
 
-| Format           | Content                                                                                                                               |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **GLB**          | Indexed geometry, normals, metric UVs, original PBR materials, embedded albedo/normal/roughness textures and decals                   |
-| **OBJ ZIP**      | Triangles, face normals, UVs, MTL, albedo/normal/roughness PNGs, `materials.json` and `IMPORT.txt`; extract the texture folder intact |
-| **`.road.json`** | Editable v1 graph, relative handles, settings, junction setbacks and procedural surface parameters                                    |
+| Format           | Content                                                                                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| **GLB**          | Indexed geometry, normals, metric UVs, original PBR materials, embedded albedo/normal/roughness textures and decals                             |
+| **OBJ ZIP**      | Triangles, face normals, UVs, MTL, albedo/normal/roughness PNGs, `materials.json`, `mesh.json` and `IMPORT.txt`; keep the texture folder intact |
+| **`.road.json`** | Editable v1 graph, relative handles, settings, junction setbacks and procedural surface parameters                                              |
 
 OBJ uses `norm`/`map_Pr` PBR MTL extensions. Importers that ignore these extensions can use the material manifest or GLB. Albedo is sRGB; normal/roughness are linear data. Normals use **OpenGL +Y**: invert green for DirectX -Y shaders. UV repeats and normal strengths are recorded in the manifest.
 
+Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts and world bounds. GLB root extras also identify the tessellation profile.
+
 Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wireframe preview does not alter the original exported materials. No preview environment is exported. A final game's visual quality also depends on its texture resolution, material/shader integration, lighting, terrain and rendering pipeline; this editor does not claim to be a complete AAA environment renderer.
 
-The published standalone was verified byte-for-byte against the local deliverable. **96 CPU checks and 41 browser checks** pass, including the real parking controls, exports, absence of auto-generated props, mobile layout and offline use.
+Release HTML is checked byte-for-byte against the published GitHub file. **113 CPU checks and 44 browser checks** pass, including the real parking controls, exports, absence of auto-generated props, mobile layout and offline use.
 
 ## Development and verification
 
@@ -86,7 +89,9 @@ window.frontier.select({ kind: "node", id: project.nodes[0].id });
 window.frontier.moveJoint(project.nodes[0].id, [10, 0, 5]);
 window.frontier.loadTemplate("race");
 window.frontier.placeSite("parking"); // enter placement mode
-window.frontier.exportProject("glb");
+window.frontier.setGeometryDetail("production"); // preview only, graph unchanged
+window.frontier.inspectSelection(); // close-up material camera
+window.frontier.exportProject("glb", "production"); // independent dense export
 window.addEventListener("frontier:change", ({ detail }) => {
   const { project, meshes, diagnostics } = detail;
 });
@@ -96,6 +101,6 @@ Selection kinds are `node`, `road` and `site`. `worldToPlan` returns plan-canvas
 
 ### Limits and shortcuts
 
-Tiles: ≤500 roads, ≤1,500 nodes, ≤200 surfaces, 5 × 5 km extent, 5 km maximum alignment control-polygon length and 35 km total. Surface-detail estimates are checked before allocation. Invalid geometry blocks mesh export but leaves JSON available for repair. Larger worlds should be authored/exported as tiles.
+Tiles: ≤500 roads, ≤1,500 nodes, ≤200 surfaces, 5 × 5 km extent, 5 km maximum alignment control-polygon length and 35 km total. Production tessellation has a separate **15 km control-polygon budget**. Surface-detail estimates are checked before allocation. Invalid geometry blocks mesh export but leaves JSON available for repair. Larger worlds should be authored/exported as tiles.
 
 V select · D/P draw · W move · H/Space pan · M measure · B procedural parking · F frame · G grid · S snap · Shift+A templates · Delete remove · Ctrl/Cmd+S save · Ctrl/Cmd+O import · Ctrl/Cmd+Z undo · Esc cancel.

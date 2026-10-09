@@ -224,8 +224,13 @@ try {
     await undo();
   });
   await test("GLB export contains valid geometry and embedded textures even in clay view", async () => {
+    const liveBefore = await state();
     await page.locator("#shade-style").selectOption("clay");
     await page.locator('[data-menu="export-menu"]').click();
+    assert.equal(
+      await page.locator("#export-detail").inputValue(),
+      "production",
+    );
     const downloadPromise = page.waitForEvent("download");
     await page.locator('[data-action="glb"]').click();
     const download = await downloadPromise,
@@ -236,6 +241,13 @@ try {
     const length = buffer.readUInt32LE(12),
       gltf = JSON.parse(buffer.subarray(20, 20 + length).toString());
     assert(gltf.meshes.length > 20);
+    const exportedTriangles = gltf.meshes
+      .flatMap((m) => m.primitives)
+      .reduce((sum, p) => sum + gltf.accessors[p.indices].count / 3, 0);
+    assert(exportedTriangles > liveBefore.triangles * 1.5);
+    assert(gltf.nodes.some((n) => n.extras?.geometryDetail === "production"));
+    assert.deepEqual((await state()).project, liveBefore.project);
+    assert.equal((await state()).triangles, liveBefore.triangles);
     assert(gltf.images.length >= 3);
     assert(gltf.images.every((i) => i.bufferView !== undefined));
     assert(!gltf.nodes.some((n) => n.name === "Context terrain"));
@@ -260,7 +272,23 @@ try {
       files[names.find((n) => n.endsWith(".mtl"))],
     );
     assert(mtl.includes("map_Kd -s .") || mtl.includes("map_Kd -s 0.5"));
-    assert(names.includes("materials.json") && names.includes("IMPORT.txt"));
+    assert(
+      names.includes("materials.json") &&
+        names.includes("IMPORT.txt") &&
+        names.includes("mesh.json"),
+    );
+    const meshManifest = JSON.parse(
+      new TextDecoder().decode(files["mesh.json"]),
+    );
+    assert.equal(meshManifest.geometryDetail, "production");
+    assert.equal(meshManifest.units, "metres");
+    assert.equal(meshManifest.upAxis, "Y");
+    assert(
+      meshManifest.objects.some(
+        (o) => o.owner.name === "Northbank avenue · West",
+      ),
+    );
+    assert(!meshManifest.includesPreviewEnvironment);
     const manifest = JSON.parse(
       new TextDecoder().decode(files["materials.json"]),
     );
@@ -486,6 +514,41 @@ try {
       0,
     );
     assert.equal(await page.locator(".canvas-host>canvas").count(), 2);
+  });
+  await test("production preview increases tessellation without mutating the graph", async () => {
+    const before = await state();
+    await page.locator("#geometry-detail").selectOption("production");
+    const dense = await state();
+    assert(dense.triangles > before.triangles * 1.5);
+    assert.deepEqual(dense.project, before.project);
+    assert.equal(
+      await page.evaluate(() => window.frontier.getNetwork().detail),
+      "production",
+    );
+    await page.locator("#geometry-detail").selectOption("editing");
+    assert.equal((await state()).triangles, before.triangles);
+    assert.deepEqual((await state()).project, before.project);
+  });
+  await test("close-up surface inspection changes the camera, never the selected road or site", async () => {
+    const before = await state(),
+      origin = {
+        x: await page
+          .locator("#scene-gizmo .axis-y .axis-hit")
+          .getAttribute("x1"),
+        hidden: await page.locator("#scene-gizmo").getAttribute("hidden"),
+      };
+    await page.locator("#surface-inspect").click();
+    assert.deepEqual((await state()).project, before.project);
+    assert.deepEqual((await state()).selection, before.selection);
+    const after = {
+      x: await page
+        .locator("#scene-gizmo .axis-y .axis-hit")
+        .getAttribute("x1"),
+      hidden: await page.locator("#scene-gizmo").getAttribute("hidden"),
+    };
+    assert.notDeepEqual(after, origin);
+    await page.screenshot({ path: resolve(cache, "surface-inspection.png") });
+    await page.locator("#scene-focus").click();
   });
   for (const id of [
     "merge",
@@ -830,6 +893,26 @@ try {
     assert(stats.rough > 210 && stats.rough < 240);
     assert.equal(stats.freshHoles, 0);
     assert(stats.wornHoles > 1000);
+  });
+  await test("editing GLB export is independently selectable and leaves the live model untouched", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("tee"));
+    const before = await state();
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("editing");
+    const promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="glb"]').click();
+    const d = await promise,
+      b = await readFile(await d.path()),
+      g = JSON.parse(b.subarray(20, 20 + b.readUInt32LE(12)).toString());
+    const triangles = g.meshes
+      .flatMap((m) => m.primitives)
+      .reduce((sum, p) => sum + g.accessors[p.indices].count / 3, 0);
+    assert.equal(triangles, before.triangles);
+    assert(g.nodes.some((n) => n.extras?.geometryDetail === "editing"));
+    assert.deepEqual((await state()).project, before.project);
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("production");
+    await page.keyboard.press("Escape");
   });
   await test("mobile layout keeps both views usable without horizontal overflow", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("district"));

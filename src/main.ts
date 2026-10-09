@@ -1,3 +1,4 @@
+import { normaliseDetail, type GeometryDetail } from "./core/quality";
 import { templateCatalog } from "./core/templates";
 import {
   siteCatalog,
@@ -37,7 +38,7 @@ import {
   resolveCrossings,
   deleteSelection,
 } from "./core/editing";
-import { exportOBJ } from "./core/export";
+import { exportOBJ, exportMeshManifest } from "./core/export";
 import { PlanView, type EditDrag, type ToolMode } from "./render/plan";
 import { SceneView, type GizmoProjection } from "./render/scene";
 import { patternCanvas, exportTexturePack } from "./render/materials";
@@ -63,7 +64,8 @@ try {
 } catch {
   /* Corrupt storage never prevents opening the studio. */
 }
-let network: Network = buildNetwork(project);
+let geometryDetail: GeometryDetail = "editing";
+let network: Network = buildNetwork(project, { detail: geometryDetail });
 let selection: Selection = {
   kind: "node",
   id: network.junctions[0]?.node.id ?? project.nodes[0]?.id,
@@ -237,7 +239,7 @@ function commit(
 }
 function rebuild(inspector = true, context = false) {
   const start = performance.now();
-  network = buildNetwork(project);
+  network = buildNetwork(project, { detail: geometryDetail });
   if (
     selection &&
     !(
@@ -322,6 +324,27 @@ function updateNames() {
     ? `${escape(selectedName().split(" · ")[0])}<small>${selection.kind === "node" ? "SHARED JOINT PIVOT" : selection.kind === "site" ? "PROCEDURAL SURFACE" : "EDITABLE ROAD ALIGNMENT"}</small>`
     : "Road network<small>LIVE PROCEDURAL GEOMETRY</small>";
   $("scene-annotation").hidden = !selection;
+}
+function setGeometryDetail(value: GeometryDetail) {
+  const before = geometryDetail;
+  geometryDetail = normaliseDetail(value);
+  try {
+    rebuild(true);
+    ($("geometry-detail") as HTMLSelectElement).value = geometryDetail;
+    toast(
+      `${geometryDetail === "production" ? "Production" : "Editing"} mesh · ${compact(network.triangles)} triangles. Road topology unchanged.`,
+    );
+  } catch (error) {
+    geometryDetail = before;
+    rebuild(true);
+    ($("geometry-detail") as HTMLSelectElement).value = before;
+    toast(
+      error instanceof Error
+        ? error.message
+        : "Could not regenerate this mesh profile.",
+      true,
+    );
+  }
 }
 function setSelection(s: Selection) {
   if (
@@ -1221,7 +1244,7 @@ function loadTemplate(id: string) {
   const loaded = commit(
     () => {
       project = makeTemplate(id);
-      network = buildNetwork(project);
+      network = buildNetwork(project, { detail: geometryDetail });
       selection = ["diamond", "cloverleaf", "trumpet"].includes(id)
         ? { kind: "road", id: project.roads.find((r) => r.bridge)!.id }
         : network.junctions[0]
@@ -1309,14 +1332,18 @@ function slug() {
   );
 }
 let exportBusy = false;
-async function exportProject(format: string) {
+async function exportProject(format: string, detail?: GeometryDetail) {
   if (format !== "json" && exportBusy) {
     toast("A geometry export is already being packaged.");
     return;
   }
   if (format !== "json") exportBusy = true;
   const exportName = slug(),
-    exportTriangles = network.triangles;
+    exportDetail = normaliseDetail(
+      detail ?? ($("export-detail") as HTMLSelectElement).value,
+    );
+  // Capture immutable authoring state; export detail never modifies live editing.
+  const exportProjectSnapshot = clone(project);
   try {
     if (format === "json") {
       download(
@@ -1338,9 +1365,16 @@ async function exportProject(format: string) {
       );
       return;
     }
+    toast(`Building ${exportDetail} export geometry…`);
+    const exportNetwork = buildNetwork(exportProjectSnapshot, {
+      detail: exportDetail,
+    });
+    if (exportNetwork.diagnostics.some((d) => d.level === "error"))
+      throw new Error(
+        "Selected export tessellation produces invalid geometry. Review the approaches before exporting.",
+      );
     if (format === "obj") {
-      const base = slug(),
-        exportNetwork = network,
+      const base = exportName,
         { files, textures } = await exportTexturePack(
           exportNetwork.meshes.map((m) => m.material),
         ),
@@ -1349,6 +1383,13 @@ async function exportProject(format: string) {
           {
             [`${base}.obj`]: strToU8(obj),
             [`${base}.mtl`]: strToU8(mtl),
+            "mesh.json": strToU8(
+              JSON.stringify(
+                exportMeshManifest(exportNetwork, exportProjectSnapshot),
+                null,
+                2,
+              ),
+            ),
             ...files,
           },
           { level: 5 },
@@ -1364,10 +1405,10 @@ async function exportProject(format: string) {
       return;
     }
     toast("Packaging geometry and paving materials…");
-    const buffer = await scene.exportGLB();
+    const buffer = await scene.exportGLB(exportNetwork);
     download(buffer, `${exportName}.glb`, "model/gltf-binary");
     toast(
-      `GLB exported · ${compact(exportTriangles)} triangles · embedded materials.`,
+      `GLB exported · ${compact(exportNetwork.triangles)} triangles · ${exportDetail} mesh · embedded materials.`,
     );
   } catch (error) {
     toast(
@@ -1396,6 +1437,10 @@ function doAction(action: string) {
     grid: toggleGrid,
     labels: toggleLabels,
     context: toggleContext,
+    inspect: () => {
+      if (!scene?.inspectSelection())
+        toast("Select a road, junction or parking surface first.", true);
+    },
     help: openHelp,
     json: () => void exportProject("json"),
     obj: () => void exportProject("obj"),
@@ -1695,7 +1740,7 @@ $("project-file").addEventListener("change", async (e) => {
       () => {
         project = imported;
         resolveCrossings(project);
-        network = buildNetwork(project);
+        network = buildNetwork(project, { detail: geometryDetail });
         selection = network.junctions[0]
           ? { kind: "node", id: network.junctions[0].node.id }
           : null;
@@ -1741,6 +1786,13 @@ $("lighting-toggle").addEventListener("click", () => {
   scene?.setNight(night);
   $("lighting-toggle").setAttribute("aria-pressed", String(night));
 });
+$("surface-inspect").addEventListener("click", () => {
+  if (!scene?.inspectSelection())
+    toast("Select a road, junction or parking surface first.", true);
+});
+$("geometry-detail").addEventListener("change", (e) =>
+  setGeometryDetail((e.target as HTMLSelectElement).value as GeometryDetail),
+);
 $("scene-focus").addEventListener("click", () => scene?.focusSelection());
 $("scene-fit").addEventListener("click", () => scene?.fit());
 $("shade-style").addEventListener("change", (e) =>
@@ -1981,6 +2033,8 @@ Object.defineProperty(window, "frontier", {
     worldToPlan: (point: V3) => plan.worldToScreen(point),
     select: setSelection,
     setMode,
+    setGeometryDetail,
+    inspectSelection: () => scene?.inspectSelection() ?? false,
     loadTemplate,
     placeSite: beginPlace,
     exportProject,

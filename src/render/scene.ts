@@ -1,11 +1,11 @@
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
-import { siteOutline } from "../core/sites";
+import { siteOutline, sitePoint } from "../core/sites";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import { Materials } from "./materials";
 
-import { type Network } from "../core/geometry";
+import { type Network, surfacePoint, edgePoint } from "../core/geometry";
 import {
   type Selection,
   type Project,
@@ -101,7 +101,7 @@ export class SceneView {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.085;
-    this.controls.minDistance = 12;
+    this.controls.minDistance = 3;
     this.controls.maxDistance = 1800;
     this.controls.maxPolarAngle = Math.PI * 0.49;
     this.controls.minPolarAngle = 0.08;
@@ -169,30 +169,10 @@ export class SceneView {
     this.project = project;
     this.network = network;
     this.disposeGeometry(this.networkGroup);
-    for (const data of network.meshes) {
-      const geometry = new THREE.BufferGeometry();
-      geometry.setAttribute(
-        "position",
-        new THREE.Float32BufferAttribute(data.positions, 3),
+    for (const data of network.meshes)
+      this.networkGroup.add(
+        this.meshFromData(data, this.materials.get(data.material)),
       );
-      geometry.setAttribute(
-        "uv",
-        new THREE.Float32BufferAttribute(data.uvs, 2),
-      );
-      geometry.setIndex(data.indices);
-      geometry.computeVertexNormals();
-      const mesh = new THREE.Mesh(geometry, this.materials.get(data.material));
-      mesh.name = data.name;
-      mesh.userData = {
-        kind: data.ownerKind,
-        id: data.owner,
-        meshKind: data.kind,
-        materialKey: data.material,
-      };
-      mesh.castShadow = !["marking", "gutter", "drain"].includes(data.kind);
-      mesh.receiveShadow = true;
-      this.networkGroup.add(mesh);
-    }
     this.materials.capture();
     const bounds = this.contextBounds;
     if (
@@ -205,6 +185,34 @@ export class SceneView {
     )
       this.buildContext(network);
     this.setSelection(this.selection);
+  }
+  private meshFromData(
+    data: Network["meshes"][number],
+    material: THREE.Material,
+  ) {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(data.positions, 3),
+    );
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(data.uvs, 2));
+    geometry.setIndex(data.indices);
+    geometry.computeVertexNormals();
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = data.name;
+    mesh.userData = {
+      kind: data.ownerKind,
+      id: data.owner,
+      meshKind: data.kind,
+      materialKey: data.material,
+    };
+    // Zero-thickness top sheets receive shadows. Their closed bases and
+    // volumetric infrastructure cast them, avoiding large-sheet shadow acne.
+    mesh.castShadow = ["curb", "rail", "structure", "sign", "lamp"].includes(
+      data.kind,
+    );
+    mesh.receiveShadow = true;
+    return mesh;
   }
   private buildContext(network: Network) {
     this.disposeGeometry(this.contextGroup, true);
@@ -457,6 +465,62 @@ export class SceneView {
     this.controls.update();
     this.onGizmo(this.gizmoProjection());
   }
+  /** Close-up material framing; changes only the camera, never the project. */
+  inspectSelection(): boolean {
+    if (!this.selection || !this.project || !this.network) return false;
+    let target: V3 | undefined,
+      direction: V3 = [1, 0, 0];
+    if (this.selection.kind === "site") {
+      const site = this.project.sites?.find((s) => s.id === this.selection!.id);
+      if (site) {
+        target = sitePoint(
+          site,
+          -site.width * 0.15,
+          -site.depth / 2 + 0.1,
+          0.2,
+        );
+        const a = (site.yaw * Math.PI) / 180;
+        direction = [Math.sin(a), 0, -Math.cos(a)];
+      }
+    } else if (this.selection.kind === "node") {
+      const joint = this.network.junctions.find(
+          (j) => j.node.id === this.selection!.id,
+        ),
+        arm = joint?.arms[0];
+      if (joint?.corners[0]?.length) {
+        const c = joint.corners[0];
+        target = add(c[Math.floor(c.length / 2)], [0, 0.12, 0]);
+        direction = arm?.n ?? [1, 0, 0];
+      } else if (arm) {
+        target = edgePoint(arm.frame, 1, "curbOut");
+        direction = arm.n;
+      }
+    } else {
+      const span = this.network.spans.find(
+        (s) => s.road.id === this.selection!.id,
+      );
+      if (span) {
+        const f = span.frames[Math.floor(span.frames.length / 2)];
+        target = surfacePoint(f, f.hw + f.cw, 0.12);
+        direction = f.n;
+      }
+    }
+    if (!target) return false;
+    const sight = new THREE.Vector3(
+      direction[0],
+      0.7,
+      direction[2],
+    ).normalize();
+    this.controls.target.set(...target);
+    this.camera.position.copy(
+      this.controls.target.clone().add(sight.multiplyScalar(12)),
+    );
+    this.camera.zoom = 1;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.onGizmo(this.gizmoProjection());
+    return true;
+  }
   zoom(factor: number) {
     this.camera.zoom = THREE.MathUtils.clamp(this.camera.zoom * factor, 0.4, 4);
     this.camera.updateProjectionMatrix();
@@ -486,24 +550,40 @@ export class SceneView {
   setEnabled(v: boolean) {
     this.controls.enabled = v;
   }
-  async exportGLB(): Promise<ArrayBuffer> {
-    const group = this.networkGroup.clone(true),
+  async exportGLB(network?: Network): Promise<ArrayBuffer> {
+    const independent = !!network && network !== this.network,
+      group = independent ? new THREE.Group() : this.networkGroup.clone(true),
       materials = new Map<string, THREE.MeshStandardMaterial>();
-    group.traverse((object) => {
-      if (object instanceof THREE.Mesh) {
-        const key = object.userData.materialKey as string;
-        if (!materials.has(key))
-          materials.set(key, this.materials.exportCopy(key));
-        object.material = materials.get(key)!;
-      }
-    });
+    const material = (key: string) => {
+      if (!materials.has(key))
+        materials.set(key, this.materials.exportCopy(key));
+      return materials.get(key)!;
+    };
+    if (independent)
+      for (const data of network!.meshes)
+        group.add(this.meshFromData(data, material(data.material)));
+    else
+      group.traverse((object) => {
+        if (object instanceof THREE.Mesh)
+          object.material = material(object.userData.materialKey as string);
+      });
+    group.userData = {
+      units: "metres",
+      upAxis: "Y",
+      geometryDetail: network?.detail ?? this.network?.detail ?? "editing",
+      includesPreviewEnvironment: false,
+    };
     try {
       return (await new GLTFExporter().parseAsync(group, {
         binary: true,
         onlyVisible: false,
       })) as ArrayBuffer;
     } finally {
-      for (const material of materials.values()) material.dispose();
+      for (const m of materials.values()) m.dispose();
+      if (independent)
+        group.traverse((o) => {
+          if (o instanceof THREE.Mesh) o.geometry.dispose();
+        });
     }
   }
   private animate = () => {

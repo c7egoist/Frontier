@@ -1,3 +1,8 @@
+import {
+  geometryProfiles,
+  normaliseDetail,
+  type GeometryDetail,
+} from "./quality";
 import { siteOutline, insidePolygon } from "./sites";
 import { parkingLayout, parkingPlan } from "./site-geometry";
 import { buildSiteGeometry } from "./site-geometry";
@@ -127,6 +132,7 @@ export interface Network {
   maxGrade: number;
   clearances: { a: string; b: string; meters: number }[];
   parkingSpaces: number;
+  detail: GeometryDetail;
 }
 const SURFACE = 0.12,
   CURB = 0.16;
@@ -1123,6 +1129,7 @@ export function cornerCurve(
   b: V3,
   db: V3,
   requestedRadius: number,
+  detail: GeometryDetail = "editing",
 ): V3[] {
   const towardA = mul(da, -1),
     towardB = mul(db, -1),
@@ -1149,9 +1156,15 @@ export function cornerCurve(
         deltaAngle = Math.atan2(q[2] - center[2], q[0] - center[0]) - angle;
       while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
       while (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2;
+      const profile = geometryProfiles[detail],
+        arcLength = Math.abs(deltaAngle) * radius;
+      const arcSteps =
+        detail === "editing"
+          ? 24
+          : Math.max(64, Math.min(512, Math.ceil(arcLength / 0.15)));
       const points: V3[] = [a];
-      for (let i = 0; i <= 24; i++) {
-        const t = i / 24;
+      for (let i = 0; i <= arcSteps; i++) {
+        const t = i / arcSteps;
         points.push([
           center[0] + Math.cos(angle + deltaAngle * t) * radius,
           a[1] + (b[1] - a[1]) * t,
@@ -1159,7 +1172,17 @@ export function cornerCurve(
         ]);
       }
       points.push(b);
-      const out = resampleLine(points, 32);
+      const length = points
+          .slice(1)
+          .reduce((sum, p, i) => sum + distance(points[i], p), 0),
+        count = Math.min(
+          profile.maxCornerPoints,
+          Math.max(
+            profile.minCornerPoints,
+            Math.ceil(length / profile.cornerSegment) + 1,
+          ),
+        );
+      const out = resampleLine(points, count);
       out[0] = a;
       out[out.length - 1] = b;
       return out;
@@ -1169,8 +1192,16 @@ export function cornerCurve(
     h = Math.min(length * 0.34, Math.max(1, requestedRadius));
   const c1 = add(a, mul(da, -h)),
     c2 = add(b, mul(db, -h));
-  return Array.from({ length: 32 }, (_, i) => {
-    const t = i / 31,
+  const profile = geometryProfiles[detail],
+    count = Math.min(
+      profile.maxCornerPoints,
+      Math.max(
+        profile.minCornerPoints,
+        Math.ceil((length + h * 2) / profile.cornerSegment) + 1,
+      ),
+    );
+  return Array.from({ length: count }, (_, i) => {
+    const t = i / (count - 1),
       u = 1 - t;
     return add(
       add(mul(a, u * u * u), mul(c1, 3 * u * u * t)),
@@ -1307,6 +1338,7 @@ function buildJunction(
   node: RoadNode,
   spans: RoadSpan[],
   diagnostics: Diagnostic[],
+  detail: GeometryDetail,
 ) {
   const b = new MeshBuilder(node.id, "node"),
     arms = spans.map((s) => makeArm(s, node)).sort((a, b) => a.angle - b.angle);
@@ -1324,7 +1356,7 @@ function buildJunction(
   for (let i = 0; i < arms.length; i++) {
     const a = arms[i],
       next = arms[(i + 1) % arms.length],
-      curve = cornerCurve(a.left, a.d, next.right, next.d, radius);
+      curve = cornerCurve(a.left, a.d, next.right, next.d, radius, detail);
     const curbIn = curve.map((p, k) =>
       add(p, [
         0,
@@ -1437,11 +1469,33 @@ function buildJunction(
     inlets,
   };
 }
-export function buildNetwork(project: Project): Network {
+export function buildNetwork(
+  project: Project,
+  options: { detail?: GeometryDetail } = {},
+): Network {
+  const detail = normaliseDetail(options.detail),
+    profile = geometryProfiles[detail];
   validateGenerationBudget(project);
+  // Dense meshes need a separate preflight budget, before any allocation.
+  if (detail === "production") {
+    const estimate = project.roads.reduce((sum, r) => {
+      const p = getNode(project, r.start).position,
+        q = getNode(project, r.end).position;
+      return (
+        sum +
+        distance([0, 0, 0], r.h1) +
+        distance(add(p, r.h1), add(q, r.h2)) +
+        distance([0, 0, 0], r.h2)
+      );
+    }, 0);
+    if (estimate > 15000)
+      throw new RangeError(
+        "Production geometry budget: 15 km of control-polygon length per editor tile. Export larger worlds as separate tiles.",
+      );
+  }
   const diagnostics: Diagnostic[] = [],
     alignments = new Map(
-      project.roads.map((r) => [r.id, sampleAlignment(project, r)]),
+      project.roads.map((r) => [r.id, sampleAlignment(project, r, profile)]),
     );
   const jointNodes = project.nodes.filter((n) =>
       needsJoint(project, n, alignments),
@@ -1553,6 +1607,7 @@ export function buildNetwork(project: Project): Network {
       node,
       spans.filter((s) => s.road.start === node.id || s.road.end === node.id),
       diagnostics,
+      detail,
     );
     junctions.push(result.junction);
     meshes.push(...result.meshes);
@@ -1672,6 +1727,7 @@ export function buildNetwork(project: Project): Network {
     max.fill(30);
   }
   return {
+    detail,
     spans,
     junctions,
     meshes,
