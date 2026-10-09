@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Landscape Editor</title>
+    <link rel="stylesheet" href="LandscapeEditor.css">
+</head>
+<body>
+    <div class="workspace">
+        <aside class="dock dock-left" aria-label="Layer stack">
+            <div class="tab-strip">
+                <button class="document-tab is-active" type="button">
+                    <span>Layer Stack</span>
+                </button>
+                <span class="tab-spacer"></span>
+                <button class="icon-button" id="add-layer-quick" type="button" title="Add generator layer" aria-label="Add generator layer">+</button>
+            </div>
+            <div class="dock-heading">
+                <p class="eyebrow">Landscape</p>
+                <h1 id="stack-title">Layer Stack</h1>
+                <p class="dock-caption">Evaluated bottom to top. Each layer folds into the heightmap below it.</p>
+            </div>
+            <div class="stat-row" id="stack-stats"></div>
+            <div class="search-field">
+                <input id="layer-filter" type="search" placeholder="Filter layers" aria-label="Filter layers">
+            </div>
+            <div class="outliner" id="outliner" role="tree"></div>
+            <div class="dock-footer dock-footer-split">
+                <button class="button" id="add-generator" type="button">+ Generator</button>
+                <button class="button" id="add-erosion" type="button">+ Erosion</button>
+            </div>
+        </aside>
+
+        <main class="viewport-panel" aria-label="Viewport">
+            <div class="tab-strip">
+                <button class="document-tab is-active" type="button" id="viewport-tab">
+                    <span id="viewport-tab-name">Landscape</span>
+                </button>
+            </div>
+            <div class="viewport-toolbar">
+                <div class="toolbar-group">
+                    <button class="button button-construct" id="recompute" type="button">Recompute</button>
+                    <button class="button" id="presets-toggle" type="button" aria-expanded="false">Presets</button>
+                </div>
+                <div class="segmented" role="group" aria-label="Camera">
+                    <button type="button" data-view="perspective" class="is-active">Perspective</button>
+                    <button type="button" data-view="top">Top</button>
+                </div>
+                <label class="toolbar-select">
+                    <span>Satmap</span>
+                    <select id="satmap-mode"></select>
+                </label>
+                <label class="toolbar-select">
+                    <span>Shading</span>
+                    <select id="shading-mode">
+                        <option value="0">Satmap</option>
+                        <option value="1">Clay</option>
+                        <option value="2">Elevation ramp</option>
+                    </select>
+                </label>
+                <button class="toggle-chip is-on" id="water-toggle" type="button" aria-pressed="true">Water</button>
+                <button class="toggle-chip" id="contour-toggle" type="button" aria-pressed="false">Contours</button>
+                <label class="toolbar-select toolbar-range">
+                    <span>Exaggeration</span>
+                    <input id="exaggeration" type="range" min="0.5" max="4" step="0.05" value="1">
+                    <output id="exaggeration-value">1.00×</output>
+                </label>
+                <div class="toolbar-spacer"></div>
+                <div class="toolbar-group">
+                    <button class="icon-button" id="undo" type="button" title="Undo (Ctrl+Z)" aria-label="Undo">
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4 2.5 7.5 6 11" /><path d="M3 7.5h7a3.5 3.5 0 0 1 0 7H8" /></svg>
+                    </button>
+                    <button class="icon-button" id="redo" type="button" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 4l3.5 3.5L10 11" /><path d="M13 7.5H6a3.5 3.5 0 0 0 0 7h2" /></svg>
+                    </button>
+                    <button class="button" id="export-raw" type="button">Export R16</button>
+                    <button class="button" id="export-png" type="button">Export satmap</button>
+                    <button class="button" id="save-json" type="button">Save JSON</button>
+                    <button class="button" id="open-json" type="button">Open JSON</button>
+                    <input id="open-json-file" type="file" accept="application/json,.json" hidden>
+                </div>
+            </div>
+            <div class="viewport-stage" id="stage">
+                <canvas id="viewport-canvas" aria-label="Landscape preview"></canvas>
+                <div class="stage-chip" id="progress-chip" hidden></div>
+                <div class="stage-legend" id="legend" hidden></div>
+                <div class="stage-banner" id="error-banner" hidden></div>
+            </div>
+            <section class="presets-drawer" id="presets-drawer" hidden aria-label="Presets">
+                <header class="drawer-head">
+                    <span class="eyebrow">Presets</span>
+                    <p>Full layer stacks with palettes and sea levels. Loading a preset replaces the current landscape; undo restores it.</p>
+                </header>
+                <div class="preset-grid" id="preset-grid"></div>
+            </section>
+            <footer class="viewport-footer" id="status"></footer>
+        </main>
+
+        <aside class="dock dock-right" aria-label="Inspector">
+            <div class="tab-strip">
+                <button class="document-tab is-active" type="button">
+                    <span>Inspector</span>
+                </button>
+            </div>
+            <div class="dock-heading" id="inspector-heading"></div>
+            <div class="dock-body" id="inspector"></div>
+            <div class="dock-footer" id="inspector-footer"></div>
+        </aside>
+    </div>
+    <script type="module" src="js/Main.js"></script>
+</body>
+</html>

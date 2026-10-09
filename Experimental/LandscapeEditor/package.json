@@ -1,0 +1,9 @@
+{
+  "name": "landscape-editor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node Check/CheckLandscape.mjs",
+    "serve": "node Serve.mjs"
+  }
+}
