@@ -17,6 +17,15 @@ export interface Site {
   bays: number;
   accessible: number;
   entrance: "north" | "south" | "east" | "west";
+  bayWidth: number;
+  bayDepth: number;
+  aisleWidth: number;
+  perimeterWidth: number;
+  entryWidth: number;
+  parkingAngle: 45 | 60 | 90;
+  parkingLayout: "automatic" | "double" | "single";
+  numbering: boolean;
+  paintWear: number;
 }
 export const siteCatalog: {
   id: SiteKind;
@@ -25,40 +34,30 @@ export const siteCatalog: {
   icon: string;
 }[] = [
   {
-    id: "block",
-    name: "Street block",
-    description: "Stone perimeter · stepped buildings · trees",
-    icon: "building-2",
-  },
-  {
     id: "parking",
-    name: "Parking court",
-    description: "90° bays · drive aisle · accessible spaces",
+    name: "Procedural parking",
+    description: "Auto rows · bay angle · drive aisles",
     icon: "square-parking",
   },
   {
     id: "plaza",
-    name: "Paved plaza",
-    description: "Large-format stone · benches · planters",
-    icon: "landmark",
+    name: "Paving surface",
+    description: "Metric stone courses · edge detail",
+    icon: "grid-2x2",
   },
   {
     id: "island",
-    name: "Landscape island",
-    description: "Rounded triangle · planted inset · curbs",
-    icon: "trees",
-  },
-  {
-    id: "water",
-    name: "Waterfront",
-    description: "Calm water surface for promenade scenes",
-    icon: "waves",
+    name: "Curbed splitter",
+    description: "Rounded footprint · paving only",
+    icon: "triangle",
   },
 ];
 export function makeSite(kind: SiteKind, position: V3): Site {
   return {
     id: uid("site"),
-    name: siteCatalog.find((s) => s.id === kind)!.name,
+    name:
+      siteCatalog.find((s) => s.id === kind)?.name ??
+      `Legacy ${kind} (excluded)`,
     kind,
     position: [...position],
     yaw: 0,
@@ -84,11 +83,20 @@ export function makeSite(kind: SiteKind, position: V3): Site {
               : 24,
     pattern: "ashlar",
     shape: kind === "island" ? "triangle" : "rectangle",
-    landscape: kind !== "water",
-    buildingHeight: kind === "block" ? 15 : 0,
-    bays: 14,
+    landscape: false,
+    buildingHeight: 0,
+    bays: 0,
     accessible: 2,
     entrance: "north",
+    bayWidth: 2.8,
+    bayDepth: 5.2,
+    aisleWidth: 6.5,
+    perimeterWidth: 1.8,
+    entryWidth: 7,
+    parkingAngle: 90,
+    parkingLayout: "automatic",
+    numbering: false,
+    paintWear: 0.08,
   };
 }
 export function sitePoint(site: Site, x: number, z: number, y = 0): V3 {
@@ -202,55 +210,78 @@ export function parseSites(raw: unknown, patterns: readonly string[]): Site[] {
   if (!Array.isArray(raw) || raw.length > 200)
     throw new Error("Invalid site collection (maximum 200).");
   const ids = new Set<string>();
-  return raw.map((value) => {
-    if (!value || typeof value !== "object") throw new Error("Invalid site.");
-    const e = value as Record<string, unknown>;
-    if (
-      typeof e.id !== "string" ||
-      e.id.length > 100 ||
-      ids.has(e.id) ||
-      !siteCatalog.some((s) => s.id === e.kind)
-    )
-      throw new Error("Invalid or duplicate site ID/type.");
-    ids.add(e.id);
-    if (
-      !Array.isArray(e.position) ||
-      e.position.length !== 3 ||
-      e.position.some(
-        (n) =>
-          typeof n !== "number" || !Number.isFinite(n) || Math.abs(n) > 100000,
+  return raw
+    .map((value) => {
+      if (!value || typeof value !== "object") throw new Error("Invalid site.");
+      const e = value as Record<string, unknown>;
+      if (
+        typeof e.id !== "string" ||
+        e.id.length > 100 ||
+        ids.has(e.id) ||
+        !["parking", "plaza", "island", "block", "water"].includes(
+          String(e.kind),
+        )
       )
-    )
-      throw new Error("Invalid site position.");
-    const fallback = makeSite(e.kind as SiteKind, e.position as V3);
-    const num = (key: string, min: number, max: number) =>
-      typeof e[key] === "number" && Number.isFinite(e[key])
-        ? clamp(e[key] as number, min, max)
-        : (fallback as unknown as Record<string, number>)[key];
-    const site: Site = {
-      ...fallback,
-      id: e.id,
-      name: typeof e.name === "string" ? e.name.slice(0, 80) : fallback.name,
-      yaw: num("yaw", -360, 360),
-      width: num("width", 8, 250),
-      depth: num("depth", 8, 400),
-      buildingHeight: num("buildingHeight", 0, 80),
-      bays: Math.round(num("bays", 2, 70)),
-      accessible: Math.round(num("accessible", 0, 6)),
-      pattern: patterns.includes(String(e.pattern))
-        ? (e.pattern as Pattern)
-        : "ashlar",
-      shape: ["rectangle", "triangle", "circle"].includes(String(e.shape))
-        ? (e.shape as Site["shape"])
-        : fallback.shape,
-      landscape: e.landscape !== false,
-      entrance: ["north", "south", "east", "west"].includes(String(e.entrance))
-        ? (e.entrance as Site["entrance"])
-        : "north",
-    };
-    const polygon = siteOutline(site);
-    if (!simplePolygon(polygon) || Math.abs(polygonArea(polygon)) < 1)
-      throw new Error("Degenerate site footprint.");
-    return site;
-  });
+        throw new Error("Invalid or duplicate site ID/type.");
+      ids.add(e.id);
+      if (
+        !Array.isArray(e.position) ||
+        e.position.length !== 3 ||
+        e.position.some(
+          (n) =>
+            typeof n !== "number" ||
+            !Number.isFinite(n) ||
+            Math.abs(n) > 100000,
+        )
+      )
+        throw new Error("Invalid site position.");
+      const fallback = makeSite(e.kind as SiteKind, e.position as V3);
+      const num = (key: string, min: number, max: number) =>
+        typeof e[key] === "number" && Number.isFinite(e[key])
+          ? clamp(e[key] as number, min, max)
+          : (fallback as unknown as Record<string, number>)[key];
+      const site: Site = {
+        ...fallback,
+        id: e.id,
+        name: typeof e.name === "string" ? e.name.slice(0, 80) : fallback.name,
+        yaw: num("yaw", -360, 360),
+        width: num("width", 8, 250),
+        depth: num("depth", 8, 400),
+        buildingHeight: num("buildingHeight", 0, 80),
+        bays: Math.round(num("bays", 0, 70)),
+        accessible: Math.round(num("accessible", 0, 6)),
+        pattern: patterns.includes(String(e.pattern))
+          ? (e.pattern as Pattern)
+          : "ashlar",
+        shape: ["rectangle", "triangle", "circle"].includes(String(e.shape))
+          ? (e.shape as Site["shape"])
+          : fallback.shape,
+        landscape: false,
+        entrance: ["north", "south", "east", "west"].includes(
+          String(e.entrance),
+        )
+          ? (e.entrance as Site["entrance"])
+          : "north",
+        bayWidth: num("bayWidth", 2.4, 3.6),
+        bayDepth: num("bayDepth", 4.5, 6.5),
+        aisleWidth: num("aisleWidth", 4, 9),
+        perimeterWidth: num("perimeterWidth", 0.3, 4),
+        entryWidth: num("entryWidth", 3.5, 10),
+        parkingAngle: [45, 60, 90].includes(Number(e.parkingAngle))
+          ? (Number(e.parkingAngle) as 45 | 60 | 90)
+          : 90,
+        parkingLayout: ["automatic", "double", "single"].includes(
+          String(e.parkingLayout),
+        )
+          ? (e.parkingLayout as Site["parkingLayout"])
+          : "automatic",
+        numbering: e.numbering === true,
+        paintWear: num("paintWear", 0, 0.35),
+      };
+      const polygon = siteOutline(site);
+      if (!simplePolygon(polygon) || Math.abs(polygonArea(polygon)) < 1)
+        throw new Error("Degenerate site footprint.");
+      return site;
+    })
+    .filter((s) => s.kind !== "block" && s.kind !== "water");
 }

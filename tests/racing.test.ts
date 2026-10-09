@@ -23,7 +23,7 @@ import {
   sitePoint,
   insidePolygon,
 } from "../src/core/sites";
-import { parkingLayout } from "../src/core/site-geometry";
+import { parkingLayout, parkingPlan } from "../src/core/site-geometry";
 import {
   simplePolygon,
   polygonArea,
@@ -217,7 +217,9 @@ describe("racing and urban templates", () => {
     assert(n.meshes.some((m) => m.kind === "rail" && m.material === "curb"));
   });
   it("signalized junction paint is projected onto and contained by the asphalt", () => {
-    const n = buildNetwork(makeTemplate("signal")),
+    const p = makeTemplate("signal");
+    p.nodes.find((n) => n.boxJunction)!.signals = true;
+    const n = buildNetwork(p),
       j = n.junctions.find((j) => j.node.signals)!;
     assert(
       n.meshes.some(
@@ -243,7 +245,9 @@ describe("racing and urban templates", () => {
       }
   });
   it("front-facing sign decals use normalized UVs rather than world projection", () => {
-    const n = buildNetwork(makeTemplate("merge"));
+    const p = makeTemplate("merge");
+    p.roads.forEach((r) => (r.signs = true));
+    const n = buildNetwork(p);
     for (const m of n.meshes.filter((m) => m.material.startsWith("sign-"))) {
       assert(m.uvs.every((v) => v >= -1e-8 && v <= 1 + 1e-8));
       assert(m.indices.length > 0);
@@ -303,7 +307,7 @@ describe("racing and urban templates", () => {
   });
 });
 describe("editable sites and parking", () => {
-  for (const kind of ["block", "parking", "plaza", "island", "water"] as const)
+  for (const kind of ["parking", "plaza", "island"] as const)
     it(`${kind}: standalone mesh ownership and finite indexed geometry`, () => {
       const site = makeSite(kind, [17, 0, -24]);
       site.yaw = 35;
@@ -322,7 +326,7 @@ describe("editable sites and parking", () => {
       finite(n);
       assert.deepEqual(parseProject(p), p);
     });
-  it("triangular landscaping is genuinely inset from every edge, including the hypotenuse", () => {
+  it("triangular paving is genuinely inset from every edge, including the hypotenuse", () => {
     const site = makeSite("island", [0, 0, 0]);
     const outline = siteOutline(site),
       inner = siteOutline(site, 2);
@@ -338,7 +342,9 @@ describe("editable sites and parking", () => {
     assert(
       layout
         .filter((s) => s.side === -1)
-        .every((s) => Math.abs(s.x) - s.width / 2 >= 4.8),
+        .every((s) =>
+          s.corners.every(([x]) => Math.abs(x) >= site.entryWidth / 2 + 0.15),
+        ),
     );
     const n = buildNetwork({
       version: 1,
@@ -349,8 +355,12 @@ describe("editable sites and parking", () => {
     });
     assert.equal(n.parkingSpaces, layout.length);
     assert(n.meshes.some((m) => m.material === "marking-accessible"));
-    assert(n.meshes.some((m) => m.material === "wheel-stop"));
-    assert(n.meshes.some((m) => m.material === "sign-parking"));
+    assert(
+      !n.meshes.some((m) =>
+        ["building", "lamp", "sign", "landscape"].includes(m.kind),
+      ),
+    );
+    assert(!n.meshes.some((m) => m.material === "wheel-stop"));
   });
   it("round/triangular courts never put rectangular bays outside the actual footprint", () => {
     for (const shape of ["circle", "triangle"] as const) {
@@ -380,7 +390,7 @@ describe("editable sites and parking", () => {
     assert.equal(JSON.stringify({ nodes: p.nodes, roads: p.roads }), graph);
     assert(!p.sites!.some((s) => s.id === id));
   });
-  it("road edits do not move independent street blocks", () => {
+  it("road edits do not move independent parking surfaces", () => {
     const p = makeTemplate("urban"),
       sites = JSON.stringify(p.sites);
     moveNode(p, p.nodes[0].id, add(p.nodes[0].position, [2, 0, 1]));
@@ -417,8 +427,8 @@ describe("editable sites and parking", () => {
     finite(buildNetwork(p));
   });
   it("invalid and overly dense site imports are rejected before allocating meshes", () => {
-    const site = makeSite("block", [0, 0, 0]);
-    site.buildingHeight = Infinity;
+    const site = makeSite("parking", [0, 0, 0]);
+    site.bayDepth = Infinity;
     const p: Project = {
       version: 1,
       name: "Oversized",
@@ -426,8 +436,8 @@ describe("editable sites and parking", () => {
       roads: [],
       sites: [site],
     };
-    assert.throws(() => validateGenerationBudget(p), /Invalid site/);
-    site.buildingHeight = 80;
+    assert.throws(() => validateGenerationBudget(p), /Invalid.*parking/);
+    site.bayDepth = 5.2;
     site.width = 250;
     site.depth = 400;
     p.sites = Array.from({ length: 20 }, () => structuredClone(site));
@@ -436,9 +446,9 @@ describe("editable sites and parking", () => {
     raw.sites![0].position = [NaN, 0, 0];
     assert.throws(() => parseProject(raw), /site position/);
   });
-  it("placing a block across live road geometry reports the obstruction", () => {
+  it("placing a paving footprint across live road geometry reports the obstruction", () => {
     const p = makeTemplate("tee"),
-      block = makeSite("block", [0, 0, 0]);
+      block = makeSite("plaza", [0, 0, 0]);
     p.sites = [block];
     const n = buildNetwork(p);
     assert(
@@ -466,5 +476,122 @@ describe("editable sites and parking", () => {
     );
     assert(mtl.includes("map_Kd -s 0.5 0.5 1 textures/paving-ashlar.png"));
     assert(!obj.includes("NaN"));
+  });
+});
+
+describe("road-only authoring and procedural parking modules", () => {
+  it("no default template generates environment props or city architecture", () => {
+    for (const id of [
+      "district",
+      "urban",
+      "merge",
+      "signal",
+      "race",
+      "cloverleaf",
+      "trumpet",
+      "waterfront",
+      "tee",
+      "roundabout",
+      "diamond",
+    ]) {
+      const p = makeTemplate(id),
+        n = buildNetwork(p);
+      assert(!p.sites?.some((s) => s.kind === "block" || s.kind === "water"));
+      assert(
+        !n.meshes.some((m) =>
+          ["building", "landscape", "lamp", "sign"].includes(m.kind),
+        ),
+        id,
+      );
+    }
+  });
+  it("legacy architecture is ignored without changing the editable road graph", () => {
+    const p = makeTemplate("district"),
+      roads = structuredClone(p.roads);
+    p.sites!.push(makeSite("block", [0, 0, 0]), makeSite("water", [0, 0, 0]));
+    const parsed = parseProject(p);
+    assert.deepEqual(parsed.roads, roads);
+    assert(
+      !parsed.sites?.some((s) => s.kind === "block" || s.kind === "water"),
+    );
+  });
+  it("increasing footprint dimensions regenerates row count and capacity automatically", () => {
+    const s = makeSite("parking", [0, 0, 0]);
+    s.accessible = 0;
+    s.depth = 25;
+    const small = parkingPlan(s);
+    s.depth = 58;
+    const deep = parkingPlan(s);
+    assert(deep.rows > small.rows);
+    assert(deep.bays.length > small.bays.length);
+    s.width = 94;
+    const wide = parkingPlan(s);
+    assert(wide.bays.length > deep.bays.length);
+    assert.equal(s.bays, 0);
+  });
+  for (const angle of [45, 60, 90] as const)
+    it(`${angle}° slots have exact dimensions and stay outside the entry spine`, () => {
+      const s = makeSite("parking", [0, 0, 0]);
+      s.width = 80;
+      s.depth = 65;
+      s.parkingAngle = angle;
+      const p = parkingPlan(s),
+        polygon = siteOutline(s, s.perimeterWidth + 0.22);
+      assert(p.bays.length > 15);
+      for (const b of p.bays) {
+        assert.equal(b.angle, angle);
+        const [a, z, c] = b.corners;
+        assert(Math.abs(Math.hypot(a[0] - z[0], a[1] - z[1]) - b.width) < 1e-8);
+        assert(Math.abs(Math.hypot(z[0] - c[0], z[1] - c[1]) - b.depth) < 1e-8);
+        assert(
+          b.corners.every(([x, z]) =>
+            insidePolygon(sitePoint(s, x, z), polygon),
+          ),
+        );
+        assert(b.corners.every(([x]) => Math.abs(x) > s.entryWidth / 2));
+      }
+      finite(
+        buildNetwork({
+          version: 1,
+          name: "Angle",
+          nodes: [],
+          roads: [],
+          sites: [s],
+        }),
+      );
+    });
+  it("changing drive aisle width changes module count, not just a UI label", () => {
+    const s = makeSite("parking", [0, 0, 0]);
+    s.depth = 54;
+    s.aisleWidth = 4;
+    const a = parkingPlan(s);
+    s.aisleWidth = 9;
+    const b = parkingPlan(s);
+    assert(a.rows > b.rows);
+    assert(b.aisles.every((a) => a.width === 9));
+  });
+  it("row modes deliberately produce single, double or repeated modules", () => {
+    const s = makeSite("parking", [0, 0, 0]);
+    s.depth = 70;
+    s.parkingLayout = "single";
+    assert.equal(parkingPlan(s).rows, 1);
+    s.parkingLayout = "double";
+    assert.equal(parkingPlan(s).rows, 2);
+    s.parkingLayout = "automatic";
+    assert(parkingPlan(s).rows >= 6);
+  });
+  it("small footprints return an explicit layout warning rather than fake stalls", () => {
+    const s = makeSite("parking", [0, 0, 0]);
+    s.depth = 8;
+    assert.equal(parkingPlan(s).bays.length, 0);
+    assert(parkingPlan(s).warnings.length > 0);
+    const n = buildNetwork({
+      version: 1,
+      name: "small",
+      nodes: [],
+      roads: [],
+      sites: [s],
+    });
+    assert(n.diagnostics.some((d) => d.owner === s.id));
   });
 });

@@ -437,13 +437,33 @@ try {
       0,
     );
   });
-  await test("dark graphite UI retains the linked editor layout", async () => {
+  await test("Slate FrontierEditor palette, panel dimensions and typography are preserved", async () => {
     assert.equal(
       await page
         .locator(".app-header")
         .evaluate((e) => getComputedStyle(e).backgroundColor),
-      "rgb(19, 22, 25)",
+      "rgb(23, 23, 23)",
     );
+    assert.equal(
+      await page
+        .locator(".outliner")
+        .evaluate((e) => getComputedStyle(e).backgroundColor),
+      "rgb(22, 22, 22)",
+    );
+    assert.equal((await page.locator(".outliner").boundingBox()).width, 284);
+    assert.equal(
+      await page
+        .locator("body")
+        .evaluate((e) => getComputedStyle(e).fontFamily),
+      '"DM Sans Variable", "DM Sans", sans-serif',
+    );
+    assert.equal(
+      await page
+        .locator(".brand>.version")
+        .evaluate((e) => getComputedStyle(e).fontSize),
+      "8px",
+    );
+    assert.equal(await page.locator('[data-asset="block"]').count(), 0);
     assert(await page.locator('[data-library="sites"]').isVisible());
     assert.equal(await page.locator(".canvas-host>canvas").count(), 2);
   });
@@ -461,6 +481,14 @@ try {
       const s = await state();
       assert.equal(s.diagnostics.length, 0);
       assert(s.triangles > 10000);
+      assert(
+        !s.meshes.some((m) =>
+          ["building", "landscape", "sign", "lamp"].includes(m.kind),
+        ),
+      );
+      assert(
+        !s.project.sites?.some((s) => s.kind === "block" || s.kind === "water"),
+      );
       assert.equal(
         await page.locator("#scene-gizmo").getAttribute("hidden"),
         null,
@@ -529,6 +557,38 @@ try {
       old.position[0] + 4,
     );
     await undo();
+  });
+  await test("procedural parking dimensions, bay angle and aisle controls change generated layout", async () => {
+    const prior = await state();
+    await page.locator('input[data-prop="depth"]').focus();
+    await page.locator('input[data-prop="depth"]').press("End");
+    const deep = await state();
+    assert(
+      deep.project.sites.find((s) => s.id === placedId).depth >
+        prior.project.sites.find((s) => s.id === placedId).depth,
+    );
+    assert(deep.triangles > prior.triangles);
+    await undo();
+    await page.locator('[data-prop="parkingAngle"]').selectOption("60");
+    assert.equal(
+      (await state()).project.sites.find((s) => s.id === placedId).parkingAngle,
+      60,
+    );
+    await undo();
+    await page.locator('[data-prop="parkingLayout"]').selectOption("single");
+    assert.equal(
+      (await state()).project.sites.find((s) => s.id === placedId)
+        .parkingLayout,
+      "single",
+    );
+    await undo();
+    assert(
+      !(await state()).meshes.some(
+        (m) =>
+          m.owner === placedId &&
+          ["building", "lamp", "sign", "landscape"].includes(m.kind),
+      ),
+    );
   });
   await test("3D Y-axis gizmo moves the site, not the connected road graph", async () => {
     const before = await state(),
@@ -630,6 +690,10 @@ try {
   });
   await test("signals are visible geometry and the junction toggle removes them", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("signal"));
+    assert(!(await state()).meshes.some((m) => m.material === "signal-red"));
+    await page
+      .getByRole("checkbox", { name: "Traffic signals", exact: true })
+      .check();
     assert((await state()).meshes.some((m) => m.material === "signal-red"));
     await page
       .getByRole("checkbox", { name: "Traffic signals", exact: true })
@@ -637,7 +701,7 @@ try {
     assert(!(await state()).meshes.some((m) => m.material === "signal-red"));
     await undo();
   });
-  await test("racing GLB exports sites, signs, rumble textures and original normal maps", async () => {
+  await test("racing GLB exports road-only surfaces, rumble textures and PBR channels", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("race"));
     await page.locator("#shade-style").selectOption("clay");
     await page.locator('[data-menu="export-menu"]').click();
@@ -657,7 +721,19 @@ try {
     assert(
       g.materials.some((m) => m.name === "paving-ashlar" && m.normalTexture),
     );
-    assert(g.materials.some((m) => m.name === "sign-speed-40"));
+    assert(
+      !g.nodes.some((n) =>
+        ["building", "landscape", "sign", "lamp"].includes(n.extras?.meshKind),
+      ),
+    );
+    assert(
+      g.materials.some(
+        (m) =>
+          m.name === "asphalt" &&
+          m.normalTexture &&
+          m.pbrMetallicRoughness.metallicRoughnessTexture,
+      ),
+    );
     assert(g.nodes.some((n) => n.extras?.kind === "site"));
     assert(g.images.every((i) => i.bufferView !== undefined));
     assert(!g.nodes.some((n) => n.name === "Context terrain"));

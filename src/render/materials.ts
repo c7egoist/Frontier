@@ -18,22 +18,22 @@ export function patternCanvas(
     for (let i = 0; i < image.data.length; i += 4) {
       const gray = 39 + random() * 12;
       image.data[i] = gray;
-      image.data[i + 1] = gray + 3;
-      image.data[i + 2] = gray + 4;
+      image.data[i + 1] = gray;
+      image.data[i + 2] = gray;
       image.data[i + 3] = 255;
     }
     c.putImageData(image, 0, 0);
     return canvas;
   }
   const palette: Record<string, number[]> = {
-    ashlar: [176, 182, 188],
-    linear: [194, 197, 199],
-    terrazzo: [182, 184, 186],
-    slate: [77, 88, 99],
-    permeable: [145, 152, 151],
+    ashlar: [170, 168, 163],
+    linear: [185, 183, 178],
+    terrazzo: [175, 174, 170],
+    slate: [65, 67, 68],
+    permeable: [147, 147, 143],
   };
-  const colors = dark ? [93, 105, 112] : (palette[pattern] ?? [176, 179, 182]);
-  c.fillStyle = dark ? "#313c45" : pattern === "slate" ? "#323b43" : "#777e83";
+  const colors = dark ? [93, 105, 112] : (palette[pattern] ?? [173, 171, 167]);
+  c.fillStyle = dark ? "#313c45" : pattern === "slate" ? "#292a2b" : "#787773";
   c.fillRect(0, 0, 512, 512);
   const tile = (x: number, y: number, w: number, h: number) => {
     const jitter = (random() - 0.5) * 12,
@@ -131,6 +131,29 @@ function normalCanvas(source: HTMLCanvasElement, strength: number) {
   c.putImageData(image, 0, 0);
   return canvas;
 }
+function roughnessCanvas(source: HTMLCanvasElement, asphalt = false) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 512;
+  const c = canvas.getContext("2d")!;
+  c.drawImage(source, 0, 0, 512, 512);
+  const image = c.getImageData(0, 0, 512, 512);
+  for (let y = 0; y < 512; y++)
+    for (let x = 0; x < 512; x++) {
+      const i = (y * 512 + x) * 4,
+        v = image.data[i] / 255,
+        noise = (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1,
+        r = asphalt
+          ? 0.88 + noise * 0.025
+          : Math.min(0.97, 0.79 + (1 - v) * 0.17 + noise * 0.012);
+      image.data[i] =
+        image.data[i + 1] =
+        image.data[i + 2] =
+          Math.round(r * 255);
+      image.data[i + 3] = 255;
+    }
+  c.putImageData(image, 0, 0);
+  return canvas;
+}
 function graphicCanvas(key: string) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 256;
@@ -144,9 +167,9 @@ function graphicCanvas(key: string) {
     c.fillText(value, 128, 132);
   };
   if (key === "race-curb") {
-    c.fillStyle = "#b83d39";
+    c.fillStyle = "#9e3e34";
     c.fillRect(0, 0, 128, 256);
-    c.fillStyle = "#eceff1";
+    c.fillStyle = "#c6c0b5";
     c.fillRect(128, 0, 128, 256);
   } else if (key.startsWith("speed-")) {
     c.fillStyle = "#f3f4f3";
@@ -258,18 +281,9 @@ export class Materials {
   get(key: string) {
     if (this.cache.has(key)) return this.cache.get(key)!;
     const colors: Record<string, string> = {
-      curb: "#b6bec5",
-      "pave-border": "#515d68",
+      curb: "#b4b0a8",
+      "pave-border": "#565755",
       pole: "#394651",
-      grass: "#608568",
-      foliage: "#427258",
-      flowers: "#d5b078",
-      wood: "#7a685a",
-      soil: "#45453c",
-      facade: "#b3b7bd",
-      glass: "#48606f",
-      roof: "#586672",
-      water: "#5995aa",
       "accessible-blue": "#326f9e",
       "wheel-stop": "#bac1c5",
       "lamp-glow": "#fff0ce",
@@ -277,16 +291,16 @@ export class Materials {
       "signal-green": "#52d391",
       "signal-off": "#24323a",
       rubber: "#202732",
-      paint: "#eef2f6",
+      paint: "#d5d4cb",
       yellow: "#ead593",
       steel: "#bec8c7",
       "steel-dark": "#83908d",
       "drain-dark": "#273b39",
-      gutter: "#374947",
+      gutter: "#363632",
       concrete: "#a9afa2",
       girder: "#65787b",
       foundation: "#778379",
-      "road-base": "#737d76",
+      "road-base": "#555653",
     };
     const m = new THREE.MeshStandardMaterial({
       color: colors[key] ?? "#ffffff",
@@ -306,14 +320,11 @@ export class Materials {
     if (pattern) {
       const texture = new THREE.CanvasTexture(patternCanvas(pattern));
       texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-      texture.repeat.set(
-        pattern === "asphalt" ? 0.14 : 0.5,
-        pattern === "asphalt" ? 0.14 : 0.5,
-      );
+      texture.repeat.set(0.5, 0.5);
       texture.colorSpace = THREE.SRGBColorSpace;
       texture.anisotropy = 8;
       m.map = texture;
-      if (pattern === "concrete") m.color.set("#c3c8ce");
+      if (pattern === "concrete") m.color.set("#ceccc7");
       const normal = new THREE.CanvasTexture(
         normalCanvas(
           texture.image as HTMLCanvasElement,
@@ -324,7 +335,22 @@ export class Materials {
       normal.repeat.copy(texture.repeat);
       normal.anisotropy = 8;
       m.normalMap = normal;
-      m.normalScale.set(0.38, 0.38);
+      m.normalScale.set(
+        pattern === "asphalt" ? 0.24 : 0.26,
+        pattern === "asphalt" ? 0.24 : 0.26,
+      );
+      const roughness = new THREE.CanvasTexture(
+        roughnessCanvas(
+          texture.image as HTMLCanvasElement,
+          pattern === "asphalt",
+        ),
+      );
+      roughness.wrapS = roughness.wrapT = THREE.RepeatWrapping;
+      roughness.repeat.copy(texture.repeat);
+      roughness.anisotropy = 8;
+      roughness.name = `${key}:roughness`;
+      m.roughnessMap = roughness;
+      m.roughness = 1;
     }
     if (
       key.startsWith("sign-") ||

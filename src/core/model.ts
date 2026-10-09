@@ -136,7 +136,7 @@ export const presets: {
       guardrails: true,
       drainage: false,
       markingStyle: "motorway",
-      signs: true,
+      signs: false,
       speedLimit: 100,
       pattern: "linear",
       median: 1.2,
@@ -170,7 +170,7 @@ export const presets: {
       markingStyle: "race",
       guardrails: true,
       railStyle: "concrete",
-      signs: true,
+      signs: false,
       speedLimit: 120,
       drainage: false,
       oneWay: true,
@@ -187,8 +187,8 @@ export const presets: {
       sidewalk: 3.4,
       parking: "parallel",
       pattern: "ashlar",
-      streetLights: true,
-      signs: true,
+      streetLights: false,
+      signs: false,
       speedLimit: 40,
     },
   },
@@ -206,7 +206,7 @@ export const presets: {
       markings: false,
       guardrails: true,
       railStyle: "railing",
-      streetLights: true,
+      streetLights: false,
       drainage: false,
       oneWay: true,
     },
@@ -350,21 +350,14 @@ export function makeDemo(): Project {
     [0, 0, -26],
     bridgeSettings,
   );
-  const block = makeSite("block", [-36, 0, -23]);
-  Object.assign(block, {
-    width: 40,
-    depth: 26,
-    buildingHeight: 11,
-    name: "Northbank stone block",
-  });
   const parking = makeSite("parking", [24, 0, -79]);
   Object.assign(parking, {
     width: 25,
     depth: 22,
-    bays: 6,
+    bays: 0,
     name: "Market parking court",
   });
-  p.sites = [block, parking];
+  p.sites = [parking];
   return p;
 }
 export function makeTemplate(type: string): Project {
@@ -440,7 +433,7 @@ export function makeTemplate(type: string): Project {
     p.nodes.forEach((node) => (node.crossings = false));
     p.roads.forEach((r) => {
       r.markingStyle = "motorway";
-      r.signs = true;
+      r.signs = false;
       r.speedLimit = r.oneWay ? 60 : 100;
       r.pattern = "linear";
       if (r.lanes >= 4) r.median = 1.2;
@@ -697,21 +690,41 @@ export function validateGenerationBudget(project: Project): void {
       site.buildingHeight > 80
     )
       throw new RangeError("Invalid site dimensions or detail parameters.");
-    if (site.kind === "block") {
-      const windows = (w: number, d: number, h: number) =>
-        Math.max(0, Math.floor(h / 3.3)) *
-        2 *
-        (Math.ceil(w / 3.3) + Math.ceil(d / 3.3));
-      siteVertices +=
-        24 *
-          (windows(site.width * 0.27, site.depth * 0.54, site.buildingHeight) +
-            windows(
-              site.width * 0.25,
-              site.depth * 0.4,
-              site.buildingHeight * 0.72,
-            )) +
-        10000;
-    } else siteVertices += site.kind === "island" ? 15000 : 8000;
+    if (site.kind === "block" || site.kind === "water") continue;
+    if (
+      ![
+        site.bayWidth,
+        site.bayDepth,
+        site.aisleWidth,
+        site.perimeterWidth,
+        site.entryWidth,
+        site.paintWear,
+      ].every(Number.isFinite) ||
+      site.bayWidth < 2.4 ||
+      site.bayWidth > 3.6 ||
+      site.bayDepth < 4.5 ||
+      site.bayDepth > 6.5 ||
+      site.aisleWidth < 4 ||
+      site.aisleWidth > 9 ||
+      ![45, 60, 90].includes(site.parkingAngle)
+    )
+      throw new RangeError("Invalid procedural parking parameters.");
+    const angle = (site.parkingAngle * Math.PI) / 180,
+      rowDepth = site.bayDepth * Math.sin(angle) + 3.6 * Math.cos(angle);
+    const rows = Math.max(
+      1,
+      Math.floor(
+        (site.depth - 2 * site.perimeterWidth) /
+          (2 * rowDepth + site.aisleWidth),
+      ) * 2,
+    );
+    siteVertices +=
+      site.kind === "parking"
+        ? rows *
+            Math.ceil((site.width * Math.sin(angle)) / site.bayWidth) *
+            28 +
+          2500
+        : 2500;
     for (const point of siteOutline(site)) {
       if (!point.every(Number.isFinite))
         throw new RangeError("Invalid site transform.");
@@ -723,7 +736,7 @@ export function validateGenerationBudget(project: Project): void {
   }
   if (siteVertices > 750000)
     throw new RangeError(
-      "Site detail budget exceeded. Reduce building heights/counts or split the district into tiles.",
+      "Surface detail budget exceeded. Reduce parking footprints/counts or split the district into tiles.",
     );
   if (total > 35000)
     throw new RangeError(

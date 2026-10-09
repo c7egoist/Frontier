@@ -186,13 +186,7 @@ export function buildMedian(b: MeshBuilder, span: RoadSpan) {
         w = ((r.median / 2) * (0.08 + 0.92 * t) * f.hw) / roadHalfWidth(r);
       return surfacePoint(f, side * w, raised ? 0.14 : 0.016);
     });
-  b.strip(
-    "landscape",
-    r.bridge ? "paving-slate" : "grass",
-    row(-1, true),
-    row(1, true),
-    true,
-  );
+  b.strip("paving", "paving-slate", row(-1, true), row(1, true), true);
   for (const side of [-1, 1])
     b.strip("curb", "curb", row(side, false), row(side, true));
   for (const index of [0, stations.length - 1])

@@ -1,5 +1,5 @@
 import { siteOutline, insidePolygon } from "./sites";
-import { parkingLayout } from "./site-geometry";
+import { parkingLayout, parkingPlan } from "./site-geometry";
 import { buildSiteGeometry } from "./site-geometry";
 import {
   buildRoadFurniture,
@@ -1572,7 +1572,14 @@ export function buildNetwork(project: Project): Network {
   }
   for (const site of project.sites ?? []) {
     meshes.push(...buildSiteGeometry(site));
-    if (site.kind === "water") continue;
+    if (site.kind === "parking")
+      for (const message of parkingPlan(site).warnings)
+        diagnostics.push({
+          level: "warning",
+          owner: site.id,
+          message: `${site.name}: ${message}`,
+        });
+    if (site.kind === "water" || site.kind === "block") continue;
     const footprint = siteOutline(site),
       minX = Math.min(...footprint.map((p) => p[0])),
       maxX = Math.max(...footprint.map((p) => p[0])),

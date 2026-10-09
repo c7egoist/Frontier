@@ -1,9 +1,10 @@
-import { siteOutline, insidePolygon } from "../core/sites";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { siteOutline } from "../core/sites";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import { Materials } from "./materials";
-import { closestOnAlignment } from "../core/curves";
+
 import { type Network } from "../core/geometry";
 import {
   type Selection,
@@ -32,11 +33,11 @@ export class SceneView {
   selection: Selection = null;
   private project?: Project;
   private raycaster = new THREE.Raycaster();
-  private sun = new THREE.DirectionalLight("#fff9ef", 2.7);
-  private ambient = new THREE.HemisphereLight("#e7edf9", "#697875", 1.95);
+  private sun = new THREE.DirectionalLight("#ffffff", 2.2);
+  private ambient = new THREE.HemisphereLight("#e7e7e7", "#404040", 0.9);
   private width = 1;
   private height = 1;
-  private gridVisible = true;
+  private gridVisible = false;
   private contextVisible = true;
   private contextBounds?: { cx: number; cz: number; size: number };
   private down: [number, number] = [0, 0];
@@ -64,17 +65,24 @@ export class SceneView {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1;
+    const pmrem = new THREE.PMREMGenerator(this.renderer),
+      room = new RoomEnvironment();
+    this.scene.environment = pmrem.fromScene(room, 0.04).texture;
+    this.scene.environmentIntensity = 0.42;
+    room.dispose();
+    pmrem.dispose();
     this.renderer.domElement.setAttribute(
       "aria-label",
       "Interactive 3D road network. Drag to orbit; right-drag to pan.",
     );
     this.renderer.domElement.setAttribute("tabindex", "0");
     container.appendChild(this.renderer.domElement);
-    this.scene.background = new THREE.Color("#282f39");
+    this.scene.background = new THREE.Color("#101010");
     this.sun.position.set(-65, 120, 50);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.radius = 3;
     this.sun.shadow.camera.left = -160;
     this.sun.shadow.camera.right = 160;
     this.sun.shadow.camera.top = 160;
@@ -222,24 +230,19 @@ export class SceneView {
     this.sun.shadow.camera.far = Math.max(500, size * 3);
     this.sun.shadow.camera.updateProjectionMatrix();
     const ground = new THREE.Mesh(
-      new THREE.BoxGeometry(size, 1.7, size),
-      new THREE.MeshStandardMaterial({ color: "#7d8b7c", roughness: 1 }),
+      new THREE.PlaneGeometry(size * 2, size * 2),
+      new THREE.MeshStandardMaterial({ color: "#202020", roughness: 1 }),
     );
-    ground.position.set(cx, -0.91, cz);
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.set(cx, -0.065, cz);
     ground.receiveShadow = true;
     ground.name = "Context terrain";
     this.contextGroup.add(ground);
-    const side = new THREE.Mesh(
-      new THREE.BoxGeometry(size + 0.3, 0.5, size + 0.3),
-      new THREE.MeshStandardMaterial({ color: "#46534b", roughness: 1 }),
-    );
-    side.position.set(cx, -1.78, cz);
-    this.contextGroup.add(side);
     this.grid = new THREE.GridHelper(
       size,
       Math.round(size / 10),
-      "#627664",
-      "#6a7e6a",
+      "#3d3d3d",
+      "#303030",
     );
     this.grid.position.set(cx, -0.043, cz);
     (this.grid.material as THREE.Material).transparent = true;
@@ -247,65 +250,6 @@ export class SceneView {
     (this.grid.material as THREE.Material).depthWrite = false;
     this.grid.visible = this.gridVisible;
     this.contextGroup.add(this.grid);
-    const treePositions: V3[] = [];
-    const rand = (x: number, z: number) => {
-      const t = Math.sin(x * 127.1 + z * 311.7) * 43758.5453;
-      return t - Math.floor(t);
-    };
-    const extent = Math.min(size * 0.38, 140);
-    for (let x = -extent; x < extent; x += 17)
-      for (let z = -extent; z < extent; z += 18) {
-        if (rand(x, z) > 0.57) continue;
-        const p: V3 = [
-          cx + x + (rand(x + 2, z) - 0.5) * 9,
-          0,
-          cz + z + (rand(x, z + 2) - 0.5) * 9,
-        ];
-        if (
-          network.spans.some(
-            (s) =>
-              closestOnAlignment(s.alignment, p).distance <
-              roadHalfWidth(s.road) + s.road.sidewalk + 5.5,
-          )
-        )
-          continue;
-        if (
-          this.project?.sites?.some((s) => insidePolygon(p, siteOutline(s, -2)))
-        )
-          continue;
-        treePositions.push(p);
-      }
-    const canopy = new THREE.InstancedMesh(
-      new THREE.IcosahedronGeometry(1, 1),
-      new THREE.MeshStandardMaterial({ color: "#607c62", roughness: 1 }),
-      treePositions.length,
-    );
-    const trunks = new THREE.InstancedMesh(
-      new THREE.CylinderGeometry(0.17, 0.24, 1.7, 5),
-      new THREE.MeshStandardMaterial({ color: "#6e7561", roughness: 1 }),
-      treePositions.length,
-    );
-    const matrix = new THREE.Matrix4(),
-      quaternion = new THREE.Quaternion();
-    treePositions.forEach((p, i) => {
-      const scale = 1.6 + rand(p[0], p[2]) * 1.2;
-      matrix.compose(
-        new THREE.Vector3(p[0], scale * 1.1 + 1.25, p[2]),
-        quaternion,
-        new THREE.Vector3(scale, scale * 1.2, scale),
-      );
-      canopy.setMatrixAt(i, matrix);
-      matrix.compose(
-        new THREE.Vector3(p[0], 0.83, p[2]),
-        quaternion,
-        new THREE.Vector3(1, 1, 1),
-      );
-      trunks.setMatrixAt(i, matrix);
-    });
-    canopy.castShadow = true;
-    canopy.receiveShadow = true;
-    trunks.castShadow = true;
-    this.contextGroup.add(canopy, trunks);
     this.contextGroup.visible = this.contextVisible;
   }
   setSelection(selection: Selection) {
@@ -322,7 +266,7 @@ export class SceneView {
         line = new THREE.Line(
           geometry,
           new THREE.LineDashedMaterial({
-            color: "#b8f5d7",
+            color: "#b9b9b9",
             dashSize: 1,
             gapSize: 0.45,
             depthTest: false,
@@ -527,9 +471,9 @@ export class SceneView {
     this.contextGroup.visible = v;
   }
   setNight(v: boolean) {
-    this.sun.intensity = v ? 0.38 : 2.7;
-    this.ambient.intensity = v ? 0.55 : 1.95;
-    this.scene.background = new THREE.Color(v ? "#111a27" : "#282f39");
+    this.sun.intensity = v ? 0.38 : 2.2;
+    this.ambient.intensity = v ? 0.55 : 0.9;
+    this.scene.background = new THREE.Color(v ? "#0e0e0e" : "#101010");
   }
   setStyle(style: string) {
     this.materials.clay(style === "clay");

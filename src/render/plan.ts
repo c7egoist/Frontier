@@ -575,7 +575,7 @@ export class PlanView {
     const c = this.ctx,
       d = this.dpr;
     c.setTransform(d, 0, 0, d, 0, 0);
-    c.fillStyle = "#171d24";
+    c.fillStyle = "#141516";
     c.fillRect(0, 0, this.width, this.height);
     c.save();
     c.translate(this.width / 2, this.height / 2);
@@ -594,7 +594,7 @@ export class PlanView {
         z0 = this.center[2] - this.height / 2 / this.scale,
         z1 = this.center[2] + this.height / 2 / this.scale;
       c.lineWidth = 0.7 / this.scale;
-      c.strokeStyle = "#2d3845";
+      c.strokeStyle = "#252729";
       c.beginPath();
       for (let x = Math.floor(x0 / step) * step; x < x1; x += step) {
         c.moveTo(x, z0);
@@ -606,7 +606,7 @@ export class PlanView {
       }
       c.stroke();
       c.lineWidth = 0.5 / this.scale;
-      c.strokeStyle = "#384c5f";
+      c.strokeStyle = "#333639";
       c.setLineDash([2 / this.scale, 4 / this.scale]);
       c.beginPath();
       c.moveTo(x0, 0);
@@ -681,7 +681,7 @@ export class PlanView {
           );
           if (joint) {
             this.path(joint.outer);
-            c.fillStyle = "#a7e7c90a";
+            c.fillStyle = "#c6c6c60a";
             c.fill();
             c.stroke();
           }
@@ -729,7 +729,7 @@ export class PlanView {
     }
     if (this.draft && this.pointer) {
       this.path([this.draft, this.pointer], false);
-      c.strokeStyle = "#b5e7d0";
+      c.strokeStyle = "#c6c6c6";
       c.lineWidth = 2 / this.scale;
       c.setLineDash([6 / this.scale, 4 / this.scale]);
       c.stroke();
@@ -791,15 +791,15 @@ export class PlanView {
           continue;
         c.beginPath();
         c.arc(x, y, selected ? 7 : joint ? 4.5 : 2.8, 0, Math.PI * 2);
-        c.fillStyle = selected ? "#b9ead3" : "#617a70";
+        c.fillStyle = selected ? "#c6c6c6" : "#617a70";
         c.fill();
-        c.strokeStyle = selected ? "#e4fff2" : "#c2cfc2";
+        c.strokeStyle = selected ? "#e6e6e6" : "#999999";
         c.lineWidth = selected ? 2 : 1;
         c.stroke();
         if (joint && this.labels) {
           c.font = '9px "IBM Plex Mono",monospace';
           c.textAlign = "left";
-          c.fillStyle = selected ? "#b6e4ce" : "#899f95";
+          c.fillStyle = selected ? "#b9b9b9" : "#848484";
           c.fillText(
             `J${String(this.network.junctions.indexOf(joint) + 1).padStart(2, "0")}`,
             x + 12,
@@ -818,7 +818,7 @@ export class PlanView {
           const node = getNode(this.project, nodeID),
             a = this.worldToScreen(node.position),
             b = this.worldToScreen(add(node.position, handle));
-          c.strokeStyle = "#b0dbc180";
+          c.strokeStyle = "#b9b9b980";
           c.lineWidth = 1;
           c.setLineDash([3, 3]);
           c.beginPath();
@@ -828,9 +828,9 @@ export class PlanView {
           c.setLineDash([]);
           c.beginPath();
           c.arc(...b, 4.5, 0, Math.PI * 2);
-          c.fillStyle = "#263e36";
+          c.fillStyle = "#262626";
           c.fill();
-          c.strokeStyle = "#b9ead0";
+          c.strokeStyle = "#c6c6c6";
           c.stroke();
         }
       }
@@ -842,9 +842,9 @@ export class PlanView {
           this.drawAxis(x, y, x, y + 47, "#94b9ca", "Z");
           c.beginPath();
           c.arc(x, y, 7, 0, Math.PI * 2);
-          c.fillStyle = "#b9ead3";
+          c.fillStyle = "#c6c6c6";
           c.fill();
-          c.strokeStyle = "#e7fff2";
+          c.strokeStyle = "#e6e6e6";
           c.lineWidth = 2;
           c.stroke();
         }
@@ -854,12 +854,12 @@ export class PlanView {
       const [x, y] = this.worldToScreen(this.pointer);
       c.beginPath();
       c.arc(x, y, this.snapped ? 8 : 5, 0, Math.PI * 2);
-      c.strokeStyle = "#c2f2db";
+      c.strokeStyle = "#b9b9b9";
       c.lineWidth = 1.5;
       c.stroke();
       if (this.snapped) {
         c.font = '9px "IBM Plex Mono",monospace';
-        c.fillStyle = "#c2f2db";
+        c.fillStyle = "#b9b9b9";
         c.textAlign = "left";
         c.fillText("SNAP", x + 12, y - 10);
       }

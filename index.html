@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#171918" />
+    <meta name="theme-color" content="#101010" />
     <meta
       name="description"
       content="Frontier Road Studio — a live, graph-based 2D and 3D road network editor with clean junctions, bridges, paving and drainage."
@@ -11,34 +11,12 @@
     <title>Frontier · Road Studio</title>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23232926'/%3E%3Cpath d='M8 23V9h16M8 16h12' fill='none' stroke='%23b9dfcc' stroke-width='3'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23161616'/%3E%3Cpath d='M8 23V9h16M8 16h12' fill='none' stroke='%23b9b9b9' stroke-width='3'/%3E%3C/svg%3E"
     />
   </head>
   <body>
     <div class="app-shell">
       <header class="app-header">
-        <a class="brand" href="#" aria-label="Frontier Road Studio"
-          ><svg
-            class="brand-symbol"
-            width="26"
-            height="28"
-            viewBox="0 0 28 30"
-            fill="none"
-          >
-            <path
-              d="M3 11 14 4l11 7-11 7-11-7Z"
-              stroke="currentColor"
-              stroke-width="1.6"
-            />
-            <path
-              d="m3 16 11 7 11-7M3 21l11 7 11-7"
-              stroke="currentColor"
-              stroke-width="1.6"
-            /></svg
-          ><span>frontier<span class="brand-dot">.</span></span
-          ><span class="brand-divider"></span
-          ><span class="studio-label">ROAD STUDIO</span></a
-        >
         <nav class="app-menu" aria-label="Application">
           <button data-menu="file-menu">File</button
           ><button data-menu="edit-menu">Edit</button
@@ -178,8 +156,32 @@
       </div>
       <main class="editor">
         <aside class="outliner" id="outliner">
+          <a class="brand" href="#" aria-label="Frontier Road Studio"
+            ><svg
+              class="brand-symbol"
+              width="26"
+              height="28"
+              viewBox="0 0 28 30"
+              fill="none"
+            >
+              <path
+                d="M3 11 14 4l11 7-11 7-11-7Z"
+                stroke="currentColor"
+                stroke-width="1.6"
+              />
+              <path
+                d="m3 16 11 7 11-7M3 21l11 7 11-7"
+                stroke="currentColor"
+                stroke-width="1.6"
+              /></svg
+            ><span>frontier<span class="brand-dot">.</span></span
+            ><span class="version">ENGINE / 01</span></a
+          >
+          <div class="scene-label">
+            WORKSPACE <span class="status-dot"></span>
+          </div>
           <div class="panel-heading">
-            <h2>Scene</h2>
+            <h2>Outliner</h2>
             <span class="subtle">01</span
             ><button
               class="icon-button"
@@ -215,10 +217,10 @@
               id="context-toggle"
               aria-pressed="true"
             >
-              <span class="context-icon"><i data-lucide="trees"></i></span
+              <span class="context-icon"><i data-lucide="box"></i></span
               ><span
-                ><strong>Terrain context</strong
-                ><small>Preview environment</small></span
+                ><strong>Studio ground</strong
+                ><small>Neutral lighting stage</small></span
               ><i data-lucide="eye"></i>
             </button>
             <div class="outliner-foot">
@@ -239,7 +241,7 @@
             <div>
               <span class="eyebrow">DESIGN WORKSPACE</span
               ><span class="heading-slash">/</span
-              ><span id="workspace-name">Road network</span>
+              ><span id="workspace-name">Road authoring</span>
             </div>
             <div class="workspace-heading-end">
               <span class="live-indicator"
@@ -345,7 +347,7 @@
                 ><span class="view-badge">3D</span>
                 <div class="shade-select">
                   <select id="shade-style" aria-label="3D shading style">
-                    <option value="shaded">Shaded</option>
+                    <option value="shaded">Material</option>
                     <option value="clay">Clay</option>
                     <option value="wireframe">Wireframe</option></select
                   ><i data-lucide="chevron-down"></i>
@@ -410,8 +412,8 @@
                     id="gizmo-plane"
                     data-axis="plane"
                     r="7"
-                    fill="#bbe9d1"
-                    stroke="#e8fff1"
+                    fill="#c6c6c6"
+                    stroke="#e6e6e6"
                     stroke-width="2"
                   />
                 </g>
@@ -500,7 +502,7 @@
                 ><button data-library="structures" aria-selected="false">
                   Structures</button
                 ><button data-library="sites" aria-selected="false">
-                  Blocks & parking</button
+                  Parking & paving</button
                 ><button data-library="networks" aria-selected="false">
                   Networks
                 </button>

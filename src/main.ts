@@ -8,6 +8,7 @@ import {
 } from "./core/sites";
 import { parkingLayout } from "./core/site-geometry";
 import "./style.css";
+import "./ui/slate-editor.css";
 import { zipSync, strToU8 } from "fflate";
 import {
   makeDemo,
@@ -91,7 +92,7 @@ let dragBefore: string | null = null,
 let scene: SceneView | undefined;
 const patternPreviews = new Map<string, string>();
 const templates = templateCatalog;
-let placementKind: SiteKind = "plaza";
+let placementKind: SiteKind = "parking";
 const templatePreviews = new Map<string, string>();
 const fmt = (n: number, decimals = 1) =>
   n.toLocaleString("en-US", {
@@ -160,7 +161,7 @@ renderAll();
 requestAnimationFrame(() => {
   plan.fit();
   scene?.fit(1.13);
-  scene?.focusSelection(185);
+  scene?.focusSelection(140);
 });
 document.fonts.ready.then(() => plan.render());
 if (restored)
@@ -318,7 +319,7 @@ function updateNames() {
   $("project-title").textContent = project.name;
   $("scene-name").textContent = project.name;
   $("selected-annotation").innerHTML = selection
-    ? `${escape(selectedName().split(" · ")[0])}<small>${selection.kind === "node" ? "SHARED JOINT PIVOT" : selection.kind === "site" ? "EDITABLE PUBLIC REALM" : "EDITABLE ROAD ALIGNMENT"}</small>`
+    ? `${escape(selectedName().split(" · ")[0])}<small>${selection.kind === "node" ? "SHARED JOINT PIVOT" : selection.kind === "site" ? "PROCEDURAL SURFACE" : "EDITABLE ROAD ALIGNMENT"}</small>`
     : "Road network<small>LIVE PROCEDURAL GEOMETRY</small>";
   $("scene-annotation").hidden = !selection;
 }
@@ -364,7 +365,7 @@ function updateHint() {
   const hints: Record<ToolMode, string> = {
     select:
       selection?.kind === "site"
-        ? "Drag the site pivot to reposition the block, plaza or parking court"
+        ? "Drag the footprint pivot to reposition the procedural surface"
         : selection?.kind === "road"
           ? "Drag a Bézier handle or the shared road pivot to edit the alignment"
           : "Drag the joint pivot to move all connected roads",
@@ -453,7 +454,7 @@ function renderOutliner() {
     },
     {
       id: "sites",
-      name: "Blocks & public realm",
+      name: "Parking & paving",
       items: (project.sites ?? []).map((s) => ({
         id: s.id,
         name: s.name,
@@ -517,70 +518,99 @@ function transformControls(position: V3, note: string) {
 function renderSiteInspector(site: Site) {
   const entry = siteCatalog.find((s) => s.id === site.kind)!,
     area = Math.round(Math.abs(polygonArea(siteOutline(site))));
-  let body = `<div class="selected-object"><div class="object-icon">${icon(entry.icon)}</div><div class="object-title"><span class="eyebrow">PUBLIC REALM / ${site.kind.toUpperCase()}</span><h1>${escape(site.name)}</h1><span class="type-pill"><span></span>${area} m² · Editable footprint</span></div><button class="icon-button object-actions" data-inspector-action="rename" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs">${["geometry", "surface", "details"].map((t) => `<button data-inspector-tab="${t}" class="${inspectorTab === t ? "active" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</nav>`;
+  let body = `<div class="selected-object"><div class="object-icon">${icon(entry.icon)}</div><div class="object-title"><span class="eyebrow">${site.kind === "parking" ? "PROCEDURAL LAYOUT" : "PAVING GEOMETRY"}</span><h1>${escape(site.name)}</h1><span class="type-pill"><span></span>${area} m² / ${site.kind === "parking" ? `${parkingLayout(site).length} stalls` : "metric surface"}</span></div><button class="icon-button object-actions" data-inspector-action="rename" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs">${["geometry", "surface", "details"].map((t) => `<button data-inspector-tab="${t}" class="${inspectorTab === t ? "active" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</nav>`;
   if (inspectorTab === "geometry") {
     body += transformControls(
       site.position,
-      "Drag the shared site pivot in either view.",
+      "Independent footprint / metres, Y-up.",
     );
     body += card(
       "Footprint",
       entry.icon,
-      choice("shape", "Shape", site.shape, [
+      choice("shape", "Boundary", site.shape, [
         ["rectangle", "Rounded rectangle"],
-        ["triangle", "Splitter triangle"],
-        ["circle", "Ellipse / circle"],
+        ["triangle", "Triangle"],
+        ["circle", "Ellipse"],
       ]) +
-        range("width", "Width", site.width, 8, 150, 1) +
-        range("depth", "Depth", site.depth, 8, 250, 1) +
+        range("width", "Width", site.width, 8, 180, 1) +
+        range("depth", "Depth", site.depth, 8, 300, 1) +
         range("yaw", "Rotation", site.yaw, -180, 180, 5, "°"),
     );
     if (site.kind === "parking")
       body += card(
-        "Parking layout",
+        "Module solver",
         "square-parking",
-        range("bays", "Bays per row", site.bays, 2, 40, 1, "") +
-          range("accessible", "Accessible bays", site.accessible, 0, 6, 1, "") +
-          choice("entrance", "Entrance", site.entrance, [
-            ["north", "North"],
-            ["south", "South"],
-            ["east", "East"],
-            ["west", "West"],
+        choice("parkingLayout", "Row layout", site.parkingLayout, [
+          ["automatic", "Automatic modules"],
+          ["double", "Double-loaded aisle"],
+          ["single", "Single-loaded aisle"],
+        ]) +
+          choice("parkingAngle", "Bay angle", String(site.parkingAngle), [
+            ["90", "90°"],
+            ["60", "60°"],
+            ["45", "45°"],
           ]) +
-          `<p class="card-note">${parkingLayout(site).length} spaces. Entry throat remains unobstructed; wheel stops and bay numbers are real geometry/decals.</p>`,
-      );
-    if (site.kind === "block")
-      body += card(
-        "Building massing",
-        "building-2",
-        range(
-          "buildingHeight",
-          "Building height",
-          site.buildingHeight,
-          0,
-          45,
-          1,
-        ),
+          range("bayWidth", "Bay width", site.bayWidth, 2.4, 3.6, 0.1) +
+          range("bayDepth", "Bay depth", site.bayDepth, 4.5, 6.5, 0.1) +
+          range("aisleWidth", "Drive aisle", site.aisleWidth, 4, 9, 0.1) +
+          `<p class="card-note">Rows and capacity regenerate from the footprint. Entry and transfer clearances are excluded from stall placement.</p>`,
       );
   } else if (inspectorTab === "surface")
     body += card(
-      "Modern paving",
+      "Paving material",
       "grid-2x2",
       patternControls(site.pattern) +
-        `<p class="material-note">World-scaled stone, inset edge bands and matching curb geometry. Included in GLB with normal maps.</p>`,
+        `<p class="material-note">World-scale UVs / albedo, normal and roughness channels. No buildings or decorative props.</p>`,
     );
-  else
+  else {
     body += card(
-      "Landscape & furniture",
-      "trees",
-      toggle(
-        "landscape",
-        "Planting & trees",
-        site.landscape,
-        "Planters, landscape insets and shade trees",
-      ) +
-        `<p class="card-note">${site.kind === "parking" ? "Parking signage, entry clearance, accessible decals and lighting are generated with the court." : site.kind === "block" ? "Stepped volumes, facade windows and paved perimeter blocks." : "Benches, planters and pedestrian-scale lighting are included with plazas."}</p>`,
+      "Edge construction",
+      "route",
+      range(
+        "perimeterWidth",
+        "Perimeter paving",
+        site.perimeterWidth,
+        0.3,
+        4,
+        0.1,
+      ),
     );
+    if (site.kind === "parking")
+      body += card(
+        "Circulation & markings",
+        "square-parking",
+        choice("entrance", "Entry side", site.entrance, [
+          ["north", "North"],
+          ["south", "South"],
+          ["east", "East"],
+          ["west", "West"],
+        ]) +
+          range(
+            "entryWidth",
+            "Entry clearance",
+            site.entryWidth,
+            3.5,
+            10,
+            0.1,
+          ) +
+          range(
+            "accessible",
+            "Accessible stalls",
+            site.accessible,
+            0,
+            6,
+            1,
+            "",
+          ) +
+          toggle(
+            "numbering",
+            "Bay numbering",
+            site.numbering,
+            "Optional stencil decals",
+          ) +
+          range("bays", "Row cap / 0 = auto", site.bays, 0, 70, 1, ""),
+      );
+  }
   $("inspector-content").innerHTML = body;
   refreshIcons();
   updateStats();
@@ -822,8 +852,15 @@ function setRoadProperty(prop: string, value: unknown) {
         "yaw",
         "bays",
         "accessible",
-        "landscape",
-        "buildingHeight",
+        "bayWidth",
+        "bayDepth",
+        "aisleWidth",
+        "perimeterWidth",
+        "entryWidth",
+        "parkingAngle",
+        "parkingLayout",
+        "numbering",
+        "paintWear",
         "entrance",
       ].includes(prop)
     )
@@ -908,7 +945,7 @@ function renderLibrary() {
   if (libraryTab === "sites")
     cards = siteCatalog.map((p) => ({
       ...p,
-      preview: `<div class="site-thumb ${p.id}">${icon(p.icon)}<span>${p.id === "parking" ? "P / 90°" : p.id === "block" ? "CITY BLOCK" : p.id === "water" ? "HARBOUR" : "PUBLIC REALM"}</span></div>`,
+      preview: `<div class="site-thumb ${p.id}">${icon(p.icon)}<span>${p.id === "parking" ? "P / 90°" : p.id === "block" ? "CITY BLOCK" : p.id === "water" ? "HARBOUR" : "SURFACE"}</span></div>`,
       action: "site",
     }));
   if (libraryTab === "structures")
@@ -1182,7 +1219,7 @@ function loadTemplate(id: string) {
     if (id === "diamond") scene?.focusSelection(380);
     else if (id === "roundabout") scene?.fit(1.25);
     else if (id === "district" || id === "tee")
-      scene?.focusSelection(id === "district" ? 185 : 155);
+      scene?.focusSelection(id === "district" ? 140 : 155);
     else if (id === "merge") scene?.focusSelection(180);
     else
       scene?.fit(
@@ -1207,7 +1244,7 @@ function openHelp() {
         ["Move pivot", "W"],
         ["Pan", "H / Space"],
         ["Measure", "M"],
-        ["Place street block", "B"],
+        ["Place procedural parking", "B"],
         ["Frame all", "F"],
         ["Toggle grid", "G"],
         ["Toggle snap", "S"],
@@ -1554,6 +1591,7 @@ $("inspector-content").addEventListener("change", (e) => {
     "railHeight",
     "postSpacing",
     "speedLimit",
+    "parkingAngle",
   ];
   const value =
     input.type === "checkbox"
@@ -1827,7 +1865,9 @@ $("viewport-divider").addEventListener("keydown", (e) => {
   if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
     e.preventDefault();
     const value =
-      parseFloat($("viewports").style.getPropertyValue("--split")) || 42;
+      parseFloat(
+        getComputedStyle($("viewports")).getPropertyValue("--split"),
+      ) || 46;
     setSplit(value + (e.key === "ArrowRight" ? 3 : -3));
   }
 });
@@ -1867,7 +1907,7 @@ window.addEventListener("keydown", (e) => {
   if (key === "b") {
     libraryTab = "sites";
     renderLibrary();
-    beginPlace("block");
+    beginPlace("parking");
   }
   if (key === "g") toggleGrid();
   if (key === "s") $("snap-button").click();

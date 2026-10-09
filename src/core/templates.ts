@@ -13,7 +13,7 @@ export const templateCatalog = [
   {
     id: "district",
     name: "Northbank district",
-    description: "Urban junctions · stone blocks · parking",
+    description: "Urban junctions · paving · procedural parking",
   },
   {
     id: "merge",
@@ -23,12 +23,12 @@ export const templateCatalog = [
   {
     id: "urban",
     name: "Harbour street circuit",
-    description: "Closed city loop · modern blocks · parking",
+    description: "Street loop · lane detail · procedural parking",
   },
   {
     id: "signal",
     name: "Channelized crossroads",
-    description: "Slip lanes · planted islands · yellow box",
+    description: "Slip lanes · paved splitters · box markings",
   },
   {
     id: "cloverleaf",
@@ -58,7 +58,7 @@ export const templateCatalog = [
   {
     id: "roundabout",
     name: "Garden roundabout",
-    description: "One-way circulation · landscaped central island",
+    description: "One-way circulation · curbed paving",
   },
   {
     id: "diamond",
@@ -124,7 +124,7 @@ export function makeAdvancedTemplate(type: string): Project | null {
     guardrails: true,
     drainage: false,
     markingStyle: "motorway",
-    signs: true,
+    signs: false,
     speedLimit: 100,
     median: 1.2,
   };
@@ -136,7 +136,7 @@ export function makeAdvancedTemplate(type: string): Project | null {
     drainage: false,
     oneWay: true,
     markingStyle: "motorway",
-    signs: true,
+    signs: false,
     speedLimit: 60,
     pattern: "slate",
   };
@@ -145,9 +145,9 @@ export function makeAdvancedTemplate(type: string): Project | null {
     laneWidth: 3.3,
     sidewalk: 3.4,
     pattern: "ashlar",
-    signs: true,
+    signs: false,
     speedLimit: 40,
-    streetLights: true,
+    streetLights: false,
   };
   const rotate = (p: V3, i: number): V3 => {
     const a = (i * Math.PI) / 2;
@@ -229,7 +229,7 @@ export function makeAdvancedTemplate(type: string): Project | null {
     const center = node("City junction", 0, 0, 0, 11);
     center.crossings = true;
     center.boxJunction = true;
-    center.signals = true;
+    center.signals = false;
     for (const index of [0, 3, 6, 9]) {
       ring[index].crossings = true;
       road(center, ring[index], `Central boulevard · ${index}`, {
@@ -239,16 +239,10 @@ export function makeAdvancedTemplate(type: string): Project | null {
         parking: "none",
       });
     }
-    for (const x of [-48, 48])
-      for (const z of [-59, 59]) {
-        const block = site("block", x, z, 66, 82);
-        block.name = `${x < 0 ? "West" : "East"} ${z < 0 ? "north" : "south"} block`;
-        block.buildingHeight = x < 0 ? 13 : 19;
-      }
     const parking = site("parking", 158, 55, 64, 36);
     parking.name = "Harbour parking court";
     parking.entrance = "west";
-    parking.bays = 19;
+    parking.bays = 0;
     const entrance = node("Parking entry", 126, 55);
     road(
       ring[9],
@@ -260,7 +254,7 @@ export function makeAdvancedTemplate(type: string): Project | null {
         sidewalk: 0.5,
         crossfall: 0,
         markings: false,
-        signs: true,
+        signs: false,
         speedLimit: 20,
       },
       [12, 0, 6],
@@ -270,7 +264,7 @@ export function makeAdvancedTemplate(type: string): Project | null {
     const c = node("Signalized crossing", 0, 0, 0, 12);
     c.crossings = true;
     c.boxJunction = true;
-    c.signals = true;
+    c.signals = false;
     const arms = Array.from({ length: 4 }, (_, i) => {
       const p = rotate([0, 0, -95], i);
       return node(`Slip terminal ${i + 1}`, p[0], p[2], 0, 4);
@@ -290,7 +284,7 @@ export function makeAdvancedTemplate(type: string): Project | null {
           guardrails: false,
           sidewalk: 1.8,
           pattern: "linear",
-          signs: true,
+          signs: false,
           speedLimit: 30,
           markingStyle: "urban",
         },
@@ -464,7 +458,7 @@ export function makeAdvancedTemplate(type: string): Project | null {
       );
     const pad = site("parking", -15, -182, 106, 32);
     pad.name = "Paddock and pit parking";
-    pad.bays = 34;
+    pad.bays = 0;
     pad.entrance = "south";
     const entry = node("Pit lane entry", -80, -145),
       exit = node("Pit lane exit", 70, -145),
@@ -503,10 +497,9 @@ export function makeAdvancedTemplate(type: string): Project | null {
       sidewalk: 0.5,
       crossfall: 0,
       markings: false,
-      signs: true,
+      signs: false,
       speedLimit: 20,
     });
-    site("plaza", -25, 9, 42, 34).name = "Race village";
   } else if (type === "waterfront") {
     const walk = {
       ...presets.find((p) => p.id === "promenade")!.settings,
@@ -571,7 +564,7 @@ export function makeAdvancedTemplate(type: string): Project | null {
       [6, 0, 0],
       [-6, 0, 0],
     );
-    site("water", 72, 0, 156, 400).name = "Harbour water";
+
     for (const z of [-135, 42, 140])
       site("plaza", -70, z, 25, 27).name = `Promenade terrace ${z}`;
   }
