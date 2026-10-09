@@ -2,8 +2,8 @@
 // the selected junction / control point / area vertex, and click picking by owner id.
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { TransformControls } from 'three/addons/controls/TransformControls.js';
+import { OrbitControls } from '../../vendor/three/addons/controls/OrbitControls.js';
+import { TransformControls } from '../../vendor/three/addons/controls/TransformControls.js';
 import { tileFor, TILE } from './paving.js';
 
 const MATS = {
@@ -19,6 +19,7 @@ const MATS = {
   post: { color: 0x5b5d63, rough: 0.5, metal: 0.4 },
   grate: { color: 0x17181a, rough: 0.6 },
   pipe: { color: 0x4f5a6e, rough: 0.5, opacity: 0.55 },
+  retain: { color: 0x8e8f8c, rough: 0.95 },
 };
 
 export class Scene3D {

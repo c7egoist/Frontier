@@ -7,6 +7,7 @@ import { buildHub } from './junction.js';
 import { bandTableMax, bridgeWeight, roadBands, sectionStrips, stationState, TAPER } from './profile.js';
 import { bridgePiers, drainageFor, guardrailFor, markingsFor } from './features.js';
 import { orientPositive, triangulate } from './clipper.js';
+import { crotchRequirements } from './angles.js';
 
 export const CLEARANCE_OK = 2.5; // m, below this a crossing is flagged
 
@@ -150,7 +151,8 @@ export function buildNetwork(project) {
     bandsOf.set(j.id, list.length ? bandTableMax(list.map((x) => roadBands(x.road))) : zeroBands());
   }
 
-  // mouth distance per road end: the hub reach, shortened on short roads
+  // mouth distance per road end. The default reach covers the hub; neighbours that leave at a narrow
+  // angle need more road so their crotch fillet fits inside the hub (geo/angles.js)
   const mouth = new Map();
   for (const j of project.junctions) {
     const list = armsOf.get(j.id) || [];
@@ -159,12 +161,23 @@ export function buildNetwork(project) {
     const d4 = bj.g + bj.k + bj.f + bj.v;
     const maxW = Math.max(...list.map((x) => Math.max(x.road.lanesL, x.road.lanesR) * x.road.laneW));
     const reach = 1.5 * (j.radius ?? 6) + d4 + maxW + 3;
-    for (const { road, end } of list) {
-      const L = curves.get(road.id).length;
-      const D = Math.min(reach, 0.45 * L);
-      mouth.set(`${road.id}|${end}`, D);
-      if (D < reach * 0.98) {
-        warnings.push({ level: 'warn', text: `${road.id} is short for junction ${j.id}; blend shortened to ${D.toFixed(1)} m` });
+    const arms = list.map(({ road, end }) => {
+      const curve = curves.get(road.id);
+      return { road, end, curve, L: curve.length, W: { L: road.lanesL * road.laneW, R: road.lanesR * road.laneW } };
+    });
+    const need = crotchRequirements(arms, bj, j.radius ?? 6);
+    for (const a of arms) {
+      const D0 = Math.min(reach, 0.45 * a.L);
+      const cap = 0.8 * a.L;
+      const nd = need.get(`${a.road.id}|${a.end}`) || { req: 0 };
+      mouth.set(`${a.road.id}|${a.end}`, Math.max(D0, Math.min(nd.req, cap)));
+      if (nd.req > cap + 1e-6) {
+        const text = nd.req === Infinity
+          ? `${a.road.id} and ${nd.partner} leave ${j.id} in the same direction; merge them into one road`
+          : `${a.road.id} and ${nd.partner} leave ${j.id} ${nd.angle.toFixed(0)} degrees apart and need ${nd.req.toFixed(0)} m of road, but ${a.road.id} is ${a.L.toFixed(0)} m. Lengthen it, open the angle or reduce the corner radius`;
+        warnings.push({ level: nd.req === Infinity ? 'error' : 'warn', text });
+      } else if (D0 < reach * 0.98) {
+        warnings.push({ level: 'warn', text: `${a.road.id} is short for junction ${j.id}; blend shortened to ${D0.toFixed(1)} m` });
       }
     }
   }
@@ -194,7 +207,12 @@ export function buildNetwork(project) {
     const s0 = ctx.Da;
     const s1 = ctx.L - ctx.Db;
     if (s1 - s0 < 0.2) {
-      warnings.push({ level: 'error', text: `${r.id} has no room for a span between its junctions` });
+      // the two junction hubs meet or overlap along this road: there is no span to build, and the hubs
+      // carry the surface. Only warn when the overlap is more than a couple of metres.
+      const need = ctx.L - (s1 - s0) + 0.2;
+      if (need - ctx.L > 2) {
+        warnings.push({ level: 'warn', text: `${r.id} is ${ctx.L.toFixed(0)} m long but its two junctions need ${need.toFixed(0)} m, so they merge along it. Lengthen ${r.id} for a separate span` });
+      }
       continue;
     }
     emitSpan(mb, plan, r, curve, ctx);
@@ -297,7 +315,7 @@ function emitSpan(mb, plan, road, curve, ctx) {
   }
   for (let q = 0; q < nQ; q++) {
     // the underside of a deck is not visible from above; skip it in plan
-    if (strips[0][q].mat === 'deck') continue;
+    if (strips[0][q].mat === 'deck' || strips[0][q].mat === 'retain') continue;
     for (let i = 0; i < strips[0][q].pts.length - 1; i++) {
       const left = sts.map((st, k) => {
         const p = strips[k][q].pts[i + 1];

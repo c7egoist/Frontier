@@ -4,6 +4,7 @@
 import { buildNetwork } from '../geo/network.js';
 import { normalizeProject, sampleProject, defaultRoad, defaultJunction, PATTERNS, CAMBER_MODES, CENTRE_MARKS, GUARD_SIDES, emptyProject } from '../model/project.js';
 import { diamondExchange } from '../model/exchange.js';
+import { planSketch } from '../model/sketch.js';
 import { exportProjectText, importProjectText, networkToObj } from '../io/exchange.js';
 import { Plan2D } from '../render/plan2d.js';
 import { PATTERN_LABELS } from '../render/paving.js';
@@ -13,6 +14,7 @@ const TOOLS = [
   { id: 'select', label: 'Select', key: 'V', hint: 'Click to select. Drag a junction to move it, drag its ring to change the corner radius, drag the arrows to move along one axis. Double-click a road to add a control point.' },
   { id: 'junction', label: 'Junction', key: 'J', hint: 'Click to place a junction (one handle controls its whole joint).' },
   { id: 'road', label: 'Road', key: 'R', hint: 'Click a junction to start a road, click another to finish it. Click empty ground to add a junction and continue. Esc to stop.' },
+  { id: 'draw', label: 'Draw road', key: 'D', hint: 'Press and drag across the plan to sketch a road. Release to create it; its ends snap to junctions within 4 m.' },
   { id: 'area', label: 'Paving', key: 'A', hint: 'Click to add corners. Double-click or click the first corner to close. Esc to cancel.' },
   { id: 'exchange', label: 'Exchange', key: 'X', hint: 'Click to place a diamond exchange (bridged mainline, four ramps) with the settings in the Exchange card.' },
 ];
@@ -299,6 +301,7 @@ function draw() {
     ghost: state.ghost,
     exGhost: state.tool === 'exchange' ? { extent: 160 } : null,
     opts: state.opts,
+    sketch: state.sketch,
   });
 }
 
@@ -370,7 +373,7 @@ function renderStatus() {
 function renderTools() {
   els.tools_el = $('tools');
   els.tools_el.innerHTML = TOOLS.map(
-    (t) => `<button class="tool" data-tool="${t.id}" aria-pressed="${state.tool === t.id}" title="${t.label} (${t.key})">${icon(t.id === 'select' ? 'select' : t.id, 14)}<span>${t.label}</span><kbd>${t.key}</kbd></button>`,
+    (t) => `<button class="tool" data-tool="${t.id}" aria-pressed="${state.tool === t.id}" title="${t.label} (${t.key})">${icon(t.id === 'select' ? 'select' : t.id === 'draw' ? 'pen' : t.id, 14)}<span>${t.label}</span><kbd>${t.key}</kbd></button>`,
   ).join('');
   $('btnUndo').innerHTML = icon('undo', 15);
   $('btnRedo').innerHTML = icon('redo', 15);
@@ -751,6 +754,11 @@ function onPlanDown(e) {
     }
     return;
   }
+  if (tool === 'draw') {
+    state.drag = { kind: 'sketch', pts: [[wx, wz]] };
+    els.plan.setPointerCapture(e.pointerId);
+    return;
+  }
   if (tool === 'junction') {
     if (hit && hit.kind === 'junction') selectObject('junction', hit.id);
     else addJunctionAt(wx, wz);
@@ -791,6 +799,14 @@ function onPlanMove(e) {
   const [wx, wz] = worldOf(e);
   state.ghost = [wx, wz];
   const d = state.drag;
+  if (d && d.kind === 'sketch') {
+    const last = d.pts[d.pts.length - 1];
+    if (Math.hypot(wx - last[0], wz - last[1]) >= 0.4) d.pts.push([wx, wz]);
+    state.sketch = d.pts;
+    draw();
+    renderStatus();
+    return;
+  }
   if (d && d.kind === 'pan') {
     plan.view.cx = d.cx - (e.clientX - d.sx) / plan.view.s;
     plan.view.cz = d.cz - (e.clientY - d.sy) / plan.view.s;
@@ -853,6 +869,13 @@ function onPlanMove(e) {
 
 function onPlanUp(e) {
   const d = state.drag;
+  if (d && d.kind === 'sketch') {
+    state.drag = null;
+    state.sketch = null;
+    finishSketch(d.pts);
+    draw();
+    return;
+  }
   if (d && d.kind === 'pan') {
     state.drag = null;
     els.plan.classList.remove('dragging');
@@ -916,6 +939,17 @@ function finishArea() {
   state.areaPts = [];
   setTool('select');
   selectObject('area', id);
+}
+
+function finishSketch(pts) {
+  const res = planSketch(state.project, pts);
+  if (res.error) return toast(res.error, true);
+  edit('draw road', (d) => {
+    for (const j of res.newJunctions) d.junctions.push(defaultJunction(j.id, j.x, j.z));
+    const rid = nextId('R', d.roads);
+    d.roads.push(defaultRoad(rid, res.road.a, res.road.b, { ctrl: res.road.ctrl }));
+    return { sel: { kind: 'road', id: rid } };
+  });
 }
 
 function onPlanWheel(e) {
@@ -1077,7 +1111,7 @@ function onKey(e) {
   }
   if (k === 'enter' && state.tool === 'area') return finishArea();
   if (k === 'f') return fitView();
-  const map = { v: 'select', j: 'junction', r: 'road', a: 'area', x: 'exchange' };
+  const map = { v: 'select', j: 'junction', r: 'road', d: 'draw', a: 'area', x: 'exchange' };
   if (map[k] && e.type === 'keydown') return setTool(map[k]);
 }
 

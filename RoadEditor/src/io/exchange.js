@@ -87,6 +87,7 @@ export function materialColour(key) {
     post: [0.45, 0.46, 0.5],
     grate: [0.15, 0.15, 0.16],
     pipe: [0.35, 0.36, 0.4],
+    retain: [0.55, 0.55, 0.53],
   };
   return table[key] || [0.6, 0.6, 0.6];
 }

@@ -10,11 +10,12 @@ import {
   differencePolys,
   groupRings,
   offsetPolys,
+  pointInPoly,
   polyArea,
   triangulate,
 } from './clipper.js';
 import { curveSlice, stationAt } from './curve.js';
-import { EMBANK_SLOPE, GUTTER_DROP } from './profile.js';
+import { EMBANK_SLOPE, FILL_RUN_MAX, GUTTER_DROP } from './profile.js';
 
 const key = (p) => `${Math.round(p[0] * 1000)},${Math.round(p[1] * 1000)}`;
 
@@ -161,10 +162,12 @@ export function buildHub(J, arms, bands, mb, opts) {
     }
   }
 
-  // embankment: slope from the verge outer edge down to ground, cut at the mouth lines
+  // embankment: fill slope from the verge outer edge, capped at FILL_RUN_MAX (a retaining wall drops
+  // to ground beyond the cap), and cut at the mouth lines so the road sections take over there
   const outer4 = Q[4];
   if (y > 0.02 && opts.embankment !== false) {
-    const run = EMBANK_SLOPE * y;
+    const run = Math.min(EMBANK_SLOPE * y, FILL_RUN_MAX);
+    const yEnd = y - run / EMBANK_SLOPE;
     const ext = offsetPolys(outer4, run);
     let ring = differencePolys(ext, outer4);
     const blockers = mouthFrames.map((fr, i) => {
@@ -184,8 +187,22 @@ export function buildHub(J, arms, bands, mb, opts) {
     const topKeys = keysOf(outer4);
     for (const grp of groupRings(ring)) {
       const t = triangulate(grp.outer, grp.holes);
-      emitTris(mb, 'embank', owner, t, (p) => (topKeys.has(key(p)) ? y : 0));
+      emitTris(mb, 'embank', owner, t, (p) => (topKeys.has(key(p)) ? y : yEnd));
       pushPlan('embank', [grp.outer, ...grp.holes]);
+    }
+    if (yEnd > 0.02) {
+      for (const poly of ext) {
+        const n = poly.length;
+        for (let i = 0; i < n; i++) {
+          const p = poly[i];
+          const q = poly[(i + 1) % n];
+          if (Math.hypot(q[0] - p[0], q[1] - p[1]) < 1e-6 || isMouthEdge(p, q)) continue;
+          const mx = (p[0] + q[0]) / 2;
+          const mz = (p[1] + q[1]) / 2;
+          if (blockers.some((bl) => pointInPoly(mx, mz, bl))) continue;
+          mb.quad('retain', owner, [p[0], yEnd, p[1]], [q[0], yEnd, q[1]], [q[0], 0, q[1]], [p[0], 0, p[1]]);
+        }
+      }
     }
   }
 

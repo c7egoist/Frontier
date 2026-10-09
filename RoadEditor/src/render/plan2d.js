@@ -78,9 +78,11 @@ export class Plan2D {
     const net = st.net;
     if (net) {
       const plan = net.plan;
-      // carriageway, bands, walls-less surfaces
-      for (const p of plan.roads) this.fillPoly(ctx, p.poly, this.fillFor(p.mat));
-      for (const h of plan.hubs) this.fillRings(ctx, h.rings, this.fillFor(h.mat));
+      // embankments first, so roads, bands and hubs always sit on top of them
+      for (const p of plan.roads) if (p.mat === 'embank') this.fillPoly(ctx, p.poly, this.fillFor(p.mat));
+      for (const h of plan.hubs) if (h.mat === 'embank') this.fillRings(ctx, h.rings, this.fillFor(h.mat));
+      for (const p of plan.roads) if (p.mat !== 'embank') this.fillPoly(ctx, p.poly, this.fillFor(p.mat));
+      for (const h of plan.hubs) if (h.mat !== 'embank') this.fillRings(ctx, h.rings, this.fillFor(h.mat));
       for (const a of plan.areas) this.fillRings(ctx, [a.poly], this.fillFor(a.mat));
       if (st.opts.marks) {
         for (const m of plan.marks) this.stroke(ctx, m.pts, '#f3f3ef', Math.max(1, m.width * this.view.s), 'round');
@@ -113,6 +115,7 @@ export class Plan2D {
         ctx.stroke();
       }
     }
+    if (st.sketch && st.sketch.length > 1) this.stroke(ctx, st.sketch, '#e5e7ea', 2, 'round', [6, 4]);
     this.drawHandles(ctx, st);
     if (st.area && st.area.length) this.drawAreaPreview(ctx, st.area, st.ghost);
     if (st.pending) this.drawPending(ctx, st);

@@ -10,6 +10,7 @@ import { stationAt } from './curve.js';
 export const TAPER = 10; // m over which a road leaves the junction plateau
 export const GUTTER_DROP = 0.02; // m, gutter fall toward the kerb
 export const EMBANK_SLOPE = 1.5; // horizontal run per metre of fill height
+export const FILL_RUN_MAX = 8; // m, widest fill slope before a retaining wall drops to ground
 export const DECK_TRANSITION = 1.0; // m, bridge deck ramp at a partial bridge end
 export const DITCH_WIDTH = 0.6; // m, verge ditch bottom width
 export const DITCH_SETBACK = 0.3; // m, verge flat before the ditch
@@ -98,8 +99,12 @@ export function sectionStrips(road, S) {
       mat: 'verge',
       pts: [[e(L3), y], [e(d), y], [e(c), y - dd], [e(b), y], [e(L4), y]],
     });
-    const far = L4 + EMBANK_SLOPE * Math.abs(y) * (1 - bw);
-    strips.push({ mat: 'embank', pts: [[e(L4), y], [e(far), y * bw]] });
+    // fill slope capped at FILL_RUN_MAX; the cap ends in a retaining wall that drops to ground
+    const fillRun = y > 0 ? Math.min(EMBANK_SLOPE * y, FILL_RUN_MAX) * (1 - bw) : EMBANK_SLOPE * Math.abs(y) * (1 - bw);
+    const far = L4 + fillRun;
+    const yEnd = y > 0 ? y - fillRun / EMBANK_SLOPE : y * bw;
+    strips.push({ mat: 'embank', pts: [[e(L4), y], [e(far), yEnd]] });
+    strips.push({ mat: 'retain', pts: [[e(far), yEnd], [e(far), y * bw]] });
     strips.push({ mat: 'deck', pts: [[e(L4), y], [e(L4), y - dep]] });
   }
   // underside of the deck, spanning both outer edges

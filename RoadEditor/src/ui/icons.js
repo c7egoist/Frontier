@@ -18,6 +18,7 @@ const ICONS = {
   search: '<circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5L14 14"/>',
   warn: P('M8 2l6.5 12h-13zM8 6.5v3.5M8 12v.5'),
   plus: P('M8 3v10M3 8h10'),
+  pen: P('M3 13l1-3 7-7 2 2-7 7zM10 3l2 2'),
   split: '<rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M8 2.5v11"/>',
   help: '<circle cx="8" cy="8" r="6.5"/><path d="M6.2 6.2a1.9 1.9 0 113 1.6c-.7.4-1.2.8-1.2 1.7M8 11.8v.4"/>',
 };
