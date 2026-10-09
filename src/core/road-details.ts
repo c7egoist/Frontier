@@ -14,6 +14,7 @@ import {
 } from "./math";
 import {
   roadHalfWidth,
+  motorHalfWidth,
   connected,
   getNode,
   type Project,
@@ -220,7 +221,7 @@ export function parallelParkingBays(
 }
 export function buildParallelParking(b: MeshBuilder, span: RoadSpan) {
   if (span.road.parking !== "parallel" || !span.road.markings) return;
-  const hw = roadHalfWidth(span.road);
+  const hw = motorHalfWidth(span.road);
   for (const { s, side } of parallelParkingBays(span)) {
     ribbon(b, span, s, s + 5.5, side * (hw - 2.2), 0.1);
     for (const end of [s, s + 5.5])
@@ -372,8 +373,13 @@ export function buildJunctionMarkings(
       if (lane === lanes / 2 && (a.road.median > 0 || z.road.median > 0))
         continue;
       const fraction = -1 + (lane * 2) / lanes,
-        p = add(a.center, mul(a.n, a.frame.hw * fraction)),
-        q = add(z.center, mul(z.n, -z.frame.hw * fraction));
+        offset = (arm: Arm) =>
+          ((((arm.road.lanes * arm.road.laneWidth) / 2) * fraction +
+            (Math.sign(fraction) * arm.road.median) / 2) *
+            arm.frame.hw) /
+          roadHalfWidth(arm.road),
+        p = add(a.center, mul(a.n, offset(a))),
+        q = add(z.center, mul(z.n, -offset(z)));
       const curve = [p, add(p, mul(a.d, -reach)), add(q, mul(z.d, -reach)), q];
       for (let i = 0; i < 40; i += 4) {
         const u = cubic(curve, i / 40),

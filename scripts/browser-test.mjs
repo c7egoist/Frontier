@@ -1687,6 +1687,395 @@ try {
     assert.deepEqual((await state()).project, before.project);
   });
 
+  // Modern mobility and open-space cases are sequential, with their own setup.
+  // TEST_FOCUS=mobility: runs this complete group without legacy case state.
+  let mobilityRoadId;
+  const mobilityState = () =>
+    page.evaluate(() => ({
+      project: window.frontier.getProject(),
+      selection: window.frontier.getSelection(),
+      mobility: window.frontier.getNetwork().mobility,
+      plantings: window.frontier.getNetwork().plantings,
+      blocks: window.frontier.getNetwork().blocks,
+      spaces: window.frontier.getNetwork().parkingSpaces,
+    }));
+  const setRange = async (prop, value) => {
+    await page.locator(`[data-prop="${prop}"]`).evaluate((e, v) => {
+      e.value = String(v);
+      e.dispatchEvent(new Event("input", { bubbles: true }));
+      e.dispatchEvent(new Event("change", { bubbles: true }));
+    }, value);
+  };
+  await test("mobility: European quarter is connected and contains real bus/cycle/pit/block/parking geometry without trees or buildings", async () => {
+    await page.evaluate(() => window.frontier.setGeometryDetail("editing"));
+    await page.evaluate(() => window.frontier.loadTemplate("europe"));
+    await page.locator('button[data-layout="split"]').click();
+    await page.locator("#shade-style").selectOption("shaded");
+    const s = await mobilityState(),
+      n = await state();
+    mobilityRoadId = s.project.roads[0].id;
+    assert.equal(s.blocks.length, 4);
+    assert(s.mobility.length > 30);
+    assert(s.plantings.length > 40);
+    assert(s.spaces > 100);
+    assert.deepEqual(n.diagnostics, []);
+    assert(s.plantings.every((p) => p.containsTree === false));
+    assert(s.blocks.every((p) => p.hasBuildings === false));
+    assert(!n.meshes.some((m) => ["landscape", "building"].includes(m.kind)));
+    await page.locator('[data-library="roads"]').click();
+    for (const id of [
+      "euro-boulevard",
+      "bus-way",
+      "cycle-street",
+      "cycle-painted",
+    ]) {
+      const card = page.locator(`[data-asset="${id}"]`);
+      await card.scrollIntoViewIfNeeded();
+      assert(await card.locator("img").isVisible());
+      assert(
+        (await card.locator("img").getAttribute("src")).startsWith(
+          "data:image/png",
+        ),
+      );
+    }
+    await page.screenshot({ path: resolve(cache, "european-quarter.png") });
+  });
+  await test("mobility: bus and protected-cycle controls edit the selected profile, preserve lane count and support undo", async () => {
+    await page.evaluate(
+      (id) => window.frontier.select({ kind: "road", id }),
+      mobilityRoadId,
+    );
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    const before = await mobilityState();
+    assert.equal(
+      await page.locator('[data-prop="cycleMode"]').inputValue(),
+      "protected",
+    );
+    assert.equal(
+      await page.locator('[data-prop="busLanes"]').inputValue(),
+      "outer",
+    );
+    await setRange("cycleWidth", 2.5);
+    let s = await mobilityState();
+    assert.equal(s.project.roads.find((r) => r.id === mobilityRoadId).lanes, 4);
+    assert.equal(
+      s.project.roads.find((r) => r.id === mobilityRoadId).cycleWidth,
+      2.5,
+    );
+    assert(
+      s.mobility
+        .filter((m) => m.owner === mobilityRoadId && m.kind === "cycle-track")
+        .every((m) => m.width === 2.5),
+    );
+    await undo();
+    assert.deepEqual((await mobilityState()).project, before.project);
+    await page.locator('[data-prop="busLanes"]').selectOption("none");
+    assert(
+      !(await mobilityState()).mobility.some(
+        (m) => m.owner === mobilityRoadId && m.kind === "bus-lane",
+      ),
+    );
+    await undo();
+    await page.locator('[data-prop="cycleMode"]').selectOption("painted");
+    assert(
+      !(await state()).meshes.some(
+        (m) =>
+          m.owner === mobilityRoadId &&
+          m.kind === "cycle" &&
+          m.material === "curb",
+      ),
+    );
+    await undo();
+    assert(
+      await page.evaluate(() => window.frontier.inspectPlanning("mobility")),
+    );
+    await page.screenshot({ path: resolve(cache, "protected-cycle-bus.png") });
+  });
+  await test("mobility: planting edits retain 2 m clear walking space, reveal real slotted grates and keep history", async () => {
+    await page.locator('[data-inspector-tab="details"]').click();
+    const before = await mobilityState();
+    assert(await page.locator('[data-prop="treePits"]').isChecked());
+    await setRange("pitWidth", 2.2);
+    let s = await mobilityState();
+    assert(
+      s.plantings
+        .filter((p) => p.owner === mobilityRoadId)
+        .every((p) => p.clearWalkWidth >= 2 && p.width === 2.2),
+    );
+    await undo();
+    await page.locator('[data-prop="pitGrate"]').check();
+    s = await mobilityState();
+    assert(s.plantings.some((p) => p.owner === mobilityRoadId && p.grate));
+    assert(
+      (await state()).meshes.some(
+        (m) => m.owner === mobilityRoadId && m.material === "tree-grate",
+      ),
+    );
+    assert(
+      await page.evaluate(() => window.frontier.inspectPlanning("planting")),
+    );
+    await page.screenshot({ path: resolve(cache, "planting-grate.png") });
+    await undo();
+    assert.deepEqual((await mobilityState()).project, before.project);
+  });
+  await test("mobility: small independent tree-growing pieces place, resize and export without adding a tree", async () => {
+    const before = await state();
+    await page.evaluate(() => window.frontier.placeSite("tree-pit"));
+    const pos = await page.evaluate(() =>
+        window.frontier.worldToPlan([0, 0, 135]),
+      ),
+      rect = await page.locator("#plan-host").boundingBox();
+    await page.mouse.click(rect.x + pos[0], rect.y + pos[1]);
+    let s = await mobilityState();
+    assert.equal(s.project.sites.length, before.project.sites.length + 1);
+    const pit = s.project.sites.find((p) => p.id === s.selection.id);
+    assert.equal(pit.kind, "tree-pit");
+    assert.equal(pit.width, 1.8);
+    assert.equal(pit.depth, 3);
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    await setRange("width", 2.4);
+    s = await mobilityState();
+    assert.equal(s.project.sites.find((p) => p.id === pit.id).width, 2.4);
+    assert(
+      s.plantings.some(
+        (p) =>
+          p.owner === pit.id && p.width === 2.4 && p.containsTree === false,
+      ),
+    );
+    await undo();
+    await page.locator('[data-prop="pitGrate"]').check();
+    assert(
+      await page.evaluate(() => window.frontier.inspectPlanning("planting")),
+    );
+    await page.screenshot({ path: resolve(cache, "standalone-tree-pit.png") });
+    await undo();
+    await undo();
+    assert.deepEqual((await state()).project, before.project);
+  });
+  await test("mobility: block frontage and actual vehicle gateways remain editable, with an explicit open/paved courtyard choice", async () => {
+    const id = await page.evaluate(
+      () =>
+        window.frontier.getProject().sites.find((s) => s.kind === "urban-block")
+          .id,
+    );
+    await page.evaluate(
+      (id) => window.frontier.select({ kind: "site", id }),
+      id,
+    );
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    const before = await mobilityState();
+    await setRange("blockBand", 4);
+    assert.equal(
+      (await mobilityState()).blocks.find((b) => b.owner === id).bandWidth,
+      4,
+    );
+    await undo();
+    await page.locator('[data-prop="blockInterior"]').selectOption("paved");
+    assert.equal(
+      (await mobilityState()).blocks.find((b) => b.owner === id).interior,
+      "paved",
+    );
+    await undo();
+    await page.locator('[data-inspector-tab="details"]').click();
+    await setRange("blockEntryWidth", 8.5);
+    assert.equal(
+      (await mobilityState()).blocks.find((b) => b.owner === id).entry.width,
+      8.5,
+    );
+    await undo();
+    assert.deepEqual((await mobilityState()).project, before.project);
+    assert(await page.evaluate(() => window.frontier.inspectSelection()));
+    await page.screenshot({ path: resolve(cache, "open-block-courtyard.png") });
+  });
+  await test("mobility: parking islands, EV reservations and permeable bay finishes regenerate capacity and geometry", async () => {
+    const id = await page.evaluate(
+      () =>
+        window.frontier.getProject().sites.find((s) => s.kind === "parking").id,
+    );
+    await page.evaluate(
+      (id) => window.frontier.select({ kind: "site", id }),
+      id,
+    );
+    await page.locator('[data-inspector-tab="details"]').click();
+    const before = await mobilityState(),
+      count = before.plantings.filter((p) => p.owner === id).length;
+    await setRange("islandEvery", 9);
+    let s = await mobilityState();
+    assert(s.plantings.filter((p) => p.owner === id).length < count);
+    assert(s.spaces > before.spaces);
+    await undo();
+    await setRange("evBays", 6);
+    assert.equal(
+      (await mobilityState()).project.sites.find((p) => p.id === id).evBays,
+      6,
+    );
+    assert(
+      (await state()).meshes.some(
+        (m) => m.owner === id && m.material === "marking-ev",
+      ),
+    );
+    await undo();
+    await page.locator('[data-inspector-tab="surface"]').click();
+    assert.equal(
+      await page.locator('[data-prop="bayFinish"]').inputValue(),
+      "permeable",
+    );
+    await page.locator('[data-prop="bayFinish"]').selectOption("concrete");
+    assert(
+      (await state()).meshes.some(
+        (m) =>
+          m.owner === id && m.kind === "parking" && m.material === "concrete",
+      ),
+    );
+    await undo();
+    await page.locator('[data-menu="layers-menu"]').click();
+    for (const layer of ["bus", "cycle", "planting"]) {
+      await page.locator(`[data-layer="${layer}"]`).uncheck();
+      await page.locator(`[data-layer="${layer}"]`).check();
+    }
+    await page.keyboard.press("Escape");
+    assert(await page.evaluate(() => window.frontier.inspectSelection()));
+    await page.screenshot({ path: resolve(cache, "modern-parking-court.png") });
+    assert.deepEqual((await mobilityState()).project, before.project);
+  });
+  await test("mobility: the reported radius-2, elevated junction remains clean when its sidewalks widen to 12 m", async () => {
+    await page.evaluate(() => {
+      window.frontier.loadTemplate("district");
+      window.frontier.select({ kind: "node", id: "j01" });
+      window.frontier.moveJoint("j01", [0, 3, 0]);
+    });
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    await setRange("radius", 2);
+    await setRange("sidewalk", 12);
+    await setRange("laneWidth", 3.3);
+    const fit = await page.evaluate(() => {
+      const j = window.frontier
+        .getNetwork()
+        .junctions.find((j) => j.node.id === "j01");
+      return {
+        valid: j.valid,
+        radius: j.radius,
+        requested: j.requestedRadius,
+        actualFloor: Math.max(
+          ...j.arms.map((a) => a.frame.sw + a.frame.cw + 0.75),
+        ),
+        points: j.outer,
+        errors: window.frontier
+          .getNetwork()
+          .diagnostics.filter((d) => d.level === "error"),
+      };
+    });
+    assert(fit.valid);
+    assert.equal(fit.requested, 2);
+    assert(Math.abs(fit.radius - fit.actualFloor) < 1e-8);
+    assert(fit.radius > 12);
+    assert(fit.points.every((p) => p.every(Number.isFinite)));
+    assert.deepEqual(fit.errors, []);
+    assert.equal(
+      Number(await page.locator("[data-radius-fit]").textContent()),
+      Number(fit.radius.toFixed(2)),
+    );
+    assert(await page.evaluate(() => window.frontier.inspectSelection()));
+    await page.screenshot({ path: resolve(cache, "wide-clean-corner.png") });
+  });
+  await test("mobility: GLB/OBJ embed mobility and empty-space metadata plus bus/cycle/soil/grate PBR channels", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("europe"));
+    const p = await page.evaluate(() => {
+      const p = window.frontier.getProject();
+      p.name = "Mobility export fixture";
+      p.roads = p.roads.slice(0, 1);
+      const block = {
+          ...p.sites.find((s) => s.kind === "urban-block"),
+          id: "export-block",
+          width: 32,
+          depth: 32,
+          position: [-55, 0, 30],
+        },
+        parking = {
+          ...p.sites.find((s) => s.kind === "parking"),
+          id: "export-parking",
+          width: 38,
+          depth: 26,
+          position: [20, 0, 35],
+        },
+        pit = {
+          ...block,
+          id: "export-pit",
+          kind: "tree-pit",
+          width: 1.8,
+          depth: 3,
+          shape: "rectangle",
+          pitGrate: true,
+          position: [55, 0, 35],
+        };
+      p.sites = [block, parking, pit];
+      return p;
+    });
+    await page.locator("#project-file").setInputFiles({
+      name: "mobility-export.road.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(p)),
+    });
+    await page.waitForFunction(
+      () => window.frontier.getProject().name === "Mobility export fixture",
+    );
+    await page.waitForFunction(
+      () => !document.querySelector("#project-file").value,
+    );
+    const before = await mobilityState();
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("production");
+    let promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="glb"]').click();
+    let download = await promise,
+      buffer = await readFile(await download.path()),
+      g = JSON.parse(
+        buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
+      );
+    const extras = g.nodes.find((n) => n.extras?.mobility)?.extras;
+    assert(extras?.mobility.some((m) => m.kind === "bus-lane"));
+    assert(extras.mobility.some((m) => m.kind === "cycle-track"));
+    assert(extras.plantings.every((p) => p.containsTree === false));
+    assert(extras.blocks.some((b) => b.hasBuildings === false));
+    for (const key of ["bus-red", "cycle-red", "soil", "tree-grate"]) {
+      const m = g.materials.find((m) => m.name === key);
+      assert(
+        m?.normalTexture && m.pbrMetallicRoughness.metallicRoughnessTexture,
+        key,
+      );
+    }
+    assert(g.images.every((i) => i.bufferView !== undefined));
+    assert(
+      !g.nodes.some((n) =>
+        ["building", "landscape"].includes(n.extras?.meshKind),
+      ),
+    );
+    await page.locator('[data-menu="export-menu"]').click();
+    promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="obj"]').click();
+    download = await promise;
+    const files = unzipSync(await readFile(await download.path())),
+      decode = (n) => new TextDecoder().decode(files[n]),
+      mesh = JSON.parse(decode("mesh.json")),
+      mats = JSON.parse(decode("materials.json")).materials;
+    assert(mesh.mobility.some((m) => m.kind === "bus-lane"));
+    assert(mesh.blocks.length === 1);
+    assert(mesh.plantings.every((p) => p.containsTree === false));
+    for (const key of ["bus-red", "cycle-red", "soil", "tree-grate"]) {
+      const m = mats[key];
+      assert(files[m.albedo] && files[m.normal] && files[m.roughness]);
+    }
+    assert.equal(mats["tree-grate"].metallic, 0.72);
+    assert.deepEqual((await mobilityState()).project, before.project);
+    await page.locator('[data-menu="export-menu"]').click();
+    promise = page.waitForEvent("download");
+    await page.locator('#export-menu [data-action="json"]').click();
+    download = await promise;
+    const saved = JSON.parse(await readFile(await download.path(), "utf8"));
+    assert.equal(saved.roads[0].cycleMode, "protected");
+    assert.equal(saved.sites.find((s) => s.kind === "tree-pit").pitGrate, true);
+  });
+
   await test("mobile layout keeps both views usable without horizontal overflow", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("district"));
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1809,6 +2198,27 @@ try {
       ),
     );
     assert.deepEqual(requests, []);
+    await offline.evaluate(() => window.frontier.loadTemplate("europe"));
+    const mobility = await offline.evaluate(() => ({
+      mobility: window.frontier.getNetwork().mobility,
+      plantings: window.frontier.getNetwork().plantings,
+      blocks: window.frontier.getNetwork().blocks,
+      meshes: window.frontier
+        .getNetwork()
+        .meshes.map((m) => ({ kind: m.kind, material: m.material })),
+    }));
+    assert(
+      mobility.mobility.length > 30 &&
+        mobility.plantings.length > 40 &&
+        mobility.blocks.length === 4,
+    );
+    assert(mobility.plantings.every((p) => p.containsTree === false));
+    assert(
+      !mobility.meshes.some((m) => ["building", "landscape"].includes(m.kind)),
+    );
+    assert(
+      await offline.evaluate(() => window.frontier.inspectPlanning("mobility")),
+    );
     assert.deepEqual(offlineErrors, []);
     await offline.screenshot({ path: resolve(cache, "offline.png") });
     await offline.close();

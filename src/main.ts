@@ -21,6 +21,7 @@ import {
   patterns,
   patternNames,
   roadDefaults,
+  roadHalfWidth,
   uid,
   connected,
   getNode,
@@ -266,10 +267,37 @@ function rebuild(inspector = true, context = false) {
         diagnostics: network.diagnostics,
         services: network.services,
         footways: network.footways,
+        plantings: network.plantings,
+        blocks: network.blocks,
+        mobility: network.mobility,
       },
     }),
   );
   updateStats();
+  const radiusOut =
+      document.querySelector<HTMLOutputElement>("[data-radius-fit]"),
+    joint = network.junctions.find((j) => j.node.id === selection?.id);
+  if (radiusOut && joint) radiusOut.value = fmt(joint.radius, 2);
+  const ownerIDs = new Set([
+    selection?.id,
+    ...selectedRoads().map((r) => r.id),
+  ]);
+  document
+    .querySelectorAll<HTMLOutputElement>("[data-mobility-stat]")
+    .forEach(
+      (o) =>
+        (o.value = String(
+          network.mobility.filter((f) => ownerIDs.has(f.owner)).length,
+        )),
+    );
+  document
+    .querySelectorAll<HTMLOutputElement>("[data-planting-stat]")
+    .forEach(
+      (o) =>
+        (o.value = String(
+          network.plantings.filter((f) => ownerIDs.has(f.owner)).length,
+        )),
+    );
   const serviceOwners = new Set([
       selection?.id,
       ...selectedRoads().map((r) => r.id),
@@ -502,11 +530,23 @@ function updateStats() {
 function syncSiteMetrics() {
   if (selection?.kind !== "site") return;
   const site = project.sites?.find((s) => s.id === selection!.id);
-  if (!site || site.kind !== "parking") return;
+  if (!site) return;
+  document
+    .querySelectorAll<HTMLOutputElement>("[data-site-area]")
+    .forEach(
+      (o) =>
+        (o.value = String(
+          Math.round(Math.abs(polygonArea(siteOutline(site)))),
+        )),
+    );
+  if (site.kind !== "parking") return;
   const p = parkingPlan(site);
   document
     .querySelectorAll<HTMLElement>('[data-site-stat="capacity"]')
     .forEach((e) => (e.textContent = `${p.bays.length} stalls`));
+  document
+    .querySelectorAll<HTMLElement>('[data-site-stat="islands"]')
+    .forEach((e) => (e.textContent = String(p.islands.length)));
   document
     .querySelectorAll<HTMLElement>('[data-site-stat="rows"]')
     .forEach((e) => (e.textContent = `${p.rows} rows`));
@@ -602,7 +642,7 @@ function transformControls(position: V3, note: string) {
 function renderSiteInspector(site: Site) {
   const entry = siteCatalog.find((s) => s.id === site.kind)!,
     area = Math.round(Math.abs(polygonArea(siteOutline(site))));
-  let body = `<div class="selected-object"><div class="object-icon">${icon(entry.icon)}</div><div class="object-title"><span class="eyebrow">${site.kind === "parking" ? "PROCEDURAL LAYOUT" : "PAVING GEOMETRY"}</span><h1>${escape(site.name)}</h1><span class="type-pill"><span></span>${area} m² / <output data-site-stat="capacity">${site.kind === "parking" ? `${parkingLayout(site).length} stalls` : "metric surface"}</output></span></div><button class="icon-button object-actions" data-inspector-action="rename" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs">${["geometry", "surface", "details"].map((t) => `<button data-inspector-tab="${t}" class="${inspectorTab === t ? "active" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</nav>`;
+  let body = `<div class="selected-object"><div class="object-icon">${icon(entry.icon)}</div><div class="object-title"><span class="eyebrow">${site.kind === "parking" ? "PROCEDURAL LAYOUT" : site.kind === "tree-pit" ? "EMPTY PLANTING OPENING" : site.kind === "urban-block" ? "BLOCK PERIMETER" : "PAVING GEOMETRY"}</span><h1>${escape(site.name)}</h1><span class="type-pill"><span></span><output data-site-area>${area}</output> m² / <output data-site-stat="capacity">${site.kind === "parking" ? `${parkingLayout(site).length} stalls` : "metric surface"}</output></span></div><button class="icon-button object-actions" data-inspector-action="rename" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs">${["geometry", "surface", "details"].map((t) => `<button data-inspector-tab="${t}" class="${inspectorTab === t ? "active" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</nav>`;
   if (inspectorTab === "geometry") {
     body += transformControls(
       site.position,
@@ -611,15 +651,50 @@ function renderSiteInspector(site: Site) {
     body += card(
       "Footprint",
       entry.icon,
-      choice("shape", "Boundary", site.shape, [
-        ["rectangle", "Rounded rectangle"],
-        ["triangle", "Triangle"],
-        ["circle", "Ellipse"],
-      ]) +
-        range("width", "Width", site.width, 8, 180, 1) +
-        range("depth", "Depth", site.depth, 8, 300, 1) +
+      (site.kind === "tree-pit"
+        ? ""
+        : choice("shape", "Boundary", site.shape, [
+            ["rectangle", "Rounded rectangle"],
+            ["triangle", "Triangle"],
+            ["circle", "Ellipse"],
+          ]) +
+          range(
+            "cornerRadius",
+            "Corner rounding",
+            site.cornerRadius,
+            0.05,
+            10,
+            0.05,
+          )) +
+        range(
+          "width",
+          "Width",
+          site.width,
+          site.kind === "tree-pit" ? 0.8 : 8,
+          site.kind === "tree-pit" ? 6 : 180,
+          site.kind === "tree-pit" ? 0.1 : 1,
+        ) +
+        range(
+          "depth",
+          "Depth",
+          site.depth,
+          site.kind === "tree-pit" ? 0.8 : 8,
+          site.kind === "tree-pit" ? 8 : 300,
+          site.kind === "tree-pit" ? 0.1 : 1,
+        ) +
         range("yaw", "Rotation", site.yaw, -180, 180, 5, "°"),
     );
+    if (site.kind === "urban-block")
+      body += card(
+        "Block perimeter",
+        "layout-template",
+        range("blockBand", "Frontage band", site.blockBand, 1, 8, 0.1) +
+          choice("blockInterior", "Courtyard / plot", site.blockInterior, [
+            ["open", "Open — no surface / buildings"],
+            ["paved", "Paved courtyard"],
+          ]) +
+          `<p class="card-note"><span>Metric perimeter ring with inset borders. Keep the interior open for a parking court or your own engine architecture. No buildings are generated.</span></p>`,
+      );
     if (site.kind === "parking")
       body += card(
         "Module solver",
@@ -643,22 +718,32 @@ function renderSiteInspector(site: Site) {
     body += card(
       "Paving material",
       "grid-2x2",
-      patternControls(site.pattern) +
+      (site.kind === "tree-pit"
+        ? '<p class="material-note">Recessed soil, flush concrete rim and optional slotted iron grate. The opening is real geometry, not a soil decal.</p>'
+        : patternControls(site.pattern)) +
+        (site.kind === "parking"
+          ? choice("bayFinish", "Parking bay finish", site.bayFinish, [
+              ["asphalt", "Asphalt"],
+              ["permeable", "Permeable pavers"],
+              ["concrete", "Concrete slabs"],
+            ])
+          : "") +
         `<p class="material-note">World-scale UVs / albedo, normal and roughness channels. No buildings or decorative props.</p>`,
     );
   else {
-    body += card(
-      "Edge construction",
-      "route",
-      range(
-        "perimeterWidth",
-        "Perimeter paving",
-        site.perimeterWidth,
-        0.3,
-        4,
-        0.1,
-      ),
-    );
+    if (site.kind !== "tree-pit" && site.kind !== "urban-block")
+      body += card(
+        "Edge construction",
+        "route",
+        range(
+          "perimeterWidth",
+          "Perimeter paving",
+          site.perimeterWidth,
+          0.3,
+          4,
+          0.1,
+        ),
+      );
     if (site.kind === "parking")
       body += card(
         "Circulation & markings",
@@ -696,6 +781,65 @@ function renderSiteInspector(site: Site) {
           range("paintWear", "Paint wear", site.paintWear, 0, 0.35, 0.05, ""),
       );
   }
+  if (site.kind === "tree-pit")
+    body += card(
+      "Future tree growing space",
+      "square-dashed",
+      toggle(
+        "pitGrate",
+        "Slotted iron grate",
+        site.pitGrate,
+        "Root opening and real drainage slots; no tree",
+      ) +
+        `<p class="card-note"><span>160 mm soil recess below the frame. Place this independent piece outside an existing solid paving sheet; road pits automatically cut their footways.</span></p><button class="solver-badge" data-inspector-action="inspect-planting">${icon("search")}Inspect the opening</button>`,
+    );
+  if (site.kind === "urban-block" && inspectorTab === "details")
+    body += card(
+      "Vehicle gateway",
+      "corner-up-right",
+      choice("blockEntrySide", "Gateway side", site.blockEntrySide, [
+        ["north", "North"],
+        ["south", "South"],
+        ["east", "East"],
+        ["west", "West"],
+      ]) +
+        range(
+          "blockEntryWidth",
+          "Clear gate / 0 = closed",
+          site.blockEntryWidth,
+          0,
+          12,
+          0.5,
+        ) +
+        `<p class="card-note"><span>A real cut through the frontage ring and plinth. Align a road driveway/apron with a separate parking entry. The European mobility quarter includes four aligned examples.</span></p>`,
+    );
+  if (site.kind === "parking" && inspectorTab === "details")
+    body += card(
+      "Modern parking modules",
+      "square-dashed",
+      toggle(
+        "parkingIslands",
+        "Empty planting islands",
+        site.parkingIslands,
+        "Replace periodic normal bays; never an aisle / transfer zone",
+      ) +
+        (site.parkingIslands
+          ? range(
+              "islandEvery",
+              "Island interval",
+              site.islandEvery,
+              3,
+              12,
+              1,
+              "",
+            )
+          : "") +
+        range("evBays", "EV-reserved bays", site.evBays, 0, 30, 1, "") +
+        `<p class="card-note"><span><output data-site-stat="islands">${parkingPlan(site).islands.length}</output> recessed soil islands; no trees. Capacity counts usable bays only. EV spaces are reserved/marked, not charging equipment.</span></p>` +
+        (site.parkingIslands
+          ? `<button class="solver-badge" data-inspector-action="inspect-planting">${icon("search")}Inspect an island</button>`
+          : ""),
+    );
   if (site.kind === "parking" && inspectorTab === "details")
     body += card(
       "Drainage & covers",
@@ -746,6 +890,40 @@ function networkPreview(id: string) {
     const c = controlPoints(p, r);
     return `M${map(c[0])}C${map(c[1])} ${map(c[2])} ${map(c[3])}`;
   };
+  if (id === "europe") {
+    const boundary = (s: Site, inset = 0) =>
+        `M${siteOutline(s, inset).map(map).join("L")}Z`,
+      plots = (p.sites ?? [])
+        .map((s) =>
+          s.kind === "urban-block"
+            ? `<path d="${boundary(s)}${boundary(s, s.blockBand)}" fill="#99999977" fill-rule="evenodd"/>`
+            : `<polygon points="${siteOutline(s).map(map).join(" ")}" fill="#383838" stroke="#777" stroke-width=".3"/>`,
+        )
+        .join(""),
+      roads = p.roads
+        .map((r) => {
+          const motor =
+              (r.lanes * r.laneWidth + r.median) / 2 +
+              (r.parking === "parallel" ? 2.3 : 0),
+            buffer = r.cycleMode === "protected" ? r.cycleSeparator : 0,
+            stroke = (color: string, width: number) =>
+              `<path d="${path(r)}" stroke="${color}" stroke-width="${width * 2 * scale}" stroke-linecap="round"/>`;
+          return (
+            stroke("#999", roadHalfWidth(r) + r.sidewalk + 0.22) +
+            stroke("#985950", roadHalfWidth(r)) +
+            stroke("#bebdb7", motor + buffer) +
+            stroke(r.busLanes === "outer" ? "#87534c" : "#383b3c", motor) +
+            (r.busLanes === "outer"
+              ? stroke("#383b3c", Math.max(0.05, motor - r.laneWidth))
+              : "") +
+            `<path d="${path(r)}" stroke="#ccc" stroke-width=".35" stroke-dasharray="1.5 2"/>`
+          );
+        })
+        .join("");
+    const svg = `<svg viewBox="0 0 180 76" fill="none" aria-hidden="true">${plots}${roads}</svg>`;
+    templatePreviews.set(id, svg);
+    return svg;
+  }
   const svg = `<svg viewBox="0 0 180 76" fill="none" aria-hidden="true">${(
     p.sites ?? []
   )
@@ -771,6 +949,82 @@ function beginPlace(kind: SiteKind) {
   setMode("place");
   toast(
     `Click in plan to place a ${siteCatalog.find((s) => s.id === kind)!.name.toLowerCase()}.`,
+  );
+}
+function mobilityControls(road: Road) {
+  const owners = new Set(selectedRoads().map((r) => r.id));
+  return card(
+    "European mobility profile",
+    "bike",
+    choice("busLanes", "Bus reservation", road.busLanes, [
+      ["none", "None"],
+      ["outer", "Outer motor lanes"],
+    ]) +
+      (road.busLanes === "outer"
+        ? choice("busSurface", "Bus-lane finish", road.busSurface, [
+            ["asphalt", "Standard asphalt"],
+            ["red", "Red aggregate"],
+          ])
+        : "") +
+      choice("cycleMode", "Cycle infrastructure", road.cycleMode, [
+        ["none", "None"],
+        ["painted", "Painted lanes"],
+        ["protected", "Protected tracks"],
+      ]) +
+      (road.cycleMode !== "none"
+        ? range(
+            "cycleWidth",
+            "Cycle width / side",
+            road.cycleWidth,
+            1.2,
+            3.5,
+            0.1,
+          ) +
+          choice("cycleColor", "Cycle surfacing", road.cycleColor, [
+            ["red", "Red aggregate"],
+            ["green", "Green aggregate"],
+            ["asphalt", "Standard asphalt"],
+          ]) +
+          (road.cycleMode === "protected"
+            ? range(
+                "cycleSeparator",
+                "Protection buffer",
+                road.cycleSeparator,
+                0.3,
+                1.5,
+                0.05,
+              )
+            : "")
+        : "") +
+      `<p class="card-note"><span>Bus lanes reserve existing motor lanes. Cycle tracks and buffers add width on both sides; separators open at driveways and crossings. <output data-mobility-stat>${network.mobility.filter((m) => owners.has(m.owner)).length}</output> mobility runs on the selection.</span></p>` +
+      (road.busLanes !== "none" || road.cycleMode !== "none"
+        ? `<button class="solver-badge" data-inspector-action="inspect-mobility">${icon("search")}Inspect mobility detail</button>`
+        : ""),
+  );
+}
+function roadPlantingControls(road: Road) {
+  const owners = new Set(selectedRoads().map((r) => r.id));
+  return card(
+    "Empty planting openings",
+    "square-dashed",
+    toggle(
+      "treePits",
+      "Footway planting pits",
+      road.treePits,
+      "Framed soil openings — no trees are generated",
+    ) +
+      (road.treePits
+        ? range("pitWidth", "Pit width", road.pitWidth, 1, 2.5, 0.1) +
+          range("pitLength", "Pit length", road.pitLength, 1.4, 4, 0.1) +
+          range("pitSpacing", "Pit interval", road.pitSpacing, 8, 32, 1) +
+          toggle(
+            "pitGrate",
+            "Slotted tree grates",
+            road.pitGrate,
+            "Physical slots and a central future-tree opening",
+          ) +
+          `<p class="card-note"><span><output data-planting-stat>${network.plantings.filter((p) => owners.has(p.owner)).length}</output> empty pits. Placement keeps at least 2 m through-walk, clears ramps/driveways and excludes bridges. Widen the footway if a pit cannot fit.</span></p><button class="solver-badge" data-inspector-action="inspect-planting">${icon("search")}Inspect a planting opening</button>`
+        : ""),
   );
 }
 function profile(road: Road) {
@@ -820,7 +1074,7 @@ function renderInspector() {
       body += card(
         "Joint geometry",
         "git-merge",
-        `<div class="radius-overview"><div><div class="radius-metric"><span id="radius-value">${fmt(node!.radius)}</span><small>m</small></div><div class="metric-caption">Corner radius</div></div>${jointSketch(node!.radius)}</div><input aria-label="Corner radius" type="range" data-prop="radius" min="2" max="24" step=".5" value="${node!.radius}" style="--progress:${((node!.radius - 2) / 22) * 100}%"/><div class="range-labels"><span>2 m</span><span>24 m</span></div><div class="solver-row"><span>Corner solver</span><span class="solver-badge">${icon("check")}Tangent fillet</span></div>${range("setback", "Paving / merge setback", node!.setback ?? 0, 0, 24, 1)}${joint.type === "Merge" ? `<p class="card-note">${icon("git-merge")}Adaptive runout pulls the paving nose back. Crosswalks are suppressed in merge throats.</p>` : ""}${toggle("boxJunction", "Yellow box markings", node!.boxJunction ?? false, "Clipped to the actual junction surface")}${toggle("signals", "Traffic signals", node!.signals ?? false, "Physical poles and signal heads; static preview phase")}`,
+        `<div class="radius-overview"><div><div class="radius-metric"><span id="radius-value">${fmt(node!.radius)}</span><small>m</small></div><div class="metric-caption">Corner radius</div></div>${jointSketch(node!.radius)}</div><input aria-label="Corner radius" type="range" data-prop="radius" min="2" max="24" step=".5" value="${node!.radius}" style="--progress:${((node!.radius - 2) / 22) * 100}%"/><div class="range-labels"><span>2 m</span><span>24 m</span></div><p class="card-note"><span>Requested radius stays editable. Wide footways offset cleanly using an automatic radius floor of <output data-radius-fit>${fmt(joint.radius, 2)}</output> m. Short approaches taper with a warning instead of folding.</span></p><div class="solver-row"><span>Corner solver</span><span class="solver-badge">${icon("check")}Tangent fillet</span></div>${range("setback", "Paving / merge setback", node!.setback ?? 0, 0, 24, 1)}${joint.type === "Merge" ? `<p class="card-note">${icon("git-merge")}Adaptive runout pulls the paving nose back. Crosswalks are suppressed in merge throats.</p>` : ""}${toggle("boxJunction", "Yellow box markings", node!.boxJunction ?? false, "Clipped to the actual junction surface")}${toggle("signals", "Traffic signals", node!.signals ?? false, "Physical poles and signal heads; static preview phase")}`,
         "radius-card",
       );
     else if (!node)
@@ -837,6 +1091,7 @@ function renderInspector() {
     body +=
       `<div class="section-heading"><span>${node ? "CONNECTED ROAD PROFILE" : "CARRIAGEWAY"}</span><small>${node ? roads.length + " approaches" : "Live cross-section"}</small></div>` +
       profile(road);
+    body += mobilityControls(road);
     if (node)
       body += `<p class="material-note">Profile changes apply to all ${roads.length} connected approaches. Each road remains individually editable.</p>`;
   } else if (inspectorTab === "surface") {
@@ -873,6 +1128,7 @@ function renderInspector() {
       `${range("crossfall", "Crossfall", road.crossfall, 0, 6, 0.5, "%")}<p class="card-note">${icon("droplets")}Crowned road surface drains toward both curbs.</p>${toggle("markings", "Road markings", road.markings, "Clipped before junctions and crossings")}`,
     );
   } else {
+    body += roadPlantingControls(road);
     const footways = network.footways.filter((f) =>
       roads.some((r) => r.id === f.owner),
     );
@@ -1138,6 +1394,16 @@ function setRoadProperty(prop: string, value: unknown) {
     const site = project.sites!.find((s) => s.id === selection!.id)!;
     if (
       [
+        "cornerRadius",
+        "blockBand",
+        "blockInterior",
+        "blockEntrySide",
+        "blockEntryWidth",
+        "pitGrate",
+        "parkingIslands",
+        "islandEvery",
+        "bayFinish",
+        "evBays",
         "pattern",
         "shape",
         "width",
@@ -1212,6 +1478,28 @@ function applyPreset(id: string) {
         ? `${preset.name} applied to the selected ${selection.kind === "node" ? "approaches" : "road"}.`
         : `${preset.name} selected. Click Draw road to begin.`,
   );
+}
+function inspectPlanning(kind: "planting" | "mobility") {
+  if (!scene?.inspectPlanning(kind)) {
+    toast(
+      "No matching detail on the selection. Enable it or choose a suitable road / planting piece.",
+      true,
+    );
+    return false;
+  }
+  for (const layer of kind === "planting"
+    ? ["planting", "curb"]
+    : ["cycle", "bus"]) {
+    hiddenLayers.delete(layer);
+    scene.setDetailLayer(layer, true);
+    plan.setDetailLayer(layer, true);
+    const input = document.querySelector<HTMLInputElement>(
+      `[data-layer="${layer}"]`,
+    );
+    if (input) input.checked = true;
+  }
+  if ($("viewports").dataset.layout === "plan") setLayout("split");
+  return true;
 }
 function inspectInfrastructure(kind: "manhole" | "drainage") {
   const visible = scene?.inspectInfrastructure(kind);
@@ -2025,6 +2313,8 @@ document.addEventListener("click", (e) => {
       });
     if (a === "inspect-ramp" || a === "inspect-driveway")
       inspectFootway(a === "inspect-ramp" ? "corner-ramp" : "driveway");
+    if (a === "inspect-planting" || a === "inspect-mobility")
+      inspectPlanning(a === "inspect-planting" ? "planting" : "mobility");
     if (a === "inspect-manhole" || a === "inspect-drain")
       inspectInfrastructure(a === "inspect-manhole" ? "manhole" : "drainage");
     if (a === "draw") setMode("draw");
@@ -2490,6 +2780,11 @@ window.addEventListener("keydown", (e) => {
     saveProject();
     return;
   }
+  if (e.key === "Escape") {
+    closeMenus();
+    setMode("select");
+    return;
+  }
   if (input) return;
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
     e.preventDefault();
@@ -2564,6 +2859,7 @@ Object.defineProperty(window, "frontier", {
     setGeometryDetail,
     inspectSelection: () => scene?.inspectSelection() ?? false,
     inspectInfrastructure,
+    inspectPlanning,
     inspectFootway,
     addDriveway,
     loadTemplate,

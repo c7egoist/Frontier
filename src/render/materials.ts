@@ -7,8 +7,7 @@ function random() {
   return seed / 4294967296;
 }
 export function patternCanvas(
-  pattern:
-    Pattern | "asphalt" | "concrete" | "cobble" | "tactile" | "curb-concrete",
+  pattern: SurfacePattern,
   dark = false,
 ): HTMLCanvasElement {
   seed = 471659;
@@ -46,6 +45,33 @@ export function patternCanvas(
         c.arc(x, y, 10, 0, Math.PI * 2);
         c.fill();
       }
+    return canvas;
+  }
+  if (
+    pattern === "tree-grate" ||
+    pattern === "soil" ||
+    pattern === "bus-red" ||
+    pattern === "cycle-red" ||
+    pattern === "cycle-green"
+  ) {
+    const image = c.createImageData(512, 512),
+      colors =
+        pattern === "soil"
+          ? [80, 66, 51]
+          : pattern === "tree-grate"
+            ? [81, 86, 82]
+            : pattern === "bus-red"
+              ? [118, 69, 63]
+              : pattern === "cycle-green"
+                ? [80, 112, 91]
+                : [143, 75, 66];
+    for (let i = 0; i < image.data.length; i += 4) {
+      const n = (random() - 0.5) * (pattern === "soil" ? 34 : 12),
+        stone = pattern === "soil" && random() < 0.06 ? 24 : 0;
+      for (let k = 0; k < 3; k++) image.data[i + k] = colors[k] + n + stone;
+      image.data[i + 3] = 255;
+    }
+    c.putImageData(image, 0, 0);
     return canvas;
   }
   if (pattern === "asphalt") {
@@ -190,7 +216,17 @@ function roughnessCanvas(source: HTMLCanvasElement, asphalt = false) {
   return canvas;
 }
 type SurfacePattern =
-  Pattern | "asphalt" | "concrete" | "cobble" | "tactile" | "curb-concrete";
+  | Pattern
+  | "asphalt"
+  | "concrete"
+  | "cobble"
+  | "tactile"
+  | "curb-concrete"
+  | "soil"
+  | "tree-grate"
+  | "bus-red"
+  | "cycle-red"
+  | "cycle-green";
 export interface SurfaceMaps {
   albedo: HTMLCanvasElement;
   normal: HTMLCanvasElement;
@@ -248,14 +284,20 @@ function tactileHeight() {
 export function surfaceMaps(pattern: SurfacePattern): SurfaceMaps {
   const key = pattern;
   if (surfaceCache.has(key)) return surfaceCache.get(key)!;
-  const albedo = patternCanvas(pattern === "concrete" ? "slabs" : pattern),
+  const aggregate = [
+      "asphalt",
+      "bus-red",
+      "cycle-red",
+      "cycle-green",
+      "soil",
+      "tree-grate",
+    ].includes(pattern),
+    albedo = patternCanvas(pattern === "concrete" ? "slabs" : pattern),
     normal = normalCanvas(
-      pattern === "tactile"
-        ? tactileHeight()
-        : reliefCanvas(albedo, pattern === "asphalt"),
-      pattern === "asphalt" ? 0.32 : 1.6,
+      pattern === "tactile" ? tactileHeight() : reliefCanvas(albedo, aggregate),
+      aggregate ? 0.32 : 1.6,
     ),
-    roughness = roughnessCanvas(albedo, pattern === "asphalt"),
+    roughness = roughnessCanvas(albedo, aggregate),
     normalStrength = pattern === "asphalt" ? 0.24 : 0.26;
   const maps = { albedo, normal, roughness, normalStrength };
   surfaceCache.set(key, maps);
@@ -290,7 +332,16 @@ const surfaceKey = (key: string): SurfacePattern | undefined =>
     ? "curb-concrete"
     : key.startsWith("paving-")
       ? (key.slice(7) as Pattern)
-      : ["asphalt", "concrete", "cobble"].includes(key)
+      : [
+            "asphalt",
+            "concrete",
+            "cobble",
+            "soil",
+            "tree-grate",
+            "bus-red",
+            "cycle-red",
+            "cycle-green",
+          ].includes(key)
         ? (key as SurfacePattern)
         : undefined;
 export function utilityMaps(
@@ -394,7 +445,7 @@ export function utilityMaps(
   surfaceCache.set(cacheKey, maps);
   return maps;
 }
-function graphicCanvas(key: string) {
+export function graphicCanvas(key: string) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 256;
   const c = canvas.getContext("2d")!;
@@ -469,6 +520,64 @@ function graphicCanvas(key: string) {
     c.moveTo(124, 104);
     c.lineTo(167, 104);
     c.stroke();
+  } else if (key === "bus") {
+    text("BUS", 126, "#e4e2d8");
+  } else if (key === "bicycle") {
+    c.strokeStyle = "#e4e2d8";
+    c.fillStyle = "#e4e2d8";
+    c.lineWidth = 8;
+    c.lineCap = "round";
+    c.lineJoin = "round";
+    for (const x of [60, 194]) {
+      c.beginPath();
+      c.arc(x, 175, 40, 0, Math.PI * 2);
+      c.stroke();
+    }
+    c.beginPath();
+    c.moveTo(60, 175);
+    c.lineTo(101, 113);
+    c.lineTo(151, 113);
+    c.lineTo(121, 175);
+    c.closePath();
+    c.moveTo(121, 175);
+    c.lineTo(95, 98);
+    c.moveTo(80, 98);
+    c.lineTo(110, 98);
+    c.moveTo(194, 175);
+    c.lineTo(146, 91);
+    c.lineTo(168, 83);
+    c.stroke();
+    c.beginPath();
+    c.moveTo(128, 8);
+    c.lineTo(105, 42);
+    c.lineTo(122, 42);
+    c.lineTo(122, 65);
+    c.lineTo(134, 65);
+    c.lineTo(134, 42);
+    c.lineTo(151, 42);
+    c.closePath();
+    c.fill();
+  } else if (key === "ev") {
+    c.strokeStyle = "#e4e2d8";
+    c.lineWidth = 10;
+    c.lineJoin = "round";
+    c.strokeRect(58, 35, 122, 181);
+    c.beginPath();
+    c.moveTo(180, 65);
+    c.lineTo(211, 90);
+    c.lineTo(211, 182);
+    c.lineTo(230, 182);
+    c.stroke();
+    c.fillStyle = "#e4e2d8";
+    c.beginPath();
+    c.moveTo(135, 64);
+    c.lineTo(90, 135);
+    c.lineTo(121, 135);
+    c.lineTo(103, 187);
+    c.lineTo(156, 115);
+    c.lineTo(126, 115);
+    c.closePath();
+    c.fill();
   } else if (key.startsWith("bay-")) text(key.slice(4), 154, "#e1e6e9");
   return canvas;
 }
@@ -531,8 +640,18 @@ export async function exportTexturePack(keys: string[]) {
         path: `${base}.png`,
         scale,
         alpha: key.startsWith("marking-") || key.startsWith("paint-wear-"),
-        wrapS: key === "utility-cover" ? "clamp" : "repeat",
-        wrapT: key.startsWith("utility-") ? "clamp" : "repeat",
+        wrapS:
+          key === "utility-cover" ||
+          key.startsWith("sign-") ||
+          key.startsWith("marking-")
+            ? "clamp"
+            : "repeat",
+        wrapT:
+          key.startsWith("utility-") ||
+          key.startsWith("sign-") ||
+          key.startsWith("marking-")
+            ? "clamp"
+            : "repeat",
       };
       await png(image, info.path);
       if (maps) {
@@ -556,7 +675,7 @@ export async function exportTexturePack(keys: string[]) {
         albedoColorSpace: "sRGB",
         dataColorSpace: "linear",
         normalConvention: "OpenGL +Y",
-        metallic: key.startsWith("utility-") ? 0.72 : 0,
+        metallic: key.startsWith("utility-") || key === "tree-grate" ? 0.72 : 0,
         roughnessFactor: maps ? 1 : 0.6,
       };
     }),
@@ -604,13 +723,14 @@ export class Materials {
     const m = new THREE.MeshStandardMaterial({
       color: colors[key] ?? "#ffffff",
       roughness: key === "steel" ? 0.38 : 0.88,
-      metalness: key.startsWith("utility-")
-        ? 0.72
-        : key === "steel"
+      metalness:
+        key.startsWith("utility-") || key === "tree-grate"
           ? 0.72
-          : key === "steel-dark"
-            ? 0.35
-            : 0,
+          : key === "steel"
+            ? 0.72
+            : key === "steel-dark"
+              ? 0.35
+              : 0,
       side: THREE.DoubleSide,
     });
     m.name = key;

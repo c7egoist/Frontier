@@ -2,6 +2,8 @@ import {
   makeNode,
   makeRoad,
   presets,
+  roadHalfWidth,
+  roadDefaults,
   type Project,
   type RoadNode,
   type RoadSettings,
@@ -10,6 +12,12 @@ import { makeSite, type SiteKind } from "./sites";
 import { mul, add, sub, type V3 } from "./math";
 
 export const templateCatalog = [
+  {
+    id: "europe",
+    name: "European mobility quarter",
+    description:
+      "Bus priority · protected cycling · open blocks · parking courts",
+  },
   {
     id: "district",
     name: "Northbank district",
@@ -67,6 +75,7 @@ export const templateCatalog = [
   },
 ];
 const ids = new Set([
+  "europe",
   "merge",
   "urban",
   "signal",
@@ -159,7 +168,104 @@ export function makeAdvancedTemplate(type: string): Project | null {
       p[0] * Math.sin(a) + p[2] * Math.cos(a),
     ];
   };
-  if (type === "merge") {
+  if (type === "europe") {
+    const boulevard = {
+        ...presets.find((p) => p.id === "euro-boulevard")!.settings,
+        signs: false,
+        streetLights: false,
+      },
+      cycle = {
+        ...presets.find((p) => p.id === "cycle-street")!.settings,
+        sidewalk: 4.8,
+        signs: false,
+        streetLights: false,
+      },
+      step = 110,
+      grid = Array.from({ length: 3 }, (_, z) =>
+        Array.from({ length: 3 }, (_, x) => {
+          const n = node(
+            `Mobility junction ${z * 3 + x + 1}`,
+            (x - 1) * step,
+            (z - 1) * step,
+            0,
+            7,
+          );
+          n.crossings = true;
+          return n;
+        }),
+      ),
+      horizontal = [];
+    for (let z = 0; z < 3; z++)
+      for (let x = 0; x < 2; x++)
+        horizontal.push(
+          road(
+            grid[z][x],
+            grid[z][x + 1],
+            `Bus boulevard ${z + 1} / ${x + 1}`,
+            boulevard,
+          ),
+        );
+    for (let x = 0; x < 3; x++)
+      for (let z = 0; z < 2; z++)
+        road(
+          grid[z][x],
+          grid[z + 1][x],
+          `Cycle street ${x + 1} / ${z + 1}`,
+          cycle,
+        );
+    const frontage = (settings: Partial<RoadSettings>) =>
+        roadHalfWidth({ ...roadDefaults, ...settings }) +
+        (settings.sidewalk ?? roadDefaults.sidewalk) +
+        0.22,
+      edgeX = frontage(cycle),
+      edgeZ = frontage(boulevard),
+      width = step - 2 * edgeX - 0.2,
+      depth = step - 2 * edgeZ - 0.2,
+      band = 3.2;
+    for (let z = 0; z < 2; z++)
+      for (let x = 0; x < 2; x++) {
+        const cx = (x - 0.5) * step,
+          cz = (z - 0.5) * step,
+          label = String.fromCharCode(65 + z * 2 + x),
+          block = site("urban-block", cx, cz, width, depth);
+        Object.assign(block, {
+          name: `Block ${label} · open perimeter`,
+          pattern: "linear",
+          blockBand: band,
+          blockEntryWidth: 7,
+          blockEntrySide: "north",
+          cornerRadius: 2.2,
+          position: [cx, 0.152, cz],
+        });
+        const court = site(
+            "parking",
+            cx,
+            cz,
+            width - 2 * band - 0.4,
+            depth - 2 * band - 0.4,
+          ),
+          apron = band + 0.3;
+        Object.assign(court, {
+          name: `Block ${label} · parking court`,
+          position: [cx, 0.152 + apron * 0.015, cz],
+          parkingIslands: true,
+          islandEvery: 6,
+          evBays: 4,
+          bayFinish: "permeable",
+          perimeterWidth: 1.4,
+          accessible: 2,
+          numbering: true,
+        });
+        const entry = horizontal[z * 2 + x];
+        entry.driveways.push({
+          id: `block-${label.toLowerCase()}-entry`,
+          at: 0.5,
+          side: 1,
+          width: 7,
+          apron,
+        });
+      }
+  } else if (type === "merge") {
     const c = node("Shared merge pivot", 0, 0),
       a = node("Incoming avenue", -140, 0),
       b = node("Through avenue", 180, 0),
@@ -241,11 +347,11 @@ export function makeAdvancedTemplate(type: string): Project | null {
         parking: "none",
       });
     }
-    const parking = site("parking", 158, 55, 64, 36);
+    const parking = site("parking", 171, 0, 64, 36);
     parking.name = "Harbour parking court";
     parking.entrance = "west";
     parking.bays = 0;
-    const entrance = node("Parking entry", 126, 55);
+    const entrance = node("Parking entry", 139, 0);
     road(
       ring[9],
       entrance,
@@ -259,8 +365,8 @@ export function makeAdvancedTemplate(type: string): Project | null {
         signs: false,
         speedLimit: 20,
       },
-      [12, 0, 6],
-      [-15, 0, 0],
+      [12, 0, 0],
+      [-12, 0, 0],
     );
   } else if (type === "signal") {
     const c = node("Signalized crossing", 0, 0, 0, 12);

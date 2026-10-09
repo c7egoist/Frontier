@@ -1,3 +1,4 @@
+import { buildPlantingPit, type PlantingFeature } from "./planting";
 import earcut from "earcut";
 import {
   MeshBuilder,
@@ -41,7 +42,16 @@ export interface InletSpec {
   side: number;
   width: number;
 }
+export interface PitSpec {
+  s: number;
+  side: number;
+  width: number;
+  length: number;
+  lo: number;
+  hi: number;
+}
 export interface FootwayLayout {
+  pits?: PitSpec[];
   ramps: RampSpec[];
   inlets: InletSpec[];
 }
@@ -145,7 +155,34 @@ export function prepareFootways(
             width: r.curbDrainType === "side-entry" ? 1.2 : 0.76,
           });
       }
-  return { ramps, inlets };
+  const pits: PitSpec[] = [];
+  if (r.treePits && !r.bridge)
+    for (const side of [-1, 1])
+      for (let s = first + 10; s < last - 8; s += r.pitSpacing) {
+        const f = frameAt(span, s),
+          lo = f.sw - r.pitWidth - 0.25,
+          hi = f.sw - 0.25;
+        if (
+          lo < 2 ||
+          s + r.pitLength / 2 > last - 2 ||
+          inRamp({ ramps, inlets }, s, side, r.pitLength / 2 + 1) ||
+          Math.min(
+            frameAt(span, s - r.pitLength / 2).sw,
+            frameAt(span, s + r.pitLength / 2).sw,
+          ) <
+            f.sw * 0.98
+        )
+          continue;
+        pits.push({
+          s,
+          side,
+          width: r.pitWidth,
+          length: r.pitLength,
+          lo: lo / f.sw,
+          hi: hi / f.sw,
+        });
+      }
+  return { ramps, inlets, pits };
 }
 export function footwayPoint(
   span: RoadSpan,
@@ -188,6 +225,9 @@ function knots(span: RoadSpan, side: number, modules = false) {
   for (const inlet of span.footway?.inlets ?? [])
     if (inlet.side === side && span.road.curbDrainType === "side-entry")
       list.push(inlet.s - inlet.width / 2, inlet.s + inlet.width / 2);
+  for (const pit of span.footway?.pits ?? [])
+    if (pit.side === side)
+      list.push(pit.s - pit.length / 2, pit.s, pit.s + pit.length / 2);
   if (
     span.road.drainage &&
     span.road.drainageType !== "linear" &&
@@ -418,7 +458,9 @@ export function buildSpanFootways(
 ) {
   const r = span.road,
     features: FootwayFeature[] = [],
-    services: UtilityFeature[] = [];
+    services: UtilityFeature[] = [],
+    plantings: PlantingFeature[] = [],
+    pitKnots = new Map<number, number[]>();
   for (const side of [-1, 1]) {
     const stations = knots(span, side),
       hollow =
@@ -433,6 +475,8 @@ export function buildSpanFootways(
           frameAt(span, i.s).curbHeight >= 0.1 &&
           frameAt(span, i.s).sw >= 0.85,
       );
+    pitKnots.set(side, stations);
+
     const portStations: number[] = [],
       accessStations: number[] = [];
     let accessGrates = 0;
@@ -505,19 +549,47 @@ export function buildSpanFootways(
       for (const ramp of span.footway?.ramps ?? [])
         if (ramp.side === side)
           fractions.push(clamp(ramp.run / r.sidewalk, 0, 1));
+      for (const pit of span.footway?.pits ?? [])
+        if (pit.side === side) fractions.push(pit.lo, pit.hi);
       const rows = [...new Set(fractions)].sort((a, b) => a - b);
-      for (let k = 0; k < rows.length - 1; k++)
-        b.strip(
-          "paving",
-          `paving-${r.pattern}`,
-          stations.map((s) =>
-            footwayPoint(span, s, side, frameAt(span, s).sw * rows[k]),
-          ),
-          stations.map((s) =>
-            footwayPoint(span, s, side, frameAt(span, s).sw * rows[k + 1]),
-          ),
-          true,
-        );
+      for (let k = 0; k < rows.length - 1; k++) {
+        let run = 0;
+        const strip = (a: number, z: number) => {
+          if (z <= a) return;
+          b.strip(
+            "paving",
+            `paving-${r.pattern}`,
+            stations
+              .slice(a, z + 1)
+              .map((s) =>
+                footwayPoint(span, s, side, frameAt(span, s).sw * rows[k]),
+              ),
+            stations
+              .slice(a, z + 1)
+              .map((s) =>
+                footwayPoint(span, s, side, frameAt(span, s).sw * rows[k + 1]),
+              ),
+            true,
+          );
+        };
+        for (let i = 0; i < stations.length - 1; i++) {
+          const a = stations[i],
+            z = stations[i + 1],
+            hole = (span.footway?.pits ?? []).some(
+              (p) =>
+                p.side === side &&
+                a >= p.s - p.length / 2 - 1e-7 &&
+                z <= p.s + p.length / 2 + 1e-7 &&
+                rows[k] >= p.lo - 1e-8 &&
+                rows[k + 1] <= p.hi + 1e-8,
+            );
+          if (hole) {
+            strip(run, i);
+            run = i + 1;
+          }
+        }
+        strip(run, stations.length - 1);
+      }
       const row = (across: (s: number) => number) =>
         stations.map((s) =>
           add(footwayPoint(span, s, side, across(s)), [0, 0.003, 0]),
@@ -622,7 +694,48 @@ export function buildSpanFootways(
       );
     }
   }
-  return { features, services };
+  for (const pit of span.footway?.pits ?? []) {
+    const f = frameAt(span, pit.s),
+      center = (pit.lo + pit.hi) / 2,
+      sample = (u: number, v: number, h: number) => {
+        const fr = frameAt(span, pit.s + u),
+          ratio = center + (v / pit.width) * (pit.hi - pit.lo);
+        return add(footwayPoint(span, pit.s + u, pit.side, fr.sw * ratio), [
+          0,
+          h,
+          0,
+        ]);
+      };
+    const fractions = (pitKnots.get(pit.side) ?? [])
+      .filter(
+        (s) =>
+          s >= pit.s - pit.length / 2 - 1e-7 &&
+          s <= pit.s + pit.length / 2 + 1e-7,
+      )
+      .map((s) => (s - pit.s) / pit.length);
+    buildPlantingPit(
+      b,
+      sample,
+      pit.width,
+      pit.length,
+      r.pitGrate,
+      0.012,
+      fractions,
+    );
+    plantings.push({
+      id: `${r.id}:pit:${pit.side}:${Math.round(pit.s * 100)}`,
+      owner: r.id,
+      ownerKind: "road",
+      kind: "footway-pit",
+      position: sample(0, 0, 0),
+      width: pit.width,
+      length: pit.length,
+      grate: r.pitGrate,
+      containsTree: false,
+      clearWalkWidth: f.sw * pit.lo,
+    });
+  }
+  return { features, services, plantings };
 }
 
 export function clearRuns(

@@ -1,4 +1,17 @@
 import {
+  buildRoadMobility,
+  buildJunctionMobility,
+  type MobilityFeature,
+} from "./mobility";
+import type { PlantingFeature } from "./planting";
+import type { BlockFeature } from "./planning-sites";
+import {
+  cornerPath,
+  offsetCornerPath,
+  effectiveCornerRadius,
+  type CornerPath,
+} from "./corners";
+import {
   prepareFootways,
   buildSpanFootways,
   clearRuns,
@@ -82,7 +95,10 @@ export type MeshKind =
   | "landscape"
   | "building"
   | "parking"
-  | "utility";
+  | "utility"
+  | "cycle"
+  | "bus"
+  | "planting";
 export interface MeshData {
   name: string;
   owner: string;
@@ -131,6 +147,9 @@ export interface Junction {
   corners: V3[][];
   type: string;
   valid: boolean;
+  radius: number;
+  requestedRadius: number;
+  cornerRadii: number[];
 }
 export interface Diagnostic {
   level: "warning" | "error";
@@ -154,6 +173,9 @@ export interface Network {
   manholes: number;
   detail: GeometryDetail;
   footways: FootwayFeature[];
+  plantings: PlantingFeature[];
+  blocks: BlockFeature[];
+  mobility: MobilityFeature[];
 }
 const SURFACE = 0.12,
   CURB = 0.16;
@@ -198,7 +220,9 @@ export class MeshBuilder {
     const key = `${kind}:${material}`;
     if (!this.meshes.has(key))
       this.meshes.set(key, {
-        name: `${this.owner} ${kind}`,
+        name: ["cycle", "bus", "planting"].includes(kind)
+          ? `${this.owner} ${kind} ${material}`
+          : `${this.owner} ${kind}`,
         owner: this.owner,
         ownerKind: this.ownerKind,
         kind,
@@ -220,7 +244,7 @@ export class MeshBuilder {
       base = mesh.positions.length / 3;
     let projection: "xz" | "xy" | "zy" = "xz";
     if (
-      (kind === "curb" && material === "curb") ||
+      (["curb", "cycle"].includes(kind) && material === "curb") ||
       (kind === "drain" && material === "concrete")
     ) {
       for (let i = 0; i < indices.length; i += 3) {
@@ -253,9 +277,19 @@ export class MeshBuilder {
       mesh.indices.push(base + a, base + b, base + c);
     }
   }
-  quad(kind: MeshKind, material: string, points: V3[], upward?: boolean) {
+  quad(
+    kind: MeshKind,
+    material: string,
+    points: V3[],
+    upward?: boolean,
+    uv?: [number, number][],
+  ) {
+    const mesh = this.target(kind, material),
+      start = mesh.uvs.length;
     this.append(kind, material, points, [0, 1, 2, 0, 2, 3], upward);
+    if (uv) uv.flat().forEach((v, i) => (mesh.uvs[start + i] = v));
   }
+
   strip(kind: MeshKind, material: string, a: V3[], b: V3[], upward?: boolean) {
     const points = a.flatMap((p, i) => [p, b[i]]),
       indices: number[] = [];
@@ -276,6 +310,33 @@ export class MeshBuilder {
         mesh.uvs[uvStart + i * 4 + 3] = 1;
       }
     }
+  }
+  faceWithHoles(
+    kind: MeshKind,
+    material: string,
+    boundary: V3[],
+    holes: V3[][],
+    upward = true,
+  ) {
+    const rows = [boundary, ...holes.filter((h) => h.length >= 3)],
+      points = rows.flat(),
+      starts: number[] = [];
+    let count = boundary.length;
+    for (const row of rows.slice(1)) {
+      starts.push(count);
+      count += row.length;
+    }
+    this.append(
+      kind,
+      material,
+      points,
+      earcut(
+        points.flatMap((p) => [p[0], p[2]]),
+        starts,
+        2,
+      ),
+      upward,
+    );
   }
   polygon(
     kind: MeshKind,
@@ -485,7 +546,13 @@ function trimDistance(
       (angles[(i + 1) % angles.length] - angle + Math.PI * 2) % (Math.PI * 2);
     minAngle = Math.min(minAngle, gap);
   });
-  const radius = Math.max(node.radius, ...roads.map((r) => r.sidewalk + 1));
+  const radius = effectiveCornerRadius(
+    node.radius,
+    roads.map((r) => ({
+      sw: r.sidewalk,
+      cw: r.curbStyle === "race" ? 0.6 : 0.22,
+    })),
+  );
   return (
     Math.max(
       radius + maxWidth + 0.8,
@@ -707,7 +774,7 @@ function buildMarkings(builder: MeshBuilder, span: RoadSpan, project: Project) {
     endCrossing = span.endJoint && effectiveCrossing(project, road.end);
   const from = start + (startCrossing ? 5 : 0.35) + road.markingSetback,
     to = end - (endCrossing ? 5 : 0.35) - road.markingSetback;
-  const hw = roadHalfWidth(road),
+  const hw = (road.lanes * road.laneWidth + road.median) / 2,
     travel = (road.lanes * road.laneWidth) / 2;
   for (const side of [-1, 1])
     for (const [a, z] of clearRuns(span, side, true))
@@ -739,8 +806,28 @@ function buildMarkings(builder: MeshBuilder, span: RoadSpan, project: Project) {
       !road.oneWay &&
       road.markingStyle === "urban"
     ) {
-      ribbon(builder, span, from, to, offset - 0.12, 0.1, "yellow");
-      ribbon(builder, span, from, to, offset + 0.12, 0.1, "yellow");
+      ribbon(
+        builder,
+        span,
+        from,
+        to,
+        offset - 0.12,
+        0.1,
+        road.cycleMode !== "none" || road.busLanes !== "none"
+          ? "paint"
+          : "yellow",
+      );
+      ribbon(
+        builder,
+        span,
+        from,
+        to,
+        offset + 0.12,
+        0.1,
+        road.cycleMode !== "none" || road.busLanes !== "none"
+          ? "paint"
+          : "yellow",
+      );
     } else
       for (
         let s = Math.ceil(from / 6) * 6;
@@ -809,9 +896,27 @@ function buildMarkings(builder: MeshBuilder, span: RoadSpan, project: Project) {
   if (startCrossing && end - start > 9) crosswalk(builder, span, start + 2);
   if (endCrossing && end - start > 9) crosswalk(builder, span, end - 2);
   if (end - start > 26) {
-    if (span.startJoint)
-      arrow(builder, frameAt(span, start + 11), -hw / 2, road.oneWay ? 1 : -1);
-    if (span.endJoint) arrow(builder, frameAt(span, end - 11), hw / 2, 1);
+    const centers = Array.from({ length: road.lanes }, (_, i) => ({
+      i,
+      offset:
+        -travel +
+        road.laneWidth * (i + 0.5) +
+        (i + 0.5 < road.lanes / 2 ? -road.median / 2 : road.median / 2),
+    })).filter(
+      (c) =>
+        road.busLanes !== "outer" ||
+        (c.i !== road.lanes - 1 && (road.oneWay || c.i !== 0)),
+    );
+    const draw = (s: number, dir: number) => {
+      const options = centers
+        .filter((c) => road.oneWay || dir * c.offset >= 0)
+        .sort((a, z) => Math.abs(a.offset) - Math.abs(z.offset));
+      if (!options.length) return;
+      const f = frameAt(span, s);
+      arrow(builder, f, (options[0].offset * f.hw) / roadHalfWidth(road), dir);
+    };
+    if (span.startJoint) draw(start + 11, road.oneWay ? 1 : -1);
+    if (span.endJoint) draw(end - 11, 1);
   }
 }
 function alternativeRail(
@@ -1165,6 +1270,7 @@ function buildSpan(
           [top[i][0], f.p[1] - 0.48, top[i][2]],
         ]);
     }
+  const mobility = buildRoadMobility(b, span);
   buildMarkings(b, span, project);
   buildMedian(b, span);
   buildParallelParking(b, span);
@@ -1178,9 +1284,11 @@ function buildSpan(
     inlets,
     services,
     footways: footwayResult.features,
+    plantings: footwayResult.plantings,
+    mobility,
   };
 }
-/** Tangent circular fillet with a bounded cubic fallback for reflex corners. */
+/** Public corner sampler; topology/offsets use the same analytic construction. */
 export function cornerCurve(
   a: V3,
   da: V3,
@@ -1189,118 +1297,7 @@ export function cornerCurve(
   requestedRadius: number,
   detail: GeometryDetail = "editing",
 ): V3[] {
-  const towardA = mul(da, -1),
-    towardB = mul(db, -1),
-    det = crossXZ(towardA, towardB);
-  if (Math.abs(det) > 1e-5) {
-    const delta = sub(b, a),
-      ta = crossXZ(delta, towardB) / det,
-      tb = crossXZ(delta, towardA) / det;
-    const cosine = clamp(dotXZ(da, db), -1, 1),
-      theta = Math.acos(cosine);
-    if (ta > 0.05 && tb > 0.05 && theta > 0.03 && theta < Math.PI - 0.03) {
-      const vertex = add(a, mul(towardA, ta)),
-        half = theta / 2;
-      const radius = Math.min(
-        requestedRadius,
-        Math.min(ta, tb) * 0.97 * Math.tan(half),
-      );
-      const tangentLength = radius / Math.tan(half),
-        p = add(vertex, mul(da, tangentLength)),
-        q = add(vertex, mul(db, tangentLength));
-      const bisector = normalizeXZ(add(da, db)),
-        center = add(vertex, mul(bisector, radius / Math.sin(half)));
-      let angle = Math.atan2(p[2] - center[2], p[0] - center[0]),
-        deltaAngle = Math.atan2(q[2] - center[2], q[0] - center[0]) - angle;
-      while (deltaAngle > Math.PI) deltaAngle -= Math.PI * 2;
-      while (deltaAngle < -Math.PI) deltaAngle += Math.PI * 2;
-      const profile = geometryProfiles[detail],
-        arcLength = Math.abs(deltaAngle) * radius;
-      const arcSteps =
-        detail === "editing"
-          ? 24
-          : Math.max(64, Math.min(512, Math.ceil(arcLength / 0.15)));
-      const points: V3[] = [a];
-      for (let i = 0; i <= arcSteps; i++) {
-        const t = i / arcSteps;
-        points.push([
-          center[0] + Math.cos(angle + deltaAngle * t) * radius,
-          a[1] + (b[1] - a[1]) * t,
-          center[2] + Math.sin(angle + deltaAngle * t) * radius,
-        ]);
-      }
-      points.push(b);
-      const length = points
-          .slice(1)
-          .reduce((sum, p, i) => sum + distance(points[i], p), 0),
-        count = Math.min(
-          profile.maxCornerPoints,
-          Math.max(
-            profile.minCornerPoints,
-            Math.ceil(length / profile.cornerSegment) + 1,
-          ),
-        );
-      const out = resampleLine(points, count);
-      out[0] = a;
-      out[out.length - 1] = b;
-      return out;
-    }
-  }
-  const length = distanceXZ(a, b),
-    h = Math.min(length * 0.34, Math.max(1, requestedRadius));
-  const c1 = add(a, mul(da, -h)),
-    c2 = add(b, mul(db, -h));
-  const profile = geometryProfiles[detail],
-    count = Math.min(
-      profile.maxCornerPoints,
-      Math.max(
-        profile.minCornerPoints,
-        Math.ceil((length + h * 2) / profile.cornerSegment) + 1,
-      ),
-    );
-  return Array.from({ length: count }, (_, i) => {
-    const t = i / (count - 1),
-      u = 1 - t;
-    return add(
-      add(mul(a, u * u * u), mul(c1, 3 * u * u * t)),
-      add(mul(c2, 3 * u * t * t), mul(b, t * t * t)),
-    );
-  });
-}
-function offsetCorner(
-  base: V3[],
-  start: V3,
-  end: V3,
-  widthA: number,
-  widthB: number,
-): V3[] {
-  const points = base.map((p, i) => {
-    const a = base[Math.max(0, i - 1)],
-      b = base[Math.min(base.length - 1, i + 1)],
-      d = normalizeXZ(sub(b, a)),
-      t = i / (base.length - 1);
-    const n: V3 = [d[2], 0, -d[0]],
-      requestedWidth = widthA * (1 - t) + widthB * t;
-    const da = normalizeXZ(sub(p, a)),
-      db = normalizeXZ(sub(b, p)),
-      turn = Math.acos(clamp(dotXZ(da, db), -1, 1));
-    const curvatureRadius =
-      turn > 1e-4
-        ? (distanceXZ(a, p) + distanceXZ(p, b)) / (2 * turn)
-        : Infinity;
-    // A wide footway cannot invert around a short-radius merge nose.
-    // Preserve exact mouth widths; narrow only the inside of the fillet.
-    const width =
-      i === 0 || i === base.length - 1
-        ? requestedWidth
-        : Math.min(requestedWidth, curvatureRadius * 0.82);
-    const y =
-      (start[1] - base[0][1]) * (1 - t) + (end[1] - base.at(-1)![1]) * t;
-    return add(p, add(mul(n, width), [0, y, 0]));
-  });
-  points[0] = start;
-  points[points.length - 1] = end;
-  return points;
+  return cornerPath(a, da, b, db, requestedRadius, detail).points;
 }
 function buildCornerRails(builder: MeshBuilder, curve: V3[], a: Arm, b: Arm) {
   if (!a.road.guardrails || !b.road.guardrails) return;
@@ -1402,20 +1399,25 @@ function buildJunction(
     arms = spans.map((s) => makeArm(s, node)).sort((a, b) => a.angle - b.angle);
   const boundary: V3[] = [],
     outer: V3[] = [],
-    corners: V3[][] = [];
+    corners: V3[][] = [],
+    paths: CornerPath[] = [];
   const material = arms.reduce(
     (a, r) => (r.road.lanes > a.road.lanes ? r : a),
     arms[0],
   );
   const junctionRoad = material.road,
     asphaltMaterial = roadMaterial(junctionRoad);
-  const radius = Math.max(node.radius, ...arms.map((a) => a.frame.sw + 1));
+  const radius = effectiveCornerRadius(
+    node.radius,
+    arms.map((a) => a.frame),
+  );
   let inlets = 0;
   const services: UtilityFeature[] = [];
   for (let i = 0; i < arms.length; i++) {
     const a = arms[i],
       next = arms[(i + 1) % arms.length],
-      curve = cornerCurve(a.left, a.d, next.right, next.d, radius, detail);
+      path = cornerPath(a.left, a.d, next.right, next.d, radius, detail),
+      curve = path.points;
     const curbIn = curve.map((p, k) =>
       add(p, [
         0,
@@ -1427,15 +1429,15 @@ function buildJunction(
     );
     curbIn[0] = armPart(a, 1, "curbIn");
     curbIn[curbIn.length - 1] = armPart(next, -1, "curbIn");
-    const curbOut = offsetCorner(
-      curve,
+    const curbOut = offsetCornerPath(
+      path,
       armPart(a, 1, "curbOut"),
       armPart(next, -1, "curbOut"),
       a.frame.cw,
       next.frame.cw,
     );
-    const paved = offsetCorner(
-      curve,
+    const paved = offsetCornerPath(
+      path,
       a.outerLeft,
       next.outerRight,
       a.frame.cw + a.frame.sw,
@@ -1443,6 +1445,7 @@ function buildJunction(
     );
     buildCornerRails(b, paved, a, next);
     corners.push(curve);
+    paths.push(path);
     boundary.push(a.right, a.center, a.left, ...curve.slice(1, -1));
     outer.push(a.outerRight, a.outerLeft, ...paved.slice(1, -1));
     sweepCurb(
@@ -1498,6 +1501,13 @@ function buildJunction(
     boundary,
     add(node.position, [0, SURFACE, 0]),
   );
+  const mobility = buildJunctionMobility(
+    b,
+    node,
+    arms,
+    paths,
+    b.output().filter((m) => m.kind === "asphalt"),
+  );
   buildJunctionMarkings(b, node, arms, b.target("asphalt", asphaltMaterial));
   buildTrafficSignals(b, node, arms);
   const bottom = outer.map((p) => [p[0], node.position[1] - 0.48, p[2]] as V3);
@@ -1532,11 +1542,86 @@ function buildJunction(
           ? "4-way"
           : `${arms.length}-way`;
   return {
-    junction: { node, arms, boundary, outer, corners, type, valid },
+    junction: {
+      node,
+      arms,
+      boundary,
+      outer,
+      corners,
+      type,
+      valid,
+      radius,
+      requestedRadius: node.radius,
+      cornerRadii: paths.map((p) => p.radius),
+    },
     meshes: b.output(),
     inlets,
     services,
+    mobility,
   };
+}
+/** Short mouths cannot contain an arbitrarily wide inward offset. Fit the
+ * shared approach footway once, then taper it along the road before meshing;
+ * pinning a 12 m end onto a 2 m fillet would otherwise create another spike. */
+function fitJunctionFootways(
+  nodes: RoadNode[],
+  spans: RoadSpan[],
+  diagnostics: Diagnostic[],
+) {
+  const caps = new Map<Frame, { sw: number; cw: number }>();
+  for (const node of nodes) {
+    const arms = spans
+      .filter((s) => s.road.start === node.id || s.road.end === node.id)
+      .map((s) => makeArm(s, node))
+      .sort((a, z) => a.angle - z.angle);
+    if (arms.length < 2) continue;
+    const radius = effectiveCornerRadius(
+      node.radius,
+      arms.map((a) => a.frame),
+    );
+    for (let i = 0; i < arms.length; i++) {
+      const a = arms[i],
+        z = arms[(i + 1) % arms.length],
+        path = cornerPath(a.left, a.d, z.right, z.d, radius, "production"),
+        limit = Math.min(...path.insetLimits);
+      if (!Number.isFinite(limit)) continue;
+      for (const arm of [a, z]) {
+        const f = arm.frame,
+          prior = caps.get(f) ?? { sw: f.sw, cw: f.cw },
+          cw = Math.min(prior.cw, Math.max(0.03, limit * 0.25)),
+          sw = Math.min(prior.sw, Math.max(0.08, limit - cw - 0.4));
+        caps.set(f, { sw, cw });
+      }
+    }
+  }
+  for (const span of spans) {
+    const first = span.frames[0],
+      last = span.frames.at(-1)!,
+      a = caps.get(first) ?? { sw: first.sw, cw: first.cw },
+      z = caps.get(last) ?? { sw: last.sw, cw: last.cw };
+    let limited = false;
+    for (const f of span.frames) {
+      const sw = Math.min(
+          f.sw,
+          a.sw + (f.s - first.s) * 0.65,
+          z.sw + (last.s - f.s) * 0.65,
+        ),
+        cw = Math.min(
+          f.cw,
+          a.cw + (f.s - first.s) * 0.05,
+          z.cw + (last.s - f.s) * 0.05,
+        );
+      if (sw < f.sw - 0.01 || cw < f.cw - 0.01) limited = true;
+      f.sw = sw;
+      f.cw = cw;
+    }
+    if (limited)
+      diagnostics.push({
+        owner: span.road.id,
+        level: "warning",
+        message: `${span.road.name}: footways tapered to fit a short junction approach. Lengthen the road to retain the requested width.`,
+      });
+  }
 }
 export function buildNetwork(
   project: Project,
@@ -1577,7 +1662,10 @@ export function buildNetwork(
     meshes: MeshData[] = [],
     junctions: Junction[] = [],
     services: UtilityFeature[] = [],
-    footways: FootwayFeature[] = [];
+    footways: FootwayFeature[] = [],
+    plantings: PlantingFeature[] = [],
+    blocks: BlockFeature[] = [],
+    mobility: MobilityFeature[] = [];
   let length = 0,
     inlets = 0,
     maxGrade = 0;
@@ -1647,16 +1735,6 @@ export function buildNetwork(
       endJoint: jointIDs.has(road.end),
       length: alignment.length - start - end,
     };
-    span.footway = prepareFootways(span, project);
-    if (
-      span.footway.ramps.filter((a) => a.kind === "driveway").length <
-      road.driveways.length
-    )
-      diagnostics.push({
-        owner: road.id,
-        level: "warning",
-        message: `${road.name}: an entry is too close to a junction, overlaps another ramp, or needs a wider non-bridge sidewalk. Move the entry or widen the footway.`,
-      });
     spans.push(span);
     for (const f of alignment.stations) {
       const before = alignment.points;
@@ -1679,11 +1757,27 @@ export function buildNetwork(
         (Math.abs(dy) / Math.max(0.001, Math.hypot(dx, dz))) * 100,
       );
     }
+  }
+  fitJunctionFootways(jointNodes, spans, diagnostics);
+  for (const span of spans) {
+    const road = span.road;
+    span.footway = prepareFootways(span, project);
+    if (
+      span.footway.ramps.filter((a) => a.kind === "driveway").length <
+      road.driveways.length
+    )
+      diagnostics.push({
+        owner: road.id,
+        level: "warning",
+        message: `${road.name}: an entry is too close to a junction, overlaps another ramp, or needs a wider non-bridge sidewalk. Move the entry or widen the footway.`,
+      });
     const result = buildSpan(span, project, [...alignments.values()]);
     meshes.push(...result.meshes);
     inlets += result.inlets;
     services.push(...result.services);
     footways.push(...result.footways);
+    plantings.push(...result.plantings);
+    mobility.push(...result.mobility);
   }
   for (const node of jointNodes) {
     const result = buildJunction(
@@ -1693,6 +1787,7 @@ export function buildNetwork(
       detail,
     );
     junctions.push(result.junction);
+    mobility.push(...result.mobility);
     meshes.push(...result.meshes);
     inlets += result.inlets;
     services.push(...result.services);
@@ -1747,7 +1842,7 @@ export function buildNetwork(
       });
   }
   for (const site of project.sites ?? []) {
-    meshes.push(...buildSiteGeometry(site, services));
+    meshes.push(...buildSiteGeometry(site, services, plantings, blocks));
     if (site.kind === "parking")
       for (const message of parkingPlan(site).warnings)
         diagnostics.push({
@@ -1813,6 +1908,9 @@ export function buildNetwork(
   return {
     detail,
     footways,
+    plantings,
+    blocks,
+    mobility,
     spans,
     junctions,
     meshes,

@@ -1,6 +1,6 @@
 # Frontier · Road authoring
 
-A self-contained HTML tool for generating **roads, paving and procedural parking** for game-engine asset workflows. Linked 2D/3D editing, shared junction pivots and exports remain live. The workspace is deliberately asset-only: no buildings, trees, benches, planters, statues, parked vehicles or decorative environment meshes.
+A self-contained HTML tool for generating **roads, paving and procedural parking** for game-engine asset workflows. Linked 2D/3D editing, shared junction pivots and exports remain live. The workspace is deliberately asset-only: no buildings, trees, benches, statues, parked vehicles or decorative environment meshes. Planting openings and block perimeters are empty infrastructure, not scenery.
 
 ## Open
 
@@ -41,6 +41,21 @@ The achromatic palette and component treatment are ported from the supplied [Sla
 
 The **Wide pedestrian street** preset uses 5.5 m footways and linear paving. Infrastructure kits also expose Wide pedestrian sidewalk, Corner curb ramp, Vehicle driveway crossing, Side-entry curb drain and Hollow drainage curb as mesh-generated thumbnails. Ramps are suppressed on bridge decks, in acute merge throats and where a footway cannot fit them. These are game-asset geometry controls, **not accessibility, planning-code, structural or swept-vehicle certification**.
 
+### Clean offsets, European mobility and empty growing spaces
+
+- **Widened junction corners:** road and junction trimming share an offset-aware radius floor. Line/arc/line fillets use analytic tangents/normals, not curvature estimated from resampled mesh chords. Increasing a footway to 12 m no longer creates alternating-width pavement spikes. Requested node radius remains editable; the inspector shows the effective offset floor. The actual circular fit can be smaller on a constrained mouth: approach footways then taper continuously, retain exact seams and report a warning. `mesh.json` records requested radii, offset floors and actual fitted corner radii (`0` identifies a cubic fallback).
+- **Geometry → European mobility profile:** reserve outer motor lanes for buses (one lane on a one-way road; both on a two-way road), choose asphalt/red bus surfacing, or add painted/protected cycle space. Motor lane count is not inflated: 1.2–3.5 m cycle tracks and 0.3–1.5 m protection buffers add width outside it. Concrete buffers have physical gaps at vehicle crossings and end before pedestrian crossings. BUS/bicycle stencils, contraflow cycle directions, conforming junction corner ribbons and set-back cycle crossings are actual mesh/material assets. Junction markings and parallel parking remain in motor space.
+- **Four new road presets:** European mobility boulevard (4 motor lanes, outer bus reservation, protected red cycling); Bus-priority avenue (2 reserved bus lanes and protected cycling); Protected cycle street; and Urban bicycle lanes (green painted lanes).
+- **Details → Empty planting openings:** generate framed footway pits at an adjustable interval, with width/length controls and optional iron grates. The paving is physically cut; soil is recessed 160 mm and grates have actual slots and a central future-tree opening. Placement preserves at least 2 m through-walk, avoids ramp/driveway flares, suppresses too-tight placements and excludes bridges. **No trees are generated.** Curved pit rims share the exact boundary stations of their paving opening.
+- **Parking & paving → Empty tree planting pit:** independently place/rotate/size a small 0.8–6 m × 0.8–8 m framed piece. Standalone pieces do not perform arbitrary booleans against existing imported/solid paving: place them in open space, or use automatic road pits to cut a footway. Soil recesses/grates are shallow game assets, not horticultural/root-volume or drainage design.
+- **Layer/inspection controls:** bus, cycle and empty-planting layers are independent in both linked views. Inspect mobility/planting buttons frame the asset and reveal its layer without changing the graph.
+
+### City blocks without buildings
+
+**Parking & paving → Urban block perimeter** creates a configurable rounded/triangular/elliptical frontage ring with inset paving borders and a closed plinth. The default central plot is genuinely open — no hidden paving roof, building or bottom slab fills it. Width, depth, rotation, rounding, frontage-band width and an explicit paved-courtyard option remain editable. A configurable north/south/east/west vehicle gateway cuts the paving, border and plinth; align a road driveway and parking entrance yourself.
+
+The **European mobility quarter** network is a complete editable example with 12 roads, bus/cycle junctions, 4 gated open blocks, 4 procedural permeable parking courts, aligned vehicle aprons, empty footway pits, planting islands and marked EV reservations. Buildings and trees are deliberately absent. Legacy architectural `block`/landscape `water` data remain excluded; the new `urban-block` kind is infrastructure only.
+
 ### Asset library and road utilities
 
 The library is a **multi-column, vertically scrolling grid**. Preview images and specifications are always visible; scrolling reaches every tile. Drag its upper divider, or focus that divider and use ↑/↓ (Home/End for limits), to resize it. Collapse/reopen does not lose the grid. Narrow screens retain visible two-column tiles and scrollable category tabs.
@@ -64,13 +79,15 @@ Choose **Parking & paving → Procedural parking**, then click in plan. Parking 
 - 45°, 60° or 90° bays with editable bay width/depth and drive-aisle width.
 - An unblocked entry spine, configurable entry side/width, optional accessible bays and transfer aisles. Clipped drive aisles must connect to the actual footprint entry; disconnected rows are excluded with a warning.
 - Live capacity/row metrics, an optional per-row cap, optional bay numbering, adjustable procedural paint wear, real markings and drainage detail.
+- Optional empty soil islands replace periodic normal bays, never circulation or accessible transfers. The surface is cut around each recessed opening; remaining usable bays determine capacity. Back-to-back openings stay separately framed rather than overlapping triangulation holes.
+- Asphalt, permeable-paver or concrete bay finishes; configurable EV-reserved bay stencils (not charging equipment). Accessible bays remain separately reserved and numbered capacity has no gaps.
 - Bevelled curbs and a metric paved perimeter; no cars, trees, posts, buildings or furniture are generated with a parking surface.
 
 Changing dimensions regenerates the rows and stall geometry. Bays and 1.25 m transfer aisles are checked for overlap with one another and circulation. Paint, arrows and grates stay inside curved footprints; curb openings use exact entry widths and closed chamfer returns. Insufficient footprint/capacity produces a warning, not fake spaces. Parking is a bounded geometric layout generator, not a certified planning-code or swept-vehicle simulation.
 
 ### Included road networks
 
-Northbank streets, an acute merge fixture, Harbour street circuit, channelized crossroads, cloverleaf, trumpet, racing loop/pits with paddock parking, waterfront paths, T-junction, roundabout and diamond interchange. The former city blocks and stylized landscape are removed, including from old imported project data; road graphs and parking are retained.
+European mobility quarter, Northbank streets, an acute merge fixture, Harbour street circuit, channelized crossroads, cloverleaf, trumpet, racing loop/pits with paddock parking, waterfront paths, T-junction, roundabout and diamond interchange. Legacy architectural blocks and stylized landscape remain excluded from old imported project data; road graphs and parking are retained. New open block-perimeter pieces do not generate architecture.
 
 The diamond has about **5.79 m modeled clearance** and **6.49% maximum grade**. Cloverleaf/trumpet ramp crossings maintain at least **5.19 m** modeled clearance. Those are geometry checks, not structural certification.
 
@@ -84,11 +101,11 @@ The diamond has about **5.79 m modeled clearance** and **6.49% maximum grade**. 
 
 OBJ uses `norm`/`map_Pr` PBR MTL extensions. Importers that ignore these extensions can use the material manifest or GLB. Albedo is sRGB; normal/roughness are linear data. Normals use **OpenGL +Y**: invert green for DirectX -Y shaders. UV repeats and normal strengths are recorded in the manifest.
 
-Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts, world bounds and the service-feature and footway tables. GLB root extras identify the tessellation profile, service features and graded footways. `materials.json` also records cover/channel wrap modes and metallic response; `Pm` and clamp settings are included in MTL.
+Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts, world bounds and service-feature, footway, mobility, empty-planting and block tables, plus actual junction offset fits. GLB root extras identify the tessellation profile and include the same infrastructure tables. `materials.json` also records cover/channel wrap modes and metallic response; `Pm` and clamp settings are included in MTL.
 
 Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wireframe preview does not alter the original exported materials. No preview environment is exported. A final game's visual quality also depends on its texture resolution, material/shader integration, lighting, terrain and rendering pipeline; this editor does not claim to be a complete AAA environment renderer.
 
-Release HTML is checked byte-for-byte against the published GitHub file. **161 CPU checks and 60 browser checks** pass, including physical curb-face aperture/roof checks, ramp grading, driveway split/undo/removal, live controls, curb/tactile PBR exports, procedural parking, mobile layout and offline use.
+Release HTML is checked byte-for-byte against the published GitHub file. **209 CPU checks and 68 browser checks** pass, including the exact widened/elevated Northbank corner reproduction, analytic offsets, short-fit tapering, bus/cycle lane separation, real planting apertures/grate slots, gated block rings, parking islands/EV capacity, legacy drainage/ramp/driveway checks, PBR exports, mobile layout and fully offline use.
 
 ## Development and verification
 
@@ -119,9 +136,21 @@ window.frontier.inspectSelection(); // close-up material camera
 window.frontier.inspectInfrastructure("manhole"); // also accepts "drainage"
 window.frontier.addDriveway(); // requires a selected non-bridge road / connected node
 window.frontier.inspectFootway("corner-ramp"); // also accepts "driveway"
+window.frontier.inspectPlanning("planting"); // also accepts "mobility"
+window.frontier.loadTemplate("europe"); // bus/cycle roads, gated blocks and parking courts
+window.frontier.placeSite("tree-pit"); // empty independent planting opening
 window.frontier.exportProject("glb", "production"); // independent dense export
 window.addEventListener("frontier:change", ({ detail }) => {
-  const { project, meshes, diagnostics, services, footways } = detail;
+  const {
+    project,
+    meshes,
+    diagnostics,
+    services,
+    footways,
+    mobility,
+    plantings,
+    blocks,
+  } = detail;
 });
 ```
 

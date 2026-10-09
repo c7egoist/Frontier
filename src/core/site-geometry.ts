@@ -1,3 +1,5 @@
+import { buildPlanningSite, type BlockFeature } from "./planning-sites";
+import { buildPlantingPit, type PlantingFeature } from "./planting";
 import { addManhole, addGratedInlet, type UtilityFeature } from "./utilities";
 import {
   area2,
@@ -32,6 +34,7 @@ export interface ParkingBay {
   angle: number;
   row: number;
   accessible: boolean;
+  ev?: boolean;
   number: number;
   aisle?: number;
   corners: [number, number][];
@@ -42,6 +45,7 @@ export interface ParkingCorridor {
   connected: boolean;
 }
 export interface ParkingPlan {
+  islands: ParkingBay[];
   bays: ParkingBay[];
   rows: number;
   aisles: ({ z: number; width: number } & ParkingCorridor)[];
@@ -294,8 +298,29 @@ export function parkingPlan(site: Site): ParkingPlan {
     warnings.push(
       `${accessibleLeft} requested accessible spaces do not fit the current footprint.`,
     );
+  const islands: ParkingBay[] = [],
+    visible: ParkingBay[] = [],
+    rowCounts = new Map<number, number>();
+  for (const bay of bays) {
+    const n = (rowCounts.get(bay.row) ?? 0) + 1;
+    rowCounts.set(bay.row, n);
+    if (site.parkingIslands && !bay.accessible && n % site.islandEvery === 0)
+      islands.push(bay);
+    else visible.push(bay);
+  }
+  let ev = site.evBays;
+  visible.forEach((bay, i) => {
+    bay.number = i + 1;
+    if (!bay.accessible && ev > 0) {
+      bay.ev = true;
+      ev--;
+    }
+  });
+  if (ev > 0)
+    warnings.push("Not enough normal spaces for the requested EV reservation.");
   return {
-    bays,
+    bays: visible,
+    islands,
     rows: specs.filter((s) => aisles[s.aisle].connected).length,
     aisles,
     spine,
@@ -400,17 +425,48 @@ function groundDecal(
   [0, 0, 1, 0, 1, 1, 0, 1].forEach((v, i) => (m.uvs[start + i] = v));
 }
 /** No environment dressing is generated. Legacy architecture/water is excluded. */
-export function buildSiteGeometry(site: Site, services: UtilityFeature[] = []) {
+export function buildSiteGeometry(
+  site: Site,
+  services: UtilityFeature[] = [],
+  plantings: PlantingFeature[] = [],
+  blocks: BlockFeature[] = [],
+) {
+  if (site.kind === "urban-block" || site.kind === "tree-pit")
+    return buildPlanningSite(site, plantings, blocks);
   if (site.kind === "block" || site.kind === "water") return [];
   const b = new MeshBuilder(site.id, "site"),
     outline = siteOutline(site),
     close = (row: V3[]) => [...row, row[0]];
-  b.polygon(
+  const parking = site.kind === "parking" ? parkingPlan(site) : undefined,
+    // Cut the soil opening, not the entire bay cell. Back-to-back cells may
+    // touch; disjoint inset openings keep earcut from bridging over a hole.
+    holes = (parking?.islands ?? []).map((slot) => {
+      const a = (slot.angle * Math.PI) / 180,
+        forward = [Math.cos(a) * slot.side, Math.sin(a) * slot.side],
+        right = [Math.sin(a), -Math.cos(a)];
+      return [
+        [-1, -1],
+        [1, -1],
+        [1, 1],
+        [-1, 1],
+      ].map(([v, u]) =>
+        sitePoint(
+          site,
+          slot.x +
+            (right[0] * v * (slot.width - 0.24)) / 2 +
+            (forward[0] * u * (slot.depth - 0.24)) / 2,
+          slot.z +
+            (right[1] * v * (slot.width - 0.24)) / 2 +
+            (forward[1] * u * (slot.depth - 0.24)) / 2,
+          0.12,
+        ),
+      );
+    });
+  b.faceWithHoles(
     site.kind === "parking" ? "parking" : "paving",
     site.kind === "parking" ? "asphalt" : `paving-${site.pattern}`,
     outline,
-    undefined,
-    true,
+    holes,
   );
   const bottom = outline.map((p) => add(p, [0, -0.3, 0]));
   b.strip("structure", "road-base", close(outline), close(bottom));
@@ -477,7 +533,7 @@ export function buildSiteGeometry(site: Site, services: UtilityFeature[] = []) {
     }
   }
   if (site.kind === "parking") {
-    const plan = parkingPlan(site);
+    const plan = parking!;
     if (plan.entry.apron.length >= 3)
       b.polygon(
         "parking",
@@ -486,8 +542,41 @@ export function buildSiteGeometry(site: Site, services: UtilityFeature[] = []) {
         undefined,
         true,
       );
+    for (const island of plan.islands) {
+      const a = (island.angle * Math.PI) / 180,
+        forward = [Math.cos(a) * island.side, Math.sin(a) * island.side],
+        right = [Math.sin(a), -Math.cos(a)];
+      const sample = (u: number, v: number, h: number) =>
+        sitePoint(
+          site,
+          island.x + forward[0] * u + right[0] * v,
+          island.z + forward[1] * u + right[1] * v,
+          0.12 + h,
+        );
+      buildPlantingPit(b, sample, island.width, island.depth, false, 0.1);
+      plantings.push({
+        id: `${site.id}:island:${island.row}:${island.x.toFixed(3)}`,
+        owner: site.id,
+        ownerKind: "site",
+        kind: "parking-island",
+        position: sample(0, 0, 0),
+        width: island.width,
+        length: island.depth,
+        grate: false,
+        containsTree: false,
+      });
+    }
     for (const slot of plan.bays) {
       const [a, z, c, d] = slot.corners;
+      if (site.bayFinish !== "asphalt")
+        b.polygon(
+          "parking",
+          site.bayFinish === "permeable" ? "paving-permeable" : "concrete",
+          slot.corners.map(([x, z]) => sitePoint(site, x, z, 0.122)),
+          undefined,
+          true,
+        );
+      if (slot.ev) groundDecal(b, site, slot.x, slot.z, 0.9, 0.9, "marking-ev");
       paintLine(b, site, a, d);
       paintLine(b, site, z, c);
       paintLine(b, site, d, c);

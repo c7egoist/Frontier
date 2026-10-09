@@ -44,6 +44,17 @@ export interface Driveway {
   apron: number;
 }
 export interface RoadSettings {
+  busLanes: "none" | "outer";
+  busSurface: "asphalt" | "red";
+  cycleMode: "none" | "painted" | "protected";
+  cycleWidth: number;
+  cycleSeparator: number;
+  cycleColor: "red" | "green" | "asphalt";
+  treePits: boolean;
+  pitWidth: number;
+  pitLength: number;
+  pitSpacing: number;
+  pitGrate: boolean;
   lanes: number;
   laneWidth: number;
   sidewalk: number;
@@ -101,6 +112,17 @@ export interface Project {
 }
 export type Selection = { kind: "node" | "road" | "site"; id: string } | null;
 export const roadDefaults: RoadSettings = {
+  busLanes: "none",
+  busSurface: "asphalt",
+  cycleMode: "none",
+  cycleWidth: 1.9,
+  cycleSeparator: 0.6,
+  cycleColor: "red",
+  treePits: false,
+  pitWidth: 1.6,
+  pitLength: 2.4,
+  pitSpacing: 16,
+  pitGrate: false,
   lanes: 2,
   laneWidth: 3.5,
   sidewalk: 4.2,
@@ -156,6 +178,76 @@ export const presets: {
     name: "Wide pedestrian street",
     description: "5.5 m footways · corner ramps",
     settings: { sidewalk: 5.5, pattern: "linear", cornerRamps: true },
+  },
+  {
+    id: "euro-boulevard",
+    name: "European mobility boulevard",
+    description: "Bus priority · protected red cycle tracks",
+    settings: {
+      lanes: 4,
+      laneWidth: 3.2,
+      sidewalk: 4.8,
+      pattern: "slabs",
+      busLanes: "outer",
+      busSurface: "red",
+      cycleMode: "protected",
+      cycleWidth: 2.1,
+      cycleSeparator: 0.65,
+      treePits: true,
+      speedLimit: 40,
+      curbDrainType: "side-entry",
+    },
+  },
+  {
+    id: "bus-way",
+    name: "Bus-priority avenue",
+    description: "Reserved bus lanes · generous pedestrian frontage",
+    settings: {
+      lanes: 2,
+      laneWidth: 3.2,
+      sidewalk: 5.4,
+      pattern: "linear",
+      busLanes: "outer",
+      busSurface: "red",
+      cycleMode: "protected",
+      cycleWidth: 1.9,
+      cycleSeparator: 0.6,
+      treePits: true,
+      pitGrate: true,
+      speedLimit: 30,
+      curbDrainType: "side-entry",
+    },
+  },
+  {
+    id: "cycle-street",
+    name: "Protected cycle street",
+    description: "2 motor lanes · buffered cycle tracks",
+    settings: {
+      lanes: 2,
+      laneWidth: 3.1,
+      sidewalk: 4.5,
+      pattern: "linear",
+      cycleMode: "protected",
+      cycleWidth: 1.9,
+      cycleSeparator: 0.6,
+      treePits: true,
+      speedLimit: 30,
+    },
+  },
+  {
+    id: "cycle-painted",
+    name: "Urban cycle lanes",
+    description: "Painted bike lanes · permeable paving",
+    settings: {
+      lanes: 2,
+      laneWidth: 3.1,
+      sidewalk: 3.8,
+      pattern: "permeable",
+      cycleMode: "painted",
+      cycleWidth: 1.6,
+      cycleColor: "green",
+      speedLimit: 30,
+    },
   },
   {
     id: "arterial",
@@ -681,6 +773,23 @@ export function parseProject(raw: unknown): Project {
         ? (entry.curbDrainType as Road["curbDrainType"])
         : "grate",
       driveways: parseDriveways(entry.driveways),
+      busLanes: entry.busLanes === "outer" ? "outer" : "none",
+      busSurface: entry.busSurface === "red" ? "red" : "asphalt",
+      cycleMode: ["none", "painted", "protected"].includes(
+        String(entry.cycleMode),
+      )
+        ? (entry.cycleMode as Road["cycleMode"])
+        : "none",
+      cycleWidth: number(entry.cycleWidth, 1.9, 1.2, 3.5),
+      cycleSeparator: number(entry.cycleSeparator, 0.6, 0.3, 1.5),
+      cycleColor: ["red", "green", "asphalt"].includes(String(entry.cycleColor))
+        ? (entry.cycleColor as Road["cycleColor"])
+        : "red",
+      treePits: entry.treePits === true,
+      pitWidth: number(entry.pitWidth, 1.6, 1, 2.5),
+      pitLength: number(entry.pitLength, 2.4, 1.4, 4),
+      pitSpacing: number(entry.pitSpacing, 16, 8, 32),
+      pitGrate: entry.pitGrate === true,
       crossfall: number(entry.crossfall, 2, 0, 8),
       inletSpacing: number(entry.inletSpacing, 18, 6, 80),
       surface: ["asphalt", "concrete", "cobble", "pavers"].includes(
@@ -802,6 +911,35 @@ export function validateGenerationBudget(project: Project): void {
     )
       throw new RangeError("Invalid footway/curb parameters.");
     if (
+      ![
+        road.cycleWidth,
+        road.cycleSeparator,
+        road.pitWidth,
+        road.pitLength,
+        road.pitSpacing,
+      ].every(Number.isFinite) ||
+      road.cycleWidth < 1.2 ||
+      road.cycleWidth > 3.5 ||
+      road.cycleSeparator < 0.3 ||
+      road.cycleSeparator > 1.5 ||
+      road.pitWidth < 1 ||
+      road.pitWidth > 2.5 ||
+      road.pitLength < 1.4 ||
+      road.pitLength > 4 ||
+      road.pitSpacing < 8 ||
+      road.pitSpacing > 32 ||
+      !["none", "outer"].includes(road.busLanes) ||
+      !["asphalt", "red"].includes(road.busSurface) ||
+      !["none", "painted", "protected"].includes(road.cycleMode) ||
+      !["red", "green", "asphalt"].includes(road.cycleColor)
+    )
+      throw new RangeError("Invalid mobility / planting parameters.");
+    if (road.treePits)
+      utilityVertices +=
+        Math.ceil(estimated / road.pitSpacing) *
+        2 *
+        (road.pitGrate ? 1400 : 280);
+    if (
       !Array.isArray(road.driveways) ||
       road.driveways.length > 20 ||
       new Set(road.driveways.map((d) => d.id)).size !== road.driveways.length ||
@@ -857,15 +995,56 @@ export function validateGenerationBudget(project: Project): void {
         site.bays,
         site.accessible,
       ].every(Number.isFinite) ||
-      site.width < 8 ||
+      site.width < (site.kind === "tree-pit" ? 0.8 : 8) ||
       site.width > 250 ||
-      site.depth < 8 ||
+      site.depth < (site.kind === "tree-pit" ? 0.8 : 8) ||
       site.depth > 400 ||
       site.buildingHeight < 0 ||
       site.buildingHeight > 80
     )
       throw new RangeError("Invalid site dimensions or detail parameters.");
     if (site.kind === "block" || site.kind === "water") continue;
+    if (
+      ![
+        site.cornerRadius,
+        site.blockBand,
+        site.blockEntryWidth,
+        site.islandEvery,
+        site.evBays,
+      ].every(Number.isFinite) ||
+      site.blockEntryWidth < 0 ||
+      site.blockEntryWidth > 12 ||
+      !["north", "south", "east", "west"].includes(site.blockEntrySide) ||
+      site.cornerRadius < 0.05 ||
+      site.cornerRadius > 10 ||
+      site.blockBand < 1 ||
+      site.blockBand > 8 ||
+      site.islandEvery < 3 ||
+      site.islandEvery > 12 ||
+      site.evBays < 0 ||
+      site.evBays > 30 ||
+      !["asphalt", "permeable", "concrete"].includes(site.bayFinish)
+    )
+      throw new RangeError("Invalid block / planting / parking enhancements.");
+    for (const point of siteOutline(site)) {
+      if (!point.every(Number.isFinite))
+        throw new RangeError("Invalid site transform.");
+      minX = Math.min(minX, point[0]);
+      maxX = Math.max(maxX, point[0]);
+      minZ = Math.min(minZ, point[2]);
+      maxZ = Math.max(maxZ, point[2]);
+    }
+    if (site.kind === "tree-pit") {
+      if (site.width > 6 || site.depth > 8)
+        throw new RangeError("Tree pit dimensions exceed 6 x 8 m.");
+      utilityVertices += site.pitGrate ? 1400 : 280;
+      continue;
+    }
+    if (site.kind === "urban-block") {
+      siteVertices += 512;
+      continue;
+    }
+
     if (
       ![
         site.bayWidth,
@@ -888,6 +1067,13 @@ export function validateGenerationBudget(project: Project): void {
     )
       throw new RangeError("Invalid procedural parking parameters.");
     if (site.kind === "parking") {
+      if (site.parkingIslands)
+        utilityVertices +=
+          (Math.ceil(site.width / site.bayWidth) *
+            Math.ceil(site.depth / (2 * site.bayDepth + site.aisleWidth)) *
+            2 *
+            280) /
+          site.islandEvery;
       const aisles =
         Math.ceil(site.depth / (2 * site.bayDepth + site.aisleWidth)) + 3;
       if (site.manholes) utilityVertices += aisles * 740;
@@ -910,14 +1096,6 @@ export function validateGenerationBudget(project: Project): void {
             28 +
           2500
         : 2500;
-    for (const point of siteOutline(site)) {
-      if (!point.every(Number.isFinite))
-        throw new RangeError("Invalid site transform.");
-      minX = Math.min(minX, point[0]);
-      maxX = Math.max(maxX, point[0]);
-      minZ = Math.min(minZ, point[2]);
-      maxZ = Math.max(maxZ, point[2]);
-    }
   }
   if (utilityVertices > 1500000)
     throw new RangeError(
@@ -935,9 +1113,16 @@ export function validateGenerationBudget(project: Project): void {
     throw new RangeError("The editor tile must fit inside a 5 × 5 km area.");
 }
 
-export const roadHalfWidth = (road: RoadSettings) =>
+export const motorHalfWidth = (road: RoadSettings) =>
   (road.lanes * road.laneWidth) / 2 +
-  (road.parking === "parallel" ? 2.35 : 0) +
-  road.median / 2;
+  road.median / 2 +
+  (road.parking === "parallel" ? 2.3 : 0);
+export const cycleZoneWidth = (road: RoadSettings) =>
+  road.cycleMode === "none"
+    ? 0
+    : road.cycleWidth +
+      (road.cycleMode === "protected" ? road.cycleSeparator : 0);
+export const roadHalfWidth = (road: RoadSettings) =>
+  motorHalfWidth(road) + cycleZoneWidth(road);
 export const roadMaterial = (road: RoadSettings) =>
   road.surface === "pavers" ? `paving-${road.pattern}` : road.surface;

@@ -16,7 +16,7 @@ import { type Network, type MeshData } from "../core/geometry";
 import { findSnap } from "../core/editing";
 import { cubic, add, sub, type V3 } from "../core/math";
 import { closestOnAlignment } from "../core/curves";
-import { patternCanvas } from "./materials";
+import { patternCanvas, graphicCanvas } from "./materials";
 export type ToolMode = "select" | "draw" | "move" | "pan" | "measure" | "place";
 export interface EditDrag {
   target: "node" | "road" | "site" | "h1" | "h2";
@@ -43,6 +43,7 @@ export class PlanView {
   private snap = true;
   private space = false;
   private patterns = new Map<string, CanvasPattern>();
+  private graphics = new Map<string, HTMLCanvasElement>();
   private hiddenLayers = new Set<string>();
   draft: V3 | null = null;
   placementKind: SiteKind = "plaza";
@@ -516,11 +517,51 @@ export class PlanView {
         "building",
         "parking",
         "utility",
+        "cycle",
+        "bus",
+        "planting",
       ].includes(mesh.kind)
     )
       return;
+    if (mesh.material.startsWith("marking-")) {
+      if (!this.graphics.has(mesh.material))
+        this.graphics.set(mesh.material, graphicCanvas(mesh.material.slice(8)));
+      const image = this.graphics.get(mesh.material)!;
+      for (let i = 0; i < mesh.positions.length / 3; i += 4) {
+        const ids = [i, i + 1, i + 2, i + 3],
+          find = (u: number, v: number) =>
+            ids.find(
+              (k) =>
+                Math.abs(mesh.uvs[k * 2] - u) < 1e-6 &&
+                Math.abs(mesh.uvs[k * 2 + 1] - v) < 1e-6,
+            ),
+          a = find(0, 1),
+          z = find(1, 1),
+          q = find(0, 0);
+        if (a === undefined || z === undefined || q === undefined) continue;
+        const p = mesh.positions;
+        c.save();
+        c.transform(
+          (p[z * 3] - p[a * 3]) / 256,
+          (p[z * 3 + 2] - p[a * 3 + 2]) / 256,
+          (p[q * 3] - p[a * 3]) / 256,
+          (p[q * 3 + 2] - p[a * 3 + 2]) / 256,
+          p[a * 3],
+          p[a * 3 + 2],
+        );
+        c.drawImage(image, 0, 0);
+        c.restore();
+      }
+      return;
+    }
     const colors: Record<string, string> = {
-      asphalt: "#333d47",
+      asphalt: "#363a3b",
+      soil: "#514334",
+      "tree-grate": "#565c58",
+      "cycle-red": "#914a43",
+      "cycle-green": "#54775e",
+      "bus-red": "#77463f",
+      "marking-ev": "#e4e2d8",
       "utility-iron": "#7b7d7a",
       "utility-cover": "#5a605f",
       "utility-recess": "#191f21",
@@ -558,7 +599,14 @@ export class PlanView {
         (p[b + 2] - p[a + 2]) * (p[d] - p[a]) -
         (p[b] - p[a]) * (p[d + 2] - p[a + 2]);
       if (
-        ["landscape", "building", "parking"].includes(mesh.kind) &&
+        [
+          "landscape",
+          "building",
+          "parking",
+          "planting",
+          "cycle",
+          "bus",
+        ].includes(mesh.kind) &&
         signed < 1e-8
       )
         continue;
@@ -641,10 +689,13 @@ export class PlanView {
           "parking",
           "paving",
           "asphalt",
+          "bus",
+          "cycle",
           "curb",
           "gutter",
           "marking",
           "drain",
+          "planting",
           "utility",
           "building",
         ])

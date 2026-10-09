@@ -12,6 +12,11 @@ export interface TextureAssetInfo {
   wrapT?: "repeat" | "clamp";
 }
 const diffuse: Record<string, [number, number, number]> = {
+  soil: [0.31, 0.26, 0.2],
+  "cycle-red": [0.56, 0.29, 0.26],
+  "cycle-green": [0.31, 0.44, 0.36],
+  "bus-red": [0.46, 0.27, 0.25],
+  "tree-grate": [0.32, 0.34, 0.32],
   asphalt: [0.18, 0.21, 0.25],
   "utility-iron": [0.41, 0.43, 0.4],
   "utility-recess": [0.1, 0.13, 0.12],
@@ -103,7 +108,9 @@ export function exportOBJ(
       `Ns ${name === "steel" ? 70 : 8}`,
       `d 1`,
       `illum 2`,
-      ...(name.startsWith("utility-") ? ["Pm 0.72"] : []),
+      ...(name.startsWith("utility-") || name === "tree-grate"
+        ? ["Pm 0.72"]
+        : []),
       "",
     );
     if (textures[name]) {
@@ -144,6 +151,15 @@ export function exportMeshManifest(network: Network, project: Project) {
     includesPreviewEnvironment: false,
     services: network.services,
     footways: network.footways,
+    plantings: network.plantings,
+    blocks: network.blocks,
+    mobility: network.mobility,
+    junctionOffsets: network.junctions.map((j) => ({
+      id: j.node.id,
+      requestedRadius: j.requestedRadius,
+      offsetRadiusFloor: j.radius,
+      fittedCornerRadii: j.cornerRadii,
+    })),
     objects: network.meshes.map((m) => ({
       name: m.name.replace(/[^a-zA-Z0-9_-]/g, "_"),
       kind: m.kind,

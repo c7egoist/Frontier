@@ -209,9 +209,9 @@ export class SceneView {
     };
     // Zero-thickness top sheets receive shadows. Their closed bases and
     // volumetric infrastructure cast them, avoiding large-sheet shadow acne.
-    mesh.castShadow = ["curb", "rail", "structure", "sign", "lamp"].includes(
-      data.kind,
-    );
+    mesh.castShadow =
+      ["curb", "rail", "structure", "sign", "lamp"].includes(data.kind) ||
+      (data.kind === "cycle" && data.material === "curb");
     mesh.receiveShadow = true;
     return mesh;
   }
@@ -593,6 +593,42 @@ export class SceneView {
     this.onGizmo(this.gizmoProjection());
     return true;
   }
+  inspectPlanning(kind: "planting" | "mobility"): boolean {
+    if (!this.network || !this.selection || !this.project) return false;
+    const owners =
+        this.selection.kind === "node"
+          ? [
+              this.selection.id,
+              ...this.project.roads
+                .filter(
+                  (r) =>
+                    r.start === this.selection!.id ||
+                    r.end === this.selection!.id,
+                )
+                .map((r) => r.id),
+            ]
+          : [this.selection.id],
+      pivot = this.selectionPosition() ?? [0, 0, 0],
+      features =
+        kind === "planting" ? this.network.plantings : this.network.mobility,
+      feature = features
+        .filter((f) => owners.includes(f.owner))
+        .sort(
+          (a, z) =>
+            Math.hypot(a.position[0] - pivot[0], a.position[2] - pivot[2]) -
+            Math.hypot(z.position[0] - pivot[0], z.position[2] - pivot[2]),
+        )[0];
+    if (!feature) return false;
+    this.controls.target.set(...feature.position);
+    this.camera.position.copy(
+      this.controls.target.clone().add(new THREE.Vector3(7, 7, 8)),
+    );
+    this.camera.zoom = 1;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.onGizmo(this.gizmoProjection());
+    return true;
+  }
   inspectInfrastructure(kind: UtilityKind | "drainage"): boolean {
     if (!this.selection || !this.network || !this.project) return false;
     const owners =
@@ -696,6 +732,9 @@ export class SceneView {
       includesPreviewEnvironment: false,
       services: network?.services ?? this.network?.services ?? [],
       footways: network?.footways ?? this.network?.footways ?? [],
+      plantings: network?.plantings ?? this.network?.plantings ?? [],
+      blocks: network?.blocks ?? this.network?.blocks ?? [],
+      mobility: network?.mobility ?? this.network?.mobility ?? [],
     };
     try {
       return (await new GLTFExporter().parseAsync(group, {

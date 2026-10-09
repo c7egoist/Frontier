@@ -6,15 +6,20 @@ import {
   presets,
   type Project,
 } from "../core/model";
-import { makeSite } from "../core/sites";
+import { makeSite, type SiteKind } from "../core/sites";
 import { buildNetwork, type Network, type MeshData } from "../core/geometry";
-import { patternCanvas, utilityMaps } from "./materials";
+import { patternCanvas, utilityMaps, graphicCanvas } from "./materials";
 import { type V3 } from "../core/math";
 
 const cache = new Map<string, string>(),
   textures = new Map<string, HTMLCanvasElement>();
 const palette: Record<string, string> = {
   asphalt: "#454b4c",
+  soil: "#514334",
+  "tree-grate": "#565c58",
+  "cycle-red": "#914a43",
+  "cycle-green": "#54775e",
+  "bus-red": "#77463f",
   curb: "#b4b0a8",
   gutter: "#343a38",
   steel: "#a6b1ad",
@@ -40,6 +45,14 @@ function texture(material: string) {
     image = patternCanvas(
       material.slice(7) as Parameters<typeof patternCanvas>[0],
     );
+  else if (material.startsWith("marking-"))
+    image = graphicCanvas(material.slice(8));
+  else if (
+    ["soil", "tree-grate", "cycle-red", "cycle-green", "bus-red"].includes(
+      material,
+    )
+  )
+    image = patternCanvas(material as Parameters<typeof patternCanvas>[0]);
   if (image) textures.set(material, image);
   return image;
 }
@@ -104,21 +117,20 @@ function render(network: Network, focus?: V3, focusScale = 165) {
         iso(m.positions.slice(i * 3, i * 3 + 3) as V3),
       ),
     ),
+    limits = world.reduce(
+      (b, v) => ({
+        minX: Math.min(b.minX, v[0]),
+        maxX: Math.max(b.maxX, v[0]),
+        minY: Math.min(b.minY, v[1]),
+        maxY: Math.max(b.maxY, v[1]),
+      }),
+      { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity },
+    ),
     center = focus
       ? iso(focus)
-      : [
-          (Math.min(...world.map((v) => v[0])) +
-            Math.max(...world.map((v) => v[0]))) /
-            2,
-          (Math.min(...world.map((v) => v[1])) +
-            Math.max(...world.map((v) => v[1]))) /
-            2,
-          0,
-        ];
-  const width =
-      Math.max(...world.map((v) => v[0])) - Math.min(...world.map((v) => v[0])),
-    height =
-      Math.max(...world.map((v) => v[1])) - Math.min(...world.map((v) => v[1])),
+      : [(limits.minX + limits.maxX) / 2, (limits.minY + limits.maxY) / 2, 0];
+  const width = limits.maxX - limits.minX,
+    height = limits.maxY - limits.minY,
     scale = focus
       ? focusScale
       : Math.min(350 / Math.max(1, width), 146 / Math.max(1, height));
@@ -139,7 +151,10 @@ function render(network: Network, focus?: V3, focusScale = 165) {
   const layers: Record<string, number> = {
     structure: 0,
     asphalt: 1,
+    bus: 1.3,
+    cycle: 1.4,
     paving: 2,
+    planting: 4.5,
     gutter: 3,
     curb: 4,
     marking: 5,
@@ -150,7 +165,12 @@ function render(network: Network, focus?: V3, focusScale = 165) {
     lamp: 10,
   };
   const rank = (m: MeshData) =>
-    (layers[m.kind] ?? 0) * 10 +
+    (m.material.startsWith("marking-")
+      ? 5
+      : m.kind === "cycle" && m.material === "curb"
+        ? 4
+        : (layers[m.kind] ?? 0)) *
+      10 +
     (m.kind === "utility"
       ? m.material === "utility-cover"
         ? 1
@@ -232,9 +252,17 @@ export function assetThumbnail(
       r.drainage = false;
     });
   } else if (category === "site") {
-    const s = makeSite(id as "parking" | "plaza" | "island", [0, 0, 0]);
-    s.width = id === "parking" ? 38 : 24;
-    s.depth = id === "parking" ? 26 : 20;
+    const s = makeSite(id as SiteKind, [0, 0, 0]);
+    if (id !== "tree-pit") {
+      s.width = id === "parking" ? 38 : id === "urban-block" ? 44 : 24;
+      s.depth = id === "parking" ? 26 : id === "urban-block" ? 36 : 20;
+    }
+    if (id === "urban-block") s.blockEntryWidth = 7;
+    if (id === "parking") {
+      s.parkingIslands = true;
+      s.bayFinish = "permeable";
+      s.evBays = 2;
+    }
     p.sites = [s];
   } else {
     const elevated = id === "bridge" || id === "steel",

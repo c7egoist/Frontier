@@ -1,8 +1,25 @@
 import { uid, type Pattern } from "./model";
 import { add, clamp, simplePolygon, polygonArea, type V3 } from "./math";
 
-export type SiteKind = "block" | "parking" | "plaza" | "island" | "water";
+export type SiteKind =
+  | "block"
+  | "parking"
+  | "plaza"
+  | "island"
+  | "water"
+  | "urban-block"
+  | "tree-pit";
 export interface Site {
+  cornerRadius: number;
+  blockBand: number;
+  blockInterior: "open" | "paved";
+  blockEntrySide: "north" | "south" | "east" | "west";
+  blockEntryWidth: number;
+  pitGrate: boolean;
+  parkingIslands: boolean;
+  islandEvery: number;
+  bayFinish: "asphalt" | "permeable" | "concrete";
+  evBays: number;
   id: string;
   name: string;
   kind: SiteKind;
@@ -43,6 +60,18 @@ export const siteCatalog: {
     icon: "square-parking",
   },
   {
+    id: "urban-block",
+    name: "Urban block perimeter",
+    description: "Paved frontage · open plot / courtyard",
+    icon: "layout-template",
+  },
+  {
+    id: "tree-pit",
+    name: "Empty tree planting pit",
+    description: "Recessed soil · frame / optional grate",
+    icon: "square-dashed",
+  },
+  {
     id: "plaza",
     name: "Paving surface",
     description: "Metric stone courses · edge detail",
@@ -57,6 +86,16 @@ export const siteCatalog: {
 ];
 export function makeSite(kind: SiteKind, position: V3): Site {
   return {
+    cornerRadius: 2.2,
+    blockBand: 3.2,
+    blockInterior: "open",
+    blockEntrySide: "north",
+    blockEntryWidth: 0,
+    pitGrate: false,
+    parkingIslands: false,
+    islandEvery: 7,
+    bayFinish: "asphalt",
+    evBays: 0,
     id: uid("site"),
     name:
       siteCatalog.find((s) => s.id === kind)?.name ??
@@ -65,25 +104,33 @@ export function makeSite(kind: SiteKind, position: V3): Site {
     position: [...position],
     yaw: 0,
     width:
-      kind === "water"
-        ? 120
-        : kind === "block"
-          ? 62
-          : kind === "parking"
-            ? 54
-            : kind === "plaza"
-              ? 40
-              : 24,
+      kind === "tree-pit"
+        ? 1.8
+        : kind === "urban-block"
+          ? 64
+          : kind === "water"
+            ? 120
+            : kind === "block"
+              ? 62
+              : kind === "parking"
+                ? 54
+                : kind === "plaza"
+                  ? 40
+                  : 24,
     depth:
-      kind === "water"
-        ? 240
-        : kind === "block"
-          ? 70
-          : kind === "parking"
-            ? 34
-            : kind === "plaza"
-              ? 36
-              : 24,
+      kind === "tree-pit"
+        ? 3
+        : kind === "urban-block"
+          ? 64
+          : kind === "water"
+            ? 240
+            : kind === "block"
+              ? 70
+              : kind === "parking"
+                ? 34
+                : kind === "plaza"
+                  ? 36
+                  : 24,
     pattern: "ashlar",
     shape: kind === "island" ? "triangle" : "rectangle",
     landscape: false,
@@ -126,6 +173,13 @@ export function siteOutline(site: Site, inset = 0, y = 0.12): V3[] {
         y,
       ),
     );
+  if (site.kind === "tree-pit")
+    return [
+      [-w, -d],
+      [w, -d],
+      [w, d],
+      [-w, d],
+    ].map(([x, z]) => sitePoint(site, x, z, y));
   let raw: [number, number][];
   if (site.shape === "triangle") {
     const hw = site.width / 2,
@@ -168,7 +222,12 @@ export function siteOutline(site: Site, inset = 0, y = 0.12): V3[] {
       ),
     ),
   );
-  const rounding = Math.min(2.2, w * 0.16, d * 0.16, minEdge * 0.27),
+  const rounding = Math.min(
+      Math.max(0.05, site.cornerRadius - inset),
+      w * 0.3,
+      d * 0.3,
+      minEdge * 0.27,
+    ),
     out: V3[] = [];
   raw.forEach((v, i) => {
     const previous = raw[(i + raw.length - 1) % raw.length],
@@ -224,9 +283,15 @@ export function parseSites(raw: unknown, patterns: readonly string[]): Site[] {
         typeof e.id !== "string" ||
         e.id.length > 100 ||
         ids.has(e.id) ||
-        !["parking", "plaza", "island", "block", "water"].includes(
-          String(e.kind),
-        )
+        ![
+          "parking",
+          "plaza",
+          "island",
+          "block",
+          "water",
+          "urban-block",
+          "tree-pit",
+        ].includes(String(e.kind))
       )
         throw new Error("Invalid or duplicate site ID/type.");
       ids.add(e.id);
@@ -251,17 +316,46 @@ export function parseSites(raw: unknown, patterns: readonly string[]): Site[] {
         id: e.id,
         name: typeof e.name === "string" ? e.name.slice(0, 80) : fallback.name,
         yaw: num("yaw", -360, 360),
-        width: num("width", 8, 250),
-        depth: num("depth", 8, 400),
+        width: num(
+          "width",
+          e.kind === "tree-pit" ? 0.8 : 8,
+          e.kind === "tree-pit" ? 6 : 250,
+        ),
+        depth: num(
+          "depth",
+          e.kind === "tree-pit" ? 0.8 : 8,
+          e.kind === "tree-pit" ? 8 : 400,
+        ),
+        cornerRadius: num("cornerRadius", 0.05, 10),
+        blockBand: num("blockBand", 1, 8),
+        blockInterior: e.blockInterior === "paved" ? "paved" : "open",
+        blockEntrySide: ["north", "south", "east", "west"].includes(
+          String(e.blockEntrySide),
+        )
+          ? (e.blockEntrySide as Site["blockEntrySide"])
+          : "north",
+        blockEntryWidth: num("blockEntryWidth", 0, 12),
+        pitGrate: e.pitGrate === true,
+        parkingIslands: e.parkingIslands === true,
+        islandEvery: Math.round(num("islandEvery", 3, 12)),
+        bayFinish: ["asphalt", "permeable", "concrete"].includes(
+          String(e.bayFinish),
+        )
+          ? (e.bayFinish as Site["bayFinish"])
+          : "asphalt",
+        evBays: Math.round(num("evBays", 0, 30)),
         buildingHeight: num("buildingHeight", 0, 80),
         bays: Math.round(num("bays", 0, 70)),
         accessible: Math.round(num("accessible", 0, 6)),
         pattern: patterns.includes(String(e.pattern))
           ? (e.pattern as Pattern)
           : "ashlar",
-        shape: ["rectangle", "triangle", "circle"].includes(String(e.shape))
-          ? (e.shape as Site["shape"])
-          : fallback.shape,
+        shape:
+          e.kind === "tree-pit"
+            ? "rectangle"
+            : ["rectangle", "triangle", "circle"].includes(String(e.shape))
+              ? (e.shape as Site["shape"])
+              : fallback.shape,
         landscape: false,
         entrance: ["north", "south", "east", "west"].includes(
           String(e.entrance),
@@ -288,7 +382,10 @@ export function parseSites(raw: unknown, patterns: readonly string[]): Site[] {
         manholeDiameter: num("manholeDiameter", 0.45, 1),
       };
       const polygon = siteOutline(site);
-      if (!simplePolygon(polygon) || Math.abs(polygonArea(polygon)) < 1)
+      if (
+        !simplePolygon(polygon) ||
+        Math.abs(polygonArea(polygon)) < (site.kind === "tree-pit" ? 0.3 : 1)
+      )
         throw new Error("Degenerate site footprint.");
       return site;
     })
