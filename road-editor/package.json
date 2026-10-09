@@ -1,0 +1,9 @@
+{
+  "name": "frontier-road-editor",
+  "private": true,
+  "type": "module",
+  "description": "Browser road designer for the Frontier engine. Static ES modules; no build step.",
+  "scripts": {
+    "test": "node --test tests/geometry.test.mjs tests/model.test.mjs tests/export.test.mjs"
+  }
+}
