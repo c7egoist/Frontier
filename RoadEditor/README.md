@@ -21,7 +21,7 @@ Google Fonts (DM Sans) is loaded from the web; without it the UI falls back to t
 | Select | `V`, click an object (plan or 3D) |
 | Move a junction | drag its disc on the plan, or use the gizmo in 3D |
 | Change corner radius | drag the dashed ring of the selected junction (one handle per joint) |
-| Move along one axis | drag the red/blue arrows of the selected junction |
+| Move along one axis | drag the white arrows of the selected junction |
 | Add a junction | `J`, click |
 | Draw a road | `R`, click a junction then another; click empty ground to add one and continue; `Esc` stops |
 | Add a road control point | double-click the road, or the inspector button |
@@ -109,9 +109,9 @@ round-tripping the project file.
 - Only the diamond exchange is generated. Other interchange forms must be built by hand.
 - Stop lines, give-way marks, arrows and traffic signals are not generated.
 - The 3D transform gizmo moves junctions only. Control points and paving corners move in the plan.
-- A full rebuild takes roughly 0.2 s for the sample and 0.5 s for a diamond exchange. Rebuilds are
-  debounced while dragging, so drags update in steps rather than every frame.
-- Clearance checks run in plan only (they assume the vertical positions in the file are the truth).
+- A full rebuild takes about 0.2 to 0.4 s for the sample and about 0.8 s with a diamond exchange added
+  (headless Chromium, software WebGL). Rebuilds are debounced while dragging, so drags update in steps.
+- Crossing checks use plan intersections and the heights stored in the file. They do not sample terrain.
 - Acute junction angles (under about 25 degrees) can make neighbouring mouths overlap. Those cases
   are not flagged yet.
 - No game-engine plugin is included. The integration point is the JSON file and the OBJ/MTL pair.
