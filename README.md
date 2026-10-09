@@ -23,7 +23,9 @@ The development server accepts preview hosts. The app has no backend, no browser
 
 Publish the **root-level `RoadDesigner.html`** file, not the development `index.html`. The single HTML can be served from any static host, including raw.githack; it does not need a `dist/assets` folder.
 
-The branch's editor URL is:
+**Published, immutable editor:** [Open Road Studio on raw.githack](https://raw.githack.com/c7egoist/Frontier/37484003b763c55e66bff81e9c88ff3beb9aee12/RoadDesigner.html). The published HTML was checked byte-for-byte against the offline-tested deliverable. raw.githack may show its external-content notice first; choose **Open the page** to continue.
+
+The branch's current editor URL is:
 
 ```text
 https://raw.githack.com/c7egoist/Frontier/arena/8070fd6c-frontier/RoadDesigner.html
