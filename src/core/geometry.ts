@@ -360,6 +360,35 @@ function pavingBands(
     true,
   );
 }
+/** A shared metric curb profile keeps the chamfer exact at body/junction seams. */
+export function curbSections(base: V3[], inner: V3[], outer: V3[]): V3[][] {
+  const sizes = base.map((p, i) =>
+    Math.min(
+      0.015,
+      Math.abs(inner[i][1] - p[1]) * 0.22,
+      distanceXZ(inner[i], outer[i]) * 0.2,
+    ),
+  );
+  return [
+    base,
+    inner.map((p, i) => add(p, [0, -sizes[i], 0])),
+    inner.map((p, i) =>
+      lerp(p, outer[i], sizes[i] / Math.max(1e-9, distanceXZ(p, outer[i]))),
+    ),
+    outer,
+  ];
+}
+function sweepCurb(
+  b: MeshBuilder,
+  material: string,
+  base: V3[],
+  inner: V3[],
+  outer: V3[],
+) {
+  const rows = curbSections(base, inner, outer);
+  for (let i = 0; i < rows.length - 1; i++)
+    b.strip("curb", material, rows[i], rows[i + 1], i > 0 ? true : undefined);
+}
 function needsJoint(
   project: Project,
   node: RoadNode,
@@ -1032,8 +1061,7 @@ function buildSpan(
       outer = frames.map((f) => edgePoint(f, side, "outer"));
     const bottom = frames.map((f) => edgePoint(f, side, "bottom"));
     const curbMaterial = road.curbStyle === "race" ? "race-curb" : "curb";
-    b.strip("curb", curbMaterial, inner, curbIn);
-    b.strip("curb", curbMaterial, curbIn, curbOut, true);
+    sweepCurb(b, curbMaterial, inner, curbIn, curbOut);
     if (road.sidewalk > 0.01) {
       b.strip("paving", `paving-${road.pattern}`, curbOut, outer, true);
       pavingBands(
@@ -1058,15 +1086,17 @@ function buildSpan(
     [frames.at(-1)!, road.end],
   ] as [Frame, string][])
     if (connected(project, id).length === 1) {
+      const profile = (side: number) =>
+        curbSections(
+          [edgePoint(f, side, "road")],
+          [edgePoint(f, side, "curbIn")],
+          [edgePoint(f, side, "curbOut")],
+        ).map((row) => row[0]);
       const top = [
         edgePoint(f, -1, "outer"),
-        edgePoint(f, -1, "curbOut"),
-        edgePoint(f, -1, "curbIn"),
-        edgePoint(f, -1, "road"),
+        ...profile(-1).reverse(),
         surfacePoint(f, 0),
-        edgePoint(f, 1, "road"),
-        edgePoint(f, 1, "curbIn"),
-        edgePoint(f, 1, "curbOut"),
+        ...profile(1),
         edgePoint(f, 1, "outer"),
       ];
       for (let i = 0; i < top.length - 1; i++)
@@ -1324,8 +1354,15 @@ function buildJunction(
     corners.push(curve);
     boundary.push(a.right, a.center, a.left, ...curve.slice(1, -1));
     outer.push(a.outerRight, a.outerLeft, ...paved.slice(1, -1));
-    b.strip("curb", "curb", curve, curbIn);
-    b.strip("curb", "curb", curbIn, curbOut, true);
+    sweepCurb(
+      b,
+      a.road.curbStyle === "race" && next.road.curbStyle === "race"
+        ? "race-curb"
+        : "curb",
+      curve,
+      curbIn,
+      curbOut,
+    );
     if (a.frame.sw > 0 || next.frame.sw > 0) {
       b.strip("paving", `paving-${a.road.pattern}`, curbOut, paved, true);
       pavingBands(

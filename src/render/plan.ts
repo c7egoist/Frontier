@@ -521,15 +521,6 @@ export class PlanView {
     const colors: Record<string, string> = {
       asphalt: "#333d47",
       "pave-border": "#53616d",
-      grass: "#4c6854",
-      foliage: "#497659",
-      flowers: "#ac9b72",
-      facade: "#68757f",
-      glass: "#647e91",
-      roof: "#5e6b76",
-      water: "#32596c",
-      "accessible-blue": "#366b97",
-      "wheel-stop": "#bec8ce",
       concrete: "#a3afb9",
       cobble: "#7b8580",
       curb: "#a9b6c2",
@@ -542,7 +533,9 @@ export class PlanView {
     };
     c.fillStyle = mesh.material.startsWith("paving-")
       ? this.texture(mesh.material)
-      : (colors[mesh.material] ?? "#74817c");
+      : (colors[
+          mesh.material.startsWith("paint-wear-") ? "paint" : mesh.material
+        ] ?? "#74817c");
     c.beginPath();
     const p = mesh.positions;
     for (let i = 0; i < mesh.indices.length; i += 3) {

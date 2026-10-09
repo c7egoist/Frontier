@@ -260,6 +260,20 @@ try {
       files[names.find((n) => n.endsWith(".mtl"))],
     );
     assert(mtl.includes("map_Kd -s .") || mtl.includes("map_Kd -s 0.5"));
+    assert(names.includes("materials.json") && names.includes("IMPORT.txt"));
+    const manifest = JSON.parse(
+      new TextDecoder().decode(files["materials.json"]),
+    );
+    assert.equal(manifest.normalConvention, "OpenGL +Y");
+    const asphalt = manifest.materials.asphalt;
+    assert(asphalt.normal && asphalt.roughness);
+    assert(names.includes(asphalt.normal) && names.includes(asphalt.roughness));
+    assert.deepEqual(asphalt.uvRepeat, [0.5, 0.5]);
+    assert.equal(asphalt.dataColorSpace, "linear");
+    assert(mtl.includes("norm -s") && mtl.includes("map_Pr -s"));
+    assert(
+      new TextDecoder().decode(files["IMPORT.txt"]).includes("invert green"),
+    );
     for (const path of names.filter((n) => n.endsWith(".png")))
       assert.equal(
         Buffer.from(files[path]).toString("hex", 0, 8),
@@ -465,6 +479,12 @@ try {
     );
     assert.equal(await page.locator('[data-asset="block"]').count(), 0);
     assert(await page.locator('[data-library="sites"]').isVisible());
+    assert.equal(
+      await page
+        .locator('[data-layer="building"],[data-layer="landscape"]')
+        .count(),
+      0,
+    );
     assert.equal(await page.locator(".canvas-host>canvas").count(), 2);
   });
   for (const id of [
@@ -568,6 +588,22 @@ try {
         prior.project.sites.find((s) => s.id === placedId).depth,
     );
     assert(deep.triangles > prior.triangles);
+    const count = await page.evaluate(() => {
+      const id = window.frontier.getSelection().id;
+      return Number(
+        document
+          .querySelector('[data-site-stat="capacity"]')
+          .textContent.split(" ")[0],
+      );
+    });
+    assert(count > 0);
+    assert.equal(
+      await page
+        .locator('input[data-prop="depth"]')
+        .evaluate((e) => e === document.activeElement),
+      true,
+    );
+    assert.equal(await page.locator('[data-site-stat="rows"]').count(), 1);
     await undo();
     await page.locator('[data-prop="parkingAngle"]').selectOption("60");
     assert.equal(
@@ -589,6 +625,22 @@ try {
           ["building", "lamp", "sign", "landscape"].includes(m.kind),
       ),
     );
+  });
+  await test("parking paint wear is a live procedural material, not a decorative prop", async () => {
+    await page.locator('[data-inspector-tab="details"]').click();
+    await page.locator('[data-prop="paintWear"]').focus();
+    await page.locator('[data-prop="paintWear"]').press("End");
+    assert.equal(
+      (await state()).project.sites.find((s) => s.id === placedId).paintWear,
+      0.35,
+    );
+    assert(
+      (await state()).meshes.some(
+        (m) => m.owner === placedId && m.material === "paint-wear-35",
+      ),
+    );
+    await undo();
+    await page.locator('[data-inspector-tab="geometry"]').click();
   });
   await test("3D Y-axis gizmo moves the site, not the connected road graph", async () => {
     const before = await state(),
@@ -738,6 +790,46 @@ try {
     assert(g.images.every((i) => i.bufferView !== undefined));
     assert(!g.nodes.some((n) => n.name === "Context terrain"));
     await page.locator("#shade-style").selectOption("shaded");
+  });
+  await test("procedural surface channels and paint masks are deterministic linear data", async () => {
+    const stats = await page.evaluate(async () => {
+      const { surfaceMaps, wornPaintCanvas } =
+        await import("/src/render/materials.ts");
+      const a = surfaceMaps("ashlar"),
+        b = surfaceMaps("asphalt");
+      const read = (c) =>
+        c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+      const n = read(a.normal),
+        r = read(b.roughness),
+        fresh = read(wornPaintCanvas(0)),
+        worn = read(wornPaintCanvas(25));
+      let blue = 0,
+        green = 0,
+        rough = 0,
+        freshHoles = 0,
+        wornHoles = 0;
+      for (let i = 0; i < n.length; i += 4) {
+        blue += n[i + 2];
+        green += n[i + 1];
+        rough += r[i + 1];
+        if (fresh[i + 3] === 0) freshHoles++;
+        if (worn[i + 3] === 0) wornHoles++;
+      }
+      return {
+        blue: blue / (n.length / 4),
+        green: green / (n.length / 4),
+        rough: rough / (n.length / 4),
+        freshHoles,
+        wornHoles,
+        cached: a === surfaceMaps("ashlar"),
+      };
+    });
+    assert(stats.cached);
+    assert(stats.blue > 240);
+    assert(stats.green > 125 && stats.green < 130);
+    assert(stats.rough > 210 && stats.rough < 240);
+    assert.equal(stats.freshHoles, 0);
+    assert(stats.wornHoles > 1000);
   });
   await test("mobile layout keeps both views usable without horizontal overflow", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("district"));

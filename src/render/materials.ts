@@ -1,3 +1,4 @@
+import type { TextureAssetInfo } from "../core/export";
 import * as THREE from "three";
 import type { Pattern } from "../core/model";
 let seed = 47;
@@ -154,6 +155,87 @@ function roughnessCanvas(source: HTMLCanvasElement, asphalt = false) {
   c.putImageData(image, 0, 0);
   return canvas;
 }
+type SurfacePattern = Pattern | "asphalt" | "concrete" | "cobble";
+export interface SurfaceMaps {
+  albedo: HTMLCanvasElement;
+  normal: HTMLCanvasElement;
+  roughness: HTMLCanvasElement;
+  normalStrength: number;
+}
+const surfaceCache = new Map<string, SurfaceMaps>();
+/** Relief is independent of tile colour, so colour variation does not become fake displacement. */
+function reliefCanvas(source: HTMLCanvasElement, asphalt: boolean) {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 512;
+  const c = canvas.getContext("2d")!,
+    src = source.getContext("2d")!.getImageData(0, 0, 512, 512).data,
+    dst = c.createImageData(512, 512);
+  let mean = 0;
+  for (let i = 0; i < src.length; i += 4) mean += src[i];
+  mean /= 512 * 512;
+  const noise = (x: number, y: number) => {
+    const value = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+    return value - Math.floor(value);
+  };
+  for (let y = 0; y < 512; y++)
+    for (let x = 0; x < 512; x++) {
+      const i = (y * 512 + x) * 4,
+        grain = noise(x, y),
+        value = asphalt
+          ? 0.5 + (grain - 0.5) * 0.085
+          : src[i] < mean * 0.73
+            ? 0.44
+            : 0.68 + (grain - 0.5) * 0.006;
+      dst.data[i] = dst.data[i + 1] = dst.data[i + 2] = value * 255;
+      dst.data[i + 3] = 255;
+    }
+  c.putImageData(dst, 0, 0);
+  return canvas;
+}
+export function surfaceMaps(pattern: SurfacePattern): SurfaceMaps {
+  const key = pattern;
+  if (surfaceCache.has(key)) return surfaceCache.get(key)!;
+  const albedo = patternCanvas(pattern === "concrete" ? "slabs" : pattern),
+    normal = normalCanvas(
+      reliefCanvas(albedo, pattern === "asphalt"),
+      pattern === "asphalt" ? 0.32 : 1.6,
+    ),
+    roughness = roughnessCanvas(albedo, pattern === "asphalt"),
+    normalStrength = pattern === "asphalt" ? 0.24 : 0.26;
+  const maps = { albedo, normal, roughness, normalStrength };
+  surfaceCache.set(key, maps);
+  return maps;
+}
+export function wornPaintCanvas(percent: number): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 512;
+  const c = canvas.getContext("2d")!,
+    data = c.createImageData(512, 512),
+    wear = Math.max(0, Math.min(0.35, percent / 100));
+  const noise = (x: number, y: number) => {
+    const v = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+    return v - Math.floor(v);
+  };
+  for (let y = 0; y < 512; y++)
+    for (let x = 0; x < 512; x++) {
+      const i = (y * 512 + x) * 4,
+        n = noise(x, y),
+        broad = noise(Math.floor(x / 3), Math.floor(y / 3)),
+        damaged = broad < wear * 0.65 || n < wear * 0.14;
+      data.data[i] = 215 + n * 12;
+      data.data[i + 1] = 214 + n * 12;
+      data.data[i + 2] = 207 + n * 10;
+      data.data[i + 3] = damaged ? 0 : 255;
+    }
+  c.putImageData(data, 0, 0);
+  return canvas;
+}
+const surfaceKey = (key: string): SurfacePattern | undefined =>
+  key.startsWith("paving-")
+    ? (key.slice(7) as Pattern)
+    : ["asphalt", "concrete", "cobble"].includes(key)
+      ? (key as SurfacePattern)
+      : undefined;
 function graphicCanvas(key: string) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 256;
@@ -235,20 +317,32 @@ function graphicCanvas(key: string) {
 /** Standalone OBJ assets; generated locally, never fetched from a CDN. */
 export async function exportTexturePack(keys: string[]) {
   const files: Record<string, Uint8Array> = {},
-    textures: Record<
-      string,
-      { path: string; scale: [number, number]; alpha: boolean }
-    > = {};
+    textures: Record<string, TextureAssetInfo> = {},
+    manifest: Record<string, unknown> = {};
+  const png = async (canvas: HTMLCanvasElement, path: string) => {
+    const blob = await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob(
+        (b) =>
+          b
+            ? resolve(b)
+            : reject(new Error("Could not encode material texture.")),
+        "image/png",
+      ),
+    );
+    files[path] = new Uint8Array(await blob.arrayBuffer());
+  };
   await Promise.all(
     [...new Set(keys)].map(async (key) => {
-      let image: HTMLCanvasElement | undefined,
+      const pattern = surfaceKey(key),
+        base = `textures/${key.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+      let maps: SurfaceMaps | undefined,
+        image: HTMLCanvasElement | undefined,
         scale: [number, number] = [0.5, 0.5];
-      if (key.startsWith("paving-"))
-        image = patternCanvas(key.slice(7) as Pattern);
-      else if (["asphalt", "concrete", "cobble"].includes(key))
-        image = patternCanvas(
-          key === "concrete" ? "slabs" : (key as "asphalt" | "cobble"),
-        );
+      if (pattern) {
+        maps = surfaceMaps(pattern);
+        image = maps.albedo;
+      } else if (/^paint-wear-\d+$/.test(key))
+        image = wornPaintCanvas(Number(key.split("-").at(-1)));
       else if (
         key.startsWith("sign-") ||
         key.startsWith("marking-") ||
@@ -260,19 +354,45 @@ export async function exportTexturePack(keys: string[]) {
         scale = key === "race-curb" ? [1 / 3, 1] : [1, 1];
       }
       if (!image) return;
-      const blob = await new Promise<Blob>((resolve, reject) =>
-        image!.toBlob(
-          (blob) =>
-            blob
-              ? resolve(blob)
-              : reject(new Error("Could not encode procedural texture.")),
-          "image/png",
-        ),
-      );
-      const path = `textures/${key.replace(/[^a-zA-Z0-9_-]/g, "_")}.png`;
-      files[path] = new Uint8Array(await blob.arrayBuffer());
-      textures[key] = { path, scale, alpha: key.startsWith("marking-") };
+      const info: TextureAssetInfo = {
+        path: `${base}.png`,
+        scale,
+        alpha: key.startsWith("marking-") || key.startsWith("paint-wear-"),
+      };
+      await png(image, info.path);
+      if (maps) {
+        info.normalPath = `${base}-normal.png`;
+        info.roughnessPath = `${base}-roughness.png`;
+        info.normalStrength = maps.normalStrength;
+        await Promise.all([
+          png(maps.normal, info.normalPath),
+          png(maps.roughness, info.roughnessPath),
+        ]);
+      }
+      textures[key] = info;
+      manifest[key] = {
+        albedo: info.path,
+        normal: info.normalPath,
+        roughness: info.roughnessPath,
+        normalStrength: info.normalStrength,
+        uvRepeat: scale,
+        albedoColorSpace: "sRGB",
+        dataColorSpace: "linear",
+        normalConvention: "OpenGL +Y",
+        metallic: 0,
+        roughnessFactor: maps ? 1 : 0.6,
+      };
     }),
+  );
+  files["materials.json"] = new TextEncoder().encode(
+    JSON.stringify(
+      { units: "metres", normalConvention: "OpenGL +Y", materials: manifest },
+      null,
+      2,
+    ),
+  );
+  files["IMPORT.txt"] = new TextEncoder().encode(
+    "Keep textures/ beside the OBJ and MTL. Albedo PNGs are sRGB; normal and roughness PNGs are linear data. Normal maps use OpenGL +Y (invert green for DirectX -Y engines). UV-repeat, normal strength and texture bindings are in materials.json. MTL norm/map_Pr are PBR extensions; use the manifest or GLB if your OBJ importer does not support them. No preview environment or decorative props are exported.",
   );
   return { files, textures };
 }
@@ -313,44 +433,37 @@ export class Materials {
       m.emissive.set(key === "signal-red" ? "#dc3e3e" : "#33b472");
       m.emissiveIntensity = 0.85;
     }
-    let pattern: Pattern | "asphalt" | "concrete" | "cobble" | undefined;
-    if (key.startsWith("paving-")) pattern = key.slice(7) as Pattern;
-    else if (["asphalt", "concrete", "cobble"].includes(key))
-      pattern = key as typeof pattern;
+    const pattern = surfaceKey(key);
     if (pattern) {
-      const texture = new THREE.CanvasTexture(patternCanvas(pattern));
-      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-      texture.repeat.set(0.5, 0.5);
-      texture.colorSpace = THREE.SRGBColorSpace;
-      texture.anisotropy = 8;
-      m.map = texture;
-      if (pattern === "concrete") m.color.set("#ceccc7");
-      const normal = new THREE.CanvasTexture(
-        normalCanvas(
-          texture.image as HTMLCanvasElement,
-          pattern === "asphalt" ? 0.12 : 1.7,
-        ),
-      );
-      normal.wrapS = normal.wrapT = THREE.RepeatWrapping;
-      normal.repeat.copy(texture.repeat);
-      normal.anisotropy = 8;
-      m.normalMap = normal;
-      m.normalScale.set(
-        pattern === "asphalt" ? 0.24 : 0.26,
-        pattern === "asphalt" ? 0.24 : 0.26,
-      );
-      const roughness = new THREE.CanvasTexture(
-        roughnessCanvas(
-          texture.image as HTMLCanvasElement,
-          pattern === "asphalt",
-        ),
-      );
-      roughness.wrapS = roughness.wrapT = THREE.RepeatWrapping;
-      roughness.repeat.copy(texture.repeat);
-      roughness.anisotropy = 8;
-      roughness.name = `${key}:roughness`;
-      m.roughnessMap = roughness;
+      const maps = surfaceMaps(pattern),
+        texture = (canvas: HTMLCanvasElement, name: string, srgb = false) => {
+          const t = new THREE.CanvasTexture(canvas);
+          t.wrapS = t.wrapT = THREE.RepeatWrapping;
+          t.repeat.set(0.5, 0.5);
+          t.anisotropy = 8;
+          t.name = name;
+          if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+          return t;
+        };
+      m.map = texture(maps.albedo, `${key}:albedo`, true);
+      m.normalMap = texture(maps.normal, `${key}:normal`);
+      m.normalScale.set(maps.normalStrength, maps.normalStrength);
+      m.roughnessMap = texture(maps.roughness, `${key}:roughness`);
       m.roughness = 1;
+      if (pattern === "concrete") m.color.set("#ceccc7");
+    }
+    if (/^paint-wear-\d+$/.test(key)) {
+      const t = new THREE.CanvasTexture(
+        wornPaintCanvas(Number(key.split("-").at(-1))),
+      );
+      t.name = key;
+      t.wrapS = t.wrapT = THREE.RepeatWrapping;
+      t.repeat.set(0.5, 0.5);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.anisotropy = 8;
+      m.map = t;
+      m.alphaTest = 0.35;
+      m.roughness = 0.94;
     }
     if (
       key.startsWith("sign-") ||
@@ -374,19 +487,16 @@ export class Materials {
       m.alphaTest = 0.35;
       m.roughness = 0.6;
     }
-    if (key === "glass") {
-      m.roughness = 0.3;
-      m.metalness = 0.25;
-    }
-    if (key === "water") {
-      m.roughness = 0.22;
-      m.metalness = 0.18;
-    }
     if (key === "lamp-glow") {
       m.emissive.set("#ffe2ad");
       m.emissiveIntensity = 1.5;
     }
-    if (key === "paint" || key === "yellow" || key.startsWith("marking-")) {
+    if (
+      key === "paint" ||
+      key.startsWith("paint-wear-") ||
+      key === "yellow" ||
+      key.startsWith("marking-")
+    ) {
       m.polygonOffset = true;
       m.polygonOffsetFactor = -1;
       m.polygonOffsetUnits = -1;
@@ -401,6 +511,9 @@ export class Materials {
     if (original) {
       copy.map = original.map;
       copy.color.copy(original.color);
+      copy.normalMap = original.normalMap;
+      copy.roughnessMap = original.roughnessMap;
+      copy.roughness = original.roughness;
     }
     copy.wireframe = false;
     return copy;
@@ -414,18 +527,35 @@ export class Materials {
   clay(value: boolean) {
     for (const [key, m] of this.cache) {
       m.map = value ? null : this.getOriginalMap(key);
-      m.color.set(value ? "#b7bcb4" : this.getOriginalColor(key));
+      m.normalMap = value ? null : (this.originals.get(key)?.normalMap ?? null);
+      m.roughnessMap = value
+        ? null
+        : (this.originals.get(key)?.roughnessMap ?? null);
+      m.roughness = value ? 0.94 : (this.originals.get(key)?.roughness ?? 0.88);
+      m.color.set(value ? "#b9b9b9" : this.getOriginalColor(key));
       m.needsUpdate = true;
     }
   }
   private originals = new Map<
     string,
-    { map: THREE.Texture | null; color: THREE.Color }
+    {
+      map: THREE.Texture | null;
+      color: THREE.Color;
+      normalMap: THREE.Texture | null;
+      roughnessMap: THREE.Texture | null;
+      roughness: number;
+    }
   >();
   capture() {
     for (const [key, m] of this.cache)
       if (!this.originals.has(key))
-        this.originals.set(key, { map: m.map, color: m.color.clone() });
+        this.originals.set(key, {
+          map: m.map,
+          color: m.color.clone(),
+          normalMap: m.normalMap,
+          roughnessMap: m.roughnessMap,
+          roughness: m.roughness,
+        });
   }
   private getOriginalMap(key: string) {
     return this.originals.get(key)?.map ?? null;

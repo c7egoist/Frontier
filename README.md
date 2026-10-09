@@ -25,7 +25,7 @@ The achromatic palette and component treatment are ported from the supplied [Sla
 - **Draw:** click points in plan. Snap to shared nodes and actual cubic curves; at-grade crossings are split into shared topology, while elevated crossings remain separate.
 - **One junction pivot:** X/Z in plan, X/Y/Z in 3D. Connected approaches and relative Bézier handles follow the same node. Road pivots and numeric transforms remain editable.
 - **Merge construction:** acute-angle runout includes radius and road width. Both ends share the available trim budget rather than wasting 43% at a free end. Paving setback is adjustable; wide inward offsets cannot fold around the merge nose. Inappropriate zebras are suppressed and junction guidance is surface-clipped.
-- **Paving:** nine world-scaled bond/panel patterns, independent pavement width, flush/stone/rumble curb profiles and edge courses. Albedo, normal and roughness channels are available in the GLB materials.
+- **Paving:** nine world-scaled bond/panel patterns, independent pavement width, flush/stone/rumble curb profiles and edge courses. Albedo, normal and roughness channels are available in GLB and the OBJ texture package. Relief is generated independently from stone colour, rather than turning colour variation into fake displacement. Road and junction curbs share a continuous 15 mm top chamfer (reduced for flush profiles).
 - **Infrastructure:** actual drainage/grates, gutters, continuous W-beam or pedestrian barriers, concrete racing barriers, steel/concrete bridge decks and supports. Signs, signal heads and light fixtures are optional, explicitly enabled controls; templates do not auto-populate them.
 - **Persistence:** local autosave, JSON import/export, transactional undo/redo, rename/delete and scene search.
 
@@ -36,11 +36,11 @@ Choose **Parking & paving → Procedural parking**, then click in plan. Parking 
 - Footprint width/depth, shape, rotation and an independent pivot.
 - Automatically repeated parking modules, single-loaded or double-loaded aisles.
 - 45°, 60° or 90° bays with editable bay width/depth and drive-aisle width.
-- An unblocked entry spine, configurable entry side/width, optional accessible bays and transfer aisles.
-- Automatic capacity, an optional per-row cap, optional bay numbering, real markings and drainage detail.
+- An unblocked entry spine, configurable entry side/width, optional accessible bays and transfer aisles. Clipped drive aisles must connect to the actual footprint entry; disconnected rows are excluded with a warning.
+- Live capacity/row metrics, an optional per-row cap, optional bay numbering, adjustable procedural paint wear, real markings and drainage detail.
 - Bevelled curbs and a metric paved perimeter; no cars, trees, posts, buildings or furniture are generated with a parking surface.
 
-Changing dimensions regenerates the rows and stall geometry. Bays are clipped to the actual footprint and kept out of circulation space. Insufficient footprint/capacity produces a warning, not fake spaces. Parking is a bounded geometric layout generator, not a certified planning-code or swept-vehicle simulation.
+Changing dimensions regenerates the rows and stall geometry. Bays and 1.25 m transfer aisles are checked for overlap with one another and circulation. Paint, arrows and grates stay inside curved footprints; curb openings use exact entry widths and closed chamfer returns. Insufficient footprint/capacity produces a warning, not fake spaces. Parking is a bounded geometric layout generator, not a certified planning-code or swept-vehicle simulation.
 
 ### Included road networks
 
@@ -50,15 +50,17 @@ The diamond has about **5.79 m modeled clearance** and **6.49% maximum grade**. 
 
 ## Export
 
-| Format           | Content                                                                                                             |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------- |
-| **GLB**          | Indexed geometry, normals, metric UVs, original PBR materials, embedded albedo/normal/roughness textures and decals |
-| **OBJ ZIP**      | Triangles, face normals, UVs, MTL and PNG textures with UV-repeat transforms; extract the texture folder intact     |
-| **`.road.json`** | Editable v1 graph, relative handles, settings, junction setbacks and procedural surface parameters                  |
+| Format           | Content                                                                                                                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **GLB**          | Indexed geometry, normals, metric UVs, original PBR materials, embedded albedo/normal/roughness textures and decals                   |
+| **OBJ ZIP**      | Triangles, face normals, UVs, MTL, albedo/normal/roughness PNGs, `materials.json` and `IMPORT.txt`; extract the texture folder intact |
+| **`.road.json`** | Editable v1 graph, relative handles, settings, junction setbacks and procedural surface parameters                                    |
+
+OBJ uses `norm`/`map_Pr` PBR MTL extensions. Importers that ignore these extensions can use the material manifest or GLB. Albedo is sRGB; normal/roughness are linear data. Normals use **OpenGL +Y**: invert green for DirectX -Y shaders. UV repeats and normal strengths are recorded in the manifest.
 
 Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wireframe preview does not alter the original exported materials. No preview environment is exported. A final game's visual quality also depends on its texture resolution, material/shader integration, lighting, terrain and rendering pipeline; this editor does not claim to be a complete AAA environment renderer.
 
-The published standalone was verified byte-for-byte against the local deliverable. **74 CPU checks and 39 browser checks** pass, including the real parking controls, exports, absence of auto-generated props, mobile layout and offline use.
+The published standalone was verified byte-for-byte against the local deliverable. **96 CPU checks and 41 browser checks** pass, including the real parking controls, exports, absence of auto-generated props, mobile layout and offline use.
 
 ## Development and verification
 

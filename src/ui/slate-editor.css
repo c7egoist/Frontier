@@ -1381,3 +1381,26 @@ select:focus-visible,
   z-index: 1;
   cursor: pointer;
 }
+
+.layout-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  border-top: 1px solid #333;
+  margin-top: 22px;
+  padding-top: 18px;
+}
+.layout-metrics strong {
+  display: block;
+  font-size: 20px;
+  font-weight: 300;
+  color: #d5d5d5;
+  letter-spacing: -0.5px;
+}
+.layout-metrics span {
+  display: block;
+  font-size: 8px;
+  color: #737373;
+  letter-spacing: 1px;
+  margin-top: 7px;
+}

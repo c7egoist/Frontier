@@ -1,3 +1,14 @@
+import {
+  area2,
+  centroid2,
+  clipConvex2,
+  rect2,
+  inside2,
+  overlap2,
+  axisBoundary2,
+  bounds2,
+} from "./polygons";
+import type { V2 } from "./math";
 import { MeshBuilder } from "./geometry";
 import { siteOutline, sitePoint, insidePolygon, type Site } from "./sites";
 import {
@@ -25,15 +36,36 @@ export interface ParkingBay {
   corners: [number, number][];
   transferCorners?: [number, number][];
 }
+export interface ParkingCorridor {
+  polygon: V2[];
+  connected: boolean;
+}
 export interface ParkingPlan {
   bays: ParkingBay[];
   rows: number;
-  aisles: { z: number; width: number }[];
-  spine: { x: number; z: number; width: number; depth: number };
+  aisles: ({ z: number; width: number } & ParkingCorridor)[];
+  spine: { x: number; z: number; width: number; depth: number; polygon: V2[] };
+  entry: { center: V2; axis: 0 | 1; sign: number; width: number; apron: V2[] };
   rowDepth: number;
   warnings: string[];
 }
-/** Metric module solver. Footprint changes regenerate rows, stalls and circulation. */
+export function parkingFootprint(site: Site, inset = 0): V2[] {
+  return siteOutline({ ...site, position: [0, 0, 0], yaw: 0 }, inset).map(
+    (p) => [p[0], p[2]],
+  );
+}
+export function parkingEntry(site: Site) {
+  const footprint = parkingFootprint(site),
+    center = centroid2(footprint),
+    ns = site.entrance === "north" || site.entrance === "south",
+    axis: 0 | 1 = ns ? 1 : 0,
+    sign = site.entrance === "south" || site.entrance === "east" ? 1 : -1,
+    tangent = ns ? center[0] : center[1],
+    hit = axisBoundary2(footprint, tangent, axis, sign > 0);
+  const anchor: V2 = ns ? [tangent, hit ?? 0] : [hit ?? 0, tangent];
+  return { center: anchor, axis, sign, width: site.entryWidth };
+}
+/** Metric modules are clipped and joined to an actual entry corridor before allocating bays. */
 export function parkingPlan(site: Site): ParkingPlan {
   const angle = (site.parkingAngle * Math.PI) / 180,
     sin = Math.sin(angle),
@@ -56,49 +88,118 @@ export function parkingPlan(site: Site): ParkingPlan {
         : Math.max(0, Math.floor(coreD / moduleDepth)),
     count = site.parkingLayout === "double" ? Math.min(1, pairs) : pairs,
     single = site.parkingLayout === "single" && coreD >= rowDepth + aisle,
-    footprint = siteOutline(site, rim),
+    footprint = parkingFootprint(site, rim),
+    outer = parkingFootprint(site),
     bays: ParkingBay[] = [],
-    aisles: ParkingPlan["aisles"] = [],
-    warnings: string[] = [];
-  const ns = site.entrance === "north" || site.entrance === "south",
-    entry = site.entryWidth,
+    warnings: string[] = [],
+    entryBase = parkingEntry(site),
+    ns = entryBase.axis === 1,
+    e = site.entryWidth;
+  const sx = ns
+      ? entryBase.center[0]
+      : entryBase.center[0] - entryBase.sign * (rim + e / 2),
     spine = {
-      x: ns
-        ? 0
-        : (site.entrance === "west" ? -1 : 1) *
-          (site.width / 2 - rim - entry / 2),
+      x: sx,
       z: 0,
-      width: entry,
-      depth: coreD,
+      width: e,
+      depth: Math.max(0, coreD),
+      polygon: clipConvex2(rect2(sx, 0, e, Math.max(0, coreD)), footprint),
     };
-  const rowSpecs: { z: number; side: number; row: number }[] = [];
+  const apronRect = ns
+    ? rect2(
+        sx,
+        entryBase.center[1] - (entryBase.sign * (rim + e / 2)) / 2,
+        e,
+        rim + e / 2 + 0.05,
+      )
+    : rect2(
+        entryBase.center[0] - (entryBase.sign * (rim + e)) / 2,
+        entryBase.center[1],
+        rim + e + 0.05,
+        e,
+      );
+  const entry = { ...entryBase, apron: clipConvex2(apronRect, outer) };
+  const aisles: ParkingPlan["aisles"] = [],
+    specs: { z: number; side: number; row: number; aisle: number }[] = [];
+  const makeAisle = (z: number) => {
+    aisles.push({
+      z,
+      width: aisle,
+      polygon: clipConvex2(rect2(0, z, Math.max(0, coreW), aisle), footprint),
+      connected: false,
+    });
+    return aisles.length - 1;
+  };
   if (single) {
-    const z = -coreD / 2 + rowDepth / 2;
-    rowSpecs.push({ z, side: -1, row: 0 });
-    aisles.push({ z: z + rowDepth / 2 + aisle / 2, width: aisle });
+    const z = -coreD / 2 + rowDepth / 2,
+      index = makeAisle(z + rowDepth / 2 + aisle / 2);
+    specs.push({ z, side: -1, row: 0, aisle: index });
   } else
     for (let i = 0; i < count; i++) {
-      const z = (i - (count - 1) / 2) * moduleDepth;
-      aisles.push({ z, width: aisle });
-      rowSpecs.push(
-        { z: z - aisle / 2 - rowDepth / 2, side: -1, row: i * 2 },
-        { z: z + aisle / 2 + rowDepth / 2, side: 1, row: i * 2 + 1 },
+      const z = (i - (count - 1) / 2) * moduleDepth,
+        index = makeAisle(z);
+      specs.push(
+        { z: z - aisle / 2 - rowDepth / 2, side: -1, row: i * 2, aisle: index },
+        {
+          z: z + aisle / 2 + rowDepth / 2,
+          side: 1,
+          row: i * 2 + 1,
+          aisle: index,
+        },
       );
     }
-  if (!rowSpecs.length)
+  if (!specs.length)
     warnings.push(
       "Footprint is too shallow for the selected bay and aisle dimensions.",
     );
+  const reachesEntry = overlap2(spine.polygon, entry.apron);
+  for (const a of aisles)
+    a.connected = reachesEntry && overlap2(a.polygon, spine.polygon);
+  let isolated = 0;
+  for (const spec of specs) if (!aisles[spec.aisle].connected) isolated++;
+  if (isolated)
+    warnings.push(
+      `${isolated} proposed rows are outside the entry-connected circulation; they are excluded.`,
+    );
+  if (!reachesEntry && specs.length)
+    warnings.push(
+      "The entry does not reach a driveable spine within this footprint. Choose another side or widen the footprint.",
+    );
   let accessibleLeft = site.accessible;
-  const priority =
-    site.entrance === "south" ? [...rowSpecs].reverse() : rowSpecs;
+  const priority = site.entrance === "south" ? [...specs].reverse() : specs,
+    occupied = new Map<string, V2[][]>();
+  const cells = (p: V2[]) => {
+    const b = bounds2(p),
+      keys: string[] = [];
+    for (let x = Math.floor(b.minX / 6); x <= Math.floor(b.maxX / 6); x++)
+      for (let z = Math.floor(b.minZ / 6); z <= Math.floor(b.maxZ / 6); z++)
+        keys.push(`${x}:${z}`);
+    return keys;
+  };
+  const collisions = (p: V2[]) => {
+    const candidates = new Set(
+      cells(p).flatMap((key) => occupied.get(key) ?? []),
+    );
+    return [...candidates].some((o) => overlap2(p, o));
+  };
+  const remember = (p: V2[]) => {
+    for (const key of cells(p)) {
+      if (!occupied.has(key)) occupied.set(key, []);
+      occupied.get(key)!.push(p);
+    }
+  };
+  const circulation = [
+    spine.polygon,
+    ...aisles.filter((a) => a.connected).map((a) => a.polygon),
+  ];
   for (const spec of priority) {
-    const minX = -coreW / 2 + (site.entrance === "west" ? entry : 0),
-      maxX = coreW / 2 - (site.entrance === "east" ? entry : 0);
-    const segments = ns
+    if (!aisles[spec.aisle].connected) continue;
+    const minX = site.entrance === "west" ? spine.x + e / 2 : -coreW / 2,
+      maxX = site.entrance === "east" ? spine.x - e / 2 : coreW / 2,
+      segments = ns
         ? [
-            [minX, -entry / 2 - 0.15],
-            [entry / 2 + 0.15, maxX],
+            [minX, spine.x - e / 2 - 0.15],
+            [spine.x + e / 2 + 0.15, maxX],
           ]
         : [[minX, maxX]],
       rowCandidates: ParkingBay[] = [];
@@ -120,50 +221,45 @@ export function parkingPlan(site: Site): ParkingPlan {
           x = cursor + pitch / 2,
           depth = site.bayDepth,
           side = spec.side,
-          forward: [number, number] = [cos * side, sin * side],
-          right: [number, number] = [sin, -cos],
-          corners: [number, number][] = [
+          forward: V2 = [cos * side, sin * side],
+          right: V2 = [sin, -cos];
+        const rect = (offset: number, w: number): V2[] =>
+          [
             [-1, -1],
             [1, -1],
             [1, 1],
             [-1, 1],
           ].map(([a, b]) => [
-            x + (right[0] * a * width) / 2 + (forward[0] * b * depth) / 2,
-            spec.z + (right[1] * a * width) / 2 + (forward[1] * b * depth) / 2,
+            x +
+              right[0] * (offset + (a * w) / 2) +
+              (forward[0] * b * depth) / 2,
+            spec.z +
+              right[1] * (offset + (a * w) / 2) +
+              (forward[1] * b * depth) / 2,
           ]);
+        const corners = rect(0, width),
+          transferCorners = accessible
+            ? rect(width / 2 + 0.625, 1.25)
+            : undefined;
         cursor += pitch;
         used++;
         if (site.bays > 0 && rowCandidates.length >= site.bays) break;
         const xMin = Math.min(...corners.map((p) => p[0])),
-          xMax = Math.max(...corners.map((p) => p[0]));
-        if (xMax > hi - 0.12 || xMin < lo + 0.05) continue;
+          xMax = Math.max(...corners.map((p) => p[0])),
+          transfer = accessible ? 1.25 / sin : 0;
         if (
-          !corners.every(([x, z]) =>
-            insidePolygon(sitePoint(site, x, z), footprint),
-          )
+          xMax > hi - 0.12 ||
+          xMin < lo + 0.05 ||
+          (transfer && xMax + transfer > hi - 0.05)
         )
           continue;
-        const transfer = accessible ? 1.25 / sin : 0;
-        if (transfer && xMax + transfer > hi - 0.05) continue;
-        const transferCorners: [number, number][] | undefined = accessible
-          ? [
-              [-1, -1],
-              [1, -1],
-              [1, 1],
-              [-1, 1],
-            ].map(([a, b]) => [
-              x +
-                right[0] * (width / 2 + 0.625 + a * 0.625) +
-                (forward[0] * b * depth) / 2,
-              spec.z +
-                right[1] * (width / 2 + 0.625 + a * 0.625) +
-                (forward[1] * b * depth) / 2,
-            ])
-          : undefined;
+        const shapes = transferCorners ? [corners, transferCorners] : [corners];
         if (
-          transferCorners &&
-          !transferCorners.every(([x, z]) =>
-            insidePolygon(sitePoint(site, x, z), footprint),
+          shapes.some(
+            (p) =>
+              !p.every((v) => inside2(footprint, v)) ||
+              circulation.some((c) => overlap2(p, c)) ||
+              collisions(p),
           )
         )
           continue;
@@ -181,6 +277,7 @@ export function parkingPlan(site: Site): ParkingPlan {
           aisle: accessible ? xMax + transfer / 2 : undefined,
           transferCorners,
         });
+        shapes.forEach(remember);
         if (accessible) {
           accessibleLeft--;
           cursor += transfer;
@@ -196,7 +293,15 @@ export function parkingPlan(site: Site): ParkingPlan {
     warnings.push(
       `${accessibleLeft} requested accessible spaces do not fit the current footprint.`,
     );
-  return { bays, rows: rowSpecs.length, aisles, spine, rowDepth, warnings };
+  return {
+    bays,
+    rows: specs.filter((s) => aisles[s.aisle].connected).length,
+    aisles,
+    spine,
+    entry,
+    rowDepth,
+    warnings,
+  };
 }
 export const parkingLayout = (site: Site) => parkingPlan(site).bays;
 
@@ -208,16 +313,33 @@ function localPoint(site: Site, p: V3): [number, number] {
     q[0] * Math.sin(a) + q[2] * Math.cos(a),
   ];
 }
+function entryFace(site: Site, a: V3, z: V3) {
+  const p = localPoint(site, a),
+    q = localPoint(site, z),
+    entry = parkingEntry(site),
+    outward: V2 = [q[1] - p[1], p[0] - q[0]];
+  return outward[entry.axis] * entry.sign > 1e-8;
+}
 function openEntry(site: Site, p: V3) {
-  const [x, z] = localPoint(site, p),
-    h = site.entryWidth / 2;
-  return site.entrance === "north"
-    ? z < -site.depth / 2 + 0.6 && Math.abs(x) < h
-    : site.entrance === "south"
-      ? z > site.depth / 2 - 0.6 && Math.abs(x) < h
-      : site.entrance === "east"
-        ? x > site.width / 2 - 0.6 && Math.abs(z) < h
-        : x < -site.width / 2 + 0.6 && Math.abs(z) < h;
+  const entry = parkingEntry(site),
+    q = localPoint(site, p),
+    tangent = entry.axis === 0 ? 1 : 0;
+  return Math.abs(q[tangent] - entry.center[tangent]) < entry.width / 2 + 1e-8;
+}
+function entryCuts(site: Site, a: V3, z: V3) {
+  const entry = parkingEntry(site),
+    tangent = entry.axis === 0 ? 1 : 0,
+    p = localPoint(site, a),
+    q = localPoint(site, z),
+    cuts = [0, 1],
+    delta = q[tangent] - p[tangent];
+  if (Math.abs(delta) > 1e-9)
+    for (const sign of [-1, 1]) {
+      const t =
+        (entry.center[tangent] + (sign * entry.width) / 2 - p[tangent]) / delta;
+      if (t > 1e-9 && t < 1 - 1e-9) cuts.push(t);
+    }
+  return cuts.sort((a, b) => a - b);
 }
 function paintLine(
   b: MeshBuilder,
@@ -227,15 +349,30 @@ function paintLine(
   width = 0.095,
   material = "paint",
 ) {
-  const p = sitePoint(site, ...a, 0.124),
-    q = sitePoint(site, ...z, 0.124),
-    n = mul(normalXZ(normalizeXZ(sub(q, p))), width / 2);
-  b.quad(
-    "marking",
-    material,
-    [sub(p, n), add(p, n), add(q, n), sub(q, n)],
-    true,
-  );
+  const d = normalizeXZ([z[0] - a[0], 0, z[1] - a[1]]),
+    n: V2 = [(-d[2] * width) / 2, (d[0] * width) / 2],
+    quad: V2[] = [
+      [a[0] - n[0], a[1] - n[1]],
+      [a[0] + n[0], a[1] + n[1]],
+      [z[0] + n[0], z[1] + n[1]],
+      [z[0] - n[0], z[1] - n[1]],
+    ],
+    polygon = clipConvex2(
+      quad,
+      parkingFootprint(site, site.perimeterWidth + 0.22),
+    );
+  const key =
+    material === "paint"
+      ? `paint-wear-${Math.round(site.paintWear * 20) * 5}`
+      : material;
+  if (polygon.length >= 3)
+    b.polygon(
+      "marking",
+      key,
+      polygon.map((p) => sitePoint(site, p[0], p[1], 0.124)),
+      undefined,
+      true,
+    );
 }
 function groundDecal(
   b: MeshBuilder,
@@ -294,34 +431,60 @@ export function buildSiteGeometry(site: Site) {
   ];
   for (let i = 0; i < outline.length; i++) {
     const k = (i + 1) % outline.length,
-      steps = Math.max(1, Math.ceil(distanceXZ(outline[i], outline[k]) / 1.2));
-    for (let part = 0; part < steps; part++) {
-      const t = part / steps,
-        u = (part + 1) / steps;
-      if (
-        site.kind === "parking" &&
-        openEntry(site, lerp(outline[i], outline[k], (t + u) / 2))
-      )
-        continue;
-      for (let row = 0; row < curbRows.length - 1; row++) {
-        const a = curbRows[row],
-          z = curbRows[row + 1];
-        b.quad(
-          "curb",
-          "curb",
-          [
-            lerp(a[i], a[k], t),
-            lerp(a[i], a[k], u),
-            lerp(z[i], z[k], u),
-            lerp(z[i], z[k], t),
-          ],
-          row === 1 || row === 2 || row === 3,
-        );
+      cuts =
+        site.kind === "parking"
+          ? entryCuts(site, outline[i], outline[k])
+          : [0, 1],
+      faces =
+        site.kind === "parking" && entryFace(site, outline[i], outline[k]);
+    const cap = (t: number) => {
+      const points = curbRows.map((row) => lerp(row[i], row[k], t));
+      b.append("curb", "curb", points, [0, 1, 2, 0, 2, 3, 0, 3, 4, 0, 4, 5]);
+    };
+    for (let interval = 0; interval < cuts.length - 1; interval++) {
+      const start = cuts[interval],
+        end = cuts[interval + 1],
+        mid = lerp(outline[i], outline[k], (start + end) / 2);
+      if (faces && openEntry(site, mid)) continue;
+      const steps = Math.max(
+        1,
+        Math.ceil((distanceXZ(outline[i], outline[k]) * (end - start)) / 1.2),
+      );
+      for (let part = 0; part < steps; part++) {
+        const t = start + ((end - start) * part) / steps,
+          u = start + ((end - start) * (part + 1)) / steps;
+        for (let row = 0; row < curbRows.length - 1; row++) {
+          const a = curbRows[row],
+            z = curbRows[row + 1];
+          b.quad(
+            "curb",
+            "curb",
+            [
+              lerp(a[i], a[k], t),
+              lerp(a[i], a[k], u),
+              lerp(z[i], z[k], u),
+              lerp(z[i], z[k], t),
+            ],
+            row > 0 && row < 4,
+          );
+        }
+      }
+      if (faces) {
+        if (start > 1e-8) cap(start);
+        if (end < 1 - 1e-8) cap(end);
       }
     }
   }
   if (site.kind === "parking") {
     const plan = parkingPlan(site);
+    if (plan.entry.apron.length >= 3)
+      b.polygon(
+        "parking",
+        "asphalt",
+        plan.entry.apron.map((p) => sitePoint(site, p[0], p[1], 0.122)),
+        undefined,
+        true,
+      );
     for (const slot of plan.bays) {
       const [a, z, c, d] = slot.corners;
       paintLine(b, site, a, d);
@@ -357,10 +520,12 @@ export function buildSiteGeometry(site: Site) {
         );
     }
     // Circulation arrows are positioned only in verified driveable aisles.
-    for (const aisle of plan.aisles) {
+    for (const aisle of plan.aisles.filter((a) => a.connected)) {
       for (const x of [-site.width * 0.24, site.width * 0.24]) {
         const direction = x < 0 ? 1 : -1,
           z = aisle.z;
+        if (!rect2(x, z, 1.55, 0.85).every((p) => inside2(aisle.polygon, p)))
+          continue;
         paintLine(
           b,
           site,
@@ -394,7 +559,15 @@ export function buildSiteGeometry(site: Site) {
             0,
             Math.cos((site.yaw * Math.PI) / 180),
           ];
-        if (openEntry(site, sitePoint(site, x, (side * site.depth) / 2)))
+        const footprint = parkingFootprint(site);
+        if (!rect2(x, z, 0.62, 0.3).every((p) => inside2(footprint, p)))
+          continue;
+        const entry = parkingEntry(site);
+        if (
+          entry.axis === 1 &&
+          side === entry.sign &&
+          openEntry(site, sitePoint(site, x, z))
+        )
           continue;
         b.box("drain", "steel-dark", center, 0.6, 0.014, 0.28, dir);
         for (let g = -0.24; g < 0.26; g += 0.06)

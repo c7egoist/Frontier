@@ -6,7 +6,7 @@ import {
   type Site,
   type SiteKind,
 } from "./core/sites";
-import { parkingLayout } from "./core/site-geometry";
+import { parkingLayout, parkingPlan } from "./core/site-geometry";
 import "./style.css";
 import "./ui/slate-editor.css";
 import { zipSync, strToU8 } from "fflate";
@@ -388,6 +388,7 @@ function setLayout(layout: string) {
     );
 }
 function updateStats() {
+  syncSiteMetrics();
   const error = network.diagnostics.some((d) => d.level === "error"),
     warn = network.diagnostics.length > 0;
   $("status-health").textContent = error
@@ -417,7 +418,10 @@ function updateStats() {
   );
   const text =
     selection?.kind === "site"
-      ? `${Math.round(Math.abs(polygonArea(siteOutline(project.sites!.find((s) => s.id === selection!.id)!))))} m² site · ${network.parkingSpaces} parking spaces`
+      ? (() => {
+          const s = project.sites!.find((s) => s.id === selection!.id)!;
+          return `${Math.round(Math.abs(polygonArea(siteOutline(s))))} m² surface${s.kind === "parking" ? ` · ${parkingLayout(s).length} stalls in this lot` : ""}`;
+        })()
       : selection?.kind === "node"
         ? `${connected(project, selection.id).length} connected approaches`
         : selection
@@ -426,6 +430,18 @@ function updateStats() {
   $("selection-health").innerHTML =
     `<div class="selection-health ${relevant.length ? "warning" : ""}">${icon(relevant.length ? "circle-alert" : "circle-check")}<span>${relevant.length ? "Geometry warning" : text}<small>${relevant.length ? escape(relevant[0].message) : selection?.kind === "node" ? "One pivot. Every connection follows." : "Meters · Y-up · Engine-ready mesh"}</small></span></div>`;
   refreshIcons();
+}
+function syncSiteMetrics() {
+  if (selection?.kind !== "site") return;
+  const site = project.sites?.find((s) => s.id === selection!.id);
+  if (!site || site.kind !== "parking") return;
+  const p = parkingPlan(site);
+  document
+    .querySelectorAll<HTMLElement>('[data-site-stat="capacity"]')
+    .forEach((e) => (e.textContent = `${p.bays.length} stalls`));
+  document
+    .querySelectorAll<HTMLElement>('[data-site-stat="rows"]')
+    .forEach((e) => (e.textContent = `${p.rows} rows`));
 }
 function renderOutliner() {
   const query = ($("scene-search") as HTMLInputElement).value.toLowerCase();
@@ -518,7 +534,7 @@ function transformControls(position: V3, note: string) {
 function renderSiteInspector(site: Site) {
   const entry = siteCatalog.find((s) => s.id === site.kind)!,
     area = Math.round(Math.abs(polygonArea(siteOutline(site))));
-  let body = `<div class="selected-object"><div class="object-icon">${icon(entry.icon)}</div><div class="object-title"><span class="eyebrow">${site.kind === "parking" ? "PROCEDURAL LAYOUT" : "PAVING GEOMETRY"}</span><h1>${escape(site.name)}</h1><span class="type-pill"><span></span>${area} m² / ${site.kind === "parking" ? `${parkingLayout(site).length} stalls` : "metric surface"}</span></div><button class="icon-button object-actions" data-inspector-action="rename" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs">${["geometry", "surface", "details"].map((t) => `<button data-inspector-tab="${t}" class="${inspectorTab === t ? "active" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</nav>`;
+  let body = `<div class="selected-object"><div class="object-icon">${icon(entry.icon)}</div><div class="object-title"><span class="eyebrow">${site.kind === "parking" ? "PROCEDURAL LAYOUT" : "PAVING GEOMETRY"}</span><h1>${escape(site.name)}</h1><span class="type-pill"><span></span>${area} m² / <output data-site-stat="capacity">${site.kind === "parking" ? `${parkingLayout(site).length} stalls` : "metric surface"}</output></span></div><button class="icon-button object-actions" data-inspector-action="rename" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs">${["geometry", "surface", "details"].map((t) => `<button data-inspector-tab="${t}" class="${inspectorTab === t ? "active" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</nav>`;
   if (inspectorTab === "geometry") {
     body += transformControls(
       site.position,
@@ -553,7 +569,7 @@ function renderSiteInspector(site: Site) {
           range("bayWidth", "Bay width", site.bayWidth, 2.4, 3.6, 0.1) +
           range("bayDepth", "Bay depth", site.bayDepth, 4.5, 6.5, 0.1) +
           range("aisleWidth", "Drive aisle", site.aisleWidth, 4, 9, 0.1) +
-          `<p class="card-note">Rows and capacity regenerate from the footprint. Entry and transfer clearances are excluded from stall placement.</p>`,
+          `<div class="layout-metrics"><div><strong data-site-stat="capacity">${parkingLayout(site).length} stalls</strong><span>GENERATED CAPACITY</span></div><div><strong data-site-stat="rows">${parkingPlan(site).rows} rows</strong><span>CONNECTED MODULES</span></div></div><p class="card-note">Rows and capacity regenerate from the footprint. Entry and transfer clearances are excluded from stall placement.</p>`,
       );
   } else if (inspectorTab === "surface")
     body += card(
@@ -608,7 +624,8 @@ function renderSiteInspector(site: Site) {
             site.numbering,
             "Optional stencil decals",
           ) +
-          range("bays", "Row cap / 0 = auto", site.bays, 0, 70, 1, ""),
+          range("bays", "Row cap / 0 = auto", site.bays, 0, 70, 1, "") +
+          range("paintWear", "Paint wear", site.paintWear, 0, 0.35, 0.05, ""),
       );
   }
   $("inspector-content").innerHTML = body;
@@ -646,7 +663,7 @@ function networkPreview(id: string) {
 }
 function beginPlace(kind: SiteKind) {
   if (!siteCatalog.some((s) => s.id === kind)) {
-    toast("Unknown public-realm asset.", true);
+    toast("Unknown procedural surface.", true);
     return;
   }
   placementKind = kind;
@@ -1261,7 +1278,7 @@ function openRename() {
   if (!selection) return;
   openModal(
     modalHeader("SELECTED OBJECT", "Give it a name.") +
-      `<form id="rename-form" class="help-body"><label for="rename-input" style="display:block;margin-bottom:12px">Object name</label><input id="rename-input" maxlength="80" required value="${escape(selectedName())}" style="width:100%;padding:12px;border:1px solid #414b58;border-radius:5px;background:#242b33"/><button type="submit" class="rebuild-button" style="margin-top:20px">${icon("check")}Rename object</button></form>`,
+      `<form id="rename-form" class="help-body"><label for="rename-input" style="display:block;margin-bottom:12px">Object name</label><input id="rename-input" maxlength="80" required value="${escape(selectedName())}" style="width:100%;padding:12px;border:1px solid #3a3a3a;border-radius:5px;background:#242424"/><button type="submit" class="rebuild-button" style="margin-top:20px">${icon("check")}Rename object</button></form>`,
   );
   ($("rename-input") as HTMLInputElement).select();
 }
@@ -1291,7 +1308,15 @@ function slug() {
       .replace(/^-|-$/g, "") || "frontier-network"
   );
 }
+let exportBusy = false;
 async function exportProject(format: string) {
+  if (format !== "json" && exportBusy) {
+    toast("A geometry export is already being packaged.");
+    return;
+  }
+  if (format !== "json") exportBusy = true;
+  const exportName = slug(),
+    exportTriangles = network.triangles;
   try {
     if (format === "json") {
       download(
@@ -1329,7 +1354,9 @@ async function exportProject(format: string) {
           { level: 5 },
         );
       download(archive, `${base}-obj.zip`, "application/zip");
-      toast("OBJ mesh + MTL + procedural PNG textures exported.");
+      toast(
+        "OBJ + MTL + albedo/normal/roughness textures and material manifest exported.",
+      );
       return;
     }
     if (!scene) {
@@ -1338,9 +1365,9 @@ async function exportProject(format: string) {
     }
     toast("Packaging geometry and paving materials…");
     const buffer = await scene.exportGLB();
-    download(buffer, `${slug()}.glb`, "model/gltf-binary");
+    download(buffer, `${exportName}.glb`, "model/gltf-binary");
     toast(
-      `GLB exported · ${compact(network.triangles)} triangles · embedded materials.`,
+      `GLB exported · ${compact(exportTriangles)} triangles · embedded materials.`,
     );
   } catch (error) {
     toast(
@@ -1349,6 +1376,8 @@ async function exportProject(format: string) {
         : "Export failed.",
       true,
     );
+  } finally {
+    if (format !== "json") exportBusy = false;
   }
 }
 function doAction(action: string) {
