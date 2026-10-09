@@ -24,6 +24,7 @@
     "@playwright/test": "^1.56.0",
     "@sparticuz/chromium": "^140.0.0",
     "@types/earcut": "^3.0.0",
+    "@types/node": "^22.20.5",
     "@types/three": "^0.180.0",
     "prettier": "^3.9.9",
     "tsx": "^4.20.6",

@@ -255,6 +255,16 @@ try {
     );
     assert(obj.includes("vn "));
     assert(!obj.includes("NaN"));
+    assert(names.some((n) => n.startsWith("textures/") && n.endsWith(".png")));
+    const mtl = new TextDecoder().decode(
+      files[names.find((n) => n.endsWith(".mtl"))],
+    );
+    assert(mtl.includes("map_Kd -s .") || mtl.includes("map_Kd -s 0.5"));
+    for (const path of names.filter((n) => n.endsWith(".png")))
+      assert.equal(
+        Buffer.from(files[path]).toString("hex", 0, 8),
+        "89504e470d0a1a0a",
+      );
   });
   await test("JSON download and local save preserve the editable graph", async () => {
     await page.keyboard.press("Control+s");
@@ -427,6 +437,232 @@ try {
       0,
     );
   });
+  await test("dark graphite UI retains the linked editor layout", async () => {
+    assert.equal(
+      await page
+        .locator(".app-header")
+        .evaluate((e) => getComputedStyle(e).backgroundColor),
+      "rgb(19, 22, 25)",
+    );
+    assert(await page.locator('[data-library="sites"]').isVisible());
+    assert.equal(await page.locator(".canvas-host>canvas").count(), 2);
+  });
+  for (const id of [
+    "merge",
+    "urban",
+    "signal",
+    "cloverleaf",
+    "trumpet",
+    "race",
+    "waterfront",
+  ])
+    await test(`${id} template renders real editable geometry without errors`, async () => {
+      await page.evaluate((id) => window.frontier.loadTemplate(id), id);
+      const s = await state();
+      assert.equal(s.diagnostics.length, 0);
+      assert(s.triangles > 10000);
+      assert.equal(
+        await page.locator("#scene-gizmo").getAttribute("hidden"),
+        null,
+      );
+      await page.screenshot({ path: resolve(cache, `${id}.png`) });
+    });
+  await test("merge setback moves the paving mouth, not the shared joint position", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("merge"));
+    const before = await page.evaluate(() => ({
+      p: window.frontier.getProject().nodes[0].position,
+      trim: window.frontier
+        .getNetwork()
+        .spans.find((s) => s.road.name === "Through avenue").frames[0].s,
+    }));
+    await page.locator('input[data-prop="setback"]').focus();
+    await page.locator('input[data-prop="setback"]').press("ArrowRight");
+    const after = await page.evaluate(() => ({
+      p: window.frontier.getProject().nodes[0].position,
+      trim: window.frontier
+        .getNetwork()
+        .spans.find((s) => s.road.name === "Through avenue").frames[0].s,
+    }));
+    assert.deepEqual(after.p, before.p);
+    assert(Math.abs(after.trim - before.trim - 1) < 1e-6);
+    await undo();
+  });
+  let placedId;
+  await test("parking asset is placed in plan as a separate, selectable site", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("district"));
+    const before = await state();
+    await page.locator('[data-library="sites"]').click();
+    await page
+      .locator('[data-asset-action="site"][data-asset="parking"]')
+      .click();
+    const q = await page.evaluate(() =>
+      window.frontier.worldToPlan([-62, 0, 80]),
+    );
+    const box = await page.locator("#plan-host").boundingBox();
+    await page.mouse.click(box.x + q[0], box.y + q[1]);
+    const s = await state();
+    assert.equal(s.project.sites.length, before.project.sites.length + 1);
+    assert.deepEqual(s.project.roads, before.project.roads);
+    assert.deepEqual(s.project.nodes, before.project.nodes);
+    placedId = s.selection.id;
+    assert.equal(s.selection.kind, "site");
+    assert(s.meshes.some((m) => m.owner === placedId && m.kind === "parking"));
+    assert(await page.locator('input[data-prop="width"]').isVisible());
+    assert.equal(
+      await page.locator("#scene-gizmo").getAttribute("hidden"),
+      null,
+    );
+  });
+  await test("site footprint and numeric transform controls rebuild and undo independently", async () => {
+    const old = (await state()).project.sites.find((s) => s.id === placedId);
+    await page.locator('input[data-prop="width"]').focus();
+    await page.locator('input[data-prop="width"]').press("ArrowRight");
+    assert.equal(
+      (await state()).project.sites.find((s) => s.id === placedId).width,
+      old.width + 1,
+    );
+    await undo();
+    await page.locator('[data-position="0"]').fill(String(old.position[0] + 4));
+    await page.locator('[data-position="0"]').press("Tab");
+    assert.equal(
+      (await state()).project.sites.find((s) => s.id === placedId).position[0],
+      old.position[0] + 4,
+    );
+    await undo();
+  });
+  await test("3D Y-axis gizmo moves the site, not the connected road graph", async () => {
+    const before = await state(),
+      origin = before.project.sites.find((s) => s.id === placedId).position;
+    const g = await page
+        .locator("#scene-gizmo .axis-y .axis-hit")
+        .evaluate((e) => ({
+          x1: Number(e.getAttribute("x1")),
+          x2: Number(e.getAttribute("x2")),
+          y1: Number(e.getAttribute("y1")),
+          y2: Number(e.getAttribute("y2")),
+        })),
+      r = await page.locator("#scene-host").boundingBox();
+    const x = r.x + g.x1 * 0.3 + g.x2 * 0.7,
+      y = r.y + g.y1 * 0.3 + g.y2 * 0.7;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y - 18, { steps: 4 });
+    await page.mouse.up();
+    const s = await state(),
+      position = s.project.sites.find((s) => s.id === placedId).position;
+    assert(position[1] > origin[1]);
+    assert.equal(position[0], origin[0]);
+    assert.equal(position[2], origin[2]);
+    assert.deepEqual(s.project.nodes, before.project.nodes);
+    await undo();
+  });
+  await test("2D site pivot drag preserves the road graph and can be undone", async () => {
+    const before = await state(),
+      origin = before.project.sites.find((s) => s.id === placedId).position;
+    const q = await page.evaluate(
+      (p) => window.frontier.worldToPlan(p),
+      origin,
+    );
+    const box = await page.locator("#plan-host").boundingBox();
+    await page.mouse.move(box.x + q[0], box.y + q[1]);
+    await page.mouse.down();
+    await page.mouse.move(box.x + q[0] + 14, box.y + q[1] - 8, { steps: 4 });
+    await page.mouse.up();
+    const s = await state(),
+      after = s.project.sites.find((s) => s.id === placedId).position;
+    assert.notDeepEqual(after, origin);
+    assert.deepEqual(s.project.roads, before.project.roads);
+    await undo();
+  });
+  await test("modern site paving has nine choices and is included in real geometry", async () => {
+    await page.locator('[data-inspector-tab="surface"]').click();
+    assert.equal(await page.locator("[data-pattern]").count(), 9);
+    await page.locator('[data-pattern="terrazzo"]').click();
+    assert.equal(
+      (await state()).project.sites.find((s) => s.id === placedId).pattern,
+      "terrazzo",
+    );
+    assert(
+      (await state()).meshes.some(
+        (m) => m.owner === placedId && m.material === "paving-terrazzo",
+      ),
+    );
+    await undo();
+  });
+  await test("deleting and undoing a site never removes or disconnects roads", async () => {
+    const before = await state();
+    await page.keyboard.press("Delete");
+    const s = await state();
+    assert(!s.project.sites.some((s) => s.id === placedId));
+    assert.deepEqual(s.project.roads, before.project.roads);
+    assert.deepEqual(s.project.nodes, before.project.nodes);
+    await undo();
+    assert((await state()).project.sites.some((s) => s.id === placedId));
+  });
+  await test("road signs, lights and pedestrian rails are actual editable mesh groups", async () => {
+    await page.evaluate(() => {
+      window.frontier.loadTemplate("district");
+      window.frontier.select({ kind: "road", id: "r02" });
+    });
+    await page.locator('[data-inspector-tab="details"]').click();
+    await page
+      .getByRole("checkbox", { name: "Road signs", exact: true })
+      .check();
+    await page
+      .getByRole("checkbox", { name: "Street lighting", exact: true })
+      .check();
+    await page
+      .getByRole("checkbox", { name: "W-beam guardrails", exact: true })
+      .check();
+    await page.locator('[data-prop="railStyle"]').selectOption("railing");
+    const s = await state();
+    assert(
+      s.meshes.some(
+        (m) => m.owner === "r02" && m.material.startsWith("sign-speed-"),
+      ),
+    );
+    assert(s.meshes.some((m) => m.owner === "r02" && m.kind === "lamp"));
+    assert(
+      s.meshes.some(
+        (m) => m.owner === "r02" && m.kind === "rail" && m.material === "pole",
+      ),
+    );
+  });
+  await test("signals are visible geometry and the junction toggle removes them", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("signal"));
+    assert((await state()).meshes.some((m) => m.material === "signal-red"));
+    await page
+      .getByRole("checkbox", { name: "Traffic signals", exact: true })
+      .uncheck();
+    assert(!(await state()).meshes.some((m) => m.material === "signal-red"));
+    await undo();
+  });
+  await test("racing GLB exports sites, signs, rumble textures and original normal maps", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("race"));
+    await page.locator("#shade-style").selectOption("clay");
+    await page.locator('[data-menu="export-menu"]').click();
+    const promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="glb"]').click();
+    const d = await promise,
+      b = await readFile(await d.path());
+    assert.equal(b.toString("ascii", 0, 4), "glTF");
+    assert.equal(b.readUInt32LE(8), b.length);
+    const g = JSON.parse(b.subarray(20, 20 + b.readUInt32LE(12)).toString());
+    assert(
+      g.materials.some(
+        (m) =>
+          m.name === "race-curb" && m.pbrMetallicRoughness.baseColorTexture,
+      ),
+    );
+    assert(
+      g.materials.some((m) => m.name === "paving-ashlar" && m.normalTexture),
+    );
+    assert(g.materials.some((m) => m.name === "sign-speed-40"));
+    assert(g.nodes.some((n) => n.extras?.kind === "site"));
+    assert(g.images.every((i) => i.bufferView !== undefined));
+    assert(!g.nodes.some((n) => n.name === "Context terrain"));
+    await page.locator("#shade-style").selectOption("shaded");
+  });
   await test("mobile layout keeps both views usable without horizontal overflow", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("district"));
     await page.setViewportSize({ width: 390, height: 844 });
@@ -467,6 +703,20 @@ try {
     );
     assert.equal(offlineErrors.length, 0, offlineErrors.join("\n"));
     assert.deepEqual(requests, []);
+    await offline.evaluate(() => window.frontier.loadTemplate("race"));
+    assert.equal(
+      await offline.evaluate(() => window.frontier.getProject().roads.length),
+      13,
+    );
+    assert(
+      await offline.evaluate(() =>
+        window.frontier
+          .getNetwork()
+          .meshes.some((m) => m.material === "race-curb"),
+      ),
+    );
+    assert.deepEqual(requests, []);
+    assert.deepEqual(offlineErrors, []);
     await offline.screenshot({ path: resolve(cache, "offline.png") });
     await offline.close();
   });

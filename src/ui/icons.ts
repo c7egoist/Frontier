@@ -63,6 +63,11 @@ import {
   Cable,
   RotateCcw,
   GripVertical,
+  Building2,
+  SquareParking,
+  Landmark,
+  Waves,
+  Signpost,
 } from "lucide";
 const icons = {
   MousePointer2,
@@ -128,6 +133,11 @@ const icons = {
   Cable,
   RotateCcw,
   GripVertical,
+  Building2,
+  SquareParking,
+  Landmark,
+  Waves,
+  Signpost,
 };
 export function refreshIcons() {
   createIcons({ icons, attrs: { "stroke-width": 1.65 } });
@@ -145,15 +155,25 @@ export const escape = (s: string) =>
 
 export function assetSketch(type: string): string {
   const colors = {
-    road: "#5e705f",
-    curb: "#b4c6a7",
-    pave: "#899d7f",
-    paint: "#d5e2c5",
+    road: "#475867",
+    curb: "#bdcbd5",
+    pave: "#91a3b1",
+    paint: "#dde7ef",
   };
   const begin =
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 72" fill="none">',
     end = "</svg>";
-  if (["urban", "arterial", "highway", "path"].includes(type)) {
+  if (
+    [
+      "urban",
+      "arterial",
+      "highway",
+      "path",
+      "race",
+      "boulevard",
+      "promenade",
+    ].includes(type)
+  ) {
     const width = type === "arterial" || type === "highway" ? 24 : 15;
     return `${begin}<path d="M-5 68 185 2" stroke="${colors.pave}" stroke-width="${width + 18}"/><path d="M-5 68 185 2" stroke="${colors.curb}" stroke-width="${width + 3}"/><path d="M-5 68 185 2" stroke="${type === "path" ? "#a7b59b" : colors.road}" stroke-width="${width}"/>${type === "path" ? '<path d="M0 55 180 15M0 63 180 23" stroke="#d6e1c4" stroke-width=".5"/>' : `<path d="M-5 68 185 2" stroke="${colors.paint}" stroke-width="1" stroke-dasharray="6 6"/>`}${type === "arterial" || type === "highway" ? `<path d="M-5 62 185 -4M-5 74 185 8" stroke="${colors.paint}" stroke-width=".7" stroke-dasharray="5 6"/>` : ""}${type === "highway" ? '<path d="M-5 51 185 -15M-5 85 185 19" stroke="#cad6c1" stroke-width="1.2"/>' : ""}${end}`;
   }
@@ -173,5 +193,5 @@ export function assetSketch(type: string): string {
 }
 export function jointSketch(radius: number): string {
   const r = Math.min(18, Math.max(4, radius * 1.3));
-  return `<svg class="junction-sketch" viewBox="0 0 84 74" fill="none"><path d="M0 25H${26 - r}Q26 25 26 ${25 - r}V0H58V${25 - r}Q58 25 ${58 + r} 25H84V49H${58 + r}Q58 49 58 ${49 + r}V74H26V${49 + r}Q26 49 ${26 - r} 49H0Z" fill="#809b7740" stroke="currentColor" stroke-width=".8"/><path d="M42 0v14m0 46v14M0 37h15m54 0h15" stroke="currentColor" opacity=".45" stroke-dasharray="3 3"/><circle cx="42" cy="37" r="3" fill="currentColor"/><path d="M${26 - r} 25H26v${-r}" stroke="#d1eac7" stroke-width=".65" stroke-dasharray="2 2"/><text x="12" y="16" font-size="7" fill="currentColor" font-family="monospace">R</text></svg>`;
+  return `<svg class="junction-sketch" viewBox="0 0 84 74" fill="none"><path d="M0 25H${26 - r}Q26 25 26 ${25 - r}V0H58V${25 - r}Q58 25 ${58 + r} 25H84V49H${58 + r}Q58 49 58 ${49 + r}V74H26V${49 + r}Q26 49 ${26 - r} 49H0Z" fill="#809bb740" stroke="currentColor" stroke-width=".8"/><path d="M42 0v14m0 46v14M0 37h15m54 0h15" stroke="currentColor" opacity=".45" stroke-dasharray="3 3"/><circle cx="42" cy="37" r="3" fill="currentColor"/><path d="M${26 - r} 25H26v${-r}" stroke="#d1e3f0" stroke-width=".65" stroke-dasharray="2 2"/><text x="12" y="16" font-size="7" fill="currentColor" font-family="monospace">R</text></svg>`;
 }

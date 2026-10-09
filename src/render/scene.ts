@@ -1,10 +1,16 @@
+import { siteOutline, insidePolygon } from "../core/sites";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import { Materials } from "./materials";
 import { closestOnAlignment } from "../core/curves";
 import { type Network } from "../core/geometry";
-import { type Selection, type Project, getNode } from "../core/model";
+import {
+  type Selection,
+  type Project,
+  getNode,
+  roadHalfWidth,
+} from "../core/model";
 import { type V3, add } from "../core/math";
 
 export interface GizmoProjection {
@@ -26,12 +32,13 @@ export class SceneView {
   selection: Selection = null;
   private project?: Project;
   private raycaster = new THREE.Raycaster();
-  private sun = new THREE.DirectionalLight("#fff6df", 2.8);
-  private ambient = new THREE.HemisphereLight("#eff5ec", "#6b796a", 2.1);
+  private sun = new THREE.DirectionalLight("#fff9ef", 2.7);
+  private ambient = new THREE.HemisphereLight("#e7edf9", "#697875", 1.95);
   private width = 1;
   private height = 1;
   private gridVisible = true;
   private contextVisible = true;
+  private contextBounds?: { cx: number; cz: number; size: number };
   private down: [number, number] = [0, 0];
   private onSelect: (s: Selection) => void;
   private onGizmo: (p: GizmoProjection | null) => void;
@@ -49,6 +56,8 @@ export class SceneView {
       antialias: true,
       alpha: false,
       powerPreference: "high-performance",
+      // Thin ground/grid separation must remain stable on kilometre-scale tiles.
+      logarithmicDepthBuffer: true,
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
@@ -62,7 +71,7 @@ export class SceneView {
     );
     this.renderer.domElement.setAttribute("tabindex", "0");
     container.appendChild(this.renderer.domElement);
-    this.scene.background = new THREE.Color("#343e3c");
+    this.scene.background = new THREE.Color("#282f39");
     this.sun.position.set(-65, 120, 50);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
@@ -177,7 +186,15 @@ export class SceneView {
       this.networkGroup.add(mesh);
     }
     this.materials.capture();
-    if (rebuildContext || !this.contextGroup.children.length)
+    const bounds = this.contextBounds;
+    if (
+      rebuildContext ||
+      !bounds ||
+      network.bounds.min[0] < bounds.cx - bounds.size / 2 + 10 ||
+      network.bounds.max[0] > bounds.cx + bounds.size / 2 - 10 ||
+      network.bounds.min[2] < bounds.cz - bounds.size / 2 + 10 ||
+      network.bounds.max[2] > bounds.cz + bounds.size / 2 - 10
+    )
       this.buildContext(network);
     this.setSelection(this.selection);
   }
@@ -191,6 +208,7 @@ export class SceneView {
       b.max[0] - b.min[0] + 60,
       b.max[2] - b.min[2] + 60,
     );
+    this.contextBounds = { cx, cz, size };
     this.camera.far = Math.max(4000, size * 8);
     this.camera.updateProjectionMatrix();
     this.controls.maxDistance = Math.max(1800, size * 4);
@@ -205,7 +223,7 @@ export class SceneView {
     this.sun.shadow.camera.updateProjectionMatrix();
     const ground = new THREE.Mesh(
       new THREE.BoxGeometry(size, 1.7, size),
-      new THREE.MeshStandardMaterial({ color: "#879680", roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: "#7d8b7c", roughness: 1 }),
     );
     ground.position.set(cx, -0.91, cz);
     ground.receiveShadow = true;
@@ -213,7 +231,7 @@ export class SceneView {
     this.contextGroup.add(ground);
     const side = new THREE.Mesh(
       new THREE.BoxGeometry(size + 0.3, 0.5, size + 0.3),
-      new THREE.MeshStandardMaterial({ color: "#48584c", roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: "#46534b", roughness: 1 }),
     );
     side.position.set(cx, -1.78, cz);
     this.contextGroup.add(side);
@@ -247,8 +265,12 @@ export class SceneView {
           network.spans.some(
             (s) =>
               closestOnAlignment(s.alignment, p).distance <
-              (s.road.lanes * s.road.laneWidth) / 2 + s.road.sidewalk + 5.5,
+              roadHalfWidth(s.road) + s.road.sidewalk + 5.5,
           )
+        )
+          continue;
+        if (
+          this.project?.sites?.some((s) => insidePolygon(p, siteOutline(s, -2)))
         )
           continue;
         treePositions.push(p);
@@ -317,6 +339,9 @@ export class SceneView {
         (j) => j.node.id === selection.id,
       );
       if (joint) outline(joint.outer, true);
+    } else if (selection.kind === "site") {
+      const site = this.project?.sites?.find((s) => s.id === selection.id);
+      if (site) outline(siteOutline(site), true);
     } else {
       const span = this.network.spans.find((s) => s.road.id === selection.id);
       if (span)
@@ -337,6 +362,11 @@ export class SceneView {
     if (!this.selection || !this.project || !this.network) return null;
     if (this.selection.kind === "node")
       return getNode(this.project, this.selection.id)?.position ?? null;
+    if (this.selection.kind === "site")
+      return (
+        this.project.sites?.find((s) => s.id === this.selection!.id)
+          ?.position ?? null
+      );
     const span = this.network.spans.find(
       (s) => s.road.id === this.selection!.id,
     );
@@ -354,6 +384,8 @@ export class SceneView {
     ];
   }
   private gizmoProjection(): GizmoProjection | null {
+    // Selection and framing must not wait for the next (possibly throttled) RAF.
+    this.camera.updateMatrixWorld();
     const p = this.selectionPosition();
     if (!p) return null;
     const origin = this.projectPoint(add(p, [0, 0.4, 0])),
@@ -463,6 +495,7 @@ export class SceneView {
     this.controls.target.copy(target);
     this.camera.updateProjectionMatrix();
     this.controls.update();
+    this.onGizmo(this.gizmoProjection());
   }
   focusSelection(distance = 105) {
     const p = this.selectionPosition();
@@ -478,10 +511,12 @@ export class SceneView {
     this.camera.zoom = 1;
     this.camera.updateProjectionMatrix();
     this.controls.update();
+    this.onGizmo(this.gizmoProjection());
   }
   zoom(factor: number) {
     this.camera.zoom = THREE.MathUtils.clamp(this.camera.zoom * factor, 0.4, 4);
     this.camera.updateProjectionMatrix();
+    this.onGizmo(this.gizmoProjection());
   }
   setGrid(v: boolean) {
     this.gridVisible = v;
@@ -492,9 +527,9 @@ export class SceneView {
     this.contextGroup.visible = v;
   }
   setNight(v: boolean) {
-    this.sun.intensity = v ? 0.45 : 2.8;
-    this.ambient.intensity = v ? 0.65 : 2.1;
-    this.scene.background = new THREE.Color(v ? "#1b2928" : "#343e3c");
+    this.sun.intensity = v ? 0.38 : 2.7;
+    this.ambient.intensity = v ? 0.55 : 1.95;
+    this.scene.background = new THREE.Color(v ? "#111a27" : "#282f39");
   }
   setStyle(style: string) {
     this.materials.clay(style === "clay");

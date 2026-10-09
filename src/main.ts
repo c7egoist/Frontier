@@ -1,3 +1,12 @@
+import { templateCatalog } from "./core/templates";
+import {
+  siteCatalog,
+  makeSite,
+  siteOutline,
+  type Site,
+  type SiteKind,
+} from "./core/sites";
+import { parkingLayout } from "./core/site-geometry";
 import "./style.css";
 import { zipSync, strToU8 } from "fflate";
 import {
@@ -6,6 +15,8 @@ import {
   parseProject,
   validateGenerationBudget,
   presets,
+  patterns,
+  patternNames,
   roadDefaults,
   connected,
   getNode,
@@ -16,7 +27,7 @@ import {
   type RoadSettings,
   type Pattern,
 } from "./core/model";
-import { add, sub, cubic, type V3 } from "./core/math";
+import { add, sub, cubic, polygonArea, type V3 } from "./core/math";
 import { buildNetwork, type Network } from "./core/geometry";
 import {
   insertRoad,
@@ -28,7 +39,7 @@ import {
 import { exportOBJ } from "./core/export";
 import { PlanView, type EditDrag, type ToolMode } from "./render/plan";
 import { SceneView, type GizmoProjection } from "./render/scene";
-import { patternCanvas } from "./render/materials";
+import { patternCanvas, exportTexturePack } from "./render/materials";
 import {
   refreshIcons,
   icon,
@@ -79,28 +90,9 @@ let dragBefore: string | null = null,
   sliderBefore: string | null = null;
 let scene: SceneView | undefined;
 const patternPreviews = new Map<string, string>();
-const templates = [
-  {
-    id: "district",
-    name: "Northbank district",
-    description: "Urban junctions + continuous viaduct",
-  },
-  {
-    id: "tee",
-    name: "Three-way junction",
-    description: "Shared T-joint · paved corners",
-  },
-  {
-    id: "roundabout",
-    name: "Garden roundabout",
-    description: "One-way circulation · four entries",
-  },
-  {
-    id: "diamond",
-    name: "Diamond interchange",
-    description: "Connected ramps · 7 m overpass",
-  },
-];
+const templates = templateCatalog;
+let placementKind: SiteKind = "plaza";
+const templatePreviews = new Map<string, string>();
 const fmt = (n: number, decimals = 1) =>
   n.toLocaleString("en-US", {
     maximumFractionDigits: decimals,
@@ -111,7 +103,7 @@ const compact = (n: number) =>
 const snapshot = () => JSON.stringify(project);
 const clone = (p: Project) => JSON.parse(JSON.stringify(p)) as Project;
 function selectedRoads(): Road[] {
-  if (!selection) return [];
+  if (!selection || selection.kind === "site") return [];
   return selection.kind === "road"
     ? project.roads.filter((r) => r.id === selection!.id)
     : connected(project, selection.id);
@@ -120,11 +112,15 @@ function selectedPosition(): V3 | null {
   if (!selection) return null;
   if (selection.kind === "node")
     return getNode(project, selection.id)?.position ?? null;
+  if (selection.kind === "site")
+    return project.sites?.find((s) => s.id === selection!.id)?.position ?? null;
   const road = selectedRoads()[0];
   return road ? cubic(controlPoints(project, road), 0.5) : null;
 }
 function selectedName() {
   if (!selection) return "Road network";
+  if (selection.kind === "site")
+    return project.sites?.find((s) => s.id === selection!.id)?.name ?? "Site";
   return selection.kind === "node"
     ? (getNode(project, selection.id)?.name ?? "Control point")
     : (selectedRoads()[0]?.name ?? "Road");
@@ -243,9 +239,13 @@ function rebuild(inspector = true, context = false) {
   network = buildNetwork(project);
   if (
     selection &&
-    !(selection.kind === "node" ? project.nodes : project.roads).some(
-      (item) => item.id === selection!.id,
-    )
+    !(
+      selection.kind === "node"
+        ? project.nodes
+        : selection.kind === "site"
+          ? (project.sites ?? [])
+          : project.roads
+    ).some((item) => item.id === selection!.id)
   )
     selection = null;
   plan.setProject(project, network);
@@ -318,16 +318,20 @@ function updateNames() {
   $("project-title").textContent = project.name;
   $("scene-name").textContent = project.name;
   $("selected-annotation").innerHTML = selection
-    ? `${escape(selectedName().split(" · ")[0])}<small>${selection.kind === "node" ? "SHARED JOINT PIVOT" : "EDITABLE ROAD ALIGNMENT"}</small>`
+    ? `${escape(selectedName().split(" · ")[0])}<small>${selection.kind === "node" ? "SHARED JOINT PIVOT" : selection.kind === "site" ? "EDITABLE PUBLIC REALM" : "EDITABLE ROAD ALIGNMENT"}</small>`
     : "Road network<small>LIVE PROCEDURAL GEOMETRY</small>";
   $("scene-annotation").hidden = !selection;
 }
 function setSelection(s: Selection) {
   if (
     s &&
-    !(s.kind === "node" ? project.nodes : project.roads).some(
-      (item) => item.id === s!.id,
-    )
+    !(
+      s.kind === "node"
+        ? project.nodes
+        : s.kind === "site"
+          ? (project.sites ?? [])
+          : project.roads
+    ).some((item) => item.id === s!.id)
   )
     s = null;
   selection = s;
@@ -348,7 +352,10 @@ function setMode(m: ToolMode) {
     b.setAttribute("aria-pressed", String(active));
     b.classList.toggle("active", active);
   });
-  if (m === "draw" && $("viewports").dataset.layout === "scene")
+  if (
+    (m === "draw" || m === "place") &&
+    $("viewports").dataset.layout === "scene"
+  )
     setLayout("split");
   renderInspector();
   updateHint();
@@ -356,15 +363,18 @@ function setMode(m: ToolMode) {
 function updateHint() {
   const hints: Record<ToolMode, string> = {
     select:
-      selection?.kind === "road"
-        ? "Drag a Bézier handle or the shared road pivot to edit the alignment"
-        : "Drag the joint pivot to move all connected roads",
+      selection?.kind === "site"
+        ? "Drag the site pivot to reposition the block, plaza or parking court"
+        : selection?.kind === "road"
+          ? "Drag a Bézier handle or the shared road pivot to edit the alignment"
+          : "Drag the joint pivot to move all connected roads",
     draw: draft
       ? "Click to extend the road · Esc to finish · Alt disables snapping"
       : "Click in the 2D plan to start a road · Existing curves and nodes snap",
     move: "Drag the shared pivot or an axis to move · Shift constrains movement",
     pan: "Drag to pan the plan · Scroll to zoom · Space temporarily pans",
     measure: "Click two points in the plan to measure their distance",
+    place: `Click in plan to place ${siteCatalog.find((s) => s.id === placementKind)!.name.toLowerCase()} · Esc to cancel`,
   };
   $("interaction-hint").textContent = hints[mode];
 }
@@ -385,12 +395,14 @@ function updateStats() {
       ? "Review geometry warnings"
       : "Network valid";
   $("status-counts").textContent =
-    `${project.roads.length} roads · ${network.junctions.length} junctions`;
+    `${project.roads.length} roads · ${network.junctions.length} joints${project.sites?.length ? ` · ${project.sites.length} sites` : ""}`;
   $("status-triangles").textContent = `${compact(network.triangles)} triangles`;
   $("status-length").textContent =
     `${Math.round(network.length).toLocaleString()} m`;
   $("object-count").textContent = String(
-    project.roads.length + network.junctions.length,
+    project.roads.length +
+      network.junctions.length +
+      (project.sites?.length ?? 0),
   ).padStart(2, "0");
   $("health-card").classList.toggle("warning", warn);
   $("health-card").innerHTML =
@@ -403,11 +415,13 @@ function updateStats() {
       selectedRoads().some((r) => r.id === d.owner),
   );
   const text =
-    selection?.kind === "node"
-      ? `${connected(project, selection.id).length} connected approaches`
-      : selection
-        ? `${fmt(network.spans.find((s) => s.road.id === selection!.id)?.alignment.length ?? 0)} m alignment`
-        : "Linked 2D + 3D geometry";
+    selection?.kind === "site"
+      ? `${Math.round(Math.abs(polygonArea(siteOutline(project.sites!.find((s) => s.id === selection!.id)!))))} m² site · ${network.parkingSpaces} parking spaces`
+      : selection?.kind === "node"
+        ? `${connected(project, selection.id).length} connected approaches`
+        : selection
+          ? `${fmt(network.spans.find((s) => s.road.id === selection!.id)?.alignment.length ?? 0)} m alignment`
+          : "Linked 2D + 3D geometry";
   $("selection-health").innerHTML =
     `<div class="selection-health ${relevant.length ? "warning" : ""}">${icon(relevant.length ? "circle-alert" : "circle-check")}<span>${relevant.length ? "Geometry warning" : text}<small>${relevant.length ? escape(relevant[0].message) : selection?.kind === "node" ? "One pivot. Every connection follows." : "Meters · Y-up · Engine-ready mesh"}</small></span></div>`;
   refreshIcons();
@@ -435,6 +449,20 @@ function renderOutliner() {
         kind: "road" as const,
         icon: r.bridge ? "cable" : "route",
         meta: r.bridge ? "BRG" : `${r.lanes}L`,
+      })),
+    },
+    {
+      id: "sites",
+      name: "Blocks & public realm",
+      items: (project.sites ?? []).map((s) => ({
+        id: s.id,
+        name: s.name,
+        kind: "site" as const,
+        icon: siteCatalog.find((k) => k.id === s.kind)!.icon,
+        meta:
+          s.kind === "parking"
+            ? `${parkingLayout(s).length} bays`
+            : s.kind.toUpperCase(),
       })),
     },
   ];
@@ -468,14 +496,152 @@ function toggle(prop: string, label: string, value: boolean, description = "") {
 function card(title: string, iconName: string, body: string, extraClass = "") {
   return `<section class="inspector-card ${extraClass}"><div class="card-heading"><span>${icon(iconName)}${title}</span>${icon("info")}</div>${body}</section>`;
 }
+function choice(
+  prop: string,
+  label: string,
+  value: string,
+  options: [string, string][],
+) {
+  return `<div class="profile-row"><label for="control-${prop}">${label}</label><div class="select-field"><select id="control-${prop}" data-prop="${prop}">${options.map(([key, name]) => `<option value="${key}" ${value === key ? "selected" : ""}>${name}</option>`).join("")}</select>${icon("chevron-down")}</div></div>`;
+}
+function patternControls(pattern: Pattern) {
+  return `<div class="pattern-options">${patterns.map((p) => `<button class="pattern-option ${p === pattern ? "selected" : ""}" data-pattern="${p}"><span class="pattern-thumb" style="background-image:url('${patternPreview(p)}')"></span>${patternNames[p]}</button>`).join("")}</div>`;
+}
+function transformControls(position: V3, note: string) {
+  return card(
+    "Transform",
+    "move",
+    `<div class="transform-fields">${["X", "Y", "Z"].map((axis, i) => `<label class="transform-field"><span>${axis}</span><input type="number" data-position="${i}" value="${position[i].toFixed(1)}" step=".5" min="-10000" max="10000" aria-label="${axis} position"/></label>`).join("")}</div><p class="card-note">${icon("move")}${note}</p>`,
+  );
+}
+function renderSiteInspector(site: Site) {
+  const entry = siteCatalog.find((s) => s.id === site.kind)!,
+    area = Math.round(Math.abs(polygonArea(siteOutline(site))));
+  let body = `<div class="selected-object"><div class="object-icon">${icon(entry.icon)}</div><div class="object-title"><span class="eyebrow">PUBLIC REALM / ${site.kind.toUpperCase()}</span><h1>${escape(site.name)}</h1><span class="type-pill"><span></span>${area} m² · Editable footprint</span></div><button class="icon-button object-actions" data-inspector-action="rename" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs">${["geometry", "surface", "details"].map((t) => `<button data-inspector-tab="${t}" class="${inspectorTab === t ? "active" : ""}">${t[0].toUpperCase() + t.slice(1)}</button>`).join("")}</nav>`;
+  if (inspectorTab === "geometry") {
+    body += transformControls(
+      site.position,
+      "Drag the shared site pivot in either view.",
+    );
+    body += card(
+      "Footprint",
+      entry.icon,
+      choice("shape", "Shape", site.shape, [
+        ["rectangle", "Rounded rectangle"],
+        ["triangle", "Splitter triangle"],
+        ["circle", "Ellipse / circle"],
+      ]) +
+        range("width", "Width", site.width, 8, 150, 1) +
+        range("depth", "Depth", site.depth, 8, 250, 1) +
+        range("yaw", "Rotation", site.yaw, -180, 180, 5, "°"),
+    );
+    if (site.kind === "parking")
+      body += card(
+        "Parking layout",
+        "square-parking",
+        range("bays", "Bays per row", site.bays, 2, 40, 1, "") +
+          range("accessible", "Accessible bays", site.accessible, 0, 6, 1, "") +
+          choice("entrance", "Entrance", site.entrance, [
+            ["north", "North"],
+            ["south", "South"],
+            ["east", "East"],
+            ["west", "West"],
+          ]) +
+          `<p class="card-note">${parkingLayout(site).length} spaces. Entry throat remains unobstructed; wheel stops and bay numbers are real geometry/decals.</p>`,
+      );
+    if (site.kind === "block")
+      body += card(
+        "Building massing",
+        "building-2",
+        range(
+          "buildingHeight",
+          "Building height",
+          site.buildingHeight,
+          0,
+          45,
+          1,
+        ),
+      );
+  } else if (inspectorTab === "surface")
+    body += card(
+      "Modern paving",
+      "grid-2x2",
+      patternControls(site.pattern) +
+        `<p class="material-note">World-scaled stone, inset edge bands and matching curb geometry. Included in GLB with normal maps.</p>`,
+    );
+  else
+    body += card(
+      "Landscape & furniture",
+      "trees",
+      toggle(
+        "landscape",
+        "Planting & trees",
+        site.landscape,
+        "Planters, landscape insets and shade trees",
+      ) +
+        `<p class="card-note">${site.kind === "parking" ? "Parking signage, entry clearance, accessible decals and lighting are generated with the court." : site.kind === "block" ? "Stepped volumes, facade windows and paved perimeter blocks." : "Benches, planters and pedestrian-scale lighting are included with plazas."}</p>`,
+    );
+  $("inspector-content").innerHTML = body;
+  refreshIcons();
+  updateStats();
+}
+function networkPreview(id: string) {
+  if (templatePreviews.has(id)) return templatePreviews.get(id)!;
+  const p = makeTemplate(id),
+    points = p.nodes.map((n) => n.position),
+    minX = Math.min(...points.map((p) => p[0])),
+    maxX = Math.max(...points.map((p) => p[0])),
+    minZ = Math.min(...points.map((p) => p[2])),
+    maxZ = Math.max(...points.map((p) => p[2])),
+    scale = Math.min(164 / (maxX - minX + 40), 66 / (maxZ - minZ + 40));
+  const map = (p: V3) =>
+    `${90 + (p[0] - (minX + maxX) / 2) * scale},${38 + (p[2] - (minZ + maxZ) / 2) * scale}`;
+  const path = (r: Road) => {
+    const c = controlPoints(p, r);
+    return `M${map(c[0])}C${map(c[1])} ${map(c[2])} ${map(c[3])}`;
+  };
+  const svg = `<svg viewBox="0 0 180 76" fill="none" aria-hidden="true">${(
+    p.sites ?? []
+  )
+    .filter((s) => s.kind !== "water")
+    .map(
+      (s) =>
+        `<polygon points="${siteOutline(s).map(map).join(" ")}" fill="#607d7855" stroke="#8a9d9655" stroke-width=".4"/>`,
+    )
+    .join(
+      "",
+    )}${p.roads.map((r) => `<path d="${path(r)}" stroke="#728898" stroke-width="${Math.max(2, (r.lanes * r.laneWidth + 2) * scale)}" stroke-linecap="round"/><path d="${path(r)}" stroke="#303e4b" stroke-width="${Math.max(1.1, r.lanes * r.laneWidth * scale)}"/><path d="${path(r)}" stroke="#cbd6de" stroke-width=".45" stroke-dasharray="2 2"/>`).join("")}</svg>`;
+  templatePreviews.set(id, svg);
+  return svg;
+}
+function beginPlace(kind: SiteKind) {
+  if (!siteCatalog.some((s) => s.id === kind)) {
+    toast("Unknown public-realm asset.", true);
+    return;
+  }
+  placementKind = kind;
+  plan.placementKind = kind;
+  setSelection(null);
+  setMode("place");
+  toast(
+    `Click in plan to place a ${siteCatalog.find((s) => s.id === kind)!.name.toLowerCase()}.`,
+  );
+}
 function profile(road: Road) {
   return card(
     "Approach profile",
     "route",
-    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 4.5, 0.1)}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 5, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
+    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 6, 0.1)}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 5, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
   );
 }
 function renderInspector() {
+  if (selection?.kind === "site") {
+    const site = project.sites?.find((s) => s.id === selection!.id);
+    if (site) {
+      renderSiteInspector(site);
+      return;
+    }
+  }
   const roads = selectedRoads(),
     road = roads[0],
     node = selection?.kind === "node" ? getNode(project, selection.id) : null,
@@ -504,7 +670,7 @@ function renderInspector() {
       body += card(
         "Joint geometry",
         "git-merge",
-        `<div class="radius-overview"><div><div class="radius-metric"><span id="radius-value">${fmt(node!.radius)}</span><small>m</small></div><div class="metric-caption">Corner radius</div></div>${jointSketch(node!.radius)}</div><input aria-label="Corner radius" type="range" data-prop="radius" min="2" max="16" step=".5" value="${node!.radius}" style="--progress:${((node!.radius - 2) / 14) * 100}%"/><div class="range-labels"><span>2 m</span><span>16 m</span></div><div class="solver-row"><span>Corner solver</span><span class="solver-badge">${icon("check")}Tangent fillet</span></div>`,
+        `<div class="radius-overview"><div><div class="radius-metric"><span id="radius-value">${fmt(node!.radius)}</span><small>m</small></div><div class="metric-caption">Corner radius</div></div>${jointSketch(node!.radius)}</div><input aria-label="Corner radius" type="range" data-prop="radius" min="2" max="24" step=".5" value="${node!.radius}" style="--progress:${((node!.radius - 2) / 22) * 100}%"/><div class="range-labels"><span>2 m</span><span>24 m</span></div><div class="solver-row"><span>Corner solver</span><span class="solver-badge">${icon("check")}Tangent fillet</span></div>${range("setback", "Paving / merge setback", node!.setback ?? 0, 0, 24, 1)}${joint.type === "Merge" ? `<p class="card-note">${icon("git-merge")}Adaptive runout pulls the paving nose back. Crosswalks are suppressed in merge throats.</p>` : ""}${toggle("boxJunction", "Yellow box markings", node!.boxJunction ?? false, "Clipped to the actual junction surface")}${toggle("signals", "Traffic signals", node!.signals ?? false, "Physical poles and signal heads; static preview phase")}`,
         "radius-card",
       );
     else if (!node)
@@ -527,12 +693,18 @@ function renderInspector() {
     body += card(
       "Carriageway material",
       "layers",
-      `<div class="material-options">${["asphalt", "concrete", "cobble"].map((surface) => `<button class="material-option ${road.surface === surface ? "selected" : ""}" data-surface="${surface}"><span class="material-swatch ${surface}"></span>${surface[0].toUpperCase() + surface.slice(1)}</button>`).join("")}</div><p class="material-note">Procedural, locally generated materials. No external textures required.</p>`,
+      `<div class="material-options">${["asphalt", "concrete", "cobble", "pavers"].map((surface) => `<button class="material-option ${road.surface === surface ? "selected" : ""}" data-surface="${surface}"><span class="material-swatch ${surface}"></span>${surface[0].toUpperCase() + surface.slice(1)}</button>`).join("")}</div><p class="material-note">Procedural, locally generated materials. No external textures required.</p>`,
     );
     body += card(
       "Paving pattern",
       "grid-2x2",
-      `<div class="pattern-options">${(["herringbone", "running", "slabs", "basket"] as Pattern[]).map((pattern) => `<button class="pattern-option ${road.pattern === pattern ? "selected" : ""}" data-pattern="${pattern}"><span class="pattern-thumb" style="background-image:url('${patternPreview(pattern)}')"></span>${{ herringbone: "Herringbone", running: "Running bond", slabs: "Concrete slabs", basket: "Basket weave" }[pattern]}</button>`).join("")}</div>${range("sidewalk", "Pavement width", road.sidewalk, 0, 5, 0.1)}`,
+      patternControls(road.pattern) +
+        range("sidewalk", "Pavement width", road.sidewalk, 0, 6, 0.1) +
+        choice("curbStyle", "Curb profile", road.curbStyle, [
+          ["stone", "Stone curb"],
+          ["flush", "Flush pedestrian edge"],
+          ["race", "Racing rumble curb"],
+        ]),
     );
     body += card(
       "Cross-section",
@@ -541,9 +713,71 @@ function renderInspector() {
     );
   } else {
     body += card(
+      "Road markings & parking",
+      "route",
+      choice("markingStyle", "Marking language", road.markingStyle, [
+        ["urban", "City street"],
+        ["motorway", "Motorway"],
+        ["race", "Racing circuit"],
+      ]) +
+        range(
+          "markingSetback",
+          "Marking setback",
+          road.markingSetback,
+          0,
+          16,
+          1,
+        ) +
+        choice("parking", "Curbside parking", road.parking, [
+          ["none", "None"],
+          ["parallel", "Parallel bays"],
+        ]) +
+        range("median", "Central median", road.median, 0, 3, 0.2) +
+        toggle(
+          "startingGrid",
+          "Starting grid",
+          road.startingGrid,
+          "Grid boxes on this racing alignment",
+        ),
+    );
+    body += card(
+      "Signs & street lighting",
+      "signpost",
+      toggle(
+        "signs",
+        "Road signs",
+        road.signs,
+        "Speed limit, route and parking signs",
+      ) +
+        range(
+          "speedLimit",
+          "Posted speed",
+          road.speedLimit,
+          20,
+          160,
+          10,
+          "km/h",
+        ) +
+        toggle(
+          "streetLights",
+          "Street lighting",
+          road.streetLights,
+          "Swept roadside poles and luminaire geometry",
+        ),
+    );
+    body += card(
       "Roadside protection",
       "shield",
-      `${toggle("guardrails", "W-beam guardrails", road.guardrails, "Corrugated steel beams with embedded posts")}<svg class="detail-art" viewBox="0 0 210 44"><path d="M0 36h210" stroke="currentColor" opacity=".2"/><path d="M15 14v23m36-23v23m36-23v23m36-23v23m36-23v23m36-23v23" stroke="currentColor" stroke-width="2"/><path d="M0 8h210v12H0Z" fill="currentColor" opacity=".3"/><path d="M0 14h210" stroke="currentColor" stroke-width="1"/></svg>${road.guardrails ? range("railHeight", "Rail height", road.railHeight, 0.5, 1.4, 0.1) + range("postSpacing", "Post spacing", road.postSpacing, 1.5, 6, 0.1) : ""}`,
+      `${toggle("guardrails", road.railStyle === "wbeam" ? "W-beam guardrails" : road.railStyle === "railing" ? "Pedestrian railing" : "Concrete safety barrier", road.guardrails, "Swept, continuous roadside protection")}<svg class="detail-art" viewBox="0 0 210 44"><path d="M0 36h210" stroke="currentColor" opacity=".2"/><path d="M15 14v23m36-23v23m36-23v23m36-23v23m36-23v23m36-23v23" stroke="currentColor" stroke-width="2"/><path d="M0 8h210v12H0Z" fill="currentColor" opacity=".3"/><path d="M0 14h210" stroke="currentColor" stroke-width="1"/></svg>${choice(
+        "railStyle",
+        "Barrier type",
+        road.railStyle,
+        [
+          ["wbeam", "Corrugated W-beam"],
+          ["railing", "Pedestrian railing"],
+          ["concrete", "Concrete / race barrier"],
+        ],
+      )}${road.guardrails ? range("railHeight", "Rail height", road.railHeight, 0.5, 1.4, 0.1) + (road.railStyle !== "concrete" ? range("postSpacing", "Post spacing", road.postSpacing, 1.5, 6, 0.1) : "") : ""}`,
     );
     body += card(
       "Drainage",
@@ -577,7 +811,28 @@ function syncPositionInputs() {
       });
 }
 function setRoadProperty(prop: string, value: unknown) {
-  if (prop === "radius" || prop === "crossings") {
+  if (selection?.kind === "site") {
+    const site = project.sites!.find((s) => s.id === selection!.id)!;
+    if (
+      [
+        "pattern",
+        "shape",
+        "width",
+        "depth",
+        "yaw",
+        "bays",
+        "accessible",
+        "landscape",
+        "buildingHeight",
+        "entrance",
+      ].includes(prop)
+    )
+      (site as unknown as Record<string, unknown>)[prop] = value;
+    return;
+  }
+  if (
+    ["radius", "crossings", "setback", "boxJunction", "signals"].includes(prop)
+  ) {
     if (selection?.kind === "node")
       (getNode(project, selection.id) as unknown as Record<string, unknown>)[
         prop
@@ -597,6 +852,10 @@ function setRoadProperty(prop: string, value: unknown) {
   }
 }
 function applyPreset(id: string) {
+  if (selection?.kind === "site") {
+    toast("Select an alignment or junction to apply a road preset.", true);
+    return;
+  }
   const preset = presets.find((p) => p.id === id)!;
   presetID = id;
   if (selection && mode !== "draw")
@@ -639,31 +898,18 @@ function renderLibrary() {
       action: "preset",
     }));
   if (libraryTab === "materials")
-    cards = [
-      {
-        id: "herringbone",
-        name: "Herringbone",
-        description: "Interlocking brick paving",
-      },
-      {
-        id: "running",
-        name: "Running bond",
-        description: "Staggered brick courses",
-      },
-      {
-        id: "slabs",
-        name: "Concrete slabs",
-        description: "Large-format stone paving",
-      },
-      {
-        id: "basket",
-        name: "Basket weave",
-        description: "Paired orthogonal bricks",
-      },
-    ].map((p) => ({
-      ...p,
-      preview: `<div class="pattern-thumb" style="height:100%;width:100%;background-image:url('${patternPreview(p.id)}');background-size:120px"></div>`,
+    cards = patterns.map((p) => ({
+      id: p,
+      name: patternNames[p],
+      description: "World-scaled stone · procedural relief",
+      preview: `<div class="pattern-thumb" style="height:100%;width:100%;background-image:url('${patternPreview(p)}');background-size:120px"></div>`,
       action: "pattern",
+    }));
+  if (libraryTab === "sites")
+    cards = siteCatalog.map((p) => ({
+      ...p,
+      preview: `<div class="site-thumb ${p.id}">${icon(p.icon)}<span>${p.id === "parking" ? "P / 90°" : p.id === "block" ? "CITY BLOCK" : p.id === "water" ? "HARBOUR" : "PUBLIC REALM"}</span></div>`,
+      action: "site",
     }));
   if (libraryTab === "structures")
     cards = [
@@ -699,7 +945,7 @@ function renderLibrary() {
   if (libraryTab === "networks")
     cards = templates.map((t) => ({
       ...t,
-      preview: assetSketch(t.id),
+      preview: networkPreview(t.id),
       action: "template",
     }));
   cards = cards.filter((p) =>
@@ -724,6 +970,20 @@ function renderLibrary() {
     .forEach((i) => i.classList.add("asset-apply"));
 }
 function drawPoint(point: V3) {
+  if (mode === "place") {
+    const site = makeSite(placementKind, point);
+    const placed = commit(() => {
+      (project.sites ??= []).push(site);
+      selection = { kind: "site", id: site.id };
+      setMode("select");
+    });
+
+    if (placed)
+      scene?.focusSelection(
+        Math.max(70, Math.max(site.width, site.depth) * 2.5),
+      );
+    return;
+  }
   if (!draft) {
     draft = [...point];
     plan.setDraft(draft);
@@ -757,7 +1017,10 @@ function handleDrag(edit: EditDrag) {
     const previous = clone(project);
     try {
       if (edit.target === "node") moveNode(project, edit.id, edit.value);
-      else if (edit.target === "road") {
+      else if (edit.target === "site") {
+        const site = project.sites!.find((s) => s.id === edit.id)!;
+        site.position = [...edit.value];
+      } else if (edit.target === "road") {
         const road = project.roads.find((r) => r.id === edit.id);
         if (road && dragBase)
           for (const id of [road.start, road.end])
@@ -802,7 +1065,8 @@ function updateGizmo(projection: GizmoProjection | null) {
     !projection.visible ||
     !selection ||
     mode === "draw" ||
-    mode === "measure"
+    mode === "measure" ||
+    mode === "place"
   ) {
     svg.setAttribute("hidden", "");
     return;
@@ -856,7 +1120,9 @@ function deleteSelected() {
   toast(
     s.kind === "node"
       ? "Junction and connected roads removed."
-      : "Road removed.",
+      : s.kind === "site"
+        ? "Site removed."
+        : "Road removed.",
   );
 }
 
@@ -894,7 +1160,7 @@ function openTemplates() {
       "Every road starts somewhere.",
       "Choose a connected network. Your current design remains in undo history.",
     ) +
-      `<div class="template-grid">${templates.map((t) => `<button class="template-card" data-template="${t.id}"><div class="asset-preview">${assetSketch(t.id)}</div><div class="asset-details"><strong>${t.name}</strong><small>${t.description}</small></div></button>`).join("")}</div><div class="modal-foot">${icon("git-merge")}Shared junction nodes. Height-aware crossings. No disconnected ramps.</div>`,
+      `<div class="template-grid">${templates.map((t) => `<button class="template-card" data-template="${t.id}"><div class="asset-preview">${networkPreview(t.id)}</div><div class="asset-details"><strong>${t.name}</strong><small>${t.description}</small></div></button>`).join("")}</div><div class="modal-foot">${icon("git-merge")}Shared junction nodes. Height-aware crossings. No disconnected ramps.</div>`,
   );
 }
 function loadTemplate(id: string) {
@@ -902,21 +1168,26 @@ function loadTemplate(id: string) {
     () => {
       project = makeTemplate(id);
       network = buildNetwork(project);
-      selection =
-        id === "diamond"
-          ? { kind: "road", id: project.roads.find((r) => r.bridge)!.id }
-          : network.junctions[0]
-            ? { kind: "node", id: network.junctions[0].node.id }
-            : null;
+      selection = ["diamond", "cloverleaf", "trumpet"].includes(id)
+        ? { kind: "road", id: project.roads.find((r) => r.bridge)!.id }
+        : network.junctions[0]
+          ? { kind: "node", id: network.junctions[0].node.id }
+          : null;
       setMode("select");
       inspectorTab = "geometry";
     },
     { fit: true },
   );
   if (loaded) {
-    if (id === "diamond") scene?.focusSelection(360);
+    if (id === "diamond") scene?.focusSelection(380);
     else if (id === "roundabout") scene?.fit(1.25);
-    else scene?.focusSelection(id === "district" ? 185 : 155);
+    else if (id === "district" || id === "tee")
+      scene?.focusSelection(id === "district" ? 185 : 155);
+    else if (id === "merge") scene?.focusSelection(180);
+    else
+      scene?.fit(
+        ["cloverleaf", "trumpet", "waterfront"].includes(id) ? 1.35 : 1.45,
+      );
     ($("modal") as HTMLDialogElement).close();
     toast(
       `${project.name} loaded. Your previous network is available with Undo.`,
@@ -930,12 +1201,13 @@ function openHelp() {
       "Design once. See it twice.",
       "A graph-based road editor with live, linked 2D and 3D geometry.",
     ) +
-      `<div class="help-body"><h3>A quick way in</h3><p>Draw in the plan. Snap to an existing road to make a junction, or cross it at the same elevation. Select the shared joint and drag its center or an axis in either view. Connected roads and their Bézier handles follow the same pivot.</p><h3>Built for your game engine</h3><p>GLB includes triangulated geometry and embedded paving textures, in meters with Y up. OBJ includes an MTL file. JSON preserves the editable graph. Browser-local saves never leave this device.</p><div class="shortcut-grid">${[
+      `<div class="help-body"><h3>A quick way in</h3><p>Draw in the plan. Snap to an existing road to make a junction, or cross it at the same elevation. Select the shared joint and drag its center or an axis in either view. Connected roads and their Bézier handles follow the same pivot.</p><h3>Built for your game engine</h3><p>GLB includes triangulated geometry and embedded paving textures, in meters with Y up. OBJ includes MTL materials and PNG textures in a ZIP archive. JSON preserves the editable graph. Browser-local saves never leave this device.</p><div class="shortcut-grid">${[
         ["Select", "V"],
         ["Draw road", "D / P"],
         ["Move pivot", "W"],
         ["Pan", "H / Space"],
         ["Measure", "M"],
+        ["Place street block", "B"],
         ["Frame all", "F"],
         ["Toggle grid", "G"],
         ["Toggle snap", "S"],
@@ -952,7 +1224,7 @@ function openRename() {
   if (!selection) return;
   openModal(
     modalHeader("SELECTED OBJECT", "Give it a name.") +
-      `<form id="rename-form" class="help-body"><label for="rename-input" style="display:block;margin-bottom:12px">Object name</label><input id="rename-input" maxlength="80" required value="${escape(selectedName())}" style="width:100%;padding:12px;border:1px solid #526d53;border-radius:5px;background:#293c2c"/><button type="submit" class="rebuild-button" style="margin-top:20px">${icon("check")}Rename object</button></form>`,
+      `<form id="rename-form" class="help-body"><label for="rename-input" style="display:block;margin-bottom:12px">Object name</label><input id="rename-input" maxlength="80" required value="${escape(selectedName())}" style="width:100%;padding:12px;border:1px solid #414b58;border-radius:5px;background:#242b33"/><button type="submit" class="rebuild-button" style="margin-top:20px">${icon("check")}Rename object</button></form>`,
   );
   ($("rename-input") as HTMLInputElement).select();
 }
@@ -1006,13 +1278,21 @@ async function exportProject(format: string) {
     }
     if (format === "obj") {
       const base = slug(),
-        { obj, mtl } = exportOBJ(network, base),
+        exportNetwork = network,
+        { files, textures } = await exportTexturePack(
+          exportNetwork.meshes.map((m) => m.material),
+        ),
+        { obj, mtl } = exportOBJ(exportNetwork, base, textures),
         archive = zipSync(
-          { [`${base}.obj`]: strToU8(obj), [`${base}.mtl`]: strToU8(mtl) },
+          {
+            [`${base}.obj`]: strToU8(obj),
+            [`${base}.mtl`]: strToU8(mtl),
+            ...files,
+          },
           { level: 5 },
         );
       download(archive, `${base}-obj.zip`, "application/zip");
-      toast("OBJ mesh + MTL materials exported.");
+      toast("OBJ mesh + MTL + procedural PNG textures exported.");
       return;
     }
     if (!scene) {
@@ -1085,7 +1365,7 @@ document.addEventListener("click", (e) => {
   const select = target.closest<HTMLElement>("[data-select]");
   if (select) {
     setSelection({
-      kind: select.dataset.kind as "node" | "road",
+      kind: select.dataset.kind as "node" | "road" | "site",
       id: select.dataset.select!,
     });
     return;
@@ -1125,6 +1405,10 @@ document.addEventListener("click", (e) => {
   if (asset) {
     const id = asset.dataset.asset!,
       action = asset.dataset.assetAction;
+    if (action === "site") {
+      beginPlace(id as SiteKind);
+      return;
+    }
     if (action === "preset") applyPreset(id);
     if (action === "pattern") {
       if (!selection) {
@@ -1136,7 +1420,7 @@ document.addEventListener("click", (e) => {
     }
     if (action === "template") loadTemplate(id);
     if (action === "structure") {
-      if (!selection) {
+      if (!selection || selection.kind === "site") {
         toast("Select a road to add a structure or roadside detail.", true);
         return;
       }
@@ -1241,6 +1525,9 @@ $("inspector-content").addEventListener("change", (e) => {
           const p = [...current] as V3;
           p[index] = value;
           moveNode(project, selection.id, p);
+        } else if (selection?.kind === "site") {
+          const site = project.sites!.find((s) => s.id === selection!.id)!;
+          site.position[index] = value;
         } else if (selection) {
           const delta: V3 = [0, 0, 0];
           delta[index] = value - current[index];
@@ -1266,6 +1553,7 @@ $("inspector-content").addEventListener("change", (e) => {
     "inletSpacing",
     "railHeight",
     "postSpacing",
+    "speedLimit",
   ];
   const value =
     input.type === "checkbox"
@@ -1282,6 +1570,8 @@ $("modal").addEventListener("submit", (e) => {
   if (!name) return;
   commit(() => {
     if (selection?.kind === "node") getNode(project, selection.id).name = name;
+    else if (selection?.kind === "site")
+      project.sites!.find((s) => s.id === selection!.id)!.name = name;
     else if (selection) selectedRoads()[0].name = name;
   });
   ($("modal") as HTMLDialogElement).close();
@@ -1310,7 +1600,7 @@ $("scene-tree").addEventListener("keydown", (e) => {
     index = items.indexOf(target);
   if (e.key === "Enter")
     setSelection({
-      kind: target.dataset.kind as "node" | "road",
+      kind: target.dataset.kind as "node" | "road" | "site",
       id: target.dataset.select!,
     });
   if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -1443,7 +1733,7 @@ let gizmoDrag: {
   position: V3;
   world: V3 | null;
   meters: number;
-  target: "node" | "road";
+  target: "node" | "road" | "site";
   id: string;
 } | null = null;
 $("scene-gizmo").addEventListener("pointerdown", (e) => {
@@ -1458,7 +1748,7 @@ $("scene-gizmo").addEventListener("pointerdown", (e) => {
     position: [...position],
     world: scene.worldOnPlane(e.clientX, e.clientY, position[1]),
     meters: scene.verticalMetersPerPixel(),
-    target: selection.kind === "node" ? "node" : "road",
+    target: selection.kind,
     id: selection.id,
   };
   scene.setEnabled(false);
@@ -1574,6 +1864,11 @@ window.addEventListener("keydown", (e) => {
   if (key === "w") setMode("move");
   if (key === "h") setMode("pan");
   if (key === "m") setMode("measure");
+  if (key === "b") {
+    libraryTab = "sites";
+    renderLibrary();
+    beginPlace("block");
+  }
   if (key === "g") toggleGrid();
   if (key === "s") $("snap-button").click();
   if (key === "f") {
@@ -1618,6 +1913,7 @@ Object.defineProperty(window, "frontier", {
     select: setSelection,
     setMode,
     loadTemplate,
+    placeSite: beginPlace,
     exportProject,
     save: saveProject,
     undo: undoProject,

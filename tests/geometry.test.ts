@@ -457,7 +457,7 @@ describe("details, persistence and export", () => {
       n.vertices,
     );
     assert(mtl.includes("newmtl asphalt"));
-    assert(mtl.includes("newmtl paving-herringbone"));
+    assert(mtl.includes("newmtl paving-ashlar"));
   });
   it("empty networks can be edited and exported without infinities", () => {
     const n = buildNetwork({ version: 1, name: "Empty", nodes: [], roads: [] });

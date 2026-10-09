@@ -302,9 +302,13 @@ export function translateRoad(project: Project, id: string, delta: V3) {
 }
 export function deleteSelection(
   project: Project,
-  kind: "node" | "road",
+  kind: "node" | "road" | "site",
   id: string,
 ) {
+  if (kind === "site") {
+    project.sites = project.sites?.filter((s) => s.id !== id);
+    return;
+  }
   project.roads = project.roads.filter((r) =>
     kind === "road" ? r.id !== id : r.start !== id && r.end !== id,
   );

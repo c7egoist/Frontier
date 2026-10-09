@@ -1,0 +1,579 @@
+import {
+  makeNode,
+  makeRoad,
+  presets,
+  type Project,
+  type RoadNode,
+  type RoadSettings,
+} from "./model";
+import { makeSite, type SiteKind } from "./sites";
+import { mul, add, sub, type V3 } from "./math";
+
+export const templateCatalog = [
+  {
+    id: "district",
+    name: "Northbank district",
+    description: "Urban junctions · stone blocks · parking",
+  },
+  {
+    id: "merge",
+    name: "Lane merge laboratory",
+    description: "Recessed paving nose · continuous lane guides",
+  },
+  {
+    id: "urban",
+    name: "Harbour street circuit",
+    description: "Closed city loop · modern blocks · parking",
+  },
+  {
+    id: "signal",
+    name: "Channelized crossroads",
+    description: "Slip lanes · planted islands · yellow box",
+  },
+  {
+    id: "cloverleaf",
+    name: "Cloverleaf interchange",
+    description: "Four 270° loops · connected elevated motorway",
+  },
+  {
+    id: "trumpet",
+    name: "Trumpet interchange",
+    description: "Three-arm motorway · loop ramp · flyover",
+  },
+  {
+    id: "race",
+    name: "Grand prix paddock",
+    description: "Closed racing circuit · rumble strips · pits",
+  },
+  {
+    id: "waterfront",
+    name: "Waterfront promenade",
+    description: "Curved limestone walks · plazas · railing",
+  },
+  {
+    id: "tee",
+    name: "Three-way junction",
+    description: "Shared T-joint · modern paved corners",
+  },
+  {
+    id: "roundabout",
+    name: "Garden roundabout",
+    description: "One-way circulation · landscaped central island",
+  },
+  {
+    id: "diamond",
+    name: "Diamond interchange",
+    description: "Connected ramps · steel bridge · route signs",
+  },
+];
+const ids = new Set([
+  "merge",
+  "urban",
+  "signal",
+  "cloverleaf",
+  "trumpet",
+  "race",
+  "waterfront",
+]);
+export function makeAdvancedTemplate(type: string): Project | null {
+  if (!ids.has(type)) return null;
+  const project: Project = {
+    version: 1,
+    name: templateCatalog.find((t) => t.id === type)!.name,
+    nodes: [],
+    roads: [],
+    sites: [],
+  };
+  const node = (name: string, x: number, z: number, y = 0, radius = 6) => {
+    const n = makeNode([x, y, z], name);
+    n.radius = radius;
+    n.crossings = false;
+    project.nodes.push(n);
+    return n;
+  };
+  const road = (
+    a: RoadNode,
+    b: RoadNode,
+    name: string,
+    settings: Partial<RoadSettings> = {},
+    h1?: V3,
+    h2?: V3,
+  ) => {
+    const r = makeRoad(a, b, name, settings, h1, h2);
+    project.roads.push(r);
+    return r;
+  };
+  const site = (
+    kind: SiteKind,
+    x: number,
+    z: number,
+    width: number,
+    depth: number,
+    yaw = 0,
+  ) => {
+    const s = makeSite(kind, [x, 0, z]);
+    Object.assign(s, { width, depth, yaw });
+    project.sites!.push(s);
+    return s;
+  };
+  const highway: Partial<RoadSettings> = {
+    lanes: 4,
+    laneWidth: 3.5,
+    sidewalk: 0.8,
+    pattern: "linear",
+    guardrails: true,
+    drainage: false,
+    markingStyle: "motorway",
+    signs: true,
+    speedLimit: 100,
+    median: 1.2,
+  };
+  const ramp: Partial<RoadSettings> = {
+    lanes: 1,
+    laneWidth: 4.2,
+    sidewalk: 0.65,
+    guardrails: true,
+    drainage: false,
+    oneWay: true,
+    markingStyle: "motorway",
+    signs: true,
+    speedLimit: 60,
+    pattern: "slate",
+  };
+  const city: Partial<RoadSettings> = {
+    lanes: 2,
+    laneWidth: 3.3,
+    sidewalk: 3.4,
+    pattern: "ashlar",
+    signs: true,
+    speedLimit: 40,
+    streetLights: true,
+  };
+  const rotate = (p: V3, i: number): V3 => {
+    const a = (i * Math.PI) / 2;
+    return [
+      p[0] * Math.cos(a) - p[2] * Math.sin(a),
+      p[1],
+      p[0] * Math.sin(a) + p[2] * Math.cos(a),
+    ];
+  };
+  if (type === "merge") {
+    const c = node("Shared merge pivot", 0, 0),
+      a = node("Incoming avenue", -140, 0),
+      b = node("Through avenue", 180, 0),
+      d = node("Slip approach", 164, 74);
+    road(a, c, "Incoming avenue", city);
+    road(c, b, "Through avenue", city);
+    road(
+      d,
+      c,
+      "Merging slip lane",
+      { ...city, lanes: 1, laneWidth: 4.2, sidewalk: 2, oneWay: true },
+      [-56, 0, -25],
+      [50, 0, 23],
+    );
+    c.setback = 3;
+  } else if (type === "urban") {
+    const raw: [number, number][] = [
+      [0, -130],
+      [-80, -130],
+      [-105, -105],
+      [-105, 0],
+      [-105, 105],
+      [-80, 130],
+      [0, 130],
+      [80, 130],
+      [105, 105],
+      [105, 0],
+      [105, -105],
+      [80, -130],
+    ];
+    const ring = raw.map(([x, z], i) =>
+      node(`Circuit waypoint ${i + 1}`, x, z, 0, 10),
+    );
+    const k = 13.8071,
+      outer = { ...city, parking: "parallel" as const };
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i],
+        b = ring[(i + 1) % ring.length];
+      const curve =
+        i === 1
+          ? [
+              [-k, 0, 0],
+              [0, 0, -k],
+            ]
+          : i === 4
+            ? [
+                [0, 0, k],
+                [-k, 0, 0],
+              ]
+            : i === 7
+              ? [
+                  [k, 0, 0],
+                  [0, 0, k],
+                ]
+              : i === 10
+                ? [
+                    [0, 0, -k],
+                    [k, 0, 0],
+                  ]
+                : null;
+      road(
+        a,
+        b,
+        `Harbour circuit · ${String(i + 1).padStart(2, "0")}`,
+        outer,
+        ...((curve as [V3, V3]) ?? [undefined, undefined]),
+      );
+    }
+    const center = node("City junction", 0, 0, 0, 11);
+    center.crossings = true;
+    center.boxJunction = true;
+    center.signals = true;
+    for (const index of [0, 3, 6, 9]) {
+      ring[index].crossings = true;
+      road(center, ring[index], `Central boulevard · ${index}`, {
+        ...city,
+        lanes: 4,
+        laneWidth: 3.2,
+        parking: "none",
+      });
+    }
+    for (const x of [-48, 48])
+      for (const z of [-59, 59]) {
+        const block = site("block", x, z, 66, 82);
+        block.name = `${x < 0 ? "West" : "East"} ${z < 0 ? "north" : "south"} block`;
+        block.buildingHeight = x < 0 ? 13 : 19;
+      }
+    const parking = site("parking", 158, 55, 64, 36);
+    parking.name = "Harbour parking court";
+    parking.entrance = "west";
+    parking.bays = 19;
+    const entrance = node("Parking entry", 126, 55);
+    road(
+      ring[9],
+      entrance,
+      "Parking driveway",
+      {
+        lanes: 2,
+        laneWidth: 3,
+        sidewalk: 0.5,
+        crossfall: 0,
+        markings: false,
+        signs: true,
+        speedLimit: 20,
+      },
+      [12, 0, 6],
+      [-15, 0, 0],
+    );
+  } else if (type === "signal") {
+    const c = node("Signalized crossing", 0, 0, 0, 12);
+    c.crossings = true;
+    c.boxJunction = true;
+    c.signals = true;
+    const arms = Array.from({ length: 4 }, (_, i) => {
+      const p = rotate([0, 0, -95], i);
+      return node(`Slip terminal ${i + 1}`, p[0], p[2], 0, 4);
+    });
+    const arterial = { ...city, lanes: 4, laneWidth: 3.3, sidewalk: 3 };
+    arms.forEach((a, i) => {
+      const p = rotate([0, 0, -190], i),
+        end = node(`Avenue boundary ${i + 1}`, p[0], p[2]);
+      road(end, a, `Avenue ${i + 1} · outer`, arterial);
+      road(a, c, `Avenue ${i + 1} · inner`, arterial);
+      road(
+        a,
+        arms[(i + 1) % 4],
+        `Free-flow slip ${i + 1}`,
+        {
+          ...ramp,
+          guardrails: false,
+          sidewalk: 1.8,
+          pattern: "linear",
+          signs: true,
+          speedLimit: 30,
+          markingStyle: "urban",
+        },
+        rotate([21, 0, 35], i),
+        rotate([-35, 0, -21], i),
+      );
+      const q = rotate([24, 0, -24], i),
+        island = site("island", q[0], q[2], 20, 20, i * 90);
+      island.name = `Planted splitter island ${i + 1}`;
+    });
+  } else if (type === "cloverleaf" || type === "trumpet") {
+    const w = node("West merge", -160, 0, 0, 4),
+      e = node("East merge", 160, 0, 0, 4),
+      n = node("North merge", 0, -160, 9, 4);
+    road(node("West boundary", -430, 0), w, "Motorway · West", highway);
+    road(w, e, "Motorway · Through", highway);
+    road(e, node("East boundary", 430, 0), "Motorway · East", highway);
+    road(
+      node("North boundary", 0, -430),
+      n,
+      "Elevated approach · North",
+      highway,
+      [0, 0, 100],
+      [0, 0, -100],
+    );
+    const s =
+      type === "cloverleaf"
+        ? node("South merge", 0, 160, 9, 4)
+        : node("Flyover fork", 0, 100, 9, 7);
+    road(
+      n,
+      s,
+      "Steel flyover",
+      { ...highway, bridge: true, structure: "steel" },
+      [0, 0, 95],
+      [0, 0, -95],
+    );
+    if (type === "cloverleaf")
+      road(
+        s,
+        node("South boundary", 0, 430),
+        "Elevated approach · South",
+        highway,
+        [0, 0, 100],
+        [0, 0, -100],
+      );
+    const hubs = [w, n, e, s],
+      count = type === "cloverleaf" ? 4 : 1,
+      radius = 55,
+      k = 0.55228475 * radius;
+    for (let quadrant = 0; quadrant < count; quadrant++) {
+      const from = hubs[quadrant],
+        to = hubs[(quadrant + 1) % 4],
+        startY = from.position[1],
+        endY = to.position[1];
+      const positions: V3[] = [
+        [-90 + radius, 0, -92],
+        [-90, 0, -92 - radius],
+        [-90 - radius, 0, -92],
+        [-90, 0, -92 + radius],
+      ];
+      const points = positions.map((p, i) => {
+        const q = rotate(p, quadrant);
+        return node(
+          `Loop ${quadrant + 1} · ${i + 1}`,
+          q[0],
+          q[2],
+          startY + (endY - startY) * (0.2 + i * 0.2),
+          3,
+        );
+      });
+      const settings = {
+        ...ramp,
+        bridge: true,
+        structure: "concrete" as const,
+      };
+      road(
+        from,
+        points[0],
+        `Loop ${quadrant + 1} · entry`,
+        settings,
+        rotate([35, 0, -22], quadrant),
+        rotate([0, 0, 35], quadrant),
+      );
+      const handles: [V3, V3][] = [
+        [
+          [0, 0, -k],
+          [k, 0, 0],
+        ],
+        [
+          [-k, 0, 0],
+          [0, 0, -k],
+        ],
+        [
+          [0, 0, k],
+          [-k, 0, 0],
+        ],
+      ];
+      for (let i = 0; i < 3; i++)
+        road(
+          points[i],
+          points[i + 1],
+          `Loop ${quadrant + 1} · arc ${i + 1}`,
+          settings,
+          rotate(handles[i][0], quadrant),
+          rotate(handles[i][1], quadrant),
+        );
+      road(
+        points[3],
+        to,
+        `Loop ${quadrant + 1} · exit`,
+        settings,
+        rotate([42, 0, 0], quadrant),
+        rotate([-22, 0, 35], quadrant),
+      );
+    }
+    if (type === "trumpet") {
+      road(
+        s,
+        w,
+        "West descending ramp",
+        { ...ramp, bridge: true },
+        [-60, 0, 0],
+        [24, 0, 40],
+      );
+      road(
+        e,
+        s,
+        "East ascending ramp",
+        { ...ramp, bridge: true },
+        [-24, 0, 40],
+        [60, 0, 0],
+      );
+    }
+  } else if (type === "race") {
+    const settings = {
+      ...presets.find((p) => p.id === "race")!.settings,
+      lanes: 2,
+      laneWidth: 5.2,
+    };
+    const raw: [number, number][] = [
+      [-140, -85],
+      [-35, -115],
+      [110, -88],
+      [155, 0],
+      [82, 85],
+      [12, 43],
+      [-58, 107],
+      [-149, 37],
+    ];
+    const ring = raw.map(([x, z], i) =>
+      node(`Race sector ${i + 1}`, x, z, 0, 6),
+    );
+    const tangents = ring.map((n, i) =>
+      mul(
+        sub(
+          ring[(i + 1) % ring.length].position,
+          ring[(i + ring.length - 1) % ring.length].position,
+        ),
+        0.17,
+      ),
+    );
+    for (let i = 0; i < ring.length; i++)
+      road(
+        ring[i],
+        ring[(i + 1) % ring.length],
+        `Grand prix · Sector ${i + 1}`,
+        { ...settings, startingGrid: i === 0 },
+        tangents[i],
+        mul(tangents[(i + 1) % ring.length], -1),
+      );
+    const pad = site("parking", -15, -182, 106, 32);
+    pad.name = "Paddock and pit parking";
+    pad.bays = 34;
+    pad.entrance = "south";
+    const entry = node("Pit lane entry", -80, -145),
+      exit = node("Pit lane exit", 70, -145),
+      mid = node("Paddock access", -15, -145, 0, 4);
+    const pitSettings = {
+      ...settings,
+      laneWidth: 3.3,
+      sidewalk: 1,
+      curbStyle: "stone" as const,
+      railStyle: "railing" as const,
+      markingStyle: "urban" as const,
+      speedLimit: 40,
+    };
+    road(
+      ring[0],
+      entry,
+      "Pit entry taper",
+      pitSettings,
+      [4, 0, -43],
+      [-23, 0, 0],
+    );
+    road(entry, mid, "Pit straight · West", pitSettings);
+    road(mid, exit, "Pit straight · East", pitSettings);
+    road(
+      exit,
+      ring[2],
+      "Pit exit taper",
+      pitSettings,
+      [22, 0, 0],
+      [-8, 0, -35],
+    );
+    const gate = node("Paddock gate", -15, -166);
+    road(mid, gate, "Paddock driveway", {
+      lanes: 2,
+      laneWidth: 3,
+      sidewalk: 0.5,
+      crossfall: 0,
+      markings: false,
+      signs: true,
+      speedLimit: 20,
+    });
+    site("plaza", -25, 9, 42, 34).name = "Race village";
+  } else if (type === "waterfront") {
+    const walk = {
+      ...presets.find((p) => p.id === "promenade")!.settings,
+      crossfall: 1,
+      railHeight: 1.1,
+      postSpacing: 2.2,
+    };
+    const raw: [number, number][] = [
+      [-33, -185],
+      [-19, -92],
+      [-37, 0],
+      [-12, 94],
+      [-27, 187],
+    ];
+    const ring = raw.map(([x, z], i) =>
+      node(`Promenade waypoint ${i + 1}`, x, z),
+    );
+    for (let i = 0; i < ring.length - 1; i++)
+      road(
+        ring[i],
+        ring[i + 1],
+        `Waterfront promenade · ${i + 1}`,
+        walk,
+        [18, 0, 32],
+        [-18, 0, -32],
+      );
+    const cycle = raw.map(([x, z], i) =>
+      node(`Cycle waypoint ${i + 1}`, x - 28, z, 0, 2),
+    );
+    for (let i = 0; i < cycle.length - 1; i++)
+      road(
+        cycle[i],
+        cycle[i + 1],
+        `Coastal cycleway · ${i + 1}`,
+        {
+          lanes: 1,
+          laneWidth: 3.4,
+          sidewalk: 0.4,
+          surface: "asphalt",
+          oneWay: true,
+          markingStyle: "urban",
+          curbStyle: "flush",
+          drainage: false,
+          markings: false,
+        },
+        [18, 0, 32],
+        [-18, 0, -32],
+      );
+    road(
+      cycle[0],
+      ring[0],
+      "North promenade link",
+      { ...walk, guardrails: false },
+      [6, 0, 0],
+      [-6, 0, 0],
+    );
+    road(
+      cycle[4],
+      ring[4],
+      "South promenade link",
+      { ...walk, guardrails: false },
+      [6, 0, 0],
+      [-6, 0, 0],
+    );
+    site("water", 72, 0, 156, 400).name = "Harbour water";
+    for (const z of [-135, 42, 140])
+      site("plaza", -70, z, 25, 27).name = `Promenade terrace ${z}`;
+  }
+  return project;
+}

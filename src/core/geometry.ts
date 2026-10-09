@@ -1,3 +1,13 @@
+import { siteOutline, insidePolygon } from "./sites";
+import { parkingLayout } from "./site-geometry";
+import { buildSiteGeometry } from "./site-geometry";
+import {
+  buildRoadFurniture,
+  buildMedian,
+  buildParallelParking,
+  buildJunctionMarkings,
+  buildTrafficSignals,
+} from "./road-details";
 import earcut from "earcut";
 import {
   add,
@@ -22,6 +32,8 @@ import {
   connected,
   getNode,
   validateGenerationBudget,
+  roadHalfWidth,
+  roadMaterial,
   type Project,
   type Road,
   type RoadNode,
@@ -44,11 +56,16 @@ export type MeshKind =
   | "rail"
   | "structure"
   | "drain"
-  | "gutter";
+  | "gutter"
+  | "sign"
+  | "lamp"
+  | "landscape"
+  | "building"
+  | "parking";
 export interface MeshData {
   name: string;
   owner: string;
-  ownerKind: "road" | "node";
+  ownerKind: "road" | "node" | "site";
   kind: MeshKind;
   material: string;
   positions: number[];
@@ -60,6 +77,7 @@ export interface Frame extends Station {
   sw: number;
   cw: number;
   crossfall: number;
+  curbHeight: number;
 }
 export interface RoadSpan {
   road: Road;
@@ -108,6 +126,7 @@ export interface Network {
   bounds: { min: V3; max: V3 };
   maxGrade: number;
   clearances: { a: string; b: string; meters: number }[];
+  parkingSpaces: number;
 }
 const SURFACE = 0.12,
   CURB = 0.16;
@@ -116,7 +135,7 @@ export function edgePoint(
   side: number,
   part: "road" | "curbIn" | "curbOut" | "outer" | "bottom",
 ): V3 {
-  const edgeHeight = SURFACE - (f.hw * f.crossfall) / 100;
+  const edgeHeight = surfaceHeight(f) - (f.hw * f.crossfall) / 100;
   const width =
     part === "road" || part === "curbIn"
       ? f.hw
@@ -128,21 +147,23 @@ export function edgePoint(
       ? edgeHeight
       : part === "bottom"
         ? -0.48
-        : edgeHeight + CURB - (part === "outer" ? f.sw * 0.01 : 0);
+        : edgeHeight + f.curbHeight - (part === "outer" ? f.sw * 0.01 : 0);
   return offsetStation(f, side * width, height);
 }
+export const surfaceHeight = (f: Frame) =>
+  Math.max(SURFACE, 0.04 + (f.hw * f.crossfall) / 100);
 export function surfacePoint(f: Frame, offset: number, extra = 0): V3 {
   return offsetStation(
     f,
     offset,
-    SURFACE - (Math.abs(offset) * f.crossfall) / 100 + extra,
+    surfaceHeight(f) - (Math.abs(offset) * f.crossfall) / 100 + extra,
   );
 }
 export class MeshBuilder {
   meshes = new Map<string, MeshData>();
   constructor(
     public owner: string,
-    public ownerKind: "road" | "node",
+    public ownerKind: "road" | "node" | "site",
   ) {}
   target(kind: MeshKind, material: string): MeshData {
     const key = `${kind}:${material}`;
@@ -194,7 +215,19 @@ export class MeshBuilder {
       const k = i * 2;
       indices.push(k, k + 1, k + 3, k, k + 3, k + 2);
     }
+    const mesh = this.target(kind, material),
+      uvStart = mesh.uvs.length;
     this.append(kind, material, points, indices, upward);
+    if (material === "race-curb") {
+      let arc = 0;
+      for (let i = 0; i < a.length; i++) {
+        if (i) arc += distance(a[i], a[i - 1]);
+        mesh.uvs[uvStart + i * 4] = arc;
+        mesh.uvs[uvStart + i * 4 + 1] = 0;
+        mesh.uvs[uvStart + i * 4 + 2] = arc;
+        mesh.uvs[uvStart + i * 4 + 3] = 1;
+      }
+    }
   }
   polygon(
     kind: MeshKind,
@@ -300,6 +333,33 @@ export class MeshBuilder {
     return [...this.meshes.values()].filter((m) => m.indices.length);
   }
 }
+function pavingBands(
+  b: MeshBuilder,
+  inner: V3[],
+  outer: V3[],
+  widths: number[],
+) {
+  const band = 0.16,
+    up = (p: V3) => add(p, [0, 0.004, 0]);
+  b.strip(
+    "paving",
+    "pave-border",
+    inner.map(up),
+    inner.map((p, k) =>
+      up(lerp(p, outer[k], Math.min(0.3, band / Math.max(0.01, widths[k])))),
+    ),
+    true,
+  );
+  b.strip(
+    "paving",
+    "pave-border",
+    outer.map((p, k) =>
+      up(lerp(p, inner[k], Math.min(0.3, band / Math.max(0.01, widths[k])))),
+    ),
+    outer.map(up),
+    true,
+  );
+}
 function needsJoint(
   project: Project,
   node: RoadNode,
@@ -308,10 +368,10 @@ function needsJoint(
   const roads = connected(project, node.id);
   if (roads.length >= 3) return true;
   if (roads.length !== 2) return false;
+  if (roads[0].curbStyle !== roads[1].curbStyle) return true;
   if (
-    Math.abs(
-      roads[0].lanes * roads[0].laneWidth - roads[1].lanes * roads[1].laneWidth,
-    ) > 0.02 ||
+    Math.abs(roadHalfWidth(roads[0]) * 2 - roadHalfWidth(roads[1]) * 2) >
+      0.02 ||
     Math.abs(roads[0].sidewalk - roads[1].sidewalk) > 0.02
   )
     return true;
@@ -330,7 +390,7 @@ function trimDistance(
   alignments: Map<string, Alignment>,
 ) {
   const roads = connected(project, node.id),
-    widths = roads.map((r) => (r.lanes * r.laneWidth) / 2),
+    widths = roads.map(roadHalfWidth),
     maxWidth = Math.max(...widths);
   const angles = roads
     .map((r) => {
@@ -347,18 +407,26 @@ function trimDistance(
     minAngle = Math.min(minAngle, gap);
   });
   const radius = Math.max(node.radius, ...roads.map((r) => r.sidewalk + 1));
-  return Math.max(
-    radius + maxWidth + 0.8,
-    radius + maxWidth / Math.max(0.15, Math.tan(minAngle / 2)) + 0.8,
+  return (
+    Math.max(
+      radius + maxWidth + 0.8,
+      (radius + maxWidth) / Math.max(0.075, Math.tan(minAngle / 2)) + 0.8,
+    ) + (node.setback ?? 0)
   );
 }
 function frameWithWidth(s: Station, road: Road, scale = 1): Frame {
   return {
     ...s,
-    hw: ((road.lanes * road.laneWidth) / 2) * scale,
+    hw: roadHalfWidth(road) * scale,
     sw: road.sidewalk * scale,
-    cw: 0.22 * scale,
+    cw: (road.curbStyle === "race" ? 0.6 : 0.22) * scale,
     crossfall: road.crossfall,
+    curbHeight:
+      road.curbStyle === "flush"
+        ? 0.04
+        : road.curbStyle === "race"
+          ? 0.08
+          : CURB,
   };
 }
 function hasSelfCrossing(alignment: Alignment): boolean {
@@ -419,8 +487,7 @@ function makeFrames(
       radius = angle > 1e-5 ? distanceXZ(a.p, b.p) / angle : Infinity;
     const scale = Math.min(
       1,
-      (radius * 0.78) /
-        ((road.lanes * road.laneWidth) / 2 + road.sidewalk + 0.22),
+      (radius * 0.78) / (roadHalfWidth(road) + road.sidewalk + 0.6),
     );
     if (scale < 0.98) limited = true;
     return frameWithWidth(s, road, Math.max(0.05, scale));
@@ -433,7 +500,7 @@ function makeFrames(
     });
   return frames;
 }
-function frameAt(span: RoadSpan, s: number): Frame {
+export function frameAt(span: RoadSpan, s: number): Frame {
   if (s <= span.frames[0].s) return span.frames[0];
   if (s >= span.frames.at(-1)!.s) return span.frames.at(-1)!;
   const i = span.frames.findIndex((f) => f.s >= s),
@@ -446,9 +513,10 @@ function frameAt(span: RoadSpan, s: number): Frame {
     sw: a.sw + (b.sw - a.sw) * t,
     cw: a.cw + (b.cw - a.cw) * t,
     crossfall: span.road.crossfall,
+    curbHeight: a.curbHeight,
   };
 }
-function ribbon(
+export function ribbon(
   builder: MeshBuilder,
   span: RoadSpan,
   from: number,
@@ -469,16 +537,14 @@ function ribbon(
     frames.map((f) =>
       surfacePoint(
         f,
-        ((offset - width / 2) * f.hw) /
-          ((span.road.lanes * span.road.laneWidth) / 2),
+        ((offset - width / 2) * f.hw) / roadHalfWidth(span.road),
         0.018,
       ),
     ),
     frames.map((f) =>
       surfacePoint(
         f,
-        ((offset + width / 2) * f.hw) /
-          ((span.road.lanes * span.road.laneWidth) / 2),
+        ((offset + width / 2) * f.hw) / roadHalfWidth(span.road),
         0.018,
       ),
     ),
@@ -501,7 +567,7 @@ function crosswalk(builder: MeshBuilder, span: RoadSpan, s: number) {
     );
   }
 }
-function arrow(
+export function arrow(
   builder: MeshBuilder,
   f: Frame,
   offset: number,
@@ -526,37 +592,247 @@ function arrow(
     true,
   );
 }
+export function minimumApproachAngle(project: Project, nodeId: string): number {
+  const angles = connected(project, nodeId)
+    .map((r) => {
+      const a = sampleAlignment(project, r),
+        d =
+          r.start === nodeId ? a.stations[0].d : mul(a.stations.at(-1)!.d, -1);
+      return Math.atan2(d[2], d[0]);
+    })
+    .sort((a, b) => a - b);
+  if (angles.length < 2) return Math.PI;
+  return Math.min(
+    ...angles.map(
+      (a, i) =>
+        (angles[(i + 1) % angles.length] - a + Math.PI * 2) % (Math.PI * 2),
+    ),
+  );
+}
+export function effectiveCrossing(project: Project, nodeId: string): boolean {
+  return (
+    getNode(project, nodeId).crossings &&
+    connected(project, nodeId).some((r) => r.markingStyle === "urban") &&
+    minimumApproachAngle(project, nodeId) > Math.PI * 0.29
+  );
+}
 function buildMarkings(builder: MeshBuilder, span: RoadSpan, project: Project) {
   const road = span.road;
   if (!road.markings) return;
   const start = span.frames[0].s,
     end = span.frames.at(-1)!.s;
   const startCrossing =
-      span.startJoint && getNode(project, road.start).crossings,
-    endCrossing = span.endJoint && getNode(project, road.end).crossings;
-  const from = start + (startCrossing ? 5 : 0.35),
-    to = end - (endCrossing ? 5 : 0.35);
-  const hw = (road.lanes * road.laneWidth) / 2;
+      span.startJoint && effectiveCrossing(project, road.start),
+    endCrossing = span.endJoint && effectiveCrossing(project, road.end);
+  const from = start + (startCrossing ? 5 : 0.35) + road.markingSetback,
+    to = end - (endCrossing ? 5 : 0.35) - road.markingSetback;
+  const hw = roadHalfWidth(road),
+    travel = (road.lanes * road.laneWidth) / 2;
   for (const side of [-1, 1])
-    ribbon(builder, span, start + 0.3, end - 0.3, side * (hw - 0.22), 0.1);
-  for (let lane = 1; lane < road.lanes; lane++) {
-    const offset = -hw + road.laneWidth * lane;
-    if (road.lanes >= 4 && lane === road.lanes / 2 && !road.oneWay) {
+    ribbon(
+      builder,
+      span,
+      start + 0.3,
+      end - 0.3,
+      side * (travel + road.median / 2 - 0.22),
+      0.13,
+    );
+  for (
+    let lane = 1;
+    lane < road.lanes && road.markingStyle !== "race";
+    lane++
+  ) {
+    const offset =
+      -travel +
+      road.laneWidth * lane +
+      (lane < road.lanes / 2
+        ? -road.median / 2
+        : lane > road.lanes / 2
+          ? road.median / 2
+          : 0);
+    if (lane === road.lanes / 2 && road.median > 0) continue;
+    if (
+      road.lanes >= 4 &&
+      lane === road.lanes / 2 &&
+      !road.oneWay &&
+      road.markingStyle === "urban"
+    ) {
       ribbon(builder, span, from, to, offset - 0.12, 0.1, "yellow");
       ribbon(builder, span, from, to, offset + 0.12, 0.1, "yellow");
     } else
-      for (let s = Math.ceil(from / 6) * 6; s < to - 0.1; s += 6)
-        ribbon(builder, span, s, Math.min(to, s + 2.7), offset, 0.11);
+      for (
+        let s = Math.ceil(from / 6) * 6;
+        s < to - 0.1;
+        s += road.markingStyle === "motorway" ? 10 : 6
+      )
+        ribbon(
+          builder,
+          span,
+          s,
+          Math.min(to, s + (road.markingStyle === "motorway" ? 5 : 2.7)),
+          offset,
+          0.13,
+        );
   }
+  if (road.markingStyle === "race" && road.startingGrid) {
+    const a = from + 3,
+      z = Math.min(to, from + 5.2);
+    if (z > a)
+      for (let row = 0; row < 2; row++)
+        for (let cell = 0; cell < 16; cell++) {
+          const f = frameAt(span, a + ((z - a) * row) / 2),
+            g = frameAt(span, a + ((z - a) * (row + 1)) / 2),
+            lo = -f.hw + (f.hw * 2 * cell) / 16,
+            hi = -f.hw + (f.hw * 2 * (cell + 1)) / 16;
+          builder.quad(
+            "marking",
+            (cell + row) % 2 ? "paint" : "rubber",
+            [
+              surfacePoint(f, lo, 0.022),
+              surfacePoint(f, hi, 0.022),
+              surfacePoint(g, -g.hw + (g.hw * 2 * (cell + 1)) / 16, 0.022),
+              surfacePoint(g, -g.hw + (g.hw * 2 * cell) / 16, 0.022),
+            ],
+            true,
+          );
+        }
+
+    for (let lane = 0; lane < 2; lane++)
+      for (let i = 0; i < 5; i++) {
+        const s = from + 10 + i * 7;
+        if (s + 2 < to) {
+          ribbon(
+            builder,
+            span,
+            s,
+            s + 2,
+            (lane === 0 ? -1 : 1) * travel * 0.5 - 0.65,
+            0.11,
+          );
+          ribbon(
+            builder,
+            span,
+            s,
+            s + 2,
+            (lane === 0 ? -1 : 1) * travel * 0.5 + 0.65,
+            0.11,
+          );
+        }
+      }
+  }
+  if (startCrossing && end - start > 14)
+    ribbon(builder, span, start + 4.1, start + 4.45, -hw * 0.5, hw - 0.5);
+  if (endCrossing && end - start > 14)
+    ribbon(builder, span, end - 4.45, end - 4.1, hw * 0.5, hw - 0.5);
   if (startCrossing && end - start > 9) crosswalk(builder, span, start + 2);
   if (endCrossing && end - start > 9) crosswalk(builder, span, end - 2);
   if (end - start > 26) {
-    if (span.startJoint) arrow(builder, frameAt(span, start + 11), -hw / 2, -1);
+    if (span.startJoint)
+      arrow(builder, frameAt(span, start + 11), -hw / 2, road.oneWay ? 1 : -1);
     if (span.endJoint) arrow(builder, frameAt(span, end - 11), hw / 2, 1);
+  }
+}
+function alternativeRail(
+  b: MeshBuilder,
+  path: V3[],
+  normals: V3[],
+  height: (t: number) => number,
+  style: "railing" | "concrete",
+  spacing: number,
+) {
+  const profiles =
+    style === "concrete"
+      ? [
+          [
+            [-0.32, 0],
+            [-0.23, 0.18],
+            [-0.09, 1],
+            [0.09, 1],
+            [0.23, 0.18],
+            [0.32, 0],
+          ],
+        ]
+      : [0.4, 0.72, 0.97].map((h) => [
+          [-0.022, h - 0.023],
+          [0.022, h - 0.023],
+          [0.022, h + 0.023],
+          [-0.022, h + 0.023],
+        ]);
+  for (const profile of profiles) {
+    const row = (i: number) =>
+      path.map((p, k) =>
+        add(
+          p,
+          add(mul(normals[k], profile[i][0]), [
+            0,
+            profile[i][1] * height(k / (path.length - 1)),
+            0,
+          ]),
+        ),
+      );
+    for (let i = 0; i < profile.length; i++)
+      b.strip(
+        "rail",
+        style === "concrete" ? "curb" : "pole",
+        row(i),
+        row((i + 1) % profile.length),
+      );
+    for (const index of [0, path.length - 1]) {
+      const points = profile.map((_, i) => row(i)[index]),
+        center = mul(
+          points.reduce((a, p) => add(a, p), [0, 0, 0] as V3),
+          1 / points.length,
+        );
+      b.append(
+        "rail",
+        style === "concrete" ? "curb" : "pole",
+        [center, ...points],
+        points.flatMap((_, i) => [0, i + 1, ((i + 1) % points.length) + 1]),
+      );
+    }
+  }
+  if (style === "railing") {
+    const length = path
+        .slice(1)
+        .reduce((s, p, i) => s + distance(p, path[i]), 0),
+      posts = resampleLine(
+        path,
+        Math.max(2, Math.ceil(length / Math.min(spacing, 2.5)) + 1),
+      );
+    for (let i = 0; i < posts.length; i++) {
+      const h = height(i / (posts.length - 1)),
+        d = normalizeXZ(
+          sub(
+            posts[Math.min(i + 1, posts.length - 1)],
+            posts[Math.max(0, i - 1)],
+          ),
+        );
+      b.box(
+        "rail",
+        "pole",
+        add(posts[i], [0, h / 2 - 0.04, 0]),
+        0.065,
+        h + 0.08,
+        0.065,
+        d,
+      );
+    }
   }
 }
 function buildRails(builder: MeshBuilder, span: RoadSpan) {
   if (!span.road.guardrails) return;
+  if (span.road.railStyle !== "wbeam") {
+    for (const side of [-1, 1])
+      alternativeRail(
+        builder,
+        span.frames.map((f) => edgePoint(f, side, "outer")),
+        span.frames.map((f) => mul(f.n, side)),
+        () => span.road.railHeight,
+        span.road.railStyle,
+        span.road.postSpacing,
+      );
+    return;
+  }
   for (const side of [-1, 1]) {
     const base = span.frames.map((f) => edgePoint(f, side, "outer"));
     // A corrugated W-beam, not a floating tube. Profile is swept in the same
@@ -605,7 +881,7 @@ function addInlet(builder: MeshBuilder, f: Frame, side: number) {
   const p = offsetStation(
     f,
     side * (f.hw + 0.04),
-    SURFACE - (f.hw * f.crossfall) / 100 + 0.009,
+    surfaceHeight(f) - (f.hw * f.crossfall) / 100 + 0.009,
   );
   builder.box("drain", "drain-dark", p, 0.36, 0.045, 0.7, f.d);
   for (let i = 0; i < 7; i++)
@@ -627,14 +903,14 @@ function buildDrainage(builder: MeshBuilder, span: RoadSpan) {
       offsetStation(
         f,
         side * (f.hw - 0.06),
-        SURFACE - (f.hw * f.crossfall) / 100 + 0.006,
+        surfaceHeight(f) - (f.hw * f.crossfall) / 100 + 0.006,
       ),
     );
     const b = span.frames.map((f) =>
       offsetStation(
         f,
         side * (f.hw + 0.065),
-        SURFACE - (f.hw * f.crossfall) / 100 + 0.006,
+        surfaceHeight(f) - (f.hw * f.crossfall) / 100 + 0.006,
       ),
     );
     builder.strip("gutter", "gutter", a, b, true);
@@ -747,18 +1023,26 @@ function buildSpan(
   const center = frames.map((f) => surfacePoint(f, 0)),
     left = frames.map((f) => edgePoint(f, 1, "road")),
     right = frames.map((f) => edgePoint(f, -1, "road"));
-  b.strip("asphalt", road.surface, left, center, true);
-  b.strip("asphalt", road.surface, center, right, true);
+  b.strip("asphalt", roadMaterial(road), left, center, true);
+  b.strip("asphalt", roadMaterial(road), center, right, true);
   for (const side of [-1, 1]) {
     const inner = frames.map((f) => edgePoint(f, side, "road")),
       curbIn = frames.map((f) => edgePoint(f, side, "curbIn"));
     const curbOut = frames.map((f) => edgePoint(f, side, "curbOut")),
       outer = frames.map((f) => edgePoint(f, side, "outer"));
     const bottom = frames.map((f) => edgePoint(f, side, "bottom"));
-    b.strip("curb", "curb", inner, curbIn);
-    b.strip("curb", "curb", curbIn, curbOut, true);
-    if (road.sidewalk > 0.01)
+    const curbMaterial = road.curbStyle === "race" ? "race-curb" : "curb";
+    b.strip("curb", curbMaterial, inner, curbIn);
+    b.strip("curb", curbMaterial, curbIn, curbOut, true);
+    if (road.sidewalk > 0.01) {
       b.strip("paving", `paving-${road.pattern}`, curbOut, outer, true);
+      pavingBands(
+        b,
+        curbOut,
+        outer,
+        frames.map((f) => f.sw),
+      );
+    }
     b.strip("structure", "road-base", outer, bottom);
   }
   b.strip(
@@ -794,6 +1078,9 @@ function buildSpan(
         ]);
     }
   buildMarkings(b, span, project);
+  buildMedian(b, span);
+  buildParallelParking(b, span);
+  buildRoadFurniture(b, span, project);
   buildRails(b, span);
   const inlets = buildDrainage(b, span);
   buildBridge(b, span, allAlignments);
@@ -874,7 +1161,20 @@ function offsetCorner(
       d = normalizeXZ(sub(b, a)),
       t = i / (base.length - 1);
     const n: V3 = [d[2], 0, -d[0]],
-      width = widthA * (1 - t) + widthB * t;
+      requestedWidth = widthA * (1 - t) + widthB * t;
+    const da = normalizeXZ(sub(p, a)),
+      db = normalizeXZ(sub(b, p)),
+      turn = Math.acos(clamp(dotXZ(da, db), -1, 1));
+    const curvatureRadius =
+      turn > 1e-4
+        ? (distanceXZ(a, p) + distanceXZ(p, b)) / (2 * turn)
+        : Infinity;
+    // A wide footway cannot invert around a short-radius merge nose.
+    // Preserve exact mouth widths; narrow only the inside of the fillet.
+    const width =
+      i === 0 || i === base.length - 1
+        ? requestedWidth
+        : Math.min(requestedWidth, curvatureRadius * 0.82);
     const y =
       (start[1] - base[0][1]) * (1 - t) + (end[1] - base.at(-1)![1]) * t;
     return add(p, add(mul(n, width), [0, y, 0]));
@@ -891,6 +1191,17 @@ function buildCornerRails(builder: MeshBuilder, curve: V3[], a: Arm, b: Arm) {
     );
     return [d[2], 0, -d[0]] as V3;
   });
+  if (a.road.railStyle === b.road.railStyle && a.road.railStyle !== "wbeam") {
+    alternativeRail(
+      builder,
+      curve,
+      normals,
+      (t) => a.road.railHeight * (1 - t) + b.road.railHeight * t,
+      a.road.railStyle,
+      (a.road.postSpacing + b.road.postSpacing) / 2,
+    );
+    return;
+  }
   const profile = [
     [-0.035, -0.16],
     [0.04, -0.08],
@@ -975,14 +1286,24 @@ function buildJunction(
   const material = arms.reduce(
     (a, r) => (r.road.lanes > a.road.lanes ? r : a),
     arms[0],
-  ).road.surface;
+  );
+  const junctionRoad = material.road,
+    asphaltMaterial = roadMaterial(junctionRoad);
   const radius = Math.max(node.radius, ...arms.map((a) => a.frame.sw + 1));
   let inlets = 0;
   for (let i = 0; i < arms.length; i++) {
     const a = arms[i],
       next = arms[(i + 1) % arms.length],
       curve = cornerCurve(a.left, a.d, next.right, next.d, radius);
-    const curbIn = curve.map((p, k) => add(p, [0, CURB, 0]));
+    const curbIn = curve.map((p, k) =>
+      add(p, [
+        0,
+        a.frame.curbHeight +
+          ((next.frame.curbHeight - a.frame.curbHeight) * k) /
+            (curve.length - 1),
+        0,
+      ]),
+    );
     curbIn[0] = armPart(a, 1, "curbIn");
     curbIn[curbIn.length - 1] = armPart(next, -1, "curbIn");
     const curbOut = offsetCorner(
@@ -1005,8 +1326,15 @@ function buildJunction(
     outer.push(a.outerRight, a.outerLeft, ...paved.slice(1, -1));
     b.strip("curb", "curb", curve, curbIn);
     b.strip("curb", "curb", curbIn, curbOut, true);
-    if (a.frame.sw > 0 || next.frame.sw > 0)
+    if (a.frame.sw > 0 || next.frame.sw > 0) {
       b.strip("paving", `paving-${a.road.pattern}`, curbOut, paved, true);
+      pavingBands(
+        b,
+        curbOut,
+        paved,
+        curbOut.map((p, k) => distanceXZ(p, paved[k])),
+      );
+    }
     const bottom = paved.map(
       (p) => [p[0], node.position[1] - 0.48, p[2]] as V3,
     );
@@ -1027,7 +1355,14 @@ function buildJunction(
       message: `${node.name}: overlapping approaches. Move the node or separate nearly parallel arms.`,
       owner: node.id,
     });
-  b.polygon("asphalt", material, boundary, add(node.position, [0, SURFACE, 0]));
+  b.polygon(
+    "asphalt",
+    asphaltMaterial,
+    boundary,
+    add(node.position, [0, SURFACE, 0]),
+  );
+  buildJunctionMarkings(b, node, arms, b.target("asphalt", asphaltMaterial));
+  buildTrafficSignals(b, node, arms);
   const bottom = outer.map((p) => [p[0], node.position[1] - 0.48, p[2]] as V3);
   arms.forEach((arm) => {
     for (const [top, bot] of [
@@ -1045,8 +1380,14 @@ function buildJunction(
     add(node.position, [0, -0.48, 0]),
     false,
   );
-  const type =
-    arms.length === 2
+  const type = arms.some(
+    (a, i) =>
+      (arms[(i + 1) % arms.length].angle - a.angle + Math.PI * 2) %
+        (Math.PI * 2) <
+      Math.PI * 0.29,
+  )
+    ? "Merge"
+    : arms.length === 2
       ? "Bend"
       : arms.length === 3
         ? "3-way"
@@ -1097,10 +1438,16 @@ export function buildNetwork(project: Project): Network {
     }
     const requiredA = backs.get(road.start) ?? 0,
       requiredB = backs.get(road.end) ?? 0;
-    const maxTrim = alignment.length * 0.43,
-      start = Math.min(requiredA, maxTrim),
-      end = Math.min(requiredB, maxTrim);
-    if (requiredA > maxTrim + 0.1 || requiredB > maxTrim + 0.1)
+    // Spend the available approach length, not a hard 43% at BOTH ends.
+    // A free-ended 94 m road can give an acute merge its full fillet runout.
+    const available = Math.max(
+        0,
+        alignment.length - Math.min(4, alignment.length * 0.2),
+      ),
+      factor = Math.min(1, available / Math.max(1e-8, requiredA + requiredB)),
+      start = requiredA * factor,
+      end = requiredB * factor;
+    if (factor < 0.99)
       diagnostics.push({
         level: "warning",
         message: `${road.name}: short approach limits the junction radius.`,
@@ -1207,13 +1554,65 @@ export function buildNetwork(project: Project): Network {
     }
     const upper = ay > by ? a.road : b.road,
       depth = upper.bridge ? (upper.structure === "steel" ? 1.12 : 0.92) : 0.48,
-      meters = gap - depth - SURFACE;
+      lower = ay > by ? b.road : a.road,
+      meters =
+        gap -
+        depth -
+        Math.max(
+          SURFACE,
+          0.04 + (roadHalfWidth(lower) * lower.crossfall) / 100,
+        );
     clearances.push({ a: crossing.a, b: crossing.b, meters });
     if (meters < 4.5)
       diagnostics.push({
         level: "warning",
         message: `Low overpass clearance: ${meters.toFixed(2)} m. Raise the deck to provide at least 4.5 m.`,
         owner: upper.id,
+      });
+  }
+  for (const site of project.sites ?? []) {
+    meshes.push(...buildSiteGeometry(site));
+    if (site.kind === "water") continue;
+    const footprint = siteOutline(site),
+      minX = Math.min(...footprint.map((p) => p[0])),
+      maxX = Math.max(...footprint.map((p) => p[0])),
+      minZ = Math.min(...footprint.map((p) => p[2])),
+      maxZ = Math.max(...footprint.map((p) => p[2]));
+    const hits =
+      spans.some((span) =>
+        span.frames.some((f) => {
+          if (
+            Math.abs(f.p[1] - site.position[1]) > 0.7 ||
+            f.p[0] < minX - f.hw ||
+            f.p[0] > maxX + f.hw ||
+            f.p[2] < minZ - f.hw ||
+            f.p[2] > maxZ + f.hw
+          )
+            return false;
+          // An access driveway may deliberately abut a parking entrance.
+          if (
+            site.kind === "parking" &&
+            (f.s < 6 || span.alignment.length - f.s < 6)
+          )
+            return false;
+          return (
+            insidePolygon(f.p, footprint) ||
+            insidePolygon(edgePoint(f, -1, "road"), footprint) ||
+            insidePolygon(edgePoint(f, 1, "road"), footprint)
+          );
+        }),
+      ) ||
+      junctions.some(
+        (j) =>
+          Math.abs(j.node.position[1] - site.position[1]) < 0.7 &&
+          (insidePolygon(j.node.position, footprint) ||
+            footprint.some((p) => insidePolygon(p, j.boundary))),
+      );
+    if (hits)
+      diagnostics.push({
+        level: "warning",
+        message: `${site.name}: footprint encroaches into a driveable road. Move or resize the site.`,
+        owner: site.id,
       });
   }
   const min: V3 = [Infinity, Infinity, Infinity],
@@ -1237,6 +1636,21 @@ export function buildNetwork(project: Project): Network {
     inlets,
     maxGrade,
     clearances,
+    parkingSpaces:
+      spans.reduce(
+        (sum, s) =>
+          sum +
+          (s.road.parking === "parallel" && s.road.markings
+            ? Math.max(
+                0,
+                Math.ceil((s.frames.at(-1)!.s - s.frames[0].s - 25.5) / 6),
+              ) * 2
+            : 0),
+        0,
+      ) +
+      (project.sites ?? [])
+        .filter((s) => s.kind === "parking")
+        .reduce((sum, s) => sum + parkingLayout(s).length, 0),
     bounds: { min, max },
     triangles: meshes.reduce((s, m) => s + m.indices.length / 3, 0),
     vertices: meshes.reduce((s, m) => s + m.positions.length / 3, 0),

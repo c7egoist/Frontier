@@ -1,18 +1,25 @@
 import {
+  siteOutline,
+  insidePolygon,
+  makeSite,
+  type SiteKind,
+} from "../core/sites";
+import {
   type Project,
   type Selection,
   type Road,
   getNode,
   controlPoints,
+  roadHalfWidth,
 } from "../core/model";
 import { type Network, type MeshData } from "../core/geometry";
 import { findSnap } from "../core/editing";
 import { cubic, add, sub, type V3 } from "../core/math";
 import { closestOnAlignment } from "../core/curves";
 import { patternCanvas } from "./materials";
-export type ToolMode = "select" | "draw" | "move" | "pan" | "measure";
+export type ToolMode = "select" | "draw" | "move" | "pan" | "measure" | "place";
 export interface EditDrag {
-  target: "node" | "road" | "h1" | "h2";
+  target: "node" | "road" | "site" | "h1" | "h2";
   id: string;
   value: V3;
   phase: "start" | "move" | "end";
@@ -38,6 +45,7 @@ export class PlanView {
   private patterns = new Map<string, CanvasPattern>();
   private hiddenLayers = new Set<string>();
   draft: V3 | null = null;
+  placementKind: SiteKind = "plaza";
   private pointer: V3 | null = null;
   private snapped = false;
   private measure: V3[] = [];
@@ -131,9 +139,13 @@ export class PlanView {
     this.network = n;
     if (
       this.selection &&
-      !(this.selection.kind === "node" ? p.nodes : p.roads).some(
-        (item) => item.id === this.selection!.id,
-      )
+      !(
+        this.selection.kind === "node"
+          ? p.nodes
+          : this.selection.kind === "site"
+            ? (p.sites ?? [])
+            : p.roads
+      ).some((item) => item.id === this.selection!.id)
     )
       this.selection = null;
     this.render();
@@ -153,7 +165,9 @@ export class PlanView {
     this.canvas.style.cursor =
       this.mode === "pan"
         ? "grab"
-        : this.mode === "draw" || this.mode === "measure"
+        : this.mode === "draw" ||
+            this.mode === "measure" ||
+            this.mode === "place"
           ? "crosshair"
           : "default";
   }
@@ -236,6 +250,11 @@ export class PlanView {
     if (!this.selection || !this.project) return null;
     if (this.selection.kind === "node")
       return getNode(this.project, this.selection.id)?.position ?? null;
+    if (this.selection.kind === "site")
+      return (
+        this.project.sites?.find((s) => s.id === this.selection!.id)
+          ?.position ?? null
+      );
     const r = this.project.roads.find((r) => r.id === this.selection!.id);
     return r ? cubic(controlPoints(this.project, r), 0.5) : null;
   }
@@ -252,20 +271,20 @@ export class PlanView {
       [ox, oz] = this.worldToScreen(origin);
     if (Math.hypot(x - ox, z - oz) < 12)
       return {
-        target: this.selection.kind === "node" ? "node" : "road",
+        target: this.selection.kind,
         id: this.selection.id,
         initial: origin,
       };
     if (Math.abs(z - oz) < 9 && x > ox + 12 && x < ox + 59)
       return {
-        target: this.selection.kind === "node" ? "node" : "road",
+        target: this.selection.kind,
         id: this.selection.id,
         initial: origin,
         axis: "x",
       };
     if (Math.abs(x - ox) < 9 && z > oz + 12 && z < oz + 57)
       return {
-        target: this.selection.kind === "node" ? "node" : "road",
+        target: this.selection.kind,
         id: this.selection.id,
         initial: origin,
         axis: "z",
@@ -285,6 +304,11 @@ export class PlanView {
   private pick(p: V3): Selection {
     if (!this.project || !this.network) return null;
     const [x, y] = this.worldToScreen(p);
+    for (const site of this.project.sites ?? []) {
+      const q = this.worldToScreen(site.position);
+      if (Math.hypot(q[0] - x, q[1] - y) < 11)
+        return { kind: "site", id: site.id };
+    }
     let nearest: Selection = null,
       min = 12;
     for (const n of this.project.nodes) {
@@ -301,16 +325,25 @@ export class PlanView {
       const near = closestOnAlignment(span.alignment, p),
         d = near.distance;
       if (
-        d <
-          (span.road.lanes * span.road.laneWidth) / 2 +
-            span.road.sidewalk +
-            4 / this.scale &&
-        d < roadDist
+        d < roadHalfWidth(span.road) + span.road.sidewalk + 4 / this.scale &&
+        (d < roadDist - 0.2 ||
+          (Math.abs(d - roadDist) < 0.2 &&
+            near.point[1] >
+              (nearest?.kind === "road"
+                ? (this.network.spans.find((s) => s.road.id === nearest!.id)
+                    ?.alignment.points[0][1] ?? -Infinity)
+                : -Infinity)))
       ) {
         roadDist = d;
         nearest = { kind: "road", id: span.road.id };
       }
     }
+    if (!nearest)
+      for (const site of [...(this.project.sites ?? [])].reverse())
+        if (insidePolygon(p, siteOutline(site))) {
+          nearest = { kind: "site", id: site.id };
+          break;
+        }
     return nearest;
   }
   private pointerDown = (e: PointerEvent) => {
@@ -329,7 +362,7 @@ export class PlanView {
       return;
     }
     if (e.button !== 0) return;
-    if (this.mode === "draw") {
+    if (this.mode === "draw" || this.mode === "place") {
       this.onDraw(this.snapPoint(p, e));
       return;
     }
@@ -354,19 +387,26 @@ export class PlanView {
             id: selection.id,
             initial: getNode(this.project, selection.id).position,
           }
-        : this.mode === "move" && selection
+        : selection?.kind === "site"
           ? {
-              target: "road" as const,
+              target: "site" as const,
               id: selection.id,
-              initial: cubic(
-                controlPoints(
-                  this.project,
-                  this.project.roads.find((r) => r.id === selection.id)!,
-                ),
-                0.5,
-              ),
+              initial: this.project.sites!.find((s) => s.id === selection.id)!
+                .position,
             }
-          : null);
+          : this.mode === "move" && selection
+            ? {
+                target: "road" as const,
+                id: selection.id,
+                initial: cubic(
+                  controlPoints(
+                    this.project,
+                    this.project.roads.find((r) => r.id === selection.id)!,
+                  ),
+                  0.5,
+                ),
+              }
+            : null);
     if (target) {
       this.interaction = {
         kind: "edit",
@@ -465,16 +505,34 @@ export class PlanView {
     const c = this.ctx;
     if (
       this.hiddenLayers.has(mesh.kind) ||
-      !["asphalt", "paving", "curb", "marking", "drain", "gutter"].includes(
-        mesh.kind,
-      )
+      ![
+        "asphalt",
+        "paving",
+        "curb",
+        "marking",
+        "drain",
+        "gutter",
+        "landscape",
+        "building",
+        "parking",
+      ].includes(mesh.kind)
     )
       return;
     const colors: Record<string, string> = {
-      asphalt: "#424c4b",
-      concrete: "#959d95",
+      asphalt: "#333d47",
+      "pave-border": "#53616d",
+      grass: "#4c6854",
+      foliage: "#497659",
+      flowers: "#ac9b72",
+      facade: "#68757f",
+      glass: "#647e91",
+      roof: "#5e6b76",
+      water: "#32596c",
+      "accessible-blue": "#366b97",
+      "wheel-stop": "#bec8ce",
+      concrete: "#a3afb9",
       cobble: "#7b8580",
-      curb: "#a0aaa0",
+      curb: "#a9b6c2",
       paint: "#cbd2c5",
       yellow: "#b4b990",
       "drain-dark": "#182d2a",
@@ -498,6 +556,14 @@ export class PlanView {
         ) < 1e-7
       )
         continue;
+      const signed =
+        (p[b + 2] - p[a + 2]) * (p[d] - p[a]) -
+        (p[b] - p[a]) * (p[d + 2] - p[a + 2]);
+      if (
+        ["landscape", "building", "parking"].includes(mesh.kind) &&
+        signed < 1e-8
+      )
+        continue;
       c.moveTo(p[a], p[a + 2]);
       c.lineTo(p[b], p[b + 2]);
       c.lineTo(p[d], p[d + 2]);
@@ -509,7 +575,7 @@ export class PlanView {
     const c = this.ctx,
       d = this.dpr;
     c.setTransform(d, 0, 0, d, 0, 0);
-    c.fillStyle = "#1c2425";
+    c.fillStyle = "#171d24";
     c.fillRect(0, 0, this.width, this.height);
     c.save();
     c.translate(this.width / 2, this.height / 2);
@@ -528,7 +594,7 @@ export class PlanView {
         z0 = this.center[2] - this.height / 2 / this.scale,
         z1 = this.center[2] + this.height / 2 / this.scale;
       c.lineWidth = 0.7 / this.scale;
-      c.strokeStyle = "#344244";
+      c.strokeStyle = "#2d3845";
       c.beginPath();
       for (let x = Math.floor(x0 / step) * step; x < x1; x += step) {
         c.moveTo(x, z0);
@@ -540,7 +606,7 @@ export class PlanView {
       }
       c.stroke();
       c.lineWidth = 0.5 / this.scale;
-      c.strokeStyle = "#445659";
+      c.strokeStyle = "#384c5f";
       c.setLineDash([2 / this.scale, 4 / this.scale]);
       c.beginPath();
       c.moveTo(x0, 0);
@@ -554,22 +620,34 @@ export class PlanView {
       const owners = [
         ...this.network.spans.map((s) => ({
           id: s.road.id,
+          kind: "road",
           y: cubic(s.alignment.points, 0.5)[1],
+        })),
+        ...(this.project.sites ?? []).map((s) => ({
+          id: s.id,
+          kind: "site",
+          y: s.position[1] - 0.02,
         })),
         ...this.network.junctions.map((j) => ({
           id: j.node.id,
+          kind: "node",
           y: j.node.position[1] + 0.01,
         })),
       ].sort((a, b) => a.y - b.y);
       for (const owner of owners) {
-        const meshes = this.network.meshes.filter((m) => m.owner === owner.id);
+        const meshes = this.network.meshes.filter(
+          (m) => m.owner === owner.id && m.ownerKind === owner.kind,
+        );
         for (const kind of [
+          "landscape",
+          "parking",
           "paving",
           "asphalt",
           "curb",
           "gutter",
           "marking",
           "drain",
+          "building",
         ])
           for (const mesh of meshes.filter((m) => m.kind === kind))
             this.drawMesh(mesh);
@@ -607,6 +685,14 @@ export class PlanView {
             c.fill();
             c.stroke();
           }
+        } else if (this.selection.kind === "site") {
+          const site = this.project.sites?.find(
+            (s) => s.id === this.selection!.id,
+          );
+          if (site) {
+            this.path(siteOutline(site));
+            c.stroke();
+          }
         } else {
           const span = this.network.spans.find(
             (s) => s.road.id === this.selection!.id,
@@ -629,6 +715,17 @@ export class PlanView {
         }
         c.setLineDash([]);
       }
+    }
+    if (this.mode === "place" && this.pointer) {
+      const ghost = makeSite(this.placementKind, this.pointer);
+      this.path(siteOutline(ghost));
+      c.fillStyle = "#a9cef51a";
+      c.fill();
+      c.strokeStyle = "#b8d7f1";
+      c.lineWidth = 1.2 / this.scale;
+      c.setLineDash([5 / this.scale, 4 / this.scale]);
+      c.stroke();
+      c.setLineDash([]);
     }
     if (this.draft && this.pointer) {
       this.path([this.draft, this.pointer], false);
