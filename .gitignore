@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.cache/
+.arena/
+coverage/
+test-results/
+*.log
+.DS_Store

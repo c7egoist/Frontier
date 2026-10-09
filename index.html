@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#171918" />
+    <meta
+      name="description"
+      content="Frontier Road Studio — a live, graph-based 2D and 3D road network editor with clean junctions, bridges, paving and drainage."
+    />
+    <title>Frontier · Road Studio</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23232926'/%3E%3Cpath d='M8 23V9h16M8 16h12' fill='none' stroke='%23b9dfcc' stroke-width='3'/%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <a class="brand" href="#" aria-label="Frontier Road Studio"
+          ><svg
+            class="brand-symbol"
+            width="26"
+            height="28"
+            viewBox="0 0 28 30"
+            fill="none"
+          >
+            <path
+              d="M3 11 14 4l11 7-11 7-11-7Z"
+              stroke="currentColor"
+              stroke-width="1.6"
+            />
+            <path
+              d="m3 16 11 7 11-7M3 21l11 7 11-7"
+              stroke="currentColor"
+              stroke-width="1.6"
+            /></svg
+          ><span>frontier<span class="brand-dot">.</span></span
+          ><span class="brand-divider"></span
+          ><span class="studio-label">ROAD STUDIO</span></a
+        >
+        <nav class="app-menu" aria-label="Application">
+          <button data-menu="file-menu">File</button
+          ><button data-menu="edit-menu">Edit</button
+          ><button data-menu="view-menu">View</button>
+        </nav>
+        <div class="project-title">
+          <i data-lucide="route"></i
+          ><span id="project-title">Northbank district</span
+          ><span class="project-extension">.road</span
+          ><span class="local-tag">LOCAL</span>
+        </div>
+        <div class="header-actions">
+          <span class="save-state" id="save-state"
+            ><span class="status-dot"></span>Local project</span
+          ><button
+            class="icon-button"
+            id="save-button"
+            title="Save project locally · Ctrl+S"
+            aria-label="Save project"
+          >
+            <i data-lucide="save"></i></button
+          ><button class="export-button" data-menu="export-menu">
+            <i data-lucide="box"></i><span>Export</span
+            ><i data-lucide="chevron-down"></i></button
+          ><button
+            class="icon-button help-button"
+            id="help-button"
+            title="Help & keyboard shortcuts"
+            aria-label="Help and keyboard shortcuts"
+          >
+            <i data-lucide="circle-help"></i>
+          </button>
+        </div>
+      </header>
+      <div class="main-toolbar">
+        <div class="creation-tools">
+          <button
+            class="icon-button mobile-outliner"
+            id="toggle-outliner"
+            title="Toggle scene outliner"
+            aria-label="Toggle scene outliner"
+          >
+            <i data-lucide="panel-left"></i></button
+          ><button
+            class="tool-button"
+            data-tool="select"
+            aria-pressed="true"
+            title="Select · V"
+          >
+            <i data-lucide="mouse-pointer-2"></i><span>Select</span
+            ><kbd>V</kbd></button
+          ><button
+            class="tool-button"
+            data-tool="draw"
+            aria-pressed="false"
+            title="Draw a road in the 2D plan · D"
+          >
+            <i data-lucide="pen-tool"></i><span>Draw road</span></button
+          ><button
+            class="tool-button"
+            id="templates-button"
+            title="Add a network template"
+          >
+            <i data-lucide="git-fork"></i><span>Junctions</span></button
+          ><button
+            class="tool-button"
+            data-tool="move"
+            aria-pressed="false"
+            title="Move a shared junction or whole road · W"
+          >
+            <i data-lucide="move"></i><span>Move</span></button
+          ><span class="tool-divider"></span
+          ><button
+            class="tool-button snap-button"
+            id="snap-button"
+            aria-pressed="true"
+            title="Toggle 0.5 m grid and node/curve snapping · S"
+          >
+            <i data-lucide="magnet"></i><span>Snap</span><small>0.5 m</small>
+          </button>
+        </div>
+        <div class="view-tools">
+          <button
+            class="icon-button"
+            id="undo-button"
+            aria-label="Undo"
+            title="Undo · Ctrl+Z"
+            disabled
+          >
+            <i data-lucide="undo-2"></i></button
+          ><button
+            class="icon-button"
+            id="redo-button"
+            aria-label="Redo"
+            title="Redo · Ctrl+Shift+Z"
+            disabled
+          >
+            <i data-lucide="redo-2"></i></button
+          ><span class="tool-divider"></span>
+          <div class="view-switch" role="group" aria-label="Workspace layout">
+            <button
+              data-layout="split"
+              aria-pressed="true"
+              title="Linked 2D and 3D split view"
+            >
+              <i data-lucide="columns-2"></i>Split</button
+            ><button
+              data-layout="plan"
+              aria-pressed="false"
+              title="2D plan only"
+            >
+              2D</button
+            ><button
+              data-layout="scene"
+              aria-pressed="false"
+              title="3D view only"
+            >
+              3D
+            </button>
+          </div>
+          <button
+            class="icon-button"
+            id="frame-all"
+            aria-label="Frame entire network"
+            title="Frame all · F"
+          >
+            <i data-lucide="scan"></i></button
+          ><button
+            class="icon-button mobile-inspector"
+            id="toggle-inspector"
+            aria-label="Toggle inspector"
+            title="Toggle inspector"
+          >
+            <i data-lucide="sliders-horizontal"></i>
+          </button>
+        </div>
+      </div>
+      <main class="editor">
+        <aside class="outliner" id="outliner">
+          <div class="panel-heading">
+            <h2>Scene</h2>
+            <span class="subtle">01</span
+            ><button
+              class="icon-button"
+              id="outliner-add"
+              aria-label="Add a network template"
+              title="Network templates"
+            >
+              <i data-lucide="plus"></i>
+            </button>
+          </div>
+          <div class="scene-name">
+            <i data-lucide="layers-3"></i
+            ><span id="scene-name">Northbank district</span
+            ><i data-lucide="chevron-down"></i>
+          </div>
+          <label class="scene-search"
+            ><i data-lucide="search"></i
+            ><input
+              id="scene-search"
+              placeholder="Find in scene…"
+              aria-label="Search scene objects"
+              autocomplete="off"
+            /><kbd>/</kbd></label
+          >
+          <div class="outliner-label">
+            <span>ROAD NETWORK</span><span id="object-count">12</span>
+          </div>
+          <div class="tree-scroll" id="scene-tree"></div>
+          <div class="outliner-bottom">
+            <div class="health-card" id="health-card"></div>
+            <button
+              class="context-toggle"
+              id="context-toggle"
+              aria-pressed="true"
+            >
+              <span class="context-icon"><i data-lucide="trees"></i></span
+              ><span
+                ><strong>Terrain context</strong
+                ><small>Preview environment</small></span
+              ><i data-lucide="eye"></i>
+            </button>
+            <div class="outliner-foot">
+              <span>FRONTIER ENGINE</span
+              ><button
+                id="shortcuts-button"
+                class="icon-button"
+                title="Keyboard shortcuts"
+                aria-label="Keyboard shortcuts"
+              >
+                <i data-lucide="keyboard"></i>
+              </button>
+            </div>
+          </div>
+        </aside>
+        <section class="workspace">
+          <div class="workspace-heading">
+            <div>
+              <span class="eyebrow">DESIGN WORKSPACE</span
+              ><span class="heading-slash">/</span
+              ><span id="workspace-name">Road network</span>
+            </div>
+            <div class="workspace-heading-end">
+              <span class="live-indicator"
+                ><span class="status-dot"></span>Live geometry</span
+              ><button
+                class="icon-button"
+                data-menu="layers-menu"
+                title="Viewport layers"
+                aria-label="Viewport layers"
+              >
+                <i data-lucide="layers"></i>
+              </button>
+            </div>
+          </div>
+          <div class="viewports" id="viewports" data-layout="split">
+            <section class="viewport plan-pane" aria-label="2D road plan">
+              <div class="viewport-caption">
+                <span class="view-number">01</span><span>Plan view</span
+                ><span class="view-badge">2D</span
+                ><button
+                  class="icon-button"
+                  id="plan-labels"
+                  title="Toggle road labels"
+                  aria-label="Toggle road labels"
+                  aria-pressed="true"
+                >
+                  <i data-lucide="tag"></i>
+                </button>
+              </div>
+              <div class="canvas-host" id="plan-host"></div>
+              <div class="plan-tools" aria-label="Plan tools">
+                <button
+                  class="icon-button active"
+                  data-tool="select"
+                  title="Select · V"
+                  aria-label="Select tool"
+                >
+                  <i data-lucide="mouse-pointer-2"></i></button
+                ><button
+                  class="icon-button"
+                  data-tool="draw"
+                  title="Draw road · D"
+                  aria-label="Draw road tool"
+                >
+                  <i data-lucide="pen-tool"></i></button
+                ><button
+                  class="icon-button"
+                  data-tool="move"
+                  title="Move · W"
+                  aria-label="Move tool"
+                >
+                  <i data-lucide="move"></i></button
+                ><span></span
+                ><button
+                  class="icon-button"
+                  data-tool="pan"
+                  title="Pan · H or hold Space"
+                  aria-label="Pan tool"
+                >
+                  <i data-lucide="hand"></i></button
+                ><button
+                  class="icon-button"
+                  data-tool="measure"
+                  title="Measure · M"
+                  aria-label="Measure tool"
+                >
+                  <i data-lucide="ruler"></i>
+                </button>
+              </div>
+              <div class="north-arrow">
+                <span>N</span
+                ><svg width="20" height="30" viewBox="0 0 20 30">
+                  <path d="m10 2-5 14 5-3 5 3-5-14Z" fill="#b6c8bc" />
+                  <path d="M10 13v14" stroke="#78948a" />
+                </svg>
+              </div>
+              <div class="plan-zoom">
+                <button id="zoom-out" aria-label="Zoom out" title="Zoom out">
+                  <i data-lucide="minus"></i></button
+                ><button id="zoom-reset" title="Fit plan to network">
+                  100%</button
+                ><button id="zoom-in" aria-label="Zoom in" title="Zoom in">
+                  <i data-lucide="plus"></i>
+                </button>
+              </div>
+              <div class="plan-coordinate" id="plan-coordinate">
+                X 0.0 &nbsp; Z 0.0
+              </div>
+            </section>
+            <div
+              class="viewport-divider"
+              id="viewport-divider"
+              role="separator"
+              tabindex="0"
+              aria-orientation="vertical"
+              aria-label="Resize 2D and 3D views"
+            >
+              <span></span>
+            </div>
+            <section class="viewport scene-pane" aria-label="3D road network">
+              <div class="viewport-caption">
+                <span class="view-number">02</span><span>Perspective</span
+                ><span class="view-badge">3D</span>
+                <div class="shade-select">
+                  <select id="shade-style" aria-label="3D shading style">
+                    <option value="shaded">Shaded</option>
+                    <option value="clay">Clay</option>
+                    <option value="wireframe">Wireframe</option></select
+                  ><i data-lucide="chevron-down"></i>
+                </div>
+              </div>
+              <div class="canvas-host" id="scene-host"></div>
+              <svg
+                id="scene-gizmo"
+                class="scene-gizmo"
+                aria-label="3D translation gizmo"
+                hidden
+              >
+                <defs>
+                  <marker
+                    id="arrow-x"
+                    markerWidth="7"
+                    markerHeight="7"
+                    refX="5.5"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <path d="M0 0 7 3.5 0 7Z" fill="#e6aa94" />
+                  </marker>
+                  <marker
+                    id="arrow-y"
+                    markerWidth="7"
+                    markerHeight="7"
+                    refX="5.5"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <path d="M0 0 7 3.5 0 7Z" fill="#b4deb6" />
+                  </marker>
+                  <marker
+                    id="arrow-z"
+                    markerWidth="7"
+                    markerHeight="7"
+                    refX="5.5"
+                    refY="3.5"
+                    orient="auto"
+                  >
+                    <path d="M0 0 7 3.5 0 7Z" fill="#adcada" />
+                  </marker>
+                </defs>
+                <g id="gizmo-axes">
+                  <g class="axis-x">
+                    <line data-axis="x" class="axis-hit" />
+                    <line class="axis-line" marker-end="url(#arrow-x)" />
+                    <text>X</text>
+                  </g>
+                  <g class="axis-z">
+                    <line data-axis="z" class="axis-hit" />
+                    <line class="axis-line" marker-end="url(#arrow-z)" />
+                    <text>Z</text>
+                  </g>
+                  <g class="axis-y">
+                    <line data-axis="y" class="axis-hit" />
+                    <line class="axis-line" marker-end="url(#arrow-y)" />
+                    <text>Y</text>
+                  </g>
+                  <circle
+                    id="gizmo-plane"
+                    data-axis="plane"
+                    r="7"
+                    fill="#bbe9d1"
+                    stroke="#e8fff1"
+                    stroke-width="2"
+                  />
+                </g>
+              </svg>
+              <div class="scene-annotation" id="scene-annotation">
+                <span class="annotation-line"></span
+                ><span id="selected-annotation"
+                  >Junction 01<small>SHARED JOINT PIVOT</small></span
+                >
+              </div>
+              <div class="scene-tools">
+                <button
+                  class="icon-button"
+                  id="grid-toggle"
+                  title="Toggle grid · G"
+                  aria-label="Toggle grid"
+                  aria-pressed="true"
+                >
+                  <i data-lucide="grid-2x2"></i></button
+                ><button
+                  class="icon-button"
+                  id="lighting-toggle"
+                  title="Toggle day / dusk lighting"
+                  aria-label="Toggle day and dusk lighting"
+                  aria-pressed="false"
+                >
+                  <i data-lucide="sun"></i></button
+                ><span></span
+                ><button
+                  class="icon-button"
+                  id="scene-focus"
+                  title="Focus selected object"
+                  aria-label="Focus selected object"
+                >
+                  <i data-lucide="focus"></i></button
+                ><button
+                  class="icon-button"
+                  id="scene-fit"
+                  title="Frame all roads"
+                  aria-label="Frame all roads"
+                >
+                  <i data-lucide="maximize"></i>
+                </button>
+              </div>
+              <div class="view-axis">
+                <svg width="65" height="63" viewBox="0 0 65 63">
+                  <path d="M32 36V9" stroke="#bad9b7" />
+                  <path d="m32 36 24 11" stroke="#d6a392" />
+                  <path d="m32 36-24 12" stroke="#97bacb" />
+                  <circle cx="32" cy="36" r="3" fill="#c2cfbf" />
+                  <text x="29" y="6" fill="#c1d8b4">Y</text>
+                  <text x="58" y="52" fill="#d9a995">X</text>
+                  <text x="0" y="54" fill="#a6c4d0">Z</text>
+                </svg>
+              </div>
+              <div class="orbit-hint">
+                <i data-lucide="mouse"></i><span>Drag to orbit</span
+                ><span class="hint-separator">·</span
+                ><span>Right-drag to pan</span>
+              </div>
+            </section>
+          </div>
+          <div class="workspace-info">
+            <div>
+              <span class="connection-indicator"></span
+              ><span id="interaction-hint"
+                >Drag the joint pivot to move all connected roads</span
+              >
+            </div>
+            <span class="linked-views"
+              ><i data-lucide="link-2"></i>Views linked</span
+            >
+          </div>
+          <section
+            class="asset-library"
+            id="asset-library"
+            aria-label="Road asset library"
+          >
+            <div class="library-heading">
+              <h2>Asset library</h2>
+              <nav class="library-tabs" aria-label="Asset categories">
+                <button data-library="roads" aria-selected="true">
+                  Road presets</button
+                ><button data-library="materials" aria-selected="false">
+                  Materials</button
+                ><button data-library="structures" aria-selected="false">
+                  Structures</button
+                ><button data-library="networks" aria-selected="false">
+                  Networks
+                </button>
+              </nav>
+              <label class="library-search"
+                ><i data-lucide="search"></i
+                ><input
+                  id="library-search"
+                  placeholder="Search assets"
+                  aria-label="Search assets"
+                  autocomplete="off" /></label
+              ><button
+                class="icon-button"
+                id="library-collapse"
+                aria-label="Collapse asset library"
+                title="Collapse asset library"
+              >
+                <i data-lucide="chevron-down"></i>
+              </button>
+            </div>
+            <div class="asset-cards" id="asset-cards"></div>
+          </section>
+        </section>
+        <aside class="inspector" id="inspector">
+          <div class="panel-heading">
+            <h2>Inspector</h2>
+            <span class="live-tag"><span></span>LIVE</span
+            ><button
+              class="icon-button"
+              id="inspector-close"
+              aria-label="Close inspector"
+              title="Close inspector"
+            >
+              <i data-lucide="x"></i>
+            </button>
+          </div>
+          <div id="inspector-content" class="inspector-content"></div>
+          <div class="inspector-bottom">
+            <div id="selection-health"></div>
+            <button class="rebuild-button" id="rebuild-button">
+              <i data-lucide="refresh-cw"></i>Rebuild geometry<kbd>↵</kbd>
+            </button>
+          </div>
+        </aside>
+      </main>
+      <footer class="status-bar">
+        <div>
+          <span class="status-dot"></span
+          ><span id="status-health">Network valid</span
+          ><span class="footer-separator"></span
+          ><span id="status-counts">10 roads · 2 junctions</span>
+        </div>
+        <div class="status-geometry">
+          <i data-lucide="triangle"></i
+          ><span id="status-triangles">23.2k triangles</span
+          ><span class="footer-separator"></span
+          ><span id="status-length">906 m</span>
+        </div>
+        <div>
+          <span class="unit-label">METERS</span
+          ><span class="footer-separator"></span
+          ><span id="status-fps">60 fps</span
+          ><span class="version-label">v1.0</span>
+        </div>
+      </footer>
+    </div>
+    <div class="dropdown-menu" id="file-menu" hidden>
+      <span class="menu-caption">PROJECT</span
+      ><button data-action="templates">
+        <i data-lucide="file-plus-2"></i>New from template<kbd>⇧ A</kbd></button
+      ><button data-action="import">
+        <i data-lucide="folder-open"></i>Open project…<kbd>⌘ O</kbd>
+      </button>
+      <hr />
+      <button data-action="save">
+        <i data-lucide="save"></i>Save locally<kbd>⌘ S</kbd></button
+      ><button data-action="json">
+        <i data-lucide="download"></i>Download .road.json
+      </button>
+    </div>
+    <div class="dropdown-menu" id="edit-menu" hidden>
+      <span class="menu-caption">EDIT NETWORK</span
+      ><button data-action="undo">
+        <i data-lucide="undo-2"></i>Undo<kbd>⌘ Z</kbd></button
+      ><button data-action="redo">
+        <i data-lucide="redo-2"></i>Redo<kbd>⌘ ⇧ Z</kbd>
+      </button>
+      <hr />
+      <button data-action="delete">
+        <i data-lucide="trash-2"></i>Delete selected<kbd>Del</kbd>
+      </button>
+    </div>
+    <div class="dropdown-menu" id="view-menu" hidden>
+      <span class="menu-caption">WORKSPACE</span
+      ><button data-action="fit">
+        <i data-lucide="scan"></i>Frame network<kbd>F</kbd></button
+      ><button data-action="grid">
+        <i data-lucide="grid-2x2"></i>Toggle grid<kbd>G</kbd></button
+      ><button data-action="labels">
+        <i data-lucide="tag"></i>Toggle plan labels</button
+      ><button data-action="context">
+        <i data-lucide="trees"></i>Toggle terrain context
+      </button>
+      <hr />
+      <button data-action="help">
+        <i data-lucide="keyboard"></i>Keyboard shortcuts<kbd>?</kbd>
+      </button>
+    </div>
+    <div class="dropdown-menu export-menu" id="export-menu" hidden>
+      <span class="menu-caption">EXPORT TO YOUR ENGINE</span
+      ><button data-action="glb">
+        <span class="format-icon">3D</span
+        ><span>glTF binary<small>Geometry + paving materials</small></span
+        ><span class="recommended">GLB</span></button
+      ><button data-action="obj">
+        <span class="format-icon">M</span
+        ><span>Wavefront mesh<small>OBJ + MTL in a ZIP archive</small></span
+        ><span class="file-ext">OBJ</span>
+      </button>
+      <hr />
+      <button data-action="json">
+        <i data-lucide="file-json"></i>Editable road project<span
+          class="file-ext"
+          >JSON</span
+        >
+      </button>
+      <p>Y-up · meters · triangulated geometry</p>
+    </div>
+    <div class="dropdown-menu layers-menu" id="layers-menu" hidden>
+      <span class="menu-caption">VIEWPORT LAYERS</span
+      ><label
+        ><input type="checkbox" data-layer="marking" checked />Road
+        markings</label
+      ><label><input type="checkbox" data-layer="paving" checked />Paving</label
+      ><label
+        ><input type="checkbox" data-layer="rail" checked />Guardrails</label
+      ><label
+        ><input type="checkbox" data-layer="drain" checked />Drainage
+        inlets</label
+      >
+      <hr />
+      <label
+        ><input type="checkbox" id="drainage-overlay" />Drainage flow overlay
+        <span class="file-ext">2D</span></label
+      >
+    </div>
+    <input
+      type="file"
+      id="project-file"
+      accept=".json,.road,application/json"
+      hidden
+    />
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden>
+      <i data-lucide="circle-check"></i><span></span>
+    </div>
+    <dialog id="modal" class="studio-modal">
+      <div id="modal-content"></div>
+    </dialog>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

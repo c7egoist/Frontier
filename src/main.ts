@@ -1,0 +1,1629 @@
+import "./style.css";
+import { zipSync, strToU8 } from "fflate";
+import {
+  makeDemo,
+  makeTemplate,
+  parseProject,
+  validateGenerationBudget,
+  presets,
+  roadDefaults,
+  connected,
+  getNode,
+  controlPoints,
+  type Project,
+  type Selection,
+  type Road,
+  type RoadSettings,
+  type Pattern,
+} from "./core/model";
+import { add, sub, cubic, type V3 } from "./core/math";
+import { buildNetwork, type Network } from "./core/geometry";
+import {
+  insertRoad,
+  moveNode,
+  translateRoad,
+  resolveCrossings,
+  deleteSelection,
+} from "./core/editing";
+import { exportOBJ } from "./core/export";
+import { PlanView, type EditDrag, type ToolMode } from "./render/plan";
+import { SceneView, type GizmoProjection } from "./render/scene";
+import { patternCanvas } from "./render/materials";
+import {
+  refreshIcons,
+  icon,
+  escape,
+  assetSketch,
+  jointSketch,
+} from "./ui/icons";
+
+const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
+  document.getElementById(id) as T;
+const STORAGE = "frontier.road-studio.v1";
+let project = makeDemo(),
+  restored = false;
+try {
+  const saved = localStorage.getItem(STORAGE);
+  if (saved) {
+    project = parseProject(JSON.parse(saved));
+    restored = true;
+  }
+} catch {
+  /* Corrupt storage never prevents opening the studio. */
+}
+let network: Network = buildNetwork(project);
+let selection: Selection = {
+  kind: "node",
+  id: network.junctions[0]?.node.id ?? project.nodes[0]?.id,
+};
+if (!selection.id) selection = null;
+let mode: ToolMode = "select",
+  inspectorTab = "geometry",
+  libraryTab = "roads",
+  presetID = "urban";
+let snapEnabled = true,
+  gridEnabled = true,
+  labelsEnabled = true,
+  contextEnabled = true,
+  night = false;
+let draft: V3 | null = null,
+  dirty = false,
+  saveTimer: ReturnType<typeof setTimeout> | undefined,
+  toastTimer: ReturnType<typeof setTimeout> | undefined;
+const undo: string[] = [],
+  redo: string[] = [];
+const collapsedGroups = new Set<string>();
+const hiddenLayers = new Set<string>();
+let dragBefore: string | null = null,
+  dragBase: Project | null = null,
+  sliderBefore: string | null = null;
+let scene: SceneView | undefined;
+const patternPreviews = new Map<string, string>();
+const templates = [
+  {
+    id: "district",
+    name: "Northbank district",
+    description: "Urban junctions + continuous viaduct",
+  },
+  {
+    id: "tee",
+    name: "Three-way junction",
+    description: "Shared T-joint · paved corners",
+  },
+  {
+    id: "roundabout",
+    name: "Garden roundabout",
+    description: "One-way circulation · four entries",
+  },
+  {
+    id: "diamond",
+    name: "Diamond interchange",
+    description: "Connected ramps · 7 m overpass",
+  },
+];
+const fmt = (n: number, decimals = 1) =>
+  n.toLocaleString("en-US", {
+    maximumFractionDigits: decimals,
+    minimumFractionDigits: decimals,
+  });
+const compact = (n: number) =>
+  n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+const snapshot = () => JSON.stringify(project);
+const clone = (p: Project) => JSON.parse(JSON.stringify(p)) as Project;
+function selectedRoads(): Road[] {
+  if (!selection) return [];
+  return selection.kind === "road"
+    ? project.roads.filter((r) => r.id === selection!.id)
+    : connected(project, selection.id);
+}
+function selectedPosition(): V3 | null {
+  if (!selection) return null;
+  if (selection.kind === "node")
+    return getNode(project, selection.id)?.position ?? null;
+  const road = selectedRoads()[0];
+  return road ? cubic(controlPoints(project, road), 0.5) : null;
+}
+function selectedName() {
+  if (!selection) return "Road network";
+  return selection.kind === "node"
+    ? (getNode(project, selection.id)?.name ?? "Control point")
+    : (selectedRoads()[0]?.name ?? "Road");
+}
+function patternPreview(pattern: string) {
+  if (!patternPreviews.has(pattern))
+    patternPreviews.set(pattern, patternCanvas(pattern as Pattern).toDataURL());
+  return patternPreviews.get(pattern)!;
+}
+
+const plan = new PlanView(
+  $("plan-host"),
+  setSelection,
+  handleDrag,
+  drawPoint,
+  (n) => {
+    $("zoom-reset").textContent = `${n}%`;
+  },
+  (p) => {
+    if (p)
+      $("plan-coordinate").innerHTML = `X ${fmt(p[0])} &nbsp; Z ${fmt(p[2])}`;
+  },
+);
+try {
+  scene = new SceneView($("scene-host"), setSelection, updateGizmo);
+  scene.setNetwork(project, network, true);
+} catch (error) {
+  $("scene-host").innerHTML =
+    `<div class="no-selection"><h2>3D preview unavailable</h2><p>This browser could not start WebGL. The 2D editor and OBJ export still work.</p></div>`;
+  console.error(error);
+}
+plan.setProject(project, network);
+plan.setSelection(selection);
+scene?.setSelection(selection);
+refreshIcons();
+renderAll();
+requestAnimationFrame(() => {
+  plan.fit();
+  scene?.fit(1.13);
+  scene?.focusSelection(185);
+});
+document.fonts.ready.then(() => plan.render());
+if (restored)
+  $("save-state").innerHTML = '<span class="status-dot"></span>Saved locally';
+
+function toast(message: string, error = false) {
+  clearTimeout(toastTimer);
+  const element = $("toast");
+  element.classList.toggle("error", error);
+  element.hidden = false;
+  element.querySelector("span")!.textContent = message;
+  toastTimer = setTimeout(() => (element.hidden = true), error ? 5500 : 3300);
+}
+function markDirty() {
+  dirty = true;
+  $("save-state").classList.add("dirty");
+  $("save-state").innerHTML = '<span class="status-dot"></span>Saving locally…';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => saveProject(false), 700);
+}
+function saveProject(notify = true) {
+  clearTimeout(saveTimer);
+  try {
+    localStorage.setItem(STORAGE, snapshot());
+    dirty = false;
+    $("save-state").classList.remove("dirty", "error");
+    $("save-state").innerHTML = '<span class="status-dot"></span>Saved locally';
+    if (notify) toast("Project saved in this browser.");
+  } catch {
+    $("save-state").classList.add("error");
+    $("save-state").innerHTML = '<span class="status-dot"></span>Not saved';
+    toast(
+      "Local storage is unavailable. Export JSON to keep your project.",
+      true,
+    );
+  }
+}
+function remember(before: string) {
+  if (before === snapshot()) return;
+  undo.push(before);
+  if (undo.length > 60) undo.shift();
+  redo.length = 0;
+  markDirty();
+  updateHistory();
+}
+function commit(
+  mutate: () => void,
+  options: { resolve?: boolean; fit?: boolean } = {},
+) {
+  const before = snapshot(),
+    beforeSelection = selection ? { ...selection } : null;
+  try {
+    mutate();
+    if (options.resolve) resolveCrossings(project);
+    rebuild(true, options.fit);
+    if (options.fit) {
+      plan.fit();
+      scene?.fit();
+    }
+    remember(before);
+    return true;
+  } catch (error) {
+    project = JSON.parse(before);
+    selection = beforeSelection;
+    rebuild(true);
+    console.warn("Road edit failed:", error);
+    toast(
+      error instanceof Error ? error.message : "Unable to update this network.",
+      true,
+    );
+    return false;
+  }
+}
+function rebuild(inspector = true, context = false) {
+  const start = performance.now();
+  network = buildNetwork(project);
+  if (
+    selection &&
+    !(selection.kind === "node" ? project.nodes : project.roads).some(
+      (item) => item.id === selection!.id,
+    )
+  )
+    selection = null;
+  plan.setProject(project, network);
+  plan.setSelection(selection);
+  scene?.setNetwork(project, network, context);
+  scene?.setSelection(selection);
+  scene?.setStyle(($("shade-style") as HTMLSelectElement).value);
+  for (const layer of hiddenLayers) {
+    scene?.setDetailLayer(layer, false);
+    plan.setDetailLayer(layer, false);
+  }
+  window.dispatchEvent(
+    new CustomEvent("frontier:change", {
+      detail: {
+        project: clone(project),
+        meshes: network.meshes,
+        diagnostics: network.diagnostics,
+      },
+    }),
+  );
+  updateStats();
+  if (inspector) {
+    renderOutliner();
+    renderInspector();
+    updateNames();
+  } else syncPositionInputs();
+  $("rebuild-button").title =
+    `Last build: ${(performance.now() - start).toFixed(0)} ms · ${network.meshes.length} mesh groups`;
+}
+function renderAll() {
+  updateNames();
+  renderOutliner();
+  renderInspector();
+  renderLibrary();
+  updateStats();
+  updateHistory();
+  refreshIcons();
+}
+function updateHistory() {
+  ($("undo-button") as HTMLButtonElement).disabled = !undo.length;
+  ($("redo-button") as HTMLButtonElement).disabled = !redo.length;
+  document.querySelector<HTMLButtonElement>('[data-action="undo"]')!.disabled =
+    !undo.length;
+  document.querySelector<HTMLButtonElement>('[data-action="redo"]')!.disabled =
+    !redo.length;
+}
+function undoProject() {
+  if (!undo.length) return;
+  redo.push(snapshot());
+  project = JSON.parse(undo.pop()!);
+  draft = null;
+  plan.setDraft(null);
+  rebuild(true, true);
+  updateHistory();
+  markDirty();
+  toast("Undo applied.");
+}
+function redoProject() {
+  if (!redo.length) return;
+  undo.push(snapshot());
+  project = JSON.parse(redo.pop()!);
+  draft = null;
+  plan.setDraft(null);
+  rebuild(true, true);
+  updateHistory();
+  markDirty();
+  toast("Redo applied.");
+}
+function updateNames() {
+  $("project-title").textContent = project.name;
+  $("scene-name").textContent = project.name;
+  $("selected-annotation").innerHTML = selection
+    ? `${escape(selectedName().split(" · ")[0])}<small>${selection.kind === "node" ? "SHARED JOINT PIVOT" : "EDITABLE ROAD ALIGNMENT"}</small>`
+    : "Road network<small>LIVE PROCEDURAL GEOMETRY</small>";
+  $("scene-annotation").hidden = !selection;
+}
+function setSelection(s: Selection) {
+  if (
+    s &&
+    !(s.kind === "node" ? project.nodes : project.roads).some(
+      (item) => item.id === s!.id,
+    )
+  )
+    s = null;
+  selection = s;
+  plan.setSelection(s);
+  scene?.setSelection(s);
+  renderOutliner();
+  renderInspector();
+  updateNames();
+  updateHint();
+}
+function setMode(m: ToolMode) {
+  mode = m;
+  plan.setMode(m);
+  draft = null;
+  plan.setDraft(null);
+  document.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach((b) => {
+    const active = b.dataset.tool === m;
+    b.setAttribute("aria-pressed", String(active));
+    b.classList.toggle("active", active);
+  });
+  if (m === "draw" && $("viewports").dataset.layout === "scene")
+    setLayout("split");
+  renderInspector();
+  updateHint();
+}
+function updateHint() {
+  const hints: Record<ToolMode, string> = {
+    select:
+      selection?.kind === "road"
+        ? "Drag a Bézier handle or the shared road pivot to edit the alignment"
+        : "Drag the joint pivot to move all connected roads",
+    draw: draft
+      ? "Click to extend the road · Esc to finish · Alt disables snapping"
+      : "Click in the 2D plan to start a road · Existing curves and nodes snap",
+    move: "Drag the shared pivot or an axis to move · Shift constrains movement",
+    pan: "Drag to pan the plan · Scroll to zoom · Space temporarily pans",
+    measure: "Click two points in the plan to measure their distance",
+  };
+  $("interaction-hint").textContent = hints[mode];
+}
+function setLayout(layout: string) {
+  $("viewports").dataset.layout = layout;
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-layout]")
+    .forEach((b) =>
+      b.setAttribute("aria-pressed", String(b.dataset.layout === layout)),
+    );
+}
+function updateStats() {
+  const error = network.diagnostics.some((d) => d.level === "error"),
+    warn = network.diagnostics.length > 0;
+  $("status-health").textContent = error
+    ? "Check junction geometry"
+    : warn
+      ? "Review geometry warnings"
+      : "Network valid";
+  $("status-counts").textContent =
+    `${project.roads.length} roads · ${network.junctions.length} junctions`;
+  $("status-triangles").textContent = `${compact(network.triangles)} triangles`;
+  $("status-length").textContent =
+    `${Math.round(network.length).toLocaleString()} m`;
+  $("object-count").textContent = String(
+    project.roads.length + network.junctions.length,
+  ).padStart(2, "0");
+  $("health-card").classList.toggle("warning", warn);
+  $("health-card").innerHTML =
+    `${icon(warn ? "circle-alert" : "circle-check")}<div><strong>${error ? "Geometry needs attention" : warn ? "Review network" : "Clean topology"}</strong><p>${warn ? escape(network.diagnostics[0].message) : "Shared boundaries · Grade-aware"}</p></div>`;
+  const relevant = network.diagnostics.filter(
+    (d) =>
+      !selection ||
+      !d.owner ||
+      d.owner === selection.id ||
+      selectedRoads().some((r) => r.id === d.owner),
+  );
+  const text =
+    selection?.kind === "node"
+      ? `${connected(project, selection.id).length} connected approaches`
+      : selection
+        ? `${fmt(network.spans.find((s) => s.road.id === selection!.id)?.alignment.length ?? 0)} m alignment`
+        : "Linked 2D + 3D geometry";
+  $("selection-health").innerHTML =
+    `<div class="selection-health ${relevant.length ? "warning" : ""}">${icon(relevant.length ? "circle-alert" : "circle-check")}<span>${relevant.length ? "Geometry warning" : text}<small>${relevant.length ? escape(relevant[0].message) : selection?.kind === "node" ? "One pivot. Every connection follows." : "Meters · Y-up · Engine-ready mesh"}</small></span></div>`;
+  refreshIcons();
+}
+function renderOutliner() {
+  const query = ($("scene-search") as HTMLInputElement).value.toLowerCase();
+  const groups = [
+    {
+      id: "junctions",
+      name: "Junctions",
+      items: network.junctions.map((j) => ({
+        id: j.node.id,
+        name: j.node.name,
+        kind: "node" as const,
+        icon: "git-fork",
+        meta: j.type,
+      })),
+    },
+    {
+      id: "roads",
+      name: "Road alignments",
+      items: project.roads.map((r) => ({
+        id: r.id,
+        name: r.name,
+        kind: "road" as const,
+        icon: r.bridge ? "cable" : "route",
+        meta: r.bridge ? "BRG" : `${r.lanes}L`,
+      })),
+    },
+  ];
+  let html = "";
+  for (const group of groups) {
+    const items = group.items.filter((i) =>
+      (i.name + " " + i.meta).toLowerCase().includes(query),
+    );
+    if (!items.length && query) continue;
+    html += `<div class="tree-group"><button class="tree-group-heading" data-group="${group.id}" aria-expanded="${!collapsedGroups.has(group.id)}">${icon(collapsedGroups.has(group.id) ? "chevron-right" : "chevron-down")}${group.name}<span class="group-count">${String(items.length).padStart(2, "0")}</span></button><div class="tree-list ${collapsedGroups.has(group.id) && !query ? "collapsed" : ""}" role="tree" aria-label="${group.name}">${items.map((item) => `<div role="treeitem" tabindex="0" class="tree-row ${selection?.id === item.id && selection.kind === item.kind ? "selected" : ""}" aria-selected="${selection?.id === item.id && selection.kind === item.kind}" data-select="${escape(item.id)}" data-kind="${item.kind}" title="${escape(item.name)}">${icon(item.icon)}<span class="tree-name">${escape(item.name)}</span><span class="tree-meta">${item.meta}</span></div>`).join("")}</div></div>`;
+  }
+  $("scene-tree").innerHTML =
+    html ||
+    '<p class="empty-tree">No matching objects.<br>Try another name or clear the search.</p>';
+  refreshIcons();
+}
+function range(
+  prop: string,
+  label: string,
+  value: number,
+  min: number,
+  max: number,
+  step: number,
+  unit = "m",
+) {
+  return `<div class="control"><div class="control-line"><label for="control-${prop}">${label}</label><output data-output="${prop}">${fmt(value, step < 1 ? 1 : 0)}${unit ? `<small>${unit}</small>` : ""}</output></div><input id="control-${prop}" type="range" data-prop="${prop}" min="${min}" max="${max}" step="${step}" value="${value}" style="--progress:${((value - min) / (max - min)) * 100}%"/></div>`;
+}
+function toggle(prop: string, label: string, value: boolean, description = "") {
+  return `<div class="toggle-row"><div class="toggle-label">${label}${description ? `<small>${description}</small>` : ""}</div><label class="switch"><input type="checkbox" data-prop="${prop}" aria-label="${label}" ${value ? "checked" : ""}/><span></span></label></div>`;
+}
+function card(title: string, iconName: string, body: string, extraClass = "") {
+  return `<section class="inspector-card ${extraClass}"><div class="card-heading"><span>${icon(iconName)}${title}</span>${icon("info")}</div>${body}</section>`;
+}
+function profile(road: Road) {
+  return card(
+    "Approach profile",
+    "route",
+    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 4.5, 0.1)}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 5, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
+  );
+}
+function renderInspector() {
+  const roads = selectedRoads(),
+    road = roads[0],
+    node = selection?.kind === "node" ? getNode(project, selection.id) : null,
+    joint =
+      selection?.kind === "node"
+        ? network.junctions.find((j) => j.node.id === selection!.id)
+        : null;
+  if (!selection || !road) {
+    $("inspector-content").innerHTML =
+      mode === "draw"
+        ? `<div class="selected-object"><div class="object-icon">${icon("pen-tool")}</div><div class="object-title"><span class="eyebrow">ROAD ALIGNMENT</span><h1>Draw a road</h1></div></div><div class="draw-tip">Click a start point in the plan, then click to add connected segments. Crossing a road at the same height creates a shared junction automatically.</div><div class="section-heading">ACTIVE ROAD PRESET</div><div class="drawing-preset">${escape(presets.find((p) => p.id === presetID)!.name)}</div><p class="material-note">Choose a preset from the asset library below. Press Esc when finished.</p>`
+        : `<div class="no-selection">${icon("mouse-pointer-2")}<h2>Make a connection.</h2><p>Select a road or a junction in either view to edit its geometry, surface and details.</p><button data-inspector-action="draw">${icon("pen-tool")}Draw your first road</button></div>`;
+    refreshIcons();
+    updateStats();
+    return;
+  }
+  const title = selectedName(),
+    position = selectedPosition()!,
+    type =
+      joint?.type ??
+      (node ? "Endpoint" : road.bridge ? "Bridge deck" : "Cubic Bézier");
+  const header = `<div class="selected-object"><div class="object-icon">${icon(node ? "git-fork" : road.bridge ? "cable" : "route")}</div><div class="object-title"><span class="eyebrow">${node ? "SHARED JUNCTION" : "ROAD ALIGNMENT"}</span><h1 title="${escape(title)}">${escape(title.split(" · ")[0])}</h1><span class="type-pill"><span></span>${type} · ${node ? "Auto-welded" : road.lanes + " lanes"}</span></div><button class="icon-button object-actions" data-inspector-action="rename" title="Rename selected object" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs" aria-label="Inspector sections">${["geometry", "surface", "details"].map((tab) => `<button data-inspector-tab="${tab}" class="${tab === inspectorTab ? "active" : ""}">${tab[0].toUpperCase() + tab.slice(1)}</button>`).join("")}</nav>`;
+  let body = "";
+  if (inspectorTab === "geometry") {
+    if (joint)
+      body += card(
+        "Joint geometry",
+        "git-merge",
+        `<div class="radius-overview"><div><div class="radius-metric"><span id="radius-value">${fmt(node!.radius)}</span><small>m</small></div><div class="metric-caption">Corner radius</div></div>${jointSketch(node!.radius)}</div><input aria-label="Corner radius" type="range" data-prop="radius" min="2" max="16" step=".5" value="${node!.radius}" style="--progress:${((node!.radius - 2) / 14) * 100}%"/><div class="range-labels"><span>2 m</span><span>16 m</span></div><div class="solver-row"><span>Corner solver</span><span class="solver-badge">${icon("check")}Tangent fillet</span></div>`,
+        "radius-card",
+      );
+    else if (!node)
+      body += card(
+        "Road alignment",
+        "spline",
+        `<div class="radius-overview"><div><div class="radius-metric">${Math.round(network.spans.find((s) => s.road.id === road.id)?.alignment.length ?? 0)}<small>m</small></div><div class="metric-caption">Curve length</div></div>${icon("route")}</div><div class="solver-row"><span>Alignment type</span><span class="solver-badge">Cubic Bézier</span></div>`,
+      );
+    body += card(
+      "Transform",
+      "move",
+      `<div class="transform-fields">${(["X", "Y", "Z"] as const).map((axis, i) => `<label class="transform-field"><span>${axis}</span><input type="number" data-position="${i}" value="${position[i].toFixed(1)}" step=".5" min="-10000" max="10000" aria-label="${axis} position"/></label>`).join("")}</div><p class="card-note">${icon("link-2")}${node ? "Connected approaches move together" : "Endpoints and attached roads follow the pivot"}</p>`,
+    );
+    body +=
+      `<div class="section-heading"><span>${node ? "CONNECTED ROAD PROFILE" : "CARRIAGEWAY"}</span><small>${node ? roads.length + " approaches" : "Live cross-section"}</small></div>` +
+      profile(road);
+    if (node)
+      body += `<p class="material-note">Profile changes apply to all ${roads.length} connected approaches. Each road remains individually editable.</p>`;
+  } else if (inspectorTab === "surface") {
+    body += card(
+      "Carriageway material",
+      "layers",
+      `<div class="material-options">${["asphalt", "concrete", "cobble"].map((surface) => `<button class="material-option ${road.surface === surface ? "selected" : ""}" data-surface="${surface}"><span class="material-swatch ${surface}"></span>${surface[0].toUpperCase() + surface.slice(1)}</button>`).join("")}</div><p class="material-note">Procedural, locally generated materials. No external textures required.</p>`,
+    );
+    body += card(
+      "Paving pattern",
+      "grid-2x2",
+      `<div class="pattern-options">${(["herringbone", "running", "slabs", "basket"] as Pattern[]).map((pattern) => `<button class="pattern-option ${road.pattern === pattern ? "selected" : ""}" data-pattern="${pattern}"><span class="pattern-thumb" style="background-image:url('${patternPreview(pattern)}')"></span>${{ herringbone: "Herringbone", running: "Running bond", slabs: "Concrete slabs", basket: "Basket weave" }[pattern]}</button>`).join("")}</div>${range("sidewalk", "Pavement width", road.sidewalk, 0, 5, 0.1)}`,
+    );
+    body += card(
+      "Cross-section",
+      "droplets",
+      `${range("crossfall", "Crossfall", road.crossfall, 0, 6, 0.5, "%")}<p class="card-note">${icon("droplets")}Crowned road surface drains toward both curbs.</p>${toggle("markings", "Road markings", road.markings, "Clipped before junctions and crossings")}`,
+    );
+  } else {
+    body += card(
+      "Roadside protection",
+      "shield",
+      `${toggle("guardrails", "W-beam guardrails", road.guardrails, "Corrugated steel beams with embedded posts")}<svg class="detail-art" viewBox="0 0 210 44"><path d="M0 36h210" stroke="currentColor" opacity=".2"/><path d="M15 14v23m36-23v23m36-23v23m36-23v23m36-23v23m36-23v23" stroke="currentColor" stroke-width="2"/><path d="M0 8h210v12H0Z" fill="currentColor" opacity=".3"/><path d="M0 14h210" stroke="currentColor" stroke-width="1"/></svg>${road.guardrails ? range("railHeight", "Rail height", road.railHeight, 0.5, 1.4, 0.1) + range("postSpacing", "Post spacing", road.postSpacing, 1.5, 6, 0.1) : ""}`,
+    );
+    body += card(
+      "Drainage",
+      "droplets",
+      `${toggle("drainage", "Curb drainage", road.drainage, "Continuous gutters + modeled metal grates")}${road.drainage ? range("inletSpacing", "Inlet spacing", road.inletSpacing, 6, 40, 1) + `<p class="card-note">${icon("droplets")}${network.inlets} inlets across this network.</p>` : ""}<button class="solver-badge" style="margin-top:12px" data-inspector-action="flow">${icon("eye")}Toggle flow overlay in 2D</button>`,
+    );
+    const clearances = network.clearances.filter(
+      (c) => c.a === road.id || c.b === road.id,
+    );
+    if (!node)
+      body += card(
+        "Bridge structure",
+        "cable",
+        `${toggle("bridge", "Elevated bridge deck", road.bridge, "Deck, beams, piers and foundations")}${road.bridge ? `<div class="profile-row" style="margin-top:14px"><label for="control-structure">Superstructure</label><div class="select-field"><select id="control-structure" data-prop="structure"><option value="concrete" ${road.structure === "concrete" ? "selected" : ""}>Concrete</option><option value="steel" ${road.structure === "steel" ? "selected" : ""}>Steel girder</option></select>${icon("chevron-down")}</div></div><p class="card-note">${icon("check")}Piers stay clear of underlying roads.</p>${clearances.length ? `<div class="number-control"><span>Minimum clearance</span><output class="detail-value">${fmt(Math.min(...clearances.map((c) => c.meters)), 2)} m</output></div>` : ""}` : ""}`,
+      );
+    else
+      body += `<p class="material-note">Select an individual alignment to add a bridge. Try the Diamond interchange template for connected, grade-separated ramps.</p>`;
+  }
+  $("inspector-content").innerHTML = header + body;
+  refreshIcons();
+  updateStats();
+}
+function syncPositionInputs() {
+  const p = selectedPosition();
+  if (p)
+    document
+      .querySelectorAll<HTMLInputElement>("[data-position]")
+      .forEach((input) => {
+        if (document.activeElement !== input)
+          input.value = p[Number(input.dataset.position)].toFixed(1);
+      });
+}
+function setRoadProperty(prop: string, value: unknown) {
+  if (prop === "radius" || prop === "crossings") {
+    if (selection?.kind === "node")
+      (getNode(project, selection.id) as unknown as Record<string, unknown>)[
+        prop
+      ] = value;
+    return;
+  }
+  for (const road of selectedRoads()) {
+    (road as unknown as Record<string, unknown>)[prop] = value;
+    if (prop === "bridge" && value === true) {
+      road.guardrails = true;
+      road.sidewalk = Math.min(road.sidewalk, 1.2);
+      for (const id of [road.start, road.end]) {
+        const node = getNode(project, id);
+        node.position[1] = Math.max(node.position[1], 6);
+      }
+    }
+  }
+}
+function applyPreset(id: string) {
+  const preset = presets.find((p) => p.id === id)!;
+  presetID = id;
+  if (selection && mode !== "draw")
+    commit(() => {
+      const preserved = ["bridge", "structure"] as const;
+      for (const road of selectedRoads()) {
+        const bridge = road.bridge,
+          structure = road.structure;
+        Object.assign(road, roadDefaults, preset.settings);
+        for (const prop of preserved)
+          (road as unknown as Record<string, unknown>)[prop] =
+            prop === "bridge" ? bridge : structure;
+      }
+    });
+  renderLibrary();
+  renderInspector();
+  toast(
+    mode === "draw"
+      ? `${preset.name} selected for new roads.`
+      : selection
+        ? `${preset.name} applied to the selected ${selection.kind === "node" ? "approaches" : "road"}.`
+        : `${preset.name} selected. Click Draw road to begin.`,
+  );
+}
+function renderLibrary() {
+  const query = ($("library-search") as HTMLInputElement).value.toLowerCase();
+  let cards: {
+    id: string;
+    name: string;
+    description: string;
+    preview: string;
+    action: string;
+  }[] = [];
+  if (libraryTab === "roads")
+    cards = presets.map((p) => ({
+      id: p.id,
+      name: p.name,
+      description: p.description,
+      preview: assetSketch(p.id),
+      action: "preset",
+    }));
+  if (libraryTab === "materials")
+    cards = [
+      {
+        id: "herringbone",
+        name: "Herringbone",
+        description: "Interlocking brick paving",
+      },
+      {
+        id: "running",
+        name: "Running bond",
+        description: "Staggered brick courses",
+      },
+      {
+        id: "slabs",
+        name: "Concrete slabs",
+        description: "Large-format stone paving",
+      },
+      {
+        id: "basket",
+        name: "Basket weave",
+        description: "Paired orthogonal bricks",
+      },
+    ].map((p) => ({
+      ...p,
+      preview: `<div class="pattern-thumb" style="height:100%;width:100%;background-image:url('${patternPreview(p.id)}');background-size:120px"></div>`,
+      action: "pattern",
+    }));
+  if (libraryTab === "structures")
+    cards = [
+      {
+        id: "bridge",
+        name: "Concrete viaduct",
+        description: "Solid deck · concrete piers",
+        preview: assetSketch("bridge"),
+        action: "structure",
+      },
+      {
+        id: "steel",
+        name: "Steel overpass",
+        description: "I-girders · clear-span bays",
+        preview: assetSketch("steel"),
+        action: "structure",
+      },
+      {
+        id: "rail",
+        name: "W-beam barrier",
+        description: "Corrugated beam · steel posts",
+        preview: assetSketch("rail"),
+        action: "structure",
+      },
+      {
+        id: "drain",
+        name: "Curb drainage",
+        description: "Runoff channel · grated inlets",
+        preview: assetSketch("drain"),
+        action: "structure",
+      },
+    ];
+  if (libraryTab === "networks")
+    cards = templates.map((t) => ({
+      ...t,
+      preview: assetSketch(t.id),
+      action: "template",
+    }));
+  cards = cards.filter((p) =>
+    (p.name + " " + p.description).toLowerCase().includes(query),
+  );
+  $("asset-cards").innerHTML =
+    cards
+      .map(
+        (card, i) =>
+          `<button class="asset-card ${card.action === "preset" && card.id === presetID ? "selected" : ""}" data-asset-action="${card.action}" data-asset="${card.id}" title="${card.action === "template" ? "Load template:" : "Apply:"} ${card.name}"><div class="asset-preview"><span class="asset-index">${String(i + 1).padStart(2, "0")}</span>${card.preview}${icon("arrow-up-right")}</div><div class="asset-details"><strong>${card.name}</strong><small>${card.description}</small></div></button>`,
+      )
+      .join("") ||
+    '<div class="library-empty">No assets match that search.</div>';
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-library]")
+    .forEach((b) =>
+      b.setAttribute("aria-selected", String(b.dataset.library === libraryTab)),
+    );
+  refreshIcons();
+  $("asset-cards")
+    .querySelectorAll(".asset-preview>.lucide")
+    .forEach((i) => i.classList.add("asset-apply"));
+}
+function drawPoint(point: V3) {
+  if (!draft) {
+    draft = [...point];
+    plan.setDraft(draft);
+    updateHint();
+    return;
+  }
+  if (Math.hypot(point[0] - draft[0], point[2] - draft[2]) < 2) {
+    toast("Roads need at least 2 meters between points.", true);
+    return;
+  }
+  let id: string | null = null;
+  commit(() => {
+    const preset = presets.find((p) => p.id === presetID)!;
+    id = insertRoad(project, draft!, point, {
+      ...roadDefaults,
+      ...preset.settings,
+    });
+    if (id) selection = { kind: "road", id };
+  });
+  draft = [...point];
+  plan.setDraft(draft);
+  updateHint();
+}
+function handleDrag(edit: EditDrag) {
+  if (edit.phase === "start") {
+    dragBefore = snapshot();
+    dragBase = clone(project);
+    return;
+  }
+  if (edit.phase === "move") {
+    const previous = clone(project);
+    try {
+      if (edit.target === "node") moveNode(project, edit.id, edit.value);
+      else if (edit.target === "road") {
+        const road = project.roads.find((r) => r.id === edit.id);
+        if (road && dragBase)
+          for (const id of [road.start, road.end])
+            getNode(project, id).position = add(
+              getNode(dragBase, id).position,
+              edit.value,
+            );
+      } else {
+        const road = project.roads.find((r) => r.id === edit.id)!;
+        road[edit.target] = sub(
+          edit.value,
+          getNode(project, edit.target === "h1" ? road.start : road.end)
+            .position,
+        );
+      }
+      validateGenerationBudget(project);
+    } catch (error) {
+      project = previous;
+      toast(
+        error instanceof Error
+          ? error.message
+          : "Movement exceeds the editor tile limit.",
+        true,
+      );
+      return;
+    }
+    rebuild(false);
+    return;
+  }
+  if (dragBefore && dragBefore !== snapshot()) {
+    resolveCrossings(project);
+    remember(dragBefore);
+    rebuild(true);
+  }
+  dragBefore = null;
+  dragBase = null;
+}
+function updateGizmo(projection: GizmoProjection | null) {
+  const svg = $("scene-gizmo");
+  if (
+    !projection ||
+    !projection.visible ||
+    !selection ||
+    mode === "draw" ||
+    mode === "measure"
+  ) {
+    svg.setAttribute("hidden", "");
+    return;
+  }
+  svg.removeAttribute("hidden");
+  for (const [axis, p] of Object.entries(projection.axes)) {
+    const group = svg.querySelector(`.axis-${axis}`)!;
+    group.querySelectorAll("line").forEach((line) => {
+      line.setAttribute("x1", String(projection.origin[0]));
+      line.setAttribute("y1", String(projection.origin[1]));
+      line.setAttribute("x2", String(p[0]));
+      line.setAttribute("y2", String(p[1]));
+    });
+    const text = group.querySelector("text")!;
+    text.setAttribute(
+      "x",
+      String(p[0] + (p[0] > projection.origin[0] ? 8 : -8)),
+    );
+    text.setAttribute(
+      "y",
+      String(p[1] + (p[1] > projection.origin[1] ? 10 : -6)),
+    );
+    text.setAttribute("text-anchor", "middle");
+  }
+  svg.querySelector("circle")!.setAttribute("cx", String(projection.origin[0]));
+  svg.querySelector("circle")!.setAttribute("cy", String(projection.origin[1]));
+}
+function toggleGrid() {
+  gridEnabled = !gridEnabled;
+  plan.setGrid(gridEnabled);
+  scene?.setGrid(gridEnabled);
+  $("grid-toggle").setAttribute("aria-pressed", String(gridEnabled));
+}
+function toggleLabels() {
+  labelsEnabled = !labelsEnabled;
+  plan.setLabels(labelsEnabled);
+  $("plan-labels").setAttribute("aria-pressed", String(labelsEnabled));
+}
+function toggleContext() {
+  contextEnabled = !contextEnabled;
+  scene?.setContext(contextEnabled);
+  $("context-toggle").setAttribute("aria-pressed", String(contextEnabled));
+}
+function deleteSelected() {
+  if (!selection) return;
+  const s = selection;
+  commit(() => {
+    deleteSelection(project, s.kind, s.id);
+    selection = null;
+  });
+  toast(
+    s.kind === "node"
+      ? "Junction and connected roads removed."
+      : "Road removed.",
+  );
+}
+
+function closeMenus() {
+  document
+    .querySelectorAll<HTMLElement>(".dropdown-menu")
+    .forEach((m) => (m.hidden = true));
+  document
+    .querySelectorAll("[data-menu]")
+    .forEach((b) => b.setAttribute("aria-expanded", "false"));
+}
+function openMenu(id: string, button: HTMLElement) {
+  const menu = $(id),
+    wasOpen = !menu.hidden;
+  closeMenus();
+  if (wasOpen) return;
+  menu.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  const r = button.getBoundingClientRect();
+  menu.style.top = `${r.bottom + 7}px`;
+  menu.style.left = `${Math.max(10, Math.min(window.innerWidth - menu.offsetWidth - 10, id === "export-menu" || id === "layers-menu" ? r.right - menu.offsetWidth : r.left))}px`;
+}
+function openModal(content: string) {
+  closeMenus();
+  $("modal-content").innerHTML = content;
+  refreshIcons();
+  ($("modal") as HTMLDialogElement).showModal();
+}
+const modalHeader = (eyebrow: string, title: string, description = "") =>
+  `<div class="modal-header"><div><span class="eyebrow">${eyebrow}</span><h2>${title}</h2>${description ? `<p>${description}</p>` : ""}</div><button class="icon-button" data-close-modal title="Close dialog" aria-label="Close dialog">${icon("x")}</button></div>`;
+function openTemplates() {
+  openModal(
+    modalHeader(
+      "NETWORK STARTING POINTS",
+      "Every road starts somewhere.",
+      "Choose a connected network. Your current design remains in undo history.",
+    ) +
+      `<div class="template-grid">${templates.map((t) => `<button class="template-card" data-template="${t.id}"><div class="asset-preview">${assetSketch(t.id)}</div><div class="asset-details"><strong>${t.name}</strong><small>${t.description}</small></div></button>`).join("")}</div><div class="modal-foot">${icon("git-merge")}Shared junction nodes. Height-aware crossings. No disconnected ramps.</div>`,
+  );
+}
+function loadTemplate(id: string) {
+  const loaded = commit(
+    () => {
+      project = makeTemplate(id);
+      network = buildNetwork(project);
+      selection =
+        id === "diamond"
+          ? { kind: "road", id: project.roads.find((r) => r.bridge)!.id }
+          : network.junctions[0]
+            ? { kind: "node", id: network.junctions[0].node.id }
+            : null;
+      setMode("select");
+      inspectorTab = "geometry";
+    },
+    { fit: true },
+  );
+  if (loaded) {
+    if (id === "diamond") scene?.focusSelection(360);
+    else if (id === "roundabout") scene?.fit(1.25);
+    else scene?.focusSelection(id === "district" ? 185 : 155);
+    ($("modal") as HTMLDialogElement).close();
+    toast(
+      `${project.name} loaded. Your previous network is available with Undo.`,
+    );
+  }
+}
+function openHelp() {
+  openModal(
+    modalHeader(
+      "FRONTIER ROAD STUDIO",
+      "Design once. See it twice.",
+      "A graph-based road editor with live, linked 2D and 3D geometry.",
+    ) +
+      `<div class="help-body"><h3>A quick way in</h3><p>Draw in the plan. Snap to an existing road to make a junction, or cross it at the same elevation. Select the shared joint and drag its center or an axis in either view. Connected roads and their Bézier handles follow the same pivot.</p><h3>Built for your game engine</h3><p>GLB includes triangulated geometry and embedded paving textures, in meters with Y up. OBJ includes an MTL file. JSON preserves the editable graph. Browser-local saves never leave this device.</p><div class="shortcut-grid">${[
+        ["Select", "V"],
+        ["Draw road", "D / P"],
+        ["Move pivot", "W"],
+        ["Pan", "H / Space"],
+        ["Measure", "M"],
+        ["Frame all", "F"],
+        ["Toggle grid", "G"],
+        ["Toggle snap", "S"],
+        ["Finish drawing", "Esc"],
+        ["Delete selected", "Del"],
+        ["Save locally", "Ctrl + S"],
+        ["Undo / redo", "Ctrl + Z / ⇧ Z"],
+      ]
+        .map(([name, key]) => `<div>${name}<kbd>${key}</kbd></div>`)
+        .join("")}</div></div>`,
+  );
+}
+function openRename() {
+  if (!selection) return;
+  openModal(
+    modalHeader("SELECTED OBJECT", "Give it a name.") +
+      `<form id="rename-form" class="help-body"><label for="rename-input" style="display:block;margin-bottom:12px">Object name</label><input id="rename-input" maxlength="80" required value="${escape(selectedName())}" style="width:100%;padding:12px;border:1px solid #526d53;border-radius:5px;background:#293c2c"/><button type="submit" class="rebuild-button" style="margin-top:20px">${icon("check")}Rename object</button></form>`,
+  );
+  ($("rename-input") as HTMLInputElement).select();
+}
+function download(
+  data: string | Uint8Array | ArrayBuffer,
+  name: string,
+  type: string,
+) {
+  const part =
+    typeof data === "string"
+      ? data
+      : data instanceof Uint8Array
+        ? (data.slice().buffer as ArrayBuffer)
+        : data;
+  const url = URL.createObjectURL(new Blob([part], { type })),
+    a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function slug() {
+  return (
+    project.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "frontier-network"
+  );
+}
+async function exportProject(format: string) {
+  try {
+    if (format === "json") {
+      download(
+        JSON.stringify(project, null, 2),
+        `${slug()}.road.json`,
+        "application/json",
+      );
+      toast("Editable road project exported.");
+      return;
+    }
+    if (!network.meshes.length) {
+      toast("Draw a road before exporting geometry.", true);
+      return;
+    }
+    if (network.diagnostics.some((d) => d.level === "error")) {
+      toast(
+        "Fix invalid geometry before exporting a mesh. JSON project export is still available.",
+        true,
+      );
+      return;
+    }
+    if (format === "obj") {
+      const base = slug(),
+        { obj, mtl } = exportOBJ(network, base),
+        archive = zipSync(
+          { [`${base}.obj`]: strToU8(obj), [`${base}.mtl`]: strToU8(mtl) },
+          { level: 5 },
+        );
+      download(archive, `${base}-obj.zip`, "application/zip");
+      toast("OBJ mesh + MTL materials exported.");
+      return;
+    }
+    if (!scene) {
+      toast("GLB requires the 3D renderer. Use OBJ for this browser.", true);
+      return;
+    }
+    toast("Packaging geometry and paving materials…");
+    const buffer = await scene.exportGLB();
+    download(buffer, `${slug()}.glb`, "model/gltf-binary");
+    toast(
+      `GLB exported · ${compact(network.triangles)} triangles · embedded materials.`,
+    );
+  } catch (error) {
+    toast(
+      error instanceof Error
+        ? `Export failed: ${error.message}`
+        : "Export failed.",
+      true,
+    );
+  }
+}
+function doAction(action: string) {
+  closeMenus();
+  const actions: Record<string, () => void> = {
+    templates: openTemplates,
+    import: () => ($("project-file") as HTMLInputElement).click(),
+    save: () => saveProject(),
+    undo: undoProject,
+    redo: redoProject,
+    delete: deleteSelected,
+    fit: () => {
+      plan.fit();
+      scene?.fit();
+    },
+    grid: toggleGrid,
+    labels: toggleLabels,
+    context: toggleContext,
+    help: openHelp,
+    json: () => void exportProject("json"),
+    obj: () => void exportProject("obj"),
+    glb: () => void exportProject("glb"),
+  };
+  actions[action]?.();
+}
+
+// Event delegation keeps every regenerated inspector and library control live.
+document.addEventListener("click", (e) => {
+  const target = e.target as Element;
+  const menu = target.closest<HTMLElement>("[data-menu]");
+  if (menu) {
+    openMenu(menu.dataset.menu!, menu);
+    return;
+  }
+  const action = target.closest<HTMLElement>("[data-action]");
+  if (action) {
+    doAction(action.dataset.action!);
+    return;
+  }
+  if (!target.closest(".dropdown-menu")) closeMenus();
+  const tool = target.closest<HTMLElement>("[data-tool]");
+  if (tool) {
+    setMode(tool.dataset.tool as ToolMode);
+    return;
+  }
+  const layout = target.closest<HTMLElement>("[data-layout]");
+  if (layout?.tagName === "BUTTON") {
+    setLayout(layout.dataset.layout!);
+    return;
+  }
+  const select = target.closest<HTMLElement>("[data-select]");
+  if (select) {
+    setSelection({
+      kind: select.dataset.kind as "node" | "road",
+      id: select.dataset.select!,
+    });
+    return;
+  }
+  const group = target.closest<HTMLElement>("[data-group]");
+  if (group) {
+    const id = group.dataset.group!;
+    if (collapsedGroups.has(id)) collapsedGroups.delete(id);
+    else collapsedGroups.add(id);
+    renderOutliner();
+    return;
+  }
+  const tab = target.closest<HTMLElement>("[data-inspector-tab]");
+  if (tab) {
+    inspectorTab = tab.dataset.inspectorTab!;
+    renderInspector();
+    return;
+  }
+  const surface = target.closest<HTMLElement>("[data-surface]");
+  if (surface) {
+    commit(() => setRoadProperty("surface", surface.dataset.surface));
+    return;
+  }
+  const pattern = target.closest<HTMLElement>("[data-pattern]");
+  if (pattern) {
+    commit(() => setRoadProperty("pattern", pattern.dataset.pattern));
+    return;
+  }
+  const library = target.closest<HTMLElement>("[data-library]");
+  if (library) {
+    libraryTab = library.dataset.library!;
+    ($("library-search") as HTMLInputElement).value = "";
+    renderLibrary();
+    return;
+  }
+  const asset = target.closest<HTMLElement>("[data-asset]");
+  if (asset) {
+    const id = asset.dataset.asset!,
+      action = asset.dataset.assetAction;
+    if (action === "preset") applyPreset(id);
+    if (action === "pattern") {
+      if (!selection) {
+        toast("Select a road or junction to apply a paving pattern.", true);
+        return;
+      }
+      commit(() => setRoadProperty("pattern", id));
+      toast("Paving pattern updated in both views.");
+    }
+    if (action === "template") loadTemplate(id);
+    if (action === "structure") {
+      if (!selection) {
+        toast("Select a road to add a structure or roadside detail.", true);
+        return;
+      }
+      if (id === "bridge" || id === "steel") {
+        if (selection.kind === "node")
+          setSelection({ kind: "road", id: selectedRoads()[0].id });
+        commit(() => {
+          setRoadProperty("bridge", true);
+          setRoadProperty("structure", id === "steel" ? "steel" : "concrete");
+        });
+      } else
+        commit(() =>
+          setRoadProperty(id === "rail" ? "guardrails" : "drainage", true),
+        );
+      inspectorTab = "details";
+      renderInspector();
+      toast(
+        `${id === "rail" ? "Guardrails" : id === "drain" ? "Drainage" : "Bridge structure"} added to the selection.`,
+      );
+    }
+    return;
+  }
+  const template = target.closest<HTMLElement>("[data-template]");
+  if (template) {
+    loadTemplate(template.dataset.template!);
+    return;
+  }
+  if (target.closest("[data-close-modal]")) {
+    ($("modal") as HTMLDialogElement).close();
+    return;
+  }
+  const inspectorAction = target.closest<HTMLElement>(
+    "[data-inspector-action]",
+  );
+  if (inspectorAction) {
+    const a = inspectorAction.dataset.inspectorAction;
+    if (a === "draw") setMode("draw");
+    if (a === "rename") openRename();
+    if (a === "flow") {
+      const checkbox = $("drainage-overlay") as HTMLInputElement;
+      checkbox.checked = !checkbox.checked;
+      plan.setDrainage(checkbox.checked);
+      toast(
+        checkbox.checked
+          ? "Drainage flow overlay shown in plan view."
+          : "Drainage flow overlay hidden.",
+      );
+    }
+    return;
+  }
+});
+$("scene-search").addEventListener("input", renderOutliner);
+$("library-search").addEventListener("input", renderLibrary);
+$("inspector-content").addEventListener("pointerdown", (e) => {
+  const target = e.target as HTMLInputElement;
+  if (target.type === "range" && target.dataset.prop) sliderBefore = snapshot();
+});
+$("inspector-content").addEventListener("focusin", (e) => {
+  const target = e.target as HTMLInputElement;
+  if (target.type === "range" && target.dataset.prop && !sliderBefore)
+    sliderBefore = snapshot();
+});
+$("inspector-content").addEventListener("focusout", (e) => {
+  if ((e.target as HTMLInputElement).type === "range") sliderBefore = null;
+});
+$("inspector-content").addEventListener("input", (e) => {
+  const input = e.target as HTMLInputElement;
+  if (input.type !== "range" || !input.dataset.prop) return;
+  if (!sliderBefore) sliderBefore = snapshot();
+  setRoadProperty(input.dataset.prop, Number(input.value));
+  input.style.setProperty(
+    "--progress",
+    `${((Number(input.value) - Number(input.min)) / (Number(input.max) - Number(input.min))) * 100}%`,
+  );
+  const out = document.querySelector<HTMLOutputElement>(
+    `[data-output="${input.dataset.prop}"]`,
+  );
+  if (out) {
+    const unit = out.querySelector("small")?.textContent;
+    out.innerHTML = `${fmt(Number(input.value), Number(input.step) < 1 ? 1 : 0)}${unit ? `<small>${unit}</small>` : ""}`;
+  }
+  if (input.dataset.prop === "radius") {
+    $("radius-value").textContent = fmt(Number(input.value));
+    const sketch = document.querySelector(".junction-sketch");
+    if (sketch) sketch.outerHTML = jointSketch(Number(input.value));
+  }
+  rebuild(false);
+});
+$("inspector-content").addEventListener("change", (e) => {
+  const input = e.target as HTMLInputElement;
+  if (input.dataset.position) {
+    const index = Number(input.dataset.position),
+      value = Number(input.value);
+    if (!Number.isFinite(value) || Math.abs(value) > 10000) {
+      renderInspector();
+      return;
+    }
+    commit(
+      () => {
+        const current = selectedPosition()!;
+        if (selection?.kind === "node") {
+          const p = [...current] as V3;
+          p[index] = value;
+          moveNode(project, selection.id, p);
+        } else if (selection) {
+          const delta: V3 = [0, 0, 0];
+          delta[index] = value - current[index];
+          translateRoad(project, selection.id, delta);
+        }
+      },
+      { resolve: true },
+    );
+    return;
+  }
+  if (!input.dataset.prop) return;
+  if (input.type === "range") {
+    if (sliderBefore) remember(sliderBefore);
+    sliderBefore = null;
+    renderOutliner();
+    return;
+  }
+  const numeric = [
+    "lanes",
+    "laneWidth",
+    "sidewalk",
+    "crossfall",
+    "inletSpacing",
+    "railHeight",
+    "postSpacing",
+  ];
+  const value =
+    input.type === "checkbox"
+      ? input.checked
+      : numeric.includes(input.dataset.prop)
+        ? Number(input.value)
+        : input.value;
+  commit(() => setRoadProperty(input.dataset.prop!, value));
+});
+$("modal").addEventListener("submit", (e) => {
+  if ((e.target as HTMLElement).id !== "rename-form") return;
+  e.preventDefault();
+  const name = ($("rename-input") as HTMLInputElement).value.trim();
+  if (!name) return;
+  commit(() => {
+    if (selection?.kind === "node") getNode(project, selection.id).name = name;
+    else if (selection) selectedRoads()[0].name = name;
+  });
+  ($("modal") as HTMLDialogElement).close();
+});
+$("modal").addEventListener("click", (e) => {
+  if (e.target === $("modal")) {
+    const r = $("modal").getBoundingClientRect(),
+      p = e as MouseEvent;
+    if (
+      p.clientX < r.left ||
+      p.clientX > r.right ||
+      p.clientY < r.top ||
+      p.clientY > r.bottom
+    )
+      ($("modal") as HTMLDialogElement).close();
+  }
+});
+$("scene-tree").addEventListener("keydown", (e) => {
+  const target = (e.target as HTMLElement).closest<HTMLElement>(
+    "[data-select]",
+  );
+  if (!target) return;
+  const items = [
+      ...$("scene-tree").querySelectorAll<HTMLElement>("[data-select]"),
+    ],
+    index = items.indexOf(target);
+  if (e.key === "Enter")
+    setSelection({
+      kind: target.dataset.kind as "node" | "road",
+      id: target.dataset.select!,
+    });
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    items[
+      Math.max(
+        0,
+        Math.min(items.length - 1, index + (e.key === "ArrowDown" ? 1 : -1)),
+      )
+    ].focus();
+  }
+});
+$("scene-tree").addEventListener("dblclick", () => {
+  scene?.focusSelection();
+});
+$("project-file").addEventListener("change", async (e) => {
+  const input = e.target as HTMLInputElement,
+    file = input.files?.[0];
+  if (!file) return;
+  try {
+    if (file.size > 8 * 1024 * 1024)
+      throw new Error("Project file is too large (maximum 8 MB).");
+    const imported = parseProject(JSON.parse(await file.text()));
+    const loaded = commit(
+      () => {
+        project = imported;
+        resolveCrossings(project);
+        network = buildNetwork(project);
+        selection = network.junctions[0]
+          ? { kind: "node", id: network.junctions[0].node.id }
+          : null;
+        setMode("select");
+      },
+      { fit: true },
+    );
+    if (loaded) toast("Road project imported.");
+  } catch (error) {
+    toast(
+      error instanceof Error
+        ? error.message
+        : "Could not open the project file.",
+      true,
+    );
+  }
+  input.value = "";
+});
+$("save-button").addEventListener("click", () => saveProject());
+$("undo-button").addEventListener("click", undoProject);
+$("redo-button").addEventListener("click", redoProject);
+$("templates-button").addEventListener("click", openTemplates);
+$("outliner-add").addEventListener("click", openTemplates);
+$("help-button").addEventListener("click", openHelp);
+$("shortcuts-button").addEventListener("click", openHelp);
+$("snap-button").addEventListener("click", () => {
+  snapEnabled = !snapEnabled;
+  plan.setSnap(snapEnabled);
+  $("snap-button").setAttribute("aria-pressed", String(snapEnabled));
+});
+$("frame-all").addEventListener("click", () => {
+  plan.fit();
+  scene?.fit();
+});
+$("zoom-in").addEventListener("click", () => plan.zoom(1.22));
+$("zoom-out").addEventListener("click", () => plan.zoom(1 / 1.22));
+$("zoom-reset").addEventListener("click", () => plan.fit());
+$("grid-toggle").addEventListener("click", toggleGrid);
+$("plan-labels").addEventListener("click", toggleLabels);
+$("context-toggle").addEventListener("click", toggleContext);
+$("lighting-toggle").addEventListener("click", () => {
+  night = !night;
+  scene?.setNight(night);
+  $("lighting-toggle").setAttribute("aria-pressed", String(night));
+});
+$("scene-focus").addEventListener("click", () => scene?.focusSelection());
+$("scene-fit").addEventListener("click", () => scene?.fit());
+$("shade-style").addEventListener("change", (e) =>
+  scene?.setStyle((e.target as HTMLSelectElement).value),
+);
+$("rebuild-button").addEventListener("click", () => {
+  commit(() => resolveCrossings(project));
+  toast(
+    network.diagnostics.length
+      ? `${network.diagnostics.length} geometry warnings. Review the inspector.`
+      : `Rebuilt ${network.meshes.length} mesh groups. All junctions validated.`,
+    network.diagnostics.some((d) => d.level === "error"),
+  );
+});
+$("library-collapse").addEventListener("click", () => {
+  const collapsed = $("asset-library").classList.toggle("collapsed");
+  $("library-collapse").setAttribute(
+    "aria-label",
+    collapsed ? "Expand asset library" : "Collapse asset library",
+  );
+});
+$("toggle-outliner").addEventListener("click", () => {
+  $("outliner").classList.toggle("open");
+  $("inspector").classList.remove("open");
+});
+$("toggle-inspector").addEventListener("click", () => {
+  $("inspector").classList.toggle("open");
+  $("outliner").classList.remove("open");
+});
+$("inspector-close").addEventListener("click", () =>
+  $("inspector").classList.remove("open"),
+);
+$("layers-menu").addEventListener("change", (e) => {
+  const input = e.target as HTMLInputElement;
+  if (input.dataset.layer) {
+    if (input.checked) hiddenLayers.delete(input.dataset.layer);
+    else hiddenLayers.add(input.dataset.layer);
+    scene?.setDetailLayer(input.dataset.layer, input.checked);
+    plan.setDetailLayer(input.dataset.layer, input.checked);
+  }
+  if (input.id === "drainage-overlay") plan.setDrainage(input.checked);
+});
+$("scene-host").addEventListener("render-error", (e) =>
+  toast((e as CustomEvent).detail, true),
+);
+(document.querySelector(".brand") as HTMLElement).addEventListener(
+  "click",
+  (e) => {
+    e.preventDefault();
+    openHelp();
+  },
+);
+
+let gizmoDrag: {
+  axis: string;
+  start: [number, number];
+  position: V3;
+  world: V3 | null;
+  meters: number;
+  target: "node" | "road";
+  id: string;
+} | null = null;
+$("scene-gizmo").addEventListener("pointerdown", (e) => {
+  const target = (e.target as Element).closest<HTMLElement>("[data-axis]");
+  if (!target || !selection || !scene) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const position = selectedPosition()!;
+  gizmoDrag = {
+    axis: target.dataset.axis!,
+    start: [e.clientX, e.clientY],
+    position: [...position],
+    world: scene.worldOnPlane(e.clientX, e.clientY, position[1]),
+    meters: scene.verticalMetersPerPixel(),
+    target: selection.kind === "node" ? "node" : "road",
+    id: selection.id,
+  };
+  scene.setEnabled(false);
+  handleDrag({
+    target: gizmoDrag.target,
+    id: gizmoDrag.id,
+    value: position,
+    phase: "start",
+  });
+});
+window.addEventListener("pointermove", (e) => {
+  if (!gizmoDrag || !scene) return;
+  const drag = gizmoDrag,
+    delta: V3 = [0, 0, 0];
+  if (drag.axis === "y") delta[1] = -(e.clientY - drag.start[1]) * drag.meters;
+  else {
+    const p = scene.worldOnPlane(e.clientX, e.clientY, drag.position[1]);
+    if (p && drag.world) {
+      delta[0] = p[0] - drag.world[0];
+      delta[2] = p[2] - drag.world[2];
+    }
+    if (drag.axis === "x") delta[2] = 0;
+    if (drag.axis === "z") delta[0] = 0;
+  }
+  let value = drag.target === "road" ? delta : add(drag.position, delta);
+  if (snapEnabled && !e.altKey)
+    value = value.map((v) => Math.round(v * 2) / 2) as V3;
+  handleDrag({ target: drag.target, id: drag.id, value, phase: "move" });
+});
+window.addEventListener("pointerup", () => {
+  if (!gizmoDrag) return;
+  handleDrag({
+    target: gizmoDrag.target,
+    id: gizmoDrag.id,
+    value: gizmoDrag.position,
+    phase: "end",
+  });
+  gizmoDrag = null;
+  scene?.setEnabled(true);
+});
+window.addEventListener("pointercancel", () => {
+  if (!gizmoDrag) return;
+  handleDrag({
+    target: gizmoDrag.target,
+    id: gizmoDrag.id,
+    value: gizmoDrag.position,
+    phase: "end",
+  });
+  gizmoDrag = null;
+  scene?.setEnabled(true);
+});
+let dividerDragging = false;
+const setSplit = (percent: number) => {
+  const value = Math.max(26, Math.min(68, percent));
+  $("viewports").style.setProperty("--split", `${value}%`);
+  $("viewport-divider").setAttribute(
+    "aria-valuenow",
+    String(Math.round(value)),
+  );
+};
+$("viewport-divider").addEventListener("pointerdown", (e) => {
+  dividerDragging = true;
+  ($("viewport-divider") as HTMLElement).setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+$("viewport-divider").addEventListener("pointermove", (e) => {
+  if (!dividerDragging) return;
+  const r = $("viewports").getBoundingClientRect();
+  setSplit(((e.clientX - r.left) / r.width) * 100);
+});
+$("viewport-divider").addEventListener(
+  "pointerup",
+  () => (dividerDragging = false),
+);
+$("viewport-divider").addEventListener("keydown", (e) => {
+  if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+    e.preventDefault();
+    const value =
+      parseFloat($("viewports").style.getPropertyValue("--split")) || 42;
+    setSplit(value + (e.key === "ArrowRight" ? 3 : -3));
+  }
+});
+window.addEventListener("keydown", (e) => {
+  const input = ["INPUT", "SELECT", "TEXTAREA"].includes(
+    (e.target as HTMLElement).tagName,
+  );
+  if (($("modal") as HTMLDialogElement).open) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    saveProject();
+    return;
+  }
+  if (input) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+    e.preventDefault();
+    e.shiftKey ? redoProject() : undoProject();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "y") {
+    e.preventDefault();
+    redoProject();
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+    e.preventDefault();
+    ($("project-file") as HTMLInputElement).click();
+    return;
+  }
+  if (e.ctrlKey || e.metaKey) return;
+  const key = e.key.toLowerCase();
+  if (key === "v") setMode("select");
+  if (key === "d" || key === "p") setMode("draw");
+  if (key === "w") setMode("move");
+  if (key === "h") setMode("pan");
+  if (key === "m") setMode("measure");
+  if (key === "g") toggleGrid();
+  if (key === "s") $("snap-button").click();
+  if (key === "f") {
+    plan.fit();
+    scene?.fit();
+  }
+  if (key === "delete" || key === "backspace") {
+    e.preventDefault();
+    deleteSelected();
+  }
+  if (key === "a" && e.shiftKey) {
+    e.preventDefault();
+    openTemplates();
+  }
+  if (key === "?") openHelp();
+  if (key === "/") {
+    e.preventDefault();
+    ($("scene-search") as HTMLInputElement).focus();
+  }
+  if (key === "escape") {
+    closeMenus();
+    setMode("select");
+    $("outliner").classList.remove("open");
+    $("inspector").classList.remove("open");
+  }
+});
+setInterval(() => {
+  if (scene) $("status-fps").textContent = `${scene.fps} fps`;
+}, 1200);
+window.addEventListener("pagehide", () => {
+  if (dirty) saveProject(false);
+});
+
+// Small, documented integration API: the HTML can be embedded in an engine tool
+// and the host can inspect the graph or listen for generated meshes.
+Object.defineProperty(window, "frontier", {
+  value: {
+    getProject: () => clone(project),
+    getNetwork: () => network,
+    getSelection: () => selection,
+    worldToPlan: (point: V3) => plan.worldToScreen(point),
+    select: setSelection,
+    setMode,
+    loadTemplate,
+    exportProject,
+    save: saveProject,
+    undo: undoProject,
+    redo: redoProject,
+    moveJoint: (id: string, position: V3) =>
+      commit(() => moveNode(project, id, position), { resolve: true }),
+  },
+  writable: false,
+});
