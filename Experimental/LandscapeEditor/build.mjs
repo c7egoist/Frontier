@@ -8,7 +8,8 @@ await esbuild.build({
   outfile: "app.js",
   format: "iife",
   jsx: "automatic",
-  loader: { ".js": "jsx", ".jsx": "jsx", ".ttf": "external" },
+  loader: { ".js": "jsx", ".jsx": "jsx" },
+  external: ["*.ttf"],
   define: { "process.env.NODE_ENV": '"production"' },
 });
 await esbuild.build({

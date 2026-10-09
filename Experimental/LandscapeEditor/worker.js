@@ -993,19 +993,29 @@
       [1, 1, diag]
     ];
     const delta = new Float32Array(N * N);
+    const exc_ = new Float64Array(8);
     for (let it = 0; it < p.iterations; it++) {
       delta.fill(0);
       for (let y = 1; y < N - 1; y++) {
         for (let x = 1; x < N - 1; x++) {
           const i = y * N + x;
           const h = H[i];
+          let total = 0;
+          let maxExc = 0;
           for (let k = 0; k < 8; k++) {
             const [dx, dy, dist] = D[k];
+            const exc = h - H[(y + dy) * N + x + dx] - tan * dist;
+            exc_[k] = exc > 0 ? exc : 0;
+            total += exc_[k];
+            if (exc_[k] > maxExc) maxExc = exc_[k];
+          }
+          if (total <= 0) continue;
+          const scale = Math.min(1, 0.5 * maxExc / total) * p.rate;
+          for (let k = 0; k < 8; k++) {
+            if (exc_[k] <= 0) continue;
+            const [dx, dy] = D[k];
             const j = (y + dy) * N + x + dx;
-            const drop = h - H[j];
-            const lim = tan * dist;
-            if (drop <= lim) continue;
-            const move = 0.5 * (drop - lim) * p.rate;
+            const move = exc_[k] * scale;
             delta[i] -= move;
             delta[j] += move;
             sed[j] += move;
