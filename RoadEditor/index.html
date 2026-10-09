@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frontier Road Editor</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300..700&display=swap" rel="stylesheet">
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/module/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
+  <!-- clipper-lib 6.4.2 (classic script: sets window.ClipperLib) -->
+  <script src="./vendor/clipper/clipper.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="outliner" aria-label="Network outliner">
+      <div class="brand"><span class="brand-symbol" aria-hidden="true">◆</span>Frontier<span class="brand-dot">.</span><span class="version">ROAD EDITOR</span></div>
+      <div class="scene-label"><span>PROJECT</span><span class="little-dot"></span></div>
+      <div class="scene-title"><span id="sceneTitle">Sample crossroads</span></div>
+      <div class="outliner-heading">
+        <h2>Objects</h2>
+        <div class="heading-actions">
+          <button class="icon-button" id="btnNewJunction" title="Add junction (J)" aria-label="Add junction">+</button>
+        </div>
+      </div>
+      <label class="search"><span aria-hidden="true">⌕</span><input id="search" placeholder="Filter objects" autocomplete="off"></label>
+      <div id="tree" class="tree"></div>
+      <div class="outliner-foot">
+        <button class="ghost-button" id="btnSample">Sample</button>
+        <button class="ghost-button" id="btnNewProject">New</button>
+        <button class="ghost-button" id="btnOpen" title="Open project JSON">Open</button>
+        <button class="ghost-button" id="btnSave" title="Save project JSON">Save JSON</button>
+        <button class="ghost-button primary-ghost" id="btnObj" title="Export OBJ + MTL for the game engine">Export OBJ</button>
+      </div>
+    </aside>
+
+    <main class="stage">
+      <header class="topbar">
+        <nav class="tools" id="tools" aria-label="Tools"></nav>
+        <div class="topbar-group">
+          <button class="icon-button" id="btnUndo" title="Undo (Ctrl+Z)" aria-label="Undo"></button>
+          <button class="icon-button" id="btnRedo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo"></button>
+        </div>
+        <div class="topbar-group views">
+          <button class="seg" data-view="split" title="Plan and 3D">Split</button>
+          <button class="seg" data-view="plan" title="Plan only">Plan</button>
+          <button class="seg" data-view="3d" title="3D only">3D</button>
+        </div>
+        <div class="topbar-group end">
+          <button class="toggle-pill" data-opt="marks" title="Road markings">Marks</button>
+          <button class="toggle-pill" data-opt="guards" title="Guardrails">Rails</button>
+          <button class="toggle-pill" data-opt="drain" title="Drainage">Drain</button>
+        </div>
+      </header>
+      <section class="viewports" id="viewports">
+        <div class="pane plan" id="planPane">
+          <canvas id="plan" aria-label="Plan view"></canvas>
+          <div class="pane-label">PLAN · 2D</div>
+        </div>
+        <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" title="Drag to resize"></div>
+        <div class="pane view3d" id="viewPane">
+          <div id="view3d" class="fill"></div>
+          <div class="pane-label">PERSPECTIVE · 3D</div>
+        </div>
+      </section>
+      <footer class="statusbar" id="status"></footer>
+    </main>
+
+    <aside class="inspector" aria-label="Inspector">
+      <div class="inspector-top"><div id="inspTitle"><span>Selection</span></div><div id="inspStats"></div></div>
+      <div class="inspector-content" id="inspector"></div>
+    </aside>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <input type="file" id="fileOpen" accept=".json,.road.json,application/json" hidden>
+  <script type="module" src="./src/ui/main.js"></script>
+</body>
+</html>
