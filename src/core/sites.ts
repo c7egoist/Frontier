@@ -26,6 +26,9 @@ export interface Site {
   parkingLayout: "automatic" | "double" | "single";
   numbering: boolean;
   paintWear: number;
+  drainage: boolean;
+  manholes: boolean;
+  manholeDiameter: number;
 }
 export const siteCatalog: {
   id: SiteKind;
@@ -97,6 +100,9 @@ export function makeSite(kind: SiteKind, position: V3): Site {
     parkingLayout: "automatic",
     numbering: false,
     paintWear: 0.08,
+    drainage: true,
+    manholes: kind === "parking",
+    manholeDiameter: 0.65,
   };
 }
 export function sitePoint(site: Site, x: number, z: number, y = 0): V3 {
@@ -277,6 +283,9 @@ export function parseSites(raw: unknown, patterns: readonly string[]): Site[] {
           : "automatic",
         numbering: e.numbering === true,
         paintWear: num("paintWear", 0, 0.35),
+        drainage: e.drainage !== false,
+        manholes: e.manholes !== false && e.kind === "parking",
+        manholeDiameter: num("manholeDiameter", 0.45, 1),
       };
       const polygon = siteOutline(site);
       if (!simplePolygon(polygon) || Math.abs(polygonArea(polygon)) < 1)

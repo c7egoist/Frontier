@@ -8,9 +8,15 @@ export interface TextureAssetInfo {
   normalPath?: string;
   roughnessPath?: string;
   normalStrength?: number;
+  wrapS?: "repeat" | "clamp";
+  wrapT?: "repeat" | "clamp";
 }
 const diffuse: Record<string, [number, number, number]> = {
   asphalt: [0.18, 0.21, 0.25],
+  "utility-iron": [0.41, 0.43, 0.4],
+  "utility-recess": [0.1, 0.13, 0.12],
+  "utility-cover": [0.32, 0.35, 0.33],
+  "utility-grate": [0.45, 0.48, 0.44],
   "pave-border": [0.32, 0.37, 0.41],
   pole: [0.22, 0.27, 0.32],
   "signal-red": [0.93, 0.35, 0.35],
@@ -93,22 +99,26 @@ export function exportOBJ(
       `newmtl ${name}`,
       `Kd ${color.join(" ")}`,
       `Ka 0.1 0.1 0.1`,
-      `Ks ${name === "steel" ? "0.5 0.5 0.5" : "0.05 0.05 0.05"}`,
+      `Ks ${name === "steel" || name.startsWith("utility-") ? "0.5 0.5 0.5" : "0.05 0.05 0.05"}`,
       `Ns ${name === "steel" ? 70 : 8}`,
       `d 1`,
       `illum 2`,
+      ...(name.startsWith("utility-") ? ["Pm 0.72"] : []),
       "",
     );
     if (textures[name]) {
-      const t = textures[name];
-      mtl.push(`map_Kd -s ${t.scale[0]} ${t.scale[1]} 1 ${t.path}`);
+      const t = textures[name],
+        clamp = t.wrapS === "clamp" && t.wrapT === "clamp" ? " -clamp on" : "";
+      mtl.push(`map_Kd -s ${t.scale[0]} ${t.scale[1]} 1${clamp} ${t.path}`);
       if (t.alpha) mtl.push(`map_d -s ${t.scale[0]} ${t.scale[1]} 1 ${t.path}`);
       if (t.normalPath)
-        mtl.push(`norm -s ${t.scale[0]} ${t.scale[1]} 1 ${t.normalPath}`);
+        mtl.push(
+          `norm -s ${t.scale[0]} ${t.scale[1]} 1${clamp} ${t.normalPath}`,
+        );
       if (t.roughnessPath)
         mtl.push(
           `Pr 1`,
-          `map_Pr -s ${t.scale[0]} ${t.scale[1]} 1 ${t.roughnessPath}`,
+          `map_Pr -s ${t.scale[0]} ${t.scale[1]} 1${clamp} ${t.roughnessPath}`,
         );
     }
   }
@@ -132,6 +142,7 @@ export function exportMeshManifest(network: Network, project: Project) {
     triangles: network.triangles,
     vertices: network.vertices,
     includesPreviewEnvironment: false,
+    services: network.services,
     objects: network.meshes.map((m) => ({
       name: m.name.replace(/[^a-zA-Z0-9_-]/g, "_"),
       kind: m.kind,

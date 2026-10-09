@@ -1,3 +1,4 @@
+import { addManhole, addGratedInlet, type UtilityFeature } from "./utilities";
 import {
   area2,
   centroid2,
@@ -399,7 +400,7 @@ function groundDecal(
   [0, 0, 1, 0, 1, 1, 0, 1].forEach((v, i) => (m.uvs[start + i] = v));
 }
 /** No environment dressing is generated. Legacy architecture/water is excluded. */
-export function buildSiteGeometry(site: Site) {
+export function buildSiteGeometry(site: Site, services: UtilityFeature[] = []) {
   if (site.kind === "block" || site.kind === "water") return [];
   const b = new MeshBuilder(site.id, "site"),
     outline = siteOutline(site),
@@ -549,38 +550,70 @@ export function buildSiteGeometry(site: Site) {
         );
       }
     }
-    // Shallow perimeter drainage detail, entirely in the paved edge course.
-    for (const side of [-1, 1])
-      for (let x = -site.width / 2 + 3; x < site.width / 2 - 2; x += 12) {
-        const z = side * (site.depth / 2 - 0.55),
-          center = sitePoint(site, x, z, 0.13),
-          dir: V3 = [
-            -Math.sin((site.yaw * Math.PI) / 180),
-            0,
-            Math.cos((site.yaw * Math.PI) / 180),
-          ];
-        const footprint = parkingFootprint(site);
-        if (!rect2(x, z, 0.62, 0.3).every((p) => inside2(footprint, p)))
-          continue;
-        const entry = parkingEntry(site);
-        if (
-          entry.axis === 1 &&
-          side === entry.sign &&
-          openEntry(site, sitePoint(site, x, z))
-        )
-          continue;
-        b.box("drain", "steel-dark", center, 0.6, 0.014, 0.28, dir);
-        for (let g = -0.24; g < 0.26; g += 0.06)
-          b.box(
-            "drain",
-            "drain-dark",
-            sitePoint(site, x + g, z, 0.138),
-            0.021,
-            0.002,
-            0.21,
-            dir,
+    if (site.manholes) {
+      const mask = parkingFootprint(site),
+        r = site.manholeDiameter / 2 + 0.06;
+      for (const [i, aisle] of plan.aisles
+        .filter((a) => a.connected)
+        .entries()) {
+        const center = centroid2(aisle.polygon),
+          circle = Array.from(
+            { length: 32 },
+            (_, k) =>
+              [
+                center[0] + Math.cos((k * Math.PI) / 16) * r,
+                center[1] + Math.sin((k * Math.PI) / 16) * r,
+              ] as V2,
           );
+        if (!circle.every((p) => inside2(mask, p) && inside2(aisle.polygon, p)))
+          continue;
+        addManhole(
+          b,
+          (u, v, h = 0) =>
+            sitePoint(site, center[0] + u, center[1] + v, 0.12 + h),
+          site.manholeDiameter,
+        );
+        services.push({
+          id: `${site.id}:manhole:${i}`,
+          owner: site.id,
+          ownerKind: "site",
+          kind: "manhole",
+          position: sitePoint(site, ...center, 0.13),
+          diameter: site.manholeDiameter,
+        });
       }
+    }
+    // Shallow perimeter drainage detail, entirely in the paved edge course.
+    if (site.drainage)
+      for (const side of [-1, 1])
+        for (let x = -site.width / 2 + 3; x < site.width / 2 - 2; x += 12) {
+          const z = side * (site.depth / 2 - 0.55),
+            center = sitePoint(site, x, z, 0.13);
+          const footprint = parkingFootprint(site);
+          if (!rect2(x, z, 0.62, 0.3).every((p) => inside2(footprint, p)))
+            continue;
+          const entry = parkingEntry(site);
+          if (
+            entry.axis === 1 &&
+            side === entry.sign &&
+            openEntry(site, sitePoint(site, x, z))
+          )
+            continue;
+          addGratedInlet(
+            b,
+            (u, v, h = 0) => sitePoint(site, x + u, z + v, 0.12 + h),
+            0.28,
+            0.6,
+          );
+          services.push({
+            id: `${site.id}:inlet:${side}:${x}`,
+            owner: site.id,
+            ownerKind: "site",
+            kind: "curb-inlet",
+            position: center,
+            length: 0.6,
+          });
+        }
   } else if (site.kind === "island") {
     const center = siteOutline(site, 1.2, 0.124);
     b.polygon("paving", "paving-slate", center, undefined, true);

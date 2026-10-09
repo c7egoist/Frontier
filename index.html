@@ -509,6 +509,18 @@
             id="asset-library"
             aria-label="Road asset library"
           >
+            <div
+              id="library-divider"
+              class="library-divider"
+              role="separator"
+              tabindex="0"
+              aria-label="Resize asset library"
+              aria-orientation="horizontal"
+              aria-valuemin="160"
+              aria-valuenow="260"
+            >
+              <span></span>
+            </div>
             <div class="library-heading">
               <h2>Asset library</h2>
               <nav class="library-tabs" aria-label="Asset categories">
@@ -517,7 +529,7 @@
                 ><button data-library="materials" aria-selected="false">
                   Materials</button
                 ><button data-library="structures" aria-selected="false">
-                  Structures</button
+                  Infrastructure</button
                 ><button data-library="sites" aria-selected="false">
                   Parking & paving</button
                 ><button data-library="networks" aria-selected="false">
@@ -534,6 +546,8 @@
               ><button
                 class="icon-button"
                 id="library-collapse"
+                aria-expanded="true"
+                aria-controls="asset-cards"
                 aria-label="Collapse asset library"
                 title="Collapse asset library"
               >
@@ -681,6 +695,10 @@
       <label
         ><input type="checkbox" data-layer="parking" checked />Parking
         courts</label
+      >
+      <label
+        ><input type="checkbox" data-layer="utility" checked />Manhole
+        covers</label
       >
       <hr />
       <label

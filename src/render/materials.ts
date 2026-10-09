@@ -236,6 +236,107 @@ const surfaceKey = (key: string): SurfacePattern | undefined =>
     : ["asphalt", "concrete", "cobble"].includes(key)
       ? (key as SurfacePattern)
       : undefined;
+export function utilityMaps(
+  kind: "utility-cover" | "utility-grate",
+): SurfaceMaps {
+  const cacheKey = kind;
+  if (surfaceCache.has(cacheKey)) return surfaceCache.get(cacheKey)!;
+  const albedo = document.createElement("canvas"),
+    height = document.createElement("canvas");
+  albedo.width = albedo.height = height.width = height.height = 512;
+  const c = albedo.getContext("2d")!,
+    h = height.getContext("2d")!;
+  c.fillStyle = "#525855";
+  c.fillRect(0, 0, 512, 512);
+  h.fillStyle = "#999";
+  h.fillRect(0, 0, 512, 512);
+  seed = 28571;
+  for (let i = 0; i < 24000; i++) {
+    const x = random() * 512,
+      y = random() * 512;
+    c.fillStyle = random() > 0.5 ? "#c3cbc212" : "#161c191e";
+    c.fillRect(x, y, 0.8, 0.8);
+  }
+  if (kind === "utility-cover") {
+    for (const radius of [241, 222]) {
+      c.strokeStyle = "#323a35";
+      c.lineWidth = 6;
+      c.beginPath();
+      c.arc(256, 256, radius, 0, Math.PI * 2);
+      c.stroke();
+      h.strokeStyle = "#707070";
+      h.lineWidth = 6;
+      h.beginPath();
+      h.arc(256, 256, radius, 0, Math.PI * 2);
+      h.stroke();
+    }
+    c.save();
+    h.save();
+    c.beginPath();
+    c.arc(256, 256, 210, 0, Math.PI * 2);
+    c.clip();
+    h.beginPath();
+    h.arc(256, 256, 210, 0, Math.PI * 2);
+    h.clip();
+    for (let y = -20; y < 540; y += 28)
+      for (let x = -20; x < 540; x += 28) {
+        c.strokeStyle = "#737c7266";
+        c.lineWidth = 2;
+        h.strokeStyle = "#b2b2b2";
+        h.lineWidth = 3;
+        for (const a of [c, h]) {
+          a.beginPath();
+          a.moveTo(x, y - 8);
+          a.lineTo(x + 8, y);
+          a.lineTo(x, y + 8);
+          a.lineTo(x - 8, y);
+          a.closePath();
+          a.stroke();
+        }
+      }
+    c.restore();
+    h.restore();
+    c.fillStyle = "#303832";
+    c.fillRect(181, 232, 150, 48);
+    h.fillStyle = "#777";
+    h.fillRect(181, 232, 150, 48);
+    c.fillStyle = "#92978e";
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.font = "500 18px monospace";
+    c.fillText("SERVICE", 256, 256);
+    h.font = "500 18px monospace";
+    h.textAlign = "center";
+    h.textBaseline = "middle";
+    h.fillStyle = "#a8a8a8";
+    h.fillText("SERVICE", 256, 256);
+  } else {
+    c.fillStyle = "#171e1b";
+    c.fillRect(0, 0, 512, 512);
+    h.fillStyle = "#5a5a5a";
+    h.fillRect(0, 0, 512, 512);
+    for (let x = 0; x < 512; x += 32) {
+      c.fillStyle = "#747c73";
+      c.fillRect(x, 12, 10, 488);
+      h.fillStyle = "#b3b3b3";
+      h.fillRect(x, 12, 10, 488);
+    }
+    for (const y of [0, 165, 337, 501]) {
+      c.fillStyle = "#6c746a";
+      c.fillRect(0, y, 512, 11);
+      h.fillStyle = "#aaa";
+      h.fillRect(0, y, 512, 11);
+    }
+  }
+  const maps = {
+    albedo,
+    normal: normalCanvas(height, 1.2),
+    roughness: roughnessCanvas(albedo),
+    normalStrength: 0.3,
+  };
+  surfaceCache.set(cacheKey, maps);
+  return maps;
+}
 function graphicCanvas(key: string) {
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 256;
@@ -341,6 +442,10 @@ export async function exportTexturePack(keys: string[]) {
       if (pattern) {
         maps = surfaceMaps(pattern);
         image = maps.albedo;
+      } else if (key === "utility-cover" || key === "utility-grate") {
+        maps = utilityMaps(key);
+        image = maps.albedo;
+        scale = [1, 1];
       } else if (/^paint-wear-\d+$/.test(key))
         image = wornPaintCanvas(Number(key.split("-").at(-1)));
       else if (
@@ -353,11 +458,22 @@ export async function exportTexturePack(keys: string[]) {
         );
         scale = key === "race-curb" ? [1 / 3, 1] : [1, 1];
       }
-      if (!image) return;
+      if (!image) {
+        if (key.startsWith("utility-"))
+          manifest[key] = {
+            baseColor: key === "utility-iron" ? "#686e66" : "#1a211e",
+            baseColorColorSpace: "sRGB",
+            metallic: 0.72,
+            roughnessFactor: 0.88,
+          };
+        return;
+      }
       const info: TextureAssetInfo = {
         path: `${base}.png`,
         scale,
         alpha: key.startsWith("marking-") || key.startsWith("paint-wear-"),
+        wrapS: key === "utility-cover" ? "clamp" : "repeat",
+        wrapT: key.startsWith("utility-") ? "clamp" : "repeat",
       };
       await png(image, info.path);
       if (maps) {
@@ -376,10 +492,12 @@ export async function exportTexturePack(keys: string[]) {
         roughness: info.roughnessPath,
         normalStrength: info.normalStrength,
         uvRepeat: scale,
+        wrapS: info.wrapS,
+        wrapT: info.wrapT,
         albedoColorSpace: "sRGB",
         dataColorSpace: "linear",
         normalConvention: "OpenGL +Y",
-        metallic: 0,
+        metallic: key.startsWith("utility-") ? 0.72 : 0,
         roughnessFactor: maps ? 1 : 0.6,
       };
     }),
@@ -402,6 +520,8 @@ export class Materials {
     if (this.cache.has(key)) return this.cache.get(key)!;
     const colors: Record<string, string> = {
       curb: "#b4b0a8",
+      "utility-iron": "#686e66",
+      "utility-recess": "#1a211e",
       "pave-border": "#565755",
       pole: "#394651",
       "accessible-blue": "#326f9e",
@@ -425,7 +545,13 @@ export class Materials {
     const m = new THREE.MeshStandardMaterial({
       color: colors[key] ?? "#ffffff",
       roughness: key === "steel" ? 0.38 : 0.88,
-      metalness: key === "steel" ? 0.72 : key === "steel-dark" ? 0.35 : 0,
+      metalness: key.startsWith("utility-")
+        ? 0.72
+        : key === "steel"
+          ? 0.72
+          : key === "steel-dark"
+            ? 0.35
+            : 0,
       side: THREE.DoubleSide,
     });
     m.name = key;
@@ -451,6 +577,26 @@ export class Materials {
       m.roughnessMap = texture(maps.roughness, `${key}:roughness`);
       m.roughness = 1;
       if (pattern === "concrete") m.color.set("#ceccc7");
+    }
+    if (key === "utility-cover" || key === "utility-grate") {
+      const maps = utilityMaps(key),
+        map = (image: HTMLCanvasElement, srgb = false) => {
+          const t = new THREE.CanvasTexture(image);
+          t.wrapS =
+            key === "utility-grate"
+              ? THREE.RepeatWrapping
+              : THREE.ClampToEdgeWrapping;
+          t.wrapT = THREE.ClampToEdgeWrapping;
+          t.anisotropy = 8;
+          t.name = `${key}:${srgb ? "albedo" : image === maps.normal ? "normal" : "roughness"}`;
+          if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+          return t;
+        };
+      m.map = map(maps.albedo, true);
+      m.normalMap = map(maps.normal);
+      m.roughnessMap = map(maps.roughness);
+      m.normalScale.set(0.3, 0.3);
+      m.roughness = 1;
     }
     if (/^paint-wear-\d+$/.test(key)) {
       const t = new THREE.CanvasTexture(

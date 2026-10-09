@@ -1,3 +1,4 @@
+import { assetThumbnail } from "./render/thumbnails";
 import { normaliseDetail, type GeometryDetail } from "./core/quality";
 import { templateCatalog } from "./core/templates";
 import {
@@ -42,13 +43,7 @@ import { exportOBJ, exportMeshManifest } from "./core/export";
 import { PlanView, type EditDrag, type ToolMode } from "./render/plan";
 import { SceneView, type GizmoProjection } from "./render/scene";
 import { patternCanvas, exportTexturePack } from "./render/materials";
-import {
-  refreshIcons,
-  icon,
-  escape,
-  assetSketch,
-  jointSketch,
-} from "./ui/icons";
+import { refreshIcons, icon, escape, jointSketch } from "./ui/icons";
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
@@ -270,6 +265,19 @@ function rebuild(inspector = true, context = false) {
     }),
   );
   updateStats();
+  const serviceOwners = new Set([
+      selection?.id,
+      ...selectedRoads().map((r) => r.id),
+    ]),
+    features = network.services.filter((s) => serviceOwners.has(s.owner));
+  document
+    .querySelectorAll<HTMLOutputElement>("[data-service-stat]")
+    .forEach(
+      (out) =>
+        (out.value = String(
+          features.filter((s) => s.kind === out.dataset.serviceStat).length,
+        )),
+    );
   if (inspector) {
     renderOutliner();
     renderInspector();
@@ -528,7 +536,7 @@ function range(
   step: number,
   unit = "m",
 ) {
-  return `<div class="control"><div class="control-line"><label for="control-${prop}">${label}</label><output data-output="${prop}">${fmt(value, step < 1 ? 1 : 0)}${unit ? `<small>${unit}</small>` : ""}</output></div><input id="control-${prop}" type="range" data-prop="${prop}" min="${min}" max="${max}" step="${step}" value="${value}" style="--progress:${((value - min) / (max - min)) * 100}%"/></div>`;
+  return `<div class="control"><div class="control-line"><label for="control-${prop}">${label}</label><output data-output="${prop}">${fmt(value, step < 0.1 ? 2 : step < 1 ? 1 : 0)}${unit ? `<small>${unit}</small>` : ""}</output></div><input id="control-${prop}" type="range" data-prop="${prop}" min="${min}" max="${max}" step="${step}" value="${value}" style="--progress:${((value - min) / (max - min)) * 100}%"/></div>`;
 }
 function toggle(prop: string, label: string, value: boolean, description = "") {
   return `<div class="toggle-row"><div class="toggle-label">${label}${description ? `<small>${description}</small>` : ""}</div><label class="switch"><input type="checkbox" data-prop="${prop}" aria-label="${label}" ${value ? "checked" : ""}/><span></span></label></div>`;
@@ -651,6 +659,37 @@ function renderSiteInspector(site: Site) {
           range("paintWear", "Paint wear", site.paintWear, 0, 0.35, 0.05, ""),
       );
   }
+  if (site.kind === "parking" && inspectorTab === "details")
+    body += card(
+      "Drainage & covers",
+      "droplets",
+      toggle(
+        "drainage",
+        "Parking drainage",
+        site.drainage,
+        "Perimeter inlets; kept outside the entry throat",
+      ) +
+        (site.drainage
+          ? `<button class="solver-badge" data-inspector-action="inspect-drain">${icon("search")}Inspect drainage</button>`
+          : "") +
+        toggle(
+          "manholes",
+          "Parking manholes",
+          site.manholes,
+          "Flush covers placed only in connected drive aisles",
+        ) +
+        (site.manholes
+          ? range(
+              "manholeDiameter",
+              "Cover diameter",
+              site.manholeDiameter,
+              0.45,
+              1,
+              0.05,
+            ) +
+            `<button class="solver-badge" data-inspector-action="inspect-manhole">${icon("search")}Inspect a cover</button>`
+          : ""),
+    );
   $("inspector-content").innerHTML = body;
   refreshIcons();
   updateStats();
@@ -733,6 +772,10 @@ function renderInspector() {
     type =
       joint?.type ??
       (node ? "Endpoint" : road.bridge ? "Bridge deck" : "Cubic Bézier");
+  const serviceOwners = new Set([selection.id, ...roads.map((r) => r.id)]),
+    selectionServices = network.services.filter((s) =>
+      serviceOwners.has(s.owner),
+    );
   const header = `<div class="selected-object"><div class="object-icon">${icon(node ? "git-fork" : road.bridge ? "cable" : "route")}</div><div class="object-title"><span class="eyebrow">${node ? "SHARED JUNCTION" : "ROAD ALIGNMENT"}</span><h1 title="${escape(title)}">${escape(title.split(" · ")[0])}</h1><span class="type-pill"><span></span>${type} · ${node ? "Auto-welded" : road.lanes + " lanes"}</span></div><button class="icon-button object-actions" data-inspector-action="rename" title="Rename selected object" aria-label="Rename selected object">${icon("settings-2")}</button></div><nav class="inspector-tabs" aria-label="Inspector sections">${["geometry", "surface", "details"].map((tab) => `<button data-inspector-tab="${tab}" class="${tab === inspectorTab ? "active" : ""}">${tab[0].toUpperCase() + tab.slice(1)}</button>`).join("")}</nav>`;
   let body = "";
   if (inspectorTab === "geometry") {
@@ -852,7 +895,61 @@ function renderInspector() {
     body += card(
       "Drainage",
       "droplets",
-      `${toggle("drainage", "Curb drainage", road.drainage, "Continuous gutters + modeled metal grates")}${road.drainage ? range("inletSpacing", "Inlet spacing", road.inletSpacing, 6, 40, 1) + `<p class="card-note">${icon("droplets")}${network.inlets} inlets across this network.</p>` : ""}<button class="solver-badge" style="margin-top:12px" data-inspector-action="flow">${icon("eye")}Toggle flow overlay in 2D</button>`,
+      `${toggle("drainage", "Curb drainage", road.drainage, "Recessed iron grates, frames and continuous gutters")}${
+        road.drainage
+          ? choice("drainageType", "Construction", road.drainageType, [
+              ["curb", "Curb inlets"],
+              ["linear", "Linear channel"],
+              ["both", "Inlets + channel"],
+            ]) +
+            range(
+              "inletSpacing",
+              "Inlet spacing",
+              road.inletSpacing,
+              6,
+              40,
+              1,
+            ) +
+            `<p class="card-note"><span><output data-service-stat="curb-inlet">${selectionServices.filter((s) => s.kind === "curb-inlet").length}</output> curb inlets / <output data-service-stat="channel-drain">${selectionServices.filter((s) => s.kind === "channel-drain").length}</output> linear channels on the selection.</span></p><button class="solver-badge" data-inspector-action="inspect-drain">${icon("search")}Inspect drainage</button>`
+          : ""
+      }<button class="solver-badge" style="margin-top:12px" data-inspector-action="flow">${icon("eye")}Flow overlay / 2D</button>`,
+    );
+    body += card(
+      "Access covers",
+      "circle",
+      toggle(
+        "manholes",
+        "Manhole covers",
+        road.manholes,
+        "Procedural service corridor; bridge decks are excluded",
+      ) +
+        (road.manholes
+          ? range(
+              "manholeDiameter",
+              "Cover diameter",
+              road.manholeDiameter,
+              0.45,
+              1,
+              0.05,
+            ) +
+            range(
+              "manholeSpacing",
+              "Cover interval",
+              road.manholeSpacing,
+              12,
+              100,
+              1,
+            ) +
+            range(
+              "manholeOffset",
+              "Lateral offset",
+              road.manholeOffset,
+              -8,
+              8,
+              0.05,
+            ) +
+            `<p class="card-note"><span><output data-service-stat="manhole">${selectionServices.filter((s) => s.kind === "manhole").length}</output> flush covers on the selection / follows grade and crossfall. Offset is constrained to the carriageway and kept clear of raised medians.</span></p><button class="solver-badge" data-inspector-action="inspect-manhole">${icon("search")}Inspect a cover</button>`
+          : ""),
     );
     const clearances = network.clearances.filter(
       (c) => c.a === road.id || c.b === road.id,
@@ -902,6 +999,9 @@ function setRoadProperty(prop: string, value: unknown) {
         "numbering",
         "paintWear",
         "entrance",
+        "manholes",
+        "manholeDiameter",
+        "drainage",
       ].includes(prop)
     )
       (site as unknown as Record<string, unknown>)[prop] = value;
@@ -957,6 +1057,26 @@ function applyPreset(id: string) {
         : `${preset.name} selected. Click Draw road to begin.`,
   );
 }
+function inspectInfrastructure(kind: "manhole" | "drainage") {
+  const visible = scene?.inspectInfrastructure(kind);
+  if (!visible) {
+    toast(
+      "No matching service detail on the selection. Enable it or select a non-bridge road/parking surface.",
+      true,
+    );
+    return false;
+  }
+  const layer = kind === "manhole" ? "utility" : "drain";
+  hiddenLayers.delete(layer);
+  scene?.setDetailLayer(layer, true);
+  plan.setDetailLayer(layer, true);
+  const input = document.querySelector<HTMLInputElement>(
+    `[data-layer="${layer}"]`,
+  );
+  if (input) input.checked = true;
+  if ($("viewports").dataset.layout === "plan") setLayout("split");
+  return true;
+}
 function renderLibrary() {
   const query = ($("library-search") as HTMLInputElement).value.toLowerCase();
   let cards: {
@@ -971,7 +1091,7 @@ function renderLibrary() {
       id: p.id,
       name: p.name,
       description: p.description,
-      preview: assetSketch(p.id),
+      preview: `<img class="asset-thumbnail" src="${assetThumbnail("road", p.id)}" alt="Generated ${escape(p.name)} road preview" loading="lazy"/>`,
       action: "preset",
     }));
   if (libraryTab === "materials")
@@ -985,7 +1105,7 @@ function renderLibrary() {
   if (libraryTab === "sites")
     cards = siteCatalog.map((p) => ({
       ...p,
-      preview: `<div class="site-thumb ${p.id}">${icon(p.icon)}<span>${p.id === "parking" ? "P / 90°" : p.id === "block" ? "CITY BLOCK" : p.id === "water" ? "HARBOUR" : "SURFACE"}</span></div>`,
+      preview: `<img class="asset-thumbnail" src="${assetThumbnail("site", p.id)}" alt="Generated ${escape(p.name)} preview" loading="lazy"/>`,
       action: "site",
     }));
   if (libraryTab === "structures")
@@ -994,28 +1114,42 @@ function renderLibrary() {
         id: "bridge",
         name: "Concrete viaduct",
         description: "Solid deck · concrete piers",
-        preview: assetSketch("bridge"),
+        preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", "bridge")}" alt="Generated bridge infrastructure preview" loading="lazy"/>`,
         action: "structure",
       },
       {
         id: "steel",
         name: "Steel overpass",
         description: "I-girders · clear-span bays",
-        preview: assetSketch("steel"),
+        preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", "steel")}" alt="Generated steel infrastructure preview" loading="lazy"/>`,
         action: "structure",
       },
       {
         id: "rail",
         name: "W-beam barrier",
         description: "Corrugated beam · steel posts",
-        preview: assetSketch("rail"),
+        preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", "rail")}" alt="Generated rail infrastructure preview" loading="lazy"/>`,
         action: "structure",
       },
       {
         id: "drain",
         name: "Curb drainage",
         description: "Runoff channel · grated inlets",
-        preview: assetSketch("drain"),
+        preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", "drain")}" alt="Generated drain infrastructure preview" loading="lazy"/>`,
+        action: "structure",
+      },
+      {
+        id: "channel",
+        name: "Linear channel drain",
+        description: "Recessed grate · continuous frame",
+        preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", "channel")}" alt="Channel drain mesh preview" loading="lazy"/>`,
+        action: "structure",
+      },
+      {
+        id: "manhole",
+        name: "Manhole cover",
+        description: "Cast-iron lid · rim · lifting pockets",
+        preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", "manhole")}" alt="Manhole cover mesh preview" loading="lazy"/>`,
         action: "structure",
       },
     ];
@@ -1032,7 +1166,7 @@ function renderLibrary() {
     cards
       .map(
         (card, i) =>
-          `<button class="asset-card ${card.action === "preset" && card.id === presetID ? "selected" : ""}" data-asset-action="${card.action}" data-asset="${card.id}" title="${card.action === "template" ? "Load template:" : "Apply:"} ${card.name}"><div class="asset-preview"><span class="asset-index">${String(i + 1).padStart(2, "0")}</span>${card.preview}${icon("arrow-up-right")}</div><div class="asset-details"><strong>${card.name}</strong><small>${card.description}</small></div></button>`,
+          `<button class="asset-card ${card.action === "preset" && card.id === presetID ? "selected" : ""}" data-asset-action="${card.action}" data-asset="${card.id}" title="${card.action === "template" ? "Load template:" : "Apply:"} ${card.name} — ${card.description}"><div class="asset-preview"><span class="asset-index">${String(i + 1).padStart(2, "0")}</span>${card.preview}${icon("arrow-up-right")}</div><div class="asset-details"><strong>${card.name}</strong><small>${card.description}</small></div></button>`,
       )
       .join("") ||
     '<div class="library-empty">No assets match that search.</div>';
@@ -1531,26 +1665,48 @@ document.addEventListener("click", (e) => {
     }
     if (action === "template") loadTemplate(id);
     if (action === "structure") {
-      if (!selection || selection.kind === "site") {
-        toast("Select a road to add a structure or roadside detail.", true);
+      if (
+        !selection ||
+        (selection.kind === "site" && !["manhole", "drain"].includes(id))
+      ) {
+        toast(
+          "Select a road/junction, or a parking surface for covers and curb inlets.",
+          true,
+        );
         return;
       }
-      if (id === "bridge" || id === "steel") {
-        if (selection.kind === "node")
-          setSelection({ kind: "road", id: selectedRoads()[0].id });
-        commit(() => {
+      if (
+        selection.kind === "site" &&
+        project.sites!.find((s) => s.id === selection!.id)!.kind !== "parking"
+      ) {
+        toast(
+          "Covers and inlets can be applied to a parking surface, not a paving island.",
+          true,
+        );
+        return;
+      }
+      if ((id === "bridge" || id === "steel") && selection.kind === "node")
+        setSelection({ kind: "road", id: selectedRoads()[0].id });
+      inspectorTab = "details";
+      const applied = commit(() => {
+        if (id === "bridge" || id === "steel") {
           setRoadProperty("bridge", true);
           setRoadProperty("structure", id === "steel" ? "steel" : "concrete");
-        });
-      } else
-        commit(() =>
-          setRoadProperty(id === "rail" ? "guardrails" : "drainage", true),
+        } else if (id === "rail") setRoadProperty("guardrails", true);
+        else if (id === "manhole") setRoadProperty("manholes", true);
+        else {
+          setRoadProperty("drainage", true);
+          if (selection?.kind !== "site")
+            setRoadProperty(
+              "drainageType",
+              id === "channel" ? "linear" : "curb",
+            );
+        }
+      });
+      if (applied)
+        toast(
+          `${id === "manhole" ? "Manhole covers" : id === "channel" ? "Linear channel drainage" : id === "rail" ? "Guardrails" : id === "drain" ? "Curb inlets" : "Bridge structure"} enabled on the selection. Inspect the detail from the inspector.`,
         );
-      inspectorTab = "details";
-      renderInspector();
-      toast(
-        `${id === "rail" ? "Guardrails" : id === "drain" ? "Drainage" : "Bridge structure"} added to the selection.`,
-      );
     }
     return;
   }
@@ -1568,6 +1724,8 @@ document.addEventListener("click", (e) => {
   );
   if (inspectorAction) {
     const a = inspectorAction.dataset.inspectorAction;
+    if (a === "inspect-manhole" || a === "inspect-drain")
+      inspectInfrastructure(a === "inspect-manhole" ? "manhole" : "drainage");
     if (a === "draw") setMode("draw");
     if (a === "rename") openRename();
     if (a === "flow") {
@@ -1611,7 +1769,7 @@ $("inspector-content").addEventListener("input", (e) => {
   );
   if (out) {
     const unit = out.querySelector("small")?.textContent;
-    out.innerHTML = `${fmt(Number(input.value), Number(input.step) < 1 ? 1 : 0)}${unit ? `<small>${unit}</small>` : ""}`;
+    out.innerHTML = `${fmt(Number(input.value), Number(input.step) < 0.1 ? 2 : Number(input.step) < 1 ? 1 : 0)}${unit ? `<small>${unit}</small>` : ""}`;
   }
   if (input.dataset.prop === "radius") {
     $("radius-value").textContent = fmt(Number(input.value));
@@ -1666,6 +1824,9 @@ $("inspector-content").addEventListener("change", (e) => {
     "postSpacing",
     "speedLimit",
     "parkingAngle",
+    "manholeDiameter",
+    "manholeSpacing",
+    "manholeOffset",
   ];
   const value =
     input.type === "checkbox"
@@ -1813,6 +1974,14 @@ $("library-collapse").addEventListener("click", () => {
     "aria-label",
     collapsed ? "Expand asset library" : "Collapse asset library",
   );
+  $("library-collapse").setAttribute(
+    "aria-expanded",
+    String(
+      !document
+        .querySelector(".asset-library")!
+        .classList.contains("collapsed"),
+    ),
+  );
 });
 $("toggle-outliner").addEventListener("click", () => {
   $("outliner").classList.toggle("open");
@@ -1919,6 +2088,62 @@ window.addEventListener("pointercancel", () => {
   gizmoDrag = null;
   scene?.setEnabled(true);
 });
+let libraryDragging = false,
+  librarySize: number | null = null;
+const libraryDock = document.querySelector<HTMLElement>(".asset-library")!;
+function libraryHeightLimit() {
+  return Math.max(
+    160,
+    document.querySelector<HTMLElement>(".workspace")!.clientHeight -
+      (window.innerWidth < 700 ? 320 : 260),
+  );
+}
+function setLibraryHeight(height: number) {
+  librarySize = Math.round(
+    Math.max(160, Math.min(libraryHeightLimit(), height)),
+  );
+  libraryDock.style.setProperty("--library-height", `${librarySize}px`);
+  $("library-divider").setAttribute("aria-valuenow", String(librarySize));
+}
+$("library-divider").addEventListener("pointerdown", (e) => {
+  libraryDragging = true;
+  $("library-divider").setPointerCapture(e.pointerId);
+  e.preventDefault();
+});
+$("library-divider").addEventListener("pointermove", (e) => {
+  if (libraryDragging)
+    setLibraryHeight(libraryDock.getBoundingClientRect().bottom - e.clientY);
+});
+for (const event of ["pointerup", "pointercancel", "lostpointercapture"])
+  $("library-divider").addEventListener(event, () => {
+    libraryDragging = false;
+  });
+$("library-divider").addEventListener("keydown", (e) => {
+  if (["ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) {
+    e.preventDefault();
+    const height = libraryDock.getBoundingClientRect().height;
+    setLibraryHeight(
+      e.key === "Home"
+        ? 160
+        : e.key === "End"
+          ? libraryHeightLimit()
+          : height + (e.key === "ArrowUp" ? 24 : -24),
+    );
+  }
+});
+new ResizeObserver(() => {
+  if (librarySize !== null && librarySize > libraryHeightLimit())
+    setLibraryHeight(librarySize);
+  $("library-divider").setAttribute(
+    "aria-valuenow",
+    String(Math.round(libraryDock.getBoundingClientRect().height)),
+  );
+  $("library-divider").setAttribute(
+    "aria-valuemax",
+    String(libraryHeightLimit()),
+  );
+}).observe(document.querySelector<HTMLElement>(".workspace")!);
+
 let dividerDragging = false;
 const setSplit = (percent: number) => {
   const value = Math.max(26, Math.min(68, percent));
@@ -2035,6 +2260,7 @@ Object.defineProperty(window, "frontier", {
     setMode,
     setGeometryDetail,
     inspectSelection: () => scene?.inspectSelection() ?? false,
+    inspectInfrastructure,
     loadTemplate,
     placeSite: beginPlace,
     exportProject,

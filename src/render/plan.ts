@@ -515,11 +515,16 @@ export class PlanView {
         "landscape",
         "building",
         "parking",
+        "utility",
       ].includes(mesh.kind)
     )
       return;
     const colors: Record<string, string> = {
       asphalt: "#333d47",
+      "utility-iron": "#7b7d7a",
+      "utility-cover": "#5a605f",
+      "utility-recess": "#191f21",
+      "utility-grate": "#63716e",
       "pave-border": "#53616d",
       concrete: "#a3afb9",
       cobble: "#7b8580",
@@ -640,6 +645,7 @@ export class PlanView {
           "gutter",
           "marking",
           "drain",
+          "utility",
           "building",
         ])
           for (const mesh of meshes.filter((m) => m.kind === kind))

@@ -47,6 +47,7 @@ const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 const results = [];
 async function test(name, fn) {
+  if (process.env.TEST_FOCUS && !name.includes(process.env.TEST_FOCUS)) return;
   const start = performance.now();
   await fn();
   results.push({ name, ms: Math.round(performance.now() - start) });
@@ -914,6 +915,409 @@ try {
     await page.locator("#export-detail").selectOption("production");
     await page.keyboard.press("Escape");
   });
+  let utilityRoadId;
+  const utilityServices = () =>
+    page.evaluate(() => {
+      const n = window.frontier.getNetwork(),
+        id = window.frontier.getSelection()?.id;
+      return {
+        selected: n.services.filter((s) => s.owner === id),
+        all: n.services,
+        manholes: n.manholes,
+        inlets: n.inlets,
+      };
+    });
+  await test("infrastructure: library is a vertically scrolling grid with visible thumbnails and labels", async () => {
+    await page.evaluate(() => {
+      window.frontier.loadTemplate("tee");
+      window.frontier.select({
+        kind: "road",
+        id: window.frontier.getProject().roads[0].id,
+      });
+    });
+    utilityRoadId = (await state()).selection.id;
+    await page.locator('[data-library="roads"]').click();
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll(".asset-thumbnail")].every(
+        (i) => i.complete && i.naturalWidth > 0,
+      ),
+    );
+    const grid = await page.locator("#asset-cards").evaluate((e) => {
+      const s = getComputedStyle(e);
+      return {
+        display: s.display,
+        columns: s.gridTemplateColumns.split(" ").length,
+        overflow: s.overflowY,
+        height: e.clientHeight,
+        scroll: e.scrollHeight,
+        width: e.clientWidth,
+        scrollWidth: e.scrollWidth,
+      };
+    });
+    assert.equal(grid.display, "grid");
+    assert(grid.columns >= 2);
+    assert.equal(grid.overflow, "auto");
+    assert(grid.scroll > grid.height);
+    assert(grid.scrollWidth <= grid.width);
+    const cards = await page.locator(".asset-card").evaluateAll((cards) =>
+      cards.map((e) => {
+        const card = e.getBoundingClientRect(),
+          preview = e.querySelector(".asset-preview").getBoundingClientRect(),
+          label = e.querySelector("strong").getBoundingClientRect(),
+          image = e.querySelector("img");
+        return {
+          height: card.height,
+          preview: preview.height,
+          labelInside: label.bottom < card.bottom && label.top > preview.top,
+          loaded: image.complete && image.naturalWidth > 0,
+          source: image.src,
+        };
+      }),
+    );
+    assert(
+      cards.every(
+        (c) => c.height > 130 && c.preview >= 80 && c.labelInside && c.loaded,
+      ),
+    );
+    assert.equal(new Set(cards.map((c) => c.source)).size, cards.length);
+    await page.locator('[data-asset="promenade"]').scrollIntoViewIfNeeded();
+    assert(await page.locator("#asset-cards").evaluate((e) => e.scrollTop > 0));
+    await page.locator("#library-search").fill("Waterfront");
+    assert.equal(await page.locator(".asset-card").count(), 1);
+    assert(await page.locator(".asset-card strong").isVisible());
+    await page.locator("#library-search").fill("");
+    await page.locator('[data-library="structures"]').click();
+    await page.locator('[data-asset="manhole"]').scrollIntoViewIfNeeded();
+    assert(await page.locator('[data-asset="manhole"] strong').isVisible());
+    assert(await page.locator('[data-asset="channel"] img').isVisible());
+    await page.screenshot({ path: resolve(cache, "library.png") });
+  });
+  await test("infrastructure: library resizing, keyboard access and collapse do not mutate the project", async () => {
+    const before = await state(),
+      dock = page.locator(".asset-library"),
+      divider = page.locator("#library-divider"),
+      height = (await dock.boundingBox()).height;
+    await divider.focus();
+    await divider.press("ArrowUp");
+    assert((await dock.boundingBox()).height > height);
+    await divider.press("ArrowDown");
+    assert.equal((await dock.boundingBox()).height, height);
+    const r = await divider.boundingBox(),
+      bounds = await dock.boundingBox();
+    await page.mouse.move(r.x + r.width / 2, r.y + 3);
+    await page.mouse.down();
+    await page.mouse.move(r.x + r.width / 2, r.y - 28, { steps: 3 });
+    await page.mouse.up();
+    assert((await dock.boundingBox()).height > height + 20);
+    const current = await divider.boundingBox();
+    await page.mouse.move(current.x + current.width / 2, current.y + 3);
+    await page.mouse.down();
+    await page.mouse.move(current.x + current.width / 2, bounds.y);
+    await page.mouse.up();
+    assert.equal((await dock.boundingBox()).height, height);
+    await page.locator("#library-collapse").click();
+    assert.equal(
+      await page.locator("#library-collapse").getAttribute("aria-expanded"),
+      "false",
+    );
+    assert.equal(await page.locator("#asset-cards").isVisible(), false);
+    await page.locator("#library-collapse").click();
+    assert.equal(
+      await page.locator("#library-collapse").getAttribute("aria-expanded"),
+      "true",
+    );
+    assert.equal((await dock.boundingBox()).height, height);
+    assert.deepEqual((await state()).project, before.project);
+  });
+  await test("infrastructure: manhole asset applies actual covers and editable metric dimensions", async () => {
+    await page.locator('[data-inspector-tab="details"]').click();
+    const before = await state(),
+      count = (await utilityServices()).selected.filter(
+        (s) => s.kind === "manhole",
+      ).length;
+    assert(count > 0);
+    await page.locator('[data-prop="manholes"]').uncheck();
+    assert(
+      !(await state()).meshes.some(
+        (m) => m.owner === utilityRoadId && m.kind === "utility",
+      ),
+    );
+    assert.equal(
+      (await utilityServices()).selected.filter((s) => s.kind === "manhole")
+        .length,
+      0,
+    );
+    await page.locator('[data-asset="manhole"]').click();
+    assert.equal(
+      (await state()).project.roads.find((r) => r.id === utilityRoadId)
+        .manholes,
+      true,
+    );
+    assert(
+      (await state()).meshes.some(
+        (m) => m.owner === utilityRoadId && m.material === "utility-cover",
+      ),
+    );
+    await page.locator('[data-prop="manholeDiameter"]').focus();
+    await page.locator('[data-prop="manholeDiameter"]').press("End");
+    assert(
+      (await utilityServices()).selected
+        .filter((s) => s.kind === "manhole")
+        .every((s) => s.diameter === 1),
+    );
+    assert(
+      (
+        await page.locator('[data-output="manholeDiameter"]').textContent()
+      ).includes("1.00"),
+    );
+    await undo();
+    await page.locator('[data-prop="manholeSpacing"]').focus();
+    await page.locator('[data-prop="manholeSpacing"]').press("End");
+    const fewer = (await utilityServices()).selected.filter(
+      (s) => s.kind === "manhole",
+    ).length;
+    assert(fewer < count);
+    assert.equal(
+      Number(await page.locator('[data-service-stat="manhole"]').textContent()),
+      fewer,
+    );
+    assert(
+      await page
+        .locator('[data-prop="manholeSpacing"]')
+        .evaluate((e) => e === document.activeElement),
+    );
+    await undo();
+    await page.locator('[data-prop="manholeOffset"]').focus();
+    await page.locator('[data-prop="manholeOffset"]').press("ArrowRight");
+    assert.equal(
+      (await state()).project.roads.find((r) => r.id === utilityRoadId)
+        .manholeOffset,
+      -1.3,
+    );
+    await undo();
+    await undo();
+    await undo();
+    assert.deepEqual((await state()).project, before.project);
+  });
+  await test("infrastructure: cover inspection reveals a hidden layer without changing selection or topology", async () => {
+    const before = await state();
+    await page.locator('[data-menu="layers-menu"]').click();
+    await page.locator('[data-layer="utility"]').uncheck();
+    await page.keyboard.press("Escape");
+    await page.locator('[data-inspector-action="inspect-manhole"]').click();
+    assert(await page.locator('[data-layer="utility"]').isChecked());
+    assert.deepEqual((await state()).selection, before.selection);
+    assert.deepEqual((await state()).project, before.project);
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+    await page.screenshot({ path: resolve(cache, "manhole.png") });
+  });
+  await test("infrastructure: curb inlets and linear channels are discoverable, editable and inspectable", async () => {
+    await page.locator('[data-prop="drainage"]').uncheck();
+    assert(
+      !(await utilityServices()).selected.some((s) => s.kind !== "manhole"),
+    );
+    await page.locator('[data-asset="drain"]').click();
+    assert(
+      (await utilityServices()).selected.some((s) => s.kind === "curb-inlet"),
+    );
+    await page.locator('[data-asset="channel"]').click();
+    let features = await utilityServices();
+    assert.equal(
+      features.selected.filter((s) => s.kind === "channel-drain").length,
+      2,
+    );
+    assert(!features.selected.some((s) => s.kind === "curb-inlet"));
+    assert(
+      (await state()).meshes.some(
+        (m) => m.owner === utilityRoadId && m.material === "utility-grate",
+      ),
+    );
+    await page.locator('[data-prop="drainageType"]').selectOption("both");
+    features = await utilityServices();
+    assert(
+      features.selected.some((s) => s.kind === "curb-inlet") &&
+        features.selected.some((s) => s.kind === "channel-drain"),
+    );
+    assert.equal(
+      features.inlets,
+      features.all.filter((s) => s.kind === "curb-inlet").length,
+    );
+    const inlets = features.selected.filter(
+      (s) => s.kind === "curb-inlet",
+    ).length;
+    await page.locator('[data-prop="inletSpacing"]').focus();
+    await page.locator('[data-prop="inletSpacing"]').press("End");
+    const lower = (await utilityServices()).selected.filter(
+      (s) => s.kind === "curb-inlet",
+    ).length;
+    assert(lower < inlets);
+    assert.equal(
+      Number(
+        await page.locator('[data-service-stat="curb-inlet"]').textContent(),
+      ),
+      lower,
+    );
+    await undo();
+    const before = await state();
+    await page.locator('[data-inspector-action="inspect-drain"]').click();
+    assert.deepEqual((await state()).project, before.project);
+    await page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(resolve)),
+        ),
+    );
+    await page.screenshot({ path: resolve(cache, "drainage.png") });
+  });
+  await test("infrastructure: GLB and OBJ export covers, channel grates, PBR maps and service metadata", async () => {
+    const before = await state();
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("production");
+    let promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="glb"]').click();
+    let download = await promise,
+      buffer = await readFile(await download.path()),
+      g = JSON.parse(
+        buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
+      );
+    assert(g.nodes.some((n) => n.extras?.meshKind === "utility"));
+    const extras = g.nodes.find((n) => n.extras?.services)?.extras;
+    assert(extras.services.some((s) => s.kind === "manhole"));
+    assert(extras.services.some((s) => s.kind === "channel-drain"));
+    for (const name of ["utility-cover", "utility-grate"]) {
+      const m = g.materials.find((m) => m.name === name);
+      assert(
+        m.normalTexture && m.pbrMetallicRoughness.metallicRoughnessTexture,
+      );
+      assert.equal(m.pbrMetallicRoughness.metallicFactor, 0.72);
+      const sampler =
+        g.samplers[
+          g.textures[m.pbrMetallicRoughness.baseColorTexture.index].sampler
+        ];
+      assert.equal(sampler.wrapS, name === "utility-cover" ? 33071 : 10497);
+      assert.equal(sampler.wrapT, 33071);
+    }
+    assert(g.images.every((i) => i.bufferView !== undefined));
+    assert.deepEqual((await state()).project, before.project);
+    await page.locator('[data-menu="export-menu"]').click();
+    promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="obj"]').click();
+    download = await promise;
+    const files = unzipSync(await readFile(await download.path())),
+      decode = (name) => new TextDecoder().decode(files[name]),
+      manifest = JSON.parse(decode("materials.json")),
+      meshes = JSON.parse(decode("mesh.json")),
+      mtl = decode(Object.keys(files).find((n) => n.endsWith(".mtl")));
+    for (const key of ["utility-cover", "utility-grate"]) {
+      const m = manifest.materials[key];
+      assert.equal(m.metallic, 0.72);
+      assert(files[m.albedo] && files[m.normal] && files[m.roughness]);
+      assert.deepEqual(m.uvRepeat, [1, 1]);
+      assert.equal(m.wrapS, key === "utility-cover" ? "clamp" : "repeat");
+      assert.equal(m.wrapT, "clamp");
+    }
+    assert.equal(manifest.materials["utility-iron"].metallic, 0.72);
+    assert(mtl.includes("Pm 0.72") && mtl.includes("-clamp on"));
+    assert(meshes.objects.some((m) => m.kind === "utility"));
+    assert(meshes.services.some((s) => s.kind === "channel-drain"));
+    assert.deepEqual((await state()).project, before.project);
+  });
+  await test("infrastructure: parking covers and perimeter drainage are real independent controls", async () => {
+    await page.evaluate(() => window.frontier.placeSite("parking"));
+    const p = await page.evaluate(() =>
+        window.frontier.worldToPlan([34, 0, 32]),
+      ),
+      r = await page.locator("#plan-host").boundingBox();
+    await page.mouse.click(r.x + p[0], r.y + p[1]);
+    const selected = (await state()).selection;
+    assert.equal(selected.kind, "site");
+    await page.locator('[data-inspector-tab="details"]').click();
+    assert(
+      (await utilityServices()).selected.some((s) => s.kind === "manhole"),
+    );
+    assert(
+      (await utilityServices()).selected.some((s) => s.kind === "curb-inlet"),
+    );
+    await page.locator('[data-prop="manholes"]').uncheck();
+    assert(
+      !(await utilityServices()).selected.some((s) => s.kind === "manhole"),
+    );
+    assert(
+      (await utilityServices()).selected.some((s) => s.kind === "curb-inlet"),
+    );
+    await page.locator('[data-asset="manhole"]').click();
+    assert(
+      (await utilityServices()).selected.some((s) => s.kind === "manhole"),
+    );
+    await page.locator('[data-prop="drainage"]').uncheck();
+    assert(
+      !(await utilityServices()).selected.some((s) => s.kind === "curb-inlet"),
+    );
+    await page.locator('[data-asset="drain"]').click();
+    assert(
+      (await utilityServices()).selected.some((s) => s.kind === "curb-inlet"),
+    );
+    await page.locator('[data-prop="manholeDiameter"]').focus();
+    await page.locator('[data-prop="manholeDiameter"]').press("End");
+    assert(
+      (await utilityServices()).selected
+        .filter((s) => s.kind === "manhole")
+        .every((s) => s.diameter === 1),
+    );
+    assert(
+      (await state()).meshes
+        .filter((m) => m.owner === selected.id)
+        .every(
+          (m) => !["building", "landscape", "lamp", "sign"].includes(m.kind),
+        ),
+    );
+    await page.locator('[data-inspector-action="inspect-manhole"]').click();
+    await page.screenshot({ path: resolve(cache, "parking-manhole.png") });
+  });
+  await test("infrastructure: utility surface maps are cached, deterministic and export-compatible", async () => {
+    const result = await page.evaluate(async () => {
+      const { utilityMaps, Materials } =
+        await import("/src/render/materials.ts");
+      const cover = utilityMaps("utility-cover"),
+        grate = utilityMaps("utility-grate"),
+        material = new Materials().get("utility-cover"),
+        read = (c) =>
+          c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
+      let b = 0,
+        g = 0,
+        r = 0;
+      const n = read(cover.normal),
+        rough = read(cover.roughness);
+      for (let i = 0; i < n.length; i += 4) {
+        b += n[i + 2];
+        g += n[i + 1];
+        r += rough[i + 1];
+      }
+      return {
+        cached: cover === utilityMaps("utility-cover"),
+        size: cover.albedo.width,
+        normalBlue: b / (n.length / 4),
+        normalGreen: g / (n.length / 4),
+        roughness: r / (n.length / 4),
+        metallic: material.metalness,
+        wrap: [material.map.wrapS, material.map.wrapT],
+        distinct: cover.albedo.toDataURL() !== grate.albedo.toDataURL(),
+      };
+    });
+    assert(result.cached && result.distinct);
+    assert.equal(result.size, 512);
+    assert(result.normalBlue > 230);
+    assert(result.normalGreen > 126 && result.normalGreen < 130);
+    assert(result.roughness > 150);
+    assert.equal(result.metallic, 0.72);
+    assert.deepEqual(result.wrap, [1001, 1001]);
+  });
+
   await test("mobile layout keeps both views usable without horizontal overflow", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("district"));
     await page.setViewportSize({ width: 390, height: 844 });
@@ -922,6 +1326,20 @@ try {
     );
     assert(await page.locator(".plan-pane").isVisible());
     assert(await page.locator(".scene-pane").isVisible());
+    const planRect = await page.locator(".plan-pane").boundingBox(),
+      sceneRect = await page.locator(".scene-pane").boundingBox();
+    assert(
+      planRect.width >= 385 && sceneRect.width >= 385,
+      "both mobile views must span the full width, not an implicit four-pixel track",
+    );
+    assert(
+      sceneRect.y >= planRect.y + planRect.height - 0.5,
+      "mobile 3D view belongs below the plan",
+    );
+    assert(
+      planRect.height > 140 && sceneRect.height > 140,
+      "both linked views retain usable canvas space",
+    );
     assert(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= window.innerWidth,
@@ -931,6 +1349,17 @@ try {
     assert(await page.locator("#inspector").isVisible());
     await page.locator("#inspector-close").click();
     assert.equal(await page.locator("#inspector").isVisible(), false);
+    await page.locator('[data-library="structures"]').click();
+    const mobileGrid = await page.locator("#asset-cards").evaluate((e) => ({
+      columns: getComputedStyle(e).gridTemplateColumns.split(" ").length,
+      height: e.clientHeight,
+      scroll: e.scrollHeight,
+    }));
+    assert(mobileGrid.columns >= 2);
+    assert(mobileGrid.scroll > mobileGrid.height);
+    await page.locator('[data-asset="manhole"]').scrollIntoViewIfNeeded();
+    assert(await page.locator('[data-asset="manhole"] img').isVisible());
+    assert(await page.locator('[data-asset="manhole"] strong').isVisible());
     await page.screenshot({ path: resolve(cache, "mobile.png") });
     await page.setViewportSize({ width: 1512, height: 982 });
   });
@@ -954,6 +1383,17 @@ try {
     );
     assert.equal(offlineErrors.length, 0, offlineErrors.join("\n"));
     assert.deepEqual(requests, []);
+    assert((await offline.locator(".asset-thumbnail").count()) > 0);
+    await offline.locator('[data-library="structures"]').click();
+    await offline.locator('[data-asset="manhole"]').scrollIntoViewIfNeeded();
+    assert(await offline.locator('[data-asset="manhole"] img').isVisible());
+    await offline.locator('[data-inspector-tab="details"]').click();
+    assert(await offline.locator('[data-prop="manholes"]').isChecked());
+    assert(
+      await offline.evaluate(() =>
+        window.frontier.inspectInfrastructure("manhole"),
+      ),
+    );
     await offline.evaluate(() => window.frontier.loadTemplate("race"));
     assert.equal(
       await offline.evaluate(() => window.frontier.getProject().roads.length),

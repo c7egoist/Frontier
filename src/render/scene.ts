@@ -1,3 +1,4 @@
+import type { UtilityKind } from "../core/utilities";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { siteOutline, sitePoint } from "../core/sites";
 import * as THREE from "three";
@@ -521,6 +522,44 @@ export class SceneView {
     this.onGizmo(this.gizmoProjection());
     return true;
   }
+  inspectInfrastructure(kind: UtilityKind | "drainage"): boolean {
+    if (!this.selection || !this.network || !this.project) return false;
+    const owners =
+      this.selection.kind === "node"
+        ? [
+            this.selection.id,
+            ...this.project.roads
+              .filter(
+                (r) =>
+                  r.start === this.selection!.id ||
+                  r.end === this.selection!.id,
+              )
+              .map((r) => r.id),
+          ]
+        : [this.selection.id];
+    const pivot = this.selectionPosition() ?? [0, 0, 0];
+    const range = (p: V3) =>
+      Math.hypot(p[0] - pivot[0], p[1] - pivot[1], p[2] - pivot[2]);
+    const feature = this.network.services
+      .filter(
+        (s) =>
+          owners.includes(s.owner) &&
+          (kind === "drainage" ? s.kind !== "manhole" : s.kind === kind),
+      )
+      .sort((a, b) => range(a.position) - range(b.position))[0];
+    if (!feature) return false;
+    this.controls.target.set(...feature.position);
+    this.camera.position.copy(
+      this.controls.target
+        .clone()
+        .add(new THREE.Vector3(1, 1.25, 1).normalize().multiplyScalar(3.6)),
+    );
+    this.camera.zoom = 1;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.onGizmo(this.gizmoProjection());
+    return true;
+  }
   zoom(factor: number) {
     this.camera.zoom = THREE.MathUtils.clamp(this.camera.zoom * factor, 0.4, 4);
     this.camera.updateProjectionMatrix();
@@ -572,6 +611,7 @@ export class SceneView {
       upAxis: "Y",
       geometryDetail: network?.detail ?? this.network?.detail ?? "editing",
       includesPreviewEnvironment: false,
+      services: network?.services ?? this.network?.services ?? [],
     };
     try {
       return (await new GLTFExporter().parseAsync(group, {

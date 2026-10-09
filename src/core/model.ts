@@ -45,6 +45,11 @@ export interface RoadSettings {
   markings: boolean;
   guardrails: boolean;
   drainage: boolean;
+  drainageType: "curb" | "linear" | "both";
+  manholes: boolean;
+  manholeDiameter: number;
+  manholeSpacing: number;
+  manholeOffset: number;
   crossfall: number;
   inletSpacing: number;
   railHeight: number;
@@ -89,6 +94,11 @@ export const roadDefaults: RoadSettings = {
   markings: true,
   guardrails: false,
   drainage: true,
+  drainageType: "curb",
+  manholes: true,
+  manholeDiameter: 0.65,
+  manholeSpacing: 35,
+  manholeOffset: -1.35,
   crossfall: 2,
   inletSpacing: 18,
   railHeight: 0.8,
@@ -135,6 +145,7 @@ export const presets: {
       sidewalk: 0.8,
       guardrails: true,
       drainage: false,
+      manholes: false,
       markingStyle: "motorway",
       signs: false,
       speedLimit: 100,
@@ -155,6 +166,7 @@ export const presets: {
       curbStyle: "flush",
       markings: false,
       drainage: false,
+      manholes: false,
       oneWay: true,
     },
   },
@@ -173,6 +185,7 @@ export const presets: {
       signs: false,
       speedLimit: 120,
       drainage: false,
+      manholes: false,
       oneWay: true,
       pattern: "slate",
     },
@@ -208,6 +221,7 @@ export const presets: {
       railStyle: "railing",
       streetLights: false,
       drainage: false,
+      manholes: false,
       oneWay: true,
     },
   },
@@ -404,6 +418,7 @@ export function makeTemplate(type: string): Project {
       sidewalk: 0.8,
       guardrails: true,
       drainage: false,
+      manholes: false,
     };
     r(w, wm, "West highway", highway);
     r(wm, em, "Cross highway", highway);
@@ -424,6 +439,7 @@ export function makeTemplate(type: string): Project {
       sidewalk: 0.65,
       guardrails: true,
       drainage: false,
+      manholes: false,
       oneWay: true,
     };
     r(nt, wm, "Ramp 01 · Northwest", ramp, [-58, 0, 10], [10, 0, -48]);
@@ -476,6 +492,7 @@ export function makeTemplate(type: string): Project {
           laneWidth: 6,
           oneWay: true,
           drainage: false,
+          manholes: false,
         },
         ...handles[i],
       );
@@ -604,6 +621,17 @@ export function parseProject(raw: unknown): Project {
       markings: entry.markings !== false,
       guardrails: entry.guardrails === true,
       drainage: entry.drainage !== false,
+      drainageType: ["curb", "linear", "both"].includes(
+        String(entry.drainageType),
+      )
+        ? (entry.drainageType as Road["drainageType"])
+        : "curb",
+      manholes:
+        entry.manholes === true ||
+        (entry.manholes !== false && entry.drainage !== false),
+      manholeDiameter: number(entry.manholeDiameter, 0.65, 0.45, 1),
+      manholeSpacing: number(entry.manholeSpacing, 35, 12, 100),
+      manholeOffset: number(entry.manholeOffset, -1.35, -8, 8),
       bridge: entry.bridge === true,
       oneWay: entry.oneWay === true,
       markingStyle: ["urban", "motorway", "race"].includes(
@@ -647,6 +675,7 @@ export function validateGenerationBudget(project: Project): void {
   if (project.roads.length > 500 || project.nodes.length > 1500)
     throw new RangeError("Editor tile limit: 500 roads and 1,500 nodes.");
   let total = 0,
+    utilityVertices = 0,
     minX = Infinity,
     maxX = -Infinity,
     minZ = Infinity,
@@ -657,10 +686,34 @@ export function validateGenerationBudget(project: Project): void {
       distance(points[0], points[1]) +
       distance(points[1], points[2]) +
       distance(points[2], points[3]);
+    if (
+      ![
+        road.manholeDiameter,
+        road.manholeSpacing,
+        road.manholeOffset,
+        road.inletSpacing,
+      ].every(Number.isFinite) ||
+      road.manholeDiameter < 0.45 ||
+      road.manholeDiameter > 1 ||
+      road.manholeSpacing < 12 ||
+      road.manholeSpacing > 100 ||
+      road.inletSpacing < 6 ||
+      road.inletSpacing > 80 ||
+      Math.abs(road.manholeOffset) > 8 ||
+      !["curb", "linear", "both"].includes(road.drainageType)
+    )
+      throw new RangeError("Invalid road utility parameters.");
     if (!Number.isFinite(estimated) || estimated > 5000)
       throw new RangeError(
         "An alignment must be shorter than 5 km. Split this road into a separate editor tile.",
       );
+    // Conservative cover/rim/bar counts; spacing controls cannot allocate
+    // millions of utility vertices before the editor can reject the edit.
+    if (road.manholes && !road.bridge)
+      utilityVertices +=
+        Math.max(0, Math.ceil((estimated - 20) / road.manholeSpacing)) * 740;
+    if (road.drainage && road.drainageType !== "linear")
+      utilityVertices += Math.ceil(estimated / road.inletSpacing) * 2 * 120;
     total += estimated;
     for (const point of points) {
       minX = Math.min(minX, point[0]);
@@ -699,6 +752,7 @@ export function validateGenerationBudget(project: Project): void {
         site.perimeterWidth,
         site.entryWidth,
         site.paintWear,
+        site.manholeDiameter,
       ].every(Number.isFinite) ||
       site.bayWidth < 2.4 ||
       site.bayWidth > 3.6 ||
@@ -706,9 +760,18 @@ export function validateGenerationBudget(project: Project): void {
       site.bayDepth > 6.5 ||
       site.aisleWidth < 4 ||
       site.aisleWidth > 9 ||
+      site.manholeDiameter < 0.45 ||
+      site.manholeDiameter > 1 ||
       ![45, 60, 90].includes(site.parkingAngle)
     )
       throw new RangeError("Invalid procedural parking parameters.");
+    if (site.kind === "parking") {
+      const aisles =
+        Math.ceil(site.depth / (2 * site.bayDepth + site.aisleWidth)) + 3;
+      if (site.manholes) utilityVertices += aisles * 740;
+      if (site.drainage)
+        utilityVertices += Math.ceil(site.width / 12) * 2 * 120;
+    }
     const angle = (site.parkingAngle * Math.PI) / 180,
       rowDepth = site.bayDepth * Math.sin(angle) + 3.6 * Math.cos(angle);
     const rows = Math.max(
@@ -734,6 +797,10 @@ export function validateGenerationBudget(project: Project): void {
       maxZ = Math.max(maxZ, point[2]);
     }
   }
+  if (utilityVertices > 1500000)
+    throw new RangeError(
+      "Utility detail budget exceeded. Increase cover/inlet intervals or export separate tiles.",
+    );
   if (siteVertices > 750000)
     throw new RangeError(
       "Surface detail budget exceeded. Reduce parking footprints/counts or split the district into tiles.",

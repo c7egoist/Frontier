@@ -1,4 +1,11 @@
 import {
+  addGratedInlet,
+  buildRoadManholes,
+  buildLinearDrain,
+  roadSampler,
+  type UtilityFeature,
+} from "./utilities";
+import {
   geometryProfiles,
   normaliseDetail,
   type GeometryDetail,
@@ -66,7 +73,8 @@ export type MeshKind =
   | "lamp"
   | "landscape"
   | "building"
-  | "parking";
+  | "parking"
+  | "utility";
 export interface MeshData {
   name: string;
   owner: string;
@@ -132,6 +140,8 @@ export interface Network {
   maxGrade: number;
   clearances: { a: string; b: string; meters: number }[];
   parkingSpaces: number;
+  services: UtilityFeature[];
+  manholes: number;
   detail: GeometryDetail;
 }
 const SURFACE = 0.12,
@@ -912,51 +922,47 @@ function buildRails(builder: MeshBuilder, span: RoadSpan) {
     }
   }
 }
-function addInlet(builder: MeshBuilder, f: Frame, side: number) {
-  const p = offsetStation(
-    f,
-    side * (f.hw + 0.04),
-    surfaceHeight(f) - (f.hw * f.crossfall) / 100 + 0.009,
-  );
-  builder.box("drain", "drain-dark", p, 0.36, 0.045, 0.7, f.d);
-  for (let i = 0; i < 7; i++)
-    builder.box(
-      "drain",
-      "steel-dark",
-      add(p, add(mul(f.d, (i - 3) * 0.09), [0, 0.028, 0])),
-      0.31,
-      0.025,
-      0.034,
-      f.d,
-    );
+function addInlet(
+  builder: MeshBuilder,
+  span: RoadSpan,
+  station: number,
+  side: number,
+): UtilityFeature {
+  const f = frameAt(span, station),
+    offset = side * (f.hw - 0.28);
+  addGratedInlet(builder, roadSampler(span, station, offset));
+  return {
+    id: `${builder.owner}:inlet:${side}:${Math.round(station * 100)}`,
+    owner: builder.owner,
+    ownerKind: builder.ownerKind,
+    kind: "curb-inlet",
+    position: surfacePoint(f, offset, 0.015),
+  };
 }
-function buildDrainage(builder: MeshBuilder, span: RoadSpan) {
+function buildDrainage(
+  builder: MeshBuilder,
+  span: RoadSpan,
+  services: UtilityFeature[],
+) {
   if (!span.road.drainage) return 0;
   let inlets = 0;
   for (const side of [-1, 1]) {
     const a = span.frames.map((f) =>
-      offsetStation(
-        f,
-        side * (f.hw - 0.06),
-        surfaceHeight(f) - (f.hw * f.crossfall) / 100 + 0.006,
+        surfacePoint(f, side * (f.hw - 0.035), 0.004),
       ),
-    );
-    const b = span.frames.map((f) =>
-      offsetStation(
-        f,
-        side * (f.hw + 0.065),
-        surfaceHeight(f) - (f.hw * f.crossfall) / 100 + 0.006,
-      ),
-    );
+      b = span.frames.map((f) => surfacePoint(f, side * (f.hw - 0.15), 0.004));
     builder.strip("gutter", "gutter", a, b, true);
-    for (
-      let s = span.frames[0].s + 5;
-      s < span.frames.at(-1)!.s - 2;
-      s += span.road.inletSpacing
-    ) {
-      addInlet(builder, frameAt(span, s), side);
-      inlets++;
-    }
+    if (span.road.drainageType !== "curb")
+      services.push(buildLinearDrain(builder, span, side));
+    if (span.road.drainageType !== "linear")
+      for (
+        let s = span.frames[0].s + 5;
+        s < span.frames.at(-1)!.s - 2;
+        s += span.road.inletSpacing
+      ) {
+        services.push(addInlet(builder, span, s, side));
+        inlets++;
+      }
   }
   return inlets;
 }
@@ -1118,9 +1124,10 @@ function buildSpan(
   buildParallelParking(b, span);
   buildRoadFurniture(b, span, project);
   buildRails(b, span);
-  const inlets = buildDrainage(b, span);
+  const services = buildRoadManholes(b, span),
+    inlets = buildDrainage(b, span, services);
   buildBridge(b, span, allAlignments);
-  return { meshes: b.output(), inlets };
+  return { meshes: b.output(), inlets, services };
 }
 /** Tangent circular fillet with a bounded cubic fallback for reflex corners. */
 export function cornerCurve(
@@ -1353,6 +1360,7 @@ function buildJunction(
     asphaltMaterial = roadMaterial(junctionRoad);
   const radius = Math.max(node.radius, ...arms.map((a) => a.frame.sw + 1));
   let inlets = 0;
+  const services: UtilityFeature[] = [];
   for (let i = 0; i < arms.length; i++) {
     const a = arms[i],
       next = arms[(i + 1) % arms.length],
@@ -1410,10 +1418,15 @@ function buildJunction(
     bottom[0] = armPart(a, 1, "bottom");
     bottom[bottom.length - 1] = armPart(next, -1, "bottom");
     b.strip("structure", "road-base", paved, bottom);
-    if (a.road.drainage) {
-      const f = { ...a.frame, d: a.d, n: a.n };
-      addInlet(b, f, 1);
-      inlets++;
+    if (a.road.drainage && a.road.drainageType !== "linear") {
+      const span = spans.find((s) => s.road.id === a.road.id)!;
+      const station = a.isStart
+        ? span.frames[0].s + 1.2
+        : span.frames.at(-1)!.s - 1.2;
+      if (span.length > 3) {
+        services.push(addInlet(b, span, station, a.isStart ? 1 : -1));
+        inlets++;
+      }
     }
   }
   const valid =
@@ -1467,6 +1480,7 @@ function buildJunction(
     junction: { node, arms, boundary, outer, corners, type, valid },
     meshes: b.output(),
     inlets,
+    services,
   };
 }
 export function buildNetwork(
@@ -1506,7 +1520,8 @@ export function buildNetwork(
   );
   const spans: RoadSpan[] = [],
     meshes: MeshData[] = [],
-    junctions: Junction[] = [];
+    junctions: Junction[] = [],
+    services: UtilityFeature[] = [];
   let length = 0,
     inlets = 0,
     maxGrade = 0;
@@ -1601,6 +1616,7 @@ export function buildNetwork(
     const result = buildSpan(span, project, [...alignments.values()]);
     meshes.push(...result.meshes);
     inlets += result.inlets;
+    services.push(...result.services);
   }
   for (const node of jointNodes) {
     const result = buildJunction(
@@ -1612,6 +1628,7 @@ export function buildNetwork(
     junctions.push(result.junction);
     meshes.push(...result.meshes);
     inlets += result.inlets;
+    services.push(...result.services);
   }
   if (maxGrade > 14)
     diagnostics.push({
@@ -1663,7 +1680,7 @@ export function buildNetwork(
       });
   }
   for (const site of project.sites ?? []) {
-    meshes.push(...buildSiteGeometry(site));
+    meshes.push(...buildSiteGeometry(site, services));
     if (site.kind === "parking")
       for (const message of parkingPlan(site).warnings)
         diagnostics.push({
@@ -1733,9 +1750,11 @@ export function buildNetwork(
     meshes,
     diagnostics,
     length,
-    inlets,
+    inlets: services.filter((s) => s.kind === "curb-inlet").length,
     maxGrade,
     clearances,
+    services,
+    manholes: services.filter((s) => s.kind === "manhole").length,
     parkingSpaces:
       spans.reduce(
         (sum, s) =>
