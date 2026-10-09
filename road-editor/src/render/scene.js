@@ -143,10 +143,20 @@ export class SceneView {
   }
 
   // Keep node handle positions in step with the model without rebuilding them.
+  // The gizmo proxy follows the model too, unless the gizmo itself is being dragged.
   syncHandles(project) {
     for (const n of project.nodes) {
       const m = this.nodeHandles.get(n.id);
       if (m) m.position.set(n.x, n.y + 0.4, n.z);
+    }
+    if (this.gizmo.dragging || !this.selected) return;
+    if (this.selected.type === 'node') {
+      const n = project.nodes.find((x) => x.id === this.selected.id);
+      if (n) this.gizmoProxy.position.set(n.x, n.y + 0.4, n.z);
+    } else if (this.selected.type === 'point') {
+      const r = project.roads.find((x) => x.id === this.selected.id);
+      const p = r && r.points[this.selected.index];
+      if (p) this.gizmoProxy.position.set(p.x, p.y + 0.4, p.z);
     }
   }
 
