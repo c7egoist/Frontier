@@ -135,6 +135,12 @@ function pieces(
         : road.name,
       start,
       end,
+      driveways: road.driveways
+        .filter((d) => d.at >= previous && (cut ? d.at < cut.t : d.at <= 1))
+        .map((d) => ({
+          ...d,
+          at: (d.at - previous) / ((cut?.t ?? 1) - previous),
+        })),
       h1: sub(segment[1], segment[0]),
       h2: sub(segment[2], endpoint),
     });

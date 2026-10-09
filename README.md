@@ -4,7 +4,7 @@ A self-contained HTML tool for generating **roads, paving and procedural parking
 
 ## Open
 
-Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified asset-grid and utilities snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/d78ef7243213130535f60fc63f13874bf553e3d6/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
+Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [previous asset-grid and utilities snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/d78ef7243213130535f60fc63f13874bf553e3d6/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
 
 Only the root HTML is deployed, not Vite's development `index.html`. Code, fonts, procedural materials and licensing notices are embedded. WebGL2 enables the 3D view; plan editing and OBJ/JSON export also work without it.
 
@@ -27,8 +27,19 @@ The achromatic palette and component treatment are ported from the supplied [Sla
 - **One junction pivot:** X/Z in plan, X/Y/Z in 3D. Connected approaches and relative Bézier handles follow the same node. Road pivots and numeric transforms remain editable.
 - **Merge construction:** acute-angle runout includes radius and road width. Both ends share the available trim budget rather than wasting 43% at a free end. Paving setback is adjustable; wide inward offsets cannot fold around the merge nose. Inappropriate zebras are suppressed and junction guidance is surface-clipped.
 - **Paving:** nine world-scaled bond/panel patterns, independent pavement width, flush/stone/rumble curb profiles and edge courses. Albedo, normal and roughness channels are available in GLB and the OBJ texture package. Relief is generated independently from stone colour, rather than turning colour variation into fake displacement. Road and junction curbs share a continuous 15 mm top chamfer (reduced for flush profiles).
-- **Infrastructure:** procedural service covers, framed cast-iron curb inlets, recessed linear-channel grates and continuous gutters. W-beam/pedestrian barriers, concrete racing barriers and steel/concrete bridges remain available. Signs, signal heads and light fixtures are optional, explicitly enabled controls; templates do not auto-populate them.
+- **Footways and access:** 4.2 m default sidewalks along the full alignment, widths up to 12 m, independent footway crossfall and curb upstand, graded corner ramps and authored vehicle crossings. The fresh Northbank demo includes one authored driveway; new roads do not auto-populate entries.
+- **Infrastructure:** procedural service covers, framed cast-iron gullies, physical side-entry curb throats with inspection lids, hollow drainage kerbs, recessed linear-channel grates and continuous gutters. W-beam/pedestrian barriers, concrete racing barriers and steel/concrete bridges remain available. Signs, signal heads and light fixtures are optional, explicitly enabled controls; templates do not auto-populate them.
 - **Persistence:** local autosave, JSON import/export, transactional undo/redo, rename/delete and scene search.
+
+### Pedestrian footways and vehicle crossings
+
+- **Surface → Paving pattern:** sidewalk width (0–12 m), stone/flush/rumble profile, curb upstand (0.04–0.30 m) and footway crossfall (−3% to +3%). Positive crossfall rises away from the curb, draining toward the road. Flush/racing profiles cap the effective upstand at 40/80 mm. Concrete curb faces have world-scaled microaggregate PBR and vertical-face UVs.
+- **Details → Pedestrian corner ramps:** enable ramps, adjust clear width (1.4–3.4 m) and run (0.8–6 m), and toggle tactile warning paving. Crossing-aligned ramps lower the actual curb and paving to a 6 mm lip, have flared sides and retain a clear landing where the available width allows. The run is clipped to fit the footway. Tactile paving has 400 mm modules with separate albedo/normal/roughness maps. The inspector reports the generated cross-ramp gradient, rather than assuming that the requested run fits.
+- **Details → Vehicle crossings / Infrastructure → Vehicle driveway crossing:** author up to 20 individual entries per road, with curve position, alignment side, 3–12 m opening width and 0–12 m apron beyond the sidewalk. A dropped curb, graded fore-ramp, continuous pedestrian landing and concrete apron are generated together. Rails, road-edge paint, curbside parking bays and explicitly enabled roadside poles/signs leave the opening clear. Entries are not decorative car props or automatic parking connectors.
+- Entry positions are normalized **cubic parameters**, not arc-length fractions. Splitting a road or resolving a crossing assigns each entry to exactly one segment and remaps its parameter, preserving its authored world position. Too-close/overlapping entries remain in the editable graph with a warning; they are not silently duplicated into the mesh.
+- **Inspect a corner ramp / Inspect entry** frames the generated construction without moving the shared pivot or changing the graph. Paving is revealed if its layer was hidden. Ramp dimensions, effective rise/run, cross-gradient, clear landing, station, side and apron length are in `network.footways`, GLB extras and OBJ `mesh.json`.
+
+The **Wide pedestrian street** preset uses 5.5 m footways and linear paving. Infrastructure kits also expose Wide pedestrian sidewalk, Corner curb ramp, Vehicle driveway crossing, Side-entry curb drain and Hollow drainage curb as mesh-generated thumbnails. Ramps are suppressed on bridge decks, in acute merge throats and where a footway cannot fit them. These are game-asset geometry controls, **not accessibility, planning-code, structural or swept-vehicle certification**.
 
 ### Asset library and road utilities
 
@@ -37,11 +48,12 @@ The library is a **multi-column, vertically scrolling grid**. Preview images and
 Select a road or shared junction, then choose **Infrastructure → Manhole cover**, **Curb drainage** or **Linear channel drain**. These enable generated geometry on the selection, not decorative placeholder objects. Open **Inspector → Details** to edit:
 
 - Manhole diameter (0.45–1.00 m), station interval (12–100 m) and lateral offset. Circular rims, recessed seams, cast tread and lifting pockets follow road grade/crossfall; lateral placement stays inside the carriageway and clear of raised medians. Bridge decks do not receive manholes. World Y zero is not assumed to be the ground datum.
-- Curb-inlet, linear-channel or combined drainage construction, with editable inlet spacing. Road grates sit inside the road lip rather than behind the curb.
+- Curb-inlet, linear-channel or combined drainage construction, with editable spacing and a separate **Curb inlet style** choice. Road gully grates sit inside the road lip. **Side-entry** removes the solid curb face and builds jambs, a soffit, recessed throat and sealed concrete sidewalk inspection slab. **Hollow** builds repeated arched face apertures with depth and occasional top access grates; its module/port counts remain stable between Editing and Production. Face drains avoid access ramps. Low/flush curbs fall back to road grates when a face inlet cannot fit.
+- For hollow curbs, the interval control spaces the top access grates; regular 650 mm kerb modules determine the face-port repetition. Service metadata records the style, actual port count and top access-grate count. The displayed inlet count includes the individual hollow ports, not just two continuous runs.
 - **Inspect a cover / Inspect drainage** frames a modeled service detail in 3D and reveals its layer; it does not edit the graph. The flow overlay remains a separate 2D diagnostic, not a substitute for the drainage mesh.
 - Parking has independent cover and drainage toggles. Covers fit entirely inside connected drive aisles; perimeter inlets avoid entry throats and remain inside the footprint.
 
-Covers and channel grates include deterministic albedo/normal/roughness maps and cast-iron metallic response. GLB root extras and OBJ `mesh.json` include service IDs, ownership, positions and dimensions. These are surface infrastructure assets, **not** underground pipe networks or a hydraulic simulation.
+Covers, channel grates, tactile paving and concrete curbs include deterministic albedo/normal/roughness maps and cast-iron metallic response. GLB root extras and OBJ `mesh.json` include service IDs, ownership, positions and dimensions. These are surface infrastructure assets, **not** underground pipe networks or a hydraulic simulation.
 
 ### Procedural parking
 
@@ -72,11 +84,11 @@ The diamond has about **5.79 m modeled clearance** and **6.49% maximum grade**. 
 
 OBJ uses `norm`/`map_Pr` PBR MTL extensions. Importers that ignore these extensions can use the material manifest or GLB. Albedo is sRGB; normal/roughness are linear data. Normals use **OpenGL +Y**: invert green for DirectX -Y shaders. UV repeats and normal strengths are recorded in the manifest.
 
-Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts, world bounds and the service-feature table. GLB root extras identify the tessellation profile and service features. `materials.json` also records cover/channel wrap modes and metallic response; `Pm` and clamp settings are included in MTL.
+Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts, world bounds and the service-feature and footway tables. GLB root extras identify the tessellation profile, service features and graded footways. `materials.json` also records cover/channel wrap modes and metallic response; `Pm` and clamp settings are included in MTL.
 
 Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wireframe preview does not alter the original exported materials. No preview environment is exported. A final game's visual quality also depends on its texture resolution, material/shader integration, lighting, terrain and rendering pipeline; this editor does not claim to be a complete AAA environment renderer.
 
-Release HTML is checked byte-for-byte against the published GitHub file. **135 CPU checks and 52 browser checks** pass, including the real parking controls, exports, absence of auto-generated props, mobile layout and offline use.
+Release HTML is checked byte-for-byte against the published GitHub file. **161 CPU checks and 60 browser checks** pass, including physical curb-face aperture/roof checks, ramp grading, driveway split/undo/removal, live controls, curb/tactile PBR exports, procedural parking, mobile layout and offline use.
 
 ## Development and verification
 
@@ -105,9 +117,11 @@ window.frontier.placeSite("parking"); // enter placement mode
 window.frontier.setGeometryDetail("production"); // preview only, graph unchanged
 window.frontier.inspectSelection(); // close-up material camera
 window.frontier.inspectInfrastructure("manhole"); // also accepts "drainage"
+window.frontier.addDriveway(); // requires a selected non-bridge road / connected node
+window.frontier.inspectFootway("corner-ramp"); // also accepts "driveway"
 window.frontier.exportProject("glb", "production"); // independent dense export
 window.addEventListener("frontier:change", ({ detail }) => {
-  const { project, meshes, diagnostics } = detail;
+  const { project, meshes, diagnostics, services, footways } = detail;
 });
 ```
 
@@ -115,6 +129,6 @@ Selection kinds are `node`, `road` and `site`. `worldToPlan` returns plan-canvas
 
 ### Limits and shortcuts
 
-Tiles: ≤500 roads, ≤1,500 nodes, ≤200 surfaces, 5 × 5 km extent, 5 km maximum alignment control-polygon length and 35 km total. Production tessellation has a separate **15 km control-polygon budget**. Surface-detail and utility-repeat estimates are checked before allocation; the conservative utility budget is 1.5 million vertices. Invalid geometry blocks mesh export but leaves JSON available for repair. Larger worlds should be authored/exported as tiles.
+Tiles: ≤500 roads, ≤1,500 nodes, ≤200 surfaces, 5 × 5 km extent, 5 km maximum alignment control-polygon length and 35 km total. Production tessellation has a separate **15 km control-polygon budget**. Surface-detail and utility-repeat estimates are checked before allocation; the conservative utility budget is 1.5 million vertices, including physical hollow-kerb repetition. Roads support at most 20 authored driveway entries each. Invalid geometry blocks mesh export but leaves JSON available for repair. Larger worlds should be authored/exported as tiles.
 
 V select · D/P draw · W move · H/Space pan · M measure · B procedural parking · F frame · G grid · S snap · Shift+A templates · Delete remove · Ctrl/Cmd+S save · Ctrl/Cmd+O import · Ctrl/Cmd+Z undo · Esc cancel.

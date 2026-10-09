@@ -1318,6 +1318,375 @@ try {
     assert.deepEqual(result.wrap, [1001, 1001]);
   });
 
+  let footwayRoadId;
+  const footwayState = () =>
+    page.evaluate(() => {
+      const p = window.frontier.getProject(),
+        n = window.frontier.getNetwork(),
+        s = window.frontier.getSelection();
+      return {
+        road: p.roads.find((r) => r.id === s?.id),
+        footways: n.footways,
+        services: n.services,
+        inlets: n.inlets,
+        meshes: n.meshes.map((m) => ({
+          owner: m.owner,
+          kind: m.kind,
+          material: m.material,
+        })),
+        diagnostics: n.diagnostics,
+      };
+    });
+  async function footwaySlider(prop, value) {
+    await page.locator(`[data-prop="${prop}"]`).evaluate((el, value) => {
+      el.value = String(value);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+    }, value);
+  }
+  await test("footways: full-length sidewalk width, curb upstand and crossfall controls are live and undoable", async () => {
+    await page.evaluate(() => {
+      window.frontier.loadTemplate("tee");
+      window.frontier.setGeometryDetail("editing");
+      window.frontier.select({
+        kind: "road",
+        id: window.frontier.getProject().roads[0].id,
+      });
+    });
+    footwayRoadId = (await state()).selection.id;
+    await page.locator('button[data-layout="split"]').click();
+    await page.locator("#shade-style").selectOption("shaded");
+    await page.locator('[data-inspector-tab="surface"]').click();
+    assert.equal(
+      await page.locator('[data-prop="sidewalk"]').getAttribute("max"),
+      "12",
+    );
+    const before = (await state()).project;
+    await page.locator('[data-prop="sidewalk"]').focus();
+    await page.locator('[data-prop="sidewalk"]').press("End");
+    assert.equal((await footwayState()).road.sidewalk, 12);
+    assert.equal(
+      await page
+        .locator('[data-prop="sidewalk"]')
+        .evaluate((e) => e === document.activeElement),
+      true,
+    );
+    await undo();
+    assert.deepEqual((await state()).project, before);
+    await page.locator('[data-prop="curbHeight"]').focus();
+    await page.locator('[data-prop="curbHeight"]').press("End");
+    assert.equal((await footwayState()).road.curbHeight, 0.3);
+    assert.equal(
+      await page.evaluate(
+        () =>
+          window.frontier
+            .getNetwork()
+            .spans.find((s) => s.road.id === window.frontier.getSelection().id)
+            .frames[0].curbHeight,
+      ),
+      0.3,
+    );
+    await undo();
+    await page.locator('[data-prop="sidewalkCrossfall"]').focus();
+    await page.locator('[data-prop="sidewalkCrossfall"]').press("End");
+    assert.equal((await footwayState()).road.sidewalkCrossfall, 3);
+    await undo();
+    assert.deepEqual((await state()).project, before);
+    assert(
+      !(await footwayState()).diagnostics.some((d) => d.level === "error"),
+    );
+  });
+  await test("footways: corner ramps, clear landings and tactile warnings regenerate and inspect without changing the pivot", async () => {
+    await page.evaluate(() =>
+      window.frontier.select({
+        kind: "node",
+        id: window.frontier.getNetwork().junctions[0].node.id,
+      }),
+    );
+    await page.locator('[data-inspector-tab="details"]').click();
+    assert.equal(
+      (await footwayState()).footways.filter((f) => f.kind === "corner-ramp")
+        .length,
+      6,
+    );
+    await page.locator('[data-prop="cornerRamps"]').uncheck();
+    assert.equal((await footwayState()).footways.length, 0);
+    await page.locator('[data-prop="cornerRamps"]').check();
+    await page.locator('[data-prop="tactile"]').uncheck();
+    assert(
+      !(await footwayState()).meshes.some(
+        (m) => m.material === "paving-tactile",
+      ),
+    );
+    await page.locator('[data-prop="tactile"]').check();
+    await footwaySlider("rampWidth", 3.4);
+    await footwaySlider("rampRun", 6);
+    const f = (await footwayState()).footways;
+    assert(
+      f.every(
+        (f) =>
+          f.width === 3.4 && Math.abs(f.landing - 0.75) < 1e-7 && f.slope < 8.4,
+      ),
+    );
+    assert.equal(
+      Number(
+        await page.locator('[data-footway-stat="corner-ramp"]').textContent(),
+      ),
+      6,
+    );
+    const before = await state();
+    await page.locator('[data-inspector-action="inspect-ramp"]').click();
+    assert.deepEqual((await state()).selection, before.selection);
+    assert.deepEqual((await state()).project, before.project);
+    await page.screenshot({ path: resolve(cache, "corner-ramp.png") });
+  });
+  await test("footways: new infrastructure kits have real distinct thumbnails and readable grid labels", async () => {
+    await page.evaluate(() => {
+      window.frontier.loadTemplate("tee");
+      window.frontier.select({
+        kind: "road",
+        id: window.frontier.getProject().roads[0].id,
+      });
+    });
+    footwayRoadId = (await state()).selection.id;
+    await page.locator('[data-library="structures"]').click();
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll(".asset-thumbnail")].every(
+        (i) => i.complete && i.naturalWidth > 0,
+      ),
+    );
+    const sources = [];
+    for (const id of ["sidewalk", "corner", "driveway", "kerb", "hollow"]) {
+      const card = page.locator(`[data-asset="${id}"]`);
+      await card.scrollIntoViewIfNeeded();
+      assert(await card.locator("strong").isVisible());
+      assert(await card.locator("img").isVisible());
+      sources.push(await card.locator("img").getAttribute("src"));
+    }
+    assert.equal(new Set(sources).size, 5);
+    await page.locator('[data-asset="sidewalk"]').click();
+    assert((await footwayState()).road.sidewalk >= 4.2);
+    assert(await page.locator('[data-prop="curbHeight"]').isVisible());
+    await page.screenshot({ path: resolve(cache, "footway-library.png") });
+  });
+  await test("footways: a driveway kit adds a dropped curb and apron with complete undo and redo", async () => {
+    const before = (await state()).project;
+    await page.locator('[data-asset="driveway"]').click();
+    const added = await footwayState(),
+      entry = added.road.driveways[0];
+    assert.equal(added.road.driveways.length, 1);
+    assert(
+      added.footways.some(
+        (f) =>
+          f.kind === "driveway" &&
+          f.owner === footwayRoadId &&
+          f.width === 6 &&
+          f.apron === 4,
+      ),
+    );
+    assert(
+      added.meshes.some(
+        (m) =>
+          m.owner === footwayRoadId &&
+          m.material === "concrete" &&
+          m.kind === "paving",
+      ),
+    );
+    assert.equal((await state()).project.nodes.length, before.nodes.length);
+    assert.equal((await state()).project.roads.length, before.roads.length);
+    assert(
+      await page.evaluate(() => window.frontier.inspectFootway("driveway")),
+    );
+    await page.screenshot({ path: resolve(cache, "driveway.png") });
+    await undo();
+    assert.deepEqual((await state()).project, before);
+    await page.locator("#redo-button").click();
+    assert.deepEqual((await footwayState()).road.driveways[0], entry);
+  });
+  await test("footways: driveway position, side, opening, apron and multiple-entry selection edit only the chosen entry", async () => {
+    const before = (await state()).project;
+    await page.locator('[data-prop="drivewaySide"]').selectOption("-1");
+    await footwaySlider("drivewayAt", 40);
+    await footwaySlider("drivewayWidth", 7.6);
+    await footwaySlider("drivewayApron", 5.8);
+    let s = await footwayState(),
+      entry = s.road.driveways[0];
+    assert.equal(entry.at, 0.4);
+    assert.equal(entry.side, -1);
+    assert.equal(entry.width, 7.6);
+    assert.equal(entry.apron, 5.8);
+    assert(
+      s.footways.some(
+        (f) =>
+          f.kind === "driveway" &&
+          f.side === -1 &&
+          f.width === 7.6 &&
+          f.apron === 5.8,
+      ),
+    );
+    assert.deepEqual((await state()).project.nodes, before.nodes);
+    await page.locator('[data-inspector-action="add-driveway"]').click();
+    s = await footwayState();
+    assert.equal(s.road.driveways.length, 2);
+    assert.equal(
+      s.footways.filter(
+        (f) => f.kind === "driveway" && f.owner === footwayRoadId,
+      ).length,
+      2,
+    );
+    assert.deepEqual(s.road.driveways[0], entry);
+    await page.locator('[data-prop="activeDriveway"]').selectOption("0");
+    assert.equal(
+      await page.locator('[data-prop="drivewaySide"]').inputValue(),
+      "-1",
+    );
+    assert.equal(
+      await page.locator('[data-prop="drivewayWidth"]').inputValue(),
+      "7.6",
+    );
+    await page.locator('[data-inspector-action="delete-driveway"]').click();
+    assert.equal((await footwayState()).road.driveways.length, 1);
+    await undo();
+    assert.equal((await footwayState()).road.driveways.length, 2);
+    assert(
+      await page.evaluate(() => window.frontier.inspectFootway("driveway")),
+    );
+    await page.screenshot({ path: resolve(cache, "driveway-edited.png") });
+  });
+  await test("footways: side-entry curb drains expose chambers, remove duplicate gully grates and have visible editable spacing", async () => {
+    await page.locator('[data-asset="kerb"]').click();
+    let s = await footwayState(),
+      services = s.services.filter((f) => f.owner === footwayRoadId);
+    assert.equal(s.road.curbDrainType, "side-entry");
+    assert(services.some((f) => f.style === "side-entry"));
+    assert(
+      !services.some(
+        (f) => f.kind === "curb-inlet" && f.style !== "side-entry",
+      ),
+    );
+    assert(
+      s.meshes.some(
+        (m) =>
+          m.owner === footwayRoadId &&
+          m.kind === "drain" &&
+          m.material === "concrete",
+      ),
+    );
+    assert.equal(
+      await page.locator('[data-prop="curbDrainType"]').inputValue(),
+      "side-entry",
+    );
+    const count = services.filter((f) => f.style === "side-entry").length;
+    await footwaySlider("inletSpacing", 6);
+    s = await footwayState();
+    assert(
+      s.services.filter(
+        (f) => f.owner === footwayRoadId && f.style === "side-entry",
+      ).length > count,
+    );
+    await undo();
+    const before = await state();
+    assert(
+      await page.evaluate(() =>
+        window.frontier.inspectInfrastructure("drainage"),
+      ),
+    );
+    assert.deepEqual((await state()).project, before.project);
+    assert.deepEqual((await state()).selection, before.selection);
+    await page.screenshot({ path: resolve(cache, "side-entry-drain.png") });
+  });
+  await test("footways: hollow curbs have arched ports, top access grates and stable production counts", async () => {
+    await page.locator('[data-asset="hollow"]').click();
+    const before = await state();
+    let s = await footwayState(),
+      features = s.services.filter(
+        (f) => f.owner === footwayRoadId && f.style === "hollow",
+      );
+    assert.equal(features.length, 2);
+    assert(features.every((f) => f.ports > 20 && f.accessGrates > 0));
+    assert.equal(
+      Number(
+        await page.locator('[data-service-stat="curb-inlet"]').textContent(),
+      ),
+      features.reduce((n, f) => n + f.ports, 0),
+    );
+    await page.evaluate(() => window.frontier.setGeometryDetail("production"));
+    s = await footwayState();
+    assert.deepEqual(
+      s.services.filter(
+        (f) => f.owner === footwayRoadId && f.style === "hollow",
+      ),
+      features,
+    );
+    assert.deepEqual((await state()).project, before.project);
+    assert(
+      await page.evaluate(() =>
+        window.frontier.inspectInfrastructure("drainage"),
+      ),
+    );
+    await page.screenshot({ path: resolve(cache, "hollow-curb.png") });
+    await page.locator('[data-prop="drainage"]').uncheck();
+    assert(
+      !(await footwayState()).services.some(
+        (f) => f.owner === footwayRoadId && f.kind !== "manhole",
+      ),
+    );
+    await undo();
+    await page.evaluate(() => window.frontier.setGeometryDetail("editing"));
+  });
+  await test("footways: GLB and OBJ retain ramp geometry, apron dimensions, drain ports and curb/tactile PBR maps", async () => {
+    const before = await state();
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("production");
+    let promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="glb"]').click();
+    let download = await promise,
+      buffer = await readFile(await download.path()),
+      g = JSON.parse(
+        buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
+      );
+    const extras = g.nodes.find((n) => n.extras?.footways)?.extras;
+    assert(extras);
+    assert(extras.footways.some((f) => f.kind === "corner-ramp"));
+    assert(
+      extras.footways.some((f) => f.kind === "driveway" && f.apron === 5.8),
+    );
+    assert(extras.services.some((f) => f.style === "hollow" && f.ports > 0));
+    for (const name of ["paving-tactile", "curb"]) {
+      const m = g.materials.find((m) => m.name === name);
+      assert(
+        m?.normalTexture && m.pbrMetallicRoughness.metallicRoughnessTexture,
+      );
+    }
+    assert(g.images.every((i) => i.bufferView !== undefined));
+    assert(
+      !g.nodes.some((n) =>
+        ["building", "landscape"].includes(n.extras?.meshKind),
+      ),
+    );
+    assert.deepEqual((await state()).project, before.project);
+    await page.locator('[data-menu="export-menu"]').click();
+    promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="obj"]').click();
+    download = await promise;
+    const files = unzipSync(await readFile(await download.path())),
+      decode = (n) => new TextDecoder().decode(files[n]),
+      mesh = JSON.parse(decode("mesh.json")),
+      materials = JSON.parse(decode("materials.json")).materials;
+    assert(mesh.footways.some((f) => f.kind === "driveway" && f.width === 7.6));
+    assert(
+      mesh.services.some((f) => f.style === "hollow" && f.accessGrates > 0),
+    );
+    for (const name of ["paving-tactile", "curb"]) {
+      const m = materials[name];
+      assert(files[m.albedo] && files[m.normal] && files[m.roughness]);
+      assert.equal(m.normalConvention, "OpenGL +Y");
+    }
+    assert.deepEqual(materials["paving-tactile"].uvRepeat, [1, 1]);
+    assert.deepEqual(materials.curb.uvRepeat, [2, 2]);
+    assert.deepEqual((await state()).project, before.project);
+  });
+
   await test("mobile layout keeps both views usable without horizontal overflow", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("district"));
     await page.setViewportSize({ width: 390, height: 844 });
@@ -1393,6 +1762,39 @@ try {
       await offline.evaluate(() =>
         window.frontier.inspectInfrastructure("manhole"),
       ),
+    );
+    assert(
+      await offline.evaluate(
+        () => window.frontier.getProject().roads[0].sidewalk === 4.2,
+      ),
+    );
+    assert(
+      await offline.evaluate(() =>
+        window.frontier
+          .getNetwork()
+          .footways.some((f) => f.kind === "corner-ramp"),
+      ),
+    );
+    for (const id of ["corner", "driveway", "kerb", "hollow"]) {
+      await offline.locator(`[data-asset="${id}"]`).scrollIntoViewIfNeeded();
+      assert(await offline.locator(`[data-asset="${id}"] img`).isVisible());
+    }
+    await offline.evaluate(() =>
+      window.frontier.select({
+        kind: "road",
+        id: window.frontier.getProject().roads[0].id,
+      }),
+    );
+    await offline.locator('[data-asset="hollow"]').click();
+    assert(
+      await offline.evaluate(() =>
+        window.frontier
+          .getNetwork()
+          .services.some((s) => s.style === "hollow" && s.ports > 0),
+      ),
+    );
+    assert(
+      await offline.evaluate(() => window.frontier.inspectFootway("driveway")),
     );
     await offline.evaluate(() => window.frontier.loadTemplate("race"));
     assert.equal(

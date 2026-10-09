@@ -522,6 +522,77 @@ export class SceneView {
     this.onGizmo(this.gizmoProjection());
     return true;
   }
+  inspectFootway(kind: "corner-ramp" | "driveway", id?: string): boolean {
+    if (!this.network || !this.project || !this.selection) return false;
+    const owners =
+        this.selection.kind === "node"
+          ? this.project.roads
+              .filter(
+                (r) =>
+                  r.start === this.selection!.id ||
+                  r.end === this.selection!.id,
+              )
+              .map((r) => r.id)
+          : [this.selection.id],
+      pivot = this.selectionPosition() ?? [0, 0, 0];
+    const feature = this.network.footways
+      .filter(
+        (f) =>
+          owners.includes(f.owner) &&
+          f.kind === kind &&
+          (!id || f.id.endsWith(`:${id}`)),
+      )
+      .sort(
+        (a, b) =>
+          Math.hypot(a.position[0] - pivot[0], a.position[2] - pivot[2]) -
+          Math.hypot(b.position[0] - pivot[0], b.position[2] - pivot[2]),
+      )[0];
+    if (!feature) return false;
+    const span = this.network.spans.find((s) => s.road.id === feature.owner)!,
+      frame = span.frames.reduce((a, b) =>
+        Math.abs(a.s - feature.station) < Math.abs(b.s - feature.station)
+          ? a
+          : b,
+      ),
+      d = frame.n;
+    this.controls.target.set(...feature.position);
+    if (kind === "driveway") {
+      const across = (frame.sw + (feature.apron ?? 0)) / 2 - feature.run / 2;
+      this.controls.target.add(
+        new THREE.Vector3(
+          d[0] * feature.side * across,
+          0,
+          d[2] * feature.side * across,
+        ),
+      );
+    }
+    this.camera.position.copy(
+      this.controls.target
+        .clone()
+        .add(
+          new THREE.Vector3(
+            -d[0] * feature.side + frame.d[0] * 0.45,
+            0.95,
+            -d[2] * feature.side + frame.d[2] * 0.45,
+          )
+            .normalize()
+            .multiplyScalar(
+              kind === "driveway"
+                ? Math.max(
+                    12,
+                    Math.hypot(feature.width, frame.sw + (feature.apron ?? 0)) *
+                      1.7,
+                  )
+                : 7,
+            ),
+        ),
+    );
+    this.camera.zoom = 1;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.onGizmo(this.gizmoProjection());
+    return true;
+  }
   inspectInfrastructure(kind: UtilityKind | "drainage"): boolean {
     if (!this.selection || !this.network || !this.project) return false;
     const owners =
@@ -552,7 +623,19 @@ export class SceneView {
     this.camera.position.copy(
       this.controls.target
         .clone()
-        .add(new THREE.Vector3(1, 1.25, 1).normalize().multiplyScalar(3.6)),
+        .add(
+          new THREE.Vector3(
+            feature.direction
+              ? feature.direction[0] - feature.direction[2] * 0.35
+              : 1,
+            feature.direction?.length ? 0.4 : 1.25,
+            feature.direction
+              ? feature.direction[2] + feature.direction[0] * 0.35
+              : 1,
+          )
+            .normalize()
+            .multiplyScalar(3.6),
+        ),
     );
     this.camera.zoom = 1;
     this.camera.updateProjectionMatrix();
@@ -612,6 +695,7 @@ export class SceneView {
       geometryDetail: network?.detail ?? this.network?.detail ?? "editing",
       includesPreviewEnvironment: false,
       services: network?.services ?? this.network?.services ?? [],
+      footways: network?.footways ?? this.network?.footways ?? [],
     };
     try {
       return (await new GLTFExporter().parseAsync(group, {

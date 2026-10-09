@@ -7,13 +7,47 @@ function random() {
   return seed / 4294967296;
 }
 export function patternCanvas(
-  pattern: Pattern | "asphalt" | "concrete" | "cobble",
+  pattern:
+    Pattern | "asphalt" | "concrete" | "cobble" | "tactile" | "curb-concrete",
   dark = false,
 ): HTMLCanvasElement {
   seed = 471659;
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = 512;
   const c = canvas.getContext("2d")!;
+  if (pattern === "curb-concrete") {
+    const rng = random,
+      data = c.createImageData(512, 512);
+    for (let i = 0; i < data.data.length; i += 4) {
+      const n = (rng() - 0.5) * 8,
+        pore = rng() < 0.012 ? -14 : 0;
+      data.data[i] = 180 + n + pore;
+      data.data[i + 1] = 176 + n + pore;
+      data.data[i + 2] = 168 + n + pore;
+      data.data[i + 3] = 255;
+    }
+    c.putImageData(data, 0, 0);
+    return canvas;
+  }
+  if (pattern === "tactile") {
+    c.fillStyle = "#b6a47a";
+    c.fillRect(0, 0, 512, 512);
+    c.strokeStyle = "#776e58";
+    c.lineWidth = 4;
+    c.strokeRect(2, 2, 508, 508);
+    for (let y = 32; y < 512; y += 64)
+      for (let x = 32; x < 512; x += 64) {
+        const g = c.createRadialGradient(x - 3, y - 4, 1, x, y, 10);
+        g.addColorStop(0, "#d1c093");
+        g.addColorStop(0.7, "#b7a579");
+        g.addColorStop(1, "#968761");
+        c.fillStyle = g;
+        c.beginPath();
+        c.arc(x, y, 10, 0, Math.PI * 2);
+        c.fill();
+      }
+    return canvas;
+  }
   if (pattern === "asphalt") {
     const image = c.createImageData(512, 512);
     for (let i = 0; i < image.data.length; i += 4) {
@@ -155,7 +189,8 @@ function roughnessCanvas(source: HTMLCanvasElement, asphalt = false) {
   c.putImageData(image, 0, 0);
   return canvas;
 }
-type SurfacePattern = Pattern | "asphalt" | "concrete" | "cobble";
+type SurfacePattern =
+  Pattern | "asphalt" | "concrete" | "cobble" | "tactile" | "curb-concrete";
 export interface SurfaceMaps {
   albedo: HTMLCanvasElement;
   normal: HTMLCanvasElement;
@@ -192,12 +227,32 @@ function reliefCanvas(source: HTMLCanvasElement, asphalt: boolean) {
   c.putImageData(dst, 0, 0);
   return canvas;
 }
+function tactileHeight() {
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 512;
+  const c = canvas.getContext("2d")!;
+  c.fillStyle = "#888";
+  c.fillRect(0, 0, 512, 512);
+  for (let y = 32; y < 512; y += 64)
+    for (let x = 32; x < 512; x += 64) {
+      const g = c.createRadialGradient(x, y, 1, x, y, 10);
+      g.addColorStop(0, "#c9c9c9");
+      g.addColorStop(1, "#888");
+      c.fillStyle = g;
+      c.beginPath();
+      c.arc(x, y, 10, 0, Math.PI * 2);
+      c.fill();
+    }
+  return canvas;
+}
 export function surfaceMaps(pattern: SurfacePattern): SurfaceMaps {
   const key = pattern;
   if (surfaceCache.has(key)) return surfaceCache.get(key)!;
   const albedo = patternCanvas(pattern === "concrete" ? "slabs" : pattern),
     normal = normalCanvas(
-      reliefCanvas(albedo, pattern === "asphalt"),
+      pattern === "tactile"
+        ? tactileHeight()
+        : reliefCanvas(albedo, pattern === "asphalt"),
       pattern === "asphalt" ? 0.32 : 1.6,
     ),
     roughness = roughnessCanvas(albedo, pattern === "asphalt"),
@@ -231,11 +286,13 @@ export function wornPaintCanvas(percent: number): HTMLCanvasElement {
   return canvas;
 }
 const surfaceKey = (key: string): SurfacePattern | undefined =>
-  key.startsWith("paving-")
-    ? (key.slice(7) as Pattern)
-    : ["asphalt", "concrete", "cobble"].includes(key)
-      ? (key as SurfacePattern)
-      : undefined;
+  key === "curb"
+    ? "curb-concrete"
+    : key.startsWith("paving-")
+      ? (key.slice(7) as Pattern)
+      : ["asphalt", "concrete", "cobble"].includes(key)
+        ? (key as SurfacePattern)
+        : undefined;
 export function utilityMaps(
   kind: "utility-cover" | "utility-grate",
 ): SurfaceMaps {
@@ -442,6 +499,8 @@ export async function exportTexturePack(keys: string[]) {
       if (pattern) {
         maps = surfaceMaps(pattern);
         image = maps.albedo;
+        if (pattern === "tactile") scale = [1, 1];
+        else if (pattern === "curb-concrete") scale = [2, 2];
       } else if (key === "utility-cover" || key === "utility-grate") {
         maps = utilityMaps(key);
         image = maps.albedo;
@@ -565,7 +624,10 @@ export class Materials {
         texture = (canvas: HTMLCanvasElement, name: string, srgb = false) => {
           const t = new THREE.CanvasTexture(canvas);
           t.wrapS = t.wrapT = THREE.RepeatWrapping;
-          t.repeat.set(0.5, 0.5);
+          t.repeat.set(
+            pattern === "tactile" ? 1 : pattern === "curb-concrete" ? 2 : 0.5,
+            pattern === "tactile" ? 1 : pattern === "curb-concrete" ? 2 : 0.5,
+          );
           t.anisotropy = 8;
           t.name = name;
           if (srgb) t.colorSpace = THREE.SRGBColorSpace;
@@ -577,6 +639,7 @@ export class Materials {
       m.roughnessMap = texture(maps.roughness, `${key}:roughness`);
       m.roughness = 1;
       if (pattern === "concrete") m.color.set("#ceccc7");
+      if (pattern === "curb-concrete") m.color.set("#ffffff");
     }
     if (key === "utility-cover" || key === "utility-grate") {
       const maps = utilityMaps(key),

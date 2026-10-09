@@ -36,10 +36,24 @@ export interface RoadNode {
   boxJunction?: boolean;
   signals?: boolean;
 }
+export interface Driveway {
+  id: string;
+  at: number;
+  side: -1 | 1;
+  width: number;
+  apron: number;
+}
 export interface RoadSettings {
   lanes: number;
   laneWidth: number;
   sidewalk: number;
+  sidewalkCrossfall: number;
+  curbHeight: number;
+  cornerRamps: boolean;
+  rampWidth: number;
+  rampRun: number;
+  tactile: boolean;
+  curbDrainType: "grate" | "side-entry" | "hollow";
   surface: Surface;
   pattern: Pattern;
   markings: boolean;
@@ -69,6 +83,7 @@ export interface RoadSettings {
   startingGrid: boolean;
 }
 export interface Road extends RoadSettings {
+  driveways: Driveway[];
   id: string;
   name: string;
   start: string;
@@ -88,7 +103,14 @@ export type Selection = { kind: "node" | "road" | "site"; id: string } | null;
 export const roadDefaults: RoadSettings = {
   lanes: 2,
   laneWidth: 3.5,
-  sidewalk: 2.4,
+  sidewalk: 4.2,
+  sidewalkCrossfall: 1.5,
+  curbHeight: 0.16,
+  cornerRamps: true,
+  rampWidth: 2.2,
+  rampRun: 2.4,
+  tactile: true,
+  curbDrainType: "grate",
   surface: "asphalt",
   pattern: "ashlar",
   markings: true,
@@ -128,6 +150,12 @@ export const presets: {
     name: "Urban street",
     description: "2 lanes · paved sidewalks",
     settings: { pattern: "ashlar" },
+  },
+  {
+    id: "pedestrian",
+    name: "Wide pedestrian street",
+    description: "5.5 m footways · corner ramps",
+    settings: { sidewalk: 5.5, pattern: "linear", cornerRamps: true },
   },
   {
     id: "arterial",
@@ -262,6 +290,7 @@ export function makeRoad(
   return {
     ...roadDefaults,
     ...settings,
+    driveways: [],
     id: uid("road"),
     name,
     start: a.id,
@@ -317,8 +346,19 @@ export function makeDemo(): Project {
     road.id = id;
     p.roads.push(road);
   };
-  r("r01", w, c, "Northbank avenue · West", [26, 0, -10], [-26, 0, 0]);
-  r("r02", c, e, "Northbank avenue · East", [26, 0, 0], [-26, 0, 0]);
+  r("r01", w, c, "Northbank avenue · West", [26, 0, -10], [-26, 0, 0], {
+    curbDrainType: "side-entry",
+  });
+  p.roads[0].driveways.push({
+    id: "demo-entry",
+    at: 0.4,
+    side: 1,
+    width: 6,
+    apron: 4,
+  });
+  r("r02", c, e, "Northbank avenue · East", [26, 0, 0], [-26, 0, 0], {
+    curbDrainType: "side-entry",
+  });
   r("r03", c, s, "Willow street", [0, 0, 26], [-8, 0, -26]);
   r("r04", north, c, "Market street", [0, 0, 16], [0, 0, -16]);
   r("r05", end, north, "Market street · North", [-8, 0, 18], [0, 0, -18]);
@@ -526,6 +566,28 @@ export function makeTemplate(type: string): Project {
   return p;
 }
 
+export function parseDriveways(raw: unknown): Driveway[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw) || raw.length > 20)
+    throw new Error("Invalid driveway collection (maximum 20 per road).");
+  const ids = new Set<string>();
+  return raw.map((e) => {
+    if (!e || typeof e.id !== "string" || e.id.length > 100 || ids.has(e.id))
+      throw new Error("Invalid/duplicate driveway ID.");
+    ids.add(e.id);
+    const number = (v: unknown, fallback: number, min: number, max: number) =>
+      typeof v === "number" && Number.isFinite(v)
+        ? clamp(v, min, max)
+        : fallback;
+    return {
+      id: e.id,
+      at: number(e.at, 0.5, 0, 1),
+      side: e.side === -1 ? -1 : 1,
+      width: number(e.width, 6, 3, 12),
+      apron: number(e.apron, 4, 0, 12),
+    };
+  });
+}
 /** Strict, bounded parsing: imported JSON is never treated as executable data. */
 export function parseProject(raw: unknown): Project {
   if (!raw || typeof raw !== "object")
@@ -606,7 +668,19 @@ export function parseProject(raw: unknown): Project {
       laneWidth: number(entry.laneWidth, 3.5, 2, 6),
       railHeight: number(entry.railHeight, 0.8, 0.5, 1.4),
       postSpacing: number(entry.postSpacing, 3.4, 1.5, 6),
-      sidewalk: number(entry.sidewalk, 2.4, 0, 6),
+      sidewalk: number(entry.sidewalk, 4.2, 0, 12),
+      sidewalkCrossfall: number(entry.sidewalkCrossfall, 1.5, -3, 3),
+      curbHeight: number(entry.curbHeight, 0.16, 0.04, 0.3),
+      cornerRamps: entry.cornerRamps !== false,
+      rampWidth: number(entry.rampWidth, 2.2, 1.4, 3.4),
+      rampRun: number(entry.rampRun, 2.4, 0.8, 6),
+      tactile: entry.tactile !== false,
+      curbDrainType: ["grate", "side-entry", "hollow"].includes(
+        String(entry.curbDrainType),
+      )
+        ? (entry.curbDrainType as Road["curbDrainType"])
+        : "grate",
+      driveways: parseDriveways(entry.driveways),
       crossfall: number(entry.crossfall, 2, 0, 8),
       inletSpacing: number(entry.inletSpacing, 18, 6, 80),
       surface: ["asphalt", "concrete", "cobble", "pavers"].includes(
@@ -707,13 +781,61 @@ export function validateGenerationBudget(project: Project): void {
       throw new RangeError(
         "An alignment must be shorter than 5 km. Split this road into a separate editor tile.",
       );
+    if (
+      ![
+        road.sidewalk,
+        road.sidewalkCrossfall,
+        road.curbHeight,
+        road.rampWidth,
+        road.rampRun,
+      ].every(Number.isFinite) ||
+      road.sidewalk < 0 ||
+      road.sidewalk > 12 ||
+      Math.abs(road.sidewalkCrossfall) > 3 ||
+      road.curbHeight < 0.04 ||
+      road.curbHeight > 0.3 ||
+      road.rampWidth < 1.4 ||
+      road.rampWidth > 3.4 ||
+      road.rampRun < 0.8 ||
+      road.rampRun > 6 ||
+      !["grate", "side-entry", "hollow"].includes(road.curbDrainType)
+    )
+      throw new RangeError("Invalid footway/curb parameters.");
+    if (
+      !Array.isArray(road.driveways) ||
+      road.driveways.length > 20 ||
+      new Set(road.driveways.map((d) => d.id)).size !== road.driveways.length ||
+      road.driveways.some(
+        (d) =>
+          typeof d.id !== "string" ||
+          !d.id ||
+          ![d.at, d.width, d.apron].every(Number.isFinite) ||
+          d.at < 0 ||
+          d.at > 1 ||
+          d.width < 3 ||
+          d.width > 12 ||
+          d.apron < 0 ||
+          d.apron > 12 ||
+          ![-1, 1].includes(d.side),
+      )
+    )
+      throw new RangeError("Invalid driveway parameters.");
+    if (
+      road.drainage &&
+      road.curbDrainType === "hollow" &&
+      road.drainageType !== "linear"
+    )
+      utilityVertices += Math.ceil(estimated) * 320;
     // Conservative cover/rim/bar counts; spacing controls cannot allocate
     // millions of utility vertices before the editor can reject the edit.
     if (road.manholes && !road.bridge)
       utilityVertices +=
         Math.max(0, Math.ceil((estimated - 20) / road.manholeSpacing)) * 740;
     if (road.drainage && road.drainageType !== "linear")
-      utilityVertices += Math.ceil(estimated / road.inletSpacing) * 2 * 120;
+      utilityVertices +=
+        Math.ceil(estimated / road.inletSpacing) *
+        2 *
+        (road.curbDrainType === "side-entry" ? 160 : 120);
     total += estimated;
     for (const point of points) {
       minX = Math.min(minX, point[0]);

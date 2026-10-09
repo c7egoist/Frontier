@@ -2,6 +2,7 @@ import {
   makeNode,
   makeRoad,
   roadDefaults,
+  makeTemplate,
   presets,
   type Project,
 } from "../core/model";
@@ -86,7 +87,7 @@ function texturedTriangle(
   c.fillRect(minX - 1, minY - 1, maxX - minX + 2, maxY - minY + 2);
   c.restore();
 }
-function render(network: Network, focus?: V3) {
+function render(network: Network, focus?: V3, focusScale = 165) {
   const canvas = document.createElement("canvas");
   canvas.width = 384;
   canvas.height = 184;
@@ -119,7 +120,7 @@ function render(network: Network, focus?: V3) {
     height =
       Math.max(...world.map((v) => v[1])) - Math.min(...world.map((v) => v[1])),
     scale = focus
-      ? 165
+      ? focusScale
       : Math.min(350 / Math.max(1, width), 146 / Math.max(1, height));
   const faces: { m: MeshData; ids: number[]; p: V3[]; depth: number }[] = [];
   for (const m of network.meshes)
@@ -181,7 +182,10 @@ function render(network: Network, focus?: V3) {
       continue;
     const image = texture(f.m.material);
     if (image) {
-      const factor = f.m.material.startsWith("paving-") ? 0.5 : 1;
+      const factor =
+        f.m.material.startsWith("paving-") && f.m.material !== "paving-tactile"
+          ? 0.5
+          : 1;
       const uv = f.ids.map(
         (i) =>
           [f.m.uvs[i * 2] * factor, f.m.uvs[i * 2 + 1] * factor] as [
@@ -217,8 +221,17 @@ export function assetThumbnail(
     nodes: [],
     roads: [],
   };
-  let focus: V3 | undefined;
-  if (category === "site") {
+  let focus: V3 | undefined,
+    focusScale = 165;
+  if (category === "structure" && id === "corner") {
+    Object.assign(p, makeTemplate("tee"));
+    p.roads.forEach((r) => {
+      r.signs = false;
+      r.streetLights = false;
+      r.manholes = false;
+      r.drainage = false;
+    });
+  } else if (category === "site") {
     const s = makeSite(id as "parking" | "plaza" | "island", [0, 0, 0]);
     s.width = id === "parking" ? 38 : 24;
     s.depth = id === "parking" ? 26 : 20;
@@ -244,6 +257,16 @@ export function assetThumbnail(
                     manholes: false,
                   }
                 : { drainage: id === "drain", manholes: id === "manhole" };
+    if (
+      category === "structure" &&
+      ["sidewalk", "driveway", "kerb", "hollow"].includes(id)
+    )
+      Object.assign(settings, {
+        sidewalk: 4.2,
+        drainage: ["kerb", "hollow"].includes(id),
+        curbDrainType: id === "hollow" ? "hollow" : "side-entry",
+        manholes: false,
+      });
     p.roads = [
       makeRoad(
         a,
@@ -265,6 +288,14 @@ export function assetThumbnail(
       ),
     ];
   }
+  if (id === "driveway")
+    p.roads[0].driveways.push({
+      id: "preview",
+      at: 0.5,
+      side: 1,
+      width: 6,
+      apron: 4,
+    });
   const n = buildNetwork(p);
   if (["manhole", "drain", "channel"].includes(id))
     focus = n.services.find(
@@ -276,7 +307,19 @@ export function assetThumbnail(
             ? "channel-drain"
             : "curb-inlet"),
     )?.position;
-  const image = render(n, focus);
+  if (id === "corner" || id === "driveway") {
+    focus = n.footways.find(
+      (f) => f.kind === (id === "corner" ? "corner-ramp" : "driveway"),
+    )?.position;
+    focusScale = id === "corner" ? 52 : 34;
+  }
+  if (id === "kerb" || id === "hollow") {
+    focus = n.services.find(
+      (s) => s.style === (id === "kerb" ? "side-entry" : "hollow"),
+    )?.position;
+    focusScale = id === "kerb" ? 100 : 75;
+  }
+  const image = render(n, focus, focusScale);
   cache.set(key, image);
   return image;
 }

@@ -21,6 +21,7 @@ import {
   patterns,
   patternNames,
   roadDefaults,
+  uid,
   connected,
   getNode,
   controlPoints,
@@ -31,6 +32,7 @@ import {
   type Pattern,
 } from "./core/model";
 import { add, sub, cubic, polygonArea, type V3 } from "./core/math";
+import { stationForParameter } from "./core/footways";
 import { buildNetwork, type Network } from "./core/geometry";
 import {
   insertRoad,
@@ -82,6 +84,7 @@ let draft: V3 | null = null,
 const undo: string[] = [],
   redo: string[] = [];
 const collapsedGroups = new Set<string>();
+let activeDriveway = 0;
 const hiddenLayers = new Set<string>();
 let dragBefore: string | null = null,
   dragBase: Project | null = null,
@@ -261,6 +264,8 @@ function rebuild(inspector = true, context = false) {
         project: clone(project),
         meshes: network.meshes,
         diagnostics: network.diagnostics,
+        services: network.services,
+        footways: network.footways,
       },
     }),
   );
@@ -275,7 +280,38 @@ function rebuild(inspector = true, context = false) {
     .forEach(
       (out) =>
         (out.value = String(
-          features.filter((s) => s.kind === out.dataset.serviceStat).length,
+          features
+            .filter((s) => s.kind === out.dataset.serviceStat)
+            .reduce((n, s) => n + (s.ports ?? 1), 0),
+        )),
+    );
+  document
+    .querySelectorAll<HTMLOutputElement>("[data-footway-stat]")
+    .forEach(
+      (out) =>
+        (out.value = String(
+          network.footways.filter(
+            (f) =>
+              serviceOwners.has(f.owner) && f.kind === out.dataset.footwayStat,
+          ).length,
+        )),
+    );
+  document
+    .querySelectorAll<HTMLOutputElement>("[data-footway-grade]")
+    .forEach(
+      (out) =>
+        (out.value = fmt(
+          Math.max(
+            0,
+            ...network.footways
+              .filter(
+                (f) =>
+                  serviceOwners.has(f.owner) &&
+                  f.kind === out.dataset.footwayGrade,
+              )
+              .map((f) => f.slope),
+          ),
+          1,
         )),
     );
   if (inspector) {
@@ -355,6 +391,7 @@ function setGeometryDetail(value: GeometryDetail) {
   }
 }
 function setSelection(s: Selection) {
+  if (s?.id !== selection?.id) activeDriveway = 0;
   if (
     s &&
     !(
@@ -740,7 +777,7 @@ function profile(road: Road) {
   return card(
     "Approach profile",
     "route",
-    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 6, 0.1)}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 5, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
+    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 6, 0.1)}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 12, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
   );
 }
 function renderInspector() {
@@ -812,12 +849,23 @@ function renderInspector() {
       "Paving pattern",
       "grid-2x2",
       patternControls(road.pattern) +
-        range("sidewalk", "Pavement width", road.sidewalk, 0, 6, 0.1) +
+        range("sidewalk", "Pavement width", road.sidewalk, 0, 12, 0.1) +
         choice("curbStyle", "Curb profile", road.curbStyle, [
           ["stone", "Stone curb"],
           ["flush", "Flush pedestrian edge"],
           ["race", "Racing rumble curb"],
-        ]),
+        ]) +
+        range("curbHeight", "Curb upstand", road.curbHeight, 0.04, 0.3, 0.01) +
+        range(
+          "sidewalkCrossfall",
+          "Footway crossfall",
+          road.sidewalkCrossfall,
+          -3,
+          3,
+          0.1,
+          "%",
+        ) +
+        `<p class="card-note"><span>Sidewalks follow the full alignment on both sides. Positive crossfall falls toward the road. Flush/racing profiles cap their upstand.</span></p>`,
     );
     body += card(
       "Cross-section",
@@ -825,6 +873,93 @@ function renderInspector() {
       `${range("crossfall", "Crossfall", road.crossfall, 0, 6, 0.5, "%")}<p class="card-note">${icon("droplets")}Crowned road surface drains toward both curbs.</p>${toggle("markings", "Road markings", road.markings, "Clipped before junctions and crossings")}`,
     );
   } else {
+    const footways = network.footways.filter((f) =>
+      roads.some((r) => r.id === f.owner),
+    );
+    body += card(
+      "Pedestrian corner ramps",
+      "corner-up-right",
+      toggle(
+        "cornerRamps",
+        "Corner curb ramps",
+        road.cornerRamps,
+        "Crossing-aligned dropped curbs with flared sides",
+      ) +
+        (road.cornerRamps
+          ? range(
+              "rampWidth",
+              "Clear ramp width",
+              road.rampWidth,
+              1.4,
+              3.4,
+              0.1,
+            ) +
+            range("rampRun", "Ramp run", road.rampRun, 0.8, 6, 0.1) +
+            toggle(
+              "tactile",
+              "Tactile warning paving",
+              road.tactile,
+              "400 mm modules with blister relief",
+            ) +
+            `<p class="card-note"><span><output data-footway-stat="corner-ramp">${footways.filter((f) => f.kind === "corner-ramp").length}</output> ramps on the selection · max cross-ramp grade <output data-footway-grade="corner-ramp">${fmt(Math.max(0, ...footways.filter((f) => f.kind === "corner-ramp").map((f) => f.slope)), 1)}</output>%. Wide footways retain a clear landing behind each ramp.</span></p><button class="solver-badge" data-inspector-action="inspect-ramp">${icon("search")}Inspect a corner ramp</button>`
+          : ""),
+    );
+    if (!node) {
+      activeDriveway = Math.min(
+        activeDriveway,
+        Math.max(0, road.driveways.length - 1),
+      );
+      const entry = road.driveways[activeDriveway];
+      body += card(
+        "Vehicle crossings",
+        "corner-up-right",
+        `<button class="solver-badge" data-inspector-action="add-driveway">${icon("plus")}Add driveway crossing</button>` +
+          (entry
+            ? choice(
+                "activeDriveway",
+                "Crossing",
+                String(activeDriveway),
+                road.driveways.map(
+                  (d, i) =>
+                    [
+                      String(i),
+                      `Entry ${i + 1} / ${d.side === 1 ? "right" : "left"}`,
+                    ] as [string, string],
+                ),
+              ) +
+              choice("drivewaySide", "Road side", String(entry.side), [
+                ["1", "Right / + offset"],
+                ["-1", "Left / − offset"],
+              ]) +
+              range(
+                "drivewayAt",
+                "Along curve",
+                entry.at * 100,
+                0,
+                100,
+                1,
+                "%",
+              ) +
+              range(
+                "drivewayWidth",
+                "Vehicle opening",
+                entry.width,
+                3,
+                12,
+                0.1,
+              ) +
+              range(
+                "drivewayApron",
+                "Apron beyond sidewalk",
+                entry.apron,
+                0,
+                12,
+                0.1,
+              ) +
+              `<p class="card-note"><span>A low curb lip and flared transition preserve the continuous pedestrian landing. Rails and edge paint leave the access clear. Move entries away from intersections.</span></p><button class="solver-badge" data-inspector-action="inspect-driveway">${icon("search")}Inspect entry</button> <button class="solver-badge" data-inspector-action="delete-driveway">${icon("trash-2")}Remove entry</button>`
+            : '<p class="card-note"><span>Author independent entries along this alignment. No driveway is auto-populated.</span></p>'),
+      );
+    }
     body += card(
       "Road markings & parking",
       "route",
@@ -902,15 +1037,22 @@ function renderInspector() {
               ["linear", "Linear channel"],
               ["both", "Inlets + channel"],
             ]) +
+            choice("curbDrainType", "Curb inlet style", road.curbDrainType, [
+              ["grate", "Road gully grate"],
+              ["side-entry", "Side-entry + chamber lid"],
+              ["hollow", "Hollow curb / arched ports"],
+            ]) +
             range(
               "inletSpacing",
-              "Inlet spacing",
+              road.curbDrainType === "hollow"
+                ? "Top access grate spacing"
+                : "Inlet spacing",
               road.inletSpacing,
               6,
               40,
               1,
             ) +
-            `<p class="card-note"><span><output data-service-stat="curb-inlet">${selectionServices.filter((s) => s.kind === "curb-inlet").length}</output> curb inlets / <output data-service-stat="channel-drain">${selectionServices.filter((s) => s.kind === "channel-drain").length}</output> linear channels on the selection.</span></p><button class="solver-badge" data-inspector-action="inspect-drain">${icon("search")}Inspect drainage</button>`
+            `<p class="card-note"><span><output data-service-stat="curb-inlet">${selectionServices.filter((s) => s.kind === "curb-inlet").reduce((n, s) => n + (s.ports ?? 1), 0)}</output> curb inlets / ports · <output data-service-stat="channel-drain">${selectionServices.filter((s) => s.kind === "channel-drain").length}</output> linear channels on the selection.</span></p><button class="solver-badge" data-inspector-action="inspect-drain">${icon("search")}Inspect drainage</button>`
           : ""
       }<button class="solver-badge" style="margin-top:12px" data-inspector-action="flow">${icon("eye")}Flow overlay / 2D</button>`,
     );
@@ -978,6 +1120,20 @@ function syncPositionInputs() {
       });
 }
 function setRoadProperty(prop: string, value: unknown) {
+  if (prop === "activeDriveway") {
+    activeDriveway = Number(value);
+    return;
+  }
+  if (prop.startsWith("driveway")) {
+    const entry = selectedRoads()[0]?.driveways[activeDriveway];
+    if (entry) {
+      if (prop === "drivewayAt") entry.at = Number(value) / 100;
+      if (prop === "drivewayWidth") entry.width = Number(value);
+      if (prop === "drivewayApron") entry.apron = Number(value);
+      if (prop === "drivewaySide") entry.side = Number(value) === -1 ? -1 : 1;
+    }
+    return;
+  }
   if (selection?.kind === "site") {
     const site = project.sites!.find((s) => s.id === selection!.id)!;
     if (
@@ -1077,6 +1233,77 @@ function inspectInfrastructure(kind: "manhole" | "drainage") {
   if ($("viewports").dataset.layout === "plan") setLayout("split");
   return true;
 }
+function addDriveway() {
+  if (!selection || selection.kind === "site") {
+    toast("Select a road to add a driveway crossing.", true);
+    return false;
+  }
+  const road = selectedRoads()[0];
+  if (!road) {
+    toast("Select a connected road to add a driveway crossing.", true);
+    return false;
+  }
+  if (selection.kind === "node") setSelection({ kind: "road", id: road.id });
+  if (road.driveways.length >= 20) {
+    toast(
+      "Alignment limit: 20 vehicle entries. Split the alignment to author more.",
+      true,
+    );
+    return false;
+  }
+  if (road.bridge) {
+    toast("Vehicle entries cannot be placed on bridge decks.", true);
+    return false;
+  }
+  inspectorTab = "details";
+  return commit(() => {
+    road.sidewalk = Math.max(road.sidewalk, 4.2);
+    const span = network.spans.find((s) => s.road.id === road.id),
+      candidates = [0.5, 0.3, 0.7, 0.18, 0.82, 0.4, 0.6, 0.24, 0.76],
+      at = span
+        ? candidates.find((t) => {
+            const station = stationForParameter(span, t);
+            return (
+              station > span.frames[0].s + (span.startJoint ? 8.1 : 4.1) &&
+              station < span.frames.at(-1)!.s - (span.endJoint ? 8.1 : 4.1) &&
+              !(span.footway?.ramps ?? []).some(
+                (r) =>
+                  r.side === 1 &&
+                  Math.abs(station - r.s) < 4 + r.width / 2 + r.flare + 0.1,
+              )
+            );
+          })
+        : undefined;
+    if (at === undefined)
+      throw new Error(
+        "No clear 6 m entry fits on this alignment. Move existing entries or use a longer road.",
+      );
+    road.driveways.push({ id: uid("entry"), at, side: 1, width: 6, apron: 4 });
+    activeDriveway = road.driveways.length - 1;
+  });
+}
+function inspectFootway(kind: "corner-ramp" | "driveway") {
+  const id =
+    kind === "driveway"
+      ? selectedRoads()[0]?.driveways[activeDriveway]?.id
+      : undefined;
+  if (!scene?.inspectFootway(kind, id)) {
+    toast(
+      "No matching ramp on the selection. Enable corner ramps and crossings, or add/move a driveway.",
+      true,
+    );
+    return false;
+  }
+  hiddenLayers.delete("paving");
+  scene?.setDetailLayer("paving", true);
+  plan.setDetailLayer("paving", true);
+  const layer = document.querySelector<HTMLInputElement>(
+    '[data-layer="paving"]',
+  );
+  if (layer) layer.checked = true;
+  if ($("viewports").dataset.layout === "plan") setLayout("split");
+  return true;
+}
 function renderLibrary() {
   const query = ($("library-search") as HTMLInputElement).value.toLowerCase();
   let cards: {
@@ -1153,6 +1380,40 @@ function renderLibrary() {
         action: "structure",
       },
     ];
+  if (libraryTab === "structures")
+    cards.push(
+      ...[
+        {
+          id: "sidewalk",
+          name: "Wide pedestrian sidewalk",
+          description: "Full-length paving · 4.2 m minimum",
+        },
+        {
+          id: "corner",
+          name: "Corner curb ramp",
+          description: "Low lip · flares · tactile warning",
+        },
+        {
+          id: "driveway",
+          name: "Vehicle driveway crossing",
+          description: "Dropped curb · continuous landing",
+        },
+        {
+          id: "kerb",
+          name: "Side-entry curb drain",
+          description: "Open throat · concrete chamber lid",
+        },
+        {
+          id: "hollow",
+          name: "Hollow drainage curb",
+          description: "Arched face ports · continuous kerb",
+        },
+      ].map((a) => ({
+        ...a,
+        preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", a.id)}" alt="Generated ${a.name} mesh preview" loading="lazy"/>`,
+        action: "structure",
+      })),
+    );
   if (libraryTab === "networks")
     cards = templates.map((t) => ({
       ...t,
@@ -1665,6 +1926,36 @@ document.addEventListener("click", (e) => {
     }
     if (action === "template") loadTemplate(id);
     if (action === "structure") {
+      if (id === "driveway") {
+        addDriveway();
+        return;
+      }
+      if (["sidewalk", "corner", "kerb", "hollow"].includes(id)) {
+        if (!selection || selection.kind === "site") {
+          toast(
+            "Select a road or junction for this road-edge construction.",
+            true,
+          );
+          return;
+        }
+        inspectorTab = id === "sidewalk" ? "surface" : "details";
+        commit(() => {
+          for (const r of selectedRoads()) {
+            r.sidewalk = Math.max(r.sidewalk, 4.2);
+            if (id === "sidewalk" || id === "corner") {
+              r.cornerRamps = true;
+              r.curbStyle = "stone";
+            } else {
+              r.drainage = true;
+              r.drainageType = "curb";
+              r.curbStyle = "stone";
+              r.curbHeight = Math.max(0.16, r.curbHeight);
+              r.curbDrainType = id === "kerb" ? "side-entry" : "hollow";
+            }
+          }
+        });
+        return;
+      }
       if (
         !selection ||
         (selection.kind === "site" && !["manhole", "drain"].includes(id))
@@ -1696,6 +1987,8 @@ document.addEventListener("click", (e) => {
         else if (id === "manhole") setRoadProperty("manholes", true);
         else {
           setRoadProperty("drainage", true);
+          if (id === "drain" && selection?.kind !== "site")
+            setRoadProperty("curbDrainType", "grate");
           if (selection?.kind !== "site")
             setRoadProperty(
               "drainageType",
@@ -1724,6 +2017,14 @@ document.addEventListener("click", (e) => {
   );
   if (inspectorAction) {
     const a = inspectorAction.dataset.inspectorAction;
+    if (a === "add-driveway") addDriveway();
+    if (a === "delete-driveway")
+      commit(() => {
+        selectedRoads()[0]?.driveways.splice(activeDriveway, 1);
+        activeDriveway = Math.max(0, activeDriveway - 1);
+      });
+    if (a === "inspect-ramp" || a === "inspect-driveway")
+      inspectFootway(a === "inspect-ramp" ? "corner-ramp" : "driveway");
     if (a === "inspect-manhole" || a === "inspect-drain")
       inspectInfrastructure(a === "inspect-manhole" ? "manhole" : "drainage");
     if (a === "draw") setMode("draw");
@@ -1815,6 +2116,8 @@ $("inspector-content").addEventListener("change", (e) => {
     return;
   }
   const numeric = [
+    "drivewaySide",
+    "activeDriveway",
     "lanes",
     "laneWidth",
     "sidewalk",
@@ -2261,6 +2564,8 @@ Object.defineProperty(window, "frontier", {
     setGeometryDetail,
     inspectSelection: () => scene?.inspectSelection() ?? false,
     inspectInfrastructure,
+    inspectFootway,
+    addDriveway,
     loadTemplate,
     placeSite: beginPlace,
     exportProject,

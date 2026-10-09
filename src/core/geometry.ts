@@ -1,4 +1,11 @@
 import {
+  prepareFootways,
+  buildSpanFootways,
+  clearRuns,
+  type FootwayFeature,
+  type FootwayLayout,
+} from "./footways";
+import {
   addGratedInlet,
   buildRoadManholes,
   buildLinearDrain,
@@ -17,6 +24,7 @@ import {
   buildRoadFurniture,
   buildMedian,
   buildParallelParking,
+  parallelParkingBays,
   buildJunctionMarkings,
   buildTrafficSignals,
 } from "./road-details";
@@ -91,6 +99,7 @@ export interface Frame extends Station {
   cw: number;
   crossfall: number;
   curbHeight: number;
+  sidewalkCrossfall: number;
 }
 export interface RoadSpan {
   road: Road;
@@ -99,6 +108,7 @@ export interface RoadSpan {
   startJoint: boolean;
   endJoint: boolean;
   length: number;
+  footway?: FootwayLayout;
 }
 export interface Arm {
   road: Road;
@@ -143,6 +153,7 @@ export interface Network {
   services: UtilityFeature[];
   manholes: number;
   detail: GeometryDetail;
+  footways: FootwayFeature[];
 }
 const SURFACE = 0.12,
   CURB = 0.16;
@@ -163,7 +174,9 @@ export function edgePoint(
       ? edgeHeight
       : part === "bottom"
         ? -0.48
-        : edgeHeight + f.curbHeight - (part === "outer" ? f.sw * 0.01 : 0);
+        : edgeHeight +
+          f.curbHeight +
+          (part === "outer" ? (f.sw * f.sidewalkCrossfall) / 100 : 0);
   return offsetStation(f, side * width, height);
 }
 export const surfaceHeight = (f: Frame) =>
@@ -205,9 +218,28 @@ export class MeshBuilder {
   ) {
     const mesh = this.target(kind, material),
       base = mesh.positions.length / 3;
+    let projection: "xz" | "xy" | "zy" = "xz";
+    if (
+      (kind === "curb" && material === "curb") ||
+      (kind === "drain" && material === "concrete")
+    ) {
+      for (let i = 0; i < indices.length; i += 3) {
+        const u = sub(points[indices[i + 1]], points[indices[i]]),
+          v = sub(points[indices[i + 2]], points[indices[i]]),
+          x = Math.abs(u[1] * v[2] - u[2] * v[1]),
+          y = Math.abs(u[2] * v[0] - u[0] * v[2]),
+          z = Math.abs(u[0] * v[1] - u[1] * v[0]);
+        if (Math.max(x, y, z) < 1e-10) continue;
+        if (y < Math.max(x, z)) projection = x > z ? "zy" : "xy";
+        break;
+      }
+    }
     points.forEach((p) => {
       mesh.positions.push(...p);
-      mesh.uvs.push(p[0], p[2]);
+      mesh.uvs.push(
+        projection === "zy" ? p[2] : p[0],
+        projection === "xz" ? p[2] : p[1],
+      );
     });
     for (let i = 0; i < indices.length; i += 3) {
       let [a, b, c] = indices.slice(i, i + 3);
@@ -349,7 +381,7 @@ export class MeshBuilder {
     return [...this.meshes.values()].filter((m) => m.indices.length);
   }
 }
-function pavingBands(
+export function pavingBands(
   b: MeshBuilder,
   inner: V3[],
   outer: V3[],
@@ -394,7 +426,7 @@ export function curbSections(base: V3[], inner: V3[], outer: V3[]): V3[][] {
     outer,
   ];
 }
-function sweepCurb(
+export function sweepCurb(
   b: MeshBuilder,
   material: string,
   base: V3[],
@@ -417,7 +449,9 @@ function needsJoint(
   if (
     Math.abs(roadHalfWidth(roads[0]) * 2 - roadHalfWidth(roads[1]) * 2) >
       0.02 ||
-    Math.abs(roads[0].sidewalk - roads[1].sidewalk) > 0.02
+    Math.abs(roads[0].sidewalk - roads[1].sidewalk) > 0.02 ||
+    Math.abs(roads[0].curbHeight - roads[1].curbHeight) > 0.001 ||
+    Math.abs(roads[0].sidewalkCrossfall - roads[1].sidewalkCrossfall) > 0.001
   )
     return true;
   const dirs = roads.map((r) => {
@@ -466,12 +500,13 @@ function frameWithWidth(s: Station, road: Road, scale = 1): Frame {
     sw: road.sidewalk * scale,
     cw: (road.curbStyle === "race" ? 0.6 : 0.22) * scale,
     crossfall: road.crossfall,
+    sidewalkCrossfall: road.sidewalkCrossfall,
     curbHeight:
       road.curbStyle === "flush"
-        ? 0.04
+        ? Math.min(0.04, road.curbHeight)
         : road.curbStyle === "race"
-          ? 0.08
-          : CURB,
+          ? Math.min(0.08, road.curbHeight)
+          : road.curbHeight,
   };
 }
 function hasSelfCrossing(alignment: Alignment): boolean {
@@ -559,6 +594,7 @@ export function frameAt(span: RoadSpan, s: number): Frame {
     cw: a.cw + (b.cw - a.cw) * t,
     crossfall: span.road.crossfall,
     curbHeight: a.curbHeight,
+    sidewalkCrossfall: span.road.sidewalkCrossfall,
   };
 }
 export function ribbon(
@@ -674,14 +710,15 @@ function buildMarkings(builder: MeshBuilder, span: RoadSpan, project: Project) {
   const hw = roadHalfWidth(road),
     travel = (road.lanes * road.laneWidth) / 2;
   for (const side of [-1, 1])
-    ribbon(
-      builder,
-      span,
-      start + 0.3,
-      end - 0.3,
-      side * (travel + road.median / 2 - 0.22),
-      0.13,
-    );
+    for (const [a, z] of clearRuns(span, side, true))
+      ribbon(
+        builder,
+        span,
+        Math.max(start + 0.3, a),
+        Math.min(end - 0.3, z),
+        side * (travel + road.median / 2 - 0.22),
+        0.13,
+      );
   for (
     let lane = 1;
     lane < road.lanes && road.markingStyle !== "race";
@@ -866,8 +903,24 @@ function alternativeRail(
 }
 function buildRails(builder: MeshBuilder, span: RoadSpan) {
   if (!span.road.guardrails) return;
+  for (const side of [-1, 1])
+    for (const [a, z] of clearRuns(span, side)) {
+      const frames = [
+        frameAt(span, a),
+        ...span.frames.filter((f) => f.s > a && f.s < z),
+        frameAt(span, z),
+      ];
+      buildRailUnbroken(builder, { ...span, frames, length: z - a }, side);
+    }
+}
+function buildRailUnbroken(
+  builder: MeshBuilder,
+  span: RoadSpan,
+  chosenSide: number,
+) {
+  if (!span.road.guardrails) return;
   if (span.road.railStyle !== "wbeam") {
-    for (const side of [-1, 1])
+    for (const side of [chosenSide])
       alternativeRail(
         builder,
         span.frames.map((f) => edgePoint(f, side, "outer")),
@@ -878,7 +931,7 @@ function buildRails(builder: MeshBuilder, span: RoadSpan) {
       );
     return;
   }
-  for (const side of [-1, 1]) {
+  for (const side of [chosenSide]) {
     const base = span.frames.map((f) => edgePoint(f, side, "outer"));
     // A corrugated W-beam, not a floating tube. Profile is swept in the same
     // frames as the deck, with solid posts embedded in the pavement/deck.
@@ -936,6 +989,7 @@ function addInlet(
     owner: builder.owner,
     ownerKind: builder.ownerKind,
     kind: "curb-inlet",
+    style: "grate",
     position: surfacePoint(f, offset, 0.015),
   };
 }
@@ -954,13 +1008,23 @@ function buildDrainage(
     builder.strip("gutter", "gutter", a, b, true);
     if (span.road.drainageType !== "curb")
       services.push(buildLinearDrain(builder, span, side));
-    if (span.road.drainageType !== "linear")
-      for (
-        let s = span.frames[0].s + 5;
-        s < span.frames.at(-1)!.s - 2;
-        s += span.road.inletSpacing
-      ) {
-        services.push(addInlet(builder, span, s, side));
+    if (
+      span.road.drainageType !== "linear" &&
+      (span.road.curbDrainType !== "hollow" || span.frames[0].curbHeight < 0.11)
+    )
+      for (const inlet of (span.footway?.inlets ?? []).filter(
+        (i) => i.side === side,
+      )) {
+        if (
+          span.road.curbDrainType === "side-entry" &&
+          services.some(
+            (s) =>
+              s.style === "side-entry" &&
+              s.id.endsWith(`${side}:${Math.round(inlet.s * 100)}`),
+          )
+        )
+          continue;
+        services.push(addInlet(builder, span, inlet.s, side));
         inlets++;
       }
   }
@@ -1066,25 +1130,7 @@ function buildSpan(
     right = frames.map((f) => edgePoint(f, -1, "road"));
   b.strip("asphalt", roadMaterial(road), left, center, true);
   b.strip("asphalt", roadMaterial(road), center, right, true);
-  for (const side of [-1, 1]) {
-    const inner = frames.map((f) => edgePoint(f, side, "road")),
-      curbIn = frames.map((f) => edgePoint(f, side, "curbIn"));
-    const curbOut = frames.map((f) => edgePoint(f, side, "curbOut")),
-      outer = frames.map((f) => edgePoint(f, side, "outer"));
-    const bottom = frames.map((f) => edgePoint(f, side, "bottom"));
-    const curbMaterial = road.curbStyle === "race" ? "race-curb" : "curb";
-    sweepCurb(b, curbMaterial, inner, curbIn, curbOut);
-    if (road.sidewalk > 0.01) {
-      b.strip("paving", `paving-${road.pattern}`, curbOut, outer, true);
-      pavingBands(
-        b,
-        curbOut,
-        outer,
-        frames.map((f) => f.sw),
-      );
-    }
-    b.strip("structure", "road-base", outer, bottom);
-  }
+  const footwayResult = buildSpanFootways(b, span, project);
   b.strip(
     "structure",
     "road-base",
@@ -1124,10 +1170,15 @@ function buildSpan(
   buildParallelParking(b, span);
   buildRoadFurniture(b, span, project);
   buildRails(b, span);
-  const services = buildRoadManholes(b, span),
+  const services = [...footwayResult.services, ...buildRoadManholes(b, span)],
     inlets = buildDrainage(b, span, services);
   buildBridge(b, span, allAlignments);
-  return { meshes: b.output(), inlets, services };
+  return {
+    meshes: b.output(),
+    inlets,
+    services,
+    footways: footwayResult.features,
+  };
 }
 /** Tangent circular fillet with a bounded cubic fallback for reflex corners. */
 export function cornerCurve(
@@ -1418,7 +1469,11 @@ function buildJunction(
     bottom[0] = armPart(a, 1, "bottom");
     bottom[bottom.length - 1] = armPart(next, -1, "bottom");
     b.strip("structure", "road-base", paved, bottom);
-    if (a.road.drainage && a.road.drainageType !== "linear") {
+    if (
+      a.road.drainage &&
+      a.road.drainageType !== "linear" &&
+      a.road.curbDrainType === "grate"
+    ) {
       const span = spans.find((s) => s.road.id === a.road.id)!;
       const station = a.isStart
         ? span.frames[0].s + 1.2
@@ -1521,7 +1576,8 @@ export function buildNetwork(
   const spans: RoadSpan[] = [],
     meshes: MeshData[] = [],
     junctions: Junction[] = [],
-    services: UtilityFeature[] = [];
+    services: UtilityFeature[] = [],
+    footways: FootwayFeature[] = [];
   let length = 0,
     inlets = 0,
     maxGrade = 0;
@@ -1591,6 +1647,16 @@ export function buildNetwork(
       endJoint: jointIDs.has(road.end),
       length: alignment.length - start - end,
     };
+    span.footway = prepareFootways(span, project);
+    if (
+      span.footway.ramps.filter((a) => a.kind === "driveway").length <
+      road.driveways.length
+    )
+      diagnostics.push({
+        owner: road.id,
+        level: "warning",
+        message: `${road.name}: an entry is too close to a junction, overlaps another ramp, or needs a wider non-bridge sidewalk. Move the entry or widen the footway.`,
+      });
     spans.push(span);
     for (const f of alignment.stations) {
       const before = alignment.points;
@@ -1617,6 +1683,7 @@ export function buildNetwork(
     meshes.push(...result.meshes);
     inlets += result.inlets;
     services.push(...result.services);
+    footways.push(...result.footways);
   }
   for (const node of jointNodes) {
     const result = buildJunction(
@@ -1745,28 +1812,21 @@ export function buildNetwork(
   }
   return {
     detail,
+    footways,
     spans,
     junctions,
     meshes,
     diagnostics,
     length,
-    inlets: services.filter((s) => s.kind === "curb-inlet").length,
+    inlets: services
+      .filter((s) => s.kind === "curb-inlet")
+      .reduce((n, s) => n + (s.ports ?? 1), 0),
     maxGrade,
     clearances,
     services,
     manholes: services.filter((s) => s.kind === "manhole").length,
     parkingSpaces:
-      spans.reduce(
-        (sum, s) =>
-          sum +
-          (s.road.parking === "parallel" && s.road.markings
-            ? Math.max(
-                0,
-                Math.ceil((s.frames.at(-1)!.s - s.frames[0].s - 25.5) / 6),
-              ) * 2
-            : 0),
-        0,
-      ) +
+      spans.reduce((sum, s) => sum + parallelParkingBays(s).length, 0) +
       (project.sites ?? [])
         .filter((s) => s.kind === "parking")
         .reduce((sum, s) => sum + parkingLayout(s).length, 0),

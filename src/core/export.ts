@@ -143,6 +143,7 @@ export function exportMeshManifest(network: Network, project: Project) {
     vertices: network.vertices,
     includesPreviewEnvironment: false,
     services: network.services,
+    footways: network.footways,
     objects: network.meshes.map((m) => ({
       name: m.name.replace(/[^a-zA-Z0-9_-]/g, "_"),
       kind: m.kind,

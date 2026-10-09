@@ -1,3 +1,4 @@
+import { clearRuns, inRamp } from "./footways";
 import {
   add,
   sub,
@@ -128,13 +129,18 @@ export function buildRoadFurniture(
         side = r.oneWay ? 1 : end ? 1 : -1,
         p = add(edgePoint(f, side, "outer"), mul(f.n, side * 0.42)),
         d = mul(f.d, r.oneWay ? -1 : end ? -1 : 1);
-      buildSign(b, p, d, `speed-${r.speedLimit}`);
+      if (!inRamp(span.footway, f.s, side, 1))
+        buildSign(b, p, d, `speed-${r.speedLimit}`);
       if (
         (end ? span.endJoint : span.startJoint) &&
-        r.markingStyle === "motorway"
+        r.markingStyle === "motorway" &&
+        !inRamp(span.footway, f.s + (end ? -6 : 6), side, 1)
       )
         buildSign(b, add(p, mul(f.d, end ? -6 : 6)), d, "exit");
-      if (r.parking === "parallel")
+      if (
+        r.parking === "parallel" &&
+        !inRamp(span.footway, f.s + (end ? -5 : 5), side, 1)
+      )
         buildSign(b, add(p, mul(f.d, end ? -5 : 5)), d, "parking");
     }
   }
@@ -159,11 +165,12 @@ export function buildRoadFurniture(
     for (let s = first + 14; s < last - 8; s += 32) {
       const f = frameAt(span, s);
       for (const side of [-1, 1])
-        buildLamp(
-          b,
-          add(edgePoint(f, side, "outer"), mul(f.n, side * 0.25)),
-          mul(f.d, side),
-        );
+        if (!inRamp(span.footway, s, side, 1))
+          buildLamp(
+            b,
+            add(edgePoint(f, side, "outer"), mul(f.n, side * 0.25)),
+            mul(f.d, side),
+          );
     }
 }
 export function buildMedian(b: MeshBuilder, span: RoadSpan) {
@@ -197,17 +204,28 @@ export function buildMedian(b: MeshBuilder, span: RoadSpan) {
       row(-1, true)[index],
     ]);
 }
-export function buildParallelParking(b: MeshBuilder, span: RoadSpan) {
-  if (span.road.parking !== "parallel" || !span.road.markings) return;
+export function parallelParkingBays(
+  span: RoadSpan,
+): { s: number; side: number }[] {
+  if (span.road.parking !== "parallel" || !span.road.markings) return [];
   const first = span.frames[0].s + 10,
     last = span.frames.at(-1)!.s - 10,
-    hw = roadHalfWidth(span.road);
-  for (let s = first; s + 5.5 < last; s += 6)
-    for (const side of [-1, 1]) {
-      ribbon(b, span, s, s + 5.5, side * (hw - 2.2), 0.1);
-      for (const end of [s, s + 5.5])
-        ribbon(b, span, end, end + 0.1, side * (hw - 1.2), 2.1);
-    }
+    bays: { s: number; side: number }[] = [];
+  for (const side of [-1, 1]) {
+    const runs = clearRuns(span, side, true);
+    for (let s = first; s + 5.5 < last; s += 6)
+      if (runs.some(([a, z]) => s >= a && s + 5.6 <= z)) bays.push({ s, side });
+  }
+  return bays;
+}
+export function buildParallelParking(b: MeshBuilder, span: RoadSpan) {
+  if (span.road.parking !== "parallel" || !span.road.markings) return;
+  const hw = roadHalfWidth(span.road);
+  for (const { s, side } of parallelParkingBays(span)) {
+    ribbon(b, span, s, s + 5.5, side * (hw - 2.2), 0.1);
+    for (const end of [s, s + 5.5])
+      ribbon(b, span, end, end + 0.1, side * (hw - 1.2), 2.1);
+  }
 }
 export function buildTrafficSignals(
   b: MeshBuilder,

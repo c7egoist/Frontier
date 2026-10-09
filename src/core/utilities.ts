@@ -10,6 +10,10 @@ export interface UtilityFeature {
   position: V3;
   diameter?: number;
   length?: number;
+  style?: "grate" | "side-entry" | "hollow";
+  ports?: number;
+  accessGrates?: number;
+  direction?: V3;
 }
 export type SurfaceSampler = (
   along: number,
