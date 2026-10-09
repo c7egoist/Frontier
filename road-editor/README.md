@@ -105,5 +105,5 @@ The geometry tests check that junction loops are simple and wound CCW, that the 
 - An interior point that falls inside a junction's throat is ignored for the road's shape, and a warning names the road. The point stays in the file.
 - Drainage is modelled as kerbs, gutters, grates and ditches. Culverts and pipe networks are not modelled.
 - Imported OBJ files are reference geometry only. They cannot be edited, and their materials are not read.
-- Build time grows with the network. The sample networks build in about 15 to 40 ms. A 60-road grid takes about 240 ms per rebuild (JavaScript, single thread), which is the limit for smooth dragging on large networks.
+- Build time grows with the network. The geometry build (`buildNetwork`) takes about 15 to 40 ms for the samples and about 240 ms for a 60-road grid, on a single JavaScript thread. A full editor refresh, including GPU upload, took roughly 150 to 300 ms in headless testing with software WebGL, so large networks drag less smoothly than small ones.
 - Textures are generated at run time on canvases. Google Fonts are loaded when the page is online; otherwise the system UI font is used.
