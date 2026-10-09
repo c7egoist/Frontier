@@ -1,0 +1,5 @@
+node_modules/
+# NOTE: dist/ is intentionally committed on the arena branch so the app opens
+# via https://raw.githack.com/.../dist/index.html
+*.local
+.DS_Store

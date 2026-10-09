@@ -1,0 +1,30 @@
+{
+  "name": "frontier-road-designer",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Frontier Road Designer — robust 2D/3D split-view road network editor with watertight junctions, joint gizmo, paving, drainage, guardrails & bridges",
+  "scripts": {
+    "dev": "vite --port=3000 --host=0.0.0.0",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port=3000 --host=0.0.0.0",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.5.0",
+    "lucide-react": "^0.546.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.183.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.183.1",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
