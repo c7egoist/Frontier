@@ -4,7 +4,7 @@ A self-contained HTML tool for generating **connected highway bridges, city road
 
 ## Open
 
-Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified connected-bridges and city-network snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/d825351f60be2195f950f2de51139e06123fca71/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
+Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified connected-bridges and city-network snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/714de2c44d01245d15da8ccee29ec6a3c03eaaca/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
 
 Only the root HTML is deployed, not Vite's development `index.html`. Code, fonts, procedural materials and licensing notices are embedded. WebGL2 enables the 3D view; plan editing and OBJ/JSON export also work without it.
 
@@ -132,7 +132,7 @@ Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wi
 
 Release HTML is checked byte-for-byte against the published GitHub file. **277 CPU checks and 81 browser checks** pass, including idle/hidden-pane render invalidation, real support surface/height exclusion, mixed member/tapered-clearance checks, incoming-only handed signal placement, directed interchange reachability, actual bridge/support clearances, atomic connected bridge insertion, seven distinct barrier sections, exact rounded splitter tips and geometry-derived gores, pocket/refuge/shared-cycle treatment, the exact widened/elevated Northbank corner reproduction, analytic offsets, short-fit tapering, bus/cycle lane separation, real planting apertures/grate slots, gated block rings, parking islands/EV capacity, legacy drainage/ramp/driveway checks, PBR exports, mobile layout and fully offline use.
 
-Published standalone: **1,135,176 bytes**, SHA-256 `0f93a2d4a9d9faba0360c7bae87a3592068e777af61ebf1b19a1b04348b9f1aa`, byte-verified against GitHub blob `75e38b4542f132d96e34e90ce0fc4b7cbf5c79be`. The immutable raw.githack URL uses code commit `d825351f60be2195f950f2de51139e06123fca71`.
+Published standalone: **1,140,631 bytes**, SHA-256 `ee6853979613197c7ca5cc7345ea6ab3553c27b06f29bc1997b864e71d543db8`, byte-verified against GitHub blob `520d178632903aa8b2343283f9e02ba7c0c13a33`. The immutable raw.githack URL uses code commit `714de2c44d01245d15da8ccee29ec6a3c03eaaca`.
 
 ## Development and verification
 
