@@ -1,3 +1,4 @@
+import { SupportSurfaceIndex, supportOutline } from "./support-surfaces";
 import earcut from "earcut";
 import {
   frameAt,
@@ -7,13 +8,7 @@ import {
   type Frame,
   type Arm,
 } from "./geometry";
-import {
-  connected,
-  getNode,
-  roadHalfWidth,
-  type Project,
-  type RoadNode,
-} from "./model";
+import { connected, roadHalfWidth, type Project, type RoadNode } from "./model";
 import { closestOnAlignment, type Alignment } from "./curves";
 import {
   add,
@@ -43,6 +38,12 @@ export interface BridgeFeature {
   end: V3;
   supports: BridgeSupport[];
   excludedSupports: V3[];
+  members?: {
+    road: string;
+    material: "steel" | "concrete";
+    mouthDepth: number;
+    jointDepth: number;
+  }[];
   physicalGeometry: true;
 }
 /** Rebuild-time clearance gate includes lower bridge ramps, cycle tracks and
@@ -53,8 +54,11 @@ export function supportIsClear(
   owner: string,
   alignments: Alignment[],
   margin = 2.5,
+  surfaces?: SupportSurfaceIndex,
+  frame?: Frame,
+  depth = 1.2,
 ) {
-  return !alignments.some((a) => {
+  const roadClear = !alignments.some((a) => {
     if (a.road.id === owner) return false;
     const near = closestOnAlignment(a, point);
     return (
@@ -62,79 +66,118 @@ export function supportIsClear(
       near.distance < roadHalfWidth(a.road) + a.road.sidewalk + margin
     );
   });
+  if (!roadClear || !surfaces) return roadClear;
+  const n = frame?.n ?? ([1, 0, 0] as V3),
+    d = frame?.d ?? ([0, 0, 1] as V3),
+    top = point[1] - depth - 0.07;
+  // Reserve the actual oriented footing footprint along the support, then test
+  // the wider headstock at its own height. Gateways and open plot holes are
+  // respected by the indexed triangles, not approximated by a filled rectangle.
+  return (
+    surfaces.clear({
+      outline: supportOutline(point, n, d, 3, 2.7),
+      minY: -0.4,
+      maxY: top + 0.08,
+    }) &&
+    surfaces.clear({
+      outline: supportOutline(
+        point,
+        n,
+        d,
+        Math.max(2.1, (frame?.hw ?? 3.5) * 1.6),
+        1.7,
+      ),
+      minY: top - 0.38,
+      maxY: top + 0.08,
+    })
+  );
 }
 function profileSweep(
   b: MeshBuilder,
   frames: Frame[],
   offset: (f: Frame) => number,
-  profile: [number, number][],
+  profile:
+    [number, number][] | ((frame: Frame, index: number) => [number, number][]),
   material: string,
 ) {
-  const rows = profile.map(([u, y]) =>
-    frames.map((f) => add(f.p, add(mul(f.n, offset(f) + u), [0, y, 0]))),
-  );
+  const sections = frames.map((f, i) =>
+      typeof profile === "function" ? profile(f, i) : profile,
+    ),
+    rows = sections[0].map((_, k) =>
+      frames.map((f, i) => {
+        const [u, y] = sections[i][k];
+        return add(f.p, add(mul(f.n, offset(f) + u), [0, y, 0]));
+      }),
+    );
   for (let i = 0; i < rows.length; i++)
     b.strip("structure", material, rows[i], rows[(i + 1) % rows.length]);
-  const triangles = earcut(profile.flat(), undefined, 2);
   for (const i of [0, frames.length - 1])
     b.append(
       "structure",
       material,
       rows.map((r) => r[i]),
-      i === 0
-        ? triangles
-        : triangles.map((v, k) => triangles[k - (k % 3) + (2 - (k % 3))]),
+      earcut(sections[i].flat(), undefined, 2).reduce<number[]>(
+        (out, v, k, triangles) => {
+          out.push(i === 0 ? v : triangles[k - (k % 3) + (2 - (k % 3))]);
+          return out;
+        },
+        [],
+      ),
     );
 }
 function girder(
   b: MeshBuilder,
   frames: Frame[],
   offset: (f: Frame) => number,
-  depth: number,
+  depth: number | ((index: number) => number),
   steel: boolean,
 ) {
   if (steel) {
-    const top = -0.455,
-      bottom = -depth;
+    const top = -0.455;
     profileSweep(
       b,
       frames,
       offset,
-      [
-        [-0.19, top],
-        [0.19, top],
-        [0.19, top - 0.035],
-        [0.02, top - 0.035],
-        [0.02, bottom + 0.045],
-        [0.17, bottom + 0.045],
-        [0.17, bottom],
-        [-0.17, bottom],
-        [-0.17, bottom + 0.045],
-        [-0.02, bottom + 0.045],
-        [-0.02, top - 0.035],
-        [-0.19, top - 0.035],
-      ],
+      (_, index) => {
+        const bottom = -(typeof depth === "number" ? depth : depth(index));
+        return [
+          [-0.19, top],
+          [0.19, top],
+          [0.19, top - 0.035],
+          [0.02, top - 0.035],
+          [0.02, bottom + 0.045],
+          [0.17, bottom + 0.045],
+          [0.17, bottom],
+          [-0.17, bottom],
+          [-0.17, bottom + 0.045],
+          [-0.02, bottom + 0.045],
+          [-0.02, top - 0.035],
+          [-0.19, top - 0.035],
+        ];
+      },
       "girder",
     );
   } else {
-    const top = -0.455,
-      bottom = -depth;
+    const top = -0.455;
     profileSweep(
       b,
       frames,
       offset,
-      [
-        [-0.4, top],
-        [0.4, top],
-        [0.29, top - 0.1],
-        [0.22, bottom + 0.09],
-        [0.3, bottom + 0.09],
-        [0.3, bottom],
-        [-0.3, bottom],
-        [-0.3, bottom + 0.09],
-        [-0.22, bottom + 0.09],
-        [-0.29, top - 0.1],
-      ],
+      (_, index) => {
+        const bottom = -(typeof depth === "number" ? depth : depth(index));
+        return [
+          [-0.4, top],
+          [0.4, top],
+          [0.29, top - 0.1],
+          [0.22, bottom + 0.09],
+          [0.3, bottom + 0.09],
+          [0.3, bottom],
+          [-0.3, bottom],
+          [-0.3, bottom + 0.09],
+          [-0.22, bottom + 0.09],
+          [-0.29, top - 0.1],
+        ];
+      },
       "concrete",
     );
   }
@@ -207,6 +250,7 @@ export function buildBridgeSpan(
   span: RoadSpan,
   project: Project,
   alignments: Alignment[],
+  surfaces?: SupportSurfaceIndex,
 ): BridgeFeature | undefined {
   const r = span.road;
   if (!r.bridge) return;
@@ -255,7 +299,7 @@ export function buildBridgeSpan(
     bays = Math.max(1, Math.ceil((last - first) / r.pierSpacing));
   const support = (f: Frame, kind: BridgeSupport["kind"]) => {
     if (f.p[1] < 2.2) return false;
-    if (!supportIsClear(f.p, r.id, alignments)) {
+    if (!supportIsClear(f.p, r.id, alignments, 2.5, surfaces, f, depth)) {
       excludedSupports.push([...f.p]);
       return false;
     }
@@ -278,7 +322,15 @@ export function buildBridgeSpan(
         if (s <= first + 2 || s >= last - 2) break;
         const candidate = frameAt(span, s);
         if (
-          supportIsClear(candidate.p, r.id, alignments) &&
+          supportIsClear(
+            candidate.p,
+            r.id,
+            alignments,
+            2.5,
+            surfaces,
+            candidate,
+            depth,
+          ) &&
           support(candidate, "pier")
         )
           break;
@@ -326,6 +378,7 @@ export function buildBridgeJoint(
   arms: Arm[],
   bottom: V3[],
   alignments: Alignment[],
+  surfaces?: SupportSurfaceIndex,
 ): BridgeFeature | undefined {
   const elevated = arms.filter((a) => a.road.bridge);
   if (!elevated.length || node.position[1] < 1.6) return;
@@ -345,11 +398,27 @@ export function buildBridgeJoint(
       { ...a.frame, p: node.position, d, n },
     ];
     for (const side of [-1, 1])
-      girder(b, frames, (f) => side * f.hw * 0.62, depth, steel);
+      girder(
+        b,
+        frames,
+        (f) => side * f.hw * 0.62,
+        (i) => a.road.bridgeDepth + (depth - a.road.bridgeDepth) * i,
+        a.road.structure === "steel",
+      );
   }
   const supports: BridgeSupport[] = [],
     excludedSupports: V3[] = [];
-  if (supportIsClear(node.position, node.id, alignments)) {
+  if (
+    supportIsClear(
+      node.position,
+      node.id,
+      alignments,
+      2.5,
+      surfaces,
+      { ...elevated[0].frame, p: node.position },
+      depth,
+    )
+  ) {
     const a = elevated[0],
       p = pier(b, { ...a.frame, p: node.position }, depth, "pier");
     if (p) supports.push(p);
@@ -362,10 +431,45 @@ export function buildBridgeJoint(
     depth,
     pierSpacing: elevated[0].road.pierSpacing,
     connections: arms.map((a) => a.road.id),
+    members: elevated.map((a) => ({
+      road: a.road.id,
+      material: a.road.structure,
+      mouthDepth: a.road.bridgeDepth,
+      jointDepth: depth,
+    })),
     start: [...node.position],
     end: [...node.position],
     supports,
     excludedSupports,
     physicalGeometry: true,
   };
+}
+
+/** Effective member depth inside a trimmed transition, used by clearance
+ * reporting as well as the swept beam sections. A shallow incoming member
+ * cannot report its old depth after the joint has tapered it deeper. */
+export function bridgeDepthAt(
+  span: RoadSpan,
+  station: number,
+  bridges: BridgeFeature[],
+) {
+  const r = span.road,
+    first = span.frames[0].s,
+    last = span.frames.at(-1)!.s;
+  const atNode = (id: string) =>
+    bridges
+      .find((b) => b.owner === id && b.kind === "joint")
+      ?.members?.find((m) => m.road === r.id)?.jointDepth ?? r.bridgeDepth;
+  if (station < first && first > 1e-8)
+    return (
+      atNode(r.start) +
+      (r.bridgeDepth - atNode(r.start)) * Math.max(0, station / first)
+    );
+  if (station > last && span.alignment.length - last > 1e-8)
+    return (
+      r.bridgeDepth +
+      (atNode(r.end) - r.bridgeDepth) *
+        Math.min(1, (station - last) / (span.alignment.length - last))
+    );
+  return r.bridgeDepth;
 }

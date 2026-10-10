@@ -3045,7 +3045,10 @@ window.addEventListener("keydown", (e) => {
   }
 });
 setInterval(() => {
-  if (scene) $("status-fps").textContent = `${scene.fps} fps`;
+  if (scene)
+    $("status-fps").textContent = scene.getRenderStats().active
+      ? `${scene.fps} fps`
+      : "Idle";
 }, 1200);
 window.addEventListener("pagehide", () => {
   if (dirty) saveProject(false);
@@ -3057,6 +3060,7 @@ Object.defineProperty(window, "frontier", {
   value: {
     getProject: () => clone(project),
     getNetwork: () => network,
+    getPreviewStats: () => scene?.getRenderStats() ?? null,
     getSelection: () => selection,
     worldToPlan: (point: V3) => plan.worldToScreen(point),
     select: setSelection,

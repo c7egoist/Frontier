@@ -446,6 +446,317 @@ try {
     assert.deepEqual((await state()).project, before.project);
     assert.equal((await state()).triangles, before.triangles);
   });
+  async function settlePreview() {
+    await page.waitForFunction(
+      () => {
+        const s = window.frontier.getPreviewStats();
+        if (!s) return false;
+        const now = performance.now(),
+          last = window.__previewSettled;
+        if (!last || last.frames !== s.renderedFrames || s.pending) {
+          window.__previewSettled = { frames: s.renderedFrames, since: now };
+          return false;
+        }
+        return now - last.since > 700;
+      },
+      null,
+      { polling: 100, timeout: 120000 },
+    );
+  }
+  async function importPolishFixture(project) {
+    await page.locator("#project-file").setInputFiles({
+      name: "polish.road.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(project)),
+    });
+    await page.waitForFunction(
+      (name) => window.frontier.getProject().name === name,
+      project.name,
+    );
+    await page.waitForFunction(
+      () => !document.querySelector("#project-file").value,
+    );
+  }
+  await test("polish: idle city preview stops drawing unchanged geometry and resumes for visual controls", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("city"));
+    await settlePreview();
+    const before = await page.evaluate(() => window.frontier.getPreviewStats());
+    await page.waitForTimeout(900);
+    const idle = await page.evaluate(() => window.frontier.getPreviewStats());
+    assert.equal(idle.renderedFrames, before.renderedFrames);
+    assert(idle.idleFrames > before.idleFrames + 5);
+    assert(idle.scheduledFrames > before.scheduledFrames + 5);
+    await page.locator("#shade-style").selectOption("wireframe");
+    await page.waitForFunction(
+      (frames) => window.frontier.getPreviewStats().renderedFrames > frames,
+      before.renderedFrames,
+    );
+    await page.locator("#shade-style").selectOption("shaded");
+    await settlePreview();
+    await page.screenshot({
+      path: resolve(cache, "on-demand-city.png"),
+      timeout: 120000,
+    });
+  });
+  await test("polish: hidden 3D pane defers GPU work but still receives graph edits", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("district"));
+    await settlePreview();
+    await page.locator('button[data-layout="plan"]').click();
+    await page.waitForFunction(
+      () => window.frontier.getPreviewStats().visible === false,
+    );
+    const before = await page.evaluate(() => window.frontier.getPreviewStats());
+    assert(
+      await page.evaluate(() => window.frontier.moveJoint("j01", [1, 0, 1])),
+    );
+    await page.waitForTimeout(600);
+    const hidden = await page.evaluate(() => window.frontier.getPreviewStats());
+    assert.equal(hidden.renderedFrames, before.renderedFrames);
+    assert(hidden.pending);
+    assert.deepEqual(
+      await page.evaluate(
+        () =>
+          window.frontier.getProject().nodes.find((n) => n.id === "j01")
+            .position,
+      ),
+      [1, 0, 1],
+    );
+    await page.locator('button[data-layout="split"]').click();
+    await page.waitForFunction(
+      (frames) =>
+        window.frontier.getPreviewStats().visible &&
+        window.frontier.getPreviewStats().renderedFrames > frames,
+      before.renderedFrames,
+    );
+    await settlePreview();
+  });
+  await test("polish: mixed bridge joins taper matching members and export their actual depths", async () => {
+    const node = (id, x, y, z) => ({
+        id,
+        name: id,
+        position: [x, y, z],
+        radius: 3,
+        crossings: false,
+      }),
+      road = (id, start, end, h1, h2, settings) => ({
+        id,
+        name: id,
+        start,
+        end,
+        h1,
+        h2,
+        lanes: 2,
+        laneWidth: 3.5,
+        sidewalk: 0.8,
+        drainage: false,
+        manholes: false,
+        signs: false,
+        ...settings,
+      });
+    await importPolishFixture({
+      version: 1,
+      name: "Mixed bridge polish",
+      nodes: [
+        node("mixed-a", -120, 8, 0),
+        node("mixed-mid", 0, 8, 0),
+        node("mixed-b", 120, 8, 0),
+        node("lower-a", -2, 0, -100),
+        node("lower-b", -2, 0, 100),
+      ],
+      roads: [
+        road("shallow", "mixed-a", "mixed-mid", [40, 0, 0], [-40, 0, 0], {
+          bridge: true,
+          structure: "concrete",
+          bridgeDepth: 1.05,
+        }),
+        road("deep", "mixed-mid", "mixed-b", [40, 0, 0], [-40, 0, 0], {
+          bridge: true,
+          structure: "steel",
+          bridgeDepth: 1.8,
+        }),
+        road(
+          "lower",
+          "lower-a",
+          "lower-b",
+          [0, 0, 200 / 3],
+          [0, 0, -200 / 3],
+          {},
+        ),
+      ],
+    });
+    const data = await page.evaluate(() => ({
+        bridges: window.frontier.getNetwork().bridges,
+        clearances: window.frontier.getNetwork().clearances,
+        diagnostics: window.frontier.getNetwork().diagnostics,
+      })),
+      joint = data.bridges.find((b) => b.owner === "mixed-mid");
+    assert.deepEqual(data.diagnostics, []);
+    assert.equal(joint.members.length, 2);
+    assert.equal(
+      joint.members.find((m) => m.road === "shallow").mouthDepth,
+      1.05,
+    );
+    assert(joint.members.every((m) => m.jointDepth === 1.8));
+    assert(data.clearances[0].meters < 6.4);
+    await page.evaluate(() =>
+      window.frontier.select({ kind: "node", id: "mixed-mid" }),
+    );
+    assert(
+      await page.evaluate(() => window.frontier.inspectRoadDetail("bridge")),
+    );
+    const promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.evaluate(() => window.frontier.exportProject("glb", "editing"));
+    const download = await promise,
+      buffer = await readFile(await download.path()),
+      gltf = JSON.parse(
+        buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
+      ),
+      extras = gltf.nodes.find((n) => n.extras?.bridges)?.extras,
+      exported = extras.bridges.find((b) => b.owner === "mixed-mid");
+    assert.deepEqual(exported.members, joint.members);
+    for (const key of ["girder", "concrete"])
+      assert(
+        gltf.nodes.some(
+          (n) => n.extras?.id === "mixed-mid" && n.extras?.materialKey === key,
+        ),
+      );
+    await page.screenshot({
+      path: resolve(cache, "mixed-bridge-join.png"),
+      timeout: 120000,
+    });
+  });
+  await test("polish: support footprints preserve a parking court below the bridge", async () => {
+    await importPolishFixture({
+      version: 1,
+      name: "Parking under bridge",
+      nodes: [
+        { id: "deck-a", position: [-160, 8, 0], radius: 3, crossings: false },
+        { id: "deck-b", position: [160, 8, 0], radius: 3, crossings: false },
+      ],
+      roads: [
+        {
+          id: "deck",
+          name: "Deck",
+          start: "deck-a",
+          end: "deck-b",
+          h1: [320 / 3, 0, 0],
+          h2: [-320 / 3, 0, 0],
+          bridge: true,
+          structure: "steel",
+          bridgeDepth: 1.25,
+          pierSpacing: 32,
+          sidewalk: 0.8,
+          drainage: false,
+          manholes: false,
+        },
+      ],
+      sites: [
+        {
+          id: "under-parking",
+          kind: "parking",
+          name: "Parking retained",
+          position: [0, 0, 0],
+          width: 44,
+          depth: 36,
+          yaw: 0,
+        },
+      ],
+    });
+    const data = await page.evaluate(() => ({
+      bridge: window.frontier
+        .getNetwork()
+        .bridges.find((b) => b.owner === "deck"),
+      diagnostics: window.frontier.getNetwork().diagnostics,
+      parking: window.frontier
+        .getNetwork()
+        .meshes.some(
+          (m) => m.owner === "under-parking" && m.kind === "parking",
+        ),
+    }));
+    assert.deepEqual(data.diagnostics, []);
+    assert(data.parking);
+    assert(data.bridge.excludedSupports.some((p) => Math.abs(p[0]) < 0.01));
+    assert(data.bridge.supports.every((s) => Math.abs(s.position[0]) > 23));
+  });
+  await test("polish: signal heads face incoming one-way traffic and mirror for keep-left roads", async () => {
+    const node = (id, x, z) => ({
+        id,
+        name: id,
+        position: [x, 0, z],
+        radius: 6,
+        crossings: true,
+        signals: id === "signal-mid",
+      }),
+      road = (id, start, end, h1, h2) => ({
+        id,
+        name: id,
+        start,
+        end,
+        h1,
+        h2,
+        oneWay: true,
+        trafficSide: "left",
+        drainage: false,
+        manholes: false,
+      });
+    await importPolishFixture({
+      version: 1,
+      name: "Incoming signal polish",
+      nodes: [
+        node("signal-mid", 0, 0),
+        node("west", -100, 0),
+        node("east", 100, 0),
+        node("south", 0, 100),
+      ],
+      roads: [
+        road(
+          "incoming",
+          "west",
+          "signal-mid",
+          [100 / 3, 0, 0],
+          [-100 / 3, 0, 0],
+        ),
+        road(
+          "out-east",
+          "signal-mid",
+          "east",
+          [100 / 3, 0, 0],
+          [-100 / 3, 0, 0],
+        ),
+        road(
+          "out-south",
+          "signal-mid",
+          "south",
+          [0, 0, 100 / 3],
+          [0, 0, -100 / 3],
+        ),
+      ],
+    });
+    const signals = () =>
+      page.evaluate(() => ({
+        triangles: window.frontier
+          .getNetwork()
+          .meshes.filter(
+            (m) => m.owner === "signal-mid" && m.material.startsWith("signal-"),
+          )
+          .reduce((s, m) => s + m.indices.length / 3, 0),
+        poles: window.frontier
+          .getNetwork()
+          .meshes.find((m) => m.owner === "signal-mid" && m.material === "pole")
+          .positions,
+      }));
+    const left = await signals();
+    assert.equal(left.triangles, 48);
+    await page.evaluate(() =>
+      window.frontier.select({ kind: "node", id: "signal-mid" }),
+    );
+    await page.locator('[data-inspector-tab="details"]').click();
+    await page.locator('[data-prop="trafficSide"]').selectOption("right");
+    const right = await signals();
+    assert.equal(right.triangles, 48);
+    assert.notDeepEqual(right.poles, left.poles);
+  });
+
   await page.evaluate(() => window.frontier.loadTemplate("district"));
   await page.locator('[data-library="roads"]').click();
   await test("2D shared pivot drag updates all approaches; undo/redo restore it", async () => {

@@ -44,6 +44,12 @@ export class SceneView {
   private down: [number, number] = [0, 0];
   private onSelect: (s: Selection) => void;
   private onGizmo: (p: GizmoProjection | null) => void;
+  private renderDirty = true;
+  private viewportVisible = true;
+  private renderedFrames = 0;
+  private scheduledFrames = 0;
+  private idleFrames = 0;
+  private lastRenderTime = 0;
   private fpsFrames = 0;
   private fpsTime = performance.now();
   public fps = 60;
@@ -103,6 +109,7 @@ export class SceneView {
       this.selectionGroup,
     );
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.addEventListener("change", this.requestRender);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.085;
     this.controls.minDistance = 3;
@@ -146,9 +153,26 @@ export class SceneView {
     this.resize();
     this.animate();
   }
+  private requestRender = () => {
+    this.renderDirty = true;
+  };
+  getRenderStats() {
+    return {
+      renderedFrames: this.renderedFrames,
+      scheduledFrames: this.scheduledFrames,
+      idleFrames: this.idleFrames,
+      pending: this.renderDirty,
+      visible: this.viewportVisible,
+      active: performance.now() - this.lastRenderTime < 1000,
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+    };
+  }
   private resize() {
+    this.requestRender();
     const r = this.container.getBoundingClientRect();
-    if (r.width < 1 || r.height < 1) return;
+    this.viewportVisible = r.width >= 1 && r.height >= 1;
+    if (!this.viewportVisible) return;
     this.width = r.width;
     this.height = r.height;
     this.renderer.setSize(r.width, r.height, false);
@@ -170,6 +194,7 @@ export class SceneView {
     group.clear();
   }
   setNetwork(project: Project, network: Network, rebuildContext = false) {
+    this.requestRender();
     this.project = project;
     this.network = network;
     this.renderer.shadowMap.needsUpdate = true;
@@ -266,6 +291,7 @@ export class SceneView {
     this.contextGroup.visible = this.contextVisible;
   }
   setSelection(selection: Selection) {
+    this.requestRender();
     this.selection = selection;
     this.disposeGeometry(this.selectionGroup, true);
     if (!selection || !this.network) {
@@ -651,7 +677,9 @@ export class SceneView {
     let target: V3 | undefined,
       range = 24;
     if (kind === "bridge") {
-      const bridge = this.network.bridges.find((b) => owners.includes(b.owner));
+      const bridge =
+        this.network.bridges.find((b) => b.owner === this.selection!.id) ??
+        this.network.bridges.find((b) => owners.includes(b.owner));
       if (bridge) {
         const support = bridge.supports[Math.floor(bridge.supports.length / 2)];
         target = support
@@ -760,30 +788,36 @@ export class SceneView {
     return true;
   }
   zoom(factor: number) {
+    this.requestRender();
     this.camera.zoom = THREE.MathUtils.clamp(this.camera.zoom * factor, 0.4, 4);
     this.camera.updateProjectionMatrix();
     this.onGizmo(this.gizmoProjection());
   }
   setGrid(v: boolean) {
+    this.requestRender();
     this.gridVisible = v;
     if (this.grid) this.grid.visible = v;
   }
   setContext(v: boolean) {
+    this.requestRender();
     this.renderer.shadowMap.needsUpdate = true;
     this.contextVisible = v;
     this.contextGroup.visible = v;
   }
   setNight(v: boolean) {
+    this.requestRender();
     this.sun.intensity = v ? 0.38 : 2.2;
     this.ambient.intensity = v ? 0.55 : 0.9;
     this.scene.background = new THREE.Color(v ? "#0e0e0e" : "#101010");
   }
   setStyle(style: string) {
+    this.requestRender();
     this.renderer.shadowMap.needsUpdate = true;
     this.materials.clay(style === "clay");
     this.materials.wireframe(style === "wireframe");
   }
   setDetailLayer(layer: string, visible: boolean) {
+    this.requestRender();
     this.renderer.shadowMap.needsUpdate = true;
     for (const child of this.networkGroup.children)
       if (child.userData.meshKind === layer) child.visible = visible;
@@ -839,16 +873,29 @@ export class SceneView {
   }
   private animate = () => {
     requestAnimationFrame(this.animate);
+    this.scheduledFrames++;
+    // OrbitControls emits change during damping. Camera, geometry, material,
+    // layer and resize setters also invalidate, but an idle network does not
+    // repeatedly draw millions of unchanged triangles or rewrite the gizmo DOM.
     this.controls.update();
-    this.renderer.render(this.scene, this.camera);
-    this.onGizmo(this.gizmoProjection());
-    this.fpsFrames++;
+    if (this.renderDirty && this.viewportVisible) {
+      this.renderDirty = false;
+      this.renderer.render(this.scene, this.camera);
+      this.onGizmo(this.gizmoProjection());
+      this.lastRenderTime = performance.now();
+      this.renderedFrames++;
+      this.fpsFrames++;
+    } else this.idleFrames++;
     const now = performance.now();
     if (now - this.fpsTime > 1000) {
-      this.fps = Math.min(
-        60,
-        Math.round((this.fpsFrames * 1000) / (now - this.fpsTime)),
-      );
+      if (this.fpsFrames)
+        this.fps = Math.min(
+          60,
+          Math.max(
+            1,
+            Math.round((this.fpsFrames * 1000) / (now - this.fpsTime)),
+          ),
+        );
       this.fpsFrames = 0;
       this.fpsTime = now;
     }

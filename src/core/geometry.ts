@@ -1,3 +1,4 @@
+import { SupportSurfaceIndex } from "./support-surfaces";
 import type { SplitterFeature } from "./splitters";
 import {
   sectionScale,
@@ -11,6 +12,7 @@ import {
 import {
   buildBridgeSpan,
   buildBridgeJoint,
+  bridgeDepthAt,
   type BridgeFeature,
 } from "./bridges";
 import { buildBarrierPath, type BarrierFeature } from "./barriers";
@@ -29,6 +31,7 @@ import {
 } from "./corners";
 import {
   prepareFootways,
+  stationForParameter,
   buildSpanFootways,
   clearRuns,
   type FootwayFeature,
@@ -547,6 +550,12 @@ function needsJoint(
   const roads = connected(project, node.id);
   if (roads.length >= 3) return true;
   if (roads.length !== 2) return false;
+  if (
+    roads.every((r) => r.bridge) &&
+    (roads[0].structure !== roads[1].structure ||
+      Math.abs(roads[0].bridgeDepth - roads[1].bridgeDepth) > 0.001)
+  )
+    return true;
   if (roads[0].curbStyle !== roads[1].curbStyle) return true;
   if (
     Math.abs(roadHalfWidth(roads[0]) * 2 - roadHalfWidth(roads[1]) * 2) >
@@ -1091,11 +1100,7 @@ function buildDrainage(
   }
   return inlets;
 }
-function buildSpan(
-  span: RoadSpan,
-  project: Project,
-  allAlignments: Alignment[],
-) {
+function buildSpan(span: RoadSpan, project: Project) {
   const b = new MeshBuilder(span.road.id, "road"),
     frames = span.frames,
     road = span.road;
@@ -1148,12 +1153,10 @@ function buildSpan(
   buildRails(b, span);
   const services = [...footwayResult.services, ...buildRoadManholes(b, span)],
     inlets = buildDrainage(b, span, services);
-  const bridge = buildBridgeSpan(b, span, project, allAlignments);
   return {
     meshes: b.output(),
     inlets,
     services,
-    bridge,
     streetDetails,
     footways: footwayResult.features,
     plantings: footwayResult.plantings,
@@ -1259,7 +1262,6 @@ function buildJunction(
   spans: RoadSpan[],
   diagnostics: Diagnostic[],
   detail: GeometryDetail,
-  allAlignments: Alignment[],
 ) {
   const b = new MeshBuilder(node.id, "node"),
     arms = spans.map((s) => makeArm(s, node)).sort((a, b) => a.angle - b.angle);
@@ -1404,7 +1406,6 @@ function buildJunction(
     add(node.position, [0, -baseDepth, 0]),
     false,
   );
-  const bridge = buildBridgeJoint(b, node, arms, bottom, allAlignments);
   const type = arms.some(
     (a, i) =>
       (arms[(i + 1) % arms.length].angle - a.angle + Math.PI * 2) %
@@ -1438,7 +1439,7 @@ function buildJunction(
     services,
     mobility,
     splitters,
-    bridge,
+    bottom,
   };
 }
 /** Short mouths cannot contain an arbitrarily wide inward offset. Fit the
@@ -1549,7 +1550,8 @@ export function buildNetwork(
     mobility: MobilityFeature[] = [],
     bridges: BridgeFeature[] = [],
     streetDetails: StreetFeature[] = [],
-    splitters: SplitterFeature[] = [];
+    splitters: SplitterFeature[] = [],
+    bridgeJoints: { node: RoadNode; arms: Arm[]; bottom: V3[] }[] = [];
   let length = 0,
     inlets = 0,
     maxGrade = 0;
@@ -1663,7 +1665,7 @@ export function buildNetwork(
         level: "warning",
         message: `${road.name}: an entry is too close to a junction, overlaps another ramp, or needs a wider non-bridge sidewalk. Move the entry or widen the footway.`,
       });
-    const result = buildSpan(span, project, [...alignments.values()]);
+    const result = buildSpan(span, project);
     meshes.push(...result.meshes);
     inlets += result.inlets;
     services.push(...result.services);
@@ -1671,7 +1673,6 @@ export function buildNetwork(
     plantings.push(...result.plantings);
     mobility.push(...result.mobility);
     streetDetails.push(...result.streetDetails);
-    if (result.bridge) bridges.push(result.bridge);
   }
   for (const node of jointNodes) {
     const result = buildJunction(
@@ -1679,12 +1680,15 @@ export function buildNetwork(
       spans.filter((s) => s.road.start === node.id || s.road.end === node.id),
       diagnostics,
       detail,
-      [...alignments.values()],
     );
     junctions.push(result.junction);
+    bridgeJoints.push({
+      node,
+      arms: result.junction.arms,
+      bottom: result.bottom,
+    });
     mobility.push(...result.mobility);
     splitters.push(...result.splitters);
-    if (result.bridge) bridges.push(result.bridge);
     meshes.push(...result.meshes);
     inlets += result.inlets;
     services.push(...result.services);
@@ -1696,48 +1700,6 @@ export function buildNetwork(
       owner: "",
     });
   const clearances: { a: string; b: string; meters: number }[] = [];
-  for (const crossing of detectCrossings(project, Infinity)) {
-    const a = alignments.get(crossing.a)!,
-      b = alignments.get(crossing.b)!;
-    const heightAt = (curve: V3[], t: number) => {
-      const u = 1 - t;
-      return (
-        u * u * u * curve[0][1] +
-        3 * u * u * t * curve[1][1] +
-        3 * u * t * t * curve[2][1] +
-        t * t * t * curve[3][1]
-      );
-    };
-    const ay = heightAt(a.points, crossing.ta),
-      by = heightAt(b.points, crossing.tb),
-      gap = Math.abs(ay - by);
-    if (gap <= 0.7) {
-      diagnostics.push({
-        level: "warning",
-        message:
-          "Unresolved at-grade crossing. Finish the edit or rebuild to create a shared junction.",
-        owner: crossing.a,
-      });
-      continue;
-    }
-    const upper = ay > by ? a.road : b.road,
-      depth = upper.bridge ? upper.bridgeDepth : 0.48,
-      lower = ay > by ? b.road : a.road,
-      meters =
-        gap -
-        depth -
-        Math.max(
-          SURFACE,
-          0.04 + (roadHalfWidth(lower) * lower.crossfall) / 100,
-        );
-    clearances.push({ a: crossing.a, b: crossing.b, meters });
-    if (meters < 4.5)
-      diagnostics.push({
-        level: "warning",
-        message: `Low overpass clearance: ${meters.toFixed(2)} m. Raise the deck to provide at least 4.5 m.`,
-        owner: upper.id,
-      });
-  }
   for (const site of project.sites ?? []) {
     meshes.push(...buildSiteGeometry(site, services, plantings, blocks));
     if (site.kind === "parking")
@@ -1792,6 +1754,126 @@ export function buildNetwork(
         level: "warning",
         message: `${site.name}: footprint encroaches into a driveable road. Move or resize the site.`,
         owner: site.id,
+      });
+  }
+  // Structural supports come after the complete road/site surfaces, so their
+  // exclusion masks use real junction returns and clipped plot/parking bands.
+  if (spans.some((s) => s.road.bridge)) {
+    const regions = spans
+      .filter((s) => s.road.bridge)
+      .map((s) => {
+        const x = s.frames.map((f) => f.p[0]),
+          z = s.frames.map((f) => f.p[2]),
+          margin = Math.max(3, ...s.frames.map((f) => f.hw * 0.8 + 2));
+        return {
+          minX: Math.min(...x) - margin,
+          maxX: Math.max(...x) + margin,
+          minZ: Math.min(...z) - margin,
+          maxZ: Math.max(...z) + margin,
+          maxY:
+            Math.max(...s.frames.map((f) => f.p[1])) -
+            s.road.bridgeDepth +
+            0.02,
+        };
+      });
+    for (const j of bridgeJoints.filter((j) =>
+      j.arms.some((a) => a.road.bridge),
+    )) {
+      const margin = Math.max(3, ...j.arms.map((a) => a.frame.hw * 0.8 + 2));
+      regions.push({
+        minX: j.node.position[0] - margin,
+        maxX: j.node.position[0] + margin,
+        minZ: j.node.position[2] - margin,
+        maxZ: j.node.position[2] + margin,
+        maxY:
+          j.node.position[1] -
+          Math.max(
+            ...j.arms
+              .filter((a) => a.road.bridge)
+              .map((a) => a.road.bridgeDepth),
+          ) +
+          0.02,
+      });
+    }
+    const surfaces = new SupportSurfaceIndex(meshes, regions),
+      allAlignments = [...alignments.values()];
+    for (const span of spans.filter((s) => s.road.bridge)) {
+      const builder = new MeshBuilder(span.road.id, "road"),
+        bridge = buildBridgeSpan(
+          builder,
+          span,
+          project,
+          allAlignments,
+          surfaces,
+        );
+      meshes.push(...builder.output());
+      if (bridge) bridges.push(bridge);
+    }
+    for (const { node, arms, bottom } of bridgeJoints) {
+      const builder = new MeshBuilder(node.id, "node"),
+        bridge = buildBridgeJoint(
+          builder,
+          node,
+          arms,
+          bottom,
+          allAlignments,
+          surfaces,
+        );
+      meshes.push(...builder.output());
+      if (bridge) bridges.push(bridge);
+    }
+  }
+  for (const crossing of detectCrossings(project, Infinity)) {
+    const a = alignments.get(crossing.a)!,
+      b = alignments.get(crossing.b)!;
+    const heightAt = (curve: V3[], t: number) => {
+      const u = 1 - t;
+      return (
+        u * u * u * curve[0][1] +
+        3 * u * u * t * curve[1][1] +
+        3 * u * t * t * curve[2][1] +
+        t * t * t * curve[3][1]
+      );
+    };
+    const ay = heightAt(a.points, crossing.ta),
+      by = heightAt(b.points, crossing.tb),
+      gap = Math.abs(ay - by);
+    if (gap <= 0.7) {
+      diagnostics.push({
+        level: "warning",
+        message:
+          "Unresolved at-grade crossing. Finish the edit or rebuild to create a shared junction.",
+        owner: crossing.a,
+      });
+      continue;
+    }
+    const upper = ay > by ? a.road : b.road,
+      upperSpan = spans.find((s) => s.road.id === upper.id),
+      depth =
+        upper.bridge && upperSpan
+          ? bridgeDepthAt(
+              upperSpan,
+              stationForParameter(
+                upperSpan,
+                ay > by ? crossing.ta : crossing.tb,
+              ),
+              bridges,
+            )
+          : 0.48,
+      lower = ay > by ? b.road : a.road,
+      meters =
+        gap -
+        depth -
+        Math.max(
+          SURFACE,
+          0.04 + (roadHalfWidth(lower) * lower.crossfall) / 100,
+        );
+    clearances.push({ a: crossing.a, b: crossing.b, meters });
+    if (meters < 4.5)
+      diagnostics.push({
+        level: "warning",
+        message: `Low overpass clearance: ${meters.toFixed(2)} m. Raise the deck to provide at least 4.5 m.`,
+        owner: upper.id,
       });
   }
   const min: V3 = [Infinity, Infinity, Infinity],

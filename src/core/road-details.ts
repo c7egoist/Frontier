@@ -210,9 +210,11 @@ export function buildTrafficSignals(
 ) {
   if (!node.signals) return;
   for (let i = 0; i < arms.length; i++) {
-    const a = arms[i],
-      p = add(a.outerRight, mul(a.d, 3.8)),
-      n = a.n;
+    const a = arms[i];
+    if (a.road.oneWay && a.isStart) continue; // No signal facing a purely outgoing one-way arm.
+    const keepLeft = a.road.trafficSide === "left",
+      p = add(keepLeft ? a.outerLeft : a.outerRight, mul(a.d, 3.8)),
+      n = mul(a.n, keepLeft ? -1 : 1);
     b.box("sign", "pole", add(p, [0, 2.5, 0]), 0.12, 5, 0.12, a.d);
     b.box(
       "sign",
