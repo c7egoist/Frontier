@@ -1,3 +1,5 @@
+import { supportsAuxiliary, auxiliaryWidthAt } from "./road-sections";
+import { roadClasses, type RoadClass } from "./design-basis";
 import { makeAdvancedTemplate } from "./templates";
 import { parseSites, siteOutline, makeSite, type Site } from "./sites";
 import { add, sub, mul, clamp, distance, type V3 } from "./math";
@@ -63,6 +65,13 @@ export interface Driveway {
   apron: number;
 }
 export interface RoadSettings {
+  roadClass: RoadClass;
+  embankment: boolean;
+  auxiliaryLane: "none" | "entry" | "exit";
+  auxiliaryLength: number;
+  auxiliaryTaper: number;
+  bridgeFrom: number;
+  bridgeTo: number;
   trafficSide: "right" | "left";
   sharedCycleStreet: boolean;
   curbExtensions: boolean;
@@ -137,6 +146,13 @@ export interface Project {
 }
 export type Selection = { kind: "node" | "road" | "site"; id: string } | null;
 export const roadDefaults: RoadSettings = {
+  roadClass: "street",
+  embankment: false,
+  auxiliaryLane: "none",
+  auxiliaryLength: 200,
+  auxiliaryTaper: 90,
+  bridgeFrom: 0,
+  bridgeTo: 1,
   trafficSide: "right",
   sharedCycleStreet: false,
   curbExtensions: false,
@@ -221,11 +237,12 @@ export const presets: {
     name: "Divided motorway carriageway",
     description: "Two one-way lanes · shoulder · thrie-beam safety rail",
     settings: {
+      roadClass: "mainline",
       lanes: 2,
-      laneWidth: 3.5,
-      shoulderWidth: 1,
+      laneWidth: 3.65,
+      shoulderWidth: 2,
       oneWay: true,
-      sidewalk: 0.8,
+      sidewalk: 0,
       guardrails: true,
       railStyle: "thrie",
       railHeight: 0.95,
@@ -337,9 +354,12 @@ export const presets: {
     name: "Divided highway",
     description: "4 lanes · safety barriers",
     settings: {
+      roadClass: "mainline",
       lanes: 4,
-      laneWidth: 3.6,
-      sidewalk: 0.8,
+      laneWidth: 3.65,
+      shoulderWidth: 2,
+      curbStyle: "flush",
+      sidewalk: 0,
       guardrails: true,
       drainage: false,
       manholes: false,
@@ -833,6 +853,21 @@ export function parseProject(raw: unknown): Project {
       end: entry.end,
       h1: vec(entry.h1),
       h2: vec(entry.h2),
+      roadClass: roadClasses.includes(entry.roadClass as RoadClass)
+        ? (entry.roadClass as RoadClass)
+        : "street",
+      embankment: entry.embankment === true,
+      auxiliaryLane:
+        entry.auxiliaryLane === "entry" || entry.auxiliaryLane === "exit"
+          ? entry.auxiliaryLane
+          : "none",
+      auxiliaryLength: number(entry.auxiliaryLength, 200, 40, 500),
+      auxiliaryTaper: number(entry.auxiliaryTaper, 90, 20, 200),
+      bridgeFrom: number(entry.bridgeFrom, 0, 0, 0.98),
+      bridgeTo: Math.max(
+        number(entry.bridgeFrom, 0, 0, 0.98) + 0.02,
+        number(entry.bridgeTo, 1, 0.02, 1),
+      ),
       trafficSide: entry.trafficSide === "left" ? "left" : "right",
       sharedCycleStreet: entry.sharedCycleStreet === true,
       curbExtensions: entry.curbExtensions === true,
@@ -1056,6 +1091,18 @@ export function validateGenerationBudget(project: Project): void {
         2 *
         (road.curbDrainType === "side-entry" ? 160 : 120);
     if (
+      !roadClasses.includes(road.roadClass) ||
+      typeof road.embankment !== "boolean" ||
+      !["none", "entry", "exit"].includes(road.auxiliaryLane) ||
+      ![road.auxiliaryLength, road.auxiliaryTaper].every(Number.isFinite) ||
+      road.auxiliaryLength < 40 ||
+      road.auxiliaryLength > 500 ||
+      road.auxiliaryTaper < 20 ||
+      road.auxiliaryTaper > 200 ||
+      ![road.bridgeFrom, road.bridgeTo].every(Number.isFinite) ||
+      road.bridgeFrom < 0 ||
+      road.bridgeTo > 1 ||
+      road.bridgeTo - road.bridgeFrom < 0.0199 ||
       !railStyles.includes(road.railStyle) ||
       !["right", "left"].includes(road.trafficSide) ||
       ![road.bridgeDepth, road.pierSpacing, road.shoulderWidth].every(
@@ -1211,6 +1258,12 @@ export function validateGenerationBudget(project: Project): void {
     throw new RangeError("The editor tile must fit inside a 5 × 5 km area.");
 }
 
+export const roadCurbWidth = (road: RoadSettings) =>
+  road.curbStyle === "flush" && road.markingStyle === "motorway"
+    ? 0
+    : road.curbStyle === "race"
+      ? 0.6
+      : 0.22;
 export const motorHalfWidth = (road: RoadSettings) =>
   (road.lanes * road.laneWidth) / 2 +
   road.median / 2 +
@@ -1223,10 +1276,20 @@ export const cycleBufferWidth = (road: RoadSettings) =>
     : 0;
 export const cycleZoneWidth = (road: RoadSettings) =>
   road.cycleMode === "none" ? 0 : road.cycleWidth + cycleBufferWidth(road);
-export const roadHalfWidth = (road: RoadSettings) =>
+export const baseRoadHalfWidth = (road: RoadSettings) =>
   motorHalfWidth(road) +
   cycleZoneWidth(road) +
   (road.markingStyle === "motorway" ? road.shoulderWidth : 0);
+export const roadHalfWidth = (road: RoadSettings) =>
+  baseRoadHalfWidth(road) +
+  (supportsAuxiliary(road) && road.auxiliaryLane !== "none"
+    ? road.laneWidth
+    : 0);
+export const roadHalfWidthAt = (
+  road: RoadSettings,
+  s: number,
+  length: number,
+) => baseRoadHalfWidth(road) + auxiliaryWidthAt(road, s, length);
 export const roadMaterial = (road: RoadSettings) =>
   road.sharedCycleStreet
     ? "cycle-red"

@@ -5,6 +5,7 @@ import {
   MeshBuilder,
   frameAt,
   edgePoint,
+  sideHalfWidth,
   surfacePoint,
   sweepCurb,
   effectiveCrossing,
@@ -191,7 +192,7 @@ export function footwayPoint(
 ): V3 {
   const f = frameAt(span, s),
     edge = edgePoint(f, side, "road"),
-    p = surfacePoint(f, side * (f.hw + f.cw + across));
+    p = surfacePoint(f, side * (sideHalfWidth(f, side) + f.cw + across));
   p[1] = edge[1] + f.curbHeight + (across * f.sidewalkCrossfall) / 100;
   let drop = 0;
   for (const ramp of span.footway?.ramps ?? [])
@@ -257,7 +258,7 @@ export function buildSideInlet(
     h = f.curbHeight,
     sample = (u: number, v: number, y: number) => {
       const frame = frameAt(span, s + u),
-        p = surfacePoint(frame, side * (frame.hw + v));
+        p = surfacePoint(frame, side * (sideHalfWidth(frame, side) + v));
       p[1] = edgePoint(frame, side, "road")[1] + y;
       return p;
     };
@@ -368,7 +369,7 @@ function hollowPanel(
     return false;
   const p = (s: number, v: number, y: number) => {
       const f = frameAt(span, s),
-        q = surfacePoint(f, side * (f.hw + v));
+        q = surfacePoint(f, side * (sideHalfWidth(f, side) + v));
       q[1] = edgePoint(f, side, "road")[1] + y;
       return q;
     },
@@ -415,7 +416,7 @@ function hollowPanel(
       right = f.cw / 2 + 0.095,
       top = (s: number, v: number, lift = 0) => {
         const fr = frameAt(span, s),
-          q = surfacePoint(fr, side * (fr.hw + v));
+          q = surfacePoint(fr, side * (sideHalfWidth(fr, side) + v));
         q[1] = edgePoint(fr, side, "road")[1] + fr.curbHeight + lift;
         return q;
       };

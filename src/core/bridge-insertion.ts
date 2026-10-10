@@ -1,3 +1,5 @@
+import { referenceLayout } from "./design-basis";
+import { bridgeAt } from "./bridge-profile";
 import {
   controlPoints,
   getNode,
@@ -5,7 +7,7 @@ import {
   roadHalfWidth,
   type Project,
 } from "./model";
-import { sampleAlignment } from "./curves";
+import { sampleAlignment, stationAt } from "./curves";
 import { splitRoad, detectCrossings } from "./editing";
 import { derivative, cubic } from "./math";
 export interface BridgeInsertion {
@@ -13,6 +15,8 @@ export interface BridgeInsertion {
   approaches: [string, string];
   joints: [string, string];
   elevation: number;
+  deckLength: number;
+  approachLengths: [number, number];
 }
 /** Atomic graph operation: preserves the two existing shared endpoints and the
  * exact XZ cubic, then inserts two level deck joints and three connected pieces.
@@ -33,13 +37,20 @@ export function insertConnectedBridge(
     throw new RangeError(
       "Clear vehicle entries before elevating this alignment, or choose another road.",
     );
-  const length = sampleAlignment(project, original).length,
-    rise = options.rise ?? 8;
+  if (original.auxiliaryLane !== "none")
+    throw new RangeError(
+      "Choose an alignment without an authored speed-change lane before inserting a bridge.",
+    );
+  const alignment = sampleAlignment(project, original),
+    length = alignment.length,
+    rise = options.rise ?? referenceLayout.deckElevation,
+    deckLength = 64,
+    requiredLength = Math.max(600, Math.ceil((3 * rise) / 0.0405 + deckLength));
   if (!Number.isFinite(rise) || rise < 5 || rise > 16)
     throw new RangeError("Bridge rise must be between 5 and 16 metres.");
-  if (length < 420)
+  if (length < requiredLength)
     throw new RangeError(
-      "Connected bridge insertion needs at least 420 m for gradual approaches. Use the Connected highway bridge template, or lengthen this alignment.",
+      `Connected bridge insertion needs at least ${requiredLength} m for a 64 m deck and approximately 4% approaches at this rise. Use the Connected highway bridge template, or lengthen this alignment.`,
     );
   if (project.roads.length > 498 || project.nodes.length > 1498)
     throw new RangeError(
@@ -54,9 +65,11 @@ export function insertConnectedBridge(
       ) + rise,
     start = r.start,
     end = r.end;
-  const a = splitRoad(draft, r.id, 0.4),
+  const ta = stationAt(alignment, (length - deckLength) / 2).t,
+    tb = stationAt(alignment, (length + deckLength) / 2).t;
+  const a = splitRoad(draft, r.id, ta),
     rest = draft.roads.find((r) => r.start === a.id && r.end === end)!,
-    b = splitRoad(draft, rest.id, 1 / 3);
+    b = splitRoad(draft, rest.id, (tb - ta) / (1 - ta));
   a.position[1] = b.position[1] = elevation;
   a.name = "Bridge landing · In";
   b.name = "Bridge landing · Out";
@@ -67,7 +80,13 @@ export function insertConnectedBridge(
     deck = draft.roads.find((r) => r.start === a.id && r.end === b.id)!,
     approachOut = draft.roads.find((r) => r.start === b.id && r.end === end)!;
   for (const piece of [approachIn, deck, approachOut]) {
-    piece.bridge = true;
+    piece.bridge = piece.id === deck.id;
+    piece.bridgeFrom = 0;
+    piece.bridgeTo = 1;
+    piece.embankment = piece.id !== deck.id;
+    if (piece.roadClass === "street" && piece.markingStyle === "motorway")
+      piece.roadClass = "mainline";
+    piece.bridgeDepth = Math.max(piece.bridgeDepth, referenceLayout.deckDepth);
     piece.structure = options.structure ?? "steel";
     piece.guardrails = true;
     if (!original.guardrails) {
@@ -80,9 +99,9 @@ export function insertConnectedBridge(
     for (const station of alignment.stations) {
       const d = derivative(points, station.t),
         grade = (Math.abs(d[1]) / Math.max(1e-8, Math.hypot(d[0], d[2]))) * 100;
-      if (grade > 8.01)
+      if (grade > 4.05)
         throw new RangeError(
-          "This curve cannot fit approaches below 8% grade. Lengthen the alignment or reduce the bridge rise.",
+          "This curve cannot fit approaches at approximately 4% grade. Lengthen the alignment or reduce the bridge rise.",
         );
     }
   }
@@ -100,9 +119,11 @@ export function insertConnectedBridge(
       lower = ay > by ? b : a,
       clearance =
         Math.abs(ay - by) -
-        (upper.bridge ? upper.bridgeDepth : 0.48) -
+        (bridgeAt(upper, ay > by ? crossing.ta : crossing.tb)
+          ? upper.bridgeDepth
+          : 0.48) -
         Math.max(0.12, 0.04 + (roadHalfWidth(lower) * lower.crossfall) / 100);
-    if (clearance < 4.5)
+    if (clearance < referenceLayout.clearance)
       throw new RangeError(
         "The inserted bridge would conflict with another road. Choose a clear alignment or increase its rise and approach length.",
       );
@@ -115,5 +136,10 @@ export function insertConnectedBridge(
     approaches: [approachIn.id, approachOut.id],
     joints: [a.id, b.id],
     elevation,
+    deckLength: sampleAlignment(draft, deck).length,
+    approachLengths: [
+      sampleAlignment(draft, approachIn).length,
+      sampleAlignment(draft, approachOut).length,
+    ],
   };
 }

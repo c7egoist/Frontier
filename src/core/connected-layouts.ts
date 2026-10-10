@@ -1,3 +1,6 @@
+import { referenceLayout as ref } from "./design-basis";
+import { derivative, distanceXZ, cubic } from "./math";
+import { sampleAlignment } from "./curves";
 /** Original, directionally connected road layouts. No scenery/building meshes.
  * Coordinates are metres. Motorway grade separation is in the graph, not props.
  */
@@ -15,8 +18,10 @@ import { sub, type V3 } from "./math";
 
 const highway: Partial<RoadSettings> = {
   lanes: 2,
-  laneWidth: 3.5,
-  shoulderWidth: 1,
+  laneWidth: ref.laneWidth,
+  shoulderWidth: ref.mainShoulder,
+  roadClass: "mainline",
+  embankment: true,
   oneWay: true,
   guardrails: true,
   railHeight: 0.95,
@@ -30,24 +35,25 @@ const highway: Partial<RoadSettings> = {
   manholes: false,
   cornerRamps: false,
   speedLimit: 100,
-  sidewalk: 0.8,
+  sidewalk: 0,
   structure: "steel",
-  bridgeDepth: 1.25,
-  pierSpacing: 32,
+  bridgeDepth: ref.deckDepth,
+  pierSpacing: 30,
   railStyle: "boxbeam",
   crossfall: 1.5,
 };
 const ramp: Partial<RoadSettings> = {
   ...highway,
   lanes: 1,
-  laneWidth: 3.8,
-  shoulderWidth: 0.45,
-  sidewalk: 0.6,
+  laneWidth: ref.rampLane,
+  shoulderWidth: ref.rampShoulder,
+  sidewalk: 0,
+  roadClass: "connector",
   railStyle: "thrie",
   railHeight: 0.95,
   postSpacing: 2.5,
   speedLimit: 60,
-  bridge: true,
+  bridge: false,
   structure: "concrete",
   bridgeDepth: 1.05,
 };
@@ -90,208 +96,496 @@ const rotate = (p: V3, quadrant: number): V3 => {
     s = Math.sin(a);
   return [p[0] * c - p[2] * s, p[1], p[0] * s + p[2] * c];
 };
-function cloverleaf(tInterchange = false) {
-  const a = author(
-      tInterchange
-        ? "Twin-loop T interchange · three connected arms"
-        : "Divided cloverleaf · connected flyovers",
-    ),
-    { node, road, project } = a;
-  const labels = ["Eastbound", "Northbound", "Westbound", "Southbound"];
-  const stations = [-900, -700, -480, -50, 50, 480, 700, 900];
-  const rows = labels.map((label, q) =>
-    stations
-      .filter(
-        (s) => !tInterchange || ((q !== 1 || s >= -50) && (q !== 3 || s <= 50)),
-      )
-      .map((s) => {
-        const y = q % 2 && Math.abs(s) <= 700 ? 8 : 0;
-        return node(
-          `${label} · ${s < 0 ? "in" : "out"} ${Math.abs(s)} m`,
-          rotate([s, y, 7], q),
-          2.8,
-        );
-      }),
+// The profile is a single smooth transition from fill to a short level overpass.
+// Node grades are carried into the cubic handles, rather than reset at every port.
+function motorwayHeight(s: number, halfSpan: number, landing = 390) {
+  const t = Math.max(
+    0,
+    Math.min(1, (landing - Math.abs(s)) / (landing - halfSpan)),
   );
-  rows.forEach((row, q) =>
-    row.slice(0, -1).forEach((n, i) => {
-      road(n, row[i + 1], `${labels[q]} motorway · ${i + 1}`, {
-        ...highway,
-        bridge:
-          q % 2 === 1 && (n.position[1] > 0 || row[i + 1].position[1] > 0),
-      });
-    }),
+  return ref.deckElevation * t * t * (3 - 2 * t);
+}
+function motorwayGrade(s: number, halfSpan: number, landing = 390) {
+  const t = Math.max(
+    0,
+    Math.min(1, (landing - Math.abs(s)) / (landing - halfSpan)),
   );
-  const r = 45,
-    k = r * 0.5522847498307936;
-  for (let q = 0; q < 4; q++) {
-    const port = (quadrant: number, s: number) =>
-      rows[quadrant].find(
-        (n) => Math.abs(rotate(n.position, -quadrant)[0] - s) < 1e-5,
-      )!;
-    if (!tInterchange || q === 0 || q === 3) {
-      const source = port(q, 50),
-        target = port((q + 1) % 4, -50),
-        sy = source.position[1],
-        ey = target.position[1];
-      const points: V3[] = [
-        [110, 0, 65],
-        [155, 0, 110],
-        [110, 0, 155],
-        [65, 0, 110],
-      ];
-      const ring = points.map((p, i) => {
-        const point = rotate(p, q);
-        point[1] = sy + ((ey - sy) * (i + 1)) / 5;
-        return node(`${labels[q]} left-turn loop · ${i + 1}`, point, 1.2);
-      });
-      const loopSettings = { ...ramp, speedLimit: 40 };
-      road(
-        source,
-        ring[0],
-        `${labels[q]} loop · diverge`,
-        loopSettings,
-        rotate([30, 0, 13], q),
-        rotate([-24, 0, 0], q),
-      );
-      const handles: [V3, V3][] = [
-        [
-          [k, 0, 0],
-          [0, 0, -k],
-        ],
-        [
-          [0, 0, k],
-          [k, 0, 0],
-        ],
-        [
-          [-k, 0, 0],
-          [0, 0, k],
-        ],
-      ];
-      for (let i = 0; i < 3; i++)
-        road(
-          ring[i],
-          ring[i + 1],
-          `${labels[q]} loop · 90° ${i + 1}`,
-          loopSettings,
-          rotate(handles[i][0], q),
-          rotate(handles[i][1], q),
-        );
-      road(
-        ring[3],
-        target,
-        `${labels[q]} loop · merge`,
-        loopSettings,
-        rotate([0, 0, -24], q),
-        rotate([13, 0, 30], q),
-      );
-    }
-    if (!tInterchange || q === 2 || q === 3)
-      road(
-        port(q, -480),
-        port((q + 3) % 4, 480),
-        `${labels[q]} direct right-turn connector`,
+  return (
+    (-Math.sign(s) * ref.deckElevation * 6 * t * (1 - t)) / (landing - halfSpan)
+  );
+}
+function setGrades(r: ReturnType<Author["road"]>, start: number, end: number) {
+  r.h1[1] = start * Math.hypot(r.h1[0], r.h1[2]);
+  r.h2[1] = -end * Math.hypot(r.h2[0], r.h2[2]);
+  return r;
+}
+function loopRoads(
+  a: Author,
+  points: RoadNode[],
+  prefix: string,
+  quadrant = 0,
+  radius: number = ref.loopRadius,
+  startGrade = 0,
+  endGrade = 0,
+) {
+  const length = Math.PI * radius * 1.5,
+    sy = points[0].position[1],
+    ey = points[3].position[1],
+    height = (t: number) =>
+      (2 * t * t * t - 3 * t * t + 1) * sy +
+      (t * t * t - 2 * t * t + t) * length * startGrade +
+      (-2 * t * t * t + 3 * t * t) * ey +
+      (t * t * t - t * t) * length * endGrade,
+    grade = (t: number) =>
+      ((6 * t * t - 6 * t) * sy +
+        (3 * t * t - 4 * t + 1) * length * startGrade +
+        (-6 * t * t + 6 * t) * ey +
+        (3 * t * t - 2 * t) * length * endGrade) /
+      length,
+    k = radius * 0.5522847498307936,
+    handles: [V3, V3][] = [
+      [
+        [k, 0, k * 0.08],
+        [0, 0, -k],
+      ],
+      [
+        [0, 0, k],
+        [k, 0, 0],
+      ],
+      [
+        [-k, 0, 0],
+        [k * 0.08, 0, k],
+      ],
+    ];
+  for (let i = 1; i < 3; i++) points[i].position[1] = height(i / 3);
+  for (let i = 0; i < 3; i++)
+    setGrades(
+      a.road(
+        points[i],
+        points[i + 1],
+        `${prefix} loop · 90° ${i + 1}`,
         {
           ...ramp,
-          structure: "steel",
-          bridgeDepth: 1.25,
-          railStyle: "wbeam",
+          laneWidth: ref.loopLane,
+          roadClass: "loop",
+          speedLimit: 50,
         },
-        rotate([250, 0, 40], q),
-        rotate([-40, 0, -250], q),
+        rotate(handles[i][0], quadrant),
+        rotate(handles[i][1], quadrant),
+      ),
+      grade(i / 3),
+      grade((i + 1) / 3),
+    );
+}
+function cloverleaf() {
+  const a = author("Reference cloverleaf · collector-distributor carriageways"),
+    { node, road, project } = a,
+    labels = ["Eastbound", "Northbound", "Westbound", "Southbound"],
+    mainStations = [-1600, -1300, -1000, -390, -48, 48, 390, 1000, 1300, 1600],
+    loopPort = ref.collectorOffset + ref.loopRadius,
+    cdStations = [-1000, -850, -loopPort, -48, 48, loopPort, 850, 1000],
+    main = labels.map((label, q) =>
+      mainStations.map((s) =>
+        node(
+          `${label} motorway · ${s} m`,
+          rotate(
+            [s, q % 2 ? motorwayHeight(s, 48) : 0, ref.carriagewayOffset],
+            q,
+          ),
+          1.2,
+        ),
+      ),
+    ),
+    collectors = labels.map((label, q) =>
+      cdStations.map((s) =>
+        node(
+          `${label} C-D · ${s} m`,
+          rotate(
+            [s, q % 2 ? motorwayHeight(s, 48) : 0, ref.collectorOffset],
+            q,
+          ),
+          1.2,
+        ),
+      ),
+    ),
+    port = (rows: RoadNode[][], q: number, s: number, values: number[]) =>
+      rows[q][values.indexOf(s)];
+  main.forEach((row, q) =>
+    row.slice(0, -1).forEach((n, i) => {
+      const lo = mainStations[i],
+        hi = mainStations[i + 1];
+      setGrades(
+        road(n, row[i + 1], `${labels[q]} motorway · ${i + 1}`, {
+          ...highway,
+          auxiliaryLane: hi === -1300 ? "exit" : lo === 1300 ? "entry" : "none",
+          auxiliaryLength: hi === -1300 ? ref.exitRun : ref.entranceRun,
+          auxiliaryTaper: ref.laneTaper,
+          bridge: !!(q % 2 && lo === -48 && hi === 48),
+        }),
+        q % 2 ? motorwayGrade(lo, 48) : 0,
+        q % 2 ? motorwayGrade(hi, 48) : 0,
       );
+    }),
+  );
+  collectors.forEach((row, q) => {
+    row.slice(0, -1).forEach((n, i) => {
+      const lo = cdStations[i],
+        hi = cdStations[i + 1];
+      setGrades(
+        road(n, row[i + 1], `${labels[q]} collector-distributor · ${i + 1}`, {
+          ...ramp,
+          laneWidth: ref.laneWidth,
+          roadClass: "collector",
+          lanes: lo >= -loopPort && hi <= loopPort ? 2 : 1,
+          speedLimit: 60,
+          bridge: !!(q % 2 && lo === -48 && hi === 48),
+          structure: "steel",
+          bridgeDepth: ref.deckDepth,
+        }),
+        q % 2 ? motorwayGrade(lo, 48) : 0,
+        q % 2 ? motorwayGrade(hi, 48) : 0,
+      );
+    });
+    road(
+      port(main, q, -1300, mainStations),
+      row[0],
+      `${labels[q]} C-D entry · deceleration connection`,
+      {
+        ...ramp,
+        laneWidth: ref.laneWidth,
+        roadClass: "collector",
+        speedLimit: 70,
+      },
+      rotate([140, 0, 12], q),
+      rotate([-130, 0, 0], q),
+    );
+    road(
+      row.at(-1)!,
+      port(main, q, 1300, mainStations),
+      `${labels[q]} C-D exit · acceleration connection`,
+      {
+        ...ramp,
+        laneWidth: ref.laneWidth,
+        roadClass: "collector",
+        speedLimit: 70,
+      },
+      rotate([130, 0, 0], q),
+      rotate([-140, 0, 12], q),
+    );
+  });
+  for (let q = 0; q < 4; q++) {
+    const source = port(collectors, q, loopPort, cdStations),
+      target = port(collectors, (q + 1) % 4, -loopPort, cdStations),
+      c = loopPort,
+      r = ref.loopRadius,
+      p1 = node(
+        `${labels[q]} loop · outer quadrant`,
+        rotate([c + r, 0, c], q),
+        1.2,
+      ),
+      p2 = node(
+        `${labels[q]} loop · return quadrant`,
+        rotate([c, 0, c + r], q),
+        1.2,
+      );
+    loopRoads(
+      a,
+      [source, p1, p2, target],
+      labels[q],
+      q,
+      r,
+      q % 2 ? motorwayGrade(loopPort, 48) : 0,
+      (q + 1) % 2 ? motorwayGrade(-loopPort, 48) : 0,
+    );
+    const start = port(collectors, q, -850, cdStations),
+      end = port(collectors, (q + 3) % 4, 850, cdStations),
+      radius = 850 - ref.collectorOffset,
+      k = radius * 0.5522847498307936;
+    road(
+      start,
+      end,
+      `${labels[q]} direct right-turn connector`,
+      { ...ramp, speedLimit: 70, railStyle: "wbeam" },
+      rotate([k, 0, k * 0.08], q),
+      rotate([-k * 0.08, 0, -k], q),
+    );
   }
   return project;
 }
-/** Directional diamond: lower city avenue joins both elevated carriageways
- * through four genuine graph ramps. The centre underpass has no at-grade joint.
- */
+/** Conventional 260 m diamond, 90-degree street terminals, 48 m overpass.
+ * Raised approaches and ramps are supported by fill, not kilometres of piers. */
 function diamond(a: Author, x: number, west?: RoadNode) {
-  const { node, road } = a;
-  const values = [-700, -480, -285, -115, 115, 285, 480, 700];
-  const south = values.map((z) =>
-    node(
-      `Southbound ${Math.abs(z)} m`,
-      [x - 7, Math.abs(z) <= 285 ? 8 : 0, z],
-      2.8,
-    ),
-  );
-  const north = [...values]
-    .reverse()
-    .map((z) =>
-      node(
-        `Northbound ${Math.abs(z)} m`,
-        [x + 7, Math.abs(z) <= 285 ? 8 : 0, z],
-        2.8,
+  const { node, road } = a,
+    values = [-1000, -800, -450, -24, 24, 450, 800, 1000],
+    rows = [values, [...values].reverse()].map((stations, q) =>
+      stations.map((z) =>
+        node(
+          `${q ? "Northbound" : "Southbound"} ${z} m`,
+          [
+            x + (q ? 1 : -1) * ref.carriagewayOffset,
+            Math.abs(z) <= 450 ? ref.deckElevation : 0,
+            z,
+          ],
+          1.2,
+        ),
       ),
     );
-  for (const [label, row] of [
-    ["Southbound", south],
-    ["Northbound", north],
-  ] as [string, RoadNode[]][])
+  for (let q = 0; q < 2; q++) {
+    const row = rows[q];
     row.slice(0, -1).forEach((n, i) =>
-      road(n, row[i + 1], `${label} highway · ${i + 1}`, {
-        ...highway,
-        bridge: n.position[1] > 0 || row[i + 1].position[1] > 0,
-      }),
+      road(
+        n,
+        row[i + 1],
+        `${q ? "Northbound" : "Southbound"} highway · ${i + 1}`,
+        {
+          ...highway,
+          auxiliaryLane: i === 1 ? "exit" : i === 5 ? "entry" : "none",
+          auxiliaryLength: i === 1 ? ref.exitRun : ref.entranceRun,
+          auxiliaryTaper: ref.laneTaper,
+          bridge:
+            Math.abs(n.position[2]) === 24 &&
+            Math.abs(row[i + 1].position[2]) === 24,
+        },
+      ),
     );
-  const w = node("West ramp terminals", [x - 110, 0, 0], 5.2, true),
-    e = node("East ramp terminals", [x + 110, 0, 0], 5.2, true);
+  }
+  const w = node("West ramp terminals", [x - 130, 0, 0], 24, true),
+    e = node("East ramp terminals", [x + 130, 0, 0], 24, true);
+  w.signals = e.signals = true;
   const street: Partial<RoadSettings> = {
-    lanes: 2,
-    laneWidth: 3.25,
-    sidewalk: 3.4,
-    cycleMode: "protected",
-    cycleWidth: 1.8,
-    cycleSeparator: 0.5,
-    pattern: "linear",
-    curbDrainType: "side-entry",
-    streetLights: !!west,
-    signs: !!west,
-    speedLimit: 50,
-  };
-  const boundary = west ?? node("City west approach", [x - 260, 0, 0], 5.2);
+      lanes: 2,
+      laneWidth: 3.25,
+      median: 1.8,
+      sidewalk: 3.4,
+      cycleMode: "protected",
+      cycleWidth: 1.8,
+      cycleSeparator: 0.5,
+      pattern: "linear",
+      curbDrainType: "side-entry",
+      streetLights: !!west,
+      signs: !!west,
+      speedLimit: 50,
+    },
+    boundary = west ?? node("City west approach", [x - 350, 0, 0], 5.2);
   road(boundary, w, "City bridge approach · West", street);
   road(w, e, "Lower avenue · continuous underpass", street);
   road(
     e,
-    node("City east approach", [x + 260, 0, 0], 5.2),
+    node("City east approach", [x + 350, 0, 0], 5.2),
     "City bridge approach · East",
     street,
   );
   road(
-    south[2],
+    rows[0][2],
     w,
     "Southbound exit · connected descent",
     ramp,
-    [-15, 0, 130],
-    [35, 0, -55],
+    [-12, 0, 170],
+    [0, 0, -140],
   );
   road(
     w,
-    south[5],
+    rows[0][5],
     "Southbound entry · connected ascent",
     ramp,
-    [35, 0, 55],
-    [-15, 0, -130],
+    [0, 0, 140],
+    [-12, 0, -170],
   );
   road(
-    north[2],
+    rows[1][2],
     e,
     "Northbound exit · connected descent",
     ramp,
-    [15, 0, -130],
-    [-35, 0, 55],
+    [12, 0, -170],
+    [0, 0, 140],
   );
   road(
     e,
-    north[5],
+    rows[1][5],
     "Northbound entry · connected ascent",
     ramp,
-    [-35, 0, -55],
-    [15, 0, 130],
+    [0, 0, -140],
+    [12, 0, 170],
   );
   return a.project;
+}
+/** A genuine single-loop trumpet: two direct connections, one 270-degree
+ * loop and one outer semi-direct connector. The two stem decks cross the
+ * through freeway; the loop lead remains below them, with no at-grade joint. */
+function trumpet() {
+  const a = author("Reference trumpet · one loop and semi-direct connector"),
+    { node, road, project } = a,
+    mainSouth = [-1500, -1100, -650, 0, 650, 1050, 1250].map((z) =>
+      node(`Southbound through · ${z} m`, [-ref.carriagewayOffset, 0, z], 1.2),
+    ),
+    mainNorth = [1250, 850, 450, 0, -650, -1100, -1500].map((z) =>
+      node(`Northbound through · ${z} m`, [ref.carriagewayOffset, 0, z], 1.2),
+    ),
+    stemValues = [-1150, -950, -650, -390, -32, 52, 350],
+    stem = stemValues.map((x) =>
+      node(
+        `Eastbound stem · ${x} m`,
+        [
+          x,
+          x <= -390 ? 0 : x >= -32 ? ref.deckElevation : motorwayHeight(x, 32),
+          4.5,
+        ],
+        1.2,
+      ),
+    );
+  for (const [label, row] of [
+    ["Southbound", mainSouth],
+    ["Northbound", mainNorth],
+  ] as [string, RoadNode[]][])
+    row.slice(0, -1).forEach((n, i) => {
+      const exit =
+          label === "Southbound"
+            ? row[i + 1].position[2] === -650
+            : row[i + 1].position[2] === 450,
+        entry =
+          label === "Southbound"
+            ? n.position[2] === 650
+            : n.position[2] === -1100;
+      road(n, row[i + 1], `${label} motorway · ${i + 1}`, {
+        ...highway,
+        auxiliaryLane: exit ? "exit" : entry ? "entry" : "none",
+        auxiliaryLength: exit ? ref.exitRun : ref.entranceRun,
+        auxiliaryTaper: ref.laneTaper,
+      });
+    });
+  stem.slice(0, -1).forEach((n, i) =>
+    road(n, stem[i + 1], `Eastbound stem · ${i + 1}`, {
+      ...ramp,
+      lanes: stemValues[i] < -650 ? 2 : 1,
+      laneWidth: ref.laneWidth,
+      speedLimit: 70,
+      roadClass: stemValues[i] < -650 ? "mainline" : "connector",
+      bridge: stemValues[i] === -32,
+      structure: "steel",
+      bridgeDepth: ref.deckDepth,
+    }),
+  );
+  const r = ref.loopRadius,
+    k = r * 0.5522847498307936,
+    cy = -r - 4.5,
+    cx = r + 32,
+    loopA = node("Trumpet loop · entry", [32, 0, cy], 1.2),
+    loopB = node("Trumpet loop · crown quadrant", [cx, 0, cy - r], 1.2),
+    loopC = node("Trumpet loop · return quadrant", [cx + r, 0, cy], 1.2),
+    loopD = node(
+      "Trumpet loop · bridge landing",
+      [cx, ref.deckElevation, -4.5],
+      1.2,
+    ),
+    outboundValues = [52, -32, -390, -650, -950, -1150],
+    outbound = outboundValues.map((x) =>
+      node(
+        `Westbound stem · ${x} m`,
+        [
+          x,
+          x <= -390 ? 0 : x >= -32 ? ref.deckElevation : motorwayHeight(x, 32),
+          -4.5,
+        ],
+        1.2,
+      ),
+    ),
+    out = [loopD, ...outbound];
+  out.slice(0, -1).forEach((n, i) =>
+    road(n, out[i + 1], `Westbound stem · ${i + 1}`, {
+      ...ramp,
+      lanes: n.position[0] <= -650 ? 2 : 1,
+      laneWidth: ref.laneWidth,
+      speedLimit: 70,
+      roadClass: n.position[0] <= -650 ? "mainline" : "connector",
+      bridge: n.position[0] === 52,
+      structure: "steel",
+      bridgeDepth: ref.deckDepth,
+    }),
+  );
+  road(
+    mainNorth.find((n) => n.position[2] === 450)!,
+    loopA,
+    "Northbound loop lead · below stem overpass",
+    { ...ramp, speedLimit: 60 },
+    [36, 0, -180],
+    [0, 0, 180],
+  );
+  loopRoads(a, [loopA, loopB, loopC, loopD], "Trumpet", 1, r);
+  // Left-turn semi-direct route wraps outside the one loop, without a second loop.
+  const semiB = node("Semi-direct · north turn", [650, 0, -295.5], 1.2),
+    semiC = node("Semi-direct · west turn", [350, 0, -595.5], 1.2),
+    semiEnd = mainNorth.find((n) => n.position[2] === -1100)!,
+    semi = [stem.at(-1)!, semiB, semiC, semiEnd],
+    h = 300 * 0.5522847498307936,
+    semiRoads = [
+      road(
+        semi[0],
+        semi[1],
+        "Trumpet semi-direct · quarter 1",
+        { ...ramp, speedLimit: 60 },
+        [h, 0, 0],
+        [0, 0, h],
+      ),
+      road(
+        semi[1],
+        semi[2],
+        "Trumpet semi-direct · quarter 2",
+        { ...ramp, speedLimit: 60 },
+        [0, 0, -h],
+        [h, 0, 0],
+      ),
+      road(
+        semi[2],
+        semi[3],
+        "Trumpet semi-direct · northbound merge",
+        { ...ramp, speedLimit: 60 },
+        [-235, 0, -12],
+        [12, 0, 210],
+      ),
+    ];
+  const lengths = semiRoads.map((r) => {
+      const st = sampleAlignment(project, r).stations;
+      return st
+        .slice(1)
+        .reduce((sum, s, i) => sum + distanceXZ(s.p, st[i].p), 0);
+    }),
+    total = lengths.reduce((s, l) => s + l, 0);
+  let distance = 0;
+  semi.forEach((n, i) => {
+    if (i) distance += lengths[i - 1];
+    const t = distance / total;
+    n.position[1] = ref.deckElevation * (1 - t * t * (3 - 2 * t));
+  });
+  distance = 0;
+  semiRoads.forEach((r, i) => {
+    const g = (s: number) =>
+      (-ref.deckElevation * 6 * (s / total) * (1 - s / total)) / total;
+    setGrades(r, g(distance), g(distance + lengths[i]));
+    distance += lengths[i];
+  });
+  const sourceStem = stem.find((n) => n.position[0] === -650)!,
+    targetSouth = mainSouth.find((n) => n.position[2] === 650)!,
+    sourceSouth = mainSouth.find((n) => n.position[2] === -650)!,
+    targetStem = outbound.find((n) => n.position[0] === -650)!,
+    dx = 641.5 * 0.5522847498307936,
+    dz = 645.5 * 0.5522847498307936;
+  road(
+    sourceStem,
+    targetSouth,
+    "Stem to southbound · direct right-turn connector",
+    { ...ramp, speedLimit: 70 },
+    [dx, 0, dz * 0.08],
+    [-dx * 0.08, 0, -dz],
+  );
+  road(
+    sourceSouth,
+    targetStem,
+    "Southbound to stem · direct right-turn connector",
+    { ...ramp, speedLimit: 70 },
+    [-dx * 0.08, 0, dz],
+    [dx, 0, -dz * 0.08],
+  );
+  return project;
 }
 function city() {
   const a = author("Connected city network · streets and highway bridges"),
@@ -423,7 +717,7 @@ function city() {
       }
     }
   // Continuous protected underpass links the city grid to the motorway ramps.
-  diamond(a, 460, grid[2][4]);
+  diamond(a, 540, grid[2][4]);
   return project;
 }
 function dumbbell() {
@@ -507,7 +801,7 @@ function dumbbell() {
 }
 export function makeConnectedTemplate(id: string): Project | null {
   if (id === "cloverleaf") return cloverleaf();
-  if (id === "trumpet") return cloverleaf(true);
+  if (id === "trumpet") return trumpet();
   if (id === "city") return city();
   if (id === "bridge" || id === "diamond")
     return diamond(

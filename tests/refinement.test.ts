@@ -218,6 +218,17 @@ describe("continuous chamfered road curbs", () => {
           (m) => m.owner === joint.node.id && m.kind === "curb",
         );
         for (const arm of joint.arms) {
+          if (arm.frame.cw < 1e-8) {
+            const asphalt = n.meshes.filter(
+              (m) => m.owner === joint.node.id && m.kind === "asphalt",
+            );
+            for (const p of [arm.left, arm.center, arm.right])
+              assert(
+                asphalt.some((m) => hasPoint(m, p)),
+                `${id}: missing flush shoulder seam`,
+              );
+            continue;
+          }
           const side = arm.isStart ? 1 : -1;
           for (const direction of [-side, side]) {
             const f = arm.frame,

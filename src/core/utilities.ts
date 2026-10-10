@@ -1,4 +1,10 @@
-import { MeshBuilder, type RoadSpan, surfacePoint, frameAt } from "./geometry";
+import {
+  MeshBuilder,
+  type RoadSpan,
+  surfacePoint,
+  frameAt,
+  sideHalfWidth,
+} from "./geometry";
 import { type V3 } from "./math";
 
 export type UtilityKind = "manhole" | "curb-inlet" | "channel-drain";
@@ -224,7 +230,9 @@ export function buildLinearDrain(
   side: number,
 ): UtilityFeature {
   const rows = (offset: number, h: number) =>
-      span.frames.map((f) => surfacePoint(f, side * (f.hw - offset), h)),
+      span.frames.map((f) =>
+        surfacePoint(f, side * (sideHalfWidth(f, side) - offset), h),
+      ),
     outer = rows(0.05, 0.004),
     inner = rows(0.27, 0.004);
   b.strip("drain", "utility-recess", outer, inner, true);
@@ -251,7 +259,7 @@ export function buildLinearDrain(
     owner: span.road.id,
     ownerKind: "road",
     kind: "channel-drain",
-    position: surfacePoint(f, side * (f.hw - 0.16), 0.008),
+    position: surfacePoint(f, side * (sideHalfWidth(f, side) - 0.16), 0.008),
     length: span.length,
   };
 }

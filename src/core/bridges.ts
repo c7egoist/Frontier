@@ -1,8 +1,10 @@
+import { bridgeAt, parameterStation } from "./bridge-profile";
 import { SupportSurfaceIndex, supportOutline } from "./support-surfaces";
 import earcut from "earcut";
 import {
   frameAt,
   edgePoint,
+  sideHalfWidth,
   type MeshBuilder,
   type RoadSpan,
   type Frame,
@@ -32,12 +34,22 @@ export interface BridgeFeature {
   kind: "span" | "joint";
   material: "steel" | "concrete";
   depth: number;
+  girderCount?: number;
+  girderSpacing?: number;
+  width?: number;
+  spanLengths?: number[];
   pierSpacing: number;
   connections: string[];
   start: V3;
   end: V3;
   supports: BridgeSupport[];
   excludedSupports: V3[];
+  abutments?: {
+    position: V3;
+    width: number;
+    height: number;
+    thickness: number;
+  }[];
   members?: {
     road: string;
     material: "steel" | "concrete";
@@ -58,9 +70,12 @@ export function supportIsClear(
   frame?: Frame,
   depth = 1.2,
 ) {
+  const bias = frame ? bridgeSection(frame).bias : 0,
+    center = frame ? add(point, mul(frame.n, bias)) : point,
+    capWidth = frame ? Math.max(2.1, bridgeSection(frame).width - 1.2) : 5.6;
   const roadClear = !alignments.some((a) => {
     if (a.road.id === owner) return false;
-    const near = closestOnAlignment(a, point);
+    const near = closestOnAlignment(a, center);
     return (
       near.point[1] < point[1] - 2 &&
       near.distance < roadHalfWidth(a.road) + a.road.sidewalk + margin
@@ -75,19 +90,13 @@ export function supportIsClear(
   // respected by the indexed triangles, not approximated by a filled rectangle.
   return (
     surfaces.clear({
-      outline: supportOutline(point, n, d, 3, 2.7),
+      outline: supportOutline(center, n, d, 3, 2.7),
       minY: -0.4,
       maxY: top + 0.08,
     }) &&
     surfaces.clear({
-      outline: supportOutline(
-        point,
-        n,
-        d,
-        Math.max(2.1, (frame?.hw ?? 3.5) * 1.6),
-        1.7,
-      ),
-      minY: top - 0.38,
+      outline: supportOutline(center, n, d, capWidth, 1.7),
+      minY: top - 0.9,
       maxY: top + 0.08,
     })
   );
@@ -182,6 +191,23 @@ function girder(
     );
   }
 }
+/** About 2.5–3 m spacing and restrained overhangs, instead of only two
+ * beams underneath a wide freeway deck. This is geometric preliminary sizing. */
+function bridgeSection(f: Frame) {
+  const left = sideHalfWidth(f, -1) + f.cw + f.sw,
+    right = sideHalfWidth(f, 1) + f.cw + f.sw;
+  return { width: left + right, bias: (right - left) / 2 };
+}
+export function girderOffsets(f: Frame, forcedCount?: number) {
+  const { width, bias } = bridgeSection(f),
+    overhang = Math.min(1, width * 0.16),
+    extent = width / 2 - overhang,
+    count = forcedCount ?? Math.max(3, Math.ceil((2 * extent) / 2.8) + 1);
+  return Array.from(
+    { length: count },
+    (_, i) => bias - extent + (2 * extent * i) / (count - 1),
+  );
+}
 function pier(
   b: MeshBuilder,
   f: Frame,
@@ -189,7 +215,9 @@ function pier(
   kind: BridgeSupport["kind"],
 ): BridgeSupport | null {
   const top = f.p[1] - depth - 0.07,
-    bottom = -0.27;
+    bottom = -0.27,
+    section = bridgeSection(f),
+    center = add(f.p, mul(f.n, section.bias));
   if (top < 1) return null;
   const shape: [number, number][] = [
     [-0.48, -0.62],
@@ -203,10 +231,13 @@ function pier(
   ];
   const ring = (y: number, scale: number) =>
     shape.map(([u, v]) =>
-      add([f.p[0], y, f.p[2]], add(mul(f.n, u * scale), mul(f.d, v * scale))),
+      add(
+        [center[0], y, center[2]],
+        add(mul(f.n, u * scale), mul(f.d, v * scale)),
+      ),
     );
   const lo = ring(bottom, 1.08),
-    hi = ring(top - 0.34, 0.92),
+    hi = ring(top - 0.86, 0.92),
     close = (r: V3[]) => [...r, r[0]];
   b.strip("structure", "concrete", close(lo), close(hi));
   b.append(
@@ -226,24 +257,37 @@ function pier(
   b.box(
     "structure",
     "concrete",
-    [f.p[0], top - 0.17, f.p[2]],
-    Math.max(2.1, f.hw * 1.6),
-    0.42,
+    [center[0], top - 0.43, center[2]],
+    Math.max(2.1, section.width - 1.2),
+    0.86,
     1.7,
     f.d,
   );
-  b.box("structure", "foundation", [f.p[0], -0.18, f.p[2]], 3.0, 0.4, 2.7, f.d);
-  for (const side of [-1, 1])
+  b.box(
+    "structure",
+    "foundation",
+    [center[0], -0.18, center[2]],
+    3.0,
+    0.4,
+    2.7,
+    f.d,
+  );
+  for (const offset of girderOffsets(f))
     b.box(
       "structure",
       "rubber",
-      add([f.p[0], top + 0.045, f.p[2]], mul(f.n, side * f.hw * 0.62)),
+      add([f.p[0], top + 0.045, f.p[2]], mul(f.n, offset)),
       0.34,
       0.07,
       0.55,
       f.d,
     );
-  return { position: [f.p[0], 0, f.p[2]], top, footprint: [3, 2.7], kind };
+  return {
+    position: [center[0], 0, center[2]],
+    top,
+    footprint: [3, 2.7],
+    kind,
+  };
 }
 export function buildBridgeSpan(
   b: MeshBuilder,
@@ -254,11 +298,22 @@ export function buildBridgeSpan(
 ): BridgeFeature | undefined {
   const r = span.road;
   if (!r.bridge) return;
-  const frames = span.frames,
+  const first = Math.max(
+      span.frames[0].s,
+      parameterStation(span.alignment, r.bridgeFrom),
+    ),
+    last = Math.min(
+      span.frames.at(-1)!.s,
+      parameterStation(span.alignment, r.bridgeTo),
+    );
+  if (last - first < 0.1) return;
+  const frames = [
+      frameAt(span, first),
+      ...span.frames.filter((f) => f.s > first + 1e-7 && f.s < last - 1e-7),
+      frameAt(span, last),
+    ],
     depth = r.bridgeDepth,
-    steel = r.structure === "steel",
-    first = frames[0].s,
-    last = frames.at(-1)!.s;
+    steel = r.structure === "steel";
   // The deck slab is closed and follows every alignment station/width taper.
   const row = (side: number, y: number) =>
     frames.map((f) => {
@@ -280,15 +335,18 @@ export function buildBridgeSpan(
       rightBottom[i],
       leftBottom[i],
     ]);
-  for (const side of [-1, 1])
-    girder(b, frames, (f) => side * f.hw * 0.62, depth, steel);
+  const count = Math.max(...frames.map((f) => girderOffsets(f).length)),
+    beamOffsets = girderOffsets(frames[0], count);
+  beamOffsets.forEach((_, i) =>
+    girder(b, frames, (f) => girderOffsets(f, count)[i], depth, steel),
+  );
   for (let s = first + 3.5; s < last - 1; s += steel ? 7 : 12) {
     const f = frameAt(span, s);
     b.box(
       "structure",
       steel ? "girder" : "concrete",
-      add(f.p, [0, -depth + 0.16, 0]),
-      f.hw * 1.35,
+      add(f.p, add([0, -depth + 0.16, 0], mul(f.n, bridgeSection(f).bias))),
+      girderOffsets(f, count).at(-1)! - girderOffsets(f, count)[0] + 0.4,
       0.22,
       0.14,
       f.d,
@@ -336,36 +394,120 @@ export function buildBridgeSpan(
           break;
       }
   }
-  // Shared elevated span ends are bearing seams, NEVER full-height walls.
+  const abutments: NonNullable<BridgeFeature["abutments"]> = [];
+  // Only a structural-to-fill transition has an abutment. Connected bridge
+  // members still meet at bearing seams, without walls across the deck.
   for (const [f, id] of [
     [frames[0], r.start],
     [frames.at(-1)!, r.end],
   ] as [Frame, string][]) {
     const neighbours = connected(project, id).filter((a) => a.id !== r.id);
-    if (!neighbours.some((a) => a.bridge)) support(f, "portal");
-    for (const side of [-1, 1])
+    const atNode = Math.abs(f.t - (id === r.start ? 0 : 1)) < 1e-7,
+      linkedBridge =
+        atNode && neighbours.some((a) => bridgeAt(a, a.start === id ? 0 : 1)),
+      fill =
+        (!atNode && r.embankment) ||
+        (atNode &&
+          neighbours.some(
+            (a) => a.embankment && !bridgeAt(a, a.start === id ? 0 : 1),
+          ));
+    if (!linkedBridge && fill) {
+      const outward = mul(f.d, id === r.start ? -1 : 1),
+        section = bridgeSection(f),
+        width = section.width,
+        height = f.p[1] - depth - 0.07,
+        backHeight = f.p[1] - 0.28;
+      if (height > 0.5) {
+        const center = add(
+          f.p,
+          add(mul(outward, 0.65), mul(f.n, section.bias)),
+        );
+        center[1] = height / 2;
+        b.box("structure", "concrete", center, width, height, 1.3, f.d);
+        const back = add(f.p, add(mul(outward, 1.22), mul(f.n, section.bias)));
+        back[1] = (height + backHeight) / 2;
+        b.box(
+          "structure",
+          "concrete",
+          back,
+          width,
+          backHeight - height,
+          0.25,
+          f.d,
+        );
+        b.box(
+          "structure",
+          "foundation",
+          [center[0], -0.2, center[2]],
+          width + 0.6,
+          0.4,
+          2.1,
+          f.d,
+        );
+        for (const side of [-1, 1]) {
+          const p = add(
+            f.p,
+            add(
+              mul(f.n, section.bias + side * (width / 2 - 0.12)),
+              mul(outward, 2.1),
+            ),
+          );
+          p[1] = backHeight / 2;
+          b.box("structure", "concrete", p, 0.24, backHeight, 3.4, f.d);
+        }
+        abutments.push({
+          position: [
+            f.p[0] + f.n[0] * section.bias,
+            0,
+            f.p[2] + f.n[2] * section.bias,
+          ],
+          width,
+          height,
+          thickness: 1.3,
+        });
+      }
+    } else if (!linkedBridge) support(f, "portal");
+    for (const offset of girderOffsets(f))
       b.box(
         "structure",
         "steel",
-        add(f.p, add(mul(f.n, side * f.hw * 0.62), [0, -depth + 0.06, 0])),
+        add(f.p, add(mul(f.n, offset), [0, -depth + 0.06, 0])),
         0.35,
         0.06,
         0.5,
         f.d,
       );
   }
+  const bearingStations = [
+      first,
+      ...supports.map((p) =>
+        parameterStation(
+          span.alignment,
+          closestOnAlignment(span.alignment, p.position).t,
+        ),
+      ),
+      last,
+    ].sort((a, b) => a - b),
+    spanLengths = bearingStations
+      .slice(1)
+      .map((s, i) => s - bearingStations[i]);
   return {
     owner: r.id,
     ownerKind: "road",
     kind: "span",
     material: r.structure,
     depth,
+    girderCount: beamOffsets.length,
+    girderSpacing: beamOffsets.length > 1 ? beamOffsets[1] - beamOffsets[0] : 0,
+    width: bridgeSection(frames[0]).width,
+    spanLengths,
     pierSpacing: r.pierSpacing,
     connections: [r.start, r.end],
     start: [...frames[0].p],
     end: [...frames.at(-1)!.p],
     supports,
     excludedSupports,
+    abutments,
     physicalGeometry: true,
   };
 }
@@ -380,7 +522,7 @@ export function buildBridgeJoint(
   alignments: Alignment[],
   surfaces?: SupportSurfaceIndex,
 ): BridgeFeature | undefined {
-  const elevated = arms.filter((a) => a.road.bridge);
+  const elevated = arms.filter((a) => bridgeAt(a.road, a.isStart ? 0 : 1));
   if (!elevated.length || node.position[1] < 1.6) return;
   const depth = Math.max(...elevated.map((a) => a.road.bridgeDepth)),
     steel = elevated.some((a) => a.road.structure === "steel");
@@ -394,17 +536,30 @@ export function buildBridgeJoint(
       n = normalXZ(d);
     const sign = a.isStart ? -1 : 1;
     const frames = [
-      { ...a.frame, d: mul(a.frame.d, sign), n: mul(a.frame.n, sign) },
-      { ...a.frame, p: node.position, d, n },
+      {
+        ...a.frame,
+        d: mul(a.frame.d, sign),
+        n: mul(a.frame.n, sign),
+        auxSide: (a.frame.auxSide ?? 1) * sign,
+      },
+      {
+        ...a.frame,
+        p: node.position,
+        d,
+        n,
+        auxSide: (a.frame.auxSide ?? 1) * sign,
+      },
     ];
-    for (const side of [-1, 1])
+    const count = Math.max(...frames.map((f) => girderOffsets(f).length));
+    girderOffsets(frames[0], count).forEach((_, index) =>
       girder(
         b,
         frames,
-        (f) => side * f.hw * 0.62,
+        (f) => girderOffsets(f, count)[index],
         (i) => a.road.bridgeDepth + (depth - a.road.bridgeDepth) * i,
         a.road.structure === "steel",
-      );
+      ),
+    );
   }
   const supports: BridgeSupport[] = [],
     excludedSupports: V3[] = [];

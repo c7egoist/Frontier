@@ -345,7 +345,7 @@ describe("graph editing and automatic intersections", () => {
       n = buildNetwork(p);
     assert.equal(n.junctions.length, 6);
     assert.equal(n.clearances.length, 2);
-    assert(n.clearances[0].meters >= 5.7);
+    assert(n.clearances[0].meters >= 5.2);
     assert(n.maxGrade < 8);
     const seen = new Set([p.nodes[0].id]);
     for (let i = 0; i < p.nodes.length; i++)

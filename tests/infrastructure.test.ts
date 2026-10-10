@@ -20,7 +20,7 @@ import {
   type MeshData,
   type Network,
 } from "../src/core/geometry";
-import { sampleAlignment } from "../src/core/curves";
+import { sampleAlignment, stationAt } from "../src/core/curves";
 import { detectCrossings, moveNode } from "../src/core/editing";
 import { insertConnectedBridge } from "../src/core/bridge-insertion";
 import { supportIsClear } from "../src/core/bridges";
@@ -195,24 +195,26 @@ describe("connected divided motorways and city templates", () => {
     assert.equal(movements, 6);
     assert.equal(
       p.roads.filter((r) => r.name.includes("loop · 90°")).length,
-      6,
+      3,
     );
   });
   for (const id of ["bridge", "cloverleaf", "trumpet", "city"])
     it(`${id}: actual girder clearances and gradual highway approaches`, () => {
       const { p, n } = template(id);
-      assert(n.maxGrade < 6.2);
+      assert(n.maxGrade < 4.05);
       assert(n.clearances.length >= 2);
-      assert(Math.min(...n.clearances.map((c) => c.meters)) > 6.4);
-      assert(n.bridges.some((b) => b.kind === "joint"));
+      assert(Math.min(...n.clearances.map((c) => c.meters)) >= 5.2);
+      assert(
+        n.bridges.every((b) => b.kind === "span" && b.abutments?.length === 2),
+      );
       assert(n.bridges.some((b) => b.material === "steel"));
       for (const r of p.roads.filter(
         (r) => r.name.includes("motorway") || r.name.includes("highway"),
       )) {
         assert.equal(r.lanes, 2);
-        assert.equal(r.laneWidth, 3.5);
-        assert.equal(r.shoulderWidth, 1);
-        assert.equal(roadHalfWidth(r), 4.5);
+        assert.equal(r.laneWidth, 3.65);
+        assert.equal(r.shoulderWidth, 2);
+        assert.equal(roadHalfWidth(r), r.auxiliaryLane === "none" ? 5.65 : 9.3);
       }
     });
   it("city has a road hierarchy, true shared-cycle pavement, refuge passages, connected parking and empty plots", () => {
@@ -343,7 +345,7 @@ describe("highway bridge geometry and atomic insertion", () => {
         near = bridge.supports.filter((s) => Math.abs(s.position[2]) < 20);
       assert.equal(near.length, 2);
       assert(near.every((s) => Math.abs(s.position[2]) > 11.45));
-      assert(distanceXZ(near[0].position, near[1].position) < 27);
+      assert(distanceXZ(near[0].position, near[1].position) < 30);
       assert(bridge.excludedSupports.some((p) => Math.abs(p[2]) < 0.01));
     }
   });
@@ -416,13 +418,14 @@ describe("highway bridge geometry and atomic insertion", () => {
     });
     const r = p.roads[0],
       curve = controlPoints(p, r),
+      originalAlignment = sampleAlignment(p, r),
       ends = p.nodes.map((n) => ({ ...n, position: [...n.position] }));
     const result = insertConnectedBridge(p, r.id),
       n = buildNetwork(p);
     assert.equal(p.nodes.length, 4);
     assert.equal(p.roads.length, 3);
     assert.deepEqual(n.diagnostics, []);
-    assert(n.maxGrade <= 5.01);
+    assert(n.maxGrade <= 4.05);
     for (const node of ends)
       assert.deepEqual(
         p.nodes.find((n) => n.id === node.id),
@@ -433,19 +436,27 @@ describe("highway bridge geometry and atomic insertion", () => {
       outRoad = p.roads.find((r) => r.id === result.approaches[1])!;
     assert.equal(inRoad.end, deck.start);
     assert.equal(deck.end, outRoad.start);
-    assert(p.roads.every((r) => r.bridge && r.oneWay));
+    assert(p.roads.every((r) => r.oneWay));
+    assert.equal(p.roads.filter((r) => r.bridge).length, 1);
+    assert(p.roads.filter((r) => !r.bridge).every((r) => r.embankment));
+    const ta = stationAt(
+        originalAlignment,
+        (originalAlignment.length - 64) / 2,
+      ).t,
+      tb = stationAt(originalAlignment, (originalAlignment.length + 64) / 2).t;
     for (const [road, lo, hi] of [
-      [inRoad, 0, 0.4],
-      [deck, 0.4, 0.6],
-      [outRoad, 0.6, 1],
+      [inRoad, 0, ta],
+      [deck, ta, tb],
+      [outRoad, tb, 1],
     ] as const)
       for (let i = 0; i <= 20; i++) {
         const a = cubic(controlPoints(p, road), i / 20),
           b = cubic(curve, lo + ((hi - lo) * i) / 20);
         assert(distanceXZ(a, b) < 1e-7);
       }
-    assert.equal(n.bridges.length, 3);
-    assert.equal(result.elevation, 8);
+    assert.equal(n.bridges.length, 1);
+    assert.equal(result.elevation, 7.2);
+    assert(Math.abs(result.deckLength - 64) < 1e-7);
   });
   it("insertion lands above a lower road with real clearance, not an automatic at-grade split", () => {
     const p = line({ oneWay: true, markingStyle: "motorway" }),
@@ -459,7 +470,7 @@ describe("highway bridge geometry and atomic insertion", () => {
     const n = buildNetwork(p);
     assert.equal(detectCrossings(p).length, 0);
     assert.equal(n.clearances.length, 1);
-    assert(n.clearances[0].meters > 6.5);
+    assert(n.clearances[0].meters >= 5.2);
   });
   for (const kind of ["short", "driveways", "steep", "conflict"] as const)
     it(`${kind} insertion refuses atomically without lifting neighbouring endpoints`, () => {
@@ -747,7 +758,11 @@ describe("seven actual barrier profiles and engine metadata", () => {
     assert.equal(m.streetDetails.length, n.streetDetails.length);
     assert.equal(m.barriers.length, n.barriers.length);
     assert(m.bridges.every((b) => b.physicalGeometry));
-    assert(m.bridges.some((b) => b.kind === "joint"));
+    assert(
+      m.bridges.every((b) => b.kind === "span" && b.abutments?.length === 2),
+    );
+    assert.equal(m.auxiliaryLanes.length, n.auxiliaryLanes.length);
+    assert.deepEqual(m.designReview, n.designReview);
     assert(!m.includesPreviewEnvironment);
   });
   it("new settings round-trip; legacy imports default safely and oversized direct bridge/shoulder input fails", () => {

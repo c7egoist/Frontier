@@ -59,13 +59,13 @@ export const templateCatalog = [
   },
   {
     id: "cloverleaf",
-    name: "Divided cloverleaf interchange",
-    description: "Separated carriageways · four loops + four right-turn links",
+    name: "Reference cloverleaf interchange",
+    description: "120 m loops · collector-distributors · 96 m overpasses",
   },
   {
     id: "trumpet",
-    name: "Twin-loop T interchange",
-    description: "Three arms · divided flyover · two connected turning loops",
+    name: "Reference trumpet interchange",
+    description: "One 270° loop · semi-direct connector · 84 m stem spans",
   },
   {
     id: "race",

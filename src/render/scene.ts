@@ -6,14 +6,28 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFExporter } from "three/addons/exporters/GLTFExporter.js";
 import { Materials } from "./materials";
 
-import { type Network, surfacePoint, edgePoint } from "../core/geometry";
+import {
+  type Network,
+  surfacePoint,
+  frameAt,
+  edgePoint,
+  sideHalfWidth,
+} from "../core/geometry";
 import {
   type Selection,
   type Project,
   getNode,
   roadHalfWidth,
 } from "../core/model";
-import { type V3, add, distanceXZ } from "../core/math";
+import {
+  type V3,
+  add,
+  sub,
+  mul,
+  normalizeXZ,
+  normalXZ,
+  distanceXZ,
+} from "../core/math";
 
 export interface GizmoProjection {
   origin: [number, number];
@@ -114,7 +128,7 @@ export class SceneView {
     this.controls.dampingFactor = 0.085;
     this.controls.minDistance = 3;
     this.controls.maxDistance = 30000;
-    this.controls.maxPolarAngle = Math.PI * 0.49;
+    this.controls.maxPolarAngle = Math.PI * 0.78;
     this.controls.minPolarAngle = 0.08;
     this.controls.screenSpacePanning = true;
     this.camera.position.set(125, 125, 155);
@@ -158,6 +172,10 @@ export class SceneView {
   };
   getRenderStats() {
     return {
+      camera: {
+        position: this.camera.position.toArray(),
+        target: this.controls.target.toArray(),
+      },
       renderedFrames: this.renderedFrames,
       scheduledFrames: this.scheduledFrames,
       idleFrames: this.idleFrames,
@@ -332,9 +350,9 @@ export class SceneView {
           outline(
             span.frames.map((f) =>
               add(f.p, [
-                f.n[0] * side * (f.hw + f.sw + 0.22),
+                f.n[0] * side * (sideHalfWidth(f, side) + f.sw + 0.22),
                 0.29,
-                f.n[2] * side * (f.hw + f.sw + 0.22),
+                f.n[2] * side * (sideHalfWidth(f, side) + f.sw + 0.22),
               ]),
             ),
           );
@@ -532,7 +550,7 @@ export class SceneView {
       );
       if (span) {
         const f = span.frames[Math.floor(span.frames.length / 2)];
-        target = surfacePoint(f, f.hw + f.cw, 0.12);
+        target = surfacePoint(f, sideHalfWidth(f, 1) + f.cw, 0.12);
         direction = f.n;
       }
     }
@@ -675,17 +693,29 @@ export class SceneView {
       ],
       pivot = this.selectionPosition() ?? [0, 0, 0];
     let target: V3 | undefined,
+      cameraOffset: V3 | undefined,
       range = 24;
     if (kind === "bridge") {
       const bridge =
         this.network.bridges.find((b) => b.owner === this.selection!.id) ??
         this.network.bridges.find((b) => owners.includes(b.owner));
       if (bridge) {
-        const support = bridge.supports[Math.floor(bridge.supports.length / 2)];
-        target = support
-          ? add(support.position, [0, support.top * 0.5, 0])
-          : (bridge.start.map((v, i) => (v + bridge.end[i]) / 2) as V3);
-        range = 38;
+        const span =
+            this.network.spans.find((s) => s.road.id === bridge.owner) ??
+            this.network.spans.find((s) =>
+              bridge.connections.includes(s.road.id),
+            ),
+          frame = span
+            ? frameAt(span, (span.frames[0].s + span.frames.at(-1)!.s) / 2)
+            : undefined,
+          d = frame?.d ?? normalizeXZ(sub(bridge.end, bridge.start)),
+          normal = normalXZ(d),
+          mid = bridge.start.map((v, i) => (v + bridge.end[i]) / 2) as V3,
+          across = Math.max(20, Math.min(30, (bridge.width ?? 10) * 2.2));
+        target = add(mid, [0, -bridge.depth + 0.05, 0]);
+        // Look up at the deck from the crossroad corridor. An along-deck
+        // camera lands inside the approach fill/abutment on a short span.
+        cameraOffset = add(mul(normal, across), add(mul(d, 7), [0, -2.8, 0]));
       }
     } else if (kind === "splitter") {
       const joints = [
@@ -733,11 +763,9 @@ export class SceneView {
       this.controls.target
         .clone()
         .add(
-          new THREE.Vector3(
-            range * 0.55,
-            range * (kind === "bridge" ? 0.1 : 0.5),
-            range * 0.65,
-          ),
+          cameraOffset
+            ? new THREE.Vector3(...cameraOffset)
+            : new THREE.Vector3(range * 0.55, range * 0.5, range * 0.65),
         ),
     );
     this.camera.zoom = 1;
@@ -868,6 +896,10 @@ export class SceneView {
         network?.streetDetails ?? this.network?.streetDetails ?? [],
       roadsideParking:
         network?.roadsideParking ?? this.network?.roadsideParking ?? [],
+      designReview: network?.designReview ?? this.network?.designReview,
+      auxiliaryLanes:
+        network?.auxiliaryLanes ?? this.network?.auxiliaryLanes ?? [],
+      embankments: network?.embankments ?? this.network?.embankments ?? [],
     };
     try {
       return (await new GLTFExporter().parseAsync(group, {

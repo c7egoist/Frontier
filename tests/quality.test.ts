@@ -114,14 +114,20 @@ describe("production mesh tolerances", () => {
       finite(dense);
       mouths(dense);
       assert(
-        !dense.meshes.some((m) =>
-          ["building", "landscape", "sign", "lamp"].includes(m.kind),
+        !dense.meshes.some(
+          (m) =>
+            ["building", "landscape", "lamp"].includes(m.kind) ||
+            (m.kind === "sign" &&
+              !(
+                m.ownerKind === "node" &&
+                p.nodes.find((n) => n.id === m.owner)?.signals
+              )),
         ),
       );
     });
   it("dense export budget rejects oversized tiles before generating vertices", () => {
     const p: Project = { version: 1, name: "Large tile", nodes: [], roads: [] };
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 17; i++) {
       const a = makeNode([-1000, 0, i * 18]),
         b = makeNode([1000, 0, i * 18]);
       p.nodes.push(a, b);
@@ -131,7 +137,7 @@ describe("production mesh tolerances", () => {
       () => buildNetwork(p, { detail: "production" }),
       /Production geometry budget/,
     );
-    assert.equal(p.roads.length, 9);
+    assert.equal(p.roads.length, 17);
   });
   it("defaults preserve the previous interactive sampling contract", () => {
     const p = makeTemplate("merge"),

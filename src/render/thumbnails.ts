@@ -255,9 +255,11 @@ export function assetThumbnail(
     p.roads = [
       makeRoad(a, z, "Connected bridge preview", {
         lanes: 2,
-        laneWidth: 3.5,
+        laneWidth: 3.65,
         oneWay: true,
-        sidewalk: 0.8,
+        shoulderWidth: 2,
+        roadClass: "mainline",
+        sidewalk: 0,
         markingStyle: "motorway",
         curbStyle: "flush",
         manholes: false,

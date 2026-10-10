@@ -1,0 +1,303 @@
+{
+  "units": "metres",
+  "selectedBasis": {
+    "laneWidth": 3.65,
+    "mainShoulder": 2,
+    "rampLane": 3.7,
+    "rampShoulder": 1.5,
+    "loopLane": 4.9,
+    "carriagewayOffset": 8.5,
+    "collectorOffset": 32,
+    "loopRadius": 120,
+    "diamondTerminalSpacing": 260,
+    "diamondSpan": 48,
+    "cloverSpan": 96,
+    "deckElevation": 7.2,
+    "deckDepth": 1.6,
+    "entranceRun": 200,
+    "exitRun": 150,
+    "laneTaper": 90,
+    "mainGrade": 4,
+    "rampGrade": 6,
+    "clearance": 5.2
+  },
+  "sources": [
+    {
+      "id": "fhwa",
+      "name": "FHWA interchange design prompt-list",
+      "url": "https://highways.dot.gov/field-offices/missouri/interchange-design-promptlist",
+      "sections": "Configurations; ramp design; spacing"
+    },
+    {
+      "id": "modot",
+      "name": "MoDOT diamond interchange alignment controls",
+      "url": "https://epg.modot.org/files/2/2a/234.2_Figure_1_Diamond_Interchange_Alignment_Controls.pdf",
+      "sections": "Ramp terminals; 300 ft taper; 400 ft entrance tangent"
+    },
+    {
+      "id": "caltrans",
+      "name": "Caltrans Highway Design Manual, Chapter 500",
+      "url": "https://dot.ca.gov/-/media/dot-media/programs/design/documents/chp0500-092923-a11y.pdf",
+      "sections": "Figures 502.2 / 502.3; 504.2; Table 504.3"
+    },
+    {
+      "id": "bridge-handbook",
+      "name": "FHWA Steel Bridge Design Handbook",
+      "url": "https://rosap.ntl.bts.gov/view/dot/49745/dot_49745_DS1.pdf",
+      "sections": "Girder arrangement, spacing, overhang and span proportions"
+    },
+    {
+      "id": "massdot",
+      "name": "MassDOT interchange design guide",
+      "url": "https://www.mass.gov/info-details/pddg-chapter-7-interchanges",
+      "sections": "Figures 7-2 / 7-4; Tables 7-11 / 7-12; ramp cross-sections"
+    }
+  ],
+  "layouts": {
+    "diamond": {
+      "roads": 21,
+      "extentIncludingApproachTails": [
+        700,
+        2000
+      ],
+      "structuralLength": 96,
+      "structuralSpans": [
+        {
+          "planLength": 48,
+          "girderCount": 5,
+          "girderSpacing": 2.325,
+          "supportedLengths": [
+            10.00012859171903,
+            27.99974281656195,
+            10.000128591719019
+          ],
+          "depth": 1.6,
+          "abutments": 2
+        },
+        {
+          "planLength": 48,
+          "girderCount": 5,
+          "girderSpacing": 2.325,
+          "supportedLengths": [
+            10.00012859171903,
+            27.99974281656195,
+            10.000128591719019
+          ],
+          "depth": 1.6,
+          "abutments": 2
+        }
+      ],
+      "maximumAlignmentGrade": 3.085714285714285,
+      "minimumStructuralClearance": 5.431000000000002,
+      "minimumLoopRadius": null,
+      "measuredWeaveSpacing": [],
+      "speedChangeLanes": [
+        {
+          "kind": "exit",
+          "fullWidthLength": 150,
+          "taperLength": 90
+        },
+        {
+          "kind": "entry",
+          "fullWidthLength": 200,
+          "taperLength": 90
+        },
+        {
+          "kind": "exit",
+          "fullWidthLength": 150,
+          "taperLength": 90
+        },
+        {
+          "kind": "entry",
+          "fullWidthLength": 200,
+          "taperLength": 90
+        }
+      ]
+    },
+    "cloverleaf": {
+      "roads": 88,
+      "extentIncludingApproachTails": [
+        3200,
+        3200
+      ],
+      "structuralLength": 384,
+      "structuralSpans": [
+        {
+          "planLength": 96,
+          "girderCount": 5,
+          "girderSpacing": 2.325,
+          "supportedLengths": [
+            23.999742816561948,
+            23.999999999999993,
+            24.000514366876097,
+            23.999742816561962
+          ],
+          "depth": 1.6,
+          "abutments": 2
+        },
+        {
+          "planLength": 96,
+          "girderCount": 5,
+          "girderSpacing": 2.325,
+          "supportedLengths": [
+            23.999742816561948,
+            23.999999999999993,
+            24.000514366876097,
+            23.999742816561962
+          ],
+          "depth": 1.6,
+          "abutments": 2
+        },
+        {
+          "planLength": 96,
+          "girderCount": 4,
+          "girderSpacing": 2.766666666666667,
+          "supportedLengths": [
+            23.999742816561948,
+            23.999999999999993,
+            24.000514366876097,
+            23.999742816561962
+          ],
+          "depth": 1.6,
+          "abutments": 2
+        },
+        {
+          "planLength": 96,
+          "girderCount": 4,
+          "girderSpacing": 2.766666666666667,
+          "supportedLengths": [
+            23.999742816561948,
+            23.999999999999993,
+            24.000514366876097,
+            23.999742816561962
+          ],
+          "depth": 1.6,
+          "abutments": 2
+        }
+      ],
+      "maximumAlignmentGrade": 3.1578947368421053,
+      "minimumStructuralClearance": 5.47525,
+      "minimumLoopRadius": 112.06358510695806,
+      "measuredWeaveSpacing": [
+        {
+          "nodeSpacing": 304,
+          "noseSpacing": 410.6099899899599
+        },
+        {
+          "nodeSpacing": 304,
+          "noseSpacing": 410.5891592878337
+        },
+        {
+          "nodeSpacing": 304,
+          "noseSpacing": 410.60998998995984
+        },
+        {
+          "nodeSpacing": 304,
+          "noseSpacing": 410.5891592878337
+        }
+      ],
+      "speedChangeLanes": [
+        {
+          "kind": "exit",
+          "fullWidthLength": 150,
+          "taperLength": 90
+        },
+        {
+          "kind": "entry",
+          "fullWidthLength": 200,
+          "taperLength": 90
+        },
+        {
+          "kind": "exit",
+          "fullWidthLength": 150,
+          "taperLength": 90
+        },
+        {
+          "kind": "entry",
+          "fullWidthLength": 200,
+          "taperLength": 90
+        },
+        {
+          "kind": "exit",
+          "fullWidthLength": 150,
+          "taperLength": 90
+        },
+        {
+          "kind": "entry",
+          "fullWidthLength": 200,
+          "taperLength": 90
+        },
+        {
+          "kind": "exit",
+          "fullWidthLength": 150,
+          "taperLength": 90
+        },
+        {
+          "kind": "entry",
+          "fullWidthLength": 200,
+          "taperLength": 90
+        }
+      ]
+    },
+    "trumpet": {
+      "roads": 33,
+      "extentIncludingApproachTails": [
+        1800,
+        2750
+      ],
+      "structuralLength": 168,
+      "structuralSpans": [
+        {
+          "planLength": 84,
+          "girderCount": 3,
+          "girderSpacing": 2.325,
+          "supportedLengths": [
+            14.000225035508295,
+            41.999999999999986,
+            27.99977496449172
+          ],
+          "depth": 1.6,
+          "abutments": 2
+        },
+        {
+          "planLength": 84,
+          "girderCount": 3,
+          "girderSpacing": 2.325,
+          "supportedLengths": [
+            28.000225035508283,
+            42,
+            13.99977496449172
+          ],
+          "depth": 1.6,
+          "abutments": 2
+        }
+      ],
+      "maximumAlignmentGrade": 3.0167597765363126,
+      "minimumStructuralClearance": 5.47525,
+      "minimumLoopRadius": 112.0635851069581,
+      "measuredWeaveSpacing": [],
+      "speedChangeLanes": [
+        {
+          "kind": "exit",
+          "fullWidthLength": 150,
+          "taperLength": 90
+        },
+        {
+          "kind": "entry",
+          "fullWidthLength": 200,
+          "taperLength": 90
+        },
+        {
+          "kind": "exit",
+          "fullWidthLength": 150,
+          "taperLength": 90
+        },
+        {
+          "kind": "entry",
+          "fullWidthLength": 200,
+          "taperLength": 90
+        }
+      ]
+    }
+  }
+}

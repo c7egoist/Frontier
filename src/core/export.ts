@@ -162,6 +162,9 @@ export function exportMeshManifest(network: Network, project: Project) {
     splitters: network.splitters,
     streetDetails: network.streetDetails,
     roadsideParking: network.roadsideParking,
+    designReview: network.designReview,
+    auxiliaryLanes: network.auxiliaryLanes,
+    embankments: network.embankments,
     junctionOffsets: network.junctions.map((j) => ({
       id: j.node.id,
       requestedRadius: j.requestedRadius,

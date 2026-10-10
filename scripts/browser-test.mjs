@@ -94,6 +94,336 @@ try {
     );
     await page.screenshot({ path: resolve(cache, "desktop.png") });
   });
+  const referenceState = () =>
+    page.evaluate(() => ({
+      project: window.frontier.getProject(),
+      selection: window.frontier.getSelection(),
+      design: window.frontier.getNetwork().designReview,
+      bridges: window.frontier.getNetwork().bridges,
+      auxiliary: window.frontier.getNetwork().auxiliaryLanes,
+      fill: window.frontier.getNetwork().embankments,
+      diagnostics: window.frontier.getNetwork().diagnostics,
+    }));
+  async function importReferenceFixture(
+    settings = {},
+    height = 0,
+    length = 400,
+  ) {
+    const p = {
+      version: 1,
+      name: "Reference geometry fixture",
+      nodes: [
+        {
+          id: "ref-a",
+          name: "In",
+          position: [-length / 2, height, 0],
+          radius: 3,
+          crossings: false,
+        },
+        {
+          id: "ref-z",
+          name: "Out",
+          position: [length / 2, height, 0],
+          radius: 3,
+          crossings: false,
+        },
+      ],
+      roads: [
+        {
+          id: "ref-road",
+          name: "Metric freeway section",
+          start: "ref-a",
+          end: "ref-z",
+          h1: [length / 3, 0, 0],
+          h2: [-length / 3, 0, 0],
+          oneWay: true,
+          lanes: 2,
+          laneWidth: 3.65,
+          shoulderWidth: 2,
+          sidewalk: 0,
+          curbStyle: "flush",
+          markingStyle: "motorway",
+          roadClass: "mainline",
+          drainage: false,
+          manholes: false,
+          signs: false,
+          bridgeDepth: 1.6,
+          structure: "steel",
+          ...settings,
+        },
+      ],
+    };
+    await page.locator("#project-file").setInputFiles({
+      name: "reference.road.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(p)),
+    });
+    await page.waitForFunction(
+      () =>
+        window.frontier.getProject().name === "Reference geometry fixture" &&
+        !document.querySelector("#project-file").value,
+    );
+    await page.evaluate(() =>
+      window.frontier.select({ kind: "road", id: "ref-road" }),
+    );
+  }
+  const referenceRange = async (prop, value) => {
+    await page.locator(`[data-prop="${prop}"]`).evaluate((e, v) => {
+      e.value = String(v);
+      e.dispatchEvent(new Event("input", { bubbles: true }));
+      e.dispatchEvent(new Event("change", { bubbles: true }));
+    }, value);
+  };
+  await test("reference: diamond schematic dimensions, short bridge decks, supported approaches and measured girder layout", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("diamond"));
+    const s = await referenceState(),
+      terminals = s.project.nodes.filter((n) =>
+        n.name.includes("ramp terminals"),
+      );
+    assert.equal(
+      Math.hypot(
+        terminals[0].position[0] - terminals[1].position[0],
+        terminals[0].position[2] - terminals[1].position[2],
+      ),
+      260,
+    );
+    assert.equal(s.bridges.length, 2);
+    assert.equal(s.design.bridgeLength, 96);
+    assert(s.design.minimumClearance >= 5.2);
+    assert(s.design.withinSelectedTargets);
+    assert(
+      s.bridges.every((b) => b.girderCount === 5 && b.abutments.length === 2),
+    );
+    assert(s.fill.length > 4);
+    assert.equal(s.auxiliary.length, 4);
+    assert(s.auxiliary.every((a) => a.taperLength === 90 && !a.fitted));
+    assert.deepEqual(s.diagnostics, []);
+    await page
+      .locator('[data-design-metric="Actual structural length"]')
+      .scrollIntoViewIfNeeded();
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Actual structural length"]')
+        .textContent(),
+      "48.0 m",
+    );
+    assert.equal(
+      await page.locator('[data-design-metric="Girder layout"]').textContent(),
+      "5 girders · 2.33 m c/c",
+    );
+    assert(
+      await page
+        .locator('a[href*="Diamond_Interchange_Alignment_Controls.pdf"]')
+        .isVisible(),
+    );
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "reference-diamond-dimensions.png"),
+    });
+    assert(
+      await page.evaluate(() => window.frontier.inspectRoadDetail("bridge")),
+    );
+    const camera = await page.evaluate(
+        () => window.frontier.getPreviewStats().camera,
+      ),
+      deck = s.bridges.find((b) => b.owner === s.selection.id),
+      mid = deck.start.map((v, i) => (v + deck.end[i]) / 2);
+    assert(
+      camera.position[1] < camera.target[1],
+      "underside inspection must not be clamped above the girder",
+    );
+    assert(
+      Math.abs(camera.position[2] - mid[2]) <= 8,
+      "short-span inspection stays out of its approach fills",
+    );
+    assert(Math.abs(camera.position[0] - mid[0]) >= 20);
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "reference-bridge-members.png"),
+    });
+  });
+  await test("reference: cloverleaf uses measured collector weave spacing and the T is one true trumpet loop", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("cloverleaf"));
+    let s = await referenceState();
+    assert.equal(s.project.roads.length, 88);
+    assert.equal(
+      s.project.roads.filter((r) => r.roadClass === "loop").length,
+      12,
+    );
+    assert(
+      s.design.roads
+        .filter((r) => r.role === "loop")
+        .every((r) => r.minimumRadius > 112),
+    );
+    assert.equal(s.design.weaves.length, 4);
+    assert(
+      s.design.weaves.every(
+        (w) =>
+          w.nodeSpacing === 304 && w.noseSpacing > 410 && w.noseSpacing < 412,
+      ),
+    );
+    assert.equal(s.auxiliary.length, 8);
+    assert.equal(s.design.bridgeLength, 384);
+    assert.deepEqual(s.diagnostics, []);
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "reference-cloverleaf-cd.png"),
+    });
+    await page.evaluate(() => window.frontier.loadTemplate("trumpet"));
+    s = await referenceState();
+    assert.equal(
+      s.project.roads.filter((r) => r.roadClass === "loop").length,
+      3,
+    );
+    assert.equal(
+      s.project.roads.filter((r) => r.name.includes("semi-direct ·")).length,
+      3,
+    );
+    assert.equal(s.design.bridgeLength, 168);
+    assert(
+      s.bridges.every(
+        (b) => Math.hypot(b.end[0] - b.start[0], b.end[2] - b.start[2]) === 84,
+      ),
+    );
+    assert(s.design.withinSelectedTargets);
+    assert.deepEqual(s.diagnostics, []);
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "reference-single-loop-trumpet.png"),
+    });
+  });
+  await test("reference: speed-change lane controls produce one-sided geometry, preserve through lanes and remain undoable", async () => {
+    await importReferenceFixture({
+      auxiliaryLane: "exit",
+      auxiliaryLength: 150,
+      auxiliaryTaper: 90,
+    });
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    const before = await referenceState();
+    await referenceRange("auxiliaryLength", 180);
+    await referenceRange("auxiliaryTaper", 100);
+    let s = await referenceState();
+    assert.equal(s.auxiliary[0].fullWidthLength, 180);
+    assert.equal(s.auxiliary[0].taperLength, 100);
+    assert.equal(s.project.roads[0].lanes, 2);
+    assert.equal(s.project.roads[0].laneWidth, 3.65);
+    assert.equal(s.project.roads[0].shoulderWidth, 2);
+    const edges = () =>
+      page.evaluate(() => {
+        const m = window.frontier
+          .getNetwork()
+          .meshes.find((m) => m.kind === "asphalt");
+        const zs = m.positions.filter((_, i) => i % 3 === 2);
+        return [Math.min(...zs), Math.max(...zs)];
+      });
+    let bounds = await edges();
+    assert(
+      Math.abs(bounds[0] + 5.65) < 1e-7 && Math.abs(bounds[1] - 9.3) < 1e-7,
+    );
+    await page.locator('[data-inspector-tab="details"]').click();
+    await page.locator('[data-prop="trafficSide"]').selectOption("left");
+    bounds = await edges();
+    assert(
+      Math.abs(bounds[0] + 9.3) < 1e-7 && Math.abs(bounds[1] - 5.65) < 1e-7,
+    );
+    await undo();
+    await undo();
+    await undo();
+    assert.deepEqual((await referenceState()).project, before.project);
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    await page.locator('[data-prop="auxiliaryLane"]').selectOption("none");
+    assert.equal((await referenceState()).auxiliary.length, 0);
+    await undo();
+    assert.equal((await referenceState()).auxiliary.length, 1);
+  });
+  await test("reference: structural bounds and fill controls regenerate actual deck length and survive preset application", async () => {
+    await importReferenceFixture(
+      { bridge: true, embankment: true, bridgeFrom: 0.2, bridgeTo: 0.8 },
+      7.2,
+      240,
+    );
+    await page.locator('[data-inspector-tab="details"]').click();
+    const before = await referenceState();
+    assert(Math.abs(before.design.bridgeLength - 144) < 1e-7);
+    await referenceRange("bridgeFrom", 40);
+    let s = await referenceState();
+    assert.equal(s.project.roads[0].bridgeFrom, 0.4);
+    assert(Math.abs(s.design.bridgeLength - 96) < 1e-7);
+    assert.equal(s.bridges[0].abutments.length, 2);
+    await page.locator('[data-library="roads"]').click();
+    await page.locator('[data-asset="motorway-carriageway"]').click();
+    s = await referenceState();
+    assert.equal(s.project.roads[0].bridgeFrom, 0.4);
+    assert.equal(s.project.roads[0].bridgeTo, 0.8);
+    assert(s.project.roads[0].embankment);
+    await undo();
+    await undo();
+    assert.deepEqual((await referenceState()).project, before.project);
+    await page.locator('[data-inspector-tab="details"]').click();
+    await page.locator('[data-prop="embankment"]').uncheck();
+    assert.deepEqual((await referenceState()).fill, []);
+    await undo();
+    assert.equal((await referenceState()).fill.length, 2);
+  });
+  await test("reference: GLB and OBJ retain metric design sources, speed-change lanes, bounded structures, bearings and approach fill", async () => {
+    await importReferenceFixture(
+      {
+        bridge: true,
+        embankment: true,
+        bridgeFrom: 0.45,
+        bridgeTo: 0.55,
+        auxiliaryLane: "exit",
+        auxiliaryLength: 150,
+        auxiliaryTaper: 90,
+      },
+      7.2,
+      600,
+    );
+    const before = await referenceState();
+    await page.locator("#shade-style").selectOption("clay");
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("production");
+    let promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('#export-menu [data-action="glb"]').click();
+    let d = await promise,
+      buffer = await readFile(await d.path());
+    const g = JSON.parse(
+        buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
+      ),
+      extras = g.nodes.find((n) => n.extras?.designReview)?.extras;
+    assert(extras);
+    assert(extras.designReview.sources.some((s) => s.id === "bridge-handbook"));
+    assert(Math.abs(extras.designReview.bridgeLength - 60) < 1e-6);
+    assert.equal(extras.auxiliaryLanes.length, 1);
+    assert.equal(extras.embankments.length, 2);
+    assert.equal(extras.bridges[0].abutments.length, 2);
+    assert(extras.bridges[0].girderCount >= 4);
+    assert(g.images.every((i) => i.bufferView !== undefined));
+    assert(
+      !g.nodes.some((n) =>
+        ["building", "landscape"].includes(n.extras?.meshKind),
+      ),
+    );
+    await page.locator('[data-menu="export-menu"]').click();
+    promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('#export-menu [data-action="obj"]').click();
+    d = await promise;
+    const files = unzipSync(await readFile(await d.path())),
+      m = JSON.parse(new TextDecoder().decode(files["mesh.json"])),
+      materials = JSON.parse(
+        new TextDecoder().decode(files["materials.json"]),
+      ).materials;
+    assert.equal(m.auxiliaryLanes.length, 1);
+    assert.equal(m.embankments.length, 2);
+    assert.equal(m.bridges[0].abutments.length, 2);
+    assert(
+      files[materials.soil.albedo] &&
+        files[materials.soil.normal] &&
+        files[materials.soil.roughness],
+    );
+    assert.deepEqual((await referenceState()).project, before.project);
+    await page.locator("#shade-style").selectOption("shaded");
+  });
   const roadsideState = () =>
     page.evaluate(() => ({
       project: window.frontier.getProject(),
@@ -440,8 +770,8 @@ try {
       roads: window.frontier.getProject().roads,
       selection: window.frontier.getSelection(),
     }));
-    assert(before.grade < 6.2);
-    assert(before.clearances.every((c) => c.meters > 6.4));
+    assert(before.grade < 4.05);
+    assert(before.clearances.every((c) => c.meters >= 5.2));
     assert.equal(
       before.roads.filter(
         (r) =>
@@ -450,7 +780,11 @@ try {
       ).length,
       4,
     );
-    assert(before.bridges.some((b) => b.kind === "joint"));
+    assert(
+      before.bridges.every(
+        (b) => b.kind === "span" && b.abutments.length === 2,
+      ),
+    );
     await page.locator('[data-inspector-tab="details"]').click();
     assert.equal(
       await page.locator('[data-prop="railStyle"] option').count(),
@@ -459,7 +793,7 @@ try {
     const depth = page.locator('[data-prop="bridgeDepth"]');
     await depth.focus();
     await depth.evaluate((e) => {
-      e.value = "1.55";
+      e.value = "1.9";
       e.dispatchEvent(new Event("input", { bubbles: true }));
       e.dispatchEvent(new Event("change", { bubbles: true }));
     });
@@ -471,7 +805,7 @@ try {
     }));
     assert.equal(
       after.bridges.find((b) => b.owner === after.selection.id).depth,
-      1.55,
+      1.9,
     );
     assert(
       Math.min(...after.clearances.map((c) => c.meters)) <
@@ -654,15 +988,19 @@ try {
         after.project.nodes.find((n) => n.id === node.id),
         node,
       );
-    assert(after.project.roads.every((r) => r.bridge && r.oneWay));
+    assert(after.project.roads.every((r) => r.oneWay));
+    assert.equal(after.project.roads.filter((r) => r.bridge).length, 1);
+    assert(
+      after.project.roads.filter((r) => !r.bridge).every((r) => r.embankment),
+    );
     assert.equal(after.selection.kind, "road");
     assert.equal(
       await page.evaluate(() => window.frontier.getNetwork().bridges.length),
-      3,
+      1,
     );
-    assert.equal(
-      await page.evaluate(() => window.frontier.getNetwork().maxGrade),
-      5,
+    assert(
+      (await page.evaluate(() => window.frontier.getNetwork().maxGrade)) <=
+        4.05,
     );
     await undo();
     assert.equal((await state()).project.roads.length, 1);
@@ -703,7 +1041,7 @@ try {
         buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
       ),
       extras = gltf.nodes.find((n) => n.extras?.bridges)?.extras;
-    assert.equal(extras.bridges.length, 3);
+    assert.equal(extras.bridges.length, 1);
     assert(extras.bridges.every((b) => b.physicalGeometry));
     assert(extras.barriers.every((b) => b.style === "boxbeam"));
     assert(Array.isArray(extras.streetDetails));
@@ -721,7 +1059,7 @@ try {
           files[Object.keys(files).find((k) => k === "mesh.json")],
         ).toString(),
       );
-    assert.equal(manifest.bridges.length, 3);
+    assert.equal(manifest.bridges.length, 1);
     assert(manifest.barriers.every((b) => b.style === "boxbeam"));
     assert.deepEqual((await state()).project, before.project);
     assert.equal((await state()).triangles, before.triangles);
@@ -1377,9 +1715,12 @@ try {
       clearances: window.frontier.getNetwork().clearances,
       maxGrade: window.frontier.getNetwork().maxGrade,
     }));
-    assert(n.clearances[0].meters >= 5.7);
-    assert(n.maxGrade < 8);
-    await page.screenshot({ path: resolve(cache, "interchange.png") });
+    assert(n.clearances[0].meters >= 5.2);
+    assert(n.maxGrade <= 4.05);
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "interchange.png"),
+    });
   });
   await test("undoing a replacement and deleting a selected road never leave stale handles", async () => {
     await undo();
@@ -1523,7 +1864,10 @@ try {
         await page.locator("#scene-gizmo").getAttribute("hidden"),
         null,
       );
-      await page.screenshot({ path: resolve(cache, `${id}.png`) });
+      await page.screenshot({
+        timeout: 120000,
+        path: resolve(cache, `${id}.png`),
+      });
     });
   await test("merge setback moves the paving mouth, not the shared joint position", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("merge"));
@@ -3231,6 +3575,39 @@ try {
     });
     // The shared single-process Chromium context stays alive until the final check.
   });
+  await test("reference: standalone reference geometry and editable dimensions work with all external requests blocked", async () => {
+    const offline =
+        offlinePage ??
+        (await browser.newPage({ viewport: { width: 1512, height: 982 } })),
+      requests = [],
+      offlineErrors = [];
+    offlinePage = offline;
+    offline.on("pageerror", (e) => offlineErrors.push(e.message));
+    await offline.route(/^https?:\/\//, (r) => {
+      requests.push(r.request().url());
+      return r.abort();
+    });
+    await offline.goto(`file://${resolve("RoadDesigner.html")}`);
+    await offline.waitForFunction(() => !!window.frontier);
+    for (const id of ["diamond", "cloverleaf", "trumpet"]) {
+      await offline.evaluate((id) => window.frontier.loadTemplate(id), id);
+      const data = await offline.evaluate(() => ({
+        design: window.frontier.getNetwork().designReview,
+        diagnostics: window.frontier.getNetwork().diagnostics,
+      }));
+      assert(data.design.withinSelectedTargets);
+      assert(data.design.minimumClearance >= 5.2);
+      assert.deepEqual(data.diagnostics, []);
+    }
+    await offline.evaluate(() => window.frontier.loadTemplate("diamond"));
+    await offline.locator('[data-inspector-tab="details"]').click();
+    assert(await offline.locator('[data-prop="bridgeFrom"]').isVisible());
+    assert(
+      await offline.evaluate(() => window.frontier.inspectRoadDetail("bridge")),
+    );
+    assert.deepEqual(requests, []);
+    assert.deepEqual(offlineErrors, []);
+  });
   await test("connected infrastructure: standalone highway bridges, city and splitters run with the network blocked", async () => {
     const offline =
         offlinePage ??
@@ -3260,7 +3637,7 @@ try {
           details: window.frontier.getNetwork().streetDetails,
           splitters: window.frontier.getNetwork().splitters,
         }));
-        if (id === "bridge") assert(data.bridges.length > 10);
+        if (id === "bridge") assert.equal(data.bridges.length, 2);
         if (id === "city")
           assert(data.details.some((f) => f.kind === "curb-extension"));
         if (id === "merge") assert.equal(data.splitters.length, 1);

@@ -10,7 +10,8 @@
     "test": "tsx --test tests/*.test.ts",
     "test:browser": "node scripts/browser-test.mjs",
     "format": "prettier --write src scripts tests index.html README.md package.json tsconfig.json vite.config.ts",
-    "format:check": "prettier --check src scripts tests index.html README.md package.json tsconfig.json vite.config.ts"
+    "format:check": "prettier --check src scripts tests index.html README.md package.json tsconfig.json vite.config.ts",
+    "audit:design": "node --import tsx scripts/reference-audit.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.2.8",

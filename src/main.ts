@@ -1,3 +1,10 @@
+import {
+  measureRoadDesign,
+  designSources,
+  referenceLayout,
+  roadClasses,
+} from "./core/design-controls";
+import { supportsAuxiliary } from "./core/road-sections";
 import { insertConnectedBridge } from "./core/bridge-insertion";
 import { railStyles, railNames } from "./core/model";
 import { assetThumbnail } from "./render/thumbnails";
@@ -278,6 +285,9 @@ function rebuild(inspector = true, context = false) {
         splitters: network.splitters,
         streetDetails: network.streetDetails,
         roadsideParking: network.roadsideParking,
+        designReview: network.designReview,
+        auxiliaryLanes: network.auxiliaryLanes,
+        embankments: network.embankments,
       },
     }),
   );
@@ -301,6 +311,46 @@ function rebuild(inspector = true, context = false) {
     selection?.id,
     ...selectedRoads().map((r) => r.id),
   ]);
+  const currentRoad = selectedRoads()[0];
+  if (currentRoad) {
+    const m = measureRoadDesign(project, currentRoad),
+      bridge = network.bridges.find((b) => b.owner === currentRoad.id),
+      values: Record<string, string> = {
+        "Minimum alignment radius":
+          m.minimumRadius === null
+            ? "Straight"
+            : `${fmt(m.minimumRadius, 1)} m`,
+        "Maximum alignment grade": `${fmt(m.maximumGrade, 2)}%`,
+        "Actual structural length": bridge
+          ? `${fmt(
+              (bridge.spanLengths ?? []).reduce((s, l) => s + l, 0),
+              1,
+            )} m`
+          : "—",
+        "Nose-to-nose weave": network.designReview.weaves.find((w) =>
+          w.owners.includes(currentRoad.id),
+        )
+          ? `${fmt(network.designReview.weaves.find((w) => w.owners.includes(currentRoad.id))!.noseSpacing, 1)} m`
+          : "—",
+        "Girder layout": bridge
+          ? `${bridge.girderCount} girders · ${fmt(bridge.girderSpacing ?? 0, 2)} m c/c`
+          : "—",
+      };
+    document
+      .querySelectorAll<HTMLOutputElement>("[data-design-metric]")
+      .forEach((o) => (o.value = values[o.dataset.designMetric!] ?? "—"));
+    const status = document.querySelector<HTMLElement>("[data-design-status]");
+    if (status)
+      status.textContent =
+        currentRoad.roadClass === "street"
+          ? "Choose a design role"
+          : m.meetsReference &&
+              network.clearances
+                .filter((c) => c.a === currentRoad.id || c.b === currentRoad.id)
+                .every((c) => c.meters >= referenceLayout.clearance)
+            ? "Within geometric targets"
+            : "Review geometry";
+  }
   document
     .querySelectorAll<HTMLOutputElement>("[data-roadside-parking]")
     .forEach(
@@ -985,6 +1035,80 @@ function beginPlace(kind: SiteKind) {
     `Click in plan to place a ${siteCatalog.find((s) => s.id === kind)!.name.toLowerCase()}.`,
   );
 }
+function referenceControls(road: Road) {
+  const m = measureRoadDesign(project, road),
+    bridge = network.bridges.find((b) => b.owner === road.id),
+    weave = network.designReview.weaves.find((w) => w.owners.includes(road.id)),
+    clearance = network.clearances.filter(
+      (c) => c.a === road.id || c.b === road.id,
+    ),
+    meets =
+      m.meetsReference &&
+      clearance.every((c) => c.meters >= referenceLayout.clearance),
+    display = (key: string, value: string) =>
+      `<div class="number-control"><span>${key}</span><output class="detail-value" data-design-metric="${key}">${value}</output></div>`;
+  return card(
+    "Reference dimensions",
+    "ruler",
+    choice(
+      "roadClass",
+      "Design role",
+      road.roadClass,
+      roadClasses.map(
+        (r) => [r, r[0].toUpperCase() + r.slice(1)] as [string, string],
+      ),
+    ) +
+      display(
+        "Minimum alignment radius",
+        m.minimumRadius === null ? "Straight" : `${fmt(m.minimumRadius, 1)} m`,
+      ) +
+      display("Maximum alignment grade", `${fmt(m.maximumGrade, 2)}%`) +
+      (bridge
+        ? display(
+            "Actual structural length",
+            `${fmt(
+              (bridge.spanLengths ?? []).reduce((s, l) => s + l, 0),
+              1,
+            )} m`,
+          ) +
+          display(
+            "Girder layout",
+            `${bridge.girderCount} girders · ${fmt(bridge.girderSpacing ?? 0, 2)} m c/c`,
+          )
+        : "") +
+      `<p class="card-note"><span>Targets: radius ${m.radiusTarget} m or more, grade ${m.gradeTarget}% or less; over-road clearance at least ${referenceLayout.clearance} m. These checks measure the cubic, not its sparse preview mesh. They do not certify sight distance, traffic capacity, superelevation or structural loads.</span></p><div class="solver-row"><span>Selected targets</span><span class="solver-badge" data-design-status>${icon(meets ? "check" : "triangle-alert")}${road.roadClass === "street" ? "Choose a design role" : meets ? "Within geometric targets" : "Review geometry"}</span></div>` +
+      (weave
+        ? display("Nose-to-nose weave", `${fmt(weave.noseSpacing, 1)} m`)
+        : "") +
+      (supportsAuxiliary(road)
+        ? choice("auxiliaryLane", "Speed-change lane", road.auxiliaryLane, [
+            ["none", "None"],
+            ["exit", "Exit / deceleration"],
+            ["entry", "Entry / acceleration"],
+          ]) +
+          (road.auxiliaryLane !== "none"
+            ? range(
+                "auxiliaryLength",
+                "Full-width run",
+                road.auxiliaryLength,
+                40,
+                500,
+                10,
+              ) +
+              range(
+                "auxiliaryTaper",
+                "Lane taper",
+                road.auxiliaryTaper,
+                20,
+                200,
+                5,
+              ) +
+              `<p class="card-note"><span>An extra lane widens only the traffic-side edge. The through lanes and shoulder retain their width, with a dashed lane divider and a true pavement taper.</span></p>`
+            : "")
+        : "") +
+      `<p class="card-note"><span>Published references: ${designSources.map((s) => `<a href="${escape(s.url)}" target="_blank" rel="noopener noreferrer">${escape(s.id)}</a>`).join(" · ")}</span></p>`,
+  );
+}
 function mobilityControls(road: Road) {
   const owners = new Set(selectedRoads().map((r) => r.id));
   return card(
@@ -1073,7 +1197,7 @@ function profile(road: Road) {
   return card(
     "Approach profile",
     "route",
-    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 6, 0.1)}${road.markingStyle === "motorway" ? range("shoulderWidth", "Asphalt shoulder / side", road.shoulderWidth, 0, 3.5, 0.1) : ""}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 12, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
+    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 6, 0.05)}${road.markingStyle === "motorway" ? range("shoulderWidth", "Asphalt shoulder / side", road.shoulderWidth, 0, 3.5, 0.1) : ""}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 12, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
   );
 }
 function renderInspector() {
@@ -1134,6 +1258,13 @@ function renderInspector() {
       `<div class="section-heading"><span>${node ? "CONNECTED ROAD PROFILE" : "CARRIAGEWAY"}</span><small>${node ? roads.length + " approaches" : "Live cross-section"}</small></div>` +
       profile(road);
     body += mobilityControls(road);
+    if (
+      !node &&
+      (road.roadClass !== "street" ||
+        road.markingStyle === "motorway" ||
+        road.bridge)
+    )
+      body += referenceControls(road);
     if (node)
       body += `<p class="material-note">Profile changes apply to all ${roads.length} connected approaches. Each road remains individually editable.</p>`;
   } else if (inspectorTab === "surface") {
@@ -1412,8 +1543,32 @@ function renderInspector() {
           road.bridge,
           "Build a superstructure at the authored height; shared endpoints are not moved",
         ) +
+          toggle(
+            "embankment",
+            "Earth-supported approaches",
+            road.embankment,
+            "Closed 2:1 fill and retained merge platforms; no trees or scenery",
+          ) +
           (road.bridge
-            ? choice("structure", "Superstructure", road.structure, [
+            ? range(
+                "bridgeFrom",
+                "Structure start / curve",
+                road.bridgeFrom * 100,
+                0,
+                road.bridgeTo * 100 - 2,
+                1,
+                "%",
+              ) +
+              range(
+                "bridgeTo",
+                "Structure end / curve",
+                road.bridgeTo * 100,
+                road.bridgeFrom * 100 + 2,
+                100,
+                1,
+                "%",
+              ) +
+              choice("structure", "Superstructure", road.structure, [
                 ["concrete", "Concrete girder"],
                 ["steel", "Steel I-girder"],
               ]) +
@@ -1433,11 +1588,11 @@ function renderInspector() {
                 50,
                 1,
               ) +
-              `<p class="card-note"><span>Decks and beams stitch across elevated joints. Foundations clear lower roads, cycleways and footways; no end walls block a connected span.</span></p><button class="solver-badge" data-inspector-action="inspect-bridge">${icon("search")}Inspect bridge structure</button>` +
+              `<p class="card-note"><span>Only the authored structural interval generates girders and piers. Fill approaches meet bearing abutments below the road surface; connected bridge members still share unobstructed bearing seams.</span></p><button class="solver-badge" data-inspector-action="inspect-bridge">${icon("search")}Inspect bridge structure</button>` +
               (clearances.length
                 ? `<div class="number-control"><span>Minimum clearance</span><output class="detail-value" data-bridge-clearance>${fmt(Math.min(...clearances.map((c) => c.meters)), 2)} m</output></div>`
                 : "")
-            : `<p class="card-note"><span>Insert a level deck with gradual, connected approaches on an alignment of at least 420 m. Existing shared endpoints stay in place.</span></p><button class="solver-badge" data-inspector-action="insert-bridge">${icon("cable")}Insert connected bridge section</button>`),
+            : `<p class="card-note"><span>Insert a 64 m level deck with approximately 4% earth-supported approaches on an alignment of at least 600 m (more for larger rises). Existing shared endpoints stay in place.</span></p><button class="solver-badge" data-inspector-action="insert-bridge">${icon("cable")}Insert connected bridge section</button>`),
       );
     else
       body += `<p class="material-note">Select an individual alignment to add a bridge. Try the Diamond interchange template for connected, grade-separated ramps.</p>`;
@@ -1520,6 +1675,13 @@ function setRoadProperty(prop: string, value: unknown) {
     return;
   }
   for (const road of selectedRoads()) {
+    if (prop === "bridgeFrom" || prop === "bridgeTo") {
+      const p = Number(value) / 100;
+      if (prop === "bridgeFrom")
+        road.bridgeFrom = Math.max(0, Math.min(road.bridgeTo - 0.02, p));
+      else road.bridgeTo = Math.min(1, Math.max(road.bridgeFrom + 0.02, p));
+      continue;
+    }
     (road as unknown as Record<string, unknown>)[prop] = value;
     if (prop === "bridge" && value === true) road.guardrails = true;
   }
@@ -1535,25 +1697,18 @@ function applyPreset(id: string) {
     commit(() => {
       const preserved = [
         "bridge",
+        "bridgeFrom",
+        "bridgeTo",
+        "embankment",
         "structure",
         "bridgeDepth",
         "pierSpacing",
       ] as const;
       for (const road of selectedRoads()) {
-        const bridge = road.bridge,
-          structure = road.structure,
-          bridgeDepth = road.bridgeDepth,
-          pierSpacing = road.pierSpacing;
-        Object.assign(road, roadDefaults, preset.settings);
-        for (const prop of preserved)
-          (road as unknown as Record<string, unknown>)[prop] =
-            prop === "bridge"
-              ? bridge
-              : prop === "structure"
-                ? structure
-                : prop === "bridgeDepth"
-                  ? bridgeDepth
-                  : pierSpacing;
+        const infrastructure = Object.fromEntries(
+          preserved.map((key) => [key, road[key]]),
+        );
+        Object.assign(road, roadDefaults, preset.settings, infrastructure);
       }
     });
   renderLibrary();
@@ -1590,7 +1745,7 @@ function inspectPlanning(kind: "planting" | "mobility") {
 }
 function insertBridgeOnSelection(
   roadId = selection?.kind === "road" ? selection.id : undefined,
-  rise = 8,
+  rise: number = referenceLayout.deckElevation,
   structure: "steel" | "concrete" = "steel",
 ) {
   if (!roadId) {
@@ -1815,7 +1970,8 @@ function renderLibrary() {
       {
         id: "bridge-kit",
         name: "Insert connected highway bridge",
-        description: "420 m + alignment · level deck · linked approaches",
+        description:
+          "600 m + alignment · 64 m deck · earth-supported approaches",
         preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", "bridge-kit")}" alt="Connected bridge approaches preview" loading="lazy"/>`,
         action: "structure",
       },
@@ -2113,7 +2269,7 @@ function loadTemplate(id: string) {
           Math.abs(getNode(project, r.end).position[2]) <= 115,
       );
       if (deck) setSelection({ kind: "road", id: deck.id });
-      scene?.focusSelection(380);
+      scene?.focusSelection(1050);
     } else if (id === "city") {
       const centre = project.nodes.find(
         (n) => Math.abs(n.position[0]) < 0.01 && Math.abs(n.position[2]) < 0.01,
@@ -2129,7 +2285,7 @@ function loadTemplate(id: string) {
           Math.abs(getNode(project, r.end).position[2]) <= 50,
       );
       if (centre) setSelection({ kind: "road", id: centre.id });
-      scene?.focusSelection(850);
+      scene?.focusSelection(id === "trumpet" ? 1800 : 1400);
     } else if (id === "signal") scene?.focusSelection(230);
     else if (id === "roundabout") scene?.fit(1.25);
     else if (id === "district" || id === "tee")

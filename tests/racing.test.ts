@@ -498,8 +498,14 @@ describe("road-only authoring and procedural parking modules", () => {
         n = buildNetwork(p);
       assert(!p.sites?.some((s) => s.kind === "block" || s.kind === "water"));
       assert(
-        !n.meshes.some((m) =>
-          ["building", "landscape", "lamp", "sign"].includes(m.kind),
+        !n.meshes.some(
+          (m) =>
+            ["building", "landscape", "lamp"].includes(m.kind) ||
+            (m.kind === "sign" &&
+              !(
+                m.ownerKind === "node" &&
+                p.nodes.find((n) => n.id === m.owner)?.signals
+              )),
         ),
         id,
       );
