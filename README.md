@@ -4,7 +4,7 @@ A self-contained HTML tool for generating **connected highway bridges, city road
 
 ## Open
 
-Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified European-road parking snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/15754e366918ebc83e196619d256cfc836f97c85/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
+Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified reference-scaled interchange and bridge snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/f9fd79f7902a4ebed9c8679a95ccd5dc0a193ffb/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
 
 Only the root HTML is deployed, not Vite's development `index.html`. Code, fonts, procedural materials and licensing notices are embedded. WebGL2 enables the 3D view; plan editing and OBJ/JSON export also work without it.
 
@@ -27,24 +27,25 @@ The achromatic palette and component treatment are ported from the supplied [Sla
 - **Draw:** click points in plan. Snap to shared nodes and actual cubic curves; at-grade crossings are split into shared topology, while elevated crossings remain separate.
 - **One junction pivot:** X/Z in plan, X/Y/Z in 3D. Connected approaches and relative Bézier handles follow the same node. Road pivots and numeric transforms remain editable.
 - **Merge construction:** acute-angle runout includes radius and road width. Both ends share the available trim budget rather than wasting 43% at a free end. Paving setback is adjustable; wide inward offsets cannot fold around the merge nose. Inappropriate zebras are suppressed and junction guidance is surface-clipped.
-- **Paving:** nine world-scaled bond/panel patterns, independent pavement width, flush/stone/rumble curb profiles and edge courses. Albedo, normal and roughness channels are available in GLB and the OBJ texture package. Relief is generated independently from stone colour, rather than turning colour variation into fake displacement. Road and junction curbs share a continuous 15 mm top chamfer (reduced for flush profiles).
+- **Paving:** nine world-scaled bond/panel patterns, independent pavement width, flush/stone/rumble curb profiles and edge courses. Albedo, normal and roughness channels are available in GLB and the OBJ texture package. Relief is generated independently from stone colour, rather than turning colour variation into fake displacement. Street/racing road and junction curbs share a continuous 15 mm top chamfer; motorway flush shoulder profiles do not generate raised urban curbs.
 - **Footways and access:** 4.2 m default sidewalks along the full alignment, widths up to 12 m, independent footway crossfall and curb upstand, graded corner ramps and authored vehicle crossings. The fresh Northbank demo includes one authored driveway; new roads do not auto-populate entries.
 - **Infrastructure:** procedural service covers, framed cast-iron gullies, physical side-entry curb throats with inspection lids, hollow drainage kerbs, recessed linear-channel grates and continuous gutters. Seven physical guardrail/parapet profiles and connected steel/concrete bridges are available. Signs, signal heads and lights are optional controls; the city template deliberately includes street lighting, signs and one signalized boulevard junction.
 - **Persistence:** local autosave, JSON import/export, transactional undo/redo, rename/delete and scene search.
 
-### Connected highway bridges and divided interchanges
+### Reference-scaled highway bridges and divided interchanges
 
-- **Networks → Connected highway bridge:** two separate one-way carriageways, 3.5 m lanes, 1 m asphalt shoulders, an 8 m elevated crossing, four directional access ramps and a continuous lower avenue. Approaches and ramps use shared graph nodes, not detached bridge props.
+- **Networks → Connected highway bridge:** two separate one-way carriageways, 3.65 m lanes, 2 m symmetric shoulders, 7.2 m alignment elevation, two 48 m overpasses, four directional access ramps and a continuous lower avenue. Approaches and ramps use shared graph nodes, not detached bridge props.
 - **Details → Bridge structure:** steel I-girder or concrete-girder sections, closed thin deck bases/slabs, bearings, diaphragms, chamfered piers and real foundations. Adjustable total underside depth (0.75–2.4 m) and pier bay spacing (16–50 m) are consumed by the geometry. Clearance subtracts the actual authored structural depth and lower road crown, not a hardcoded material estimate.
 - Elevated bridge joints stitch the deck and beams between their trimmed spans. Shared span ends are bearing seams rather than tall abutment walls across a connected road. Support stations test lower roads/ramps and an indexed set of actual triangulated junction paving, cycleways, footways, parking and plot bands. Height-clipped intersection checks use oriented footing reservations and the wider headstock at its own elevation; open courtyard/gateway holes stay open. A blocked pier is moved to safe edges of the lower corridor when possible. This is a geometric exclusion rule, not a structural load solver.
 - **Mixed bridge joins:** straight steel/concrete or different-depth members receive a real shared transition, not mismatched end caps. Each arm retains its own material and mouth section, tapering into the joint depth. Clearance reporting consumes that same taper. Per-member road/material/mouth-depth/joint-depth metadata is included in GLB and OBJ manifests, and bridge inspection prefers the selected joint.
-- **Insert connected bridge section / Infrastructure → Insert connected highway bridge:** on a selected ground alignment at least 420 m long, insert two level landings and three connected sections. Original shared endpoint positions, XZ spline and direction are preserved. The default rise is 8 m. Steep (>8%) or conflicting approaches, vehicle entries and insufficient length/capacity are refused atomically. Undo/redo restores the operation. A manual Elevated bridge deck toggle constructs at the current height and no longer lifts neighbouring streets.
-- **Clovers and T networks:** cloverleaf uses four separated directional carriageways, four 270° turning loops and four direct right-turn links. The three-arm **Twin-loop T interchange** retains the legacy `trumpet` template ID, but is explicitly a divided double-loop T layout, not a falsely labelled single-loop trumpet. Directed reachability checks cover the required movements. Loop speed controls are 40 km/h; direct ramps are 60 km/h.
+- **Insert connected bridge section / Infrastructure → Insert connected highway bridge:** on a selected ground alignment at least 600 m long, insert two level landings and three connected sections. Original shared endpoint positions, XZ spline and direction are preserved. The default rise is 7.2 m. Approximately 4% approach geometry is required; steep or conflicting approaches, vehicle entries and insufficient length/capacity are refused atomically. Undo/redo restores the operation. A manual Elevated bridge deck toggle constructs at the current height and no longer lifts neighbouring streets.
+- **Clovers and T networks:** the C-D cloverleaf has four directional motorway carriageways, separate collector-distributor roads, four 270° loops and four direct right-turn links. The legacy `trumpet` ID now generates a genuine single-loop trumpet, with one 270° loop, two direct links and one semi-direct movement. Directed reachability covers all required movements. Nominal loop radius is 120 m with a 50 km/h loop setting; the minimum measured curve radius including transitions is about 112.1 m.
+
 - **Geometry → Traffic handedness:** right/left lane-direction policy controls bike/bus stencil directions, incoming-only stop bars and signal-pole/mast placement. Signal heads are omitted from outgoing-only one-way arms. Motorway shoulder width is independently editable. Channelized crossroads have compact 3.25 m motor lanes, 3.5 m right-turn slip lanes and small rounded paving islands.
 - **Curbs and gores:** exact tangent and mid-arc knots keep a short rounded splitter from turning into a chamfer between long straight returns. Painted gores are derived from the actual sampled curb tip, remain on triangulated asphalt and stop 1.6 m before the physical nose. Ordinary crossroads no longer inherit unrelated merge dividers. **Inspect curb splitter** frames the real construction.
 - **Roadside protection:** W-beam, three-wave thrie-beam, hollow box-beam, four-cable, pedestrian tube railing, concrete safety barrier and bridge parapet/vertical infill. These are distinct swept sections with caps, posts/sockets and attachment detail, not a texture selector. Corner sweeps use the actual fillet normals; mixed designs receive a connected transition. Infrastructure thumbnails show the generated profile close-up. Production includes denser bolt/hardware detail.
 
-The connected diamond/bridge/city crossings have **6.60 m minimum modeled clearance** and **6.16% maximum highway grade**. Cloverleaf/T crossings have **6.63 m minimum modeled clearance** and **6.0% maximum grade**. These are measured geometry checks, **not civil, traffic-safety or structural certification**. Very large networks are heavier than individual road tiles; use Editing preview or export smaller engine tiles.
+The corrected diamond/bridge/city crossings have **5.431 m minimum modeled clearance** and **3.086% maximum alignment grade**. C-D cloverleaf/trumpet clearances are **5.475 m**; maximum alignment grades are **3.158% / 3.017%** respectively. These are measured geometry checks, **not civil, traffic-safety or structural certification**. The complete source audit and dimensioned schematics are linked below. Larger networks remain tiled game assets; use Editing preview when appropriate.
 
 ### Connected city road network — no buildings or trees
 
@@ -125,9 +126,25 @@ Changing dimensions regenerates the rows and stall geometry. Bays and 1.25 m tra
 
 ### Included road networks
 
-Connected city network, connected highway bridge, dumbbell/twin roundabouts, European mobility quarter, Northbank streets, an acute merge fixture, Harbour street circuit, compact channelized crossroads, divided cloverleaf, twin-loop T interchange, racing loop/pits with paddock parking, waterfront paths, T-junction, roundabout and divided diamond interchange. Legacy architectural blocks and stylized landscape remain excluded from old imported project data; road graphs and parking are retained. New open block-perimeter pieces do not generate architecture.
+Connected city network, connected highway bridge, dumbbell/twin roundabouts, European mobility quarter, Northbank streets, an acute merge fixture, Harbour street circuit, compact channelized crossroads, divided cloverleaf, single-loop trumpet interchange, racing loop/pits with paddock parking, waterfront paths, T-junction, roundabout and divided diamond interchange. Legacy architectural blocks and stylized landscape remain excluded from old imported project data; road graphs and parking are retained. New open block-perimeter pieces do not generate architecture.
 
 All template defaults are game-asset starting layouts. No template generates architecture or trees; only explicitly designed infrastructure such as the city street lights/signals is included.
+
+## Interchange dimensions and source verification
+
+The interchange/bridge families have been rebuilt from published FHWA/MoDOT/Caltrans/MassDOT schematics and geometric controls, with explicit measured dimensions. See the [source audit and before/after measurements](./docs/INTERCHANGE_REFERENCES.md), [dimensioned diamond](./docs/reference-layouts/diamond.svg), [C-D cloverleaf](./docs/reference-layouts/cloverleaf.svg) and [single-loop trumpet](./docs/reference-layouts/trumpet.svg).
+
+- **Conventional diamond:** 260 m terminal centres; perpendicular local-street ramp tangents; two 48 m overpass decks. The raised approaches and four ramps use closed fill instead of being treated as kilometres of viaduct.
+- **C-D cloverleaf:** four nominal 120 m loops, separate collector-distributor roads and two-lane core collectors; 304 m C-D graph-port spacing and about 410.6 m between actual gore noses. Four 96 m structural spans; measured loop minimum radius is about 112.1 m, not the previous 17.8 m connection.
+- **Genuine trumpet:** one 270-degree loop, two direct right-turn links and an outer semi-direct connection, preserving all six required movements between its three arms. Two 84 m stem spans, rather than the old twin-loop T arrangement.
+- **Speed-change lanes:** an actual one-sided extra lane, 150 m exit or 200 m entrance full-width run plus a 90 m pavement taper. Geometry controls preserve the through lanes and shoulder; keep-left mirrors the side. User-shortened zones are reported, not silently advertised as full-length.
+- **Bridge proportions:** 7.2 m alignment datum / 1.6 m depth in these templates; actual minimum modeled road clearances 5.431–5.475 m. Width-derived 3–5 girder arrangements and individual bearings, deeper pier caps and structure-to-fill abutments. Supported span lengths are exported.
+- **Live dimension controls:** Geometry → Reference dimensions shows cubic minimum radius, maximum alignment grade, actual structural length, girder layout, measured weave spacing and published-source links. Details → Bridge structure exposes structural start/end percentages and earth-supported approaches.
+- **Connected insertion:** a nominal 64 m deck and two filled approaches; minimum 600 m host, increasing with requested rise, near 4% grades. Shared endpoints and the exact XZ alignment remain unchanged. The operation refuses insufficient/blocked approaches atomically.
+
+The selected cross-sections, radius/grade targets and flat-ground reference are explicit **game-asset assumptions**, not universal standards or traffic/structural certification. Traffic demand, queues, weaving capacity, sight distance, superelevation and structural loads require separate project-specific design. Highway shoulder profiles are flush rather than raised urban curbs. The user's European parking streets are unchanged.
+
+Run `npm run audit:design` to regenerate the dimensioned schematics and assert their measured geometry. `network.designReview`, `auxiliaryLanes` and `embankments` are available through the live API, change events, GLB extras and OBJ manifests.
 
 ## Export
 
@@ -139,13 +156,13 @@ All template defaults are game-asset starting layouts. No template generates arc
 
 OBJ uses `norm`/`map_Pr` PBR MTL extensions. Importers that ignore these extensions can use the material manifest or GLB. Albedo is sRGB; normal/roughness are linear data. Normals use **OpenGL +Y**: invert green for DirectX -Y shaders. UV repeats and normal strengths are recorded in the manifest.
 
-Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts, world bounds and service-feature, footway, mobility, empty-planting, block, bridge, barrier, splitter, street-detail and roadside-parking tables, plus actual junction offset fits. GLB root extras identify the tessellation profile and include the same infrastructure tables. `materials.json` also records cover/channel wrap modes and metallic response; `Pm` and clamp settings are included in MTL.
+Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts, world bounds and service-feature, footway, mobility, empty-planting, block, bridge, barrier, splitter, street-detail, roadside-parking, measured-design-review, auxiliary-lane and approach-fill tables, plus actual junction offset fits. GLB root extras identify the tessellation profile and include the same infrastructure tables. `materials.json` also records cover/channel wrap modes and metallic response; `Pm` and clamp settings are included in MTL.
 
 Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wireframe preview does not alter the original exported materials. No preview environment is exported. A final game's visual quality also depends on its texture resolution, material/shader integration, lighting, terrain and rendering pipeline; this editor does not claim to be a complete AAA environment renderer.
 
-Release HTML is checked byte-for-byte against the published GitHub file. **295 CPU checks and 86 browser checks** pass, including boxed European roadside-bay geometry/capacity, bus/cycle/door-buffer separation, access/mouth exclusions, parking live controls/history/inspection and embedded export/offline stencils, idle/hidden-pane render invalidation, real support surface/height exclusion, mixed member/tapered-clearance checks, incoming-only handed signal placement, directed interchange reachability, actual bridge/support clearances, atomic connected bridge insertion, seven distinct barrier sections, exact rounded splitter tips and geometry-derived gores, pocket/refuge/shared-cycle treatment, the exact widened/elevated Northbank corner reproduction, analytic offsets, short-fit tapering, bus/cycle lane separation, real planting apertures/grate slots, gated block rings, parking islands/EV capacity, legacy drainage/ramp/driveway checks, PBR exports, mobile layout and fully offline use.
+Release HTML is checked byte-for-byte against the published GitHub file. **323 CPU checks and 92 browser checks** pass, including published-reference cubic curvature/grade/spacing checks, bounded overpass/abutment/fill geometry, full production C-D cloverleaf, single-loop trumpet reachability, one-sided handed speed-change lanes, source/measurement exports and clear underside inspection, boxed European roadside-bay geometry/capacity, bus/cycle/door-buffer separation, access/mouth exclusions, parking live controls/history/inspection and embedded export/offline stencils, idle/hidden-pane render invalidation, real support surface/height exclusion, mixed member/tapered-clearance checks, incoming-only handed signal placement, directed interchange reachability, actual bridge/support clearances, atomic connected bridge insertion, seven distinct barrier sections, exact rounded splitter tips and geometry-derived gores, pocket/refuge/shared-cycle treatment, the exact widened/elevated Northbank corner reproduction, analytic offsets, short-fit tapering, bus/cycle lane separation, real planting apertures/grate slots, gated block rings, parking islands/EV capacity, legacy drainage/ramp/driveway checks, PBR exports, mobile layout and fully offline use.
 
-Published standalone: **1,143,282 bytes**, SHA-256 `8bd48ef765aad8bbf0de50cd18f062438fd0c4682cba51605203412243a0b0bd`, byte-verified against GitHub blob `98df6cdd9a42df4ce18676a5f16724298b02147a`. The immutable raw.githack URL uses code commit `15754e366918ebc83e196619d256cfc836f97c85`.
+Published standalone: **1,165,059 bytes**, SHA-256 `f1b0c040beef008213870893269a16b5448e06a7d36376008a3640146a0fef5f`, byte-verified against GitHub blob `c9234a97d7968b72e3bbf9e3eb74156ab1e8ae3e`. The immutable raw.githack URL uses code commit `f9fd79f7902a4ebed9c8679a95ccd5dc0a193ffb`.
 
 ## Development and verification
 
@@ -167,7 +184,7 @@ The app has no backend, no credentials and no browser-facing localhost calls. So
 ```js
 const project = window.frontier.getProject(); // independent JSON-safe copy
 const network = window.frontier.getNetwork(); // treat arrays as read-only
-const preview = window.frontier.getPreviewStats(); // draw/idle counters, visibility, pending state; null without WebGL
+const preview = window.frontier.getPreviewStats(); // draw/idle counters, camera copy, visibility, pending state; null without WebGL
 window.frontier.select({ kind: "node", id: project.nodes[0].id });
 window.frontier.moveJoint(project.nodes[0].id, [10, 0, 5]);
 window.frontier.loadTemplate("race");
@@ -183,7 +200,7 @@ window.frontier.loadTemplate("city"); // connected streets, parking access and h
 window.frontier.loadTemplate("bridge"); // divided highway + four ramps + underpass
 window.frontier.inspectRoadDetail("bridge"); // also "splitter", "street" and "parking"
 const groundRoadId = network.spans.find(
-  (s) => !s.road.bridge && s.alignment.length >= 420,
+  (s) => !s.road.bridge && s.alignment.length >= 600,
 )?.road.id;
 if (groundRoadId) window.frontier.insertBridge(groundRoadId, 8, "steel"); // atomic
 window.frontier.placeSite("tree-pit"); // empty independent planting opening
@@ -203,6 +220,9 @@ window.addEventListener("frontier:change", ({ detail }) => {
     splitters,
     streetDetails,
     roadsideParking,
+    designReview,
+    auxiliaryLanes,
+    embankments,
   } = detail;
 });
 ```
@@ -211,6 +231,6 @@ Selection kinds are `node`, `road` and `site`. `worldToPlan` returns plan-canvas
 
 ### Limits and shortcuts
 
-Tiles: ≤500 roads, ≤1,500 nodes, ≤200 surfaces, 5 × 5 km extent, 5 km maximum alignment control-polygon length and 35 km total. Production tessellation has a separate **15 km control-polygon budget**. Surface-detail and utility-repeat estimates are checked before allocation; the conservative utility budget is 1.5 million vertices, including physical hollow-kerb repetition. Roads support at most 20 authored driveway entries each. Invalid geometry blocks mesh export but leaves JSON available for repair. Larger worlds should be authored/exported as tiles.
+Tiles: ≤500 roads, ≤1,500 nodes, ≤200 surfaces, 5 × 5 km extent, 5 km maximum alignment control-polygon length and 35 km total. Production tessellation has a separate **32 km control-polygon budget**. Surface-detail and utility-repeat estimates are checked before allocation; the conservative utility budget is 1.5 million vertices, including physical hollow-kerb repetition. Roads support at most 20 authored driveway entries each. Invalid geometry blocks mesh export but leaves JSON available for repair. Larger worlds should be authored/exported as tiles.
 
 V select · D/P draw · W move · H/Space pan · M measure · B procedural parking · F frame · G grid · S snap · Shift+A templates · Delete remove · Ctrl/Cmd+S save · Ctrl/Cmd+O import · Ctrl/Cmd+Z undo · Esc cancel.
