@@ -13,7 +13,7 @@ import {
   getNode,
   roadHalfWidth,
 } from "../core/model";
-import { type V3, add } from "../core/math";
+import { type V3, add, distanceXZ } from "../core/math";
 
 export interface GizmoProjection {
   origin: [number, number];
@@ -659,7 +659,7 @@ export class SceneView {
     this.onGizmo(this.gizmoProjection());
     return true;
   }
-  inspectRoadDetail(kind: "bridge" | "splitter" | "street") {
+  inspectRoadDetail(kind: "bridge" | "splitter" | "street" | "parking") {
     if (!this.network || !this.project || !this.selection) return false;
     const owners = [
         this.selection.id,
@@ -708,6 +708,15 @@ export class SceneView {
               ),
           )[0];
       if (split) target = split.pavingNose;
+    } else if (kind === "parking") {
+      const bay = this.network.roadsideParking
+        .filter((b) => owners.includes(b.owner))
+        .sort(
+          (a, b) =>
+            distanceXZ(a.position, pivot) - distanceXZ(b.position, pivot),
+        )[0];
+      if (bay) target = bay.position;
+      range = 16;
     } else {
       const feature = this.network.streetDetails
         .filter((f) => owners.includes(f.owner))
@@ -857,6 +866,8 @@ export class SceneView {
       splitters: network?.splitters ?? this.network?.splitters ?? [],
       streetDetails:
         network?.streetDetails ?? this.network?.streetDetails ?? [],
+      roadsideParking:
+        network?.roadsideParking ?? this.network?.roadsideParking ?? [],
     };
     try {
       return (await new GLTFExporter().parseAsync(group, {

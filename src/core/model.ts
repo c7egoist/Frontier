@@ -256,8 +256,9 @@ export const presets: {
   {
     id: "euro-boulevard",
     name: "European mobility boulevard",
-    description: "Bus priority · protected red cycle tracks",
+    description: "Bus priority · protected red cycle tracks · parking bays",
     settings: {
+      parking: "parallel",
       lanes: 4,
       laneWidth: 3.2,
       sidewalk: 4.8,
@@ -295,8 +296,9 @@ export const presets: {
   {
     id: "cycle-street",
     name: "Protected cycle street",
-    description: "2 motor lanes · buffered cycle tracks",
+    description: "2 motor lanes · buffered cycle tracks · parking bays",
     settings: {
+      parking: "parallel",
       lanes: 2,
       laneWidth: 3.1,
       sidewalk: 4.5,
@@ -311,8 +313,9 @@ export const presets: {
   {
     id: "cycle-painted",
     name: "Urban cycle lanes",
-    description: "Painted bike lanes · permeable paving",
+    description: "Painted bike lanes · roadside parking · permeable paving",
     settings: {
+      parking: "parallel",
       lanes: 2,
       laneWidth: 3.1,
       sidewalk: 3.8,
@@ -1212,11 +1215,14 @@ export const motorHalfWidth = (road: RoadSettings) =>
   (road.lanes * road.laneWidth) / 2 +
   road.median / 2 +
   (road.parking === "parallel" ? 2.3 : 0);
+/** A painted cycle lane alongside parking also keeps a hatched door buffer. */
+export const cycleBufferWidth = (road: RoadSettings) =>
+  road.cycleMode === "protected" ||
+  (road.cycleMode === "painted" && road.parking === "parallel")
+    ? road.cycleSeparator
+    : 0;
 export const cycleZoneWidth = (road: RoadSettings) =>
-  road.cycleMode === "none"
-    ? 0
-    : road.cycleWidth +
-      (road.cycleMode === "protected" ? road.cycleSeparator : 0);
+  road.cycleMode === "none" ? 0 : road.cycleWidth + cycleBufferWidth(road);
 export const roadHalfWidth = (road: RoadSettings) =>
   motorHalfWidth(road) +
   cycleZoneWidth(road) +

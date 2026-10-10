@@ -486,6 +486,8 @@ export function graphicCanvas(key: string) {
     c.lineTo(229, 18);
     c.lineTo(128, 221);
     c.fill();
+  } else if (key === "parking-bay") {
+    text("P", 178, "#e4e2d8");
   } else if (key === "parking") {
     c.fillStyle = "#286caa";
     c.fillRect(0, 0, 256, 256);

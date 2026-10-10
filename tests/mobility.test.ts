@@ -222,9 +222,9 @@ describe("bus and cycle geometry / motor-space separation", () => {
       r = p.roads[0],
       n = buildNetwork(p);
     assert.equal(r.lanes, 4);
-    assert.equal(motorHalfWidth(r), 6.4);
-    assert.equal(roadHalfWidth(r), 9.15);
-    assert.equal(n.spans[0].frames[0].hw, 9.15);
+    assert.equal(motorHalfWidth(r), 8.7);
+    assert.equal(roadHalfWidth(r), 11.45);
+    assert.equal(n.spans[0].frames[0].hw, 11.45);
     const buses = n.meshes.find((m) => m.material === "bus-red")!;
     assert(
       points(buses).every(
@@ -234,7 +234,7 @@ describe("bus and cycle geometry / motor-space separation", () => {
     const cycle = n.meshes.find((m) => m.material === "cycle-red")!;
     assert(
       points(cycle).every(
-        (p) => Math.abs(p[2]) >= 7.05 - 1e-7 && Math.abs(p[2]) <= 9.15 + 1e-7,
+        (p) => Math.abs(p[2]) >= 9.35 - 1e-7 && Math.abs(p[2]) <= 11.45 + 1e-7,
       ),
     );
     const buffer = n.meshes.find(
@@ -242,7 +242,7 @@ describe("bus and cycle geometry / motor-space separation", () => {
     )!;
     assert(
       points(buffer).every(
-        (p) => Math.abs(p[2]) >= 6.4 && Math.abs(p[2]) <= 7.05,
+        (p) => Math.abs(p[2]) >= 8.7 && Math.abs(p[2]) <= 9.35,
       ),
     );
   });

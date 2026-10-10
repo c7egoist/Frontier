@@ -94,6 +94,286 @@ try {
     );
     await page.screenshot({ path: resolve(cache, "desktop.png") });
   });
+  const roadsideState = () =>
+    page.evaluate(() => ({
+      project: window.frontier.getProject(),
+      selection: window.frontier.getSelection(),
+      bays: window.frontier.getNetwork().roadsideParking,
+      spaces: window.frontier.getNetwork().parkingSpaces,
+      diagnostics: window.frontier.getNetwork().diagnostics,
+      meshes: window.frontier.getNetwork().meshes.map((m) => ({
+        owner: m.owner,
+        kind: m.kind,
+        material: m.material,
+      })),
+    }));
+  async function importParkingFixture() {
+    const p = {
+      version: 1,
+      name: "Roadside parking export fixture",
+      nodes: [
+        {
+          id: "parking-a",
+          name: "Entry",
+          position: [-60, 0, 0],
+          radius: 3,
+          crossings: false,
+        },
+        {
+          id: "parking-z",
+          name: "Exit",
+          position: [60, 0, 0],
+          radius: 3,
+          crossings: false,
+        },
+      ],
+      roads: [
+        {
+          id: "parking-road",
+          name: "Protected cycle parking street",
+          start: "parking-a",
+          end: "parking-z",
+          h1: [40, 0, 0],
+          h2: [-40, 0, 0],
+          lanes: 2,
+          laneWidth: 3.1,
+          parking: "parallel",
+          cycleMode: "protected",
+          cycleWidth: 1.9,
+          cycleSeparator: 0.6,
+          sidewalk: 4.5,
+          drainage: false,
+          manholes: false,
+          signs: false,
+          treePits: false,
+          driveways: [
+            { id: "parking-access", at: 0.5, side: 1, width: 7, apron: 3.5 },
+          ],
+        },
+      ],
+    };
+    await page.locator("#project-file").setInputFiles({
+      name: "roadside-parking.road.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(p)),
+    });
+    await page.waitForFunction(
+      () =>
+        window.frontier.getProject().name ===
+          "Roadside parking export fixture" &&
+        !document.querySelector("#project-file").value,
+    );
+    await page.evaluate(() =>
+      window.frontier.select({ kind: "road", id: "parking-road" }),
+    );
+  }
+  await test("roadside parking: European quarter has visible real bays on all twelve roads, clear entries and no scenery", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("europe"));
+    await page.locator('button[data-layout="split"]').click();
+    await page.locator("#shade-style").selectOption("shaded");
+    const s = await roadsideState();
+    assert.equal(s.bays.length, 180);
+    assert.equal(new Set(s.bays.map((b) => b.owner)).size, 12);
+    assert(s.project.roads.every((r) => r.parking === "parallel"));
+    assert.equal(
+      s.meshes.filter((m) => m.material === "marking-parking-bay").length,
+      12,
+    );
+    assert.deepEqual(s.diagnostics, []);
+    assert(!s.meshes.some((m) => ["building", "landscape"].includes(m.kind)));
+    for (const span of await page.evaluate(() =>
+      window.frontier.getNetwork().spans.map((s) => ({
+        owner: s.road.id,
+        first: s.frames[0].s,
+        last: s.frames.at(-1).s,
+        ramps: s.footway.ramps,
+      })),
+    )) {
+      for (const bay of s.bays.filter((b) => b.owner === span.owner)) {
+        assert(bay.startStation - 0.05 >= span.first + 10 - 1e-6);
+        assert(bay.endStation + 0.05 <= span.last - 10 + 1e-6);
+        for (const ramp of span.ramps.filter((r) => r.side === bay.side))
+          assert(
+            bay.endStation + 0.35 <= ramp.s - ramp.width / 2 - ramp.flare ||
+              bay.startStation - 0.35 >= ramp.s + ramp.width / 2 + ramp.flare,
+          );
+      }
+    }
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "european-roadside-parking.png"),
+    });
+    await page.evaluate(
+      (id) => window.frontier.select({ kind: "road", id }),
+      s.project.roads[0].id,
+    );
+    await page.locator('[data-inspector-tab="details"]').click();
+    await page.locator('[data-inspector-action="inspect-parking"]').click();
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "european-parking-closeup.png"),
+    });
+  });
+  await test("roadside parking: live toggle, count, layer inspection and undo preserve the liked bus/cycle profile", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("europe"));
+    const p = (await roadsideState()).project,
+      id = p.roads[0].id;
+    await page.evaluate(
+      (id) => window.frontier.select({ kind: "road", id }),
+      id,
+    );
+    await page.locator('[data-inspector-tab="details"]').click();
+    const before = await roadsideState(),
+      count = before.bays.filter((b) => b.owner === id).length;
+    assert(count > 10);
+    assert.equal(
+      Number(await page.locator("[data-roadside-parking]").textContent()),
+      count,
+    );
+    await page.locator('[data-menu="layers-menu"]').click();
+    await page.locator('[data-layer="marking"]').uncheck();
+    await page.locator('[data-menu="layers-menu"]').click();
+    await page.locator('[data-inspector-action="inspect-parking"]').click();
+    assert(await page.locator('[data-layer="marking"]').isChecked());
+    assert.deepEqual((await roadsideState()).project, before.project);
+    await page.locator('[data-prop="parking"]').selectOption("none");
+    const disabled = await roadsideState(),
+      road = disabled.project.roads.find((r) => r.id === id);
+    assert(!disabled.bays.some((b) => b.owner === id));
+    assert.equal(
+      Number(await page.locator("[data-roadside-parking]").textContent()),
+      0,
+    );
+    for (const key of [
+      "lanes",
+      "laneWidth",
+      "busLanes",
+      "cycleMode",
+      "cycleWidth",
+      "cycleSeparator",
+      "sidewalk",
+    ])
+      assert.equal(road[key], before.project.roads[0][key]);
+    assert(
+      !(await page.evaluate(() =>
+        window.frontier.inspectRoadDetail("parking"),
+      )),
+    );
+    await undo();
+    assert.deepEqual((await roadsideState()).project, before.project);
+    assert.deepEqual((await roadsideState()).bays, before.bays);
+    assert.equal(
+      Number(await page.locator("[data-roadside-parking]").textContent()),
+      count,
+    );
+  });
+  await test("roadside parking: painted cycle bays retain a hatched door buffer and bus-only avenues do not gain car slots", async () => {
+    await importParkingFixture();
+    await page.locator('[data-library="roads"]').click();
+    await page.locator('[data-asset="cycle-painted"]').click();
+    let s = await roadsideState(),
+      road = s.project.roads[0];
+    assert.equal(road.parking, "parallel");
+    assert.equal(road.cycleMode, "painted");
+    assert(s.bays.length > 20);
+    assert(s.meshes.some((m) => m.material === "cycle-green"));
+    const cycle = await page.evaluate(
+      () =>
+        window.frontier
+          .getNetwork()
+          .meshes.find((m) => m.material === "cycle-green").positions,
+    );
+    for (let i = 2; i < cycle.length; i += 3)
+      assert(Math.abs(cycle[i]) >= 6 - 1e-7);
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    assert.equal(
+      await page.locator('[data-prop="cycleSeparator"]').inputValue(),
+      "0.6",
+    );
+    assert(
+      await page.getByText("Hatched door buffer", { exact: true }).isVisible(),
+    );
+    await page.evaluate(() => window.frontier.inspectRoadDetail("parking"));
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "painted-cycle-parking.png"),
+    });
+    await page.locator('[data-asset="bus-way"]').click();
+    s = await roadsideState();
+    assert.equal(s.project.roads[0].parking, "none");
+    assert.deepEqual(s.bays, []);
+    await page.locator('[data-inspector-tab="details"]').click();
+    await page.locator('[data-prop="parking"]').selectOption("parallel");
+    s = await roadsideState();
+    assert.deepEqual(s.bays, []);
+    assert(!s.meshes.some((m) => m.material === "marking-parking-bay"));
+    assert.equal(s.spaces, 0);
+  });
+  await test("roadside parking: production GLB, OBJ and editable JSON retain bay geometry, footprints and white stencil textures", async () => {
+    await importParkingFixture();
+    const before = await roadsideState();
+    assert(before.bays.length > 20);
+    await page.locator("#shade-style").selectOption("clay");
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("production");
+    let promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="glb"]').click();
+    let download = await promise,
+      buffer = await readFile(await download.path());
+    const g = JSON.parse(
+        buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
+      ),
+      extras = g.nodes.find((n) => n.extras?.roadsideParking)?.extras,
+      mat = g.materials.find((m) => m.name === "marking-parking-bay");
+    assert(extras?.roadsideParking.length === before.bays.length);
+    assert.equal(extras.geometryDetail, "production");
+    assert(
+      extras.roadsideParking.every(
+        (b) => b.boundary.length === 4 && b.width >= 1.9 && b.length >= 5,
+      ),
+    );
+    assert.deepEqual(
+      extras.roadsideParking.map((b) => b.id),
+      before.bays.map((b) => b.id),
+    );
+    assert(mat?.pbrMetallicRoughness.baseColorTexture);
+    assert.equal(mat.alphaMode, "MASK");
+    assert(g.images.every((i) => i.bufferView !== undefined));
+    assert(
+      g.nodes.some(
+        (n) =>
+          n.extras?.meshKind === "marking" &&
+          n.extras?.materialKey === "marking-parking-bay",
+      ),
+    );
+    assert.deepEqual((await roadsideState()).project, before.project);
+    await page.locator('[data-menu="export-menu"]').click();
+    promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('[data-action="obj"]').click();
+    download = await promise;
+    const files = unzipSync(await readFile(await download.path())),
+      manifest = JSON.parse(new TextDecoder().decode(files["mesh.json"])),
+      materials = JSON.parse(
+        new TextDecoder().decode(files["materials.json"]),
+      ).materials,
+      parkingMat = materials["marking-parking-bay"];
+    assert.equal(manifest.roadsideParking.length, before.bays.length);
+    assert.equal(parkingMat.wrapS, "clamp");
+    assert.equal(parkingMat.wrapT, "clamp");
+    assert(files[parkingMat.albedo]);
+    assert(manifest.objects.some((o) => o.material === "marking-parking-bay"));
+    await page.locator('[data-menu="export-menu"]').click();
+    promise = page.waitForEvent("download");
+    await page.locator('#export-menu [data-action="json"]').click();
+    download = await promise;
+    const json = JSON.parse((await readFile(await download.path())).toString());
+    assert.deepEqual(json, before.project);
+    assert.equal(json.roads[0].parking, "parallel");
+    assert.equal(json.roads[0].cycleMode, "protected");
+    assert.equal(json.roads[0].driveways.length, 1);
+    assert.deepEqual((await roadsideState()).project, before.project);
+    await page.locator("#shade-style").selectOption("shaded");
+  });
   async function importBridgeFixture() {
     const p = {
       version: 1,
@@ -2890,6 +3170,66 @@ try {
     // Keep this context for the last connected-infrastructure offline check.
     // Closing a context mid-suite breaks npm Chromium single-process mode.
     offlinePage = offline;
+  });
+  await test("roadside parking: standalone European bays run offline with functional live controls and inspection", async () => {
+    const offline =
+        offlinePage ??
+        (await browser.newPage({ viewport: { width: 1512, height: 982 } })),
+      requests = [],
+      offlineErrors = [];
+    offlinePage = offline;
+    offline.on("pageerror", (e) => offlineErrors.push(e.message));
+    await offline.route(/^https?:\/\//, (r) => {
+      requests.push(r.request().url());
+      return r.abort();
+    });
+    await offline.goto(`file://${resolve("RoadDesigner.html")}`);
+    await offline.waitForFunction(() => !!window.frontier);
+    await offline.evaluate(() => window.frontier.loadTemplate("europe"));
+    const before = await offline.evaluate(() => ({
+      project: window.frontier.getProject(),
+      bays: window.frontier.getNetwork().roadsideParking,
+    }));
+    assert.equal(before.bays.length, 180);
+    const id = before.project.roads[0].id;
+    await offline.evaluate(
+      (id) => window.frontier.select({ kind: "road", id }),
+      id,
+    );
+    await offline.locator('[data-inspector-tab="details"]').click();
+    assert(
+      await offline.evaluate(() =>
+        window.frontier.inspectRoadDetail("parking"),
+      ),
+    );
+    await offline.locator('[data-prop="parking"]').selectOption("none");
+    assert(
+      !(await offline.evaluate(
+        (id) =>
+          window.frontier
+            .getNetwork()
+            .roadsideParking.some((b) => b.owner === id),
+        id,
+      )),
+    );
+    await offline.evaluate(() => window.frontier.undo());
+    assert.equal(
+      await offline.evaluate(
+        () => window.frontier.getNetwork().roadsideParking.length,
+      ),
+      180,
+    );
+    assert.deepEqual(
+      await offline.evaluate(() => window.frontier.getProject()),
+      before.project,
+    );
+    assert.deepEqual(requests, []);
+    assert.deepEqual(offlineErrors, []);
+    await offline.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "offline-roadside-parking.png"),
+    });
+    // The shared single-process Chromium context stays alive until the final check.
   });
   await test("connected infrastructure: standalone highway bridges, city and splitters run with the network blocked", async () => {
     const offline =

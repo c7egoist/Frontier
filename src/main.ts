@@ -24,6 +24,7 @@ import {
   patternNames,
   roadDefaults,
   roadHalfWidth,
+  cycleBufferWidth,
   uid,
   connected,
   getNode,
@@ -276,6 +277,7 @@ function rebuild(inspector = true, context = false) {
         barriers: network.barriers,
         splitters: network.splitters,
         streetDetails: network.streetDetails,
+        roadsideParking: network.roadsideParking,
       },
     }),
   );
@@ -299,6 +301,14 @@ function rebuild(inspector = true, context = false) {
     selection?.id,
     ...selectedRoads().map((r) => r.id),
   ]);
+  document
+    .querySelectorAll<HTMLOutputElement>("[data-roadside-parking]")
+    .forEach(
+      (o) =>
+        (o.value = String(
+          network.roadsideParking.filter((b) => ownerIDs.has(b.owner)).length,
+        )),
+    );
   document
     .querySelectorAll<HTMLOutputElement>("[data-mobility-stat]")
     .forEach(
@@ -922,7 +932,7 @@ function networkPreview(id: string) {
           const motor =
               (r.lanes * r.laneWidth + r.median) / 2 +
               (r.parking === "parallel" ? 2.3 : 0),
-            buffer = r.cycleMode === "protected" ? r.cycleSeparator : 0,
+            buffer = cycleBufferWidth(r),
             stroke = (color: string, width: number) =>
               `<path d="${path(r)}" stroke="${color}" stroke-width="${width * 2 * scale}" stroke-linecap="round"/>`;
           return (
@@ -1015,10 +1025,12 @@ function mobilityControls(road: Road) {
             ["green", "Green aggregate"],
             ["asphalt", "Standard asphalt"],
           ]) +
-          (road.cycleMode === "protected"
+          (cycleBufferWidth(road) > 0
             ? range(
                 "cycleSeparator",
-                "Protection buffer",
+                road.cycleMode === "protected"
+                  ? "Protection buffer"
+                  : "Hatched door buffer",
                 road.cycleSeparator,
                 0.3,
                 1.5,
@@ -1270,6 +1282,7 @@ function renderInspector() {
           ["none", "None"],
           ["parallel", "Parallel bays"],
         ]) +
+        `<p class="card-note"><span><output data-roadside-parking>${network.roadsideParking.filter((b) => selectedRoads().some((r) => r.id === b.owner)).length}</output> roadside bays · 5.5 × 2.1 m nominal. Separate 2.3 m strips retain travel and cycle widths. Boxes leave crossings and entry flares clear; squeezed curves, bridges, race/motorway and bus-only roads have no bays.</span></p><button class="solver-badge" data-inspector-action="inspect-parking">${icon("search")}Inspect roadside parking</button>` +
         toggle(
           "curbExtensions",
           "Parking-pocket curb extensions",
@@ -1603,7 +1616,7 @@ function insertBridgeOnSelection(
   }
   return result;
 }
-function inspectRoadDetail(kind: "bridge" | "splitter" | "street") {
+function inspectRoadDetail(kind: "bridge" | "splitter" | "street" | "parking") {
   const found = scene?.inspectRoadDetail(kind) ?? false;
   if (!found)
     toast(
@@ -1615,7 +1628,9 @@ function inspectRoadDetail(kind: "bridge" | "splitter" | "street") {
       ? ["structure", "rail"]
       : kind === "splitter"
         ? ["curb", "paving", "marking"]
-        : ["curb", "paving", "marking"]) {
+        : kind === "parking"
+          ? ["asphalt", "marking", "cycle", "bus"]
+          : ["curb", "paving", "marking"]) {
       hiddenLayers.delete(layer);
       scene?.setDetailLayer(layer, true);
       plan.setDetailLayer(layer, true);
@@ -1624,6 +1639,8 @@ function inspectRoadDetail(kind: "bridge" | "splitter" | "street") {
       );
       if (input) input.checked = true;
     }
+  if (found && kind === "parking" && $("viewports").dataset.layout === "plan")
+    setLayout("split");
   return found;
 }
 function inspectInfrastructure(kind: "manhole" | "drainage") {
@@ -2509,14 +2526,17 @@ document.addEventListener("click", (e) => {
     if (
       a === "inspect-bridge" ||
       a === "inspect-splitter" ||
-      a === "inspect-street"
+      a === "inspect-street" ||
+      a === "inspect-parking"
     ) {
       inspectRoadDetail(
         a === "inspect-bridge"
           ? "bridge"
           : a === "inspect-splitter"
             ? "splitter"
-            : "street",
+            : a === "inspect-parking"
+              ? "parking"
+              : "street",
       );
       return;
     }

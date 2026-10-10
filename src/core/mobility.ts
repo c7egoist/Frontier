@@ -8,7 +8,12 @@ import {
   type Arm,
   type MeshData,
 } from "./geometry";
-import { roadHalfWidth, motorHalfWidth, type RoadNode } from "./model";
+import {
+  roadHalfWidth,
+  motorHalfWidth,
+  cycleBufferWidth,
+  type RoadNode,
+} from "./model";
 import { clearRuns } from "./footways";
 import { offsetCornerPath, type CornerPath } from "./corners";
 import { meshSurfaceY } from "./road-details";
@@ -153,7 +158,7 @@ export function buildRoadMobility(
     });
   }
   if (r.cycleMode === "none") return features;
-  const buffer = r.cycleMode === "protected" ? r.cycleSeparator : 0,
+  const buffer = cycleBufferWidth(r),
     inner = motor + buffer,
     outer = inner + r.cycleWidth;
   for (const side of [-1, 1]) {
@@ -207,6 +212,35 @@ export function buildRoadMobility(
             for (const edge of [inner + 0.12, outer - 0.16])
               ribbon(b, span, s, s + 0.25, side * edge, 0.3);
           }
+    }
+    if (r.cycleMode === "painted" && buffer > 0 && r.markings) {
+      // Paint-only door buffer: no separator obstructs an access or crossing.
+      const margin = 7 + r.markingSetback;
+      for (const [a, z] of clearRuns(span, side)) {
+        const from = Math.max(a + 0.4, first + margin),
+          to = Math.min(z - 0.4, last - margin);
+        for (let s = from; s + buffer < to; s += 3) {
+          const point = (ds: number, offset: number) => {
+            const f = frameAt(span, s + ds);
+            return surfacePoint(
+              f,
+              side * offset * sectionScale(span, f),
+              0.018,
+            );
+          };
+          b.quad(
+            "marking",
+            "paint",
+            [
+              point(0, motor + 0.08),
+              point(0.1, motor + 0.08),
+              point(buffer, motor + buffer - 0.08),
+              point(buffer - 0.1, motor + buffer - 0.08),
+            ],
+            true,
+          );
+        }
+      }
     }
     if (r.cycleMode !== "protected") continue;
     // Low, closed-volume concrete islands. Leave the entire access flare and

@@ -1,6 +1,6 @@
 import { splitterLayout } from "./splitters";
 import type { CornerPath } from "./corners";
-import { buildMedianIsland } from "./street-details";
+import { buildMedianIsland, sectionScale } from "./street-details";
 import { clearRuns, inRamp } from "./footways";
 import {
   add,
@@ -13,6 +13,7 @@ import {
   cubic,
   distanceXZ,
   clamp,
+  simplePolygon,
   type V3,
 } from "./math";
 import {
@@ -22,6 +23,7 @@ import {
   getNode,
   type Project,
   type RoadNode,
+  type RoadSettings,
 } from "./model";
 import { insidePolygon } from "./sites";
 import {
@@ -142,7 +144,7 @@ export function buildRoadFurniture(
       )
         buildSign(b, add(p, mul(f.d, end ? -6 : 6)), d, "exit");
       if (
-        r.parking === "parallel" &&
+        allowsRoadsideParking(r) &&
         !inRamp(span.footway, f.s + (end ? -5 : 5), side, 1)
       )
         buildSign(b, add(p, mul(f.d, end ? -5 : 5)), d, "parking");
@@ -180,28 +182,151 @@ export function buildRoadFurniture(
 export function buildMedian(b: MeshBuilder, span: RoadSpan, project: Project) {
   return buildMedianIsland(b, span, project);
 }
-export function parallelParkingBays(
-  span: RoadSpan,
-): { s: number; side: number }[] {
-  if (span.road.parking !== "parallel" || !span.road.markings) return [];
-  const first = span.frames[0].s + 10,
-    last = span.frames.at(-1)!.s - 10,
-    bays: { s: number; side: number }[] = [];
-  for (const side of [-1, 1]) {
-    const runs = clearRuns(span, side, true);
-    for (let s = first; s + 5.5 < last; s += 6)
-      if (runs.some(([a, z]) => s >= a && s + 5.6 <= z)) bays.push({ s, side });
+export interface RoadsideParkingBay {
+  id: string;
+  owner: string;
+  kind: "parallel-bay";
+  side: -1 | 1;
+  startStation: number;
+  endStation: number;
+  station: number;
+  position: V3;
+  /** Conservative plan dimensions between marking centrelines, in metres. */
+  length: number;
+  width: number;
+  direction: number;
+  boundary: V3[];
+}
+const PARKING_LENGTH = 5.5,
+  PARKING_WIDTH = 2.1,
+  PARKING_PITCH = 6,
+  PARKING_STROKE = 0.1;
+export const allowsRoadsideParking = (r: RoadSettings) =>
+  r.parking === "parallel" &&
+  r.markings &&
+  r.markingStyle === "urban" &&
+  !r.bridge &&
+  !(r.busLanes === "outer" && r.lanes <= (r.oneWay ? 1 : 2));
+
+/** Bays occupy only the allocated 2.3 m parking band, never a motor/bus lane
+ * or the cycle zone outside it. Recess the complete painted box from mouths
+ * and access flares; don't report squeezed or folded boxes as usable spaces. */
+export function parallelParkingBays(span: RoadSpan): RoadsideParkingBay[] {
+  const r = span.road;
+  if (!allowsRoadsideParking(r)) return [];
+  const first = span.frames[0].s + 10 + PARKING_STROKE / 2,
+    last = span.frames.at(-1)!.s - 10 - PARKING_STROKE / 2,
+    hw = motorHalfWidth(r),
+    inner = hw - 2.2,
+    outer = hw - 0.1,
+    center = (inner + outer) / 2,
+    bays: RoadsideParkingBay[] = [];
+  for (const side of [-1, 1] as const) {
+    const runs = clearRuns(span, side);
+    for (let s = first; s + PARKING_LENGTH <= last; s += PARKING_PITCH) {
+      const end = s + PARKING_LENGTH;
+      if (!runs.some(([a, z]) => s - 0.35 >= a && end + 0.35 <= z)) continue;
+      const station = (s + end) / 2,
+        frames = [
+          frameAt(span, s - PARKING_STROKE / 2),
+          ...span.frames.filter((f) => f.s > s && f.s < end),
+          frameAt(span, station),
+          frameAt(span, end + PARKING_STROKE / 2),
+        ],
+        scale = Math.min(...frames.map((f) => sectionScale(span, f)));
+      if (
+        PARKING_WIDTH * scale < 1.9 ||
+        frames.some(
+          (f) =>
+            (outer + PARKING_STROKE / 2) * sectionScale(span, f) > f.hw - 0.02,
+        )
+      )
+        continue;
+      const point = (at: number, offset: number) => {
+          const f = frameAt(span, at);
+          return surfacePoint(f, side * offset * sectionScale(span, f), 0.018);
+        },
+        boundary = [
+          point(s, inner),
+          point(s, outer),
+          point(end, outer),
+          point(end, inner),
+        ],
+        length = Math.min(
+          distanceXZ(boundary[0], boundary[3]),
+          distanceXZ(boundary[1], boundary[2]),
+        );
+      if (!simplePolygon(boundary) || length < 5) continue;
+      bays.push({
+        id: `${r.id}:parallel-bay:${side}:${s.toFixed(3)}`,
+        owner: r.id,
+        kind: "parallel-bay",
+        side,
+        startStation: s,
+        endStation: end,
+        station,
+        position: point(station, center),
+        length,
+        width: PARKING_WIDTH * scale,
+        direction: r.oneWay ? 1 : side * (r.trafficSide === "left" ? -1 : 1),
+        boundary,
+      });
+    }
   }
   return bays;
 }
 export function buildParallelParking(b: MeshBuilder, span: RoadSpan) {
-  if (span.road.parking !== "parallel" || !span.road.markings) return;
-  const hw = motorHalfWidth(span.road);
-  for (const { s, side } of parallelParkingBays(span)) {
-    ribbon(b, span, s, s + 5.5, side * (hw - 2.2), 0.1);
-    for (const end of [s, s + 5.5])
-      ribbon(b, span, end, end + 0.1, side * (hw - 1.2), 2.1);
+  const bays = parallelParkingBays(span),
+    hw = motorHalfWidth(span.road),
+    inner = hw - 2.2,
+    outer = hw - 0.1,
+    center = (inner + outer) / 2,
+    sideCounts = new Map<number, number>();
+  for (const bay of bays) {
+    const { startStation: s, endStation: end, side } = bay;
+    for (const edge of [inner, outer])
+      ribbon(b, span, s, end, side * edge, PARKING_STROKE);
+    for (const cap of [s, end])
+      ribbon(
+        b,
+        span,
+        cap - PARKING_STROKE / 2,
+        cap + PARKING_STROKE / 2,
+        side * center,
+        PARKING_WIDTH + PARKING_STROKE,
+      );
+    const index = sideCounts.get(side) ?? 0;
+    sideCounts.set(side, index + 1);
+    if (index % 4) continue;
+    // White road paint, not a blue sign or a parked-car prop. Each vertex follows
+    // the crowned station surface; the UV orientation follows traffic handedness.
+    const point = (x: number, ds: number) => {
+      const f = frameAt(span, bay.station + ds * bay.direction);
+      return surfacePoint(
+        f,
+        (side * center + x * bay.direction) * sectionScale(span, f),
+        0.024,
+      );
+    };
+    b.quad(
+      "marking",
+      "marking-parking-bay",
+      [
+        point(-0.55, -0.7),
+        point(0.55, -0.7),
+        point(0.55, 0.7),
+        point(-0.55, 0.7),
+      ],
+      true,
+      [
+        [0, 0],
+        [1, 0],
+        [1, 1],
+        [0, 1],
+      ],
+    );
   }
+  return bays;
 }
 export function buildTrafficSignals(
   b: MeshBuilder,

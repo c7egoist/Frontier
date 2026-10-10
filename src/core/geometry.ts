@@ -56,7 +56,7 @@ import {
   buildRoadFurniture,
   buildMedian,
   buildParallelParking,
-  parallelParkingBays,
+  type RoadsideParkingBay,
   buildJunctionMarkings,
   buildTrafficSignals,
 } from "./road-details";
@@ -194,6 +194,7 @@ export interface Network {
   maxGrade: number;
   clearances: { a: string; b: string; meters: number }[];
   parkingSpaces: number;
+  roadsideParking: RoadsideParkingBay[];
   services: UtilityFeature[];
   manholes: number;
   detail: GeometryDetail;
@@ -1148,7 +1149,7 @@ function buildSpan(span: RoadSpan, project: Project) {
   buildMarkings(b, span, project);
   const refuges = buildMedian(b, span, project);
   const streetDetails = [...streetFeatures(span, project), ...refuges];
-  buildParallelParking(b, span);
+  const roadsideParking = buildParallelParking(b, span);
   buildRoadFurniture(b, span, project);
   buildRails(b, span);
   const services = [...footwayResult.services, ...buildRoadManholes(b, span)],
@@ -1158,6 +1159,7 @@ function buildSpan(span: RoadSpan, project: Project) {
     inlets,
     services,
     streetDetails,
+    roadsideParking,
     footways: footwayResult.features,
     plantings: footwayResult.plantings,
     mobility,
@@ -1550,6 +1552,7 @@ export function buildNetwork(
     mobility: MobilityFeature[] = [],
     bridges: BridgeFeature[] = [],
     streetDetails: StreetFeature[] = [],
+    roadsideParking: RoadsideParkingBay[] = [],
     splitters: SplitterFeature[] = [],
     bridgeJoints: { node: RoadNode; arms: Arm[]; bottom: V3[] }[] = [];
   let length = 0,
@@ -1673,6 +1676,7 @@ export function buildNetwork(
     plantings.push(...result.plantings);
     mobility.push(...result.mobility);
     streetDetails.push(...result.streetDetails);
+    roadsideParking.push(...result.roadsideParking);
   }
   for (const node of jointNodes) {
     const result = buildJunction(
@@ -1896,6 +1900,7 @@ export function buildNetwork(
     mobility,
     bridges,
     streetDetails,
+    roadsideParking,
     splitters,
     barriers: [
       ...spans
@@ -1948,7 +1953,7 @@ export function buildNetwork(
     services,
     manholes: services.filter((s) => s.kind === "manhole").length,
     parkingSpaces:
-      spans.reduce((sum, s) => sum + parallelParkingBays(s).length, 0) +
+      roadsideParking.length +
       (project.sites ?? [])
         .filter((s) => s.kind === "parking")
         .reduce((sum, s) => sum + parkingLayout(s).length, 0),
