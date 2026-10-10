@@ -1,3 +1,4 @@
+import { makeConnectedTemplate } from "./connected-layouts";
 import {
   makeNode,
   makeRoad,
@@ -12,6 +13,24 @@ import { makeSite, type SiteKind } from "./sites";
 import { mul, add, sub, type V3 } from "./math";
 
 export const templateCatalog = [
+  {
+    id: "city",
+    name: "Connected city network",
+    description:
+      "Street hierarchy · shared cycle streets · highway flyovers · no buildings",
+  },
+  {
+    id: "bridge",
+    name: "Connected highway bridge",
+    description:
+      "Divided decks · four directional ramps · continuous lower avenue",
+  },
+  {
+    id: "dumbbell",
+    name: "Dumbbell junction",
+    description:
+      "Twin compact roundabouts · linked city approaches · curbed islands",
+  },
   {
     id: "europe",
     name: "European mobility quarter",
@@ -40,13 +59,13 @@ export const templateCatalog = [
   },
   {
     id: "cloverleaf",
-    name: "Cloverleaf interchange",
-    description: "Four 270° loops · connected elevated motorway",
+    name: "Divided cloverleaf interchange",
+    description: "Separated carriageways · four loops + four right-turn links",
   },
   {
     id: "trumpet",
-    name: "Trumpet interchange",
-    description: "Three-arm motorway · loop ramp · flyover",
+    name: "Twin-loop T interchange",
+    description: "Three arms · divided flyover · two connected turning loops",
   },
   {
     id: "race",
@@ -85,6 +104,8 @@ const ids = new Set([
   "waterfront",
 ]);
 export function makeAdvancedTemplate(type: string): Project | null {
+  const connected = makeConnectedTemplate(type);
+  if (connected) return connected;
   if (!ids.has(type)) return null;
   const project: Project = {
     version: 1,
@@ -369,23 +390,23 @@ export function makeAdvancedTemplate(type: string): Project | null {
       [-12, 0, 0],
     );
   } else if (type === "signal") {
-    const c = node("Signalized crossing", 0, 0, 0, 12);
+    const c = node("Signalized crossing", 0, 0, 0, 6);
     c.crossings = true;
     c.boxJunction = true;
     c.signals = false;
     const arms = Array.from({ length: 4 }, (_, i) => {
-      const p = rotate([0, 0, -95], i);
+      const p = rotate([0, 0, -56], i);
       return node(`Slip terminal ${i + 1}`, p[0], p[2], 0, 4);
     });
-    const arterial = { ...city, lanes: 4, laneWidth: 3.3, sidewalk: 3 };
+    const arterial = { ...city, lanes: 2, laneWidth: 3.25, sidewalk: 3.4 };
     arms.forEach((a, i) => {
-      const p = rotate([0, 0, -190], i),
+      const p = rotate([0, 0, -135], i),
         end = node(`Avenue boundary ${i + 1}`, p[0], p[2]);
       road(end, a, `Avenue ${i + 1} · outer`, arterial);
       road(a, c, `Avenue ${i + 1} · inner`, arterial);
       road(
         a,
-        arms[(i + 1) % 4],
+        arms[(i + 3) % 4],
         `Free-flow slip ${i + 1}`,
         {
           ...ramp,
@@ -395,13 +416,16 @@ export function makeAdvancedTemplate(type: string): Project | null {
           signs: false,
           speedLimit: 30,
           markingStyle: "urban",
+          laneWidth: 3.5,
         },
-        rotate([21, 0, 35], i),
-        rotate([-35, 0, -21], i),
+        rotate([-16, 0, 23], i),
+        rotate([23, 0, -16], i),
       );
-      const q = rotate([24, 0, -24], i),
-        island = site("island", q[0], q[2], 20, 20, i * 90);
-      island.name = `Planted splitter island ${i + 1}`;
+      const q = rotate([-16, 0, -16], i),
+        island = site("island", q[0], q[2], 10, 10, i * 90);
+      island.name = `Rounded paved splitter island ${i + 1}`;
+      island.cornerRadius = 0.9;
+      island.pattern = "linear";
     });
   } else if (type === "cloverleaf" || type === "trumpet") {
     const w = node("West merge", -160, 0, 0, 4),

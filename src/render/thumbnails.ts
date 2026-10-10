@@ -1,3 +1,6 @@
+import { insertConnectedBridge } from "../core/bridge-insertion";
+import { railStyles, type RailStyle } from "../core/model";
+import { edgePoint } from "../core/geometry";
 import {
   makeNode,
   makeRoad,
@@ -15,6 +18,8 @@ const cache = new Map<string, string>(),
   textures = new Map<string, HTMLCanvasElement>();
 const palette: Record<string, string> = {
   asphalt: "#454b4c",
+  concrete: "#9b9a95",
+  pole: "#434646",
   soil: "#514334",
   "tree-grate": "#565c58",
   "cycle-red": "#914a43",
@@ -243,7 +248,27 @@ export function assetThumbnail(
   };
   let focus: V3 | undefined,
     focusScale = 165;
-  if (category === "structure" && id === "corner") {
+  if (category === "structure" && id === "bridge-kit") {
+    const a = makeNode([-300, 0, 0]),
+      z = makeNode([300, 0, 0]);
+    p.nodes = [a, z];
+    p.roads = [
+      makeRoad(a, z, "Connected bridge preview", {
+        lanes: 2,
+        laneWidth: 3.5,
+        oneWay: true,
+        sidewalk: 0.8,
+        markingStyle: "motorway",
+        curbStyle: "flush",
+        manholes: false,
+        drainage: false,
+        guardrails: true,
+        railStyle: "boxbeam",
+        railHeight: 0.95,
+      }),
+    ];
+    insertConnectedBridge(p, p.roads[0].id);
+  } else if (category === "structure" && id === "corner") {
     Object.assign(p, makeTemplate("tee"));
     p.roads.forEach((r) => {
       r.signs = false;
@@ -285,6 +310,20 @@ export function assetThumbnail(
                     manholes: false,
                   }
                 : { drainage: id === "drain", manholes: id === "manhole" };
+    if (category === "structure" && id.startsWith("rail-")) {
+      const style = id.slice(5) as RailStyle;
+      if (railStyles.includes(style))
+        Object.assign(settings, {
+          guardrails: true,
+          railStyle: style,
+          railHeight:
+            style === "parapet" ? 1.2 : style === "railing" ? 1.05 : 0.95,
+          sidewalk: 0.8,
+          manholes: false,
+          drainage: false,
+          markings: false,
+        });
+    }
     if (
       category === "structure" &&
       ["sidewalk", "driveway", "kerb", "hollow"].includes(id)
@@ -325,6 +364,15 @@ export function assetThumbnail(
       apron: 4,
     });
   const n = buildNetwork(p);
+  if (category === "structure" && (id === "rail" || id.startsWith("rail-"))) {
+    const span = n.spans[0];
+    focus = edgePoint(
+      span.frames[Math.floor(span.frames.length / 2)],
+      1,
+      "outer",
+    );
+    focusScale = 31;
+  }
   if (["manhole", "drain", "channel"].includes(id))
     focus = n.services.find(
       (s) =>

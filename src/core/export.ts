@@ -34,6 +34,8 @@ const diffuse: Record<string, [number, number, number]> = {
   paint: [0.9, 0.92, 0.85],
   yellow: [0.88, 0.8, 0.48],
   steel: [0.67, 0.73, 0.7],
+  "steel-dark": [0.35, 0.39, 0.42],
+  foundation: [0.52, 0.54, 0.53],
   girder: [0.35, 0.46, 0.47],
   gutter: [0.15, 0.23, 0.2],
   "road-base": [0.39, 0.45, 0.39],
@@ -104,11 +106,12 @@ export function exportOBJ(
       `newmtl ${name}`,
       `Kd ${color.join(" ")}`,
       `Ka 0.1 0.1 0.1`,
-      `Ks ${name === "steel" || name.startsWith("utility-") ? "0.5 0.5 0.5" : "0.05 0.05 0.05"}`,
-      `Ns ${name === "steel" ? 70 : 8}`,
+      `Ks ${["steel", "steel-dark", "girder", "pole"].includes(name) || name.startsWith("utility-") ? "0.5 0.5 0.5" : "0.05 0.05 0.05"}`,
+      `Ns ${["steel", "steel-dark", "girder", "pole"].includes(name) ? 70 : 8}`,
       `d 1`,
       `illum 2`,
-      ...(name.startsWith("utility-") || name === "tree-grate"
+      ...(name.startsWith("utility-") ||
+      ["tree-grate", "steel", "steel-dark", "girder", "pole"].includes(name)
         ? ["Pm 0.72"]
         : []),
       "",
@@ -154,6 +157,10 @@ export function exportMeshManifest(network: Network, project: Project) {
     plantings: network.plantings,
     blocks: network.blocks,
     mobility: network.mobility,
+    bridges: network.bridges,
+    barriers: network.barriers,
+    splitters: network.splitters,
+    streetDetails: network.streetDetails,
     junctionOffsets: network.junctions.map((j) => ({
       id: j.node.id,
       requestedRadius: j.requestedRadius,

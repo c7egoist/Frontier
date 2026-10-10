@@ -14,8 +14,8 @@ export const geometryProfiles: Record<GeometryDetail, GeometryProfile> = {
     maxDepth: 12,
     maxDeviation: 0.045,
     minCornerPoints: 32,
-    cornerSegment: Infinity,
-    maxCornerPoints: 32,
+    cornerSegment: 2.8,
+    maxCornerPoints: 128,
   },
   production: {
     maxSegment: 0.75,

@@ -1,6 +1,6 @@
 # Frontier · Road authoring
 
-A self-contained HTML tool for generating **roads, paving and procedural parking** for game-engine asset workflows. Linked 2D/3D editing, shared junction pivots and exports remain live. The workspace is deliberately asset-only: no buildings, trees, benches, statues, parked vehicles or decorative environment meshes. Planting openings and block perimeters are empty infrastructure, not scenery.
+A self-contained HTML tool for generating **connected highway bridges, city roads, paving and procedural parking** for game-engine asset workflows. Linked 2D/3D editing, shared junction pivots and exports remain live. The workspace is deliberately asset-only: no buildings, trees, benches, statues, parked vehicles or decorative environment meshes. Planting openings and block perimeters are empty infrastructure, not scenery.
 
 ## Open
 
@@ -28,8 +28,31 @@ The achromatic palette and component treatment are ported from the supplied [Sla
 - **Merge construction:** acute-angle runout includes radius and road width. Both ends share the available trim budget rather than wasting 43% at a free end. Paving setback is adjustable; wide inward offsets cannot fold around the merge nose. Inappropriate zebras are suppressed and junction guidance is surface-clipped.
 - **Paving:** nine world-scaled bond/panel patterns, independent pavement width, flush/stone/rumble curb profiles and edge courses. Albedo, normal and roughness channels are available in GLB and the OBJ texture package. Relief is generated independently from stone colour, rather than turning colour variation into fake displacement. Road and junction curbs share a continuous 15 mm top chamfer (reduced for flush profiles).
 - **Footways and access:** 4.2 m default sidewalks along the full alignment, widths up to 12 m, independent footway crossfall and curb upstand, graded corner ramps and authored vehicle crossings. The fresh Northbank demo includes one authored driveway; new roads do not auto-populate entries.
-- **Infrastructure:** procedural service covers, framed cast-iron gullies, physical side-entry curb throats with inspection lids, hollow drainage kerbs, recessed linear-channel grates and continuous gutters. W-beam/pedestrian barriers, concrete racing barriers and steel/concrete bridges remain available. Signs, signal heads and light fixtures are optional, explicitly enabled controls; templates do not auto-populate them.
+- **Infrastructure:** procedural service covers, framed cast-iron gullies, physical side-entry curb throats with inspection lids, hollow drainage kerbs, recessed linear-channel grates and continuous gutters. Seven physical guardrail/parapet profiles and connected steel/concrete bridges are available. Signs, signal heads and lights are optional controls; the city template deliberately includes street lighting, signs and one signalized boulevard junction.
 - **Persistence:** local autosave, JSON import/export, transactional undo/redo, rename/delete and scene search.
+
+### Connected highway bridges and divided interchanges
+
+- **Networks → Connected highway bridge:** two separate one-way carriageways, 3.5 m lanes, 1 m asphalt shoulders, an 8 m elevated crossing, four directional access ramps and a continuous lower avenue. Approaches and ramps use shared graph nodes, not detached bridge props.
+- **Details → Bridge structure:** steel I-girder or concrete-girder sections, closed thin deck bases/slabs, bearings, diaphragms, chamfered piers and real foundations. Adjustable total underside depth (0.75–2.4 m) and pier bay spacing (16–50 m) are consumed by the geometry. Clearance subtracts the actual authored structural depth and lower road crown, not a hardcoded material estimate.
+- Elevated bridge joints stitch the deck and beams between their trimmed spans. Shared span ends are bearing seams rather than tall abutment walls across a connected road. Support stations test lower roads, lower bridge ramps, cycling and footways using the foundation footprint; a blocked pier is moved to safe edges of the lower corridor when possible. This is a geometric exclusion rule, not a structural load solver.
+- **Insert connected bridge section / Infrastructure → Insert connected highway bridge:** on a selected ground alignment at least 420 m long, insert two level landings and three connected sections. Original shared endpoint positions, XZ spline and direction are preserved. The default rise is 8 m. Steep (>8%) or conflicting approaches, vehicle entries and insufficient length/capacity are refused atomically. Undo/redo restores the operation. A manual Elevated bridge deck toggle constructs at the current height and no longer lifts neighbouring streets.
+- **Clovers and T networks:** cloverleaf uses four separated directional carriageways, four 270° turning loops and four direct right-turn links. The three-arm **Twin-loop T interchange** retains the legacy `trumpet` template ID, but is explicitly a divided double-loop T layout, not a falsely labelled single-loop trumpet. Directed reachability checks cover the required movements. Loop speed controls are 40 km/h; direct ramps are 60 km/h.
+- **Geometry → Traffic handedness:** right/left lane-direction policy controls bike/bus stencil directions and incoming-only stop bars. Motorway shoulder width is independently editable. Channelized crossroads have compact 3.25 m motor lanes, 3.5 m right-turn slip lanes and small rounded paving islands.
+- **Curbs and gores:** exact tangent and mid-arc knots keep a short rounded splitter from turning into a chamfer between long straight returns. Painted gores are derived from the actual sampled curb tip, remain on triangulated asphalt and stop 1.6 m before the physical nose. Ordinary crossroads no longer inherit unrelated merge dividers. **Inspect curb splitter** frames the real construction.
+- **Roadside protection:** W-beam, three-wave thrie-beam, hollow box-beam, four-cable, pedestrian tube railing, concrete safety barrier and bridge parapet/vertical infill. These are distinct swept sections with caps, posts/sockets and attachment detail, not a texture selector. Corner sweeps use the actual fillet normals; mixed designs receive a connected transition. Infrastructure thumbnails show the generated profile close-up. Production includes denser bolt/hardware detail.
+
+The connected diamond/bridge/city crossings have **6.60 m minimum modeled clearance** and **6.16% maximum highway grade**. Cloverleaf/T crossings have **6.63 m minimum modeled clearance** and **6.0% maximum grade**. These are measured geometry checks, **not civil, traffic-safety or structural certification**. Very large networks are heavier than individual road tiles; use Editing preview or export smaller engine tiles.
+
+### Connected city road network — no buildings or trees
+
+**Networks → Connected city network** builds a five-by-five street grid linked to the highway bridge/underpass and four ramps. It includes a bus/cycle boulevard and central avenue, parallel-parking local streets, red shared-cycle streets, 16 gated open plots and four procedural parking courts with true split-road access connections. The interiors remain empty; no buildings or trees are generated.
+
+- **Shared cycle street:** full-width red carriageway and direction-aware bicycle stencils, without falsely adding dedicated bicycle lanes or centre separators.
+- **Parking-pocket curb extensions:** consume 2.1 m of parking width near pedestrian crossings, not travel lanes. The outside footway boundary/elevation and motor-lane/crown scale are preserved. Separate protected/painted cycle lanes prevent bulbs from pinching them. The radius solver includes the enlarged corner footway. Roadside parking stops before the pocket taper.
+- **Crossings and refuges:** zebras conform to the actual curve/grade and share the station and length of the dropped curb ramps. Stop bars cover incoming lanes only; one-way outgoing mouths do not receive stop bars. Medians from 1.2 m form continuous rounded raised islands around genuinely flat crossing passages with tactile panels, rather than a raised obstruction across the zebra.
+- Open-plot collision diagnostics test the actual solid paving band and entry mask, not the empty interior or gate throat. Genuine band encroachment still warns.
+- District-scale plan labels become more selective on large networks and return with zoom. The city opens around its central crossing; fit/zoom can reveal the entire connected network. Cached static shadows keep the detailed bridge/rail geometry from regenerating a light map during every camera orbit.
 
 ### Pedestrian footways and vehicle crossings
 
@@ -87,9 +110,9 @@ Changing dimensions regenerates the rows and stall geometry. Bays and 1.25 m tra
 
 ### Included road networks
 
-European mobility quarter, Northbank streets, an acute merge fixture, Harbour street circuit, channelized crossroads, cloverleaf, trumpet, racing loop/pits with paddock parking, waterfront paths, T-junction, roundabout and diamond interchange. Legacy architectural blocks and stylized landscape remain excluded from old imported project data; road graphs and parking are retained. New open block-perimeter pieces do not generate architecture.
+Connected city network, connected highway bridge, dumbbell/twin roundabouts, European mobility quarter, Northbank streets, an acute merge fixture, Harbour street circuit, compact channelized crossroads, divided cloverleaf, twin-loop T interchange, racing loop/pits with paddock parking, waterfront paths, T-junction, roundabout and divided diamond interchange. Legacy architectural blocks and stylized landscape remain excluded from old imported project data; road graphs and parking are retained. New open block-perimeter pieces do not generate architecture.
 
-The diamond has about **5.79 m modeled clearance** and **6.49% maximum grade**. Cloverleaf/trumpet ramp crossings maintain at least **5.19 m** modeled clearance. Those are geometry checks, not structural certification.
+All template defaults are game-asset starting layouts. No template generates architecture or trees; only explicitly designed infrastructure such as the city street lights/signals is included.
 
 ## Export
 
@@ -101,11 +124,11 @@ The diamond has about **5.79 m modeled clearance** and **6.49% maximum grade**. 
 
 OBJ uses `norm`/`map_Pr` PBR MTL extensions. Importers that ignore these extensions can use the material manifest or GLB. Albedo is sRGB; normal/roughness are linear data. Normals use **OpenGL +Y**: invert green for DirectX -Y shaders. UV repeats and normal strengths are recorded in the manifest.
 
-Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts, world bounds and service-feature, footway, mobility, empty-planting and block tables, plus actual junction offset fits. GLB root extras identify the tessellation profile and include the same infrastructure tables. `materials.json` also records cover/channel wrap modes and metallic response; `Pm` and clamp settings are included in MTL.
+Geometry exports default to **Production** detail, independently of preview detail. Choose Editing in the export menu for a lighter mesh. Export rebuilds a captured project snapshot: it does not change the live graph, undo history or preview tessellation. `mesh.json` records tolerances, owner IDs/names, surface/material mappings, counts, world bounds and service-feature, footway, mobility, empty-planting, block, bridge, barrier, splitter and street-detail tables, plus actual junction offset fits. GLB root extras identify the tessellation profile and include the same infrastructure tables. `materials.json` also records cover/channel wrap modes and metallic response; `Pm` and clamp settings are included in MTL.
 
 Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wireframe preview does not alter the original exported materials. No preview environment is exported. A final game's visual quality also depends on its texture resolution, material/shader integration, lighting, terrain and rendering pipeline; this editor does not claim to be a complete AAA environment renderer.
 
-Release HTML is checked byte-for-byte against the published GitHub file. **209 CPU checks and 68 browser checks** pass, including the exact widened/elevated Northbank corner reproduction, analytic offsets, short-fit tapering, bus/cycle lane separation, real planting apertures/grate slots, gated block rings, parking islands/EV capacity, legacy drainage/ramp/driveway checks, PBR exports, mobile layout and fully offline use.
+Release HTML is checked byte-for-byte against the published GitHub file. **264 CPU checks and 76 browser checks** pass, including directed interchange reachability, actual bridge/support clearances, atomic connected bridge insertion, seven distinct barrier sections, exact rounded splitter tips and geometry-derived gores, pocket/refuge/shared-cycle treatment, the exact widened/elevated Northbank corner reproduction, analytic offsets, short-fit tapering, bus/cycle lane separation, real planting apertures/grate slots, gated block rings, parking islands/EV capacity, legacy drainage/ramp/driveway checks, PBR exports, mobile layout and fully offline use.
 
 ## Development and verification
 
@@ -138,6 +161,13 @@ window.frontier.addDriveway(); // requires a selected non-bridge road / connecte
 window.frontier.inspectFootway("corner-ramp"); // also accepts "driveway"
 window.frontier.inspectPlanning("planting"); // also accepts "mobility"
 window.frontier.loadTemplate("europe"); // bus/cycle roads, gated blocks and parking courts
+window.frontier.loadTemplate("city"); // connected streets, parking access and highway bridge
+window.frontier.loadTemplate("bridge"); // divided highway + four ramps + underpass
+window.frontier.inspectRoadDetail("bridge"); // also "splitter" and "street"
+const groundRoadId = network.spans.find(
+  (s) => !s.road.bridge && s.alignment.length >= 420,
+)?.road.id;
+if (groundRoadId) window.frontier.insertBridge(groundRoadId, 8, "steel"); // atomic
 window.frontier.placeSite("tree-pit"); // empty independent planting opening
 window.frontier.exportProject("glb", "production"); // independent dense export
 window.addEventListener("frontier:change", ({ detail }) => {
@@ -150,6 +180,10 @@ window.addEventListener("frontier:change", ({ detail }) => {
     mobility,
     plantings,
     blocks,
+    bridges,
+    barriers,
+    splitters,
+    streetDetails,
   } = detail;
 });
 ```

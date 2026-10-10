@@ -1,3 +1,5 @@
+import { insertConnectedBridge } from "./core/bridge-insertion";
+import { railStyles, railNames } from "./core/model";
 import { assetThumbnail } from "./render/thumbnails";
 import { normaliseDetail, type GeometryDetail } from "./core/quality";
 import { templateCatalog } from "./core/templates";
@@ -270,10 +272,25 @@ function rebuild(inspector = true, context = false) {
         plantings: network.plantings,
         blocks: network.blocks,
         mobility: network.mobility,
+        bridges: network.bridges,
+        barriers: network.barriers,
+        splitters: network.splitters,
+        streetDetails: network.streetDetails,
       },
     }),
   );
   updateStats();
+  const clearanceOwners = new Set(selectedRoads().map((r) => r.id)),
+    currentClearances = network.clearances.filter(
+      (c) => clearanceOwners.has(c.a) || clearanceOwners.has(c.b),
+    );
+  document
+    .querySelectorAll<HTMLOutputElement>("[data-bridge-clearance]")
+    .forEach((o) => {
+      o.value = currentClearances.length
+        ? `${fmt(Math.min(...currentClearances.map((c) => c.meters)), 2)} m`
+        : "—";
+    });
   const radiusOut =
       document.querySelector<HTMLOutputElement>("[data-radius-fit]"),
     joint = network.junctions.find((j) => j.node.id === selection?.id);
@@ -890,7 +907,7 @@ function networkPreview(id: string) {
     const c = controlPoints(p, r);
     return `M${map(c[0])}C${map(c[1])} ${map(c[2])} ${map(c[3])}`;
   };
-  if (id === "europe") {
+  if (id === "europe" || id === "city") {
     const boundary = (s: Site, inset = 0) =>
         `M${siteOutline(s, inset).map(map).join("L")}Z`,
       plots = (p.sites ?? [])
@@ -912,7 +929,14 @@ function networkPreview(id: string) {
             stroke("#999", roadHalfWidth(r) + r.sidewalk + 0.22) +
             stroke("#985950", roadHalfWidth(r)) +
             stroke("#bebdb7", motor + buffer) +
-            stroke(r.busLanes === "outer" ? "#87534c" : "#383b3c", motor) +
+            stroke(
+              r.sharedCycleStreet
+                ? "#985950"
+                : r.busLanes === "outer"
+                  ? "#87534c"
+                  : "#383b3c",
+              motor,
+            ) +
             (r.busLanes === "outer"
               ? stroke("#383b3c", Math.max(0.05, motor - r.laneWidth))
               : "") +
@@ -930,11 +954,11 @@ function networkPreview(id: string) {
     .filter((s) => s.kind !== "water")
     .map(
       (s) =>
-        `<polygon points="${siteOutline(s).map(map).join(" ")}" fill="#607d7855" stroke="#8a9d9655" stroke-width=".4"/>`,
+        `<polygon points="${siteOutline(s).map(map).join(" ")}" fill="#85858555" stroke="#aaa5" stroke-width=".4"/>`,
     )
     .join(
       "",
-    )}${p.roads.map((r) => `<path d="${path(r)}" stroke="#728898" stroke-width="${Math.max(2, (r.lanes * r.laneWidth + 2) * scale)}" stroke-linecap="round"/><path d="${path(r)}" stroke="#303e4b" stroke-width="${Math.max(1.1, r.lanes * r.laneWidth * scale)}"/><path d="${path(r)}" stroke="#cbd6de" stroke-width=".45" stroke-dasharray="2 2"/>`).join("")}</svg>`;
+    )}${p.roads.map((r) => `<path d="${path(r)}" stroke="#929292" stroke-width="${Math.max(2, (r.lanes * r.laneWidth + 2) * scale)}" stroke-linecap="round"/><path d="${path(r)}" stroke="#363636" stroke-width="${Math.max(1.1, r.lanes * r.laneWidth * scale)}"/><path d="${path(r)}" stroke="#d6d6d6" stroke-width=".45" stroke-dasharray="2 2"/>`).join("")}</svg>`;
   templatePreviews.set(id, svg);
   return svg;
 }
@@ -956,10 +980,16 @@ function mobilityControls(road: Road) {
   return card(
     "European mobility profile",
     "bike",
-    choice("busLanes", "Bus reservation", road.busLanes, [
-      ["none", "None"],
-      ["outer", "Outer motor lanes"],
-    ]) +
+    toggle(
+      "sharedCycleStreet",
+      "Shared cycle street",
+      road.sharedCycleStreet,
+      "Red full-width carriageway with bicycle stencils; no extra bike lane",
+    ) +
+      choice("busLanes", "Bus reservation", road.busLanes, [
+        ["none", "None"],
+        ["outer", "Outer motor lanes"],
+      ]) +
       (road.busLanes === "outer"
         ? choice("busSurface", "Bus-lane finish", road.busSurface, [
             ["asphalt", "Standard asphalt"],
@@ -1031,7 +1061,7 @@ function profile(road: Road) {
   return card(
     "Approach profile",
     "route",
-    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 6, 0.1)}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 12, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
+    `<div class="profile-row"><label for="control-lanes">Lane count</label><div class="select-field"><select id="control-lanes" data-prop="lanes" aria-label="Lane count">${[1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}" ${n === road.lanes ? "selected" : ""}>${n} ${n === 1 ? "lane" : "lanes"}</option>`).join("")}</select>${icon("chevron-down")}</div></div>${range("laneWidth", "Lane width", road.laneWidth, 2.5, 6, 0.1)}${road.markingStyle === "motorway" ? range("shoulderWidth", "Asphalt shoulder / side", road.shoulderWidth, 0, 3.5, 0.1) : ""}${range("sidewalk", "Sidewalk width", road.sidewalk, 0, 12, 0.1)}${selection?.kind === "node" ? toggle("crossings", "Pedestrian crossings", getNode(project, selection.id).crossings, "Striped crossings at each approach") : toggle("markings", "Road markings", road.markings, "Lane lines, edge lines and turn arrows")}`,
   );
 }
 function renderInspector() {
@@ -1074,7 +1104,7 @@ function renderInspector() {
       body += card(
         "Joint geometry",
         "git-merge",
-        `<div class="radius-overview"><div><div class="radius-metric"><span id="radius-value">${fmt(node!.radius)}</span><small>m</small></div><div class="metric-caption">Corner radius</div></div>${jointSketch(node!.radius)}</div><input aria-label="Corner radius" type="range" data-prop="radius" min="2" max="24" step=".5" value="${node!.radius}" style="--progress:${((node!.radius - 2) / 22) * 100}%"/><div class="range-labels"><span>2 m</span><span>24 m</span></div><p class="card-note"><span>Requested radius stays editable. Wide footways offset cleanly using an automatic radius floor of <output data-radius-fit>${fmt(joint.radius, 2)}</output> m. Short approaches taper with a warning instead of folding.</span></p><div class="solver-row"><span>Corner solver</span><span class="solver-badge">${icon("check")}Tangent fillet</span></div>${range("setback", "Paving / merge setback", node!.setback ?? 0, 0, 24, 1)}${joint.type === "Merge" ? `<p class="card-note">${icon("git-merge")}Adaptive runout pulls the paving nose back. Crosswalks are suppressed in merge throats.</p>` : ""}${toggle("boxJunction", "Yellow box markings", node!.boxJunction ?? false, "Clipped to the actual junction surface")}${toggle("signals", "Traffic signals", node!.signals ?? false, "Physical poles and signal heads; static preview phase")}`,
+        `<div class="radius-overview"><div><div class="radius-metric"><span id="radius-value">${fmt(node!.radius)}</span><small>m</small></div><div class="metric-caption">Corner radius</div></div>${jointSketch(node!.radius)}</div><input aria-label="Corner radius" type="range" data-prop="radius" min="2" max="24" step=".5" value="${node!.radius}" style="--progress:${((node!.radius - 2) / 22) * 100}%"/><div class="range-labels"><span>2 m</span><span>24 m</span></div><p class="card-note"><span>Requested radius stays editable. Wide footways offset cleanly using an automatic radius floor of <output data-radius-fit>${fmt(joint.radius, 2)}</output> m. Short approaches taper with a warning instead of folding.</span></p><div class="solver-row"><span>Corner solver</span><span class="solver-badge">${icon("check")}Tangent fillet</span></div>${range("setback", "Paving / merge setback", node!.setback ?? 0, 0, 24, 1)}${joint.type === "Merge" ? `<p class="card-note">${icon("git-merge")}Adaptive runout recesses the rounded curb nose. Gores derive from that actual nose; crossings stay out of merge throats.</p><button class="solver-badge" data-inspector-action="inspect-splitter">${icon("search")}Inspect curb splitter</button>` : ""}${toggle("boxJunction", "Yellow box markings", node!.boxJunction ?? false, "Clipped to the actual junction surface")}${toggle("signals", "Traffic signals", node!.signals ?? false, "Physical poles and signal heads; static preview phase")}`,
         "radius-card",
       );
     else if (!node)
@@ -1219,11 +1249,15 @@ function renderInspector() {
     body += card(
       "Road markings & parking",
       "route",
-      choice("markingStyle", "Marking language", road.markingStyle, [
-        ["urban", "City street"],
-        ["motorway", "Motorway"],
-        ["race", "Racing circuit"],
+      choice("trafficSide", "Traffic handedness", road.trafficSide, [
+        ["right", "Keep right / European"],
+        ["left", "Keep left"],
       ]) +
+        choice("markingStyle", "Marking language", road.markingStyle, [
+          ["urban", "City street"],
+          ["motorway", "Motorway"],
+          ["race", "Racing circuit"],
+        ]) +
         range(
           "markingSetback",
           "Marking setback",
@@ -1236,7 +1270,14 @@ function renderInspector() {
           ["none", "None"],
           ["parallel", "Parallel bays"],
         ]) +
+        toggle(
+          "curbExtensions",
+          "Parking-pocket curb extensions",
+          road.curbExtensions,
+          "Consume parking space at crossings, not travel lanes. Requires parallel bays and no separate cycle track.",
+        ) +
         range("median", "Central median", road.median, 0, 3, 0.2) +
+        `<p class="card-note"><span>Crosswalks share the curb-ramp station. Stop bars apply only to incoming lanes. Medians from 1.2 m receive level refuge passages.</span></p><button class="solver-badge" data-inspector-action="inspect-street">${icon("search")}Inspect crossing detail</button>` +
         toggle(
           "startingGrid",
           "Starting grid",
@@ -1272,15 +1313,11 @@ function renderInspector() {
     body += card(
       "Roadside protection",
       "shield",
-      `${toggle("guardrails", road.railStyle === "wbeam" ? "W-beam guardrails" : road.railStyle === "railing" ? "Pedestrian railing" : "Concrete safety barrier", road.guardrails, "Swept, continuous roadside protection")}<svg class="detail-art" viewBox="0 0 210 44"><path d="M0 36h210" stroke="currentColor" opacity=".2"/><path d="M15 14v23m36-23v23m36-23v23m36-23v23m36-23v23m36-23v23" stroke="currentColor" stroke-width="2"/><path d="M0 8h210v12H0Z" fill="currentColor" opacity=".3"/><path d="M0 14h210" stroke="currentColor" stroke-width="1"/></svg>${choice(
+      `${toggle("guardrails", road.railStyle === "wbeam" ? "W-beam guardrails" : railNames[road.railStyle], road.guardrails, "Swept, continuous roadside protection")}<svg class="detail-art" viewBox="0 0 210 44"><path d="M0 36h210" stroke="currentColor" opacity=".2"/><path d="M15 14v23m36-23v23m36-23v23m36-23v23m36-23v23m36-23v23" stroke="currentColor" stroke-width="2"/><path d="M0 8h210v12H0Z" fill="currentColor" opacity=".3"/><path d="M0 14h210" stroke="currentColor" stroke-width="1"/></svg>${choice(
         "railStyle",
         "Barrier type",
         road.railStyle,
-        [
-          ["wbeam", "Corrugated W-beam"],
-          ["railing", "Pedestrian railing"],
-          ["concrete", "Concrete / race barrier"],
-        ],
+        railStyles.map((style) => [style, railNames[style]]),
       )}${road.guardrails ? range("railHeight", "Rail height", road.railHeight, 0.5, 1.4, 0.1) + (road.railStyle !== "concrete" ? range("postSpacing", "Post spacing", road.postSpacing, 1.5, 6, 0.1) : "") : ""}`,
     );
     body += card(
@@ -1356,7 +1393,38 @@ function renderInspector() {
       body += card(
         "Bridge structure",
         "cable",
-        `${toggle("bridge", "Elevated bridge deck", road.bridge, "Deck, beams, piers and foundations")}${road.bridge ? `<div class="profile-row" style="margin-top:14px"><label for="control-structure">Superstructure</label><div class="select-field"><select id="control-structure" data-prop="structure"><option value="concrete" ${road.structure === "concrete" ? "selected" : ""}>Concrete</option><option value="steel" ${road.structure === "steel" ? "selected" : ""}>Steel girder</option></select>${icon("chevron-down")}</div></div><p class="card-note">${icon("check")}Piers stay clear of underlying roads.</p>${clearances.length ? `<div class="number-control"><span>Minimum clearance</span><output class="detail-value">${fmt(Math.min(...clearances.map((c) => c.meters)), 2)} m</output></div>` : ""}` : ""}`,
+        toggle(
+          "bridge",
+          "Elevated bridge deck",
+          road.bridge,
+          "Build a superstructure at the authored height; shared endpoints are not moved",
+        ) +
+          (road.bridge
+            ? choice("structure", "Superstructure", road.structure, [
+                ["concrete", "Concrete girder"],
+                ["steel", "Steel I-girder"],
+              ]) +
+              range(
+                "bridgeDepth",
+                "Slab / girder depth",
+                road.bridgeDepth,
+                0.75,
+                2.4,
+                0.05,
+              ) +
+              range(
+                "pierSpacing",
+                "Pier bay spacing",
+                road.pierSpacing,
+                16,
+                50,
+                1,
+              ) +
+              `<p class="card-note"><span>Decks and beams stitch across elevated joints. Foundations clear lower roads, cycleways and footways; no end walls block a connected span.</span></p><button class="solver-badge" data-inspector-action="inspect-bridge">${icon("search")}Inspect bridge structure</button>` +
+              (clearances.length
+                ? `<div class="number-control"><span>Minimum clearance</span><output class="detail-value" data-bridge-clearance>${fmt(Math.min(...clearances.map((c) => c.meters)), 2)} m</output></div>`
+                : "")
+            : `<p class="card-note"><span>Insert a level deck with gradual, connected approaches on an alignment of at least 420 m. Existing shared endpoints stay in place.</span></p><button class="solver-badge" data-inspector-action="insert-bridge">${icon("cable")}Insert connected bridge section</button>`),
       );
     else
       body += `<p class="material-note">Select an individual alignment to add a bridge. Try the Diamond interchange template for connected, grade-separated ramps.</p>`;
@@ -1440,14 +1508,7 @@ function setRoadProperty(prop: string, value: unknown) {
   }
   for (const road of selectedRoads()) {
     (road as unknown as Record<string, unknown>)[prop] = value;
-    if (prop === "bridge" && value === true) {
-      road.guardrails = true;
-      road.sidewalk = Math.min(road.sidewalk, 1.2);
-      for (const id of [road.start, road.end]) {
-        const node = getNode(project, id);
-        node.position[1] = Math.max(node.position[1], 6);
-      }
-    }
+    if (prop === "bridge" && value === true) road.guardrails = true;
   }
 }
 function applyPreset(id: string) {
@@ -1459,14 +1520,27 @@ function applyPreset(id: string) {
   presetID = id;
   if (selection && mode !== "draw")
     commit(() => {
-      const preserved = ["bridge", "structure"] as const;
+      const preserved = [
+        "bridge",
+        "structure",
+        "bridgeDepth",
+        "pierSpacing",
+      ] as const;
       for (const road of selectedRoads()) {
         const bridge = road.bridge,
-          structure = road.structure;
+          structure = road.structure,
+          bridgeDepth = road.bridgeDepth,
+          pierSpacing = road.pierSpacing;
         Object.assign(road, roadDefaults, preset.settings);
         for (const prop of preserved)
           (road as unknown as Record<string, unknown>)[prop] =
-            prop === "bridge" ? bridge : structure;
+            prop === "bridge"
+              ? bridge
+              : prop === "structure"
+                ? structure
+                : prop === "bridgeDepth"
+                  ? bridgeDepth
+                  : pierSpacing;
       }
     });
   renderLibrary();
@@ -1500,6 +1574,57 @@ function inspectPlanning(kind: "planting" | "mobility") {
   }
   if ($("viewports").dataset.layout === "plan") setLayout("split");
   return true;
+}
+function insertBridgeOnSelection(
+  roadId = selection?.kind === "road" ? selection.id : undefined,
+  rise = 8,
+  structure: "steel" | "concrete" = "steel",
+) {
+  if (!roadId) {
+    toast(
+      "Select a ground road alignment, or load the Connected highway bridge template.",
+      true,
+    );
+    return false;
+  }
+  const result = commit(() => {
+    const inserted = insertConnectedBridge(project, roadId, {
+      rise,
+      structure,
+    });
+    selection = { kind: "road", id: inserted.bridge };
+    inspectorTab = "details";
+  });
+  if (result) {
+    scene?.focusSelection(180);
+    toast(
+      "Connected bridge inserted. Shared endpoints and XZ alignment preserved.",
+    );
+  }
+  return result;
+}
+function inspectRoadDetail(kind: "bridge" | "splitter" | "street") {
+  const found = scene?.inspectRoadDetail(kind) ?? false;
+  if (!found)
+    toast(
+      `No ${kind} detail on this selection. Choose a connected template or enable the road feature.`,
+      true,
+    );
+  else
+    for (const layer of kind === "bridge"
+      ? ["structure", "rail"]
+      : kind === "splitter"
+        ? ["curb", "paving", "marking"]
+        : ["curb", "paving", "marking"]) {
+      hiddenLayers.delete(layer);
+      scene?.setDetailLayer(layer, true);
+      plan.setDetailLayer(layer, true);
+      const input = document.querySelector<HTMLInputElement>(
+        `[data-layer="${layer}"]`,
+      );
+      if (input) input.checked = true;
+    }
+  return found;
 }
 function inspectInfrastructure(kind: "manhole" | "drainage") {
   const visible = scene?.inspectInfrastructure(kind);
@@ -1668,6 +1793,30 @@ function renderLibrary() {
         action: "structure",
       },
     ];
+  if (libraryTab === "structures")
+    cards.push(
+      {
+        id: "bridge-kit",
+        name: "Insert connected highway bridge",
+        description: "420 m + alignment · level deck · linked approaches",
+        preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", "bridge-kit")}" alt="Connected bridge approaches preview" loading="lazy"/>`,
+        action: "structure",
+      },
+      ...railStyles
+        .filter((s) => s !== "wbeam")
+        .map((style) => ({
+          id: `rail-${style}`,
+          name: railNames[style],
+          description:
+            style === "parapet"
+              ? "Concrete plinth · tubular rail · real vertical infill"
+              : style === "cable"
+                ? "Four swept steel cables · sockets · posts"
+                : "Swept physical section · posts / end caps",
+          preview: `<img class="asset-thumbnail" src="${assetThumbnail("structure", `rail-${style}`)}" alt="Generated ${railNames[style]} mesh preview" loading="lazy"/>`,
+          action: "structure",
+        })),
+    );
   if (libraryTab === "structures")
     cards.push(
       ...[
@@ -1928,7 +2077,7 @@ function loadTemplate(id: string) {
     () => {
       project = makeTemplate(id);
       network = buildNetwork(project, { detail: geometryDetail });
-      selection = ["diamond", "cloverleaf", "trumpet"].includes(id)
+      selection = ["diamond", "cloverleaf", "trumpet", "bridge"].includes(id)
         ? { kind: "road", id: project.roads.find((r) => r.bridge)!.id }
         : network.junctions[0]
           ? { kind: "node", id: network.junctions[0].node.id }
@@ -1939,7 +2088,32 @@ function loadTemplate(id: string) {
     { fit: true },
   );
   if (loaded) {
-    if (id === "diamond") scene?.focusSelection(380);
+    if (id === "diamond" || id === "bridge") {
+      const deck = project.roads.find(
+        (r) =>
+          r.bridge &&
+          Math.abs(getNode(project, r.start).position[2]) <= 115 &&
+          Math.abs(getNode(project, r.end).position[2]) <= 115,
+      );
+      if (deck) setSelection({ kind: "road", id: deck.id });
+      scene?.focusSelection(380);
+    } else if (id === "city") {
+      const centre = project.nodes.find(
+        (n) => Math.abs(n.position[0]) < 0.01 && Math.abs(n.position[2]) < 0.01,
+      );
+      if (centre) setSelection({ kind: "node", id: centre.id });
+      scene?.focusSelection(1000);
+    } else if (id === "cloverleaf" || id === "trumpet") {
+      const centre = project.roads.find(
+        (r) =>
+          r.bridge &&
+          r.lanes === 2 &&
+          Math.abs(getNode(project, r.start).position[2]) <= 50 &&
+          Math.abs(getNode(project, r.end).position[2]) <= 50,
+      );
+      if (centre) setSelection({ kind: "road", id: centre.id });
+      scene?.focusSelection(850);
+    } else if (id === "signal") scene?.focusSelection(230);
     else if (id === "roundabout") scene?.fit(1.25);
     else if (id === "district" || id === "tee")
       scene?.focusSelection(id === "district" ? 140 : 155);
@@ -2214,6 +2388,10 @@ document.addEventListener("click", (e) => {
     }
     if (action === "template") loadTemplate(id);
     if (action === "structure") {
+      if (id === "bridge-kit") {
+        insertBridgeOnSelection();
+        return;
+      }
       if (id === "driveway") {
         addDriveway();
         return;
@@ -2271,8 +2449,17 @@ document.addEventListener("click", (e) => {
         if (id === "bridge" || id === "steel") {
           setRoadProperty("bridge", true);
           setRoadProperty("structure", id === "steel" ? "steel" : "concrete");
-        } else if (id === "rail") setRoadProperty("guardrails", true);
-        else if (id === "manhole") setRoadProperty("manholes", true);
+        } else if (id === "rail" || id.startsWith("rail-")) {
+          if (id.startsWith("rail-")) {
+            const style = id.slice(5) as Road["railStyle"];
+            setRoadProperty("railStyle", style);
+            const height =
+              style === "parapet" ? 1.2 : style === "railing" ? 1.05 : 0.95;
+            for (const r of selectedRoads())
+              r.railHeight = Math.max(height, r.railHeight);
+          }
+          setRoadProperty("guardrails", true);
+        } else if (id === "manhole") setRoadProperty("manholes", true);
         else {
           setRoadProperty("drainage", true);
           if (id === "drain" && selection?.kind !== "site")
@@ -2286,7 +2473,7 @@ document.addEventListener("click", (e) => {
       });
       if (applied)
         toast(
-          `${id === "manhole" ? "Manhole covers" : id === "channel" ? "Linear channel drainage" : id === "rail" ? "Guardrails" : id === "drain" ? "Curb inlets" : "Bridge structure"} enabled on the selection. Inspect the detail from the inspector.`,
+          `${id === "manhole" ? "Manhole covers" : id === "channel" ? "Linear channel drainage" : id === "rail" || id.startsWith("rail-") ? "Guardrails" : id === "drain" ? "Curb inlets" : "Bridge structure"} enabled on the selection. Inspect the detail from the inspector.`,
         );
     }
     return;
@@ -2315,6 +2502,24 @@ document.addEventListener("click", (e) => {
       inspectFootway(a === "inspect-ramp" ? "corner-ramp" : "driveway");
     if (a === "inspect-planting" || a === "inspect-mobility")
       inspectPlanning(a === "inspect-planting" ? "planting" : "mobility");
+    if (a === "insert-bridge") {
+      insertBridgeOnSelection();
+      return;
+    }
+    if (
+      a === "inspect-bridge" ||
+      a === "inspect-splitter" ||
+      a === "inspect-street"
+    ) {
+      inspectRoadDetail(
+        a === "inspect-bridge"
+          ? "bridge"
+          : a === "inspect-splitter"
+            ? "splitter"
+            : "street",
+      );
+      return;
+    }
     if (a === "inspect-manhole" || a === "inspect-drain")
       inspectInfrastructure(a === "inspect-manhole" ? "manhole" : "drainage");
     if (a === "draw") setMode("draw");
@@ -2859,6 +3064,8 @@ Object.defineProperty(window, "frontier", {
     setGeometryDetail,
     inspectSelection: () => scene?.inspectSelection() ?? false,
     inspectInfrastructure,
+    inspectRoadDetail,
+    insertBridge: insertBridgeOnSelection,
     inspectPlanning,
     inspectFootway,
     addDriveway,

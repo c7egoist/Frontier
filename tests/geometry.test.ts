@@ -343,8 +343,8 @@ describe("graph editing and automatic intersections", () => {
   it("diamond interchange has connected ramps, moderate grades and real clearance", () => {
     const p = makeTemplate("diamond"),
       n = buildNetwork(p);
-    assert.equal(n.junctions.length, 4);
-    assert.equal(n.clearances.length, 1);
+    assert.equal(n.junctions.length, 6);
+    assert.equal(n.clearances.length, 2);
     assert(n.clearances[0].meters >= 5.7);
     assert(n.maxGrade < 8);
     const seen = new Set([p.nodes[0].id]);
@@ -398,8 +398,13 @@ describe("details, persistence and export", () => {
     checkMesh(buildNetwork(p));
   });
   it("barriers stitch around guarded junction corners without crossing the open mouths", () => {
-    const p = makeTemplate("diamond"),
-      n = buildNetwork(p);
+    const p = makeTemplate("diamond");
+    // Deliberately guard every approach: the default lower city avenue is open.
+    p.roads.forEach((r) => {
+      r.guardrails = true;
+      r.railStyle = "wbeam";
+    });
+    const n = buildNetwork(p);
     for (const joint of n.junctions) {
       const rails = n.meshes.find(
         (m) => m.owner === joint.node.id && m.kind === "rail",

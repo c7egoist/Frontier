@@ -19,6 +19,7 @@ export interface CornerPath {
   normals: V3[];
   insetLimits: number[];
   radius: number;
+  fractions: number[];
 }
 export const effectiveCornerRadius = (
   requested: number,
@@ -62,19 +63,61 @@ export function cornerPath(
         arc = Math.abs(sweep) * r,
         lb = distanceXZ(q, b),
         total = la + arc + lb,
-        count = Math.min(
-          profile.maxCornerPoints,
+        // Sample the fillet itself, not just the long mouth-to-mouth path.
+        // Exact tangent knots + a tip knot stop acute splitters becoming a
+        // three-chord chamfer when the straight returns consume the samples.
+        arcSegments = Math.min(
+          2 * Math.floor((profile.maxCornerPoints - 5) / 4),
           Math.max(
-            profile.minCornerPoints,
-            Math.ceil(total / profile.cornerSegment) + 1,
+            8,
+            Math.ceil(
+              Math.max(
+                arc / (detail === "production" ? 0.18 : 0.45),
+                Math.abs(sweep) /
+                  (detail === "production" ? Math.PI / 90 : Math.PI / 36),
+              ) / 2,
+            ) * 2,
           ),
         ),
+        lineSegments = Math.min(
+          profile.maxCornerPoints - arcSegments - 1,
+          Math.max(
+            profile.minCornerPoints - arcSegments - 1,
+            2,
+            Math.ceil((la + lb) / profile.cornerSegment),
+          ),
+        ),
+        aSegments =
+          la < 1e-8
+            ? 0
+            : Math.max(
+                1,
+                Math.floor((lineSegments * la) / Math.max(1e-9, la + lb)),
+              ),
+        bSegments = lb < 1e-8 ? 0 : Math.max(1, lineSegments - aSegments),
+        samples = [
+          0,
+          ...Array.from(
+            { length: aSegments },
+            (_, i) => (la * (i + 1)) / Math.max(1, aSegments),
+          ),
+          ...Array.from(
+            { length: arcSegments },
+            (_, i) => la + (arc * (i + 1)) / arcSegments,
+          ),
+          ...Array.from(
+            { length: bSegments },
+            (_, i) => la + arc + (lb * (i + 1)) / Math.max(1, bSegments),
+          ),
+        ],
+        count = samples.length,
+        fractions = samples.map((s) => s / Math.max(1e-8, total)),
         points: V3[] = [],
         normals: V3[] = [],
         limits: number[] = [];
       for (let i = 0; i < count; i++) {
-        const s = (total * i) / (count - 1),
-          t = i / (count - 1);
+        const s = samples[i],
+          t = fractions[i];
         let point: V3,
           d: V3,
           limit = Infinity;
@@ -104,7 +147,7 @@ export function cornerPath(
       points[count - 1] = b;
       normals[0] = right(towardA);
       normals[count - 1] = right(db);
-      return { points, normals, insetLimits: limits, radius: r };
+      return { points, normals, insetLimits: limits, radius: r, fractions };
     }
   }
   const length = distanceXZ(a, b),
@@ -139,7 +182,13 @@ export function cornerPath(
   points[count - 1] = b;
   normals[0] = right(towardA);
   normals[count - 1] = right(db);
-  return { points, normals, insetLimits: limits, radius: 0 };
+  return {
+    points,
+    normals,
+    insetLimits: limits,
+    radius: 0,
+    fractions: points.map((_, i) => i / (count - 1)),
+  };
 }
 /** Continuous width envelope; no alternating per-chord radius estimates. */
 export function offsetCornerPath(
@@ -151,7 +200,7 @@ export function offsetCornerPath(
 ): V3[] {
   const count = path.points.length,
     desired = path.points.map(
-      (_, i) => widthA + ((widthB - widthA) * i) / (count - 1),
+      (_, i) => widthA + (widthB - widthA) * path.fractions[i],
     ),
     widths = desired.map((w, i) =>
       w >= 0 ? Math.min(w, path.insetLimits[i]) : w,
@@ -169,7 +218,7 @@ export function offsetCornerPath(
         widths[i + 1] + distanceXZ(path.points[i], path.points[i + 1]) * 0.65,
       );
   const points = path.points.map((p, i) => {
-    const t = i / (count - 1),
+    const t = path.fractions[i],
       rise =
         (start[1] - path.points[0][1]) * (1 - t) +
         (end[1] - path.points[count - 1][1]) * t;

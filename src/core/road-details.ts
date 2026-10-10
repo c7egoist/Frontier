@@ -1,3 +1,6 @@
+import { splitterLayout } from "./splitters";
+import type { CornerPath } from "./corners";
+import { buildMedianIsland } from "./street-details";
 import { clearRuns, inRamp } from "./footways";
 import {
   add,
@@ -174,36 +177,8 @@ export function buildRoadFurniture(
           );
     }
 }
-export function buildMedian(b: MeshBuilder, span: RoadSpan) {
-  const r = span.road;
-  if (r.median < 0.15) return;
-  const first = span.frames[0].s,
-    last = span.frames.at(-1)!.s,
-    margin = 12 + r.markingSetback;
-  if (last - first < margin * 2 + 8) return;
-  const a = first + margin,
-    z = last - margin;
-  const stations = [
-    frameAt(span, a),
-    ...span.frames.filter((f) => f.s > a && f.s < z),
-    frameAt(span, z),
-  ];
-  const row = (side: number, raised: boolean) =>
-    stations.map((f) => {
-      const t = Math.min(1, (f.s - a) / 8, (z - f.s) / 8),
-        w = ((r.median / 2) * (0.08 + 0.92 * t) * f.hw) / roadHalfWidth(r);
-      return surfacePoint(f, side * w, raised ? 0.14 : 0.016);
-    });
-  b.strip("paving", "paving-slate", row(-1, true), row(1, true), true);
-  for (const side of [-1, 1])
-    b.strip("curb", "curb", row(side, false), row(side, true));
-  for (const index of [0, stations.length - 1])
-    b.quad("curb", "curb", [
-      row(-1, false)[index],
-      row(1, false)[index],
-      row(1, true)[index],
-      row(-1, true)[index],
-    ]);
+export function buildMedian(b: MeshBuilder, span: RoadSpan, project: Project) {
+  return buildMedianIsland(b, span, project);
 }
 export function parallelParkingBays(
   span: RoadSpan,
@@ -303,9 +278,17 @@ export function buildJunctionMarkings(
   node: RoadNode,
   arms: Arm[],
   surface: MeshData,
+  paths: CornerPath[] = [],
 ) {
-  if (!arms.some((a) => a.road.markings) || arms.length < 2) return;
-  const paint = (a: V3, z: V3, width = 0.12, material = "paint") => {
+  if (!arms.some((a) => a.road.markings) || arms.length < 2) return [];
+  const splitters = splitterLayout(node, arms, paths, surface);
+  const paint = (
+    a: V3,
+    z: V3,
+    width = 0.12,
+    material = "paint",
+    avoidGore = false,
+  ) => {
     const count = Math.max(1, Math.ceil(distanceXZ(a, z) / 0.7)),
       d = normalizeXZ(sub(z, a)),
       n = normalXZ(d);
@@ -318,6 +301,11 @@ export function buildJunctionMarkings(
           add(q, mul(n, width / 2)),
           add(q, mul(n, -width / 2)),
         ];
+      if (
+        avoidGore &&
+        splitters.some((s) => quad.some((p) => insidePolygon(p, s.outline)))
+      )
+        continue;
       const heights = quad.map((point) => meshSurfaceY(surface, point));
       if (heights.some((y) => y === undefined)) continue;
       b.quad(
@@ -365,7 +353,13 @@ export function buildJunctionMarkings(
         pair = [arms[i], arms[j]];
       }
     }
-  if (pair) {
+  const merge = arms.some(
+    (a, i) =>
+      (arms[(i + 1) % arms.length].angle - a.angle + Math.PI * 2) %
+        (Math.PI * 2) <
+      Math.PI * 0.29,
+  );
+  if (pair && (merge || arms.length === 2)) {
     const [a, z] = pair,
       lanes = Math.min(a.road.lanes, z.road.lanes),
       reach = distanceXZ(a.center, z.center) * 0.33;
@@ -393,30 +387,28 @@ export function buildJunctionMarkings(
             boundsHalf + 1
         )
           continue;
-        paint(u, v, 0.11);
+        paint(u, v, 0.11, "paint", true);
       }
     }
   }
-  // Recessed painted gore before the actual paving nose on shallow splits.
-  for (let i = 0; i < arms.length; i++) {
-    const a = arms[i],
-      z = arms[(i + 1) % arms.length],
-      gap = (z.angle - a.angle + Math.PI * 2) % (Math.PI * 2);
-    if (gap > Math.PI * 0.29 || gap < 0.015) continue;
-    const d = normalizeXZ(add(a.d, z.d)),
-      n = normalXZ(d),
-      distance =
-        Math.min(
-          distanceXZ(a.center, node.position),
-          distanceXZ(z.center, node.position),
-        ) * 0.7;
-    const nose = add(node.position, mul(d, distance)),
-      length = Math.min(15, distance * 0.6);
-    const side = (s: number, sign: number) =>
-      add(add(nose, mul(d, -length + s)), mul(n, sign * (s / length) * 1.25));
-    paint(side(0, -1), side(length, -1), 0.14);
-    paint(side(0, 1), side(length, 1), 0.14);
-    for (let s = 3; s < length; s += 2.6)
-      paint(side(s, -1), side(Math.min(length, s + 1.3), 1), 0.14);
+  // A single metric chevron fan per real split, recessed from the curb nose.
+  for (const gore of splitters) {
+    const normal = normalXZ(gore.direction),
+      side = (s: number, sign: number) =>
+        add(
+          add(gore.paintedTip, mul(gore.direction, s)),
+          mul(normal, sign * (s / gore.length) * gore.halfWidth),
+        );
+    paint(side(0, -1), side(gore.length, -1), 0.14);
+    paint(side(0, 1), side(gore.length, 1), 0.14);
+    for (let s = 2.8; s < gore.length - 0.5; s += 2.8) {
+      const tip = add(
+        gore.paintedTip,
+        mul(gore.direction, Math.min(gore.length - 0.3, s + 1.2)),
+      );
+      paint(side(s, -1), tip, 0.16);
+      paint(tip, side(s, 1), 0.16);
+    }
   }
+  return splitters;
 }

@@ -1,3 +1,4 @@
+import { sectionScale, motorLanes } from "./street-details";
 import {
   MeshBuilder,
   surfacePoint,
@@ -17,14 +18,19 @@ export interface MobilityFeature {
   id: string;
   owner: string;
   ownerKind: "road" | "node";
-  kind: "bus-lane" | "cycle-track" | "cycle-connection" | "cycle-crossing";
+  kind:
+    | "bus-lane"
+    | "cycle-track"
+    | "cycle-connection"
+    | "cycle-crossing"
+    | "shared-cycle-street";
   position: V3;
   width: number;
   protected: boolean;
   side?: number;
 }
 const scaled = (span: RoadSpan, nominal: number, f = span.frames[0]) =>
-  (nominal * f.hw) / roadHalfWidth(span.road);
+  nominal * sectionScale(span, f);
 function decal(
   b: MeshBuilder,
   span: RoadSpan,
@@ -37,7 +43,7 @@ function decal(
   direction = 1,
 ) {
   const f = frameAt(span, s),
-    scale = f.hw / roadHalfWidth(span.road),
+    scale = sectionScale(span, f),
     point = (x: number, z: number) =>
       add(
         surfacePoint(f, (offset + x) * scale, 0.024),
@@ -82,8 +88,8 @@ export function buildRoadMobility(
     b.strip(
       kind,
       material,
-      frames.map((f) => surfacePoint(f, (lo * f.hw) / hw, 0.004)),
-      frames.map((f) => surfacePoint(f, (hi * f.hw) / hw, 0.004)),
+      frames.map((f) => surfacePoint(f, lo * sectionScale(span, f), 0.004)),
+      frames.map((f) => surfacePoint(f, hi * sectionScale(span, f), 0.004)),
       true,
     );
   if (r.busLanes === "outer")
@@ -105,7 +111,7 @@ export function buildRoadMobility(
             3.4,
             "marking-bus",
             "bus",
-            r.oneWay ? 1 : side,
+            r.oneWay ? 1 : side * (r.trafficSide === "left" ? -1 : 1),
           );
       }
       const f = frameAt(span, (first + last) / 2);
@@ -120,6 +126,32 @@ export function buildRoadMobility(
         side,
       });
     }
+  if (r.sharedCycleStreet) {
+    for (const lane of motorLanes(r)) {
+      for (let s = first + 14; s < last - 10; s += 30)
+        decal(
+          b,
+          span,
+          s,
+          lane.offset,
+          1.15,
+          2.3,
+          "marking-bicycle",
+          "cycle",
+          lane.direction,
+        );
+    }
+    const f = frameAt(span, (first + last) / 2);
+    features.push({
+      id: `${r.id}:shared-cycle`,
+      owner: r.id,
+      ownerKind: "road",
+      kind: "shared-cycle-street",
+      position: surfacePoint(f, 0),
+      width: r.lanes * r.laneWidth,
+      protected: false,
+    });
+  }
   if (r.cycleMode === "none") return features;
   const buffer = r.cycleMode === "protected" ? r.cycleSeparator : 0,
     inner = motor + buffer,

@@ -1,5 +1,5 @@
 import { MeshBuilder, type MeshKind } from "./geometry";
-import { siteOutline, sitePoint, type Site } from "./sites";
+import { siteOutline, sitePoint, insidePolygon, type Site } from "./sites";
 import { buildPlantingPit, type PlantingFeature } from "./planting";
 import { add, lerp, polygonArea, type V3 } from "./math";
 
@@ -12,6 +12,34 @@ export interface BlockFeature {
   plotArea: number;
   hasBuildings: false;
   entry: { side: Site["blockEntrySide"]; width: number } | null;
+}
+/** World-space containment of the real solid band; open plots and gate
+ * throats are deliberately not collision footprints. */
+export function blockSolidAt(site: Site, p: V3) {
+  if (!insidePolygon(p, siteOutline(site))) return false;
+  const band = Math.min(site.blockBand, Math.min(site.width, site.depth) * 0.3);
+  if (
+    site.blockInterior !== "paved" &&
+    insidePolygon(p, siteOutline(site, band))
+  )
+    return false;
+  const angle = (-site.yaw * Math.PI) / 180,
+    dx = p[0] - site.position[0],
+    dz = p[2] - site.position[2],
+    x = dx * Math.cos(angle) - dz * Math.sin(angle),
+    z = dx * Math.sin(angle) + dz * Math.cos(angle),
+    side = site.blockEntrySide,
+    width = Math.min(
+      site.blockEntryWidth,
+      (side === "north" || side === "south" ? site.width : site.depth) * 0.65,
+    );
+  const inGate =
+    width > 0 &&
+    ((side === "north" && z <= 0 && Math.abs(x) <= width / 2) ||
+      (side === "south" && z >= 0 && Math.abs(x) <= width / 2) ||
+      (side === "east" && x >= 0 && Math.abs(z) <= width / 2) ||
+      (side === "west" && x <= 0 && Math.abs(z) <= width / 2));
+  return !inGate;
 }
 /** Convex subtraction preserves vertex heights, including vertical plinth faces. */
 function outsideMask(poly: V3[], mask: V3[]): V3[][] {

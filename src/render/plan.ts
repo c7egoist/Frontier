@@ -809,6 +809,18 @@ export class PlanView {
           const p = cubic(span.alignment.points, 0.52),
             q = this.worldToScreen(p),
             label = span.road.name.split(" · ")[0];
+          // Dense networks remain readable at district scale; labels return on
+          // zoom and the selected edge is always identifiable in the outliner.
+          if (
+            this.project.roads.length > 25 &&
+            span.length * this.scale <
+              Math.max(80, c.measureText(label).width + 12) &&
+            !(
+              this.selection?.kind === "road" &&
+              this.selection.id === span.road.id
+            )
+          )
+            continue;
           if (
             q[0] < 20 ||
             q[0] > this.width - 20 ||
@@ -824,10 +836,10 @@ export class PlanView {
           c.save();
           c.translate(q[0], q[1]);
           c.rotate(angle);
-          c.fillStyle = "#202a29dc";
+          c.fillStyle = "#292929dc";
           const w = c.measureText(label).width;
           c.fillRect(-w / 2 - 4, -6, w + 8, 12);
-          c.fillStyle = "#bdc8bf";
+          c.fillStyle = "#c7c7c7";
           c.fillText(label, 0, 0);
           c.restore();
         }
@@ -841,12 +853,16 @@ export class PlanView {
           continue;
         c.beginPath();
         c.arc(x, y, selected ? 7 : joint ? 4.5 : 2.8, 0, Math.PI * 2);
-        c.fillStyle = selected ? "#c6c6c6" : "#617a70";
+        c.fillStyle = selected ? "#c6c6c6" : "#757575";
         c.fill();
         c.strokeStyle = selected ? "#e6e6e6" : "#999999";
         c.lineWidth = selected ? 2 : 1;
         c.stroke();
-        if (joint && this.labels) {
+        if (
+          joint &&
+          this.labels &&
+          (selected || this.project.roads.length <= 25 || this.scale >= 0.6)
+        ) {
           c.font = '9px "IBM Plex Mono",monospace';
           c.textAlign = "left";
           c.fillStyle = selected ? "#b9b9b9" : "#848484";

@@ -22,7 +22,7 @@ export interface GizmoProjection {
 }
 export class SceneView {
   scene = new THREE.Scene();
-  camera = new THREE.PerspectiveCamera(38, 1, 0.1, 4000);
+  camera = new THREE.PerspectiveCamera(38, 1, 0.1, 40000);
   renderer: THREE.WebGLRenderer;
   controls: OrbitControls;
   networkGroup = new THREE.Group();
@@ -64,6 +64,9 @@ export class SceneView {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Roads are static between edits: keep detailed shadows without re-drawing
+    // every bridge, post and curb into the light map on every orbit frame.
+    this.renderer.shadowMap.autoUpdate = false;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1;
@@ -103,7 +106,7 @@ export class SceneView {
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.085;
     this.controls.minDistance = 3;
-    this.controls.maxDistance = 1800;
+    this.controls.maxDistance = 30000;
     this.controls.maxPolarAngle = Math.PI * 0.49;
     this.controls.minPolarAngle = 0.08;
     this.controls.screenSpacePanning = true;
@@ -169,6 +172,7 @@ export class SceneView {
   setNetwork(project: Project, network: Network, rebuildContext = false) {
     this.project = project;
     this.network = network;
+    this.renderer.shadowMap.needsUpdate = true;
     this.disposeGeometry(this.networkGroup);
     for (const data of network.meshes)
       this.networkGroup.add(
@@ -629,6 +633,82 @@ export class SceneView {
     this.onGizmo(this.gizmoProjection());
     return true;
   }
+  inspectRoadDetail(kind: "bridge" | "splitter" | "street") {
+    if (!this.network || !this.project || !this.selection) return false;
+    const owners = [
+        this.selection.id,
+        ...(this.selection.kind === "node"
+          ? this.project.roads
+              .filter(
+                (r) =>
+                  r.start === this.selection!.id ||
+                  r.end === this.selection!.id,
+              )
+              .map((r) => r.id)
+          : []),
+      ],
+      pivot = this.selectionPosition() ?? [0, 0, 0];
+    let target: V3 | undefined,
+      range = 24;
+    if (kind === "bridge") {
+      const bridge = this.network.bridges.find((b) => owners.includes(b.owner));
+      if (bridge) {
+        const support = bridge.supports[Math.floor(bridge.supports.length / 2)];
+        target = support
+          ? add(support.position, [0, support.top * 0.5, 0])
+          : (bridge.start.map((v, i) => (v + bridge.end[i]) / 2) as V3);
+        range = 38;
+      }
+    } else if (kind === "splitter") {
+      const joints = [
+          ...owners,
+          ...this.project.roads
+            .filter((r) => owners.includes(r.id))
+            .flatMap((r) => [r.start, r.end]),
+        ],
+        split = this.network.splitters
+          .filter((s) => joints.includes(s.owner))
+          .sort(
+            (a, b) =>
+              Math.hypot(
+                a.pavingNose[0] - pivot[0],
+                a.pavingNose[2] - pivot[2],
+              ) -
+              Math.hypot(
+                b.pavingNose[0] - pivot[0],
+                b.pavingNose[2] - pivot[2],
+              ),
+          )[0];
+      if (split) target = split.pavingNose;
+    } else {
+      const feature = this.network.streetDetails
+        .filter((f) => owners.includes(f.owner))
+        .sort(
+          (a, b) =>
+            Math.hypot(a.position[0] - pivot[0], a.position[2] - pivot[2]) -
+            Math.hypot(b.position[0] - pivot[0], b.position[2] - pivot[2]),
+        )[0];
+      if (feature) target = feature.position;
+    }
+    if (!target) return false;
+    this.controls.target.set(...target);
+    this.camera.position.copy(
+      this.controls.target
+        .clone()
+        .add(
+          new THREE.Vector3(
+            range * 0.55,
+            range * (kind === "bridge" ? 0.1 : 0.5),
+            range * 0.65,
+          ),
+        ),
+    );
+    this.camera.zoom = 1;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.onGizmo(this.gizmoProjection());
+    return true;
+  }
   inspectInfrastructure(kind: UtilityKind | "drainage"): boolean {
     if (!this.selection || !this.network || !this.project) return false;
     const owners =
@@ -689,6 +769,7 @@ export class SceneView {
     if (this.grid) this.grid.visible = v;
   }
   setContext(v: boolean) {
+    this.renderer.shadowMap.needsUpdate = true;
     this.contextVisible = v;
     this.contextGroup.visible = v;
   }
@@ -698,10 +779,12 @@ export class SceneView {
     this.scene.background = new THREE.Color(v ? "#0e0e0e" : "#101010");
   }
   setStyle(style: string) {
+    this.renderer.shadowMap.needsUpdate = true;
     this.materials.clay(style === "clay");
     this.materials.wireframe(style === "wireframe");
   }
   setDetailLayer(layer: string, visible: boolean) {
+    this.renderer.shadowMap.needsUpdate = true;
     for (const child of this.networkGroup.children)
       if (child.userData.meshKind === layer) child.visible = visible;
   }
@@ -735,6 +818,11 @@ export class SceneView {
       plantings: network?.plantings ?? this.network?.plantings ?? [],
       blocks: network?.blocks ?? this.network?.blocks ?? [],
       mobility: network?.mobility ?? this.network?.mobility ?? [],
+      bridges: network?.bridges ?? this.network?.bridges ?? [],
+      barriers: network?.barriers ?? this.network?.barriers ?? [],
+      splitters: network?.splitters ?? this.network?.splitters ?? [],
+      streetDetails:
+        network?.streetDetails ?? this.network?.streetDetails ?? [],
     };
     try {
       return (await new GLTFExporter().parseAsync(group, {

@@ -2,6 +2,25 @@ import { makeAdvancedTemplate } from "./templates";
 import { parseSites, siteOutline, makeSite, type Site } from "./sites";
 import { add, sub, mul, clamp, distance, type V3 } from "./math";
 
+export const railStyles = [
+  "wbeam",
+  "thrie",
+  "boxbeam",
+  "cable",
+  "railing",
+  "concrete",
+  "parapet",
+] as const;
+export type RailStyle = (typeof railStyles)[number];
+export const railNames: Record<RailStyle, string> = {
+  wbeam: "Corrugated W-beam",
+  thrie: "Thrie-beam safety rail",
+  boxbeam: "Hollow box-beam",
+  cable: "Four-cable tension barrier",
+  railing: "Pedestrian railing",
+  concrete: "Concrete safety barrier",
+  parapet: "Bridge parapet / vertical infill",
+};
 export type Surface = "asphalt" | "concrete" | "cobble" | "pavers";
 export const patterns = [
   "ashlar",
@@ -44,6 +63,11 @@ export interface Driveway {
   apron: number;
 }
 export interface RoadSettings {
+  trafficSide: "right" | "left";
+  sharedCycleStreet: boolean;
+  curbExtensions: boolean;
+  bridgeDepth: number;
+  pierSpacing: number;
   busLanes: "none" | "outer";
   busSurface: "asphalt" | "red";
   cycleMode: "none" | "painted" | "protected";
@@ -57,6 +81,7 @@ export interface RoadSettings {
   pitGrate: boolean;
   lanes: number;
   laneWidth: number;
+  shoulderWidth: number;
   sidewalk: number;
   sidewalkCrossfall: number;
   curbHeight: number;
@@ -88,7 +113,7 @@ export interface RoadSettings {
   speedLimit: number;
   streetLights: boolean;
   curbStyle: "stone" | "flush" | "race";
-  railStyle: "wbeam" | "railing" | "concrete";
+  railStyle: RailStyle;
   parking: "none" | "parallel";
   median: number;
   startingGrid: boolean;
@@ -112,6 +137,11 @@ export interface Project {
 }
 export type Selection = { kind: "node" | "road" | "site"; id: string } | null;
 export const roadDefaults: RoadSettings = {
+  trafficSide: "right",
+  sharedCycleStreet: false,
+  curbExtensions: false,
+  bridgeDepth: 1.2,
+  pierSpacing: 30,
   busLanes: "none",
   busSurface: "asphalt",
   cycleMode: "none",
@@ -125,6 +155,7 @@ export const roadDefaults: RoadSettings = {
   pitGrate: false,
   lanes: 2,
   laneWidth: 3.5,
+  shoulderWidth: 0,
   sidewalk: 4.2,
   sidewalkCrossfall: 1.5,
   curbHeight: 0.16,
@@ -167,6 +198,49 @@ export const presets: {
   description: string;
   settings: Partial<RoadSettings>;
 }[] = [
+  {
+    id: "shared-cycle",
+    name: "Dutch shared cycle street",
+    description: "Red carriageway · calm 30 km/h street · parking pockets",
+    settings: {
+      sharedCycleStreet: true,
+      lanes: 2,
+      laneWidth: 2.8,
+      sidewalk: 3.2,
+      parking: "parallel",
+      curbExtensions: true,
+      pattern: "herringbone",
+      speedLimit: 30,
+      streetLights: true,
+      curbDrainType: "side-entry",
+      crossfall: 1.5,
+    },
+  },
+  {
+    id: "motorway-carriageway",
+    name: "Divided motorway carriageway",
+    description: "Two one-way lanes · shoulder · thrie-beam safety rail",
+    settings: {
+      lanes: 2,
+      laneWidth: 3.5,
+      shoulderWidth: 1,
+      oneWay: true,
+      sidewalk: 0.8,
+      guardrails: true,
+      railStyle: "thrie",
+      railHeight: 0.95,
+      postSpacing: 2.5,
+      curbStyle: "flush",
+      curbHeight: 0.05,
+      markingStyle: "motorway",
+      markingSetback: 1,
+      signs: true,
+      drainage: false,
+      manholes: false,
+      cornerRamps: false,
+      speedLimit: 100,
+    },
+  },
   {
     id: "urban",
     name: "Urban street",
@@ -465,8 +539,8 @@ export function makeDemo(): Project {
   // A real, continuous viaduct with flat-tangent approach ramps. All connections
   // are shared graph nodes; the elevated crossing never joins the avenue below.
   const bn = n("bridge-north", 51, -110),
-    b1 = n("bridge-a", 49, -38, 5.8, 3);
-  const b2 = n("bridge-b", 56, 32, 5.8, 3),
+    b1 = n("bridge-a", 49, -38, 6.1, 3);
+  const b2 = n("bridge-b", 56, 32, 6.1, 3),
     bs = n("bridge-south", 67, 104);
   const bridgeSettings = {
     sidewalk: 1.1,
@@ -756,8 +830,14 @@ export function parseProject(raw: unknown): Project {
       end: entry.end,
       h1: vec(entry.h1),
       h2: vec(entry.h2),
+      trafficSide: entry.trafficSide === "left" ? "left" : "right",
+      sharedCycleStreet: entry.sharedCycleStreet === true,
+      curbExtensions: entry.curbExtensions === true,
+      bridgeDepth: number(entry.bridgeDepth, 1.2, 0.75, 2.4),
+      pierSpacing: number(entry.pierSpacing, 30, 16, 50),
       lanes: Math.round(number(entry.lanes, 2, 1, 6)),
       laneWidth: number(entry.laneWidth, 3.5, 2, 6),
+      shoulderWidth: number(entry.shoulderWidth, 0, 0, 3.5),
       railHeight: number(entry.railHeight, 0.8, 0.5, 1.4),
       postSpacing: number(entry.postSpacing, 3.4, 1.5, 6),
       sidewalk: number(entry.sidewalk, 4.2, 0, 12),
@@ -829,9 +909,7 @@ export function parseProject(raw: unknown): Project {
       curbStyle: ["stone", "flush", "race"].includes(String(entry.curbStyle))
         ? (entry.curbStyle as Road["curbStyle"])
         : "stone",
-      railStyle: ["wbeam", "railing", "concrete"].includes(
-        String(entry.railStyle),
-      )
+      railStyle: railStyles.includes(String(entry.railStyle) as RailStyle)
         ? (entry.railStyle as Road["railStyle"])
         : "wbeam",
       parking: entry.parking === "parallel" ? "parallel" : "none",
@@ -974,6 +1052,23 @@ export function validateGenerationBudget(project: Project): void {
         Math.ceil(estimated / road.inletSpacing) *
         2 *
         (road.curbDrainType === "side-entry" ? 160 : 120);
+    if (
+      !railStyles.includes(road.railStyle) ||
+      !["right", "left"].includes(road.trafficSide) ||
+      ![road.bridgeDepth, road.pierSpacing, road.shoulderWidth].every(
+        Number.isFinite,
+      ) ||
+      road.shoulderWidth < 0 ||
+      road.shoulderWidth > 3.5 ||
+      road.bridgeDepth < 0.75 ||
+      road.bridgeDepth > 2.4 ||
+      road.pierSpacing < 16 ||
+      road.pierSpacing > 50
+    )
+      throw new RangeError("Invalid bridge / roadside protection parameters.");
+    // Dense parapet infill is real geometry, not an alpha texture.
+    if (road.guardrails && road.railStyle === "parapet")
+      utilityVertices += Math.ceil(estimated / 0.18) * 48;
     total += estimated;
     for (const point of points) {
       minX = Math.min(minX, point[0]);
@@ -1123,6 +1218,12 @@ export const cycleZoneWidth = (road: RoadSettings) =>
     : road.cycleWidth +
       (road.cycleMode === "protected" ? road.cycleSeparator : 0);
 export const roadHalfWidth = (road: RoadSettings) =>
-  motorHalfWidth(road) + cycleZoneWidth(road);
+  motorHalfWidth(road) +
+  cycleZoneWidth(road) +
+  (road.markingStyle === "motorway" ? road.shoulderWidth : 0);
 export const roadMaterial = (road: RoadSettings) =>
-  road.surface === "pavers" ? `paving-${road.pattern}` : road.surface;
+  road.sharedCycleStreet
+    ? "cycle-red"
+    : road.surface === "pavers"
+      ? `paving-${road.pattern}`
+      : road.surface;

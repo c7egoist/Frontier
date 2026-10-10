@@ -1,3 +1,4 @@
+import { crossingStations } from "./street-details";
 import { buildPlantingPit, type PlantingFeature } from "./planting";
 import earcut from "earcut";
 import {
@@ -109,11 +110,9 @@ export function prepareFootways(
     ramps.push(spec);
   };
   if (r.cornerRamps && r.markingStyle === "urban" && r.curbStyle === "stone")
-    for (const [joint, id, s] of [
-      [span.startJoint, r.start, first + 2.3],
-      [span.endJoint, r.end, last - 2.3],
-    ] as [boolean, string, number][]) {
-      if (!joint || !effectiveCrossing(project, id)) continue;
+    for (const crossing of crossingStations(span, project)) {
+      const id = crossing.node,
+        s = crossing.s;
       for (const side of [-1, 1])
         addRamp({
           id: `${r.id}:corner-ramp:${id}:${side}`,
