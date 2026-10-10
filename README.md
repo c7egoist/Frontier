@@ -4,7 +4,7 @@ A self-contained HTML tool for generating **connected highway bridges, city road
 
 ## Open
 
-Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified European-mobility and open-space snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/a6938accd9f49cbe8f6f02701692c38395d45ddd/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
+Open [`RoadDesigner.html`](./RoadDesigner.html), or use the [verified connected-bridges and city-network snapshot on raw.githack](https://raw.githack.com/c7egoist/Frontier/d825351f60be2195f950f2de51139e06123fca71/RoadDesigner.html). No install or external asset requests are required. raw.githack can show a safety notice first; choose **Open the page**. Browser-local saves do not transfer between hosting origins: export/import JSON to move a layout.
 
 Only the root HTML is deployed, not Vite's development `index.html`. Code, fonts, procedural materials and licensing notices are embedded. WebGL2 enables the 3D view; plan editing and OBJ/JSON export also work without it.
 
@@ -129,6 +129,8 @@ Geometry exports default to **Production** detail, independently of preview deta
 Meters, **Y-up**. Hidden detail layers remain in a complete mesh export. Clay/wireframe preview does not alter the original exported materials. No preview environment is exported. A final game's visual quality also depends on its texture resolution, material/shader integration, lighting, terrain and rendering pipeline; this editor does not claim to be a complete AAA environment renderer.
 
 Release HTML is checked byte-for-byte against the published GitHub file. **264 CPU checks and 76 browser checks** pass, including directed interchange reachability, actual bridge/support clearances, atomic connected bridge insertion, seven distinct barrier sections, exact rounded splitter tips and geometry-derived gores, pocket/refuge/shared-cycle treatment, the exact widened/elevated Northbank corner reproduction, analytic offsets, short-fit tapering, bus/cycle lane separation, real planting apertures/grate slots, gated block rings, parking islands/EV capacity, legacy drainage/ramp/driveway checks, PBR exports, mobile layout and fully offline use.
+
+Published standalone: **1,135,176 bytes**, SHA-256 `0f93a2d4a9d9faba0360c7bae87a3592068e777af61ebf1b19a1b04348b9f1aa`, byte-verified against GitHub blob `75e38b4542f132d96e34e90ce0fc4b7cbf5c79be`. The immutable raw.githack URL uses code commit `d825351f60be2195f950f2de51139e06123fca71`.
 
 ## Development and verification
 
