@@ -19,6 +19,15 @@ export interface AuxiliaryLaneFeature {
   taperLength: number;
   startStation: number;
   endStation: number;
+  requestedStartStation: number;
+  requestedEndStation: number;
+  meshedFullWidthLength: number;
+  meshedTaperLength: number;
+  junctionContinuation: {
+    node: string;
+    end: "start" | "end";
+    length: number;
+  }[];
   start: V3;
   end: V3;
   fitted: boolean;
@@ -38,6 +47,7 @@ export function buildAuxiliaryLane(
     first = Math.max(span.frames[0].s, start),
     last = Math.min(span.frames.at(-1)!.s, end),
     motor = (r.lanes * r.laneWidth + r.median) / 2;
+  if (last - first < 0.04) return;
   if (r.markings && last > first) {
     for (let s = first; s < last - 0.3; s += 10) {
       const a = frameAt(span, s),
@@ -62,6 +72,26 @@ export function buildAuxiliaryLane(
       side * (motor * sectionScale(span, f) + (f.auxWidth ?? 0) / 2),
     );
   };
+  const overlap = (a: number, z: number) =>
+      Math.max(0, Math.min(z, last) - Math.max(a, first)),
+    length = span.alignment.length,
+    meshedFullWidthLength =
+      r.auxiliaryLane === "exit"
+        ? overlap(length - run, length)
+        : overlap(0, run),
+    meshedTaperLength =
+      r.auxiliaryLane === "exit"
+        ? overlap(length - run - taper, length - run)
+        : overlap(run, run + taper),
+    junctionContinuation: AuxiliaryLaneFeature["junctionContinuation"] = [];
+  if (span.startJoint && first > start + 1e-7)
+    junctionContinuation.push({
+      node: r.start,
+      end: "start",
+      length: first - start,
+    });
+  if (span.endJoint && end > last + 1e-7)
+    junctionContinuation.push({ node: r.end, end: "end", length: end - last });
   return {
     owner: r.id,
     kind: r.auxiliaryLane,
@@ -69,8 +99,13 @@ export function buildAuxiliaryLane(
     laneWidth: r.laneWidth,
     fullWidthLength: run,
     taperLength: taper,
-    startStation: start,
-    endStation: end,
+    startStation: first,
+    endStation: last,
+    requestedStartStation: start,
+    requestedEndStation: end,
+    meshedFullWidthLength,
+    meshedTaperLength,
+    junctionContinuation,
     start: point(first),
     end: point(last),
     fitted: scale < 0.999,

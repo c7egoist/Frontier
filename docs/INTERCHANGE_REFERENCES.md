@@ -75,6 +75,16 @@ npm run audit:design
 
 Load the updated **Networks** templates to use the corrected graph. Imported/saved layouts are not silently overwritten or retroactively scaled.
 
+## Continuation: physical seats, bounds and measured lane portions
+
+The metric template dimensions above are unchanged. A second pass adds aligned, contacting bearing stacks; shared girder patterns on equal-width connected decks; width/spacing ranges for tapered decks; and geometric exclusion of blocked abutments. The plate/pad assembly is a **selected 70 mm asset stack**, not a structural specification.
+
+Blocked landing walls and their associated fill are withheld with an explicit error. An elevated filled approach that crosses a lower road outside the structural interval is no longer reported as a usable clear overpass. Move/extend the structural bounds to restore the infrastructure; editable JSON and undo remain available. This checks centreline crossings and the actual paved surfaces at abutment foundations/walls/wings, not every possible terrain volume or structural situation.
+
+Auxiliary configuration lengths remain 150/200 m plus 90 m in the templates, but the trimmed alignment meshes do not contain all of that length. For example, a diamond exit has **9.2 m of full-width auxiliary run and 90 m taper on its separate alignment mesh**, with **140.8 m allocated to its shared junction**. The entrance has **59.2 m full-width meshed run** plus the taper and corresponding junction allocation. These are now separate, explicit values in the inspector and exported measurement data, rather than inconsistent station/position pairs. They do not establish weaving capacity.
+
+Full auxiliary lanes are included in the motorway node's incoming/outgoing counts. Through-divider offsets no longer shrink when only the outer edge widens. Surface-clipped auxiliary guidance continues into its junction.
+
 ## Remaining limits
 
 These checks verify asset dimensions, alignment curvature/grade, directionally connected topology, actual structural intervals, geometric clearances and exported metadata. They **do not** establish traffic capacity, signal timing, queue storage, weaving safety under traffic demand, stopping/decision sight distance, superelevation compliance, swept paths, structural strength, foundations, earthwork quantities or jurisdiction-specific approval. The shoulder arrangement is a clearly stated symmetric asset starting section, not a claim that every authority specifies symmetric shoulders.
@@ -83,4 +93,4 @@ The expanded reference layouts still fit the 5 × 5 km / 35 km total-control-pol
 
 ## Verification
 
-**323 CPU checks and 92 real-browser checks pass**, with no browser runtime errors. Coverage includes the actual cubic radii/grades, metric template dimensions, full production cloverleaf, six trumpet movements, one-sided/handed speed-change geometry, bounded bridge/approach support, beam/bearing/abutment metadata, underside-camera clearance, history/preset preservation, GLB/OBJ/JSON and fully offline standalone use. The existing European quarter retains its 180 roadside bays. Strict TypeScript, production build, formatting and dependency audit also pass.
+**347 CPU checks and 96 real-browser checks pass**, with no browser runtime errors. Coverage includes bearing seat/member/spacing continuity, blocked-landing/fill exclusion and atomic refusal, meshed/requested auxiliary dimensions, motorway marking/lane continuity, large OBJ groups, the actual cubic radii/grades, metric template dimensions, full production cloverleaf, six trumpet movements, one-sided/handed speed-change geometry, bounded bridge/approach support, beam/bearing/abutment metadata, underside-camera clearance, history/preset preservation, GLB/OBJ/JSON and fully offline standalone use. The existing European quarter retains its 180 roadside bays. Strict TypeScript, production build, formatting and dependency audit also pass.

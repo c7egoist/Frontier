@@ -174,6 +174,222 @@ try {
       e.dispatchEvent(new Event("change", { bubbles: true }));
     }, value);
   };
+  await test("continuity: tapered bridge bearings match every fixed girder and expose honest spacing ranges", async () => {
+    await importReferenceFixture(
+      {
+        bridge: true,
+        auxiliaryLane: "entry",
+        auxiliaryLength: 200,
+        auxiliaryTaper: 90,
+      },
+      8,
+      400,
+    );
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    const s = await referenceState(),
+      b = s.bridges[0];
+    assert.equal(b.girderCount, 6);
+    assert(b.girderSpacingRange[1] - b.girderSpacingRange[0] > 0.5);
+    assert.equal(b.bearings.length, b.supports.length * 6);
+    assert(
+      b.bearings.every(
+        (p) => p.girderCount === 6 && Math.abs(p.top - p.bottom - 0.07) < 1e-7,
+      ),
+    );
+    assert(
+      (
+        await page.locator('[data-design-metric="Girder layout"]').textContent()
+      ).includes("1.86–2.59"),
+    );
+    assert.equal(
+      Number(
+        await page
+          .locator('[data-design-metric="Bearing assemblies"]')
+          .textContent(),
+      ),
+      b.bearings.length,
+    );
+    assert.deepEqual(s.design.structureIssues, []);
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "continuous-tapered-bridge-seats.png"),
+    });
+    const before = s.project;
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("production");
+    let promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('#export-menu [data-action="glb"]').click();
+    let d = await promise,
+      buffer = await readFile(await d.path());
+    const gltf = JSON.parse(
+        buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
+      ),
+      extras = gltf.nodes.find((n) => n.extras?.bridges)?.extras;
+    assert.equal(
+      extras.bridges[0].bearings.length,
+      extras.bridges[0].supports.length * 6,
+    );
+    assert(extras.bridges[0].bearings.every((b) => b.physicalGeometry));
+    assert(extras.bridges[0].widthRange[1] > extras.bridges[0].widthRange[0]);
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.waitForFunction(() =>
+      document.querySelector("#toast").textContent.includes("GLB exported"),
+    );
+    promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('#export-menu [data-action="obj"]').click();
+    d = await promise;
+    const files = unzipSync(await readFile(await d.path())),
+      m = JSON.parse(new TextDecoder().decode(files["mesh.json"]));
+    assert.deepEqual(m.bridges[0].bearings, extras.bridges[0].bearings);
+    assert(m.auxiliaryLanes[0].meshedFullWidthLength === 200);
+    assert.deepEqual((await referenceState()).project, before);
+  });
+  await test("continuity: edited structural bounds cannot hide a wall or earth mass across the lower road", async () => {
+    await importReferenceFixture(
+      { bridge: true, embankment: true, bridgeFrom: 0.35, bridgeTo: 0.75 },
+      7.2,
+      600,
+    );
+    const p = (await referenceState()).project;
+    p.name = "Continuity underpass";
+    p.nodes.push(
+      {
+        id: "continuity-lower-a",
+        name: "Lower in",
+        position: [0, 0, -100],
+        radius: 3,
+        crossings: false,
+      },
+      {
+        id: "continuity-lower-z",
+        name: "Lower out",
+        position: [0, 0, 100],
+        radius: 3,
+        crossings: false,
+      },
+    );
+    p.roads.push({
+      id: "continuity-lower",
+      name: "Lower road",
+      start: "continuity-lower-a",
+      end: "continuity-lower-z",
+      h1: [0, 0, 66.6666666667],
+      h2: [0, 0, -66.6666666667],
+      lanes: 2,
+      laneWidth: 3.5,
+      sidewalk: 4.2,
+      drainage: false,
+      manholes: false,
+    });
+    await page.locator("#project-file").setInputFiles({
+      name: "continuity.road.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(p)),
+    });
+    await page.waitForFunction(
+      () =>
+        window.frontier.getProject().name === "Continuity underpass" &&
+        !document.querySelector("#project-file").value,
+    );
+    await page.evaluate(() =>
+      window.frontier.select({ kind: "road", id: "ref-road" }),
+    );
+    await page.locator('[data-inspector-tab="details"]').click();
+    const before = await referenceState();
+    await referenceRange("bridgeFrom", 50);
+    let s = await referenceState();
+    assert.equal(s.bridges[0].excludedAbutments.length, 1);
+    assert.equal(s.bridges[0].abutments.length, 1);
+    assert(s.design.structureIssues.some((i) => i.kind === "abutment"));
+    assert(!s.design.withinSelectedTargets);
+    assert(s.diagnostics.some((d) => d.level === "error"));
+    assert(!s.fill.some((e) => e.owner === "ref-road"));
+    const downloads = [],
+      handler = (d) => downloads.push(d);
+    page.on("download", handler);
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator('#export-menu [data-action="glb"]').click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#toast")
+        .textContent.includes("Fix invalid geometry"),
+    );
+    assert.equal(downloads.length, 0);
+    page.off("download", handler);
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Support condition"]')
+        .textContent(),
+      "Review structural bounds",
+    );
+    assert.equal(
+      await page.locator("[data-design-status]").textContent(),
+      "Review geometry",
+    );
+    await undo();
+    s = await referenceState();
+    assert.deepEqual(s.project, before.project);
+    assert.deepEqual(s.diagnostics, []);
+    assert.equal(s.bridges[0].abutments.length, 2);
+    assert.equal(s.fill.length, 2);
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "lower-road-safe-bridge-bounds.png"),
+    });
+  });
+  await test("continuity: meshed versus configured auxiliary lengths and extra junction lanes are measured, not implied", async () => {
+    await page.evaluate(() => window.frontier.loadTemplate("diamond"));
+    const s = await referenceState(),
+      a = s.auxiliary.find((a) => a.kind === "exit"),
+      road = s.project.roads.find((r) => r.id === a.owner);
+    await page.evaluate(
+      (id) => window.frontier.select({ kind: "road", id }),
+      a.owner,
+    );
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    assert(a.meshedFullWidthLength < a.fullWidthLength);
+    assert(
+      Math.abs(
+        a.meshedFullWidthLength +
+          a.meshedTaperLength -
+          (a.endStation - a.startStation),
+      ) < 1e-7,
+    );
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Meshed full-width run"]')
+        .textContent(),
+      "9.2 m",
+    );
+    assert.equal(
+      await page.locator('[data-design-metric="Meshed taper"]').textContent(),
+      "90.0 m",
+    );
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Junction continuation"]')
+        .textContent(),
+      "140.8 m",
+    );
+    await page.evaluate(
+      (id) => window.frontier.select({ kind: "node", id }),
+      road.end,
+    );
+    assert.equal(
+      await page.locator('[data-junction-lanes="incoming"]').textContent(),
+      "3",
+    );
+    assert.equal(
+      await page.locator('[data-junction-lanes="outgoing"]').textContent(),
+      "3",
+    );
+    assert.deepEqual((await referenceState()).project, s.project);
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "motorway-lane-continuity.png"),
+    });
+  });
   await test("reference: diamond schematic dimensions, short bridge decks, supported approaches and measured girder layout", async () => {
     await page.evaluate(() => window.frontier.loadTemplate("diamond"));
     const s = await referenceState(),
@@ -3574,6 +3790,50 @@ try {
       path: resolve(cache, "offline-roadside-parking.png"),
     });
     // The shared single-process Chromium context stays alive until the final check.
+  });
+  await test("continuity: standalone seat metadata, landing protection and undo run fully offline", async () => {
+    const offline =
+        offlinePage ??
+        (await browser.newPage({ viewport: { width: 1512, height: 982 } })),
+      requests = [],
+      offlineErrors = [];
+    offlinePage = offline;
+    offline.on("pageerror", (e) => offlineErrors.push(e.message));
+    await offline.route(/^https?:\/\//, (r) => {
+      requests.push(r.request().url());
+      return r.abort();
+    });
+    await offline.goto(`file://${resolve("RoadDesigner.html")}`);
+    await offline.waitForFunction(() => !!window.frontier);
+    await offline.evaluate(() => window.frontier.loadTemplate("diamond"));
+    let data = await offline.evaluate(() => ({
+      project: window.frontier.getProject(),
+      design: window.frontier.getNetwork().designReview,
+      bridges: window.frontier.getNetwork().bridges,
+    }));
+    assert(data.bridges.every((b) => b.bearings.length > 0));
+    assert(
+      data.design.junctionLanes.some(
+        (j) => j.incoming === 3 && j.outgoing === 3,
+      ),
+    );
+    await offline.locator('[data-inspector-tab="details"]').click();
+    await offline.locator('[data-prop="bridgeFrom"]').evaluate((e) => {
+      e.value = "50";
+      e.dispatchEvent(new Event("input", { bubbles: true }));
+      e.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    let issues = await offline.evaluate(
+      () => window.frontier.getNetwork().designReview.structureIssues,
+    );
+    assert(issues.some((i) => i.kind === "abutment"));
+    await offline.locator("#undo-button").click();
+    issues = await offline.evaluate(
+      () => window.frontier.getNetwork().designReview.structureIssues,
+    );
+    assert.deepEqual(issues, []);
+    assert.deepEqual(requests, []);
+    assert.deepEqual(offlineErrors, []);
   });
   await test("reference: standalone reference geometry and editable dimensions work with all external requests blocked", async () => {
     const offline =

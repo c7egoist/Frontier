@@ -18,6 +18,7 @@ import {
 } from "./math";
 import {
   roadHalfWidth,
+  baseRoadHalfWidth,
   motorHalfWidth,
   connected,
   getNode,
@@ -495,10 +496,10 @@ export function buildJunctionMarkings(
         continue;
       const fraction = -1 + (lane * 2) / lanes,
         offset = (arm: Arm) =>
-          ((((arm.road.lanes * arm.road.laneWidth) / 2) * fraction +
+          (((arm.road.lanes * arm.road.laneWidth) / 2) * fraction +
             (Math.sign(fraction) * arm.road.median) / 2) *
-            arm.frame.hw) /
-          roadHalfWidth(arm.road),
+          (arm.frame.profileScale ??
+            arm.frame.hw / baseRoadHalfWidth(arm.road)),
         p = add(a.center, mul(a.n, offset(a))),
         q = add(z.center, mul(z.n, -offset(z)));
       const curve = [p, add(p, mul(a.d, -reach)), add(q, mul(z.d, -reach)), q];
@@ -516,6 +517,39 @@ export function buildJunctionMarkings(
           continue;
         paint(u, v, 0.11, "paint", true);
       }
+    }
+    // Keep the additional-lane divider continuous across a one-way motorway
+    // split/merge. Its through-lane edge must not move when only the OUTER
+    // pavement edge widens. Surface/gore clipping remains mandatory.
+    if (
+      a.road.oneWay &&
+      z.road.oneWay &&
+      a.isStart !== z.isStart &&
+      Math.max(a.frame.auxWidth ?? 0, z.frame.auxWidth ?? 0) > 0.3
+    ) {
+      const point = (arm: Arm) => {
+          const side = arm.road.trafficSide === "left" ? -1 : 1,
+            scale =
+              arm.frame.profileScale ??
+              arm.frame.hw / baseRoadHalfWidth(arm.road),
+            offset =
+              side *
+              ((arm.road.lanes * arm.road.laneWidth + arm.road.median) / 2 +
+                0.065) *
+              scale;
+          return add(arm.center, mul(arm.frame.n, offset));
+        },
+        p = point(a),
+        q = point(z),
+        curve = [p, add(p, mul(a.d, -reach)), add(q, mul(z.d, -reach)), q];
+      for (let i = 0; i < 40; i += 4)
+        paint(
+          cubic(curve, i / 40),
+          cubic(curve, (i + 1.8) / 40),
+          0.11,
+          "paint",
+          true,
+        );
     }
   }
   // A single metric chevron fan per real split, recessed from the curb nose.

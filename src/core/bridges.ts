@@ -1,3 +1,8 @@
+import {
+  buildBearings,
+  bearingDimensions,
+  type BridgeBearing,
+} from "./bridge-bearings";
 import { bridgeAt, parameterStation } from "./bridge-profile";
 import { SupportSurfaceIndex, supportOutline } from "./support-surfaces";
 import earcut from "earcut";
@@ -19,6 +24,7 @@ import {
   normalizeXZ,
   normalXZ,
   distanceXZ,
+  dotXZ,
   type V3,
 } from "./math";
 
@@ -27,6 +33,7 @@ export interface BridgeSupport {
   top: number;
   footprint: [number, number];
   kind: "pier" | "portal";
+  station?: number;
 }
 export interface BridgeFeature {
   owner: string;
@@ -36,7 +43,9 @@ export interface BridgeFeature {
   depth: number;
   girderCount?: number;
   girderSpacing?: number;
+  girderSpacingRange?: [number, number];
   width?: number;
+  widthRange?: [number, number];
   spanLengths?: number[];
   pierSpacing: number;
   connections: string[];
@@ -44,6 +53,8 @@ export interface BridgeFeature {
   end: V3;
   supports: BridgeSupport[];
   excludedSupports: V3[];
+  bearings?: BridgeBearing[];
+  excludedAbutments?: { position: V3; station: number; part: string }[];
   abutments?: {
     position: V3;
     width: number;
@@ -55,6 +66,7 @@ export interface BridgeFeature {
     material: "steel" | "concrete";
     mouthDepth: number;
     jointDepth: number;
+    girderCount?: number;
   }[];
   physicalGeometry: true;
 }
@@ -213,8 +225,10 @@ function pier(
   f: Frame,
   depth: number,
   kind: BridgeSupport["kind"],
+  girderCount?: number,
+  bearings: BridgeBearing[] = [],
 ): BridgeSupport | null {
-  const top = f.p[1] - depth - 0.07,
+  const top = f.p[1] - depth - bearingDimensions.totalHeight,
     bottom = -0.27,
     section = bridgeSection(f),
     center = add(f.p, mul(f.n, section.bias));
@@ -272,22 +286,80 @@ function pier(
     2.7,
     f.d,
   );
-  for (const offset of girderOffsets(f))
-    b.box(
-      "structure",
-      "rubber",
-      add([f.p[0], top + 0.045, f.p[2]], mul(f.n, offset)),
-      0.34,
-      0.07,
-      0.55,
-      f.d,
-    );
+  bearings.push(
+    ...buildBearings(b, f, depth, girderOffsets(f, girderCount), kind),
+  );
   return {
     position: [center[0], 0, center[2]],
     top,
     footprint: [3, 2.7],
     kind,
+    station: f.s,
   };
+}
+interface AbutmentPart {
+  name: string;
+  material: string;
+  center: V3;
+  width: number;
+  height: number;
+  length: number;
+}
+function abutmentParts(f: Frame, depth: number, outward: V3): AbutmentPart[] {
+  const section = bridgeSection(f),
+    width = section.width,
+    seat = f.p[1] - depth - bearingDimensions.totalHeight,
+    backHeight = f.p[1] - 0.28,
+    center = (distance: number, y: number) => {
+      const p = add(f.p, add(mul(outward, distance), mul(f.n, section.bias)));
+      p[1] = y;
+      return p;
+    },
+    parts: AbutmentPart[] = [
+      {
+        name: "breast wall",
+        material: "concrete",
+        center: center(0.35, seat / 2),
+        width,
+        height: seat,
+        length: 1.3,
+      },
+      {
+        name: "back wall",
+        material: "concrete",
+        center: center(1.12, (seat + backHeight) / 2),
+        width,
+        height: backHeight - seat,
+        length: 0.25,
+      },
+      {
+        name: "foundation",
+        material: "foundation",
+        center: center(0.35, -0.2),
+        width: width + 0.6,
+        height: 0.4,
+        length: 2.1,
+      },
+    ];
+  for (const side of [-1, 1]) {
+    const p = add(
+      f.p,
+      add(
+        mul(f.n, section.bias + side * (width / 2 - 0.12)),
+        mul(outward, 2.1),
+      ),
+    );
+    p[1] = backHeight / 2;
+    parts.push({
+      name: `wing ${side}`,
+      material: "concrete",
+      center: p,
+      width: 0.24,
+      height: backHeight,
+      length: 3.4,
+    });
+  }
+  return parts;
 }
 export function buildBridgeSpan(
   b: MeshBuilder,
@@ -295,6 +367,7 @@ export function buildBridgeSpan(
   project: Project,
   alignments: Alignment[],
   surfaces?: SupportSurfaceIndex,
+  forcedCount?: number,
 ): BridgeFeature | undefined {
   const r = span.road;
   if (!r.bridge) return;
@@ -335,7 +408,8 @@ export function buildBridgeSpan(
       rightBottom[i],
       leftBottom[i],
     ]);
-  const count = Math.max(...frames.map((f) => girderOffsets(f).length)),
+  const count =
+      forcedCount ?? Math.max(...frames.map((f) => girderOffsets(f).length)),
     beamOffsets = girderOffsets(frames[0], count);
   beamOffsets.forEach((_, i) =>
     girder(b, frames, (f) => girderOffsets(f, count)[i], depth, steel),
@@ -354,6 +428,8 @@ export function buildBridgeSpan(
   }
   const supports: BridgeSupport[] = [],
     excludedSupports: V3[] = [],
+    bearings: BridgeBearing[] = [],
+    excludedAbutments: NonNullable<BridgeFeature["excludedAbutments"]> = [],
     bays = Math.max(1, Math.ceil((last - first) / r.pierSpacing));
   const support = (f: Frame, kind: BridgeSupport["kind"]) => {
     if (f.p[1] < 2.2) return false;
@@ -361,8 +437,15 @@ export function buildBridgeSpan(
       excludedSupports.push([...f.p]);
       return false;
     }
-    if (supports.some((p) => distanceXZ(p.position, f.p) < 7)) return true;
-    const p = pier(b, f, depth, kind);
+    if (
+      supports.some((p) =>
+        p.station !== undefined
+          ? Math.abs(p.station - f.s) < 7
+          : distanceXZ(p.position, f.p) < 7,
+      )
+    )
+      return true;
+    const p = pier(b, f, depth, kind, count, bearings);
     if (p) supports.push(p);
     return !!p;
   };
@@ -404,7 +487,8 @@ export function buildBridgeSpan(
     const neighbours = connected(project, id).filter((a) => a.id !== r.id);
     const atNode = Math.abs(f.t - (id === r.start ? 0 : 1)) < 1e-7,
       linkedBridge =
-        atNode && neighbours.some((a) => bridgeAt(a, a.start === id ? 0 : 1)),
+        bridgeAt(r, id === r.start ? 0 : 1) &&
+        neighbours.some((a) => bridgeAt(a, a.start === id ? 0 : 1)),
       fill =
         (!atNode && r.embankment) ||
         (atNode &&
@@ -414,83 +498,84 @@ export function buildBridgeSpan(
     if (!linkedBridge && fill) {
       const outward = mul(f.d, id === r.start ? -1 : 1),
         section = bridgeSection(f),
-        width = section.width,
-        height = f.p[1] - depth - 0.07,
-        backHeight = f.p[1] - 0.28;
+        height = f.p[1] - depth - bearingDimensions.totalHeight;
       if (height > 0.5) {
-        const center = add(
-          f.p,
-          add(mul(outward, 0.65), mul(f.n, section.bias)),
-        );
-        center[1] = height / 2;
-        b.box("structure", "concrete", center, width, height, 1.3, f.d);
-        const back = add(f.p, add(mul(outward, 1.22), mul(f.n, section.bias)));
-        back[1] = (height + backHeight) / 2;
-        b.box(
-          "structure",
-          "concrete",
-          back,
-          width,
-          backHeight - height,
-          0.25,
-          f.d,
-        );
-        b.box(
-          "structure",
-          "foundation",
-          [center[0], -0.2, center[2]],
-          width + 0.6,
-          0.4,
-          2.1,
-          f.d,
-        );
-        for (const side of [-1, 1]) {
-          const p = add(
-            f.p,
-            add(
-              mul(f.n, section.bias + side * (width / 2 - 0.12)),
-              mul(outward, 2.1),
-            ),
+        const parts = abutmentParts(f, depth, outward),
+          blocked = surfaces
+            ? parts.find(
+                (p) =>
+                  !surfaces.clear(
+                    {
+                      outline: supportOutline(
+                        p.center,
+                        f.n,
+                        f.d,
+                        p.width,
+                        p.length,
+                      ),
+                      minY: p.center[1] - p.height / 2,
+                      maxY: p.center[1] + p.height / 2,
+                    },
+                    r.id,
+                  ),
+              )
+            : !supportIsClear(f.p, r.id, alignments, 2.5, undefined, f, depth)
+              ? parts[0]
+              : undefined;
+        if (blocked)
+          excludedAbutments.push({
+            position: [...f.p],
+            station: f.s,
+            part: blocked.name,
+          });
+        else {
+          for (const p of parts)
+            b.box(
+              "structure",
+              p.material,
+              p.center,
+              p.width,
+              p.height,
+              p.length,
+              f.d,
+            );
+          bearings.push(
+            ...buildBearings(b, f, depth, girderOffsets(f, count), "abutment"),
           );
-          p[1] = backHeight / 2;
-          b.box("structure", "concrete", p, 0.24, backHeight, 3.4, f.d);
+          abutments.push({
+            position: [
+              f.p[0] + f.n[0] * section.bias,
+              0,
+              f.p[2] + f.n[2] * section.bias,
+            ],
+            width: section.width,
+            height,
+            thickness: 1.3,
+          });
         }
-        abutments.push({
-          position: [
-            f.p[0] + f.n[0] * section.bias,
-            0,
-            f.p[2] + f.n[2] * section.bias,
-          ],
-          width,
-          height,
-          thickness: 1.3,
-        });
       }
     } else if (!linkedBridge) support(f, "portal");
-    for (const offset of girderOffsets(f))
-      b.box(
-        "structure",
-        "steel",
-        add(f.p, add(mul(f.n, offset), [0, -depth + 0.06, 0])),
-        0.35,
-        0.06,
-        0.5,
-        f.d,
-      );
   }
   const bearingStations = [
       first,
-      ...supports.map((p) =>
-        parameterStation(
-          span.alignment,
-          closestOnAlignment(span.alignment, p.position).t,
-        ),
+      ...supports.map(
+        (p) =>
+          p.station ??
+          parameterStation(
+            span.alignment,
+            closestOnAlignment(span.alignment, p.position).t,
+          ),
       ),
       last,
     ].sort((a, b) => a - b),
     spanLengths = bearingStations
       .slice(1)
       .map((s, i) => s - bearingStations[i]);
+  const widths = frames.map((f) => bridgeSection(f).width),
+    spacings = frames.map((f) => {
+      const offsets = girderOffsets(f, count);
+      return offsets[1] - offsets[0];
+    });
   return {
     owner: r.id,
     ownerKind: "road",
@@ -500,6 +585,8 @@ export function buildBridgeSpan(
     girderCount: beamOffsets.length,
     girderSpacing: beamOffsets.length > 1 ? beamOffsets[1] - beamOffsets[0] : 0,
     width: bridgeSection(frames[0]).width,
+    widthRange: [Math.min(...widths), Math.max(...widths)],
+    girderSpacingRange: [Math.min(...spacings), Math.max(...spacings)],
     spanLengths,
     pierSpacing: r.pierSpacing,
     connections: [r.start, r.end],
@@ -507,6 +594,8 @@ export function buildBridgeSpan(
     end: [...frames.at(-1)!.p],
     supports,
     excludedSupports,
+    bearings,
+    excludedAbutments,
     abutments,
     physicalGeometry: true,
   };
@@ -521,6 +610,7 @@ export function buildBridgeJoint(
   bottom: V3[],
   alignments: Alignment[],
   surfaces?: SupportSurfaceIndex,
+  counts: ReadonlyMap<string, number> = new Map(),
 ): BridgeFeature | undefined {
   const elevated = arms.filter((a) => bridgeAt(a.road, a.isStart ? 0 : 1));
   if (!elevated.length || node.position[1] < 1.6) return;
@@ -550,7 +640,9 @@ export function buildBridgeJoint(
         auxSide: (a.frame.auxSide ?? 1) * sign,
       },
     ];
-    const count = Math.max(...frames.map((f) => girderOffsets(f).length));
+    const count =
+      counts.get(a.road.id) ??
+      Math.max(...frames.map((f) => girderOffsets(f).length));
     girderOffsets(frames[0], count).forEach((_, index) =>
       girder(
         b,
@@ -562,21 +654,66 @@ export function buildBridgeJoint(
     );
   }
   const supports: BridgeSupport[] = [],
-    excludedSupports: V3[] = [];
+    excludedSupports: V3[] = [],
+    bearings: BridgeBearing[] = [],
+    seatArm = [...elevated].sort(
+      (a, b) => bridgeSection(b.frame).width - bridgeSection(a.frame).width,
+    )[0],
+    seatFrame = { ...seatArm.frame, p: node.position },
+    seatCount = counts.get(seatArm.road.id) ?? girderOffsets(seatFrame).length;
   if (
-    supportIsClear(
-      node.position,
-      node.id,
-      alignments,
-      2.5,
-      surfaces,
-      { ...elevated[0].frame, p: node.position },
-      depth,
+    elevated.every((a) =>
+      supportIsClear(
+        node.position,
+        node.id,
+        alignments,
+        2.5,
+        surfaces,
+        { ...a.frame, p: node.position },
+        depth,
+      ),
     )
   ) {
-    const a = elevated[0],
-      p = pier(b, { ...a.frame, p: node.position }, depth, "pier");
-    if (p) supports.push(p);
+    const p = pier(b, seatFrame, depth, "pier", seatCount, bearings);
+    if (p) {
+      supports.push(p);
+      bearings.forEach((b) => (b.members = [seatArm.road.id]));
+      for (const arm of elevated) {
+        if (arm === seatArm) continue;
+        const f = { ...arm.frame, p: node.position },
+          section = bridgeSection(f),
+          center = add(f.p, mul(f.n, section.bias));
+        center[1] = p.top - 0.43;
+        const delta = sub(center, p.position),
+          sameCap =
+            Math.abs(Math.abs(dotXZ(f.d, seatFrame.d)) - 1) < 1e-8 &&
+            Math.abs(dotXZ(delta, seatFrame.n)) +
+              Math.max(2.1, section.width - 1.2) / 2 <=
+              Math.max(2.1, bridgeSection(seatFrame).width - 1.2) / 2 + 1e-8 &&
+            Math.abs(dotXZ(delta, seatFrame.d)) < 1e-8;
+        if (!sameCap)
+          b.box(
+            "structure",
+            "concrete",
+            center,
+            Math.max(2.1, section.width - 1.2),
+            0.86,
+            1.7,
+            f.d,
+          );
+        bearings.push(
+          ...buildBearings(
+            b,
+            f,
+            depth,
+            girderOffsets(f, counts.get(arm.road.id)),
+            "pier",
+            bearings,
+            arm.road.id,
+          ),
+        );
+      }
+    }
   } else excludedSupports.push([...node.position]);
   return {
     owner: node.id,
@@ -591,11 +728,14 @@ export function buildBridgeJoint(
       material: a.road.structure,
       mouthDepth: a.road.bridgeDepth,
       jointDepth: depth,
+      girderCount: counts.get(a.road.id) ?? girderOffsets(a.frame).length,
     })),
     start: [...node.position],
     end: [...node.position],
     supports,
     excludedSupports,
+    bearings,
+    excludedAbutments: [],
     physicalGeometry: true,
   };
 }

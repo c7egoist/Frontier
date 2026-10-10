@@ -26,6 +26,9 @@ for (const id of ["diamond", "cloverleaf", "trumpet"]) {
       planLength: Math.hypot(b.end[0] - b.start[0], b.end[2] - b.start[2]),
       girderCount: b.girderCount,
       girderSpacing: b.girderSpacing,
+      girderSpacingRange: b.girderSpacingRange,
+      widthRange: b.widthRange,
+      bearingAssemblies: b.bearings?.length ?? 0,
       supportedLengths: b.spanLengths,
       depth: b.depth,
       abutments: b.abutments.length,
@@ -47,6 +50,12 @@ for (const id of ["diamond", "cloverleaf", "trumpet"]) {
       kind: a.kind,
       fullWidthLength: a.fullWidthLength,
       taperLength: a.taperLength,
+      meshedFullWidthLength: a.meshedFullWidthLength,
+      meshedTaperLength: a.meshedTaperLength,
+      junctionContinuation: a.junctionContinuation.reduce(
+        (s, c) => s + c.length,
+        0,
+      ),
     })),
   };
   // Draw original dimensioned schematics from the ACTUAL generated road edges

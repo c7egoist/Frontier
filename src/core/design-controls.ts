@@ -1,3 +1,4 @@
+import { auxiliaryWidthAt } from "./road-sections";
 import { parameterStation } from "./bridge-profile";
 /** Published geometric references inform these editable game-asset defaults.
  * They are not a site-specific civil, structural, traffic-capacity or safety approval.
@@ -49,6 +50,19 @@ export interface WeaveMeasure {
   mergeNose: V3;
   divergeNose: V3;
 }
+export interface StructureIssue {
+  owner: string;
+  kind: "abutment" | "approach-fill";
+  position: V3;
+  message: string;
+}
+export interface JunctionLaneMeasure {
+  owner: string;
+  incoming: number;
+  outgoing: number;
+  auxiliaryApproaches: number;
+  balanced: boolean;
+}
 export interface DesignReview {
   units: "metres";
   basis: "Reference-scaled game geometry, not civil certification";
@@ -59,6 +73,8 @@ export interface DesignReview {
   clearanceTarget: number;
   withinSelectedTargets: boolean;
   weaves: WeaveMeasure[];
+  structureIssues: StructureIssue[];
+  junctionLanes: JunctionLaneMeasure[];
   extent: [number, number];
   limitations: string[];
 }
@@ -197,11 +213,45 @@ export function measureWeaves(
   }
   return out;
 }
+export function measureJunctionLanes(project: Project): JunctionLaneMeasure[] {
+  return project.nodes.flatMap((n) => {
+    const roads = connected(project, n.id);
+    if (
+      roads.length < 3 ||
+      !roads.every((r) => r.oneWay && r.markingStyle === "motorway")
+    )
+      return [];
+    let incoming = 0,
+      outgoing = 0,
+      auxiliaryApproaches = 0;
+    for (const r of roads) {
+      const length = sampleAlignment(project, r).length,
+        auxiliary =
+          auxiliaryWidthAt(r, r.start === n.id ? 0 : length, length) >=
+          r.laneWidth - 1e-6
+            ? 1
+            : 0;
+      auxiliaryApproaches += auxiliary;
+      if (r.end === n.id) incoming += r.lanes + auxiliary;
+      else outgoing += r.lanes + auxiliary;
+    }
+    return [
+      {
+        owner: n.id,
+        incoming,
+        outgoing,
+        auxiliaryApproaches,
+        balanced: incoming === outgoing,
+      },
+    ];
+  });
+}
 export function reviewDesign(
   project: Project,
   clearances: { meters: number }[],
   bridges?: { spanLengths?: number[]; kind: "span" | "joint" }[],
   splitters: { owner: string; pavingNose: V3 }[] = [],
+  structureIssues: StructureIssue[] = [],
 ): DesignReview {
   const xs = project.nodes.map((n) => n.position[0]),
     zs = project.nodes.map((n) => n.position[2]);
@@ -214,7 +264,10 @@ export function reviewDesign(
     sources: designSources,
     roads,
     clearanceTarget: referenceLayout.clearance,
+    structureIssues,
+    junctionLanes: measureJunctionLanes(project),
     withinSelectedTargets:
+      structureIssues.length === 0 &&
       roads.every((r) => r.meetsReference) &&
       clearances.every((c) => c.meters >= referenceLayout.clearance),
     weaves: measureWeaves(project, splitters),

@@ -66,10 +66,19 @@
           "planLength": 48,
           "girderCount": 5,
           "girderSpacing": 2.325,
+          "girderSpacingRange": [
+            2.325,
+            2.325
+          ],
+          "widthRange": [
+            11.3,
+            11.3
+          ],
+          "bearingAssemblies": 20,
           "supportedLengths": [
-            10.00012859171903,
-            27.99974281656195,
-            10.000128591719019
+            10,
+            28,
+            10
           ],
           "depth": 1.6,
           "abutments": 2
@@ -78,10 +87,19 @@
           "planLength": 48,
           "girderCount": 5,
           "girderSpacing": 2.325,
+          "girderSpacingRange": [
+            2.325,
+            2.325
+          ],
+          "widthRange": [
+            11.3,
+            11.3
+          ],
+          "bearingAssemblies": 20,
           "supportedLengths": [
-            10.00012859171903,
-            27.99974281656195,
-            10.000128591719019
+            10,
+            28,
+            10
           ],
           "depth": 1.6,
           "abutments": 2
@@ -95,22 +113,34 @@
         {
           "kind": "exit",
           "fullWidthLength": 150,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 9.199999999999989,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "entry",
           "fullWidthLength": 200,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 59.19999999999999,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "exit",
           "fullWidthLength": 150,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 9.199999999999989,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "entry",
           "fullWidthLength": 200,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 59.19999999999999,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         }
       ]
     },
@@ -126,11 +156,20 @@
           "planLength": 96,
           "girderCount": 5,
           "girderSpacing": 2.325,
+          "girderSpacingRange": [
+            2.325,
+            2.325
+          ],
+          "widthRange": [
+            11.3,
+            11.3
+          ],
+          "bearingAssemblies": 25,
           "supportedLengths": [
-            23.999742816561948,
-            23.999999999999993,
-            24.000514366876097,
-            23.999742816561962
+            24,
+            24,
+            24,
+            24
           ],
           "depth": 1.6,
           "abutments": 2
@@ -139,11 +178,20 @@
           "planLength": 96,
           "girderCount": 5,
           "girderSpacing": 2.325,
+          "girderSpacingRange": [
+            2.325,
+            2.325
+          ],
+          "widthRange": [
+            11.3,
+            11.3
+          ],
+          "bearingAssemblies": 25,
           "supportedLengths": [
-            23.999742816561948,
-            23.999999999999993,
-            24.000514366876097,
-            23.999742816561962
+            24,
+            24,
+            24,
+            24
           ],
           "depth": 1.6,
           "abutments": 2
@@ -152,11 +200,20 @@
           "planLength": 96,
           "girderCount": 4,
           "girderSpacing": 2.766666666666667,
+          "girderSpacingRange": [
+            2.766666666666667,
+            2.766666666666667
+          ],
+          "widthRange": [
+            10.3,
+            10.3
+          ],
+          "bearingAssemblies": 20,
           "supportedLengths": [
-            23.999742816561948,
-            23.999999999999993,
-            24.000514366876097,
-            23.999742816561962
+            24,
+            24,
+            24,
+            24
           ],
           "depth": 1.6,
           "abutments": 2
@@ -165,11 +222,20 @@
           "planLength": 96,
           "girderCount": 4,
           "girderSpacing": 2.766666666666667,
+          "girderSpacingRange": [
+            2.766666666666667,
+            2.766666666666667
+          ],
+          "widthRange": [
+            10.3,
+            10.3
+          ],
+          "bearingAssemblies": 20,
           "supportedLengths": [
-            23.999742816561948,
-            23.999999999999993,
-            24.000514366876097,
-            23.999742816561962
+            24,
+            24,
+            24,
+            24
           ],
           "depth": 1.6,
           "abutments": 2
@@ -200,42 +266,66 @@
         {
           "kind": "exit",
           "fullWidthLength": 150,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 9.199999999999989,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "entry",
           "fullWidthLength": 200,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 59.19999999999999,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "exit",
           "fullWidthLength": 150,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 9.199999999999989,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "entry",
           "fullWidthLength": 200,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 59.19999999999999,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "exit",
           "fullWidthLength": 150,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 9.199999999999989,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "entry",
           "fullWidthLength": 200,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 59.19999999999999,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "exit",
           "fullWidthLength": 150,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 9.199999999999989,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "entry",
           "fullWidthLength": 200,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 59.19999999999999,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         }
       ]
     },
@@ -251,10 +341,19 @@
           "planLength": 84,
           "girderCount": 3,
           "girderSpacing": 2.325,
+          "girderSpacingRange": [
+            2.325,
+            2.325
+          ],
+          "widthRange": [
+            6.65,
+            6.65
+          ],
+          "bearingAssemblies": 12,
           "supportedLengths": [
-            14.000225035508295,
-            41.999999999999986,
-            27.99977496449172
+            14,
+            42,
+            28
           ],
           "depth": 1.6,
           "abutments": 2
@@ -263,10 +362,19 @@
           "planLength": 84,
           "girderCount": 3,
           "girderSpacing": 2.325,
+          "girderSpacingRange": [
+            2.325,
+            2.325
+          ],
+          "widthRange": [
+            6.65,
+            6.65
+          ],
+          "bearingAssemblies": 12,
           "supportedLengths": [
-            28.000225035508283,
+            28,
             42,
-            13.99977496449172
+            14
           ],
           "depth": 1.6,
           "abutments": 2
@@ -280,22 +388,34 @@
         {
           "kind": "exit",
           "fullWidthLength": 150,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 9.199999999999989,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "entry",
           "fullWidthLength": 200,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 59.19999999999999,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         },
         {
           "kind": "exit",
           "fullWidthLength": 150,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 43.1602951072756,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 106.8397048927244
         },
         {
           "kind": "entry",
           "fullWidthLength": 200,
-          "taperLength": 90
+          "taperLength": 90,
+          "meshedFullWidthLength": 59.19999999999999,
+          "meshedTaperLength": 90,
+          "junctionContinuation": 140.8
         }
       ]
     }

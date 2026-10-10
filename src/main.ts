@@ -315,7 +315,32 @@ function rebuild(inspector = true, context = false) {
   if (currentRoad) {
     const m = measureRoadDesign(project, currentRoad),
       bridge = network.bridges.find((b) => b.owner === currentRoad.id),
+      auxiliary = network.auxiliaryLanes.find(
+        (a) => a.owner === currentRoad.id,
+      ),
+      structuralIssue = network.designReview.structureIssues.find(
+        (i) => i.owner === currentRoad.id,
+      ),
       values: Record<string, string> = {
+        "Meshed full-width run": auxiliary
+          ? `${fmt(auxiliary.meshedFullWidthLength, 1)} m`
+          : "—",
+        "Meshed taper": auxiliary
+          ? `${fmt(auxiliary.meshedTaperLength, 1)} m`
+          : "—",
+        "Junction continuation": auxiliary
+          ? `${fmt(
+              auxiliary.junctionContinuation.reduce(
+                (sum, c) => sum + c.length,
+                0,
+              ),
+              1,
+            )} m`
+          : "—",
+        "Bearing assemblies": String(bridge?.bearings?.length ?? 0),
+        "Support condition": structuralIssue
+          ? "Review structural bounds"
+          : "Clear geometric seats",
         "Minimum alignment radius":
           m.minimumRadius === null
             ? "Straight"
@@ -332,9 +357,7 @@ function rebuild(inspector = true, context = false) {
         )
           ? `${fmt(network.designReview.weaves.find((w) => w.owners.includes(currentRoad.id))!.noseSpacing, 1)} m`
           : "—",
-        "Girder layout": bridge
-          ? `${bridge.girderCount} girders · ${fmt(bridge.girderSpacing ?? 0, 2)} m c/c`
-          : "—",
+        "Girder layout": bridge ? girderDescription(bridge) : "—",
       };
     document
       .querySelectorAll<HTMLOutputElement>("[data-design-metric]")
@@ -345,6 +368,7 @@ function rebuild(inspector = true, context = false) {
         currentRoad.roadClass === "street"
           ? "Choose a design role"
           : m.meetsReference &&
+              !structuralIssue &&
               network.clearances
                 .filter((c) => c.a === currentRoad.id || c.b === currentRoad.id)
                 .every((c) => c.meters >= referenceLayout.clearance)
@@ -1035,15 +1059,28 @@ function beginPlace(kind: SiteKind) {
     `Click in plan to place a ${siteCatalog.find((s) => s.id === kind)!.name.toLowerCase()}.`,
   );
 }
+function girderDescription(bridge: Network["bridges"][number]) {
+  const range = bridge.girderSpacingRange,
+    spacing =
+      range && range[1] - range[0] > 0.005
+        ? `${fmt(range[0], 2)}–${fmt(range[1], 2)}`
+        : fmt(bridge.girderSpacing ?? 0, 2);
+  return `${bridge.girderCount} girders · ${spacing} m c/c`;
+}
 function referenceControls(road: Road) {
   const m = measureRoadDesign(project, road),
     bridge = network.bridges.find((b) => b.owner === road.id),
     weave = network.designReview.weaves.find((w) => w.owners.includes(road.id)),
+    auxiliary = network.auxiliaryLanes.find((a) => a.owner === road.id),
+    structureIssue = network.designReview.structureIssues.find(
+      (i) => i.owner === road.id,
+    ),
     clearance = network.clearances.filter(
       (c) => c.a === road.id || c.b === road.id,
     ),
     meets =
       m.meetsReference &&
+      !structureIssue &&
       clearance.every((c) => c.meters >= referenceLayout.clearance),
     display = (key: string, value: string) =>
       `<div class="number-control"><span>${key}</span><output class="detail-value" data-design-metric="${key}">${value}</output></div>`;
@@ -1071,14 +1108,36 @@ function referenceControls(road: Road) {
               1,
             )} m`,
           ) +
+          display("Girder layout", girderDescription(bridge)) +
+          display("Bearing assemblies", String(bridge.bearings?.length ?? 0)) +
           display(
-            "Girder layout",
-            `${bridge.girderCount} girders · ${fmt(bridge.girderSpacing ?? 0, 2)} m c/c`,
+            "Support condition",
+            structureIssue
+              ? "Review structural bounds"
+              : "Clear geometric seats",
           )
         : "") +
       `<p class="card-note"><span>Targets: radius ${m.radiusTarget} m or more, grade ${m.gradeTarget}% or less; over-road clearance at least ${referenceLayout.clearance} m. These checks measure the cubic, not its sparse preview mesh. They do not certify sight distance, traffic capacity, superelevation or structural loads.</span></p><div class="solver-row"><span>Selected targets</span><span class="solver-badge" data-design-status>${icon(meets ? "check" : "triangle-alert")}${road.roadClass === "street" ? "Choose a design role" : meets ? "Within geometric targets" : "Review geometry"}</span></div>` +
       (weave
         ? display("Nose-to-nose weave", `${fmt(weave.noseSpacing, 1)} m`)
+        : "") +
+      (auxiliary
+        ? display(
+            "Meshed full-width run",
+            `${fmt(auxiliary.meshedFullWidthLength, 1)} m`,
+          ) +
+          display("Meshed taper", `${fmt(auxiliary.meshedTaperLength, 1)} m`) +
+          display(
+            "Junction continuation",
+            `${fmt(
+              auxiliary.junctionContinuation.reduce(
+                (sum, c) => sum + c.length,
+                0,
+              ),
+              1,
+            )} m`,
+          ) +
+          `<p class="card-note"><span>Configured lengths include the junction allocation. These meshed lengths describe only this alignment outside its trimmed junction mouths; they are not weaving capacity or a whole-interchange measurement.</span></p>`
         : "") +
       (supportsAuxiliary(road)
         ? choice("auxiliaryLane", "Speed-change lane", road.auxiliaryLane, [
@@ -1258,6 +1317,17 @@ function renderInspector() {
       `<div class="section-heading"><span>${node ? "CONNECTED ROAD PROFILE" : "CARRIAGEWAY"}</span><small>${node ? roads.length + " approaches" : "Live cross-section"}</small></div>` +
       profile(road);
     body += mobilityControls(road);
+    if (node) {
+      const lanes = network.designReview.junctionLanes.find(
+        (j) => j.owner === node.id,
+      );
+      if (lanes)
+        body += card(
+          "Motorway lane connections",
+          "split",
+          `<div class="number-control"><span>Incoming motor lanes</span><output data-junction-lanes="incoming">${lanes.incoming}</output></div><div class="number-control"><span>Outgoing motor lanes</span><output data-junction-lanes="outgoing">${lanes.outgoing}</output></div><p class="card-note"><span>Includes ${lanes.auxiliaryApproaches} full auxiliary approach${lanes.auxiliaryApproaches === 1 ? "" : "es"}. ${lanes.balanced ? "Lane counts balance across this joint." : "This joint adds or drops lanes; review the intended merge."} Counts and paint continuity are geometric checks, not traffic-capacity certification.</span></p>`,
+        );
+    }
     if (
       !node &&
       (road.roadClass !== "street" ||

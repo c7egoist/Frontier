@@ -1,3 +1,4 @@
+import { buildNetwork } from "./geometry";
 import { referenceLayout } from "./design-basis";
 import { bridgeAt } from "./bridge-profile";
 import {
@@ -129,6 +130,14 @@ export function insertConnectedBridge(
       );
   }
   validateGenerationBudget(draft);
+  const generated = buildNetwork(draft),
+    issue = generated.designReview.structureIssues.find((i) =>
+      edited.has(i.owner),
+    );
+  if (issue)
+    throw new RangeError(
+      `${issue.message} Choose a clear landing or a longer structural span.`,
+    );
   project.nodes = draft.nodes;
   project.roads = draft.roads;
   return {

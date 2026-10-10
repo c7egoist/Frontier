@@ -13,7 +13,11 @@ import {
   type EmbankmentFeature,
 } from "./embankments";
 import { bridgeAt, parameterStation } from "./bridge-profile";
-import { reviewDesign, type DesignReview } from "./design-controls";
+import {
+  reviewDesign,
+  type DesignReview,
+  type StructureIssue,
+} from "./design-controls";
 import { SupportSurfaceIndex } from "./support-surfaces";
 import type { SplitterFeature } from "./splitters";
 import {
@@ -29,6 +33,7 @@ import {
   buildBridgeSpan,
   buildBridgeJoint,
   bridgeDepthAt,
+  girderOffsets,
   type BridgeFeature,
 } from "./bridges";
 import { buildBarrierPath, type BarrierFeature } from "./barriers";
@@ -78,6 +83,7 @@ import {
 } from "./road-details";
 import earcut from "earcut";
 import {
+  cubic,
   add,
   sub,
   mul,
@@ -1220,7 +1226,6 @@ function buildSpan(span: RoadSpan, project: Project) {
           [top[i][0], f.p[1] - (f.roadBaseDepth ?? 0.48), top[i][2]],
         ]);
     }
-  const embankments = buildApproachFill(b, span);
   const mobility = buildRoadMobility(b, span);
   buildMarkings(b, span, project);
   const auxiliaryLane = buildAuxiliaryLane(b, span);
@@ -1237,7 +1242,6 @@ function buildSpan(span: RoadSpan, project: Project) {
     services,
     streetDetails,
     roadsideParking,
-    embankments,
     auxiliaryLane,
     footways: footwayResult.features,
     plantings: footwayResult.plantings,
@@ -1490,13 +1494,9 @@ function buildJunction(
     add(node.position, [0, -baseDepth, 0]),
     false,
   );
-  const embankment = buildRetainedJoint(
-    b,
-    node.id,
-    bottom,
+  const retained =
     arms.some((a) => a.road.embankment) &&
-      !arms.some((a) => bridgeAt(a.road, a.isStart ? 0 : 1)),
-  );
+    !arms.some((a) => bridgeAt(a.road, a.isStart ? 0 : 1));
   const type = arms.some(
     (a, i) =>
       (arms[(i + 1) % arms.length].angle - a.angle + Math.PI * 2) %
@@ -1531,7 +1531,7 @@ function buildJunction(
     mobility,
     splitters,
     bottom,
-    embankment,
+    retained,
   };
 }
 /** Short mouths cannot contain an arbitrarily wide inward offset. Fit the
@@ -1629,6 +1629,17 @@ export function buildNetwork(
       needsJoint(project, n, alignments),
     ),
     jointIDs = new Set(jointNodes.map((n) => n.id));
+  const blockedFill = new Set<string>(),
+    structureIssues: StructureIssue[] = [];
+  const structureIssue = (
+    owner: string,
+    kind: StructureIssue["kind"],
+    position: V3,
+    message: string,
+  ) => {
+    structureIssues.push({ owner, kind, position: [...position], message });
+    diagnostics.push({ owner, level: "error", message });
+  };
   const backs = new Map(
     jointNodes.map((n) => [n.id, trimDistance(project, n, alignments)]),
   );
@@ -1646,7 +1657,12 @@ export function buildNetwork(
     embankments: EmbankmentFeature[] = [],
     auxiliaryLanes: AuxiliaryLaneFeature[] = [],
     splitters: SplitterFeature[] = [],
-    bridgeJoints: { node: RoadNode; arms: Arm[]; bottom: V3[] }[] = [];
+    bridgeJoints: {
+      node: RoadNode;
+      arms: Arm[];
+      bottom: V3[];
+      retained: boolean;
+    }[] = [];
   let length = 0,
     inlets = 0,
     maxGrade = 0;
@@ -1803,7 +1819,7 @@ export function buildNetwork(
     mobility.push(...result.mobility);
     streetDetails.push(...result.streetDetails);
     roadsideParking.push(...result.roadsideParking);
-    embankments.push(...result.embankments);
+
     if (result.auxiliaryLane) auxiliaryLanes.push(result.auxiliaryLane);
   }
   for (const node of jointNodes) {
@@ -1814,11 +1830,12 @@ export function buildNetwork(
       detail,
     );
     junctions.push(result.junction);
-    if (result.embankment) embankments.push(result.embankment);
+
     bridgeJoints.push({
       node,
       arms: result.junction.arms,
       bottom: result.bottom,
+      retained: result.retained,
     });
     mobility.push(...result.mobility);
     splitters.push(...result.splitters);
@@ -1901,7 +1918,10 @@ export function buildNetwork(
             3,
             ...s.frames.map(
               (f) =>
-                Math.max(sideHalfWidth(f, -1), sideHalfWidth(f, 1)) * 0.8 + 2,
+                Math.max(sideHalfWidth(f, -1), sideHalfWidth(f, 1)) +
+                f.cw +
+                f.sw +
+                1.5,
             ),
           );
         return {
@@ -1909,10 +1929,7 @@ export function buildNetwork(
           maxX: Math.max(...x) + margin,
           minZ: Math.min(...z) - margin,
           maxZ: Math.max(...z) + margin,
-          maxY:
-            Math.max(...s.frames.map((f) => f.p[1])) -
-            s.road.bridgeDepth +
-            0.02,
+          maxY: Math.max(...s.frames.map((f) => f.p[1])) - 0.28 + 0.02,
         };
       });
     for (const j of bridgeJoints.filter((j) =>
@@ -1922,9 +1939,10 @@ export function buildNetwork(
         3,
         ...j.arms.map(
           (a) =>
-            Math.max(sideHalfWidth(a.frame, -1), sideHalfWidth(a.frame, 1)) *
-              0.8 +
-            2,
+            Math.max(sideHalfWidth(a.frame, -1), sideHalfWidth(a.frame, 1)) +
+            a.frame.cw +
+            a.frame.sw +
+            1.5,
         ),
       );
       regions.push({
@@ -1944,6 +1962,72 @@ export function buildNetwork(
     }
     const surfaces = new SupportSurfaceIndex(meshes, regions),
       allAlignments = [...alignments.values()];
+    const layoutCounts = new Map<string, number>();
+    for (const span of spans.filter((s) => s.road.bridge)) {
+      const a = Math.max(
+          span.frames[0].s,
+          parameterStation(span.alignment, span.road.bridgeFrom),
+        ),
+        z = Math.min(
+          span.frames.at(-1)!.s,
+          parameterStation(span.alignment, span.road.bridgeTo),
+        ),
+        fs = [
+          frameAt(span, a),
+          ...span.frames.filter((f) => f.s > a && f.s < z),
+          frameAt(span, z),
+        ];
+      layoutCounts.set(
+        span.road.id,
+        Math.max(...fs.map((f) => girderOffsets(f).length)),
+      );
+    }
+    // Equal-width, near-straight connected decks share one girder pattern.
+    // A taper upstream must not end six lines against a neighbour's five.
+    const incidentByNode = new Map<string, RoadSpan[]>(),
+      parent = new Map([...layoutCounts.keys()].map((id) => [id, id]));
+    for (const span of spans)
+      for (const id of [span.road.start, span.road.end]) {
+        const list = incidentByNode.get(id) ?? [];
+        list.push(span);
+        incidentByNode.set(id, list);
+      }
+    const root = (id: string): string => {
+      const p = parent.get(id)!;
+      if (p !== id) parent.set(id, root(p));
+      return parent.get(id)!;
+    };
+    for (const node of project.nodes) {
+      const incident = incidentByNode.get(node.id) ?? [];
+      if (
+        incident.length !== 2 ||
+        !incident.every((s) =>
+          bridgeAt(s.road, s.road.start === node.id ? 0 : 1),
+        )
+      )
+        continue;
+      const [a, z] = incident.map((s) =>
+          s.road.start === node.id ? s.frames[0] : s.frames.at(-1)!,
+        ),
+        dirs = incident.map((s, i) =>
+          mul(i === 0 ? a.d : z.d, s.road.start === node.id ? 1 : -1),
+        ),
+        w = (f: Frame) =>
+          sideHalfWidth(f, 1) + sideHalfWidth(f, -1) + 2 * (f.sw + f.cw);
+      if (
+        Math.abs(w(a) - w(z)) > 0.02 ||
+        dotXZ(dirs[0], dirs[1]) > -Math.cos(Math.PI / 15)
+      )
+        continue;
+      parent.set(root(incident[1].road.id), root(incident[0].road.id));
+    }
+    const componentCount = new Map<string, number>();
+    for (const [id, count] of layoutCounts) {
+      const key = root(id);
+      componentCount.set(key, Math.max(componentCount.get(key) ?? 0, count));
+    }
+    for (const id of layoutCounts.keys())
+      layoutCounts.set(id, componentCount.get(root(id))!);
     for (const span of spans.filter((s) => s.road.bridge)) {
       const builder = new MeshBuilder(span.road.id, "road"),
         bridge = buildBridgeSpan(
@@ -1952,10 +2036,41 @@ export function buildNetwork(
           project,
           allAlignments,
           surfaces,
+          layoutCounts.get(span.road.id),
         );
       meshes.push(...builder.output());
-      if (bridge) bridges.push(bridge);
+      if (bridge) {
+        bridges.push(bridge);
+        for (const excluded of bridge.excludedAbutments ?? []) {
+          blockedFill.add(span.road.id);
+          if (
+            Math.abs(excluded.station - span.frames[0].s) < 1e-6 &&
+            bridgeAt(span.road, 0)
+          )
+            connected(project, span.road.start)
+              .filter((r) => r.embankment)
+              .forEach((r) => blockedFill.add(r.id));
+          if (
+            Math.abs(excluded.station - span.frames.at(-1)!.s) < 1e-6 &&
+            bridgeAt(span.road, 1)
+          )
+            connected(project, span.road.end)
+              .filter((r) => r.embankment)
+              .forEach((r) => blockedFill.add(r.id));
+          structureIssue(
+            span.road.id,
+            "abutment",
+            excluded.position,
+            `${span.road.name}: ${excluded.part} overlaps a lower road, footway or paved site. Abutment and associated approach fill withheld; move the structural bounds.`,
+          );
+        }
+      }
     }
+    const girderCounts = new Map(
+      bridges
+        .filter((b) => b.kind === "span")
+        .map((b) => [b.owner, b.girderCount!]),
+    );
     for (const { node, arms, bottom } of bridgeJoints) {
       const builder = new MeshBuilder(node.id, "node"),
         bridge = buildBridgeJoint(
@@ -1965,6 +2080,7 @@ export function buildNetwork(
           bottom,
           allAlignments,
           surfaces,
+          girderCounts,
         );
       meshes.push(...builder.output());
       if (bridge) bridges.push(bridge);
@@ -2016,12 +2132,43 @@ export function buildNetwork(
           0.04 + (roadHalfWidth(lower) * lower.crossfall) / 100,
         );
     clearances.push({ a: crossing.a, b: crossing.b, meters });
+    if (
+      upper.embankment &&
+      !bridgeAt(upper, ay > by ? crossing.ta : crossing.tb)
+    ) {
+      blockedFill.add(upper.id);
+      const point = cubic(
+        ay > by ? a.points : b.points,
+        ay > by ? crossing.ta : crossing.tb,
+      );
+      structureIssue(
+        upper.id,
+        "approach-fill",
+        point,
+        `${upper.name}: earth-supported approach crosses a lower road outside its structural interval. Fill withheld; extend the bridge or change the crossing alignment.`,
+      );
+    }
     if (meters < 4.5)
       diagnostics.push({
         level: "warning",
         message: `Low overpass clearance: ${meters.toFixed(2)} m. Raise the deck to provide at least 4.5 m.`,
         owner: upper.id,
       });
+  }
+  // Add approach earthwork only after crossing/abutment checks. A failed
+  // geometric edit must not create a wall or soil mass across lower traffic.
+  for (const span of spans) {
+    if (!span.road.embankment || blockedFill.has(span.road.id)) continue;
+    const b = new MeshBuilder(span.road.id, "road");
+    embankments.push(...buildApproachFill(b, span));
+    meshes.push(...b.output());
+  }
+  for (const { node, arms, bottom, retained } of bridgeJoints) {
+    if (!retained || arms.some((a) => blockedFill.has(a.road.id))) continue;
+    const b = new MeshBuilder(node.id, "node"),
+      fill = buildRetainedJoint(b, node.id, bottom, true);
+    if (fill) embankments.push(fill);
+    meshes.push(...b.output());
   }
   const min: V3 = [Infinity, Infinity, Infinity],
     max: V3 = [-Infinity, -Infinity, -Infinity];
@@ -2036,7 +2183,13 @@ export function buildNetwork(
     max.fill(30);
   }
   return {
-    designReview: reviewDesign(project, clearances, bridges, splitters),
+    designReview: reviewDesign(
+      project,
+      clearances,
+      bridges,
+      splitters,
+      structureIssues,
+    ),
     embankments,
     auxiliaryLanes,
     detail,

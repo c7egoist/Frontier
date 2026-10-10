@@ -88,7 +88,10 @@ export function exportOBJ(
       );
       normalBase++;
     }
-    lines.push(...faces);
+    // A production girder/rail group can exceed a browser's argument limit.
+    // Appending one line at a time avoids an otherwise valid OBJ failing with
+    // "Maximum call stack size exceeded" on a large mesh.
+    for (const face of faces) lines.push(face);
     vertexBase += mesh.positions.length / 3;
   }
   const mtl = [
