@@ -1,7 +1,7 @@
 From ea9be5e60ec2caf0b4f574d4682e20bc82c7f7ec Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 16:23:26 +0000
-Subject: [PATCH 06/12] Vehicle spike dump: log per-wheel forces of the step
+Subject: [PATCH 06/13] Vehicle spike dump: log per-wheel forces of the step
  that preceded a chassis velocity jump
 
 ---

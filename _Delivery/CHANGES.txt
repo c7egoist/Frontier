@@ -62,6 +62,7 @@ D	Projects/Project-Drive/Source/SurfelReference.cpp
 M	Projects/Project-Zero/Host/MaterialLevelViewport.cpp
 M	Projects/Project-Zero/Makefile
 A	Projects/Project-Zero/Source/PathCompareMain.cpp
+A	Projects/Project-Zero/Source/SdfGiPipelineMain.cpp
 M	Tools/Build/BuildSolidArcApplication.py
 M	Tools/Build/PackageWindowsProjects.py
 M	Tools/Build/ToolchainSequence.ps1

@@ -5,8 +5,10 @@ CXX      := g++
 CXXFLAGS := -std=c++20 -O2 -Wall -Wextra -I../../ExternalPackages/vulkan-headers/include
 TARGET   := bin/Project-Zero-CpuReference
 PATHTOOL := bin/Project-Zero-PathCompare
+GITOOL   := bin/Project-Zero-SdfGiPipeline
 OBJDIR   := build/cpu
 PATHOBJ  := build/path
+GIOBJ    := build/gi
 
 SRCS := \
 	Source/CpuReferenceMain.cpp \
@@ -26,16 +28,36 @@ PATHSRCS := \
 	../../Engine/GeometricRaster/DistanceFieldStructure.cpp \
 	../../Engine/DeviceExchange/OrientationClassifier.cpp
 
+# SdfGiPipeline is the faithful CPU mirror of the four-pass Distance Field GI pipeline
+# (capture -> radiance -> gather -> resolve). It is the one that shows the field is dynamic.
+GISRCS := \
+	Source/SdfGiPipelineMain.cpp \
+	../../Engine/GeometricRaster/DistanceAtlasSpace.cpp \
+	../../Engine/DeviceExchange/OrientationClassifier.cpp
+
 OBJS := $(addprefix $(OBJDIR)/,$(notdir $(SRCS:.cpp=.o)))
 PATHOBJS := $(addprefix $(PATHOBJ)/,$(notdir $(PATHSRCS:.cpp=.o)))
+GIOBJS := $(addprefix $(GIOBJ)/,$(notdir $(GISRCS:.cpp=.o)))
 
 vpath %.cpp Source ../../Engine/GeometricRaster ../../Engine/DeviceExchange
 
-.PHONY: all clean run paths
+.PHONY: all clean run paths sdfgi
 
-all: $(TARGET) $(PATHTOOL)
+all: $(TARGET) $(PATHTOOL) $(GITOOL)
 
 paths: $(PATHTOOL)
+
+sdfgi: $(GITOOL)
+
+$(GITOOL): $(GIOBJS)
+	@mkdir -p bin
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lpthread
+
+$(GIOBJ)/%.o: %.cpp | $(GIOBJ)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(GIOBJ):
+	@mkdir -p $(GIOBJ)
 
 $(PATHTOOL): $(PATHOBJS)
 	@mkdir -p bin
@@ -61,4 +83,4 @@ run: $(TARGET)
 	./$(TARGET)
 
 clean:
-	rm -rf $(OBJDIR) $(TARGET) $(PATHOBJ) $(PATHTOOL)
+	rm -rf $(OBJDIR) $(TARGET) $(PATHOBJ) $(PATHTOOL) $(GIOBJ) $(GITOOL)

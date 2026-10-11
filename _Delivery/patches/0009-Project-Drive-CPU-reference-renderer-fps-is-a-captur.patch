@@ -1,7 +1,7 @@
 From 45372159ca77d978260c77ac381aeaf9c8b9e909 Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 17:32:28 +0000
-Subject: [PATCH 09/12] Project-Drive CPU reference renderer: --fps is a
+Subject: [PATCH 09/13] Project-Drive CPU reference renderer: --fps is a
  capture RATE, not a step stride
 
 --fps now means captured poses per simulated second (stride = 240 / fps), so

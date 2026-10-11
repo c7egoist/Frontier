@@ -1,7 +1,7 @@
 From 58ce831a0c4a218dab9ab4c65e0bf5319d7a768e Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 16:15:34 +0000
-Subject: [PATCH 02/12] SDF: bake a local distance atlas once at startup;
+Subject: [PATCH 02/13] SDF: bake a local distance atlas once at startup;
  instances only move their placement
 
 Replaces the camera-snapped three-clipmap rebuild with DistanceAtlasSpace (one volume per

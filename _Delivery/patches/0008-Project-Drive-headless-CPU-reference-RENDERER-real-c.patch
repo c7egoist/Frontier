@@ -1,7 +1,7 @@
 From e847f6346fa558fc975fa0f55070733f8d136d10 Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 17:30:03 +0000
-Subject: [PATCH 08/12] Project-Drive: headless CPU reference RENDERER (real
+Subject: [PATCH 08/13] Project-Drive: headless CPU reference RENDERER (real
  course + real ControlVehicle mesh)
 
 Adds Projects/Project-Drive/Source/DriveRender.cpp, the GPU-free mirror of what the

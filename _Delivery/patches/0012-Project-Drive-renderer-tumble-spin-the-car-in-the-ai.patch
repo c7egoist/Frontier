@@ -1,7 +1,7 @@
 From 5c06c6e237ceaa9e03b1bc67b974f336dbd97274 Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 18:51:14 +0000
-Subject: [PATCH 12/12] Project-Drive renderer: --tumble (spin the car in the
+Subject: [PATCH 12/13] Project-Drive renderer: --tumble (spin the car in the
  air) and per-step tyre telemetry
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8

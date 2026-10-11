@@ -1,7 +1,7 @@
 From 31aa415eaf8460b58b11c9cba4722ecd23b6d617 Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 16:37:01 +0000
-Subject: [PATCH 07/12] SolidArc: Vulkan DeviceRasterExchange behind
+Subject: [PATCH 07/13] SolidArc: Vulkan DeviceRasterExchange behind
  RasterExchange (matcap shaders, pick plane, SSAA), raster/D3D11/tool logs
 
 - Presentation/DeviceRasterExchange.{h,cpp}: one render pass per target (RGBA16F linear colour, R32_UINT pick, D32 depth),

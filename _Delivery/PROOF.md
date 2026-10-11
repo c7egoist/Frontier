@@ -1,11 +1,10 @@
 # Frontier — rendering proof
 
-Everything under `proof/` was produced in this sandbox by CPU reference renderers that read the
+Everything under `proof/` was produced in this sandbox by CPU reference programs that read the
 project's own headers. **Open `proof/index.html`** for the browsable version. This file is the
 plain-text index: what is there, what it does and does not prove.
 
 Branch base: commit `1784c86` of `SultanAladin/Frontier-` (the commit before `3e45285`).
-Working tree: `work` branch.
 
 ---
 
@@ -13,65 +12,166 @@ Working tree: `work` branch.
 
 | | |
 |:---|:---|
-| **What these pixels are** | CPU reference renders. The GPU side of the pipeline is *simulated on the CPU*, exactly as you asked. |
-| **What they are not** | Screenshots of the Vulkan app. There is no GPU and no Windows here, and there never was. |
-| **Project-Zero ReSTIR stills** | The project's *own* CPU ReSTIR path tracer (`bin/Project-Zero-CpuReference`). Same scene, sky, fog, ReSTIR DI + GI. Proves the **scene, lighting and integrator**. Does **not** exercise the Vulkan passes. |
-| **Project-Zero raster + SDF stills** | New `bin/Project-Zero-PathCompare`, a CPU mirror of the three paths (see §1). The **scene, camera and light directions are the project's**; the rasteriser and the SDF march are mine, and the surface shading is my path tracer, **not** the engine's material model. |
-| **Project-Drive** | Course from `DriveCourse.h::EmitCourseTriangles` (the very emitter the render side uses), body/rim/tyre from the generated `ControlVehicle*.inl`, every pose from the real `VehicleSolver`. **Geometry, layout and dynamics are the project's own; surface shading is mine.** |
+| **What these pixels are** | CPU reference renders. The GPU side of the pipeline is *simulated on the CPU*. |
+| **What they are not** | Screenshots of the Vulkan app. There is no GPU and no Windows here. |
+| **`Project-Zero/SDF-GI/`** | A faithful CPU mirror of the real four-pass Distance Field GI pipeline (§1). Read §1 before trusting any other SDF image in this document. |
+| **`Project-Zero/pathcompare_reference/`** | The project's *own* CPU ReSTIR path tracer (`Project-Zero-CpuReference`) plus a hand-written reference. Proves the **scene, lighting and integrator**. Does **not** exercise the Vulkan passes. |
+| **`Project-Zero/pathcompare_raster/`** | A z-buffer mirror of the raster path with the engine's light list. The scene and camera are the project's; the rasteriser and the surface shading are mine. |
+| **Project-Drive** | Course from `DriveCourse.h::EmitCourseTriangles`, body/rim/tyre from the generated `ControlVehicle*.inl`, every pose from the real `VehicleSolver`. **Geometry, layout and dynamics are the project's own; surface shading is mine.** |
 | **The code fixes** | Still **GPU-unverified**. Compile/syntax-checked only, plus the CPU references below. |
 
+### A correction, up front
+
+In the previous drop I presented three Project-Zero paths — `reference`, `sdf` and `raster` — and
+called the middle one "the SDF GI path". **That was wrong.** It cast camera rays through a path tracer
+and used the distance field only for a sun-shadow and a sky term. It was a path tracer that happened to
+touch an SDF. You were right to call it out: it looked ray traced because it was ray traced.
+
+Those images have been **deleted** from `proof/` (the folder `Project-Zero/SDF-GI/` is gone). What replaces
+them is §1: a line-by-line CPU translation of the four passes the engine actually records.
+
 ---
 
-## 1. The three render paths, side by side (new)
+## 1. Distance Field GI — the real pipeline, mirrored on the CPU
 
-`Projects/Project-Zero/Source/PathCompareMain.cpp` renders the **same scene from the same camera**
-through each path the engine can take:
+### 1.1 What the engine actually does
 
-| path | how it works |
+`Plans/Ongoing/SwapSurfelGIWithDistanceFieldGI.md` puts render mode 1 this way:
+
+| | mode 1: Distance Field GI |
 |:---|:---|
-| `reference` | primary ray + exact ray-traced sun shadow and one cosine bounce — the ground truth for the diff metric |
-| `sdf` | primary ray; **sun shadow and sky/GI marched through the baked `DistanceAtlasSpace` volume** |
-| `raster` | z-buffer over the same triangles; sun + moon + the first N emissive triangles; **one coarse 256×256 sun shadow map stretched over 480 m**; flat ambient, no GI |
+| Primary visibility | **mesh rasterization** |
+| Diffuse indirect GI | **surface cache over cascaded distance fields** |
+| Direct shadows | **monotone k·H/t contact soft shadows** |
+| Specular | raytraced BVH or sky |
+| RT cores | **not used** |
 
-### Accuracy against the reference (RMS over RGB, 0 = identical)
+That is Lumen-for-GTX: a raster G-buffer, a surface cache of cards, and software sphere-marching
+through distance fields for the diffuse bounce. **No path tracing.** Four compute passes, in order:
 
-| scene | sun hour | viewport | sdf vs reference | raster vs reference |
-|:---|:---|:---|---:|---:|
-| showcase | 08:00 | 640×360 | **0.903** | 1.263 |
-| showcase | 12:00 | 640×360 | **1.113** | 1.772 |
-| showcase | 17:93 | 640×360 | **0.087** | 0.137 |
-| showcase | 20:00 | 640×360 | **0.081** | 0.109 |
-| Cornell box | 12:00 | 480×270 | **3.329** | 4.286 |
+| pass | shader | what it does |
+|:---|:---|:---|
+| 0 | `DistanceFieldCapture.slang` | one **surface card** per triangle — albedo, normal, coverage, emission |
+| 1 | `DistanceFieldRadiance.slang` | **Jacobi propagation** over the card atlas: direct sun + previous frame's indirect, mixed at 0.25 |
+| 2 | `DistanceFieldGather.slang` | per G-buffer pixel: hemisphere rays **marched through the composed local distance fields**, refined against the exact triangle BVH, **MIS** between cosine and card-area sampling → incident irradiance |
+| 3 | `DistanceFieldGIResolve.slang` | 7×7 bilateral irradiance reconstruction + direct light + tonemap |
 
-The SDF path is closer to the reference than the raster path **in every case**. The Cornell box is the
-worst case for both — it is a closed room with no sky, so a path without GI has nothing to fall back on
-(raster mean luminance 0.768 against reference 0.425: the flat ambient leaks light everywhere).
+Primary visibility comes from a **z-buffer over the live triangles**. The baked facets are used only
+for the cards and for exact queries. That split is the whole design.
 
-### Cost of each path (showcase, 640×360, 2 spp)
+### 1.2 The mirror
 
-| stage | ms |
-|:---|---:|
-| bake the distance atlas (once, 1.75 M voxels at 0.157 m) | ~490 |
-| `raster` | ~20 |
-| `sdf` (6–10 M distance samples) | ~1,200 |
-| `reference` (exact ray tracing) | ~1,600 |
+`Projects/Project-Zero/Source/SdfGiPipelineMain.cpp` (`make sdfgi`).
 
-The raster path is ~60× cheaper than the SDF path and ~80× cheaper than the reference on the CPU.
-That cost gap is the whole reason the engine offers it — and the quality table above is what you pay.
+**Translated line by line from the Slang:**
 
-### The raster light list, measured not asserted
+- `SampleSceneDistance` → `DistanceAtlasSpace::Sample`, the engine's *own* transformed-local-field
+  composition. A moving instance rewrites only its world→local rows via `Atlas::Project`.
+- `DistanceShadow` → hard umbra from the exact facet BVH; otherwise a 48-step march through the composed
+  field with the engine's monotone `max(H − 0.25·Cell, 0) / (Softness·Travel)` penumbra.
+- `GatherDistanceRadiance` → 32 samples (16 in the radiance pass), 48-step sphere march, exact
+  refinement when `Distance < Cell·0.7`, sky on escape, fallback exact trace on exhaustion, and the
+  **balance heuristic** between the cosine and card-area PDFs.
+- `SelectRadianceFacet` → the engine's preorder BVH solid-angle walk (`BranchSolidAngle` /
+  `FacetSolidAngle` / `RadianceDirectionDensity`).
+- cards → the engine's **square-to-triangle warp** (`CardPosition` / `CardCoordinate`) and its 4-tap
+  bilinear `SampleCachedRadiance`.
+- `InstanceMoved` masking → a moved instance's baked facets are excluded from **every** exact query, so
+  it can only shade through the field. That is the engine's rule, and it is visible in the output.
+- temporal accumulation → the radiance pass mixes at 0.25 per frame, so GI converges over frames.
+- `ReconstructIrradiance` → 7×7, alignment³², plane tolerance, `exp(−d²/8)`.
 
-The showcase scene contains **0 emissive triangles** and the outdoor scene **0**; the Cornell box
-contains **2**. So on Project-Zero's own CPU scenes the raster path is lit by sun + moon + flat
-ambient only. (The 1,642-emissive-triangle figure reported earlier came from the live app's scene,
-which is not in this checkout — I cannot measure it here, and I am not going to pretend I did.)
+**Simplified (and this is *not* the transport):** the material. The engine decodes authored OpenPBR
+slabs through `MaterialEvaluation.slang`; here a surface is a Lambert diffuse term plus a Schlick/GGX
+lobe. The **light transport** is the engine's; the **BRDF is a stand-in**.
 
-### The baked field
+### 1.3 The scene
 
-`proof/Project-Zero/sdf/*_sdfslice.png` is a slice through the baked volume, so the field the SDF GI
-marches can be looked at rather than taken on trust.
+An **open-topped courtyard** (floor + four walls, no ceiling — with a ceiling, `DistanceShadow` returns
+0 everywhere because the exact BVH always finds the lid), lit by a sun and one emissive wall strip.
+Three instances: the room (static), a **sphere that orbits**, and a **box that spins and translates**.
+The sphere rotates *and* translates, so the field is exercised by the full affine inverse, not just a
+translation. 854 facets, cards at 8×8 = 54,656 card texels, 384×216, 16 frames.
+
+### 1.4 Is it dynamic? The measurements
+
+| | |
+|:---|:---|
+| distance field baked | **once** — 2,524,243 voxels, 10,096,972 bytes, 566 ms |
+| bytes rewritten per frame, both objects moving | **336** (3 placements × 112 B) |
+| `Atlas::Project()` per frame | **0.001–0.002 ms** |
+| atlas FNV-1a checksum, all 16 frames | **`9af57a57398069d9`, identical in every frame** |
+| `PlacementRevision` over 16 frames | 2 → 3 → … → **17** (increments every single frame) |
+| `MovedInstances` | **2** (the sphere and the box; the room stays at its baked pose) |
+
+The volume bytes never change; only the 3×112-byte placement rows do. That is the "baked once, only
+transformed locally" requirement, measured rather than asserted.
+
+**The negative control — `frozen`.** Identical in every respect except `Atlas::Project()` is never
+called. The live geometry still moves, so the objects are visibly in motion, but the field stays at the
+baked pose: `PlacementRevision` stays at **1**, `MovedInstances` stays at **0**.
+
+| | dynamic | frozen | GI off |
+|:---|---:|---:|---:|
+| **RMS on the floor vs a 4-bounce path trace** (mean of frames 0/4/8/12) | **0.1304** | 0.1856 | 0.1956 |
+| **mean \|luminance change\| between frames**, floor pixels that are *never occluded* by an object | **0.01044** | 0.00170 | 0.01215 |
+| ratio of that change to frozen | **6.1×** | 1.0× | 7.1× |
+
+The second row is the one that matters. Restricted to floor pixels no object ever slides across, the
+only thing that can change a pixel is the light — and with the field re-placed the floor's shading moves
+**6.1× more** than with the field frozen. The frozen residual (0.0017) is the card history still
+converging, not the shadow moving.
+
+Re-placing the field also makes the image **more correct**: floor RMS against the path-traced reference
+drops from 0.186 to 0.130 (−30%).
+
+### 1.5 Cost per frame
+
+| stage | ms | note |
+|:---|---:|:---|
+| bake the distance field | **566** | **once**, never repeated |
+| capture surface cards | 0.2 | once |
+| `Atlas::Project()` | **0.001–0.002** | per frame, 336 bytes |
+| build the live triangle list | 0.03–0.09 | per frame; this is a CPU-mirror artefact, the GPU reads the vertex buffer |
+| radiance (54,656 card texels × 16 samples) | 940 | per frame |
+| gather (82,944 px × 32 samples × ≤48 march steps) | 4,200 | per frame |
+| resolve (7×7 bilateral) | 170 | per frame |
+
+The gather dominates, exactly as it does on a GPU. None of these numbers say anything about GPU
+performance — they are a single-thread-for-a-workgroup CPU mirror running on 8 cores.
+
+### 1.6 Two bugs I hit while building this, both worth knowing about
+
+1. **The indirect term was a factor of π too dark.** `GatherDistanceRadiance` averages incoming
+   radiance over a *cosine-weighted* hemisphere, so it returns **E/π**, not E. The engine's resolve is
+   `col += response · ReconstructIrradiance · Tuning.y` with no further 1/π. I divided by π a second
+   time. Fixing it moved the whole-image RMS against the path trace from **0.264 → 0.121**. If
+   `DistanceFieldGIResolve` ever gets a 1/π added there, it will be a π-too-dark regression.
+2. **`DistanceShadow`'s penumbra keeps darkening as the ray marches.** The visibility estimate is
+   `max(H − 0.25·Cell, 0) / (Softness·Travel)` where H is the field value. `Travel` keeps growing, so
+   any geometry the ray *passes near* eventually darkens the receiver, even if it never blocks it — the
+   cone test `Distance < Travel·Facing − 0.75·Cell` uses the **receiver's** facing term, which for a
+   floor under a high sun is a >60° cone. Measured mean floor sun visibility, geometric truth ≈0.65:
+
+   | `ShadowSoftness` (`Tuning.x`) | 0.01 | 0.05 | 0.18 | 0.50 | 1.00 |
+   |:---|---:|---:|---:|---:|---:|
+   | mean floor sun visibility | 0.92 | 0.89 | 0.79 | 0.62 | 0.56 |
+
+   The host clamps `Tuning.x` to ≥0.01 (`DistanceFieldGIStage.cpp:388`) with no documented upper bound,
+   so a soft-shadow setting above ~0.2 will over-darken. The final renders use 0.01.
+
+### 1.7 What this still does not show
+
+- **A moved instance does not donate GI.** Its baked facets are masked from every exact query, so a
+  moving object is lit *by* the scene's cards and it occludes, but it never bleeds its own colour onto
+  anything. That is the engine's rule as written, faithfully reproduced — and it is why the moving
+  sphere darkens the floor rather than tinting it. If you want moving objects to cast coloured bounce,
+  the card/facet data has to be re-projected when an instance moves; the field alone cannot do it.
+- **No textures, no normal maps, no OpenPBR.** Cards carry flat albedo.
+- **CPU timings are not GPU timings.**
 
 ---
+
 
 ## 2. Project-Zero ReSTIR reference — 38 renders
 
@@ -166,14 +266,15 @@ at t = 4.571 s on the FR wheel. So the spike is not an artefact of my tumble; th
 
 | file | frames | fps | size |
 |:---|:---:|:---:|---:|
-| `Project-Drive/Project-Drive_tumble_closeup.gif` / `.mp4` | 231 | 60 | 4.7 MB / 2.6 MB |
-| `Project-Drive/Project-Drive_tumble_fixedcam.gif` / `.mp4` | 126 | 30 | 7.2 MB / 1.3 MB |
-| `Project-Drive/Project-Drive_tumble_chase.gif` / `.mp4` | 126 | 30 | 5.1 MB / 1.0 MB |
-| `Project-Drive/Project-Drive_control_fixedcam.gif` / `.mp4` | 126 | 30 | 6.9 MB / 1.1 MB |
-| `Project-Drive/Project-Drive_chase.gif` / `.mp4` | 72 | 6 | 1.9 MB / 2.1 MB |
-| `Project-Drive/Project-Drive_orbit.gif` / `.mp4` | 48 | 6 | 1.6 MB / 1.5 MB |
-| `Project-Drive/Project-Drive_trackside.gif` / `.mp4` | 36 | 4 | 0.7 MB / 0.8 MB |
-| `Project-Zero/Project-Zero_sdf_turntable.gif` / `.mp4` | 12 | 7 | 0.9 MB / 0.2 MB |
+| `Project-Drive/Project-Drive_tumble_closeup.gif` / `.mp4` | 231 | 60 | 2.1 MB / 2.6 MB |
+| `Project-Drive/Project-Drive_tumble_fixedcam.gif` / `.mp4` | 126 | 30 | 1.7 MB / 1.3 MB |
+| `Project-Drive/Project-Drive_control_fixedcam.gif` / `.mp4` | 126 | 30 | 1.6 MB / 1.1 MB |
+| `Project-Drive/Project-Drive_chase.mp4` | 72 | 6 | 2.1 MB |
+| `Project-Drive/Project-Drive_orbit.mp4` | 48 | 6 | 1.5 MB |
+| `Project-Drive/Project-Drive_trackside.mp4` | 36 | 4 | 0.8 MB |
+| `Project-Zero/SDF-GI/Project-Zero_sdfgi_dynamic.gif` / `.mp4` | 16 | 8 | 0.39 MB / 0.07 MB |
+| `Project-Zero/SDF-GI/Project-Zero_sdfgi_frozen.gif` / `.mp4` | 16 | 8 | 0.32 MB / 0.04 MB |
+| `Project-Zero/SDF-GI/Project-Zero_sdfgi_nogi.gif` / `.mp4` | 16 | 8 | 0.14 MB / 0.06 MB |
 | `Project-Zero/Project-Zero_raster_turntable.gif` / `.mp4` | 12 | 7 | 0.15 MB / 0.02 MB |
 | `Project-Zero/Project-Zero_turntable.gif` / `.mp4` | 16 | 8 | 0.8 MB / 0.2 MB |
 | `Project-Zero/Project-Zero_timeofday.gif` / `.mp4` | 13 | 4 | 0.8 MB / 0.2 MB |

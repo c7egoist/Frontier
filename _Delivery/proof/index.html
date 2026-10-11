@@ -16,78 +16,107 @@
  ul { margin: 8px 0 0 18px; } li { margin: 4px 0; }
  .warn { background: #2a1f14; border: 1px solid #5a3a17; padding: 12px; border-radius: 8px; }
  .find { background: #14202a; border: 1px solid #1f4a63; padding: 12px; border-radius: 8px; margin-top: 12px; }
+ .fix { background: #14291f; border: 1px solid #1f6337; padding: 12px; border-radius: 8px; margin-top: 12px; }
 </style>
 <h1>Frontier — rendering proof</h1>
-<p class="note">Every image, GIF and MP4 here was produced in this sandbox by CPU reference renderers that read
-the project's own headers. Nothing is a screenshot of the Vulkan app. The GPU side is <em>simulated on the CPU</em>.</p>
-<div class="warn">
+<p class="note">Every image, GIF and MP4 here was produced in this sandbox by CPU reference programs that read the
+project's own headers. Nothing is a screenshot of the Vulkan app. The GPU side is <em>simulated on the CPU</em>.</p>
+<div class="fix">
+<strong>Correction to the previous drop.</strong> The &ldquo;sdf&rdquo; path I showed before was <em>not</em> the
+engine's Distance Field GI pipeline — it was a path tracer that used the distance field for a shadow and a sky term.
+You were right: it looked ray traced because it was ray traced. Those images have been deleted. The section below is a
+line-by-line CPU translation of the four passes the engine actually records: raster G-buffer, surface cards, sphere
+marching through composed local distance fields, MIS gather, bilateral resolve. See
+<code>_Delivery/PROOF.md</code> §1.
+</div>
+<div class="warn" style="margin-top:12px">
 <strong>Read this before you trust any pixel here.</strong>
 <ul>
-<li><strong>Project-Zero</strong> — ReSTIR stills come from the project's own CPU ReSTIR path tracer. The raster and
-SDF-GI images come from the new <code>Project-Zero-PathCompare</code>, a CPU mirror: the raster path is a z-buffer
-with the engine's light list, the SDF path marches a <code>DistanceAtlasSpace</code> volume I bake. Shading is my
-path tracer, <em>not</em> the engine's material model. Scene, geometry, camera and light directions are the project's.</li>
-<li><strong>Project-Drive</strong> — course from <code>DriveCourse.h::EmitCourseTriangles</code>, body/rim/tyre meshes
-from the generated <code>ControlVehicle*.inl</code>, pose from the real <code>VehicleSolver</code>. Shading is mine;
-geometry and dynamics are the project's.</li>
 <li><strong>No GPU, no Windows here.</strong> The code fixes are compile/syntax-checked only.</li>
+<li><strong>Distance Field GI</strong> — transport, cards, field composition, shadow march, MIS and the bilateral
+resolve are the engine's. The <em>material</em> is a stand-in Lambert + Schlick/GGX, not the engine's OpenPBR stack.</li>
+<li><strong>A moved instance does not donate GI.</strong> Its baked facets are masked from every exact query, so a
+moving object is lit by the scene's cards and it occludes — but it never bleeds its own colour. That is the engine's
+rule as written, faithfully reproduced.</li>
+<li><strong>Project-Drive</strong> — geometry, layout and dynamics are the project's own; surface shading is mine.</li>
 </ul>
 </div>
 <div class="find">
-<strong>The finding from the tumble.</strong> On a hard landing the soft tyre puts <strong>998 kN</strong> through one
-wheel in a single 240 Hz step — 313&times; the static wheel load — with 407 nodes in contact, 156 mm of penetration
-and the rim-flange bottoming constraint handed 159 mm. The per-node XPBD contact &lambda; stays at 0.0016, so the
-force is the <em>sum of raw &lambda;/h&sup2; over ~400 nodes with no clamp</em>. The control run (identical drive, no
-spin) still peaks at <strong>29.7 kN = 9.3&times;</strong>. See
-<code>_Delivery/PROOF.md</code> section 4 and the CSVs in <code>Project-Drive/</code>.
+<strong>The two headline numbers.</strong><br>
+&nbsp;&nbsp;<strong>Is it dynamic?</strong> Yes. The field is baked once (10,096,972 bytes, 566 ms); moving both
+objects rewrites <strong>336 bytes</strong> and takes <strong>0.001&ndash;0.002 ms</strong>, and the atlas checksum is
+<strong>identical in all 16 frames</strong>. On floor pixels no object ever crosses, the shading moves
+<strong>6.1&times; more</strong> than when the field is frozen.<br>
+&nbsp;&nbsp;<strong>Is it right?</strong> Floor RMS against a 4-bounce path trace: <strong>0.130</strong> with the
+field re-placed, 0.186 frozen, 0.196 with GI off.
+</div>
+<div class="find">
+<strong>And the XPBD finding from the tumble.</strong> On a hard landing the soft tyre puts <strong>998 kN</strong>
+through one wheel in a single 240 Hz step — 313&times; the static wheel load — while the per-node contact
+&lambda; stays at 0.0016. With h = 1/(240&times;8) s that is ~5.9 kN per node from &lambda;/h&sup2;, summed over ~400
+nodes with <em>no clamp</em>. See <code>_Delivery/PROOF.md</code> §4.
+</div>
+<h2>Distance Field GI — the real pipeline, on moving objects</h2>
+<p class="note">Four passes, translated line by line from the engine's Slang: capture surface cards, propagate radiance over the card atlas, gather by marching the COMPOSED LOCAL DISTANCE FIELDS, resolve with a 7x7 bilateral filter. Primary visibility is a z-buffer. No path tracing. A sphere orbits and a box spins; the field is baked ONCE and only its 3x112-byte placement rows are rewritten each frame.</p>
+<div class="grid">
+<figure><video src="Project-Zero/SDF-GI/Project-Zero_sdfgi_dynamic.mp4" controls muted loop playsinline></video><figcaption>DYNAMIC — field re-placed every frame (watch the floor) (mp4, 0.07 MB)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/Project-Zero_sdfgi_dynamic.gif"><img loading="lazy" src="Project-Zero/SDF-GI/Project-Zero_sdfgi_dynamic.gif" alt=""></a><figcaption>DYNAMIC — field re-placed every frame (watch the floor) (gif, 0.39 MB)</figcaption></figure>
+<figure><video src="Project-Zero/SDF-GI/Project-Zero_sdfgi_frozen.mp4" controls muted loop playsinline></video><figcaption>FROZEN control — objects move, field is NOT re-placed (mp4, 0.04 MB)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/Project-Zero_sdfgi_frozen.gif"><img loading="lazy" src="Project-Zero/SDF-GI/Project-Zero_sdfgi_frozen.gif" alt=""></a><figcaption>FROZEN control — objects move, field is NOT re-placed (gif, 0.32 MB)</figcaption></figure>
+<figure><video src="Project-Zero/SDF-GI/Project-Zero_sdfgi_nogi.mp4" controls muted loop playsinline></video><figcaption>GI OFF — sky ambient fill only (mp4, 0.06 MB)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/Project-Zero_sdfgi_nogi.gif"><img loading="lazy" src="Project-Zero/SDF-GI/Project-Zero_sdfgi_nogi.gif" alt=""></a><figcaption>GI OFF — sky ambient fill only (gif, 0.14 MB)</figcaption></figure>
+</div>
+<h2>Distance Field GI — is it actually right? and is it actually dynamic?</h2>
+<p class="note">Left: RMS on the floor against a 4-bounce path trace of the identical live geometry. Re-placing the field is the most accurate of the three (0.130 vs 0.186 frozen vs 0.196 GI-off). Right: how much the floor's shading moves between frames, measured only on floor pixels no object ever slides across — so the only thing that can change them is light. Dynamic moves 6.1x more than frozen.</p>
+<div class="grid">
+<figure><a href="Project-Zero/09_sdfgi_dynamic_vs_frozen.png"><img loading="lazy" src="Project-Zero/09_sdfgi_dynamic_vs_frozen.png" alt=""></a><figcaption>09 — accuracy, and does the light follow the objects</figcaption></figure>
+<figure><a href="Project-Zero/08_sdfgi_passtimings.png"><img loading="lazy" src="Project-Zero/08_sdfgi_passtimings.png" alt=""></a><figcaption>08 — cost per pass, and 336 bytes vs 10,096,972 bytes</figcaption></figure>
+<figure><a href="Project-Zero/10_sdfgi_framecompare.png"><img loading="lazy" src="Project-Zero/10_sdfgi_framecompare.png" alt=""></a><figcaption>10 — frame 8: reference / dynamic / frozen / GI-off / sun visibility / the field</figcaption></figure>
+</div>
+<h2>Distance Field GI — still frames</h2>
+<p class="note">384x216, 854 facets, 54,656 card texels, 32 gather samples, 6 warm-up frames of temporal accumulation.</p>
+<div class="grid">
+<figure><a href="Project-Zero/SDF-GI/dynamic/frame_000.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/dynamic/frame_000.jpg" alt=""></a><figcaption>DYNAMIC frame 0</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/frozen/frame_000.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/frozen/frame_000.jpg" alt=""></a><figcaption>FROZEN frame 0 (same live geometry)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/nogi/frame_000.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/nogi/frame_000.jpg" alt=""></a><figcaption>GI OFF frame 0</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/dynamic/frame_004.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/dynamic/frame_004.jpg" alt=""></a><figcaption>DYNAMIC frame 4</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/frozen/frame_004.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/frozen/frame_004.jpg" alt=""></a><figcaption>FROZEN frame 4 (same live geometry)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/nogi/frame_004.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/nogi/frame_004.jpg" alt=""></a><figcaption>GI OFF frame 4</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/dynamic/frame_008.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/dynamic/frame_008.jpg" alt=""></a><figcaption>DYNAMIC frame 8</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/frozen/frame_008.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/frozen/frame_008.jpg" alt=""></a><figcaption>FROZEN frame 8 (same live geometry)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/nogi/frame_008.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/nogi/frame_008.jpg" alt=""></a><figcaption>GI OFF frame 8</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/dynamic/frame_012.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/dynamic/frame_012.jpg" alt=""></a><figcaption>DYNAMIC frame 12</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/frozen/frame_012.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/frozen/frame_012.jpg" alt=""></a><figcaption>FROZEN frame 12 (same live geometry)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/nogi/frame_012.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/nogi/frame_012.jpg" alt=""></a><figcaption>GI OFF frame 12</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/reference/ref_000.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/reference/ref_000.jpg" alt=""></a><figcaption>PATH-TRACED REFERENCE frame 0 (4 bounces, 32 spp)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/reference/ref_004.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/reference/ref_004.jpg" alt=""></a><figcaption>PATH-TRACED REFERENCE frame 4 (4 bounces, 32 spp)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/reference/ref_008.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/reference/ref_008.jpg" alt=""></a><figcaption>PATH-TRACED REFERENCE frame 8 (4 bounces, 32 spp)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/reference/ref_012.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/reference/ref_012.jpg" alt=""></a><figcaption>PATH-TRACED REFERENCE frame 12 (4 bounces, 32 spp)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/sunvisibility_000.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/sunvisibility_000.jpg" alt=""></a><figcaption>the sun visibility the field produces, frame 0</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/sunvisibility_008.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/sunvisibility_008.jpg" alt=""></a><figcaption>the sun visibility the field produces, frame 8</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/field_slice.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/field_slice.jpg" alt=""></a><figcaption>the baked distance field, sliced at z = 0.30 m</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/floor_mask.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/floor_mask.jpg" alt=""></a><figcaption>the floor mask used for the metrics</figcaption></figure>
 </div>
 <h2>The vehicle tumble — GIF and MP4</h2>
-<p class="note">The car is driven by the real VehicleSolver over the real course. At t = 4.30 s the scripted drive has it leave the ramp at 11.26 m/s; body rates (2.5, -7.0, 1.2) rad/s are injected there so it tumbles. The CONTROL clip is the byte-identical drive with no spin. Every frame is an independent render.</p>
+<p class="note">The car is driven by the real VehicleSolver over the real course. At t = 4.30 s the scripted drive leaves the ramp at 11.26 m/s; body rates (2.5, -7.0, 1.2) rad/s are injected there so it tumbles. The CONTROL clip is the byte-identical drive with no spin. Every frame is an independent render.</p>
 <div class="grid">
 <figure><video src="Project-Drive/Project-Drive_tumble_closeup.mp4" controls muted loop playsinline></video><figcaption>TUMBLE — body-relative close-up, 60 fps, 640x360 — watch the wheels (mp4, 2.61 MB)</figcaption></figure>
-<figure><a href="Project-Drive/Project-Drive_tumble_closeup.gif"><img loading="lazy" src="Project-Drive/Project-Drive_tumble_closeup.gif" alt=""></a><figcaption>TUMBLE — body-relative close-up, 60 fps, 640x360 — watch the wheels (gif, 9.25 MB)</figcaption></figure>
+<figure><a href="Project-Drive/Project-Drive_tumble_closeup.gif"><img loading="lazy" src="Project-Drive/Project-Drive_tumble_closeup.gif" alt=""></a><figcaption>TUMBLE — body-relative close-up, 60 fps, 640x360 — watch the wheels (gif, 2.13 MB)</figcaption></figure>
 <figure><video src="Project-Drive/Project-Drive_tumble_fixedcam.mp4" controls muted loop playsinline></video><figcaption>TUMBLE — fixed camera beside the ramp, 30 fps (mp4, 1.30 MB)</figcaption></figure>
-<figure><a href="Project-Drive/Project-Drive_tumble_fixedcam.gif"><img loading="lazy" src="Project-Drive/Project-Drive_tumble_fixedcam.gif" alt=""></a><figcaption>TUMBLE — fixed camera beside the ramp, 30 fps (gif, 7.51 MB)</figcaption></figure>
+<figure><a href="Project-Drive/Project-Drive_tumble_fixedcam.gif"><img loading="lazy" src="Project-Drive/Project-Drive_tumble_fixedcam.gif" alt=""></a><figcaption>TUMBLE — fixed camera beside the ramp, 30 fps (gif, 1.70 MB)</figcaption></figure>
 <figure><video src="Project-Drive/Project-Drive_tumble_chase.mp4" controls muted loop playsinline></video><figcaption>TUMBLE — chase camera, 30 fps (mp4, 1.01 MB)</figcaption></figure>
-<figure><a href="Project-Drive/Project-Drive_tumble_chase.gif"><img loading="lazy" src="Project-Drive/Project-Drive_tumble_chase.gif" alt=""></a><figcaption>TUMBLE — chase camera, 30 fps (gif, 5.27 MB)</figcaption></figure>
 <figure><video src="Project-Drive/Project-Drive_control_fixedcam.mp4" controls muted loop playsinline></video><figcaption>CONTROL — same 8 s, same camera, NO spin (mp4, 1.12 MB)</figcaption></figure>
-<figure><a href="Project-Drive/Project-Drive_control_fixedcam.gif"><img loading="lazy" src="Project-Drive/Project-Drive_control_fixedcam.gif" alt=""></a><figcaption>CONTROL — same 8 s, same camera, NO spin (gif, 7.16 MB)</figcaption></figure>
+<figure><a href="Project-Drive/Project-Drive_control_fixedcam.gif"><img loading="lazy" src="Project-Drive/Project-Drive_control_fixedcam.gif" alt=""></a><figcaption>CONTROL — same 8 s, same camera, NO spin (gif, 1.61 MB)</figcaption></figure>
 </div>
-<h2>The three render paths — GIF and MP4</h2>
-<p class="note">Project-Zero's showcase scene rendered by the same camera through each path: the z-buffer raster path, SDF GI marched through the baked distance atlas, and the exact ray-traced reference.</p>
+<h2>The raster path — GIF and MP4</h2>
+<p class="note">Project-Zero's showcase scene, z-buffered and lit by sun + moon + the first N emissive triangles with one coarse 256x256 shadow map, rendered from 12 camera yaws.</p>
 <div class="grid">
-<figure><video src="Project-Zero/Project-Zero_sdf_turntable.mp4" controls muted loop playsinline></video><figcaption>SDF GI path — 12 camera yaws (mp4, 0.22 MB)</figcaption></figure>
-<figure><a href="Project-Zero/Project-Zero_sdf_turntable.gif"><img loading="lazy" src="Project-Zero/Project-Zero_sdf_turntable.gif" alt=""></a><figcaption>SDF GI path — 12 camera yaws (gif, 0.86 MB)</figcaption></figure>
-<figure><video src="Project-Zero/Project-Zero_raster_turntable.mp4" controls muted loop playsinline></video><figcaption>RASTER path — the same 12 camera yaws (mp4, 0.02 MB)</figcaption></figure>
-<figure><a href="Project-Zero/Project-Zero_raster_turntable.gif"><img loading="lazy" src="Project-Zero/Project-Zero_raster_turntable.gif" alt=""></a><figcaption>RASTER path — the same 12 camera yaws (gif, 0.15 MB)</figcaption></figure>
-</div>
-<h2>The three render paths — stills</h2>
-<p class="note">Same frame, three paths. reference = primary ray + exact ray-traced shadow/bounce. sdf = primary ray with sun shadow and sky/GI marched through the baked DistanceAtlasSpace. raster = z-buffer, sun + moon + the first N emissive triangles, one coarse 256x256 sun shadow map stretched over 480 m.</p>
-<div class="grid">
-<figure><a href="Project-Zero/reference/showcase_h17.93_reference.jpg"><img loading="lazy" src="Project-Zero/reference/showcase_h17.93_reference.jpg" alt=""></a><figcaption>showcase_h17.93_reference</figcaption></figure>
-<figure><a href="Project-Zero/sdf/showcase_h17.93_sdf.jpg"><img loading="lazy" src="Project-Zero/sdf/showcase_h17.93_sdf.jpg" alt=""></a><figcaption>showcase_h17.93_sdf</figcaption></figure>
-<figure><a href="Project-Zero/raster/showcase_h17.93_raster.jpg"><img loading="lazy" src="Project-Zero/raster/showcase_h17.93_raster.jpg" alt=""></a><figcaption>showcase_h17.93_raster</figcaption></figure>
-<figure><a href="Project-Zero/reference/showcase_h08.00_reference.jpg"><img loading="lazy" src="Project-Zero/reference/showcase_h08.00_reference.jpg" alt=""></a><figcaption>showcase_h08.00_reference</figcaption></figure>
-<figure><a href="Project-Zero/sdf/showcase_h08.00_sdf.jpg"><img loading="lazy" src="Project-Zero/sdf/showcase_h08.00_sdf.jpg" alt=""></a><figcaption>showcase_h08.00_sdf</figcaption></figure>
-<figure><a href="Project-Zero/raster/showcase_h08.00_raster.jpg"><img loading="lazy" src="Project-Zero/raster/showcase_h08.00_raster.jpg" alt=""></a><figcaption>showcase_h08.00_raster</figcaption></figure>
-<figure><a href="Project-Zero/reference/showcase_h12.00_reference.jpg"><img loading="lazy" src="Project-Zero/reference/showcase_h12.00_reference.jpg" alt=""></a><figcaption>showcase_h12.00_reference</figcaption></figure>
-<figure><a href="Project-Zero/sdf/showcase_h12.00_sdf.jpg"><img loading="lazy" src="Project-Zero/sdf/showcase_h12.00_sdf.jpg" alt=""></a><figcaption>showcase_h12.00_sdf</figcaption></figure>
-<figure><a href="Project-Zero/raster/showcase_h12.00_raster.jpg"><img loading="lazy" src="Project-Zero/raster/showcase_h12.00_raster.jpg" alt=""></a><figcaption>showcase_h12.00_raster</figcaption></figure>
-<figure><a href="Project-Zero/reference/showcase_h20.00_reference.jpg"><img loading="lazy" src="Project-Zero/reference/showcase_h20.00_reference.jpg" alt=""></a><figcaption>showcase_h20.00_reference</figcaption></figure>
-<figure><a href="Project-Zero/sdf/showcase_h20.00_sdf.jpg"><img loading="lazy" src="Project-Zero/sdf/showcase_h20.00_sdf.jpg" alt=""></a><figcaption>showcase_h20.00_sdf</figcaption></figure>
-<figure><a href="Project-Zero/raster/showcase_h20.00_raster.jpg"><img loading="lazy" src="Project-Zero/raster/showcase_h20.00_raster.jpg" alt=""></a><figcaption>showcase_h20.00_raster</figcaption></figure>
-<figure><a href="Project-Zero/reference/cornell_reference.jpg"><img loading="lazy" src="Project-Zero/reference/cornell_reference.jpg" alt=""></a><figcaption>cornell_reference</figcaption></figure>
-<figure><a href="Project-Zero/sdf/cornell_sdf.jpg"><img loading="lazy" src="Project-Zero/sdf/cornell_sdf.jpg" alt=""></a><figcaption>cornell_sdf</figcaption></figure>
-<figure><a href="Project-Zero/raster/cornell_raster.jpg"><img loading="lazy" src="Project-Zero/raster/cornell_raster.jpg" alt=""></a><figcaption>cornell_raster</figcaption></figure>
-</div>
-<h2>The baked distance field itself</h2>
-<p class="note">A slice through the baked DistanceAtlasSpace volume, so the field the SDF GI marches can be looked at rather than taken on trust.</p>
-<div class="grid">
-<figure><a href="Project-Zero/sdf/cornell_sdfslice.jpg"><img loading="lazy" src="Project-Zero/sdf/cornell_sdfslice.jpg" alt=""></a><figcaption>cornell_sdfslice.png</figcaption></figure>
-<figure><a href="Project-Zero/sdf/showcase_h08.00_sdfslice.jpg"><img loading="lazy" src="Project-Zero/sdf/showcase_h08.00_sdfslice.jpg" alt=""></a><figcaption>showcase_h08.00_sdfslice.png</figcaption></figure>
-<figure><a href="Project-Zero/sdf/showcase_h12.00_sdfslice.jpg"><img loading="lazy" src="Project-Zero/sdf/showcase_h12.00_sdfslice.jpg" alt=""></a><figcaption>showcase_h12.00_sdfslice.png</figcaption></figure>
-<figure><a href="Project-Zero/sdf/showcase_h17.93_sdfslice.jpg"><img loading="lazy" src="Project-Zero/sdf/showcase_h17.93_sdfslice.jpg" alt=""></a><figcaption>showcase_h17.93_sdfslice.png</figcaption></figure>
-<figure><a href="Project-Zero/sdf/showcase_h20.00_sdfslice.jpg"><img loading="lazy" src="Project-Zero/sdf/showcase_h20.00_sdfslice.jpg" alt=""></a><figcaption>showcase_h20.00_sdfslice.png</figcaption></figure>
+<figure><video src="Project-Zero/Project-Zero_raster_turntable.mp4" controls muted loop playsinline></video><figcaption>RASTER path — 12 camera yaws (mp4, 0.02 MB)</figcaption></figure>
+<figure><a href="Project-Zero/Project-Zero_raster_turntable.gif"><img loading="lazy" src="Project-Zero/Project-Zero_raster_turntable.gif" alt=""></a><figcaption>RASTER path — 12 camera yaws (gif, 0.15 MB)</figcaption></figure>
+<figure><video src="Project-Zero/Project-Zero_turntable.mp4" controls muted loop playsinline></video><figcaption>ReSTIR reference — 16 camera yaws (mp4, 0.22 MB)</figcaption></figure>
+<figure><a href="Project-Zero/Project-Zero_turntable.gif"><img loading="lazy" src="Project-Zero/Project-Zero_turntable.gif" alt=""></a><figcaption>ReSTIR reference — 16 camera yaws (gif, 0.79 MB)</figcaption></figure>
+<figure><video src="Project-Zero/Project-Zero_timeofday.mp4" controls muted loop playsinline></video><figcaption>ReSTIR reference — sun sweep, 13 hours (mp4, 0.21 MB)</figcaption></figure>
+<figure><a href="Project-Zero/Project-Zero_timeofday.gif"><img loading="lazy" src="Project-Zero/Project-Zero_timeofday.gif" alt=""></a><figcaption>ReSTIR reference — sun sweep, 13 hours (gif, 0.77 MB)</figcaption></figure>
 </div>
 <h2>XPBD soft-tyre internals during the tumble</h2>
 <p class="note">Per-step, per-wheel, 240 Hz: contact node count, XPBD contact lambda, deepest penetration, the per-family constraint residuals the solver is left holding, rim-flange bottoming, and the reaction force.</p>
@@ -96,63 +125,53 @@ spin) still peaks at <strong>29.7 kN = 9.3&times;</strong>. See
 <figure><a href="Project-Drive/06_tyre_carcass_residuals.png"><img loading="lazy" src="Project-Drive/06_tyre_carcass_residuals.png" alt=""></a><figcaption>06 — carcass residuals, contact nodes, gas pressure</figcaption></figure>
 <figure><a href="Project-Drive/07_tyre_peak_and_artefact.png"><img loading="lazy" src="Project-Drive/07_tyre_peak_and_artefact.png" alt=""></a><figcaption>07 — peak reaction in one step</figcaption></figure>
 </div>
-<h2>Project-Drive stills — tumble close-up (39 kept)</h2>
+<h2>Project-Drive stills</h2>
 <p class="note">Real course geometry, real car mesh, real VehicleSolver pose.</p>
 <div class="grid">
-<figure><a href="Project-Drive/tumble_closeup/closeup_000.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_000.jpg" alt=""></a><figcaption>closeup_000.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_012.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_012.jpg" alt=""></a><figcaption>closeup_012.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_024.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_024.jpg" alt=""></a><figcaption>closeup_024.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_036.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_036.jpg" alt=""></a><figcaption>closeup_036.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_048.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_048.jpg" alt=""></a><figcaption>closeup_048.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_060.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_060.jpg" alt=""></a><figcaption>closeup_060.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_072.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_072.jpg" alt=""></a><figcaption>closeup_072.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_084.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_084.jpg" alt=""></a><figcaption>closeup_084.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_096.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_096.jpg" alt=""></a><figcaption>closeup_096.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_108.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_108.jpg" alt=""></a><figcaption>closeup_108.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_120.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_120.jpg" alt=""></a><figcaption>closeup_120.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_132.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_132.jpg" alt=""></a><figcaption>closeup_132.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_144.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_144.jpg" alt=""></a><figcaption>closeup_144.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_156.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_156.jpg" alt=""></a><figcaption>closeup_156.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_168.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_168.jpg" alt=""></a><figcaption>closeup_168.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_180.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_180.jpg" alt=""></a><figcaption>closeup_180.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_192.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_192.jpg" alt=""></a><figcaption>closeup_192.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_204.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_204.jpg" alt=""></a><figcaption>closeup_204.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_216.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_216.jpg" alt=""></a><figcaption>closeup_216.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_closeup/closeup_228.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_228.jpg" alt=""></a><figcaption>closeup_228.png</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_000.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_000.jpg" alt=""></a><figcaption>tumble close-up — closeup_000</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_012.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_012.jpg" alt=""></a><figcaption>tumble close-up — closeup_012</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_024.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_024.jpg" alt=""></a><figcaption>tumble close-up — closeup_024</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_036.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_036.jpg" alt=""></a><figcaption>tumble close-up — closeup_036</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_048.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_048.jpg" alt=""></a><figcaption>tumble close-up — closeup_048</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_060.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_060.jpg" alt=""></a><figcaption>tumble close-up — closeup_060</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_072.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_072.jpg" alt=""></a><figcaption>tumble close-up — closeup_072</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_084.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_084.jpg" alt=""></a><figcaption>tumble close-up — closeup_084</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_096.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_096.jpg" alt=""></a><figcaption>tumble close-up — closeup_096</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_108.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_108.jpg" alt=""></a><figcaption>tumble close-up — closeup_108</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_120.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_120.jpg" alt=""></a><figcaption>tumble close-up — closeup_120</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_132.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_132.jpg" alt=""></a><figcaption>tumble close-up — closeup_132</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_144.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_144.jpg" alt=""></a><figcaption>tumble close-up — closeup_144</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_156.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_156.jpg" alt=""></a><figcaption>tumble close-up — closeup_156</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_168.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_168.jpg" alt=""></a><figcaption>tumble close-up — closeup_168</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_180.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_180.jpg" alt=""></a><figcaption>tumble close-up — closeup_180</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_192.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_192.jpg" alt=""></a><figcaption>tumble close-up — closeup_192</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_204.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_204.jpg" alt=""></a><figcaption>tumble close-up — closeup_204</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_216.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_216.jpg" alt=""></a><figcaption>tumble close-up — closeup_216</figcaption></figure>
+<figure><a href="Project-Drive/tumble_closeup/closeup_228.jpg"><img loading="lazy" src="Project-Drive/tumble_closeup/closeup_228.jpg" alt=""></a><figcaption>tumble close-up — closeup_228</figcaption></figure>
+<figure><a href="Project-Drive/chase/chase_000.jpg"><img loading="lazy" src="Project-Drive/chase/chase_000.jpg" alt=""></a><figcaption>chase — chase_000</figcaption></figure>
+<figure><a href="Project-Drive/chase/chase_016.jpg"><img loading="lazy" src="Project-Drive/chase/chase_016.jpg" alt=""></a><figcaption>chase — chase_016</figcaption></figure>
+<figure><a href="Project-Drive/chase/chase_032.jpg"><img loading="lazy" src="Project-Drive/chase/chase_032.jpg" alt=""></a><figcaption>chase — chase_032</figcaption></figure>
+<figure><a href="Project-Drive/chase/chase_048.jpg"><img loading="lazy" src="Project-Drive/chase/chase_048.jpg" alt=""></a><figcaption>chase — chase_048</figcaption></figure>
+<figure><a href="Project-Drive/chase/chase_064.jpg"><img loading="lazy" src="Project-Drive/chase/chase_064.jpg" alt=""></a><figcaption>chase — chase_064</figcaption></figure>
+<figure><a href="Project-Drive/hero/hero_000.jpg"><img loading="lazy" src="Project-Drive/hero/hero_000.jpg" alt=""></a><figcaption>hero — hero_000</figcaption></figure>
+<figure><a href="Project-Drive/hero/hero_002.jpg"><img loading="lazy" src="Project-Drive/hero/hero_002.jpg" alt=""></a><figcaption>hero — hero_002</figcaption></figure>
+<figure><a href="Project-Drive/hero/hero_004.jpg"><img loading="lazy" src="Project-Drive/hero/hero_004.jpg" alt=""></a><figcaption>hero — hero_004</figcaption></figure>
+<figure><a href="Project-Drive/hero/hero_006.jpg"><img loading="lazy" src="Project-Drive/hero/hero_006.jpg" alt=""></a><figcaption>hero — hero_006</figcaption></figure>
+<figure><a href="Project-Drive/hero/hero_008.jpg"><img loading="lazy" src="Project-Drive/hero/hero_008.jpg" alt=""></a><figcaption>hero — hero_008</figcaption></figure>
+<figure><a href="Project-Drive/hero/hero_010.jpg"><img loading="lazy" src="Project-Drive/hero/hero_010.jpg" alt=""></a><figcaption>hero — hero_010</figcaption></figure>
+<figure><a href="Project-Drive/orbit/orbit_000.jpg"><img loading="lazy" src="Project-Drive/orbit/orbit_000.jpg" alt=""></a><figcaption>orbit — orbit_000</figcaption></figure>
+<figure><a href="Project-Drive/orbit/orbit_016.jpg"><img loading="lazy" src="Project-Drive/orbit/orbit_016.jpg" alt=""></a><figcaption>orbit — orbit_016</figcaption></figure>
+<figure><a href="Project-Drive/orbit/orbit_032.jpg"><img loading="lazy" src="Project-Drive/orbit/orbit_032.jpg" alt=""></a><figcaption>orbit — orbit_032</figcaption></figure>
+<figure><a href="Project-Drive/trackside/trackside_000.jpg"><img loading="lazy" src="Project-Drive/trackside/trackside_000.jpg" alt=""></a><figcaption>trackside — trackside_000</figcaption></figure>
+<figure><a href="Project-Drive/trackside/trackside_016.jpg"><img loading="lazy" src="Project-Drive/trackside/trackside_016.jpg" alt=""></a><figcaption>trackside — trackside_016</figcaption></figure>
+<figure><a href="Project-Drive/trackside/trackside_032.jpg"><img loading="lazy" src="Project-Drive/trackside/trackside_032.jpg" alt=""></a><figcaption>trackside — trackside_032</figcaption></figure>
 </div>
-<h2>Project-Drive stills — tumble, fixed camera (11 kept)</h2>
-<p class="note">Real course geometry, real car mesh, real VehicleSolver pose.</p>
+<h2>Telemetry graphs</h2>
+<p class="note">From the render timing CSVs and the tyre dumps.</p>
 <div class="grid">
-<figure><a href="Project-Drive/tumble_fixedcam/tumble_fixedcam_000.jpg"><img loading="lazy" src="Project-Drive/tumble_fixedcam/tumble_fixedcam_000.jpg" alt=""></a><figcaption>tumble_fixedcam_000.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_fixedcam/tumble_fixedcam_024.jpg"><img loading="lazy" src="Project-Drive/tumble_fixedcam/tumble_fixedcam_024.jpg" alt=""></a><figcaption>tumble_fixedcam_024.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_fixedcam/tumble_fixedcam_048.jpg"><img loading="lazy" src="Project-Drive/tumble_fixedcam/tumble_fixedcam_048.jpg" alt=""></a><figcaption>tumble_fixedcam_048.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_fixedcam/tumble_fixedcam_072.jpg"><img loading="lazy" src="Project-Drive/tumble_fixedcam/tumble_fixedcam_072.jpg" alt=""></a><figcaption>tumble_fixedcam_072.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_fixedcam/tumble_fixedcam_096.jpg"><img loading="lazy" src="Project-Drive/tumble_fixedcam/tumble_fixedcam_096.jpg" alt=""></a><figcaption>tumble_fixedcam_096.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_fixedcam/tumble_fixedcam_120.jpg"><img loading="lazy" src="Project-Drive/tumble_fixedcam/tumble_fixedcam_120.jpg" alt=""></a><figcaption>tumble_fixedcam_120.png</figcaption></figure>
-</div>
-<h2>Project-Drive stills — tumble, chase camera (11 kept)</h2>
-<p class="note">Real course geometry, real car mesh, real VehicleSolver pose.</p>
-<div class="grid">
-<figure><a href="Project-Drive/tumble_chasecam/tumble_chasecam_000.jpg"><img loading="lazy" src="Project-Drive/tumble_chasecam/tumble_chasecam_000.jpg" alt=""></a><figcaption>tumble_chasecam_000.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_chasecam/tumble_chasecam_024.jpg"><img loading="lazy" src="Project-Drive/tumble_chasecam/tumble_chasecam_024.jpg" alt=""></a><figcaption>tumble_chasecam_024.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_chasecam/tumble_chasecam_048.jpg"><img loading="lazy" src="Project-Drive/tumble_chasecam/tumble_chasecam_048.jpg" alt=""></a><figcaption>tumble_chasecam_048.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_chasecam/tumble_chasecam_072.jpg"><img loading="lazy" src="Project-Drive/tumble_chasecam/tumble_chasecam_072.jpg" alt=""></a><figcaption>tumble_chasecam_072.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_chasecam/tumble_chasecam_096.jpg"><img loading="lazy" src="Project-Drive/tumble_chasecam/tumble_chasecam_096.jpg" alt=""></a><figcaption>tumble_chasecam_096.png</figcaption></figure>
-<figure><a href="Project-Drive/tumble_chasecam/tumble_chasecam_120.jpg"><img loading="lazy" src="Project-Drive/tumble_chasecam/tumble_chasecam_120.jpg" alt=""></a><figcaption>tumble_chasecam_120.png</figcaption></figure>
-</div>
-<h2>Project-Drive stills — control, fixed camera (11 kept)</h2>
-<p class="note">Real course geometry, real car mesh, real VehicleSolver pose.</p>
-<div class="grid">
-<figure><a href="Project-Drive/control_fixedcam/control_fixedcam_000.jpg"><img loading="lazy" src="Project-Drive/control_fixedcam/control_fixedcam_000.jpg" alt=""></a><figcaption>control_fixedcam_000.png</figcaption></figure>
-<figure><a href="Project-Drive/control_fixedcam/control_fixedcam_024.jpg"><img loading="lazy" src="Project-Drive/control_fixedcam/control_fixedcam_024.jpg" alt=""></a><figcaption>control_fixedcam_024.png</figcaption></figure>
-<figure><a href="Project-Drive/control_fixedcam/control_fixedcam_048.jpg"><img loading="lazy" src="Project-Drive/control_fixedcam/control_fixedcam_048.jpg" alt=""></a><figcaption>control_fixedcam_048.png</figcaption></figure>
-<figure><a href="Project-Drive/control_fixedcam/control_fixedcam_072.jpg"><img loading="lazy" src="Project-Drive/control_fixedcam/control_fixedcam_072.jpg" alt=""></a><figcaption>control_fixedcam_072.png</figcaption></figure>
-<figure><a href="Project-Drive/control_fixedcam/control_fixedcam_096.jpg"><img loading="lazy" src="Project-Drive/control_fixedcam/control_fixedcam_096.jpg" alt=""></a><figcaption>control_fixedcam_096.png</figcaption></figure>
-<figure><a href="Project-Drive/control_fixedcam/control_fixedcam_120.jpg"><img loading="lazy" src="Project-Drive/control_fixedcam/control_fixedcam_120.jpg" alt=""></a><figcaption>control_fixedcam_120.png</figcaption></figure>
-</div>
-<h2>Project-Drive telemetry (the 12 s reference run)</h2>
-<p class="note">From DriveTelemetry and the render timing CSVs.</p>
-<div class="grid">
+<figure><a href="Project-Zero/01_render_cost.png"><img loading="lazy" src="Project-Zero/01_render_cost.png" alt=""></a><figcaption>01_render_cost.png</figcaption></figure>
+<figure><a href="Project-Zero/02_sweep_timings.png"><img loading="lazy" src="Project-Zero/02_sweep_timings.png" alt=""></a><figcaption>02_sweep_timings.png</figcaption></figure>
+<figure><a href="Project-Zero/03_fog_timings.png"><img loading="lazy" src="Project-Zero/03_fog_timings.png" alt=""></a><figcaption>03_fog_timings.png</figcaption></figure>
 <figure><a href="Project-Drive/01_speed_drivetrain.png"><img loading="lazy" src="Project-Drive/01_speed_drivetrain.png" alt=""></a><figcaption>01_speed_drivetrain.png</figcaption></figure>
 <figure><a href="Project-Drive/02_wheel_loads.png"><img loading="lazy" src="Project-Drive/02_wheel_loads.png" alt=""></a><figcaption>02_wheel_loads.png</figcaption></figure>
 <figure><a href="Project-Drive/03_slip_braketemp.png"><img loading="lazy" src="Project-Drive/03_slip_braketemp.png" alt=""></a><figcaption>03_slip_braketemp.png</figcaption></figure>

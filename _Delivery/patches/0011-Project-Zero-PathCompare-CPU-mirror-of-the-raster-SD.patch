@@ -1,7 +1,7 @@
 From 711ad0ebf1a8f6abe46bcac77f015495bf8c702b Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 18:20:23 +0000
-Subject: [PATCH 11/12] Project-Zero: PathCompare CPU mirror of the raster /
+Subject: [PATCH 11/13] Project-Zero: PathCompare CPU mirror of the raster /
  SDF-GI / reference paths
 
 New tool: Projects/Project-Zero/bin/Project-Zero-PathCompare (make paths). It renders the
