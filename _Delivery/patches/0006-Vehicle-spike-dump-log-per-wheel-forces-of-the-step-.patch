@@ -1,0 +1,115 @@
+From ea9be5e60ec2caf0b4f574d4682e20bc82c7f7ec Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 16:23:26 +0000
+Subject: [PATCH 06/10] Vehicle spike dump: log per-wheel forces of the step
+ that preceded a chassis velocity jump
+
+---
+ .../Vehicle/VehicleSolver.cpp                 | 44 +++++++++++++++++++
+ .../PhysicalDynamics/Vehicle/VehicleSolver.h  | 10 +++++
+ 2 files changed, 54 insertions(+)
+
+diff --git a/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp b/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp
+index 76c26ad..318d4d0 100644
+--- a/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp
++++ b/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include <algorithm>
+ #include <cmath>
++#include <cstdio>
+ 
+ namespace Frontier::Vehicle {
+ 
+@@ -78,6 +79,9 @@ void VehicleSolver::Build(const VehicleSolverConfiguration& config, const Hooks&
+     CurrentTelemetry.GearIndex = GearIndex;
+     CurrentTelemetry.PacejkaActive = ActiveConfiguration.ActiveScheme == DrivingScheme::PacejkaDrivetrain;
+ 
++    LastChassisValid = false;
++    StepSerial       = 0u;
++    SpikeDumpCount   = 0u;
+     ConstructionComplete = !SoftTyres.empty() && static_cast<bool>(ChassisHooks.ReadChassis) &&
+              static_cast<bool>(ChassisHooks.ApplyForceAtPoint) && static_cast<bool>(ChassisHooks.Ground);
+ }
+@@ -185,10 +189,50 @@ float VehicleSolver::AntiRollForce(size_t Wheel) const noexcept
+ void VehicleSolver::Step(float Δτ) noexcept
+ {
+     if (!ConstructionComplete || Δτ <= 0.0f) return;
++    ++StepSerial;
++    InspectSpike(Δτ);
+     if (ActiveConfiguration.ActiveScheme == DrivingScheme::PacejkaDrivetrain) StepPacejka(Δτ);
+     else                                                  StepSimple(Δτ);
+ }
+ 
++void VehicleSolver::InspectSpike(float Δτ) noexcept
++{
++    if (!ChassisHooks.ReadChassis) return;
++    const ChassisState Now = ChassisHooks.ReadChassis();
++    if (LastChassisValid && SpikeDumpCount < 12u)
++    {
++        const float Dx = Now.LinearVelocity.x - LastChassis.LinearVelocity.x, Dy = Now.LinearVelocity.y - LastChassis.LinearVelocity.y,
++                    Dz = Now.LinearVelocity.z - LastChassis.LinearVelocity.z;
++        const float Acceleration = std::sqrt(Dx * Dx + Dy * Dy + Dz * Dz) / Δτ;
++        const bool  Finite       = std::isfinite(Now.Position.x) && std::isfinite(Now.Position.y) && std::isfinite(Now.Position.z)
++                                && std::isfinite(Acceleration);
++        if (!Finite || Acceleration > SpikeThreshold)
++        {
++            ++SpikeDumpCount;
++            // 📝 The forces printed are the PREVIOUS step's: they were applied after the velocity LastChassis recorded, so they are what produced
++            //    this jump. Contact counts of 0 with a huge load, or a tyre force far above its load times the friction limit, name the culprit.
++            std::fprintf(stderr, "[VehicleSpike] #%u step=%llu dt=%.5f accel=%.1f m/s^2 (threshold %.1f) pos=(%.3f %.3f %.3f) vel=(%.2f %.2f %.2f) "
++                         "was=(%.2f %.2f %.2f) angular=(%.2f %.2f %.2f)\n", SpikeDumpCount, static_cast<unsigned long long>(StepSerial), Δτ, Acceleration,
++                         SpikeThreshold, Now.Position.x, Now.Position.y, Now.Position.z, Now.LinearVelocity.x, Now.LinearVelocity.y, Now.LinearVelocity.z,
++                         LastChassis.LinearVelocity.x, LastChassis.LinearVelocity.y, LastChassis.LinearVelocity.z, Now.AngularVelocity.x,
++                         Now.AngularVelocity.y, Now.AngularVelocity.z);
++            std::fprintf(stderr, "[VehicleSpike]   chassis speed=%.2f forward=%.2f total_Fz=%.0f N wheels_in_contact=%u/%u gear=%d rpm=%.0f\n",
++                         CurrentTelemetry.SpeedMetresPerSecond, CurrentTelemetry.ForwardSpeed, CurrentTelemetry.TotalVerticalLoad,
++                         CurrentTelemetry.WheelsInContact, CurrentTelemetry.WheelCount, CurrentTelemetry.GearIndex, CurrentTelemetry.EngineRPM);
++            for (uint32_t Index = 0u; Index < CurrentTelemetry.WheelCount && Index < CurrentTelemetry.Wheels.size(); ++Index)
++            {
++                const WheelTelemetry& Wheel = CurrentTelemetry.Wheels[Index];
++                std::fprintf(stderr, "[VehicleSpike]   wheel %u contact=%d nodes=%u Fz=%.0f Fx=%.0f Fy=%.0f strut=%.3f m rate=%.2f m/s strut_force=%.0f "
++                             "slip_ratio=%.3f slip_angle=%.3f omega=%.1f contact_z=%.3f\n", Index, Wheel.InContact ? 1 : 0, Wheel.ContactCount,
++                             Wheel.VerticalLoad, Wheel.LongitudinalForce, Wheel.LateralForce, Wheel.StrutCompression, Wheel.StrutRate,
++                             Wheel.StrutForce, Wheel.SlipRatio, Wheel.SlipAngleRad, Wheel.WheelOmega, Wheel.ContactPoint.z);
++            }
++        }
++    }
++    LastChassis      = Now;
++    LastChassisValid = true;
++}
++
+ //------------------------------------------------------------------------------------------------------------------------
+ // SimpleFrictionCircle — the validated Phase-3 arcade layer (kept as a selectable fallback).
+ //------------------------------------------------------------------------------------------------------------------------
+diff --git a/Engine/PhysicalDynamics/Vehicle/VehicleSolver.h b/Engine/PhysicalDynamics/Vehicle/VehicleSolver.h
+index 4c61254..e760f16 100644
+--- a/Engine/PhysicalDynamics/Vehicle/VehicleSolver.h
++++ b/Engine/PhysicalDynamics/Vehicle/VehicleSolver.h
+@@ -255,6 +255,9 @@ public:
+     [[nodiscard]] const VehicleTelemetry& Telemetry() const noexcept { return CurrentTelemetry; }
+     [[nodiscard]] const std::vector<XPBDSoftTyre>& Tyres() const noexcept { return SoftTyres; }
+     [[nodiscard]] bool Constructed() const noexcept { return ConstructionComplete; }
++    /// 📦 Largest chassis acceleration between two consecutive steps before a spike dump is written to the log. [m/s^2]
++    void AssignSpikeThreshold(float Threshold) noexcept { SpikeThreshold = Threshold; }
++    [[nodiscard]] uint32_t SpikeDumps() const noexcept { return SpikeDumpCount; }
+ 
+ private:
+     [[nodiscard]] static float Clamp(float Amount, float Lower, float Upper) noexcept { return Amount < Lower ? Lower : (Amount > Upper ? Upper : Amount); }
+@@ -262,6 +265,13 @@ private:
+     // The two driving layers Step() dispatches to (selected by ActiveConfiguration.ActiveScheme).
+     void StepSimple(float Δτ) noexcept;   // Phase-3 friction-circle layer (validated fallback)
+     void StepPacejka(float Δτ) noexcept;  // production drivetrain + Pacejka slip layer
++    /// 📦 Compares the chassis velocity with the previous step's and, when it jumped, prints the previous step's forces per wheel.
++    void InspectSpike(float Δτ) noexcept;
++    ChassisState               LastChassis;               // chassis as read at the previous step
++    bool                       LastChassisValid = false;  // [-] LastChassis holds a real reading
++    float                      SpikeThreshold = 80.0f;    // [m/s^2] about 8 g
++    uint32_t                   SpikeDumpCount = 0u;       // [cnt] dumps written; capped so a launch loop cannot flood the log
++    uint64_t                   StepSerial = 0u;           // [cnt] steps taken since Build
+ 
+     VehicleSolverConfiguration    ActiveConfiguration;
+     Hooks                      ChassisHooks;
+-- 
+2.39.5
+

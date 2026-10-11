@@ -1,0 +1,2919 @@
+From 65f43d3c2dae3a11aa8088744c8876c4bfcd7844 Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 16:01:59 +0000
+Subject: [PATCH 01/10] Remove Surfel GI (stage, shaders, CPU reference, build
+ entries); SDF stage is the only non-raytraced GI. Also repairs
+ RecordComputeCommands head deleted in 1784c86 (restored from 323df75).
+
+---
+ CMakeLists.txt                                |   5 -
+ .../UnifiedMaterialEvaluation.h               |  11 +-
+ Engine/DeviceExchange/SurfelGIStage.cpp       | 511 --------------
+ Engine/DeviceExchange/SurfelGIStage.h         | 157 -----
+ Engine/DeviceExchange/SwapchainExchange.cpp   | 157 +----
+ Engine/DeviceExchange/SwapchainExchange.h     |   9 +-
+ Engine/DeviceExchange/VisibilityExchange.cpp  |   2 +-
+ .../DisplayPresentation/ControlCentreHost.h   |   4 +-
+ .../DisplayPresentation/ReSTIRIntegrator.cpp  |   2 +-
+ .../DisplayPresentation/SurfelReference.cpp   | 195 ------
+ Engine/DisplayPresentation/SurfelReference.h  |  84 ---
+ Engine/Host/FrontierRuntime.cpp               |   5 +-
+ .../ProjectInterchange/ProjectInterchange.h   |   2 +-
+ .../Shaders/DistanceFieldGIResolveBody.slang  |   2 +-
+ Engine/Shaders/SceneMaterialResolve.slang     |   8 +-
+ Engine/Shaders/SurfaceResolve.slang           |   2 +-
+ Engine/Shaders/SurfelCommit.slang             |  39 --
+ Engine/Shaders/SurfelGIResolve.slang          | 283 --------
+ Engine/Shaders/SurfelIrradianceUpdate.slang   | 237 -------
+ Projects/Project-Drive/Makefile               |  14 +-
+ Projects/Project-Drive/Source/DriveCourse.h   |   2 +-
+ .../Source/ProjectDriveInterchange.cpp        |   2 +-
+ .../Project-Drive/Source/SurfelReference.cpp  | 638 ------------------
+ .../Host/MaterialLevelViewport.cpp            |   4 +-
+ Tools/Build/PackageWindowsProjects.py         |   2 +-
+ Tools/Build/ToolchainSequence.ps1             |   5 -
+ 26 files changed, 59 insertions(+), 2323 deletions(-)
+ delete mode 100644 Engine/DeviceExchange/SurfelGIStage.cpp
+ delete mode 100644 Engine/DeviceExchange/SurfelGIStage.h
+ delete mode 100644 Engine/DisplayPresentation/SurfelReference.cpp
+ delete mode 100644 Engine/DisplayPresentation/SurfelReference.h
+ delete mode 100644 Engine/Shaders/SurfelCommit.slang
+ delete mode 100644 Engine/Shaders/SurfelGIResolve.slang
+ delete mode 100644 Engine/Shaders/SurfelIrradianceUpdate.slang
+ delete mode 100644 Projects/Project-Drive/Source/SurfelReference.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a40ef4c..ac28e9a 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -119,8 +119,6 @@ set(SHADER_TABLE
+     "ReSTIRViewport.slang|compute|ReSTIRViewport.spv"
+     "RasterViewport.slang|compute|RasterViewport.spv"
+     "RayQueryViewport.slang|compute|RayQueryViewport.spv"
+-    "SurfelIrradianceUpdate.slang|compute|SurfelIrradianceUpdate.spv"
+-    "SurfelCommit.slang|compute|SurfelCommit.spv"
+     "DistanceFieldConstruct.slang|compute|DistanceFieldConstruct.spv"
+     "DistanceFieldCapture.slang|compute|DistanceFieldCapture.spv"
+     "DistanceFieldCaptureFixed.slang|compute|DistanceFieldCaptureFixed.spv"
+@@ -129,7 +127,6 @@ set(SHADER_TABLE
+     "DistanceFieldGatherFixed.slang|compute|DistanceFieldGatherFixed.spv"
+     "DistanceFieldGIResolveFixed.slang|compute|DistanceFieldGIResolveFixed.spv"
+     "DistanceFieldGIResolve.slang|compute|DistanceFieldGIResolve.spv"
+-    "SurfelGIResolve.slang|compute|SurfelGIResolve.spv"
+     "ClusterCull.slang|compute|ClusterCull.spv"
+     "HiZReduce.slang|compute|HiZReduce.spv"
+     "AtrousDenoise.slang|compute|AtrousDenoise.spv"
+@@ -219,7 +216,6 @@ set(FRONTIER_ENGINE_SOURCES
+     Engine/DisplayPresentation/IconArt.cpp
+     Engine/DisplayPresentation/IconPresentation.cpp
+     Engine/DisplayPresentation/VectorCodec.cpp
+-    Engine/DisplayPresentation/SurfelReference.cpp
+     Engine/DisplayPresentation/FontCodec.cpp
+     Engine/DisplayPresentation/ConfigurationRegistry.cpp
+     Engine/DisplayPresentation/ControlCentreHost.cpp
+@@ -327,7 +323,6 @@ set(FRONTIER_HOST_SOURCES
+     Engine/DeviceExchange/RayQueryExchange.cpp
+     Engine/GeometricRaster/DistanceFieldStructure.cpp
+     Engine/DeviceExchange/DistanceFieldGIStage.cpp
+-    Engine/DeviceExchange/SurfelGIStage.cpp
+     Engine/DeviceExchange/RayTracingCapabilitySet.cpp
+     Engine/DeviceExchange/VisibilityExchange.cpp
+     Engine/DeviceExchange/InterfaceExchange.cpp
+diff --git a/Engine/ContentInterchange/UnifiedMaterialEvaluation.h b/Engine/ContentInterchange/UnifiedMaterialEvaluation.h
+index f996520..3d9e910 100644
+--- a/Engine/ContentInterchange/UnifiedMaterialEvaluation.h
++++ b/Engine/ContentInterchange/UnifiedMaterialEvaluation.h
+@@ -10,7 +10,6 @@
+ //       VisibilityRaster    a hand-rolled Lambert + single GGX lobe off MaterialRecord's flattened 64-byte header
+ //                           (AlbedoR/G/B, Roughness, Metalness). No coat, no flakes, no transmission, no fuzz,
+ //                           no thin film, no energy compensation.
+-//       SurfelReference     a local MaterialAlbedo() switch returning one RGB constant per family.
+ //       MaterialLevelViewport  the real thing — MaterialEvaluation.slang through a private TranscribeShadingRecord.
+ //
+ //    That made the "GI off / GI on / RT on" comparison meaningless: the columns differed by MATERIAL MODEL as much
+@@ -26,8 +25,8 @@
+ //    not, now that one sky feeds both." The same argument applies to the BSDF, and this file finishes the job.
+ //
+ //    WHAT STILL LEGITIMATELY DIFFERS between the paths — and must, because it is the whole point:
+-//       * transport: raster has no ray queries at all (its quarantine gate greps for them), Surfel carries a bounced
+-//         term through a world-space surfel field, ReSTIR resamples reservoirs of traced direct light.
++//       * transport: raster has no ray queries at all (its quarantine gate greps for them), the distance-field GI carries a bounced
++//         term through traced SDF radiance, ReSTIR resamples reservoirs of traced direct light.
+ //       * visibility: shadow maps vs traced occlusion.
+ //       * sampling: one shading point per pixel vs many.
+ //    None of those are reasons to evaluate a different BRDF.
+@@ -88,7 +87,7 @@ inline vec4 FetchSheenFull(float mu, float alpha)
+ #define FRONTIER_AUTOMOTIVE_SHOWCASE 1
+ // INTERNAL LINKAGE. MaterialEvaluation.slang is shader text: its functions are written at namespace scope
+ //    with external linkage, which is fine while exactly one translation unit in a binary includes it. The
+-//    moment two do -- here, VisibilityRaster and SurfelReference in the same link -- the linker reports
++//    moment two do -- e.g. VisibilityRaster and a CPU reference in the same link -- the linker reports
+ //    multiple definition of EvaluateBsdf, SampleBsdf, PdfBsdf and the rest. An anonymous namespace gives each
+ //    TU its own copy, which is what an inline function would have done had the shader been written as one.
+ //    Nothing crosses a TU boundary here: every caller evaluates the lobe set locally.
+@@ -227,8 +226,8 @@ namespace Frontier::UnifiedMaterial {
+ //------------------------------------------------------------------------------------------------------------------------
+ // The device-side MaterialSlabRecord unpacked into the evaluator's ShadingRecord. Lifted out of
+ //    MaterialLevelViewport::TranscribeShadingRecord so there is ONE transcription rather than one per host —
+-//    it was the third hand-written copy of this mapping, after the kernel's ResolveMaterial and the surfel
+-//    passes' (which did not have one at all, and approximated instead).
++//    it was the third hand-written copy of this mapping, after the kernel's ResolveMaterial and the retired
++//    surface-cache passes' (which did not have one at all, and approximated instead).
+ //
+ //    ⚠️ This is the no-texture case: a slab's constant channels only. ResolveMaterial on the device also folds
+ //    in the bound textures and the surface frame; a host that has textures must do the same after calling this.
+diff --git a/Engine/DeviceExchange/SurfelGIStage.cpp b/Engine/DeviceExchange/SurfelGIStage.cpp
+deleted file mode 100644
+index 01295ca..0000000
+--- a/Engine/DeviceExchange/SurfelGIStage.cpp
++++ /dev/null
+@@ -1,511 +0,0 @@
+-//============================================================================================================================================
+-// 📦 Engine/DeviceExchange/SurfelGIStage.cpp — implementation. See SurfelGIStage.h for the contract.
+-//============================================================================================================================================
+-#include "SurfelGIStage.h"
+-
+-#include <algorithm>
+-#include <array>
+-#include <vector>
+-#include <cmath>
+-#include <cstring>
+-#include <fstream>
+-#include <iostream>
+-
+-namespace Frontier
+-{
+-namespace
+-{
+-    //--------------------------------------------------------------------------------------------------------------------
+-    // Buffer allocation — mirrors SwapchainExchange::AllocateBuffer so the two agree on memory-type selection.
+-    //--------------------------------------------------------------------------------------------------------------------
+-    bool AllocateBuffer(VkDevice Device, const VkPhysicalDeviceMemoryProperties& Mem, VkDeviceSize Bytes,
+-                        VkBufferUsageFlags Usage, uint32_t MemoryFlags, VkBuffer& OutBuffer, VkDeviceMemory& OutMemory) noexcept
+-    {
+-        VkBufferCreateInfo BufferInfo{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+-        BufferInfo.size = Bytes; BufferInfo.usage = Usage; BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+-        if (vkCreateBuffer(Device, &BufferInfo, nullptr, &OutBuffer) != VK_SUCCESS) return false;
+-
+-        VkMemoryRequirements Req{};
+-        vkGetBufferMemoryRequirements(Device, OutBuffer, &Req);
+-
+-        uint32_t TypeIndex = UINT32_MAX;
+-        for (uint32_t i = 0u; i < Mem.memoryTypeCount; ++i)
+-            if ((Req.memoryTypeBits & (1u << i)) && (Mem.memoryTypes[i].propertyFlags & MemoryFlags) == MemoryFlags) { TypeIndex = i; break; }
+-        if (TypeIndex == UINT32_MAX) return false;
+-
+-        VkMemoryAllocateInfo AllocInfo{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
+-        AllocInfo.allocationSize = Req.size; AllocInfo.memoryTypeIndex = TypeIndex;
+-        if (vkAllocateMemory(Device, &AllocInfo, nullptr, &OutMemory) != VK_SUCCESS) return false;
+-        return vkBindBufferMemory(Device, OutBuffer, OutMemory, 0) == VK_SUCCESS;
+-    }
+-
+-    std::vector<uint32_t> LoadSpirv(const std::string& Path) noexcept
+-    {
+-        std::ifstream File(Path, std::ios::binary | std::ios::ate);
+-        if (!File.is_open()) { std::cerr << "[SurfelGIStage] cannot open SPIR-V: " << Path << "\n"; return {}; }
+-        const std::streamsize Bytes = File.tellg();
+-        if (Bytes < 4 || (Bytes % 4) != 0) { std::cerr << "[SurfelGIStage] malformed SPIR-V: " << Path << "\n"; return {}; }
+-        std::vector<uint32_t> Spirv(static_cast<size_t>(Bytes) / 4u);
+-        File.seekg(0); File.read(reinterpret_cast<char*>(Spirv.data()), Bytes);
+-        return Spirv;
+-    }
+-
+-    VkShaderModule MakeModule(VkDevice Device, const std::string& Path) noexcept
+-    {
+-        const std::vector<uint32_t> Spirv = LoadSpirv(Path);
+-        if (Spirv.empty()) return VK_NULL_HANDLE;
+-        VkShaderModuleCreateInfo Info{ VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+-        Info.codeSize = Spirv.size() * 4u; Info.pCode = Spirv.data();
+-        VkShaderModule Module = VK_NULL_HANDLE;
+-        (void)vkCreateShaderModule(Device, &Info, nullptr, &Module);
+-        return Module;
+-    }
+-
+-    VkDescriptorSetLayoutBinding StorageBuffer(uint32_t b) noexcept
+-    { return { b, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
+-    VkDescriptorSetLayoutBinding StorageImage(uint32_t b) noexcept
+-    { return { b, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1u, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
+-    VkDescriptorSetLayoutBinding Sampled(uint32_t b, uint32_t Count = 1u) noexcept
+-    { return { b, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, Count, VK_SHADER_STAGE_COMPUTE_BIT, nullptr }; }
+-    // Matches CellHash() in SurfelIrradianceUpdate.slang / SurfelGIResolve.slang exactly.
+-    inline uint32_t CellHash(int cx, int cy, int cz, uint32_t hashSize) noexcept
+-    {
+-        const uint32_t h = static_cast<uint32_t>(cx + 1024) * 73856093u
+-                         ^ static_cast<uint32_t>(cy + 1024) * 19349663u
+-                         ^ static_cast<uint32_t>(cz + 1024) * 83492791u;
+-        return h % hashSize;
+-    }
+-}
+-
+-//========================================================================================================================
+-// Bring-up / teardown
+-//========================================================================================================================
+-bool SurfelGIStage::Bring(const SurfelStageInit& Init) noexcept
+-{
+-    I = Init;
+-    if (I.Device == VK_NULL_HANDLE || I.CwbvhNodeBuffer == VK_NULL_HANDLE || I.CwbvhLeafBuffer == VK_NULL_HANDLE ||
+-        I.OutputImageView == VK_NULL_HANDLE || I.SurfaceImageView == VK_NULL_HANDLE || I.NormalImageView == VK_NULL_HANDLE ||
+-        I.TriangleBuffer == VK_NULL_HANDLE || I.MaterialBuffer == VK_NULL_HANDLE || I.InstanceBuffer == VK_NULL_HANDLE ||
+-        I.SlabBuffer == VK_NULL_HANDLE || I.VertexBuffer == VK_NULL_HANDLE || I.IndexBuffer == VK_NULL_HANDLE ||
+-        I.EnergyLutView == VK_NULL_HANDLE || I.SheenLutView == VK_NULL_HANDLE || I.GridCellSize <= 0.0f)
+-    {
+-        std::cerr << "[SurfelGIStage] deferred: scene traversal, visibility targets, scene buffers or shading "
+-                     "tables are not resident.\n";
+-        I = {};
+-        return false;
+-    }
+-    HostSurfels.reserve(I.MaxSurfels);
+-    HostGridHead.assign(I.GridHashSize, 0);
+-    HostGridNext.assign(I.MaxSurfels, 0);
+-    if (!CreateBuffers())   { std::cerr << "[SurfelGIStage] buffer allocation failed\n"; Destroy(); return false; }
+-    if (!CreatePipelines()) { std::cerr << "[SurfelGIStage] pipeline creation failed\n"; Destroy(); return false; }
+-    if (!WriteDescriptors()){ std::cerr << "[SurfelGIStage] descriptor write failed\n"; Destroy(); return false; }
+-    std::cerr << "[SurfelGIStage] up: max=" << I.MaxSurfels << " grid=" << I.GridHashSize
+-              << " cell=" << I.GridCellSize << " m\n";
+-    return true;
+-}
+-
+-bool SurfelGIStage::CreateBuffers() noexcept
+-{
+-    const VkDeviceSize SurfelBytes = VkDeviceSize(I.MaxSurfels) * sizeof(GpuSurfel);
+-    const VkDeviceSize HeadBytes   = VkDeviceSize(I.GridHashSize) * sizeof(int32_t);
+-    const VkDeviceSize NextBytes   = VkDeviceSize(I.MaxSurfels) * sizeof(int32_t);
+-    const uint32_t DeviceLocal = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+-    const uint32_t HostVisible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+-    const VkBufferUsageFlags Ssbo = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+-    const VkBufferUsageFlags Src  = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+-
+-    return AllocateBuffer(I.Device, I.MemoryProperties, SurfelBytes, Ssbo, DeviceLocal, SurfelBuffer, SurfelMem)
+-        && AllocateBuffer(I.Device, I.MemoryProperties, HeadBytes,   Ssbo, DeviceLocal, HeadBuffer,   HeadMem)
+-        && AllocateBuffer(I.Device, I.MemoryProperties, NextBytes,   Ssbo, DeviceLocal, NextBuffer,   NextMem)
+-        && AllocateBuffer(I.Device, I.MemoryProperties, SurfelBytes, Src,  HostVisible, SurfelStage,  SurfelStageMem)
+-        && AllocateBuffer(I.Device, I.MemoryProperties, HeadBytes,   Src,  HostVisible, HeadStage,    HeadStageMem)
+-        && AllocateBuffer(I.Device, I.MemoryProperties, NextBytes,   Src,  HostVisible, NextStage,    NextStageMem);
+-}
+-
+-bool SurfelGIStage::CreatePipelines() noexcept
+-{
+-    auto BuildLayout = [&](const std::vector<VkDescriptorSetLayoutBinding>& Bindings,
+-                           uint32_t PushBytes, VkDescriptorSetLayout& SetLayout, VkPipelineLayout& PipeLayout)
+-    {
+-        VkDescriptorSetLayoutCreateInfo LI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+-        LI.bindingCount = static_cast<uint32_t>(Bindings.size()); LI.pBindings = Bindings.data();
+-        if (vkCreateDescriptorSetLayout(I.Device, &LI, nullptr, &SetLayout) != VK_SUCCESS) return false;
+-        VkPushConstantRange Push{ VK_SHADER_STAGE_COMPUTE_BIT, 0u, PushBytes };
+-        VkPipelineLayoutCreateInfo PI{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+-        PI.setLayoutCount = 1u; PI.pSetLayouts = &SetLayout; PI.pushConstantRangeCount = 1u; PI.pPushConstantRanges = &Push;
+-        return vkCreatePipelineLayout(I.Device, &PI, nullptr, &PipeLayout) == VK_SUCCESS;
+-    };
+-    auto BuildPipeline = [&](const std::string& Spv, VkPipelineLayout PipeLayout, VkPipeline& Out)
+-    {
+-        VkShaderModule Module = MakeModule(I.Device, I.SpirvDirectory + "/" + Spv);
+-        if (Module == VK_NULL_HANDLE) return false;
+-        VkPipelineShaderStageCreateInfo Stage{ VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+-        Stage.stage = VK_SHADER_STAGE_COMPUTE_BIT; Stage.module = Module; Stage.pName = "main";
+-        VkComputePipelineCreateInfo CI{ VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };
+-        CI.stage = Stage; CI.layout = PipeLayout;
+-        const VkResult R = vkCreateComputePipelines(I.Device, VK_NULL_HANDLE, 1u, &CI, nullptr, &Out);
+-        vkDestroyShaderModule(I.Device, Module, nullptr);
+-        return R == VK_SUCCESS;
+-    };
+-
+-    // Both shading passes carry the full scene now, so the pool has to cover it: 6 scene SSBOs each, the two
+-    //    shading LUTs each, and one variable-count bindless table each. The table is the expensive entry — it is
+-    //    sized by the device's slot capacity exactly as the ReSTIR set is.
+-    const uint32_t Slots = I.TextureCapacity;                      // 0 ⇒ no descriptor indexing; the table is 1 slot
+-    const uint32_t TableSize = Slots > 0u ? Slots : 1u;
+-    std::array<VkDescriptorPoolSize, 3> PoolSizes{{
+-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,        24u },                 // update 11 + commit 1 + resolve 11 (+slack)
+-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          4u },                 // resolve: output, surface, normal (+slack)
+-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2u * TableSize + 8u },// two LUTs + the sky cube + two tables
+-    }};
+-    VkDescriptorPoolCreateInfo PoolInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+-    PoolInfo.maxSets       = 3u;
+-    PoolInfo.flags         = Slots > 0u ? VkDescriptorPoolCreateFlags(VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT) : 0u;
+-    PoolInfo.poolSizeCount = static_cast<uint32_t>(PoolSizes.size());
+-    PoolInfo.pPoolSizes    = PoolSizes.data();
+-    if (vkCreateDescriptorPool(I.Device, &PoolInfo, nullptr, &DescriptorPool) != VK_SUCCESS) return false;
+-
+-    // The bindless table is the LAST binding in both shading sets (31), variable-count and partially bound, which
+-    //    is what VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT requires. Matching the kernel's set exactly
+-    //    means the same SPIR-V declaration compiles against either.
+-    auto BuildShadingLayout = [&](std::vector<VkDescriptorSetLayoutBinding> Bindings,
+-                                  VkDescriptorSetLayout& SetLayout, VkPipelineLayout& PipeLayout)
+-    {
+-        Bindings.push_back(Sampled(31u, TableSize));
+-        std::vector<VkDescriptorBindingFlags> Flags(Bindings.size(), 0u);
+-        if (Slots > 0u) Flags.back() = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+-                                     | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT
+-                                     | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+-        VkDescriptorSetLayoutBindingFlagsCreateInfo FlagsInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO };
+-        FlagsInfo.bindingCount = static_cast<uint32_t>(Flags.size());
+-        FlagsInfo.pBindingFlags = Flags.data();
+-        VkDescriptorSetLayoutCreateInfo LI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+-        LI.pNext = Slots > 0u ? &FlagsInfo : nullptr;
+-        LI.flags = Slots > 0u ? VkDescriptorSetLayoutCreateFlags(VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT) : 0u;
+-        LI.bindingCount = static_cast<uint32_t>(Bindings.size()); LI.pBindings = Bindings.data();
+-        if (vkCreateDescriptorSetLayout(I.Device, &LI, nullptr, &SetLayout) != VK_SUCCESS) return false;
+-        VkPushConstantRange Push{ VK_SHADER_STAGE_COMPUTE_BIT, 0u, 96u };
+-        VkPipelineLayoutCreateInfo PI{ VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+-        PI.setLayoutCount = 1u; PI.pSetLayouts = &SetLayout; PI.pushConstantRangeCount = 1u; PI.pPushConstantRanges = &Push;
+-        return vkCreatePipelineLayout(I.Device, &PI, nullptr, &PipeLayout) == VK_SUCCESS;
+-    };
+-
+-    // push blocks: update/resolve = 6×vec4/uvec4 = 96 B; commit = one uvec4 = 16 B (see the shaders).
+-    // Update  — 0/1/2 surfel field · 3/4/5 tri/mat/inst · 8/9 CWBVH · 10/11/12 slab/vtx/idx · 13/14 LUTs · 31 table.
+-    if (!BuildShadingLayout({ StorageBuffer(0), StorageBuffer(1), StorageBuffer(2),
+-                              StorageBuffer(3), StorageBuffer(4), StorageBuffer(5),
+-                              StorageBuffer(8), StorageBuffer(9),
+-                              StorageBuffer(10), StorageBuffer(11), StorageBuffer(12),
+-                              Sampled(13), Sampled(14) },
+-                            UpdateLayout, UpdatePipeLayout)) return false;
+-    if (!BuildLayout({ StorageBuffer(0) }, 16u, CommitLayout, CommitPipeLayout)) return false;
+-    // Resolve — 0/1/2 images · 8/9 CWBVH · 10/11/12 surfel field · 13/14 LUTs · 15–20 scene · 31 table.
+-    //    3 (albedo) and 4 (material aux) are GONE: the slab is decoded from SurfaceImage.w instead of being
+-    //    re-encoded into an rgba8 and an rgba16f on the way past.
+-    if (!BuildShadingLayout({ StorageImage(0), StorageImage(1), StorageImage(2),
+-                              StorageBuffer(8), StorageBuffer(9),
+-                              StorageBuffer(10), StorageBuffer(11), StorageBuffer(12),
+-                              Sampled(13), Sampled(14),
+-                              StorageBuffer(15), StorageBuffer(16), StorageBuffer(17),
+-                              StorageBuffer(18), StorageBuffer(19), StorageBuffer(20) },
+-                            ResolveLayout, ResolvePipeLayout)) return false;
+-
+-    return BuildPipeline("SurfelIrradianceUpdate.spv", UpdatePipeLayout,  UpdatePipeline)
+-        && BuildPipeline("SurfelCommit.spv",           CommitPipeLayout,  CommitPipeline)
+-        && BuildPipeline("SurfelGIResolve.spv",        ResolvePipeLayout, ResolvePipeline);
+-}
+-
+-bool SurfelGIStage::WriteDescriptors() noexcept
+-{
+-    std::array<VkDescriptorSetLayout, 3> Layouts{ UpdateLayout, CommitLayout, ResolveLayout };
+-    std::array<VkDescriptorSet*, 3>      Sets{ &UpdateSet, &CommitSet, &ResolveSet };
+-    // The two shading sets end in a variable-count bindless table, so their allocation has to say how many slots
+-    //    it actually wants. The commit set (index 1) has no table and must not carry the chain.
+-    const uint32_t VariableCount = I.TextureCapacity > 0u ? I.TextureCapacity : 1u;
+-    VkDescriptorSetVariableDescriptorCountAllocateInfo VariableInfo{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO };
+-    VariableInfo.descriptorSetCount = 1u; VariableInfo.pDescriptorCounts = &VariableCount;
+-    for (size_t i = 0; i < 3; ++i)
+-    {
+-        VkDescriptorSetAllocateInfo AI{ VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+-        AI.pNext = (i != 1u && I.TextureCapacity > 0u) ? &VariableInfo : nullptr;
+-        AI.descriptorPool = DescriptorPool; AI.descriptorSetCount = 1u; AI.pSetLayouts = &Layouts[i];
+-        if (vkAllocateDescriptorSets(I.Device, &AI, Sets[i]) != VK_SUCCESS) return false;
+-    }
+-
+-    auto Buf = [](VkBuffer b){ return VkDescriptorBufferInfo{ b, 0u, VK_WHOLE_SIZE }; };
+-    auto Img = [](VkImageView v){ return VkDescriptorImageInfo{ VK_NULL_HANDLE, v, VK_IMAGE_LAYOUT_GENERAL }; };
+-    const VkDescriptorBufferInfo Surfel = Buf(SurfelBuffer), Head = Buf(HeadBuffer), Next = Buf(NextBuffer);
+-    const VkDescriptorBufferInfo Nodes  = Buf(I.CwbvhNodeBuffer), Tris = Buf(I.CwbvhLeafBuffer);
+-    const VkDescriptorImageInfo  Out = Img(I.OutputImageView), Surf = Img(I.SurfaceImageView), Norm = Img(I.NormalImageView);
+-    // The scene the two shading passes decode — the same handles the ReSTIR kernel binds, borrowed, not copied.
+-    const VkDescriptorBufferInfo Tri   = Buf(I.TriangleBuffer), Mat = Buf(I.MaterialBuffer), Inst = Buf(I.InstanceBuffer);
+-    const VkDescriptorBufferInfo Slab  = Buf(I.SlabBuffer), Vtx = Buf(I.VertexBuffer), Idx = Buf(I.IndexBuffer);
+-    auto Tex = [&](VkImageView v){ return VkDescriptorImageInfo{ I.TableSampler, v, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL }; };
+-    const VkDescriptorImageInfo  Energy = Tex(I.EnergyLutView), Sheen = Tex(I.SheenLutView);
+-    // The bindless table. Unused slots repeat slot 0 rather than staying null: PARTIALLY_BOUND permits null, but
+-    //    only where the shader provably never indexes it, and kMaterialTextureNone is the only guard there is.
+-    std::vector<VkDescriptorImageInfo> Table;
+-    if (I.TextureCapacity > 0u && I.TextureCount > 0u)
+-    {
+-        Table.resize(I.TextureCapacity);
+-        for (uint32_t Slot = 0u; Slot < I.TextureCapacity; ++Slot)
+-            Table[Slot] = VkDescriptorImageInfo{ I.TextureSampler,
+-                                                 I.TextureViews[Slot < I.TextureCount ? Slot : 0u],
+-                                                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+-    }
+-
+-    std::vector<VkWriteDescriptorSet> W;
+-    auto WB = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorBufferInfo* i)
+-    { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, nullptr, i, nullptr }); };
+-    auto WI = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorImageInfo* i)
+-    { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, i, nullptr, nullptr }); };
+-    auto WS = [&](VkDescriptorSet s, uint32_t b, const VkDescriptorImageInfo* i)
+-    { W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, b, 0u, 1u, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, i, nullptr, nullptr }); };
+-    auto WTable = [&](VkDescriptorSet s)
+-    {
+-        if (Table.empty()) return;
+-        W.push_back({ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, s, 31u, 0u,
+-                      static_cast<uint32_t>(Table.size()), VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+-                      Table.data(), nullptr, nullptr });
+-    };
+-
+-    // Update: b0/1/2 surfel field · b3/4/5 tri/mat/inst · b8/9 CWBVH · b10/11/12 slab/vtx/idx · b13/14 LUTs · b31 table
+-    WB(UpdateSet, 0, &Surfel); WB(UpdateSet, 1, &Head); WB(UpdateSet, 2, &Next);
+-    WB(UpdateSet, 3, &Tri); WB(UpdateSet, 4, &Mat); WB(UpdateSet, 5, &Inst);
+-    WB(UpdateSet, 8, &Nodes); WB(UpdateSet, 9, &Tris);
+-    WB(UpdateSet, 10, &Slab); WB(UpdateSet, 11, &Vtx); WB(UpdateSet, 12, &Idx);
+-    WS(UpdateSet, 13, &Energy); WS(UpdateSet, 14, &Sheen); WTable(UpdateSet);
+-    // Commit: b0 Surfels
+-    WB(CommitSet, 0, &Surfel);
+-    // Resolve: images 0/1/2 · b8/9 CWBVH · b10/11/12 surfel field · b13/14 LUTs · b15–20 scene · b31 table.
+-    //    The albedo and material-aux images are gone with the approximation that needed them.
+-    WI(ResolveSet, 0, &Out); WI(ResolveSet, 1, &Surf); WI(ResolveSet, 2, &Norm);
+-    WB(ResolveSet, 8, &Nodes); WB(ResolveSet, 9, &Tris);
+-    WB(ResolveSet, 10, &Surfel); WB(ResolveSet, 11, &Head); WB(ResolveSet, 12, &Next);
+-    WS(ResolveSet, 13, &Energy); WS(ResolveSet, 14, &Sheen);
+-    WB(ResolveSet, 15, &Tri); WB(ResolveSet, 16, &Mat); WB(ResolveSet, 17, &Inst);
+-    WB(ResolveSet, 18, &Slab); WB(ResolveSet, 19, &Vtx); WB(ResolveSet, 20, &Idx);
+-    WTable(ResolveSet);
+-
+-    vkUpdateDescriptorSets(I.Device, static_cast<uint32_t>(W.size()), W.data(), 0u, nullptr);
+-    return true;
+-}
+-
+-//========================================================================================================================
+-// Host-side field maintenance + hash-grid build
+-//========================================================================================================================
+-void SurfelGIStage::UpdateField(const std::vector<SurfaceSample>& Samples, const SurfelFrameParams& Params) noexcept
+-{
+-    if (!IsReady()) return;
+-    ++FrameCounter;
+-    const float cell = I.GridCellSize;
+-
+-    // 1) The GPU owns age and irradiance after the first upload. Keeping the CPU mirror structural-only is
+-    // essential: uploading it again every frame would reset the GPU running mean to zero and defeat persistence.
+-
+-    // 2) spawn: for each supplied surface sample, if no live surfel already covers it (within its radius on the
+-    //    tangent plane) allocate one — reusing a dead slot when available, else growing the pool up to MaxSurfels.
+-    uint32_t spawned = 0u, recycled = 0u;
+-    bool topologyChanged = false;
+-    auto radiusAt = [&](const float* /*p*/) { return cell; };   // one surfel per cell; caller scales cell to the scene
+-    for (const SurfaceSample& q : Samples)
+-    {
+-        const int cx = int(std::floor((q.Position[0] - Params.GridOrigin[0]) / cell));
+-        const int cy = int(std::floor((q.Position[1] - Params.GridOrigin[1]) / cell));
+-        const int cz = int(std::floor((q.Position[2] - Params.GridOrigin[2]) / cell));
+-        // covered? scan the cell chain we built last frame (cheap; empty on frame 0)
+-        bool covered = false;
+-        if (!HostGridHead.empty())
+-        {
+-            int idx = HostGridHead[CellHash(cx, cy, cz, I.GridHashSize)] - 1;
+-            for (int guard = 0; idx >= 0 && guard < 256; ++guard)
+-            {
+-                const GpuSurfel& s = HostSurfels[idx];
+-                const float d[3]{ q.Position[0]-s.PositionRadius[0], q.Position[1]-s.PositionRadius[1], q.Position[2]-s.PositionRadius[2] };
+-                const float dist = std::sqrt(d[0]*d[0]+d[1]*d[1]+d[2]*d[2]);
+-                if (s.Albedo[3] > 0.5f && dist < s.PositionRadius[3]) { covered = true; break; }
+-                idx = HostGridNext[idx] - 1;
+-            }
+-        }
+-        if (covered) continue;
+-
+-        GpuSurfel s{};
+-        const float r = radiusAt(q.Position);
+-        s.PositionRadius[0]=q.Position[0]; s.PositionRadius[1]=q.Position[1]; s.PositionRadius[2]=q.Position[2]; s.PositionRadius[3]=r;
+-        s.NormalAge[0]=q.Normal[0]; s.NormalAge[1]=q.Normal[1]; s.NormalAge[2]=q.Normal[2]; s.NormalAge[3]=0.0f;
+-        s.Albedo[0]=q.Albedo[0]; s.Albedo[1]=q.Albedo[1]; s.Albedo[2]=q.Albedo[2]; s.Albedo[3]=1.0f;   // alive
+-
+-        // reuse a dead slot if one exists, else append
+-        bool placed = false;
+-        for (uint32_t k = 0; k < HostSurfels.size(); ++k)
+-            if (HostSurfels[k].Albedo[3] < 0.5f) { HostSurfels[k] = s; ++recycled; placed = true; topologyChanged = true; break; }
+-        if (!placed && HostSurfels.size() < I.MaxSurfels) { HostSurfels.push_back(s); ++spawned; topologyChanged = true; }
+-    }
+-
+-    // 3) build the hash grid on the host: clear heads, then prepend each live surfel to its cell chain (+1 encoding).
+-    LiveCount = 0u;
+-    std::fill(HostGridHead.begin(), HostGridHead.end(), 0);
+-    if (HostGridNext.size() < HostSurfels.size()) HostGridNext.resize(HostSurfels.size(), 0);
+-    for (uint32_t i = 0; i < HostSurfels.size(); ++i)
+-    {
+-        const GpuSurfel& s = HostSurfels[i];
+-        if (s.Albedo[3] < 0.5f) { HostGridNext[i] = 0; continue; }
+-        ++LiveCount;
+-        const int cx = int(std::floor((s.PositionRadius[0] - Params.GridOrigin[0]) / cell));
+-        const int cy = int(std::floor((s.PositionRadius[1] - Params.GridOrigin[1]) / cell));
+-        const int cz = int(std::floor((s.PositionRadius[2] - Params.GridOrigin[2]) / cell));
+-        const uint32_t h = CellHash(cx, cy, cz, I.GridHashSize);
+-        HostGridNext[i]  = HostGridHead[h];        // previous head becomes our next (+1-encoded; 0 = end)
+-        HostGridHead[h]  = int32_t(i) + 1;         // we are the new head (+1-encoded)
+-    }
+-
+-    // Stage a structural refresh only on population changes. The compute passes retain and refine Irradiance on
+-    // ordinary frames; a full host upload on every frame would make the advertised running mean non-persistent.
+-    if (topologyChanged)
+-    {
+-        FieldUploadPending = true;
+-        UploadBuffers();
+-    }
+-
+-    // 4) log (task requirement). Throttle to once a second at 60 fps so the console is readable.
+-    if (FrameCounter <= 3 || (FrameCounter % 60u) == 0u)
+-    {
+-        const float coverage = I.GridHashSize ? float(LiveCount) / float(I.GridHashSize) : 0.0f;
+-        std::cerr << "[SurfelGI] frame " << FrameCounter
+-                  << "  live=" << LiveCount << "/" << I.MaxSurfels
+-                  << "  spawned=" << spawned << "  recycled=" << recycled
+-                  << "  coverage=" << coverage << " surfels/cell"
+-                  << "  rays=" << Params.RayCount << "\n";
+-    }
+-}
+-
+-void SurfelGIStage::UploadBuffers() noexcept
+-{
+-    if (!FieldUploadPending) return;
+-    auto Copy = [&](VkDeviceMemory Mem, const void* Src, VkDeviceSize Bytes)
+-    {
+-        if (Bytes == 0) return;
+-        void* Mapped = nullptr;
+-        if (vkMapMemory(I.Device, Mem, 0, Bytes, 0, &Mapped) == VK_SUCCESS)
+-        {
+-            std::memcpy(Mapped, Src, static_cast<size_t>(Bytes));
+-            vkUnmapMemory(I.Device, Mem);
+-        }
+-    };
+-    Copy(SurfelStageMem, HostSurfels.data(),  VkDeviceSize(HostSurfels.size()) * sizeof(GpuSurfel));
+-    Copy(HeadStageMem,   HostGridHead.data(), VkDeviceSize(HostGridHead.size()) * sizeof(int32_t));
+-    Copy(NextStageMem,   HostGridNext.data(), VkDeviceSize(HostSurfels.size()) * sizeof(int32_t));
+-    // NOTE: the staging→device transfers are recorded at the top of RecordFrame() so they land inside the frame's
+-    //       command buffer (one queue, correct ordering). See RecordFrame().
+-}
+-
+-//========================================================================================================================
+-// Per-frame recording: (upload) → update → commit → resolve
+-//========================================================================================================================
+-bool SurfelGIStage::RecordFrame(VkCommandBuffer Command, const SurfelFrameParams& Params) noexcept
+-{
+-    if (!IsReady() || Command == VK_NULL_HANDLE || LiveCount == 0u || Params.RenderWidth == 0u || Params.RenderHeight == 0u)
+-        return false;   // nothing to shade this frame; caller falls back to the existing renderer
+-
+-    // 0) Upload only when the field topology changed. In steady state the GPU's Irradiance is authoritative;
+-    // copying the CPU seed every frame would erase its running mean. A compute→compute barrier still makes the
+-    // previous submission's commit visible before this frame's Jacobi update.
+-    if (FieldUploadPending)
+-    {
+-        auto CopyBuf = [&](VkBuffer Stage, VkBuffer Dst, VkDeviceSize Bytes)
+-        { VkBufferCopy R{ 0, 0, Bytes }; vkCmdCopyBuffer(Command, Stage, Dst, 1u, &R); };
+-        CopyBuf(SurfelStage, SurfelBuffer, VkDeviceSize(HostSurfels.size()) * sizeof(GpuSurfel));
+-        CopyBuf(HeadStage,   HeadBuffer,   VkDeviceSize(HostGridHead.size()) * sizeof(int32_t));
+-        CopyBuf(NextStage,   NextBuffer,   VkDeviceSize(HostSurfels.size()) * sizeof(int32_t));
+-
+-        VkMemoryBarrier ToCompute{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+-        ToCompute.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+-        ToCompute.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+-        vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+-                             0u, 1u, &ToCompute, 0u, nullptr, 0u, nullptr);
+-        FieldUploadPending = false;
+-    }
+-    else
+-    {
+-        VkMemoryBarrier PreviousCommit{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+-        PreviousCommit.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+-        PreviousCommit.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+-        vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+-                             0u, 1u, &PreviousCommit, 0u, nullptr, 0u, nullptr);
+-    }
+-
+-    VkMemoryBarrier ComputeRW{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+-    ComputeRW.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+-    ComputeRW.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+-    auto ComputeBarrier = [&]{
+-        vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+-                             0u, 1u, &ComputeRW, 0u, nullptr, 0u, nullptr);
+-    };
+-
+-    const uint32_t Groups1D = (LiveCount + 63u) / 64u;
+-
+-    // 1) SurfelIrradianceUpdate — one thread per surfel; writes IrradianceNew (Jacobi target).
+-    struct UpdatePush { float Sun[4], SunCol[4], Sky[4], Grid[4]; uint32_t Counts[4]; float Tuning[4]; } up{};
+-    up.Sun[0]=Params.SunDirection[0]; up.Sun[1]=Params.SunDirection[1]; up.Sun[2]=Params.SunDirection[2]; up.Sun[3]=Params.SunRadiance;
+-    up.SunCol[0]=Params.SunColour[0]; up.SunCol[1]=Params.SunColour[1]; up.SunCol[2]=Params.SunColour[2];
+-    up.Sky[0]=Params.SkyAmbient[0]; up.Sky[1]=Params.SkyAmbient[1]; up.Sky[2]=Params.SkyAmbient[2];
+-    up.Grid[0]=Params.GridOrigin[0]; up.Grid[1]=Params.GridOrigin[1]; up.Grid[2]=Params.GridOrigin[2]; up.Grid[3]=I.GridCellSize;
+-    up.Counts[0]=LiveCount; up.Counts[1]=Params.FrameIndex; up.Counts[2]=Params.RayCount; up.Counts[3]=I.GridHashSize;
+-    up.Tuning[0]=Params.FireflyClamp; up.Tuning[1]=Params.AgeCap;
+-    vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, UpdatePipeline);
+-    vkCmdBindDescriptorSets(Command, VK_PIPELINE_BIND_POINT_COMPUTE, UpdatePipeLayout, 0u, 1u, &UpdateSet, 0u, nullptr);
+-    vkCmdPushConstants(Command, UpdatePipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(up), &up);
+-    vkCmdDispatch(Command, Groups1D, 1u, 1u);
+-    ComputeBarrier();
+-
+-    // 1.5) SurfelCommit — Irradiance = IrradianceNew (deferred Jacobi swap).
+-    uint32_t commit[4]{ LiveCount, 0u, 0u, 0u };
+-    vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, CommitPipeline);
+-    vkCmdBindDescriptorSets(Command, VK_PIPELINE_BIND_POINT_COMPUTE, CommitPipeLayout, 0u, 1u, &CommitSet, 0u, nullptr);
+-    vkCmdPushConstants(Command, CommitPipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(commit), commit);
+-    vkCmdDispatch(Command, Groups1D, 1u, 1u);
+-    ComputeBarrier();
+-
+-    // 2) SurfelGIResolve — per-pixel; reads the G-buffer + surfel field, writes the presentation image.
+-    struct ResolvePush { float Sun[4], SunCol[4], Sky[4], Grid[4], Eye[4]; uint32_t Counts[4]; } rp{};
+-    std::memcpy(rp.Sun,  up.Sun,  sizeof(rp.Sun));
+-    std::memcpy(rp.SunCol, up.SunCol, sizeof(rp.SunCol));
+-    std::memcpy(rp.Grid, up.Grid, sizeof(rp.Grid));
+-    rp.Sky[0]=Params.SkyAmbient[0]; rp.Sky[1]=Params.SkyAmbient[1]; rp.Sky[2]=Params.SkyAmbient[2]; rp.Sky[3]=Params.Exposure;
+-    rp.Eye[0]=Params.CameraEye[0]; rp.Eye[1]=Params.CameraEye[1]; rp.Eye[2]=Params.CameraEye[2];
+-    rp.Counts[0]=LiveCount; rp.Counts[1]=I.GridHashSize; rp.Counts[2]=Params.FeatureFlags; rp.Counts[3]=Params.ReflectionMode;
+-    const uint32_t Gx = (Params.RenderWidth  + 15u) / 16u;
+-    const uint32_t Gy = (Params.RenderHeight + 15u) / 16u;
+-    vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, ResolvePipeline);
+-    vkCmdBindDescriptorSets(Command, VK_PIPELINE_BIND_POINT_COMPUTE, ResolvePipeLayout, 0u, 1u, &ResolveSet, 0u, nullptr);
+-    vkCmdPushConstants(Command, ResolvePipeLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(rp), &rp);
+-    vkCmdDispatch(Command, Gx, Gy, 1u);
+-    return true;
+-}
+-
+-//========================================================================================================================
+-// Teardown
+-//========================================================================================================================
+-void SurfelGIStage::Destroy() noexcept
+-{
+-    if (I.Device == VK_NULL_HANDLE) return;
+-    auto DB = [&](VkBuffer& b, VkDeviceMemory& m){ if (b) vkDestroyBuffer(I.Device, b, nullptr); if (m) vkFreeMemory(I.Device, m, nullptr); b=VK_NULL_HANDLE; m=VK_NULL_HANDLE; };
+-    DB(SurfelBuffer, SurfelMem); DB(HeadBuffer, HeadMem); DB(NextBuffer, NextMem);
+-    DB(SurfelStage, SurfelStageMem); DB(HeadStage, HeadStageMem); DB(NextStage, NextStageMem);
+-    auto DP = [&](VkPipeline& p){ if (p) vkDestroyPipeline(I.Device, p, nullptr); p=VK_NULL_HANDLE; };
+-    DP(UpdatePipeline); DP(CommitPipeline); DP(ResolvePipeline);
+-    auto DPL = [&](VkPipelineLayout& l){ if (l) vkDestroyPipelineLayout(I.Device, l, nullptr); l=VK_NULL_HANDLE; };
+-    DPL(UpdatePipeLayout); DPL(CommitPipeLayout); DPL(ResolvePipeLayout);
+-    // Descriptor sets die with their private pool; release it before their layouts to keep validation lifetime
+-    // ordering explicit on scene replacement and swapchain resize.
+-    if (DescriptorPool) vkDestroyDescriptorPool(I.Device, DescriptorPool, nullptr);
+-    DescriptorPool = VK_NULL_HANDLE;
+-    UpdateSet = CommitSet = ResolveSet = VK_NULL_HANDLE;
+-    auto DSL = [&](VkDescriptorSetLayout& l){ if (l) vkDestroyDescriptorSetLayout(I.Device, l, nullptr); l=VK_NULL_HANDLE; };
+-    DSL(UpdateLayout); DSL(CommitLayout); DSL(ResolveLayout);
+-    HostSurfels.clear(); HostGridHead.clear(); HostGridNext.clear();
+-    LiveCount = 0u; FrameCounter = 0u; FieldUploadPending = false;
+-    I = {};
+-}
+-}
+diff --git a/Engine/DeviceExchange/SurfelGIStage.h b/Engine/DeviceExchange/SurfelGIStage.h
+deleted file mode 100644
+index ae5f7a2..0000000
+--- a/Engine/DeviceExchange/SurfelGIStage.h
++++ /dev/null
+@@ -1,157 +0,0 @@
+-//============================================================================================================================================
+-// 📦 Engine/DeviceExchange/SurfelGIStage.h — host owner of the surfel-GI compute stage (Thread E, RenderPath == 1)
+-//============================================================================================================================================
+-// Self-contained companion to SwapchainExchange. It owns:
+-//    • three storage buffers (SSBOs) — the surfel field, the grid head table, the per-surfel next-links;
+-//    • the CPU mirror of the surfel field + the HOST-SIDE hash-grid build that fills the two link buffers;
+-//    • three compute pipelines built from the delivered SPIR-V — SurfelIrradianceUpdate, SurfelCommit, SurfelGIResolve;
+-//    • the recording of the three vkCmdDispatch calls (update → commit → resolve) with the barriers between them;
+-//    • per-frame surfel logging (spawned / live / recycled / coverage), as the task requires.
+-//
+-// Everything device-specific is passed in through SurfelStageInit so this file compiles against the engine's existing
+-//    Vulkan objects without reaching into SwapchainExchange internals. The stage owns its short-lived descriptor pool:
+-//    it must never consume the ReSTIR pool's one descriptor set or leave dangling CWBVH bindings after a scene reload.
+-//
+-// The binding contract MUST match the shaders in ../Shaders:
+-//    Update  : b0 Surfels(rw)  b1 GridHead(ro)  b2 GridNext(ro)  b8 CwbvhNodes  b9 CwbvhTris   push SurfelUpdateConstants
+-//    Commit  : b0 Surfels(rw)                                                                   push {uvec4 Counts}
+-//    Resolve : b0 Output(w) b1 Surface(ro) b2 Normal(ro) b3 Albedo(ro) b4 MaterialAux(ro)
+-//              b8 CwbvhNodes b9 CwbvhTris  b10 Surfels(ro) b11 GridHead(ro) b12 GridNext(ro)  push ResolveConstants
+-//------------------------------------------------------------------------------------------------------------------------
+-
+-#pragma once
+-#include <vulkan/vulkan.h>
+-#include <cstdint>
+-#include <string>
+-#include <vector>
+-
+-namespace Frontier
+-{
+-    // 80 B — mirrors `struct GpuSurfel` in SurfelIrradianceUpdate.slang / SurfelCommit.slang (std430).
+-    struct GpuSurfel
+-    {
+-        float PositionRadius[4];   // xyz world position, w world-space radius
+-        float NormalAge[4];        // xyz unit normal, w age (frames)
+-        float Albedo[4];           // xyz diffuse albedo, w alive flag (>0.5)
+-        float Irradiance[4];       // xyz committed E
+-        float IrradianceNew[4];    // xyz Jacobi target
+-    };
+-    static_assert(sizeof(GpuSurfel) == 80, "GpuSurfel must match the std430 shader record (80 B)");
+-
+-    // A primary-surface sample the host bins into surfels. Feed one per screen tile (from a coarse SurfaceImage
+-    //    readback) or per scene-geometry sample; if none are supplied the field simply ages and holds.
+-    struct SurfaceSample
+-    {
+-        float Position[3];
+-        float Normal[3];
+-        float Albedo[3];
+-    };
+-
+-    struct SurfelStageInit
+-    {
+-        VkDevice                         Device            = VK_NULL_HANDLE;
+-        VkPhysicalDeviceMemoryProperties MemoryProperties  {};
+-
+-        // Shared acceleration structure blobs — the SAME buffers the ReSTIR kernel binds at 8/9.
+-        VkBuffer                         CwbvhNodeBuffer   = VK_NULL_HANDLE;
+-        VkBuffer                         CwbvhLeafBuffer   = VK_NULL_HANDLE;
+-
+-        // G-buffer + present views (GENERAL layout storage images produced by VisibilityRaster/SurfaceResolve).
+-        VkImageView                      OutputImageView   = VK_NULL_HANDLE;   // rgba8   (present target)
+-        VkImageView                      SurfaceImageView  = VK_NULL_HANDLE;   // rgba32f (world pos + vis id)
+-        VkImageView                      NormalImageView   = VK_NULL_HANDLE;   // rgba16f
+-
+-        // ── The scene, as the ReSTIR kernel sees it ─────────────────────────────────────────────────────────────
+-        // Both surfel passes now decode the real hit triangle and evaluate the real OpenPBR slab, so they need the
+-        //    same six scene SSBOs, the same two shading LUTs and the same bindless texture table the kernel binds.
+-        //    These are BORROWED handles — SwapchainExchange owns them and rebinds the stage whenever they change.
+-        //    Before this they were absent, and the passes approximated the material instead of reading it.
+-        VkBuffer                         TriangleBuffer    = VK_NULL_HANDLE;   // GpuTriangle[]     — flat primitives
+-        VkBuffer                         MaterialBuffer    = VK_NULL_HANDLE;   // GpuMaterial[]     — slab headers
+-        VkBuffer                         InstanceBuffer    = VK_NULL_HANDLE;   // GpuInstance[]     — transforms + slab index
+-        VkBuffer                         SlabBuffer        = VK_NULL_HANDLE;   // GpuMaterialSlab[] — the OpenPBR parameters
+-        VkBuffer                         VertexBuffer      = VK_NULL_HANDLE;   // GpuVertex[]       — normals, tangents, UVs
+-        VkBuffer                         IndexBuffer       = VK_NULL_HANDLE;   // uint[]            — per-instance indices
+-        VkSampler                        TableSampler      = VK_NULL_HANDLE;   // clamped bilinear for the two LUTs
+-        VkImageView                      EnergyLutView     = VK_NULL_HANDLE;   // binding 13 — Kulla–Conty E(μ,α)
+-        VkImageView                      SheenLutView      = VK_NULL_HANDLE;   // binding 14 — LTC sheen table
+-        VkSampler                        TextureSampler    = VK_NULL_HANDLE;   // repeat trilinear for the bindless table
+-        const VkImageView*               TextureViews      = nullptr;          // binding 31 — the bindless table itself
+-        uint32_t                         TextureCount      = 0u;               // [-] entries in TextureViews
+-        uint32_t                         TextureCapacity   = 0u;               // [-] 0 ⇒ no descriptor indexing on this device
+-
+-        uint32_t                         MaxSurfels        = 262144u;          // pool ceiling (SPAWN_BUDGET grows toward it)
+-        uint32_t                         GridHashSize      = 131072u;          // hash table cells (prime-ish, > live surfels)
+-        float                            GridCellSize      = 0.09f;            // world cell size (≈ RMAX; scene-scaled by caller)
+-        std::string                      SpirvDirectory    = "Engine/Shaders"; // where SurfelIrradianceUpdate.spv etc. live
+-    };
+-
+-    // Per-frame push payload the caller fills from its scene/camera/sky (units match the shaders).
+-    struct SurfelFrameParams
+-    {
+-        float    SunDirection[3] = {0, 1, 0};   // TO the sun, unit
+-        float    SunRadiance     = 0.0f;
+-        float    SunColour[3]    = {1, 1, 1};
+-        float    SkyAmbient[3]   = {0, 0, 0};
+-        float    GridOrigin[3]   = {0, 0, 0};   // world origin of the hash grid (min corner of the live AABB)
+-        float    CameraEye[3]    = {0, 0, 0};
+-        float    Exposure        = 1.0f;
+-        float    FireflyClamp    = 8.0f;
+-        float    AgeCap          = 64.0f;
+-        uint32_t RayCount        = 8u;
+-        uint32_t FrameIndex      = 0u;
+-        uint32_t FeatureFlags    = 0u;          // DispatchConfiguration::FeatureFlags (kFeature* mirror)
+-        uint32_t ReflectionMode  = 1u;          // 0 Off / 1 Sky / 2 Raytraced
+-        uint32_t RenderWidth     = 0u;
+-        uint32_t RenderHeight    = 0u;
+-    };
+-
+-    class SurfelGIStage
+-    {
+-    public:
+-        bool Bring(const SurfelStageInit& Init) noexcept;               // allocate SSBOs + build pipelines/sets
+-        void Destroy() noexcept;
+-
+-        // Host-side topology maintenance: spawn/recycle from supplied surface samples up to the budget and rebuild
+-        //    the CPU hash grid. The GPU owns age and irradiance once resident, so steady frames do not re-upload the
+-        //    seed field or reset its running mean. Logs spawned/live/recycled/coverage; call before RecordFrame().
+-        void UpdateField(const std::vector<SurfaceSample>& Samples, const SurfelFrameParams& Params) noexcept;
+-
+-        // Record update → commit → resolve into an already-begun command buffer, with the two compute→compute
+-        //    barriers. Bind order and push blocks match the shaders. Returns false without writing when the field
+-        //    has no live samples, so the caller can retain its normal renderer as a safe fallback.
+-        [[nodiscard]] bool RecordFrame(VkCommandBuffer Command, const SurfelFrameParams& Params) noexcept;
+-
+-        [[nodiscard]] bool IsReady() const noexcept { return I.Device != VK_NULL_HANDLE && UpdatePipeline != VK_NULL_HANDLE && ResolvePipeline != VK_NULL_HANDLE; }
+-        uint32_t LiveSurfelCount() const noexcept { return LiveCount; }
+-
+-    private:
+-        bool CreateBuffers() noexcept;
+-        bool CreatePipelines() noexcept;
+-        bool WriteDescriptors() noexcept;
+-        void UploadBuffers() noexcept;                                  // CPU topology mirror → staging SSBOs, only after a spawn/recycle
+-
+-        SurfelStageInit          I{};
+-        // SSBOs (device local) + host-visible staging mirrors.
+-        VkBuffer                 SurfelBuffer = VK_NULL_HANDLE, SurfelStage = VK_NULL_HANDLE;
+-        VkBuffer                 HeadBuffer   = VK_NULL_HANDLE, HeadStage   = VK_NULL_HANDLE;
+-        VkBuffer                 NextBuffer   = VK_NULL_HANDLE, NextStage   = VK_NULL_HANDLE;
+-        VkDeviceMemory           SurfelMem = VK_NULL_HANDLE, SurfelStageMem = VK_NULL_HANDLE;
+-        VkDeviceMemory           HeadMem   = VK_NULL_HANDLE, HeadStageMem   = VK_NULL_HANDLE;
+-        VkDeviceMemory           NextMem   = VK_NULL_HANDLE, NextStageMem   = VK_NULL_HANDLE;
+-
+-        VkDescriptorPool         DescriptorPool = VK_NULL_HANDLE;             // private: 3 sets / 11 SSBO / 5 storage-image descriptors
+-        VkDescriptorSetLayout    UpdateLayout = VK_NULL_HANDLE, CommitLayout = VK_NULL_HANDLE, ResolveLayout = VK_NULL_HANDLE;
+-        VkPipelineLayout         UpdatePipeLayout = VK_NULL_HANDLE, CommitPipeLayout = VK_NULL_HANDLE, ResolvePipeLayout = VK_NULL_HANDLE;
+-        VkPipeline               UpdatePipeline = VK_NULL_HANDLE, CommitPipeline = VK_NULL_HANDLE, ResolvePipeline = VK_NULL_HANDLE;
+-        VkDescriptorSet          UpdateSet = VK_NULL_HANDLE, CommitSet = VK_NULL_HANDLE, ResolveSet = VK_NULL_HANDLE;
+-
+-        // CPU mirror of the field + grid.
+-        std::vector<GpuSurfel>   HostSurfels;
+-        std::vector<int32_t>     HostGridHead;                          // per-cell first surfel (+1; 0 = empty)
+-        std::vector<int32_t>     HostGridNext;                          // per-surfel next in chain (+1; 0 = end)
+-        uint32_t                 LiveCount = 0u;
+-        uint64_t                 FrameCounter = 0u;
+-        bool                     FieldUploadPending = false;             // never overwrite GPU irradiance once the stable field is resident
+-    };
+-}
+diff --git a/Engine/DeviceExchange/SwapchainExchange.cpp b/Engine/DeviceExchange/SwapchainExchange.cpp
+index 0c1b59f..e30b776 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.cpp
++++ b/Engine/DeviceExchange/SwapchainExchange.cpp
+@@ -79,13 +79,13 @@ static constexpr uint32_t kLuminanceSampleStride = 32u;
+ //    layer below it), so the size is restated here and CheckSkyKernel.sh fails the build if the two disagree.
+ static constexpr uint32_t kSkyRecordBytes = 144u;
+ // DeviceExchange receives sky data as the 144-byte ABI payload rather than depending on the presentation layer.
+-// The surfel route consumes only the first two std140 rows, whose layout is fixed by the SkyKernelParity gate.
++// The distance-field route consumes only the first two std140 rows, whose layout is fixed by the SkyKernelParity gate.
+ struct SkyTransportPrefix
+ {
+     float SunDirection[4];
+     float SunRadiance[4];
+ };
+-static_assert(sizeof(SkyTransportPrefix) == 32u, "surfel sky prefix must consume exactly two std140 rows");
++static_assert(sizeof(SkyTransportPrefix) == 32u, "distance-field sky prefix must consume exactly two std140 rows");
+ // The Celestial moon uniform block (binding 22) is eighteen std140 rows — 288 B, pinned by static_assert in
+ //    DisplayPresentation/MoonConstantRecord.h. Same layering as the sky record above: restated here, and the moon
+ //    gate fails the build if the two disagree.
+@@ -594,7 +594,6 @@ void SwapchainExchange::Retire() noexcept
+     if (Vulkan->ImGuiDescriptorPool) vkDestroyDescriptorPool (Vulkan->Device, Vulkan->ImGuiDescriptorPool, nullptr);
+ 
+     DistanceFieldStage.Destroy();
+-    SurfelStage.Destroy();
+     Vulkan->RayQueries.Retire();
+     Visibility.Retire();
+     RetireSwapchain();
+@@ -2481,7 +2480,7 @@ void SwapchainExchange::UploadMaterials(const MaterialIndex& Materials) noexcept
+     if (!Vulkan->Device) return;
+ 
+     if (Vulkan->MaterialBuffer || Vulkan->SlabBuffer) vkDeviceWaitIdle(Vulkan->Device);
+-    DistanceFieldStage.Destroy(); SurfelStage.Destroy();
++    DistanceFieldStage.Destroy();
+     if (Vulkan->MaterialBuffer) vkDestroyBuffer(Vulkan->Device, Vulkan->MaterialBuffer, nullptr);
+     if (Vulkan->MaterialMemory) vkFreeMemory   (Vulkan->Device, Vulkan->MaterialMemory, nullptr);
+     if (Vulkan->SlabBuffer)     vkDestroyBuffer(Vulkan->Device, Vulkan->SlabBuffer, nullptr);
+@@ -2534,7 +2533,7 @@ void SwapchainExchange::UploadTextures(const TextureIndex& Textures) noexcept
+ {
+     if (!Vulkan->Device || !Vulkan->DescriptorIndexing) return;
+     vkDeviceWaitIdle(Vulkan->Device);
+-    DistanceFieldStage.Destroy(); SurfelStage.Destroy();
++    DistanceFieldStage.Destroy();
+     ++SurfaceMaterialRevision;
+     DestroyTextures();
+ 
+@@ -2755,7 +2754,6 @@ void SwapchainExchange::UploadShadingTables(const float* Energy, const float* Sh
+     //    garbage on forgiving drivers, a fault on strict ones. The rewrite is idempotent for every other binding.
+     WriteDescriptorSet();
+     (void)BringDistanceFieldGIStage();
+-    (void)BringSurfelGIStage();
+ }
+ 
+ void* SwapchainExchange::SwapReservoirParity() noexcept
+@@ -3104,7 +3102,6 @@ void SwapchainExchange::UploadScene(const SceneStructure& Scene, const Traversal
+             std::cerr << "[RayQuery] Hardware triangle BLAS/TLAS resident: " << Vulkan->RayQueryInstanceCount
+                       << " instances; inline ray queries enabled for ReSTIR GI, shadows and mesh reflections.\n";
+     }
+-    BuildSurfelSamples(Scene);
+     try
+     {
+         if (!DistanceGeometry.Construct(Scene)) std::cerr << "[SdfGI] Scene contains no valid distance geometry.\n";
+@@ -3119,8 +3116,6 @@ void SwapchainExchange::UploadScene(const SceneStructure& Scene, const Traversal
+     // shared visibility targets exist, so no descriptor ever points at an old or null traversal buffer.
+     if (!BringDistanceFieldGIStage())
+         std::cerr << "[DistanceFieldGIStage] unavailable after scene upload; retaining the established renderer as fallback.\n";
+-    if (!BringSurfelGIStage())
+-        std::cerr << "[SurfelGIStage] unavailable after scene upload; retaining the established renderer as fallback.\n";
+ 
+     // R4b: the raster's alpha-mask test borrows the slab SSBO and the bindless table (VisibilityRaster.frag bindings 6 / 7).
+     if (Vulkan->DescriptorIndexing)
+@@ -3182,7 +3177,6 @@ void SwapchainExchange::RefreshMaterialDescriptors() noexcept
+     // Uploads wait for the device before replacing borrowed buffers/views. Recreate both GI descriptor sets,
+     // including the fallback, so a live material or texture edit can never leave stale image handles behind.
+     (void)BringDistanceFieldGIStage();
+-    (void)BringSurfelGIStage();
+     if (Vulkan->DescriptorIndexing && Visibility.IsReady())
+     {
+         std::vector<const void*> Views;
+@@ -3222,11 +3216,11 @@ bool SwapchainExchange::BringDistanceFieldGIStage() noexcept
+     Init.EnergyLutView    = Vulkan->ShadingTables[0].View;
+     Init.SheenLutView     = Vulkan->ShadingTables[1].View;
+     Init.TextureSampler   = Vulkan->TextureSampler;
+-    SurfelTextureViews.clear();
+-    SurfelTextureViews.reserve(Vulkan->Textures.size());
+-    for (const VulkanRecord::ResidentTexture& T : Vulkan->Textures) SurfelTextureViews.push_back(T.View);
+-    Init.TextureViews     = SurfelTextureViews.data();
+-    Init.TextureCount     = static_cast<uint32_t>(SurfelTextureViews.size());
++    SdfTextureViews.clear();
++    SdfTextureViews.reserve(Vulkan->Textures.size());
++    for (const VulkanRecord::ResidentTexture& T : Vulkan->Textures) SdfTextureViews.push_back(T.View);
++    Init.TextureViews     = SdfTextureViews.data();
++    Init.TextureCount     = static_cast<uint32_t>(SdfTextureViews.size());
+     Init.TextureCapacity  = Vulkan->DescriptorIndexing ? Init.TextureCount : 0u;
+     if (!Init.TriangleBuffer || !Init.MaterialBuffer || !Init.InstanceBuffer
+      || !Init.SlabBuffer     || !Init.VertexBuffer   || !Init.IndexBuffer
+@@ -3234,84 +3228,6 @@ bool SwapchainExchange::BringDistanceFieldGIStage() noexcept
+     return DistanceFieldStage.Bring(Init);
+ }
+ 
+-bool SwapchainExchange::BringSurfelGIStage() noexcept
+-{
+-    SurfelStage.Destroy();
+-    // Initial device bring-up and a resize before the first scene have no CWBVH yet. This is a normal
+-    // deferred state, not a failed renderer; UploadScene will call us immediately after UploadTraversal.
+-    if (!Vulkan->TraversalNodeBuffer || !Vulkan->TraversalLeafBuffer || !Visibility.IsReady()) return true;
+-    SurfelStageInit Init{};
+-    Init.Device           = Vulkan->Device;
+-    Init.MemoryProperties = Vulkan->MemoryProperties;
+-    Init.CwbvhNodeBuffer  = Vulkan->TraversalNodeBuffer;
+-    Init.CwbvhLeafBuffer  = Vulkan->TraversalLeafBuffer;
+-    Init.OutputImageView  = Vulkan->StorageImageView;
+-    Init.SurfaceImageView = static_cast<VkImageView>(Visibility.QuerySurfaceView());
+-    Init.NormalImageView  = static_cast<VkImageView>(Visibility.QueryNormalView());
+-    // ── the scene, lent to the surfel passes ────────────────────────────────────────────────────────────────
+-    // Both passes decode the real hit and evaluate the real slab now, so they borrow exactly what the kernel
+-    //    binds. Same buffers, same LUTs, same bindless table — not copies, not a reduced G-buffer encoding.
+-    //    This function already runs after UploadTriangles/UploadMaterials/UploadTraversal, so the handles are
+-    //    current; any later reupload calls it again and the descriptors are rewritten.
+-    Init.TriangleBuffer   = static_cast<VkBuffer>(Visibility.QueryFlatTriangleBuffer());
+-    Init.MaterialBuffer   = Vulkan->MaterialBuffer;
+-    Init.InstanceBuffer   = static_cast<VkBuffer>(Visibility.QueryInstanceBuffer());
+-    Init.SlabBuffer       = Vulkan->SlabBuffer;
+-    Init.VertexBuffer     = static_cast<VkBuffer>(Visibility.QueryVertexBuffer());
+-    Init.IndexBuffer      = static_cast<VkBuffer>(Visibility.QueryIndexBuffer());
+-    Init.TableSampler     = Vulkan->TableSampler;
+-    Init.EnergyLutView    = Vulkan->ShadingTables[0].View;
+-    Init.SheenLutView     = Vulkan->ShadingTables[1].View;
+-    Init.TextureSampler   = Vulkan->TextureSampler;
+-    SurfelTextureViews.clear();
+-    SurfelTextureViews.reserve(Vulkan->Textures.size());
+-    for (const VulkanRecord::ResidentTexture& T : Vulkan->Textures) SurfelTextureViews.push_back(T.View);
+-    Init.TextureViews     = SurfelTextureViews.data();
+-    Init.TextureCount     = static_cast<uint32_t>(SurfelTextureViews.size());
+-    Init.TextureCapacity  = Vulkan->DescriptorIndexing ? kTextureSlotCapacity : 0u;
+-    // Every scene buffer has to be real before the passes can decode anything. Missing one is the deferred
+-    //    bring-up state the CWBVH check above describes, not a failure.
+-    if (!Init.TriangleBuffer || !Init.MaterialBuffer || !Init.InstanceBuffer
+-     || !Init.SlabBuffer     || !Init.VertexBuffer   || !Init.IndexBuffer
+-     || !Init.EnergyLutView  || !Init.SheenLutView) return true;
+-    Init.GridCellSize     = 0.25f;
+-    return SurfelStage.Bring(Init);
+-}
+-
+-void SwapchainExchange::BuildSurfelSamples(const SceneStructure& Scene) noexcept
+-{
+-    SurfelSamples.clear();
+-    const std::vector<TriangleIndex>& Facets = Scene.QueryFlatTriangles();
+-    const std::vector<MaterialRecord>& Materials = Scene.QueryMaterials().QueryRecords();
+-    if (Facets.empty() || Materials.empty()) return;
+-
+-    constexpr size_t MaximumSamples = 16384u;
+-    const size_t Stride = std::max<size_t>(1u, Facets.size() / MaximumSamples);
+-    float Minimum[3] = { 1.0e30f, 1.0e30f, 1.0e30f };
+-    for (size_t Index = 0u; Index < Facets.size(); Index += Stride)
+-    {
+-        const TriangleIndex& Facet = Facets[Index];
+-        const float EdgeAlpha[3] = { Facet.VertexBetaX - Facet.VertexAlphaX, Facet.VertexBetaY - Facet.VertexAlphaY, Facet.VertexBetaZ - Facet.VertexAlphaZ };
+-        const float EdgeBeta[3]  = { Facet.VertexGammaX - Facet.VertexAlphaX, Facet.VertexGammaY - Facet.VertexAlphaY, Facet.VertexGammaZ - Facet.VertexAlphaZ };
+-        float Normal[3] = { EdgeAlpha[1] * EdgeBeta[2] - EdgeAlpha[2] * EdgeBeta[1], EdgeAlpha[2] * EdgeBeta[0] - EdgeAlpha[0] * EdgeBeta[2], EdgeAlpha[0] * EdgeBeta[1] - EdgeAlpha[1] * EdgeBeta[0] };
+-        const float Length = std::sqrt(Normal[0] * Normal[0] + Normal[1] * Normal[1] + Normal[2] * Normal[2]);
+-        if (Length <= 1.0e-6f) continue;
+-        Normal[0] /= Length; Normal[1] /= Length; Normal[2] /= Length;
+-        uint32_t MaterialSlot = 0u;
+-        std::memcpy(&MaterialSlot, &Facet.MaterialSlot, sizeof(MaterialSlot));
+-        const MaterialRecord& Material = Materials[MaterialSlot < Materials.size() ? MaterialSlot : 0u];
+-        SurfaceSample Sample{};
+-        Sample.Position[0] = (Facet.VertexAlphaX + Facet.VertexBetaX + Facet.VertexGammaX) / 3.0f;
+-        Sample.Position[1] = (Facet.VertexAlphaY + Facet.VertexBetaY + Facet.VertexGammaY) / 3.0f;
+-        Sample.Position[2] = (Facet.VertexAlphaZ + Facet.VertexBetaZ + Facet.VertexGammaZ) / 3.0f;
+-        std::memcpy(Sample.Normal, Normal, sizeof(Normal));
+-        Sample.Albedo[0] = Material.AlbedoR; Sample.Albedo[1] = Material.AlbedoG; Sample.Albedo[2] = Material.AlbedoB;
+-        for (uint32_t Axis = 0u; Axis < 3u; ++Axis) Minimum[Axis] = std::min(Minimum[Axis], Sample.Position[Axis]);
+-        SurfelSamples.push_back(Sample);
+-    }
+-    for (uint32_t Axis = 0u; Axis < 3u; ++Axis) SurfelGridOrigin[Axis] = Minimum[Axis] - 0.5f;
+-}
+-
+ //============================================================================================================================================
+ //                                           RECORD AND PRESENT
+ //============================================================================================================================================
+@@ -3419,7 +3335,26 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+     }
+ 
+     Vulkan->ActiveSlot = (ActiveSlot + 1u) % kCycleSlotCount;
+-}E_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
++}
++
++//------------------------------------------------------------------------------------------------------------------------
++//                                           RECORD COMPUTE COMMANDS
++//------------------------------------------------------------------------------------------------------------------------
++
++void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const DispatchConfiguration& Dispatch) noexcept
++{
++    VkCommandBuffer Command = Vulkan->ComputeCommands[ImageOrdinal];
++
++    VkCommandBufferBeginInfo BeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
++    BeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
++    (void)vkBeginCommandBuffer(Command, &BeginInfo);
++    if ((Dispatch.FeatureFlags & DispatchFeatureRaytracing) != 0u) Vulkan->RayQueries.RecordRefit(Command);
++    if (!Vulkan->PendingTraversal.empty())
++    {
++        VkMemoryBarrier Transfer{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
++        Transfer.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
++        Transfer.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
++        vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                              0u, 1u, &Transfer, 0u, nullptr, 0u, nullptr);
+         for (const auto& Upload : Vulkan->PendingTraversal)
+             for (VkDeviceSize Offset = 0u; Offset < Upload.Bytes.size(); Offset += 65536u)
+@@ -3570,12 +3505,12 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+     Frame.RenderHeight = RenderHeight;
+     Visibility.RecordFrame(Command, Vulkan->ActiveSlot, Frame);
+ 
+-    // Non-raytraced GI: prefer SDF only when ready; otherwise retain the existing Surfel route.
++    // Non-raytraced GI: the SDF stage is the only non-raytraced GI; when it is not ready the plain raster below runs.
+     const bool NonRaytracedGIRequested = (Dispatch.FeatureFlags & DispatchFeatureRaytracing) == 0u
+                                       && (Dispatch.FeatureFlags & DispatchFeatureGlobalIllumination) != 0u;
+     bool NonRaytracedGIRecorded = false;
+ 
+-    // 1) Distance Field GI (Primary non-raytraced GI stage)
++    // Distance Field GI (the only non-raytraced GI stage)
+     if (Frame.DebugView == DebugViewCategory::Off && NonRaytracedGIRequested && DistanceFieldStage.IsReady())
+     {
+         DistanceFieldFrameParams DfParams{};
+@@ -3603,35 +3538,6 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+         NonRaytracedGIRecorded = DistanceFieldStage.RecordFrame(Command, DfParams);
+     }
+ 
+-    // 2) Surfel GI (Retained fallback if Distance Field GI is unavailable)
+-    if (Frame.DebugView == DebugViewCategory::Off && NonRaytracedGIRequested && !NonRaytracedGIRecorded && SurfelStage.IsReady())
+-    {
+-        SurfelFrameParams SurfelParams{};
+-        const SkyTransportPrefix* Sky = static_cast<const SkyTransportPrefix*>(Vulkan->SkyMapped);
+-        if (Sky)
+-        {
+-            for (uint32_t Channel = 0u; Channel < 3u; ++Channel)
+-            {
+-                SurfelParams.SunDirection[Channel] = Sky->SunDirection[Channel];
+-                SurfelParams.SunColour[Channel]    = Sky->SunRadiance[Channel];
+-                // The canonical sky record has no cube. Its sun radiance is the analytic, shared direct-light
+-                // input; a small stable fraction provides the non-raytraced diffuse dome term.
+-                SurfelParams.SkyAmbient[Channel]   = Sky->SunRadiance[Channel] * 0.04f;
+-            }
+-            SurfelParams.SunRadiance = Sky->SunRadiance[3] > 0.0f ? 1.0f : 0.0f;
+-        }
+-        SurfelParams.GridOrigin[0] = SurfelGridOrigin[0]; SurfelParams.GridOrigin[1] = SurfelGridOrigin[1]; SurfelParams.GridOrigin[2] = SurfelGridOrigin[2];
+-        SurfelParams.CameraEye[0]  = Dispatch.CameraOriginX; SurfelParams.CameraEye[1] = Dispatch.CameraOriginY; SurfelParams.CameraEye[2] = Dispatch.CameraOriginZ;
+-        SurfelParams.Exposure      = Dispatch.Exposure;
+-        SurfelParams.FrameIndex    = Dispatch.AccumulationIndex;
+-        SurfelParams.FeatureFlags  = Dispatch.FeatureFlags;
+-        SurfelParams.ReflectionMode = (Dispatch.FeatureFlags & DispatchFeatureReflectionMask) >> DispatchFeatureReflectionShift;
+-        SurfelParams.RenderWidth   = RenderWidth;
+-        SurfelParams.RenderHeight  = RenderHeight;
+-        SurfelStage.UpdateField(SurfelSamples, SurfelParams);
+-        NonRaytracedGIRecorded = SurfelStage.RecordFrame(Command, SurfelParams);
+-    }
+-
+     // Raster and SDF failure never silently request ReSTIR. Weather belongs in both resolves.
+     const bool TraceRequested = (Dispatch.FeatureFlags & DispatchFeatureRaytracing) != 0u;
+     bool ShadowStageRecorded = false;
+@@ -4214,7 +4120,6 @@ bool SwapchainExchange::RebuildSwapchain() noexcept
+     if (!BringSwapchain() || !BringStorageImage()) return false;
+     if (!Visibility.Resize(Configuration.Width, Configuration.Height, Vulkan->StorageImageView)) return false;
+     (void)BringDistanceFieldGIStage();
+-    if (!BringSurfelGIStage()) return false;
+ 
+     // Every view handed out by the device seam has just been destroyed and recreated. Bumping the generation is how
+     //    an overlay learns it must re-Resize; without it, it would keep rendering into a stale VkImageView.
+diff --git a/Engine/DeviceExchange/SwapchainExchange.h b/Engine/DeviceExchange/SwapchainExchange.h
+index 5b6850f..59fae57 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.h
++++ b/Engine/DeviceExchange/SwapchainExchange.h
+@@ -13,7 +13,6 @@
+ #include "RayTracingCapabilitySet.h"
+ #include "OrientationClassifier.h"
+ #include "VisibilityExchange.h"
+-#include "SurfelGIStage.h"
+ #include "DistanceFieldGIStage.h"
+ #include "TriangleSpan.h"
+ #include <cstdint>
+@@ -261,7 +260,6 @@ public:
+     [[nodiscard]] bool          RefreshInstances(const InstanceRecord* Rows, uint32_t Count) noexcept;
+     /// 📦 Reports readiness of the SDF transport, not merely selection of render mode one.
+     [[nodiscard]] bool QueryDistanceFieldGIReady() const noexcept { return DistanceFieldStage.IsReady(); }
+-    [[nodiscard]] bool QuerySurfelGIReady() const noexcept { return SurfelStage.IsReady(); }
+ 
+     [[nodiscard]] uint32_t      QueryInstanceCount() const noexcept { return Visibility.QueryInstanceCount(); }
+     void                        UploadTextures(const TextureIndex& Textures) noexcept;   // R4a bindless table → binding 18 (last since R6)
+@@ -428,9 +426,7 @@ private:
+     [[nodiscard]] bool  BringCycleSlots()       noexcept;
+     [[nodiscard]] bool  BringImGui()            noexcept;
+     [[nodiscard]] bool  BringVisibility()       noexcept;
+-    [[nodiscard]] bool  BringSurfelGIStage()   noexcept;
+     [[nodiscard]] bool  BringDistanceFieldGIStage() noexcept;
+-    void                BuildSurfelSamples(const SceneStructure& Scene) noexcept;
+ 
+     void                RetireSwapchain()       noexcept;
+     [[nodiscard]] bool  RebuildSwapchain()      noexcept;
+@@ -463,15 +459,12 @@ private:
+     bool                    FullscreenActive;    // [-]   window currently covers the primary monitor
+     RayTracingCapabilitySet Capabilities;        // [-]   probed in BringPhysicalDevice
+     VisibilityExchange      Visibility;          // [-]   R2 resident scene + cull / raster / HiZ / resolve
+-    SurfelGIStage           SurfelStage;         // [-]   shared non-raytraced indirect-light compute route
+     uint64_t               SurfaceMaterialRevision = 0u;
+     bool                   SceneUploadInProgress = false;
+     void                   RefreshMaterialDescriptors() noexcept;
+     DistanceFieldStructure DistanceGeometry;
+     DistanceFieldGIStage    DistanceFieldStage;  // [-]   shared non-raytraced distance-field GI route (RenderPath == 1)
+-    std::vector<SurfaceSample> SurfelSamples;    // [-]   persistent seed candidates derived from shared geometry
+-    std::vector<VkImageView>   SurfelTextureViews;// [-]  bindless table lent to the surfel passes; outlives Bring()
+-    float                   SurfelGridOrigin[3] = { 0.0f, 0.0f, 0.0f };
++    std::vector<VkImageView>   SdfTextureViews;  // [-]   bindless table lent to the SDF passes; outlives Bring()
+     bool                    TraversalResident = false;
+     uint64_t                TraversalNodeCapacity = 0u;   // [B] allocation size, so a refit refresh cannot overrun
+     uint64_t                TraversalLeafCapacity = 0u;   // [B]   // [-]   R3 CWBVH uploaded (kernel refuses to run without it)
+diff --git a/Engine/DeviceExchange/VisibilityExchange.cpp b/Engine/DeviceExchange/VisibilityExchange.cpp
+index 8811372..ce33bbf 100644
+--- a/Engine/DeviceExchange/VisibilityExchange.cpp
++++ b/Engine/DeviceExchange/VisibilityExchange.cpp
+@@ -521,7 +521,7 @@ bool VisibilityExchange::BringPipelines() noexcept
+     if (!MakePipelineLayout(Vulkan->HiZLayout, sizeof(HiZPushRecord), CS, Vulkan->HiZPipelineLayout)) return false;
+     if (!MakeCompute("Engine/Shaders/HiZReduce.spv", Vulkan->HiZPipelineLayout, Vulkan->HiZPipeline)) return false;
+ 
+-    // ④ Resolve: shared position, normal, material-auxiliary, and albedo targets feed the non-raytraced Surfel route.
++    // ④ Resolve: shared position, normal, material-auxiliary, and albedo targets feed the non-raytraced Distance Field route.
+     if (!MakeLayout({ Binding(0, UBO, CS), Binding(1, SSBO, CS), Binding(2, SSBO, CS), Binding(3, SSBO, CS), Binding(4, SSBO, CS), Binding(5, SSBO, CS),
+                       Binding(6, TEX, CS), Binding(7, TEX, CS), Binding(8, TEX, CS), Binding(9, TEX, CS), Binding(10, IMG, CS), Binding(11, IMG, CS), Binding(12, IMG, CS), Binding(13, SSBO, CS), Binding(14, IMG, CS), Binding(15, IMG, CS) }, Vulkan->ResolveLayout)) return false;
+     if (!MakePipelineLayout(Vulkan->ResolveLayout, 0u, 0u, Vulkan->ResolvePipelineLayout)) return false;
+diff --git a/Engine/DisplayPresentation/ControlCentreHost.h b/Engine/DisplayPresentation/ControlCentreHost.h
+index 893d44a..3ce9056 100644
+--- a/Engine/DisplayPresentation/ControlCentreHost.h
++++ b/Engine/DisplayPresentation/ControlCentreHost.h
+@@ -104,7 +104,7 @@ enum class QuickTileCategory : uint32_t
+     Notifications      = 4,
+     Quality            = 5,
+     PatchGeometry      = 6,
+-    Raytracing         = 7,   // master: ReSTIR raytraced path on/off. Off -> surfel GI (GI on) / plain visibility raster (GI off)
++    Raytracing         = 7,   // master: ReSTIR raytraced path on/off. Off -> Distance Field GI (GI on) / plain visibility raster (GI off)
+     Count              = 8
+ };
+ 
+@@ -130,7 +130,7 @@ enum class ReflectionModeCategory : uint32_t { Off = 0, Sky = 1, Raytraced = 2,
+ struct ControlCentreSettings
+ {
+     bool             GlobalIllumination = true;
+-    bool             Raytracing         = true;   // ReSTIR raytraced path. Off -> surfel GI (GI on) / plain visibility raster (GI off)
++    bool             Raytracing         = true;   // ReSTIR raytraced path. Off -> Distance Field GI (GI on) / plain visibility raster (GI off)
+     bool             AntiAliasing       = true;
+     bool             FrameRateOverlay   = false;
+     bool             Notifications      = true;
+diff --git a/Engine/DisplayPresentation/ReSTIRIntegrator.cpp b/Engine/DisplayPresentation/ReSTIRIntegrator.cpp
+index 9b3ba5b..0863d4e 100644
+--- a/Engine/DisplayPresentation/ReSTIRIntegrator.cpp
++++ b/Engine/DisplayPresentation/ReSTIRIntegrator.cpp
+@@ -122,7 +122,7 @@ DispatchConfiguration ReSTIRIntegrator::BuildDispatch(
+                                    //    unless something turns it off — off is the bit-for-bit pre-sky estimator.
+                                    | (ActiveConfiguration.RenderPath == 0u && ActiveConfiguration.SkyReservoir       ? DispatchFeatureSkyReservoir       : 0u)
+                                    // Thread E. Raytracing ON ⇔ RenderPath 0 (the raytraced ReSTIR kernel is the active
+-                                   //    path); the surfel-GI and plain-raster paths clear bit 11 so the kernel early-outs
++                                   //    path); the distance-field-GI and plain-raster paths clear bit 11 so the kernel early-outs
+                                    //    when the host dispatches one of them instead. The Reflections tile is a 2-bit field
+                                    //    (0 Off / 1 Sky / 2 Raytraced) packed at bits 15-16 — masked to 3 so a stray high bit
+                                    //    can never bleed into another flag. No screen-space reflections exist to select.
+diff --git a/Engine/DisplayPresentation/SurfelReference.cpp b/Engine/DisplayPresentation/SurfelReference.cpp
+deleted file mode 100644
+index c8c080d..0000000
+--- a/Engine/DisplayPresentation/SurfelReference.cpp
++++ /dev/null
+@@ -1,195 +0,0 @@
+-//============================================================================================================================================
+-//                                             SURFELREFERENCE.CPP
+-//============================================================================================================================================
+-#include "SurfelReference.h"
+-
+-#include <algorithm>
+-#include <cmath>
+-
+-namespace Frontier
+-{
+-namespace
+-{
+-    constexpr float kEpsilon = 1.0e-6f;
+-
+-    float Dot(const float A[3], const float B[3]) noexcept
+-    {
+-        return A[0] * B[0] + A[1] * B[1] + A[2] * B[2];
+-    }
+-
+-    float Distance(const float A[3], const float B[3]) noexcept
+-    {
+-        const float X = A[0] - B[0], Y = A[1] - B[1], Z = A[2] - B[2];
+-        return std::sqrt(X * X + Y * Y + Z * Z);
+-    }
+-
+-    void Normalise(float N[3]) noexcept
+-    {
+-        const float Length = std::sqrt(Dot(N, N));
+-        if (Length <= kEpsilon) { N[0] = 0.0f; N[1] = 1.0f; N[2] = 0.0f; return; }
+-        N[0] /= Length; N[1] /= Length; N[2] /= Length;
+-    }
+-}
+-
+-SurfelReferenceField::SurfelReferenceField(const SurfelReferenceSettings& InitialSettings) noexcept
+-    : Settings(InitialSettings)
+-{
+-    if (Settings.CellSize <= kEpsilon) Settings.CellSize = 0.25f;
+-    if (Settings.AgeCap <= 0.0f) Settings.AgeCap = 1.0f;
+-}
+-
+-void SurfelReferenceField::Reset() noexcept
+-{
+-    Surfels.clear();
+-    Grid.clear();
+-    FrameCount = 0u;
+-}
+-
+-void SurfelReferenceField::AssignSettings(const SurfelReferenceSettings& NewSettings) noexcept
+-{
+-    Settings = NewSettings;
+-    if (Settings.CellSize <= kEpsilon) Settings.CellSize = 0.25f;
+-    if (Settings.AgeCap <= 0.0f) Settings.AgeCap = 1.0f;
+-    RebuildGrid();
+-}
+-
+-uint32_t SurfelReferenceField::HashCell(int32_t X, int32_t Y, int32_t Z) const noexcept
+-{
+-    // This is intentionally the same integer hash as SurfelGIStage and the compute shaders. The map retains a
+-    // collision chain, just as the GPU's head/next buffer does; geometric tests below reject unrelated cells.
+-    return static_cast<uint32_t>(X + 1024) * 73856093u
+-         ^ static_cast<uint32_t>(Y + 1024) * 19349663u
+-         ^ static_cast<uint32_t>(Z + 1024) * 83492791u;
+-}
+-
+-void SurfelReferenceField::CellOf(const float Position[3], int32_t& X, int32_t& Y, int32_t& Z) const noexcept
+-{
+-    const float InverseCell = 1.0f / Settings.CellSize;
+-    X = static_cast<int32_t>(std::floor((Position[0] - Settings.GridOrigin[0]) * InverseCell));
+-    Y = static_cast<int32_t>(std::floor((Position[1] - Settings.GridOrigin[1]) * InverseCell));
+-    Z = static_cast<int32_t>(std::floor((Position[2] - Settings.GridOrigin[2]) * InverseCell));
+-}
+-
+-void SurfelReferenceField::RebuildGrid() noexcept
+-{
+-    Grid.clear();
+-    Grid.reserve(Surfels.size());
+-    for (uint32_t Index = 0u; Index < Surfels.size(); ++Index)
+-    {
+-        int32_t X = 0, Y = 0, Z = 0;
+-        CellOf(Surfels[Index].Sample.Position, X, Y, Z);
+-        Grid[HashCell(X, Y, Z)].push_back(Index);
+-    }
+-}
+-
+-bool SurfelReferenceField::IsCovered(const SurfelReferenceSample& Candidate) const noexcept
+-{
+-    int32_t X = 0, Y = 0, Z = 0;
+-    CellOf(Candidate.Position, X, Y, Z);
+-    // A surface can straddle a cell boundary; match the shared gather's 3x3x3 query rather than relying on a
+-    // single bucket. Hash collisions are harmless because the normal/distance tests remain authoritative.
+-    for (int32_t OffsetZ = -1; OffsetZ <= 1; ++OffsetZ)
+-    for (int32_t OffsetY = -1; OffsetY <= 1; ++OffsetY)
+-    for (int32_t OffsetX = -1; OffsetX <= 1; ++OffsetX)
+-    {
+-        const auto It = Grid.find(HashCell(X + OffsetX, Y + OffsetY, Z + OffsetZ));
+-        if (It == Grid.end()) continue;
+-        for (uint32_t Index : It->second)
+-        {
+-            const Surfel& Existing = Surfels[Index];
+-            if (Distance(Existing.Sample.Position, Candidate.Position) >= Settings.CellSize) continue;
+-            if (Dot(Existing.Sample.Normal, Candidate.Normal) > 0.7f) return true;
+-        }
+-    }
+-    return false;
+-}
+-
+-void SurfelReferenceField::Seed(const std::vector<SurfelReferenceSample>& Samples) noexcept
+-{
+-    bool Changed = false;
+-    for (const SurfelReferenceSample& Candidate : Samples)
+-    {
+-        if (Surfels.size() >= Settings.MaximumSurfels || IsCovered(Candidate)) continue;
+-        Surfel NewSurfel{};
+-        NewSurfel.Sample = Candidate;
+-        Normalise(NewSurfel.Sample.Normal);
+-        Surfels.push_back(NewSurfel);
+-        // Make the new sample visible to subsequent candidates in this Seed call. The complete rebuild below keeps
+-        // cells stable after the batch and avoids any dependence on candidate ordering across calls.
+-        int32_t X = 0, Y = 0, Z = 0;
+-        CellOf(NewSurfel.Sample.Position, X, Y, Z);
+-        Grid[HashCell(X, Y, Z)].push_back(static_cast<uint32_t>(Surfels.size() - 1u));
+-        Changed = true;
+-    }
+-    if (Changed) RebuildGrid();
+-}
+-
+-void SurfelReferenceField::Step(SurfelReferenceMeasure Measure, void* UserContext) noexcept
+-{
+-    if (Measure == nullptr || Surfels.empty()) return;
+-    ++FrameCount;
+-    for (uint32_t Index = 0u; Index < Surfels.size(); ++Index)
+-    {
+-        Surfel& Current = Surfels[Index];
+-        float Measured[3]{};
+-        Measure(Current.Sample, Index, UserContext, Measured);
+-        const float Alpha = 1.0f / std::min(Current.Age + 1.0f, Settings.AgeCap);
+-        for (uint32_t Channel = 0u; Channel < 3u; ++Channel)
+-            Current.PendingIrradiance[Channel] = Current.Irradiance[Channel]
+-                                             + (Measured[Channel] - Current.Irradiance[Channel]) * Alpha;
+-    }
+-    // Deferred commit is the CPU Jacobi boundary: each Measure above saw exactly the prior field.
+-    for (Surfel& Current : Surfels)
+-    {
+-        Current.Irradiance[0] = Current.PendingIrradiance[0];
+-        Current.Irradiance[1] = Current.PendingIrradiance[1];
+-        Current.Irradiance[2] = Current.PendingIrradiance[2];
+-        Current.Age += 1.0f;
+-    }
+-}
+-
+-void SurfelReferenceField::Gather(const float Position[3], const float Normal[3], float OutIrradiance[3]) const noexcept
+-{
+-    OutIrradiance[0] = OutIrradiance[1] = OutIrradiance[2] = 0.0f;
+-    if (Surfels.empty()) return;
+-
+-    float QueryNormal[3] = { Normal[0], Normal[1], Normal[2] };
+-    Normalise(QueryNormal);
+-    int32_t X = 0, Y = 0, Z = 0;
+-    CellOf(Position, X, Y, Z);
+-
+-    float WeightSum = 0.0f;
+-    for (int32_t OffsetZ = -1; OffsetZ <= 1; ++OffsetZ)
+-    for (int32_t OffsetY = -1; OffsetY <= 1; ++OffsetY)
+-    for (int32_t OffsetX = -1; OffsetX <= 1; ++OffsetX)
+-    {
+-        const auto It = Grid.find(HashCell(X + OffsetX, Y + OffsetY, Z + OffsetZ));
+-        if (It == Grid.end()) continue;
+-        for (uint32_t Index : It->second)
+-        {
+-            const Surfel& Source = Surfels[Index];
+-            const float DistanceToSource = Distance(Position, Source.Sample.Position);
+-            if (DistanceToSource >= Settings.CellSize) continue;
+-            const float NormalWeight = Dot(QueryNormal, Source.Sample.Normal);
+-            if (NormalWeight <= 0.0f) continue;
+-            const float Delta[3] = { Position[0] - Source.Sample.Position[0], Position[1] - Source.Sample.Position[1], Position[2] - Source.Sample.Position[2] };
+-            if (std::fabs(Dot(Delta, Source.Sample.Normal)) >= Settings.CellSize * 0.5f) continue;
+-            float DistanceWeight = 1.0f - DistanceToSource / Settings.CellSize;
+-            DistanceWeight *= DistanceWeight;
+-            const float Weight = NormalWeight * DistanceWeight;
+-            OutIrradiance[0] += Source.Irradiance[0] * Weight;
+-            OutIrradiance[1] += Source.Irradiance[1] * Weight;
+-            OutIrradiance[2] += Source.Irradiance[2] * Weight;
+-            WeightSum += Weight;
+-        }
+-    }
+-    if (WeightSum > kEpsilon)
+-    {
+-        OutIrradiance[0] /= WeightSum;
+-        OutIrradiance[1] /= WeightSum;
+-        OutIrradiance[2] /= WeightSum;
+-    }
+-    else
+-        OutIrradiance[0] = OutIrradiance[1] = OutIrradiance[2] = 0.0f;
+-}
+-} // namespace Frontier
+diff --git a/Engine/DisplayPresentation/SurfelReference.h b/Engine/DisplayPresentation/SurfelReference.h
+deleted file mode 100644
+index 25842de..0000000
+--- a/Engine/DisplayPresentation/SurfelReference.h
++++ /dev/null
+@@ -1,84 +0,0 @@
+-//============================================================================================================================================
+-//                                             SURFELREFERENCE.H
+-//============================================================================================================================================
+-// 📦 Deterministic, Vulkan-free reference for the shared Surfel-GI field.
+-//
+-// This is engine code, rather than a per-project executable, so every project can use the same CPU oracle
+-// when validating the GPU SurfelGIStage. The owner supplies scene-specific ray/lighting evaluation through the small
+-// callback; this class owns the renderer-independent parts that must match on every project: persistent placement,
+-// the spatial hash, Jacobi-style running mean, and irradiance gathering.
+-//============================================================================================================================================
+-
+-#pragma once
+-
+-#include <cstdint>
+-#include <unordered_map>
+-#include <vector>
+-
+-namespace Frontier
+-{
+-    struct SurfelReferenceSample
+-    {
+-        float Position[3]{};
+-        float Normal[3]{};
+-        float Albedo[3]{};
+-    };
+-
+-    struct SurfelReferenceSettings
+-    {
+-        float    GridOrigin[3] = { 0.0f, 0.0f, 0.0f };
+-        float    CellSize      = 0.25f;
+-        float    AgeCap        = 64.0f;
+-        uint32_t MaximumSurfels = 262144u;
+-    };
+-
+-    // The measurement is irradiance at the surfel, before its temporal running mean. A project may implement it with
+-    // its deterministic CPU CWBVH/BVH, direct-light oracle, and previous-field Gather call. It is deliberately a
+-    // C-layout callback rather than a project type or std::function so the shared reference has no project ownership.
+-    using SurfelReferenceMeasure = void (*)(const SurfelReferenceSample& Sample, uint32_t Index,
+-                                            void* UserContext, float OutIrradiance[3]) noexcept;
+-
+-    class SurfelReferenceField
+-    {
+-    public:
+-        explicit SurfelReferenceField(const SurfelReferenceSettings& InitialSettings = {}) noexcept;
+-
+-        void Reset() noexcept;
+-        void AssignSettings(const SurfelReferenceSettings& NewSettings) noexcept;
+-
+-        // Adds persistent samples only where the existing world-space field does not already cover the same surface.
+-        // Calling this once per frame with the same visible samples is intentionally idempotent.
+-        void Seed(const std::vector<SurfelReferenceSample>& Samples) noexcept;
+-
+-        // All measurements observe the previous irradiance state; the commit happens only after every callback
+-        // returned. This is the CPU equivalent of SurfelIrradianceUpdate + SurfelCommit's Jacobi boundary.
+-        void Step(SurfelReferenceMeasure Measure, void* UserContext = nullptr) noexcept;
+-
+-        // Irradiance gathered from the current persistent field with the same 3x3x3 hash neighbourhood, normal and
+-        // tangent-plane gates that the GPU resolve uses. Returns black when no matching surfel covers the query.
+-        void Gather(const float Position[3], const float Normal[3], float OutIrradiance[3]) const noexcept;
+-
+-        [[nodiscard]] const SurfelReferenceSettings& QuerySettings() const noexcept { return Settings; }
+-        [[nodiscard]] uint32_t QuerySurfelCount() const noexcept { return static_cast<uint32_t>(Surfels.size()); }
+-        [[nodiscard]] uint64_t QueryFrameCount() const noexcept { return FrameCount; }
+-
+-    private:
+-        struct Surfel
+-        {
+-            SurfelReferenceSample Sample{};
+-            float Irradiance[3]{};
+-            float PendingIrradiance[3]{};
+-            float Age = 0.0f;
+-        };
+-
+-        [[nodiscard]] uint32_t HashCell(int32_t X, int32_t Y, int32_t Z) const noexcept;
+-        void CellOf(const float Position[3], int32_t& X, int32_t& Y, int32_t& Z) const noexcept;
+-        void RebuildGrid() noexcept;
+-        [[nodiscard]] bool IsCovered(const SurfelReferenceSample& Candidate) const noexcept;
+-
+-        SurfelReferenceSettings Settings{};
+-        std::vector<Surfel> Surfels;
+-        std::unordered_map<uint32_t, std::vector<uint32_t>> Grid;
+-        uint64_t FrameCount = 0u;
+-    };
+-}
+diff --git a/Engine/Host/FrontierRuntime.cpp b/Engine/Host/FrontierRuntime.cpp
+index a54a52d..e6a9abb 100644
+--- a/Engine/Host/FrontierRuntime.cpp
++++ b/Engine/Host/FrontierRuntime.cpp
+@@ -1068,7 +1068,7 @@ int Frontier::RunFrontierRuntime(
+         Integrator.AssignDenoiseLevelCount(Criteria.DenoiseLevelCount);
+         // ── Render-path decision matrix (Raytracing tile × Global Illumination tile) ──────────────────────────────────
+         //    RT ON            -> raytraced ReSTIR kernel (GI and/or raytraced reflections).
+-        //    RT OFF + GI ON   -> surfel GI (visibility raster primary + persistent world-space surfel indirect).
++        //    RT OFF + GI ON   -> Distance Field GI (visibility raster primary + SDF-traced indirect).
+         //    RT OFF + GI OFF  -> plain visibility raster (materials + direct + sky ambient; no GI, no rays).
+         //    Guard: RT ON + GI OFF + Reflections OFF is flat and pointless, so it falls back to the plain raster —
+         //           which looks better than a raytraced path carrying neither GI nor reflections.
+@@ -1086,8 +1086,7 @@ int Frontier::RunFrontierRuntime(
+         {
+             const char* PathName = RenderPath == 0u ? "raytraced ReSTIR kernel"
+                                  : RenderPath == 1u ? (Surface.QueryDistanceFieldGIReady() ? "Distance Field GI"
+-                                                      : Surface.QuerySurfelGIReady() ? "Surfel GI (SDF unavailable)"
+-                                                      : "raster fallback (SDF/Surfel unavailable)")
++                                                      : "raster fallback (SDF unavailable)")
+                                  :                    "plain visibility raster (no GI)";
+             const char* ReflName = EffReflMode == Frontier::ReflectionModeCategory::Off ? "off"
+                                  : EffReflMode == Frontier::ReflectionModeCategory::Sky ? "sky" : "raytraced";
+diff --git a/Engine/ProjectInterchange/ProjectInterchange.h b/Engine/ProjectInterchange/ProjectInterchange.h
+index 92f569e..7ce1cdd 100644
+--- a/Engine/ProjectInterchange/ProjectInterchange.h
++++ b/Engine/ProjectInterchange/ProjectInterchange.h
+@@ -102,7 +102,7 @@ typedef struct FrontierProjectRenderingPreference
+ {
+     uint32_t StructureSize;                 // [B] - guards additions at this C edge
+     uint32_t RenderModeNumber;              // [-] - project preference; engine selects supported shared mode
+-    uint32_t IndirectIlluminationEnabled;   // [-] - shared ReSTIR or Surfel-GI preference
++    uint32_t IndirectIlluminationEnabled;   // [-] - shared ReSTIR or SDF-GI preference
+ } FrontierProjectRenderingPreference;
+ 
+ typedef struct FrontierProjectPanel
+diff --git a/Engine/Shaders/DistanceFieldGIResolveBody.slang b/Engine/Shaders/DistanceFieldGIResolveBody.slang
+index 20536c5..433d7ea 100644
+--- a/Engine/Shaders/DistanceFieldGIResolveBody.slang
++++ b/Engine/Shaders/DistanceFieldGIResolveBody.slang
+@@ -87,7 +87,7 @@ vec3 ReconstructIrradiance(ivec2 Pixel, vec3 Position, uint Visibility)
+ vec3 Fresnel(vec3 f0, float cosTheta){ float m = clamp(1.0 - cosTheta, 0.0, 1.0); float m2 = m*m; return f0 + (vec3(1.0) - f0) * (m2*m2*m); }
+ 
+ // Shade a ray hit: the real triangle, the real slab, the engine's BSDF. Shared by the reflection ray here and
+-//    by SurfelIrradianceUpdate.slang's bounce — the two must agree about what a surface does with light.
++//    by the radiance pass's bounce — the two must agree about what a surface does with light.
+ vec3 ShadeHit(vec3 hp, uint FacetSlot, vec3 wo)
+ {
+     DistanceFacet Facet=Facets[FacetSlot];
+diff --git a/Engine/Shaders/SceneMaterialResolve.slang b/Engine/Shaders/SceneMaterialResolve.slang
+index 4d05efd..3622c4d 100644
+--- a/Engine/Shaders/SceneMaterialResolve.slang
++++ b/Engine/Shaders/SceneMaterialResolve.slang
+@@ -3,15 +3,15 @@
+ //============================================================================================================================================
+ // 📦 The hit → ShadingRecord decode, shared by every path that shades a ray hit.
+ //
+-//    WHY THIS FILE EXISTS.  It was ReSTIRViewport.slang's private §R4b. The surfel passes could not reach it, so
+-//    SurfelIrradianceUpdate.slang shaded its bounce hits with `vec3 hitN = -wi;` — a normal invented from the ray
++//    WHY THIS FILE EXISTS.  It was ReSTIRViewport.slang's private §R4b. The retired surfel passes could not reach it, so
++//    they shaded its bounce hits with `vec3 hitN = -wi;` — a normal invented from the ray
+ //    direction — and no material decode at all. Every bounce in the GI field was therefore achromatic and
+ //    geometry-blind: no base colour, no metal, no coat, no transmission, and a cosine term that depended on which
+ //    way the ray happened to point rather than on the surface it struck. A material cannot bleed its colour into
+ //    a room if the bounce never reads the material.
+ //
+ //    UnifiedMaterialEvaluation.h already makes this argument for the CPU side, and it applies verbatim here:
+-//    transport, visibility and sampling are legitimately different between the raster, surfel and ReSTIR paths.
++//    transport, visibility and sampling are legitimately different between the raster, distance-field and ReSTIR paths.
+ //    Which BSDF you evaluate once a ray knows what it hit is not.
+ //
+ //    THE CONTRACT.  This file declares no bindings of its own; the includer must already have declared, with the
+@@ -307,7 +307,7 @@ uint TriangleMaterial(uint flatPrimitive)
+ 
+ // ∫ f(wo, wi)·cos θ dωi — the fraction of a UNIFORM environment this material sends back to the viewer.
+ //
+-//    A path that has an irradiance but no incoming direction (a surfel field, a sky fill) needs this and nothing
++//    A path that has an irradiance but no incoming direction (a radiance cache, a sky fill) needs this and nothing
+ //    else; outgoing radiance is E/π × this. The obvious shortcut — evaluate f once along the normal and multiply
+ //    by π — is correct only for a Lambert lobe. On a clearcoated or metallic slab f(N, N) sits on the specular
+ //    peak, so π·f is enormous and the material renders blown-out white. Clamping does not help: the peak is
+diff --git a/Engine/Shaders/SurfaceResolve.slang b/Engine/Shaders/SurfaceResolve.slang
+index 7b8f34a..037dc7e 100644
+--- a/Engine/Shaders/SurfaceResolve.slang
++++ b/Engine/Shaders/SurfaceResolve.slang
+@@ -32,7 +32,7 @@ layout(set = 0, binding = 9)          uniform sampler2D  HiZImage;
+ layout(set = 0, binding = 10, rgba32f) uniform writeonly image2D SurfaceImage;
+ layout(set = 0, binding = 11, rgba16f) uniform writeonly image2D NormalImage;
+ layout(set = 0, binding = 12, rgba8)   uniform writeonly image2D OutputImage;
+-// Thread E — material aux G-buffer. The surfel-GI and plain-raster paths do NOT run the full OpenPBR material
++// Thread E — material aux G-buffer. The distance-field-GI and plain-raster paths do NOT run the full OpenPBR material
+ //    evaluation, so they need the primary surface's metalness/roughness spelled out here to shade every material
+ //    correctly (metals reflect, dielectrics diffuse). x = metalness, y = specular roughness, zw = 0. rgba16f is
+ //    plenty for two 0..1 scalars and matches NormalImage's format. Written every pixel (background = 0,1).
+diff --git a/Engine/Shaders/SurfelCommit.slang b/Engine/Shaders/SurfelCommit.slang
+deleted file mode 100644
+index e2417be..0000000
+--- a/Engine/Shaders/SurfelCommit.slang
++++ /dev/null
+@@ -1,39 +0,0 @@
+-//============================================================================================================================================
+-// 📦 Engine/Shaders/SurfelCommit.slang — Jacobi commit for the surfel field (pass 1.5 of the GI stage).
+-//============================================================================================================================================
+-// SurfelIrradianceUpdate.slang writes each surfel's new running-mean irradiance into IrradianceNew and leaves the
+-//    previous value in Irradiance untouched, because GatherField() during the update reads NEIGHBOURS' Irradiance
+-//    (the previous frame's committed value) — a Gauss–Seidel in-place write would make the result depend on thread
+-//    order. This trivial pass performs the deferred swap Irradiance = IrradianceNew for every live surfel, AFTER
+-//    the whole update dispatch has finished (a compute→compute barrier separates them). It is what the update
+-//    shader's closing comment ("host commits Irradiance = IrradianceNew") refers to; keeping it a GPU pass avoids a
+-//    per-frame readback. One thread per surfel, same 64-wide group and same GpuSurfel record as the update pass.
+-//
+-// NOTE: GLSL source, lowered by glslc / glslang -S comp (see BuildGlslang.sh).
+-
+-#version 460
+-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+-
+-struct GpuSurfel
+-{
+-    vec4 PositionRadius;    // xyz = world position, w = world-space radius
+-    vec4 NormalAge;         // xyz = surface normal (unit), w = age in frames
+-    vec4 Albedo;            // xyz = diffuse albedo, w = alive flag (>0.5)
+-    vec4 Irradiance;        // xyz = E (committed) — gathered by neighbours next frame
+-    vec4 IrradianceNew;     // xyz = E' (this frame's running-mean result)
+-};
+-
+-layout(std430, binding = 0) buffer SurfelExtent { GpuSurfel Surfels[]; };
+-
+-layout(push_constant) uniform SurfelCommitConstants
+-{
+-    uvec4 Counts;   // x = surfel count; yzw unused (kept uvec4 for std430 push alignment parity with the other passes)
+-} PC;
+-
+-void main()
+-{
+-    uint si = gl_GlobalInvocationID.x;
+-    if (si >= PC.Counts.x) return;
+-    if (Surfels[si].Albedo.w < 0.5) return;         // skip dead slots
+-    Surfels[si].Irradiance = Surfels[si].IrradianceNew;
+-}
+diff --git a/Engine/Shaders/SurfelGIResolve.slang b/Engine/Shaders/SurfelGIResolve.slang
+deleted file mode 100644
+index e740204..0000000
+--- a/Engine/Shaders/SurfelGIResolve.slang
++++ /dev/null
+@@ -1,283 +0,0 @@
+-//============================================================================================================================================
+-//                                                   SURFELGIRESOLVE.SLANG
+-//============================================================================================================================================
+-// 📦 GTX path, pass 2 of 2 — per-pixel resolve. Reads the visibility raster's G-buffer (SurfaceImage = world position,
+-//    NormalImage = normal — the SAME pair SurfaceResolve.slang produces for the ReSTIR kernel), evaluates the material,
+-//    and composes the final pixel from three separable terms:
+-//        direct  = sun NEE, shadow-ray tested        (always — sharp)
+-//        indirect= surfel-field diffuse gather        (only when Global Illumination is ON)
+-//        reflect = OFF / SKY / RAYTRACED              (the Reflections quick-tile mode)
+-//    then tone-maps to OutputImage. Materials are evaluated in ALL modes here, not only the raytraced kernel — which is
+-//    the correctness requirement: a surface looks the same material whether it is lit by ReSTIR, by surfels, or flat.
+-//
+-//    This one shader covers TWO of the three render modes (the third is the raytraced ReSTIR kernel, unchanged):
+-//        • Raytracing OFF + GI ON  → surfel GI      : kFeatureGlobalIllumination set, surfel gather runs.
+-//        • Raytracing OFF + GI OFF → plain raster   : flag clear, indirect = sky ambient only (never black), no rays.
+-//    The Reflections mode is independent (Off/Sky/Raytraced); the host clamps it so Raytraced reflections only appear
+-//    when the raytracing budget is actually available (see PortingGuide.md mode matrix + the fall-back guard).
+-//
+-//    THE MATERIAL IS DECODED, NOT APPROXIMATED.  SurfaceImage.w carries the visibility id — the same packed
+-//    instance/primitive pair ReSTIRViewport.slang's primary hit unpacks — so this pass resolves the real triangle
+-//    through SceneMaterialResolve.slang and evaluates MaterialEvaluation.slang's full lobe stack.
+-//
+-//    It used to read an rgba8 albedo image and a metal/rough aux and shade `albedo·(1−metal)/π` plus a fixed
+-//    F0 = 0.04. That is a different material model from the one the raytraced path evaluates for the same pixel:
+-//    no coat, no transmission, no anisotropy, no sheen, no thin film, no F82 metal tint, no EON diffuse
+-//    roughness — and base colour quantised to 8 bits on the way through. A viewer toggling "Raytracing" was
+-//    therefore comparing two BSDFs as well as two transports, which makes the comparison useless for judging
+-//    either. Transport, visibility and sampling may differ between the paths. The BSDF may not.
+-//
+-//    NOTE: GLSL source lowered by the build scripts (glslang/glslc -fshader-stage=compute --target-env=vulkan1.2).
+-
+-#version 460
+-#extension GL_GOOGLE_include_directive : require
+-#extension GL_EXT_nonuniform_qualifier : require
+-
+-layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+-
+-//------------------------------------------------------------------------------------------------------------------------
+-//                                                    IMAGES / G-BUFFER
+-//------------------------------------------------------------------------------------------------------------------------
+-layout(rgba8,   binding = 0) uniform writeonly image2D OutputImage;   // tone-mapped presentation
+-layout(rgba32f, binding = 1) uniform readonly  image2D SurfaceImage;  // xyz = world position, w = visibility id bits
+-layout(rgba16f, binding = 2) uniform readonly  image2D NormalImage;   // xyz = geometric normal
+-// 📝 There is no sky CUBE anywhere in this engine. This pass used to declare `layout(binding = 5) samplerCube
+-//    SkyCube` and sample it in three places, while SurfelGIStage::CreatePipelines listed bindings 0–4 and 8–12
+-//    and nothing else — a shader that reads a descriptor absent from its pipeline layout is an invalid pipeline,
+-//    so vkCreateComputePipelines rejected it and the stage fell back every time it was asked for.
+-//    The kernel's own sky is SkyRecords.slang's SkyAlong, which needs a nine-vec4 atmosphere block this pass has
+-//    no room for in a 96-byte push range. Until that block is shared, the sky here is the analytic two-lobe
+-//    gradient below, built only from push constants that already exist.
+-//    ⚠️ SEAM: this is NOT the kernel's atmosphere. Background and reflection-miss pixels will differ between the
+-//    surfel path and the raytraced path. Surface shading — the thing the paths are compared on — does not.
+-
+-//------------------------------------------------------------------------------------------------------------------------
+-//                                                    SURFEL FIELD (read-only here)
+-//------------------------------------------------------------------------------------------------------------------------
+-struct GpuSurfel
+-{
+-    vec4 PositionRadius;
+-    vec4 NormalAge;
+-    vec4 Albedo;
+-    vec4 Irradiance;
+-    vec4 IrradianceNew;
+-};
+-layout(std430, binding = 10) readonly buffer SurfelExtent          { GpuSurfel Surfels[];      };
+-layout(std430, binding = 11) readonly buffer SurfelGridHeadExtent  { int  SurfelGridHead[]; };
+-layout(std430, binding = 12) readonly buffer SurfelGridNextExtent  { int  SurfelGridNext[]; };
+-
+-// Shared CWBVH — direct shadow ray + raytraced reflection ray.
+-layout(std430, binding = 8) readonly buffer TraversalNodeExtent { vec4 CwbvhNodes[]; };
+-layout(std430, binding = 9) readonly buffer TraversalLeafExtent { vec4 CwbvhTris[];  };
+-uint TlasInstanceCount = 0u;
+-#include "TraversalCWBVH.slang"
+-
+-//------------------------------------------------------------------------------------------------------------------------
+-//                                              THE SCENE, AS THE ReSTIR KERNEL SEES IT
+-//------------------------------------------------------------------------------------------------------------------------
+-#include "SceneShadingRecords.slang"
+-
+-// 📝 13 and 14 are NOT free: MaterialEvaluation.slang claims them for EnergyLut and SheenLut, in every pass that
+-//    includes it. These start at 15 to leave that pair alone.
+-layout(std430, binding = 15) readonly buffer TriangleExtent     { GpuTriangle     Triangles[];     };
+-layout(std430, binding = 16) readonly buffer MaterialExtent     { GpuMaterial     Materials[];     };
+-layout(std430, binding = 17) readonly buffer InstanceExtent     { GpuInstance     Instances[];     };
+-layout(std430, binding = 18) readonly buffer MaterialSlabExtent { GpuMaterialSlab MaterialSlabs[]; };
+-layout(std430, binding = 19) readonly buffer VertexExtent       { GpuVertex       Vertices[];      };
+-layout(std430, binding = 20) readonly buffer IndexExtent        { uint            Indices[];       };
+-
+-const uint kMaterialTextureNone = 0xFFFFFFFFu;
+-#define FRONTIER_AUTOMOTIVE_SHOWCASE 1
+-#include "MaterialEvaluation.slang"
+-layout(binding = 31) uniform sampler2D Textures[];   // bindless table, as in ReSTIRViewport (last binding in the set)
+-#include "SceneMaterialResolve.slang"
+-
+-// The visibility id packing SurfaceResolve.slang writes into SurfaceImage.w — identical to ReSTIRViewport's.
+-const uint kVisibilityInvalid = 0xFFFFFFFFu;
+-uint VisibilityInstance(uint Packed)  { return (Packed >> 14) & 0x3FFFFu; }
+-uint VisibilityPrimitive(uint Packed) { return Packed & 0x3FFFu; }
+-
+-//------------------------------------------------------------------------------------------------------------------------
+-//                                                    PUSH CONSTANTS
+-//------------------------------------------------------------------------------------------------------------------------
+-layout(push_constant) uniform ResolveConstants
+-{
+-    vec4  SunDirectionRadiance;   // xyz = to-sun (unit), w = radiance
+-    vec4  SunColour;              // xyz = sun colour
+-    vec4  SkyAmbient;             // xyz = sky ambient (plain-raster diffuse fill), w = exposure
+-    vec4  GridOriginCell;         // xyz = grid origin, w = cell size
+-    vec4  CameraEye;              // xyz = eye, w unused
+-    uvec4 Counts;                 // x = surfel count, y = grid hash size, z = feature flags, w = reflection mode
+-} PC;
+-
+-// Feature flags — MUST match Engine/Shaders/ReSTIRViewport.slang so a single ControlCentreSettings drives both paths.
+-const uint kFeatureGlobalIllumination = 1u;    // bit 0: surfel diffuse gather runs
+-// Reflection mode (Counts.w): 0 = Off, 1 = Sky, 2 = Raytraced.
+-const uint kReflectOff = 0u, kReflectSky = 1u, kReflectRaytraced = 2u;
+-
+-// Horizon → zenith gradient about the sky ambient, plus a broad solar aureole. Roughness widens the lobe, which
+-//    is what a prefiltered cube would have done for a glossy reflection.
+-vec3 SkyAlongApprox(vec3 Direction, float Roughness)
+-{
+-    const vec3  up      = vec3(0.0, 0.0, 1.0);                       // world is RH Z-up, metres
+-    const float height  = clamp(dot(Direction, up) * 0.5 + 0.5, 0.0, 1.0);
+-    const vec3  zenith  = PC.SkyAmbient.xyz;
+-    const vec3  horizon = PC.SkyAmbient.xyz * vec3(1.35, 1.22, 1.05);  // Rayleigh reddens toward the horizon
+-    vec3 dome = mix(horizon, zenith, height * height);
+-    const float sunCos  = clamp(dot(Direction, normalize(PC.SunDirectionRadiance.xyz)), 0.0, 1.0);
+-    const float sharp   = mix(2048.0, 8.0, clamp(Roughness, 0.0, 1.0));
+-    dome += PC.SunColour.xyz * PC.SunDirectionRadiance.w * pow(sunCos, sharp) * 0.02;
+-    return dome;
+-}
+-
+-ivec3 CellOf(vec3 p){ vec3 q = (p - PC.GridOriginCell.xyz) / PC.GridOriginCell.w; return ivec3(floor(q)); }
+-uint  CellHash(ivec3 c){ uint h = uint(c.x+1024)*73856093u ^ uint(c.y+1024)*19349663u ^ uint(c.z+1024)*83492791u; return h % PC.Counts.y; }
+-
+-vec3 GatherField(vec3 P, vec3 N)
+-{
+-    vec3 acc = vec3(0.0); float wsum = 0.0;
+-    ivec3 base = CellOf(P);
+-    for (int dz=-1; dz<=1; ++dz) for (int dy=-1; dy<=1; ++dy) for (int dx=-1; dx<=1; ++dx)
+-    {
+-        uint cell = CellHash(base + ivec3(dx,dy,dz));
+-        int idx = SurfelGridHead[cell] - 1; int guard = 0;
+-        while (idx >= 0 && guard < 256)
+-        {
+-            GpuSurfel s = Surfels[idx];
+-            vec3 d = P - s.PositionRadius.xyz; float dist = length(d); float r = s.PositionRadius.w;
+-            if (s.Albedo.w > 0.5 && dist < r)
+-            {
+-                float wn = dot(N, s.NormalAge.xyz); float planar = abs(dot(d, s.NormalAge.xyz));
+-                if (wn > 0.0 && planar < r*0.5) { float wd = 1.0 - dist/r; wd*=wd; float w = wn*wd; acc += s.Irradiance.xyz*w; wsum += w; }
+-            }
+-            idx = SurfelGridNext[idx] - 1; ++guard;
+-        }
+-    }
+-    return wsum > 1e-4 ? acc / wsum : vec3(0.0);
+-}
+-
+-vec3 SunDirect(vec3 P, vec3 N)
+-{
+-    vec3 L = normalize(PC.SunDirectionRadiance.xyz);
+-    float ndl = max(dot(N, L), 0.0);
+-    if (ndl <= 0.0) return vec3(0.0);
+-    vec3 rD = 1.0 / L;
+-    bool shadowed = TraverseOccluded(P + N*1e-3, L, rD, 1e30);   // single-blob world; two-level path: TraverseInstancesOccluded
+-    return shadowed ? vec3(0.0) : PC.SunColour.xyz * (PC.SunDirectionRadiance.w * ndl);
+-}
+-
+-// Schlick Fresnel for the specular/reflection weight.
+-vec3 Fresnel(vec3 f0, float cosTheta){ float m = clamp(1.0 - cosTheta, 0.0, 1.0); float m2 = m*m; return f0 + (vec3(1.0) - f0) * (m2*m2*m); }
+-
+-// Shade a ray hit: the real triangle, the real slab, the engine's BSDF. Shared by the reflection ray here and
+-//    by SurfelIrradianceUpdate.slang's bounce — the two must agree about what a surface does with light.
+-vec3 ShadeHit(vec3 hp, uint flatPrim, vec3 wo)
+-{
+-    GpuInstance  inst = Instances[0];                               // single-blob world
+-    GpuMaterial  mat  = Materials[TriangleMaterial(flatPrim)];
+-    SurfaceFrame F;
+-    ShadingRecord m = ResolveMaterial(mat, inst, LocalPrimitive(flatPrim, 0u), hp, wo, 0.0, F);
+-    vec3 woLoc = ToLocal(F, wo);
+-    if (woLoc.z <= 0.0) return F.Emission;
+-    ResolvedLayers layers = ResolveLayers(m, woLoc);
+-
+-    vec3 Lo = F.Emission;
+-    vec3 L = normalize(PC.SunDirectionRadiance.xyz);
+-    vec3 wiLoc = ToLocal(F, L);
+-    if (wiLoc.z > 0.0 && !TraverseOccluded(hp + F.Geometric*1e-3, L, 1.0/L, 1e30))
+-        Lo += EvaluateBsdf(m, layers, woLoc, wiLoc) * (PC.SunColour.xyz * PC.SunDirectionRadiance.w) * wiLoc.z;
+-    Lo += AmbientResponse(m, layers, woLoc) * (kInvPi * GatherField(hp, F.Normal));
+-    return Lo;
+-}
+-
+-vec3 Reflection(vec3 P, vec3 N, vec3 V, float roughness, uint mode)
+-{
+-    if (mode == kReflectOff) return vec3(0.0);
+-    vec3 R = reflect(-V, N);
+-    if (mode == kReflectSky)
+-    {
+-        // reflect the sky dome only — no scene rays. Roughness widens toward the ambient (cheap gloss).
+-        return SkyAlongApprox(R, roughness);
+-    }
+-    // kReflectRaytraced — one reflection ray against the CWBVH; miss → sky, hit → the hit's own material.
+-    vec3 rD = 1.0 / R;
+-    TraversalHit h = TraverseClosest(P + N*1e-3, R, rD, 1e30);
+-    if (h.t >= 1e29) return SkyAlongApprox(R, 0.0);
+-    return ShadeHit(P + R * h.t, h.primitive, -R);
+-}
+-
+-void main()
+-{
+-    ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
+-    ivec2 size = imageSize(SurfaceImage);
+-    if (pixel.x >= size.x || pixel.y >= size.y) return;
+-
+-    vec4 surf = imageLoad(SurfaceImage, pixel);
+-    vec3 P = surf.xyz;
+-    uint visibility = floatBitsToUint(surf.w);
+-    // A miss (no geometry) shows the sky directly.
+-    if (visibility == kVisibilityInvalid)
+-    {
+-        vec3 V = normalize(P - PC.CameraEye.xyz);
+-        vec3 sky = SkyAlongApprox(V, 0.0);
+-        imageStore(OutputImage, pixel, vec4(pow(sky/(sky+vec3(1.0)), vec3(1.0/2.2)), 1.0));
+-        return;
+-    }
+-
+-    // ── the receiving material, decoded ─────────────────────────────────────────────────────────────────────
+-    // Same unpack, same instance row, same ResolveMaterial call as ReSTIRViewport.slang's primary hit. The
+-    //    shading frame comes back from the decode, so the normal map and the tangent basis are the raytraced
+-    //    path's, not a geometric normal read out of an rgba16f image.
+-    GpuInstance  inst = Instances[VisibilityInstance(visibility)];
+-    GpuMaterial  mat  = Materials[inst.MaterialIndex];
+-    vec3  V         = normalize(PC.CameraEye.xyz - P);
+-    float coneWidth = length(PC.CameraEye.xyz - P) * 0.0015;   // ≈ one pixel's spread at the hit [m]
+-    SurfaceFrame F;
+-    ShadingRecord m = ResolveMaterial(mat, inst, VisibilityPrimitive(visibility), P, V, coneWidth, F);
+-    vec3 N = F.Normal;
+-
+-    uint flags = PC.Counts.z;
+-    uint reflMode = PC.Counts.w;
+-
+-    // An emitter is its own radiance, as in the raytraced kernel.
+-    if (dot(F.Emission, F.Emission) > 0.0)
+-    {
+-        vec3 e = F.Emission * PC.SkyAmbient.w;
+-        imageStore(OutputImage, pixel, vec4(pow(e/(e+vec3(1.0)), vec3(1.0/2.2)), 1.0));
+-        return;
+-    }
+-
+-    vec3 woLoc = ToLocal(F, V);
+-    if (woLoc.z <= 0.0) { imageStore(OutputImage, pixel, vec4(0.0, 0.0, 0.0, 1.0)); return; }
+-    ResolvedLayers layers = ResolveLayers(m, woLoc);
+-
+-    // --- direct (always, sharp) — the full lobe stack, not a Lambert ---
+-    vec3 col = vec3(0.0);
+-    {
+-        vec3 L = normalize(PC.SunDirectionRadiance.xyz);
+-        vec3 wiLoc = ToLocal(F, L);
+-        if (wiLoc.z > 0.0 && !TraverseOccluded(P + F.Geometric*1e-3, L, 1.0/L, 1e30))
+-            col += EvaluateBsdf(m, layers, woLoc, wiLoc) * (PC.SunColour.xyz * PC.SunDirectionRadiance.w) * wiLoc.z;
+-    }
+-
+-    // --- indirect diffuse: an irradiance through this material's hemispherical response ---
+-    vec3 response = AmbientResponse(m, layers, woLoc);
+-    if ((flags & kFeatureGlobalIllumination) != 0u)
+-        col += response * (kInvPi * GatherField(P, N));        // surfel GI
+-    else
+-        col += response * PC.SkyAmbient.xyz;                   // plain raster: sky ambient fill (never black)
+-
+-    // --- reflections (Off / Sky / Raytraced) ---
+-    // Fresnel from the resolved slab's own F0 — metal tint, coat IOR and all — rather than a hard 0.04.
+-    if (reflMode != kReflectOff)
+-    {
+-        vec3 f0 = mix(vec3(0.04), m.BaseColor, m.Metalness) * m.SpecularColor;
+-        vec3 Fr = Fresnel(f0, max(woLoc.z, 0.0));
+-        col += Fr * Reflection(P, N, V, m.SpecularRoughness, reflMode);
+-    }
+-
+-    // exposure + Reinhard + gamma
+-    col *= PC.SkyAmbient.w;
+-    vec3 mapped = pow(col / (col + vec3(1.0)), vec3(1.0/2.2));
+-    imageStore(OutputImage, pixel, vec4(mapped, 1.0));
+-}
+diff --git a/Engine/Shaders/SurfelIrradianceUpdate.slang b/Engine/Shaders/SurfelIrradianceUpdate.slang
+deleted file mode 100644
+index 6a1f1fa..0000000
+--- a/Engine/Shaders/SurfelIrradianceUpdate.slang
++++ /dev/null
+@@ -1,237 +0,0 @@
+-//============================================================================================================================================
+-//                                               SURFELIRRADIANCEUPDATE.SLANG
+-//============================================================================================================================================
+-// 📦 GTX global-illumination path, pass 1 of 2 — the persistent world-space surfel field's temporal irradiance update.
+-//    Dispatched ONE thread per live surfel when the "Raytracing" quick tile is OFF and "Global Illumination" is ON
+-//    (see the mode matrix in RaytraceToggle/PortingGuide.md). It does NOT run in the raytraced ReSTIR path, and it does
+-//    NOT run in the plain visibility-raster mode (GI off) — the host skips the whole surfel graph there.
+-//
+-//    Technique (mirrors the proven CPU reference SurfelGI/SurfelGI.cpp, itself after Jure Triglav's surfel GI):
+-//      • surfels are persistent in world space and never move — the single biggest anti-flicker decision;
+-//      • each frame a surfel casts RayCount cosine-weighted hemisphere rays, traverses the shared CWBVH for
+-//        visibility, gathers sun direct at the hit (shadow-ray tested) plus the neighbouring surfels' PREVIOUS
+-//        irradiance (one bounce this frame → multi-bounce over frames), and folds the result into a running mean;
+-//      • Jacobi update: it reads Irradiance (last frame) and writes IrradianceNew, so the pass is order-independent
+-//        and never feeds its own output back within a frame (no read-after-write shimmer). The host swaps the two
+-//        after the dispatch (or bind them ping-pong).
+-//    Anti-flicker levers, all here: persistent surfels · running mean 1/min(age,cap) · firefly clamp · Jacobi.
+-//
+-//    HIT SHADING.  A bounce reads the material it actually struck. The hit's triangle, instance and primitive go
+-//    through SceneMaterialResolve.slang — the SAME decode ReSTIRViewport.slang runs on its own bounce vertices —
+-//    and the outgoing radiance is MaterialEvaluation.slang's EvaluateBsdf against the sun, plus the surfel field's
+-//    previous irradiance through the material's own diffuse response, plus emission.
+-//
+-//    This replaced `vec3 hitN = -wi;` and no material decode at all. That stand-in had two consequences worth
+-//    stating plainly, because they are what a reader would otherwise mistake for a tuning problem:
+-//      • every bounce was achromatic. Lo was the sun term times 1/π with no base colour anywhere, so a surfel over
+-//        red carpet and a surfel over grey concrete gathered identical light. Colour bleeding was not weak, it was
+-//        structurally absent.
+-//      • the cosine term was geometry-blind. dot(-wi, L) depends only on where the ray pointed, so a wall and the
+-//        floor it meets returned the same N·L, and a surface facing away from the sun was still lit by it.
+-//
+-// ⚠️ PORT SEAM (one left): the surfel hash grid is a head/next linked list the host builds each frame from the
+-//    surfel positions.
+-//    NOTE: GLSL source lowered by the build scripts (glslang/glslc -fshader-stage=compute --target-env=vulkan1.2).
+-
+-#version 460
+-#extension GL_GOOGLE_include_directive : require
+-#extension GL_EXT_nonuniform_qualifier : require
+-
+-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+-
+-//------------------------------------------------------------------------------------------------------------------------
+-//                                                    SURFEL FIELD
+-//------------------------------------------------------------------------------------------------------------------------
+-// One persistent record per surfel. std430; 80 B. Alive when Albedo.w > 0.5.
+-struct GpuSurfel
+-{
+-    vec4 PositionRadius;    // xyz = world position, w = world-space radius
+-    vec4 NormalAge;         // xyz = surface normal (unit), w = age in frames (float; running-mean denominator)
+-    vec4 Albedo;            // xyz = diffuse albedo, w = alive flag (>0.5)
+-    vec4 Irradiance;        // xyz = E (committed, last frame) — read this frame (Jacobi source)
+-    vec4 IrradianceNew;     // xyz = E' (this frame's running-mean result) — written here (Jacobi target)
+-};
+-
+-layout(std430, binding = 0) buffer SurfelExtent      { GpuSurfel Surfels[];      };
+-layout(std430, binding = 1) readonly buffer SurfelGridHeadExtent { int  SurfelGridHead[]; };  // per-cell first surfel (+1; 0 = empty)
+-layout(std430, binding = 2) readonly buffer SurfelGridNextExtent { int  SurfelGridNext[]; };  // per-surfel next in cell chain (+1; 0 = end)
+-
+-//------------------------------------------------------------------------------------------------------------------------
+-//                                              THE SCENE, AS THE ReSTIR KERNEL SEES IT
+-//------------------------------------------------------------------------------------------------------------------------
+-// Same records, same slot numbers, same decode. A bounce here resolves its material through exactly the arithmetic
+-//    the raytraced path uses for its own bounce vertices, so the two cannot drift apart by accident.
+-#include "SceneShadingRecords.slang"
+-
+-layout(std430, binding = 3)  readonly buffer TriangleExtent     { GpuTriangle     Triangles[];     };
+-layout(std430, binding = 4)  readonly buffer MaterialExtent     { GpuMaterial     Materials[];     };
+-layout(std430, binding = 5)  readonly buffer InstanceExtent     { GpuInstance     Instances[];     };
+-layout(std430, binding = 10) readonly buffer MaterialSlabExtent { GpuMaterialSlab MaterialSlabs[]; };
+-layout(std430, binding = 11) readonly buffer VertexExtent       { GpuVertex       Vertices[];      };
+-layout(std430, binding = 12) readonly buffer IndexExtent        { uint            Indices[];       };
+-
+-// Shared CWBVH blobs (identical bindings to the ReSTIR kernel's 8/9) — TraversalCWBVH.slang traces these.
+-layout(std430, binding = 8) readonly buffer TraversalNodeExtent { vec4 CwbvhNodes[]; };
+-layout(std430, binding = 9) readonly buffer TraversalLeafExtent { vec4 CwbvhTris[];  };
+-uint TlasInstanceCount = 0u;   // single-blob world here (the showcase grid); the two-level path plugs in as in ReSTIRViewport.
+-#include "TraversalCWBVH.slang"
+-
+-const uint kMaterialTextureNone = 0xFFFFFFFFu;
+-#define FRONTIER_AUTOMOTIVE_SHOWCASE 1
+-#include "MaterialEvaluation.slang"      // 13 = EnergyLut, 14 = SheenLut, declared inside
+-layout(binding = 31) uniform sampler2D Textures[];   // bindless table, as in ReSTIRViewport (last binding in the set)
+-#include "SceneMaterialResolve.slang"
+-
+-//------------------------------------------------------------------------------------------------------------------------
+-//                                                    PUSH CONSTANTS
+-//------------------------------------------------------------------------------------------------------------------------
+-layout(push_constant) uniform SurfelUpdateConstants
+-{
+-    vec4  SunDirectionRadiance;   // xyz = direction TO the sun (unit), w = scalar radiance
+-    vec4  SunColour;              // xyz = sun colour, w unused
+-    vec4  SkyAmbient;             // xyz = hemisphere ambient (sky) radiance added on a ray miss, w unused
+-    vec4  GridOriginCell;         // xyz = grid origin (world), w = cell size
+-    uvec4 Counts;                 // x = surfel count, y = frame index, z = ray count, w = grid hash size
+-    vec4  Tuning;                 // x = firefly clamp, y = running-mean age cap, z/w unused
+-} PC;
+-
+-//------------------------------------------------------------------------------------------------------------------------
+-//                                                    HELPERS
+-//------------------------------------------------------------------------------------------------------------------------
+-uint HashU(uint x){ x^=x>>16; x*=0x7feb352du; x^=x>>15; x*=0x846ca68bu; x^=x>>16; return x; }
+-float Rand(inout uint s){ s=HashU(s); return float(s>>8)*(1.0/16777216.0); }
+-
+-ivec3 CellOf(vec3 p)
+-{
+-    vec3 q = (p - PC.GridOriginCell.xyz) / PC.GridOriginCell.w;
+-    return ivec3(floor(q));
+-}
+-uint CellHash(ivec3 c)
+-{
+-    uint h = uint(c.x + 1024) * 73856093u ^ uint(c.y + 1024) * 19349663u ^ uint(c.z + 1024) * 83492791u;
+-    return h % PC.Counts.w;
+-}
+-
+-// Gather the neighbouring surfels' committed irradiance at (P, N) from the 3×3×3 cell neighbourhood.
+-vec3 GatherField(vec3 P, vec3 N)
+-{
+-    vec3 acc = vec3(0.0); float wsum = 0.0;
+-    ivec3 base = CellOf(P);
+-    for (int dz = -1; dz <= 1; ++dz)
+-    for (int dy = -1; dy <= 1; ++dy)
+-    for (int dx = -1; dx <= 1; ++dx)
+-    {
+-        uint cell = CellHash(base + ivec3(dx, dy, dz));
+-        int idx = SurfelGridHead[cell] - 1;
+-        int guard = 0;
+-        while (idx >= 0 && guard < 256)
+-        {
+-            GpuSurfel s = Surfels[idx];
+-            vec3 d = P - s.PositionRadius.xyz;
+-            float dist = length(d);
+-            float r = s.PositionRadius.w;
+-            if (s.Albedo.w > 0.5 && dist < r)
+-            {
+-                float wn = dot(N, s.NormalAge.xyz);
+-                float planar = abs(dot(d, s.NormalAge.xyz));
+-                if (wn > 0.0 && planar < r * 0.5)
+-                {
+-                    float wd = 1.0 - dist / r; wd *= wd;
+-                    float w = wn * wd;
+-                    acc += s.Irradiance.xyz * w; wsum += w;
+-                }
+-            }
+-            idx = SurfelGridNext[idx] - 1;
+-            ++guard;
+-        }
+-    }
+-    return wsum > 1e-4 ? acc / wsum : vec3(0.0);
+-}
+-
+-void main()
+-{
+-    uint si = gl_GlobalInvocationID.x;
+-    if (si >= PC.Counts.x) return;
+-    GpuSurfel s = Surfels[si];
+-    if (s.Albedo.w < 0.5) return;
+-
+-    vec3 N = normalize(s.NormalAge.xyz);
+-    // tangent frame
+-    vec3 t = abs(N.x) < 0.9 ? vec3(1,0,0) : vec3(0,1,0);
+-    vec3 tx = normalize(cross(t, N));
+-    vec3 ty = cross(N, tx);
+-
+-    uint seed = HashU(si * 2246822519u ^ PC.Counts.y * 3266489917u);
+-    uint rays = max(PC.Counts.z, 1u);
+-    float firefly = PC.Tuning.x;
+-
+-    vec3 meas = vec3(0.0);
+-    for (uint k = 0u; k < rays; ++k)
+-    {
+-        float u1 = Rand(seed), u2 = Rand(seed);
+-        float rr = sqrt(u1), ph = 2.0 * kPi * u2;
+-        vec3 wi = normalize(tx * (rr * cos(ph)) + ty * (rr * sin(ph)) + N * sqrt(max(0.0, 1.0 - u1)));
+-
+-        vec3 O = s.PositionRadius.xyz + N * 1e-3;
+-        vec3 rD = 1.0 / wi;
+-        TraversalHit h = TraverseClosest(O, wi, rD, 1e30);
+-        if (h.t >= 1e29)
+-        {
+-            // ray escaped → sky ambient contributes to this surfel's irradiance
+-            meas += PC.SkyAmbient.xyz;
+-            continue;
+-        }
+-        vec3 hp = O + wi * h.t;
+-
+-        // ── what did we hit? ────────────────────────────────────────────────────────────────────────────────
+-        // The real triangle, the real instance, the real slab, through the shared decode. `wo` points back
+-        //    along the ray towards this surfel, which is the direction the bounce radiance has to leave in.
+-        // Single-blob world: the traversal's primitive IS the flat triangle index, and the one instance row
+-        //    carries the transform the vertex lookup needs.
+-        uint         flatPrim = h.primitive;
+-        GpuInstance  inst     = Instances[0];
+-        GpuMaterial  mat      = Materials[TriangleMaterial(flatPrim)];
+-        vec3 wo = -wi;
+-        SurfaceFrame F;
+-        ShadingRecord m = ResolveMaterial(mat, inst, LocalPrimitive(flatPrim, 0u), hp, wo,
+-                                          s.PositionRadius.w, F);
+-        vec3 hitN   = F.Normal;
+-        vec3 woLoc  = ToLocal(F, wo);
+-        if (woLoc.z <= 0.0) continue;                  // grazing / backfacing: nothing leaves towards us
+-        ResolvedLayers layers = ResolveLayers(m, woLoc);
+-
+-        vec3 Lo = F.Emission;                          // the hit emits: lamps bleed into the field
+-
+-        // ── sun, through the material's own BSDF ────────────────────────────────────────────────────────────
+-        vec3 L = normalize(PC.SunDirectionRadiance.xyz);
+-        vec3 wiLoc = ToLocal(F, L);
+-        if (wiLoc.z > 0.0)
+-        {
+-            vec3 sO = hp + F.Geometric * 1e-3; vec3 srD = 1.0 / L;
+-            bool shadowed = TraverseOccluded(sO, L, srD, 1e30);   // single-blob world (TlasInstanceCount==0); two-level: TraverseInstancesOccluded
+-            if (!shadowed)
+-                Lo += EvaluateBsdf(m, layers, woLoc, wiLoc)
+-                    * (PC.SunColour.xyz * PC.SunDirectionRadiance.w) * wiLoc.z;
+-        }
+-
+-        // ── multi-bounce: the field's previous irradiance, through the same material ────────────────────────
+-        // AmbientResponse is ∫ f·cos dω for this slab, so E/π × response is the radiance a surface of THIS
+-        //    material returns under that irradiance. The previous `kInvPi * GatherField(...)` was a bare
+-        //    Lambert of albedo 1 — white, whatever the bounce landed on.
+-        Lo += AmbientResponse(m, layers, woLoc) * (kInvPi * GatherField(hp, hitN));
+-
+-        // firefly clamp on the sample
+-        Lo = min(Lo, vec3(firefly));
+-        meas += Lo;
+-    }
+-    // cosine-weighted estimator of irradiance E = π · mean(Lo)
+-    meas *= kPi / float(rays);
+-
+-    float age = s.NormalAge.w + 1.0;
+-    float cap = max(PC.Tuning.y, 1.0);
+-    float alpha = 1.0 / min(age, cap);              // running mean → converges then holds (anti-flicker)
+-    vec3 Enew = s.Irradiance.xyz + (meas - s.Irradiance.xyz) * alpha;
+-
+-    Surfels[si].IrradianceNew = vec4(Enew, 0.0);    // Jacobi target; host commits Irradiance = IrradianceNew
+-    Surfels[si].NormalAge.w   = age;
+-}
+diff --git a/Projects/Project-Drive/Makefile b/Projects/Project-Drive/Makefile
+index 7965e43..a6e6aba 100644
+--- a/Projects/Project-Drive/Makefile
++++ b/Projects/Project-Drive/Makefile
+@@ -2,11 +2,10 @@
+ #  Projects/Project-Drive/Makefile — headless CPU references (sandbox stand-in), mirroring Project-Zero's Makefile discipline.
+ # ============================================================================================================================================
+ #  The product renderer is the Vulkan + Slang + ImGui stack (built by CMake `linux-app` / the Windows ToolchainSequence, once
+-#  GameExecution is wired — see README). These two targets are the GPU-free references, buildable with plain g++:
++#  GameExecution is wired — see README). This target is the GPU-free reference, buildable with plain g++:
+ #
+ #     make telemetry   -> bin/DriveTelemetry    physics -> Diagnostics/{telemetry.csv,timing.log,run.log}
+-#     make surfel      -> bin/SurfelReference    surfel-GI render -> Diagnostics/{drive_gi.ppm,surfel_timing.log}
+-#     make run         -> build both and run them into Diagnostics/
++#     make run         -> build it and run it into Diagnostics/
+ #
+ #  Explicit file lists only — never glob Source/ (Project-Zero's rot-guard rule).
+ 
+@@ -25,24 +24,19 @@ VEHICLE_SRCS := \
+ 	$(VEHICLE)/TyreSlipDynamics.cpp \
+ 	$(VEHICLE)/Drivetrain.cpp
+ 
+-.PHONY: all telemetry surfel run clean
+-all: telemetry surfel
++.PHONY: all telemetry run clean
++all: telemetry
+ 
+ telemetry: $(BIN)/DriveTelemetry
+-surfel:    $(BIN)/SurfelReference
+ 
+ $(BIN)/DriveTelemetry: Source/DriveTelemetry.cpp Source/DriveCourse.h $(VEHICLE_SRCS) | $(BIN)
+ 	$(CXX) $(CXXFLAGS) -I$(VEHICLE) -ISource Source/DriveTelemetry.cpp $(VEHICLE_SRCS) -o $@
+ 
+-$(BIN)/SurfelReference: Source/SurfelReference.cpp Source/DriveCourse.h Source/ControlVehicleMesh.inl | $(BIN)
+-	$(CXX) $(CXXFLAGS) -pthread -ISource Source/SurfelReference.cpp -o $@
+-
+ $(BIN) $(DIAG):
+ 	@mkdir -p $@
+ 
+ run: all | $(DIAG)
+ 	./$(BIN)/DriveTelemetry  $(DIAG)
+-	./$(BIN)/SurfelReference --w 800 --h 450 --frames 24 --rays 8 --out $(DIAG)
+ 
+ clean:
+ 	rm -rf $(BIN)
+diff --git a/Projects/Project-Drive/Source/DriveCourse.h b/Projects/Project-Drive/Source/DriveCourse.h
+index ee0152a..a1feac4 100644
+--- a/Projects/Project-Drive/Source/DriveCourse.h
++++ b/Projects/Project-Drive/Source/DriveCourse.h
+@@ -3,7 +3,7 @@
+ //============================================================================================================================================
+ //
+ //    ONE definition of the course, read by both hosts exactly like ShowroomStructure is in Project-Zero:
+-//      • the RENDER side (SurfelReference / the Vulkan app) emits triangles from EmitCourseTriangles();
++//      • the RENDER side (the Vulkan app) emits triangles from EmitCourseTriangles();
+ //      • the PHYSICS side (DriveTelemetry / the live drive) samples CourseHeight()/CourseNormal() as the tyre ground query.
+ //    Because both come from these functions, the wheels rest exactly on the surface the renderer draws.
+ //
+diff --git a/Projects/Project-Drive/Source/ProjectDriveInterchange.cpp b/Projects/Project-Drive/Source/ProjectDriveInterchange.cpp
+index 57ea8b0..14129d9 100644
+--- a/Projects/Project-Drive/Source/ProjectDriveInterchange.cpp
++++ b/Projects/Project-Drive/Source/ProjectDriveInterchange.cpp
+@@ -168,7 +168,7 @@ uint32_t FRONTIER_CODE_IMAGE_CALL ConstructProject(
+             { sizeof(FrontierProjectPanel), "ControlVehicle",     "ControlVehicle Inspector" },
+             { sizeof(FrontierProjectPanel), "XPBDTyres",          "XPBD Tyres" },
+             { sizeof(FrontierProjectPanel), "VehicleDynamics",    "Vehicle Dynamics" },
+-            { sizeof(FrontierProjectPanel), "DriveRenderModes",   "Surfel GI / ReSTIR" },
++            { sizeof(FrontierProjectPanel), "DriveRenderModes",   "Distance Field GI / ReSTIR" },
+         };
+         for (const FrontierProjectPanel& Panel : Panels)
+             HostInterchange->ReceivePanel(&Panel, HostInterchange->ProjectReception);
+diff --git a/Projects/Project-Drive/Source/SurfelReference.cpp b/Projects/Project-Drive/Source/SurfelReference.cpp
+deleted file mode 100644
+index fcdf4a8..0000000
+--- a/Projects/Project-Drive/Source/SurfelReference.cpp
++++ /dev/null
+@@ -1,638 +0,0 @@
+-//============================================================================================================================================
+-// 📦 Projects/Project-Drive/Source/SurfelReference.cpp — headless Surfel-GI reference render of the drive scene
+-//============================================================================================================================================
+-//
+-//    Project-Drive's headless CPU reference for the RENDER half. It is the same split the engine uses on the GTX path and
+-//    the standalone SurfelGI/ reference proved: a visibility pass builds the G-buffer, DIRECT light stays sharp (sun NEE +
+-//    sky), and a persistent field of world-space SURFELS carries only the INDIRECT (bounced) light, temporally averaged
+-//    through a world-space hash grid so it converges and holds still (no boil).
+-//
+-//    Unlike a closed-room reference, the geometry here is a TRIANGLE SOUP (checker pad + ramp + bumps + cones from
+-//    DriveCourse, plus the real ControlVehicle shell and procedural wheels), so this file adds a compact BVH over the
+-//    triangles for closest-hit and shadow queries. Output → Diagnostics/: drive_gi.ppm (tonemapped) + surfel_timing.log.
+-//
+-//    Build (plain g++ + pthreads, no GPU): see Projects/Project-Drive/Makefile (target: SurfelReference).
+-
+-#include "DriveCourse.h"
+-#include "VehicleGeometry.h"
+-#include "DriveSceneAuthor.h"
+-#include "ContentInterchange/MaterialIndex.h"
+-// ONE material model for every CPU render path -- see the header of this file for why this is not optional.
+-#include "ContentInterchange/UnifiedMaterialEvaluation.h"
+-#include "CelestialSequence.h"
+-#include "GeometricRaster/VisibilityRaster.h"
+-#include "DisplayPresentation/AtmosphereModel.h"
+-#include "DisplayPresentation/CelestialTier.h"
+-#include "ControlVehicleMesh.inl"
+-
+-#include <algorithm>
+-#include <chrono>
+-#include <cmath>
+-#include <cstdint>
+-#include <cstdio>
+-#include <string>
+-#include <thread>
+-#include <vector>
+-#include <atomic>
+-
+-namespace DC = Frontier::Drive;
+-
+-//------------------------------------------------------------------------------------------------------------------------ vec math
+-struct V { float x=0,y=0,z=0; };
+-static inline V operator+(V a,V b){return{a.x+b.x,a.y+b.y,a.z+b.z};}
+-static inline V operator-(V a,V b){return{a.x-b.x,a.y-b.y,a.z-b.z};}
+-static inline V operator*(V a,float s){return{a.x*s,a.y*s,a.z*s};}
+-static inline V operator*(V a,V b){return{a.x*b.x,a.y*b.y,a.z*b.z};}
+-static inline float dot(V a,V b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+-static inline V cross(V a,V b){return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};}
+-static inline float len(V a){return std::sqrt(dot(a,a));}
+-static inline V norm(V a){float l=len(a);return l>0?a*(1.0f/l):a;}
+-static inline V vmin(V a,V b){return{std::min(a.x,b.x),std::min(a.y,b.y),std::min(a.z,b.z)};}
+-static inline V vmax(V a,V b){return{std::max(a.x,b.x),std::max(a.y,b.y),std::max(a.z,b.z)};}
+-static const float PI=3.14159265358979f, INV_PI=1.0f/PI;
+-
+-struct RNG{ uint32_t s; RNG(uint32_t seed){s=seed?seed:0x9e3779b9u;} float f(){s^=s<<13;s^=s>>17;s^=s<<5;return (s&0xFFFFFF)/16777216.0f;} };
+-static inline uint32_t hashi(uint32_t a){a^=a>>16;a*=0x7feb352du;a^=a>>15;a*=0x846ca68bu;a^=a>>16;return a;}
+-
+-//------------------------------------------------------------------------------------------------------------------------ triangles + materials
+-struct Tri{ V a,b,c,n; uint32_t mat; };
+-// ── the engine's material model, indexed by family ──────────────────────────────────────────────────────────
+-// This used to be a switch returning one flat RGB constant per family, shaded as pure Lambert.  That made the
+-// Surfel column of the render-mode comparison differ from the other two by MATERIAL MODEL as well as by light
+-// transport, which is the one variable such a comparison has to hold fixed.  The slabs now come from
+-// DriveSceneAuthor::AuthorMaterials -- the very same authored descriptors the raster and ReSTIR paths read --
+-// pushed through MaterialIndex so the flatten and the record construction are the engine's, not a hand copy.
+-struct MaterialTable
+-{
+-    Frontier::MaterialIndex Index;
+-    std::vector<ShadingRecord> Shading;
+-
+-    void Build()
+-    {
+-        Frontier::Drive::DriveSceneAuthor Author;
+-        Author.Construct(/*StaticPose=*/true);
+-        for (const auto& Descriptor : Author.QueryMaterials())
+-            Index.Register(Descriptor);
+-        Index.Finalise(1u);
+-        Frontier::UnifiedMaterial::EnsureTables();
+-        const auto& Records = Index.QueryRecords();
+-        const auto& Slabs   = Index.QuerySlabRecords();
+-        Shading.reserve(Records.size());
+-        for (const auto& R : Records)
+-        {
+-            const uint32_t Selection = (R.Flags >> Frontier::kMaterialReflectanceShift) & 0xFu;
+-            Shading.push_back(R.SlabOffset < Slabs.size()
+-                ? Frontier::UnifiedMaterial::Transcribe(Slabs[R.SlabOffset], Selection)
+-                : ShadingRecord{});
+-        }
+-    }
+-};
+-static MaterialTable g_Materials;
+-
+-static const ShadingRecord& MaterialFor(uint32_t m)
+-{
+-    static const ShadingRecord Fallback{};
+-    return (m < g_Materials.Shading.size()) ? g_Materials.Shading[m] : Fallback;
+-}
+-
+-// Kept only for the surfel field's colour-bleed weight, which needs a single scalar albedo per surfel rather
+-// than a full BSDF evaluation; the BSDF itself is what shades the pixel.
+-static V MaterialAlbedo(uint32_t m)
+-{
+-    const ShadingRecord& R = MaterialFor(m);
+-    return V{ R.BaseColor.x, R.BaseColor.y, R.BaseColor.z };
+-}
+-
+-// Emissive families, so the surfel field can bounce the lamps' light into the scene rather than treating them
+-// as dark paint.  Values are the authored Emission Color x Emission Strength from the .blend node tree.
+-static V MaterialEmission(uint32_t m)
+-{
+-    switch(m){
+-        case DC::MatHeadlight: return {48.699997f, 48.699997f, 48.699997f};
+-        case DC::MatTaillight: return {6.5f, 0.0f, 0.106873f};
+-        case DC::MatHub:       return {0.0f, 0.277313f, 1.0f};
+-        default:               return {0.0f, 0.0f, 0.0f};
+-    }
+-}
+-
+-//------------------------------------------------------------------------------------------------------------------------ scene build
+-// The per-face family arrives with the mesh: ControlVehicleMesh.inl carries kTriangleFamily, recovered from the
+-// .blend `material_index` attribute.  The positional classifier that used to stand here is deleted, exactly as it
+-// was in DriveSceneAuthor -- two independent copies of the same guess is how the raster and the GI reference came
+-// to disagree about which faces were glass.
+-static void EmitCar(std::vector<Tri>& tris, V offset)
+-{
+-    using namespace Frontier::Drive::ControlVehicleMesh;
+-    auto Raw=[&](uint32_t i){ return V{kPositions[i*3+0],kPositions[i*3+1],kPositions[i*3+2]}; };
+-    for(uint32_t t=0;t<kTriangleCount;++t){ V a=Raw(kTriangles[t*3+0]),b=Raw(kTriangles[t*3+1]),c=Raw(kTriangles[t*3+2]);
+-        Tri T; T.a=a+offset; T.b=b+offset; T.c=c+offset; T.n=norm(cross(T.b-T.a,T.c-T.a));
+-        T.mat=kTriangleFamily[t]; tris.push_back(T);
+-    }
+-}
+-static void EmitWheel(std::vector<Tri>& tris, V centre, float R, float hw, uint32_t seg)
+-{
+-    const float yL=centre.y-hw, yR=centre.y+hw, hubR=R*0.45f;
+-    auto addq=[&](V a,V b,V c,V d,uint32_t m){ Tri t1{a,b,c,norm(cross(b-a,c-a)),m}; Tri t2{a,c,d,norm(cross(c-a,d-a)),m};
+-        tris.push_back(t1); tris.push_back(t2); };
+-    for(uint32_t s=0;s<seg;++s){
+-        float a0=2*PI*s/seg, a1=2*PI*(s+1)/seg;
+-        V o0{centre.x+R*std::cos(a0),0,centre.z+R*std::sin(a0)}, o1{centre.x+R*std::cos(a1),0,centre.z+R*std::sin(a1)};
+-        addq({o0.x,yL,o0.z},{o1.x,yL,o1.z},{o1.x,yR,o1.z},{o0.x,yR,o0.z}, DC::MatTyre);            // tread
+-        V h0{centre.x+hubR*std::cos(a0),0,centre.z+hubR*std::sin(a0)}, h1{centre.x+hubR*std::cos(a1),0,centre.z+hubR*std::sin(a1)};
+-        Tri f0{{centre.x,yR,centre.z},{h0.x,yR,h0.z},{h1.x,yR,h1.z},{0,1,0},DC::MatHub}; tris.push_back(f0);
+-        Tri f1{{centre.x,yL,centre.z},{h1.x,yL,h1.z},{h0.x,yL,h0.z},{0,-1,0},DC::MatHub}; tris.push_back(f1);
+-        addq({h0.x,yR,h0.z},{o0.x,yR,o0.z},{o1.x,yR,o1.z},{h1.x,yR,h1.z}, DC::MatTyre);              // R sidewall
+-        addq({h0.x,yL,h0.z},{h1.x,yL,h1.z},{o1.x,yL,o1.z},{o0.x,yL,o0.z}, DC::MatTyre);              // L sidewall
+-    }
+-}
+-static std::vector<Tri> BuildScene()
+-{
+-    std::vector<Tri> tris; tris.reserve(8000);
+-    DC::EmitCourseTriangles([&](float ax,float ay,float az,float bx,float by,float bz,float cx,float cy,float cz,uint32_t m){
+-        Tri t; t.a={ax,ay,az}; t.b={bx,by,bz}; t.c={cx,cy,cz}; t.n=norm(cross(t.b-t.a,t.c-t.a)); t.mat=m; tris.push_back(t);
+-    });
+-    // Placement comes from VehicleGeometry, NOT from hand-copied constants.  The previous literals (spawnZ
+-    // 0.2486, wheel radius 0.34, half-width 0.1175) pre-dated the frame-contract fix to TyreRadius 0.50855 and
+-    // left the car sitting ~0.17 m low on quarter-size wheels -- a separate scene from the one the other three
+-    // render modes draw, which makes a side-by-side comparison meaningless.
+-    Frontier::Vehicle::VehicleGeometry geo;
+-    const float spawnZ = geo.ModelGroundOffset();
+-    EmitCar(tris, V{0,0,spawnZ});
+-    for(uint32_t w=0;w<4u;++w){
+-        const Frontier::Vehicle::Vec3 hub = geo.AxleMountLocal(w);
+-        EmitWheel(tris, V{hub.x, hub.y, hub.z + geo.CoMHeight + spawnZ},
+-                  geo.TyreRadius, 0.5f*geo.TyreWidth, 32u);
+-    }
+-    return tris;
+-}
+-
+-//------------------------------------------------------------------------------------------------------------------------ compact BVH
+-struct Node{ V lo,hi; int left=-1,right=-1,first=0,count=0; };
+-struct BVH{
+-    std::vector<Node> nodes; std::vector<int> idx; const std::vector<Tri>* T=nullptr;
+-    void build(const std::vector<Tri>& tris){ T=&tris; idx.resize(tris.size()); for(size_t i=0;i<tris.size();++i) idx[i]=(int)i;
+-        nodes.reserve(tris.size()*2); makeNode(0,(int)tris.size()); }
+-    static V triLo(const Tri& t){ return vmin(vmin(t.a,t.b),t.c);} static V triHi(const Tri& t){ return vmax(vmax(t.a,t.b),t.c);}
+-    int makeNode(int first,int count){
+-        int ni=(int)nodes.size(); nodes.push_back({});
+-        V lo{1e30f,1e30f,1e30f}, hi{-1e30f,-1e30f,-1e30f};
+-        for(int i=first;i<first+count;++i){ lo=vmin(lo,triLo((*T)[idx[i]])); hi=vmax(hi,triHi((*T)[idx[i]])); }
+-        nodes[ni].lo=lo; nodes[ni].hi=hi;
+-        if(count<=6){ nodes[ni].first=first; nodes[ni].count=count; return ni; }
+-        V ext=hi-lo; int ax=(ext.x>ext.y&&ext.x>ext.z)?0:(ext.y>ext.z?1:2);
+-        int mid=first+count/2;
+-        std::nth_element(idx.begin()+first, idx.begin()+mid, idx.begin()+first+count,
+-            [&](int A,int B){ V ca=triLo((*T)[A])+triHi((*T)[A]); V cb=triLo((*T)[B])+triHi((*T)[B]);
+-                              return (ax==0?ca.x:ax==1?ca.y:ca.z) < (ax==0?cb.x:ax==1?cb.y:cb.z); });
+-        int l=makeNode(first,mid-first); int r=makeNode(mid,first+count-mid);
+-        nodes[ni].left=l; nodes[ni].right=r; return ni;
+-    }
+-    static bool slab(const Node& n,V ro,V inv,float tmax){
+-        float t0=0,t1=tmax;
+-        for(int a=0;a<3;++a){ float o=(a==0?ro.x:a==1?ro.y:ro.z), i=(a==0?inv.x:a==1?inv.y:inv.z);
+-            float lo=(a==0?n.lo.x:a==1?n.lo.y:n.lo.z), hi=(a==0?n.hi.x:a==1?n.hi.y:n.hi.z);
+-            float ta=(lo-o)*i, tb=(hi-o)*i; if(ta>tb) std::swap(ta,tb); t0=std::max(t0,ta); t1=std::min(t1,tb); if(t1<t0) return false; }
+-        return true;
+-    }
+-    static bool triHit(const Tri& tr,V ro,V rd,float& t){
+-        V e1=tr.b-tr.a, e2=tr.c-tr.a, p=cross(rd,e2); float det=dot(e1,p); if(std::fabs(det)<1e-8f) return false;
+-        float inv=1.0f/det; V tv=ro-tr.a; float u=dot(tv,p)*inv; if(u<0||u>1) return false;
+-        V q=cross(tv,e1); float v=dot(rd,q)*inv; if(v<0||u+v>1) return false; float tt=dot(e2,q)*inv; if(tt<1e-4f||tt>=t) return false; t=tt; return true;
+-    }
+-    bool closest(V ro,V rd,float tmax,int& outTri,float& outT) const {
+-        V inv{1.0f/rd.x,1.0f/rd.y,1.0f/rd.z}; float t=tmax; int best=-1; int stack[64],sp=0; stack[sp++]=0;
+-        while(sp){ const Node& n=nodes[stack[--sp]]; if(!slab(n,ro,inv,t)) continue;
+-            if(n.count){ for(int i=n.first;i<n.first+n.count;++i){ int ti=idx[i]; if(triHit((*T)[ti],ro,rd,t)) best=ti; } }
+-            else { stack[sp++]=n.left; stack[sp++]=n.right; } }
+-        outTri=best; outT=t; return best>=0;
+-    }
+-    bool anyHit(V ro,V rd,float dist) const {
+-        V inv{1.0f/rd.x,1.0f/rd.y,1.0f/rd.z}; int stack[64],sp=0; stack[sp++]=0;
+-        while(sp){ const Node& n=nodes[stack[--sp]]; if(!slab(n,ro,inv,dist)) continue;
+-            if(n.count){ for(int i=n.first;i<n.first+n.count;++i){ int ti=idx[i]; float t=dist; if(triHit((*T)[ti],ro,rd,t)) return true; } }
+-            else { stack[sp++]=n.left; stack[sp++]=n.right; } }
+-        return false;
+-    }
+-};
+-
+-//------------------------------------------------------------------------------------------------------------------------ lighting
+-// ── the real sun and sky, not a hand-picked one ────────────────────────────────────────────────────────────
+-// These were hardcoded: SUN_DIR = norm(-0.35, -0.30, 0.88) and SUN_COL = (1, .95, .85) * 3.
+-//
+-// That sun is almost straight up (z = 0.88) and weak. The engine's actual sun at the Drive scene's hour is
+-// nearly HORIZONTAL -- CelestialSequence solves (-0.496, 0.868, 0.012) for Johannesburg at 13:00 -- and far
+-// brighter. An overhead sun lights every face of a car at a similar angle, which is precisely why the body
+-// read as flat untextured colour with no shading gradient, no specular and no real contact shadow, while the
+-// raster and ReSTIR sheets of the same car had all three.
+-//
+-// It also explains why this looked fine in a Cornell box and terrible here: a closed box is lit by an area
+-// light inside it, so the sky and the sun never enter the picture. Outdoors they ARE the picture. And the
+-// standing instruction for this project is explicit that Project-Drive must not have a flat sky.
+-static V   SUN_DIR = norm(V{-0.496f, 0.868f, 0.012f});   // replaced at startup by the solved direction
+-static V   SUN_COL = V{1.0f,0.95f,0.85f}*3.0f;           // replaced at startup by the solved radiance
+-// ── the engine's own sky, baked into a dome LUT ────────────────────────────────────────────────────────────
+-// Previously an analytic two-colour gradient. The engine integrates a real atmosphere -- Rayleigh, Mie, ozone,
+-//    planet shadow -- through AtmosphereModel::Integrate, and that is a plain static function, so nothing had
+-//    to be extracted: the only thing the surfel path was missing was the Medium/Light parameters. Those come
+-//    out of CelestialSequence::ApplyTo via VisibilityRaster::QueryCelestial, which is how the raster gets them,
+-//    so both paths now march the SAME air.
+-//
+-//    Marching per ray would be ruinous here (29k surfels x 8 rays x 64 frames, each a nested
+-//    sample x light-sample integral), so it is baked once into a lat-long dome and sampled bilinearly. That
+-//    is exactly the trade the engine itself offers as its baked sky dome.
+-static Frontier::VisibilityRaster::CelestialSettings g_Sky;
+-static bool g_SkyBaked = false;
+-static constexpr int kDomeU = 128, kDomeV = 64;
+-static std::vector<V> g_Dome;
+-
+-static V DomeFetch(V d){
+-    const float u = (std::atan2(d.y, d.x) + PI) * (1.0f/(2.0f*PI));
+-    const float v = std::acos(std::max(-1.0f, std::min(1.0f, d.z))) * (1.0f/PI);
+-    float fu = u*(kDomeU-1), fv = v*(kDomeV-1);
+-    int iu=(int)fu, iv=(int)fv; float tu=fu-iu, tv=fv-iv;
+-    int iu1=(iu+1)%kDomeU, iv1=std::min(iv+1,kDomeV-1);
+-    iu=std::max(0,std::min(iu,kDomeU-1)); iv=std::max(0,std::min(iv,kDomeV-1));
+-    const V a=g_Dome[iv*kDomeU+iu], b=g_Dome[iv*kDomeU+iu1];
+-    const V c=g_Dome[iv1*kDomeU+iu], e=g_Dome[iv1*kDomeU+iu1];
+-    return (a*(1-tu)+b*tu)*(1-tv) + (c*(1-tu)+e*tu)*tv;
+-}
+-
+-static void BakeDome(){
+-    g_Dome.assign((size_t)kDomeU*kDomeV, V{0,0,0});
+-    for(int iv=0; iv<kDomeV; ++iv) for(int iu=0; iu<kDomeU; ++iu){
+-        const float phi = (iu/(float)(kDomeU-1))*2.0f*PI - PI;
+-        const float th  = (iv/(float)(kDomeV-1))*PI;
+-        const float st=std::sin(th);
+-        float dir[3]={st*std::cos(phi), st*std::sin(phi), std::cos(th)};
+-        const Frontier::AtmosphereSample S = Frontier::AtmosphereModel::Integrate(
+-            g_Sky.Medium, g_Sky.Light, g_Sky.CameraHeight, dir, g_Sky.SampleCount, g_Sky.LightSampleCount);
+-        g_Dome[(size_t)iv*kDomeU+iu] = V{S.Radiance[0], S.Radiance[1], S.Radiance[2]};
+-    }
+-    g_SkyBaked = true;
+-}
+-
+-static V SkyColour(V d){
+-    if (g_SkyBaked) return DomeFetch(norm(d));
+-    const float t = std::max(0.0f, d.z);                 // fallback only if the sky never came up
+-    return V{0.35f,0.5f,0.85f}*t + V{0.7f,0.75f,0.8f}*(1.0f-t);
+-}
+-// `wo` points towards the viewer.  The BSDF is the engine's; only the transport around it is this file's.
+-static V DirectLight(const BVH& bvh, V P, V N, uint32_t mat, V wo){
+-    const ShadingRecord& m = MaterialFor(mat);
+-    V c{0,0,0};
+-    const float ndl=dot(N,SUN_DIR);
+-    if(ndl>0 && !bvh.anyHit(P+N*0.002f, SUN_DIR, 1e4f)){
+-        const vec3 f = Frontier::UnifiedMaterial::EvaluateWorld(m, vec3(N.x,N.y,N.z),
+-                                                                vec3(wo.x,wo.y,wo.z),
+-                                                                vec3(SUN_DIR.x,SUN_DIR.y,SUN_DIR.z));
+-        c = V{f.x,f.y,f.z} * (SUN_COL*ndl);                    // sun, direct + shadowed
+-    }
+-    // NO analytic sky ambient here. It used to add an UNOCCLUDED sky term to every surface, and the resolve
+-    //    then added the surfel indirect on top -- but the surfel field already carries the sky, because a
+-    //    surfel ray that hits nothing returns SkyColour(d). So the sky was counted twice, and the half that
+-    //    was counted without occlusion filled every shadow and flattened the whole frame. That is the main
+-    //    reason the car read as untextured colour with no shading gradient.
+-    //
+-    //    RaytraceToggle/CpuMirror/ModeMatrix.cpp draws the line in the same place: sky ambient belongs to the
+-    //    PLAIN-RASTER mode (`amb = dalb*SKY_AMBIENT`), while surfel mode takes its ambient from the field
+-    //    (`lit = direct + dalb*INV_PI*E`). One or the other, never both.
+-    const vec3 e = m.Emission;
+-    return c + V{e.x,e.y,e.z};
+-}
+-static V hemiUniform(V N, float u1, float u2){ float z=u1, rr=std::sqrt(std::max(0.0f,1.0f-z*z)), th=2*PI*u2;
+-    V t=norm(std::fabs(N.x)>0.9f?cross(N,{0,1,0}):cross(N,{1,0,0})); V b=cross(N,t);
+-    return norm(t*(rr*std::cos(th))+b*(rr*std::sin(th))+N*z); }
+-static V hemi(V N, float u1, float u2){ float r=std::sqrt(u1), th=2*PI*u2; V t=norm(std::fabs(N.x)>0.9f?cross(N,{0,1,0}):cross(N,{1,0,0})); V b=cross(N,t);
+-    return norm(t*(r*std::cos(th))+b*(r*std::sin(th))+N*std::sqrt(std::max(0.0f,1-u1))); }
+-
+-//------------------------------------------------------------------------------------------------------------------------ surfels
+-// GIBS (SIGGRAPH 2021, the basis of the W298/SurfelGI reference) stores DIRECTIONAL irradiance per surfel as
+-//    L1 spherical harmonics -- 4 coefficients per channel -- not a single RGB. That is the difference between
+-//    a surfel that lights every nearby normal identically and one that lights a wall and the floor beneath it
+-//    differently. With a flat value the only directionality left is the dot(N, surfel.n) weight, which is why
+-//    the bounce reads as a uniform wash over curved bodywork.
+-struct Sh3 { V c[4]{{0,0,0},{0,0,0},{0,0,0},{0,0,0}}; };
+-inline Sh3 operator*(const Sh3& a, float k){ Sh3 r; for(int i=0;i<4;++i) r.c[i]=a.c[i]*k; return r; }
+-inline Sh3 operator+(const Sh3& a, const Sh3& b){ Sh3 r; for(int i=0;i<4;++i) r.c[i]=a.c[i]+b.c[i]; return r; }
+-
+-// ── radial depth: moment-based visibility (webgiya's "Radial Depth" pass) ──────────────────────────────────
+-// The planar cutoff is a crude proxy for visibility: it rejects surfels whose offset along their own normal is
+-//    large, which stops floor-to-flank leaks but says nothing about whether anything is actually BETWEEN the
+-//    surfel and the point being shaded. A surfel on the ground still leaks under the car, because the shading
+-//    point is coplanar-ish with it and simply occluded.
+-//
+-//    So each surfel also stores depth MOMENTS in a few directional bins -- mean distance and mean squared
+-//    distance to whatever its rays hit. At gather time Chebyshev's inequality turns those two numbers into a
+-//    probability that the shading point is visible from the surfel:
+-//
+-//        d <= mu                      -> fully visible
+-//        otherwise  sigma2 = mu2 - mu*mu,  p = sigma2 / (sigma2 + (d - mu)^2)
+-//
+-//    Same machinery DDGI uses for probe visibility. It is what stops indirect light bleeding through geometry,
+-//    which is the difference between "soft" and "dirty".
+-constexpr int kDepthBins = 8;
+-
+-struct Surfel{
+-    V pos,n,albedo; float radius; Sh3 E, Enew; uint32_t age=0;
+-    float dMean[kDepthBins]{}, dMean2[kDepthBins]{}; uint32_t dCount[kDepthBins]{};
+-};
+-
+-// Bin a direction into the hemisphere around N: 4 azimuth sectors x 2 elevation rings.
+-inline int DepthBin(V N, V d)
+-{
+-    V t = norm(std::fabs(N.x)>0.9f ? cross(N,{0,1,0}) : cross(N,{1,0,0}));
+-    V b = cross(N,t);
+-    const float e = dot(d,N);                       // 0..1 over the hemisphere
+-    const int ring = e > 0.70710678f ? 1 : 0;       // 45 degrees splits the two rings
+-    const float az = std::atan2(dot(d,b), dot(d,t)) + PI;
+-    const int sector = std::min(3, (int)(az / (PI*0.5f)));
+-    return ring*4 + sector;
+-}
+-
+-// Chebyshev visibility of a point at distance `dist` in direction `dir` from this surfel.
+-inline float RadialVisibility(const Surfel& s, V dir, float dist)
+-{
+-    const int k = DepthBin(s.n, dir);
+-    if (s.dCount[k] == 0u) return 1.0f;             // nothing measured that way yet: do not invent occlusion
+-    const float mu = s.dMean[k], mu2 = s.dMean2[k];
+-    if (dist <= mu + 1e-3f) return 1.0f;
+-    const float sigma2 = std::max(1e-6f, mu2 - mu*mu);
+-    const float dd = dist - mu;
+-    return sigma2 / (sigma2 + dd*dd);
+-}
+-
+-// Project a radiance sample arriving from direction d into L1 SH.
+-inline void ShAccumulate(Sh3& sh, V d, V L, float w)
+-{
+-    sh.c[0] = sh.c[0] + L*(0.282095f*w);
+-    sh.c[1] = sh.c[1] + L*(0.488603f*d.y*w);
+-    sh.c[2] = sh.c[2] + L*(0.488603f*d.z*w);
+-    sh.c[3] = sh.c[3] + L*(0.488603f*d.x*w);
+-}
+-
+-// Evaluate irradiance along N, with the Lambert convolution (A0 = pi, A1 = 2pi/3).
+-inline V ShIrradiance(const Sh3& sh, V N)
+-{
+-    const float A0=3.14159265f*0.282095f, A1=2.0943951f*0.488603f;
+-    return sh.c[0]*A0 + sh.c[1]*(A1*N.y) + sh.c[2]*(A1*N.z) + sh.c[3]*(A1*N.x);
+-}
+-// Cell size is RMAX + eps so the 3x3x3 cell walk in gatherEcov cannot miss a contributing surfel.
+-struct Grid{ float cell=0.701f; std::vector<std::vector<int>> cells; int nx,ny,nz; V lo;
+-    void build(V mn,V mx){ lo=mn; nx=std::max(1,(int)((mx.x-mn.x)/cell)+1); ny=std::max(1,(int)((mx.y-mn.y)/cell)+1); nz=std::max(1,(int)((mx.z-mn.z)/cell)+1);
+-        cells.assign((size_t)nx*ny*nz,{}); }
+-    int index(V p)const{ int ix=std::clamp((int)((p.x-lo.x)/cell),0,nx-1),iy=std::clamp((int)((p.y-lo.y)/cell),0,ny-1),iz=std::clamp((int)((p.z-lo.z)/cell),0,nz-1);
+-        return (iz*ny+iy)*nx+ix; }
+-    void add(int i,V p){ cells[index(p)].push_back(i); }
+-};
+-template<class F> static void par(int n,F f){ unsigned T=std::max(1u,std::thread::hardware_concurrency()); std::vector<std::thread> th;
+-    std::atomic<int> next{0}; auto work=[&]{ int i; while((i=next.fetch_add(1))<n) f(i); };
+-    for(unsigned t=0;t<T;++t) th.emplace_back(work);
+-    for(auto& x:th) x.join();
+-}
+-
+-struct Cam{ V eye,fwd,right,up; float tanHalf,aspect; int W,H; };
+-static V rayDir(const Cam& c,float px,float py){ float u=(2*(px+0.5f)/c.W-1)*c.tanHalf*c.aspect, v=(1-2*(py+0.5f)/c.H)*c.tanHalf;
+-    return norm(c.fwd+c.right*u+c.up*v); }
+-static inline float aces(float x){x*=0.9f;return std::min(1.0f,std::max(0.0f,(x*(2.51f*x+0.03f))/(x*(2.43f*x+0.59f)+0.14f)));}
+-static inline uint8_t enc(float v){return (uint8_t)std::lround(std::pow(aces(v),1.0f/2.2f)*255.0f);}
+-
+-int main(int argc,char**argv){
+-    int W=800,H=450,FRAMES=28,RAYS=8; std::string outDir="Projects/Project-Drive/Diagnostics";
+-    std::string outName="drive_gi.ppm";
+-    float sunHour=13.0f;   // --sun <h> : the same hour the other render modes are given
+-    int REFLECT=1;   // --reflect off|sky|raytraced  (ReflectionModeCategory; default Sky, as RT-off degrades to)
+-    float eyeX=-6.40f,eyeY=-5.40f,eyeZ=2.20f, aimX=0.0f,aimY=0.0f,aimZ=0.70f, fovDeg=46.0f;
+-    for(int i=1;i<argc;++i){ std::string a=argv[i]; auto nx=[&](int d){return i+1<argc?std::atoi(argv[++i]):d;};
+-        auto nf=[&](float d){return i+1<argc?(float)std::atof(argv[++i]):d;};
+-        if(a=="--w")W=nx(W); else if(a=="--h")H=nx(H); else if(a=="--frames")FRAMES=nx(FRAMES); else if(a=="--rays")RAYS=nx(RAYS);
+-        else if(a=="--eye"){eyeX=nf(eyeX);eyeY=nf(eyeY);eyeZ=nf(eyeZ);}
+-        else if(a=="--aim"){aimX=nf(aimX);aimY=nf(aimY);aimZ=nf(aimZ);}
+-        else if(a=="--fov")fovDeg=nf(fovDeg);
+-        else if(a=="--name")outName=(i+1<argc?argv[++i]:outName);
+-        else if(a=="--sun")sunHour=nf(sunHour);
+-        else if(a=="--reflect"){ std::string v=(i+1<argc?argv[++i]:"sky"); REFLECT = v=="off"?0:(v=="raytraced"?2:1); }
+-        else if(a=="--out")outDir=(i+1<argc?argv[++i]:outDir); }
+-    using Clock=std::chrono::steady_clock; auto t0=Clock::now();
+-
+-    // The engine's own celestial solver supplies the sun, exactly as DriveSceneMirror gives it to the raster,
+-    //    so the three render modes cannot be lit by three different suns.
+-    {
+-        Frontier::HostRuntime::CelestialSequence Sky;
+-        Sky.Prepare();
+-        Sky.Observation.LocalHours = sunHour;
+-        Sky.Prepare();
+-        const Frontier::SkyConstantRecord R = Sky.PackSkyRecord();
+-        const V Dir{R.SunDirection[0], R.SunDirection[1], R.SunDirection[2]};
+-        if (len(Dir) > 1e-4f) SUN_DIR = norm(Dir);
+-        // SunDirect, NOT SunRadiance. SkyConstantRecord.h labels SunDirect "panel direct-sun factor" -- it is
+-        //    the quantity a surface shades with, already carrying the gain, the colour and the atmospheric
+-        //    transmittance. SunRadiance (22.0 flat white here) is the disc's own radiance for the sky march,
+-        //    and using it to shade blew every upward-facing surface to white. SunDirect at this hour is
+-        //    (5.22, 4.56, 3.53): warm, because a 32.5-degree sun has come a long way through the air.
+-        const V Rad{R.SunDirect[0], R.SunDirect[1], R.SunDirect[2]};
+-        if (len(Rad) > 1e-6f) SUN_COL = Rad;
+-
+-        // The same atmosphere the raster is handed, read back through the public accessor and baked.
+-        Frontier::VisibilityRaster Probe;
+-        Frontier::CelestialBudget Budget;
+-        Budget.AtmosphereSamples = 16u; Budget.AtmosphereLightSamples = 6u;
+-        Sky.ApplyTo(Probe, Budget);
+-        g_Sky = Probe.QueryCelestial();
+-        if (g_Sky.Enabled) BakeDome();
+-        std::printf("SurfelReference: sky %s (%dx%d dome, %u/%u atmosphere samples)\n",
+-                    g_SkyBaked ? "from AtmosphereModel" : "FALLBACK gradient",
+-                    kDomeU, kDomeV, g_Sky.SampleCount, g_Sky.LightSampleCount);
+-        std::printf("SurfelReference: sun hour %.2f -> dir (%.3f %.3f %.3f), radiance (%.2f %.2f %.2f)\n",
+-                    sunHour, SUN_DIR.x, SUN_DIR.y, SUN_DIR.z, SUN_COL.x, SUN_COL.y, SUN_COL.z);
+-    }
+-
+-    g_Materials.Build();   // the authored slabs, flattened by the engine's own MaterialIndex
+-    std::vector<Tri> tris=BuildScene();
+-    V mn{1e30f,1e30f,1e30f},mx{-1e30f,-1e30f,-1e30f};
+-    for(auto&t:tris){ mn=vmin(mn,vmin(vmin(t.a,t.b),t.c)); mx=vmax(mx,vmax(vmax(t.a,t.b),t.c)); }
+-    BVH bvh; bvh.build(tris);
+-    auto tBVH=Clock::now();
+-
+-    // Shared render-mode framing, so this sheet is comparable with the raster and ReSTIR ones pixel for pixel.
+-    // Overridable from the command line for turntable sequences.
+-    Cam cam;
+-    cam.eye={eyeX,eyeY,eyeZ};
+-    cam.fwd=norm(V{aimX,aimY,aimZ}-cam.eye);
+-    cam.right=norm(cross(cam.fwd,{0,0,1}));
+-    cam.up=cross(cam.right,cam.fwd);
+-    cam.tanHalf=std::tan(fovDeg*PI/180.0f/2); cam.aspect=(float)W/H; cam.W=W; cam.H=H;
+-
+-    // G-buffer
+-    std::vector<V> gP(W*H),gN(W*H),gA(W*H); std::vector<uint8_t> gV(W*H,0); std::vector<uint32_t> gM(W*H,0u);
+-    par(W*H,[&](int i){ int x=i%W,y=i/W; V rd=rayDir(cam,(float)x,(float)y); int ti; float t;
+-        if(bvh.closest(cam.eye,rd,1e5f,ti,t)){ V P=cam.eye+rd*t; V N=tris[ti].n; if(dot(N,rd)>0)N=N*-1.0f;
+-            gP[i]=P; gN[i]=N; gA[i]=MaterialAlbedo(tris[ti].mat); gM[i]=tris[ti].mat; gV[i]=1; } });
+-
+-    // spawn surfels on visible surface (coverage-driven: 1 per cell footprint, filled over frames)
+-    std::vector<Surfel> sf; sf.reserve(200000); Grid grid; grid.build(mn-V{2,2,2},mx+V{2,2,2});
+-    // Surfel radius scales with distance from the eye, exactly as RaytraceToggle/CpuMirror/ModeMatrix.cpp
+-    //    and the SurfelCommit/SurfelGIResolve pair do. The previous `return 0.9f` was a stub: one fixed
+-    //    0.9 m footprint over a 4.4 m car means a handful of surfels blanket the whole vehicle, which is
+-    //    the blotchy result that was reported. Constants are ModeMatrix's big-scene set.
+-    const float RMIN=0.22f, RMAX=0.70f, RADFAC=0.055f, COVERAGE_TARGET=2.4f;
+-    const int   SPAWN_BUDGET=4000;
+-    auto radiusAt=[&](V P){ float d=len(P-cam.eye); return std::min(RMAX,std::max(RMIN,RADFAC*d)); };
+-    auto gatherEcov=[&](V P,V N,float& covOut){ Sh3 e; float wsum=0;
+-        // search 3x3x3 neighbourhood
+-        for(int dz=-1;dz<=1;++dz)for(int dy=-1;dy<=1;++dy)for(int dx=-1;dx<=1;++dx){
+-            V q=P+V{(float)dx,(float)dy,(float)dz}*grid.cell; int c=grid.index(q); if(c<0||c>=(int)grid.cells.size())continue;
+-            for(int s:grid.cells[c]){ const Surfel& S=sf[s]; V d=P-S.pos; float dist=len(d); if(dist>=S.radius)continue;
+-                float wn=dot(N,S.n); if(wn<=0) continue;                     // must face the same way
+-                // PLANAR CUTOFF. Without it a surfel sitting on the ground lights a point on the car's
+-                //    flank simply because the two are within one radius of each other. That is the single
+-                //    worst divergence from the shipped shader and it is exactly why the GI looked wrong on
+-                //    the vehicle while looking fine on a large flat floor -- a floor has no neighbouring
+-                //    surface at a different orientation to leak from.
+-                float planar=std::fabs(dot(d,S.n)); if(planar>S.radius*0.5f) continue;
+-                float wd=1.0f-dist/S.radius; wd*=wd;                          // SQUARED falloff, as the shader
+-                float vis=1.0f;
+-                if(dist>1e-4f) vis=RadialVisibility(S, d*(-1.0f/dist), dist);   // surfel -> shading point
+-                float w=wn*wd*vis; if(w<=0) continue; e=e+S.E*w; wsum+=w; } }
+-        covOut=wsum; return wsum>1e-4f? ShIrradiance(e*(1.0f/wsum), N) : V{0,0,0}; };
+-    auto gatherE=[&](V P,V N){ float c; return gatherEcov(P,N,c); };
+-    auto gatherCoverage=[&](V P,V N){ float c; gatherEcov(P,N,c); return c; };
+-
+-    auto spawnPass=[&](int frame){ RNG rr(hashi(frame*2654435761u+7u));
+-        // COVERAGE-DRIVEN spawning, as the proven mirror does it: seed where the field is thin, not at a
+-        //    flat 4% of pixels with a fixed 0.75 m dedupe. The old rule left the car under-covered because
+-        //    one surfel within 0.75 m suppressed every later candidate across the whole bodywork.
+-        int budget=SPAWN_BUDGET, stride=3, off=frame%(stride*stride);
+-        int ox=off%stride, oy=off/stride;
+-        for(int y=oy;y<H&&budget>0;y+=stride) for(int x=ox;x<W&&budget>0;x+=stride){
+-            int i=y*W+x; if(!gV[i]) continue;
+-            V P=gP[i];
+-            float cov=gatherCoverage(P,gN[i]);
+-            if(cov>=COVERAGE_TARGET) continue;
+-            if(rr.f() > (1.0f-cov/COVERAGE_TARGET)*0.9f+0.1f) continue;
+-            Surfel s; s.pos=P; s.n=gN[i]; s.albedo=gA[i]; s.radius=radiusAt(P);
+-            // WARM START, isotropically: the gather hands back irradiance and s.E now STORES irradiance, so
+-            //    inverting the L0 term seeds a flat SH of the right magnitude rather than letting a new surfel
+-            //    pop black. (While E was albedo-premultiplied these two were different quantities.)
+-            { const V E0=gatherE(P,gN[i]); s.E.c[0]=E0*(1.0f/(3.14159265f*0.282095f)); }
+-            s.age=4u;
+-            --budget;
+-            sf.push_back(s); grid.add((int)sf.size()-1,P); } };
+-
+-    // one temporal step: each surfel casts hemisphere rays, gathers direct at the hit, running-mean into E
+-    auto temporal=[&](int frame){ int n=(int)sf.size();
+-        par(n,[&](int si){ Surfel& s=sf[si]; RNG r(hashi((uint32_t)si*2246822519u ^ (uint32_t)frame*3266489917u));
+-            Sh3 sh; const float w=6.28318531f/(float)RAYS;   // uniform hemisphere: pdf = 1/2pi
+-            for(int k=0;k<RAYS;++k){ V d=hemiUniform(s.n,r.f(),r.f()); int ti; float t; V L;
+-                float hitDist=1e4f;
+-                if(bvh.closest(s.pos+s.n*0.003f,d,1e4f,ti,t)){ V P=s.pos+d*t; V N=tris[ti].n; if(dot(N,d)>0)N=N*-1.0f;
+-                    L=DirectLight(bvh,P,N,tris[ti].mat,d*-1.0f); hitDist=t; }
+-                else L=SkyColour(d);
+-                {   // running mean of depth and depth^2 in this direction's bin
+-                    const int k=DepthBin(s.n,d);
+-                    const float dClamp=std::min(hitDist, s.radius*4.0f);
+-                    const uint32_t c=++s.dCount[k]; const float a=1.0f/(float)std::min(c,256u);
+-                    s.dMean[k]  += (dClamp        - s.dMean[k])  * a;
+-                    s.dMean2[k] += (dClamp*dClamp - s.dMean2[k]) * a;
+-                }
+-                // Firefly clamp. One ray landing on the emissive tail lamp otherwise injects a bright blob that
+-                //    the running mean then takes dozens of frames to forget -- visible as a lingering hot patch.
+-                const float m=std::max(L.x,std::max(L.y,L.z)); const float kClamp=8.0f;
+-                if(m>kClamp) L=L*(kClamp/m);
+-                // IRRADIANCE, not radiosity. `L` is already the radiance LEAVING the hit surface — DirectLight
+-                //    evaluated that surface's own BSDF, so the colour bleed is in it. Multiplying by the SURFEL's
+-                //    albedo here and again by the receiver's albedo at gather time applied the albedo twice: on
+-                //    this scene's rubber (0.037) the indirect came out 27x too dark, and because the squaring is
+-                //    per channel it also shifted hue — the cone's (0.95, 0.35, 0.05) bounced as (1.00, 0.12, 0.00).
+-                //    ModeMatrix.cpp and SurfelIrradianceUpdate.slang both accumulate the bare radiance; so does this.
+-                ShAccumulate(sh,d,L,w);
+-            }
+-            s.Enew=sh; });
+-        for(auto& s:sf){ s.age++; float a=1.0f/std::min(s.age,64u); s.E=s.E*(1.0f-a)+s.Enew*a; } };
+-
+-    for(int f=0;f<FRAMES;++f){ spawnPass(f); temporal(f); }
+-    auto tGI=Clock::now();
+-
+-
+-    std::vector<V> img(W*H);
+-    par(W*H,[&](int i){ int x=i%W,y=i/W; V rd=rayDir(cam,(float)x,(float)y);
+-        if(!gV[i]){ img[i]=SkyColour(rd); return; }
+-        V P=gP[i],N=gN[i],A=gA[i];
+-        V direct=DirectLight(bvh,P,N,gM[i],rd*-1.0f);
+-
+-        // ── reflections: Off / Sky / Raytraced ──────────────────────────────────────────────────────────────
+-        // ControlCentreHost's ReflectionModeCategory, mirrored. There is deliberately NO screen-space option:
+-        //    a reflection is either traced against the scene or it is the sky dome sampled along the mirror
+-        //    vector. In surfel mode the raytracing budget is by definition absent, so GameExecution degrades
+-        //    Raytraced -> Sky; the mode is still accepted here so the CPU proof can show both.
+-        V reflection{0,0,0};
+-        if (REFLECT != 0)
+-        {
+-            const V R = rd - N*(2.0f*dot(rd,N));
+-            if (REFLECT == 2)   // raytraced: one mirror ray, shaded, with the sky as the miss
+-            {
+-                int ti2; float t2;
+-                if (bvh.closest(P + N*0.002f, R, 1e4f, ti2, t2))
+-                {
+-                    const V HP = P + R*t2; V HN = tris[ti2].n; if (dot(HN,R) > 0) HN = HN*-1.0f;
+-                    // The indirect term at the REFLECTED hit goes through that hit's material too, matching
+-                    //    SurfelGIResolve.slang's ShadeHit. Bare `gatherE*INV_PI` would make every reflected
+-                    //    surface bounce light like a white Lambertian regardless of what it is.
+-                    const vec3 hresp = Frontier::UnifiedMaterial::AmbientResponse(MaterialFor(tris[ti2].mat),
+-                                                                                  vec3(HN.x,HN.y,HN.z),
+-                                                                                  vec3(-R.x,-R.y,-R.z));
+-                    const V hbounce{hresp.x,hresp.y,hresp.z};
+-                    reflection = DirectLight(bvh, HP, HN, tris[ti2].mat, R*-1.0f) + hbounce*(gatherE(HP,HN)*INV_PI);
+-                }
+-                else reflection = SkyColour(R);
+-            }
+-            else reflection = SkyColour(R);   // sky dome along the mirror vector, no rays
+-            // Weighted by SCHLICK FRESNEL, not by the raw specular weight. The first version used
+-            //    SpecularWeight * (1 - SpecularRoughness), which is ~0.9 for almost every material here, so
+-            //    nine tenths of the sky dome was added to every surface in the scene and the frame washed out
+-            //    to near-white. Reflectance at normal incidence is ~0.04 for a dielectric and only approaches
+-            //    1 at grazing angles -- that angular falloff is the whole character of a reflection.
+-            const ShadingRecord& m = MaterialFor(gM[i]);
+-            const float CosTheta = std::min(1.0f, std::fabs(dot(N, rd*-1.0f)));
+-            const float Fc = (1.0f-CosTheta)*(1.0f-CosTheta)*(1.0f-CosTheta)*(1.0f-CosTheta)*(1.0f-CosTheta);
+-            V F0{0.04f,0.04f,0.04f};
+-            F0 = F0*(1.0f-m.Metalness) + V{m.BaseColor.x,m.BaseColor.y,m.BaseColor.z}*m.Metalness;
+-            const V Fr = F0 + (V{1,1,1}-F0)*Fc;
+-            const float Gloss = (1.0f-m.SpecularRoughness)*(1.0f-m.SpecularRoughness);
+-            reflection = V{reflection.x*Fr.x, reflection.y*Fr.y, reflection.z*Fr.z} * Gloss;
+-        }
+-        // Indirect is modulated by the material it LANDS on, through the ENGINE's material model rather than a
+-        //    hand-rolled Lambert. AmbientResponse is the integral of f.cos over the hemisphere for this slab, so
+-        //    outgoing = E/pi * response, and a clearcoated or metallic surface responds to bounce light the way
+-        //    it responds to any other light. `BaseColor*(1-Metalness)/pi` could not: it has no coat, no sheen,
+-        //    no transmission, no F82 tint, and it is the one thing UnifiedMaterialEvaluation.h exists to forbid.
+-        const ShadingRecord& mr = MaterialFor(gM[i]);
+-        const vec3 resp = Frontier::UnifiedMaterial::AmbientResponse(mr, vec3(N.x,N.y,N.z),
+-                                                                     vec3(-rd.x,-rd.y,-rd.z));
+-        V indirect = V{resp.x,resp.y,resp.z}*(gatherE(P,N)*INV_PI);
+-        img[i]=direct+indirect+reflection;
+-        (void)x;(void)y; });
+-
+-    // write PPM
+-    std::string ppm=outDir+"/"+outName; FILE* fp=std::fopen(ppm.c_str(),"wb");
+-    if(fp){ std::fprintf(fp,"P6\n%d %d\n255\n",W,H); for(int i=0;i<W*H;++i){ unsigned char px[3]={enc(img[i].x),enc(img[i].y),enc(img[i].z)}; std::fwrite(px,1,3,fp);} std::fclose(fp); }
+-
+-    auto tEnd=Clock::now();
+-    auto ms=[&](Clock::time_point a,Clock::time_point b){ return std::chrono::duration<double,std::milli>(b-a).count(); };
+-    std::string tim=outDir+"/surfel_timing.log";
+-    if(FILE* tf=std::fopen(tim.c_str(),"w")){
+-        std::fprintf(tf,"# Project-Drive SurfelReference timing\n");
+-        std::fprintf(tf,"resolution        %dx%d\n",W,H);
+-        std::fprintf(tf,"triangles         %zu\n",tris.size());
+-        std::fprintf(tf,"bvh_nodes         %zu\n",bvh.nodes.size());
+-        std::fprintf(tf,"surfels           %zu\n",sf.size());
+-        std::fprintf(tf,"gi_frames         %d (rays/surfel %d)\n",FRAMES,RAYS);
+-        std::fprintf(tf,"build_bvh_ms      %.1f\n",ms(t0,tBVH));
+-        std::fprintf(tf,"surfel_gi_ms      %.1f\n",ms(tBVH,tGI));
+-        std::fprintf(tf,"final_shade_ms    %.1f\n",ms(tGI,tEnd));
+-        std::fprintf(tf,"total_ms          %.1f\n",ms(t0,tEnd));
+-        std::fclose(tf);
+-    }
+-    std::printf("SurfelReference: %zu tris, %zu surfels, %dx%d, %d GI frames -> %s (%.1f ms total)\n",
+-                tris.size(), sf.size(), W, H, FRAMES, ppm.c_str(), ms(t0,tEnd));
+-    return 0;
+-}
+diff --git a/Projects/Project-Zero/Host/MaterialLevelViewport.cpp b/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
+index 3f4fc4b..8c32a44 100644
+--- a/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
++++ b/Projects/Project-Zero/Host/MaterialLevelViewport.cpp
+@@ -59,7 +59,7 @@
+ #include <thread>
+ #include <vector>
+ 
+-// The engine's single material model, shared with VisibilityRaster and SurfelReference.
++// The engine's single material model, shared with VisibilityRaster.
+ #include "ContentInterchange/UnifiedMaterialEvaluation.h"
+ namespace { const Frontier::ShadingTableSet* g_Tables = nullptr; }
+ 
+@@ -3394,7 +3394,7 @@ int main(int ArgumentCount, char** ArgumentValues)
+ 
+     Frontier::ShadingTableSet Tables = Frontier::ShadingTableCodec::Bake(1024u);
+     g_Tables = &Tables;
+-    Frontier::UnifiedMaterial::BindTables(Tables);   // the raster and surfel paths read these too
++    Frontier::UnifiedMaterial::BindTables(Tables);   // the raster and SDF paths read these too
+ 
+     if (Denoise && Width != Height)
+     {
+diff --git a/Tools/Build/PackageWindowsProjects.py b/Tools/Build/PackageWindowsProjects.py
+index 3016bb6..8e5251f 100644
+--- a/Tools/Build/PackageWindowsProjects.py
++++ b/Tools/Build/PackageWindowsProjects.py
+@@ -235,7 +235,7 @@ def Main() -> None:
+                           "executionValidation": "Production SPIR-V with synchronization and GPU-assisted shader-access validation",
+                           "transport": "Three camera-snapped distance volumes, GPU-captured textured surface-card atlas with Jacobi radiance, exact mesh secondary rays",
+                           "activation": "Only after all scene resources and shader pipelines are ready",
+-                          "fallback": "Existing Surfel GI, or existing compute fallback if Surfel is unavailable"},
++                          "fallback": "Plain visibility raster when the SDF stage is not ready"},
+                 "requirements": ["Windows x64", "Microsoft Visual C++ x64 runtime (bundled)",
+                                  "Compatible Vulkan GPU and its installed driver"],
+                 "sha256": {Location.relative_to(Destination).as_posix(): hashlib.sha256(Location.read_bytes()).hexdigest()
+diff --git a/Tools/Build/ToolchainSequence.ps1 b/Tools/Build/ToolchainSequence.ps1
+index 7f921ec..775a99b 100644
+--- a/Tools/Build/ToolchainSequence.ps1
++++ b/Tools/Build/ToolchainSequence.ps1
+@@ -385,8 +385,6 @@ $ShaderTable = @(
+     @{ Source = 'ReSTIRViewport.slang';        Stage = 'compute';  Output = 'ReSTIRViewport.spv' }
+     @{ Source = 'RasterViewport.slang';        Stage = 'compute';  Output = 'RasterViewport.spv' }
+     @{ Source = 'RayQueryViewport.slang';        Stage = 'compute';  Output = 'RayQueryViewport.spv' }
+-    @{ Source = 'SurfelIrradianceUpdate.slang'; Stage = 'compute';  Output = 'SurfelIrradianceUpdate.spv' }
+-    @{ Source = 'SurfelCommit.slang';           Stage = 'compute';  Output = 'SurfelCommit.spv' }
+     @{ Source = 'DistanceFieldConstruct.slang'; Stage = 'compute'; Output = 'DistanceFieldConstruct.spv' }
+     @{ Source = 'DistanceFieldCapture.slang'; Stage = 'compute'; Output = 'DistanceFieldCapture.spv' }
+     @{ Source = 'DistanceFieldCaptureFixed.slang'; Stage = 'compute'; Output = 'DistanceFieldCaptureFixed.spv' }
+@@ -395,7 +393,6 @@ $ShaderTable = @(
+     @{ Source = 'DistanceFieldGatherFixed.slang'; Stage = 'compute'; Output = 'DistanceFieldGatherFixed.spv' }
+     @{ Source = 'DistanceFieldGIResolveFixed.slang'; Stage = 'compute'; Output = 'DistanceFieldGIResolveFixed.spv' }
+     @{ Source = 'DistanceFieldGIResolve.slang'; Stage = 'compute'; Output = 'DistanceFieldGIResolve.spv' }
+-    @{ Source = 'SurfelGIResolve.slang';         Stage = 'compute';  Output = 'SurfelGIResolve.spv' }
+     @{ Source = 'ClusterCull.slang';           Stage = 'compute';  Output = 'ClusterCull.spv' }
+     @{ Source = 'HiZReduce.slang';             Stage = 'compute';  Output = 'HiZReduce.spv' }
+     @{ Source = 'AtrousDenoise.slang';         Stage = 'compute';  Output = 'AtrousDenoise.spv' }
+@@ -607,7 +604,6 @@ $EngineRelative = @(
+     'Engine\DeviceExchange\RayQueryExchange.cpp'
+     'Engine\GeometricRaster\DistanceFieldStructure.cpp'
+     'Engine\DeviceExchange\DistanceFieldGIStage.cpp'
+-    'Engine\DeviceExchange\SurfelGIStage.cpp'
+     'Engine\DeviceExchange\RayTracingCapabilitySet.cpp'
+     'Engine\DeviceExchange\InputExchange.cpp'
+     'Engine\DeviceExchange\DiagnosticMetrics.cpp'
+@@ -620,7 +616,6 @@ $EngineRelative = @(
+     'Engine\DisplayPresentation\IconArt.cpp'
+     'Engine\DisplayPresentation\IconPresentation.cpp'
+     'Engine\DisplayPresentation\VectorCodec.cpp'
+-    'Engine\DisplayPresentation\SurfelReference.cpp'
+     'Engine\DisplayPresentation\ControlCentreHost.cpp'
+     'Engine\DisplayPresentation\FontCodec.cpp'
+     'Engine\DisplayPresentation\PixelSpace.cpp'
+-- 
+2.39.5
+

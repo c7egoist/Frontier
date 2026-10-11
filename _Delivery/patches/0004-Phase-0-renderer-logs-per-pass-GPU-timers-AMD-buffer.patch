@@ -1,0 +1,1059 @@
+From 12f9ef9c063f6177e4b62fdd273f03cdf6d769ee Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 16:22:44 +0000
+Subject: [PATCH 04/10] Phase 0 renderer logs: per-pass GPU timers, AMD buffer
+ markers, VK_EXT_device_fault, 5 s frame windows, pipeline choice and RT
+ refusal reason, UploadScene/SDF triggers, swapchain rebuild reason and
+ duration, memory placement, pipeline compile progress
+
+---
+ .../DeviceExchange/DistanceFieldGIStage.cpp   |  23 ++
+ Engine/DeviceExchange/DistanceFieldGIStage.h  |   4 +
+ Engine/DeviceExchange/RenderMetrics.cpp       | 286 ++++++++++++++++++
+ Engine/DeviceExchange/RenderMetrics.h         | 116 +++++++
+ Engine/DeviceExchange/SwapchainExchange.cpp   | 175 ++++++++++-
+ Engine/DeviceExchange/SwapchainExchange.h     |  18 +-
+ Engine/Host/FrontierRuntime.cpp               |   6 +-
+ 7 files changed, 609 insertions(+), 19 deletions(-)
+ create mode 100644 Engine/DeviceExchange/RenderMetrics.cpp
+ create mode 100644 Engine/DeviceExchange/RenderMetrics.h
+
+diff --git a/Engine/DeviceExchange/DistanceFieldGIStage.cpp b/Engine/DeviceExchange/DistanceFieldGIStage.cpp
+index 199a2a8..b3c9481 100644
+--- a/Engine/DeviceExchange/DistanceFieldGIStage.cpp
++++ b/Engine/DeviceExchange/DistanceFieldGIStage.cpp
+@@ -4,6 +4,7 @@
+ // 📦 Records the one-time atlas upload, placement refresh, radiance propagation and resolve with explicit resource dependencies.
+ 
+ #include "DistanceFieldGIStage.h"
++#include "RenderMetrics.h"
+ #include <algorithm>
+ #include <array>
+ #include <cmath>
+@@ -366,6 +367,16 @@ bool DistanceFieldGIStage::RecordFrame(VkCommandBuffer Command, const DistanceFi
+     uint32_t    Counts[4]         = { static_cast<uint32_t>(Atlas.QueryPlacements().size()), static_cast<uint32_t>(Geometry.QueryBranches().size()),
+                                       static_cast<uint32_t>(Geometry.QueryFacets().size()), Initialization.CardResolution };
+     const bool        Capture   = GeometryChanged || ResidentMaterials != Frame.MaterialRevision;
++    // 📝 Phase 0 trigger log. A steady frame prints nothing; the rare triggers print once each; the per-step placement refresh is counted
++    //    and summarised so a Play session cannot flood the log.
++    if (GeometryChanged || Capture)
++        std::cerr << "[SdfGI] frame " << FrameNumber << ": " << (GeometryChanged ? "facets/branches/atlas uploaded (geometry revision " : "cards recaptured (geometry revision ")
++                  << ResidentRevision << " -> " << Geometry.QueryRevision() << ", material revision "
++                  << (ResidentMaterials == UINT64_MAX ? 0u : ResidentMaterials) << " -> " << Frame.MaterialRevision << "); atlas voxels=" << VoxelCount
++                  << " baked_volumes=" << Atlas.QueryBakeCount() << "\n";
++    if (PlacementChanged && !GeometryChanged && (++PlacementUploads % 300u) == 1u)
++        std::cerr << "[SdfGI] placement table refreshed " << PlacementUploads << " time(s) so far (" << Atlas.QueryMovedCount()
++                  << " instance(s) off their baked pose); the atlas itself was not touched\n";
+     DistanceFieldPush Push{};
+     std::memcpy(Push.Sun, Frame.SunDirection, 12u);
+     Push.Sun[3] = Frame.SunRadiance;
+@@ -392,6 +403,9 @@ bool DistanceFieldGIStage::RecordFrame(VkCommandBuffer Command, const DistanceFi
+         MemoryBarrier.dstAccessMask = DestinationAccess;
+         vkCmdPipelineBarrier(Command, Source, Destination, 0u, 1u, &MemoryBarrier, 0u, nullptr, 0u, nullptr);
+     };
++    auto Open  = [&](const char* Name) { if (Frame.Metrics) Frame.Metrics->OpenPass(Command, Name); };
++    auto Close = [&]() { if (Frame.Metrics) Frame.Metrics->ClosePass(Command); };
++    Open("SdfUploadAndClear");
+     // 📝 All stages run on the host's existing compute queue. Include previous reads before overwriting shared volumes.
+     Barrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+             VK_ACCESS_TRANSFER_WRITE_BIT);
+@@ -440,28 +454,37 @@ bool DistanceFieldGIStage::RecordFrame(VkCommandBuffer Command, const DistanceFi
+             VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+     vkCmdBindDescriptorSets(Command, VK_PIPELINE_BIND_POINT_COMPUTE, PipelineLayout, 0u, 1u, &Sets[FrameNumber & 1u], 0u, nullptr);
+     vkCmdPushConstants(Command, PipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(Push), &Push);
++    Close();
+     if (Capture)
+     {
++        Open("SdfCaptureCards");
+         vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[0]);
+         vkCmdDispatch(Command, (CardWidth + 7u) / 8u, (CardHeight + 7u) / 8u, 1u);
+         Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                 VK_ACCESS_SHADER_READ_BIT);
++        Close();
+     }
++    Open("SdfRadiance");
+     vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[1]);
+     vkCmdDispatch(Command, (CardWidth + 7u) / 8u, (CardHeight + 7u) / 8u, 1u);
+     Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+             VK_ACCESS_SHADER_READ_BIT);
++    Close();
+     if (Frame.FeatureFlags & 1u)
+     {
++        Open("SdfGather");
+         vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[2]);
+         vkCmdDispatch(Command, (Frame.RenderWidth + 15u) / 16u, (Frame.RenderHeight + 15u) / 16u, 1u);
+         Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                 VK_ACCESS_SHADER_READ_BIT);
++        Close();
+     }
++    Open("SdfResolve");
+     vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[3]);
+     vkCmdDispatch(Command, (Frame.RenderWidth + 15u) / 16u, (Frame.RenderHeight + 15u) / 16u, 1u);
+     Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+             VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
++    Close();
+     CardImagesInitialized = true;
+     ResidentMaterials     = Frame.MaterialRevision;
+     ResidentRevision      = Geometry.QueryRevision();
+diff --git a/Engine/DeviceExchange/DistanceFieldGIStage.h b/Engine/DeviceExchange/DistanceFieldGIStage.h
+index 6a5de66..55db9ca 100644
+--- a/Engine/DeviceExchange/DistanceFieldGIStage.h
++++ b/Engine/DeviceExchange/DistanceFieldGIStage.h
+@@ -43,8 +43,11 @@ struct DistanceFieldStageInit
+     std::string                      SpirvDirectory         = "Engine/Shaders";
+ };
+ 
++class RenderMetrics;
++
+ struct DistanceFieldFrameParams
+ {
++    RenderMetrics* Metrics = nullptr;   // [-] optional; when set every sub-pass is bracketed for the GPU timers and device-loss markers
+     float    SunDirection[3]  = {0.1473f, -0.1179f, 0.9820f};
+     float    SunRadiance      = 1.0f;
+     float    SunColour[3]     = {1.0f, 0.96f, 0.90f};
+@@ -168,6 +171,7 @@ class DistanceFieldGIStage
+     uint64_t               ResidentPlacement = UINT64_MAX;
+     uint32_t               ResidentFacets = 0u, ResidentPlacements = 0u;
+     RecordReport           LastRecord;
++    uint32_t               PlacementUploads = 0u;   // [cnt] placement-table refreshes since bring-up (log throttle)
+     float                  PreviousLighting[12]{};
+     bool                   Ready = false;
+     std::string            Refusal;
+diff --git a/Engine/DeviceExchange/RenderMetrics.cpp b/Engine/DeviceExchange/RenderMetrics.cpp
+new file mode 100644
+index 0000000..08c7fb4
+--- /dev/null
++++ b/Engine/DeviceExchange/RenderMetrics.cpp
+@@ -0,0 +1,286 @@
++//============================================================================================================================================
++//                                                            RENDERMETRICS.CPP
++//============================================================================================================================================
++// 📦 Timestamp stripes, buffer markers, device-fault capture and frame-time windows.
++
++#include "RenderMetrics.h"
++#include <algorithm>
++#include <cstdio>
++#include <cstring>
++#include <iostream>
++
++namespace Frontier
++{
++//------------------------------------------------------------------------------------------------------------------------
++//                                                     DEVICE WISH
++//------------------------------------------------------------------------------------------------------------------------
++
++RenderMetrics::DeviceWish RenderMetrics::QueryDeviceWish(VkPhysicalDevice PhysicalDevice) noexcept
++{
++    DeviceWish Wish;
++    uint32_t Count = 0u;
++    vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &Count, nullptr);
++    std::vector<VkExtensionProperties> Extensions(Count);
++    if (Count) vkEnumerateDeviceExtensionProperties(PhysicalDevice, nullptr, &Count, Extensions.data());
++    for (const VkExtensionProperties& Extension : Extensions)
++    {
++        Wish.MarkerExtension = Wish.MarkerExtension || std::strcmp(Extension.extensionName, VK_AMD_BUFFER_MARKER_EXTENSION_NAME) == 0;
++        Wish.FaultExtension  = Wish.FaultExtension  || std::strcmp(Extension.extensionName, VK_EXT_DEVICE_FAULT_EXTENSION_NAME) == 0;
++    }
++    if (Wish.FaultExtension)
++    {
++        VkPhysicalDeviceFaultFeaturesEXT Fault{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT };
++        VkPhysicalDeviceFeatures2        Features{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &Fault };
++        vkGetPhysicalDeviceFeatures2(PhysicalDevice, &Features);
++        Wish.FaultFeature = Fault.deviceFault == VK_TRUE;
++    }
++    std::cerr << "[RenderMetrics] device offers: VK_AMD_buffer_marker=" << Wish.MarkerExtension << " VK_EXT_device_fault="
++              << Wish.FaultExtension << " deviceFault=" << Wish.FaultFeature << "\n";
++    return Wish;
++}
++
++//------------------------------------------------------------------------------------------------------------------------
++//                                                      LIFECYCLE
++//------------------------------------------------------------------------------------------------------------------------
++
++bool RenderMetrics::Bring(VkPhysicalDevice PhysicalDevice, VkDevice Target, uint32_t Slots, const DeviceWish& Wanted) noexcept
++{
++    Retire();
++    if (!Target || !PhysicalDevice || Slots == 0u || Slots > MaximumSlots) return false;
++    Device    = Target;
++    SlotCount = Slots;
++
++    VkPhysicalDeviceProperties Properties{};
++    vkGetPhysicalDeviceProperties(PhysicalDevice, &Properties);
++    TimestampPeriod = Properties.limits.timestampPeriod;
++    VkQueryPoolCreateInfo Query{ VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
++    Query.queryType  = VK_QUERY_TYPE_TIMESTAMP;
++    Query.queryCount = Slots * QueriesPerSlot;
++    Enabled.Timestamps = Properties.limits.timestampComputeAndGraphics == VK_TRUE
++                      && vkCreateQueryPool(Device, &Query, nullptr, &Pool) == VK_SUCCESS;
++
++    if (Wanted.MarkerExtension)
++    {
++        WriteMarker = reinterpret_cast<PFN_vkCmdWriteBufferMarkerAMD>(vkGetDeviceProcAddr(Device, "vkCmdWriteBufferMarkerAMD"));
++        VkBufferCreateInfo Buffer{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
++        Buffer.size  = sizeof(uint32_t) * Slots * MarkersPerSlot;
++        Buffer.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
++        VkMemoryRequirements Requirements{};
++        VkPhysicalDeviceMemoryProperties Memory{};
++        vkGetPhysicalDeviceMemoryProperties(PhysicalDevice, &Memory);
++        // 📝 Host-visible and coherent system memory: device-local memory is lost with the device, this is not.
++        const VkMemoryPropertyFlags Required = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
++        if (WriteMarker && vkCreateBuffer(Device, &Buffer, nullptr, &MarkerBuffer) == VK_SUCCESS)
++        {
++            vkGetBufferMemoryRequirements(Device, MarkerBuffer, &Requirements);
++            uint32_t Type = Memory.memoryTypeCount;
++            for (uint32_t Index = 0u; Index < Memory.memoryTypeCount && Type == Memory.memoryTypeCount; ++Index)
++                if ((Requirements.memoryTypeBits & (1u << Index)) && (Memory.memoryTypes[Index].propertyFlags & Required) == Required
++                    && !(Memory.memoryTypes[Index].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) Type = Index;
++            VkMemoryAllocateInfo Allocation{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
++            Allocation.allocationSize  = Requirements.size;
++            Allocation.memoryTypeIndex = Type;
++            void* Mapped = nullptr;
++            if (Type != Memory.memoryTypeCount && vkAllocateMemory(Device, &Allocation, nullptr, &MarkerMemory) == VK_SUCCESS
++                && vkBindBufferMemory(Device, MarkerBuffer, MarkerMemory, 0u) == VK_SUCCESS
++                && vkMapMemory(Device, MarkerMemory, 0u, VK_WHOLE_SIZE, 0u, &Mapped) == VK_SUCCESS && Mapped)
++            {
++                MarkerWords = static_cast<volatile uint32_t*>(Mapped);
++                for (uint32_t Word = 0u; Word < Slots * MarkersPerSlot; ++Word) MarkerWords[Word] = 0u;
++                Enabled.Markers = true;
++            }
++        }
++    }
++    if (Wanted.FaultExtension && Wanted.FaultFeature)
++    {
++        ReadFault     = reinterpret_cast<PFN_vkGetDeviceFaultInfoEXT>(vkGetDeviceProcAddr(Device, "vkGetDeviceFaultInfoEXT"));
++        Enabled.Fault = ReadFault != nullptr;
++    }
++    WindowStart   = std::chrono::steady_clock::now();
++    PreviousFrame = WindowStart;
++    std::cerr << "[RenderMetrics] timestamps=" << Enabled.Timestamps << " (" << TimestampPeriod << " ns/tick) markers=" << Enabled.Markers
++              << " deviceFault=" << Enabled.Fault << "\n";
++    return Enabled.Timestamps || Enabled.Markers || Enabled.Fault;
++}
++
++void RenderMetrics::Retire() noexcept
++{
++    if (Device)
++    {
++        if (Pool)         vkDestroyQueryPool(Device, Pool, nullptr);
++        if (MarkerMemory) vkUnmapMemory(Device, MarkerMemory);
++        if (MarkerBuffer) vkDestroyBuffer(Device, MarkerBuffer, nullptr);
++        if (MarkerMemory) vkFreeMemory(Device, MarkerMemory, nullptr);
++    }
++    *this = RenderMetrics{};
++}
++
++//------------------------------------------------------------------------------------------------------------------------
++//                                                      RECORDING
++//------------------------------------------------------------------------------------------------------------------------
++
++void RenderMetrics::Mark(VkCommandBuffer Command, VkPipelineStageFlagBits Stage, uint32_t Word, uint32_t Value) noexcept
++{
++    if (!Enabled.Markers) return;
++    WriteMarker(Command, Stage, MarkerBuffer, sizeof(uint32_t) * (Slot * MarkersPerSlot + Word), Value);
++}
++
++void RenderMetrics::OpenFrame(VkCommandBuffer Command, uint32_t Target, uint64_t FrameSerial) noexcept
++{
++    if (!Device || Target >= SlotCount) return;
++    Slot   = Target;
++    Serial = FrameSerial;
++    Harvest(Slot);
++    PassCount[Slot] = 0u;
++    OpenName        = nullptr;
++    if (Enabled.Timestamps)
++    {
++        vkCmdResetQueryPool(Command, Pool, Slot * QueriesPerSlot, QueriesPerSlot);
++        vkCmdWriteTimestamp(Command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, Pool, Slot * QueriesPerSlot);
++        Recorded[Slot] = true;
++    }
++    Mark(Command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0u, static_cast<uint32_t>(FrameSerial));
++    Mark(Command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 1u, 0u);
++    Mark(Command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 2u, 0u);
++}
++
++void RenderMetrics::OpenPass(VkCommandBuffer Command, const char* Name) noexcept
++{
++    if (!Device || PassCount[Slot] + 1u >= QueriesPerSlot) return;
++    OpenName                      = Name;
++    Names[Slot][PassCount[Slot]]  = Name;   // 📝 stored before the pass runs, so a hang inside it still has a name to report
++    Mark(Command, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 1u, PassCount[Slot] + 1u);
++}
++
++void RenderMetrics::ClosePass(VkCommandBuffer Command) noexcept
++{
++    if (!Device || !OpenName) return;
++    const uint32_t Index = PassCount[Slot]++;
++    OpenName             = nullptr;
++    if (Enabled.Timestamps)
++        vkCmdWriteTimestamp(Command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, Pool, Slot * QueriesPerSlot + 1u + Index);
++    Mark(Command, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 2u, Index + 1u);
++}
++
++//------------------------------------------------------------------------------------------------------------------------
++//                                                  HARVEST AND REPORT
++//------------------------------------------------------------------------------------------------------------------------
++
++void RenderMetrics::Harvest(uint32_t Target) noexcept
++{
++    if (!Enabled.Timestamps || !Recorded[Target] || PassCount[Target] == 0u) return;
++    Recorded[Target] = false;
++    uint64_t Stamps[QueriesPerSlot]{};
++    const uint32_t Count = PassCount[Target] + 1u;
++    // 📝 Without WAIT or AVAILABILITY the call returns VK_NOT_READY unless every query finished. That is the normal answer for a slot the
++    //    GPU has not retired, and the stripe is simply skipped; the frame fence wait that precedes recording makes it rare.
++    if (vkGetQueryPoolResults(Device, Pool, Target * QueriesPerSlot, Count, sizeof(Stamps), Stamps, sizeof(uint64_t),
++                              VK_QUERY_RESULT_64_BIT) != VK_SUCCESS) return;
++    double Total = 0.0;
++    for (uint32_t Index = 0u; Index + 1u < Count; ++Index)
++    {
++        const double Milliseconds = static_cast<double>(Stamps[Index + 1u] - Stamps[Index]) * TimestampPeriod * 1e-6;
++        const char*  Name         = Names[Target][Index] ? Names[Target][Index] : "unnamed";
++        auto Found = std::find_if(Totals.begin(), Totals.end(), [&](const PassTotal& Row) { return std::strcmp(Row.Name, Name) == 0; });
++        if (Found == Totals.end()) { Totals.push_back(PassTotal{ Name, 0.0, 0.0, 0u }); Found = Totals.end() - 1; }
++        Found->Sum    += Milliseconds;
++        Found->Maximum = std::max(Found->Maximum, Milliseconds);
++        ++Found->Count;
++        Total += Milliseconds;
++    }
++    LastGpuMilliseconds = Total;
++    WindowGpu          += Total;
++    ++WindowGpuFrames;
++}
++
++void RenderMetrics::CloseFrame(const char* PipelineName, const char* PresentMode) noexcept
++{
++    const auto Now = std::chrono::steady_clock::now();
++    WindowIntervals.push_back(std::chrono::duration<double, std::milli>(Now - PreviousFrame).count());
++    PreviousFrame = Now;
++    ++WindowFrames;
++    const double Elapsed = std::chrono::duration<double>(Now - WindowStart).count();
++    if (Elapsed < WindowSeconds) return;
++
++    std::sort(WindowIntervals.begin(), WindowIntervals.end());
++    double Sum = 0.0;
++    for (double Interval : WindowIntervals) Sum += Interval;
++    const double Average = WindowFrames ? Sum / WindowFrames : 0.0;
++    const double Percentile = WindowIntervals.empty() ? 0.0 : WindowIntervals[std::min<size_t>(WindowIntervals.size() - 1u, WindowIntervals.size() * 95u / 100u)];
++    const double Gpu = WindowGpuFrames ? WindowGpu / WindowGpuFrames : 0.0;
++    // 📝 With a FIFO present mode the interval is the display period, not the cost of a frame. `gpu_bound_fps` is what the GPU alone could
++    //    sustain, which is the uncapped number to compare tiers by; it is only shown when timers produced data.
++    char Line[512];
++    std::snprintf(Line, sizeof(Line),
++                  "[FrameTime] window=%.1fs frames=%u fps=%.1f avg_ms=%.2f p95_ms=%.2f max_ms=%.2f gpu_ms=%.2f gpu_bound_fps=%.1f pipeline=%s present=%s",
++                  Elapsed, WindowFrames, Elapsed > 0.0 ? WindowFrames / Elapsed : 0.0, Average, Percentile,
++                  WindowIntervals.empty() ? 0.0 : WindowIntervals.back(), Gpu, Gpu > 0.0 ? 1000.0 / Gpu : 0.0,
++                  PipelineName ? PipelineName : "unknown", PresentMode ? PresentMode : "unknown");
++    std::cerr << Line << "\n";
++    for (const PassTotal& Row : Totals)
++    {
++        if (!Row.Count) continue;
++        std::snprintf(Line, sizeof(Line), "[GpuPass] %-28s avg_ms=%7.3f max_ms=%7.3f share=%5.1f%% frames=%u", Row.Name, Row.Sum / Row.Count,
++                      Row.Maximum, WindowGpu > 0.0 ? 100.0 * Row.Sum / WindowGpu : 0.0, Row.Count);
++        std::cerr << Line << "\n";
++    }
++    Totals.clear();
++    WindowIntervals.clear();
++    WindowFrames    = 0u;
++    WindowGpuFrames = 0u;
++    WindowGpu       = 0.0;
++    WindowStart     = Now;
++}
++
++//------------------------------------------------------------------------------------------------------------------------
++//                                                     DEVICE LOSS
++//------------------------------------------------------------------------------------------------------------------------
++
++void RenderMetrics::InspectLoss(const char* Operation, int32_t Result) noexcept
++{
++    if (!Device || LossPrinted) return;
++    LossPrinted = true;
++    std::cerr << "[DeviceLoss] " << (Operation ? Operation : "unknown") << " returned VkResult " << Result << " at frame serial " << Serial << "\n";
++    if (Enabled.Markers)
++    {
++        for (uint32_t Target = 0u; Target < SlotCount; ++Target)
++        {
++            const uint32_t Serial32 = MarkerWords[Target * MarkersPerSlot], Entered = MarkerWords[Target * MarkersPerSlot + 1u],
++                           Completed = MarkerWords[Target * MarkersPerSlot + 2u];
++            const char* EnteredName   = Entered   && Entered   <= QueriesPerSlot ? Names[Target][Entered - 1u]   : nullptr;
++            const char* CompletedName = Completed && Completed <= QueriesPerSlot ? Names[Target][Completed - 1u] : nullptr;
++            std::cerr << "[DeviceLoss] slot " << Target << ": frame " << Serial32 << " entered='" << (EnteredName ? EnteredName : "-")
++                      << "' completed='" << (CompletedName ? CompletedName : "-") << "'"
++                      << (Entered != Completed ? "  <- the GPU was inside the entered pass" : "") << "\n";
++        }
++    }
++    else std::cerr << "[DeviceLoss] no VK_AMD_buffer_marker, so the pass that hung cannot be named\n";
++    if (!Enabled.Fault)
++    {
++        std::cerr << "[DeviceLoss] no VK_EXT_device_fault on this driver\n";
++        return;
++    }
++    VkDeviceFaultCountsEXT Counts{ VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT };
++    if (ReadFault(Device, &Counts, nullptr) != VK_SUCCESS)
++    {
++        std::cerr << "[DeviceFault] vkGetDeviceFaultInfoEXT refused the count query\n";
++        return;
++    }
++    std::vector<VkDeviceFaultAddressInfoEXT> Addresses(Counts.addressInfoCount);
++    std::vector<VkDeviceFaultVendorInfoEXT>  Vendors(Counts.vendorInfoCount);
++    VkDeviceFaultInfoEXT Info{ VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT };
++    Info.pAddressInfos = Addresses.empty() ? nullptr : Addresses.data();
++    Info.pVendorInfos  = Vendors.empty() ? nullptr : Vendors.data();
++    if (ReadFault(Device, &Counts, &Info) != VK_SUCCESS)
++    {
++        std::cerr << "[DeviceFault] vkGetDeviceFaultInfoEXT refused the info query\n";
++        return;
++    }
++    std::cerr << "[DeviceFault] " << Info.description << "\n";
++    for (const VkDeviceFaultAddressInfoEXT& Address : Addresses)
++        std::cerr << "[DeviceFault] address type=" << static_cast<int>(Address.addressType) << " reported=0x" << std::hex << Address.reportedAddress
++                  << " precision=0x" << Address.addressPrecision << std::dec << "\n";
++    for (const VkDeviceFaultVendorInfoEXT& Vendor : Vendors)
++        std::cerr << "[DeviceFault] vendor '" << Vendor.description << "' code=" << Vendor.vendorFaultCode << " data=" << Vendor.vendorFaultData << "\n";
++}
++}
+diff --git a/Engine/DeviceExchange/RenderMetrics.h b/Engine/DeviceExchange/RenderMetrics.h
+new file mode 100644
+index 0000000..2a5ff10
+--- /dev/null
++++ b/Engine/DeviceExchange/RenderMetrics.h
+@@ -0,0 +1,116 @@
++//============================================================================================================================================
++//                                                             RENDERMETRICS.H
++//============================================================================================================================================
++// 📦 Per-pass GPU timers, AMD buffer markers, VK_EXT_device_fault capture and five-second frame windows for the Vulkan renderer.
++
++#pragma once
++#include <vulkan/vulkan.h>
++#include <chrono>
++#include <cstdint>
++#include <string>
++#include <vector>
++
++namespace Frontier
++{
++/// 📦 Everything the renderer reports about its own cost and its own failures, in one place so the log lines stay uniform.
++///
++///    Timers  A timestamp pool with one stripe per frame slot. `OpenFrame` harvests the stripe written `SlotCount` frames ago, so no fence
++///            is added and nothing stalls. A pass is the span between the previous `ClosePass` and this one, so it includes the barrier
++///            bubble in front of it; that is the cost the next pass actually waits for.
++///    Markers VK_AMD_buffer_marker writes land in host-visible memory, so they survive a device loss. Every pass writes "entered" when the
++///            command processor reaches it and "completed" when all earlier work has retired; after VK_ERROR_DEVICE_LOST the gap between
++///            the two names the pass that was executing.
++///    Fault   VK_EXT_device_fault is queried once after a device loss and printed verbatim (address ranges, vendor info).
++class RenderMetrics
++{
++public:
++    static constexpr uint32_t QueriesPerSlot  = 64u;   // [cnt] one frame stamp plus up to 63 passes
++    static constexpr uint32_t MarkersPerSlot  = 4u;    // [cnt] serial, entered, completed, spare
++    static constexpr uint32_t MaximumSlots    = 4u;    // [cnt] frame slots one metrics object can stripe over
++    static constexpr double   WindowSeconds   = 5.0;   // [s]   length of one frame-time report window
++
++    struct Capability
++    {
++        bool Timestamps = false;   // [-] the queue family supports timestamps and the pool was created
++        bool Markers    = false;   // [-] VK_AMD_buffer_marker is enabled on the device and the marker buffer exists
++        bool Fault      = false;   // [-] VK_EXT_device_fault is enabled on the device
++    };
++
++    /// 📦 Device-level wishes the renderer must add to vkCreateDevice before `Bring`.
++    struct DeviceWish
++    {
++        bool MarkerExtension = false;   // [-] the physical device offers VK_AMD_buffer_marker
++        bool FaultExtension  = false;   // [-] the physical device offers VK_EXT_device_fault
++        bool FaultFeature    = false;   // [-] deviceFault is supported (VkPhysicalDeviceFaultFeaturesEXT)
++    };
++    /// 📦 Inspects the physical device and logs which diagnostics it can offer.
++    static DeviceWish QueryDeviceWish(VkPhysicalDevice Device) noexcept;
++
++    /// 📦 Creates the timestamp pool and the marker buffer on an existing device.
++    /// err   returns false when nothing could be created; the renderer then runs unmetered
++    bool Bring(VkPhysicalDevice PhysicalDevice, VkDevice Device, uint32_t SlotCount, const DeviceWish& Enabled) noexcept;
++    void Retire() noexcept;
++
++    /// 📦 Harvests the stripe of `Slot`, resets it and stamps the start of the new frame. Call first in the command buffer.
++    void OpenFrame(VkCommandBuffer Command, uint32_t Slot, uint64_t FrameSerial) noexcept;
++    /// 📦 Names a pass and writes its "entered" marker. `Name` must outlive the renderer (a string literal).
++    void OpenPass(VkCommandBuffer Command, const char* Name) noexcept;
++    /// 📦 Stamps the end of the open pass and writes its "completed" marker.
++    void ClosePass(VkCommandBuffer Command) noexcept;
++
++    /// 📦 Accumulates one presented frame and, once a window has elapsed, prints the [FrameTime] and [GpuPass] lines.
++    /// prm   PipelineName   [-]  route that rendered the window ("HardwareRayQuery", "SoftwareBvh", "RasterSdf", ...)
++    /// prm   PresentMode    [-]  VK_PRESENT_MODE name the swapchain currently uses
++    void CloseFrame(const char* PipelineName, const char* PresentMode) noexcept;
++
++    /// 📦 Reads the markers and VK_EXT_device_fault and prints them. Safe to call more than once; only the first call prints the fault.
++    void InspectLoss(const char* Operation, int32_t Result) noexcept;
++
++    [[nodiscard]] const Capability& QueryCapability() const noexcept
++    {
++        return Enabled;
++    }
++    [[nodiscard]] double QueryLastGpuMilliseconds() const noexcept
++    {
++        return LastGpuMilliseconds;
++    }
++
++private:
++    struct PassTotal
++    {
++        const char* Name    = nullptr;   // [-]  literal passed to OpenPass
++        double      Sum     = 0.0;       // [ms] accumulated over the window
++        double      Maximum = 0.0;       // [ms] worst single frame in the window
++        uint32_t    Count   = 0u;        // [cnt] frames that contributed
++    };
++
++    void Harvest(uint32_t Slot) noexcept;
++    void Mark(VkCommandBuffer Command, VkPipelineStageFlagBits Stage, uint32_t Word, uint32_t Value) noexcept;
++
++    VkDevice             Device          = VK_NULL_HANDLE;
++    VkQueryPool          Pool            = VK_NULL_HANDLE;
++    VkBuffer             MarkerBuffer    = VK_NULL_HANDLE;
++    VkDeviceMemory       MarkerMemory    = VK_NULL_HANDLE;
++    volatile uint32_t*   MarkerWords     = nullptr;
++    PFN_vkCmdWriteBufferMarkerAMD WriteMarker = nullptr;
++    PFN_vkGetDeviceFaultInfoEXT   ReadFault   = nullptr;
++    float                TimestampPeriod = 1.0f;     // [ns/tick]
++    uint32_t             SlotCount       = 0u;
++    uint32_t             Slot            = 0u;       // [-]  stripe being recorded
++    uint32_t             PassCount[MaximumSlots]{};             // [cnt] passes closed per slot in the current recording
++    bool                 Recorded[MaximumSlots]{};              // [-]  the slot holds stamps nobody has harvested yet
++    const char*          Names[MaximumSlots][QueriesPerSlot]{};
++    const char*          OpenName        = nullptr;
++    uint64_t             Serial          = 0u;
++    Capability           Enabled;
++    std::vector<PassTotal> Totals;
++    double               WindowGpu       = 0.0;      // [ms] GPU time summed over the window
++    uint32_t             WindowGpuFrames = 0u;       // [cnt] frames whose GPU time was harvested in the window
++    double               LastGpuMilliseconds = 0.0;  // [ms] GPU time of the most recently harvested frame
++    uint32_t             WindowFrames    = 0u;
++    std::vector<double>  WindowIntervals;            // [ms] frame-to-frame intervals of the window
++    std::chrono::steady_clock::time_point WindowStart{};
++    std::chrono::steady_clock::time_point PreviousFrame{};
++    bool                 LossPrinted     = false;
++};
++}
+diff --git a/Engine/DeviceExchange/SwapchainExchange.cpp b/Engine/DeviceExchange/SwapchainExchange.cpp
+index f1896e3..afbfe51 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.cpp
++++ b/Engine/DeviceExchange/SwapchainExchange.cpp
+@@ -54,6 +54,7 @@
+ 
+ #include "DriverProgress.h"
+ #include "PipelineCacheFile.h"
++#include "RenderMetrics.h"
+ #include <chrono>
+ #include <cstdlib>
+ 
+@@ -417,7 +418,7 @@ static void AllocateBuffer(
+     BufferInfo.size        = ByteCount;
+     BufferInfo.usage       = UsageFlags;
+     BufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+-    (void)vkCreateBuffer(Device, &BufferInfo, nullptr, &OutBuffer);
++    const VkResult BufferResult = vkCreateBuffer(Device, &BufferInfo, nullptr, &OutBuffer);
+ 
+     VkMemoryRequirements Requirements{};
+     vkGetBufferMemoryRequirements(Device, OutBuffer, &Requirements);
+@@ -425,6 +426,7 @@ static void AllocateBuffer(
+     VkMemoryAllocateInfo AllocateInfo{};
+     AllocateInfo.sType          = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+     AllocateInfo.allocationSize = Requirements.size;
++    bool Matched = false;
+     for (uint32_t Index = 0u; Index < MemoryProperties.memoryTypeCount; ++Index)
+     {
+         if ((Requirements.memoryTypeBits & (1u << Index)) &&
+@@ -432,13 +434,27 @@ static void AllocateBuffer(
+              static_cast<VkMemoryPropertyFlags>(MemoryFlags))
+         {
+             AllocateInfo.memoryTypeIndex = Index;
++            Matched = true;
+             break;
+         }
+     }
+-    std::cerr << "[Allocation] buffer requested=" << ByteCount << " allocated=" << Requirements.size
+-              << " memory_flags=" << MemoryProperties.memoryTypes[AllocateInfo.memoryTypeIndex].propertyFlags << " (request, not live total)\n";
+-    (void)vkAllocateMemory(Device, &AllocateInfo, nullptr, &OutMemory);
+-    vkBindBufferMemory(Device, OutBuffer, OutMemory, 0);
++    // 📝 Phase 0 memory placement. `local` means VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, i.e. VRAM; anything else is system memory reached over
++    //    PCIe by every shader read. The running totals make a scene that quietly landed in system memory obvious in one line.
++    static uint64_t LocalBytes = 0u, SystemBytes = 0u;
++    const VkMemoryPropertyFlags Placed = MemoryProperties.memoryTypes[AllocateInfo.memoryTypeIndex].propertyFlags;
++    const bool Local = (Placed & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) != 0u;
++    (Local ? LocalBytes : SystemBytes) += Requirements.size;
++    const VkResult AllocateResult = vkAllocateMemory(Device, &AllocateInfo, nullptr, &OutMemory);
++    const VkResult BindResult     = AllocateResult == VK_SUCCESS ? vkBindBufferMemory(Device, OutBuffer, OutMemory, 0) : VK_ERROR_OUT_OF_DEVICE_MEMORY;
++    std::cerr << "[Allocation] buffer requested=" << ByteCount << " allocated=" << Requirements.size << " memory_flags=" << Placed
++              << " placement=" << (Local ? "VRAM" : "SYSTEM_RAM") << " type=" << AllocateInfo.memoryTypeIndex
++              << " heap=" << MemoryProperties.memoryTypes[AllocateInfo.memoryTypeIndex].heapIndex
++              << " running_total_vram_mib=" << (LocalBytes >> 20u) << " running_total_system_mib=" << (SystemBytes >> 20u)
++              << " (request totals, not live)\n";
++    if (!Matched || BufferResult != VK_SUCCESS || AllocateResult != VK_SUCCESS || BindResult != VK_SUCCESS)
++        std::cerr << "[Allocation] WARNING requested flags=" << MemoryFlags << (Matched ? "" : " matched no memory type, fell back to type 0")
++                  << " create=" << static_cast<int>(BufferResult) << " allocate=" << static_cast<int>(AllocateResult) << " bind="
++                  << static_cast<int>(BindResult) << "\n";
+ }
+ 
+ //============================================================================================================================================
+@@ -595,6 +611,7 @@ void SwapchainExchange::Retire() noexcept
+     if (Vulkan->ImGuiDescriptorPool) vkDestroyDescriptorPool (Vulkan->Device, Vulkan->ImGuiDescriptorPool, nullptr);
+ 
+     DistanceFieldStage.Destroy();
++    Metrics.Retire();
+     Vulkan->RayQueries.Retire();
+     Visibility.Retire();
+     RetireSwapchain();
+@@ -947,6 +964,11 @@ bool SwapchainExchange::BringPhysicalDevice() noexcept
+               << " | RP ext " << Capabilities.RayTracingPipelineExtension
+               << " | BDA " << Capabilities.BufferDeviceAddress << " | bindless " << Capabilities.DescriptorIndexing
+               << " | subgroup " << Capabilities.SubgroupSize << "]  driver: " << Capabilities.DriverInfo << "\n";
++    if (Resolved < RayTracingTierCategory::RayQuery)
++        HardwareRefusal = std::string("capability resolves to ") + RayTracingCapabilitySet::TierName(Resolved) + " (supported "
++                        + RayTracingCapabilitySet::TierName(Supported) + ", requested " + RayTracingCapabilitySet::RequestName(RayTracingRequest)
++                        + "; AS ext " + std::to_string(Capabilities.AccelerationStructureExtension) + " RQ ext "
++                        + std::to_string(Capabilities.RayQueryExtension) + " RQ feat " + std::to_string(Capabilities.RayQueryFeature) + ")";
+     if (RayTracingRequest != RayTracingRequestCategory::Auto
+         && static_cast<uint32_t>(Resolved) < static_cast<uint32_t>(RayTracingRequest) - 1u)
+         std::cerr << "[SwapchainExchange] Requested ray-tracing tier is not available on this device; downgraded to "
+@@ -992,6 +1014,13 @@ bool SwapchainExchange::BringLogicalDevice() noexcept
+     VkPhysicalDeviceFeatures DeviceFeatures{};
+     DeviceFeatures.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+ 
++    // Phase 0 diagnostics: AMD buffer markers survive a device loss and VK_EXT_device_fault explains it. Both are optional.
++    MetricsWish = RenderMetrics::QueryDeviceWish(Vulkan->PhysicalDevice);
++    if (MetricsWish.MarkerExtension) DeviceExtensions.push_back(VK_AMD_BUFFER_MARKER_EXTENSION_NAME);
++    if (MetricsWish.FaultExtension && MetricsWish.FaultFeature) DeviceExtensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
++    VkPhysicalDeviceFaultFeaturesEXT FaultFeature{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT };
++    FaultFeature.deviceFault = VK_TRUE;
++
+     // R2: vkCmdDrawIndexedIndirectCount is a Vulkan 1.2 core feature (drawIndirectCount) — requested only when offered;
+     //    without it the raster issues a fixed-count indirect draw over zero-sized commands (same image, more CP work).
+     VkPhysicalDeviceVulkan12Features Supported12{ VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+@@ -1001,6 +1030,11 @@ bool SwapchainExchange::BringLogicalDevice() noexcept
+     Enabled12.drawIndirectCount = Supported12.drawIndirectCount;
+     Enabled12.bufferDeviceAddress = RayQueryRequested ? VK_TRUE : VK_FALSE;
+     if (RayQueryRequested) Enabled12.pNext = &Acceleration;
++    if (MetricsWish.FaultExtension && MetricsWish.FaultFeature)
++    {
++        FaultFeature.pNext = Enabled12.pNext;
++        Enabled12.pNext    = &FaultFeature;
++    }
+     DrawIndirectCountSupported  = Supported12.drawIndirectCount == VK_TRUE;
+     // R4a: bindless texture table — Vulkan 1.2 descriptor indexing (core on every Vulkan 1.2 driver incl. Pascal).
+     //    Requested only when offered; without it the material table uploads but textures stay off (logged once).
+@@ -1042,6 +1076,7 @@ bool SwapchainExchange::BringLogicalDevice() noexcept
+ 
+     vkGetDeviceQueue(Vulkan->Device, Vulkan->GraphicsFamily, 0u, &Vulkan->GraphicsQueue);
+     vkGetDeviceQueue(Vulkan->Device, Vulkan->ComputeFamily,  0u, &Vulkan->ComputeQueue);
++    (void)Metrics.Bring(Vulkan->PhysicalDevice, Vulkan->Device, kCycleSlotCount, MetricsWish);
+ 
+     if (RayQueryRequested)
+     {
+@@ -1049,6 +1084,7 @@ bool SwapchainExchange::BringLogicalDevice() noexcept
+         if (!Vulkan->RayQueryEnabled)
+         {
+             Vulkan->RayQueries.Retire();
++            HardwareRefusal = "RayQueryExchange::Construct refused the device resources (acceleration-structure or ray-query setup failed)";
+             std::cerr << "[RayQuery] Device resources refused; using software traversal.\n";
+         }
+     }
+@@ -1630,9 +1666,20 @@ bool SwapchainExchange::BringComputePipeline() noexcept
+         {
+             ComputeInfo.stage.module = Compiled;
+             ComputeInfo.layout = Vulkan->RayQueryPipelineLayout;
+-            if (vkCreateComputePipelines(Vulkan->Device, Vulkan->PipelineCache, 1u, &ComputeInfo, nullptr, &Vulkan->RayQueryPipeline) != VK_SUCCESS)
++            const auto Started = std::chrono::steady_clock::now();
++            std::cerr << "[PipelineCompile] RayQueryViewport " << Shader.codeSize << " bytes: begin (driver compile or cache lookup)\n";
++            const VkResult HardwareResult = DriverProgress::Call("compute pipeline (driver compile/cache lookup): RayQueryViewport", [&] { return vkCreateComputePipelines(
++                Vulkan->Device, Vulkan->PipelineCache, 1u, &ComputeInfo, nullptr, &Vulkan->RayQueryPipeline); });
++            std::cerr << "[PipelineCompile] RayQueryViewport result=" << static_cast<int>(HardwareResult) << " ms="
++                      << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - Started).count() << "\n";
++            if (HardwareResult != VK_SUCCESS)
++            {
++                HardwareRefusal = "RayQueryViewport pipeline compile failed (VkResult " + std::to_string(static_cast<int>(HardwareResult)) + ")";
+                 std::cerr << "[RayQuery] Shader refused; using software traversal.\n";
++            }
+         }
++        else HardwareRefusal = HardwareSpirv.empty() ? "Engine/Shaders/RayQueryViewport.spv is missing or unreadable"
++                                                     : "RayQueryViewport pipeline layout or shader module creation failed";
+         if (Compiled) vkDestroyShaderModule(Vulkan->Device, Compiled, nullptr);
+     }
+     SavePipelineCache("ReSTIR ready");
+@@ -3085,9 +3132,17 @@ void SwapchainExchange::UploadStarTables(const void* CellBytes, uint32_t CellCou
+     vkUpdateDescriptorSets(Vulkan->Device, 1u, &Write, 0u, nullptr);
+ }
+ 
+-void SwapchainExchange::UploadScene(const SceneStructure& Scene, const TraversalIndex& Traversal, const TextureIndex* Textures) noexcept
++void SwapchainExchange::UploadScene(const SceneStructure& Scene, const TraversalIndex& Traversal, const TextureIndex* Textures,
++                                    const char* Trigger) noexcept
+ {
+     if (!Vulkan->Device) return;
++    const auto UploadStarted = std::chrono::steady_clock::now();
++    ++SceneUploadSerial;
++    std::cerr << "[UploadScene] #" << SceneUploadSerial << " trigger='" << (Trigger ? Trigger : "unspecified") << "' instances="
++              << Scene.QueryInstances().size() << " triangles=" << Scene.QueryFlatTriangles().size() << " vertices=" << Scene.QueryVertices().size()
++              << " since_previous_ms="
++              << (LastSceneUpload.time_since_epoch().count() ? std::chrono::duration_cast<std::chrono::milliseconds>(UploadStarted - LastSceneUpload).count() : -1)
++              << " (each upload waits for the device to go idle)\n";
+     SceneUploadInProgress = true;
+     Visibility.UploadScene(Scene);
+     if (Textures) UploadTextures(*Textures);        // R4a: bindless table (binding 15) — before the descriptor writes below
+@@ -3098,7 +3153,10 @@ void SwapchainExchange::UploadScene(const SceneStructure& Scene, const Traversal
+     {
+         Vulkan->RayQueryInstanceCount = static_cast<uint32_t>(Scene.QueryInstances().size());
+         if (!Vulkan->RayQueries.ConstructScene(Scene))
++        {
++            HardwareRefusal = "RayQueryExchange::ConstructScene refused the scene (empty instance, triangle or index range, or build failure)";
+             std::cerr << "[RayQuery] Triangle acceleration construction refused; using software traversal.\n";
++        }
+         else
+             std::cerr << "[RayQuery] Hardware triangle BLAS/TLAS resident: " << Vulkan->RayQueryInstanceCount
+                       << " instances; inline ray queries enabled for ReSTIR GI, shadows and mesh reflections.\n";
+@@ -3129,6 +3187,10 @@ void SwapchainExchange::UploadScene(const SceneStructure& Scene, const Traversal
+     if (!BringDistanceFieldGIStage())
+         std::cerr << "[DistanceFieldGIStage] unavailable after scene upload; retaining the established renderer as fallback.\n";
+ 
++    LastSceneUpload = std::chrono::steady_clock::now();
++    std::cerr << "[UploadScene] #" << SceneUploadSerial << " finished in "
++              << std::chrono::duration_cast<std::chrono::milliseconds>(LastSceneUpload - UploadStarted).count() << " ms\n";
++
+     // R4b: the raster's alpha-mask test borrows the slab SSBO and the bindless table (VisibilityRaster.frag bindings 6 / 7).
+     if (Vulkan->DescriptorIndexing)
+     {
+@@ -3274,6 +3336,7 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+         std::cerr << "[SwapchainExchange] " << Operation << " failed: VkResult "
+                   << static_cast<int>(Result) << (Result == VK_ERROR_DEVICE_LOST ? " (VK_ERROR_DEVICE_LOST)" : "")
+                   << ". Rendering stopped; inspect the driver/validation logs.\n";
++        if (Result == VK_ERROR_DEVICE_LOST) Metrics.InspectLoss(Operation, static_cast<int32_t>(Result));
+         FrameFailed = true;
+         FrameFailureOperation = Operation;
+         FrameFailureCode = static_cast<int32_t>(Result);
+@@ -3289,7 +3352,7 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+     if (ResizePending)
+     {
+         ResizePending = false;
+-        if (!RebuildSwapchain()) Failed("RebuildSwapchain(resize)", VK_ERROR_INITIALIZATION_FAILED);
++        if (!RebuildSwapchain(RebuildReason)) Failed("RebuildSwapchain(resize)", VK_ERROR_INITIALIZATION_FAILED);
+         return;
+     }
+ 
+@@ -3306,7 +3369,7 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+     // An out-of-date acquire does not signal, so rebuilding here is safe.
+     if (AcquireResult == VK_ERROR_OUT_OF_DATE_KHR)
+     {
+-        if (!RebuildSwapchain()) Failed("RebuildSwapchain(acquire)", VK_ERROR_INITIALIZATION_FAILED);
++        if (!RebuildSwapchain("vkAcquireNextImageKHR returned VK_ERROR_OUT_OF_DATE_KHR")) Failed("RebuildSwapchain(acquire)", VK_ERROR_INITIALIZATION_FAILED);
+         return;
+     }
+ 
+@@ -3322,6 +3385,16 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+         if (ImageWait != VK_SUCCESS) { Failed("vkWaitForFences(image)", ImageWait); return; }
+     }
+ 
++    {
++        std::string Reason;
++        const char* Route = DescribePipeline(Dispatch, Reason);
++        if (Route != ReportedPipeline)
++        {
++            ReportedPipeline = Route;
++            std::cerr << "[RenderPath] pipeline=" << Route << " reason: " << Reason << " (ray-tracing tier "
++                      << (QueryRayTracingTier() == RayTracingTierCategory::RayQuery ? "RayQuery" : "Software") << ")\n";
++        }
++    }
+     void* PrevReservoirs = SwapReservoirParity();   // R6: prev = last frame's curr before recording the new frame
+     Visibility.AssignReservoirView(PrevReservoirs);   // R6 row 3: resolve binding 13 follows the kernel's prev buffer (M/W/Age views)
+     RecordComputeCommands(ImageOrdinal, Dispatch);
+@@ -3359,7 +3432,9 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+     if (PresentResult == VK_ERROR_OUT_OF_DATE_KHR || PresentResult == VK_SUBOPTIMAL_KHR || ResizePending)
+     {
+         ResizePending = false;
+-        if (!RebuildSwapchain()) { Failed("RebuildSwapchain(present)", VK_ERROR_INITIALIZATION_FAILED); return; }
++        const char* PresentReason = PresentResult == VK_ERROR_OUT_OF_DATE_KHR ? "vkQueuePresentKHR returned VK_ERROR_OUT_OF_DATE_KHR"
++                                  : PresentResult == VK_SUBOPTIMAL_KHR        ? "vkQueuePresentKHR returned VK_SUBOPTIMAL_KHR" : RebuildReason;
++        if (!RebuildSwapchain(PresentReason)) { Failed("RebuildSwapchain(present)", VK_ERROR_INITIALIZATION_FAILED); return; }
+     }
+     else if (PresentResult != VK_SUCCESS)
+     {
+@@ -3368,6 +3443,7 @@ void SwapchainExchange::RecordAndPresent(const DispatchConfiguration& Dispatch)
+     }
+ 
+     Vulkan->ActiveSlot = (ActiveSlot + 1u) % kCycleSlotCount;
++    Metrics.CloseFrame(ReportedPipeline, QueryPresentModeName());
+ }
+ 
+ //------------------------------------------------------------------------------------------------------------------------
+@@ -3381,7 +3457,11 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
+     VkCommandBufferBeginInfo BeginInfo{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+     BeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+     (void)vkBeginCommandBuffer(Command, &BeginInfo);
++    Metrics.OpenFrame(Command, Vulkan->ActiveSlot, ++FrameSerial);
++    Metrics.OpenPass(Command, "RayQueryRefit");
+     if ((Dispatch.FeatureFlags & DispatchFeatureRaytracing) != 0u) Vulkan->RayQueries.RecordRefit(Command);
++    Metrics.ClosePass(Command);
++    Metrics.OpenPass(Command, "UploadsAndBarriers");
+     if (!Vulkan->PendingTraversal.empty())
+     {
+         VkMemoryBarrier Transfer{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+@@ -3536,7 +3616,10 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
+     VisibilityFrameConfiguration Frame = VisibilityFrame;
+     Frame.RenderWidth  = RenderWidth;
+     Frame.RenderHeight = RenderHeight;
++    Metrics.ClosePass(Command);
++    Metrics.OpenPass(Command, "VisibilityFront");
+     Visibility.RecordFrame(Command, Vulkan->ActiveSlot, Frame);
++    Metrics.ClosePass(Command);
+ 
+     // Non-raytraced GI: the SDF stage is the only non-raytraced GI; when it is not ready the plain raster below runs.
+     const bool NonRaytracedGIRequested = (Dispatch.FeatureFlags & DispatchFeatureRaytracing) == 0u
+@@ -3568,6 +3651,7 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
+         DfParams.ReflectionMode = (Dispatch.FeatureFlags & DispatchFeatureReflectionMask) >> DispatchFeatureReflectionShift;
+         DfParams.RenderWidth    = RenderWidth;
+         DfParams.RenderHeight   = RenderHeight;
++        DfParams.Metrics        = &Metrics;
+         NonRaytracedGIRecorded = DistanceFieldStage.RecordFrame(Command, DfParams);
+     }
+ 
+@@ -3578,7 +3662,9 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
+     {
+         ShadowFrameConfiguration Shadow = ShadowFrame;
+         (void)Visibility.PlaceShadowTaps(Shadow);
++        Metrics.OpenPass(Command, "RasterShadowMaps");
+         ShadowStageRecorded = Visibility.RecordShadowFrame(Command, Vulkan->ActiveSlot, Shadow, false);
++        Metrics.ClosePass(Command);
+     }
+ 
+     if (Frame.DebugView == DebugViewCategory::Off && !NonRaytracedGIRecorded)
+@@ -3643,9 +3729,12 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
+         // R10 ② — bracket the ReSTIR dispatch itself. The trailing span (query 10→11) also contains the à-trous
+         //    denoise and the luminance reduction, so without this pair "kernel" was really "kernel + denoise +
+         //    luminance" and no tier comparison could tell which of the three a change had moved.
++        Metrics.OpenPass(Command, Hardware ? "ShadeHardwareRayQuery" : TraceRequested ? "ShadeSoftwareBvh" : "ShadeRaster");
+         if (TraceRequested) Visibility.RecordRestirBegin(Command, Vulkan->ActiveSlot);
+         vkCmdDispatch(Command, GroupX, GroupY, 1u);
+         if (TraceRequested) Visibility.RecordRestirEnd(Command, Vulkan->ActiveSlot);
++        Metrics.ClosePass(Command);
++        Metrics.OpenPass(Command, "DenoiseAndLuminance");
+         Vulkan->HistoryContentsValid=true;
+         Vulkan->HistoryWidth=RenderWidth; Vulkan->HistoryHeight=RenderHeight;
+ 
+@@ -3812,7 +3901,9 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
+     }
+ 
+     if(Frame.DebugView != DebugViewCategory::Off || ShadowStageRecorded || NonRaytracedGIRecorded) Vulkan->HistoryContentsValid=false;
++    Metrics.ClosePass(Command);
+     Visibility.RecordKernelEnd(Command, Vulkan->ActiveSlot);
++    Metrics.OpenPass(Command, "OutlineOverlayBlit");
+ 
+     // ②a3 Editor selection outline — the picked instances' true silhouette, in green, straight onto the finished
+     //      presentation image (SelectionOutline.spv reads the visibility id image per pixel). After the kernel and
+@@ -3995,6 +4086,8 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
+         }
+     }
+ 
++    Metrics.ClosePass(Command);
++    Metrics.OpenPass(Command, "ImGui");
+     // ⑦ ImGui render pass
+     VkClearValue ClearValue{};
+     ClearValue.color = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
+@@ -4010,6 +4103,7 @@ void SwapchainExchange::RecordComputeCommands(uint32_t ImageOrdinal, const Dispa
+     if (ImDrawData* DrawData = ImGui::GetDrawData())
+         ImGui_ImplVulkan_RenderDrawData(DrawData, Command);
+     vkCmdEndRenderPass(Command);
++    Metrics.ClosePass(Command);
+ 
+     (void)vkEndCommandBuffer(Command);
+ }
+@@ -4105,6 +4199,7 @@ void SwapchainExchange::AssignPresentPacing(PresentPacingCategory Desired) noexc
+     if (Pacing == Desired) return;
+     Pacing = Desired;
+     ResizePending = true;   // rebuild at the next present with the new mode
++    RebuildReason = "present pacing changed (vertical sync option)";
+ }
+ 
+ void SwapchainExchange::AssignFullscreen(bool Desired) noexcept
+@@ -4126,14 +4221,18 @@ void SwapchainExchange::AssignFullscreen(bool Desired) noexcept
+     }
+     FullscreenActive = Desired;
+     ResizePending = true;   // the framebuffer callback also fires; a redundant rebuild is harmless
++    RebuildReason = "fullscreen toggle";
+ }
+ 
+ //============================================================================================================================================
+ //                                             SWAPCHAIN REBUILD (on resize)
+ //============================================================================================================================================
+ 
+-bool SwapchainExchange::RebuildSwapchain() noexcept
++bool SwapchainExchange::RebuildSwapchain(const char* Reason) noexcept
+ {
++    const auto RebuildStarted = std::chrono::steady_clock::now();
++    std::cerr << "[SwapchainRebuild] begin reason='" << (Reason ? Reason : "unspecified") << "' present=" << QueryPresentModeName()
++              << " from " << Configuration.Width << "x" << Configuration.Height << "\n";
+     int FramebufferW = 0, FramebufferH = 0;
+     glfwGetFramebufferSize(GlfwWindow, &FramebufferW, &FramebufferH);
+     while (FramebufferW == 0 || FramebufferH == 0)
+@@ -4150,9 +4249,21 @@ bool SwapchainExchange::RebuildSwapchain() noexcept
+ 
+     RetireSwapchain();
+ 
+-    if (!BringSwapchain() || !BringStorageImage()) return false;
+-    if (!Visibility.Resize(Configuration.Width, Configuration.Height, Vulkan->StorageImageView)) return false;
++    const auto Retired = std::chrono::steady_clock::now();
++    if (!BringSwapchain() || !BringStorageImage())
++    {
++        std::cerr << "[SwapchainRebuild] FAILED while recreating the swapchain or storage image\n";
++        return false;
++    }
++    const auto Recreated = std::chrono::steady_clock::now();
++    if (!Visibility.Resize(Configuration.Width, Configuration.Height, Vulkan->StorageImageView))
++    {
++        std::cerr << "[SwapchainRebuild] FAILED while resizing the visibility targets\n";
++        return false;
++    }
++    const auto Resized = std::chrono::steady_clock::now();
+     (void)BringDistanceFieldGIStage();
++    const auto StageDone = std::chrono::steady_clock::now();
+ 
+     // Every view handed out by the device seam has just been destroyed and recreated. Bumping the generation is how
+     //    an overlay learns it must re-Resize; without it, it would keep rendering into a stale VkImageView.
+@@ -4177,6 +4288,12 @@ bool SwapchainExchange::RebuildSwapchain() noexcept
+         FramebufferInfo.layers          = 1u;
+         (void)vkCreateFramebuffer(Vulkan->Device, &FramebufferInfo, nullptr, &Vulkan->ImGuiFramebuffers[Index]);
+     }
++    const auto Milliseconds = [](auto From, auto To) { return std::chrono::duration_cast<std::chrono::milliseconds>(To - From).count(); };
++    const auto Finished     = std::chrono::steady_clock::now();
++    std::cerr << "[SwapchainRebuild] done reason='" << (Reason ? Reason : "unspecified") << "' to " << Configuration.Width << "x" << Configuration.Height
++              << " total_ms=" << Milliseconds(RebuildStarted, Finished) << " (idle+retire " << Milliseconds(RebuildStarted, Retired)
++              << ", swapchain+storage " << Milliseconds(Retired, Recreated) << ", visibility " << Milliseconds(Recreated, Resized)
++              << ", sdf stage " << Milliseconds(Resized, StageDone) << ", descriptors+imgui " << Milliseconds(StageDone, Finished) << ")\n";
+     return true;
+ }
+ 
+@@ -4386,6 +4503,38 @@ void SwapchainExchange::OnFramebuffer(GLFWwindow* Window, int, int) noexcept
+ } // namespace Frontier
+ 
+ namespace Frontier {
++const char* SwapchainExchange::DescribePipeline(const DispatchConfiguration& Dispatch, std::string& Reason) const noexcept
++{
++    try
++    {
++        if ((Dispatch.FeatureFlags & DispatchFeatureRaytracing) == 0u)
++        {
++            const bool GlobalIllumination = (Dispatch.FeatureFlags & DispatchFeatureGlobalIllumination) != 0u;
++            if (GlobalIllumination && DistanceFieldStage.IsReady())
++            {
++                Reason = "ray tracing is off in the feature flags; distance-field GI is resident (hardware ray tracing is not used on this route)";
++                return "RasterSdfGi";
++            }
++            Reason = GlobalIllumination ? "ray tracing is off and the SDF stage is not ready; plain raster" : "ray tracing and global illumination are off; plain raster";
++            return "Raster";
++        }
++        if (QueryRayTracingTier() == RayTracingTierCategory::RayQuery)
++        {
++            Reason = "VK_KHR_ray_query pipeline and acceleration structure are resident; the RT cores trace";
++            return "HardwareRayQuery";
++        }
++        Reason = !HardwareRefusal.empty() ? HardwareRefusal
++               : !Vulkan->RayQueryEnabled ? "VK_KHR_ray_query device resources were never created"
++               : !Vulkan->RayQueryPipeline ? "the RayQueryViewport pipeline does not exist"
++               : "the acceleration structure is not resident (no scene uploaded yet, or ConstructScene refused)";
++        return "SoftwareBvh";
++    }
++    catch (...)
++    {
++        return "Unknown";
++    }
++}
++
+ RayTracingTierCategory SwapchainExchange::QueryRayTracingTier() const noexcept
+ {
+     // 📝 The hardware route needs only its own pipeline and a resident acceleration structure. It used to also demand the software two-level
+diff --git a/Engine/DeviceExchange/SwapchainExchange.h b/Engine/DeviceExchange/SwapchainExchange.h
+index 59fae57..f06f1fa 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.h
++++ b/Engine/DeviceExchange/SwapchainExchange.h
+@@ -14,6 +14,7 @@
+ #include "OrientationClassifier.h"
+ #include "VisibilityExchange.h"
+ #include "DistanceFieldGIStage.h"
++#include "RenderMetrics.h"
+ #include "TriangleSpan.h"
+ #include <cstdint>
+ #include <string>
+@@ -253,7 +254,9 @@ public:
+ 
+     // R2: the whole level becomes resident (vertices · indices · instances · clusters · materials · luminaires) and the
+     //    interim kernel's flat triangle / material SSBOs are taken from the same SceneStructure — one upload, one truth.
+-    void                        UploadScene(const SceneStructure& Scene, const TraversalIndex& Traversal, const TextureIndex* Textures = nullptr) noexcept;
++    /// 📦 Publishes the scene to the device. `Trigger` is a string literal naming why the host is uploading; it appears in the [UploadScene] log.
++    void                        UploadScene(const SceneStructure& Scene, const TraversalIndex& Traversal, const TextureIndex* Textures = nullptr,
++                                            const char* Trigger = "unspecified") noexcept;
+ 
+     // D3: per-frame instance transform refresh (no reallocation, no device stall). See
+     //    VisibilityExchange::RefreshInstances. Returns false if the count no longer matches the resident scene.
+@@ -334,7 +337,7 @@ public:
+     [[nodiscard]] const char*   QueryFrameFailureOperation() const noexcept { return FrameFailureOperation; }
+     [[nodiscard]] int32_t       QueryFrameFailureCode() const noexcept { return FrameFailureCode; }
+ 
+-    void                        SignalResize() noexcept { ResizePending = true; }
++    void                        SignalResize() noexcept { ResizePending = true; RebuildReason = "framebuffer size event"; }
+ 
+     // Display settings (Step 5C). Each request is applied at the next present: pacing rebuilds the swapchain with the
+     //    best supported VkPresentModeKHR; fullscreen toggles the GLFW window between the primary monitor's video mode
+@@ -429,7 +432,7 @@ private:
+     [[nodiscard]] bool  BringDistanceFieldGIStage() noexcept;
+ 
+     void                RetireSwapchain()       noexcept;
+-    [[nodiscard]] bool  RebuildSwapchain()      noexcept;
++    [[nodiscard]] bool  RebuildSwapchain(const char* Reason) noexcept;   // Reason is logged with the rebuild duration
+     [[nodiscard]] uint32_t ResolvePresentMode() const noexcept;   // VkPresentModeKHR as uint32_t (header stays Vulkan-free)
+ 
+     void                RecordComputeCommands(uint32_t ImageIndex,
+@@ -454,6 +457,15 @@ private:
+     GLFWwindow*             GlfwWindow;         // [-]   GLFW window pointer
+     SwapchainConfiguration  Configuration;      // [-]   runtime-tunable surface parameters
+     bool                    ResizePending;       // [-]   framebuffer resize signal
++    const char*             RebuildReason = "unspecified";   // [-]   why ResizePending was raised; a string literal
++    RenderMetrics           Metrics;             // [-]   per-pass GPU timers, device-loss markers, frame windows
++    RenderMetrics::DeviceWish MetricsWish;       // [-]   diagnostics extensions requested at vkCreateDevice
++    uint64_t                FrameSerial = 0u;    // [-]   command buffers recorded; names the frame in device-loss markers
++    uint64_t                SceneUploadSerial = 0u;   // [-]   UploadScene calls so far
++    std::chrono::steady_clock::time_point LastSceneUpload{};   // [-]   when the previous UploadScene finished
++    std::string             HardwareRefusal;     // [-]   why the hardware ray-query route is not available; empty when it is
++    const char*             ReportedPipeline = nullptr;   // [-]   last route written to the [RenderPath] line
++    [[nodiscard]] const char* DescribePipeline(const DispatchConfiguration& Dispatch, std::string& Reason) const noexcept;
+     PresentPacingCategory   Pacing;              // [-]   requested pacing (default VerticalSyncOn)
+     uint32_t                ResolvedPresentMode; // [-]   VkPresentModeKHR chosen at the last swapchain build
+     bool                    FullscreenActive;    // [-]   window currently covers the primary monitor
+diff --git a/Engine/Host/FrontierRuntime.cpp b/Engine/Host/FrontierRuntime.cpp
+index e6a9abb..a12218a 100644
+--- a/Engine/Host/FrontierRuntime.cpp
++++ b/Engine/Host/FrontierRuntime.cpp
+@@ -736,7 +736,7 @@ int Frontier::RunFrontierRuntime(
+     Startup.Mark("DecodedTexturePayload",-1,TexturePayload);
+     Startup.Mark("DecodedTextureCapacity",-1,TextureCapacity);
+     Startup.Mark("CpuGeometryPayload",-1,Level.QueryVertices().size()*sizeof(Frontier::VertexRecord)+Level.QueryIndices().size()*sizeof(uint32_t)+Level.QueryFlatTriangles().size()*sizeof(Frontier::TriangleIndex));
+-    Surface.UploadScene(Level, Traversal, &Textures);
++    Surface.UploadScene(Level, Traversal, &Textures, "startup level load");
+     FRONTIER_PROBE_PHASE_END("SceneUpload");
+         Startup.Mark("SceneUpload:end",Frontier::HostRuntime::StartupLog::Elapsed(SceneUploadStart));
+ 
+@@ -1668,7 +1668,7 @@ int Frontier::RunFrontierRuntime(
+                 // Apply previously only derived CPU records. This authoring-time, idle upload is
+                 // deliberately conservative (not a per-frame fast path); it also refreshes emitters.
+                 Level.Finalise(std::max(1u, Level.QueryMaterials().QueryMetrics().SlabLimit));
+-                Surface.UploadScene(Level, Traversal, &Textures);
++                Surface.UploadScene(Level, Traversal, &Textures, "material apply");
+                 Integrator.ResetAccumulation("material apply");   // committed constants change the shading - restart like any look change
+                 if (ControlCentre.QueryNotifications().QueryApplied().RenderFinished)
+                 {
+@@ -1855,7 +1855,7 @@ int Frontier::RunFrontierRuntime(
+                     Logger.RecordMessage(Frontier::DiagnosticSeverity::Refusal, "Project geometry", "Traversal rebuild refused");
+                     break;
+                 }
+-                Surface.UploadScene(Level, Traversal);
++                Surface.UploadScene(Level, Traversal, nullptr, "play: project geometry deformed (tyres), every step");
+             }
+             else (void)Surface.RefreshInstances(AnimatedInstances.data(), static_cast<uint32_t>(AnimatedInstances.size()));
+             if (InstancesResident)
+-- 
+2.39.5
+

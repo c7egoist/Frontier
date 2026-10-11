@@ -1,0 +1,16 @@
+================================================================================
+                 PROJECT-ZERO — RESTIR PHOTOMETRIC TEST GROUND                  
+================================================================================
+[Project-Zero] Showcase: soil plain, one hundred analytical shapes, sunset sky,
+[Project-Zero] moon, stars, clouds, and ground mist through ReSTIR DI + GI.
+[INFO] [Bootstrap] Project-Zero showcase starting.
+[Project-Zero] Viewport: 640x480 pixels.
+[Project-Zero] Sun hour 17.93, yaw 220 deg, pitch -2 deg.
+[Project-Zero] CloudShadow: ON (marched), type 2, coverage 0.35, t = 40.0 s, drift = (-241.9, -68.5).
+[Project-Zero] Showcase render completed in 4775.85 ms.
+[INFO] [TelemetryMetrics] Measurement: ViewportWidth = 640 [px]
+[INFO] [TelemetryMetrics] Measurement: ViewportHeight = 480 [px]
+[INFO] [TelemetryMetrics] Measurement: RenderDurationMs = 4775.85 [ms]
+[INFO] [TelemetryMetrics] Measurement: SpatialResamplingPasses = 2 [count]
+[Project-Zero] Exported raw PPM image to: Diagnostics/ProjectZero_Showcase.ppm
+[INFO] [Shutdown] Project-Zero showcase completed.

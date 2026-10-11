@@ -1,0 +1,9 @@
+Engine/DeviceExchange/SurfelGIStage.cpp
+Engine/DeviceExchange/SurfelGIStage.h
+Engine/DisplayPresentation/SurfelReference.cpp
+Engine/DisplayPresentation/SurfelReference.h
+Engine/Shaders/DistanceFieldConstruct.slang
+Engine/Shaders/SurfelCommit.slang
+Engine/Shaders/SurfelGIResolve.slang
+Engine/Shaders/SurfelIrradianceUpdate.slang
+Projects/Project-Drive/Source/SurfelReference.cpp

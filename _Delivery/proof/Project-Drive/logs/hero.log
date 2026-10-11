@@ -1,0 +1,17 @@
+[DriveRender] course: 2098 triangles, 1123 BVH nodes
+[DriveRender] simulation: 12 captured frames in 26447 ms
+[cover] frame 0: checkerLight=26.82% checkerDark=28.15% surround=5.15% ramp=3.22% cone=0.03% bodyPaint=4.32% glass=0.41% plastic=2.08% tyre=5.05% taillight=1.23% default=0.48%  (rays=4665600 shadow=8627234)
+[DriveRender] frame   0  t= 0.00s  18246.1 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_000.ppm)
+[DriveRender] frame   1  t= 1.00s  18112.4 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_001.ppm)
+[DriveRender] frame   2  t= 2.00s  16419.7 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_002.ppm)
+[DriveRender] frame   3  t= 3.00s  18425.9 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_003.ppm)
+[DriveRender] frame   4  t= 4.00s  16249.5 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_004.ppm)
+[DriveRender] frame   5  t= 5.00s  16134.2 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_005.ppm)
+[DriveRender] frame   6  t= 6.00s  16075.4 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_006.ppm)
+[DriveRender] frame   7  t= 7.00s  14131.0 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_007.ppm)
+[cover] frame 8: checkerLight=17.73% checkerDark=19.13% surround=21.18% ramp=2.01% cone=0.13% bodyPaint=4.31% glass=0.41% plastic=2.02% tyre=5.11% trim=0.00% taillight=1.23% default=0.48%  (rays=37324800 shadow=65923436)
+[DriveRender] frame   8  t= 8.00s  13322.6 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_008.ppm)
+[DriveRender] frame   9  t= 9.00s  13306.6 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_009.ppm)
+[DriveRender] frame  10  t=10.00s  13789.5 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_010.ppm)
+[DriveRender] frame  11  t=11.00s  13441.0 ms   27166 tris  (/tmp/w/drive/renders/hero/chase_011.ppm)
+[DriveRender] 12 frames, 187653.8 ms total (15637.8 ms/frame average), 960x540, 9 spp

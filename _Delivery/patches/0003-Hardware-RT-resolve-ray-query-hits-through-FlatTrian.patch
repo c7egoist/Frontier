@@ -1,0 +1,49 @@
+From ec614186c935d28f2269ea216aaaa416d64ce18d Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 16:17:40 +0000
+Subject: [PATCH 03/10] Hardware RT: resolve ray-query hits through
+ FlatTriangleOffset and stop gating the tier on the software instance set
+
+---
+ Engine/DeviceExchange/SwapchainExchange.cpp | 4 +++-
+ Engine/Shaders/ViewportIntegrator.slang     | 6 ++++++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/Engine/DeviceExchange/SwapchainExchange.cpp b/Engine/DeviceExchange/SwapchainExchange.cpp
+index fbd1299..f1896e3 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.cpp
++++ b/Engine/DeviceExchange/SwapchainExchange.cpp
+@@ -4388,8 +4388,10 @@ void SwapchainExchange::OnFramebuffer(GLFWwindow* Window, int, int) noexcept
+ namespace Frontier {
+ RayTracingTierCategory SwapchainExchange::QueryRayTracingTier() const noexcept
+ {
++    // 📝 The hardware route needs only its own pipeline and a resident acceleration structure. It used to also demand the software two-level
++    //    instance set (or a single instance), which Project-Drive never builds because its tyres deform, so RT cores were refused on the one
++    //    project that needs them. RayQueryViewport now resolves (instance, primitive) through FlatTriangleOffset by itself.
+     return Vulkan && Vulkan->RayQueryPipeline && Vulkan->RayQueries.Ready()
+-        && (InstanceTraversalResident || Vulkan->RayQueryInstanceCount == 1u)
+         ? RayTracingTierCategory::RayQuery : RayTracingTierCategory::Software;
+ }
+ }
+diff --git a/Engine/Shaders/ViewportIntegrator.slang b/Engine/Shaders/ViewportIntegrator.slang
+index a3a7ed4..3bf8ad6 100644
+--- a/Engine/Shaders/ViewportIntegrator.slang
++++ b/Engine/Shaders/ViewportIntegrator.slang
+@@ -391,8 +391,14 @@ bool TraceTraversalOccluded(vec3 origin, vec3 dir, vec3 rD, float tmax)
+ 
+ // D6 — the flat index a traversal result resolves to: the instance's own triangles are contiguous in Triangles[], so the
+ //    local primitive plus the instance's FirstTriangle is the world-space index the material / uv / normal lookups use.
++//    Hardware ray queries always report (instance, local primitive) because the acceleration structure holds one bottom level per
++//    instance. When the software two-level set is not resident (TlasInstanceCount == 0) Triangles[] is still laid out per instance, so
++//    the hardware hit resolves through FlatTriangleOffset instead of being mistaken for an already-flat index.
+ uint FlatPrimitiveOf(TraversalResult result)
+ {
++#ifdef FRONTIER_RAYQUERY
++    if (TlasInstanceCount == 0u) return Instances[result.instance].FlatTriangleOffset + result.primitive;
++#endif
+     return TlasInstanceCount == 0u ? result.primitive : TlasInstances[result.instance].FirstTriangle + result.primitive;
+ }
+ 
+-- 
+2.39.5
+

@@ -1,0 +1,48 @@
+From 35f2da5b5718580a02ceeb4c5964fb556edf0f58 Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 17:34:59 +0000
+Subject: [PATCH 10/10] Project-Drive CPU reference renderer: create the output
+ directory, fail loudly on write
+
+The tool rendered 72 frames into a directory that did not exist and reported
+success -- std::fopen failing was swallowed. It now creates outDir up front and
+prints errno if a PPM cannot be opened.
+---
+ Projects/Project-Drive/Source/DriveRender.cpp | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Projects/Project-Drive/Source/DriveRender.cpp b/Projects/Project-Drive/Source/DriveRender.cpp
+index 19f7e14..b3c0978 100644
+--- a/Projects/Project-Drive/Source/DriveRender.cpp
++++ b/Projects/Project-Drive/Source/DriveRender.cpp
+@@ -30,7 +30,9 @@
+ #include <cmath>
+ #include <cstdint>
+ #include <cstdio>
++#include <cerrno>
+ #include <cstring>
++#include <filesystem>
+ #include <string>
+ #include <vector>
+ 
+@@ -575,7 +577,7 @@ static void RenderFrame(const Scene& sc, const Sky& sky, const Camera& cam, cons
+ static bool WritePpm(const char* path, const std::vector<float>& img, int w, int h, float exposure)
+ {
+     FILE* f = std::fopen(path, "wb");
+-    if (!f) return false;
++    if (!f) { std::fprintf(stderr, "[DriveRender] CANNOT WRITE %s (errno %d)\n", path, errno); return false; }
+     std::fprintf(f, "P6\n%d %d\n255\n", w, h);
+     std::vector<uint8_t> row(static_cast<size_t>(w) * 3);
+     for (int y = 0; y < h; ++y)
+@@ -603,6 +605,8 @@ static bool WritePpm(const char* path, const std::vector<float>& img, int w, int
+ int main(int argc, char** argv)
+ {
+     std::string outDir = (argc > 1) ? argv[1] : "Projects/Project-Drive/Diagnostics/Render";
++    std::error_code DirError;
++    std::filesystem::create_directories(outDir, DirError);   // the tool must not silently render into a void
+     RenderOptions opt;
+     std::string mode = "chase";
+     float simTime = 12.0f;
+-- 
+2.39.5
+

@@ -1,0 +1,46 @@
+From 45372159ca77d978260c77ac381aeaf9c8b9e909 Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 17:32:28 +0000
+Subject: [PATCH 09/10] Project-Drive CPU reference renderer: --fps is a
+ capture RATE, not a step stride
+
+--fps now means captured poses per simulated second (stride = 240 / fps), so
+"--time 12 --fps 6" yields 72 frames instead of 480. Also documents that value.
+---
+ Projects/Project-Drive/Source/DriveRender.cpp | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/Projects/Project-Drive/Source/DriveRender.cpp b/Projects/Project-Drive/Source/DriveRender.cpp
+index cc2a144..19f7e14 100644
+--- a/Projects/Project-Drive/Source/DriveRender.cpp
++++ b/Projects/Project-Drive/Source/DriveRender.cpp
+@@ -606,7 +606,7 @@ int main(int argc, char** argv)
+     RenderOptions opt;
+     std::string mode = "chase";
+     float simTime = 12.0f;
+-    int   stride = 40;                 // default 6 Hz capture (12 s -> 72 frames)
++    float captureHz = 6.0f;            // captured poses per simulated second
+     bool  parked = false;              // --static: hold the car still and move only the camera
+     for (int i = 2; i < argc; ++i)
+     {
+@@ -618,7 +618,7 @@ int main(int argc, char** argv)
+         else if (a == "--sun")    opt.SunHour = next(opt.SunHour);
+         else if (a == "--mode")   mode = (i + 1 < argc) ? argv[++i] : mode;
+         else if (a == "--time")   simTime = next(simTime);
+-        else if (a == "--fps")    { stride = static_cast<int>(next(6)); if (stride < 1) stride = 1; }
++        else if (a == "--fps")    { captureHz = next(captureHz); if (captureHz < 0.05f) captureHz = 0.05f; }
+         else if (a == "--static") parked = true;
+         else std::fprintf(stderr, "[DriveRender] unknown flag %s\n", a.c_str());
+     }
+@@ -634,7 +634,7 @@ int main(int argc, char** argv)
+     const float dt = 1.0f / 240.0f;
+     const float T = simTime;
+     const int steps = static_cast<int>(T / dt);
+-    stride = std::max(1, stride);
++    const int stride = std::max(1, static_cast<int>(std::lround((1.0f / dt) / captureHz)));
+ 
+     VehicleGeometry g;
+     VehicleSolverConfiguration cfg; cfg.ActiveScheme = DrivingScheme::PacejkaDrivetrain;
+-- 
+2.39.5
+

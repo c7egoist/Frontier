@@ -1,0 +1,1801 @@
+From 58ce831a0c4a218dab9ab4c65e0bf5319d7a768e Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 16:15:34 +0000
+Subject: [PATCH 02/10] SDF: bake a local distance atlas once at startup;
+ instances only move their placement
+
+Replaces the camera-snapped three-clipmap rebuild with DistanceAtlasSpace (one volume per
+distinct mesh, baked once, trilinear local sampling through each instance's world-to-local
+map). UploadScene keeps the atlas when the topology is unchanged; moved instances are masked
+out of exact queries and only cast soft SDF shadows. DistanceFieldConstruct.slang removed.
+Adds a CPU visual proof under VisualProof/DistanceAtlas.
+---
+ CMakeLists.txt                                |   2 +-
+ .../DeviceExchange/DistanceFieldGIStage.cpp   | 136 +++--
+ Engine/DeviceExchange/DistanceFieldGIStage.h  |  30 +-
+ Engine/DeviceExchange/SwapchainExchange.cpp   |  47 +-
+ Engine/GeometricRaster/DistanceAtlasSpace.cpp | 520 ++++++++++++++++++
+ Engine/GeometricRaster/DistanceAtlasSpace.h   | 101 ++++
+ .../DistanceFieldStructure.cpp                |  28 +-
+ .../GeometricRaster/DistanceFieldStructure.h  |  11 +-
+ Engine/Shaders/DistanceFieldConstruct.slang   |  38 --
+ Engine/Shaders/DistanceFieldTransport.slang   | 150 ++---
+ Tools/Build/PackageWindowsProjects.py         |   4 +-
+ Tools/Build/ToolchainSequence.ps1             |   2 +-
+ .../DistanceAtlas/DistanceAtlasChecks.cpp     | 271 +++++++++
+ 13 files changed, 1133 insertions(+), 207 deletions(-)
+ create mode 100644 Engine/GeometricRaster/DistanceAtlasSpace.cpp
+ create mode 100644 Engine/GeometricRaster/DistanceAtlasSpace.h
+ delete mode 100644 Engine/Shaders/DistanceFieldConstruct.slang
+ create mode 100644 VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ac28e9a..db1b0f8 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -119,7 +119,6 @@ set(SHADER_TABLE
+     "ReSTIRViewport.slang|compute|ReSTIRViewport.spv"
+     "RasterViewport.slang|compute|RasterViewport.spv"
+     "RayQueryViewport.slang|compute|RayQueryViewport.spv"
+-    "DistanceFieldConstruct.slang|compute|DistanceFieldConstruct.spv"
+     "DistanceFieldCapture.slang|compute|DistanceFieldCapture.spv"
+     "DistanceFieldCaptureFixed.slang|compute|DistanceFieldCaptureFixed.spv"
+     "DistanceFieldRadiance.slang|compute|DistanceFieldRadiance.spv"
+@@ -321,6 +320,7 @@ set(FRONTIER_HOST_SOURCES
+     Engine/Host/EditorFeedSequence.cpp
+     Engine/DeviceExchange/SwapchainExchange.cpp
+     Engine/DeviceExchange/RayQueryExchange.cpp
++    Engine/GeometricRaster/DistanceAtlasSpace.cpp
+     Engine/GeometricRaster/DistanceFieldStructure.cpp
+     Engine/DeviceExchange/DistanceFieldGIStage.cpp
+     Engine/DeviceExchange/RayTracingCapabilitySet.cpp
+diff --git a/Engine/DeviceExchange/DistanceFieldGIStage.cpp b/Engine/DeviceExchange/DistanceFieldGIStage.cpp
+index a29a84b..199a2a8 100644
+--- a/Engine/DeviceExchange/DistanceFieldGIStage.cpp
++++ b/Engine/DeviceExchange/DistanceFieldGIStage.cpp
+@@ -1,14 +1,16 @@
+ //============================================================================================================================================
+ //                                                       DISTANCEFIELDGISTAGE.CPP
+ //============================================================================================================================================
+-// 📦 Records geometry upload, distance construction, radiance propagation and resolve with explicit resource dependencies.
++// 📦 Records the one-time atlas upload, placement refresh, radiance propagation and resolve with explicit resource dependencies.
+ 
+ #include "DistanceFieldGIStage.h"
+ #include <algorithm>
+ #include <array>
+ #include <cmath>
++#include <chrono>
+ #include <cstring>
+ #include <fstream>
++#include <iostream>
+ 
+ namespace Frontier
+ {
+@@ -20,19 +22,20 @@ bool DistanceFieldGIStage::Bring(const DistanceFieldStageInit& Input) noexcept
+         Input.Geometry->QueryBranches().empty() || !Input.OutputImageView || !Input.SurfaceImageView || !Input.NormalImageView ||
+         !Input.TriangleBuffer || !Input.MaterialBuffer || !Input.InstanceBuffer || !Input.SlabBuffer || !Input.VertexBuffer ||
+         !Input.IndexBuffer || !Input.TableSampler || !Input.EnergyLutView || !Input.SheenLutView ||
+-        !Input.ImageWidth || !Input.ImageHeight || Input.CardResolution < 2u ||
+-        Input.CardResolution > 32u || Input.VolumeResolution < 8u || Input.VolumeResolution > 64u || !std::isfinite(Input.ClipmapCellSize) ||
+-        Input.ClipmapCellSize <= 0.0f ||
++        !Input.ImageWidth || !Input.ImageHeight || Input.CardResolution < 2u || Input.CardResolution > 32u ||
+         (Input.TextureCapacity &&
+          (!Input.TextureCount || !Input.TextureViews || !Input.TextureSampler || Input.TextureCount > Input.TextureCapacity)))
+     {
+-        Refusal = "SDF initialization is missing scene resources or has invalid clipmap dimensions";
++        Refusal = "SDF initialization is missing scene resources or has invalid card dimensions";
+         return false;
+     }
+     Initialization = Input;
+     try
+     {
+-        VoxelCount             = 3u * Input.VolumeResolution * Input.VolumeResolution * Input.VolumeResolution;
++        const auto& Atlas      = Input.Geometry->QueryAtlas();
++        VoxelCount             = static_cast<uint32_t>(Atlas.QueryAtlas().size());
++        ResidentFacets         = static_cast<uint32_t>(Input.Geometry->QueryFacets().size());
++        ResidentPlacements     = static_cast<uint32_t>(Atlas.QueryPlacements().size());
+         const uint32_t Cards   = static_cast<uint32_t>(Input.Geometry->QueryFacets().size());
+         const uint32_t Columns = static_cast<uint32_t>(std::ceil(std::sqrt(double(Cards))));
+         CardWidth              = Columns * Input.CardResolution;
+@@ -49,7 +52,10 @@ bool DistanceFieldGIStage::Bring(const DistanceFieldStageInit& Input) noexcept
+             Destroy();
+             return false;
+         }
+-        if (!Allocate(0u, VkDeviceSize(VoxelCount) * 64u) || !Allocate(3u, 64u) ||
++        // 📝 Slot 0 holds the baked atlas (uploaded once); slot 3 holds the counts and one placement row per instance. A scene with no
++        //    atlas still gets 16-byte stubs so every descriptor is valid and SampleSceneDistance simply reports "far".
++        if (!Allocate(0u, std::max<VkDeviceSize>(16u, VkDeviceSize(VoxelCount) * sizeof(float))) ||
++            !Allocate(3u, 16u + std::max<VkDeviceSize>(1u, ResidentPlacements) * sizeof(DistanceAtlasPlacement)) ||
+             !Allocate(4u, Input.Geometry->QueryBranches().size() * sizeof(DistanceFieldBranch)) ||
+             !Allocate(5u, Input.Geometry->QueryFacets().size() * sizeof(DistanceFieldFacet)) || !ConstructCardImages() ||
+             !ConstructPipelines() || !WriteDescriptors())
+@@ -170,11 +176,11 @@ bool DistanceFieldGIStage::ConstructPipelines()
+     PipelineInformation.pPushConstantRanges    = &Push;
+     if (vkCreatePipelineLayout(Initialization.Device, &PipelineInformation, nullptr, &PipelineLayout) != VK_SUCCESS) return false;
+     const char* Names[] = {
+-        "DistanceFieldConstruct.spv", Initialization.TextureCapacity ? "DistanceFieldCapture.spv" : "DistanceFieldCaptureFixed.spv",
++        Initialization.TextureCapacity ? "DistanceFieldCapture.spv" : "DistanceFieldCaptureFixed.spv",
+         "DistanceFieldRadiance.spv",
+         Initialization.TextureCapacity ? "DistanceFieldGather.spv" : "DistanceFieldGatherFixed.spv",
+         Initialization.TextureCapacity ? "DistanceFieldGIResolve.spv" : "DistanceFieldGIResolveFixed.spv"};
+-    for (uint32_t Index = 0u; Index < 5u; ++Index)
++    for (uint32_t Index = 0u; Index < 4u; ++Index)
+     {
+         std::ifstream Stream(Initialization.SpirvDirectory + "/" + Names[Index], std::ios::binary | std::ios::ate);
+         if (!Stream) return false;
+@@ -194,8 +200,12 @@ bool DistanceFieldGIStage::ConstructPipelines()
+         Pipeline.stage.module = Module;
+         Pipeline.stage.pName  = "main";
+         Pipeline.layout       = PipelineLayout;
+-        const auto Result     = vkCreateComputePipelines(Initialization.Device, VK_NULL_HANDLE, 1u, &Pipeline, nullptr, &Pipelines[Index]);
++        const auto Started    = std::chrono::steady_clock::now();
++        std::cerr << "[PipelineCompile] SdfGI " << Index + 1u << "/4 " << Names[Index] << " " << Length << " bytes: begin\n";
++        const auto Result     = vkCreateComputePipelines(Initialization.Device, Initialization.PipelineCache, 1u, &Pipeline, nullptr, &Pipelines[Index]);
+         vkDestroyShaderModule(Initialization.Device, Module, nullptr);
++        std::cerr << "[PipelineCompile] SdfGI " << Index + 1u << "/4 " << Names[Index] << " result=" << static_cast<int>(Result) << " ms="
++                  << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - Started).count() << "\n";
+         if (Result != VK_SUCCESS) return false;
+     }
+     return true;
+@@ -299,7 +309,46 @@ bool DistanceFieldGIStage::IsReady() const noexcept
+     return Ready && Initialization.Geometry && !Initialization.Geometry->QueryFacets().empty() &&
+            !Initialization.Geometry->QueryBranches().empty() &&
+            Initialization.Geometry->QueryFacets().size() * sizeof(DistanceFieldFacet) <= Sizes[5] &&
+-           Initialization.Geometry->QueryBranches().size() * sizeof(DistanceFieldBranch) <= Sizes[4];
++           Initialization.Geometry->QueryBranches().size() * sizeof(DistanceFieldBranch) <= Sizes[4] &&
++           16u + Initialization.Geometry->QueryAtlas().QueryPlacements().size() * sizeof(DistanceAtlasPlacement) <= Sizes[3];
++}
++
++bool DistanceFieldGIStage::CanRebind(const DistanceFieldStageInit& Input) const noexcept
++{
++    return Initialization.Device && Pipelines[0] && Pipelines[3] && Input.Device == Initialization.Device && Input.Geometry &&
++           Input.ImageWidth == Initialization.ImageWidth && Input.ImageHeight == Initialization.ImageHeight &&
++           Input.TextureCapacity == Initialization.TextureCapacity && Input.TextureUpdateAfterBind == Initialization.TextureUpdateAfterBind &&
++           Input.CardResolution == Initialization.CardResolution &&
++           Input.Geometry->QueryFacets().size() == ResidentFacets &&
++           Input.Geometry->QueryAtlas().QueryPlacements().size() == ResidentPlacements &&
++           Input.Geometry->QueryAtlas().QueryAtlas().size() == VoxelCount;
++}
++
++bool DistanceFieldGIStage::Rebind(const DistanceFieldStageInit& Input) noexcept
++{
++    if (!CanRebind(Input)) return false;
++    Ready = false;
++    Refusal.clear();
++    Initialization = Input;
++    if (Pool) vkDestroyDescriptorPool(Initialization.Device, Pool, nullptr);
++    Pool = VK_NULL_HANDLE;
++    std::fill(std::begin(Sets), std::end(Sets), VK_NULL_HANDLE);
++    if (!WriteDescriptors())
++    {
++        Refusal = "SDF descriptor rewrite failed";
++        Destroy();
++        return false;
++    }
++    // 📝 Material and texture handles may have changed under an identical topology, so the cards are captured once more; the atlas and the
++    //    facets stay resident. A changed geometry revision re-sends the facets and atlas by itself.
++    ResidentMaterials = UINT64_MAX;
++    Ready = true;
++    return true;
++}
++
++void DistanceFieldGIStage::Suspend() noexcept
++{
++    Ready = false;
+ }
+ 
+ bool DistanceFieldGIStage::RecordFrame(VkCommandBuffer Command, const DistanceFieldFrameParams& Frame) noexcept
+@@ -308,26 +357,14 @@ bool DistanceFieldGIStage::RecordFrame(VkCommandBuffer Command, const DistanceFi
+         Frame.RenderWidth > Initialization.ImageWidth || Frame.RenderHeight > Initialization.ImageHeight) return false;
+     for (float Value : Frame.CameraEye)
+         if (!std::isfinite(Value)) return false;
+-    struct GeometryConstants
+-    {
+-        float    Origins[12];
+-        uint32_t Counts[4];
+-    } Constants{};
+-    const uint32_t Resolution = Initialization.VolumeResolution;
+-    for (uint32_t Level = 0u; Level < 3u; ++Level)
+-    {
+-        const float Cell = Initialization.ClipmapCellSize * float(1u << Level);
+-        for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
+-            Constants.Origins[4u * Level + Axis] = (std::floor(Frame.CameraEye[Axis] / Cell) - float(Resolution / 2u)) * Cell;
+-        Constants.Origins[4u * Level + 3u] = Cell;
+-    }
+-    const auto& Geometry        = *Initialization.Geometry;
+-    const bool  GeometryChanged = ResidentRevision != Geometry.QueryRevision();
+-    const bool  Reconstruct     = GeometryChanged || std::memcmp(Origins, Constants.Origins, sizeof(Origins)) != 0;
+-    Constants.Counts[0]         = Resolution;
+-    Constants.Counts[1]         = static_cast<uint32_t>(Geometry.QueryBranches().size());
+-    Constants.Counts[2]         = static_cast<uint32_t>(Geometry.QueryFacets().size());
+-    Constants.Counts[3]         = Initialization.CardResolution;
++    const auto& Geometry          = *Initialization.Geometry;
++    const auto& Atlas             = Geometry.QueryAtlas();
++    const bool  GeometryChanged   = ResidentRevision != Geometry.QueryRevision();
++    // 📝 The placement table is the only per-instance state that moves at runtime. It is a few kilobytes and is sent only when an
++    //    instance transform actually changed; no volume is rebuilt and nothing is re-uploaded for a steady frame.
++    const bool  PlacementChanged  = GeometryChanged || ResidentPlacement != Atlas.QueryPlacementRevision();
++    uint32_t    Counts[4]         = { static_cast<uint32_t>(Atlas.QueryPlacements().size()), static_cast<uint32_t>(Geometry.QueryBranches().size()),
++                                      static_cast<uint32_t>(Geometry.QueryFacets().size()), Initialization.CardResolution };
+     const bool        Capture   = GeometryChanged || ResidentMaterials != Frame.MaterialRevision;
+     DistanceFieldPush Push{};
+     std::memcpy(Push.Sun, Frame.SunDirection, 12u);
+@@ -358,18 +395,24 @@ bool DistanceFieldGIStage::RecordFrame(VkCommandBuffer Command, const DistanceFi
+     // 📝 All stages run on the host's existing compute queue. Include previous reads before overwriting shared volumes.
+     Barrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+             VK_ACCESS_TRANSFER_WRITE_BIT);
+-    auto Upload = [&](VkBuffer Buffer, const void* Data, VkDeviceSize Bytes)
++    auto Upload = [&](VkBuffer Buffer, const void* Data, VkDeviceSize Bytes, VkDeviceSize Base = 0u)
+     {
+         for (VkDeviceSize Offset = 0u; Offset < Bytes; Offset += 65536u)
+-            vkCmdUpdateBuffer(Command, Buffer, Offset, std::min<VkDeviceSize>(65536u, Bytes - Offset),
++            vkCmdUpdateBuffer(Command, Buffer, Base + Offset, std::min<VkDeviceSize>(65536u, Bytes - Offset),
+                               static_cast<const char*>(Data) + Offset);
+     };
+     if (GeometryChanged)
+     {
+         Upload(Buffers[4], Geometry.QueryBranches().data(), Geometry.QueryBranches().size() * sizeof(DistanceFieldBranch));
+         Upload(Buffers[5], Geometry.QueryFacets().data(), Geometry.QueryFacets().size() * sizeof(DistanceFieldFacet));
++        if (!Atlas.QueryAtlas().empty()) Upload(Buffers[0], Atlas.QueryAtlas().data(), Atlas.QueryAtlas().size() * sizeof(float));
++    }
++    if (PlacementChanged)
++    {
++        Upload(Buffers[3], Counts, sizeof(Counts));
++        if (!Atlas.QueryPlacements().empty())
++            Upload(Buffers[3], Atlas.QueryPlacements().data(), Atlas.QueryPlacements().size() * sizeof(DistanceAtlasPlacement), sizeof(Counts));
+     }
+-    Upload(Buffers[3], &Constants, sizeof(Constants));
+     if (!CardImagesInitialized)
+     {
+         for (auto Image : CardImages)
+@@ -397,41 +440,38 @@ bool DistanceFieldGIStage::RecordFrame(VkCommandBuffer Command, const DistanceFi
+             VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+     vkCmdBindDescriptorSets(Command, VK_PIPELINE_BIND_POINT_COMPUTE, PipelineLayout, 0u, 1u, &Sets[FrameNumber & 1u], 0u, nullptr);
+     vkCmdPushConstants(Command, PipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0u, sizeof(Push), &Push);
+-    if (Reconstruct)
+-    {
+-        vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[0]);
+-        vkCmdDispatch(Command, (VoxelCount + 63u) / 64u, 1u, 1u);
+-        Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+-                VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+-    }
+     if (Capture)
+     {
+-        vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[1]);
++        vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[0]);
+         vkCmdDispatch(Command, (CardWidth + 7u) / 8u, (CardHeight + 7u) / 8u, 1u);
+         Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                 VK_ACCESS_SHADER_READ_BIT);
+     }
+-    vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[2]);
++    vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[1]);
+     vkCmdDispatch(Command, (CardWidth + 7u) / 8u, (CardHeight + 7u) / 8u, 1u);
+     Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+             VK_ACCESS_SHADER_READ_BIT);
+     if (Frame.FeatureFlags & 1u)
+     {
+-        vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[3]);
++        vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[2]);
+         vkCmdDispatch(Command, (Frame.RenderWidth + 15u) / 16u, (Frame.RenderHeight + 15u) / 16u, 1u);
+         Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                 VK_ACCESS_SHADER_READ_BIT);
+     }
+-    vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[4]);
++    vkCmdBindPipeline(Command, VK_PIPELINE_BIND_POINT_COMPUTE, Pipelines[3]);
+     vkCmdDispatch(Command, (Frame.RenderWidth + 15u) / 16u, (Frame.RenderHeight + 15u) / 16u, 1u);
+     Barrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+             VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT);
+     CardImagesInitialized = true;
+     ResidentMaterials     = Frame.MaterialRevision;
+     ResidentRevision      = Geometry.QueryRevision();
+-    std::memcpy(Origins, Constants.Origins, sizeof(Origins));
++    ResidentPlacement     = Atlas.QueryPlacementRevision();
+     std::memcpy(PreviousLighting, Push.Sun, sizeof(PreviousLighting));
++    LastRecord.UploadedGeometry   = GeometryChanged;
++    LastRecord.UploadedPlacements = PlacementChanged;
++    LastRecord.CapturedCards      = Capture;
+     ++FrameNumber;
++    LastRecord.FrameNumber        = FrameNumber;
+     return true;
+ }
+ 
+@@ -473,8 +513,10 @@ void DistanceFieldGIStage::Destroy() noexcept
+     ResidentMaterials      = UINT64_MAX;
+     VoxelCount = FrameNumber = 0u;
+     ResidentRevision         = 0u;
++    ResidentPlacement        = UINT64_MAX;
++    ResidentFacets = ResidentPlacements = 0u;
++    LastRecord               = {};
+     Initialization           = {};
+-    std::fill(std::begin(Origins), std::end(Origins), 0.0f);
+     std::fill(std::begin(PreviousLighting), std::end(PreviousLighting), 0.0f);
+ }
+ } // namespace Frontier
+diff --git a/Engine/DeviceExchange/DistanceFieldGIStage.h b/Engine/DeviceExchange/DistanceFieldGIStage.h
+index a484097..6a5de66 100644
+--- a/Engine/DeviceExchange/DistanceFieldGIStage.h
++++ b/Engine/DeviceExchange/DistanceFieldGIStage.h
+@@ -1,7 +1,7 @@
+ //============================================================================================================================================
+ //                                                        DISTANCEFIELDGISTAGE.H
+ //============================================================================================================================================
+-// 📦 Owns scene-derived GPU distance clipmaps, Jacobi radiance caches and raster-fed material resolve.
++// 📦 Owns the once-uploaded local distance atlas and instance placements, Jacobi radiance caches and raster-fed material resolve.
+ 
+ #pragma once
+ #include <vulkan/vulkan.h>
+@@ -15,6 +15,7 @@ struct DistanceFieldStageInit
+ {
+     VkPhysicalDevice                 PhysicalDevice = VK_NULL_HANDLE;
+     VkDevice                         Device         = VK_NULL_HANDLE;
++    VkPipelineCache                  PipelineCache  = VK_NULL_HANDLE;   // [-] shared cache; null compiles every pipeline from scratch
+     VkPhysicalDeviceMemoryProperties MemoryProperties{};
+     VkBuffer                         CwbvhNodeBuffer        = VK_NULL_HANDLE;
+     VkBuffer                         CwbvhLeafBuffer        = VK_NULL_HANDLE;
+@@ -38,8 +39,6 @@ struct DistanceFieldStageInit
+     uint32_t                         ImageWidth             = 0u;
+     uint32_t                         ImageHeight            = 0u;
+     uint32_t                         CardResolution         = 4u;
+-    uint32_t                         VolumeResolution       = 32u;
+-    float                            ClipmapCellSize        = 0.15f;
+     const DistanceFieldStructure*    Geometry               = nullptr;
+     std::string                      SpirvDirectory         = "Engine/Shaders";
+ };
+@@ -84,6 +83,13 @@ class DistanceFieldGIStage
+     DistanceFieldGIStage(DistanceFieldGIStage&&)                 = delete;
+     DistanceFieldGIStage& operator=(DistanceFieldGIStage&&)      = delete;
+     bool                  Bring(const DistanceFieldStageInit& Initialization) noexcept;
++    /// 📦 Re-points the borrowed scene buffers and images without touching pipelines, the resident atlas or the card images. Only valid for
++    ///    the same scene topology and image size the stage was brought up with.
++    /// err   returns false when the topology or image size changed; the caller then falls back to Bring
++    bool                  Rebind(const DistanceFieldStageInit& Initialization) noexcept;
++    bool                  CanRebind(const DistanceFieldStageInit& Initialization) const noexcept;
++    /// 📦 Stops recording (borrowed handles are about to die) but keeps pipelines, atlas and cards for Rebind.
++    void                  Suspend() noexcept;
+     void                  Destroy() noexcept;
+     bool                  IsReady() const noexcept;
+     bool                  RecordFrame(VkCommandBuffer Command, const DistanceFieldFrameParams& Frame) noexcept;
+@@ -91,6 +97,18 @@ class DistanceFieldGIStage
+     {
+         return Refusal;
+     }
++    /// 📦 What the last RecordFrame had to upload or recompute; all false means a steady-state frame with no scene work.
++    struct RecordReport
++    {
++        bool     UploadedGeometry   = false;   // [-] facets, BVH branches and the atlas were sent to the device
++        bool     UploadedPlacements = false;   // [-] the instance placement table was sent to the device
++        bool     CapturedCards      = false;   // [-] surface cards were re-captured
++        uint32_t FrameNumber        = 0u;      // [-] frames recorded since bring-up
++    };
++    const RecordReport& QueryLastRecord() const
++    {
++        return LastRecord;
++    }
+     // 📝 Borrowed readback handles for execution verification; owned and retired by this stage.
+     VkBuffer QueryDistanceBuffer() const
+     {
+@@ -138,7 +156,7 @@ class DistanceFieldGIStage
+     VkDescriptorSetLayout  DescriptorLayout = VK_NULL_HANDLE;
+     VkPipelineLayout       PipelineLayout   = VK_NULL_HANDLE;
+     VkDescriptorSet        Sets[2]{};
+-    VkPipeline             Pipelines[5]{};
++    VkPipeline             Pipelines[4]{};
+     VkImage                CardImages[7]{};
+     VkImageView            CardViews[7]{};
+     VkDeviceMemory         CardStorage[7]{};
+@@ -147,7 +165,9 @@ class DistanceFieldGIStage
+     uint64_t               ResidentMaterials     = UINT64_MAX;
+     uint32_t               VoxelCount = 0u, FrameNumber = 0u;
+     uint64_t               ResidentRevision = 0u;
+-    float                  Origins[12]{};
++    uint64_t               ResidentPlacement = UINT64_MAX;
++    uint32_t               ResidentFacets = 0u, ResidentPlacements = 0u;
++    RecordReport           LastRecord;
+     float                  PreviousLighting[12]{};
+     bool                   Ready = false;
+     std::string            Refusal;
+diff --git a/Engine/DeviceExchange/SwapchainExchange.cpp b/Engine/DeviceExchange/SwapchainExchange.cpp
+index e30b776..fbd1299 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.cpp
++++ b/Engine/DeviceExchange/SwapchainExchange.cpp
+@@ -54,6 +54,7 @@
+ 
+ #include "DriverProgress.h"
+ #include "PipelineCacheFile.h"
++#include <chrono>
+ #include <cstdlib>
+ 
+ namespace Frontier {
+@@ -2480,7 +2481,7 @@ void SwapchainExchange::UploadMaterials(const MaterialIndex& Materials) noexcept
+     if (!Vulkan->Device) return;
+ 
+     if (Vulkan->MaterialBuffer || Vulkan->SlabBuffer) vkDeviceWaitIdle(Vulkan->Device);
+-    DistanceFieldStage.Destroy();
++    DistanceFieldStage.Suspend();   // [-] borrowed handles die below; BringDistanceFieldGIStage rebinds without recompiling
+     if (Vulkan->MaterialBuffer) vkDestroyBuffer(Vulkan->Device, Vulkan->MaterialBuffer, nullptr);
+     if (Vulkan->MaterialMemory) vkFreeMemory   (Vulkan->Device, Vulkan->MaterialMemory, nullptr);
+     if (Vulkan->SlabBuffer)     vkDestroyBuffer(Vulkan->Device, Vulkan->SlabBuffer, nullptr);
+@@ -2533,7 +2534,7 @@ void SwapchainExchange::UploadTextures(const TextureIndex& Textures) noexcept
+ {
+     if (!Vulkan->Device || !Vulkan->DescriptorIndexing) return;
+     vkDeviceWaitIdle(Vulkan->Device);
+-    DistanceFieldStage.Destroy();
++    DistanceFieldStage.Suspend();   // [-] texture views die below; BringDistanceFieldGIStage rebinds without recompiling
+     ++SurfaceMaterialRevision;
+     DestroyTextures();
+ 
+@@ -3104,7 +3105,18 @@ void SwapchainExchange::UploadScene(const SceneStructure& Scene, const Traversal
+     }
+     try
+     {
+-        if (!DistanceGeometry.Construct(Scene)) std::cerr << "[SdfGI] Scene contains no valid distance geometry.\n";
++        // 📝 The distance atlas is baked once. Any later upload with the same topology (the Play loop re-uploads every step) only
++        //    re-projects the instance placements; baking again would be exactly the per-frame rebuild the engine must never do.
++        if (DistanceGeometry.Matches(Scene))
++        {
++            std::cerr << "[SdfGI] UploadScene: topology unchanged, atlas kept (bakes so far: " << DistanceGeometry.QueryAtlas().QueryBakeCount() << ")\n";
++            (void)DistanceGeometry.RefreshInstances(Scene.QueryInstances().data(), static_cast<uint32_t>(Scene.QueryInstances().size()));
++        }
++        else
++        {
++            std::cerr << "[SdfGI] UploadScene: topology changed or first upload, baking the atlas\n";
++            if (!DistanceGeometry.Construct(Scene)) std::cerr << "[SdfGI] Scene contains no valid distance geometry.\n";
++        }
+     }
+     catch (...)
+     {
+@@ -3187,9 +3199,13 @@ void SwapchainExchange::RefreshMaterialDescriptors() noexcept
+ 
+ bool SwapchainExchange::BringDistanceFieldGIStage() noexcept
+ {
+-    DistanceFieldStage.Destroy();
+-    if (!Visibility.IsReady() || DistanceGeometry.QueryFacets().empty()) return true;
++    if (!Visibility.IsReady() || DistanceGeometry.QueryFacets().empty())
++    {
++        DistanceFieldStage.Destroy();
++        return true;
++    }
+     DistanceFieldStageInit Init{};
++    Init.PipelineCache = Vulkan->PipelineCache;
+     Init.ImageWidth = Configuration.Width;
+     Init.ImageHeight = Configuration.Height;
+     VkPhysicalDeviceVulkan12Features Features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+@@ -3224,8 +3240,25 @@ bool SwapchainExchange::BringDistanceFieldGIStage() noexcept
+     Init.TextureCapacity  = Vulkan->DescriptorIndexing ? Init.TextureCount : 0u;
+     if (!Init.TriangleBuffer || !Init.MaterialBuffer || !Init.InstanceBuffer
+      || !Init.SlabBuffer     || !Init.VertexBuffer   || !Init.IndexBuffer
+-     || !Init.EnergyLutView  || !Init.SheenLutView) return true;
+-    return DistanceFieldStage.Bring(Init);
++     || !Init.EnergyLutView  || !Init.SheenLutView)
++    {
++        DistanceFieldStage.Suspend();
++        return true;
++    }
++    // 📝 Same topology and image size: only the borrowed handles changed, so the pipelines, the resident atlas and the cards survive.
++    if (DistanceFieldStage.CanRebind(Init))
++    {
++        const bool Rebound = DistanceFieldStage.Rebind(Init);
++        std::cerr << "[SdfGI] Stage rebind: " << (Rebound ? "kept pipelines, atlas and cards" : "refused") << "\n";
++        if (Rebound) return true;
++    }
++    DistanceFieldStage.Destroy();
++    const auto Started = std::chrono::steady_clock::now();
++    const bool Brought = DistanceFieldStage.Bring(Init);
++    std::cerr << "[SdfGI] Stage bring-up " << (Brought ? "ok" : "failed") << " in "
++              << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - Started).count() << " ms; atlas voxels="
++              << DistanceFieldStage.QueryVoxelCount() << " placements=" << DistanceGeometry.QueryAtlas().QueryPlacements().size() << "\n";
++    return Brought;
+ }
+ 
+ //============================================================================================================================================
+diff --git a/Engine/GeometricRaster/DistanceAtlasSpace.cpp b/Engine/GeometricRaster/DistanceAtlasSpace.cpp
+new file mode 100644
+index 0000000..e9879b4
+--- /dev/null
++++ b/Engine/GeometricRaster/DistanceAtlasSpace.cpp
+@@ -0,0 +1,520 @@
++//============================================================================================================================================
++//                                                          DISTANCEATLASSPACE.CPP
++//============================================================================================================================================
++// 📦 Bakes per-mesh local distance volumes with a multithreaded exact closest-facet search, and re-places instances without touching them.
++
++#include "DistanceAtlasSpace.h"
++#include "SceneStructure.h"
++#include <algorithm>
++#include <atomic>
++#include <chrono>
++#include <cmath>
++#include <cstring>
++#include <limits>
++#include <thread>
++
++namespace Frontier
++{
++namespace
++{
++struct Facet
++{
++    float Alpha[3], Beta[3], Gamma[3];
++};
++
++struct Node
++{
++    float    Minimum[3], Maximum[3];
++    uint32_t Second;   // [idx] right child; the left child is always the next node
++    uint32_t First;    // [idx] first facet of a leaf
++    uint32_t Count;    // [cnt] facets in a leaf, 0 for an interior node
++};
++
++struct Hierarchy
++{
++    std::vector<Facet>    Facets;
++    std::vector<Node>     Nodes;
++    std::vector<uint32_t> Order;
++};
++
++float DistanceSquaredToFacet(const float Point[3], const Facet& Triangle) noexcept
++{
++    float EdgeAlpha[3], EdgeBeta[3], Delta[3];
++    for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++    {
++        EdgeAlpha[Axis] = Triangle.Beta[Axis] - Triangle.Alpha[Axis];
++        EdgeBeta[Axis]  = Triangle.Gamma[Axis] - Triangle.Alpha[Axis];
++        Delta[Axis]     = Point[Axis] - Triangle.Alpha[Axis];
++    }
++    const auto Dot = [](const float* Left, const float* Right) noexcept { return Left[0] * Right[0] + Left[1] * Right[1] + Left[2] * Right[2]; };
++    const auto Length = [&](const float* Vector) noexcept { return Dot(Vector, Vector); };
++    const float D1 = Dot(EdgeAlpha, Delta), D2 = Dot(EdgeBeta, Delta);
++    if (D1 <= 0.0f && D2 <= 0.0f) return Length(Delta);
++    float FromBeta[3] = { Point[0] - Triangle.Beta[0], Point[1] - Triangle.Beta[1], Point[2] - Triangle.Beta[2] };
++    const float D3 = Dot(EdgeAlpha, FromBeta), D4 = Dot(EdgeBeta, FromBeta);
++    if (D3 >= 0.0f && D4 <= D3) return Length(FromBeta);
++    const float AreaGamma = D1 * D4 - D3 * D2;
++    if (AreaGamma <= 0.0f && D1 >= 0.0f && D3 <= 0.0f)
++    {
++        const float Weight = D1 / (D1 - D3);
++        float       Offset[3];
++        for (uint32_t Axis = 0u; Axis < 3u; ++Axis) Offset[Axis] = Delta[Axis] - EdgeAlpha[Axis] * Weight;
++        return Length(Offset);
++    }
++    float FromGamma[3] = { Point[0] - Triangle.Gamma[0], Point[1] - Triangle.Gamma[1], Point[2] - Triangle.Gamma[2] };
++    const float D5 = Dot(EdgeAlpha, FromGamma), D6 = Dot(EdgeBeta, FromGamma);
++    if (D6 >= 0.0f && D5 <= D6) return Length(FromGamma);
++    const float AreaBeta = D5 * D2 - D1 * D6;
++    if (AreaBeta <= 0.0f && D2 >= 0.0f && D6 <= 0.0f)
++    {
++        const float Weight = D2 / (D2 - D6);
++        float       Offset[3];
++        for (uint32_t Axis = 0u; Axis < 3u; ++Axis) Offset[Axis] = Delta[Axis] - EdgeBeta[Axis] * Weight;
++        return Length(Offset);
++    }
++    const float AreaAlpha = D3 * D6 - D5 * D4;
++    if (AreaAlpha <= 0.0f && D4 - D3 >= 0.0f && D5 - D6 >= 0.0f)
++    {
++        const float Weight = (D4 - D3) / ((D4 - D3) + (D5 - D6));
++        float       Offset[3];
++        for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++            Offset[Axis] = FromBeta[Axis] - (Triangle.Gamma[Axis] - Triangle.Beta[Axis]) * Weight;
++        return Length(Offset);
++    }
++    const float Sum    = AreaAlpha + AreaBeta + AreaGamma;
++    const float WeightBeta = AreaBeta / Sum, WeightGamma = AreaGamma / Sum;
++    float       Offset[3];
++    for (uint32_t Axis = 0u; Axis < 3u; ++Axis) Offset[Axis] = Delta[Axis] - EdgeAlpha[Axis] * WeightBeta - EdgeBeta[Axis] * WeightGamma;
++    return Length(Offset);
++}
++
++float DistanceSquaredToBox(const float Point[3], const Node& Entry) noexcept
++{
++    float Sum = 0.0f;
++    for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++    {
++        const float Excess = std::max(std::max(Entry.Minimum[Axis] - Point[Axis], Point[Axis] - Entry.Maximum[Axis]), 0.0f);
++        Sum += Excess * Excess;
++    }
++    return Sum;
++}
++
++uint32_t Linearize(Hierarchy& Structure, uint32_t First, uint32_t Count)
++{
++    const uint32_t Slot = static_cast<uint32_t>(Structure.Nodes.size());
++    Structure.Nodes.push_back(Node{});
++    Node Entry{};
++    float CentroidMinimum[3], CentroidMaximum[3];
++    for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++    {
++        Entry.Minimum[Axis] = CentroidMinimum[Axis] = std::numeric_limits<float>::max();
++        Entry.Maximum[Axis] = CentroidMaximum[Axis] = -std::numeric_limits<float>::max();
++    }
++    for (uint32_t Index = First; Index < First + Count; ++Index)
++    {
++        const Facet& Triangle = Structure.Facets[Structure.Order[Index]];
++        for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++        {
++            const float Low  = std::min({ Triangle.Alpha[Axis], Triangle.Beta[Axis], Triangle.Gamma[Axis] });
++            const float High = std::max({ Triangle.Alpha[Axis], Triangle.Beta[Axis], Triangle.Gamma[Axis] });
++            const float Centre = (Triangle.Alpha[Axis] + Triangle.Beta[Axis] + Triangle.Gamma[Axis]) / 3.0f;
++            Entry.Minimum[Axis]    = std::min(Entry.Minimum[Axis], Low);
++            Entry.Maximum[Axis]    = std::max(Entry.Maximum[Axis], High);
++            CentroidMinimum[Axis]  = std::min(CentroidMinimum[Axis], Centre);
++            CentroidMaximum[Axis]  = std::max(CentroidMaximum[Axis], Centre);
++        }
++    }
++    if (Count <= 4u)
++    {
++        Entry.First = First;
++        Entry.Count = Count;
++        Structure.Nodes[Slot] = Entry;
++        return Slot;
++    }
++    uint32_t Widest = 0u;
++    for (uint32_t Axis = 1u; Axis < 3u; ++Axis)
++        if (CentroidMaximum[Axis] - CentroidMinimum[Axis] > CentroidMaximum[Widest] - CentroidMinimum[Widest]) Widest = Axis;
++    const uint32_t Half = Count / 2u;
++    std::nth_element(Structure.Order.begin() + First, Structure.Order.begin() + First + Half, Structure.Order.begin() + First + Count,
++                     [&](uint32_t Left, uint32_t Right)
++                     {
++                         const Facet& Alpha = Structure.Facets[Left];
++                         const Facet& Beta  = Structure.Facets[Right];
++                         return Alpha.Alpha[Widest] + Alpha.Beta[Widest] + Alpha.Gamma[Widest] <
++                                Beta.Alpha[Widest] + Beta.Beta[Widest] + Beta.Gamma[Widest];
++                     });
++    Linearize(Structure, First, Half);
++    Entry.Second = Linearize(Structure, First + Half, Count - Half);
++    Structure.Nodes[Slot] = Entry;
++    return Slot;
++}
++
++/// 📝 Branch-and-bound closest facet. `Hint` carries the previous voxel's winner: its distance is an exact upper bound, so the box test
++///    rejects almost every node and the walk is short. That coherence is what makes a million voxels cheap.
++float ClosestDistanceSquared(const Hierarchy& Structure, const float Point[3], uint32_t& Hint) noexcept
++{
++    float Best = DistanceSquaredToFacet(Point, Structure.Facets[Structure.Order[Hint]]);
++    uint32_t Stack[96];
++    uint32_t Depth = 0u;
++    Stack[Depth++] = 0u;
++    while (Depth)
++    {
++        const uint32_t Slot  = Stack[--Depth];
++        const Node&    Entry = Structure.Nodes[Slot];
++        if (DistanceSquaredToBox(Point, Entry) >= Best) continue;
++        if (Entry.Count)
++        {
++            for (uint32_t Index = 0u; Index < Entry.Count; ++Index)
++            {
++                const float Candidate = DistanceSquaredToFacet(Point, Structure.Facets[Structure.Order[Entry.First + Index]]);
++                if (Candidate < Best)
++                {
++                    Best = Candidate;
++                    Hint = Entry.First + Index;
++                }
++            }
++            continue;
++        }
++        const uint32_t LeftSlot  = Slot + 1u;
++        const uint32_t RightSlot = Entry.Second;
++        const float    LeftDistance  = DistanceSquaredToBox(Point, Structure.Nodes[LeftSlot]);
++        const float    RightDistance = DistanceSquaredToBox(Point, Structure.Nodes[RightSlot]);
++        if (LeftDistance <= RightDistance)
++        {
++            Stack[Depth++] = RightSlot;
++            Stack[Depth++] = LeftSlot;
++        }
++        else
++        {
++            Stack[Depth++] = LeftSlot;
++            Stack[Depth++] = RightSlot;
++        }
++    }
++    return Best;
++}
++
++struct Layout
++{
++    float    VoxelSize;
++    uint32_t Dimensions[3];
++    uint64_t Voxels;
++};
++
++/// 📝 Smallest voxel at or above `MinimumVoxel` whose padded grid fits `Budget`. Thin or huge meshes get a coarser voxel instead of a
++///    refusal; the exact BVH still decides every hit, so a coarse volume costs marching efficiency, never correctness.
++Layout ChooseLayout(const float Extent[3], uint32_t Budget, float MinimumVoxel, uint32_t Padding) noexcept
++{
++    const float Longest = std::max({ Extent[0], Extent[1], Extent[2], 1.0e-3f });
++    float       Voxel   = std::max(MinimumVoxel, Longest / 256.0f);
++    Layout      Result{};
++    for (uint32_t Attempt = 0u; Attempt < 96u; ++Attempt)
++    {
++        Result.Voxels = 1u;
++        for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++        {
++            Result.Dimensions[Axis] = std::max(4u, static_cast<uint32_t>(std::ceil(Extent[Axis] / Voxel)) + 2u * Padding);
++            Result.Voxels *= Result.Dimensions[Axis];
++        }
++        Result.VoxelSize = Voxel;
++        if (Result.Voxels <= Budget) break;
++        Voxel *= 1.08f;
++    }
++    return Result;
++}
++
++double SmallestSingularValue(const float Matrix[3][3]) noexcept
++{
++    double Gram[3][3];
++    for (uint32_t Row = 0u; Row < 3u; ++Row)
++        for (uint32_t Column = 0u; Column < 3u; ++Column)
++        {
++            Gram[Row][Column] = 0.0;
++            for (uint32_t Inner = 0u; Inner < 3u; ++Inner) Gram[Row][Column] += double(Matrix[Inner][Row]) * double(Matrix[Inner][Column]);
++        }
++    const double OffDiagonal = Gram[0][1] * Gram[0][1] + Gram[0][2] * Gram[0][2] + Gram[1][2] * Gram[1][2];
++    double       Smallest;
++    if (OffDiagonal < 1.0e-24)
++        Smallest = std::min({ Gram[0][0], Gram[1][1], Gram[2][2] });
++    else
++    {
++        const double Mean     = (Gram[0][0] + Gram[1][1] + Gram[2][2]) / 3.0;
++        const double Spread   = std::sqrt(((Gram[0][0] - Mean) * (Gram[0][0] - Mean) + (Gram[1][1] - Mean) * (Gram[1][1] - Mean) +
++                                           (Gram[2][2] - Mean) * (Gram[2][2] - Mean) + 2.0 * OffDiagonal) / 6.0);
++        double       Shifted[3][3];
++        for (uint32_t Row = 0u; Row < 3u; ++Row)
++            for (uint32_t Column = 0u; Column < 3u; ++Column) Shifted[Row][Column] = (Gram[Row][Column] - (Row == Column ? Mean : 0.0)) / Spread;
++        const double Determinant = Shifted[0][0] * (Shifted[1][1] * Shifted[2][2] - Shifted[1][2] * Shifted[2][1]) -
++                                   Shifted[0][1] * (Shifted[1][0] * Shifted[2][2] - Shifted[1][2] * Shifted[2][0]) +
++                                   Shifted[0][2] * (Shifted[1][0] * Shifted[2][1] - Shifted[1][1] * Shifted[2][0]);
++        const double Angle = std::acos(std::clamp(Determinant * 0.5, -1.0, 1.0)) / 3.0;
++        Smallest = Mean + Spread * 2.0 * std::cos(Angle + 2.0943951023931953);   // the smallest of the three roots
++    }
++    return std::sqrt(std::max(Smallest, 0.0));
++}
++} // namespace
++
++uint32_t DistanceAtlasSpace::QueryMovedCount() const noexcept
++{
++    uint32_t Count = 0u;
++    for (const auto& Entry : Placements) Count += (Entry.Flags & DistanceAtlasMoved) ? 1u : 0u;
++    return Count;
++}
++
++bool DistanceAtlasSpace::Bake(const std::vector<VertexRecord>& Vertices, const std::vector<uint32_t>& Corners,
++                              const std::vector<InstanceRecord>& Rows, const DistanceAtlasSettings& Settings) noexcept
++{
++    try
++    {
++        const auto Started = std::chrono::steady_clock::now();
++        Atlas.clear(); Volumes.clear(); InstanceVolume.assign(Rows.size(), UINT32_MAX); BakedWorld.assign(Rows.size(), {}); Placements.clear();
++        Report = {};
++        struct Prototype { uint32_t FirstIndex, VertexOffset, TriangleCount, Representative; Hierarchy Structure; float Minimum[3], Maximum[3]; };
++        std::vector<Prototype> Prototypes;
++        for (uint32_t Slot = 0u; Slot < Rows.size(); ++Slot)
++        {
++            const InstanceRecord& Row = Rows[Slot];
++            std::copy(std::begin(Row.World), std::end(Row.World), BakedWorld[Slot].begin());
++            if (!Row.TriangleCount) continue;
++            uint32_t Match = UINT32_MAX;
++            for (uint32_t Index = 0u; Index < Prototypes.size(); ++Index)
++                if (Prototypes[Index].FirstIndex == Row.FirstIndex && Prototypes[Index].VertexOffset == Row.VertexOffset &&
++                    Prototypes[Index].TriangleCount == Row.TriangleCount) { Match = Index; break; }
++            if (Match == UINT32_MAX)
++            {
++                Prototype Entry{};
++                Entry.FirstIndex = Row.FirstIndex; Entry.VertexOffset = Row.VertexOffset; Entry.TriangleCount = Row.TriangleCount; Entry.Representative = Slot;
++                Match = static_cast<uint32_t>(Prototypes.size());
++                Prototypes.push_back(std::move(Entry));
++            }
++            InstanceVolume[Slot] = Match;
++        }
++        for (Prototype& Entry : Prototypes)
++        {
++            for (uint32_t Axis = 0u; Axis < 3u; ++Axis) { Entry.Minimum[Axis] = std::numeric_limits<float>::max(); Entry.Maximum[Axis] = -std::numeric_limits<float>::max(); }
++            for (uint32_t Primitive = 0u; Primitive < Entry.TriangleCount; ++Primitive)
++            {
++                Facet Triangle{};
++                float* Targets[3] = { Triangle.Alpha, Triangle.Beta, Triangle.Gamma };
++                bool   Finite     = true;
++                for (uint32_t Corner = 0u; Corner < 3u; ++Corner)
++                {
++                    const size_t Index = size_t(Entry.FirstIndex) + Primitive * 3u + Corner;
++                    if (Index >= Corners.size() || size_t(Corners[Index]) + Entry.VertexOffset >= Vertices.size()) { Finite = false; break; }
++                    const Vector3& Position = Vertices[Corners[Index] + Entry.VertexOffset].SpatialLocation;
++                    Targets[Corner][0] = Position.x; Targets[Corner][1] = Position.y; Targets[Corner][2] = Position.z;
++                    Finite &= std::isfinite(Position.x) && std::isfinite(Position.y) && std::isfinite(Position.z);
++                }
++                if (!Finite) continue;
++                for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++                {
++                    Entry.Minimum[Axis] = std::min({ Entry.Minimum[Axis], Triangle.Alpha[Axis], Triangle.Beta[Axis], Triangle.Gamma[Axis] });
++                    Entry.Maximum[Axis] = std::max({ Entry.Maximum[Axis], Triangle.Alpha[Axis], Triangle.Beta[Axis], Triangle.Gamma[Axis] });
++                }
++                Entry.Structure.Facets.push_back(Triangle);
++            }
++            if (Entry.Structure.Facets.empty()) continue;
++            Entry.Structure.Order.resize(Entry.Structure.Facets.size());
++            for (uint32_t Index = 0u; Index < Entry.Structure.Order.size(); ++Index) Entry.Structure.Order[Index] = Index;
++            Entry.Structure.Nodes.reserve(Entry.Structure.Facets.size());
++            Linearize(Entry.Structure, 0u, static_cast<uint32_t>(Entry.Structure.Order.size()));
++        }
++        // ① size every volume under the per-mesh budget, then shrink them together if the atlas budget is exceeded
++        std::vector<Layout> Layouts(Prototypes.size());
++        float               Scale = 1.0f;
++        for (uint32_t Pass = 0u; Pass < 6u; ++Pass)
++        {
++            uint64_t Total = 0u;
++            for (uint32_t Index = 0u; Index < Prototypes.size(); ++Index)
++            {
++                if (Prototypes[Index].Structure.Facets.empty()) { Layouts[Index] = {}; continue; }
++                float Extent[3];
++                for (uint32_t Axis = 0u; Axis < 3u; ++Axis) Extent[Axis] = Prototypes[Index].Maximum[Axis] - Prototypes[Index].Minimum[Axis];
++                const uint32_t Budget = std::max<uint32_t>(4096u, static_cast<uint32_t>(double(Settings.MeshVoxelBudget) * Scale));
++                Layouts[Index] = ChooseLayout(Extent, Budget, Settings.MinimumVoxel, Settings.PaddingVoxels);
++                Total += Layouts[Index].Voxels;
++            }
++            if (Total <= Settings.AtlasVoxelBudget) break;
++            Scale *= static_cast<float>(double(Settings.AtlasVoxelBudget) / double(Total)) * 0.95f;
++        }
++        uint64_t Offset = 0u;
++        Volumes.resize(Prototypes.size());
++        for (uint32_t Index = 0u; Index < Prototypes.size(); ++Index)
++        {
++            Volume& Target = Volumes[Index];
++            Target = {};
++            if (Prototypes[Index].Structure.Facets.empty()) continue;
++            const Layout& Shape = Layouts[Index];
++            Target.VoxelSize = Shape.VoxelSize;
++            for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++            {
++                Target.Dimensions[Axis] = Shape.Dimensions[Axis];
++                const float Centre = 0.5f * (Prototypes[Index].Minimum[Axis] + Prototypes[Index].Maximum[Axis]);
++                const float Half   = 0.5f * Shape.VoxelSize * float(Shape.Dimensions[Axis]);
++                Target.BoxMinimum[Axis] = Centre - Half;
++                Target.BoxMaximum[Axis] = Centre + Half;
++            }
++            Target.Offset = static_cast<uint32_t>(Offset);
++            Offset += Shape.Voxels;
++        }
++        if (Offset == 0u || Offset > std::numeric_limits<uint32_t>::max()) return false;
++        Atlas.assign(static_cast<size_t>(Offset), 0.0f);
++        // ② fill: one z-slice per work item, each thread carrying its own closest-facet hint
++        const uint32_t Hardware = std::max(1u, std::thread::hardware_concurrency());
++        const uint32_t Threads  = Settings.ThreadCount ? Settings.ThreadCount : Hardware;
++        for (uint32_t Index = 0u; Index < Prototypes.size(); ++Index)
++        {
++            const Volume& Target = Volumes[Index];
++            if (!Target.Dimensions[0]) continue;
++            const Hierarchy& Structure = Prototypes[Index].Structure;
++            std::atomic<uint32_t> NextSlice{ 0u };
++            const auto Work = [&]() noexcept
++            {
++                uint32_t Hint = 0u;
++                for (uint32_t Slice = NextSlice.fetch_add(1u); Slice < Target.Dimensions[2]; Slice = NextSlice.fetch_add(1u))
++                    for (uint32_t Row = 0u; Row < Target.Dimensions[1]; ++Row)
++                        for (uint32_t Column = 0u; Column < Target.Dimensions[0]; ++Column)
++                        {
++                            const float Point[3] = { Target.BoxMinimum[0] + (float(Column) + 0.5f) * Target.VoxelSize,
++                                                     Target.BoxMinimum[1] + (float(Row) + 0.5f) * Target.VoxelSize,
++                                                     Target.BoxMinimum[2] + (float(Slice) + 0.5f) * Target.VoxelSize };
++                            const size_t Linear = Target.Offset + (size_t(Slice) * Target.Dimensions[1] + Row) * Target.Dimensions[0] + Column;
++                            Atlas[Linear] = std::sqrt(ClosestDistanceSquared(Structure, Point, Hint));
++                        }
++            };
++            std::vector<std::thread> Pool;
++            for (uint32_t Worker = 1u; Worker < std::min(Threads, Target.Dimensions[2]); ++Worker) Pool.emplace_back(Work);
++            Work();
++            for (auto& Worker : Pool) Worker.join();
++            ++BakeCount;
++        }
++        Report.Volumes = static_cast<uint32_t>(Prototypes.size());
++        Report.Instances = static_cast<uint32_t>(Rows.size());
++        Report.Voxels = Offset;
++        Report.FinestVoxel = std::numeric_limits<float>::max();
++        for (const Volume& Target : Volumes)
++            if (Target.Dimensions[0])
++            {
++                Report.FinestVoxel = std::min(Report.FinestVoxel, Target.VoxelSize);
++                Report.CoarsestVoxel = std::max(Report.CoarsestVoxel, Target.VoxelSize);
++            }
++        Report.Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - Started).count();
++        Placements.assign(Rows.size(), {});
++        return Project(Rows.data(), static_cast<uint32_t>(Rows.size()));
++    }
++    catch (...)
++    {
++        Atlas.clear(); Volumes.clear(); Placements.clear();
++        return false;
++    }
++}
++
++bool DistanceAtlasSpace::Project(const InstanceRecord* Rows, uint32_t Count) noexcept
++{
++    if (!Rows || Count != Placements.size() || Count != InstanceVolume.size()) return false;
++    bool Changed = false;
++    for (uint32_t Slot = 0u; Slot < Count; ++Slot)
++    {
++        DistanceAtlasPlacement Next{};
++        const uint32_t Index = InstanceVolume[Slot];
++        const float*   World = Rows[Slot].World;
++        float          Linear[3][3];
++        for (uint32_t Row = 0u; Row < 3u; ++Row)
++            for (uint32_t Column = 0u; Column < 3u; ++Column) Linear[Row][Column] = World[Column * 4u + Row];
++        float Moved = 0.0f;
++        for (uint32_t Element = 0u; Element < 16u; ++Element) Moved = std::max(Moved, std::fabs(World[Element] - BakedWorld[Slot][Element]));
++        if (Rows[Slot].TriangleCount && Moved > 1.0e-4f) Next.Flags |= DistanceAtlasMoved;
++        if (Index != UINT32_MAX && Volumes[Index].Dimensions[0])
++        {
++            const double Determinant = double(Linear[0][0]) * (double(Linear[1][1]) * Linear[2][2] - double(Linear[1][2]) * Linear[2][1]) -
++                                       double(Linear[0][1]) * (double(Linear[1][0]) * Linear[2][2] - double(Linear[1][2]) * Linear[2][0]) +
++                                       double(Linear[0][2]) * (double(Linear[1][0]) * Linear[2][1] - double(Linear[1][1]) * Linear[2][0]);
++            const double Scale = SmallestSingularValue(Linear);
++            if (std::fabs(Determinant) > 1.0e-12 && Scale > 1.0e-6)
++            {
++                double Inverse[3][3];
++                Inverse[0][0] = (double(Linear[1][1]) * Linear[2][2] - double(Linear[1][2]) * Linear[2][1]) / Determinant;
++                Inverse[0][1] = (double(Linear[0][2]) * Linear[2][1] - double(Linear[0][1]) * Linear[2][2]) / Determinant;
++                Inverse[0][2] = (double(Linear[0][1]) * Linear[1][2] - double(Linear[0][2]) * Linear[1][1]) / Determinant;
++                Inverse[1][0] = (double(Linear[1][2]) * Linear[2][0] - double(Linear[1][0]) * Linear[2][2]) / Determinant;
++                Inverse[1][1] = (double(Linear[0][0]) * Linear[2][2] - double(Linear[0][2]) * Linear[2][0]) / Determinant;
++                Inverse[1][2] = (double(Linear[0][2]) * Linear[1][0] - double(Linear[0][0]) * Linear[1][2]) / Determinant;
++                Inverse[2][0] = (double(Linear[1][0]) * Linear[2][1] - double(Linear[1][1]) * Linear[2][0]) / Determinant;
++                Inverse[2][1] = (double(Linear[0][1]) * Linear[2][0] - double(Linear[0][0]) * Linear[2][1]) / Determinant;
++                Inverse[2][2] = (double(Linear[0][0]) * Linear[1][1] - double(Linear[0][1]) * Linear[1][0]) / Determinant;
++                for (uint32_t Row = 0u; Row < 3u; ++Row)
++                {
++                    double Shift = 0.0;
++                    for (uint32_t Column = 0u; Column < 3u; ++Column)
++                    {
++                        Next.WorldToLocal[Row * 4u + Column] = static_cast<float>(Inverse[Row][Column]);
++                        Shift += Inverse[Row][Column] * double(World[12u + Column]);
++                    }
++                    Next.WorldToLocal[Row * 4u + 3u] = static_cast<float>(-Shift);
++                }
++                const Volume& Source = Volumes[Index];
++                std::copy(std::begin(Source.BoxMinimum), std::end(Source.BoxMinimum), Next.BoxMinimum);
++                std::copy(std::begin(Source.BoxMaximum), std::end(Source.BoxMaximum), Next.BoxMaximum);
++                std::copy(std::begin(Source.Dimensions), std::end(Source.Dimensions), Next.Dimensions);
++                Next.DistanceScale = static_cast<float>(Scale);
++                Next.VoxelSize     = Source.VoxelSize;
++                Next.Offset        = Source.Offset;
++                Next.Flags        |= DistanceAtlasValid;
++            }
++        }
++        if (std::memcmp(&Next, &Placements[Slot], sizeof(Next)) != 0)
++        {
++            Placements[Slot] = Next;
++            Changed          = true;
++        }
++    }
++    if (Changed) ++PlacementRevision;
++    return true;
++}
++
++float DistanceAtlasSpace::Sample(const float WorldPosition[3], float& Cell) const noexcept
++{
++    float Best = 1.0e20f;
++    Cell = 1.0f;
++    for (const DistanceAtlasPlacement& Entry : Placements)
++    {
++        if (!(Entry.Flags & DistanceAtlasValid)) continue;
++        float Local[3];
++        for (uint32_t Row = 0u; Row < 3u; ++Row)
++            Local[Row] = Entry.WorldToLocal[Row * 4u] * WorldPosition[0] + Entry.WorldToLocal[Row * 4u + 1u] * WorldPosition[1] +
++                         Entry.WorldToLocal[Row * 4u + 2u] * WorldPosition[2] + Entry.WorldToLocal[Row * 4u + 3u];
++        float Clamped[3], Outside = 0.0f;
++        for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++        {
++            Clamped[Axis] = std::clamp(Local[Axis], Entry.BoxMinimum[Axis], Entry.BoxMaximum[Axis]);
++            Outside += (Local[Axis] - Clamped[Axis]) * (Local[Axis] - Clamped[Axis]);
++        }
++        const float BoxDistance = std::sqrt(Outside) * Entry.DistanceScale;
++        if (BoxDistance >= Best) continue;
++        float    Fraction[3];
++        uint32_t Base[3];
++        for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++        {
++            const float Coordinate = (Clamped[Axis] - Entry.BoxMinimum[Axis]) / Entry.VoxelSize - 0.5f;
++            const float Floor      = std::clamp(std::floor(Coordinate), 0.0f, float(Entry.Dimensions[Axis]) - 2.0f);
++            Base[Axis]     = static_cast<uint32_t>(Floor);
++            Fraction[Axis] = std::clamp(Coordinate - Floor, 0.0f, 1.0f);
++        }
++        float Distance = 0.0f;
++        for (uint32_t Corner = 0u; Corner < 8u; ++Corner)
++        {
++            const uint32_t Step[3] = { Corner & 1u, (Corner >> 1u) & 1u, (Corner >> 2u) & 1u };
++            float          Weight  = 1.0f;
++            for (uint32_t Axis = 0u; Axis < 3u; ++Axis) Weight *= Step[Axis] ? Fraction[Axis] : 1.0f - Fraction[Axis];
++            const size_t Linear = Entry.Offset + (size_t(Base[2] + Step[2]) * Entry.Dimensions[1] + Base[1] + Step[1]) * Entry.Dimensions[0] + Base[0] + Step[0];
++            Distance += Atlas[Linear] * Weight;
++        }
++        const float Total = BoxDistance + Distance * Entry.DistanceScale;
++        if (Total < Best)
++        {
++            Best = Total;
++            Cell = Entry.VoxelSize * Entry.DistanceScale;
++        }
++    }
++    return Best;
++}
++}
+diff --git a/Engine/GeometricRaster/DistanceAtlasSpace.h b/Engine/GeometricRaster/DistanceAtlasSpace.h
+new file mode 100644
+index 0000000..e984f49
+--- /dev/null
++++ b/Engine/GeometricRaster/DistanceAtlasSpace.h
+@@ -0,0 +1,101 @@
++//============================================================================================================================================
++//                                                           DISTANCEATLASSPACE.H
++//============================================================================================================================================
++// 📦 Local-space unsigned distance volumes baked once per mesh and re-placed, never rebuilt, when instances move.
++
++#pragma once
++#include "GeometryStructure.h"
++#include <array>
++#include <cstdint>
++#include <vector>
++
++namespace Frontier
++{
++struct InstanceRecord;
++
++/// 📦 One mesh instance as the GPU sees it: the world→local affine map plus the local volume it samples. std430 mirror of `SdfInstance`
++///    in DistanceFieldTransport.slang.
++struct alignas(16) DistanceAtlasPlacement
++{
++    float    WorldToLocal[12];   // [-]   rows 0..2 of the affine world→local map, each (R[r][0..2], t[r])
++    float    BoxMinimum[3];      // [m]   local-space minimum of the padded volume
++    float    DistanceScale;      // [-]   smallest singular value of the local→world map: local distance × this never overestimates
++    float    BoxMaximum[3];      // [m]   local-space maximum of the padded volume
++    float    VoxelSize;          // [m]   local voxel edge
++    uint32_t Offset;             // [idx] first float of this volume inside the atlas
++    uint32_t Dimensions[3];      // [cnt] voxels along x, y, z
++    uint32_t Flags;              // [bit] DistanceAtlasValid | DistanceAtlasMoved
++    uint32_t Reserved[3];        // [-]   keeps the record at seven std430 rows
++};
++static_assert(sizeof(DistanceAtlasPlacement) == 112u, "DistanceAtlasPlacement must stay seven vec4 rows");
++
++constexpr uint32_t DistanceAtlasValid = 1u;   // [bit] the instance owns a baked volume
++constexpr uint32_t DistanceAtlasMoved = 2u;   // [bit] the world transform differs from the pose the volume and facets were baked at
++
++struct DistanceAtlasSettings
++{
++    uint32_t MeshVoxelBudget  = 1u << 19u;   // [cnt] most voxels one mesh may take
++    uint32_t AtlasVoxelBudget = 4u << 20u;   // [cnt] most voxels the whole atlas may take (4 bytes each)
++    float    MinimumVoxel     = 0.03f;       // [m]   finest voxel edge, however small the mesh
++    uint32_t PaddingVoxels    = 2u;          // [cnt] empty voxels kept around the mesh so the field decays outside it
++    uint32_t ThreadCount      = 0u;          // [cnt] 0 selects the hardware thread count
++};
++
++struct DistanceAtlasReport
++{
++    uint32_t Volumes   = 0u;     // [cnt] distinct meshes baked
++    uint32_t Instances = 0u;     // [cnt] instances placed
++    uint64_t Voxels    = 0u;     // [cnt] voxels across the atlas
++    double   Seconds   = 0.0;    // [s]   wall-clock bake time
++    float    FinestVoxel = 0.0f; // [m]
++    float    CoarsestVoxel = 0.0f;// [m]
++};
++
++/// 📦 Local-space unsigned distance volumes, one per distinct mesh, baked once and then only re-placed. Moving an instance rewrites its
++///    world→local map; the volume, and the GPU copy of it, never change. This is the mesh-distance-field half of a Lumen/Unreal-style
++///    scene representation: the scene field is a composition of transformed local fields rather than a world grid that is rebuilt.
++class DistanceAtlasSpace
++{
++public:
++    /// 📦 Bakes one volume per distinct (FirstIndex, VertexOffset, TriangleCount) mesh with a multithreaded exact closest-triangle search.
++    /// in    Rows   [-]  instances at their baked pose; their World matrices become the reference pose for DistanceAtlasMoved
++    /// err   returns false when no instance owns a finite triangle; never throws
++    /// cost  🔴
++    bool Bake(const std::vector<VertexRecord>& Vertices, const std::vector<uint32_t>& Corners,
++              const std::vector<InstanceRecord>& Rows, const DistanceAtlasSettings& Settings) noexcept;
++
++    /// 📦 Re-places every instance from its current World matrix. Touches no volume data.
++    /// err   returns false when Count differs from the baked instance count
++    /// cost  ✔️
++    bool Project(const InstanceRecord* Rows, uint32_t Count) noexcept;
++
++    /// 📦 CPU mirror of SampleSceneDistance: the smallest transformed local distance over all instances, and the world voxel size there.
++    float Sample(const float WorldPosition[3], float& Cell) const noexcept;
++
++    const std::vector<float>&                  QueryAtlas() const noexcept { return Atlas; }
++    const std::vector<DistanceAtlasPlacement>& QueryPlacements() const noexcept { return Placements; }
++    const DistanceAtlasReport&                 QueryReport() const noexcept { return Report; }
++    uint64_t                                   QueryPlacementRevision() const noexcept { return PlacementRevision; }
++    uint32_t                                   QueryBakeCount() const noexcept { return BakeCount; }
++    uint32_t                                   QueryMovedCount() const noexcept;
++    bool                                       Empty() const noexcept { return Placements.empty() || Atlas.empty(); }
++
++private:
++    struct Volume
++    {
++        float    BoxMinimum[3];
++        float    BoxMaximum[3];
++        float    VoxelSize;
++        uint32_t Offset;
++        uint32_t Dimensions[3];
++    };
++    std::vector<float>                  Atlas;                // [m]   unsigned distances, x fastest, then y, then z
++    std::vector<Volume>                 Volumes;              // [-]   one per distinct mesh
++    std::vector<uint32_t>               InstanceVolume;       // [idx] per instance, UINT32_MAX when it has no finite triangle
++    std::vector<std::array<float, 16>>  BakedWorld;           // [-]   per instance, the pose the volume was baked at
++    std::vector<DistanceAtlasPlacement> Placements;           // [-]   per instance, rewritten by Project
++    DistanceAtlasReport                 Report;
++    uint64_t                            PlacementRevision = 0u;   // [-] bumps only when a placement actually changed
++    uint32_t                            BakeCount         = 0u;   // [-] volumes baked since construction; Project never raises it
++};
++}
+diff --git a/Engine/GeometricRaster/DistanceFieldStructure.cpp b/Engine/GeometricRaster/DistanceFieldStructure.cpp
+index 01506ac..2657eea 100644
+--- a/Engine/GeometricRaster/DistanceFieldStructure.cpp
++++ b/Engine/GeometricRaster/DistanceFieldStructure.cpp
+@@ -26,22 +26,28 @@ bool DistanceFieldStructure::Construct(const std::vector<VertexRecord>& Position
+                                       const std::vector<MaterialRecord>& Reflectance)
+ {
+     Vertices = Positions; Indices = Corners; Instances = Placements; Materials = Reflectance;
+-    return ProjectInstances();
++    if (!ProjectInstances()) return false;
++    // 📝 The one and only bake. Failure leaves the exact BVH usable; the distance field then reports "far" everywhere and the shaders
++    //    fall back to exact traversal.
++    (void)Atlas.Bake(Vertices, Indices, Instances, DistanceAtlasSettings{});
++    return true;
+ }
+ 
+ bool DistanceFieldStructure::RefreshInstances(const InstanceRecord* Rows, uint32_t Count)
+ {
+     if (!Rows || Count != Instances.size()) return false;
+-    bool Changed = false;
+-    for (uint32_t Index = 0u; Index < Count; ++Index)
+-    {
+-        if (std::memcmp(Rows[Index].World, Instances[Index].World, sizeof(Rows[Index].World)) != 0 ||
+-            Rows[Index].MaterialIndex != Instances[Index].MaterialIndex)
+-            Changed = true;
+-    }
+-    if (!Changed) return true;
+-    Instances.assign(Rows, Rows + Count);
+-    return ProjectInstances();
++    return Atlas.Empty() ? true : Atlas.Project(Rows, Count);
++}
++
++bool DistanceFieldStructure::Matches(const SceneStructure& Scene) const
++{
++    const auto& Rows = Scene.QueryInstances();
++    if (Facets.empty() || Rows.size() != Instances.size() || Scene.QueryVertices().size() != Vertices.size() ||
++        Scene.QueryIndices().size() != Indices.size() || Scene.QueryMaterials().QueryRecords().size() != Materials.size()) return false;
++    for (size_t Index = 0u; Index < Rows.size(); ++Index)
++        if (Rows[Index].TriangleCount != Instances[Index].TriangleCount || Rows[Index].FirstIndex != Instances[Index].FirstIndex ||
++            Rows[Index].VertexOffset != Instances[Index].VertexOffset) return false;
++    return true;
+ }
+ 
+ bool DistanceFieldStructure::ProjectInstances()
+diff --git a/Engine/GeometricRaster/DistanceFieldStructure.h b/Engine/GeometricRaster/DistanceFieldStructure.h
+index d2ce5fe..63eea22 100644
+--- a/Engine/GeometricRaster/DistanceFieldStructure.h
++++ b/Engine/GeometricRaster/DistanceFieldStructure.h
+@@ -1,10 +1,11 @@
+ //============================================================================================================================================
+ //                                                      DISTANCEFIELDSTRUCTURE.H
+ //============================================================================================================================================
+-// 📦 World-space triangle BVH shared by distance-volume construction and exact secondary mesh rays.
++// 📦 Rest-pose world-space triangle BVH for exact secondary rays, plus the local distance atlas that follows instances as they move.
+ 
+ #pragma once
+ #include "GeometryStructure.h"
++#include "DistanceAtlasSpace.h"
+ #include "../ContentInterchange/MaterialIndex.h"
+ #include <array>
+ 
+@@ -37,11 +38,18 @@ public:
+                    const std::vector<uint32_t>& Corners,
+                    const std::vector<InstanceRecord>& Placements,
+                    const std::vector<MaterialRecord>& Reflectance);
++    /// 📦 Re-places instances from their current World matrices. The facets, the BVH and the distance atlas are never rebuilt here, so
++    ///    Revision does not move; only the atlas placements and their revision do.
++    /// err   returns false when Count differs from the constructed instance count
+     bool RefreshInstances(const InstanceRecord* Rows, uint32_t Count);
++    /// 📦 True when Scene has the same instance, triangle, index, vertex and material counts the structure was constructed from, i.e. an
++    ///    upload that only re-sends the same scene and so needs no rebuild.
++    bool Matches(const SceneStructure& Scene) const;
+     bool Construct(std::vector<DistanceFieldFacet> Facets);
+     const std::vector<DistanceFieldFacet>& QueryFacets() const { return Facets; }
+     const std::vector<DistanceFieldBranch>& QueryBranches() const { return Branches; }
+     uint64_t QueryRevision() const { return Revision; }
++    const DistanceAtlasSpace& QueryAtlas() const { return Atlas; }
+ private:
+     void Linearize(uint32_t First, uint32_t Count);
+     bool ProjectInstances();
+@@ -51,6 +59,7 @@ private:
+     std::vector<uint32_t> Indices;
+     std::vector<InstanceRecord> Instances;
+     std::vector<MaterialRecord> Materials;
++    DistanceAtlasSpace Atlas;
+     uint64_t Revision = 0u;
+ };
+ }
+diff --git a/Engine/Shaders/DistanceFieldConstruct.slang b/Engine/Shaders/DistanceFieldConstruct.slang
+deleted file mode 100644
+index 8a6d9ae..0000000
+--- a/Engine/Shaders/DistanceFieldConstruct.slang
++++ /dev/null
+@@ -1,38 +0,0 @@
+-//============================================================================================================================================
+-//                                                     DISTANCEFIELDCONSTRUCT.SLANG
+-//============================================================================================================================================
+-// 📦 Populates three camera-snapped distance volumes from exact triangle closest points and resident material coefficients.
+-
+-#version 460
+-#extension GL_GOOGLE_include_directive : require
+-layout(local_size_x=64) in;
+-#include "DistanceFieldTransport.slang"
+-void main()
+-{
+-    uint Index=gl_GlobalInvocationID.x;
+-    if (Index>=PC.Counts.x) return;
+-    vec3 Position=CellPosition(Index), Closest=vec3(0.0);
+-    float Best=1e30;
+-    uint Selected=0u, Branch=0u;
+-    while (Branch<GeometryCounts.y)
+-    {
+-        DistanceBranch Entry=Branches[Branch];
+-        if (BoxDistanceSquared(Position,Entry.Minimum.xyz,Entry.Maximum.xyz)>Best)
+-        { Branch=Entry.Range.x; continue; }
+-        for (uint Leaf=0u; Leaf<Entry.Range.z; ++Leaf)
+-        {
+-            uint Facet=Entry.Range.y+Leaf;
+-            vec3 Point=ClosestOnTriangle(Position,Facets[Facet]);
+-            float Squared=dot(Position-Point,Position-Point);
+-            if (Squared<Best) { Best=Squared; Closest=Point; Selected=Facet; }
+-        }
+-        ++Branch;
+-    }
+-    DistanceFacet Facet=Facets[Selected];
+-    float Distance=sqrt(Best);
+-    if (dot(Position-Closest,Facet.Normal.xyz)<0.0) Distance=-Distance;
+-    Field[Index].PositionDistance=vec4(Closest,Distance);
+-    Field[Index].Normal=vec4(Facet.Normal.xyz,ClipOrigins[Index/VolumeCount()].w);
+-    Field[Index].Albedo=vec4(clamp(Facet.Albedo.xyz,vec3(0.0),vec3(0.95)),1.0);
+-    Field[Index].Emission=vec4(max(Facet.Emission.xyz,vec3(0.0)),0.0);
+-}
+diff --git a/Engine/Shaders/DistanceFieldTransport.slang b/Engine/Shaders/DistanceFieldTransport.slang
+index 9f6840f..464ca4a 100644
+--- a/Engine/Shaders/DistanceFieldTransport.slang
++++ b/Engine/Shaders/DistanceFieldTransport.slang
+@@ -1,16 +1,18 @@
+ //============================================================================================================================================
+ //                                                     DISTANCEFIELDTRANSPORT.SLANG
+ //============================================================================================================================================
+-// 📦 Shared std430 scene/clipmap records, continuous distance sampling and exact secondary triangle traversal.
++// 📦 Shared std430 scene records, local-volume distance composition and exact secondary triangle traversal.
+ 
+ #ifndef FRONTIER_DISTANCE_TRANSPORT
+ #define FRONTIER_DISTANCE_TRANSPORT
+ struct DistanceFacet { vec4 Alpha; vec4 Beta; vec4 Gamma; vec4 Normal; vec4 Albedo; vec4 Emission; };
+ struct DistanceBranch { vec4 Minimum; vec4 Maximum; uvec4 Range; };
+-struct DistanceVoxel { vec4 PositionDistance; vec4 Normal; vec4 Albedo; vec4 Emission; };
+-layout(std430, binding=3) buffer FieldExtent { DistanceVoxel Field[]; };
++// 📝 One row per scene instance, mirrored by DistanceAtlasPlacement (112 bytes). The atlas is baked once at startup; a moving instance only
++//    rewrites its world-to-local rows. State.x bit 0: owns a volume. Bit 1: moved from the pose its baked facets were captured at.
++struct SdfInstance { vec4 Row0; vec4 Row1; vec4 Row2; vec4 BoxMinimum; vec4 BoxMaximum; uvec4 Layout; uvec4 State; };
++layout(std430, binding=3) readonly buffer DistanceAtlas { float AtlasDistances[]; };
+ layout(rgba32f, binding=4) uniform readonly image2D PreviousRadiance;
+-layout(std430, binding=5) readonly buffer DistanceConstants { vec4 ClipOrigins[3]; uvec4 GeometryCounts; };
++layout(std430, binding=5) readonly buffer DistanceConstants { uvec4 GeometryCounts; SdfInstance SdfInstances[]; };   // x instances, y branches, z facets, w card size
+ layout(std430, binding=6) readonly buffer DistanceBranches { DistanceBranch Branches[]; };
+ layout(std430, binding=7) readonly buffer DistanceFacets { DistanceFacet Facets[]; };
+ layout(rgba32f, binding=10) uniform image2D NextRadiance;
+@@ -28,43 +30,49 @@ layout(push_constant) uniform DistancePush
+     uvec4 RenderExtent;
+ } PC;
+ 
+-uint VolumeCount() { return GeometryCounts.x * GeometryCounts.x * GeometryCounts.x; }
+-uint CellIndex(uvec3 Cell, uint Level)
++bool InstanceMoved(uint Instance)
+ {
+-    return Level * VolumeCount() + (Cell.z * GeometryCounts.x + Cell.y) * GeometryCounts.x + Cell.x;
++    return Instance < GeometryCounts.x && (SdfInstances[Instance].State.x & 2u) != 0u;
+ }
+-vec3 CellPosition(uint Index)
++bool BeyondScene(vec3 Point)
+ {
+-    uint Level = Index / VolumeCount();
+-    uint Local = Index % VolumeCount();
+-    uvec3 Cell = uvec3(Local % GeometryCounts.x, (Local / GeometryCounts.x) % GeometryCounts.x, Local / (GeometryCounts.x * GeometryCounts.x));
+-    return ClipOrigins[Level].xyz + (vec3(Cell) + 0.5) * ClipOrigins[Level].w;
+-}
+-int SelectClip(vec3 Position, out vec3 Coordinate)
+-{
+-    for (int Level = 0; Level < 3; ++Level)
+-    {
+-        Coordinate = (Position - ClipOrigins[Level].xyz) / ClipOrigins[Level].w - 0.5;
+-        if (all(greaterThanEqual(Coordinate, vec3(0.0))) && all(lessThan(Coordinate, vec3(GeometryCounts.x - 1u)))) return Level;
+-    }
+-    return -1;
++    return any(lessThan(Point, Branches[0].Minimum.xyz)) || any(greaterThan(Point, Branches[0].Maximum.xyz));
+ }
++// 📝 The scene field is the smallest of the instances' local fields, each read through its own world-to-local map. Outside an instance's
++//    padded volume the distance is the straight-line distance to the volume plus the value at the nearest edge sample, which is an upper
++//    bound; a box that is already farther than the best answer is skipped without touching the atlas. `Cell` is the world size of the
++//    voxel that supplied the answer, so callers can tell how much to trust it. Returns 1e20 when the scene owns no volume.
+ float SampleSceneDistance(vec3 Position, out float Cell)
+ {
+-    vec3 Coordinate;
+-    int Level = SelectClip(Position, Coordinate);
+-    if (Level < 0) { Cell = ClipOrigins[2].w; return 1e20; }
+-    Cell = ClipOrigins[Level].w;
+-    uvec3 Base = uvec3(floor(Coordinate));
+-    vec3 Fraction = fract(Coordinate);
+-    float Distance = 0.0;
+-    for (uint Corner = 0u; Corner < 8u; ++Corner)
++    float Best = 1e20;
++    Cell = 0.25;
++    for (uint Instance = 0u; Instance < GeometryCounts.x; ++Instance)
+     {
+-        uvec3 Offset = uvec3(Corner & 1u, (Corner >> 1u) & 1u, (Corner >> 2u) & 1u);
+-        vec3 Weight = mix(vec3(1.0) - Fraction, Fraction, vec3(Offset));
+-        Distance += abs(Field[CellIndex(Base + Offset, uint(Level))].PositionDistance.w) * Weight.x * Weight.y * Weight.z;
++        SdfInstance Entry = SdfInstances[Instance];
++        if ((Entry.State.x & 1u) == 0u) continue;
++        vec3 Local = vec3(dot(Entry.Row0.xyz, Position) + Entry.Row0.w, dot(Entry.Row1.xyz, Position) + Entry.Row1.w,
++                          dot(Entry.Row2.xyz, Position) + Entry.Row2.w);
++        vec3 Clamped = clamp(Local, Entry.BoxMinimum.xyz, Entry.BoxMaximum.xyz);
++        float Scale = Entry.BoxMinimum.w;
++        float BoxDistance = length(Local - Clamped) * Scale;
++        if (BoxDistance >= Best) continue;
++        float Voxel = Entry.BoxMaximum.w;
++        vec3 Coordinate = (Clamped - Entry.BoxMinimum.xyz) / Voxel - 0.5;
++        vec3 Lower = clamp(floor(Coordinate), vec3(0.0), vec3(Entry.Layout.yzw) - 2.0);
++        vec3 Fraction = clamp(Coordinate - Lower, vec3(0.0), vec3(1.0));
++        uvec3 Base = uvec3(Lower);
++        float Distance = 0.0;
++        for (uint Corner = 0u; Corner < 8u; ++Corner)
++        {
++            uvec3 Offset = uvec3(Corner & 1u, (Corner >> 1u) & 1u, (Corner >> 2u) & 1u);
++            vec3 Weight = mix(vec3(1.0) - Fraction, Fraction, vec3(Offset));
++            uvec3 Texel = Base + Offset;
++            Distance += AtlasDistances[Entry.Layout.x + (Texel.z * Entry.Layout.z + Texel.y) * Entry.Layout.y + Texel.x] * Weight.x * Weight.y * Weight.z;
++        }
++        float Total = BoxDistance + Distance * Scale;
++        if (Total < Best) { Best = Total; Cell = Voxel * Scale; }
+     }
+-    return abs(Distance);
++    return Best;
+ }
+ // 📝 Every facet owns a non-overlapping rectangular card. The square-to-triangle warp uses every texel;
+ //    authored UVs are interpolated separately by ResolveMaterial, so mirrored/repeated UVs never alias cards.
+@@ -111,31 +119,6 @@ float SurfaceCoverage(uint Facet, vec3 Position)
+     ivec2 Pixel=CardOrigin(Facet)+ivec2(clamp(CardCoordinate(Facet,Position)*float(GeometryCounts.w),vec2(0.0),vec2(GeometryCounts.w-1u)));
+     return imageLoad(SurfaceNormal,Pixel).w;
+ }
+-float BoxDistanceSquared(vec3 Position, vec3 Minimum, vec3 Maximum)
+-{
+-    vec3 Delta = max(max(Minimum - Position, Position - Maximum), vec3(0.0));
+-    return dot(Delta, Delta);
+-}
+-vec3 ClosestOnTriangle(vec3 Position, DistanceFacet Facet)
+-{
+-    vec3 Alpha=Facet.Alpha.xyz, Beta=Facet.Beta.xyz, Gamma=Facet.Gamma.xyz;
+-    vec3 EdgeAlpha=Beta-Alpha, EdgeBeta=Gamma-Alpha, Delta=Position-Alpha;
+-    float D1=dot(EdgeAlpha,Delta), D2=dot(EdgeBeta,Delta);
+-    if (D1<=0.0 && D2<=0.0) return Alpha;
+-    Delta=Position-Beta;
+-    float D3=dot(EdgeAlpha,Delta), D4=dot(EdgeBeta,Delta);
+-    if (D3>=0.0 && D4<=D3) return Beta;
+-    float AreaGamma=D1*D4-D3*D2;
+-    if (AreaGamma<=0.0 && D1>=0.0 && D3<=0.0) return Alpha+EdgeAlpha*(D1/(D1-D3));
+-    Delta=Position-Gamma;
+-    float D5=dot(EdgeAlpha,Delta), D6=dot(EdgeBeta,Delta);
+-    if (D6>=0.0 && D5<=D6) return Gamma;
+-    float AreaBeta=D5*D2-D1*D6;
+-    if (AreaBeta<=0.0 && D2>=0.0 && D6<=0.0) return Alpha+EdgeBeta*(D2/(D2-D6));
+-    float AreaAlpha=D3*D6-D5*D4;
+-    if (AreaAlpha<=0.0 && D4-D3>=0.0 && D5-D6>=0.0) return Beta+(Gamma-Beta)*((D4-D3)/((D4-D3)+(D5-D6)));
+-    return Alpha+(EdgeAlpha*AreaBeta+EdgeBeta*AreaGamma)/(AreaAlpha+AreaBeta+AreaGamma);
+-}
+ struct DistanceRayHit { float Travel; uint Facet; };
+ DistanceRayHit TraceDistanceMesh(vec3 Origin, vec3 Direction, float Maximum)
+ {
+@@ -161,55 +144,33 @@ DistanceRayHit TraceDistanceMesh(vec3 Origin, vec3 Direction, float Maximum)
+             float Beta=dot(Delta,Cross)/Determinant;
+             vec3 Second=cross(Delta,EdgeAlpha);
+             float Gamma=dot(Direction,Second)/Determinant, Travel=dot(EdgeBeta,Second)/Determinant;
+-            if (Beta>=0.0 && Gamma>=0.0 && Beta+Gamma<=1.0 && Travel>1e-4 && Travel<Hit.Travel)
++            if (Beta>=0.0 && Gamma>=0.0 && Beta+Gamma<=1.0 && Travel>1e-4 && Travel<Hit.Travel && !InstanceMoved(floatBitsToUint(Triangle.Alpha.w)))
+             { if (SurfaceCoverage(Slot,Origin+Direction*Travel)>0.0) { Hit.Travel=Travel; Hit.Facet=Slot; } }
+         }
+         ++Branch;
+     }
+     return Hit;
+ }
+-// 📝 The clipmap's nearest-face sign is not a solid winding classification. A penumbra must not
+-// follow its interpolated zero sheets or camera-snapped voxel boundaries. Refine the continuous
+-// surface distance for shadows; retain the clipmap as the diffuse traversal accelerator.
+-float ShadowSurfaceDistance(vec3 Point, vec3 Receiver, vec3 ReceiverNormal)
+-{
+-    float Best=1e30;
+-    uint Branch=0u;
+-    while (Branch<GeometryCounts.y)
+-    {
+-        DistanceBranch Entry=Branches[Branch];
+-        if (BoxDistanceSquared(Point,Entry.Minimum.xyz,Entry.Maximum.xyz)>Best)
+-        { Branch=Entry.Range.x; continue; }
+-        for (uint Leaf=0u; Leaf<Entry.Range.z; ++Leaf)
+-        {
+-            uint Slot=Entry.Range.y+Leaf;
+-            DistanceFacet Facet=Facets[Slot];
+-            // A coplanar receiving surface cannot cast a shadow on itself. Without this exclusion
+-            // even an empty plane darkens when the Sun is lower than the penumbra cone angle.
+-            if (abs(dot(Facet.Normal.xyz,ReceiverNormal))>0.9999 &&
+-                abs(dot(Facet.Normal.xyz,Receiver-Facet.Alpha.xyz))<0.003) continue;
+-            vec3 Closest=ClosestOnTriangle(Point,Facet);
+-            if (SurfaceCoverage(Slot,Closest)<=0.0) continue;
+-            Best=min(Best,dot(Point-Closest,Point-Closest));
+-        }
+-        ++Branch;
+-    }
+-    return sqrt(Best);
+-}
++// 📝 Hard umbra comes from the exact BVH over the baked scene. The penumbra is marched through the composed local fields, which is also the only
++//    place a moved instance can shade anything: its baked facets are masked out of every exact query. The field is unsigned and trilinear,
++//    so it reads up to half a voxel high at a surface. Two guards follow from that: samples closer to the surface than the receiver's own
++//    tangent plane are the receiver itself and are ignored, and the cone is opened by a quarter voxel so contact does not band.
+ float DistanceShadow(vec3 Position, vec3 Normal)
+ {
+     vec3 Direction=normalize(PC.SunDirectionRadiance.xyz);
+     vec3 Origin=Position+Normal*0.002;
+-    // Exact umbra confirmation also covers thin casters, clipmap exits and march-budget exhaustion.
+     if (TraceDistanceMesh(Origin,Direction,1e20).Facet!=0xFFFFFFFFu) return 0.0;
+     float Visibility=1.0, Travel=0.004;
+     float Maximum=length(Origin-Branches[0].Minimum.xyz)+length(Branches[0].Maximum.xyz-Branches[0].Minimum.xyz);
+-    for (uint Step=0u; Step<64u && Travel<Maximum; ++Step)
++    float Softness=max(PC.Tuning.x,0.0001), Facing=max(dot(Normal,Direction),0.0);
++    for (uint Step=0u; Step<48u && Travel<Maximum; ++Step)
+     {
+-        float Distance=ShadowSurfaceDistance(Origin+Direction*Travel,Position,Normal);
+-        if (Distance>1e14) break;
+-        Visibility=min(Visibility,Distance/(max(PC.Tuning.x,0.0001)*Travel));
+-        Travel+=max(Distance*0.5,0.002);
++        float Cell;
++        float Distance=SampleSceneDistance(Origin+Direction*Travel,Cell);
++        if (Distance>1e19) break;
++        if (Distance<Travel*Facing-0.75*Cell)
++            Visibility=min(Visibility,max(Distance-0.25*Cell,0.0)/(Softness*Travel));
++        Travel+=max(Distance*0.5,Cell*0.5);
+     }
+     return clamp(Visibility,0.0,1.0);
+ }
+@@ -234,6 +195,7 @@ float BranchSolidAngle(uint Slot, vec3 Position, vec3 Normal)
+ float FacetSolidAngle(uint Slot, vec3 Position, vec3 Normal)
+ {
+     DistanceFacet Facet=Facets[Slot];
++    if (InstanceMoved(floatBitsToUint(Facet.Alpha.w))) return 0.0;
+     vec3 Delta=(Facet.Alpha.xyz+Facet.Beta.xyz+Facet.Gamma.xyz)/3.0-Position;
+     float Height=max(dot(Facet.Alpha.xyz-Position,Normal),max(dot(Facet.Beta.xyz-Position,Normal),dot(Facet.Gamma.xyz-Position,Normal)));
+     if (Height<=0.0) return 0.0;
+@@ -323,7 +285,7 @@ vec3 GatherDistanceRadiance(vec3 Position, vec3 Normal, bool Current)
+         {
+             vec3 Point=Origin+Direction*Travel;
+             float Distance=SampleSceneDistance(Point,Cell);
+-            if (Distance>1e19)
++            if (Distance>1e19 || BeyondScene(Point))
+             {
+                 DistanceRayHit Hit=TraceDistanceMesh(Origin,Direction,1e20);
+                 if (Hit.Facet!=0xFFFFFFFFu) Incoming=SampleCachedRadiance(Hit.Facet,Origin+Direction*Hit.Travel,Current);
+diff --git a/Tools/Build/PackageWindowsProjects.py b/Tools/Build/PackageWindowsProjects.py
+index 8e5251f..b6ea76c 100644
+--- a/Tools/Build/PackageWindowsProjects.py
++++ b/Tools/Build/PackageWindowsProjects.py
+@@ -132,7 +132,7 @@ def Main() -> None:
+     Shaders = sorted((Binary / "Engine/Shaders").glob("*.spv"))
+     if not Shaders:
+         raise RuntimeError("No compiled Vulkan shaders found")
+-    for Name in ("DistanceFieldConstruct", "DistanceFieldCapture", "DistanceFieldCaptureFixed", "DistanceFieldRadiance", "DistanceFieldGather", "DistanceFieldGatherFixed", "DistanceFieldGIResolve", "DistanceFieldGIResolveFixed"):
++    for Name in ("DistanceFieldCapture", "DistanceFieldCaptureFixed", "DistanceFieldRadiance", "DistanceFieldGather", "DistanceFieldGatherFixed", "DistanceFieldGIResolve", "DistanceFieldGIResolveFixed"):
+         if not (Binary / f"Engine/Shaders/{Name}.spv").is_file():
+             raise RuntimeError(f"Missing compiled {Name} shader")
+     for Shader in Shaders:
+@@ -233,7 +233,7 @@ def Main() -> None:
+                           "shaderCompiled": True, "runtimeEnabled": True,
+                           "softwareVulkanExecutionVerified": os.environ.get("SDF_VULKAN_EXECUTION_VERIFIED") == "1",
+                           "executionValidation": "Production SPIR-V with synchronization and GPU-assisted shader-access validation",
+-                          "transport": "Three camera-snapped distance volumes, GPU-captured textured surface-card atlas with Jacobi radiance, exact mesh secondary rays",
++                          "transport": "One startup-baked local distance atlas with per-instance placements, GPU-captured textured surface-card atlas with Jacobi radiance, exact mesh secondary rays",
+                           "activation": "Only after all scene resources and shader pipelines are ready",
+                           "fallback": "Plain visibility raster when the SDF stage is not ready"},
+                 "requirements": ["Windows x64", "Microsoft Visual C++ x64 runtime (bundled)",
+diff --git a/Tools/Build/ToolchainSequence.ps1 b/Tools/Build/ToolchainSequence.ps1
+index 775a99b..5b84d57 100644
+--- a/Tools/Build/ToolchainSequence.ps1
++++ b/Tools/Build/ToolchainSequence.ps1
+@@ -385,7 +385,6 @@ $ShaderTable = @(
+     @{ Source = 'ReSTIRViewport.slang';        Stage = 'compute';  Output = 'ReSTIRViewport.spv' }
+     @{ Source = 'RasterViewport.slang';        Stage = 'compute';  Output = 'RasterViewport.spv' }
+     @{ Source = 'RayQueryViewport.slang';        Stage = 'compute';  Output = 'RayQueryViewport.spv' }
+-    @{ Source = 'DistanceFieldConstruct.slang'; Stage = 'compute'; Output = 'DistanceFieldConstruct.spv' }
+     @{ Source = 'DistanceFieldCapture.slang'; Stage = 'compute'; Output = 'DistanceFieldCapture.spv' }
+     @{ Source = 'DistanceFieldCaptureFixed.slang'; Stage = 'compute'; Output = 'DistanceFieldCaptureFixed.spv' }
+     @{ Source = 'DistanceFieldRadiance.slang'; Stage = 'compute'; Output = 'DistanceFieldRadiance.spv' }
+@@ -602,6 +601,7 @@ $EngineRelative = @(
+     #    agreement, so run it with any build-system change.
+     'Engine\DeviceExchange\SwapchainExchange.cpp'
+     'Engine\DeviceExchange\RayQueryExchange.cpp'
++    'Engine\GeometricRaster\DistanceAtlasSpace.cpp'
+     'Engine\GeometricRaster\DistanceFieldStructure.cpp'
+     'Engine\DeviceExchange\DistanceFieldGIStage.cpp'
+     'Engine\DeviceExchange\RayTracingCapabilitySet.cpp'
+diff --git a/VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp b/VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp
+new file mode 100644
+index 0000000..599e4bf
+--- /dev/null
++++ b/VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp
+@@ -0,0 +1,271 @@
++//============================================================================================================================================
++//                                                         DISTANCEATLASCHECKS.CPP
++//============================================================================================================================================
++// 📦 Dependency-free CPU proof: baked local distance volumes match brute-force triangle distance, and moving an instance never re-bakes.
++
++#include "../../Engine/GeometricRaster/DistanceAtlasSpace.h"
++#include "../../Engine/GeometricRaster/SceneStructure.h"
++#include <algorithm>
++#include <cmath>
++#include <cstdio>
++#include <cstring>
++#include <random>
++
++using namespace Frontier;
++
++namespace
++{
++int FailureCount = 0;
++
++void Report(bool Passed, const char* Name, const char* Detail, FILE* Log)
++{
++    if (!Passed) ++FailureCount;
++    std::fprintf(stdout, "  %s  %s  %s\n", Passed ? "PASS" : "FAIL", Name, Detail);
++    if (Log) std::fprintf(Log, "  %s  %s  %s\n", Passed ? "PASS" : "FAIL", Name, Detail);
++}
++
++struct SceneMesh
++{
++    std::vector<VertexRecord> Vertices;
++    std::vector<uint32_t>     Corners;
++};
++
++uint32_t AppendBox(SceneMesh& Mesh, float HalfExtent, uint32_t& Triangles, uint32_t& VertexBase)
++{
++    const uint32_t FirstIndex = static_cast<uint32_t>(Mesh.Corners.size());
++    const uint32_t Base       = static_cast<uint32_t>(Mesh.Vertices.size());
++    for (uint32_t Corner = 0u; Corner < 8u; ++Corner)
++    {
++        VertexRecord Vertex{};
++        Vertex.SpatialLocation = { (Corner & 1u) ? HalfExtent : -HalfExtent, (Corner & 2u) ? HalfExtent : -HalfExtent, (Corner & 4u) ? HalfExtent : -HalfExtent };
++        Mesh.Vertices.push_back(Vertex);
++    }
++    const uint32_t Faces[12][3] = { { 0, 2, 1 }, { 1, 2, 3 }, { 4, 5, 6 }, { 5, 7, 6 }, { 0, 1, 4 }, { 1, 5, 4 },
++                                    { 2, 6, 3 }, { 3, 6, 7 }, { 0, 4, 2 }, { 2, 4, 6 }, { 1, 3, 5 }, { 3, 7, 5 } };
++    for (const auto& Face : Faces) for (uint32_t Corner : Face) Mesh.Corners.push_back(Corner);   // indices are relative to the instance's VertexOffset
++    VertexBase = Base;
++    Triangles = 12u;
++    return FirstIndex;
++}
++
++uint32_t AppendSphere(SceneMesh& Mesh, float Radius, uint32_t Rings, uint32_t Segments, uint32_t& Triangles, uint32_t& VertexBase)
++{
++    const uint32_t FirstIndex = static_cast<uint32_t>(Mesh.Corners.size());
++    const uint32_t Base       = static_cast<uint32_t>(Mesh.Vertices.size());
++    for (uint32_t Ring = 0u; Ring <= Rings; ++Ring)
++        for (uint32_t Segment = 0u; Segment <= Segments; ++Segment)
++        {
++            const float Polar = 3.14159265f * float(Ring) / float(Rings), Azimuth = 6.2831853f * float(Segment) / float(Segments);
++            VertexRecord Vertex{};
++            Vertex.SpatialLocation = { Radius * std::sin(Polar) * std::cos(Azimuth), Radius * std::sin(Polar) * std::sin(Azimuth), Radius * std::cos(Polar) };
++            Mesh.Vertices.push_back(Vertex);
++        }
++    Triangles = 0u;
++    for (uint32_t Ring = 0u; Ring < Rings; ++Ring)
++        for (uint32_t Segment = 0u; Segment < Segments; ++Segment)
++        {
++            const uint32_t Alpha = Ring * (Segments + 1u) + Segment, Beta = Alpha + Segments + 1u;
++            for (uint32_t Corner : { Alpha, Beta, Alpha + 1u, Alpha + 1u, Beta, Beta + 1u }) Mesh.Corners.push_back(Corner);
++            Triangles += 2u;
++        }
++    VertexBase = Base;
++    return FirstIndex;
++}
++
++uint32_t AppendQuad(SceneMesh& Mesh, float HalfExtent, uint32_t& Triangles, uint32_t& VertexBase)
++{
++    const uint32_t FirstIndex = static_cast<uint32_t>(Mesh.Corners.size());
++    const uint32_t Base       = static_cast<uint32_t>(Mesh.Vertices.size());
++    for (uint32_t Corner = 0u; Corner < 4u; ++Corner)
++    {
++        VertexRecord Vertex{};
++        Vertex.SpatialLocation = { (Corner & 1u) ? HalfExtent : -HalfExtent, (Corner & 2u) ? HalfExtent : -HalfExtent, 0.0f };
++        Mesh.Vertices.push_back(Vertex);
++    }
++    for (uint32_t Corner : { 0u, 1u, 2u, 1u, 3u, 2u }) Mesh.Corners.push_back(Corner);
++    VertexBase = Base;
++    Triangles = 2u;
++    return FirstIndex;
++}
++
++void PlaceTransform(InstanceRecord& Row, float Yaw, const float Scale[3], const float Position[3])
++{
++    std::memset(Row.World, 0, sizeof(Row.World));
++    const float Cosine = std::cos(Yaw), Sine = std::sin(Yaw);
++    // column-major: World[column * 4 + row]
++    Row.World[0] = Cosine * Scale[0]; Row.World[1] = Sine * Scale[0];
++    Row.World[4] = -Sine * Scale[1];  Row.World[5] = Cosine * Scale[1];
++    Row.World[10] = Scale[2];
++    Row.World[12] = Position[0]; Row.World[13] = Position[1]; Row.World[14] = Position[2]; Row.World[15] = 1.0f;
++    std::memcpy(Row.PreviousWorld, Row.World, sizeof(Row.World));
++}
++
++float DistancePointSegment(const float Point[3], const float Start[3], const float End[3])
++{
++    float Edge[3], Delta[3];
++    float EdgeLength = 0.0f, Along = 0.0f;
++    for (uint32_t Axis = 0u; Axis < 3u; ++Axis) { Edge[Axis] = End[Axis] - Start[Axis]; Delta[Axis] = Point[Axis] - Start[Axis]; EdgeLength += Edge[Axis] * Edge[Axis]; Along += Edge[Axis] * Delta[Axis]; }
++    const float Weight = EdgeLength > 0.0f ? std::clamp(Along / EdgeLength, 0.0f, 1.0f) : 0.0f;
++    float Sum = 0.0f;
++    for (uint32_t Axis = 0u; Axis < 3u; ++Axis) { const float Offset = Delta[Axis] - Edge[Axis] * Weight; Sum += Offset * Offset; }
++    return std::sqrt(Sum);
++}
++
++/// 📝 Independent of the baker's Ericson walk: project onto the plane and accept the foot when it lies inside, otherwise take the nearest edge.
++float DistancePointTriangle(const float Point[3], const float Alpha[3], const float Beta[3], const float Gamma[3])
++{
++    float EdgeAlpha[3], EdgeBeta[3], Normal[3], Delta[3];
++    for (uint32_t Axis = 0u; Axis < 3u; ++Axis) { EdgeAlpha[Axis] = Beta[Axis] - Alpha[Axis]; EdgeBeta[Axis] = Gamma[Axis] - Alpha[Axis]; Delta[Axis] = Point[Axis] - Alpha[Axis]; }
++    Normal[0] = EdgeAlpha[1] * EdgeBeta[2] - EdgeAlpha[2] * EdgeBeta[1];
++    Normal[1] = EdgeAlpha[2] * EdgeBeta[0] - EdgeAlpha[0] * EdgeBeta[2];
++    Normal[2] = EdgeAlpha[0] * EdgeBeta[1] - EdgeAlpha[1] * EdgeBeta[0];
++    const float NormalLength = std::sqrt(Normal[0] * Normal[0] + Normal[1] * Normal[1] + Normal[2] * Normal[2]);
++    float       Best         = std::min({ DistancePointSegment(Point, Alpha, Beta), DistancePointSegment(Point, Beta, Gamma), DistancePointSegment(Point, Gamma, Alpha) });
++    if (NormalLength > 1.0e-12f)
++    {
++        const float Height = (Delta[0] * Normal[0] + Delta[1] * Normal[1] + Delta[2] * Normal[2]) / NormalLength;
++        float Foot[3];
++        for (uint32_t Axis = 0u; Axis < 3u; ++Axis) Foot[Axis] = Point[Axis] - Normal[Axis] / NormalLength * Height;
++        float Side[3][3];
++        const float* Corners[3] = { Alpha, Beta, Gamma };
++        bool Inside = true;
++        for (uint32_t Edge = 0u; Edge < 3u; ++Edge)
++        {
++            const float* Start = Corners[Edge]; const float* End = Corners[(Edge + 1u) % 3u];
++            const float Run[3] = { End[0] - Start[0], End[1] - Start[1], End[2] - Start[2] };
++            const float Rise[3] = { Foot[0] - Start[0], Foot[1] - Start[1], Foot[2] - Start[2] };
++            Side[Edge][0] = Run[1] * Rise[2] - Run[2] * Rise[1]; Side[Edge][1] = Run[2] * Rise[0] - Run[0] * Rise[2]; Side[Edge][2] = Run[0] * Rise[1] - Run[1] * Rise[0];
++            Inside &= (Side[Edge][0] * Normal[0] + Side[Edge][1] * Normal[1] + Side[Edge][2] * Normal[2]) >= 0.0f;
++        }
++        if (Inside) Best = std::min(Best, std::fabs(Height));
++    }
++    return Best;
++}
++
++float BruteForce(const SceneMesh& Mesh, const std::vector<InstanceRecord>& Rows, const float Point[3])
++{
++    float Best = 1.0e20f;
++    for (const InstanceRecord& Row : Rows)
++        for (uint32_t Primitive = 0u; Primitive < Row.TriangleCount; ++Primitive)
++        {
++            float Corners[3][3];
++            for (uint32_t Corner = 0u; Corner < 3u; ++Corner)
++            {
++                const Vector3& Local = Mesh.Vertices[Mesh.Corners[Row.FirstIndex + Primitive * 3u + Corner] + Row.VertexOffset].SpatialLocation;
++                for (uint32_t Axis = 0u; Axis < 3u; ++Axis)
++                    Corners[Corner][Axis] = Row.World[Axis] * Local.x + Row.World[4u + Axis] * Local.y + Row.World[8u + Axis] * Local.z + Row.World[12u + Axis];
++            }
++            Best = std::min(Best, DistancePointTriangle(Point, Corners[0], Corners[1], Corners[2]));
++        }
++    return Best;
++}
++} // namespace
++
++int main()
++{
++    FILE* Log = std::fopen("VisualProof/DistanceAtlas/DistanceAtlasChecks.log", "w");
++    std::printf("DistanceAtlasChecks\n");
++    if (Log) std::fprintf(Log, "DistanceAtlasChecks\n");
++    char Detail[256];
++
++    SceneMesh Mesh;
++    uint32_t  BoxTriangles = 0u, SphereTriangles = 0u, QuadTriangles = 0u, BoxBase = 0u, SphereBase = 0u, QuadBase = 0u;
++    const uint32_t BoxFirst    = AppendBox(Mesh, 0.5f, BoxTriangles, BoxBase);
++    const uint32_t SphereFirst = AppendSphere(Mesh, 1.0f, 96u, 192u, SphereTriangles, SphereBase);
++    const uint32_t QuadFirst   = AppendQuad(Mesh, 40.0f, QuadTriangles, QuadBase);
++    std::vector<InstanceRecord> Rows(4);
++    for (auto& Row : Rows) std::memset(&Row, 0, sizeof(Row));
++    const float One[3] = { 1.0f, 1.0f, 1.0f };
++    const float Origin[3] = { 0.0f, 0.0f, 0.5f };
++    const float SphereAt[3] = { 5.0f, 0.0f, 1.5f };
++    const float SphereScale[3] = { 1.5f, 1.5f, 1.5f };
++    const float BoxAt[3] = { 0.0f, 6.0f, 1.0f };
++    const float BoxScale[3] = { 1.4f, 1.4f, 1.4f };
++    const float Ground[3] = { 0.0f, 0.0f, 0.0f };
++    Rows[0].FirstIndex = BoxFirst;    Rows[0].VertexOffset = BoxBase;    Rows[0].TriangleCount = BoxTriangles;    PlaceTransform(Rows[0], 0.0f, One, Origin);
++    Rows[1].FirstIndex = SphereFirst; Rows[1].VertexOffset = SphereBase; Rows[1].TriangleCount = SphereTriangles; PlaceTransform(Rows[1], 0.4f, SphereScale, SphereAt);
++    Rows[2].FirstIndex = BoxFirst;    Rows[2].VertexOffset = BoxBase;    Rows[2].TriangleCount = BoxTriangles;    PlaceTransform(Rows[2], 0.5236f, BoxScale, BoxAt);   // shares instance 0's mesh
++    Rows[3].FirstIndex = QuadFirst;   Rows[3].VertexOffset = QuadBase;   Rows[3].TriangleCount = QuadTriangles;   PlaceTransform(Rows[3], 0.0f, One, Ground);
++
++    DistanceAtlasSpace Atlas;
++    DistanceAtlasSettings Settings{};
++    const bool Baked = Atlas.Bake(Mesh.Vertices, Mesh.Corners, Rows, Settings);
++    std::snprintf(Detail, sizeof(Detail), "%u volumes for %u instances, %llu voxels, %.3f s, voxel %.3f..%.3f m", Atlas.QueryReport().Volumes, Atlas.QueryReport().Instances,
++                  static_cast<unsigned long long>(Atlas.QueryReport().Voxels), Atlas.QueryReport().Seconds, Atlas.QueryReport().FinestVoxel, Atlas.QueryReport().CoarsestVoxel);
++    Report(Baked && Atlas.QueryReport().Volumes == 3u, "bake shares the mesh of instances 0 and 2", Detail, Log);
++
++    std::mt19937 Random(7u);
++    std::uniform_real_distribution<float> Unit(0.0f, 1.0f);
++    const auto Measure = [&](const std::vector<InstanceRecord>& Pose, float& WorstOver, float& WorstUnder, float& MeanError)
++    {
++        WorstOver = WorstUnder = MeanError = 0.0f;
++        const uint32_t SampleCount = 4000u;
++        for (uint32_t Index = 0u; Index < SampleCount; ++Index)
++        {
++            const float Point[3] = { -12.0f + 24.0f * Unit(Random), -12.0f + 24.0f * Unit(Random), 0.05f + 6.0f * Unit(Random) };
++            float       Cell     = 0.0f;
++            const float Sampled  = Atlas.Sample(Point, Cell);
++            const float Truth    = BruteForce(Mesh, Pose, Point);
++            const float Error    = Sampled - Truth;
++            WorstOver  = std::max(WorstOver, Error);
++            WorstUnder = std::max(WorstUnder, -Error);
++            MeanError += std::fabs(Error) / float(SampleCount);
++        }
++    };
++    float Over = 0.0f, Under = 0.0f, Mean = 0.0f;
++    Measure(Rows, Over, Under, Mean);
++    const float CoarsestWorld = Atlas.QueryReport().CoarsestVoxel * 2.0f;
++    std::snprintf(Detail, sizeof(Detail), "4000 points: worst over %.4f m, worst under %.4f m, mean |error| %.4f m (voxel %.3f m)", Over, Under, Mean, Atlas.QueryReport().FinestVoxel);
++    Report(Over <= CoarsestWorld && Under <= CoarsestWorld, "baked pose matches brute-force triangle distance", Detail, Log);
++
++    // Move instance 2 and the sphere; only the placement may change.
++    const float* DataBefore = Atlas.QueryAtlas().data();
++    const size_t SizeBefore = Atlas.QueryAtlas().size();
++    const uint32_t BakesBefore = Atlas.QueryBakeCount();
++    const uint64_t RevisionBefore = Atlas.QueryPlacementRevision();
++    std::vector<InstanceRecord> Moved = Rows;
++    const float NewBoxAt[3] = { -7.0f, -4.0f, 1.5f };
++    const float NewBoxScale[3] = { 0.8f, 0.8f, 0.8f };
++    PlaceTransform(Moved[2], -1.1f, NewBoxScale, NewBoxAt);
++    const float NewSphereAt[3] = { 3.0f, 8.0f, 2.5f };
++    PlaceTransform(Moved[1], 1.0f, SphereScale, NewSphereAt);
++    const bool Projected = Atlas.Project(Moved.data(), static_cast<uint32_t>(Moved.size()));
++    std::snprintf(Detail, sizeof(Detail), "bakes %u->%u, atlas %zu floats unchanged, revision %llu->%llu, moved %u", BakesBefore, Atlas.QueryBakeCount(), SizeBefore,
++                  static_cast<unsigned long long>(RevisionBefore), static_cast<unsigned long long>(Atlas.QueryPlacementRevision()), Atlas.QueryMovedCount());
++    Report(Projected && Atlas.QueryBakeCount() == BakesBefore && Atlas.QueryAtlas().data() == DataBefore && Atlas.QueryAtlas().size() == SizeBefore &&
++           Atlas.QueryPlacementRevision() == RevisionBefore + 1u && Atlas.QueryMovedCount() == 2u,
++           "moving instances re-places without re-baking", Detail, Log);
++    Measure(Moved, Over, Under, Mean);
++    std::snprintf(Detail, sizeof(Detail), "4000 points after the move: worst over %.4f m, worst under %.4f m, mean |error| %.4f m", Over, Under, Mean);
++    Report(Over <= CoarsestWorld && Under <= CoarsestWorld, "moved pose matches brute-force triangle distance", Detail, Log);
++
++    const uint64_t RevisionMoved = Atlas.QueryPlacementRevision();
++    (void)Atlas.Project(Moved.data(), static_cast<uint32_t>(Moved.size()));
++    Report(Atlas.QueryPlacementRevision() == RevisionMoved, "an unchanged pose does not bump the placement revision", "revision stable", Log);
++
++    // Non-uniform scale: the field may underestimate (it scales by the smallest singular value) but must never overestimate.
++    const float StretchScale[3] = { 1.5f, 0.75f, 2.0f };
++    std::vector<InstanceRecord> Stretched = Moved;
++    PlaceTransform(Stretched[2], -1.1f, StretchScale, NewBoxAt);
++    (void)Atlas.Project(Stretched.data(), static_cast<uint32_t>(Stretched.size()));
++    Measure(Stretched, Over, Under, Mean);
++    std::snprintf(Detail, sizeof(Detail), "stretched box (1.5, 0.75, 2): worst over %.4f m, worst under %.4f m (underestimate is the price of one scalar scale)", Over, Under);
++    Report(Over <= CoarsestWorld, "non-uniform scale never overestimates", Detail, Log);
++
++    // Thread-count independence.
++    DistanceAtlasSpace Single, Many;
++    DistanceAtlasSettings OneThread{}; OneThread.ThreadCount = 1u;
++    DistanceAtlasSettings EightThreads{}; EightThreads.ThreadCount = 8u;
++    const bool BakedSingle = Single.Bake(Mesh.Vertices, Mesh.Corners, Rows, OneThread);
++    const bool BakedMany   = Many.Bake(Mesh.Vertices, Mesh.Corners, Rows, EightThreads);
++    std::snprintf(Detail, sizeof(Detail), "1 thread %.3f s, 8 threads %.3f s", Single.QueryReport().Seconds, Many.QueryReport().Seconds);
++    float WorstDifference = 0.0f;
++    for (size_t Index = 0u; Index < Single.QueryAtlas().size() && Index < Many.QueryAtlas().size(); ++Index)
++        WorstDifference = std::max(WorstDifference, std::fabs(Single.QueryAtlas()[Index] - Many.QueryAtlas()[Index]));
++    std::snprintf(Detail + std::strlen(Detail), sizeof(Detail) - std::strlen(Detail), ", worst difference %.2e m", WorstDifference);
++    Report(BakedSingle && BakedMany && Single.QueryAtlas().size() == Many.QueryAtlas().size() && WorstDifference < 1.0e-5f, "bake agrees across thread counts", Detail, Log);
++
++    std::printf("%s (%d failures)\n", FailureCount ? "FAILED" : "ALL PASSED", FailureCount);
++    if (Log) { std::fprintf(Log, "%s (%d failures)\n", FailureCount ? "FAILED" : "ALL PASSED", FailureCount); std::fclose(Log); }
++    return FailureCount ? 1 : 0;
++}
+-- 
+2.39.5
+
