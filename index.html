@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Frontier — AAA WebGPU Procedural Road & Urban Network Generator</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="workspace">
+    <!-- ======================================================================
+         LEFT DOCK: ProjectZeroEditor Outliner + Quad Topology Telemetry + Quick Actions
+         ====================================================================== -->
+    <aside class="dock dock-left">
+      <div class="tab-strip">
+        <button class="document-tab active" type="button">
+          <span class="dot"></span>
+          <span>Outliner &amp; Topology</span>
+        </button>
+      </div>
+
+      <div class="dock-body">
+        <div class="outliner-header-row">
+          <span class="outliner-heading">Mesh &amp; Traffic Telemetry</span>
+          <span id="stat-fps" style="font-size:10.5px; color:#34c759; font-weight:600;">60 FPS</span>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-cell">
+            <span class="stat-label">Quad Faces</span>
+            <span class="stat-val amber" id="stat-quads">25,712</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-label">Tri Faces (Quad %)</span>
+            <span class="stat-val" id="stat-tris">51,424 (100%)</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-label">1-Mesh Junctions</span>
+            <span class="stat-val cyan" id="stat-junctions">3 Merged</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-label">AI Traffic Cap</span>
+            <span class="stat-val amber" id="stat-vehicles">18 / 25</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-label">City Blocks</span>
+            <span class="stat-val" id="stat-blocks">9 Parcels</span>
+          </div>
+          <div class="stat-cell">
+            <span class="stat-label">Subsurface</span>
+            <span class="stat-val cyan">Rail + Subway</span>
+          </div>
+        </div>
+
+        <div class="outliner-actions">
+          <button class="btn-action primary" id="btn-new-curve" type="button" title="Draw a curved road spline (P)">+ Draw Curve (P)</button>
+          <button class="btn-action" id="btn-add-crossing" type="button" title="Add a curved crossing road to see automatic Y/+ intersection merging">+ Auto-Cross Road</button>
+          <button class="btn-action" id="btn-frame-scene" type="button" title="Frame camera on road network (F)">Frame Scene (F)</button>
+          <button class="btn-action" id="btn-export-obj" type="button" title="Export Quad-Dominant Wavefront .OBJ">Export Quad .OBJ</button>
+        </div>
+
+        <div class="outliner-list" id="outliner-list"></div>
+      </div>
+    </aside>
+
+    <!-- ======================================================================
+         CENTER DOCK: Preset Document Tabs + WebGPU 3D Viewport + 2D Plan Split
+         ====================================================================== -->
+    <main class="dock dock-center">
+      <div class="tab-strip">
+        <button class="document-tab active" data-preset="metropolis" type="button">
+          <span class="dot"></span>
+          <span>Grand Metropolis</span>
+        </button>
+        <button class="document-tab" data-preset="interchange" type="button">
+          <span>Cloverleaf &amp; Rail Underpass</span>
+        </button>
+        <button class="document-tab" data-preset="european" type="button">
+          <span>European Cobble &amp; Y-Plazas</span>
+        </button>
+        <button class="document-tab" data-preset="construction" type="button">
+          <span>Active Roadwork &amp; Tunnel</span>
+        </button>
+
+        <div class="header-status-pills">
+          <span class="status-badge gpu" id="badge-gpu">WebGPU Native WGSL</span>
+          <span class="status-badge quads" id="badge-quads">100% Quads · 3 Merged Junctions</span>
+          <span class="status-badge" id="badge-traffic">AI Traffic: 18/25</span>
+        </div>
+      </div>
+
+      <div class="viewport-shell">
+        <canvas id="gpu-canvas"></canvas>
+        <canvas id="overlay-canvas"></canvas>
+
+        <!-- ProjectZeroEditor Floating Viewport Toolbar -->
+        <div class="viewport-toolbar">
+          <button class="vp-btn active" data-tool="select" type="button" title="Select &amp; Move Intersection / Node with 3D Gizmo (V)">
+            <span>Select &amp; Gizmo</span>
+            <span class="kbd">V</span>
+          </button>
+          <button class="vp-btn" data-tool="draw" type="button" title="Draw Curved Spline Road with Auto-Merge Intersections (P)">
+            <span>Draw Curve</span>
+            <span class="kbd">P</span>
+          </button>
+          <button class="vp-btn" data-tool="insert" type="button" title="Insert Control Point on Curve (I)">
+            <span>Insert Point</span>
+            <span class="kbd">I</span>
+          </button>
+
+          <div class="toolbar-divider"></div>
+
+          <select class="vp-select" id="sel-render-mode" title="Viewport Shading &amp; Quad Topology Mode (W)">
+            <option value="0">Shading: PBR Lit</option>
+            <option value="1">Shading: PBR + Quad Cage (W)</option>
+            <option value="2">Shading: Pure Quad Cage</option>
+            <option value="3">Shading: Triangle Wire</option>
+            <option value="4">Shading: Studio Clay</option>
+            <option value="5">Shading: Layer Mask Heatmap</option>
+          </select>
+
+          <button class="vp-btn" id="btn-split-view" type="button" title="Toggle Synchronized 2D Ortho Plan + 3D WebGPU Split View (S)">
+            <span>Split 2D/3D</span>
+            <span class="kbd">S</span>
+          </button>
+          <button class="vp-btn" id="btn-cutaway" type="button" title="Cutaway Ground to Inspect Underground Subway &amp; Road Tunnels (U)">
+            <span>Subsurface X-Ray</span>
+            <span class="kbd">U</span>
+          </button>
+
+          <div class="toolbar-divider"></div>
+
+          <select class="vp-select" id="sel-follow-actor" title="Camera Ride-Along Mode">
+            <option value="">Cam: Free Orbit</option>
+            <option value="car">Ride: AI Vehicle #1</option>
+            <option value="train">Ride: Express Train</option>
+            <option value="subway">Ride: Subway Metro</option>
+            <option value="robot">Ride: Sidewalk Robot</option>
+          </select>
+
+          <button class="vp-btn active" id="btn-sim-toggle" type="button" title="Play / Pause AI Traffic, Trains &amp; Robots (Space)">
+            <span>AI Traffic Live</span>
+            <span class="kbd">Space</span>
+          </button>
+        </div>
+
+        <div class="viewport-hud-bottom">
+          <div class="hud-pill" id="hud-hint-text">
+            <strong>Select &amp; Gizmo Mode (V):</strong> Click any <strong>Merged Intersection (+ / Y / T)</strong> badge or gizmo axis to move the entire intersection at once.
+          </div>
+          <div class="hud-pill">
+            <span>No Node Editor · Dual LayerStack Workflow</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <!-- ======================================================================
+         RIGHT DOCK: Inspector (Top) + Dual LayerStack (Road Generation + Texture/PBR)
+         ====================================================================== -->
+    <aside class="dock dock-right">
+      <div class="right-split-container">
+        <!-- 1. Inspector on the Right -->
+        <section class="inspector-pane" id="inspector-pane">
+          <div class="pane-section-bar" id="inspector-header-bar">
+            <div class="pane-section-title">
+              <span>Inspector</span>
+              <span class="pane-section-badge" id="inspector-badge">4-Way + · 4 Arms</span>
+            </div>
+            <span style="font-size:10px; color:#777;">Click to Fold</span>
+          </div>
+          <div class="inspector-scroll" id="inspector-body"></div>
+        </section>
+
+        <!-- 2. LayerStack Panel on the Right (Road Stack + Texture Stack) -->
+        <section class="layerstack-pane">
+          <div class="layerstack-switcher">
+            <button class="stack-tab-btn" data-stack-tab="road" type="button">
+              <span>Road Stack</span>
+              <span class="count">10</span>
+            </button>
+            <button class="stack-tab-btn" data-stack-tab="texture" type="button">
+              <span>Texture Stack</span>
+              <span class="count">8</span>
+            </button>
+            <button class="stack-tab-btn active" data-stack-tab="both" type="button">
+              <span>Both Stacks</span>
+              <span class="count">18</span>
+            </button>
+          </div>
+
+          <div class="stack-scroll" id="layerstack-scroll"></div>
+        </section>
+      </div>
+    </aside>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
