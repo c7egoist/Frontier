@@ -1,3 +1,4 @@
+import { cubicProfile } from "./cubic-analysis";
 import {
   supportsAuxiliary,
   auxiliaryDimensions,
@@ -15,6 +16,9 @@ import {
 import { bridgeAt, parameterStation } from "./bridge-profile";
 import {
   reviewDesign,
+  curveDesignMetrics,
+  curveIssueMessages,
+  measureGradeJoins,
   type DesignReview,
   type StructureIssue,
 } from "./design-controls";
@@ -103,6 +107,7 @@ import {
 } from "./math";
 import { detectCrossings } from "./editing";
 import {
+  controlPoints,
   connected,
   getNode,
   validateGenerationBudget,
@@ -221,7 +226,7 @@ export interface Network {
   vertices: number;
   inlets: number;
   bounds: { min: V3; max: V3 };
-  maxGrade: number;
+  maxGrade: number | null;
   clearances: { a: string; b: string; meters: number }[];
   parkingSpaces: number;
   roadsideParking: RoadsideParkingBay[];
@@ -748,11 +753,9 @@ function makeFrames(
   length: number,
 ) {
   let limited = false;
-  const frames = stations.map((s, i) => {
-    const a = stations[Math.max(0, i - 1)],
-      b = stations[Math.min(stations.length - 1, i + 1)];
-    const angle = Math.acos(clamp(dotXZ(a.d, b.d), -1, 1)),
-      radius = angle > 1e-5 ? distanceXZ(a.p, b.p) / angle : Infinity;
+  const differential = cubicProfile(controlPoints(project, road));
+  const frames = stations.map((s) => {
+    const radius = differential.radiusAt(s.t);
     const scale = Math.min(
       1,
       (radius * 0.78) / (roadHalfWidth(road) + road.sidewalk + 0.6),
@@ -793,11 +796,10 @@ export function frameAt(span: RoadSpan, s: number): Frame {
     a = span.frames[i - 1],
     b = span.frames[i],
     t = (s - a.s) / Math.max(1e-8, b.s - a.s);
+  const station = stationAt(span.alignment, s);
   return {
-    ...stationAt(span.alignment, s),
-    roadBaseDepth: bridgeAt(span.road, stationAt(span.alignment, s).t)
-      ? 0.28
-      : 0.48,
+    ...station,
+    roadBaseDepth: bridgeAt(span.road, station.t) ? 0.28 : 0.48,
     profileScale:
       (a.profileScale ?? 1) +
       ((b.profileScale ?? 1) - (a.profileScale ?? 1)) * t,
@@ -1665,10 +1667,28 @@ export function buildNetwork(
     }[] = [];
   let length = 0,
     inlets = 0,
-    maxGrade = 0;
+    maxGrade: number | null = 0;
   for (const road of project.roads) {
     const alignment = alignments.get(road.id)!;
     length += alignment.length;
+    const metric = curveDesignMetrics(alignment.points);
+    if (metric.maximumGrade === null) maxGrade = null;
+    else if (maxGrade !== null)
+      maxGrade = Math.max(maxGrade, metric.maximumGrade);
+    for (const issue of metric.issues)
+      diagnostics.push({
+        level: "error",
+        owner: road.id,
+        message: `${road.name}: ${curveIssueMessages[issue.kind]} (curve ${(issue.parameter * 100).toFixed(4)}%).`,
+      });
+    if (metric.planLength < 0.2) {
+      diagnostics.push({
+        level: "error",
+        owner: road.id,
+        message: `${road.name}: zero-length horizontal road.`,
+      });
+      continue;
+    }
     if (hasSelfCrossing(alignment))
       diagnostics.push({
         level: "error",
@@ -1775,28 +1795,14 @@ export function buildNetwork(
       length: alignment.length - start - end,
     };
     spans.push(span);
-    for (const f of alignment.stations) {
-      const before = alignment.points;
-      const t = f.t,
-        u = 1 - t;
-      const dy =
-        3 * u * u * (before[1][1] - before[0][1]) +
-        6 * u * t * (before[2][1] - before[1][1]) +
-        3 * t * t * (before[3][1] - before[2][1]);
-      const dx =
-        3 * u * u * (before[1][0] - before[0][0]) +
-        6 * u * t * (before[2][0] - before[1][0]) +
-        3 * t * t * (before[3][0] - before[2][0]);
-      const dz =
-        3 * u * u * (before[1][2] - before[0][2]) +
-        6 * u * t * (before[2][2] - before[1][2]) +
-        3 * t * t * (before[3][2] - before[2][2]);
-      maxGrade = Math.max(
-        maxGrade,
-        (Math.abs(dy) / Math.max(0.001, Math.hypot(dx, dz))) * 100,
-      );
-    }
   }
+  for (const join of measureGradeJoins(project))
+    if (join.assessed && !join.continuous)
+      diagnostics.push({
+        owner: join.owner,
+        level: "warning",
+        message: `${getNode(project, join.owner).name}: vertical grade discontinuity ${join.delta === null ? "is unbounded" : `${join.delta.toFixed(2)} percentage points`}. Retune the connected vertical handles.`,
+      });
   fitJunctionFootways(jointNodes, spans, diagnostics);
   for (const span of spans) {
     const road = span.road;
@@ -1843,7 +1849,7 @@ export function buildNetwork(
     inlets += result.inlets;
     services.push(...result.services);
   }
-  if (maxGrade > 14)
+  if (maxGrade !== null && maxGrade > 14)
     diagnostics.push({
       level: "warning",
       message: `Maximum grade is ${maxGrade.toFixed(1)}%. Lengthen the approach or reduce its elevation.`,

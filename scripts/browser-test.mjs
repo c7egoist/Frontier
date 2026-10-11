@@ -174,6 +174,268 @@ try {
       e.dispatchEvent(new Event("change", { bubbles: true }));
     }, value);
   };
+  function cubicFixture(points, name = "Cubic audit fixture", settings = {}) {
+    return {
+      version: 1,
+      name,
+      nodes: [
+        {
+          id: "cubic-a",
+          name: "Curve in",
+          position: points[0],
+          radius: 3,
+          crossings: false,
+        },
+        {
+          id: "cubic-z",
+          name: "Curve out",
+          position: points[3],
+          radius: 3,
+          crossings: false,
+        },
+      ],
+      roads: [
+        {
+          id: "cubic-road",
+          name: "Audited cubic",
+          start: "cubic-a",
+          end: "cubic-z",
+          h1: points[1].map((v, i) => v - points[0][i]),
+          h2: points[2].map((v, i) => v - points[3][i]),
+          oneWay: true,
+          lanes: 2,
+          laneWidth: 3.65,
+          shoulderWidth: 2,
+          sidewalk: 0,
+          curbStyle: "flush",
+          markingStyle: "motorway",
+          roadClass: "mainline",
+          drainage: false,
+          manholes: false,
+          signs: false,
+          ...settings,
+        },
+      ],
+      sites: [],
+    };
+  }
+  async function importCubicFixture(p, target = page) {
+    await target.locator("#project-file").setInputFiles({
+      name: "cubic-audit.road.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(p)),
+    });
+    await target.waitForFunction(
+      (name) =>
+        window.frontier.getProject().name === name &&
+        !document.querySelector("#project-file").value,
+      p.name,
+    );
+    await target.evaluate(() =>
+      window.frontier.select({ kind: "road", id: "cubic-road" }),
+    );
+    await target.locator('[data-inspector-tab="geometry"]').click();
+  }
+  await test("cubic audit: the actual narrow grade/radius peak is measured and pinned in both editing and production", async () => {
+    const a = 0.50135,
+      C = 6000,
+      e = 1e-6,
+      b = 0.05,
+      vs = [
+        [C * (a * a + e), -2 * C * a, C],
+        [C * e, 0, 0],
+        [-C * b * a, C * b, 0],
+      ],
+      p0 = [0, 0, 0],
+      p1 = vs.map((v) => v[0] / 3),
+      p2 = vs.map((v, i) => 2 * p1[i] + v[1] / 6),
+      p3 = vs.map((v, i) => 3 * p2[i] - 3 * p1[i] + v[2] / 3);
+    await importCubicFixture(cubicFixture([p0, p1, p2, p3]));
+    const metrics = () =>
+      page.evaluate(() => ({
+        m: window.frontier
+          .getNetwork()
+          .designReview.roads.find((r) => r.owner === "cubic-road"),
+        max: window.frontier.getNetwork().maxGrade,
+        knots: window.frontier
+          .getNetwork()
+          .spans[0].alignment.stations.map((f) => f.t),
+      }));
+    let s = await metrics();
+    assert(Math.abs(s.m.maximumGrade - 100) < 0.001);
+    assert(Math.abs(s.m.maximumGradeParameter - a) < 1e-10);
+    assert(s.m.minimumRadius < 1e-6);
+    assert(!s.m.meetsReference);
+    assert(s.knots.some((t) => Math.abs(t - a) < 1e-10));
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Maximum alignment grade"]')
+        .textContent(),
+      "100.00%",
+    );
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Maximum grade position"]')
+        .textContent(),
+      "50.1350% curve",
+    );
+    assert.equal(
+      await page.locator("[data-design-status]").textContent(),
+      "Review geometry",
+    );
+    await page.locator("#geometry-detail").selectOption("production");
+    const dense = await metrics();
+    assert(Math.abs(dense.m.maximumGrade - s.m.maximumGrade) < 1e-9);
+    assert(dense.knots.some((t) => Math.abs(t - a) < 1e-10));
+    await page.locator("#geometry-detail").selectOption("editing");
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "cubic-critical-peak.png"),
+    });
+  });
+  await test("cubic audit: reversing and vertical tangents are explicit errors while JSON, repair, undo and redo remain available", async () => {
+    const bad = cubicFixture(
+      [
+        [0, 0, 0],
+        [200, 0, 0],
+        [-200, 0, 0],
+        [100, 0, 0],
+      ],
+      "Reversing street",
+      { roadClass: "street", markingStyle: "urban", shoulderWidth: 0 },
+    );
+    await importCubicFixture(bad);
+    let s = await referenceState();
+    assert(s.design.alignmentIssues.some((i) => i.kind === "plan-reversal"));
+    assert(s.diagnostics.some((d) => d.level === "error"));
+    assert(!s.design.withinSelectedTargets);
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Minimum alignment radius"]')
+        .textContent(),
+      "0.0 m",
+    );
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Curve regularity"]')
+        .textContent(),
+      "Review curve tangents",
+    );
+    assert.equal(
+      await page.locator("[data-design-status]").textContent(),
+      "Review geometry",
+    );
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator('#export-menu [data-action="glb"]').click();
+    await page.waitForFunction(() =>
+      document
+        .querySelector("#toast")
+        .textContent.includes("Fix invalid geometry"),
+    );
+    await page.locator('[data-menu="export-menu"]').click();
+    const promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('#export-menu [data-action="json"]').click();
+    const d = await promise,
+      p = JSON.parse((await readFile(await d.path())).toString());
+    assert.deepEqual(p, (await referenceState()).project);
+    const healthy = cubicFixture(
+      [
+        [0, 0, 0],
+        [100 / 3, 0, 0],
+        [200 / 3, 0, 0],
+        [100, 0, 0],
+      ],
+      "Repaired street",
+      { roadClass: "street", markingStyle: "urban", shoulderWidth: 0 },
+    );
+    await importCubicFixture(healthy);
+    assert.deepEqual((await referenceState()).diagnostics, []);
+    await undo();
+    assert((await referenceState()).design.alignmentIssues.length > 0);
+    await page.locator("#redo-button").click();
+    assert.deepEqual((await referenceState()).diagnostics, []);
+    await importCubicFixture(
+      cubicFixture(
+        [
+          [0, 0, 0],
+          [0, 1, 0],
+          [100, 2, 0],
+          [300, 3, 0],
+        ],
+        "Vertical tangent",
+      ),
+    );
+    assert.equal(
+      await page.evaluate(() => window.frontier.getNetwork().maxGrade),
+      null,
+    );
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Maximum alignment grade"]')
+        .textContent(),
+      "Unbounded",
+    );
+    assert(
+      (await referenceState()).design.alignmentIssues.some(
+        (i) => i.kind === "vertical-tangent",
+      ),
+    );
+  });
+  await test("cubic audit: bridge insertion retains original endpoint grades and displays continuous shared landings", async () => {
+    await importCubicFixture(
+      cubicFixture(
+        [
+          [-450, 0, 0],
+          [-150, 2 / 3, 0],
+          [150, 4 / 3, 0],
+          [450, 2, 0],
+        ],
+        "Graded bridge host",
+      ),
+    );
+    const before = await referenceState();
+    await page.locator('[data-inspector-tab="details"]').click();
+    await page.locator('[data-inspector-action="insert-bridge"]').click();
+    const s = await referenceState();
+    assert.equal(s.project.roads.length, 3);
+    assert(s.design.gradeJoins.every((j) => j.continuous));
+    assert(s.design.gradeJoins.length === 2);
+    for (const node of before.project.nodes)
+      assert.deepEqual(
+        s.project.nodes.find((n) => n.id === node.id),
+        node,
+      );
+    assert(Math.abs(s.design.bridgeLength - 64) < 1e-6);
+    const inRoad = s.project.roads.find((r) => r.name.includes("approach in")),
+      outRoad = s.project.roads.find((r) => r.name.includes("approach out"));
+    assert(
+      Math.abs(
+        (100 * inRoad.h1[1]) / Math.hypot(inRoad.h1[0], inRoad.h1[2]) -
+          (2 / 900) * 100,
+      ) < 1e-9,
+    );
+    assert(
+      Math.abs(
+        (-100 * outRoad.h2[1]) / Math.hypot(outRoad.h2[0], outRoad.h2[2]) -
+          (2 / 900) * 100,
+      ) < 1e-9,
+    );
+    await page.evaluate(
+      (id) => window.frontier.select({ kind: "node", id }),
+      inRoad.end,
+    );
+    await page.locator('[data-inspector-tab="geometry"]').click();
+    assert.equal(
+      await page.locator("[data-grade-join]").textContent(),
+      "0.0000 pp",
+    );
+    await undo();
+    assert.deepEqual((await referenceState()).project, before.project);
+    await page.locator("#redo-button").click();
+    assert(
+      (await referenceState()).design.gradeJoins.every((j) => j.continuous),
+    );
+  });
   await test("continuity: tapered bridge bearings match every fixed girder and expose honest spacing ranges", async () => {
     await importReferenceFixture(
       {
@@ -475,7 +737,9 @@ try {
     assert(
       s.design.weaves.every(
         (w) =>
-          w.nodeSpacing === 304 && w.noseSpacing > 410 && w.noseSpacing < 412,
+          Math.abs(w.nodeSpacing - 304) < 1e-7 &&
+          w.noseSpacing > 410 &&
+          w.noseSpacing < 412,
       ),
     );
     assert.equal(s.auxiliary.length, 8);
@@ -3790,6 +4054,62 @@ try {
       path: resolve(cache, "offline-roadside-parking.png"),
     });
     // The shared single-process Chromium context stays alive until the final check.
+  });
+  await test("cubic audit: offline polynomial checks reject reversals and preserve valid zero-handle straight geometry", async () => {
+    const offline =
+        offlinePage ??
+        (await browser.newPage({ viewport: { width: 1512, height: 982 } })),
+      requests = [],
+      offlineErrors = [];
+    offlinePage = offline;
+    offline.on("pageerror", (e) => offlineErrors.push(e.message));
+    await offline.route(/^https?:\/\//, (r) => {
+      requests.push(r.request().url());
+      return r.abort();
+    });
+    await offline.goto(`file://${resolve("RoadDesigner.html")}`);
+    await offline.waitForFunction(() => !!window.frontier);
+    await importCubicFixture(
+      cubicFixture(
+        [
+          [0, 0, 0],
+          [200, 0, 0],
+          [-200, 0, 0],
+          [100, 0, 0],
+        ],
+        "Offline reversing cubic",
+      ),
+      offline,
+    );
+    assert(
+      await offline.evaluate(() =>
+        window.frontier
+          .getNetwork()
+          .designReview.alignmentIssues.some((i) => i.kind === "plan-reversal"),
+      ),
+    );
+    await importCubicFixture(
+      cubicFixture(
+        [
+          [0, 0, 0],
+          [0, 0, 0],
+          [0, 0, 100],
+          [0, 0, 300],
+        ],
+        "Offline valid tangent",
+      ),
+      offline,
+    );
+    const data = await offline.evaluate(() => ({
+      diagnostics: window.frontier.getNetwork().diagnostics,
+      d: window.frontier.getNetwork().spans[0].frames[0].d,
+      issues: window.frontier.getNetwork().designReview.alignmentIssues,
+    }));
+    assert.deepEqual(data.diagnostics, []);
+    assert.deepEqual(data.issues, []);
+    assert.deepEqual(data.d, [0, 0, 1]);
+    assert.deepEqual(requests, []);
+    assert.deepEqual(offlineErrors, []);
   });
   await test("continuity: standalone seat metadata, landing protection and undo run fully offline", async () => {
     const offline =

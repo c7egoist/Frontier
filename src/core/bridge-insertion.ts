@@ -1,3 +1,4 @@
+import { cubicProfile, analyzeCubic } from "./cubic-analysis";
 import { buildNetwork } from "./geometry";
 import { referenceLayout } from "./design-basis";
 import { bridgeAt } from "./bridge-profile";
@@ -10,7 +11,7 @@ import {
 } from "./model";
 import { sampleAlignment, stationAt } from "./curves";
 import { splitRoad, detectCrossings } from "./editing";
-import { derivative, cubic } from "./math";
+import { cubic } from "./math";
 export interface BridgeInsertion {
   bridge: string;
   approaches: [string, string];
@@ -42,7 +43,24 @@ export function insertConnectedBridge(
     throw new RangeError(
       "Choose an alignment without an authored speed-change lane before inserting a bridge.",
     );
-  const alignment = sampleAlignment(project, original),
+  const originalCurve = controlPoints(project, original),
+    originalMetric = analyzeCubic(originalCurve),
+    originalProfile = cubicProfile(originalCurve);
+  if (originalMetric.issues.length)
+    throw new RangeError(
+      "This alignment has a reversing, vertical or zero-radius tangent. Fix its handles before inserting a bridge.",
+    );
+  const spatial = sampleAlignment(project, original);
+  let planStation = 0;
+  const stations = spatial.stations.map((f, i) => {
+      if (i)
+        planStation += Math.hypot(
+          f.p[0] - spatial.stations[i - 1].p[0],
+          f.p[2] - spatial.stations[i - 1].p[2],
+        );
+      return { ...f, s: planStation };
+    }),
+    alignment = { ...spatial, stations, length: planStation },
     length = alignment.length,
     rise = options.rise ?? referenceLayout.deckElevation,
     deckLength = 64,
@@ -95,16 +113,23 @@ export function insertConnectedBridge(
       piece.railHeight = Math.max(0.95, piece.railHeight);
     }
     piece.h1[1] = piece.h2[1] = 0;
-    const points = controlPoints(draft, piece),
-      alignment = sampleAlignment(draft, piece);
-    for (const station of alignment.stations) {
-      const d = derivative(points, station.t),
-        grade = (Math.abs(d[1]) / Math.max(1e-8, Math.hypot(d[0], d[2]))) * 100;
-      if (grade > 4.05)
-        throw new RangeError(
-          "This curve cannot fit approaches at approximately 4% grade. Lengthen the alignment or reduce the bridge rise.",
-        );
-    }
+    if (piece.id === approachIn.id)
+      piece.h1[1] =
+        ((originalProfile.signedGradeAt(0) ?? 0) / 100) *
+        Math.hypot(piece.h1[0], piece.h1[2]);
+    if (piece.id === approachOut.id)
+      piece.h2[1] =
+        (-(originalProfile.signedGradeAt(1) ?? 0) / 100) *
+        Math.hypot(piece.h2[0], piece.h2[2]);
+    const metric = analyzeCubic(controlPoints(draft, piece));
+    if (
+      metric.issues.length ||
+      metric.maximumGrade === null ||
+      metric.maximumGrade > 4.05
+    )
+      throw new RangeError(
+        "This curve cannot fit grade-continuous approaches at approximately 4% grade. Lengthen the alignment or reduce the bridge rise.",
+      );
   }
   approachIn.name = `${original.name} · Bridge approach in`;
   deck.name = `${original.name} · Connected bridge deck`;

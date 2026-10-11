@@ -111,7 +111,7 @@ describe("published-reference interchange geometry", () => {
       [300, 3, 0],
     ]);
     assert.equal(straight.minimumRadius, null);
-    close(straight.maximumGrade, 1);
+    close(straight.maximumGrade!, 1);
     close(straight.planLength, 300);
   });
   for (const id of ["diamond", "cloverleaf", "trumpet", "city"])
@@ -120,7 +120,7 @@ describe("published-reference interchange geometry", () => {
       assert(n.designReview.roads.length > 0);
       assert(n.designReview.roads.every((r) => r.meetsReference));
       assert(n.designReview.withinSelectedTargets);
-      assert(n.maxGrade <= 4.05);
+      assert(n.maxGrade! <= 4.05);
       assert(n.clearances.every((c) => c.meters >= referenceLayout.clearance));
       assert.deepEqual(n.diagnostics, []);
       assert.equal(detectCrossings(p).length, 0);
@@ -400,7 +400,7 @@ describe("bounded bridge structure and editable/exported design data", () => {
     assert.equal(result.elevation, 8);
     assert.equal(p.roads.filter((r) => r.bridge).length, 1);
     assert(p.roads.filter((r) => !r.bridge).every((r) => r.embankment));
-    assert(n.maxGrade <= 4.05);
+    assert(n.maxGrade! <= 4.05);
     for (const old of before)
       assert.deepEqual(
         p.nodes.find((n) => n.id === old.id),

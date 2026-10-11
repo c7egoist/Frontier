@@ -1,9 +1,9 @@
+import { criticalCurveParameters, cubicProfile } from "./cubic-analysis";
 import type { GeometryProfile } from "./quality";
 import {
   add,
   sub,
   cubic,
-  derivative,
   normalizeXZ,
   normalXZ,
   distance,
@@ -28,6 +28,15 @@ export interface Alignment {
   stations: Station[];
   length: number;
 }
+const profiles = new WeakMap<Alignment, ReturnType<typeof cubicProfile>>();
+function alignmentProfile(a: Alignment) {
+  let profile = profiles.get(a);
+  if (!profile) {
+    profile = cubicProfile(a.points);
+    profiles.set(a, profile);
+  }
+  return profile;
+}
 export function sampleAlignment(
   project: Project,
   road: Road,
@@ -35,7 +44,8 @@ export function sampleAlignment(
     maxDepth?: number;
   } = { maxSegment: 2.8, maxDeviation: 0.045 },
 ): Alignment {
-  const points = controlPoints(project, road);
+  const points = controlPoints(project, road).map((p) => [...p] as V3),
+    differential = cubicProfile(points);
   const sampled: { p: V3; t: number }[] = [{ p: points[0], t: 0 }];
   const subdivide = (p: V3[], ta: number, tb: number, depth: number) => {
     const chord = distance(p[0], p[3]);
@@ -45,7 +55,10 @@ export function sampleAlignment(
     );
     if (
       depth >= (profile.maxDepth ?? 12) ||
-      (chord <= profile.maxSegment && flatness <= profile.maxDeviation)
+      (chord <= profile.maxSegment &&
+        flatness <= profile.maxDeviation &&
+        distance(p[0], p[1]) + distance(p[1], p[2]) + distance(p[2], p[3]) <=
+          chord + profile.maxDeviation * 4)
     )
       sampled.push({ p: p[3], t: tb });
     else {
@@ -55,7 +68,19 @@ export function sampleAlignment(
       subdivide(right, mid, tb, depth + 1);
     }
   };
-  subdivide(points, 0, 1, 0);
+  const knots = [...criticalCurveParameters(points), 1];
+  let remaining = points,
+    from = 0;
+  for (const to of knots) {
+    if (to - from < 1e-12) continue;
+    if (to >= 1 - 1e-12) subdivide(remaining, from, 1, 0);
+    else {
+      const [left, right] = splitCubic(remaining, (to - from) / (1 - from));
+      subdivide(left, from, to, 0);
+      remaining = right;
+    }
+    from = to;
+  }
   const unique = sampled.filter(
     (v, i) => i === 0 || distance(v.p, sampled[i - 1].p) > 1e-5,
   );
@@ -63,16 +88,13 @@ export function sampleAlignment(
   let s = 0;
   const stations = unique.map((v, i) => {
     if (i) s += distance(v.p, unique[i - 1].p);
-    let dir = derivative(points, v.t);
-    if (Math.hypot(dir[0], dir[2]) < 1e-7)
-      dir = sub(
-        cubic(points, clamp(v.t + 0.001, 0, 1)),
-        cubic(points, clamp(v.t - 0.001, 0, 1)),
-      );
-    const d = normalizeXZ(dir);
+    const d =
+      differential.tangentAt(v.t) ?? normalizeXZ(sub(points[3], points[0]));
     return { ...v, d, n: normalXZ(d), s };
   });
-  return { road, points, stations, length: s };
+  const alignment = { road, points, stations, length: s };
+  profiles.set(alignment, differential);
+  return alignment;
 }
 export function stationAt(a: Alignment, s: number): Station {
   s = clamp(s, 0, a.length);
@@ -89,7 +111,9 @@ export function stationAt(a: Alignment, s: number): Station {
     left.t +
     ((right.t - left.t) * (s - left.s)) / Math.max(1e-8, right.s - left.s);
   const p = cubic(a.points, t),
-    d = normalizeXZ(derivative(a.points, t));
+    d =
+      alignmentProfile(a).tangentAt(t) ??
+      normalizeXZ(sub(a.points[3], a.points[0]));
   return { p, d, n: normalXZ(d), s, t };
 }
 export function trimmedStations(

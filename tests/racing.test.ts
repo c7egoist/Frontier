@@ -198,7 +198,7 @@ describe("racing and urban templates", () => {
       const n = buildNetwork(makeTemplate(name));
       assert(n.clearances.length > 0);
       assert(Math.min(...n.clearances.map((c) => c.meters)) > 5.1);
-      assert(n.maxGrade < 7);
+      assert(n.maxGrade! < 7);
       assert(n.meshes.some((m) => m.material === "girder"));
     }
   });

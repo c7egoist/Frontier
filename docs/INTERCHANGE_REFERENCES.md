@@ -85,6 +85,16 @@ Auxiliary configuration lengths remain 150/200 m plus 90 m in the templates, but
 
 Full auxiliary lanes are included in the motorway node's incoming/outgoing counts. Through-divider offsets no longer shrink when only the outer edge widens. Surface-clipped auxiliary guidance continues into its junction.
 
+## Continuation: extrema and vertical transitions
+
+The metric interchange dimensions are unchanged. The curve audit now uses numerical root isolation of the cubic's derivative equations to locate controlling curvature and grade on the **whole alignment**. It no longer depends on a fixed set of 512 parameter samples. Plan length uses bounded adaptive integration; this is not a formal civil-design approval or an interval-arithmetic guarantee.
+
+The regression fixture demonstrates the old sampling gap: a very narrow **100% grade peak** at curve parameter **0.50135** can lie between fixed samples that report less than 4.05%. The controlling parameter is now measured and pinned in editing and production meshes. Collinear reversing curves are no longer presented as ordinary straight roads.
+
+Explicit errors identify reversing, vertical, collapsed and zero-radius stopped tangents. A monotone stationary straight or a straight zero-handle endpoint remains valid, with its true limiting tangent. Unbounded grade is encoded as JSON `null` and displayed as **Unbounded**. Shape correction and JSON/history remain available; invalid mesh export is blocked.
+
+Near-straight shared alignment ends report grade mismatch in percentage points against an explicit **0.25 pp selected asset tolerance**. Connected bridge insertion preserves the original start/end grades, uses level deck landings and measures the deck's selected 64 m length in plan. Its full-curve grade checks and atomic refusals include these transitions.
+
 ## Remaining limits
 
 These checks verify asset dimensions, alignment curvature/grade, directionally connected topology, actual structural intervals, geometric clearances and exported metadata. They **do not** establish traffic capacity, signal timing, queue storage, weaving safety under traffic demand, stopping/decision sight distance, superelevation compliance, swept paths, structural strength, foundations, earthwork quantities or jurisdiction-specific approval. The shoulder arrangement is a clearly stated symmetric asset starting section, not a claim that every authority specifies symmetric shoulders.
@@ -93,4 +103,4 @@ The expanded reference layouts still fit the 5 × 5 km / 35 km total-control-pol
 
 ## Verification
 
-**347 CPU checks and 96 real-browser checks pass**, with no browser runtime errors. Coverage includes bearing seat/member/spacing continuity, blocked-landing/fill exclusion and atomic refusal, meshed/requested auxiliary dimensions, motorway marking/lane continuity, large OBJ groups, the actual cubic radii/grades, metric template dimensions, full production cloverleaf, six trumpet movements, one-sided/handed speed-change geometry, bounded bridge/approach support, beam/bearing/abutment metadata, underside-camera clearance, history/preset preservation, GLB/OBJ/JSON and fully offline standalone use. The existing European quarter retains its 180 roadside bays. Strict TypeScript, production build, formatting and dependency audit also pass.
+**386 CPU checks and 100 real-browser checks pass**, with no browser runtime errors. Coverage includes numerical cubic extrema/endpoint limits, sparse-preview counterexamples, tangent/plan regularity, grade-continuous bridge insertion and nullable metadata, bearing seat/member/spacing continuity, blocked-landing/fill exclusion and atomic refusal, meshed/requested auxiliary dimensions, motorway marking/lane continuity, large OBJ groups, the actual cubic radii/grades, metric template dimensions, full production cloverleaf, six trumpet movements, one-sided/handed speed-change geometry, bounded bridge/approach support, beam/bearing/abutment metadata, underside-camera clearance, history/preset preservation, GLB/OBJ/JSON and fully offline standalone use. The existing European quarter retains its 180 roadside bays. Strict TypeScript, production build, formatting and dependency audit also pass.

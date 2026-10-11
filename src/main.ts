@@ -307,6 +307,14 @@ function rebuild(inspector = true, context = false) {
       document.querySelector<HTMLOutputElement>("[data-radius-fit]"),
     joint = network.junctions.find((j) => j.node.id === selection?.id);
   if (radiusOut && joint) radiusOut.value = fmt(joint.radius, 2);
+  const gradeJoinOutput =
+      document.querySelector<HTMLOutputElement>("[data-grade-join]"),
+    gradeJoin = network.designReview.gradeJoins.find(
+      (j) => j.owner === selection?.id,
+    );
+  if (gradeJoinOutput && gradeJoin)
+    gradeJoinOutput.value =
+      gradeJoin.delta === null ? "Unbounded" : `${fmt(gradeJoin.delta, 4)} pp`;
   const ownerIDs = new Set([
     selection?.id,
     ...selectedRoads().map((r) => r.id),
@@ -320,6 +328,9 @@ function rebuild(inspector = true, context = false) {
       ),
       structuralIssue = network.designReview.structureIssues.find(
         (i) => i.owner === currentRoad.id,
+      ),
+      badJoin = network.designReview.gradeJoins.find(
+        (j) => j.roads.includes(currentRoad.id) && j.assessed && !j.continuous,
       ),
       values: Record<string, string> = {
         "Meshed full-width run": auxiliary
@@ -345,7 +356,21 @@ function rebuild(inspector = true, context = false) {
           m.minimumRadius === null
             ? "Straight"
             : `${fmt(m.minimumRadius, 1)} m`,
-        "Maximum alignment grade": `${fmt(m.maximumGrade, 2)}%`,
+        "Minimum radius position":
+          m.minimumRadiusParameter === null
+            ? "—"
+            : `${fmt(m.minimumRadiusParameter * 100, 4)}% curve`,
+        "Maximum grade position": `${fmt(m.maximumGradeParameter * 100, 4)}% curve`,
+        "Grade continuity": badJoin
+          ? badJoin.delta === null
+            ? "Unbounded join"
+            : `${fmt(badJoin.delta, 4)} pp mismatch`
+          : "Within selected tolerance",
+        "Curve regularity": m.issues.length
+          ? "Review curve tangents"
+          : "Regular plan geometry",
+        "Maximum alignment grade":
+          m.maximumGrade === null ? "Unbounded" : `${fmt(m.maximumGrade, 2)}%`,
         "Actual structural length": bridge
           ? `${fmt(
               (bridge.spanLengths ?? []).reduce((s, l) => s + l, 0),
@@ -365,10 +390,11 @@ function rebuild(inspector = true, context = false) {
     const status = document.querySelector<HTMLElement>("[data-design-status]");
     if (status)
       status.textContent =
-        currentRoad.roadClass === "street"
+        currentRoad.roadClass === "street" && !m.issues.length
           ? "Choose a design role"
           : m.meetsReference &&
               !structuralIssue &&
+              !badJoin &&
               network.clearances
                 .filter((c) => c.a === currentRoad.id || c.b === currentRoad.id)
                 .every((c) => c.meters >= referenceLayout.clearance)
@@ -589,7 +615,9 @@ function updateStats() {
   const error = network.diagnostics.some((d) => d.level === "error"),
     warn = network.diagnostics.length > 0;
   $("status-health").textContent = error
-    ? "Check junction geometry"
+    ? network.designReview.alignmentIssues.length
+      ? "Check road geometry"
+      : "Check junction geometry"
     : warn
       ? "Review geometry warnings"
       : "Network valid";
@@ -1075,12 +1103,16 @@ function referenceControls(road: Road) {
     structureIssue = network.designReview.structureIssues.find(
       (i) => i.owner === road.id,
     ),
+    badJoin = network.designReview.gradeJoins.find(
+      (j) => j.roads.includes(road.id) && j.assessed && !j.continuous,
+    ),
     clearance = network.clearances.filter(
       (c) => c.a === road.id || c.b === road.id,
     ),
     meets =
       m.meetsReference &&
       !structureIssue &&
+      !badJoin &&
       clearance.every((c) => c.meters >= referenceLayout.clearance),
     display = (key: string, value: string) =>
       `<div class="number-control"><span>${key}</span><output class="detail-value" data-design-metric="${key}">${value}</output></div>`;
@@ -1099,7 +1131,32 @@ function referenceControls(road: Road) {
         "Minimum alignment radius",
         m.minimumRadius === null ? "Straight" : `${fmt(m.minimumRadius, 1)} m`,
       ) +
-      display("Maximum alignment grade", `${fmt(m.maximumGrade, 2)}%`) +
+      display(
+        "Minimum radius position",
+        m.minimumRadiusParameter === null
+          ? "—"
+          : `${fmt(m.minimumRadiusParameter * 100, 4)}% curve`,
+      ) +
+      display(
+        "Maximum grade position",
+        `${fmt(m.maximumGradeParameter * 100, 4)}% curve`,
+      ) +
+      display(
+        "Grade continuity",
+        badJoin
+          ? badJoin.delta === null
+            ? "Unbounded join"
+            : `${fmt(badJoin.delta, 4)} pp mismatch`
+          : "Within selected tolerance",
+      ) +
+      display(
+        "Curve regularity",
+        m.issues.length ? "Review curve tangents" : "Regular plan geometry",
+      ) +
+      display(
+        "Maximum alignment grade",
+        m.maximumGrade === null ? "Unbounded" : `${fmt(m.maximumGrade, 2)}%`,
+      ) +
       (bridge
         ? display(
             "Actual structural length",
@@ -1117,7 +1174,7 @@ function referenceControls(road: Road) {
               : "Clear geometric seats",
           )
         : "") +
-      `<p class="card-note"><span>Targets: radius ${m.radiusTarget} m or more, grade ${m.gradeTarget}% or less; over-road clearance at least ${referenceLayout.clearance} m. These checks measure the cubic, not its sparse preview mesh. They do not certify sight distance, traffic capacity, superelevation or structural loads.</span></p><div class="solver-row"><span>Selected targets</span><span class="solver-badge" data-design-status>${icon(meets ? "check" : "triangle-alert")}${road.roadClass === "street" ? "Choose a design role" : meets ? "Within geometric targets" : "Review geometry"}</span></div>` +
+      `<p class="card-note"><span>Targets: radius ${m.radiusTarget} m or more, grade ${m.gradeTarget}% or less; over-road clearance at least ${referenceLayout.clearance} m. These checks measure the cubic, not its sparse preview mesh. They do not certify sight distance, traffic capacity, superelevation or structural loads.</span></p><div class="solver-row"><span>Selected targets</span><span class="solver-badge" data-design-status>${icon(meets ? "check" : "triangle-alert")}${road.roadClass === "street" && !m.issues.length ? "Choose a design role" : meets ? "Within geometric targets" : "Review geometry"}</span></div>` +
       (weave
         ? display("Nose-to-nose weave", `${fmt(weave.noseSpacing, 1)} m`)
         : "") +
@@ -1318,6 +1375,17 @@ function renderInspector() {
       profile(road);
     body += mobilityControls(road);
     if (node) {
+      const join = network.designReview.gradeJoins.find(
+        (j) => j.owner === node.id,
+      );
+      if (join)
+        body += card(
+          "Vertical grade join",
+          "activity",
+          `<div class="number-control"><span>Grade mismatch</span><output data-grade-join>${join.delta === null ? "Unbounded" : `${fmt(join.delta, 4)} pp`}</output></div><p class="card-note"><span>${join.continuous ? "Connected alignment tangents meet the selected continuity tolerance." : "Retune the vertical handles to remove this grade kink."} Selected tolerance: ${referenceLayout.gradeJoinTolerance} percentage points; not a civil sight-distance or vertical-curve certification.</span></p>`,
+        );
+    }
+    if (node) {
       const lanes = network.designReview.junctionLanes.find(
         (j) => j.owner === node.id,
       );
@@ -1332,7 +1400,8 @@ function renderInspector() {
       !node &&
       (road.roadClass !== "street" ||
         road.markingStyle === "motorway" ||
-        road.bridge)
+        road.bridge ||
+        network.designReview.alignmentIssues.some((i) => i.owner === road.id))
     )
       body += referenceControls(road);
     if (node)

@@ -19,7 +19,8 @@
     "laneTaper": 90,
     "mainGrade": 4,
     "rampGrade": 6,
-    "clearance": 5.2
+    "clearance": 5.2,
+    "gradeJoinTolerance": 0.25
   },
   "sources": [
     {
@@ -105,7 +106,43 @@
           "abutments": 2
         }
       ],
-      "maximumAlignmentGrade": 3.085714285714285,
+      "curveAuditMethod": "polynomial-extrema",
+      "alignmentIssues": [],
+      "assessedGradeJoins": [
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 6.254777603522008e-16,
+          "continuous": true
+        },
+        {
+          "delta": 5.551115123125783e-15,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 6.254777603522008e-16,
+          "continuous": true
+        },
+        {
+          "delta": 5.551115123125783e-15,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        }
+      ],
+      "maximumAlignmentGrade": 3.085714285714284,
       "minimumStructuralClearance": 5.431000000000002,
       "minimumLoopRadius": null,
       "measuredWeaveSpacing": [],
@@ -241,25 +278,221 @@
           "abutments": 2
         }
       ],
+      "curveAuditMethod": "polynomial-extrema",
+      "alignmentIssues": [],
+      "assessedGradeJoins": [
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 2.7755575615628914e-15,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 2.7755575615628914e-15,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 5.341933285808786e-15,
+          "continuous": true
+        },
+        {
+          "delta": 2.7755575615628914e-15,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 5.34193328580879e-15,
+          "continuous": true
+        },
+        {
+          "delta": 2.7755575615628914e-15,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 5.551115123125783e-17,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 8.881784197001252e-16,
+          "continuous": true
+        },
+        {
+          "delta": 1.6653345369377348e-16,
+          "continuous": true
+        },
+        {
+          "delta": 2.7755575615628914e-16,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 1.9984014443252818e-15,
+          "continuous": true
+        },
+        {
+          "delta": 5.551115123125783e-16,
+          "continuous": true
+        }
+      ],
       "maximumAlignmentGrade": 3.1578947368421053,
       "minimumStructuralClearance": 5.47525,
-      "minimumLoopRadius": 112.06358510695806,
+      "minimumLoopRadius": 112.0635132844474,
       "measuredWeaveSpacing": [
         {
-          "nodeSpacing": 304,
-          "noseSpacing": 410.6099899899599
+          "nodeSpacing": 304.00000000000006,
+          "noseSpacing": 410.6104472181827
         },
         {
-          "nodeSpacing": 304,
-          "noseSpacing": 410.5891592878337
+          "nodeSpacing": 304.00000000000006,
+          "noseSpacing": 410.5896002862684
         },
         {
-          "nodeSpacing": 304,
-          "noseSpacing": 410.60998998995984
+          "nodeSpacing": 304.00000000000006,
+          "noseSpacing": 410.6104472181827
         },
         {
-          "nodeSpacing": 304,
-          "noseSpacing": 410.5891592878337
+          "nodeSpacing": 304.00000000000006,
+          "noseSpacing": 410.58960028626836
         }
       ],
       "speedChangeLanes": [
@@ -380,9 +613,97 @@
           "abutments": 2
         }
       ],
-      "maximumAlignmentGrade": 3.0167597765363126,
+      "curveAuditMethod": "polynomial-extrema",
+      "alignmentIssues": [],
+      "assessedGradeJoins": [
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 3.1720657846433046e-15,
+          "continuous": true
+        },
+        {
+          "delta": 8.94139348691401e-16,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 1.1102230246251565e-15,
+          "continuous": true
+        },
+        {
+          "delta": 2.4424906541753444e-15,
+          "continuous": true
+        },
+        {
+          "delta": 3.945418400874139e-15,
+          "continuous": true
+        },
+        {
+          "delta": 2.664535259100376e-15,
+          "continuous": true
+        },
+        {
+          "delta": 3.1720657846433046e-15,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 0,
+          "continuous": true
+        },
+        {
+          "delta": 1.2212453270876722e-15,
+          "continuous": true
+        },
+        {
+          "delta": 5.551115123125783e-16,
+          "continuous": true
+        }
+      ],
+      "maximumAlignmentGrade": 3.016759776536312,
       "minimumStructuralClearance": 5.47525,
-      "minimumLoopRadius": 112.0635851069581,
+      "minimumLoopRadius": 112.06351328444745,
       "measuredWeaveSpacing": [],
       "speedChangeLanes": [
         {

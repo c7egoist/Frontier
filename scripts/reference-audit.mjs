@@ -33,6 +33,11 @@ for (const id of ["diamond", "cloverleaf", "trumpet"]) {
       depth: b.depth,
       abutments: b.abutments.length,
     })),
+    curveAuditMethod: "polynomial-extrema",
+    alignmentIssues: review.alignmentIssues,
+    assessedGradeJoins: review.gradeJoins
+      .filter((j) => j.assessed)
+      .map((j) => ({ delta: j.delta, continuous: j.continuous })),
     maximumAlignmentGrade: n.maxGrade,
     minimumStructuralClearance: review.minimumClearance,
     minimumLoopRadius: review.roads.some((r) => r.role === "loop")

@@ -1,3 +1,9 @@
+import {
+  analyzeCubic,
+  cubicProfile,
+  type CubicMetrics,
+  type CurveIssueKind,
+} from "./cubic-analysis";
 import { auxiliaryWidthAt } from "./road-sections";
 import { parameterStation } from "./bridge-profile";
 /** Published geometric references inform these editable game-asset defaults.
@@ -10,14 +16,7 @@ import {
   type Project,
   type Road,
 } from "./model";
-import {
-  derivative,
-  distanceXZ,
-  normalizeXZ,
-  dotXZ,
-  sub,
-  type V3,
-} from "./math";
+import { derivative, cubic, normalizeXZ, dotXZ, sub, type V3 } from "./math";
 import { sampleAlignment } from "./curves";
 
 import { designSources, referenceLayout, type RoadClass } from "./design-basis";
@@ -28,12 +27,9 @@ export {
   type RoadClass,
 } from "./design-basis";
 
-export interface RoadDesignMeasure {
+export interface RoadDesignMeasure extends CubicMetrics {
   owner: string;
   role: RoadClass;
-  planLength: number;
-  minimumRadius: number | null;
-  maximumGrade: number;
   laneWidth: number;
   shoulderWidth: number;
   radiusTarget: number;
@@ -63,6 +59,22 @@ export interface JunctionLaneMeasure {
   auxiliaryApproaches: number;
   balanced: boolean;
 }
+export interface AlignmentIssue {
+  owner: string;
+  kind: CurveIssueKind;
+  parameter: number;
+  position: V3;
+  message: string;
+}
+export interface GradeJoinMeasure {
+  owner: string;
+  roads: [string, string];
+  outwardGrades: [number | null, number | null];
+  delta: number | null;
+  headingMismatch: number;
+  continuous: boolean;
+  assessed: boolean;
+}
 export interface DesignReview {
   units: "metres";
   basis: "Reference-scaled game geometry, not civil certification";
@@ -74,50 +86,14 @@ export interface DesignReview {
   withinSelectedTargets: boolean;
   weaves: WeaveMeasure[];
   structureIssues: StructureIssue[];
+  alignmentIssues: AlignmentIssue[];
+  gradeJoins: GradeJoinMeasure[];
   junctionLanes: JunctionLaneMeasure[];
   extent: [number, number];
   limitations: string[];
 }
 export function curveDesignMetrics(points: V3[]) {
-  let minimumRadius = Infinity,
-    maximumGrade = 0,
-    planLength = 0;
-  let previous = points[0];
-  // Evaluate the cubic itself, not the preview's sparse/chordal frame mesh.
-  // Including endpoints detects tiny off-ramp/merge radii previously missed.
-  const count = 512;
-  for (let i = 0; i <= count; i++) {
-    const t = i / count,
-      u = 1 - t,
-      d = derivative(points, t),
-      dd = points[0].map(
-        (_, k) =>
-          6 *
-          (u * (points[2][k] - 2 * points[1][k] + points[0][k]) +
-            t * (points[3][k] - 2 * points[2][k] + points[1][k])),
-      ) as V3,
-      speed = Math.hypot(d[0], d[2]),
-      cross = Math.abs(d[0] * dd[2] - d[2] * dd[0]);
-    if (speed > 1e-8) {
-      maximumGrade = Math.max(maximumGrade, (100 * Math.abs(d[1])) / speed);
-      if (cross > 1e-8)
-        minimumRadius = Math.min(minimumRadius, speed ** 3 / cross);
-    }
-    const point = points[0].map(
-      (_, k) =>
-        u ** 3 * points[0][k] +
-        3 * u * u * t * points[1][k] +
-        3 * u * t * t * points[2][k] +
-        t ** 3 * points[3][k],
-    ) as V3;
-    if (i) planLength += distanceXZ(previous, point);
-    previous = point;
-  }
-  return {
-    planLength,
-    minimumRadius: Number.isFinite(minimumRadius) ? minimumRadius : null,
-    maximumGrade,
-  };
+  return analyzeCubic(points);
 }
 export function measureRoadDesign(
   project: Project,
@@ -156,6 +132,8 @@ export function measureRoadDesign(
     meetsReference:
       (metric.minimumRadius === null ||
         metric.minimumRadius >= radiusTarget - 0.1) &&
+      metric.issues.length === 0 &&
+      metric.maximumGrade !== null &&
       metric.maximumGrade <= gradeTarget + 0.05 &&
       r.laneWidth >= widthTarget - 0.01,
   };
@@ -246,6 +224,53 @@ export function measureJunctionLanes(project: Project): JunctionLaneMeasure[] {
     ];
   });
 }
+export const curveIssueMessages: Record<CurveIssueKind, string> = {
+  "plan-reversal":
+    "plan direction reverses; reshape the handles or use separate connected roads",
+  "vertical-tangent":
+    "unbounded vertical grade at a stopped plan tangent; separate the handle from the pivot in plan",
+  "collapsed-plan": "no usable horizontal alignment; move an endpoint in plan",
+  "zero-radius-tangent":
+    "zero-radius stopped tangent; move the coincident handle away from the pivot",
+};
+export function measureGradeJoins(project: Project): GradeJoinMeasure[] {
+  return project.nodes.flatMap((n) => {
+    const roads = connected(project, n.id);
+    if (roads.length !== 2) return [];
+    const profiles = roads.map((r) => cubicProfile(controlPoints(project, r))),
+      ts = roads.map((r) => (r.start === n.id ? 0 : 1)),
+      dirs = profiles.map((p, i) => {
+        const d = p.tangentAt(ts[i]);
+        return d ? (d.map((v) => v * (ts[i] === 0 ? 1 : -1)) as V3) : null;
+      });
+    if (!dirs[0] || !dirs[1]) return [];
+    const mismatch =
+      180 -
+      (Math.acos(Math.max(-1, Math.min(1, dotXZ(dirs[0], dirs[1])))) * 180) /
+        Math.PI;
+    if (mismatch > 12 + 1e-7) return [];
+    const grades = profiles.map((p, i) => {
+        const grade = p.signedGradeAt(ts[i]);
+        return grade === null ? null : grade * (ts[i] === 0 ? 1 : -1) || 0;
+      }) as GradeJoinMeasure["outwardGrades"],
+      delta =
+        grades[0] === null || grades[1] === null
+          ? null
+          : Math.abs(grades[0] + grades[1]);
+    return [
+      {
+        owner: n.id,
+        roads: [roads[0].id, roads[1].id],
+        outwardGrades: grades,
+        delta,
+        headingMismatch: mismatch === 0 ? 0 : mismatch,
+        continuous:
+          delta !== null && delta <= referenceLayout.gradeJoinTolerance,
+        assessed: roads.some((r) => r.roadClass !== "street"),
+      },
+    ];
+  });
+}
 export function reviewDesign(
   project: Project,
   clearances: { meters: number }[],
@@ -255,9 +280,23 @@ export function reviewDesign(
 ): DesignReview {
   const xs = project.nodes.map((n) => n.position[0]),
     zs = project.nodes.map((n) => n.position[2]);
-  const roads = project.roads
-    .filter((r) => r.roadClass !== "street")
-    .map((r) => measureRoadDesign(project, r));
+  const all = project.roads.map((r) => measureRoadDesign(project, r)),
+    roads = all.filter((r) => r.role !== "street"),
+    gradeJoins = measureGradeJoins(project),
+    alignmentIssues: AlignmentIssue[] = all.flatMap((m) =>
+      m.issues.map((i) => {
+        const r = project.roads.find((r) => r.id === m.owner)!;
+        return {
+          owner: m.owner,
+          kind: i.kind,
+          parameter: i.parameter,
+          position: cubic(controlPoints(project, r), i.parameter).map((v) =>
+            v === 0 ? 0 : v,
+          ) as V3,
+          message: curveIssueMessages[i.kind],
+        };
+      }),
+    );
   return {
     units: "metres",
     basis: "Reference-scaled game geometry, not civil certification",
@@ -265,9 +304,13 @@ export function reviewDesign(
     roads,
     clearanceTarget: referenceLayout.clearance,
     structureIssues,
+    alignmentIssues,
+    gradeJoins,
     junctionLanes: measureJunctionLanes(project),
     withinSelectedTargets:
       structureIssues.length === 0 &&
+      alignmentIssues.length === 0 &&
+      gradeJoins.filter((j) => j.assessed).every((j) => j.continuous) &&
       roads.every((r) => r.meetsReference) &&
       clearances.every((c) => c.meters >= referenceLayout.clearance),
     weaves: measureWeaves(project, splitters),

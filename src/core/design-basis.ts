@@ -51,6 +51,7 @@ export const referenceLayout = {
   mainGrade: 4,
   rampGrade: 6,
   clearance: 5.2,
+  gradeJoinTolerance: 0.25,
 } as const;
 export type RoadClass =
   "street" | "mainline" | "connector" | "loop" | "collector";

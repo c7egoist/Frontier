@@ -201,7 +201,7 @@ describe("connected divided motorways and city templates", () => {
   for (const id of ["bridge", "cloverleaf", "trumpet", "city"])
     it(`${id}: actual girder clearances and gradual highway approaches`, () => {
       const { p, n } = template(id);
-      assert(n.maxGrade < 4.05);
+      assert(n.maxGrade! < 4.05);
       assert(n.clearances.length >= 2);
       assert(Math.min(...n.clearances.map((c) => c.meters)) >= 5.2);
       assert(
@@ -425,7 +425,7 @@ describe("highway bridge geometry and atomic insertion", () => {
     assert.equal(p.nodes.length, 4);
     assert.equal(p.roads.length, 3);
     assert.deepEqual(n.diagnostics, []);
-    assert(n.maxGrade <= 4.05);
+    assert(n.maxGrade! <= 4.05);
     for (const node of ends)
       assert.deepEqual(
         p.nodes.find((n) => n.id === node.id),
