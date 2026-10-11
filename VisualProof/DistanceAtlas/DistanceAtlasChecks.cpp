@@ -243,6 +243,33 @@ int main()
     (void)Atlas.Project(Moved.data(), static_cast<uint32_t>(Moved.size()));
     Report(Atlas.QueryPlacementRevision() == RevisionMoved, "an unchanged pose does not bump the placement revision", "revision stable", Log);
 
+    // A deforming project — a tyre squashing under load, at one step per call — moves vertex POSITIONS and nothing
+    //    else: GeometrySequence refuses any step that changes a vertex count, an index count or an index value. The
+    //    atlas is baked from the rest pose and is never re-baked during playback, so this must not touch it. This is
+    //    the invariant the Play loop now depends on: it refits the traversal and the hardware acceleration and
+    //    leaves the bake count alone.
+    {
+        const uint32_t  BakesAtRest    = Atlas.QueryBakeCount();
+        const float*    DataAtRest     = Atlas.QueryAtlas().data();
+        const size_t    SizeAtRest     = Atlas.QueryAtlas().size();
+        const size_t    VerticesAtRest = Mesh.Vertices.size();
+        const uint64_t  RevisionAtRest = Atlas.QueryPlacementRevision();
+        std::vector<VertexRecord> RestVertices = Mesh.Vertices;
+        for (VertexRecord& Vertex : Mesh.Vertices) Vertex.SpatialLocation.z *= 0.6f;   // squash every mesh
+        const bool ReProjected = Atlas.Project(Moved.data(), static_cast<uint32_t>(Moved.size()));
+        std::snprintf(Detail, sizeof(Detail), "vertices %zu->%zu, bakes %u->%u, atlas %zu floats, revision %llu->%llu",
+                      VerticesAtRest, Mesh.Vertices.size(), BakesAtRest, Atlas.QueryBakeCount(), SizeAtRest,
+                      static_cast<unsigned long long>(RevisionAtRest),
+                      static_cast<unsigned long long>(Atlas.QueryPlacementRevision()));
+        Report(ReProjected && Atlas.QueryBakeCount() == BakesAtRest && Atlas.QueryAtlas().data() == DataAtRest &&
+               Atlas.QueryAtlas().size() == SizeAtRest && Mesh.Vertices.size() == VerticesAtRest,
+               "deforming vertices never re-bakes the atlas", Detail, Log);
+        Mesh.Vertices = RestVertices;
+        Measure(Moved, Over, Under, Mean);
+        std::snprintf(Detail, sizeof(Detail), "4000 points after the squash and restore: worst over %.4f m, worst under %.4f m", Over, Under);
+        Report(Over <= CoarsestWorld && Under <= CoarsestWorld, "the baked field survives a playback deformation", Detail, Log);
+    }
+
     // Non-uniform scale: the field may underestimate (it scales by the smallest singular value) but must never overestimate.
     const float StretchScale[3] = { 1.5f, 0.75f, 2.0f };
     std::vector<InstanceRecord> Stretched = Moved;

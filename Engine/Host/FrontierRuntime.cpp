@@ -1475,6 +1475,12 @@ int Frontier::RunFrontierRuntime(
     uint32_t PreviousTransport = 0u;
     std::vector<Frontier::InstanceRecord> ProjectRestInstances;
     Frontier::HostRuntime::FlyThroughSolver ProjectEditCamera = Camera;
+    // 📝 Playback publication counters. A deforming project is REFITTED per step; only a step that changes topology
+    //    (or that the refit refuses) is allowed to fall back to a rebuild. These two numbers are the whole point —
+    //    a healthy Play session shows RebuildSteps at 0 and RefitSteps counting the physics steps.
+    uint64_t PlaybackRefitSteps       = 0u;   // [-]  steps published by refit, no rebuild
+    uint64_t PlaybackRebuildSteps     = 0u;   // [-]  steps that had to fall back to UploadScene
+    float    PlaybackRefitMillisecondsPeak = 0.0f;   // [ms] worst traversal refit seen during playback
     while (!Surface.CloseRequested() && !Panel.Convert<bool>())
     {
         const auto  NowTime = Clock::now();
@@ -1831,6 +1837,16 @@ int Frontier::RunFrontierRuntime(
         ProjectMoved = ProjectMoved || GeometryChanged;
         if (Transport == 0u && PreviousTransport != 0u)
         {
+            // 📝 The proof that Play no longer rebuilds. RefitSteps counts the physics steps published by refit;
+            //    RebuildSteps must stay at 0 for a session whose topology never moved. UploadScene's own serial is
+            //    printed beside them so a rebuild anywhere in the frame is visible, not just in this branch.
+            std::cerr << "[Playback] transport stopped: refit steps " << PlaybackRefitSteps
+                      << ", rebuild steps " << PlaybackRebuildSteps
+                      << ", worst traversal refit " << PlaybackRefitMillisecondsPeak << " ms"
+                      << ", UploadScene calls over the session " << Surface.QuerySceneUploadSerial()
+                      << ", distance-field bakes " << Surface.QueryDistanceFieldBakeCount() << "\n";
+            PlaybackRefitSteps = PlaybackRebuildSteps = 0u;
+            PlaybackRefitMillisecondsPeak = 0.0f;
             if (ProjectGeometry.Active() && !ProjectGeometry.Restore(Level))
             {
                 Logger.RecordMessage(Frontier::DiagnosticSeverity::Refusal, "Project geometry", "Authored topology changed during playback");
@@ -1845,17 +1861,36 @@ int Frontier::RunFrontierRuntime(
         {
             if (ProjectGeometry.Active())
             {
-                // Correctness-first synchronized publication. UploadScene waits for GPU readers, replaces raster
-                // buffers and hardware traversal, and reconstructs native hybrid SDF geometry at the same revision.
-                // The rigid-only two-level path is disabled above for these projects. This is NOT a fast stream.
+                // 📝 A deforming project moves vertices and nothing else: GeometrySequence::Advance refuses any step
+                //    that changes a vertex count, an index count or an index value, and it resets a deformed
+                //    subject's World to identity so the positions already carry the pose. The resident structures
+                //    therefore stay VALID across the step and only need refitting.
+                //
+                //    The previous code rebuilt here, which cost a full UploadScene every physics step: device idle,
+                //    every scene extent reallocated, the emitter cache rebuilt, the CWBVH rebuilt from scratch, the
+                //    hardware BLAS/TLAS reconstructed, the descriptor sets rewritten and the distance atlas
+                //    re-examined. At 240 Hz that is the difference between a refit and a reload.
                 Level.RefreshGeometry(AnimatedInstances);
                 TracedFacets = Level.QueryFlatTriangles();
-                if (!Traversal.BuildBottomLevel(TracedFacets, false))
+                if (Traversal.IsRefittable() && Traversal.RefitBottomLevel(TracedFacets) &&
+                    Surface.RefreshDeformation(Level, Traversal, TracedFacets,
+                                               AnimatedInstances.data(), static_cast<uint32_t>(AnimatedInstances.size())))
+                {
+                    ++PlaybackRefitSteps;
+                    PlaybackRefitMillisecondsPeak = std::max(PlaybackRefitMillisecondsPeak, Traversal.QueryRefitMilliseconds());
+                }
+                else if (!Traversal.IsRefittable() || !Traversal.BuildBottomLevel(TracedFacets, false))
                 {
                     Logger.RecordMessage(Frontier::DiagnosticSeverity::Refusal, "Project geometry", "Traversal rebuild refused");
                     break;
                 }
-                Surface.UploadScene(Level, Traversal, nullptr, "play: project geometry deformed (tyres), every step");
+                else
+                {
+                    // Only reachable when the refit or the publish refused, i.e. the scene no longer matches what
+                    // UploadScene made resident. Correctness-first: pay the full upload rather than trace a stale tree.
+                    ++PlaybackRebuildSteps;
+                    Surface.UploadScene(Level, Traversal, nullptr, "play: project geometry rebuild (refit refused or topology moved)");
+                }
             }
             else (void)Surface.RefreshInstances(AnimatedInstances.data(), static_cast<uint32_t>(AnimatedInstances.size()));
             if (InstancesResident)

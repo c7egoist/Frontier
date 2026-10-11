@@ -265,16 +265,46 @@ public:
     [[nodiscard]] bool QueryDistanceFieldGIReady() const noexcept { return DistanceFieldStage.IsReady(); }
 
     [[nodiscard]] uint32_t      QueryInstanceCount() const noexcept { return Visibility.QueryInstanceCount(); }
+    /// 📦 How many UploadScene calls have happened since bring-up. A healthy Play session leaves this unchanged.
+    [[nodiscard]] uint64_t      QuerySceneUploadSerial() const noexcept { return SceneUploadSerial; }
+    /// 📦 How many times the distance atlas has been baked. The atlas is baked once, at load or on the first upload
+    ///    whose topology differs; a deforming project must never move this number.
+    [[nodiscard]] uint32_t      QueryDistanceFieldBakeCount() const noexcept { return DistanceGeometry.QueryAtlas().QueryBakeCount(); }
     void                        UploadTextures(const TextureIndex& Textures) noexcept;   // R4a bindless table → binding 18 (last since R6)
     void                        DestroyTextures() noexcept;
     void                        UploadShadingTables(const float* Energy, const float* Sheen, uint32_t Resolution) noexcept;   // R4b: two RGBA32F Resolution² planes (ShadingTableCodec bake) → bindings 13 / 14, once
     void                        UploadTraversal(const TraversalIndex& Traversal) noexcept;   // R3 CWBVH blobs → bindings 8-9
+    // Rewrites the resident flat-triangle extent without reallocating: no vkDeviceWaitIdle and no descriptor
+    //    rewrite, so it is safe once per physics step. False when the triangle count moved (a topology change,
+    //    which belongs to UploadTriangles) or when nothing is resident yet.
+    [[nodiscard]] bool          UploadTrianglesInPlace(const std::vector<TriangleIndex>& Triangles) noexcept;
 
     // D5: per-frame acceleration-structure refresh after a refit. No reallocation and no device stall, so unlike
     //    UploadTraversal this is safe every frame. Also re-uploads the flat triangles, because the kernel resolves
     //    material and normal through them and they must not lag the structure. False if a blob outgrew its
     //    allocation, in which case the caller should fall back to a full UploadTraversal.
     [[nodiscard]] bool          RefreshTraversal(const TraversalIndex& Traversal, const std::vector<TriangleIndex>& Facets) noexcept;
+
+    /// 📦 Publishes one step of a topology-preserving deformation: the deformed vertices and cluster bounds, the
+    ///    refitted traversal blobs, the flat triangles, the instance rows, and an update build of the hardware
+    ///    bottom levels. Nothing here reallocates, waits for the device, rewrites a descriptor, rebuilds the
+    ///    emitter cache, or re-examines the distance atlas — so the atlas bake count does not move and Play costs a
+    ///    refit per step instead of a full UploadScene per step.
+    /// in    Scene    [-]  the deformed scene; its counts must equal what UploadScene made resident
+    /// in    Traversal [-] the traversal index, already refitted by the caller
+    /// in    Facets   [-]  the refitted flat triangles, the same vector handed to TraversalIndex::RefitBottomLevel
+    /// in    Rows     [-]  the deformed instance rows (a deforming subject carries an identity World)
+    /// in    Count    [instances] how many rows; must equal the resident instance count
+    /// err   returns false when any stage refuses — most often because a count moved, meaning the topology changed
+    ///       and the caller must rebuild with UploadScene. Refusal is safe: nothing is left half-published in a way
+    ///       a following UploadScene cannot repair.
+    /// cost  🚩
+    /// pre   UploadScene has run at least once; TraversalIndex::RefitBottomLevel has already succeeded
+    /// post  the raster, the traversal and the hardware acceleration all read the deformed geometry this frame
+    /// tag   api, nonallocating, nonthrowing
+    [[nodiscard]] bool          RefreshDeformation(const SceneStructure& Scene, const TraversalIndex& Traversal,
+                                                  const std::vector<TriangleIndex>& Facets,
+                                                  const InstanceRecord* Rows, uint32_t Count) noexcept;
 
     // D6/D7 — the two-level structure → bindings 27 (top-level nodes), 28 (the instance list its leaves index),
     //    29 (the instance rows: inverse + world AABB + BLAS index) and 30 (BLAS placements: where each BLAS' blobs start
@@ -462,6 +492,8 @@ private:
     RenderMetrics::DeviceWish MetricsWish;       // [-]   diagnostics extensions requested at vkCreateDevice
     uint64_t                FrameSerial = 0u;    // [-]   command buffers recorded; names the frame in device-loss markers
     uint64_t                SceneUploadSerial = 0u;   // [-]   UploadScene calls so far
+    uint64_t                DeformationPublishCount      = 0u;   // [-]   RefreshDeformation calls that reached the accelerators
+    double                  DeformationPublishMilliseconds = 0.0;  // [ms]  total host cost of those publishes
     std::chrono::steady_clock::time_point LastSceneUpload{};   // [-]   when the previous UploadScene finished
     std::string             HardwareRefusal;     // [-]   why the hardware ray-query route is not available; empty when it is
     const char*             ReportedPipeline = nullptr;   // [-]   last route written to the [RenderPath] line
@@ -480,6 +512,7 @@ private:
     bool                    TraversalResident = false;
     uint64_t                TraversalNodeCapacity = 0u;   // [B] allocation size, so a refit refresh cannot overrun
     uint64_t                TraversalLeafCapacity = 0u;   // [B]   // [-]   R3 CWBVH uploaded (kernel refuses to run without it)
+    uint64_t                TriangleCapacity      = 0u;   // [B]   flat-triangle extent UploadTriangles allocated; bounds the in-place rewrite
 
     // D6/D7 two-level traversal (bindings 27-30): what was allocated, so a per-frame refresh cannot overrun.
     bool                    InstanceTraversalResident = false;

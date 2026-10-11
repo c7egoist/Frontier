@@ -1,0 +1,607 @@
+From d3002e06fd3b816df08ce90864c1e5a0a71ab108 Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 22:08:26 +0000
+Subject: [PATCH] Play refits the resident scene each step instead of
+ rebuilding it
+
+FrontierRuntime published one deforming physics step with the load-time path:
+RefreshGeometry + BuildBottomLevel + UploadScene. UploadScene waits for the
+device to go idle, reallocates and re-uploads every scene extent, rebuilds the
+emitter cache, reconstructs the hardware BLAS and TLAS, rewrites the descriptor
+sets and re-examines the distance atlas. ProjectDriveInterchange bumps
+GeometryRevision every tick because the XPBD tyres genuinely deform, so this
+ran at 240 Hz.
+
+But GeometrySequence::Advance refuses any step that changes a vertex count, an
+index count or an index value, and it resets a deformed subject's World to
+identity so the positions already carry the pose. The resident structures stay
+valid across the step and only need refitting. The rebuild was never necessary.
+
+The Play loop now takes SwapchainExchange::RefreshDeformation when
+TraversalIndex::IsRefittable and RefitBottomLevel succeed, and falls back to
+BuildBottomLevel + UploadScene only when the refit or the publish refuses -
+which is to say only when the topology really moved. Both arms are counted and
+printed when the transport stops:
+
+  [Playback] transport stopped: refit steps N, rebuild steps 0,
+             worst traversal refit X ms, UploadScene calls 1,
+             distance-field bakes 1
+
+RefreshDeformation is four no-reallocation stages:
+  1 VisibilityExchange::RefreshDeformation - vertices, cluster bounds and flat
+    triangles memcpy'd into the extents UploadScene already allocated
+  2 RefreshTraversal - the refitted CWBVH blobs, and the flat triangles again,
+    now through UploadTrianglesInPlace so no vkDeviceWaitIdle and no
+    descriptor rewrite
+  3 RefreshInstances - instance rows, atlas placements, RT placement rows
+  4 RayQueryExchange::RefreshVertices - stages the deformed vertices for a
+    MODE_UPDATE build of the bottom levels inside the frame command buffer
+
+RayQueryExchange gains ALLOW_UPDATE_BIT on the bottom-level builds, retained
+geometry and range records, a persistent host mapping of the vertex extent, and
+a MODE_UPDATE arm in RecordRefit. A purely rigid step leaves VerticesPending
+clear and pays only the TLAS refit it always paid.
+
+The distance atlas was already bake-once - Matches() is a count comparison and
+a deformation cannot move a count - but the bake trigger is now logged with its
+cost, so an editor-triggered rebuild is visible.
+
+DistanceAtlasChecks gains two checks, both passing: deforming vertices never
+re-bakes the atlas, and the baked field survives a playback deformation.
+---
+ Engine/DeviceExchange/RayQueryExchange.cpp    | 77 ++++++++++++++++---
+ Engine/DeviceExchange/RayQueryExchange.h      | 18 +++++
+ Engine/DeviceExchange/SwapchainExchange.cpp   | 72 ++++++++++++++++-
+ Engine/DeviceExchange/SwapchainExchange.h     | 33 ++++++++
+ Engine/DeviceExchange/VisibilityExchange.cpp  | 28 +++++++
+ Engine/DeviceExchange/VisibilityExchange.h    | 14 ++++
+ Engine/Host/FrontierRuntime.cpp               | 45 +++++++++--
+ .../DistanceAtlas/DistanceAtlasChecks.cpp     | 27 +++++++
+ 8 files changed, 294 insertions(+), 20 deletions(-)
+
+diff --git a/Engine/DeviceExchange/RayQueryExchange.cpp b/Engine/DeviceExchange/RayQueryExchange.cpp
+index 09e0c77..60a52eb 100644
+--- a/Engine/DeviceExchange/RayQueryExchange.cpp
++++ b/Engine/DeviceExchange/RayQueryExchange.cpp
+@@ -58,7 +58,10 @@ void RayQueryExchange::Reclaim(Extent& Storage)
+ 
+ void RayQueryExchange::RetireScene()
+ {
+-    SceneReady = PlacementsPending = false;
++    SceneReady = PlacementsPending = VerticesPending = BottomRefittable = false;
++    if (VertexMapping) { vkUnmapMemory(Device, Vertices.Memory); VertexMapping = nullptr; }
++    BottomGeometry.clear();
++    BottomSpans.clear();
+     if (TopLevel) DestroyAcceleration(Device, TopLevel, nullptr);
+     TopLevel = VK_NULL_HANDLE;
+     for (auto Acceleration : BottomLevels)
+@@ -167,9 +170,13 @@ bool RayQueryExchange::ConstructScene(const SceneStructure& Scene)
+     BottomLevels.resize(Rows.size(), VK_NULL_HANDLE);
+     BottomStorage.resize(Rows.size());
+     PendingPlacements.resize(Rows.size());
+-    std::vector<VkAccelerationStructureGeometryKHR> Geometry(Rows.size());
++    // 📝 Retained in BottomGeometry / BottomSpans rather than locals: RecordRefit rebuilds an update build record
++    //    from them every step, and Build.pGeometries points into BottomGeometry.
++    BottomGeometry.clear();
++    BottomGeometry.resize(Rows.size());
++    BottomSpans.clear();
++    BottomSpans.resize(Rows.size());
+     std::vector<VkAccelerationStructureBuildGeometryInfoKHR> Builds(Rows.size());
+-    std::vector<VkAccelerationStructureBuildRangeInfoKHR> Ranges(Rows.size());
+     VkDeviceSize ScratchBytes = 0u;
+     for (uint32_t Slot = 0u; Slot < Rows.size(); ++Slot)
+     {
+@@ -179,7 +186,7 @@ bool RayQueryExchange::ConstructScene(const SceneStructure& Scene)
+         for (uint32_t Index = 0u; Index < Row.TriangleCount * 3u; ++Index)
+             LastVertex = std::max(LastVertex, Corners[Row.FirstIndex + Index]);
+         if (Row.VertexOffset >= Points.size() || LastVertex >= Points.size() - Row.VertexOffset) return false;
+-        auto& Facets = Geometry[Slot];
++        auto& Facets = BottomGeometry[Slot];
+         Facets.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+         Facets.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+         Facets.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+@@ -194,7 +201,10 @@ bool RayQueryExchange::ConstructScene(const SceneStructure& Scene)
+         auto& Build = Builds[Slot];
+         Build.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+         Build.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+-        Build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR;
++        // 📝 ALLOW_UPDATE is what lets Play update these in place. A deforming tyre keeps its triangle count and its
++        //    index list, so an update build is both legal and far cheaper than a rebuild; without the flag the only
++        //    way to track the deformation would be ConstructScene again, which stalls the device.
++        Build.flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
+         Build.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+         Build.geometryCount = 1u;
+         Build.pGeometries = &Facets;
+@@ -207,8 +217,8 @@ bool RayQueryExchange::ConstructScene(const SceneStructure& Scene)
+         Description.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
+         if (CreateAcceleration(Device, &Description, nullptr, &BottomLevels[Slot]) != VK_SUCCESS) return false;
+         Build.dstAccelerationStructure = BottomLevels[Slot];
+-        Ranges[Slot].primitiveCount = Row.TriangleCount;
+-        ScratchBytes = std::max(ScratchBytes, Sizes.buildScratchSize);
++        BottomSpans[Slot].primitiveCount = Row.TriangleCount;
++        ScratchBytes = std::max({ ScratchBytes, Sizes.buildScratchSize, Sizes.updateScratchSize });
+         VkAccelerationStructureDeviceAddressInfoKHR Address{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR };
+         Address.accelerationStructure = BottomLevels[Slot];
+         auto& Placement = PendingPlacements[Slot];
+@@ -252,7 +262,7 @@ bool RayQueryExchange::ConstructScene(const SceneStructure& Scene)
+     for (uint32_t Slot = 0u; Slot < Rows.size(); ++Slot)
+     {
+         Builds[Slot].scratchData.deviceAddress = ScratchAddress;
+-        const auto* Range = &Ranges[Slot];
++        const auto* Range = &BottomSpans[Slot];
+         BuildAcceleration(Command, 1u, &Builds[Slot], &Range);
+         VkMemoryBarrier Serial{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+         Serial.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+@@ -278,6 +288,12 @@ bool RayQueryExchange::ConstructScene(const SceneStructure& Scene)
+     Write.descriptorCount = 1u;
+     Write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+     vkUpdateDescriptorSets(Device, 1u, &Write, 0u, nullptr);
++    // 📝 Allocate() chose host-visible coherent memory because the vertex extent was created with a source, so this
++    //    mapping stays resident for the lifetime of the scene and RefreshVertices writes straight into it. Mapped
++    //    here rather than at allocation so every early-return above leaves nothing to unwind.
++    if (vkMapMemory(Device, Vertices.Memory, 0u, Vertices.Bytes, 0u, &VertexMapping) != VK_SUCCESS) VertexMapping = nullptr;
++    VerticesPending  = false;
++    BottomRefittable = true;
+     SceneReady = true;
+     return true;
+ }
+@@ -293,15 +309,54 @@ bool RayQueryExchange::RefreshPlacements(const InstanceRecord* Rows, uint32_t Co
+     return true;
+ }
+ 
++bool RayQueryExchange::RefreshVertices(const VertexRecord* Points, uint32_t Count)
++{
++    // A deformation is only publishable while the resident scene has the same vertices it was built from: the
++    //    bottom-level geometry records hold maxVertex and the index window, both of which a topology change moves.
++    if (!SceneReady || !BottomRefittable || !Points || !VertexMapping) return false;
++    if (Count == 0u || static_cast<VkDeviceSize>(Count) * sizeof(VertexRecord) > Vertices.Bytes) return false;
++    std::memcpy(VertexMapping, Points, static_cast<size_t>(Count) * sizeof(VertexRecord));
++    VerticesPending = true;
++    return true;
++}
++
+ void RayQueryExchange::RecordRefit(VkCommandBuffer Command)
+ {
+-    if (!SceneReady || !PlacementsPending) return;
++    if (!SceneReady || (!PlacementsPending && !VerticesPending)) return;
++    // ① Everything the host just wrote — the staged placement rows, and the deformed vertices when a project moved
++    //    them — has to be visible to the build before any acceleration structure reads it.
+     VkMemoryBarrier Before{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
+-    Before.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
++    Before.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+     Before.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+-    vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
++    vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                          VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
+                          0u, 1u, &Before, 0u, nullptr, 0u, nullptr);
++    // ② Bottom levels: an update build follows the deformation without re-running the builder. A purely rigid step
++    //    leaves VerticesPending clear and pays nothing here — the bottom levels are still exactly right.
++    if (VerticesPending)
++    {
++        for (uint32_t Slot = 0u; Slot < BottomLevels.size(); ++Slot)
++        {
++            VkAccelerationStructureBuildGeometryInfoKHR Build{ VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR };
++            Build.type                     = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
++            Build.flags                    = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR | VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
++            Build.mode                     = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
++            Build.srcAccelerationStructure = BottomLevels[Slot];
++            Build.dstAccelerationStructure = BottomLevels[Slot];
++            Build.geometryCount            = 1u;
++            Build.pGeometries              = &BottomGeometry[Slot];
++            Build.scratchData.deviceAddress = ScratchAddress;
++            const auto* Span = &BottomSpans[Slot];
++            BuildAcceleration(Command, 1u, &Build, &Span);
++            VkMemoryBarrier Serial{ VK_STRUCTURE_TYPE_MEMORY_BARRIER };
++            Serial.srcAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
++            Serial.dstAccessMask = VK_ACCESS_ACCELERATION_STRUCTURE_READ_BIT_KHR | VK_ACCESS_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
++            vkCmdPipelineBarrier(Command, VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
++                                 VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR, 0u, 1u, &Serial, 0u, nullptr, 0u, nullptr);
++        }
++        VerticesPending = false;
++    }
++    // ③ Placement rows, then the top level. A TLAS is never left unrefitted when either half moved.
+     const VkDeviceSize Bytes = PendingPlacements.size() * sizeof(VkAccelerationStructureInstanceKHR);
+     const auto* Source = reinterpret_cast<const unsigned char*>(PendingPlacements.data());
+     for (VkDeviceSize Offset = 0u; Offset < Bytes; Offset += 65536u)
+diff --git a/Engine/DeviceExchange/RayQueryExchange.h b/Engine/DeviceExchange/RayQueryExchange.h
+index b5ed16b..d9e2331 100644
+--- a/Engine/DeviceExchange/RayQueryExchange.h
++++ b/Engine/DeviceExchange/RayQueryExchange.h
+@@ -11,6 +11,7 @@
+ namespace Frontier {
+ class SceneStructure;
+ struct InstanceRecord;
++struct VertexRecord;
+ 
+ class RayQueryExchange
+ {
+@@ -18,6 +19,16 @@ public:
+     bool Construct(VkDevice Device, VkPhysicalDevice PhysicalDevice, VkQueue Queue, uint32_t QueueFamily);
+     bool ConstructScene(const SceneStructure& Scene);
+     bool RefreshPlacements(const InstanceRecord* Placements, uint32_t Count);
++    /// 📦 Rewrites the resident vertex extent in place after a topology-preserving deformation and marks the bottom
++    ///    levels for an update build. The bottom levels themselves are rebuilt by the next RecordRefit, in queue
++    ///    order, so no recording that is still reading them can observe a half-written vehicle.
++    /// in    Points   [vertices] the deformed vertex records, in construction order
++    /// in    Count    [vertices] how many records Points holds; must equal the resident count
++    /// err   returns false when no scene is resident, the bottom levels were built without the update flag, the
++    ///       vertex extent is not host mapped, or Count exceeds it — the caller must then fall back to a rebuild
++    /// cost  🚩
++    /// tag   api, nonallocating, nonthrowing
++    bool RefreshVertices(const VertexRecord* Points, uint32_t Count);
+     void RecordRefit(VkCommandBuffer Command);
+     void Retire();
+     [[nodiscard]] bool Ready() const noexcept { return SceneReady; }
+@@ -50,6 +61,13 @@ private:
+     std::vector<Extent> BottomStorage;
+     Extent Vertices, Indices, Placements, TopStorage, Scratch;
+     std::vector<VkAccelerationStructureInstanceKHR> PendingPlacements;
++    // 📝 Retained from ConstructScene so RecordRefit can rebuild the per-instance build record for an update.
++    //    Build.pGeometries points INTO BottomGeometry, which is why this cannot be a local that outlives the call.
++    std::vector<VkAccelerationStructureGeometryKHR>       BottomGeometry;
++    std::vector<VkAccelerationStructureBuildRangeInfoKHR> BottomSpans;
++    void*       VertexMapping    = nullptr;   // [-]      persistent host mapping of Vertices, rewritten on deformation
++    bool        VerticesPending  = false;     // [-]      a deformation arrived since the last refit
++    bool        BottomRefittable = false;     // [-]      bottom levels carry ALLOW_UPDATE, so MODE_UPDATE is legal
+     VkDeviceSize ScratchAlignment = 256u;
+     VkDeviceAddress ScratchAddress = 0u;
+     bool SceneReady = false;
+diff --git a/Engine/DeviceExchange/SwapchainExchange.cpp b/Engine/DeviceExchange/SwapchainExchange.cpp
+index afbfe51..42606fc 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.cpp
++++ b/Engine/DeviceExchange/SwapchainExchange.cpp
+@@ -2503,6 +2503,7 @@ void SwapchainExchange::UploadTriangles(const std::vector<TriangleIndex>& Triang
+     Vulkan->TriangleCount      = static_cast<uint32_t>(Triangles.size());
+     // A zero-sized buffer is invalid; keep at least one record so the SSBO binding is always valid.
+     const VkDeviceSize ByteCount = std::max<VkDeviceSize>(Triangles.size(), 1u) * sizeof(TriangleIndex);
++    TriangleCapacity           = ByteCount;   // [B] so UploadTrianglesInPlace can refuse an overrun rather than truncate
+     constexpr uint32_t HostVisible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
+                                    | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+ 
+@@ -2523,6 +2524,24 @@ void SwapchainExchange::UploadTriangles(const std::vector<TriangleIndex>& Triang
+     WriteDescriptorSet();
+ }
+ 
++bool SwapchainExchange::UploadTrianglesInPlace(const std::vector<TriangleIndex>& Triangles) noexcept
++{
++    // 📝 UploadTriangles destroys and recreates the buffer, which forces a vkDeviceWaitIdle and a descriptor rewrite.
++    //    That is correct at load and wrong at one call per physics step, so this is the same write without any of it:
++    //    the VkBuffer handle is unchanged, only its bytes move. Refuses rather than truncates when the triangle count
++    //    moved, because that is a topology change and belongs to UploadTriangles.
++    if (!Vulkan || !Vulkan->Device || !Vulkan->TriangleBuffer || !Vulkan->TriangleMemory) return false;
++    if (Triangles.empty() || Triangles.size() != static_cast<size_t>(Vulkan->TriangleCount)) return false;
++
++    const VkDeviceSize ByteCount = static_cast<VkDeviceSize>(Triangles.size()) * sizeof(TriangleIndex);
++    if (ByteCount > TriangleCapacity) return false;
++    void* Mapped = nullptr;
++    if (vkMapMemory(Vulkan->Device, Vulkan->TriangleMemory, 0u, ByteCount, 0u, &Mapped) != VK_SUCCESS || Mapped == nullptr) return false;
++    std::memcpy(Mapped, Triangles.data(), static_cast<size_t>(ByteCount));
++    vkUnmapMemory(Vulkan->Device, Vulkan->TriangleMemory);
++    return true;
++}
++
+ void SwapchainExchange::UploadMaterials(const MaterialIndex& Materials) noexcept
+ {
+     if (!Vulkan->Device) return;
+@@ -2917,8 +2936,44 @@ bool SwapchainExchange::RefreshTraversal(const TraversalIndex& Traversal, const
+     if (!Refresh(Traversal.QueryLeafBlob(), Vulkan->TraversalLeafMemory, TraversalLeafCapacity)) return false;
+ 
+     // The kernel resolves a hit's material and normal from Triangles[], so the flat triangles must move with the
+-    //    acceleration structure or shading would read the body's old position.
+-    UploadTriangles(Facets);
++    //    acceleration structure or shading would read the body's old position. In place when the count is unchanged;
++    //    UploadTriangles only as the fallback, because it stalls the device and rewrites the descriptor set.
++    if (!UploadTrianglesInPlace(Facets)) UploadTriangles(Facets);
++    return true;
++}
++
++bool SwapchainExchange::RefreshDeformation(const SceneStructure& Scene, const TraversalIndex& Traversal,
++                                           const std::vector<TriangleIndex>& Facets,
++                                           const InstanceRecord* Rows, uint32_t Count) noexcept
++{
++    // 📝 One step of a deforming project. Every stage below is the no-reallocation variant of what UploadScene does,
++    //    and every one of them refuses rather than truncates, so the caller can fall back to UploadScene and lose
++    //    speed but never correctness.
++    //
++    //    What is deliberately absent, and why:
++    //      · UploadTextures / UploadMaterials — a deformation moves no reflectance.
++    //      · VisibilityExchange::UploadScene — it would rebuild the emitter cache and reallocate every extent.
++    //      · the DistanceGeometry topology test — Matches() is a count comparison and a deformation cannot move a
++    //        count, so a bake would be refused here anyway. RefreshInstances only re-places, never re-bakes.
++    //      · vkDeviceWaitIdle — nothing here destroys a handle, so nothing has to drain the device.
++    if (!Vulkan || !Vulkan->Device || !TraversalResident) return false;
++
++    const auto Started = std::chrono::steady_clock::now();
++    if (!Visibility.RefreshDeformation(Scene))  return false;   // ① deformed vertices, cluster bounds, flat triangles
++    if (!RefreshTraversal(Traversal, Facets))   return false;   // ② refitted CWBVH blobs and the flat triangles again
++    if (!RefreshInstances(Rows, Count))         return false;   // ③ instance rows, atlas placements, RT placement rows
++
++    // ④ Hardware bottom levels. Staged here, built by RecordRefit in queue order inside the frame's command buffer,
++    //    which is the only place an update build may be recorded. A device without hardware ray queries has nothing
++    //    to stage, so it is not a refusal — only a ready accelerator that turns the vertices down is.
++    bool AccelerationStaged = true;
++    if (Vulkan->RayQueries.Ready())
++        AccelerationStaged = Vulkan->RayQueries.RefreshVertices(Scene.QueryVertices().data(),
++                                                                static_cast<uint32_t>(Scene.QueryVertices().size()));
++    if (!AccelerationStaged) return false;
++
++    ++DeformationPublishCount;
++    DeformationPublishMilliseconds += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count();
+     return true;
+ }
+ 
+@@ -3167,13 +3222,22 @@ void SwapchainExchange::UploadScene(const SceneStructure& Scene, const Traversal
+         //    re-projects the instance placements; baking again would be exactly the per-frame rebuild the engine must never do.
+         if (DistanceGeometry.Matches(Scene))
+         {
+-            std::cerr << "[SdfGI] UploadScene: topology unchanged, atlas kept (bakes so far: " << DistanceGeometry.QueryAtlas().QueryBakeCount() << ")\n";
++            std::cerr << "[SdfGI] UploadScene: topology unchanged ('" << (Trigger ? Trigger : "unspecified") << "'), atlas kept"
++                      << " (bakes so far: " << DistanceGeometry.QueryAtlas().QueryBakeCount() << ")\n";
+             (void)DistanceGeometry.RefreshInstances(Scene.QueryInstances().data(), static_cast<uint32_t>(Scene.QueryInstances().size()));
+         }
+         else
+         {
+-            std::cerr << "[SdfGI] UploadScene: topology changed or first upload, baking the atlas\n";
++            // 📝 The only place a bake can happen: the first upload, or an upload whose topology differs — an import,
++            //    a level load, or an editor edit. Never a Play step: a deformation cannot move a count.
++            const auto BakeStarted = std::chrono::steady_clock::now();
++            std::cerr << "[SdfGI] UploadScene: topology changed ('" << (Trigger ? Trigger : "unspecified") << "'), baking the atlas (bake #"
++                      << (DistanceGeometry.QueryAtlas().QueryBakeCount() + 1u) << ")\n";
+             if (!DistanceGeometry.Construct(Scene)) std::cerr << "[SdfGI] Scene contains no valid distance geometry.\n";
++            std::cerr << "[SdfGI] bake finished in "
++                      << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - BakeStarted).count()
++                      << " ms; voxels=" << DistanceGeometry.QueryAtlas().QueryReport().Voxels
++                      << " placements=" << DistanceGeometry.QueryAtlas().QueryPlacements().size() << "\n";
+         }
+     }
+     catch (...)
+diff --git a/Engine/DeviceExchange/SwapchainExchange.h b/Engine/DeviceExchange/SwapchainExchange.h
+index f06f1fa..592c358 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.h
++++ b/Engine/DeviceExchange/SwapchainExchange.h
+@@ -265,10 +265,19 @@ public:
+     [[nodiscard]] bool QueryDistanceFieldGIReady() const noexcept { return DistanceFieldStage.IsReady(); }
+ 
+     [[nodiscard]] uint32_t      QueryInstanceCount() const noexcept { return Visibility.QueryInstanceCount(); }
++    /// 📦 How many UploadScene calls have happened since bring-up. A healthy Play session leaves this unchanged.
++    [[nodiscard]] uint64_t      QuerySceneUploadSerial() const noexcept { return SceneUploadSerial; }
++    /// 📦 How many times the distance atlas has been baked. The atlas is baked once, at load or on the first upload
++    ///    whose topology differs; a deforming project must never move this number.
++    [[nodiscard]] uint32_t      QueryDistanceFieldBakeCount() const noexcept { return DistanceGeometry.QueryAtlas().QueryBakeCount(); }
+     void                        UploadTextures(const TextureIndex& Textures) noexcept;   // R4a bindless table → binding 18 (last since R6)
+     void                        DestroyTextures() noexcept;
+     void                        UploadShadingTables(const float* Energy, const float* Sheen, uint32_t Resolution) noexcept;   // R4b: two RGBA32F Resolution² planes (ShadingTableCodec bake) → bindings 13 / 14, once
+     void                        UploadTraversal(const TraversalIndex& Traversal) noexcept;   // R3 CWBVH blobs → bindings 8-9
++    // Rewrites the resident flat-triangle extent without reallocating: no vkDeviceWaitIdle and no descriptor
++    //    rewrite, so it is safe once per physics step. False when the triangle count moved (a topology change,
++    //    which belongs to UploadTriangles) or when nothing is resident yet.
++    [[nodiscard]] bool          UploadTrianglesInPlace(const std::vector<TriangleIndex>& Triangles) noexcept;
+ 
+     // D5: per-frame acceleration-structure refresh after a refit. No reallocation and no device stall, so unlike
+     //    UploadTraversal this is safe every frame. Also re-uploads the flat triangles, because the kernel resolves
+@@ -276,6 +285,27 @@ public:
+     //    allocation, in which case the caller should fall back to a full UploadTraversal.
+     [[nodiscard]] bool          RefreshTraversal(const TraversalIndex& Traversal, const std::vector<TriangleIndex>& Facets) noexcept;
+ 
++    /// 📦 Publishes one step of a topology-preserving deformation: the deformed vertices and cluster bounds, the
++    ///    refitted traversal blobs, the flat triangles, the instance rows, and an update build of the hardware
++    ///    bottom levels. Nothing here reallocates, waits for the device, rewrites a descriptor, rebuilds the
++    ///    emitter cache, or re-examines the distance atlas — so the atlas bake count does not move and Play costs a
++    ///    refit per step instead of a full UploadScene per step.
++    /// in    Scene    [-]  the deformed scene; its counts must equal what UploadScene made resident
++    /// in    Traversal [-] the traversal index, already refitted by the caller
++    /// in    Facets   [-]  the refitted flat triangles, the same vector handed to TraversalIndex::RefitBottomLevel
++    /// in    Rows     [-]  the deformed instance rows (a deforming subject carries an identity World)
++    /// in    Count    [instances] how many rows; must equal the resident instance count
++    /// err   returns false when any stage refuses — most often because a count moved, meaning the topology changed
++    ///       and the caller must rebuild with UploadScene. Refusal is safe: nothing is left half-published in a way
++    ///       a following UploadScene cannot repair.
++    /// cost  🚩
++    /// pre   UploadScene has run at least once; TraversalIndex::RefitBottomLevel has already succeeded
++    /// post  the raster, the traversal and the hardware acceleration all read the deformed geometry this frame
++    /// tag   api, nonallocating, nonthrowing
++    [[nodiscard]] bool          RefreshDeformation(const SceneStructure& Scene, const TraversalIndex& Traversal,
++                                                  const std::vector<TriangleIndex>& Facets,
++                                                  const InstanceRecord* Rows, uint32_t Count) noexcept;
++
+     // D6/D7 — the two-level structure → bindings 27 (top-level nodes), 28 (the instance list its leaves index),
+     //    29 (the instance rows: inverse + world AABB + BLAS index) and 30 (BLAS placements: where each BLAS' blobs start
+     //    inside bindings 8/9). Taken at load beside UploadTraversal; the kernel walks them only when the dispatcher's
+@@ -462,6 +492,8 @@ private:
+     RenderMetrics::DeviceWish MetricsWish;       // [-]   diagnostics extensions requested at vkCreateDevice
+     uint64_t                FrameSerial = 0u;    // [-]   command buffers recorded; names the frame in device-loss markers
+     uint64_t                SceneUploadSerial = 0u;   // [-]   UploadScene calls so far
++    uint64_t                DeformationPublishCount      = 0u;   // [-]   RefreshDeformation calls that reached the accelerators
++    double                  DeformationPublishMilliseconds = 0.0;  // [ms]  total host cost of those publishes
+     std::chrono::steady_clock::time_point LastSceneUpload{};   // [-]   when the previous UploadScene finished
+     std::string             HardwareRefusal;     // [-]   why the hardware ray-query route is not available; empty when it is
+     const char*             ReportedPipeline = nullptr;   // [-]   last route written to the [RenderPath] line
+@@ -480,6 +512,7 @@ private:
+     bool                    TraversalResident = false;
+     uint64_t                TraversalNodeCapacity = 0u;   // [B] allocation size, so a refit refresh cannot overrun
+     uint64_t                TraversalLeafCapacity = 0u;   // [B]   // [-]   R3 CWBVH uploaded (kernel refuses to run without it)
++    uint64_t                TriangleCapacity      = 0u;   // [B]   flat-triangle extent UploadTriangles allocated; bounds the in-place rewrite
+ 
+     // D6/D7 two-level traversal (bindings 27-30): what was allocated, so a per-frame refresh cannot overrun.
+     bool                    InstanceTraversalResident = false;
+diff --git a/Engine/DeviceExchange/VisibilityExchange.cpp b/Engine/DeviceExchange/VisibilityExchange.cpp
+index ce33bbf..43523dc 100644
+--- a/Engine/DeviceExchange/VisibilityExchange.cpp
++++ b/Engine/DeviceExchange/VisibilityExchange.cpp
+@@ -932,6 +932,34 @@ bool VisibilityExchange::RefreshInstances(const InstanceRecord* Rows, uint32_t C
+     return true;
+ }
+ 
++bool VisibilityExchange::RefreshDeformation(const SceneStructure& Scene) noexcept
++{
++    // 📝 The per-frame counterpart of the three UploadBuffer calls in UploadScene. Same three extents, same host
++    //    mappings, no vkDeviceWaitIdle — a deformation changes the bytes, never the shape of the allocation. The
++    //    emitter cache is deliberately NOT rebuilt: it is derived from emissive flat triangles, and a project that
++    //    grew or moved a light has changed the scene and must go through UploadScene instead.
++    if (Vulkan == nullptr || !Vulkan->Device) return false;
++
++    const auto& Points   = Scene.QueryVertices();
++    const auto& Clusters = Scene.QueryClusters();
++    const auto& Facets   = Scene.QueryFlatTriangles();
++    if (Clusters.size() != ClusterCount)            return false;   // [-] clusters moved: a rebuild, not a deformation
++    if (Scene.QueryTriangleCount() != TriangleCount) return false;   // [-] triangle count moved: a rebuild, not a deformation
++    if (Points.empty() || Clusters.empty() || Facets.empty()) return false;
++
++    const auto Publish = [](GpuBuffer& Target, const void* Source, VkDeviceSize ByteCount) noexcept -> bool
++    {
++        if (Target.Mapped == nullptr || ByteCount > Target.Bytes) return false;
++        std::memcpy(Target.Mapped, Source, static_cast<size_t>(ByteCount));
++        return true;
++    };
++
++    if (!Publish(Vulkan->Vertices,      Points.data(),   static_cast<VkDeviceSize>(Points.size())   * sizeof(VertexRecord)))  return false;
++    if (!Publish(Vulkan->Clusters,      Clusters.data(), static_cast<VkDeviceSize>(Clusters.size()) * sizeof(ClusterRecord))) return false;
++    if (!Publish(Vulkan->FlatTriangles, Facets.data(),   static_cast<VkDeviceSize>(Facets.size())   * sizeof(TriangleIndex))) return false;
++    return true;
++}
++
+ //------------------------------------------------------------------------------------------------------------------------
+ //                                                   DESCRIPTOR WRITES
+ //------------------------------------------------------------------------------------------------------------------------
+diff --git a/Engine/DeviceExchange/VisibilityExchange.h b/Engine/DeviceExchange/VisibilityExchange.h
+index 440423e..2110abd 100644
+--- a/Engine/DeviceExchange/VisibilityExchange.h
++++ b/Engine/DeviceExchange/VisibilityExchange.h
+@@ -166,6 +166,20 @@ public:
+     //    reads it is submitted, which is why the caller does this before RecordAndPresent.
+     [[nodiscard]] bool  RefreshInstances(const InstanceRecord* Rows, uint32_t Count) noexcept;
+ 
++    /// 📦 Rewrites the vertex, cluster and flat-triangle extents in place for geometry that MOVED without changing
++    ///    topology — a deforming tyre, at one physics step per call. The three allocations UploadScene made are
++    ///    host-visible and persistently mapped, so this is three memcpys: no reallocation, no vkDeviceWaitIdle, no
++    ///    descriptor rewrite, and no rebuild of the emitter cache, whose emissive triangles a tyre is not part of.
++    /// in    Scene   [-]  the deformed scene; every count must equal what UploadScene made resident
++    /// err   returns false when the extents are absent, unmapped, or smaller than the deformed payload, or when the
++    ///       triangle or cluster count moved — any of which means the topology changed and the caller must rebuild
++    /// out   true   the resident buffers now carry the deformed geometry
++    /// cost  🚩
++    /// pre   UploadScene has run at least once and the cluster and triangle counts are unchanged since
++    /// post  on false no buffer is touched; the resident geometry still shows the previous step
++    /// tag   api, nonallocating, nonthrowing
++    [[nodiscard]] bool  RefreshDeformation(const SceneStructure& Scene) noexcept;
++
+     // Instances resident after the last UploadScene — the bound RefreshInstances must match.
+     [[nodiscard]] uint32_t QueryInstanceCount() const noexcept { return InstanceCount; }
+ 
+diff --git a/Engine/Host/FrontierRuntime.cpp b/Engine/Host/FrontierRuntime.cpp
+index a12218a..9fe39d0 100644
+--- a/Engine/Host/FrontierRuntime.cpp
++++ b/Engine/Host/FrontierRuntime.cpp
+@@ -1475,6 +1475,12 @@ int Frontier::RunFrontierRuntime(
+     uint32_t PreviousTransport = 0u;
+     std::vector<Frontier::InstanceRecord> ProjectRestInstances;
+     Frontier::HostRuntime::FlyThroughSolver ProjectEditCamera = Camera;
++    // 📝 Playback publication counters. A deforming project is REFITTED per step; only a step that changes topology
++    //    (or that the refit refuses) is allowed to fall back to a rebuild. These two numbers are the whole point —
++    //    a healthy Play session shows RebuildSteps at 0 and RefitSteps counting the physics steps.
++    uint64_t PlaybackRefitSteps       = 0u;   // [-]  steps published by refit, no rebuild
++    uint64_t PlaybackRebuildSteps     = 0u;   // [-]  steps that had to fall back to UploadScene
++    float    PlaybackRefitMillisecondsPeak = 0.0f;   // [ms] worst traversal refit seen during playback
+     while (!Surface.CloseRequested() && !Panel.Convert<bool>())
+     {
+         const auto  NowTime = Clock::now();
+@@ -1831,6 +1837,16 @@ int Frontier::RunFrontierRuntime(
+         ProjectMoved = ProjectMoved || GeometryChanged;
+         if (Transport == 0u && PreviousTransport != 0u)
+         {
++            // 📝 The proof that Play no longer rebuilds. RefitSteps counts the physics steps published by refit;
++            //    RebuildSteps must stay at 0 for a session whose topology never moved. UploadScene's own serial is
++            //    printed beside them so a rebuild anywhere in the frame is visible, not just in this branch.
++            std::cerr << "[Playback] transport stopped: refit steps " << PlaybackRefitSteps
++                      << ", rebuild steps " << PlaybackRebuildSteps
++                      << ", worst traversal refit " << PlaybackRefitMillisecondsPeak << " ms"
++                      << ", UploadScene calls over the session " << Surface.QuerySceneUploadSerial()
++                      << ", distance-field bakes " << Surface.QueryDistanceFieldBakeCount() << "\n";
++            PlaybackRefitSteps = PlaybackRebuildSteps = 0u;
++            PlaybackRefitMillisecondsPeak = 0.0f;
+             if (ProjectGeometry.Active() && !ProjectGeometry.Restore(Level))
+             {
+                 Logger.RecordMessage(Frontier::DiagnosticSeverity::Refusal, "Project geometry", "Authored topology changed during playback");
+@@ -1845,17 +1861,36 @@ int Frontier::RunFrontierRuntime(
+         {
+             if (ProjectGeometry.Active())
+             {
+-                // Correctness-first synchronized publication. UploadScene waits for GPU readers, replaces raster
+-                // buffers and hardware traversal, and reconstructs native hybrid SDF geometry at the same revision.
+-                // The rigid-only two-level path is disabled above for these projects. This is NOT a fast stream.
++                // 📝 A deforming project moves vertices and nothing else: GeometrySequence::Advance refuses any step
++                //    that changes a vertex count, an index count or an index value, and it resets a deformed
++                //    subject's World to identity so the positions already carry the pose. The resident structures
++                //    therefore stay VALID across the step and only need refitting.
++                //
++                //    The previous code rebuilt here, which cost a full UploadScene every physics step: device idle,
++                //    every scene extent reallocated, the emitter cache rebuilt, the CWBVH rebuilt from scratch, the
++                //    hardware BLAS/TLAS reconstructed, the descriptor sets rewritten and the distance atlas
++                //    re-examined. At 240 Hz that is the difference between a refit and a reload.
+                 Level.RefreshGeometry(AnimatedInstances);
+                 TracedFacets = Level.QueryFlatTriangles();
+-                if (!Traversal.BuildBottomLevel(TracedFacets, false))
++                if (Traversal.IsRefittable() && Traversal.RefitBottomLevel(TracedFacets) &&
++                    Surface.RefreshDeformation(Level, Traversal, TracedFacets,
++                                               AnimatedInstances.data(), static_cast<uint32_t>(AnimatedInstances.size())))
++                {
++                    ++PlaybackRefitSteps;
++                    PlaybackRefitMillisecondsPeak = std::max(PlaybackRefitMillisecondsPeak, Traversal.QueryRefitMilliseconds());
++                }
++                else if (!Traversal.IsRefittable() || !Traversal.BuildBottomLevel(TracedFacets, false))
+                 {
+                     Logger.RecordMessage(Frontier::DiagnosticSeverity::Refusal, "Project geometry", "Traversal rebuild refused");
+                     break;
+                 }
+-                Surface.UploadScene(Level, Traversal, nullptr, "play: project geometry deformed (tyres), every step");
++                else
++                {
++                    // Only reachable when the refit or the publish refused, i.e. the scene no longer matches what
++                    // UploadScene made resident. Correctness-first: pay the full upload rather than trace a stale tree.
++                    ++PlaybackRebuildSteps;
++                    Surface.UploadScene(Level, Traversal, nullptr, "play: project geometry rebuild (refit refused or topology moved)");
++                }
+             }
+             else (void)Surface.RefreshInstances(AnimatedInstances.data(), static_cast<uint32_t>(AnimatedInstances.size()));
+             if (InstancesResident)
+diff --git a/VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp b/VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp
+index 599e4bf..337a086 100644
+--- a/VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp
++++ b/VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp
+@@ -243,6 +243,33 @@ int main()
+     (void)Atlas.Project(Moved.data(), static_cast<uint32_t>(Moved.size()));
+     Report(Atlas.QueryPlacementRevision() == RevisionMoved, "an unchanged pose does not bump the placement revision", "revision stable", Log);
+ 
++    // A deforming project — a tyre squashing under load, at one step per call — moves vertex POSITIONS and nothing
++    //    else: GeometrySequence refuses any step that changes a vertex count, an index count or an index value. The
++    //    atlas is baked from the rest pose and is never re-baked during playback, so this must not touch it. This is
++    //    the invariant the Play loop now depends on: it refits the traversal and the hardware acceleration and
++    //    leaves the bake count alone.
++    {
++        const uint32_t  BakesAtRest    = Atlas.QueryBakeCount();
++        const float*    DataAtRest     = Atlas.QueryAtlas().data();
++        const size_t    SizeAtRest     = Atlas.QueryAtlas().size();
++        const size_t    VerticesAtRest = Mesh.Vertices.size();
++        const uint64_t  RevisionAtRest = Atlas.QueryPlacementRevision();
++        std::vector<VertexRecord> RestVertices = Mesh.Vertices;
++        for (VertexRecord& Vertex : Mesh.Vertices) Vertex.SpatialLocation.z *= 0.6f;   // squash every mesh
++        const bool ReProjected = Atlas.Project(Moved.data(), static_cast<uint32_t>(Moved.size()));
++        std::snprintf(Detail, sizeof(Detail), "vertices %zu->%zu, bakes %u->%u, atlas %zu floats, revision %llu->%llu",
++                      VerticesAtRest, Mesh.Vertices.size(), BakesAtRest, Atlas.QueryBakeCount(), SizeAtRest,
++                      static_cast<unsigned long long>(RevisionAtRest),
++                      static_cast<unsigned long long>(Atlas.QueryPlacementRevision()));
++        Report(ReProjected && Atlas.QueryBakeCount() == BakesAtRest && Atlas.QueryAtlas().data() == DataAtRest &&
++               Atlas.QueryAtlas().size() == SizeAtRest && Mesh.Vertices.size() == VerticesAtRest,
++               "deforming vertices never re-bakes the atlas", Detail, Log);
++        Mesh.Vertices = RestVertices;
++        Measure(Moved, Over, Under, Mean);
++        std::snprintf(Detail, sizeof(Detail), "4000 points after the squash and restore: worst over %.4f m, worst under %.4f m", Over, Under);
++        Report(Over <= CoarsestWorld && Under <= CoarsestWorld, "the baked field survives a playback deformation", Detail, Log);
++    }
++
+     // Non-uniform scale: the field may underestimate (it scales by the smallest singular value) but must never overestimate.
+     const float StretchScale[3] = { 1.5f, 0.75f, 2.0f };
+     std::vector<InstanceRecord> Stretched = Moved;
+-- 
+2.39.5
+

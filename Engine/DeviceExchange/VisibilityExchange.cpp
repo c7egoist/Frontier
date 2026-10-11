@@ -932,6 +932,34 @@ bool VisibilityExchange::RefreshInstances(const InstanceRecord* Rows, uint32_t C
     return true;
 }
 
+bool VisibilityExchange::RefreshDeformation(const SceneStructure& Scene) noexcept
+{
+    // 📝 The per-frame counterpart of the three UploadBuffer calls in UploadScene. Same three extents, same host
+    //    mappings, no vkDeviceWaitIdle — a deformation changes the bytes, never the shape of the allocation. The
+    //    emitter cache is deliberately NOT rebuilt: it is derived from emissive flat triangles, and a project that
+    //    grew or moved a light has changed the scene and must go through UploadScene instead.
+    if (Vulkan == nullptr || !Vulkan->Device) return false;
+
+    const auto& Points   = Scene.QueryVertices();
+    const auto& Clusters = Scene.QueryClusters();
+    const auto& Facets   = Scene.QueryFlatTriangles();
+    if (Clusters.size() != ClusterCount)            return false;   // [-] clusters moved: a rebuild, not a deformation
+    if (Scene.QueryTriangleCount() != TriangleCount) return false;   // [-] triangle count moved: a rebuild, not a deformation
+    if (Points.empty() || Clusters.empty() || Facets.empty()) return false;
+
+    const auto Publish = [](GpuBuffer& Target, const void* Source, VkDeviceSize ByteCount) noexcept -> bool
+    {
+        if (Target.Mapped == nullptr || ByteCount > Target.Bytes) return false;
+        std::memcpy(Target.Mapped, Source, static_cast<size_t>(ByteCount));
+        return true;
+    };
+
+    if (!Publish(Vulkan->Vertices,      Points.data(),   static_cast<VkDeviceSize>(Points.size())   * sizeof(VertexRecord)))  return false;
+    if (!Publish(Vulkan->Clusters,      Clusters.data(), static_cast<VkDeviceSize>(Clusters.size()) * sizeof(ClusterRecord))) return false;
+    if (!Publish(Vulkan->FlatTriangles, Facets.data(),   static_cast<VkDeviceSize>(Facets.size())   * sizeof(TriangleIndex))) return false;
+    return true;
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                   DESCRIPTOR WRITES
 //------------------------------------------------------------------------------------------------------------------------

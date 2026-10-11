@@ -2503,6 +2503,7 @@ void SwapchainExchange::UploadTriangles(const std::vector<TriangleIndex>& Triang
     Vulkan->TriangleCount      = static_cast<uint32_t>(Triangles.size());
     // A zero-sized buffer is invalid; keep at least one record so the SSBO binding is always valid.
     const VkDeviceSize ByteCount = std::max<VkDeviceSize>(Triangles.size(), 1u) * sizeof(TriangleIndex);
+    TriangleCapacity           = ByteCount;   // [B] so UploadTrianglesInPlace can refuse an overrun rather than truncate
     constexpr uint32_t HostVisible = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
                                    | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
@@ -2521,6 +2522,24 @@ void SwapchainExchange::UploadTriangles(const std::vector<TriangleIndex>& Triang
     }
 
     WriteDescriptorSet();
+}
+
+bool SwapchainExchange::UploadTrianglesInPlace(const std::vector<TriangleIndex>& Triangles) noexcept
+{
+    // 📝 UploadTriangles destroys and recreates the buffer, which forces a vkDeviceWaitIdle and a descriptor rewrite.
+    //    That is correct at load and wrong at one call per physics step, so this is the same write without any of it:
+    //    the VkBuffer handle is unchanged, only its bytes move. Refuses rather than truncates when the triangle count
+    //    moved, because that is a topology change and belongs to UploadTriangles.
+    if (!Vulkan || !Vulkan->Device || !Vulkan->TriangleBuffer || !Vulkan->TriangleMemory) return false;
+    if (Triangles.empty() || Triangles.size() != static_cast<size_t>(Vulkan->TriangleCount)) return false;
+
+    const VkDeviceSize ByteCount = static_cast<VkDeviceSize>(Triangles.size()) * sizeof(TriangleIndex);
+    if (ByteCount > TriangleCapacity) return false;
+    void* Mapped = nullptr;
+    if (vkMapMemory(Vulkan->Device, Vulkan->TriangleMemory, 0u, ByteCount, 0u, &Mapped) != VK_SUCCESS || Mapped == nullptr) return false;
+    std::memcpy(Mapped, Triangles.data(), static_cast<size_t>(ByteCount));
+    vkUnmapMemory(Vulkan->Device, Vulkan->TriangleMemory);
+    return true;
 }
 
 void SwapchainExchange::UploadMaterials(const MaterialIndex& Materials) noexcept
@@ -2917,8 +2936,44 @@ bool SwapchainExchange::RefreshTraversal(const TraversalIndex& Traversal, const 
     if (!Refresh(Traversal.QueryLeafBlob(), Vulkan->TraversalLeafMemory, TraversalLeafCapacity)) return false;
 
     // The kernel resolves a hit's material and normal from Triangles[], so the flat triangles must move with the
-    //    acceleration structure or shading would read the body's old position.
-    UploadTriangles(Facets);
+    //    acceleration structure or shading would read the body's old position. In place when the count is unchanged;
+    //    UploadTriangles only as the fallback, because it stalls the device and rewrites the descriptor set.
+    if (!UploadTrianglesInPlace(Facets)) UploadTriangles(Facets);
+    return true;
+}
+
+bool SwapchainExchange::RefreshDeformation(const SceneStructure& Scene, const TraversalIndex& Traversal,
+                                           const std::vector<TriangleIndex>& Facets,
+                                           const InstanceRecord* Rows, uint32_t Count) noexcept
+{
+    // 📝 One step of a deforming project. Every stage below is the no-reallocation variant of what UploadScene does,
+    //    and every one of them refuses rather than truncates, so the caller can fall back to UploadScene and lose
+    //    speed but never correctness.
+    //
+    //    What is deliberately absent, and why:
+    //      · UploadTextures / UploadMaterials — a deformation moves no reflectance.
+    //      · VisibilityExchange::UploadScene — it would rebuild the emitter cache and reallocate every extent.
+    //      · the DistanceGeometry topology test — Matches() is a count comparison and a deformation cannot move a
+    //        count, so a bake would be refused here anyway. RefreshInstances only re-places, never re-bakes.
+    //      · vkDeviceWaitIdle — nothing here destroys a handle, so nothing has to drain the device.
+    if (!Vulkan || !Vulkan->Device || !TraversalResident) return false;
+
+    const auto Started = std::chrono::steady_clock::now();
+    if (!Visibility.RefreshDeformation(Scene))  return false;   // ① deformed vertices, cluster bounds, flat triangles
+    if (!RefreshTraversal(Traversal, Facets))   return false;   // ② refitted CWBVH blobs and the flat triangles again
+    if (!RefreshInstances(Rows, Count))         return false;   // ③ instance rows, atlas placements, RT placement rows
+
+    // ④ Hardware bottom levels. Staged here, built by RecordRefit in queue order inside the frame's command buffer,
+    //    which is the only place an update build may be recorded. A device without hardware ray queries has nothing
+    //    to stage, so it is not a refusal — only a ready accelerator that turns the vertices down is.
+    bool AccelerationStaged = true;
+    if (Vulkan->RayQueries.Ready())
+        AccelerationStaged = Vulkan->RayQueries.RefreshVertices(Scene.QueryVertices().data(),
+                                                                static_cast<uint32_t>(Scene.QueryVertices().size()));
+    if (!AccelerationStaged) return false;
+
+    ++DeformationPublishCount;
+    DeformationPublishMilliseconds += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Started).count();
     return true;
 }
 
@@ -3167,13 +3222,22 @@ void SwapchainExchange::UploadScene(const SceneStructure& Scene, const Traversal
         //    re-projects the instance placements; baking again would be exactly the per-frame rebuild the engine must never do.
         if (DistanceGeometry.Matches(Scene))
         {
-            std::cerr << "[SdfGI] UploadScene: topology unchanged, atlas kept (bakes so far: " << DistanceGeometry.QueryAtlas().QueryBakeCount() << ")\n";
+            std::cerr << "[SdfGI] UploadScene: topology unchanged ('" << (Trigger ? Trigger : "unspecified") << "'), atlas kept"
+                      << " (bakes so far: " << DistanceGeometry.QueryAtlas().QueryBakeCount() << ")\n";
             (void)DistanceGeometry.RefreshInstances(Scene.QueryInstances().data(), static_cast<uint32_t>(Scene.QueryInstances().size()));
         }
         else
         {
-            std::cerr << "[SdfGI] UploadScene: topology changed or first upload, baking the atlas\n";
+            // 📝 The only place a bake can happen: the first upload, or an upload whose topology differs — an import,
+            //    a level load, or an editor edit. Never a Play step: a deformation cannot move a count.
+            const auto BakeStarted = std::chrono::steady_clock::now();
+            std::cerr << "[SdfGI] UploadScene: topology changed ('" << (Trigger ? Trigger : "unspecified") << "'), baking the atlas (bake #"
+                      << (DistanceGeometry.QueryAtlas().QueryBakeCount() + 1u) << ")\n";
             if (!DistanceGeometry.Construct(Scene)) std::cerr << "[SdfGI] Scene contains no valid distance geometry.\n";
+            std::cerr << "[SdfGI] bake finished in "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - BakeStarted).count()
+                      << " ms; voxels=" << DistanceGeometry.QueryAtlas().QueryReport().Voxels
+                      << " placements=" << DistanceGeometry.QueryAtlas().QueryPlacements().size() << "\n";
         }
     }
     catch (...)

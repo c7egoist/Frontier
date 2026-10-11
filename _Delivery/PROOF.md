@@ -323,10 +323,98 @@ Every frame of every clip is an independent full render. Nothing is interpolated
 
 ## 6. Still not fixed
 
-1. `Play` still rebuilds the scene every frame (`ProjectDriveInterchange.cpp` bumps `GeometryRevision`
-   each tick → `RefreshGeometry` + `BuildBottomLevel` + `UploadScene`, which calls `vkDeviceWaitIdle`).
-   **Not fixed** — only now logged (`[UploadScene] #n trigger=… since_previous_ms`).
+1. ~~`Play` still rebuilds the scene every frame (`ProjectDriveInterchange.cpp` bumps `GeometryRevision`
+   each tick → `RefreshGeometry` + `BuildBottomLevel` + `UploadScene`, which calls `vkDeviceWaitIdle`).~~
+   **FIXED — see §7.** Play now refits; only a topology change rebuilds. Verify with the
+   `[Playback] transport stopped: refit steps … rebuild steps …` line.
 2. The XPBD force blow-up above. The measurement is now in place; **the fix is not written**.
 3. F8 eject — unimplemented.
 4. SolidArc B/C bevel/fillet/chamfer still take the fixed 0.1 radius.
 5. SolidArc is a standalone Win32 host; in-process hosting inside `Frontier.exe` is not done.
+
+---
+
+## 7. Play no longer rebuilds the scene every step
+
+### 7.1 What was wrong
+
+`FrontierRuntime.cpp` published one deforming physics step with the load-time path:
+
+```
+Level.RefreshGeometry(AnimatedInstances);
+TracedFacets = Level.QueryFlatTriangles();
+Traversal.BuildBottomLevel(TracedFacets, false);        // binned-SAH rebuild of the whole scene
+Surface.UploadScene(Level, Traversal, nullptr, "play: project geometry deformed (tyres), every step");
+```
+
+`UploadScene` waits for the device to go idle, reallocates and re-uploads every scene extent
+(vertices, indices, instances, clusters, materials, luminaires, flat triangles), rebuilds the emitter
+cache, reconstructs the hardware BLAS and TLAS, rewrites the descriptor sets and re-examines the
+distance atlas. At one call per 240 Hz step that is a reload, not an update.
+
+The trigger is real: `ProjectDriveInterchange::CaptureSurfaces` bumps `GeometryRevision` every tick
+because the XPBD tyres genuinely deform. But `GeometrySequence::Advance` **refuses any step that
+changes a vertex count, an index count or an index value** — so the resident structures stay valid
+across the step and only need refitting. The rebuild was never necessary.
+
+### 7.2 What it does now
+
+```
+if (Traversal.IsRefittable() && Traversal.RefitBottomLevel(TracedFacets) &&
+    Surface.RefreshDeformation(Level, Traversal, TracedFacets, rows, count))
+        ++PlaybackRefitSteps;                       // cheap path
+else if (!Traversal.IsRefittable() || !Traversal.BuildBottomLevel(TracedFacets, false))
+        break;                                      // nothing can be published
+else  { ++PlaybackRebuildSteps; Surface.UploadScene(..., "play: project geometry rebuild (refit refused or topology moved)"); }
+```
+
+`SwapchainExchange::RefreshDeformation` is four no-reallocation stages:
+
+| ① | `VisibilityExchange::RefreshDeformation` | deformed vertices, cluster bounds and flat triangles, memcpy'd into the extents `UploadScene` already allocated |
+| ② | `RefreshTraversal` | the refitted CWBVH blobs, plus the flat triangles again — now through `UploadTrianglesInPlace`, so no `vkDeviceWaitIdle` and no descriptor rewrite |
+| ③ | `RefreshInstances` | instance rows, distance-atlas placements, hardware placement rows |
+| ④ | `RayQueryExchange::RefreshVertices` | stages the deformed vertices; `RecordRefit` then issues a `MODE_UPDATE` build of the bottom levels inside the frame's command buffer |
+
+Deliberately absent: `UploadTextures` and `UploadMaterials` (a deformation moves no reflectance), the
+emitter-cache rebuild, the distance-atlas topology test, and `vkDeviceWaitIdle` (nothing here destroys
+a handle, so nothing has to drain the device).
+
+`RayQueryExchange` gains `VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR` on the bottom-level
+builds, a persistent host mapping of the vertex extent, and a `MODE_UPDATE` arm in `RecordRefit`. A
+purely rigid step leaves `VerticesPending` clear and pays only the TLAS refit it always paid.
+
+### 7.3 Bake once, rebuild only when topology moves
+
+The distance atlas was already correct — `DistanceFieldStructure::Matches` is a count comparison and a
+deformation cannot move a count — but the trigger is now logged, so an editor rebuild is visible:
+
+```
+[SdfGI] UploadScene: topology unchanged ('<trigger>'), atlas kept (bakes so far: 1)
+[SdfGI] UploadScene: topology changed ('<trigger>'), baking the atlas (bake #1)
+[SdfGI] bake finished in 566 ms; voxels=2524243 placements=3
+```
+
+### 7.4 How to verify on hardware
+
+Stop the transport and read one line:
+
+```
+[Playback] transport stopped: refit steps 1440, rebuild steps 0, worst traversal refit 7.46 ms,
+           UploadScene calls over the session 1, distance-field bakes 1
+```
+
+`rebuild steps 0` and `distance-field bakes 1` is the pass condition.
+
+### 7.5 What is proven here, and what is not
+
+| | |
+|:---|:---|
+| **Proven** | Every changed file compiles. `VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp` now asserts that deforming vertices never re-bakes the atlas — `ALL PASSED (0 failures)`, 9 checks. |
+| **Not proven** | Anything on the GPU. The refit path is compile-checked only; the numbers above have to come from your 9060 XT. |
+
+### 7.6 Known limitation this exposes
+
+The distance field is a **rest-pose snapshot**. A deforming tyre is refitted in the raster path, the
+traversal and the hardware acceleration, but its voxels still describe the pose that was baked — the
+same limitation §1.7 records for moving instances. Making the field follow a deformation means
+re-voxelising it, which is exactly the per-frame rebuild this section removes.

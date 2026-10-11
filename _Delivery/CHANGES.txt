@@ -26,6 +26,8 @@ M	Editor/AuthoringTools/Modelling/SolidArc/Presentation/SoftwareRaster.h
 M	Engine/ContentInterchange/UnifiedMaterialEvaluation.h
 M	Engine/DeviceExchange/DistanceFieldGIStage.cpp
 M	Engine/DeviceExchange/DistanceFieldGIStage.h
+M	Engine/DeviceExchange/RayQueryExchange.cpp
+M	Engine/DeviceExchange/RayQueryExchange.h
 A	Engine/DeviceExchange/RenderMetrics.cpp
 A	Engine/DeviceExchange/RenderMetrics.h
 D	Engine/DeviceExchange/SurfelGIStage.cpp
@@ -33,6 +35,7 @@ D	Engine/DeviceExchange/SurfelGIStage.h
 M	Engine/DeviceExchange/SwapchainExchange.cpp
 M	Engine/DeviceExchange/SwapchainExchange.h
 M	Engine/DeviceExchange/VisibilityExchange.cpp
+M	Engine/DeviceExchange/VisibilityExchange.h
 M	Engine/DisplayPresentation/ControlCentreHost.h
 M	Engine/DisplayPresentation/ReSTIRIntegrator.cpp
 D	Engine/DisplayPresentation/SurfelReference.cpp
