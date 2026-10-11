@@ -70,3 +70,4 @@ M	Tools/Build/BuildSolidArcApplication.py
 M	Tools/Build/PackageWindowsProjects.py
 M	Tools/Build/ToolchainSequence.ps1
 A	VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp
+A	VisualProof/DistanceAtlas/DistanceAtlasDeformChecks.cpp

@@ -412,9 +412,46 @@ Stop the transport and read one line:
 | **Proven** | Every changed file compiles. `VisualProof/DistanceAtlas/DistanceAtlasChecks.cpp` now asserts that deforming vertices never re-bakes the atlas — `ALL PASSED (0 failures)`, 9 checks. |
 | **Not proven** | Anything on the GPU. The refit path is compile-checked only; the numbers above have to come from your 9060 XT. |
 
-### 7.6 Known limitation this exposes
+### 7.6 What it does NOT do: the field does not follow the deformation
 
-The distance field is a **rest-pose snapshot**. A deforming tyre is refitted in the raster path, the
-traversal and the hardware acceleration, but its voxels still describe the pose that was baked — the
-same limitation §1.7 records for moving instances. Making the field follow a deformation means
-re-voxelising it, which is exactly the per-frame rebuild this section removes.
+Removing the rebuild does not make the SDF follow the tyre. `VisualProof/DistanceAtlas/
+DistanceAtlasDeformChecks.cpp` bakes one 0.35 m tyre at (5, 0, 1.5), performs one deformation step
+exactly as `GeometrySequence::Advance` does — world-space deformed positions written into the vertex
+array, and the subject's `World` row reset to identity — and then asks the field where the tyre is:
+
+| point | after bake | after the step |
+|:---|---:|---:|
+| on the rest-pose tyre surface | **0.0069 m** | 5.0213 m |
+| on the **deformed** tyre surface | — | **4.9815 m** |
+| at the **world origin** | 4.8611 m | **0.0069 m** |
+| bake count | 1 | **1** |
+
+So three things are true at once:
+
+1. **No re-bake.** Bake count stays 1 and the atlas bytes are identical. ✅
+2. **The volume is teleported.** `DistanceAtlasSpace` stores **object-space** volumes placed by
+   `WorldToLocal`. `Advance` resets `World` to identity, so `WorldToLocal` becomes identity and the
+   object-space tyre is placed **at the world origin** — a rest-pose ghost, 0.0069 m from the surface
+   there, where the same point read 4.8611 m before the step.
+3. **The facets are masked.** `World` differs from `BakedWorld`, so `DistanceAtlasMoved` is set and
+   `InstanceMoved` excludes the tyre from every exact query.
+
+The SDF GI therefore sees the tyre **nowhere near the tyre**. The raster, the CWBVH and the hardware
+BLAS are all correct after §7.2; the distance field is the one path that is wrong, and it was wrong
+before this change too — §7.2 removes the rebuilds, it does not add a deformation channel.
+
+**Why it cannot.** The whole per-instance runtime state is `DistanceAtlasPlacement`, 112 bytes:
+`WorldToLocal[12]`, the baked `BoxMinimum`/`BoxMaximum`, one scalar `DistanceScale`, `VoxelSize`,
+`Offset`, `Dimensions[3]`, `Flags`. `Project()` takes `InstanceRecord*` and reads only `.World`. There
+is no VAT slot, no second volume and no per-vertex offset — the structure physically cannot express a
+deformation.
+
+**What a VAT-style channel would take.** Bake the rest volume once (as now); upload a small
+per-instance displacement texture; in `SampleSceneDistance`, warp the local position by the sampled
+displacement *before* indexing the volume, so the voxels are never rewritten. The marched distance then
+stops being a true distance, so the step needs the usual Lipschitz clamp — divide by
+`1 − ‖∇displacement‖`. Cost: one extra fetch per distance sample, and a placement record that grows.
+
+A cheaper stopgap is to stop `Advance` resetting `World` to identity: the volume then at least sits
+where the tyre is (measured: rest surface 0.0069 m) even though the squash stays invisible (deformed
+surface 0.1372 m).

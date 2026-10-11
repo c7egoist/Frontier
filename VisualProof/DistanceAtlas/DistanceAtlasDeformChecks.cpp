@@ -1,0 +1,178 @@
+//============================================================================================================================================
+//                                                     DISTANCEATLASDEFORMCHECKS.CPP
+//============================================================================================================================================
+// 📦 Dependency-free CPU proof of what happens to the distance field when a project DEFORMS its geometry: the atlas
+//    is never re-baked, and the field does not follow the deformation — the deformed subject's volume ends up placed
+//    by an identity transform, so it sits at the world origin at its rest pose.
+
+#include "../../Engine/GeometricRaster/DistanceAtlasSpace.h"
+#include "../../Engine/GeometricRaster/SceneStructure.h"
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
+using namespace Frontier;
+
+namespace
+{
+int    FailureCount = 0;
+char   Detail[256];
+
+void Report(bool Passed, const char* Name, const char* Text, FILE* Log)
+{
+    if (!Passed) ++FailureCount;
+    std::printf("  %s  %s  %s\n", Passed ? "PASS" : "FAIL", Name, Text);
+    if (Log) std::fprintf(Log, "  %s  %s  %s\n", Passed ? "PASS" : "FAIL", Name, Text);
+}
+
+/// 📝 Records a measured fact with no pass/fail judgement. The gap below is known and wanted on the record; when a
+///    deformation channel lands, this line is what has to change.
+void Record(const char* Name, const char* Text, FILE* Log)
+{
+    std::printf("  GAP   %s  %s\n", Name, Text);
+    if (Log) std::fprintf(Log, "  GAP   %s  %s\n", Name, Text);
+}
+
+void PlaceTransform(InstanceRecord& Row, float RotationZ, const float Scale[3], const float At[3])
+{
+    std::memset(&Row, 0, sizeof(Row));
+    const float C = std::cos(RotationZ), S = std::sin(RotationZ);
+    Row.World[0]  = C * Scale[0];  Row.World[1]  = S * Scale[0];  Row.World[2]  = 0.0f;      Row.World[3]  = 0.0f;
+    Row.World[4]  = -S * Scale[1]; Row.World[5]  = C * Scale[1];  Row.World[6]  = 0.0f;      Row.World[7]  = 0.0f;
+    Row.World[8]  = 0.0f;          Row.World[9]  = 0.0f;          Row.World[10] = Scale[2];  Row.World[11] = 0.0f;
+    Row.World[12] = At[0];         Row.World[13] = At[1];         Row.World[14] = At[2];     Row.World[15] = 1.0f;
+    std::memcpy(Row.PreviousWorld, Row.World, sizeof(Row.World));
+}
+
+uint32_t AppendSphere(std::vector<VertexRecord>& Vertices, std::vector<uint32_t>& Corners, float Radius,
+                      uint32_t Segments, uint32_t Rings, uint32_t& TrianglesOut, uint32_t& BaseOut)
+{
+    const uint32_t First = static_cast<uint32_t>(Corners.size());
+    const uint32_t Base  = static_cast<uint32_t>(Vertices.size());
+    for (uint32_t Ring = 0u; Ring <= Rings; ++Ring)
+    {
+        const float Beta = 3.14159265358979323846f * static_cast<float>(Ring) / static_cast<float>(Rings);
+        for (uint32_t Segment = 0u; Segment <= Segments; ++Segment)
+        {
+            const float Alpha = 6.28318530717958647692f * static_cast<float>(Segment) / static_cast<float>(Segments);
+            VertexRecord Vertex{};
+            Vertex.SpatialLocation  = { Radius * std::sin(Beta) * std::cos(Alpha),
+                                        Radius * std::sin(Beta) * std::sin(Alpha),
+                                        Radius * std::cos(Beta) };
+            Vertex.NormalDirection  = { Vertex.SpatialLocation.x / Radius, Vertex.SpatialLocation.y / Radius, Vertex.SpatialLocation.z / Radius };
+            Vertex.TangentDirection = { -std::sin(Alpha), std::cos(Alpha), 0.0f, 1.0f };
+            Vertices.push_back(Vertex);
+        }
+    }
+    for (uint32_t Ring = 0u; Ring < Rings; ++Ring)
+        for (uint32_t Segment = 0u; Segment < Segments; ++Segment)
+        {
+            const uint32_t A = Base + Ring * (Segments + 1u) + Segment;
+            const uint32_t B = A + Segments + 1u;
+            Corners.push_back(A);     Corners.push_back(B);     Corners.push_back(A + 1u);
+            Corners.push_back(A + 1u); Corners.push_back(B);    Corners.push_back(B + 1u);
+        }
+    TrianglesOut = static_cast<uint32_t>(Corners.size() - First) / 3u;
+    BaseOut      = Base;
+    return First;
+}
+
+constexpr float kTyreRadius  = 0.35f;   // [m]
+constexpr float kSquash      = 0.60f;   // [-] one deformation step: z scaled by this
+constexpr float kOnSurface   = 0.05f;   // [m] a point this close to the field reads as "the geometry is here"
+} // namespace
+
+int main()
+{
+    FILE* Log = std::fopen("VisualProof/DistanceAtlas/DistanceAtlasDeformChecks.log", "w");
+    std::printf("DistanceAtlasDeformChecks — one deforming tyre, one deformation step\n");
+    if (Log) std::fprintf(Log, "DistanceAtlasDeformChecks — one deforming tyre, one deformation step\n");
+
+    std::vector<VertexRecord> Vertices;
+    std::vector<uint32_t>     Corners;
+    uint32_t SphereTriangles = 0u, SphereBase = 0u;
+    const uint32_t SphereFirst = AppendSphere(Vertices, Corners, kTyreRadius, 24u, 16u, SphereTriangles, SphereBase);
+
+    std::vector<InstanceRecord> Rows(1);
+    const float One[3]     = { 1.0f, 1.0f, 1.0f };
+    const float WheelAt[3] = { 5.0f, 0.0f, 1.5f };
+    PlaceTransform(Rows[0], 0.0f, One, WheelAt);
+    Rows[0].FirstIndex = SphereFirst; Rows[0].VertexOffset = SphereBase; Rows[0].TriangleCount = SphereTriangles;
+
+    DistanceAtlasSpace Atlas;
+    DistanceAtlasSettings Settings{};
+    const bool Baked = Atlas.Bake(Vertices, Corners, Rows, Settings);
+    std::snprintf(Detail, sizeof(Detail), "%u volume, %llu voxels, voxel %.3f m",
+                  Atlas.QueryReport().Volumes, static_cast<unsigned long long>(Atlas.QueryReport().Voxels), Atlas.QueryReport().FinestVoxel);
+    Report(Baked && Atlas.QueryReport().Volumes == 1u, "the tyre bakes to one volume", Detail, Log);
+
+    const float RestSurface[3]     = { 5.0f, 0.0f, 1.5f + kTyreRadius };
+    const float OpenAir[3]         = { 5.0f, 0.0f, 1.5f + 3.00f };
+    const float Origin[3]          = { 0.0f, 0.0f, kTyreRadius };
+    const float DeformedSurface[3] = { 5.0f, 0.0f, 1.5f + kTyreRadius * kSquash };
+
+    const auto Ask = [&](const float Point[3]) { float Cell = 0.0f; return Atlas.Sample(Point, Cell); };
+    const float RestBefore    = Ask(RestSurface);
+    const float OriginBefore  = Ask(Origin);
+    const float OpenAirBefore = Ask(OpenAir);
+
+    std::snprintf(Detail, sizeof(Detail), "rest surface %.4f m, world origin %.4f m, open air %.4f m", RestBefore, OriginBefore, OpenAirBefore);
+    Report(RestBefore < kOnSurface && OriginBefore > 1.0f, "the baked field knows where the tyre is", Detail, Log);
+
+    // ---- one deformation step, exactly as GeometrySequence::Advance performs it --------------------------------
+    //   ① the project returns deformed positions in WORLD space and they are written into the vertex array
+    //   ② the subject's World row is reset to identity, because the positions already carry the pose
+    const uint32_t BakesBefore    = Atlas.QueryBakeCount();
+    const float*   AtlasBefore    = Atlas.QueryAtlas().data();
+    const size_t   AtlasBytes     = Atlas.QueryAtlas().size();
+    const size_t   VerticesBefore = Vertices.size();
+
+    std::vector<VertexRecord> Deformed = Vertices;
+    for (uint32_t Index = SphereBase; Index < Vertices.size(); ++Index)
+    {
+        Deformed[Index].SpatialLocation.z *= kSquash;
+        const float* World = Rows[0].World;
+        const Vector3 Local = Deformed[Index].SpatialLocation;
+        Deformed[Index].SpatialLocation = { World[0] * Local.x + World[4] * Local.y + World[8]  * Local.z + World[12],
+                                            World[1] * Local.x + World[5] * Local.y + World[9]  * Local.z + World[13],
+                                            World[2] * Local.x + World[6] * Local.y + World[10] * Local.z + World[14] };
+    }
+    Vertices = Deformed;
+
+    std::vector<InstanceRecord> DeformedRows = Rows;
+    DeformedRows[0].World[0]  = 1.0f; DeformedRows[0].World[1]  = 0.0f; DeformedRows[0].World[2]  = 0.0f; DeformedRows[0].World[3]  = 0.0f;
+    DeformedRows[0].World[4]  = 0.0f; DeformedRows[0].World[5]  = 1.0f; DeformedRows[0].World[6]  = 0.0f; DeformedRows[0].World[7]  = 0.0f;
+    DeformedRows[0].World[8]  = 0.0f; DeformedRows[0].World[9]  = 0.0f; DeformedRows[0].World[10] = 1.0f; DeformedRows[0].World[11] = 0.0f;
+    DeformedRows[0].World[12] = 0.0f; DeformedRows[0].World[13] = 0.0f; DeformedRows[0].World[14] = 0.0f; DeformedRows[0].World[15] = 1.0f;
+    std::memcpy(DeformedRows[0].PreviousWorld, DeformedRows[0].World, sizeof(DeformedRows[0].World));
+
+    const bool ReProjected = Atlas.Project(DeformedRows.data(), static_cast<uint32_t>(DeformedRows.size()));
+    const float RestAfter     = Ask(RestSurface);
+    const float DeformedAfter = Ask(DeformedSurface);
+    const float OriginAfter   = Ask(Origin);
+
+    std::snprintf(Detail, sizeof(Detail), "vertices %zu->%zu, bakes %u->%u, atlas %zu floats identical, moved flag %u",
+                  VerticesBefore, Vertices.size(), BakesBefore, Atlas.QueryBakeCount(), AtlasBytes,
+                  (Atlas.QueryPlacements()[0].Flags & DistanceAtlasMoved) ? 1u : 0u);
+    Report(ReProjected && Atlas.QueryBakeCount() == BakesBefore && Atlas.QueryAtlas().data() == AtlasBefore &&
+           Vertices.size() == VerticesBefore,
+           "a deformation step never re-bakes the atlas", Detail, Log);
+
+    Report((Atlas.QueryPlacements()[0].Flags & DistanceAtlasMoved) != 0u,
+           "the deformed subject is flagged moved, so its facets leave every exact query",
+           "DistanceAtlasMoved set", Log);
+
+    std::snprintf(Detail, sizeof(Detail), "deformed surface %.4f m (was %.4f m at rest)", DeformedAfter, RestBefore);
+    Record("the field does not follow the deformation", Detail, Log);
+    std::snprintf(Detail, sizeof(Detail), "world origin %.4f m -> %.4f m; the rest-pose volume is now placed by an identity transform",
+                  OriginBefore, OriginAfter);
+    Record("the volume is teleported to the world origin", Detail, Log);
+    std::snprintf(Detail, sizeof(Detail), "deformed surface %.4f m, rest surface %.4f m (open air is %.4f m)",
+                  DeformedAfter, RestAfter, OpenAirBefore);
+    Record("the tyre is absent from the field at its own position", Detail, Log);
+
+    std::printf("%s (%d failures, 3 known gaps recorded)\n", FailureCount ? "FAILED" : "ALL PASSED", FailureCount);
+    if (Log) { std::fprintf(Log, "%s (%d failures, 3 known gaps recorded)\n", FailureCount ? "FAILED" : "ALL PASSED", FailureCount); std::fclose(Log); }
+    return FailureCount ? 1 : 0;
+}
