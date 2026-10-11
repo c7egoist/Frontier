@@ -1,0 +1,59 @@
+From 5c06c6e237ceaa9e03b1bc67b974f336dbd97274 Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Sun, 11 Oct 2026 18:51:14 +0000
+Subject: [PATCH 12/12] Project-Drive renderer: --tumble (spin the car in the
+ air) and per-step tyre telemetry
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two additions to the CPU reference renderer, both aimed at the XPBD soft-tyre blow-up:
+
+* --tumble / --tumble-at / --tumble-rate / --launch
+  Body rates are injected in world axes at a chosen time (default 4.30 s, where the
+  scripted drive leaves the ramp at 11.26 m/s). --launch adds an impulse to buy airtime.
+  New --mode close: a body-relative three-quarter close-up so the wheels are actually
+  visible. --skip-before renders only a time window without shortening the simulation.
+
+* --tyrelog FILE
+  240 Hz per-wheel dump straight out of XPBDSoftTyre: contact node count, max contact
+  lambda, deepest penetration, all five SoftTyreResidual families (spoke / shear / hoop /
+  lateral / diagonal), rim arrival and residual, TyreReaction Fx/Fy/Fz, inflation force,
+  gauge pressure, hub Z, wheel omega, patch centre — 77 columns.
+
+What the dump shows on a landing: 407 nodes in contact, 0.156 m penetration, the rim-flange
+constraint handed 0.159 m, and a reaction of 998 kN through ONE wheel in a single step —
+313x the static wheel load — while the per-node contact lambda stays at 0.0016. With
+h = 1/(240*8) s that is ~5.9 kN per node from lambda/h^2, summed over ~400 nodes with no
+clamp: the mechanism behind XPBDSoftTyre.cpp's unclamped lambda/h^2 sum, now measured
+instead of read out of the source. The control run (identical drive, no spin) still peaks
+at 29.7 kN = 9.3x, so the spike is not an artefact of the tumble.
+
+Also fixes a corrupt CSV header: the column-name fprintf passed 19 varargs to 18
+specifiers, so the last column of every wheel was garbled and readers silently read
+shifted fields. The header is now written in a loop.
+---
+ Projects/Project-Drive/Source/DriveRender.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/Projects/Project-Drive/Source/DriveRender.cpp b/Projects/Project-Drive/Source/DriveRender.cpp
+index 628e063..211a488 100644
+--- a/Projects/Project-Drive/Source/DriveRender.cpp
++++ b/Projects/Project-Drive/Source/DriveRender.cpp
+@@ -816,6 +816,13 @@ int main(int argc, char** argv)
+             cam.Eye = { 14.0f, -16.0f, 2.2f };
+             cam.Target = Car.Pos + R::V3{ 0, 0, 0.5f };
+         }
++        else if (mode == "close")
++        {
++            // Body-relative three-quarter close-up: close enough that a 4.4 m car fills ~44% of the
++            // frame width, so the wheels -- and what the tyres are doing -- are actually visible.
++            cam.Eye    = Car.Pos + R::Rot(Car.Rot, R::V3{ -1.6f, -7.4f, 1.9f });
++            cam.Target = Car.Pos + R::Rot(Car.Rot, R::V3{  0.6f,  0.0f, 0.15f });
++        }
+         else if (mode == "launch")
+         {
+             // Fixed camera beside the ramp: the whole point of the tumble is to watch the body rotate
+-- 
+2.39.5
+

@@ -1,7 +1,7 @@
 From 12f9ef9c063f6177e4b62fdd273f03cdf6d769ee Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 16:22:44 +0000
-Subject: [PATCH 04/10] Phase 0 renderer logs: per-pass GPU timers, AMD buffer
+Subject: [PATCH 04/12] Phase 0 renderer logs: per-pass GPU timers, AMD buffer
  markers, VK_EXT_device_fault, 5 s frame windows, pipeline choice and RT
  refusal reason, UploadScene/SDF triggers, swapchain rebuild reason and
  duration, memory placement, pipeline compile progress

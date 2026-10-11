@@ -1,7 +1,7 @@
 From 65f43d3c2dae3a11aa8088744c8876c4bfcd7844 Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 16:01:59 +0000
-Subject: [PATCH 01/10] Remove Surfel GI (stage, shaders, CPU reference, build
+Subject: [PATCH 01/12] Remove Surfel GI (stage, shaders, CPU reference, build
  entries); SDF stage is the only non-raytraced GI. Also repairs
  RecordComputeCommands head deleted in 1784c86 (restored from 323df75).
 

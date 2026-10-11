@@ -1,7 +1,7 @@
 From 35f2da5b5718580a02ceeb4c5964fb556edf0f58 Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 17:34:59 +0000
-Subject: [PATCH 10/10] Project-Drive CPU reference renderer: create the output
+Subject: [PATCH 10/12] Project-Drive CPU reference renderer: create the output
  directory, fail loudly on write
 
 The tool rendered 72 frames into a directory that did not exist and reported

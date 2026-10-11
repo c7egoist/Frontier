@@ -1,7 +1,7 @@
 From d170ed4b954717c8a2c7d41bd552e1de08816a29 Mon Sep 17 00:00:00 2001
 From: Arena Agent <agent@arena.ai>
 Date: Sun, 11 Oct 2026 16:22:53 +0000
-Subject: [PATCH 05/10] Build lists: RenderMetrics.cpp
+Subject: [PATCH 05/12] Build lists: RenderMetrics.cpp
 
 ---
  CMakeLists.txt                    | 1 +

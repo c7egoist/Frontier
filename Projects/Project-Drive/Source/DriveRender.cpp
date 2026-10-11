@@ -612,6 +612,12 @@ int main(int argc, char** argv)
     float simTime = 12.0f;
     float captureHz = 6.0f;            // captured poses per simulated second
     bool  parked = false;              // --static: hold the car still and move only the camera
+    bool  tumble = false;              // --tumble: spin the chassis at the moment it leaves the ramp
+    float tumbleAt = 4.30f;            // [s] when the kick lands (the ramp crest is ~4.3 s into the scripted drive)
+    float tumbleRoll = 2.5f, tumblePitch = -7.0f, tumbleYaw = 1.2f;   // [rad/s] body rates injected at tumbleAt
+    float launchBoost = 0.0f;          // [m/s] extra upward+forward velocity at tumbleAt, to buy airtime
+    float skipBefore = -1.0f;          // [s] simulate but do not render frames before this time
+    std::string tyreLog;
     for (int i = 2; i < argc; ++i)
     {
         const std::string a = argv[i];
@@ -624,6 +630,12 @@ int main(int argc, char** argv)
         else if (a == "--time")   simTime = next(simTime);
         else if (a == "--fps")    { captureHz = next(captureHz); if (captureHz < 0.05f) captureHz = 0.05f; }
         else if (a == "--static") parked = true;
+        else if (a == "--tumble") tumble = true;
+        else if (a == "--tumble-at") tumbleAt = next(tumbleAt);
+        else if (a == "--tumble-rate") { tumbleRoll = next(tumbleRoll); tumblePitch = next(tumblePitch); tumbleYaw = next(tumbleYaw); }
+        else if (a == "--launch") launchBoost = next(launchBoost);
+        else if (a == "--skip-before") skipBefore = next(skipBefore);
+        else if (a == "--tyrelog") tyreLog = (i + 1 < argc) ? argv[++i] : "tyres.csv";
         else std::fprintf(stderr, "[DriveRender] unknown flag %s\n", a.c_str());
     }
 
@@ -675,15 +687,81 @@ int main(int argc, char** argv)
 
     std::vector<Frame> Frames;
     float spin[4] = { 0, 0, 0, 0 };
+    bool kicked = false;
+    FILE* tyreCsv = tyreLog.empty() ? nullptr : std::fopen(tyreLog.c_str(), "w");
+    if (tyreCsv)
+    {
+        std::fprintf(tyreCsv, "t,airborne,speed_mps,chassis_z,angvel_mag");
+        static const char* kTyreColumns[18] =
+        {
+            "contact_nodes", "max_contact_lambda", "deepest_penetration_m",
+            "residual_spoke", "residual_shear", "residual_hoop", "residual_lateral",
+            "residual_diagonal", "rim_arrival", "rim_residual",
+            "force_x", "force_y", "force_z", "inflation_z", "pressure_kPa",
+            "hub_z", "omega", "patch_z"
+        };
+        for (int w = 0; w < 4; ++w)
+            for (int c = 0; c < 18; ++c)
+                std::fprintf(tyreCsv, ",w%d_%s", w, kTyreColumns[c]);
+        std::fprintf(tyreCsv, "\n");
+    }
     const auto simStart = std::chrono::steady_clock::now();
     for (int s = 0; s <= steps; ++s)
     {
         const float t = s * dt;
         ctl.AssignInput(InputAt(t));
+        if (tumble && !kicked && t >= tumbleAt)
+        {
+            kicked = true;
+            // Body rates are injected in WORLD axes: +X fwd, +Y left, +Z up. Negative pitch lifts the nose
+            // (a backflip); positive roll raises the left side; yaw is the spin about vertical.
+            ch.AngularVelocity = Vec3{ tumbleRoll, tumblePitch, tumbleYaw };
+            if (launchBoost > 0.0f)
+            {
+                const Vec3 fwd = ch.Orientation.Rotate(Vec3{ 1.0f, 0.0f, 0.0f });
+                ch.LinearVelocity = ch.LinearVelocity + fwd * (launchBoost * 0.55f) + Vec3{ 0.0f, 0.0f, launchBoost };
+            }
+            std::printf("[tumble] kick at t=%.3f s  speed=%.2f m/s  z=%.2f m  rates=(%.1f, %.1f, %.1f) rad/s%s\n",
+                        t, ctl.Telemetry().SpeedMetresPerSecond, ch.Position.z,
+                        tumbleRoll, tumblePitch, tumbleYaw,
+                        launchBoost > 0.0f ? "  (+ forced launch impulse)" : "");
+            std::fflush(stdout);
+        }
         ctl.Step(dt);
         ch.Integrate(dt);
         const auto& tl = ctl.Telemetry();
         for (uint32_t w = 0; w < tl.WheelCount && w < 4; ++w) spin[w] += tl.Wheels[w].WheelOmega * dt;
+
+        if (tyreCsv)
+        {
+            const auto& tl2 = ctl.Telemetry();
+            bool air2 = true;
+            for (uint32_t w = 0; w < tl2.WheelCount; ++w) if (tl2.Wheels[w].InContact) air2 = false;
+            const float av = std::sqrt(ch.AngularVelocity.x * ch.AngularVelocity.x +
+                                       ch.AngularVelocity.y * ch.AngularVelocity.y +
+                                       ch.AngularVelocity.z * ch.AngularVelocity.z);
+            std::fprintf(tyreCsv, "%.5f,%d,%.3f,%.4f,%.4f,", t, air2 ? 1 : 0, tl2.SpeedMetresPerSecond, ch.Position.z, av);
+            for (uint32_t w = 0; w < 4 && w < tl2.WheelCount; ++w)
+            {
+                const XPBDSoftTyre& ty = ctl.Tyres()[w];
+                const SoftTyreResidual& rs = ty.Residual();
+                const TyreReaction& rx = ty.Reaction();
+                uint32_t touching = 0u; float maxLambda = 0.0f, deepest = 0.0f;
+                for (const SoftTyreNode& nd : ty.Nodes())
+                {
+                    if (nd.InContact) ++touching;
+                    maxLambda = std::max(maxLambda, std::fabs(nd.ContactLambda));
+                }
+                deepest = rs.ContactMax;
+                const Vec3 hp = tl2.Wheels[w].HubPosition;
+                std::fprintf(tyreCsv, "%u,%.4f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.5f,%.3f,%.3f,%.3f,%.3f,%.2f,%.4f,%.4f,%.4f%s",
+                             touching, maxLambda, deepest,
+                             rs.SpokeMax, rs.ShearMax, rs.HoopMax, rs.LateralMax, rs.DiagonalMax,
+                             rs.RimArrival, rs.RimMax,
+                             rx.Force.x, rx.Force.y, rx.Force.z, rx.InflationForce.z, rx.GaugePressure / 1000.0f,
+                             hp.z, tl2.Wheels[w].WheelOmega, rx.PatchCentre.z, (w < 3) ? "," : "\n");
+            }
+        }
 
         if (s % stride == 0)
         {
@@ -705,6 +783,7 @@ int main(int argc, char** argv)
             Frames.push_back(f);
         }
     }
+    if (tyreCsv) { std::fclose(tyreCsv); std::printf("[DriveRender] tyre telemetry written to %s\n", tyreLog.c_str()); }
     const double simMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - simStart).count();
     std::printf("[DriveRender] simulation: %zu captured frames in %.0f ms\n", Frames.size(), simMs);
 
@@ -720,6 +799,7 @@ int main(int argc, char** argv)
     for (const Frame& f : Frames)
     {
         const Frame& Car = parked ? Frames.front() : f;
+        if (skipBefore > 0.0f && Car.T < skipBefore) { ++idx; continue; }
         Scene sc = CourseScene;                 // static course is copied, not rebuilt
         EmitVehicle(sc, Car);
         sc.Build();
@@ -735,6 +815,20 @@ int main(int argc, char** argv)
         {
             cam.Eye = { 14.0f, -16.0f, 2.2f };
             cam.Target = Car.Pos + R::V3{ 0, 0, 0.5f };
+        }
+        else if (mode == "close")
+        {
+            // Body-relative three-quarter close-up: close enough that a 4.4 m car fills ~44% of the
+            // frame width, so the wheels -- and what the tyres are doing -- are actually visible.
+            cam.Eye    = Car.Pos + R::Rot(Car.Rot, R::V3{ -1.6f, -7.4f, 1.9f });
+            cam.Target = Car.Pos + R::Rot(Car.Rot, R::V3{  0.6f,  0.0f, 0.15f });
+        }
+        else if (mode == "launch")
+        {
+            // Fixed camera beside the ramp: the whole point of the tumble is to watch the body rotate
+            // against something that is not moving.
+            cam.Eye = { 30.0f, -26.0f, 9.0f };
+            cam.Target = Car.Pos;
         }
         else // orbit: a full turn spread evenly over the captured frames
         {
