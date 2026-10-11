@@ -158,7 +158,8 @@ performance — they are a single-thread-for-a-workgroup CPU mirror running on 8
    | mean floor sun visibility | 0.92 | 0.89 | 0.79 | 0.62 | 0.56 |
 
    The host clamps `Tuning.x` to ≥0.01 (`DistanceFieldGIStage.cpp:388`) with no documented upper bound,
-   so a soft-shadow setting above ~0.2 will over-darken. The final renders use 0.01.
+   so a soft-shadow setting above ~0.2 will over-darken. The clips in `SDF-GI/` were rendered at the
+   clamp floor, 0.01 — see §1.8 for why that was the wrong choice and what it costs to undo it.
 
 ### 1.7 What this still does not show
 
@@ -169,6 +170,42 @@ performance — they are a single-thread-for-a-workgroup CPU mirror running on 8
   the card/facet data has to be re-projected when an instance moves; the field alone cannot do it.
 - **No textures, no normal maps, no OpenPBR.** Cards carry flat albedo.
 - **CPU timings are not GPU timings.**
+
+### 1.8 Why the shadows in those clips look banded — my control, not the pipeline
+
+The engine ships `ShadowSoftness = 0.22f` (`Engine/DeviceExchange/DistanceFieldGIStage.h:56`). I rendered
+everything at `0.01`, the clamp floor, because 0.01 minimised RMS against a path tracer whose sun is a
+**mathematical point**. A point sun has no penumbra, so that objective rewards driving the penumbra to
+zero width — and a zero-width penumbra is an aliased hard edge. The banding is the objective being wrong,
+not the pipeline. There is also no denoise pass to have omitted: `DistanceFieldGIStage.cpp` records only
+SdfCaptureCards → SdfRadiance → SdfGather → SdfResolve.
+
+One run, one control changed (`/tmp/w/ge`, cards 4, warmup 24):
+
+| `ShadowSoftness` | flat-plateau fraction of the sun-visibility buffer | pixels inside the 0.15–0.85 penumbra |
+|:---:|:---:|:---:|
+| **0.01** (what I shipped) | **0.911** | **3.8 %** |
+| 0.08 | 0.852 | 5.1 % |
+| **0.22** (engine default) | **0.742** | **16.0 %** |
+| 0.45 | 0.698 | 22.9 % |
+
+Flat plateau = adjacent pixels with an identical value. In the *rendered* frame over the 200×80 crop in
+`proof/Project-Zero/12_sdfgi_banding.png`, the plateau fraction is 0.488 at 0.01, 0.150 at 0.22 and 0.076
+in the path-traced reference. At 0.01 the visibility histogram is essentially two-valued.
+
+`SDF-GI/enginedefault/` is the same 16-frame animation re-rendered at the engine's defaults — softness
+0.22, cards 4, `GiBoost` 1.0 — with the penumbra intact.
+
+**The honest cost.** Softening is not free, and it exposes the §1.6 bug rather than fixing it. Against a
+path trace with a matched 12.4° cone sun (atan 0.22, `--suncone 12.4`), the field's mean floor luminance
+is **0.621** where the reference is **0.773** — 20 % dark. At softness 0.01 the same figure is 0.686,
+11 % dark. `DistanceShadow` builds its cone as `Softness × Travel`, so the softness knob controls the
+*width* of the ramp and the *total* darkness at the same time; there is no setting that gets both right.
+RMS against the point-sun reference, whole image: 0.141 at 0.01 vs 0.186 at 0.22.
+
+That coupling is worth a follow-up fix in `DistanceFieldTransport.slang:158` — normalise the ramp so
+softness sets the penumbra width without moving the mean — rather than leaving 0.01 in place, which was
+cancelling the width error against the darkness error.
 
 ---
 
@@ -275,6 +312,7 @@ at t = 4.571 s on the FR wheel. So the spike is not an artefact of my tumble; th
 | `Project-Zero/SDF-GI/Project-Zero_sdfgi_dynamic.gif` / `.mp4` | 16 | 8 | 0.39 MB / 0.07 MB |
 | `Project-Zero/SDF-GI/Project-Zero_sdfgi_frozen.gif` / `.mp4` | 16 | 8 | 0.32 MB / 0.04 MB |
 | `Project-Zero/SDF-GI/Project-Zero_sdfgi_nogi.gif` / `.mp4` | 16 | 8 | 0.14 MB / 0.06 MB |
+| `Project-Zero/SDF-GI/enginedefault/Project-Zero_sdfgi_enginedefault.gif` / `.mp4` | 16 | 8 | 0.41 MB / 0.05 MB |
 | `Project-Zero/Project-Zero_raster_turntable.gif` / `.mp4` | 12 | 7 | 0.15 MB / 0.02 MB |
 | `Project-Zero/Project-Zero_turntable.gif` / `.mp4` | 16 | 8 | 0.8 MB / 0.2 MB |
 | `Project-Zero/Project-Zero_timeofday.gif` / `.mp4` | 13 | 4 | 0.8 MB / 0.2 MB |

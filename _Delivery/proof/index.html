@@ -73,6 +73,43 @@ nodes with <em>no clamp</em>. See <code>_Delivery/PROOF.md</code> §4.
 <figure><a href="Project-Zero/08_sdfgi_passtimings.png"><img loading="lazy" src="Project-Zero/08_sdfgi_passtimings.png" alt=""></a><figcaption>08 — cost per pass, and 336 bytes vs 10,096,972 bytes</figcaption></figure>
 <figure><a href="Project-Zero/10_sdfgi_framecompare.png"><img loading="lazy" src="Project-Zero/10_sdfgi_framecompare.png" alt=""></a><figcaption>10 — frame 8: reference / dynamic / frozen / GI-off / sun visibility / the field</figcaption></figure>
 </div>
+<h2>Why the GI shadows looked banded &mdash; it was my control, not the pipeline</h2>
+<p class="note">The three clips above were rendered with <code>ShadowSoftness&nbsp;=&nbsp;0.01</code>, which is the
+clamp floor the host applies to <code>Frame.Tuning.x</code>. I picked it because it minimised RMS against a path
+tracer whose sun is a mathematical point &mdash; and a point sun has no penumbra, so the optimiser drove the
+penumbra to zero width. A zero-width penumbra <em>is</em> an aliased hard edge. That is the banding. The engine
+ships <code>ShadowSoftness = 0.22f</code> (<code>Engine/DeviceExchange/DistanceFieldGIStage.h:56</code>), which is
+what you see in game. There is no denoise pass to have omitted: <code>DistanceFieldGIStage.cpp</code> records only
+SdfCaptureCards &rarr; SdfRadiance &rarr; SdfGather &rarr; SdfResolve.</p>
+<div class="find">
+<strong>The measurement.</strong> Same run, same cards, same warmup &mdash; only <code>ShadowSoftness</code>
+changes. Flat-plateau fraction of the sun-visibility buffer (adjacent pixels with an identical value) and the
+fraction of pixels that land inside the 0.15&ndash;0.85 penumbra:<br>
+&nbsp;&nbsp;softness <strong>0.01</strong> &rarr; plateau <strong>0.911</strong>, penumbra <strong>3.8%</strong>
+(a two-valued shadow)<br>
+&nbsp;&nbsp;softness <strong>0.08</strong> &rarr; plateau 0.852, penumbra 5.1%<br>
+&nbsp;&nbsp;softness <strong>0.22</strong> &rarr; plateau <strong>0.742</strong>, penumbra
+<strong>16.0%</strong> &nbsp;(engine default)<br>
+&nbsp;&nbsp;softness <strong>0.45</strong> &rarr; plateau 0.698, penumbra 22.9%<br>
+In the rendered frame, over the 200&times;80 crop below, plateau is 0.488 at 0.01 vs 0.150 at 0.22 vs 0.076 in the
+path-traced reference.
+</div>
+<div class="grid">
+<figure><a href="Project-Zero/12_sdfgi_banding.png"><img loading="lazy" src="Project-Zero/12_sdfgi_banding.png" alt=""></a><figcaption>12 &mdash; top: the sun-visibility buffer. bottom: the rendered frame and the reference. Only ShadowSoftness differs.</figcaption></figure>
+<figure><video src="Project-Zero/SDF-GI/enginedefault/Project-Zero_sdfgi_enginedefault.mp4" controls muted loop playsinline></video><figcaption>RENDERED AT THE ENGINE'S DEFAULT softness 0.22, cards 4, GiBoost 1.0 &mdash; same animation, penumbra intact (mp4)</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/enginedefault/Project-Zero_sdfgi_enginedefault.gif"><img loading="lazy" src="Project-Zero/SDF-GI/enginedefault/Project-Zero_sdfgi_enginedefault.gif" alt=""></a><figcaption>the same clip as a gif, for side-by-side with the banded one above</figcaption></figure>
+<figure><a href="Project-Zero/SDF-GI/enginedefault/sunvisibility_000.jpg"><img loading="lazy" src="Project-Zero/SDF-GI/enginedefault/sunvisibility_000.jpg" alt=""></a><figcaption>sun visibility at softness 0.22 &mdash; a continuous gradient, not two values</figcaption></figure>
+</div>
+<div class="find">
+<strong>The honest cost, and what it exposes.</strong> The softer shadow is not free. Against a path trace with a
+matched 12.4&deg; cone sun (atan 0.22), the field's mean floor luminance is <strong>0.621</strong> where the
+reference is <strong>0.773</strong> &mdash; 20% dark. At softness 0.01 the same figure is 0.686, 11% dark. In
+other words <code>DistanceShadow</code> couples the <em>width</em> of the penumbra to the <em>total</em> darkness:
+the cone radius is <code>Softness&nbsp;&times;&nbsp;Travel</code>, so raising the softness widens the ramp
+<em>and</em> drags the mean down. That is worth a follow-up fix (normalise the ramp so softness controls width
+only), and it is the reason 0.01 happened to score best &mdash; it was cancelling one error with another. RMS
+against the point-sun reference, whole image: 0.141 at softness 0.01 vs 0.186 at 0.22.
+</div>
 <h2>Distance Field GI — still frames</h2>
 <p class="note">384x216, 854 facets, 54,656 card texels, 32 gather samples, 6 warm-up frames of temporal accumulation.</p>
 <div class="grid">
