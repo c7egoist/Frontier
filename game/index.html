@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>FRONTIER // ZIPPER CIRCUIT</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.min.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+
+  <!-- In-race HUD -->
+  <div id="hud" class="hidden">
+    <div class="panel tl">
+      <div class="label">LAP</div>
+      <div class="big" id="lap">1<span>/3</span></div>
+      <div class="mono" id="time">00:00.00</div>
+      <div class="mono small" id="lastLap">LAST --:--.--</div>
+    </div>
+
+    <div class="panel tr">
+      <div class="label">POSITION</div>
+      <div class="big" id="pos">1<span>/8</span></div>
+      <ol id="standings"></ol>
+    </div>
+
+    <canvas id="minimap" width="220" height="220"></canvas>
+
+    <div class="panel bl">
+      <div class="speed"><span id="speed">0</span><small>KM/H</small></div>
+      <div class="label">ENERGY</div>
+      <div class="bar"><div id="energy"></div></div>
+      <div class="label small" id="boostState">BOOST READY</div>
+    </div>
+
+    <div class="panel bc" id="caller">
+      <div class="caller-head">
+        <span class="label" id="callerTitle">ZIPPER CALLER</span>
+        <span class="tag" id="callerMode">AI</span>
+      </div>
+      <div class="lanes" id="lanes">
+        <div class="lane" data-lane="0"><b>1</b></div>
+        <div class="lane" data-lane="1"><b>2</b></div>
+        <div class="lane" data-lane="2"><b>3</b></div>
+        <div class="lane" data-lane="3"><b>4</b></div>
+        <div class="lane" data-lane="4"><b>5</b></div>
+      </div>
+      <canvas id="zipmap" width="200" height="150"></canvas>
+      <div class="hint" id="callerHint">Press 1–5 to draw the gap</div>
+    </div>
+
+    <div id="center"></div>
+    <div id="toasts"></div>
+    <div id="trainWarn" class="hidden">TRAIN CROSSING</div>
+  </div>
+
+  <!-- Menu -->
+  <div id="menu" class="overlay">
+    <div class="menu-card">
+      <div class="logo">FRONTIER</div>
+      <div class="sub">ZIPPER CIRCUIT</div>
+      <p class="blurb">Four-wheel street racing on a neon avenue. Trains cross the road, traffic
+        weaves through the lanes, and the bollards rise in a pattern. One teammate draws the gap
+        toward their lane, and the rest shoot through it.</p>
+
+      <div class="opt-group">
+        <div class="label">Caller</div>
+        <div class="seg" id="modeSeg">
+          <button data-mode="solo" class="on">Solo · AI caller</button>
+          <button data-mode="coop">Co-op · you call (1–5)</button>
+        </div>
+      </div>
+      <div class="opt-group">
+        <div class="label">Difficulty</div>
+        <div class="seg" id="diffSeg">
+          <button data-diff="rookie">Rookie</button>
+          <button data-diff="pro" class="on">Pro</button>
+          <button data-diff="elite">Elite</button>
+        </div>
+      </div>
+
+      <button id="startBtn" class="primary">START RACE <kbd>Enter</kbd></button>
+
+      <div class="controls">
+        <div><b>Drive</b> Arrows / WASD · Space boost · Shift drift · Down / S brake</div>
+        <div><b>Caller</b> 1–5 draw the gap toward a lane (gamepad: LB / RB)</div>
+        <div><b>Other</b> P / Esc pause · R restart · M mute</div>
+      </div>
+      <div class="foot">Best with a gamepad or keyboard. Click the page once if there is no sound.</div>
+    </div>
+  </div>
+
+  <!-- Pause -->
+  <div id="pause" class="overlay hidden">
+    <div class="menu-card small-card">
+      <div class="logo small">PAUSED</div>
+      <button id="resumeBtn" class="primary">RESUME <kbd>P</kbd></button>
+      <button id="restartBtn">RESTART <kbd>R</kbd></button>
+      <button id="menuBtn">MENU <kbd>Esc</kbd></button>
+    </div>
+  </div>
+
+  <!-- Results -->
+  <div id="results" class="overlay hidden">
+    <div class="menu-card results-card">
+      <div class="logo small" id="resultTitle">RACE COMPLETE</div>
+      <table id="resultTable"></table>
+      <div class="row">
+        <button id="againBtn" class="primary">RACE AGAIN <kbd>Enter</kbd></button>
+        <button id="toMenuBtn">MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
