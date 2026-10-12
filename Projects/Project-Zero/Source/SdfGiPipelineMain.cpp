@@ -176,12 +176,13 @@ public:
     void Configure(uint32_t CardRes, uint32_t GatherSamples, uint32_t RadianceSamples,
                    Vec3 SunDir, Vec3 SunColour, float SunRadiance, Vec3 SkyAmbient,
                    float Softness, float IrradianceScale, float Exposure,
-                   bool Gi, bool FreezeTemporal) noexcept
+                   bool Gi, bool FreezeTemporal, int Layer = 0) noexcept
     {
         R_ = std::clamp<uint32_t>(CardRes, 2u, 32u);
         GS_ = GatherSamples; RS_ = RadianceSamples;
         Sun_ = Norm(SunDir); SunColour_ = SunColour; SunR_ = SunRadiance; Sky_ = SkyAmbient;
         Softness_ = std::max(Softness, 0.0001f); Scale_ = IrradianceScale; Exposure_ = Exposure;
+        Layer_ = Layer;   // 0 = full, 1 = direct sun only, 2 = indirect gather only
         Gi_ = Gi; Freeze_ = FreezeTemporal;
         const size_t n = F_.size() * static_cast<size_t>(R_) * R_;
         Diffuse_.assign(n, V3(0, 0, 0)); Normal_.assign(n, V3(0, 0, 1)); Emission_.assign(n, V3(0, 0, 0));
@@ -395,6 +396,10 @@ private:
     uint32_t GS_ = 32u, RS_ = 16u;
     Vec3 Sun_{ 0, 0, 1 }, SunColour_{ 1, 1, 1 }, Sky_{ 0.02f, 0.025f, 0.03f };
     float SunR_ = 0.0f, Softness_ = 0.2f, Scale_ = 1.0f, Exposure_ = 1.0f;
+    /// 📦 Which contribution Resolve keeps: 0 = full (sun + gather), 1 = direct sun only, 2 = indirect gather only.
+    ///    Used to render the two halves of the transport side by side. Only the SURFACE response is split — the sky
+    ///    background is kept in every layer so the images stay readable.
+    int   Layer_ = 0;
     bool Gi_ = true, Freeze_ = false;
     double CaptureMs_ = 0, RadianceMs_ = 0, GatherMs_ = 0, ResolveMs_ = 0, BakeMs_ = 0;
 
@@ -814,7 +819,7 @@ private:
             if (Dot(Emission, Emission) > 0.0f) Colour = Emission;
             else
             {
-                if (SunR_ > 0.0f)
+                if (SunR_ > 0.0f && Layer_ != 2)   // layer 2 = indirect only: drop the direct sun arm
                 {
                     const float NdotL = Dot(N, Sun_);
                     if (NdotL > 0.0f)
@@ -838,7 +843,8 @@ private:
                         Colour = Add(Colour, Mul(SunColour_, SunR_ * Vis * Spec));
                     }
                 }
-                if (Gi_)
+                if (Layer_ == 1) { /* layer 1 = direct only: no ambient fill, so the umbra stays genuinely black */ }
+                else if (Gi_)
                 {
                     // 📝 GatherDistanceRadiance already averages Incoming over a COSINE-weighted hemisphere, so it
                     //    returns E/pi, not E. The engine's resolve is `col += response * ReconstructIrradiance *
@@ -1100,6 +1106,7 @@ int main(int argc, char** argv)
     float softness = 0.18f, exposure = 1.0f, irradiance = 1.0f;
     uint32_t budget = 10u << 20u;
     std::string mode = "dynamic";      // dynamic | frozen | nogi
+    std::string layer = "full";        // full | direct | indirect
     bool reference = false;
     int  refEvery = 4;
     float voxel = 0.0f;
@@ -1122,6 +1129,7 @@ int main(int argc, char** argv)
         else if (a == "--irradiance") irradiance = F(irradiance);
         else if (a == "--budget")    budget = static_cast<uint32_t>(F(budget));
         else if (a == "--voxel")     voxel = F(voxel);
+        else if (a == "--layer")     layer = argv[++i];
         else if (a == "--mode")      mode = argv[++i];
         else if (a == "--reference") reference = true;
         else if (a == "--refevery")  refEvery = std::max(1, static_cast<int>(F(refEvery)));
@@ -1258,7 +1266,8 @@ int main(int argc, char** argv)
                  static_cast<uint32_t>(radianceSamples),
                  Norm(V3(0.22f, 0.34f, 0.91f)), V3(1.0f, 0.97f, 0.92f), 3.2f,   // sun: the field-marched penumbra
                  V3(0.055f, 0.070f, 0.095f), softness, irradiance, exposure,
-                 mode != "nogi", mode == "frozen");
+                 mode != "nogi", mode == "frozen",
+                 layer == "direct" ? 1 : (layer == "indirect" ? 2 : 0));
 
     gi.PassCapture();
     std::printf("[SdfGi] capture       %.1f ms\n", gi.CaptureMs());
