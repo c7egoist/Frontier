@@ -1,0 +1,63 @@
+<!doctype html><html><head><meta charset="utf-8"><title>ReSTIR — old vs new</title>
+<style>
+body{background:#141414;color:#e8e8e8;font:14px/1.55 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;padding:28px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:16px;margin:30px 0 10px;border-bottom:1px solid #333;padding-bottom:6px}
+.sub{color:#9aa;margin:0 0 22px;font-size:13px}
+.row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
+figure{margin:0;background:#1c1c1c;padding:8px;border-radius:6px}
+figure img{display:block;width:480px;height:auto;image-rendering:pixelated;background:#000}
+figcaption{font-size:12px;color:#9aa;margin-top:6px;text-align:center}
+table{border-collapse:collapse;font-size:13px;margin:8px 0}
+th,td{border:1px solid #333;padding:5px 10px;text-align:right}
+th{background:#222;text-align:center;font-weight:600}
+td.l,th.l{text-align:left}
+.good{color:#7fd97f}.bad{color:#ff8b7a}.warn{color:#ffcf6b}
+code{background:#242424;padding:1px 5px;border-radius:3px;font-size:12.5px}
+ul{margin:8px 0;padding-left:20px}li{margin:5px 0}
+.note{background:#1c1c1c;border-left:3px solid #ffcf6b;padding:10px 14px;margin:14px 0;border-radius:0 4px 4px 0}
+</style></head><body>
+
+<h1>ReSTIR — before vs after</h1>
+<p class="sub">320×180, 64 frames, Project-Zero CPU reference model (the dual-region kernel, run as C++17).
+Same seeds, same scene, same budget. The only difference is the ReSTIR fixes.</p>
+
+<h2>The image</h2>
+<div class="row">
+<figure><img src="old.png"><figcaption>BEFORE<br><span style="color:#ff8b7a">wall probe DI locked at 0.000000</span></figcaption></figure>
+<figure><img src="new.png"><figcaption>AFTER<br><span style="color:#7fd97f">wall probe DI = 0.187629</span></figcaption></figure>
+</div>
+<div class="row" style="margin-top:14px">
+<figure><img src="diff.png"><figcaption>DIFFERENCE — amplified ×6, mid-grey = unchanged<br>
+57.5 % of pixels changed · MAE 13.2/255 · RMS 23.2 · max 123</figcaption></figure>
+</div>
+
+<h2>Probe estimates against the brute-force reference (512 spp)</h2>
+<table><tr><th class="l">probe</th><th>reference</th><th>before</th><th>after</th><th class="l">note</th></tr>
+<tr><td class="l">floor — direct</td><td>0.224265</td><td>0.277452</td><td>0.282845</td><td class="l">single run, high-variance estimator</td></tr>
+<tr><td class="l">floor — indirect</td><td>0.183124</td><td>0.183576</td><td>0.189044</td><td class="l"></td></tr>
+<tr><td class="l">floor-left — direct</td><td>0.236056</td><td class="bad">0.000000</td><td class="bad">0.000000</td><td class="l">lock persists here</td></tr>
+<tr><td class="l">floor-left — indirect</td><td>0.188478</td><td>0.188481</td><td>0.186064</td><td class="l"></td></tr>
+<tr><td class="l">wall — direct</td><td>0.160219</td><td class="bad">0.000000</td><td class="good">0.187629</td><td class="l"><b>lock cleared</b></td></tr>
+<tr><td class="l">wall — indirect</td><td>0.190484</td><td>0.190129</td><td>0.184167</td><td class="l"></td></tr>
+</table>
+
+<div class="note"><b>The wall probe is the story.</b> Before, its direct estimate was <code>0.000000</code> across all
+64 frames — the reservoir locked onto an occluded sample and never escaped. The spatial-snapshot fix (patch 0016)
+clears it. That is the anomaly behind the <code>DI = 0.0000</code> runs in the committed
+<code>ReSTIRConvergence.txt</code>, now caught at 5× the resolution.</div>
+
+<h2>Performance — 320×180, 16 frames, best of 2</h2>
+<table><tr><th class="l">build</th><th>initial</th><th>+ temporal</th><th>+ spatial</th><th class="l">marginal cost</th></tr>
+<tr><td class="l">before</td><td>102.60 s</td><td>102.94 s</td><td>103.11 s</td><td class="l">temporal 0.34 s · spatial 0.17 s</td></tr>
+<tr><td class="l">after</td><td>100.89 s</td><td>108.94 s</td><td>132.69 s</td><td class="l">temporal 8.05 s · spatial <b>23.75 s</b></td></tr>
+</table>
+<p><b class="bad">The GI reconnection costs +28.7 %</b> on the full pipeline, and +17.9 % of the frame is now the
+spatial pass alone (was 0.2 %). Each tap pays two bounce traces to re-evaluate the offered path at the receiver —
+that is what correct ReSTIR-GI reuse costs.</p>
+
+<div class="note">This <b>retroactively justifies turning the GI pool off by default</b> far more strongly than the
+original estimate. The pool was costing a second full ReSTIR pipeline for 0.6–1.6 % RMSE; it is now
+<b>measurably</b> ~29 % of frame time for that. On a GPU the bounces are BVH traversals rather than analytic
+intersections, so the constant will differ — but the shape will not.</div>
+
+</body></html>

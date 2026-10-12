@@ -716,7 +716,13 @@ float PHatFull(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec3 
     if (cosL <= 0.0) return 0.0;
     vec3  wi = ToLocal(F, lDir);
     if (wi.z <= 0.0) return 0.0;
-    return max(dot(EvaluateBsdf(m, L, wo, wi), emit), 0.0) * cosT * cosL / (dist2 + 0.001);
+    // ⚠️ The softening constant here MUST match the one the shading estimate divides by (dist2 + 0.01 — the shade
+    //    sites and every non-reservoir NEE arm). It used to be 0.001. That is not a bias: RIS is unbiased for
+    //    whatever f_shade is defined as, and the estimator really does integrate the 0.01 form. But it made p̂ a
+    //    worse importance function than the estimator deserved — candidates were being weighted by a slightly
+    //    different integrand than the one they were finally divided by. Matching makes p̂ proportional to f,
+    //    which is the best importance function available. Variance only; the converged image is unchanged.
+    return max(dot(EvaluateBsdf(m, L, wo, wi), emit), 0.0) * cosT * cosL / (dist2 + 0.01);
 }
 
 // Sun target: f·L·cos — the sun is at infinity, so no d². L is the record's attenuated direct radiance, which
@@ -769,7 +775,10 @@ struct Reservoir
     uint  Visible;          // R6: visibility of the chosen sample at the shading pixel (1 = lit; re-traced on reuse)
 };
 
-void ResampleCandidate(inout Reservoir res, vec3 point, uint light, vec2 uv, float weight, inout uint seed)
+// R6: `uv` used to be carried into the reservoir's SelectedUv slot. That slot is gone — the 64 B repack dropped
+//    it, because nothing ever read it: PHatFull re-derives everything from `point`, PHatSky from the direction,
+//    and the chosen light point is stored outright. The parameter went with it.
+void ResampleCandidate(inout Reservoir res, vec3 point, uint light, float weight, inout uint seed)
 {
     res.WeightSum    += weight;
     res.SampleCount  += 1u;
@@ -788,7 +797,7 @@ void ResampleCandidate(inout Reservoir res, vec3 point, uint light, vec2 uv, flo
 //    the corrected scale against quadrature. HitPos anchors the sun's far point; SunUp (any direct radiance)
 //    decides whether the coin is flipped at all.
 void DrawDirectCandidate(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec3 hitPos, bool sunUp,
-                         bool skyOn, out vec3 point, out uint light, out vec2 uv, out float weight, inout uint seed)
+                         bool skyOn, out vec3 point, out uint light, out float weight, inout uint seed)
 {
     // #27B with skyOn false this function consumes EXACTLY the pre-sky random sequence — the OFF path is the
     //    bit-for-bit A/B identity. With it true the sun's coin now also flips when the sky is the only
@@ -801,7 +810,6 @@ void DrawDirectCandidate(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3
         vec3 sunDir = SampleSunDirection(SkySunDirection.xyz, u1, u2);
         point  = hitPos + sunDir * kSunShadowDistance;
         light  = kSunLightIndex;
-        uv     = vec2(u1, u2);
         float pHat = PHatSun(F, m, L, wo, SunEmission() * CloudShadowTransmittance(hitPos, sunDir), sunDir);
         float pPick = (LightTriangleCount > 0u || skyOn) ? SunPickChance() : 1.0;
         weight = pHat * SunSolidAngle() / pPick;
@@ -818,7 +826,6 @@ void DrawDirectCandidate(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3
         vec3 skyDir = SampleCosineHemisphere(F.Geometric, u1, u2);
         point  = hitPos + skyDir * kSunShadowDistance;
         light  = kSkyLightIndex;
-        uv     = vec2(u1, u2);
         float pHat = PHatSky(F, m, L, wo, SkyReservoirEmission(skyDir), skyDir);
         float cosT  = max(dot(F.Geometric, skyDir), 0.0);
         float pDir  = cosT / 3.14159265358979323846;   // the cosine sampler's own pdf
@@ -834,7 +841,6 @@ void DrawDirectCandidate(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3
         float  u2 = RandFloat(seed);
         point = SampleLightPointFor(li, u1, u2);
         light = li;
-        uv    = vec2(u1, u2);
         vec3 toLight = point - hitPos;
         float pHat = PHatFull(F, m, L, wo, LightEmission(li), toLight, dot(toLight, toLight), LightNormal(li));
         float pPick = (sunUp ? 1.0 - SunPickChance() : 1.0)
@@ -1150,17 +1156,17 @@ vec3 GiPoolShade(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec
     //    its own BSDF sample (the path-trace arm), so a sky candidate at the vertex would count the dome twice.
     for (uint s = 0u; s < SamplesPerPixel; ++s)
     {
-        vec3  lp; uint li; vec2 uv; float w;
-        DrawDirectCandidate(F, m, L, wo, hitPos, sunUp, /*skyOn=*/false, lp, li, uv, w, seed);
-        ResampleCandidate(ris, lp, li, uv, w, seed);
+        vec3  lp; uint li; float w;
+        DrawDirectCandidate(F, m, L, wo, hitPos, sunUp, /*skyOn=*/false, lp, li, w, seed);
+        ResampleCandidate(ris, lp, li, w, seed);
     }
     // The tier's extra same-pixel candidates count for the indirect pool too: it is the same dial, and leaving them to
     //    the direct pool alone would make the tiers mean two different things.
     for (uint e = 0u; e < ExtraCandidateCount; ++e)
     {
-        vec3  lp; uint li; vec2 uv; float w;
-        DrawDirectCandidate(F, m, L, wo, hitPos, sunUp, /*skyOn=*/false, lp, li, uv, w, seed);
-        ResampleCandidate(ris, lp, li, uv, w, seed);
+        vec3  lp; uint li; float w;
+        DrawDirectCandidate(F, m, L, wo, hitPos, sunUp, /*skyOn=*/false, lp, li, w, seed);
+        ResampleCandidate(ris, lp, li, w, seed);
     }
 
     float pSelected = 0.0;
@@ -1424,9 +1430,9 @@ void main()
 
         for (uint s = 0u; s < SamplesPerPixel; ++s)
         {
-            vec3  lp; uint li; vec2 luv; float w;
-            DrawDirectCandidate(frame, shading, layers, woLocal, hitPos, sunUp, skyReservoir, lp, li, luv, w, seed);
-            ResampleCandidate(res, lp, li, luv, w, seed);
+            vec3  lp; uint li; float w;
+            DrawDirectCandidate(frame, shading, layers, woLocal, hitPos, sunUp, skyReservoir, lp, li, w, seed);
+            ResampleCandidate(res, lp, li, w, seed);
         }
 
         // Compute unbiased weight W (R6: the chosen light comes from the reservoir — no nearest-emissive search)
@@ -1455,9 +1461,9 @@ void main()
 
             for (uint sp = 0u; sp < effectiveExtraCandidates; ++sp)
             {
-                vec3  nlp; uint nli; vec2 nuv; float nW;
-                DrawDirectCandidate(frame, shading, layers, woLocal, hitPos, sunUp, skyReservoir, nlp, nli, nuv, nW, seed);
-                ResampleCandidate(res, nlp, nli, nuv, nW, seed);
+                vec3  nlp; uint nli; float nW;
+                DrawDirectCandidate(frame, shading, layers, woLocal, hitPos, sunUp, skyReservoir, nlp, nli, nW, seed);
+                ResampleCandidate(res, nlp, nli, nW, seed);
             }
             // W for the final selection (the selected point may have changed in the loop above). This is the one
             //    evaluation that establishes pSelected; everything downstream carries it. PHatSelected answers for

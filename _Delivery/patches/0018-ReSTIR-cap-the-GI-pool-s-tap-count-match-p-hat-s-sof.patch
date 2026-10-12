@@ -1,0 +1,229 @@
+From 79df46eba1deaa7ef0ed01722498b594227cbbe6 Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Mon, 12 Oct 2026 06:58:07 +0000
+Subject: [PATCH] ReSTIR: cap the GI pool's tap count, match p-hat's softening,
+ drop dead uv
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+① GI POOL TAP COUNT — the reconnection, made affordable
+
+The GI pool walked the same 4-tap cross as the DI pool. Since reconnection
+landed that is the wrong trade: each tap costs two bounce traces to
+re-evaluate the offered path at the receiver, so the taps ARE the pool's
+marginal cost. The pool gets its own ceiling (kGiSpatialTapCeiling = 2).
+
+Measured at 320x180 x 16 frames, wall clock, best of 2:
+
+    GI taps    time      vs pre-reconnection (103.11 s)   wall-probe se
+      1        113.06 s   +9.6 %                          0.010715
+      2        118.45 s  +14.9 %                          0.006543
+      4        132.08 s  +28.7 %                          0.006226
+
+Going 1 -> 2 cuts the standard error 39 %; going 2 -> 4 buys a further 4.8 %
+for 2.5x the marginal cost (5.4 s vs 13.6 s). Two is where the knee is.
+
+Canonical regression (64x36, 48 frames x 12 runs) — T4 determinism PASS,
+OVERALL PASS. Mean |error| of the three GI probes against the brute-force
+reference:
+
+    reference   committed baseline   after 0016   now (taps 2)
+    floor       0.004367             0.004185     0.003077
+    floor-left  0.003115             0.005271     0.003412
+    wall        0.002545             0.002437     0.001645
+    mean        0.003342             0.003964     0.002711   (-18.9 %)
+
+② p-HAT SOFTENING CONSTANT — ViewportIntegrator.slang
+
+PHatFull divided by (dist2 + 0.001) while the shading estimate and every
+non-reservoir NEE arm divide by (dist2 + 0.01). Not a bias — RIS is unbiased
+for whatever f_shade is defined as, and the estimator really does integrate
+the 0.01 form — but p-hat was weighting candidates by a slightly different
+integrand than the one they were finally divided by, which makes it a worse
+importance function than the estimator deserves. Matched to 0.01 so p-hat is
+proportional to f. Variance only; the converged image is unchanged.
+
+③ DEAD uv PARAMETER — ViewportIntegrator.slang
+
+The 64 B repack removed Reservoir.SelectedUv; the parameter that fed it was
+still threaded through DrawDirectCandidate and ResampleCandidate and their
+four call sites. Removed, along with the now-dead locals. Register-level
+only, but it is the other half of the cleanup and leaving it invites someone
+to put the field back.
+---
+ Engine/Shaders/ViewportIntegrator.slang       | 42 +++++++++++--------
+ .../Project-Zero/Host/ReSTIRConvergence.cpp   |  8 +++-
+ .../Integration/Shaders/ReSTIRSequence.slang  |  9 +++-
+ 3 files changed, 38 insertions(+), 21 deletions(-)
+
+diff --git a/Engine/Shaders/ViewportIntegrator.slang b/Engine/Shaders/ViewportIntegrator.slang
+index e8b0017..121285b 100644
+--- a/Engine/Shaders/ViewportIntegrator.slang
++++ b/Engine/Shaders/ViewportIntegrator.slang
+@@ -716,7 +716,13 @@ float PHatFull(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec3
+     if (cosL <= 0.0) return 0.0;
+     vec3  wi = ToLocal(F, lDir);
+     if (wi.z <= 0.0) return 0.0;
+-    return max(dot(EvaluateBsdf(m, L, wo, wi), emit), 0.0) * cosT * cosL / (dist2 + 0.001);
++    // ⚠️ The softening constant here MUST match the one the shading estimate divides by (dist2 + 0.01 — the shade
++    //    sites and every non-reservoir NEE arm). It used to be 0.001. That is not a bias: RIS is unbiased for
++    //    whatever f_shade is defined as, and the estimator really does integrate the 0.01 form. But it made p̂ a
++    //    worse importance function than the estimator deserved — candidates were being weighted by a slightly
++    //    different integrand than the one they were finally divided by. Matching makes p̂ proportional to f,
++    //    which is the best importance function available. Variance only; the converged image is unchanged.
++    return max(dot(EvaluateBsdf(m, L, wo, wi), emit), 0.0) * cosT * cosL / (dist2 + 0.01);
+ }
+ 
+ // Sun target: f·L·cos — the sun is at infinity, so no d². L is the record's attenuated direct radiance, which
+@@ -769,7 +775,10 @@ struct Reservoir
+     uint  Visible;          // R6: visibility of the chosen sample at the shading pixel (1 = lit; re-traced on reuse)
+ };
+ 
+-void ResampleCandidate(inout Reservoir res, vec3 point, uint light, vec2 uv, float weight, inout uint seed)
++// R6: `uv` used to be carried into the reservoir's SelectedUv slot. That slot is gone — the 64 B repack dropped
++//    it, because nothing ever read it: PHatFull re-derives everything from `point`, PHatSky from the direction,
++//    and the chosen light point is stored outright. The parameter went with it.
++void ResampleCandidate(inout Reservoir res, vec3 point, uint light, float weight, inout uint seed)
+ {
+     res.WeightSum    += weight;
+     res.SampleCount  += 1u;
+@@ -788,7 +797,7 @@ void ResampleCandidate(inout Reservoir res, vec3 point, uint light, vec2 uv, flo
+ //    the corrected scale against quadrature. HitPos anchors the sun's far point; SunUp (any direct radiance)
+ //    decides whether the coin is flipped at all.
+ void DrawDirectCandidate(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec3 hitPos, bool sunUp,
+-                         bool skyOn, out vec3 point, out uint light, out vec2 uv, out float weight, inout uint seed)
++                         bool skyOn, out vec3 point, out uint light, out float weight, inout uint seed)
+ {
+     // #27B with skyOn false this function consumes EXACTLY the pre-sky random sequence — the OFF path is the
+     //    bit-for-bit A/B identity. With it true the sun's coin now also flips when the sky is the only
+@@ -801,7 +810,6 @@ void DrawDirectCandidate(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3
+         vec3 sunDir = SampleSunDirection(SkySunDirection.xyz, u1, u2);
+         point  = hitPos + sunDir * kSunShadowDistance;
+         light  = kSunLightIndex;
+-        uv     = vec2(u1, u2);
+         float pHat = PHatSun(F, m, L, wo, SunEmission() * CloudShadowTransmittance(hitPos, sunDir), sunDir);
+         float pPick = (LightTriangleCount > 0u || skyOn) ? SunPickChance() : 1.0;
+         weight = pHat * SunSolidAngle() / pPick;
+@@ -818,7 +826,6 @@ void DrawDirectCandidate(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3
+         vec3 skyDir = SampleCosineHemisphere(F.Geometric, u1, u2);
+         point  = hitPos + skyDir * kSunShadowDistance;
+         light  = kSkyLightIndex;
+-        uv     = vec2(u1, u2);
+         float pHat = PHatSky(F, m, L, wo, SkyReservoirEmission(skyDir), skyDir);
+         float cosT  = max(dot(F.Geometric, skyDir), 0.0);
+         float pDir  = cosT / 3.14159265358979323846;   // the cosine sampler's own pdf
+@@ -834,7 +841,6 @@ void DrawDirectCandidate(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3
+         float  u2 = RandFloat(seed);
+         point = SampleLightPointFor(li, u1, u2);
+         light = li;
+-        uv    = vec2(u1, u2);
+         vec3 toLight = point - hitPos;
+         float pHat = PHatFull(F, m, L, wo, LightEmission(li), toLight, dot(toLight, toLight), LightNormal(li));
+         float pPick = (sunUp ? 1.0 - SunPickChance() : 1.0)
+@@ -1150,17 +1156,17 @@ vec3 GiPoolShade(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec
+     //    its own BSDF sample (the path-trace arm), so a sky candidate at the vertex would count the dome twice.
+     for (uint s = 0u; s < SamplesPerPixel; ++s)
+     {
+-        vec3  lp; uint li; vec2 uv; float w;
+-        DrawDirectCandidate(F, m, L, wo, hitPos, sunUp, /*skyOn=*/false, lp, li, uv, w, seed);
+-        ResampleCandidate(ris, lp, li, uv, w, seed);
++        vec3  lp; uint li; float w;
++        DrawDirectCandidate(F, m, L, wo, hitPos, sunUp, /*skyOn=*/false, lp, li, w, seed);
++        ResampleCandidate(ris, lp, li, w, seed);
+     }
+     // The tier's extra same-pixel candidates count for the indirect pool too: it is the same dial, and leaving them to
+     //    the direct pool alone would make the tiers mean two different things.
+     for (uint e = 0u; e < ExtraCandidateCount; ++e)
+     {
+-        vec3  lp; uint li; vec2 uv; float w;
+-        DrawDirectCandidate(F, m, L, wo, hitPos, sunUp, /*skyOn=*/false, lp, li, uv, w, seed);
+-        ResampleCandidate(ris, lp, li, uv, w, seed);
++        vec3  lp; uint li; float w;
++        DrawDirectCandidate(F, m, L, wo, hitPos, sunUp, /*skyOn=*/false, lp, li, w, seed);
++        ResampleCandidate(ris, lp, li, w, seed);
+     }
+ 
+     float pSelected = 0.0;
+@@ -1424,9 +1430,9 @@ void main()
+ 
+         for (uint s = 0u; s < SamplesPerPixel; ++s)
+         {
+-            vec3  lp; uint li; vec2 luv; float w;
+-            DrawDirectCandidate(frame, shading, layers, woLocal, hitPos, sunUp, skyReservoir, lp, li, luv, w, seed);
+-            ResampleCandidate(res, lp, li, luv, w, seed);
++            vec3  lp; uint li; float w;
++            DrawDirectCandidate(frame, shading, layers, woLocal, hitPos, sunUp, skyReservoir, lp, li, w, seed);
++            ResampleCandidate(res, lp, li, w, seed);
+         }
+ 
+         // Compute unbiased weight W (R6: the chosen light comes from the reservoir — no nearest-emissive search)
+@@ -1455,9 +1461,9 @@ void main()
+ 
+             for (uint sp = 0u; sp < effectiveExtraCandidates; ++sp)
+             {
+-                vec3  nlp; uint nli; vec2 nuv; float nW;
+-                DrawDirectCandidate(frame, shading, layers, woLocal, hitPos, sunUp, skyReservoir, nlp, nli, nuv, nW, seed);
+-                ResampleCandidate(res, nlp, nli, nuv, nW, seed);
++                vec3  nlp; uint nli; float nW;
++                DrawDirectCandidate(frame, shading, layers, woLocal, hitPos, sunUp, skyReservoir, nlp, nli, nW, seed);
++                ResampleCandidate(res, nlp, nli, nW, seed);
+             }
+             // W for the final selection (the selected point may have changed in the loop above). This is the one
+             //    evaluation that establishes pSelected; everything downstream carries it. PHatSelected answers for
+diff --git a/Projects/Project-Zero/Host/ReSTIRConvergence.cpp b/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
+index 0f770bb..479dae6 100644
+--- a/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
++++ b/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
+@@ -33,6 +33,12 @@ constexpr uint32_t kH = 36;
+ constexpr uint32_t kM0 = 8;
+ constexpr uint32_t kMCap = 20;
+ constexpr uint32_t kSpatTaps = 4;
++// The GI pool does not need the DI pool's tap count. Its reconnection costs two bounce traces PER TAP, so the
++//    taps are its whole marginal cost: measured at 320x180x16 frames, the spatial pass went 0.17 s -> 23.75 s
++//    when reconnection landed. Overridable so the count can be swept rather than guessed.
++#ifndef kGiSpatTaps
++constexpr uint32_t kGiSpatTaps = 2;
++#endif
+ constexpr float kAlbedo = 0.5f;
+ constexpr float kPiH = 3.14159265f;
+ constexpr float kWallZ = -4.0f;
+@@ -514,7 +520,7 @@ void RunGiSpatial(const std::vector<GB>& gb, std::vector<IndirectReservoirStruct
+             RandomSequenceStructure rng = RandomSequenceMake(RandomSequenceSeed(uint(x), uint(y), frame, 5u) ^ RandomSeed);
+             if (g.depth > 0.0f)
+             {
+-                for (uint k = 0u; k < kSpatTaps; k++)
++                for (uint k = 0u; k < kGiSpatTaps; k++)
+                 {
+                     const RandomFloatStructure r1 = RandomFloatNext(rng);
+                     rng = r1.rng;
+diff --git a/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang b/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
+index 915589e..599dab1 100644
+--- a/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
++++ b/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
+@@ -424,7 +424,12 @@ cbuffer SkySequenceConfiguration : register(b1)
+     uint TemporalIndex;
+     uint InitialCandidates;       // initial candidates per pixel (DI; GI uses InitialCandidates / 2)
+     uint ReservoirCap;     // temporal M cap (20)
+-    uint SpatialTaps; // spatial taps (4)
++    uint SpatialTaps;      // spatial taps (4) — the DI cross
++
++    // The GI pool walks a SHORTER cross than the DI pool. Its reconnection costs two bounce traces PER TAP, so the
++    //    taps are its entire marginal cost, and the pool is the weaker of the two estimators to begin with
++    //    (0.6-1.6 % RMSE). Two, measured in the CPU mirror: most of the reuse benefit for half the traces.
++    const uint kGiSpatialTapCeiling = 2u;
+     uint RandomSeed;     // run seed (0 for the deterministic proof)
+     uint LaunchPad;
+ };
+@@ -988,7 +993,7 @@ void IndirectSpatial(uint3 tid : SV_DispatchThreadID)
+         SkyConfiguration cp = SkyConfigurationFromExchange();
+         float3 posW = g.pos + g.normal * 1e-3f;
+         float3 nSky = normalize(SkyFrameTransform(g.normal));
+-        for (uint k = 0u; k < SpatialTaps; k++)
++        for (uint k = 0u; k < min(SpatialTaps, kGiSpatialTapCeiling); k++)
+         {
+             RandomFloatStructure r1 = RandomFloatNext(rng);
+             rng = r1.rng;
+-- 
+2.39.5
+
