@@ -1529,15 +1529,36 @@ void main()
                 }
             }
 
-            // Visibility re-traced at the current pixel for the TEMPORAL reservoir: the history's W has to be an
-            //    honest weight, and the two passes are two dispatches — the spatial pass cannot validate a value it
-            //    is not allowed to write back. The spatial pass re-traces for whichever sample it ends up shading.
+            // Visibility re-traced at the current pixel for the TEMPORAL reservoir, so the history publishes a
+            //    sample known to be visible here. The spatial pass re-traces for whichever sample it ends up
+            //    shading (R11, below).
+            //
+            //    ⚠️ VISIBILITY IS NOT BAKED INTO UnbiasedWeight — it gates SHADING only, and W must stay a pure
+            //    weight. The pairwise-MIS combine reads a neighbour's stored W as
+            //        wNeigh = pHat_receiver(z_neighbour) * W_neighbour * mNeighCapped,
+            //    so a W that already carries the NEIGHBOUR's visibility makes that arm integrate
+            //    f·V_receiver·V_neighbour instead of f·V_receiver: light blocked at the neighbour but visible
+            //    HERE is silently lost. Spatial reuse then throws away precisely the samples that make it
+            //    worthwhile — a pixel just outside a shadow cannot learn from a neighbour just inside one.
+            //
+            //    Measured on a 2-D transcription of this exact algebra against 4 M-point quadrature (receiver
+            //    lit, neighbour across a shadow boundary, M = 4 candidates):
+            //        W carrying visibility : bias -10.15 / -13.52 / -16.29 % at 1 / 2 / 4 taps (soft boundary)
+            //                                bias -34.83 / -46.39 / -55.44 % at 1 / 2 / 4 taps (hard boundary)
+            //                                noise 0.689 -> 0.997 sd/mean at 4 taps (WORSE than no reuse)
+            //        W visibility-free     : bias +0.02 / -0.04 / +0.01 % and 0.320 sd/mean at 4 taps —
+            //                                unbiased, and 32 % quieter than the biased arm.
+            //    The occluder-removed control is 0.00 % for both arms, and the bias is flat across
+            //    kTemporalMClamp in {1, 2, 5, 20, 1000}, so it is this line and not the M-cap.
+            //
+            //    GiPoolShade already had it right: its occlusion test gates the CONTRIBUTION
+            //    (`if (blocked || ris.SampleCount == 0u) return vec3(0.0);`), never the weight. The two pools
+            //    now agree.
             {
                 bool histBlocked = IsDistantLight(res.SelectedLight)
                     ? TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint)
                     : TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint - normalize(res.SelectedPoint - hitPos) * 1e-3);
                 res.Visible = histBlocked ? 0u : 1u;
-                if (res.Visible == 0u) res.UnbiasedWeight = 0.0;
             }
 
             // The temporal reservoir is what the history takes (see the publish block at the end of the DI block):
@@ -1625,7 +1646,8 @@ void main()
             // R11: late validation only for SPATIAL winners. This keeps the visibility-reuse saving for local and
             //    temporal selections (already traced at the current pixel above) while closing the leak that matters
             //    perceptually: a neighbour's sample that can see around a blocker must not illuminate this pixel.
-            //    If it fails, W is zeroed for this frame only; the history below still receives the pre-spatial
+            //    If it fails, the pixel contributes nothing this frame — V gates the SHADING, never W, for the
+            //    reason spelled out at the temporal trace above. The history below still receives the pre-spatial
             //    temporal reservoir, which is the non-feedback rule that keeps temporal M bounded.
             if (spatialWinnerNeedsCurrentPixelVisibility && res.Visible == 1u)
             {
@@ -1633,7 +1655,6 @@ void main()
                     ? TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint)
                     : TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint - normalize(res.SelectedPoint - hitPos) * 1e-3);
                 res.Visible = spatialBlocked ? 0u : 1u;
-                if (res.Visible == 0u) res.UnbiasedWeight = 0.0;
             }
 
             // Publish the reservoir for next frame's temporal reuse (always — even occluded, M still counts).

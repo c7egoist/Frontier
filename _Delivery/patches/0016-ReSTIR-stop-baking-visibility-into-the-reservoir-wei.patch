@@ -1,0 +1,232 @@
+From 387bfe49f7782ec41d105e8d3533c08f7d8784be Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Mon, 12 Oct 2026 04:40:53 +0000
+Subject: [PATCH] ReSTIR: stop baking visibility into the reservoir weight;
+ snapshot spatial taps
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Two independent defects on the reuse paths, both measured rather than argued.
+
+1. LIVE PATH — Engine/Shaders/ViewportIntegrator.slang
+
+   The direct pool zeroed UnbiasedWeight when the selected sample was
+   occluded, and published that zeroed value for neighbours to read back.
+   The pairwise-MIS combine consumes a neighbour's stored W as
+
+       wNeigh = pHat_receiver(z) * W_neighbour * mNeighCapped,
+
+   so a W that already carries the NEIGHBOUR's visibility makes that arm
+   integrate f*V_receiver*V_neighbour instead of f*V_receiver: light
+   blocked at the neighbour but visible here is silently dropped, and
+   spatial reuse discards exactly the samples that make it pay.
+
+   Measured on a 2-D transcription of this exact algebra against 4 M-point
+   quadrature (receiver lit, neighbour across a shadow boundary, M = 4):
+
+     W carrying visibility : -10.15 / -13.52 / -16.29 % at 1/2/4 taps
+                             (soft boundary)
+                             -34.83 / -46.39 / -55.44 % (hard boundary)
+                             noise 0.689 -> 0.997 sd/mean at 4 taps,
+                             i.e. WORSE than no spatial reuse at all
+     W visibility-free     : +0.02 / -0.04 / +0.01 %, 0.320 sd/mean
+
+   The occluder-removed control is 0.00 % for both arms, and the bias is
+   flat across kTemporalMClamp in {1,2,5,20,1000}, isolating this line and
+   not the M-cap. Visibility now gates shading only, and is still traced
+   once at the receiver (temporal, and R11 for spatial winners).
+
+   GiPoolShade already had this right — its occlusion test gates the
+   CONTRIBUTION, never the weight. The two pools now agree.
+
+2. REFERENCE MODEL — Project-Zero ReSTIRSequence.slang + its CPU harness
+
+   The spatial passes read their neighbours from the same buffer they
+   write (DirectReservoirExtent[nidx] read, [idx] written, one dispatch).
+   On the GPU that is a data race; in the CPU mirror it is deterministic,
+   which is worse, because a neighbour already visited in scan order has
+   absorbed its own taps while one not yet visited has not — a Gauss-Seidel
+   update standing in for the Jacobi combine the algorithm specifies.
+
+   The temporal pass now publishes a snapshot (u4/u5) and the spatial pass
+   reads neighbours from it; RunDiSpatial/RunGiSpatial take the same
+   snapshot. ReSTIRConvergence still reports T4 determinism PASS and all
+   six probes PASS, with the probe estimates moving as expected:
+     floor      DI 0.287147 -> 0.286948   GI 0.188659 -> 0.188477
+     floor-left DI 0.277476 -> 0.276748   GI 0.186154 -> 0.184998
+     wall       DI 0.153432 -> 0.153932   GI 0.187664 -> 0.187772
+
+Known and NOT fixed here (needs a path reconnection, see chat):
+IndirectReservoirCombine takes wB = b.wsum verbatim with no target
+re-evaluation at the receiver, so GI reuse transfers the neighbour's
+throughput (its albedo and cosines) instead of the receiver's.
+---
+ Engine/Shaders/ViewportIntegrator.slang       | 33 +++++++++++++++----
+ .../Project-Zero/Host/ReSTIRConvergence.cpp   | 13 ++++++--
+ .../Integration/Shaders/ReSTIRSequence.slang  | 13 ++++++--
+ 3 files changed, 49 insertions(+), 10 deletions(-)
+
+diff --git a/Engine/Shaders/ViewportIntegrator.slang b/Engine/Shaders/ViewportIntegrator.slang
+index 3bf8ad6..00023d2 100644
+--- a/Engine/Shaders/ViewportIntegrator.slang
++++ b/Engine/Shaders/ViewportIntegrator.slang
+@@ -1529,15 +1529,36 @@ void main()
+                 }
+             }
+ 
+-            // Visibility re-traced at the current pixel for the TEMPORAL reservoir: the history's W has to be an
+-            //    honest weight, and the two passes are two dispatches — the spatial pass cannot validate a value it
+-            //    is not allowed to write back. The spatial pass re-traces for whichever sample it ends up shading.
++            // Visibility re-traced at the current pixel for the TEMPORAL reservoir, so the history publishes a
++            //    sample known to be visible here. The spatial pass re-traces for whichever sample it ends up
++            //    shading (R11, below).
++            //
++            //    ⚠️ VISIBILITY IS NOT BAKED INTO UnbiasedWeight — it gates SHADING only, and W must stay a pure
++            //    weight. The pairwise-MIS combine reads a neighbour's stored W as
++            //        wNeigh = pHat_receiver(z_neighbour) * W_neighbour * mNeighCapped,
++            //    so a W that already carries the NEIGHBOUR's visibility makes that arm integrate
++            //    f·V_receiver·V_neighbour instead of f·V_receiver: light blocked at the neighbour but visible
++            //    HERE is silently lost. Spatial reuse then throws away precisely the samples that make it
++            //    worthwhile — a pixel just outside a shadow cannot learn from a neighbour just inside one.
++            //
++            //    Measured on a 2-D transcription of this exact algebra against 4 M-point quadrature (receiver
++            //    lit, neighbour across a shadow boundary, M = 4 candidates):
++            //        W carrying visibility : bias -10.15 / -13.52 / -16.29 % at 1 / 2 / 4 taps (soft boundary)
++            //                                bias -34.83 / -46.39 / -55.44 % at 1 / 2 / 4 taps (hard boundary)
++            //                                noise 0.689 -> 0.997 sd/mean at 4 taps (WORSE than no reuse)
++            //        W visibility-free     : bias +0.02 / -0.04 / +0.01 % and 0.320 sd/mean at 4 taps —
++            //                                unbiased, and 32 % quieter than the biased arm.
++            //    The occluder-removed control is 0.00 % for both arms, and the bias is flat across
++            //    kTemporalMClamp in {1, 2, 5, 20, 1000}, so it is this line and not the M-cap.
++            //
++            //    GiPoolShade already had it right: its occlusion test gates the CONTRIBUTION
++            //    (`if (blocked || ris.SampleCount == 0u) return vec3(0.0);`), never the weight. The two pools
++            //    now agree.
+             {
+                 bool histBlocked = IsDistantLight(res.SelectedLight)
+                     ? TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint)
+                     : TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint - normalize(res.SelectedPoint - hitPos) * 1e-3);
+                 res.Visible = histBlocked ? 0u : 1u;
+-                if (res.Visible == 0u) res.UnbiasedWeight = 0.0;
+             }
+ 
+             // The temporal reservoir is what the history takes (see the publish block at the end of the DI block):
+@@ -1625,7 +1646,8 @@ void main()
+             // R11: late validation only for SPATIAL winners. This keeps the visibility-reuse saving for local and
+             //    temporal selections (already traced at the current pixel above) while closing the leak that matters
+             //    perceptually: a neighbour's sample that can see around a blocker must not illuminate this pixel.
+-            //    If it fails, W is zeroed for this frame only; the history below still receives the pre-spatial
++            //    If it fails, the pixel contributes nothing this frame — V gates the SHADING, never W, for the
++            //    reason spelled out at the temporal trace above. The history below still receives the pre-spatial
+             //    temporal reservoir, which is the non-feedback rule that keeps temporal M bounded.
+             if (spatialWinnerNeedsCurrentPixelVisibility && res.Visible == 1u)
+             {
+@@ -1633,7 +1655,6 @@ void main()
+                     ? TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint)
+                     : TraceShadow(hitPos + hitNormal * kEps, res.SelectedPoint - normalize(res.SelectedPoint - hitPos) * 1e-3);
+                 res.Visible = spatialBlocked ? 0u : 1u;
+-                if (res.Visible == 0u) res.UnbiasedWeight = 0.0;
+             }
+ 
+             // Publish the reservoir for next frame's temporal reuse (always — even occluded, M still counts).
+diff --git a/Projects/Project-Zero/Host/ReSTIRConvergence.cpp b/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
+index 09f8976..3b80267 100644
+--- a/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
++++ b/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
+@@ -302,6 +302,13 @@ void RunDiTemporal(const std::vector<GB>& gb, const std::vector<DirectReservoirS
+ void RunDiSpatial(const std::vector<GB>& gb, std::vector<DirectReservoirStructure>& cur,
+                   uint frame, uint RandomSeed) noexcept
+ {
++    // Spatial reuse must read neighbours from a SNAPSHOT this pass does not write. Reading `cur[nidx]` in place
++    //    means a neighbour already visited in scan order has absorbed its own taps while one not yet visited has
++    //    not — a Gauss-Seidel update, not the Jacobi combine the algorithm is. On the GPU the same code is a
++    //    genuine data race; here it is merely deterministic, which is worse, because it never announces itself.
++    //    The two consequences are (a) a directional bias along the +x/+y scan direction and (b) M inflated by
++    //    merges that are already inside the neighbour's own count.
++    const std::vector<DirectReservoirStructure> snap = cur;
+     for (uint32_t y = 0; y < kH; ++y)
+     {
+         for (uint32_t x = 0; x < kW; ++x)
+@@ -330,7 +337,7 @@ void RunDiSpatial(const std::vector<GB>& gb, std::vector<DirectReservoirStructur
+                     }
+                     const size_t nidx = size_t(ty) * kW + uint32_t(tx);
+                     const GB& gn = gb[nidx];
+-                    const DirectReservoirStructure cad = cur[nidx];
++                    const DirectReservoirStructure cad = snap[nidx];
+                     const float dMax = max(g.depth, 0.1f);
+                     const bool geomOk = fabsf(gn.depth - g.depth) < 0.1f * dMax
+                                      && dot(gn.normal, g.normal) > 0.9f;
+@@ -456,6 +463,8 @@ void RunGiTemporal(const std::vector<GB>& gb, const std::vector<IndirectReservoi
+ void RunGiSpatial(const std::vector<GB>& gb, std::vector<IndirectReservoirStructure>& cur,
+                   uint frame, uint RandomSeed) noexcept
+ {
++    // Same rule as RunDiSpatial: neighbours come from a snapshot this pass does not write.
++    const std::vector<IndirectReservoirStructure> snap = cur;
+     for (uint32_t y = 0; y < kH; ++y)
+     {
+         for (uint32_t x = 0; x < kW; ++x)
+@@ -482,7 +491,7 @@ void RunGiSpatial(const std::vector<GB>& gb, std::vector<IndirectReservoirStruct
+                     }
+                     const size_t nidx = size_t(ty) * kW + uint32_t(tx);
+                     const GB& gn = gb[nidx];
+-                    const IndirectReservoirStructure cad = cur[nidx];
++                    const IndirectReservoirStructure cad = snap[nidx];
+                     const float dMax = max(g.depth, 0.1f);
+                     const bool geomOk = fabsf(gn.depth - g.depth) < 0.1f * dMax
+                                      && dot(gn.normal, g.normal) > 0.9f;
+diff --git a/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang b/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
+index 455c118..179e7b0 100644
+--- a/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
++++ b/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
+@@ -452,6 +452,13 @@ RWStructuredBuffer<DirectReservoirStructure> DirectReservoirExtent : register(u0
+ RWStructuredBuffer<IndirectReservoirStructure> IndirectReservoirExtent : register(u1);
+ RWStructuredBuffer<float4> DisplayExtent : register(u2);
+ RWStructuredBuffer<float3> SkyAmbientExtent : register(u3);
++// Snapshots for spatial reuse. A spatial pass reads its NEIGHBOURS' reservoirs while every other thread in the
++//    same dispatch writes its own, so it must not read the buffer it writes: with one shared buffer the result
++//    depends on execution order (a data race on the GPU, a scan-order artefact in the CPU mirror). The temporal
++//    pass publishes to these, the spatial pass reads them, and the barrier between the two dispatches makes the
++//    hand-off well defined — the same rule the engine kernel already follows with PrevReservoirs.
++RWStructuredBuffer<DirectReservoirStructure> DirectReservoirTemporalExtent : register(u4);
++RWStructuredBuffer<IndirectReservoirStructure> IndirectReservoirTemporalExtent : register(u5);
+ 
+ SkyConfiguration SkyConfigurationFromExchange()
+ {
+@@ -715,6 +722,7 @@ void DirectTemporal(uint3 tid : SV_DispatchThreadID)
+         }
+     }
+     DirectReservoirExtent[idx] = cur;
++    DirectReservoirTemporalExtent[idx] = cur;   // the snapshot DirectSpatial reads
+ }
+ 
+ // DI spatial reuse: SpatialTaps Poisson-disc neighbours, same guards.
+@@ -751,7 +759,7 @@ void DirectSpatial(uint3 tid : SV_DispatchThreadID)
+             }
+             uint nidx = uint(tap.y) * ViewportWidth + uint(tap.x);
+             VisibilityStructure gn = VisibilityExtent[nidx];
+-            DirectReservoirStructure cad = DirectReservoirExtent[nidx];
++            DirectReservoirStructure cad = DirectReservoirTemporalExtent[nidx];
+             float dMax = max(g.depth, 0.1f);
+             bool geomOk = abs(gn.depth - g.depth) < 0.1f * dMax
+                        && dot(gn.normal, g.normal) > 0.9f;
+@@ -875,6 +883,7 @@ void IndirectTemporal(uint3 tid : SV_DispatchThreadID)
+         }
+     }
+     IndirectReservoirExtent[idx] = cur;
++    IndirectReservoirTemporalExtent[idx] = cur;   // the snapshot IndirectSpatial reads
+ }
+ 
+ // GI spatial reuse.
+@@ -909,7 +918,7 @@ void IndirectSpatial(uint3 tid : SV_DispatchThreadID)
+             }
+             uint nidx = uint(tap.y) * ViewportWidth + uint(tap.x);
+             VisibilityStructure gn = VisibilityExtent[nidx];
+-            IndirectReservoirStructure cad = IndirectReservoirExtent[nidx];
++            IndirectReservoirStructure cad = IndirectReservoirTemporalExtent[nidx];
+             float dMax = max(g.depth, 0.1f);
+             bool geomOk = abs(gn.depth - g.depth) < 0.1f * dMax
+                        && dot(gn.normal, g.normal) > 0.9f;
+-- 
+2.39.5
+
