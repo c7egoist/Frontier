@@ -176,13 +176,14 @@ public:
     void Configure(uint32_t CardRes, uint32_t GatherSamples, uint32_t RadianceSamples,
                    Vec3 SunDir, Vec3 SunColour, float SunRadiance, Vec3 SkyAmbient,
                    float Softness, float IrradianceScale, float Exposure,
-                   bool Gi, bool FreezeTemporal, int Layer = 0) noexcept
+                   bool Gi, bool FreezeTemporal, int Layer = 0, int Stride = 1) noexcept
     {
         R_ = std::clamp<uint32_t>(CardRes, 2u, 32u);
         GS_ = GatherSamples; RS_ = RadianceSamples;
         Sun_ = Norm(SunDir); SunColour_ = SunColour; SunR_ = SunRadiance; Sky_ = SkyAmbient;
         Softness_ = std::max(Softness, 0.0001f); Scale_ = IrradianceScale; Exposure_ = Exposure;
         Layer_ = Layer;   // 0 = full, 1 = direct sun only, 2 = indirect gather only
+        Stride_ = std::max(1, Stride);
         Gi_ = Gi; Freeze_ = FreezeTemporal;
         const size_t n = F_.size() * static_cast<size_t>(R_) * R_;
         Diffuse_.assign(n, V3(0, 0, 0)); Normal_.assign(n, V3(0, 0, 1)); Emission_.assign(n, V3(0, 0, 0));
@@ -266,7 +267,9 @@ public:
         Parallel([&]()
         {
             for (uint32_t y = Row.fetch_add(1u); y < static_cast<uint32_t>(H); y = Row.fetch_add(1u))
-                for (uint32_t x = 0; x < static_cast<uint32_t>(W); ++x)
+            {
+                if (static_cast<int>(y % static_cast<uint32_t>(Stride_)) != 0) continue;   // probe rows only
+                for (uint32_t x = 0; x < static_cast<uint32_t>(W); x += static_cast<uint32_t>(Stride_))
                 {
                     const size_t i = static_cast<size_t>(y) * W + x;
                     if (Out.Instance[i] == 0xFFFFFFFFu) continue;
@@ -277,6 +280,7 @@ public:
                     Out.Irradiance[i] = GatherDistanceRadiance(Out.Position[i], N, true,
                                                                Scramble(x), Scramble(y + 0x9e3779b9u));
                     Out.GatherNormal[i] = N;
+                }
                 }
         });
         GatherMs_ = Ms(T);
@@ -400,6 +404,9 @@ private:
     ///    Used to render the two halves of the transport side by side. Only the SURFACE response is split — the sky
     ///    background is kept in every layer so the images stay readable.
     int   Layer_ = 0;
+    /// 📦 Screen-probe grid spacing (Lumen-style final gather): gathers run on every Stride_-th pixel and the
+    ///    resolve reconstructs per pixel from the surrounding probes. 1 = the legacy dense per-pixel gather.
+    int   Stride_ = 1;
     bool Gi_ = true, Freeze_ = false;
     double CaptureMs_ = 0, RadianceMs_ = 0, GatherMs_ = 0, ResolveMs_ = 0, BakeMs_ = 0;
 
@@ -784,8 +791,13 @@ private:
     {
         const size_t i = static_cast<size_t>(Y) * W + X;
         Vec3 Sum{}; float Total = 0.0f;
-        for (int Row = -3; Row <= 3; ++Row) for (int Col = -3; Col <= 3; ++Col)
+        // Dense gather: the classic 7x7 bilateral. Probe grid: widen so the window always covers the four
+        //    surrounding probes, and scale the Gaussian with the spacing so the blend stays local.
+        const int   R       = Stride_ <= 1 ? 3 : Stride_ + 1;
+        const float Sigma2  = Stride_ <= 1 ? 8.0f : 0.5f * float(Stride_ * Stride_);
+        for (int Row = -R; Row <= R; ++Row) for (int Col = -R; Col <= R; ++Col)
         {
+            if (Stride_ > 1 && (((Y + Row) % Stride_) != 0 || ((X + Col) % Stride_) != 0)) continue;
             const int nx = X + Col, ny = Y + Row;
             if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
             const size_t n = static_cast<size_t>(ny) * W + nx;
@@ -796,7 +808,7 @@ private:
             if (Dot(Guide, Guide) < 1e-12f || Alignment < 0.9f) continue;
             const Vec3 Delta = Sub(Out.Position[n], Position);
             if (std::fabs(Dot(Delta, Normal)) > std::max(0.001f, Len(Delta) * 0.1f)) continue;
-            const float Weight = std::exp(-static_cast<float>(Col * Col + Row * Row) / 8.0f) * std::pow(std::max(Alignment, 0.0f), 32.0f);
+            const float Weight = std::exp(-static_cast<float>(Col * Col + Row * Row) / Sigma2) * std::pow(std::max(Alignment, 0.0f), 32.0f);
             Sum = Add(Sum, Mul(Out.Irradiance[n], Weight)); Total += Weight;
         }
         return Total > 0.0f ? Mul(Sum, 1.0f / Total) : Out.Irradiance[i];
@@ -1107,6 +1119,7 @@ int main(int argc, char** argv)
     uint32_t budget = 10u << 20u;
     std::string mode = "dynamic";      // dynamic | frozen | nogi
     std::string layer = "full";        // full | direct | indirect
+    int gstride = 1;                     // screen-probe grid spacing (1 = dense per-pixel gather)
     bool reference = false;
     int  refEvery = 4;
     float voxel = 0.0f;
@@ -1130,6 +1143,7 @@ int main(int argc, char** argv)
         else if (a == "--budget")    budget = static_cast<uint32_t>(F(budget));
         else if (a == "--voxel")     voxel = F(voxel);
         else if (a == "--layer")     layer = argv[++i];
+        else if (a == "--gstride")   gstride = static_cast<int>(F(gstride));
         else if (a == "--mode")      mode = argv[++i];
         else if (a == "--reference") reference = true;
         else if (a == "--refevery")  refEvery = std::max(1, static_cast<int>(F(refEvery)));
@@ -1267,7 +1281,7 @@ int main(int argc, char** argv)
                  Norm(V3(0.22f, 0.34f, 0.91f)), V3(1.0f, 0.97f, 0.92f), 3.2f,   // sun: the field-marched penumbra
                  V3(0.055f, 0.070f, 0.095f), softness, irradiance, exposure,
                  mode != "nogi", mode == "frozen",
-                 layer == "direct" ? 1 : (layer == "indirect" ? 2 : 0));
+                 layer == "direct" ? 1 : (layer == "indirect" ? 2 : 0), gstride);
 
     gi.PassCapture();
     std::printf("[SdfGi] capture       %.1f ms\n", gi.CaptureMs());
