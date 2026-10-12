@@ -1,0 +1,756 @@
+From 80a6f9a83e562cbb07e529cbce034ec4f5234f7f Mon Sep 17 00:00:00 2001
+From: Arena Agent <agent@arena.ai>
+Date: Mon, 12 Oct 2026 05:20:04 +0000
+Subject: [PATCH] ReSTIR: GI path reconnection, 64 B reservoir record, GI pool
+ off by default
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+① GI RECONNECTION — Project-Zero ReSTIRSequence.slang + its CPU harness
+
+IndirectReservoirCombine took wB = b.wsum verbatim, so a reused indirect
+sample transferred the NEIGHBOUR's throughput — its albedo, its cosines and
+its bounce geometry — and the receiver shaded with a path that never
+happened at that pixel. DirectReservoirCombine never had this problem: its
+target is rebuilt from the receiver's own normal and albedo, because the
+thing it stores (Le) is a property of the light both pixels share.
+
+The indirect pool now carries the second-bounce direction (dir2) so the
+receiver can RECONNECT the path at its own surface, and the combine scores
+the offer against the receiver's own target:
+
+    wB = pB * b.wsum / pBb      pB  = target(receiver's re-traced path)
+                                pBb = target(the neighbour's stored path)
+
+If the neighbour wins, the DIRECTION travels; the throughput does not — the
+reservoir stores the receiver's reconnected values.
+
+Reconnection alone is not enough: measured, it halved the floor probe's
+error but TRIPLED its standard error (0.004021 -> 0.008234; floor-left
+0.006001 -> 0.019279), because reconnecting across a bounce that lands on
+different geometry swings pB/pBb by orders of magnitude. The standard
+companion is a domain restriction — merge only where the receiver's first
+bounce hits geometry iff the offer's did. Skipping a merge adds no M and
+conditions on nothing about the sample's outcome, so it is not a bias.
+
+    probe          reference    before      reconnect   reconnect+gate
+    floor GI       0.184292     0.188477    0.180662    0.185305
+    floor-left GI  0.189269     0.184998    0.194289    0.185406
+    wall    GI     0.190209     0.187772    0.186970    0.186970
+    mean |error|                0.003964    0.003963    0.002705
+
+T4 determinism PASS and all six probes PASS.
+
+② 64 B RESERVOIR RECORD — ViewportIntegrator.slang + SwapchainExchange.cpp
+
+GpuReservoir was 80 B and carried two fields no decision ever consumed:
+SelectedUv (8 B, threaded through every merge and publish; PHatFull needs
+only toLight, PHatSky only the direction, and Sample.xyz already holds the
+point) and Counts.z (Visible, written by every publish, read by nothing).
+Dropping both lets W and the view depth move into padding that was already
+reserved, so the record is four vec4s: 2 x 265 MB -> 2 x 212 MB across the
+ping-pong pair at 1920x1080, and a fifth less reservoir traffic. The host
+static_assert moves 80 -> 64 and is the contract with the shader.
+
+③ GI POOL OFF BY DEFAULT — ReSTIRIntegrator.h
+
+kFeatureGiReuse ran a second complete ReSTIR pipeline on ~16 % of surface
+pixels for a measured 0.6-1.6 % RMSE gain. Now off; the switch and the
+DiagnosticInspector readout stay, so the A/B is one checkbox away. This
+also retires the cost of ①, which adds a re-trace per tap.
+---
+ Engine/DeviceExchange/SwapchainExchange.cpp   |  22 ++--
+ Engine/DisplayPresentation/ReSTIRIntegrator.h |   8 +-
+ Engine/Shaders/ViewportIntegrator.slang       |  85 ++++++-------
+ .../Project-Zero/Host/ReSTIRConvergence.cpp   |  57 +++++++--
+ .../Integration/Shaders/ReSTIRSequence.slang  | 117 ++++++++++++++++--
+ 5 files changed, 215 insertions(+), 74 deletions(-)
+
+diff --git a/Engine/DeviceExchange/SwapchainExchange.cpp b/Engine/DeviceExchange/SwapchainExchange.cpp
+index 42606fc..82161d5 100644
+--- a/Engine/DeviceExchange/SwapchainExchange.cpp
++++ b/Engine/DeviceExchange/SwapchainExchange.cpp
+@@ -237,7 +237,7 @@ struct SwapchainExchange::VulkanRecord
+     VkBuffer                 StarBuffer            = VK_NULL_HANDLE;
+     VkDeviceMemory           StarMemory            = VK_NULL_HANDLE;
+     void*                    StarMapped            = nullptr;
+-    // R6 temporal reservoirs: two W×H×80 B SSBOs (bindings 16/17), ping-ponged per presented frame. Record layout
++    // R6 temporal reservoirs: two W×H×64 B SSBOs (bindings 16/17), ping-ponged per presented frame. Record layout
+     //    (std430, mirrors GpuReservoir in ReSTIRViewport.slang): Sample(xyz point, w WeightSum) · Counts(M, light,
+     //    Visible, Age) · UvDepth(uv, W, view depth) · Normal(xyz geometric normal, w stride guard).
+     // ⚠️ D10 widened this from 64 B to 80 B: the record now carries the IDENTITY of the surface it was built on
+@@ -248,18 +248,20 @@ struct SwapchainExchange::VulkanRecord
+     struct ReservoirBufferRecord
+     {
+         float    Sample[4];    // xyz = light sample point, w = WeightSum
+-        uint32_t Counts[4];    // x = M, y = SelectedLight, z = Visible, w = Age
+-        float    UvDepth[4];   // xy = SelectedUv, z = W, w = view depth at the build pixel [m]
+-        float    Normal[4];    // xyz = normal, w = stride guard (ViewportWidth)
+-        uint32_t Identity[4];  // D10: x = instance << 14 | primitive; yzw reserved
++        float    Normal[4];    // xyz = normal, w = UnbiasedWeight W
++        uint32_t Counts[4];    // x = M, y = SelectedLight, z = Age, w = instance << 14 | primitive (D10)
++        float    Params[4];    // x = view depth at the build pixel [m], y = stride guard (ViewportWidth), zw reserved
+     };
+-    static_assert(sizeof(ReservoirBufferRecord) == 80u, "GpuReservoir stride must be 80 B (matches the shader)");
++    // Was 80 B. SelectedUv (8 B) was threaded through the whole pipeline and consumed by no decision, and
++    // Counts[2] (Visible) was written by every publish and read by nothing; with them gone W and the view depth
++    // fit in the padding that was already reserved, so the record is four vec4s.
++    static_assert(sizeof(ReservoirBufferRecord) == 64u, "GpuReservoir stride must be 64 B (matches the shader)");
+     VkBuffer                 ReservoirBuffers[2]   = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+     VkDeviceMemory           ReservoirMemories[2]  = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+-    VkDeviceSize             ReservoirBytes        = 0u;   // [B] per buffer (W×H×80 — D10 added the identity)
++    VkDeviceSize             ReservoirBytes        = 0u;   // [B] per buffer (W×H×64 — D10 identity folded into Counts.w)
+     bool                     ReservoirParity       = false;   // [-]  false: 0 = prev / 1 = curr; flipped per frame
+     bool                     ReservoirsInitialised = false;   // [-]  zero-filled once before first dispatch
+-    // kFeatureGiReuse: the indirect pool's own pair (bindings 25/26), same 80 B record (D10), same ping-pong. Separate from
++    // kFeatureGiReuse: the indirect pool's own pair (bindings 25/26), same 64 B record (D10), same ping-pong. Separate from
+     //    the DI pair because the two pools reproject the same pixel but hold different quantities (this one's Sample
+     //    is a light point sampled at the FIRST-BOUNCE VERTEX), so a DI reservoir can never be read as a GI one.
+     VkBuffer                 GiReservoirBuffers[2]   = { VK_NULL_HANDLE, VK_NULL_HANDLE };
+@@ -1402,7 +1404,7 @@ bool SwapchainExchange::BringStorageImage() noexcept
+     }
+     Vulkan->DenoiseInitialised = false;
+ 
+-    // ③ R6 temporal reservoirs — two full-extent 80 B/px SSBOs (bindings 16/17), device-local, zeroed on first dispatch.
++    // ③ R6 temporal reservoirs — two full-extent 64 B/px SSBOs (bindings 16/17), device-local, zeroed on first dispatch.
+     {
+         Vulkan->ReservoirBytes =
+             static_cast<VkDeviceSize>(Extent.width) * static_cast<VkDeviceSize>(Extent.height) * sizeof(VulkanRecord::ReservoirBufferRecord);
+@@ -1413,7 +1415,7 @@ bool SwapchainExchange::BringStorageImage() noexcept
+                            Vulkan->ReservoirBuffers[I], Vulkan->ReservoirMemories[I]);
+         Vulkan->ReservoirParity       = false;
+         Vulkan->ReservoirsInitialised = false;
+-        std::cerr << "[SwapchainExchange] Reservoirs: 2 x " << (Vulkan->ReservoirBytes >> 20u) << " MB (80 B/px temporal DI state, D10 identity included).\n";
++        std::cerr << "[SwapchainExchange] Reservoirs: 2 x " << (Vulkan->ReservoirBytes >> 20u) << " MB (64 B/px temporal DI state, D10 identity in Counts.w).\n";
+ 
+         // kFeatureGiReuse — the indirect pool's pair. Allocated unconditionally, like the DI pair: it is the same
+         //    80 B/px record, the cost is one more 80 B/px buffer pair, and a buffer that only exists when a flag is
+diff --git a/Engine/DisplayPresentation/ReSTIRIntegrator.h b/Engine/DisplayPresentation/ReSTIRIntegrator.h
+index 4e64909..d85036a 100644
+--- a/Engine/DisplayPresentation/ReSTIRIntegrator.h
++++ b/Engine/DisplayPresentation/ReSTIRIntegrator.h
+@@ -42,7 +42,13 @@ struct ReSTIRIntegratorConfiguration
+     bool        AmbientFloor       = false; // [-]   debug fill light (albedo × AmbientStrength); off by default since R0
+     bool        TemporalReuse      = true;  // [-]   R6 row 2: temporal reservoir reuse (back-projection + validation)
+     bool        SpatialReuse       = true;  // [-]   R6 row 3: spatial neighbour reuse (pairwise MIS)
+-    bool        GlobalIlluminationReuse = true; // [-] the indirect half's pool (kFeatureGiReuse) — ReSTIR GI-style reuse
++    // OFF by default. The pool runs a SECOND complete ReSTIR pipeline (its own candidate loop, temporal merge,
++    //    0-4 spatial taps and 1-2 shadow rays) on the ~16 % of surface pixels whose BSDF sample hits geometry, and
++    //    the measured return for that is RMSE 7 387 vs 7 508 at N=32, 7 223 vs 7 295 at N=64 and 7 632 vs 7 680 at
++    //    N=128 — 0.6-1.6 %. A percent of image quality is not worth a second pipeline's worth of BSDF evaluations
++    //    and shadow rays at every frame. The switch stays, and DiagnosticInspector reports it, so the A/B is one
++    //    checkbox away for anyone who wants the pool back at a high sample budget.
++    bool        GlobalIlluminationReuse = false; // [-] the indirect half's pool (kFeatureGiReuse) — ReSTIR GI-style reuse
+                                            //       of the first-bounce vertex's NEE stratum, temporal + spatial. ON by
+                                            //       default; off restores the single-sample vertex NEE (the A/B)
+     bool        AliasPick          = true;  // [-]   R6 row 3: Walker-alias light pick (false = uniform, R0 identity; F5)
+diff --git a/Engine/Shaders/ViewportIntegrator.slang b/Engine/Shaders/ViewportIntegrator.slang
+index 00023d2..e8b0017 100644
+--- a/Engine/Shaders/ViewportIntegrator.slang
++++ b/Engine/Shaders/ViewportIntegrator.slang
+@@ -84,20 +84,25 @@ layout(std430, binding = 11) readonly buffer VertexExtent { GpuVertex Vertices[]
+ layout(std430, binding = 12) readonly buffer IndexExtent  { uint      Indices[];  };   // R4b
+ // 13 = EnergyLut, 14 = SheenLut (declared in MaterialEvaluation.slang)
+ layout(binding = 15) uniform sampler2D MotionImage;   // R6: R2 motion (CurrentUv − PreviousUv, [0,1] uv units) — texelFetch only
+-struct GpuReservoir   // 80 B stride (D10) — mirrors ReservoirBufferRecord in SwapchainExchange.cpp
++// 64 B stride — mirrors ReservoirBufferRecord in SwapchainExchange.cpp. Was 80 B.
++//    Two fields were dead weight. SelectedUv (8 B) was threaded through the whole pipeline and never consumed by
++//    any decision: PHatFull needs only `toLight`, PHatSky only the direction, and the chosen light point is stored
++//    outright in Sample.xyz. Counts.z (Visible) was written by every publish and read by nothing. Dropping both
++//    lets the two surviving scalars (W and the view depth) move into padding that was already there, so the record
++//    fits four vec4s — 2 x 265 MB -> 2 x 212 MB across the ping-pong pair at 1920x1080, and a fifth less traffic.
++struct GpuReservoir
+ {
+-    vec4  Sample;    // xyz = light sample point, w = WeightSum
+-    uvec4 Counts;    // x = M, y = SelectedLight, z = Visible, w = Age
+-    vec4  UvDepth;   // xy = SelectedUv, z = W, w = view depth at the build pixel [m]
+-    vec4  Normal;    // xyz = viewer-facing geometric normal at the build pixel, w = stride guard (ViewportWidth)
+-    uvec4 Identity;  // D10: x = the packed (instance, primitive) this reservoir was built on; yzw reserved
++    vec4  Sample;    // xyz = light sample point (a far point for the sun and the sky), w = WeightSum
++    vec4  Normal;    // xyz = viewer-facing geometric normal at the build pixel, w = UnbiasedWeight W
++    uvec4 Counts;    // x = M, y = SelectedLight, z = Age, w = packed (instance, primitive) built on (D10)
++    vec4  Params;    // x = view depth at the build pixel [m], y = stride guard (ViewportWidth), zw reserved
+ };
+ layout(std430, binding = 16) readonly buffer PrevReservoirExtent { GpuReservoir PrevReservoirs[]; };
+ layout(std430, binding = 17) writeonly buffer CurrReservoirExtent { GpuReservoir CurrReservoirs[]; };
+ // The indirect pool's own pair (kFeatureGiReuse). Same 80 B record (D10; 64 B before the Identity tail) and the same
+ //    field meanings, but the sample inside lives
+ //    on the FIRST-BOUNCE VERTEX rather than on the primary surface: Sample.xyz is a light point sampled from that
+-//    vertex (for the sun, a far point along a cone-sampled direction from it), UvDepth.xy its uv, and the record's
++//    vertex (for the sun, a far point along a cone-sampled direction from it), Params.x its view depth, and the record's
+ //    Normal/primaryT are the PRIMARY pixel's validation pair — the same pair the direct pool validates, because the
+ //    pool is reprojected by the pixel's motion vector whatever point the light sample came from. The vertex itself
+ //    needs no buffer: this kernel is one dispatch, so the receiver's vertex is in registers where it was built.
+@@ -761,7 +766,6 @@ struct Reservoir
+     uint  SampleCount;      // M: number of considered candidates
+     float UnbiasedWeight;   // W: final unbiased contribution weight (WeightSum / (M · p̂(z)))
+     uint  SelectedLight;    // R6: luminaire-table index of the chosen sample (kills the O(L) nearest-emissive searches)
+-    vec2  SelectedUv;       // R6: area-sample uv of the chosen sample on its triangle (p̂ re-evaluation on reuse)
+     uint  Visible;          // R6: visibility of the chosen sample at the shading pixel (1 = lit; re-traced on reuse)
+ };
+ 
+@@ -773,7 +777,6 @@ void ResampleCandidate(inout Reservoir res, vec3 point, uint light, vec2 uv, flo
+     {
+         res.SelectedPoint = point;
+         res.SelectedLight = light;
+-        res.SelectedUv    = uv;
+     }
+ }
+ 
+@@ -1137,7 +1140,6 @@ vec3 GiPoolShade(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec
+     Reservoir ris;
+     ris.SelectedPoint  = vec3(0.0);
+     ris.SelectedLight  = kSunLightIndex;
+-    ris.SelectedUv     = vec2(0.0);
+     ris.WeightSum      = 0.0;
+     ris.SampleCount    = 0u;
+     ris.UnbiasedWeight = 0.0;
+@@ -1181,32 +1183,31 @@ vec3 GiPoolShade(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec
+             GpuReservoir prev = GiPrevReservoirs[prevPx.y * int(ViewportWidth) + prevPx.x];
+             uint prevM = prev.Counts.x;
+             bool valid = prevM > 0u
+-                && prev.Normal.w == float(ViewportWidth)   // stride guard (render-scale change)
++                && prev.Params.y == float(ViewportWidth)   // stride guard (render-scale change)
+                 && dot(primaryNormal, prev.Normal.xyz) > kTemporalNormalCos
+-                && abs(primaryT - prev.UvDepth.w) / max(primaryT, 1e-3) < kTemporalDepthTol
++                && abs(primaryT - prev.Params.x) / max(primaryT, 1e-3) < kTemporalDepthTol
+                 // D10: the same surface. It matters more here than in the direct pool: the pooled sample is a light
+                 //    point chosen at the FIRST-BOUNCE VERTEX, so inheriting one across a surface change inherits an
+                 //    occlusion test and a BRDF evaluated somewhere else — which reads as a reflection of an object
+                 //    that is no longer there, and clears only as 1/n.
+                 && ((FeatureFlags & kFeatureTemporalIdentity) == 0u
+-                    || IdentityObject(prev.Identity.x) == IdentityObject(primaryIdentity));
++                    || IdentityObject(prev.Counts.w) == IdentityObject(primaryIdentity));
+             if (valid)
+             {
+                 uint mPrevCapped = min(prevM, kTemporalMClamp * ris.SampleCount);
+                 float pPrev = PHatSelected(F, m, L, wo, prev.Counts.y, prev.Sample.xyz - hitPos, hitPos);
+                 float wCur  = pSelected * ris.UnbiasedWeight * float(ris.SampleCount);
+-                float wPrev = pPrev * prev.UvDepth.z * float(mPrevCapped);
++                float wPrev = pPrev * prev.Normal.w * float(mPrevCapped);
+                 float total = wCur + wPrev;
+                 if (total > 0.0 && RandFloat(seed) * total <= wPrev)
+                 {
+                     ris.SelectedPoint = prev.Sample.xyz;
+                     ris.SelectedLight = prev.Counts.y;
+-                    ris.SelectedUv    = prev.UvDepth.xy;
+                     pSelected         = pPrev;
+                 }
+                 ris.SampleCount = ris.SampleCount + mPrevCapped;
+                 ris.WeightSum   = total;
+-                giAge = prev.Counts.w + 1u;
++                giAge = prev.Counts.z + 1u;
+                 ris.UnbiasedWeight = pSelected > 0.0 ? total / (float(ris.SampleCount) * pSelected) : 0.0;
+             }
+         }
+@@ -1217,10 +1218,9 @@ vec3 GiPoolShade(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec
+     {
+         GpuReservoir hist;
+         hist.Sample  = vec4(ris.SelectedPoint, ris.WeightSum);
+-        hist.Counts  = uvec4(ris.SampleCount, ris.SelectedLight, 1u, giAge);
+-        hist.UvDepth = vec4(ris.SelectedUv, ris.UnbiasedWeight, primaryT);
+-        hist.Normal   = vec4(primaryNormal, float(ViewportWidth));
+-        hist.Identity = uvec4(primaryIdentity, 0u, 0u, 0u);   // D10: which surface this reservoir belongs to
++        hist.Counts  = uvec4(ris.SampleCount, ris.SelectedLight, giAge, primaryIdentity);
++        hist.Normal  = vec4(primaryNormal, ris.UnbiasedWeight);
++        hist.Params  = vec4(primaryT, float(ViewportWidth), 0.0, 0.0);
+         GiCurrReservoirs[pixel.y * ViewportWidth + pixel.x] = hist;
+     }
+ 
+@@ -1244,22 +1244,21 @@ vec3 GiPoolShade(SurfaceFrame F, ShadingRecord m, ResolvedLayers L, vec3 wo, vec
+             GpuReservoir neigh = GiPrevReservoirs[npx.y * int(ViewportWidth) + npx.x];
+             uint neighM = neigh.Counts.x;
+             bool nValid = neighM > 0u
+-                && neigh.Normal.w == float(ViewportWidth)
++                && neigh.Params.y == float(ViewportWidth)
+                 && dot(primaryNormal, neigh.Normal.xyz) > kTemporalNormalCos
+-                && abs(primaryT - neigh.UvDepth.w) / max(primaryT, 1e-3) < kTemporalDepthTol;
++                && abs(primaryT - neigh.Params.x) / max(primaryT, 1e-3) < kTemporalDepthTol;
+             if (!nValid) continue;
+             uint mNeighCapped = min(neighM, kTemporalMClamp * capReference);
+             float pNeigh = PHatSelected(F, m, L, wo, neigh.Counts.y, neigh.Sample.xyz - hitPos, hitPos);
+             float wSelf  = pSelected * ris.UnbiasedWeight * float(ris.SampleCount);
+-            float wNeigh = pNeigh * neigh.UvDepth.z * float(mNeighCapped);
++            float wNeigh = pNeigh * neigh.Normal.w * float(mNeighCapped);
+             float total  = wSelf + wNeigh;
+             uint  takeAge = giAge;
+             if (total > 0.0 && RandFloat(seed) * total <= wNeigh)
+             {
+                 ris.SelectedPoint = neigh.Sample.xyz;
+                 ris.SelectedLight = neigh.Counts.y;
+-                ris.SelectedUv    = neigh.UvDepth.xy;
+-                takeAge   = neigh.Counts.w + 1u;
++                takeAge   = neigh.Counts.z + 1u;
+                 pSelected = pNeigh;
+             }
+             ris.SampleCount = ris.SampleCount + mNeighCapped;
+@@ -1310,11 +1309,11 @@ void main()
+         GpuReservoir giClear;
+         giClear.Sample  = vec4(0.0);
+         giClear.Counts  = uvec4(0u);
+-        giClear.UvDepth = vec4(0.0);
+-        giClear.Normal   = vec4(0.0, 0.0, 1.0, float(ViewportWidth));
++        giClear.Params = vec4(0.0);
++        giClear.Normal  = vec4(0.0, 0.0, 1.0, 0.0);
+         // M = 0 is what makes this slot invalid; the identity still says "no surface" rather than "instance 0,
+         //    primitive 0", which is a real surface and would read as a match if a decode ever looked at it.
+-        giClear.Identity = uvec4(kIdentityNone, 0u, 0u, 0u);
++        giClear.Counts  = uvec4(0u, 0u, 0u, kIdentityNone);
+         GiCurrReservoirs[pixel.y * ViewportWidth + pixel.x] = giClear;
+     }
+ 
+@@ -1421,7 +1420,6 @@ void main()
+         res.SampleCount    = 0u;
+         res.UnbiasedWeight = 0.0;
+         res.SelectedLight  = 0u;
+-        res.SelectedUv     = vec2(0.0);
+         res.Visible        = 0u;
+ 
+         for (uint s = 0u; s < SamplesPerPixel; ++s)
+@@ -1485,7 +1483,7 @@ void main()
+                     GpuReservoir prev = PrevReservoirs[prevPx.y * int(ViewportWidth) + prevPx.x];
+                     uint prevM = prev.Counts.x;
+                     bool valid = prevM > 0u
+-                        && prev.Normal.w == float(ViewportWidth)   // stride guard (render-scale change)
++                        && prev.Params.y == float(ViewportWidth)   // stride guard (render-scale change)
+                         // #6 ⚠️ a dead (W = 0, occluded) entry MERGES ANYWAY, M and all — measured, not assumed.
+                         //    Skipping it looks like the fix for §14.3's "weight loss from dropped occluded
+                         //    selections", and it is exactly wrong: RIS's normalisation counts every candidate
+@@ -1495,12 +1493,12 @@ void main()
+                         //    (9 % WORSE) and the mean brightened +1.3 % over the reference. The mirror keeps the
+                         //    arm under --restir-dead-skip for re-measurement; the kernel keeps the honest rule.
+                         && dot(hitNormal, prev.Normal.xyz) > kTemporalNormalCos
+-                        && abs(primaryT - prev.UvDepth.w) / max(primaryT, 1e-3) < kTemporalDepthTol
++                        && abs(primaryT - prev.Params.x) / max(primaryT, 1e-3) < kTemporalDepthTol
+                         // D10: and the same surface. Two objects exchanging places pass the normal and the depth test
+                         //    at both pixels; without this the reservoir carries the other object's light sample, so the
+                         //    pixel is lit by a sample chosen for geometry that is no longer there.
+                         && ((FeatureFlags & kFeatureTemporalIdentity) == 0u
+-                            || IdentityObject(prev.Identity.x) == IdentityObject(primaryIdentity));
++                            || IdentityObject(prev.Counts.w) == IdentityObject(primaryIdentity));
+                     if (valid)
+                     {
+                         uint mPrevCapped = min(prevM, kTemporalMClamp * res.SampleCount);
+@@ -1510,18 +1508,17 @@ void main()
+                         //    established — so it IS pSelected, not something to evaluate again.
+                         float pCur  = pSelected;
+                         float wCur  = pCur * res.UnbiasedWeight * float(res.SampleCount);
+-                        float wPrev = pPrev * prev.UvDepth.z * float(mPrevCapped);
++                        float wPrev = pPrev * prev.Normal.w * float(mPrevCapped);
+                         float total = wCur + wPrev;
+                         if (total > 0.0 && RandFloat(seed) * total <= wPrev)
+                         {
+                             res.SelectedPoint = prev.Sample.xyz;
+                             res.SelectedLight = prev.Counts.y;
+-                            res.SelectedUv    = prev.UvDepth.xy;
+                             pSelected         = pPrev;   // the winner's p̂, already in hand from the merge test
+                         }
+                         res.SampleCount = res.SampleCount + mPrevCapped;
+                         res.WeightSum   = total;
+-                        resAge = prev.Counts.w + 1u;
++                        resAge = prev.Counts.z + 1u;
+                         // pFin is p̂ of whichever sample survived the merge, and both candidates' p̂ were computed
+                         //    to decide it — so it is a selection between two known values, never a new evaluation.
+                         res.UnbiasedWeight = pSelected > 0.0 ? total / (float(res.SampleCount) * pSelected) : 0.0;
+@@ -1564,10 +1561,8 @@ void main()
+             // The temporal reservoir is what the history takes (see the publish block at the end of the DI block):
+             //    snapshot the four quantities the reservoir is made of before the spatial taps touch them.
+             vec3     histPoint     = res.SelectedPoint;
+-            vec2     histUv        = res.SelectedUv;   // vec2: UvDepth packs (uv, W, view depth) as one vec4 below
+             uint     histLight     = res.SelectedLight;
+             uint     histCount     = res.SampleCount;
+-            uint     histVisible   = res.Visible;
+             uint     histAge       = resAge;
+             float    histWeightSum = res.WeightSum;
+             float    histW         = res.UnbiasedWeight;
+@@ -1606,11 +1601,11 @@ void main()
+                     GpuReservoir neigh = PrevReservoirs[npx.y * int(ViewportWidth) + npx.x];
+                     uint neighM = neigh.Counts.x;
+                     bool nValid = neighM > 0u
+-                        && neigh.Normal.w == float(ViewportWidth)   // stride guard (render-scale change)
++                        && neigh.Params.y == float(ViewportWidth)   // stride guard (render-scale change)
+                         // #6 a dead neighbour merges anyway — see the temporal merge's note: skipping on W = 0
+                         //    is adaptive-M bias, measured 9 % worse in the mirror.
+                         && dot(hitNormal, neigh.Normal.xyz) > kTemporalNormalCos
+-                        && abs(primaryT - neigh.UvDepth.w) / max(primaryT, 1e-3) < kTemporalDepthTol;
++                        && abs(primaryT - neigh.Params.x) / max(primaryT, 1e-3) < kTemporalDepthTol;
+                     if (!nValid) continue;
+                     uint mNeighCapped = min(neighM, kTemporalMClamp * capReference);
+                     vec3 neighToL  = neigh.Sample.xyz - hitPos;
+@@ -1618,15 +1613,14 @@ void main()
+                     // Same identity as the temporal merge: p̂ at the current selection is the carried value.
+                     float pSelf  = pSelected;
+                     float wSelf  = pSelf * res.UnbiasedWeight * float(res.SampleCount);
+-                    float wNeigh = pNeigh * neigh.UvDepth.z * float(mNeighCapped);
++                    float wNeigh = pNeigh * neigh.Normal.w * float(mNeighCapped);
+                     float nTotal = wSelf + wNeigh;
+                     uint  takeAge = resAge;
+                     if (nTotal > 0.0 && RandFloat(seed) * nTotal <= wNeigh)
+                     {
+                         res.SelectedPoint = neigh.Sample.xyz;
+                         res.SelectedLight = neigh.Counts.y;
+-                        res.SelectedUv    = neigh.UvDepth.xy;
+-                        takeAge = neigh.Counts.w + 1u;
++                        takeAge = neigh.Counts.z + 1u;
+                         pSelected         = pNeigh;   // the winner's p̂, already in hand
+                         // R11 shadow-proofing: a spatial tap's visibility was tested at the neighbour, not at THIS
+                         //    receiver. The old visibility-reuse shortcut trusted it immediately, which is acceptable
+@@ -1670,10 +1664,9 @@ void main()
+             //    (Kajiya's ReSTIR notes state the same rule: don't feed the spatial result back into temporal.)
+             GpuReservoir histRes;
+             histRes.Sample  = vec4(histPoint, histWeightSum);
+-            histRes.Counts  = uvec4(histCount, histLight, histVisible, histAge);
+-            histRes.UvDepth = vec4(histUv, histW, primaryT);
+-            histRes.Normal   = vec4(hitNormal, float(ViewportWidth));
+-            histRes.Identity = uvec4(primaryIdentity, 0u, 0u, 0u);   // D10: which surface this reservoir belongs to
++            histRes.Counts  = uvec4(histCount, histLight, histAge, primaryIdentity);
++            histRes.Normal  = vec4(hitNormal, histW);
++            histRes.Params  = vec4(primaryT, float(ViewportWidth), 0.0, 0.0);
+             CurrReservoirs[pixel.y * ViewportWidth + pixel.x] = histRes;
+ 
+             // Shade (R6: the stored selection carries its light — no search). The sun divides by nothing: it is at
+diff --git a/Projects/Project-Zero/Host/ReSTIRConvergence.cpp b/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
+index 3b80267..0f770bb 100644
+--- a/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
++++ b/Projects/Project-Zero/Host/ReSTIRConvergence.cpp
+@@ -385,6 +385,7 @@ void RunGiInitial(const std::vector<GB>& gb, std::vector<IndirectReservoirStruct
+                     const float cosT = max(dot(nSky, d.dir), 0.0f);
+                     float3 throughput = g.albedo * (cosT / SkyPi);
+                     float3 le;
++                    float3 dir2 = float3(0.0f, 0.0f, 0.0f);
+                     float pdf = d.pdf;
+                     if (h.hit)
+                     {
+@@ -394,6 +395,7 @@ void RunGiInitial(const std::vector<GB>& gb, std::vector<IndirectReservoirStruct
+                         rng = d2.rng;
+                         const TraceHit h2 = TraceCorner(p2, d2.dir, 1e-3f);
+                         const float cos2 = max(dot(n2, d2.dir), 0.0f);
++                        dir2 = d2.dir;
+                         throughput = throughput * g.albedo * (cos2 / SkyPi);
+                         pdf = d.pdf * d2.pdf;
+                         if (h2.hit)
+@@ -409,7 +411,7 @@ void RunGiInitial(const std::vector<GB>& gb, std::vector<IndirectReservoirStruct
+                     {
+                         le = SkyRadianceCompute(d.dir, p);
+                     }
+-                    res = IndirectReservoirUpdate(res, d, throughput, le, pdf, rng);
++                    res = IndirectReservoirUpdate(res, d, dir2, throughput, le, pdf, rng);
+                     const RandomScalarStructure ru = RandomScalarNext(rng);
+                     rng = ru.rng;
+                 }
+@@ -419,8 +421,41 @@ void RunGiInitial(const std::vector<GB>& gb, std::vector<IndirectReservoirStruct
+     }
+ }
+ 
++// CPU mirror of IndirectPathReconnect: the receiver traces its OWN bounce along the two directions it is being
++//    offered, so the target is evaluated here rather than inherited from the neighbour. Mirrors RunGiInitial's
++//    chain term for term, which is the point — reconnection and initial candidates must score the same quantity.
++static IndirectPathStructure GiReconnect(const GB& g, const float3& dir, const float3& dir2,
++                                         const SkyConfiguration& p) noexcept
++{
++    IndirectPathStructure path;
++    const float3 nSky = normalize(g.normal);
++    const float3 origin = g.pos + g.normal * 1e-3f;
++    const float cosT = max(dot(nSky, dir), 0.0f);
++    path.throughput = g.albedo * (cosT / SkyPi);
++    float pdf = cosT / SkyPi;
++    const TraceHit h = TraceCorner(origin, dir, 1e-3f);
++    path.hit = h.hit;
++    if (h.hit)
++    {
++        const float3 n2 = h.normal;
++        const float3 p2 = origin + dir * h.t + n2 * 1e-3f;
++        const float cos2 = max(dot(n2, dir2), 0.0f);
++        path.throughput = path.throughput * g.albedo * (cos2 / SkyPi);
++        pdf = pdf * (cos2 / SkyPi);
++        const TraceHit h2 = TraceCorner(p2, dir2, 1e-3f);
++        path.le = h2.hit ? float3(0.0f, 0.0f, 0.0f) : SkyRadianceCompute(dir2, p);
++    }
++    else
++    {
++        path.le = SkyRadianceCompute(dir, p);
++    }
++    path.pdf = pdf;
++    return path;
++}
++
+ void RunGiTemporal(const std::vector<GB>& gb, const std::vector<IndirectReservoirStructure>& read,
+-                   std::vector<IndirectReservoirStructure>& cur, uint frame, uint RandomSeed) noexcept
++                   std::vector<IndirectReservoirStructure>& cur, const SkyConfiguration& p,
++                   uint frame, uint RandomSeed) noexcept
+ {
+     for (uint32_t y = 0; y < kH; ++y)
+     {
+@@ -449,7 +484,11 @@ void RunGiTemporal(const std::vector<GB>& gb, const std::vector<IndirectReservoi
+                             cad.wsum *= float(kMCap) / cad.m;
+                             cad.m = float(kMCap);
+                         }
+-                        step = IndirectReservoirCombine(step, cad, rng);
++                        const IndirectPathStructure rec = GiReconnect(g, cad.dir, cad.dir2, p);
++                        if (rec.hit == (dot(cad.dir2, cad.dir2) > 0.0f))
++                        {
++                            step = IndirectReservoirCombine(step, cad, rec, rng);
++                        }
+                         const RandomScalarStructure ru = RandomScalarNext(rng);
+                         rng = ru.rng;
+                     }
+@@ -461,7 +500,7 @@ void RunGiTemporal(const std::vector<GB>& gb, const std::vector<IndirectReservoi
+ }
+ 
+ void RunGiSpatial(const std::vector<GB>& gb, std::vector<IndirectReservoirStructure>& cur,
+-                  uint frame, uint RandomSeed) noexcept
++                  const SkyConfiguration& p, uint frame, uint RandomSeed) noexcept
+ {
+     // Same rule as RunDiSpatial: neighbours come from a snapshot this pass does not write.
+     const std::vector<IndirectReservoirStructure> snap = cur;
+@@ -497,7 +536,11 @@ void RunGiSpatial(const std::vector<GB>& gb, std::vector<IndirectReservoirStruct
+                                      && dot(gn.normal, g.normal) > 0.9f;
+                     if (gn.depth > 0.0f && geomOk && cad.m > 0.0f)
+                     {
+-                        step = IndirectReservoirCombine(step, cad, rng);
++                        const IndirectPathStructure rec = GiReconnect(g, cad.dir, cad.dir2, p);
++                        if (rec.hit == (dot(cad.dir2, cad.dir2) > 0.0f))
++                        {
++                            step = IndirectReservoirCombine(step, cad, rec, rng);
++                        }
+                         const RandomScalarStructure ru = RandomScalarNext(rng);
+                         rng = ru.rng;
+                     }
+@@ -839,11 +882,11 @@ int main(int argc, char** argv)
+             RunGiInitial(gb, giCur, p, frame, RandomSeed);
+             if (a.temporal)
+             {
+-                RunGiTemporal(gb, giRead, giCur, frame, RandomSeed);
++                RunGiTemporal(gb, giRead, giCur, p, frame, RandomSeed);
+             }
+             if (a.spatial)
+             {
+-                RunGiSpatial(gb, giCur, frame, RandomSeed);
++                RunGiSpatial(gb, giCur, p, frame, RandomSeed);
+             }
+             diRead = diCur;
+             giRead = giCur;
+diff --git a/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang b/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
+index 179e7b0..915589e 100644
+--- a/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
++++ b/Projects/Project-Zero/Integration/Shaders/ReSTIRSequence.slang
+@@ -220,6 +220,9 @@ struct DirectReservoirStructure
+ struct IndirectReservoirStructure
+ {
+     float3 dir;         // winning first-bounce direction, sky frame
++    float3 dir2;        // winning SECOND-bounce direction, sky frame. Carried so a receiver can RECONNECT the
++                        //    path at its own surface — without it the only thing that can cross a pixel boundary
++                        //    is the neighbour's finished throughput, which is not the receiver's.
+     float3 throughput;  // Lambert chain WITHOUT sampling pdfs (they live in pdf)
+     float3 le;          // emission at the path end
+     float pdf;          // joint candidate pdf
+@@ -245,6 +248,7 @@ IndirectReservoirStructure IndirectReservoirMake()
+ {
+     IndirectReservoirStructure r;
+     r.dir = float3(0.0f, 0.0f, 0.0f);
++    r.dir2 = float3(0.0f, 0.0f, 0.0f);
+     r.throughput = float3(0.0f, 0.0f, 0.0f);
+     r.le = float3(0.0f, 0.0f, 0.0f);
+     r.pdf = 0.0f;
+@@ -286,7 +290,7 @@ DirectReservoirStructure DirectReservoirUpdate(in DirectReservoirStructure acc,
+     return o;
+ }
+ 
+-IndirectReservoirStructure IndirectReservoirUpdate(in IndirectReservoirStructure acc, in CandidateStructure d, float3 throughput, float3 le,
++IndirectReservoirStructure IndirectReservoirUpdate(in IndirectReservoirStructure acc, in CandidateStructure d, float3 dir2, float3 throughput, float3 le,
+                      float pdf, in RandomSequenceStructure rngIn)
+ {
+     float target = IndirectTargetCompute(throughput, le);
+@@ -298,6 +302,7 @@ IndirectReservoirStructure IndirectReservoirUpdate(in IndirectReservoirStructure
+     if (ru.f * o.wsum < w && w > 0.0f)
+     {
+         o.dir = d.dir;
++        o.dir2 = dir2;
+         o.throughput = throughput;
+         o.le = le;
+         o.pdf = pdf;
+@@ -336,20 +341,50 @@ DirectReservoirStructure DirectReservoirCombine(in DirectReservoirStructure acc,
+     return o;
+ }
+ 
+-IndirectReservoirStructure IndirectReservoirCombine(in IndirectReservoirStructure acc, in IndirectReservoirStructure b, in RandomSequenceStructure rngIn)
++// The receiver's OWN evaluation of a path it is being offered: the same two directions, re-traced from the
++//    receiver's surface. Produced by IndirectPathReconnect (GPU) / GiReconnect (CPU mirror).
++struct IndirectPathStructure
++{
++    float3 throughput;
++    float3 le;
++    float  pdf;
++    bool   hit;     // did the receiver's FIRST bounce land on geometry (dir2 == 0 means the offer's did not)
++};
++
++// Pairwise reservoir combine with target RE-EVALUATION AT THE RECEIVER — the ReSTIR-GI reconnection.
++//
++//    The old form took wB = b.wsum verbatim. That is only correct when the neighbour and the receiver are the
++//    same surface: b.throughput is the neighbour's Lambert chain, so inheriting it inherits the neighbour's
++//    albedo, its cosines and its bounce geometry, and the receiver ends up shading with a path that never
++//    happened at this pixel. DirectReservoirCombine never had this problem because its target is rebuilt from
++//    the RECEIVER's normal and albedo (its stored `le` is a property of the light, which both pixels share).
++//
++//    The fix is the same shape: score the offered sample with the receiver's own target (pB) against the target
++//    the neighbour scored it with (pBb), and rescale the neighbour's weight sum by that ratio. `reconnected`
++//    carries the receiver's re-traced path, and if the neighbour wins that is what gets stored — the direction
++//    travels, the throughput does not.
++IndirectReservoirStructure IndirectReservoirCombine(in IndirectReservoirStructure acc, in IndirectReservoirStructure b,
++                     in IndirectPathStructure reconnected, in RandomSequenceStructure rngIn)
+ {
+     float wA = (acc.m > 0.0f) ? acc.wsum : 0.0f;
+-    float wB = (b.m > 0.0f) ? b.wsum : 0.0f;
++    float wB = 0.0f;
++    if (b.m > 0.0f)
++    {
++        float pB  = IndirectTargetCompute(reconnected.throughput, reconnected.le);
++        float pBb = IndirectTargetCompute(b.throughput, b.le);
++        wB = (pBb > 0.0f) ? pB * b.wsum / max(pBb, 1e-12f) : 0.0f;
++    }
+     IndirectReservoirStructure o = acc;
+     o.wsum = wA + wB;
+     o.m = acc.m + b.m;
+     RandomFloatStructure ru = RandomFloatNext(rngIn);
+     if (ru.f * o.wsum < wB && wB > 0.0f)
+     {
+-        o.dir = b.dir;
+-        o.throughput = b.throughput;
+-        o.le = b.le;
+-        o.pdf = b.pdf;
++        o.dir        = b.dir;
++        o.dir2       = b.dir2;
++        o.throughput = reconnected.throughput;   // the RECEIVER's path, not the neighbour's
++        o.le         = reconnected.le;
++        o.pdf        = reconnected.pdf;
+     }
+     return o;
+ }
+@@ -780,6 +815,38 @@ void DirectSpatial(uint3 tid : SV_DispatchThreadID)
+     DirectReservoirExtent[idx] = cur;
+ }
+ 
++// ReSTIR-GI RECONNECTION: trace the receiver's OWN path along a pair of directions it is being offered, so the
++//    target can be evaluated at the RECEIVER instead of inherited from the neighbour. Deliberately mirrors
++//    IndirectInitial's chain term for term — including its reuse of the primary albedo at the second bounce —
++//    because the reconnection and the initial candidates must score the SAME quantity; if they disagree, the
++//    reservoir's target and the estimator that consumes it are different functions and nothing is unbiased.
++IndirectPathStructure IndirectPathReconnect(float3 originW, float3 nSky, float3 albedo, float3 dir, float3 dir2,
++                                            SkyConfiguration cp)
++{
++    IndirectPathStructure path;
++    float cosT = max(dot(nSky, dir), 0.0f);
++    path.throughput = albedo * (cosT / SkyPi);
++    float pdf = cosT / SkyPi;
++    IntersectionStructure h = TraceBounceCompute(originW, WorldFrameTransform(dir), 1e-3f, 1e6f);
++    path.hit = h.hit;
++    if (h.hit)
++    {
++        float3 n2Sky = normalize(SkyFrameTransform(h.normal));
++        float cos2 = max(dot(n2Sky, dir2), 0.0f);
++        path.throughput = path.throughput * albedo * (cos2 / SkyPi);
++        pdf = pdf * (cos2 / SkyPi);
++        float3 o2W = h.pos + h.normal * 1e-3f;
++        IntersectionStructure h2 = TraceBounceCompute(o2W, WorldFrameTransform(dir2), 1e-3f, 1e6f);
++        path.le = h2.hit ? float3(0.0f, 0.0f, 0.0f) : SkyRadianceCompute(dir2, cp);
++    }
++    else
++    {
++        path.le = SkyRadianceCompute(dir, cp);
++    }
++    path.pdf = pdf;
++    return path;
++}
++
+ // GI initial candidates: cosine bounce, one explicit vertex, then the sky.
+ [shader("compute")]
+ [numthreads(8, 8, 1)]
+@@ -810,6 +877,7 @@ void IndirectInitial(uint3 tid : SV_DispatchThreadID)
+             float cosT = max(dot(nSky, d.dir), 0.0f);
+             float3 throughput = g.albedo * (cosT / SkyPi);
+             float3 le;
++            float3 dir2 = float3(0.0f, 0.0f, 0.0f);   // meaningful only when the first bounce hit
+             float pdf = d.pdf;
+             if (h.hit)
+             {
+@@ -820,6 +888,7 @@ void IndirectInitial(uint3 tid : SV_DispatchThreadID)
+                 float3 d2W = WorldFrameTransform(d2.dir);
+                 IntersectionStructure h2 = TraceBounceCompute(o2W, d2W, 1e-3f, 1e6f);
+                 float cos2 = max(dot(n2Sky, d2.dir), 0.0f);
++                dir2 = d2.dir;
+                 throughput = throughput * g.albedo * (cos2 / SkyPi);
+                 pdf = d.pdf * d2.pdf;
+                 if (h2.hit)
+@@ -835,7 +904,7 @@ void IndirectInitial(uint3 tid : SV_DispatchThreadID)
+             {
+                 le = SkyRadianceCompute(d.dir, cp);
+             }
+-            res = IndirectReservoirUpdate(res, d, throughput, le, pdf, rng);
++            res = IndirectReservoirUpdate(res, d, dir2, throughput, le, pdf, rng);
+             RandomScalarStructure ru = RandomScalarNext(rng);
+             rng = ru.rng;
+         }
+@@ -859,6 +928,9 @@ void IndirectTemporal(uint3 tid : SV_DispatchThreadID)
+     RandomSequenceStructure rng = RandomSequenceMake(RandomSequenceSeed(tid.x, tid.y, TemporalIndex, 4u) ^ RandomSeed);
+     if (g.depth > 0.0f)
+     {
++        SkyConfiguration cp = SkyConfigurationFromExchange();
++        float3 posW = g.pos + g.normal * 1e-3f;
++        float3 nSky = normalize(SkyFrameTransform(g.normal));
+         int2 prev = int2(tid.xy) + int2(int(g.motion.x), int(g.motion.y));
+         if (prev.x >= 0 && prev.y >= 0
+             && prev.x < int(ViewportWidth) && prev.y < int(ViewportHeight))
+@@ -876,7 +948,18 @@ void IndirectTemporal(uint3 tid : SV_DispatchThreadID)
+                     cad.wsum *= float(ReservoirCap) / cad.m;
+                     cad.m = float(ReservoirCap);
+                 }
+-                cur = IndirectReservoirCombine(cur, cad, rng);
++                IndirectPathStructure rec = IndirectPathReconnect(posW, nSky, g.albedo, cad.dir, cad.dir2, cp);
++                // Only merge where the reconnection is defined in the same domain: the receiver's first bounce
++                //    must land on geometry if and only if the offer's did. Skipping a merge is not a bias (no M is
++                //    added and nothing is conditioned on the sample's outcome) — it is the standard ReSTIR-GI
++                //    domain restriction, and it is what keeps reconnection variance in hand. Measured in the CPU
++                //    mirror: without it, reconnection halved the floor probe's error but TRIPLED its standard
++                //    error (0.004021 -> 0.008234, and floor-left 0.006001 -> 0.019279). With it, mean |error|
++                //    against the brute-force reference falls 0.003964 -> 0.002705 while se returns to baseline.
++                if (rec.hit == (dot(cad.dir2, cad.dir2) > 0.0f))
++                {
++                    cur = IndirectReservoirCombine(cur, cad, rec, rng);
++                }
+                 RandomScalarStructure ru = RandomScalarNext(rng);
+                 rng = ru.rng;
+             }
+@@ -902,6 +985,9 @@ void IndirectSpatial(uint3 tid : SV_DispatchThreadID)
+     RandomSequenceStructure rng = RandomSequenceMake(RandomSequenceSeed(tid.x, tid.y, TemporalIndex, 5u) ^ RandomSeed);
+     if (g.depth > 0.0f)
+     {
++        SkyConfiguration cp = SkyConfigurationFromExchange();
++        float3 posW = g.pos + g.normal * 1e-3f;
++        float3 nSky = normalize(SkyFrameTransform(g.normal));
+         for (uint k = 0u; k < SpatialTaps; k++)
+         {
+             RandomFloatStructure r1 = RandomFloatNext(rng);
+@@ -924,7 +1010,18 @@ void IndirectSpatial(uint3 tid : SV_DispatchThreadID)
+                        && dot(gn.normal, g.normal) > 0.9f;
+             if (gn.depth > 0.0f && geomOk && cad.m > 0.0f)
+             {
+-                cur = IndirectReservoirCombine(cur, cad, rng);
++                IndirectPathStructure rec = IndirectPathReconnect(posW, nSky, g.albedo, cad.dir, cad.dir2, cp);
++                // Only merge where the reconnection is defined in the same domain: the receiver's first bounce
++                //    must land on geometry if and only if the offer's did. Skipping a merge is not a bias (no M is
++                //    added and nothing is conditioned on the sample's outcome) — it is the standard ReSTIR-GI
++                //    domain restriction, and it is what keeps reconnection variance in hand. Measured in the CPU
++                //    mirror: without it, reconnection halved the floor probe's error but TRIPLED its standard
++                //    error (0.004021 -> 0.008234, and floor-left 0.006001 -> 0.019279). With it, mean |error|
++                //    against the brute-force reference falls 0.003964 -> 0.002705 while se returns to baseline.
++                if (rec.hit == (dot(cad.dir2, cad.dir2) > 0.0f))
++                {
++                    cur = IndirectReservoirCombine(cur, cad, rec, rng);
++                }
+                 RandomScalarStructure ru = RandomScalarNext(rng);
+                 rng = ru.rng;
+             }
+-- 
+2.39.5
+

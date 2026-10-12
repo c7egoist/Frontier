@@ -237,7 +237,7 @@ struct SwapchainExchange::VulkanRecord
     VkBuffer                 StarBuffer            = VK_NULL_HANDLE;
     VkDeviceMemory           StarMemory            = VK_NULL_HANDLE;
     void*                    StarMapped            = nullptr;
-    // R6 temporal reservoirs: two W×H×80 B SSBOs (bindings 16/17), ping-ponged per presented frame. Record layout
+    // R6 temporal reservoirs: two W×H×64 B SSBOs (bindings 16/17), ping-ponged per presented frame. Record layout
     //    (std430, mirrors GpuReservoir in ReSTIRViewport.slang): Sample(xyz point, w WeightSum) · Counts(M, light,
     //    Visible, Age) · UvDepth(uv, W, view depth) · Normal(xyz geometric normal, w stride guard).
     // ⚠️ D10 widened this from 64 B to 80 B: the record now carries the IDENTITY of the surface it was built on
@@ -248,18 +248,20 @@ struct SwapchainExchange::VulkanRecord
     struct ReservoirBufferRecord
     {
         float    Sample[4];    // xyz = light sample point, w = WeightSum
-        uint32_t Counts[4];    // x = M, y = SelectedLight, z = Visible, w = Age
-        float    UvDepth[4];   // xy = SelectedUv, z = W, w = view depth at the build pixel [m]
-        float    Normal[4];    // xyz = normal, w = stride guard (ViewportWidth)
-        uint32_t Identity[4];  // D10: x = instance << 14 | primitive; yzw reserved
+        float    Normal[4];    // xyz = normal, w = UnbiasedWeight W
+        uint32_t Counts[4];    // x = M, y = SelectedLight, z = Age, w = instance << 14 | primitive (D10)
+        float    Params[4];    // x = view depth at the build pixel [m], y = stride guard (ViewportWidth), zw reserved
     };
-    static_assert(sizeof(ReservoirBufferRecord) == 80u, "GpuReservoir stride must be 80 B (matches the shader)");
+    // Was 80 B. SelectedUv (8 B) was threaded through the whole pipeline and consumed by no decision, and
+    // Counts[2] (Visible) was written by every publish and read by nothing; with them gone W and the view depth
+    // fit in the padding that was already reserved, so the record is four vec4s.
+    static_assert(sizeof(ReservoirBufferRecord) == 64u, "GpuReservoir stride must be 64 B (matches the shader)");
     VkBuffer                 ReservoirBuffers[2]   = { VK_NULL_HANDLE, VK_NULL_HANDLE };
     VkDeviceMemory           ReservoirMemories[2]  = { VK_NULL_HANDLE, VK_NULL_HANDLE };
-    VkDeviceSize             ReservoirBytes        = 0u;   // [B] per buffer (W×H×80 — D10 added the identity)
+    VkDeviceSize             ReservoirBytes        = 0u;   // [B] per buffer (W×H×64 — D10 identity folded into Counts.w)
     bool                     ReservoirParity       = false;   // [-]  false: 0 = prev / 1 = curr; flipped per frame
     bool                     ReservoirsInitialised = false;   // [-]  zero-filled once before first dispatch
-    // kFeatureGiReuse: the indirect pool's own pair (bindings 25/26), same 80 B record (D10), same ping-pong. Separate from
+    // kFeatureGiReuse: the indirect pool's own pair (bindings 25/26), same 64 B record (D10), same ping-pong. Separate from
     //    the DI pair because the two pools reproject the same pixel but hold different quantities (this one's Sample
     //    is a light point sampled at the FIRST-BOUNCE VERTEX), so a DI reservoir can never be read as a GI one.
     VkBuffer                 GiReservoirBuffers[2]   = { VK_NULL_HANDLE, VK_NULL_HANDLE };
@@ -1402,7 +1404,7 @@ bool SwapchainExchange::BringStorageImage() noexcept
     }
     Vulkan->DenoiseInitialised = false;
 
-    // ③ R6 temporal reservoirs — two full-extent 80 B/px SSBOs (bindings 16/17), device-local, zeroed on first dispatch.
+    // ③ R6 temporal reservoirs — two full-extent 64 B/px SSBOs (bindings 16/17), device-local, zeroed on first dispatch.
     {
         Vulkan->ReservoirBytes =
             static_cast<VkDeviceSize>(Extent.width) * static_cast<VkDeviceSize>(Extent.height) * sizeof(VulkanRecord::ReservoirBufferRecord);
@@ -1413,7 +1415,7 @@ bool SwapchainExchange::BringStorageImage() noexcept
                            Vulkan->ReservoirBuffers[I], Vulkan->ReservoirMemories[I]);
         Vulkan->ReservoirParity       = false;
         Vulkan->ReservoirsInitialised = false;
-        std::cerr << "[SwapchainExchange] Reservoirs: 2 x " << (Vulkan->ReservoirBytes >> 20u) << " MB (80 B/px temporal DI state, D10 identity included).\n";
+        std::cerr << "[SwapchainExchange] Reservoirs: 2 x " << (Vulkan->ReservoirBytes >> 20u) << " MB (64 B/px temporal DI state, D10 identity in Counts.w).\n";
 
         // kFeatureGiReuse — the indirect pool's pair. Allocated unconditionally, like the DI pair: it is the same
         //    80 B/px record, the cost is one more 80 B/px buffer pair, and a buffer that only exists when a flag is
