@@ -288,6 +288,9 @@ function rebuild(inspector = true, context = false) {
         designReview: network.designReview,
         auxiliaryLanes: network.auxiliaryLanes,
         embankments: network.embankments,
+        generatedSections: network.generatedSections,
+        surfaceJoins: network.surfaceJoins,
+        surfaceClearances: network.surfaceClearances,
       },
     }),
   );
@@ -315,13 +318,21 @@ function rebuild(inspector = true, context = false) {
   if (gradeJoinOutput && gradeJoin)
     gradeJoinOutput.value =
       gradeJoin.delta === null ? "Unbounded" : `${fmt(gradeJoin.delta, 4)} pp`;
+  const surfaceJoinOutput = document.querySelector<HTMLOutputElement>(
+      "[data-surface-join]",
+    ),
+    surfaceJoin = network.surfaceJoins.find((j) => j.owner === selection?.id);
+  if (surfaceJoinOutput && surfaceJoin)
+    surfaceJoinOutput.value = `${fmt(surfaceJoin.maximumGap * 1000, 3)} mm`;
   const ownerIDs = new Set([
     selection?.id,
     ...selectedRoads().map((r) => r.id),
   ]);
   const currentRoad = selectedRoads()[0];
   if (currentRoad) {
-    const m = measureRoadDesign(project, currentRoad),
+    const m =
+        network.designReview.roads.find((r) => r.owner === currentRoad.id) ??
+        measureRoadDesign(project, currentRoad),
       bridge = network.bridges.find((b) => b.owner === currentRoad.id),
       auxiliary = network.auxiliaryLanes.find(
         (a) => a.owner === currentRoad.id,
@@ -329,10 +340,44 @@ function rebuild(inspector = true, context = false) {
       structuralIssue = network.designReview.structureIssues.find(
         (i) => i.owner === currentRoad.id,
       ),
+      surface = network.generatedSections.find(
+        (s) => s.owner === currentRoad.id,
+      ),
+      badSurface = network.surfaceJoins.find(
+        (j) => j.roads.includes(currentRoad.id) && !j.sealed,
+      ),
+      physical = network.surfaceClearances.filter(
+        (c) =>
+          c.upper === currentRoad.id ||
+          network.bridges.some(
+            (b) =>
+              b.owner === c.upper &&
+              b.kind === "joint" &&
+              b.connections.includes(currentRoad.id),
+          ),
+      ),
+      clearance = (kind: string) => {
+        const values = physical
+          .filter((c) => c.lowerKind === kind)
+          .map((c) => c.meters);
+        return values.length ? `${fmt(Math.min(...values), 3)} m` : "—";
+      },
       badJoin = network.designReview.gradeJoins.find(
         (j) => j.roads.includes(currentRoad.id) && j.assessed && !j.continuous,
       ),
       values: Record<string, string> = {
+        "Minimum generated lane": surface
+          ? `${fmt(surface.minimumLaneWidth, 3)} m`
+          : "—",
+        "Minimum width position": surface
+          ? `${fmt(surface.minimumWidthParameter * 100, 4)}% curve`
+          : "—",
+        "Measured motor clearance": clearance("motor"),
+        "Measured cycle clearance": clearance("cycle"),
+        "Measured footway clearance": clearance("pedestrian"),
+        "Pavement seam": badSurface
+          ? `${fmt(badSurface.maximumGap * 1000, 3)} mm gap`
+          : "Sealed generated join",
         "Meshed full-width run": auxiliary
           ? `${fmt(auxiliary.meshedFullWidthLength, 1)} m`
           : "—",
@@ -390,11 +435,16 @@ function rebuild(inspector = true, context = false) {
     const status = document.querySelector<HTMLElement>("[data-design-status]");
     if (status)
       status.textContent =
-        currentRoad.roadClass === "street" && !m.issues.length
+        currentRoad.roadClass === "street" &&
+        !m.issues.length &&
+        !structuralIssue &&
+        !badJoin &&
+        !badSurface
           ? "Choose a design role"
           : m.meetsReference &&
               !structuralIssue &&
               !badJoin &&
+              !badSurface &&
               network.clearances
                 .filter((c) => c.a === currentRoad.id || c.b === currentRoad.id)
                 .every((c) => c.meters >= referenceLayout.clearance)
@@ -1096,9 +1146,31 @@ function girderDescription(bridge: Network["bridges"][number]) {
   return `${bridge.girderCount} girders · ${spacing} m c/c`;
 }
 function referenceControls(road: Road) {
-  const m = measureRoadDesign(project, road),
+  const m =
+      network.designReview.roads.find((r) => r.owner === road.id) ??
+      measureRoadDesign(project, road),
     bridge = network.bridges.find((b) => b.owner === road.id),
     weave = network.designReview.weaves.find((w) => w.owners.includes(road.id)),
+    surface = network.generatedSections.find((s) => s.owner === road.id),
+    badSurface = network.surfaceJoins.find(
+      (j) => j.roads.includes(road.id) && !j.sealed,
+    ),
+    physical = network.surfaceClearances.filter(
+      (c) =>
+        c.upper === road.id ||
+        network.bridges.some(
+          (b) =>
+            b.owner === c.upper &&
+            b.kind === "joint" &&
+            b.connections.includes(road.id),
+        ),
+    ),
+    clearanceValue = (kind: string) => {
+      const values = physical
+        .filter((c) => c.lowerKind === kind)
+        .map((c) => c.meters);
+      return values.length ? `${fmt(Math.min(...values), 3)} m` : "—";
+    },
     auxiliary = network.auxiliaryLanes.find((a) => a.owner === road.id),
     structureIssue = network.designReview.structureIssues.find(
       (i) => i.owner === road.id,
@@ -1113,6 +1185,7 @@ function referenceControls(road: Road) {
       m.meetsReference &&
       !structureIssue &&
       !badJoin &&
+      !badSurface &&
       clearance.every((c) => c.meters >= referenceLayout.clearance),
     display = (key: string, value: string) =>
       `<div class="number-control"><span>${key}</span><output class="detail-value" data-design-metric="${key}">${value}</output></div>`;
@@ -1127,6 +1200,20 @@ function referenceControls(road: Road) {
         (r) => [r, r[0].toUpperCase() + r.slice(1)] as [string, string],
       ),
     ) +
+      display(
+        "Minimum generated lane",
+        surface ? `${fmt(surface.minimumLaneWidth, 3)} m` : "—",
+      ) +
+      display(
+        "Minimum width position",
+        surface ? `${fmt(surface.minimumWidthParameter * 100, 4)}% curve` : "—",
+      ) +
+      display(
+        "Pavement seam",
+        badSurface
+          ? `${fmt(badSurface.maximumGap * 1000, 3)} mm gap`
+          : "Sealed generated join",
+      ) +
       display(
         "Minimum alignment radius",
         m.minimumRadius === null ? "Straight" : `${fmt(m.minimumRadius, 1)} m`,
@@ -1167,6 +1254,9 @@ function referenceControls(road: Road) {
           ) +
           display("Girder layout", girderDescription(bridge)) +
           display("Bearing assemblies", String(bridge.bearings?.length ?? 0)) +
+          display("Measured motor clearance", clearanceValue("motor")) +
+          display("Measured cycle clearance", clearanceValue("cycle")) +
+          display("Measured footway clearance", clearanceValue("pedestrian")) +
           display(
             "Support condition",
             structureIssue
@@ -1174,7 +1264,7 @@ function referenceControls(road: Road) {
               : "Clear geometric seats",
           )
         : "") +
-      `<p class="card-note"><span>Targets: radius ${m.radiusTarget} m or more, grade ${m.gradeTarget}% or less; over-road clearance at least ${referenceLayout.clearance} m. These checks measure the cubic, not its sparse preview mesh. They do not certify sight distance, traffic capacity, superelevation or structural loads.</span></p><div class="solver-row"><span>Selected targets</span><span class="solver-badge" data-design-status>${icon(meets ? "check" : "triangle-alert")}${road.roadClass === "street" && !m.issues.length ? "Choose a design role" : meets ? "Within geometric targets" : "Review geometry"}</span></div>` +
+      `<p class="card-note"><span>Targets: radius ${m.radiusTarget} m or more, grade ${m.gradeTarget}% or less; over-road clearance at least ${referenceLayout.clearance} m. These checks measure the cubic, not its sparse preview mesh. They do not certify sight distance, traffic capacity, superelevation or structural loads.</span></p><div class="solver-row"><span>Selected targets</span><span class="solver-badge" data-design-status>${icon(meets ? "check" : "triangle-alert")}${road.roadClass === "street" && !m.issues.length && !structureIssue && !badJoin && !badSurface ? "Choose a design role" : meets ? "Within geometric targets" : "Review geometry"}</span></div>` +
       (weave
         ? display("Nose-to-nose weave", `${fmt(weave.noseSpacing, 1)} m`)
         : "") +
@@ -1383,6 +1473,15 @@ function renderInspector() {
           "Vertical grade join",
           "activity",
           `<div class="number-control"><span>Grade mismatch</span><output data-grade-join>${join.delta === null ? "Unbounded" : `${fmt(join.delta, 4)} pp`}</output></div><p class="card-note"><span>${join.continuous ? "Connected alignment tangents meet the selected continuity tolerance." : "Retune the vertical handles to remove this grade kink."} Selected tolerance: ${referenceLayout.gradeJoinTolerance} percentage points; not a civil sight-distance or vertical-curve certification.</span></p>`,
+        );
+    }
+    if (node) {
+      const seam = network.surfaceJoins.find((j) => j.owner === node.id);
+      if (seam)
+        body += card(
+          "Pavement surface join",
+          "layers",
+          `<div class="number-control"><span>Generated seam gap</span><output data-surface-join>${fmt(seam.maximumGap * 1000, 3)} mm</output></div><p class="card-note"><span>${seam.transition === "junction" ? "Cross-section differences use a fitted transition." : "Matching sections meet directly."} ${seam.comparedPoints} generated mouth/edge points checked against a ${seam.tolerance * 1000} mm selected asset tolerance. Not a civil or structural certification.</span></p>`,
         );
     }
     if (node) {

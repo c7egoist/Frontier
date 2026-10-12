@@ -1,3 +1,8 @@
+import type {
+  GeneratedSectionMeasure,
+  SurfaceJoinMeasure,
+  SurfaceClearanceMeasure,
+} from "./pavement-audit";
 import {
   analyzeCubic,
   cubicProfile,
@@ -36,6 +41,10 @@ export interface RoadDesignMeasure extends CubicMetrics {
   gradeTarget: number;
   widthTarget: number;
   meetsReference: boolean;
+  minimumGeneratedLaneWidth?: number;
+  minimumGeneratedWidthParameter?: number;
+  generatedSectionMeasured?: boolean;
+  minimumPhysicalMotorClearance?: number | null;
 }
 export interface WeaveMeasure {
   merge: string;
@@ -48,7 +57,7 @@ export interface WeaveMeasure {
 }
 export interface StructureIssue {
   owner: string;
-  kind: "abutment" | "approach-fill";
+  kind: "abutment" | "approach-fill" | "surface-intersection";
   position: V3;
   message: string;
 }
@@ -90,6 +99,13 @@ export interface DesignReview {
   gradeJoins: GradeJoinMeasure[];
   junctionLanes: JunctionLaneMeasure[];
   extent: [number, number];
+  pavementAudit: {
+    minimumMotorClearance: number | null;
+    minimumCycleClearance: number | null;
+    minimumPedestrianClearance: number | null;
+    allJoinsSealed: boolean;
+    method: "generated-pavement-surfaces";
+  };
   limitations: string[];
 }
 export function curveDesignMetrics(points: V3[]) {
@@ -274,13 +290,57 @@ export function measureGradeJoins(project: Project): GradeJoinMeasure[] {
 export function reviewDesign(
   project: Project,
   clearances: { meters: number }[],
-  bridges?: { spanLengths?: number[]; kind: "span" | "joint" }[],
+  bridges?: {
+    spanLengths?: number[];
+    kind: "span" | "joint";
+    owner?: string;
+    connections?: string[];
+  }[],
   splitters: { owner: string; pavingNose: V3 }[] = [],
   structureIssues: StructureIssue[] = [],
+  pavement: {
+    generatedSections: GeneratedSectionMeasure[];
+    surfaceJoins: SurfaceJoinMeasure[];
+    surfaceClearances: SurfaceClearanceMeasure[];
+  } = { generatedSections: [], surfaceJoins: [], surfaceClearances: [] },
 ): DesignReview {
   const xs = project.nodes.map((n) => n.position[0]),
     zs = project.nodes.map((n) => n.position[2]);
-  const all = project.roads.map((r) => measureRoadDesign(project, r)),
+  const sections = new Map(pavement.generatedSections.map((s) => [s.owner, s]));
+  const all = project.roads.map((r) => {
+      const m = measureRoadDesign(project, r),
+        s = sections.get(r.id),
+        owners = new Set([
+          r.id,
+          ...(bridges ?? [])
+            .filter(
+              (b) =>
+                b.kind === "joint" && b.connections?.includes(r.id) && b.owner,
+            )
+            .map((b) => b.owner!),
+        ]),
+        clear = pavement.surfaceClearances
+          .filter((c) => owners.has(c.upper) && c.lowerKind === "motor")
+          .map((c) => c.meters),
+        measured = clear.length ? Math.min(...clear) : null,
+        failedStructure = structureIssues.some((i) => owners.has(i.owner));
+      return {
+        ...m,
+        ...(s
+          ? {
+              minimumGeneratedLaneWidth: s.minimumLaneWidth,
+              minimumGeneratedWidthParameter: s.minimumWidthParameter,
+              generatedSectionMeasured: true,
+            }
+          : {}),
+        minimumPhysicalMotorClearance: measured,
+        meetsReference:
+          m.meetsReference &&
+          (!s || s.minimumLaneWidth >= m.widthTarget - 0.01) &&
+          !failedStructure &&
+          (measured === null || measured >= referenceLayout.clearance),
+      };
+    }),
     roads = all.filter((r) => r.role !== "street"),
     gradeJoins = measureGradeJoins(project),
     alignmentIssues: AlignmentIssue[] = all.flatMap((m) =>
@@ -297,6 +357,12 @@ export function reviewDesign(
         };
       }),
     );
+  const minimumSurface = (kind: SurfaceClearanceMeasure["lowerKind"]) => {
+    const values = pavement.surfaceClearances
+      .filter((c) => c.lowerKind === kind)
+      .map((c) => c.meters);
+    return values.length ? Math.min(...values) : null;
+  };
   return {
     units: "metres",
     basis: "Reference-scaled game geometry, not civil certification",
@@ -307,7 +373,18 @@ export function reviewDesign(
     alignmentIssues,
     gradeJoins,
     junctionLanes: measureJunctionLanes(project),
+    pavementAudit: {
+      minimumMotorClearance: minimumSurface("motor"),
+      minimumCycleClearance: minimumSurface("cycle"),
+      minimumPedestrianClearance: minimumSurface("pedestrian"),
+      allJoinsSealed: pavement.surfaceJoins.every((j) => j.sealed),
+      method: "generated-pavement-surfaces",
+    },
     withinSelectedTargets:
+      pavement.surfaceJoins.every((j) => j.sealed) &&
+      pavement.surfaceClearances
+        .filter((c) => c.lowerKind === "motor")
+        .every((c) => c.meters >= referenceLayout.clearance) &&
       structureIssues.length === 0 &&
       alignmentIssues.length === 0 &&
       gradeJoins.filter((j) => j.assessed).every((j) => j.continuous) &&

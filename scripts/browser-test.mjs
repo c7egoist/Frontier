@@ -236,6 +236,292 @@ try {
     );
     await target.locator('[data-inspector-tab="geometry"]').click();
   }
+  const pavementSettings = {
+    oneWay: true,
+    lanes: 2,
+    laneWidth: 3.65,
+    shoulderWidth: 2,
+    sidewalk: 0,
+    curbStyle: "flush",
+    markingStyle: "motorway",
+    roadClass: "mainline",
+    manholes: false,
+    drainage: false,
+    signs: false,
+  };
+  async function importPavementFixture(p, roadId, target = page) {
+    await target.locator("#project-file").setInputFiles({
+      name: "pavement-audit.road.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify(p)),
+    });
+    await target.waitForFunction(
+      (name) =>
+        window.frontier.getProject().name === name &&
+        !document.querySelector("#project-file").value,
+      p.name,
+    );
+    await target.evaluate(
+      (id) => window.frontier.select({ kind: "road", id }),
+      roadId,
+    );
+    await target.locator('[data-inspector-tab="geometry"]').click();
+  }
+  function surfaceCrossingFixture(parallel = false) {
+    const length = parallel ? 200 : 100,
+      p = {
+        version: 1,
+        name: parallel ? "Parallel pavement audit" : "Sloped pavement audit",
+        nodes: [
+          {
+            id: "pavement-a",
+            name: "Upper in",
+            position: [-length / 2, parallel ? 8 : 5, 0],
+            radius: 3,
+            crossings: false,
+          },
+          {
+            id: "pavement-z",
+            name: "Upper out",
+            position: [length / 2, parallel ? 8 : 11, 0],
+            radius: 3,
+            crossings: false,
+          },
+          {
+            id: "pavement-low-a",
+            name: "Lower in",
+            position: parallel ? [-100, 0, 4] : [0, 0, -100],
+            radius: 3,
+            crossings: false,
+          },
+          {
+            id: "pavement-low-z",
+            name: "Lower out",
+            position: parallel ? [100, 0, 4] : [0, 0, 100],
+            radius: 3,
+            crossings: false,
+          },
+        ],
+        roads: [
+          {
+            id: "pavement-upper",
+            name: "Measured bridge",
+            start: "pavement-a",
+            end: "pavement-z",
+            h1: [length / 3, parallel ? 0 : 2, 0],
+            h2: [-length / 3, parallel ? 0 : -2, 0],
+            ...pavementSettings,
+            roadClass: parallel ? "mainline" : "street",
+            bridge: true,
+            structure: "steel",
+            bridgeDepth: 1.6,
+          },
+          {
+            id: "pavement-lower",
+            name: "Lower pavement",
+            start: "pavement-low-a",
+            end: "pavement-low-z",
+            h1: parallel ? [200 / 3, 0, 0] : [0, 0, 200 / 3],
+            h2: parallel ? [-200 / 3, 0, 0] : [0, 0, -200 / 3],
+            lanes: 2,
+            laneWidth: 3.5,
+            sidewalk: 0,
+            manholes: false,
+            drainage: false,
+          },
+        ],
+        sites: [],
+      };
+    return p;
+  }
+  await test("pavement: crown changes create sealed surface transitions with complete undo", async () => {
+    const p = {
+      version: 1,
+      name: "Crowned surface join",
+      nodes: [
+        {
+          id: "pavement-in",
+          name: "In",
+          position: [-120, 7.2, 0],
+          radius: 3,
+          crossings: false,
+        },
+        {
+          id: "pavement-middle",
+          name: "Shared",
+          position: [0, 7.2, 0],
+          radius: 3,
+          crossings: false,
+        },
+        {
+          id: "pavement-out",
+          name: "Out",
+          position: [120, 7.2, 0],
+          radius: 3,
+          crossings: false,
+        },
+      ],
+      roads: [
+        {
+          id: "pavement-in-road",
+          name: "Crown 1",
+          start: "pavement-in",
+          end: "pavement-middle",
+          h1: [40, 0, 0],
+          h2: [-40, 0, 0],
+          ...pavementSettings,
+          crossfall: 1.5,
+        },
+        {
+          id: "pavement-out-road",
+          name: "Crown 2",
+          start: "pavement-middle",
+          end: "pavement-out",
+          h1: [40, 0, 0],
+          h2: [-40, 0, 0],
+          ...pavementSettings,
+          crossfall: 4,
+        },
+      ],
+      sites: [],
+    };
+    await importPavementFixture(p, "pavement-in-road");
+    const before = await referenceState();
+    let seams = await page.evaluate(
+      () => window.frontier.getNetwork().surfaceJoins,
+    );
+    assert.equal(seams[0].transition, "junction");
+    assert(seams[0].sealed);
+    assert(seams[0].maximumGap < 1e-6);
+    await page.evaluate(() =>
+      window.frontier.select({ kind: "node", id: "pavement-middle" }),
+    );
+    assert.equal(
+      await page.locator("[data-surface-join]").textContent(),
+      "0.000 mm",
+    );
+    await page.locator('[data-inspector-tab="surface"]').click();
+    await referenceRange("crossfall", 4);
+    seams = await page.evaluate(
+      () => window.frontier.getNetwork().surfaceJoins,
+    );
+    assert.equal(seams[0].transition, "direct");
+    assert(seams[0].sealed);
+    await undo();
+    assert.deepEqual((await referenceState()).project, before.project);
+    assert.equal(
+      (await page.evaluate(() => window.frontier.getNetwork().surfaceJoins))[0]
+        .transition,
+      "junction",
+    );
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "pavement-crown-transition.png"),
+    });
+  });
+  await test("pavement: physical footprint clearances find sloping and parallel cases and remain in GLB/OBJ", async () => {
+    await importPavementFixture(surfaceCrossingFixture(), "pavement-upper");
+    let data = await page.evaluate(() => ({
+      clear: window.frontier.getNetwork().clearances,
+      surface: window.frontier.getNetwork().surfaceClearances,
+    }));
+    assert(Math.abs(data.clear[0].meters - 6.14) < 1e-6);
+    const c = data.surface.find((c) => c.lowerKind === "motor");
+    assert(Math.abs(c.lowerPosition[0] + 3.5) < 1e-6);
+    assert.equal(c.method, "triangulated-surface-overlap");
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Measured motor clearance"]')
+        .textContent(),
+      "6.140 m",
+    );
+    await page.locator('[data-menu="export-menu"]').click();
+    await page.locator("#export-detail").selectOption("production");
+    let promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('#export-menu [data-action="glb"]').click();
+    let d = await promise,
+      buffer = await readFile(await d.path());
+    const gltf = JSON.parse(
+        buffer.subarray(20, 20 + buffer.readUInt32LE(12)).toString(),
+      ),
+      extras = gltf.nodes.find((n) => n.extras?.surfaceClearances)?.extras;
+    assert(extras);
+    assert(
+      Math.abs(
+        extras.surfaceClearances.find((c) => c.lowerKind === "motor").meters -
+          6.14,
+      ) < 1e-6,
+    );
+    assert(extras.generatedSections.length === 2);
+    assert(extras.surfaceJoins.every((j) => j.sealed));
+    await page.waitForFunction(() =>
+      document.querySelector("#toast").textContent.includes("GLB exported"),
+    );
+    await page.locator('[data-menu="export-menu"]').click();
+    promise = page.waitForEvent("download", { timeout: 120000 });
+    await page.locator('#export-menu [data-action="obj"]').click();
+    d = await promise;
+    const files = unzipSync(await readFile(await d.path())),
+      m = JSON.parse(new TextDecoder().decode(files["mesh.json"]));
+    assert.deepEqual(m.surfaceClearances, extras.surfaceClearances);
+    assert.deepEqual(m.generatedSections, extras.generatedSections);
+    await importPavementFixture(surfaceCrossingFixture(true), "pavement-upper");
+    data = await page.evaluate(() => ({
+      clear: window.frontier.getNetwork().clearances,
+      surface: window.frontier.getNetwork().surfaceClearances,
+    }));
+    assert.equal(data.clear.length, 1);
+    assert(data.surface.some((c) => c.lowerKind === "motor"));
+    assert(data.clear[0].meters > 6 && data.clear[0].meters < 6.4);
+    await page.screenshot({
+      timeout: 120000,
+      path: resolve(cache, "pavement-parallel-clearance.png"),
+    });
+  });
+  await test("pavement: actual generated widths and separate motor/cycle/footway clearance readouts stay truthful", async () => {
+    await importCubicFixture(
+      cubicFixture(
+        [
+          [-12, 0, 0],
+          [-12, 0, -32],
+          [12, 0, -32],
+          [12, 0, 0],
+        ],
+        "Narrow generated pavement",
+        { roadClass: "street", sidewalk: 4.2 },
+      ),
+    );
+    let section = await page.evaluate(
+      () => window.frontier.getNetwork().generatedSections[0],
+    );
+    assert(section.minimumLaneWidth < section.requestedLaneWidth);
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Minimum generated lane"]')
+        .textContent(),
+      `${section.minimumLaneWidth.toLocaleString("en-US", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} m`,
+    );
+    await page.evaluate(() => window.frontier.loadTemplate("diamond"));
+    let audit = await page.evaluate(
+      () => window.frontier.getNetwork().designReview.pavementAudit,
+    );
+    assert(Math.abs(audit.minimumMotorClearance - 5.431) < 1e-6);
+    assert(Math.abs(audit.minimumPedestrianClearance - 5.309) < 1e-6);
+    assert(audit.minimumCycleClearance !== null);
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Measured footway clearance"]')
+        .textContent(),
+      "5.309 m",
+    );
+    assert.equal(
+      await page
+        .locator('[data-design-metric="Minimum generated lane"]')
+        .textContent(),
+      "3.650 m",
+    );
+    assert(audit.allJoinsSealed);
+  });
   await test("cubic audit: the actual narrow grade/radius peak is measured and pinned in both editing and production", async () => {
     const a = 0.50135,
       C = 6000,
@@ -4054,6 +4340,51 @@ try {
       path: resolve(cache, "offline-roadside-parking.png"),
     });
     // The shared single-process Chromium context stays alive until the final check.
+  });
+  await test("pavement: offline triangulated clearance and surface-join measurements work without external requests", async () => {
+    const offline =
+        offlinePage ??
+        (await browser.newPage({ viewport: { width: 1512, height: 982 } })),
+      requests = [],
+      offlineErrors = [];
+    offlinePage = offline;
+    offline.on("pageerror", (e) => offlineErrors.push(e.message));
+    await offline.route(/^https?:\/\//, (r) => {
+      requests.push(r.request().url());
+      return r.abort();
+    });
+    await offline.goto(`file://${resolve("RoadDesigner.html")}`);
+    await offline.waitForFunction(() => !!window.frontier);
+    await offline.evaluate(() => window.frontier.loadTemplate("diamond"));
+    let data = await offline.evaluate(() => ({
+      audit: window.frontier.getNetwork().designReview.pavementAudit,
+      seams: window.frontier.getNetwork().surfaceJoins,
+      sections: window.frontier.getNetwork().generatedSections,
+    }));
+    assert(data.audit.allJoinsSealed);
+    assert(data.seams.every((s) => s.sealed));
+    assert(data.sections.every((s) => s.minimumLaneWidth > 0));
+    assert(Math.abs(data.audit.minimumMotorClearance - 5.431) < 1e-6);
+    await importPavementFixture(
+      surfaceCrossingFixture(true),
+      "pavement-upper",
+      offline,
+    );
+    assert.equal(
+      await offline.evaluate(
+        () => window.frontier.getNetwork().clearances.length,
+      ),
+      1,
+    );
+    assert(
+      (
+        await offline.evaluate(
+          () => window.frontier.getNetwork().surfaceClearances,
+        )
+      ).some((c) => c.lowerKind === "motor"),
+    );
+    assert.deepEqual(requests, []);
+    assert.deepEqual(offlineErrors, []);
   });
   await test("cubic audit: offline polynomial checks reject reversals and preserve valid zero-handle straight geometry", async () => {
     const offline =

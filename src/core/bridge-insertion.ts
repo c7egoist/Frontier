@@ -163,6 +163,22 @@ export function insertConnectedBridge(
     throw new RangeError(
       `${issue.message} Choose a clear landing or a longer structural span.`,
     );
+  const physical = generated.surfaceClearances.find(
+    (c) =>
+      c.lowerKind === "motor" &&
+      (edited.has(c.upper) ||
+        generated.bridges.some(
+          (b) =>
+            b.owner === c.upper &&
+            b.kind === "joint" &&
+            b.connections.some((id) => edited.has(id)),
+        )) &&
+      c.meters < referenceLayout.clearance,
+  );
+  if (physical)
+    throw new RangeError(
+      "The inserted bridge has insufficient physical pavement clearance away from its centreline crossing. Increase the rise and approach length.",
+    );
   project.nodes = draft.nodes;
   project.roads = draft.roads;
   return {

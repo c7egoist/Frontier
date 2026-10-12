@@ -897,6 +897,11 @@ export class SceneView {
       roadsideParking:
         network?.roadsideParking ?? this.network?.roadsideParking ?? [],
       designReview: network?.designReview ?? this.network?.designReview,
+      generatedSections:
+        network?.generatedSections ?? this.network?.generatedSections ?? [],
+      surfaceJoins: network?.surfaceJoins ?? this.network?.surfaceJoins ?? [],
+      surfaceClearances:
+        network?.surfaceClearances ?? this.network?.surfaceClearances ?? [],
       auxiliaryLanes:
         network?.auxiliaryLanes ?? this.network?.auxiliaryLanes ?? [],
       embankments: network?.embankments ?? this.network?.embankments ?? [],

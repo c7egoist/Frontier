@@ -106,6 +106,16 @@
           "abutments": 2
         }
       ],
+      "pavementAudit": {
+        "minimumMotorClearance": 5.431,
+        "minimumCycleClearance": 5.52,
+        "minimumPedestrianClearance": 5.308999999999999,
+        "allJoinsSealed": true,
+        "method": "generated-pavement-surfaces"
+      },
+      "sealedSurfaceJoins": 14,
+      "surfaceJoinCount": 14,
+      "minimumGeneratedLaneWidth": 3.25,
       "curveAuditMethod": "polynomial-extrema",
       "alignmentIssues": [],
       "assessedGradeJoins": [
@@ -143,7 +153,7 @@
         }
       ],
       "maximumAlignmentGrade": 3.085714285714284,
-      "minimumStructuralClearance": 5.431000000000002,
+      "minimumStructuralClearance": 5.431,
       "minimumLoopRadius": null,
       "measuredWeaveSpacing": [],
       "speedChangeLanes": [
@@ -278,6 +288,16 @@
           "abutments": 2
         }
       ],
+      "pavementAudit": {
+        "minimumMotorClearance": 5.47525,
+        "minimumCycleClearance": null,
+        "minimumPedestrianClearance": null,
+        "allJoinsSealed": true,
+        "method": "generated-pavement-surfaces"
+      },
+      "sealedSurfaceJoins": 72,
+      "surfaceJoinCount": 72,
+      "minimumGeneratedLaneWidth": 3.65,
       "curveAuditMethod": "polynomial-extrema",
       "alignmentIssues": [],
       "assessedGradeJoins": [
@@ -613,6 +633,16 @@
           "abutments": 2
         }
       ],
+      "pavementAudit": {
+        "minimumMotorClearance": 5.47525,
+        "minimumCycleClearance": null,
+        "minimumPedestrianClearance": null,
+        "allJoinsSealed": true,
+        "method": "generated-pavement-surfaces"
+      },
+      "sealedSurfaceJoins": 27,
+      "surfaceJoinCount": 27,
+      "minimumGeneratedLaneWidth": 3.65,
       "curveAuditMethod": "polynomial-extrema",
       "alignmentIssues": [],
       "assessedGradeJoins": [

@@ -1,3 +1,11 @@
+import {
+  measureGeneratedSections,
+  measureSurfaceJoins,
+  measureSurfaceClearances,
+  type GeneratedSectionMeasure,
+  type SurfaceJoinMeasure,
+  type SurfaceClearanceMeasure,
+} from "./pavement-audit";
 import { cubicProfile } from "./cubic-analysis";
 import {
   supportsAuxiliary,
@@ -215,6 +223,9 @@ export interface Diagnostic {
 }
 export interface Network {
   designReview: DesignReview;
+  generatedSections: GeneratedSectionMeasure[];
+  surfaceJoins: SurfaceJoinMeasure[];
+  surfaceClearances: SurfaceClearanceMeasure[];
   embankments: EmbankmentFeature[];
   auxiliaryLanes: AuxiliaryLaneFeature[];
   spans: RoadSpan[];
@@ -595,25 +606,40 @@ function needsJoint(
       Math.abs(roads[0].bridgeDepth - roads[1].bridgeDepth) > 0.001)
   )
     return true;
-  if (roads[0].curbStyle !== roads[1].curbStyle) return true;
+  const profiles = roads.map((r) => {
+      const alignment = alignments.get(r.id)!,
+        isStart = r.start === node.id,
+        station = isStart ? alignment.stations[0] : alignment.stations.at(-1)!,
+        radius = cubicProfile(alignment.points).radiusAt(station.t),
+        scale = Math.max(
+          0.05,
+          Math.min(1, (radius * 0.78) / (roadHalfWidth(r) + r.sidewalk + 0.6)),
+        ),
+        f = frameWithWidth(station, r, scale, alignment.length),
+        sign = isStart ? 1 : -1;
+      return {
+        f,
+        left: sideHalfWidth(f, sign),
+        right: sideHalfWidth(f, -sign),
+      };
+    }),
+    [a, z] = profiles;
+  // Compare the surfaces that really meet at this node, in outward-arm
+  // coordinates. Equal maximum widths can hide opposite auxiliary sides or a
+  // different crown/curb profile, leaving a slit across the driving surface.
   if (
-    Math.abs(
-      roads.map((r) => {
-        const a = alignments.get(r.id)!;
-        return roadHalfWidthAt(r, r.start === node.id ? 0 : a.length, a.length);
-      })[0] -
-        roads.map((r) => {
-          const a = alignments.get(r.id)!;
-          return roadHalfWidthAt(
-            r,
-            r.start === node.id ? 0 : a.length,
-            a.length,
-          );
-        })[1],
-    ) > 0.01 ||
-    Math.abs(roads[0].sidewalk - roads[1].sidewalk) > 0.02 ||
-    Math.abs(roads[0].curbHeight - roads[1].curbHeight) > 0.001 ||
-    Math.abs(roads[0].sidewalkCrossfall - roads[1].sidewalkCrossfall) > 0.001
+    Math.abs(a.left - z.right) > 0.01 ||
+    Math.abs(a.right - z.left) > 0.01 ||
+    Math.abs(surfaceHeight(a.f) - surfaceHeight(z.f)) > 0.001 ||
+    Math.abs(a.f.crossfall - z.f.crossfall) > 0.001 ||
+    Math.abs(a.f.sw - z.f.sw) > 0.02 ||
+    Math.abs(a.f.cw - z.f.cw) > 0.001 ||
+    Math.abs(a.f.curbHeight - z.f.curbHeight) > 0.001 ||
+    Math.abs(a.f.sidewalkCrossfall - z.f.sidewalkCrossfall) > 0.001 ||
+    roads[0].lanes !== roads[1].lanes ||
+    Math.abs(roads[0].laneWidth - roads[1].laneWidth) > 0.001 ||
+    Math.abs(roads[0].median - roads[1].median) > 0.001 ||
+    roads[0].curbStyle !== roads[1].curbStyle
   )
     return true;
   const dirs = roads.map((r) => {
@@ -2161,6 +2187,50 @@ export function buildNetwork(
         owner: upper.id,
       });
   }
+  const surfaceClearances = measureSurfaceClearances(
+    meshes,
+    new Set(bridges.map((b) => b.owner)),
+  );
+  for (const c of surfaceClearances) {
+    if (
+      c.lowerKind === "motor" &&
+      c.upperOwnerKind === "road" &&
+      c.lowerOwnerKind === "road"
+    ) {
+      const previous = clearances.find(
+        (p) =>
+          (p.a === c.upper && p.b === c.lower) ||
+          (p.a === c.lower && p.b === c.upper),
+      );
+      if (previous) previous.meters = Math.min(previous.meters, c.meters);
+      else clearances.push({ a: c.upper, b: c.lower, meters: c.meters });
+    }
+    if (c.meters < -0.001) {
+      blockedFill.add(c.upper);
+      if (c.upperOwnerKind === "node")
+        connected(project, c.upper)
+          .filter((r) => r.embankment)
+          .forEach((r) => blockedFill.add(r.id));
+      structureIssue(
+        c.upper,
+        "surface-intersection",
+        c.undersidePosition,
+        `Bridge structure intersects a lower ${c.lowerKind} pavement surface (${c.meters.toFixed(3)} m gap). Raise/reposition the structure before mesh export.`,
+      );
+    } else if (
+      c.lowerKind === "motor" &&
+      c.meters < 4.5 &&
+      !diagnostics.some(
+        (d) =>
+          d.owner === c.upper && d.message.startsWith("Low overpass clearance"),
+      )
+    )
+      diagnostics.push({
+        owner: c.upper,
+        level: "warning",
+        message: `Low measured pavement clearance: ${c.meters.toFixed(3)} m. Raise the deck to provide at least 4.5 m.`,
+      });
+  }
   // Add approach earthwork only after crossing/abutment checks. A failed
   // geometric edit must not create a wall or soil mass across lower traffic.
   for (const span of spans) {
@@ -2188,13 +2258,25 @@ export function buildNetwork(
     min.fill(-30);
     max.fill(30);
   }
+  const generatedSections = measureGeneratedSections(spans),
+    surfaceJoins = measureSurfaceJoins(spans, junctions, meshes);
+  for (const join of surfaceJoins.filter((j) => !j.sealed))
+    diagnostics.push({
+      owner: join.owner,
+      level: "error",
+      message: `Pavement join has a ${join.maximumGap.toFixed(4)} m surface gap. Review its cross-section transition before mesh export.`,
+    });
   return {
+    generatedSections,
+    surfaceJoins,
+    surfaceClearances,
     designReview: reviewDesign(
       project,
       clearances,
       bridges,
       splitters,
       structureIssues,
+      { generatedSections, surfaceJoins, surfaceClearances },
     ),
     embankments,
     auxiliaryLanes,

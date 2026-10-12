@@ -33,6 +33,12 @@ for (const id of ["diamond", "cloverleaf", "trumpet"]) {
       depth: b.depth,
       abutments: b.abutments.length,
     })),
+    pavementAudit: review.pavementAudit,
+    sealedSurfaceJoins: n.surfaceJoins.filter((j) => j.sealed).length,
+    surfaceJoinCount: n.surfaceJoins.length,
+    minimumGeneratedLaneWidth: Math.min(
+      ...n.generatedSections.map((s) => s.minimumLaneWidth),
+    ),
     curveAuditMethod: "polynomial-extrema",
     alignmentIssues: review.alignmentIssues,
     assessedGradeJoins: review.gradeJoins

@@ -166,6 +166,9 @@ export function exportMeshManifest(network: Network, project: Project) {
     streetDetails: network.streetDetails,
     roadsideParking: network.roadsideParking,
     designReview: network.designReview,
+    generatedSections: network.generatedSections,
+    surfaceJoins: network.surfaceJoins,
+    surfaceClearances: network.surfaceClearances,
     auxiliaryLanes: network.auxiliaryLanes,
     embankments: network.embankments,
     junctionOffsets: network.junctions.map((j) => ({
