@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildTyreMesh, tetElementForces, mulMM, transposeC, invertColMajor, sub,
-  CpuTyreSimulation, packParams, PARAM_LAYOUT, resolveParams, nodeInfoArray,
+  CpuTyreSimulation, packParams, PARAM_LAYOUT, PARAM_FLOATS, resolveParams, nodeInfoArray, roadPreset,
 } from '../src/tyreCore.js';
 import { SIM_WGSL } from '../src/shaders.js';
 
@@ -69,7 +69,8 @@ test('packed uniform layout matches the WGSL Params struct field order', () => {
   const body = SIM_WGSL.match(/struct Params \{([\s\S]*?)\};/)[1];
   const fields = [...body.matchAll(/(\w+)\s*:\s*f32/g)].map((m) => m[1]);
   assert.deepEqual(fields, PARAM_LAYOUT);
-  assert.equal(packParams(resolveParams(SMALL), 10, 10).length, 28);
+  assert.equal(PARAM_LAYOUT.length, 28);
+  assert.equal(packParams(resolveParams(SMALL), 10, 10).length, PARAM_FLOATS);
   assert.equal(nodeInfoArray(buildTyreMesh(SMALL), 1000).length, 4 * 600);
 });
 
@@ -95,16 +96,39 @@ test('tyre settles under load at a sensible ride height without blowing up', { t
   assert.ok(sim.rim[1] < 0.332 && sim.rim[1] > 0.30, `rim height ${sim.rim[1]}`);
 });
 
-test('rolling advances the rim and spins it at v / R', { timeout: 120000 }, () => {
-  const sim = new CpuTyreSimulation({ ...SMALL, speed: 5 });
-  for (let s = 0; s < 1000; s++) sim.step();
+test('rolling advances the rim and spins it at -v/R (contact patch sticks to the road)', { timeout: 120000 }, () => {
+  const sim = new CpuTyreSimulation({ ...SMALL, speed: 5, road: [] });
+  for (let s = 0; s < 3000; s++) sim.step();
   assert.ok(Math.abs(sim.rim[0] - 5 * sim.time) < 1e-9);
-  assert.ok(Math.abs(sim.rim[3] - sim.rim[0] / sim.p.treadRadius) < 1e-6);
+  assert.ok(Math.abs(sim.rim[3] + sim.rim[0] / sim.p.treadRadius) < 1e-6);
+  // Nodes in contact should be almost stationary relative to the road. The old sign gave ~2x forward speed.
+  let sum = 0, c = 0;
+  for (let n = 0; n < sim.N; n++) if (sim.x[3 * n + 1] < 0.01) { sum += sim.v[3 * n]; c++; }
+  assert.ok(c > 0);
+  assert.ok(Math.abs(sum / c) < 1.0, `mean contact-patch vx ${sum / c}`);
   assert.ok(sim.x.every(Number.isFinite));
 });
 
+test('slip angle: spin scales with cos(yaw) and the tyre stays finite', { timeout: 120000 }, () => {
+  const sim = new CpuTyreSimulation({ ...SMALL, speed: 5, yaw: 0.2, road: [] });
+  for (let s = 0; s < 1500; s++) sim.step();
+  assert.ok(Math.abs(sim.rimVel[3] + (5 * Math.cos(0.2)) / sim.p.treadRadius) < 1e-9);
+  assert.ok(sim.x.every(Number.isFinite));
+});
+
+test('kerb strike lifts the tread over the obstacle without blowing up', { timeout: 120000 }, () => {
+  const sim = new CpuTyreSimulation({ ...SMALL, speed: 4, road: roadPreset('kerb', 0.1) });
+  let maxSpeed = 0;
+  for (let s = 0; s < 1500; s++) {
+    sim.step();
+    for (let i = 0; i < sim.v.length; i++) maxSpeed = Math.max(maxSpeed, Math.abs(sim.v[i]));
+  }
+  assert.ok(sim.x.every(Number.isFinite));
+  assert.ok(maxSpeed < 20, `max node speed ${maxSpeed}`);
+});
+
 test('stiff, fast, high-pressure case stays finite with the adaptive step', { timeout: 120000 }, () => {
-  const sim = new CpuTyreSimulation({ ...SMALL, youngs: 10e6, pressure: 4e5, bumpH: 0.08, speed: 20 });
+  const sim = new CpuTyreSimulation({ ...SMALL, youngs: 10e6, pressure: 4e5, road: roadPreset('speedbump', 0.08), speed: 20 });
   for (let s = 0; s < 1000; s++) sim.step();
   assert.ok(Number.isFinite(sim.rim[1]) && Math.abs(sim.rim[1]) < 1);
 });

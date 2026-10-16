@@ -1,6 +1,6 @@
 // WebGPU host: buffers, compute passes (tet forces → nodes → rim → normals) and render passes.
 import { SIM_WGSL, RENDER_WGSL } from './shaders.js';
-import { packParams, nodeInfoArray } from './tyreCore.js';
+import { packParams, packRoad, nodeInfoArray, PARAM_FLOATS } from './tyreCore.js';
 
 const RIM_STRIDE = 36; // pos3 normal3 colour3 as f32
 const STORAGE = GPUBufferUsage.STORAGE;
@@ -78,8 +78,17 @@ export class GpuTyre {
   buildResources(canvasSize) {
     const { device, mesh, N, T } = this;
     const p = mesh.params;
-    this.paramBuf = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | COPY_DST });
-    this.globalsBuf = device.createBuffer({ size: 144, usage: GPUBufferUsage.UNIFORM | COPY_DST });
+    this.paramBuf = device.createBuffer({ size: 4 * PARAM_FLOATS, usage: GPUBufferUsage.UNIFORM | COPY_DST });
+    this.globalsBuf = device.createBuffer({ size: 272, usage: GPUBufferUsage.UNIFORM | COPY_DST });
+    // GPU timestamps (optional feature): sub-step passes 0-5, normal 6-7, render 8-9.
+    this.hasTimestamps = device.features.has('timestamp-query');
+    if (this.hasTimestamps) {
+      this.querySet = device.createQuerySet({ type: 'timestamp', count: 10 });
+      this.queryResolve = device.createBuffer({ size: 80, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
+      this.queryStaging = device.createBuffer({ size: 80, usage: GPUBufferUsage.MAP_READ | COPY_DST });
+      this.timeState = 'idle';
+      this.gpuTimes = null; // averaged ms per pass
+    }
     this.nodeInfoBuf = makeBuffer(device, nodeInfoArray(mesh, p.density), STORAGE);
     this.nodeStateBuf = device.createBuffer({ size: 8 * N * 4, usage: STORAGE | COPY_DST });
     this.nodeNormalBuf = device.createBuffer({ size: 16 * N, usage: STORAGE | COPY_DST });
@@ -215,29 +224,34 @@ export class GpuTyre {
     const p = params;
     this.rimX += steps * p.dt * p.speed;
     device.queue.writeBuffer(this.paramBuf, 0, packParams(p, this.N, this.T));
-    const g = new Float32Array(36);
+    const g = new Float32Array(68);
     g.set(camera.viewProj, 0);
     g.set([camera.eye[0], camera.eye[1], camera.eye[2], 1], 16);
     g.set([0.45, 0.85, 0.35, 0], 20);
-    g.set([p.bumpH, p.bumpX, p.bumpW, 0], 24);
+    g.set([0, 0, 0, 0], 24); // spare
     g.set([colourMode, this.mesh.params.NT, this.mesh.params.NI, this.mesh.params.NJ], 28);
-    g.set([p.rimRadius, p.treadRadius, Math.floor(this.rimX), 0], 32);
+    g.set([p.rimRadius, p.treadRadius, Math.floor(this.rimX), p.yaw], 32);
+    g.set(packRoad(p.road), 36);
     device.queue.writeBuffer(this.globalsBuf, 0, g);
 
     const encoder = device.createCommandEncoder();
     const tetGroups = Math.ceil(this.T / 64), nodeGroups = Math.ceil(this.N / 64);
+    // Time the first sub-step and the render pass of this frame, only when no readback is in flight.
+    const timed = this.hasTimestamps && this.timeState === 'idle' && steps > 0;
+    const ts = (i) => (timed ? { querySet: this.querySet, beginningOfPassWriteIndex: i, endOfPassWriteIndex: i + 1 } : undefined);
     for (let s = 0; s < steps; s++) {
-      let pass = encoder.beginComputePass();
+      const first = s === 0 && timed;
+      let pass = encoder.beginComputePass({ timestampWrites: first ? ts(0) : undefined });
       pass.setPipeline(this.pipeTet); pass.setBindGroup(0, this.bgSimTet); pass.dispatchWorkgroups(tetGroups);
       pass.end();
-      pass = encoder.beginComputePass();
+      pass = encoder.beginComputePass({ timestampWrites: first ? ts(2) : undefined });
       pass.setPipeline(this.pipeNode); pass.setBindGroup(0, this.bgSimNode); pass.dispatchWorkgroups(nodeGroups);
       pass.end();
-      pass = encoder.beginComputePass();
+      pass = encoder.beginComputePass({ timestampWrites: first ? ts(4) : undefined });
       pass.setPipeline(this.pipeRim); pass.setBindGroup(0, this.bgSimRim); pass.dispatchWorkgroups(1);
       pass.end();
     }
-    const normalPass = encoder.beginComputePass();
+    const normalPass = encoder.beginComputePass({ timestampWrites: timed ? ts(6) : undefined });
     normalPass.setPipeline(this.pipeNormal); normalPass.setBindGroup(0, this.bgSimNormal);
     normalPass.dispatchWorkgroups(nodeGroups);
     normalPass.end();
@@ -254,6 +268,7 @@ export class GpuTyre {
     const pass = encoder.beginRenderPass({
       colorAttachments: [{ view, clearValue: { r: 0.09, g: 0.1, b: 0.12, a: 1 }, loadOp: 'clear', storeOp: 'store' }],
       depthStencilAttachment: { view: this.depthView, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' },
+      timestampWrites: timed ? ts(8) : undefined,
     });
     pass.setBindGroup(0, this.bgRender);
     pass.setPipeline(this.pipeGround);
@@ -278,7 +293,26 @@ export class GpuTyre {
       encoder.copyBufferToBuffer(this.rimBuf, 0, this.rimStaging, 0, 32);
       this.readState = 'copying';
     }
+    if (timed) {
+      encoder.resolveQuerySet(this.querySet, 0, 10, this.queryResolve, 0);
+      encoder.copyBufferToBuffer(this.queryResolve, 0, this.queryStaging, 0, 80);
+      this.timeState = 'copying';
+    }
     device.queue.submit([encoder.finish()]);
+    if (this.timeState === 'copying') {
+      this.timeState = 'mapping';
+      this.queryStaging.mapAsync(GPUMapMode.READ).then(() => {
+        const t = new BigInt64Array(this.queryStaging.getMappedRange().slice(0));
+        this.queryStaging.unmap();
+        const ms = (a, b) => Number(t[b] - t[a]) / 1e6;
+        const sample = { tet: ms(0, 1), node: ms(2, 3), rim: ms(4, 5), normal: ms(6, 7), render: ms(8, 9) };
+        // Exponential moving average; per-pass deltas are coarse (browsers quantise timers), so smooth them.
+        this.gpuTimes = this.gpuTimes
+          ? Object.fromEntries(Object.keys(sample).map((k) => [k, this.gpuTimes[k] * 0.9 + sample[k] * 0.1]))
+          : sample;
+        this.timeState = 'idle';
+      }).catch(() => { this.timeState = 'idle'; });
+    }
     if (this.readState === 'copying') {
       this.readState = 'mapping';
       this.rimStaging.mapAsync(GPUMapMode.READ).then(() => {

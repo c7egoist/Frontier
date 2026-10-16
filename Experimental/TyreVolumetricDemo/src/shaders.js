@@ -6,9 +6,10 @@ struct Params {
   gravity: f32, damping: f32, groundK: f32, groundC: f32,
   friction: f32, frictionC: f32, beadK: f32, beadC: f32,
   rimRadius: f32, treadRadius: f32, rimMass: f32, suspK: f32,
-  suspC: f32, speed: f32, targetY: f32, bumpH: f32,
-  bumpX: f32, bumpW: f32, nodeCount: f32, tetCount: f32,
-  NT: f32, NI: f32, NJ: f32, pad: f32,
+  suspC: f32, speed: f32, targetY: f32, roadCount: f32,
+  yaw: f32, nodeCount: f32, tetCount: f32,
+  NT: f32, NI: f32, NJ: f32, pad0: f32, pad1: f32,
+  road: array<vec4<f32>, 8>,   // x, w, h, kind
 };
 
 // Per node: nodeState[2n] = (position, reaction), nodeState[2n+1] = (velocity, 0)
@@ -20,13 +21,27 @@ struct Params {
 @group(0) @binding(5) var<storage, read_write> tetForce: array<vec4<f32>>; // 4 per tet (entry = tet*4+local)
 @group(0) @binding(6) var<storage, read> adjStart: array<u32>;
 @group(0) @binding(7) var<storage, read> adjList: array<u32>;
-@group(0) @binding(8) var<storage, read_write> rim: array<vec4<f32>>;   // [0] = (x, y, z, alpha) [1] = (vx, vy, vz, omega)
+@group(0) @binding(8) var<storage, read_write> rim: array<vec4<f32>>;   // [0] = (x, y, z, alpha) [1] = (vx, vy, vz, alphaDot)
 @group(0) @binding(9) var<storage, read_write> nodeNormal: array<vec4<f32>>;
 
-fn terrainH(x: f32) -> f32 {
-  let d = (x - P.bumpX) / P.bumpW;
+fn featureH(f: vec4<f32>, x: f32) -> f32 {
+  if (f.w > 0.5) {
+    // kerb: block from f.x to f.x + f.y with 3 cm smooth ramps
+    let up = smoothstep(f.x - 0.03, f.x, x);
+    let down = 1.0 - smoothstep(f.x + f.y, f.x + f.y + 0.03, x);
+    return f.z * up * down;
+  }
+  let d = (x - f.x) / f.y;
   if (abs(d) >= 1.0) { return 0.0; }
-  return P.bumpH * 0.5 * (1.0 + cos(3.14159265 * d));
+  return f.z * 0.5 * (1.0 + cos(3.14159265 * d));
+}
+
+fn terrainH(x: f32) -> f32 {
+  var h = 0.0;
+  for (var k = 0u; k < 8u; k = k + 1u) {
+    h = h + featureH(P.road[k], x);
+  }
+  return h;
 }
 
 fn cofac(F: mat3x3<f32>) -> mat3x3<f32> {
@@ -83,18 +98,23 @@ fn cs_node(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   f = f - P.damping * m * v;
 
-  let rim0 = rim[0];
-  let rim1 = rim[1];
-  let alpha = rim0.w;
-  let c = cos(alpha);
-  let s = sin(alpha);
+  let c0 = rim[0];
+  let c1 = rim[1];
   var react = 0.0;
   if (length(info.xy) < P.rimRadius + 1e-4) {
-    let ox = info.x * c - info.y * s;
-    let oy = info.x * s + info.y * c;
-    let tgt = vec3<f32>(rim0.x + ox, rim0.y + oy, info.z);
-    let omega = rim1.w;
-    let vt = vec3<f32>(rim1.x - omega * oy, rim1.y + omega * ox, rim1.z);
+    let cA = cos(c0.w);
+    let sA = sin(c0.w);
+    let cY = cos(P.yaw);
+    let sY = sin(P.yaw);
+    // rest → Rz(alpha) (rolling plane) → Ry(yaw) (wheel heading)
+    let ax = info.x * cA - info.y * sA;
+    let ay = info.x * sA + info.y * cA;
+    let az = info.z;
+    let r = vec3<f32>(ax * cY + az * sY, ay, -ax * sY + az * cY);
+    let tgt = c0.xyz + r;
+    // spin vector W = alphaDot · axle, axle = (sin yaw, 0, cos yaw)
+    let W = c1.w * vec3<f32>(sY, 0.0, cY);
+    let vt = c1.xyz + cross(W, r);
     let fb = P.beadK * (tgt - x) + P.beadC * m * (vt - v);
     f = f + fb;
     react = -fb.y;
@@ -143,7 +163,7 @@ fn cs_rim(@builtin(local_invocation_id) lid: vec3<u32>) {
     pos.y = pos.y + P.dt * vel.y;
     vel.x = P.speed;
     vel.z = 0.0;
-    vel.w = P.speed / P.treadRadius;
+    vel.w = -P.speed * cos(P.yaw) / P.treadRadius;
     pos.x = pos.x + P.dt * vel.x;
     pos.z = 0.0;
     pos.w = pos.w + P.dt * vel.w;
@@ -179,14 +199,16 @@ fn cs_normal(@builtin(global_invocation_id) gid: vec3<u32>) {
   let dth = nodeState[2u * nodeAt(t + 1, i, j)].xyz - nodeState[2u * nodeAt(t - 1, i, j)].xyz;
   let di = nodeState[2u * nodeAt(t, ip, j)].xyz - nodeState[2u * nodeAt(t, im, j)].xyz;
   let dj = nodeState[2u * nodeAt(t, i, jp)].xyz - nodeState[2u * nodeAt(t, i, jm)].xyz;
-  let radial = vec3<f32>(pC.x - rim[0].x, pC.y - rim[0].y, 0.0);
+  let axle = vec3<f32>(sin(P.yaw), 0.0, cos(P.yaw));
+  let d = pC - rim[0].xyz;
+  let radial = d - axle * dot(d, axle);
   let c1 = cross(dth, dj);
   let c2 = cross(dth, di);
   var nrm = vec3<f32>(0.0);
   if (i == NI - 1) { nrm = nrm + c1 * sign(dot(c1, radial)); }
   if (j == 0 || j == NJ - 1) {
     let lat = select(-1.0, 1.0, j == NJ - 1);
-    nrm = nrm + c2 * sign(c2.z * lat);
+    nrm = nrm + c2 * sign(dot(c2, axle) * lat);
   }
   if (length(nrm) < 1e-12) { nrm = radial; }
   nodeNormal[n] = vec4<f32>(normalize(nrm), 0.0);
@@ -198,9 +220,10 @@ struct Globals {
   viewProj: mat4x4<f32>,
   camPos: vec4<f32>,
   lightDir: vec4<f32>,
-  terrain: vec4<f32>,   // bumpH, bumpX, bumpW, 0
+  terrain: vec4<f32>,   // unused
   view: vec4<f32>,      // colourMode, NT, NI, NJ
-  rimInfo: vec4<f32>,   // rimRadius, treadRadius, 0, 0
+  rimInfo: vec4<f32>,   // rimRadius, treadRadius, ground grid shift (m), yaw
+  road: array<vec4<f32>, 8>,
 };
 @group(0) @binding(0) var<uniform> G: Globals;
 @group(0) @binding(1) var<storage, read> nodeState: array<vec4<f32>>;
@@ -208,10 +231,30 @@ struct Globals {
 @group(0) @binding(3) var<storage, read> nodeInfo: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> rim: array<vec4<f32>>;
 
-fn terrainH(x: f32) -> f32 {
-  let d = (x - G.terrain.y) / G.terrain.z;
+fn featureH(f: vec4<f32>, x: f32) -> f32 {
+  if (f.w > 0.5) {
+    let up = smoothstep(f.x - 0.03, f.x, x);
+    let down = 1.0 - smoothstep(f.x + f.y, f.x + f.y + 0.03, x);
+    return f.z * up * down;
+  }
+  let d = (x - f.x) / f.y;
   if (abs(d) >= 1.0) { return 0.0; }
-  return G.terrain.x * 0.5 * (1.0 + cos(3.14159265 * d));
+  return f.z * 0.5 * (1.0 + cos(3.14159265 * d));
+}
+
+fn terrainH(x: f32) -> f32 {
+  var h = 0.0;
+  for (var k = 0u; k < 8u; k = k + 1u) {
+    h = h + featureH(G.road[k], x);
+  }
+  return h;
+}
+
+// Wheel frame: local = Ry(-yaw) · (world − centre), in the rolling plane + axle.
+fn toWheel(d: vec3<f32>) -> vec3<f32> {
+  let c = cos(G.rimInfo.w);
+  let s = sin(G.rimInfo.w);
+  return vec3<f32>(d.x * c - d.z * s, d.y, d.x * s + d.z * c);
 }
 
 struct TyreOut {
@@ -225,14 +268,14 @@ struct TyreOut {
 fn vs_tyre(@builtin(vertex_index) vi: u32) -> TyreOut {
   let p = nodeState[2u * vi].xyz;
   let info = nodeInfo[vi];
-  let rc = rim[0].xy;
-  let restR = length(info.xy);
-  let curR = length(p.xy - rc);
+  let d = p - rim[0].xyz;
+  let axle = vec3<f32>(sin(G.rimInfo.w), 0.0, cos(G.rimInfo.w));
+  let radial = length(d - axle * dot(d, axle));
   var o: TyreOut;
   o.pos = G.viewProj * vec4<f32>(p, 1.0);
   o.world = p;
   o.normal = nodeNormal[vi].xyz;
-  o.dev = restR - curR; // + = squashed inward (contact patch / sidewall), - = bulged
+  o.dev = length(info.xy) - radial; // + = squashed inward, - = bulged
   return o;
 }
 
@@ -242,15 +285,14 @@ fn fs_tyre(inp: TyreOut) -> @location(0) vec4<f32> {
   let v = normalize(G.camPos.xyz - inp.world);
   if (dot(n, v) < 0.0) { n = -n; }
   let L = normalize(G.lightDir.xyz);
-  // Tread pattern follows the material: angle in the rim frame, integer frequency so it wraps cleanly.
-  let rc = rim[0].xy;
-  let alpha = rim[0].w;
-  let ang = atan2(inp.world.y - rc.y, inp.world.x - rc.x) - alpha;
+  // Tread pattern follows the material: angle in the wheel frame, integer frequency so it wraps cleanly.
+  let local = toWheel(inp.world - rim[0].xyz);
+  let ang = atan2(local.y, local.x) - rim[0].w;
   let blocks = fract(ang * 36.0 / 6.2831853);
   let transverse = 1.0 - smoothstep(0.02, 0.06, min(blocks, 1.0 - blocks));
-  let rr = length(inp.world.xy - rc);
+  let rr = length(vec2<f32>(local.x, local.y));
   let onTread = smoothstep(0.26, 0.31, rr);
-  let groove = transverse * onTread * (1.0 - smoothstep(0.03, 0.07, abs(inp.world.z)));
+  let groove = transverse * onTread * (1.0 - smoothstep(0.03, 0.07, abs(local.z)));
   var base = vec3<f32>(0.075, 0.075, 0.08);
   base = mix(base, vec3<f32>(0.02, 0.02, 0.022), groove);
   if (G.view.x > 0.5) {
@@ -280,9 +322,8 @@ struct GroundOut {
 @vertex
 fn vs_ground(@location(0) xz: vec2<f32>) -> GroundOut {
   let wx = xz.x + G.rimInfo.z;
-  let y = terrainH(wx);
   var o: GroundOut;
-  o.world = vec3<f32>(wx, y, xz.y);
+  o.world = vec3<f32>(wx, terrainH(wx), xz.y);
   o.pos = G.viewProj * vec4<f32>(o.world, 1.0);
   return o;
 }
@@ -311,18 +352,20 @@ struct RimOut {
   @location(2) colour: vec3<f32>,
 };
 
-// Rim geometry is authored once in the wheel frame and placed on the GPU from the rim state.
+// Rim geometry is authored once in the wheel frame and placed on the GPU: Ry(yaw)·Rz(alpha)·local + centre.
 @vertex
 fn vs_rim(i: RimIn) -> RimOut {
   let a = rim[0].w;
   let c = cos(a);
   let s = sin(a);
-  let lp = vec3<f32>(c * i.pos.x - s * i.pos.y, s * i.pos.x + c * i.pos.y, i.pos.z);
-  let ln = vec3<f32>(c * i.normal.x - s * i.normal.y, s * i.normal.x + c * i.normal.y, i.normal.z);
+  let cY = cos(G.rimInfo.w);
+  let sY = sin(G.rimInfo.w);
+  let p1 = vec3<f32>(c * i.pos.x - s * i.pos.y, s * i.pos.x + c * i.pos.y, i.pos.z);
+  let n1 = vec3<f32>(c * i.normal.x - s * i.normal.y, s * i.normal.x + c * i.normal.y, i.normal.z);
   var o: RimOut;
-  o.world = lp + vec3<f32>(rim[0].x, rim[0].y, 0.0);
+  o.world = vec3<f32>(p1.x * cY + p1.z * sY, p1.y, -p1.x * sY + p1.z * cY) + rim[0].xyz;
   o.pos = G.viewProj * vec4<f32>(o.world, 1.0);
-  o.normal = ln;
+  o.normal = vec3<f32>(n1.x * cY + n1.z * sY, n1.y, -n1.x * sY + n1.z * cY);
   o.colour = i.colour;
   return o;
 }

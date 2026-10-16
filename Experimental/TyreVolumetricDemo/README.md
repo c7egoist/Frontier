@@ -13,8 +13,30 @@ npm run serve     # then open http://localhost:8080 in a WebGPU browser (Chrome/
 ```
 
 Open the page in a WebGPU-capable browser. Sliders: rolling speed, inflation, rubber stiffness,
-effective density, sprung mass, road bump, friction, damping, simulation speed. Toggle the
-tetrahedral edges, switch to the deformation colour map, or pause/reset.
+effective density, sprung mass, obstacle height, **slip angle (steer)**, friction, damping,
+simulation speed. The **Road** menu picks a speed bump, a kerb strike, a mixed course, or flat.
+Toggle the tetrahedral edges, switch to the deformation colour map, or pause/reset.
+
+The HUD shows FPS, JS encode time, sub-steps per frame, and GPU pass times when the browser
+exposes the `timestamp-query` feature (Chrome/Edge on desktop typically do; Safari may not).
+
+## Road and slip
+
+- **Road features** (`roadPreset`, `featureHeight` / WGSL `featureH`): a raised-cosine speed bump,
+  or a kerb block with 3 cm ramps. Up to eight features, summed. CPU and GPU use the same function.
+- **Slip angle**: the wheel heading (`yaw`) is rotated about the vertical axis relative to the
+  direction of travel. The bead target is `rim + Ry(yaw)·Rz(α)·rest`, and the spin vector is
+  `α̇·(sin yaw, 0, cos yaw)`. The tread has to slide sideways to follow the rim, so lateral
+  forces build up in the contact patch. The rim's lateral position is still prescribed; there is
+  no steering-torque model.
+
+## Fixed in this revision
+
+- **Rolling spin sign.** The rim spun the wrong way: at 5 m/s the contact patch moved forward at
+  about 12 m/s, so the tread was skidding. It now spins at −v·cos(yaw)/R, and the contact patch
+  moves at about 0.4 m/s. A test checks this.
+- **Contact stickiness.** The viscous friction rate went from 150/s to 600/s, which makes the
+  contact patch stick much more like a real tyre.
 
 ## Method
 
@@ -60,7 +82,7 @@ keep up.
 ## What this is not (yet)
 
 - **Rim motion is prescribed**: the rim advances at the commanded speed and spins with the
-  rolling constraint. Drive torque, braking and slip ratio are not modelled.
+  rolling constraint (and yaw for slip). Drive torque, braking and slip ratio are not modelled.
 - **Road contact is a height-field penalty** (vertical normal, clamped Coulomb friction per
   node). There is no tyre-to-triangle contact.
 - **No self-contact** between tread and sidewall, and no inner-liner or cord model.

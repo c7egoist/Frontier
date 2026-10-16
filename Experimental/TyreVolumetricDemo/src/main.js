@@ -1,5 +1,5 @@
 // UI, camera and frame loop for the WebGPU volumetric tyre demo.
-import { buildTyreMesh, resolveParams } from './tyreCore.js';
+import { buildTyreMesh, resolveParams, roadPreset } from './tyreCore.js';
 import { GpuTyre } from './gpuTyre.js';
 
 const canvas = document.getElementById('view');
@@ -12,7 +12,8 @@ const SLIDERS = [
   { key: 'youngsMPa', label: 'Rubber stiffness E (MPa)', min: 2, max: 10, step: 0.2 },
   { key: 'density', label: 'Effective density (kg/m³)', min: 1000, max: 3000, step: 50 },
   { key: 'rimMass', label: 'Sprung mass per corner (kg)', min: 60, max: 400, step: 5 },
-  { key: 'bumpCm', label: 'Road bump height (cm)', min: 0, max: 8, step: 0.5 },
+  { key: 'bumpCm', label: 'Obstacle height (cm)', min: 0, max: 12, step: 0.5 },
+  { key: 'slip', label: 'Slip angle / steer (deg)', min: -10, max: 10, step: 0.5 },
   { key: 'friction', label: 'Tread friction µ', min: 0, max: 1.5, step: 0.05 },
   { key: 'damping', label: 'Internal damping (1/s)', min: 0, max: 30, step: 0.5 },
   { key: 'simSpeed', label: 'Simulation speed (×)', min: 0.1, max: 1, step: 0.05 },
@@ -21,6 +22,7 @@ const SLIDERS = [
 const ui = {
   speed: 5, bar: 2.5, youngsMPa: 6, density: 1000, rimMass: 180, bumpCm: 3,
   friction: 0.9, damping: 4, simSpeed: 1, colourMode: 0, showEdges: false, paused: false, follow: true,
+  slip: 0, road: 'speedbump',
 };
 
 function toParams() {
@@ -30,7 +32,8 @@ function toParams() {
     youngs: ui.youngsMPa * 1e6,
     density: ui.density,
     rimMass: ui.rimMass,
-    bumpH: ui.bumpCm / 100,
+    road: roadPreset(ui.road, ui.bumpCm / 100),
+    yaw: (ui.slip * Math.PI) / 180,
     friction: ui.friction,
     damping: ui.damping,
   });
@@ -52,6 +55,7 @@ function buildControls() {
     });
     showValue(s.key);
   }
+  document.getElementById('road').addEventListener('change', (e) => { ui.road = e.target.value; });
   document.getElementById('colour').addEventListener('change', (e) => { ui.colourMode = Number(e.target.value); });
   document.getElementById('edges').addEventListener('change', (e) => { ui.showEdges = e.target.checked; });
   document.getElementById('follow').addEventListener('change', (e) => { ui.follow = e.target.checked; });
@@ -124,7 +128,7 @@ const SIM_DT_CAP = 1 / 30;
 const MAX_STEPS_PER_FRAME = 240;
 let gpu = null;
 let accumulator = 0, simTime = 0, last = performance.now();
-let frames = 0, fpsTime = 0, fps = 0;
+let frames = 0, fpsTime = 0, fps = 0, jsMs = 0;
 let meshParams = null;
 
 function resizeCanvas() {
@@ -157,15 +161,23 @@ function frame(now) {
   }
   const aspect = canvas.width / Math.max(1, canvas.height);
   const cam = cameraMatrices(aspect);
+  const t0 = performance.now();
   gpu.frame({ params, steps, camera: cam, colourMode: ui.colourMode, showEdges: ui.showEdges });
+  jsMs = jsMs * 0.9 + (performance.now() - t0) * 0.1;
 
   const rim = gpu.lastRim;
   const rimY = rim ? rim.y : NaN;
   const sag = Number.isFinite(rimY) ? (params.targetY - rimY) * 1000 : NaN;
+  const g = gpu.gpuTimes;
+  const gpuLine = g
+    ? `GPU per sub-step (ms, EMA): tet ${g.tet.toFixed(3)}  node ${g.node.toFixed(3)}  rim ${g.rim.toFixed(3)}\n` +
+      `GPU est. per frame: ${(steps * (g.tet + g.node + g.rim) + g.normal + g.render).toFixed(2)} ms  (normal ${g.normal.toFixed(3)}, render ${g.render.toFixed(3)})`
+    : 'GPU timing: timestamp-query not available in this browser';
   hud.textContent =
-    `FPS ${fps.toFixed(0)}   sub-steps/frame ${steps} (dt ${(params.dt * 1e3).toFixed(2)} ms)\n` +
-    `sim time ${simTime.toFixed(2)} s   rim x ${gpu.rimX.toFixed(2)} m\n` +
+    `FPS ${fps.toFixed(0)}   JS encode ${jsMs.toFixed(2)} ms   sub-steps/frame ${steps} (dt ${(params.dt * 1e3).toFixed(3)} ms)\n` +
+    `sim time ${simTime.toFixed(2)} s   rim x ${gpu.rimX.toFixed(2)} m   slip ${ui.slip.toFixed(1)}°\n` +
     `rim height ${Number.isFinite(rimY) ? rimY.toFixed(4) : '…'} m   ride-target offset ${Number.isFinite(sag) ? sag.toFixed(1) : '…'} mm\n` +
+    `${gpuLine}\n` +
     `nodes ${meshParams.N}   tetrahedra ${meshParams.T}   surface tris ${meshParams.surface.length / 3}`;
 }
 
@@ -182,7 +194,8 @@ async function main() {
   }
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
   if (!adapter) { showMessage('No WebGPU adapter was found.'); return; }
-  const device = await adapter.requestDevice();
+  const wanted = adapter.features.has('timestamp-query') ? ['timestamp-query'] : [];
+  const device = await adapter.requestDevice({ requiredFeatures: wanted });
   device.lost.then((info) => showMessage(`GPU device lost: ${info.message}`));
   const format = navigator.gpu.getPreferredCanvasFormat();
   const context = canvas.getContext('webgpu');

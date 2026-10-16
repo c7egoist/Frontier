@@ -13,8 +13,12 @@ export const DEFAULT_PARAMS = {
   // Contact against the procedural road (penalty spring + viscous friction clamped by Coulomb).
   // groundC, frictionC and beadC are damping RATES (1/s), applied per node as rate·mass·velocity so the
   // explicit step stays stable for the very light bead/sidewall nodes.
-  groundK: 3.0e4, groundC: 60, friction: 0.9, frictionC: 150,
-  bumpH: 0.03, bumpX: 4.0, bumpW: 0.5,
+  groundK: 3.0e4, groundC: 60, friction: 0.9, frictionC: 600,
+  // Road features: {x, w, h, kind}. kind 0 = raised-cosine speed bump centred on x (half-width w, height h);
+  // kind 1 = kerb: block from x to x+w, height h, with 3 cm ramps. Up to MAX_ROAD features.
+  road: [{ x: 4.0, w: 0.5, h: 0.03, kind: 0 }],
+  // Wheel yaw (slip angle) relative to the direction of travel, radians. 0 = straight.
+  yaw: 0,
   // Bead attachment to the rim and the rim's suspended mass.
   beadK: 2.5e4, beadC: 40,
   rimMass: 180, suspK: 9.0e4, suspC: 4000, targetY: 0.33,
@@ -44,6 +48,19 @@ export function nodeInfoArray(mesh, density) {
     out[4 * n + 2] = mesh.rest[3 * n + 2]; out[4 * n + 3] = density * mesh.nodeVolume[n];
   }
   return out;
+}
+
+export const MAX_ROAD = 8;
+const KERB_RAMP = 0.03;
+
+// Named road layouts for the UI. `h` is the obstacle height in metres.
+export function roadPreset(name, h) {
+  switch (name) {
+    case 'speedbump': return [{ x: 4, w: 0.5, h, kind: 0 }];
+    case 'kerb': return [{ x: 4, w: 0.25, h, kind: 1 }];
+    case 'mixed': return [{ x: 3, w: 0.5, h, kind: 0 }, { x: 9, w: 0.25, h, kind: 1 }, { x: 14, w: 0.4, h: h * 0.6, kind: 0 }];
+    default: return [];
+  }
 }
 
 export function resolveParams(overrides = {}) {
@@ -196,11 +213,25 @@ export function invertColMajor(m) {
   return transposeC(inv); // back to column-major
 }
 
-// Terrain height (same function as the WGSL terrainH): one raised cosine bump.
-export function terrainHeight(x, p) {
-  const d = (x - p.bumpX) / p.bumpW;
+// Road height at x: sum of features (same as the WGSL terrainH).
+export function featureHeight(f, x) {
+  if (f.kind === 1) {
+    const up = smoothstep(f.x - KERB_RAMP, f.x, x);
+    const down = 1 - smoothstep(f.x + f.w, f.x + f.w + KERB_RAMP, x);
+    return f.h * up * down;
+  }
+  const d = (x - f.x) / f.w;
   if (Math.abs(d) >= 1) return 0;
-  return p.bumpH * 0.5 * (1 + Math.cos(Math.PI * d));
+  return f.h * 0.5 * (1 + Math.cos(Math.PI * d));
+}
+function smoothstep(a, b, x) {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+export function terrainHeight(x, p) {
+  let h = 0;
+  for (const f of p.road) h += featureHeight(f, x);
+  return h;
 }
 
 // First Piola–Kirchhoff element forces, per tetrahedron, in the same form as the WGSL cs_tet pass.
@@ -238,17 +269,26 @@ export function lameParameters(p) {
   return { mu, lambda };
 }
 
-// Packs parameters in the exact field order of `struct Params` in shaders.js (28 floats).
+// Packs parameters in the exact field order of `struct Params` in shaders.js (28 scalars, then 8 road vec4s).
 export const PARAM_LAYOUT = [
   'mu', 'lambda', 'pressure', 'dt', 'gravity', 'damping', 'groundK', 'groundC',
   'friction', 'frictionC', 'beadK', 'beadC', 'rimRadius', 'treadRadius', 'rimMass', 'suspK',
-  'suspC', 'speed', 'targetY', 'bumpH', 'bumpX', 'bumpW', 'nodeCount', 'tetCount',
-  'NT', 'NI', 'NJ', 'pad',
+  'suspC', 'speed', 'targetY', 'roadCount', 'yaw', 'nodeCount', 'tetCount',
+  'NT', 'NI', 'NJ', 'pad0', 'pad1',
 ];
+export const PARAM_FLOATS = PARAM_LAYOUT.length + 4 * MAX_ROAD; // 60
+export function packRoad(features) {
+  const out = new Float32Array(4 * MAX_ROAD);
+  features.slice(0, MAX_ROAD).forEach((f, i) => out.set([f.x, f.w, f.h, f.kind], 4 * i));
+  return out;
+}
 export function packParams(p, N, T) {
   const { mu, lambda } = lameParameters(p);
-  const values = { ...p, mu, lambda, nodeCount: N, tetCount: T, pad: 0 };
-  return Float32Array.from(PARAM_LAYOUT.map((k) => values[k]));
+  const values = { ...p, mu, lambda, roadCount: p.road.length, nodeCount: N, tetCount: T, pad0: 0, pad1: 0 };
+  const out = new Float32Array(PARAM_FLOATS);
+  PARAM_LAYOUT.forEach((k, i) => { out[i] = values[k]; });
+  out.set(packRoad(p.road), PARAM_LAYOUT.length);
+  return out;
 }
 
 // CPU reference of the GPU pipeline: tet forces → node gather/integrate (+bead springs, ground) → rim update.
@@ -262,6 +302,10 @@ export class CpuTyreSimulation {
     this.reset();
   }
 
+  rimAngles() {
+    return { alpha: this.rim[3], yaw: this.p.yaw };
+  }
+
   reset() {
     const { N, rest } = this.mesh;
     const y0 = this.p.treadRadius + 0.005;
@@ -273,8 +317,9 @@ export class CpuTyreSimulation {
       this.x[3 * n + 1] = rest[3 * n + 1] + y0;
       this.x[3 * n + 2] = rest[3 * n + 2];
     }
-    this.rim = [0, y0, 0, 0];   // x, y, z, alpha
-    this.rimVel = [0, 0, 0, 0]; // vx, vy, vz, omega
+    this.rim = [0, y0, 0];      // centre x, y, z
+    this.rim[3] = 0;            // spin angle alpha (about the wheel axle)
+    this.rimVel = [0, 0, 0, 0]; // vx, vy, vz, alpha-dot
     this.time = 0;
   }
 
@@ -298,9 +343,13 @@ export class CpuTyreSimulation {
     }
 
     // 2) node gather + bead springs + ground contact + semi-implicit integration
-    const [rx0, ry0, , alpha] = this.rim;
-    const [rvx, rvy, rvz, omega] = this.rimVel;
+    const [rx0, ry0, rz0] = this.rim;
+    const [rvx, rvy, rvz, alphaDot] = this.rimVel;
+    const { alpha, yaw } = this.rimAngles();
     const c = Math.cos(alpha), s = Math.sin(alpha);
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    // Spin vector W = α̇ · axle, axle = Ry(yaw)·ẑ = (sin yaw, 0, cos yaw).
+    const Wx = alphaDot * sy, Wy = 0, Wz = alphaDot * cy;
     for (let n = 0; n < N; n++) {
       const mass = m.nodeRest[4 * n + 3];
       const px = x[3 * n], py = x[3 * n + 1], pz = x[3 * n + 2];
@@ -312,12 +361,15 @@ export class CpuTyreSimulation {
       }
       fx -= p.damping * mass * vx; fy -= p.damping * mass * vy; fz -= p.damping * mass * vz;
 
-      const rxr = m.nodeRest[4 * n], ryr = m.nodeRest[4 * n + 1], rzr = m.nodeRest[4 * n + 2];
+      const restX = m.nodeRest[4 * n], restY = m.nodeRest[4 * n + 1], restZ = m.nodeRest[4 * n + 2];
       let react = 0;
-      if (Math.hypot(rxr, ryr) < p.rimRadius + 1e-4) {
-        const ox = rxr * c - ryr * s, oy = rxr * s + ryr * c;
-        const tx = rx0 + ox, ty = ry0 + oy, tz = rzr;
-        const wvx = rvx - omega * oy, wvy = rvy + omega * ox, wvz = rvz;
+      if (Math.hypot(restX, restY) < p.rimRadius + 1e-4) {
+        // target = rim + Ry(yaw)·Rz(alpha)·rest ; r = target − rim centre
+        const ax = restX * c - restY * s, ay = restX * s + restY * c, az = restZ;
+        const rX = ax * cy + az * sy, rY = ay, rZ = -ax * sy + az * cy;
+        const tx = rx0 + rX, ty = ry0 + rY, tz = rz0 + rZ;
+        // rim velocity + W × r
+        const wvx = rvx + (Wy * rZ - Wz * rY), wvy = rvy + (Wz * rX - Wx * rZ), wvz = rvz + (Wx * rY - Wy * rX);
         const bx = p.beadK * (tx - px) + p.beadC * mass * (wvx - vx);
         const by = p.beadK * (ty - py) + p.beadC * mass * (wvy - vy);
         const bz = p.beadK * (tz - pz) + p.beadC * mass * (wvz - vz);
@@ -341,7 +393,7 @@ export class CpuTyreSimulation {
       this.react[n] = react;
     }
 
-    // 3) rim: suspension + bead reaction in y, prescribed rolling in x
+    // 3) rim: suspension + bead reaction in y; travel along x at `speed`; spin about its axle at −v·cos(yaw)/R
     let sumR = 0;
     for (let n = 0; n < N; n++) sumR += this.react[n];
     const M = p.rimMass;
@@ -349,7 +401,7 @@ export class CpuTyreSimulation {
     this.rimVel[1] += dt * ay;
     this.rim[1] += dt * this.rimVel[1];
     this.rimVel[0] = p.speed;
-    this.rimVel[3] = p.speed / p.treadRadius;
+    this.rimVel[3] = (-p.speed * Math.cos(p.yaw)) / p.treadRadius;
     this.rim[0] += dt * this.rimVel[0];
     this.rim[3] += dt * this.rimVel[3];
     this.time += dt;
