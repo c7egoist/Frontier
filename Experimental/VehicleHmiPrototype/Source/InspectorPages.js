@@ -17,6 +17,7 @@ import { ArenaZones, TrainingDrills } from "./LevelStructure.js";
 import { DerezPresets } from "./EffectSequence.js";
 import { FormatPrimary } from "./TrainingSequence.js";
 import { CameraRigs } from "./CabinStructure.js";
+import { BeamStates, LampTechnologies, DescribeLamps } from "./Lighting/VehicleLamps.js";
 
 export const InspectionModes = [
     ["Final image", 0], ["Direct sun only", 1], ["Indirect diffuse (GI)", 2], ["Indirect irradiance (denoised)", 3],
@@ -95,10 +96,16 @@ export function ConstructEntities(Host)
           Switches: () => [{ Name: "See-through glass", Glyph: "Eye", Read: () => Host.Cabin.Settings.SeeThroughGlass,
                              Write: (On) => { Host.Cabin.Settings.SeeThroughGlass = On; } },
                            { Name: "Screens", Glyph: "Monitor", Read: () => Host.Cabin.Settings.Screens, Write: (On) => { Host.Cabin.Settings.Screens = On; } }] },
+        { Id: "lamps", Group: "Vehicle", Name: "Lamps", Type: "Beam, fog & roof flood", Glyph: "Lightbulb", Colour: Accent.Vehicle, Parent: "vehicle",
+          Description: "Low & high beam · fog lamps · roof flood bar", Meta: () => (S.Lamps.Beam === 0 ? "off" : BeamStates[S.Lamps.Beam].toLowerCase()),
+          State: () => (S.Lamps.Beam > 0 || S.Lamps.Fog || S.Lamps.RoofFlood ? "live" : ""), Build: (C, B) => BuildLamps(Host, C, B) },
         { Id: "marks", Group: "Vehicle", Name: "Tyre marks", Type: "Rubber deposit", Glyph: "CircleDot", Colour: Accent.Vehicle, Parent: "vehicle",
           Description: "Rubber laid by sliding work", Meta: () => `${Host.Marks.Metrics.LaidMetres.toFixed(0)} m`, State: () => (S.TyreMarks ? "live" : ""),
           Build: (C, B) => BuildMarks(Host, C, B),
           Toggle: { Read: () => S.TyreMarks, Write: (On) => { S.TyreMarks = On; } } },
+        { Id: "street", Group: "Environment", Name: "Street & LED lights", Type: "Luminaires", Glyph: "Lightbulb", Colour: Accent.Environment,
+          Description: "Lampposts · LED building · tunnel & gantry strips", Meta: () => `${Host.LightStats ? Host.LightStats.Lights : 0} lights`,
+          State: () => "live", Build: (C, B) => BuildStreetLights(Host, C, B) },
         { Id: "gas", Group: "Effects", Name: "Smoke & fire", Type: "Gas domain", Glyph: "Flame", Colour: Accent.Effects,
           Description: "Eulerian smoke · combustion · tyre sources", Meta: () => (Host.Smoke.Resident ? "resident" : "idle"),
           State: () => (Host.Smoke.Resident ? "live" : ""), Build: (C, B) => BuildGas(Host, C, B),
@@ -412,6 +419,67 @@ function BuildCabin(Host, C, Body)
     C.Button(Row, "Passenger", "Camera", () => Host.AssignCameraMode("Passenger"));
     C.Button(Row, "Chase", "Car", () => Host.AssignCameraMode("Chase"));
     C.Button(Row, "Orbit", "Camera", () => Host.AssignCameraMode("Orbit"));
+}
+
+// 📝 The vehicle's lamps: the beam (the I key steps it), the fog lamps and the roof flood bar, and the photometry of each. A change
+//    of a value takes effect on the next frame: the profile tables rebuild when their parameters change (IlluminationHost.js).
+function BuildLamps(Host, C, Body)
+{
+    const L = Host.Settings.Lamps;
+    const Beam = C.Card(Body, "Beam", "Lightbulb", { Accent: Accent.Vehicle, Index: 1, Subtitle: "I steps · Shift+I fog · L roof flood" });
+    C.Readout(Beam, () => [DescribeLamps(L)]);
+    C.Segmented(Beam, L, "Beam", [["Off", 0], ["Low", 1], ["High", 2]], { Label: "Headlamps", OnChange: () => Host.LampsChanged() });
+    C.Switch(Beam, L, "Fog", { Label: "Fog lamps", Detail: "Shift+I", OnChange: () => Host.LampsChanged() });
+    C.Switch(Beam, L, "RoofFlood", { Label: "Roof flood bar", Detail: "L", OnChange: () => Host.LampsChanged() });
+
+    const Technology = C.Card(Body, "Lamp technology", "Zap", { Accent: Accent.Vehicle, Index: 2 });
+    C.Segmented(Technology, L, "Technology", Object.entries(LampTechnologies).map(([Key, Value]) => [Value.Label, Key]),
+                { OnChange: (Key) => { L.Kelvin = LampTechnologies[Key].Kelvin; } });
+    C.Muted(Technology, "A technology sets the colour temperature and the output together; the sliders below refine each beam.");
+    Slider(C, Technology, L, "Kelvin", "Colour temperature", 2700, 6500, 100, "K", 0);
+
+    const Low = C.Card(Body, "Low beam", "Lightbulb", { Accent: Accent.Vehicle, Index: 3, Subtitle: "Asymmetric cut-off · ECE-style" });
+    Slider(C, Low, L.Low, "Intensity", "Peak intensity", 50, 1000, 10, "cd", 0);
+    Slider(C, Low, L.Low, "CutoffDegrees", "Cut-off line", -2, 1, 0.1, "°", 1);
+    Slider(C, Low, L.Low, "RightRise", "Right-hand rise", 0, 2, 0.05, "°", 2);
+    Slider(C, Low, L.Low, "AimDegrees", "Aim", -3, 3, 0.1, "°", 1);
+
+    const High = C.Card(Body, "High beam", "Lightbulb", { Accent: Accent.Vehicle, Index: 4, Subtitle: "Full reflector · no cut-off" });
+    Slider(C, High, L.High, "Intensity", "Peak intensity", 200, 3000, 20, "cd", 0);
+    Slider(C, High, L.High, "Spread", "Spread", 0.5, 2, 0.05, "×", 2);
+    Slider(C, High, L.High, "AimDegrees", "Aim", -3, 3, 0.1, "°", 1);
+
+    const Fog = C.Card(Body, "Fog lamps", "CloudFog", { Accent: Accent.Vehicle, Index: 5, Subtitle: "Wide, low, hard cut-off" });
+    Slider(C, Fog, L.FogLamp, "Intensity", "Peak intensity", 0, 800, 10, "cd", 0);
+    Slider(C, Fog, L.FogLamp, "CutoffDegrees", "Cut-off line", -6, 0, 0.1, "°", 1);
+
+    const Flood = C.Card(Body, "Roof flood bar", "Sun", { Accent: Accent.Vehicle, Index: 6, Subtitle: "Flood · wide and flat-topped" });
+    Slider(C, Flood, L.Flood, "Intensity", "Peak intensity", 0, 2500, 20, "cd", 0);
+    Slider(C, Flood, L.Flood, "Width", "Width", 15, 80, 1, "°", 0);
+    Slider(C, Flood, L.Flood, "Height", "Height", 8, 40, 1, "°", 0);
+    Slider(C, Flood, L.Flood, "AimDegrees", "Aim", -15, 5, 0.5, "°", 1);
+
+    const Set = C.Card(Body, "Clustered light set", "LayoutGrid", { Accent: Accent.Vehicle, Index: 7 });
+    C.Stats(Set, [["Lights", () => (Host.LightStats ? Host.LightStats.Lights : 0)], ["Cells used", () => (Host.LightStats ? Host.LightStats.CellsUsed : 0)],
+                  ["Busiest cell", () => (Host.LightStats ? Host.LightStats.BusiestCell : 0)]]);
+    C.Readout(Set, () => [Host.LightStats && Host.LightStats.Dropped > 0 ? `${Host.LightStats.Dropped} light references dropped` : "every light is kept"]);
+}
+
+// 📝 The course's own lights: the lamppost and strip photometry, and the strips' gain (the tunnel, the hangar, the gantries and the LED building).
+function BuildStreetLights(Host, C, Body)
+{
+    const L = Host.Settings.Lamps;
+    const Posts = C.Card(Body, "Lampposts", "Lightbulb", { Accent: Accent.Environment, Index: 1, Subtitle: "20 street lamps · IES street downlight" });
+    C.Segmented(Posts, L.Street, "Profile", [["Built-in", "Built-in"], ["Imported IES", "Imported"]], { Label: "Light profile",
+                OnChange: () => Host.LampsChanged() });
+    C.Button(Posts, Host.ImportedIesName ? `Load another .ies (${Host.ImportedIesName})` : "Load an .ies file…", "Upload", () => Host.ChooseIesFile());
+    Slider(C, Posts, L.Street, "Intensity", "Peak intensity", 0, 600, 5, "cd", 0);
+    Slider(C, Posts, L.Street, "Kelvin", "Colour temperature", 2200, 6500, 100, "K", 0);
+    C.Muted(Posts, "Each lamp is a luminaire on a 1.5 m arm with a full cut-off: its light falls on the road, not into the sky.");
+
+    const Strips = C.Card(Body, "Strips & panels", "LayoutGrid", { Accent: Accent.Environment, Index: 2 });
+    Slider(C, Strips, L.Strips, "Gain", "Strip gain", 0, 4, 0.05, "×", 2);
+    C.Muted(Strips, "The tunnel lamps, the hangar and gantry strips and the LED building's three rows are rectangular area lights in their fixtures' colours.");
 }
 
 function BuildMarks(Host, C, Body)

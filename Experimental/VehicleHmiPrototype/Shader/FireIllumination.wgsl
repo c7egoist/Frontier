@@ -49,27 +49,3 @@ fn ResolveFireArrival(Position: vec3f, Normal: vec3f) -> FireArrival
     Arrival.Illuminance = Frame.FireLightColour * Frame.FireLightIntensity * Window * Visibility / max(Squared, 0.25);
     return Arrival;
 }
-
-// Pooled sparks/derez: bounded inverse-square falloff, distance-field occlusion,
-// evaluated by both the direct screen pass and the card cache for bounced light.
-fn ResolveTransientArrival(Position: vec3f, Normal: vec3f, Index: u32) -> FireArrival {
-    let Light = Frame.TransientLights[Index];
-    var Arrival: FireArrival;
-    Arrival.Direction = vec3f(0.0, 0.0, 1.0);
-    Arrival.Illuminance = vec3f(0.0);
-    let Toward = Light.PositionReach.xyz - Position;
-    let Squared = dot(Toward, Toward);
-    let Reach = Light.PositionReach.w;
-    if (Reach <= 0.0 || Squared >= Reach * Reach || all(Light.Colour.rgb <= vec3f(0.0))) { return Arrival; }
-    let Range = sqrt(Squared);
-    Arrival.Direction = Toward / max(Range, 0.0001);
-    if (dot(Normal, Arrival.Direction) <= 0.0) { return Arrival; }
-    let Window = pow(1.0 - Squared / (Reach * Reach), 2.0);
-    var Visibility = 1.0;
-    if (FeatureEnabled(Frame, FeatureDirectShadow)) {
-        let Bias = ResolveSurfaceBias(Position);
-        Visibility = TraverseSceneShadow(Position + Normal * Bias, Arrival.Direction, Bias * 0.5, max(Range - 0.15, 0.0), 4.0);
-    }
-    Arrival.Illuminance = Light.Colour.rgb * Frame.EmissionScale * Window * Visibility / max(Squared, 0.16);
-    return Arrival;
-}

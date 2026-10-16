@@ -12,6 +12,7 @@ import { VehicleGeometry, ResolveCoMAuthoredZ } from "./VehicleSpecification.js"
 import { ConstructIdentityTransform, ConstructRigidTransform, TransformBounds, InvertTransform, RotateVector, ConjugateQuaternion,
          SubtractVector, CrossVector, NormalizeVector } from "./TransformProjection.js";
 import { StressShapes, ResolveStressPlacements } from "./StressLayout.js";
+import { EmitRoofBarFacets } from "./LightFixtureStructure.js";
 
 // 📝 What an occupant takes part in. A ground tile only owns a surface card; the ground occupant is only rastered,
 //    because the scene distance field carries the ground as its analytic plane rather than as a sampled volume.
@@ -81,7 +82,11 @@ export class SceneStructure
 
         // ① facet sets ------------------------------------------------------------------------------------------------
         // 📝 The cabin (CabinStructure.js) is part of the body: it moves, shades, derezzes and enters the field with it.
-        const BodySet       = this.ConstructFacetSet("ControlVehicle body", [...ProjectBodyFacets(Body), ...ConstructCabinFacets()], 0.05, 40.0);
+        // 📝 The roof flood bar is part of the body (EmitRoofBarFacets), so it moves, shades and shadows with the car. The authored
+        //    body facets are kept apart: the bar's roof height is read from them, never from the bar itself.
+        this.VehicleBodyFacets = ProjectBodyFacets(Body);
+        const BodySet       = this.ConstructFacetSet("ControlVehicle body", [...this.VehicleBodyFacets, ...ConstructCabinFacets(),
+                                                                             ...EmitRoofBarFacets(this.VehicleBodyFacets)], 0.05, 40.0);
         this.VehicleBodySet = BodySet;
         const WheelLeftSet  = this.ConstructFacetSet("ControlVehicle wheel (left)", ProjectWheelFacets(Tyre, Rim, false), 0.025, 40.0);
         const WheelRightSet = this.ConstructFacetSet("ControlVehicle wheel (right)", ProjectWheelFacets(Tyre, Rim, true), 0.025, 40.0);

@@ -8,6 +8,7 @@
 //! include "PackingCodec.wgsl"
 //! include "SkyProjection.wgsl"
 //! include "FireIllumination.wgsl"
+//! include "ClusterVisibility.wgsl"
 
 struct CascadeReceiver
 {
@@ -105,9 +106,16 @@ fn IntegrateDirectRadiance(@builtin(global_invocation_id) Invocation: vec3u)
     {
         Radiance += Fire.Illuminance * ResolveDirectReflectance(Surface, Normal, View, Fire.Direction);
     }
-    for (var Index = 0u; Index < 8u; Index++) {
-        let Light = ResolveTransientArrival(Position, Normal, Index);
-        Radiance += Light.Illuminance * ResolveDirectReflectance(Surface, Normal, View, Light.Direction);
+    // 📝 Every clustered light of this point's cell (ClusteredLights.wgsl): the sparks, the lamps and the course's lights.
+    let Range = ResolveClusterRange(Position);
+    for (var Entry = 0u; Entry < Range.y; Entry++)
+    {
+        let Sample = ResolveLightSample(ClusterEntries[Range.x + Entry], Position, Normal);
+        if (any(Sample.Illuminance > vec3f(0.0)))
+        {
+            let Visibility = ResolveSampleVisibility(Sample, Position, Normal);
+            Radiance += Sample.Illuminance * Visibility * ResolveDirectReflectance(Surface, Normal, View, Sample.Direction);
+        }
     }
     textureStore(DirectTarget, vec2i(Pixel), vec4f(Radiance, 1.0));
 }

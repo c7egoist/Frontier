@@ -143,7 +143,8 @@ Edits apply live. The eye toggles switch an entity off (smoke, fracture, a singl
 | T | reset the arena: knocked cones rez back onto their marks, broken props are rebuilt |
 | F or F8 | free camera (WASD, Q/E, Shift) |
 | drag / wheel | orbit / zoom the chase camera; inside the car drag to look around, click the tablet to use it |
-| H · I · P | readout · distance-slice inset · editor columns |
+| H · J · P | readout · distance-slice inset · editor columns |
+| I · Shift+I · L | lamps: beam (off → low → high → off) · fog lamps · roof flood bar |
 | V | clean view — hides every overlay; V again restores exactly what was open |
 
 ## The proving grounds
@@ -160,8 +161,8 @@ which the tyres, the fragments and the smoke all read. A 216 × 120 m asphalt pa
   glass pane in steel frames, octagonal concrete pillars, ABS barriers, a stone wall, a concrete block;
 - **hangar** — 28 × 16 × 8 m, open to the south, crimson back wall, a slatted roof that lets sun stripes in and lamp
   strips that light it at night: the bounce-light showcase;
-- **container yard**, a **control tower**, a **lit tunnel**, and light poles whose emissive heads light the night
-  through the surface cards.
+- **container yard**, a **control tower**, a **lit tunnel**, twenty **lampposts** on 1.5 m arms (see *Lights* below),
+  and an **LED light building** west of the pad, facing the start line.
 
 Shapes are authored long-side-on-x and turned into place, tall thin poles, gantry posts and signs are rastered only,
 and large structures take coarse volumes and sparse cards, so the occupant distance space stays near 70 MB.
@@ -400,6 +401,8 @@ Frame timing card shows the average frame rate, the **1 % low** over the last 24
 `webgpu` package): on the null backend it validates every WGSL module, pipeline layout and command; with a
 SwiftShader Vulkan ICD it renders real frames and writes PNG captures. A `HOOKS` module can script input (the
 burnout, a run down the smash alley) and report from the host. See the file header for usage.
+`npm --prefix Tools run validate:lights` runs the lamps (beam, fog, roof flood, an imported IES file) through the frame;
+`npm --prefix Tools test` runs the unit tests, including `Lighting.test.mjs`.
 `Tools/VehicleStability.mjs` needs nothing installed: it steps the vehicle, thermal and carcass solvers in the frame
 loop's order on the open pad and fails on a bouncing body, a left–right asymmetry, a car leaving the ground or a
 runaway wheel (see *Soft tyres, pressure and failure*).
@@ -419,11 +422,9 @@ path data, ISC License (notice in the file).
   boxes and current convex debris hulls. Bounces lose normal/tangential energy and heat;
   settled/cold particles retire. Blackbody chromaticity and size-dependent cooling fade
   smoothly to red; reduced HDR energy avoids the previous overbright yellow clipping.
-- **Lighting:** at most eight transient proxy lights shared across spark clusters and
-  derez/rez emitters, with per-cluster and whole-pool energy limits, distance falloff,
-  distance-field shadows in screen/card direct lighting, and decay to zero. Card lighting
-  feeds GI. Mirrors use unshadowed proxy lights. Proxies approximate the bulk of the effect,
-  not individual particle lights; the card/temporal caches retain their normal update lag.
+- **Lighting:** spark clusters and derez/rez emitters are point lights in the clustered light set (see *Lights*),
+  with a whole-set luminance budget, distance falloff and decay to zero. They are not shadowed. Sparks are
+  gathered into at most twelve spatial bins, so the bulk of the effect is lit, not each particle.
 - **Countersteer:** Vehicle → Telemetry exposes an on/off switch and strength (default 0.45).
   It steers toward lateral travel and damps yaw, fades in from 3–12 m/s, yields at manual
   lock, and disables in reverse/airborne. Scripted input bypasses it for deterministic tests.
@@ -466,6 +467,51 @@ camera, not free-flight, and does not provide arbitrary-obstacle camera collisio
 Validation: 33 unit tests pass; a 30-frame Orbit integration run exercises rotation,
 zoom and persistent angles with zero GPU errors/warnings (Dawn null backend, not a
 rendered visual review).
+
+## Lights
+
+The course, the car and the effects share one **clustered light set** (`Source/Lighting/`). Each frame the host gathers every
+light (the car's lamps, the course's luminaires, the spark and derez lights), bins it into a world-space grid of 5 × 5 × 8.5 m
+cells and uploads the records (`ClusteredLightStore.js`). Three passes read the same set at bind group 2:
+
+- the **screen direct** pass (`DirectRadiance.wgsl`);
+- the **surface cache's direct** pass (`CardDirect.wgsl`), so the cards, the radiosity they feed and therefore every indirect
+  bounce of the final gather carry the lamps. A lamp that changes is relit through the cards' existing relighting budget
+  (`InvalidateLighting` on a change); the cards of a moving car's lamp pools refresh on their cadence, as the sparks do;
+- the **forward** pass the mirrors and the Garage preview use (`ForwardRaster.wgsl`), unshadowed.
+
+Light types: **point**, **spot** with an **IES-style profile** (a tabulated candela distribution in the light's frame, bilinear
+in the shader, `IesProfiles.js`), and **rectangular area lights** (LED strips, tunnel and hangar strips, gantry lamps) that
+use the nearest point of the emitting face. Shadows come from the scene distance field, as the tyre fires' do, and only for
+the car's lamps; the course's lights are unshadowed so the set stays cheap.
+
+**Profiles** (`IesProfiles.js`): low beam (a hot spot, a hard cut-off just below the horizon and an ECE-style lift on the
+right), high beam (a full reflector beam, no cut-off), fog (wide and low, cut above the line) and roof flood (wide,
+flat-topped), each with settings on the Lights page; a street downlight with a full cut-off; and an **imported LM-63 (`.ies`)**
+file, loaded from the Lights page (`ParseIesProfile` and `ResampleIesProfile`; TILT=NONE files).
+
+**The car** (`VehicleLamps.js`): the headlamps, fog lamps and the roof flood bar are attached to the body, so they follow the
+car. The roof flood bar is part of the body's facets (`LightFixtureStructure.js`) and sits on the flat roof. Lamp technologies
+(halogen, xenon, LED) set the colour temperature and output; the lenses glow with the lamp state. Their authored emission is
+dimmed when the lamps are off.
+
+**The course**: each lamppost is a pole (a collider), an arm and a luminaire whose lens is a street downlight; the LED building
+has three rows of LED strips, each an area light; the tunnel, the hangar and the gantries are area lights in their fixtures'
+colours. All are placed from the same placements as their geometry (`LevelStructure.js`).
+
+| Key | Action |
+| --- | --- |
+| I | headlamps: off → low beam → high beam → off |
+| Shift+I | fog lamps |
+| L | roof flood bar |
+
+The Lights page (Vehicle → Lamps, Environment → Street & LED lights) edits the photometry live. Scene candelas are relative
+units, tuned so a low beam lights the road ahead as a bright night does, not to a physical lux.
+
+Limits: at most 128 lights per frame and 48 per cell (the counts are shown on the Lights page); beyond them the least
+important (the effect lights, then the course's) are dropped and counted. `npm --prefix Tools run validate:lights` drives the
+beam, fog and flood, loads an IES file and checks the set through the real frame. Dawn's null backend validates the shaders
+and bind groups but does not render pixels: the look needs a browser review.
 
 ## Spark variation
 

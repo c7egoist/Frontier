@@ -1,7 +1,13 @@
 import { VehicleOrbitCamera } from "./VehicleOrbitCamera.js";
 import { DrivingCameraMotion } from "./DrivingCameraMotion.js";
 import { ResolveHudStyle } from "./HudLayout.js";
-import { BuildTransientLights, TransientLightFloats } from "./TransientLights.js";
+import { ClusteredLightStore } from "./Lighting/ClusteredLightStore.js";
+import { BuildProfileSet, ParseIesProfile, ResampleIesProfile } from "./Lighting/IesProfiles.js";
+import { ConstructLampSettings, BuildVehicleLights, ResolveLensScales, ResolveLampAction, ApplyLampAction } from "./Lighting/VehicleLamps.js";
+import { BuildStreetLights } from "./Lighting/StreetLighting.js";
+import { BuildEffectLights } from "./Lighting/EffectLights.js";
+import { ResolveRoofBarLens } from "./LightFixtureStructure.js";
+import { ResolveLevelPlacements } from "./LevelStructure.js";
 import { VehicleAppearance } from "./VehicleAppearance.js";
 //============================================================================================================================================
 //                                                           ILLUMINATIONHOST.JS
@@ -60,7 +66,7 @@ const ShaderSources = [
     "ReservoirRecords.wgsl", "ReservoirTemporal.wgsl", "ReservoirSpatial.wgsl", "ReflectionTraversal.wgsl", "VarianceTemporal.wgsl",
     "VarianceWavelet.wgsl", "VarianceUpsample.wgsl", "InspectionMarch.wgsl", "DisplayRecombination.wgsl", "DisplayAntialias.wgsl",
     "DisplayExposure.wgsl", "DisplayPresent.wgsl", "FireIllumination.wgsl", "PlumeRecords.wgsl", "PlumeAdvection.wgsl", "PlumePressure.wgsl", "PlumeVorticity.wgsl", "PlumeMarch.wgsl",
-    "FragmentDistance.wgsl", "EffectRecords.wgsl", "EffectRaster.wgsl", "VehicleVisual.wgsl", "SparkRaster.wgsl", "ForwardRaster.wgsl",
+    "ClusteredLights.wgsl", "ClusterVisibility.wgsl", "FragmentDistance.wgsl", "EffectRecords.wgsl", "EffectRaster.wgsl", "VehicleVisual.wgsl", "SparkRaster.wgsl", "ForwardRaster.wgsl",
     "CabinOverlay.wgsl", "CabinVolume.wgsl"
 ];
 
@@ -82,7 +88,7 @@ const TemporalRestartBit = 2048;   // [-] FeatureTemporalRestart in SceneRecords
 const PassNames = ["Distance union", "Card lighting", "Shadow", "Surface", "Direct", "ReSTIR GI", "Diffuse reconstruction",
                    "Reflection", "Glossy reconstruction", "Resolve", "Smoke transport", "Smoke render"];
 
-const FrameRecordExtent = 512 + TransientLightFloats * 4;   // [B] FrameRecord in SceneRecords.wgsl
+const FrameRecordExtent = 512;   // [B] FrameRecord in SceneRecords.wgsl; the clustered lights have their own records
 const FireLightReach    = 14.0;  // [m] influence radius of a tyre fire's light
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -117,7 +123,9 @@ class IlluminationHost
             HudScale: 1, HudAcross: 0, HudDown: 0,
             CameraShake: true, CameraShakeStrength: 0.5, SpeedFov: true, SpeedFovBoost: 14,
             HmiScale: 1, HmiZoom: 1, CockpitFov: 70,
-            CameraMode: Query.get("camera") || "Chase"
+            CameraMode: Query.get("camera") || "Chase",
+            // 📝 Vehicle lamps and the course's lights (Lighting/): beam state, fog, roof flood and their photometry.
+            Lamps: ConstructLampSettings()
         };
         if (Query.has("preset"))
             this.PendingPreset = Query.get("preset");
@@ -202,6 +210,13 @@ class IlluminationHost
         this.ReportProgress("Allocating surface cards", 0.66);
         this.Cards = new SurfaceCardDepot(this.Exchange, this.Shaders, { Extent: this.Grade.CardExtent, DensityScale: this.Grade.CardDensity });
         this.Cards.AllocateCards(this.Scene);
+        // 📝 The clustered lights (Lighting/ClusteredLightStore.js): one set of records every lit pass reads at group 2.
+        this.Lights = new ClusteredLightStore(this.Exchange);
+        this.Lights.AssignProfiles(BuildProfileSet(this.Settings.Lamps));
+        this.LampProfileKey = JSON.stringify(this.LampProfileParameters());
+        // 📐 The course's lights come from the same placements as the geometry; the roof flood's lens from the body's roof.
+        this.LevelPlacements = ResolveLevelPlacements();
+        this.RoofLens = ResolveRoofBarLens(this.Scene.VehicleBodyFacets);
         if (new URLSearchParams(location.search).has("warm"))
             this.Cards.WarmFrames = Number(new URLSearchParams(location.search).get("warm"));
         Device.queue.writeBuffer(this.OccupantRecords, 0, this.Scene.EncodeOccupantRecords(this.Volumes));
@@ -267,7 +282,7 @@ class IlluminationHost
         await this.Atmosphere.ConstructResources();
         this.Shadow = new ShadowProjection(this.Exchange, this.Shaders, this.Grade.ShadowExtent);
         await this.Shadow.ConstructResources(this.OccupantRecords);
-        await this.Cards.ConstructResources(this.FrameRecords, this.OccupantRecords, this.MaterialRecords, this.Distance.TraversalLayout);
+        await this.Cards.ConstructResources(this.FrameRecords, this.OccupantRecords, this.MaterialRecords, this.Distance.TraversalLayout, this.Lights);
         this.SamplingGroup = this.Cards.ConstructSamplingGroup(this.OccupantRecords, this.Atmosphere.SkyView, this.Atmosphere.SkySampler);
         this.ReportProgress("Compiling surface and resampling programs", 0.84);
         this.Marks = new TyreMarkDepot(this.Exchange);
@@ -283,7 +298,7 @@ class IlluminationHost
         this.Recovery = new RecoveryDirector(this);
         this.Surface = new SurfaceProjection(this.Exchange, this.Shaders);
         await this.Surface.ConstructPrograms(this.FrameRecords, this.OccupantRecords, this.MaterialRecords, this.Distance.TraversalLayout, this.Marks,
-                                             this.Effects, this.VehicleRecords);
+                                             this.Effects, this.VehicleRecords, this.Lights);
         this.Resampling = new ResamplingSequence(this.Exchange, this.Shaders);
         await this.Resampling.ConstructPrograms(this.FrameRecords, this.MaterialRecords, this.Distance.TraversalLayout, this.Cards.SamplingLayout);
         this.Diffuse = new VarianceIntegrator(this.Exchange, this.Shaders, "Diffuse", { MinimumWeight: 0.08, TallyLimit: 24, WaveletIterations: 3, ColourSigma: 4.0 });
@@ -302,7 +317,7 @@ class IlluminationHost
         this.Cabin.AssignPressure(this.Settings.TyrePressureFront);
         await this.Cabin.ConstructResources({ FrameRecords: this.FrameRecords, OccupantRecords: this.OccupantRecords, MaterialRecords: this.MaterialRecords,
                                               EffectRecords: this.Effects.Records, VehicleRecords: this.VehicleRecords, Shadow: this.Shadow,
-                                              Atmosphere: this.Atmosphere, Scene: this.Scene, AdaptationRecords: this.Display.AdaptationRecords });
+                                              Atmosphere: this.Atmosphere, Scene: this.Scene, AdaptationRecords: this.Display.AdaptationRecords, Lights: this.Lights });
         this.ReportProgress("Compiling drift smoke programs", 0.91);
         this.Thermal = new TyreThermalSolver(4);
         this.BurstPuffs = [];
@@ -586,6 +601,9 @@ class IlluminationHost
                 this.ResetArena();
             if (Event.code === "KeyC" && !Event.repeat && !Event.ctrlKey && !Event.metaKey)
                 this.CycleCamera(Event.shiftKey ? -1 : 1);
+            const LampAction = ResolveLampAction(Event);
+            if (LampAction)
+                this.HandleLampAction(LampAction);
             for (const [Name, Code] of Object.entries(OverlayKeys))
                 if (Event.code === Code && !Event.repeat && !Event.ctrlKey && !Event.metaKey && !Event.altKey)
                     this.Dock.Toggle(Name);
@@ -916,6 +934,96 @@ class IlluminationHost
                  Aspect: this.ScreenExtent[0] / this.ScreenExtent[1], Near };
     }
 
+    // 📝 The parameters the profile tables are built from: a change to any of them rebuilds the tables (the Lights page edits them).
+    LampProfileParameters()
+    {
+        const Lamps = this.Settings.Lamps;
+        return { Low: Lamps.Low, High: Lamps.High, FogLamp: Lamps.FogLamp, Flood: Lamps.Flood, Imported: this.ImportedIesName || null };
+    }
+
+    // 📝 Loads an LM-63 file as the imported street profile. The table is rebuilt with it; the lamps take it from the Lights page.
+    LoadIesProfile(Text, Name)
+    {
+        this.ImportedIes = ResampleIesProfile(ParseIesProfile(Text));
+        this.ImportedIesName = Name;
+        this.Settings.Lamps.Street.Profile = "Imported";
+        this.LampProfileKey = null;
+        this.Shell.Announce(`IES profile: ${Name}`);
+    }
+
+    // 📝 The frame's light set, in priority order: the vehicle's lamps, the course's lights, then the effect lights. The set is
+    //    capped at ClusterLimits.MaxLights, so the effect lights, the most numerous, are the first to be dropped.
+    UpdateLights()
+    {
+        const Lamps = this.Settings.Lamps;
+        const ProfileKey = JSON.stringify(this.LampProfileParameters());
+        if (ProfileKey !== this.LampProfileKey)
+        {
+            this.LampProfileKey = ProfileKey;
+            this.Lights.AssignProfiles(BuildProfileSet(Lamps, this.ImportedIes || null));
+        }
+        this.Effects.LightAlbedo = this.Materials[CourseMaterial.BodyCoat].Albedo;
+        const Body = this.Scene.Occupants[this.Scene.VehicleOccupants.Body].Transform;
+        this.Lights.Begin();
+        for (const Light of BuildVehicleLights(Lamps, Body, this.RoofLens))
+            this.Lights.Add(Light);
+        for (const Light of BuildStreetLights(this.LevelPlacements, this.Materials, Lamps))
+            this.Lights.Add(Light);
+        for (const Light of BuildEffectLights(this.Sparks, this.Effects))
+            this.Lights.Add(Light);
+        this.LightStats = this.Lights.Upload();
+        this.ApplyLensEmission();
+    }
+
+    // 📝 The lamp lenses take their emission from the beam state: the headlamps glow brighter when the beam is on, the fog and
+    //    flood lenses when their lamps are. Written into the material records only when the state changes.
+    ApplyLensEmission()
+    {
+        const Scales = ResolveLensScales(this.Settings.Lamps);
+        const Key = `${Scales.Headlight}|${Scales.FogLens}|${Scales.FloodLens}`;
+        if (Key === this.LensKey)
+            return;
+        this.LensKey = Key;
+        const Write = (Family, Scale) => this.Exchange.Device.queue.writeBuffer(this.MaterialRecords, (Family * 12 + 4) * 4,
+                                                                                 Float32Array.from(this.Materials[Family].Emission, (Channel) => Channel * Scale));
+        Write(CourseMaterial.Headlight, Scales.Headlight);
+        Write(CourseMaterial.FogLens, Scales.FogLens);
+        Write(CourseMaterial.FloodLens, Scales.FloodLens);
+    }
+
+    // 📝 I, Shift+I and L: a change of the lamps is a step change of the light, so the temporal histories restart and the surface
+    //    cache relights, as for a change of the sun.
+    HandleLampAction(Action)
+    {
+        const Notice = ApplyLampAction(this.Settings.Lamps, Action);
+        this.LampsChanged();
+        this.Shell.Announce(Notice);
+    }
+
+    // 📝 Opens a file picker for an LM-63 (.ies) photometric file; the file is read as text and loaded as the imported profile.
+    ChooseIesFile()
+    {
+        const Input = document.createElement("input");
+        Input.type = "file";
+        Input.accept = ".ies";
+        Input.addEventListener("change", () =>
+        {
+            const File = Input.files && Input.files[0];
+            if (!File)
+                return;
+            File.text().then((Text) => this.LoadIesProfile(Text, File.name))
+                       .catch((Error) => this.Shell.Announce(`IES: ${Error.message}`));
+        });
+        Input.click();
+    }
+
+    // 📝 Any change to the lamps' state (a key, or a switch on the Lights page) restarts the histories and relights the cards.
+    LampsChanged()
+    {
+        this.PriorValid = false;
+        this.Cards.InvalidateLighting();
+    }
+
     EncodeFrameRecord(Camera, Light)
     {
         const [Width, Height] = this.ScreenExtent;
@@ -975,8 +1083,6 @@ class IlluminationHost
         Scalars[123] = this.Settings.SmokeEnabled ? Fire.Intensity : 0.0;
         Scalars.set(Fire.Colour, 124);
         Scalars[127] = FireLightReach;
-        this.Effects.LightAlbedo = this.Materials[CourseMaterial.BodyCoat].Albedo;
-        Scalars.set(BuildTransientLights(this.Sparks, this.Effects), 128);
         this.Exchange.Device.queue.writeBuffer(this.FrameRecords, 0, Bytes);
     }
 
@@ -1075,6 +1181,7 @@ class IlluminationHost
         this.Smoke.Advance(this.FixedStep ? this.FixedStep : Δτ, {
             Enabled: this.Settings.SmokeEnabled, Emissions, Vehicle: this.Vehicle, Light, SkyScale: this.Settings.SkyScale,
             Gas: this.Settings.Gas, Readings, Thermal: this.Thermal });
+        this.UpdateLights();
         this.EncodeFrameRecord(Camera, Light);
         Device.queue.writeBuffer(this.OccupantRecords, 0, this.Scene.EncodeOccupantRecords(this.Volumes, this.Scene.DynamicCount));
 

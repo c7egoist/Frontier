@@ -23,6 +23,7 @@
 //! include "EffectRecords.wgsl"
 //! include "VehicleVisual.wgsl"
 //! include "CabinVolume.wgsl"
+//! include "ClusteredLights.wgsl"
 
 struct ForwardView
 {
@@ -185,15 +186,12 @@ fn ForwardFragment(Varying: ForwardVarying) -> @location(0) vec4f
         // 📝 The preview is a picture on a screen (display-referred, 8-bit): a soft shoulder keeps the coat's highlights.
         return vec4f(Radiance * 1.5 / (vec3f(1.0) + Radiance * 1.5), 1.0);
     }
-    for (var Index = 0u; Index < 8u; Index++) {
-        let Light = Frame.TransientLights[Index];
-        let Toward = Light.PositionReach.xyz - Varying.WorldPosition;
-        let D2 = dot(Toward, Toward);
-        let Reach = Light.PositionReach.w;
-        if (Reach > 0.0 && D2 < Reach * Reach) {
-            let Energy = Light.Colour.rgb * Frame.EmissionScale * pow(1.0 - D2 / (Reach * Reach), 2.0) / max(D2, 0.16);
-            Radiance += Energy * ResolveDirectReflectance(Surface, Normal, ViewDirection, Toward / max(sqrt(D2), 0.0001));
-        }
+    // 📝 The clustered lights of the point (unshadowed: the forward passes have no distance field to shadow through).
+    let Range = ResolveClusterRange(Varying.WorldPosition);
+    for (var Entry = 0u; Entry < Range.y; Entry++)
+    {
+        let Sample = ResolveLightSample(ClusterEntries[Range.x + Entry], Varying.WorldPosition, Normal);
+        Radiance += Sample.Illuminance * Frame.EmissionScale * ResolveDirectReflectance(Surface, Normal, ViewDirection, Sample.Direction);
     }
     // 📝 Scene: the sun with its cascaded shadow, the sky over the normal's hemisphere, the ground's bounce.
     let Visibility = ResolveSunVisibility(Varying.WorldPosition, Normal);

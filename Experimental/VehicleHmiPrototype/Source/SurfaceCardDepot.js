@@ -192,7 +192,7 @@ export class SurfaceCardDepot
     //                                                  RESOURCES
     //--------------------------------------------------------------------------------------------------------------------
 
-    async ConstructResources(FrameRecords, OccupantRecords, MaterialRecords, DistanceLayout)
+    async ConstructResources(FrameRecords, OccupantRecords, MaterialRecords, DistanceLayout, Lights)
     {
         const Extent = this.Configuration.Extent;
         const Usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
@@ -242,7 +242,8 @@ export class SurfaceCardDepot
             [FrameRecords, this.CardRecords, this.TileRecords, this.WorkRecords, this.Views.Albedo, this.Views.Emission, this.Views.Direct,
              this.Views.Depth, this.SiteRecords, this.Views.Final]);
 
-        this.DirectProgram    = await this.Shaders.ConstructComputeProgram("CardDirect.wgsl", "IntegrateCardDirect", [this.DirectLayout, DistanceLayout]);
+        this.Lights           = Lights;
+        this.DirectProgram    = await this.Shaders.ConstructComputeProgram("CardDirect.wgsl", "IntegrateCardDirect", [this.DirectLayout, DistanceLayout, Lights.Layout]);
         this.RadiosityProgram = await this.Shaders.ConstructComputeProgram("CardRadiosity.wgsl", "IntegrateCardRadiosity",
                                                                            [this.RadiosityLayout, DistanceLayout, this.SamplingLayout]);
         this.FinalProgram     = await this.Shaders.ConstructComputeProgram("CardFinal.wgsl", "IntegrateCardFinal", [this.FinalLayout]);
@@ -366,6 +367,7 @@ export class SurfaceCardDepot
         Pass.setPipeline(this.DirectProgram);
         Pass.setBindGroup(0, this.DirectGroup);
         Pass.setBindGroup(1, DistanceGroup);
+        Pass.setBindGroup(2, this.Lights.Group);
         Pass.dispatchWorkgroups(GroupsX, GroupsY);
         if (RadiosityEnabled)
         {

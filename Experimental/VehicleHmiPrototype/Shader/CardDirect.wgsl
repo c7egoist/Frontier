@@ -8,6 +8,7 @@
 //! include "CardProjection.wgsl"
 //! include "CardIrradiance.wgsl"
 //! include "FireIllumination.wgsl"
+//! include "ClusterVisibility.wgsl"
 
 @group(0) @binding(1) var<storage, read> Cards     : array<CardRecord>;
 @group(0) @binding(2) var<storage, read> Occupants : array<OccupantRecord>;
@@ -58,9 +59,16 @@ fn IntegrateCardDirect(@builtin(workgroup_id) Group: vec3u, @builtin(local_invoc
     }
     let Fire = ResolveFireArrival(Position, Normal);
     Irradiance += Fire.Illuminance * max(dot(Normal, Fire.Direction), 0.0);
-    for (var Index = 0u; Index < 8u; Index++) {
-        let Light = ResolveTransientArrival(Position, Normal, Index);
-        Irradiance += Light.Illuminance * max(dot(Normal, Light.Direction), 0.0);
+    // 📝 The clustered lights reach the cards through this pass, so every bounce the final gather takes carries them too.
+    let Range = ResolveClusterRange(Position);
+    for (var Entry = 0u; Entry < Range.y; Entry++)
+    {
+        let Sample = ResolveLightSample(ClusterEntries[Range.x + Entry], Position, Normal);
+        if (any(Sample.Illuminance > vec3f(0.0)))
+        {
+            let Visibility = ResolveSampleVisibility(Sample, Position, Normal);
+            Irradiance += Sample.Illuminance * Visibility * max(dot(Normal, Sample.Direction), 0.0);
+        }
     }
     textureStore(CardDirectTarget, Texel, vec4f(Irradiance, 1.0));
 }

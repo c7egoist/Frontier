@@ -97,7 +97,16 @@ export const CourseMaterial = Object.freeze({
     MirrorTrim:      78,
     TabletHousing:   80,
     RimBase:         81, // original MatTyre finish on METAL geometry; never shredded
-    RimScrape:       79     // the rear-view mirror's housing and stem: CabinTrim's finish, fixed to the shell, not the cockpit
+    RimScrape:       79,    // the rear-view mirror's housing and stem: CabinTrim's finish, fixed to the shell, not the cockpit
+    // 📝 The lit fixtures (LightFixtureStructure.js): street luminaires, the LED building and the roof flood bar. Their lenses
+    //    are emissive; the vehicle's lamp lenses are scaled to the beam state at run time (IlluminationHost.js).
+    LampHousing:     82,    // the dark steel of a street luminaire's housing
+    StreetLens:      83,    // the street luminaire's lens: a warm-white emitter
+    LedStrip:        84,    // an LED light strip on the LED building's facade
+    LedWallPanel:    85,    // the LED building's render, a light grey
+    RoofBarHousing:  86,    // the roof flood bar's dark housing
+    FloodLens:       87,    // the roof flood bar's lens, dimmed when the lamps are off
+    FogLens:         88     // the fog lamps' amber lenses, dimmed when the fog lamps are off
 });
 
 export const MarkedFamilyFirst = CourseMaterial.Asphalt;   // [-]
@@ -270,6 +279,23 @@ export function ConstructMaterialSpecification()
     const Letter = Dielectric(0.82, 0.82, 0.80, 0.45);
     Letter.Emission = [1.6, 1.6, 1.55];
     Materials[CourseMaterial.SignLetter] = Letter;
+
+    // 📝 The lit fixtures. Emission is linear radiance; the street and LED strips are the scene's brightest emitters at night.
+    Materials[CourseMaterial.LampHousing]    = Dielectric(0.10, 0.10, 0.11, 0.42);
+    const StreetLens = Dielectric(0.90, 0.90, 0.90, 0.20);
+    StreetLens.Emission = [9.0, 8.2, 6.6];
+    Materials[CourseMaterial.StreetLens] = StreetLens;
+    const LedStrip = Dielectric(0.90, 0.90, 0.92, 0.20);
+    LedStrip.Emission = [10.0, 10.5, 11.0];
+    Materials[CourseMaterial.LedStrip] = LedStrip;
+    Materials[CourseMaterial.LedWallPanel]   = Dielectric(0.62, 0.63, 0.66, 0.50);
+    Materials[CourseMaterial.RoofBarHousing] = Dielectric(0.04, 0.04, 0.045, 0.35);
+    const FloodLens = Dielectric(0.90, 0.90, 0.90, 0.15);
+    FloodLens.Emission = [9.0, 9.0, 9.0];
+    Materials[CourseMaterial.FloodLens] = FloodLens;
+    const FogLens = Dielectric(0.90, 0.60, 0.10, 0.20);
+    FogLens.Emission = [7.0, 3.5, 0.3];
+    Materials[CourseMaterial.FogLens] = FogLens;
     // 📝 Cabin: charcoal leather and soft-touch trim (≈ 4–6 % albedo, as automotive interiors measure), satin
     //    aluminium accents, near-black cover glass for the displays and a silvered mirror base.
     Materials[CourseMaterial.CabinLeather] = Dielectric(0.045, 0.040, 0.038, 0.55);

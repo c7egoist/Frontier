@@ -25,6 +25,7 @@
 //    Large structures take coarse volumes and sparse cards: the global field's finest voxel is 12.5 cm anyway.
 
 import { CourseMaterial } from "./MaterialSpecification.js";
+import { EmitLampPoleFacets, EmitLampArmFacets, EmitLampHeadFacets, EmitLedBuildingFacets, LampPostLayout, LedBuildingPlacement } from "./LightFixtureStructure.js";
 import { CourseConstants, KerbConstants, SpawnPoint, EmitQuad, EmitBoxFacets, EmitPanelFacets, EmitPrismFacets,
          EmitExtrusionFacets, EmitConeFacets, EmitRampFacets, EmitTyreBarrierFacets, EmitCornerBoxFacets } from "./CourseStructure.js";
 
@@ -79,8 +80,12 @@ export const LevelShapes = Object.freeze({
     TowerRoof:    { Emit: () => EmitBoxFacets(7.5, 7.5, 0.4, CourseMaterial.SteelDark), Voxel: 0.15, Cards: 6 },
     Jersey:       { Emit: () => EmitExtrusionFacets(JerseyProfile, 2.0, CourseMaterial.BarrierConcrete), Voxel: 0.05, Cards: 14 },
     TyreStack:    { Emit: () => EmitPrismFacets(0.33, 1.2, 12, CourseMaterial.Tyre), Voxel: 0.06, Cards: 16 },
-    Pole:         { Emit: () => EmitBoxFacets(0.3, 0.3, 11.0, CourseMaterial.SteelDark), Voxel: 0.25, Cards: 0, Distance: false },
-    PoleHead:     { Emit: () => EmitBoxFacets(1.8, 0.6, 0.3, CourseMaterial.LampWarm), Voxel: 0.05, Cards: 16 },
+    // 📝 Street lamps (LightFixtureStructure.js): the pole is the collider; its arm is rastered only, far above the car; the
+    //    luminaire is in the field and carded, so its housing shades the lamp below and its lens lights the course through the cards.
+    LampPole:     { Emit: () => EmitLampPoleFacets(), Voxel: 0.25, Cards: 0, Distance: false },
+    LampArm:      { Emit: () => EmitLampArmFacets(), Voxel: 0.1, Cards: 0, Distance: false },
+    LampHead:     { Emit: () => EmitLampHeadFacets(), Voxel: 0.03, Cards: 16 },
+    LedBuilding:  { Emit: () => EmitLedBuildingFacets(), Voxel: 0.2, Cards: 6 },
     FramePost:    { Emit: () => EmitBoxFacets(0.12, 0.12, 2.3, CourseMaterial.SteelDark), Voxel: 0.1, Cards: 0, Distance: false },
     // 📝 The training arena: tyre barrier sections, the launch gantries (rastered posts, a beam and a lamp strip in
     //    the field) and the station signs (rastered: double-sided boards with raised, faintly lit letters).
@@ -95,7 +100,7 @@ export const LevelShapes = Object.freeze({
 
 // 📝 Shapes the car collides with (as world boxes); roofs, lamps and kerbs are not colliders.
 const ColliderShapes = new Set(["HangarPanel", "HangarAccent", "Cabinet", "Container40", "Container20", "TunnelWall",
-                                "Tower", "Jersey", "TyreStack", "Pole", "FramePost", "TyreBarrier", "GantryPost", "SignPost"]);
+                                "Tower", "Jersey", "TyreStack", "LampPole", "FramePost", "TyreBarrier", "GantryPost", "SignPost", "LedBuilding"]);
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PLACEMENTS
@@ -209,7 +214,8 @@ export function ResolveLevelPlacements()
                   Sign.Position[1] + Side * Along[1] * (0.5 * Width - 0.35));
     }
 
-    // ⑨ light poles (rastered) with their lamp heads (in the field: they light the night)
+    // ⑨ street lamps: a pole, its arm and the luminaire at the arm's tip (LightFixtureStructure.js). The placements below
+    //    are their poles' foot, facing; the arm reaches along the facing.
     const Poles = [[-45.0, 10.0, -90.0], [-15.0, 10.0, -90.0], [15.0, 10.0, -90.0], [45.0, 10.0, -90.0],
                    [-30.0, -10.0, 90.0], [0.0, -10.0, 90.0], [30.0, -10.0, 90.0], [-48.0, 30.0, 0.0],
                    [-12.0, 44.0, 180.0], [-56.0, -24.0, 0.0], [20.0, -38.0, 90.0], [8.0, 30.0, 0.0],
@@ -217,10 +223,15 @@ export function ResolveLevelPlacements()
                    [128.0, 30.0, 0.0], [154.0, -32.0, 180.0], [128.0, -4.0, -45.0]];
     Poles.forEach(([X, Y, Facing], Index) =>
     {
-        Place("Pole", `Light pole ${Index}`, X, Y);
         const Angle = Facing * Degrees;
-        Place("PoleHead", `Light pole head ${Index}`, X + 0.7 * Math.cos(Angle), Y + 0.7 * Math.sin(Angle), 10.8, Angle);
+        Place("LampPole", `Street lamp pole ${Index}`, X, Y);
+        Place("LampArm", `Street lamp arm ${Index}`, X, Y, 0.0, Angle);
+        Place("LampHead", `Street lamp ${Index}`, X + LampPostLayout.ArmLength * Math.cos(Angle), Y + LampPostLayout.ArmLength * Math.sin(Angle),
+              LampPostLayout.ArmBottom, Angle);
     });
+
+    // ⑩ the LED light building, west of the pad, facing the start
+    Place("LedBuilding", "LED light building", LedBuildingPlacement.Position[0], LedBuildingPlacement.Position[1], 0.0, LedBuildingPlacement.Yaw);
     return List;
 }
 

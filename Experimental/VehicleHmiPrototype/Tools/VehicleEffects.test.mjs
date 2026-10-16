@@ -6,7 +6,7 @@ import { SparkSequence, ResolveSparkRadiance } from '../Source/SparkSequence.js'
 import { TyreMarkDepot } from '../Source/TyreMarkDepot.js';
 import { VehicleVisualState, VehicleRecordBytes } from '../Source/VehicleVisualState.js';
 import { DriverInputIntegrator, ResolveCountersteer } from '../Source/DriverInputIntegrator.js';
-import { BuildTransientLights } from '../Source/TransientLights.js';
+import { BuildEffectLights, EffectLightLimits } from '../Source/Lighting/EffectLights.js';
 import { CourseConstants } from '../Source/CourseStructure.js';
 globalThis.GPUBufferUsage = { VERTEX: 1, COPY_DST: 2 };
 globalThis.GPUTextureUsage = { TEXTURE_BINDING: 1, COPY_DST: 2 };
@@ -100,26 +100,26 @@ test('countersteer is symmetric, bounded, optional and yields to manual input; r
     assert.equal(Driver.Advance(new Set(), 1/120, F, { Enabled: false }).Steer, 0);
     Driver.Reset(); assert.equal(Driver.Correction, 0);
 });
-test('pooled HDR lights are bounded, decay and extinguish; debris never glows', () => {
+test('effect lights are bounded, decay and extinguish; debris never glows', () => {
     const Sparks = { Settings: { Enabled: true, Brightness: 1 }, Particles: Array.from({length: 100}, (_, I) =>
         ({ Position: [I * 0.5,0,1], Kelvin: 3000, Size: 1 })) };
     const Settings = { Intensity: 1, Faces: false, GlowStrength: 6, Glow: '#35d6ff', Drag: 0.4 };
     const Emitter = { Start: 0, End: 3, Kind: 0, Centre: [0,0,0], Velocity: [1,0,0], Transform: [1,0,0,0,0,1,0,0,0,0,1,0,0,0,1,1] };
     const Effects = { Clock: 0.5, Settings, Emitters: Array(8).fill(Emitter) };
-    const Light = BuildTransientLights(Sparks, Effects);
-    assert.equal(Light.length, 64); assert.ok([...Light].every(Number.isFinite));
-    let Energy = 0;
-    for (let I = 0; I < 64; I += 8) Energy += Light[I+4] * 0.2126 + Light[I+5] * 0.7152 + Light[I+6] * 0.0722;
-    assert.ok(Energy <= 100.001);
+    const Lights = BuildEffectLights(Sparks, Effects);
+    assert.ok(Lights.length <= EffectLightLimits.SparkBins + EffectLightLimits.Emitters);
+    assert.ok(Lights.every((Light) => Light.Colour.every(Number.isFinite) && Light.Position.every(Number.isFinite)));
+    const Luma = (C) => C[0] * 0.2126 + C[1] * 0.7152 + C[2] * 0.0722;
+    assert.ok(Lights.reduce((Sum, Light) => Sum + Luma(Light.Colour), 0) <= EffectLightLimits.LuminanceBudget + 0.001);
     Sparks.Settings.Enabled = false;
     Effects.Emitters = [Emitter];
-    const Before = BuildTransientLights(Sparks, Effects)[5];
+    const Before = BuildEffectLights(Sparks, Effects)[0].Colour[0];
     Effects.Clock = 2.95;
-    assert.ok(BuildTransientLights(Sparks, Effects)[5] < Before);
+    assert.ok(BuildEffectLights(Sparks, Effects)[0].Colour[0] < Before);
     Effects.Clock = 3;
-    assert.ok(BuildTransientLights(Sparks, Effects).every(V => V === 0));
+    assert.equal(BuildEffectLights(Sparks, Effects).length, 0);
     Effects.Clock = 1; Effects.Emitters = [{ ...Emitter, Kind: 4 }];
-    assert.ok(BuildTransientLights(Sparks, Effects).every(V => V === 0));
+    assert.equal(BuildEffectLights(Sparks, Effects).length, 0);
 });
 test('assisted left/right slide recovery stays grounded, finite and symmetric on the flat pad', async () => {
     const { VehicleSolver } = await import('../Source/VehicleSolver.js');
