@@ -1,0 +1,122 @@
+/* Sound-library additions on top of the fracture editor chrome (FracturePanel.css).
+   Colours are the fracture editor's palette (FractureEditorSurface.h), so the look matches. */
+
+/* ---- left pane: sound types and presets -------------------------------------- */
+.type-group { padding: 14px 10px 4px; }
+.type-group > .tiny-label { display: block; padding: 0 6px 6px; }
+.type-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-align: left;
+  padding: 8px 9px;
+  margin-bottom: 3px;
+  background: transparent;
+  border-color: transparent;
+  color: #929292;
+  font-size: 11px;
+}
+.type-item:hover { background: #262626; color: #eee; }
+.type-item[aria-pressed="true"] { background: #2b2d2b; border-color: #ffffff0c; color: #d3d9d5; }
+.type-item i { width: 6px; height: 6px; border-radius: 50%; background: #3f463f; flex: none; }
+.type-item[aria-pressed="true"] i { background: #699375; }
+
+.preset-list { display: flex; flex-direction: column; gap: 4px; padding: 0 10px 14px; }
+.preset-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 7px 8px;
+  background: #1f1f1f;
+  border-color: #ffffff08;
+  font-size: 10px;
+  color: #a6a6a6;
+  line-height: 1.35;
+}
+.preset-card:hover { background: #2a2a2a; border-color: #505050; color: #eee; }
+.preset-card.active { background: #2e2e2e; border-color: #666; color: #eee; }
+.preset-card span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preset-card b { margin-left: auto; font-weight: 400; color: #5e655e; font-size: 9px; }
+
+/* ---- inspector controls ------------------------------------------------------ */
+.control { margin-top: 14px; }
+.control:first-of-type { margin-top: 6px; }
+.control[hidden] { display: none; }
+.control-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: #919191; }
+.control-head small { font-size: 8px; color: #656565; letter-spacing: 0.4px; }
+.control-row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.control-row input[type="range"] { flex: 1; min-width: 0; }
+.control-row .num {
+  width: 74px;
+  flex: none;
+  padding: 5px 7px;
+  font-size: 10px;
+  text-align: right;
+  background: #101010;
+  border: 1px solid #ffffff10;
+  border-radius: 5px;
+}
+.control-row .unit { font-size: 9px; color: #5c5c5c; min-width: 26px; }
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 16px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track { height: 3px; border-radius: 3px; background: linear-gradient(90deg, #454545 var(--fill, 50%), #242424 var(--fill, 50%)); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 12px; height: 12px; margin-top: -4.5px; border-radius: 50%; background: #e0e0e0; border: 0; }
+input[type="range"]::-moz-range-track { height: 3px; border-radius: 3px; background: #242424; }
+input[type="range"]::-moz-range-progress { height: 3px; border-radius: 3px; background: #454545; }
+input[type="range"]::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #e0e0e0; border: 0; }
+
+select.control-select { width: 100%; margin-top: 7px; padding: 8px; font-size: 11px; }
+
+.switch-row { display: flex; align-items: center; justify-content: space-between; margin-top: 14px; font-size: 10px; color: #919191; }
+.switch { position: relative; width: 30px; height: 16px; flex: none; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch span { position: absolute; inset: 0; background: #242424; border: 1px solid #ffffff10; border-radius: 16px; transition: background .15s; cursor: pointer; }
+.switch span::after { content: ""; position: absolute; left: 2px; top: 2px; width: 10px; height: 10px; border-radius: 50%; background: #8a8a8a; transition: transform .15s; }
+.switch input:checked + span { background: #34453a; }
+.switch input:checked + span::after { transform: translateX(14px); background: #bacbbf; }
+
+/* material picker: two columns, the fracture editor's material-options grid */
+.material-options { margin-top: 9px; }
+.material-options button small { display: block; font-size: 8px; color: #5f5f5f; letter-spacing: 0.4px; }
+
+/* ---- viewport --------------------------------------------------------------- */
+.sound-view { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px 18px 10px; gap: 8px; }
+.sound-view .viewport-title { position: static; padding: 0; }
+.sound-view .viewport-title h1 { font-size: 22px; }
+.wave-box { position: relative; flex: 1; min-height: 0; background: #111; border: 1px solid #ffffff08; border-radius: 12px; overflow: hidden; }
+.wave-box canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.wave-box.spec { flex: 0.8; }
+.wave-label { position: absolute; left: 10px; top: 7px; font-size: 8px; letter-spacing: 1.1px; color: #5f655f; pointer-events: none; }
+.wave-empty { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; color: #5b5b5b; }
+.transport { display: flex; align-items: center; gap: 8px; }
+.transport button { min-width: 74px; }
+.transport .time { font-size: 10px; color: #7c7c7c; font-variant-numeric: tabular-nums; min-width: 96px; }
+.transport .grow { flex: 1; }
+.hint { font-size: 9px; color: #5f5f5f; }
+
+.surface-chip { font-size: 9px; letter-spacing: 0.6px; color: #8ea192; }
+
+.custom-grid .control:first-child { margin-top: 0; }
+
+.out-row { display: flex; gap: 8px; margin-top: 12px; }
+.out-row button { flex: 1; font-size: 10px; height: 30px; }
+.seed-field { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 10px; color: #919191; }
+.seed-field input { width: 110px; padding: 6px 8px; font-size: 11px; }
+
+.chip-note { font-size: 9px; color: #656565; line-height: 1.6; margin-top: 10px; }
+.chip-note code { font-size: 9px; color: #9aa89e; }
+
+@media (max-width: 900px) {
+  .sound-view { padding: 12px; }
+}

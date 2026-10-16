@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Sound · Procedural Sound Library</title>
+    <link rel="stylesheet" href="./FracturePanel.css" />
+    <link rel="stylesheet" href="./SoundPanel.css" />
+  </head>
+  <body>
+    <div class="fracture-app sound-app">
+      <header class="titlebar">
+        <a href="#" title="Procedural Sound Library"
+          >◈ <b>Frontier</b></a
+        ><span class="divider"></span><span>Procedural Sound Library</span
+        ><span class="title-tail">PARAMETRIC SFX · WEB AUDIO</span>
+      </header>
+
+      <nav class="workspace-bar">
+        <div class="workspace-tab">Sound <span>↗</span></div>
+        <span id="breadcrumb">Library / Impacts / Bump</span>
+        <div class="grow"></div>
+        <button id="random-seed" title="New random seed for the same recipe">New seed</button>
+        <button id="export" class="primary-small">Download WAV…</button>
+      </nav>
+
+      <main class="workspace">
+        <!-- left: what to make -->
+        <aside class="target-panel">
+          <header class="pane-heading">Sound type <span>11 GENERATORS</span></header>
+          <div class="target-content" id="type-list"></div>
+          <header class="pane-heading" style="border-top:1px solid #ffffff08">Presets <span id="preset-count">0</span></header>
+          <div class="target-content" style="padding-top:10px">
+            <div class="preset-list" id="preset-list"></div>
+          </div>
+        </aside>
+
+        <!-- centre: the sound -->
+        <section class="viewport-panel">
+          <header class="viewport-toolbar">
+            <div class="view-tabs">
+              <button id="view-wave" aria-pressed="true">Waveform</button
+              ><button id="view-spec" aria-pressed="false">Spectrogram</button>
+            </div>
+            <div class="grow"></div>
+            <button id="loop" aria-pressed="false" title="Loop playback">Loop</button>
+            <button id="fit" title="Re-render now">Re-render</button>
+          </header>
+
+          <div class="sound-view">
+            <div class="viewport-title" style="position:static">
+              <span id="group-label">IMPACTS</span>
+              <h1 id="sound-name">Bump · knock · tap · thud</h1>
+              <p id="sound-caption" style="font-size:11px;color:#777;margin-top:6px;line-height:1.6"></p>
+            </div>
+
+            <div class="wave-box" id="wave-box">
+              <span class="wave-label">WAVEFORM</span>
+              <canvas id="wave"></canvas>
+              <div class="wave-empty" id="wave-empty">rendering…</div>
+            </div>
+            <div class="wave-box spec" id="spec-box" hidden>
+              <span class="wave-label">SPECTROGRAM · 0–12 kHz</span>
+              <canvas id="spec"></canvas>
+            </div>
+
+            <div class="transport">
+              <button id="play" class="primary">▶ Play</button>
+              <button id="stop">■ Stop</button>
+              <span class="time" id="time">0.00 / 0.00 s</span>
+              <div class="grow"></div>
+              <span class="hint">Space = play · edits re-render live</span>
+            </div>
+          </div>
+
+          <div class="metrics">
+            <div><strong id="m-dur">—</strong><span>DURATION</span></div>
+            <div><strong id="m-peak">—</strong><span>PEAK dBFS</span></div>
+            <div><strong id="m-rms">—</strong><span>RMS dBFS</span></div>
+            <div><strong id="m-cent">—</strong><span>CENTROID</span></div>
+          </div>
+        </section>
+
+        <!-- right: how it sounds -->
+        <aside class="inspector-panel">
+          <header class="pane-heading">Inspector <span id="render-ms">PER SOUND</span></header>
+          <div class="inspector-scroll" id="inspector"></div>
+        </aside>
+      </main>
+
+      <footer class="statusbar">
+        <span id="status" role="status">Ready</span
+        ><span>44.1 kHz · MONO · SEEDED · <i></i> DETERMINISTIC</span>
+      </footer>
+    </div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

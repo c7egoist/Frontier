@@ -1,0 +1,3 @@
+# Rendered audio and any local exports are generated data: keep them out of Git.
+out/
+*.wav

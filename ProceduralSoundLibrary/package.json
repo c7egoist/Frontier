@@ -1,0 +1,14 @@
+{
+  "name": "procedural-sound-library",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Parametric, seeded sound-effect synthesis: impacts, doors, motors, tyres, crashes, glass, cargo and water, on any surface.",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/test.mjs",
+    "render": "node src/render-library.mjs",
+    "ui": "node serve.mjs 8080"
+  },
+  "engines": { "node": ">=18" },
+  "license": "UNLICENSED"
+}
