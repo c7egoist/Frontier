@@ -1,6 +1,6 @@
 // WebGPU host: buffers, compute passes (tet forces → nodes → rim → normals) and render passes.
-import { SIM_WGSL, RENDER_WGSL } from './shaders.js';
-import { packParams, packRoad, nodeInfoArray, PARAM_FLOATS } from './tyreCore.js';
+import { SIM_WGSL, RENDER_WGSL } from './shaders.js?v=5';
+import { packParams, packRoad, nodeInfoArray, PARAM_FLOATS } from './tyreCore.js?v=5';
 
 const RIM_STRIDE = 36; // pos3 normal3 colour3 as f32
 const STORAGE = GPUBufferUsage.STORAGE;

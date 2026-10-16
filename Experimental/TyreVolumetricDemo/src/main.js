@@ -1,6 +1,6 @@
 // UI, camera and frame loop for the WebGPU volumetric tyre demo.
-import { buildTyreMesh, resolveParams, roadPreset } from './tyreCore.js';
-import { GpuTyre } from './gpuTyre.js';
+import { buildTyreMesh, resolveParams, roadPreset } from './tyreCore.js?v=5';
+import { GpuTyre } from './gpuTyre.js?v=5';
 
 const canvas = document.getElementById('view');
 const hud = document.getElementById('hud');
