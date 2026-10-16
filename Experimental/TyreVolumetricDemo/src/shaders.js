@@ -24,7 +24,10 @@ struct Params {
 @group(0) @binding(8) var<storage, read_write> rim: array<vec4<f32>>;   // [0] = (x, y, z, alpha) [1] = (vx, vy, vz, alphaDot)
 @group(0) @binding(9) var<storage, read_write> nodeNormal: array<vec4<f32>>;
 
+const ROAD_PERIOD: f32 = 12.0;
+
 fn featureH(f: vec4<f32>, x: f32) -> f32 {
+  if (f.z == 0.0) { return 0.0; }
   if (f.w > 0.5) {
     // kerb: block from f.x to f.x + f.y with 3 cm smooth ramps
     let up = smoothstep(f.x - 0.03, f.x, x);
@@ -37,9 +40,11 @@ fn featureH(f: vec4<f32>, x: f32) -> f32 {
 }
 
 fn terrainH(x: f32) -> f32 {
+  // Periodic road: wrap x into one period and sum features at the wrapped position and its neighbours.
+  let xl = x - ROAD_PERIOD * floor(x / ROAD_PERIOD);
   var h = 0.0;
   for (var k = 0u; k < 8u; k = k + 1u) {
-    h = h + featureH(P.road[k], x);
+    h = h + featureH(P.road[k], xl) + featureH(P.road[k], xl + ROAD_PERIOD) + featureH(P.road[k], xl - ROAD_PERIOD);
   }
   return h;
 }
@@ -231,7 +236,10 @@ struct Globals {
 @group(0) @binding(3) var<storage, read> nodeInfo: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> rim: array<vec4<f32>>;
 
+const ROAD_PERIOD: f32 = 12.0;
+
 fn featureH(f: vec4<f32>, x: f32) -> f32 {
+  if (f.z == 0.0) { return 0.0; }
   if (f.w > 0.5) {
     let up = smoothstep(f.x - 0.03, f.x, x);
     let down = 1.0 - smoothstep(f.x + f.y, f.x + f.y + 0.03, x);
@@ -243,9 +251,11 @@ fn featureH(f: vec4<f32>, x: f32) -> f32 {
 }
 
 fn terrainH(x: f32) -> f32 {
+  // Periodic road: wrap x into one period and sum features at the wrapped position and its neighbours.
+  let xl = x - ROAD_PERIOD * floor(x / ROAD_PERIOD);
   var h = 0.0;
   for (var k = 0u; k < 8u; k = k + 1u) {
-    h = h + featureH(G.road[k], x);
+    h = h + featureH(G.road[k], xl) + featureH(G.road[k], xl + ROAD_PERIOD) + featureH(G.road[k], xl - ROAD_PERIOD);
   }
   return h;
 }

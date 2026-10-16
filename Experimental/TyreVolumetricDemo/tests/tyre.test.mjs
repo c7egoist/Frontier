@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildTyreMesh, tetElementForces, mulMM, transposeC, invertColMajor, sub,
-  CpuTyreSimulation, packParams, PARAM_LAYOUT, PARAM_FLOATS, resolveParams, nodeInfoArray, roadPreset,
+  CpuTyreSimulation, packParams, PARAM_LAYOUT, PARAM_FLOATS, resolveParams, nodeInfoArray, roadPreset, terrainHeight, ROAD_PERIOD,
 } from '../src/tyreCore.js';
 import { SIM_WGSL } from '../src/shaders.js';
 
@@ -131,4 +131,14 @@ test('stiff, fast, high-pressure case stays finite with the adaptive step', { ti
   const sim = new CpuTyreSimulation({ ...SMALL, youngs: 10e6, pressure: 4e5, road: roadPreset('speedbump', 0.08), speed: 20 });
   for (let s = 0; s < 1000; s++) sim.step();
   assert.ok(Number.isFinite(sim.rim[1]) && Math.abs(sim.rim[1]) < 1);
+});
+
+test('road repeats every ROAD_PERIOD so the tyre meets obstacles on every lap', () => {
+  const p = { road: roadPreset('mixed', 0.08) };
+  for (const x of [0.2, 3.9, 4.3, 9.1, 14.2, 20.0]) {
+    assert.ok(Math.abs(terrainHeight(x, p) - terrainHeight(x + ROAD_PERIOD, p)) < 1e-12);
+    assert.ok(Math.abs(terrainHeight(x, p) - terrainHeight(x - 3 * ROAD_PERIOD, p)) < 1e-12);
+  }
+  assert.ok(terrainHeight(3.0, p) > 0.07, 'bump peak is present in the first period');
+  assert.ok(terrainHeight(3.0 + ROAD_PERIOD, p) > 0.07, 'and in the next period');
 });

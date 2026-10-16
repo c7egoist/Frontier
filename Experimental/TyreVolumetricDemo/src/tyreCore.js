@@ -51,6 +51,8 @@ export function nodeInfoArray(mesh, density) {
 }
 
 export const MAX_ROAD = 8;
+// Road features repeat every ROAD_PERIOD metres, so the tyre meets them again on each lap.
+export const ROAD_PERIOD = 12;
 const KERB_RAMP = 0.03;
 
 // Named road layouts for the UI. `h` is the obstacle height in metres.
@@ -215,6 +217,7 @@ export function invertColMajor(m) {
 
 // Road height at x: sum of features (same as the WGSL terrainH).
 export function featureHeight(f, x) {
+  if (!(f.h !== 0)) return 0;
   if (f.kind === 1) {
     const up = smoothstep(f.x - KERB_RAMP, f.x, x);
     const down = 1 - smoothstep(f.x + f.w, f.x + f.w + KERB_RAMP, x);
@@ -229,8 +232,13 @@ function smoothstep(a, b, x) {
   return t * t * (3 - 2 * t);
 }
 export function terrainHeight(x, p) {
+  // Periodic: evaluate each feature at the wrapped position and its neighbours.
+  const P = ROAD_PERIOD;
+  const xl = x - P * Math.floor(x / P);
   let h = 0;
-  for (const f of p.road) h += featureHeight(f, x);
+  for (const f of p.road) {
+    h += featureHeight(f, xl) + featureHeight(f, xl + P) + featureHeight(f, xl - P);
+  }
   return h;
 }
 
