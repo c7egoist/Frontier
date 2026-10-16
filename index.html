@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#090d12" />
+  <meta name="description" content="A real-time triangle-BVH ReSTIR GI lab with multi-bounce path continuation and the Project-Drive ControlVehicle." />
+  <title>Frontier · ReSTIR GI Lab</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="Frontier home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span class="brand-name">FRONTIER<span class="brand-divider">/</span><span class="brand-product">RADIANCE</span></span>
+      </a>
+      <div class="topbar-center">
+        <span class="live-dot"></span>
+        <span class="eyebrow">REAL-TIME RENDERING LAB</span>
+        <span class="topbar-separator">/</span>
+        <span class="topbar-scene">PROJECT DRIVE · CONTROLVEHICLE</span>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-button" id="help-button" type="button" title="Controls and rendering notes" aria-label="Open help">?</button>
+        <button class="icon-button" id="fold-button" type="button" title="Fold settings panel" aria-label="Fold settings panel">☰</button>
+        <span class="version-tag">PREVIEW <b>0.1</b></span>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="stage" aria-label="Realtime ray-traced scene">
+        <canvas id="viewport" tabindex="0" aria-label="ControlVehicle render viewport"></canvas>
+        <div class="stage-vignette" aria-hidden="true"></div>
+
+        <div class="stage-topline">
+          <div class="scene-chip">
+            <span class="chip-icon">◈</span>
+            <span><b>STUDIO A</b><small>TRIANGLE SCENE · 1 VEHICLE · 3 AREA LIGHTS</small></span>
+          </div>
+          <div class="stage-badges">
+            <span class="badge badge-live"><i></i> LIVE</span>
+            <span class="badge badge-render" id="render-badge">RESTIR GI</span>
+          </div>
+        </div>
+
+        <div class="telemetry-card" id="telemetry-card">
+          <div class="telemetry-head"><span>FRAME TELEMETRY</span><span class="telemetry-indicator">●</span></div>
+          <div class="telemetry-grid">
+            <div><strong id="fps-value">--</strong><span>FPS</span></div>
+            <div><strong id="frame-value">--</strong><span>FRAME MS</span></div>
+            <div><strong id="resolution-value">-- × --</strong><span>GI TARGET</span></div>
+          </div>
+          <div class="telemetry-divider"></div>
+          <div class="telemetry-line"><span>RAY MODE</span><b id="telemetry-backend">INITIALIZING</b></div>
+          <div class="telemetry-line"><span>BVH PRIMITIVES</span><b id="triangle-count">--</b></div>
+          <div class="telemetry-line"><span>BOUNCE DEPTH</span><b id="bounce-readout">--</b></div>
+        </div>
+
+        <div class="reticle" aria-hidden="true"><span></span><span></span></div>
+        <div class="stage-bottomline">
+          <div class="viewport-controls"><span class="control-mouse">↔</span> DRAG TO ORBIT <i></i> SCROLL TO DOLLY <i></i> <kbd>WASD</kbd> DRIVE</div>
+          <div class="camera-readout"><span class="camera-dot"></span><span id="camera-readout">ORBIT CAMERA · 13.2 M</span></div>
+        </div>
+
+        <div class="drive-pad" aria-label="Hold-to-drive controls">
+          <div class="drive-pad-title"><span>DRIVE PAD</span><small>HOLD</small></div>
+          <div class="drive-pad-grid">
+            <button class="drive-button drive-forward" type="button" data-drive="forward" aria-label="Accelerate">▲</button>
+            <button class="drive-button drive-left" type="button" data-drive="left" aria-label="Steer left">◀</button>
+            <button class="drive-button drive-reverse" type="button" data-drive="reverse" aria-label="Brake or reverse">▼</button>
+            <button class="drive-button drive-right" type="button" data-drive="right" aria-label="Steer right">▶</button>
+          </div>
+          <button class="drive-button drive-handbrake" type="button" data-drive="handbrake" aria-label="Handbrake">HAND BRAKE</button>
+        </div>
+
+        <div class="bringup" id="bringup">
+          <div class="bringup-mark"><span></span><span></span><span></span></div>
+          <div class="bringup-title">Building the triangle scene</div>
+          <div class="bringup-caption" id="bringup-caption">Loading Project-Drive ControlVehicle archives…</div>
+          <div class="bringup-track"><div id="bringup-progress"></div></div>
+          <div class="bringup-percent" id="bringup-percent">00%</div>
+        </div>
+        <div class="toast" id="toast" role="status" aria-live="polite"></div>
+      </section>
+
+      <aside class="settings-panel" id="settings-panel" aria-label="Rendering settings">
+        <div class="panel-scroll">
+          <div class="panel-heading">
+            <div>
+              <div class="panel-kicker">LIGHTING PIPELINE <span class="kicker-line"></span></div>
+              <h1>ReSTIR <em>GI</em></h1>
+              <p>Spatiotemporal path resampling<br />with multi-bounce continuation.</p>
+            </div>
+            <span class="pipeline-glyph" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+          </div>
+
+          <section class="panel-section">
+            <div class="section-title"><span class="section-index">01</span><h2>Render view</h2></div>
+            <div class="mode-grid" role="group" aria-label="Render view">
+              <button class="mode-button is-active" data-mode="0" type="button"><span class="mode-symbol">◉</span>GI resolve</button>
+              <button class="mode-button" data-mode="1" type="button"><span class="mode-symbol">◌</span>Direct only</button>
+              <button class="mode-button" data-mode="2" type="button"><span class="mode-symbol">◇</span>Normals</button>
+              <button class="mode-button" data-mode="3" type="button"><span class="mode-symbol">▧</span>Albedo</button>
+              <button class="mode-button mode-wide" data-mode="4" type="button"><span class="mode-symbol">⦿</span>Reservoir confidence</button>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title"><span class="section-index">02</span><h2>Quality preset</h2><span class="auto-pill">AUTO READY</span></div>
+            <div class="preset-list" role="group" aria-label="Quality presets">
+              <button class="preset-card" data-preset="gtx" type="button">
+                <span class="preset-radio"></span><span class="preset-copy"><b>GTX · Performance</b><small>Software BVH · low-cost game target</small></span><span class="preset-tag">GTX</span>
+              </button>
+              <button class="preset-card is-selected" data-preset="balanced" type="button">
+                <span class="preset-radio"></span><span class="preset-copy"><b>Balanced</b><small>Stable history · diffuse multi-bounce</small></span><span class="preset-tag">MID</span>
+              </button>
+              <button class="preset-card" data-preset="rtx" type="button">
+                <span class="preset-radio"></span><span class="preset-copy"><b>RTX · Compute high</b><small>More candidates · longer path budget</small></span><span class="preset-tag preset-tag-accent">RTX</span>
+              </button>
+              <button class="preset-card" data-preset="ultra" type="button">
+                <span class="preset-radio"></span><span class="preset-copy"><b>Ultra · Look-dev</b><small>Higher samples · not a console target</small></span><span class="preset-tag">MAX</span>
+              </button>
+            </div>
+            <div class="backend-card">
+              <span class="backend-icon"><i></i><i></i><i></i></span>
+              <div class="backend-copy"><b id="backend-title">WEBGPU · SOFTWARE BVH</b><small id="backend-detail">Triangle traversal · GTX / RTX compatible</small></div>
+              <span class="backend-state" id="backend-state">AUTO</span>
+            </div>
+            <p class="backend-note" id="backend-note">This browser exposes GPU compute, not native DXR/Vulkan ray-query. The exact same triangle-BVH fallback runs on GTX and RTX; no SDF path is involved.</p>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title"><span class="section-index">03</span><h2>Reservoirs</h2><button class="text-button" id="reset-history" type="button">RESET HISTORY <span>↻</span></button></div>
+            <div class="control-row slider-row">
+              <label for="candidate-count">Initial candidates</label><output id="candidate-count-value">1 ray</output>
+              <input id="candidate-count" type="range" min="1" max="4" step="1" value="1" />
+              <div class="range-caption"><span>LOW NOISE</span><span>MORE COST</span></div>
+            </div>
+            <div class="control-row slider-row">
+              <label for="bounce-count">Indirect bounces</label><output id="bounce-count-value">3</output>
+              <input id="bounce-count" type="range" min="1" max="8" step="1" value="3" />
+              <div class="range-caption"><span>1 BOUNCE</span><span>8 BOUNCES</span></div>
+            </div>
+            <div class="control-row slider-row">
+              <label for="history-count">Temporal reservoir cap</label><output id="history-count-value">24 M</output>
+              <input id="history-count" type="range" min="4" max="64" step="4" value="24" />
+              <div class="range-caption"><span>RESPONSIVE</span><span>STABLE</span></div>
+            </div>
+            <div class="control-row slider-row">
+              <label for="spatial-count">Spatial reuse taps</label><output id="spatial-count-value">4 taps</output>
+              <input id="spatial-count" type="range" min="0" max="8" step="1" value="4" />
+              <div class="range-caption"><span>SHARP</span><span>SMOOTH</span></div>
+            </div>
+            <div class="toggle-list">
+              <label class="toggle-row" for="temporal-toggle"><span><b>Temporal reuse</b><small>Reproject · validate · clamp history</small></span><input id="temporal-toggle" type="checkbox" checked /><i></i></label>
+              <label class="toggle-row" for="spatial-toggle"><span><b>Spatial reuse</b><small>Normal / plane compatible neighbors</small></span><input id="spatial-toggle" type="checkbox" checked /><i></i></label>
+              <label class="toggle-row" for="denoise-toggle"><span><b>Edge-aware resolve</b><small>Depth and normal guided upscale</small></span><input id="denoise-toggle" type="checkbox" checked /><i></i></label>
+              <label class="toggle-row" for="checkerboard-toggle"><span><b>Checkerboard candidates</b><small>Alternate GI rays across frames</small></span><input id="checkerboard-toggle" type="checkbox" /><i></i></label>
+            </div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title"><span class="section-index">04</span><h2>Game budget</h2><span class="section-subtitle">PER FRAME</span></div>
+            <div class="control-row slider-row">
+              <label for="render-scale">GI render scale</label><output id="render-scale-value">50%</output>
+              <input id="render-scale" type="range" min="25" max="100" step="5" value="50" />
+              <div class="range-caption"><span>PERFORMANCE</span><span>FULL RES</span></div>
+            </div>
+            <div class="control-row slider-row">
+              <label for="gi-strength">Indirect intensity</label><output id="gi-strength-value">1.00×</output>
+              <input id="gi-strength" type="range" min="0" max="2" step="0.05" value="1" />
+              <div class="range-caption"><span>SUBTLE</span><span>BOOSTED</span></div>
+            </div>
+            <div class="control-row slider-row">
+              <label for="firefly-clamp">Firefly clamp</label><output id="firefly-value">12.0</output>
+              <input id="firefly-clamp" type="range" min="2" max="32" step="1" value="12" />
+              <div class="range-caption"><span>STRICT</span><span>LOOSE</span></div>
+            </div>
+            <div class="control-row slider-row">
+              <label for="exposure">Exposure</label><output id="exposure-value">0.0 EV</output>
+              <input id="exposure" type="range" min="-2" max="2" step="0.1" value="0" />
+              <div class="range-caption"><span>DARKER</span><span>BRIGHTER</span></div>
+            </div>
+          </section>
+
+          <section class="panel-section scene-section">
+            <div class="section-title"><span class="section-index">05</span><h2>Scene controls</h2></div>
+            <div class="scene-control-row">
+              <div class="drive-status"><span class="drive-dot" id="drive-dot"></span><span><b id="drive-status">PARKED</b><small>PROJECT-DRIVE · CONTROLVEHICLE</small></span></div>
+              <button class="small-action" id="reset-camera" type="button">RESET VIEW</button>
+            </div>
+            <div class="drive-hint"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Throttle · steer · brake/reverse</span><kbd>SPACE</kbd><span>Handbrake</span></div>
+            <div class="touch-hint">Or hold the on-screen drive pad in the viewport.</div>
+            <div class="vehicle-readout"><span>SPEED</span><b id="speed-readout">0 <small>KM/H</small></b><span>GEAR</span><b id="gear-readout">N</b></div>
+          </section>
+
+          <section class="panel-section pipeline-section">
+            <div class="section-title"><span class="section-index">06</span><h2>Frame path</h2></div>
+            <div class="pipeline-steps">
+              <div class="pipeline-step"><span class="step-dot"></span><b>Primary triangles</b><small>G-buffer · motion reprojection</small></div>
+              <div class="pipeline-step"><span class="step-dot"></span><b>Initial path candidates</b><small>Cosine sample · BVH visibility</small></div>
+              <div class="pipeline-step"><span class="step-dot"></span><b>Temporal + spatial RIS</b><small>History tests · neighbor reuse</small></div>
+              <div class="pipeline-step"><span class="step-dot"></span><b>Multi-bounce resolve</b><small>Edge-aware denoise · tone map</small></div>
+            </div>
+          </section>
+
+          <footer class="panel-footer">
+            <span class="footer-mark">F</span>
+            <span><b>FRONTIER RADIANCE</b><small>Triangle ray tracing · ReSTIR GI prototype</small></span>
+            <a href="/README.md" target="_blank" rel="noreferrer" aria-label="Open README">↗</a>
+          </footer>
+        </div>
+      </aside>
+    </main>
+
+    <div class="help-modal" id="help-modal" aria-hidden="true">
+      <div class="help-backdrop" data-close-help></div>
+      <section class="help-card" role="dialog" aria-modal="true" aria-labelledby="help-title">
+        <button class="help-close" id="help-close" type="button" aria-label="Close help">×</button>
+        <div class="panel-kicker">QUICK GUIDE <span class="kicker-line"></span></div>
+        <h2 id="help-title">A ray-traced game-lighting lab.</h2>
+        <p>The viewport traces the Project-Drive ControlVehicle and studio geometry as indexed triangles through a per-mesh BVH. GI candidates are extended over multiple diffuse bounces, then selected and reused with spatiotemporal reservoirs.</p>
+        <div class="help-grid">
+          <div><b>Orbit camera</b><span>Drag over the viewport. Scroll to dolly.</span></div>
+          <div><b>Drive the car</b><span>W / S throttle and brake/reverse, A / D steer, Space handbrake—or hold the viewport drive pad.</span></div>
+          <div><b>GTX compatibility</b><span>Software BVH compute is the portable fallback. Use the GTX preset for a lower ray and history budget.</span></div>
+          <div><b>RTX compatibility</b><span>RTX can run the same compute path at higher quality. A browser cannot expose DXR / Vulkan RT cores; native hardware RT needs a native host backend.</span></div>
+        </div>
+        <div class="help-callout"><span>!</span><p><b>Not an SDF renderer.</b> No signed-distance volumes, sphere tracing, or distance-field scene representation are used.</p></div>
+      </section>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
