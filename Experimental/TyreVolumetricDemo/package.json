@@ -1,0 +1,11 @@
+{
+  "name": "volumetric-tyre-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WebGPU tetrahedral volumetric (FEM) tyre demo: explicit corotation-free St. Venant–Kirchhoff elasticity + volume-preserving inflation.",
+  "scripts": {
+    "serve": "python3 -m http.server 8080 --bind 0.0.0.0",
+    "test": "node --test tests/tyre.test.mjs"
+  }
+}
