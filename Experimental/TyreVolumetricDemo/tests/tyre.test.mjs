@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildTyreMesh, tetElementForces, mulMM, transposeC, invertColMajor, sub,
-  CpuTyreSimulation, packParams, PARAM_LAYOUT, PARAM_FLOATS, resolveParams, nodeInfoArray, roadPreset, terrainHeight, ROAD_PERIOD,
+  CpuTyreSimulation, packParams, PARAM_LAYOUT, PARAM_FLOATS, resolveParams, nodeInfoArray, roadPreset, terrainHeight,
 } from '../src/tyreCore.js';
 import { SIM_WGSL } from '../src/shaders.js';
 
@@ -133,12 +133,23 @@ test('stiff, fast, high-pressure case stays finite with the adaptive step', { ti
   assert.ok(Number.isFinite(sim.rim[1]) && Math.abs(sim.rim[1]) < 1);
 });
 
-test('road repeats every ROAD_PERIOD so the tyre meets obstacles on every lap', () => {
-  const p = { road: roadPreset('mixed', 0.08) };
+test('road repeats every roadPeriod so the tyre meets obstacles on every lap', () => {
+  const P = 12;
+  const p = { road: roadPreset('mixed', 0.08, { period: P }), roadPeriod: P };
   for (const x of [0.2, 3.9, 4.3, 9.1, 14.2, 20.0]) {
-    assert.ok(Math.abs(terrainHeight(x, p) - terrainHeight(x + ROAD_PERIOD, p)) < 1e-12);
-    assert.ok(Math.abs(terrainHeight(x, p) - terrainHeight(x - 3 * ROAD_PERIOD, p)) < 1e-12);
+    assert.ok(Math.abs(terrainHeight(x, p) - terrainHeight(x + P, p)) < 1e-12);
+    assert.ok(Math.abs(terrainHeight(x, p) - terrainHeight(x - 3 * P, p)) < 1e-12);
   }
-  assert.ok(terrainHeight(3.0, p) > 0.07, 'bump peak is present in the first period');
-  assert.ok(terrainHeight(3.0 + ROAD_PERIOD, p) > 0.07, 'and in the next period');
+  assert.ok(terrainHeight(4.0, p) > 0.07, 'first mixed bump peak');
+  assert.ok(terrainHeight(4.0 + P, p) > 0.07, 'and in the next period');
+});
+
+test('road controls: obstacle position, width and period are honoured and wrapped', () => {
+  const p = { road: roadPreset('speedbump', 0.1, { x: 25, w: 1, period: 10 }), roadPeriod: 10 };
+  assert.equal(p.road[0].x, 5); // 25 wraps to 5 in a 10 m period
+  assert.ok(Math.abs(terrainHeight(5, p) - 0.1) < 1e-12, 'peak at the wrapped position');
+  assert.ok(terrainHeight(5 + 1.2, p) < 1e-12, "zero outside the full width");
+  const pk = { road: roadPreset('kerb', 0.05, { x: 2, w: 0.5, period: 10 }), roadPeriod: 10 };
+  assert.ok(Math.abs(terrainHeight(2.25, pk) - 0.05) < 1e-12, 'kerb plateau');
+  assert.equal(roadPreset('flat', 0.1).length, 0);
 });

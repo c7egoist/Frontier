@@ -13,8 +13,13 @@ const SLIDERS = [
   { key: 'density', label: 'Effective density (kg/m³)', min: 1000, max: 3000, step: 50 },
   { key: 'rimMass', label: 'Sprung mass per corner (kg)', min: 60, max: 400, step: 5 },
   { key: 'bumpCm', label: 'Obstacle height (cm)', min: 0, max: 12, step: 0.5 },
+  { key: 'obsX', label: 'Obstacle position (m)', min: 0, max: 40, step: 0.25 },
+  { key: 'obsW', label: 'Obstacle width (m)', min: 0.1, max: 3, step: 0.05 },
+  { key: 'period', label: 'Road repeat length (m)', min: 6, max: 40, step: 0.5 },
+  { key: 'spacing', label: 'Mixed road: spacing (m)', min: 1, max: 20, step: 0.25 },
   { key: 'slip', label: 'Slip angle / steer (deg)', min: -10, max: 10, step: 0.5 },
   { key: 'friction', label: 'Tread friction µ', min: 0, max: 1.5, step: 0.05 },
+  { key: 'frictionC', label: 'Contact stickiness (1/s)', min: 0, max: 2000, step: 50 },
   { key: 'damping', label: 'Internal damping (1/s)', min: 0, max: 30, step: 0.5 },
   { key: 'simSpeed', label: 'Simulation speed (×)', min: 0.1, max: 1, step: 0.05 },
 ];
@@ -23,6 +28,7 @@ const ui = {
   speed: 5, bar: 2.5, youngsMPa: 6, density: 1000, rimMass: 180, bumpCm: 3,
   friction: 0.9, damping: 4, simSpeed: 1, colourMode: 0, showEdges: false, paused: false, follow: true,
   slip: 0, road: 'speedbump',
+  obsX: 4, obsW: 0.5, period: 12, spacing: 4, frictionC: 600,
 };
 
 function toParams() {
@@ -32,7 +38,9 @@ function toParams() {
     youngs: ui.youngsMPa * 1e6,
     density: ui.density,
     rimMass: ui.rimMass,
-    road: roadPreset(ui.road, ui.bumpCm / 100),
+    road: roadPreset(ui.road, ui.bumpCm / 100, { x: ui.obsX, w: ui.obsW, period: ui.period, spacing: ui.spacing }),
+    roadPeriod: ui.period,
+    frictionC: ui.frictionC,
     yaw: (ui.slip * Math.PI) / 180,
     friction: ui.friction,
     damping: ui.damping,

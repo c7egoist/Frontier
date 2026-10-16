@@ -228,7 +228,7 @@ export class GpuTyre {
     g.set(camera.viewProj, 0);
     g.set([camera.eye[0], camera.eye[1], camera.eye[2], 1], 16);
     g.set([0.45, 0.85, 0.35, 0], 20);
-    g.set([0, 0, 0, 0], 24); // spare
+    g.set([p.roadPeriod, 0, 0, 0], 24);
     g.set([colourMode, this.mesh.params.NT, this.mesh.params.NI, this.mesh.params.NJ], 28);
     g.set([p.rimRadius, p.treadRadius, Math.floor(this.rimX), p.yaw], 32);
     g.set(packRoad(p.road), 36);

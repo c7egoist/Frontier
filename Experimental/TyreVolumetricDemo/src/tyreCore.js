@@ -17,6 +17,7 @@ export const DEFAULT_PARAMS = {
   // Road features: {x, w, h, kind}. kind 0 = raised-cosine speed bump centred on x (half-width w, height h);
   // kind 1 = kerb: block from x to x+w, height h, with 3 cm ramps. Up to MAX_ROAD features.
   road: [{ x: 4.0, w: 0.5, h: 0.03, kind: 0 }],
+  roadPeriod: 12,
   // Wheel yaw (slip angle) relative to the direction of travel, radians. 0 = straight.
   yaw: 0,
   // Bead attachment to the rim and the rim's suspended mass.
@@ -51,16 +52,24 @@ export function nodeInfoArray(mesh, density) {
 }
 
 export const MAX_ROAD = 8;
-// Road features repeat every ROAD_PERIOD metres, so the tyre meets them again on each lap.
+// Road features repeat every roadPeriod metres (a DEFAULT_PARAMS entry, so the UI can change it).
 export const ROAD_PERIOD = 12;
 const KERB_RAMP = 0.03;
 
-// Named road layouts for the UI. `h` is the obstacle height in metres.
-export function roadPreset(name, h) {
+// Named road layouts. h = obstacle height (m). opts: x = position of the first obstacle (m),
+// w = obstacle width (m), period = repeat length (m), spacing = gap to the second obstacle in 'mixed' (m).
+export function roadPreset(name, h, opts = {}) {
+  const P = opts.period ?? ROAD_PERIOD;
+  const wrap = (x) => ((x % P) + P) % P;
+  const x0 = opts.x ?? 4, w = opts.w ?? 0.5, gap = opts.spacing ?? 4;
   switch (name) {
-    case 'speedbump': return [{ x: 4, w: 0.5, h, kind: 0 }];
-    case 'kerb': return [{ x: 4, w: 0.25, h, kind: 1 }];
-    case 'mixed': return [{ x: 3, w: 0.5, h, kind: 0 }, { x: 9, w: 0.25, h, kind: 1 }, { x: 14, w: 0.4, h: h * 0.6, kind: 0 }];
+    case 'speedbump': return [{ x: wrap(x0), w, h, kind: 0 }];
+    case 'kerb': return [{ x: wrap(x0), w, h, kind: 1 }];
+    case 'mixed': return [
+      { x: wrap(x0), w, h, kind: 0 },
+      { x: wrap(x0 + gap), w, h, kind: 1 },
+      { x: wrap(x0 + 2 * gap), w, h: h * 0.6, kind: 0 },
+    ];
     default: return [];
   }
 }
@@ -233,7 +242,7 @@ function smoothstep(a, b, x) {
 }
 export function terrainHeight(x, p) {
   // Periodic: evaluate each feature at the wrapped position and its neighbours.
-  const P = ROAD_PERIOD;
+  const P = p.roadPeriod ?? ROAD_PERIOD;
   const xl = x - P * Math.floor(x / P);
   let h = 0;
   for (const f of p.road) {
@@ -282,7 +291,7 @@ export const PARAM_LAYOUT = [
   'mu', 'lambda', 'pressure', 'dt', 'gravity', 'damping', 'groundK', 'groundC',
   'friction', 'frictionC', 'beadK', 'beadC', 'rimRadius', 'treadRadius', 'rimMass', 'suspK',
   'suspC', 'speed', 'targetY', 'roadCount', 'yaw', 'nodeCount', 'tetCount',
-  'NT', 'NI', 'NJ', 'pad0', 'pad1',
+  'NT', 'NI', 'NJ', 'pad0', 'roadPeriod',
 ];
 export const PARAM_FLOATS = PARAM_LAYOUT.length + 4 * MAX_ROAD; // 60
 export function packRoad(features) {
@@ -292,7 +301,7 @@ export function packRoad(features) {
 }
 export function packParams(p, N, T) {
   const { mu, lambda } = lameParameters(p);
-  const values = { ...p, mu, lambda, roadCount: p.road.length, nodeCount: N, tetCount: T, pad0: 0, pad1: 0 };
+  const values = { ...p, mu, lambda, roadCount: p.road.length, nodeCount: N, tetCount: T, pad0: 0 };
   const out = new Float32Array(PARAM_FLOATS);
   PARAM_LAYOUT.forEach((k, i) => { out[i] = values[k]; });
   out.set(packRoad(p.road), PARAM_LAYOUT.length);

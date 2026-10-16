@@ -14,7 +14,10 @@ npm run serve     # then open http://localhost:8080 in a WebGPU browser (Chrome/
 
 Open the page in a WebGPU-capable browser. Sliders: rolling speed, inflation, rubber stiffness,
 effective density, sprung mass, obstacle height, **slip angle (steer)**, friction, damping,
-simulation speed. The **Road** menu picks a speed bump, a kerb strike, a mixed course, or flat.
+simulation speed. The **Road** menu picks a speed bump, a kerb strike, a mixed course, or flat. Sliders control
+everything else about the road: obstacle height, position, width, repeat length (the road repeats
+every period, so the tyre meets obstacles on each lap), mixed-course spacing, and contact
+stickiness (the friction rate). Nothing about the road is fixed except the kerb ramp length (3 cm).
 Toggle the tetrahedral edges, switch to the deformation colour map, or pause/reset.
 
 The HUD shows FPS, JS encode time, sub-steps per frame, and GPU pass times when the browser

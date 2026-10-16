@@ -8,7 +8,7 @@ struct Params {
   rimRadius: f32, treadRadius: f32, rimMass: f32, suspK: f32,
   suspC: f32, speed: f32, targetY: f32, roadCount: f32,
   yaw: f32, nodeCount: f32, tetCount: f32,
-  NT: f32, NI: f32, NJ: f32, pad0: f32, pad1: f32,
+  NT: f32, NI: f32, NJ: f32, pad0: f32, roadPeriod: f32,
   road: array<vec4<f32>, 8>,   // x, w, h, kind
 };
 
@@ -23,8 +23,6 @@ struct Params {
 @group(0) @binding(7) var<storage, read> adjList: array<u32>;
 @group(0) @binding(8) var<storage, read_write> rim: array<vec4<f32>>;   // [0] = (x, y, z, alpha) [1] = (vx, vy, vz, alphaDot)
 @group(0) @binding(9) var<storage, read_write> nodeNormal: array<vec4<f32>>;
-
-const ROAD_PERIOD: f32 = 12.0;
 
 fn featureH(f: vec4<f32>, x: f32) -> f32 {
   if (f.z == 0.0) { return 0.0; }
@@ -41,10 +39,11 @@ fn featureH(f: vec4<f32>, x: f32) -> f32 {
 
 fn terrainH(x: f32) -> f32 {
   // Periodic road: wrap x into one period and sum features at the wrapped position and its neighbours.
-  let xl = x - ROAD_PERIOD * floor(x / ROAD_PERIOD);
+  let per = P.roadPeriod;
+  let xl = x - per * floor(x / per);
   var h = 0.0;
   for (var k = 0u; k < 8u; k = k + 1u) {
-    h = h + featureH(P.road[k], xl) + featureH(P.road[k], xl + ROAD_PERIOD) + featureH(P.road[k], xl - ROAD_PERIOD);
+    h = h + featureH(P.road[k], xl) + featureH(P.road[k], xl + per) + featureH(P.road[k], xl - per);
   }
   return h;
 }
@@ -225,7 +224,7 @@ struct Globals {
   viewProj: mat4x4<f32>,
   camPos: vec4<f32>,
   lightDir: vec4<f32>,
-  terrain: vec4<f32>,   // unused
+  terrain: vec4<f32>,   // road period (m) in x
   view: vec4<f32>,      // colourMode, NT, NI, NJ
   rimInfo: vec4<f32>,   // rimRadius, treadRadius, ground grid shift (m), yaw
   road: array<vec4<f32>, 8>,
@@ -235,8 +234,6 @@ struct Globals {
 @group(0) @binding(2) var<storage, read> nodeNormal: array<vec4<f32>>;
 @group(0) @binding(3) var<storage, read> nodeInfo: array<vec4<f32>>;
 @group(0) @binding(4) var<storage, read> rim: array<vec4<f32>>;
-
-const ROAD_PERIOD: f32 = 12.0;
 
 fn featureH(f: vec4<f32>, x: f32) -> f32 {
   if (f.z == 0.0) { return 0.0; }
@@ -252,10 +249,11 @@ fn featureH(f: vec4<f32>, x: f32) -> f32 {
 
 fn terrainH(x: f32) -> f32 {
   // Periodic road: wrap x into one period and sum features at the wrapped position and its neighbours.
-  let xl = x - ROAD_PERIOD * floor(x / ROAD_PERIOD);
+  let per = G.terrain.x;
+  let xl = x - per * floor(x / per);
   var h = 0.0;
   for (var k = 0u; k < 8u; k = k + 1u) {
-    h = h + featureH(G.road[k], xl) + featureH(G.road[k], xl + ROAD_PERIOD) + featureH(G.road[k], xl - ROAD_PERIOD);
+    h = h + featureH(G.road[k], xl) + featureH(G.road[k], xl + per) + featureH(G.road[k], xl - per);
   }
   return h;
 }
