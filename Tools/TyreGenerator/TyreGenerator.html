@@ -1,0 +1,1207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Slate Tyre Generator — procedural 3D tyres &amp; tread editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@200;300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c0d0f;--card:#17181b;--card2:#1e2024;--card3:#25272c;--line:rgba(255,255,255,.06);--txt:#e6e7ea;--mut:#8a8d94;--dim:#5c5f66;
+    --green:#38c46d;--yellow:#d6c93a;--red:#e5423f;--orange:#f0a04b;--acc:#ffffff;
+    font-family:"Outfit",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px;font-weight:300;letter-spacing:.01em;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);overflow:hidden}
+  #app{display:grid;grid-template-columns:320px 1fr 340px;grid-template-rows:60px 1fr;height:100vh;gap:10px;padding:10px;background:radial-gradient(1200px 600px at 60% -10%,#1a1c20 0%,var(--bg) 60%)}
+  header{grid-column:1/4;display:flex;align-items:center;gap:8px;padding:0 6px}
+  .logo{width:34px;height:34px;border-radius:50%;background:conic-gradient(from 210deg,var(--txt) 0 12%,transparent 12% 25%,var(--txt) 25% 37%,transparent 37% 50%,var(--txt) 50% 62%,transparent 62% 75%,var(--txt) 75% 87%,transparent 87%);-webkit-mask:radial-gradient(circle,transparent 30%,#000 32%);mask:radial-gradient(circle,transparent 30%,#000 32%);margin-right:10px;opacity:.9}
+  .tabs{display:flex;gap:4px}
+  .tab{padding:10px 20px;border-radius:999px;color:var(--mut);cursor:pointer;font-weight:400;transition:.2s}
+  .tab:hover{color:var(--txt)}
+  .tab.on{background:var(--card2);color:var(--txt)}
+  .chips{display:flex;gap:6px;margin-left:auto;flex-wrap:nowrap;overflow:hidden}
+  .chip{padding:9px 16px;border-radius:999px;background:var(--card);color:var(--mut);cursor:pointer;white-space:nowrap;border:1px solid transparent}
+  .chip b{font-weight:400;color:var(--txt);margin-right:6px}
+  .chip.on{background:var(--card2);border-color:var(--line);color:var(--txt)}
+  aside,#bottom,#view{min-height:0}
+  aside{display:flex;flex-direction:column;gap:10px;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#2a2c31 transparent}
+  .card{background:var(--card);border-radius:22px;padding:18px 18px 14px;flex:0 0 auto;position:relative}
+  .card h2{display:flex;align-items:center;gap:10px;font-size:15px;font-weight:400;margin:0 0 12px;color:var(--txt);letter-spacing:.01em}
+  .card h2::before{content:"";width:3px;height:16px;border-radius:2px;background:var(--bar,var(--green))}
+  .card h2 .r{margin-left:auto;color:var(--mut);font-size:12px;font-weight:300}
+  .big{font-size:42px;font-weight:200;letter-spacing:-.02em;line-height:1;color:#fff;margin:2px 0 10px}
+  .big small{font-size:16px;color:var(--dim);margin-left:4px;font-weight:300}
+  .big .frac{color:var(--dim)}
+  .sub{display:flex;gap:6px;margin:0 0 6px;flex-wrap:wrap}
+  .pill{padding:5px 11px;border-radius:999px;font-size:12px;background:rgba(214,201,58,.12);color:var(--yellow)}
+  .pill.g{background:rgba(56,196,109,.12);color:var(--green)} .pill.r{background:rgba(229,66,63,.14);color:var(--red)} .pill.n{background:var(--card2);color:var(--mut)}
+  .sec{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:14px 0 6px;font-weight:400}
+  .row{display:flex;align-items:center;gap:8px;margin:7px 0}
+  .row label{flex:0 0 118px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
+  .row .val{flex:0 0 54px;text-align:right;font-variant-numeric:tabular-nums;color:var(--txt);font-weight:400}
+  .row input[type=range]{flex:1;min-width:0;-webkit-appearance:none;appearance:none;height:18px;background:transparent;cursor:pointer}
+  .row input[type=range]::-webkit-slider-runnable-track{height:2px;background:#2d3036;border-radius:2px}
+  .row input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;margin-top:-5px;box-shadow:0 0 0 3px var(--card)}
+  .row input[type=range]::-moz-range-track{height:2px;background:#2d3036;border-radius:2px}
+  .row input[type=range]::-moz-range-thumb{width:12px;height:12px;border:0;border-radius:50%;background:#fff}
+  .row select,.row input[type=text],.row input[type=file]{flex:1;min-width:0;background:var(--card2);color:var(--txt);border:1px solid transparent;border-radius:999px;padding:7px 12px;font:inherit;font-size:12.5px;outline:0}
+  .row select:focus,.row input[type=text]:focus{border-color:#3a3d44}
+  .row input[type=color]{flex:0 0 28px;width:28px;height:28px;border:0;background:transparent;padding:0;border-radius:50%;overflow:hidden;cursor:pointer}
+  .row input[type=color]::-webkit-color-swatch-wrapper{padding:0}.row input[type=color]::-webkit-color-swatch{border:2px solid #2d3036;border-radius:50%}
+  .row input[type=checkbox]{appearance:none;width:34px;height:20px;border-radius:999px;background:#2d3036;position:relative;cursor:pointer;transition:.2s}
+  .row input[type=checkbox]::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#9a9da4;transition:.2s}
+  .row input[type=checkbox]:checked{background:var(--green)} .row input[type=checkbox]:checked::after{left:17px;background:#fff}
+  button{background:var(--card2);color:var(--txt);border:1px solid transparent;border-radius:999px;padding:8px 14px;font:inherit;font-size:12.5px;font-weight:400;cursor:pointer;transition:.15s}
+  button:hover{background:var(--card3)}
+  button.primary{background:#fff;color:#111}
+  button.primary:hover{background:#e8e8e8}
+  button.small{padding:5px 11px;font-size:12px}
+  .btns{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 2px}
+  #view{position:relative;border-radius:22px;overflow:hidden;background:#0b0c0e}
+  #view canvas{display:block}
+  .float{position:absolute;background:rgba(23,24,27,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-radius:20px;padding:14px 18px}
+  #badge{left:16px;top:16px;min-width:230px}
+  #badge .t{display:flex;align-items:center;gap:8px;color:var(--mut);font-size:13px}
+  #badge .t::before{content:"";width:3px;height:14px;border-radius:2px;background:var(--green)}
+  #badge .name{font-size:34px;font-weight:300;letter-spacing:-.01em;color:#fff;margin:6px 0 2px}
+  #badge .size{font-size:15px;color:var(--mut)}
+  #tiles{right:16px;top:16px;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px;background:transparent;backdrop-filter:none}
+  .tile{background:rgba(23,24,27,.82);backdrop-filter:blur(14px);border-radius:18px;padding:12px 14px;min-width:120px}
+  .tile .l{color:var(--mut);font-size:11.5px;display:flex;align-items:center;gap:6px}
+  .tile .l i{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block}
+  .tile .v{font-size:26px;font-weight:200;color:#fff;margin-top:4px;letter-spacing:-.02em;line-height:1.1}
+  .tile .v small{font-size:12px;color:var(--dim);margin-left:3px}
+  #viewbtns{left:16px;bottom:16px;display:flex;gap:4px;padding:6px}
+  #viewbtns button{background:transparent;color:var(--mut)} #viewbtns button:hover,#viewbtns button.primary{background:var(--card2);color:#fff}
+  #wearbar{right:16px;bottom:16px;width:280px;padding:12px 18px 10px}
+  #wearbar .l{display:flex;justify-content:space-between;color:var(--mut);font-size:12px;margin-bottom:2px}
+  #wearbar .l b{font-weight:300;color:#fff;font-size:20px}
+  #wearbar input{width:100%}
+  #presets{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .preset{background:var(--card2);border-radius:16px;padding:8px;cursor:pointer;border:1px solid transparent;transition:.15s}
+  .preset:hover{background:var(--card3)}
+  .preset.active{border-color:#fff}
+  .preset canvas{width:100%;height:38px;display:block;border-radius:10px;background:#222}
+  .preset .n{font-weight:400;margin-top:7px;font-size:13px;color:#fff}
+  .preset .t{color:var(--mut);font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;margin-top:1px}
+  #layers{display:flex;flex-direction:column;gap:4px}
+  .layer{display:flex;align-items:center;gap:6px;background:var(--card2);border-radius:12px;padding:7px 8px 7px 12px;cursor:pointer;border:1px solid transparent}
+  .layer.sel{border-color:#fff}
+  .layer .nm{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-weight:400}
+  .layer .nm small{color:var(--mut);font-weight:300;margin-left:4px}
+  .layer .ic{width:3px;height:14px;border-radius:2px;flex:0 0 3px}
+  .layer button{padding:0 6px;line-height:20px;background:transparent;color:var(--mut)} .layer button:hover{color:#fff;background:var(--card3)}
+  #treadView{width:100%;height:150px;display:block;border-radius:14px;background:#111}
+  #treadStrip{width:100%;height:26px;display:block;border-radius:8px;background:#111;margin-top:6px}
+  #profile{cursor:crosshair;touch-action:none}
+  .mode.sm span{padding:4px 9px;font-size:11px}
+  .hint{color:var(--mut);font-size:12px;line-height:1.5;margin:4px 0}
+  code{background:var(--card2);padding:1px 6px;border-radius:6px;font-size:11px;font-family:ui-monospace,Menlo,monospace}
+  #toast{position:absolute;left:50%;bottom:20px;transform:translateX(-50%);background:#fff;color:#111;padding:8px 16px;border-radius:999px;opacity:0;transition:opacity .3s;pointer-events:none;font-weight:400}
+  .mode{display:flex;gap:2px;background:var(--card2);border-radius:999px;padding:3px;margin-left:auto}
+  .mode span{padding:5px 12px;border-radius:999px;color:var(--mut);cursor:pointer;font-size:12px}
+  .mode span.on{background:var(--card3);color:#fff}
+  .panel{display:none}.panel.on{display:block}
+#ed2d{position:fixed;inset:0;background:rgba(5,6,8,.94);z-index:50;display:flex;flex-direction:column;gap:10px;padding:16px;overflow:auto}
+#ed2d[hidden]{display:none}
+#ed2d .ed-tools{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;font-size:12px;color:var(--mut)}
+#ed2d .ed-tools button.on{background:var(--green);color:#000}
+#ed2d .ed-tools input[type=range]{width:120px}
+#ed2dCanvas{width:100%;max-width:1200px;background:#111;border-radius:12px;cursor:crosshair;touch-action:none;align-self:flex-start}
+#ed2d .ed-help{font-size:12px;color:var(--mut)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo"></div>
+    <div class="tabs" id="tabs">
+      <div class="tab on" data-tab="size">Tyre</div><div class="tab" data-tab="look">Look</div><div class="tab" data-tab="export">Export</div>
+    </div>
+  </header>
+
+  <aside id="left">
+    <div class="panel on" data-panel="size">
+      <div class="card" style="--bar:var(--green)">
+        <h2>Tyre size <span class="r" id="sizeR"></span></h2>
+        <div class="big" id="bigSize"></div>
+        <div class="sub" id="sizePills"></div>
+        <div id="tyreParams"></div>
+      </div>
+      <div class="card" style="--bar:var(--yellow);margin-top:10px">
+        <h2>Cross-section <span class="r">drag the handles</span></h2>
+        <canvas id="profile" width="280" height="210" style="width:100%;height:210px;background:#111;border-radius:14px"></canvas>
+        <div id="profileParams"></div>
+      </div>
+      <div class="card" style="--bar:var(--red);margin-top:10px">
+        <h2>Tread materials <div class="mode sm" id="treadMode"><span class="on" data-m="color">Colour</span><span data-m="height">Depth</span><span data-m="normal">Normal</span><span data-m="rough">Rough</span></div></h2>
+        <canvas id="treadView"></canvas>
+        <canvas id="treadStrip"></canvas>
+        <div class="hint" id="treadDims" style="margin-top:6px"></div>
+      </div>
+    </div>
+    <div class="panel" data-panel="look">
+      <div class="card" style="--bar:var(--yellow)"><h2>Compound &amp; look</h2><div id="lookParams"></div></div>
+    </div>
+    <div class="panel" data-panel="export">
+      <div class="card" style="--bar:var(--red)"><h2>Export</h2>
+        <div class="hint">Textures are exported at the current map resolution. GLB is in metres, Y-up, tyre axis along X.</div>
+        <div class="btns"><button id="exportJson">Pattern JSON</button><button id="exportHeight">Height PNG</button><button id="exportNormal">Normal PNG</button><button id="exportGlb" class="primary">GLB (3D)</button><button id="exportObj">Quad OBJ</button></div>
+        <div class="row" style="margin-top:12px"><label>Import JSON</label><input type="file" id="importJson" accept=".json"></div>
+      </div>
+    </div>
+  </aside>
+
+  <main id="view">
+    <div class="float" id="badge"><div class="t" id="badgeType">Slick</div><div class="name" id="badgeName">GZero</div><div class="size" id="badgeSize">245/40 R18</div></div>
+    <div class="float" id="tiles"></div>
+    <div class="float" id="viewbtns">
+      <button class="small" data-view="iso">Iso</button><button class="small" data-view="side">Side</button><button class="small" data-view="tread">Tread</button><button class="small" data-view="front">Front</button><button class="small" id="spinBtn">Spin</button><button class="small" id="threadsBtn">X-ray cords</button>
+    </div>
+    <div id="toast"></div>
+  </main>
+
+  <aside id="right">
+    <div class="card" style="--bar:var(--green)">
+      <h2>Tread presets <select id="typeFilter" class="r" style="background:var(--card2);color:var(--mut);border:0;border-radius:999px;padding:4px 10px;font:inherit;font-size:12px"></select></h2>
+      <div id="presets"></div>
+      <div class="btns"><button id="randomBtn" class="primary">Random tyre</button><button id="randomName">New name</button></div>
+    </div>
+    <div class="card" style="--bar:var(--yellow)">
+      <h2>Tread editor</h2>
+      <div class="row"><label>Name</label><input type="text" id="pName"></div>
+      <div class="row"><label>Type</label><select id="pType"></select></div>
+      <div class="row"><label>Add layer</label><select id="addLayer"></select><button id="addLayerBtn" class="small">Add</button></div>
+      <div class="btns"><button id="open2d" class="small">2D tread editor…</button></div>
+      <div id="layers"></div>
+    </div>
+    <div class="card" style="--bar:var(--red)">
+      <h2>Layer properties</h2>
+      <div id="layerProps" class="hint">Select a layer to edit it. Layers are drawn in order; deeper cuts win.<br>Across-position <code>-1…1</code> = tread edges, <code>±1.3</code> reaches the shoulder.</div>
+    </div>
+  </aside>
+
+</div>
+
+<div id="ed2d" hidden>
+  <div class="ed-tools">
+    <b style="color:var(--text);font-size:14px">2D tread editor</b>
+    <span>Unrolled tread · u along the circumference (mm), v across (mm, 0 = centre)</span>
+    <button id="edClose" class="primary">Done</button>
+  </div>
+  <div class="ed-tools" id="edToolbar">
+    <button data-tool="stroke" class="on">Groove / sipe</button><button data-tool="block">Block</button><button data-tool="circle">Dimple</button><button data-tool="select">Select</button><button data-tool="erase">Erase</button>
+    <span>Width <input id="edWidth" type="range" min="0.3" max="20" step="0.1" value="4"><b id="edWidthV" style="color:var(--text)">4.0 mm</b></span>
+    <span>Depth <input id="edDepth" type="range" min="0.05" max="1" step="0.01" value="1"><b id="edDepthV" style="color:var(--text)"></b></span>
+    <span>Grid <select id="edGrid"><option value="0">off</option><option value="1">1 mm</option><option value="2" selected>2 mm</option><option value="5">5 mm</option><option value="10">10 mm</option></select></span>
+    <label><input id="edMirror" type="checkbox"> mirror across centre</label>
+  </div>
+  <div class="ed-tools">
+    <span>Zoom <input id="edZoom" type="range" min="1" max="6" step="0.1" value="1"><b id="edZoomV" style="color:var(--text)">1.0×</b></span>
+    <span>Pan <input id="edPan" type="range" min="0" max="2000" step="1" value="0"><b id="edPanV" style="color:var(--text)"></b></span>
+    <button id="edUndo" class="small">Undo</button><button id="edRedo" class="small">Redo</button><button id="edClear" class="small">Clear all</button>
+    <span id="edCount"></span>
+  </div>
+  <canvas id="ed2dCanvas" width="1200" height="200"></canvas>
+  <div class="ed-help" id="edHelp"></div>
+</div>
+<script src="https://unpkg.com/clipper-lib@6.4.2/clipper.js"></script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
+import { buildTyreQuadMesh, quadMeshToGeometry, quadMeshToObj, auditQuadMesh, hitShape, mirrorShape, moveShape } from './TyreTopology.js';
+
+// =====================================================================================================================
+//  STATE
+// =====================================================================================================================
+const T = {                       // tyre carcass parameters (mm / inch / fractions)
+  width: 245, aspect: 40, rim: 18, treadDepth: 8, wear: 0, wearBias: 0,
+  treadFrac: 0.88, crown: 2.0, shoulder: 18, bulge: 1.0, rimWidthFrac: 0.78,
+  radial: 720, across: 96, meshMode: 'quad', quadBudget: 120, polyDetail: 6,
+  rubber: '#151515', letter: 'white', lettering: true, brand: 'SLATE', spokes: 5, rimColor: '#c9ccd2', rimStyle: 'spoke'
+};
+const P = { name: 'GZero', type: 'Slick', layers: [] };   // tread pattern
+const UI = { sel: -1, threads: false, spin: false, treadMode: 'color' };
+
+const TYPES = ['Slick', 'Semi-slick', 'Drift', 'Street', 'Grip / UHP', 'Wet', 'Winter', 'Rally', 'Off-road', 'Drag'];
+
+const LAYER_DEFS = {
+  circ:    { label: 'Circumferential groove', color: '#38c46d', pos: 0, width: 8, depth: 1, zig: 0, zigCount: 60 },
+  lateral: { label: 'Lateral groove',          color: '#d6c93a', count: 48, angle: 20, width: 6, depth: 1, from: -1, to: 1, phase: 0, mirror: false, curve: 0, zig: 0 },
+  chevron: { label: 'Chevron / V groove',      color: '#f0a04b', count: 40, angle: 55, width: 7, depth: 1, from: 0.08, to: 1.3, phase: 0, mirror: true, curve: 0.3, zig: 0 },
+  sipe:    { label: 'Sipes',                   color: '#9aa4ff', count: 140, angle: 0, width: 1.2, depth: 0.55, from: -1, to: 1, phase: 0.5, mirror: false, curve: 0, zig: 1.5 },
+  dimple:  { label: 'Circular pattern',        color: '#4fc3f7', rows: 3, count: 60, radius: 3, depth: 0.5, from: -0.7, to: 0.7, stagger: true, ring: false },
+  hex:     { label: 'Hexagon cells',           color: '#e5423f', size: 14, width: 3, depth: 0.8, from: -1, to: 1, rotate: 0 },
+  noise:   { label: 'Micro texture',           color: '#8a8d94', amount: 0.06, scale: 3 },
+  shape:   { label: 'Drawn shapes (2D editor)', color: '#7fd1ff', depth: 1 }
+};
+const RANGES = {
+  pos: [-1.3, 1.3, 0.01], width: [0.5, 30, 0.1], depth: [0.05, 1, 0.01], zig: [0, 12, 0.1], zigCount: [4, 240, 1],
+  count: [2, 300, 1], angle: [-80, 80, 1], from: [-1.3, 1.3, 0.01], to: [-1.3, 1.3, 0.01], phase: [0, 1, 0.01], curve: [-1.5, 1.5, 0.01],
+  rows: [1, 14, 1], radius: [0.5, 15, 0.1], size: [4, 40, 0.5], rotate: [0, 60, 1], amount: [0, 0.5, 0.01], scale: [1, 12, 0.5]
+};
+const LABELS = { pos: 'Across position', width: 'Width (mm)', depth: 'Depth (×tread)', zig: 'Zig-zag (mm)', zigCount: 'Zig-zag count', count: 'Count around', angle: 'Angle (°)', from: 'From (across)', to: 'To (across)', phase: 'Phase', curve: 'Curvature', rows: 'Rows', radius: 'Radius (mm)', size: 'Cell size (mm)', rotate: 'Cell rotation (°)', amount: 'Amount', scale: 'Scale', mirror: 'Mirror (V)', stagger: 'Stagger rows', ring: 'Rings instead of dots' };
+
+// =====================================================================================================================
+//  PRESETS — each one is a named tread design with its own default tyre size
+// =====================================================================================================================
+const L = (type, o = {}) => Object.assign({ type }, strip(LAYER_DEFS[type]), o);
+function strip(d) { const r = {}; for (const k in d) if (k !== 'label' && k !== 'color') r[k] = d[k]; return r; }
+
+const PRESETS = [
+  { name: 'GZero', type: 'Slick', tyre: { width: 305, aspect: 30, rim: 19, treadDepth: 4, treadFrac: 0.93, crown: 1.2, shoulder: 26, letter: 'yellow' },
+    layers: [L('dimple', { rows: 2, count: 4, radius: 2.5, depth: 0.7, from: -0.55, to: 0.55, stagger: false }), L('noise', { amount: 0.04, scale: 2 })] },
+  { name: 'Grizzly Magnum', type: 'Off-road', tyre: { width: 285, aspect: 70, rim: 17, treadDepth: 15, treadFrac: 0.92, crown: 3, shoulder: 14, letter: 'white' },
+    layers: [L('circ', { pos: 0, width: 12, zig: 6, zigCount: 28 }), L('circ', { pos: 0.55, width: 11, zig: 5, zigCount: 28 }), L('circ', { pos: -0.55, width: 11, zig: 5, zigCount: 28 }),
+             L('lateral', { count: 28, angle: 18, width: 12, from: 0.3, to: 1.3, phase: 0 }), L('lateral', { count: 28, angle: -18, width: 12, from: -1.3, to: -0.3, phase: 0.5 }),
+             L('lateral', { count: 28, angle: 0, width: 9, from: -0.3, to: 0.3, phase: 0.25 }), L('sipe', { count: 56, angle: 12, width: 1.5, depth: 0.4, from: -1.3, to: 1.3, zig: 2 })] },
+  { name: 'Vortex R1', type: 'Grip / UHP', tyre: { width: 255, aspect: 35, rim: 19, treadDepth: 7, crown: 1.8, shoulder: 16 },
+    layers: [L('circ', { pos: 0.22, width: 7 }), L('circ', { pos: -0.22, width: 7 }), L('chevron', { count: 44, angle: 58, width: 6, from: 0.3, to: 1.3, curve: 0.35 }),
+             L('sipe', { count: 88, angle: 60, width: 1.2, depth: 0.5, from: 0.45, to: 1.25, mirror: true, phase: 0.5 })] },
+  { name: 'Smokestack D', type: 'Drift', tyre: { width: 235, aspect: 40, rim: 18, treadDepth: 6, crown: 1.5, shoulder: 20, letter: 'red' },
+    layers: [L('circ', { pos: 0.35, width: 6 }), L('circ', { pos: -0.35, width: 6 }), L('lateral', { count: 24, angle: 35, width: 5, from: 0.5, to: 1.3, phase: 0 }),
+             L('lateral', { count: 24, angle: -35, width: 5, from: -1.3, to: -0.5, phase: 0.5 })] },
+  { name: 'Urban Pulse', type: 'Street', tyre: { width: 205, aspect: 55, rim: 16, treadDepth: 8, crown: 2.2, shoulder: 15, letter: 'black' },
+    layers: [L('circ', { pos: 0.6, width: 8 }), L('circ', { pos: 0.2, width: 7 }), L('circ', { pos: -0.2, width: 7 }), L('circ', { pos: -0.6, width: 8 }),
+             L('lateral', { count: 64, angle: 10, width: 4, from: -1.3, to: 1.3, phase: 0 }), L('sipe', { count: 128, angle: 10, width: 1, depth: 0.6, from: -1.3, to: 1.3, zig: 1.2, phase: 0.5 })] },
+  { name: 'Monsoon Cut', type: 'Wet', tyre: { width: 245, aspect: 45, rim: 18, treadDepth: 10, crown: 2.5, shoulder: 15, letter: 'white' },
+    layers: [L('circ', { pos: 0, width: 12 }), L('circ', { pos: 0.5, width: 8 }), L('circ', { pos: -0.5, width: 8 }),
+             L('chevron', { count: 36, angle: 50, width: 9, from: 0.05, to: 1.3, curve: 0.5 }), L('chevron', { count: 36, angle: 50, width: 3, depth: 0.6, from: 0.05, to: 1.3, curve: 0.5, phase: 0.5 })] },
+  { name: 'Apex Shadow', type: 'Grip / UHP', tyre: { width: 265, aspect: 35, rim: 20, treadDepth: 7, crown: 1.6, shoulder: 17, letter: 'black' },
+    layers: [L('circ', { pos: -0.15, width: 9 }), L('circ', { pos: -0.55, width: 8 }), L('circ', { pos: 0.4, width: 6 }),
+             L('lateral', { count: 56, angle: 22, width: 4, from: -1.3, to: -0.15, phase: 0 }), L('lateral', { count: 22, angle: -25, width: 6, from: 0.4, to: 1.3, phase: 0.3, curve: 0.3 }),
+             L('sipe', { count: 112, angle: 22, width: 1, depth: 0.5, from: -1.3, to: -0.15, phase: 0.5 })] },
+  { name: 'HexaGrip Nova', type: 'Street', tyre: { width: 225, aspect: 45, rim: 17, treadDepth: 8, crown: 2, shoulder: 16, letter: 'white' },
+    layers: [L('hex', { size: 13, width: 3.5, depth: 0.9, from: -1.3, to: 1.3 }), L('circ', { pos: 0, width: 7 })] },
+  { name: 'Dimple Rave', type: 'Semi-slick', tyre: { width: 245, aspect: 40, rim: 18, treadDepth: 5, crown: 1.5, shoulder: 20, letter: 'yellow' },
+    layers: [L('dimple', { rows: 7, count: 90, radius: 3.2, depth: 0.7, from: -1.1, to: 1.1, stagger: true }), L('circ', { pos: 0, width: 5, depth: 0.9 })] },
+  { name: 'Frostbite Sipe', type: 'Winter', tyre: { width: 215, aspect: 60, rim: 16, treadDepth: 10, crown: 2.5, shoulder: 14, letter: 'black' },
+    layers: [L('circ', { pos: 0.45, width: 7, zig: 2, zigCount: 80 }), L('circ', { pos: -0.45, width: 7, zig: 2, zigCount: 80 }),
+             L('chevron', { count: 40, angle: 35, width: 6, from: 0.05, to: 1.3, curve: 0.1 }), L('sipe', { count: 200, angle: 35, width: 1.1, depth: 0.7, from: 0.05, to: 1.3, mirror: true, zig: 1.6, phase: 0.33 }),
+             L('sipe', { count: 200, angle: 35, width: 1.1, depth: 0.7, from: 0.05, to: 1.3, mirror: true, zig: 1.6, phase: 0.66 })] },
+  { name: 'Kestrel TC', type: 'Semi-slick', tyre: { width: 275, aspect: 35, rim: 18, treadDepth: 5, crown: 1.2, shoulder: 22, letter: 'white' },
+    layers: [L('circ', { pos: 0.3, width: 9 }), L('circ', { pos: -0.3, width: 9 }), L('lateral', { count: 18, angle: 40, width: 5, from: 0.65, to: 1.3, phase: 0 }),
+             L('lateral', { count: 18, angle: -40, width: 5, from: -1.3, to: -0.65, phase: 0.5 }), L('noise', { amount: 0.03, scale: 3 })] },
+  { name: 'Ravager Mud', type: 'Rally', tyre: { width: 235, aspect: 75, rim: 15, treadDepth: 14, treadFrac: 0.9, crown: 4, shoulder: 12, letter: 'white' },
+    layers: [L('lateral', { count: 22, angle: 30, width: 14, from: 0.1, to: 1.3, phase: 0 }), L('lateral', { count: 22, angle: -30, width: 14, from: -1.3, to: -0.1, phase: 0.5 }),
+             L('circ', { pos: 0, width: 9, zig: 8, zigCount: 22 }), L('lateral', { count: 22, angle: 0, width: 10, from: -0.1, to: 0.1, phase: 0.25 })] },
+  { name: 'Comet Drag', type: 'Drag', tyre: { width: 375, aspect: 50, rim: 15, treadDepth: 4, treadFrac: 0.95, crown: 1, shoulder: 30, rimWidthFrac: 0.85, letter: 'white' },
+    layers: [L('dimple', { rows: 2, count: 3, radius: 3, depth: 0.8, from: -0.7, to: 0.7, stagger: true }), L('noise', { amount: 0.05, scale: 2 })] },
+  { name: 'Talon Trail', type: 'Off-road', tyre: { width: 265, aspect: 65, rim: 17, treadDepth: 13, crown: 3, shoulder: 13, letter: 'white' },
+    layers: [L('hex', { size: 22, width: 8, depth: 1, from: -1.3, to: 1.3 }), L('circ', { pos: 0, width: 9, zig: 4, zigCount: 30 })] },
+];
+
+// =====================================================================================================================
+//  NAME GENERATOR
+// =====================================================================================================================
+const PRE = ['Grizzly', 'Vortex', 'Apex', 'Phantom', 'Raptor', 'Kestrel', 'Titan', 'Nomad', 'Viper', 'Comet', 'Ghost', 'Ember', 'Frost', 'Monsoon', 'Talon', 'Rogue', 'Sabre', 'Nitro', 'Onyx', 'Havoc', 'Quasar', 'Slate', 'Cobra', 'Tempest', 'Falcon'];
+const SUF = ['Magnum', 'R1', 'GT', 'Zero', 'Cut', 'Sport', 'Pro', 'X', 'Ultra', 'Drift', 'Evo', 'Nova', 'S3', 'Max', 'Grip', 'Blade', 'Trail', 'Prime', 'RS', 'TC', 'Rain', 'Ice'];
+const rnd = (a, b) => a + Math.random() * (b - a);
+const ri = (a, b) => Math.floor(rnd(a, b + 1));
+const pick = a => a[ri(0, a.length - 1)];
+function randomName() {
+  const r = Math.random();
+  if (r < 0.2) return pick('GZKVTXRQ'.split('')) + pick(['Zero', 'One', 'Force', 'Max', 'Prime']);
+  if (r < 0.35) return pick(PRE) + ' ' + pick(SUF) + ' ' + ri(2, 9);
+  return pick(PRE) + ' ' + pick(SUF);
+}
+function randomTyre() {
+  const type = pick(TYPES); const layers = [];
+  const size = { Slick: [305, 30, 19, 4], 'Semi-slick': [265, 35, 18, 5], Drift: [235, 40, 18, 6], Street: [205, 55, 16, 8], 'Grip / UHP': [255, 35, 19, 7], Wet: [245, 45, 18, 10], Winter: [215, 60, 16, 10], Rally: [235, 70, 15, 14], 'Off-road': [285, 70, 17, 15], Drag: [375, 50, 15, 4] }[type];
+  Object.assign(T, { width: size[0] + ri(-2, 2) * 10, aspect: size[1] + ri(-1, 1) * 5, rim: size[2], treadDepth: size[3], letter: pick(['white', 'yellow', 'red', 'black', 'blue']), crown: rnd(1, 3), shoulder: rnd(12, 26) });
+  const grooves = type === 'Slick' || type === 'Drag' ? 0 : type === 'Semi-slick' || type === 'Drift' ? ri(1, 2) : ri(2, 4);
+  const positions = grooves === 1 ? [0] : grooves === 2 ? [-0.3, 0.3] : grooves === 3 ? [-0.5, 0, 0.5] : [-0.6, -0.2, 0.2, 0.6];
+  const zig = type === 'Off-road' || type === 'Rally' ? rnd(3, 7) : (type === 'Winter' ? rnd(0, 2) : 0);
+  positions.forEach(p => layers.push(L('circ', { pos: p, width: rnd(5, 11), zig, zigCount: ri(22, 80) })));
+  const style = pick(['sym', 'dir', 'asym', 'hex', 'dot']);
+  if (type === 'Slick' || type === 'Drag') { layers.push(L('dimple', { rows: 2, count: ri(3, 6), radius: 2.5, depth: 0.7, from: -0.6, to: 0.6, stagger: false })); layers.push(L('noise', { amount: 0.04, scale: 2 })); }
+  else if (style === 'dir') layers.push(L('chevron', { count: ri(30, 50), angle: ri(35, 65), width: rnd(4, 9), from: rnd(0.05, 0.3), to: 1.3, curve: rnd(0, 0.6) }));
+  else if (style === 'asym') { layers.push(L('lateral', { count: ri(40, 64), angle: ri(10, 30), width: rnd(3, 5), from: -1.3, to: rnd(-0.3, -0.1) })); layers.push(L('lateral', { count: ri(16, 26), angle: -ri(15, 40), width: rnd(4, 7), from: rnd(0.2, 0.5), to: 1.3, curve: 0.3 })); }
+  else if (style === 'hex') layers.push(L('hex', { size: rnd(10, 24), width: rnd(3, 7), depth: rnd(0.7, 1), from: -1.3, to: 1.3 }));
+  else if (style === 'dot') layers.push(L('dimple', { rows: ri(3, 8), count: ri(40, 100), radius: rnd(2, 5), depth: rnd(0.4, 0.9), from: -1.1, to: 1.1, stagger: true, ring: Math.random() < 0.3 }));
+  else { const a = ri(-30, 30), c = ri(20, 64); layers.push(L('lateral', { count: c, angle: a, width: rnd(4, 10), from: 0.2, to: 1.3 })); layers.push(L('lateral', { count: c, angle: -a, width: rnd(4, 10), from: -1.3, to: -0.2, phase: 0.5 })); }
+  if (type === 'Winter' || (type === 'Street' && Math.random() < 0.7)) layers.push(L('sipe', { count: ri(100, 220), angle: ri(-30, 30), width: 1.1, depth: rnd(0.4, 0.7), from: -1.3, to: 1.3, zig: rnd(0, 2), phase: 0.5 }));
+  P.name = randomName(); P.type = type; P.layers = layers; UI.sel = -1;
+}
+
+// =====================================================================================================================
+//  GEOMETRY DERIVED VALUES
+// =====================================================================================================================
+function dims(t = T) {
+  const Rrim = t.rim * 25.4 / 2, H = t.width * t.aspect / 100, Rout = Rrim + H;
+  const halfW = t.width / 2, treadHalf = halfW * t.treadFrac, sr = Math.min(t.shoulder, H * 0.6);
+  const shoulderExt = sr * Math.sin(80 * Math.PI / 180);
+  const acrossHalf = treadHalf + shoulderExt;
+  return { Rrim, H, Rout, halfW, treadHalf, sr, shoulderExt, acrossHalf, circ: 2 * Math.PI * Rout, bw: halfW * t.rimWidthFrac };
+}
+
+// =====================================================================================================================
+//  TREAD PATTERN RENDERER  (mm space → depth map). White = full rubber, black = full tread depth cut.
+// =====================================================================================================================
+function renderPattern(pattern, d, H, wear = 0, wearBias = 0, treadDepth = 8, skipNoise = false) {
+  const k = H / (2 * d.acrossHalf);                   // px per mm (uniform)
+  const W = Math.max(64, Math.min(4096, Math.round(d.circ * k)));
+  const kx = W / d.circ, ky = k;                       // tiny anisotropy fix so it wraps exactly
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+  const th = d.treadHalf, circ = d.circ;
+  const g = v => { const q = Math.round(255 * (1 - Math.min(1, Math.max(0, v)))); return `rgb(${q},${q},${q})`; };
+  ctx.lineJoin = 'round'; ctx.lineCap = 'butt';
+  for (const off of [-circ, 0, circ]) {
+    ctx.setTransform(kx, 0, 0, ky, off * kx, H / 2);
+    ctx.globalCompositeOperation = 'darken';
+    for (const ly of pattern.layers) {
+      if (ly.type === 'noise') continue;
+      ctx.strokeStyle = ctx.fillStyle = g(ly.depth);
+      if (ly.type === 'circ') {
+        const y = ly.pos * th;
+        if (ly.zig > 0) {
+          ctx.lineWidth = ly.width; ctx.beginPath(); const n = Math.max(2, Math.round(ly.zigCount)) * 2;
+          for (let i = 0; i <= n; i++) { const x = i / n * circ, yy = y + (i % 2 ? ly.zig : -ly.zig); i ? ctx.lineTo(x, yy) : ctx.moveTo(x, yy); }
+          ctx.stroke();
+        } else ctx.fillRect(-5, y - ly.width / 2, circ + 10, ly.width);
+      } else if (ly.type === 'lateral' || ly.type === 'chevron' || ly.type === 'sipe') {
+        ctx.lineWidth = ly.width; const tan = Math.tan(ly.angle * Math.PI / 180); const n = Math.max(1, Math.round(ly.count));
+        const steps = 14; ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+          const x0 = (i + ly.phase) / n * circ;
+          for (const s of ly.mirror ? [1, -1] : [1]) {
+            for (let j = 0; j <= steps; j++) {
+              const cc = ly.from + (ly.to - ly.from) * j / steps;
+              const yy = (ly.mirror ? s * cc : cc) * th;
+              const ac = ly.mirror ? Math.abs(cc) : cc;
+              let xx = x0 + ac * th * tan + (ly.curve || 0) * ac * ac * th * 0.5;
+              if (ly.zig) xx += (j % 2 ? ly.zig : -ly.zig) * 0.5;
+              j ? ctx.lineTo(xx, yy) : ctx.moveTo(xx, yy);
+            }
+          }
+        }
+        ctx.stroke();
+      } else if (ly.type === 'shape') {
+        for (const sh of ly.shapes || []) {
+          const pts = sh.pts || []; ctx.fillStyle = ctx.strokeStyle = g(sh.depth ?? ly.depth ?? 1);
+          if (sh.kind === 'stroke' && pts.length > 1) { ctx.lineWidth = Math.max(0.3, sh.width || 3); ctx.beginPath(); pts.forEach((q, k) => k ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke(); }
+          else if (sh.kind === 'polygon' && pts.length > 2) { ctx.beginPath(); pts.forEach((q, k) => k ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.fill(); }
+          else if (sh.kind === 'circle' && pts.length) { ctx.beginPath(); ctx.arc(pts[0][0], pts[0][1], sh.r || 3, 0, Math.PI * 2); ctx.fill(); }
+        }
+      } else if (ly.type === 'dimple') {
+        const rows = Math.max(1, Math.round(ly.rows)), n = Math.max(1, Math.round(ly.count));
+        for (let r = 0; r < rows; r++) {
+          const cc = rows === 1 ? (ly.from + ly.to) / 2 : ly.from + (ly.to - ly.from) * r / (rows - 1); const y = cc * th;
+          const sh = ly.stagger && r % 2 ? 0.5 : 0;
+          for (let i = 0; i < n; i++) {
+            const x = (i + sh) / n * circ; ctx.beginPath(); ctx.arc(x, y, ly.radius, 0, Math.PI * 2);
+            if (ly.ring) { ctx.lineWidth = Math.max(0.6, ly.radius * 0.4); ctx.stroke(); } else ctx.fill();
+          }
+        }
+      } else if (ly.type === 'hex') {
+        const s = Math.max(2, ly.size); const nx = Math.max(2, 2 * Math.round(circ / (3 * s))); const sx = circ / nx; const sy = Math.sqrt(3) * s;
+        const y0 = ly.from * th, y1 = ly.to * th; ctx.save(); ctx.beginPath(); ctx.rect(-5, y0, circ + 10, y1 - y0); ctx.clip();
+        ctx.lineWidth = ly.width; ctx.beginPath(); const rot = ly.rotate * Math.PI / 180;
+        const j0 = Math.floor((y0 - sy) / sy), j1 = Math.ceil((y1 + sy) / sy);
+        for (let i = -1; i <= nx; i++) for (let j = j0; j <= j1; j++) {
+          const cx = i * sx, cy = j * sy + (Math.abs(i) % 2 ? sy / 2 : 0);
+          for (let v = 0; v < 6; v++) { const a = rot + v * Math.PI / 3; const px = cx + s * Math.cos(a), py = cy + s * Math.sin(a); v ? ctx.lineTo(px, py) : ctx.moveTo(px, py); }
+          ctx.closePath();
+        }
+        ctx.stroke(); ctx.restore();
+      }
+    }
+    // tread-wear indicator bars (1.6 mm legal limit) inside deep circumferential grooves
+    ctx.globalCompositeOperation = 'source-over'; ctx.fillStyle = g(1 - 1.6 / treadDepth);
+    for (const ly of pattern.layers) if (ly.type === 'circ' && ly.width >= 4 && ly.depth >= 0.9 && !ly.zig)
+      for (let i = 0; i < 6; i++) ctx.fillRect((i + 0.5) / 6 * circ - 3, ly.pos * th - ly.width / 2 - 0.2, 6, ly.width + 0.4);
+  }
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over';
+  // ---- post: depth array, wear, micro texture ----
+  const img = ctx.getImageData(0, 0, W, H).data; const depth = new Float32Array(W * H);
+  const noiseLayers = skipNoise ? [] : pattern.layers.filter(l => l.type === 'noise');
+  for (let y = 0; y < H; y++) {
+    const cc = (y / H * 2 - 1) * d.acrossHalf / th;                                 // across coordinate in tread units
+    const wLocal = Math.min(1, Math.max(0, wear * (1 + 0.6 * wearBias * (1 - 2 * Math.min(1, cc * cc)))));
+    for (let x = 0; x < W; x++) {
+      let dv = 1 - img[(y * W + x) * 4] / 255;
+      for (const nl of noiseLayers) dv += nl.amount * (vnoise(x / (nl.scale * k), y / (nl.scale * k)) - 0.5) + nl.amount * 0.4 * (vnoise(x / (nl.scale * k) * 4, y / (nl.scale * k) * 4) - 0.5);
+      depth[y * W + x] = Math.max(0, dv - wLocal);
+    }
+  }
+  return { W, H, k, depth, wearRow: y => { const cc = (y / H * 2 - 1) * d.acrossHalf / th; return Math.min(1, Math.max(0, wear * (1 + 0.6 * wearBias * (1 - 2 * Math.min(1, cc * cc))))); } };
+}
+function hash2(x, y) { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); }
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi), b = hash2(xi + 1, yi), c = hash2(xi, yi + 1), dd = hash2(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + dd) * u * v;
+}
+
+// Build colour / roughness / normal canvases from the depth field
+function buildTreadMaps(pm, treadDepth, rubberHex, wear) {
+  const { W, H, depth, k } = pm;
+  const base = new THREE.Color(rubberHex), worn = new THREE.Color('#4a4846'), grooveC = new THREE.Color('#0a0a0a');
+  const col = new ImageData(W, H), rou = new ImageData(W, H), nor = new ImageData(W, H);
+  const mmPerPx = 1 / k; const tmp = new THREE.Color();
+  for (let y = 0; y < H; y++) {
+    const wl = pm.wearRow(y);
+    for (let x = 0; x < W; x++) {
+      const i = y * W + x, o = i * 4; const dv = depth[i];
+      const grain = vnoise(x / 6, y / 6) * 0.5 + vnoise(x / 1.7, y / 1.7) * 0.5;
+      // colour: contact surface polishes/greys as it wears; groove floors are dark
+      tmp.copy(base).lerp(worn, wl * 0.75 * (0.7 + 0.6 * grain));
+      tmp.lerp(grooveC, Math.min(1, dv * 1.2));
+      tmp.offsetHSL(0, 0, (grain - 0.5) * 0.06);
+      col.data[o] = tmp.r * 255; col.data[o + 1] = tmp.g * 255; col.data[o + 2] = tmp.b * 255; col.data[o + 3] = 255;
+      const r = dv > 0.02 ? 0.92 : 0.9 - wl * 0.42 + (grain - 0.5) * 0.15; const rq = Math.max(0, Math.min(1, r)) * 255;
+      rou.data[o] = rq; rou.data[o + 1] = rq; rou.data[o + 2] = rq; rou.data[o + 3] = 255;
+      const xl = depth[y * W + (x + W - 1) % W], xr = depth[y * W + (x + 1) % W];
+      const yu = depth[Math.max(0, y - 1) * W + x], yd = depth[Math.min(H - 1, y + 1) * W + x];
+      const dzdx = (xr - xl) * treadDepth / (2 * mmPerPx), dzdy = (yd - yu) * treadDepth / (2 * mmPerPx);
+      let nx = dzdx, ny = dzdy, nz = 1; const len = Math.hypot(nx, ny, nz); nx /= len; ny /= len; nz /= len;
+      nor.data[o] = (nx * 0.5 + 0.5) * 255; nor.data[o + 1] = (ny * 0.5 + 0.5) * 255; nor.data[o + 2] = (nz * 0.5 + 0.5) * 255; nor.data[o + 3] = 255;
+    }
+  }
+  const mk = id => { const c = document.createElement('canvas'); c.width = W; c.height = H; c.getContext('2d').putImageData(id, 0, 0); return c; };
+  const hc = document.createElement('canvas'); hc.width = W; hc.height = H; const hid = new ImageData(W, H);
+  for (let i = 0; i < W * H; i++) { const q = (1 - depth[i]) * 255; hid.data[i * 4] = hid.data[i * 4 + 1] = hid.data[i * 4 + 2] = q; hid.data[i * 4 + 3] = 255; }
+  hc.getContext('2d').putImageData(hid, 0, 0);
+  return { color: mk(col), rough: mk(rou), normal: mk(nor), height: hc };
+}
+
+// Sidewall canvas: lettering ("thread" of text + rim protector rib + sidewall micro texture)
+function buildSidewall(outer) {
+  const W = 4096, H = 256; const c = document.createElement('canvas'); c.width = W; c.height = H; const ctx = c.getContext('2d');
+  const hc = document.createElement('canvas'); hc.width = W; hc.height = H; const hx = hc.getContext('2d'); hx.fillStyle = '#808080'; hx.fillRect(0, 0, W, H);
+  drawSidewallThreads(hx, W, H);
+  ctx.fillStyle = T.rubber; ctx.fillRect(0, 0, W, H);
+  // subtle radial texture streaks
+  ctx.globalAlpha = 0.08; for (let i = 0; i < 1200; i++) { ctx.fillStyle = Math.random() < 0.5 ? '#000' : '#fff'; ctx.fillRect(Math.random() * W, Math.random() * H, 1, rnd(4, 40)); } ctx.globalAlpha = 1;
+  // bead / rim protector rib and shoulder rib  (s: 0 = bead at bottom, 1 = shoulder at top)
+  ctx.fillStyle = 'rgba(0,0,0,.35)'; ctx.fillRect(0, H * 0.14, W, 4); ctx.fillRect(0, H * 0.86, W, 3);
+  ctx.fillStyle = 'rgba(255,255,255,.06)'; ctx.fillRect(0, H * 0.18, W, 2); ctx.fillRect(0, H * 0.83, W, 3);
+  if (T.lettering) {
+    const colors = { white: '#e8e8e8', yellow: '#f5c518', red: '#e53935', blue: '#42a5f5', black: '#2a2a2a' }; const lc = colors[T.letter] || '#e8e8e8';
+    const size = sizeString(); const dir = P.layers.some(l => l.type === 'chevron') ? '   ◄ ROTATION' : '';
+    const asym = P.layers.some(l => l.type === 'lateral' && ((l.from > -0.9 && l.to > 0.9) || (l.from < -0.9 && l.to < 0.9))) ? (outer ? '   OUTSIDE' : '   INSIDE') : '';
+    ctx.save(); ctx.translate(0, H * 0.5); if (!outer) { ctx.scale(-1, 1); ctx.translate(-W, 0); }
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    for (const x0 of [0, W / 2]) {
+      ctx.fillStyle = lc; ctx.font = '900 96px Impact, "Arial Black", system-ui, sans-serif'; ctx.fillText(T.brand.toUpperCase(), x0 + 60, 0);
+      emboss(hx, ctx.font, T.brand.toUpperCase(), x0 + 60, H * 0.5, outer, W);
+      const bw = ctx.measureText(T.brand.toUpperCase()).width;
+      ctx.font = 'italic 800 78px system-ui, sans-serif'; ctx.fillText(P.name.toUpperCase(), x0 + 60 + bw + 60, 0);
+      emboss(hx, ctx.font, P.name.toUpperCase(), x0 + 60 + bw + 60, H * 0.5, outer, W);
+      const nw = ctx.measureText(P.name.toUpperCase()).width;
+      ctx.fillStyle = T.letter === 'black' ? '#333' : '#bfbfbf'; ctx.font = '600 44px ui-monospace, Menlo, Consolas, monospace';
+      ctx.fillText(size + '   ' + P.type.toUpperCase() + '  ' + Math.round(T.treadDepth) + 'mm' + dir + asym, x0 + 60 + bw + 60 + nw + 90, 0);
+      // embossed DOT block
+      ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.font = '600 26px ui-monospace, monospace'; ctx.fillText('DOT SL8T ' + Math.abs(hashStr(P.name)) % 9000 + '  TUBELESS RADIAL  MAX 51 PSI', x0 + 60, H * 0.28);
+    }
+    ctx.restore();
+  }
+  return { color: c, normal: heightToNormal(hc, 2.2) };
+}
+function emboss(hx, font, text, x, y, outer, W) { hx.save(); if (!outer) { hx.scale(-1, 1); hx.translate(-W, 0); } hx.font = font; hx.textBaseline = 'middle'; hx.fillStyle = '#b0b0b0'; hx.fillText(text, x, y); hx.restore(); }
+// the 'threads': radial body-cord ridges, woven chafer fabric at the bead, mould parting line, vent spews
+function drawSidewallThreads(hx, W, H) {
+  const rand = mulberry(hashStr(P.name + T.width));
+  hx.lineWidth = 1; for (let x = 0; x < W; x += 2.6) { const a = 0.05 + rand() * 0.16; hx.strokeStyle = `rgba(255,255,255,${a})`; hx.beginPath(); hx.moveTo(x, H * 0.16); hx.lineTo(x + 1.5, H * 0.92); hx.stroke(); }   // radial cords
+  hx.strokeStyle = 'rgba(255,255,255,.22)'; for (let x = -H; x < W + H; x += 3) { hx.beginPath(); hx.moveTo(x, 0); hx.lineTo(x + H * 0.16, H * 0.16); hx.stroke(); hx.beginPath(); hx.moveTo(x + H * 0.16, 0); hx.lineTo(x, H * 0.16); hx.stroke(); }   // woven chafer
+  hx.fillStyle = 'rgba(0,0,0,.35)'; hx.fillRect(0, H * 0.16 - 1, W, 2); hx.fillStyle = 'rgba(255,255,255,.45)'; hx.fillRect(0, H * 0.5 + 44, W, 1.5);   // parting line above the lettering
+  hx.fillStyle = 'rgba(255,255,255,.35)'; for (let x = 0; x < W; x += 3) { const a = 0.25 + rand() * 0.2; hx.fillStyle = `rgba(255,255,255,${a})`; hx.fillRect(x, H * 0.90 + (x % 6 ? 0 : 1.5), 1.8, 1.8); }   // stitch row along the shoulder
+  for (let i = 0; i < 40; i++) { const x = rand() * W, y = H * (0.2 + rand() * 0.65); const g = hx.createRadialGradient(x, y, 0, x, y, 3.5); g.addColorStop(0, 'rgba(255,255,255,.9)'); g.addColorStop(1, 'rgba(255,255,255,0)'); hx.fillStyle = g; hx.fillRect(x - 4, y - 4, 8, 8); }   // vent spews
+}
+function mulberry(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function heightToNormal(src, strength) {
+  const W = src.width, H = src.height; const d = src.getContext('2d').getImageData(0, 0, W, H).data; const out = new ImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const o = (y * W + x) * 4; const l = d[(y * W + (x + W - 1) % W) * 4], r = d[(y * W + (x + 1) % W) * 4], u = d[(Math.max(0, y - 1) * W + x) * 4], b = d[(Math.min(H - 1, y + 1) * W + x) * 4];
+    let nx = -(r - l) / 255 * strength, ny = -(b - u) / 255 * strength, nz = 1; const ln = Math.hypot(nx, ny, nz); out.data[o] = (nx / ln * 0.5 + 0.5) * 255; out.data[o + 1] = (ny / ln * 0.5 + 0.5) * 255; out.data[o + 2] = (nz / ln * 0.5 + 0.5) * 255; out.data[o + 3] = 255; }
+  const c = document.createElement('canvas'); c.width = W; c.height = H; c.getContext('2d').putImageData(out, 0, 0); return c;
+}
+function hashStr(s) { let h = 7; for (const ch of s) h = (h * 31 + ch.charCodeAt(0)) | 0; return h; }
+function sizeString() { return `${T.width}/${T.aspect} R${T.rim}`; }
+
+
+// =====================================================================================================================
+//  POLYGON TREAD — groove shapes as 2D polygons (mm), boolean-combined, extruded as flat faces + vertical walls
+// =====================================================================================================================
+const TAU = Math.PI * 2;
+const CS = 100;                                            // Clipper works in integers: 0.01 mm units
+const CL = () => window.ClipperLib;
+const toPath = ring => ring.map(p => ({ X: Math.round(p[0] * CS), Y: Math.round(p[1] * CS) }));
+const orient = path => { if (!CL().Clipper.Orientation(path)) path.reverse(); return path; };
+function circleRing(cx, cy, r, n = 24) { const ring = []; for (let i = 0; i < n; i++) ring.push([cx + r * Math.cos(i / n * TAU), cy + r * Math.sin(i / n * TAU)]); return ring; }
+function rectPath(x0, y0, x1, y1) { return orient(toPath([[x0, y0], [x1, y0], [x1, y1], [x0, y1]])); }
+// polylines (open or closed outlines) → filled groove areas via ClipperOffset
+function strokePaths(polylines, w, closed = false) {
+  const L = CL(); const co = new L.ClipperOffset(2, 0.25 * CS);
+  for (const pl of polylines) co.AddPath(toPath(pl), L.JoinType.jtRound, closed ? L.EndType.etClosedLine : L.EndType.etOpenButt);
+  const out = new L.Paths(); co.Execute(out, w / 2 * CS); return out;
+}
+function boolOp(type, subj, clip) {
+  const L = CL(); const c = new L.Clipper(); c.AddPaths(subj, L.PolyType.ptSubject, true); if (clip && clip.length) c.AddPaths(clip, L.PolyType.ptClip, true);
+  const out = new L.Paths(); c.Execute(type, out, L.PolyFillType.pftNonZero, L.PolyFillType.pftNonZero); return out;
+}
+const union = (a, b) => boolOp(CL().ClipType.ctUnion, a, b || []);
+const diff = (a, b) => boolOp(CL().ClipType.ctDifference, a, b);
+const inter = (a, b) => boolOp(CL().ClipType.ctIntersection, a, b);
+function exPolygons(paths) {                               // → [{outer:[[x,y]..], holes:[[[x,y]..]]}] in mm
+  const L = CL(); const c = new L.Clipper(); c.AddPaths(paths, L.PolyType.ptSubject, true); const tree = new L.PolyTree(); c.Execute(L.ClipType.ctUnion, tree, L.PolyFillType.pftNonZero, L.PolyFillType.pftNonZero);
+  return L.JS.PolyTreeToExPolygons(tree).map(ex => ({ outer: ex.outer.map(p => [p.X / CS, p.Y / CS]), holes: ex.holes.map(h => h.map(p => [p.X / CS, p.Y / CS])) }));
+}
+// Every groove layer as Clipper paths with its depth
+function patternPolygons(pattern, d, treadDepth) {
+  const th = d.treadHalf, circ = d.circ, A = d.acrossHalf; const out = []; const bars = [];
+  const shift = (paths, dx) => paths.map(p => p.map(q => ({ X: q.X + Math.round(dx * CS), Y: q.Y })));
+  for (const ly of pattern.layers) {
+    if (ly.type === 'noise') continue; let paths = []; let wrap = true;
+    if (ly.type === 'circ') {
+      const y = ly.pos * th;
+      if (ly.zig > 0) { const n = Math.max(2, Math.round(ly.zigCount)) * 2; const pts = []; for (let i = -2; i <= n + 2; i++) pts.push([i / n * circ, y + (Math.abs(i) % 2 ? ly.zig : -ly.zig)]); paths = strokePaths([pts], ly.width); wrap = false; }
+      else { paths = [rectPath(-circ, y - ly.width / 2, 2 * circ, y + ly.width / 2)]; wrap = false; }
+      if (ly.width >= 4 && ly.depth >= 0.9 && !ly.zig) for (let i = 0; i < 6; i++) { const x = (i + 0.5) / 6 * circ; bars.push(rectPath(x - 3, y - ly.width / 2 - 0.2, x + 3, y + ly.width / 2 + 0.2)); }
+    } else if (ly.type === 'lateral' || ly.type === 'chevron' || ly.type === 'sipe') {
+      const tan = Math.tan(ly.angle * Math.PI / 180), n = Math.max(1, Math.round(ly.count)); const steps = (ly.curve || ly.zig) ? 8 : 1; const lines = [];
+      for (let i = 0; i < n; i++) { const x0 = (i + ly.phase) / n * circ;
+        for (const sg of ly.mirror ? [1, -1] : [1]) { const pts = [];
+          for (let j = 0; j <= steps; j++) { const cc = ly.from + (ly.to - ly.from) * j / steps; const yy = (ly.mirror ? sg * cc : cc) * th; const ac = ly.mirror ? Math.abs(cc) : cc;
+            let xx = x0 + ac * th * tan + (ly.curve || 0) * ac * ac * th * 0.5; if (ly.zig) xx += (j % 2 ? ly.zig : -ly.zig) * 0.5; pts.push([xx, yy]); }
+          lines.push(pts); } }
+      paths = strokePaths(lines, ly.width);
+    } else if (ly.type === 'dimple') {
+      const rows = Math.max(1, Math.round(ly.rows)), n = Math.max(1, Math.round(ly.count)); const rings = [];
+      for (let r = 0; r < rows; r++) { const cc = rows === 1 ? (ly.from + ly.to) / 2 : ly.from + (ly.to - ly.from) * r / (rows - 1); const y = cc * th; const sh = ly.stagger && r % 2 ? 0.5 : 0;
+        for (let i = 0; i < n; i++) { const x = (i + sh) / n * circ; const seg = Math.max(12, Math.min(48, Math.round(ly.radius * 6))); rings.push(circleRing(x, y, ly.radius, seg)); } }
+      paths = ly.ring ? strokePaths(rings, Math.max(0.6, ly.radius * 0.4), true) : rings.map(r => orient(toPath(r)));
+    } else if (ly.type === 'hex') {
+      const sz = Math.max(2, ly.size); const nx = Math.max(2, 2 * Math.round(circ / (3 * sz))); const sx = circ / nx; const sy = Math.sqrt(3) * sz; const y0 = ly.from * th, y1 = ly.to * th; const rot = ly.rotate * Math.PI / 180;
+      const j0 = Math.floor((y0 - sy) / sy), j1 = Math.ceil((y1 + sy) / sy); const hexes = [];
+      for (let i = -1; i <= nx; i++) for (let j = j0; j <= j1; j++) { const cx = i * sx, cy = j * sy + (Math.abs(i) % 2 ? sy / 2 : 0); const pts = []; for (let v = 0; v < 6; v++) { const a = rot + v * Math.PI / 3; pts.push([cx + sz * Math.cos(a), cy + sz * Math.sin(a)]); } hexes.push(pts); }
+      paths = inter(strokePaths(hexes, ly.width, true), [rectPath(-circ, y0, 2 * circ, y1)]); wrap = false;
+    }
+    if (!paths.length) continue;
+    if (wrap) paths = paths.concat(shift(paths, circ), shift(paths, -circ));      // seam continuity
+    out.push({ paths, depth: Math.round(ly.depth * 100) / 100 });
+  }
+  return { grooves: out, bars, barDepth: Math.round((1 - 1.6 / treadDepth) * 100) / 100 };
+}
+// nested regions R_i (everything cut to depth >= d_i) → floor pieces S_i = R_i − R_{i+1}
+function treadRegions(pattern, d, treadDepth, wear) {
+  const { grooves, bars, barDepth } = patternPolygons(pattern, d, treadDepth);
+  const A = d.acrossHalf, circ = d.circ; const rect = [rectPath(0, -A, circ, A)];
+  const depths = [...new Set(grooves.map(g => g.depth).filter(v => v > wear + 0.005))].sort((a, b) => b - a);
+  const wantBars = bars.length && barDepth > wear + 0.005 && depths.some(v => v > barDepth);
+  if (wantBars && !depths.includes(barDepth)) { depths.push(barDepth); depths.sort((a, b) => b - a); }
+  let R = []; const regions = [];
+  for (const dep of depths) { const paths = grooves.filter(g => g.depth === dep).flatMap(g => g.paths); R = union(R.concat(paths)); regions.unshift({ depth: dep, R }); }
+  if (wantBars) for (const rg of regions) if (rg.depth > barDepth) rg.R = diff(rg.R, bars);
+  for (const rg of regions) rg.R = inter(rg.R, rect);
+  const pieces = [{ depth: 0, paths: regions.length ? diff(rect, regions[0].R) : rect }];
+  for (let i = 0; i < regions.length; i++) pieces.push({ depth: regions[i].depth, paths: i + 1 < regions.length ? diff(regions[i].R, regions[i + 1].R) : regions[i].R });
+  return { pieces, levels: [0, ...regions.map(r => r.depth)] };
+}
+function pointInRing(x, y, ring) { let inside = false; for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) { const xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1]; if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside; } return inside; }
+function subdivideRing(ring, lx, ly, th = 1e9, lyShoulder = ly) { const out = []; for (let i = 0; i < ring.length; i++) { const a = ring[i], b = ring[(i + 1) % ring.length]; const lyy = Math.max(Math.abs(a[1]), Math.abs(b[1])) > th - 0.5 ? lyShoulder : ly; const n = Math.max(1, Math.ceil(Math.max(Math.abs(b[0] - a[0]) / lx, Math.abs(b[1] - a[1]) / lyy))); for (let k = 0; k < n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]); } return out; }
+// across-position (mm) → axial position, radius and outward normal on the crowned/shouldered profile
+function treadProfileAt(y, d) {
+  const ay = Math.abs(y), sgn = Math.sign(y) || 1;
+  if (ay <= d.treadHalf) return { x: y, r: d.Rout - T.crown * (y / d.treadHalf) ** 2, nx: 0, nr: 1, w: 1 };
+  const phi = Math.min(80 * Math.PI / 180, Math.asin(Math.min(1, (ay - d.treadHalf) / d.sr))); const c80 = Math.cos(80 * Math.PI / 180);
+  return { x: sgn * (d.treadHalf + d.sr * Math.sin(phi)), r: d.Rout - T.crown - d.sr + d.sr * Math.cos(phi), nx: sgn * Math.sin(phi), nr: Math.cos(phi), w: Math.max(0, (Math.cos(phi) - c80) / (1 - c80)) };
+}
+function buildPolyTread(d, pmGeo) {
+  const { pieces, levels } = treadRegions(P, d, T.treadDepth, T.wear);
+  const D = T.treadDepth, A = d.acrossHalf, circ = d.circ, LX = T.polyDetail, LY = T.polyDetail * 2;
+  const pos = [], nrm = [], uv = [], tan = []; let tris = 0;
+  const wl = y => pmGeo.wearRow((y + A) / (2 * A) * pmGeo.H);
+  const place = (x, y, hFrac) => { const pr = treadProfileAt(y, d); const off = D * Math.max(hFrac, wl(y)) * pr.w; const ax = pr.x - pr.nx * off, r = pr.r - pr.nr * off; const th = x / circ * TAU; return [ax, r * Math.cos(th), r * Math.sin(th), pr.nx, pr.nr * Math.cos(th), pr.nr * Math.sin(th)]; };
+  const push = (p, n, u, v, t) => { pos.push(p[0], p[1], p[2]); nrm.push(n[0], n[1], n[2]); uv.push(u, v); tan.push(t[0], t[1], t[2], 1); };
+  const tangentAt = u => { const th = u * TAU; return [0, -Math.sin(th), Math.cos(th)]; };   // +u direction (circumferential)
+  const snapLevel = h => levels.reduce((b, l) => Math.abs(l - h) < Math.abs(b - h) ? l : b, 0);
+  const LYS = Math.max(1.5, d.sr * 0.17);                         // finer across-steps on the shoulder arc (~10°)
+  const rowsY = []; for (let y = 0; y <= d.treadHalf - LY * 0.5; y += LY) rowsY.push(y); for (let ph = 10; ph < 80; ph += 10) rowsY.push(d.treadHalf + d.sr * Math.sin(ph * Math.PI / 180)); const ROWS = [...rowsY.map(y => -y).reverse(), ...rowsY.slice(1)];
+  const SW = LX * 2;                                              // strip width for wide polygons (keeps earcut inputs small)
+  const bbox = ring => { let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9; for (const p of ring) { if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; } return [x0, y0, x1, y1]; };
+  const splitWide = ex => {
+    const [x0, y0, x1, y1] = bbox(ex.outer); if (x1 - x0 <= SW * 2.5) return [ex];
+    const outerP = toPath(ex.outer); const holes = ex.holes.map(h => ({ p: toPath(h), b: bbox(h) })); const out = [];
+    for (let xs = Math.floor(x0 / SW) * SW; xs < x1; xs += SW) {
+      const xe = xs + SW; const hp = holes.filter(h => h.b[2] >= xs && h.b[0] <= xe).map(h => h.p);
+      const part = inter([outerP, ...hp], [rectPath(xs, y0 - 1, xe, y1 + 1)]); if (part.length) out.push(...exPolygons(part));
+    }
+    return out;
+  };
+  for (const pc of pieces) for (const ex0 of exPolygons(pc.paths)) for (const poly of splitWide(ex0)) {
+    const rings = [poly.outer, ...poly.holes].map(r => subdivideRing(r, LX, LY, d.treadHalf, LYS)); if (rings[0].length < 3) continue;
+    // Steiner grid inside the polygon for curvature-following interiors
+    const xs = rings[0].map(p => p[0]), ys = rings[0].map(p => p[1]); const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const steiner = [];
+    if (x1 - x0 > LX * 1.5 || y1 - y0 > LY * 1.5) for (const gy of ROWS) { if (gy <= y0 || gy >= y1) continue; for (let gx = Math.ceil(x0 / LX) * LX; gx < x1; gx += LX) {
+      if (!pointInRing(gx, gy, rings[0])) continue; let inHole = false; for (let h = 1; h < rings.length; h++) if (pointInRing(gx, gy, rings[h])) { inHole = true; break; } if (inHole) continue;
+      // keep clear of edges (avoid slivers)
+      const tol = Math.abs(gy) > d.treadHalf ? LYS * 0.35 : LY * 0.35; let near = false; for (const r of rings) { for (let i = 0; i < r.length && !near; i++) if (Math.abs(r[i][0] - gx) < LX * 0.35 && Math.abs(r[i][1] - gy) < tol) near = true; if (near) break; } if (near) continue;
+      steiner.push([gx, gy]);
+    } }
+    const contour = rings[0].map(p => new THREE.Vector2(p[0], p[1])); const holes = rings.slice(1).map(r => r.map(p => new THREE.Vector2(p[0], p[1])));
+    for (const sp of steiner) holes.push([new THREE.Vector2(sp[0], sp[1])]);
+    let faces; try { faces = THREE.ShapeUtils.triangulateShape(contour, holes); } catch (e) { continue; }
+    const all = contour.concat(...holes); const hz = pc.depth;
+    for (const f of faces) { const a = all[f[0]], b = all[f[1]], c = all[f[2]]; const area = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y); if (Math.abs(area) < 1e-6) continue;
+      const ord = area > 0 ? [a, b, c] : [a, c, b];
+      for (const q of ord) { const P3 = place(q.x, q.y, hz); push(P3, [P3[3], P3[4], P3[5]], q.x / circ, (q.y + A) / (2 * A), tangentAt(q.x / circ)); } tris++; }
+    // walls: generated from the lower side of every boundary edge
+    for (const r of rings) for (let i = 0; i < r.length; i++) {
+      const a = r[i], b = r[(i + 1) % r.length]; const dx = b[0] - a[0], dy = b[1] - a[1]; const l = Math.hypot(dx, dy); if (l < 1e-6) continue;
+      const ox = dy / l, oy = -dx / l; const mx = (a[0] + b[0]) / 2 + ox * 0.9, my = (a[1] + b[1]) / 2 + oy * 0.9;
+      const smp = sampleDepth(pmGeo, mx / circ, (my + A) / (2 * A)); const hOut = smp > 0.02 ? snapLevel(smp + wl(my)) : 0;
+      const hIn = pc.depth; if (hOut >= hIn - 0.005) continue;
+      const u = mx / circ, v = (my + A) / (2 * A);
+      const a0 = place(a[0], a[1], hOut), b0 = place(b[0], b[1], hOut), a1 = place(a[0], a[1], hIn), b1 = place(b[0], b[1], hIn);
+      if (Math.hypot(a0[0] - a1[0], a0[1] - a1[1], a0[2] - a1[2]) < 0.02 && Math.hypot(b0[0] - b1[0], b0[1] - b1[1], b0[2] - b1[2]) < 0.02) continue;
+      const n = [0, 0, 0]; { const e1 = [b0[0] - a0[0], b0[1] - a0[1], b0[2] - a0[2]], e2 = [a1[0] - a0[0], a1[1] - a0[1], a1[2] - a0[2]]; n[0] = e1[1] * e2[2] - e1[2] * e2[1]; n[1] = e1[2] * e2[0] - e1[0] * e2[2]; n[2] = e1[0] * e2[1] - e1[1] * e2[0]; const ln = Math.hypot(...n) || 1; n[0] /= ln; n[1] /= ln; n[2] /= ln; }
+      // wall must face into the groove (toward −outward): flip if needed
+      const th = u * TAU; const want = [-oy, ox * Math.sin(th), -ox * Math.cos(th)]; /* −outward: x→circumferential tangent, y→axle */ const flip = n[0] * want[0] + n[1] * want[1] + n[2] * want[2] < 0; if (flip) { n[0] = -n[0]; n[1] = -n[1]; n[2] = -n[2]; }
+      // wall UVs sit just inside the groove floor (flat in the depth map) so the normal map does not tilt them
+      const inU = -ox * 1.2 / circ, inV = -oy * 1.2 / (2 * A); const uvA0 = [a[0] / circ + inU, (a[1] + A) / (2 * A) + inV], uvB0 = [b[0] / circ + inU, (b[1] + A) / (2 * A) + inV];
+      const uvA1 = [uvA0[0] + inU * 0.6, uvA0[1] + inV * 0.6], uvB1 = [uvB0[0] + inU * 0.6, uvB0[1] + inV * 0.6];
+      const et = [b0[0] - a0[0], b0[1] - a0[1], b0[2] - a0[2]]; const el = Math.hypot(...et) || 1; const wt = [et[0] / el, et[1] / el, et[2] / el];
+      const quad = flip ? [[a0, uvA0], [a1, uvA1], [b0, uvB0], [b0, uvB0], [a1, uvA1], [b1, uvB1]] : [[a0, uvA0], [b0, uvB0], [a1, uvA1], [a1, uvA1], [b0, uvB0], [b1, uvB1]];
+      for (const [q, t] of quad) push(q, n, t[0], t[1], wt); tris += 2;
+    }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setAttribute('tangent', new THREE.Float32BufferAttribute(tan, 4)); g.computeBoundingSphere();
+  g.userData.tris = tris; return g;
+}
+// sidewall-only lathe (used together with the polygon tread)
+function buildSidewallGeometry(d, prof) {
+  const side = prof.filter(p => p.zone === 'side' || p.edge); const M = Math.max(90, Math.round(T.radial / 2));
+  const left = side.filter(p => p.x < 0), right = side.filter(p => p.x > 0);
+  const pos = [], uv = [], idx = []; let base = 0;
+  for (const run of [left, right]) { const N = run.length;
+    for (let i = 0; i < N; i++) { const p = run[i]; for (let j = 0; j <= M; j++) { const u = j / M, th = u * TAU; pos.push(p.x, p.r * Math.cos(th), p.r * Math.sin(th)); uv.push(p.x < 0 ? 1 - u : u, Math.max(-0.05, p.s ?? 1)); } }
+    for (let i = 0; i < N - 1; i++) for (let j = 0; j < M; j++) { const a = base + i * (M + 1) + j, b = a + 1, c = a + M + 1, e = c + 1; idx.push(a, b, c, b, e, c); }
+    base += N * (M + 1); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals(); return g;
+}
+
+// =====================================================================================================================
+//  3D TYRE MESH (procedural profile revolved, displaced by tread depth map along profile normals)
+// =====================================================================================================================
+function buildProfile(d) {
+  const { Rrim, H, Rout, halfW, treadHalf, sr, bw } = d; const crown = T.crown;
+  const right = [];
+  const treadN = Math.round(T.across / 2), shN = 12, sideN = 26;
+  for (let i = 0; i <= treadN; i++) { const x = i / treadN * treadHalf; right.push({ x, r: Rout - crown * (x / treadHalf) ** 2, zone: 'tread', w: 1 }); }
+  const cx = treadHalf, cr = Rout - crown - sr; let last;
+  for (let i = 1; i <= shN; i++) { const phi = i / shN * 80 * Math.PI / 180; last = { x: cx + sr * Math.sin(phi), r: cr + sr * Math.cos(phi), zone: 'tread', w: Math.max(0, (Math.cos(phi) - Math.cos(80 * Math.PI / 180)) / (1 - Math.cos(80 * Math.PI / 180))), edge: i === shN, s: 1 }; right.push(last); }
+  const P0 = last, P3 = { x: bw, r: Rrim + 2 }, bul = T.bulge;
+  const P1 = { x: P0.x + (halfW - P0.x) * 1.35 * bul + 4, r: P0.r - H * 0.22 }, P2 = { x: bw + (halfW - bw) * 0.55 * bul, r: Rrim + H * 0.2 };
+  for (let i = 1; i <= sideN; i++) {
+    const t = i / sideN, mt = 1 - t; const x = mt ** 3 * P0.x + 3 * mt * mt * t * P1.x + 3 * mt * t * t * P2.x + t ** 3 * P3.x, r = mt ** 3 * P0.r + 3 * mt * mt * t * P1.r + 3 * mt * t * t * P2.r + t ** 3 * P3.r;
+    right.push({ x, r, zone: 'side', w: 0, s: 1 - t });
+  }
+  right.push({ x: bw - 3, r: Rrim - 1, zone: 'side', w: 0, s: -0.05 });   // tuck under the rim flange
+  const left = right.slice(1).reverse().map(p => Object.assign({}, p, { x: -p.x }));
+  const pts = left.concat(right);
+  // 2D profile normals (pointing outward)
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)]; let tx = b.x - a.x, tr = b.r - a.r; const l = Math.hypot(tx, tr) || 1; tx /= l; tr /= l;
+    pts[i].nx = tr; pts[i].nr = -tx; if (pts[i].nr < 0 && pts[i].zone === 'tread') { pts[i].nx = -tr; pts[i].nr = tx; }
+  }
+  // sidewall normals should point away from the axis plane; fix orientation by sign of x
+  for (const p of pts) if (p.zone === 'side') { const s = Math.sign(p.x) || 1; if (Math.sign(p.nx) !== s && Math.abs(p.nx) > 0.3) { p.nx = -p.nx; p.nr = -p.nr; } else if (p.nr < -0.2 && Math.abs(p.nx) <= 0.3) { p.nx = -p.nx; p.nr = -p.nr; } }
+  return pts;
+}
+
+function sampleDepth(pm, u, v) {
+  const { W, H, depth } = pm; let fx = ((u % 1) + 1) % 1 * W, fy = Math.min(H - 1.001, Math.max(0, v * H));
+  const x0 = Math.floor(fx) % W, y0 = Math.floor(fy), x1 = (x0 + 1) % W, y1 = Math.min(H - 1, y0 + 1), tx = fx - Math.floor(fx), ty = fy - y0;
+  return (depth[y0 * W + x0] * (1 - tx) + depth[y0 * W + x1] * tx) * (1 - ty) + (depth[y1 * W + x0] * (1 - tx) + depth[y1 * W + x1] * tx) * ty;
+}
+
+function buildTyreGeometry(d, pm) {
+  const prof = buildProfile(d); const N = prof.length, M = T.radial;
+  const pos = new Float32Array(N * (M + 1) * 3), uv = new Float32Array(N * (M + 1) * 2);
+  const D = T.treadDepth; const A = d.acrossHalf;
+  for (let i = 0; i < N; i++) {
+    const p = prof[i]; const v = (p.x + A) / (2 * A);
+    for (let j = 0; j <= M; j++) {
+      const u = j / M, th = u * Math.PI * 2; let x = p.x, r = p.r;
+      if (p.w > 0) {
+        const h = sampleDepth(pm, u, v); const worn = pm.wearRow(v * pm.H) * D;
+        const off = (h * D + worn) * p.w; x -= p.nx * off; r -= p.nr * off;
+      }
+      const k = (i * (M + 1) + j); pos[k * 3] = x; pos[k * 3 + 1] = r * Math.cos(th); pos[k * 3 + 2] = r * Math.sin(th);
+      if (p.zone === 'tread') { uv[k * 2] = u; uv[k * 2 + 1] = v; } else { uv[k * 2] = p.x < 0 ? 1 - u : u; uv[k * 2 + 1] = p.s; }
+    }
+  }
+  const treadIdx = [], sideIdx = [];
+  for (let i = 0; i < N - 1; i++) {
+    const arr = (prof[i].zone === 'tread' && prof[i + 1].zone === 'tread') ? treadIdx : sideIdx;
+    for (let j = 0; j < M; j++) { const a = i * (M + 1) + j, b = a + 1, c = a + (M + 1), dd = c + 1; arr.push(a, b, c, b, dd, c); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  g.setIndex(treadIdx.concat(sideIdx)); g.addGroup(0, treadIdx.length, 0); g.addGroup(treadIdx.length, sideIdx.length, 1);
+  g.computeVertexNormals(); g.computeBoundingSphere();
+  return { geometry: g, profile: prof };
+}
+
+function buildRim(d) {
+  const grp = new THREE.Group(); const mat = new THREE.MeshStandardMaterial({ color: T.rimColor, metalness: 0.9, roughness: 0.28 });
+  const dark = new THREE.MeshStandardMaterial({ color: '#2a2b2e', metalness: 0.6, roughness: 0.5 });
+  const Rf = d.Rrim + 2, bw = d.bw;
+  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(d.Rrim - 2, d.Rrim - 2, bw * 2 - 8, 96, 1, true), dark); barrel.rotation.z = Math.PI / 2; grp.add(barrel);
+  for (const s of [-1, 1]) { const f = new THREE.Mesh(new THREE.TorusGeometry(d.Rrim - 1.5, 3.5, 12, 96), mat); f.rotation.y = Math.PI / 2; f.position.x = s * (bw - 2); grp.add(f); }
+  if (T.rimStyle === 'spoke') {
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(d.Rrim * 0.3, d.Rrim * 0.3, 40, 48), mat); hub.rotation.z = Math.PI / 2; hub.position.x = bw * 0.55; grp.add(hub);
+    const n = T.spokes; for (let i = 0; i < n; i++) {
+      const sp = new THREE.Mesh(new THREE.BoxGeometry(22, d.Rrim - 8, 34), mat); const a = i / n * Math.PI * 2;
+      sp.position.set(bw * 0.55, Math.cos(a) * d.Rrim * 0.55, Math.sin(a) * d.Rrim * 0.55); sp.rotation.x = -a; grp.add(sp);
+    }
+    for (let i = 0; i < 5; i++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(6, 6, 8, 6), dark); const a = i / 5 * Math.PI * 2; b.rotation.z = Math.PI / 2; b.position.set(bw * 0.55 + 22, Math.cos(a) * d.Rrim * 0.14, Math.sin(a) * d.Rrim * 0.14); grp.add(b); }
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(d.Rrim * 0.8, d.Rrim * 0.8, 24, 64), new THREE.MeshStandardMaterial({ color: '#5a5550', metalness: 0.7, roughness: 0.6 })); disc.rotation.z = Math.PI / 2; disc.position.x = bw * 0.1; grp.add(disc);
+  } else {
+    const dish = new THREE.Mesh(new THREE.CylinderGeometry(d.Rrim - 3, d.Rrim * 0.35, 6, 96), mat); dish.rotation.z = Math.PI / 2; dish.position.x = bw * 0.6; grp.add(dish);
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(d.Rrim * 0.35, d.Rrim * 0.35, 30, 48), dark); cap.rotation.z = Math.PI / 2; cap.position.x = bw * 0.6; grp.add(cap);
+  }
+  return grp;
+}
+
+// carcass "threads": radial body cords + steel belt cords under the tread
+function buildThreads(profile, d) {
+  const verts = []; const cords = 160; const M = 240;
+  for (let i = 0; i < cords; i++) {
+    const th = i / cords * Math.PI * 2, c = Math.cos(th), s = Math.sin(th);
+    for (let j = 0; j < profile.length - 1; j++) {
+      const a = profile[j], b = profile[j + 1]; const off = 1.2;
+      const ax = a.x + a.nx * off, ar = a.r + a.nr * off - (a.zone === 'tread' ? T.treadDepth * (1 - T.wear) + 1 : 0), bx = b.x + b.nx * off, br = b.r + b.nr * off - (b.zone === 'tread' ? T.treadDepth * (1 - T.wear) + 1 : 0);
+      verts.push(ax, ar * c, ar * s, bx, br * c, br * s);
+    }
+  }
+  const beltR = d.Rout - T.crown * 0.5 - T.treadDepth * (1 - T.wear) - 0.4;
+  for (const sgn of [1, -1]) for (let i = 0; i < 90; i++) {
+    const th0 = i / 90 * Math.PI * 2; const span = d.treadHalf * 2 * Math.tan(20 * Math.PI / 180) / beltR;
+    for (let j = 0; j < 6; j++) {
+      const x0 = -d.treadHalf + j / 6 * d.treadHalf * 2, x1 = -d.treadHalf + (j + 1) / 6 * d.treadHalf * 2;
+      const t0 = th0 + sgn * span * j / 6, t1 = th0 + sgn * span * (j + 1) / 6;
+      verts.push(x0, beltR * Math.cos(t0), beltR * Math.sin(t0), x1, beltR * Math.cos(t1), beltR * Math.sin(t1));
+    }
+  }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+  return new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#d6c93a', transparent: true, opacity: 0.55 }));
+}
+
+// =====================================================================================================================
+//  2D TREAD EDITOR: grooves, sipes, blocks and dimples drawn on the unrolled tread. They are stored as one `shape`
+//  layer (tag 'drawn') whose shapes feed both the texture maps (renderPattern) and the quad remesh (TyreTopology.js).
+// =====================================================================================================================
+const ED = { tool: 'stroke', width: 4, depth: 1, grid: 2, mirror: false, zoom: 1, u0: 0, sel: -1, draft: null, drag: null, cursor: null, undo: [], redo: [] };
+const EDW = 1200, edCv = document.getElementById('ed2dCanvas'), edModal = document.getElementById('ed2d');
+const edGeom = () => { const d = dims(); return { C: d.circ, A: d.acrossHalf, th: d.treadHalf, ppm: EDW / (d.circ / ED.zoom) }; };
+const wrapU = (u, C) => ((u % C) + C) % C;
+const pdu = (a, b, C) => { let x = (a - b) % C; if (x < 0) x += C; return x > C / 2 ? x - C : x; };
+function drawnLayer(create = false) { let ly = P.layers.find(l => l.type === 'shape' && l.tag === 'drawn'); if (!ly && create) { ly = { type: 'shape', tag: 'drawn', depth: 1, shapes: [] }; P.layers.push(ly); } return ly; }
+const edShapes = () => drawnLayer(false)?.shapes || [];
+function edPush() { ED.undo.push(JSON.stringify(edShapes())); if (ED.undo.length > 200) ED.undo.shift(); ED.redo = []; }
+function edSet(shapes) { drawnLayer(true).shapes = shapes; buildLayerUI(); edDraw(); schedule(); }
+function edUndo() { if (!ED.undo.length) return; ED.redo.push(JSON.stringify(edShapes())); edSet(JSON.parse(ED.undo.pop())); ED.sel = -1; }
+function edRedo() { if (!ED.redo.length) return; ED.undo.push(JSON.stringify(edShapes())); edSet(JSON.parse(ED.redo.pop())); ED.sel = -1; }
+function edSnapP(p, e) { if (!ED.grid || (e && e.shiftKey)) return p; const g = edGeom(); return { u: wrapU(Math.round(p.u / ED.grid) * ED.grid, g.C), v: Math.round(p.v / ED.grid) * ED.grid }; }
+function edPoint(e) { const g = edGeom(), r = edCv.getBoundingClientRect(); const x = (e.clientX - r.left) * edCv.width / r.width, y = (e.clientY - r.top) * edCv.height / r.height; return { u: wrapU(ED.u0 + x / g.ppm, g.C), v: y / g.ppm - g.A }; }
+function edMake(kind, pts, r) { const s = { kind, pts, depth: ED.depth }; if (kind === 'stroke') s.width = ED.width; if (kind === 'circle') s.r = r; return s; }
+function edAdd(s) { edPush(); const ns = edShapes().slice(); ns.push(s); if (ED.mirror) { const m = mirrorShape(s); if (JSON.stringify(m.pts) !== JSON.stringify(s.pts)) ns.push(m); } edSet(ns); ED.sel = ns.length - 1; }
+function edFinishDraft() {
+  const d = ED.draft; ED.draft = null; if (!d) return edDraw();
+  const pts = []; for (const q of d.pts) { const l = pts[pts.length - 1]; if (!l || Math.hypot(l[0] - q[0], l[1] - q[1]) > 1e-6) pts.push(q); }
+  if (d.kind === 'polygon' && pts.length > 1 && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 1e-6) pts.pop();
+  if (pts.length < (d.kind === 'polygon' ? 3 : 2)) return edDraw();
+  edAdd(edMake(d.kind, pts));
+}
+edCv.addEventListener('pointerdown', e => {
+  if (e.button !== 0) return;
+  const g = edGeom(), p0 = edPoint(e), p = edSnapP(p0, e), tol = Math.max(1.2, 6 / g.ppm);
+  if (ED.tool === 'select' || ED.tool === 'erase') {
+    const shapes = edShapes(); let hit = -1; for (let i = shapes.length - 1; i >= 0; i--) if (hitShape(shapes[i], p0.u, p0.v, g.C, tol)) { hit = i; break; }
+    if (ED.tool === 'erase') { if (hit >= 0) { edPush(); const ns = shapes.slice(); ns.splice(hit, 1); ED.sel = -1; edSet(ns); } return; }
+    ED.sel = hit;
+    if (hit >= 0) { ED.drag = { i: hit, start: p0, base: JSON.parse(JSON.stringify(shapes[hit])), snap: JSON.stringify(shapes), moved: false }; edCv.setPointerCapture(e.pointerId); }
+    edDraw(); return;
+  }
+  if (ED.tool === 'circle') { ED.draft = { kind: 'circle', pts: [[p.u, p.v]], r: 0 }; edCv.setPointerCapture(e.pointerId); return; }
+  if (ED.tool === 'block' && ED.draft && ED.draft.pts.length >= 3 && Math.hypot(pdu(p0.u, ED.draft.pts[0][0], g.C), p0.v - ED.draft.pts[0][1]) < tol) return edFinishDraft();
+  if (!ED.draft) ED.draft = { kind: ED.tool === 'block' ? 'polygon' : 'stroke', pts: [] };
+  ED.draft.pts.push([p.u, p.v]); edDraw();
+});
+edCv.addEventListener('pointermove', e => {
+  const g = edGeom(), p0 = edPoint(e); ED.cursor = edSnapP(p0, e);
+  if (ED.drag) {
+    const dr = ED.drag; const du = pdu(p0.u, dr.start.u, g.C), dv = p0.v - dr.start.v;
+    if (!dr.moved && Math.hypot(du, dv) < 0.3) return;
+    dr.moved = true; const shapes = edShapes().slice(); shapes[dr.i] = moveShape(dr.base, du, dv, g.C); drawnLayer(true).shapes = shapes; edDraw(); return;
+  }
+  if (ED.draft && ED.tool === 'circle') { const c = ED.draft.pts[0]; ED.draft.r = Math.hypot(pdu(ED.cursor.u, c[0], g.C), ED.cursor.v - c[1]); }
+  if (ED.draft) edDraw();
+});
+edCv.addEventListener('pointerup', () => {
+  if (ED.drag) { const dr = ED.drag; ED.drag = null; if (dr.moved) { ED.undo.push(dr.snap); ED.redo = []; edSet(edShapes()); } else edDraw(); return; }
+  if (ED.draft && ED.tool === 'circle') { const d = ED.draft; ED.draft = null; if (d.r >= 0.5) edAdd(edMake('circle', d.pts, d.r)); else edDraw(); }
+});
+edCv.addEventListener('dblclick', () => { if (ED.draft && ED.tool !== 'circle') edFinishDraft(); });
+function edDraw() {
+  if (edModal.hidden) return;
+  const g = edGeom(), H = Math.max(60, Math.round(2 * g.A * g.ppm)), ctx = edCv.getContext('2d');
+  if (edCv.height !== H) edCv.height = H;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = '#0b0c0e'; ctx.fillRect(0, 0, EDW, H);
+  if (patternMap) for (const off of [-g.C, 0, g.C]) ctx.drawImage(patternMap, 0, 0, patternMap.width, patternMap.height, (off - ED.u0) * g.ppm, 0, g.C * g.ppm, H);
+  ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const step = ED.grid || 10;
+  if (step * g.ppm >= 5) { ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = 1; for (let u = Math.ceil(ED.u0 / step) * step; (u - ED.u0) * g.ppm < EDW; u += step) { const x = (u - ED.u0) * g.ppm; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); } }
+  ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.setLineDash([6, 6]);
+  for (const v of [0, -g.th, g.th]) { const y = (v + g.A) * g.ppm; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(EDW, y); ctx.stroke(); }
+  ctx.setLineDash([]); ctx.restore();
+  const shapes = edShapes();
+  const drawOne = (s, off, col, fill) => {
+    ctx.setTransform(g.ppm, 0, 0, g.ppm, (off - ED.u0) * g.ppm, g.A * g.ppm); const pts = s.pts || [];
+    ctx.strokeStyle = col; ctx.fillStyle = fill; ctx.lineJoin = 'round'; ctx.lineWidth = 1.5 / g.ppm;
+    if (s.kind === 'stroke' && pts.length > 1) { ctx.lineWidth = Math.max(s.width || 3, 1.5 / g.ppm); ctx.globalAlpha = .55; ctx.beginPath(); pts.forEach((q, k) => k ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.stroke(); ctx.globalAlpha = 1; }
+    else if (s.kind === 'polygon' && pts.length > 2) { ctx.beginPath(); pts.forEach((q, k) => k ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])); ctx.closePath(); ctx.fill(); ctx.stroke(); }
+    else if (s.kind === 'circle' && pts.length) { ctx.beginPath(); ctx.arc(pts[0][0], pts[0][1], Math.max(s.r || 0, 0.2), 0, Math.PI * 2); ctx.fill(); ctx.stroke(); }
+  };
+  shapes.forEach((s, i) => { for (const off of [-g.C, 0, g.C]) drawOne(s, off, i === ED.sel ? '#ffffff' : '#7fd1ff', 'rgba(127,209,255,.30)'); });
+  if (ED.draft) {
+    const dft = { kind: ED.draft.kind, pts: ED.draft.kind === 'circle' ? ED.draft.pts : ED.draft.pts.concat(ED.cursor ? [[ED.cursor.u, ED.cursor.v]] : []), width: ED.width, r: ED.draft.r };
+    for (const off of [-g.C, 0, g.C]) drawOne(dft, off, '#ffd166', 'rgba(255,209,102,.25)');
+  }
+  const n = shapes.length; document.getElementById('edCount').textContent = `${n} shape${n === 1 ? '' : 's'} · ${(ED.depth * T.treadDepth).toFixed(1)} mm deep`;
+  document.getElementById('edHelp').textContent = ({ stroke: 'Click to add points, double-click to finish (Enter also finishes, Esc cancels).', block: 'Click corners; double-click or click the first corner to close the block.', circle: 'Press at the centre and drag out the radius.', select: 'Drag a shape to move it. Delete removes the selected shape.', erase: 'Click a shape to delete it.' })[ED.tool] + (ED.cursor ? `   ·   u ${ED.cursor.u.toFixed(0)} mm, v ${ED.cursor.v.toFixed(1)} mm` : '');
+}
+document.querySelectorAll('#edToolbar [data-tool]').forEach(b => b.onclick = () => { ED.tool = b.dataset.tool; ED.draft = null; document.querySelectorAll('#edToolbar [data-tool]').forEach(x => x.classList.toggle('on', x === b)); edDraw(); });
+const edBind = (id, fn) => document.getElementById(id).addEventListener('input', e => { fn(e.target.value); edDraw(); });
+edBind('edWidth', v => { ED.width = +v; document.getElementById('edWidthV').textContent = (+v).toFixed(1) + ' mm'; });
+edBind('edDepth', v => { ED.depth = +v; document.getElementById('edDepthV').textContent = `${(+v * T.treadDepth).toFixed(1)} mm (${Math.round(+v * 100)}%)`; });
+edBind('edGrid', v => { ED.grid = +v; });
+edBind('edZoom', v => { ED.zoom = +v; document.getElementById('edZoomV').textContent = (+v).toFixed(1) + '×'; });
+edBind('edPan', v => { ED.u0 = +v; document.getElementById('edPanV').textContent = Math.round(+v) + ' mm'; });
+document.getElementById('edMirror').onchange = e => { ED.mirror = e.target.checked; };
+document.getElementById('edUndo').onclick = () => edUndo();
+document.getElementById('edRedo').onclick = () => edRedo();
+document.getElementById('edClear').onclick = () => { if (!edShapes().length) return; edPush(); edSet([]); ED.sel = -1; };
+document.getElementById('open2d').onclick = () => {
+  const d = dims(); const pan = document.getElementById('edPan'); pan.max = Math.round(d.circ); pan.value = ED.u0; document.getElementById('edPanV').textContent = Math.round(ED.u0) + ' mm';
+  document.getElementById('edDepthV').textContent = `${(ED.depth * T.treadDepth).toFixed(1)} mm (${Math.round(ED.depth * 100)}%)`; document.getElementById('edWidthV').textContent = ED.width.toFixed(1) + ' mm';
+  edCv.width = EDW; edModal.hidden = false; edDraw();
+};
+document.getElementById('edClose').onclick = () => { edModal.hidden = true; ED.draft = null; ED.drag = null; rebuild(); };
+window.addEventListener('keydown', e => {
+  if (edModal.hidden || e.target.matches('input[type=text],input:not([type]),textarea')) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); edUndo(); }
+  else if (mod && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); edRedo(); }
+  else if (e.key === 'Escape') { ED.draft = null; edDraw(); }
+  else if (e.key === 'Enter' && ED.draft) edFinishDraft();
+  else if ((e.key === 'Delete' || e.key === 'Backspace') && ED.sel >= 0 && !ED.draft) { edPush(); const ns = edShapes().slice(); ns.splice(ED.sel, 1); ED.sel = -1; edSet(ns); }
+});
+window.addEventListener('resize', () => { if (!edModal.hidden) edDraw(); });
+
+// =====================================================================================================================
+//  THREE.JS SCENE
+// =====================================================================================================================
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setPixelRatio(Math.min(2, devicePixelRatio)); renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05; view.prepend(renderer.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color('#0b0c0e');
+const pmrem = new THREE.PMREMGenerator(renderer); scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+const camera = new THREE.PerspectiveCamera(38, 1, 1, 20000); camera.position.set(700, 380, 720);
+const controls = new OrbitControls(camera, renderer.domElement); controls.enableDamping = true; controls.target.set(0, 0, 0);
+controls.zoomSpeed = 0.8; controls.maxPolarAngle = Math.PI / 2 - 0.03; controls.zoomToCursor = false;
+function fitZoom(d) { const R = d.Rout; controls.minDistance = R * 0.75; controls.maxDistance = R * 7; camera.near = R * 0.02; camera.far = R * 60; camera.updateProjectionMatrix();
+  const dist = camera.position.distanceTo(controls.target); if (dist > controls.maxDistance || dist < controls.minDistance) { const dir = camera.position.clone().sub(controls.target).normalize(); camera.position.copy(controls.target).addScaledVector(dir, THREE.MathUtils.clamp(dist, controls.minDistance, controls.maxDistance)); } }
+const key = new THREE.DirectionalLight('#fff4e0', 2.2); key.position.set(600, 900, 500); key.castShadow = true; key.shadow.mapSize.set(2048, 2048); key.shadow.camera.left = key.shadow.camera.bottom = -600; key.shadow.camera.right = key.shadow.camera.top = 600; key.shadow.camera.far = 3000; key.shadow.bias = -0.0002; key.shadow.normalBias = 2.5; scene.add(key);
+scene.add(new THREE.DirectionalLight('#9fc5ff', 0.6).translateX(-800).translateY(200).translateZ(-400));
+scene.add(new THREE.HemisphereLight('#3a4050', '#0b0b0d', 0.6));
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.MeshStandardMaterial({ color: '#121316', roughness: 0.95 })); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+const grid = new THREE.GridHelper(4000, 80, '#232529', '#1a1c1f'); grid.position.y = 0.5; scene.add(grid);
+const tyreGroup = new THREE.Group(); scene.add(tyreGroup);
+
+let tyreMesh, rimGroup, threadLines, maps, patternMap, profileCache, treadMat, sideMatL, sideMatR, lastQuadMesh = null;
+function disposeGroup() { tyreGroup.traverse(o => { if (o.geometry) o.geometry.dispose(); }); tyreGroup.clear(); }
+
+function rebuild(full = true) {
+  const d = dims();
+  patternMap = renderPattern(P, d, 384, T.wear, T.wearBias, T.treadDepth);
+  maps = buildTreadMaps(patternMap, T.treadDepth, T.rubber, T.wear);
+  disposeGroup();
+  const tex = c => { const t = new THREE.CanvasTexture(c); t.flipY = false; t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; t.colorSpace = THREE.NoColorSpace; return t; };
+  const colTex = tex(maps.color); colTex.colorSpace = THREE.SRGBColorSpace;
+  const useQuad = T.meshMode === 'quad' && !!window.ClipperLib;
+  const usePoly = (T.meshMode === 'poly' || useQuad) && !!window.ClipperLib;
+  treadMat = new THREE.MeshStandardMaterial({ map: colTex, normalMap: tex(maps.normal), normalScale: new THREE.Vector2(usePoly ? 0.35 : 0.7, usePoly ? 0.35 : 0.7), roughnessMap: tex(maps.rough), roughness: 1, metalness: 0.0 });
+  const sw = buildSidewall(true); const sideTex = tex(sw.color); sideTex.colorSpace = THREE.SRGBColorSpace;
+  if (useQuad) sideTex.channel = 1;   // quad remesh: sidewall group samples the second UV set (uv1)
+  const sideMat = new THREE.MeshStandardMaterial({ map: sideTex, normalMap: tex(sw.normal), normalScale: new THREE.Vector2(0.8, 0.8), roughness: 0.8, metalness: 0 });
+  tyreMesh = new THREE.Group(); let triCount = 0;
+  let quadOK = false;
+  if (useQuad) {
+    try {
+      const t0 = performance.now();
+      const mesh = buildTyreQuadMesh({ d, pattern: { layers: P.layers }, treadDepth: T.treadDepth, wear: T.wear, wearBias: T.wearBias, crown: T.crown, bulge: T.bulge,
+        rimWidthFrac: T.rimWidthFrac, spacing: 15, chamfer: 0.25, faceBudget: T.quadBudget * 1000 });
+      const geo = quadMeshToGeometry(THREE, mesh);
+      tyreMesh.add(new THREE.Mesh(geo, [treadMat, sideMat])); profileCache = buildProfile(d);
+      triCount = mesh.quads.length / 4; lastQuadMesh = mesh; quadOK = true;
+      const a = auditQuadMesh(mesh);
+      const topoEl2 = document.getElementById('topo'); if (topoEl2) topoEl2.innerHTML = `<b style="color:var(--text)">Topology</b> · ${(mesh.quads.length / 4 / 1000).toFixed(1)}k quads · ${a.vertices.toLocaleString()} verts<br>` +
+        `open edges ${a.boundaryEdges} · non-manifold ${a.nonManifoldEdges} · inconsistent ${a.inconsistentEdges} · χ ${a.eulerCharacteristic} · ` +
+        `<span style="color:${a.watertight && !a.nonManifoldEdges && !a.inconsistentEdges ? 'var(--green)' : 'var(--red)'}">${a.watertight && !a.nonManifoldEdges && !a.inconsistentEdges ? 'watertight, all quads' : 'check'}</span> · ${Math.round(performance.now() - t0)} ms`;
+    } catch (e) { console.warn('quad remesh failed, falling back to polygon mesh', e); const te = document.getElementById('topo'); if (te) te.textContent = 'Quad remesh failed: ' + e.message; }
+  }
+  const topoEl = document.getElementById('topo'); if (topoEl && !useQuad) topoEl.textContent = '';
+  if (quadOK) { /* quad geometry was added above */ }
+  else if (usePoly) {
+    const pmGeo = renderPattern(P, d, 384, T.wear, T.wearBias, T.treadDepth, true);
+    let treadGeo; try { treadGeo = buildPolyTread(d, pmGeo); } catch (e) { console.warn('polygon tread failed, falling back', e); }
+    if (treadGeo) { const prof = buildProfile(d); profileCache = prof; tyreMesh.add(new THREE.Mesh(treadGeo, treadMat)); tyreMesh.add(new THREE.Mesh(buildSidewallGeometry(d, prof), sideMat)); triCount = treadGeo.userData.tris; }
+    else { const { geometry, profile } = buildTyreGeometry(d, patternMap); profileCache = profile; tyreMesh.add(new THREE.Mesh(geometry, [treadMat, sideMat])); triCount = geometry.index.count / 3; }
+  } else { const { geometry, profile } = buildTyreGeometry(d, patternMap); profileCache = profile; tyreMesh.add(new THREE.Mesh(geometry, [treadMat, sideMat])); triCount = geometry.index.count / 3; }
+  tyreMesh.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; if (UI.threads) [].concat(o.material).forEach(m => { m.transparent = true; m.opacity = 0.35; }); } });
+  tyreMesh.userData.tris = triCount; tyreMesh.userData.quad = quadOK; tyreGroup.add(tyreMesh);
+  rimGroup = buildRim(d); rimGroup.traverse(o => { o.castShadow = true; }); tyreGroup.add(rimGroup);
+  threadLines = buildThreads(profileCache, d); threadLines.visible = UI.threads; tyreGroup.add(threadLines);
+  const groundR = d.Rout - T.wear * T.treadDepth; tyreGroup.position.y = groundR; tyreGroup.rotation.z = 0;
+  if (!controls.userData?.init) { controls.userData = { init: true }; controls.target.set(0, groundR, 0); camera.position.set(d.Rout * 2.6, groundR + d.Rout * 0.6, d.Rout * 2.7); }
+  fitZoom(d);
+  updateHud(d); drawProfile(d, profileCache); drawTreadView();
+}
+
+function updateHud(d) {
+  const worn = T.wear * T.treadDepth, remaining = T.treadDepth - worn;
+  document.getElementById('badgeName').textContent = P.name; document.getElementById('badgeType').textContent = P.type; document.getElementById('badgeSize').textContent = sizeString();
+  const od = (d.Rout - worn) * 2; const circ = Math.PI * od;
+  const col = remaining < 1.6 ? 'var(--red)' : remaining < 3 ? 'var(--yellow)' : 'var(--green)';
+  const tile = (l, v, u, dot) => `<div class="tile"><div class="l"><i style="background:${dot || 'var(--green)'}"></i>${l}</div><div class="v">${v}<small>${u}</small></div></div>`;
+  document.getElementById('tiles').innerHTML =
+    tile('Overall Ø', od.toFixed(0), 'mm', 'var(--yellow)') + tile('Tread left', remaining.toFixed(1), '/ ' + T.treadDepth + ' mm', col) +
+    tile('Circumference', (circ / 1000).toFixed(2), 'm', 'var(--yellow)') + tile('Tread mesh', (tyreMesh?.userData.tris / 1000 || 0).toFixed(1), tyreMesh?.userData.quad ? 'k quads · pure quad' : 'k tris · ' + (T.meshMode === 'poly' ? 'polygons' : 'heightmap'), 'var(--green)');
+  const bigNum = v => { const [a, b] = String(v).split('.'); return a + (b ? '<span class="frac">.' + b + '</span>' : ''); };
+  document.getElementById('bigSize').innerHTML = `${T.width}<span class="frac">/${T.aspect}</span><small>R${T.rim}</small>`;
+  document.getElementById('sizeR').textContent = `${(d.Rrim * 2).toFixed(0)} mm rim`;
+  document.getElementById('sizePills').innerHTML = `<span class="pill n">sidewall ${d.H.toFixed(0)} mm</span><span class="pill n">tread ${(d.treadHalf * 2).toFixed(0)} mm</span><span class="pill ${remaining < 1.6 ? 'r' : 'g'}">${T.wear ? '-' + worn.toFixed(1) + ' mm worn' : 'new'}</span>`;
+}
+
+const profView = { X: null, Y: null, sc: 1, handles: [] };
+function profileHandles(d) {
+  const sr = d.sr, s45 = Math.sin(Math.PI / 4), c45 = Math.cos(Math.PI / 4);
+  const list = [
+    { id: 'tread', x: d.treadHalf, r: d.Rout - T.crown, label: 'tread edge / crown', color: '#38c46d' },
+    { id: 'shoulder', x: d.treadHalf + sr * s45, r: d.Rout - T.crown - sr + sr * c45, label: 'shoulder radius', color: '#d6c93a' },
+    { id: 'bulge', x: d.halfW * (0.6 + 0.4 * T.bulge), r: d.Rrim + d.H * 0.52, label: 'sidewall bulge', color: '#f0a04b' },
+    { id: 'bead', x: d.bw, r: d.Rrim + 2, label: 'rim width', color: '#9aa4ff' },
+    { id: 'depth', x: 0, r: d.Rout - T.treadDepth, label: 'tread depth', color: '#e5423f' },
+  ];
+  return list.flatMap(h => h.x === 0 ? [h] : [h, Object.assign({}, h, { x: -h.x, mirror: true })]);
+}
+function drawProfile(d, prof) {
+  const c = document.getElementById('profile'), ctx = c.getContext('2d'); const W = c.width, H = c.height; ctx.clearRect(0, 0, W, H);
+  const worn = T.wear * T.treadDepth;
+  const sc = Math.min((W - 44) / (T.width * 1.15), (H - 40) / (d.Rout - d.Rrim + 40)); const ox = W / 2, oy = H - 16;
+  const X = x => ox + x * sc, Y = r => oy - (r - d.Rrim + 20) * sc; Object.assign(profView, { X, Y, sc, ox, oy, d });
+  ctx.strokeStyle = '#2b2f38'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(X(-d.bw - 10), Y(d.Rrim)); ctx.lineTo(X(d.bw + 10), Y(d.Rrim)); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = '#9aa0ab'; ctx.fillRect(X(-d.bw), Y(d.Rrim) - 3, (2 * d.bw) * sc, 6);
+  ctx.beginPath(); prof.forEach((p, i) => { const rr = p.r - (p.zone === 'tread' ? worn * p.w : 0); i ? ctx.lineTo(X(p.x), Y(rr)) : ctx.moveTo(X(p.x), Y(rr)); }); ctx.closePath();
+  ctx.fillStyle = '#1e2024'; ctx.fill(); ctx.strokeStyle = '#e6e7ea'; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.strokeStyle = '#d6c93a'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]); ctx.beginPath(); prof.filter(p => p.zone === 'tread').forEach((p, i) => { const rr = p.r - (T.treadDepth + worn) * p.w; i ? ctx.lineTo(X(p.x), Y(rr)) : ctx.moveTo(X(p.x), Y(rr)); }); ctx.stroke(); ctx.setLineDash([]);
+  // handles
+  profView.handles = profileHandles(d);
+  for (const h of profView.handles) {
+    const hx = X(h.x), hy = Y(h.r); const active = profView.drag && profView.drag.id === h.id;
+    ctx.beginPath(); ctx.arc(hx, hy, active ? 7 : 5, 0, Math.PI * 2); ctx.fillStyle = '#111'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = h.color; ctx.stroke();
+    if (!h.mirror) { ctx.fillStyle = h.color; ctx.font = '300 10px Outfit, system-ui'; ctx.textAlign = h.id === 'depth' ? 'center' : 'left'; ctx.fillText(h.label, hx + (h.id === 'depth' ? 0 : 9), hy + (h.id === 'depth' ? 14 : -8)); }
+  }
+  ctx.fillStyle = '#8a8d94'; ctx.font = '300 11px Outfit, system-ui'; ctx.textAlign = 'center';
+  ctx.fillText(`${T.width} mm`, ox, Y(d.Rout) - 10); ctx.fillText(`rim ${T.rim}" · ${(d.bw * 2).toFixed(0)} mm`, ox, oy - 4);
+  ctx.textAlign = 'left'; ctx.fillText(`${d.H.toFixed(0)} mm`, X(d.halfW) + 10, (Y(d.Rout) + Y(d.Rrim)) / 2);
+  ctx.textAlign = 'right'; ctx.fillStyle = '#5c5f66'; ctx.fillText(`crown ${T.crown.toFixed(1)} · R${d.sr.toFixed(0)} · depth ${T.treadDepth}`, W - 8, 14);
+}
+(function initProfileEditor() {
+  const c = document.getElementById('profile'); const clamp = THREE.MathUtils.clamp;
+  const toCanvas = e => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) * c.width / r.width, (e.clientY - r.top) * c.height / r.height]; };
+  const pick = (px, py) => { let best = null, bd = 12; for (const h of profView.handles) { const dd = Math.hypot(profView.X(h.x) - px, profView.Y(h.r) - py); if (dd < bd) { bd = dd; best = h; } } return best; };
+  c.addEventListener('pointermove', e => { if (!profView.drag) { c.style.cursor = pick(...toCanvas(e)) ? 'grab' : 'crosshair'; return; }
+    const [px, py] = toCanvas(e); const d = profView.d; const sgn = profView.drag.mirror ? -1 : 1;
+    const xmm = sgn * (px - profView.ox) / profView.sc, rmm = d.Rrim - 20 + (profView.oy - py) / profView.sc;
+    switch (profView.drag.id) {
+      case 'tread': T.treadFrac = clamp(xmm / d.halfW, 0.7, 0.98); T.crown = clamp(d.Rout - rmm, 0, 8); break;
+      case 'shoulder': T.shoulder = clamp((xmm - d.treadHalf) / Math.sin(Math.PI / 4), 4, 40); break;
+      case 'bulge': T.bulge = clamp((xmm / d.halfW - 0.6) / 0.4, 0.4, 1.6); break;
+      case 'bead': T.rimWidthFrac = clamp(xmm / d.halfW, 0.6, 0.92); break;
+      case 'depth': T.treadDepth = clamp(Math.round((d.Rout - rmm) * 2) / 2, 2, 20); break;
+    }
+    const nd = dims(); drawProfile(nd, buildProfile(nd)); schedule(); });
+  c.addEventListener('pointerdown', e => { const h = pick(...toCanvas(e)); if (!h) return; profView.drag = h; c.setPointerCapture(e.pointerId); c.style.cursor = 'grabbing'; });
+  const end = () => { if (!profView.drag) return; profView.drag = null; c.style.cursor = 'crosshair'; buildTyreUI(); const nd = dims(); drawProfile(nd, buildProfile(nd)); };
+  c.addEventListener('pointerup', end); c.addEventListener('pointercancel', end);
+})();
+function drawTreadView() {
+  const src = maps[UI.treadMode]; const bright = UI.treadMode === 'color' ? 'brightness(2.6) contrast(1.05)' : 'none';
+  const c = document.getElementById('treadView'); const r = c.getBoundingClientRect(); if (!r.width) return; c.width = Math.round(r.width * devicePixelRatio); c.height = Math.round(r.height * devicePixelRatio);
+  const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high'; ctx.filter = bright;
+  const cropW = Math.min(src.width, Math.round(src.height * c.width / c.height));     // a window of the circumference at true aspect
+  ctx.drawImage(src, 0, 0, cropW, src.height, 0, 0, c.width, c.height); ctx.filter = 'none';
+  const st = document.getElementById('treadStrip'); const rs = st.getBoundingClientRect(); st.width = Math.round(rs.width * devicePixelRatio); st.height = Math.round(rs.height * devicePixelRatio);
+  const sx = st.getContext('2d'); sx.filter = bright; sx.drawImage(src, 0, 0, st.width, st.height); sx.filter = 'none';
+  sx.strokeStyle = '#fff'; sx.lineWidth = 2; sx.strokeRect(1, 1, st.width * cropW / src.width - 2, st.height - 2);
+  const d = dims(); document.getElementById('treadDims').textContent = `Showing ${(cropW / patternMap.k).toFixed(0)} mm of ${(d.circ).toFixed(0)} mm circumference · map ${patternMap.W}×${patternMap.H} @ ${patternMap.k.toFixed(2)} px/mm`;
+}
+function resize() { const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); if (maps) drawTreadView(); }
+new ResizeObserver(resize).observe(view); resize();
+let last = performance.now();
+renderer.setAnimationLoop(now => { const dt = (now - last) / 1000; last = now; if (UI.spin && tyreGroup) tyreGroup.rotation.x -= dt * 0.8; controls.update(); renderer.render(scene, camera); });
+
+// =====================================================================================================================
+//  UI
+// =====================================================================================================================
+let timer; const schedule = () => { clearTimeout(timer); timer = setTimeout(() => rebuild(), T.meshMode === 'quad' ? 350 : 40); };
+const scheduleQuad = () => schedule();
+function slider(parent, label, obj, key, min, max, step, fmt = v => v, after = schedule) {
+  const row = document.createElement('div'); row.className = 'row'; row.innerHTML = `<label title="${label}">${label}</label><input type="range" min="${min}" max="${max}" step="${step}" value="${obj[key]}"><span class="val">${fmt(obj[key])}</span>`;
+  const inp = row.querySelector('input'), val = row.querySelector('.val');
+  inp.oninput = () => { obj[key] = parseFloat(inp.value); val.textContent = fmt(obj[key]); after(); }; parent.appendChild(row); return row;
+}
+function select(parent, label, obj, key, opts, after = schedule) {
+  const row = document.createElement('div'); row.className = 'row'; row.innerHTML = `<label>${label}</label><select>${opts.map(o => `<option ${o == obj[key] ? 'selected' : ''}>${o}</option>`).join('')}</select>`;
+  row.querySelector('select').onchange = e => { obj[key] = isNaN(+e.target.value) ? e.target.value : +e.target.value; after(); }; parent.appendChild(row); return row;
+}
+function check(parent, label, obj, key, after = schedule) {
+  const row = document.createElement('div'); row.className = 'row'; row.innerHTML = `<label>${label}</label><input type="checkbox" ${obj[key] ? 'checked' : ''}>`;
+  row.querySelector('input').onchange = e => { obj[key] = e.target.checked; after(); }; parent.appendChild(row); return row;
+}
+function color(parent, label, obj, key, after = schedule) {
+  const row = document.createElement('div'); row.className = 'row'; row.innerHTML = `<label>${label}</label><input type="color" value="${obj[key]}">`;
+  row.querySelector('input').oninput = e => { obj[key] = e.target.value; after(); }; parent.appendChild(row); return row;
+}
+function buildTyreUI() {
+  const p = document.getElementById('tyreParams'); p.innerHTML = '';
+  const h = t => { const e = document.createElement('div'); e.className = 'sec'; e.textContent = t; p.appendChild(e); };
+  h('Size');
+  slider(p, 'Section width (mm)', T, 'width', 135, 405, 5); slider(p, 'Aspect ratio (%)', T, 'aspect', 20, 85, 5); slider(p, 'Rim diameter (in)', T, 'rim', 12, 24, 1);
+  h('Wear');
+  slider(p, 'Wear (new → bald)', T, 'wear', 0, 1, 0.01, v => v === 0 ? 'New' : v >= 1 ? 'Bald' : Math.round(v * 100) + '%');
+  slider(p, 'Wear bias (edge↔centre)', T, 'wearBias', -1, 1, 0.01, v => v.toFixed(2));
+  h('Tread mesh');
+  select(p, 'Mesh mode', T, 'meshMode', ['quad', 'poly', 'heightmap']); slider(p, 'Quad budget (k quads)', T, 'quadBudget', 20, 300, 5, v => v + 'k', scheduleQuad);
+  p.insertAdjacentHTML('beforeend', '<div id="topo" class="row" style="display:block;font-size:12px;color:var(--mut);line-height:1.5"></div>');
+  slider(p, 'Polygon detail (mm)', T, 'polyDetail', 3, 16, 0.5, v => v.toFixed(1));
+  slider(p, 'Segments around', T, 'radial', 180, 1440, 20); slider(p, 'Segments across (heightmap)', T, 'across', 32, 192, 8);
+  const pp = document.getElementById('profileParams'); pp.innerHTML = '';
+  slider(pp, 'Tread depth (mm)', T, 'treadDepth', 2, 20, 0.5); slider(pp, 'Tread width fraction', T, 'treadFrac', 0.7, 0.98, 0.01, v => v.toFixed(2));
+  slider(pp, 'Crown drop (mm)', T, 'crown', 0, 8, 0.1, v => v.toFixed(1)); slider(pp, 'Shoulder radius (mm)', T, 'shoulder', 4, 40, 1);
+  slider(pp, 'Sidewall bulge', T, 'bulge', 0.4, 1.6, 0.01, v => v.toFixed(2)); slider(pp, 'Rim width fraction', T, 'rimWidthFrac', 0.6, 0.92, 0.01, v => v.toFixed(2));
+  const l = document.getElementById('lookParams'); l.innerHTML = '';
+  color(l, 'Rubber colour', T, 'rubber'); select(l, 'Lettering colour', T, 'letter', ['white', 'yellow', 'red', 'blue', 'black']); check(l, 'Sidewall lettering', T, 'lettering');
+  const b = document.createElement('div'); b.className = 'row'; b.innerHTML = '<label>Brand</label><input type="text" value="' + T.brand + '">'; b.querySelector('input').oninput = e => { T.brand = e.target.value; schedule(); }; l.appendChild(b);
+  select(l, 'Rim style', T, 'rimStyle', ['spoke', 'dish']); slider(l, 'Spokes', T, 'spokes', 3, 12, 1); color(l, 'Rim colour', T, 'rimColor');
+}
+function buildPresetUI() {
+  const box = document.getElementById('presets'); box.innerHTML = '';
+  PRESETS.forEach((pr, i) => {
+    if (UI.typeFilter && pr.type !== UI.typeFilter) return;
+    const el = document.createElement('div'); el.className = 'preset' + (pr.name === P.name ? ' active' : ''); el.innerHTML = `<canvas width="240" height="60"></canvas><div class="n">${pr.name}</div><div class="t">${pr.type}</div>`;
+    const t = Object.assign({}, T, pr.tyre); const d = dims(t); const pm = renderPattern({ layers: pr.layers }, d, 60, 0, 0, t.treadDepth);
+    const ctx = el.querySelector('canvas').getContext('2d'); const id = ctx.createImageData(240, 60);
+    for (let y = 0; y < 60; y++) for (let x = 0; x < 240; x++) { const sx = Math.floor(x / 240 * Math.min(pm.W, pm.H * 4)); const v = 40 + (1 - pm.depth[y * pm.W + sx]) * 60; const o = (y * 240 + x) * 4; id.data[o] = id.data[o + 1] = id.data[o + 2] = v; id.data[o + 3] = 255; }
+    ctx.putImageData(id, 0, 0);
+    el.onclick = () => applyPreset(i); box.appendChild(el);
+  });
+}
+function applyPreset(i) {
+  const pr = PRESETS[i]; Object.assign(T, pr.tyre); P.name = pr.name; P.type = pr.type; P.layers = pr.layers.map(l => Object.assign({}, l)); UI.sel = -1; T.wear = 0;
+  refreshAll();
+}
+function refreshAll() { buildTyreUI(); buildPresetUI(); buildLayerUI(); document.getElementById('pName').value = P.name; document.getElementById('pType').value = P.type; rebuild(); }
+
+function buildLayerUI() {
+  const box = document.getElementById('layers'); box.innerHTML = '';
+  P.layers.forEach((ly, i) => {
+    const def = LAYER_DEFS[ly.type]; const el = document.createElement('div'); el.className = 'layer' + (i === UI.sel ? ' sel' : '');
+    const desc = ly.type === 'shape' ? `${(ly.shapes || []).length} drawn` : ly.type === 'circ' ? `@${ly.pos} · ${ly.width}mm` : ly.type === 'hex' ? `${ly.size}mm cells` : ly.type === 'dimple' ? `${ly.rows}×${ly.count}` : ly.type === 'noise' ? `${ly.amount}` : `×${ly.count} · ${ly.angle}°`;
+    el.innerHTML = `<span class="ic" style="background:${def.color}"></span><span class="nm">${def.label} <small>${desc}</small></span><button title="duplicate">⧉</button><button title="up">↑</button><button title="down">↓</button><button title="delete">✕</button>`;
+    const [dup, up, dn, del] = el.querySelectorAll('button');
+    el.onclick = () => { UI.sel = i; buildLayerUI(); };
+    dup.onclick = e => { e.stopPropagation(); const c = JSON.parse(JSON.stringify(ly)); if (c.tag) delete c.tag; P.layers.splice(i + 1, 0, c); UI.sel = i + 1; buildLayerUI(); schedule(); };
+    up.onclick = e => { e.stopPropagation(); if (i > 0) { [P.layers[i - 1], P.layers[i]] = [P.layers[i], P.layers[i - 1]]; UI.sel = i - 1; buildLayerUI(); schedule(); } };
+    dn.onclick = e => { e.stopPropagation(); if (i < P.layers.length - 1) { [P.layers[i + 1], P.layers[i]] = [P.layers[i], P.layers[i + 1]]; UI.sel = i + 1; buildLayerUI(); schedule(); } };
+    del.onclick = e => { e.stopPropagation(); P.layers.splice(i, 1); UI.sel = -1; buildLayerUI(); schedule(); };
+    box.appendChild(el);
+  });
+  const props = document.getElementById('layerProps'); props.innerHTML = '';
+  const ly = P.layers[UI.sel];
+  if (!ly) { props.className = 'hint'; props.innerHTML = 'Select a layer to edit it. Layers are drawn in order; deeper cuts win.<br>Across-position <code>-1…1</code> = tread edges, <code>±1.3</code> reaches the shoulder.'; return; }
+  props.className = '';
+  const t = document.createElement('div'); t.className = 'hint'; t.innerHTML = `<b style="color:${LAYER_DEFS[ly.type].color}">${LAYER_DEFS[ly.type].label}</b>`; props.appendChild(t);
+  for (const k in ly) {
+    if (k === 'type') continue;
+    if (typeof ly[k] === 'boolean') check(props, LABELS[k] || k, ly, k, () => { buildLayerUI(); schedule(); });
+    else if (RANGES[k]) slider(props, LABELS[k] || k, ly, k, ...RANGES[k], v => (+v).toFixed(RANGES[k][2] < 1 ? 2 : 0), () => { refreshLayerLabel(); schedule(); });
+  }
+  const mir = document.createElement('div'); mir.className = 'btns';
+  mir.innerHTML = '<button class="small">Mirror layer across centre</button>'; mir.querySelector('button').onclick = () => {
+    const c = JSON.parse(JSON.stringify(ly)); if (c.tag) delete c.tag; if (c.shapes) c.shapes = c.shapes.map(sh => mirrorShape(sh)); if ('pos' in c) c.pos = -c.pos; if ('from' in c) { const f = -c.to, tt = -c.from; c.from = f; c.to = tt; } if ('angle' in c && !c.mirror) c.angle = -c.angle; if ('phase' in c) c.phase = (c.phase + 0.5) % 1;
+    P.layers.splice(UI.sel + 1, 0, c); UI.sel++; buildLayerUI(); schedule();
+  }; props.appendChild(mir);
+}
+function refreshLayerLabel() { const els = document.querySelectorAll('#layers .layer'); const ly = P.layers[UI.sel]; if (!ly || !els[UI.sel]) return; const desc = ly.type === 'shape' ? `${(ly.shapes || []).length} drawn` : ly.type === 'circ' ? `@${ly.pos} · ${ly.width}mm` : ly.type === 'hex' ? `${ly.size}mm cells` : ly.type === 'dimple' ? `${ly.rows}×${ly.count}` : ly.type === 'noise' ? `${ly.amount}` : `×${ly.count} · ${ly.angle}°`; els[UI.sel].querySelector('small').textContent = desc; }
+
+// static controls
+document.getElementById('pType').innerHTML = TYPES.map(t => `<option>${t}</option>`).join('');
+document.getElementById('pType').onchange = e => { P.type = e.target.value; schedule(); };
+document.getElementById('pName').oninput = e => { P.name = e.target.value; schedule(); };
+document.getElementById('addLayer').innerHTML = Object.keys(LAYER_DEFS).filter(k => k !== 'shape').map(k => `<option value="${k}">${LAYER_DEFS[k].label}</option>`).join('');
+document.getElementById('addLayerBtn').onclick = () => { P.layers.push(L(document.getElementById('addLayer').value)); UI.sel = P.layers.length - 1; buildLayerUI(); schedule(); };
+document.getElementById('randomBtn').onclick = () => { randomTyre(); refreshAll(); };
+document.getElementById('randomName').onclick = () => { P.name = randomName(); document.getElementById('pName').value = P.name; schedule(); };
+document.querySelectorAll('#treadMode span').forEach(el => el.onclick = () => { document.querySelectorAll('#treadMode span').forEach(x => x.classList.remove('on')); el.classList.add('on'); UI.treadMode = el.dataset.m; drawTreadView(); });
+document.querySelectorAll('.tab').forEach(el => el.onclick = () => { document.querySelectorAll('.tab').forEach(x => x.classList.remove('on')); el.classList.add('on'); document.querySelectorAll('.panel').forEach(p => p.classList.toggle('on', p.dataset.panel === el.dataset.tab)); });
+UI.typeFilter = null;
+function buildChips() { const sel = document.getElementById('typeFilter'); const counts = {}; PRESETS.forEach(p => counts[p.type] = (counts[p.type] || 0) + 1);
+  sel.innerHTML = `<option value="">All types (${PRESETS.length})</option>` + Object.keys(counts).map(t => `<option value="${t}" ${UI.typeFilter === t ? 'selected' : ''}>${t} (${counts[t]})</option>`).join('');
+  sel.onchange = () => { UI.typeFilter = sel.value || null; buildPresetUI(); }; }
+buildChips();
+buildChips();
+document.getElementById('spinBtn').onclick = e => { UI.spin = !UI.spin; e.target.classList.toggle('primary', UI.spin); };
+document.getElementById('threadsBtn').onclick = e => { UI.threads = !UI.threads; e.target.classList.toggle('primary', UI.threads); if (threadLines) threadLines.visible = UI.threads; if (tyreMesh) tyreMesh.traverse(o => { if (o.isMesh) [].concat(o.material).forEach(m => { m.transparent = UI.threads; m.opacity = UI.threads ? 0.35 : 1; m.needsUpdate = true; }); }); };
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
+  const d = dims(); const R = d.Rout; const v = b.dataset.view;
+  const pos = { iso: [R * 2.6, R * 1.4, R * 2.7], side: [R * 4.2, R * 0.9, 0.01], front: [0.01, R * 0.9, R * 4.2], tread: [R * 0.9, R * 2.9, R * 0.7] }[v];
+  controls.target.set(0, v === 'tread' ? R * 1.6 : R * 0.95, 0); camera.position.set(pos[0], pos[1] + (v === 'tread' ? R * 0.7 : 0), pos[2]); fitZoom(d); tyreGroup.rotation.x = 0;
+});
+// exports
+const dl = (name, url) => { const a = document.createElement('a'); a.href = url; a.download = name; a.click(); };
+const toast = m => { const t = document.getElementById('toast'); t.textContent = m; t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, 1800); };
+document.getElementById('exportJson').onclick = () => { dl(P.name.replace(/\s+/g, '_') + '.tyre.json', URL.createObjectURL(new Blob([JSON.stringify({ tyre: T, pattern: P }, null, 2)], { type: 'application/json' }))); toast('Pattern JSON exported'); };
+document.getElementById('exportHeight').onclick = () => { dl(P.name.replace(/\s+/g, '_') + '_height.png', maps.height.toDataURL()); toast('Height map exported'); };
+document.getElementById('exportNormal').onclick = () => { dl(P.name.replace(/\s+/g, '_') + '_normal.png', maps.normal.toDataURL()); toast('Normal map exported'); };
+document.getElementById('exportGlb').onclick = () => {
+  const ex = new GLTFExporter(); const g = tyreGroup.clone(); g.remove(...g.children.filter(c => c.isLineSegments)); g.position.set(0, 0, 0); g.scale.setScalar(0.001);
+  ex.parse(g, r => { dl(P.name.replace(/\s+/g, '_') + '.glb', URL.createObjectURL(new Blob([r], { type: 'model/gltf-binary' }))); toast('GLB exported (metres)'); }, e => toast('Export failed: ' + e), { binary: true });
+};
+document.getElementById('exportObj').onclick = () => {
+  if (!lastQuadMesh) { toast('Set Mesh mode to quad first'); return; }
+  dl(P.name.replace(/\s+/g, '_') + '_quads.obj', URL.createObjectURL(new Blob([quadMeshToObj(lastQuadMesh, P.name)], { type: 'text/plain' }))); toast('Quad OBJ exported (mm)');
+};
+document.getElementById('importJson').onchange = e => { const f = e.target.files[0]; if (!f) return; f.text().then(txt => { const j = JSON.parse(txt); if (j.tyre) Object.assign(T, j.tyre); if (j.pattern) { P.name = j.pattern.name; P.type = j.pattern.type; P.layers = j.pattern.layers; } UI.sel = -1; refreshAll(); toast('Imported ' + P.name); }); };
+window.addEventListener('keydown', e => { if (e.key === 'r' && !e.target.matches('input,select')) { randomTyre(); refreshAll(); } });
+
+applyPreset(0);
+</script>
+</body>
+</html>

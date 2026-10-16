@@ -1,0 +1,15 @@
+{
+  "name": "tyre-generator-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Node test harness for the Tyre Generator topology code (not needed to run the page).",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/quad.test.mjs tests/shapes.test.mjs tests/editor.test.mjs tests/render.test.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^0.1.0",
+    "clipper-lib": "6.4.2",
+    "three": "0.160.0"
+  }
+}
