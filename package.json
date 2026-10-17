@@ -1,0 +1,56 @@
+{
+  "name": "frontier-audio",
+  "version": "1.0.0",
+  "description": "Procedural cinematic UI sound system — sleek interface audio with zero samples.",
+  "keywords": [
+    "web-audio",
+    "ui-sounds",
+    "procedural-audio",
+    "sound-design",
+    "interface",
+    "typescript"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/frontier-audio.umd.cjs",
+  "module": "./dist/frontier-audio.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/frontier-audio.js",
+      "require": "./dist/frontier-audio.umd.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build --mode lib && tsc -p tsconfig.build.json",
+    "build:demo": "vite build --outDir demo-dist --base ./",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "measure": "vite-node scripts/measure.ts",
+    "measure:write": "vite-node scripts/measure.ts --write",
+    "render:wavs": "vite-node scripts/render-wavs.ts out",
+    "docs": "vite-node scripts/docs.ts",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "happy-dom": "^21.0.3",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.0",
+    "web-audio-engine": "^0.13.4",
+    "vite-node": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
