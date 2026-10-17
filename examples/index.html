@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Frontier Audio — Vanilla Example</title>
+  <style>
+    body { background:#080a0f; color:#d6e6f5; font-family: monospace; padding:40px; }
+    button { margin:8px; padding:12px 18px; background:rgba(90,200,255,0.12); border:1px solid rgba(90,200,255,0.25); color:#d6e6f5; border-radius:8px; cursor:pointer; }
+    button:hover { background:rgba(90,200,255,0.22); }
+  </style>
+</head>
+<body>
+  <h1>Frontier UI Audio — Vanilla</h1>
+  <p>Click anywhere to init, then try sounds</p>
+  <div id="buttons"></div>
+
+  <script type="module">
+    import { frontierAudio, SOUNDS } from '../dist/index.js';
+
+    let ready = false;
+    async function ensure() {
+      if (!ready) {
+        await frontierAudio.init({ masterVolume: 0.85 });
+        ready = true;
+        console.log('ready', frontierAudio.list());
+      }
+    }
+
+    document.addEventListener('click', ensure, { once: true });
+
+    const container = document.getElementById('buttons');
+    for (const name of Object.keys(SOUNDS)) {
+      const btn = document.createElement('button');
+      btn.textContent = name;
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        await ensure();
+        frontierAudio.play(name);
+      });
+      container.appendChild(btn);
+    }
+  </script>
+</body>
+</html>

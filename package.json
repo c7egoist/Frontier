@@ -1,0 +1,36 @@
+{
+  "name": "@frontier/ui-audio",
+  "version": "1.0.0",
+  "description": "Procedurally generated, sleek Iron Man-inspired UI sound library — no samples, no chiptune, pure Web Audio",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "dev": "vite demo --host 0.0.0.0 --port 5173",
+    "build": "tsc -p tsconfig.json && vite build --config vite.lib.config.ts",
+    "build:demo": "vite build --outDir dist-demo demo",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "web-audio",
+    "ui-sounds",
+    "procedural-audio",
+    "ironman",
+    "sfx",
+    "synthesis",
+    "interface"
+  ],
+  "author": "Frontier",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}
