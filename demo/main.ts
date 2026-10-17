@@ -1,6 +1,6 @@
 import { FrontierAudio, SOUND_CATEGORIES, SOUNDS, searchSounds } from '../src/index';
 import type { SoundCategory, SoundMeta } from '../src/types';
-import { computePeaks, downloadBuffer, drawPeaks, fitCanvas } from './waveform';
+import { computePeaks, drawPeaks, fitCanvas } from './waveform';
 import type { PeakData } from './waveform';
 
 /* ------------------------------------------------------------------ *

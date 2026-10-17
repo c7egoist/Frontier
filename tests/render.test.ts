@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 // @ts-ignore - pure-JS Web Audio implementation used for offline rendering.
 import { OfflineAudioContext as NodeOfflineContext } from 'web-audio-engine';
-import { SOUNDS, getSound } from '../src/catalog';
+import { SOUNDS } from '../src/catalog';
 import { encodeWav, renderSound } from '../src/core/render';
 import type { OfflineContextFactory } from '../src/core/render';
-import { getSound as get } from '../src/catalog';
+import { getSound } from '../src/catalog';
 
 const factory: OfflineContextFactory = (channels, length, sampleRate) =>
   new NodeOfflineContext(channels, length, sampleRate) as unknown as BaseAudioContext;
@@ -30,7 +30,7 @@ describe('offline rendering', () => {
   it('renders representative sounds from every category without clipping', async () => {
     const ids = ['click', 'navigate', 'confirm', 'powerOn', 'whoosh', 'sync', 'sonar'];
     for (const id of ids) {
-      const def = get(id)!;
+      const def = getSound(id)!;
       const rendered = await renderSound(def, { contextFactory: factory, seed: 42 });
       const { peak, rms, nan } = analyse(rendered.buffer);
       expect(nan, `${id} produced non-finite samples`).toBe(0);
@@ -108,7 +108,7 @@ describe('offline rendering', () => {
   });
 
   it('throws a clear error when no offline context exists', async () => {
-    const def = get('click')!;
+    const def = getSound('click')!;
     const saved = (globalThis as any).OfflineAudioContext;
     const savedWebkit = (globalThis as any).webkitOfflineAudioContext;
     try {

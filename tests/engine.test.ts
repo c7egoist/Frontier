@@ -95,6 +95,13 @@ describe('engine', () => {
     expect(engine.activeVoices).toBe(0);
   });
 
+  it('includes a scheduled start delay in the handle duration', () => {
+    const engine = make({ context: offlineContext() });
+    const immediate = engine.play('click', { force: true })!;
+    const scheduled = engine.play('tick', { when: 1.5, force: true })!;
+    expect(scheduled.duration).toBeGreaterThan(immediate.duration + 1.3);
+  });
+
   it('choreographs sequences and reports their length', () => {
     const engine = make({ context: offlineContext() });
     const total = engine.sequence([

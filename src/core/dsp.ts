@@ -9,11 +9,8 @@
  */
 
 import type { FilterOptions } from '../types';
-import { rand } from './rng';
-import type { Rng } from './rng';
 
 export const MIN_GAIN = 0.0001;
-export const TAU = Math.PI * 2;
 
 /** Equal-tempered note table used across the catalog (A4 = 440 Hz). */
 export const NOTE = {
@@ -214,9 +211,4 @@ export function softClipCurve(amount = 1.4, length = 2048): Float32Array<ArrayBu
     curve[i] = Math.tanh(x * amount) / Math.tanh(amount);
   }
   return curve;
-}
-
-/** Random detune helper for organic variation. */
-export function jitter(rng: Rng, cents: number): number {
-  return rand(rng, -cents, cents);
 }

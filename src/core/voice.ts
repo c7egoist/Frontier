@@ -431,11 +431,16 @@ export class Voice {
    * Lifecycle
    * ---------------------------------------------------------------- */
 
-  /** Finalises the voice and returns its tail length in seconds. */
+  /**
+   * Finalises the voice and returns how long it will still be audible from
+   * `now` — including any deliberate `when` start delay. This is what the
+   * engine uses to time graph cleanup, so scheduled sounds are never disposed
+   * before they begin.
+   */
   finish(): number {
     // Always give the tail a floor so cleanup is predictable.
     this.endTime = Math.max(this.endTime, this.t0 + 0.02);
-    return this.endTime - this.t0;
+    return Math.max(0.02, this.endTime - this.cfg.ctx.currentTime);
   }
 
   /** Immediately (with a short fade) silences this voice. */

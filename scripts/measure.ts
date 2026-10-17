@@ -15,7 +15,6 @@ import { resolve } from 'node:path';
 import { OfflineAudioContext as NodeOfflineContext } from 'web-audio-engine';
 import { SOUNDS } from '../src/catalog';
 import { renderSound } from '../src/core/render';
-import { dbToGain } from '../src/core/dsp';
 
 const SAMPLE_RATE = 44100;
 const args = process.argv.slice(2);

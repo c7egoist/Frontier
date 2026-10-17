@@ -34,7 +34,7 @@ await audio.unlock(); // call once inside a user gesture (iOS / Safari)
 npm install
 npm run dev        # audition UI → http://localhost:5173
 npm run build      # library → dist/frontier-audio.js + .d.ts
-npm test           # 34 tests, including an offline render of all 61 sounds
+npm test           # 35 tests, including an offline render of all 61 sounds
 ```
 
 The library is dependency-free at runtime. Until it is published, import it from this repository:
