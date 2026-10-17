@@ -99,7 +99,7 @@ export class RestirPathTracer {
     f.set([settings.exposure, settings.spatialRadius, settings.spatialCount, settings.mLimit], 64);
     f.set([frame.sunI, frame.skyScale, Math.min(16, frame.lights.length), 0], 68);
     f.set([this.blasVec4Offset, instVec4Offset, prevVec4Offset, this.w * this.h], 72);
-    f.set([p, 0, 0, 0], 76);
+    f.set([p, frame.displaySize ? frame.displaySize[0] : this.w, frame.displaySize ? frame.displaySize[1] : this.h, 0], 76);
     frame.lights.slice(0, 16).forEach((L, i) => { set3(80 + i * 4, L.p, L.w); set3(144 + i * 4, L.c, 0); });
     d.queue.writeBuffer(this.uniform, 0, u);
 

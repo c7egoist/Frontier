@@ -1041,7 +1041,7 @@ class IlluminationHost
             eye: Camera.Position, right: Right, up: Up, fwd: Forward,
             tanY: Math.tan(0.5 * Camera.VerticalFieldOfView), aspect: Camera.Aspect,
             sunDir: Light.Direction, sunColor: Light.Illuminance, sunI: 1.0, skyScale: this.Settings.SkyScale,
-            viewProj: ViewProj, prevViewProj: PrevViewProj, frameIndex: this.FrameIndex, lights: Lamps
+            viewProj: ViewProj, prevViewProj: PrevViewProj, frameIndex: this.FrameIndex, lights: Lamps, displaySize: this.ScreenExtent
         }, {
             bounces: this.Settings.RtBounces, temporal: this.Settings.TemporalReuse, spatial: this.Settings.SpatialReuse,
             visibility: this.Settings.VisibilityReuse, indirectScale: this.Settings.IndirectScale,

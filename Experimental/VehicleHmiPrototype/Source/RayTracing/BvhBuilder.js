@@ -89,12 +89,12 @@ export class RayScene {
       const pos = new Float32Array(set.Facets.length*9);
       set.Facets.forEach((f,i)=>f.Corners.forEach((c,k)=>pos.set(c, i*9+k*3)));
       const { nodes, indices } = BuildBvh(pos);
-      const nf = nodes, nu = new Uint32Array(nodes.buffer);
+      const nf = nodes; // node fields are integer-valued f32s; read them as floats, never as bits
       for (let i=0;i<nodes.length;i+=NODE_FLOATS) {
         const at = nodeData.length;
         nodeData.push(nf[i],nf[i+1],nf[i+2],0, nf[i+4],nf[i+5],nf[i+6],0);
-        if (nu[i+7]===0) nodeData[at+3] = info.nodeBase + nu[i+3];       // interior: global child
-        else { nodeData[at+3] = info.triBase + nu[i+3]; nodeData[at+7] = nu[i+7]; } // leaf: global tri start
+        if (nf[i+7]===0) nodeData[at+3] = info.nodeBase + nf[i+3];       // interior: global child
+        else { nodeData[at+3] = info.triBase + nf[i+3]; nodeData[at+7] = nf[i+7]; } // leaf: global tri start
       }
       for (const ti of indices) {
         const f=set.Facets[ti], gn=facetNormal(f.Corners);

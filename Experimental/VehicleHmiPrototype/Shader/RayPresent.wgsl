@@ -17,7 +17,7 @@ fn aces(x: vec3f) -> vec3f {
   return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0.0), vec3f(1.0));
 }
 @fragment fn Present(@builtin(position) frag: vec4f) -> @location(0) vec4f {
-  let size = vec2f(frame.misc.x, frame.misc.y);
+  let size = vec2f(frame.pack2.y, frame.pack2.z); // canvas (target) size, not trace size
   let uv = frag.xy / max(size, vec2f(1.0));
   // src is at trace resolution; sample nearest via texel coords scaled by canvas:
   let dims = vec2f(textureDimensions(src));

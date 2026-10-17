@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BuildBvh } from '../Source/RayTracing/BvhBuilder.js';
+import { BuildBvh, RayScene, NODE_FLOATS } from '../Source/RayTracing/BvhBuilder.js';
+import { SceneStructure } from '../Source/FacetStructure.js';
 
 const Root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -42,4 +43,42 @@ test('ReSTIR path tracer is wired as the default renderer with all four passes',
   const common = fs.readFileSync(path.join(Root, 'Shader/RayCommon.wgsl'), 'utf8');
   for (const fn of ['traceScene', 'anyHit', 'sampleBsdf', 'evalBsdf', 'nee', 'targetPdf'])
     assert.match(common, new RegExp(`fn ${fn}`));
+});
+
+test('packed BLAS for the real scene: leaves reference in-range triangles and cover each set', async () => {
+  const Archive = path.join(Root, 'Archive');
+  const RealFetch = globalThis.fetch;
+  globalThis.fetch = async (Url) => {
+    const File = path.isAbsolute(Url) ? Url : path.join(Root, 'Source', Url);
+    const Data = fs.readFileSync(File);
+    return { ok: true, arrayBuffer: async () => Data.buffer.slice(Data.byteOffset, Data.byteOffset + Data.byteLength) };
+  };
+  try {
+    const Scene = new SceneStructure();
+    await Scene.ConstructScene(Archive, 0);
+    const Ray = new RayScene(Scene);
+    const TriCount = Ray.triangles.length / 16;
+    Scene.FacetSets.forEach((Set, Index) => {
+      const Info = Ray.setInfo[Index];
+      if (!Set.Facets.length) return;
+      let Covered = 0;
+      const NodeCount = Ray.nodes.length / NODE_FLOATS;
+      const Stack = [Info.nodeBase];
+      while (Stack.length) {
+        const N = Stack.pop(), O = N * NODE_FLOATS;
+        if (Ray.nodes[O + 7] > 0) {
+          Covered += Ray.nodes[O + 7];
+          assert.ok(Ray.nodes[O + 3] >= Info.triBase && Ray.nodes[O + 3] + Ray.nodes[O + 7] <= Info.triBase + Set.Facets.length,
+            `${Set.Name}: leaf triangles in range`);
+        } else {
+          assert.ok(Ray.nodes[O + 3] > Info.nodeBase && Ray.nodes[O + 3] + 1 < NodeCount, `${Set.Name}: child in range`);
+          Stack.push(Ray.nodes[O + 3], Ray.nodes[O + 3] + 1);
+        }
+      }
+      assert.equal(Covered, Set.Facets.length, `${Set.Name}: all triangles covered`);
+    });
+    assert.ok(TriCount > 15000);
+    const Frame = Ray.buildFrame();
+    assert.ok(Frame.count > 100, 'TLAS instances built');
+  } finally { globalThis.fetch = RealFetch; }
 });
