@@ -336,6 +336,9 @@ export class FractureSequence
             if (Piece.Volume)
                 this.Host.Distance.InvalidateBounds([Scene.QueryWorldBounds(Piece.Occupant)]);
         this.UploadPieces(Prop);
+        // The raster path draws this composite through its anchor, whereas triangle transport needs every rigid piece
+        // as an individual BLAS instance.  Upload the same authored fragment triangles to the preallocated RT slots.
+        this.Host.RayTracing?.UpdateFragments(Prop.Pieces);
     }
 
     // 📐 The albedo a traced ray reads off a card-less fragment: the mean of the material's skin and interior, packed

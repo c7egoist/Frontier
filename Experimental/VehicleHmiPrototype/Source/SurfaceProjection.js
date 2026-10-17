@@ -17,12 +17,13 @@ export class SurfaceProjection
     // 📝 TyreMarks: the TyreMarkDepot whose deposit the raster reads for the road families.
     // 📝 Effects (EffectSequence) shares this pass: its record masks the car here, and its cubes draw after the runs.
     // 📝 VehicleRecords: the VehicleRecord the vertex stage deforms the tyres and turns the steering wheel by.
-    async ConstructPrograms(FrameRecords, OccupantRecords, MaterialRecords, DistanceLayout, TyreMarks, Effects, VehicleRecords)
+    async ConstructPrograms(FrameRecords, OccupantRecords, MaterialRecords, DistanceLayout, TyreMarks, Effects, VehicleRecords, RayTracing)
     {
         this.FrameRecords    = FrameRecords;
         this.OccupantRecords = OccupantRecords;
         this.MaterialRecords = MaterialRecords;
         this.Effects         = Effects;
+        this.RayTracing      = RayTracing;
         this.RasterLayout = this.Exchange.ConstructDescriptorLayout(["Uniform", "StorageRead", "Texture2D", "Sampler", "Uniform", "StorageRead"],
                                                                     GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, "Surface raster");
         this.RasterGroup = this.Exchange.ConstructDescriptorGroup(this.RasterLayout, [FrameRecords, OccupantRecords, TyreMarks.View, TyreMarks.Sampler,
@@ -41,9 +42,10 @@ export class SurfaceProjection
         this.DirectLayout = this.Exchange.ConstructDescriptorLayout(
             ["Uniform", "StorageRead", "Texture2D", "TextureDepth2D", "TextureDepth2DLayered", "SamplerComparison", "Uniform", "Texture2D",
              "Sampler", "StorageTexture2D:rgba16float", "StorageRead"], GPUShaderStage.COMPUTE, "Direct radiance");
-        // 📝 The direct pass traverses the scene distance field only to shadow a tyre fire's light (FireIllumination.wgsl).
-        this.DirectProgram = await this.Shaders.ConstructComputeProgram("DirectRadiance.wgsl", "IntegrateDirectRadiance",
-                                                                        [this.DirectLayout, DistanceLayout]);
+        // 📝 Primary visibility stays rasterized for motion vectors, but all direct-light shadow queries use the exact
+        // same triangle TLAS/BLAS as ReSTIR GI and glossy continuation paths.
+        this.DirectProgram = await this.Shaders.ConstructComputeProgram("RayDirectRadiance.wgsl", "IntegrateRayDirectRadiance",
+                                                                        [this.DirectLayout, RayTracing.Layout]);
     }
 
     ConstructTargets(Width, Height, Shadow, Atmosphere, LightRecords = null)
@@ -92,12 +94,12 @@ export class SurfaceProjection
         Pass.end();
     }
 
-    RecordDirect(Encoder, DistanceGroup, TimestampWrites)
+    RecordDirect(Encoder, TimestampWrites)
     {
-        const Pass = Encoder.beginComputePass({ label: "Direct radiance", timestampWrites: TimestampWrites });
+        const Pass = Encoder.beginComputePass({ label: "Ray-traced direct radiance", timestampWrites: TimestampWrites });
         Pass.setPipeline(this.DirectProgram);
         Pass.setBindGroup(0, this.DirectGroup);
-        Pass.setBindGroup(1, DistanceGroup);
+        Pass.setBindGroup(1, this.RayTracing.Group);
         Pass.dispatchWorkgroups(Math.ceil(this.Extent[0] / 8), Math.ceil(this.Extent[1] / 8));
         Pass.end();
     }

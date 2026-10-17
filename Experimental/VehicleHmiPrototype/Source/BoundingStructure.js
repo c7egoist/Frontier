@@ -188,5 +188,7 @@ export function ConstructBoundingStructure(Corners)
             Ordered[Index * 12 + Corner * 4 + 2] = Corners[Facet * 9 + Corner * 3 + 2];
         }
     }
-    return { NodeScalars, NodeCount: Nodes.length, FacetCorners: Ordered, FacetCount };
+    // Keep the final permutation alongside the flattened stream.  The distance-volume builder only needs corners,
+    // while the triangle path tracer also needs to carry the authored material family with the reordered facet.
+    return { NodeScalars, NodeCount: Nodes.length, FacetCorners: Ordered, FacetCount, FacetOrder: Order };
 }

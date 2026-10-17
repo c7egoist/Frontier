@@ -104,14 +104,22 @@ export class ShaderInterchange
         const Module = await this.ConstructModule(FileName, Constants);
         const Device = this.Exchange.Device;
         Device.pushErrorScope("validation");
-        const Program = await Device.createComputePipelineAsync({
-            label:   `${FileName}:${EntryPoint}`,
-            layout:  Device.createPipelineLayout({ bindGroupLayouts: Layouts }),
-            compute: { module: Module, entryPoint: EntryPoint }
-        });
+        let Program, Rejection = null;
+        try
+        {
+            Program = await Device.createComputePipelineAsync({
+                label:   `${FileName}:${EntryPoint}`,
+                layout:  Device.createPipelineLayout({ bindGroupLayouts: Layouts }),
+                compute: { module: Module, entryPoint: EntryPoint }
+            });
+        }
+        catch (Error)
+        {
+            Rejection = Error;
+        }
         const Failure = await Device.popErrorScope();
-        if (Failure)
-            throw new Error(`Compute program ${FileName}:${EntryPoint} — ${Failure.message}`);
+        if (Failure || Rejection)
+            throw new Error(`Compute program ${FileName}:${EntryPoint} — ${(Failure || Rejection).message}`);
         return Program;
     }
 

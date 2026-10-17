@@ -22,6 +22,7 @@ import { AtmosphereIntegrator } from "./AtmosphereIntegrator.js";
 import { ShadowProjection } from "./ShadowProjection.js";
 import { SurfaceProjection } from "./SurfaceProjection.js";
 import { ResamplingSequence } from "./ResamplingSequence.js";
+import { RayTracingGeometry } from "./RayTracingGeometry.js";
 import { VarianceIntegrator } from "./VarianceIntegrator.js";
 import { DisplayProjection } from "./DisplayProjection.js";
 import { HardwareMetrics } from "./HardwareMetrics.js";
@@ -58,7 +59,9 @@ const ShaderSources = [
     "DistanceRecords.wgsl", "DistanceTraversal.wgsl", "DistanceTransfer.wgsl", "DistanceUnion.wgsl", "CardProjection.wgsl",
     "CardSampling.wgsl", "CardCapture.wgsl", "CardIrradiance.wgsl", "CardDirect.wgsl", "CardRadiosity.wgsl", "CardFinal.wgsl",
     "AtmosphereScattering.wgsl", "SurfaceReflectance.wgsl", "ShadowRaster.wgsl", "SurfaceRaster.wgsl", "DirectRadiance.wgsl",
-    "ReservoirRecords.wgsl", "ReservoirTemporal.wgsl", "ReservoirSpatial.wgsl", "ReflectionTraversal.wgsl", "VarianceTemporal.wgsl",
+    "ReservoirRecords.wgsl", "ReservoirTemporal.wgsl", "ReservoirSpatial.wgsl", "ReflectionTraversal.wgsl",
+    "RaySceneRecords.wgsl", "RayTraversal.wgsl", "RayReservoirRecords.wgsl", "RayRestirTemporal.wgsl", "RayRestirSpatial.wgsl",
+    "RayRestirReflection.wgsl", "RayDirectRadiance.wgsl", "VarianceTemporal.wgsl",
     "VarianceWavelet.wgsl", "VarianceUpsample.wgsl", "InspectionMarch.wgsl", "DisplayRecombination.wgsl", "DisplayAntialias.wgsl",
     "DisplayExposure.wgsl", "DisplayPresent.wgsl", "FireIllumination.wgsl", "PlumeRecords.wgsl", "PlumeAdvection.wgsl", "PlumePressure.wgsl", "PlumeVorticity.wgsl", "PlumeMarch.wgsl",
     "FragmentDistance.wgsl", "EffectRecords.wgsl", "EffectRaster.wgsl", "VehicleVisual.wgsl", "SparkRaster.wgsl", "ForwardRaster.wgsl",
@@ -108,7 +111,7 @@ class IlluminationHost
             SunElevation: 38.0, SunAzimuth: 145.0, SolarIlluminance: 12.0, SkyScale: 1.0, EmissionScale: 1.0,
             ExposureCompensation: 0.0, AutoExposure: true, DirectShadow: true,
             Indirect: true, TemporalReuse: true, SpatialReuse: true, VisibilityReuse: true, RadianceRefresh: true,
-            SpatialCount: 5, SpatialRadius: 20, TemporalTallyLimit: 20, IndirectScale: 1.0, VarianceKernel: true, Reflection: true,
+            SpatialCount: 5, SpatialRadius: 20, TemporalTallyLimit: 20, IndirectScale: 1.0, PathBounces: 3, VarianceKernel: true, Reflection: true,
             Antialias: true, TraceScale: 2, FreezeDistance: false, CardRadiosity: true, CardTileBudget: this.Grade.TileBudget,
             Quality: ["low", "medium", "high"].indexOf(this.GradeName),
             RenderScale: this.Grade.RenderScale, LightingPreset: "Custom", TestPlume: 0,
@@ -272,6 +275,12 @@ class IlluminationHost
         this.ReportProgress("Compiling lighting programs", 0.76);
         this.Atmosphere = new AtmosphereIntegrator(this.Exchange, this.Shaders);
         await this.Atmosphere.ConstructResources();
+        // 📝 RTX-class default: exact authored triangles in a refitted TLAS/SAH-BLAS.  The portable WebGPU path is
+        // compute-based because the web standard has no vendor ray-query extension; it never falls back to an SDF GI ray.
+        this.ReportProgress("Building triangle ray-tracing acceleration structures", 0.78);
+        this.RayTracing = new RayTracingGeometry(this.Exchange, this.Shaders, { MaximumBounces: 3, MaximumDistance: 500.0 });
+        await this.RayTracing.ConstructResources(this.Scene, this.OccupantRecords, this.MaterialRecords, this.Atmosphere.SkyView, this.Atmosphere.SkySampler,
+                                                 this.LightRecords);
         this.Shadow = new ShadowProjection(this.Exchange, this.Shaders, this.Grade.ShadowExtent);
         await this.Shadow.ConstructResources(this.OccupantRecords);
         await this.Cards.ConstructResources(this.FrameRecords, this.OccupantRecords, this.MaterialRecords, this.Distance.TraversalLayout, this.LightRecords);
@@ -290,9 +299,9 @@ class IlluminationHost
         this.Recovery = new RecoveryDirector(this);
         this.Surface = new SurfaceProjection(this.Exchange, this.Shaders);
         await this.Surface.ConstructPrograms(this.FrameRecords, this.OccupantRecords, this.MaterialRecords, this.Distance.TraversalLayout, this.Marks,
-                                             this.Effects, this.VehicleRecords);
+                                             this.Effects, this.VehicleRecords, this.RayTracing);
         this.Resampling = new ResamplingSequence(this.Exchange, this.Shaders);
-        await this.Resampling.ConstructPrograms(this.FrameRecords, this.MaterialRecords, this.Distance.TraversalLayout, this.Cards.SamplingLayout);
+        await this.Resampling.ConstructPrograms(this.FrameRecords, this.MaterialRecords, this.RayTracing);
         this.Diffuse = new VarianceIntegrator(this.Exchange, this.Shaders, "Diffuse", { MinimumWeight: 0.08, TallyLimit: 24, WaveletIterations: 3, ColourSigma: 4.0 });
         await this.Diffuse.ConstructPrograms(this.FrameRecords);
         this.Glossy = new VarianceIntegrator(this.Exchange, this.Shaders, "Glossy", { MinimumWeight: 0.12, TallyLimit: 12, WaveletIterations: 2, ColourSigma: 3.0 });
@@ -1105,6 +1114,16 @@ class IlluminationHost
             Gas: this.Settings.Gas, Readings, Thermal: this.Thermal });
         this.EncodeFrameRecord(Camera, Light);
         Device.queue.writeBuffer(this.OccupantRecords, 0, this.Scene.EncodeOccupantRecords(this.Volumes, this.Scene.DynamicCount));
+        // Keep ray instances in lockstep with the transforms just encoded for the raster motion vectors.  Activity changes
+        // (fracture / cone / stress enablement) deliberately restart temporal reservoirs; ordinary rigid motion reprojects.
+        const PathBounces = Math.max(1, Math.min(6, Math.round(this.Settings.PathBounces)));
+        if (this.RayTracing.MaximumBounces !== PathBounces)
+        {
+            this.RayTracing.MaximumBounces = PathBounces;
+            this.PriorValid = false;
+        }
+        if (this.RayTracing.Update(this.Scene))
+            this.PriorValid = false;
 
         if (this.Lighting && this.LightRecords)
         {
@@ -1138,15 +1157,15 @@ class IlluminationHost
         if (Included("Cabin"))
             this.Cabin.RecordViews(Encoder, this.Scene, this.VertexRecords, this.Vehicle.QueryBodyTransform(), this.QueryMirrorsVisible());
         if (Included("Direct"))
-            this.Surface.RecordDirect(Encoder, this.Distance.TraversalGroup, this.Metrics.QueryWrites("Direct"));
+            this.Surface.RecordDirect(Encoder, this.Metrics.QueryWrites("Direct"));
         if (this.Settings.Indirect && Included("Resampling"))
         {
-            this.Resampling.RecordResampling(Encoder, Parity, this.Distance.TraversalGroup, this.SamplingGroup, this.Metrics.QueryWrites("ReSTIR GI"));
+            this.Resampling.RecordResampling(Encoder, Parity, this.Metrics.QueryWrites("ReSTIR GI"));
             if (Included("Diffuse"))
                 this.Diffuse.Record(Encoder, Parity, this.Settings.VarianceKernel, this.Metrics.QueryWrites("Diffuse reconstruction"));
             if (this.Settings.Reflection && Included("Reflection"))
             {
-                this.Resampling.RecordReflection(Encoder, this.Distance.TraversalGroup, this.SamplingGroup, this.Metrics.QueryWrites("Reflection"));
+                this.Resampling.RecordReflection(Encoder, this.Metrics.QueryWrites("Reflection"));
                 this.Glossy.Record(Encoder, Parity, this.Settings.VarianceKernel, this.Metrics.QueryWrites("Glossy reconstruction"));
             }
         }

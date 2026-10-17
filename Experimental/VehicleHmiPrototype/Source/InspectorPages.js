@@ -70,8 +70,8 @@ export function ConstructEntities(Host)
     const S = Host.Settings;
     const Entities = [
         { Id: "render", Group: "Render", Name: "Render settings", Type: "Renderer", Glyph: "Monitor", Colour: Accent.Render,
-          Description: "Resolution, final gather, reflections & debug views",
-          Meta: () => `${Host.GradeName}`, State: () => "live", Build: (C, B) => BuildRender(Host, C, B),
+          Description: "Triangle ReSTIR path tracing, reflections & debug views",
+          Meta: () => `RTX · ${Host.GradeName}`, State: () => "live", Build: (C, B) => BuildRender(Host, C, B),
           Switches: () => [Feature("Indirect", "Sparkles", S, "Indirect"), Feature("Reflections", "Aperture", S, "Reflection"),
                            Feature("Denoiser", "Layers", S, "VarianceKernel"), Feature("TAA", "Scan", S, "Antialias")] },
         { Id: "field", Group: "Render", Name: "Global distance field", Type: "Scene distance field", Glyph: "GridLattice", Colour: Accent.Render,
@@ -178,12 +178,12 @@ function BuildRender(Host, C, Body)
     const Quality = C.Card(Body, "Resolution & quality", "Monitor", { Accent: Accent.Render, Index: 1 });
     C.Metric(Quality, () => (Host.ScreenExtent ? `${Host.ScreenExtent[0]}×${Host.ScreenExtent[1]}` : "–"), "px", 0,
              () => [`trace ${Host.TraceExtent ? Host.TraceExtent.join("×") : "–"}`, "live"]);
-    C.Muted(Quality, "Render target after the scale and the pixel ceiling of the quality grade; ReSTIR GI and reflections trace at the trace resolution.");
+    C.Muted(Quality, "Default renderer: exact triangle TLAS/BLAS ReSTIR path tracer. ReSTIR GI and glossy paths trace at the selected resolution.");
     C.Segmented(Quality, S, "Quality", [["Low", 0], ["Medium", 1], ["High", 2]], { Label: "Quality grade · reloads" });
     C.Segmented(Quality, S, "TraceScale", [["Full", 1], ["Half", 2], ["Quarter", 4]], { Label: "Trace resolution" });
     Slider(C, Quality, S, "RenderScale", "Render scale", 0.25, 2.0, 0.05, "×", 2, ["Faster", "Sharper"]);
 
-    const Gather = C.Card(Body, "Global illumination · ReSTIR", "Sparkles", { Accent: Accent.Render, Index: 2 });
+    const Gather = C.Card(Body, "Triangle path tracing · ReSTIR GI", "Sparkles", { Accent: Accent.Render, Index: 2 });
     C.Switch(Gather, S, "TemporalReuse", { Label: "Temporal reuse", Detail: "Reservoirs carried through motion vectors" });
     C.Switch(Gather, S, "SpatialReuse", { Label: "Spatial reuse", Detail: "Neighbouring reservoirs merged per pixel" });
     C.Switch(Gather, S, "VisibilityReuse", { Label: "Visibility validation", Detail: "Reused samples re-traced for occlusion" });
@@ -191,13 +191,14 @@ function BuildRender(Host, C, Body)
     Slider(C, Gather, S, "SpatialCount", "Spatial candidates", 0, 8, 1, "", 0);
     Slider(C, Gather, S, "SpatialRadius", "Spatial radius", 2, 48, 1, "px", 0);
     Slider(C, Gather, S, "TemporalTallyLimit", "Temporal M limit", 1, 40, 1, "", 0, ["Responsive", "Stable"]);
+    Slider(C, Gather, S, "PathBounces", "Path bounces", 1, 6, 1, "", 0, ["Fast", "Full"]);
     Slider(C, Gather, S, "IndirectScale", "Indirect intensity", 0, 3, 0.05, "×", 2);
 
     const Image = C.Card(Body, "Exposure & image", "Aperture", { Accent: Accent.Render, Index: 3 });
     C.Switch(Image, S, "AutoExposure", { Label: "Auto exposure" });
     Slider(C, Image, S, "ExposureCompensation", "Exposure compensation", -4, 4, 0.1, "EV", 1, ["Darker", "Brighter"]);
-    C.Switch(Image, S, "DirectShadow", { Label: "Sun shadows", Detail: "Cascaded shadow depth" });
-    C.Switch(Image, S, "Reflection", { Label: "Glossy reflections", Detail: "Distance-field traced, denoised" });
+    C.Switch(Image, S, "DirectShadow", { Label: "Ray-traced shadows", Detail: "Shared TLAS/BLAS visibility rays" });
+    C.Switch(Image, S, "Reflection", { Label: "Glossy reflections", Detail: "Triangle-traced, denoised" });
     C.Switch(Image, S, "VarianceKernel", { Label: "Denoiser (SVGF)" });
     C.Switch(Image, S, "Antialias", { Label: "Temporal antialiasing", Detail: "Also resolves dithered tyre marks" });
 

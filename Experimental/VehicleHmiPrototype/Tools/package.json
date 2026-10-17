@@ -9,7 +9,8 @@
     "test:stability": "node VehicleStability.mjs ..",
     "validate:effects": "HOOKS=VehicleEffectsHooks.mjs node HeadlessHarness.mjs .. 36 \"?capture=1\"",
     "validate:slate": "HOOKS=SlateIntegrationHooks.mjs node HeadlessHarness.mjs .. 48 \"?capture=1\"",
-    "validate:orbit": "HOOKS=VehicleOrbitHooks.mjs node HeadlessHarness.mjs .. 30 \"?capture=1\""
+    "validate:orbit": "HOOKS=VehicleOrbitHooks.mjs node HeadlessHarness.mjs .. 30 \"?capture=1\"",
+    "validate:ray": "HOOKS=RayTracingHooks.mjs node HeadlessHarness.mjs .. 8 \"?capture=1\""
   },
   "devDependencies": {
     "webgpu": "0.6.2"

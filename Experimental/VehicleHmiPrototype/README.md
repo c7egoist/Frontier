@@ -73,6 +73,7 @@ npm --prefix Tools run test:stability
 npm --prefix Tools run validate
 npm --prefix Tools run validate:effects
 npm --prefix Tools run validate:slate
+npm --prefix Tools run validate:ray    # triangle tracer survives a live fracture / per-piece BLAS upload
 ```
 
 Dawn's null backend checks shader/pipeline/command validity, not rendered pixels.
@@ -80,11 +81,17 @@ Use a WebGPU-capable browser to assess appearance, interaction and hardware perf
 
 ---
 
-# IlluminationHost — distance-field GI · surface cards · ReSTIR GI (WebGPU)
+# IlluminationHost — triangle ReSTIR path tracing · distance-field support (WebGPU)
 
-A self-contained WebGPU exhibit inside the **Frontier Editor** UI: one scene distance field (four camera-centred
-toroidal cascades), a surface cache of oriented cards with multi-bounce radiosity, a ReSTIR GI final gather traced
-through that field, SVGF reconstruction, glossy reflections — and the Project-Drive ControlVehicle (a port of its
+A self-contained WebGPU exhibit inside the **Frontier Editor** UI. Its default real-time renderer is a complete
+triangle-path ReSTIR GI transport path: authored facets are built into per-mesh SAH BLASes, a refitted TLAS instances
+every active vehicle, cone, prop and stress object, and direct shadows, initial candidates, temporal/spatial visibility,
+continuation bounces and glossy reflections traverse that same exact triangle scene. Preallocated dynamic BLAS leaves
+receive each live fracture piece's authored triangles, so debris uses individual rigid transforms rather than a proxy.
+The ReSTIR reservoir stores its continuation seed and material identity, re-evaluates shifted paths, applies the
+reconnection Jacobian and 1/Z correction, and is reconstructed with SVGF. The distance field and surface cards remain
+supporting systems for smoke, inspection,
+card radiosity and gameplay, rather than the default GI ray representation — and the Project-Drive ControlVehicle (a port of its
 struts, MF6.1 tyres and GT-R powertrain) on the **Frontier proving grounds** and its **training arena** (timed
 drills, 136 knockable cones), with GPU drift smoke and tyre fire, burnouts that lay sharp-edged rubber, breakable
 props whose debris are convex rigid bodies in the distance field, and a derez / rez effect for every respawn.
@@ -96,6 +103,15 @@ import in this folder was developed here. The editor look comes from `Experiment
 `Docs/FrontierEditorComponents.md`); the fracture algorithm and its material table from `Experimental/FractureEditor`
 (Frontier-, `arena/215a6f39-frontier`); the derez presets from `Experimental/ParticleEditor` (same branch); the smoke
 design from Frontier's `Engine/VolumetricDynamics`.
+
+## RTX-class WebGPU renderer
+
+The default renderer is **Triangle ReSTIR Path Tracing** (three bounces by default, adjustable to six in Render settings).
+It uses WebGPU compute storage buffers for its TLAS/BLAS traversal so it ships as browser JavaScript + WGSL—there is no
+C++ renderer, no Three.js path-tracing plug-in and no SDF/screen-space stand-in in the ReSTIR transport path. Standard
+WebGPU currently does not expose a portable vendor `rayQuery` / hardware-acceleration API, so it cannot truthfully claim
+that an RTX RT core is called directly. RTX-class GPUs are the intended high-throughput target; their normal WebGPU
+compute implementation runs the full triangle traversal, with exact geometry shared by direct shadows, GI and reflections.
 
 ## Running
 
