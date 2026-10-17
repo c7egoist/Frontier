@@ -276,6 +276,8 @@ export class FractureSequence
         }
         Set.VertexCount = Cursor;
         this.Host.Exchange.Device.queue.writeBuffer(this.Host.VertexRecords, Set.FirstVertex * VertexStride, Bytes, 0, Math.max(4, Cursor * VertexStride));
+        if (this.Host.RayTracing)
+            this.Host.RayTracing.RegisterPropFragments(Prop.Index, Prop.Definition.PieceFirst, Prop.Definition.Capacity, Written);
         return Written;
     }
 
@@ -417,6 +419,8 @@ export class FractureSequence
             Occupant.LocalMaximum = null;
         }
         Prop.Pieces = [];
+        if (this.Host.RayTracing)
+            this.Host.RayTracing.ClearPropFragments(Placement.PieceFirst, Placement.Capacity);
         const Index = Placement.IntactOccupant;
         Scene.Occupants[Index].Inactive = false;
         this.Host.Distance.InvalidateBounds([Scene.QueryWorldBounds(Index)]);

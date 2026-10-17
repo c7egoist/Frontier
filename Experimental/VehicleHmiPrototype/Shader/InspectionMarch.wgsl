@@ -10,6 +10,7 @@
 //    3  card radiance at the hit (Lumen's "surface cache" view): the scene exactly as every indirect ray sees it.
 
 //! include "CardSampling.wgsl"
+//! include "RayTraversal.wgsl"
 
 @group(0) @binding(1) var InspectionTarget : texture_storage_2d<rgba16float, write>;
 
@@ -43,9 +44,62 @@ fn MarchInspection(@builtin(global_invocation_id) Invocation: vec3u)
     }
     let Far = ReconstructWorldPosition(vec2f(Pixel) + 0.5, 1.0e-6);
     let Direction = normalize(Far - Frame.CameraPosition);
-    let Hit = TraverseSceneDistance(Frame.CameraPosition, Direction, 0.0, 600.0, 0.0);
     var Colour = vec3f(0.0);
-    switch (Frame.DistanceInspection)
+
+    if (FeatureEnabled(Frame, FeatureRayTracing))
+    {
+        let RtHit = TraceSceneRay(Frame.CameraPosition, Direction, 0.01, 600.0);
+        switch (ResolveDistanceInspectionMode(Frame))
+        {
+            case 2u:
+            {
+                Colour = ProjectHeat(f32(RtHit.Steps) / 96.0);
+            }
+            case 3u:
+            {
+                if (RtHit.Hit)
+                {
+                    var Seed = ConstructPixelSeed(Pixel, Frame.FrameIndex, 53u);
+                    let Surf = ProjectSurfaceSample(RayMaterials[RtHit.Family]);
+                    Colour   = Surf.Emission * Frame.EmissionScale
+                             + EvaluateDirectNextEvent(RtHit.Position, RtHit.Normal, -Direction, Surf, &Seed, true);
+                }
+                else
+                {
+                    Colour = SampleSkyRadiance(Direction);
+                }
+            }
+            default:
+            {
+                if (RtHit.Hit)
+                {
+                    let Surf  = ProjectSurfaceSample(RayMaterials[RtHit.Family]);
+                    let Shade = 0.35 + 0.65 * max(dot(RtHit.Normal, normalize(vec3f(0.4, 0.3, 0.85))), 0.0);
+                    Colour = mix(Surf.Albedo, RtHit.Normal * 0.5 + 0.5, 0.55) * Shade;
+                    if (RtHit.Identity < arrayLength(&Occupants))
+                    {
+                        let Occ = Occupants[RtHit.Identity];
+                        if ((Occ.Roles & RoleDynamic) != 0u)
+                        {
+                            Colour = mix(Colour, vec3f(0.25, 0.90, 0.70), 0.30);
+                        }
+                    }
+                    let Lattice = fract(RtHit.Position * 2.0);
+                    let Edge = min(min(min(Lattice.x, 1.0 - Lattice.x), min(Lattice.y, 1.0 - Lattice.y)), min(Lattice.z, 1.0 - Lattice.z));
+                    Colour *= mix(0.84, 1.0, smoothstep(0.0, 0.05, Edge));
+                }
+                else
+                {
+                    Colour = mix(vec3f(0.10, 0.11, 0.14), vec3f(0.22, 0.26, 0.34), clamp(Direction.z * 2.0 + 0.5, 0.0, 1.0));
+                }
+            }
+        }
+        textureStore(InspectionTarget, vec2i(Pixel), vec4f(Colour, 1.0));
+        return;
+    }
+
+    let Hit = TraverseSceneDistance(Frame.CameraPosition, Direction, 0.0, 600.0, 0.0);
+    switch (ResolveDistanceInspectionMode(Frame))
     {
         case 2u:
         {

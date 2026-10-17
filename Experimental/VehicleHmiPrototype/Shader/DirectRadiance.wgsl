@@ -9,6 +9,7 @@
 //! include "SkyProjection.wgsl"
 //! include "FireIllumination.wgsl"
 //! include "ClusteredLights.wgsl"
+//! include "RayTraversal.wgsl"
 
 struct CascadeReceiver
 {
@@ -23,8 +24,8 @@ struct CascadeReceiver
 @group(0) @binding(4) var ShadowDepth                  : texture_depth_2d_array;
 @group(0) @binding(5) var ShadowSampler                : sampler_comparison;
 @group(0) @binding(6) var<uniform> Receiver            : CascadeReceiver;
-@group(0) @binding(7) var SkyView                      : texture_2d<f32>;
-@group(0) @binding(8) var SkySampler                   : sampler;
+@group(0) @binding(7) var DirectSkyView                : texture_2d<f32>;
+@group(0) @binding(8) var DirectSkySampler             : sampler;
 @group(0) @binding(9) var DirectTarget                 : texture_storage_2d<rgba16float, write>;
 @group(0) @binding(10) var<storage, read> SceneLights  : array<LightRecord>;
 
@@ -64,7 +65,7 @@ fn ResolveCascadeVisibility(Position: vec3f, Normal: vec3f) -> f32
 
 fn ResolveBackgroundRadiance(Direction: vec3f) -> vec3f
 {
-    var Radiance = textureSampleLevel(SkyView, SkySampler, ProjectSkyCoordinates(Direction), 0.0).rgb * Frame.SkyScale
+    var Radiance = textureSampleLevel(DirectSkyView, DirectSkySampler, ProjectSkyCoordinates(Direction), 0.0).rgb * Frame.SkyScale
                  + Frame.NightSkyRadiance;
     // 📝 The solar disc (0.27° radius) is added only here, never to escaped rays, so it is not counted twice.
     let Cosine = dot(Direction, Frame.SunDirection);
@@ -91,31 +92,56 @@ fn IntegrateDirectRadiance(@builtin(global_invocation_id) Invocation: vec3u)
         textureStore(DirectTarget, vec2i(Pixel), vec4f(ResolveBackgroundRadiance(normalize(Far - Frame.CameraPosition)), 0.0));
         return;
     }
-    let Position   = ReconstructWorldPosition(Centre, Depth);
-    let Attributes = textureLoad(SurfaceAttributes, vec2i(Pixel), 0);
-    let Normal     = DecodeOctahedral(Attributes.xy);
-    let Surface    = ProjectSurfaceSample(Materials[u32(Attributes.z + 0.5)]);
-    let View       = normalize(Frame.CameraPosition - Position);
+    let Position     = ReconstructWorldPosition(Centre, Depth);
+    let Attributes   = textureLoad(SurfaceAttributes, vec2i(Pixel), 0);
+    let Normal       = DecodeOctahedral(Attributes.xy);
+    let Surface      = ProjectSurfaceSample(Materials[u32(Attributes.z + 0.5)]);
+    let View         = normalize(Frame.CameraPosition - Position);
+    let UseRtShadows = FeatureEnabled(Frame, FeatureRayTracing) && FeatureEnabled(Frame, FeatureRayTracedShadows);
+    let RayOrigin    = Position + Normal * RayEpsilon;
+
     var Visibility = 1.0;
+    var SunDir     = Frame.SunDirection;
     if (FeatureEnabled(Frame, FeatureDirectShadow))
     {
-        Visibility = ResolveCascadeVisibility(Position, Normal);
+        if (UseRtShadows)
+        {
+            SunDir     = SampleSunConeDirection(Frame.SunDirection, ProjectTemporalPair(Pixel, Frame.FrameIndex, 17u));
+            Visibility = TraceSceneVisibility(RayOrigin, SunDir, RayEpsilon, 400.0);
+        }
+        else
+        {
+            Visibility = ResolveCascadeVisibility(Position, Normal);
+        }
     }
-    var Radiance = Frame.SunIlluminance * Visibility * ResolveDirectReflectance(Surface, Normal, View, Frame.SunDirection);
+    var Radiance = Frame.SunIlluminance * Visibility * ResolveDirectReflectance(Surface, Normal, View, SunDir);
     let Fire = ResolveFireArrival(Position, Normal);
     if (any(Fire.Illuminance > vec3f(0.0)))
     {
         Radiance += Fire.Illuminance * ResolveDirectReflectance(Surface, Normal, View, Fire.Direction);
     }
 
-    // Clustered light evaluations with photometric / IES profiles
+    // Clustered light evaluations with photometric / IES profiles and optional BVH ray-traced shadows
     let NumLights = arrayLength(&SceneLights);
-    for (var i = 0u; i < NumLights; i++) {
+    for (var i = 0u; i < NumLights; i++)
+    {
         let Light = SceneLights[i];
+        if (Light.Params.w < 0.5)
+        {
+            break;
+        }
         let LightIllum = EvaluateLightArrival(Light, Position, Normal);
-        if (any(LightIllum > vec3f(0.0))) {
-            let TowardLight = normalize(Light.PositionType.xyz - Position);
-            Radiance += LightIllum * ResolveDirectReflectance(Surface, Normal, View, TowardLight);
+        if (any(LightIllum > vec3f(0.0)))
+        {
+            let Offset      = Light.PositionType.xyz - Position;
+            let LightDist   = length(Offset);
+            let TowardLight = Offset / max(LightDist, 1.0e-4);
+            var LightVis    = 1.0;
+            if (UseRtShadows)
+            {
+                LightVis = TraceSceneVisibility(RayOrigin, TowardLight, RayEpsilon, max(LightDist - 0.08, RayEpsilon));
+            }
+            Radiance += LightIllum * LightVis * ResolveDirectReflectance(Surface, Normal, View, TowardLight);
         }
     }
 

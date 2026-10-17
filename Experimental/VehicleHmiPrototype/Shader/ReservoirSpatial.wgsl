@@ -16,6 +16,7 @@
 //! include "CardSampling.wgsl"
 //! include "ReservoirRecords.wgsl"
 //! include "DiscrepancySequence.wgsl"
+//! include "RayTraversal.wgsl"
 
 @group(0) @binding(1) var Guide                            : texture_2d<f32>;
 @group(0) @binding(2) var SurfaceDepth                     : texture_depth_2d;
@@ -99,8 +100,13 @@ fn ResampleSpatial(@builtin(global_invocation_id) Invocation: vec3u)
                 continue;
             }
             let DonorPosition = ResolveTracePosition(Donor);
+            if (abs(dot(DonorPosition - Position, Normal)) > 0.08 * max(ViewDepth, 0.5))
+            {
+                continue;
+            }
             let Jacobian = ResolveReconnectionJacobian(Reservoir.Sample, Position, DonorPosition);
-            if (Jacobian > 8.0 || Jacobian < 0.125 || Jacobian != Jacobian)
+            let MaxJac   = select(8.0, 5.0, FeatureEnabled(Frame, FeatureFireflyFilter));
+            if (Jacobian > MaxJac || Jacobian < (1.0 / MaxJac) || Jacobian != Jacobian)
             {
                 continue;
             }
@@ -120,11 +126,21 @@ fn ResampleSpatial(@builtin(global_invocation_id) Invocation: vec3u)
     // ④ visibility of an adopted sample from this surface
     if (Spatial.Adopted && FeatureEnabled(Frame, FeatureVisibilityReuse))
     {
-        let Toward = Spatial.Sample.Position - Position;
-        let Length = length(Toward);
-        let Bias = ResolveSurfaceBias(Position);
-        let Reach = select(Length - 2.0 * ResolveSurfaceBias(Spatial.Sample.Position), 300.0, Spatial.Sample.Identity == SkyIdentity);
-        if (TraverseSceneVisibility(Position + Normal * Bias, Toward / Length, 0.5 * Bias, max(Reach, 0.0)) < 0.5)
+        let Toward  = Spatial.Sample.Position - Position;
+        let Length  = length(Toward);
+        var Visible = 1.0;
+        if (FeatureEnabled(Frame, FeatureRayTracing))
+        {
+            let Reach = select(Length - 3.0 * RayEpsilon, 400.0, Spatial.Sample.Identity == SkyIdentity);
+            Visible   = TraceSceneVisibility(Position + Normal * RayEpsilon, Toward / max(Length, 1.0e-4), RayEpsilon, max(Reach, 0.0));
+        }
+        else
+        {
+            let Bias  = ResolveSurfaceBias(Position);
+            let Reach = select(Length - 2.0 * ResolveSurfaceBias(Spatial.Sample.Position), 300.0, Spatial.Sample.Identity == SkyIdentity);
+            Visible   = TraverseSceneVisibility(Position + Normal * Bias, Toward / max(Length, 1.0e-4), 0.5 * Bias, max(Reach, 0.0));
+        }
+        if (Visible < 0.5)
         {
             Spatial = Own;
             Spatial.WeightSum = ResolveReservoirTarget(Own.Sample, Position, Normal) * Own.Weight * Own.Tally;
@@ -149,8 +165,9 @@ fn ResampleSpatial(@builtin(global_invocation_id) Invocation: vec3u)
     // ⑤ resolve the demodulated irradiance
     let Cosine = max(dot(Normal, ResolveSampleDirection(Chosen, Position)), 0.0);
     var Irradiance = Chosen.Radiance * Cosine * Weight;
-    let Luminance = ResolveLuminance(Irradiance);
-    let Limit = 40.0 * max(ResolveLuminance(Frame.SunIlluminance), 0.5);
+    let Luminance  = ResolveLuminance(Irradiance);
+    let ClampScale = select(40.0, 22.0, FeatureEnabled(Frame, FeatureFireflyFilter));
+    let Limit      = ClampScale * max(ResolveLuminance(Frame.SunIlluminance), 0.5);
     if (Luminance > Limit)
     {
         Irradiance *= Limit / Luminance;

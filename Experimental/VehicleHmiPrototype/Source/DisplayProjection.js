@@ -12,7 +12,7 @@ export class DisplayProjection
     }
 
     // 📝 OccupantRecords: the recombination finds the car's cabin through the body's world → local transform.
-    async ConstructPrograms(FrameRecords, MaterialRecords, DistanceLayout, SamplingLayout, OccupantRecords)
+    async ConstructPrograms(FrameRecords, MaterialRecords, DistanceLayout, SamplingLayout, OccupantRecords, RayTracingLayout)
     {
         this.FrameRecords    = FrameRecords;
         this.MaterialRecords = MaterialRecords;
@@ -31,7 +31,7 @@ export class DisplayProjection
         this.AntialiasProgram  = await this.Shaders.ConstructComputeProgram("DisplayAntialias.wgsl", "IntegrateAntialias", [this.AntialiasLayout]);
         this.ExposureProgram   = await this.Shaders.ConstructComputeProgram("DisplayExposure.wgsl", "IntegrateExposure", [this.ExposureLayout]);
         this.InspectionProgram = await this.Shaders.ConstructComputeProgram("InspectionMarch.wgsl", "MarchInspection",
-                                                                            [this.InspectionLayout, DistanceLayout, SamplingLayout]);
+                                                                            [this.InspectionLayout, DistanceLayout, SamplingLayout, RayTracingLayout]);
         this.PresentProgram = await this.Shaders.ConstructRasterProgram("DisplayPresent.wgsl", {
             VertexEntry: "PresentVertex", FragmentEntry: "PresentFragment",
             Primitive: { topology: "triangle-list" },
@@ -95,13 +95,14 @@ export class DisplayProjection
         };
     }
 
-    RecordInspection(Encoder, DistanceGroup, SamplingGroup)
+    RecordInspection(Encoder, DistanceGroup, SamplingGroup, RayTracingGroup)
     {
         const Pass = Encoder.beginComputePass({ label: "Inspection march" });
         Pass.setPipeline(this.InspectionProgram);
         Pass.setBindGroup(0, this.InspectionGroup);
         Pass.setBindGroup(1, DistanceGroup);
         Pass.setBindGroup(2, SamplingGroup);
+        Pass.setBindGroup(3, RayTracingGroup);
         Pass.dispatchWorkgroups(Math.ceil(this.ScreenExtent[0] / 8), Math.ceil(this.ScreenExtent[1] / 8));
         Pass.end();
     }

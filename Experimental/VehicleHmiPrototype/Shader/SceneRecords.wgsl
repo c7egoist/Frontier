@@ -59,11 +59,52 @@ const FeatureTemporalAntialias : u32 = 128u;
 const FeatureDirectShadow      : u32 = 256u;
 const FeatureAutoExposure      : u32 = 512u;
 const FeatureRadianceRefresh   : u32 = 1024u;
-const FeatureTemporalRestart      : u32 = 2048u;   // [-] set for one frame: every temporal history restarts
+const FeatureTemporalRestart   : u32 = 2048u;   // [-] set for one frame: every temporal history restarts
+const FeatureRayTracing        : u32 = 8192u;   // [-] RTX TLAS/BLAS multi-bounce ReSTIR path tracer
+const FeatureRayTracedShadows  : u32 = 16384u;  // [-] exact BVH visibility for solar cone & clustered IES lights
+const FeatureRussianRoulette      : u32 = 32768u;  // [-] throughput-weighted Russian roulette termination
+const FeatureFireflyFilter        : u32 = 65536u;  // [-] Jacobian & variance firefly/boiling suppression
+const FeatureMultiBounceNEE       : u32 = 131072u; // [-] Next-Event Estimation + RIS at secondary path vertices
+const FeatureRayTracedReflections : u32 = 262144u; // [-] exact TLAS/BLAS multi-bounce ray-traced reflections
 
 fn FeatureEnabled(Frame: FrameRecord, Bit: u32) -> bool
 {
     return (Frame.Features & Bit) != 0u;
+}
+
+fn ResolveMaxBounces(Frame: FrameRecord) -> u32
+{
+    let Encoded = (Frame.Features >> 20u) & 7u;
+    return select(Encoded, 3u, Encoded == 0u);
+}
+
+fn ResolveInitialCandidates(Frame: FrameRecord) -> u32
+{
+    let Encoded = (Frame.Features >> 24u) & 7u;
+    return select(Encoded, 2u, Encoded == 0u);
+}
+
+fn ResolveReflectionBounces(Frame: FrameRecord) -> u32
+{
+    let Encoded = (Frame.Features >> 28u) & 7u;
+    return select(Encoded, 2u, Encoded == 0u);
+}
+
+fn ResolveDistanceInspectionMode(Frame: FrameRecord) -> u32
+{
+    return Frame.DistanceInspection & 15u;
+}
+
+fn ResolveReflectionRoughness(Frame: FrameRecord) -> f32
+{
+    let Encoded = (Frame.DistanceInspection >> 8u) & 255u;
+    return select(0.80, f32(Encoded) / 255.0, Encoded > 0u);
+}
+
+fn ResolveReflectionScale(Frame: FrameRecord) -> f32
+{
+    let Encoded = (Frame.DistanceInspection >> 16u) & 0xFFFFu;
+    return select(1.0, max(f32(Encoded) - 1.0, 0.0) / 1000.0, Encoded > 0u);
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -93,6 +134,7 @@ const RoleDistance : u32 = 2u;
 const RoleCards    : u32 = 4u;
 const RoleDynamic  : u32 = 8u;
 const RoleFallback : u32 = 16u;   // card-less: FirstCard carries the packed albedo
+const RoleShredded : u32 = 32u;   // wheel whose tyre rubber is shredded; ray traversal passes through TyreFamily
 const NoMaterialOverride : u32 = 0xFFFFFFFFu;
 
 //------------------------------------------------------------------------------------------------------------------------

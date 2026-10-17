@@ -16,7 +16,7 @@ export class ResamplingSequence
         this.Shaders  = Shaders;
     }
 
-    async ConstructPrograms(FrameRecords, MaterialRecords, DistanceLayout, SamplingLayout)
+    async ConstructPrograms(FrameRecords, MaterialRecords, DistanceLayout, SamplingLayout, RayTracingLayout)
     {
         this.FrameRecords    = FrameRecords;
         this.MaterialRecords = MaterialRecords;
@@ -28,12 +28,13 @@ export class ResamplingSequence
             ["Uniform", "Texture2D", "TextureDepth2D", "StorageRead", "StorageTexture2D:rgba16float"], Compute, "Reservoir spatial");
         this.ReflectionLayout = this.Exchange.ConstructDescriptorLayout(
             ["Uniform", "StorageRead", "Texture2D", "TextureDepth2D", "StorageTexture2D:rgba16float"], Compute, "Reflection traversal");
+        const SharedLayouts = [DistanceLayout, SamplingLayout, RayTracingLayout];
         this.TemporalProgram   = await this.Shaders.ConstructComputeProgram("ReservoirTemporal.wgsl", "ResampleTemporal",
-                                                                            [this.TemporalLayout, DistanceLayout, SamplingLayout]);
+                                                                            [this.TemporalLayout, ...SharedLayouts]);
         this.SpatialProgram    = await this.Shaders.ConstructComputeProgram("ReservoirSpatial.wgsl", "ResampleSpatial",
-                                                                            [this.SpatialLayout, DistanceLayout, SamplingLayout]);
+                                                                            [this.SpatialLayout, ...SharedLayouts]);
         this.ReflectionProgram = await this.Shaders.ConstructComputeProgram("ReflectionTraversal.wgsl", "TraverseReflection",
-                                                                            [this.ReflectionLayout, DistanceLayout, SamplingLayout]);
+                                                                            [this.ReflectionLayout, ...SharedLayouts]);
     }
 
     ConstructTargets(TraceExtent, Surface)
@@ -62,12 +63,13 @@ export class ResamplingSequence
             [this.FrameRecords, this.MaterialRecords, Surface.Views.Attributes, Surface.Views.Depth, this.Views.Reflection]);
     }
 
-    RecordResampling(Encoder, Parity, DistanceGroup, SamplingGroup, TimestampWrites)
+    RecordResampling(Encoder, Parity, DistanceGroup, SamplingGroup, RayTracingGroup, TimestampWrites)
     {
         const [Width, Height] = this.TraceExtent;
         const Pass = Encoder.beginComputePass({ label: "ReSTIR GI", timestampWrites: TimestampWrites });
         Pass.setBindGroup(1, DistanceGroup);
         Pass.setBindGroup(2, SamplingGroup);
+        Pass.setBindGroup(3, RayTracingGroup);
         Pass.setPipeline(this.TemporalProgram);
         Pass.setBindGroup(0, this.TemporalGroups[Parity]);
         Pass.dispatchWorkgroups(Math.ceil(Width / 8), Math.ceil(Height / 8));
@@ -77,7 +79,7 @@ export class ResamplingSequence
         Pass.end();
     }
 
-    RecordReflection(Encoder, DistanceGroup, SamplingGroup, TimestampWrites)
+    RecordReflection(Encoder, DistanceGroup, SamplingGroup, RayTracingGroup, TimestampWrites)
     {
         const [Width, Height] = this.TraceExtent;
         const Pass = Encoder.beginComputePass({ label: "Reflection traversal", timestampWrites: TimestampWrites });
@@ -85,6 +87,7 @@ export class ResamplingSequence
         Pass.setBindGroup(0, this.ReflectionGroup);
         Pass.setBindGroup(1, DistanceGroup);
         Pass.setBindGroup(2, SamplingGroup);
+        Pass.setBindGroup(3, RayTracingGroup);
         Pass.dispatchWorkgroups(Math.ceil(Width / 8), Math.ceil(Height / 8));
         Pass.end();
     }

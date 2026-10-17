@@ -62,7 +62,7 @@ export class ChaseCameraSolver
         this.Target = [Position[0], Position[1], Position[2] + ChaseCameraConfiguration.LookAtHeight];
         const Widen = ClampScalar(Math.abs(Speed) / Math.max(1.0, ChaseCameraConfiguration.SpeedForFullFov), 0.0, 1.0);
         this.FieldOfView = ChaseCameraConfiguration.RestFieldOfView + ChaseCameraConfiguration.SpeedFieldOfView * Widen;
-        // User camera rotation is preserved without automatically springing back behind the car
+        this.OrbitYaw *= Math.exp(-0.35 * Δτ);
     }
 }
 

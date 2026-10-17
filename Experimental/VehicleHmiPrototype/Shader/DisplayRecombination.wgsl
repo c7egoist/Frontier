@@ -89,8 +89,9 @@ fn ResolveRecombination(@builtin(global_invocation_id) Invocation: vec3u)
     let View = normalize(Frame.CameraPosition - Position);
     let NdotV = max(dot(Normal, View), 1.0e-3);
 
-    // 📝 Inside the car's cabin the traced light is the body's own sunlit exterior seen from within: keep a twentieth.
-    let Enclosure = mix(1.0, CabinIndirectShare, ResolveCabinShare((Occupants[0].WorldToLocal * vec4f(Position, 1.0)).xyz));
+    // 📝 Inside the car's cabin: SDF volumes need 0.05 to counter self-hit, whereas RTX traces through real window openings.
+    let TargetCabinShare = select(CabinIndirectShare, 0.45, FeatureEnabled(Frame, FeatureRayTracing));
+    let Enclosure = mix(1.0, TargetCabinShare, ResolveCabinShare((Occupants[0].WorldToLocal * vec4f(Position, 1.0)).xyz));
     var Irradiance = vec3f(0.0);
     if (FeatureEnabled(Frame, FeatureIndirect))
     {
@@ -98,15 +99,19 @@ fn ResolveRecombination(@builtin(global_invocation_id) Invocation: vec3u)
     }
     let Diffuse = ResolveDiffuseAlbedo(Surface) * InversePi * Irradiance;
 
-    let GlossRoughness = select(Surface.Roughness, Surface.CoatRoughness, Surface.CoatWeight > 0.0);
-    let Reflection = textureLoad(ReflectionRadiance, Pixel, 0);
-    var Glossy = Irradiance * InversePi;
-    if (FeatureEnabled(Frame, FeatureReflection) && FeatureEnabled(Frame, FeatureIndirect))
+    let GlossRoughness   = select(Surface.Roughness, Surface.CoatRoughness, Surface.CoatWeight > 0.0);
+    let Reflection       = textureLoad(ReflectionRadiance, Pixel, 0);
+    var Glossy           = Irradiance * InversePi;
+    let UseRtReflections = FeatureEnabled(Frame, FeatureRayTracing) && FeatureEnabled(Frame, FeatureRayTracedReflections);
+    let Cutoff           = select(0.50, ResolveReflectionRoughness(Frame), UseRtReflections);
+    let FadeStart        = max(0.05, Cutoff - 0.18);
+    if (FeatureEnabled(Frame, FeatureReflection))
     {
-        Glossy = mix(Reflection.rgb * Frame.IndirectScale * Enclosure, Glossy, smoothstep(0.35, 0.5, GlossRoughness));
+        let ReflScale = select(1.0, Frame.IndirectScale, FeatureEnabled(Frame, FeatureIndirect)) * ResolveReflectionScale(Frame);
+        Glossy = mix(Reflection.rgb * ReflScale * Enclosure, Glossy, smoothstep(FadeStart, Cutoff, GlossRoughness));
     }
     let LayerResponse = ResolveEnvironmentResponse(NdotV, Surface.Roughness);
-    let LayerGlossy = select(Glossy, mix(Glossy, Irradiance * InversePi, smoothstep(0.3, 0.5, Surface.Roughness)), Surface.CoatWeight > 0.0);
+    let LayerGlossy = select(Glossy, mix(Glossy, Irradiance * InversePi, smoothstep(FadeStart - 0.05, Cutoff, Surface.Roughness)), Surface.CoatWeight > 0.0);
     var Indirect = Diffuse + LayerGlossy * (ResolveSpecularColour(Surface) * LayerResponse.x + LayerResponse.y);
     var Specular = LayerGlossy * (ResolveSpecularColour(Surface) * LayerResponse.x + LayerResponse.y);
     if (Surface.CoatWeight > 0.0)

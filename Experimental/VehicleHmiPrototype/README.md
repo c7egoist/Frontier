@@ -62,6 +62,23 @@ so scene exposure no longer bleaches its authored colours. Both brightness contr
 reach zero correctly; set the in-tablet and inspector brightness to 100% / 1 for
 normal viewing. Scene emission strength does not boost the UI.
 
+## RTX · Full ReSTIR GI Path Tracer (Default Render Mode)
+
+The default renderer is now **RTX · ReSTIR Path Tracer** (`RayTracing: true`, configurable in **Render settings → RTX · ReSTIR Path Tracer** or via `?renderer=rtx|gtx`):
+
+- **Two-Level BVH Acceleration Structure (`Source/RayTracingSpace.js` & `Shader/RayTraversal.wgsl`)**:
+  - **Bottom-Level Acceleration Structure (BLAS)**: Binned-SAH BVH (`LeafCapacity = 4`, 12 SAH bins) built over all 56 `FacetSets` (20,854 static/mesh triangles across `ControlVehicle` body/wheels/cabin/roof fixtures, the 3,664-triangle `Proving ground` course mesh, buildings, cones, breakables, stress objects, and street lamp poles/gantries) plus dynamic per-fragment BLAS leaves registered on the fly when breakable props shatter (`RegisterPropFragments`).
+  - **Top-Level Acceleration Structure (TLAS)**: Rebuilt every frame (`UpdateTlas`) over all active scene occupants using Binned-SAH, transforming rays into each occupant's local space (`WorldToLocal`) for exact Möller–Trumbore ray-triangle intersection, barycentric smooth vertex normal interpolation, transparent `VehicleGlass` pass-through, and shredded-tyre rubber bypass (`RoleShredded`) so rays strike the underlying metal wheel rim.
+- **Full Multi-Bounce Path Tracing (`TraceMultiBouncePath`)**:
+  - **Initial Candidate RIS**: Generates $M_{\text{init}}$ (default 2, up to 4) stratified low-discrepancy path candidates per pixel before temporal integration.
+  - **Two-Layer PBR BSDF Importance Sampling (`SampleSurfaceBsdf`)**: Importance-samples both the Heitz 2018 GGX Visible Normal Distribution Function (VNDF) specular/clearcoat lobe and the cosine-weighted Lambertian diffuse lobe with exact mixture PDF evaluation.
+  - **Next-Event Estimation (NEE) with Inline RIS (`EvaluateDirectNextEvent`)**: At every bounce vertex ($1 \dots B_{\max}$, default 3 bounces), evaluates soft solar cone shadow rays, active tyre-fire point lighting, and **Resampled Importance Sampling (RIS)** over all 32 clustered photometric / IES lights (roadway batwing street lamps, asymmetric low beams, collimated high beams, selective-yellow fog lights, and roof floodlights) with exact TLAS/BLAS shadow rays (`TraceSceneVisibility`).
+  - **Multiple Importance Sampling (MIS), Russian Roulette & Infinite-Bounce Tail**: Combines BSDF continuation with emissive hits via balance-heuristic MIS, applies throughput-weighted Russian Roulette termination (`FeatureRussianRoulette`), queries the surface-card radiosity cache beyond $B_{\max}$ for infinite-bounce energy conservation, and suppresses single-path outliers (`FeatureFireflyFilter`).
+- **Spatiotemporal ReSTIR GI Reuse & Multi-Bounce Ray-Traced Reflections / Direct Shadows**:
+  - **Temporal Reuse (`Shader/ReservoirTemporal.wgsl`)**: Motion-vector reprojection with rigid/dynamic occupant vertex carry (`CarryReservoirSample`), plane-distance geometric rejection, and exact BVH visibility validation.
+  - **Spatial Reuse (`Shader/ReservoirSpatial.wgsl`)**: Disk neighbor reservoir merging with the solid-angle reconnection-shift Jacobian $|\partial\omega_r / \partial\omega_q|$, `1/Z` pairwise/tally normalization, and adopted BVH visibility verification.
+  - **Multi-Bounce Ray-Traced Reflections & Direct Shadows (`Shader/ReflectionTraversal.wgsl`, `Shader/DisplayRecombination.wgsl`, `Shader/DirectRadiance.wgsl`)**: Traces 1–4 bounce GGX VNDF glossy and mirror reflection paths (`TraceMultiBounceReflection`, default `ReflectionBounces: 2`, configurable via `?reflbounces=1..4` or the **Ray-traced reflections** / **RTX · ReSTIR Path Tracer** inspector cards) across car paint, glass, mirrors, and wet asphalt with direct NEE + BVH shadow rays, surface-card GI, Fresnel/clearcoat continuation, and SVGF spatio-temporal reconstruction.
+
 ## Checks
 
 ```sh

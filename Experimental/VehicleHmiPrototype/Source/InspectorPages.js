@@ -21,12 +21,12 @@ import { AutomotiveMode, RoofFixtureType } from "./LightingSystem.js";
 
 export const InspectionModes = [
     ["Final image", 0], ["Direct sun only", 1], ["Indirect diffuse (GI)", 2], ["Indirect irradiance (denoised)", 3],
-    ["ReSTIR irradiance (raw, no denoise)", 4], ["Glossy reflections", 5], ["Global distance field", 6],
+    ["ReSTIR irradiance (raw, no denoise)", 4], ["Glossy reflections", 5], ["BVH / Distance-field inspection", 6],
     ["Surface cards (texel space)", 7], ["Normals", 8], ["Albedo", 9]
 ];
 
 export const DistanceInspections = [
-    ["Field normals · cascades · rewritten bricks", 1], ["Traversal step heat", 2], ["Surface cache as the tracer sees it", 3]
+    ["Triangle / field normals · dynamic objects", 1], ["BVH / SDF traversal step heat", 2], ["Ray-traced NEE / surface cache", 3]
 ];
 
 export const StressMotionOptions = [["Static", 0], ["One in ten", 1], ["All moving", 2]];
@@ -70,12 +70,14 @@ export function ConstructEntities(Host)
     const S = Host.Settings;
     const Entities = [
         { Id: "render", Group: "Render", Name: "Render settings", Type: "Renderer", Glyph: "Monitor", Colour: Accent.Render,
-          Description: "Resolution, final gather, reflections & debug views",
-          Meta: () => `${Host.GradeName}`, State: () => "live", Build: (C, B) => BuildRender(Host, C, B),
-          Switches: () => [Feature("Indirect", "Sparkles", S, "Indirect"), Feature("Reflections", "Aperture", S, "Reflection"),
-                           Feature("Denoiser", "Layers", S, "VarianceKernel"), Feature("TAA", "Scan", S, "Antialias")] },
-        { Id: "field", Group: "Render", Name: "Global distance field", Type: "Scene distance field", Glyph: "GridLattice", Colour: Accent.Render,
-          Description: "Four toroidal cascades rewritten by brick", Meta: () => `${Host.Grade.ClipResolution}³`,
+          Description: "RTX ReSTIR Path Tracer, resolution, reflections & debug views",
+          Meta: () => `${S.RayTracing ? "RTX · PT" : "GTX · SDF"} · ${Host.GradeName}`, State: () => "live", Build: (C, B) => BuildRender(Host, C, B),
+          Switches: () => [Feature("Raytracing", "Zap", S, "RayTracing"), Feature("Indirect", "Sparkles", S, "Indirect"),
+                           Feature("Reflections", "Aperture", S, "Reflection"), Feature("Denoiser", "Layers", S, "VarianceKernel"),
+                           Feature("TAA", "Scan", S, "Antialias")] },
+        { Id: "field", Group: "Render", Name: "BVH & distance field", Type: "Acceleration structures", Glyph: "GridLattice", Colour: Accent.Render,
+          Description: "Two-level BVH (TLAS + BLAS) & toroidal SDF cascades",
+          Meta: () => (S.RayTracing && Host.RayTracing ? `${Host.RayTracing.ActiveInstances} TLAS` : `${Host.Grade.ClipResolution}³`),
           State: () => (S.FreezeDistance ? "warm" : "live"), Build: (C, B) => BuildField(Host, C, B) },
         { Id: "cards", Group: "Render", Name: "Surface cache", Type: "Surface cards", Glyph: "LayoutGrid", Colour: Accent.Render,
           Description: "Card radiosity & relighting budget", Meta: () => `${Host.Cards.Cards.length}`, State: () => "live",
@@ -175,7 +177,31 @@ function GasSlider(C, Parent, Gas, Key, Labels = null)
 function BuildRender(Host, C, Body)
 {
     const S = Host.Settings;
-    const Quality = C.Card(Body, "Resolution & quality", "Monitor", { Accent: Accent.Render, Index: 1 });
+    const Arch = C.Card(Body, "RTX · ReSTIR Path Tracer", "Zap", { Accent: Accent.Render, Index: 1 });
+    C.Metric(Arch, () => (S.RayTracing ? `${S.MaxBounces}B GI · ${S.ReflectionBounces}B Refl · M=${S.InitialCandidates}` : "GTX SDF GI"), "", 0,
+             () => [S.RayTracing ? "RTX raytracing" : "GTX distance field", "live"]);
+    C.Muted(Arch, "Two-level BVH (TLAS over scene occupants + Binned-SAH BLAS per mesh) with multi-bounce BSDF importance sampling, RIS Next-Event Estimation, MIS, and Russian Roulette.");
+    C.Segmented(Arch, S, "RayTracing", [["RTX · ReSTIR Path Tracer", true], ["GTX · Distance-Field GI", false]], { Label: "Renderer architecture" });
+    Slider(C, Arch, S, "MaxBounces", "GI path bounces", 1, 4, 1, "", 0, ["1 bounce", "4 bounces"]);
+    Slider(C, Arch, S, "ReflectionBounces", "Reflection bounces", 1, 4, 1, "", 0, ["1 bounce", "4 bounces"]);
+    Slider(C, Arch, S, "InitialCandidates", "Initial RIS path candidates", 1, 4, 1, "", 0, ["Fast", "Low variance"]);
+    C.Switch(Arch, S, "RayTracedShadows", { Label: "Ray-traced direct & IES shadows", Detail: "Exact BVH visibility for sun cone, street lamps & headlights" });
+    C.Switch(Arch, S, "RayTracedReflections", { Label: "Ray-traced multi-bounce reflections", Detail: "GGX VNDF & mirror BVH reflections across car paint, glass & wet asphalt" });
+    C.Switch(Arch, S, "MultiBounceNEE", { Label: "Multi-bounce NEE + RIS", Detail: "Direct sun, fire & IES light sampling at secondary path vertices" });
+    C.Switch(Arch, S, "RussianRoulette", { Label: "Russian roulette termination", Detail: "Throughput-weighted unbiased path continuation" });
+    C.Switch(Arch, S, "FireflyFilter", { Label: "Firefly & boiling suppression", Detail: "Jacobian & luminance outlier clamp" });
+
+    const Refl = C.Card(Body, "Ray-traced reflections", "Aperture", { Accent: Accent.Render, Index: 2 });
+    C.Metric(Refl, () => (S.Reflection ? (S.RayTracing && S.RayTracedReflections ? `RTX · ${S.ReflectionBounces} bounce${S.ReflectionBounces > 1 ? "s" : ""}` : "GTX · SDF") : "Off"), "", 0,
+             () => [`rough ≤ ${(S.ReflectionRoughness ?? 0.80).toFixed(2)}`, S.Reflection ? "live" : "warm"]);
+    C.Muted(Refl, "Multi-bounce GGX VNDF glossy and mirror reflections traced against the Two-Level BVH with direct NEE, surface-card GI, and SVGF spatio-temporal reconstruction.");
+    C.Switch(Refl, S, "Reflection", { Label: "Enable glossy & mirror reflections", Detail: "Screen-space reflection target + exterior mirror glass" });
+    C.Switch(Refl, S, "RayTracedReflections", { Label: "Use RTX BVH reflection rays", Detail: "Exact triangle hits instead of SDF sphere-tracing" });
+    Slider(C, Refl, S, "ReflectionBounces", "Reflection bounces", 1, 4, 1, "", 0, ["Single bounce", "4 bounces"]);
+    Slider(C, Refl, S, "ReflectionScale", "Reflection intensity", 0, 3, 0.05, "×", 2);
+    Slider(C, Refl, S, "ReflectionRoughness", "Roughness cutoff", 0.15, 1.0, 0.05, "", 2, ["Mirror only", "All surfaces"]);
+
+    const Quality = C.Card(Body, "Resolution & quality", "Monitor", { Accent: Accent.Render, Index: 3 });
     C.Metric(Quality, () => (Host.ScreenExtent ? `${Host.ScreenExtent[0]}×${Host.ScreenExtent[1]}` : "–"), "px", 0,
              () => [`trace ${Host.TraceExtent ? Host.TraceExtent.join("×") : "–"}`, "live"]);
     C.Muted(Quality, "Render target after the scale and the pixel ceiling of the quality grade; ReSTIR GI and reflections trace at the trace resolution.");
@@ -183,7 +209,7 @@ function BuildRender(Host, C, Body)
     C.Segmented(Quality, S, "TraceScale", [["Full", 1], ["Half", 2], ["Quarter", 4]], { Label: "Trace resolution" });
     Slider(C, Quality, S, "RenderScale", "Render scale", 0.25, 2.0, 0.05, "×", 2, ["Faster", "Sharper"]);
 
-    const Gather = C.Card(Body, "Global illumination · ReSTIR", "Sparkles", { Accent: Accent.Render, Index: 2 });
+    const Gather = C.Card(Body, "Global illumination · ReSTIR", "Sparkles", { Accent: Accent.Render, Index: 4 });
     C.Switch(Gather, S, "TemporalReuse", { Label: "Temporal reuse", Detail: "Reservoirs carried through motion vectors" });
     C.Switch(Gather, S, "SpatialReuse", { Label: "Spatial reuse", Detail: "Neighbouring reservoirs merged per pixel" });
     C.Switch(Gather, S, "VisibilityReuse", { Label: "Visibility validation", Detail: "Reused samples re-traced for occlusion" });
@@ -193,25 +219,25 @@ function BuildRender(Host, C, Body)
     Slider(C, Gather, S, "TemporalTallyLimit", "Temporal M limit", 1, 40, 1, "", 0, ["Responsive", "Stable"]);
     Slider(C, Gather, S, "IndirectScale", "Indirect intensity", 0, 3, 0.05, "×", 2);
 
-    const Image = C.Card(Body, "Exposure & image", "Aperture", { Accent: Accent.Render, Index: 3 });
+    const Image = C.Card(Body, "Exposure & image", "Aperture", { Accent: Accent.Render, Index: 5 });
     C.Switch(Image, S, "AutoExposure", { Label: "Auto exposure" });
     Slider(C, Image, S, "ExposureCompensation", "Exposure compensation", -4, 4, 0.1, "EV", 1, ["Darker", "Brighter"]);
-    C.Switch(Image, S, "DirectShadow", { Label: "Sun shadows", Detail: "Cascaded shadow depth" });
-    C.Switch(Image, S, "Reflection", { Label: "Glossy reflections", Detail: "Distance-field traced, denoised" });
+    C.Switch(Image, S, "DirectShadow", { Label: "Sun shadows", Detail: "Ray-traced BVH cone or cascaded shadow depth" });
+    C.Switch(Image, S, "Reflection", { Label: "Glossy reflections", Detail: "BVH ray-traced or SDF-traced, SVGF denoised" });
     C.Switch(Image, S, "VarianceKernel", { Label: "Denoiser (SVGF)" });
     C.Switch(Image, S, "Antialias", { Label: "Temporal antialiasing", Detail: "Also resolves dithered tyre marks" });
 
-    const Debug = C.Card(Body, "Debug views", "Bug", { Accent: Accent.Render, Index: 4 });
+    const Debug = C.Card(Body, "Debug views", "Bug", { Accent: Accent.Render, Index: 6 });
     C.Select(Debug, S, "Inspection", InspectionModes, { Label: "Display" });
-    C.Select(Debug, S, "DistanceInspection", DistanceInspections, { Label: "Distance-field view" });
+    C.Select(Debug, S, "DistanceInspection", DistanceInspections, { Label: "BVH / SDF view" });
     C.Switch(Debug, S, "HudVisible", { Label: "Readout overlay", Detail: "H" });
     C.Switch(Debug, S, "InsetEnabled", { Label: "Distance slice inset", Detail: "J" });
     Slider(C, Debug, S, "SliceHeight", "Slice height", 0.05, 4.0, 0.05, "m", 2);
 
-    const Timing = C.Card(Body, "Frame timing", "Activity", { Accent: Accent.Render, Index: 5 });
+    const Timing = C.Card(Body, "Frame timing", "Activity", { Accent: Accent.Render, Index: 7 });
     C.Metric(Timing, () => 1.0 / Math.max(Host.FrameSeconds || 1, 1.0e-4), "fps", 0, () => [`1% low ${Host.LowRate || "–"}`, ""]);
     C.Stats(Timing, [["Frame", () => (Host.FrameSeconds || 0) * 1000.0, "ms", 1], ["Draw runs", () => Host.Scene.DrawRuns.length],
-                     ["Bricks / frame", () => Host.Distance.FrameBricks.length / 4]]);
+                     ["TLAS instances", () => (Host.RayTracing ? Host.RayTracing.ActiveInstances : 0)]]);
     C.Readout(Timing, () =>
     {
         if (!Host.Metrics.Enabled)
@@ -224,7 +250,17 @@ function BuildRender(Host, C, Body)
 function BuildField(Host, C, Body)
 {
     const S = Host.Settings;
-    const Field = C.Card(Body, "Cascades", "GridLattice", { Accent: Accent.Render, Index: 1 });
+    if (Host.RayTracing)
+    {
+        const Bvh = C.Card(Body, "Two-Level BVH (TLAS + BLAS)", "Zap", { Accent: Accent.Render, Index: 1 });
+        C.Metric(Bvh, () => Host.RayTracing.ActiveInstances, "instances", 0,
+                 () => [`${Host.RayTracing.TotalTriangles} triangles`, S.RayTracing ? "live" : "warm"]);
+        C.Stats(Bvh, [["TLAS nodes", () => Host.RayTracing.UsedTlasNodes],
+                      ["BLAS nodes", () => Math.max(0, Host.RayTracing.StaticNodeCount - 4608)],
+                      ["Triangles", () => Host.RayTracing.TotalTriangles]]);
+        C.Muted(Bvh, "TLAS is rebuilt over active occupants each frame; per-mesh Binned-SAH BLAS hierarchies are built at bring-up and extended dynamically on fracture.");
+    }
+    const Field = C.Card(Body, "Cascades", "GridLattice", { Accent: Accent.Render, Index: 2 });
     C.Metric(Field, () => Host.Distance.TotalBricks, "bricks", 0, () => [S.FreezeDistance ? "frozen" : "updating", S.FreezeDistance ? "warm" : "live"]);
     C.Muted(Field, "Bricks rewritten since start: scrolling windows and moving occupants only.");
     C.Switch(Field, S, "FreezeDistance", { Label: "Freeze field updates" });

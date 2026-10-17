@@ -11,6 +11,7 @@
 //! include "SurfaceReflectance.wgsl"
 //! include "PackingCodec.wgsl"
 //! include "DiscrepancySequence.wgsl"
+//! include "RayTraversal.wgsl"
 
 @group(0) @binding(1) var<storage, read> Materials : array<MaterialRecord>;
 @group(0) @binding(2) var SurfaceAttributes        : texture_2d<f32>;
@@ -18,22 +19,6 @@
 @group(0) @binding(4) var ReflectionTarget         : texture_storage_2d<rgba16float, write>;
 
 const RoughnessCutoff : f32 = 0.5;
-
-// 📐 Heitz 2018, "Sampling the GGX Distribution of Visible Normals"; view in tangent space, α = roughness².
-fn ProjectVisibleNormal(View: vec3f, α: f32, Pair: vec2f) -> vec3f
-{
-    let Stretched = normalize(vec3f(α * View.x, α * View.y, View.z));
-    let LengthSquared = Stretched.x * Stretched.x + Stretched.y * Stretched.y;
-    let T1 = select(vec3f(1.0, 0.0, 0.0), vec3f(-Stretched.y, Stretched.x, 0.0) * inverseSqrt(LengthSquared), LengthSquared > 0.0);
-    let T2 = cross(Stretched, T1);
-    let Radius = sqrt(Pair.x);
-    let φ = 2.0 * Pi * Pair.y;
-    let P1 = Radius * cos(φ);
-    let Interpolant = 0.5 * (1.0 + Stretched.z);
-    let P2 = mix(sqrt(max(0.0, 1.0 - P1 * P1)), Radius * sin(φ), Interpolant);
-    let Hemisphere = P1 * T1 + P2 * T2 + sqrt(max(0.0, 1.0 - P1 * P1 - P2 * P2)) * Stretched;
-    return normalize(vec3f(α * Hemisphere.x, α * Hemisphere.y, max(0.0, Hemisphere.z)));
-}
 
 @compute @workgroup_size(8, 8)
 fn TraverseReflection(@builtin(global_invocation_id) Invocation: vec3u)
@@ -53,7 +38,9 @@ fn TraverseReflection(@builtin(global_invocation_id) Invocation: vec3u)
     let Attributes = textureLoad(SurfaceAttributes, ScreenPixel, 0);
     let Surface = ProjectSurfaceSample(Materials[u32(Attributes.z + 0.5)]);
     let Roughness = select(Surface.Roughness, Surface.CoatRoughness, Surface.CoatWeight > 0.0);
-    if (Roughness > RoughnessCutoff)
+    let UseRtReflections = FeatureEnabled(Frame, FeatureRayTracing) && FeatureEnabled(Frame, FeatureRayTracedReflections);
+    let Cutoff = select(RoughnessCutoff, ResolveReflectionRoughness(Frame), UseRtReflections);
+    if (Roughness > Cutoff)
     {
         textureStore(ReflectionTarget, vec2i(TracePixel), vec4f(0.0));
         return;
@@ -70,8 +57,18 @@ fn TraverseReflection(@builtin(global_invocation_id) Invocation: vec3u)
     {
         Direction = reflect(-View, Normal);
     }
-    let Bias = ResolveSurfaceBias(Position);
-    let Hit = TraverseSceneDistance(Position + Normal * Bias, Direction, 0.5 * Bias, 300.0, Roughness * 0.05);
-    let Radiance = ResolveTraversalRadiance(Hit, Direction);
+
+    var Radiance = vec3f(0.0);
+    if (UseRtReflections)
+    {
+        var Seed = ConstructPixelSeed(TracePixel, Frame.FrameIndex, 41u);
+        Radiance = TraceMultiBounceReflection(Position + Normal * RayEpsilon, Direction, Roughness, &Seed);
+    }
+    else
+    {
+        let Bias = ResolveSurfaceBias(Position);
+        let Hit  = TraverseSceneDistance(Position + Normal * Bias, Direction, 0.5 * Bias, 300.0, Roughness * 0.05);
+        Radiance = ResolveTraversalRadiance(Hit, Direction);
+    }
     textureStore(ReflectionTarget, vec2i(TracePixel), vec4f(min(Radiance, vec3f(200.0)), 1.0));
 }

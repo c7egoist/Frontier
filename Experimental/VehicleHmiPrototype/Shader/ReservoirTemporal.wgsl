@@ -16,6 +16,7 @@
 //! include "CardSampling.wgsl"
 //! include "ReservoirRecords.wgsl"
 //! include "DiscrepancySequence.wgsl"
+//! include "RayTraversal.wgsl"
 
 @group(0) @binding(1) var SurfaceAttributes                   : texture_2d<f32>;
 @group(0) @binding(2) var SurfaceDepth                        : texture_depth_2d;
@@ -54,6 +55,10 @@ fn RefreshSampleRadiance(Sample: ReservoirSample) -> vec3f
     {
         return SampleSkyRadiance(-Sample.Normal);
     }
+    if (FeatureEnabled(Frame, FeatureRayTracing))
+    {
+        return Sample.Radiance;
+    }
     let Level = ResolveFinestClip(Sample.Position, 1.0);
     let Card = SampleCardRadiance(Sample.Position, Sample.Normal, Sample.Identity, ResolveCardTolerance(Level));
     return select(Sample.Radiance, Card.rgb, Card.w > 0.0);
@@ -87,31 +92,54 @@ fn ResampleTemporal(@builtin(global_invocation_id) Invocation: vec3u)
     textureStore(GuideTarget, vec2i(TracePixel), vec4f(EncodeOctahedral(Normal), ViewDepth, 1.0 + ExpectedDepth));
     var Seed = ConstructPixelSeed(TracePixel, Frame.FrameIndex, 11u);
 
-    // ② initial candidate through the scene distance field
-    let Pair      = ProjectTemporalPair(TracePixel, Frame.FrameIndex, 3u);
-    let Direction = ConstructTangentFrame(Normal) * ProjectCosineHemisphere(Pair);
-    let Bias      = ResolveSurfaceBias(Position);
-    let Hit       = TraverseSceneDistance(Position + Normal * Bias, Direction, 0.5 * Bias, 300.0, 0.0);
-    var Candidate: ReservoirSample;
-    if (Hit.Hit)
+    // ② initial candidate generation (RIS over M_init multi-bounce paths in RTX mode, or scene distance field in GTX mode)
+    let Bias         = ResolveSurfaceBias(Position);
+    let Basis        = ConstructTangentFrame(Normal);
+    let UseRayTrace  = FeatureEnabled(Frame, FeatureRayTracing);
+    let InitialCount = select(1u, ResolveInitialCandidates(Frame), UseRayTrace);
+    var Current      = ConstructEmptyReservoir();
+
+    for (var CandIdx = 0u; CandIdx < InitialCount; CandIdx += 1u)
     {
-        Candidate.Position = Hit.Position;
-        Candidate.Normal   = Hit.Normal;
-        Candidate.Identity = Hit.Identity;
-        Candidate.Radiance = ResolveTraversalRadiance(Hit, Direction);
+        let Pair      = ProjectTemporalPair(TracePixel, Frame.FrameIndex + CandIdx * 37u, 3u + CandIdx * 2u);
+        let Direction = Basis * ProjectCosineHemisphere(Pair);
+        var Candidate : ReservoirSample;
+        if (UseRayTrace)
+        {
+            Candidate = TraceMultiBouncePath(Position + Normal * RayEpsilon, Direction, &Seed);
+        }
+        else
+        {
+            let Hit = TraverseSceneDistance(Position + Normal * Bias, Direction, 0.5 * Bias, 300.0, 0.0);
+            if (Hit.Hit)
+            {
+                Candidate.Position = Hit.Position;
+                Candidate.Normal   = Hit.Normal;
+                Candidate.Identity = Hit.Identity;
+                Candidate.Radiance = ResolveTraversalRadiance(Hit, Direction);
+            }
+            else
+            {
+                Candidate.Position = Position + Direction * SkyReach;
+                Candidate.Normal   = -Direction;
+                Candidate.Identity = SkyIdentity;
+                Candidate.Radiance = SampleSkyRadiance(Direction);
+            }
+        }
+        let Cosine        = max(dot(Normal, Direction), 0.0);
+        let SourcePdf     = Cosine * InversePi;
+        let InitialWeight = select(0.0, ResolveLuminance(Candidate.Radiance) * Cosine / SourcePdf, SourcePdf > 1.0e-6);
+        MergeReservoir(&Current, Candidate, InitialWeight, 1.0, AdvanceUniform(&Seed));
     }
-    else
+
+    if (InitialCount > 1u && Current.Tally > 0.0)
     {
-        Candidate.Position = Position + Direction * SkyReach;
-        Candidate.Normal   = -Direction;
-        Candidate.Identity = SkyIdentity;
-        Candidate.Radiance = SampleSkyRadiance(Direction);
+        let InitTarget    = ResolveReservoirTarget(Current.Sample, Position, Normal);
+        let InitW         = select(0.0, Current.WeightSum / (Current.Tally * InitTarget), InitTarget > 0.0);
+        Current.WeightSum = InitTarget * InitW;
+        Current.Weight    = InitW;
+        Current.Tally     = 1.0;
     }
-    let Cosine    = max(dot(Normal, Direction), 0.0);
-    let SourcePdf = Cosine * InversePi;
-    var Current   = ConstructEmptyReservoir();
-    let InitialWeight = select(0.0, ResolveLuminance(Candidate.Radiance) * Cosine / SourcePdf, SourcePdf > 1.0e-6);
-    MergeReservoir(&Current, Candidate, InitialWeight, 1.0, AdvanceUniform(&Seed));
 
     // ③ temporal reuse
     if (FeatureEnabled(Frame, FeatureTemporalReuse))
@@ -141,8 +169,17 @@ fn ResampleTemporal(@builtin(global_invocation_id) Invocation: vec3u)
                     {
                         let Toward = Reused.Position - Position;
                         let Length = length(Toward);
-                        let Reach = select(Length - 2.0 * ResolveSurfaceBias(Reused.Position), 300.0, Reused.Identity == SkyIdentity);
-                        let Visible = TraverseSceneVisibility(Position + Normal * Bias, Toward / Length, 0.5 * Bias, max(Reach, 0.0));
+                        var Visible = 1.0;
+                        if (UseRayTrace)
+                        {
+                            let Reach = select(Length - 3.0 * RayEpsilon, 400.0, Reused.Identity == SkyIdentity);
+                            Visible   = TraceSceneVisibility(Position + Normal * RayEpsilon, Toward / max(Length, 1.0e-4), RayEpsilon, max(Reach, 0.0));
+                        }
+                        else
+                        {
+                            let Reach = select(Length - 2.0 * ResolveSurfaceBias(Reused.Position), 300.0, Reused.Identity == SkyIdentity);
+                            Visible   = TraverseSceneVisibility(Position + Normal * Bias, Toward / max(Length, 1.0e-4), 0.5 * Bias, max(Reach, 0.0));
+                        }
                         Target *= Visible;
                     }
                     let Tally = min(Prior.Tally, Frame.TemporalTallyLimit);
