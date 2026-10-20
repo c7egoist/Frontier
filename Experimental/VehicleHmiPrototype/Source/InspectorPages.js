@@ -302,6 +302,24 @@ function BuildSun(Host, C, Body)
     Slider(C, Intensity, S, "SolarIlluminance", "Solar intensity", 1, 30, 0.5, "", 1);
     Slider(C, Intensity, S, "SkyScale", "Sky intensity", 0, 3, 0.05, "×", 2);
     Slider(C, Intensity, S, "EmissionScale", "Emitters (lamps, flames)", 0, 4, 0.05, "×", 2);
+
+    if (Host.Lighting)
+    {
+        const Cluster = C.Card(Body, "3D Clustered Lighting", "Sparkles", { Accent: Accent.Environment, Index: 4 });
+        C.Metric(Cluster, () => Host.Lighting.Lights.length, "active lights", 0,
+                 () => [`${Host.Lighting.ActiveClusterCells}/1024 cells`, Host.Lighting.CullEnabled ? "live" : "warm"]);
+        C.Stats(Cluster, [
+            ["Point lights", () => Host.Lighting.Lights.filter((L) => L.Type === 0).length],
+            ["Street lamps", () => Host.Lighting.Lights.filter((L) => L.Type === 1).length],
+            ["Vehicle beams", () => Host.Lighting.Lights.filter((L) => L.Type >= 2).length]
+        ]);
+        C.Muted(Cluster, "16×16×4 3D spatial grid with 64-bit per-cell light bitmasks and hardware firstTrailingBit traversal alongside emissive surface cards.");
+        C.Switch(Cluster, Host.Lighting, "CullEnabled", {
+            Label: "3D cluster bitmask culling",
+            Detail: "Skip out-of-range lights per 3D cell across Direct, Card & Path passes",
+            OnChange: () => { Host.Cards?.InvalidateLighting(); Host.PriorValid = false; }
+        });
+    }
 }
 
 function DrawSunArc(Context, Width, Height, Elevation, Azimuth)

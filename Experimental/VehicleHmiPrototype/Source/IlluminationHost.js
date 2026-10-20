@@ -234,8 +234,12 @@ class IlluminationHost
         this.RayTracing = new RayTracingSpace(this.Exchange);
         this.RayTracing.ConstructResources(this.Scene, this.MaterialRecords, this.LightRecords);
 
-        this.StreetLampPoles = ResolveLevelPlacements()
+        const LevelPlacements = ResolveLevelPlacements();
+        this.StreetLampPoles = LevelPlacements
             .filter((P) => P.Shape === "PoleHead")
+            .map((P) => ({ X: P.Position[0], Y: P.Position[1], Z: P.Position[2] }));
+        this.PointLampPosts = LevelPlacements
+            .filter((P) => P.Shape === "LampLantern")
             .map((P) => ({ X: P.Position[0], Y: P.Position[1], Z: P.Position[2] }));
         this.Constants = {
             MaximumTraversalSteps: { Type: "u32", Value: this.Grade.Steps },
@@ -1148,7 +1152,7 @@ class IlluminationHost
 
         if (this.Lighting && this.LightRecords)
         {
-            const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), this.StreetLampPoles);
+            const LightData = this.Lighting.Update(this.Vehicle.QueryBodyTransform(), this.StreetLampPoles, this.PointLampPosts);
             Device.queue.writeBuffer(this.LightRecords, 0, LightData);
         }
         if (this.RayTracing)

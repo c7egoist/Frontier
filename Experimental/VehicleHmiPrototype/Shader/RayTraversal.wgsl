@@ -24,7 +24,7 @@ struct BoundingNode
 @group(3) @binding(0) var<storage, read> BvhNodes     : array<BoundingNode>;
 @group(3) @binding(1) var<storage, read> BvhTriangles : array<vec4f>;
 @group(3) @binding(2) var<storage, read> RayMaterials : array<MaterialRecord>;
-@group(3) @binding(3) var<uniform> RayLights          : array<LightRecord, 32>;
+@group(3) @binding(3) var<uniform> RayLights          : ClusteredLightBuffer;
 
 const TlasLeafBit        : u32 = 0x80000000u;
 const TlasIndexMask      : u32 = 0x7FFFFFFFu;
@@ -581,53 +581,66 @@ fn EvaluateDirectNextEvent(
         Direct += Fire.Illuminance * ResolveDirectReflectance(Surface, Normal, View, Fire.Direction) * Pi;
     }
 
-    // 3. Inline RIS over Clustered Photometric / IES Lights (street lamps, headlights, fog beams, roof floodlights)
-    var SelectedContrib = vec3f(0.0);
-    var SelectedDir     = vec3f(0.0, 0.0, 1.0);
-    var SelectedDist    = 0.0;
-    var SelectedWeight  = 0.0;
-    var WeightSum       = 0.0;
-
-    for (var LightIdx = 0u; LightIdx < 32u; LightIdx += 1u)
+    // 3. Inline RIS over 3D Clustered Lights (point lights, roadway IES street lamps, headlights, fog & roof beams)
+    let CellIdx = ResolveClusterCellIndex(RayLights.GridMinimum, RayLights.GridScale, Position);
+    if (CellIdx != -1)
     {
-        let Light = RayLights[LightIdx];
-        if (Light.Params.w < 0.5)
+        let Pair  = RayLights.CellMasks[u32(max(CellIdx, 0)) >> 1u];
+        let Mask2 = ResolveClusterMaskFromPair(CellIdx, Pair, RayLights.GridMinimum.w);
+        if ((Mask2.x | Mask2.y) != 0u)
         {
-            break;
-        }
-        let Arrival = EvaluateLightArrival(Light, Position, Normal);
-        if (all(Arrival <= vec3f(1.0e-5)))
-        {
-            continue;
-        }
-        let Toward  = Light.PositionType.xyz - Position;
-        let Dist    = length(Toward);
-        let LDir    = Toward / max(Dist, 1.0e-4);
-        let Contrib = Arrival * ResolveDirectReflectance(Surface, Normal, View, LDir) * Pi;
-        let Weight  = ResolveLuminance(Contrib);
-        if (Weight <= 1.0e-5)
-        {
-            continue;
-        }
-        WeightSum += Weight;
-        if (AdvanceUniform(Seed) * WeightSum < Weight)
-        {
-            SelectedContrib = Contrib;
-            SelectedDir     = LDir;
-            SelectedDist    = Dist;
-            SelectedWeight  = Weight;
-        }
-    }
+            var SelectedContrib = vec3f(0.0);
+            var SelectedDir     = vec3f(0.0, 0.0, 1.0);
+            var SelectedDist    = 0.0;
+            var SelectedWeight  = 0.0;
+            var WeightSum       = 0.0;
 
-    if (SelectedWeight > 0.0)
-    {
-        var LightVis = 1.0;
-        if (TraceShadows)
-        {
-            LightVis = TraceSceneVisibility(Origin, SelectedDir, RayEpsilon, max(SelectedDist - 0.08, RayEpsilon));
+            for (var Word = 0u; Word < 2u; Word += 1u)
+            {
+                var Mask = select(Mask2.x, Mask2.y, Word == 1u);
+                let Base = Word * 32u;
+                while (Mask != 0u)
+                {
+                    let Bit     = firstTrailingBit(Mask);
+                    Mask       &= Mask - 1u;
+                    let Light   = RayLights.Lights[Base + Bit];
+                    let Arrival = EvaluateLightIlluminance(Light, Position, Normal);
+                    if (all(Arrival <= vec3f(1.0e-5)))
+                    {
+                        continue;
+                    }
+                    let Toward  = Light.PositionType.xyz - Position;
+                    let Dist    = length(Toward);
+                    let LDir    = Toward / max(Dist, 1.0e-4);
+                    let Contrib = Arrival * ResolveDirectReflectance(Surface, Normal, View, LDir) * Pi;
+                    let Weight  = ResolveLuminance(Contrib);
+                    if (Weight <= 1.0e-5)
+                    {
+                        continue;
+                    }
+                    WeightSum += Weight;
+                    if (AdvanceUniform(Seed) * WeightSum < Weight)
+                    {
+                        SelectedContrib = Contrib;
+                        SelectedDir     = LDir;
+                        SelectedDist    = Dist;
+                        SelectedWeight  = Weight;
+                    }
+                }
+            }
+
+            if (SelectedWeight > 0.0)
+            {
+                var LightVis = 1.0;
+                let SunLum   = ResolveLuminance(Frame.SunIlluminance);
+                if (TraceShadows && WeightSum > 0.12 + 0.03 * SunLum)
+                {
+                    LightVis = TraceSceneVisibility(Origin, SelectedDir, RayEpsilon, max(SelectedDist - 0.65, RayEpsilon));
+                }
+                let RisWeight = WeightSum / SelectedWeight;
+                Direct += SelectedContrib * LightVis * RisWeight;
+            }
         }
-        let RisWeight = WeightSum / SelectedWeight;
-        Direct += SelectedContrib * LightVis * RisWeight;
     }
 
     return Direct;

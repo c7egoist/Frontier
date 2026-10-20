@@ -6,7 +6,7 @@ import {
     RoofFixtureType,
     AutomotiveMode,
     MaxSceneLights,
-    LightRecordFloats,
+    LightBufferFloats,
     ConstructRoofFixtureFacets
 } from "../Source/LightingSystem.js";
 import { ResolveLevelPlacements } from "../Source/LevelStructure.js";
@@ -37,7 +37,7 @@ test("LightingSystem manages automotive light modes and roof fixtures correctly"
     assert.equal(sys.RoofFixture, RoofFixtureType.SlimLED);
 });
 
-test("LightingSystem packs street lamps and automotive headlights without buffer overflow", () => {
+test("LightingSystem packs street lamps, point lights, automotive headlights, and 16x16x4 3D cluster bitmasks", () => {
     const sys = new LightingSystem();
     const placements = ResolveLevelPlacements();
     const poles = placements.filter(p => p.Shape === "PoleHead").map(p => ({
@@ -45,39 +45,66 @@ test("LightingSystem packs street lamps and automotive headlights without buffer
         Y: p.Position[1],
         Z: p.Position[2]
     }));
+    const pointLamps = placements.filter(p => p.Shape === "LampLantern").map(p => ({
+        X: p.Position[0],
+        Y: p.Position[1],
+        Z: p.Position[2]
+    }));
     assert.equal(poles.length, 20);
+    assert.equal(pointLamps.length, 10);
 
     const vehicleTransform = ConstructIdentityTransform();
-    const buffer = sys.Update(vehicleTransform, poles);
+    const buffer = sys.Update(vehicleTransform, poles, pointLamps);
 
-    assert.equal(buffer.length, MaxSceneLights * LightRecordFloats);
+    assert.equal(buffer.length, LightBufferFloats);
     assert.ok(sys.Lights.length <= MaxSceneLights);
+    assert.ok(sys.ActiveClusterCells > 0);
+    assert.ok(sys.ActiveClusterCells < 1024);
 
     // Street lamps check
     const streetLamps = sys.Lights.filter(l => l.Type === LightType.StreetLamp);
-    assert.ok(streetLamps.length > 0);
-    assert.equal(streetLamps[0].Direction[2], -1.0); // Downward photometric orientation
+    assert.equal(streetLamps.length, 20);
+    assert.equal(streetLamps[0].Direction[2], -1.0);
+
+    // Clustered omnidirectional point lights check
+    const omniLights = sys.Lights.filter(l => l.Type === LightType.Omni);
+    assert.equal(omniLights.length, 10);
 
     // Headlights check (Low beam default)
     const lowBeams = sys.Lights.filter(l => l.Type === LightType.LowBeam);
     assert.equal(lowBeams.length, 2);
 
+    // Verify 3D cluster culling: start grid cell (-38, 0, 1.0) contains nearby point lights, not east-arena poles
+    const [maskLoStart, maskHiStart] = sys.QueryClusterMask(-38.0, 0.0, 1.0);
+    assert.ok((maskLoStart | maskHiStart) !== 0);
+    // Point light 0 at (-38, 7.78, 5.0) is light index 20 -> bit 20 in maskLo
+    assert.ok((maskLoStart & (1 << 20)) !== 0);
+    // East arena pole 19 at (145, 24, 10.55) is light index 19 -> must be culled (0) at X = -38
+    assert.equal(maskLoStart & (1 << 19), 0);
+
+    // Verify cone culling: vehicle at origin (0, 0, 0) facing +X should not assign low-beam bits to cells behind it (-40, 0, 1)
+    const lowBeamIdx0 = sys.Lights.findIndex(l => l.Type === LightType.LowBeam);
+    assert.ok(lowBeamIdx0 >= 0 && lowBeamIdx0 < 32);
+    const [maskLoAhead] = sys.QueryClusterMask(20.0, 0.0, 1.0);
+    assert.ok((maskLoAhead & (1 << lowBeamIdx0)) !== 0);
+    assert.equal(maskLoStart & (1 << lowBeamIdx0), 0);
+
     // Switch to High beam
     sys.SetVehicleMode(AutomotiveMode.HighBeam);
-    sys.Update(vehicleTransform, poles);
+    sys.Update(vehicleTransform, poles, pointLamps);
     const highBeams = sys.Lights.filter(l => l.Type === LightType.HighBeam);
     assert.equal(highBeams.length, 2);
 
     // Enable roof light
     sys.ToggleRoofLight();
     sys.SetRoofFixture(RoofFixtureType.SlimLED);
-    sys.Update(vehicleTransform, poles);
+    sys.Update(vehicleTransform, poles, pointLamps);
     const slimFloods = sys.Lights.filter(l => l.Type === LightType.Floodlight);
     assert.equal(slimFloods.length, 1);
 
     // Switch to Rally pods
     sys.SetRoofFixture(RoofFixtureType.RallyPod);
-    sys.Update(vehicleTransform, poles);
+    sys.Update(vehicleTransform, poles, pointLamps);
     const rallyFloods = sys.Lights.filter(l => l.Type === LightType.Floodlight);
     assert.equal(rallyFloods.length, 2);
 });

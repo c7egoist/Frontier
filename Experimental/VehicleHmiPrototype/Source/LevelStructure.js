@@ -57,6 +57,10 @@ export const LevelShapes = Object.freeze({
     PoleHead:     { Emit: () => EmitBoxFacets(1.8, 0.6, 0.3, CourseMaterial.SteelDark,
                                               [CourseMaterial.SteelDark, CourseMaterial.LampWarm, CourseMaterial.SteelDark,
                                                CourseMaterial.SteelDark, CourseMaterial.SteelDark, CourseMaterial.SteelDark]), Voxel: 0.05, Cards: 16 },
+    LampPost:     { Emit: () => EmitBoxFacets(0.20, 0.20, 5.4, CourseMaterial.SteelDark), Voxel: 0.20, Cards: 0, Distance: false },
+    LampLantern:  { Emit: () => EmitBoxFacets(0.60, 0.42, 0.24, CourseMaterial.SteelDark,
+                                              [CourseMaterial.SteelDark, CourseMaterial.LampWarm, CourseMaterial.SteelDark,
+                                               CourseMaterial.SteelDark, CourseMaterial.SteelDark, CourseMaterial.SteelDark]), Voxel: 0.08, Cards: 0, Distance: false },
     FramePost:    { Emit: () => EmitBoxFacets(0.12, 0.12, 2.3, CourseMaterial.SteelDark), Voxel: 0.1, Cards: 0, Distance: false },
     TrafficPost:  { Emit: () => EmitBoxFacets(0.16, 0.16, 3.8, CourseMaterial.SteelDark), Voxel: 0.1, Cards: 0, Distance: false },
     TrafficHead:  { Emit: () => EmitTrafficHeadFacets(), Voxel: 0.05, Cards: 8 },
@@ -69,7 +73,7 @@ export const LevelShapes = Object.freeze({
 
 // 📝 Shapes the car collides with (as world boxes)
 const ColliderShapes = new Set(["HangarPanel", "HangarAccent", "Cabinet", "Container40", "Container20", "TunnelWall",
-                                "Tower", "Jersey", "TyreStack", "Pole", "FramePost", "TrafficPost", "TyreBarrier", "GantryPost"]);
+                                "Tower", "Jersey", "TyreStack", "Pole", "LampPost", "FramePost", "TrafficPost", "TyreBarrier", "GantryPost"]);
 
 //------------------------------------------------------------------------------------------------------------------------
 //                                                    PLACEMENTS
@@ -186,6 +190,26 @@ export function ResolveLevelPlacements()
         Place("Pole", `Light pole ${Index}`, X, Y);
         const Angle = Facing * Degrees;
         Place("PoleHead", `Light pole head ${Index}`, X + 0.7 * Math.cos(Angle), Y + 0.7 * Math.sin(Angle), 10.8, Angle);
+    });
+
+    // ⑨ Point-Light Lamp Posts (Omnidirectional Clustered Point Lights along start straight, apron, burnout & smash alley)
+    const PointLampPosts = [
+        [-38.0,   8.2, -90.0], // Start grid North-West
+        [-38.0,  -8.2,  90.0], // Start grid South-West
+        [-22.0,   8.2, -90.0], // Launch straight North
+        [-22.0,  -8.2,  90.0], // Launch straight South
+        [ -6.0,   8.2, -90.0], // Mid straight North (before ramp)
+        [ -6.0,  -8.2,  90.0], // Mid straight South (before ramp)
+        [ 19.0,  28.5,   0.0], // Hangar West apron
+        [ 49.0,  28.5, 180.0], // Hangar East apron
+        [-38.0, -18.0, -90.0], // Burnout box perimeter
+        [ 12.0, -18.0, -90.0]  // Smash alley corridor
+    ];
+    PointLampPosts.forEach(([X, Y, Facing], Index) =>
+    {
+        Place("LampPost", `Point lamp post ${Index}`, X, Y);
+        const Angle = Facing * Degrees;
+        Place("LampLantern", `Point lamp lantern ${Index}`, X + 0.42 * Math.cos(Angle), Y + 0.42 * Math.sin(Angle), 5.35, Angle);
     });
 
     return List;

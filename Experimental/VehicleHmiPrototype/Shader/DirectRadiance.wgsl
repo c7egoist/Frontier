@@ -26,8 +26,8 @@ struct CascadeReceiver
 @group(0) @binding(6) var<uniform> Receiver            : CascadeReceiver;
 @group(0) @binding(7) var DirectSkyView                : texture_2d<f32>;
 @group(0) @binding(8) var DirectSkySampler             : sampler;
-@group(0) @binding(9) var DirectTarget                 : texture_storage_2d<rgba16float, write>;
-@group(0) @binding(10) var<storage, read> SceneLights  : array<LightRecord>;
+@group(0) @binding(9)  var DirectTarget       : texture_storage_2d<rgba16float, write>;
+@group(0) @binding(10) var<storage, read> SceneLights : ClusteredLightBuffer;
 
 // 📐 3×3 percentage-closer taps, each a hardware bilinear comparison, after a normal offset of 1.5 texels.
 fn ResolveCascadeVisibility(Position: vec3f, Normal: vec3f) -> f32
@@ -121,27 +121,56 @@ fn IntegrateDirectRadiance(@builtin(global_invocation_id) Invocation: vec3u)
         Radiance += Fire.Illuminance * ResolveDirectReflectance(Surface, Normal, View, Fire.Direction);
     }
 
-    // Clustered light evaluations with photometric / IES profiles and optional BVH ray-traced shadows
-    let NumLights = arrayLength(&SceneLights);
-    for (var i = 0u; i < NumLights; i++)
+    // 3D Clustered light evaluations (bitmask-culled point lights, roadway IES street lamps, and vehicle beams)
+    let CellIdx = ResolveClusterCellIndex(SceneLights.GridMinimum, SceneLights.GridScale, Position);
+    if (CellIdx != -1)
     {
-        let Light = SceneLights[i];
-        if (Light.Params.w < 0.5)
+        let Pair  = SceneLights.CellMasks[u32(max(CellIdx, 0)) >> 1u];
+        let Mask2 = ResolveClusterMaskFromPair(CellIdx, Pair, SceneLights.GridMinimum.w);
+        if ((Mask2.x | Mask2.y) != 0u)
         {
-            break;
-        }
-        let LightIllum = EvaluateLightArrival(Light, Position, Normal);
-        if (any(LightIllum > vec3f(0.0)))
-        {
-            let Offset      = Light.PositionType.xyz - Position;
-            let LightDist   = length(Offset);
-            let TowardLight = Offset / max(LightDist, 1.0e-4);
-            var LightVis    = 1.0;
-            if (UseRtShadows)
+            var ClusterRad  = vec3f(0.0);
+            var BestContrib = vec3f(0.0);
+            var BestDir     = vec3f(0.0, 0.0, 1.0);
+            var BestDist    = 0.0;
+            var BestLum     = 0.0;
+
+            for (var Word = 0u; Word < 2u; Word += 1u)
             {
-                LightVis = TraceSceneVisibility(RayOrigin, TowardLight, RayEpsilon, max(LightDist - 0.08, RayEpsilon));
+                var Mask = select(Mask2.x, Mask2.y, Word == 1u);
+                let Base = Word * 32u;
+                while (Mask != 0u)
+                {
+                    let Bit   = firstTrailingBit(Mask);
+                    Mask     &= Mask - 1u;
+                    let Light = SceneLights.Lights[Base + Bit];
+                    let LightIllum = EvaluateLightIlluminance(Light, Position, Normal);
+                    if (any(LightIllum > vec3f(0.0)))
+                    {
+                        let Offset      = Light.PositionType.xyz - Position;
+                        let LightDist   = length(Offset);
+                        let TowardLight = Offset / max(LightDist, 1.0e-4);
+                        let Contrib     = LightIllum * ResolveDirectReflectance(Surface, Normal, View, TowardLight);
+                        ClusterRad     += Contrib;
+                        let Lum         = dot(Contrib, vec3f(0.2126, 0.7152, 0.0722));
+                        if (Lum > BestLum)
+                        {
+                            BestLum     = Lum;
+                            BestContrib = Contrib;
+                            BestDir     = TowardLight;
+                            BestDist    = LightDist;
+                        }
+                    }
+                }
             }
-            Radiance += LightIllum * LightVis * ResolveDirectReflectance(Surface, Normal, View, TowardLight);
+
+            let SunLum = dot(Frame.SunIlluminance, vec3f(0.2126, 0.7152, 0.0722));
+            if (UseRtShadows && BestLum > 0.04 + 0.015 * SunLum)
+            {
+                let LightVis = TraceSceneVisibility(RayOrigin, BestDir, RayEpsilon, max(BestDist - 0.65, RayEpsilon));
+                ClusterRad  += BestContrib * (LightVis - 1.0);
+            }
+            Radiance += ClusterRad;
         }
     }
 

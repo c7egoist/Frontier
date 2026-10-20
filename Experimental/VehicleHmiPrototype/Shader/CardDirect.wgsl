@@ -17,7 +17,7 @@
 @group(0) @binding(5) var CardNormal                  : texture_2d<f32>;
 @group(0) @binding(6) var CardDepth                   : texture_2d<f32>;
 @group(0) @binding(7) var CardDirectTarget            : texture_storage_2d<rgba16float, write>;
-@group(0) @binding(8) var<storage, read> SceneLights  : array<LightRecord>;
+@group(0) @binding(8) var<storage, read> SceneLights  : ClusteredLightBuffer;
 
 @compute @workgroup_size(8, 8)
 fn IntegrateCardDirect(@builtin(workgroup_id) Group: vec3u, @builtin(local_invocation_id) Local: vec3u)
@@ -63,12 +63,24 @@ fn IntegrateCardDirect(@builtin(workgroup_id) Group: vec3u, @builtin(local_invoc
     let Fire = ResolveFireArrival(Position, Normal);
     Irradiance += Fire.Illuminance * max(dot(Normal, Fire.Direction), 0.0);
 
-    // Clustered light irradiance feeding surface cards (which bounce into ReSTIR GI & multi-bounce radiosity!)
-    let NumLights = arrayLength(&SceneLights);
-    for (var i = 0u; i < NumLights; i++) {
-        let Light = SceneLights[i];
-        let LightIllum = EvaluateLightArrival(Light, Position, Normal);
-        Irradiance += LightIllum;
+    // 3D Clustered light irradiance feeding surface cards (iterating only active lights in this texel's 3D cluster cell)
+    let CellIdx = ResolveClusterCellIndex(SceneLights.GridMinimum, SceneLights.GridScale, Position);
+    if (CellIdx != -1)
+    {
+        let Pair  = SceneLights.CellMasks[u32(max(CellIdx, 0)) >> 1u];
+        let Mask2 = ResolveClusterMaskFromPair(CellIdx, Pair, SceneLights.GridMinimum.w);
+        for (var Word = 0u; Word < 2u; Word += 1u)
+        {
+            var Mask = select(Mask2.x, Mask2.y, Word == 1u);
+            let Base = Word * 32u;
+            while (Mask != 0u)
+            {
+                let Bit   = firstTrailingBit(Mask);
+                Mask     &= Mask - 1u;
+                let Light = SceneLights.Lights[Base + Bit];
+                Irradiance += EvaluateLightArrival(Light, Position, Normal);
+            }
+        }
     }
 
     textureStore(CardDirectTarget, Texel, vec4f(Irradiance, 1.0));
