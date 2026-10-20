@@ -379,13 +379,22 @@ function BuildVehicle(Host, C, Body)
                       ["Ignited", () => Host.Thermal.Wheels.filter((Wheel) => Wheel.Ignited).length]]);
 
     const Names = ["FL", "FR", "RL", "RR"];
-    const Tyres = C.Card(Body, "Tyres", "CircleDot", { Accent: Accent.Vehicle, Index: 3, Subtitle: "Volumetric tyre physics · pressure · wear · failure" });
+    const Tyres = C.Card(Body, "Tyres · 3D FEM Continuum", "CircleDot", { Accent: Accent.Vehicle, Index: 3, Subtitle: "3D Hex8 Neo-Hookean FEM · 2D Shell · XPBD · Spring" });
+    C.Segmented(Tyres, S, "TyreModel", [
+        ["3D FEM", "solid"],
+        ["2D Shell", "shell"],
+        ["XPBD", "xpbd"],
+        ["Spring", "spring"]
+    ], {
+        Label: "Continuum tyre model",
+        OnChange: (Model) => Host.Vehicle.AssignTyreModel(Model)
+    });
     C.Stats(Tyres, [0, 1, 2, 3].map((Wheel) => [Names[Wheel], () => Host.Thermal.Wheels[Wheel].Surface - 273.15, "°"]), 4);
     C.Stats(Tyres, [0, 1, 2, 3].map((Wheel) => [Names[Wheel] + " kPa", () => Host.Thermal.Wheels[Wheel].GaugePressure / 1000.0]), 4);
     C.Stats(Tyres, [0, 1, 2, 3].map((Wheel) => [Names[Wheel] + " mm", () => Host.Vehicle.Wheels[Wheel].TyreDeflection * 1000.0, "", 0]), 4);
     C.Stats(Tyres, [0, 1, 2, 3].map((Wheel) => [Names[Wheel] + " tread", () => Host.Thermal.QueryTreadFractions()[Wheel] * 100.0, "%"]), 4);
     C.Readout(Tyres, () => [Host.QueryTyreLive().States.map((State, Wheel) => `${Names[Wheel]} ${State || "ok"}`).join(" · ")]);
-    C.Muted(Tyres, "GPU volumetric tyre physics (Chaos Flesh / PB-FEM continuum): real-time contact patch flattening, internal pressure dilatation, volumetric sidewall bulges and lateral shear distortion.");
+    C.Muted(Tyres, "3D Hexahedral Neo-Hookean Continuum FEM (128 Hex8 elements, 32×5 nodal lattice per tyre) with GPU displacement-field interpolation.");
     Slider(C, Tyres, S, "TyrePressureFront", "Front cold pressure", 0, 400, 5, "kPa", 0, ["Flat", "Over"], () => Host.ApplySetting("TyrePressure"));
     Slider(C, Tyres, S, "TyrePressureRear", "Rear cold pressure", 0, 400, 5, "kPa", 0, ["Flat", "Over"], () => Host.ApplySetting("TyrePressure"));
     C.Switch(Tyres, S, "TyreWear", { Label: "Tread wear", Detail: "Sliding work abrades the tread, hotter faster" });

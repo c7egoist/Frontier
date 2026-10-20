@@ -11,6 +11,8 @@
 //    is stable at speed, and the low-speed tread damping of VehicleSolverConfiguration keeps standstill quiet.
 
 import { TyreSlipSolver } from "./TyreSlipSolver.js";
+import { SolidContinuumWheel, ShellContinuumWheel } from "./TyreContinuumElasticity.js";
+import { CarcassWheel } from "./TyreCarcassProjection.js";
 import { VehicleGeometry, ResolveSuspensionPair, ResolveSuspensionMountLocal, ResolveInertia, AntiRollBars,
          EngineSheet, TurbochargerSheet, TransmissionSheet, ChassisSheet } from "./VehicleSpecification.js";
 import { ResolveCourseHeight, ResolveCourseNormal, SpawnPoint } from "./CourseStructure.js";
@@ -85,18 +87,46 @@ export class VehicleSolver
 {
     constructor(Obstacles)
     {
-        this.Tyres       = new TyreSlipSolver();
-        const Pair       = ResolveSuspensionPair();
-        this.Struts      = [Pair.Front, Pair.Front, Pair.Rear, Pair.Rear];
-        this.StaticLength = 0.6436 - 0.0914;
-        this.InertiaBody = ResolveInertia();
-        this.Obstacles   = Obstacles;
-        this.Accumulator = 0.0;
-        this.LineLock    = true;    // [-] assist: both pedals near standstill hold only the front brakes
-        this.Burnout     = false;   // [-] line lock currently engaged
-        this.Support     = null;    // [-] RigidBodyWorld: heavy debris the wheels can drive over (QuerySupport)
-        this.Frozen      = false;   // [-] held where it is (rezzing in): no integration, no forces
+        this.Tyres         = new TyreSlipSolver();
+        this.TyreModel     = "solid"; // Default: 3D Hexahedral Neo-Hookean Continuum FEM
+        this.SolidWheels   = [0, 1, 2, 3].map(() => new SolidContinuumWheel());
+        this.ShellWheels   = [0, 1, 2, 3].map(() => new ShellContinuumWheel());
+        this.CarcassWheels = [0, 1, 2, 3].map(() => new CarcassWheel());
+        const Pair         = ResolveSuspensionPair();
+        this.Struts        = [Pair.Front, Pair.Front, Pair.Rear, Pair.Rear];
+        this.StaticLength  = 0.6436 - 0.0914;
+        this.InertiaBody   = ResolveInertia();
+        this.Obstacles     = Obstacles;
+        this.Accumulator   = 0.0;
+        this.LineLock      = true;    // [-] assist: both pedals near standstill hold only the front brakes
+        this.Burnout       = false;   // [-] line lock currently engaged
+        this.Support       = null;    // [-] RigidBodyWorld: heavy debris the wheels can drive over (QuerySupport)
+        this.Frozen        = false;   // [-] held where it is (rezzing in): no integration, no forces
         this.Respawn();
+    }
+
+    ResolveActiveWheelSolver(Wheel)
+    {
+        if (this.TyreModel === "solid") return this.SolidWheels[Wheel];
+        if (this.TyreModel === "shell") return this.ShellWheels[Wheel];
+        if (this.TyreModel === "xpbd")  return this.CarcassWheels[Wheel];
+        return null;
+    }
+
+    AssignTyreModel(Model)
+    {
+        this.TyreModel = (Model === "solid" || Model === "shell" || Model === "xpbd" || Model === "spring") ? Model : "solid";
+        if (this.Wheels)
+        {
+            for (let Wheel = 0; Wheel < 4; ++Wheel)
+                this.Wheels[Wheel].Carcass = this.ResolveActiveWheelSolver(Wheel);
+            this.AdvanceTyreContinuum(1.0 / 120.0);
+        }
+    }
+
+    QueryCarcassPositions(WheelIndex)
+    {
+        return this.Wheels?.[WheelIndex]?.Carcass?.Positions || null;
     }
 
     Respawn(Position = [SpawnPoint.Position[0], SpawnPoint.Position[1], VehicleGeometry.CoMHeight + 0.02], Yaw = SpawnPoint.Yaw)
@@ -143,8 +173,18 @@ export class VehicleSolver
             HubDistance:     Infinity,
             GroundNormal:    [0.0, 0.0, 1.0],
             LateralForce:    0.0,
-            RollingSpeed:    0.0
+            RollingSpeed:    0.0,
+            Carcass:         this.ResolveActiveWheelSolver(Wheel)
         }));
+        for (let Wheel = 0; Wheel < 4; ++Wheel)
+        {
+            const Mount = AddVector(this.Position, RotateVector(this.Orientation, this.Wheels[Wheel].Mount));
+            const Down  = RotateVector(this.Orientation, [0.0, 0.0, -1.0]);
+            const Hub   = MultiplyAddVector(Mount, Down, this.StaticLength);
+            this.SolidWheels[Wheel].Reset(Hub, this.Orientation);
+            this.ShellWheels[Wheel].Reset(Hub, this.Orientation);
+            this.CarcassWheels[Wheel].Reset(Hub, this.Orientation);
+        }
         this.ShredEvents  = [];
         this.PinchEvents  = [];
         this.Scrapes      = new Map();
@@ -233,6 +273,39 @@ export class VehicleSolver
         {
             this.Step(Command, SubstepSeconds);
             this.Accumulator -= SubstepSeconds;
+        }
+        this.AdvanceTyreContinuum(Math.max(SubstepSeconds, Math.min(Seconds || (1.0 / 60.0), 1.0 / 30.0)));
+    }
+
+    AdvanceTyreContinuum(dt)
+    {
+        if (this.TyreModel === "spring")
+        {
+            for (let Index = 0; Index < 4; ++Index)
+                this.Wheels[Index].Carcass = null;
+            return;
+        }
+        const DownBody = RotateVector(this.Orientation, [0.0, 0.0, -1.0]);
+        for (let Index = 0; Index < 4; ++Index)
+        {
+            const Wheel  = this.Wheels[Index];
+            const Solver = this.ResolveActiveWheelSolver(Index);
+            Wheel.Carcass = Solver;
+            if (!Solver || Wheel.Shredded) continue;
+
+            const Mount   = AddVector(this.Position, RotateVector(this.Orientation, Wheel.Mount));
+            const Hub     = MultiplyAddVector(Mount, DownBody, Wheel.Length);
+            const Steered = MultiplyQuaternion(this.Orientation, ConstructAxisQuaternion([0.0, 0.0, 1.0], Wheel.Steer || 0.0));
+            const Spun    = MultiplyQuaternion(Steered, ConstructAxisQuaternion([0.0, 1.0, 0.0], Wheel.SpinAngle || 0.0));
+
+            Solver.Step({
+                Center:       Hub,
+                Orientation:  Spun,
+                GroundNormal: Wheel.GroundNormal || [0.0, 0.0, 1.0],
+                Deflection:   Wheel.Contact ? Wheel.TyreDeflection : 0.0,
+                Pressure:     Wheel.Pressure,
+                LateralForce: Wheel.LateralForce || 0.0
+            }, dt, 2);
         }
     }
 

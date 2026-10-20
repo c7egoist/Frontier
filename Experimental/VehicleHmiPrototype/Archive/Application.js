@@ -9128,6 +9128,745 @@ var TyreSlipSolver = class {
   }
 };
 
+// Source/TyreContinuumElasticity.js
+var CircumferentialCount = 32;
+var MeridionalCount = 5;
+var NodesPerWheel = CircumferentialCount * MeridionalCount;
+var TyreRimRadius = 0.3448;
+var TyreOuterRadius = 0.50855;
+var ReferencePressure = 22e4;
+var MeridionalProfile = Object.freeze([
+  Object.freeze({ Radius: 0.3448, Y: -0.115, Thickness: 0.018, Mobile: 0 }),
+  // 0: Inner rim bead (clamped)
+  Object.freeze({ Radius: 0.4865, Y: -0.118, Thickness: 0.016, Mobile: 1 }),
+  // 1: Inner sidewall / shoulder
+  Object.freeze({ Radius: 0.50855, Y: 0, Thickness: 0.024, Mobile: 1 }),
+  // 2: Tread crown center
+  Object.freeze({ Radius: 0.4865, Y: 0.118, Thickness: 0.016, Mobile: 1 }),
+  // 3: Outer sidewall / shoulder
+  Object.freeze({ Radius: 0.3448, Y: 0.115, Thickness: 0.018, Mobile: 0 })
+  // 4: Outer rim bead (clamped)
+]);
+var HexParentSigns = Object.freeze([
+  [-1, -1, -1],
+  [1, -1, -1],
+  [1, 1, -1],
+  [-1, 1, -1],
+  [-1, -1, 1],
+  [1, -1, 1],
+  [1, 1, 1],
+  [-1, 1, 1]
+]);
+function Invert3x3Transpose(J00, J01, J02, J10, J11, J12, J20, J21, J22, Out, Offset) {
+  const C00 = J11 * J22 - J12 * J21;
+  const C01 = J12 * J20 - J10 * J22;
+  const C02 = J10 * J21 - J11 * J20;
+  const C10 = J02 * J21 - J01 * J22;
+  const C11 = J00 * J22 - J02 * J20;
+  const C12 = J01 * J20 - J00 * J21;
+  const C20 = J01 * J12 - J02 * J11;
+  const C21 = J02 * J10 - J00 * J12;
+  const C22 = J00 * J11 - J01 * J10;
+  const Det = J00 * C00 + J01 * C01 + J02 * C02;
+  const InvDet = Math.abs(Det) > 1e-12 ? 1 / Det : 0;
+  Out[Offset + 0] = C00 * InvDet;
+  Out[Offset + 1] = C01 * InvDet;
+  Out[Offset + 2] = C02 * InvDet;
+  Out[Offset + 3] = C10 * InvDet;
+  Out[Offset + 4] = C11 * InvDet;
+  Out[Offset + 5] = C12 * InvDet;
+  Out[Offset + 6] = C20 * InvDet;
+  Out[Offset + 7] = C21 * InvDet;
+  Out[Offset + 8] = C22 * InvDet;
+  return Math.abs(Det);
+}
+function RotateVecInto(Qx, Qy, Qz, Qw, Vx, Vy, Vz, Out, Offset) {
+  const Tx = 2 * (Qy * Vz - Qz * Vy);
+  const Ty = 2 * (Qz * Vx - Qx * Vz);
+  const Tz = 2 * (Qx * Vy - Qy * Vx);
+  Out[Offset + 0] = Vx + Qw * Tx + (Qy * Tz - Qz * Ty);
+  Out[Offset + 1] = Vy + Qw * Ty + (Qz * Tx - Qx * Tz);
+  Out[Offset + 2] = Vz + Qw * Tz + (Qx * Ty - Qy * Tx);
+}
+var SolidContinuumWheel = class {
+  constructor() {
+    this.NodeCount = NodesPerWheel;
+    this.ElementCount = CircumferentialCount * (MeridionalCount - 1);
+    this.RestLocal = new Float32Array(this.NodeCount * 3);
+    this.InnerRestLocal = new Float32Array(this.NodeCount * 3);
+    this.LocalPositions = new Float32Array(this.NodeCount * 3);
+    this.LocalVelocities = new Float32Array(this.NodeCount * 3);
+    this.Forces = new Float32Array(this.NodeCount * 3);
+    this.Positions = new Float32Array(this.NodeCount * 3);
+    this.InvMass = new Float32Array(this.NodeCount);
+    this.ElemNodes = new Uint16Array(this.ElementCount * 4);
+    this.ElemGrad = new Float32Array(this.ElementCount * 12);
+    this.ElemVol = new Float32Array(this.ElementCount);
+    this.MeanJacobian = 1;
+    this.MeanStress = 0;
+    this.ContactNodes = 0;
+    this.VerticalForce = 0;
+    this.BuildReferenceMesh();
+    this.PrecomputeHexElements();
+  }
+  BuildReferenceMesh() {
+    for (let i = 0; i < CircumferentialCount; ++i) {
+      const Theta = 2 * Math.PI * i / CircumferentialCount;
+      const CosT = Math.cos(Theta);
+      const SinT = Math.sin(Theta);
+      for (let m = 0; m < MeridionalCount; ++m) {
+        const Prof = MeridionalProfile[m];
+        const ROut = Prof.Radius;
+        const RIn = ROut - Prof.Thickness;
+        const Idx3 = (i * MeridionalCount + m) * 3;
+        this.RestLocal[Idx3 + 0] = ROut * CosT;
+        this.RestLocal[Idx3 + 1] = Prof.Y;
+        this.RestLocal[Idx3 + 2] = ROut * SinT;
+        this.InnerRestLocal[Idx3 + 0] = RIn * CosT;
+        this.InnerRestLocal[Idx3 + 1] = Prof.Y * 0.94;
+        this.InnerRestLocal[Idx3 + 2] = RIn * SinT;
+        this.LocalPositions[Idx3 + 0] = this.RestLocal[Idx3 + 0];
+        this.LocalPositions[Idx3 + 1] = this.RestLocal[Idx3 + 1];
+        this.LocalPositions[Idx3 + 2] = this.RestLocal[Idx3 + 2];
+        this.Positions[Idx3 + 0] = this.RestLocal[Idx3 + 0];
+        this.Positions[Idx3 + 1] = this.RestLocal[Idx3 + 1];
+        this.Positions[Idx3 + 2] = this.RestLocal[Idx3 + 2];
+        this.InvMass[i * MeridionalCount + m] = Prof.Mobile ? m === 2 ? 0.85 : 1.1 : 0;
+      }
+    }
+  }
+  PrecomputeHexElements() {
+    const InvJT = new Float32Array(9);
+    const CornerX = new Float32Array(24);
+    let Elem = 0;
+    for (let i = 0; i < CircumferentialCount; ++i) {
+      const iNext = (i + 1) % CircumferentialCount;
+      for (let m = 0; m < MeridionalCount - 1; ++m) {
+        const n0 = i * MeridionalCount + m;
+        const n1 = iNext * MeridionalCount + m;
+        const n2 = iNext * MeridionalCount + (m + 1);
+        const n3 = i * MeridionalCount + (m + 1);
+        this.ElemNodes[Elem * 4 + 0] = n0;
+        this.ElemNodes[Elem * 4 + 1] = n1;
+        this.ElemNodes[Elem * 4 + 2] = n2;
+        this.ElemNodes[Elem * 4 + 3] = n3;
+        const Nodes4 = [n0, n1, n2, n3];
+        for (let c = 0; c < 4; ++c) {
+          const Base = Nodes4[c] * 3;
+          CornerX[c * 3 + 0] = this.InnerRestLocal[Base + 0];
+          CornerX[c * 3 + 1] = this.InnerRestLocal[Base + 1];
+          CornerX[c * 3 + 2] = this.InnerRestLocal[Base + 2];
+          CornerX[(c + 4) * 3 + 0] = this.RestLocal[Base + 0];
+          CornerX[(c + 4) * 3 + 1] = this.RestLocal[Base + 1];
+          CornerX[(c + 4) * 3 + 2] = this.RestLocal[Base + 2];
+        }
+        let J00 = 0, J01 = 0, J02 = 0;
+        let J10 = 0, J11 = 0, J12 = 0;
+        let J20 = 0, J21 = 0, J22 = 0;
+        for (let a = 0; a < 8; ++a) {
+          const S = HexParentSigns[a];
+          const d0 = 0.125 * S[0], d1 = 0.125 * S[1], d2 = 0.125 * S[2];
+          const Xx = CornerX[a * 3 + 0], Xy = CornerX[a * 3 + 1], Xz = CornerX[a * 3 + 2];
+          J00 += Xx * d0;
+          J01 += Xx * d1;
+          J02 += Xx * d2;
+          J10 += Xy * d0;
+          J11 += Xy * d1;
+          J12 += Xy * d2;
+          J20 += Xz * d0;
+          J21 += Xz * d1;
+          J22 += Xz * d2;
+        }
+        const DetJ = Invert3x3Transpose(J00, J01, J02, J10, J11, J12, J20, J21, J22, InvJT, 0);
+        this.ElemVol[Elem] = Math.max(1e-6, 8 * DetJ);
+        const GradBase = Elem * 12;
+        for (let c = 0; c < 4; ++c) {
+          const S = HexParentSigns[c + 4];
+          const d0 = 0.125 * S[0], d1 = 0.125 * S[1], d2 = 0.125 * S[2];
+          this.ElemGrad[GradBase + c * 3 + 0] = InvJT[0] * d0 + InvJT[1] * d1 + InvJT[2] * d2;
+          this.ElemGrad[GradBase + c * 3 + 1] = InvJT[3] * d0 + InvJT[4] * d1 + InvJT[5] * d2;
+          this.ElemGrad[GradBase + c * 3 + 2] = InvJT[6] * d0 + InvJT[7] * d1 + InvJT[8] * d2;
+        }
+        ++Elem;
+      }
+    }
+  }
+  Reset(WheelCenter = [0, 0, 0], WheelQuat = [0, 0, 0, 1]) {
+    this.LocalPositions.set(this.RestLocal);
+    this.LocalVelocities.fill(0);
+    this.MeanJacobian = 1;
+    this.MeanStress = 0;
+    this.ContactNodes = 0;
+    this.VerticalForce = 0;
+    this.SyncWorldPositions(WheelCenter, WheelQuat);
+  }
+  SyncWorldPositions(WheelCenter, WheelQuat) {
+    const Cx = WheelCenter[0], Cy = WheelCenter[1], Cz = WheelCenter[2];
+    const Qx = WheelQuat[0], Qy = WheelQuat[1], Qz = WheelQuat[2], Qw = WheelQuat[3];
+    for (let n = 0; n < this.NodeCount; ++n) {
+      const Base = n * 3;
+      RotateVecInto(Qx, Qy, Qz, Qw, this.LocalPositions[Base], this.LocalPositions[Base + 1], this.LocalPositions[Base + 2], this.Positions, Base);
+      this.Positions[Base + 0] += Cx;
+      this.Positions[Base + 1] += Cy;
+      this.Positions[Base + 2] += Cz;
+    }
+  }
+  // 📐 Steps the 3D Hexahedral Neo-Hookean continuum tyre over Substeps iterations (zero heap allocations).
+  Step(State, dt = 1 / 120, Substeps = 2) {
+    const Center = State.Center || [0, 0, 0];
+    const Quat = State.Orientation || [0, 0, 0, 1];
+    const NormalWorld = State.GroundNormal || [0, 0, 1];
+    const Deflection = Math.max(0, State.Deflection || 0);
+    const Pressure = Math.max(0, State.Pressure !== void 0 ? State.Pressure : ReferencePressure);
+    const LatForce = State.LateralForce || 0;
+    const DownLocal = [0, 0, -1];
+    RotateVecInto(-Quat[0], -Quat[1], -Quat[2], Quat[3], -NormalWorld[0], -NormalWorld[1], -NormalWorld[2], DownLocal, 0);
+    const DownX = DownLocal[0], DownY = DownLocal[1], DownZ = DownLocal[2];
+    const ContactPhi = Math.atan2(DownZ, DownX);
+    const PNorm = Math.max(0.08, Pressure / ReferencePressure);
+    const YoungE = 12e3 * (0.32 + 0.68 * PNorm);
+    const Nu = 0.44;
+    const Mu = YoungE / (2 * (1 + Nu));
+    const Lambda = YoungE * Nu / ((1 + Nu) * (1 - 2 * Nu));
+    const SubDt = Math.min(dt / Math.max(1, Substeps), 1 / 240);
+    const Damping = Math.exp(-38 * SubDt);
+    const LateralShift = Math.max(-0.042, Math.min(0.042, LatForce / 145e3));
+    const PatchSpan = Math.max(0.22, Math.min(1.1, 0.44 / Math.sqrt(Math.max(0.15, PNorm))));
+    let JSum = 0;
+    let StressSum = 0;
+    for (let step = 0; step < Substeps; ++step) {
+      this.Forces.fill(0);
+      JSum = 0;
+      StressSum = 0;
+      for (let e = 0; e < this.ElementCount; ++e) {
+        const NBase = e * 4;
+        const GBase = e * 12;
+        const V0 = this.ElemVol[e];
+        let F00 = 1, F01 = 0, F02 = 0;
+        let F10 = 0, F11 = 1, F12 = 0;
+        let F20 = 0, F21 = 0, F22 = 1;
+        for (let c = 0; c < 4; ++c) {
+          const Node3 = this.ElemNodes[NBase + c] * 3;
+          const ux = this.LocalPositions[Node3 + 0] - this.RestLocal[Node3 + 0];
+          const uy = this.LocalPositions[Node3 + 1] - this.RestLocal[Node3 + 1];
+          const uz = this.LocalPositions[Node3 + 2] - this.RestLocal[Node3 + 2];
+          const gx = this.ElemGrad[GBase + c * 3 + 0];
+          const gy = this.ElemGrad[GBase + c * 3 + 1];
+          const gz = this.ElemGrad[GBase + c * 3 + 2];
+          F00 += ux * gx;
+          F01 += ux * gy;
+          F02 += ux * gz;
+          F10 += uy * gx;
+          F11 += uy * gy;
+          F12 += uy * gz;
+          F20 += uz * gx;
+          F21 += uz * gy;
+          F22 += uz * gz;
+        }
+        const C00 = F11 * F22 - F12 * F21;
+        const C01 = F12 * F20 - F10 * F22;
+        const C02 = F10 * F21 - F11 * F20;
+        const C10 = F02 * F21 - F01 * F22;
+        const C11 = F00 * F22 - F02 * F20;
+        const C12 = F01 * F20 - F00 * F21;
+        const C20 = F01 * F12 - F02 * F11;
+        const C21 = F02 * F10 - F00 * F12;
+        const C22 = F00 * F11 - F01 * F10;
+        const RawJ = F00 * C00 + F01 * C01 + F02 * C02;
+        const J = Math.max(0.3, Math.min(2.2, RawJ));
+        const InvJ = 1 / J;
+        JSum += J;
+        const Coeff = (Lambda * J * (J - 1) - Mu) * InvJ;
+        const P00 = Mu * F00 + Coeff * C00, P01 = Mu * F01 + Coeff * C01, P02 = Mu * F02 + Coeff * C02;
+        const P10 = Mu * F10 + Coeff * C10, P11 = Mu * F11 + Coeff * C11, P12 = Mu * F12 + Coeff * C12;
+        const P20 = Mu * F20 + Coeff * C20, P21 = Mu * F21 + Coeff * C21, P22 = Mu * F22 + Coeff * C22;
+        StressSum += Math.sqrt(P00 * P00 + P11 * P11 + P22 * P22);
+        for (let c = 0; c < 4; ++c) {
+          const Node = this.ElemNodes[NBase + c];
+          if (this.InvMass[Node] <= 0) continue;
+          const Node3 = Node * 3;
+          const gx = this.ElemGrad[GBase + c * 3 + 0];
+          const gy = this.ElemGrad[GBase + c * 3 + 1];
+          const gz = this.ElemGrad[GBase + c * 3 + 2];
+          this.Forces[Node3 + 0] -= V0 * (P00 * gx + P01 * gy + P02 * gz);
+          this.Forces[Node3 + 1] -= V0 * (P10 * gx + P11 * gy + P12 * gz);
+          this.Forces[Node3 + 2] -= V0 * (P20 * gx + P21 * gy + P22 * gz);
+        }
+      }
+      let ContactCount = 0;
+      for (let i = 0; i < CircumferentialCount; ++i) {
+        const Theta = 2 * Math.PI * i / CircumferentialCount;
+        let DPhi = Theta - ContactPhi;
+        DPhi -= 2 * Math.PI * Math.round(DPhi / (2 * Math.PI));
+        const AbsDPhi = Math.abs(DPhi);
+        for (let m = 1; m <= 3; ++m) {
+          const Node = i * MeridionalCount + m;
+          const Node3 = Node * 3;
+          const InvM = this.InvMass[Node];
+          const Rx = this.RestLocal[Node3 + 0];
+          const Ry = this.RestLocal[Node3 + 1];
+          const Rz = this.RestLocal[Node3 + 2];
+          const Ux = this.LocalPositions[Node3 + 0] - Rx;
+          const Uy = this.LocalPositions[Node3 + 1] - Ry;
+          const Uz = this.LocalPositions[Node3 + 2] - Rz;
+          const TetherK = 450 * (0.4 + 0.6 * PNorm);
+          const Vx = (this.LocalVelocities[Node3 + 0] + SubDt * InvM * (this.Forces[Node3 + 0] - TetherK * Ux)) * Damping;
+          const Vy = (this.LocalVelocities[Node3 + 1] + SubDt * InvM * (this.Forces[Node3 + 1] - TetherK * Uy)) * Damping;
+          const Vz = (this.LocalVelocities[Node3 + 2] + SubDt * InvM * (this.Forces[Node3 + 2] - TetherK * Uz)) * Damping;
+          let Nx = this.LocalPositions[Node3 + 0] + SubDt * Vx;
+          let Ny = this.LocalPositions[Node3 + 1] + SubDt * Vy;
+          let Nz = this.LocalPositions[Node3 + 2] + SubDt * Vz;
+          if (Deflection > 1e-5) {
+            const RadialRest = MeridionalProfile[m].Radius;
+            const RadialFrac = (RadialRest - TyreRimRadius) / (TyreOuterRadius - TyreRimRadius);
+            let TargetDR = 0;
+            let TargetDY = 0;
+            if (AbsDPhi < PatchSpan) {
+              ContactCount++;
+              const U = AbsDPhi / PatchSpan;
+              const Env = 0.5 * (1 + Math.cos(U * Math.PI));
+              TargetDR = -Deflection * Env * RadialFrac;
+              if (m !== 2) {
+                const BulgeSign = m === 1 ? -1 : 1;
+                const BulgeAmp = 0.52 / (0.4 + 0.6 * Math.sqrt(PNorm));
+                TargetDY += BulgeSign * Deflection * BulgeAmp * Env;
+              }
+            } else if (AbsDPhi < PatchSpan * 1.5) {
+              const V = (AbsDPhi - PatchSpan) / (0.5 * PatchSpan);
+              TargetDR = Math.sin(V * Math.PI) * (0.12 * Deflection * RadialFrac);
+            }
+            if (AbsDPhi < PatchSpan * 1.2) {
+              const UShear = AbsDPhi / (PatchSpan * 1.2);
+              const ShearEnv = 0.5 * (1 + Math.cos(UShear * Math.PI));
+              TargetDY += LateralShift * ShearEnv * RadialFrac;
+            }
+            const CosT = Math.cos(Theta), SinT = Math.sin(Theta);
+            const GoalR = Math.max(TyreRimRadius + 8e-3, RadialRest + TargetDR);
+            const GoalX = GoalR * CosT;
+            const GoalY = Ry + TargetDY;
+            const GoalZ = GoalR * SinT;
+            const Blend = AbsDPhi < PatchSpan * 1.5 ? 0.78 : 0.45;
+            Nx = Nx + (GoalX - Nx) * Blend;
+            Ny = Ny + (GoalY - Ny) * Blend;
+            Nz = Nz + (GoalZ - Nz) * Blend;
+          }
+          this.LocalVelocities[Node3 + 0] = (Nx - this.LocalPositions[Node3 + 0]) / SubDt;
+          this.LocalVelocities[Node3 + 1] = (Ny - this.LocalPositions[Node3 + 1]) / SubDt;
+          this.LocalVelocities[Node3 + 2] = (Nz - this.LocalPositions[Node3 + 2]) / SubDt;
+          this.LocalPositions[Node3 + 0] = Nx;
+          this.LocalPositions[Node3 + 1] = Ny;
+          this.LocalPositions[Node3 + 2] = Nz;
+        }
+      }
+      this.ContactNodes = ContactCount;
+    }
+    this.MeanJacobian = JSum / this.ElementCount;
+    this.MeanStress = StressSum / this.ElementCount;
+    const EffStiffness = 25e3 + 0.9 * Pressure;
+    this.VerticalForce = Deflection * EffStiffness;
+    this.SyncWorldPositions(Center, Quat);
+    return this.VerticalForce;
+  }
+};
+var ShellContinuumWheel = class {
+  constructor() {
+    this.NodeCount = NodesPerWheel;
+    this.ElementCount = CircumferentialCount * (MeridionalCount - 1);
+    this.RestLocal = new Float32Array(this.NodeCount * 3);
+    this.LocalPositions = new Float32Array(this.NodeCount * 3);
+    this.LocalVelocities = new Float32Array(this.NodeCount * 3);
+    this.Forces = new Float32Array(this.NodeCount * 3);
+    this.Positions = new Float32Array(this.NodeCount * 3);
+    this.InvMass = new Float32Array(this.NodeCount);
+    this.ElemMetric = new Float32Array(this.ElementCount * 4);
+    this.MeanStress = 0;
+    this.VerticalForce = 0;
+    this.BuildReferenceShell();
+  }
+  BuildReferenceShell() {
+    for (let i = 0; i < CircumferentialCount; ++i) {
+      const Theta = 2 * Math.PI * i / CircumferentialCount;
+      const CosT = Math.cos(Theta);
+      const SinT = Math.sin(Theta);
+      for (let m = 0; m < MeridionalCount; ++m) {
+        const Prof = MeridionalProfile[m];
+        const Idx3 = (i * MeridionalCount + m) * 3;
+        this.RestLocal[Idx3 + 0] = Prof.Radius * CosT;
+        this.RestLocal[Idx3 + 1] = Prof.Y;
+        this.RestLocal[Idx3 + 2] = Prof.Radius * SinT;
+        this.LocalPositions[Idx3 + 0] = this.RestLocal[Idx3 + 0];
+        this.LocalPositions[Idx3 + 1] = this.RestLocal[Idx3 + 1];
+        this.LocalPositions[Idx3 + 2] = this.RestLocal[Idx3 + 2];
+        this.Positions[Idx3 + 0] = this.RestLocal[Idx3 + 0];
+        this.Positions[Idx3 + 1] = this.RestLocal[Idx3 + 1];
+        this.Positions[Idx3 + 2] = this.RestLocal[Idx3 + 2];
+        this.InvMass[i * MeridionalCount + m] = Prof.Mobile ? 1 : 0;
+      }
+    }
+    let Elem = 0;
+    for (let i = 0; i < CircumferentialCount; ++i) {
+      const iNext = (i + 1) % CircumferentialCount;
+      for (let m = 0; m < MeridionalCount - 1; ++m) {
+        const n0 = (i * MeridionalCount + m) * 3;
+        const n1 = (iNext * MeridionalCount + m) * 3;
+        const n3 = (i * MeridionalCount + (m + 1)) * 3;
+        const A1x = this.RestLocal[n1] - this.RestLocal[n0];
+        const A1y = this.RestLocal[n1 + 1] - this.RestLocal[n0 + 1];
+        const A1z = this.RestLocal[n1 + 2] - this.RestLocal[n0 + 2];
+        const A2x = this.RestLocal[n3] - this.RestLocal[n0];
+        const A2y = this.RestLocal[n3 + 1] - this.RestLocal[n0 + 1];
+        const A2z = this.RestLocal[n3 + 2] - this.RestLocal[n0 + 2];
+        const A11 = A1x * A1x + A1y * A1y + A1z * A1z;
+        const A22 = A2x * A2x + A2y * A2y + A2z * A2z;
+        const A12 = A1x * A2x + A1y * A2y + A1z * A2z;
+        const Area = Math.sqrt(Math.max(1e-8, A11 * A22 - A12 * A12));
+        this.ElemMetric[Elem * 4 + 0] = A11;
+        this.ElemMetric[Elem * 4 + 1] = A22;
+        this.ElemMetric[Elem * 4 + 2] = A12;
+        this.ElemMetric[Elem * 4 + 3] = Area;
+        ++Elem;
+      }
+    }
+  }
+  Reset(WheelCenter = [0, 0, 0], WheelQuat = [0, 0, 0, 1]) {
+    this.LocalPositions.set(this.RestLocal);
+    this.LocalVelocities.fill(0);
+    this.MeanStress = 0;
+    this.VerticalForce = 0;
+    this.SyncWorldPositions(WheelCenter, WheelQuat);
+  }
+  SyncWorldPositions(WheelCenter, WheelQuat) {
+    const Cx = WheelCenter[0], Cy = WheelCenter[1], Cz = WheelCenter[2];
+    const Qx = WheelQuat[0], Qy = WheelQuat[1], Qz = WheelQuat[2], Qw = WheelQuat[3];
+    for (let n = 0; n < this.NodeCount; ++n) {
+      const Base = n * 3;
+      RotateVecInto(Qx, Qy, Qz, Qw, this.LocalPositions[Base], this.LocalPositions[Base + 1], this.LocalPositions[Base + 2], this.Positions, Base);
+      this.Positions[Base + 0] += Cx;
+      this.Positions[Base + 1] += Cy;
+      this.Positions[Base + 2] += Cz;
+    }
+  }
+  Step(State, dt = 1 / 120, Substeps = 2) {
+    const Center = State.Center || [0, 0, 0];
+    const Quat = State.Orientation || [0, 0, 0, 1];
+    const NormalWorld = State.GroundNormal || [0, 0, 1];
+    const Deflection = Math.max(0, State.Deflection || 0);
+    const Pressure = Math.max(0, State.Pressure !== void 0 ? State.Pressure : ReferencePressure);
+    const LatForce = State.LateralForce || 0;
+    const DownLocal = [0, 0, -1];
+    RotateVecInto(-Quat[0], -Quat[1], -Quat[2], Quat[3], -NormalWorld[0], -NormalWorld[1], -NormalWorld[2], DownLocal, 0);
+    const ContactPhi = Math.atan2(DownLocal[2], DownLocal[0]);
+    const PNorm = Math.max(0.08, Pressure / ReferencePressure);
+    const SubDt = Math.min(dt / Math.max(1, Substeps), 1 / 240);
+    const Damping = Math.exp(-36 * SubDt);
+    const LateralShift = Math.max(-0.042, Math.min(0.042, LatForce / 145e3));
+    const PatchSpan = Math.max(0.22, Math.min(1.1, 0.44 / Math.sqrt(Math.max(0.15, PNorm))));
+    const E1 = 1800 * (0.4 + 0.6 * PNorm);
+    const E2 = 1200 * (0.4 + 0.6 * PNorm);
+    const Nu12 = 0.38;
+    const KBend = 120;
+    for (let step = 0; step < Substeps; ++step) {
+      this.Forces.fill(0);
+      let Elem = 0;
+      for (let i = 0; i < CircumferentialCount; ++i) {
+        const iNext = (i + 1) % CircumferentialCount;
+        for (let m = 0; m < MeridionalCount - 1; ++m) {
+          const n0 = (i * MeridionalCount + m) * 3;
+          const n1 = (iNext * MeridionalCount + m) * 3;
+          const n3 = (i * MeridionalCount + (m + 1)) * 3;
+          const a1x = this.LocalPositions[n1] - this.LocalPositions[n0];
+          const a1y = this.LocalPositions[n1 + 1] - this.LocalPositions[n0 + 1];
+          const a1z = this.LocalPositions[n1 + 2] - this.LocalPositions[n0 + 2];
+          const a2x = this.LocalPositions[n3] - this.LocalPositions[n0];
+          const a2y = this.LocalPositions[n3 + 1] - this.LocalPositions[n0 + 1];
+          const a2z = this.LocalPositions[n3 + 2] - this.LocalPositions[n0 + 2];
+          const A11 = this.ElemMetric[Elem * 4 + 0];
+          const A22 = this.ElemMetric[Elem * 4 + 1];
+          const Area = this.ElemMetric[Elem * 4 + 3];
+          const Strain1 = 0.5 * (a1x * a1x + a1y * a1y + a1z * a1z - A11) / Math.max(1e-6, A11);
+          const Strain2 = 0.5 * (a2x * a2x + a2y * a2y + a2z * a2z - A22) / Math.max(1e-6, A22);
+          const S11 = E1 * (Strain1 + Nu12 * Strain2) * Area;
+          const S22 = E2 * (Strain2 + Nu12 * Strain1) * Area;
+          const f1x = S11 * a1x, f1y = S11 * a1y, f1z = S11 * a1z;
+          const f2x = S22 * a2x, f2y = S22 * a2y, f2z = S22 * a2z;
+          this.Forces[n0] += f1x + f2x;
+          this.Forces[n0 + 1] += f1y + f2y;
+          this.Forces[n0 + 2] += f1z + f2z;
+          this.Forces[n1] -= f1x;
+          this.Forces[n1 + 1] -= f1y;
+          this.Forces[n1 + 2] -= f1z;
+          this.Forces[n3] -= f2x;
+          this.Forces[n3 + 1] -= f2y;
+          this.Forces[n3 + 2] -= f2z;
+          ++Elem;
+        }
+        const b1 = (i * MeridionalCount + 1) * 3;
+        const b2 = (i * MeridionalCount + 2) * 3;
+        const b3 = (i * MeridionalCount + 3) * 3;
+        const CurvY = this.LocalPositions[b1 + 1] + this.LocalPositions[b3 + 1] - 2 * this.LocalPositions[b2 + 1] - (this.RestLocal[b1 + 1] + this.RestLocal[b3 + 1] - 2 * this.RestLocal[b2 + 1]);
+        this.Forces[b2 + 1] += KBend * CurvY;
+        this.Forces[b1 + 1] -= 0.5 * KBend * CurvY;
+        this.Forces[b3 + 1] -= 0.5 * KBend * CurvY;
+      }
+      for (let i = 0; i < CircumferentialCount; ++i) {
+        const Theta = 2 * Math.PI * i / CircumferentialCount;
+        let DPhi = Theta - ContactPhi;
+        DPhi -= 2 * Math.PI * Math.round(DPhi / (2 * Math.PI));
+        const AbsDPhi = Math.abs(DPhi);
+        for (let m = 1; m <= 3; ++m) {
+          const Node = i * MeridionalCount + m;
+          const Node3 = Node * 3;
+          const InvM = this.InvMass[Node];
+          const Rx = this.RestLocal[Node3 + 0], Ry = this.RestLocal[Node3 + 1], Rz = this.RestLocal[Node3 + 2];
+          const Vx = (this.LocalVelocities[Node3 + 0] + SubDt * InvM * this.Forces[Node3 + 0]) * Damping;
+          const Vy = (this.LocalVelocities[Node3 + 1] + SubDt * InvM * this.Forces[Node3 + 1]) * Damping;
+          const Vz = (this.LocalVelocities[Node3 + 2] + SubDt * InvM * this.Forces[Node3 + 2]) * Damping;
+          let Nx = this.LocalPositions[Node3 + 0] + SubDt * Vx;
+          let Ny = this.LocalPositions[Node3 + 1] + SubDt * Vy;
+          let Nz = this.LocalPositions[Node3 + 2] + SubDt * Vz;
+          const RadialRest = MeridionalProfile[m].Radius;
+          const RadialFrac = (RadialRest - TyreRimRadius) / (TyreOuterRadius - TyreRimRadius);
+          let TargetDR = 0, TargetDY = 0;
+          if (Deflection > 1e-5) {
+            if (AbsDPhi < PatchSpan) {
+              const U = AbsDPhi / PatchSpan;
+              const Env = 0.5 * (1 + Math.cos(U * Math.PI));
+              TargetDR = -Deflection * Env * RadialFrac;
+              if (m !== 2) {
+                const BulgeSign = m === 1 ? -1 : 1;
+                TargetDY += BulgeSign * Deflection * (0.48 / (0.4 + 0.6 * Math.sqrt(PNorm))) * Env;
+              }
+            } else if (AbsDPhi < PatchSpan * 1.5) {
+              const V = (AbsDPhi - PatchSpan) / (0.5 * PatchSpan);
+              TargetDR = Math.sin(V * Math.PI) * (0.11 * Deflection * RadialFrac);
+            }
+            if (AbsDPhi < PatchSpan * 1.2) {
+              const UShear = AbsDPhi / (PatchSpan * 1.2);
+              TargetDY += LateralShift * 0.5 * (1 + Math.cos(UShear * Math.PI)) * RadialFrac;
+            }
+          }
+          const GoalR = Math.max(TyreRimRadius + 8e-3, RadialRest + TargetDR);
+          const GoalX = GoalR * Math.cos(Theta);
+          const GoalY = Ry + TargetDY;
+          const GoalZ = GoalR * Math.sin(Theta);
+          const Blend = 0.72;
+          Nx += (GoalX - Nx) * Blend;
+          Ny += (GoalY - Ny) * Blend;
+          Nz += (GoalZ - Nz) * Blend;
+          this.LocalVelocities[Node3 + 0] = (Nx - this.LocalPositions[Node3 + 0]) / SubDt;
+          this.LocalVelocities[Node3 + 1] = (Ny - this.LocalPositions[Node3 + 1]) / SubDt;
+          this.LocalVelocities[Node3 + 2] = (Nz - this.LocalPositions[Node3 + 2]) / SubDt;
+          this.LocalPositions[Node3 + 0] = Nx;
+          this.LocalPositions[Node3 + 1] = Ny;
+          this.LocalPositions[Node3 + 2] = Nz;
+        }
+      }
+    }
+    this.VerticalForce = Deflection * (25e3 + 0.88 * Pressure);
+    this.SyncWorldPositions(Center, Quat);
+    return this.VerticalForce;
+  }
+};
+
+// Source/TyreCarcassProjection.js
+function RotateVecInto2(Qx, Qy, Qz, Qw, Vx, Vy, Vz, Out, Offset) {
+  const Tx = 2 * (Qy * Vz - Qz * Vy);
+  const Ty = 2 * (Qz * Vx - Qx * Vz);
+  const Tz = 2 * (Qx * Vy - Qy * Vx);
+  Out[Offset + 0] = Vx + Qw * Tx + (Qy * Tz - Qz * Ty);
+  Out[Offset + 1] = Vy + Qw * Ty + (Qz * Tx - Qx * Tz);
+  Out[Offset + 2] = Vz + Qw * Tz + (Qx * Ty - Qy * Tx);
+}
+var CarcassWheel = class {
+  constructor() {
+    this.NodeCount = NodesPerWheel;
+    this.RestLocal = new Float32Array(this.NodeCount * 3);
+    this.LocalPositions = new Float32Array(this.NodeCount * 3);
+    this.PrevLocal = new Float32Array(this.NodeCount * 3);
+    this.LocalVelocities = new Float32Array(this.NodeCount * 3);
+    this.Positions = new Float32Array(this.NodeCount * 3);
+    this.InvMass = new Float32Array(this.NodeCount);
+    this.ConstraintPairs = null;
+    this.ConstraintRest = null;
+    this.ConstraintAlpha = null;
+    this.ConstraintCount = 0;
+    this.VerticalForce = 0;
+    this.BuildLattice();
+  }
+  BuildLattice() {
+    for (let i = 0; i < CircumferentialCount; ++i) {
+      const Theta = 2 * Math.PI * i / CircumferentialCount;
+      const CosT = Math.cos(Theta);
+      const SinT = Math.sin(Theta);
+      for (let m = 0; m < MeridionalCount; ++m) {
+        const Prof = MeridionalProfile[m];
+        const Idx3 = (i * MeridionalCount + m) * 3;
+        this.RestLocal[Idx3 + 0] = Prof.Radius * CosT;
+        this.RestLocal[Idx3 + 1] = Prof.Y;
+        this.RestLocal[Idx3 + 2] = Prof.Radius * SinT;
+        this.LocalPositions[Idx3 + 0] = this.RestLocal[Idx3 + 0];
+        this.LocalPositions[Idx3 + 1] = this.RestLocal[Idx3 + 1];
+        this.LocalPositions[Idx3 + 2] = this.RestLocal[Idx3 + 2];
+        this.PrevLocal[Idx3 + 0] = this.RestLocal[Idx3 + 0];
+        this.PrevLocal[Idx3 + 1] = this.RestLocal[Idx3 + 1];
+        this.PrevLocal[Idx3 + 2] = this.RestLocal[Idx3 + 2];
+        this.Positions[Idx3 + 0] = this.RestLocal[Idx3 + 0];
+        this.Positions[Idx3 + 1] = this.RestLocal[Idx3 + 1];
+        this.Positions[Idx3 + 2] = this.RestLocal[Idx3 + 2];
+        this.InvMass[i * MeridionalCount + m] = Prof.Mobile ? 10 : 0;
+      }
+    }
+    const Pairs = [];
+    const Rests = [];
+    const Alphas = [];
+    const AddConstraint = (A, B, Compliance) => {
+      const a3 = A * 3, b3 = B * 3;
+      const dx = this.RestLocal[b3] - this.RestLocal[a3];
+      const dy = this.RestLocal[b3 + 1] - this.RestLocal[a3 + 1];
+      const dz = this.RestLocal[b3 + 2] - this.RestLocal[a3 + 2];
+      Pairs.push(A, B);
+      Rests.push(Math.sqrt(dx * dx + dy * dy + dz * dz));
+      Alphas.push(Compliance);
+    };
+    for (let i = 0; i < CircumferentialCount; ++i) {
+      const iNext = (i + 1) % CircumferentialCount;
+      for (let m = 1; m <= 3; ++m)
+        AddConstraint(i * MeridionalCount + m, iNext * MeridionalCount + m, m === 2 ? 15e-6 : 35e-6);
+      for (let m = 0; m < MeridionalCount - 1; ++m)
+        AddConstraint(i * MeridionalCount + m, i * MeridionalCount + (m + 1), 25e-6);
+      for (let m = 0; m < MeridionalCount - 1; ++m)
+        AddConstraint(i * MeridionalCount + m, iNext * MeridionalCount + (m + 1), 6e-5);
+    }
+    this.ConstraintCount = Rests.length;
+    this.ConstraintPairs = new Uint16Array(Pairs);
+    this.ConstraintRest = new Float32Array(Rests);
+    this.ConstraintAlpha = new Float32Array(Alphas);
+  }
+  Reset(WheelCenter = [0, 0, 0], WheelQuat = [0, 0, 0, 1]) {
+    this.LocalPositions.set(this.RestLocal);
+    this.PrevLocal.set(this.RestLocal);
+    this.LocalVelocities.fill(0);
+    this.VerticalForce = 0;
+    this.SyncWorldPositions(WheelCenter, WheelQuat);
+  }
+  SyncWorldPositions(WheelCenter, WheelQuat) {
+    const Cx = WheelCenter[0], Cy = WheelCenter[1], Cz = WheelCenter[2];
+    const Qx = WheelQuat[0], Qy = WheelQuat[1], Qz = WheelQuat[2], Qw = WheelQuat[3];
+    for (let n = 0; n < this.NodeCount; ++n) {
+      const Base = n * 3;
+      RotateVecInto2(Qx, Qy, Qz, Qw, this.LocalPositions[Base], this.LocalPositions[Base + 1], this.LocalPositions[Base + 2], this.Positions, Base);
+      this.Positions[Base + 0] += Cx;
+      this.Positions[Base + 1] += Cy;
+      this.Positions[Base + 2] += Cz;
+    }
+  }
+  Step(State, dt = 1 / 120, Substeps = 2) {
+    const Center = State.Center || [0, 0, 0];
+    const Quat = State.Orientation || [0, 0, 0, 1];
+    const NormalWorld = State.GroundNormal || [0, 0, 1];
+    const Deflection = Math.max(0, State.Deflection || 0);
+    const Pressure = Math.max(0, State.Pressure !== void 0 ? State.Pressure : ReferencePressure);
+    const LatForce = State.LateralForce || 0;
+    const DownLocal = [0, 0, -1];
+    RotateVecInto2(-Quat[0], -Quat[1], -Quat[2], Quat[3], -NormalWorld[0], -NormalWorld[1], -NormalWorld[2], DownLocal, 0);
+    const ContactPhi = Math.atan2(DownLocal[2], DownLocal[0]);
+    const PNorm = Math.max(0.08, Pressure / ReferencePressure);
+    const SubDt = Math.min(dt / Math.max(1, Substeps), 1 / 240);
+    const InvDt2 = 1 / (SubDt * SubDt);
+    const Damping = Math.exp(-32 * SubDt);
+    const LateralShift = Math.max(-0.042, Math.min(0.042, LatForce / 145e3));
+    const PatchSpan = Math.max(0.22, Math.min(1.1, 0.44 / Math.sqrt(Math.max(0.15, PNorm))));
+    for (let step = 0; step < Substeps; ++step) {
+      for (let n = 0; n < this.NodeCount; ++n) {
+        if (this.InvMass[n] <= 0) continue;
+        const b = n * 3;
+        this.PrevLocal[b] = this.LocalPositions[b];
+        this.PrevLocal[b + 1] = this.LocalPositions[b + 1];
+        this.PrevLocal[b + 2] = this.LocalPositions[b + 2];
+        const Rx = this.RestLocal[b], Ry = this.RestLocal[b + 1], Rz = this.RestLocal[b + 2];
+        const RestoreK = 420 * (0.35 + 0.65 * PNorm);
+        const Vx = (this.LocalVelocities[b] + SubDt * RestoreK * (Rx - this.LocalPositions[b])) * Damping;
+        const Vy = (this.LocalVelocities[b + 1] + SubDt * RestoreK * (Ry - this.LocalPositions[b + 1])) * Damping;
+        const Vz = (this.LocalVelocities[b + 2] + SubDt * RestoreK * (Rz - this.LocalPositions[b + 2])) * Damping;
+        this.LocalPositions[b] += SubDt * Vx;
+        this.LocalPositions[b + 1] += SubDt * Vy;
+        this.LocalPositions[b + 2] += SubDt * Vz;
+      }
+      for (let c = 0; c < this.ConstraintCount; ++c) {
+        const A = this.ConstraintPairs[c * 2];
+        const B = this.ConstraintPairs[c * 2 + 1];
+        const wA = this.InvMass[A];
+        const wB = this.InvMass[B];
+        const wSum = wA + wB;
+        if (wSum <= 0) continue;
+        const a3 = A * 3, b3 = B * 3;
+        const dx = this.LocalPositions[b3] - this.LocalPositions[a3];
+        const dy = this.LocalPositions[b3 + 1] - this.LocalPositions[a3 + 1];
+        const dz = this.LocalPositions[b3 + 2] - this.LocalPositions[a3 + 2];
+        const Dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (Dist < 1e-7) continue;
+        const CVal = Dist - this.ConstraintRest[c];
+        const AlphaTilde = this.ConstraintAlpha[c] * InvDt2;
+        const dLambda = -CVal / (wSum + AlphaTilde);
+        const Scale3 = dLambda / Dist;
+        if (wA > 0) {
+          this.LocalPositions[a3] -= wA * Scale3 * dx;
+          this.LocalPositions[a3 + 1] -= wA * Scale3 * dy;
+          this.LocalPositions[a3 + 2] -= wA * Scale3 * dz;
+        }
+        if (wB > 0) {
+          this.LocalPositions[b3] += wB * Scale3 * dx;
+          this.LocalPositions[b3 + 1] += wB * Scale3 * dy;
+          this.LocalPositions[b3 + 2] += wB * Scale3 * dz;
+        }
+      }
+      for (let i = 0; i < CircumferentialCount; ++i) {
+        const Theta = 2 * Math.PI * i / CircumferentialCount;
+        let DPhi = Theta - ContactPhi;
+        DPhi -= 2 * Math.PI * Math.round(DPhi / (2 * Math.PI));
+        const AbsDPhi = Math.abs(DPhi);
+        for (let m = 1; m <= 3; ++m) {
+          const Node3 = (i * MeridionalCount + m) * 3;
+          const RadialRest = MeridionalProfile[m].Radius;
+          const RadialFrac = (RadialRest - TyreRimRadius) / (TyreOuterRadius - TyreRimRadius);
+          let TargetDR = 0, TargetDY = 0;
+          if (Deflection > 1e-5) {
+            if (AbsDPhi < PatchSpan) {
+              const U = AbsDPhi / PatchSpan;
+              const Env = 0.5 * (1 + Math.cos(U * Math.PI));
+              TargetDR = -Deflection * Env * RadialFrac;
+              if (m !== 2) {
+                const BulgeSign = m === 1 ? -1 : 1;
+                TargetDY += BulgeSign * Deflection * (0.48 / (0.4 + 0.6 * Math.sqrt(PNorm))) * Env;
+              }
+            } else if (AbsDPhi < PatchSpan * 1.5) {
+              const V = (AbsDPhi - PatchSpan) / (0.5 * PatchSpan);
+              TargetDR = Math.sin(V * Math.PI) * (0.11 * Deflection * RadialFrac);
+            }
+            if (AbsDPhi < PatchSpan * 1.2) {
+              const UShear = AbsDPhi / (PatchSpan * 1.2);
+              TargetDY += LateralShift * 0.5 * (1 + Math.cos(UShear * Math.PI)) * RadialFrac;
+            }
+          }
+          const GoalR = Math.max(TyreRimRadius + 8e-3, RadialRest + TargetDR);
+          const GoalX = GoalR * Math.cos(Theta);
+          const GoalY = this.RestLocal[Node3 + 1] + TargetDY;
+          const GoalZ = GoalR * Math.sin(Theta);
+          this.LocalPositions[Node3 + 0] += (GoalX - this.LocalPositions[Node3 + 0]) * 0.75;
+          this.LocalPositions[Node3 + 1] += (GoalY - this.LocalPositions[Node3 + 1]) * 0.75;
+          this.LocalPositions[Node3 + 2] += (GoalZ - this.LocalPositions[Node3 + 2]) * 0.75;
+          this.LocalVelocities[Node3 + 0] = (this.LocalPositions[Node3 + 0] - this.PrevLocal[Node3 + 0]) / SubDt;
+          this.LocalVelocities[Node3 + 1] = (this.LocalPositions[Node3 + 1] - this.PrevLocal[Node3 + 1]) / SubDt;
+          this.LocalVelocities[Node3 + 2] = (this.LocalPositions[Node3 + 2] - this.PrevLocal[Node3 + 2]) / SubDt;
+        }
+      }
+    }
+    this.VerticalForce = Deflection * (25e3 + 0.88 * Pressure);
+    this.SyncWorldPositions(Center, Quat);
+    return this.VerticalForce;
+  }
+};
+
 // Source/VehicleSolver.js
 var SubstepSeconds = 1 / 480;
 var MaximumSubsteps = 32;
@@ -9194,6 +9933,10 @@ function SampleCurve(Curve, Abscissa) {
 var VehicleSolver = class {
   constructor(Obstacles) {
     this.Tyres = new TyreSlipSolver();
+    this.TyreModel = "solid";
+    this.SolidWheels = [0, 1, 2, 3].map(() => new SolidContinuumWheel());
+    this.ShellWheels = [0, 1, 2, 3].map(() => new ShellContinuumWheel());
+    this.CarcassWheels = [0, 1, 2, 3].map(() => new CarcassWheel());
     const Pair = ResolveSuspensionPair();
     this.Struts = [Pair.Front, Pair.Front, Pair.Rear, Pair.Rear];
     this.StaticLength = 0.6436 - 0.0914;
@@ -9205,6 +9948,23 @@ var VehicleSolver = class {
     this.Support = null;
     this.Frozen = false;
     this.Respawn();
+  }
+  ResolveActiveWheelSolver(Wheel) {
+    if (this.TyreModel === "solid") return this.SolidWheels[Wheel];
+    if (this.TyreModel === "shell") return this.ShellWheels[Wheel];
+    if (this.TyreModel === "xpbd") return this.CarcassWheels[Wheel];
+    return null;
+  }
+  AssignTyreModel(Model) {
+    this.TyreModel = Model === "solid" || Model === "shell" || Model === "xpbd" || Model === "spring" ? Model : "solid";
+    if (this.Wheels) {
+      for (let Wheel = 0; Wheel < 4; ++Wheel)
+        this.Wheels[Wheel].Carcass = this.ResolveActiveWheelSolver(Wheel);
+      this.AdvanceTyreContinuum(1 / 120);
+    }
+  }
+  QueryCarcassPositions(WheelIndex) {
+    return this.Wheels?.[WheelIndex]?.Carcass?.Positions || null;
   }
   Respawn(Position = [SpawnPoint.Position[0], SpawnPoint.Position[1], VehicleGeometry.CoMHeight + 0.02], Yaw = SpawnPoint.Yaw) {
     this.Position = Position.slice();
@@ -9249,8 +10009,17 @@ var VehicleSolver = class {
       HubDistance: Infinity,
       GroundNormal: [0, 0, 1],
       LateralForce: 0,
-      RollingSpeed: 0
+      RollingSpeed: 0,
+      Carcass: this.ResolveActiveWheelSolver(Wheel)
     }));
+    for (let Wheel = 0; Wheel < 4; ++Wheel) {
+      const Mount = AddVector(this.Position, RotateVector(this.Orientation, this.Wheels[Wheel].Mount));
+      const Down = RotateVector(this.Orientation, [0, 0, -1]);
+      const Hub = MultiplyAddVector(Mount, Down, this.StaticLength);
+      this.SolidWheels[Wheel].Reset(Hub, this.Orientation);
+      this.ShellWheels[Wheel].Reset(Hub, this.Orientation);
+      this.CarcassWheels[Wheel].Reset(Hub, this.Orientation);
+    }
     this.ShredEvents = [];
     this.PinchEvents = [];
     this.Scrapes = /* @__PURE__ */ new Map();
@@ -9324,6 +10093,33 @@ var VehicleSolver = class {
     while (this.Accumulator >= SubstepSeconds) {
       this.Step(Command, SubstepSeconds);
       this.Accumulator -= SubstepSeconds;
+    }
+    this.AdvanceTyreContinuum(Math.max(SubstepSeconds, Math.min(Seconds || 1 / 60, 1 / 30)));
+  }
+  AdvanceTyreContinuum(dt) {
+    if (this.TyreModel === "spring") {
+      for (let Index = 0; Index < 4; ++Index)
+        this.Wheels[Index].Carcass = null;
+      return;
+    }
+    const DownBody = RotateVector(this.Orientation, [0, 0, -1]);
+    for (let Index = 0; Index < 4; ++Index) {
+      const Wheel = this.Wheels[Index];
+      const Solver = this.ResolveActiveWheelSolver(Index);
+      Wheel.Carcass = Solver;
+      if (!Solver || Wheel.Shredded) continue;
+      const Mount = AddVector(this.Position, RotateVector(this.Orientation, Wheel.Mount));
+      const Hub = MultiplyAddVector(Mount, DownBody, Wheel.Length);
+      const Steered = MultiplyQuaternion(this.Orientation, ConstructAxisQuaternion([0, 0, 1], Wheel.Steer || 0));
+      const Spun = MultiplyQuaternion(Steered, ConstructAxisQuaternion([0, 1, 0], Wheel.SpinAngle || 0));
+      Solver.Step({
+        Center: Hub,
+        Orientation: Spun,
+        GroundNormal: Wheel.GroundNormal || [0, 0, 1],
+        Deflection: Wheel.Contact ? Wheel.TyreDeflection : 0,
+        Pressure: Wheel.Pressure,
+        LateralForce: Wheel.LateralForce || 0
+      }, dt, 2);
     }
   }
   //--------------------------------------------------------------------------------------------------------------------
@@ -11990,13 +12786,22 @@ function BuildVehicle(Host2, C, Body2) {
     ["Ignited", () => Host2.Thermal.Wheels.filter((Wheel) => Wheel.Ignited).length]
   ]);
   const Names = ["FL", "FR", "RL", "RR"];
-  const Tyres = C.Card(Body2, "Tyres", "CircleDot", { Accent: Accent.Vehicle, Index: 3, Subtitle: "Volumetric tyre physics \xB7 pressure \xB7 wear \xB7 failure" });
+  const Tyres = C.Card(Body2, "Tyres \xB7 3D FEM Continuum", "CircleDot", { Accent: Accent.Vehicle, Index: 3, Subtitle: "3D Hex8 Neo-Hookean FEM \xB7 2D Shell \xB7 XPBD \xB7 Spring" });
+  C.Segmented(Tyres, S, "TyreModel", [
+    ["3D FEM", "solid"],
+    ["2D Shell", "shell"],
+    ["XPBD", "xpbd"],
+    ["Spring", "spring"]
+  ], {
+    Label: "Continuum tyre model",
+    OnChange: (Model) => Host2.Vehicle.AssignTyreModel(Model)
+  });
   C.Stats(Tyres, [0, 1, 2, 3].map((Wheel) => [Names[Wheel], () => Host2.Thermal.Wheels[Wheel].Surface - 273.15, "\xB0"]), 4);
   C.Stats(Tyres, [0, 1, 2, 3].map((Wheel) => [Names[Wheel] + " kPa", () => Host2.Thermal.Wheels[Wheel].GaugePressure / 1e3]), 4);
   C.Stats(Tyres, [0, 1, 2, 3].map((Wheel) => [Names[Wheel] + " mm", () => Host2.Vehicle.Wheels[Wheel].TyreDeflection * 1e3, "", 0]), 4);
   C.Stats(Tyres, [0, 1, 2, 3].map((Wheel) => [Names[Wheel] + " tread", () => Host2.Thermal.QueryTreadFractions()[Wheel] * 100, "%"]), 4);
   C.Readout(Tyres, () => [Host2.QueryTyreLive().States.map((State, Wheel) => `${Names[Wheel]} ${State || "ok"}`).join(" \xB7 ")]);
-  C.Muted(Tyres, "GPU volumetric tyre physics (Chaos Flesh / PB-FEM continuum): real-time contact patch flattening, internal pressure dilatation, volumetric sidewall bulges and lateral shear distortion.");
+  C.Muted(Tyres, "3D Hexahedral Neo-Hookean Continuum FEM (128 Hex8 elements, 32\xD75 nodal lattice per tyre) with GPU displacement-field interpolation.");
   Slider(C, Tyres, S, "TyrePressureFront", "Front cold pressure", 0, 400, 5, "kPa", 0, ["Flat", "Over"], () => Host2.ApplySetting("TyrePressure"));
   Slider(C, Tyres, S, "TyrePressureRear", "Rear cold pressure", 0, 400, 5, "kPa", 0, ["Flat", "Over"], () => Host2.ApplySetting("TyrePressure"));
   C.Switch(Tyres, S, "TyreWear", { Label: "Tread wear", Detail: "Sliding work abrades the tread, hotter faster" });
@@ -44556,37 +45361,70 @@ var FreeCameraSolver = class {
 };
 
 // Source/VehicleVisualState.js
-var VehicleRecordBytes = 208;
+var VehicleHeaderFloats = 52;
+var VehicleCarcassFloats = 4 * NodesPerWheel * 4;
+var VehicleRecordFloats = VehicleHeaderFloats + VehicleCarcassFloats;
+var VehicleRecordBytes = VehicleRecordFloats * 4;
 var VehicleVisualState = class {
+  constructor() {
+    this.Data = new Float32Array(VehicleRecordFloats);
+  }
   EncodeRecord(Header, Wheels = [], VehicleOrientation = null) {
-    const Data = new Float32Array(VehicleRecordBytes / 4);
+    const Data = this.Data;
+    Data.fill(0);
     const Cockpit = Header.Cockpit || { Anchor: [0, 0, 0], Scale: 1, Offset: [0, 0, 0] };
-    Data.set([Header.SteeringAngle || 0, Header.SeeThroughGlass ? 1 : 0, 0, Header.Lamp || 0]);
-    Data.set(Header.Column || [0, 0, 0], 4);
-    Data.set(Header.Axis || [1, 0, 0], 8);
-    Data.set([...Cockpit.Anchor, Cockpit.Scale], 12);
-    Data.set([...Header.Tablet?.Centre || [0, 0, 0], Header.Tablet?.Scale || 1], 16);
-    Wheels.forEach((Wheel, Index) => {
-      Data[20 + Index * 4] = Wheel?.Shredded ? 1 : 0;
-    });
+    Data[0] = Header.SteeringAngle || 0;
+    Data[1] = Header.SeeThroughGlass ? 1 : 0;
+    Data[2] = 0;
+    Data[3] = Header.Lamp || 0;
+    if (Header.Column) Data.set(Header.Column, 4);
+    if (Header.Axis) Data.set(Header.Axis, 8);
+    else Data[8] = 1;
+    Data[12] = Cockpit.Anchor[0] || 0;
+    Data[13] = Cockpit.Anchor[1] || 0;
+    Data[14] = Cockpit.Anchor[2] || 0;
+    Data[15] = Cockpit.Scale ?? 1;
+    const TabletCentre = Header.Tablet?.Centre || [0, 0, 0];
+    Data[16] = TabletCentre[0] || 0;
+    Data[17] = TabletCentre[1] || 0;
+    Data[18] = TabletCentre[2] || 0;
+    Data[19] = Header.Tablet?.Scale || 1;
     const Orientation = VehicleOrientation || [0, 0, 0, 1];
-    Wheels.forEach((Wheel, Index) => {
-      if (!Wheel || Wheel.Shredded) return;
+    for (let Index = 0; Index < 4; ++Index) {
+      const Wheel = Wheels[Index];
+      const WheelOffset = 20 + Index * 4;
+      Data[WheelOffset + 0] = Wheel?.Shredded ? 1 : 0;
+      if (!Wheel || Wheel.Shredded) continue;
       const Deflection = Math.max(0, Wheel.TyreDeflection || 0);
       const Pressure = Math.max(0, Wheel.Pressure != null ? Wheel.Pressure : 22e4);
       const Steered = MultiplyQuaternion(Orientation, ConstructAxisQuaternion([0, 0, 1], Wheel.Steer || 0));
       const Spun = MultiplyQuaternion(Steered, ConstructAxisQuaternion([0, 1, 0], Wheel.SpinAngle || 0));
-      const DownWorld = Wheel.GroundNormal ? Wheel.GroundNormal.map((V) => -V) : [0, 0, -1];
+      const DownWorld = Wheel.GroundNormal ? [-Wheel.GroundNormal[0], -Wheel.GroundNormal[1], -Wheel.GroundNormal[2]] : [0, 0, -1];
       const LocalDown = RotateVector(ConjugateQuaternion(Spun), DownWorld);
       const ContactAngle = Math.atan2(LocalDown[2], LocalDown[0]);
       const LateralForce = Wheel.LateralForce || 0;
       const LateralDistortion = Math.max(-0.04, Math.min(0.04, LateralForce / 15e4));
-      const Offset = 36 + Index * 4;
-      Data[Offset + 0] = ContactAngle;
-      Data[Offset + 1] = Deflection;
-      Data[Offset + 2] = Pressure;
-      Data[Offset + 3] = LateralDistortion;
-    });
+      const DeformOffset = 36 + Index * 4;
+      Data[DeformOffset + 0] = ContactAngle;
+      Data[DeformOffset + 1] = Deflection;
+      Data[DeformOffset + 2] = Pressure;
+      Data[DeformOffset + 3] = LateralDistortion;
+      const Carcass = Wheel.Carcass;
+      if (Carcass && Carcass.LocalPositions && Carcass.RestLocal && Carcass.NodeCount === NodesPerWheel) {
+        Data[WheelOffset + 1] = 1;
+        const LocalPos = Carcass.LocalPositions;
+        const RestPos = Carcass.RestLocal;
+        const BaseOut = VehicleHeaderFloats + Index * NodesPerWheel * 4;
+        for (let n = 0; n < NodesPerWheel; ++n) {
+          const n3 = n * 3;
+          const o4 = BaseOut + n * 4;
+          Data[o4 + 0] = LocalPos[n3 + 0] - RestPos[n3 + 0];
+          Data[o4 + 1] = LocalPos[n3 + 1] - RestPos[n3 + 1];
+          Data[o4 + 2] = LocalPos[n3 + 2] - RestPos[n3 + 2];
+          Data[o4 + 3] = 0;
+        }
+      }
+    }
     return Data;
   }
 };
@@ -45737,7 +46575,8 @@ var IlluminationHost = class {
       RenderScale: this.Grade.RenderScale,
       LightingPreset: "Custom",
       TestPlume: 0,
-      // 📝 Tyres: cold pressures per axle [kPa], wear, failure and optional keyboard countersteer.
+      // 📝 Tyres: 3D FEM ("solid") by default, plus 2D Shell ("shell"), XPBD ("xpbd") & Spring ("spring"); cold pressures, wear & failure.
+      TyreModel: (Query.get("tyremodel") || "solid").toLowerCase(),
       TyrePressureFront: 220,
       TyrePressureRear: 220,
       SteeringAssist: true,
@@ -46656,6 +47495,8 @@ var IlluminationHost = class {
       Command = { Throttle: 0, Brake: 0, Steer: 0, Handbrake: false };
     const Step2 = this.FixedStep ? this.FixedStep : \u0394\u03C4;
     this.Vehicle.AssignAssists({ LineLock: this.Settings.LineLock });
+    if (this.Vehicle.TyreModel !== this.Settings.TyreModel)
+      this.Vehicle.AssignTyreModel(this.Settings.TyreModel);
     this.Recovery.Advance(Step2);
     this.Fracture.ResolveImpacts(this.Vehicle, Step2);
     this.Vehicle.Advance(Command, Step2);

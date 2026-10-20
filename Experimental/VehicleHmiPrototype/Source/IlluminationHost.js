@@ -131,7 +131,8 @@ class IlluminationHost
             Antialias: true, TraceScale: 2, FreezeDistance: false, CardRadiosity: true, CardTileBudget: this.Grade.TileBudget,
             Quality: ["low", "medium", "high"].indexOf(this.GradeName),
             RenderScale: this.Grade.RenderScale, LightingPreset: "Custom", TestPlume: 0,
-            // 📝 Tyres: cold pressures per axle [kPa], wear, failure and optional keyboard countersteer.
+            // 📝 Tyres: 3D FEM ("solid") by default, plus 2D Shell ("shell"), XPBD ("xpbd") & Spring ("spring"); cold pressures, wear & failure.
+            TyreModel: (Query.get("tyremodel") || "solid").toLowerCase(),
             TyrePressureFront: 220, TyrePressureRear: 220, SteeringAssist: true, SteeringAssistStrength: 0.45,
             TyreWear: true, WearScale: 1.0, TyreFailure: true, Sparks: true,
             HudScale: 1, HudAcross: 0, HudDown: 0,
@@ -1083,6 +1084,8 @@ class IlluminationHost
             Command = { Throttle: 0.0, Brake: 0.0, Steer: 0.0, Handbrake: false };
         const Step = this.FixedStep ? this.FixedStep : Δτ;
         this.Vehicle.AssignAssists({ LineLock: this.Settings.LineLock });
+        if (this.Vehicle.TyreModel !== this.Settings.TyreModel)
+            this.Vehicle.AssignTyreModel(this.Settings.TyreModel);
         this.Recovery.Advance(Step);
         this.Fracture.ResolveImpacts(this.Vehicle, Step);
         this.Vehicle.Advance(Command, Step);
