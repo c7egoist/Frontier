@@ -100,7 +100,7 @@ fn PresentFragment(Varying: PresentVarying) -> @location(0) vec4f
     {
         Colour = clamp(Radiance, vec3f(0.0), vec3f(1.0));
     }
-    if (Frame.InsetEnabled != 0u)
+    if ((Frame.InsetEnabled & 1u) != 0u)
     {
         let Size = floor(Frame.ScreenExtent.y * 0.34);
         let Origin = vec2f(Frame.ScreenExtent.x - Size - 16.0, 16.0);

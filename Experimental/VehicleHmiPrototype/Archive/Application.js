@@ -1,7 +1,12 @@
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
 };
 var __export = (target, all) => {
   for (var name in all)
@@ -6575,6 +6580,8 @@ var RayTracingSpace = class {
   ConstructResources(Scene, MaterialRecords, LightRecords) {
     this.BuildCpuHierarchy(Scene);
     if (this.Exchange && this.Exchange.Device) {
+      this.MaterialRecords = MaterialRecords;
+      this.LightRecords = LightRecords;
       this.NodeBuffer = this.Exchange.ConstructRecordsFrom(
         this.AllNodeScalars,
         GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -6585,18 +6592,30 @@ var RayTracingSpace = class {
         GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
         "RayTracing BLAS triangles"
       );
+      this.DefaultHmiTexture = this.Exchange.ConstructTexture({
+        label: "Fallback HMI screen texture",
+        size: [1, 1],
+        format: "rgba8unorm-srgb",
+        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+      });
+      const DefaultView = this.DefaultHmiTexture.createView();
       this.TraversalLayout = this.Exchange.ConstructDescriptorLayout(
-        ["StorageRead", "StorageRead", "StorageRead", "Uniform"],
+        ["StorageRead", "StorageRead", "StorageRead", "Uniform", "Texture2D", "Texture2D"],
         GPUShaderStage.COMPUTE,
         "RayTracing traversal"
       );
-      this.TraversalGroup = this.Exchange.ConstructDescriptorGroup(
-        this.TraversalLayout,
-        [this.NodeBuffer, this.TriangleBuffer, MaterialRecords, LightRecords],
-        "RayTracing traversal group"
-      );
+      this.AssignHmiTextures(DefaultView, DefaultView);
     }
     this.UpdateTlas(Scene, null);
+  }
+  AssignHmiTextures(TabletView, ClusterView) {
+    if (!this.Exchange || !this.Exchange.Device || !this.TraversalLayout)
+      return;
+    this.TraversalGroup = this.Exchange.ConstructDescriptorGroup(
+      this.TraversalLayout,
+      [this.NodeBuffer, this.TriangleBuffer, this.MaterialRecords, this.LightRecords, TabletView, ClusterView],
+      "RayTracing traversal group"
+    );
   }
   // 📝 Registers per-fragment BLAS leaf nodes and triangles when a breakable prop shatters in FractureSequence.
   RegisterPropFragments(BreakableIndex, PieceFirst, Capacity, WrittenFragments) {
@@ -45325,7 +45344,6 @@ var ChaseCameraSolver = class {
     this.Target = [Position[0], Position[1], Position[2] + ChaseCameraConfiguration.LookAtHeight];
     const Widen = ClampScalar(Math.abs(Speed) / Math.max(1, ChaseCameraConfiguration.SpeedForFullFov), 0, 1);
     this.FieldOfView = ChaseCameraConfiguration.RestFieldOfView + ChaseCameraConfiguration.SpeedFieldOfView * Widen;
-    this.OrbitYaw *= Math.exp(-0.35 * \u0394\u03C4);
   }
 };
 var FreeCameraSolver = class {
@@ -46300,6 +46318,11 @@ var CabinSequence = class _CabinSequence {
     Pass.end();
     this.Metrics.PreviewPasses++;
   }
+  QueryEffectiveBrightness() {
+    const Screen = this.Screen;
+    const Live = !!Screen && this.Settings.Screens;
+    return ResolveScreenBrightness(this.Settings.Brightness, Screen?.Values.brightness ?? 100, Live);
+  }
   // 📝 Over the recombined radiance, before the antialiasing; the surface depth read only.
   RecordOverlay(Encoder, TargetView, DepthView) {
     if (!this.OverlayProgram)
@@ -46803,6 +46826,8 @@ var IlluminationHost = class {
       Scene: this.Scene,
       AdaptationRecords: this.Display.AdaptationRecords
     });
+    if (this.RayTracing && this.Cabin.TabletTexture && this.Cabin.ClusterTexture)
+      this.RayTracing.AssignHmiTextures(this.Cabin.TabletTexture.createView(), this.Cabin.ClusterTexture.createView());
     this.ReportProgress("Compiling drift smoke programs", 0.91);
     this.Thermal = new TyreThermalSolver(4);
     this.BurstPuffs = [];
@@ -47458,7 +47483,11 @@ var IlluminationHost = class {
     const ScaleShort = Math.max(1, Math.min(65535, Math.round((this.Settings.ReflectionScale ?? 1) * 1e3) + 1));
     Integers[115] = (DistMode | RoughByte << 8 | ScaleShort << 16) >>> 0;
     Scalars.set(this.Focus, 116);
-    Integers[119] = (this.Dock ? this.Dock.InsetDrawn : this.Settings.InsetEnabled) ? 1 : 0;
+    const InsetBit = (this.Dock ? this.Dock.InsetDrawn : this.Settings.InsetEnabled) ? 1 : 0;
+    const EffectiveBrightness = this.Cabin ? this.Cabin.QueryEffectiveBrightness() : this.Settings.Screens ? this.Settings.Brightness : 0;
+    const HmiBrightEncoded = Math.max(1, Math.min(4095, Math.round(EffectiveBrightness * 1e3) + 1));
+    const HmiScaleEncoded = Math.max(1, Math.min(4095, Math.round((this.Settings.HmiScale ?? 1) * 1e3)));
+    Integers[119] = (InsetBit | HmiBrightEncoded << 8 | HmiScaleEncoded << 20) >>> 0;
     const Fire = this.Smoke.FireLight;
     Scalars.set(Fire.Position, 120);
     Scalars[123] = this.Settings.SmokeEnabled ? Fire.Intensity : 0;

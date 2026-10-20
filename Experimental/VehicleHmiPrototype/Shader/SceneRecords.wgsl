@@ -107,6 +107,18 @@ fn ResolveReflectionScale(Frame: FrameRecord) -> f32
     return select(1.0, max(f32(Encoded) - 1.0, 0.0) / 1000.0, Encoded > 0u);
 }
 
+fn ResolveHmiBrightness(Frame: FrameRecord) -> f32
+{
+    let Encoded = (Frame.InsetEnabled >> 8u) & 0xFFFu;
+    return select(1.0, max(f32(Encoded) - 1.0, 0.0) / 1000.0, Encoded > 0u);
+}
+
+fn ResolveHmiScale(Frame: FrameRecord) -> f32
+{
+    let Encoded = (Frame.InsetEnabled >> 20u) & 0xFFFu;
+    return select(1.0, f32(Encoded) / 1000.0, Encoded > 0u);
+}
+
 //------------------------------------------------------------------------------------------------------------------------
 //                                                   OCCUPANT RECORD
 //------------------------------------------------------------------------------------------------------------------------

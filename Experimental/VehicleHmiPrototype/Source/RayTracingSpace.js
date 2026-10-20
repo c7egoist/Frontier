@@ -405,6 +405,8 @@ export class RayTracingSpace
         this.BuildCpuHierarchy(Scene);
         if (this.Exchange && this.Exchange.Device)
         {
+            this.MaterialRecords = MaterialRecords;
+            this.LightRecords    = LightRecords;
             this.NodeBuffer = this.Exchange.ConstructRecordsFrom(
                 this.AllNodeScalars,
                 GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
@@ -415,18 +417,32 @@ export class RayTracingSpace
                 GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
                 "RayTracing BLAS triangles"
             );
+            this.DefaultHmiTexture = this.Exchange.ConstructTexture({
+                label: "Fallback HMI screen texture",
+                size: [1, 1],
+                format: "rgba8unorm-srgb",
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST
+            });
+            const DefaultView = this.DefaultHmiTexture.createView();
             this.TraversalLayout = this.Exchange.ConstructDescriptorLayout(
-                ["StorageRead", "StorageRead", "StorageRead", "Uniform"],
+                ["StorageRead", "StorageRead", "StorageRead", "Uniform", "Texture2D", "Texture2D"],
                 GPUShaderStage.COMPUTE,
                 "RayTracing traversal"
             );
-            this.TraversalGroup = this.Exchange.ConstructDescriptorGroup(
-                this.TraversalLayout,
-                [this.NodeBuffer, this.TriangleBuffer, MaterialRecords, LightRecords],
-                "RayTracing traversal group"
-            );
+            this.AssignHmiTextures(DefaultView, DefaultView);
         }
         this.UpdateTlas(Scene, null);
+    }
+
+    AssignHmiTextures(TabletView, ClusterView)
+    {
+        if (!this.Exchange || !this.Exchange.Device || !this.TraversalLayout)
+            return;
+        this.TraversalGroup = this.Exchange.ConstructDescriptorGroup(
+            this.TraversalLayout,
+            [this.NodeBuffer, this.TriangleBuffer, this.MaterialRecords, this.LightRecords, TabletView, ClusterView],
+            "RayTracing traversal group"
+        );
     }
 
     // 📝 Registers per-fragment BLAS leaf nodes and triangles when a breakable prop shatters in FractureSequence.

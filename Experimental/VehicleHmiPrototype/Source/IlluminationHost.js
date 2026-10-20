@@ -342,6 +342,8 @@ class IlluminationHost
         await this.Cabin.ConstructResources({ FrameRecords: this.FrameRecords, OccupantRecords: this.OccupantRecords, MaterialRecords: this.MaterialRecords,
                                               EffectRecords: this.Effects.Records, VehicleRecords: this.VehicleRecords, Shadow: this.Shadow,
                                               Atmosphere: this.Atmosphere, Scene: this.Scene, AdaptationRecords: this.Display.AdaptationRecords });
+        if (this.RayTracing && this.Cabin.TabletTexture && this.Cabin.ClusterTexture)
+            this.RayTracing.AssignHmiTextures(this.Cabin.TabletTexture.createView(), this.Cabin.ClusterTexture.createView());
         this.ReportProgress("Compiling drift smoke programs", 0.91);
         this.Thermal = new TyreThermalSolver(4);
         this.BurstPuffs = [];
@@ -1043,7 +1045,11 @@ class IlluminationHost
         const ScaleShort = Math.max(1, Math.min(65535, Math.round((this.Settings.ReflectionScale ?? 1.0) * 1000.0) + 1));
         Integers[115]    = (DistMode | (RoughByte << 8) | (ScaleShort << 16)) >>> 0;
         Scalars.set(this.Focus, 116);
-        Integers[119] = (this.Dock ? this.Dock.InsetDrawn : this.Settings.InsetEnabled) ? 1 : 0;
+        const InsetBit = (this.Dock ? this.Dock.InsetDrawn : this.Settings.InsetEnabled) ? 1 : 0;
+        const EffectiveBrightness = this.Cabin ? this.Cabin.QueryEffectiveBrightness() : (this.Settings.Screens ? this.Settings.Brightness : 0.0);
+        const HmiBrightEncoded = Math.max(1, Math.min(4095, Math.round(EffectiveBrightness * 1000.0) + 1));
+        const HmiScaleEncoded  = Math.max(1, Math.min(4095, Math.round((this.Settings.HmiScale ?? 1.0) * 1000.0)));
+        Integers[119] = (InsetBit | (HmiBrightEncoded << 8) | (HmiScaleEncoded << 20)) >>> 0;
         const Fire = this.Smoke.FireLight;
         Scalars.set(Fire.Position, 120);
         Scalars[123] = this.Settings.SmokeEnabled ? Fire.Intensity : 0.0;

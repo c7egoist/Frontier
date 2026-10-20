@@ -121,6 +121,10 @@ fn IntegrateDirectRadiance(@builtin(global_invocation_id) Invocation: vec3u)
         Radiance += Fire.Illuminance * ResolveDirectReflectance(Surface, Normal, View, Fire.Direction);
     }
 
+    // Live HMI Display Rectangular Area-Light NEE (Tablet + Instrument Cluster) with BVH shadow visibility
+    let HmiPair = ProjectTemporalPair(Pixel, Frame.FrameIndex, 43u);
+    Radiance += EvaluateHmiAreaLightNee(Position, Normal, View, Surface, HmiPair, UseRtShadows) * InversePi;
+
     // 3D Clustered light evaluations (bitmask-culled point lights, roadway IES street lamps, and vehicle beams)
     let CellIdx = ResolveClusterCellIndex(SceneLights.GridMinimum, SceneLights.GridScale, Position);
     if (CellIdx != -1)

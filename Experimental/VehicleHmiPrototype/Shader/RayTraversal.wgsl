@@ -25,6 +25,8 @@ struct BoundingNode
 @group(3) @binding(1) var<storage, read> BvhTriangles : array<vec4f>;
 @group(3) @binding(2) var<storage, read> RayMaterials : array<MaterialRecord>;
 @group(3) @binding(3) var<uniform> RayLights          : ClusteredLightBuffer;
+@group(3) @binding(4) var HmiTabletTexture            : texture_2d<f32>;
+@group(3) @binding(5) var HmiClusterTexture           : texture_2d<f32>;
 
 const TlasLeafBit        : u32 = 0x80000000u;
 const TlasIndexMask      : u32 = 0x7FFFFFFFu;
@@ -541,10 +543,236 @@ fn SampleSurfaceBsdf(
     return true;
 }
 
+// 📐 Physical HMI screen texture evaluation & rectangular area-light Next-Event Estimation (NEE) inside the vehicle cabin.
+const HmiTabletCentre  : vec3f = vec3f(0.96721675, 0.0, 0.51285865);
+const HmiTabletRight   : vec3f = vec3f(0.0, -1.0, 0.0);
+const HmiTabletUp      : vec3f = vec3f(0.40776045, 0.0, 0.91308894);
+const HmiTabletNormal  : vec3f = vec3f(-0.91308894, 0.0, 0.40776045);
+
+const HmiClusterCentre : vec3f = vec3f(0.65755436, 0.42, 0.71216928);
+const HmiClusterRight  : vec3f = vec3f(0.0, -1.0, 0.0);
+const HmiClusterUp     : vec3f = vec3f(0.21822962, 0.0, 0.97589745);
+const HmiClusterNormal : vec3f = vec3f(-0.97589745, 0.0, 0.21822962);
+
+fn IsCockpitSurface(Identity: u32, Family: u32) -> bool
+{
+    return Identity == 0u && Family >= CockpitFamilyFirst && Family <= TabletHousingFamily && Family != RimMarkFamily;
+}
+
+fn LoadHmiTexel(IsCluster: bool, UV: vec2f) -> vec3f
+{
+    let Clamped = saturate(UV);
+    if (IsCluster)
+    {
+        let Dims  = vec2f(textureDimensions(HmiClusterTexture, 0));
+        let Texel = clamp(vec2i(Clamped * Dims), vec2i(0), max(vec2i(Dims) - vec2i(1), vec2i(0)));
+        return textureLoad(HmiClusterTexture, Texel, 0).rgb;
+    }
+    let Dims  = vec2f(textureDimensions(HmiTabletTexture, 0));
+    let Texel = clamp(vec2i(Clamped * Dims), vec2i(0), max(vec2i(Dims) - vec2i(1), vec2i(0)));
+    return textureLoad(HmiTabletTexture, Texel, 0).rgb;
+}
+
+// 📐 Multi-tap filtered read of the live HMI texture at UV so area-light NEE integrates the screen's spatial colour distribution.
+fn SampleHmiScreenFiltered(IsCluster: bool, UV: vec2f) -> vec3f
+{
+    let C0 = LoadHmiTexel(IsCluster, UV);
+    let C1 = LoadHmiTexel(IsCluster, UV + vec2f( 0.14,  0.09));
+    let C2 = LoadHmiTexel(IsCluster, UV + vec2f(-0.14,  0.09));
+    let C3 = LoadHmiTexel(IsCluster, UV + vec2f( 0.14, -0.09));
+    let C4 = LoadHmiTexel(IsCluster, UV + vec2f(-0.14, -0.09));
+    return C0 * 0.40 + (C1 + C2 + C3 + C4) * 0.15;
+}
+
+// 📐 Evaluates the live emitted radiance L_e(x, ω) when a GI or reflection ray intersects the Tablet or Instrument Cluster display.
+//    When ApplyMisWeight is true (for diffuse/BSDF GI rays), applies Veach's balance/power heuristic weight w_bsdf complementary to
+//    EvaluateHmiAreaLightNee so direct NEE + BSDF hits sum to 1 without double counting.
+fn EvaluateHmiScreenRadiance(Hit: RayHit, IncomingRayDir: vec3f, ApplyMisWeight: bool) -> vec3f
+{
+    if (Hit.Identity != 0u)
+    {
+        return vec3f(0.0);
+    }
+    let HmiBright = ResolveHmiBrightness(Frame);
+    if (HmiBright <= 1.0e-4)
+    {
+        return vec3f(0.0);
+    }
+    let Occ       = Occupants[0];
+    let LocalPos  = (Occ.WorldToLocal * vec4f(Hit.Position, 1.0)).xyz;
+    let LocalView = normalize((Occ.WorldToLocal * vec4f(-IncomingRayDir, 0.0)).xyz);
+
+    if (Hit.Family == DisplayGlassFamily)
+    {
+        let CosEmit = dot(LocalView, HmiTabletNormal);
+        if (CosEmit <= 0.0)
+        {
+            return vec3f(0.0);
+        }
+        let HmiScale = ResolveHmiScale(Frame);
+        let Width    = 0.30 * HmiScale;
+        let Height   = 0.1875 * HmiScale;
+        let Rel      = LocalPos - HmiTabletCentre;
+        let U        = 0.5 + dot(Rel, HmiTabletRight) / max(Width, 1.0e-4);
+        let V        = 0.5 - dot(Rel, HmiTabletUp) / max(Height, 1.0e-4);
+        if (U >= 0.0 && U <= 1.0 && V >= 0.0 && V <= 1.0)
+        {
+            var Weight = 1.0;
+            if (ApplyMisWeight)
+            {
+                let Area       = Width * Height;
+                let DistSq     = max(Hit.Travel * Hit.Travel, 0.030);
+                let SolidAngle = (Area * CosEmit) / DistSq;
+                let PdfBsdf    = InversePi;
+                let Prod       = PdfBsdf * SolidAngle;
+                Weight         = (Prod * Prod) / (1.0 + Prod * Prod);
+            }
+            return LoadHmiTexel(false, vec2f(U, V)) * (3.0 * HmiBright * Weight);
+        }
+    }
+    else if (Hit.Family == SteeringWheelFamily)
+    {
+        let CosEmit = dot(LocalView, HmiClusterNormal);
+        if (CosEmit <= 0.0)
+        {
+            return vec3f(0.0);
+        }
+        let Rel   = LocalPos - HmiClusterCentre;
+        let Plane = abs(dot(Rel, HmiClusterNormal));
+        if (Plane < 0.016)
+        {
+            let X = dot(Rel, HmiClusterRight) / 0.135;
+            let Y = dot(Rel, HmiClusterUp) / 0.0755;
+            if (abs(Y) <= 1.0 && (abs(X) + 0.38 * abs(Y)) <= 1.02)
+            {
+                var Weight = 1.0;
+                if (ApplyMisWeight)
+                {
+                    let Area       = 0.27 * 0.151 * 0.81;
+                    let DistSq     = max(Hit.Travel * Hit.Travel, 0.025);
+                    let SolidAngle = (Area * CosEmit) / DistSq;
+                    let PdfBsdf    = InversePi;
+                    let Prod       = PdfBsdf * SolidAngle;
+                    Weight         = (Prod * Prod) / (1.0 + Prod * Prod);
+                }
+                let U = 0.5 + 0.5 * X;
+                let V = 0.5 - 0.5 * Y;
+                return LoadHmiTexel(true, vec2f(U, V)) * (3.5 * HmiBright * Weight);
+            }
+        }
+    }
+    return vec3f(0.0);
+}
+
+// 📐 Physical Rectangular Area-Light Next-Event Estimation (NEE) over the 3D Tablet and Instrument Cluster displays
+//    with BVH shadow ray occlusion and Veach power-heuristic MIS weight w_nee inside the vehicle cabin.
+fn EvaluateHmiAreaLightNee(
+    Position    : vec3f,
+    Normal      : vec3f,
+    View        : vec3f,
+    Surface     : SurfaceSample,
+    Pair        : vec2f,
+    TraceShadow : bool
+) -> vec3f
+{
+    let HmiBright = ResolveHmiBrightness(Frame);
+    if (HmiBright <= 1.0e-4)
+    {
+        return vec3f(0.0);
+    }
+    let Occ      = Occupants[0];
+    let LocalPos = (Occ.WorldToLocal * vec4f(Position, 1.0)).xyz;
+    // Fast cabin bounding check in vehicle-local space
+    if (LocalPos.x < -1.35 || LocalPos.x > 1.55 || abs(LocalPos.y) > 1.15 || LocalPos.z < -0.25 || LocalPos.z > 1.35)
+    {
+        return vec3f(0.0);
+    }
+
+    var Radiance = vec3f(0.0);
+    let Origin   = Position + Normal * RayEpsilon;
+
+    // 1. Centre-Stack Tablet Display Area Light (0.30m × 0.1875m × HmiScale²)
+    let HmiScale    = ResolveHmiScale(Frame);
+    let TabWidth    = 0.30 * HmiScale;
+    let TabHeight   = 0.1875 * HmiScale;
+    let TabArea     = TabWidth * TabHeight;
+    let TabLocalPt  = HmiTabletCentre
+                    + HmiTabletRight * ((Pair.x - 0.5) * TabWidth)
+                    + HmiTabletUp    * ((0.5 - Pair.y) * TabHeight);
+    let TabWorldPt   = (Occ.LocalToWorld * vec4f(TabLocalPt, 1.0)).xyz;
+    let TabWorldNorm = normalize((Occ.LocalToWorld * vec4f(HmiTabletNormal, 0.0)).xyz);
+    let ToTablet     = TabWorldPt - Position;
+    let TabDistSq    = dot(ToTablet, ToTablet);
+    if (TabDistSq > 9.0e-4 && TabDistSq < 3.6)
+    {
+        let TabDist   = sqrt(TabDistSq);
+        let TabDir    = ToTablet / TabDist;
+        let NoL       = dot(Normal, TabDir);
+        let CosScreen = dot(TabWorldNorm, -TabDir);
+        if (NoL > 0.0 && CosScreen > 0.0)
+        {
+            var Vis = 1.0;
+            if (TraceShadow && TabDist > 0.05)
+            {
+                Vis = TraceSceneVisibility(Origin, TabDir, RayEpsilon, max(TabDist - 0.035, RayEpsilon));
+            }
+            if (Vis > 0.0)
+            {
+                let ScreenLe   = SampleHmiScreenFiltered(false, Pair) * (3.0 * HmiBright);
+                let SolidAngle = (TabArea * CosScreen) / max(TabDistSq, 0.030);
+                let Prod       = (NoL * InversePi) * SolidAngle;
+                let MisWeight  = 1.0 / (1.0 + Prod * Prod);
+                let Brdf       = ResolveDirectReflectance(Surface, Normal, View, TabDir) * Pi;
+                Radiance      += ScreenLe * SolidAngle * MisWeight * Vis * Brdf;
+            }
+        }
+    }
+
+    // 2. Instrument Cluster Display Area Light (0.27m × 0.151m hexagonal binnacle)
+    let CluPair     = fract(Pair + vec2f(0.618034, 0.381966));
+    let CluWidth    = 0.27;
+    let CluHeight   = 0.151;
+    let CluArea     = CluWidth * CluHeight * 0.81;
+    let CluLocalPt  = HmiClusterCentre
+                    + HmiClusterRight * ((CluPair.x - 0.5) * CluWidth)
+                    + HmiClusterUp    * ((0.5 - CluPair.y) * CluHeight);
+    let CluWorldPt   = (Occ.LocalToWorld * vec4f(CluLocalPt, 1.0)).xyz;
+    let CluWorldNorm = normalize((Occ.LocalToWorld * vec4f(HmiClusterNormal, 0.0)).xyz);
+    let ToCluster    = CluWorldPt - Position;
+    let CluDistSq    = dot(ToCluster, ToCluster);
+    if (CluDistSq > 9.0e-4 && CluDistSq < 2.2)
+    {
+        let CluDist   = sqrt(CluDistSq);
+        let CluDir    = ToCluster / CluDist;
+        let NoL       = dot(Normal, CluDir);
+        let CosScreen = dot(CluWorldNorm, -CluDir);
+        if (NoL > 0.0 && CosScreen > 0.0)
+        {
+            var Vis = 1.0;
+            if (TraceShadow && CluDist > 0.05)
+            {
+                Vis = TraceSceneVisibility(Origin, CluDir, RayEpsilon, max(CluDist - 0.035, RayEpsilon));
+            }
+            if (Vis > 0.0)
+            {
+                let ScreenLe   = SampleHmiScreenFiltered(true, CluPair) * (3.5 * HmiBright);
+                let SolidAngle = (CluArea * CosScreen) / max(CluDistSq, 0.025);
+                let Prod       = (NoL * InversePi) * SolidAngle;
+                let MisWeight  = 1.0 / (1.0 + Prod * Prod);
+                let Brdf       = ResolveDirectReflectance(Surface, Normal, View, CluDir) * Pi;
+                Radiance      += ScreenLe * SolidAngle * MisWeight * Vis * Brdf;
+            }
+        }
+    }
+
+    return Radiance;
+}
+
 // 📐 Next-Event Estimation (NEE) at a path vertex:
 //    1. Soft solar cone NEE with exact BVH shadow ray + MIS weight
 //    2. Active tyre fire point light NEE
-//    3. Resampled Importance Sampling (RIS) over all 32 clustered photometric / IES lights with 1 exact BVH shadow ray
+//    3. Live HMI Tablet & Instrument Cluster rectangular area-light NEE inside the vehicle cabin
+//    4. Resampled Importance Sampling (RIS) over all 32 clustered photometric / IES lights with 1 exact BVH shadow ray
 fn EvaluateDirectNextEvent(
     Position     : vec3f,
     Normal       : vec3f,
@@ -580,6 +808,9 @@ fn EvaluateDirectNextEvent(
     {
         Direct += Fire.Illuminance * ResolveDirectReflectance(Surface, Normal, View, Fire.Direction) * Pi;
     }
+
+    // 3. Live HMI Display Rectangular Area-Light NEE (Tablet + Instrument Cluster)
+    Direct += EvaluateHmiAreaLightNee(Position, Normal, View, Surface, Pair, TraceShadows);
 
     // 3. Inline RIS over 3D Clustered Lights (point lights, roadway IES street lamps, headlights, fog & roof beams)
     let CellIdx = ResolveClusterCellIndex(RayLights.GridMinimum, RayLights.GridScale, Position);
@@ -668,8 +899,8 @@ fn TraceMultiBouncePath(Origin: vec3f, FirstDirection: vec3f, Seed: ptr<function
     let Mat1  = RayMaterials[Hit1.Family];
     let Surf1 = ProjectSurfaceSample(Mat1);
 
-    // Bounce 1 direct emission + Next-Event Estimation
-    var TotalRadiance = Surf1.Emission * Frame.EmissionScale;
+    // Bounce 1 direct emission (including live HMI screen emission) + Next-Event Estimation
+    var TotalRadiance = Surf1.Emission * Frame.EmissionScale + EvaluateHmiScreenRadiance(Hit1, FirstDirection, true);
     TotalRadiance += EvaluateDirectNextEvent(Hit1.Position, Hit1.Normal, -FirstDirection, Surf1, Seed, true);
 
     let MaxBounces     = ResolveMaxBounces(Frame);
@@ -679,6 +910,7 @@ fn TraceMultiBouncePath(Origin: vec3f, FirstDirection: vec3f, Seed: ptr<function
     var CurrView       = -FirstDirection;
     var CurrSurf       = Surf1;
     var CurrIdentity   = Hit1.Identity;
+    var CurrFamily     = Hit1.Family;
     var EscapedToSky   = false;
 
     // Secondary & higher-order path bounces (bounce 2 .. MaxBounces)
@@ -721,7 +953,8 @@ fn TraceMultiBouncePath(Origin: vec3f, FirstDirection: vec3f, Seed: ptr<function
         let GeomTerm  = CosAtHit / DistSq;
         let MisWeight = clamp((BsdfPdf * BsdfPdf) / max(BsdfPdf * BsdfPdf + GeomTerm * GeomTerm * 0.01, 1.0e-5), 0.15, 1.0);
 
-        TotalRadiance += PathThroughput * SurfB.Emission * Frame.EmissionScale * MisWeight;
+        let HitEmission = SurfB.Emission * Frame.EmissionScale + EvaluateHmiScreenRadiance(HitB, NextDir, true);
+        TotalRadiance  += PathThroughput * HitEmission * MisWeight;
 
         if (FeatureEnabled(Frame, FeatureMultiBounceNEE))
         {
@@ -734,10 +967,11 @@ fn TraceMultiBouncePath(Origin: vec3f, FirstDirection: vec3f, Seed: ptr<function
         CurrView     = -NextDir;
         CurrSurf     = SurfB;
         CurrIdentity = HitB.Identity;
+        CurrFamily   = HitB.Family;
     }
 
-    // Infinite-bounce radiosity cache tail beyond MaxBounces
-    if (!EscapedToSky && FeatureEnabled(Frame, FeatureCardRadiosity))
+    // Infinite-bounce radiosity cache tail beyond MaxBounces (excluded on interior cabin surfaces to prevent exterior car-card leakage)
+    if (!EscapedToSky && FeatureEnabled(Frame, FeatureCardRadiosity) && !IsCockpitSurface(CurrIdentity, CurrFamily))
     {
         let TailClip = ResolveFinestClip(CurrPos, 1.0);
         let CardTail = SampleCardRadiance(CurrPos, CurrNormal, CurrIdentity, ResolveCardTolerance(TailClip));
@@ -804,17 +1038,19 @@ fn TraceMultiBounceReflection(
 
         let HitSurf     = ProjectSurfaceSample(RayMaterials[Hit.Family]);
         let ViewDir     = -RayDir;
-        var HitRadiance = HitSurf.Emission * Frame.EmissionScale;
+        var HitRadiance = HitSurf.Emission * Frame.EmissionScale + EvaluateHmiScreenRadiance(Hit, RayDir, false);
 
-        // Direct Next-Event Estimation (Sun cone + Fire + RIS over 32 IES lights with exact BVH shadow rays)
+        // Direct Next-Event Estimation (Sun cone + Fire + HMI screens + RIS over 32 IES lights with exact BVH shadow rays)
         HitRadiance += EvaluateDirectNextEvent(Hit.Position, Hit.Normal, ViewDir, HitSurf, Seed, Bounce <= 2u) * InversePi;
 
         // Indirect diffuse illumination on the reflected surface so shadowed faces retain natural colour and depth
         let DiffuseAlbedo = ResolveDiffuseAlbedo(HitSurf);
         if (any(DiffuseAlbedo > vec3f(1.0e-3)))
         {
-            var AmbientIrr = SampleSkyRadiance(Hit.Normal) * (0.28 + 0.28 * saturate(Hit.Normal.z));
-            if (FeatureEnabled(Frame, FeatureCardRadiosity))
+            let InCockpit  = IsCockpitSurface(Hit.Identity, Hit.Family);
+            let AmbientScale = select(0.28 + 0.28 * saturate(Hit.Normal.z), 0.04 + 0.04 * saturate(Hit.Normal.z), InCockpit);
+            var AmbientIrr = SampleSkyRadiance(Hit.Normal) * AmbientScale;
+            if (FeatureEnabled(Frame, FeatureCardRadiosity) && !InCockpit)
             {
                 let Clip = ResolveFinestClip(Hit.Position, 1.0);
                 let Card = SampleCardRadiance(Hit.Position, Hit.Normal, Hit.Identity, ResolveCardTolerance(Clip));

@@ -412,6 +412,13 @@ export class CabinSequence
         this.Metrics.PreviewPasses++;
     }
 
+    QueryEffectiveBrightness()
+    {
+        const Screen = this.Screen;
+        const Live = !!Screen && this.Settings.Screens;
+        return ResolveScreenBrightness(this.Settings.Brightness, Screen?.Values.brightness ?? 100, Live);
+    }
+
     // 📝 Over the recombined radiance, before the antialiasing; the surface depth read only.
     RecordOverlay(Encoder, TargetView, DepthView)
     {
