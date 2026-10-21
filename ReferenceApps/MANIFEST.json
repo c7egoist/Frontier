@@ -1,0 +1,4359 @@
+{
+  "repository": "unassignedinbox/Frontier",
+  "ref": "arena/f905b778-frontier",
+  "commit": "b299ec6903cfda8237e6bb2088bb720729d55aa7",
+  "files": [
+    {
+      "path": "Docs/DeformationTransportReview.html",
+      "sha256": "5321a22439cbbf8d99376058a36f0b5b10c2571ebfcd4474a59e732bec6c92aa",
+      "bytes": 20961
+    },
+    {
+      "path": "Docs/DistanceTransportReview.html",
+      "sha256": "5216edc337fe21ddd15aa19b4fcfd431d021d438ba68742838cb989347f53402",
+      "bytes": 24478
+    },
+    {
+      "path": "Docs/RadianceIntegratorReview.html",
+      "sha256": "0b82d24e8ba6979b09dcec4462d2fcc021f09314d4daf063a80bf9dd0a33b94c",
+      "bytes": 32824
+    },
+    {
+      "path": "EngineContent/Fonts/SunReference/DMSans-Light.ttf",
+      "sha256": "53ee0471fab58e16d579bbac192f8f76da10523b97e26837a49e08a6401862f1",
+      "bytes": 56672
+    },
+    {
+      "path": "EngineContent/Fonts/SunReference/DMSans-Regular.ttf",
+      "sha256": "520460497ea04a7d590ae7ad9bda3f523a6c11f2f7de9afa69ff853bc5e7f73b",
+      "bytes": 56856
+    },
+    {
+      "path": "EngineContent/Fonts/SunReference/OFL.txt",
+      "sha256": "7ec15e79c59bc14b86436a17e5eb7926b46cbcaeb08e1a7e6c110b415e6eb2a2",
+      "bytes": 4388
+    },
+    {
+      "path": "EngineContent/Fonts/SunReference/README.md",
+      "sha256": "0bf3166e7b426f898848cf180a7788b1b45ce7f463a7b436aa9582814407bffb",
+      "bytes": 954
+    },
+    {
+      "path": "Exhibits/CliffSequence/CliffSpecification.js",
+      "sha256": "25851f3a9ec6ec27792fc6b09df733ca3bab41cfc5c7f57880c4b056807445be",
+      "bytes": 8233
+    },
+    {
+      "path": "Exhibits/CliffSequence/FractureSequence.js",
+      "sha256": "62f1cdec89913ce62602fe7cf334833fa10a3b8b3bd77bae4327e4c8efd43dad",
+      "bytes": 26557
+    },
+    {
+      "path": "Exhibits/CliffSequence/GenerationQueue.js",
+      "sha256": "89a2d407eef1920cdebc1de041a0a1d4b71d6537205f860217c6a8438b6ad999",
+      "bytes": 1529
+    },
+    {
+      "path": "Exhibits/CliffSequence/GrainPanel.js",
+      "sha256": "9431a9222a93051625c6f49a50d97e11451828630617f4ac8aa151ee6cf1864c",
+      "bytes": 26665
+    },
+    {
+      "path": "Exhibits/CliffSequence/GrainQueue.js",
+      "sha256": "a41aa3cbda6d7cf72c1cd95584b80b663a1a465702ce2f5137903e09b0ba3a13",
+      "bytes": 2264
+    },
+    {
+      "path": "Exhibits/CliffSequence/GrainSequence.js",
+      "sha256": "4b21a8437616d4041ee3d5482132caadc0bce7190054ad57128d7d12e5bed0cb",
+      "bytes": 19329
+    },
+    {
+      "path": "Exhibits/CliffSequence/GrainSpecification.js",
+      "sha256": "99313c678455d5922e58d7371b49f109a74170a474f7911f32643c8f1ab8ca26",
+      "bytes": 2261
+    },
+    {
+      "path": "Exhibits/CliffSequence/MaterialPanel.css",
+      "sha256": "d93bc0959e9914183a3e16b0bcb35558a33dd9961115ba502e5be778fbc3f85b",
+      "bytes": 12914
+    },
+    {
+      "path": "Exhibits/CliffSequence/PlanarSolver/LICENSE.txt",
+      "sha256": "7c19b47a8a97ae40afc48fc6e3ceb24dc239e4ffe3701ace1298d8a05af3cd16",
+      "bytes": 9936
+    },
+    {
+      "path": "Exhibits/CliffSequence/PlanarSolver/cdt2d.js",
+      "sha256": "1a6d499f39cfe5dd94e84892aca4e2a2c84a8d061dd9a808ce5b9d58cae2169b",
+      "bytes": 26484
+    },
+    {
+      "path": "Exhibits/CliffSequence/PolyhedronSolver.js",
+      "sha256": "5c67f739b74c1361784110e2ef368268a71ff60d93e2f2a21543f0e119ac05a3",
+      "bytes": 21632
+    },
+    {
+      "path": "Exhibits/CliffSequence/ReliefProjection.js",
+      "sha256": "c076ea0a0aa28b5d09b819aee915ea40b6bddebd36199d1ee9e7d407bd32a28d",
+      "bytes": 5668
+    },
+    {
+      "path": "Exhibits/CliffSequence/RuptureSolver.js",
+      "sha256": "a98ed8ef0f684aead4394cc6368dafc5853adba8e2ab7b44320d13bbae07a242",
+      "bytes": 4307
+    },
+    {
+      "path": "Exhibits/CliffSequence/TriangleSolver.js",
+      "sha256": "c3eb7e84c0e996649eecffab018022813fbfa2c8ffde653c94efca40e06a2094",
+      "bytes": 12976
+    },
+    {
+      "path": "Exhibits/CliffSequence/WorkspacePanel.css",
+      "sha256": "33fdac700215540f11e66102fca764e6ea81f299fbcc2d2dc03aa75c70ae3f0c",
+      "bytes": 12311
+    },
+    {
+      "path": "Exhibits/CliffSequence/WorkspacePanel.js",
+      "sha256": "b9e2286b4e7d9919f44437c9edad8e7065724667e2f62b72304647cceaacf1ba",
+      "bytes": 31792
+    },
+    {
+      "path": "Exhibits/CliffSequence/index.html",
+      "sha256": "12919280876f3e64956b6ee2539f9f11ad4f281ab963cedc7af8b35ddb242fb9",
+      "bytes": 8224
+    },
+    {
+      "path": "Exhibits/DeformationIntegrator/DeformationPanel.css",
+      "sha256": "a7656ee8618dbfc7984f895947ad355cecc177f72d97cc909d9fb0f2017c6d72",
+      "bytes": 6945
+    },
+    {
+      "path": "Exhibits/DeformationIntegrator/DeformationPanel.js",
+      "sha256": "a8a5b4752b359d32132d09b69ecaa2f3fa469af21875c4ce470e96a82133069d",
+      "bytes": 30911
+    },
+    {
+      "path": "Exhibits/DeformationIntegrator/DeformationSpecification.js",
+      "sha256": "7e2778047ba3b461fe3e70601acc81b922b750eb871d604099dd0136ea6e0488",
+      "bytes": 11033
+    },
+    {
+      "path": "Exhibits/DeformationIntegrator/TransportIntegrator.js",
+      "sha256": "0afa19e2abee48e3387117876dda886b6c77e4896939c7b6eff00a0826e472f0",
+      "bytes": 13966
+    },
+    {
+      "path": "Exhibits/DeformationIntegrator/index.html",
+      "sha256": "5391baaadfd533372518b5a25c4f6596dd2eda660154e3c7016333aaa8fb525c",
+      "bytes": 4069
+    },
+    {
+      "path": "Exhibits/DistanceIntegrator/BodySpecification.js",
+      "sha256": "f0431f61d82d70350f4a6b4f19a604364ca9490cd6dab5402337b90dd146208c",
+      "bytes": 15206
+    },
+    {
+      "path": "Exhibits/DistanceIntegrator/DistanceIntegrator.js",
+      "sha256": "b5b78125d05b39bdeb642483cccdc1e16e232401933e707a28a00c814a37d1ae",
+      "bytes": 23830
+    },
+    {
+      "path": "Exhibits/DistanceIntegrator/DistancePanel.css",
+      "sha256": "fc84f3c02abfbe91263fa3353f1cfde94909abca77ad9d7709f8b68308c8e9f9",
+      "bytes": 8363
+    },
+    {
+      "path": "Exhibits/DistanceIntegrator/DistancePanel.js",
+      "sha256": "47f471fbac4403ce2d6c8e0b51d66aec80395d60e2759924c6a6f1051b7a0ea5",
+      "bytes": 35210
+    },
+    {
+      "path": "Exhibits/DistanceIntegrator/index.html",
+      "sha256": "26ee9980257ce068f3355e1683766f8253945a718697387139f76fb45ee6b1cc",
+      "bytes": 4767
+    },
+    {
+      "path": "Exhibits/Docs/BaseGeometryAndFractureEditorNotes.md",
+      "sha256": "86aebd9a6fa77865d426d19757d8ce886c207028e9f9fbc49de2d9477c576a7b",
+      "bytes": 10507
+    },
+    {
+      "path": "Exhibits/Docs/BrowserEditorHistory.md",
+      "sha256": "da5203df7f5c3c720b9e22f9e8ec5b0b85372d14edc812e226877174f7785952",
+      "bytes": 22916
+    },
+    {
+      "path": "Exhibits/Docs/FrontierEditorComponents.md",
+      "sha256": "9048653a067374c42368d08f3e5de77199a6fcc058968e28e70b370c65b7f614",
+      "bytes": 14178
+    },
+    {
+      "path": "Exhibits/Docs/MainEditorIntegration.md",
+      "sha256": "1d108e4bf24a7a0d3ca04c52fc0636c6430a47f0ea5387723b665a328b812e52",
+      "bytes": 6258
+    },
+    {
+      "path": "Exhibits/Docs/ParticleEditor.md",
+      "sha256": "9948b7a8f4655f7201626dacdf5b48eb3a46266f812a020566202f589955224a",
+      "bytes": 37354
+    },
+    {
+      "path": "Exhibits/Docs/UpstreamExperimentalREADME.md",
+      "sha256": "ec2aa0fc0c6dcb7bda32f6dbd0f73ea20fa0ad88d1214dabeea76efa08b1cea5",
+      "bytes": 1709
+    },
+    {
+      "path": "Exhibits/EngineContent/Fonts/SunReference/DMSans-Light.ttf",
+      "sha256": "53ee0471fab58e16d579bbac192f8f76da10523b97e26837a49e08a6401862f1",
+      "bytes": 56672
+    },
+    {
+      "path": "Exhibits/EngineContent/Fonts/SunReference/DMSans-Regular.ttf",
+      "sha256": "520460497ea04a7d590ae7ad9bda3f523a6c11f2f7de9afa69ff853bc5e7f73b",
+      "bytes": 56856
+    },
+    {
+      "path": "Exhibits/EngineContent/Fonts/SunReference/OFL.txt",
+      "sha256": "7ec15e79c59bc14b86436a17e5eb7926b46cbcaeb08e1a7e6c110b415e6eb2a2",
+      "bytes": 4388
+    },
+    {
+      "path": "Exhibits/EngineContent/Fonts/SunReference/README.md",
+      "sha256": "0bf3166e7b426f898848cf180a7788b1b45ce7f463a7b436aa9582814407bffb",
+      "bytes": 954
+    },
+    {
+      "path": "Exhibits/Fluid/.gitignore",
+      "sha256": "790e3169bc19b046fe55ba1da6d13b976c28363c8c00462a2195fe5faf260910",
+      "bytes": 20
+    },
+    {
+      "path": "Exhibits/Fluid/ExportSamples.mjs",
+      "sha256": "892480499a99c21f4fbabb836c5919030c408669b38a19edf2f69cc3b89ed2c8",
+      "bytes": 1764
+    },
+    {
+      "path": "Exhibits/Fluid/Samples/camp_fire_steady.gasscene.toml",
+      "sha256": "80ace4b997a4515f50c2066ace378a12185aed5a0a5f97d996bfb6b290cd8089",
+      "bytes": 2165
+    },
+    {
+      "path": "Exhibits/Fluid/Samples/cold_dust_fall.gasscene.toml",
+      "sha256": "26e8806371238ad5989cdda83f114c95a134bd4868c864ee140005ab6970b7f4",
+      "bytes": 2157
+    },
+    {
+      "path": "Exhibits/Fluid/Samples/deflector_obstacle.gasscene.toml",
+      "sha256": "05e54ecaaf4adaa0ac37889a8f3979df6fd596803e1408376dfb98ddb79b3cd6",
+      "bytes": 2167
+    },
+    {
+      "path": "Exhibits/Fluid/Samples/far_cheap_plume.gasscene.toml",
+      "sha256": "6743bb296efdc16e2d2a3dc6a5a4004048a9b83972e531ccef67661bb14ffaa6",
+      "bytes": 2155
+    },
+    {
+      "path": "Exhibits/Fluid/Samples/fracture_dust_burst.gasscene.toml",
+      "sha256": "9fba05087651e35ce5fc25b462c3073e49cfa877b30fab9da29c79d5bd4dcb47",
+      "bytes": 2163
+    },
+    {
+      "path": "Exhibits/Fluid/Samples/hero_detonation.gasscene.toml",
+      "sha256": "bbe036e8ca5a6a1e468a76151cbb97855187c4d27823ab076d1535f1cf7ab235",
+      "bytes": 2162
+    },
+    {
+      "path": "Exhibits/Fluid/Samples/open_bounds_megaton.gasscene.toml",
+      "sha256": "f86f211feb5804cc229c859a8dddc772842d9592c4c64d362f9384d82ca03b2d",
+      "bytes": 2158
+    },
+    {
+      "path": "Exhibits/Fluid/Samples/tyre_burnout_ring.gasscene.toml",
+      "sha256": "bf2d9a6620cbf9cf84cb6b3affbd996e48d634a0b02983b8d4fcc4123f4cf3b5",
+      "bytes": 2156
+    },
+    {
+      "path": "Exhibits/Fluid/dist/assets/DMSans-Light-C6_NQcw2.ttf",
+      "sha256": "53ee0471fab58e16d579bbac192f8f76da10523b97e26837a49e08a6401862f1",
+      "bytes": 56672,
+      "preserved_build": "BuildArchives/Fluid/assets/DMSans-Light-C6_NQcw2.ttf"
+    },
+    {
+      "path": "Exhibits/Fluid/dist/assets/DMSans-Regular-edFi4ZX-.ttf",
+      "sha256": "520460497ea04a7d590ae7ad9bda3f523a6c11f2f7de9afa69ff853bc5e7f73b",
+      "bytes": 56856,
+      "preserved_build": "BuildArchives/Fluid/assets/DMSans-Regular-edFi4ZX-.ttf"
+    },
+    {
+      "path": "Exhibits/Fluid/dist/assets/index-B5vjcv4W.css",
+      "sha256": "56ae0777aa463ca7d179ebf48b8d265bf216f69fffb35f7caf3d266394b1f036",
+      "bytes": 45673,
+      "preserved_build": "BuildArchives/Fluid/assets/index-B5vjcv4W.css"
+    },
+    {
+      "path": "Exhibits/Fluid/dist/assets/index-Kv-iuMsI.js",
+      "sha256": "504646b4f743a97752a7213278cb634e6ae4eb13d3035c82bc1f1e9a8cdbe482",
+      "bytes": 201500,
+      "preserved_build": "BuildArchives/Fluid/assets/index-Kv-iuMsI.js"
+    },
+    {
+      "path": "Exhibits/Fluid/dist/index.html",
+      "sha256": "4d0e9972e0fa70a5f9691bdbf8bf767cbca3a3ba1bfee06a5b7b1239a77e0a14",
+      "bytes": 24329,
+      "preserved_build": "BuildArchives/Fluid/index.html"
+    },
+    {
+      "path": "Exhibits/Fluid/index.html",
+      "sha256": "dc02a1e8865d46bab25e02fff6c65db44321899f49525b3831ce09cb4be8540b",
+      "bytes": 24359
+    },
+    {
+      "path": "Exhibits/Fluid/package-lock.json",
+      "sha256": "212aaa895049145252320cd0f8be3256ed846f03768fe9204fa5a52f358dbb37",
+      "bytes": 35820
+    },
+    {
+      "path": "Exhibits/Fluid/package.json",
+      "sha256": "1ec4edec2763c3a9b0e66258d7c4c8c3919d93115c39085deae9d61a7b4ee866",
+      "bytes": 965
+    },
+    {
+      "path": "Exhibits/Fluid/src/BoundsProjection.js",
+      "sha256": "ddcd8cb369024f0bda8111f4d6571b01802c4a06c9bf29024241b3cce532b604",
+      "bytes": 1625
+    },
+    {
+      "path": "Exhibits/Fluid/src/BrowserMetrics.mjs",
+      "sha256": "e400d059bbb26defbec9d92386347ac00d82ce45c4fcd5dee659faef329e47c6",
+      "bytes": 13775
+    },
+    {
+      "path": "Exhibits/Fluid/src/DocumentSequence.js",
+      "sha256": "8b126d37e03e59fba136dec464a490747c6648958f4c0a8176e338ab888c8379",
+      "bytes": 9507
+    },
+    {
+      "path": "Exhibits/Fluid/src/FlipbookSequence.js",
+      "sha256": "ee2e757d81378bd4de51670650c0bb853a1d985091fb90e235b00f5ebb3a44cb",
+      "bytes": 12648
+    },
+    {
+      "path": "Exhibits/Fluid/src/FluidPanel.css",
+      "sha256": "8fa9ec189d60f12ffdcd902df6943832af2c1aad7f89b07c8678e111cd7cae59",
+      "bytes": 30236
+    },
+    {
+      "path": "Exhibits/Fluid/src/FluidPanel.js",
+      "sha256": "0525d48d832e2ee1fa6347698d6aa9b8613523e56aa1b7c387a83892762987a2",
+      "bytes": 58414
+    },
+    {
+      "path": "Exhibits/Fluid/src/InteractionMetrics.mjs",
+      "sha256": "3981956e24b93b8c7de098d313d705bdeeb8fa5ab607a655e79e3e6d8c5b1ff1",
+      "bytes": 15744
+    },
+    {
+      "path": "Exhibits/Fluid/src/SampleScenes.js",
+      "sha256": "db6b87ecaef6933cf7eef5b3ecb466d9361ba5f9095230aa1edde1da1233ec1a",
+      "bytes": 6860
+    },
+    {
+      "path": "Exhibits/Fluid/src/SceneMetrics.mjs",
+      "sha256": "94bffe5bbcf66ea0bc4a4f1b1925684018dacf42a0e22738631bdbf5d711d085",
+      "bytes": 15849
+    },
+    {
+      "path": "Exhibits/Fluid/src/SceneSpecification.js",
+      "sha256": "074394416cd68c1ee7ab3098d9597e44ada323dd9cc953f24bd6815b0f265ef4",
+      "bytes": 9652
+    },
+    {
+      "path": "Exhibits/Fluid/src/SceneTomlCodec.js",
+      "sha256": "ab499c21bbd522a13142caf3bb28c67f4c05b61f9a29d7438d62223542e1ac3f",
+      "bytes": 7176
+    },
+    {
+      "path": "Exhibits/Fluid/src/ThemeSpecification.css",
+      "sha256": "e80b26f7ea2b6fb7063d553584b8247481fa42f8b5618b4476bfc785cb980db7",
+      "bytes": 27966
+    },
+    {
+      "path": "Exhibits/Fluid/src/camera.js",
+      "sha256": "013bfe5a600e6bf6204f252a8d688a5867a05b9dd8a5440906b6af5188f34b2b",
+      "bytes": 5242
+    },
+    {
+      "path": "Exhibits/Fluid/src/engine-webgl2.js",
+      "sha256": "6039b411b8c4a7836e65e043455ee6079b2140605f310829af0bb15414329ab4",
+      "bytes": 27398
+    },
+    {
+      "path": "Exhibits/Fluid/src/engine-webgpu.js",
+      "sha256": "dada3971b8a26146cd3e492906be3f0bd63ef0fcd8f79d7c4a8f61d782dd2a2d",
+      "bytes": 16291
+    },
+    {
+      "path": "Exhibits/Fluid/src/presets.js",
+      "sha256": "56942dc45ed9a626436a839b94bb9933285eefb8920c6a68fcf26116cd00f100",
+      "bytes": 42506
+    },
+    {
+      "path": "Exhibits/Fluid/src/shaders-glsl.js",
+      "sha256": "0ff98c20215b611537a6f4aa1e179f4f2933cd198a8e0332a94d6bd1e33712b4",
+      "bytes": 53205
+    },
+    {
+      "path": "Exhibits/Fluid/src/shaders-wgsl.js",
+      "sha256": "4e6f6cca22853a021516e422214b87b403b4f6fa3d6223efefc65cfd18e47432",
+      "bytes": 29424
+    },
+    {
+      "path": "Exhibits/Fluid/vite.config.js",
+      "sha256": "add2eb847d18d517f5b9bf42d5f05bcd993270ae224553aa5785998835e5408d",
+      "bytes": 535
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Fluid/FluidKernels.js",
+      "sha256": "e3d301f18f989ce5a4fb28a02833cdd5436b4d4b6d5ffb494bf9c41967d48aeb",
+      "bytes": 28822
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Fluid/FluidRenderKernels.js",
+      "sha256": "5de4cbebc0d4225cbdf5007d12c293de1916a83ecb048d14fc7977f72948c2d4",
+      "bytes": 20018
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Fluid/FluidViewport.js",
+      "sha256": "6fe678acd4627b9b6b67cc29c7fd24ffa366ffaf894f1bb366ee6851be7628c8",
+      "bytes": 45504
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/FluidEditorEntry.js",
+      "sha256": "3e2f122ff309c36a2472e225aef2b7bec22eb96b20f5ddafdb5ea7667a83cad9",
+      "bytes": 81737
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/FluidNodeEditor.html",
+      "sha256": "556c565a8b9dc451e9b892955fefab8370272a6438da58cfb4b463bebac976f1",
+      "bytes": 48826
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Graph/CatalogueSpecifications.js",
+      "sha256": "8086d0c025483b7c7dd6975aa712479cb123c86d2161bf4dfad7e7f181c0d2a3",
+      "bytes": 15397
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Graph/GraphStore.js",
+      "sha256": "574368d7b5c43e71861b1cf595b2031a29d229bd1d3bafddd9988b44cdd3b371",
+      "bytes": 10348
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Graph/LinkRouting.js",
+      "sha256": "e9729be7ec17a24a89813da77cb829e6971585d0eec88869e33d27cb25702e01",
+      "bytes": 4893
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/LaunchFluidNodeEditor.bat",
+      "sha256": "48c009493bae261045d3cb7c44d8576be4128fa02231fce698bd9f477d02d300",
+      "bytes": 1265
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Presentation/CatalogueMenu.js",
+      "sha256": "880048ff1784b2a8a419ee1af3025d7238b9496c113acbbef7ef3ee7b83f5832",
+      "bytes": 8789
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Presentation/EntryRasterization.js",
+      "sha256": "134d528797e639b2b1364cf6e5b47f4a0b2357f5e3303fab7455001cdcf06d0c",
+      "bytes": 14751
+    },
+    {
+      "path": "Exhibits/FluidNodeEditor/Presentation/GlyphOutlines.js",
+      "sha256": "357b5a5a1972c419fead025b24b0b3d7bd22640f289fa87e84bb65781cd734fa",
+      "bytes": 8014
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/README.md",
+      "sha256": "bbd5dd643a09c1c8b2fb6ce84dbb86f9682baca4012adc673a98d0e2b546b36f",
+      "bytes": 3265
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/dist/assets/index-Cv9Pq6si.js",
+      "sha256": "e70dea7d691d314585e4c62fd99ba549200c9652603ac740e0a00b063f5bf794",
+      "bytes": 560216,
+      "preserved_build": "BuildArchives/FluxParticleStudio/assets/index-Cv9Pq6si.js"
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/dist/index.html",
+      "sha256": "0b08070101a40004721a9802cb1cca41c0e738c46fc683347d3b256918d5a034",
+      "bytes": 17843,
+      "preserved_build": "BuildArchives/FluxParticleStudio/index.html"
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/index.html",
+      "sha256": "26a097b3f261bd58f9400290a85f6b77e4d2cd35c53a02dd73a496824bbd52ea",
+      "bytes": 4861
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/package.json",
+      "sha256": "d6080d4f43b13160dee349054bf205eb1b7ae126eabe3f57decc4122a57e5672",
+      "bytes": 524
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/scripts/inline-css.mjs",
+      "sha256": "de1a2f68d09d653f8de74a61843b6e0959cfafb7b8aeed3f5007fa5515a99d49",
+      "bytes": 800
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/engine.js",
+      "sha256": "f239d712487c83938f02e9204fbf3a046736c73adb6f2307638eda109e9b3540",
+      "bytes": 14286
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/io.js",
+      "sha256": "e4a321dd1be2b56a92d670d25975a8bedac4c6568585734837f4d4fe091e1331",
+      "bytes": 5870
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/main.js",
+      "sha256": "8b46ae4eaf8096c0dcb18a0df52a90b4e61d1697085d960e5f90b3be9f715fa2",
+      "bytes": 12882
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/panels.js",
+      "sha256": "668c6d07b5589526d66097ecf30c88f6555545aabebb12ecac1926d8acd77818",
+      "bytes": 14909
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/presets.js",
+      "sha256": "2b2b1d73aeb2634f38a6f1e8203e818a79b632b4e4bebd9af29dd495be816d90",
+      "bytes": 6993
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/shaders.js",
+      "sha256": "36bb06c08652a88162ff11a920fe0213dd7184b2e3656e912c5d520299827f03",
+      "bytes": 7097
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/state.js",
+      "sha256": "abd36cbfd5b7d1845cacd0fbefb2901e0b80aa820d6900e16f8b1d3414346054",
+      "bytes": 2699
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/style.css",
+      "sha256": "b4d8df1f92117d10adc78f2df0ec53f57172e23e558985407ca854266ba0aef2",
+      "bytes": 16394
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/src/timeline.js",
+      "sha256": "547f550afb95919336859bdc33067194bc26bce4b43621d2b68dd6c3833dc621",
+      "bytes": 1901
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/tests/io.test.js",
+      "sha256": "f26abea7f06f1333ca16ebe6c56331a798c7f7746905792e07ab39fd786821dc",
+      "bytes": 1749
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/tests/presets.test.js",
+      "sha256": "caf3aeee3c7f7bbd35e8e34de103c483da02949a2d48a2b9891d0c12f1fc4111",
+      "bytes": 2213
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/tests/shaders.test.js",
+      "sha256": "6fcce197b34dcc044022936987905313a966f553cf58fd80f5a976a4991fed49",
+      "bytes": 3022
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/tests/solids.test.js",
+      "sha256": "76dfad578680df7b6df0b9edb285efddbf44e9a5c0ceb924d0288c8c1f9bd181",
+      "bytes": 1851
+    },
+    {
+      "path": "Exhibits/FluxParticleStudio/vite.config.js",
+      "sha256": "f3bb3e1cf3fc2558295f2806257472b5ac98d2f211cb2f26d4bd60438da96c35",
+      "bytes": 193
+    },
+    {
+      "path": "Exhibits/FractureEditor/Build.mjs",
+      "sha256": "70be86b203b6c327bd76cbf5133ac4b145114ffb637f32ad9b1da8d817073382",
+      "bytes": 2441
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Checks.json",
+      "sha256": "eb90d925cfef699f6c43b247eacf1639eb4a858576ed3985e5bb266e5eb36cb5",
+      "bytes": 1850
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Concrete.png",
+      "sha256": "b56e245ed2fc22f7620a10a68f1f7a80ab5bc7841be9b134852a31480432c1de",
+      "bytes": 173182
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Cube.png",
+      "sha256": "d822f730d9852e39541fdedecd404a5ce85ef9ea032599a20ecaaeb01b7d5c48",
+      "bytes": 163567
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/EditorRegression.json",
+      "sha256": "01a85b4eca53eb1505d5396f407d2e53029599cd5ab5e11d61ff8e69ef28e060",
+      "bytes": 7691
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/FractureCard.png",
+      "sha256": "11f97044644afc0f47821cefb53302c3a61c3b33776462f10467c092f3dac1a1",
+      "bytes": 97236
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/GeometryChecks.json",
+      "sha256": "defab3e5e53670c9a275a598f42832a9085d0b695a3431aba4a35e9a2175cd06",
+      "bytes": 52578
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/GlassPane.png",
+      "sha256": "e0ea26d114495e0813d313a08dc4b05f8b8c7a2e5de3255517047a46d06e969f",
+      "bytes": 128738
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/GlassReassembled.png",
+      "sha256": "baf384ed51f5e945b13242c6a52910a3d30cdb02bdac53c458c8bd3bf6b35597",
+      "bytes": 111699
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Medium.png",
+      "sha256": "49ef1ebac0dfba3b587a7b8714ada26eba6666d938d0c69b81895c81804880c4",
+      "bytes": 146737
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Narrow.png",
+      "sha256": "57531972e5cbd43135f562fc179fade9ece96d506e2493659c0d25f9fdc23f93",
+      "bytes": 75326
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/ObjectInspector.png",
+      "sha256": "23cdc6997e918021321d7922afc75d807be8a711da1d7b751fc76b203e889176",
+      "bytes": 127037
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Plastic.png",
+      "sha256": "11a76c04bc1d99e8b6cba0f2ee60036c050ce35a1c5815730059fef39d47215d",
+      "bytes": 139634
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Precomputed.png",
+      "sha256": "7d0bb81db1a030533848f569049f808b6fd4fda524bbc7938fcabfa8d2d519ac",
+      "bytes": 167875
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/QualityCard.png",
+      "sha256": "f8feff39481506a3fd5af7b6012f897d59bdadf4ecab96dedb7637cb3f2c368d",
+      "bytes": 143910
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Sphere.png",
+      "sha256": "f1e5fdf1c005fd51b59b948cb1bebbc37a296467fb44dcbf7d493a2cdab41cd9",
+      "bytes": 174336
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/SphereTopology.png",
+      "sha256": "924bc466779aa581fd3605b85f95dc1cb8f6f8edfac6e625cc6c2e2141468d59",
+      "bytes": 272072
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Stone.png",
+      "sha256": "e83328e552b93dccc9fbbee9beeb236a1be4c55fe9a5e243448e4d689250ec97",
+      "bytes": 184375
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/TemperedGlass.png",
+      "sha256": "e4c1fd71bfb2ee3f25ace31185698b0fc798368b591e01863dac883ce1e78332",
+      "bytes": 130682
+    },
+    {
+      "path": "Exhibits/FractureEditor/Captures/Wood.png",
+      "sha256": "10fe6dc3b4da427f1604a2d409061c930616b0caca4647521ff2906d1617769b",
+      "bytes": 174400
+    },
+    {
+      "path": "Exhibits/FractureEditor/CheckBrowser.mjs",
+      "sha256": "7f03eab967325ad7d7b4efb8cf0c3c1c19d06a6d6d1d9d7c24f5a0a0391a0a22",
+      "bytes": 17320
+    },
+    {
+      "path": "Exhibits/FractureEditor/CheckGeometry.mjs",
+      "sha256": "dae7de59447b4df59445f10414b945fbca5f2a941fc9fafc915555179f350919",
+      "bytes": 8276
+    },
+    {
+      "path": "Exhibits/FractureEditor/FractureDepot.js",
+      "sha256": "76158792ed2e9585d6e8468137323c2227af166505fec6f2d6bcc919fa38183e",
+      "bytes": 1909
+    },
+    {
+      "path": "Exhibits/FractureEditor/FracturePanel.css",
+      "sha256": "acb7b4382bf22b94f3de521133ca30b2ed512c62b51a3cd0cf53b62e8827ca26",
+      "bytes": 14461
+    },
+    {
+      "path": "Exhibits/FractureEditor/FracturePanel.html",
+      "sha256": "7ef9e13dddd776f5ca256eaeeb3cf5c522253f5725dad87fdfc736a08ca11bf6",
+      "bytes": 12172
+    },
+    {
+      "path": "Exhibits/FractureEditor/FracturePanel.js",
+      "sha256": "97ec6256db57cd3cccf9c2e0b0d24f28bec136f572437039c1f03dadf8b549f8",
+      "bytes": 25953
+    },
+    {
+      "path": "Exhibits/FractureEditor/FractureProjection.js",
+      "sha256": "98e6b7ddb9d461706d57fd435ec655c811ebe05c31e9ad3a3de557f8db865bdb",
+      "bytes": 5041
+    },
+    {
+      "path": "Exhibits/FractureEditor/FractureSpecification.js",
+      "sha256": "29ef93e88b96f54bd36673e28c334739b2c23f2264312291bc0ffff75a699a35",
+      "bytes": 3422
+    },
+    {
+      "path": "Exhibits/FractureEditor/FractureStructure.js",
+      "sha256": "3012acfe00327b40fbe2b886cb984bb49c5cc8498a095238204e187efa4883be",
+      "bytes": 22026
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Fragmentation/src/core/convex.ts",
+      "sha256": "a997f0034b13118d61e10f78da89be8ee46c2237ddd6619332cc25f74a68b802",
+      "bytes": 12147
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Fragmentation/src/core/math.ts",
+      "sha256": "7cbba62f3bd800b65b1d584a472a95c5d39dc00688baa0cfa4b5a259c0e98e57",
+      "bytes": 3222
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Fragmentation/src/fracture/fracture.ts",
+      "sha256": "23fd3dec18be45925b21962a6b7ff3b855d3684e1ab3b75101d251f7a1a688e8",
+      "bytes": 11158
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Fragmentation/src/fracture/materials.ts",
+      "sha256": "bbd49a96cb72c2a02b9f7c43314b6291e854ee8e2522083c64c9dff76847a14f",
+      "bytes": 4828
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Fragmentation/src/scene/targets.ts",
+      "sha256": "7e663383f23ad06183c18432656b75717005fad2fe33e2f4aee2dcb2d70d6036",
+      "bytes": 3479
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Propagation/src/core/math.ts",
+      "sha256": "91ec2980b126d5e9f559d6fa7725af6c101b80aa0504ce0ed3c5c37b8d5e9524",
+      "bytes": 10538
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Propagation/src/frac/crack2d.ts",
+      "sha256": "034e6bc1af02e5a33640312c7db04e3717040387088e4fa5adf500a2a35afc7b",
+      "bytes": 24284
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Propagation/src/frac/dent.ts",
+      "sha256": "068966cbc0bb2ac290395d942a93155f684c3cf8dea11d3a83742d488fd1c851",
+      "bytes": 30246
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Propagation/src/frac/dentmap.ts",
+      "sha256": "ab5daabf13d093b77a1769fcc4c43086fca966aa351f1e40c3f6ca13b1b8ffb1",
+      "bytes": 8918
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Propagation/src/frac/regions.ts",
+      "sha256": "20141edb4122d952169f4832b4c17f610763252d7a062754e6802d50d742d41a",
+      "bytes": 14545
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Propagation/src/geom/carbody.ts",
+      "sha256": "9006c1eeb60414418d0192141ac30aed983f4fa93daaeefe5e9b4f4219d48266",
+      "bytes": 14375
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Propagation/src/geom/convex.ts",
+      "sha256": "d682f8452c74807ff1a01a3900f2f5b57af8ede8e504b1eb21a72e92bf363697",
+      "bytes": 11855
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Propagation/src/sim/materials.ts",
+      "sha256": "d2b018ed903638e076f6b11048a6a08cb022715a776f2e8beb2fc836ee01aacb",
+      "bytes": 6574
+    },
+    {
+      "path": "Exhibits/FractureEditor/SourceDepot/Provenance.json",
+      "sha256": "1bcdb676b62b7e3109aed4561570bdb9bfdcfa377fc484fa83af94a5bc746192",
+      "bytes": 1548
+    },
+    {
+      "path": "Exhibits/FractureEditor/index.html",
+      "sha256": "ff6868be84aeb1b90111411b45a330f773fabdf0c9cd9703ee0a9a68092bf99e",
+      "bytes": 788712
+    },
+    {
+      "path": "Exhibits/FractureEditor/package-lock.json",
+      "sha256": "b0878817df753a9318b0de266c4e1e2e60bb34f63491b4ffb7b4bdbb987ee80e",
+      "bytes": 14864
+    },
+    {
+      "path": "Exhibits/FractureEditor/package.json",
+      "sha256": "5e901120a0fc8be97fdf9883521ef4b258e589af870313d6686f73ec555b6a39",
+      "bytes": 231
+    },
+    {
+      "path": "Exhibits/FrontierEditor/README.md",
+      "sha256": "edace4f914faed706144370918319327b0eee71d4b604fe9498e0bf47892198b",
+      "bytes": 1430
+    },
+    {
+      "path": "Exhibits/FrontierEditor/atmosphere-shared-controls.jsx",
+      "sha256": "03cf964537e190f077242c46f34b694a91555ca4cf2102bdf36ab7e4751ccb99",
+      "bytes": 2693
+    },
+    {
+      "path": "Exhibits/FrontierEditor/camera-graphics.jsx",
+      "sha256": "51a24676f7ce05208b64fda2a17fb968175f7142905dbaf4d748c8e8a20524ff",
+      "bytes": 4978
+    },
+    {
+      "path": "Exhibits/FrontierEditor/celestial-controls.jsx",
+      "sha256": "f6caad55174a9dd3ab28a5cb69464efa45cb509137ee4d032d9aecf68ec44caa",
+      "bytes": 9105
+    },
+    {
+      "path": "Exhibits/FrontierEditor/celestial-icons.jsx",
+      "sha256": "80395d83f5c3e828fe98e6f4f473aac20fc5b1b39a17abcfe99ccd259d865c85",
+      "bytes": 2288
+    },
+    {
+      "path": "Exhibits/FrontierEditor/cluster-lod-core.js",
+      "sha256": "16fcb6ccfcbbdd55f60cbdef9d35e1754f62ee7e330b04cf284863a3725e0584",
+      "bytes": 3546
+    },
+    {
+      "path": "Exhibits/FrontierEditor/cluster-lod-demo.js",
+      "sha256": "ebb9e32d10482d9990ab937725a3c2f968ef492c48270fdade5834483c978e55",
+      "bytes": 7142
+    },
+    {
+      "path": "Exhibits/FrontierEditor/cluster-lod.html",
+      "sha256": "ababd28237fb4ba0f03fa68c82d9d4fcfdcd60cbcc9c3288664c8d397fb9f4bc",
+      "bytes": 8865
+    },
+    {
+      "path": "Exhibits/FrontierEditor/collection-icon-options.html",
+      "sha256": "ec4494fcf9f56c8ca5042585387f0a76115ad9ea3e2aef9bcb5980836fae4018",
+      "bytes": 6034
+    },
+    {
+      "path": "Exhibits/FrontierEditor/construct-menu.css",
+      "sha256": "35637818b8d2bf74540b60ed7947a5f4b1d59ae7a45acf9f3eb6363ccd7492ee",
+      "bytes": 12433
+    },
+    {
+      "path": "Exhibits/FrontierEditor/construct-menu.jsx",
+      "sha256": "90663514d376b8ac4c6d4e1176007108f0aaa592102b98338ac14b0a9e3402f4",
+      "bytes": 13079
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/arcade-joystick.svg",
+      "sha256": "2651a101ff6df19d263f90711e2a0a169726ffc7f987294125e46a3be5a8ec15",
+      "bytes": 2811
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-blend.svg",
+      "sha256": "eb04dd8789c2270be0bd41a86576573790c458d5d5961b64cf7172fd38c86fef",
+      "bytes": 2429
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-exr.svg",
+      "sha256": "542f89f3c27e9180d0fe5b68e5da932343e3233e6a69c3e1081a56d0dcad6e80",
+      "bytes": 2419
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-fbx.svg",
+      "sha256": "cdb311073504017d1734f103f7667ee9bf56cf0bdefe7e65addf714a0e9704b0",
+      "bytes": 2205
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-glsl.svg",
+      "sha256": "34fa9fd9a42446d9ad5f41f3624de64f9dbf257670cd8871a00b28b99aec9977",
+      "bytes": 2452
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-gltf.svg",
+      "sha256": "692f856de6a7f5d635c1a7f6434344a337b9335d2cbe749d4c78bc743b7f488d",
+      "bytes": 2212
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-jpg.svg",
+      "sha256": "a4bdfdd06b492d85773c79a89302d0d15422f411359b325cadfff2c01a121caf",
+      "bytes": 2339
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-json.svg",
+      "sha256": "be82d6813d2a5e81429f1919258c0c9d030307cd8559ebfd1098c7f6e3043ec4",
+      "bytes": 2152
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-mat.svg",
+      "sha256": "ba1d85d8579b1a02666d86ebb049c2dd7ae2d887a4aa141941a06769c5ba9217",
+      "bytes": 2561
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-mp3.svg",
+      "sha256": "8f3f19337e3c4e77c466ec0f1df3225644ab0468d7569a580ad7b29cf97a4ef9",
+      "bytes": 2155
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-obj.svg",
+      "sha256": "be7351b8c7bdfe4d5059e71a4645239fa61c495658b155c6fc090366ba40f18d",
+      "bytes": 2205
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-ogg.svg",
+      "sha256": "1086ed65cedda8ae7cd70418c0bc5b84eec55efb031989c80007663642ce0f25",
+      "bytes": 2155
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-otf.svg",
+      "sha256": "cefc3ea60b7dd6bed81d6ac1d985327cb6e52edaa4108043e33654b8cab046a0",
+      "bytes": 2147
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-png.svg",
+      "sha256": "f0076136fe3520a9bab92d695e724ff72dd1f91a866095ea727f481584de8716",
+      "bytes": 2339
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-py.svg",
+      "sha256": "fcfe9d9c6d87f6991de8748ca0ca2c2a061b70fec7061aaf60431e213b14e508",
+      "bytes": 2138
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-svg.svg",
+      "sha256": "ecb2df968cf73468cf0514104fde24c1f952f6931b4cf0497bf5c37363405d48",
+      "bytes": 2339
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-ttf.svg",
+      "sha256": "eb9b28551736ca17a6b6d7674de489e77c1d59604e6749db015f952695c6eebc",
+      "bytes": 2147
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-wav.svg",
+      "sha256": "86c7fb8a9bbae5ee7100768c5abae60774a2daac04f4cd1f2266a1a7b42257f6",
+      "bytes": 2155
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-woff.svg",
+      "sha256": "8d1ab959459c25f0c9bbdd591a92f94c72f474eca062d89b1eab8f00cbc5db76",
+      "bytes": 2154
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-woff2.svg",
+      "sha256": "9e989b0a458bbe4491ee864e1da691660ceda9def4c387b3c5e9a2b4fd9c2815",
+      "bytes": 2161
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-file-zip.svg",
+      "sha256": "697188a7c5cfb319e3c21f7a26348e5c5acbdee0b762e3453459b2aa7e241b43",
+      "bytes": 2321
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-animation.svg",
+      "sha256": "12f0c3b7a0be7d1b63d8c2a08c7104413ae2a3cb397968e3e2a98dd219fc810b",
+      "bytes": 2607
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-archives.svg",
+      "sha256": "11dbe320b1eef6dc722f5fa98399cc74e1ce531d80e75b27e3ff8d7b4a43b3a9",
+      "bytes": 2678
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-audio.svg",
+      "sha256": "41923cde540f88df0374f5f0491bfe15d7ff41f0841af675e9f4a3e6431a30de",
+      "bytes": 2409
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-fonts.svg",
+      "sha256": "0515688d5b66676da3342350f7c02f9081a4dd83cc1648e1ad6d8a57769b4020",
+      "bytes": 2396
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-images.svg",
+      "sha256": "36f809c1fa2b7ae91ebd28ccf255795107e615b68c610aaad368e36587bbf909",
+      "bytes": 2692
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-materials.svg",
+      "sha256": "de020cf1767642ada8062205ad953cf7553adcb920347406a1b095a39d702081",
+      "bytes": 3069
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-models.svg",
+      "sha256": "59bb80c3bdce4ac84bfef211d0423216396b12c71d2041b184c833803db50fe3",
+      "bytes": 2497
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-scenes.svg",
+      "sha256": "209e68c6cc02dfcdc606828eabfee6e2c242433e5a859614e917dd0d72b7b82e",
+      "bytes": 2804
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-scripts.svg",
+      "sha256": "d8e624b4d108890e17b46f0c1e4f668d8f56709ff6b972cc2dc82221b498c7d1",
+      "bytes": 2408
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-shaders.svg",
+      "sha256": "78039577191b55508104755cd0aa3b592068b327e60839d8bfd7e3da8e9c19cc",
+      "bytes": 2857
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-textures.svg",
+      "sha256": "4488eac1a610748aabcd0fa78eab4bcba5ad5e43e35851bfbda561bb89bd17a9",
+      "bytes": 2826
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/asset-folder-video.svg",
+      "sha256": "7d037273b896ee9549baf27f722dabc81c110e6de948f791124ca7d52a7a82f0",
+      "bytes": 2696
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/camera.svg",
+      "sha256": "04b275cffafc53cf69f92c337e4c741cd8b0e06db428770930794447e86d50eb",
+      "bytes": 2858
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/clapperboard.svg",
+      "sha256": "f570a413fddfc7e1ca758e3fdd4a1c69154e06f14c7a6f0e4ae037aaf4b4bc3b",
+      "bytes": 3918
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/clouds.svg",
+      "sha256": "59b9cb51633a3171d54db77160d483744436f47e3e0d73cb5b4a7a73414c6412",
+      "bytes": 2010
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/collection-bracketed-objects.svg",
+      "sha256": "0511cc3a04649dbff923c34a734302636a7912e964fd5720748d2b613c83fd6e",
+      "bytes": 652
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/collection-linked-nodes.svg",
+      "sha256": "1d313d101d89bb9f11a7eb8ee5620db248b5c4bbfa7821c655819afb84e555f7",
+      "bytes": 649
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/collection-overlapping-tiles.svg",
+      "sha256": "b61ae18043822a39672fee2fd9f5c2c403af05f8425d6b93261a81eed68c54c0",
+      "bytes": 973
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/collection-stacked-layers.svg",
+      "sha256": "810f71dc446ea5d7225f511b56f671c5f71606c44cbf74d7f93d540f980a6dd0",
+      "bytes": 630
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/collection.svg",
+      "sha256": "564b1d0636ccfd639822d08067308d4019e71dda4fb2afd9c50eb78cfd643483",
+      "bytes": 1696
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/command-key.svg",
+      "sha256": "17e7c9d507719b5bed752b7bc316758cd1b4d2e6d127693bc4fd32f991723087",
+      "bytes": 2605
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/dice.svg",
+      "sha256": "b30d48863fefe26d5993c5949ddffd634af7c27a2396a0c822626189b83f042b",
+      "bytes": 2701
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/earth.svg",
+      "sha256": "41b39082afc23716e6a3e1d06c2f6162ead0a815c30944757b13498f5815d7e2",
+      "bytes": 9908
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-area-light.svg",
+      "sha256": "17f11dfc8e5eab93bc49c333b0217f0c72b3f0dd5454c11fb53a09b8b75cfdde",
+      "bytes": 640
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-bone.svg",
+      "sha256": "2ccba75c7319295b6d04fb1442e7ae6e61beb52166d4ca478ad7084ab716e310",
+      "bytes": 647
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-box-collider.svg",
+      "sha256": "a9846235d5cfa327b25cdbac068a72848d90ab6e5800bb6d3b71026e58493c14",
+      "bytes": 519
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-brake-light.svg",
+      "sha256": "04ec17639bc1535c89f34b336dd0d1dd451c9ed4cec0535c16a73b274298f2fb",
+      "bytes": 563
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-collection.svg",
+      "sha256": "19c096cf0257ff54daedf35b33fc6acd078c2816471ea71c99c73c452919fdc2",
+      "bytes": 751
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-debug-breakpoint.svg",
+      "sha256": "a2d5cbfc8f286b589b6244b6b4e62c683173127b1ba6f9b5b9e6f84be59b8c8c",
+      "bytes": 2040
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-debug-bug.svg",
+      "sha256": "72a5ec7a57bcf4b4cdb2dd683e860d75bb1fafcbf2920e46d4bfe955d4730290",
+      "bytes": 1795
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-debug-run.svg",
+      "sha256": "f84190ae45954947dd9ec24c1b703b595b6df5690db229eab90b68ada4a800be",
+      "bytes": 1949
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-dome-light.svg",
+      "sha256": "d45fe8e9fec257ffec5f26f9ca70a769119a59e6f49dba60d75bf05320faee5c",
+      "bytes": 937
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-geometry.svg",
+      "sha256": "63ccaeb5df75fbd4847297b84eaab4615698fa2597d0f319bf3c0f2036c85973",
+      "bytes": 671
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-grid.svg",
+      "sha256": "99e6baf799003b1dcdbc021e58cd3827d72e7b814bd724d362d936b85d64411d",
+      "bytes": 456
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-hazard-lights.svg",
+      "sha256": "2714601d0084ee6848a92178052181d431fe6ae6890e24eb98adbbdc0a369085",
+      "bytes": 556
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-hdri-light.svg",
+      "sha256": "5205f31a5e4fe28f670cb3dd3517c9483cffcd3d2270d07529f0e7bead72db85",
+      "bytes": 1556
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-hidden.svg",
+      "sha256": "d1b5619a66b87f05ef47ca5222a6ba5312015beb22cc2f15a8e1219b7f05844c",
+      "bytes": 515
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-instance.svg",
+      "sha256": "21f893f28affaad68912680e41635662c6c5d0b7fc78e045885cab12a05ead7c",
+      "bytes": 926
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-lock.svg",
+      "sha256": "c378ba74f7b49a9dafcd8ce7b8d5660efa8456a2b26a28fc491662158e43a28b",
+      "bytes": 539
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-material.svg",
+      "sha256": "f329a6001a302aac16ed14eed8a28ccc706bbe783c37ae8c8033c4c0cc7ab2f5",
+      "bytes": 1763
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-move.svg",
+      "sha256": "44a9366102b19ffd4e33f4ced87c8bb4d40699761b1da1bd9a073e7bea1098b7",
+      "bytes": 834
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-particle-emitter.svg",
+      "sha256": "5316ddd8d3c5c65e377e1dd34a2b9a8ba33ca0f4684b67d7d2b1986fa41fb127",
+      "bytes": 898
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-pause.svg",
+      "sha256": "f0f42e3620ca31f5c47752c6060caa52801d9c8c3d6f7cbe6dafcc00a02e2e83",
+      "bytes": 428
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-physics.svg",
+      "sha256": "43b60c3b818d42a84c736c19005820455d89e25e746bdb6eea5594e24aaf3d30",
+      "bytes": 864
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-pivot.svg",
+      "sha256": "7a31c017d5c5dcfd477e60c02f058921cc23fb2f14c343f1245d8b4a3c458356",
+      "bytes": 438
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-play-mode.svg",
+      "sha256": "2ad62086a654a90bc176d51392a59c3757a1245dfcae990624c9d3b2846c52eb",
+      "bytes": 439
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-point-light.svg",
+      "sha256": "e1de167da958fbe7e8c298e7e3d3e98589f92a3e1639c99f54f01868538f84bf",
+      "bytes": 836
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-precompute.svg",
+      "sha256": "612e52acbdcf51ed622509164c795ac9248c7064f70bc4c9ed7f068a943b8ae5",
+      "bytes": 761
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-prefab.svg",
+      "sha256": "975af7f097e47307235beb6d2eae3ee14c9dfb4047e0d3f8fefafa3dcbed9669",
+      "bytes": 587
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-rotate.svg",
+      "sha256": "4eb2f4a044fb4183b74fd2fd705e564868ebdf02836ed86121a20b53817ac880",
+      "bytes": 791
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-scale.svg",
+      "sha256": "831f345d595d700a9054e4c786cf266bbec5a3438acba7d4a9d1da182beb8bff",
+      "bytes": 516
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-select.svg",
+      "sha256": "a073fca4635c8fe30d5b2b8824c57dd1e01c9b0a2e8d965dc76cef6b28664c74",
+      "bytes": 410
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-simulate.svg",
+      "sha256": "09d1b2aa94178dcdecdcd9230adaf5a8178781fcc8642f0b49ceb5a7a139f1b8",
+      "bytes": 947
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-snap.svg",
+      "sha256": "99c4364eb1688dfc11c86bcaad4e78e9821b5e9ae01dea42d9bff15b64c88a9b",
+      "bytes": 599
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-sphere-collider.svg",
+      "sha256": "4dc2d488c928178df9b4c90a4cf1f127b74475658ae0b2453dbd561d106d2b0b",
+      "bytes": 575
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-spotlight.svg",
+      "sha256": "db321c87b8c6deb1864d9ffefc37a05cbf2ad02568c9b563784ec2434b7e7014",
+      "bytes": 667
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-stop.svg",
+      "sha256": "353a1e279218dbfcb03fba9b4f1b4319548f0420c83d71cb72015787be8b7195",
+      "bytes": 673
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-texture.svg",
+      "sha256": "79ace07e263ee9c2cc8cad0b5ffd0c655c69705f28b460cf8dda3b34d91a1d6f",
+      "bytes": 509
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-trigger.svg",
+      "sha256": "76d5ed76cccfa8813bd7187e429d5ca710ab650bc3b0a6d09071f17fb24e1f3d",
+      "bytes": 533
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-unlock.svg",
+      "sha256": "7ae8f8c60db7a8821ff441a09c0180f89b25457c89411a01f8f149ff5a000ef4",
+      "bytes": 542
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/editor-visibility.svg",
+      "sha256": "435ca82b0513fe52ba0954678538df78d0e4a271d72c146c2f108048a18fda2d",
+      "bytes": 463
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/environment-exposure.svg",
+      "sha256": "34bdba1cbddf82f092a6d3a52becd6d729947b4bfd30e8b69f9b61b85f7adf1d",
+      "bytes": 1293
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/fire.svg",
+      "sha256": "b3eeea4613c7d0e2dc1882a976a6a137d7ddf3376a3cbea372d3bce8e11750a6",
+      "bytes": 1804
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/fluid-glass.svg",
+      "sha256": "d059912713df8e698ae739195608508ad4181c6b347c2064d9e28c26e3f66c4a",
+      "bytes": 2409
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/fluid.svg",
+      "sha256": "24aac61899369dd192be6183883963c7d47bf8fa052cb263e2f4720a016b0df4",
+      "bytes": 1071
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/fog.svg",
+      "sha256": "aacb7841c660e317f50522f0d95b3b663fee33eae33c743ce7a0b9354a902d78",
+      "bytes": 2204
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/forest.svg",
+      "sha256": "2375050a102965aab5b0a85babe96c2cf10a88524a8eecab0395bee88065f463",
+      "bytes": 1702
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/game-controller.svg",
+      "sha256": "48b360616dea20268e7adcb076d5a140096894b7fbd95ad460de8186475135ad",
+      "bytes": 3082
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/geometry.svg",
+      "sha256": "8d014a1010c289918bce638c8058e9511ebcfdcf2d929ae84eed1f9b159143d4",
+      "bytes": 940
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/graphics-card-2d.svg",
+      "sha256": "52b19c2a925f0c5e1fe2c728377d4801c9801a5685de84d8fa7db1f3d52ab5c7",
+      "bytes": 1688
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/hard-drive.svg",
+      "sha256": "62a2d21b2fc26dec93196c975df7f64e9df8fe262ea257099711067fa712730a",
+      "bytes": 7488
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/home.svg",
+      "sha256": "5f930a421b9c3d6fd5a1be7ad8cc61d3185eeeed0ea6c7d73aee16f87dabe390",
+      "bytes": 2597
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/lens-flare.svg",
+      "sha256": "0c4f717df2cb6a002a7f0daeef5caf43436dceb51257d2f3663d4920af6e9b17",
+      "bytes": 2727
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/light-area-2d.svg",
+      "sha256": "3aa5d861699070071b9bf773273d46fba28b08240fa036676a32c4b53ef15116",
+      "bytes": 436
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/light-incandescent-2d.svg",
+      "sha256": "c62fb0ff0dad1c317b6d0f350c9349cf8f03f08b575481477a80c646b8c8eee3",
+      "bytes": 498
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/light-point-2d.svg",
+      "sha256": "5631ef20f4ae012f5d17f9623fde2545d836ad80a0c8aad479e1d3dd04b6ac51",
+      "bytes": 779
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/lightning.svg",
+      "sha256": "999269d21fddebe56aa55a55f6eb9204f5c1e0294c77590e7fc7716f74bc7eb8",
+      "bytes": 20392
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/material.svg",
+      "sha256": "529adaccfea921a520714f6a488eeb1ea4b6b44382cdc5b42c237579439375f8",
+      "bytes": 58563
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/microphone.svg",
+      "sha256": "820fd9c71a641d71f219332d9d85cb085ea7e0732cc3d789c2f64012cde4d36a",
+      "bytes": 7508
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/moon.svg",
+      "sha256": "e3272801cd5d98b7edc5ffc02407cb2694593c0fcbaef59938daa648f9980b2f",
+      "bytes": 15970
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/package.svg",
+      "sha256": "c5c2779cb3ea567677d959780597a2a856da2a388a0b8c901a1adf2c8d34e20c",
+      "bytes": 1697
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/rainbow.svg",
+      "sha256": "65937b1f01eb12e7933b047b6c2f129c2d5930e46d9398bf338bd8d51c6c7322",
+      "bytes": 934
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/ram-2d.svg",
+      "sha256": "e4c1bdf6c322559192a361683c55f75fc930b5a0c887c8ef5a44163ce5cd3872",
+      "bytes": 1038
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/retro-terminal.svg",
+      "sha256": "96e32443852e07a0db350560b8521244b28e56843df2c267318da14bbc688166",
+      "bytes": 2594
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/sky-scattering.svg",
+      "sha256": "a067f10fbb711602ae457405da43b7f9cd2ad43b146d5bef5662b7050ebc48d3",
+      "bytes": 1400
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-animation-curve.svg",
+      "sha256": "c8d6934ce1c160a64e2adbc47f60a77fe6e7d26ce1c58138187e99fe5d850419",
+      "bytes": 2446
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-build.svg",
+      "sha256": "aac92f50e7c2f75309c713f29cd8313fb28f40864d5f82cc4bf5b628624ae3a9",
+      "bytes": 2632
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-clapboard.svg",
+      "sha256": "d1d8165b0c3be8211dec7980aa6faf6734286f8061c73d32e930cb4ed8900752",
+      "bytes": 2663
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-color-picker.svg",
+      "sha256": "501e4d00b8d848628906ab25055d4ef627240c2fd5b30eef456c3922e69fc3b5",
+      "bytes": 2953
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-document.svg",
+      "sha256": "26dc1c296b95d834d98667832e78d923f077db5ea39e8b07fbb2fc7dd5b0c801",
+      "bytes": 3297
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-fabric.svg",
+      "sha256": "132d99665dd84afe0d0730150a59471b9564b48b7e6b78b97e5313287537dd97",
+      "bytes": 2486
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-film-strip.svg",
+      "sha256": "e32a08223b626b3058f9c1133b7b48fa8679ac5fa777df6bec39f48117af5f6c",
+      "bytes": 3750
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-image-widget-variant2.svg",
+      "sha256": "8d3194f01bf265832949b9ef58df7a97c746e7eaa8d6a4fd84bc167d7d5d8f54",
+      "bytes": 2446
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-image-widget-variant3.svg",
+      "sha256": "c684b4298b5b3265662f9ca3c97ac430d85a5a95ae37b095f3be06d8ebf9f425",
+      "bytes": 2706
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-image-widget-variant4.svg",
+      "sha256": "81fb686510a49a17317d28a0d6b691d51ba4173548e1f10a8822fe6d3a8a8c4d",
+      "bytes": 2333
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-image.svg",
+      "sha256": "5199a2068586948ebb6b285c196f6f431ac19f4d3edda9bf2cc313cac297faea",
+      "bytes": 2458
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-l-e-d-panel.svg",
+      "sha256": "ff123534416bbe08c213cf34b8221037f1eb268663c328eb3dbe7a02877d2557",
+      "bytes": 4559
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-lantern.svg",
+      "sha256": "5154c835c70445072140e1fd93a4774b90bbda0cb70c50fadbb418ac58422397",
+      "bytes": 5360
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-live-broadcast.svg",
+      "sha256": "bbc2bdc3f64ef57a0812105eedd89f3e51c3a26d697f88d7ceccaf90382f1428",
+      "bytes": 2484
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-meeting-grid.svg",
+      "sha256": "82960616acacafa330051ae5bc29ad01a4ab28f390b4cd7cf2eded0252b284e6",
+      "bytes": 2308
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-old-gamepad-classic.svg",
+      "sha256": "adf83919432b5022a88fce5fb2a243eff613902c3b46ccc597e56d0871fc2ab5",
+      "bytes": 2814
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-ring-light.svg",
+      "sha256": "c5f5708941d47b95203932953709285d9c37e706e18e384537571325092acaf0",
+      "bytes": 2357
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-scene-hierarchy.svg",
+      "sha256": "a833b8f34149c305d8c3234304b0e8d567cd5fe1225029f0e20bf1d736258eba",
+      "bytes": 2964
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-script-node.svg",
+      "sha256": "c1c9a8a93dff32555b43f3f79ba56c52b1a590cdb97ab80bc3f3670d6d873f68",
+      "bytes": 3017
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-shader-node.svg",
+      "sha256": "27c8a5b38a0c3cbeefa803266bb5396386cd0987e5c31c665ac27d42e5353e9e",
+      "bytes": 2549
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-spotlight.svg",
+      "sha256": "99179d347933c26372cd60953831aa225fefbab8260fc60484c32fd7dd8622cb",
+      "bytes": 3523
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-sprite-sheet.svg",
+      "sha256": "e8912adec848b5a5a4921552b3f358795341a14880b4bbe133c0f1c642a4cecc",
+      "bytes": 3718
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-terminal.svg",
+      "sha256": "b25c135bfea576ba3358d394fe1cc8bc5ee50f0578d66c5db1c11ae1d894e386",
+      "bytes": 2361
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-tilemap.svg",
+      "sha256": "aaf37d7e88540685931bee9500dcec6863e0dd6d7bb0c4accb43c0e0df24020e",
+      "bytes": 2608
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-timeline.svg",
+      "sha256": "a62a6345334d61b5b013f7c7aa96a3df20f214ad26e47913eba30a850ddb0518",
+      "bytes": 2457
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/slate-video-player.svg",
+      "sha256": "7370dacff725bbec176bb513a95a09d20362fe31ca3b3e6b9424779ba16f3701",
+      "bytes": 2327
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/smoke.svg",
+      "sha256": "e85bbf4b491300500bd4ff57d893a37f83bd9dfa3ebd41e11271475c73d8d581",
+      "bytes": 2319
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/speaker.svg",
+      "sha256": "88c9976f122b3f88d419dc4b3da44154d661839398b837bdd795a124dbc93fb8",
+      "bytes": 4360
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/stars.svg",
+      "sha256": "247e8f05a547a41fbf2c97339e2c104220354f44692df71edb24a9cd161197ac",
+      "bytes": 3684
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/sun.svg",
+      "sha256": "4784b0b90011b710a1345a8048901404a4cc8a1f15c98e886589f47133f6a1c3",
+      "bytes": 4368
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/terrain.svg",
+      "sha256": "d84ac696528da7c166710e55d32b9c576efa10f2930b8edae85158f9f9b5e34b",
+      "bytes": 874
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/weather-hail.svg",
+      "sha256": "68f7fde98b04b309f3900f5fb6d3ec45c4cec3be91f2038913aa022319bebce2",
+      "bytes": 6780
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/weather-rain.svg",
+      "sha256": "f28e17bc17dedf92adc908931400e38d5306a8c4575465f49a578b8b59833c23",
+      "bytes": 6254
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/weather-snow.svg",
+      "sha256": "95f74c0132f2d951e0e726ca6b3d88bf1134a6ee505a4bcb66c1f8648cdcfc87",
+      "bytes": 4667
+    },
+    {
+      "path": "Exhibits/FrontierEditor/custom-icons/wind.svg",
+      "sha256": "8b281a793b21674a43f73cd5d2b4d1346422b0b3138a21310eed608a240dbe86",
+      "bytes": 427
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/assets/earth-CYSemozy.svg",
+      "sha256": "41b39082afc23716e6a3e1d06c2f6162ead0a815c30944757b13498f5815d7e2",
+      "bytes": 9908,
+      "preserved_build": "BuildArchives/FrontierEditor/assets/earth-CYSemozy.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/assets/index-Cn3Vwmvm.css",
+      "sha256": "d566734f9877328d5743ba55b1d18471a33473668c79301d77179b9f457ebb9a",
+      "bytes": 97739,
+      "preserved_build": "BuildArchives/FrontierEditor/assets/index-Cn3Vwmvm.css"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/assets/index-pff7-qaz.js",
+      "sha256": "ef247b07ff356e180c6369d928b4b47eb7c581dbfb5442e267963411dd36adbb",
+      "bytes": 375825,
+      "preserved_build": "BuildArchives/FrontierEditor/assets/index-pff7-qaz.js"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/assets/moon-DmZg69Vo.svg",
+      "sha256": "e3272801cd5d98b7edc5ffc02407cb2694593c0fcbaef59938daa648f9980b2f",
+      "bytes": 15970,
+      "preserved_build": "BuildArchives/FrontierEditor/assets/moon-DmZg69Vo.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/assets/sun-Dx6eTS0U.svg",
+      "sha256": "4784b0b90011b710a1345a8048901404a4cc8a1f15c98e886589f47133f6a1c3",
+      "bytes": 4368,
+      "preserved_build": "BuildArchives/FrontierEditor/assets/sun-Dx6eTS0U.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/cluster-lod-core.js",
+      "sha256": "16fcb6ccfcbbdd55f60cbdef9d35e1754f62ee7e330b04cf284863a3725e0584",
+      "bytes": 3546,
+      "preserved_build": "BuildArchives/FrontierEditor/cluster-lod-core.js"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/cluster-lod-demo.js",
+      "sha256": "ebb9e32d10482d9990ab937725a3c2f968ef492c48270fdade5834483c978e55",
+      "bytes": 7142,
+      "preserved_build": "BuildArchives/FrontierEditor/cluster-lod-demo.js"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/cluster-lod.html",
+      "sha256": "ababd28237fb4ba0f03fa68c82d9d4fcfdcd60cbcc9c3288664c8d397fb9f4bc",
+      "bytes": 8865,
+      "preserved_build": "BuildArchives/FrontierEditor/cluster-lod.html"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/collection-icon-options.html",
+      "sha256": "ec4494fcf9f56c8ca5042585387f0a76115ad9ea3e2aef9bcb5980836fae4018",
+      "bytes": 6034,
+      "preserved_build": "BuildArchives/FrontierEditor/collection-icon-options.html"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/arcade-joystick.svg",
+      "sha256": "2651a101ff6df19d263f90711e2a0a169726ffc7f987294125e46a3be5a8ec15",
+      "bytes": 2811,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/arcade-joystick.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-blend.svg",
+      "sha256": "eb04dd8789c2270be0bd41a86576573790c458d5d5961b64cf7172fd38c86fef",
+      "bytes": 2429,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-blend.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-exr.svg",
+      "sha256": "542f89f3c27e9180d0fe5b68e5da932343e3233e6a69c3e1081a56d0dcad6e80",
+      "bytes": 2419,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-exr.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-fbx.svg",
+      "sha256": "cdb311073504017d1734f103f7667ee9bf56cf0bdefe7e65addf714a0e9704b0",
+      "bytes": 2205,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-fbx.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-glsl.svg",
+      "sha256": "34fa9fd9a42446d9ad5f41f3624de64f9dbf257670cd8871a00b28b99aec9977",
+      "bytes": 2452,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-glsl.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-gltf.svg",
+      "sha256": "692f856de6a7f5d635c1a7f6434344a337b9335d2cbe749d4c78bc743b7f488d",
+      "bytes": 2212,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-gltf.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-jpg.svg",
+      "sha256": "a4bdfdd06b492d85773c79a89302d0d15422f411359b325cadfff2c01a121caf",
+      "bytes": 2339,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-jpg.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-json.svg",
+      "sha256": "be82d6813d2a5e81429f1919258c0c9d030307cd8559ebfd1098c7f6e3043ec4",
+      "bytes": 2152,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-json.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-mat.svg",
+      "sha256": "ba1d85d8579b1a02666d86ebb049c2dd7ae2d887a4aa141941a06769c5ba9217",
+      "bytes": 2561,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-mat.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-mp3.svg",
+      "sha256": "8f3f19337e3c4e77c466ec0f1df3225644ab0468d7569a580ad7b29cf97a4ef9",
+      "bytes": 2155,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-mp3.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-obj.svg",
+      "sha256": "be7351b8c7bdfe4d5059e71a4645239fa61c495658b155c6fc090366ba40f18d",
+      "bytes": 2205,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-obj.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-ogg.svg",
+      "sha256": "1086ed65cedda8ae7cd70418c0bc5b84eec55efb031989c80007663642ce0f25",
+      "bytes": 2155,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-ogg.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-otf.svg",
+      "sha256": "cefc3ea60b7dd6bed81d6ac1d985327cb6e52edaa4108043e33654b8cab046a0",
+      "bytes": 2147,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-otf.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-png.svg",
+      "sha256": "f0076136fe3520a9bab92d695e724ff72dd1f91a866095ea727f481584de8716",
+      "bytes": 2339,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-png.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-py.svg",
+      "sha256": "fcfe9d9c6d87f6991de8748ca0ca2c2a061b70fec7061aaf60431e213b14e508",
+      "bytes": 2138,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-py.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-svg.svg",
+      "sha256": "ecb2df968cf73468cf0514104fde24c1f952f6931b4cf0497bf5c37363405d48",
+      "bytes": 2339,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-svg.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-ttf.svg",
+      "sha256": "eb9b28551736ca17a6b6d7674de489e77c1d59604e6749db015f952695c6eebc",
+      "bytes": 2147,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-ttf.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-wav.svg",
+      "sha256": "86c7fb8a9bbae5ee7100768c5abae60774a2daac04f4cd1f2266a1a7b42257f6",
+      "bytes": 2155,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-wav.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-woff.svg",
+      "sha256": "8d1ab959459c25f0c9bbdd591a92f94c72f474eca062d89b1eab8f00cbc5db76",
+      "bytes": 2154,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-woff.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-woff2.svg",
+      "sha256": "9e989b0a458bbe4491ee864e1da691660ceda9def4c387b3c5e9a2b4fd9c2815",
+      "bytes": 2161,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-woff2.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-file-zip.svg",
+      "sha256": "697188a7c5cfb319e3c21f7a26348e5c5acbdee0b762e3453459b2aa7e241b43",
+      "bytes": 2321,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-file-zip.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-animation.svg",
+      "sha256": "12f0c3b7a0be7d1b63d8c2a08c7104413ae2a3cb397968e3e2a98dd219fc810b",
+      "bytes": 2607,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-animation.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-archives.svg",
+      "sha256": "11dbe320b1eef6dc722f5fa98399cc74e1ce531d80e75b27e3ff8d7b4a43b3a9",
+      "bytes": 2678,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-archives.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-audio.svg",
+      "sha256": "41923cde540f88df0374f5f0491bfe15d7ff41f0841af675e9f4a3e6431a30de",
+      "bytes": 2409,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-audio.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-fonts.svg",
+      "sha256": "0515688d5b66676da3342350f7c02f9081a4dd83cc1648e1ad6d8a57769b4020",
+      "bytes": 2396,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-fonts.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-images.svg",
+      "sha256": "36f809c1fa2b7ae91ebd28ccf255795107e615b68c610aaad368e36587bbf909",
+      "bytes": 2692,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-images.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-materials.svg",
+      "sha256": "de020cf1767642ada8062205ad953cf7553adcb920347406a1b095a39d702081",
+      "bytes": 3069,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-materials.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-models.svg",
+      "sha256": "59bb80c3bdce4ac84bfef211d0423216396b12c71d2041b184c833803db50fe3",
+      "bytes": 2497,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-models.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-scenes.svg",
+      "sha256": "209e68c6cc02dfcdc606828eabfee6e2c242433e5a859614e917dd0d72b7b82e",
+      "bytes": 2804,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-scenes.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-scripts.svg",
+      "sha256": "d8e624b4d108890e17b46f0c1e4f668d8f56709ff6b972cc2dc82221b498c7d1",
+      "bytes": 2408,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-scripts.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-shaders.svg",
+      "sha256": "78039577191b55508104755cd0aa3b592068b327e60839d8bfd7e3da8e9c19cc",
+      "bytes": 2857,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-shaders.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-textures.svg",
+      "sha256": "4488eac1a610748aabcd0fa78eab4bcba5ad5e43e35851bfbda561bb89bd17a9",
+      "bytes": 2826,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-textures.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/asset-folder-video.svg",
+      "sha256": "7d037273b896ee9549baf27f722dabc81c110e6de948f791124ca7d52a7a82f0",
+      "bytes": 2696,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/asset-folder-video.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/camera.svg",
+      "sha256": "04b275cffafc53cf69f92c337e4c741cd8b0e06db428770930794447e86d50eb",
+      "bytes": 2858,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/camera.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/clapperboard.svg",
+      "sha256": "f570a413fddfc7e1ca758e3fdd4a1c69154e06f14c7a6f0e4ae037aaf4b4bc3b",
+      "bytes": 3918,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/clapperboard.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/clouds.svg",
+      "sha256": "59b9cb51633a3171d54db77160d483744436f47e3e0d73cb5b4a7a73414c6412",
+      "bytes": 2010,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/clouds.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/collection-bracketed-objects.svg",
+      "sha256": "0511cc3a04649dbff923c34a734302636a7912e964fd5720748d2b613c83fd6e",
+      "bytes": 652,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/collection-bracketed-objects.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/collection-linked-nodes.svg",
+      "sha256": "1d313d101d89bb9f11a7eb8ee5620db248b5c4bbfa7821c655819afb84e555f7",
+      "bytes": 649,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/collection-linked-nodes.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/collection-overlapping-tiles.svg",
+      "sha256": "b61ae18043822a39672fee2fd9f5c2c403af05f8425d6b93261a81eed68c54c0",
+      "bytes": 973,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/collection-overlapping-tiles.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/collection-stacked-layers.svg",
+      "sha256": "810f71dc446ea5d7225f511b56f671c5f71606c44cbf74d7f93d540f980a6dd0",
+      "bytes": 630,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/collection-stacked-layers.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/collection.svg",
+      "sha256": "564b1d0636ccfd639822d08067308d4019e71dda4fb2afd9c50eb78cfd643483",
+      "bytes": 1696,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/collection.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/command-key.svg",
+      "sha256": "17e7c9d507719b5bed752b7bc316758cd1b4d2e6d127693bc4fd32f991723087",
+      "bytes": 2605,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/command-key.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/dice.svg",
+      "sha256": "b30d48863fefe26d5993c5949ddffd634af7c27a2396a0c822626189b83f042b",
+      "bytes": 2701,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/dice.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/earth.svg",
+      "sha256": "41b39082afc23716e6a3e1d06c2f6162ead0a815c30944757b13498f5815d7e2",
+      "bytes": 9908,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/earth.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-area-light.svg",
+      "sha256": "17f11dfc8e5eab93bc49c333b0217f0c72b3f0dd5454c11fb53a09b8b75cfdde",
+      "bytes": 640,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-area-light.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-bone.svg",
+      "sha256": "2ccba75c7319295b6d04fb1442e7ae6e61beb52166d4ca478ad7084ab716e310",
+      "bytes": 647,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-bone.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-box-collider.svg",
+      "sha256": "a9846235d5cfa327b25cdbac068a72848d90ab6e5800bb6d3b71026e58493c14",
+      "bytes": 519,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-box-collider.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-brake-light.svg",
+      "sha256": "04ec17639bc1535c89f34b336dd0d1dd451c9ed4cec0535c16a73b274298f2fb",
+      "bytes": 563,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-brake-light.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-collection.svg",
+      "sha256": "19c096cf0257ff54daedf35b33fc6acd078c2816471ea71c99c73c452919fdc2",
+      "bytes": 751,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-collection.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-debug-breakpoint.svg",
+      "sha256": "a2d5cbfc8f286b589b6244b6b4e62c683173127b1ba6f9b5b9e6f84be59b8c8c",
+      "bytes": 2040,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-debug-breakpoint.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-debug-bug.svg",
+      "sha256": "72a5ec7a57bcf4b4cdb2dd683e860d75bb1fafcbf2920e46d4bfe955d4730290",
+      "bytes": 1795,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-debug-bug.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-debug-run.svg",
+      "sha256": "f84190ae45954947dd9ec24c1b703b595b6df5690db229eab90b68ada4a800be",
+      "bytes": 1949,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-debug-run.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-dome-light.svg",
+      "sha256": "d45fe8e9fec257ffec5f26f9ca70a769119a59e6f49dba60d75bf05320faee5c",
+      "bytes": 937,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-dome-light.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-geometry.svg",
+      "sha256": "63ccaeb5df75fbd4847297b84eaab4615698fa2597d0f319bf3c0f2036c85973",
+      "bytes": 671,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-geometry.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-grid.svg",
+      "sha256": "99e6baf799003b1dcdbc021e58cd3827d72e7b814bd724d362d936b85d64411d",
+      "bytes": 456,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-grid.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-hazard-lights.svg",
+      "sha256": "2714601d0084ee6848a92178052181d431fe6ae6890e24eb98adbbdc0a369085",
+      "bytes": 556,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-hazard-lights.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-hdri-light.svg",
+      "sha256": "5205f31a5e4fe28f670cb3dd3517c9483cffcd3d2270d07529f0e7bead72db85",
+      "bytes": 1556,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-hdri-light.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-hidden.svg",
+      "sha256": "d1b5619a66b87f05ef47ca5222a6ba5312015beb22cc2f15a8e1219b7f05844c",
+      "bytes": 515,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-hidden.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-instance.svg",
+      "sha256": "21f893f28affaad68912680e41635662c6c5d0b7fc78e045885cab12a05ead7c",
+      "bytes": 926,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-instance.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-lock.svg",
+      "sha256": "c378ba74f7b49a9dafcd8ce7b8d5660efa8456a2b26a28fc491662158e43a28b",
+      "bytes": 539,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-lock.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-material.svg",
+      "sha256": "f329a6001a302aac16ed14eed8a28ccc706bbe783c37ae8c8033c4c0cc7ab2f5",
+      "bytes": 1763,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-material.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-move.svg",
+      "sha256": "44a9366102b19ffd4e33f4ced87c8bb4d40699761b1da1bd9a073e7bea1098b7",
+      "bytes": 834,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-move.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-particle-emitter.svg",
+      "sha256": "5316ddd8d3c5c65e377e1dd34a2b9a8ba33ca0f4684b67d7d2b1986fa41fb127",
+      "bytes": 898,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-particle-emitter.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-pause.svg",
+      "sha256": "f0f42e3620ca31f5c47752c6060caa52801d9c8c3d6f7cbe6dafcc00a02e2e83",
+      "bytes": 428,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-pause.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-physics.svg",
+      "sha256": "43b60c3b818d42a84c736c19005820455d89e25e746bdb6eea5594e24aaf3d30",
+      "bytes": 864,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-physics.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-pivot.svg",
+      "sha256": "7a31c017d5c5dcfd477e60c02f058921cc23fb2f14c343f1245d8b4a3c458356",
+      "bytes": 438,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-pivot.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-play-mode.svg",
+      "sha256": "2ad62086a654a90bc176d51392a59c3757a1245dfcae990624c9d3b2846c52eb",
+      "bytes": 439,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-play-mode.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-point-light.svg",
+      "sha256": "e1de167da958fbe7e8c298e7e3d3e98589f92a3e1639c99f54f01868538f84bf",
+      "bytes": 836,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-point-light.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-precompute.svg",
+      "sha256": "612e52acbdcf51ed622509164c795ac9248c7064f70bc4c9ed7f068a943b8ae5",
+      "bytes": 761,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-precompute.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-prefab.svg",
+      "sha256": "975af7f097e47307235beb6d2eae3ee14c9dfb4047e0d3f8fefafa3dcbed9669",
+      "bytes": 587,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-prefab.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-rotate.svg",
+      "sha256": "4eb2f4a044fb4183b74fd2fd705e564868ebdf02836ed86121a20b53817ac880",
+      "bytes": 791,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-rotate.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-scale.svg",
+      "sha256": "831f345d595d700a9054e4c786cf266bbec5a3438acba7d4a9d1da182beb8bff",
+      "bytes": 516,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-scale.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-select.svg",
+      "sha256": "a073fca4635c8fe30d5b2b8824c57dd1e01c9b0a2e8d965dc76cef6b28664c74",
+      "bytes": 410,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-select.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-simulate.svg",
+      "sha256": "09d1b2aa94178dcdecdcd9230adaf5a8178781fcc8642f0b49ceb5a7a139f1b8",
+      "bytes": 947,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-simulate.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-snap.svg",
+      "sha256": "99c4364eb1688dfc11c86bcaad4e78e9821b5e9ae01dea42d9bff15b64c88a9b",
+      "bytes": 599,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-snap.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-sphere-collider.svg",
+      "sha256": "4dc2d488c928178df9b4c90a4cf1f127b74475658ae0b2453dbd561d106d2b0b",
+      "bytes": 575,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-sphere-collider.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-spotlight.svg",
+      "sha256": "db321c87b8c6deb1864d9ffefc37a05cbf2ad02568c9b563784ec2434b7e7014",
+      "bytes": 667,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-spotlight.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-stop.svg",
+      "sha256": "353a1e279218dbfcb03fba9b4f1b4319548f0420c83d71cb72015787be8b7195",
+      "bytes": 673,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-stop.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-texture.svg",
+      "sha256": "79ace07e263ee9c2cc8cad0b5ffd0c655c69705f28b460cf8dda3b34d91a1d6f",
+      "bytes": 509,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-texture.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-trigger.svg",
+      "sha256": "76d5ed76cccfa8813bd7187e429d5ca710ab650bc3b0a6d09071f17fb24e1f3d",
+      "bytes": 533,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-trigger.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-unlock.svg",
+      "sha256": "7ae8f8c60db7a8821ff441a09c0180f89b25457c89411a01f8f149ff5a000ef4",
+      "bytes": 542,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-unlock.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/editor-visibility.svg",
+      "sha256": "435ca82b0513fe52ba0954678538df78d0e4a271d72c146c2f108048a18fda2d",
+      "bytes": 463,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/editor-visibility.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/environment-exposure.svg",
+      "sha256": "34bdba1cbddf82f092a6d3a52becd6d729947b4bfd30e8b69f9b61b85f7adf1d",
+      "bytes": 1293,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/environment-exposure.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/fire.svg",
+      "sha256": "b3eeea4613c7d0e2dc1882a976a6a137d7ddf3376a3cbea372d3bce8e11750a6",
+      "bytes": 1804,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/fire.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/fluid-glass.svg",
+      "sha256": "d059912713df8e698ae739195608508ad4181c6b347c2064d9e28c26e3f66c4a",
+      "bytes": 2409,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/fluid-glass.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/fluid.svg",
+      "sha256": "24aac61899369dd192be6183883963c7d47bf8fa052cb263e2f4720a016b0df4",
+      "bytes": 1071,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/fluid.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/fog.svg",
+      "sha256": "aacb7841c660e317f50522f0d95b3b663fee33eae33c743ce7a0b9354a902d78",
+      "bytes": 2204,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/fog.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/forest.svg",
+      "sha256": "2375050a102965aab5b0a85babe96c2cf10a88524a8eecab0395bee88065f463",
+      "bytes": 1702,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/forest.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/game-controller.svg",
+      "sha256": "48b360616dea20268e7adcb076d5a140096894b7fbd95ad460de8186475135ad",
+      "bytes": 3082,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/game-controller.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/geometry.svg",
+      "sha256": "8d014a1010c289918bce638c8058e9511ebcfdcf2d929ae84eed1f9b159143d4",
+      "bytes": 940,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/geometry.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/graphics-card-2d.svg",
+      "sha256": "52b19c2a925f0c5e1fe2c728377d4801c9801a5685de84d8fa7db1f3d52ab5c7",
+      "bytes": 1688,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/graphics-card-2d.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/hard-drive.svg",
+      "sha256": "62a2d21b2fc26dec93196c975df7f64e9df8fe262ea257099711067fa712730a",
+      "bytes": 7488,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/hard-drive.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/home.svg",
+      "sha256": "5f930a421b9c3d6fd5a1be7ad8cc61d3185eeeed0ea6c7d73aee16f87dabe390",
+      "bytes": 2597,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/home.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/lens-flare.svg",
+      "sha256": "0c4f717df2cb6a002a7f0daeef5caf43436dceb51257d2f3663d4920af6e9b17",
+      "bytes": 2727,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/lens-flare.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/light-area-2d.svg",
+      "sha256": "3aa5d861699070071b9bf773273d46fba28b08240fa036676a32c4b53ef15116",
+      "bytes": 436,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/light-area-2d.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/light-incandescent-2d.svg",
+      "sha256": "c62fb0ff0dad1c317b6d0f350c9349cf8f03f08b575481477a80c646b8c8eee3",
+      "bytes": 498,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/light-incandescent-2d.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/light-point-2d.svg",
+      "sha256": "5631ef20f4ae012f5d17f9623fde2545d836ad80a0c8aad479e1d3dd04b6ac51",
+      "bytes": 779,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/light-point-2d.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/lightning.svg",
+      "sha256": "999269d21fddebe56aa55a55f6eb9204f5c1e0294c77590e7fc7716f74bc7eb8",
+      "bytes": 20392,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/lightning.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/material.svg",
+      "sha256": "529adaccfea921a520714f6a488eeb1ea4b6b44382cdc5b42c237579439375f8",
+      "bytes": 58563,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/material.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/microphone.svg",
+      "sha256": "820fd9c71a641d71f219332d9d85cb085ea7e0732cc3d789c2f64012cde4d36a",
+      "bytes": 7508,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/microphone.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/moon.svg",
+      "sha256": "e3272801cd5d98b7edc5ffc02407cb2694593c0fcbaef59938daa648f9980b2f",
+      "bytes": 15970,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/moon.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/package.svg",
+      "sha256": "c5c2779cb3ea567677d959780597a2a856da2a388a0b8c901a1adf2c8d34e20c",
+      "bytes": 1697,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/package.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/rainbow.svg",
+      "sha256": "65937b1f01eb12e7933b047b6c2f129c2d5930e46d9398bf338bd8d51c6c7322",
+      "bytes": 934,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/rainbow.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/ram-2d.svg",
+      "sha256": "e4c1bdf6c322559192a361683c55f75fc930b5a0c887c8ef5a44163ce5cd3872",
+      "bytes": 1038,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/ram-2d.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/retro-terminal.svg",
+      "sha256": "96e32443852e07a0db350560b8521244b28e56843df2c267318da14bbc688166",
+      "bytes": 2594,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/retro-terminal.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/sky-scattering.svg",
+      "sha256": "a067f10fbb711602ae457405da43b7f9cd2ad43b146d5bef5662b7050ebc48d3",
+      "bytes": 1400,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/sky-scattering.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-animation-curve.svg",
+      "sha256": "c8d6934ce1c160a64e2adbc47f60a77fe6e7d26ce1c58138187e99fe5d850419",
+      "bytes": 2446,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-animation-curve.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-build.svg",
+      "sha256": "aac92f50e7c2f75309c713f29cd8313fb28f40864d5f82cc4bf5b628624ae3a9",
+      "bytes": 2632,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-build.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-clapboard.svg",
+      "sha256": "d1d8165b0c3be8211dec7980aa6faf6734286f8061c73d32e930cb4ed8900752",
+      "bytes": 2663,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-clapboard.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-color-picker.svg",
+      "sha256": "501e4d00b8d848628906ab25055d4ef627240c2fd5b30eef456c3922e69fc3b5",
+      "bytes": 2953,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-color-picker.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-document.svg",
+      "sha256": "26dc1c296b95d834d98667832e78d923f077db5ea39e8b07fbb2fc7dd5b0c801",
+      "bytes": 3297,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-document.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-fabric.svg",
+      "sha256": "132d99665dd84afe0d0730150a59471b9564b48b7e6b78b97e5313287537dd97",
+      "bytes": 2486,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-fabric.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-film-strip.svg",
+      "sha256": "e32a08223b626b3058f9c1133b7b48fa8679ac5fa777df6bec39f48117af5f6c",
+      "bytes": 3750,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-film-strip.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-image-widget-variant2.svg",
+      "sha256": "8d3194f01bf265832949b9ef58df7a97c746e7eaa8d6a4fd84bc167d7d5d8f54",
+      "bytes": 2446,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-image-widget-variant2.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-image-widget-variant3.svg",
+      "sha256": "c684b4298b5b3265662f9ca3c97ac430d85a5a95ae37b095f3be06d8ebf9f425",
+      "bytes": 2706,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-image-widget-variant3.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-image-widget-variant4.svg",
+      "sha256": "81fb686510a49a17317d28a0d6b691d51ba4173548e1f10a8822fe6d3a8a8c4d",
+      "bytes": 2333,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-image-widget-variant4.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-image.svg",
+      "sha256": "5199a2068586948ebb6b285c196f6f431ac19f4d3edda9bf2cc313cac297faea",
+      "bytes": 2458,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-image.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-l-e-d-panel.svg",
+      "sha256": "ff123534416bbe08c213cf34b8221037f1eb268663c328eb3dbe7a02877d2557",
+      "bytes": 4559,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-l-e-d-panel.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-lantern.svg",
+      "sha256": "5154c835c70445072140e1fd93a4774b90bbda0cb70c50fadbb418ac58422397",
+      "bytes": 5360,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-lantern.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-live-broadcast.svg",
+      "sha256": "bbc2bdc3f64ef57a0812105eedd89f3e51c3a26d697f88d7ceccaf90382f1428",
+      "bytes": 2484,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-live-broadcast.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-meeting-grid.svg",
+      "sha256": "82960616acacafa330051ae5bc29ad01a4ab28f390b4cd7cf2eded0252b284e6",
+      "bytes": 2308,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-meeting-grid.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-old-gamepad-classic.svg",
+      "sha256": "adf83919432b5022a88fce5fb2a243eff613902c3b46ccc597e56d0871fc2ab5",
+      "bytes": 2814,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-old-gamepad-classic.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-ring-light.svg",
+      "sha256": "c5f5708941d47b95203932953709285d9c37e706e18e384537571325092acaf0",
+      "bytes": 2357,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-ring-light.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-scene-hierarchy.svg",
+      "sha256": "a833b8f34149c305d8c3234304b0e8d567cd5fe1225029f0e20bf1d736258eba",
+      "bytes": 2964,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-scene-hierarchy.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-script-node.svg",
+      "sha256": "c1c9a8a93dff32555b43f3f79ba56c52b1a590cdb97ab80bc3f3670d6d873f68",
+      "bytes": 3017,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-script-node.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-shader-node.svg",
+      "sha256": "27c8a5b38a0c3cbeefa803266bb5396386cd0987e5c31c665ac27d42e5353e9e",
+      "bytes": 2549,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-shader-node.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-spotlight.svg",
+      "sha256": "99179d347933c26372cd60953831aa225fefbab8260fc60484c32fd7dd8622cb",
+      "bytes": 3523,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-spotlight.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-sprite-sheet.svg",
+      "sha256": "e8912adec848b5a5a4921552b3f358795341a14880b4bbe133c0f1c642a4cecc",
+      "bytes": 3718,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-sprite-sheet.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-terminal.svg",
+      "sha256": "b25c135bfea576ba3358d394fe1cc8bc5ee50f0578d66c5db1c11ae1d894e386",
+      "bytes": 2361,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-terminal.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-tilemap.svg",
+      "sha256": "aaf37d7e88540685931bee9500dcec6863e0dd6d7bb0c4accb43c0e0df24020e",
+      "bytes": 2608,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-tilemap.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-timeline.svg",
+      "sha256": "a62a6345334d61b5b013f7c7aa96a3df20f214ad26e47913eba30a850ddb0518",
+      "bytes": 2457,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-timeline.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/slate-video-player.svg",
+      "sha256": "7370dacff725bbec176bb513a95a09d20362fe31ca3b3e6b9424779ba16f3701",
+      "bytes": 2327,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/slate-video-player.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/smoke.svg",
+      "sha256": "e85bbf4b491300500bd4ff57d893a37f83bd9dfa3ebd41e11271475c73d8d581",
+      "bytes": 2319,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/smoke.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/speaker.svg",
+      "sha256": "88c9976f122b3f88d419dc4b3da44154d661839398b837bdd795a124dbc93fb8",
+      "bytes": 4360,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/speaker.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/stars.svg",
+      "sha256": "247e8f05a547a41fbf2c97339e2c104220354f44692df71edb24a9cd161197ac",
+      "bytes": 3684,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/stars.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/sun.svg",
+      "sha256": "4784b0b90011b710a1345a8048901404a4cc8a1f15c98e886589f47133f6a1c3",
+      "bytes": 4368,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/sun.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/terrain.svg",
+      "sha256": "d84ac696528da7c166710e55d32b9c576efa10f2930b8edae85158f9f9b5e34b",
+      "bytes": 874,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/terrain.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/weather-hail.svg",
+      "sha256": "68f7fde98b04b309f3900f5fb6d3ec45c4cec3be91f2038913aa022319bebce2",
+      "bytes": 6780,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/weather-hail.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/weather-rain.svg",
+      "sha256": "f28e17bc17dedf92adc908931400e38d5306a8c4575465f49a578b8b59833c23",
+      "bytes": 6254,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/weather-rain.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/weather-snow.svg",
+      "sha256": "95f74c0132f2d951e0e726ca6b3d88bf1134a6ee505a4bcb66c1f8648cdcfc87",
+      "bytes": 4667,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/weather-snow.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/custom-icons/wind.svg",
+      "sha256": "8b281a793b21674a43f73cd5d2b4d1346422b0b3138a21310eed608a240dbe86",
+      "bytes": 427,
+      "preserved_build": "BuildArchives/FrontierEditor/custom-icons/wind.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/icons.html",
+      "sha256": "606d5662d58a95ce367337a28a782f9c937cdfc6f880c743a8301054da549b02",
+      "bytes": 478793,
+      "preserved_build": "BuildArchives/FrontierEditor/icons.html"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/index.html",
+      "sha256": "107a04c12c7982ffb4aa9f50d2421ad12e17ff856587b66717d7959a40a7aca1",
+      "bytes": 544,
+      "preserved_build": "BuildArchives/FrontierEditor/index.html"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/collection-options/bracketed-objects.svg",
+      "sha256": "3bcc52f09df160d155c113575cf75f1fb01abff757bee269558d28b5085736ab",
+      "bytes": 475,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/collection-options/bracketed-objects.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/collection-options/linked-nodes.svg",
+      "sha256": "ad40c29ea7f5dc17eb0d6d9b77f5ff4a3509bdd71f017a057ecd162d9d7436f5",
+      "bytes": 478,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/collection-options/linked-nodes.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/collection-options/overlapping-tiles.svg",
+      "sha256": "6c710acdc71792d91b25f23ba9fe493135d7937e0e0784773a081d14349264ef",
+      "bytes": 872,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/collection-options/overlapping-tiles.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/collection-options/stacked-layers.svg",
+      "sha256": "24ea7520357c68b23b6bcaa07016d499cc16b4460af272f87efcfe5878ef317a",
+      "bytes": 455,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/collection-options/stacked-layers.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/folder-environment.svg",
+      "sha256": "c5466bebab157d04c982b388398e09a5323fb266aafb9df083df8d37fd3c9d59",
+      "bytes": 728,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/folder-environment.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/folder-generic.svg",
+      "sha256": "aa34317849f2b5b702f15d331eab5ec2a9ac16a1332ba19e687ee8a697a357dd",
+      "bytes": 554,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/folder-generic.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/folder-water.svg",
+      "sha256": "d7b87372cc4742bfd85cb7f0e189ee76bce67522a99bc7e00fa93a479dd8016f",
+      "bytes": 631,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/folder-water.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/local-cloud.svg",
+      "sha256": "23d26bf08b231711078d7c1704800aa56c20cd78172dce27b79ee1b5e0946604",
+      "bytes": 2224,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/local-cloud.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/local-fog.svg",
+      "sha256": "249f200719a9f6d78c2181c72971d941b4e470f5940b54841a104c2bb2546ba3",
+      "bytes": 2418,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/local-fog.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/outliner-precipitation.svg",
+      "sha256": "16cbd74b2299a42aa33245d0324a18c3727c514ff30febd0f51e4350bca5ebcf",
+      "bytes": 513,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/outliner-precipitation.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/dist/ui-icons/outliner-stars.svg",
+      "sha256": "1872e91208ff4c78cfd11787a3bc2a45eba0771bf082080de0deb15083e166e8",
+      "bytes": 389,
+      "preserved_build": "BuildArchives/FrontierEditor/ui-icons/outliner-stars.svg"
+    },
+    {
+      "path": "Exhibits/FrontierEditor/environment-graphics.jsx",
+      "sha256": "01bfbb1da57233ed359cdf0f182a3fe6adb1d9ab3b7a6983d3cd1e77b425b0b4",
+      "bytes": 6468
+    },
+    {
+      "path": "Exhibits/FrontierEditor/extra-inspectors.jsx",
+      "sha256": "2493f4e00612904c6a9989c26f3dde2f3cb8aabff7cf6d70723c56e50828101c",
+      "bytes": 13647
+    },
+    {
+      "path": "Exhibits/FrontierEditor/flare-inspector.jsx",
+      "sha256": "d10bfde40e954d87949c214c4a0c9c55e2316de68efa113e86a863da7313472f",
+      "bytes": 9062
+    },
+    {
+      "path": "Exhibits/FrontierEditor/fluid-graphics.jsx",
+      "sha256": "0e0cd35cfde23487018a645f259bd7aa19cf994bc0798f4736eaf69068596f5f",
+      "bytes": 7089
+    },
+    {
+      "path": "Exhibits/FrontierEditor/foliage-inspectors.jsx",
+      "sha256": "39ff29ef69606e68cd918ba2e6e8174217f0b5391f054be55b4762c1f18a6faf",
+      "bytes": 7223
+    },
+    {
+      "path": "Exhibits/FrontierEditor/icons.html",
+      "sha256": "606d5662d58a95ce367337a28a782f9c937cdfc6f880c743a8301054da549b02",
+      "bytes": 478793
+    },
+    {
+      "path": "Exhibits/FrontierEditor/index.html",
+      "sha256": "a263595f2a01f4d9c168d3001768dc5407f95c47cb1f97d6f3ad13a27b06c09e",
+      "bytes": 438
+    },
+    {
+      "path": "Exhibits/FrontierEditor/local-volumes.jsx",
+      "sha256": "1529186c799f6ad564191729e80abffdecef036b46e5a9b81b526a91d9786f49",
+      "bytes": 6082
+    },
+    {
+      "path": "Exhibits/FrontierEditor/material-inspector.jsx",
+      "sha256": "2e086fd668c506313721a573c09a67cfee3ef923f8f738bd47b3219b1442721d",
+      "bytes": 6503
+    },
+    {
+      "path": "Exhibits/FrontierEditor/material-model.js",
+      "sha256": "2e1a433cdac16051b7bba8fe8b8ff4ce102a0b815d30e4a5f80db344ebdeb026",
+      "bytes": 1628
+    },
+    {
+      "path": "Exhibits/FrontierEditor/moon-controls.jsx",
+      "sha256": "4ee2454642bf919de0dc6fa89165f17bbe5cb385494e79fdf884721c42f719a0",
+      "bytes": 7309
+    },
+    {
+      "path": "Exhibits/FrontierEditor/object-inspector.jsx",
+      "sha256": "ea1ee3b71af569be166b72ed97d2a3e8bee2cab6ea571d117f8bd563475b4d20",
+      "bytes": 4082
+    },
+    {
+      "path": "Exhibits/FrontierEditor/optics.js",
+      "sha256": "df635d7aeab30e3816b099adf7661252a8451d20550ee43ab99d22788c4a7f6b",
+      "bytes": 1028
+    },
+    {
+      "path": "Exhibits/FrontierEditor/organization.jsx",
+      "sha256": "3f35baf3f91e9a481d6a25342e84e23ac604eb041b518de96aa26bb6dafe6e97",
+      "bytes": 7110
+    },
+    {
+      "path": "Exhibits/FrontierEditor/outliner-icons.jsx",
+      "sha256": "5def5e9cec0be9a49338d98d08af60b0e9bf66d985f00ecd203abd20bb3c9983",
+      "bytes": 3361
+    },
+    {
+      "path": "Exhibits/FrontierEditor/package-lock.json",
+      "sha256": "63f6d316699868a43ce520ba812f32a54bd8ee6e6bf3d61bebf1fe22f59d299c",
+      "bytes": 62417
+    },
+    {
+      "path": "Exhibits/FrontierEditor/package.json",
+      "sha256": "07333cbf91748a33bc48d87ed2910b0adf4bf3adcb02f52b994937d6bcd186c1",
+      "bytes": 306
+    },
+    {
+      "path": "Exhibits/FrontierEditor/precompute-quick-tiles.jsx",
+      "sha256": "4a13770e62d4bd671a80ba1fe9d300f29772a0ec2d0a0cfed919b7236d094133",
+      "bytes": 6594
+    },
+    {
+      "path": "Exhibits/FrontierEditor/property-graphics.jsx",
+      "sha256": "e8776a3196a3672ebc90e1205fc3ab4920af11af49f749110f9edb4cfb29f846",
+      "bytes": 9837
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/atmosphere_effect_icons.py",
+      "sha256": "e00f1629ef6b0e91ca3879a04422e92e1a1db38291734df6c16ec0615394e140",
+      "bytes": 6457
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/build-icon-gallery.py",
+      "sha256": "80428fb6e9bde0f9b0a30b74bc5189602cc5d1b7f94bbd5ffb39ead89be007a5",
+      "bytes": 39803
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/check-file-assets.mjs",
+      "sha256": "5e90aea1ca9116c4ae8627537db9354e9024b4d375cce05d3941bd7c43eabad1",
+      "bytes": 2343
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/check-layout.mjs",
+      "sha256": "958fe35db2f1d2335d64ed306e6ef8d577770cefa6d45628bf2428129176c4ce",
+      "bytes": 1969
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/check-outliner-icons.mjs",
+      "sha256": "9f4706a9ec52cabcbd7a29ada66a21c782d474407db54dd27947b7171fb550f6",
+      "bytes": 10971
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/check-precompute-controls.mjs",
+      "sha256": "d19411973e92f3208ee93703b2f2e3f6d623a8865e39e7b37daf4a4f300b473a",
+      "bytes": 5260
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/check-slate-import.mjs",
+      "sha256": "dd5e3847850ee94889aaed6079997e8fe7f156cbf3c56cabd58332d5e2172d2e",
+      "bytes": 5669
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/check-weather-expansion.mjs",
+      "sha256": "d86dd82245f5ee23d03ed3cb965a598154210702f678e45ffd83eaf2d5248f0e",
+      "bytes": 2332
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/collection_options.py",
+      "sha256": "34e3fa29123d3b07dc741368db942b5c06303e56857783566b46782c6b2a4081",
+      "bytes": 1044
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/compute_icons.py",
+      "sha256": "fe1a6913006b1ef31efd2b32fdf28beec72ed9a566ad0269fe84b963648ec289",
+      "bytes": 9333
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/control_icon_refresh.py",
+      "sha256": "e331f59a0863e9231cfb35222bf63a341cf3f69e62b297f4b9035594b2ec14bb",
+      "bytes": 5248
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/creative_depth.py",
+      "sha256": "774e60095abb162af517cbf16f231c613a1a11211ecf891803f887a44be87661",
+      "bytes": 12630
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/creative_icons.py",
+      "sha256": "7dc58ce514e5b2f941c53c01474d653cb30712d304588d98e350ffda747c5c71",
+      "bytes": 15821
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/editor_icons.py",
+      "sha256": "1f7a85da6cbcce2df0a1356d4faf561fd2bdef90aa82ba6029b0dc5c49ef21b9",
+      "bytes": 17046
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/editor_surface_icons.py",
+      "sha256": "bb799674b2fc4b197b714533342f61afc15926d473349eca5f4efd853dd142ec",
+      "bytes": 4638
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/everyday_icons.py",
+      "sha256": "060a5d265634ba787780c3a32434f2d22c80e86c49a1c7536cb44b7fae5c92c3",
+      "bytes": 7713
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/file_asset_icons.py",
+      "sha256": "909f00cee762e80864f5b9b13e98afe9bc68d3f95583fc86e47e3f6ab73b22ef",
+      "bytes": 7990
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/hardware_icons.py",
+      "sha256": "b52e91a7d8caba3e61419bd0d4936e9f62de13597eeecdf22ac328529c68f6a4",
+      "bytes": 8543
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/icon_reference_revision.py",
+      "sha256": "794e8500811579ef4f9c730a6a925fd565930eb06507181d1352b170a601e2db",
+      "bytes": 8059
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/icon_revision_two.py",
+      "sha256": "73d85a1eeafee6e9c8572fc0c113b4c53ba75593b2abf8dd6e161ea3651323bc",
+      "bytes": 16666
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/import-slate-icons.mjs",
+      "sha256": "0609f5560bea783129cacdd268229fb173eb4ad70138ca27909ab8f04d8776a4",
+      "bytes": 2226
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/light_icons.py",
+      "sha256": "ff003a5a985e153cc16a4873e4c67b15e2a408f856829debdd32d230382d8f43",
+      "bytes": 9560
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/measure-slate-layout.mjs",
+      "sha256": "7f696a6b1a8ebbfef14a98b507f8b7174fe6c03819d05f806940466148273783",
+      "bytes": 2452
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/media_icons.py",
+      "sha256": "fe80fd4489efdd2eb216e90889e1f0501397112e10fae9ae9628f2bcaecc6542",
+      "bytes": 8802
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/precompute_icon.py",
+      "sha256": "a6d7bb5c1c32c189f54311bdcff58b148fb89dceba39aee5a7535480eab8a7a6",
+      "bytes": 862
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/serve-icons.py",
+      "sha256": "6e6e93703c0e2f98064ed5bbc2f39f2a682a69dc7d60b4f12152dc72b212315c",
+      "bytes": 1601
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/slate-reviewed-source.py",
+      "sha256": "5aaf2db6111b2a66e0b5029283a5fbc916f22e6618e4162078d1b2d6e0c8577e",
+      "bytes": 491
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/slate_icons.py",
+      "sha256": "e81e513262d6827f9ff5391e9e95e34e3dd66816594fec4eb6416490b8fbc4b4",
+      "bytes": 3731
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/slate_refinements.py",
+      "sha256": "8f3c81478a1621b02b73e4bb0f9037819df0bdcbdd27b6e14373315d504fe95d",
+      "bytes": 6745
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/test-cluster-lod.mjs",
+      "sha256": "62afac542e7b6f5ae547cda2fcafb5b895882a54c50876b74d50294b21cacfbc",
+      "bytes": 3460
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/utility_icons.py",
+      "sha256": "752e5a1c8d4e97f25baddea3c8f21b41261e9bbb3d3bfd399620efb109e5dd42",
+      "bytes": 7089
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/weather_expansion_icons.py",
+      "sha256": "ee2d8fc92f0ba67c38f037a9119933633c2e83595f94da26a00e94dcf7a9f585",
+      "bytes": 3368
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/weather_material_icons.py",
+      "sha256": "d40c1546f71b659c56b39205cad61c01cc4e6e923f8d21d34d1b169e2b8d841e",
+      "bytes": 7292
+    },
+    {
+      "path": "Exhibits/FrontierEditor/scripts/weather_particle_revision.py",
+      "sha256": "dadaee9370d1df8c60e0e1a62e267d8ac1868615be89d77e47dd81528503d594",
+      "bytes": 4128
+    },
+    {
+      "path": "Exhibits/FrontierEditor/src.jsx",
+      "sha256": "f5d9376d7aa2771d563251445595cb0265ecf4137acf5c426b793aec35b1bbc1",
+      "bytes": 37050
+    },
+    {
+      "path": "Exhibits/FrontierEditor/style.css",
+      "sha256": "76bef1f16bde15cabed536582006f922b287fa8dd374e1e14466216afa66b756",
+      "bytes": 95650
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/collection-options/bracketed-objects.svg",
+      "sha256": "3bcc52f09df160d155c113575cf75f1fb01abff757bee269558d28b5085736ab",
+      "bytes": 475
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/collection-options/linked-nodes.svg",
+      "sha256": "ad40c29ea7f5dc17eb0d6d9b77f5ff4a3509bdd71f017a057ecd162d9d7436f5",
+      "bytes": 478
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/collection-options/overlapping-tiles.svg",
+      "sha256": "6c710acdc71792d91b25f23ba9fe493135d7937e0e0784773a081d14349264ef",
+      "bytes": 872
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/collection-options/stacked-layers.svg",
+      "sha256": "24ea7520357c68b23b6bcaa07016d499cc16b4460af272f87efcfe5878ef317a",
+      "bytes": 455
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/folder-environment.svg",
+      "sha256": "c5466bebab157d04c982b388398e09a5323fb266aafb9df083df8d37fd3c9d59",
+      "bytes": 728
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/folder-generic.svg",
+      "sha256": "aa34317849f2b5b702f15d331eab5ec2a9ac16a1332ba19e687ee8a697a357dd",
+      "bytes": 554
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/folder-water.svg",
+      "sha256": "d7b87372cc4742bfd85cb7f0e189ee76bce67522a99bc7e00fa93a479dd8016f",
+      "bytes": 631
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/local-cloud.svg",
+      "sha256": "23d26bf08b231711078d7c1704800aa56c20cd78172dce27b79ee1b5e0946604",
+      "bytes": 2224
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/local-fog.svg",
+      "sha256": "249f200719a9f6d78c2181c72971d941b4e470f5940b54841a104c2bb2546ba3",
+      "bytes": 2418
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/outliner-precipitation.svg",
+      "sha256": "16cbd74b2299a42aa33245d0324a18c3727c514ff30febd0f51e4350bca5ebcf",
+      "bytes": 513
+    },
+    {
+      "path": "Exhibits/FrontierEditor/ui-icons/outliner-stars.svg",
+      "sha256": "1872e91208ff4c78cfd11787a3bc2a45eba0771bf082080de0deb15083e166e8",
+      "bytes": 389
+    },
+    {
+      "path": "Exhibits/FrontierEditor/vendor/slate-new-icons/App.tsx",
+      "sha256": "c2c679fb6595340cee1e9afa9cdf23455cca55bdd941f900d87d06099874adb7",
+      "bytes": 304663
+    },
+    {
+      "path": "Exhibits/FrontierEditor/vendor/slate-new-icons/NOTICE.md",
+      "sha256": "1fd31894c5c7374c5d73b71dfe2082f0488079f745e0efe26c65a94570a05c59",
+      "bytes": 2490
+    },
+    {
+      "path": "Exhibits/FrontierEditor/vendor/slate-new-icons/icons.json",
+      "sha256": "0dfb17b5534950e80094b1c8c5cb7faeee426407b73d05655301ec1bea03946e",
+      "bytes": 295018
+    },
+    {
+      "path": "Exhibits/FrontierEditor/vendor/slate-new-icons/layout.json",
+      "sha256": "149bb6d962161e52fc436644319548d9bbb8a61c5b2386017439b72ae96a7edd",
+      "bytes": 10332
+    },
+    {
+      "path": "Exhibits/FrontierEditor/vendor/slate-new-icons/selection.json",
+      "sha256": "94510ebf5bd8391ee477ad6a4525a724d61cbc0a4ebeca39a1089c88bac28a59",
+      "bytes": 614
+    },
+    {
+      "path": "Exhibits/FrontierEditor/vite.config.js",
+      "sha256": "94a3a3963d6b51db57b1050955afa202f6bf94657101b70b7ff5d7f1d5e163ca",
+      "bytes": 1259
+    },
+    {
+      "path": "Exhibits/FrontierEditor/weather-graphics.jsx",
+      "sha256": "b9bd71dff633eb80c73012f836482dbafa7fbd1fb2498803d637baa275dd7a00",
+      "bytes": 9677
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/BaseGeometrySurface.h",
+      "sha256": "c077f5816bc2ad4f24d5bf7c8424e95629ec474107d0adda7680bca0b563ef20",
+      "bytes": 21683
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/CloudDeckSurface.h",
+      "sha256": "7e857249843f229254ba8ac279766d0ab401d5a66aebefc7737044a5696477b8",
+      "bytes": 9451
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/CloudInstrumentSurface.h",
+      "sha256": "581385a7848036b7a19634ded2be184aa27bd1a585cfa95113e3884ac4772034",
+      "bytes": 26462
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/EntityNotesSurface.h",
+      "sha256": "16e777e00513aa0f1bf71e1b6e8a76721e23322394760489cdc53781f42450d0",
+      "bytes": 10671
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/FluidEditorControls.h",
+      "sha256": "308d0d6a100bc7a9c4c4a3261c03487d83feb9f010599ce7c00db5f8b7c9330a",
+      "bytes": 32414
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/FluidEditorSurface.h",
+      "sha256": "9e94b442d69de84cbe983292267216a7d79b1649bf086f6276149af2ab4806d7",
+      "bytes": 85254
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/FogPanelSurface.h",
+      "sha256": "e99d4d22500703022dd403b34f0070a4a7b82f685eeabcb69a8aba1c37d28fe0",
+      "bytes": 52735
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/ForceFieldCardSurface.h",
+      "sha256": "d802e2d96996cd2be9ae9e25b3e4aaef10ef6bc376375f39695ad5ff1c95aca8",
+      "bytes": 26819
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/FractureCardSurface.h",
+      "sha256": "f368ddf2ec53c76e299edc460b8ebbc09d204279aaa63a340b77f74b7d6a1c9d",
+      "bytes": 29647
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/FractureEditorSurface.h",
+      "sha256": "b95a3f2ff8bb4d62b7b198fb4327d17f5a4890a8bed1fdd90cc4263191c3eaf0",
+      "bytes": 91281
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/GasCardSurface.h",
+      "sha256": "4dc18ab3f81f7566ae6d44ac7aae3b6b20f584245095c11117ff219c075d5381",
+      "bytes": 56269
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/LightPanelSurface.h",
+      "sha256": "a5dd3a2964d1ac05fd38d3e92774dbb3e0c9c0612bb54d924fd151dca23a2ba8",
+      "bytes": 12993
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/WindBindingControls.h",
+      "sha256": "416e1c6ecb8c5430dbda2238d1c772f70bfe8af9c45a9c96c20507db07ed878c",
+      "bytes": 1169
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/WindEditorSurface.h",
+      "sha256": "251aedad704b5252167818acc4c17cd5b03f6de3b1d2586fa5d041ceabb3dd2e",
+      "bytes": 39760
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/WindInstrumentSurface.h",
+      "sha256": "8cb4d1ca3dcbe636e14b7ba0b6dbecb3f776d05db9f77cfda13f1922b131cc95",
+      "bytes": 58654
+    },
+    {
+      "path": "Exhibits/NativeSurfaces/WindPanelSurface.h",
+      "sha256": "15a755812e0991283b5fdbc118120b1ef318c27434d36c0c7097acb4739c9e21",
+      "bytes": 33952
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/EditorEntry.js",
+      "sha256": "aecfadab92be4a0be0d77f99b0e795af32ad8abc1e83d56962575a9c0f83c21c",
+      "bytes": 62229
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/Graph/CatalogueSpecifications.js",
+      "sha256": "2f321b82904f859e699f78577bce71abc07abd6f486d719e2c594866fc102f2a",
+      "bytes": 10634
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/Graph/GraphStore.js",
+      "sha256": "574368d7b5c43e71861b1cf595b2031a29d229bd1d3bafddd9988b44cdd3b371",
+      "bytes": 10348
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/Graph/LinkRouting.js",
+      "sha256": "e9729be7ec17a24a89813da77cb829e6971585d0eec88869e33d27cb25702e01",
+      "bytes": 4893
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/LaunchNodeFlowEditor.bat",
+      "sha256": "3036490a9bcce9ff9b1d9d7cb694303c67b139c51632d0970a0947ef767a7fb1",
+      "bytes": 1111
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/NodeFlowEditor.html",
+      "sha256": "23dcfcc11432e52a9629b9dba1f2b7e5baa08695b1f4dcf8639cd1d53f7c4b3f",
+      "bytes": 41798
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/Presentation/CatalogueMenu.js",
+      "sha256": "880048ff1784b2a8a419ee1af3025d7238b9496c113acbbef7ef3ee7b83f5832",
+      "bytes": 8789
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/Presentation/EntryRasterization.js",
+      "sha256": "134d528797e639b2b1364cf6e5b47f4a0b2357f5e3303fab7455001cdcf06d0c",
+      "bytes": 14751
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/Presentation/GlyphOutlines.js",
+      "sha256": "43c9ed9fde15e585811c226fb51eb774e65024a7d4f2a7467cc226a11c5f4b88",
+      "bytes": 6883
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/Terrain/SimplexField.js",
+      "sha256": "e8d8e274bb16c887f0c41fa7fd7c3dc5f862277c33b5f834e23a81b7240cf342",
+      "bytes": 5497
+    },
+    {
+      "path": "Exhibits/NodeFlowEditor/Terrain/TerrainViewport.js",
+      "sha256": "f49ceb0d2cc5800b2cfcf065e7128affbe6415150fee52263393997c30b03efd",
+      "bytes": 17902
+    },
+    {
+      "path": "Exhibits/Ocean/Ocean.html",
+      "sha256": "59c5edf667b63725e0b241f43f535f3e8cc46545d28f3683c3dc3cd4bbcdf6fc",
+      "bytes": 38638
+    },
+    {
+      "path": "Exhibits/Ocean/README.md",
+      "sha256": "fe05bec65cded86e13d8d8eeb5d498048744871527a0c97cf56a1b917ceab16b",
+      "bytes": 2610
+    },
+    {
+      "path": "Exhibits/Ocean/RESEARCH.md",
+      "sha256": "4d6515fcb9f2950d4cc66a73bbbeb1a02381a00d03398352d694d283f8d07930",
+      "bytes": 10667
+    },
+    {
+      "path": "Exhibits/Ocean/lib/addons/OrbitControls.js",
+      "sha256": "07e7f0aada1e4fcb580e927af02225683434937dcec21a5781515bd39037f937",
+      "bytes": 30235
+    },
+    {
+      "path": "Exhibits/Ocean/lib/three.module.min.js",
+      "sha256": "3e690ac7d180b0aadf0891bea39eec643e29e2d3e75c99b18689518665f69ba6",
+      "bytes": 670681
+    },
+    {
+      "path": "Exhibits/ParticleEditor/CheckForceFields.mjs",
+      "sha256": "ee218c97259a27a6e87aa50b4e05f4bd133cff3001c17594cc91806b3758c2d4",
+      "bytes": 18361
+    },
+    {
+      "path": "Exhibits/ParticleEditor/CheckForcePanel.mjs",
+      "sha256": "fda5b04363aa49c510ba88a9baded30cdd786460617b39bda1b5e9ddd9de2774",
+      "bytes": 8576
+    },
+    {
+      "path": "Exhibits/ParticleEditor/CheckHandoff.mjs",
+      "sha256": "6ab2795857b9c1d08ea411888a1747a297c53f1357a4e42044cf815db8ce1616",
+      "bytes": 11997
+    },
+    {
+      "path": "Exhibits/ParticleEditor/ParticleEditor.css",
+      "sha256": "47218e4d19ea6267d9606cc4772831c69ffff2ff2c3c81e0a79e5405ded61617",
+      "bytes": 16419
+    },
+    {
+      "path": "Exhibits/ParticleEditor/index.html",
+      "sha256": "2e5feb7e0653e3cbad3b942ef2b86c095e2d1edec65a383b4c8706229cfad113",
+      "bytes": 4312
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/app.js",
+      "sha256": "05ad5c12724ce1544cde45ba58a158246c8b41acfd20377350fe62b183b1a08f",
+      "bytes": 74299
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/edits.js",
+      "sha256": "b08b86ec95ff6bf816994d86129c6ddffb154c16b9313d74af2b3ef860df8456",
+      "bytes": 3768
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/engine.js",
+      "sha256": "45f4f8ae8b72a884c018e537cd2b276ae057f08c340d05a1432060565e00e552",
+      "bytes": 30160
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/fibres.js",
+      "sha256": "225edf61aaaa39c7d7f9e0232e538f6716de9259bbc3a9647d7a72c138c0089a",
+      "bytes": 7045
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/forcefields.js",
+      "sha256": "7df526c8c848ba96d81204695734add62cb79bcc531c7849d8c9dc5ba8afaa8a",
+      "bytes": 22957
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/handoff.js",
+      "sha256": "57c0151cc8aac8f714619df071434c1f4d80a92b55084d6216005d97114318b3",
+      "bytes": 6399
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/lightning.js",
+      "sha256": "2ae9d2e87d69170bde8425d6d4b6d0e92011646c537367e3252a48c386bae56a",
+      "bytes": 8401
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/pe.js",
+      "sha256": "1d2896b991b5e9fcd639520d5a20d471093dcea9094b04c12c465ef1d0bda736",
+      "bytes": 1039
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/presets.js",
+      "sha256": "597563016cadefab711b15577af6f46675b4d5315a2cd4085f5d9ce012b37202",
+      "bytes": 39406
+    },
+    {
+      "path": "Exhibits/ParticleEditor/js/shaders.js",
+      "sha256": "323a81b462c69d40de3d254ab9902792ef9840c9d70886b21c56b452fa8aa24d",
+      "bytes": 55387
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/ActionIcon.jsx",
+      "sha256": "e790a5517c5f68dc8b19d49f2b91c72f862e58f2a0d3738dd10747e332f5f975",
+      "bytes": 9052
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/AssetDepot.js",
+      "sha256": "c5adfd2956e28a936b0de2cf63df61c0d21de9030017391f21d5f40381f79f18",
+      "bytes": 7572
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/AssetPanel.css",
+      "sha256": "468b21f31fbabf66abfa9245647818de664d96f94805f5ca79485a8177b40b9d",
+      "bytes": 14030
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/AssetPanel.jsx",
+      "sha256": "634f026fc564ca15e4d7c000678e4c77f1508555bdb0d90ead82cdb04e9c90c9",
+      "bytes": 19334
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/AtmosphereLab.jsx",
+      "sha256": "3a84e9041ec71dd32d8f57a1e31ca519ae715ae20db79dcf97f3ef9b0859b50a",
+      "bytes": 23364
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/BrowserTiming.js",
+      "sha256": "d1102ad5a8a912d217deebe75354407aff2960cac226b6fcd6525c2200bdb0e8",
+      "bytes": 2093
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/Build.mjs",
+      "sha256": "3be8dc55662c6494cf2769ce8448b19522968fb84deb173b24c3a3479a8082fc",
+      "bytes": 7270
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckAssets.mjs",
+      "sha256": "be4148ad12ae4087c6cfbbc28b3abe6fe19286b9ee96b187058bb287f44258ce",
+      "bytes": 14753
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckBrowser.mjs",
+      "sha256": "410d87bd716fbcab1c42a821fc1961f6896762de38c7797a4b368ac3f6b8755b",
+      "bytes": 12472
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckCloudPlacement.mjs",
+      "sha256": "fa87ae1421d7c20775951bdfe3686f5fd6f9625136f29f86a0a595e2a39f2a58",
+      "bytes": 11116
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckConstruction.mjs",
+      "sha256": "cb0f40215da4212066ed3c46fb5782e7d20f2916cc3352eca5c0d9a986701c60",
+      "bytes": 12191
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckEntityContext.mjs",
+      "sha256": "698afa733ab5bbd484f134f32e8d759b111f41b562a534c665850e299bb41b93",
+      "bytes": 5283
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckEnvironmentGraphs.mjs",
+      "sha256": "de5d4b1b1f918952caf794effaebe8e21c9633ab8a709ad4ccae94dc053666fa",
+      "bytes": 14834
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckFogCamera.mjs",
+      "sha256": "7b98b36d4b1de52abeb436e73e61905e4050e38e46c694d75e97ac9ac938ad41",
+      "bytes": 11476
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckFogCards.mjs",
+      "sha256": "b8c5256b12e64411acc4a04fcdab1f0b54be2d2db0c8c006d80187ff6695959c",
+      "bytes": 6219
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckGasInspector.mjs",
+      "sha256": "f7935a0ca3d864ed2df578788deea33b9c2903ba1ab3721ffcd15787aefb2831",
+      "bytes": 16299
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckInspectorLayout.mjs",
+      "sha256": "94de314395d23dc03a94a944b0ba15beed95a2b183cd46dbd585544242f16d3b",
+      "bytes": 12362
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckInspectorOrder.mjs",
+      "sha256": "7c63e920b382b9a2a89d506b6e99966a54f6ee2a89c012cba58bace5fda3b6c2",
+      "bytes": 13926
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckInstrumentStyle.mjs",
+      "sha256": "f1d95bc9cda6641f0eaec73d02c36a2b275a6d81a2f00a91f733138d90a65298",
+      "bytes": 6329
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckLightDesign.mjs",
+      "sha256": "c5f4f78bc5e9850c0a2ed82e69796323a03663689662f3426ebefd80a01534ed",
+      "bytes": 14695
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckLighting.mjs",
+      "sha256": "b60991010c2b163779612d8f061ea7de1a72bd8d404c6253e4547379c0fcecf3",
+      "bytes": 16367
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckMaterials.mjs",
+      "sha256": "282cd21ae34777aa2ebd75a902f36e311e0a5cbea2bd55da1b8c77c9f9567cdf",
+      "bytes": 16481
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckQuickTools.mjs",
+      "sha256": "44256fdd4fd3ab90123a0e0d235d3236d99fc7d4ed9342bb028715f3810f0c19",
+      "bytes": 10039
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckReference.mjs",
+      "sha256": "f537c6f2879802590a23bd48de723c78bfe74a4dade8d43d7c64d96abb329f46",
+      "bytes": 15146
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckSharedCards.mjs",
+      "sha256": "a875f5c9f1c63fc8dde9f11b79dfcfcf816ffb0f0ee5e1b7c9e1d7460cd3388b",
+      "bytes": 10043
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckWind.mjs",
+      "sha256": "a82515d3fa4d1a665cdc925af06afa2a4b87dc2a16043b28b3c14416f86ac3ed",
+      "bytes": 15642
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckWorkspaceCards.mjs",
+      "sha256": "b7eb42f9794d8ad2a6d5d5421a4d02f5cc74ff0269294717d86945d040d00339",
+      "bytes": 14902
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CheckerViewport.jsx",
+      "sha256": "46cbce17859a7f18ef208fc5cc6142e6e8d4bb46f62aef365b54098bae449338",
+      "bytes": 4944
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CloudDeckPanel.jsx",
+      "sha256": "17fc1c14d7c9c4b81a7a9342a699d3bd4349cd260e76a6c64ffe04f655f7b3a8",
+      "bytes": 4845
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/CloudSpecification.js",
+      "sha256": "2f5e20e22f26cf38b54ece1fb8ffd24fca78b1177afe78f3b18d6a1cec824029",
+      "bytes": 1581
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/ConstructPanel.jsx",
+      "sha256": "3c75752070d43c3c3dc2a9607e665785e9aad6b4a265c582ab80a5d91c7b6bf1",
+      "bytes": 9560
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/DiagnosticsCard.jsx",
+      "sha256": "7efbc20a5ed42b1cce5ef6181b5f171f3f30f8c546d0d85339db147e16a601ac",
+      "bytes": 16779
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/DrawerPanel.jsx",
+      "sha256": "4135bc230698a69f8e4aef031221c010c23bc093e2ccb64df123ed037ed5fffb",
+      "bytes": 8138
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/Editor.css",
+      "sha256": "e7371423340a32dd2645d35311e3f1232391889232ee5a01ee96b368f759c366",
+      "bytes": 53794
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/Editor.jsx",
+      "sha256": "7ff996b2c69727531fe72d675e0928859a9063fa6ad44d07231221647f21cbf6",
+      "bytes": 74401
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/EmitterPanel.jsx",
+      "sha256": "20160ea42549bb9dd52ac004aee3a00c6621ec70263343ce7564e1c2cd0343d2",
+      "bytes": 2438
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/ExtractPanels.py",
+      "sha256": "37bc08fd3d645e7b53d8ac83bb806e4eed7a837addf53cc98e6e60178ab9400f",
+      "bytes": 10095
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/FogPanel.css",
+      "sha256": "28854ba3bf7d4e8f62d8bfb1f258b0e9ad3a8588722d3d4dc1b1229100f0d370",
+      "bytes": 3013
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/FogPanel.jsx",
+      "sha256": "875b965e1ac0c3a112104f36fa511655c2a72d1f3148a178318877fdf29bc627",
+      "bytes": 3457
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/FogShape.js",
+      "sha256": "a3eb02f73d95fcd8d46848135ef080e9eba783490f90cb90caa33058edbce8b9",
+      "bytes": 5709
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/FogShapePanel.css",
+      "sha256": "58d7fc3664016d77a9685c5848ae5cdfe36ea7e239a2e26425602ddbc2d1ef2c",
+      "bytes": 1999
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/FogShapePanel.jsx",
+      "sha256": "c84487740a3739ea51ce2bc78148b38c73ad7b3eace5c439a9ccbbe76b311c04",
+      "bytes": 8130
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/FolderInspector.jsx",
+      "sha256": "db885ad22f555b3e205e8dfc0d41197f136eac7a6967a06f2f13e953b2ba2d41",
+      "bytes": 12828
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/FolderInventory.mjs",
+      "sha256": "332d624c5deea091ca8b391e91aa6b8278339318619fe6568fd701e98679f368",
+      "bytes": 2387
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/FracturePanel.jsx",
+      "sha256": "598474524fbd9cb3e8bcc376b80f36b5f4041ad78d0f80762b92e1f579939da7",
+      "bytes": 5082
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/GasPanel.css",
+      "sha256": "d38b49d5601d7c29686680835ac56860bab4e986a5e8b76ef96ba9fd0f8badd1",
+      "bytes": 5467
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/GasPanel.jsx",
+      "sha256": "a60af73de548f35600a2c2cc3ce0b7be620ec2d71fb73f9eb7660e5829d77a69",
+      "bytes": 32330
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/GasSpecification.js",
+      "sha256": "63c266ba27132805d23f90004a23a36882f0664777ea1d48fcb72eb2c221e9a9",
+      "bytes": 20421
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/HeightFogSpecification.js",
+      "sha256": "7b1a00a87d8486510a56ddebacea0483e4abf71b3e7384642fa7124017910ad6",
+      "bytes": 1646
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/HeightFogVisual.jsx",
+      "sha256": "aa96d47d7e3894c552cf9e5c2b2c414341b845c784b0b0fc0d5adba521547915",
+      "bytes": 4878
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/Fontshare.css",
+      "sha256": "7e7000c4a40169a785bd72cc430980d0003ff61ea72ac5e153824c844797b1e8",
+      "bytes": 1429
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/NOTICE.txt",
+      "sha256": "caa9b9085644cff7fd52c50d819c2b4d2de80ef490b35f5c2964fdb3b207d89b",
+      "bytes": 1621
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/Provenance.json",
+      "sha256": "35ebd3df046a50b917cafba215999569ea53544d8226b92f7674b4a7e8b3f1a7",
+      "bytes": 1957
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/bus.js",
+      "sha256": "9b4c48af5849c086cd732606eea4d952a965bc154c0c54ea20db28b00e5c6b59",
+      "bytes": 474
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/icons.js",
+      "sha256": "8ce57436ee569d19958e2f260f03d5bf03a82db7eb53844888f751ee99b51dd7",
+      "bytes": 7426
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/inspector.js",
+      "sha256": "bb3dfd8b5740dad3cde1bc21dc00c9b77b0260f355623fa20346cbd7f637e62a",
+      "bytes": 8462
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/kit.js",
+      "sha256": "badf2103189ffdc253da6c3c9788a242c51d85f1ad0c57ba98b210a7c0696086",
+      "bytes": 10997
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/advancedLights.js",
+      "sha256": "6d1b7c7972d5d534d8311e22e138e7a6be48a40107bf7c9586ae112aef149dc9",
+      "bytes": 12631
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/clouds.js",
+      "sha256": "26120cef7b924da4f06109f2f1ffcb907465f2c3f983f4cfae3c973ef8459897",
+      "bytes": 11362
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/controls.js",
+      "sha256": "d3cb50b03c475f63f52f6306cdbb7831265fe208990d8f1e6a555613ff594bdc",
+      "bytes": 7139
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/fog.js",
+      "sha256": "35a660035798713112e44cbe8e2f5ead7c21d5584a4a3a447bbea281df30fb0e",
+      "bytes": 19581
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/folder.js",
+      "sha256": "29339db125bb94fe18f5f1734871939e0fcd977fd96f9f7dfb283ffe17c23959",
+      "bytes": 9545
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/index.js",
+      "sha256": "0078b85225dc68545c64f83fe3d367ec44bda0b58e8e2229731e4da028771e3c",
+      "bytes": 883
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/lights.js",
+      "sha256": "eb369cbf5a053a0fc963c15150aaf4d106a64409f75ee558f95dfa1bfb1f24e3",
+      "bytes": 12047
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/moon.js",
+      "sha256": "7610afb5e1b9f56b2255b7fde82ad7f8df7450d6953d01ee164801f569c9dcb3",
+      "bytes": 49711
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/sun.js",
+      "sha256": "f2df258e62064466a30e5c1e119729fae5c9fd08b80d8a0b23439d4b4df4086d",
+      "bytes": 41624
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/panels/wind.js",
+      "sha256": "f7aa85a1e2deb1e51165803225447860a9b979152b56b43fea142d910535f746",
+      "bytes": 25551
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/styles.css",
+      "sha256": "de8e78b3a4cebd2452baeb91a6ba4a93658c34255b67180cdee42251fad68d3d",
+      "bytes": 71093
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorDepot/world.js",
+      "sha256": "f49d390828204fc5d2112b356b9eab41e89e5d66dce5d4989c8af3546c0c44ea",
+      "bytes": 31602
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InspectorHost.js",
+      "sha256": "7a6ee829f8a5e62096181c293c7858822091033f1e8136b204b42048c77b6d22",
+      "bytes": 10382
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/Inspectors.jsx",
+      "sha256": "1bfaaa5a782260eadc1c13960329a6dd42a80bf4a2f86e94e2a76ae52d681ce1",
+      "bytes": 56048
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/InstrumentSpecification.js",
+      "sha256": "11f009c1e8b756a6f4747ec1de7f031f0587cfd09fae6d24af6e8c24eac85211",
+      "bytes": 2631
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/LightPanel.css",
+      "sha256": "8256e13e37b4bf2b14e279239c679f7371d88f34eaaaac48eb103f05c191c749",
+      "bytes": 13033
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/LightPanel.js",
+      "sha256": "ae3b8adc3c333e657b4bb0c32142652470af2be67c67c77fbea04f0f5ac84a9a",
+      "bytes": 19496
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/LightProjection.js",
+      "sha256": "dc5eeb2c10103caf97e5145c5ec06692d42644f40bce75f40fdb0aa9776e34ed",
+      "bytes": 18705
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/LightSpecification.js",
+      "sha256": "26dc5581a1845d3a6517d4901dfe1bcec85e5454a9c44e67756faddd98792582",
+      "bytes": 2411
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/LiveGraph.css",
+      "sha256": "8fd403fd9b508cb61163428295ca0ffa7b8aae31e7b3ea7887c6ced79dfdfcf4",
+      "bytes": 7953
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/LiveGraph.jsx",
+      "sha256": "75a26da53abd3a57f8eefe80bf3178e674c4a3dcd7ce77fd666d53a950f077ec",
+      "bytes": 25775
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/MaterialPanel.css",
+      "sha256": "26eee95b9e3448342fbcb5611c4c7762e70949178b359057507afcd43f3b86c9",
+      "bytes": 22153
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/MaterialPanel.jsx",
+      "sha256": "6d5baea19b7e82a709ca4585378687276beb4e7ecd8e70425bf4e492e4ccd4f9",
+      "bytes": 22163
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/MaterialSpecification.js",
+      "sha256": "25ba9e5079b35abc314b841671e9153f438c020a70fab0670d018d8415511db3",
+      "bytes": 8402
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/NativePanels.json",
+      "sha256": "669e36a329001a9c41250b8fad4fa165ea53e25aa9cfac0d8d150e7a95407361",
+      "bytes": 56691
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/Notch.jsx",
+      "sha256": "1373ba81aec7ddf5e3e61b4eb77b50d14480983e0bb4970f83c1c33a48d07543",
+      "bytes": 29934
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/OpticalGraphic.jsx",
+      "sha256": "fca5684e70c5e840b785d12b679006f7f30d3e72024dd910a1d0175380c673a4",
+      "bytes": 3956
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/ReferencePanel.jsx",
+      "sha256": "b3e63efa64c4e7c7d06b7318216dd621235760b6d03bbb9d565cfb5e96a8b6f7",
+      "bytes": 5498
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/ScenePolicy.js",
+      "sha256": "a3ca1aee88ebe987aa73a375fd486805fc660abd183be8fe771a9b309b1c8e35",
+      "bytes": 2838
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/ShaderPanel.jsx",
+      "sha256": "19b0b3beb1d7d46e966899cc99e25f772dd2c7045c04b6fbdfbed889cf906a8d",
+      "bytes": 3831
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/ShaderballPanel.jsx",
+      "sha256": "82c912b0f71e4d6061dcd31cd859fd3883f251d5a7d7cb1854abac3f6fb2f974",
+      "bytes": 10693
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/Solar.mjs",
+      "sha256": "54220a55e09fe2fa9d81fd395d59204f4052deb36a253c624fb459dd45b8f96b",
+      "bytes": 3005
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/TransformPanel.jsx",
+      "sha256": "6b6ce0e621813eb3ea330d06b7fa41c675e6001612a087916e6b71075b67c5fc",
+      "bytes": 4579
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/WindPanel.css",
+      "sha256": "9933ecd1aa0272edc144d32eb9a72c49dbc4fb84b491d9da9ff505690fde4b9e",
+      "bytes": 7706
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/WindPanel.jsx",
+      "sha256": "5ff2d1edf1967e45bc04fcab7f56e5743f0c4e4e68e93d935e13152cdc91e82c",
+      "bytes": 28391
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/WindSpecification.js",
+      "sha256": "fff3d3186536affe48b4b49ea5945934612390673a61b0f8d23ff9fa98007367",
+      "bytes": 3462
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/WorkspaceCards.css",
+      "sha256": "2d2808ca5d61668d5194d93575c8ea9fac2c320274a96938ec215bc80bd9b28d",
+      "bytes": 12091
+    },
+    {
+      "path": "Exhibits/ProjectZeroEditor/index.html",
+      "sha256": "9822c7c6f0fbc28b0c9448b0cfbc3a7abd315939709de87a628443539dc9cd9a",
+      "bytes": 4913605
+    },
+    {
+      "path": "Exhibits/README.md",
+      "sha256": "ab93347c60fc71f55952325f79d02712d1405b50005536c640d8bb175bab50b5",
+      "bytes": 5766
+    },
+    {
+      "path": "Exhibits/RadianceIntegrator/README.md",
+      "sha256": "c94700c21e7cd18b812558faa1e465f17ee7efde330b836d633b993ff0199022",
+      "bytes": 3022
+    },
+    {
+      "path": "Exhibits/RadianceIntegrator/RadiancePanel.css",
+      "sha256": "2d3b8f4e4e8f93fbe601800dafd156afeecad64608b904b4f7e7675df253810f",
+      "bytes": 9277
+    },
+    {
+      "path": "Exhibits/RadianceIntegrator/RadiancePanel.js",
+      "sha256": "54bd489cd4e99b79461f6f13ee84032acf390abd183bc5408c231915454cfa3a",
+      "bytes": 42455
+    },
+    {
+      "path": "Exhibits/RadianceIntegrator/SceneSpecification.js",
+      "sha256": "30688af46a380112f153db066fb1dd33e8196c2214d473e0893d637e68247a4d",
+      "bytes": 10594
+    },
+    {
+      "path": "Exhibits/RadianceIntegrator/TransportIntegrator.js",
+      "sha256": "d9a74483bd8f79c4e89d56079fa20c89da1ef81349c4ffdecc2c6015e007fd81",
+      "bytes": 22371
+    },
+    {
+      "path": "Exhibits/RadianceIntegrator/index.html",
+      "sha256": "161faec494ec506147678784574e8c3ab561a45dc11112b78ef94171e1370f6d",
+      "bytes": 4185
+    },
+    {
+      "path": "Exhibits/RadianceProjection/ProbeIntegrator.js",
+      "sha256": "ff07f31386862b2136bda45b30686886d98a8cbcbcc1dc832331255343f6847c",
+      "bytes": 36014
+    },
+    {
+      "path": "Exhibits/RadianceProjection/ProbeScheduler.js",
+      "sha256": "6b7d324bb4db3e20d5bcd62516e2ffb97cafe493ab8128bf61803677754a5658",
+      "bytes": 2761
+    },
+    {
+      "path": "Exhibits/RadianceProjection/index.html",
+      "sha256": "ef15ae9a670d1f6500fa35308a0b3e20a1ee1d8afc817d29408763b13b89c720",
+      "bytes": 13893
+    },
+    {
+      "path": "Exhibits/RadianceSequence/CascadeSequence.js",
+      "sha256": "a17954b303addfd0a5679ae18fb9ec41dec57d1ec5e877ffc18598a122aeddca",
+      "bytes": 18856
+    },
+    {
+      "path": "Exhibits/RadianceSequence/SceneSpecification.js",
+      "sha256": "86a331c64f04c0891827604995b64710a7c3dfff1d18e7fd7c21ed9a2e73bf26",
+      "bytes": 4102
+    },
+    {
+      "path": "Exhibits/RadianceSequence/WorkspacePanel.css",
+      "sha256": "8b3a4fc7c114a303ae6817547b4a6b8555adee1a91ecc8b637084e1fe354787a",
+      "bytes": 1664
+    },
+    {
+      "path": "Exhibits/RadianceSequence/WorkspacePanel.js",
+      "sha256": "84755ccb185d543d4afa4b0dc14e2c542b1ad719772d31f098b5dd4125c103ec",
+      "bytes": 15426
+    },
+    {
+      "path": "Exhibits/RadianceSequence/index.html",
+      "sha256": "6f73a0204bb9bf7618a8b53c48dc011157c90031d28becbd02c73c5cc1636eed",
+      "bytes": 6056
+    },
+    {
+      "path": "Exhibits/RoadEditor/README.md",
+      "sha256": "e22f5f2b2f8600ba01cfdb19293ed9f1aeb10fc342934c62d2fb510421f32f45",
+      "bytes": 6299
+    },
+    {
+      "path": "Exhibits/RoadEditor/dist/assets/index-B48OAHYk.css",
+      "sha256": "f88a064453cb697a60d7e9e510aaee813103c5c0eadf99a3a579685cd6017697",
+      "bytes": 21539,
+      "preserved_build": "BuildArchives/RoadEditor/assets/index-B48OAHYk.css"
+    },
+    {
+      "path": "Exhibits/RoadEditor/dist/assets/index-mYGQ988w.js",
+      "sha256": "449ce12f935f3116a0942041172bcb9eb6f78424d173eaadf5c093012a264e11",
+      "bytes": 637593,
+      "preserved_build": "BuildArchives/RoadEditor/assets/index-mYGQ988w.js"
+    },
+    {
+      "path": "Exhibits/RoadEditor/dist/index.html",
+      "sha256": "43c36c8244db9dc530c288047b9397e654bc4b8101c374f06e2d7ff7bad39d7e",
+      "bytes": 29885,
+      "preserved_build": "BuildArchives/RoadEditor/index.html"
+    },
+    {
+      "path": "Exhibits/RoadEditor/dist/samples/diamond-interchange.road.json",
+      "sha256": "008d664b2d77cd8b658e62971254658d78a0cf2bf4850e40fa0b006310a00ace",
+      "bytes": 5386,
+      "preserved_build": "BuildArchives/RoadEditor/samples/diamond-interchange.road.json"
+    },
+    {
+      "path": "Exhibits/RoadEditor/dist/samples/mountain-pass.road.json",
+      "sha256": "88b0621d7c201b338fd130ba35788469da8480ef5ca29c6995dbcae7f0902333",
+      "bytes": 2323,
+      "preserved_build": "BuildArchives/RoadEditor/samples/mountain-pass.road.json"
+    },
+    {
+      "path": "Exhibits/RoadEditor/dist/samples/quarry-haul.road.json",
+      "sha256": "b76723b964aa823fe8c2e888be6b781de19a0ee8c898a7804f748a3176a8e252",
+      "bytes": 2533,
+      "preserved_build": "BuildArchives/RoadEditor/samples/quarry-haul.road.json"
+    },
+    {
+      "path": "Exhibits/RoadEditor/dist/samples/village-loop.road.json",
+      "sha256": "9f0daa34d53cc08a7106b59bb6a7827aa8efc8e86f91514aa195aaebecdc4988",
+      "bytes": 1706,
+      "preserved_build": "BuildArchives/RoadEditor/samples/village-loop.road.json"
+    },
+    {
+      "path": "Exhibits/RoadEditor/index.html",
+      "sha256": "2bc0e61b35f4d3292e0b1f09e7fe2c4ceca880f49ff2723ecde1f57f9c484a4c",
+      "bytes": 8298
+    },
+    {
+      "path": "Exhibits/RoadEditor/integration/README.md",
+      "sha256": "05f5bf16917799debd111e83fef296d3a263760b97c45482f10c9ebc91468904",
+      "bytes": 1895
+    },
+    {
+      "path": "Exhibits/RoadEditor/integration/frontier-road-import.js",
+      "sha256": "b539d7076055a71504512a2737a37171c9a49b0991ddbc846cd22a5716e32aa1",
+      "bytes": 8675
+    },
+    {
+      "path": "Exhibits/RoadEditor/package-lock.json",
+      "sha256": "965c0295391d5cca8870b77e1dde45028f1c3e08c3e6a13c5503ddc4b110acc5",
+      "bytes": 34193
+    },
+    {
+      "path": "Exhibits/RoadEditor/package.json",
+      "sha256": "a3d641d07201dc84d92293563804641af951a3e1eccfaa9edae74cb5840a3444",
+      "bytes": 506
+    },
+    {
+      "path": "Exhibits/RoadEditor/public/samples/diamond-interchange.road.json",
+      "sha256": "008d664b2d77cd8b658e62971254658d78a0cf2bf4850e40fa0b006310a00ace",
+      "bytes": 5386
+    },
+    {
+      "path": "Exhibits/RoadEditor/public/samples/mountain-pass.road.json",
+      "sha256": "88b0621d7c201b338fd130ba35788469da8480ef5ca29c6995dbcae7f0902333",
+      "bytes": 2323
+    },
+    {
+      "path": "Exhibits/RoadEditor/public/samples/quarry-haul.road.json",
+      "sha256": "b76723b964aa823fe8c2e888be6b781de19a0ee8c898a7804f748a3176a8e252",
+      "bytes": 2533
+    },
+    {
+      "path": "Exhibits/RoadEditor/public/samples/village-loop.road.json",
+      "sha256": "9f0daa34d53cc08a7106b59bb6a7827aa8efc8e86f91514aa195aaebecdc4988",
+      "bytes": 1706
+    },
+    {
+      "path": "Exhibits/RoadEditor/scripts/inline-css.mjs",
+      "sha256": "0f950afad9508b9ee9f7871bf002160f60485214341214508792088bd082c7e4",
+      "bytes": 814
+    },
+    {
+      "path": "Exhibits/RoadEditor/scripts/make-diamond.mjs",
+      "sha256": "314005cf69a5200311d81d9eb42e2e4a28ad36e8a4f1c11d4e09ec061fa9f47d",
+      "bytes": 2270
+    },
+    {
+      "path": "Exhibits/RoadEditor/scripts/probe-selfx.mjs",
+      "sha256": "fb1add1c6050a308f9b817de5ea8084f2fce19f8135956749d55d0aebd56cf27",
+      "bytes": 1127
+    },
+    {
+      "path": "Exhibits/RoadEditor/scripts/probe-stride-trap.mjs",
+      "sha256": "2ad66897f520449665a8d353b5d70389240082eb7321e254f05d5614d9ba7275",
+      "bytes": 1097
+    },
+    {
+      "path": "Exhibits/RoadEditor/scripts/verify-plan.mjs",
+      "sha256": "cdea53cc648e86d98304ddca8a659dacc89c8b4ca698f0ed5bea9c4fb7b117c6",
+      "bytes": 5759
+    },
+    {
+      "path": "Exhibits/RoadEditor/scripts/verify-sample.mjs",
+      "sha256": "95ce92da754e71960ac031588353744934112227553a8a81a8695d7bc096484f",
+      "bytes": 1532
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/geometry.js",
+      "sha256": "a7fb93df785feaa22b9b487c48334763b7a16f31d8d077f64f077a2a56f8165a",
+      "bytes": 37027
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/io.js",
+      "sha256": "89a39935530336ed256ea51edda122d1f54dfe6b2d3b12a4bcc110142fbc8943",
+      "bytes": 14491
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/main.js",
+      "sha256": "169599c50bc7e8bb021f65a6e6a9e9419919fc47dd1937bfed1222488b256d8c",
+      "bytes": 17271
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/panels.js",
+      "sha256": "b36a5995115b7e1f4bef39af04d056536508b3236e8e004f8257bc038e487674",
+      "bytes": 53502
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/plan.js",
+      "sha256": "33dd19fac5ff85aed38d12d6eda79b2adeeb001400afafc21bfe262f04f20fa1",
+      "bytes": 42361
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/preview3d.js",
+      "sha256": "46d62e3b8bd15f5c2c0763b014c322411f338ad9c23902d49412158a0e2104c8",
+      "bytes": 13688
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/spline.js",
+      "sha256": "054fc200ec67f788f6c7ca3fe9b0f4a9e91f1a1ad136aa87999876abbf56b1f4",
+      "bytes": 8829
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/state.js",
+      "sha256": "b8df0d1cdf8ec7bfa02663428de9e881b59c0faca60c4033067385c0f86e1b01",
+      "bytes": 7501
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/style.css",
+      "sha256": "9815e77515c73aa12a5c15cd548fad7c0721061d7ecd83796c78005631419b0d",
+      "bytes": 24157
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/topology.js",
+      "sha256": "504a723d74734ce909d3ecf9a1d30fd052b0be008e4a7e137b5bf38dceba3119",
+      "bytes": 26294
+    },
+    {
+      "path": "Exhibits/RoadEditor/src/validate.js",
+      "sha256": "fc281218dd65829dcc592bfaf55a0248fc5ddde4e2e928cd30f11d9bf889fbf8",
+      "bytes": 8267
+    },
+    {
+      "path": "Exhibits/RoadEditor/tests/geometry.test.js",
+      "sha256": "fc9aa6fd981bf02b701ae59cd3f7d7b3bf21ec46ba95f7e958e2b95167185c20",
+      "bytes": 7805
+    },
+    {
+      "path": "Exhibits/RoadEditor/tests/io.test.js",
+      "sha256": "67b8b2df52b2693c1a2193ef00c622376613aa6526be8659ee50f4593e8d3dd3",
+      "bytes": 2888
+    },
+    {
+      "path": "Exhibits/RoadEditor/tests/smoke.test.js",
+      "sha256": "d6551bdad73aeecf59e93d8c456ac5553a5c1a3d543e2c9605d203cc4964a27c",
+      "bytes": 23836
+    },
+    {
+      "path": "Exhibits/RoadEditor/tests/spline.test.js",
+      "sha256": "7345baf043f70415d0e8807d31a1038787359e4b72fb8e8e20f7577bcd16ae4b",
+      "bytes": 2925
+    },
+    {
+      "path": "Exhibits/RoadEditor/tests/state.test.js",
+      "sha256": "bfad42e79b6acd24856895985c4b3751e9367f61d50554a1bc52356eb0f9ec9f",
+      "bytes": 2942
+    },
+    {
+      "path": "Exhibits/RoadEditor/tests/topology.test.js",
+      "sha256": "ca4797b275fd7d4f54a7317c7a5c9ec434e086a59b13e2e70d52a33a15258f6c",
+      "bytes": 9269
+    },
+    {
+      "path": "Exhibits/RoadEditor/tests/validate.test.js",
+      "sha256": "772ab53d031e4b5b18d935ac8c244a5b794eeb7784aa0586b0d63fb1a56f83e1",
+      "bytes": 4785
+    },
+    {
+      "path": "Exhibits/RoadEditor/vite.config.js",
+      "sha256": "d8dae33c7132707e853f4d1dffb6a738db29d41388cf310704fe8e99c8b4d9e9",
+      "bytes": 193
+    },
+    {
+      "path": "Exhibits/SolidArc/.gitignore",
+      "sha256": "790e3169bc19b046fe55ba1da6d13b976c28363c8c00462a2195fe5faf260910",
+      "bytes": 20
+    },
+    {
+      "path": "Exhibits/SolidArc/Native/CompileSequence.py",
+      "sha256": "e972b9505f5860b2cbf39212143e2facf0a3ce4f96c1dd4be5a36a37f944f532",
+      "bytes": 1832
+    },
+    {
+      "path": "Exhibits/SolidArc/Native/GeometryExchange.cpp",
+      "sha256": "f2d85896d377de529ebaa106342dfc373752e2851ae977086488e3b0a62f52e0",
+      "bytes": 8796
+    },
+    {
+      "path": "Exhibits/SolidArc/Runtime/EmscriptenLicense.txt",
+      "sha256": "2fd38dc06e484cdd7a3f1e2f6577f5d53062052a2fd85131b56b89fbd673731c",
+      "bytes": 5091
+    },
+    {
+      "path": "Exhibits/SolidArc/Runtime/GeometryModule.js",
+      "sha256": "c6be87e4f5998be687f1cbc1e4347b0082a67c98459cfd320cf3a92d7897eb97",
+      "bytes": 79275
+    },
+    {
+      "path": "Exhibits/SolidArc/Runtime/GeometryModule.wasm",
+      "sha256": "f5bd40aff585df849b57d0c9b694856600b8e37cb254df391c4f2200dac934c6",
+      "bytes": 2308742
+    },
+    {
+      "path": "Exhibits/SolidArc/Runtime/LibcxxLicense.txt",
+      "sha256": "539dd7aed86e8a4f12cbdd0e6c50c189c7d74847e4fecc64ce2c6ee3a01da38b",
+      "bytes": 16703
+    },
+    {
+      "path": "Exhibits/SolidArc/Runtime/Provenance.json",
+      "sha256": "712a8f04a62bf27d90abd14facaae22e190f1524cd4bae356433229290a9a5db",
+      "bytes": 229
+    },
+    {
+      "path": "Exhibits/SolidArc/index.html",
+      "sha256": "4a63287c4ff8ce1a4da5e0e789092d45ce8c4795c2fbbbbf448a27c4622c5cc4",
+      "bytes": 16289
+    },
+    {
+      "path": "Exhibits/SolidArc/package-lock.json",
+      "sha256": "978a272d419c641eb13e971b915f0d18ad5c795fe1008fdca550f8a19a830b27",
+      "bytes": 35800
+    },
+    {
+      "path": "Exhibits/SolidArc/package.json",
+      "sha256": "85710d763b086b6faac3142fbef866a8d70f6e3a8da25cfe7be6eacea263a931",
+      "bytes": 454
+    },
+    {
+      "path": "Exhibits/SolidArc/src/BrowserMetrics.mjs",
+      "sha256": "67724e5924282daa715d1c9e639bc1b86e9fa7b00a4774ecb8c1b0171ed822e2",
+      "bytes": 13749
+    },
+    {
+      "path": "Exhibits/SolidArc/src/CommandSpecification.js",
+      "sha256": "cade2fdce7311aeb63fbc89aed1134fc4bed04d18f325fbcb4d33185bbd76bac",
+      "bytes": 12344
+    },
+    {
+      "path": "Exhibits/SolidArc/src/ConstructionSpecification.js",
+      "sha256": "3e3c646a14004dbcb79dae21dcd97a9c53f557e4c2559b603c7363361472ae6f",
+      "bytes": 4650
+    },
+    {
+      "path": "Exhibits/SolidArc/src/GeometryMetrics.mjs",
+      "sha256": "e15c3ce60f4afdc4181eafeb5ca764a73577bed1db3ec3d3c8405de99d247285",
+      "bytes": 16920
+    },
+    {
+      "path": "Exhibits/SolidArc/src/GeometrySequence.js",
+      "sha256": "479bd75adc2744ebb28794b9ab0c180ca88817ceac18e142df9751bf94008439",
+      "bytes": 8179
+    },
+    {
+      "path": "Exhibits/SolidArc/src/NavigationMetrics.mjs",
+      "sha256": "80cc4c9600bc473f0a1452874414f736bd5c7c0700e951b98c89518de45aa5f3",
+      "bytes": 14987
+    },
+    {
+      "path": "Exhibits/SolidArc/src/WorkspacePanel.css",
+      "sha256": "682a55354b4122833a0599b5ffc2724f3b711354e57b7423878339a181edec06",
+      "bytes": 33984
+    },
+    {
+      "path": "Exhibits/SolidArc/src/WorkspacePanel.js",
+      "sha256": "d25ace0121f5605aa5b9014339e4ab7c05a8b63cd5039487d153b380eebbf5f6",
+      "bytes": 60082
+    },
+    {
+      "path": "Exhibits/SolidArc/vite.config.js",
+      "sha256": "0cbaa9d428926d822057f8f456f0682671ac267a833963fb26d4ffa2851401d0",
+      "bytes": 1081
+    },
+    {
+      "path": "Exhibits/SpatialHud/CheckHost.mjs",
+      "sha256": "f479230b65813c1acef16808453d4d687e7662f2eaa9c5839cd462e5ca252957",
+      "bytes": 15261
+    },
+    {
+      "path": "Exhibits/SpatialHud/CheckHud.mjs",
+      "sha256": "353961ba7c139d0ccd8ff815787b3f00ffde7ba78917aa07afc9fb2341fa1127",
+      "bytes": 44447
+    },
+    {
+      "path": "Exhibits/SpatialHud/RenderStill.mjs",
+      "sha256": "884c59f3af8ee166ac900f6086c5a69d596bc8cdc6c0924cd360e19c9e638e20",
+      "bytes": 69238
+    },
+    {
+      "path": "Exhibits/SpatialHud/SpatialHud.css",
+      "sha256": "172ad0500426e818c5cdcaad2db46fbbe515baea4dde98b78e9214997d64ea29",
+      "bytes": 3484
+    },
+    {
+      "path": "Exhibits/SpatialHud/Stills/FieldRung.png",
+      "sha256": "fce0c86784d7282f383ac65f164f8c53dae88a617e512727776cf371fe503fa0",
+      "bytes": 197157
+    },
+    {
+      "path": "Exhibits/SpatialHud/Stills/Grazing.png",
+      "sha256": "a7aa976e2a250a5ea2d12207a731e3a701dea64e53951e3c5a3d7f8761ac9d37",
+      "bytes": 208061
+    },
+    {
+      "path": "Exhibits/SpatialHud/Stills/Home.png",
+      "sha256": "6185ea1c0c44293c7f9bc9565043f832112ca32fb2fe0c17e2766dabe7c52d0b",
+      "bytes": 317032
+    },
+    {
+      "path": "Exhibits/SpatialHud/Stills/HomeFlat.png",
+      "sha256": "b67c13152ed6fff906347e9f365df26a07aabc4d344cf320f885e24eb8f04c61",
+      "bytes": 349056
+    },
+    {
+      "path": "Exhibits/SpatialHud/Stills/Screen.png",
+      "sha256": "38964332dfb3043179fa0bf408218b03af64a0c35e5d7b4526d9735002848824",
+      "bytes": 294908
+    },
+    {
+      "path": "Exhibits/SpatialHud/Stills/Tablet.png",
+      "sha256": "c8df9b78dfbfbdc2417f3d7ff78b8f861d39131220ae8dec8994c5643e2a9e54",
+      "bytes": 235789
+    },
+    {
+      "path": "Exhibits/SpatialHud/index.html",
+      "sha256": "593df1b0bd99962f5668dd13918add75ee0493ab76aa7324b63cc9e5bffcf1f5",
+      "bytes": 3557
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/app.js",
+      "sha256": "e3bf1ffebb3c8ee2ba736bb58b0646b0cb97d5a3dbcd85fb9a386302e59a3627",
+      "bytes": 34467
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/chassis.js",
+      "sha256": "24d197aa2c8db6af5c40db0a9d2e4010cf638155078a422bc7ffc019915f884a",
+      "bytes": 25549
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/display.js",
+      "sha256": "a36853493aae69d133a76973521b71c29a949aea43bcd1b5d74a997cd888e94b",
+      "bytes": 18569
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/fibres.js",
+      "sha256": "ac7ab9e077e7a747de43ce885a91f4862b349b951c2130ceba79af3189abea5a",
+      "bytes": 23010
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/figures.js",
+      "sha256": "df86020bf89b56ce29327001a43e7485c7955f32fc0ed7f3f1aff461a6f7db8b",
+      "bytes": 11240
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/layout.js",
+      "sha256": "7c151316f7a4bf62d9ab7a63aa21737d7cfe5b50d413e8dafbbf537ae8a36767",
+      "bytes": 18354
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/sdf.generated.js",
+      "sha256": "90594b6d69022176d3125435b23dd15e0c56dfc060f9ffea3b87c1c9484c3d6a",
+      "bytes": 33045
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/shell.js",
+      "sha256": "f1ef11bef33d1b309320d30195b3252c5a8feaf852ac21a74ffc13da3df1e6ac",
+      "bytes": 26938
+    },
+    {
+      "path": "Exhibits/SpatialHud/js/streaks.js",
+      "sha256": "37d6491ac9a8393bad4f13566c3f3a86973b928b8c0d23a8728080151abc4f45",
+      "bytes": 7941
+    },
+    {
+      "path": "Exhibits/WebFluidLab/.gitignore",
+      "sha256": "fe718e7babb14f3cbad2d97f08889b9ce5215ed3fe0e43b2b8cfbfb3b9b844e8",
+      "bytes": 253
+    },
+    {
+      "path": "Exhibits/WebFluidLab/README.md",
+      "sha256": "85f7a58411666c9b069dd2fac358057d16df0c8274ea6f9d7cbeff193f3bde58",
+      "bytes": 5788
+    },
+    {
+      "path": "Exhibits/WebFluidLab/dist/assets/index-69v4hkbp.css",
+      "sha256": "11fd8849429f11c7a93b247ea2b587736b09391ae091a38aaf44e8b4d119be24",
+      "bytes": 2435,
+      "preserved_build": "BuildArchives/WebFluidLab/assets/index-69v4hkbp.css"
+    },
+    {
+      "path": "Exhibits/WebFluidLab/dist/assets/index-D0XQAlJ_.js",
+      "sha256": "f88d9e44fc6caf4a256caa75f0df2caf45497a6769682dbe15f17ef91fd335eb",
+      "bytes": 71463,
+      "preserved_build": "BuildArchives/WebFluidLab/assets/index-D0XQAlJ_.js"
+    },
+    {
+      "path": "Exhibits/WebFluidLab/dist/favicon.svg",
+      "sha256": "61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66",
+      "bytes": 9522,
+      "preserved_build": "BuildArchives/WebFluidLab/favicon.svg"
+    },
+    {
+      "path": "Exhibits/WebFluidLab/dist/icons.svg",
+      "sha256": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
+      "bytes": 5031,
+      "preserved_build": "BuildArchives/WebFluidLab/icons.svg"
+    },
+    {
+      "path": "Exhibits/WebFluidLab/dist/index.html",
+      "sha256": "0895848e98a6a56f586f0141d2a992e94bb04b2fc6d213eea4afa469ea73275b",
+      "bytes": 669,
+      "preserved_build": "BuildArchives/WebFluidLab/index.html"
+    },
+    {
+      "path": "Exhibits/WebFluidLab/index.html",
+      "sha256": "9e63c8eac7af3d59450f70fa44b09b72356a0ddd33e8dd22749c3f909caedac2",
+      "bytes": 567
+    },
+    {
+      "path": "Exhibits/WebFluidLab/package-lock.json",
+      "sha256": "1e1acb7bd866920ddb033a59635256f764f380713bab4127c4d6cd43426ce80f",
+      "bytes": 41284
+    },
+    {
+      "path": "Exhibits/WebFluidLab/package.json",
+      "sha256": "6393b6b9ec05fd717e9eea9f2e8e8452c47a50b3e2b292977df4995ba0339008",
+      "bytes": 518
+    },
+    {
+      "path": "Exhibits/WebFluidLab/public/favicon.svg",
+      "sha256": "61bc9a161de58248288e6905425d7180f0624c2865007b97d763fdac12043a66",
+      "bytes": 9522
+    },
+    {
+      "path": "Exhibits/WebFluidLab/public/icons.svg",
+      "sha256": "b45fa506195cfcdef406ba9f0c77b36ddc1a7c224040926ec70abc2fdea7b93a",
+      "bytes": 5031
+    },
+    {
+      "path": "Exhibits/WebFluidLab/scripts/smoke-test-cpu-solver.ts",
+      "sha256": "0b18da9735d2c6d622c425b8840f95fbd2cfc471e60ebd58969dfd5d0e6ee44d",
+      "bytes": 3677
+    },
+    {
+      "path": "Exhibits/WebFluidLab/scripts/validate-wgsl.mjs",
+      "sha256": "29a566a11b96702f558daa7ab9a34c7d48fd346dbce4cd0e226e8e7063d2bc0a",
+      "bytes": 1387
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/app/App.ts",
+      "sha256": "65970527033aa9e432d5f3dba2f8a9048c144d8ecfc3dd0fa171d58113d674a3",
+      "bytes": 6871
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/colliders.ts",
+      "sha256": "73f3c9b1b0ad605e7ec455e53269c4718cd98aef5d9e009a6525f47b809c722d",
+      "bytes": 4622
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/main.ts",
+      "sha256": "81c6fe7696e0049211df16b3c20cb5df971c3b43b5256a512962a2b8499f3164",
+      "bytes": 209
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/materials.ts",
+      "sha256": "01c484ef711d0577b1971d46704ec9f5bc13d8ca24b9e1beb3c65907a331b8aa",
+      "bytes": 2202
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/perf/DynamicResolution.ts",
+      "sha256": "2f9ace87135caad11c01c82e224d6f12c47a86879226d8afad281d49c3d9c111",
+      "bytes": 2443
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgl2/WebGl2Renderer.ts",
+      "sha256": "b990b26d04dff9107de39c646ac9c1c7ad9513969272b0df9b2745fb0e3b540b",
+      "bytes": 14648
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgl2/shaders/blit.frag.glsl",
+      "sha256": "8acfdc37ddcb4a82767b0770e205cb0d0a5751eba2d443daf818e0ddd6e9f402",
+      "bytes": 530
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgl2/shaders/blit.vert.glsl",
+      "sha256": "934cee05e32fffbc865f5637caff9cb1ef0bab5a42773f8d8f1ac8a3c1204b4a",
+      "bytes": 197
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgl2/shaders/particles.frag.glsl",
+      "sha256": "0f81e903f56e31323d75a0ed6c3e321cf564ccd83676183ae31ebd0f13b2ce55",
+      "bytes": 2790
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgl2/shaders/particles.vert.glsl",
+      "sha256": "0a3c248d9854c235844200c6f73a3e385b90b5cd2e3e6543c108cd0e3e33846b",
+      "bytes": 1048
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgl2/shaders/scene.frag.glsl",
+      "sha256": "bca646ba6124c0708bbff57c02c4260a78a2e0f2fea35806f63fe9331f115be7",
+      "bytes": 1113
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgl2/shaders/scene.vert.glsl",
+      "sha256": "01756899716c3068d66f428f715c18d1a4584b9b54b43f6152df8195c226173b",
+      "bytes": 413
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgpu/WebGpuRenderer.ts",
+      "sha256": "0f7efb2912281b7b36b1a4ecefabbea047588421acf85bd86d1a5533f2d4e5e4",
+      "bytes": 14124
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgpu/shaders/blit.wgsl",
+      "sha256": "db5589b8f12334777941a8149281860dc493d0314972367fb43e4d220cfc1e64",
+      "bytes": 1373
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgpu/shaders/particles.wgsl",
+      "sha256": "3b9475b9475411ce29d63fa9c21e8f7d925a45f7f33fab76ff232c680e943867",
+      "bytes": 3919
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgpu/shaders/renderCommon.wgsl",
+      "sha256": "a6ecc6e6e921a70e36bb25f42217374e57b557fad9c6f4aaa9b2cc7e28984324",
+      "bytes": 997
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/render/webgpu/shaders/scene.wgsl",
+      "sha256": "980138bfbc8ae5c95158ce02357dcd1a0fb3ecf35f80e1196264b75275bafd49",
+      "bytes": 1626
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/scene/CameraUniform.ts",
+      "sha256": "80b35cf52d93553b74d8726283a55b6a54f1717cfd5c5c25210aab08491c1f3e",
+      "bytes": 1516
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/scene/Geometry.ts",
+      "sha256": "a1f2b68b8ee22d349e59da5e83557784e3298b73d78476a0da731afe5aad4271",
+      "bytes": 2485
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/scene/OrbitCamera.ts",
+      "sha256": "9016d61da2f7671806e05504469a9349968644469fe57f827a5d0179ba7329f0",
+      "bytes": 2253
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/sim/common.ts",
+      "sha256": "4b634ee0674cac60e4c65a4d4a91f8243a379d8f36780d6ca10b83c33df6adca",
+      "bytes": 1996
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/sim/cpu/CpuSolver.ts",
+      "sha256": "22cf53e8628de261b509c4e566d321a81fc65d261b593fc67f93c8a3969df791",
+      "bytes": 13017
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/sim/gpu/GpuSolver.ts",
+      "sha256": "4bdeaf174f8c8ac8db0808fde17d36547bf2dd51fe2061a4d8754aa6b74f9743",
+      "bytes": 10873
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/sim/gpu/shaders/common.wgsl",
+      "sha256": "bd5a73fa76f5a3e95a5fffb854a1a1c513e05b765190eeebbd47b50ad945fa53",
+      "bytes": 4434
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/sim/gpu/shaders/density.wgsl",
+      "sha256": "9407c855d0236cb30a6db7dc69e935fb496380b59907bd6955c08fbbfd84a6af",
+      "bytes": 1464
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/sim/gpu/shaders/forces.wgsl",
+      "sha256": "e32bbc5eff4a8d7d02862c3041077d39fdf2ed26f1b110e90fc95beae85880a1",
+      "bytes": 2756
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/sim/gpu/shaders/insert.wgsl",
+      "sha256": "d2b159716e88f64530678071df8c2c7835c2fd52c8c62df55953e3fa2dadbe70",
+      "bytes": 525
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/sim/gpu/shaders/integrate.wgsl",
+      "sha256": "cf809dd8c34b0369e3ba1e0aae7aa341a6c2ea960383317291e2dd0945c2c514",
+      "bytes": 3210
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/style.css",
+      "sha256": "5902321b97491445fd70fc08d02b9b703aa8a5459de66c83973023b7026bfdb0",
+      "bytes": 3163
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/types.ts",
+      "sha256": "652f03b5ab2d58d1c4a6a9dadd5838afd902ad755907eed0b749339fb76dd6ab",
+      "bytes": 2444
+    },
+    {
+      "path": "Exhibits/WebFluidLab/src/ui/Hud.ts",
+      "sha256": "15b4336654725b0adc9006b23486c5be3e8c1d85b6b19c6072cea152dfad8698",
+      "bytes": 4760
+    },
+    {
+      "path": "Exhibits/WebFluidLab/tsconfig.json",
+      "sha256": "6ed1be08a25a4411587d6c6de9a84818cc7c7c49e242d28a218f8d77c2c1bb21",
+      "bytes": 615
+    },
+    {
+      "path": "Exhibits/WebFluidLab/vite.config.ts",
+      "sha256": "f097527c7af2e4e85d38891eafc30406eb7b4130cd5ee328cc62dddf26bb4456",
+      "bytes": 691
+    },
+    {
+      "path": "index.html",
+      "sha256": "6e1989f9e118c2949ff73f36ca660c64540da83072aaac84f22dd23d20c123c8",
+      "bytes": 12963
+    }
+  ]
+}

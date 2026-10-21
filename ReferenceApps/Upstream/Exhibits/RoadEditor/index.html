@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frontier · Road Editor</title>
+<meta name="description" content="Spline road editor for the Frontier Terrain Lab engine. Plan + 3D, junctions, terrain drape, OBJ/JSON export. Y-up, meters.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0a0b'/%3E%3Cpath d='M8 26c6-2 4-8 8-10s4-6 8-8' stroke='%234a90e2' stroke-width='3.4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='8' cy='26' r='2.4' fill='%23f4f4f5'/%3E%3Ccircle cx='24' cy='8' r='2.4' fill='%23f4f4f5'/%3E%3C/svg%3E">
+</head>
+<body>
+<div id="app">
+  <!-- ════ UNIFIED TOP HEADER ════ -->
+  <header class="top-header">
+    <div class="th-left">
+      <div class="brand">F</div>
+      <span class="app-title"><i data-lucide="route"></i>Road Editor</span>
+      <span class="project-chip" id="project-chip" title="Project name — rename in the Project panel">
+        <span class="dirty-dot" id="dirty-dot" hidden></span><span id="project-name">Untitled route</span>
+      </span>
+    </div>
+    <div class="th-center">
+      <div class="view-seg" id="view-seg" role="tablist" aria-label="View mode">
+        <button data-view="plan" class="sel" title="Plan view — top-down spline editing (1)"><i data-lucide="map"></i><span>Plan</span></button>
+        <button data-view="split" title="Plan + 3D side by side (2)"><i data-lucide="columns-2"></i><span>Split</span></button>
+        <button data-view="td" title="3D preview (3)"><i data-lucide="box"></i><span>3D</span></button>
+      </div>
+    </div>
+    <div class="th-right">
+      <button class="icon-btn" id="btn-undo" title="Undo (Ctrl+Z)"><i data-lucide="undo-2"></i></button>
+      <button class="icon-btn" id="btn-redo" title="Redo (Ctrl+Shift+Z)"><i data-lucide="redo-2"></i></button>
+      <div class="th-sep"></div>
+      <button class="pill-btn accent" id="btn-export" title="Export project, mesh, or data"><i data-lucide="download"></i><span>Export</span><i data-lucide="chevron-down" class="caret"></i></button>
+      <button class="icon-btn" id="btn-help" title="Shortcuts & help (H or ?)"><i data-lucide="keyboard"></i></button>
+    </div>
+  </header>
+
+  <!-- ════ BODY ════ -->
+  <div class="editor-body">
+    <!-- LEFT: project / roads / terrain / junctions -->
+    <aside class="side left" id="left-panel" aria-label="Project panel"></aside>
+
+    <!-- CENTER: viewport(s) + metrics + status -->
+    <section class="viewport-panel">
+      <div class="stage view-plan" id="stage">
+        <div id="plan-wrap">
+          <canvas id="plan" aria-label="Road plan view. Click to select, drag points to reshape."></canvas>
+          <div class="view-toolbar" id="plan-toolbar" role="toolbar" aria-label="Plan tools">
+            <button data-tool="select" class="sel" title="Select / move points (V)"><i data-lucide="mouse-pointer-2"></i></button>
+            <button data-tool="draw" title="Draw road — click to append points, Enter to finish (D)"><i data-lucide="pen-line"></i></button>
+            <button data-tool="pan" title="Pan (Space-drag works in any tool)"><i data-lucide="hand"></i></button>
+            <span class="vt-sep"></span>
+            <button data-snap="grid" class="sel" title="Snap to grid"><i data-lucide="grid-3x3"></i></button>
+            <button data-snap="node" class="sel" title="Snap to road endpoints (makes junctions on drop)"><i data-lucide="magnet"></i></button>
+            <button data-snap="issues" class="sel" title="Show validation markers"><i data-lucide="triangle-alert"></i></button>
+            <span class="vt-sep"></span>
+            <button data-act="fit" title="Fit all roads (F)"><i data-lucide="maximize"></i></button>
+          </div>
+        </div>
+        <div id="view3d-wrap" hidden>
+          <div id="view3d"></div>
+          <div class="view-toolbar" id="td-toolbar" role="toolbar" aria-label="3D tools">
+            <button data-act="orbit" class="sel" title="Perspective orbit view"><i data-lucide="orbit"></i></button>
+            <button data-act="top" title="Top-down 3D view"><i data-lucide="scan"></i></button>
+            <span class="vt-sep"></span>
+            <button data-act="wire" title="Toggle wireframe"><i data-lucide="triangle"></i></button>
+            <button data-act="spin" title="Auto-rotate"><i data-lucide="rotate-3d"></i></button>
+            <span class="vt-sep"></span>
+            <button data-act="drive" title="Drive the selected road (or longest)"><i data-lucide="car"></i></button>
+            <button data-act="shot" title="Save 3D screenshot (PNG)"><i data-lucide="camera"></i></button>
+            <span class="vt-sep"></span>
+            <button data-act="reset" title="Reset camera"><i data-lucide="locate-fixed"></i></button>
+          </div>
+          <div class="drive-capsule" id="drive-capsule" hidden>
+            <button data-d="play" title="Play / pause (Space)"><i data-lucide="pause"></i></button>
+            <button data-d="slow" title="8 m/s">8</button>
+            <button data-d="cruise" class="sel" title="16 m/s">16</button>
+            <button data-d="fast" title="30 m/s">30</button>
+            <span class="dc-road" id="drive-road">—</span>
+            <button data-d="stop" title="Exit drive (Esc)"><i data-lucide="square"></i></button>
+          </div>
+        </div>
+      </div>
+      <div class="metrics" id="metrics"></div>
+      <div class="status-bar" id="statusbar"></div>
+    </section>
+
+    <!-- RIGHT: inspector -->
+    <aside class="props" id="inspector" aria-label="Inspector"></aside>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<!-- ════ HELP OVERLAY ════ -->
+<div class="help-veil" id="help" hidden>
+  <div class="help-card" role="dialog" aria-label="Road editor help">
+    <div class="help-head">
+      <span><i data-lucide="route"></i><b>Road Editor</b> · spline routes for Frontier Terrain Lab</span>
+      <button class="icon-btn" id="help-close" title="Close (Esc)"><i data-lucide="x"></i></button>
+    </div>
+    <div class="help-grid">
+      <div>
+        <h3>Tools</h3>
+        <p><kbd>V</kbd> Select — drag points, <kbd>Alt</kbd>+click a segment to insert, double-click to extend the nearest end.</p>
+        <p><kbd>D</kbd> Draw — click to append points to the active road. Click near the first point to close the loop. <kbd>Enter</kbd> finishes.</p>
+        <p><kbd>Space</kbd>+drag or middle-drag pans in any tool. Wheel zooms to the cursor. <kbd>F</kbd> fits all.</p>
+        <p>Drag an endpoint onto another endpoint to weld a <b>junction</b>; both roads then share that node.</p>
+      </div>
+      <div>
+        <h3>Edit</h3>
+        <p><kbd>Del</kbd> delete point · <kbd>Shift</kbd>+<kbd>Del</kbd> delete road · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> undo/redo.</p>
+        <p><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> switch Plan / Split / 3D. <kbd>Ctrl</kbd>+<kbd>S</kbd> downloads the project JSON.</p>
+        <p>Heights are per-point metres (Y-up). Use <b>Drape to terrain</b> after importing a heightmap, or set <b>Conform → Drape</b> so the ribbon itself hugs the ground.</p>
+      </div>
+      <div>
+        <h3>Exports</h3>
+        <p><b>.road.json</b> — versioned project, reloadable here and readable by the engine snippet in <kbd>integration/</kbd>.</p>
+        <p><b>.obj</b> — Y-up metre mesh with the same header convention as Terrain Lab exports. Geometry only.</p>
+        <p><b>.csv</b> — centreline stations (s, x, y, z, heading, grade, radius). <b>.png</b> — plan or 3D capture.</p>
+      </div>
+    </div>
+    <div class="help-foot">Y-up · metres · validation: tight curves (&lt;15 m warn, &lt;7 m error), grades (&gt;8% warn, &gt;12% error), crossings & duplicates.</div>
+  </div>
+</div>
+
+<div class="menu" id="export-menu" hidden></div>
+<div class="menu" id="popup-menu" hidden></div>
+
+<input type="file" id="file-road" accept=".json,.road.json,application/json" hidden>
+<input type="file" id="file-height" accept="image/png,image/jpeg" hidden>
+
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
