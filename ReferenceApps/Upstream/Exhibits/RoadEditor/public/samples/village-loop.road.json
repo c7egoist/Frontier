@@ -1,0 +1,69 @@
+{
+  "format": "frontier-road-network",
+  "version": 1,
+  "units": "meters",
+  "up": "+Y",
+  "name": "Village Loop",
+  "nextId": 3,
+  "roads": [
+    {
+      "id": "r1",
+      "name": "Village Loop",
+      "color": "#7ee7a5",
+      "visible": true,
+      "closed": true,
+      "lanes": 2,
+      "laneWidth": 2.75,
+      "shoulderL": 0.5,
+      "shoulderR": 0.5,
+      "kerbL": true,
+      "kerbR": true,
+      "camber": 0.05,
+      "surface": "asphalt",
+      "centerMarking": "dashed",
+      "edgeMarking": true,
+      "guardrailL": false,
+      "guardrailR": false,
+      "conform": "design",
+      "drapeOffset": 0.15,
+      "points": [
+        {"x": -60, "z": -30, "y": 12, "w": 1},
+        {"x": -20, "z": -45, "y": 12, "w": 1},
+        {"x": 25, "z": -40, "y": 12, "w": 1},
+        {"x": 55, "z": -15, "y": 12, "w": 1},
+        {"x": 50, "z": 25, "y": 12, "w": 1},
+        {"x": 10, "z": 45, "y": 12, "w": 1},
+        {"x": -35, "z": 40, "y": 12, "w": 1},
+        {"x": -60, "z": 10, "y": 12, "w": 1}
+      ]
+    },
+    {
+      "id": "r2",
+      "name": "Mill Lane",
+      "color": "#c792ea",
+      "visible": true,
+      "closed": false,
+      "lanes": 1,
+      "laneWidth": 3.5,
+      "shoulderL": 0.5,
+      "shoulderR": 0.5,
+      "kerbL": false,
+      "kerbR": false,
+      "camber": 0.05,
+      "surface": "dirt",
+      "centerMarking": "none",
+      "edgeMarking": false,
+      "guardrailL": false,
+      "guardrailR": false,
+      "conform": "design",
+      "drapeOffset": 0.15,
+      "points": [
+        {"x": 110, "z": -60, "y": 11, "w": 1},
+        {"x": 105, "z": 0, "y": 11, "w": 1},
+        {"x": 115, "z": 60, "y": 11, "w": 1}
+      ]
+    }
+  ],
+  "junctions": [],
+  "heightmap": null
+}

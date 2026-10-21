@@ -1,0 +1,102 @@
+{
+  "format": "frontier-road-network",
+  "version": 1,
+  "units": "meters",
+  "up": "+Y",
+  "name": "Quarry Haul Road",
+  "nextId": 4,
+  "roads": [
+    {
+      "id": "r1",
+      "name": "Haul Road",
+      "color": "#e2a44a",
+      "visible": true,
+      "closed": false,
+      "lanes": 1,
+      "laneWidth": 7.0,
+      "shoulderL": 1.5,
+      "shoulderR": 1.5,
+      "kerbL": false,
+      "kerbR": false,
+      "camber": 0.04,
+      "surface": "gravel",
+      "centerMarking": "none",
+      "edgeMarking": false,
+      "guardrailL": false,
+      "guardrailR": true,
+      "conform": "design",
+      "drapeOffset": 0.2,
+      "points": [
+        {"x": -160, "z": -80, "y": 46, "w": 1},
+        {"x": -100, "z": -72, "y": 44, "w": 1},
+        {"x": -40, "z": -60, "y": 42, "w": 1},
+        {"x": -2, "z": -50, "y": 41, "w": 1},
+        {"x": 16, "z": -28, "y": 40, "w": 1},
+        {"x": 0, "z": -8, "y": 39, "w": 1},
+        {"x": -32, "z": -6, "y": 38, "w": 1},
+        {"x": -90, "z": -12, "y": 36, "w": 1},
+        {"x": -138, "z": -10, "y": 35, "w": 1},
+        {"x": -168, "z": -22, "y": 34, "w": 1},
+        {"x": -184, "z": 6, "y": 33, "w": 1},
+        {"x": -164, "z": 30, "y": 32, "w": 1},
+        {"x": -128, "z": 36, "y": 31, "w": 1},
+        {"x": -60, "z": 40, "y": 28, "w": 1},
+        {"x": 0, "z": 52, "y": 24, "w": 1},
+        {"x": 60, "z": 66, "y": 20, "w": 1},
+        {"x": 95, "z": 75, "y": 18, "w": 1}
+      ]
+    },
+    {
+      "id": "r2",
+      "name": "Pit Exit",
+      "color": "#7ee7a5",
+      "visible": true,
+      "closed": false,
+      "lanes": 1,
+      "laneWidth": 4.5,
+      "shoulderL": 1.0,
+      "shoulderR": 1.0,
+      "kerbL": false,
+      "kerbR": false,
+      "camber": 0.05,
+      "surface": "dirt",
+      "centerMarking": "none",
+      "edgeMarking": false,
+      "guardrailL": false,
+      "guardrailR": false,
+      "conform": "design",
+      "drapeOffset": 0.15,
+      "points": [
+        {"x": 95, "z": 75, "y": 18, "w": 1},
+        {"x": 135, "z": 100, "y": 13, "w": 1},
+        {"x": 170, "z": 140, "y": 9, "w": 1}
+      ]
+    }
+  ],
+  "junctions": [
+    {
+      "id": "j3",
+      "name": "Pit Gate",
+      "x": 95,
+      "z": 75,
+      "y": 18,
+      "links": [
+        {"road": "r1", "end": "end"},
+        {"road": "r2", "end": "start"}
+      ]
+    }
+  ],
+  "heightmap": {
+    "name": "Demo hills",
+    "kind": "demo",
+    "width": 128,
+    "height": 128,
+    "minX": -240,
+    "maxX": 240,
+    "minZ": -240,
+    "maxZ": 240,
+    "base": 0,
+    "scale": 1,
+    "image": null
+  }
+}

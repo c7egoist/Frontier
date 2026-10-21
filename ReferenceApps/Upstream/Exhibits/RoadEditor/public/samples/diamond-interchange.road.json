@@ -1,0 +1,360 @@
+{
+ "format": "frontier-road-network",
+ "version": 1,
+ "units": "meters",
+ "up": "+Y",
+ "name": "Diamond Interchange",
+ "nextId": 7,
+ "roads": [
+  {
+   "id": "r1",
+   "name": "Freeway E-W",
+   "color": "#6aa8e8",
+   "visible": true,
+   "closed": false,
+   "lanes": 4,
+   "laneWidth": 3.5,
+   "shoulderL": 2.5,
+   "shoulderR": 2.5,
+   "kerbL": false,
+   "kerbR": false,
+   "camber": 0.04,
+   "surface": "asphalt",
+   "centerMarking": "double",
+   "edgeMarking": true,
+   "guardrailL": true,
+   "guardrailR": true,
+   "bridgeParapet": "rail",
+   "bridgeSpacing": 12,
+   "conform": "design",
+   "drapeOffset": 0.15,
+   "points": [
+    {
+     "x": -160,
+     "z": 0,
+     "y": 0,
+     "w": 1
+    },
+    {
+     "x": 160,
+     "z": 0,
+     "y": 0,
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "r2",
+   "name": "Crossroad N-S",
+   "color": "#7ee7a5",
+   "visible": true,
+   "closed": false,
+   "lanes": 2,
+   "laneWidth": 3.5,
+   "shoulderL": 1.5,
+   "shoulderR": 1.5,
+   "kerbL": false,
+   "kerbR": false,
+   "camber": 0.05,
+   "surface": "asphalt",
+   "centerMarking": "dashed",
+   "edgeMarking": true,
+   "guardrailL": true,
+   "guardrailR": true,
+   "bridgeParapet": "solid",
+   "bridgeSpacing": 14,
+   "conform": "design",
+   "drapeOffset": 0.15,
+   "points": [
+    {
+     "x": 0,
+     "z": -160,
+     "y": 2.5,
+     "w": 1
+    },
+    {
+     "x": 0,
+     "z": -100,
+     "y": 7,
+     "w": 1
+    },
+    {
+     "x": 0,
+     "z": -60,
+     "y": 7,
+     "w": 1,
+     "bridge": true
+    },
+    {
+     "x": 0,
+     "z": 60,
+     "y": 7,
+     "w": 1,
+     "bridge": true
+    },
+    {
+     "x": 0,
+     "z": 100,
+     "y": 7,
+     "w": 1
+    },
+    {
+     "x": 0,
+     "z": 160,
+     "y": 2.5,
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "r3",
+   "name": "Ramp NE",
+   "color": "#e8c26a",
+   "visible": true,
+   "closed": false,
+   "lanes": 2,
+   "laneWidth": 3.25,
+   "shoulderL": 1,
+   "shoulderR": 1,
+   "kerbL": false,
+   "kerbR": false,
+   "camber": 0.05,
+   "surface": "asphalt",
+   "centerMarking": "single",
+   "edgeMarking": true,
+   "guardrailL": true,
+   "guardrailR": true,
+   "bridgeParapet": "rail",
+   "bridgeSpacing": 12,
+   "conform": "design",
+   "drapeOffset": 0.15,
+   "points": [
+    {
+     "x": 70,
+     "z": 0,
+     "y": 0,
+     "w": 1
+    },
+    {
+     "x": 52,
+     "z": -12,
+     "y": 1.2,
+     "w": 1
+    },
+    {
+     "x": 36,
+     "z": -30,
+     "y": 2.9,
+     "w": 1
+    },
+    {
+     "x": 24,
+     "z": -52,
+     "y": 4.6,
+     "w": 1
+    },
+    {
+     "x": 12,
+     "z": -72,
+     "y": 6.3,
+     "w": 1
+    },
+    {
+     "x": 0,
+     "z": -80,
+     "y": 7,
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "r4",
+   "name": "Ramp NW",
+   "color": "#e8c26a",
+   "visible": true,
+   "closed": false,
+   "lanes": 2,
+   "laneWidth": 3.25,
+   "shoulderL": 1,
+   "shoulderR": 1,
+   "kerbL": false,
+   "kerbR": false,
+   "camber": 0.05,
+   "surface": "asphalt",
+   "centerMarking": "single",
+   "edgeMarking": true,
+   "guardrailL": true,
+   "guardrailR": true,
+   "bridgeParapet": "rail",
+   "bridgeSpacing": 12,
+   "conform": "design",
+   "drapeOffset": 0.15,
+   "points": [
+    {
+     "x": -70,
+     "z": 0,
+     "y": 0,
+     "w": 1
+    },
+    {
+     "x": -52,
+     "z": -12,
+     "y": 1.2,
+     "w": 1
+    },
+    {
+     "x": -36,
+     "z": -30,
+     "y": 2.9,
+     "w": 1
+    },
+    {
+     "x": -24,
+     "z": -52,
+     "y": 4.6,
+     "w": 1
+    },
+    {
+     "x": -12,
+     "z": -72,
+     "y": 6.3,
+     "w": 1
+    },
+    {
+     "x": 0,
+     "z": -80,
+     "y": 7,
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "r5",
+   "name": "Ramp SE",
+   "color": "#e8c26a",
+   "visible": true,
+   "closed": false,
+   "lanes": 2,
+   "laneWidth": 3.25,
+   "shoulderL": 1,
+   "shoulderR": 1,
+   "kerbL": false,
+   "kerbR": false,
+   "camber": 0.05,
+   "surface": "asphalt",
+   "centerMarking": "single",
+   "edgeMarking": true,
+   "guardrailL": true,
+   "guardrailR": true,
+   "bridgeParapet": "rail",
+   "bridgeSpacing": 12,
+   "conform": "design",
+   "drapeOffset": 0.15,
+   "points": [
+    {
+     "x": 70,
+     "z": 0,
+     "y": 0,
+     "w": 1
+    },
+    {
+     "x": 52,
+     "z": 12,
+     "y": 1.2,
+     "w": 1
+    },
+    {
+     "x": 36,
+     "z": 30,
+     "y": 2.9,
+     "w": 1
+    },
+    {
+     "x": 24,
+     "z": 52,
+     "y": 4.6,
+     "w": 1
+    },
+    {
+     "x": 12,
+     "z": 72,
+     "y": 6.3,
+     "w": 1
+    },
+    {
+     "x": 0,
+     "z": 80,
+     "y": 7,
+     "w": 1
+    }
+   ]
+  },
+  {
+   "id": "r6",
+   "name": "Ramp SW",
+   "color": "#e8c26a",
+   "visible": true,
+   "closed": false,
+   "lanes": 2,
+   "laneWidth": 3.25,
+   "shoulderL": 1,
+   "shoulderR": 1,
+   "kerbL": false,
+   "kerbR": false,
+   "camber": 0.05,
+   "surface": "asphalt",
+   "centerMarking": "single",
+   "edgeMarking": true,
+   "guardrailL": true,
+   "guardrailR": true,
+   "bridgeParapet": "rail",
+   "bridgeSpacing": 12,
+   "conform": "design",
+   "drapeOffset": 0.15,
+   "points": [
+    {
+     "x": -70,
+     "z": 0,
+     "y": 0,
+     "w": 1
+    },
+    {
+     "x": -52,
+     "z": 12,
+     "y": 1.2,
+     "w": 1
+    },
+    {
+     "x": -36,
+     "z": 30,
+     "y": 2.9,
+     "w": 1
+    },
+    {
+     "x": -24,
+     "z": 52,
+     "y": 4.6,
+     "w": 1
+    },
+    {
+     "x": -12,
+     "z": 72,
+     "y": 6.3,
+     "w": 1
+    },
+    {
+     "x": 0,
+     "z": 80,
+     "y": 7,
+     "w": 1
+    }
+   ]
+  }
+ ],
+ "junctions": [],
+ "heightmap": null,
+ "settings": {
+  "cornerRadius": 6
+ },
+ "intersectionOverrides": {}
+}

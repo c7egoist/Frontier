@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Flux · Particle Studio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0a0b'/%3E%3Cpath d='M16 5v22M5 16h22M8.5 8.5l15 15M23.5 8.5l-15 15' stroke='%23b78cff' stroke-width='2.6' stroke-linecap='round'/%3E%3Ccircle cx='16' cy='16' r='3' fill='%23f4f4f5'/%3E%3C/svg%3E"/>
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <div class="brand-tx"><b>Flux</b><span>Particle Studio</span></div>
+    </div>
+    <div class="comp-name"><input id="comp-name" value="Untitled" spellcheck="false" aria-label="Composition name"/></div>
+    <div class="transport">
+      <button id="t-stop" class="tbtn" title="Back to start"><i data-lucide="skip-back"></i></button>
+      <button id="t-play" class="tbtn primary" title="Play / pause (Space)"><i data-lucide="play"></i></button>
+      <span id="time-readout" title="Current / duration">0.00 / 8.00</span>
+      <button id="t-loop" class="tbtn on" title="Loop"><i data-lucide="repeat"></i></button>
+    </div>
+    <div class="actions">
+      <button id="btn-add" class="pill-btn" title="Add emitter layer"><i data-lucide="plus"></i><span>Layer</span></button>
+      <div class="menu-wrap">
+        <button id="btn-export" class="pill-btn accent" title="Export"><i data-lucide="download"></i><span>Export</span><i data-lucide="chevron-down"></i></button>
+        <div id="export-menu" class="menu hidden">
+          <button data-x="png"><i data-lucide="image"></i><span>Frame PNG</span></button>
+          <button data-x="webm"><i data-lucide="clapperboard"></i><span>Render loop (WebM)</span></button>
+          <div class="menu-sep"></div>
+          <button data-x="save"><i data-lucide="save"></i><span>Composition JSON</span></button>
+          <button data-x="open"><i data-lucide="folder-open"></i><span>Open JSON…</span></button>
+        </div>
+      </div>
+      <button id="btn-help" class="tbtn" title="Shortcuts (?)"><i data-lucide="circle-help"></i></button>
+    </div>
+  </header>
+  <div id="middle">
+    <aside id="left"><div id="left-scroll" class="panel-scroll"></div></aside>
+    <section id="stage">
+      <div id="viewport"></div>
+      <div id="view-toolbar">
+        <button id="v-bloom" class="tbtn on" title="Bloom"><i data-lucide="sparkles"></i></button>
+        <button id="v-trails" class="tbtn on" title="Light trails"><i data-lucide="spline"></i></button>
+        <span class="vt-sep"></span>
+        <button id="v-home" class="tbtn" title="Reset camera (F)"><i data-lucide="focus"></i></button>
+      </div>
+      <div id="rec-badge" class="hidden"><span class="dot"></span>REC <span id="rec-time">0.0s</span></div>
+      <div id="timeline">
+        <div id="tl-top">
+          <span id="tl-dur-lab">Loop</span>
+          <div id="scrub-wrap">
+            <div id="burst-ticks"></div>
+            <input id="scrub" type="range" min="0" max="1000" value="0" step="1" aria-label="Playhead"/>
+          </div>
+          <input id="dur" type="number" min="1" max="30" step="0.5" value="8" title="Loop duration (s)"/>
+          <span class="dur-unit">s</span>
+        </div>
+      </div>
+      <div id="statusbar">
+        <span id="st-fps" title="Frames per second">— fps</span>
+        <span id="st-parts" title="Live particles">—</span>
+        <span id="st-sep"></span>
+        <span id="st-sel">—</span>
+        <span id="st-saved">saved</span>
+      </div>
+    </section>
+    <aside id="right"><div id="inspector" class="panel-scroll"></div></aside>
+  </div>
+</div>
+<div id="toasts"></div>
+<div id="help" class="hidden">
+  <div class="help-card">
+    <h3>Flux shortcuts</h3>
+    <div class="help-grid">
+      <span><b>Space</b></span><span>Play / pause</span>
+      <span><b>Home</b></span><span>Back to start</span>
+      <span><b>F</b></span><span>Reset camera</span>
+      <span><b>L</b></span><span>Add emitter layer</span>
+      <span><b>Ctrl+Z</b> / <b>Ctrl+Shift+Z</b></span><span>Undo / redo</span>
+      <span><b>Ctrl+S</b></span><span>Download composition JSON</span>
+      <span><b>Del</b></span><span>Delete selected layer</span>
+      <span><b>Drag</b></span><span>Orbit · wheel zooms · right-drag pans</span>
+    </div>
+    <p class="help-p">Every layer is a GPU emitter: stateless in time, so scrubbing is exact.
+    Starbursts fire radially at their event time; trails smear motion into light streaks.</p>
+    <button id="help-close" class="pill-btn accent">Close</button>
+  </div>
+</div>
+<input type="file" id="file-open" accept=".json,application/json" hidden/>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>
