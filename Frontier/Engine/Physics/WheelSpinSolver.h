@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                   WHEEL SPIN SOLVER
 ==========================================================================================================================================*/
-// 🧩 Portable wheel angular update, ported from the owner-authorized Frontier- reference.
+// 🧩 Provisional portable wheel angular update; JS-derived, not the authoritative Project-Drive vehicle port.
 
 #pragma once
 

@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                    PACEJKA SLIP SOLVER
 ==========================================================================================================================================*/
-// 🧩 Pacejka MF6.1 pure-slip and combined-slip response, ported from the owner-authorized Frontier- reference.
+// 🧩 Provisional portable Pacejka MF6.1 slice; JS-derived, not the authoritative Project-Drive C++ vehicle port.
 
 #pragma once
 

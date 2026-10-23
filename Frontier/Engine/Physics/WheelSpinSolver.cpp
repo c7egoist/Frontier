@@ -12,7 +12,7 @@ namespace Frontier
 namespace
 {
 
-constexpr double ReferencePressure = 220000.0; // [Pa] - VehicleSolver.js TyreReferencePressure
+constexpr double ReferencePressure = 220000.0; // [Pa] - provisional legacy tyre pressure reference
 constexpr double FullTurn = 6.283185307179586476925286766559;
 
 [[nodiscard]] double Sign(double Scalar) noexcept

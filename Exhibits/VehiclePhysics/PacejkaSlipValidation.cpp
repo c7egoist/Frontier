@@ -1,7 +1,7 @@
 /*==========================================================================================================================================
                                                   PACEJKA SLIP VALIDATION
 ==========================================================================================================================================*/
-// 🧩 Differential MF6.1 oracle for the authorized previous-project JavaScript reference.
+// 🧩 Legacy provisional differential fixture; its JavaScript-derived oracle is not the Project-Drive C++ vehicle reference.
 
 #include "Engine/Physics/PacejkaSlipSolver.h"
 
@@ -105,7 +105,7 @@ int main()
     AssertEquivalent(Solver.LateralForce(-2.0, 0.0, 4000.0), Solver.LateralForce(-1.3, 0.0, 4000.0),
                      "negative α saturation", 0);
 
-    // 📝 Backward-Euler slip coordinates, evaluated from the authorized VehicleSolver.js equations.
+    // 📝 Legacy JS-derived oracle values; do not use as Project-Drive C++ parity evidence.
     struct TransientOracle
     {
         TyreSlipCoordinates Current;

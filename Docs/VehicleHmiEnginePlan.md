@@ -264,41 +264,32 @@ Indirect source feeding the candidates: Distance* field GI + Card* radiosity.
 | D4  | Ray traversal                     | Port software `RayTraversal` 1:1 — exact parity ✔️            | `VK_KHR_ray_query` — faster, traversal order differs 🚩       | A first; B later behind golden-image proof |
 | D5  | Cluster culling                   | Compute cull + HiZ, as demo ✔️                                | Mesh/task shaders — new code path, parity risk 🚩             | A; revisit after Phase 4 measurements |
 
-## 9. Physics — native Jolt, custom vehicle + tyre forces
+## 9. Physics — authorized C++ source only
 
-✔️ **Owner gate opened 2026-10-23.** The owner supplied `SultanAladin/Frontier-` @ `3382938` as the
-physics reference and then explicitly called the next phase. Port from that authorized previous-project source;
-do not copy physics from the VehicleHMI demo JavaScript. Its measured contact model confirms D6: custom per-wheel
-contact and tyre forces, with Jolt owning rigid-body integration/collisions.
+✔️ The owner-designated source is `SultanAladin/Frontier-` @ `3382938`. Do not use VehicleHmiPrototype HTML/JS
+physics as the vehicle model or compare it against Jolt. The C++ `Engine/PhysicalDynamics/RigidBodySolver.{h,cpp}`
+has been inspected and ported into `Frontier/Engine/PhysicalDynamics/`, exposed as the `FrontierJoltPhysicsExtension`
+CMake target. The exact native Jolt 5.3.0 revision from `ExternalPackages/Dependencies.lock.json` is pinned and
+checksum-verified.
 
-📝 The authorized previous project uses `jolt-physics` 1.1.0 WebAssembly from JavaScript; it is not an existing native
-C++ port. Frontier now pins upstream native Jolt Physics 5.4.0 in `Automation/JoltDependencies.json`, restores it into
-ignored `ExternalPackages/`, and links the initial `JoltPhysicsDivision` C++ adapter. This deliberately does not claim
-WASM/native API or behaviour parity. The custom solvers stay custom — Jolt integrates rigid bodies; Frontier computes
-powertrain and tyre forces and applies them at the contact patches.
+⚠️ **Source-location mismatch:** that `RigidBodySolver.cpp` implements generic Jolt rigid-body creation, fixed stepping,
+shape construction, layers, impulses, and pose readback. It contains no ControlVehicle drivetrain, steering, wheel,
+suspension, or tyre dynamics. A full C++ `Project-Drive` vehicle solver/specification is not present anywhere in the
+supplied branch tree. Do not substitute VehicleHmiPrototype JS. Obtain the missing Project-Drive C++ source location
+before implementing or validating the car model.
 
-| Demo module (bytes)                     | C++ destination                                   | Jolt provides                          | Stays custom (Frontier)                              |
-|-----------------------------------------|---------------------------------------------------|----------------------------------------|------------------------------------------------------|
-| `JoltWorld.js` (11,258)                 | `JoltWorld.cpp`                                   | PhysicsSystem, layers, job system      | world settings, step cadence                         |
-| `RigidBodyWorld.js` (48,237)            | `RigidBodyWorld.cpp`                              | bodies, constraints, contacts          | body catalogue for course + fracture debris          |
-| `VehicleSolver.js` (67,153)             | `VehicleSolver.cpp`                               | chassis rigid body; wheel query (D6)   | powertrain, steering geometry, aero, stability     |
-| `VehicleSpecification.js` (13,283)      | `VehicleSpecification` (TOML-backed)              | —                                      | full vehicle data model                              |
-| `TyreContinuumElasticity.js` (34,183)   | `TyreContinuumElasticity.cpp`                     | — (force source)                       | carcass node continuum → patch force/moment          |
-| `TyreSlipSolver.js` (6,913)             | `TyreSlipSolver.cpp`                              | —                                      | slip ratio κ, slip angle α → combined-slip forces    |
-| `TyreThermalSolver.js` (21,864)         | `TyreThermalSolver.cpp`                           | —                                      | temperature field → μ coupling, wear inputs          |
-| `TyreCarcassProjection.js` (12,938)     | `TyreCarcassProjection.cpp`                       | —                                      | visual carcass deformation                           |
-| `TyreMarkDepot.js` (13,223)             | `TyreMarkDepot.cpp` + `SurfaceDeposit*` shaders   | —                                      | mark deposition onto course surface                  |
-| `FractureStructure/Sequence.js` (63 KB) | `FractureStructure.cpp`, `FractureSequence.cpp`   | debris bodies on fracture events       | fracture topology + trigger logic                    |
-| `DriverInputIntegrator.js`, cameras     | same names                                        | —                                      | input conditioning, chase/orbit solvers              |
+| Authoritative native source | Port/status | Responsibility |
+|-----------------------------|-------------|----------------|
+| `Engine/PhysicalDynamics/RigidBodySolver.h/.cpp` | Ported to `Frontier/Engine/PhysicalDynamics/` | Generic Jolt rigid-body world and fixed-step body lifecycle |
+| Project-Drive ControlVehicle C++ solver/specification | Not found in supplied branch; awaiting source location | Complete drivetrain, steering, suspension, contact, tyre coupling, and vehicle data |
+| ControlVehicle and tyre visual material source/assets | Not yet located/ported | Body paint, glass, trim, rim/brake, tyre rubber/tread |
 
-- Physics identifiers follow `SKILL-formatting.md` §4: real symbols (`κ`, `α`, `σ`, `μ`, `τ`), unit-tagged comments.
-- Fixed-step with substeps (exact Hz is read from `JoltWorld.js` in Phase 6 — not assumed here).
-- Validation ports: `JoltWorld.test.mjs`, `VolumetricTyrePhysics.test.mjs`, `VehicleComponents.test.mjs`,
-  `VehicleStability.mjs`, `VehicleEffects.test.mjs` become C++ validation programs with the same assertions.
-
-| #  | Decision              | Option A (rating)                                    | Option B (rating)                                     | Recommendation |
-|----|-----------------------|------------------------------------------------------|-------------------------------------------------------|----------------|
-| D6 | Wheel ↔ ground        | Jolt `VehicleConstraint` wheeled solver 🚩 (convenient, but its tyre model would fight the continuum solver) | Custom per-wheel ray/shape cast; continuum+slip solvers own forces; Jolt integrates ✔️ | B — the tyre stack is the demo's signature; Jolt must not override it |
+- CTest currently validates generic Jolt rigid-body setup and existing portable tyre/wheel standalone exhibits only; it is
+  not a complete vehicle regression and does not compare HTML/JS physics to Jolt.
+- The earlier tyre/wheel C++ standalone slices were derived from prior-project JavaScript. They are provisional and not
+  accepted as the ControlVehicle physics source of truth until checked against the missing native Project-Drive source.
+- Jolt’s native `RigidBodySolver` is not the vehicle model. It becomes the rigid integration/contact world that receives
+  the vehicle implementation once the authorized C++ source is available.
 
 ## 10. UI — 1:1 port contract
 
@@ -485,7 +476,7 @@ WriteLog(FoliageCategory, LogSeverity::Info, "Leaf cluster detached · %d leaves
 | 4 🚧  | Virtualized geometry: `ClusterNesting`, cull, HiZ, visibility resolve — **portable core landed 2026-10-22**: `Engine/Rendering/ClusterNesting` (median-split nesting, enclosing bounds, sphere-tree monotone error, screen-space-error cut) + `VisibilityCull` (frustum, max-depth HiZ pyramid, conservative occlusion), proven on procedural corpora (`Exhibits/GeometryPipeline` 57/57: exactly-once cuts, monotone error/refinement, zero false-negative culls); Slang/GPU bodies + simplification DAG + demo corpus parity at the SDK phase | portable invariants ✔️ · demo `GeometryHierarchy` corpus images matched (SDK phase) |
 | 5 🚧  | ReSTIR chain + SVGF; distance-field + card GI — **chain portable core landed 2026-10-22**: `DeterministicRandom` (PCG32), `DiscrepancySequence`, `ReservoirSampling` (WRS/RIS + M-clamped temporal + Jacobian-factored spatial combines), `VarianceFiltering` (SVGF moments + à-trous + joint upsample), `IlluminationUnits` (§8.2 chain declared: resolves in order, ping-pongs off-atlas, 32 barriers), proven against analytic oracles (`Exhibits/IlluminationChain` 55/55: perfect-target RIS exactly zero-variance; reuse unbiased within 5σ; 256-receiver scene RMSE 0.385 vs naive 3.86; SVGF RMSE 12× down, edge 97% retained). **Distance-field + card GI portable core also landed**: `Rendering/DistanceField` (analytic SDF union, sphere tracing, baked records, AO, hemisphere indirect) + `Rendering/SurfaceCards` (texel radiosity, regularised form factors, DF visibility), declared as the indirect prelude in `IlluminationUnits` and proven in `Exhibits/IndirectIllumination` (60/60); Slang/GPU bodies + golden images remain | portable oracles ✔️ · golden-image parity vs demo captures (SDK phase) |
 | 6 🚧  | Environment: atmosphere, celestial, clouds, fog, flare, precipitation, lightning (visual) — **portable cores landed 2026-10-22**: `AtmosphereModel` (Rayleigh/Mie/ozone, transmittance LUT, single + approximated multiple scattering), `CelestialModel` (solar position, twilight, lunar phase, deterministic stars), `FogMedium` (analytic height-fog integral), `CloudField` (integer-hash density + Beer-Lambert march with sun shadow march), `WeatherEffects` (wrap-exact precipitation, midpoint-displacement lightning), `LensFlareModel`, `EnvironmentUnits` declaration — proven in `Exhibits/EnvironmentPipeline` (73/73; vertical transmittance matches analytic optical depths to 4 decimals, Benoni solar-noon identity, uniform-slab march exactly Beer-Lambert). Slang bodies + per-family demo captures remain SDK-phase | portable oracles ✔️ · per-family captures vs demo (SDK phase) |
-| 7 🚧  | **In progress (owner called phase 2026-10-23):** authorized source = previous project `Frontier-` @3382938. Tyre force/transient slip and wheel-spin cores pass 94 + 25 checks. Native Jolt 5.4.0 is now pinned/restored through `PrepareJolt.py`; `JoltPhysicsDivision` builds against actual Jolt and passes gravity/contact/removal/fixed-step validation. Remaining: ControlVehicle data/geometry and dynamics, tyre-to-chassis forces, contact/load/suspension, transmission/differential, aero/stability, visual material assets, and vehicle-level regression. | tyre + wheel cores ✔️ · initial native Jolt C++ integration ✔️ · 🚧 ControlVehicle port/materials + complete Jolt bridge |
+| 7 🚧  | **In progress:** authoritative native Jolt source is `Frontier-` @3382938 `Engine/PhysicalDynamics/RigidBodySolver.{h,cpp}`; the matching Jolt 5.3.0 commit is pinned. The complete generic rigid-body solver is ported and validated (3 CTest targets). Existing tyre slices originated from previous-project JS and are provisional, not the ControlVehicle source of truth. The linked branch contains no Project-Drive vehicle C++ solver files: the supplied `RigidBodySolver.cpp` itself is a generic Jolt world, not drivetrain/suspension dynamics. Awaiting exact C++ source location for the ControlVehicle model. No VehicleHmiPrototype HTML/JS physics is to be ported or compared to Jolt. | native `RigidBodySolver` ✔️ · 🚧 authoritative ControlVehicle C++ source + vehicle/material integration |
 | 8 ⏸️  | **Deferred per owner (2026-10-22):** cabin HMI screens, plume/fire/sparks, particle workspace. Do not start until explicitly reactivated. | owner reactivates phase |
 | 9     | Shipping configuration audit: every `#ifdef` row of §5 verified; 1:1 contract closed (every row Ported or Approved-removal) | shipping binary contains no editor machinery (symbol/size report) |
 
@@ -529,7 +520,7 @@ expandable-row detail already present was confirmed sufficient — no dropdown-c
 
 | Item                                                                 | Verification                                            | Status |
 |----------------------------------------------------------------------|---------------------------------------------------------|--------|
-| Phase 7 physics port | `Exhibits/VehiclePhysics`: tyre/transient-slip 94 checks + wheel-spin 25 checks; native Jolt 5.4.0 built from pinned checksum-verified source and `JoltPhysicsValidation` passes gravity/contact/removal/fixed-step integration; CTest 3/3 | 🟢 tyre + wheel cores, initial native Jolt adapter · 🚧 full ControlVehicle/Jolt bridge, geometry/material assets |
+| Phase 7 native Jolt port | `Frontier/Engine/PhysicalDynamics/RigidBodySolver.{h,cpp}` from the owner reference; checksum-verified Jolt 5.3.0 build; CTest 3/3 (tyre/wheel provisional suites + generic rigid-body lifecycle/contact/fixed-step suite) | 🟢 native generic rigid-body solver · 🚧 Project-Drive vehicle C++ sources not found in supplied branch; do not substitute JS/demo physics |
 | Complete portable render pipeline: `CompleteFrameUnits` + `ReferenceRenderer` | one 38-unit declaration resolves, 77 barriers derive, 54% atlas saving; stages execute through display encoding; 18/18 deterministic + closed-form BRDF checks; upstream GGX/Smith/Schlick one-stratum PBR is carried into RIS target and direct shading; capture at `Exhibits/CompleteRenderer/Capture/reference-frame.png` | 🟢 CPU reference · 🚧 Vulkan/OS window |
 | Phase 8 visual add-ons (cabin HMI, plume/fire/sparks, particle workspace) | explicitly deferred by owner 2026-10-22; untouched | ⏸️ |
 
@@ -580,7 +571,8 @@ Phase 0 is complete; Phase 3's portable half is complete. Remaining, in order
 (owner-resequenced 2026-10-22: infrastructure first): Phase 1+3 SDK build (Windows capture
 beside the approved HTML + spinning cube through the resolved order on screen) → Phase 2 kit
 → Phase 4 virtualized geometry on this core. The TextureWorkspace fix phase (complaint report above) runs
-when the owner calls it; Glinty (D9) follows it. Phase 7 is active: portable MF6.1 force, transient-slip, and wheel-spin
-cores are implemented; native Jolt 5.4.0 is pinned, integrated through an initial C++ adapter, and validated against
-the real library. ControlVehicle geometry/specification, its visual materials and tyre assets, full vehicle dynamics,
-the tyre-to-Jolt chassis bridge, stability, and Windows SDK verification remain outstanding.
+when the owner calls it; Glinty (D9) follows it. Phase 7 is active: the reference's native C++ `RigidBodySolver` is
+ported against pinned Jolt 5.3.0. Earlier standalone tyre/wheel slices were JS-derived and are provisional only. The
+Project-Drive ControlVehicle C++ dynamics source is not present in the supplied branch; geometry, drivetrain,
+suspension, tyre-material assets, Jolt vehicle bridge, and stability work must wait for that C++ source rather than
+substituting VehicleHmiPrototype HTML/JS physics.

@@ -46,12 +46,15 @@ set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 add_subdirectory("${CMAKE_SOURCE_DIR}/ExternalPackages/JoltPhysics/Build"
     "${CMAKE_BINARY_DIR}/JoltPhysics" EXCLUDE_FROM_ALL)
+add_library(FrontierJoltPhysicsExtension STATIC
+    Frontier/Engine/PhysicalDynamics/RigidBodySolver.cpp)
+target_include_directories(FrontierJoltPhysicsExtension PUBLIC "${CMAKE_SOURCE_DIR}")
+target_link_libraries(FrontierJoltPhysicsExtension PUBLIC Jolt)
 add_library(FrontierVehiclePhysics STATIC
     Frontier/Engine/Physics/PacejkaSlipSolver.cpp
-    Frontier/Engine/Physics/WheelSpinSolver.cpp
-    Frontier/Engine/Physics/JoltPhysicsDivision.cpp)
+    Frontier/Engine/Physics/WheelSpinSolver.cpp)
 target_include_directories(FrontierVehiclePhysics PUBLIC "${CMAKE_SOURCE_DIR}")
-target_link_libraries(FrontierVehiclePhysics PUBLIC Jolt)
+target_link_libraries(FrontierVehiclePhysics PUBLIC FrontierJoltPhysicsExtension)
 include(Automation/ThorVGSoftware.cmake)
 set(IMGUI_ROOT "${CMAKE_SOURCE_DIR}/ExternalPackages/imgui")
 add_library(FrontierImGui STATIC

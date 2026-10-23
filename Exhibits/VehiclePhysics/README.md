@@ -1,9 +1,11 @@
-# Vehicle Physics — portable tyre and wheel slices
+# Vehicle Physics — native rigid-body extension and provisional tyre slices
 
-Phase 7 portable physics components are being ported from the owner-authorized previous project
-**`SultanAladin/Frontier-` @ `3382938`**. References include
-`Experimental/VehicleHmiPrototype/Source/TyreSlipSolver.js`, `VehicleSolver.js`, and `VehicleSpecification.js`.
-Neither the reference JS nor unrelated VehicleHMI demo JS is copied into this checkout.
+The authoritative native Jolt reference is **`SultanAladin/Frontier-` @ `3382938`**,
+`Engine/PhysicalDynamics/RigidBodySolver.{h,cpp}`, with its Jolt pin in `ExternalPackages/Dependencies.lock.json`.
+The C++ rigid-body port below follows that source. The existing standalone tyre/wheel solvers were authored earlier from
+JavaScript in the previous project; they are not used as the ControlVehicle source of truth and must be revalidated or
+replaced against the missing Project-Drive C++ tyre/dynamics sources before vehicle integration. No HTML/demo physics is
+used or compared against Jolt.
 
 ## Implemented
 
@@ -11,7 +13,7 @@ Neither the reference JS nor unrelated VehicleHMI demo JS is copied into this ch
 - Lateral MF6.1 force `Fy(α, γ, Fz)` with `α ∈ [-1.3, 1.3]` rad and camber thrust/shift.
 - Combined-slip cosine weighting `Gxα`, `Gyκ`, and lateral `SVyκ`, using normalized pure-slip stiffnesses.
 - Load-scaled longitudinal/lateral relaxation lengths, including the reference 5% lower load-ratio floor.
-- Backward-Euler transient-slip integration from the reference `VehicleSolver.js`, with source clamps `κ ∈ [-1.5, 1.5]` and `α ∈ [-1.3, 1.3]`; nonpositive timesteps preserve the input coordinates.
+- A provisional backward-Euler transient-slip implementation with `κ ∈ [-1.5, 1.5]` and `α ∈ [-1.3, 1.3]`; not accepted as the Project-Drive vehicle source until matched to its C++ implementation.
 - Default parameter sheet from the previous project's `PacejkaParameters` (GRIT FTireSpecSheet coefficients).
 - `WheelSpinSolver` integrates drive torque, loaded-contact tyre reaction and pressure-sensitive rolling resistance,
   applies brake torque with the source's no-reverse-through-zero rule, then advances wheel angle.
@@ -33,12 +35,9 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror -I Frontier \
   -o /tmp/WheelSpinValidation && /tmp/WheelSpinValidation
 ```
 
-Results: `Pacejka MF6.1 validation: 94 checks, 0 failed`; `Wheel spin validation: 25 checks, 0 failed`.
-Thirteen tyre slip/load/camber tuples and four relaxation loads were compared to JS outputs; ten transient-slip
-cases cover forward/reverse motion, loading and timesteps, with clamp, boundedness and steady-state checks. Eleven
-wheel-spin tuples differentially cover drive, braking, tyre reaction, pressure-dependent rolling resistance, contact,
-shredded tyres, reverse rotation, and JavaScript-compatible signed angle wrapping. GCC C++17 `-Wall -Wextra -Werror`
-passes; oracle values were generated using Node.js v22.22.3.
+Legacy provisional-suite results: `Pacejka MF6.1 validation: 94 checks, 0 failed`; `Wheel spin validation: 25 checks, 0 failed`.
+These fixtures retain JS-derived numerical oracles from earlier work; they are not the Project-Drive C++ vehicle oracle,
+are not a complete-car validation, and are not compared with Jolt. GCC C++17 `-Wall -Wextra -Werror` passes.
 
 CMake targets and CTest entries: `PacejkaSlipValidation`, `WheelSpinValidation`, and `JoltPhysicsValidation`.
 Restore the pinned, ignored Jolt source before configuring:
@@ -50,17 +49,17 @@ cmake --build Build/VehiclePhysics --parallel
 ctest --test-dir Build/VehiclePhysics --output-on-failure
 ```
 
-Jolt is pinned to upstream **5.4.0** (`036ea7b1…`) by `Automation/JoltDependencies.json` and verified against the
-archive SHA-256 there. Native validation exercises gravity, ground contact, body removal, and zero-time stepping; it
-builds and passes against the actual Jolt C++ library, not the reference project's WASM wrapper.
+Jolt is pinned to the owner-reference lock at upstream **5.3.0** (`0373ec0d…`) by `Automation/JoltDependencies.json`
+and verified against the archive SHA-256 there. `RigidBodySolver` is the C++ rigid-body-world port: static/kinematic/
+dynamic bodies, box/sphere/capsule/cylinder/plane shapes, layers, fixed-step accumulation, interpolation, sleep, readback,
+impulses, teleports, and Jolt registration lifecycle. The extension target is `FrontierJoltPhysicsExtension`.
 
 ## Phase 7 boundary
 
-The native Jolt dependency and an initial C++ world adapter are now present, but this remains **not** a complete
-ControlVehicle port or vehicle/Jolt integration. Still outstanding: ControlVehicle geometry/specification and full
-vehicle dynamics, contact/load/suspension coupling, transmission/differential, vehicle-level brake/control integration,
-aero, appropriate ControlVehicle/tyre visual material assets, vehicle stability port of `VehicleStability.mjs`, the
-custom tyre-to-Jolt chassis bridge, and the Windows SDK build. The wheel-spin component integrates supplied drive/brake
-torques; it does not implement those vehicle systems. The previous project's `JoltWorld.js` uses Jolt 1.1.0 WASM;
-the C++ build deliberately pins upstream native Jolt 5.4.0 and has not claimed binary/API parity with the WASM package.
-Phase 8 remains deferred.
+The owner-reference C++ `RigidBodySolver.cpp` is a generic Jolt rigid-body world; inspection confirms it contains no
+ControlVehicle drivetrain, suspension, or tyre dynamics. The native solver is now ported and validated against Jolt
+5.3.0. ControlVehicle geometry/specification and full vehicle dynamics, suspension/contact coupling, transmission /
+differential, vehicle-level brake/control integration, aero, appropriate ControlVehicle/tyre visual material assets,
+the custom tyre-to-Jolt chassis bridge, and Windows SDK verification remain outstanding. The owner-linked branch's
+`VehicleSolver.js` is not being used as physics source, and no HTML/demo physics is compared against Jolt. Phase 8
+remains deferred.

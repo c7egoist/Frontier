@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(FrontierVehiclePhysicsExhibit CXX)
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 get_filename_component(FRONTIER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../Frontier" ABSOLUTE)
 add_executable(PacejkaSlipValidation
@@ -21,7 +21,7 @@ set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../ExternalPackages/JoltPhysics/Build ${CMAKE_CURRENT_BINARY_DIR}/JoltPhysics EXCLUDE_FROM_ALL)
 add_executable(JoltPhysicsValidation
     JoltPhysicsValidation.cpp
-    ${FRONTIER_ROOT}/Engine/Physics/JoltPhysicsDivision.cpp)
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/RigidBodySolver.cpp)
 target_include_directories(JoltPhysicsValidation PRIVATE ${FRONTIER_ROOT})
 target_link_libraries(JoltPhysicsValidation PRIVATE Jolt)
 

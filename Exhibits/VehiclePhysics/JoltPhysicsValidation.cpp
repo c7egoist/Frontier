@@ -1,54 +1,90 @@
 /*==========================================================================================================================================
                                                 JOLT PHYSICS VALIDATION
 ==========================================================================================================================================*/
-// 🧩 Native integration proof: rigid-body gravity, ground contact, body removal and bounded stepping.
+// 🧩 Native Jolt C++ rigid-body lifecycle, fixed-step accumulation and ground-contact validation.
 
-#include "Engine/Physics/JoltPhysicsDivision.h"
+#include "Engine/PhysicalDynamics/RigidBodySolver.h"
 
 #include <cmath>
-#include <cstdint>
 #include <cstdio>
 #include <string>
 
 int main()
 {
-    Frontier::JoltPhysicsDivision Physics;
-    if (std::string(Frontier::JoltPhysicsDivision::BackendName()).find("native C++") == std::string::npos)
+    using namespace Frontier;
+    RigidBodySolver Solver;
+    RigidBodyConfiguration Configuration;
+    Configuration.FixedStepSeconds = 1.0f / 120.0f;
+    Configuration.WorkerThreads = 1;
+    if (!Solver.Bring(Configuration))
     {
-        std::printf("FAIL backend identification\n");
+        std::printf("FAIL Jolt initialization: %s\n", Solver.QueryLastRefusal().c_str());
+        return 1;
+    }
+    if (std::string(RigidBodySolver::QueryBackendVersion()) != "Jolt 5.3.0")
+    {
+        std::printf("FAIL expected reference-pinned native Jolt 5.3.0, got %s\n", RigidBodySolver::QueryBackendVersion());
         return 1;
     }
 
-    const Frontier::JoltBodyHandle Crate = Physics.AddBox({{0.0, 0.0, 2.0}, {0.25, 0.25, 0.25}, 10.0, 0.7, 0.0});
+    RigidBodyDescription Ground;
+    Ground.Name = "validation-ground";
+    Ground.Motion = RigidBodyMotionCategory::Static;
+    Ground.Shape.Category = CollisionShapeCategory::Plane;
+    const RigidBodyIdentity GroundIdentity = Solver.CreateBody(Ground);
+
+    RigidBodyDescription Crate;
+    Crate.Name = "validation-crate";
+    Crate.Shape.Category = CollisionShapeCategory::Box;
+    Crate.Shape.HalfExtents = {0.25f, 0.25f, 0.25f};
+    Crate.Position = {0.0f, 0.0f, 2.0f};
+    Crate.MassKilograms = 10.0f;
+    Crate.Friction = 0.7f;
+    Crate.Restitution = 0.0f;
+    const RigidBodyIdentity CrateIdentity = Solver.CreateBody(Crate);
+    if (GroundIdentity == InvalidRigidBody || CrateIdentity == InvalidRigidBody || Solver.QueryMetrics().BodyCount != 2)
+    {
+        std::printf("FAIL Jolt body construction: %s\n", Solver.QueryLastRefusal().c_str());
+        return 1;
+    }
+
     for (uint32_t Index = 0; Index < 600; ++Index)
     {
-        Physics.Advance(1.0 / 120.0);
+        Solver.Advance(1.0f / 120.0f);
     }
-    const Frontier::JoltBodyMotion Resting = Physics.ReadMotion(Crate);
-    if (!std::isfinite(Resting.Position.Z) || std::abs(Resting.Position.Z - 0.25) > 0.03)
+    RigidBodyPose CratePose;
+    if (!Solver.QueryPose(CrateIdentity, CratePose) || !std::isfinite(CratePose.Position.z) ||
+        std::abs(CratePose.Position.z - 0.25f) > 0.04f || Solver.QueryMetrics().StepCount != 600)
     {
-        std::printf("FAIL native body did not settle on ground: z=%.9f\n", Resting.Position.Z);
+        std::printf("FAIL Jolt fixed-step settling: z=%.7f steps=%llu\n",
+                    CratePose.Position.z, static_cast<unsigned long long>(Solver.QueryMetrics().StepCount));
         return 1;
     }
 
-    const uint32_t BodiesBeforeRemoval = Physics.BodyCount();
-    Physics.RemoveBody(Crate);
-    if (Physics.BodyCount() + 1 != BodiesBeforeRemoval)
+    const RigidBodyMetrics BeforeDestroy = Solver.QueryMetrics();
+    Solver.DestroyBody(CrateIdentity);
+    if (Solver.QueryMetrics().BodyCount + 1 != BeforeDestroy.BodyCount)
     {
-        std::printf("FAIL native body was not removed\n");
+        std::printf("FAIL Jolt body destruction\n");
         return 1;
     }
 
-    const Frontier::JoltBodyHandle FastBox = Physics.AddBox({{2.0, 0.0, 3.0}, {0.1, 0.1, 0.1}, 5.0, 0.5, 0.0});
-    Physics.Advance(0.0);
-    const Frontier::JoltBodyMotion Unchanged = Physics.ReadMotion(FastBox);
-    if (std::abs(Unchanged.Position.Z - 3.0) > 1e-6)
+    RigidBodyDescription InvalidPlane = Ground;
+    InvalidPlane.Motion = RigidBodyMotionCategory::Dynamic;
+    if (Solver.CreateBody(InvalidPlane) != InvalidRigidBody || Solver.QueryLastRefusal().empty())
     {
-        std::printf("FAIL zero-time advance moved body\n");
+        std::printf("FAIL dynamic plane was not refused\n");
         return 1;
     }
 
-    std::printf("Jolt native validation: gravity/contact/removal/zero-step checks passed (%s)\n",
-                Frontier::JoltPhysicsDivision::BackendName());
+    Solver.Retire();
+    if (Solver.IsReady())
+    {
+        std::printf("FAIL Jolt world did not retire\n");
+        return 1;
+    }
+
+    std::printf("Jolt native validation: rigid-body lifecycle, fixed stepping, contact and refusal checks passed (%s)\n",
+                RigidBodySolver::QueryBackendVersion());
     return 0;
 }

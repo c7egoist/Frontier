@@ -25,8 +25,15 @@ def Main():
         return 0
     if VerifyOnly:
         raise RuntimeError('Jolt source is not prepared; run python Automation/PrepareJolt.py')
+    Backup = None
     if Destination.exists():
-        raise RuntimeError('Unmanaged dependency directory; preserve or move it first: ' + str(Destination))
+        if not Stamp.exists():
+            raise RuntimeError('Unmanaged dependency directory; preserve or move it first: ' + str(Destination))
+        BackupRoot = Destination.parent / '.frontier-backups'
+        BackupRoot.mkdir(parents=True, exist_ok=True)
+        Backup = BackupRoot / (Manifest['package'] + '-' + Stamp.read_text().strip())
+        if Backup.exists():
+            raise RuntimeError('Pinned dependency backup already exists; preserve it and move it before retrying: ' + str(Backup))
 
     print('Downloading pinned dependency:', Manifest['package'], Manifest['version'])
     with urllib.request.urlopen(Manifest['url'], timeout=120) as Response:
@@ -55,7 +62,14 @@ def Main():
                         shutil.copyfileobj(Source, Target)
         (Staging / '.frontier-revision').write_text(Manifest['revision'] + '\n')
         Destination.parent.mkdir(parents=True, exist_ok=True)
-        Staging.rename(Destination)
+        if Destination.exists():
+            Destination.rename(Backup)
+        try:
+            Staging.rename(Destination)
+        except OSError:
+            if Backup is not None and Backup.exists() and not Destination.exists():
+                Backup.rename(Destination)
+            raise
     finally:
         if Staging.exists():
             shutil.rmtree(Staging)
