@@ -28,11 +28,30 @@ execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/
 if(NOT FONT_STATUS EQUAL 0)
     message(FATAL_ERROR "Prepare fonts first: pip install -r Automation/FontRequirements.txt; python Automation/PrepareFonts.py")
 endif()
+execute_process(COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/PrepareJolt.py" --verify
+    RESULT_VARIABLE JOLT_STATUS)
+if(NOT JOLT_STATUS EQUAL 0)
+    message(FATAL_ERROR "Prepare Jolt first: python Automation/PrepareJolt.py")
+endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(MSVC)
     add_compile_options(/utf-8 /W4)
 endif()
+# Jolt is restored by the explicit, checksum-pinned setup script; configuration itself never downloads dependencies.
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
+set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
+set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
+add_subdirectory("${CMAKE_SOURCE_DIR}/ExternalPackages/JoltPhysics/Build"
+    "${CMAKE_BINARY_DIR}/JoltPhysics" EXCLUDE_FROM_ALL)
+add_library(FrontierVehiclePhysics STATIC
+    Frontier/Engine/Physics/PacejkaSlipSolver.cpp
+    Frontier/Engine/Physics/WheelSpinSolver.cpp
+    Frontier/Engine/Physics/JoltPhysicsDivision.cpp)
+target_include_directories(FrontierVehiclePhysics PUBLIC "${CMAKE_SOURCE_DIR}")
+target_link_libraries(FrontierVehiclePhysics PUBLIC Jolt)
 include(Automation/ThorVGSoftware.cmake)
 set(IMGUI_ROOT "${CMAKE_SOURCE_DIR}/ExternalPackages/imgui")
 add_library(FrontierImGui STATIC
@@ -110,7 +129,7 @@ if(WIN32)
         "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
     target_compile_definitions(Frontier PRIVATE FRONTIER_UI_VULKAN=1 VK_NO_PROTOTYPES
         FRONTIER_BUILD_COMMIT=\"${FRONTIER_BUILD_COMMIT}\")
-    target_link_libraries(Frontier PRIVATE FrontierEditorUI FrontierSurfaceRasterization glfw ole32)
+    target_link_libraries(Frontier PRIVATE FrontierEditorUI FrontierSurfaceRasterization FrontierVehiclePhysics glfw ole32)
     add_executable(TextureStudio Experimental/TextureStudio/Native/WindowsTextureStudio.cpp
         Engine/Interface/WindowsApplication.cpp Engine/Interface/VulkanPresentation.cpp
         "${IMGUI_ROOT}/backends/imgui_impl_glfw.cpp" "${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp")

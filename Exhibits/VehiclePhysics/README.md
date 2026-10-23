@@ -40,14 +40,27 @@ wheel-spin tuples differentially cover drive, braking, tyre reaction, pressure-d
 shredded tyres, reverse rotation, and JavaScript-compatible signed angle wrapping. GCC C++17 `-Wall -Wextra -Werror`
 passes; oracle values were generated using Node.js v22.22.3.
 
-CMake targets and CTest entries: `PacejkaSlipValidation` and `WheelSpinValidation`. CMake is not installed in the
-sandbox, so both targets are compiled directly with g++ as shown.
+CMake targets and CTest entries: `PacejkaSlipValidation`, `WheelSpinValidation`, and `JoltPhysicsValidation`.
+Restore the pinned, ignored Jolt source before configuring:
+
+```sh
+python Automation/PrepareJolt.py
+cmake -S Exhibits/VehiclePhysics -B Build/VehiclePhysics
+cmake --build Build/VehiclePhysics --parallel
+ctest --test-dir Build/VehiclePhysics --output-on-failure
+```
+
+Jolt is pinned to upstream **5.4.0** (`036ea7b1…`) by `Automation/JoltDependencies.json` and verified against the
+archive SHA-256 there. Native validation exercises gravity, ground contact, body removal, and zero-time stepping; it
+builds and passes against the actual Jolt C++ library, not the reference project's WASM wrapper.
 
 ## Phase 7 boundary
 
-This remains **not** a vehicle simulation or Jolt integration. Still outstanding: contact/load/suspension coupling,
-vehicle-level powertrain/brakes/aero, stability port of `VehicleStability.mjs`, Jolt native world/body lifecycle/contact
-validation, and the Windows SDK build. This wheel component integrates supplied drive/brake torques; it does not
-implement the transmission, differential, or vehicle controls. The authorized
-previous project's `JoltWorld.js` uses Jolt 1.1.0 WASM; this repository currently has no native Jolt dependency or C++
-build target. No dependency was silently vendored and no native/Jolt result is claimed. Phase 8 remains deferred.
+The native Jolt dependency and an initial C++ world adapter are now present, but this remains **not** a complete
+ControlVehicle port or vehicle/Jolt integration. Still outstanding: ControlVehicle geometry/specification and full
+vehicle dynamics, contact/load/suspension coupling, transmission/differential, vehicle-level brake/control integration,
+aero, appropriate ControlVehicle/tyre visual material assets, vehicle stability port of `VehicleStability.mjs`, the
+custom tyre-to-Jolt chassis bridge, and the Windows SDK build. The wheel-spin component integrates supplied drive/brake
+torques; it does not implement those vehicle systems. The previous project's `JoltWorld.js` uses Jolt 1.1.0 WASM;
+the C++ build deliberately pins upstream native Jolt 5.4.0 and has not claimed binary/API parity with the WASM package.
+Phase 8 remains deferred.

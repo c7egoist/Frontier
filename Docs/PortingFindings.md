@@ -105,10 +105,13 @@ delta · 🟡 cosmetic/process. Cross-refs: plan `Docs/VehicleHmiEnginePlan.md` 
    `SultanAladin/Frontier-` @ `3382938`. D6 resolves to custom per-wheel contact/tyre
    forces with Jolt for rigid integration. The MF6.1 pure/combined-slip and load-scaled relaxation C++ core
    matches 13 source-JS tuples and four load oracles; transient slip ports VehicleSolver.js backward-Euler
-   updates and source clamps. A portable wheel-spin slice now integrates drive/tyre/rolling-resistance torques,
-   braking, and angle progression with 25 JS-differential/invariant checks. Strict C++ exhibits pass 94 tyre
-   checks and 25 wheel checks. Contact/suspension coupling, vehicle dynamics, native Jolt and vehicle-level
-   stability validation remain open.
+   updates and source clamps. A portable wheel-spin slice integrates drive/tyre/rolling-resistance torques,
+   braking, and angle progression with 25 JS-differential/invariant checks. Native Jolt Physics 5.4.0 is now pinned
+   by URL+SHA-256 and restored into ignored `ExternalPackages/`; `JoltPhysicsDivision` owns a real native physics
+   system and passes a compiled gravity/contact/removal/step exhibit. CTest passes 3/3. The reference's JoltWorld.js
+   is WASM, not a C++ port; no binary parity is claimed. ControlVehicle specification/geometry, vehicle-level
+   forces/controls, tyre-chassis bridge, visual materials/assets, suspension/contact, stability, and Windows SDK
+   verification remain open.
 8. 🟡 D9 Glinty flake replacement approved but deferred until TextureWorkspace stabilises.
 9. 🟡 Cabin HMI may depend on a Slate SDK (`SlateCabinLayout/Fittings.js` vs this repo's
    Slate upstream) — Phase 0 open question, needs owner clarification before Phase 8.
