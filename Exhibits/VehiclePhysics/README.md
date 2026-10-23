@@ -1,46 +1,32 @@
-# Vehicle Physics — native rigid-body extension and provisional tyre slices
+# Vehicle Physics — native vehicle dynamics on Jolt 5.3.0
 
-The authoritative native Jolt reference is **`SultanAladin/Frontier-` @ `3382938`**,
-`Engine/PhysicalDynamics/RigidBodySolver.{h,cpp}`, with its Jolt pin in `ExternalPackages/Dependencies.lock.json`.
-The C++ rigid-body port below follows that source. The existing standalone tyre/wheel solvers were authored earlier from
-JavaScript in the previous project; they are not used as the ControlVehicle source of truth and must be revalidated or
-replaced against the missing Project-Drive C++ tyre/dynamics sources before vehicle integration. No HTML/demo physics is
-used or compared against Jolt.
+## Authoritative source selection
 
-## Implemented
+Scanned all branch heads in the four owner-specified repositories. The newest complete native vehicle snapshot found is:
 
-- Longitudinal MF6.1 force `Fx(κ, γ, Fz)` with the source clamp `κ ∈ [-0.92, 1.5]`.
-- Lateral MF6.1 force `Fy(α, γ, Fz)` with `α ∈ [-1.3, 1.3]` rad and camber thrust/shift.
-- Combined-slip cosine weighting `Gxα`, `Gyκ`, and lateral `SVyκ`, using normalized pure-slip stiffnesses.
-- Load-scaled longitudinal/lateral relaxation lengths, including the reference 5% lower load-ratio floor.
-- A provisional backward-Euler transient-slip implementation with `κ ∈ [-1.5, 1.5]` and `α ∈ [-1.3, 1.3]`; not accepted as the Project-Drive vehicle source until matched to its C++ implementation.
-- Default parameter sheet from the previous project's `PacejkaParameters` (GRIT FTireSpecSheet coefficients).
-- `WheelSpinSolver` integrates drive torque, loaded-contact tyre reaction and pressure-sensitive rolling resistance,
-  applies brake torque with the source's no-reverse-through-zero rule, then advances wheel angle.
+- Repository: `SultanAladin/Frontier-`
+- Branch: `arena/215a6f39-frontier`
+- Branch head: `f2cfc57daaaf1fafc9a01a2002af6cad8cbd0f0f`, 2026-10-14 18:32:41 UTC
+- Latest vehicle-source change contained by that head: `f1f0d72e54effc0b5cae64eae726323bb82bdd01`, 2026-10-14 04:16:30 UTC (tyre deformation/pressure integration)
 
-These portable components are isolated under `Frontier/Engine/Physics/`; no vehicle integration or Jolt API leaks into
-the tyre or wheel mathematics.
+This head contains the complete C++ `Engine/PhysicalDynamics/Vehicle/` model and Project-Drive vehicle geometry sources. The other same-day candidate heads are older; the latest C++ vehicle source change is an ancestor of `arena/215a6f39-frontier`. Searches of `SultanAladin/Slate`, `unassignedinbox/Slate`, and `unassignedinbox/Frontier` found no newer matching native vehicle source. No HTML/JavaScript vehicle physics was ported or compared with Jolt.
 
-## Reproduction and verification
+## Ported and wired
 
-```sh
-g++ -std=c++17 -O2 -Wall -Wextra -Werror -I Frontier \
-  Exhibits/VehiclePhysics/PacejkaSlipValidation.cpp \
-  Frontier/Engine/Physics/PacejkaSlipSolver.cpp \
-  -o /tmp/PacejkaSlipValidation && /tmp/PacejkaSlipValidation
+The native model is under `Frontier/Engine/PhysicalDynamics/Vehicle/`:
 
-g++ -std=c++17 -O2 -Wall -Wextra -Werror -I Frontier \
-  Exhibits/VehiclePhysics/WheelSpinValidation.cpp \
-  Frontier/Engine/Physics/WheelSpinSolver.cpp \
-  -o /tmp/WheelSpinValidation && /tmp/WheelSpinValidation
-```
+- `VehicleSolver`: four-corner vehicle dynamics, Pacejka slip, suspension/anti-roll bars, wheel spin, braking/ABS, thermal state, drivetrain and aerodynamics.
+- `Drivetrain`, `PacejkaMagicFormula`, `TyreSlipDynamics`, `RigidWheel`, `TraceContactTyre`, and suspension/thermal specifications.
+- `VehicleGeometry`: measured ControlVehicle socket geometry and dimensions, plus geometry-to-wheel/suspension setup.
+- `JoltVehicleBinding`: reads the Jolt chassis pose/velocity, applies vehicle forces/torques to the Jolt dynamic body, and steps both systems at the same fixed interval.
+- `RigidBodySolver::QuerySurface`: Jolt narrow-phase ray hit, world-space normal, and collision body's friction coefficient. The binding uses this by default for tyre ground samples and road-material friction, while allowing a scene-provided query override.
+- `VehicleContactMaterial.h`: mechanical tyre and road coefficients are distinct from visual PBR materials; the coefficients combine symmetrically. The existing `EngineContent/MaterialArchives/TextureStudio/performance-rubber.material` is a render material, not a substitute for contact parameters.
 
-Legacy provisional-suite results: `Pacejka MF6.1 validation: 94 checks, 0 failed`; `Wheel spin validation: 25 checks, 0 failed`.
-These fixtures retain JS-derived numerical oracles from earlier work; they are not the Project-Drive C++ vehicle oracle,
-are not a complete-car validation, and are not compared with Jolt. GCC C++17 `-Wall -Wextra -Werror` passes.
+The root target `FrontierVehiclePhysics` now contains the native model and binding, and links the existing `FrontierJoltPhysicsExtension` (Jolt 5.3.0 remains pinned to the owner-reference revision `0373ec0d…`).
 
-CMake targets and CTest entries: `PacejkaSlipValidation`, `WheelSpinValidation`, and `JoltPhysicsValidation`.
-Restore the pinned, ignored Jolt source before configuring:
+## Verification
+
+Standalone configure/build/test:
 
 ```sh
 python Automation/PrepareJolt.py
@@ -49,17 +35,8 @@ cmake --build Build/VehiclePhysics --parallel
 ctest --test-dir Build/VehiclePhysics --output-on-failure
 ```
 
-Jolt is pinned to the owner-reference lock at upstream **5.3.0** (`0373ec0d…`) by `Automation/JoltDependencies.json`
-and verified against the archive SHA-256 there. `RigidBodySolver` is the C++ rigid-body-world port: static/kinematic/
-dynamic bodies, box/sphere/capsule/cylinder/plane shapes, layers, fixed-step accumulation, interpolation, sleep, readback,
-impulses, teleports, and Jolt registration lifecycle. The extension target is `FrontierJoltPhysicsExtension`.
+Latest sandbox run: **6/6 CTest tests passed**, including the upstream vehicle-equation and mock-scene suites, generic Jolt body validation, and `JoltVehicleBindingValidation`. The Jolt vehicle test queries the actual Jolt plane for surface normal and friction, registers a 4-wheel ControlVehicle geometry/configuration, verifies four tyre contacts, then drives the actual dynamic Jolt chassis to **15.240 m/s**. The legacy JS-derived Pacejka and wheel-spin programs remain isolated as provisional exhibit-only checks; their sources are no longer included in the `FrontierVehiclePhysics` product library.
 
-## Phase 7 boundary
+## Remaining integration boundary
 
-The owner-reference C++ `RigidBodySolver.cpp` is a generic Jolt rigid-body world; inspection confirms it contains no
-ControlVehicle drivetrain, suspension, or tyre dynamics. The native solver is now ported and validated against Jolt
-5.3.0. ControlVehicle geometry/specification and full vehicle dynamics, suspension/contact coupling, transmission /
-differential, vehicle-level brake/control integration, aero, appropriate ControlVehicle/tyre visual material assets,
-the custom tyre-to-Jolt chassis bridge, and Windows SDK verification remain outstanding. The owner-linked branch's
-`VehicleSolver.js` is not being used as physics source, and no HTML/demo physics is compared against Jolt. Phase 8
-remains deferred.
+The C++ dynamics and a real Jolt chassis/ground/material-query path are now connected and validated. The binding's default surface sampler is a vertical ray fan (appropriate for this +Z-up vehicle); a project can override it for a terrain/heightfield-specific sampler. The actual Project-Drive scene, rendered ControlVehicle mesh/socket asset transfer, wheel visual-material assignment, and Windows/MSVC application build are not yet integrated or proven. This test does not claim Vulkan/GPU/native-window proof.

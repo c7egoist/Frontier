@@ -15,6 +15,11 @@
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
+#include <Jolt/Physics/Body/BodyLock.h>
+#include <Jolt/Physics/Body/BodyFilter.h>
+#include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
+#include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/RayCast.h>
 #include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayerInterfaceTable.h>
 #include <Jolt/Physics/Collision/BroadPhase/ObjectVsBroadPhaseLayerFilterTable.h>
 #include <Jolt/Physics/Collision/ObjectLayerPairFilterTable.h>
@@ -469,6 +474,21 @@ void RigidBodySolver::ApplyImpulse(RigidBodyIdentity Identity, const Vector3& Im
         World->Physics.GetBodyInterface().AddImpulse(R->Body, ToJolt(Impulse));
 }
 
+void RigidBodySolver::ApplyForceAtPoint(RigidBodyIdentity Identity, const Vector3& Force,
+                                             const Vector3& WorldPoint) noexcept
+{
+    if (!Ready) return;
+    if (const JoltWorld::BodyRecord* R = World->Find(Identity); R != nullptr && R->Motion == RigidBodyMotionCategory::Dynamic)
+        World->Physics.GetBodyInterface().AddForce(R->Body, ToJolt(Force), ToJoltReal(WorldPoint));
+}
+
+void RigidBodySolver::ApplyTorque(RigidBodyIdentity Identity, const Vector3& Torque) noexcept
+{
+    if (!Ready) return;
+    if (const JoltWorld::BodyRecord* R = World->Find(Identity); R != nullptr && R->Motion == RigidBodyMotionCategory::Dynamic)
+        World->Physics.GetBodyInterface().AddTorque(R->Body, ToJolt(Torque));
+}
+
 void RigidBodySolver::AssignLinearVelocity(RigidBodyIdentity Identity, const Vector3& Velocity) noexcept
 {
     if (!Ready) return;
@@ -528,6 +548,41 @@ bool RigidBodySolver::QueryPose(RigidBodyIdentity Identity, RigidBodyPose& Pose)
     Pose.Shape           = R->Shape;
     Pose.Active          = Bodies.IsActive(R->Body);
     return true;
+}
+
+bool RigidBodySolver::QuerySurface(const Vector3& RayOrigin, const Vector3& RayDirection, float MaxDistance,
+                                   RigidBodyIdentity IgnoreBody, Vector3& SurfacePoint,
+                                   Vector3& SurfaceNormal, float& Friction) const noexcept
+{
+    if (!Ready || !(MaxDistance > 0.0f)) return false;
+    const Vector3 Direction = RayDirection.Normalized();
+    if (Direction.LengthSquared() < 0.5f) return false;
+
+    const Vector3 RayDisplacement{Direction.x * MaxDistance, Direction.y * MaxDistance, Direction.z * MaxDistance};
+    const JPH::RRayCast Ray(ToJoltReal(RayOrigin), ToJolt(RayDisplacement));
+    JPH::RayCastResult Hit;
+    bool Found = false;
+    const JoltWorld::BodyRecord* Ignored = World->Find(IgnoreBody);
+    if (Ignored != nullptr)
+    {
+        const JPH::IgnoreSingleBodyFilter Filter(Ignored->Body);
+        Found = World->Physics.GetNarrowPhaseQuery().CastRay(Ray, Hit, {}, {}, Filter);
+    }
+    else
+    {
+        Found = World->Physics.GetNarrowPhaseQuery().CastRay(Ray, Hit);
+    }
+    if (!Found) return false;
+
+    JPH::BodyLockRead Lock(World->Physics.GetBodyLockInterface(), Hit.mBodyID);
+    if (!Lock.Succeeded()) return false;
+    const JPH::Body& Body = Lock.GetBody();
+    const JPH::RVec3 Point = Ray.GetPointOnRay(Hit.mFraction);
+    const JPH::Vec3 Normal = Body.GetWorldSpaceSurfaceNormal(Hit.mSubShapeID2, Point);
+    SurfacePoint = FromJolt(Point);
+    SurfaceNormal = FromJolt(Normal.Normalized());
+    Friction = Body.GetFriction();
+    return SurfaceNormal.LengthSquared() > 0.5f;
 }
 
 void RigidBodySolver::QueryPoses(std::vector<RigidBodyPose>& Poses) const noexcept

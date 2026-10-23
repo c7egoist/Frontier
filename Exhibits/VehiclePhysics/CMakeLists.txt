@@ -13,6 +13,24 @@ add_executable(WheelSpinValidation
     ${FRONTIER_ROOT}/Engine/Physics/WheelSpinSolver.cpp)
 target_include_directories(WheelSpinValidation PRIVATE ${FRONTIER_ROOT})
 
+set(FRONTIER_NATIVE_VEHICLE_SOURCES
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/Drivetrain.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp)
+set(FRONTIER_NATIVE_JOLT_VEHICLE_SOURCES
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/JoltVehicleBinding.cpp)
+add_executable(PortedVehicleValidation
+    VehicleValidation.cpp ${FRONTIER_NATIVE_VEHICLE_SOURCES})
+target_include_directories(PortedVehicleValidation PRIVATE
+    ${FRONTIER_ROOT} ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle)
+add_executable(PortedVehicleSceneValidation
+    VehicleSceneValidation.cpp ${FRONTIER_NATIVE_VEHICLE_SOURCES})
+target_include_directories(PortedVehicleSceneValidation PRIVATE
+    ${FRONTIER_ROOT} ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle)
+
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
 set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
@@ -24,8 +42,19 @@ add_executable(JoltPhysicsValidation
     ${FRONTIER_ROOT}/Engine/PhysicalDynamics/RigidBodySolver.cpp)
 target_include_directories(JoltPhysicsValidation PRIVATE ${FRONTIER_ROOT})
 target_link_libraries(JoltPhysicsValidation PRIVATE Jolt)
+add_executable(JoltVehicleBindingValidation
+    JoltVehicleBindingValidation.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/RigidBodySolver.cpp
+    ${FRONTIER_NATIVE_VEHICLE_SOURCES}
+    ${FRONTIER_NATIVE_JOLT_VEHICLE_SOURCES})
+target_include_directories(JoltVehicleBindingValidation PRIVATE
+    ${FRONTIER_ROOT} ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle)
+target_link_libraries(JoltVehicleBindingValidation PRIVATE Jolt)
 
 enable_testing()
 add_test(NAME PacejkaSlipValidation COMMAND PacejkaSlipValidation)
 add_test(NAME WheelSpinValidation COMMAND WheelSpinValidation)
 add_test(NAME JoltPhysicsValidation COMMAND JoltPhysicsValidation)
+add_test(NAME JoltVehicleBindingValidation COMMAND JoltVehicleBindingValidation)
+add_test(NAME PortedVehicleValidation COMMAND PortedVehicleValidation)
+add_test(NAME PortedVehicleSceneValidation COMMAND PortedVehicleSceneValidation)

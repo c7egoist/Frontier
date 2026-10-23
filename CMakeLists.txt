@@ -51,8 +51,13 @@ add_library(FrontierJoltPhysicsExtension STATIC
 target_include_directories(FrontierJoltPhysicsExtension PUBLIC "${CMAKE_SOURCE_DIR}")
 target_link_libraries(FrontierJoltPhysicsExtension PUBLIC Jolt)
 add_library(FrontierVehiclePhysics STATIC
-    Frontier/Engine/Physics/PacejkaSlipSolver.cpp
-    Frontier/Engine/Physics/WheelSpinSolver.cpp)
+    Frontier/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/Drivetrain.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/JoltVehicleBinding.cpp)
 target_include_directories(FrontierVehiclePhysics PUBLIC "${CMAKE_SOURCE_DIR}")
 target_link_libraries(FrontierVehiclePhysics PUBLIC FrontierJoltPhysicsExtension)
 include(Automation/ThorVGSoftware.cmake)

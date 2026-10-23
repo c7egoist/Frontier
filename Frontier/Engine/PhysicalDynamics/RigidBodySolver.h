@@ -163,6 +163,9 @@ public:
 
     // Interaction (dynamic bodies only)
     void                    ApplyImpulse(RigidBodyIdentity Identity, const Vector3& ImpulseNewtonSeconds) noexcept;
+    void                    ApplyForceAtPoint(RigidBodyIdentity Identity, const Vector3& ForceNewtons,
+                                              const Vector3& WorldPoint) noexcept;
+    void                    ApplyTorque(RigidBodyIdentity Identity, const Vector3& TorqueNewtonMetres) noexcept;
     void                    AssignLinearVelocity(RigidBodyIdentity Identity, const Vector3& Velocity) noexcept;
     void                    Teleport(RigidBodyIdentity Identity, const Vector3& Position, const Quaternion& Orientation) noexcept;
     void                    MoveKinematic(RigidBodyIdentity Identity, const Vector3& Position, const Quaternion& Orientation, float Δτ) noexcept;
@@ -170,6 +173,11 @@ public:
 
     // Readback
     [[nodiscard]] bool      QueryPose(RigidBodyIdentity Identity, RigidBodyPose& Pose) const noexcept;
+    // Narrow-phase ray query used by ground-contact models. Direction is normalized internally; outputs include the
+    // hit body's Jolt friction coefficient so tyre-road materials can be paired at the contact patch.
+    [[nodiscard]] bool      QuerySurface(const Vector3& RayOrigin, const Vector3& RayDirection, float MaxDistance,
+                                         RigidBodyIdentity IgnoreBody, Vector3& SurfacePoint,
+                                         Vector3& SurfaceNormal, float& Friction) const noexcept;
     void                    QueryPoses(std::vector<RigidBodyPose>& Poses) const noexcept;     // every resident body, creation order
     [[nodiscard]] const std::string& QueryName(RigidBodyIdentity Identity) const noexcept;
     [[nodiscard]] const RigidBodyMetrics& QueryMetrics() const noexcept { return Metrics; }

@@ -101,16 +101,19 @@ delta · 🟡 cosmetic/process. Cross-refs: plan `Docs/VehicleHmiEnginePlan.md` 
 5. 🟠 GI/filter cores are single-channel (luminance); RGB = same recurrences per channel.
 6. 🟠 Atmosphere/cloud models (Phase 6) are canonical Earth models (Bruneton/Hillaire
    constants), not read from the demo's Atmosphere* shaders — parameter parity unknown.
-7. Phase 7 was explicitly opened by the owner on 2026-10-23; authorized source is
-   `SultanAladin/Frontier-` @ `3382938`. The exact C++ `Engine/PhysicalDynamics/RigidBodySolver.{h,cpp}` is a
-   generic Jolt body world, not a vehicle drivetrain/suspension solver. It has been ported to
-   `Frontier/Engine/PhysicalDynamics/` and built against the reference lock's exact Jolt 5.3.0 pin (URL+SHA-256).
-   CTest passes 3/3, including the native body lifecycle/fixed-step/contact validation. The earlier MF6.1,
-   transient-slip, and wheel-spin standalone code was derived from previous-project JavaScript, so it is provisional
-   and not being used as the ControlVehicle source of truth. Inspection of all C++ paths in the supplied branch found
-   no Project-Drive vehicle solver/specification files; do not replace them with VehicleHmiPrototype HTML/JS physics.
-   Awaiting the correct C++ vehicle-source location before drivetrain, suspension, tyre coupling, or related materials
-   are ported.
+7. Phase 7 was explicitly opened by the owner on 2026-10-23. The generic Jolt world from
+   `SultanAladin/Frontier-` has been ported under `Frontier/Engine/PhysicalDynamics/` and remains pinned to the
+   owner-reference Jolt 5.3.0 revision. A full branch-head scan found the latest complete native vehicle source in
+   `SultanAladin/Frontier-` branch `arena/215a6f39-frontier` at `f2cfc57` (2026-10-14 18:32:41 UTC); the latest
+   vehicle-source change in that history is `f1f0d72` (tyre deformation/pressure integration). No newer matching
+   source was found in the other three owner-specified repositories. The C++ drivetrain, suspension, tyre, thermal,
+   braking/ABS, aero and ControlVehicle geometry model has been ported to `Frontier/Engine/PhysicalDynamics/Vehicle/`.
+   `JoltVehicleBinding` now applies vehicle forces to a Jolt chassis; Jolt narrow-phase surface queries return contact
+   normals and collision-body friction for the tyre material pairing. Physical tyre/road coefficients are kept distinct
+   from the existing PBR `performance-rubber.material`. Standalone CTest passes 6/6, including a Jolt vehicle run with
+   four tyre contacts and chassis acceleration. The older JS-derived standalone slices remain provisional and are not
+   used as the ControlVehicle source of truth. Project-Drive scene/render asset transfer and Windows/MSVC application
+   build are still outstanding; no HTML/JS vehicle physics is used or compared with Jolt.
 8. 🟡 D9 Glinty flake replacement approved but deferred until TextureWorkspace stabilises.
 9. 🟡 Cabin HMI may depend on a Slate SDK (`SlateCabinLayout/Fittings.js` vs this repo's
    Slate upstream) — Phase 0 open question, needs owner clarification before Phase 8.
