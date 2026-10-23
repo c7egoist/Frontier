@@ -1,9 +1,9 @@
-# Vehicle Physics — Pacejka MF6.1 slice
+# Vehicle Physics — portable tyre and wheel slices
 
-First Phase 7 deliverable: a portable, headless pure-slip and combined-slip tyre-force core, ported from the
-owner-authorized previous project **`SultanAladin/Frontier-` @ `3382938`**. The specific reference files are
-`Experimental/VehicleHmiPrototype/Source/TyreSlipSolver.js` and `VehicleSpecification.js`. Neither the reference JS nor
-unrelated VehicleHMI demo JS is copied into this checkout.
+Phase 7 portable physics components are being ported from the owner-authorized previous project
+**`SultanAladin/Frontier-` @ `3382938`**. References include
+`Experimental/VehicleHmiPrototype/Source/TyreSlipSolver.js`, `VehicleSolver.js`, and `VehicleSpecification.js`.
+Neither the reference JS nor unrelated VehicleHMI demo JS is copied into this checkout.
 
 ## Implemented
 
@@ -13,9 +13,11 @@ unrelated VehicleHMI demo JS is copied into this checkout.
 - Load-scaled longitudinal/lateral relaxation lengths, including the reference 5% lower load-ratio floor.
 - Backward-Euler transient-slip integration from the reference `VehicleSolver.js`, with source clamps `κ ∈ [-1.5, 1.5]` and `α ∈ [-1.3, 1.3]`; nonpositive timesteps preserve the input coordinates.
 - Default parameter sheet from the previous project's `PacejkaParameters` (GRIT FTireSpecSheet coefficients).
+- `WheelSpinSolver` integrates drive torque, loaded-contact tyre reaction and pressure-sensitive rolling resistance,
+  applies brake torque with the source's no-reverse-through-zero rule, then advances wheel angle.
 
-The implementation is isolated under `Frontier/Engine/Physics/`; no vehicle integration or Jolt API leaks into the
-portable tyre mathematics.
+These portable components are isolated under `Frontier/Engine/Physics/`; no vehicle integration or Jolt API leaks into
+the tyre or wheel mathematics.
 
 ## Reproduction and verification
 
@@ -23,24 +25,29 @@ portable tyre mathematics.
 g++ -std=c++17 -O2 -Wall -Wextra -Werror -I Frontier \
   Exhibits/VehiclePhysics/PacejkaSlipValidation.cpp \
   Frontier/Engine/Physics/PacejkaSlipSolver.cpp \
-  -o /tmp/PacejkaSlipValidation
-/tmp/PacejkaSlipValidation
+  -o /tmp/PacejkaSlipValidation && /tmp/PacejkaSlipValidation
+
+g++ -std=c++17 -O2 -Wall -Wextra -Werror -I Frontier \
+  Exhibits/VehiclePhysics/WheelSpinValidation.cpp \
+  Frontier/Engine/Physics/WheelSpinSolver.cpp \
+  -o /tmp/WheelSpinValidation && /tmp/WheelSpinValidation
 ```
 
-Result: **94 checks, 0 failed**. Thirteen slip/load/camber tuples were evaluated by the original JS source at
-reference commit `3382938`; C++ pure Fx, pure Fy, combined Fx/Fy, plus four-load relaxation lengths agree to relative
-tolerance `2e-12` (absolute floor `1e-8`). Ten transient-slip cases exercise the reference backward-Euler equations
-across forward/reverse speeds, loads, and timesteps; additional tests cover source clamps, zero timestep, boundedness,
-and convergence to the steady ODE solution. GCC 12.2.0, C++17, `-Wall -Wextra -Werror` is clean. Golden outputs were
-generated with Node.js v22.22.3.
+Results: `Pacejka MF6.1 validation: 94 checks, 0 failed`; `Wheel spin validation: 25 checks, 0 failed`.
+Thirteen tyre slip/load/camber tuples and four relaxation loads were compared to JS outputs; ten transient-slip
+cases cover forward/reverse motion, loading and timesteps, with clamp, boundedness and steady-state checks. Eleven
+wheel-spin tuples differentially cover drive, braking, tyre reaction, pressure-dependent rolling resistance, contact,
+shredded tyres, reverse rotation, and JavaScript-compatible signed angle wrapping. GCC C++17 `-Wall -Wextra -Werror`
+passes; oracle values were generated using Node.js v22.22.3.
 
-CMake target: `PacejkaSlipValidation` in this directory. CMake was not available in the sandbox, so the exact target
-sources were compiled directly with g++ as above.
+CMake targets and CTest entries: `PacejkaSlipValidation` and `WheelSpinValidation`. CMake is not installed in the
+sandbox, so both targets are compiled directly with g++ as shown.
 
 ## Phase 7 boundary
 
-This remains **not** a vehicle simulation or Jolt integration. Still outstanding: contact/load/suspension, wheel angular
-integration, powertrain/brakes/aero, vehicle stability port of `VehicleStability.mjs`, Jolt native world/body lifecycle/
-contact validation, and the Windows SDK build. The authorized
+This remains **not** a vehicle simulation or Jolt integration. Still outstanding: contact/load/suspension coupling,
+vehicle-level powertrain/brakes/aero, stability port of `VehicleStability.mjs`, Jolt native world/body lifecycle/contact
+validation, and the Windows SDK build. This wheel component integrates supplied drive/brake torques; it does not
+implement the transmission, differential, or vehicle controls. The authorized
 previous project's `JoltWorld.js` uses Jolt 1.1.0 WASM; this repository currently has no native Jolt dependency or C++
 build target. No dependency was silently vendored and no native/Jolt result is claimed. Phase 8 remains deferred.

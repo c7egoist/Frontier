@@ -7,5 +7,12 @@ add_executable(PacejkaSlipValidation
     PacejkaSlipValidation.cpp
     ${FRONTIER_ROOT}/Engine/Physics/PacejkaSlipSolver.cpp)
 target_include_directories(PacejkaSlipValidation PRIVATE ${FRONTIER_ROOT})
+
+add_executable(WheelSpinValidation
+    WheelSpinValidation.cpp
+    ${FRONTIER_ROOT}/Engine/Physics/WheelSpinSolver.cpp)
+target_include_directories(WheelSpinValidation PRIVATE ${FRONTIER_ROOT})
+
 enable_testing()
 add_test(NAME PacejkaSlipValidation COMMAND PacejkaSlipValidation)
+add_test(NAME WheelSpinValidation COMMAND WheelSpinValidation)
