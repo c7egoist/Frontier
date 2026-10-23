@@ -6,8 +6,8 @@ C++ / Vulkan / Slang engine project, opened through the Project Browser. First d
 Status: ✔️ approved by owner 2026-10-22 — recommendations D1–D5 and D7 stand (D7 revisitable on request).
 Phase 1 (Log Stream C++ port) landed the same day: portable engine + panel + Project Zero, validated
 headlessly; the windowed SDK build is the remaining half (§16).
-D6 is deferred to the owner's full physics reference; D8 approved the same day, with coloured user
-categories + a user logging API folded into §11. 🔴 Phase 7 is gated on that reference (§9).
+D6 was deferred until the owner supplied the full physics reference; that reference was approved and Phase 7 opened
+on 2026-10-23 (§9). D8 approved the same day, with coloured user categories + a user logging API folded into §11.
 
 ## TL;DR
 
@@ -483,7 +483,7 @@ WriteLog(FoliageCategory, LogSeverity::Info, "Leaf cluster detached · %d leaves
 | 4 🚧  | Virtualized geometry: `ClusterNesting`, cull, HiZ, visibility resolve — **portable core landed 2026-10-22**: `Engine/Rendering/ClusterNesting` (median-split nesting, enclosing bounds, sphere-tree monotone error, screen-space-error cut) + `VisibilityCull` (frustum, max-depth HiZ pyramid, conservative occlusion), proven on procedural corpora (`Exhibits/GeometryPipeline` 57/57: exactly-once cuts, monotone error/refinement, zero false-negative culls); Slang/GPU bodies + simplification DAG + demo corpus parity at the SDK phase | portable invariants ✔️ · demo `GeometryHierarchy` corpus images matched (SDK phase) |
 | 5 🚧  | ReSTIR chain + SVGF; distance-field + card GI — **chain portable core landed 2026-10-22**: `DeterministicRandom` (PCG32), `DiscrepancySequence`, `ReservoirSampling` (WRS/RIS + M-clamped temporal + Jacobian-factored spatial combines), `VarianceFiltering` (SVGF moments + à-trous + joint upsample), `IlluminationUnits` (§8.2 chain declared: resolves in order, ping-pongs off-atlas, 32 barriers), proven against analytic oracles (`Exhibits/IlluminationChain` 55/55: perfect-target RIS exactly zero-variance; reuse unbiased within 5σ; 256-receiver scene RMSE 0.385 vs naive 3.86; SVGF RMSE 12× down, edge 97% retained). **Distance-field + card GI portable core also landed**: `Rendering/DistanceField` (analytic SDF union, sphere tracing, baked records, AO, hemisphere indirect) + `Rendering/SurfaceCards` (texel radiosity, regularised form factors, DF visibility), declared as the indirect prelude in `IlluminationUnits` and proven in `Exhibits/IndirectIllumination` (60/60); Slang/GPU bodies + golden images remain | portable oracles ✔️ · golden-image parity vs demo captures (SDK phase) |
 | 6 🚧  | Environment: atmosphere, celestial, clouds, fog, flare, precipitation, lightning (visual) — **portable cores landed 2026-10-22**: `AtmosphereModel` (Rayleigh/Mie/ozone, transmittance LUT, single + approximated multiple scattering), `CelestialModel` (solar position, twilight, lunar phase, deterministic stars), `FogMedium` (analytic height-fog integral), `CloudField` (integer-hash density + Beer-Lambert march with sun shadow march), `WeatherEffects` (wrap-exact precipitation, midpoint-displacement lightning), `LensFlareModel`, `EnvironmentUnits` declaration — proven in `Exhibits/EnvironmentPipeline` (73/73; vertical transmittance matches analytic optical depths to 4 decimals, Benoni solar-noon identity, uniform-slab march exactly Beer-Lambert). Slang bodies + per-family demo captures remain SDK-phase | portable oracles ✔️ · per-family captures vs demo (SDK phase) |
-| 7 🚧  | **In progress (owner called phase 2026-10-23):** reference = previous project `Frontier-` @3382938. First slice landed: `Frontier/Engine/Physics/PacejkaSlipSolver` pure/combined MF6.1 forces + relaxation-length laws, proven against 13 source-JS input tuples and four load oracles (`Exhibits/VehiclePhysics`, 67/67). Remaining: transient slip, wheel/contact/suspension, powertrain/brakes/aero/vehicle stability port, Jolt native world/body/contact bridge, then full `VehicleStability.mjs`-class C++ regression | first tyre-force oracle slice ✔️ · 🚧 complete vehicle/Jolt + stability suite |
+| 7 🚧  | **In progress (owner called phase 2026-10-23):** reference = previous project `Frontier-` @3382938. `Frontier/Engine/Physics/PacejkaSlipSolver` now ports MF6.1 pure/combined forces, relaxation-length laws, and backward-Euler transient-slip dynamics with source clamps; 94/94 checks pass, including 10 differential slip tuples and bounded/convergent integration. Remaining: wheel/contact/suspension, powertrain/brakes/aero/vehicle stability port, Jolt native world/body/contact bridge, then full `VehicleStability.mjs`-class C++ regression | tyre force + transient-slip slices ✔️ · 🚧 complete vehicle/Jolt + stability suite |
 | 8 ⏸️  | **Deferred per owner (2026-10-22):** cabin HMI screens, plume/fire/sparks, particle workspace. Do not start until explicitly reactivated. | owner reactivates phase |
 | 9     | Shipping configuration audit: every `#ifdef` row of §5 verified; 1:1 contract closed (every row Ported or Approved-removal) | shipping binary contains no editor machinery (symbol/size report) |
 
@@ -504,11 +504,11 @@ approval. This checkout's `networking-windows.yml` trigger set must be inspected
 | D8 | Log Stream HTML as designed this turn                    | approve → Phase 1 converts it first ✔️ / revise design 🚩 | approve        |
 | D9 | Flake model for M6 glints (§11/MaterialAndFlakesReport)    | replace cell-search flakes with Glinty constant-time NDF ✔️ (owner-directed 2026-10-22, deferred until TextureWorkspace stabilises) / keep current flakes 🚩 | Glinty, deferred |
 
-Owner verdict, 2026-10-22: plan approved. D1–D5 and D7 stand as recommended. D6 is deferred to the owner's
-full physics reference at the Phase 7 gate (§9). D8 approved the same day after the owner viewed the
-corrected preview (the first attempt had landed on the copied demo shell). Two owner additions are
-folded into §11: coloured user categories and the user
-logging API. The expandable-row detail already present was confirmed sufficient — no dropdown-card variant.
+Owner verdict, 2026-10-22: plan approved. D1–D5 and D7 stand as recommended. D6 was initially deferred pending
+the owner's full physics reference; the reference was supplied and approved on 2026-10-23, opening Phase 7 (§9).
+D8 was approved the same day after the owner viewed the corrected preview (the first attempt had landed on the copied
+demo shell). Two owner additions are folded into §11: coloured user categories and the user logging API. The
+expandable-row detail already present was confirmed sufficient — no dropdown-card variant.
 
 ## 15. Risks and unverified items — stated, not hidden
 
@@ -527,7 +527,7 @@ logging API. The expandable-row detail already present was confirmed sufficient 
 
 | Item                                                                 | Verification                                            | Status |
 |----------------------------------------------------------------------|---------------------------------------------------------|--------|
-| Phase 7 first slice: `Frontier/Engine/Physics/PacejkaSlipSolver` | `Exhibits/VehiclePhysics` 67/67 vs `Frontier-` @3382938 JavaScript MF6.1: 13 combined slip/load/camber cases (pure Fx/Fy + combined Fx/Fy), 4 load-dependent relaxation pairs, zero-load + clamp limits; GCC C++17 `-Wall -Wextra -Werror` | 🟢 portable tyre force · 🚧 vehicle dynamics/Jolt |
+| Phase 7 tyre slices: `Frontier/Engine/Physics/PacejkaSlipSolver` | `Exhibits/VehiclePhysics` 94/94: MF6.1 pure/combined force oracles, load-scaled relaxation, 10 backward-Euler transient-slip differentials, source clamps, boundedness and steady-state convergence; GCC C++17 `-Wall -Wextra -Werror` | 🟢 portable tyre force + transient slip · 🚧 vehicle dynamics/Jolt |
 | Complete portable render pipeline: `CompleteFrameUnits` + `ReferenceRenderer` | one 38-unit declaration resolves, 77 barriers derive, 54% atlas saving; stages execute through display encoding; 18/18 deterministic + closed-form BRDF checks; upstream GGX/Smith/Schlick one-stratum PBR is carried into RIS target and direct shading; capture at `Exhibits/CompleteRenderer/Capture/reference-frame.png` | 🟢 CPU reference · 🚧 Vulkan/OS window |
 | Phase 8 visual add-ons (cabin HMI, plume/fire/sparks, particle workspace) | explicitly deferred by owner 2026-10-22; untouched | ⏸️ |
 
@@ -578,5 +578,5 @@ Phase 0 is complete; Phase 3's portable half is complete. Remaining, in order
 (owner-resequenced 2026-10-22: infrastructure first): Phase 1+3 SDK build (Windows capture
 beside the approved HTML + spinning cube through the resolved order on screen) → Phase 2 kit
 → Phase 4 virtualized geometry on this core. The TextureWorkspace fix phase (complaint report above) runs
-when the owner calls it; Glinty (D9) follows it. Phase 7 is now active: the pure/combined MF6.1 tyre-force core is the first landed slice;
-vehicle integration and native Jolt remain the next work.
+when the owner calls it; Glinty (D9) follows it. Phase 7 is active: the pure/combined MF6.1 force core and transient-slip
+integration are implemented and validated; vehicle dynamics, stability, and native Jolt remain outstanding.

@@ -186,4 +186,31 @@ TyreRelaxationLengths PacejkaSlipSolver::ResolveRelaxationLengths(double Fz) con
                 std::pow(Ratio, Parameters_.RelaxationLoadExponentLateral)};
 }
 
+TyreSlipCoordinates PacejkaSlipSolver::IntegrateTransientSlip(
+    TyreSlipCoordinates Current,
+    double LongitudinalVelocity,
+    double LateralVelocity,
+    double WheelAngularVelocity,
+    double RollingRadius,
+    double Fz,
+    double Timestep) const noexcept
+{
+    if (Timestep <= 0.0)
+    {
+        return Current;
+    }
+
+    const TyreRelaxationLengths Lengths = ResolveRelaxationLengths(Fz);
+    const double SlipSpeed = LongitudinalVelocity - WheelAngularVelocity * RollingRadius;
+    const double LongitudinalRate = Timestep / Lengths.Longitudinal;
+    const double LateralRate = Timestep / Lengths.Lateral;
+
+    return {Clamp((Current.Kappa - SlipSpeed * LongitudinalRate) /
+                      (1.0 + std::abs(LongitudinalVelocity) * LongitudinalRate),
+                  -1.5, 1.5),
+            Clamp((Current.Alpha - LateralVelocity * LateralRate) /
+                      (1.0 + std::abs(LongitudinalVelocity) * LateralRate),
+                  -1.3, 1.3)};
+}
+
 } // namespace Frontier

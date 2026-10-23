@@ -11,6 +11,7 @@ unrelated VehicleHMI demo JS is copied into this checkout.
 - Lateral MF6.1 force `Fy(α, γ, Fz)` with `α ∈ [-1.3, 1.3]` rad and camber thrust/shift.
 - Combined-slip cosine weighting `Gxα`, `Gyκ`, and lateral `SVyκ`, using normalized pure-slip stiffnesses.
 - Load-scaled longitudinal/lateral relaxation lengths, including the reference 5% lower load-ratio floor.
+- Backward-Euler transient-slip integration from the reference `VehicleSolver.js`, with source clamps `κ ∈ [-1.5, 1.5]` and `α ∈ [-1.3, 1.3]`; nonpositive timesteps preserve the input coordinates.
 - Default parameter sheet from the previous project's `PacejkaParameters` (GRIT FTireSpecSheet coefficients).
 
 The implementation is isolated under `Frontier/Engine/Physics/`; no vehicle integration or Jolt API leaks into the
@@ -26,18 +27,20 @@ g++ -std=c++17 -O2 -Wall -Wextra -Werror -I Frontier \
 /tmp/PacejkaSlipValidation
 ```
 
-Result: **67 checks, 0 failed**. Thirteen slip/load/camber tuples were evaluated by the original JS source at
+Result: **94 checks, 0 failed**. Thirteen slip/load/camber tuples were evaluated by the original JS source at
 reference commit `3382938`; C++ pure Fx, pure Fy, combined Fx/Fy, plus four-load relaxation lengths agree to relative
-tolerance `2e-12` (absolute floor `1e-8`). Additional checks pin zero-load handling and both slip saturation bounds.
-GCC 12.2.0, C++17, `-Wall -Wextra -Werror` is clean. Golden outputs were generated with Node.js v22.22.3.
+tolerance `2e-12` (absolute floor `1e-8`). Ten transient-slip cases exercise the reference backward-Euler equations
+across forward/reverse speeds, loads, and timesteps; additional tests cover source clamps, zero timestep, boundedness,
+and convergence to the steady ODE solution. GCC 12.2.0, C++17, `-Wall -Wextra -Werror` is clean. Golden outputs were
+generated with Node.js v22.22.3.
 
 CMake target: `PacejkaSlipValidation` in this directory. CMake was not available in the sandbox, so the exact target
 sources were compiled directly with g++ as above.
 
 ## Phase 7 boundary
 
-This is **not** a vehicle simulation or Jolt integration. Still outstanding: transient slip relaxation dynamics,
-contact/load/suspension, wheel angular integration, powertrain/brakes/aero, vehicle stability port of
-`VehicleStability.mjs`, Jolt native world/body lifecycle/contact validation, and the Windows SDK build. The authorized
+This remains **not** a vehicle simulation or Jolt integration. Still outstanding: contact/load/suspension, wheel angular
+integration, powertrain/brakes/aero, vehicle stability port of `VehicleStability.mjs`, Jolt native world/body lifecycle/
+contact validation, and the Windows SDK build. The authorized
 previous project's `JoltWorld.js` uses Jolt 1.1.0 WASM; this repository currently has no native Jolt dependency or C++
 build target. No dependency was silently vendored and no native/Jolt result is claimed. Phase 8 remains deferred.

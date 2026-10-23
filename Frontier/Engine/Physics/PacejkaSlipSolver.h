@@ -82,8 +82,14 @@ struct TyreSlipForces
 
 struct TyreRelaxationLengths
 {
-    double Longitudinal = 0.0; // [m]
-    double Lateral = 0.0;      // [m]
+    double Longitudinal = 0.0; // [m] - longitudinal relaxation length
+    double Lateral = 0.0;      // [m] - lateral relaxation length
+};
+
+struct TyreSlipCoordinates
+{
+    double Kappa = 0.0; // [-] - relaxed longitudinal slip ratio
+    double Alpha = 0.0; // [rad] - relaxed lateral slip angle
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -100,6 +106,17 @@ class PacejkaSlipSolver
     [[nodiscard]] double LateralForce(double α, double γ, double Fz) const noexcept;
     [[nodiscard]] TyreSlipForces Combine(double κ, double α, double γ, double Fz) const noexcept;
     [[nodiscard]] TyreRelaxationLengths ResolveRelaxationLengths(double Fz) const noexcept;
+
+    // Backward-Euler transient-slip integration. Speeds are [m/s], wheel speed [rad/s], radius [m],
+    // normal load [N], and timestep [s]. Nonpositive timesteps preserve the current coordinates.
+    [[nodiscard]] TyreSlipCoordinates IntegrateTransientSlip(
+        TyreSlipCoordinates Current,
+        double LongitudinalVelocity,
+        double LateralVelocity,
+        double WheelAngularVelocity,
+        double RollingRadius,
+        double Fz,
+        double Timestep) const noexcept;
 
   private:
     struct CoefficientSet

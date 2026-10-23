@@ -105,6 +105,61 @@ int main()
     AssertEquivalent(Solver.LateralForce(-2.0, 0.0, 4000.0), Solver.LateralForce(-1.3, 0.0, 4000.0),
                      "negative α saturation", 0);
 
+    // 📝 Backward-Euler slip coordinates, evaluated from the authorized VehicleSolver.js equations.
+    struct TransientOracle
+    {
+        TyreSlipCoordinates Current;
+        double LongitudinalVelocity, LateralVelocity, WheelAngularVelocity, RollingRadius, Fz, Timestep;
+        TyreSlipCoordinates Expected;
+    };
+    constexpr TransientOracle TransientOracles[] = {
+        {{0.0, 0.0}, 15.0, 0.0, 28.0, 0.50855, 4000.0, 1.0 / 480.0, {-0.020106444036974799, 0.0}},
+        {{0.08, -0.03}, 24.0, 1.2, 41.0, 0.50855, 5600.0, 1.0 / 480.0, {-0.021151271797208094, -0.039949120869700955}},
+        {{-0.12, 0.07}, -8.0, -0.8, -12.0, 0.49, 2500.0, 1.0 / 480.0, {-0.0055705281175808356, 0.079651629571208374}},
+        {{0.3, -0.25}, 35.0, 3.2, 61.0, 0.5, 8000.0, 1.0 / 240.0, {0.00036737438471535979, -0.13727148509344772}},
+        {{-0.4, 0.4}, 18.0, -5.0, 30.0, 0.46, 6200.0, 1.0 / 600.0, {-0.34231154448411139, 0.35575865151005054}},
+        {{1.4, -1.2}, 50.0, 8.0, 90.0, 0.5, 9000.0, 1.0 / 120.0, {0.10452753084059631, -0.29571570165781536}},
+        {{-1.4, 1.2}, -20.0, -7.0, -35.0, 0.5, 1000.0, 1.0 / 120.0, {-0.089744726911531264, 0.45411806212514283}},
+        {{0.01, 0.02}, 0.2, -0.1, 0.3, 0.50855, 4000.0, 1.0 / 480.0, {0.0078533278786517904, 0.024562995159388538}},
+        {{0.5, 0.8}, 12.0, 4.0, 15.0, 0.5, 0.0, 1.0 / 480.0, {-0.037616458653688810, 0.043788112816920424}},
+        {{0.2, -0.1}, 30.0, 0.0, 0.0, 0.5, 5000.0, 0.0, {0.2, -0.1}}
+    };
+    for (uint32_t Index = 0; Index < sizeof(TransientOracles) / sizeof(TransientOracles[0]); ++Index)
+    {
+        const TransientOracle& Oracle = TransientOracles[Index];
+        const TyreSlipCoordinates Updated = Solver.IntegrateTransientSlip(
+            Oracle.Current,
+            Oracle.LongitudinalVelocity,
+            Oracle.LateralVelocity,
+            Oracle.WheelAngularVelocity,
+            Oracle.RollingRadius,
+            Oracle.Fz,
+            Oracle.Timestep);
+        AssertEquivalent(Updated.Kappa, Oracle.Expected.Kappa, "transient κ", Index);
+        AssertEquivalent(Updated.Alpha, Oracle.Expected.Alpha, "transient α", Index);
+    }
+
+    const TyreSlipCoordinates PositiveClamp = Solver.IntegrateTransientSlip({10.0, 10.0}, 0.0, 0.0, 0.0, 0.5, 4000.0, 1.0);
+    const TyreSlipCoordinates NegativeClamp = Solver.IntegrateTransientSlip({-10.0, -10.0}, 0.0, 0.0, 0.0, 0.5, 4000.0, 1.0);
+    AssertEquivalent(PositiveClamp.Kappa, 1.5, "transient positive κ clamp", 0);
+    AssertEquivalent(PositiveClamp.Alpha, 1.3, "transient positive α clamp", 0);
+    AssertEquivalent(NegativeClamp.Kappa, -1.5, "transient negative κ clamp", 0);
+    AssertEquivalent(NegativeClamp.Alpha, -1.3, "transient negative α clamp", 0);
+
+    // 📝 Constant-velocity integration remains bounded and converges to the ODE's steady slip values.
+    TyreSlipCoordinates Integrated{};
+    bool RemainedBounded = true;
+    for (uint32_t Index = 0; Index < 2000; ++Index)
+    {
+        Integrated = Solver.IntegrateTransientSlip(Integrated, 20.0, 1.0, 35.0, 0.5, 4000.0, 1.0 / 240.0);
+        RemainedBounded = RemainedBounded && std::isfinite(Integrated.Kappa) && std::isfinite(Integrated.Alpha) &&
+                          Integrated.Kappa >= -1.5 && Integrated.Kappa <= 1.5 &&
+                          Integrated.Alpha >= -1.3 && Integrated.Alpha <= 1.3;
+    }
+    AssertCondition(RemainedBounded, "transient integration remains finite and inside source clamps");
+    AssertEquivalent(Integrated.Kappa, -0.125, "transient longitudinal steady solution", 0);
+    AssertEquivalent(Integrated.Alpha, -0.05, "transient lateral steady solution", 0);
+
     std::printf("Pacejka MF6.1 validation: %u checks, %u failed\n", Checks, Failures);
     return Failures == 0 ? 0 : 1;
 }

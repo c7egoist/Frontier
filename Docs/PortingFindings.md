@@ -103,9 +103,11 @@ delta · 🟡 cosmetic/process. Cross-refs: plan `Docs/VehicleHmiEnginePlan.md` 
    constants), not read from the demo's Atmosphere* shaders — parameter parity unknown.
 7. Phase 7 was explicitly opened by the owner on 2026-10-23; authorized source is
    `SultanAladin/Frontier-` @ `3382938`. D6 resolves to custom per-wheel contact/tyre
-   forces with Jolt for rigid integration. The first MF6.1 pure/combined-slip C++ core
-   matches 13 source-JS tuples and four relaxation-load oracles (67 checks); full vehicle
-   dynamics, transient relaxation, native Jolt and stability validation remain open.
+   forces with Jolt for rigid integration. The MF6.1 pure/combined-slip and load-scaled relaxation C++ core
+   matches 13 source-JS tuples and four load oracles; transient slip ports VehicleSolver.js backward-Euler
+   updates and source clamps. The exhibit now passes 94 strict C++ checks, including differential transient
+   cases and bounded/convergent integration. Full vehicle dynamics, native Jolt and vehicle-level stability
+   validation remain open.
 8. 🟡 D9 Glinty flake replacement approved but deferred until TextureWorkspace stabilises.
 9. 🟡 Cabin HMI may depend on a Slate SDK (`SlateCabinLayout/Fittings.js` vs this repo's
    Slate upstream) — Phase 0 open question, needs owner clarification before Phase 8.
