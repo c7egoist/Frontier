@@ -54,7 +54,11 @@ add_library(FrontierVehiclePhysics STATIC
     Frontier/Engine/PhysicalDynamics/Vehicle/Aerodynamics.cpp
     Frontier/Engine/PhysicalDynamics/Vehicle/Drivetrain.cpp
     Frontier/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/PacejkaTyreModel.cpp
     Frontier/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/TyreModelRegistry.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/XpbdTyreSpring.cpp
+    Frontier/Engine/PhysicalDynamics/Vehicle/TyreFEMSolver.cpp
     Frontier/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp
     Frontier/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp
     Frontier/Engine/PhysicalDynamics/Vehicle/JoltVehicleBinding.cpp

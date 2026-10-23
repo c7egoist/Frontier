@@ -8,6 +8,19 @@ add_executable(PacejkaSlipValidation
     ${FRONTIER_ROOT}/Engine/Physics/PacejkaSlipSolver.cpp)
 target_include_directories(PacejkaSlipValidation PRIVATE ${FRONTIER_ROOT})
 
+# Headless modular-tyre-model validation: pure C++, no Jolt. Builds on any host.
+add_executable(TyreModelValidation
+    TyreModelValidation.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/TyreModelRegistry.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/XpbdTyreSpring.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/TyreFEMSolver.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/PacejkaTyreModel.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/TyreSlipDynamics.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/PacejkaMagicFormula.cpp)
+target_include_directories(TyreModelValidation PRIVATE
+    ${FRONTIER_ROOT} ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle)
+add_test(NAME TyreModelValidation COMMAND TyreModelValidation)
+
 add_executable(WheelSpinValidation
     WheelSpinValidation.cpp
     ${FRONTIER_ROOT}/Engine/Physics/WheelSpinSolver.cpp)

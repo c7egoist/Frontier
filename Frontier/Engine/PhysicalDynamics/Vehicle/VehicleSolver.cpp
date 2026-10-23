@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <vector>
 
 
@@ -107,6 +108,13 @@ void VehicleSolver::Build(const VehicleSolverConfiguration& config, const Hooks&
         }
     }
     CurrentTelemetry.WheelCount = static_cast<uint32_t>(Wheels.size());
+
+    // One modular tyre model per wheel, all sharing the selected kind. Pacejka keeps the existing
+    //   StepPacejka path; XPBD spring and 3-D FEM run through StepModular.
+    TyreModels.clear();
+    TyreModels.reserve(Wheels.size());
+    for (size_t i = 0; i < Wheels.size(); ++i)
+        TyreModels.push_back(CreateTyreModel(ActiveConfiguration.TyreModel));
 
     CurrentTelemetry.Chassis = initial;
     CurrentTelemetry.EngineRPM = ActiveConfiguration.Engine.IdleRPM;
@@ -236,8 +244,13 @@ void VehicleSolver::Step(float Δτ) noexcept
     PreviousChassisVelocity = Chassis.LinearVelocity;
     PreviousChassisStep = true;
     for (size_t Wheel = 0u; Wheel < StrutBarForces.size(); ++Wheel) StrutBarForces[Wheel] = AntiRollForce(Wheel);
-    if (ActiveConfiguration.ActiveScheme == DrivingScheme::PacejkaDrivetrain) StepPacejka(Δτ);
-    else                                                  StepSimple(Δτ);
+    if (ActiveConfiguration.TyreModel == TyreModelKind::Pacejka)
+    {
+        if (ActiveConfiguration.ActiveScheme == DrivingScheme::PacejkaDrivetrain) StepPacejka(Δτ);
+        else                                                  StepSimple(Δτ);
+    }
+    else
+        StepModular(Δτ);  // modular tyre model (XPBD spring / 3-D FEM)
     IntegrateConditions(Δτ);
 }
 
@@ -1069,6 +1082,155 @@ void VehicleSolver::CorrectAttachments(const Vec3& BeforePosition,
             CurrentTelemetry.Wheels[Corner].HubPosition = Tyre.HubPosition();
             CurrentTelemetry.Wheels[Corner].HubRotation = Tyre.HubRotation();
         }
+    }
+}
+
+//------------------------------------------------------------------------------------------------------------------------
+// StepModular — modular tyre model path (XPBD spring / 3-D FEM)
+//------------------------------------------------------------------------------------------------------------------------
+//   Same hub-motion + contact-fan pre-pass as the other layers, but the in-plane and vertical forces come from a
+//   TyreModel (Pacejka / XPBD spring / 3-D FEM) rather than the hard-coded Pacejka+powertrain stack. This is what
+//   makes a tyre model usable with any component: the solver only supplies TyreModelInputs and applies the
+//   returned forces/moments at the patch.
+//
+//   Frame note: TyreModelOutputs are wheel-frame (Fx forward, Fy lateral, Fz down into the road); the road's
+//   reaction on the chassis is Forward·Fx + Lateral·Fy + Normal·Fz applied at the patch, plus SpinTorqueNm about
+//   the axle.
+void VehicleSolver::StepModular(float Δτ) noexcept
+{
+    if (!ConstructionComplete || Δτ <= 0.0f) return;
+    const ChassisState cs = ChassisHooks.ReadChassis();
+    ChassisAcceleration = PreviousChassisStep
+        ? (cs.LinearVelocity - PreviousChassisVelocity) * (1.0f / Δτ) : ActiveConfiguration.Gravity;
+    PreviousChassisVelocity = cs.LinearVelocity;
+    PreviousChassisStep = true;
+
+    const Vec3 up = cs.Orientation.Rotate({0.0f, 0.0f, 1.0f});
+
+    // First-order steer smoothing toward the commanded lock.
+    const float targetSteer = Clamp(DriverCommand.Steer, -1.0f, 1.0f) * ActiveConfiguration.MaxSteerAngleRad;
+    const float steerBlend = std::min(1.0f, Δτ * ActiveConfiguration.SteerRatePerSecond);
+    SteerAngle += (targetSteer - SteerAngle) * steerBlend;
+
+    CurrentTelemetry.Chassis = cs;
+    CurrentTelemetry.SpeedMetresPerSecond = cs.LinearVelocity.Length();
+    CurrentTelemetry.ForwardSpeed = Dot(cs.LinearVelocity, cs.Orientation.Rotate({1.0f, 0.0f, 0.0f}));
+    CurrentTelemetry.TotalVerticalLoad = 0.0f;
+    CurrentTelemetry.WheelsInContact = 0u;
+
+    // Pre-pass: hub motions, then the contact fan for every wheel.
+    std::vector<HubMotion> Motions(Wheels.size());
+    for (size_t i = 0; i < Wheels.size(); ++i)
+    {
+        const WheelMount& wheel = ActiveConfiguration.Wheels[i];
+        const Vec3 hub = cs.Position + cs.Orientation.Rotate(wheel.LocalOffset);
+        const Quat steerQ = wheel.Steered ? Quat::AxisAngle(up, SteerAngle) : Quat{0, 0, 0, 1};
+        const Quat hubRot = QuatNormalize(QuatMul(steerQ, cs.Orientation));
+        const Vec3 r = hub - cs.Position;
+        const Vec3 hubVel = cs.LinearVelocity + Cross(cs.AngularVelocity, r);
+        HubMotion& motion = Motions[i];
+        motion.Position = hub + hubVel * Δτ;
+        const float AngularSpeed = cs.AngularVelocity.Length();
+        const Quat BearingIncrement = AngularSpeed > 1.0e-8f
+            ? Quat::AxisAngle(cs.AngularVelocity * (1.0f / AngularSpeed), AngularSpeed * Δτ) : Quat{};
+        motion.Orientation = (BearingIncrement * hubRot).Normalized();
+        motion.AngularVelocity = cs.AngularVelocity;
+        motion.LinearVelocity = hubVel;
+        motion.SpinRate = WheelSpin[i];
+    }
+    std::vector<TyreReaction> TraceReactions;
+    AdvanceTyreContact(Motions, Δτ, TraceReactions);
+
+    for (size_t i = 0; i < Wheels.size(); ++i)
+    {
+        const WheelMount& wheel = ActiveConfiguration.Wheels[i];
+        RigidWheel& tyre = Wheels[i];
+        const Vec3 hub = cs.Position + cs.Orientation.Rotate(wheel.LocalOffset);
+        const Quat steerQ = wheel.Steered ? Quat::AxisAngle(up, SteerAngle) : Quat{0, 0, 0, 1};
+        const Quat hubRot = QuatNormalize(QuatMul(steerQ, cs.Orientation));
+        const Vec3 r = hub - cs.Position;
+        const Vec3 hubVel = cs.LinearVelocity + Cross(cs.AngularVelocity, r);
+
+        const TyreReaction& reaction = TraceReactions[i];
+        const float FzContact = reaction.SupportReaction.Length();
+        const bool onGnd = reaction.ContactCount > 0u && FzContact > 1.0f;
+        const Vec3 patch = onGnd ? reaction.PatchCentre : Vec3{hub.x, hub.y, hub.z - ActiveConfiguration.Tyre.Radius};
+        const Vec3 ContactNormal = reaction.SupportReaction.Length() > 1.0f ? reaction.SupportReaction.Normalized() : up;
+
+        // Wheel-frame axes (with steer/camber).
+        const Vec3 RawForward = hubRot.Rotate({1.0f, 0.0f, 0.0f});
+        const Vec3 wf = (RawForward - ContactNormal * Dot(RawForward, ContactNormal)).Normalized();
+        const Vec3 wl = Cross(ContactNormal, wf).Normalized();
+
+        // Road friction at the patch (geometric-mean pairing with the tyre coefficient happens inside models).
+        float RoadFriction = 1.0f;
+        if (ChassisHooks.RoadFrictionAt) RoadFriction = ChassisHooks.RoadFrictionAt(patch);
+
+        // The TyreModel seam consumes a TraceContactReading; AdvanceTyreContact only kept the TyreReaction, so
+        //   rebuild the reading here. Rate is unavailable from the reaction (the contact reader owns it).
+        TraceContactReading Reading{};
+        Reading.Reaction = reaction;
+        Reading.Normal = ContactNormal;
+        Reading.Deflection = reaction.Deflection;
+        Reading.Rate = 0.0f;
+        Reading.HitCount = reaction.ContactCount;
+        Reading.SampleCount = reaction.ContactCount;
+
+        // Tyre-model inputs. The model owns force generation from kinematics + contact; the drivetrain's spin
+        //   demand is wired as AppliedSpinTorqueNm once a drivetrain is coupled to a modular tyre (follow-up).
+        TyreModelInputs Inputs{};
+        Inputs.HubPosition = hub;
+        Inputs.HubRotation = hubRot;
+        Inputs.HubLinearVelocity = hubVel;
+        Inputs.HubAngularVelocity = cs.AngularVelocity;
+        Inputs.SpinRate = WheelSpin[i];
+        Inputs.Tyre = &ActiveConfiguration.Tyre;
+        Inputs.Contact = &Reading;
+        Inputs.Ground = ChassisHooks.Ground;          // per-node query for the 3-D FEM model
+        Inputs.DeltaTau = Δτ;
+        Inputs.RoadFriction = RoadFriction;
+        Inputs.CamberRad = 0.0f;                      // carried in hubRot; convenience field
+        Inputs.SteerRad = wheel.Steered ? SteerAngle : 0.0f;
+        Inputs.AppliedSpinTorqueNm = 0.0f;            // drivetrain coupling to modular tyres: follow-up
+
+        const TyreModelOutputs Out = TyreModels[i]->Step(Inputs);
+
+        // Convert wheel-frame outputs to a world force at the patch and a spin torque about the axle.
+        //   Fz is down into the road, so the road pushes the chassis up along the contact normal.
+        const Vec3 WorldForce = wf * Out.Fx + wl * Out.Fy + ContactNormal * Out.Fz;
+        ChassisHooks.ApplyForceAtPoint(WorldForce, patch);
+
+        const Vec3 AxleWorld = hubRot.Rotate({0.0f, 1.0f, 0.0f});
+        if (ChassisHooks.ApplyTorque) ChassisHooks.ApplyTorque(AxleWorld * Out.SpinTorqueNm);
+
+        // Integrate wheel spin from the tyre's reaction torque (Iw·ω̇ = τ), so driven/braked wheels spin down/up.
+        const float Iw = std::max(0.05f, ActiveConfiguration.WheelInertia);
+        WheelSpin[i] += (Out.SpinTorqueNm / Iw) * Δτ;
+
+        // Telemetry.
+        WheelTelemetry& wt = CurrentTelemetry.Wheels[std::min<size_t>(i, CurrentTelemetry.Wheels.size() - 1)];
+        wt.HubPosition = hub;
+        wt.HubRotation = hubRot;
+        wt.SpinAngle = tyre.CarcassAngle();
+        wt.ContactNormal = Out.ContactNormal;
+        wt.TyreDeflection = Out.Deflection;
+        wt.ContactPoint = patch;
+        wt.ContactVelocity = hubVel;
+        wt.SlipVelocity = wl * Out.SlipAngleRad * std::max(Dot(cs.LinearVelocity, wf), 0.0f);
+        wt.VerticalLoad = Out.Fz;
+        wt.LongitudinalForce = Out.Fx;
+        wt.LateralForce = Out.Fy;
+        wt.SlipRatio = Out.SlipRatio;
+        wt.SlipAngleRad = Out.SlipAngleRad;
+        wt.SteerAngleRad = wheel.Steered ? SteerAngle : 0.0f;
+        wt.ContactCount = Out.ContactCount;
+        wt.InContact = Out.InContact;
+        wt.WheelOmega = WheelSpin[i];
+        wt.RimForce = reaction.RimForce;
+        wt.NormalReaction = reaction.NormalReaction;
+
+        CurrentTelemetry.TotalVerticalLoad += Out.Fz;
+        if (Out.InContact) ++CurrentTelemetry.WheelsInContact;
     }
 }
 

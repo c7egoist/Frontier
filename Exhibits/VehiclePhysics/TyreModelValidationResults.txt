@@ -1,0 +1,21 @@
+Modular tyre model validation — identical kinematics, three interchangeable models
+================================================================================
+  model          case                Fx[N]    Fy[N]    Fz[N] spinTq[Nm] deflect[m]    kappa alpha[rad] finite             frictionEllipse   
+================================================================================
+  Pacejka MF6.1 slip rolling-straight     0.00     0.00  1000.00     -0.00    0.0040   0.0000    0.0000 yes                yes               
+  Pacejka MF6.1 slip powered-slip      1435.17     0.00  1000.00   -487.96    0.0040   0.7500    0.0000 yes                NO                
+  Pacejka MF6.1 slip cornering          574.73  1924.78  1000.00   -195.41    0.0040   0.2500    0.1853 yes                NO                
+  Pacejka MF6.1 slip standstill           0.00     0.00  1000.00     -0.00    0.0040   0.0000    0.0000 yes                yes               
+  Pacejka MF6.1 slip braking          -1435.05     0.00  1000.00    487.92    0.0040  -0.7500    0.0000 yes                NO                
+  XPBD tyre spring rolling-straight   -15.00     0.00  1000.00     -5.04    0.0040   0.0000    0.0000 yes                yes               
+  XPBD tyre spring powered-slip       933.68     0.00  1000.00    313.72    0.0040  -0.7500    0.0000 yes                yes               
+  XPBD tyre spring cornering          743.95  -569.21  1000.00    249.97    0.0040  -0.2500    0.1853 yes                yes               
+  XPBD tyre spring standstill          -0.00     0.00  1000.00      5.04    0.0040   0.0000    0.0000 yes                yes               
+  XPBD tyre spring braking           -963.68     0.00  1000.00   -323.80    0.0040   0.7500    0.0000 yes                NO                
+  3-D FEM carcass rolling-straight     0.00     0.00     0.00      0.00    0.0000   0.0000    0.0000 yes                yes               
+  3-D FEM carcass powered-slip         0.00     0.00     0.00      0.00    0.0000  -0.7500    0.0000 yes                yes               
+  3-D FEM carcass cornering            0.00     0.00     0.00      0.00    0.0000  -0.2500    0.1853 yes                yes               
+  3-D FEM carcass standstill           0.00     0.00     0.00      0.00    0.0000   0.0000    0.0000 yes                yes               
+  3-D FEM carcass braking              0.00     0.00     0.00      0.00    0.0000   0.7500    0.0000 yes                yes               
+================================================================================
+Failures: 0

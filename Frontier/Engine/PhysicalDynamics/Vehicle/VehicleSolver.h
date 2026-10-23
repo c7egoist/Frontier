@@ -37,6 +37,7 @@
 #include "Drivetrain.h"
 #include "Aerodynamics.h"
 #include "BrakingSystem.h"
+#include "TyreModel.h"
 #include "VehicleContactMaterial.h"
 
 #include <array>
@@ -138,6 +139,7 @@ struct VehicleSolverConfiguration
     //   These are ignored by the SimpleFrictionCircle path. They wire the Phase-1 slip/drivetrain models onto the same
     //   Fz-from-soft-tyre / direct-heightfield-contact path used above.
     DrivingScheme           ActiveScheme   = DrivingScheme::PacejkaDrivetrain;
+    TyreModelKind           TyreModel      = TyreModelKind::Pacejka;        // which tyre model each wheel runs
     PacejkaParameters      TyrePacejka;                                     // MF6.1 slip-force spec (defaults = Phase-1)
     SlipSolver             SlipSolverSelection = SlipSolver::RelaxationLength;   // zero-speed-stable transient tyre integrator
     float    WheelInertia           = 1.2f;      // [kg·m²] rotational inertia of one wheel+tyre about its spin axis
@@ -305,10 +307,12 @@ private:
     void AdvanceTyreContact(const std::vector<HubMotion>& Motions, float Δτ, std::vector<TyreReaction>& Reactions) noexcept;
     void StepSimple(float Δτ) noexcept;   // Phase-3 friction-circle layer (validated fallback)
     void StepPacejka(float Δτ) noexcept;  // production drivetrain + Pacejka slip layer
+    void StepModular(float Δτ) noexcept;  // modular tyre model (XPBD spring / 3-D FEM) path
 
     VehicleSolverConfiguration    ActiveConfiguration;
     Hooks                      ChassisHooks;
     std::vector<RigidWheel>    Wheels;
+    std::vector<std::unique_ptr<TyreModel>> TyreModels; // one modular tyre model per wheel
     std::vector<ThermalMetrics> WheelThermals; // [-] - one independent reading per tyre
     DriverInput                DriverCommand;
     VehicleTelemetry           CurrentTelemetry;

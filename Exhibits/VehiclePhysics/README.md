@@ -53,3 +53,22 @@ Latest sandbox run: **7/7 CTest tests passed**, including the upstream vehicle-e
 ## Remaining integration boundary
 
 The C++ dynamics and a real Jolt chassis/ground/material-query path are now connected and validated. The binding's default surface sampler is a vertical ray fan (appropriate for this +Z-up vehicle); a project can override it for a terrain/heightfield-specific sampler. The actual Project-Drive scene, rendered ControlVehicle mesh/socket asset transfer, wheel visual-material assignment, and Windows/MSVC application build are not yet integrated or proven. This test does not claim Vulkan/GPU/native-window proof.
+
+## Modular tyre models (XPBD spring + 3-D FEM)
+
+Three interchangeable tyre models now sit behind the engine-agnostic `TyreModel` seam
+(`Frontier/Engine/PhysicalDynamics/Vehicle/TyreModel.h`), so any component can use any model:
+
+- `PacejkaTyreModel` — validated MF6.1 slip adapter (production default).
+- `XpbdTyreSpring` — configurable XPBD tyre spring: radial sidewall spring + inflation pressure + tangential
+  shear constraint relaxed by iterative projection.
+- `TyreFEMSolver` — 3-D finite-element carcass: toroidal hex mesh, linear-isotropic elasticity, inflation
+  pressure, penalty ground contact, semi-implicit integration.
+- `TyreModelRegistry` — `CreateTyreModel(TyreModelKind)` factory.
+
+`VehicleSolver` gained a `TyreModel` configuration knob and a `StepModular` path; `Pacejka` keeps the existing
+validated behaviour unchanged. Headless validation for all three models (identical kinematics, results table,
+friction-ellipse and finiteness checks) is at `TyreModelValidation.cpp` + `TyreModelValidationResults.txt`, wired
+into this exhibit's CMake as the `TyreModelValidation` test. It was run locally (`g++ -std=c++20`, 0 failures);
+the Jolt-dependent targets could not be compiled in this sandbox because `ExternalPackages/` is restored from
+pinned dependencies and is not vendored here.

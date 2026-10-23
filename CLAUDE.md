@@ -152,3 +152,33 @@ to the native Pattern panel, persists vector TOML, and submits GPU coverage/sele
 the recorded evidence explicitly does not represent a Windows desktop session. Pattern Float32 outputs remain
 unconnected to the PBR material renderer; native 3D application, physical height calibration, user-document export and
 Pattern 1:1 parity remain open. GIF previews are 8-bit evidence, not precision checks. Scope remains approximately 68%.
+
+## Vehicle physics references (recorded 2026-10-23)
+
+### Project-Drive vehicle physics reference (authoritative native C++ snapshot)
+Scanned the owner-specified repositories for the native vehicle physics reference. The newest complete native snapshot is:
+
+- Repository: `SultanAladin/Frontier-`
+- Branch: `arena/9440f4d0-frontier`
+- File: `Engine/PhysicalDynamics/RigidBodySolver.cpp` / `.h` — the +Z-up Jolt rigid-body world (the only TU that sees `JPH::`), fixed-step accumulator, body records, shape builder. This is the Project-Drive reference the vehicle layer ports; no HTML/JavaScript physics was ported or compared with Jolt.
+- ControlVehicle geometry assets: `EngineContent/GeometryArchives/ControlVehicle.blend`/`.blend1` and `Experimental/VehicleHmiPrototype/Archive/ControlVehicle{Body,Rim,Tyre}.facet` (binary facet archives, regenerated via `Archive/FacetArchiveCodec.py`).
+- `Experimental/VehicleHmiPrototype/PLAN.md` — JS/WebGPU + Jolt 1.1.0 WASM prototype; custom `VehicleSolver`/`TyreSlipSolver`/`TyreThermalSolver` remain responsible for drivetrain/suspension/tyre forces, with Jolt for loose-body metadata.
+
+### Repositories searched for native XPBD / 3-D FEM tyre physics
+`SultanAladin/Slate`, `unassignedinbox/Slate`, `unassignedinbox/Frontier` — none contain native tyre physics (initial/empty checkouts). No XPBD tyre spring or 3-D FEM carcass work was found in any searched repository; the modular tyre models below were implemented new on this branch.
+
+### Modular tyre models (new on `arena/558d515b-frontier`)
+All three are interchangeable behind the engine-agnostic `TyreModel` seam (`Frontier/Engine/PhysicalDynamics/Vehicle/TyreModel.h`); none mention Jolt or the vehicle solver, so any component can use any model:
+
+- `PacejkaTyreModel` — validated MF6.1 slip adapter (existing production default).
+- `XpbdTyreSpring` — configurable XPBD tyre spring: radial sidewall spring + pressure + tangential shear constraint relaxed by iterative projection (`XpbdTyreSpring.{h,cpp}`).
+- `TyreFEMSolver` — 3-D finite-element carcass: toroidal hex mesh, linear-isotropic elasticity, inflation pressure, penalty ground contact, semi-implicit integration (`TyreFEMSolver.{h,cpp}`).
+- `TyreModelRegistry` — `CreateTyreModel(TyreModelKind)` factory usable by any component.
+
+Validation: `Exhibits/VehiclePhysics/TyreModelValidation.cpp` (headless, pure C++) + `Exhibits/VehiclePhysics/TyreModelValidationResults.txt`; wired into `Exhibits/VehiclePhysics/CMakeLists.txt` as `TyreModelValidation`.
+
+### Jolt Physics Extension
+The Jolt Physics Extension already exists as the CMake target `FrontierJoltPhysicsExtension` (`Frontier/Engine/PhysicalDynamics/RigidBodySolver.cpp` linked against `Jolt`) — `RigidBodySolver.cpp` is the single translation unit that sees `JPH::`. No rename is required; the extension boundary is already realised by `RigidBodySolver`. The root `CMakeLists.txt` links `FrontierVehiclePhysics` against `FrontierJoltPhysicsExtension`.
+
+### Build status note
+`ExternalPackages/` is ignored and restored from pinned dependencies (`Automation/PrepareJolt.py`), so Jolt is not vendored in this sandbox and the Jolt-dependent targets (`RigidBodySolver.cpp`, Jolt exhibits) cannot be compiled locally here. The pure-C++ tyre/model layer (`TyreModel`, `XpbdTyreSpring`, `TyreFEMSolver`, `PacejkaTyreModel`, `VehicleSolver`, `JoltVehicleBinding`, `VehiclePhysicsComponent`) was syntax-checked with `g++ -std=c++20 -fsyntax-only`; the Jolt-dependent files were reviewed against the existing `RigidBodySolver` seam but not compiled.
