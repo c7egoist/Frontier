@@ -266,10 +266,10 @@ Indirect source feeding the candidates: Distance* field GI + Card* radiosity.
 
 ## 9. Physics — native Jolt, custom vehicle + tyre forces
 
-🔴 **Owner gate (set 2026-10-22): do not port tyre or vehicle physics from the demo JavaScript.** When Phase 7
-is reached, stop and notify the owner first — the owner will supply the full reference to copy the physics from.
-Everything in this section is therefore an inventory of what the demo contains, not porting instructions; the
-supplied reference decides D6 and supersedes any mapping below where they differ.
+✔️ **Owner gate opened 2026-10-23.** The owner supplied `SultanAladin/Frontier-` @ `3382938` as the
+physics reference and then explicitly called the next phase. Port from that authorized previous-project source;
+do not copy physics from the VehicleHMI demo JavaScript. Its measured contact model confirms D6: custom per-wheel
+contact and tyre forces, with Jolt owning rigid-body integration/collisions.
 
 💡 The demo's `node_modules/jolt-physics` WASM bindings mirror Jolt's native C++ API almost name-for-name, so
 `JoltWorld.js` ports mechanically. The custom solvers stay custom — Jolt integrates bodies; Frontier computes
@@ -483,7 +483,7 @@ WriteLog(FoliageCategory, LogSeverity::Info, "Leaf cluster detached · %d leaves
 | 4 🚧  | Virtualized geometry: `ClusterNesting`, cull, HiZ, visibility resolve — **portable core landed 2026-10-22**: `Engine/Rendering/ClusterNesting` (median-split nesting, enclosing bounds, sphere-tree monotone error, screen-space-error cut) + `VisibilityCull` (frustum, max-depth HiZ pyramid, conservative occlusion), proven on procedural corpora (`Exhibits/GeometryPipeline` 57/57: exactly-once cuts, monotone error/refinement, zero false-negative culls); Slang/GPU bodies + simplification DAG + demo corpus parity at the SDK phase | portable invariants ✔️ · demo `GeometryHierarchy` corpus images matched (SDK phase) |
 | 5 🚧  | ReSTIR chain + SVGF; distance-field + card GI — **chain portable core landed 2026-10-22**: `DeterministicRandom` (PCG32), `DiscrepancySequence`, `ReservoirSampling` (WRS/RIS + M-clamped temporal + Jacobian-factored spatial combines), `VarianceFiltering` (SVGF moments + à-trous + joint upsample), `IlluminationUnits` (§8.2 chain declared: resolves in order, ping-pongs off-atlas, 32 barriers), proven against analytic oracles (`Exhibits/IlluminationChain` 55/55: perfect-target RIS exactly zero-variance; reuse unbiased within 5σ; 256-receiver scene RMSE 0.385 vs naive 3.86; SVGF RMSE 12× down, edge 97% retained). **Distance-field + card GI portable core also landed**: `Rendering/DistanceField` (analytic SDF union, sphere tracing, baked records, AO, hemisphere indirect) + `Rendering/SurfaceCards` (texel radiosity, regularised form factors, DF visibility), declared as the indirect prelude in `IlluminationUnits` and proven in `Exhibits/IndirectIllumination` (60/60); Slang/GPU bodies + golden images remain | portable oracles ✔️ · golden-image parity vs demo captures (SDK phase) |
 | 6 🚧  | Environment: atmosphere, celestial, clouds, fog, flare, precipitation, lightning (visual) — **portable cores landed 2026-10-22**: `AtmosphereModel` (Rayleigh/Mie/ozone, transmittance LUT, single + approximated multiple scattering), `CelestialModel` (solar position, twilight, lunar phase, deterministic stars), `FogMedium` (analytic height-fog integral), `CloudField` (integer-hash density + Beer-Lambert march with sun shadow march), `WeatherEffects` (wrap-exact precipitation, midpoint-displacement lightning), `LensFlareModel`, `EnvironmentUnits` declaration — proven in `Exhibits/EnvironmentPipeline` (73/73; vertical transmittance matches analytic optical depths to 4 decimals, Benoni solar-noon identity, uniform-slab march exactly Beer-Lambert). Slang bodies + per-family demo captures remain SDK-phase | portable oracles ✔️ · per-family captures vs demo (SDK phase) |
-| 7     | 🔴 GATED (§9): reference received 2026-10-22 — previous project (`Frontier-` @9440f4d0) `TyreSlipSolver.js` = Pacejka MF6.1 + `VehicleSolver.js`; port still sequenced after infrastructure by owner direction → then Jolt world + vehicle + full tyre stack + fracture | ported `*.test.mjs` assertions green in C++ validation              |
+| 7 🚧  | **In progress (owner called phase 2026-10-23):** reference = previous project `Frontier-` @3382938. First slice landed: `Frontier/Engine/Physics/PacejkaSlipSolver` pure/combined MF6.1 forces + relaxation-length laws, proven against 13 source-JS input tuples and four load oracles (`Exhibits/VehiclePhysics`, 67/67). Remaining: transient slip, wheel/contact/suspension, powertrain/brakes/aero/vehicle stability port, Jolt native world/body/contact bridge, then full `VehicleStability.mjs`-class C++ regression | first tyre-force oracle slice ✔️ · 🚧 complete vehicle/Jolt + stability suite |
 | 8 ⏸️  | **Deferred per owner (2026-10-22):** cabin HMI screens, plume/fire/sparks, particle workspace. Do not start until explicitly reactivated. | owner reactivates phase |
 | 9     | Shipping configuration audit: every `#ifdef` row of §5 verified; 1:1 contract closed (every row Ported or Approved-removal) | shipping binary contains no editor machinery (symbol/size report) |
 
@@ -527,6 +527,7 @@ logging API. The expandable-row detail already present was confirmed sufficient 
 
 | Item                                                                 | Verification                                            | Status |
 |----------------------------------------------------------------------|---------------------------------------------------------|--------|
+| Phase 7 first slice: `Frontier/Engine/Physics/PacejkaSlipSolver` | `Exhibits/VehiclePhysics` 67/67 vs `Frontier-` @3382938 JavaScript MF6.1: 13 combined slip/load/camber cases (pure Fx/Fy + combined Fx/Fy), 4 load-dependent relaxation pairs, zero-load + clamp limits; GCC C++17 `-Wall -Wextra -Werror` | 🟢 portable tyre force · 🚧 vehicle dynamics/Jolt |
 | Complete portable render pipeline: `CompleteFrameUnits` + `ReferenceRenderer` | one 38-unit declaration resolves, 77 barriers derive, 54% atlas saving; stages execute through display encoding; 18/18 deterministic + closed-form BRDF checks; upstream GGX/Smith/Schlick one-stratum PBR is carried into RIS target and direct shading; capture at `Exhibits/CompleteRenderer/Capture/reference-frame.png` | 🟢 CPU reference · 🚧 Vulkan/OS window |
 | Phase 8 visual add-ons (cabin HMI, plume/fire/sparks, particle workspace) | explicitly deferred by owner 2026-10-22; untouched | ⏸️ |
 
@@ -577,5 +578,5 @@ Phase 0 is complete; Phase 3's portable half is complete. Remaining, in order
 (owner-resequenced 2026-10-22: infrastructure first): Phase 1+3 SDK build (Windows capture
 beside the approved HTML + spinning cube through the resolved order on screen) → Phase 2 kit
 → Phase 4 virtualized geometry on this core. The TextureWorkspace fix phase (complaint report above) runs
-when the owner calls it; Glinty (D9) follows it. Phase 7 physics reference is in hand (Pacejka
-MF6.1, §9); its port starts only when the sequence reaches it.
+when the owner calls it; Glinty (D9) follows it. Phase 7 is now active: the pure/combined MF6.1 tyre-force core is the first landed slice;
+vehicle integration and native Jolt remain the next work.

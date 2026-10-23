@@ -101,8 +101,11 @@ delta · 🟡 cosmetic/process. Cross-refs: plan `Docs/VehicleHmiEnginePlan.md` 
 5. 🟠 GI/filter cores are single-channel (luminance); RGB = same recurrences per channel.
 6. 🟠 Atmosphere/cloud models (Phase 6) are canonical Earth models (Bruneton/Hillaire
    constants), not read from the demo's Atmosphere* shaders — parameter parity unknown.
-7. 🟡 Phase 7 physics reference is in hand (Pacejka MF6.1 JS in `SultanAladin/Frontier-`)
-   and **gated by the owner**; nothing ported. D6 (wheel-ground model) undecided until then.
+7. Phase 7 was explicitly opened by the owner on 2026-10-23; authorized source is
+   `SultanAladin/Frontier-` @ `3382938`. D6 resolves to custom per-wheel contact/tyre
+   forces with Jolt for rigid integration. The first MF6.1 pure/combined-slip C++ core
+   matches 13 source-JS tuples and four relaxation-load oracles (67 checks); full vehicle
+   dynamics, transient relaxation, native Jolt and stability validation remain open.
 8. 🟡 D9 Glinty flake replacement approved but deferred until TextureWorkspace stabilises.
 9. 🟡 Cabin HMI may depend on a Slate SDK (`SlateCabinLayout/Fittings.js` vs this repo's
    Slate upstream) — Phase 0 open question, needs owner clarification before Phase 8.
@@ -128,4 +131,4 @@ delta · 🟡 cosmetic/process. Cross-refs: plan `Docs/VehicleHmiEnginePlan.md` 
 5. `git hash-object` (no `--path`) vs index EOL handling can make byte-identical-content
    files hash differently during recovery audits — compare normalised content.
 
-*Filed for later attention per owner instruction, 2026-10-22. Work continues at Phase 6.*
+*Filed for later attention per owner instruction, 2026-10-22; Phase 7 update, 2026-10-23. Work continues at Phase 7.**
