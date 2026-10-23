@@ -19,7 +19,8 @@ The native model is under `Frontier/Engine/PhysicalDynamics/Vehicle/`:
 - `Drivetrain`, `PacejkaMagicFormula`, `TyreSlipDynamics`, `RigidWheel`, `TraceContactTyre`, and suspension/thermal specifications.
 - `VehicleGeometry`: measured ControlVehicle socket geometry and dimensions, plus geometry-to-wheel/suspension setup.
 - `JoltVehicleBinding`: reads the Jolt chassis pose/velocity, applies vehicle forces/torques to the Jolt dynamic body, and steps both systems at the same fixed interval.
-- `RigidBodySolver::QuerySurface`: Jolt narrow-phase ray hit, world-space normal, and collision body's friction coefficient. The binding uses this by default for tyre ground samples and road-material friction, while allowing a scene-provided query override.
+- `VehiclePhysicsComponent`: engine-facing lifecycle owner for the Jolt world, road, chassis and complete native vehicle configuration. It exposes input assignment, fixed stepping, chassis readback and wheel/powertrain telemetry; scenes can instead supply custom ground/material callbacks.
+- `RigidBodySolver::QuerySurface`: Jolt narrow-phase ray hit, world-space normal, and collision body's friction coefficient. The binding uses this by default for tyre ground samples and road-material friction.
 - `VehicleContactMaterial.h`: mechanical tyre and road coefficients are distinct from visual PBR materials; the coefficients combine symmetrically. The existing `EngineContent/MaterialArchives/TextureStudio/performance-rubber.material` is a render material, not a substitute for contact parameters.
 
 The root target `FrontierVehiclePhysics` now contains the native model and binding, and links the existing `FrontierJoltPhysicsExtension` (Jolt 5.3.0 remains pinned to the owner-reference revision `0373ec0d…`).
@@ -35,7 +36,19 @@ cmake --build Build/VehiclePhysics --parallel
 ctest --test-dir Build/VehiclePhysics --output-on-failure
 ```
 
-Latest sandbox run: **6/6 CTest tests passed**, including the upstream vehicle-equation and mock-scene suites, generic Jolt body validation, and `JoltVehicleBindingValidation`. The Jolt vehicle test queries the actual Jolt plane for surface normal and friction, registers a 4-wheel ControlVehicle geometry/configuration, verifies four tyre contacts, then drives the actual dynamic Jolt chassis to **15.240 m/s**. The legacy JS-derived Pacejka and wheel-spin programs remain isolated as provisional exhibit-only checks; their sources are no longer included in the `FrontierVehiclePhysics` product library.
+Engine integration entry point:
+
+```cpp
+Frontier::Vehicle::VehiclePhysicsComponent Vehicle;
+Frontier::Vehicle::VehiclePhysicsComponentConfiguration Config;
+if (Vehicle.Bring(Config)) {
+    Vehicle.AssignInput({.Throttle = 0.6f, .Steer = 0.1f});
+    Vehicle.StepFixed(); // call once per configured fixed step
+    const auto& Wheels = Vehicle.Telemetry().Wheels;
+}
+```
+
+Latest sandbox run: **7/7 CTest tests passed**, including the upstream vehicle-equation and mock-scene suites, generic Jolt body validation, Jolt surface/material query, Jolt binding, and `VehiclePhysicsComponentValidation`. The component test verifies four loaded tyre contacts, powered drivetrain/wheel spin, Jolt chassis acceleration, braking response and clean teardown. The legacy JS-derived Pacejka and wheel-spin programs remain isolated as provisional exhibit-only checks; their sources are no longer included in the `FrontierVehiclePhysics` product library.
 
 ## Remaining integration boundary
 

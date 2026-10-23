@@ -110,8 +110,8 @@ delta · 🟡 cosmetic/process. Cross-refs: plan `Docs/VehicleHmiEnginePlan.md` 
    braking/ABS, aero and ControlVehicle geometry model has been ported to `Frontier/Engine/PhysicalDynamics/Vehicle/`.
    `JoltVehicleBinding` now applies vehicle forces to a Jolt chassis; Jolt narrow-phase surface queries return contact
    normals and collision-body friction for the tyre material pairing. Physical tyre/road coefficients are kept distinct
-   from the existing PBR `performance-rubber.material`. Standalone CTest passes 6/6, including a Jolt vehicle run with
-   four tyre contacts and chassis acceleration. The older JS-derived standalone slices remain provisional and are not
+   from the existing PBR `performance-rubber.material`. Standalone CTest passes 7/7, including a Jolt vehicle-component run with
+   four tyre contacts, drivetrain/tyre response, braking and component teardown. The older JS-derived standalone slices remain provisional and are not
    used as the ControlVehicle source of truth. Project-Drive scene/render asset transfer and Windows/MSVC application
    build are still outstanding; no HTML/JS vehicle physics is used or compared with Jolt.
 8. 🟡 D9 Glinty flake replacement approved but deferred until TextureWorkspace stabilises.

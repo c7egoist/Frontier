@@ -21,7 +21,8 @@ set(FRONTIER_NATIVE_VEHICLE_SOURCES
     ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/VehicleGeometry.cpp
     ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/VehicleSolver.cpp)
 set(FRONTIER_NATIVE_JOLT_VEHICLE_SOURCES
-    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/JoltVehicleBinding.cpp)
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/JoltVehicleBinding.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle/VehiclePhysicsComponent.cpp)
 add_executable(PortedVehicleValidation
     VehicleValidation.cpp ${FRONTIER_NATIVE_VEHICLE_SOURCES})
 target_include_directories(PortedVehicleValidation PRIVATE
@@ -50,11 +51,20 @@ add_executable(JoltVehicleBindingValidation
 target_include_directories(JoltVehicleBindingValidation PRIVATE
     ${FRONTIER_ROOT} ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle)
 target_link_libraries(JoltVehicleBindingValidation PRIVATE Jolt)
+add_executable(VehiclePhysicsComponentValidation
+    VehiclePhysicsComponentValidation.cpp
+    ${FRONTIER_ROOT}/Engine/PhysicalDynamics/RigidBodySolver.cpp
+    ${FRONTIER_NATIVE_VEHICLE_SOURCES}
+    ${FRONTIER_NATIVE_JOLT_VEHICLE_SOURCES})
+target_include_directories(VehiclePhysicsComponentValidation PRIVATE
+    ${FRONTIER_ROOT} ${FRONTIER_ROOT}/Engine/PhysicalDynamics/Vehicle)
+target_link_libraries(VehiclePhysicsComponentValidation PRIVATE Jolt)
 
 enable_testing()
 add_test(NAME PacejkaSlipValidation COMMAND PacejkaSlipValidation)
 add_test(NAME WheelSpinValidation COMMAND WheelSpinValidation)
 add_test(NAME JoltPhysicsValidation COMMAND JoltPhysicsValidation)
 add_test(NAME JoltVehicleBindingValidation COMMAND JoltVehicleBindingValidation)
+add_test(NAME VehiclePhysicsComponentValidation COMMAND VehiclePhysicsComponentValidation)
 add_test(NAME PortedVehicleValidation COMMAND PortedVehicleValidation)
 add_test(NAME PortedVehicleSceneValidation COMMAND PortedVehicleSceneValidation)

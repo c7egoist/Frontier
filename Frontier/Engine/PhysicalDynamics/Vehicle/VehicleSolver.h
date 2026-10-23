@@ -15,13 +15,13 @@
 //    Like the rest of the vehicle layer this class is ENGINE-AGNOSTIC and header-only-math (it reuses the self-contained
 //    Vec3/Quat from VehicleMath.h). It never mentions Jolt: it reaches the rigid chassis through a small set of `Hooks`
 //    (read chassis pose, apply force at a world point, apply torque) and reaches the ground through GroundQuery.
-//    In the engine `TractrixVehicleScene` binds those hooks to `RigidBodySolver`; the headless `VehicleSceneValidation`
-//    binds them to a mock box integrator, so the whole solver compiles and is validated in the sandbox without Jolt.
+//    In the engine `JoltVehicleBinding` (owned by `VehiclePhysicsComponent`) binds those hooks to `RigidBodySolver`;
+//    the headless `VehicleSceneValidation` binds them to a mock box integrator. The full vehicle stack is independently
+//    tested and also runs against the native Jolt world.
 //
-//    Call order per fixed physics step (on the Phase-0 physics thread):
-//        solver.AssignInput(input);
-//        solver.Step(Δτ);          // reads chassis, steps tyres, applies wheel forces to the chassis
-//        solver.StepOnce();            // integrates the chassis with those forces
+//    Engine call order per configured fixed physics step:
+//        component.AssignInput(input);
+//        component.StepFixed();      // solves drivetrain/tyres/suspension, submits forces, then advances Jolt once
 //
 //    Frame conventions (match RigidBodySolver + VehicleMath.h): right-handed, +Z up, chassis-local +X forward, +Y left,
 //    tyre spin axis +Y.
