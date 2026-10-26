@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#101010">
+<meta name="description" content="Frontier Terrain Studio — combined SDF/voxel + heightfield terrain generation with geological erosion, a layer stack, and reusable paintable channels.">
+<title>Frontier · Terrain Studio</title>
+<link rel="stylesheet" href="Style/TerrainStudio.css">
+</head>
+<body>
+<div id="shell">
+
+    <!-- ============ APP BAR ============ -->
+    <header id="appbar">
+        <div class="doc-title">
+            <span id="doc-name">Bernese Alps</span><span class="doc-ext">.terrain</span>
+        </div>
+        <nav class="workspace-tabs" id="workspace-tabs">
+            <button data-workspace="layers" class="active">Generate</button>
+            <button data-workspace="brush">Sculpt &amp; Paint</button>
+            <button data-workspace="scene">Scene</button>
+        </nav>
+        <div class="appbar-icons">
+            <button class="icon-button" id="panels-toggle" title="Hide panels (P)"><i data-glyph="panels"></i></button>
+            <button class="icon-button" id="snapshot-button" title="Save viewport PNG"><i data-glyph="camera"></i></button>
+        </div>
+    </header>
+
+    <!-- ============ BREADCRUMB BAR ============ -->
+    <div id="crumbbar">
+        <div class="crumbs">
+            <span class="crumb-icon"><i data-glyph="massif"></i></span>
+            <span class="crumb dim">Terrain essentials</span>
+            <span class="crumb-sep">›</span>
+            <span class="crumb" id="crumb-current">Terrain explorer</span>
+        </div>
+        <div class="crumb-actions">
+            <span class="sync-status"><span class="sync-dot" id="sync-dot"></span><span id="sync-text">Workspace up to date</span></span>
+            <button class="pill-button" id="import-button">Import</button>
+            <button class="pill-button" id="export-button"><i data-glyph="export"></i>Export terrain</button>
+        </div>
+    </div>
+
+    <!-- ============ MAIN ============ -->
+    <div id="main">
+
+        <!-- ===== LEFT: LIBRARY ===== -->
+        <aside class="column" id="library">
+            <div class="column-tabs">
+                <div class="column-tab"><i data-glyph="library"></i>Terrain library<button class="tab-close" tabindex="-1">×</button></div>
+            </div>
+            <div class="column-body">
+                <div class="segmented wide" id="library-tabs">
+                    <button data-library="presets" class="active">Presets</button>
+                    <button data-library="channels">Channels<span class="seg-count" id="channel-count">11</span></button>
+                </div>
+
+                <section id="presets-page">
+                    <div class="column-heading-row">
+                        <h2 class="column-heading">Terrain library</h2>
+                        <span class="heading-count" id="preset-count">4</span>
+                        <button class="icon-button heading-add" id="blank-world" title="Blank world from one layer"><i data-glyph="plus"></i></button>
+                    </div>
+                    <label class="search-field">
+                        <i data-glyph="search"></i>
+                        <input id="preset-search" type="text" placeholder="Search terrains..." autocomplete="off">
+                        <kbd>/</kbd>
+                    </label>
+                    <div class="filter-pills" id="preset-filters">
+                        <button data-filter="all" class="active">All terrains</button>
+                        <button data-filter="Alpine">Alpine</button>
+                        <button data-filter="Arid">Arid</button>
+                    </div>
+                    <div class="section-label"><span>Field-tested geologies · 1024²</span><span id="preset-shown">4</span></div>
+                    <div class="preset-grid" id="preset-grid"></div>
+                    <p class="library-note">Every preset is an ordinary layer stack — nothing is baked or hidden.
+                    Open one, then restack its geology until the land agrees with you.</p>
+                </section>
+
+                <section id="channels-page" class="hidden">
+                    <div class="column-heading-row">
+                        <h2 class="column-heading">Channels</h2>
+                        <button class="icon-button heading-add" id="new-channel" title="New authored channel"><i data-glyph="plus"></i></button>
+                    </div>
+                    <p class="library-note">Channels are the reusable currency of the stack: erosion writes them,
+                    layer masks and materials read them, and every one can be painted by hand.</p>
+                    <div class="section-label"><span>Derived by geology</span></div>
+                    <div id="channel-list-derived" class="channel-list"></div>
+                    <div class="section-label"><span>Authored &amp; painted</span></div>
+                    <div id="channel-list-authored" class="channel-list"></div>
+                </section>
+            </div>
+            <div class="column-footer-card">
+                <span class="footer-glyph"><i data-glyph="compass"></i></span>
+                <div>
+                    <div class="footer-title">Beautiful by calculation.</div>
+                    <div class="footer-sub" id="footer-stats">1024² relief · SDF stamps · stream-power rivers</div>
+                </div>
+                <button class="icon-button" id="about-button" title="About Terrain Studio"><i data-glyph="help"></i></button>
+            </div>
+        </aside>
+
+        <!-- ===== CENTRE: VIEWPORT ===== -->
+        <main id="viewport-column">
+            <div class="column-tabs viewport-tabs">
+                <div class="column-tab viewport-tab active" data-view="3d"><i data-glyph="cube"></i>Viewport</div>
+                <div class="column-tab viewport-tab inactive" data-view="2d">2D field</div>
+                <div class="viewport-tab-spacer"></div>
+                <span class="fps-readout" id="fps-readout">— fps</span>
+            </div>
+            <div id="viewport-stage">
+                <canvas id="gl-canvas"></canvas>
+                <canvas id="field2d-canvas" class="hidden" width="768" height="768"></canvas>
+                <div id="field2d-ring" class="hidden"></div>
+
+                <div class="viewport-chips">
+                    <span class="chip live"><span class="sync-dot"></span>Live preview</span>
+                    <span class="chip" id="chip-resolution">1024² · 2 km</span>
+                    <span class="chip hidden" id="chip-viewmode">Shaded</span>
+                </div>
+                <div class="viewport-autorotate">
+                    <label class="switch-row inline"><span>Autorotate</span><span class="toggle" id="autorotate-toggle"><span class="toggle-knob"></span></span></label>
+                    <button class="icon-button dark" id="fullscreen-button" title="Fullscreen viewport"><i data-glyph="expand"></i></button>
+                </div>
+
+                <div class="viewport-title" id="viewport-title">
+                    <div class="title-eyebrow" id="title-region">01 / Alpine collection</div>
+                    <h1 id="title-name">Bernese Alps</h1>
+                    <p id="title-blurb">Glaciated granite massif.</p>
+                </div>
+
+                <div class="viewport-rail">
+                    <button id="zoom-in" title="Zoom in"><i data-glyph="zoomin"></i></button>
+                    <button id="zoom-out" title="Zoom out"><i data-glyph="zoomout"></i></button>
+                    <button id="frame-view" title="Frame terrain (F)"><i data-glyph="cube"></i></button>
+                    <button id="reset-camera" title="Reset camera"><i data-glyph="reset"></i></button>
+                </div>
+
+                <div class="viewport-toolbar">
+                    <button class="toolbar-select" id="viewmode-select"><i data-glyph="eye"></i><span id="viewmode-label">Shaded</span><i data-glyph="chevrondown"></i></button>
+                    <span class="toolbar-sep"></span>
+                    <button class="toolbar-select" id="sun-select"><i data-glyph="sun"></i><span id="sun-label">Afternoon sun</span><i data-glyph="chevrondown"></i></button>
+                    <span class="toolbar-sep"></span>
+                    <button class="toolbar-icon" id="toolbar-snapshot" title="Save viewport PNG"><i data-glyph="camera"></i></button>
+                </div>
+
+                <div id="progress-pill" class="hidden">
+                    <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+                    <span id="progress-label">Building…</span>
+                    <span id="progress-pct">0%</span>
+                    <button id="progress-cancel" title="Cancel rebuild">×</button>
+                </div>
+
+                <div class="viewport-hint" id="viewport-hint">Drag to orbit · Wheel to zoom · Right-drag to pan · Double-click to set pivot</div>
+                <div class="axis-gizmo" aria-hidden="true">
+                    <svg viewBox="0 0 64 64" width="52" height="52">
+                        <line x1="32" y1="36" x2="32" y2="10" stroke="#9a9a9a" stroke-width="1.4"/><text x="30" y="8" fill="#9a9a9a" font-size="9">Y</text>
+                        <line x1="32" y1="36" x2="48" y2="46" stroke="#7d7d7d" stroke-width="1.4"/><text x="50" y="50" fill="#7d7d7d" font-size="9">X</text>
+                        <line x1="32" y1="36" x2="15" y2="45" stroke="#666" stroke-width="1.4"/><text x="6" y="49" fill="#666" font-size="9">Z</text>
+                    </svg>
+                </div>
+            </div>
+        </main>
+
+        <!-- ===== RIGHT: INSPECTOR ===== -->
+        <aside class="column" id="inspector">
+            <div class="column-tabs">
+                <div class="column-tab"><i data-glyph="sliders"></i>Inspector<button class="tab-close" tabindex="-1">×</button></div>
+            </div>
+            <div class="column-body inspector-body">
+                <div class="inspector-heading-row">
+                    <h2 class="inspector-heading">Terrain inspector</h2>
+                    <button class="icon-button" id="rebuild-button" title="Rebuild world from scratch"><i data-glyph="reset"></i></button>
+                </div>
+                <div class="identity-row">
+                    <canvas id="identity-thumb" width="96" height="96"></canvas>
+                    <div class="identity-text">
+                        <div class="identity-name" id="identity-name">Bernese Alps</div>
+                        <div class="identity-kind"><span class="sync-dot small"></span><span id="identity-kind">Heightfield + SDF · 1024²</span></div>
+                    </div>
+                    <button class="icon-button" id="favourite-button" title="Favourite"><i data-glyph="star"></i></button>
+                </div>
+
+                <div class="segmented wide inspector-tabs" id="inspector-tabs">
+                    <button data-page="layers" class="active"><i data-glyph="layers"></i>Layers<span class="seg-count" id="layer-count">7</span></button>
+                    <button data-page="brush"><i data-glyph="brush"></i>Brush</button>
+                    <button data-page="scene"><i data-glyph="sun"></i>Scene</button>
+                </div>
+
+                <!-- LAYERS PAGE -->
+                <section id="page-layers" class="inspector-page">
+                    <div class="eyebrow-row"><span class="eyebrow">Geological stack · newest on top</span><span class="badge" id="stack-badge">Ready</span></div>
+                    <div id="layer-stack"></div>
+                    <button class="add-layer-button" id="add-layer-button"><i data-glyph="plus"></i>Add layer</button>
+                    <div id="layer-properties"></div>
+                </section>
+
+                <!-- BRUSH PAGE -->
+                <section id="page-brush" class="inspector-page hidden">
+                    <div class="eyebrow-row"><span class="eyebrow">Sculpt · paint · stamp</span><span class="badge" id="brush-badge">Orbit</span></div>
+                    <div class="tool-grid" id="tool-grid">
+                        <button class="tool-tile active" data-tool="orbit"><i data-glyph="orbit"></i><span>Orbit</span></button>
+                        <button class="tool-tile" data-tool="raise"><i data-glyph="raise"></i><span>Raise</span></button>
+                        <button class="tool-tile" data-tool="lower"><i data-glyph="lower"></i><span>Lower</span></button>
+                        <button class="tool-tile" data-tool="flatten"><i data-glyph="flatten"></i><span>Flatten</span></button>
+                        <button class="tool-tile" data-tool="smooth"><i data-glyph="smooth"></i><span>Smooth</span></button>
+                        <button class="tool-tile" data-tool="terrace"><i data-glyph="strata"></i><span>Terrace</span></button>
+                        <button class="tool-tile" data-tool="channel"><i data-glyph="droplet"></i><span>Paint channel</span></button>
+                        <button class="tool-tile" data-tool="material"><i data-glyph="brush"></i><span>Paint material</span></button>
+                        <button class="tool-tile" data-tool="stamp"><i data-glyph="arch"></i><span>SDF stamp</span></button>
+                        <button class="tool-tile" data-tool="stampErase"><i data-glyph="erase"></i><span>Remove stamp</span></button>
+                    </div>
+                    <div id="brush-controls"></div>
+                    <div class="card metrics-card">
+                        <div class="card-heading"><span><i data-glyph="compass"></i>Under the brush</span></div>
+                        <div class="metric-row">
+                            <div>
+                                <div class="metric" id="metric-elevation">—<small>m</small></div>
+                                <div class="muted">Elevation</div>
+                            </div>
+                            <div>
+                                <div class="metric" id="metric-slope">—<small>°</small></div>
+                                <div class="muted">Slope</div>
+                            </div>
+                            <div>
+                                <div class="metric" id="metric-flow">—</div>
+                                <div class="muted">Flow</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- SCENE PAGE -->
+                <section id="page-scene" class="inspector-page hidden">
+                    <div class="eyebrow-row"><span class="eyebrow">Atmosphere &amp; display</span><span class="badge">Live</span></div>
+                    <div id="scene-controls"></div>
+                    <div class="card metrics-card">
+                        <div class="card-heading"><span><i data-glyph="massif"></i>World survey</span></div>
+                        <div class="metric-row">
+                            <div>
+                                <div class="metric" id="metric-peak">—<small>m</small></div>
+                                <div class="muted">Highest point</div>
+                            </div>
+                            <div>
+                                <div class="metric" id="metric-relief">—<small>m</small></div>
+                                <div class="muted">Total relief</div>
+                            </div>
+                        </div>
+                        <p class="muted" id="survey-line">No world built yet.</p>
+                    </div>
+                </section>
+            </div>
+            <div class="inspector-footer">
+                <button class="save-preset-button" id="save-stack-button"><i data-glyph="plus"></i>Save stack as preset</button>
+                <div class="footer-made">Made to be made your own.</div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- ============ STATUS BAR ============ -->
+    <footer id="statusbar">
+        <span class="status-cell"><span class="status-square"></span>Perspective</span>
+        <span class="status-sep"></span>
+        <span class="status-cell" id="status-view">Shaded</span>
+        <span class="status-sep"></span>
+        <span class="status-cell dim" id="status-eval">Not built</span>
+        <span class="status-spacer"></span>
+        <span class="status-cell dim" id="status-cursor"></span>
+        <span class="status-sep"></span>
+        <span class="status-cell">WebGL 2.0<span class="sync-dot small"></span></span>
+    </footer>
+</div>
+
+<div id="menu-root"></div>
+<div id="toast-root"></div>
+<input type="file" id="import-file" accept=".json,application/json" class="hidden">
+
+<script type="module" src="Source/TerrainStudio.js"></script>
+</body>
+</html>
