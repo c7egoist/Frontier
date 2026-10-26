@@ -15,7 +15,7 @@ import { LayerStackEvaluation, LayerTypes, LayerTypeById, ConstructLayer } from 
 import { ReliefPresets } from "./ReliefPresets.js";
 import { ReliefRasterization } from "./ReliefRasterization.js";
 import { PolygoniseStamps, ConstructStamp, StampShapes } from "./DistanceStamps.js";
-import { Cancellation } from "./ErosionSequence.js";
+import { Cancellation, BakeSurfaceData } from "./ErosionSequence.js";
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
 //                                                                  GLYPHS
@@ -391,6 +391,9 @@ const ViewModes =
     { Id: 9,  Label: "Soil moisture" },
     { Id: 10, Label: "Normals" },
     { Id: 11, Label: "Channel · inspected" },
+    { Id: 12, Label: "Occlusion (baked)" },
+    { Id: 13, Label: "Protrusion (baked)" },
+    { Id: 14, Label: "Traced density" },
 ];
 
 const SunPresets =
@@ -641,6 +644,7 @@ export class TerrainStudio
     SetViewMode(ModeId)
     {
         this.ViewMode = ModeId;
+        this.Raster.UseRaymarch = (ModeId === 14);
         const Mode = ViewModes.find((Candidate) => Candidate.Id === ModeId);
         ById("viewmode-label").textContent = ModeId === 11 ? `Channel · ${this.InspectedChannel}` : Mode.Label;
         ById("status-view").textContent = ModeId === 11 ? `Channel ${this.InspectedChannel}` : Mode.Label;
@@ -914,7 +918,7 @@ export class TerrainStudio
             return;
         this.InspectedChannel = Name;
         this.Raster.UploadOverlay(Channel.Samples, Channel.Tint);
-        const DerivedIndex = { Flow: 3, Water: 4, Wear: 5, Deposition: 6, Hardness: 7, Snow: 8, Moisture: 9 }[Name];
+        const DerivedIndex = { Flow: 3, Water: 4, Wear: 5, Deposition: 6, Hardness: 7, Snow: 8, Moisture: 9, Occlusion: 12, Protrusion: 13 }[Name];
         this.SetViewMode(DerivedIndex !== undefined ? DerivedIndex : 11);
         this.ConstructChannelList();
     }
@@ -1110,6 +1114,8 @@ export class TerrainStudio
     AfterBuild()
     {
         this.ApplyBorderTaper();
+        // Bake the data maps the splat shader textures from (occlusion + protrusion).
+        BakeSurfaceData(this.Field);
         this.Raster.UploadField(this.Field);
         this.Raster.UploadPaint(this.Field);
         const Inspected = this.Field.Channel(this.InspectedChannel);
@@ -1471,6 +1477,15 @@ export class TerrainStudio
                 ById("autorotate-toggle").classList.toggle("on", On);
             }));
         Host.appendChild(DisplayCard);
+
+        const TraceCard = ConstructCard("Traced density", "eye", "Sphere-traced implicit surface — select it from the view menu (Shaded ▾). Density lives in the shader; detail octaves fade in as you zoom, past the heightmap's 1024².");
+        TraceCard.Content.appendChild(ConstructSlider({
+            Label: "Trace detail", Min: 0, Max: 2.5, Step: 0.05, Unit: "x",
+            Get: () => this.Raster.RaymarchDetail, Set: (R) => { this.Raster.RaymarchDetail = R; } }));
+        TraceCard.Content.appendChild(ConstructSlider({
+            Label: "Trace steps (quality)", Min: 48, Max: 384, Step: 4, Unit: "",
+            Get: () => this.Raster.RaymarchSteps, Set: (R) => { this.Raster.RaymarchSteps = R; } }));
+        Host.appendChild(TraceCard);
     }
 
     //--------------------------------------------------------------------------------------------------------
@@ -2235,6 +2250,8 @@ export class TerrainStudio
             else
             {
                 this.RefreshSurvey();
+                BakeSurfaceData(this.Field);
+                this.Raster.UploadChannelGroup(this.Field, "Occlusion");
                 if (this.Stamps.length)
                     this.RefreshStamps();
             }
@@ -2946,11 +2963,11 @@ export class TerrainStudio
         const ShowBrush = this.IsBrushTool() && Hit && this.ViewDimension === "3d";
         return {
             TimeSeconds: (NowStamp - this.TimeOrigin) / 1000.0,
-            ViewMode: this.ViewMode,
+            ViewMode: this.ViewMode === 14 ? 0 : this.ViewMode,
             Shadows: this.Shadows,
             ShowGrid: this.ShowGrid,
             CloudAmount: this.CloudAmount,
-            OverlayAmount: this.Brush.Tool === "channel" && this.ViewMode === 0 ? 0.55 : 0.0,
+            OverlayAmount: this.Brush.Tool === "channel" && (this.ViewMode === 0 || this.ViewMode === 14) ? 0.55 : 0.0,
             Brush: {
                 X: Hit ? Hit.X : 0, Y: Hit ? Hit.Y : 0, Z: Hit ? Hit.Z : 0,
                 Radius: this.Brush.Radius,

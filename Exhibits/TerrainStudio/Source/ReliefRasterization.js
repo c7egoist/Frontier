@@ -172,6 +172,7 @@ const SharedGlsl = /* glsl */`
     uniform sampler2D HeightTex;   // relief height in metres (own texture: sculpt re-uploads stay cheap)
     uniform sampler2D FieldTexA;   // flow, water, snow, moisture
     uniform sampler2D FieldTexB;   // wear, deposition, hardness, spare
+    uniform sampler2D FieldTexC;   // occlusion, protrusion (baked surface data), spare, spare
     uniform sampler2D PaintTex;    // painted rock, meadow, sand, snow
     uniform sampler2D OverlayTex;  // whichever channel is being inspected / painted
     uniform sampler2D ShadowTex;
@@ -186,7 +187,7 @@ const SharedGlsl = /* glsl */`
     uniform vec2  HeightRange;
     uniform float TimeSeconds;
     uniform float Exposure;
-    uniform int   ViewMode;        // 0 shaded · 1 height · 2 slope · 3 flow · 4 water · 5 wear · 6 deposition · 7 hardness · 8 snow · 9 moisture · 10 normals · 11 channel overlay
+    uniform int   ViewMode;        // 0 shaded · 1 height · 2 slope · 3 flow · 4 water · 5 wear · 6 deposition · 7 hardness · 8 snow · 9 moisture · 10 normals · 11 channel overlay · 12 occlusion · 13 protrusion
     uniform float OverlayAmount;
     uniform vec3  OverlayTint;
     uniform mat4  ShadowViewProjection;
@@ -420,6 +421,7 @@ const SurfaceFragmentCore = /* glsl */`
         vec2 XZ = WorldPos.xz;
         vec4 TexA = SampleTexBilinear(FieldTexA, XZ);
         vec4 TexB = SampleTexBilinear(FieldTexB, XZ);
+        vec4 TexC = SampleTexBilinear(FieldTexC, XZ);
         vec4 Paint = SampleTexBilinear(PaintTex, XZ);
         float HeightHere = WorldPos.y;
         float HeightNorm = clamp((HeightHere - HeightRange.x) / max(HeightRange.y - HeightRange.x, 1.0), 0.0, 1.0);
@@ -430,6 +432,8 @@ const SurfaceFragmentCore = /* glsl */`
         float WearHere = TexB.r;
         float DepositionHere = TexB.g;
         float HardnessHere = TexB.b;
+        float OcclusionHere = TexC.r;
+        float ProtrusionHere = TexC.g;
 
         vec3 ViewDir = normalize(CameraPos - WorldPos);
         float ViewDistance = length(CameraPos - WorldPos);
@@ -451,6 +455,8 @@ const SurfaceFragmentCore = /* glsl */`
             else if (ViewMode == 8)  DebugColour = mix(vec3(0.03), vec3(0.95), SnowHere);
             else if (ViewMode == 9)  DebugColour = mix(vec3(0.05, 0.03, 0.01), vec3(0.2, 0.8, 0.35), MoistureHere);
             else if (ViewMode == 10) DebugColour = GeometricNormal * 0.5 + 0.5;
+            else if (ViewMode == 12) DebugColour = vec3(OcclusionHere);
+            else if (ViewMode == 13) DebugColour = vec3(ProtrusionHere);
             else
             {
                 float OverlayReading = SampleChannelBilinear(OverlayTex, 0, XZ);
@@ -459,49 +465,54 @@ const SurfaceFragmentCore = /* glsl */`
             return ApplyFog(DebugColour * DiffuseShade * 1.6, WorldPos, CameraPos);
         }
 
-        // ---- material weights -------------------------------------------------------------
+        // ---- material weights: simulated/baked data only (flat colours, no noise albedo) ----
         float Flatness = smoothstep(0.55, 0.86, GeometricNormal.y);
         float RockW = 1.0 - smoothstep(0.52, 0.78, GeometricNormal.y + WearHere * 0.06);
-        float GrainNoise = NoiseOctaves(XZ * 0.011, 3);
-        float PatchNoise = NoiseOctaves(XZ * 0.0016 + 7.0, 3);
 
-        float VegSignal = MoistureHere * 0.62 + (1.0 - HeightNorm) * 0.28 + PatchNoise * 0.35 - 0.12;
-        float MeadowW = Vegetation * smoothstep(0.34, 0.62, VegSignal) * Flatness * (1.0 - smoothstep(0.55, 0.75, HeightNorm));
-        float SandW = clamp(DepositionHere * 1.25 - 0.22, 0.0, 1.0) * (0.35 + 0.65 * Flatness)
+        float VegSignal = MoistureHere * 0.78 + (1.0 - HeightNorm) * 0.34 - 0.22;
+        float MeadowW = Vegetation * smoothstep(0.30, 0.58, VegSignal) * Flatness * (1.0 - smoothstep(0.55, 0.75, HeightNorm));
+        // Fluvial sediment: silt where the river lost power — fans, floodplains, lakebeds.
+        float SedimentW = clamp(DepositionHere * 1.45 - 0.28, 0.0, 1.0) * (0.35 + 0.65 * smoothstep(0.25, 0.7, FlowHere)) * Flatness;
+        float SandW = clamp(DepositionHere * 1.25 - 0.22, 0.0, 1.0) * (1.0 - MoistureHere * 0.55) * (0.35 + 0.65 * Flatness)
                     + (1.0 - smoothstep(0.0, 3.5, HeightHere - WaterLevel)) * step(0.0, HeightHere - WaterLevel) * 0.6 * Flatness;
-        SandW = clamp(SandW, 0.0, 1.0);
+        SandW = clamp(SandW * (1.0 - SedimentW * 0.7), 0.0, 1.0);
         float ScreeW = clamp(DepositionHere * 0.9 + WearHere * 0.25 - 0.18, 0.0, 1.0) * (1.0 - RockW) * (1.0 - SandW);
         float SnowW = clamp(SnowHere, 0.0, 1.0) * (0.30 + 0.70 * smoothstep(0.30, 0.72, GeometricNormal.y));
         float IceW = SnowW * smoothstep(0.42, 0.78, FlowHere) * Flatness;
 
-        // ---- albedos ----------------------------------------------------------------------
-        float RockMix = clamp(HeightNorm * 0.8 + GrainNoise * 0.5 - 0.15, 0.0, 1.0);
+        // ---- albedos: flat material colours graded only by height/hardness/wear/protrusion ---
+        float RockMix = clamp(HeightNorm * 0.72 + HardnessHere * 0.38 - 0.12, 0.0, 1.0);
         vec3 RockAlbedo = mix(RockLowColour, RockHighColour, RockMix);
-        float BandPhase = sin((HeightHere / StrataBand) * 6.28318 + GrainNoise * 4.2);
+        float BandPhase = sin((HeightHere / StrataBand) * 6.28318);
         vec3 BandTint = mix(vec3(1.06, 0.88, 0.72), vec3(0.82, 0.66, 0.60), BandPhase * 0.5 + 0.5);
         RockAlbedo *= mix(vec3(1.0), BandTint, StrataContrast * 0.85);
-        RockAlbedo *= 0.82 + 0.36 * NoiseOctaves(WorldPos.zy * 0.05 + WorldPos.xy * 0.013, 3);
+        // Exposed crests polish pale in the wind; freshly scoured rock reads lighter.
+        RockAlbedo *= 0.90 + 0.20 * ProtrusionHere + 0.08 * WearHere;
 
-        vec3 SoilAlbedo = mix(DryColour, RockLowColour * 1.1, PatchNoise * 0.7);
-        vec3 MeadowAlbedo = mix(MeadowColour, DryColour, clamp((1.0 - MoistureHere) * 0.7 + GrainNoise * 0.35 - 0.1, 0.0, 1.0));
-        MeadowAlbedo *= 0.8 + 0.45 * NoiseOctaves(XZ * 0.09, 3);
-        vec3 SandAlbedo = SandColour * (0.86 + 0.26 * NoiseOctaves(XZ * 0.06, 2));
-        vec3 ScreeAlbedo = ScreeColour * (0.75 + 0.5 * NoiseOctaves(XZ * 0.14, 3));
-        vec3 SnowAlbedo = SnowColour * (0.94 + 0.10 * GrainNoise);
+        vec3 SoilAlbedo = mix(DryColour, RockLowColour * 1.05, clamp(0.25 + DepositionHere * 0.55, 0.0, 1.0));
+        vec3 SedimentAlbedo = mix(SandColour, DryColour, 0.45) * 0.94;
+        vec3 MeadowAlbedo = mix(MeadowColour, DryColour, clamp((1.0 - MoistureHere) * 0.85 - 0.05, 0.0, 1.0));
+        vec3 SandAlbedo = SandColour;
+        vec3 ScreeAlbedo = ScreeColour * (0.93 + 0.12 * ProtrusionHere);
+        vec3 SnowAlbedo = SnowColour;
         vec3 IceAlbedo = mix(SnowColour, vec3(0.55, 0.72, 0.85), 0.65);
 
         vec3 Albedo = SoilAlbedo;
+        Albedo = mix(Albedo, SedimentAlbedo, SedimentW);
         Albedo = mix(Albedo, SandAlbedo, SandW * (1.0 - MeadowW * 0.6));
         Albedo = mix(Albedo, ScreeAlbedo, ScreeW);
         Albedo = mix(Albedo, MeadowAlbedo, MeadowW);
         Albedo = mix(Albedo, RockAlbedo, RockW);
         Albedo = mix(Albedo, IceAlbedo, IceW * 0.85);
         Albedo = mix(Albedo, SnowAlbedo, SnowW * (1.0 - IceW * 0.7));
+        // Altitude grade: warm lowlands cooling with height.
+        Albedo *= mix(vec3(1.05, 1.00, 0.93), vec3(0.95, 0.99, 1.06), HeightNorm);
 
         float Roughness = 0.93;
         Roughness = mix(Roughness, 0.88, RockW);
         Roughness = mix(Roughness, 0.55, SnowW * 0.6);
         Roughness = mix(Roughness, 0.22, IceW);
+        Roughness = mix(Roughness, 0.45, smoothstep(0.55, 0.95, FlowHere) * RockW * 0.7);   // flow-polished rock
 
         // Painted materials override procedurals in proportion to their coverage.
         float PaintTotal = clamp(Paint.r + Paint.g + Paint.b + Paint.a, 0.0, 1.0);
@@ -525,7 +536,7 @@ const SurfaceFragmentCore = /* glsl */`
         BumpStrength = mix(BumpStrength, 0.30, ScreeW * 0.7);
         vec3 Normal = PerturbNormal(WorldPos, GeometricNormal, 0.38, BumpStrength * 0.055 * DetailFade);
         // Sand ripple micro-normal, aligned across the wind.
-        float Ripple = sin(dot(XZ, vec2(0.83, 0.55)) * 2.4 + GrainNoise * 5.0);
+        float Ripple = sin(dot(XZ, vec2(0.83, 0.55)) * 2.4);
         Normal = normalize(Normal + vec3(0.83, 0.0, 0.55) * Ripple * 0.05 * SandW * DetailFade);
 
         // ---- lighting ---------------------------------------------------------------------
@@ -534,14 +545,12 @@ const SurfaceFragmentCore = /* glsl */`
         float WrappedNdotL = clamp((NdotL + Wrap) / (1.0 + Wrap), 0.0, 1.0);
         float Shadow = ShadowFactor(WorldPos, GeometricNormal, clamp(NdotLRaw, 0.0, 1.0));
 
-        // Concavity ambient occlusion from the height texture.
-        float NeighbourAvg = (SampleHeight(XZ + vec2(FieldTexel * 9.0, 0.0)) + SampleHeight(XZ - vec2(FieldTexel * 9.0, 0.0))
-                            + SampleHeight(XZ + vec2(0.0, FieldTexel * 9.0)) + SampleHeight(XZ - vec2(0.0, FieldTexel * 9.0))) * 0.25;
-        float Concavity = clamp((NeighbourAvg - SampleHeight(XZ)) * 0.045, 0.0, 0.45);
-        float AmbientOcclusion = 1.0 - Concavity * 0.55;
+        // Baked multi-scale occlusion; protrusion lets exposed ground catch a little more sky.
+        float AmbientOcclusion = mix(0.30, 1.0, OcclusionHere);
+        float DirectOcclusion = mix(0.72, 1.0, OcclusionHere) * (0.94 + 0.10 * ProtrusionHere);
 
         vec3 HemiAmbient = mix(RockLowColour * 0.55, mix(SkyHorizonColour, SkyZenithColour, 0.45), Normal.y * 0.5 + 0.5);
-        vec3 Diffuse = Albedo * (SunColour * WrappedNdotL * Shadow + HemiAmbient * 0.60 * AmbientOcclusion);
+        vec3 Diffuse = Albedo * (SunColour * WrappedNdotL * Shadow * DirectOcclusion + HemiAmbient * 0.60 * AmbientOcclusion);
         vec3 Specular = SunColour * GgxSpecular(Normal, ViewDir, SunDirection, Roughness, vec3(0.04)) * max(NdotL, 0.0) * Shadow;
         vec3 EnvSpecular = mix(SkyHorizonColour, SkyZenithColour, 0.5) * pow(1.0 - max(dot(Normal, ViewDir), 0.0), 3.0)
                          * (1.0 - Roughness) * 0.35 * AmbientOcclusion;
@@ -649,6 +658,132 @@ const StampFragmentGlsl = /* glsl */`#version 300 es
 const DepthFragmentGlsl = /* glsl */`#version 300 es
     precision highp float;
     void main() { }
+`;
+
+// Sphere-traced density terrain: the heightfield becomes an implicit surface
+// (density = y - h(x,z) - detail) and is raymarched per-pixel, so shading normals come from the
+// density gradient itself — one continuous smooth surface with no mesh tessellation and no
+// texel stair-stepping. Procedural detail octaves inside the density add relief the 1024²
+// heightmap cannot hold, each fading in as the camera closes in. Hits write gl_FragDepth so
+// stamps, water and the brush ring composite exactly as they do against the mesh.
+const RaymarchFragmentGlsl = /* glsl */`#version 300 es
+    precision highp float;
+    precision highp int;
+    in vec2 Ndc;
+    out vec4 OutColour;
+    uniform vec3 CameraPosition;
+    uniform vec3 CameraRight;
+    uniform vec3 CameraUp;
+    uniform vec3 CameraForward;
+    uniform float TanHalfFov;
+    uniform float Aspect;
+    uniform mat4 ViewProjection;
+    uniform float RaymarchSteps;
+    uniform float RaymarchDetail;
+    uniform vec3 BrushCentre;
+    uniform float BrushRadius;
+    uniform float BrushFalloff;
+    uniform float BrushVisible;
+    uniform float ShowGrid;
+    ${SharedGlsl}
+    ${SurfaceFragmentCore}
+
+    float TraceDetail(vec2 XZ, float Distance)
+    {
+        float Sum = 0.0;
+        Sum += (HashNoise(XZ * (1.0 / 26.0)) * 2.0 - 1.0) * 1.05 * exp(-Distance / 1600.0);
+        Sum += (HashNoise(XZ * (1.0 / 13.0) + 4.7) * 2.0 - 1.0) * 0.52 * exp(-Distance / 850.0);
+        Sum += (HashNoise(XZ * (1.0 / 6.5) + 9.3) * 2.0 - 1.0) * 0.26 * exp(-Distance / 450.0);
+        Sum += (HashNoise(XZ * (1.0 / 3.2) + 2.9) * 2.0 - 1.0) * 0.13 * exp(-Distance / 240.0);
+        return Sum * RaymarchDetail;
+    }
+
+    float TerrainDensity(vec3 P, float Distance)
+    {
+        return P.y - SampleHeight(P.xz) - TraceDetail(P.xz, Distance);
+    }
+
+    vec3 TraceNormal(vec3 P, float Distance)
+    {
+        float E = max(0.35, Distance * 0.0016);
+        vec2 K = vec2(1.0, -1.0);
+        return normalize(K.xyy * TerrainDensity(P + K.xyy * E, Distance)
+                       + K.yyx * TerrainDensity(P + K.yyx * E, Distance)
+                       + K.yxy * TerrainDensity(P + K.yxy * E, Distance)
+                       + K.xxx * TerrainDensity(P + K.xxx * E, Distance));
+    }
+
+    void main()
+    {
+        vec3 Ro = CameraPosition;
+        vec3 Rd = normalize(CameraForward + (CameraRight * (Ndc.x * Aspect) + CameraUp * Ndc.y) * TanHalfFov);
+
+        // Clip the march to the terrain bounding box; misses leave sky/water/stamps to their draws.
+        vec3 BoxMin = vec3(-FieldExtent * 0.5, HeightRange.x - 30.0, -FieldExtent * 0.5);
+        vec3 BoxMax = vec3( FieldExtent * 0.5, HeightRange.y + 30.0,  FieldExtent * 0.5);
+        vec3 InvRd = 1.0 / Rd;
+        vec3 TSmalls = min((BoxMin - Ro) * InvRd, (BoxMax - Ro) * InvRd);
+        vec3 TBigs   = max((BoxMin - Ro) * InvRd, (BoxMax - Ro) * InvRd);
+        float TNear = max(max(TSmalls.x, TSmalls.y), TSmalls.z);
+        float TFar  = min(min(TBigs.x, TBigs.y), TBigs.z);
+        if (TFar <= max(TNear, 0.0))
+            discard;
+
+        float T = max(TNear, 0.0);
+        float PrevT = T;
+        float HitT = -1.0;
+        int MaxSteps = int(RaymarchSteps);
+        for (int StepIndex = 0; StepIndex < 512; StepIndex++)
+        {
+            if (StepIndex >= MaxSteps || T > TFar)
+                break;
+            float D = TerrainDensity(Ro + Rd * T, T);
+            if (D < 0.0)
+            {
+                float Lo = PrevT;
+                float Hi = T;
+                for (int Refine = 0; Refine < 5; Refine++)
+                {
+                    float Mid = (Lo + Hi) * 0.5;
+                    if (TerrainDensity(Ro + Rd * Mid, Mid) < 0.0) Hi = Mid; else Lo = Mid;
+                }
+                HitT = (Lo + Hi) * 0.5;
+                break;
+            }
+            PrevT = T;
+            float Relax = 0.62 / (1.0 + 0.55 * RaymarchDetail * exp(-T / 700.0));
+            T += max(D * Relax, 0.35 + T * 0.0012);
+        }
+        if (HitT < 0.0)
+            discard;
+
+        vec3 P = Ro + Rd * HitT;
+        vec3 Normal = TraceNormal(P, HitT);
+        vec3 Colour = ShadeSurface(P, Normal, CameraPosition);
+        vec3 FinalColour = Tonemap(Colour);
+
+        if (ShowGrid > 0.5)
+        {
+            vec2 GridPos = abs(fract(P.xz / 32.0) - 0.5);
+            float Line = smoothstep(0.48, 0.5, max(GridPos.x, GridPos.y));
+            FinalColour = mix(FinalColour, vec3(0.9), Line * 0.14);
+        }
+
+        if (BrushVisible > 0.5)
+        {
+            float Distance = length(P.xz - BrushCentre.xz);
+            float Ring = 1.0 - smoothstep(0.0, 2.2 + BrushRadius * 0.012, abs(Distance - BrushRadius));
+            float InnerRing = 1.0 - smoothstep(0.0, 1.4 + BrushRadius * 0.008, abs(Distance - BrushRadius * BrushFalloff));
+            float Disc = (1.0 - smoothstep(BrushRadius * BrushFalloff, BrushRadius, Distance)) * 0.10;
+            vec3 Accent = vec3(0.24, 0.77, 0.43);
+            FinalColour = mix(FinalColour, Accent, clamp(Ring * 0.9 + InnerRing * 0.45, 0.0, 1.0));
+            FinalColour += Accent * Disc;
+        }
+
+        vec4 Clip = ViewProjection * vec4(P, 1.0);
+        gl_FragDepth = (Clip.z / Clip.w) * 0.5 + 0.5;
+        OutColour = vec4(FinalColour, 1.0);
+    }
 `;
 
 const SkyVertexGlsl = /* glsl */`#version 300 es
@@ -822,6 +957,9 @@ export class ReliefRasterization
         this.OverlayTint = [1.0, 0.45, 0.2];
         this.HeightRange = [0, 1];
         this.StrataBand = 26.0;
+        this.UseRaymarch = false;
+        this.RaymarchSteps = 220;
+        this.RaymarchDetail = 1.0;
         this.PackScratch = new Float32Array(Resolution * Resolution * 4);
 
         this.ConstructPrograms();
@@ -872,6 +1010,7 @@ export class ReliefRasterization
         this.StampDepthProgram   = this.LinkProgram(StampVertexGlsl, DepthFragmentGlsl);
         this.SkyProgram    = this.LinkProgram(SkyVertexGlsl, SkyFragmentGlsl);
         this.WaterProgram  = this.LinkProgram(WaterVertexGlsl, WaterFragmentGlsl);
+        this.RaymarchProgram = this.LinkProgram(SkyVertexGlsl, RaymarchFragmentGlsl);
     }
 
     ConstructGeometry()
@@ -969,6 +1108,7 @@ export class ReliefRasterization
         this.HeightTex  = this.ConstructFloatTexture(1);
         this.FieldTexA  = this.ConstructFloatTexture(4);
         this.FieldTexB  = this.ConstructFloatTexture(4);
+        this.FieldTexC  = this.ConstructFloatTexture(4);
         this.PaintTex   = this.ConstructFloatTexture(4);
         this.OverlayTex = this.ConstructFloatTexture(1);
         this.ZeroSamples = new Float32Array(Resolution * Resolution);
@@ -1039,6 +1179,11 @@ export class ReliefRasterization
             Field.ChannelSamples("Deposition"),
             Field.ChannelSamples("Hardness"),
             this.ZeroSamples);
+        this.PackAndUpload(this.FieldTexC,
+            Field.ChannelSamples("Occlusion"),
+            Field.ChannelSamples("Protrusion"),
+            this.ZeroSamples,
+            this.ZeroSamples);
     }
 
     // Repack whichever packed texture owns a channel (after painting into it).
@@ -1058,6 +1203,14 @@ export class ReliefRasterization
                 Field.ChannelSamples("Wear"),
                 Field.ChannelSamples("Deposition"),
                 Field.ChannelSamples("Hardness"),
+                this.ZeroSamples);
+        }
+        else if (ChannelName === "Occlusion" || ChannelName === "Protrusion")
+        {
+            this.PackAndUpload(this.FieldTexC,
+                Field.ChannelSamples("Occlusion"),
+                Field.ChannelSamples("Protrusion"),
+                this.ZeroSamples,
                 this.ZeroSamples);
         }
         else if (ChannelName.startsWith("Paint"))
@@ -1133,6 +1286,8 @@ export class ReliefRasterization
         Gl.bindTexture(Gl.TEXTURE_2D, this.OverlayTex);
         Gl.activeTexture(Gl.TEXTURE5);
         Gl.bindTexture(Gl.TEXTURE_2D, this.ShadowTexture);
+        Gl.activeTexture(Gl.TEXTURE6);
+        Gl.bindTexture(Gl.TEXTURE_2D, this.FieldTexC);
         Gl.activeTexture(Gl.TEXTURE0);
     }
 
@@ -1151,6 +1306,7 @@ export class ReliefRasterization
         if (U.PaintTex)  Gl.uniform1i(U.PaintTex, 3);
         if (U.OverlayTex) Gl.uniform1i(U.OverlayTex, 4);
         if (U.ShadowTex) Gl.uniform1i(U.ShadowTex, 5);
+        if (U.FieldTexC) Gl.uniform1i(U.FieldTexC, 6);
 
         Set3("SunDirection", Sun);
         Set3("SunColour", [1.05, 0.97, 0.88].map((C) => C * Env.SunIntensity * 0.42));
@@ -1267,13 +1423,32 @@ export class ReliefRasterization
         Gl.drawArrays(Gl.TRIANGLES, 0, 3);
         Gl.depthMask(true);
 
-        // Terrain.
-        Gl.useProgram(this.TerrainProgram.Program);
-        this.AssignSharedUniforms(this.TerrainProgram, Options, ShadowVP);
-        if (this.TerrainProgram.Uniforms.ViewProjection)
-            Gl.uniformMatrix4fv(this.TerrainProgram.Uniforms.ViewProjection, false, ViewProjection);
-        Gl.bindVertexArray(this.TerrainVao);
-        Gl.drawElements(Gl.TRIANGLES, this.TerrainIndexCount, Gl.UNSIGNED_INT, 0);
+        // Terrain: the displaced mesh, or the sphere-traced density field in its place.
+        if (this.UseRaymarch)
+        {
+            Gl.useProgram(this.RaymarchProgram.Program);
+            this.AssignSharedUniforms(this.RaymarchProgram, Options, ShadowVP);
+            const RU = this.RaymarchProgram.Uniforms;
+            if (RU.ViewProjection) Gl.uniformMatrix4fv(RU.ViewProjection, false, ViewProjection);
+            if (RU.CameraRight)    Gl.uniform3f(RU.CameraRight, Basis.Right[0], Basis.Right[1], Basis.Right[2]);
+            if (RU.CameraUp)       Gl.uniform3f(RU.CameraUp, Basis.Up[0], Basis.Up[1], Basis.Up[2]);
+            if (RU.CameraForward)  Gl.uniform3f(RU.CameraForward, Basis.Forward[0], Basis.Forward[1], Basis.Forward[2]);
+            if (RU.TanHalfFov)     Gl.uniform1f(RU.TanHalfFov, Math.tan(this.FovRadians * 0.5));
+            if (RU.Aspect)         Gl.uniform1f(RU.Aspect, Aspect);
+            if (RU.RaymarchSteps)  Gl.uniform1f(RU.RaymarchSteps, this.RaymarchSteps);
+            if (RU.RaymarchDetail) Gl.uniform1f(RU.RaymarchDetail, this.RaymarchDetail);
+            Gl.bindVertexArray(this.SkyVao);
+            Gl.drawArrays(Gl.TRIANGLES, 0, 3);
+        }
+        else
+        {
+            Gl.useProgram(this.TerrainProgram.Program);
+            this.AssignSharedUniforms(this.TerrainProgram, Options, ShadowVP);
+            if (this.TerrainProgram.Uniforms.ViewProjection)
+                Gl.uniformMatrix4fv(this.TerrainProgram.Uniforms.ViewProjection, false, ViewProjection);
+            Gl.bindVertexArray(this.TerrainVao);
+            Gl.drawElements(Gl.TRIANGLES, this.TerrainIndexCount, Gl.UNSIGNED_INT, 0);
+        }
 
         // SDF stamp surfaces.
         if (this.StampIndexCount > 0)

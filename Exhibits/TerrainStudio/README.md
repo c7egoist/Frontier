@@ -17,7 +17,7 @@ preferred (graceful fallbacks included).
 | **Bernese Alps** | Granite massif: ridged crests, glacial U-valleys, hydraulic rills, altitude snowpack |
 | **Khumbu Himalaya** | Collision arc on a foreland: knife arêtes, antecedent gorges, névé above 470 m |
 | **Colorado Canyon** | Tilted sedimentary plateau: strata hardness staircase, stream-power river, SDF arch |
-| **Hamada Insels** | Rocky desert: cellular mesa remnants, talus aprons, wadi drainage, sand sheeting |
+| **Rocky Hamada** | Dissected plateau in retreat: remnants at staggered levels, wadi fans, sand sheeting |
 
 Every preset is an ordinary editable layer stack — nothing is baked. Open
 one, restack it, re-seed it, save your own.
@@ -47,10 +47,17 @@ cancellable, so the editor never locks):
   hardness-scaled capacity; writes Wear and Deposition.
 - **Drainage solve** — priority-flood (Wang & Liu) depression filling, D8
   accumulation; writes Flow and lake Water.
-- **Fluvial incision** — stream-power law `E ∝ A^0.45 · (0.12 + S)` with a
-  base-level slope floor, applied as a *swath*: each channel cell's cut is
-  splatted across a valley cross-section whose half-width grows with √A.
-  Point incision alone digs slots that talus refill; the swath digs valleys.
+- **River erosion (fluvial)** — stream-power law `E ∝ A^0.45 · (0.12 + S)` with
+  a base-level slope floor, applied as a *swath*: each channel cell's cut is
+  splatted across a valley cross-section whose half-width grows with √A
+  (point incision alone digs slots that talus refill; the swath digs
+  valleys). Eroded mass enters a sediment load routed cell-to-cell
+  downstream: carrying capacity grows with discharge and grade, an
+  overloaded river *deposits* — floodplains, alluvial fans where the grade
+  breaks, deltas in lakes — and a loaded river saws slower but never below
+  a quarter of its detachment rate (its bedload is its tools). Tune it with
+  the layer's **Sedimentation** and **Sediment capacity** sliders. Writes
+  Flow, Water and honest Deposition only where sediment actually settles.
 - **Thermal erosion** — angle-of-repose relaxation that is *hardness-aware*:
   where strata hardness varies, hard beds stand at the cliff angle while
   soft beds repose — the cliff-and-bench staircase of real canyon country.
@@ -75,6 +82,37 @@ viewable in the viewport.
 
 The field border eases into the sea (outer 8.5% rim) so worlds read as
 finished landmasses rather than floating slabs.
+
+**Texturing is data-driven, with flat colours.** After every build the
+editor bakes two Gaea-style data maps from the finished heightfield —
+**Occlusion** (multi-scale burial at 3/14/48-texel radii, shaded by how
+much sky a slope can see) and **Protrusion** (how proud a crest or edge
+stands) — into first-class channels you can inspect like any other. The
+splat shader then textures *only* from data: baked occlusion and
+protrusion, altitude grading, strata hardness, wear, sediment (silt where
+the river laid its load down) and flow (wet, polished rock along trunk
+streams). Material colours themselves are flat — there is no noise in the
+albedo at all; variation comes from the simulated maps and the geometry.
+
+## Traced density view & resolution limits
+
+The substrate is a **1024² Float32 heightmap** (2 km, 2 m texels): every
+channel, layer cache and solver scales with it, so 2048² would cost 4×
+and 4096² 16× — beyond what CPU solvers in a browser tab survive. The SDF
+stamps are true voxel grids, capped at 130³ cells over their bounds.
+
+The **Traced density** view (view menu, `Shaded ▾`) sidesteps the texel
+limit for *rendering*: the heightfield becomes an implicit density
+(`d = y − h(x,z) − detail`) held entirely in the fragment shader and
+sphere-traced per pixel. Shading normals come from the density gradient —
+one continuous smooth surface, no mesh tessellation, no texel
+stair-stepping — and four procedural detail octaves (26 m down to 3.2 m
+wavelength) live inside the density, each fading in as the camera closes
+in, so relief keeps resolving as you zoom past what the heightmap holds.
+Hits write real depth, so stamps, water and the brush ring composite
+exactly as against the mesh; shadows still come from the mesh shadow map.
+Detail amount and trace quality are sliders on the Scene page. The mesh
+view remains the fast path for sculpting on weak GPUs.
 
 ## The editor
 

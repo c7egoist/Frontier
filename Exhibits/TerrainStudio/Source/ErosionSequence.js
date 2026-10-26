@@ -50,7 +50,7 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
     const N          = Resolution;
 
     const DropletCount     = Math.max(1000, Math.round(Params.Droplets));
-    const Lifetime         = 26;
+    const Lifetime         = 40;
     const Inertia          = Params.Inertia;
     const CapacityFactor   = Params.Capacity;
     const MinimumCapacity  = 0.01;
@@ -94,6 +94,9 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
         let Speed    = 1.0;
         let Water    = 1.0;
         let Sediment = 0.0;
+        // Each droplet keeps a consistent turning bias for its whole life: rills curve, cross and
+        // capture one another instead of running as parallel corduroy down smooth faces.
+        const TurnRate = (NextRandom() - 0.5) * 0.85;
 
         for (let Step = 0; Step < Lifetime; Step++)
         {
@@ -120,6 +123,14 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
                 break;
             DirX /= DirLength;
             DirY /= DirLength;
+            // Persistent curvature (this droplet's TurnRate) plus a whisper of jitter.
+            const CurveAngle = TurnRate * (0.65 + NextRandom() * 0.35);
+            const CurveCos = Math.cos(CurveAngle);
+            const CurveSin = Math.sin(CurveAngle);
+            const CurvedX = DirX * CurveCos - DirY * CurveSin;
+            const CurvedY = DirX * CurveSin + DirY * CurveCos;
+            DirX = CurvedX;
+            DirY = CurvedY;
             PosX += DirX;
             PosY += DirY;
             if (PosX < Inset || PosX > N - Inset - 1 || PosY < Inset || PosY > N - Inset - 1)
@@ -515,25 +526,42 @@ export async function FluvialIncision(Field, Params, Report, Cancel)
 
     const Hardness    = Field.ChannelSamples("Hardness");
     const Strength    = Params.Strength;
-    const DepositShare = 0.32;
+    const Sedimentation = (Params.Sedimentation !== undefined) ? Params.Sedimentation : 0.55;
+    const CapacityScale = (Params.Capacity !== undefined) ? Params.Capacity : 1.0;
     const AreaExponent = 0.45;
     const Iterations   = Math.max(1, Math.round(Params.Iterations));
     const Applied = new Float32Array(Heights.length);
     const Carve   = new Float32Array(Heights.length);
+    const Load    = new Float32Array(Heights.length);
 
     for (let Iteration = 0; Iteration < Iterations; Iteration++)
     {
         Applied.fill(0.0);
         Carve.fill(0.0);
+        Load.fill(0.0);
         for (let OrderIndex = 0; OrderIndex < Ordered; OrderIndex++)
         {
             const Cell   = Order[OrderIndex];
             const Target = Receiver[Cell];
+            const Incoming = Load[Cell];
             if (Target < 0)
+            {
+                // World edge or unfilled pit: whatever the river still carries is laid down here —
+                // lake deltas and terminal fans form exactly this way.
+                if (Incoming > 0.0)
+                {
+                    const Dump = Math.min(Incoming * Sedimentation, 2.5);
+                    Heights[Cell] += Dump;
+                    Deposition[Cell] = Math.min(Deposition[Cell] + Dump * 0.22, 1.0);
+                }
                 continue;
+            }
             const AreaNorm = Accumulation[Cell] / MaxAccumulation;
             if (AreaNorm < 0.0004)
+            {
+                Load[Target] += Incoming;
                 continue;
+            }
             const CellX = Cell % N;
             const CellZ = (Cell / N) | 0;
             const TargetX = Target % N;
@@ -545,11 +573,28 @@ export async function FluvialIncision(Field, Params, Report, Cancel)
             // where its local grade is gentle — that is how a river crosses a plateau at all.
             let Incision = Strength * Math.pow(AreaNorm, AreaExponent) * (0.12 + Math.min(SlopeHere, 1.4)) * Resistance * 60.0;
             if (Incision > 14.0) Incision = 14.0;
-            if (Incision <= 0.0)
-                continue;
-            Applied[Cell] = Incision;
-            Heights[Target] += Incision * DepositShare;
-            Deposition[Target] = Math.min(Deposition[Target] + Incision * 0.08, 1.0);
+            // Transport limit (the sedimentation half of the river): carrying capacity grows with
+            // discharge and grade. An overloaded river deposits the excess here — floodplains and
+            // alluvial fans grow where the grade breaks. A loaded river also saws slower (the cover
+            // effect), but never below a quarter of its detachment rate: its bedload is its tools.
+            const CapacityHere = CapacityScale * Strength * Math.pow(AreaNorm, AreaExponent) * (0.05 + Math.min(SlopeHere, 1.4)) * 60.0;
+            let Carried = Incoming;
+            if (Carried > CapacityHere)
+            {
+                const Lay = Math.min((Carried - CapacityHere) * Sedimentation, 1.6);
+                if (Lay > 0.0)
+                {
+                    Heights[Cell] += Lay;
+                    Deposition[Cell] = Math.min(Deposition[Cell] + Lay * 0.22, 1.0);
+                    Carried -= Lay;
+                }
+            }
+            const Headroom = Math.max(CapacityHere - Carried, Incision * 0.25);
+            const Cut = Math.min(Incision, Headroom);
+            if (Cut > 0.0)
+                Applied[Cell] = Cut;
+            // The swath cut below quarries the valley walls too; the load books their volume at 1.6x.
+            Load[Target] += Carried + Cut * 1.6;
         }
         // A one-texel slot is not a valley: splat each channel cell's incision across a swath
         // whose half-width grows with drainage area, then cut the max-composited profile once.
@@ -815,4 +860,49 @@ export async function SnowAccumulation(Field, Params, Noise, Report, Cancel)
         }
     }
     Report(1.0);
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------------------
+//                                                                  SURFACE DATA BAKE
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+// 📝 Data maps baked from the finished heightfield: multi-scale occlusion (how buried a texel sits
+//    inside the landform, shaded by how much sky its slope can see) and protrusion (how proud a crest
+//    or edge stands). The splat shader textures from these — plus height, sediment and flow — using
+//    flat material colours, the way dedicated erosion tools hand data to a texturing stage.
+export function BakeSurfaceData(Field)
+{
+    const Heights = Field.Heights;
+    const N = Resolution;
+    const Occlusion  = Field.ChannelSamples("Occlusion");
+    const Protrusion = Field.ChannelSamples("Protrusion");
+
+    // BoxBlurInPlace returns a fresh array (its name lies); the source is left untouched.
+    const Near = BoxBlurInPlace(Heights, 3);
+    const Mid  = BoxBlurInPlace(Heights, 14);
+    const Far  = BoxBlurInPlace(Heights, 48);
+
+    for (let Z = 0; Z < N; Z++)
+    {
+        const Row = Z * N;
+        const RowUp = (Z > 0 ? Z - 1 : Z) * N;
+        const RowDown = (Z < N - 1 ? Z + 1 : Z) * N;
+        for (let X = 0; X < N; X++)
+        {
+            const Index = Row + X;
+            const H = Heights[Index];
+            // Burial at three scales: rills, valleys, whole basins.
+            const Burial = 0.34 * Math.max(Near[Index] - H, 0.0) / 1.4
+                         + 0.36 * Math.max(Mid[Index]  - H, 0.0) / 7.0
+                         + 0.22 * Math.max(Far[Index]  - H, 0.0) / 26.0;
+            const GradX = (Heights[Row + Math.min(X + 1, N - 1)] - Heights[Row + Math.max(X - 1, 0)]) / (2.0 * TexelSize);
+            const GradY = (Heights[RowDown + X] - Heights[RowUp + X]) / (2.0 * TexelSize);
+            const SkyFacing = 1.0 / Math.sqrt(1.0 + GradX * GradX + GradY * GradY);
+            let Occ = (1.0 - Burial) * (0.55 + 0.45 * SkyFacing);
+            Occlusion[Index] = Occ < 0.0 ? 0.0 : Occ > 1.0 ? 1.0 : Occ;
+            const Pro = 0.65 * Math.max(H - Mid[Index], 0.0) / 6.0
+                      + 0.35 * Math.max(H - Near[Index], 0.0) / 1.1;
+            Protrusion[Index] = Pro > 1.0 ? 1.0 : Pro;
+        }
+    }
 }

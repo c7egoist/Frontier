@@ -174,6 +174,43 @@ export class LatticeNoise
         }
         return Second - Nearest;
     }
+
+    // 📝 Same Worley field, but also returns the winning cell's stable hash in [0, 1). Builders use it
+    //    to give every plateau remnant its own level — without it all mesa tops saturate identically.
+    CellularWithIdentity(PosX, PosY)
+    {
+        const Permutation = this.Permutation;
+        const CellX = Math.floor(PosX);
+        const CellY = Math.floor(PosY);
+        let Nearest = 8.0;
+        let Second  = 8.0;
+        let Winner  = 0;
+        for (let OffsetY = -1; OffsetY <= 1; OffsetY++)
+        {
+            for (let OffsetX = -1; OffsetX <= 1; OffsetX++)
+            {
+                const NeighbourX = CellX + OffsetX;
+                const NeighbourY = CellY + OffsetY;
+                const Hash = Permutation[Permutation[NeighbourX & 255] + (NeighbourY & 255)];
+                const PointX = NeighbourX + GradientX[Hash] * 0.44 + 0.5;
+                const PointY = NeighbourY + GradientY[Hash] * 0.44 + 0.5;
+                const DeltaX = PosX - PointX;
+                const DeltaY = PosY - PointY;
+                const Distance = Math.sqrt(DeltaX * DeltaX + DeltaY * DeltaY);
+                if (Distance < Nearest)
+                {
+                    Second  = Nearest;
+                    Nearest = Distance;
+                    Winner  = Hash;
+                }
+                else if (Distance < Second)
+                {
+                    Second = Distance;
+                }
+            }
+        }
+        return [Second - Nearest, Winner / 256.0];
+    }
 }
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
@@ -192,6 +229,8 @@ export const DerivedChannels =
     { Name: "Hardness",   Label: "Rock hardness",     Tint: [0.65, 0.60, 0.95], Writer: "Strata terrace" },
     { Name: "Snow",       Label: "Snow & ice",        Tint: [0.90, 0.95, 1.00], Writer: "Snow accumulation" },
     { Name: "Moisture",   Label: "Soil moisture",     Tint: [0.30, 0.85, 0.45], Writer: "Derived at rebuild" },
+    { Name: "Occlusion",  Label: "Occlusion (baked)", Tint: [0.85, 0.85, 0.90], Writer: "Surface bake" },
+    { Name: "Protrusion", Label: "Protrusion (baked)",Tint: [1.00, 0.85, 0.55], Writer: "Surface bake" },
 ];
 
 export const MaterialPaintChannels =

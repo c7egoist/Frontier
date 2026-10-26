@@ -103,7 +103,12 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
     }
     const Span = Math.max(Hi - Lo, 0.0001);
     for (let Index = 0; Index < Out.length; Index++)
-        Out[Index] = Math.pow((Out[Index] - Lo) / Span, 1.2) * P.Amplitude;
+    {
+        // Clamp before the fractional power: Lo/Hi are tracked in double precision while Out is
+        // Float32, so the minimum cell can round a hair below Lo — and pow(negative, 1.2) is NaN.
+        const Unit = Math.min(Math.max((Out[Index] - Lo) / Span, 0.0), 1.0);
+        Out[Index] = Math.pow(Unit, 1.2) * P.Amplitude;
+    }
 }
 
 async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
@@ -154,18 +159,22 @@ async function BuildCellularPlateau(Field, Layer, Out, Report, Cancel)
     const N     = Resolution;
     const Scale = TexelSize / P.CellSize;
     const Edge  = Math.max(P.EdgeWidth, 0.02);
+    const HeightVariance = (P.HeightVariance !== undefined) ? P.HeightVariance : 0.65;
     let Lo = Infinity, Hi = -Infinity;
     for (let Z = 0; Z < N; Z++)
     {
         for (let X = 0; X < N; X++)
         {
-            const Warp = Noise.Fractal(X * Scale * 0.6 + 8.8, Z * Scale * 0.6 + 1.9, 2, 2.0, 0.5) * 0.35;
-            const Cell = Noise.Cellular((X + Warp * 40.0) * Scale, (Z - Warp * 40.0) * Scale);
+            const Warp = Noise.Fractal(X * Scale * 0.6 + 8.8, Z * Scale * 0.6 + 1.9, 2, 2.0, 0.5);
+            const [Cell, Identity] = Noise.CellularWithIdentity((X + Warp * 70.0) * Scale, (Z - Warp * 70.0) * Scale);
             let Top = (Cell - 0.06) / Edge;
             Top = Top < 0.0 ? 0.0 : Top > 1.0 ? 1.0 : Top;
             Top = Top * Top * (3.0 - 2.0 * Top);
+            // Every remnant stands at its own level. Without the per-cell level all mesa tops
+            // saturate to one elevation and the field reads as stacked cakes, not eroded plateau.
+            const Level = 1.0 - HeightVariance * (1.0 - Identity);
             const Detail = Noise.Fractal(X * TexelSize / 260.0, Z * TexelSize / 260.0, 4, 2.0, 0.5);
-            const Raised = (0.18 + 0.82 * Top) + Detail * 0.07;
+            const Raised = (0.18 + 0.82 * Top * Level) + Detail * 0.07;
             Out[Z * N + X] = Raised;
             if (Raised < Lo) Lo = Raised;
             if (Raised > Hi) Hi = Raised;
@@ -320,6 +329,7 @@ export const LayerTypes =
             Param("BaseElevation", "Base elevation",   -200, 600, 5,  0,   "m"),
             Param("CellSize",      "Cell size",        120, 900, 5,   380, "m"),
             Param("EdgeWidth",     "Edge softness",    0.05, 0.9, 0.01, 0.4, ""),
+            Param("HeightVariance", "Remnant height variance", 0, 0.95, 0.01, 0.65, ""),
         ],
         Build: (Field, Layer, Out, Report, Cancel) => BuildCellularPlateau(Field, Layer, Out, Report, Cancel),
     },
@@ -346,12 +356,14 @@ export const LayerTypes =
         Modify: (Field, Layer, Report, Cancel) => ApplyStrataTerrace(Field, Layer, Report, Cancel),
     },
     {
-        Id: "FluvialIncision", Label: "Fluvial incision", Group: "Erosion", Glyph: "river",
-        Blurb: "Drainage solution + stream-power law. Writes Flow and Water.",
+        Id: "FluvialIncision", Label: "River erosion", Group: "Erosion", Glyph: "river",
+        Blurb: "Drainage solution + stream-power incision with downstream sediment transport: what the river cannot carry it lays down as floodplains, fans and deltas. Writes Flow, Water, Deposition.",
         Params:
         [
-            Param("Strength",   "Incision strength", 0, 3, 0.05, 1.0, ""),
-            Param("Iterations", "Incision iterations", 1, 6, 1,  2,   ""),
+            Param("Strength",      "Incision strength",  0, 3, 0.05,   1.0,  ""),
+            Param("Iterations",    "Incision iterations", 1, 6, 1,     2,    ""),
+            Param("Sedimentation", "Sedimentation",       0, 1, 0.01,   0.55, ""),
+            Param("Capacity",      "Sediment capacity",   0.2, 3, 0.05, 1.0,  "x"),
         ],
         Modify: (Field, Layer, Report, Cancel) => FluvialIncision(Field, Layer.Params, Report, Cancel),
     },
