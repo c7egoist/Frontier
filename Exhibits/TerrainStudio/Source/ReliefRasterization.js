@@ -487,7 +487,7 @@ const SurfaceFragmentCore = /* glsl */`
         vec3 BandTint = mix(vec3(1.06, 0.88, 0.72), vec3(0.82, 0.66, 0.60), BandPhase * 0.5 + 0.5);
         RockAlbedo *= mix(vec3(1.0), BandTint, StrataContrast * 0.85);
         // Exposed crests polish pale in the wind; freshly scoured rock reads lighter.
-        RockAlbedo *= 0.90 + 0.20 * ProtrusionHere + 0.08 * WearHere;
+        RockAlbedo *= 0.93 + 0.11 * ProtrusionHere + 0.06 * WearHere;
 
         vec3 SoilAlbedo = mix(DryColour, RockLowColour * 1.05, clamp(0.25 + DepositionHere * 0.55, 0.0, 1.0));
         vec3 SedimentAlbedo = mix(SandColour, DryColour, 0.45) * 0.94;
@@ -546,8 +546,8 @@ const SurfaceFragmentCore = /* glsl */`
         float Shadow = ShadowFactor(WorldPos, GeometricNormal, clamp(NdotLRaw, 0.0, 1.0));
 
         // Baked multi-scale occlusion; protrusion lets exposed ground catch a little more sky.
-        float AmbientOcclusion = mix(0.30, 1.0, OcclusionHere);
-        float DirectOcclusion = mix(0.72, 1.0, OcclusionHere) * (0.94 + 0.10 * ProtrusionHere);
+        float AmbientOcclusion = mix(0.42, 1.0, OcclusionHere);
+        float DirectOcclusion = mix(0.80, 1.0, OcclusionHere) * (0.96 + 0.07 * ProtrusionHere);
 
         vec3 HemiAmbient = mix(RockLowColour * 0.55, mix(SkyHorizonColour, SkyZenithColour, 0.45), Normal.y * 0.5 + 0.5);
         vec3 Diffuse = Albedo * (SunColour * WrappedNdotL * Shadow * DirectOcclusion + HemiAmbient * 0.60 * AmbientOcclusion);
@@ -847,7 +847,10 @@ const SkyFragmentGlsl = /* glsl */`#version 300 es
         vec3 Dir = normalize(CameraForward + CameraRight * Ndc.x * TanHalfFov * Aspect + CameraUp * Ndc.y * TanHalfFov);
         float Elevation = clamp(Dir.y, -1.0, 1.0);
         vec3 Colour = mix(SkyHorizonColour, SkyZenithColour, pow(max(Elevation, 0.0), 0.40));
-        Colour = mix(Colour, FogColour * 0.92, smoothstep(0.06, -0.08, Elevation));
+        float BelowHorizon = 1.0 - smoothstep(-0.08, 0.06, Elevation);
+        float DeepGround = 1.0 - smoothstep(-0.45, -0.05, Elevation);
+        vec3 GroundHaze = mix(FogColour * 0.86, FogColour * vec3(0.38, 0.36, 0.34), DeepGround);
+        Colour = mix(Colour, GroundHaze, BelowHorizon);
 
         float SunDot = dot(Dir, SunDirection);
         float Disc = smoothstep(0.99955, 0.99985, SunDot);
@@ -911,7 +914,10 @@ const WaterFragmentGlsl = /* glsl */`#version 300 es
         float Bx = WaterBump(FlowP + vec2(Eps, 0.0));
         float Bz = WaterBump(FlowP + vec2(0.0, Eps));
         float B0b = WaterBump(XZ * 0.16 - vec2(TimeSeconds * 0.03, 0.0));
-        vec3 Normal = normalize(vec3((B0 - Bx) * 1.4 + (B0b - 0.5) * 0.08, 1.0, (B0 - Bz) * 1.4));
+        // Wave detail must die with distance: unfaded, the per-pixel noise normal aliases into
+        // sparkling static across the whole sea when the camera sits kilometres away.
+        float DetailFade = exp(-length(CameraPosition - WorldPosition) * 0.0012);
+        vec3 Normal = normalize(vec3(((B0 - Bx) * 1.4 + (B0b - 0.5) * 0.08) * DetailFade, 1.0, (B0 - Bz) * 1.4 * DetailFade));
 
         vec3 ViewDir = normalize(CameraPosition - WorldPosition);
         float Fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(Normal, ViewDir), 0.0), 5.0);
@@ -923,7 +929,7 @@ const WaterFragmentGlsl = /* glsl */`#version 300 es
         float StreamFlow = SampleChannelBilinear(FieldTexA, 0, XZ);
         Body = mix(Body, WaterTint * 1.2, smoothstep(0.6, 0.95, StreamFlow) * 0.3);
 
-        vec3 Specular = SunColour * GgxSpecular(Normal, ViewDir, SunDirection, 0.07, vec3(0.02)) * max(dot(Normal, SunDirection), 0.0);
+        vec3 Specular = SunColour * GgxSpecular(Normal, ViewDir, SunDirection, mix(0.07, 0.38, 1.0 - DetailFade), vec3(0.02)) * max(dot(Normal, SunDirection), 0.0);
         float FoamBand = 1.0 - smoothstep(0.0, 0.85, DepthBelow);
         float FoamPattern = smoothstep(0.58, 0.85, NoiseOctaves(XZ * 0.33 + TimeSeconds * 0.045, 3)) * FoamBand;
         vec3 Colour = mix(Body, SkyReflection, Fresnel) + Specular;
@@ -1057,7 +1063,7 @@ export class ReliefRasterization
         Gl.bindVertexArray(null);
 
         // Water plane covering the field plus a margin.
-        const Reach = WorldExtent * 0.75;
+        const Reach = WorldExtent * 4.0;
         const Plane = new Float32Array([-Reach, -Reach, Reach, -Reach, -Reach, Reach, Reach, Reach]);
         this.WaterVao = Gl.createVertexArray();
         Gl.bindVertexArray(this.WaterVao);

@@ -137,6 +137,42 @@ Keys: drag orbit · wheel zoom · right-drag pan · double-click set pivot ·
 `F` frame · `G` grid · `P` panels · `[` `]` brush size · `X` flip brush ·
 `/` search · `Ctrl/⌘+Z` undo (region-sliced, 28 deep) · `Esc` cancel build.
 
+## Steep-face honesty (round 4)
+
+The dripped-wax corduroy that used to cover steep Himalayan walls was
+diagnosed numerically (groove energy at 16 m lag, measured per layer
+prefix) and turned out to be four stacked causes, none of them the river
+solver it was first blamed on:
+
+- **Formation** — the ridge and tectonic crest fields were sharpened
+  three times over (ridged sharpness, a `pow 1.45` shaping, a `pow 1.2`
+  normalisation), producing thin fins with slot valleys between them.
+  The shaping powers are gone, crests blend toward a coarse blur so
+  faces stay broad, and the finest ridge octaves (8–16 m web) are no
+  longer generated.
+- **Hydraulic wash** — droplet sediment capacity grew unboundedly with
+  slope and speed, so droplets augered deep parallel rills down every
+  wall. Capacity now saturates with slope (sheet flow is depth-limited)
+  and droplets have a terminal velocity.
+- **Thermal repose** — winner-take-all transfer to the single lowest of
+  four neighbours made mass travel in single-file paths, stamping its
+  own rill network onto everything it relaxed. It now distributes to
+  all eight over-talused neighbours in proportion to excess.
+- **Drainage routing** — flow accumulation is multiple-flow-direction
+  (Holmgren, slope⁴ weights) instead of single-receiver D8, so the
+  flow/wear/sediment maps texture faces as irregular wash rather than
+  regular stripes; fluvial incision is also gated to real drainage area
+  so it no longer textures unchannelled walls.
+
+Snow hold is now measured on a slope-blurred surface (real névé bridges
+texel-scale ribs instead of shedding off every bump), the sky below the
+horizon is deep ground haze and the water plane reaches it, so a
+terrain can no longer float on a white void; distant water fades its
+wave detail instead of aliasing into static. Net effect, steep-face
+groove energy relative to relief: the Himalaya now sits at the same
+smoothness the Alps always had, with its gorges, crests and deposition
+intact.
+
 ## Provenance & conventions
 
 The UI reuses the Alloy (TextureStudio) editor design language from

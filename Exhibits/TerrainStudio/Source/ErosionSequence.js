@@ -50,7 +50,7 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
     const N          = Resolution;
 
     const DropletCount     = Math.max(1000, Math.round(Params.Droplets));
-    const Lifetime         = 40;
+    const Lifetime         = 34;
     const Inertia          = Params.Inertia;
     const CapacityFactor   = Params.Capacity;
     const MinimumCapacity  = 0.01;
@@ -149,7 +149,13 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
                              + NAB * (1.0 - NewFracX) * NewFracY + NBB * NewFracX * NewFracY;
             const DeltaHeight = HeightNext - HeightHere;
 
-            const Capacity = Math.max(CapacityFactor * Speed * Water * -DeltaHeight, MinimumCapacity);
+            // Sediment capacity saturates with slope: real sheet flow is depth-limited, so a
+            // near-vertical face does not grant a droplet unbounded carrying power. Without the
+            // saturation (and the terminal speed below), droplets auger deep parallel grooves
+            // down every steep wall — the wax-drip artefact.
+            const Drop = -DeltaHeight;
+            const EffectiveDrop = Drop > 0.0 ? Drop / (1.0 + Drop * 0.30) : Drop;
+            const Capacity = Math.max(CapacityFactor * Speed * Water * EffectiveDrop, MinimumCapacity);
 
             if (Sediment > Capacity || DeltaHeight > 0.0)
             {
@@ -168,7 +174,7 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
             }
             else
             {
-                let Amount = Math.min((Capacity - Sediment) * ErodeRate, -DeltaHeight > 0.0 ? -DeltaHeight : 0.0);
+                let Amount = Math.min((Capacity - Sediment) * ErodeRate, EffectiveDrop > 0.0 ? EffectiveDrop : 0.0);
                 if (Amount > 0.0)
                 {
                     for (let BrushIndex = 0; BrushIndex < Offsets.length; BrushIndex++)
@@ -189,6 +195,7 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
             }
 
             Speed = Math.sqrt(Math.max(Speed * Speed + DeltaHeight * Gravity, 0.0));
+            if (Speed > 3.2) Speed = 3.2;   // terminal velocity: friction wins on long faces
             Water *= 1.0 - EvaporateRate;
             if (Water < 0.01)
                 break;
@@ -269,23 +276,43 @@ export async function ThermalErosion(Field, Params, Report, Cancel)
             {
                 const Index  = Row + X;
                 const Height = Heights[Index];
-                let Lowest       = Height;
-                let LowestIndex  = Index;
-                const Left  = Heights[Index - 1];
-                const Right = Heights[Index + 1];
-                const Up    = Heights[Index - N];
-                const Down  = Heights[Index + N];
-                if (Left  < Lowest) { Lowest = Left;  LowestIndex = Index - 1; }
-                if (Right < Lowest) { Lowest = Right; LowestIndex = Index + 1; }
-                if (Up    < Lowest) { Lowest = Up;    LowestIndex = Index - N; }
-                if (Down  < Lowest) { Lowest = Down;  LowestIndex = Index + N; }
-                const Drop = Height - Lowest;
                 const CellLimit = Limit + (CliffLimit - Limit) * HardnessNorm[Index];
-                if (Drop > CellLimit)
+                const DiagLimit = CellLimit * 1.41421356;
+                // Distribute to ALL over-talused neighbours in proportion to their excess, keeping
+                // the same total outflow (MaxExcess * Rate) the old winner-take-all rule used.
+                // Dumping everything into the single lowest of four neighbours makes mass travel
+                // in single-file preferential paths — iterated dozens of times, that stamps its
+                // own rill network onto every steep face (the corduroy this solver used to set).
+                const E0 = (Height - Heights[Index - 1])     - CellLimit;
+                const E1 = (Height - Heights[Index + 1])     - CellLimit;
+                const E2 = (Height - Heights[Index - N])     - CellLimit;
+                const E3 = (Height - Heights[Index + N])     - CellLimit;
+                const E4 = (Height - Heights[Index - N - 1]) - DiagLimit;
+                const E5 = (Height - Heights[Index - N + 1]) - DiagLimit;
+                const E6 = (Height - Heights[Index + N - 1]) - DiagLimit;
+                const E7 = (Height - Heights[Index + N + 1]) - DiagLimit;
+                let MaxExcess = 0.0, SumExcess = 0.0;
+                if (E0 > 0.0) { SumExcess += E0; if (E0 > MaxExcess) MaxExcess = E0; }
+                if (E1 > 0.0) { SumExcess += E1; if (E1 > MaxExcess) MaxExcess = E1; }
+                if (E2 > 0.0) { SumExcess += E2; if (E2 > MaxExcess) MaxExcess = E2; }
+                if (E3 > 0.0) { SumExcess += E3; if (E3 > MaxExcess) MaxExcess = E3; }
+                if (E4 > 0.0) { SumExcess += E4; if (E4 > MaxExcess) MaxExcess = E4; }
+                if (E5 > 0.0) { SumExcess += E5; if (E5 > MaxExcess) MaxExcess = E5; }
+                if (E6 > 0.0) { SumExcess += E6; if (E6 > MaxExcess) MaxExcess = E6; }
+                if (E7 > 0.0) { SumExcess += E7; if (E7 > MaxExcess) MaxExcess = E7; }
+                if (MaxExcess > 0.0)
                 {
-                    const Move = (Drop - CellLimit) * Rate;
-                    Delta[Index]       -= Move;
-                    Delta[LowestIndex] += Move;
+                    const Scale = MaxExcess * Rate / SumExcess;
+                    let Moved = 0.0;
+                    if (E0 > 0.0) { const M = E0 * Scale; Delta[Index - 1]     += M; Moved += M; }
+                    if (E1 > 0.0) { const M = E1 * Scale; Delta[Index + 1]     += M; Moved += M; }
+                    if (E2 > 0.0) { const M = E2 * Scale; Delta[Index - N]     += M; Moved += M; }
+                    if (E3 > 0.0) { const M = E3 * Scale; Delta[Index + N]     += M; Moved += M; }
+                    if (E4 > 0.0) { const M = E4 * Scale; Delta[Index - N - 1] += M; Moved += M; }
+                    if (E5 > 0.0) { const M = E5 * Scale; Delta[Index - N + 1] += M; Moved += M; }
+                    if (E6 > 0.0) { const M = E6 * Scale; Delta[Index + N - 1] += M; Moved += M; }
+                    if (E7 > 0.0) { const M = E7 * Scale; Delta[Index + N + 1] += M; Moved += M; }
+                    Delta[Index] -= Moved;
                 }
             }
         }
@@ -378,9 +405,12 @@ export async function SolveDrainage(Field, Report, Cancel)
     }
 
     let Processed = 0;
+    const FloodOrder = new Int32Array(Count);
+    let Flooded = 0;
     while (HeapSize > 0)
     {
         const Cell = HeapPop();
+        FloodOrder[Flooded++] = Cell;
         const CellX = Cell % N;
         const CellZ = (Cell / N) | 0;
         const Spill = Filled[Cell] + Epsilon;
@@ -453,8 +483,8 @@ export async function SolveDrainage(Field, Report, Cancel)
         }
     }
 
-    //📝 Kahn upstream order: cells with no donors first. Accumulation rides the same order that the
-    //   incision pass will reuse to deliver sediment downstream.
+    //📝 Kahn upstream order on the D8 donor tree: cells with no donors first. The incision pass
+    //   reuses this order (and the single D8 Receiver) to deliver sediment downstream.
     const Order = new Int32Array(Count);
     const Queue = new Int32Array(Count);
     let QueueHead = 0;
@@ -464,22 +494,78 @@ export async function SolveDrainage(Field, Report, Cancel)
         if (Donors[Cell] === 0)
             Queue[QueueTail++] = Cell;
     }
-    const Accumulation = new Float32Array(Count).fill(1.0);
     let Ordered = 0;
     while (QueueHead < QueueTail)
     {
         const Cell = Queue[QueueHead++];
         Order[Ordered++] = Cell;
         const Target = Receiver[Cell];
-        if (Target >= 0)
-        {
-            Accumulation[Target] += Accumulation[Cell];
-            if (--Donors[Target] === 0)
-                Queue[QueueTail++] = Target;
-        }
+        if (Target >= 0 && --Donors[Target] === 0)
+            Queue[QueueTail++] = Target;
         if ((Ordered & 65535) === 0)
         {
-            Report(0.65 + 0.35 * Ordered / Count);
+            Report(0.65 + 0.22 * Ordered / Count);
+            Cancel.ThrowIfRequested();
+            await YieldBriefly();
+        }
+    }
+
+    // Multiple-flow-direction accumulation (Holmgren slope^4 weights): each cell spreads its
+    // catchment over every strictly-lower neighbour instead of only the D8 receiver. Where the
+    // ground is channelised the steepest path still captures nearly everything, but on smooth
+    // faces the flow disperses and braids — this is the cure for the evenly-spaced parallel
+    // rills that single-direction routing engraves on every mountainside. Walking the flood's
+    // pop sequence backwards visits donors before any of their receivers.
+    const Accumulation = new Float32Array(Count).fill(1.0);
+    for (let FloodIndex = Count - 1; FloodIndex >= 0; FloodIndex--)
+    {
+        const Cell = FloodOrder[FloodIndex];
+        const CellX = Cell % N;
+        const CellZ = (Cell / N) | 0;
+        const HeightHere = Filled[Cell];
+        let WeightSum = 0.0;
+        for (let OffsetZ = -1; OffsetZ <= 1; OffsetZ++)
+        {
+            for (let OffsetX = -1; OffsetX <= 1; OffsetX++)
+            {
+                if (OffsetX === 0 && OffsetZ === 0)
+                    continue;
+                const Nx = CellX + OffsetX;
+                const Nz = CellZ + OffsetZ;
+                if (Nx < 0 || Nx >= N || Nz < 0 || Nz >= N)
+                    continue;
+                const Drop = HeightHere - Filled[Nz * N + Nx];
+                if (Drop <= 0.0)
+                    continue;
+                const SlopeW = Drop * ((OffsetX !== 0 && OffsetZ !== 0) ? InvSqrt2 : 1.0);
+                WeightSum += SlopeW * SlopeW * SlopeW * SlopeW;
+            }
+        }
+        if (WeightSum > 0.0)
+        {
+            const Share = Accumulation[Cell] / WeightSum;
+            for (let OffsetZ = -1; OffsetZ <= 1; OffsetZ++)
+            {
+                for (let OffsetX = -1; OffsetX <= 1; OffsetX++)
+                {
+                    if (OffsetX === 0 && OffsetZ === 0)
+                        continue;
+                    const Nx = CellX + OffsetX;
+                    const Nz = CellZ + OffsetZ;
+                    if (Nx < 0 || Nx >= N || Nz < 0 || Nz >= N)
+                        continue;
+                    const Neighbour = Nz * N + Nx;
+                    const Drop = HeightHere - Filled[Neighbour];
+                    if (Drop <= 0.0)
+                        continue;
+                    const SlopeW = Drop * ((OffsetX !== 0 && OffsetZ !== 0) ? InvSqrt2 : 1.0);
+                    Accumulation[Neighbour] += Share * SlopeW * SlopeW * SlopeW * SlopeW;
+                }
+            }
+        }
+        if ((FloodIndex & 262143) === 0)
+        {
+            Report(0.87 + 0.13 * (1.0 - FloodIndex / Count));
             Cancel.ThrowIfRequested();
             await YieldBriefly();
         }
@@ -571,8 +657,12 @@ export async function FluvialIncision(Field, Params, Report, Cancel)
             const Resistance = 1.0 - 0.8 * Hardness[Cell];
             // The (0.12 + S) floor stands in for base-level fall: a trunk stream saws downward even
             // where its local grade is gentle — that is how a river crosses a plateau at all.
-            let Incision = Strength * Math.pow(AreaNorm, AreaExponent) * (0.12 + Math.min(SlopeHere, 1.4)) * Resistance * 60.0;
+            let Incision = Strength * Math.pow(AreaNorm, AreaExponent) * (0.12 + Math.min(SlopeHere, 0.7)) * Resistance * 60.0;
             if (Incision > 14.0) Incision = 14.0;
+            // Threads without a real catchment do not get to saw — rill-scale wash is the
+            // droplet layer's business. (The slope cap above also dropped 1.4 -> 0.7: with the
+            // old cap every thread on a steep face incised at trunk-stream rates.)
+            if (AreaNorm < 0.0012) Incision = 0.0;
             // Transport limit (the sedimentation half of the river): carrying capacity grows with
             // discharge and grade. An overloaded river deposits the excess here — floodplains and
             // alluvial fans grow where the grade breaks. A loaded river also saws slower (the cover
@@ -842,12 +932,14 @@ export async function SnowAccumulation(Field, Params, Noise, Report, Cancel)
             const X1 = X < N - 1 ? X + 1 : X;
             const Z0 = Z > 0 ? Z - 1 : Z;
             const Z1 = Z < N - 1 ? Z + 1 : Z;
-            const GradX = (Heights[Z * N + X1] - Heights[Z * N + X0]) / ((X1 - X0) * TexelSize);
-            const GradZ = (Heights[Z1 * N + X] - Heights[Z0 * N + X]) / ((Z1 - Z0) * TexelSize);
+            // Slope from the blurred surface: snow slabs respond to the face angle over metres,
+            // not to every texel-scale groove wall (which would shed the whole face bare).
+            const GradX = (Blurred[Z * N + X1] - Blurred[Z * N + X0]) / ((X1 - X0) * TexelSize);
+            const GradZ = (Blurred[Z1 * N + X] - Blurred[Z0 * N + X]) / ((Z1 - Z0) * TexelSize);
             const SlopeHere = Math.sqrt(GradX * GradX + GradZ * GradZ);
             let Hold = 1.0 - Math.min(SlopeHere / (SlopeLimit * 1.9), 1.0);
             Hold = Hold * Hold;
-            const Stored = Cover * (0.25 + 0.75 * Hold);
+            const Stored = Cover * (0.45 + 0.55 * Hold);
             Snow[Index] = Math.max(Snow[Index], Stored);
             const Drift = Math.max(Blurred[Index] - Heights[Index], 0.0) * 0.55;
             Heights[Index] += Stored * Depth + Drift * Cover * Hold;
@@ -892,7 +984,7 @@ export function BakeSurfaceData(Field)
             const Index = Row + X;
             const H = Heights[Index];
             // Burial at three scales: rills, valleys, whole basins.
-            const Burial = 0.34 * Math.max(Near[Index] - H, 0.0) / 1.4
+            const Burial = 0.14 * Math.max(Near[Index] - H, 0.0) / 1.4
                          + 0.36 * Math.max(Mid[Index]  - H, 0.0) / 7.0
                          + 0.22 * Math.max(Far[Index]  - H, 0.0) / 26.0;
             const GradX = (Heights[Row + Math.min(X + 1, N - 1)] - Heights[Row + Math.max(X - 1, 0)]) / (2.0 * TexelSize);
@@ -900,8 +992,8 @@ export function BakeSurfaceData(Field)
             const SkyFacing = 1.0 / Math.sqrt(1.0 + GradX * GradX + GradY * GradY);
             let Occ = (1.0 - Burial) * (0.55 + 0.45 * SkyFacing);
             Occlusion[Index] = Occ < 0.0 ? 0.0 : Occ > 1.0 ? 1.0 : Occ;
-            const Pro = 0.65 * Math.max(H - Mid[Index], 0.0) / 6.0
-                      + 0.35 * Math.max(H - Near[Index], 0.0) / 1.1;
+            const Pro = 0.70 * Math.max(H - Mid[Index], 0.0) / 6.5
+                      + 0.20 * Math.max(H - Near[Index], 0.0) / 1.8;
             Protrusion[Index] = Pro > 1.0 ? 1.0 : Pro;
         }
     }

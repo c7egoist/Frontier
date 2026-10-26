@@ -10,7 +10,7 @@
 //    day stand beside: paint the Water channel, point a layer's mask at it, rebuild.
 
 import { Resolution, TexelSize, WorldExtent, LatticeNoise, MaskWeight, SlopeAt } from "./ReliefField.js";
-import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation } from "./ErosionSequence.js";
+import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation, BoxBlurInPlace } from "./ErosionSequence.js";
 
 async function YieldBriefly()
 {
@@ -85,8 +85,8 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
         {
             const WarpX = Noise.Fractal(X * WarpScale + 3.1, Z * WarpScale + 17.7, 3, 2.0, 0.5) * WarpTexels;
             const WarpZ = Noise.Fractal(X * WarpScale + 23.9, Z * WarpScale + 5.5, 3, 2.0, 0.5) * WarpTexels;
-            let Ridge = Noise.Ridged((X + WarpX) * Scale, (Z + WarpZ) * Scale, Math.round(P.Octaves), 2.05, 0.52, P.Sharpness);
-            Ridge = Math.pow(Ridge, 1.45);   // thin the feet so valleys stay valleys
+            let Ridge = Noise.Ridged((X + WarpX) * Scale, (Z + WarpZ) * Scale, Math.round(P.Octaves), 2.05, 0.47, P.Sharpness);
+            Ridge = Math.pow(Ridge, 1.12);   // slight foot-thinning only — heavier exponents turn the crest web into fins
             // A soft continental envelope stops every crest reaching full height at once.
             const Envelope = 0.30 + 0.70 * (Noise.Fractal(X * Scale * 0.33 + 9.2, Z * Scale * 0.33 + 4.4, 3, 2.0, 0.5) * 0.5 + 0.5);
             const Raised = Ridge * Envelope;
@@ -104,11 +104,18 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
     const Span = Math.max(Hi - Lo, 0.0001);
     for (let Index = 0; Index < Out.length; Index++)
     {
-        // Clamp before the fractional power: Lo/Hi are tracked in double precision while Out is
-        // Float32, so the minimum cell can round a hair below Lo — and pow(negative, 1.2) is NaN.
+        // Linear normalisation (clamped: Lo/Hi are tracked in double precision while Out is
+        // Float32, so the minimum cell can round a hair below Lo).
         const Unit = Math.min(Math.max((Out[Index] - Lo) / Span, 0.0), 1.0);
-        Out[Index] = Math.pow(Unit, 1.2) * P.Amplitude;
+        Out[Index] = Unit * P.Amplitude;
     }
+    // Soften the fine crest network at groove scale: at full strength it prints a regular
+    // corduroy of 15-40 m ridges across every flank, and downstream solvers amplify the
+    // downslope subset into wax-drip fluting. A 22 m kernel at 42% halves groove depth
+    // while leaving hundred-metre arêtes standing.
+    const Softened = BoxBlurInPlace(Out, 5);
+    for (let Index = 0; Index < Out.length; Index++)
+        Out[Index] += (Softened[Index] - Out[Index]) * 0.42;
 }
 
 async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
@@ -134,7 +141,7 @@ async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
             const Distance = Across - P.Offset - Meander;
             const Width = Distance > 0.0 ? P.Width : P.Width * (1.0 - P.Asymmetry * 0.72);
             const Profile = Math.exp(-(Distance * Distance) / (Width * Width));
-            const Crest = 0.35 + 0.65 * Noise.Ridged(Along * CrestScale * 0.5 + 2.2, Distance * CrestScale * 0.5, 5, 2.05, 0.52, 1.7);
+            const Crest = 0.45 + 0.55 * Noise.Ridged(Along * CrestScale * 0.5 + 2.2, Distance * CrestScale * 0.5, 4, 2.05, 0.50, 1.35);
             const Raised = Profile * Crest;
             Out[Z * N + X] = Raised;
             if (Raised < Lo) Lo = Raised;
@@ -150,6 +157,11 @@ async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
     const Span = Math.max(Hi - Lo, 0.0001);
     for (let Index = 0; Index < Out.length; Index++)
         Out[Index] = ((Out[Index] - Lo) / Span) * P.Amplitude;
+    // Same fine-crest softening as the ridge builder: the front should read as buttresses
+    // and gullies at the hundred-metre scale, not as regular corduroy at the ten-metre scale.
+    const Softened = BoxBlurInPlace(Out, 5);
+    for (let Index = 0; Index < Out.length; Index++)
+        Out[Index] += (Softened[Index] - Out[Index]) * 0.40;
 }
 
 async function BuildCellularPlateau(Field, Layer, Out, Report, Cancel)

@@ -41,7 +41,7 @@ export const ReliefPresets =
             ConstructLayer("ContinentalMass", { Label: "Alpine basement", Blend: "Replace", Seed: 4815,
                 Params: { Amplitude: 450, BaseElevation: 40, Wavelength: 1320, Octaves: 7, Gain: 0.52, Warp: 170, Plateau: 0.12 } }),
             ConstructLayer("RidgeUplift", { Label: "Horn & arête crests", Seed: 9021,
-                Params: { Amplitude: 465, Wavelength: 860, Octaves: 7, Sharpness: 1.7, Warp: 150 } }),
+                Params: { Amplitude: 465, Wavelength: 860, Octaves: 7, Sharpness: 1.45, Warp: 150 } }),
             ConstructLayer("FluvialIncision", { Label: "Drainage & rivers", Seed: 4817,
                 Params: { Strength: 0.8, Iterations: 2, Sedimentation: 0.5, Capacity: 1.1 } }),
             ConstructLayer("GlacialPolish", { Label: "Glacial troughs", Seed: 4819,
@@ -78,7 +78,7 @@ export const ReliefPresets =
             ConstructLayer("TectonicFront", { Label: "Main collision arc", Seed: 8849,
                 Params: { Amplitude: 920, Angle: 118, Offset: -80, Width: 470, Asymmetry: 0.45, Meander: 280, Waviness: 1100, CrestWavelength: 300 } }),
             ConstructLayer("RidgeUplift", { Label: "Ice arêtes", Seed: 8851, MaskChannel: "Height", MaskLow: 0.15, MaskHigh: 0.55,
-                Params: { Amplitude: 620, Wavelength: 520, Octaves: 7, Sharpness: 2.1, Warp: 130 } }),
+                Params: { Amplitude: 620, Wavelength: 520, Octaves: 5, Sharpness: 1.5, Warp: 130 } }),
             ConstructLayer("FluvialIncision", { Label: "Antecedent gorges", Seed: 8853,
                 Params: { Strength: 1.8, Iterations: 4, Sedimentation: 0.45, Capacity: 1.1 } }),
             ConstructLayer("GlacialPolish", { Label: "Imja-style troughs", Seed: 8857,
@@ -88,7 +88,7 @@ export const ReliefPresets =
             ConstructLayer("ThermalErosion", { Label: "Frost-shatter repose", Seed: 8863,
                 Params: { Iterations: 85, TalusAngle: 35, Rate: 0.5 } }),
             ConstructLayer("SnowAccumulation", { Label: "Névé & icefall snow", Seed: 8867,
-                Params: { Snowline: 470, Band: 170, SlopeLimit: 62, Depth: 3.5 } }),
+                Params: { Snowline: 470, Band: 170, SlopeLimit: 68, Depth: 3.5 } }),
         ],
         Environment: Environment(
         {
