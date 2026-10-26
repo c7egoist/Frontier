@@ -7,7 +7,7 @@
 <meta name="theme-color" content="#101010">
 <meta name="description" content="Frontier Terrain Studio — combined SDF/voxel + heightfield terrain generation with geological erosion, a layer stack, and reusable paintable channels.">
 <title>Frontier · Terrain Studio</title>
-<link rel="stylesheet" href="Style/TerrainStudio.css">
+<link rel="stylesheet" href="Style/TerrainStudio.css?v=5">
 </head>
 <body>
 <div id="shell">
@@ -199,7 +199,7 @@
 
                 <!-- BRUSH PAGE -->
                 <section id="page-brush" class="inspector-page hidden">
-                    <div class="eyebrow-row"><span class="eyebrow">Sculpt · paint · stamp</span><span class="badge" id="brush-badge">Orbit</span></div>
+                    <div class="eyebrow-row"><span class="eyebrow">Base sculpt · SDF caves · B&amp;W mask</span><span class="badge" id="brush-badge">Orbit</span></div>
                     <div class="tool-grid" id="tool-grid">
                         <button class="tool-tile active" data-tool="orbit"><i data-glyph="orbit"></i><span>Orbit</span></button>
                         <button class="tool-tile" data-tool="raise"><i data-glyph="raise"></i><span>Raise</span></button>
@@ -207,10 +207,9 @@
                         <button class="tool-tile" data-tool="flatten"><i data-glyph="flatten"></i><span>Flatten</span></button>
                         <button class="tool-tile" data-tool="smooth"><i data-glyph="smooth"></i><span>Smooth</span></button>
                         <button class="tool-tile" data-tool="terrace"><i data-glyph="strata"></i><span>Terrace</span></button>
-                        <button class="tool-tile" data-tool="channel"><i data-glyph="droplet"></i><span>Paint channel</span></button>
-                        <button class="tool-tile" data-tool="material"><i data-glyph="brush"></i><span>Paint material</span></button>
-                        <button class="tool-tile" data-tool="stamp"><i data-glyph="arch"></i><span>SDF stamp</span></button>
-                        <button class="tool-tile" data-tool="stampErase"><i data-glyph="erase"></i><span>Remove stamp</span></button>
+                        <button class="tool-tile" data-tool="caveCarve"><i data-glyph="arch"></i><span>Carve cave</span></button>
+                        <button class="tool-tile" data-tool="caveFill"><i data-glyph="erase"></i><span>Fill cave</span></button>
+                        <button class="tool-tile" data-tool="mask"><i data-glyph="brush"></i><span>Mask (B&amp;W)</span></button>
                     </div>
                     <div id="brush-controls"></div>
                     <div class="card metrics-card">
@@ -277,6 +276,6 @@
 <div id="toast-root"></div>
 <input type="file" id="import-file" accept=".json,application/json" class="hidden">
 
-<script type="module" src="Source/TerrainStudio.js"></script>
+<script type="module" src="Source/TerrainStudio.js?v=5"></script>
 </body>
 </html>

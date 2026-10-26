@@ -14,7 +14,7 @@ import { ReliefField, LatticeNoise, Resolution, TexelSize, WorldExtent, DerivedC
 import { LayerStackEvaluation, LayerTypes, LayerTypeById, ConstructLayer } from "./LayerStackEvaluation.js";
 import { ReliefPresets } from "./ReliefPresets.js";
 import { ReliefRasterization } from "./ReliefRasterization.js";
-import { PolygoniseStamps, ConstructStamp, StampShapes } from "./DistanceStamps.js";
+import { PolygoniseStamps, ConstructStamp, ConstructCave, StampShapes } from "./DistanceStamps.js";
 import { Cancellation, BakeSurfaceData } from "./ErosionSequence.js";
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
@@ -394,6 +394,7 @@ const ViewModes =
     { Id: 12, Label: "Occlusion (baked)" },
     { Id: 13, Label: "Protrusion (baked)" },
     { Id: 14, Label: "Traced density" },
+    { Id: 15, Label: "Combine mask (B&W)" },
 ];
 
 const SunPresets =
@@ -437,11 +438,15 @@ export class TerrainStudio
         this.Brush =
         {
             Tool: "orbit",
+            SculptTarget: "base",
             Radius: 95.0,
             Strength: 0.6,
             Softness: 0.55,
-            ChannelName: "Water",
+            ChannelName: "Mask",
             ChannelSign: 1,
+            MaskSign: 1,
+            CaveDepth: 95.0,
+            CaveBlend: 10.0,
             Material: "PaintMeadow",
             StampShape: "Arch",
             StampScale: 115.0,
@@ -861,18 +866,21 @@ export class TerrainStudio
                 Event.stopPropagation();
                 this.InspectChannel(Channel.Name);
             });
-            const PaintButton = Construct("button", "icon-button");
-            PaintButton.innerHTML = GlyphSvg("brush");
-            PaintButton.title = "Paint this channel";
-            PaintButton.addEventListener("click", (Event) =>
-            {
-                Event.stopPropagation();
-                this.Brush.ChannelName = Channel.Name;
-                this.SetInspectorPage("brush");
-                this.SetTool("channel");
-            });
             Actions.appendChild(ViewButton);
-            Actions.appendChild(PaintButton);
+            if (Channel.Authored)
+            {
+                const PaintButton = Construct("button", "icon-button");
+                PaintButton.innerHTML = GlyphSvg("brush");
+                PaintButton.title = "Paint B&W mask";
+                PaintButton.addEventListener("click", (Event) =>
+                {
+                    Event.stopPropagation();
+                    this.Brush.ChannelName = Channel.Name;
+                    this.SetInspectorPage("brush");
+                    this.SetTool("mask");
+                });
+                Actions.appendChild(PaintButton);
+            }
             Row.appendChild(Actions);
             Row.addEventListener("click", () => this.InspectChannel(Channel.Name));
             (Channel.Authored ? AuthoredHost : DerivedHost).appendChild(Row);
@@ -918,7 +926,7 @@ export class TerrainStudio
             return;
         this.InspectedChannel = Name;
         this.Raster.UploadOverlay(Channel.Samples, Channel.Tint);
-        const DerivedIndex = { Flow: 3, Water: 4, Wear: 5, Deposition: 6, Hardness: 7, Snow: 8, Moisture: 9, Occlusion: 12, Protrusion: 13 }[Name];
+        const DerivedIndex = { Flow: 3, Water: 4, Wear: 5, Deposition: 6, Hardness: 7, Snow: 8, Moisture: 9, Occlusion: 12, Protrusion: 13, Mask: 15 }[Name];
         this.SetViewMode(DerivedIndex !== undefined ? DerivedIndex : 11);
         this.ConstructChannelList();
     }
@@ -929,12 +937,12 @@ export class TerrainStudio
         while (this.Field.Channel("Mask " + Serial))
             Serial++;
         const Name = "Mask " + Serial;
-        const Tints = [[1.0, 0.45, 0.75], [0.45, 0.9, 1.0], [1.0, 0.8, 0.3], [0.65, 1.0, 0.5]];
-        this.Field.RegisterChannel(Name, Name, Tints[(Serial - 1) % Tints.length], true, "Authored mask");
+        const Channel = this.Field.RegisterChannel(Name, Name + " (B&W)", [0.96, 0.96, 0.96], true, "B&W mask brush");
+        Channel.Samples.fill(1.0);
         this.Brush.ChannelName = Name;
         this.ConstructChannelList();
         this.ConstructBrushControls();
-        ShowToast(`Channel “${Name}” registered — paint it, then use it as any layer's mask`, "droplet");
+        ShowToast(`B&W mask “${Name}” created — paint black & white to combine terrains`, "brush");
     }
 
     ChannelOptions()
@@ -964,10 +972,14 @@ export class TerrainStudio
         this.Environment = DeepClone(Preset.Environment);
         this.Raster.SetEnvironment(this.Environment);
         this.Field.Heights.fill(0.0);
+        this.Field.BaseDelta.fill(0.0);
         this.Field.SculptDelta.fill(0.0);
+        this.Field.LayerCaves = [];
+        this.Field.UserCaves = [];
         for (const Channel of this.Field.Channels.values())
-            Channel.Samples.fill(0.0);
+            Channel.Samples.fill(Channel.Authored ? 1.0 : 0.0);
         this.Evaluation.Cache = [];
+        this.Evaluation.UnmaskedCache = [];
         this.History = [];
         this.HistoryIndex = -1;
         this.SelectedLayerSerial = this.Layers.length ? this.Layers[this.Layers.length - 1].Serial : -1;
@@ -1088,40 +1100,19 @@ export class TerrainStudio
     // in the interior is untouched and sculpting stays consistent with what is drawn.
     ApplyBorderTaper()
     {
-        const Heights = this.Field.Heights;
-        const Target = this.Field.Minimum - 25.0;
-        this.BorderTarget = Target;
-        const Rim = Math.floor(Resolution * 0.085);
-        for (let Z = 0; Z < Resolution; Z++)
-        {
-            for (let X = 0; X < Resolution; X++)
-            {
-                const EdgeDist = Math.min(X, Z, Resolution - 1 - X, Resolution - 1 - Z);
-                if (EdgeDist >= Rim)
-                    continue;
-                let T = EdgeDist / Rim;
-                T = T * T * (3.0 - 2.0 * T);
-                const Index = Z * Resolution + X;
-                Heights[Index] = Target + (Heights[Index] - Target) * T;
-            }
-        }
+        this.BorderTarget = undefined;
         this.Field.MeasureRange();
-        const TopCache = this.Evaluation.Cache[this.Layers.length - 1];
-        if (TopCache)
-            TopCache.set(Heights);
     }
 
     AfterBuild()
     {
         this.ApplyBorderTaper();
-        // Bake the data maps the splat shader textures from (occlusion + protrusion).
         BakeSurfaceData(this.Field);
         this.Raster.UploadField(this.Field);
         this.Raster.UploadPaint(this.Field);
         const Inspected = this.Field.Channel(this.InspectedChannel);
         if (Inspected)
             this.Raster.UploadOverlay(Inspected.Samples, Inspected.Tint);
-        // Strata band period follows the topmost strata layer, so colour banding matches the terraces.
         this.Raster.StrataBand = 26.0;
         for (const Layer of this.Layers)
         {
@@ -1134,33 +1125,35 @@ export class TerrainStudio
             this.DrawRealThumb(this.ActivePreset);
         if (this.ViewDimension === "2d")
             this.Render2DField();
-        if (this.Stamps.length)
-            this.RefreshStamps();
+        this.RefreshStamps();
     }
 
     RefreshSurvey()
     {
+        const CaveTotal = (this.Field.LayerCaves ? this.Field.LayerCaves.length : 0) + (this.Field.UserCaves ? this.Field.UserCaves.length : 0);
         ById("metric-peak").innerHTML = `${Math.round(this.Field.Maximum)}<small>m</small>`;
         ById("metric-relief").innerHTML = `${Math.round(this.Field.Maximum - this.Field.Minimum)}<small>m</small>`;
         ById("survey-line").textContent =
             `Relief ${Math.round(this.Field.Minimum)}…${Math.round(this.Field.Maximum)} m over 2.0 km · ` +
-            `${this.Stamps.length} SDF stamp${this.Stamps.length === 1 ? "" : "s"} · ` +
-            `${(this.Raster.StampIndexCount / 3).toLocaleString()} stamp triangles`;
+            `${CaveTotal} SDF cave${CaveTotal === 1 ? "" : "s"} · ` +
+            `${(this.Raster.StampIndexCount / 3).toLocaleString()} voxel triangles`;
         ById("footer-stats").textContent =
-            `Peak ${Math.round(this.Field.Maximum)} m · relief ${Math.round(this.Field.Maximum - this.Field.Minimum)} m · 1024²`;
+            `Peak ${Math.round(this.Field.Maximum)} m · relief ${Math.round(this.Field.Maximum - this.Field.Minimum)} m · ${CaveTotal} caves`;
     }
 
     RefreshStamps()
     {
         const StartedAt = performance.now();
-        this.SetSyncState("Polygonising SDF stamps…", true);
+        this.SetSyncState("Polygonising 3D SDF caves & voxels…", true);
         setTimeout(() =>
         {
             const Surface = PolygoniseStamps(this.Field, this.Stamps);
             this.Raster.SetStampSurface(Surface);
+            this.Raster.UploadChannelGroup(this.Field, "CaveCutout");
+            this.RefreshChannelPreviews();
             this.RefreshSurvey();
             this.SetSyncState(`Stamps polygonised in ${Math.round(performance.now() - StartedAt)} ms`, false);
-        }, 30);
+        }, 20);
     }
 
     //--------------------------------------------------------------------------------------------------------
@@ -1500,28 +1493,27 @@ export class TerrainStudio
         const Labels =
         {
             orbit: "Orbit", raise: "Raise", lower: "Lower", flatten: "Flatten", smooth: "Smooth",
-            terrace: "Terrace", channel: "Paint channel", material: "Paint material",
-            stamp: "SDF stamp", stampErase: "Remove stamp",
+            terrace: "Terrace", caveCarve: "Carve cave", caveFill: "Fill cave", mask: "Mask (B&W)",
         };
         ById("brush-badge").textContent = Labels[Tool] || Tool;
         this.ConstructBrushControls();
         const Hints =
         {
             orbit: "Drag to orbit · Wheel to zoom · Right-drag to pan · Double-click to set pivot",
-            raise: "Paint to raise relief — strokes accumulate in the Sculpt layer · [ ] brush size · X swaps to Lower",
-            lower: "Paint to carve relief · [ ] brush size · X swaps to Raise",
-            flatten: "First touch sets the bench height; paint to level toward it",
-            smooth: "Paint to relax relief toward its local average",
-            terrace: "Paint to snap relief into benches",
-            channel: "Painting writes straight into the channel — masks and materials read it live · Alt subtracts",
-            material: "Painted materials override the procedural splat in proportion to coverage",
-            stamp: "Click the terrain to plant a voxel SDF stamp — arches and fins truly overhang",
-            stampErase: "Click near a stamp to remove it",
+            raise: "Sculpt on the Base layer (or Sculpt layer) · [ ] brush size · X swaps to Lower",
+            lower: "Carve relief on the Base layer (or Sculpt layer) · [ ] brush size · X swaps to Raise",
+            flatten: "First touch sets the bench elevation; drag to level toward it",
+            smooth: "Relax relief toward its local average (rounds sharp creases)",
+            terrace: "Snap relief into stepped geological benches",
+            caveCarve: "Click or drag on any hillside or cliff to bore a 3D SDF cave tunnel into the rock · Alt fills",
+            caveFill: "Click or drag over a carved cave to fill the rock volume back in",
+            mask: "Paint Black (0) and White (1) to mask and combine terrain layers in the stack · X swaps B/W",
         };
         this.SetHint(Hints[Tool] || Hints.orbit);
-        if (Tool === "channel")
+        if (Tool === "mask")
         {
-            const Channel = this.Field.Channel(this.Brush.ChannelName);
+            this.EnsureMaskTargetLayer();
+            const Channel = this.Field.Channel(this.Brush.ChannelName || "Mask");
             if (Channel)
                 this.Raster.UploadOverlay(Channel.Samples, Channel.Tint);
         }
@@ -1532,9 +1524,32 @@ export class TerrainStudio
         return ["raise", "lower", "flatten", "smooth", "terrace"].includes(Tool || this.Brush.Tool);
     }
 
+    IsCaveTool(Tool)
+    {
+        return ["caveCarve", "caveFill"].includes(Tool || this.Brush.Tool);
+    }
+
     IsBrushTool(Tool)
     {
-        return this.IsSculptTool(Tool) || ["channel", "material"].includes(Tool || this.Brush.Tool);
+        const Active = Tool || this.Brush.Tool;
+        return this.IsSculptTool(Active) || this.IsCaveTool(Active) || Active === "mask";
+    }
+
+    EnsureMaskTargetLayer()
+    {
+        const MaskName = this.Brush.ChannelName || "Mask";
+        let Masked = this.Layers.find((Layer) => Layer.MaskChannel === MaskName);
+        if (!Masked && this.Layers.length > 1)
+        {
+            const Candidate = this.Layers.find((Layer, Idx) => Idx > 0 && (Layer.TypeId === "RidgeUplift" || Layer.TypeId === "TectonicFront" || Layer.TypeId === "ContinentalMass" || Layer.TypeId === "CellularPlateau" || Layer.TypeId === "SculptDelta")) || this.Layers[1];
+            if (Candidate)
+            {
+                Candidate.MaskChannel = MaskName;
+                Candidate.MaskLow = 0.0;
+                Candidate.MaskHigh = 1.0;
+                this.RenderLayerStack();
+            }
+        }
     }
 
     ConstructBrushControls()
@@ -1548,7 +1563,7 @@ export class TerrainStudio
 
         if (Tool === "orbit")
         {
-            const Card = ConstructCard("Navigation", "orbit", "The Material workspace camera feel — exponential glide");
+            const Card = ConstructCard("Navigation", "orbit", "Exponential camera glide");
             Card.Content.appendChild(Construct("p", "muted",
                 "Left-drag orbits, right-drag pans, the wheel dollies toward the pivot, and a double-click plants the pivot on the land itself. " +
                 "Hold Space to orbit with any brush in hand. F frames the world, P hides the panels, G toggles the survey grid."));
@@ -1558,9 +1573,10 @@ export class TerrainStudio
 
         const BrushCard = ConstructCard("Brush", "brush", "");
         BrushCard.Content.appendChild(ConstructSlider({
-            Label: "Radius", Min: 8, Max: 420, Step: 1, Unit: "m",
+            Label: this.IsCaveTool(Tool) ? "Cave aperture (radius)" : "Radius",
+            Min: 10, Max: this.IsCaveTool(Tool) ? 140 : 420, Step: 1, Unit: "m",
             Get: () => Brush.Radius, Set: (R) => { Brush.Radius = R; } }));
-        if (Tool !== "stamp" && Tool !== "stampErase")
+        if (!this.IsCaveTool(Tool))
         {
             BrushCard.Content.appendChild(ConstructSlider({
                 Label: "Strength", Min: 0.02, Max: 1, Step: 0.01, Unit: "",
@@ -1569,149 +1585,210 @@ export class TerrainStudio
                 Label: "Edge softness", Min: 0, Max: 0.95, Step: 0.01, Unit: "",
                 Get: () => Brush.Softness, Set: (R) => { Brush.Softness = R; } }));
         }
+        else if (Tool === "caveCarve")
+        {
+            BrushCard.Content.appendChild(ConstructSlider({
+                Label: "Tunnel depth", Min: 25, Max: 200, Step: 5, Unit: "m",
+                Get: () => Brush.CaveDepth, Set: (R) => { Brush.CaveDepth = R; } }));
+            BrushCard.Content.appendChild(ConstructSlider({
+                Label: "Lip rounding", Min: 4, Max: 24, Step: 1, Unit: "m",
+                Get: () => Brush.CaveBlend, Set: (R) => { Brush.CaveBlend = R; } }));
+        }
         Host.appendChild(BrushCard);
 
         if (this.IsSculptTool(Tool))
         {
-            const Card = ConstructCard("Sculpt strokes", "sculpt", "A delta field, applied by its own stack layer");
+            const Card = ConstructCard("Sculpt target", "sculpt", "Sculpting is restricted to the Base layer or a Sculpt layer");
+            const TargetPills = Construct("div", "radio-pills");
+            for (const [TargetId, Label] of [["base", "Base layer (Layer 0)"], ["sculpt", "Sculpt layer"]])
+            {
+                const Pill = Construct("button", "", Label);
+                Pill.classList.toggle("active", Brush.SculptTarget === TargetId);
+                Pill.addEventListener("click", () =>
+                {
+                    Brush.SculptTarget = TargetId;
+                    if (TargetId === "sculpt")
+                        this.EnsureSculptLayer();
+                    this.ConstructBrushControls();
+                });
+                TargetPills.appendChild(Pill);
+            }
+            Card.Content.appendChild(TargetPills);
+
             if (Tool === "terrace")
             {
                 Card.Content.appendChild(ConstructSlider({
                     Label: "Bench step", Min: 3, Max: 60, Step: 1, Unit: "m",
                     Get: () => Brush.TerraceStep, Set: (R) => { Brush.TerraceStep = R; } }));
             }
-            const SculptIndex = this.Layers.findIndex((Layer) => Layer.TypeId === "SculptDelta");
-            Card.Content.appendChild(Construct("p", "muted",
-                SculptIndex < 0
-                    ? "The first stroke creates a “Sculpt strokes” layer at the top of the stack. Because strokes are a delta, re-running erosion beneath them keeps your hand-work intact."
-                    : (SculptIndex === this.Layers.length - 1
-                        ? "Sculpt layer is topmost — strokes composite live."
-                        : "Sculpt layer sits mid-stack — strokes apply on release, then everything above it re-erodes over your edits.")));
-            const Actions = Construct("div", "brush-actions");
-            const ClearButton = Construct("button", "pill-button", "Clear sculpt");
-            ClearButton.addEventListener("click", () =>
-            {
-                this.Field.SculptDelta.fill(0.0);
-                this.RebuildFrom(Math.max(SculptIndex, 0));
-                ShowToast("Sculpt delta cleared", "sculpt");
-            });
-            Actions.appendChild(ClearButton);
-            Card.Content.appendChild(Actions);
-            Host.appendChild(Card);
-        }
 
-        if (Tool === "channel")
-        {
-            const Card = ConstructCard("Channel target", "droplet", "Writes land directly in the registry");
-            Card.Content.appendChild(ConstructSelectRow("Channel",
-                () => Brush.ChannelName, this.ChannelOptions(),
-                (Chosen) =>
-                {
-                    Brush.ChannelName = Chosen;
-                    const Channel = this.Field.Channel(Chosen);
-                    if (Channel)
-                        this.Raster.UploadOverlay(Channel.Samples, Channel.Tint);
-                    this.ConstructBrushControls();
-                }));
-            const PillHost = Construct("div", "radio-pills");
-            for (const [Sign, Label] of [[1, "Add"], [-1, "Subtract"]])
-            {
-                const Pill = Construct("button", "", Label);
-                Pill.classList.toggle("active", Brush.ChannelSign === Sign);
-                Pill.addEventListener("click", () =>
-                {
-                    Brush.ChannelSign = Sign;
-                    this.ConstructBrushControls();
-                });
-                PillHost.appendChild(Pill);
-            }
-            Card.Content.appendChild(PillHost);
-            const Channel = this.Field.Channel(Brush.ChannelName);
-            if (Channel && !Channel.Authored)
+            if (Brush.SculptTarget === "base")
             {
                 Card.Content.appendChild(Construct("p", "muted",
-                    `“${Channel.Label}” is derived by ${Channel.Writer.toLowerCase()}. Your paint is honoured everywhere until that writer next rebuilds — paint a lake into Water and mask a snow layer by “not Water”, for instance.`));
+                    "Strokes sculpt the Base layer (Layer 0) and preview at 60 fps. Click “Re-erode over base” whenever you want rivers, glaciers and talus to re-carve your sculpted base."));
+                const Actions = Construct("div", "brush-actions");
+                const ErodeBtn = Construct("button", "pill-button", "Re-erode over base");
+                ErodeBtn.addEventListener("click", () =>
+                {
+                    this.RebuildFrom(0);
+                    ShowToast("Re-running erosion stack over sculpted base", "river");
+                });
+                const ClearBtn = Construct("button", "pill-button", "Clear base sculpt");
+                ClearBtn.addEventListener("click", () =>
+                {
+                    this.Field.BaseDelta.fill(0.0);
+                    this.RebuildFrom(0);
+                    ShowToast("Base layer sculpt cleared", "sculpt");
+                });
+                Actions.appendChild(ErodeBtn);
+                Actions.appendChild(ClearBtn);
+                Card.Content.appendChild(Actions);
             }
             else
             {
+                const SculptIndex = this.SculptLayerIndex();
                 Card.Content.appendChild(Construct("p", "muted",
-                    "Authored channel — it persists through every rebuild and can be any layer's mask."));
+                    "Strokes accumulate in the dedicated “Sculpt layer” in the stack. You can reorder it or mask it with the B&W mask brush."));
+                const Actions = Construct("div", "brush-actions");
+                const ClearButton = Construct("button", "pill-button", "Clear sculpt layer");
+                ClearButton.addEventListener("click", () =>
+                {
+                    this.Field.SculptDelta.fill(0.0);
+                    this.RebuildFrom(Math.max(SculptIndex, 0));
+                    ShowToast("Sculpt layer cleared", "sculpt");
+                });
+                Actions.appendChild(ClearButton);
+                Card.Content.appendChild(Actions);
             }
             Host.appendChild(Card);
         }
 
-        if (Tool === "material")
+        if (this.IsCaveTool(Tool))
         {
-            const Card = ConstructCard("Material", "layers", "Overrides the procedural splat");
-            const PillHost = Construct("div", "radio-pills");
-            const Choices =
-            [
-                { Id: "PaintRock", Label: "Rock", Swatch: "#7a6a58" },
-                { Id: "PaintMeadow", Label: "Meadow", Swatch: "#59823c" },
-                { Id: "PaintSand", Label: "Sand", Swatch: "#d9b26e" },
-                { Id: "PaintSnow", Label: "Snow", Swatch: "#eef2ff" },
-                { Id: "Erase", Label: "Erase", Swatch: "#444" },
-            ];
-            for (const Choice of Choices)
-            {
-                const Pill = Construct("button");
-                const Dot = Construct("span", "swatch");
-                Dot.style.background = Choice.Swatch;
-                Pill.appendChild(Dot);
-                Pill.appendChild(document.createTextNode(Choice.Label));
-                Pill.classList.toggle("active", Brush.Material === Choice.Id);
-                Pill.addEventListener("click", () =>
-                {
-                    Brush.Material = Choice.Id;
-                    this.ConstructBrushControls();
-                });
-                PillHost.appendChild(Pill);
-            }
-            Card.Content.appendChild(PillHost);
+            const TotalCaves = (this.Field.LayerCaves ? this.Field.LayerCaves.length : 0) + (this.Field.UserCaves ? this.Field.UserCaves.length : 0);
+            const Card = ConstructCard("3D SDF / voxel caves", "arch", "Boolean SmoothMax subtraction + Surface Nets polygonisation");
+            Card.Content.appendChild(Construct("p", "muted",
+                `${TotalCaves} cave${TotalCaves === 1 ? "" : "s"} active (${this.Field.LayerCaves.length} procedural · ${this.Field.UserCaves.length} hand-carved) · ` +
+                `${(this.Raster.StampIndexCount / 3).toLocaleString()} voxel triangles. ` +
+                "Clicking or dragging bores a 3D vaulted cave capsule into the slope and cuts open the heightmap lid so you see straight inside."));
             const Actions = Construct("div", "brush-actions");
-            const ClearButton = Construct("button", "pill-button", "Clear material paint");
-            ClearButton.addEventListener("click", () =>
+            const ClearCavesBtn = Construct("button", "pill-button", "Clear hand-carved caves");
+            ClearCavesBtn.addEventListener("click", () =>
             {
-                for (const Definition of MaterialPaintChannels)
-                    this.Field.ChannelSamples(Definition.Name).fill(0.0);
-                this.Raster.UploadPaint(this.Field);
-                this.RefreshChannelPreviews();
-                ShowToast("Material paint cleared", "brush");
+                this.Field.UserCaves = [];
+                this.RefreshStamps();
+                this.ConstructBrushControls();
+                ShowToast("Hand-carved caves cleared", "arch");
             });
-            Actions.appendChild(ClearButton);
+            Actions.appendChild(ClearCavesBtn);
             Card.Content.appendChild(Actions);
             Host.appendChild(Card);
         }
 
-        if (Tool === "stamp" || Tool === "stampErase")
+        if (Tool === "mask")
         {
-            const Card = ConstructCard("Voxel SDF stamps", "arch", "Analytic distance fields, surface-netted into the terrain");
-            if (Tool === "stamp")
+            this.EnsureMaskTargetLayer();
+            const MaskName = Brush.ChannelName || "Mask";
+            const Card = ConstructCard("Black & white combine mask", "brush", "Use 0 (black) and 1 (white) to combine terrains in the layer stack");
+
+            const SwatchPills = Construct("div", "radio-pills");
+            for (const [Sign, Label, Hex] of [[1, "White (1 · show)", "#f4f4f4"], [-1, "Black (0 · hide)", "#181818"]])
             {
-                const PillHost = Construct("div", "radio-pills");
-                for (const Shape of StampShapes)
+                const Pill = Construct("button");
+                const Dot = Construct("span", "swatch");
+                Dot.style.background = Hex;
+                Dot.style.border = "1px solid #666";
+                Pill.appendChild(Dot);
+                Pill.appendChild(document.createTextNode(Label));
+                Pill.classList.toggle("active", Brush.MaskSign === Sign);
+                Pill.addEventListener("click", () =>
                 {
-                    const Pill = Construct("button", "", Shape.Label.replace("Natural ", "").replace("Rock ", "").replace(" cluster", "").replace("Sandstone ", ""));
-                    Pill.title = Shape.Blurb;
-                    Pill.classList.toggle("active", Brush.StampShape === Shape.Id);
-                    Pill.addEventListener("click", () =>
-                    {
-                        Brush.StampShape = Shape.Id;
-                        this.ConstructBrushControls();
-                    });
-                    PillHost.appendChild(Pill);
-                }
-                Card.Content.appendChild(PillHost);
-                Card.Content.appendChild(ConstructSlider({
-                    Label: "Stamp scale", Min: 30, Max: 340, Step: 1, Unit: "m",
-                    Get: () => Brush.StampScale, Set: (R) => { Brush.StampScale = R; } }));
-                Card.Content.appendChild(ConstructSlider({
-                    Label: "Rotation", Min: 0, Max: 360, Step: 1, Unit: "°",
-                    Get: () => Brush.StampRotation, Set: (R) => { Brush.StampRotation = R; } }));
+                    Brush.MaskSign = Sign;
+                    this.ConstructBrushControls();
+                });
+                SwatchPills.appendChild(Pill);
             }
-            Card.Content.appendChild(Construct("p", "muted",
-                `${this.Stamps.length} stamp${this.Stamps.length === 1 ? "" : "s"} planted · ${(this.Raster.StampIndexCount / 3).toLocaleString()} triangles. ` +
-                "Each stamp is unioned against the heightfield's own distance field and polygonised at a voxel size matched to its scale — that is the overhang a pure heightfield cannot grow."));
+            Card.Content.appendChild(SwatchPills);
+
+            const ViewPills = Construct("div", "radio-pills");
+            for (const [ModeId, Label] of [[0, "View: Combined terrain"], [15, "View: B&W mask"]])
+            {
+                const Pill = Construct("button", "", Label);
+                Pill.classList.toggle("active", this.ViewMode === ModeId);
+                Pill.addEventListener("click", () =>
+                {
+                    this.SetViewMode(ModeId);
+                    this.ConstructBrushControls();
+                });
+                ViewPills.appendChild(Pill);
+            }
+            Card.Content.appendChild(ViewPills);
+
+            const CombinableLayers = this.Layers.slice(1).map((L) => ({ Id: String(L.Serial), Label: L.Label }));
+            const CurrentMasked = this.Layers.find((L) => L.MaskChannel === MaskName);
+            if (CombinableLayers.length > 0)
+            {
+                Card.Content.appendChild(ConstructSelectRow("Combined layer",
+                    () => CurrentMasked ? String(CurrentMasked.Serial) : CombinableLayers[0].Id,
+                    CombinableLayers,
+                    (ChosenSerial) =>
+                    {
+                        for (const L of this.Layers)
+                        {
+                            if (L.MaskChannel === MaskName)
+                                L.MaskChannel = "";
+                        }
+                        const Chosen = this.Layers.find((L) => String(L.Serial) === String(ChosenSerial));
+                        if (Chosen)
+                        {
+                            Chosen.MaskChannel = MaskName;
+                            Chosen.MaskLow = 0.0;
+                            Chosen.MaskHigh = 1.0;
+                        }
+                        this.RenderLayerStack();
+                        this.RebuildFrom(1);
+                    }));
+            }
+
+            const Actions = Construct("div", "brush-actions");
+            const FillWhite = Construct("button", "pill-button", "Fill white (1)");
+            FillWhite.addEventListener("click", () =>
+            {
+                this.Field.ChannelSamples(MaskName).fill(1.0);
+                this.Raster.UploadChannelGroup(this.Field, MaskName);
+                this.RefreshChannelPreviews();
+                const Idx = this.Layers.findIndex((L) => L.MaskChannel === MaskName);
+                if (Idx >= 0) this.RebuildFrom(Idx);
+            });
+            const FillBlack = Construct("button", "pill-button", "Fill black (0)");
+            FillBlack.addEventListener("click", () =>
+            {
+                this.Field.ChannelSamples(MaskName).fill(0.0);
+                this.Raster.UploadChannelGroup(this.Field, MaskName);
+                this.RefreshChannelPreviews();
+                const Idx = this.Layers.findIndex((L) => L.MaskChannel === MaskName);
+                if (Idx >= 0) this.RebuildFrom(Idx);
+            });
+            const AddCombine = Construct("button", "pill-button", "+ Add terrain to combine");
+            AddCombine.addEventListener("click", () =>
+            {
+                const NewLayer = ConstructLayer("RidgeUplift", {
+                    Label: "Combined massif (B&W masked)",
+                    MaskChannel: MaskName, MaskLow: 0.0, MaskHigh: 1.0,
+                    Params: { Amplitude: 240, Wavelength: 980, Octaves: 5, Sharpness: 1.3, Warp: 160 },
+                });
+                this.Layers.splice(Math.min(2, this.Layers.length), 0, NewLayer);
+                this.SelectedLayerSerial = NewLayer.Serial;
+                this.RenderLayerStack();
+                this.RenderLayerProperties();
+                this.ConstructBrushControls();
+                this.RebuildFrom(1);
+                ShowToast("Added secondary terrain masked by B&W mask — paint black/white to blend", "layers");
+            });
+            Actions.appendChild(FillWhite);
+            Actions.appendChild(FillBlack);
+            Actions.appendChild(AddCombine);
+            Card.Content.appendChild(Actions);
             Host.appendChild(Card);
         }
     }
@@ -1775,7 +1852,7 @@ export class TerrainStudio
             Pointer.LastX = Event.clientX;
             Pointer.LastY = Event.clientY;
             this.RefreshHoverHit();
-            const WantsOrbit = this.Brush.Tool === "orbit" || Event.altKey || this.SpaceHeld;
+            const WantsOrbit = this.Brush.Tool === "orbit" || this.SpaceHeld;
             if (Event.button === 2 || Event.button === 1)
             {
                 Pointer.Dragging = "pan";
@@ -1790,14 +1867,19 @@ export class TerrainStudio
             }
             if (!Pointer.Hit)
                 return;
-            if (this.Brush.Tool === "stamp")
+            if (this.Brush.Tool === "caveCarve")
             {
-                this.PlaceStamp(Pointer.Hit);
+                if (Event.altKey) this.FillCaveAt(Pointer.Hit);
+                else this.CarveCaveAt(Pointer.Hit);
+                Pointer.LastCaveHit = { X: Pointer.Hit.X, Z: Pointer.Hit.Z };
+                Pointer.CaveDragging = Event.altKey ? "fill" : "carve";
                 return;
             }
-            if (this.Brush.Tool === "stampErase")
+            if (this.Brush.Tool === "caveFill")
             {
-                this.EraseStampAt(Pointer.Hit);
+                this.FillCaveAt(Pointer.Hit);
+                Pointer.LastCaveHit = { X: Pointer.Hit.X, Z: Pointer.Hit.Z };
+                Pointer.CaveDragging = "fill";
                 return;
             }
             this.BeginStroke(Pointer.Hit, Event);
@@ -1808,12 +1890,16 @@ export class TerrainStudio
             if (Pointer.Stroke)
                 this.EndStroke();
             Pointer.Dragging = null;
+            Pointer.CaveDragging = null;
+            Pointer.LastCaveHit = null;
         });
         Canvas.addEventListener("pointercancel", () =>
         {
             if (Pointer.Stroke)
                 this.EndStroke();
             Pointer.Dragging = null;
+            Pointer.CaveDragging = null;
+            Pointer.LastCaveHit = null;
         });
         Canvas.addEventListener("wheel", (Event) =>
         {
@@ -1897,6 +1983,16 @@ export class TerrainStudio
         Pointer.Dirty = false;
         if (Pointer.Stroke && Pointer.Hit)
             this.StrokeTo(Pointer.Hit, null);
+        else if (Pointer.CaveDragging && Pointer.Hit && Pointer.LastCaveHit)
+        {
+            const Dist = Math.hypot(Pointer.Hit.X - Pointer.LastCaveHit.X, Pointer.Hit.Z - Pointer.LastCaveHit.Z);
+            if (Dist >= Math.max(this.Brush.Radius * 0.55, 18.0))
+            {
+                if (Pointer.CaveDragging === "fill") this.FillCaveAt(Pointer.Hit);
+                else this.CarveCaveAt(Pointer.Hit);
+                Pointer.LastCaveHit = { X: Pointer.Hit.X, Z: Pointer.Hit.Z };
+            }
+        }
         this.RefreshBrushMetrics();
     }
 
@@ -1968,9 +2064,11 @@ export class TerrainStudio
                 case "x": case "X":
                     if (this.Brush.Tool === "raise") this.SetTool("lower");
                     else if (this.Brush.Tool === "lower") this.SetTool("raise");
-                    else if (this.Brush.Tool === "channel")
+                    else if (this.Brush.Tool === "caveCarve") this.SetTool("caveFill");
+                    else if (this.Brush.Tool === "caveFill") this.SetTool("caveCarve");
+                    else if (this.Brush.Tool === "mask")
                     {
-                        this.Brush.ChannelSign *= -1;
+                        this.Brush.MaskSign *= -1;
                         this.ConstructBrushControls();
                     }
                     break;
@@ -2002,38 +2100,89 @@ export class TerrainStudio
     //                                                              STAMPS
     //--------------------------------------------------------------------------------------------------------
 
-    PlaceStamp(Hit)
+    CarveCaveAt(Hit)
     {
-        const Stamp = ConstructStamp(this.Brush.StampShape, Hit.X, Hit.Z, this.Brush.StampScale, this.Brush.StampRotation);
-        this.Stamps.push(Stamp);
-        this.PushHistory({ Kind: "stamp-add", Stamp });
+        const Step = 6.0;
+        const GradX = (this.Field.HeightAt(Hit.X + Step, Hit.Z) - this.Field.HeightAt(Hit.X - Step, Hit.Z)) / (2.0 * Step);
+        const GradZ = (this.Field.HeightAt(Hit.X, Hit.Z + Step) - this.Field.HeightAt(Hit.X, Hit.Z - Step)) / (2.0 * Step);
+        const GradLen = Math.hypot(GradX, GradZ);
+        let InX, InZ;
+        if (GradLen > 0.16)
+        {
+            InX = GradX / GradLen;
+            InZ = GradZ / GradLen;
+        }
+        else
+        {
+            const Basis = this.Raster.Camera.Basis();
+            const FwLen = Math.hypot(Basis.Forward[0], Basis.Forward[2]) || 1.0;
+            InX = Basis.Forward[0] / FwLen;
+            InZ = Basis.Forward[2] / FwLen;
+        }
+        const Radius = Math.min(Math.max(this.Brush.Radius * 0.36, 12.0), 64.0);
+        const Depth  = Math.max(this.Brush.CaveDepth || 90.0, Radius * 1.6);
+        const Blend  = Math.max(this.Brush.CaveBlend || 10.0, 4.0);
+        const StartX = Hit.X - InX * Radius * 0.28;
+        const StartY = Hit.Y + Radius * 0.08;
+        const StartZ = Hit.Z - InZ * Radius * 0.28;
+        const EndX   = Hit.X + InX * Depth;
+        const EndY   = Hit.Y - Radius * 0.06;
+        const EndZ   = Hit.Z + InZ * Depth;
+
+        const Cave = ConstructCave(StartX, StartY, StartZ, EndX, EndY, EndZ, Radius, Blend);
+        this.Field.UserCaves.push(Cave);
+        this.PushHistory({ Kind: "cave-add", Cave });
         this.RefreshStamps();
         this.ConstructBrushControls();
-        ShowToast(`${Stamp.Shape} planted at ${Math.round(Hit.X)}, ${Math.round(Hit.Z)} — polygonising the voxel field`, "arch");
+        ShowToast(`3D SDF cave carved at (${Math.round(Hit.X)}, ${Math.round(Hit.Z)}) — aperture ${Math.round(Radius * 2)} m`, "arch");
+    }
+
+    FillCaveAt(Hit)
+    {
+        const Reach = Math.max(this.Brush.Radius * 1.25, 48.0);
+        const Match = (Cave) =>
+        {
+            const MidX = (Cave.X + Cave.EndX) * 0.5;
+            const MidZ = (Cave.Z + Cave.EndZ) * 0.5;
+            return Math.hypot(Cave.X - Hit.X, Cave.Z - Hit.Z) < Reach
+                || Math.hypot(MidX - Hit.X, MidZ - Hit.Z) < Reach;
+        };
+        let Removed = null;
+        let FromList = null;
+        const UserIdx = this.Field.UserCaves.findIndex(Match);
+        if (UserIdx >= 0)
+        {
+            Removed = this.Field.UserCaves.splice(UserIdx, 1)[0];
+            FromList = this.Field.UserCaves;
+        }
+        else
+        {
+            const LayerIdx = this.Field.LayerCaves.findIndex(Match);
+            if (LayerIdx >= 0)
+            {
+                Removed = this.Field.LayerCaves.splice(LayerIdx, 1)[0];
+                FromList = this.Field.LayerCaves;
+            }
+        }
+        if (!Removed)
+        {
+            ShowToast("No cave within brush reach to fill", "erase");
+            return;
+        }
+        this.PushHistory({ Kind: "cave-remove", Cave: Removed, List: FromList });
+        this.RefreshStamps();
+        this.ConstructBrushControls();
+        ShowToast("Cave filled back into solid rock", "arch");
+    }
+
+    PlaceStamp(Hit)
+    {
+        this.CarveCaveAt(Hit);
     }
 
     EraseStampAt(Hit)
     {
-        let Nearest = null;
-        let NearestDist = Infinity;
-        for (const Stamp of this.Stamps)
-        {
-            const Dist = Math.hypot(Stamp.X - Hit.X, Stamp.Z - Hit.Z);
-            if (Dist < NearestDist && Dist < Math.max(Stamp.Scale * 0.8, 40))
-            {
-                Nearest = Stamp;
-                NearestDist = Dist;
-            }
-        }
-        if (!Nearest)
-        {
-            ShowToast("No stamp within reach of that click", "erase");
-            return;
-        }
-        this.Stamps.splice(this.Stamps.indexOf(Nearest), 1);
-        this.PushHistory({ Kind: "stamp-remove", Stamp: Nearest });
-        this.RefreshStamps();
-        this.ConstructBrushControls();
+        this.FillCaveAt(Hit);
     }
 
     //--------------------------------------------------------------------------------------------------------
@@ -2050,7 +2199,7 @@ export class TerrainStudio
         let Index = this.SculptLayerIndex();
         if (Index < 0)
         {
-            const Layer = ConstructLayer("SculptDelta", { Label: "Sculpt strokes" });
+            const Layer = ConstructLayer("SculptDelta", { Label: "Sculpt layer" });
             this.Layers.push(Layer);
             Index = this.Layers.length - 1;
             this.RenderLayerStack();
@@ -2061,6 +2210,8 @@ export class TerrainStudio
 
     SculptCompositeLive()
     {
+        if (this.Brush.SculptTarget === "base")
+            return true;
         const Index = this.SculptLayerIndex();
         if (Index < 0)
             return false;
@@ -2071,6 +2222,12 @@ export class TerrainStudio
 
     CompositeSculptNow()
     {
+        if (this.Brush.SculptTarget === "base")
+        {
+            this.Field.MeasureRange();
+            this.Raster.UploadHeights(this.Field);
+            return;
+        }
         const Index = this.SculptLayerIndex();
         const Heights = this.Field.Heights;
         const Delta = this.Field.SculptDelta;
@@ -2082,38 +2239,17 @@ export class TerrainStudio
             this.Evaluation.Cache[Index] = new Float32Array(Heights.length);
         this.Evaluation.Cache[Index].set(Heights);
         this.Field.MeasureRange();
-        if (this.BorderTarget !== undefined)
-        {
-            // Keep the rim grounded while sculpting live (same easing as ApplyBorderTaper).
-            const HeightsNow = this.Field.Heights;
-            const Rim = Math.floor(Resolution * 0.085);
-            for (let Z = 0; Z < Resolution; Z++)
-            {
-                for (let X = 0; X < Resolution; X++)
-                {
-                    const EdgeDist = Math.min(X, Z, Resolution - 1 - X, Resolution - 1 - Z);
-                    if (EdgeDist >= Rim)
-                        continue;
-                    let T = EdgeDist / Rim;
-                    T = T * T * (3.0 - 2.0 * T);
-                    const Idx = Z * Resolution + X;
-                    HeightsNow[Idx] = this.BorderTarget + (HeightsNow[Idx] - this.BorderTarget) * T;
-                }
-            }
-            this.Evaluation.Cache[Index].set(HeightsNow);
-            this.Field.MeasureRange();
-        }
         this.Raster.UploadHeights(this.Field);
     }
 
     StrokeTarget()
     {
-        // Returns {Samples, Flush()} for the active painting tool.
         const Tool = this.Brush.Tool;
         if (this.IsSculptTool(Tool))
         {
+            const IsBase = this.Brush.SculptTarget === "base";
             return {
-                Samples: this.Field.SculptDelta,
+                Samples: IsBase ? this.Field.BaseDelta : this.Field.SculptDelta,
                 Flush: () =>
                 {
                     if (this.SculptCompositeLive())
@@ -2121,25 +2257,19 @@ export class TerrainStudio
                 },
             };
         }
-        if (Tool === "channel")
+        if (Tool === "mask")
         {
-            const Name = this.Brush.ChannelName;
+            const Name = this.Brush.ChannelName || "Mask";
             return {
                 Samples: this.Field.ChannelSamples(Name),
                 Flush: () =>
                 {
                     this.Raster.UploadChannelGroup(this.Field, Name);
+                    this.Raster.UploadHeights(this.Field);
                     const Channel = this.Field.Channel(Name);
                     if (Channel)
                         this.Raster.UploadOverlay(Channel.Samples, Channel.Tint);
                 },
-            };
-        }
-        if (Tool === "material")
-        {
-            return {
-                Samples: this.Brush.Material === "Erase" ? this.Field.ChannelSamples("PaintRock") : this.Field.ChannelSamples(this.Brush.Material),
-                Flush: () => this.Raster.UploadPaint(this.Field),
             };
         }
         return null;
@@ -2150,16 +2280,16 @@ export class TerrainStudio
         const Target = this.StrokeTarget();
         if (!Target)
             return;
-        if (this.IsSculptTool())
+        if (this.IsSculptTool() && this.Brush.SculptTarget === "sculpt")
             this.EnsureSculptLayer();
+        if (this.Brush.Tool === "mask")
+            this.EnsureMaskTargetLayer();
         const Pointer = this.Pointer;
         Pointer.Stroke =
         {
             Target,
             Snapshot: new Float32Array(Target.Samples),
-            SnapshotB: this.Brush.Tool === "material"
-                ? MaterialPaintChannels.map((Definition) => new Float32Array(this.Field.ChannelSamples(Definition.Name)))
-                : null,
+            SnapshotB: null,
             MinX: Resolution, MaxX: -1, MinZ: Resolution, MaxZ: -1,
             Touched: false,
         };
@@ -2244,31 +2374,39 @@ export class TerrainStudio
         // Post-stroke geology consequences.
         if (this.IsSculptTool())
         {
-            const Index = this.SculptLayerIndex();
-            if (!this.SculptCompositeLive() && Index >= 0)
-                this.RebuildFrom(Index);
-            else
+            if (this.Brush.SculptTarget === "base")
             {
+                if (this.Evaluation.Cache[0])
+                {
+                    for (let i = 0; i < this.Field.Heights.length; i++)
+                        this.Evaluation.Cache[0][i] += (this.Field.BaseDelta[i] - Stroke.Snapshot[i]);
+                }
                 this.RefreshSurvey();
                 BakeSurfaceData(this.Field);
                 this.Raster.UploadChannelGroup(this.Field, "Occlusion");
-                if (this.Stamps.length)
-                    this.RefreshStamps();
+                this.RefreshStamps();
             }
-        }
-        else if (this.Brush.Tool === "channel")
-        {
-            this.RefreshChannelPreviews();
-            const MaskedIndex = this.Layers.findIndex((Layer) => Layer.MaskChannel === this.Brush.ChannelName);
-            if (MaskedIndex >= 0)
+            else
             {
-                ShowToast(`“${this.Brush.ChannelName}” masks layer “${this.Layers[MaskedIndex].Label}” — rebuilding from there`, "layers");
-                this.RebuildFrom(MaskedIndex);
+                const Index = this.SculptLayerIndex();
+                if (!this.SculptCompositeLive() && Index >= 0)
+                    this.RebuildFrom(Index);
+                else
+                {
+                    this.RefreshSurvey();
+                    BakeSurfaceData(this.Field);
+                    this.Raster.UploadChannelGroup(this.Field, "Occlusion");
+                    this.RefreshStamps();
+                }
             }
         }
-        else if (this.Brush.Tool === "material")
+        else if (this.Brush.Tool === "mask")
         {
             this.RefreshChannelPreviews();
+            BakeSurfaceData(this.Field);
+            this.Raster.UploadChannelGroup(this.Field, "Occlusion");
+            this.RefreshSurvey();
+            this.RefreshStamps();
         }
         if (this.ViewDimension === "2d")
             this.Render2DField();
@@ -2307,19 +2445,18 @@ export class TerrainStudio
         Stroke.Touched = true;
 
         const Sculpting = this.IsSculptTool(Tool);
+        const IsBaseSculpt = Sculpting && Brush.SculptTarget === "base";
         const Heights = this.Field.Heights;
-        const Delta = this.Field.SculptDelta;
-        const SculptIndex = Sculpting ? this.SculptLayerIndex() : -1;
-        const Underneath = Sculpting && SculptIndex > 0 ? this.Evaluation.Cache[SculptIndex - 1] : null;
-        const Rate = Brush.Strength * 2.6;
-        const ChannelSign = (Event && Event.altKey) ? -Brush.ChannelSign : Brush.ChannelSign;
+        const Delta = IsBaseSculpt ? this.Field.BaseDelta : this.Field.SculptDelta;
+        const SculptIndex = Sculpting && !IsBaseSculpt ? this.SculptLayerIndex() : -1;
+        const Underneath = Sculpting && !IsBaseSculpt && SculptIndex > 0 ? this.Evaluation.Cache[SculptIndex - 1] : null;
+        const Rate = Brush.Strength * 2.6 * ((Event && Event.altKey) ? -1.0 : 1.0);
+        const MaskSign = (Event && Event.altKey) ? -Brush.MaskSign : Brush.MaskSign;
 
-        const PaintArrays = Tool === "material"
-            ? MaterialPaintChannels.map((Definition) => this.Field.ChannelSamples(Definition.Name))
-            : null;
-        const PaintTargetIndex = PaintArrays
-            ? MaterialPaintChannels.findIndex((Definition) => Definition.Name === Brush.Material)
-            : -1;
+        const MaskName = Brush.ChannelName || "Mask";
+        const MaskedIndex = Tool === "mask" ? this.Layers.findIndex((L) => L.MaskChannel === MaskName) : -1;
+        const MaskUnder = (MaskedIndex > 0 && this.Evaluation.Cache[MaskedIndex - 1]) ? this.Evaluation.Cache[MaskedIndex - 1] : null;
+        const MaskFull  = (MaskedIndex >= 0 && this.Evaluation.UnmaskedCache[MaskedIndex]) ? this.Evaluation.UnmaskedCache[MaskedIndex] : null;
 
         for (let Z = MinZ; Z <= MaxZ; Z++)
         {
@@ -2337,8 +2474,10 @@ export class TerrainStudio
 
                 if (Sculpting)
                 {
-                    const Under = Underneath ? Underneath[Index] : 0.0;
-                    const CompositeHere = Under + Delta[Index];
+                    const OldDelta = Delta[Index];
+                    const CurrentH = Heights[Index];
+                    const Under = IsBaseSculpt ? (CurrentH - OldDelta) : (Underneath ? Underneath[Index] : 0.0);
+                    const CompositeHere = Under + OldDelta;
                     switch (Tool)
                     {
                         case "raise": Delta[Index] += Weight * Rate; break;
@@ -2365,30 +2504,17 @@ export class TerrainStudio
                             break;
                         }
                     }
+                    if (IsBaseSculpt)
+                        Heights[Index] += (Delta[Index] - OldDelta);
                 }
-                else if (Tool === "channel")
+                else if (Tool === "mask")
                 {
                     const Samples = Stroke.Target.Samples;
-                    Samples[Index] = Math.min(1.0, Math.max(0.0, Samples[Index] + ChannelSign * Weight * Brush.Strength * 0.22));
-                }
-                else if (Tool === "material" && PaintArrays)
-                {
-                    if (Brush.Material === "Erase")
-                    {
-                        for (const Array of PaintArrays)
-                            Array[Index] = Math.max(0.0, Array[Index] - Weight * Brush.Strength * 0.3);
-                    }
-                    else
-                    {
-                        const Add = Weight * Brush.Strength * 0.26;
-                        for (let PaintIndex = 0; PaintIndex < PaintArrays.length; PaintIndex++)
-                        {
-                            if (PaintIndex === PaintTargetIndex)
-                                PaintArrays[PaintIndex][Index] = Math.min(1.0, PaintArrays[PaintIndex][Index] + Add);
-                            else
-                                PaintArrays[PaintIndex][Index] = Math.max(0.0, PaintArrays[PaintIndex][Index] - Add * 0.55);
-                        }
-                    }
+                    const OldVal = Samples[Index];
+                    const NewVal = Math.min(1.0, Math.max(0.0, OldVal + MaskSign * Weight * Brush.Strength * 0.25));
+                    Samples[Index] = NewVal;
+                    if (MaskUnder && MaskFull)
+                        Heights[Index] += (MaskFull[Index] - MaskUnder[Index]) * (NewVal - OldVal);
                 }
             }
         }
@@ -2431,17 +2557,31 @@ export class TerrainStudio
             this.Raster.UploadPaint(this.Field);
             this.RefreshChannelPreviews();
         }
-        else if (Record.Kind === "stamp-add")
+        else if (Record.Kind === "cave-add")
         {
-            if (Undoing) this.Stamps.splice(this.Stamps.indexOf(Record.Stamp), 1);
-            else this.Stamps.push(Record.Stamp);
+            if (Undoing)
+            {
+                const Idx = this.Field.UserCaves.indexOf(Record.Cave);
+                if (Idx >= 0) this.Field.UserCaves.splice(Idx, 1);
+            }
+            else
+            {
+                this.Field.UserCaves.push(Record.Cave);
+            }
             this.RefreshStamps();
+            this.ConstructBrushControls();
         }
-        else if (Record.Kind === "stamp-remove")
+        else if (Record.Kind === "cave-remove")
         {
-            if (Undoing) this.Stamps.push(Record.Stamp);
-            else this.Stamps.splice(this.Stamps.indexOf(Record.Stamp), 1);
+            const List = Record.List || this.Field.UserCaves;
+            if (Undoing) List.push(Record.Cave);
+            else
+            {
+                const Idx = List.indexOf(Record.Cave);
+                if (Idx >= 0) List.splice(Idx, 1);
+            }
             this.RefreshStamps();
+            this.ConstructBrushControls();
         }
     }
 

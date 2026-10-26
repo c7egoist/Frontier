@@ -116,8 +116,12 @@ export class LatticeNoise
         return Sum / Normaliser;
     }
 
-    // 📝 Ridged multifractal: sharp crests where the folded signal approaches 1. Sharpness exponent
-    //    concentrates mass along the crest line — the difference between dunes and the Khumbu.
+    // 📝 Ridged multifractal with un-pinned zero crossings, concave U-valley shaping, and Musgrave
+    //    heterogeneous weighting. A single 2D gradient-noise octave vanishes at every integer lattice
+    //    corner, which pins 1-|n| crests onto a fishnet of closed V-pits (\/). Combining two shifted
+    //    incommensurate samples frees the zero-crossings into open mountain spines; squaring the
+    //    base signal gives d/dx -> 0 in the troughs so valleys open into U-basins (\___/) rather
+    //    than V-notches; weighting fine octaves by the coarse ridge keeps valley floors uncluttered.
     Ridged(PosX, PosY, Octaves, Lacunarity, Gain, Sharpness)
     {
         let Amplitude  = 0.5;
@@ -125,10 +129,14 @@ export class LatticeNoise
         let FrequencyY = PosY;
         let Sum        = 0.0;
         let Normaliser = 0.0;
+        const Exp = Math.min(Math.max(Sharpness * 0.72, 0.75), 1.18);
         for (let Octave = 0; Octave < Octaves; Octave++)
         {
-            let Ridge = 1.0 - Math.abs(this.Sample(FrequencyX, FrequencyY));
-            Ridge = Math.pow(Math.max(Ridge, 0.0), Sharpness);
+            const Primary   = this.Sample(FrequencyX, FrequencyY);
+            const Secondary = this.Sample(FrequencyX * 1.37 + 17.3, FrequencyY * 1.37 - 9.1);
+            const Signal    = Primary * 0.68 + Secondary * 0.32;
+            let Ridge = 1.0 - Math.sqrt(Signal * Signal + 0.016);
+            Ridge = Math.pow(Math.max(Ridge, 0.0), Exp);
             Sum        += Amplitude * Ridge;
             Normaliser += Amplitude;
             const RotatedX = FrequencyX * 0.8 - FrequencyY * 0.6;
@@ -231,29 +239,27 @@ export const DerivedChannels =
     { Name: "Moisture",   Label: "Soil moisture",     Tint: [0.30, 0.85, 0.45], Writer: "Derived at rebuild" },
     { Name: "Occlusion",  Label: "Occlusion (baked)", Tint: [0.85, 0.85, 0.90], Writer: "Surface bake" },
     { Name: "Protrusion", Label: "Protrusion (baked)",Tint: [1.00, 0.85, 0.55], Writer: "Surface bake" },
+    { Name: "CaveCutout", Label: "Cave openings (SDF)", Tint: [0.95, 0.38, 0.25], Writer: "Cave system (SDF)" },
 ];
 
-export const MaterialPaintChannels =
-[
-    { Name: "PaintRock",   Label: "Painted rock",   Tint: [0.55, 0.48, 0.42] },
-    { Name: "PaintMeadow", Label: "Painted meadow", Tint: [0.35, 0.62, 0.25] },
-    { Name: "PaintSand",   Label: "Painted sand",   Tint: [0.90, 0.75, 0.45] },
-    { Name: "PaintSnow",   Label: "Painted snow",   Tint: [0.95, 0.97, 1.00] },
-];
+export const MaterialPaintChannels = [];
 
 export class ReliefField
 {
     constructor()
     {
         this.Heights     = new Float32Array(Resolution * Resolution);
+        this.BaseDelta   = new Float32Array(Resolution * Resolution);
         this.SculptDelta = new Float32Array(Resolution * Resolution);
+        this.LayerCaves  = [];
+        this.UserCaves   = [];
         this.Channels    = new Map();
         this.Minimum     = 0.0;
         this.Maximum     = 1.0;
         for (const Definition of DerivedChannels)
             this.RegisterChannel(Definition.Name, Definition.Label, Definition.Tint, false, Definition.Writer);
-        for (const Definition of MaterialPaintChannels)
-            this.RegisterChannel(Definition.Name, Definition.Label, Definition.Tint, true, "Material brush");
+        const MaskChannel = this.RegisterChannel("Mask", "Combine mask (B&W)", [0.96, 0.96, 0.96], true, "B&W mask brush");
+        MaskChannel.Samples.fill(1.0);
     }
 
     RegisterChannel(Name, Label, Tint, Authored, Writer)

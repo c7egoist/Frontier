@@ -11,6 +11,7 @@
 
 import { Resolution, TexelSize, WorldExtent, LatticeNoise, MaskWeight, SlopeAt } from "./ReliefField.js";
 import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation, BoxBlurInPlace } from "./ErosionSequence.js";
+import { BuildProceduralCaves } from "./DistanceStamps.js";
 
 async function YieldBriefly()
 {
@@ -75,8 +76,8 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
     const P     = Layer.Params;
     const Noise = new LatticeNoise(Layer.Seed ^ 0x51AB);
     const N     = Resolution;
-    const Scale = TexelSize / P.Wavelength;
-    const WarpScale = TexelSize / (P.Wavelength * 2.6);
+    const Scale = TexelSize / Math.max(P.Wavelength, 680.0);
+    const WarpScale = TexelSize / (Math.max(P.Wavelength, 680.0) * 1.85);
     const WarpTexels = P.Warp / TexelSize;
     let Lo = Infinity, Hi = -Infinity;
     for (let Z = 0; Z < N; Z++)
@@ -85,11 +86,26 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
         {
             const WarpX = Noise.Fractal(X * WarpScale + 3.1, Z * WarpScale + 17.7, 3, 2.0, 0.5) * WarpTexels;
             const WarpZ = Noise.Fractal(X * WarpScale + 23.9, Z * WarpScale + 5.5, 3, 2.0, 0.5) * WarpTexels;
-            let Ridge = Noise.Ridged((X + WarpX) * Scale, (Z + WarpZ) * Scale, Math.round(P.Octaves), 2.05, 0.47, P.Sharpness);
-            Ridge = Math.pow(Ridge, 1.12);   // slight foot-thinning only — heavier exponents turn the crest web into fins
-            // A soft continental envelope stops every crest reaching full height at once.
-            const Envelope = 0.30 + 0.70 * (Noise.Fractal(X * Scale * 0.33 + 9.2, Z * Scale * 0.33 + 4.4, 3, 2.0, 0.5) * 0.5 + 0.5);
-            const Raised = Ridge * Envelope;
+            const Ux = (X + WarpX) * Scale;
+            const Uz = (Z + WarpZ) * Scale;
+
+            // Long connected structural fold ridges (anisotropic along strike so ridges form
+            // continuous mountain chains and cols rather than isolated 2D point-cones).
+            const StrikeA = Ux * 0.85 + Uz * 0.52;
+            const CrossA  = -Ux * 0.52 + Uz * 0.85;
+            const SpineA  = Noise.Ridged(StrikeA * 0.52, CrossA * 0.92, 3, 2.0, 0.42, P.Sharpness);
+
+            const StrikeB = Ux * 0.48 - Uz * 0.88;
+            const CrossB  = Ux * 0.88 + Uz * 0.48;
+            const SpineB  = Noise.Ridged(StrikeB * 0.58 + 7.4, CrossB * 0.95 - 4.1, 3, 2.0, 0.40, P.Sharpness);
+
+            // Smooth-max union of primary and secondary structural folds + broad massif dome.
+            const Diff = SpineA - SpineB;
+            const ConnectedSpine = 0.5 * (SpineA + SpineB + Math.sqrt(Diff * Diff + 0.025));
+            const BroadDome = Noise.Fractal(Ux * 0.55 + 5.2, Uz * 0.55 - 3.8, 4, 2.0, 0.48) * 0.5 + 0.5;
+            const Envelope  = 0.45 + 0.55 * (Noise.Fractal(X * Scale * 0.34 + 9.2, Z * Scale * 0.34 + 4.4, 3, 2.0, 0.5) * 0.5 + 0.5);
+
+            const Raised = (0.58 * ConnectedSpine + 0.42 * BroadDome) * Envelope;
             Out[Z * N + X] = Raised;
             if (Raised < Lo) Lo = Raised;
             if (Raised > Hi) Hi = Raised;
@@ -104,18 +120,12 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
     const Span = Math.max(Hi - Lo, 0.0001);
     for (let Index = 0; Index < Out.length; Index++)
     {
-        // Linear normalisation (clamped: Lo/Hi are tracked in double precision while Out is
-        // Float32, so the minimum cell can round a hair below Lo).
         const Unit = Math.min(Math.max((Out[Index] - Lo) / Span, 0.0), 1.0);
         Out[Index] = Unit * P.Amplitude;
     }
-    // Soften the fine crest network at groove scale: at full strength it prints a regular
-    // corduroy of 15-40 m ridges across every flank, and downstream solvers amplify the
-    // downslope subset into wax-drip fluting. A 22 m kernel at 42% halves groove depth
-    // while leaving hundred-metre arêtes standing.
-    const Softened = BoxBlurInPlace(Out, 5);
+    const Softened = BoxBlurInPlace(Out, 3);
     for (let Index = 0; Index < Out.length; Index++)
-        Out[Index] += (Softened[Index] - Out[Index]) * 0.42;
+        Out[Index] += (Softened[Index] - Out[Index]) * 0.30;
 }
 
 async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
@@ -126,8 +136,8 @@ async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
     const Radians = P.Angle * Math.PI / 180.0;
     const CosA = Math.cos(Radians);
     const SinA = Math.sin(Radians);
-    const AlongScale = 1.0 / P.Waviness;               // per metre along the front
-    const CrestScale = TexelSize / P.CrestWavelength;
+    const AlongScale = 1.0 / P.Waviness;
+    const CrestScale = TexelSize / Math.max(P.CrestWavelength, 480.0);
     let Lo = Infinity, Hi = -Infinity;
     for (let Z = 0; Z < N; Z++)
     {
@@ -139,10 +149,13 @@ async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
             const Across = WorldX * SinA + WorldZ * CosA;
             const Meander = Noise.Fractal(Along * AlongScale + 13.0, 4.7, 3, 2.0, 0.5) * P.Meander;
             const Distance = Across - P.Offset - Meander;
-            const Width = Distance > 0.0 ? P.Width : P.Width * (1.0 - P.Asymmetry * 0.72);
-            const Profile = Math.exp(-(Distance * Distance) / (Width * Width));
-            const Crest = 0.45 + 0.55 * Noise.Ridged(Along * CrestScale * 0.5 + 2.2, Distance * CrestScale * 0.5, 4, 2.05, 0.50, 1.35);
-            const Raised = Profile * Crest;
+            const Width = Distance > 0.0 ? P.Width : P.Width * (1.0 - P.Asymmetry * 0.55);
+            const Profile = Math.exp(-(Distance * Distance) / (Width * Width * 1.45));
+            // Continuous faulted main divide with broad transverse buttress spurs and cirque valleys.
+            const MainDivide = 0.58 + 0.42 * (Noise.Fractal(Along * CrestScale * 0.45 + 2.2, Distance * CrestScale * 0.25, 3, 2.0, 0.48) * 0.5 + 0.5);
+            const Buttresses = Noise.Ridged(Along * CrestScale * 0.62 - 7.4, Distance * CrestScale * 0.28 + 4.1, 3, 2.0, 0.44, 1.10);
+            const SpurFade   = Math.exp(-(Distance * Distance) / (Width * Width * 3.4));
+            const Raised     = Profile * MainDivide + SpurFade * (1.0 - Profile * 0.45) * Buttresses * 0.52;
             Out[Z * N + X] = Raised;
             if (Raised < Lo) Lo = Raised;
             if (Raised > Hi) Hi = Raised;
@@ -157,11 +170,9 @@ async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
     const Span = Math.max(Hi - Lo, 0.0001);
     for (let Index = 0; Index < Out.length; Index++)
         Out[Index] = ((Out[Index] - Lo) / Span) * P.Amplitude;
-    // Same fine-crest softening as the ridge builder: the front should read as buttresses
-    // and gullies at the hundred-metre scale, not as regular corduroy at the ten-metre scale.
-    const Softened = BoxBlurInPlace(Out, 5);
+    const Softened = BoxBlurInPlace(Out, 3);
     for (let Index = 0; Index < Out.length; Index++)
-        Out[Index] += (Softened[Index] - Out[Index]) * 0.40;
+        Out[Index] += (Softened[Index] - Out[Index]) * 0.30;
 }
 
 async function BuildCellularPlateau(Field, Layer, Out, Report, Cancel)
@@ -169,24 +180,30 @@ async function BuildCellularPlateau(Field, Layer, Out, Report, Cancel)
     const P     = Layer.Params;
     const Noise = new LatticeNoise(Layer.Seed ^ 0x2E91);
     const N     = Resolution;
-    const Scale = TexelSize / P.CellSize;
-    const Edge  = Math.max(P.EdgeWidth, 0.02);
+    const Scale = TexelSize / Math.max(P.CellSize, 380.0);
+    const Edge  = Math.max(P.EdgeWidth, 0.14);
     const HeightVariance = (P.HeightVariance !== undefined) ? P.HeightVariance : 0.65;
     let Lo = Infinity, Hi = -Infinity;
     for (let Z = 0; Z < N; Z++)
     {
         for (let X = 0; X < N; X++)
         {
-            const Warp = Noise.Fractal(X * Scale * 0.6 + 8.8, Z * Scale * 0.6 + 1.9, 2, 2.0, 0.5);
-            const [Cell, Identity] = Noise.CellularWithIdentity((X + Warp * 70.0) * Scale, (Z - Warp * 70.0) * Scale);
-            let Top = (Cell - 0.06) / Edge;
-            Top = Top < 0.0 ? 0.0 : Top > 1.0 ? 1.0 : Top;
-            Top = Top * Top * (3.0 - 2.0 * Top);
-            // Every remnant stands at its own level. Without the per-cell level all mesa tops
-            // saturate to one elevation and the field reads as stacked cakes, not eroded plateau.
-            const Level = 1.0 - HeightVariance * (1.0 - Identity);
-            const Detail = Noise.Fractal(X * TexelSize / 260.0, Z * TexelSize / 260.0, 4, 2.0, 0.5);
-            const Raised = (0.18 + 0.82 * Top * Level) + Detail * 0.07;
+            const WarpX = Noise.Fractal(X * Scale * 0.55 + 8.8, Z * Scale * 0.55 + 1.9, 3, 2.0, 0.5) * 155.0;
+            const WarpZ = Noise.Fractal(X * Scale * 0.55 - 4.3, Z * Scale * 0.55 + 12.7, 3, 2.0, 0.5) * 155.0;
+            const [Cell, Identity] = Noise.CellularWithIdentity((X + WarpX) * Scale, (Z + WarpZ) * Scale);
+            // Wadi-and-butte badlands: wide flat sand-sheeted wadi corridors separating eroded
+            // sandstone mesas, cuestas and rocky outcrops across the full 2 km x 2 km domain.
+            const WadiCorridor = Noise.Ridged((X + WarpX * 0.5) * TexelSize / 920.0 + 3.1, (Z + WarpZ * 0.5) * TexelSize / 920.0 - 2.4, 4, 2.02, 0.46, 1.35);
+            let Butte = (Cell - 0.14) / Edge;
+            Butte = Butte < 0.0 ? 0.0 : Butte > 1.0 ? 1.0 : Butte;
+            Butte = Butte * Butte * (3.0 - 2.0 * Butte);
+            const Level = 1.0 - HeightVariance * 0.50 * (1.0 - Identity);
+            // Carve flat wadi basins where WadiCorridor < 0.42, rising into steep sandstone massifs above.
+            let CorridorMask = (WadiCorridor - 0.34) / 0.46;
+            CorridorMask = CorridorMask < 0.0 ? 0.0 : CorridorMask > 1.0 ? 1.0 : CorridorMask;
+            CorridorMask = CorridorMask * CorridorMask * (3.0 - 2.0 * CorridorMask);
+            const CragDetail = Noise.Ridged(X * TexelSize / 340.0 + 7.2, Z * TexelSize / 340.0 - 4.8, 3, 2.0, 0.45, 1.25);
+            const Raised = CorridorMask * (0.58 * Butte * Level + 0.42 * CragDetail) + (1.0 - CorridorMask) * 0.06 * CragDetail;
             Out[Z * N + X] = Raised;
             if (Raised < Lo) Lo = Raised;
             if (Raised > Hi) Hi = Raised;
@@ -442,8 +459,20 @@ export const LayerTypes =
             SnowAccumulation(Field, Layer.Params, new LatticeNoise(Layer.Seed ^ 0x3F77), Report, Cancel),
     },
     {
-        Id: "SculptDelta", Label: "Sculpt strokes", Group: "Sculpt", Glyph: "sculpt",
-        Blurb: "Everything the sculpt brush has raised or carved, as one layer.",
+        Id: "CaveNetwork", Label: "Cave system (SDF)", Group: "Formation", Glyph: "arch",
+        Blurb: "Carves 3D voxel signed-distance caves, vaulted tunnels and cliff overhangs directly into steep rock walls.",
+        Params:
+        [
+            Param("CaveCount",   "Cave mouths",   1, 10, 1,   4,  ""),
+            Param("Aperture",    "Cave aperture", 12, 68, 1,  26, "m"),
+            Param("TunnelDepth", "Tunnel depth",  30, 220, 5, 95, "m"),
+            Param("Blend",       "Lip rounding",  4, 24, 1,   10, "m"),
+        ],
+        Modify: async (Field, Layer, Report) => { BuildProceduralCaves(Field, Layer); Report(1.0); },
+    },
+    {
+        Id: "SculptDelta", Label: "Sculpt layer", Group: "Sculpt", Glyph: "sculpt",
+        Blurb: "Height strokes painted into this sculpt layer. Combine or mask with the B&W mask brush.",
         Params: [],
         Modify: async (Field, Layer, Report) => { ApplySculptDelta(Field); Report(1.0); },
     },
@@ -495,14 +524,16 @@ export class LayerStackEvaluation
 {
     constructor(Field)
     {
-        this.Field  = Field;
-        this.Cache  = [];        // relief snapshot after each layer index
-        this.Scratch = new Float32Array(Resolution * Resolution);
+        this.Field         = Field;
+        this.Cache         = [];        // relief snapshot after each layer index
+        this.UnmaskedCache = [];        // pre-mask snapshot per layer for instant B&W mask blending
+        this.Scratch       = new Float32Array(Resolution * Resolution);
     }
 
     InvalidateFrom(Index)
     {
         this.Cache.length = Math.min(this.Cache.length, Index);
+        this.UnmaskedCache.length = Math.min(this.UnmaskedCache.length, Index);
     }
 
     BuildMaskWeights(Layer)
@@ -552,10 +583,17 @@ export class LayerStackEvaluation
         {
             Heights.fill(0.0);
             Field.ClearDerivedChannels();
+            Field.LayerCaves = [];
         }
         else if (this.Cache[Start - 1])
         {
             Heights.set(this.Cache[Start - 1]);
+            Field.LayerCaves = [];
+            for (let Prior = 0; Prior < Start; Prior++)
+            {
+                if (Layers[Prior] && Layers[Prior].Enabled && Layers[Prior].TypeId === "CaveNetwork")
+                    BuildProceduralCaves(Field, Layers[Prior]);
+            }
         }
 
         for (let Index = Start; Index < Layers.length; Index++)
@@ -589,6 +627,18 @@ export class LayerStackEvaluation
                 {
                     await Type.Modify(Field, Layer, Overall, Cancel);
                 }
+
+                // Base-layer sculpting lives directly on Layer 0 so downstream erosion layers act over it.
+                if (Index === 0 && Field.BaseDelta)
+                {
+                    const BaseDelta = Field.BaseDelta;
+                    for (let Texel = 0; Texel < Heights.length; Texel++)
+                        Heights[Texel] += BaseDelta[Texel];
+                }
+
+                if (!this.UnmaskedCache[Index])
+                    this.UnmaskedCache[Index] = new Float32Array(Resolution * Resolution);
+                this.UnmaskedCache[Index].set(Heights);
 
                 // Uniform strength × mask mixing against the incoming relief.
                 const Strength = Layer.Strength;

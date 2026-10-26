@@ -780,10 +780,30 @@ export function BoxBlurInPlace(Source, RadiusTexels)
 
 export async function GlacialPolish(Field, Params, Report, Cancel)
 {
-    const Heights = Field.Heights;
-    const Flow    = Field.ChannelSamples("Flow");
-    const Blurred = BoxBlurInPlace(Heights, Params.WidthTexels);
-    Report(0.5);
+    const Heights    = Field.Heights;
+    const Flow       = Field.ChannelSamples("Flow");
+    const Deposition = Field.ChannelSamples("Deposition");
+    const Width      = Math.max(4, Math.round(Params.WidthTexels));
+    const NearWidth  = Math.max(3, Math.round(Width * 0.45));
+    const BlurredNear = BoxBlurInPlace(Heights, NearWidth);
+    const BlurredWide = BoxBlurInPlace(Heights, Width);
+    Report(0.35);
+    await YieldBriefly();
+    Cancel.ThrowIfRequested();
+
+    // Dilate the trunk drainage and any pinched V-notches (\/) across the full trough width so the
+    // glacier acts on the whole valley cross-section rather than the 1-texel river thread.
+    const Seed = new Float32Array(Heights.length);
+    for (let Index = 0; Index < Heights.length; Index++)
+    {
+        const FlowHere = Flow[Index];
+        const FlowTerm = FlowHere > 0.22 ? Math.min((FlowHere - 0.22) / 0.48, 1.0) : 0.0;
+        const Pinch = Math.max(BlurredNear[Index] - Heights[Index], 0.0);
+        const PinchTerm = Math.min(Pinch / 14.0, 1.0);
+        Seed[Index] = Math.max(FlowTerm, PinchTerm * 0.8);
+    }
+    const TroughSwath = BoxBlurInPlace(Seed, Math.max(4, Math.round(Width * 0.65)));
+    Report(0.7);
     await YieldBriefly();
     Cancel.ThrowIfRequested();
 
@@ -791,13 +811,18 @@ export async function GlacialPolish(Field, Params, Report, Cancel)
     const Scour    = Params.ScourMetres;
     for (let Index = 0; Index < Heights.length; Index++)
     {
-        const FlowHere = Flow[Index];
-        if (FlowHere < 0.3)
+        const Swath = Math.min(TroughSwath[Index] * 2.4, 1.0);
+        const Pinch = Math.max(BlurredNear[Index] - Heights[Index], 0.0);
+        if (Swath < 0.02 && Pinch < 0.25)
             continue;
-        let Trunk = (FlowHere - 0.3) / 0.5;
-        Trunk = Trunk > 1.0 ? 1.0 : Trunk * Trunk * (3.0 - 2.0 * Trunk);
-        const Blend = Strength * Trunk;
-        Heights[Index] += (Blurred[Index] - Scour * Trunk - Heights[Index]) * Blend;
+        const Trough = Swath * Swath * (3.0 - 2.0 * Swath);
+        // Round sharp \/ valley bottoms toward the parabolic floor while lowering the flanks into a U-trough (\___/).
+        const FloorTarget = Math.min(BlurredNear[Index], BlurredWide[Index]) - Scour * Trough * 0.65;
+        const PinchLift = Pinch * Strength * 0.65;
+        const TroughCut = (FloorTarget - Heights[Index]) * Strength * Trough * 0.72;
+        Heights[Index] += PinchLift + TroughCut;
+        if (Trough > 0.25 && Heights[Index] <= BlurredNear[Index] + 2.0)
+            Deposition[Index] = Math.min(Deposition[Index] + Trough * Strength * 0.22, 1.0);
     }
     Report(1.0);
 }
@@ -904,53 +929,75 @@ export async function AeolianSettle(Field, Params, Report, Cancel)
 export async function SnowAccumulation(Field, Params, Noise, Report, Cancel)
 {
     const Heights = Field.Heights;
+    const Source  = new Float32Array(Heights);
     const Snow    = Field.ChannelSamples("Snow");
+    const Flow    = Field.ChannelSamples("Flow");
     const N       = Resolution;
-    const Blurred = BoxBlurInPlace(Heights, 4);
+    const Blurred = BoxBlurInPlace(Source, 4);
+    const Wide    = BoxBlurInPlace(Source, 16);
     Report(0.35);
     await YieldBriefly();
     Cancel.ThrowIfRequested();
 
-    const Snowline     = Params.Snowline;
-    const BandMetres   = Math.max(Params.Band, 4.0);
-    const SlopeLimit   = Math.tan(Params.SlopeLimit * Math.PI / 180.0);
-    const Depth        = Params.Depth;
-    const DriftScale   = 3.0 / N;
+    const Snowline   = Params.Snowline;
+    const BandMetres = Math.max(Params.Band, 12.0);
+    // Convert SlopeLimit degrees into a realistic alpine rock-shedding threshold so steep faces (> 27-32 deg)
+    // shed snow to expose dark granite/gneiss walls while cirques, couloirs and saddles hold snow.
+    const CritSlope  = Math.min(Math.tan(Params.SlopeLimit * Math.PI / 180.0) * 0.52, 0.62);
+    const Depth      = Params.Depth;
+    const DriftScale = 3.2 / N;
 
     for (let Z = 0; Z < N; Z++)
     {
         for (let X = 0; X < N; X++)
         {
             const Index = Z * N + X;
-            const Wobble = Noise.Fractal(X * DriftScale, Z * DriftScale, 3, 2.0, 0.5) * BandMetres * 2.2;
-            let Cover = (Heights[Index] - (Snowline + Wobble)) / BandMetres;
-            Cover = Cover < 0.0 ? 0.0 : Cover > 1.0 ? 1.0 : Cover;
-            Cover = Cover * Cover * (3.0 - 2.0 * Cover);
-            if (Cover <= 0.0)
-                continue;
             const X0 = X > 0 ? X - 1 : X;
             const X1 = X < N - 1 ? X + 1 : X;
             const Z0 = Z > 0 ? Z - 1 : Z;
             const Z1 = Z < N - 1 ? Z + 1 : Z;
-            // Slope from the blurred surface: snow slabs respond to the face angle over metres,
-            // not to every texel-scale groove wall (which would shed the whole face bare).
-            const GradX = (Blurred[Z * N + X1] - Blurred[Z * N + X0]) / ((X1 - X0) * TexelSize);
-            const GradZ = (Blurred[Z1 * N + X] - Blurred[Z0 * N + X]) / ((Z1 - Z0) * TexelSize);
-            const SlopeHere = Math.sqrt(GradX * GradX + GradZ * GradZ);
-            let Hold = 1.0 - Math.min(SlopeHere / (SlopeLimit * 1.9), 1.0);
-            Hold = Hold * Hold;
-            const Stored = Cover * (0.45 + 0.55 * Hold);
+
+            const BlurGx = (Blurred[Z * N + X1] - Blurred[Z * N + X0]) / ((X1 - X0) * TexelSize);
+            const BlurGz = (Blurred[Z1 * N + X] - Blurred[Z0 * N + X]) / ((Z1 - Z0) * TexelSize);
+            const SlopeHere = Math.sqrt(BlurGx * BlurGx + BlurGz * BlurGz);
+
+            // Multi-scale concavity from immutable Source: > 0 in cirques/couloirs, < 0 on convex ridges.
+            const Concavity = (Wide[Index] - Source[Index]) * 0.65 + (Blurred[Index] - Source[Index]) * 0.55;
+            const CouloirBonus   = Math.max(Concavity, 0.0) * 4.5 + Flow[Index] * 38.0;
+            const RidgeWindStrip = Math.max(-Concavity - 0.4, 0.0) * 9.5;
+
+            const Wobble = Noise.Fractal(X * DriftScale, Z * DriftScale, 3, 2.0, 0.5) * BandMetres * 0.65;
+            const LocalSnowline = Snowline + Wobble - CouloirBonus + RidgeWindStrip;
+            let Cover = (Source[Index] - LocalSnowline) / BandMetres;
+            Cover = Cover < 0.0 ? 0.0 : Cover > 1.0 ? 1.0 : Cover;
+            Cover = Cover * Cover * (3.0 - 2.0 * Cover);
+            if (Cover <= 0.0)
+                continue;
+
+            // Steep faces shed snow to bare rock; concave couloirs hold snow up to slightly steeper angles.
+            const CouloirHold = Concavity > 0.5 ? Math.min(Concavity / 8.0, 0.22) : 0.0;
+            const EffectiveCrit = CritSlope + CouloirHold;
+            let Hold = 1.0 - Math.min(Math.max((SlopeHere - EffectiveCrit * 0.42) / Math.max(EffectiveCrit * 0.58, 0.10), 0.0), 1.0);
+            Hold = Hold * Hold * (3.0 - 2.0 * Hold);
+
+            // Wind scours exposed convex arêtes so dark rock spines stand out sharply against snowfields.
+            const WindScour = Concavity < -0.3 ? Math.max(0.0, 1.0 - (-Concavity - 0.3) * 0.22) : 1.0;
+
+            const Stored = Math.min(Cover * Hold * WindScour, 1.0);
             Snow[Index] = Math.max(Snow[Index], Stored);
-            const Drift = Math.max(Blurred[Index] - Heights[Index], 0.0) * 0.55;
-            Heights[Index] += Stored * Depth + Drift * Cover * Hold;
         }
         if ((Z & 127) === 0)
         {
-            Report(0.35 + 0.65 * Z / N);
+            Report(0.35 + 0.55 * Z / N);
             Cancel.ThrowIfRequested();
             await YieldBriefly();
         }
     }
+
+    // Smooth the snow depth addition before applying to Heights so snow drifts never add 1-texel roughness.
+    const SmoothSnow = BoxBlurInPlace(Snow, 3);
+    for (let Index = 0; Index < Heights.length; Index++)
+        Heights[Index] = Source[Index] + SmoothSnow[Index] * Depth * 0.45;
     Report(1.0);
 }
 
