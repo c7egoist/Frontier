@@ -72,6 +72,13 @@ export interface Attachment {
   requires?: Attachment;
   /** Take the exit frame from the window loop itself instead of the parent's analytic radial (small windows on ribbed or flat parents). */
   loopExit?: boolean;
+  /**
+   * Side of the parent surface the child leaves from, for windows on concave
+   * faces (the inside of a snap trap, the upper face of a channelled blade):
+   * the measured loop normal is flipped to agree with it instead of pointing
+   * away from the centreline.
+   */
+  normalHint?: V3;
   // Filled in by the planner.
   j0: number;
   row0: number;
@@ -680,7 +687,7 @@ export abstract class OrganMesher {
       nrm.z += (p.x - q.x) * (p.y + q.y);
     }
     let normal = lengthSq(nrm) < 1e-18 ? sub(cen, f.pos) : normalize(nrm);
-    if (dot(normal, sub(cen, f.pos)) < 0) normal = scale(normal, -1);
+    if (dot(normal, c.normalHint ?? sub(cen, f.pos)) < 0) normal = scale(normal, -1);
     let size = 0;
     for (let k = 0; k < M; k++) {
       const p = this.pos(childLoop[k]);

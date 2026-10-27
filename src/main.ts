@@ -1,8 +1,9 @@
 import './ui/styles.css';
-import { PRESETS, PRESET_GROUPS, TreeParams, PlantKind, cloneParams, SHAPE_NAMES, Shape, scatterFor, trunkBaseRadius, rootReach, isGrass, isSucculent, isVegetable, isOrganPlant, plantKind } from './tree/params';
+import { PRESETS, PRESET_GROUPS, TreeParams, PlantKind, cloneParams, SHAPE_NAMES, Shape, scatterFor, trunkBaseRadius, rootReach, isGrass, isSucculent, isVegetable, isCarnivore, isOrganPlant, plantKind } from './tree/params';
 import { GrassParams, Inflorescence, INFLORESCENCE_NAMES, HEAD_BRANCH_NAMES, grassHeight, grassHabit } from './plant/grassParams';
 import { SucculentParams, SucculentForm, SUCCULENT_FORM_NAMES, succulentHeight, succulentHabit } from './plant/succulentParams';
 import { VegetableParams, VegetableForm, FruitShape, LeafShape, VEGETABLE_FORM_NAMES, FRUIT_SHAPE_NAMES, vegetableHeight, vegetableHabit } from './plant/vegetableParams';
+import { CarnivoreParams, CarnivoreForm, TrapKind, HoodKind, CARNIVORE_FORM_NAMES, TRAP_NAMES, HOOD_NAMES, carnivoreHeight, carnivoreHabit } from './plant/carnivoreParams';
 import { Viewer, DEFAULT_VIEW, ViewerSettings, DisplayMode } from './viewer/scene';
 import { el, icon, button, section, slider, select, check, stepper, levelsHeader, levelRow, fmtInt, fmtCompact } from './ui/controls';
 import type { WorkerRequest, WorkerResponse, GenerateResponse } from './worker/tree.worker';
@@ -191,11 +192,12 @@ const tabBotany = el('button', 'on', 'Botany');
 const tabGrass = el('button', '', 'Grass');
 const tabSucculent = el('button', '', 'Succulent');
 const tabVegetable = el('button', '', 'Crop');
+const tabCarnivore = el('button', '', 'Trap');
 const tabRoots = el('button', '', 'Roots');
 const tabMesh = el('button', '', 'Mesh');
 const tabView = el('button', '', 'View');
 const tabReport = el('button', '', 'Topology');
-tabs.append(tabBotany, tabGrass, tabSucculent, tabVegetable, tabRoots, tabMesh, tabView, tabReport);
+tabs.append(tabBotany, tabGrass, tabSucculent, tabVegetable, tabCarnivore, tabRoots, tabMesh, tabView, tabReport);
 const scroll = el('div', 'insp');
 panel.append(tabs, scroll);
 
@@ -204,17 +206,19 @@ const pages = {
   grass: el('div'),
   succulent: el('div'),
   vegetable: el('div'),
+  carnivore: el('div'),
   roots: el('div'),
   mesh: el('div'),
   view: el('div'),
   report: el('div'),
 };
-scroll.append(pages.botany, pages.grass, pages.succulent, pages.vegetable, pages.roots, pages.mesh, pages.view, pages.report);
+scroll.append(pages.botany, pages.grass, pages.succulent, pages.vegetable, pages.carnivore, pages.roots, pages.mesh, pages.view, pages.report);
 const tabMap: [HTMLButtonElement, HTMLElement][] = [
   [tabBotany, pages.botany],
   [tabGrass, pages.grass],
   [tabSucculent, pages.succulent],
   [tabVegetable, pages.vegetable],
+  [tabCarnivore, pages.carnivore],
   [tabRoots, pages.roots],
   [tabMesh, pages.mesh],
   [tabView, pages.view],
@@ -226,8 +230,9 @@ const kindTabs: Record<PlantKind, HTMLButtonElement[]> = {
   grass: [tabGrass],
   succulent: [tabSucculent],
   vegetable: [tabVegetable],
+  carnivore: [tabCarnivore],
 };
-const KIND_LABEL: Record<PlantKind, string> = { tree: 'tree', grass: 'grass', succulent: 'succulent', vegetable: 'vegetable' };
+const KIND_LABEL: Record<PlantKind, string> = { tree: 'tree', grass: 'grass', succulent: 'succulent', vegetable: 'vegetable', carnivore: 'carnivorous' };
 function showTab(btn: HTMLButtonElement): void {
   for (const [b, p] of tabMap) {
     b.classList.toggle('on', b === btn);
@@ -326,6 +331,10 @@ function baseReach(): number {
   if (isVegetable(params) && params.vegetable) {
     const v = params.vegetable;
     return Math.max(0.3, v.form === 'vine' ? v.height * 0.8 : v.form === 'rosette' ? v.leafLength * 1.5 : v.height * 0.5);
+  }
+  if (isCarnivore(params) && params.carnivore) {
+    const c = params.carnivore;
+    return Math.max(0.2, c.form === 'vine' ? c.height * 0.6 : c.form === 'pitcher' ? c.pitcherHeight * 0.6 : c.leafLength * 1.5);
   }
   return rootReach(params);
 }
@@ -505,6 +514,7 @@ const LEVEL_NAMES: Record<PlantKind, [string, string, string, string]> = {
   grass: ['Crown', 'Culms', 'Blades', 'Heads'],
   succulent: ['Body', 'Arms · pads', 'Leaves · fruit', 'Areoles · spines'],
   vegetable: ['Stem · root', 'Branches · stalks', 'Leaves', 'Fruit · pods'],
+  carnivore: ['Crown · stem', 'Leaves · pitchers', 'Hoods · flowers', 'Teeth · tentacles'],
 };
 
 function groupOf(name: string): string {
@@ -780,6 +790,8 @@ const GROUP_ICON: Record<string, string> = {
   'Vegetables · fruiting bushes': 'tomato',
   'Vegetables · vines': 'pumpkin',
   'Vegetables · heads, roots & grain': 'carrot',
+  'Carnivorous · traps & sundews': 'flytrap',
+  'Carnivorous · pitcher plants': 'pitcher',
 };
 const GROUP_ACCENT: Record<string, string> = {
   Oaks: '#c98b4b',
@@ -799,6 +811,8 @@ const GROUP_ACCENT: Record<string, string> = {
   'Vegetables · fruiting bushes': '#ff6b57',
   'Vegetables · vines': '#ffa14a',
   'Vegetables · heads, roots & grain': '#c7d94f',
+  'Carnivorous · traps & sundews': '#ff7a9e',
+  'Carnivorous · pitcher plants': '#c45cff',
 };
 const closedGroups = new Set<string>();
 
@@ -812,6 +826,7 @@ function speciesMeta(name: string): string {
   }
   if (isSucculent(p) && p.succulent) return `${succulentHabit(p.succulent)} · ${fmtH(succulentHeight(p.succulent))}`;
   if (isVegetable(p) && p.vegetable) return `${vegetableHabit(p.vegetable)} · ${fmtH(vegetableHeight(p.vegetable))}`;
+  if (isCarnivore(p) && p.carnivore) return `${carnivoreHabit(p.carnivore)} · ${fmtH(carnivoreHeight(p.carnivore))}`;
   const b = p.botany;
   return `${SHAPE_NAMES[b.shape].toLowerCase()} · ${b.scale} m · L${b.levels}`;
 }
@@ -861,7 +876,7 @@ function buildLibrary(): void {
   }
   if (shown === 0) {
     const empty = el('div', 'empty');
-    empty.append(el('b', '', 'No species match'), document.createTextNode('Try a family name such as “oak”, “conifer”, “cacti”, “grass” or “vegetables”.'));
+    empty.append(el('b', '', 'No species match'), document.createTextNode('Try a family name such as “oak”, “conifer”, “cacti”, “grass”, “vegetables” or “carnivorous”.'));
     libTree.append(empty);
   }
   tileSpecies.innerHTML = '';
@@ -1461,6 +1476,142 @@ function buildVegetablePage(): void {
 }
 
 // -----------------------------------------------------------------------------
+// Trap page (carnivorous plants)
+// -----------------------------------------------------------------------------
+
+function buildCarnivorePage(): void {
+  const page = pages.carnivore;
+  page.innerHTML = '';
+  if (!isCarnivore(params) || !params.carnivore) return;
+  const C = (): CarnivoreParams => params.carnivore!;
+  const c = C();
+  seedHeader(page);
+  const rebuild = (): void => {
+    onChange();
+    buildCarnivorePage();
+  };
+  const rosette = c.form === 'rosette';
+  const pitcher = c.form === 'pitcher';
+  const vine = c.form === 'vine';
+  const snap = rosette && c.trap === 'snap';
+  const sundew = rosette && c.trap === 'tentacle';
+  const cobra = pitcher && c.hood === 'cobra';
+
+  const sForm = section('Growth form', page, { hint: CARNIVORE_FORM_NAMES[c.form].split(' ')[0].toLowerCase() });
+  select(sForm, 'Form', (Object.keys(CARNIVORE_FORM_NAMES) as CarnivoreForm[]).map((k) => ({ value: k, label: CARNIVORE_FORM_NAMES[k] })), () => C().form, (val) => (C().form = val), rebuild);
+  slider(sForm, vine ? 'Stem length' : 'Crown height', () => C().height, (val) => (C().height = val), { min: 0.003, max: vine ? 4 : 0.15, step: 0.001, ...cm }, onChange);
+  slider(sForm, 'Height variation', () => C().heightV, (val) => (C().heightV = val), { min: 0, max: 0.5, step: 0.01, unit: '±' }, onChange);
+  slider(sForm, vine ? 'Stem radius' : 'Crown radius', () => C().radius, (val) => (C().radius = val), { min: 0.002, max: 0.06, step: 0.0005, ...mm }, onChange);
+  if (vine) slider(sForm, 'Lean', () => C().lean, (val) => (C().lean = val), { min: 0, max: 85, step: 1, unit: '°', title: 'How far the scrambling stem leans over by its top' }, onChange);
+
+  if (!pitcher) {
+    const sLeaf = section('Leaves', page, { hint: `${c.leaves} leaves` });
+    slider(sLeaf, 'Leaves', () => C().leaves, (val) => (C().leaves = Math.round(val)), { min: 1, max: 30, step: 1 }, onChange);
+    slider(sLeaf, vine ? 'Blade length' : 'Leaf length', () => C().leafLength, (val) => (C().leafLength = val), { min: 0.01, max: 0.5, step: 0.001, ...cm }, onChange);
+    slider(sLeaf, 'Length variation', () => C().leafLengthV, (val) => (C().leafLengthV = val), { min: 0, max: 0.6, step: 0.01, unit: '±' }, onChange);
+    slider(sLeaf, snap ? 'Petiole width' : 'Blade width', () => C().leafWidth, (val) => (C().leafWidth = val), { min: 0.002, max: 0.12, step: 0.0005, ...mm }, onChange);
+    slider(sLeaf, 'Thickness', () => C().leafThickness, (val) => (C().leafThickness = val), { min: 0.01, max: 0.4, step: 0.005, unit: '× width' }, onChange);
+    if (rosette) {
+      slider(sLeaf, 'Spread · outer', () => C().leafSpread, (val) => (C().leafSpread = val), { min: 0, max: 95, step: 1, unit: '°', title: 'Angle from the vertical of the oldest leaves' }, onChange);
+      slider(sLeaf, 'Spread · inner', () => C().leafSpreadTop, (val) => (C().leafSpreadTop = val), { min: 0, max: 95, step: 1, unit: '°' }, onChange);
+      slider(sLeaf, 'Petiole', () => C().petiole, (val) => (C().petiole = val), { min: 0, max: 0.85, step: 0.01, unit: '× length', title: 'Share of the leaf that is petiole; the rest is the trap or blade' }, onChange);
+    } else {
+      slider(sLeaf, 'Spread', () => C().leafSpread, (val) => (C().leafSpread = val), { min: 10, max: 95, step: 1, unit: '°' }, onChange);
+      slider(sLeaf, 'Spread · top', () => C().leafSpreadTop, (val) => (C().leafSpreadTop = val), { min: 10, max: 95, step: 1, unit: '°' }, onChange);
+    }
+    slider(sLeaf, 'Droop', () => C().leafDroop, (val) => (C().leafDroop = val), { min: -30, max: 90, step: 1, unit: '°' }, onChange);
+    if (!snap) slider(sLeaf, 'Channel', () => C().leafCup, (val) => (C().leafCup = val), { min: 0, max: 150, step: 1, unit: '°', title: 'Arc of the blade across its width' }, onChange);
+    if (sundew) slider(sLeaf, 'Tip curl', () => C().tipCurl, (val) => (C().tipCurl = val), { min: 0, max: 270, step: 5, unit: '°', title: 'Young blades unroll from a curl' }, onChange);
+  }
+
+  if (rosette) {
+    const sTrap = section('Trap', page, { hint: TRAP_NAMES[c.trap].split(' ')[0].toLowerCase() });
+    select(sTrap, 'Kind', (Object.keys(TRAP_NAMES) as TrapKind[]).map((k) => ({ value: k, label: TRAP_NAMES[k] })), () => C().trap, (val) => (C().trap = val), rebuild);
+    if (snap) {
+      slider(sTrap, 'Lobe width', () => C().trapWidth, (val) => (C().trapWidth = val), { min: 0.003, max: 0.05, step: 0.0005, ...mm }, onChange);
+      slider(sTrap, 'Opening', () => C().trapOpen, (val) => (C().trapOpen = val), { min: 5, max: 175, step: 1, unit: '°', title: 'Angle between the lobes: shut to flat open' }, onChange);
+      slider(sTrap, 'Opening variation', () => C().trapOpenV, (val) => (C().trapOpenV = val), { min: 0, max: 0.8, step: 0.01, unit: '±' }, onChange);
+      slider(sTrap, 'Teeth per lobe', () => C().cilia, (val) => (C().cilia = Math.round(val)), { min: 0, max: 24, step: 1 }, onChange);
+      slider(sTrap, 'Tooth length', () => C().ciliaLength, (val) => (C().ciliaLength = val), { min: 0, max: 0.012, step: 0.0001, ...mm }, onChange);
+      slider(sTrap, 'Trigger hairs', () => C().triggerHairs, (val) => (C().triggerHairs = Math.round(val)), { min: 0, max: 6, step: 1, unit: 'per lobe' }, onChange);
+    }
+    if (sundew) {
+      slider(sTrap, 'Tentacles per leaf', () => C().tentacles, (val) => (C().tentacles = Math.round(val)), { min: 0, max: 200, step: 1 }, onChange);
+      slider(sTrap, 'Tentacle length', () => C().tentacleLength, (val) => (C().tentacleLength = val), { min: 0.0005, max: 0.012, step: 0.0001, ...mm }, onChange);
+      slider(sTrap, 'Tentacle radius', () => C().tentacleRadius, (val) => (C().tentacleRadius = val), { min: 0.00005, max: 0.001, step: 0.00001, format: (v: number) => (v * 1000).toFixed(2), unit: 'mm' }, onChange);
+    }
+  }
+
+  if (pitcher || vine) {
+    const sPit = section('Pitchers', page, { hint: pitcher ? `${c.pitchers} pitchers` : `${cm.format(c.pitcherHeight)} cm` });
+    if (pitcher) slider(sPit, 'Pitchers', () => C().pitchers, (val) => (C().pitchers = Math.round(val)), { min: 1, max: 24, step: 1 }, onChange);
+    slider(sPit, 'Height', () => C().pitcherHeight, (val) => (C().pitcherHeight = val), { min: 0.02, max: 1.2, step: 0.005, ...cm }, onChange);
+    slider(sPit, 'Height variation', () => C().pitcherHeightV, (val) => (C().pitcherHeightV = val), { min: 0, max: 0.6, step: 0.01, unit: '±' }, onChange);
+    slider(sPit, 'Base radius', () => C().pitcherBase, (val) => (C().pitcherBase = val), { min: 0.001, max: 0.04, step: 0.0005, ...mm }, onChange);
+    slider(sPit, 'Mouth radius', () => C().pitcherMouth, (val) => (C().pitcherMouth = val), { min: 0.003, max: 0.1, step: 0.0005, ...mm }, onChange);
+    slider(sPit, 'Flare', () => C().pitcherTaper, (val) => (C().pitcherTaper = val), { min: 0.3, max: 4, step: 0.05, title: 'Exponent of the widening: 1 is a straight cone, higher a trumpet, lower bulges early' }, onChange);
+    slider(sPit, 'Belly', () => C().pitcherBelly, (val) => (C().pitcherBelly = val), { min: 0.6, max: 2.5, step: 0.01, unit: '×' }, onChange);
+    slider(sPit, 'Belly position', () => C().pitcherBellyPos, (val) => (C().pitcherBellyPos = val), { min: 0, max: 1, step: 0.01 }, onChange);
+    slider(sPit, 'Belly width', () => C().pitcherBellyWidth, (val) => (C().pitcherBellyWidth = val), { min: 0.05, max: 0.6, step: 0.01 }, onChange);
+    if (pitcher) {
+      slider(sPit, 'Lean', () => C().pitcherLean, (val) => (C().pitcherLean = val), { min: 0, max: 85, step: 1, unit: '°' }, onChange);
+      slider(sPit, 'Curve up', () => C().pitcherCurve, (val) => (C().pitcherCurve = val), { min: 0, max: 90, step: 1, unit: '°', title: 'A leaning pitcher curving back towards the vertical' }, onChange);
+      slider(sPit, 'Twist', () => C().pitcherTwist, (val) => (C().pitcherTwist = val), { min: 0, max: 360, step: 5, unit: '°', title: 'Twist of the tube over its length (shows in the wing)' }, onChange);
+    }
+    slider(sPit, 'Wing', () => C().wing, (val) => (C().wing = val), { min: 0, max: 1.2, step: 0.01, unit: '× radius' }, onChange);
+    slider(sPit, 'Rolled lip', () => C().peristome, (val) => (C().peristome = val), { min: 0, max: 0.5, step: 0.01, unit: '× mouth' }, onChange);
+    slider(sPit, 'Visible depth', () => C().pitcherDepth, (val) => (C().pitcherDepth = val), { min: 0.05, max: 0.9, step: 0.01, unit: '× height', title: 'How far down the inside is modelled before the pool' }, onChange);
+
+    const sHood = section(vine ? 'Lid' : 'Hood', page, { hint: vine ? 'lid' : HOOD_NAMES[c.hood].split(' ')[0].toLowerCase() });
+    if (pitcher) select(sHood, 'Kind', (Object.keys(HOOD_NAMES) as HoodKind[]).map((k) => ({ value: k, label: HOOD_NAMES[k] })), () => C().hood, (val) => (C().hood = val), rebuild);
+    if (!cobra) {
+      slider(sHood, 'Length', () => C().hoodLength, (val) => (C().hoodLength = val), { min: 0, max: 0.2, step: 0.001, ...cm }, onChange);
+      slider(sHood, 'Width', () => C().hoodWidth, (val) => (C().hoodWidth = val), { min: 0, max: 0.2, step: 0.001, ...cm }, onChange);
+      slider(sHood, vine ? 'Opening' : c.hood === 'erect' ? 'Tilt back' : 'Arch', () => C().hoodAngle, (val) => (C().hoodAngle = val), { min: 0, max: 150, step: 1, unit: '°' }, onChange);
+      slider(sHood, 'Curl', () => C().hoodCup, (val) => (C().hoodCup = val), { min: -120, max: 150, step: 1, unit: '°', title: 'Curl of the margins towards the mouth (negative: away)' }, onChange);
+    } else {
+      slider(sHood, 'Head bend', () => C().headBend, (val) => (C().headBend = val), { min: 60, max: 200, step: 1, unit: '°' }, onChange);
+      slider(sHood, 'Dome', () => C().headBulge, (val) => (C().headBulge = val), { min: 1, max: 4, step: 0.05, unit: '× radius' }, onChange);
+      slider(sHood, 'Fishtail length', () => C().fishtail, (val) => (C().fishtail = val), { min: 0, max: 0.15, step: 0.001, ...cm }, onChange);
+      slider(sHood, 'Fishtail width', () => C().fishtailWidth, (val) => (C().fishtailWidth = val), { min: 0.005, max: 0.06, step: 0.0005, ...mm }, onChange);
+    }
+    if (vine) {
+      slider(sHood, 'Tendril length', () => C().tendrilLength, (val) => (C().tendrilLength = val), { min: 0.02, max: 0.6, step: 0.005, ...cm }, onChange);
+      slider(sHood, 'Tendril radius', () => C().tendrilRadius, (val) => (C().tendrilRadius = val), { min: 0.0005, max: 0.005, step: 0.0001, ...mm }, onChange);
+    }
+  }
+
+  if (!vine) {
+    const sFl = section('Flowers', page, { hint: c.scape > 0 ? `${c.scape} scape${c.scape > 1 ? 's' : ''}` : 'none', collapsed: c.scape === 0 });
+    slider(sFl, 'Scapes', () => C().scape, (val) => (C().scape = Math.round(val)), { min: 0, max: 4, step: 1 }, rebuild);
+    if (c.scape > 0) {
+      slider(sFl, 'Scape height', () => C().scapeHeight, (val) => (C().scapeHeight = val), { min: 0.03, max: 1, step: 0.005, ...cm }, onChange);
+      slider(sFl, 'Scape radius', () => C().scapeRadius, (val) => (C().scapeRadius = val), { min: 0.0004, max: 0.006, step: 0.0001, ...mm }, onChange);
+      slider(sFl, 'Lateral flowers', () => C().flowers, (val) => (C().flowers = Math.round(val)), { min: 0, max: 24, step: 1, title: 'Flowers along the top of the scape besides the terminal one' }, onChange);
+      slider(sFl, 'Flower radius', () => C().flowerRadius, (val) => (C().flowerRadius = val), { min: 0.001, max: 0.06, step: 0.0005, ...mm }, onChange);
+      slider(sFl, 'Flower length', () => C().flowerLength, (val) => (C().flowerLength = val), { min: 0.002, max: 0.08, step: 0.0005, ...mm }, onChange);
+      slider(sFl, 'Nod', () => C().flowerNod, (val) => (C().flowerNod = val), { min: 0, max: 170, step: 1, unit: '°' }, onChange);
+    }
+  }
+
+  const sRes = section('Resolution · motion', page, { hint: `${c.sides} sides`, collapsed: true });
+  slider(sRes, vine ? 'Stem sides' : 'Crown sides', () => C().sides, (val) => (C().sides = Math.round(val / 2) * 2), { min: 8, max: 96, step: 2 }, onChange);
+  if (!pitcher) slider(sRes, 'Leaf sides', () => C().leafSides, (val) => (C().leafSides = Math.round(val / 4) * 4), { min: 8, max: 24, step: 4 }, onChange);
+  if (pitcher || vine) slider(sRes, 'Pitcher sides', () => C().pitcherSides, (val) => (C().pitcherSides = Math.round(val)), { min: 12, max: 48, step: 2 }, onChange);
+  slider(sRes, 'Ring aspect', () => C().ringAspect, (val) => (C().ringAspect = val), { min: 0.5, max: 2.5, step: 0.05, title: 'Ring spacing relative to the width of a quad' }, onChange);
+  stepper(sRes, 'Collar rings', () => C().collarRings, (val) => (C().collarRings = val), { min: 0, max: 3, integer: true }, onChange);
+  slider(sRes, 'Sway', () => C().sway, (val) => (C().sway = val), { min: 0, max: 1, step: 0.05 }, onChange);
+  slider(sRes, 'Flex', () => C().flex, (val) => (C().flex = val), { min: 0, max: 1, step: 0.05, title: 'Bending of leaves, pitchers and scapes about their base' }, onChange);
+
+  page.append(
+    Object.assign(el('p', 'note'), {
+      textContent:
+        'A carnivorous plant is modelled with its traps as one closed quad surface. A flytrap leaf is a single tube whose flat petiole section turns into two dished lobes on a hinge, with the teeth and trigger hairs welded to the lobes; a sundew blade carries its tentacles on a row lattice; a pitcher is a tube that flares to the mouth, rolls over the lip and goes back down inside to the surface of the pool, so the mouth is really open, with the hood or lid welded just below the lip.',
+    }),
+  );
+}
+
+// -----------------------------------------------------------------------------
 // Roots & site page
 // -----------------------------------------------------------------------------
 
@@ -1657,6 +1808,7 @@ function rebuildPages(): void {
   buildGrassPage();
   buildSucculentPage();
   buildVegetablePage();
+  buildCarnivorePage();
   buildRootsPage();
   buildMeshPage();
   buildLibrary();
@@ -1722,6 +1874,7 @@ buildBotanyPage();
 buildGrassPage();
 buildSucculentPage();
 buildVegetablePage();
+buildCarnivorePage();
 buildRootsPage();
 buildMeshPage();
 buildViewPage();
@@ -1836,6 +1989,7 @@ cmdInput.addEventListener('keydown', (e) => {
     grass?: Partial<GrassParams>;
     succulent?: Partial<SucculentParams>;
     vegetable?: Partial<VegetableParams>;
+    carnivore?: Partial<CarnivoreParams>;
     seed?: number;
     name?: string;
   }) {
@@ -1843,6 +1997,7 @@ cmdInput.addEventListener('keydown', (e) => {
     if (partial.grass && params.grass) Object.assign(params.grass, partial.grass);
     if (partial.succulent && params.succulent) Object.assign(params.succulent, partial.succulent);
     if (partial.vegetable && params.vegetable) Object.assign(params.vegetable, partial.vegetable);
+    if (partial.carnivore && params.carnivore) Object.assign(params.carnivore, partial.carnivore);
     if (partial.mesh) Object.assign(params.mesh, partial.mesh);
     if (partial.roots) Object.assign(params.roots, partial.roots);
     if (partial.environment) Object.assign(params.environment, partial.environment);

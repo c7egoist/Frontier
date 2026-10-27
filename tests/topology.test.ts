@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { PRESETS, TREE_PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment, isGrass, isSucculent, isVegetable, plantKind } from '../src/tree/params';
+import { PRESETS, TREE_PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment, isGrass, isSucculent, isVegetable, isCarnivore, plantKind } from '../src/tree/params';
 import { buildSkeleton } from '../src/tree/skeleton';
 import { buildMesh } from '../src/tree/mesher';
 import { validateTopology } from '../src/tree/validate';
@@ -10,6 +10,8 @@ import { SucculentMesher } from '../src/plant/succulentMesher';
 import { DEFAULT_SUCCULENT, SUCCULENT_PRESETS, SucculentParams } from '../src/plant/succulentParams';
 import { VegetableMesher } from '../src/plant/vegetableMesher';
 import { DEFAULT_VEGETABLE, VEGETABLE_PRESETS, VegetableParams } from '../src/plant/vegetableParams';
+import { CarnivoreMesher } from '../src/plant/carnivoreMesher';
+import { DEFAULT_CARNIVORE, CARNIVORE_PRESETS, CarnivoreParams } from '../src/plant/carnivoreParams';
 import { OrganBuildResult } from '../src/plant/organMesher';
 import { QuadMesh } from '../src/tree/mesh';
 import { generateTree } from '../src/tree/generate';
@@ -43,8 +45,15 @@ function buildVegetable(preset: { vegetable: Partial<VegetableParams> }, seed: n
   return { ...built, report };
 }
 
+function buildCarnivore(preset: { carnivore: Partial<CarnivoreParams> }, seed: number) {
+  const c = { ...DEFAULT_CARNIVORE, ...preset.carnivore };
+  const built = new CarnivoreMesher(c, seed).build();
+  const report = validateTopology(built.mesh);
+  return { ...built, report };
+}
+
 /**
- * Assertions shared by every organ plant (grass, succulent, vegetable): one
+ * Assertions shared by every organ plant (grass, succulent, vegetable, carnivorous plant): one
  * closed all-quad genus-0 surface, sane wind weights. `sway` is the species'
  * whole-plant sway weight baked into the height attribute (1 for grasses).
  */
@@ -322,6 +331,121 @@ describe('welded vegetable with its crop is a single closed manifold', () => {
     expect(lines.filter((l) => l.startsWith('v ')).length).toBe(mesh.vertexCount);
     expect(lines.filter((l) => l.startsWith('f ') && l.trim().split(/\s+/).length === 5).length).toBe(mesh.quadCount);
     const glb = toGLB(mesh, leaves, 'pepper');
+    const dv = new DataView(glb);
+    expect(dv.getUint32(0, true)).toBe(0x46546c67);
+    expect(dv.getUint32(8, true)).toBe(glb.byteLength);
+  });
+});
+
+describe('welded carnivorous plant with its traps is a single closed manifold', () => {
+  for (const preset of CARNIVORE_PRESETS) {
+    for (const seed of [1, 7]) {
+      it(`${preset.name} seed ${seed}`, () => {
+        const built = buildCarnivore(preset, seed);
+        const c = { ...DEFAULT_CARNIVORE, ...preset.carnivore };
+        expectWeldedOrganPlant(built, 0, Math.min(1, Math.max(0, c.sway)));
+        const n = built.stats.counts;
+        // The traps are modelled: every leaf of a rosette carries its trap, every pitcher is there with its hood.
+        if (c.form === 'rosette') {
+          const leaves = (n['trap leaves'] ?? 0) + (n['sundew leaves'] ?? 0) + (n.blades ?? 0);
+          expect(leaves, 'leaves').toBe(Math.round(c.leaves));
+          if (c.trap === 'snap') {
+            expect(n.teeth, 'teeth').toBeGreaterThan(leaves * c.cilia);
+            expect(n['trigger hairs'], 'trigger hairs').toBeGreaterThanOrEqual(leaves * 3);
+          }
+          if (c.trap === 'tentacle') expect(n.tentacles, 'tentacles').toBeGreaterThan(leaves * 0.4 * c.tentacles);
+          if (c.scape > 0) expect(n.scapes).toBe(Math.round(c.scape));
+        } else if (c.form === 'pitcher') {
+          expect(n.pitchers, 'pitchers').toBe(Math.round(c.pitchers));
+          if (c.hood === 'cobra') expect(n['fishtail lobes']).toBe(2 * Math.round(c.pitchers));
+          else expect(n.hoods, 'hoods').toBe(Math.round(c.pitchers));
+        } else {
+          expect(n['vine leaves']).toBe(Math.round(c.leaves));
+          expect(n.pitchers, 'pitchers').toBeGreaterThanOrEqual(Math.round(c.leaves) - 1);
+          expect(n.lids).toBe(n.pitchers);
+        }
+      });
+    }
+  }
+
+  it('a pitcher is one tube whose mouth is really open: the lip rolls over and the wall goes back down inside', () => {
+    const c: CarnivoreParams = { ...DEFAULT_CARNIVORE, ...CARNIVORE_PRESETS.find((x) => x.name === 'Yellow Trumpet Pitcher')!.carnivore, pitchers: 1, hoodLength: 0, scape: 0, pitcherLean: 0, pitcherHeightV: 0 };
+    const built = new CarnivoreMesher(c, 3).build();
+    const report = validateTopology(built.mesh);
+    expect(report.genus).toBe(0);
+    expect(report.boundaryEdges).toBe(0);
+    expect(built.stats.counts.pitchers).toBe(1);
+    const pos = built.mesh.positions;
+    const n = built.mesh.vertexCount;
+    let top = -Infinity;
+    for (let i = 0; i < n; i++) top = Math.max(top, pos[3 * i + 1]);
+    // Axis of the mouth: centroid of the lip (the highest vertices, no hood on this one).
+    let cx = 0;
+    let cz = 0;
+    let m = 0;
+    for (let i = 0; i < n; i++) {
+      if (pos[3 * i + 1] > top - 0.004) {
+        cx += pos[3 * i];
+        cz += pos[3 * i + 2];
+        m++;
+      }
+    }
+    cx /= m;
+    cz /= m;
+    // Well below the lip there are rings clearly inside the tube: the inner wall on its way down to the pool.
+    let inner = 0;
+    for (let i = 0; i < n; i++) {
+      const y = pos[3 * i + 1];
+      if (y > top - 0.05 || y < top - 0.09) continue;
+      const d = Math.hypot(pos[3 * i] - cx, pos[3 * i + 2] - cz);
+      if (d < 0.85 * c.pitcherMouth) inner++;
+    }
+    expect(inner, 'inner-wall vertices').toBeGreaterThan(20);
+    // The pool depth is real geometry: a shallow pitcher of the same shape has far fewer rings.
+    const shallow = new CarnivoreMesher({ ...c, pitcherDepth: 0.02 }, 3).build();
+    expect(validateTopology(shallow.mesh).genus).toBe(0);
+    expect(built.mesh.quadCount - shallow.mesh.quadCount).toBeGreaterThan(8 * c.pitcherSides);
+  });
+
+  it('carnivorous presets carry their kind through the shared pipeline', () => {
+    const traps = PRESETS.filter(isCarnivore);
+    expect(traps.length).toBe(CARNIVORE_PRESETS.length);
+    const p = cloneParams(traps.find((v) => v.name === 'Venus Flytrap')!);
+    p.seed = 5;
+    const r = generateTree(p);
+    expect(plantKind(p)).toBe('carnivore');
+    expect(r.skeleton).toBeNull();
+    expect(r.organs).toBeDefined();
+    expect(r.report.closed && r.report.manifold).toBe(true);
+    expect(r.report.genus).toBe(0);
+    expect(r.stats.stems).toBe(r.organs!.organs);
+    expect(r.organs!.counts['trap leaves']).toBe(8);
+    expect(r.buffers.index.length).toBe(r.mesh.quadCount * 6);
+  });
+
+  it('is deterministic for a given seed and differs across seeds', () => {
+    const preset = CARNIVORE_PRESETS.find((c) => c.name === 'Cobra Lily')!;
+    const a = buildCarnivore(preset, 9);
+    const b = buildCarnivore(preset, 9);
+    const c = buildCarnivore(preset, 10);
+    const sum = (arr: ArrayLike<number>) => {
+      let t = 0;
+      for (let i = 0; i < arr.length; i++) t += arr[i] * ((i % 7) + 1);
+      return t;
+    };
+    expect(a.report.faces).toBe(b.report.faces);
+    expect(sum(a.mesh.positions)).toBe(sum(b.mesh.positions));
+    expect(sum(c.mesh.positions)).not.toBe(sum(a.mesh.positions));
+  });
+
+  it('exports a carnivorous plant as quads to OBJ and GLB', () => {
+    const { mesh } = buildCarnivore(CARNIVORE_PRESETS.find((v) => v.name === 'Tropical Pitcher Plant')!, 1);
+    const leaves = new LeafMesh();
+    const obj = toOBJ(mesh, leaves, 'nepenthes');
+    const lines = obj.split('\n');
+    expect(lines.filter((l) => l.startsWith('v ')).length).toBe(mesh.vertexCount);
+    expect(lines.filter((l) => l.startsWith('f ') && l.trim().split(/\s+/).length === 5).length).toBe(mesh.quadCount);
+    const glb = toGLB(mesh, leaves, 'nepenthes');
     const dv = new DataView(glb);
     expect(dv.getUint32(0, true)).toBe(0x46546c67);
     expect(dv.getUint32(8, true)).toBe(glb.byteLength);

@@ -15,6 +15,7 @@ import { EnvironmentParams, DEFAULT_SCATTER, scatterObstacles } from '../env/env
 import { GrassParams, DEFAULT_GRASS, GRASS_PRESETS, GRASS_GROUPS } from '../plant/grassParams';
 import { SucculentParams, DEFAULT_SUCCULENT, SUCCULENT_PRESETS, SUCCULENT_GROUPS } from '../plant/succulentParams';
 import { VegetableParams, DEFAULT_VEGETABLE, VEGETABLE_PRESETS, VEGETABLE_GROUPS } from '../plant/vegetableParams';
+import { CarnivoreParams, DEFAULT_CARNIVORE, CARNIVORE_PRESETS, CARNIVORE_GROUPS } from '../plant/carnivoreParams';
 
 export type Level4<T> = [T, T, T, T];
 
@@ -214,7 +215,7 @@ export const DEFAULT_ROOTS: RootParams = {
  * Weber-Penn skeleton; grasses, succulents and vegetables through their own
  * organ meshers (all of them welded single manifolds).
  */
-export type PlantKind = 'tree' | 'grass' | 'succulent' | 'vegetable';
+export type PlantKind = 'tree' | 'grass' | 'succulent' | 'vegetable' | 'carnivore';
 
 export interface TreeParams {
   name: string;
@@ -231,11 +232,14 @@ export interface TreeParams {
   succulent?: SucculentParams;
   /** Vegetable description (kind === 'vegetable'). */
   vegetable?: VegetableParams;
+  /** Carnivorous plant description (kind === 'carnivore'). */
+  carnivore?: CarnivoreParams;
 }
 
 export const isGrass = (p: { kind?: PlantKind }): boolean => p.kind === 'grass';
 export const isSucculent = (p: { kind?: PlantKind }): boolean => p.kind === 'succulent';
 export const isVegetable = (p: { kind?: PlantKind }): boolean => p.kind === 'vegetable';
+export const isCarnivore = (p: { kind?: PlantKind }): boolean => p.kind === 'carnivore';
 /** Anything that is not a Weber-Penn tree. */
 export const isOrganPlant = (p: { kind?: PlantKind }): boolean => p.kind !== undefined && p.kind !== 'tree';
 export const plantKind = (p: { kind?: PlantKind }): PlantKind => p.kind ?? 'tree';
@@ -368,6 +372,10 @@ function succulentPreset(name: string, succulent: Partial<SucculentParams>): Tre
 
 function vegetablePreset(name: string, vegetable: Partial<VegetableParams>): TreeParams {
   return { ...organPreset(name, 'vegetable'), vegetable: { ...DEFAULT_VEGETABLE, ...vegetable } };
+}
+
+function carnivorePreset(name: string, carnivore: Partial<CarnivoreParams>): TreeParams {
+  return { ...organPreset(name, 'carnivore'), carnivore: { ...DEFAULT_CARNIVORE, ...carnivore } };
 }
 
 /**
@@ -1436,12 +1444,13 @@ export const TREE_PRESETS: TreeParams[] = [
   }, {}, { count: 5, radius: 0.42, length: 0.26, laterals: 2, forks: 0.5 }),
 ];
 
-/** Every species: trees first, then the grasses, the cacti & succulents and the vegetables. */
+/** Every species: trees first, then the grasses, the cacti & succulents, the vegetables and the carnivorous plants. */
 export const PRESETS: TreeParams[] = [
   ...TREE_PRESETS,
   ...GRASS_PRESETS.map((g) => grassPreset(g.name, g.grass)),
   ...SUCCULENT_PRESETS.map((g) => succulentPreset(g.name, g.succulent)),
   ...VEGETABLE_PRESETS.map((g) => vegetablePreset(g.name, g.vegetable)),
+  ...CARNIVORE_PRESETS.map((g) => carnivorePreset(g.name, g.carnivore)),
 ];
 
 /** Grouping for the species list. Presets missing here are shown under "Other". */
@@ -1456,6 +1465,7 @@ export const PRESET_GROUPS: { label: string; names: string[] }[] = [
   ...SUCCULENT_GROUPS,
   ...GRASS_GROUPS,
   ...VEGETABLE_GROUPS,
+  ...CARNIVORE_GROUPS,
 ];
 
 export function getPreset(name: string): TreeParams {

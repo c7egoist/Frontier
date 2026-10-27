@@ -4,7 +4,7 @@
  * Used by the worker, the tests and the CLI.
  */
 
-import { TreeParams, DEFAULT_ROOTS, isGrass, isSucculent, isVegetable } from './params';
+import { TreeParams, DEFAULT_ROOTS, isGrass, isSucculent, isVegetable, isCarnivore } from './params';
 import { buildSkeleton, Skeleton } from './skeleton';
 import { buildMesh, MesherStats } from './mesher';
 import { validateTopology, TopologyReport } from './validate';
@@ -18,6 +18,8 @@ import { SucculentMesher } from '../plant/succulentMesher';
 import { DEFAULT_SUCCULENT } from '../plant/succulentParams';
 import { VegetableMesher } from '../plant/vegetableMesher';
 import { DEFAULT_VEGETABLE } from '../plant/vegetableParams';
+import { CarnivoreMesher } from '../plant/carnivoreMesher';
+import { DEFAULT_CARNIVORE } from '../plant/carnivoreParams';
 import { OrganBuildResult, OrganStats } from '../plant/organMesher';
 
 export interface Timings {
@@ -82,6 +84,10 @@ export function generateTree(params: TreeParams, options: { validate?: boolean; 
   if (isVegetable(params)) {
     const vp = (params.vegetable = params.vegetable ?? { ...DEFAULT_VEGETABLE });
     return generateOrgans(params, options, () => new VegetableMesher(vp, params.seed).build());
+  }
+  if (isCarnivore(params)) {
+    const cp = (params.carnivore = params.carnivore ?? { ...DEFAULT_CARNIVORE });
+    return generateOrgans(params, options, () => new CarnivoreMesher(cp, params.seed).build());
   }
   const t0 = now();
   const skeleton = buildSkeleton(params);

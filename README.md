@@ -4,8 +4,9 @@ A production-oriented vegetation generator that outputs **one closed, manifold q
 plant — no intersecting tubes, no "place a twig on a branch" merges. Branches grow *out of* their
 parent's surface through shared edge loops, forks are true Y-crotches, grass blades and culms grow
 out of a welded crown the same way, and every vertex carries wind data so the whole plant bends as
-a single skin. 30 tree species, 14 grasses, 19 desert succulents (cacti, agaves, yuccas, aloes) and
-14 vegetables — with the vegetable itself modelled — ship as presets.
+a single skin. 30 tree species, 14 grasses, 19 desert succulents (cacti, agaves, yuccas, aloes),
+14 vegetables — with the vegetable itself modelled — and 9 carnivorous plants — with their snap
+traps, tentacles and pitchers modelled — ship as presets.
 
 ```
 npm install
@@ -26,6 +27,7 @@ npm run build      # static bundle in dist/
 | Organs | `src/plant/organMesher.ts` | **Welded organ mesher** (below): the shared engine for every non-tree plant — windows planned on a parent's ring lattice, collar loops, forks, refinement bands, one closed quad manifold per plant. |
 | Succulents | `src/plant/succulentMesher.ts`, `src/plant/succulentParams.ts` | Columnar and barrel cacti with ribs, areoles and spines, forking arms, opuntia pads with tunas, tree aloes with leaf tufts, agave / yucca / aloe rosettes with terminal spines, marginal teeth and flower stalks. 19 species in four desert families. |
 | Vegetables | `src/plant/vegetableMesher.ts`, `src/plant/vegetableParams.ts` | Fruiting bushes (tomato trusses, peppers, eggplant, beans, okra), vines (pumpkin, courgette, cucumber), heads, roots and grain (cabbage, lettuce, carrot, beetroot, maize with husked ears, silk and tassel). The edible organ is part of the same manifold. 14 species. |
+| Carnivorous plants | `src/plant/carnivoreMesher.ts`, `src/plant/carnivoreParams.ts` | Rosettes with snap traps (hinged lobes, cilia, trigger hairs), sundew blades with tentacle rows, butterwort blades; pitcher clumps with open mouths, rolled peristomes, ala wings and hoods (over / erect / cobra fishtail / spoon); the Nepenthes vine with leaf → tendril → hanging pitcher → lid. Scapes with star or bell flowers. 9 species in two families. |
 | Export | `src/tree/export.ts` | OBJ with **quads preserved** (for Blender/Maya/ZBrush), GLB (triangulated) with wind data in `COLOR_0` and level/junction flags in `TEXCOORD_1`. |
 | UI | `src/main.ts`, `src/ui/*` | Three floating cards in the SolidArc panel language: **Library** (species browser grouped by biome and plant family, search, census), **Viewport** (display modes shaded / clay / wire / levels / junctions / wind, pill toolbar, camera read-out, exact fit-to-view framing from 10 cm turf to 70 m redwoods, key hints), **Inspector** (hero card with height + mesh census, presence grid, tabs Botany · Roots · Mesh · View · Topology for trees and Grass · View · Topology for grasses, with tick-track sliders, steppers, per-level tables with drag-to-scrub cells, and a command line: `seed 42`, `preset oak`, `mode wire`, `export glb`, `help`). Generation runs in a Web Worker. |
 
@@ -87,7 +89,7 @@ closed quad manifold** — the same guarantee as the trees, with no triangles at
 `Lawn Turf` (330 blades) is 14.5 k faces, `Wheat` 9 k, `Meadow Grass` 67 k, `Pampas Grass` (24 culms,
 plumes with secondaries) 305 k — all genus 0, zero dropped organs, on every seed in the test matrix.
 
-## The welded organ mesher (succulents, vegetables)
+## The welded organ mesher (succulents, vegetables, carnivorous plants)
 
 Cacti, agaves and vegetables share one engine, `OrganMesher`. A plant is a tree of **organs**
 (trunk, arm, pad, leaf, areole, spine, tooth, fruit, flower, petiole, blade, leaflet, pod, ear,
@@ -115,6 +117,31 @@ Pincushion, Prickly Pear (obovate pads leaning out of the parent plane, tunas al
 Teddy-Bear Cholla, Candelabra Tree, Quiver Tree, Century Plant, Blue Agave, Artichoke Agave,
 Foxtail Agave, Queen Victoria Agave, Spanish Dagger, Bitter Aloe, Aloe Vera.
 
+### Carnivorous plants
+
+`CarnivoreMesher` builds the traps themselves as part of the same closed surface — nothing is
+placed or intersected:
+
+* **Rosettes** (flytrap, sundews, butterwort) grow from a short buried crown; the leaves leave
+  the crown through lattice windows at soil level, so the petioles visibly fan out of the plant and
+  the crown grows as tall as its lattice needs.
+* **Snap traps** are one organ: winged petiole → hinge → two dished lobes that open about the
+  midrib by `trapOpen`, with the marginal cilia (teeth) and the three trigger hairs per lobe grown
+  from 1 × 1 and 2 × 1 windows on the lobe surface (`normalHint` keeps them on the inside face).
+* **Sundew leaves** carry rows of tentacles — alternating margin pairs and face columns, each one a
+  stalk swelling into a mucilage knob — on strap (Cape) or round (round-leaved) blades.
+* **Pitchers** are a single tube from rhizome to lip: the radius profile (`taper`, belly, cobra
+  bulge) shapes the body, the ala wing is a bump on the front, the peristome rolls over the lip
+  and the wall goes **back down inside** the mouth to the pool, so the trap is really open. Hoods
+  (over / erect / cobra fishtail / spoon), Nepenthes lids and wings are flaps leaving windows just
+  under the lip. The cobra lily twists, bends its head over and swells it into the dome; the
+  Nepenthes vine grows leaf → tendril → hanging pitcher → lid as one organ per leaf.
+* **Flowers** sit on scapes leaving the crown's top rows: flat five-lobed stars on the flytrap and
+  sundews (one-sided raceme), nodding bells on the pitcher plants.
+
+Carnivorous presets: Venus Flytrap, Cape Sundew, Round-leaved Sundew, Common Butterwort, Yellow
+Trumpet Pitcher, Purple Pitcher Plant, Cobra Lily, Sun Pitcher, Tropical Pitcher Plant.
+
 ## Wind
 
 Per-vertex attributes baked by the mesher:
@@ -134,12 +161,13 @@ full tree, close-ups of specific junction types, display modes and the wind defo
 used to review the results in this repository; they require `puppeteer-core` and a Chromium binary
 (`CHROME_PATH`).
 
-`scripts/probe.ts` (trees), `scripts/grassProbe.ts`, `scripts/succulentProbe.ts` and
-`scripts/vegetableProbe.ts` run the full pipeline headlessly and print the topology audit per
+`scripts/probe.ts` (trees), `scripts/grassProbe.ts`, `scripts/succulentProbe.ts`,
+`scripts/vegetableProbe.ts` and `scripts/carnivoreProbe.ts` run the full pipeline headlessly and print the topology audit per
 preset × seed: `npx vite-node scripts/succulentProbe.ts "" 1,2,3`. `scripts/hashPresets.ts` prints
 per-preset mesh checksums for regression comparisons.
 
-`npm test` covers every preset (30 trees + 14 grasses + 19 succulents + 14 vegetables): closed,
+`npm test` covers every preset (30 trees + 14 grasses + 19 succulents + 14 vegetables + 9 carnivorous
+plants): closed,
 manifold, consistently wound, one component, genus 0, quad ratio, drop budget, wind attribute
 ranges, determinism and the OBJ/GLB/GPU exporters.
 
@@ -147,5 +175,6 @@ ranges, determinism and the OBJ/GLB/GPU exporters.
 
 Form and topology only: solid-colour materials, proxy leaf cards on trees. Bark and blade
 textures, UV layout for atlases, LOD chains and detailed leaves are the next step; the quad flow
-and the UV seams are already laid out to make that straightforward. Grasses, succulents and
-vegetables share the organ/window machinery; shrubs and ferns can reuse it as well.
+and the UV seams are already laid out to make that straightforward. Grasses, succulents,
+vegetables and carnivorous plants share the organ/window machinery; shrubs and ferns can reuse it
+as well.

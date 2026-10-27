@@ -61,6 +61,10 @@ const ICONS: Record<string, string> = {
   pumpkin: 'M12 7c-6 0-8 4-8 7 0 4 3 7 8 7s8-3 8-7c0-3-2-7-8-7zM12 7v14M8 8c-1.5 4-1.5 9 0 13M16 8c1.5 4 1.5 9 0 13M12 7c0-2 1-3 3-4',
   // Carrot: tapered root with leaves.
   carrot: 'M14 10L6 21l11-8a3 3 0 0 0-3-3zM14 10c0-3 1-5 3-7M14 10c2-1 4-2 6-2M14 10c-2-1-4-3-4-6',
+  // Flytrap: an open two-lobed trap with teeth on a petiole.
+  flytrap: 'M12 21v-7M12 14C8 14 4 11 4 6c3 0 6 2 8 5M12 14c4 0 8-3 8-8-3 0-6 2-8 5M6 8l-1-2M8 10l-1-2M18 8l1-2M16 10l1-2',
+  // Pitcher: a trumpet pitcher with its hood.
+  pitcher: 'M10 21c-1-5-1-10 0-14h4c1 4 1 9 0 14zM9 7c0-2 1-3 3-3s3 1 3 3M7 5c2-2 6-2 9 0',
 };
 
 export function icon(name: string, cls = 'i'): SVGSVGElement {
