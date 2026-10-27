@@ -772,7 +772,8 @@ const GROUP_ICON: Record<string, string> = {
   'Rocky terrain': 'mountain',
   'Desert · columnar cacti': 'saguaro',
   'Desert · barrels & pads': 'barrel',
-  'Desert · succulent trees & rosettes': 'agave',
+  'Desert · succulent trees': 'saguaro',
+  'Desert · agaves, yuccas & aloes': 'agave',
   'Grasses · turf & meadow': 'grass',
   'Grasses · tussock': 'tussock',
   'Grasses · cereals & reeds': 'wheat',
@@ -790,7 +791,8 @@ const GROUP_ACCENT: Record<string, string> = {
   'Rocky terrain': '#b48cff',
   'Desert · columnar cacti': '#7fc26e',
   'Desert · barrels & pads': '#a8c95a',
-  'Desert · succulent trees & rosettes': '#6fbfa4',
+  'Desert · succulent trees': '#6fbfa4',
+  'Desert · agaves, yuccas & aloes': '#5fc9b8',
   'Grasses · turf & meadow': '#8fd15a',
   'Grasses · tussock': '#c9d36a',
   'Grasses · cereals & reeds': '#e2b95b',
@@ -1239,7 +1241,9 @@ function buildSucculentPage(): void {
     slider(sPad, 'Length variation', () => C().padLengthV, (v) => (C().padLengthV = v), { min: 0, max: 0.5, step: 0.01, unit: '±' }, onChange);
     slider(sPad, 'Pad width', () => C().padWidth, (v) => (C().padWidth = v), { min: 0.03, max: 0.5, step: 0.005, ...cm }, onChange);
     slider(sPad, 'Pad thickness', () => C().padThickness, (v) => (C().padThickness = v), { min: 0.005, max: 0.08, step: 0.001, ...mm }, onChange);
-    slider(sPad, 'Twist', () => C().padTwist, (v) => (C().padTwist = v), { min: 0, max: 90, step: 1, unit: '°', title: 'Rotation of a child pad out of its parent plane (± random)' }, onChange);
+    slider(sPad, 'Spread angle', () => C().padAngle, (v) => (C().padAngle = v), { min: 10, max: 90, step: 1, unit: '°', title: 'Angle between a child pad and its parent, in the parent plane (±17° random)' }, onChange);
+    slider(sPad, 'Tilt', () => C().padTilt, (v) => (C().padTilt = v), { min: 0, max: 60, step: 1, unit: '°', title: 'Lean of a child pad out of its parent plane, towards one face (± random)' }, onChange);
+    slider(sPad, 'Twist', () => C().padTwist, (v) => (C().padTwist = v), { min: 0, max: 90, step: 1, unit: '°', title: 'Rotation of a child pad\'s own plane against its parent plane (± random)' }, onChange);
     slider(sPad, 'Upward curve', () => C().padUp, (v) => (C().padUp = v), { min: 0, max: 80, step: 1, unit: '°' }, onChange);
     slider(sPad, 'Children from', () => C().padFrom, (v) => (C().padFrom = v), { min: 0.3, max: 0.95, step: 0.01, title: 'Attachment range along the parent rim' }, onChange);
     slider(sPad, 'Children to', () => C().padTo, (v) => (C().padTo = v), { min: 0.35, max: 0.98, step: 0.01 }, onChange);
@@ -1276,6 +1280,10 @@ function buildSucculentPage(): void {
     slider(sLeaf, 'Spread (inner)', () => C().leafSpreadTop, (v) => (C().leafSpreadTop = v), { min: 0, max: 90, step: 1, unit: '°' }, onChange);
     slider(sLeaf, 'Bend', () => C().leafBend, (v) => (C().leafBend = v), { min: 0, max: 90, step: 1, unit: '°', title: 'Outward arch along the leaf' }, onChange);
     slider(sLeaf, 'Twist', () => C().leafTwist, (v) => (C().leafTwist = v), { min: 0, max: 60, step: 1, unit: '°' }, onChange);
+    slider(sLeaf, 'Widest at', () => C().leafWidest, (v) => (C().leafWidest = v), { min: 0.1, max: 0.8, step: 0.01, title: 'Position of the widest point along the leaf: 0.2 lanceolate, 0.55 obovate (artichoke agaves)' }, onChange);
+    slider(sLeaf, 'Tip taper', () => C().leafTaper, (v) => (C().leafTaper = v), { min: 1, max: 6, step: 0.1, title: '1 = straight taper (triangular), 1.6 = lanceolate, 4 = broad with an abrupt tip' }, onChange);
+    slider(sLeaf, 'Terminal spine', () => C().leafTipSpine, (v) => (C().leafTipSpine = v), { min: 0, max: 0.08, step: 0.001, ...mm, title: 'Hard spine the leaf narrows into (agaves, yuccas)' }, onChange);
+    if (!tufted) slider(sLeaf, 'Leaf zone', () => C().leafZone, (v) => (C().leafZone = v), { min: 0.1, max: 1, step: 0.01, title: 'Fraction of the stem, from the top, that carries leaves — trunked agaves and yuccas use about a half' }, onChange);
     stepper(sLeaf, 'Teeth per edge', () => C().teeth, (v) => (C().teeth = v), { min: 0, max: 40, integer: true }, onChange);
     slider(sLeaf, 'Tooth length', () => C().toothLength, (v) => (C().toothLength = v), { min: 0.001, max: 0.03, step: 0.0005, ...mm }, onChange);
   }

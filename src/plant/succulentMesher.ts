@@ -578,20 +578,30 @@ export class SucculentMesher extends OrganMesher {
     right0 = lengthSq(right0) < 1e-12 ? anyPerpendicular(dir0) : normalize(right0);
     const bend = p.leafBend * DEG2RAD;
     const twist = p.leafTwist * DEG2RAD * v.twistSign;
-    const line = growLine(exit.pos, dir0, right0, L, 12, (t0, t1) => ({
+    // The blade narrows into a hard terminal spine (agaves, yuccas): the same tube, carried on past the
+    // blade and rounded off into a tapering cone.
+    const tip = Math.max(0, p.leafTipSpine);
+    const Lt = L + tip;
+    const line = growLine(exit.pos, dir0, right0, Lt, tip > 0 ? 14 : 12, (t0, t1) => ({
       gravity: bend * (Math.pow(t1, 1.5) - Math.pow(t0, 1.5)),
       roll: twist * (t1 - t0),
     }));
     const w0 = Math.min(W, 0.9 * exit.size);
+    const widest = clamp(p.leafWidest, 0.1, 0.8);
+    const taper = clamp(p.leafTaper, 1, 6);
     const widthAt = (s: number): number => {
       const t = clamp(s / L, 0, 1);
-      const grow = w0 + (W - w0) * smooth(t / 0.3);
-      const u = Math.max(0, (t - 0.3) / 0.7);
-      const outline = W * Math.pow(Math.max(0, 1 - Math.pow(u, 1.6)), 0.85);
-      return Math.max(0.05 * W, Math.min(grow, t < 0.3 ? grow : outline));
+      const grow = w0 + (W - w0) * smooth(t / widest);
+      const u = Math.max(0, (t - widest) / (1 - widest));
+      const outline = W * Math.pow(Math.max(0, 1 - Math.pow(u, taper)), 0.85);
+      return Math.max(0.05 * W, Math.min(grow, t < widest ? grow : outline));
     };
     const thk = clamp(p.leafThickness, 0.03, 0.8);
     const cup = p.leafCup * DEG2RAD;
+    // Spine: round, as thick as the blade's end allows, tapering to a point.
+    const rSpine = tip > 0 ? Math.min(0.5 * widthAt(L), Math.max(0.001, 0.07 * tip)) : 0;
+    const spineRad = (s: number): number => rSpine * (1 - 0.85 * clamp((s - L) / Math.max(1e-6, tip), 0, 1));
+    const radiusAt = (s: number): number => (s > L && tip > 0 ? spineRad(s) : 0.5 * widthAt(s));
     const sStart = Math.min(0.3 * L, Math.max(0.8 * w0, 0.8 * exit.size, this.collarLen(0.5 * w0, 1.4)));
     const perimeter = 2 * W * (1 + 0.6 * thk);
     const N = evenSides(p.leafSides, 6, 16);
@@ -599,7 +609,7 @@ export class SucculentMesher extends OrganMesher {
     const flex = Math.max(v.base.limb, this.flexMax);
     const flutter = this.flutter;
     const wind = (s: number): VertexWind => {
-      const t = clamp(s / L, 0, 1);
+      const t = clamp(s / Lt, 0, 1);
       return { height: 0, limb: lerp1(v.base.limb, flex, t * t), phase: v.base.phase, detail: 0.15 * t * t * flutter };
     };
     const children: Attachment[] = [];
@@ -628,6 +638,8 @@ export class SucculentMesher extends OrganMesher {
       }
     }
     this.count('leaves');
+    const extra = cosineStations(0.8 * L, L, 3, true);
+    if (tip > 0) extra.push(L, L + 0.5 * tip);
     return {
       level: v.level,
       line,
@@ -635,11 +647,19 @@ export class SucculentMesher extends OrganMesher {
       profile: (s, j, NN) => {
         const t = clamp(s / L, 0, 1);
         const w = widthAt(s);
-        return cupPoint(NN, j, w, W * thk * (1 - 0.8 * t), cup * (1 - 0.4 * t));
+        const q = cupPoint(NN, j, w, W * thk * (1 - 0.8 * t), cup * (1 - 0.4 * t));
+        if (tip <= 0) return q;
+        // Blend the channelled blade into the round spine over the last part of the blade.
+        const b = s >= L ? 1 : smooth((t - 0.85) / 0.15);
+        if (b <= 0) return q;
+        const th = (TAU * j) / NN;
+        const rc = lerp1(0.5 * w, rSpine, b);
+        const rr = s > L ? spineRad(s) : rc;
+        return { x: lerp1(q.x, rr * Math.cos(th), b), y: lerp1(q.y, rr * Math.sin(th), b) };
       },
-      radius: (s) => 0.5 * widthAt(s),
+      radius: radiusAt,
       round: false,
-      extra: cosineStations(0.8 * L, L, 3, true),
+      extra,
       spacing,
       rowLattice: spacing,
       children,
@@ -698,17 +718,21 @@ export class SucculentMesher extends OrganMesher {
     const L = depth + H;
     const { loop, exit } = this.baseRing({ x: 0, y: -depth, z: 0 }, 0.92 * r, N);
     const sStart = 0.3 * depth;
-    const domeLen = Math.min(0.3 * H, 0.9 * r);
+    // The stem narrows towards the crown and ends in a pointed bud — the central spear of unopened
+    // leaves — short and slim enough to stay hidden among the youngest leaves.
+    const domeLen = Math.min(0.3 * H, 0.8 * r);
     const n = Math.max(0, Math.round(p.leaves));
     const leafN = evenSides(p.leafSides, 6, 16);
     const { w, h } = this.leafWindow(leafN);
     const spacing0 = Math.max(0.003, p.ringAspect * ((TAU * r) / N));
-    const spacing = this.packSpacing(n + (p.stalk > 0 ? 3 : 0) + Math.floor(N / (w + 1)), w, h, N, Math.max(0.02, L - domeLen - Math.max(sStart, depth - 0.02) - 2 * spacing0), spacing0);
+    // Trunked rosettes (yuccas, foxtail agaves) carry their leaves only on the top part of the stem.
+    const zone = clamp(p.leafZone, 0.1, 1);
+    const spacing = this.packSpacing(n + (p.stalk > 0 ? 3 : 0) + Math.floor(N / (w + 1)), w, h, N, Math.max(0.02, zone * (L - domeLen - Math.max(sStart, depth - 0.02) - 2 * spacing0)), spacing0);
     const rad = (s: number): number => {
       const t = clamp((s - depth) / H, -1, 1);
-      let rr = r * (1 - 0.35 * smooth(t));
+      let rr = r * (1 - 0.5 * smooth(t));
       const td = (s - (L - domeLen)) / domeLen;
-      if (td > 0) rr *= Math.max(0.05, Math.sqrt(Math.max(0, 1 - td * td)));
+      if (td > 0) rr *= Math.max(0.06, Math.pow(Math.max(0, 1 - td), 0.65));
       return rr;
     };
     const lean = p.leanV * DEG2RAD * this.rng.uniform();
@@ -724,7 +748,8 @@ export class SucculentMesher extends OrganMesher {
     const hasStalk = p.stalk > 0 && p.stalkHeight > 0;
     // The flower stalk takes the top two rows below the dome; the leaves stop a clear row beneath it.
     const sTo = hasStalk ? sTop - 3.5 * spacing : sTop;
-    const sFrom = Math.max(sStart + (0.5 * h + 1) * spacing, depth - 0.02);
+    const sFrom0 = Math.max(sStart + (0.5 * h + 1) * spacing, depth + 0.005);
+    const sFrom = zone < 1 ? Math.max(sFrom0, sTo - zone * (sTo - sFrom0)) : sFrom0;
     const az0 = this.leafRng.next() * TAU;
     // Phyllotaxis on the lattice: leaf k sits on row ⌊k / perRow⌋ (rows h + 1 lattice pitches apart, so the
     // windows of consecutive rows clear each other) and the golden angle picks its column; within a row the
@@ -735,19 +760,26 @@ export class SucculentMesher extends OrganMesher {
     const rowsUsed = Math.min(rowsAvail, Math.ceil(n / perRow));
     // Rows sit on whole lattice pitches so they can never merge; spread over the zone when there are spare rows.
     const rowPitch = rowsUsed > 1 ? pitch * Math.max(1, Math.floor((sTo - sFrom) / pitch / (rowsUsed - 1))) : pitch;
-    const sector = TAU / perRow;
+    // Columns: the leaves of a row sit `pitchCols` columns apart (at least a window and a free column);
+    // whatever is left over is used as per-leaf jitter so the spiral does not look machined.
+    const colStep = TAU / N;
+    const pitchCols = Math.max(w + 1, Math.floor(N / perRow));
+    const slackCols = pitchCols - (w + 1);
+    // A partly filled row goes at the bottom: the crown must close around the bud.
+    const fill = rowsUsed * perRow >= n ? (perRow - (n % perRow)) % perRow : 0;
     for (let k = 0; k < n; k++) {
       const f = n > 1 ? k / (n - 1) : 1;
-      const row = Math.min(rowsUsed - 1, Math.floor(k / perRow));
+      const row = Math.min(rowsUsed - 1, Math.floor((k + fill) / perRow));
       const s = sFrom + rowPitch * row;
-      // Golden-angle spiral, then each leaf is kept inside its own sector of the row so the windows never overlap.
-      const slot = k % perRow;
-      const jitter = ((k * GOLDEN) % sector) * 0.3 + 0.35 * sector;
-      const az = az0 + row * GOLDEN + slot * sector + jitter;
+      // Golden-angle rotation from row to row, then whole-column slots so no two windows of a row can touch.
+      const slot = (k + fill) % perRow;
+      const base = Math.round((az0 + row * GOLDEN) / colStep);
+      const jit = slackCols > 0 ? Math.floor(((k * GOLDEN) % 1) * (slackCols + 1)) : 0;
+      const az = (base + slot * pitchCols + jit + 0.5 * w) * colStep;
       const spread = lerp1(p.leafSpread, p.leafSpreadTop, smooth(f)) * DEG2RAD;
       let lenF = 1;
       if (f < 0.15) lenF = lerp1(0.75, 1, f / 0.15);
-      else if (f > 0.7) lenF = lerp1(1, 0.5, smooth((f - 0.7) / 0.3));
+      else if (f > 0.7) lenF = lerp1(1, 0.58, smooth((f - 0.7) / 0.3));
       const Lf = Math.max(0.02, p.leafLength * lenF * (1 + p.leafLengthV * this.leafRng.uniform()));
       const twistSign = this.leafRng.next() < 0.5 ? -1 : 1;
       children.push({
@@ -909,8 +941,10 @@ export class SucculentMesher extends OrganMesher {
 
   private buildPads(): void {
     const p = this.p;
-    const T = Math.max(0.004, p.padThickness);
-    const W = Math.max(0.03, p.padWidth);
+    // The first joint of an old opuntia is a stout, half-woody pad: thicker and a little narrower than
+    // the young pads it carries.
+    const T = Math.max(0.004, 1.5 * p.padThickness);
+    const W = Math.max(0.03, 0.85 * p.padWidth);
     const rNeck = Math.max(0.006, 0.9 * T);
     const depth = 0.04 + 0.5 * rNeck;
     const { loop, exit } = this.baseRing({ x: 0, y: -depth, z: 0 }, rNeck, 8);
@@ -919,7 +953,7 @@ export class SucculentMesher extends OrganMesher {
     const lean = 6 * DEG2RAD * this.rng.uniform();
     const dir0 = normalize(add(scale(UP, Math.cos(lean)), scale(A, Math.sin(lean))));
     const right0 = normalize(cross(UP, A));
-    const L = depth + Math.max(0.03, p.padLength * (1 + p.padLengthV * this.rng.uniform()));
+    const L = depth + Math.max(0.03, 1.05 * p.padLength * (1 + 0.5 * p.padLengthV * this.rng.uniform()));
     const budget = { left: Math.max(0, Math.round(p.pads) - 1) };
     const organ = this.makePad(exit, { level: 0, L, W, T, dir0, right0, base: { limb: 0, phase: this.rng.next(), pivot: { x: 0, y: 0, z: 0 } }, children: this.padChildren(0, budget), sGround: depth }, budget);
     this.meshTube(organ, loop, exit, 1);
@@ -942,7 +976,7 @@ export class SucculentMesher extends OrganMesher {
         c = cc;
       }
     }
-    let n = Math.max(1, Math.round(c + 0.8 * this.rng.uniform()));
+    let n = Math.max(level === 0 ? Math.min(3, c + 1) : 1, Math.round(c + 0.8 * this.rng.uniform()));
     n = Math.min(n, budget.left);
     budget.left -= n;
     return n;
@@ -967,11 +1001,16 @@ export class SucculentMesher extends OrganMesher {
     const refine: number[] = [];
     for (let d = 0; d < doublings; d++) refine.push(sStart + (2 * d + 1.5) * spacing);
     const widen = Math.max(0.3, (refine.length ? refine[refine.length - 1] + 2 * spacing - s0 : 0.2 * span) / span);
+    // Obovate outline: an egg with its broad end up, widest at 58 % of the length, on a narrow neck.
+    // The buried first pad is already broad where it meets the ground: its neck widens from the collar.
+    const growFrom = isBase ? sStart : s0;
+    const growLen = isBase ? 0.2 * (L - sStart) : widen * span;
     const widthAt = (s: number): number => {
       const t = clamp((s - s0) / span, -0.5, 1);
-      const grow = wNeck + (W - wNeck) * smooth(Math.max(0, t) / widen);
-      const u = Math.max(0, (t - 0.45) / 0.55);
-      const outline = W * Math.pow(Math.max(0, 1 - u * u), 0.55);
+      const grow = wNeck + (W - wNeck) * smooth(Math.max(0, s - growFrom) / growLen);
+      const c = 0.58;
+      const u = t < c ? (c - t) / c : (t - c) / (1 - c);
+      const outline = W * Math.pow(Math.max(0, 1 - u * u), t < c ? 0.6 : 0.5);
       return Math.max(0.06 * W, Math.min(grow, outline));
     };
     const thickAt = (s: number): number => {
@@ -1002,9 +1041,11 @@ export class SucculentMesher extends OrganMesher {
       const e = right ? 0 : 1;
       const s = Math.min(sLast, Math.max(edgeNext[e], s0 + span * clamp(f, 0.3, 0.97)));
       edgeNext[e] = s + 3.5 * spacing;
-      // Child pads fan out from the rim (opuntias spread as much as they rise) and twist out of the parent plane.
-      const angle = (38 + 34 * rng.next()) * DEG2RAD;
-      const twist = p.padTwist * DEG2RAD * rng.uniform();
+      // Child pads fan out from the rim (opuntias spread as much as they rise), lean out of the parent's
+      // plane towards one face or the other, and twist their own plane away from the parent's.
+      const angle = (p.padAngle + 17 * rng.uniform()) * DEG2RAD;
+      const tilt = p.padTilt * DEG2RAD * rng.uniform();
+      const twist = p.padTwist * DEG2RAD * (rng.next() < 0.5 ? -1 : 1) * (0.35 + 0.65 * rng.next());
       const lenJ = 1 + p.padLengthV * rng.uniform();
       const phase = rng.next();
       const childCount = this.padChildren(level + 1, budget);
@@ -1021,7 +1062,8 @@ export class SucculentMesher extends OrganMesher {
         row1: 0,
         make: (ex) => {
           const f0 = line.at(s);
-          const dir0 = normalize(add(scale(ex.dir, Math.cos(angle)), scale(ex.normal, Math.sin(angle))));
+          const side = normalize(add(scale(ex.normal, Math.cos(tilt)), scale(f0.up, Math.sin(tilt))));
+          const dir0 = normalize(add(scale(ex.dir, Math.cos(angle)), scale(side, Math.sin(angle))));
           const upC = normalize(projectOnPlane(rotateAxis(f0.up, dir0, twist), dir0));
           const right0 = normalize(cross(upC, dir0));
           return this.makePad(
@@ -1029,8 +1071,8 @@ export class SucculentMesher extends OrganMesher {
             {
               level: level + 1,
               L: Math.max(0.03, p.padLength * lenJ * (1 - 0.08 * level)),
-              W: W * (1 - 0.06 * level),
-              T,
+              W: Math.max(0.03, p.padWidth * (1 - 0.06 * level)),
+              T: Math.max(0.004, p.padThickness * (level === 0 ? 1.25 : 1)),
               dir0,
               right0,
               base: { limb: limbAt(s), phase: isBase ? phase : v.base.phase, pivot: isBase ? ex.pos : pivot },
@@ -1043,27 +1085,31 @@ export class SucculentMesher extends OrganMesher {
       });
     }
 
-    // ---- Fruits on the upper rim of the terminal pads.
+    // ---- Fruits (tunas) in a row along the upper rim of the terminal pads: alternate edges, each edge
+    // stacked from the apex down at the pitch the 2×1 rim windows allow.
     const fruits = nChildren === 0 && !isBase ? Math.max(0, Math.round(p.fruits + 0.99 * rng.uniform())) : 0;
-    for (let k = 0; k < fruits; k++) {
+    const sFruitTop = L - 2 * spacing;
+    const fruitPitch = 2.5 * spacing;
+    const fruitSlots = Math.max(0, Math.floor((sFruitTop - (s0 + 0.55 * span)) / fruitPitch) + 1);
+    for (let k = 0; k < Math.min(fruits, 2 * fruitSlots); k++) {
       const right = k % 2 === 0;
       const j0 = right ? NF - 1 : NF / 2 - 1;
-      const f = 0.68 + (0.29 * (Math.floor(k / 2) + rng.next() * 0.8)) / Math.max(1, Math.ceil(fruits / 2));
-      const s = s0 + span * Math.min(0.96, f);
+      const s = sFruitTop - Math.floor(k / 2) * fruitPitch - 0.25 * spacing * rng.next();
       const len = Math.max(0.01, p.fruitLength * (1 + 0.15 * rng.uniform()));
+      const rJ = 1 + 0.12 * rng.uniform();
       children.push({
         s,
         az: (j0 + 1) * colStep,
         w: 2,
-        h: 2,
-        hh: spacing,
+        h: 1,
+        hh: 0.5 * spacing,
         priority: 1,
         loopExit: true,
         optional: true,
         j0: 0,
         row0: 0,
         row1: 0,
-        make: (ex) => this.makeFruit(ex, { limb: limbAt(s), phase: v.base.phase, pivot }, len),
+        make: (ex) => this.makeFruit(ex, { limb: limbAt(s), phase: v.base.phase, pivot }, len, rJ),
       });
     }
 
@@ -1105,7 +1151,13 @@ export class SucculentMesher extends OrganMesher {
       level: Math.min(3, level === 0 ? 0 : 1),
       line,
       sStart,
-      profile: (s, j, NN) => stadiumPoint(NN, j, 0.5 * widthAt(s), 0.5 * thickAt(s)),
+      profile: (s, j, NN) => {
+        // Rounded rim, faces that swell gently towards the middle (a lens, not a slab).
+        const a = 0.5 * widthAt(s);
+        const q = stadiumPoint(NN, j, a, 0.5 * thickAt(s));
+        const u = q.x / a;
+        return { x: q.x, y: q.y * (1 + 0.3 * (1 - u * u)) };
+      },
       radius: (s) => 0.5 * widthAt(s),
       round: false,
       extra: cosineStations(s0 + 0.82 * span, L, 4, true),
@@ -1119,25 +1171,31 @@ export class SucculentMesher extends OrganMesher {
     };
   }
 
-  private makeFruit(exit: Exit, base: WindBase, len: number): Organ {
+  /** A tuna: barrel-shaped, narrow at the areole, nearly cylindrical, with a flat, dimpled top. */
+  private makeFruit(exit: Exit, base: WindBase, len: number, rJ = 1): Organ {
     const p = this.p;
-    const R = Math.max(0.004, p.fruitRadius);
-    const dir0 = normalize(add(scale(exit.normal, 0.8), scale(exit.dir, 0.45)));
+    const R = Math.max(0.004, p.fruitRadius * rJ);
+    const dir0 = normalize(add(scale(exit.normal, 0.7), scale(exit.dir, 0.7)));
     let right0 = projectOnPlane(cross(exit.dir, exit.normal), dir0);
     right0 = lengthSq(right0) < 1e-12 ? anyPerpendicular(dir0) : normalize(right0);
-    const rNeck = Math.min(R, 0.45 * exit.size);
-    const sStart = Math.min(0.2 * len, Math.max(this.collarLen(rNeck, 1.2), 0.3 * exit.size));
+    const rNeck = Math.min(0.6 * R, 0.45 * exit.size);
+    const sStart = Math.min(0.15 * len, Math.max(this.collarLen(rNeck, 1.2), 0.3 * exit.size));
     const L = Math.max(len, sStart + 0.004);
+    const span = L - sStart;
     const line = growLine(exit.pos, dir0, right0, L, 3, () => ({}));
-    const sR = sStart + 0.12 * (L - sStart);
-    const body = (t: number): number => Math.pow(Math.sin(Math.PI * Math.pow(clamp(t, 0, 1), 0.85)), 0.6);
+    const sR = sStart + 0.08 * span;
+    const body = (t: number): number => {
+      if (t < 0.5) return 0.6 + 0.4 * smooth(t / 0.5); // shoulder from the neck to the full radius
+      if (t < 0.82) return 1 - 0.03 * ((t - 0.5) / 0.32); // nearly cylindrical belly
+      const u = (t - 0.82) / 0.18; // rounded top, ending in a small flat disc
+      return 0.97 * Math.sqrt(Math.max(0, 1 - 0.9 * u * u));
+    };
     const rad = (s: number): number => {
-      const t = (s - sStart) / (L - sStart);
-      if (t < 0.12) return lerp1(rNeck, R * body(0.12), t / 0.12);
-      if (t > 0.94) return R * Math.max(0.35, body(0.94) * (1 - 0.6 * (t - 0.94) / 0.06));
+      const t = clamp((s - sStart) / span, 0, 1);
+      if (t < 0.08) return lerp1(rNeck, R * body(0.08), t / 0.08);
       return R * body(t);
     };
-    const stations = [sR, ...cosineStations(sR, L, 8, false).slice(1), sStart + 0.94 * (L - sStart)];
+    const stations = [sR, ...[0.2, 0.35, 0.5, 0.66, 0.82, 0.9, 0.96].map((t) => sStart + t * span)];
     this.count('fruits');
     return {
       level: 2,
@@ -1146,9 +1204,9 @@ export class SucculentMesher extends OrganMesher {
       profile: (s, j, N) => {
         const rr = rad(s);
         const th = (TAU * j) / N;
-        const t = (s - sStart) / (L - sStart);
-        // Dimpled top: the last ring is pushed back towards the body.
-        const z = t > 0.94 ? -0.18 * R * ((t - 0.94) / 0.06) : 0;
+        const t = (s - sStart) / span;
+        // Umbilicus: the top rings are pushed back into the body.
+        const z = t > 0.9 ? -0.14 * R * ((t - 0.9) / 0.1) : 0;
         return { x: rr * Math.cos(th), y: rr * Math.sin(th), z };
       },
       radius: rad,

@@ -4,7 +4,8 @@ A production-oriented vegetation generator that outputs **one closed, manifold q
 plant — no intersecting tubes, no "place a twig on a branch" merges. Branches grow *out of* their
 parent's surface through shared edge loops, forks are true Y-crotches, grass blades and culms grow
 out of a welded crown the same way, and every vertex carries wind data so the whole plant bends as
-a single skin. 30 tree species and 14 grasses ship as presets.
+a single skin. 30 tree species, 14 grasses, 19 desert succulents (cacti, agaves, yuccas, aloes) and
+14 vegetables — with the vegetable itself modelled — ship as presets.
 
 ```
 npm install
@@ -22,6 +23,9 @@ npm run build      # static bundle in dist/
 | Validation | `src/tree/validate.ts` | Half-edge style audit: boundary edges, non-manifold edges, winding consistency, degenerate faces, isolated vertices, connected components, Euler characteristic / genus, valence histogram. |
 | Wind | `src/viewer/shaders.ts` | Three-tier vertex wind (trunk sway ∝ height², limb bending about a per-limb pivot with phase, twig/leaf flutter). Data is baked per vertex by the mesher. |
 | Grasses | `src/plant/grassMesher.ts`, `src/plant/grassParams.ts` | **Welded grass mesher** (below): crown dome, leaf blades, culms with nodes/sheaths/leaves and four inflorescence types, all one closed quad manifold. 14 species in three families (turf & meadow, tussock, cereals & reeds). |
+| Organs | `src/plant/organMesher.ts` | **Welded organ mesher** (below): the shared engine for every non-tree plant — windows planned on a parent's ring lattice, collar loops, forks, refinement bands, one closed quad manifold per plant. |
+| Succulents | `src/plant/succulentMesher.ts`, `src/plant/succulentParams.ts` | Columnar and barrel cacti with ribs, areoles and spines, forking arms, opuntia pads with tunas, tree aloes with leaf tufts, agave / yucca / aloe rosettes with terminal spines, marginal teeth and flower stalks. 19 species in four desert families. |
+| Vegetables | `src/plant/vegetableMesher.ts`, `src/plant/vegetableParams.ts` | Fruiting bushes (tomato trusses, peppers, eggplant, beans, okra), vines (pumpkin, courgette, cucumber), heads, roots and grain (cabbage, lettuce, carrot, beetroot, maize with husked ears, silk and tassel). The edible organ is part of the same manifold. 14 species. |
 | Export | `src/tree/export.ts` | OBJ with **quads preserved** (for Blender/Maya/ZBrush), GLB (triangulated) with wind data in `COLOR_0` and level/junction flags in `TEXCOORD_1`. |
 | UI | `src/main.ts`, `src/ui/*` | Three floating cards in the SolidArc panel language: **Library** (species browser grouped by biome and plant family, search, census), **Viewport** (display modes shaded / clay / wire / levels / junctions / wind, pill toolbar, camera read-out, exact fit-to-view framing from 10 cm turf to 70 m redwoods, key hints), **Inspector** (hero card with height + mesh census, presence grid, tabs Botany · Roots · Mesh · View · Topology for trees and Grass · View · Topology for grasses, with tick-track sliders, steppers, per-level tables with drag-to-scrub cells, and a command line: `seed 42`, `preset oak`, `mode wire`, `export glb`, `help`). Generation runs in a Web Worker. |
 
@@ -83,6 +87,34 @@ closed quad manifold** — the same guarantee as the trees, with no triangles at
 `Lawn Turf` (330 blades) is 14.5 k faces, `Wheat` 9 k, `Meadow Grass` 67 k, `Pampas Grass` (24 culms,
 plumes with secondaries) 305 k — all genus 0, zero dropped organs, on every seed in the test matrix.
 
+## The welded organ mesher (succulents, vegetables)
+
+Cacti, agaves and vegetables share one engine, `OrganMesher`. A plant is a tree of **organs**
+(trunk, arm, pad, leaf, areole, spine, tooth, fruit, flower, petiole, blade, leaflet, pod, ear,
+husk, silk…). Each organ is a tube along a `Line` with an arbitrary cross-section profile
+(`ribbedPoint` for ribbed cacti, `stadiumPoint` + lens swell for opuntia pads, `cupPoint` for
+channelled leaves, `bladePoint` for grass-like blades) and a list of **attachments**: rectangular
+`w × h` windows on the parent's ring lattice from which the children grow through collar loops.
+
+* **Planning before meshing.** Windows are snapped to the parent's ring stations, searched over a
+  small offset table for a free spot, and sorted by priority; dense detail (areoles, spines, teeth,
+  sepals) is `optional` and simply yields when it would collide, nothing structural is ever
+  dropped on the shipped presets (the probe scripts assert `dropped = 0`).
+* **Ring lattices.** Rosettes place their leaves on whole lattice rows and whole-column slots
+  (golden-angle rotation between rows, per-leaf slack jitter) so a hundred leaves pack around a
+  7 cm stem with no two windows touching; forks that are asked for within one window height are
+  spaced evenly round the parent and the parent is lengthened to fit them.
+* **Refinement bands.** A child ring can double its vertex count across a band (`refine`) so a
+  2 × 2 rim window becomes a 16-vertex fruit, keeping the quad flow.
+* **Wind.** `finish(sway)` normalises the height attribute by the plant height and scales it by the
+  species' `sway`, so a saguaro barely moves while a tomato bush sways; `limb` / `pivot` / `phase`
+  run per arm, pad or leaf.
+
+Succulent presets: Saguaro, Cardón, Organ Pipe, San Pedro, Golden Barrel, Fishhook Barrel,
+Pincushion, Prickly Pear (obovate pads leaning out of the parent plane, tunas along the rims),
+Teddy-Bear Cholla, Candelabra Tree, Quiver Tree, Century Plant, Blue Agave, Artichoke Agave,
+Foxtail Agave, Queen Victoria Agave, Spanish Dagger, Bitter Aloe, Aloe Vera.
+
 ## Wind
 
 Per-vertex attributes baked by the mesher:
@@ -102,16 +134,18 @@ full tree, close-ups of specific junction types, display modes and the wind defo
 used to review the results in this repository; they require `puppeteer-core` and a Chromium binary
 (`CHROME_PATH`).
 
-`scripts/probe.ts` (trees) and `scripts/grassProbe.ts` (grasses) run the full pipeline headlessly
-and print the topology audit per preset × seed: `npx vite-node scripts/grassProbe.ts "" 1,2,3`.
+`scripts/probe.ts` (trees), `scripts/grassProbe.ts`, `scripts/succulentProbe.ts` and
+`scripts/vegetableProbe.ts` run the full pipeline headlessly and print the topology audit per
+preset × seed: `npx vite-node scripts/succulentProbe.ts "" 1,2,3`. `scripts/hashPresets.ts` prints
+per-preset mesh checksums for regression comparisons.
 
-`npm test` covers every preset (30 trees + 14 grasses) × 3 seeds: closed, manifold, consistently
-wound, one component, genus 0, quad ratio, drop budget, wind attribute ranges, determinism and
-the OBJ/GLB/GPU exporters.
+`npm test` covers every preset (30 trees + 14 grasses + 19 succulents + 14 vegetables): closed,
+manifold, consistently wound, one component, genus 0, quad ratio, drop budget, wind attribute
+ranges, determinism and the OBJ/GLB/GPU exporters.
 
 ## Scope of this phase
 
 Form and topology only: solid-colour materials, proxy leaf cards on trees. Bark and blade
 textures, UV layout for atlases, LOD chains and detailed leaves are the next step; the quad flow
-and the UV seams are already laid out to make that straightforward. Grasses are the first non-tree
-plant family; shrubs, ferns and succulents can reuse the same organ/window machinery.
+and the UV seams are already laid out to make that straightforward. Grasses, succulents and
+vegetables share the organ/window machinery; shrubs and ferns can reuse it as well.

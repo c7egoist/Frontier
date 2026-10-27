@@ -127,6 +127,10 @@ export interface SucculentParams {
   padLevels: number;
   /** Rotation of a child pad's plane out of the parent's plane (± random). */
   padTwist: number;
+  /** Angle between a child pad and its parent's axis, in the parent's plane (±17° random). */
+  padAngle: number;
+  /** Tilt of a child pad's axis out of the parent's plane (± random): pads leaving the rim towards a face. */
+  padTilt: number;
   /** Upward curve of a pad along its length. */
   padUp: number;
   /** Attachment range of child pads along the parent's rim (fractions of the pad length). */
@@ -153,6 +157,14 @@ export interface SucculentParams {
   /** Outward arch along the leaf. */
   leafBend: number;
   leafTwist: number;
+  /** Position of the widest point along the leaf (0.2 = lanceolate, 0.55 = obovate / spatulate). */
+  leafWidest: number;
+  /** Shape of the taper beyond the widest point: 1 = straight (triangular), 1.6 = lanceolate, 4 = blunt with an abrupt tip. */
+  leafTaper: number;
+  /** Length of the hard terminal spine the leaf narrows into (agaves, yuccas; 0 = none). */
+  leafTipSpine: number;
+  /** Fraction of the stem, from the top, that carries leaves (1 = all of it; trunked agaves and yuccas use ~0.5). */
+  leafZone: number;
   /** Marginal teeth per edge (0 = entire margins). */
   teeth: number;
   toothLength: number;
@@ -239,6 +251,8 @@ export const DEFAULT_SUCCULENT: SucculentParams = {
   pads: 14,
   padLevels: 4,
   padTwist: 40,
+  padAngle: 55,
+  padTilt: 0,
   padUp: 30,
   padFrom: 0.55,
   padTo: 0.95,
@@ -255,6 +269,10 @@ export const DEFAULT_SUCCULENT: SucculentParams = {
   leafSpreadTop: 12,
   leafBend: 25,
   leafTwist: 8,
+  leafWidest: 0.3,
+  leafTaper: 1.6,
+  leafTipSpine: 0,
+  leafZone: 1,
   teeth: 14,
   toothLength: 0.008,
   stalk: 0,
@@ -503,18 +521,20 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
     succulent: {
       form: 'pad',
       padLength: 0.3,
-      padLengthV: 0.2,
+      padLengthV: 0.22,
       padWidth: 0.2,
       padThickness: 0.025,
-      pads: 16,
+      pads: 18,
       padLevels: 4,
-      padTwist: 45,
-      padUp: 35,
-      padFrom: 0.55,
+      padTwist: 60,
+      padAngle: 52,
+      padTilt: 30,
+      padUp: 22,
+      padFrom: 0.5,
       padTo: 0.95,
-      fruits: 3,
-      fruitLength: 0.06,
-      fruitRadius: 0.022,
+      fruits: 5,
+      fruitLength: 0.07,
+      fruitRadius: 0.024,
       areoleSpacing: 0.04,
       areoleRadius: 0.005,
       areoleTilt: 0,
@@ -679,12 +699,169 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       leafSpreadTop: 12,
       leafBend: 28,
       leafTwist: 8,
+      leafWidest: 0.3,
+      leafTaper: 1.6,
+      leafTipSpine: 0.04,
       teeth: 14,
       toothLength: 0.009,
       stalk: 0,
       leafSides: 16,
       sides: 24,
       flex: 0.25,
+    },
+  },
+  {
+    // Agave tequilana: the blue agave of Jalisco — a rosette of rigid, narrow, straight leaves a metre
+    // and more long, finely toothed and ending in a dark terminal spine.
+    name: 'Blue Agave',
+    succulent: {
+      form: 'rosette',
+      height: 0.42,
+      radius: 0.12,
+      leaves: 72,
+      leafLength: 1.25,
+      leafLengthV: 0.12,
+      leafWidth: 0.1,
+      leafThickness: 0.32,
+      leafCup: 55,
+      leafSpread: 80,
+      leafSpreadTop: 10,
+      leafBend: 10,
+      leafTwist: 4,
+      leafWidest: 0.25,
+      leafTaper: 2.6,
+      leafTipSpine: 0.035,
+      teeth: 22,
+      toothLength: 0.004,
+      stalk: 0,
+      leafSides: 12,
+      sides: 36,
+      flex: 0.2,
+    },
+  },
+  {
+    // Agave parryi: the artichoke agave — a compact globe of short, broad, grey leaves, each ending
+    // abruptly in a stout black spine.
+    name: 'Artichoke Agave',
+    succulent: {
+      form: 'rosette',
+      height: 0.3,
+      radius: 0.14,
+      leaves: 64,
+      leafLength: 0.38,
+      leafLengthV: 0.1,
+      leafWidth: 0.13,
+      leafThickness: 0.4,
+      leafCup: 45,
+      leafSpread: 80,
+      leafSpreadTop: 6,
+      leafBend: 6,
+      leafTwist: 0,
+      leafWidest: 0.55,
+      leafTaper: 4,
+      leafTipSpine: 0.025,
+      teeth: 9,
+      toothLength: 0.004,
+      stalk: 0,
+      leafSides: 12,
+      sides: 36,
+      flex: 0.15,
+    },
+  },
+  {
+    // Agave attenuata: the foxtail agave — a soft, spineless rosette of broad grey-green leaves that
+    // recurve gracefully, carried on a bare trunk up to a metre tall.
+    name: 'Foxtail Agave',
+    succulent: {
+      form: 'rosette',
+      height: 0.9,
+      heightV: 0.2,
+      radius: 0.07,
+      leanV: 8,
+      leaves: 44,
+      leafLength: 0.55,
+      leafLengthV: 0.12,
+      leafWidth: 0.14,
+      leafThickness: 0.12,
+      leafCup: 40,
+      leafSpread: 78,
+      leafSpreadTop: 15,
+      leafBend: 48,
+      leafTwist: 10,
+      leafWidest: 0.45,
+      leafTaper: 2.2,
+      leafTipSpine: 0,
+      leafZone: 0.25,
+      teeth: 0,
+      stalk: 0,
+      leafSides: 12,
+      sides: 24,
+      flex: 0.35,
+    },
+  },
+  {
+    // Agave victoriae-reginae: the queen Victoria agave — a small, dense dome of a hundred thick,
+    // triangular leaves without marginal teeth, each tipped with a short spine.
+    name: 'Queen Victoria Agave',
+    succulent: {
+      form: 'rosette',
+      height: 0.2,
+      radius: 0.07,
+      leaves: 120,
+      leafLength: 0.15,
+      leafLengthV: 0.08,
+      leafWidth: 0.05,
+      leafThickness: 0.6,
+      leafCup: 25,
+      leafSpread: 85,
+      leafSpreadTop: 8,
+      leafBend: 0,
+      leafTwist: 0,
+      leafWidest: 0.3,
+      leafTaper: 1.4,
+      leafTipSpine: 0.012,
+      teeth: 0,
+      stalk: 0,
+      leafSides: 8,
+      sides: 40,
+      flex: 0.1,
+    },
+  },
+  {
+    // Yucca gloriosa: the Spanish dagger — a trunk topped by a dense globe of stiff, narrow, sharp-pointed
+    // leaves, the oldest reflexed into a skirt, with a tall panicle of pendent bell flowers.
+    name: 'Spanish Dagger',
+    succulent: {
+      form: 'rosette',
+      height: 1.3,
+      heightV: 0.2,
+      radius: 0.11,
+      leanV: 6,
+      leaves: 120,
+      leafLength: 0.62,
+      leafLengthV: 0.1,
+      leafWidth: 0.04,
+      leafThickness: 0.3,
+      leafCup: 25,
+      leafSpread: 108,
+      leafSpreadTop: 8,
+      leafBend: 10,
+      leafTwist: 12,
+      leafWidest: 0.3,
+      leafTaper: 1.5,
+      leafTipSpine: 0.015,
+      leafZone: 0.35,
+      teeth: 0,
+      stalk: 1,
+      stalkHeight: 1.1,
+      stalkRadius: 0.02,
+      flowers: 120,
+      flowerLength: 0.06,
+      flowerRadius: 0.016,
+      flowerDroop: 75,
+      leafSides: 8,
+      sides: 36,
+      flex: 0.2,
     },
   },
   {
@@ -719,10 +896,46 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       flex: 0.3,
     },
   },
+  {
+    // Aloe vera: a near-stemless rosette of thick, upright, lanceolate leaves with small marginal teeth
+    // and a slender raceme of yellow tubular flowers.
+    name: 'Aloe Vera',
+    succulent: {
+      form: 'rosette',
+      height: 0.22,
+      radius: 0.06,
+      leaves: 24,
+      leafLength: 0.46,
+      leafLengthV: 0.15,
+      leafWidth: 0.085,
+      leafThickness: 0.45,
+      leafCup: 75,
+      leafSpread: 48,
+      leafSpreadTop: 10,
+      leafBend: 18,
+      leafTwist: 4,
+      leafWidest: 0.2,
+      leafTaper: 1.5,
+      leafTipSpine: 0,
+      teeth: 10,
+      toothLength: 0.003,
+      stalk: 1,
+      stalkHeight: 0.75,
+      stalkRadius: 0.008,
+      flowers: 100,
+      flowerLength: 0.03,
+      flowerRadius: 0.0035,
+      flowerDroop: 70,
+      leafSides: 10,
+      sides: 24,
+      flex: 0.3,
+    },
+  },
 ];
 
 export const SUCCULENT_GROUPS: { label: string; names: string[] }[] = [
   { label: 'Desert · columnar cacti', names: ['Saguaro', 'Cardón', 'Organ Pipe Cactus', 'San Pedro Cactus'] },
   { label: 'Desert · barrels & pads', names: ['Golden Barrel', 'Fishhook Barrel', 'Pincushion Cactus', 'Prickly Pear', 'Teddy-Bear Cholla'] },
-  { label: 'Desert · succulent trees & rosettes', names: ['Candelabra Tree', 'Quiver Tree', 'Century Plant', 'Bitter Aloe'] },
+  { label: 'Desert · succulent trees', names: ['Candelabra Tree', 'Quiver Tree'] },
+  { label: 'Desert · agaves, yuccas & aloes', names: ['Century Plant', 'Blue Agave', 'Artichoke Agave', 'Foxtail Agave', 'Queen Victoria Agave', 'Spanish Dagger', 'Bitter Aloe', 'Aloe Vera'] },
 ];
