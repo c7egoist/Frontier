@@ -85,6 +85,7 @@ jobs:
           ctest --test-dir Build/Windows -C $env:BUILD_CONFIGURATION --output-on-failure -R '^(WebPatternNativeImportFixture|WebPatternNativeImportValidation|MaterialPreviewConfigurationValidation|MaterialLibraryValidation|IconDomainValidation|ProjectBrowserValidation|SurfaceGeometryValidation|BakeFieldValidation|FrontierEditorInputValidation)$' 2>&1 | Tee-Object Build/Diagnostics/Acceptance.log
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Assemble experimental FrontierEditor test package (unsigned, not for distribution)
+        if: ${{ !cancelled() }}
         run: |
           $Package = 'Binaries/FrontierEditor-Package'
           New-Item -ItemType Directory -Force $Package | Out-Null
@@ -100,6 +101,7 @@ jobs:
           Compress-Archive -Path "$Package/*" -DestinationPath Binaries/FrontierEditor-Windows-x64-Experimental.zip -Force
           Write-Output "FrontierEditor experimental package assembled"
       - name: Upload experimental FrontierEditor test binary
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: FrontierEditor-Windows-x64-Experimental
