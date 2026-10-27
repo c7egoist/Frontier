@@ -11,7 +11,7 @@
 //    thermal relaxation holds every slope at or below its angle of repose; glacial polish widens trunk
 //    valleys into U profiles; the slab transport model moves sand downwind and drops it in wind shadow.
 
-import { Resolution, TexelSize, ConstructRandomStream } from "./ReliefField.js";
+import { Resolution, TexelSize, ConstructRandomStream, LatticeNoise } from "./ReliefField.js";
 
 const YieldInterval = 4096;   // completions between yields to the browser
 
@@ -1056,9 +1056,9 @@ export async function SnowAccumulation(Field, Params, Noise, Report, Cancel)
 
     const Snowline   = Params.Snowline;
     const BandMetres = Math.max(Params.Band, 12.0);
-    // Convert SlopeLimit degrees into a realistic alpine rock-shedding threshold so steep faces (> 27-32 deg)
-    // shed snow to expose dark granite/gneiss walls while cirques, couloirs and saddles hold snow.
-    const CritSlope  = Math.min(Math.tan(Params.SlopeLimit * Math.PI / 180.0) * 0.52, 0.62);
+    // Realistic alpine snow-holding threshold: snow blankets high cirques, benches, and upper slopes up to ~38-44 deg,
+    // while steeper cliff walls (> 42 deg) and protruding bedrock outcrops shed snow to expose dark rock.
+    const CritSlope  = Math.min(Math.tan(Params.SlopeLimit * Math.PI / 180.0) * 0.86, 0.94);
     const Depth      = Params.Depth;
     const DriftScale = 3.2 / N;
 
@@ -1078,10 +1078,10 @@ export async function SnowAccumulation(Field, Params, Noise, Report, Cancel)
 
             // Multi-scale concavity from immutable Source: > 0 in cirques/couloirs, < 0 on convex ridges.
             const Concavity = (Wide[Index] - Source[Index]) * 0.65 + (Blurred[Index] - Source[Index]) * 0.55;
-            const CouloirBonus   = Math.max(Concavity, 0.0) * 4.5 + Flow[Index] * 38.0;
-            const RidgeWindStrip = Math.max(-Concavity - 0.4, 0.0) * 9.5;
+            const CouloirBonus   = Math.max(Concavity, 0.0) * 3.4 + Flow[Index] * 26.0;
+            const RidgeWindStrip = Math.max(-Concavity - 2.2, 0.0) * 3.0;
 
-            const Wobble = Noise.Fractal(X * DriftScale, Z * DriftScale, 3, 2.0, 0.5) * BandMetres * 0.65;
+            const Wobble = Noise.Fractal(X * DriftScale, Z * DriftScale, 3, 2.0, 0.5) * BandMetres * 0.55;
             const LocalSnowline = Snowline + Wobble - CouloirBonus + RidgeWindStrip;
             let Cover = (Source[Index] - LocalSnowline) / BandMetres;
             Cover = Cover < 0.0 ? 0.0 : Cover > 1.0 ? 1.0 : Cover;
@@ -1089,14 +1089,14 @@ export async function SnowAccumulation(Field, Params, Noise, Report, Cancel)
             if (Cover <= 0.0)
                 continue;
 
-            // Steep faces shed snow to bare rock; concave couloirs hold snow up to slightly steeper angles.
-            const CouloirHold = Concavity > 0.5 ? Math.min(Concavity / 8.0, 0.22) : 0.0;
+            // Steep cliff faces shed snow to bare rock; upper benches, shoulders, and couloirs hold continuous snowfields.
+            const CouloirHold = Concavity > 0.5 ? Math.min(Concavity / 8.0, 0.24) : 0.0;
             const EffectiveCrit = CritSlope + CouloirHold;
-            let Hold = 1.0 - Math.min(Math.max((SlopeHere - EffectiveCrit * 0.42) / Math.max(EffectiveCrit * 0.58, 0.10), 0.0), 1.0);
+            let Hold = 1.0 - Math.min(Math.max((SlopeHere - EffectiveCrit * 0.50) / Math.max(EffectiveCrit * 0.52, 0.12), 0.0), 1.0);
             Hold = Hold * Hold * (3.0 - 2.0 * Hold);
 
-            // Wind scours exposed convex arêtes so dark rock spines stand out sharply against snowfields.
-            const WindScour = Concavity < -0.3 ? Math.max(0.0, 1.0 - (-Concavity - 0.3) * 0.22) : 1.0;
+            // Wind scours only the sharpest knife-edge arêtes & horns so rock crags pierce through coherent snowfields.
+            const WindScour = Concavity < -2.0 ? Math.max(0.18, 1.0 - (-Concavity - 2.0) * 0.085) : 1.0;
 
             const Stored = Math.min(Cover * Hold * WindScour, 1.0);
             Snow[Index] = Math.max(Snow[Index], Stored);
@@ -1124,6 +1124,121 @@ export async function SnowAccumulation(Field, Params, Noise, Report, Cancel)
 //    inside the landform, shaded by how much sky its slope can see) and protrusion (how proud a crest
 //    or edge stands). The splat shader textures from these — plus height, sediment and flow — using
 //    flat material colours, the way dedicated erosion tools hand data to a texturing stage.
+// 📝 Synthesises Gaea-style jagged bedrock outcrops/crags along ridges & steep flanks and scatters
+//    angular rockfall boulders across talus aprons, moraines, and valley benches. Outcrops strip
+//    overlying snow/soil on their steep protruding crowns and boost Hardness & Protrusion.
+export function ApplyRuggedOutcropsAndRocks(Field, Params = {})
+{
+    const Heights    = Field.Heights;
+    const Snow       = Field.ChannelSamples("Snow");
+    const Deposition = Field.ChannelSamples("Deposition");
+    const Hardness   = Field.ChannelSamples("Hardness");
+    const Water      = Field.ChannelSamples("Water");
+    const Wear       = Field.ChannelSamples("Wear");
+    const N          = Resolution;
+
+    const OutcropAmp = (Params.OutcropAmplitude !== undefined) ? Params.OutcropAmplitude : 18.5;
+    const RockAmp    = (Params.RockAmplitude !== undefined)    ? Params.RockAmplitude    : 5.8;
+    const Density    = (Params.Density !== undefined)          ? Params.Density          : 0.58;
+    const Seed       = (Params.Seed !== undefined)             ? Params.Seed             : 7331;
+    const Noise      = new LatticeNoise(Seed ^ 0x6F93);
+
+    const Source = new Float32Array(Heights);
+    const Near   = BoxBlurInPlace(Source, 4);
+    const Mid    = BoxBlurInPlace(Source, 16);
+    const OutcropField = new Float32Array(N * N);
+    const BoulderField = new Float32Array(N * N);
+
+    let HMin = 1e9, HMax = -1e9;
+    for (let Index = 0; Index < Source.length; Index++)
+    {
+        if (Source[Index] < HMin) HMin = Source[Index];
+        if (Source[Index] > HMax) HMax = Source[Index];
+    }
+    const HSpan = Math.max(HMax - HMin, 1.0);
+    const Thresh = 0.65 - Density * 0.18;
+
+    for (let Z = 2; Z < N - 2; Z++)
+    {
+        const Row = Z * N;
+        for (let X = 2; X < N - 2; X++)
+        {
+            const Index = Row + X;
+            if (Water[Index] > 0.12)
+                continue;
+
+            const Gx = (Near[Row + X + 1] - Near[Row + X - 1]) / (2.0 * TexelSize);
+            const Gz = (Near[(Z + 1) * N + X] - Near[(Z - 1) * N + X]) / (2.0 * TexelSize);
+            const Slope = Math.sqrt(Gx * Gx + Gz * Gz);
+            const Elev01 = (Source[Index] - HMin) / HSpan;
+            const RidgeProtrusion = Math.max(Source[Index] - Mid[Index] + 1.5, 0.0);
+            const LocalConvex = Math.max(Source[Index] - Near[Index] + 0.3, 0.0);
+
+            // 1. Rugged Bedrock Outcrops & Crags (bold Gaea-style stepped rock buttresses & ridge gendarmes):
+            const SlopeMask = Math.min(Math.max((Slope - 0.30) / 0.26, 0.0), 1.0)
+                            * (1.0 - Math.min(Math.max((Slope - 2.10) / 0.65, 0.0), 1.0));
+            const RidgeBonus = Math.min(RidgeProtrusion / 14.0, 1.0) * 0.72 + Math.min(LocalConvex / 3.8, 1.0) * 0.28;
+            const OutcropZone = Math.max(SlopeMask * (0.38 + 0.62 * Elev01), RidgeBonus * 0.90);
+
+            if (OutcropZone > 0.14 && OutcropAmp > 0.01)
+            {
+                const Ux = X * 0.025 + Gx * 0.48;
+                const Uz = Z * 0.025 + Gz * 0.48;
+                const Cluster = Noise.Ridged(Ux * 0.68 + 3.7, Uz * 0.68 - 8.1, 2, 2.05, 0.48, 1.55);
+                if (Cluster > Thresh)
+                {
+                    const ClusterW = Math.min((Cluster - Thresh) / Math.max(1.0 - Thresh, 0.08), 1.0);
+                    const BlockA = Noise.Ridged(Ux * 1.65 - Uz * 0.75 + 19.1, Uz * 1.65 + Ux * 0.75, 2, 2.1, 0.50, 1.80);
+                    const BlockB = 1.0 - Math.abs(Noise.Sample(X * 0.064 + 7.3, Z * 0.064 - 4.9));
+                    const AngularCrag = Math.pow(Math.max(BlockA * 0.72 + Math.max(BlockB, 0.0) * 0.28, 0.0), 1.45);
+                    // Stepped rock joint ledges along elevation so outcrops have blocky fracture benches.
+                    const JointPhase = (Source[Index] * 0.10 + BlockA * 0.95);
+                    const JointStep  = 0.72 + 0.28 * Math.floor((JointPhase - Math.floor(JointPhase)) * 3.0) / 2.0;
+                    OutcropField[Index] = OutcropAmp * OutcropZone * ClusterW * AngularCrag * JointStep;
+                }
+            }
+
+            // 2. Scattered Talus Boulders & Rockfall Blocks (multi-texel angular boulders on scree & benches):
+            const TalusSlope = Math.min(Math.max((Slope - 0.10) / 0.16, 0.0), 1.0)
+                             * (1.0 - Math.min(Math.max((Slope - 0.82) / 0.22, 0.0), 1.0));
+            const FootHollow = Math.min(Math.max((Mid[Index] - Source[Index] + 1.2) / 9.5, 0.0), 1.0);
+            const BoulderZone = TalusSlope * Math.min(Deposition[Index] * 1.60 + FootHollow * 0.60 + Wear[Index] * 0.32, 1.0);
+
+            if (BoulderZone > 0.16 && RockAmp > 0.01)
+            {
+                const Patch = Noise.Sample(X * 0.036 + 5.1, Z * 0.036 - 9.4) * 0.5 + 0.5;
+                if (Patch > 0.42)
+                {
+                    // Multi-texel cellular boulder cones (6-12 m across) + medium blocks.
+                    const CellA = 1.0 - Noise.Cellular(X * 0.088 + 31.4, Z * 0.088 + 12.8);
+                    const CellB = 1.0 - Noise.Cellular(X * 0.145 - 17.2, Z * 0.145 + 43.1);
+                    const DomeA = Math.pow(Math.max(CellA - 0.46, 0.0) / 0.54, 1.85);
+                    const DomeB = Math.pow(Math.max(CellB - 0.52, 0.0) / 0.48, 1.95) * 0.55;
+                    BoulderField[Index] = RockAmp * BoulderZone * (DomeA + DomeB) * ((Patch - 0.42) / 0.58);
+                }
+            }
+        }
+    }
+
+    const SmoothOutcrop = BoxBlurInPlace(OutcropField, 1);
+    for (let Index = 0; Index < Heights.length; Index++)
+    {
+        const OutLift = 0.62 * OutcropField[Index] + 0.38 * SmoothOutcrop[Index];
+        const BldLift = BoulderField[Index];
+        const TotalLift = OutLift + BldLift;
+        if (TotalLift > 0.08)
+        {
+            Heights[Index] += TotalLift;
+            if (OutLift > 2.6 || BldLift > 1.1)
+            {
+                const Strip = Math.min(Math.max((OutLift - 2.6) / 3.8, (BldLift - 0.8) / 1.8), 0.90);
+                Snow[Index] *= (1.0 - Strip);
+            }
+            Hardness[Index] = Math.max(Hardness[Index], Math.min(0.64 + TotalLift * 0.12, 0.98));
+        }
+    }
+}
+
 export function BakeSurfaceData(Field)
 {
     const Heights = Field.Heights;
@@ -1131,7 +1246,6 @@ export function BakeSurfaceData(Field)
     const Occlusion  = Field.ChannelSamples("Occlusion");
     const Protrusion = Field.ChannelSamples("Protrusion");
 
-    // BoxBlurInPlace returns a fresh array (its name lies); the source is left untouched.
     const Near = BoxBlurInPlace(Heights, 3);
     const Mid  = BoxBlurInPlace(Heights, 14);
     const Far  = BoxBlurInPlace(Heights, 48);
@@ -1145,17 +1259,16 @@ export function BakeSurfaceData(Field)
         {
             const Index = Row + X;
             const H = Heights[Index];
-            // Burial at three scales: rills, valleys, whole basins.
-            const Burial = 0.14 * Math.max(Near[Index] - H, 0.0) / 1.4
+            const Burial = 0.20 * Math.max(Near[Index] - H, 0.0) / 1.30
                          + 0.36 * Math.max(Mid[Index]  - H, 0.0) / 7.0
                          + 0.22 * Math.max(Far[Index]  - H, 0.0) / 26.0;
             const GradX = (Heights[Row + Math.min(X + 1, N - 1)] - Heights[Row + Math.max(X - 1, 0)]) / (2.0 * TexelSize);
             const GradY = (Heights[RowDown + X] - Heights[RowUp + X]) / (2.0 * TexelSize);
             const SkyFacing = 1.0 / Math.sqrt(1.0 + GradX * GradX + GradY * GradY);
-            let Occ = (1.0 - Burial) * (0.55 + 0.45 * SkyFacing);
+            let Occ = (1.0 - Burial) * (0.52 + 0.48 * SkyFacing);
             Occlusion[Index] = Occ < 0.0 ? 0.0 : Occ > 1.0 ? 1.0 : Occ;
-            const Pro = 0.70 * Math.max(H - Mid[Index], 0.0) / 6.5
-                      + 0.20 * Math.max(H - Near[Index], 0.0) / 1.8;
+            const Pro = 0.66 * Math.max(H - Mid[Index], 0.0) / 6.0
+                      + 0.32 * Math.max(H - Near[Index], 0.0) / 1.5;
             Protrusion[Index] = Pro > 1.0 ? 1.0 : Pro;
         }
     }

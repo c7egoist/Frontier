@@ -10,7 +10,7 @@
 //    day stand beside: paint the Water channel, point a layer's mask at it, rebuild.
 
 import { Resolution, TexelSize, WorldExtent, LatticeNoise, MaskWeight, SlopeAt } from "./ReliefField.js";
-import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation, BoxBlurInPlace } from "./ErosionSequence.js";
+import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation, ApplyRuggedOutcropsAndRocks, BoxBlurInPlace } from "./ErosionSequence.js";
 import { BuildProceduralCaves } from "./DistanceStamps.js";
 
 async function YieldBriefly()
@@ -468,6 +468,21 @@ export const LayerTypes =
             SnowAccumulation(Field, Layer.Params, new LatticeNoise(Layer.Seed ^ 0x3F77), Report, Cancel),
     },
     {
+        Id: "RockOutcrops", Label: "Rugged outcrops & rocks", Group: "Surface", Glyph: "crag",
+        Blurb: "Gaea-style fractured bedrock outcrops jutting from ridges & flanks plus angular talus boulders on scree aprons.",
+        Params:
+        [
+            Param("OutcropAmplitude", "Outcrop crag height", 0, 28, 0.5, 12.0, "m"),
+            Param("RockAmplitude",    "Talus boulder size",  0, 10, 0.2, 3.6,  "m"),
+            Param("Density",          "Outcrop coverage",    0.1, 0.95, 0.02, 0.64, ""),
+        ],
+        Modify: async (Field, Layer, Report) =>
+        {
+            ApplyRuggedOutcropsAndRocks(Field, { ...Layer.Params, Seed: Layer.Seed });
+            Report(1.0);
+        },
+    },
+    {
         Id: "CaveNetwork", Label: "Cave system (SDF)", Group: "Formation", Glyph: "arch",
         Blurb: "Carves 3D voxel signed-distance caves, vaulted tunnels and cliff overhangs directly into steep rock walls.",
         Params:
@@ -671,7 +686,39 @@ export class LayerStackEvaluation
             await YieldBriefly();
         }
 
+        const HasExplicitOutcrops = Layers.some((L) => L && L.Enabled && L.TypeId === "RockOutcrops");
+        this.PostStackHeights  = new Float32Array(Heights);
+        this.PostStackSnow     = new Float32Array(Field.ChannelSamples("Snow"));
+        this.PostStackHardness = new Float32Array(Field.ChannelSamples("Hardness"));
+        if (!HasExplicitOutcrops)
+            this.ApplySceneOutcrops(Layers);
+
         Field.MeasureRange();
         Field.DeriveMoisture();
+    }
+
+    ApplySceneOutcrops(Layers)
+    {
+        const Field = this.Field;
+        if (!this.PostStackHeights)
+            return;
+        Field.Heights.set(this.PostStackHeights);
+        Field.ChannelSamples("Snow").set(this.PostStackSnow);
+        Field.ChannelSamples("Hardness").set(this.PostStackHardness);
+
+        const OutcropScale = (Field.OutcropScale !== undefined) ? Field.OutcropScale : 1.0;
+        const RockScale    = (Field.RockScatterScale !== undefined) ? Field.RockScatterScale : 1.0;
+        const Seed = (Layers && Layers[0]) ? (Layers[0].Seed ^ 0x5A17) : 7331;
+        if (OutcropScale > 0.01 || RockScale > 0.01)
+        {
+            ApplyRuggedOutcropsAndRocks(Field,
+            {
+                OutcropAmplitude: 18.5 * OutcropScale,
+                RockAmplitude:    5.8 * RockScale,
+                Density:          0.62,
+                Seed:             Seed,
+            });
+        }
+        Field.MeasureRange();
     }
 }

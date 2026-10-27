@@ -119,7 +119,7 @@
 
                 <div class="viewport-chips">
                     <span class="chip live"><span class="sync-dot"></span>Live preview</span>
-                    <span class="chip" id="chip-resolution">1024² · 2 km</span>
+                    <button class="chip" id="chip-resolution" style="cursor:pointer" title="Click to change terrain resolution &amp; quality">1024² (1K) · 2 km ▾</button>
                     <span class="chip hidden" id="chip-viewmode">Shaded</span>
                 </div>
                 <div class="viewport-autorotate">
@@ -142,6 +142,8 @@
 
                 <div class="viewport-toolbar">
                     <button class="toolbar-select" id="viewmode-select"><i data-glyph="eye"></i><span id="viewmode-label">Shaded</span><i data-glyph="chevrondown"></i></button>
+                    <span class="toolbar-sep"></span>
+                    <button class="toolbar-select" id="quality-select" title="Terrain resolution &amp; mesh quality"><i data-glyph="layers"></i><span id="quality-label">1024² (1K)</span><i data-glyph="chevrondown"></i></button>
                     <span class="toolbar-sep"></span>
                     <button class="toolbar-select" id="sun-select"><i data-glyph="sun"></i><span id="sun-label">Afternoon sun</span><i data-glyph="chevrondown"></i></button>
                     <span class="toolbar-sep"></span>

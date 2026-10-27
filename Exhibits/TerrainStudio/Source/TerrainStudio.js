@@ -561,6 +561,26 @@ export class TerrainStudio
                 Action: () => this.SetViewMode(Mode.Id),
             })));
         });
+        const OpenQualityMenu = (Anchor) =>
+        {
+            const QualityOptions =
+            [
+                { Id: "512",  Label: "512² · Draft (448² mesh)" },
+                { Id: "1024", Label: "1024² · 1K Standard (768² mesh)" },
+                { Id: "2048", Label: "2048² · 2K High (1024² mesh + fine crags)" },
+                { Id: "4096", Label: "4096² · 4K Ultra (1280² mesh + ultra outcrops)" },
+            ];
+            OpenMenu(Anchor, QualityOptions.map((Opt) => ({
+                Label: Opt.Label,
+                Checked: (this.Raster.QualityId || "1024") === Opt.Id,
+                Action: () => this.SetQuality(Opt.Id),
+            })));
+        };
+        if (ById("quality-select"))
+            ById("quality-select").addEventListener("click", (Event) => OpenQualityMenu(Event.currentTarget));
+        if (ById("chip-resolution"))
+            ById("chip-resolution").addEventListener("click", (Event) => OpenQualityMenu(Event.currentTarget));
+
         ById("sun-select").addEventListener("click", (Event) =>
         {
             OpenMenu(Event.currentTarget, SunPresets.map((Preset) => ({
@@ -1449,6 +1469,29 @@ export class TerrainStudio
     //                                                              SCENE CONTROLS
     //--------------------------------------------------------------------------------------------------------
 
+    SetQuality(QualityId)
+    {
+        this.Raster.SetQuality(QualityId);
+        const ShortLabels = { "512": "512² (Draft)", "1024": "1024² (1K)", "2048": "2048² (2K)", "4096": "4096² (4K)" };
+        const Short = ShortLabels[String(QualityId)] || "1024² (1K)";
+        if (ById("quality-label"))
+            ById("quality-label").textContent = Short;
+        if (ById("chip-resolution"))
+            ById("chip-resolution").textContent = `${Short} · 2 km ▾`;
+        if (ById("identity-kind"))
+            ById("identity-kind").textContent = `Heightfield + SDF · ${Short}`;
+        this.ConstructSceneControls();
+        ShowToast(`Terrain quality set to ${Short} (${this.Raster.ActiveGridSegments}² mesh)`, "layers");
+    }
+
+    RefreshOutcropsLive()
+    {
+        this.Evaluation.ApplySceneOutcrops(this.Layers);
+        BakeSurfaceData(this.Field);
+        this.RefreshStamps();
+        this.Raster.UploadField(this.Field);
+    }
+
     ConstructSceneControls()
     {
         const Host = ById("scene-controls");
@@ -1456,6 +1499,36 @@ export class TerrainStudio
             return;
         Host.textContent = "";
         const Env = this.Environment;
+
+        const QualityCard = ConstructCard("Terrain quality & outcrops", "layers", "Mesh resolution, Gaea-style rugged bedrock outcrops & talus boulder scatter");
+        const QualityPills = Construct("div", "radio-pills");
+        for (const [QId, QLabel] of [["512", "512² Draft"], ["1024", "1024² 1K"], ["2048", "2048² 2K"], ["4096", "4096² 4K"]])
+        {
+            const Pill = Construct("button", "", QLabel);
+            Pill.classList.toggle("active", (this.Raster.QualityId || "1024") === QId);
+            Pill.addEventListener("click", () => this.SetQuality(QId));
+            QualityPills.appendChild(Pill);
+        }
+        QualityCard.Content.appendChild(QualityPills);
+        QualityCard.Content.appendChild(ConstructSlider({
+            Label: "Rugged outcrops", Min: 0, Max: 2.0, Step: 0.05, Unit: "x",
+            Get: () => (this.Field.OutcropScale !== undefined ? this.Field.OutcropScale : 1.0),
+            Set: (R, Committed) =>
+            {
+                this.Field.OutcropScale = R;
+                if (Committed) this.RefreshOutcropsLive();
+            },
+        }));
+        QualityCard.Content.appendChild(ConstructSlider({
+            Label: "Rock & boulder scatter", Min: 0, Max: 2.0, Step: 0.05, Unit: "x",
+            Get: () => (this.Field.RockScatterScale !== undefined ? this.Field.RockScatterScale : 1.0),
+            Set: (R, Committed) =>
+            {
+                this.Field.RockScatterScale = R;
+                if (Committed) this.RefreshOutcropsLive();
+            },
+        }));
+        Host.appendChild(QualityCard);
 
         const SunCard = ConstructCard("Sun & sky", "sun", "Directional light + hemisphere ambient");
         SunCard.Content.appendChild(ConstructSlider({

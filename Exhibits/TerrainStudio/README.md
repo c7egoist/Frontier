@@ -91,3 +91,17 @@ buttresses with wide concave valleys between them.
   micro-normals, alluvial riverbank gravel collars (`BankCollar`), and
   physically-based river/tarn water absorption with Fresnel sky reflection,
   sun specular, and whitewater rapids foam.
+
+
+## Round 7 — Photorealistic Shading, Gaea-Style Rugged Outcrops & Rocks, and Terrain Quality Selector
+
+1. **Photorealistic Rock, Snow & Atmosphere Shading (`ReliefRasterization.js`, `ErosionSequence.js`)**:
+   - **Crisp 1.15-Texel Couloir & Crevice Normals**: Removed the 18-metre (`4.5` texel) normal blur inside concave mountain couloirs so gullies, dihedrals, outcrop crags, and boulders retain razor-sharp geometric normals, restricting valley-pinch relaxation strictly to flat valley bottoms (`FineNormal.y > 0.88`).
+   - **Scale-Invariant 3D Angular Rock Cleavage (`PerturbNormal` + `RidgedOctaves`)**: Fixed the finite-difference chain-rule scaling (`Step = 0.24 / Scale`) and replaced smooth bilinear noise with multi-octave rotated 3D ridged rock fracture planes, adding meso-scale outcrop cleavage (`~19 m`) and crag/boulder facets (`~4 m`).
+   - **Coherent Alpine Snowpack Pierced by Bedrock Crags (`SnowAccumulation`)**: Relaxed over-aggressive convex ridge wind-scour and slope clipping so snow blankets upper cirques, benches, and summits up to the angle of repose while steep cliff faces (`> 42°`) and protruding bedrock outcrops pierce sharply through the snow.
+   - **Flat-Gated Reflective Water & Clear Studio Aerial Perspective (`ApplyFog`)**: Restricted reflective turquoise water sheets to flat valley rivers and lake basins (`GeometricNormal.y > 0.90`) so steep mountain torrents read as dark wet bedrock, and added a `1250 m` clear foreground distance to `ApplyFog` so the 2 km massif renders with Gaea-style studio clarity.
+2. **Gaea-Style Rugged Bedrock Outcrops & Scattered Talus Rocks/Boulders (`ApplyRuggedOutcropsAndRocks`, `RockOutcrops`)**:
+   - Added `ApplyRuggedOutcropsAndRocks` in `ErosionSequence.js` and registered the **Rugged outcrops & rocks** (`RockOutcrops`) surface layer in `LayerStackEvaluation.js`.
+   - Synthesises anisotropic, stepped bedrock outcrops (`18.5 m` default amplitude) along ridges, shoulders, and steep mountain flanks plus multi-texel cellular rockfall boulders (`5.8 m` default amplitude) across talus aprons, moraines, and canyon benches, coupled with 3D shader boulder masks (`BoulderMask`), warm/cool mineral weathering, and basal contact AO (`BoulderContactAO`).
+3. **Interactive Terrain Quality / Resolution Selector (`index.html`, `TerrainStudio.js`, `ReliefRasterization.js`)**:
+   - Added interactive **Quality / Resolution** selectors (`512² Draft`, `1024² 1K`, `2048² 2K High`, `4096² 4K Ultra`) in three places: the top-left viewport pill (`#chip-resolution`), the bottom-center viewport dock (`#quality-select`), and the top card of the **Scene** inspector tab (**Terrain quality & outcrops**), alongside live **Rugged outcrops** and **Rock & boulder scatter** sliders.
