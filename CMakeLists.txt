@@ -107,6 +107,29 @@ add_library(FrontierEditorUI STATIC UI/Editor/ProjectBrowserPanel.cpp UI/Editor/
 target_link_libraries(FrontierEditorUI PUBLIC FrontierInterface)
 target_compile_definitions(FrontierEditorUI PUBLIC FRONTIER_EDITOR=1)
 
+# 📝 Portable diagnostics/scene panels (Frontier/) drawn through the interface SDK: the same translation
+# units Exhibits/LogStream validates headlessly, compiled here with native presentation enabled so the
+# editor workspace hosts the genuine Log Stream and Outliner panels.
+add_library(FrontierPortablePanels STATIC
+    Frontier/Engine/Diagnostics/LogRingStore.cpp Frontier/Engine/Diagnostics/LogCategories.cpp
+    Frontier/Engine/Diagnostics/LogStream.cpp
+    Frontier/Engine/Interface/LogStreamPanel.cpp Frontier/Engine/Interface/LogStreamPanelPresentation.cpp
+    Frontier/Engine/Interface/SceneDirectoryPanel.cpp Frontier/Engine/Interface/SceneDirectoryPanelPresentation.cpp
+    Frontier/Engine/Interface/StackRailControls.cpp
+    Frontier/Engine/Scene/RecordEntry.cpp Frontier/Engine/Scene/RecordStore.cpp Frontier/Engine/Scene/SceneDirectory.cpp)
+target_include_directories(FrontierPortablePanels PUBLIC "${CMAKE_SOURCE_DIR}/Frontier" "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
+target_compile_definitions(FrontierPortablePanels PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR=1)
+target_link_libraries(FrontierPortablePanels PUBLIC FrontierImGui FrontierInterface)
+
+# Experimental standalone editor workspace application (Experimental/FrontierEditor): shared sources for
+# the windowed host, the headless evidence harness and the input validation below.
+set(FRONTIER_EDITOR_SOURCES
+    Experimental/FrontierEditor/Input/InputSubstrate.cpp Experimental/FrontierEditor/Input/InputMap.cpp
+    Experimental/FrontierEditor/Input/InputMapCodec.cpp Experimental/FrontierEditor/Input/InputPanel.cpp
+    Experimental/FrontierEditor/Workspace/VehicleSceneFixture.cpp Experimental/FrontierEditor/Workspace/RecordInspectorPanel.cpp
+    Experimental/FrontierEditor/Workspace/ViewportPanel.cpp Experimental/FrontierEditor/Workspace/WorkspaceHost.cpp)
+
 # GLFW owns windows/input on every platform; DX11 is only the legacy Windows-only exhibit's display
 # adapter, not the primary renderer, and never needs GLFW built differently per platform.
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
@@ -151,6 +174,34 @@ install(FILES ExternalPackages/tomlpp/LICENSE DESTINATION Notices RENAME TomlPlu
 install(FILES ExternalPackages/stb/LICENSE DESTINATION Notices RENAME Stb-LICENSE.txt)
 install(FILES ExternalPackages/thorvg/LICENSE DESTINATION Notices RENAME ThorVG-LICENSE.txt)
 install(FILES Engine/Interface/Lucide.NOTICE Documentation/SourceNotices.md DESTINATION Notices)
+
+# Experimental standalone Frontier Editor workspace (Notch · Outliner · Inspector · Log Stream ·
+# blank Viewport · Input) on the same GLFW + Vulkan host pattern as TextureStudio; UI-only, no scene
+# renderer. Builds on Windows and (host verification) Linux like TextureStudio.
+add_executable(FrontierEditor Experimental/FrontierEditor/Native/EditorApplication.cpp
+    Experimental/FrontierEditor/Native/GlfwInputPoll.cpp ${FRONTIER_EDITOR_SOURCES}
+    Engine/Interface/WindowsApplication.cpp Engine/Interface/VulkanPresentation.cpp
+    "${IMGUI_ROOT}/backends/imgui_impl_glfw.cpp" "${IMGUI_ROOT}/backends/imgui_impl_vulkan.cpp")
+target_include_directories(FrontierEditor PRIVATE "${CMAKE_SOURCE_DIR}/Experimental/FrontierEditor"
+    "${IMGUI_ROOT}/backends" "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
+target_compile_definitions(FrontierEditor PRIVATE FRONTIER_UI_VULKAN=1 VK_NO_PROTOTYPES GLFW_INCLUDE_NONE
+    FRONTIER_BUILD_COMMIT=\"${FRONTIER_BUILD_COMMIT}\" FRONTIER_BUILD_REVISION="${FRONTIER_BUILD_REVISION}")
+target_link_libraries(FrontierEditor PRIVATE FrontierEditorUI FrontierPortablePanels glfw)
+if(NOT WIN32 AND BUILD_TESTING)
+    set_target_properties(FrontierEditor PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/FrontierEditor")
+endif()
+if(WIN32)
+    # 📝 Kept out of the flat configuration directory the distribution verifier enumerates: the editor
+    #    ships as a separate experimental test artifact, not through the signed workspace package.
+    set_target_properties(FrontierEditor PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/FrontierEditor/$<CONFIG>")
+    target_compile_definitions(FrontierEditor PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+    target_link_libraries(FrontierEditor PRIVATE comdlg32 shell32)
+    if(MSVC)
+        target_link_options(FrontierEditor PRIVATE /SUBSYSTEM:WINDOWS /ENTRY:mainCRTStartup)
+    endif()
+endif()
+add_custom_command(TARGET FrontierEditor POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_directory
+    "${CMAKE_SOURCE_DIR}/EngineContent" "$<TARGET_FILE_DIR:FrontierEditor>/EngineContent")
 
 if(WIN32)
     target_compile_definitions(TextureStudio PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
@@ -439,6 +490,19 @@ if(BUILD_TESTING)
     target_link_libraries(InterfaceValidation PRIVATE FrontierEditorUI)
     add_test(NAME InterfaceValidation COMMAND InterfaceValidation
         "${CMAKE_SOURCE_DIR}/EngineContent/Icons" "${CMAKE_BINARY_DIR}/evidence")
+    add_executable(FrontierEditorInputValidation Experimental/FrontierEditor/Input/InputValidation.cpp
+        Experimental/FrontierEditor/Input/InputSubstrate.cpp Experimental/FrontierEditor/Input/InputMap.cpp
+        Experimental/FrontierEditor/Input/InputMapCodec.cpp)
+    target_include_directories(FrontierEditorInputValidation PRIVATE "${CMAKE_SOURCE_DIR}/Experimental/FrontierEditor"
+        "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
+    target_link_libraries(FrontierEditorInputValidation PRIVATE FrontierInterface)
+    add_test(NAME FrontierEditorInputValidation COMMAND FrontierEditorInputValidation)
+    set_tests_properties(FrontierEditorInputValidation PROPERTIES WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    # Headless scripted-interaction evidence for the editor workspace (CPU rasterizer; run manually,
+    # frames land in the chosen output directory). Not a CTest: it is an evidence generator.
+    add_executable(FrontierEditorEvidence Experimental/FrontierEditor/Evidence/WorkspaceEvidence.cpp ${FRONTIER_EDITOR_SOURCES})
+    target_include_directories(FrontierEditorEvidence PRIVATE "${CMAKE_SOURCE_DIR}/Experimental/FrontierEditor")
+    target_link_libraries(FrontierEditorEvidence PRIVATE FrontierEditorUI FrontierPortablePanels)
     # 📝 Merge recovery 2026-10-27: target blocks from arena/4014756b-frontier that the
     # three-way CMakeLists merge dropped; restored verbatim (see Documentation/MergeImport-2026-10-27.md).
     add_executable(VectorAuthoringEditingValidation Exhibits/TextureStudio/Code/VectorAuthoringEditingValidation.cpp)
