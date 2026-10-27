@@ -22,21 +22,20 @@ namespace Frontier
 namespace
 {
 
-using Theme = KitTheme;
 
-void SectionCaption(const KitFaces& Faces, const char* Text)
+void SectionCaption(const KitFaces& Faces, const EditorTheme& Palette, const char* Text)
 {
     ImDrawList*  Ink = ImGui::GetWindowDrawList();
     const ImVec2 At  = ImGui::GetCursorScreenPos();
-    KitDrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(At.x + 2.0f, At.y + 6.0f), Theme::Faint, Text, 10.5f * 0.13f);
+    KitDrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(At.x + 2.0f, At.y + 6.0f), Palette.Faint, Text, 10.5f * 0.13f);
     ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 24.0f));
 }
 
-void Lamp(bool Lit, const char* Label)
+void Lamp(const EditorTheme& Palette, bool Lit, const char* Label)
 {
     ImDrawList*  Ink = ImGui::GetWindowDrawList();
     const ImVec2 At  = ImGui::GetCursorScreenPos();
-    Ink->AddCircleFilled(ImVec2(At.x + 5.0f, At.y + 7.0f), 5.0f, Lit ? Theme::Mint : Theme::Surface3);
+    Ink->AddCircleFilled(ImVec2(At.x + 5.0f, At.y + 7.0f), 5.0f, Lit ? Palette.Accent : Palette.Surface3);
     ImGui::Dummy(ImVec2(14.0f, 14.0f));
     ImGui::SameLine();
     ImGui::TextUnformatted(Label);
@@ -56,16 +55,16 @@ void InputPanel::ConstructInterface()
     ServiceCapture();
 
     // Context -----------------------------------------------------------------------------------------
-    SectionCaption(Faces, "CONTEXT");
+    SectionCaption(Faces, Palette, "CONTEXT");
     const InputContextCategory Live = Map.QueryContext();
     {
         ImDrawList*  Ink    = ImGui::GetWindowDrawList();
         const ImVec2 Origin = ImGui::GetCursorScreenPos();
         const bool   Sim    = Live == InputContextCategory::Simulation;
-        KitPillSurface(Ink, Origin, ImVec2(Origin.x + 150.0f, Origin.y + 24.0f), Sim ? Theme::MintDim : Theme::Surface2,
-                       Sim ? Theme::Mint : Theme::Line, 999.0f);
+        KitPillSurface(Ink, Origin, ImVec2(Origin.x + 150.0f, Origin.y + 24.0f), Sim ? Palette.AccentSoft : Palette.Surface2,
+                       Sim ? Palette.Accent : Palette.Line, 999.0f);
         KitDrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(Origin.x + 14.0f, Origin.y + 6.0f),
-                       Sim ? Theme::Mint : Theme::Muted, InputContextName(Live), 10.5f * 0.13f);
+                       Sim ? Palette.Accent : Palette.Muted, InputContextName(Live), 10.5f * 0.13f);
         ImGui::Dummy(ImVec2(150.0f, 24.0f));
     }
     ImGui::SameLine();
@@ -80,11 +79,11 @@ void InputPanel::ConstructInterface()
     {
         ConfigureSimulationCaptured(false);
     }
-    Lamp(Map.QueryPointerCaptured(), "Pointer captured (look axes live)");
-    Lamp(Map.QueryTextEntryActive(), "Text entry active (editor shortcuts suppressed)");
+    Lamp(Palette, Map.QueryPointerCaptured(), "Pointer captured (look axes live)");
+    Lamp(Palette, Map.QueryTextEntryActive(), "Text entry active (editor shortcuts suppressed)");
 
     // Live readings -----------------------------------------------------------------------------------
-    SectionCaption(Faces, "LIVE ACTIONS");
+    SectionCaption(Faces, Palette, "LIVE ACTIONS");
     {
         std::vector<std::string> Shown;
         for (const KeyAssignment& Assignment : Map.QueryAssignments())
@@ -95,15 +94,15 @@ void InputPanel::ConstructInterface()
             }
             Shown.push_back(Assignment.Action);
             const ActionReading Reading = Map.QueryAction(Assignment.Action);
-            Lamp(Reading.Down, Assignment.Action.c_str());
+            Lamp(Palette, Reading.Down, Assignment.Action.c_str());
             ImGui::SameLine(std::max(150.0f, ImGui::GetWindowContentRegionMax().x * 0.62f));
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Theme::Faint), "%s%s",
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Palette.Faint), "%s%s",
                                Assignment.Context == Live ? "" : "(inactive context) ",
                                Reading.Pressed ? "pressed" : Reading.Released ? "released" : "");
         }
     }
 
-    SectionCaption(Faces, "LIVE AXES");
+    SectionCaption(Faces, Palette, "LIVE AXES");
     {
         std::vector<std::string> Shown;
         for (const AxisAssignment& Assignment : Map.QueryAxisAssignments())
@@ -118,25 +117,25 @@ void InputPanel::ConstructInterface()
             const ImVec2 At      = ImGui::GetCursorScreenPos();
             const float  BarX    = At.x + 150.0f;
             const float  BarW    = 140.0f;
-            Ink->AddRectFilled(ImVec2(BarX, At.y + 3.0f), ImVec2(BarX + BarW, At.y + 13.0f), Theme::Surface3, 3.0f);
+            Ink->AddRectFilled(ImVec2(BarX, At.y + 3.0f), ImVec2(BarX + BarW, At.y + 13.0f), Palette.Surface3, 3.0f);
             const float CentreX = BarX + BarW * 0.5f;
             const float Edge    = CentreX + std::clamp(Reading, -1.0f, 1.0f) * BarW * 0.5f;
             Ink->AddRectFilled(ImVec2(std::min(CentreX, Edge), At.y + 3.0f), ImVec2(std::max(CentreX, Edge), At.y + 13.0f),
-                               Theme::Mint, 3.0f);
-            Ink->AddLine(ImVec2(CentreX, At.y + 1.0f), ImVec2(CentreX, At.y + 15.0f), Theme::Line, 1.0f);
+                               Palette.Accent, 3.0f);
+            Ink->AddLine(ImVec2(CentreX, At.y + 1.0f), ImVec2(CentreX, At.y + 15.0f), Palette.Line, 1.0f);
             char Value[32];
             std::snprintf(Value, sizeof(Value), "%+.2f", static_cast<double>(Reading));
-            Ink->AddText(ImVec2(BarX + BarW + 8.0f, At.y), Theme::Muted, Value);
-            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Theme::Faint), "%s", Assignment.Axis.c_str());
+            Ink->AddText(ImVec2(BarX + BarW + 8.0f, At.y), Palette.Muted, Value);
+            ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Palette.Faint), "%s", Assignment.Axis.c_str());
             ImGui::Dummy(ImVec2(1.0f, 2.0f));
         }
     }
 
     // Assignments -------------------------------------------------------------------------------------
-    SectionCaption(Faces, "ASSIGNMENTS / PRESS-TO-ASSIGN");
+    SectionCaption(Faces, Palette, "ASSIGNMENTS / PRESS-TO-ASSIGN");
     if (!CaptureAction.empty())
     {
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Theme::Mint), "Press a key for '%s' (Esc cancels)...",
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Palette.Accent), "Press a key for '%s' (Esc cancels)...",
                            CaptureAction.c_str());
     }
     int RowIndex = 0;
@@ -150,9 +149,9 @@ void InputPanel::ConstructInterface()
         const std::string Source = Assignment.Chord.Key != InputKeyCategory::None
                                        ? InputChordTable::QueryChordLabel(Assignment.Chord)
                                        : std::string("Pointer ") + PointerButtonName(Assignment.PointerButton);
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Theme::Muted), "%s", Source.c_str());
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Palette.Muted), "%s", Source.c_str());
         ImGui::SameLine(RowWidth * 0.70f);
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Theme::Faint), "%s",
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Palette.Faint), "%s",
                            InputContextName(Assignment.Context));
         ImGui::SameLine(std::max(RowWidth - 66.0f, RowWidth * 0.70f + 56.0f));
         if (Assignment.Chord.Key != InputKeyCategory::None && ImGui::SmallButton("Reassign"))
@@ -165,10 +164,10 @@ void InputPanel::ConstructInterface()
     }
 
     // Conflicts ---------------------------------------------------------------------------------------
-    SectionCaption(Faces, "CONFLICTS");
+    SectionCaption(Faces, Palette, "CONFLICTS");
     if (Map.QueryConflicts().empty())
     {
-        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Theme::Faint), "None recorded this session.");
+        ImGui::TextColored(ImGui::ColorConvertU32ToFloat4(Palette.Faint), "None recorded this session.");
     }
     for (const std::string& Conflict : Map.QueryConflicts())
     {
@@ -176,7 +175,7 @@ void InputPanel::ConstructInterface()
     }
 
     // Persistence -------------------------------------------------------------------------------------
-    SectionCaption(Faces, "PERSISTENCE / TOML");
+    SectionCaption(Faces, Palette, "PERSISTENCE / TOML");
     ImGui::TextWrapped("%s", PersistencePath.empty() ? "(no path configured)" : PersistencePath.string().c_str());
     std::string Diagnostic;
     if (ImGui::Button("Save assignments") && !PersistencePath.empty())

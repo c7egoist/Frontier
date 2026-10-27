@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "EditorTheme.h"
 #include "Input/InputMap.h"
 
 #include <filesystem>
@@ -32,6 +33,7 @@ class InputPanel
     [[nodiscard]] bool QueryCapturing() const noexcept { return !CaptureAction.empty(); }
 
     // Host wiring --------------------------------------------------------------------------------------
+    void ConfigureTheme(const EditorTheme& Value) { Palette = Value; }   // Appearance-resolved, per cycle
     void ObserveSubstrate(const InputSubstrate* Substrate) noexcept { Observed = Substrate; }
     void ConfigurePersistencePath(std::filesystem::path Path) { PersistencePath = std::move(Path); }
     std::function<void(bool)>            ConfigureSimulationCaptured;   // Host: context + cursor policy
@@ -41,6 +43,7 @@ class InputPanel
     void ServiceCapture();
 
     InputMap&               Map;
+    EditorTheme             Palette;
     const InputSubstrate*   Observed = nullptr;
     std::filesystem::path   PersistencePath;
     std::string             StatusLine;

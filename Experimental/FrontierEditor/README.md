@@ -12,11 +12,15 @@ folders is a later, separate step.
 | Panel | Source | Notes |
 |---|---|---|
 | Notch / Control Centre | `UI/Editor/ControlCentrePanel` | Top-centre pull-down sheet (appearance, quick tiles, notifications). |
-| Outliner | `Frontier/Engine/Interface/SceneDirectoryPanel` | Scene directory tree with classification pills, text filter, spawn menu, visibility eyes. |
-| Viewport | `Workspace/ViewportPanel` | **Deliberately blank canvas** for this UI step (scene rendering is a separate workstream) plus a live simulation-axis strip. Click it (or F5) to capture the Simulation input context; Esc releases. |
+| Outliner | `Frontier/Engine/Interface/SceneDirectoryPanel` | Scene directory tree with classification pills, text filter, spawn menu, per-classification icons (approved artwork via `IconPresentation`), fold chevrons, and visibility eyes. |
+| Viewport | `Workspace/ViewportPanel` | **Fully blank except its header row** (record summary + live input context). Its one behaviour is invisible: click it (or F5) to capture the Simulation input context; Esc releases. Scene rendering connects here in a later step. |
 | Log Stream | `Frontier/Engine/Interface/LogStreamPanel` | The retained log engine's panel, unchanged. |
-| Inspector | `Workspace/RecordInspectorPanel` | New: identity (rename), classification, nesting (up-link / depth / down-links), Outliner visibility for the selected record. |
+| Inspector | `Workspace/RecordInspectorPanel` | **Blank for now** — docked and wired to the Outliner; identity/nesting/visibility content is a later step. |
 | Input | `Input/InputPanel` | New: the input layer's test bench — live actions/axes, press-to-assign rebinding, conflict log, TOML save/load. |
+
+The editor's own panels (Viewport header, Input) render in the **Control Centre Appearance theme**
+(`ThemeStructure` palette + accent, resolved per cycle in `EditorTheme`), so changing theme or accent
+in the notch restyles them live. An HTML evidence viewer lives at `Evidence/index.html`.
 
 Docking, tabs, splitters, and layout persistence come from `Engine/Interface/PanelDockspace`,
 the same composer the TexturePaint and Baking workspaces use. Layout changes persist next to the
@@ -85,13 +89,13 @@ Tests: `ctest --test-dir build -R FrontierEditor` (needs `-DBUILD_TESTING=ON`).
 
 `FrontierEditorEvidence` drives the real dockspace on the headless CPU rasterizer (the
 LogStream exhibit's PanelCapture pattern), discovering controls by effect and replaying them
-recorded. Current run: **0 failures** across seating, Outliner select/filter/spawn, Inspector
-rename, F6 panel toggles, press-to-assign rebind to Ctrl+L, notch open/dismiss, and Simulation
+recorded. Current run: **0 failures** across seating, Outliner select/filter/spawn/collapse,
+F6 panel toggles, press-to-assign rebind to Ctrl+L, notch open/dismiss, and Simulation
 capture with W/A/D/Space/Escape.
 
 | GIF | Shows |
 |---|---|
-| `outliner-inspector.gif` | Row selection, text filter, spawn from the + menu, rename in the Inspector. |
+| `outliner-inspector.gif` | Row selection, chevron collapse/expand of the vehicle subtree, text filter, spawn from the + menu. |
 | `docking-input.gif` | F6 toggling the Input panel, press-to-assign rebinding, Ctrl+L toggling Log Stream, splitter drags, log pause. |
 | `notch-simulation.gif` | Notch click opening the Control Centre, quick tile, dismissal, canvas capture, throttle/steer axes, Escape release. |
 
@@ -109,6 +113,7 @@ text on top. The windowed application renders it as designed.
 ## Deliberately not here yet
 
 - Scene rendering in the Viewport (separate eos-lineage workstream).
+- Inspector content (identity, nesting, visibility) — the panel is blank by request for now.
 - Promotion of `Input/` into `Frontier/Engine/` (after it proves out here).
 - Gamepad hardware polling in `GlfwInputPoll` (the substrate/map gamepad paths are implemented
   and validation-tested; the GLFW joystick feed is the remaining wire).

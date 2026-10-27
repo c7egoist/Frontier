@@ -15,6 +15,7 @@
 #if defined(FRONTIER_WITH_INTERFACE_SDK)
 
 #include "Engine/Interface/DropdownControls.h"
+#include "Engine/Interface/IconArt.h"
 #include "Engine/Interface/StackRailControls.h"
 #include "Engine/Scene/SceneDirectory.h"
 #include "SceneDirectoryPanelRegistration.h"
@@ -51,6 +52,25 @@ ImU32 ClassificationColour(RecordClassification Classification) noexcept
         case RecordClassification::Count:        break;
     }
     return KitInkHex(0x5f6b64);
+}
+
+IconSymbol ClassificationSymbol(RecordClassification Classification) noexcept
+{
+    switch (Classification)
+    {
+        case RecordClassification::Vehicle:      return IconSymbol::EditorPrefab;
+        case RecordClassification::Tyre:         return IconSymbol::SlateRingLight;
+        case RecordClassification::Environment:  return IconSymbol::Forest;
+        case RecordClassification::Geometry:     return IconSymbol::EditorMesh;
+        case RecordClassification::Illumination: return IconSymbol::EditorPointLight;
+        case RecordClassification::Camera:       return IconSymbol::Camera;
+        case RecordClassification::Physics:      return IconSymbol::EditorPhysics;
+        case RecordClassification::Interface:    return IconSymbol::EditorSliders;
+        case RecordClassification::Content:      return IconSymbol::Package;
+        case RecordClassification::Unclassified: return IconSymbol::EditorInstance;
+        case RecordClassification::Count:        break;
+    }
+    return IconSymbol::EditorInstance;
 }
 
 void MenuCaption(const KitFaces& Faces, const char* Text)
@@ -269,7 +289,8 @@ void SceneDirectoryPanel::ConstructInterface()
             std::snprintf(Id, sizeof(Id), "OutlinerRow%llu", static_cast<unsigned long long>(Row.Token.Value));
             const TreeRowInteraction Hit = DrawTreeRow(
                 Faces, Id, ImVec2(CL, At.y), ContentW, static_cast<float>(Row.DepthTier) * 16.0f,
-                Row.ChildCount > 0, Row.Collapsed, ClassificationColour(Row.Classification), Row.Name.c_str(),
+                Row.ChildCount > 0, Row.Collapsed, ClassificationSymbol(Row.Classification),
+                ClassificationColour(Row.Classification), Row.Name.c_str(),
                 RecordClassificationName(Row.Classification), Row.Visible, QuerySelected() == Row.Token);
             if (Hit.ChevronClicked)
             {

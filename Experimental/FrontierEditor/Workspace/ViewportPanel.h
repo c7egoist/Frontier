@@ -1,9 +1,11 @@
 /*==========================================================================================================================================
                                                               VIEWPORTPANEL.H
-==========================================================================================================================================*/
-// 🧩 Blank scene canvas: the docking home of the future renderer, today a labelled surface + simulation readout.
+============================================================================================================================================*/
+// 🧩 The scene canvas's docking home: fully blank for now except its header row; renderer arrives later.
 
 #pragma once
+
+#include "EditorTheme.h"
 
 #include <cstddef>
 #include <functional>
@@ -12,30 +14,29 @@
 namespace Frontier
 {
 
-class InputMap;
-
 //----------------------------------------------------------------------------------------------------------------------
 //                                                       VIEWPORT PANEL
 //----------------------------------------------------------------------------------------------------------------------
 
-// 📝 Deliberately blank per the UI-first scope: no renderer is connected in this step (the eos lineage
-//    owns rendering). The panel still earns its place — it is the pointer-capture target for the
-//    Simulation input context and renders the live driving axes so Editor ⇄ Simulation input routing is
-//    verifiable on screen before any scene drawing exists.
+// 📝 Deliberately blank per the current scope: the panel draws only its header row (record summary +
+//    live input context, in the Appearance theme) and stays an empty surface below it. The one piece
+//    of behaviour it already owns is invisible: the whole surface is the pointer-capture target for
+//    the Simulation input context (click to capture, Esc releases), so the shared input layer can be
+//    driven before any scene rendering exists. Scene rendering connects here in a later step.
 class ViewportPanel
 {
   public:
     void ConstructInterface();
+    void ConfigureTheme(const EditorTheme& Value) { Palette = Value; }
 
     // Host wiring, refreshed by WorkspaceHost::Synchronize every cycle.
-    const InputMap*     Map                = nullptr;
-    size_t              RecordCount        = 0;      // [records]
-    std::string         SelectedName;                // [text] - Empty when nothing is selected
-    bool                SimulationCaptured = false;  // [-]
-    std::function<void()> RequestCaptureToggle;      // Click on the canvas (capture ⇄ release is host policy)
+    size_t                RecordCount        = 0;      // [records]
+    std::string           SelectedName;                // [text] - Empty when nothing is selected
+    bool                  SimulationCaptured = false;  // [-]
+    std::function<void()> RequestCaptureToggle;        // Click on the surface (capture ⇄ release is host policy)
 
   private:
-    void ConstructSimulationStrip(float Width);
+    EditorTheme Palette;
 };
 
 } // namespace Frontier

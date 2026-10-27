@@ -4,6 +4,7 @@
 // 🧩 Headless interaction evidence: the real editor workspace rendered by a CPU rasterizer under a scripted pointer/keyboard.
 
 #include "Engine/Diagnostics/DiagnosticJournal.h"
+#include "Engine/Interface/IconPresentation.h"
 #include "Input/InputSubstrate.h"
 #include "UI/Editor/ControlCentrePanel.h"
 #include "Workspace/WorkspaceHost.h"
@@ -46,30 +47,33 @@ struct Pixel
 };
 
 std::vector<Pixel>   Framebuffer;
-const unsigned char* AtlasPixels = nullptr;
-int                  AtlasWidth  = 0;
-int                  AtlasHeight = 0;
+const unsigned char* AtlasPixels  = nullptr;
+int                  AtlasWidth   = 0;
+int                  AtlasHeight  = 0;
+const unsigned char* SamplePixels = nullptr;   // Texture bound for the command being rasterized
+int                  SampleWidth  = 0;
+int                  SampleHeight = 0;
 ImTextureID          AtlasId     = ImTextureID(0xA77A5);
 
-float SampleAtlas(float U, float V, int Channel)
+float SampleTexture(float U, float V, int Channel)
 {
-    const float X  = std::clamp(U * static_cast<float>(AtlasWidth) - 0.5f, 0.0f, static_cast<float>(AtlasWidth - 1));
-    const float Y  = std::clamp(V * static_cast<float>(AtlasHeight) - 0.5f, 0.0f, static_cast<float>(AtlasHeight - 1));
+    const float X  = std::clamp(U * static_cast<float>(SampleWidth) - 0.5f, 0.0f, static_cast<float>(SampleWidth - 1));
+    const float Y  = std::clamp(V * static_cast<float>(SampleHeight) - 0.5f, 0.0f, static_cast<float>(SampleHeight - 1));
     const int   X0 = static_cast<int>(X);
     const int   Y0 = static_cast<int>(Y);
-    const int   X1 = std::min(X0 + 1, AtlasWidth - 1);
-    const int   Y1 = std::min(Y0 + 1, AtlasHeight - 1);
+    const int   X1 = std::min(X0 + 1, SampleWidth - 1);
+    const int   Y1 = std::min(Y0 + 1, SampleHeight - 1);
     const float Fx = X - static_cast<float>(X0);
     const float Fy = Y - static_cast<float>(Y0);
     const auto  At = [&](int Px, int Py) {
-        return static_cast<float>(AtlasPixels[(static_cast<size_t>(Py) * AtlasWidth + Px) * 4 + Channel]) / 255.0f;
+        return static_cast<float>(SamplePixels[(static_cast<size_t>(Py) * SampleWidth + Px) * 4 + Channel]) / 255.0f;
     };
     const float Top    = At(X0, Y0) + (At(X1, Y0) - At(X0, Y0)) * Fx;
     const float Bottom = At(X0, Y1) + (At(X1, Y1) - At(X0, Y1)) * Fx;
     return Top + (Bottom - Top) * Fy;
 }
 
-void RasterizeTriangle(const ImDrawVert& A, const ImDrawVert& B, const ImDrawVert& C, const ImVec4& Clip, bool UseAtlas)
+void RasterizeTriangle(const ImDrawVert& A, const ImDrawVert& B, const ImDrawVert& C, const ImVec4& Clip, bool UseTexture)
 {
     const float Area = (B.pos.x - A.pos.x) * (C.pos.y - A.pos.y) - (B.pos.y - A.pos.y) * (C.pos.x - A.pos.x);
     if (Area == 0.0f)
@@ -100,12 +104,12 @@ void RasterizeTriangle(const ImDrawVert& A, const ImDrawVert& B, const ImDrawVer
             const float U  = A.uv.x * W0 + B.uv.x * W1 + C.uv.x * W2;
             const float V  = A.uv.y * W0 + B.uv.y * W1 + C.uv.y * W2;
             float       Sr = 1.0f, Sg = 1.0f, Sb = 1.0f, Sa = 1.0f;
-            if (UseAtlas)
+            if (UseTexture)
             {
-                Sr = SampleAtlas(U, V, 0);
-                Sg = SampleAtlas(U, V, 1);
-                Sb = SampleAtlas(U, V, 2);
-                Sa = SampleAtlas(U, V, 3);
+                Sr = SampleTexture(U, V, 0);
+                Sg = SampleTexture(U, V, 1);
+                Sb = SampleTexture(U, V, 2);
+                Sa = SampleTexture(U, V, 3);
             }
             const ImU32 ColA = A.col, ColB = B.col, ColC = C.col;
             const float Vr = ((ColA >> 0) & 0xff) * W0 + ((ColB >> 0) & 0xff) * W1 + ((ColC >> 0) & 0xff) * W2;
@@ -126,6 +130,23 @@ void RasterizeTriangle(const ImDrawVert& A, const ImDrawVert& B, const ImDrawVer
     }
 }
 
+// The harness is the texture backend: acknowledge atlas creates/updates/destroys so producers
+// (IconPresentation) can build and retire their textures exactly as under the Vulkan adapter.
+void ServiceTextures()
+{
+    for (ImTextureData* Texture : ImGui::GetPlatformIO().Textures)
+    {
+        if (Texture->Status == ImTextureStatus_WantCreate || Texture->Status == ImTextureStatus_WantUpdates)
+        {
+            Texture->SetStatus(ImTextureStatus_OK);
+        }
+        else if (Texture->Status == ImTextureStatus_WantDestroy)
+        {
+            Texture->SetStatus(ImTextureStatus_Destroyed);
+        }
+    }
+}
+
 void RasterizeDrawData(const ImDrawData& DrawData)
 {
     for (int ListIndex = 0; ListIndex < DrawData.CmdListsCount; ++ListIndex)
@@ -139,13 +160,36 @@ void RasterizeDrawData(const ImDrawData& DrawData)
             }
             const ImVec4 Clip(Command.ClipRect.x - DrawData.DisplayPos.x, Command.ClipRect.y - DrawData.DisplayPos.y,
                               Command.ClipRect.z - DrawData.DisplayPos.x, Command.ClipRect.w - DrawData.DisplayPos.y);
-            const bool   UseAtlas = Command.GetTexID() == AtlasId;
+            bool UseTexture = false;
+            if (Command.GetTexID() == AtlasId)
+            {
+                SamplePixels = AtlasPixels;
+                SampleWidth  = AtlasWidth;
+                SampleHeight = AtlasHeight;
+                UseTexture   = SamplePixels != nullptr;
+            }
+            else
+            {
+                // Icon atlases and other user textures sample from their own CPU pixels.
+                for (ImTextureData* Texture : ImGui::GetPlatformIO().Textures)
+                {
+                    if (Texture->TexID == Command.GetTexID() && Texture->Format == ImTextureFormat_RGBA32 &&
+                        Texture->Pixels != nullptr)
+                    {
+                        SamplePixels = Texture->Pixels;
+                        SampleWidth  = Texture->Width;
+                        SampleHeight = Texture->Height;
+                        UseTexture   = true;
+                        break;
+                    }
+                }
+            }
             for (unsigned int Index = 0; Index + 2 < Command.ElemCount; Index += 3)
             {
                 const ImDrawVert& A = List->VtxBuffer[List->IdxBuffer[Command.IdxOffset + Index] + Command.VtxOffset];
                 const ImDrawVert& B = List->VtxBuffer[List->IdxBuffer[Command.IdxOffset + Index + 1] + Command.VtxOffset];
                 const ImDrawVert& C = List->VtxBuffer[List->IdxBuffer[Command.IdxOffset + Index + 2] + Command.VtxOffset];
-                RasterizeTriangle(A, B, C, Clip, UseAtlas);
+                RasterizeTriangle(A, B, C, Clip, UseTexture);
             }
         }
     }
@@ -241,6 +285,8 @@ int main(int ArgumentCount, char** Arguments)
     Io.IniFilename = nullptr;
     Io.DisplaySize = ImVec2(static_cast<float>(CaptureWidth), static_cast<float>(CaptureHeight));
     Io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;
+    Io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;   // CPU rasterizer services user textures
+    IconPresentation::Attach(ContentRoot / "EngineContent/Icons");
     Io.AddMousePosEvent(-1.0f, -1.0f);
     Framebuffer.resize(static_cast<size_t>(CaptureWidth) * CaptureHeight);
 
@@ -272,6 +318,7 @@ int main(int ArgumentCount, char** Arguments)
         AtlasPixels = Pixels;
         Io.Fonts->SetTexID(AtlasId);
         std::fill(Framebuffer.begin(), Framebuffer.end(), Pixel{11, 16, 14, 255});
+        ServiceTextures();
         RasterizeDrawData(*ImGui::GetDrawData());
         OverlayPointer(CursorX, CursorY);
         WritePpm(Path);
@@ -438,6 +485,37 @@ int main(int ArgumentCount, char** Arguments)
     const float VehicleY   = LearnRowY("VehicleHMI Test Vehicle");
     Expect(FrontLeftY > 0 && VehicleY > 0, "outliner row positions learned");
 
+    const auto RowShown = [&](const char* Name) {
+        for (const SceneDirectoryRow& Row : Outliner.QueryVisible())
+        {
+            if (Row.Name == Name)
+            {
+                return true;
+            }
+        }
+        return false;
+    };
+    float ChevronY = -1.0f;
+    if (VehicleY > 0)
+    {
+        for (float Y = VehicleY - 4.0f; Y < VehicleY + 30.0f && ChevronY < 0; Y += 3.0f)
+        {
+            Click(OutlinerWindow->Pos.x + 32.0f, Y);
+            Settle(3);
+            if (!RowShown("Front Left"))
+            {
+                ChevronY = Y;
+                std::printf("learned vehicle chevron at y=%.0f\n", static_cast<double>(Y));
+            }
+        }
+        if (ChevronY > 0)
+        {
+            Click(OutlinerWindow->Pos.x + 32.0f, ChevronY);   // Re-expand for the recorded take
+            Settle(4);
+        }
+    }
+    Expect(ChevronY > 0 && RowShown("Front Left"), "vehicle chevron learned (collapse + expand)");
+
     float FilterX = -1.0f, FilterY = -1.0f;
     for (float Y = OutlinerWindow->Pos.y + 135.0f; Y < OutlinerWindow->Pos.y + 175.0f && FilterY < 0; Y += 4.0f)
     {
@@ -527,26 +605,7 @@ int main(int ArgumentCount, char** Arguments)
     Outliner.ClearSelection();
     Settle(10);
 
-    // Rename field in the Inspector (needs a selection first).
-    float RenameX = -1.0f, RenameY = -1.0f;
-    if (InspectorWindow != nullptr && FrontLeftY > 0)
-    {
-        Click(OutlinerWindow->Pos.x + 130.0f, FrontLeftY);
-        Settle(4);
-        for (float Y = InspectorWindow->Pos.y + 80.0f; Y < InspectorWindow->Pos.y + 200.0f && RenameY < 0; Y += 4.0f)
-        {
-            Click(InspectorWindow->Pos.x + 90.0f, Y);
-            if (Io.WantTextInput)
-            {
-                RenameX = InspectorWindow->Pos.x + 90.0f;
-                RenameY = Y;
-                std::printf("learned rename field at (%.0f, %.0f)\n", static_cast<double>(RenameX),
-                            static_cast<double>(RenameY));
-            }
-        }
-        KeyTap(InputKeyCategory::Escape);
-    }
-    Expect(RenameY > 0, "inspector rename field learned");
+    // (Inspector is intentionally blank in this step; there is no rename field to learn.)
 
     // Log Stream pause toggle.
     float PauseX = -1.0f, PauseY = -1.0f;
@@ -585,6 +644,18 @@ int main(int ArgumentCount, char** Arguments)
     Still("still-inspector-front-left");
     Click(OutlinerWindow->Pos.x + 130.0f, VehicleY);
     Settle(48);
+    if (ChevronY > 0)
+    {
+        // Fold the vehicle subtree by its chevron, prove the children leave the rows, unfold again.
+        Click(OutlinerWindow->Pos.x + 32.0f, ChevronY);
+        Settle(36);
+        Expect(!RowShown("Front Left"), "chevron collapse hid the vehicle children");
+        Step(1.0 / 60.0);
+        Still("still-outliner-collapsed");
+        Click(OutlinerWindow->Pos.x + 32.0f, ChevronY);
+        Settle(36);
+        Expect(RowShown("Front Left"), "chevron expand restored the vehicle children");
+    }
     if (FilterY > 0)
     {
         Click(FilterX, FilterY);
@@ -611,26 +682,6 @@ int main(int ArgumentCount, char** Arguments)
         Click(SpawnItemX, SpawnItemY);
         Settle(36);
         Expect(Workspace.QueryFixture().QueryRecordCount() == Before + 1, "recorded spawn created a record");
-    }
-    if (RenameY > 0)
-    {
-        Click(RenameX, RenameY);
-        Io.AddKeyEvent(ImGuiKey_End, true);
-        Step(1.0 / 60.0);
-        Io.AddKeyEvent(ImGuiKey_End, false);
-        for (int Erase = 0; Erase < 40; ++Erase)   // Clear the existing name deterministically
-        {
-            Io.AddKeyEvent(ImGuiKey_Backspace, true);
-            Io.AddKeyEvent(ImGuiKey_Backspace, false);
-            Step(1.0 / 60.0);
-        }
-        TypeText("Spawned Cube");
-        Settle(18);
-        KeyTap(InputKeyCategory::Enter);
-        Settle(42);
-        Expect(FindRowToken("Spawned Cube").IsValid(), "inspector rename applied to the directory");
-        Step(1.0 / 60.0);
-        Still("still-inspector-renamed");
     }
     Recording = false;
     std::printf("segment %s: %d frames\n", Segment.c_str(), SegmentFrame);

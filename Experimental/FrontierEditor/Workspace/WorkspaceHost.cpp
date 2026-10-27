@@ -11,6 +11,7 @@
 #include "Engine/Interface/LogStreamPanelRegistration.h"
 #include "Engine/Interface/SceneDirectoryPanelRegistration.h"
 #include "Input/InputMapCodec.h"
+#include "EditorTheme.h"
 #include "UI/Editor/ControlCentrePanel.h"
 
 #include <imgui.h>
@@ -266,6 +267,15 @@ void WorkspaceHost::TogglePanel(const char* Key, const char* Label)
 
 void WorkspaceHost::Synchronize(double Δτ)
 {
+    // Appearance fold: the editor's own panels render in the Control Centre's Appearance theme.
+    const AppearanceSettings& Appearance = Centre.QueryAppearance().QueryApplied();
+    Theme.ConfigureTheme(Appearance.Theme);
+    Theme.ConfigureAccent(Appearance.Accent);
+    Theme.ConfigureCornerRadius(Appearance.CornerRadius);
+    const EditorTheme ResolvedTheme = ResolveEditorTheme(Theme.QueryPalette(), Theme.QueryAccentColor());
+    InputsPanel.ConfigureTheme(ResolvedTheme);
+    CanvasPanel.ConfigureTheme(ResolvedTheme);
+
     LogPanel.Synchronize(LogStore(), LogCategories(), Δτ);
 
     // Spawn flow: the Outliner records a request; the host creates the record under the selection.
@@ -315,7 +325,6 @@ void WorkspaceHost::Synchronize(double Δτ)
 
     // Panel view-state refresh.
     const SceneInspectorSummary& Summary = OutlinerPanel.QueryInspector();
-    CanvasPanel.Map                      = &Map;
     CanvasPanel.RecordCount             = Fixture.QueryRecordCount();
     CanvasPanel.SelectedName            = Summary.HasSelection ? Summary.Name : std::string{};
     CanvasPanel.SimulationCaptured      = SimulationCaptured;

@@ -7,6 +7,7 @@
 
 #include "Engine/Interface/LogStreamPanel.h"
 #include "Engine/Interface/PanelDockspace.h"
+#include "Engine/Interface/ThemeStructure.h"
 #include "Engine/Interface/SceneDirectoryPanel.h"
 #include "Input/InputMap.h"
 #include "Input/InputPanel.h"
@@ -78,6 +79,7 @@ class WorkspaceHost
     InputPanel            InputsPanel;
     VehicleSceneFixture   Fixture;
 
+    ThemeStructure        Theme;                      // Appearance theme resolved for the editor panels
     RecordToken           LastSelected{};             // [-] - Selection-change logging
     uint64_t              LayoutResetRevision = 0;    // [-] - Control Centre layout-reset tracking
     double                HeartbeatAccumulator = 0;   // [s]

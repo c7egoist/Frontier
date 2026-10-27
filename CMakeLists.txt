@@ -125,6 +125,7 @@ target_link_libraries(FrontierPortablePanels PUBLIC FrontierImGui FrontierInterf
 # Experimental standalone editor workspace application (Experimental/FrontierEditor): shared sources for
 # the windowed host, the headless evidence harness and the input validation below.
 set(FRONTIER_EDITOR_SOURCES
+    Experimental/FrontierEditor/EditorTheme.cpp
     Experimental/FrontierEditor/Input/InputSubstrate.cpp Experimental/FrontierEditor/Input/InputMap.cpp
     Experimental/FrontierEditor/Input/InputMapCodec.cpp Experimental/FrontierEditor/Input/InputPanel.cpp
     Experimental/FrontierEditor/Workspace/VehicleSceneFixture.cpp Experimental/FrontierEditor/Workspace/RecordInspectorPanel.cpp

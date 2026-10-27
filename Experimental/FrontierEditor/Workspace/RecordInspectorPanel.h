@@ -1,13 +1,12 @@
 /*==========================================================================================================================================
                                                            RECORDINSPECTORPANEL.H
-==========================================================================================================================================*/
-// 🧩 Inspector for the Outliner selection: identity, nesting and visibility of one scene record, read/write.
+============================================================================================================================================*/
+// 🧩 Inspector for the Outliner selection: intentionally blank for now; its content arrives later.
 
 #pragma once
 
 #include "Engine/Scene/RecordToken.h"
 
-#include <array>
 #include <functional>
 
 namespace Frontier
@@ -19,23 +18,20 @@ class SceneDirectoryPanel;
 //                                                    RECORD INSPECTOR PANEL
 //----------------------------------------------------------------------------------------------------------------------
 
-// 📝 The third member of the VehicleHMI editor triad (Outliner · Viewport · Inspector). Reads the
-//    SceneDirectoryPanel's SceneInspectorSummary each frame and writes back through the SceneDirectory
-//    (rename, visibility), so the Outliner and Inspector can never disagree about a record. Navigation
-//    (up-link/down-link clicks) routes through SelectRecord back into the Outliner's selection.
+// 📝 Placeholder member of the editor triad (Outliner · Viewport · Inspector): the panel is docked and
+//    wired to the Outliner, but deliberately draws nothing for now — its identity/nesting/visibility
+//    content is a later step. Selection routing stays available for that step via SelectRecord.
 class RecordInspectorPanel
 {
   public:
     explicit RecordInspectorPanel(const SceneDirectoryPanel& Outliner) : OutlinerPanel(Outliner) {}
 
-    void ConstructInterface();
+    void ConstructInterface();   // Intentionally blank for now (see class note)
 
     std::function<void(RecordToken)> SelectRecord;   // Host wiring: OutlinerPanel.Select
 
   private:
-    const SceneDirectoryPanel& OutlinerPanel;
-    std::array<char, 128>      RenameBuffer{};
-    RecordToken                RenameToken{};        // [-] - Selection the buffer currently mirrors
+    const SceneDirectoryPanel& OutlinerPanel;   // Reserved for the inspector content step
 };
 
 } // namespace Frontier

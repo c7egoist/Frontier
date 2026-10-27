@@ -16,6 +16,8 @@
 //    on the reusable upstream DropdownControlSurface. Declarations exist only with the interface SDK present.
 #if defined(FRONTIER_WITH_INTERFACE_SDK)
 
+#include "Engine/Interface/IconArt.h"
+
 #include <imgui.h>
 
 namespace Frontier
@@ -113,10 +115,13 @@ struct TreeRowInteraction
     bool EyeClicked     = false;   // Visibility toggle
 };
 
-// One Outliner tree row (demo .tree-row: name, meta, visibility, selected/off states), 30 px tall.
+// One Outliner tree row (demo .tree-row: chevron, classification icon, name, meta, visibility eye), 30 px tall.
+// Icons draw through IconPresentation (approved artwork); the hand-drawn glyphs remain as the fallback for
+// hosts without a texture-capable adapter. DotColour inks the fallback classification disc.
 [[nodiscard]] TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Minimum, float Width,
-                                             float Indent, bool HasChildren, bool Collapsed, ImU32 DotColour,
-                                             const char* Name, const char* Meta, bool Visible, bool Selected);
+                                             float Indent, bool HasChildren, bool Collapsed, IconSymbol Symbol,
+                                             ImU32 DotColour, const char* Name, const char* Meta, bool Visible,
+                                             bool Selected);
 
 } // namespace Frontier
 

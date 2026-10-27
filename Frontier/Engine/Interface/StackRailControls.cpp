@@ -1,5 +1,6 @@
 // 🧩 StackRail chrome, TreeRow, IdentityHeader: the kit set the SceneDirectory consumes (interface SDK only).
 
+#include "Engine/Interface/IconPresentation.h"
 #include "Engine/Interface/StackRailControls.h"
 
 // This translation unit compiles only with the interface SDK present; without it, it is empty so portable
@@ -164,8 +165,8 @@ void DrawIdentityHeader(const KitFaces& Faces, ImVec2 Minimum, float Width, ImU3
 }
 
 TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Minimum, float Width, float Indent,
-                               bool HasChildren, bool Collapsed, ImU32 DotColour, const char* Name,
-                               const char* Meta, bool Visible, bool Selected)
+                               bool HasChildren, bool Collapsed, IconSymbol Symbol, ImU32 DotColour,
+                               const char* Name, const char* Meta, bool Visible, bool Selected)
 {
     ImDrawList*        Ink     = ImGui::GetWindowDrawList();
     const float        Height  = 30.0f;   // [px]
@@ -175,6 +176,9 @@ TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Min
 
     ImGui::PushID(Id);
     bool BodyHovered = false;
+    // The fold chevron and visibility eye are submitted after the full-row target and must be allowed
+    // to overlap it; without this the row claims every click and neither control ever fires.
+    ImGui::SetNextItemAllowOverlap();
     Result.Clicked   = KitTarget("##Row", Minimum, ImVec2(Width, Height), BodyHovered);
 
     if (Selected)
@@ -199,12 +203,16 @@ TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Min
                       Collapsed ? "Expand" : "Collapse");
         const ImU32  ChevronColour = ChevronHovered ? Theme::Text : Theme::Faint;
         const ImVec2 C(CursorX + 6.0f, CentreY);
-        if (Collapsed)
+        const bool   ChevronArt = IconPresentation::Draw(
+            Ink, Collapsed ? IconSymbol::EditorChevronRight : IconSymbol::EditorChevronDown,
+            ImVec2(C.x - 7.0f, CentreY - 7.0f), 14.0f, ChevronHovered ? 1.0f : 0.6f, IconDomain::Editor,
+            IM_COL32_WHITE);
+        if (!ChevronArt && Collapsed)
         {
             Ink->AddTriangleFilled(ImVec2(C.x - 3.0f, C.y - 5.0f), ImVec2(C.x - 3.0f, C.y + 5.0f),
                                    ImVec2(C.x + 4.0f, C.y), ChevronColour);
         }
-        else
+        else if (!ChevronArt)
         {
             Ink->AddTriangleFilled(ImVec2(C.x - 5.0f, C.y - 3.0f), ImVec2(C.x + 5.0f, C.y - 3.0f),
                                    ImVec2(C.x, C.y + 4.0f), ChevronColour);
@@ -212,10 +220,14 @@ TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Min
     }
     CursorX += 18.0f;
 
-    // Classification dot + name.
-    Ink->AddCircleFilled(ImVec2(CursorX + 4.0f, CentreY), 3.5f,
-                         Visible ? DotColour : KitInkWithAlpha(DotColour, 0.35f));
-    CursorX += 16.0f;
+    // Classification icon + name (the coloured disc remains the no-adapter fallback).
+    if (!IconPresentation::Draw(Ink, Symbol, ImVec2(CursorX, CentreY - 8.0f), 16.0f, Visible ? 1.0f : 0.4f,
+                                 IconDomain::Editor, IM_COL32_WHITE))
+    {
+        Ink->AddCircleFilled(ImVec2(CursorX + 8.0f, CentreY), 3.5f,
+                             Visible ? DotColour : KitInkWithAlpha(DotColour, 0.35f));
+    }
+    CursorX += 22.0f;
     const ImU32 NameColour = !Visible ? Theme::Faint : (Selected ? Theme::Text : Theme::Muted);
     KitDrawText(Ink, Selected ? Faces.Medium : Faces.Regular, 13.0f, ImVec2(CursorX, CentreY - 6.5f), NameColour,
                 Name);
@@ -227,12 +239,19 @@ TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Min
                                   Visible ? "Hide in viewport" : "Show in viewport");
     const ImU32  EyeColour = EyeHovered ? Theme::Text : (Visible ? Theme::Muted : Theme::Faint);
     const ImVec2 EyeCentre(EyeX + 12.0f, CentreY);
-    Ink->AddCircle(EyeCentre, 6.5f, EyeColour, 24, 1.3f);
-    Ink->AddCircleFilled(EyeCentre, 2.2f, Visible ? EyeColour : KitInkWithAlpha(EyeColour, 0.0f));
-    if (!Visible)
+    const bool   EyeArt = IconPresentation::Draw(
+        Ink, Visible ? IconSymbol::EditorVisibility : IconSymbol::EditorHidden,
+        ImVec2(EyeX + 4.0f, CentreY - 8.0f), 16.0f, EyeHovered ? 1.0f : (Visible ? 0.75f : 0.5f),
+        IconDomain::Editor, IM_COL32_WHITE);
+    if (!EyeArt)
     {
-        Ink->AddLine(ImVec2(EyeCentre.x - 7.0f, EyeCentre.y + 6.0f), ImVec2(EyeCentre.x + 7.0f, EyeCentre.y - 6.0f),
-                     EyeColour, 1.4f);
+        Ink->AddCircle(EyeCentre, 6.5f, EyeColour, 24, 1.3f);
+        Ink->AddCircleFilled(EyeCentre, 2.2f, Visible ? EyeColour : KitInkWithAlpha(EyeColour, 0.0f));
+        if (!Visible)
+        {
+            Ink->AddLine(ImVec2(EyeCentre.x - 7.0f, EyeCentre.y + 6.0f),
+                         ImVec2(EyeCentre.x + 7.0f, EyeCentre.y - 6.0f), EyeColour, 1.4f);
+        }
     }
 
     const float MetaW = KitTextWidth(Faces.Regular, 11.0f, Meta);
