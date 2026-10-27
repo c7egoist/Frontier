@@ -14,145 +14,40 @@
  *   3 inflorescence parts (branchlets, bristles, spikelets, awns).
  */
 
-import { QuadMesh, VertexWind } from '../tree/mesh';
+import { VertexWind } from '../tree/mesh';
 import { Random } from '../core/random';
-import { V3, UP, TAU, DEG2RAD, add, addScaled, sub, dot, cross, normalize, lengthSq, lerp, mod, clamp, rotateTowards, rotateAxis, scale } from '../core/math';
-import { Line, Frame, growLine } from './line';
+import { V3, UP, TAU, DEG2RAD, add, cross, normalize, clamp, mod, scale } from '../core/math';
+import { growLine } from './line';
 import { GrassParams, grassHeight } from './grassParams';
+import { OrganMesher, OrganStats, OrganBuildResult, Exit, Organ, Attachment, PadWindow, PadSpec, evenSides, windowFor, bladePoint } from './organMesher';
 
-export interface GrassStats {
-  /** Organs meshed (crown, blades, culms, leaves, head parts). */
-  organs: number;
-  /** Windows welded (every organ but the crown has one). */
-  junctions: number;
-  dropped: number;
-  dropReasons: Record<string, number>;
-  /** crown · culms · blades (incl. culm leaves) · inflorescence parts */
-  perLevel: [number, number, number, number];
+export { bladePoint } from './organMesher';
+
+export interface GrassStats extends OrganStats {
   culms: number;
   blades: number;
 }
 
-export interface GrassBuildResult {
-  mesh: QuadMesh;
+export interface GrassBuildResult extends OrganBuildResult {
   stats: GrassStats;
-  height: number;
-  /** Depth of the crown's root ball below the ground (metres). */
-  groundDepth: number;
-}
-
-/** Where a child leaves its parent: a point on the parent surface with its frame. */
-interface Exit {
-  pos: V3;
-  /** Outward surface normal. */
-  normal: V3;
-  /** Parent axis direction (UP for the crown). */
-  dir: V3;
-  /** Physical size of the window (longest side), metres. */
-  size: number;
-  /** Vertices of the window loop = vertices around the child's rings. */
-  N: number;
-}
-
-interface Attachment {
-  /** Arc length of the exit along the parent. */
-  s: number;
-  /** Azimuth of the exit in the parent's ring frame, radians. */
-  az: number;
-  /** Window size in cells. */
-  w: number;
-  h: number;
-  /** Half height of the window along the parent, metres. */
-  hh: number;
-  make: (exit: Exit) => Organ;
-  // Filled in by the planner.
-  j0: number;
-  row0: number;
-  row1: number;
-}
-
-interface Organ {
-  level: number;
-  line: Line;
-  /** Arc length of the first ring (collar length). */
-  sStart: number;
-  /** Ring vertex j of N at arc length s, in the (right, up) frame of the centreline. */
-  profile: (s: number, j: number, N: number) => { x: number; y: number };
-  /** Local radius (window sizing, exits of children). */
-  radius: (s: number) => number;
-  /** Round cross-section: the ring phase is fitted to the window (blades keep their width axis). */
-  round: boolean;
-  /** Extra mandatory ring stations. */
-  extra: number[];
-  /** Regular ring spacing. */
-  spacing: number;
-  children: Attachment[];
-  wind: (s: number, y: number) => VertexWind;
-  pivot: V3;
-  /** Nominal radius for the collar fillet clamp. */
-  r0: number;
-}
-
-interface Ring {
-  idx: number[];
-  s: number;
-  f: Frame;
-}
-
-interface CrownWindow {
-  a0: number;
-  b0: number;
-  w: number;
-  h: number;
-  make: (exit: Exit) => Organ;
 }
 
 type HeadVals = { length: number; droop: number; secondaries: number; bodyR: number; awnL: number; angle: number; rb: number; phase: number };
 
 const GOLDEN = 2.399963229728653; // 137.5°
 
-/** (rows, columns) offsets tried when a window does not fit where the child wants it, cheapest first. */
-const OFFSETS: [number, number][] = [
-  [0, 0],
-  [0, 1],
-  [0, -1],
-  [1, 0],
-  [-1, 0],
-  [1, 1],
-  [1, -1],
-  [-1, 1],
-  [-1, -1],
-  [2, 0],
-  [-2, 0],
-  [0, 2],
-  [0, -2],
-  [2, 1],
-  [2, -1],
-  [-2, 1],
-  [-2, -1],
-  [3, 0],
-  [-3, 0],
-  [3, 1],
-  [-3, 1],
-  [4, 0],
-  [-4, 0],
-];
-
-export class GrassMesher {
-  readonly mesh = new QuadMesh();
+export class GrassMesher extends OrganMesher {
+  readonly stats: GrassStats = { organs: 0, junctions: 0, dropped: 0, dropReasons: {}, perLevel: [0, 0, 0, 0], counts: {}, culms: 0, blades: 0 };
   private readonly g: GrassParams;
   private readonly rng: Random;
   private readonly bladeRng: Random;
   private readonly culmRng: Random;
   private readonly headRng: Random;
-  private plantH = 1;
-  /** Detail flutter weight: absolute in the shader, so small plants get less of it. */
-  private flutter = 1;
-  private groundDepth = 0;
-  private stats: GrassStats = { organs: 0, junctions: 0, dropped: 0, dropReasons: {}, perLevel: [0, 0, 0, 0], culms: 0, blades: 0 };
 
   constructor(g: GrassParams, seed: number) {
+    super();
     this.g = g;
+    this.collarRingsDefault = g.collarRings;
     this.rng = new Random((seed ^ 0x6ea55c0d) >>> 0);
     this.bladeRng = this.rng.fork();
     this.culmRng = this.rng.fork();
@@ -163,13 +58,8 @@ export class GrassMesher {
     this.plantH = Math.max(0.05, grassHeight(this.g));
     this.flutter = clamp(this.plantH / 1.5, 0.15, 1);
     this.meshCrown();
-    // Normalise the sway weight by the real height of the plant.
-    let maxY = 1e-3;
-    const p = this.mesh.positions;
-    for (let i = 1; i < p.length; i += 3) if (p[i] > maxY) maxY = p[i];
-    const w = this.mesh.wind;
-    for (let i = 0; i < w.length; i += 4) w[i] = clamp(p[(i / 4) * 3 + 1] / maxY, 0, 1);
-    return { mesh: this.mesh, stats: this.stats, height: maxY, groundDepth: this.groundDepth };
+    const r = this.finish();
+    return { ...r, stats: this.stats };
   }
 
   // ---------------------------------------------------------------------------
@@ -178,7 +68,6 @@ export class GrassMesher {
 
   private meshCrown(): void {
     const g = this.g;
-    const mesh = this.mesh;
     const R = Math.max(0.01, g.crownRadius);
     const sink = Math.max(0, g.crownSink) + 0.004;
     const H = Math.max(0, g.crownHeight);
@@ -197,25 +86,11 @@ export class GrassMesher {
     const need = blades + culms * bsx * bsy;
     const S = Math.max(bsx + 1, bsy + 1, Math.ceil(Math.sqrt((Math.max(1, need) * 1.18) / 0.7)));
     const K = S * pitch + 2;
-    const cell = (2 * R) / K;
 
-    // Dome geometry (square grid mapped onto the disc with the elliptical mapping).
-    const domePoint = (u01: number, v01: number): V3 => {
-      const u = 2 * u01 - 1;
-      const v = 2 * v01 - 1;
-      const x = u * Math.sqrt(Math.max(0, 1 - (v * v) / 2));
-      const z = v * Math.sqrt(Math.max(0, 1 - (u * u) / 2));
-      const r = Math.min(1, Math.sqrt(x * x + z * z));
-      const y = -sink + H * (1 - Math.pow(r, prof));
-      return { x: R * x, y, z: R * z };
-    };
-    const domeNormal = (u01: number, v01: number): V3 => {
-      const e = 0.5 / K;
-      const du = sub(domePoint(Math.min(1, u01 + e), v01), domePoint(Math.max(0, u01 - e), v01));
-      const dv = sub(domePoint(u01, Math.min(1, v01 + e)), domePoint(u01, Math.max(0, v01 - e)));
-      const n = cross(dv, du);
-      return lengthSq(n) < 1e-18 ? { x: 0, y: 1, z: 0 } : normalize(n);
-    };
+    // Dome geometry: the root ball carries the rim straight down, inset, and is closed below ground.
+    const depth = Math.max(0.02, 0.35 * R);
+    const sp: PadSpec = { R, H, sink, prof, K, below: [{ depth: sink + depth, scale: 0.8 }] };
+    const domePoint = (u01: number, v01: number): V3 => this.domePoint(sp, u01, v01);
 
     // Sites: one per pitch×pitch block of cells.
     type Site = { i: number; k: number; r: number; az: number; free: boolean };
@@ -231,7 +106,7 @@ export class GrassMesher {
       }
     }
 
-    const windows: CrownWindow[] = [];
+    const windows: PadWindow[] = [];
     const rngL = this.rng;
 
     // Culms first: they claim blocks of sites in the middle of the tuft.
@@ -308,67 +183,7 @@ export class GrassMesher {
     this.stats.culms = culmsPlaced;
     this.stats.blades = nBlades;
 
-    // ---- Grid vertices -----------------------------------------------------
-    const cellWin = new Int32Array(K * K).fill(-1);
-    windows.forEach((win, id) => {
-      for (let a = win.a0; a < win.a0 + win.w; a++) for (let b = win.b0; b < win.b0 + win.h; b++) cellWin[a * K + b] = id;
-    });
-    const occ = (a: number, b: number): boolean => a >= 0 && b >= 0 && a < K && b < K && cellWin[a * K + b] >= 0;
-    const interior = (a: number, b: number): boolean => occ(a - 1, b - 1) && occ(a - 1, b) && occ(a, b - 1) && occ(a, b);
-    const vid = new Int32Array((K + 1) * (K + 1)).fill(-1);
-    const still: VertexWind = { height: 0, limb: 0, phase: 0, detail: 0 };
-    const origin = { x: 0, y: 0, z: 0 };
-    for (let a = 0; a <= K; a++) {
-      for (let b = 0; b <= K; b++) {
-        if (interior(a, b)) continue;
-        const p = domePoint(a / K, b / K);
-        vid[a * (K + 1) + b] = mesh.addVertex(p.x, p.y, p.z, still, origin, 0, 0);
-      }
-    }
-    const V = (a: number, b: number): number => vid[a * (K + 1) + b];
-    this.stats.organs++;
-    this.stats.perLevel[0]++;
-
-    // Top quads (skipping window cells): (a,b) → (a,b+1) → (a+1,b+1) → (a+1,b) faces up.
-    for (let a = 0; a < K; a++) {
-      for (let b = 0; b < K; b++) {
-        if (cellWin[a * K + b] >= 0) continue;
-        mesh.addQuad(V(a, b), V(a, b + 1), V(a + 1, b + 1), V(a + 1, b), [a / K, b / K, a / K, (b + 1) / K, (a + 1) / K, (b + 1) / K, (a + 1) / K, b / K]);
-      }
-    }
-
-    // Root ball: the rim is carried straight down, inset, and closed with a ladder cap (invisible below ground).
-    const depth = Math.max(0.02, 0.35 * R);
-    this.groundDepth = sink + depth;
-    const rim: number[] = [];
-    for (let a = 0; a < K; a++) rim.push(V(a, K));
-    for (let b = K; b > 0; b--) rim.push(V(K, b));
-    for (let a = K; a > 0; a--) rim.push(V(a, 0));
-    for (let b = 0; b < K; b++) rim.push(V(0, b));
-    const below: number[] = [];
-    for (const v of rim) below.push(mesh.addVertex(mesh.positions[v * 3] * 0.8, -sink - depth, mesh.positions[v * 3 + 2] * 0.8, still, origin, 0, 0));
-    const M = rim.length;
-    for (let j = 0; j < M; j++) {
-      const j1 = (j + 1) % M;
-      mesh.addQuad(below[j], below[j1], rim[j1], rim[j], [j / M, -0.1, (j + 1) / M, -0.1, (j + 1) / M, 0, j / M, 0]);
-    }
-    this.cap([...below].reverse());
-
-    // ---- Tillers -------------------------------------------------------------
-    for (const win of windows) {
-      const loop: number[] = [];
-      const { a0, b0, w, h } = win;
-      // Counter-clockwise seen from above: +a along b0+h, −b along a0+w, −a along b0, +b along a0.
-      for (let a = a0; a < a0 + w; a++) loop.push(V(a, b0 + h));
-      for (let b = b0 + h; b > b0; b--) loop.push(V(a0 + w, b));
-      for (let a = a0 + w; a > a0; a--) loop.push(V(a, b0));
-      for (let b = b0; b < b0 + h; b++) loop.push(V(a0, b));
-      const uc = (a0 + w / 2) / K;
-      const vc = (b0 + h / 2) / K;
-      const exit: Exit = { pos: domePoint(uc, vc), normal: domeNormal(uc, vc), dir: { x: 0, y: 1, z: 0 }, size: Math.max(w, h) * cell, N: loop.length };
-      const organ = win.make(exit);
-      this.meshTube(organ, loop, exit, 1);
-    }
+    this.meshPad(sp, windows);
   }
 
   // ---------------------------------------------------------------------------
@@ -730,427 +545,4 @@ export class GrassMesher {
       r0: v.rb,
     };
   }
-
-  /** Distance from the exit to the first full ring: a sheath-like collar proportional to the child's size. */
-  private collarLen(r: number): number {
-    return Math.max(2.2 * r, 0.0015);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Tubes
-  // ---------------------------------------------------------------------------
-
-  private meshTube(o: Organ, loop: number[], exit: Exit, depth: number): void {
-    const mesh = this.mesh;
-    const N = loop.length;
-    const L = o.line.length;
-    const colStep = TAU / N;
-    this.stats.organs++;
-    this.stats.perLevel[Math.min(3, o.level)]++;
-
-    // Round organs: rotate the ring frame so ring vertex k faces loop vertex k.
-    if (o.round) {
-      const f0 = o.line.at(o.sStart);
-      const ph = this.fitPhase(loop, f0);
-      if (Math.abs(ph) > 1e-6) {
-        const rs = o.line.rights;
-        for (let i = 0; i < rs.length; i++) rs[i] = rotateAxis(rs[i], o.line.dirs[i], ph);
-      }
-    }
-
-    // ---- Plan the windows of the children.
-    const accepted: Attachment[] = [];
-    const cands = o.children.slice().sort((a, b) => a.s - b.s);
-    for (const c of cands) {
-      const jBase = Math.round(c.az / colStep - c.w / 2);
-      const sMin = o.sStart + 0.6 * c.hh;
-      const sMax = L - 0.6 * c.hh;
-      const epsSame = 0.6 * c.hh;
-      let placed = false;
-      for (const [dr, dj] of OFFSETS) {
-        const s = c.s + dr * 2 * c.hh;
-        const lo = s - c.hh;
-        const hi = s + c.hh;
-        if (lo < sMin || hi > sMax) continue;
-        const j0 = mod(jBase + dj, N);
-        let ok = true;
-        for (const a of accepted) {
-          const aLo = a.s - a.hh;
-          const aHi = a.s + a.hh;
-          if (circularOverlap(j0, c.w, a.j0, a.w, N)) {
-            // Same columns: keep a clear band of tube between the windows.
-            if (lo < aHi + epsSame && aLo < hi + epsSame) {
-              ok = false;
-              break;
-            }
-          } else if (circularOverlap(j0 - 1, c.w + 2, a.j0, a.w, N)) {
-            // Neighbouring columns: the windows may touch corner to corner but not overlap.
-            if (lo < aHi - 1e-9 && aLo < hi - 1e-9) {
-              ok = false;
-              break;
-            }
-          }
-        }
-        if (!ok) continue;
-        c.s = s;
-        c.j0 = j0;
-        c.az = (j0 + c.w / 2) * colStep;
-        accepted.push(c);
-        placed = true;
-        break;
-      }
-      if (!placed) this.drop(L - o.sStart < 2.4 * c.hh ? 'organ too short' : 'window conflict');
-    }
-
-    // ---- Ring stations.
-    const st = this.stations(o, accepted);
-    const K = st.length;
-    const occupied = new Uint8Array(Math.max(1, K - 1) * N);
-    const rows: Attachment[] = [];
-    for (const c of accepted) {
-      const row0 = nearestIndex(st, c.s - c.hh);
-      const row1 = nearestIndex(st, c.s + c.hh);
-      if (row0 < 1 || row1 > K - 1 || row1 - row0 !== c.h) {
-        this.drop('no room on parent');
-        continue;
-      }
-      let free = true;
-      for (let i = row0; i < row1 && free; i++) for (let j = 0; j < c.w; j++) if (occupied[i * N + mod(c.j0 + j, N)]) free = false;
-      if (!free) {
-        this.drop('window conflict');
-        continue;
-      }
-      for (let i = row0; i < row1; i++) for (let j = 0; j < c.w; j++) occupied[i * N + mod(c.j0 + j, N)] = 1;
-      c.row0 = row0;
-      c.row1 = row1;
-      c.s = 0.5 * (st[row0] + st[row1]);
-      rows.push(c);
-    }
-
-    // ---- Rings.
-    const cellOcc = (i: number, j: number): boolean => i >= 0 && i < K - 1 && occupied[i * N + mod(j, N)] === 1;
-    const interior = (i: number, j: number): boolean => cellOcc(i - 1, j - 1) && cellOcc(i - 1, j) && cellOcc(i, j - 1) && cellOcc(i, j);
-    // Mitre: tilt the first ring towards the parent surface.
-    const a0 = o.line.dirs[0];
-    const theta = Math.acos(clamp(dot(a0, exit.normal), -1, 1));
-    const alpha = theta * 0.5 * clamp(o.sStart / Math.max(1e-6, 2.2 * o.r0), 0, 1);
-    const tilt = alpha > 1e-3 ? rotateTowards(a0, exit.normal, alpha) : undefined;
-    const rings: Ring[] = [];
-    for (let i = 0; i < K; i++) rings.push(this.buildRing(o, st[i], N, i === 0 ? tilt : undefined, (j) => interior(i, j)));
-
-    // ---- Collar, tube, cap.
-    this.collar(loop, rings[0], exit, o);
-    for (let i = 0; i < K - 1; i++) {
-      const a = rings[i].idx;
-      const b = rings[i + 1].idx;
-      const va = st[i] / L;
-      const vb = st[i + 1] / L;
-      for (let j = 0; j < N; j++) {
-        if (occupied[i * N + j]) continue;
-        const j1 = (j + 1) % N;
-        mesh.addQuad(a[j], a[j1], b[j1], b[j], [j / N, va, (j + 1) / N, va, (j + 1) / N, vb, j / N, vb]);
-      }
-    }
-    this.cap(rings[K - 1].idx);
-
-    // ---- Children.
-    for (const c of rows) {
-      const childLoop = this.holeLoop(rings, c, N);
-      const f = o.line.at(c.s);
-      const radial = normalize(add(scale(f.right, Math.cos(c.az)), scale(f.up, Math.sin(c.az))));
-      const pos = addScaled(f.pos, radial, o.radius(c.s));
-      const childExit: Exit = { pos, normal: radial, dir: f.dir, size: Math.max(c.w * colStep * o.radius(c.s), 2 * c.hh), N: childLoop.length };
-      const child = c.make(childExit);
-      this.meshTube(child, childLoop, childExit, depth + 1);
-    }
-  }
-
-  /**
-   * Ring stations along an organ: the collar ring, the tip, the rows of every
-   * window, the organ's own feature stations and regular fill in between.
-   * Nothing is ever inserted inside a window span, so a window always gets
-   * exactly the rows it was planned with.
-   */
-  private stations(o: Organ, windows: Attachment[]): number[] {
-    const L = o.line.length;
-    const sStart = o.sStart;
-    if (L - sStart < 1e-6) return [sStart];
-    type St = { s: number; pri: number };
-    const spans: [number, number][] = windows.map((w) => [w.s - w.hh, w.s + w.hh]);
-    const inside = (s: number): boolean => spans.some(([a, b]) => s > a + 1e-9 && s < b - 1e-9);
-    const mand: St[] = [
-      { s: sStart, pri: 3 },
-      { s: L, pri: 3 },
-    ];
-    let minRow = Infinity;
-    for (const w of windows) {
-      mand.push({ s: w.s - w.hh, pri: 2 }, { s: w.s + w.hh, pri: 2 });
-      for (let r = 1; r < w.h; r++) mand.push({ s: w.s - w.hh + (2 * w.hh * r) / w.h, pri: 2 });
-      const cell = (2 * w.hh) / w.h;
-      if (cell < minRow) minRow = cell;
-    }
-    for (const s of o.extra) if (s > sStart + 1e-6 && s < L - 1e-6 && !inside(s)) mand.push({ s, pri: 1 });
-    const spacing = o.spacing;
-    const eps = Math.min(spacing * 0.3, isFinite(minRow) ? minRow * 0.3 : Infinity);
-    mand.sort((a, b) => a.s - b.s || b.pri - a.pri);
-    const kept: St[] = [];
-    for (const st of mand) {
-      const last = kept[kept.length - 1];
-      if (last && st.s - last.s < eps) {
-        if (st.pri > last.pri) kept[kept.length - 1] = st;
-        continue;
-      }
-      kept.push(st);
-    }
-    kept[kept.length - 1] = { s: L, pri: 3 };
-    if (kept.length >= 2 && kept[kept.length - 1].s - kept[kept.length - 2].s < eps * 0.5) kept.splice(kept.length - 2, 1);
-    const out: number[] = [];
-    for (let i = 0; i < kept.length; i++) {
-      out.push(kept[i].s);
-      if (i === kept.length - 1) break;
-      const gap = kept[i + 1].s - kept[i].s;
-      if (inside(kept[i].s + 0.5 * gap)) continue;
-      const n = Math.floor(gap / spacing);
-      if (n >= 1) {
-        const step = gap / (n + 1);
-        for (let k = 1; k <= n; k++) out.push(kept[i].s + k * step);
-      }
-    }
-    return out;
-  }
-
-  private buildRing(o: Organ, s: number, N: number, tiltNormal: V3 | undefined, skip: (j: number) => boolean): Ring {
-    const f = o.line.at(s);
-    const idx: number[] = new Array(N);
-    const an = tiltNormal ? dot(f.dir, tiltNormal) : 1;
-    for (let j = 0; j < N; j++) {
-      if (skip(j)) {
-        idx[j] = -1;
-        continue;
-      }
-      const q = o.profile(s, j, N);
-      const off = { x: q.x * f.right.x + q.y * f.up.x, y: q.x * f.right.y + q.y * f.up.y, z: q.x * f.right.z + q.y * f.up.z };
-      if (tiltNormal && an > 0.3) {
-        const lambda = -dot(off, tiltNormal) / an;
-        off.x += f.dir.x * lambda;
-        off.y += f.dir.y * lambda;
-        off.z += f.dir.z * lambda;
-      }
-      const p = add(f.pos, off);
-      idx[j] = this.mesh.addVertex(p.x, p.y, p.z, o.wind(s, p.y), o.pivot, o.level, 0);
-    }
-    return { idx, s, f };
-  }
-
-  /**
-   * Fit a regular angular spacing to a closed loop as seen along the organ's
-   * axis: the starting angle that best aligns ring vertex k with loop vertex k
-   * (angles measured from the projected centroid).
-   */
-  private fitPhase(loop: number[], f: Frame): number {
-    const M = loop.length;
-    const xs: number[] = new Array(M);
-    const ys: number[] = new Array(M);
-    let cx = 0;
-    let cy = 0;
-    for (let k = 0; k < M; k++) {
-      const v = sub(this.pos(loop[k]), f.pos);
-      xs[k] = dot(v, f.right);
-      ys[k] = dot(v, f.up);
-      cx += xs[k];
-      cy += ys[k];
-    }
-    cx /= M;
-    cy /= M;
-    let sx = 0;
-    let sy = 0;
-    for (let k = 0; k < M; k++) {
-      const a = Math.atan2(ys[k] - cy, xs[k] - cx) - (TAU * k) / M;
-      sx += Math.cos(a);
-      sy += Math.sin(a);
-    }
-    return Math.atan2(sy, sx);
-  }
-
-  /** Bridge the window loop to the first ring through `collarRings` fillet loops. */
-  private collar(loop: number[], first: Ring, exit: Exit, o: Organ): void {
-    const mesh = this.mesh;
-    const M = loop.length;
-    const shift = this.bestShift(loop, first.idx);
-    const lp: number[] = new Array(M);
-    for (let k = 0; k < M; k++) lp[k] = loop[(k + shift) % M];
-    const n = Math.max(0, Math.round(this.g.collarRings));
-    const a0 = o.line.dirs[0];
-    const radial = exit.normal;
-    const cosT = Math.max(0.2, dot(a0, radial));
-    const fillet = 0.7;
-    let prev = lp;
-    for (let q = 0; q < n; q++) {
-      const k = (q + 1) / (n + 1);
-      const mid: number[] = [];
-      for (let i = 0; i < M; i++) {
-        const a = this.pos(lp[i]);
-        const b = this.pos(first.idx[i]);
-        const chord = lerp(a, b, k);
-        let mu = dot(sub(b, a), radial) / cosT;
-        mu = clamp(mu, 0, 4 * o.r0);
-        const c = addScaled(b, a0, -mu);
-        const w0 = (1 - k) * (1 - k);
-        const w1 = 2 * k * (1 - k);
-        const w2 = k * k;
-        const bez = { x: a.x * w0 + c.x * w1 + b.x * w2, y: a.y * w0 + c.y * w1 + b.y * w2, z: a.z * w0 + c.z * w1 + b.z * w2 };
-        const p = lerp(chord, bez, fillet);
-        mid.push(mesh.addVertex(p.x, p.y, p.z, o.wind(first.s * k, p.y), o.pivot, o.level, 1));
-      }
-      this.bridge(prev, mid);
-      prev = mid;
-    }
-    this.bridge(prev, first.idx);
-    for (const v of loop) mesh.junction[v] = 1;
-    for (const v of first.idx) mesh.junction[v] = 1;
-    this.stats.junctions++;
-  }
-
-  /** Cyclic shift of the loop that pairs each loop vertex with the nearest ring vertex (least twisted collar). */
-  private bestShift(loop: number[], ring: number[]): number {
-    const M = loop.length;
-    const p = this.mesh.positions;
-    let best = 0;
-    let bestCost = Infinity;
-    for (let sh = 0; sh < M; sh++) {
-      let cost = 0;
-      for (let k = 0; k < M; k++) {
-        const a = loop[(k + sh) % M] * 3;
-        const b = ring[k] * 3;
-        const dx = p[a] - p[b];
-        const dy = p[a + 1] - p[b + 1];
-        const dz = p[a + 2] - p[b + 2];
-        cost += dx * dx + dy * dy + dz * dz;
-      }
-      if (cost < bestCost) {
-        bestCost = cost;
-        best = sh;
-      }
-    }
-    return best;
-  }
-
-  private bridge(a: number[], b: number[]): void {
-    const M = a.length;
-    for (let k = 0; k < M; k++) {
-      const k1 = (k + 1) % M;
-      this.mesh.addQuad(a[k], a[k1], b[k1], b[k], [k / M, -0.05, (k + 1) / M, -0.05, (k + 1) / M, 0, k / M, 0]);
-    }
-  }
-
-  /** Ladder cap of a ring that runs counter-clockwise seen from outside. */
-  private cap(ring: number[]): void {
-    const M = ring.length;
-    for (let i = 0; 2 * i <= M - 3; i++) {
-      this.mesh.addQuad(ring[i], ring[i + 1], ring[M - 2 - i], ring[M - 1 - i], [0, 0, 1, 0, 1, 1, 0, 1]);
-    }
-  }
-
-  /** Closed loop of vertex indices around a window, counter-clockwise seen from outside. */
-  private holeLoop(rings: Ring[], h: Attachment, N: number): number[] {
-    const loop: number[] = [];
-    const { row0, row1, j0, w } = h;
-    for (let j = 0; j <= w; j++) loop.push(rings[row0].idx[mod(j0 + j, N)]);
-    for (let i = row0 + 1; i <= row1; i++) loop.push(rings[i].idx[mod(j0 + w, N)]);
-    for (let j = w - 1; j >= 0; j--) loop.push(rings[row1].idx[mod(j0 + j, N)]);
-    for (let i = row1 - 1; i >= row0 + 1; i--) loop.push(rings[i].idx[mod(j0, N)]);
-    for (const v of loop) if (v < 0) throw new Error('holeLoop: window touches a skipped vertex');
-    return loop;
-  }
-
-  private pos(i: number): V3 {
-    const p = this.mesh.positions;
-    return { x: p[i * 3], y: p[i * 3 + 1], z: p[i * 3 + 2] };
-  }
-
-  private drop(reason: string, n = 1): void {
-    this.stats.dropped += n;
-    this.stats.dropReasons[reason] = (this.stats.dropReasons[reason] ?? 0) + n;
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Helpers
-// -----------------------------------------------------------------------------
-
-function evenSides(n: number, lo: number, hi: number): number {
-  return clamp(Math.round(n / 2) * 2, lo, hi);
-}
-
-/** Window (w × h cells) whose boundary loop has N vertices: 2(w + h) = N. */
-function windowFor(N: number): { w: number; h: number } {
-  switch (N) {
-    case 4:
-      return { w: 1, h: 1 };
-    case 6:
-      return { w: 1, h: 2 };
-    case 8:
-      return { w: 2, h: 2 };
-    case 10:
-      return { w: 2, h: 3 };
-    default:
-      return { w: 3, h: 3 };
-  }
-}
-
-/**
- * Cross-section of a blade with N vertices, counter-clockwise seen from the
- * tip: right edge → adaxial (upper) face → left edge → abaxial face. `keel`
- * folds the blade into a V along the midrib, `rolled` curls it towards a
- * tube (edges up and inwards).
- */
-export function bladePoint(N: number, j: number, width: number, thickness: number, keel: number, rolled: number): { x: number; y: number } {
-  const m = N / 2;
-  let u: number;
-  let top: boolean;
-  if (j <= m) {
-    u = 1 - (2 * j) / m;
-    top = true;
-  } else {
-    u = -1 + (2 * (j - m)) / m;
-    top = false;
-  }
-  const hw = width * 0.5;
-  const th = thickness * 0.5 * (1 - Math.pow(u, 4));
-  // Flat, keeled profile.
-  const yk = keel * width * Math.pow(Math.abs(u), 1.5);
-  const fx = u * hw;
-  const fy = yk + (top ? th : -th);
-  if (rolled <= 1e-4) return { x: fx, y: fy };
-  // Rolled: an arc of angle phi whose midrib stays at the origin; edges curl up and inwards.
-  const phi = 5.8 * Math.max(0.15, rolled);
-  const gap = TAU - phi;
-  const Rr = width / phi;
-  const ang = Math.PI / 2 + gap / 2 + ((u + 1) / 2) * phi;
-  const rho = Rr + (top ? -th : th);
-  const ax = rho * Math.cos(ang);
-  const ay = Rr + rho * Math.sin(ang);
-  return { x: fx + (ax - fx) * rolled, y: fy + (ay - fy) * rolled };
-}
-
-function nearestIndex(sorted: number[], v: number): number {
-  let lo = 0;
-  let hi = sorted.length - 1;
-  while (hi - lo > 1) {
-    const mid = (lo + hi) >> 1;
-    if (sorted[mid] <= v) lo = mid;
-    else hi = mid;
-  }
-  return Math.abs(sorted[lo] - v) <= Math.abs(sorted[hi] - v) ? lo : hi;
-}
-
-/** Do circular integer intervals [a, a+wa) and [b, b+wb) on a ring of N overlap? */
-function circularOverlap(a: number, wa: number, b: number, wb: number, N: number): boolean {
-  if (wa >= N || wb >= N) return true;
-  a = mod(a, N);
-  b = mod(b, N);
-  const d = mod(b - a, N);
-  if (d < wa) return true;
-  const d2 = mod(a - b, N);
-  return d2 < wb;
 }

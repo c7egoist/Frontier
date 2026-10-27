@@ -1,11 +1,17 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { PRESETS, TREE_PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment, isGrass } from '../src/tree/params';
+import { PRESETS, TREE_PRESETS, cloneParams, DEFAULT_MESH, DEFAULT_BOTANY, DEFAULT_ROOTS, TreeParams, defaultEnvironment, isGrass, isSucculent, isVegetable, plantKind } from '../src/tree/params';
 import { buildSkeleton } from '../src/tree/skeleton';
 import { buildMesh } from '../src/tree/mesher';
 import { validateTopology } from '../src/tree/validate';
 import { toOBJ, toGLB, toGpuBuffers } from '../src/tree/export';
 import { GrassMesher } from '../src/plant/grassMesher';
 import { DEFAULT_GRASS, GRASS_PRESETS } from '../src/plant/grassParams';
+import { SucculentMesher } from '../src/plant/succulentMesher';
+import { DEFAULT_SUCCULENT, SUCCULENT_PRESETS, SucculentParams } from '../src/plant/succulentParams';
+import { VegetableMesher } from '../src/plant/vegetableMesher';
+import { DEFAULT_VEGETABLE, VEGETABLE_PRESETS, VegetableParams } from '../src/plant/vegetableParams';
+import { OrganBuildResult } from '../src/plant/organMesher';
+import { QuadMesh } from '../src/tree/mesh';
 import { generateTree } from '../src/tree/generate';
 import { LeafMesh } from '../src/tree/mesh';
 
@@ -21,6 +27,58 @@ function buildGrass(preset: { grass: Partial<(typeof GRASS_PRESETS)[number]['gra
   const built = new GrassMesher(g, seed).build();
   const report = validateTopology(built.mesh);
   return { ...built, report };
+}
+
+function buildSucculent(preset: { succulent: Partial<SucculentParams> }, seed: number) {
+  const c = { ...DEFAULT_SUCCULENT, ...preset.succulent };
+  const built = new SucculentMesher(c, seed).build();
+  const report = validateTopology(built.mesh);
+  return { ...built, report };
+}
+
+function buildVegetable(preset: { vegetable: Partial<VegetableParams> }, seed: number) {
+  const v = { ...DEFAULT_VEGETABLE, ...preset.vegetable };
+  const built = new VegetableMesher(v, seed).build();
+  const report = validateTopology(built.mesh);
+  return { ...built, report };
+}
+
+/**
+ * Assertions shared by every organ plant (grass, succulent, vegetable): one
+ * closed all-quad genus-0 surface, sane wind weights. `sway` is the species'
+ * whole-plant sway weight baked into the height attribute (1 for grasses).
+ */
+function expectWeldedOrganPlant(built: OrganBuildResult & { report: ReturnType<typeof validateTopology> }, maxDropped = 0, sway = 1): void {
+  const { report, stats, mesh, height, groundDepth } = built;
+  expect(report.boundaryEdges, 'boundary edges').toBe(0);
+  expect(report.nonManifoldEdges, 'non-manifold edges').toBe(0);
+  expect(report.inconsistentEdges, 'inconsistent winding').toBe(0);
+  expect(report.degenerateFaces, 'degenerate faces').toBe(0);
+  expect(report.isolatedVertices, 'isolated vertices').toBe(0);
+  expect(report.components, 'connected components').toBe(1);
+  expect(report.eulerCharacteristic, 'Euler characteristic').toBe(2);
+  expect(report.genus).toBe(0);
+  expect(report.quadRatio).toBe(1);
+  expect(stats.dropped, 'dropped organs').toBeLessThanOrEqual(maxDropped);
+  expect(stats.junctions).toBe(stats.organs - 1);
+  expect(height).toBeGreaterThan(0.02);
+  expect(groundDepth).toBeGreaterThan(0);
+  expectWindInRange(mesh, sway);
+}
+
+function expectWindInRange(mesh: QuadMesh, top = 1): void {
+  const n = mesh.vertexCount;
+  let maxHeight = 0;
+  let outOfRange = 0;
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < 4; k++) {
+      const v = mesh.wind[i * 4 + k];
+      if (!(v >= 0 && v <= 1)) outOfRange++;
+    }
+    if (mesh.wind[i * 4] > maxHeight) maxHeight = mesh.wind[i * 4];
+  }
+  expect(outOfRange, 'wind attributes out of [0, 1]').toBe(0);
+  expect(maxHeight, 'sway weight at the top of the plant').toBeCloseTo(top, 5);
 }
 
 // Each test is a long, fully synchronous mesh build. Between tests vitest only
@@ -136,6 +194,134 @@ describe('welded grass plant is a single closed manifold', () => {
     expect(lines.filter((l) => l.startsWith('v ')).length).toBe(mesh.vertexCount);
     expect(lines.filter((l) => l.startsWith('f ') && l.trim().split(/\s+/).length === 5).length).toBe(mesh.quadCount);
     const glb = toGLB(mesh, leaves, 'grass');
+    const dv = new DataView(glb);
+    expect(dv.getUint32(0, true)).toBe(0x46546c67);
+    expect(dv.getUint32(8, true)).toBe(glb.byteLength);
+  });
+});
+
+describe('welded succulent (cactus) is a single closed manifold', () => {
+  for (const preset of SUCCULENT_PRESETS) {
+    for (const seed of [1, 7]) {
+      it(`${preset.name} seed ${seed}`, () => {
+        const built = buildSucculent(preset, seed);
+        // Dense areoles on pads occasionally lose a window to a neighbour; nothing else may be dropped.
+        const sp = { ...DEFAULT_SUCCULENT, ...preset.succulent };
+        expectWeldedOrganPlant(built, sp.form === 'pad' ? 3 : 1, Math.min(1, Math.max(0, sp.sway)));
+        const c = built.stats.counts;
+        const form = sp.form;
+        if (form === 'rosette') expect(c.leaves).toBeGreaterThan(5);
+        else if (form === 'pad') expect(c.pads).toBeGreaterThan(3);
+        else expect((c.trunk ?? 0) + (c.barrel ?? 0)).toBeGreaterThan(0);
+        // Areoles and spines are separate welded organs, not decals.
+        if (sp.areoleSpacing > 0 && sp.spineLength > 0 && form !== 'rosette' && !sp.armTuft) {
+          expect(c.areoles).toBeGreaterThan(20);
+          expect(c.spines).toBeGreaterThan(c.areoles);
+        }
+      });
+    }
+  }
+
+  it('arms leave the trunk through windows and carry their own areoles', () => {
+    const { stats } = buildSucculent(SUCCULENT_PRESETS.find((c) => c.name === 'Saguaro')!, 1);
+    expect(stats.counts.arms).toBeGreaterThanOrEqual(2);
+    expect(stats.perLevel[1]).toBeGreaterThanOrEqual(2);
+    expect(stats.perLevel[3]).toBeGreaterThan(stats.perLevel[1]);
+  });
+
+  it('a clump rises from one buried pad as a single surface', () => {
+    const { stats, report } = buildSucculent(SUCCULENT_PRESETS.find((c) => c.name === 'Organ Pipe Cactus')!, 2);
+    expect(stats.counts.trunk).toBeGreaterThanOrEqual(4);
+    expect(report.components).toBe(1);
+  });
+
+  it('succulent presets carry their kind through the shared pipeline', () => {
+    const cacti = PRESETS.filter(isSucculent);
+    expect(cacti.length).toBe(SUCCULENT_PRESETS.length);
+    const p = cloneParams(cacti.find((c) => c.name === 'Golden Barrel')!);
+    p.seed = 3;
+    const r = generateTree(p);
+    expect(plantKind(p)).toBe('succulent');
+    expect(r.skeleton).toBeNull();
+    expect(r.organs).toBeDefined();
+    expect(r.grass).toBeUndefined();
+    expect(r.report.closed && r.report.manifold).toBe(true);
+    expect(r.report.genus).toBe(0);
+    expect(r.stats.stems).toBe(r.organs!.organs);
+    expect(r.summary.stemsPerLevel).toEqual(r.organs!.perLevel);
+    expect(r.summary.height).toBeGreaterThan(0.3);
+    expect(r.buffers.index.length).toBe(r.mesh.quadCount * 6);
+  });
+
+  it('is deterministic for a given seed and differs across seeds', () => {
+    const preset = SUCCULENT_PRESETS.find((c) => c.name === 'Prickly Pear')!;
+    const a = buildSucculent(preset, 9);
+    const b = buildSucculent(preset, 9);
+    const c = buildSucculent(preset, 10);
+    const sum = (arr: ArrayLike<number>) => {
+      let t = 0;
+      for (let i = 0; i < arr.length; i++) t += arr[i] * ((i % 7) + 1);
+      return t;
+    };
+    expect(a.report.faces).toBe(b.report.faces);
+    expect(sum(a.mesh.positions)).toBe(sum(b.mesh.positions));
+    expect(sum(c.mesh.positions)).not.toBe(sum(a.mesh.positions));
+  });
+});
+
+describe('welded vegetable with its crop is a single closed manifold', () => {
+  for (const preset of VEGETABLE_PRESETS) {
+    for (const seed of [1, 7]) {
+      it(`${preset.name} seed ${seed}`, () => {
+        const built = buildVegetable(preset, seed);
+        const v = { ...DEFAULT_VEGETABLE, ...preset.vegetable };
+        expectWeldedOrganPlant(built, 0, Math.min(1, Math.max(0, v.sway)));
+        const c = built.stats.counts;
+        // The edible part is modelled: fruit / pods / ears on cropping forms, a head or storage root on rosettes.
+        if (v.form === 'rosette') {
+          if (v.headLeaves > 0) expect(c['head leaves']).toBeGreaterThan(3);
+          if (v.rootLength > 0) expect(c.root).toBe(1);
+          expect(c.blades).toBeGreaterThan(3);
+        } else {
+          const crop = (c.fruits ?? 0) + (c.pods ?? 0) + (c.ears ?? 0);
+          expect(crop, 'crop organs').toBeGreaterThan(0);
+          expect(built.stats.perLevel[3], 'level-3 organs (fruit, sepals, husks)').toBeGreaterThan(0);
+        }
+        expect((c.blades ?? 0) + (c['head leaves'] ?? 0)).toBeGreaterThan(0);
+      });
+    }
+  }
+
+  it('fruit bodies are refined to the requested resolution on a 6-sided pedicel', () => {
+    const { mesh } = buildVegetable(VEGETABLE_PRESETS.find((v) => v.name === 'Tomato')!, 1);
+    // Refinement bands are all-quad: no triangles anywhere on the plant.
+    expect(mesh.triCount).toBe(0);
+  });
+
+  it('vegetable presets carry their kind through the shared pipeline', () => {
+    const crops = PRESETS.filter(isVegetable);
+    expect(crops.length).toBe(VEGETABLE_PRESETS.length);
+    const p = cloneParams(crops.find((v) => v.name === 'Pumpkin')!);
+    p.seed = 3;
+    const r = generateTree(p);
+    expect(plantKind(p)).toBe('vegetable');
+    expect(r.skeleton).toBeNull();
+    expect(r.organs).toBeDefined();
+    expect(r.report.closed && r.report.manifold).toBe(true);
+    expect(r.report.genus).toBe(0);
+    expect(r.stats.stems).toBe(r.organs!.organs);
+    expect(r.organs!.counts.fruits).toBeGreaterThan(0);
+    expect(r.buffers.index.length).toBe(r.mesh.quadCount * 6);
+  });
+
+  it('exports a vegetable as quads to OBJ and GLB', () => {
+    const { mesh } = buildVegetable(VEGETABLE_PRESETS.find((v) => v.name === 'Bell Pepper')!, 1);
+    const leaves = new LeafMesh();
+    const obj = toOBJ(mesh, leaves, 'pepper');
+    const lines = obj.split('\n');
+    expect(lines.filter((l) => l.startsWith('v ')).length).toBe(mesh.vertexCount);
+    expect(lines.filter((l) => l.startsWith('f ') && l.trim().split(/\s+/).length === 5).length).toBe(mesh.quadCount);
+    const glb = toGLB(mesh, leaves, 'pepper');
     const dv = new DataView(glb);
     expect(dv.getUint32(0, true)).toBe(0x46546c67);
     expect(dv.getUint32(8, true)).toBe(glb.byteLength);

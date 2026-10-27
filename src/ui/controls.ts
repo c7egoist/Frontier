@@ -49,6 +49,18 @@ const ICONS: Record<string, string> = {
   grass: 'M4 21c1-6 3-10 6-13M9 21c0-7 2-12 4-16M13 21c1-6 3-11 6-14M17 21c0-5 1-8 3-10M7 21c-1-4-2-7-4-9',
   wheat: 'M12 22V9M12 9c-3 0-5-2-5-5 3 0 5 2 5 5zM12 9c3 0 5-2 5-5-3 0-5 2-5 5zM12 14c-3 0-5-2-5-5 3 0 5 2 5 5zM12 14c3 0 5-2 5-5-3 0-5 2-5 5zM12 19c-3 0-5-2-5-5 3 0 5 2 5 5zM12 19c3 0 5-2 5-5-3 0-5 2-5 5z',
   tussock: 'M12 21v-9M12 12C9 9 6 8 3 9c2 3 5 4 9 3zM12 12c3-3 6-4 9-3-2 3-5 4-9 3zM12 15c-3-1-6 0-8 3 3 0 6-1 8-3zM12 15c3-1 6 0 8 3-3 0-6-1-8-3z',
+  // Saguaro: trunk with two raised arms.
+  saguaro: 'M10 21V6a2 2 0 0 1 4 0v15M10 13H8a1.5 1.5 0 0 1-1.5-1.5V7M14 15h2a1.5 1.5 0 0 0 1.5-1.5V9M8 21h8',
+  // Barrel cactus: ribbed globe.
+  barrel: 'M12 4a8 8 0 0 1 8 8 8 8 0 0 1-8 8 8 8 0 0 1-8-8 8 8 0 0 1 8-8zM12 4v16M6.3 6.3c2 4 2 7.4 0 11.4M17.7 6.3c-2 4-2 7.4 0 11.4',
+  // Agave: rosette of pointed leaves.
+  agave: 'M12 21c0-5 0-10 0-16M12 15c-4 0-7-2-9-6M12 15c4 0 7-2 9-6M12 19c-3 0-6-1-8-3M12 19c3 0 6-1 8-3',
+  // Tomato: round fruit with a five-point calyx.
+  tomato: 'M12 8a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM12 8V5M12 8L8.5 6M12 8l3.5-2M12 8l-2 3M12 8l2 3',
+  // Pumpkin: lobed fruit with a stalk.
+  pumpkin: 'M12 7c-6 0-8 4-8 7 0 4 3 7 8 7s8-3 8-7c0-3-2-7-8-7zM12 7v14M8 8c-1.5 4-1.5 9 0 13M16 8c1.5 4 1.5 9 0 13M12 7c0-2 1-3 3-4',
+  // Carrot: tapered root with leaves.
+  carrot: 'M14 10L6 21l11-8a3 3 0 0 0-3-3zM14 10c0-3 1-5 3-7M14 10c2-1 4-2 6-2M14 10c-2-1-4-3-4-6',
 };
 
 export function icon(name: string, cls = 'i'): SVGSVGElement {

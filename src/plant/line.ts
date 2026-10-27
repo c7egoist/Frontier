@@ -104,3 +104,56 @@ export function growLine(pos: V3, dir: V3, right: V3, L: number, steps: number, 
   }
   return line;
 }
+
+/**
+ * Smooth polyline through control points (centripetal Catmull-Rom), `samples`
+ * points per segment, with `right0` transported along it. Used for organs
+ * whose path is designed in space rather than grown by the turtle: vines
+ * following the ground, head leaves wrapping a sphere, arching fruit stalks.
+ */
+export function lineThrough(pts: V3[], right0: V3, samples = 6): Line {
+  const line = new Line();
+  const n = pts.length;
+  if (n === 0) return line;
+  if (n === 1) {
+    line.push(clone(pts[0]), { x: 0, y: 1, z: 0 }, normalize(right0));
+    return line;
+  }
+  const P = (i: number): V3 => pts[Math.max(0, Math.min(n - 1, i))];
+  const sample: V3[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = P(i - 1);
+    const p1 = P(i);
+    const p2 = P(i + 1);
+    const p3 = P(i + 2);
+    const alpha = 0.5;
+    const t0 = 0;
+    const t1 = t0 + Math.pow(Math.max(1e-6, length(sub(p1, p0))), alpha);
+    const t2 = t1 + Math.pow(Math.max(1e-6, length(sub(p2, p1))), alpha);
+    const t3 = t2 + Math.pow(Math.max(1e-6, length(sub(p3, p2))), alpha);
+    const m = Math.max(1, Math.round(samples));
+    for (let k = 0; k < m; k++) {
+      const t = t1 + ((t2 - t1) * k) / m;
+      const A1 = lerp(p0, p1, (t - t0) / (t1 - t0));
+      const A2 = lerp(p1, p2, (t - t1) / (t2 - t1));
+      const A3 = lerp(p2, p3, (t - t2) / (t3 - t2));
+      const B1 = lerp(A1, A2, (t - t0) / (t2 - t0));
+      const B2 = lerp(A2, A3, (t - t1) / (t3 - t1));
+      sample.push(lerp(B1, B2, (t - t1) / (t2 - t1)));
+    }
+  }
+  sample.push(clone(pts[n - 1]));
+  // Directions by central differences, frame by transport.
+  let r = normalize(right0);
+  for (let i = 0; i < sample.length; i++) {
+    const a = sample[Math.max(0, i - 1)];
+    const b = sample[Math.min(sample.length - 1, i + 1)];
+    let d = sub(b, a);
+    d = lengthSq(d) < 1e-16 ? (i > 0 ? line.dirs[i - 1] : { x: 0, y: 1, z: 0 }) : normalize(d);
+    let rr = projectOnPlane(r, d);
+    rr = lengthSq(rr) < 1e-12 ? anyPerpendicular(d) : normalize(rr);
+    r = rr;
+    line.push(sample[i], d, rr);
+  }
+  return line;
+}

@@ -13,6 +13,8 @@
 
 import { EnvironmentParams, DEFAULT_SCATTER, scatterObstacles } from '../env/environment';
 import { GrassParams, DEFAULT_GRASS, GRASS_PRESETS, GRASS_GROUPS } from '../plant/grassParams';
+import { SucculentParams, DEFAULT_SUCCULENT, SUCCULENT_PRESETS, SUCCULENT_GROUPS } from '../plant/succulentParams';
+import { VegetableParams, DEFAULT_VEGETABLE, VEGETABLE_PRESETS, VEGETABLE_GROUPS } from '../plant/vegetableParams';
 
 export type Level4<T> = [T, T, T, T];
 
@@ -207,8 +209,12 @@ export const DEFAULT_ROOTS: RootParams = {
   dive: 0.75,
 };
 
-/** What kind of plant a parameter set describes. Trees go through the Weber-Penn skeleton, grasses through the grass mesher. */
-export type PlantKind = 'tree' | 'grass';
+/**
+ * What kind of plant a parameter set describes. Trees go through the
+ * Weber-Penn skeleton; grasses, succulents and vegetables through their own
+ * organ meshers (all of them welded single manifolds).
+ */
+export type PlantKind = 'tree' | 'grass' | 'succulent' | 'vegetable';
 
 export interface TreeParams {
   name: string;
@@ -221,9 +227,18 @@ export interface TreeParams {
   environment: EnvironmentParams;
   /** Grass description (kind === 'grass'). */
   grass?: GrassParams;
+  /** Cactus / succulent description (kind === 'succulent'). */
+  succulent?: SucculentParams;
+  /** Vegetable description (kind === 'vegetable'). */
+  vegetable?: VegetableParams;
 }
 
 export const isGrass = (p: { kind?: PlantKind }): boolean => p.kind === 'grass';
+export const isSucculent = (p: { kind?: PlantKind }): boolean => p.kind === 'succulent';
+export const isVegetable = (p: { kind?: PlantKind }): boolean => p.kind === 'vegetable';
+/** Anything that is not a Weber-Penn tree. */
+export const isOrganPlant = (p: { kind?: PlantKind }): boolean => p.kind !== undefined && p.kind !== 'tree';
+export const plantKind = (p: { kind?: PlantKind }): PlantKind => p.kind ?? 'tree';
 
 export const DEFAULT_MESH: MeshParams = {
   trunkRadialSegments: 24,
@@ -331,18 +346,28 @@ function preset(name: string, botany: Partial<BotanyParams>, mesh: Partial<MeshP
   };
 }
 
-function grassPreset(name: string, grass: Partial<GrassParams>): TreeParams {
-  const roots = { ...DEFAULT_ROOTS, enabled: false };
+function organPreset(name: string, kind: PlantKind): TreeParams {
   return {
     name,
     seed: 1,
-    kind: 'grass',
+    kind,
     botany: { ...DEFAULT_BOTANY },
     mesh: { ...DEFAULT_MESH },
-    roots,
+    roots: { ...DEFAULT_ROOTS, enabled: false },
     environment: { enabled: false, scatter: { ...DEFAULT_SCATTER, count: 0 }, obstacles: [] },
-    grass: { ...DEFAULT_GRASS, ...grass },
   };
+}
+
+function grassPreset(name: string, grass: Partial<GrassParams>): TreeParams {
+  return { ...organPreset(name, 'grass'), grass: { ...DEFAULT_GRASS, ...grass } };
+}
+
+function succulentPreset(name: string, succulent: Partial<SucculentParams>): TreeParams {
+  return { ...organPreset(name, 'succulent'), succulent: { ...DEFAULT_SUCCULENT, ...succulent } };
+}
+
+function vegetablePreset(name: string, vegetable: Partial<VegetableParams>): TreeParams {
+  return { ...organPreset(name, 'vegetable'), vegetable: { ...DEFAULT_VEGETABLE, ...vegetable } };
 }
 
 /**
@@ -1411,8 +1436,13 @@ export const TREE_PRESETS: TreeParams[] = [
   }, {}, { count: 5, radius: 0.42, length: 0.26, laterals: 2, forks: 0.5 }),
 ];
 
-/** Every species: trees first, then the grasses. */
-export const PRESETS: TreeParams[] = [...TREE_PRESETS, ...GRASS_PRESETS.map((g) => grassPreset(g.name, g.grass))];
+/** Every species: trees first, then the grasses, the cacti & succulents and the vegetables. */
+export const PRESETS: TreeParams[] = [
+  ...TREE_PRESETS,
+  ...GRASS_PRESETS.map((g) => grassPreset(g.name, g.grass)),
+  ...SUCCULENT_PRESETS.map((g) => succulentPreset(g.name, g.succulent)),
+  ...VEGETABLE_PRESETS.map((g) => vegetablePreset(g.name, g.vegetable)),
+];
 
 /** Grouping for the species list. Presets missing here are shown under "Other". */
 export const PRESET_GROUPS: { label: string; names: string[] }[] = [
@@ -1423,7 +1453,9 @@ export const PRESET_GROUPS: { label: string; names: string[] }[] = [
   { label: 'Savanna', names: ['Umbrella Thorn', 'Baobab', 'Marula', 'Fever Tree'] },
   { label: 'Desert', names: ['Joshua Tree', 'Desert Ironwood'] },
   { label: 'Rocky terrain', names: ['Bristlecone Pine', 'Rowan'] },
+  ...SUCCULENT_GROUPS,
   ...GRASS_GROUPS,
+  ...VEGETABLE_GROUPS,
 ];
 
 export function getPreset(name: string): TreeParams {

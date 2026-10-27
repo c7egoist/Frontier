@@ -4,7 +4,7 @@
  * Used by the worker, the tests and the CLI.
  */
 
-import { TreeParams, DEFAULT_ROOTS, isGrass } from './params';
+import { TreeParams, DEFAULT_ROOTS, isGrass, isSucculent, isVegetable } from './params';
 import { buildSkeleton, Skeleton } from './skeleton';
 import { buildMesh, MesherStats } from './mesher';
 import { validateTopology, TopologyReport } from './validate';
@@ -14,6 +14,11 @@ import { Environment, ObstacleMeshData, DEFAULT_ENVIRONMENT } from '../env/envir
 import { buildRoots } from './roots';
 import { GrassMesher, GrassStats } from '../plant/grassMesher';
 import { DEFAULT_GRASS } from '../plant/grassParams';
+import { SucculentMesher } from '../plant/succulentMesher';
+import { DEFAULT_SUCCULENT } from '../plant/succulentParams';
+import { VegetableMesher } from '../plant/vegetableMesher';
+import { DEFAULT_VEGETABLE } from '../plant/vegetableParams';
+import { OrganBuildResult, OrganStats } from '../plant/organMesher';
 
 export interface Timings {
   skeleton: number;
@@ -52,6 +57,8 @@ export interface GenerateResult {
   groundDepth: number;
   /** Grass mesher statistics (grasses only). */
   grass?: GrassStats;
+  /** Organ mesher statistics (succulents and vegetables; grasses also expose theirs here). */
+  organs?: OrganStats;
 }
 
 const now = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -68,6 +75,14 @@ export function completeParams(params: TreeParams): TreeParams {
 export function generateTree(params: TreeParams, options: { validate?: boolean; obstacleMeshes?: boolean } = {}): GenerateResult {
   completeParams(params);
   if (isGrass(params)) return generateGrass(params, options);
+  if (isSucculent(params)) {
+    const sp = (params.succulent = params.succulent ?? { ...DEFAULT_SUCCULENT });
+    return generateOrgans(params, options, () => new SucculentMesher(sp, params.seed).build());
+  }
+  if (isVegetable(params)) {
+    const vp = (params.vegetable = params.vegetable ?? { ...DEFAULT_VEGETABLE });
+    return generateOrgans(params, options, () => new VegetableMesher(vp, params.seed).build());
+  }
   const t0 = now();
   const skeleton = buildSkeleton(params);
   const t1 = now();
@@ -105,16 +120,23 @@ export function generateTree(params: TreeParams, options: { validate?: boolean; 
   };
 }
 
-/**
- * Grass pipeline: crown + tillers welded by the grass mesher → validation →
- * GPU buffers. The result has the same shape as a tree's so the worker, the
- * exporters and the UI treat both alike; "stems" are organs here.
- */
+/** Grass pipeline: the grass mesher's statistics are also exposed under `grass` for the inspector. */
 function generateGrass(params: TreeParams, options: { validate?: boolean; obstacleMeshes?: boolean }): GenerateResult {
   const g = params.grass ?? { ...DEFAULT_GRASS };
   params.grass = g;
+  const r = generateOrgans(params, options, () => new GrassMesher(g, params.seed).build());
+  return { ...r, grass: r.organs as GrassStats };
+}
+
+/**
+ * Organ-plant pipeline (grasses, cacti & succulents, vegetables): the family's
+ * mesher welds the whole plant → validation → GPU buffers. The result has the
+ * same shape as a tree's so the worker, the exporters and the UI treat all
+ * plants alike; "stems" are organs here.
+ */
+function generateOrgans(params: TreeParams, options: { validate?: boolean; obstacleMeshes?: boolean }, build: () => OrganBuildResult): GenerateResult {
   const t0 = now();
-  const built = new GrassMesher(g, params.seed).build();
+  const built = build();
   const t1 = now();
   const environment = new Environment(params.environment);
   const report = options.validate === false ? emptyReport(built.mesh) : validateTopology(built.mesh);
@@ -154,7 +176,7 @@ function generateGrass(params: TreeParams, options: { validate?: boolean; obstac
       obstacles: environment.count,
     },
     groundDepth: built.groundDepth,
-    grass: gs,
+    organs: gs,
   };
 }
 
