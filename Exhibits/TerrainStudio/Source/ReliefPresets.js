@@ -5,7 +5,7 @@
 //    Arid, and Volcanic & Karst provinces. Every preset is an ordinary layer stack combining tectonic/structural
 //    uplift, Gaea-style river incision, perched lakes/tarns, glacial/hydraulic/thermal erosion, and 3D SDF caves.
 
-import { ConstructLayer } from "./LayerStackEvaluation.js?v=8";
+import { ConstructLayer } from "./LayerStackEvaluation.js?v=10";
 
 export const DefaultEnvironment =
 {
@@ -48,6 +48,10 @@ export const ReliefPresets =
             ConstructLayer("RidgeUplift", {
                 Label: "Horn & arête crests", Seed: 9021,
                 Params: { Amplitude: 320, Wavelength: 800, Octaves: 5, Sharpness: 1.56, Warp: 160 },
+            }),
+            ConstructLayer("RuggedPushPull", {
+                Label: "Granite north-face buttresses", Seed: 4820,
+                Params: { Amount: 14.5, Scale: 64, Blockiness: 0.78, Ledges: 0.52, Bands: 3, SlopeMin: 30 },
             }),
             ConstructLayer("FluvialIncision", {
                 Label: "Drainage & rivers", Seed: 4817,
@@ -108,6 +112,10 @@ export const ReliefPresets =
                 Label: "Ice arêtes & horns", Seed: 8851,
                 Params: { Amplitude: 285, Wavelength: 780, Octaves: 5, Sharpness: 1.48, Warp: 155 },
             }),
+            ConstructLayer("RuggedPushPull", {
+                Label: "Lhotse gneiss cliff faces", Seed: 8852,
+                Params: { Amount: 15.0, Scale: 68, Blockiness: 0.80, Ledges: 0.56, Bands: 4, SlopeMin: 29 },
+            }),
             ConstructLayer("FluvialIncision", {
                 Label: "Antecedent gorges & rivers", Seed: 8853,
                 Params: { Strength: 2.35, Iterations: 4, Sedimentation: 0.45, Capacity: 1.15 },
@@ -162,7 +170,11 @@ export const ReliefPresets =
             }),
             ConstructLayer("StrataTerrace", {
                 Label: "Bedded limestone & shale", Seed: 1613,
-                Params: { BandMetres: 24, RiserWidth: 0.42, TerraceStrength: 0.65, HardContrast: 0.9 },
+                Params: { BandMetres: 24, RiserWidth: 0.42, TerraceStrength: 0.72, HardContrast: 0.92, Dip: 3.5, DipDirection: 42, Packaging: 0.68, Variation: 0.65 },
+            }),
+            ConstructLayer("RuggedPushPull", {
+                Label: "Redwall cliff buttresses", Seed: 1615,
+                Params: { Amount: 14.0, Scale: 62, Blockiness: 0.82, Ledges: 0.62, Bands: 4, SlopeMin: 27 },
             }),
             ConstructLayer("FluvialIncision", {
                 Label: "The Colorado River", Seed: 1617,
@@ -211,21 +223,21 @@ export const ReliefPresets =
         SeedMark: 2340,
         BuildLayers: () =>
         [
-            ConstructLayer("CellularPlateau", {
-                Label: "Sandstone mesas & wadis", Blend: "Replace", Seed: 2340,
-                Params: { Amplitude: 245, BaseElevation: 35, CellSize: 540, EdgeWidth: 0.28, HeightVariance: 0.62 },
+            ConstructLayer("SlateLandform", {
+                Label: "Hamada pediment & dunes", Blend: "Replace", Seed: 2340,
+                Params: { MountainHeight: 165, BaseElevation: 28, BaseFrequency: 1.35, RidgeSharpness: 1.85, PeakPower: 1.30, WarpStrength: 0.65, ReliefFrequency: 1.2, ReliefContrast: 0.62, PlateauStrength: 0.52, PlateauHeight: 145, DuneAmount: 22, DuneWavelength: 135, DuneDirection: 38, DuneAsymmetry: 0.72, DuneCoverage: 0.64 },
             }),
-            ConstructLayer("DomainWarp", {
-                Label: "Escarpment retreat", Seed: 2343,
-                Params: { StrengthMetres: 135, Wavelength: 560 },
-            }),
-            ConstructLayer("ContinentalMass", {
-                Label: "Pediment swell", Seed: 2347, Strength: 0.72,
-                Params: { Amplitude: 120, BaseElevation: 0, Wavelength: 960, Octaves: 5, Gain: 0.48, Warp: 130, Plateau: 0.32 },
+            ConstructLayer("RockStacks", {
+                Label: "Tiered sandstone stacks & buttes", Seed: 2343,
+                Params: { StackHeight: 165, StackLevels: 5, StackScale: 235, StackTaper: 0.30, StackSharpness: 0.94, StackChaos: 0.48, StackSpires: 0.14, StackCoverage: 0.58, StackPedestal: 0.50, StackSizeVar: 0.72, StackElongation: 0.52, StackCluster: 0.54 },
             }),
             ConstructLayer("StrataTerrace", {
                 Label: "Cuesta sandstone bedding", Seed: 2351,
-                Params: { BandMetres: 26, RiserWidth: 0.42, TerraceStrength: 0.44, HardContrast: 0.82 },
+                Params: { BandMetres: 22, RiserWidth: 0.42, TerraceStrength: 0.68, HardContrast: 0.88, Dip: 4.5, DipDirection: 32, Packaging: 0.66 },
+            }),
+            ConstructLayer("RuggedPushPull", {
+                Label: "Jointed cliff faces & ledges", Seed: 2354,
+                Params: { Amount: 14.5, Scale: 58, Blockiness: 0.82, Ledges: 0.58, Bands: 4, SlopeMin: 26 },
             }),
             ConstructLayer("FluvialIncision", {
                 Label: "Wadi canyon network", Seed: 2357,
@@ -827,5 +839,221 @@ export const ReliefPresets =
         }),
         Stamps: [],
         Camera: { Azimuth: -38, Elevation: 25, Distance: 2300 },
+    },
+    {
+        Id: "DesertStacks",
+        Label: "Desert Rock Stacks",
+        Region: "Canyonlands · 38.2° N",
+        Category: "Arid",
+        Blurb: "Gaea-style tiered sandstone rock stacks, hoodoo spires and pediment benches with undercut shale beds and blocky cliff overhangs.",
+        SeedMark: 7104,
+        BuildLayers: () =>
+        [
+            ConstructLayer("SlateLandform", {
+                Label: "Pediment floor & canyon rim", Blend: "Replace", Seed: 7104,
+                Params: { MountainHeight: 130, BaseElevation: 24, BaseFrequency: 1.2, RidgeSharpness: 1.7, PeakPower: 1.25, WarpStrength: 0.55, ReliefFrequency: 1.1, ReliefContrast: 0.58, DuneAmount: 16, DuneWavelength: 125, DuneDirection: 42, DuneAsymmetry: 0.72, DuneCoverage: 0.55 },
+            }),
+            ConstructLayer("RockStacks", {
+                Label: "Tiered sandstone stacks", Seed: 7109,
+                Params: { StackHeight: 195, StackLevels: 6, StackScale: 225, StackTaper: 0.32, StackSharpness: 0.95, StackChaos: 0.50, StackSpires: 0.18, StackCoverage: 0.64, StackPedestal: 0.52, StackSizeVar: 0.78, StackElongation: 0.54, StackCluster: 0.58 },
+            }),
+            ConstructLayer("StrataTerrace", {
+                Label: "Cedar Mesa sandstone beds", Seed: 7117,
+                Params: { BandMetres: 20, TerraceStrength: 0.78, HardContrast: 0.92, Dip: 3.0, DipDirection: 28, Packaging: 0.72, Variation: 0.65 },
+            }),
+            ConstructLayer("RuggedPushPull", {
+                Label: "Overhanging caprock ledges", Seed: 7123,
+                Params: { Amount: 16.5, Scale: 56, Blockiness: 0.85, Ledges: 0.64, Bands: 4, SlopeMin: 26 },
+            }),
+            ConstructLayer("FluvialIncision", {
+                Label: "Arroyo & pediment channels", Seed: 7129,
+                Params: { Strength: 1.45, Iterations: 3, Sedimentation: 0.62, Capacity: 1.05 },
+            }),
+            ConstructLayer("HydraulicErosion", {
+                Label: "Pedestal rill carving", Seed: 7137,
+                Params: { Droplets: 140000, Inertia: 0.24, Capacity: 4.0, ErodeRate: 0.30, DepositRate: 0.34, Radius: 2 },
+            }),
+            ConstructLayer("ThermalErosion", {
+                Label: "Talus skirts & cliff repose", Seed: 7143,
+                Params: { Iterations: 48, TalusAngle: 33, CliffAngle: 78, Rate: 0.48 },
+            }),
+            ConstructLayer("CaveNetwork", {
+                Label: "Sandstone arch & alcove caves (SDF)", Seed: 7151,
+                Params: { CaveCount: 2, Aperture: 16, TunnelDepth: 72, Blend: 7 },
+            }),
+        ],
+        Environment: Environment(
+        {
+            SunAzimuth: 134, SunElevation: 39, SunIntensity: 3.45, WaterLevel: -40,
+            FogDensity: 0.000075, FogColour: [0.84, 0.73, 0.58],
+            SkyZenith: [0.18, 0.38, 0.67], SkyHorizon: [0.90, 0.80, 0.64],
+            RockLow: [0.50, 0.24, 0.14], RockHigh: [0.76, 0.44, 0.26],
+            SandTint: [0.84, 0.62, 0.38], ScreeTint: [0.58, 0.35, 0.21],
+            MeadowTint: [0.30, 0.34, 0.16], DryTint: [0.60, 0.44, 0.25],
+            WaterTint: [0.09, 0.30, 0.28],
+            Vegetation: 0.12, StrataContrast: 0.94,
+        }),
+        Stamps: [],
+        Camera: { Azimuth: -42, Elevation: 23, Distance: 2280 },
+    },
+    {
+        Id: "CoastalCliffs",
+        Label: "Coastal Escarpment & Stacks",
+        Region: "North Atlantic · 58.6° N",
+        Category: "Fluvial",
+        Blurb: "Wave-cut headland cliffs and offshore sea stacks dropping sheer from a stream-incised coastal plateau into the sea.",
+        SeedMark: 5860,
+        BuildLayers: () =>
+        [
+            ConstructLayer("SlateLandform", {
+                Label: "Headland plateau & sea stacks", Blend: "Replace", Seed: 5860,
+                Params: { MountainHeight: 220, BaseElevation: -25, BaseFrequency: 1.25, RidgeSharpness: 1.85, PeakPower: 1.25, WarpStrength: 0.55, ReliefFrequency: 0.85, ReliefContrast: 0.82, CliffHeight: 245, CliffSharpness: 0.95, CliffStacks: 0.82, PlateauStrength: 0.76, PlateauHeight: 240 },
+            }),
+            ConstructLayer("StrataTerrace", {
+                Label: "Old Red Sandstone bedding", Seed: 5867,
+                Params: { BandMetres: 18, TerraceStrength: 0.74, HardContrast: 0.90, Dip: 5.5, DipDirection: 65, Packaging: 0.68 },
+            }),
+            ConstructLayer("RuggedPushPull", {
+                Label: "Wave-quarried cliff buttresses", Seed: 5873,
+                Params: { Amount: 17.5, Scale: 58, Blockiness: 0.86, Ledges: 0.68, Bands: 4, SlopeMin: 25 },
+            }),
+            ConstructLayer("FluvialIncision", {
+                Label: "Hanging plateau streams", Seed: 5879,
+                Params: { Strength: 1.65, Iterations: 3, Sedimentation: 0.48, Capacity: 1.05 },
+            }),
+            ConstructLayer("HydraulicErosion", {
+                Label: "Cliff-top rill wash", Seed: 5883,
+                Params: { Droplets: 120000, Inertia: 0.25, Capacity: 3.8, ErodeRate: 0.28, DepositRate: 0.30, Radius: 2 },
+            }),
+            ConstructLayer("ThermalErosion", {
+                Label: "Boulder beach & cliff repose", Seed: 5891,
+                Params: { Iterations: 38, TalusAngle: 35, CliffAngle: 80, Rate: 0.45 },
+            }),
+            ConstructLayer("CaveNetwork", {
+                Label: "Sea caves & blowholes (SDF)", Seed: 5897,
+                Params: { CaveCount: 3, Aperture: 18, TunnelDepth: 85, Blend: 7 },
+            }),
+        ],
+        Environment: Environment(
+        {
+            SunAzimuth: 126, SunElevation: 33, SunIntensity: 3.25, WaterLevel: 52,
+            FogDensity: 0.000105, FogColour: [0.68, 0.74, 0.79],
+            SkyZenith: [0.14, 0.31, 0.58], SkyHorizon: [0.78, 0.83, 0.87],
+            RockLow: [0.26, 0.23, 0.21], RockHigh: [0.50, 0.43, 0.38],
+            SandTint: [0.64, 0.58, 0.46], ScreeTint: [0.38, 0.35, 0.32],
+            MeadowTint: [0.15, 0.35, 0.12], DryTint: [0.40, 0.36, 0.20],
+            WaterTint: [0.04, 0.24, 0.32],
+            Vegetation: 0.88, StrataContrast: 0.82,
+        }),
+        Stamps: [],
+        Camera: { Azimuth: -34, Elevation: 23, Distance: 2300 },
+    },
+    {
+        Id: "Tepui",
+        Label: "Tepui Tabletop",
+        Region: "Guiana Shield · 5.2° N",
+        Category: "Volcanic",
+        Blurb: "Roraima-style Precambrian quartzite tabletop mountain ringed by sheer overhanging 400 m vertical cliff walls above cloud-forest slopes.",
+        SeedMark: 5204,
+        BuildLayers: () =>
+        [
+            ConstructLayer("SlateLandform", {
+                Label: "Roraima tabletop & escarpment", Blend: "Replace", Seed: 5204,
+                Params: { MountainHeight: 280, BaseElevation: 45, BaseFrequency: 1.15, RidgeSharpness: 1.9, PeakPower: 1.3, WarpStrength: 0.55, ReliefFrequency: 0.90, ReliefContrast: 0.88, CliffHeight: 290, CliffSharpness: 0.97, CliffStacks: 0.35, PlateauStrength: 0.88, PlateauHeight: 390 },
+            }),
+            ConstructLayer("RockStacks", {
+                Label: "Summit turret bastions", Seed: 5211, Strength: 0.65,
+                Params: { StackHeight: 120, StackLevels: 4, StackScale: 260, StackTaper: 0.32, StackSharpness: 0.92, StackChaos: 0.45, StackSpires: 0.15, StackCoverage: 0.48, StackPedestal: 0.35, StackSizeVar: 0.65, StackElongation: 0.55, StackCluster: 0.60 },
+            }),
+            ConstructLayer("StrataTerrace", {
+                Label: "Precambrian quartzite beds", Seed: 5219,
+                Params: { BandMetres: 26, TerraceStrength: 0.82, HardContrast: 0.94, Dip: 2.0, DipDirection: 18, Packaging: 0.78 },
+            }),
+            ConstructLayer("RuggedPushPull", {
+                Label: "Overhanging prows & chimneys", Seed: 5227,
+                Params: { Amount: 19.0, Scale: 62, Blockiness: 0.88, Ledges: 0.72, Bands: 4, SlopeMin: 26 },
+            }),
+            ConstructLayer("FluvialIncision", {
+                Label: "Tabletop cascades & rivers", Seed: 5233,
+                Params: { Strength: 1.85, Iterations: 4, Sedimentation: 0.52, Capacity: 1.08 },
+            }),
+            ConstructLayer("HydraulicErosion", {
+                Label: "Tropical cloudburst wash", Seed: 5239,
+                Params: { Droplets: 135000, Inertia: 0.25, Capacity: 4.0, ErodeRate: 0.30, DepositRate: 0.32, Radius: 2 },
+            }),
+            ConstructLayer("ThermalErosion", {
+                Label: "Jungle talus skirt", Seed: 5247,
+                Params: { Iterations: 42, TalusAngle: 34, CliffAngle: 82, Rate: 0.46 },
+            }),
+            ConstructLayer("CaveNetwork", {
+                Label: "Quartzite sinkhole caves (SDF)", Seed: 5253,
+                Params: { CaveCount: 3, Aperture: 17, TunnelDepth: 84, Blend: 7 },
+            }),
+        ],
+        Environment: Environment(
+        {
+            SunAzimuth: 138, SunElevation: 37, SunIntensity: 3.25, WaterLevel: 82,
+            FogDensity: 0.000120, FogColour: [0.68, 0.75, 0.74],
+            SkyZenith: [0.16, 0.36, 0.62], SkyHorizon: [0.78, 0.84, 0.82],
+            RockLow: [0.22, 0.20, 0.20], RockHigh: [0.54, 0.42, 0.38],
+            SandTint: [0.72, 0.58, 0.44], ScreeTint: [0.34, 0.31, 0.29],
+            MeadowTint: [0.12, 0.34, 0.11], DryTint: [0.34, 0.32, 0.18],
+            WaterTint: [0.05, 0.30, 0.28],
+            Vegetation: 0.92, StrataContrast: 0.88,
+        }),
+        Stamps: [],
+        Camera: { Azimuth: -38, Elevation: 24, Distance: 2350 },
+    },
+    {
+        Id: "GraniteTors",
+        Label: "Granite Tors & Moorland",
+        Region: "Dartmoor · 50.6° N",
+        Category: "Fluvial",
+        Blurb: "Weathered granite uplands crowned by jointed woolsack core-stone tors and boulder fields above peat-stained moorland streams.",
+        SeedMark: 5060,
+        BuildLayers: () =>
+        [
+            ConstructLayer("SlateLandform", {
+                Label: "Moorland granite batholith", Blend: "Replace", Seed: 5060,
+                Params: { MountainHeight: 340, BaseElevation: 55, BaseFrequency: 1.35, RidgeSharpness: 1.55, PeakPower: 1.20, WarpStrength: 0.50, ReliefFrequency: 1.15, ReliefContrast: 0.58 },
+            }),
+            ConstructLayer("BoulderTors", {
+                Label: "Jointed core-stone tors", Seed: 5067,
+                Params: { Density: 0.72, Size: 18, Spacing: 175, Count: 7, RidgeBias: 0.72, SlopeMax: 30, Weather: 0.52 },
+            }),
+            ConstructLayer("StrataTerrace", {
+                Label: "Horizontal granite sheet joints", Seed: 5073,
+                Params: { BandMetres: 14, TerraceStrength: 0.54, HardContrast: 0.78, Dip: 2.5, DipDirection: 40, Packaging: 0.55 },
+            }),
+            ConstructLayer("RuggedPushPull", {
+                Label: "Blocky tor crags", Seed: 5079,
+                Params: { Amount: 12.0, Scale: 48, Blockiness: 0.80, Ledges: 0.52, Bands: 3, SlopeMin: 26 },
+            }),
+            ConstructLayer("FluvialIncision", {
+                Label: "Moorland becks & pools", Seed: 5083,
+                Params: { Strength: 1.95, Iterations: 4, Sedimentation: 0.56, Capacity: 1.08 },
+            }),
+            ConstructLayer("HydraulicErosion", {
+                Label: "Peat & grus wash", Seed: 5089,
+                Params: { Droplets: 135000, Inertia: 0.26, Capacity: 3.9, ErodeRate: 0.28, DepositRate: 0.32, Radius: 2 },
+            }),
+            ConstructLayer("ThermalErosion", {
+                Label: "Clitter boulder aprons", Seed: 5097,
+                Params: { Iterations: 46, TalusAngle: 34, CliffAngle: 76, Rate: 0.48 },
+            }),
+        ],
+        Environment: Environment(
+        {
+            SunAzimuth: 130, SunElevation: 34, SunIntensity: 3.15, WaterLevel: 92,
+            FogDensity: 0.000105, FogColour: [0.68, 0.73, 0.76],
+            SkyZenith: [0.16, 0.33, 0.58], SkyHorizon: [0.78, 0.82, 0.85],
+            RockLow: [0.28, 0.27, 0.26], RockHigh: [0.54, 0.52, 0.49],
+            SandTint: [0.62, 0.55, 0.42], ScreeTint: [0.42, 0.40, 0.37],
+            MeadowTint: [0.18, 0.33, 0.12], DryTint: [0.45, 0.37, 0.20],
+            WaterTint: [0.06, 0.25, 0.28],
+            Vegetation: 0.86, StrataContrast: 0.48,
+        }),
+        Stamps: [],
+        Camera: { Azimuth: -36, Elevation: 24, Distance: 2250 },
     },
 ];

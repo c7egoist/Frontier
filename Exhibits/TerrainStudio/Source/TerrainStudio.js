@@ -10,12 +10,12 @@
 //    any layer's mask or read directly by the material splat. Sculpt strokes live in their own delta
 //    field applied by a stack layer, so hand work survives downstream re-erosion like real geology.
 
-import { ReliefField, LatticeNoise, Resolution, TexelSize, WorldExtent, DerivedChannels, MaterialPaintChannels } from "./ReliefField.js?v=8";
-import { LayerStackEvaluation, LayerTypes, LayerTypeById, ConstructLayer } from "./LayerStackEvaluation.js?v=8";
-import { ReliefPresets } from "./ReliefPresets.js?v=8";
-import { ReliefRasterization } from "./ReliefRasterization.js?v=8";
-import { PolygoniseStamps, ConstructStamp, ConstructCave, StampShapes } from "./DistanceStamps.js?v=8";
-import { Cancellation, BakeSurfaceData } from "./ErosionSequence.js?v=8";
+import { ReliefField, LatticeNoise, Resolution, TexelSize, WorldExtent, DerivedChannels, MaterialPaintChannels } from "./ReliefField.js?v=10";
+import { LayerStackEvaluation, LayerTypes, LayerTypeById, ConstructLayer } from "./LayerStackEvaluation.js?v=10";
+import { ReliefPresets } from "./ReliefPresets.js?v=10";
+import { ReliefRasterization } from "./ReliefRasterization.js?v=10";
+import { PolygoniseStamps, ConstructStamp, ConstructCave, StampShapes } from "./DistanceStamps.js?v=10";
+import { Cancellation, BakeSurfaceData } from "./ErosionSequence.js?v=10";
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
 //                                                                  GLYPHS

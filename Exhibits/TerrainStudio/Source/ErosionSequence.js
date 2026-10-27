@@ -11,7 +11,7 @@
 //    thermal relaxation holds every slope at or below its angle of repose; glacial polish widens trunk
 //    valleys into U profiles; the slab transport model moves sand downwind and drops it in wind shadow.
 
-import { Resolution, TexelSize, ConstructRandomStream, LatticeNoise } from "./ReliefField.js?v=8";
+import { Resolution, WorldExtent, TexelSize, ConstructRandomStream, LatticeNoise, SimplexNoise, GradientNoise3, Mulberry32, HashCoords } from "./ReliefField.js?v=10";
 
 const YieldInterval = 4096;   // completions between yields to the browser
 
@@ -1250,6 +1250,418 @@ export function ApplyRuggedOutcropsAndRocks(Field, Params = {})
             Hardness[Index] = Math.max(Hardness[Index], Math.min(0.64 + TotalLift * 0.12, 0.98));
         }
     }
+}
+
+
+//--------------------------------------------------------------------------------------------------------------------------------------------
+//                                              SLATE STRATIGRAPHIC PACKAGES & DIP (STRATA-MODEL PORT)
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+function SmoothStep01(Edge0, Edge1, X)
+{
+    const T = Math.min(1.0, Math.max(0.0, (X - Edge0) / Math.max(Edge1 - Edge0, 1e-6)));
+    return T * T * (3.0 - 2.0 * T);
+}
+
+export function ConstructBedTable(Params)
+{
+    const Band      = Math.max(2.0, Params.BandMetres || Params.strataBand || 26.0);
+    const Variation = Params.Variation !== undefined ? Params.Variation : 0.6;
+    const Packaging = Params.Packaging !== undefined ? Params.Packaging : 0.6;
+    const HardShare = Params.HardShare !== undefined ? Params.HardShare : 0.38;
+    const Seed      = (Params.Seed || 1) | 0;
+    const NextRand  = Mulberry32(((Seed * 977 + 13) >>> 0));
+    const Gauss = () =>
+    {
+        const U = Math.max(1e-6, NextRand()), W = NextRand();
+        return Math.sqrt(-2.0 * Math.log(U)) * Math.cos(2.0 * Math.PI * W);
+    };
+    const Tops = [], Hard = [], Thick = [], Grad = [];
+    let Elev = -1500.0, Guard = 0;
+    while (Elev < 5000.0 && Guard++ < 4000)
+    {
+        const Draw = NextRand();
+        const BedGroup = Draw < Packaging * 0.45 ? 0 : Draw < Packaging * 0.72 ? 1 : 2;
+        const Count = 2 + Math.floor(NextRand() * 6.0);
+        for (let Sub = 0; Sub < Count && Elev < 5000.0; Sub++)
+        {
+            let BedThick = Band * Math.exp(Gauss() * 0.5 * Variation) * (BedGroup === 0 ? 0.42 : BedGroup === 1 ? 1.45 : 1.0);
+            BedThick = Math.max(Band * 0.12, Math.min(Band * 4.0, BedThick));
+            let BedHard;
+            if (BedGroup === 0)
+                BedHard = NextRand() < 0.15 ? 0.62 + 0.30 * NextRand() : 0.02 + 0.24 * NextRand();
+            else if (BedGroup === 1)
+                BedHard = NextRand() < 0.18 ? 0.08 + 0.22 * NextRand() : 0.72 + 0.28 * NextRand();
+            else
+                BedHard = NextRand() < HardShare ? 0.66 + 0.34 * NextRand() : 0.03 + 0.27 * NextRand();
+            Elev += BedThick;
+            Tops.push(Elev);
+            Hard.push(BedHard);
+            Thick.push(BedThick);
+            Grad.push(BedHard > 0.5 && NextRand() < 0.4 ? 1 : 0);
+        }
+    }
+    return {
+        Count: Tops.length,
+        Band,
+        Tops:  Float32Array.from(Tops),
+        Hard:  Float32Array.from(Hard),
+        Thick: Float32Array.from(Thick),
+        Grad:  Uint8Array.from(Grad),
+    };
+}
+
+export function SampleBedAt(Table, TiltedElev, Out)
+{
+    const Tops = Table.Tops;
+    let Lo = 0, Hi = Table.Count - 1;
+    while (Lo < Hi)
+    {
+        const Mid = (Lo + Hi) >> 1;
+        if (TiltedElev < Tops[Mid]) Hi = Mid;
+        else Lo = Mid + 1;
+    }
+    const Top = Tops[Lo], Thick = Table.Thick[Lo];
+    Out.Index = Lo;
+    Out.Frac  = Math.max(0.0, Math.min(1.0, (TiltedElev - (Top - Thick)) / Thick));
+    Out.Thick = Thick;
+    Out.Hard  = Table.Hard[Lo];
+    Out.Grad  = Table.Grad[Lo];
+    return Out;
+}
+
+export function BedJitter(WorldX, WorldZ, Amount = 0.22)
+{
+    const WaveA = Math.sin(WorldX * 0.0091 + 0.7 * Math.sin(WorldZ * 0.0063 + 1.3));
+    const WaveB = Math.cos(WorldZ * 0.0077 + 0.5 * Math.sin(WorldX * 0.0052 + 0.4));
+    return 1.0 + Amount * (0.6 * WaveA + 0.4 * WaveB);
+}
+
+export function ApplyStrataPackages(Field, Params, OutcropMask = null)
+{
+    const Heights  = Field.Heights;
+    const Hardness = Field.ChannelSamples("Hardness");
+    const N        = Resolution;
+    const Band     = Math.max(2.0, Params.BandMetres || 24.0);
+    const Strength = Params.TerraceStrength !== undefined ? Params.TerraceStrength : 0.72;
+    const Contrast = Params.HardContrast !== undefined ? Params.HardContrast : 0.85;
+    const DipDeg   = Params.Dip !== undefined ? Params.Dip : 4.0;
+    const DirDeg   = Params.DipDirection !== undefined ? Params.DipDirection : 35.0;
+    const Lateral  = Params.Lateral !== undefined ? Params.Lateral : 0.24;
+    const Seed     = (Params.Seed || 1613) | 0;
+
+    const DipRad = (DipDeg * Math.PI) / 180.0;
+    const DirRad = (DirDeg * Math.PI) / 180.0;
+    const DipGx  = Math.tan(DipRad) * Math.cos(DirRad);
+    const DipGz  = Math.tan(DipRad) * Math.sin(DirRad);
+
+    const DetailNoise = new SimplexNoise(Seed * 5 + 77);
+    const Table       = ConstructBedTable({ BandMetres: Band, Variation: Params.Variation, Packaging: Params.Packaging, HardShare: Params.HardShare, Seed });
+    const BedSample   = { Index: 0, Frac: 0.0, Thick: Band, Hard: 0.5, Grad: 0 };
+
+    const SlopeMap = new Float32Array(N * N);
+    for (let Z = 0; Z < N; Z++)
+    {
+        const Z0 = Math.max(0, Z - 1), Z1 = Math.min(N - 1, Z + 1);
+        for (let X = 0; X < N; X++)
+        {
+            const X0 = Math.max(0, X - 1), X1 = Math.min(N - 1, X + 1);
+            const Dx = (Heights[Z * N + X1] - Heights[Z * N + X0]) / ((X1 - X0) * TexelSize);
+            const Dz = (Heights[Z1 * N + X] - Heights[Z0 * N + X]) / ((Z1 - Z0) * TexelSize);
+            SlopeMap[Z * N + X] = Math.hypot(Dx, Dz);
+        }
+    }
+
+    for (let Z = 0; Z < N; Z++)
+    {
+        const WorldZ = Z * TexelSize;
+        for (let X = 0; X < N; X++)
+        {
+            const WorldX = X * TexelSize;
+            const Idx    = Z * N + X;
+            const H      = Heights[Idx];
+            const Tilt   = DipGx * WorldX + DipGz * WorldZ;
+            const Jitter = BedJitter(WorldX, WorldZ, Lateral);
+            SampleBedAt(Table, (H + Tilt) / Jitter, BedSample);
+            const Frac = BedSample.Frac;
+            const Bi   = BedSample.Index;
+
+            let Hard = BedSample.Grad ? BedSample.Hard * (0.55 + 0.45 * Frac) : BedSample.Hard;
+            Hard = Math.min(1.0, Math.max(0.0, Hard + 0.12 * DetailNoise.Fbm(WorldX * 0.006 + Bi * 3.7, WorldZ * 0.006, 3)));
+            Hard = 0.35 + (Hard - 0.35) * Contrast;
+
+            const SteepK = 1.2 + 7.8 * Hard;
+            const FracK  = Math.pow(Frac, SteepK);
+            const StepF  = FracK / (FracK + Math.pow(1.0 - Frac, SteepK));
+            const Thin   = SmoothStep01(0.08, 0.30, BedSample.Thick / Band);
+            const Terraced = (Table.Tops[Bi] - BedSample.Thick + (Frac + (StepF - Frac) * Thin) * BedSample.Thick) * Jitter - Tilt;
+
+            const SlopeMask = SmoothStep01(0.28, 0.78, SlopeMap[Idx]);
+            const StrikeExpr = 0.55 + 0.45 * (0.5 + 0.5 * DetailNoise.Fbm(WorldX * 0.0045 + Bi * 1.9, WorldZ * 0.0045 - Bi * 0.7, 2));
+            let Amount = Math.min(0.95, Strength * SlopeMask * (0.5 + 0.6 * Hard) * StrikeExpr);
+            if (OutcropMask && OutcropMask[Idx] > 0.0)
+                Amount *= (1.0 - OutcropMask[Idx]);
+
+            Heights[Idx]  = H + (Terraced - H) * Amount;
+            Hardness[Idx] = Math.max(Hardness[Idx] * 0.25, Hard);
+        }
+    }
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------------------
+//                                              SLATE RUGGED LATERAL PUSH-PULL CLIFFS (RUGGED.JS PORT)
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+function StairStep(Val, Steps, Sharp)
+{
+    const Scaled = Val * Steps;
+    const Frac   = Scaled - Math.floor(Scaled);
+    const Edge   = 0.5 - 0.5 * Sharp;
+    return (Math.floor(Scaled) + SmoothStep01(Edge, 1.0 - Edge, Frac)) / Steps;
+}
+
+function BlockifySignal(Val, Steps, Sharp)
+{
+    const Norm = Math.min(1.0, Math.max(0.0, (Val + 1.0) * 0.5));
+    return StairStep(Norm, Steps, Sharp) * 2.0 - 1.0;
+}
+
+export function RuggedPushPull(Field, Params)
+{
+    const Amount = Params.Amount !== undefined ? Params.Amount : 14.0;
+    if (Amount <= 0.01)
+        return;
+    const Heights  = Field.Heights;
+    const Hardness = Field.ChannelSamples("Hardness");
+    const Snow     = Field.ChannelSamples("Snow");
+    const N        = Resolution;
+    const Total    = N * N;
+    const ScaleL   = Math.max(TexelSize * 3.0, Params.Scale || 68.0);
+    const Blocky   = Math.min(1.0, Math.max(0.0, Params.Blockiness !== undefined ? Params.Blockiness : 0.72));
+    const Ledges   = Math.max(0.0, Params.Ledges !== undefined ? Params.Ledges : 0.52);
+    const Bands    = Math.max(1, Math.round(Params.Bands || 3));
+    const SlopeMin = Params.SlopeMin !== undefined ? Params.SlopeMin : 28.0;
+    const SlopeMax = Params.SlopeMax !== undefined ? Params.SlopeMax : SlopeMin + 22.0;
+    const TanMin   = Math.tan((SlopeMin * Math.PI) / 180.0);
+    const TanMax   = Math.tan((SlopeMax * Math.PI) / 180.0);
+    const Seed     = (Params.Seed || 1) | 0;
+
+    const Noise2 = new SimplexNoise(Seed * 29 + 5);
+    const Noise3 = new GradientNoise3(Seed * 31 + 17);
+
+    let Mask = new Float32Array(Total);
+    const GradX = new Float32Array(Total);
+    const GradZ = new Float32Array(Total);
+    for (let Z = 0; Z < N; Z++)
+    {
+        const Z0 = Math.max(0, Z - 1), Z1 = Math.min(N - 1, Z + 1);
+        for (let X = 0; X < N; X++)
+        {
+            const X0 = Math.max(0, X - 1), X1 = Math.min(N - 1, X + 1);
+            const Idx = Z * N + X;
+            const Dx = (Heights[Z * N + X1] - Heights[Z * N + X0]) / ((X1 - X0) * TexelSize);
+            const Dz = (Heights[Z1 * N + X] - Heights[Z0 * N + X]) / ((Z1 - Z0) * TexelSize);
+            GradX[Idx] = Dx;
+            GradZ[Idx] = Dz;
+            Mask[Idx]  = SmoothStep01(TanMin, TanMax, Math.hypot(Dx, Dz));
+        }
+    }
+    const BlurRad = Math.max(1, Math.min(16, Math.round(ScaleL * 0.22 / TexelSize)));
+    Mask = BoxBlurInPlace(BoxBlurInPlace(Mask, BlurRad), BlurRad);
+
+    const DispX = new Float32Array(Total);
+    const DispZ = new Float32Array(Total);
+    const DispY = new Float32Array(Total);
+    for (let Z = 0; Z < N; Z++)
+    {
+        const WorldZ = (Z + 0.5) * TexelSize - WorldExtent * 0.5;
+        for (let X = 0; X < N; X++)
+        {
+            const Idx = Z * N + X;
+            const M = Mask[Idx];
+            if (M < 0.01)
+                continue;
+            const WorldX = (X + 0.5) * TexelSize - WorldExtent * 0.5;
+            const WorldY = Heights[Idx];
+            let Coarse = Noise3.Fbm(WorldX / ScaleL, WorldY / (ScaleL * 0.55), WorldZ / ScaleL, 2, 2.1, 0.5) * 1.4;
+            Coarse = (1.0 - Blocky) * Coarse + Blocky * BlockifySignal(Coarse, Bands, 0.75);
+            let Fine = Noise2.Fbm(WorldX / (ScaleL * 0.33) + 7.3, WorldZ / (ScaleL * 0.33) - 2.1, 3, 2.2, 0.5) * 1.4;
+            Fine = (1.0 - Blocky) * Fine + Blocky * BlockifySignal(Fine, 2, 0.70);
+            const Signal = Coarse * 0.72 + Fine * 0.38;
+            const GradLen = Math.hypot(GradX[Idx], GradZ[Idx]) || 1.0;
+            const OutX = -GradX[Idx] / GradLen;
+            const OutZ = -GradZ[Idx] / GradLen;
+            const Shift = Amount * M * Signal;
+            DispX[Idx] = OutX * Shift;
+            DispZ[Idx] = OutZ * Shift;
+            DispY[Idx] = Amount * Ledges * M * Signal * 0.35;
+        }
+    }
+    const SmoothDx = BoxBlurInPlace(DispX, 1);
+    const SmoothDz = BoxBlurInPlace(DispZ, 1);
+    const SrcH     = new Float32Array(Heights);
+    const SrcHard  = new Float32Array(Hardness);
+
+    const SampleGrid = (Arr, Fx, Fz) =>
+    {
+        const X0 = Math.floor(Fx), Z0 = Math.floor(Fz);
+        const Tx = Fx - X0, Tz = Fz - Z0;
+        const X1 = Math.min(N - 1, X0 + 1), Z1 = Math.min(N - 1, Z0 + 1);
+        const A = Arr[Z0 * N + X0], B = Arr[Z0 * N + X1], C = Arr[Z1 * N + X0], D = Arr[Z1 * N + X1];
+        return (A * (1.0 - Tx) + B * Tx) * (1.0 - Tz) + (C * (1.0 - Tx) + D * Tx) * Tz;
+    };
+
+    for (let Z = 0; Z < N; Z++)
+    {
+        for (let X = 0; X < N; X++)
+        {
+            const Idx = Z * N + X;
+            const Dx = SmoothDx[Idx], Dz = SmoothDz[Idx], Dy = DispY[Idx];
+            if (Dx === 0.0 && Dz === 0.0 && Dy === 0.0)
+                continue;
+            const Fx = Math.min(N - 1.001, Math.max(0.0, X - Dx / TexelSize));
+            const Fz = Math.min(N - 1.001, Math.max(0.0, Z - Dz / TexelSize));
+            Heights[Idx]  = SampleGrid(SrcH, Fx, Fz) + Dy;
+            Hardness[Idx] = Math.max(Hardness[Idx], SampleGrid(SrcHard, Fx, Fz));
+            if (Math.abs(Dy) > 1.2)
+                Snow[Idx] *= Math.max(0.0, 1.0 - Math.abs(Dy) * 0.18);
+        }
+    }
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------------------
+//                                              SLATE SUPERELLIPSOID BOULDER TORS (OUTCROPS.JS PORT)
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+export function AddBoulderTors(Field, Params)
+{
+    const Density = Math.min(1.0, Math.max(0.0, Params.Density !== undefined ? Params.Density : 0.45));
+    const N = Resolution;
+    const Mask = new Float32Array(N * N);
+    if (Density <= 0.001)
+        return Mask;
+
+    const Heights    = Field.Heights;
+    const Hardness   = Field.ChannelSamples("Hardness");
+    const Deposition = Field.ChannelSamples("Deposition");
+    const Snow       = Field.ChannelSamples("Snow");
+    const Seed       = (Params.Seed || 1) | 0;
+    const NextRand   = Mulberry32(Seed * 131 + 9);
+    const BulgeNoise = new SimplexNoise(Seed * 7 + 3);
+    const BaseH      = new Float32Array(Heights);
+
+    const Radius     = Math.max(TexelSize * 2.0, Params.Size || 16.0);
+    const Spacing    = Math.max(Radius * 3.0, Params.Spacing || 200.0);
+    const PerCluster = Math.max(1, Math.round(Params.Count !== undefined ? Params.Count : 5));
+    const Aspect     = Params.Aspect !== undefined ? Params.Aspect : 0.72;
+    const Bury       = Math.min(1.0, Math.max(0.0, Params.Bury !== undefined ? Params.Bury : 0.38));
+    const RidgeBias  = Math.min(1.0, Math.max(0.0, Params.RidgeBias !== undefined ? Params.RidgeBias : 0.55));
+    const SlopeMax   = Math.tan(((Params.SlopeMax !== undefined ? Params.SlopeMax : 30.0) * Math.PI) / 180.0);
+    const Weather    = Math.min(1.0, Math.max(0.0, Params.Weather !== undefined ? Params.Weather : 0.55));
+    const Spread     = Params.Spread !== undefined ? Params.Spread : 1.55;
+
+    const SampleBase = (Wx, Wz) =>
+    {
+        const U = Math.min(1.0, Math.max(0.0, Wx / WorldExtent)) * (N - 1);
+        const W = Math.min(1.0, Math.max(0.0, Wz / WorldExtent)) * (N - 1);
+        const I = Math.min(N - 2, Math.floor(U)), J = Math.min(N - 2, Math.floor(W));
+        const Fu = U - I, Fw = W - J;
+        const A = BaseH[J * N + I], B = BaseH[J * N + I + 1], C = BaseH[(J + 1) * N + I], D = BaseH[(J + 1) * N + I + 1];
+        return (A * (1.0 - Fu) + B * Fu) * (1.0 - Fw) + (C * (1.0 - Fu) + D * Fu) * Fw;
+    };
+    const SlopeAtPos = (Wx, Wz, Rad) =>
+    {
+        const Dx = (SampleBase(Wx + Rad, Wz) - SampleBase(Wx - Rad, Wz)) / (2.0 * Rad);
+        const Dz = (SampleBase(Wx, Wz + Rad) - SampleBase(Wx, Wz - Rad)) / (2.0 * Rad);
+        return Math.hypot(Dx, Dz);
+    };
+    const ReliefAtPos = (Wx, Wz, Rad) =>
+    {
+        let Sum = 0.0;
+        for (let K = 0; K < 8; K++)
+        {
+            const Ang = (K / 8.0) * Math.PI * 2.0;
+            Sum += SampleBase(Wx + Math.cos(Ang) * Rad, Wz + Math.sin(Ang) * Rad);
+        }
+        return SampleBase(Wx, Wz) - Sum / 8.0;
+    };
+
+    const Boulders = [];
+    const Margin = Radius * 2.0;
+    const GridCount = Math.max(1, Math.floor(WorldExtent / Spacing));
+    for (let Gj = 0; Gj < GridCount; Gj++)
+    {
+        for (let Gi = 0; Gi < GridCount; Gi++)
+        {
+            const R0 = NextRand(), R1 = NextRand(), R2 = NextRand(), R3 = NextRand();
+            const Cx = Margin + ((Gi + 0.15 + R0 * 0.7) / GridCount) * (WorldExtent - 2.0 * Margin);
+            const Cz = Margin + ((Gj + 0.15 + R1 * 0.7) / GridCount) * (WorldExtent - 2.0 * Margin);
+            if (R2 > Density) continue;
+            if (SlopeAtPos(Cx, Cz, Radius) > SlopeMax) continue;
+            if (RidgeBias > 0.0)
+            {
+                const Rel = ReliefAtPos(Cx, Cz, Radius * 4.0);
+                const Prob = (1.0 - RidgeBias) + RidgeBias * SmoothStep01(-Radius * 0.3, Radius * 0.8, Rel);
+                if (R3 > Prob) continue;
+            }
+            const Count = Math.max(1, Math.round(PerCluster * (0.6 + NextRand() * 0.8)));
+            const ClusterRad = Radius * Spread * Math.sqrt(Count) * 0.6;
+            const Lean = NextRand() * Math.PI;
+            for (let B = 0; B < Count; B++)
+            {
+                const Ang = NextRand() * Math.PI * 2.0;
+                const Rad = B === 0 ? 0.0 : ClusterRad * Math.sqrt(NextRand());
+                const Bx = Cx + Math.cos(Ang) * Rad, Bz = Cz + Math.sin(Ang) * Rad;
+                if (SlopeAtPos(Bx, Bz, Radius * 0.5) > SlopeMax * 1.5) continue;
+                const Scale = (B === 0 ? 1.0 : 0.45 + NextRand() * 0.6) * (0.8 + NextRand() * 0.4);
+                const Rx = Radius * Scale * (0.8 + NextRand() * 0.5);
+                const Rz = Radius * Scale * (0.6 + NextRand() * 0.5);
+                const Ry = Math.max(Rx, Rz) * Aspect * (0.75 + NextRand() * 0.5);
+                const Theta = Lean + (NextRand() - 0.5) * 0.9;
+                const PowerP = 2.0 + (1.0 - Weather) * 1.4 + NextRand() * 0.4;
+                const Ground = SampleBase(Bx, Bz);
+                const Cy = Ground - Ry * Bury * (0.7 + NextRand() * 0.6);
+                Boulders.push({ Bx, Bz, Rx, Rz, Ry, Cy, Cos: Math.cos(Theta), Sin: Math.sin(Theta), PowerP, SeedOff: NextRand() * 100.0 });
+            }
+        }
+    }
+
+    for (const Bd of Boulders)
+    {
+        const Reach = Math.max(Bd.Rx, Bd.Rz) * 1.25;
+        const I0 = Math.max(0, Math.floor((Bd.Bx - Reach) / TexelSize));
+        const I1 = Math.min(N - 1, Math.ceil((Bd.Bx + Reach) / TexelSize));
+        const J0 = Math.max(0, Math.floor((Bd.Bz - Reach) / TexelSize));
+        const J1 = Math.min(N - 1, Math.ceil((Bd.Bz + Reach) / TexelSize));
+        const InvP = 1.0 / Bd.PowerP;
+        for (let J = J0; J <= J1; J++)
+        {
+            const Dz = J * TexelSize - Bd.Bz;
+            for (let I = I0; I <= I1; I++)
+            {
+                const Dx = I * TexelSize - Bd.Bx;
+                const U = Dx * Bd.Cos + Dz * Bd.Sin;
+                const W = -Dx * Bd.Sin + Dz * Bd.Cos;
+                const Bulge = BulgeNoise.Fbm((U / Bd.Rx) * 1.3 + Bd.SeedOff, (W / Bd.Rz) * 1.3 - Bd.SeedOff, 2, 2.0, 0.5);
+                const Grow = 1.0 + Bulge * 0.16 * (0.5 + Weather * 0.5);
+                const Dist = Math.pow(Math.abs(U) / (Bd.Rx * Grow), Bd.PowerP) + Math.pow(Math.abs(W) / (Bd.Rz * Grow), Bd.PowerP);
+                if (Dist >= 1.0)
+                    continue;
+                const Idx = J * N + I;
+                const Top = Bd.Cy + Bd.Ry * Math.pow(1.0 - Dist, InvP) * (1.0 + Bulge * 0.06);
+                if (Top > Heights[Idx])
+                {
+                    Heights[Idx] = Top;
+                    const M = SmoothStep01(1.0, 0.72, Dist);
+                    if (M > Mask[Idx]) Mask[Idx] = M;
+                    Hardness[Idx] = Math.max(Hardness[Idx], 0.65 + 0.32 * M);
+                    Deposition[Idx] *= (1.0 - 0.85 * M);
+                    Snow[Idx] *= (1.0 - 0.75 * M);
+                }
+            }
+        }
+    }
+    return Mask;
 }
 
 export function BakeSurfaceData(Field)

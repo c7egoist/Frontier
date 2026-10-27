@@ -11,7 +11,7 @@
 //    Debug view modes recolour the same surface by any channel — the fastest way to see whether the
 //    fluvial solver or your brush actually did what you told it to.
 
-import { Resolution, TexelSize, WorldExtent } from "./ReliefField.js?v=8";
+import { Resolution, TexelSize, WorldExtent } from "./ReliefField.js?v=10";
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
 //                                                                  MATRIX ARITHMETIC
@@ -421,10 +421,13 @@ const TerrainVertexGlsl = /* glsl */`#version 300 es
     precision highp float;
     precision highp int;
     uniform sampler2D HeightTex;
+    uniform sampler2D FieldTexB;
     uniform sampler2D FieldTexC;
     uniform mat4 ViewProjection;
     uniform float GridResUniform;
     uniform float QualityDetailScale;
+    uniform float StrataBand;
+    uniform float StrataContrast;
     const float FieldExtent = ${WorldExtent.toFixed(1)};
     const int   FieldRes    = ${Resolution};
     layout(location = 0) in vec2 GridCoord;
@@ -472,6 +475,13 @@ const TerrainVertexGlsl = /* glsl */`#version 300 es
         return mix(mix(AA, BA, Frac.x), mix(AB, BB, Frac.x), Frac.y);
     }
 
+    float FetchHardness(vec2 WorldXZIn)
+    {
+        vec2 Grid = (WorldXZIn / FieldExtent + 0.5) * float(FieldRes) - 0.5;
+        ivec2 C = clamp(ivec2(floor(Grid)), ivec2(0), ivec2(FieldRes - 1));
+        return texelFetch(FieldTexB, C, 0).b;
+    }
+
     float FetchProtrusion(vec2 WorldXZIn)
     {
         vec2 Grid = (WorldXZIn / FieldExtent + 0.5) * float(FieldRes) - 0.5;
@@ -479,14 +489,61 @@ const TerrainVertexGlsl = /* glsl */`#version 300 es
         return texelFetch(FieldTexC, C, 0).g;
     }
 
+    // 📝 Ported from Slate CliffGenerator src/terrain-geometry.js + src/detail.js:
+    //    Displaces cliff vertices horizontally along the smoothed outward cliff normal (OutDir)
+    //    to form caprock overhang lips, undercut soft-bed recesses, 3D buttresses, staggered
+    //    masonry block courses, and razor-sharp peak/arete horns.
     void main()
     {
         float ActiveGrid = max(GridResUniform, 256.0);
         vec2 XZ = (GridCoord / ActiveGrid - 0.5) * FieldExtent;
         float Height = FetchHeightBilinear(XZ);
+        float Hardness = FetchHardness(XZ);
         float Protrusion = FetchProtrusion(XZ);
-        Height += SubTexelCrag(XZ, Protrusion, max(QualityDetailScale, 1.0));
-        WorldPosition = vec3(XZ.x, Height, XZ.y);
+
+        // Smooth outward horizontal cliff normal sampled over +-13.5 m so adjacent vertices never fold.
+        float Span = 13.5;
+        float HxP = FetchHeightBilinear(XZ + vec2(Span, 0.0));
+        float HxM = FetchHeightBilinear(XZ - vec2(Span, 0.0));
+        float HzP = FetchHeightBilinear(XZ + vec2(0.0, Span));
+        float HzM = FetchHeightBilinear(XZ - vec2(0.0, Span));
+        vec2 Grad = vec2((HxP - HxM) / (2.0 * Span), (HzP - HzM) / (2.0 * Span));
+        float Slope = length(Grad);
+        vec2 OutDir = Slope > 0.001 ? (-Grad / Slope) : vec2(0.0);
+
+        float Steep = smoothstep(0.52, 1.32, Slope);
+        float DispH = 0.0;
+        float DispY = SubTexelCrag(XZ, Protrusion, max(QualityDetailScale, 1.0));
+
+        if (Steep > 0.005)
+        {
+            float Band = max(StrataBand, 6.0);
+            float Warp = (HashNoiseV(XZ * 0.009) - 0.5) * Band * 0.45;
+            float BedPhase = (Height + Warp) / Band * 6.2831853;
+            float LedgeNotch = HashNoiseV(XZ * 0.032 + vec2(Height * 0.04)) * 2.0 - 1.0;
+            // Hard beds push outward (+); soft beds undercut inward (-).
+            float BedLip = ((Hardness - 0.44) * 2.0 + 0.52 * cos(BedPhase)) * (1.0 - 0.35 * max(0.0, LedgeNotch));
+            // 3D buttress ribs & alcoves along the cliff wall.
+            float Buttress = (HashNoiseV(XZ * 0.024 + vec2(Height * 0.015, -Height * 0.012)) * 2.0 - 1.0) * 1.35;
+            // Staggered brickwork cliff block courses.
+            float CourseIdx = floor((Height + Warp) / (Band * 0.42));
+            float StrikeU = dot(XZ, vec2(-OutDir.y, OutDir.x)) + mod(CourseIdx, 2.0) * 7.5;
+            float BlockCell = floor(StrikeU / 15.0);
+            float BlockJut = (HashGridV(vec2(BlockCell, CourseIdx)) - 0.48) * 1.45 * (0.35 + 0.65 * StrataContrast);
+
+            float OverhangStrength = 2.65 * (0.45 + 0.55 * StrataContrast);
+            DispH = Steep * (BedLip * OverhangStrength + Buttress + BlockJut);
+            DispH = clamp(DispH, -3.4, 4.2);
+            // Gravity lip sag on projecting caprock overhangs + vertical step riser accent.
+            DispY += -max(0.0, DispH) * 0.16 + Steep * sin(BedPhase) * 0.55 * StrataContrast;
+        }
+
+        // Peak & arete horn sharpening: pull upper steep flanks slightly into the ridge divide & lift summit horns.
+        float HornMask = smoothstep(0.42, 0.82, Protrusion) * smoothstep(0.35, 1.05, Slope);
+        DispH -= HornMask * 1.15;
+        DispY += smoothstep(0.52, 0.92, Protrusion) * 1.65;
+
+        WorldPosition = vec3(XZ.x + OutDir.x * DispH, Height + DispY, XZ.y + OutDir.y * DispH);
         WorldXZ = XZ;
         gl_Position = ViewProjection * vec4(WorldPosition, 1.0);
     }
@@ -605,7 +662,7 @@ const SurfaceFragmentCore = /* glsl */`
         float SnowSignal = SnowHere * 1.28 + (FractureMacro - 0.50) * 0.22 + (FractureMeso - 0.50) * 0.16
                          - max(OutcropCrag - 0.42, 0.0) * 0.82 - BoulderMask * 0.90
                          - (1.0 - smoothstep(0.55, 0.78, GeometricNormal.y)) * 0.55;
-        float SnowW = smoothstep(0.28, 0.48, SnowSignal) * smoothstep(0.40, 0.64, GeometricNormal.y) * (1.0 - InsideCave);
+        float SnowW = smoothstep(0.08, 0.24, SnowSignal) * smoothstep(0.40, 0.64, GeometricNormal.y) * (1.0 - InsideCave);
         float IceW = SnowW * smoothstep(0.42, 0.78, FlowEffective) * Flatness;
 
         // ---- albedos: natural stone/earth tones with crisp rock joint fissures & mineral grain ---
@@ -699,8 +756,9 @@ const SurfaceFragmentCore = /* glsl */`
         // ---- Gaea-style Perched Lakes, Tarns & Flowing Rivers (above sea-level plane) -----
         // Calm reflective water pools only on flat valley floors & tarns (< 23 deg, GeometricNormal.y > 0.92),
         // preventing cartoon turquoise specks from clinging to steep mountain slopes.
+        float AridKeep = smoothstep(-15.0, 5.0, WaterLevel);
         float WaterCover = smoothstep(0.22, 0.42, WaterHere) * smoothstep(0.90, 0.965, GeometricNormal.y)
-                         * (1.0 - SnowW * 0.88) * (1.0 - InsideCave);
+                         * AridKeep * (1.0 - SnowW * 0.88) * (1.0 - InsideCave);
         if (WaterCover > 0.005)
         {
             float WaterDepth01 = clamp((WaterHere - 0.20) / 0.70, 0.0, 1.0);
@@ -899,13 +957,49 @@ const RaymarchFragmentGlsl = /* glsl */`#version 300 es
         return Sum * RaymarchDetail;
     }
 
+    // 📝 Ported from Slate CliffGenerator src/sdf-chunks.js + src/detail.js:
+    //    3D density evaluation with vertical wall shear, caprock overhang lips, soft-bed undercuts,
+    //    3D buttresses, and staggered brickwork cliff courses evaluated at 3D elevation P.y.
     float TerrainDensity(vec3 P, float Distance)
     {
-        float H0 = SampleHeight(P.xz);
-        float Step = 4.0;
-        float HAvg = 0.25 * (SampleHeight(P.xz + vec2(Step, 0.0)) + SampleHeight(P.xz - vec2(Step, 0.0))
-                           + SampleHeight(P.xz + vec2(0.0, Step)) + SampleHeight(P.xz - vec2(0.0, Step)));
-        float HEff = H0 + max(HAvg - H0, 0.0) * 0.42;
+        float Step = 5.5;
+        float HxP = SampleHeight(P.xz + vec2(Step, 0.0));
+        float HxM = SampleHeight(P.xz - vec2(Step, 0.0));
+        float HzP = SampleHeight(P.xz + vec2(0.0, Step));
+        float HzM = SampleHeight(P.xz - vec2(0.0, Step));
+        vec2 Grad = vec2((HxP - HxM) / (2.0 * Step), (HzP - HzM) / (2.0 * Step));
+        float Slope = length(Grad);
+        vec2 OutDir = Slope > 0.001 ? (-Grad / Slope) : vec2(0.0);
+        float Steep = smoothstep(0.52, 1.32, Slope);
+
+        // Vertical wall shear + 3D caprock overhang / soft-bed undercut at elevation P.y:
+        float CliffShift = 0.0;
+        if (Steep > 0.01)
+        {
+            float Band = max(StrataBand, 6.0);
+            float Warp = (HashNoise(P.xz * 0.009) - 0.5) * Band * 0.45;
+            float BedPhase = (P.y + Warp) / Band * 6.2831853;
+            float Hardness = SampleChannelBilinear(FieldTexB, 2, P.xz);
+            float BedLip = (Hardness - 0.44) * 1.85 + 0.55 * cos(BedPhase);
+            float Buttress = (HashNoise(P.xz * 0.025 + vec2(P.y * 0.018, -P.y * 0.014)) * 2.0 - 1.0) * 1.15;
+            float CourseIdx = floor((P.y + Warp) / (Band * 0.42));
+            float StrikeU = dot(P.xz, vec2(-OutDir.y, OutDir.x)) + mod(CourseIdx, 2.0) * 7.5;
+            float BlockCell = floor(StrikeU / 15.0);
+            float SeamU = abs(fract(StrikeU / 15.0) - 0.5);
+            float SeamY = abs(fract((P.y + Warp) / (Band * 0.42)) - 0.5);
+            float Groove = smoothstep(0.44, 0.50, max(SeamU, SeamY)) * 0.75;
+            float BlockJut = ((HashGrid(vec2(BlockCell, CourseIdx)) - 0.48) * 1.35 - Groove) * (0.35 + 0.65 * StrataContrast);
+            CliffShift = Steep * (BedLip * 2.1 * (0.45 + 0.55 * StrataContrast) + Buttress + BlockJut);
+            CliffShift = clamp(CliffShift, -3.2, 3.8);
+        }
+
+        vec2 SampleXZ = P.xz - OutDir * CliffShift;
+        float H0 = SampleHeight(SampleXZ);
+        float HAvg = 0.25 * (HxP + HxM + HzP + HzM);
+        float ValleyConcave = max(HAvg - H0, 0.0) * (1.0 - Steep) * 0.36;
+        float ProHere = SampleChannelBilinear(FieldTexC, 1, P.xz);
+        float HornLift = smoothstep(0.50, 0.90, ProHere) * 1.55;
+        float HEff = H0 + ValleyConcave + HornLift;
         return P.y - HEff - TraceDetail(P.xz, Distance);
     }
 

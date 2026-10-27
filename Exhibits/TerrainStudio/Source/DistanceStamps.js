@@ -15,7 +15,7 @@
 //       while the 3D Surface-Nets voxel mesh wraps seamlessly from the rounded exterior lip through
 //       the vaulted cave ceiling, walls and floor.
 
-import { LatticeNoise, ConstructRandomStream, Resolution, TexelSize, WorldExtent, SlopeAt } from "./ReliefField.js?v=8";
+import { LatticeNoise, ConstructRandomStream, Resolution, TexelSize, WorldExtent, SlopeAt } from "./ReliefField.js?v=10";
 
 const Shrink = 0.4;   // [m] how far additive stamp skins tuck beneath the heightfield far from their rim
 

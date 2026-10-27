@@ -228,6 +228,222 @@ export class LatticeNoise
     }
 }
 
+
+//--------------------------------------------------------------------------------------------------------------------------------------------
+//                                                      SIMPLEX 2D & GRADIENT 3D NOISE (SLATE PORT)
+//--------------------------------------------------------------------------------------------------------------------------------------------
+
+const SimplexGrad2 =
+[
+    [1, 1], [-1, 1], [1, -1], [-1, -1],
+    [1, 0], [-1, 0], [0, 1], [0, -1],
+    [0.7071, 0.7071], [-0.7071, 0.7071], [0.7071, -0.7071], [-0.7071, -0.7071],
+];
+const SkewF2   = 0.5 * (Math.sqrt(3.0) - 1.0);
+const UnskewG2 = (3.0 - Math.sqrt(3.0)) / 6.0;
+
+export function Mulberry32(Seed)
+{
+    let Cursor = Seed >>> 0;
+    return function NextRandom()
+    {
+        Cursor = (Cursor + 0x6D2B79F5) >>> 0;
+        let Temp = Cursor;
+        Temp = Math.imul(Temp ^ (Temp >>> 15), Temp | 1);
+        Temp ^= Temp + Math.imul(Temp ^ (Temp >>> 7), Temp | 61);
+        return ((Temp ^ (Temp >>> 14)) >>> 0) / 4294967296.0;
+    };
+}
+
+export function HashCoords(CoordX, CoordY, Seed = 0)
+{
+    let Hash = (CoordX * 374761393 + CoordY * 668265263 + Seed * 2246822519) | 0;
+    Hash = Math.imul(Hash ^ (Hash >>> 13), 1274126177);
+    Hash ^= Hash >>> 16;
+    return (Hash >>> 0) / 4294967296.0;
+}
+
+export class SimplexNoise
+{
+    constructor(Seed = 1)
+    {
+        const NextRandom = Mulberry32(Seed);
+        const Order = new Uint8Array(256);
+        for (let Index = 0; Index < 256; Index++)
+            Order[Index] = Index;
+        for (let Index = 255; Index > 0; Index--)
+        {
+            const Swap = Math.floor(NextRandom() * (Index + 1));
+            const Temp = Order[Index];
+            Order[Index] = Order[Swap];
+            Order[Swap] = Temp;
+        }
+        this.Perm = new Uint8Array(512);
+        this.PermMod12 = new Uint8Array(512);
+        for (let Index = 0; Index < 512; Index++)
+        {
+            this.Perm[Index] = Order[Index & 255];
+            this.PermMod12[Index] = this.Perm[Index] % 12;
+        }
+    }
+
+    Sample(PosX, PosY)
+    {
+        const Perm = this.Perm;
+        const PermMod12 = this.PermMod12;
+        const Skew = (PosX + PosY) * SkewF2;
+        const CellI = Math.floor(PosX + Skew);
+        const CellJ = Math.floor(PosY + Skew);
+        const Unskew = (CellI + CellJ) * UnskewG2;
+        const X0 = PosX - (CellI - Unskew);
+        const Y0 = PosY - (CellJ - Unskew);
+        const StepI1 = X0 > Y0 ? 1 : 0;
+        const StepJ1 = X0 > Y0 ? 0 : 1;
+        const X1 = X0 - StepI1 + UnskewG2;
+        const Y1 = Y0 - StepJ1 + UnskewG2;
+        const X2 = X0 - 1.0 + 2.0 * UnskewG2;
+        const Y2 = Y0 - 1.0 + 2.0 * UnskewG2;
+        const II = CellI & 255;
+        const JJ = CellJ & 255;
+        let N0 = 0.0, N1 = 0.0, N2 = 0.0;
+        let T0 = 0.5 - X0 * X0 - Y0 * Y0;
+        if (T0 > 0.0)
+        {
+            const Grad = SimplexGrad2[PermMod12[II + Perm[JJ]]];
+            T0 *= T0;
+            N0 = T0 * T0 * (Grad[0] * X0 + Grad[1] * Y0);
+        }
+        let T1 = 0.5 - X1 * X1 - Y1 * Y1;
+        if (T1 > 0.0)
+        {
+            const Grad = SimplexGrad2[PermMod12[II + StepI1 + Perm[JJ + StepJ1]]];
+            T1 *= T1;
+            N1 = T1 * T1 * (Grad[0] * X1 + Grad[1] * Y1);
+        }
+        let T2 = 0.5 - X2 * X2 - Y2 * Y2;
+        if (T2 > 0.0)
+        {
+            const Grad = SimplexGrad2[PermMod12[II + 1 + Perm[JJ + 1]]];
+            T2 *= T2;
+            N2 = T2 * T2 * (Grad[0] * X2 + Grad[1] * Y2);
+        }
+        return 70.0 * (N0 + N1 + N2);
+    }
+
+    Fbm(PosX, PosY, Octaves = 6, Lacunarity = 2.0, Gain = 0.5)
+    {
+        let Sum = 0.0, Amp = 1.0, Norm = 0.0, Fx = PosX, Fy = PosY;
+        for (let Octave = 0; Octave < Octaves; Octave++)
+        {
+            Sum  += Amp * this.Sample(Fx, Fy);
+            Norm += Amp;
+            Amp  *= Gain;
+            Fx    = Fx * Lacunarity + 17.3;
+            Fy    = Fy * Lacunarity - 9.1;
+        }
+        return Sum / Norm;
+    }
+
+    Ridged(PosX, PosY, Octaves = 8, Lacunarity = 2.05, Gain = 0.5, Sharpness = 2.0)
+    {
+        let Sum = 0.0, Amp = 0.5, Weight = 1.0, Norm = 0.0, Fx = PosX, Fy = PosY;
+        for (let Octave = 0; Octave < Octaves; Octave++)
+        {
+            let Ridge = 1.0 - Math.abs(this.Sample(Fx, Fy));
+            Ridge  = Math.pow(Math.max(Ridge, 0.0), Sharpness) * Weight;
+            Weight = Math.min(1.0, Math.max(0.0, Ridge * 2.0));
+            Sum   += Ridge * Amp;
+            Norm  += Amp;
+            Amp   *= Gain;
+            Fx     = Fx * Lacunarity + 31.7;
+            Fy     = Fy * Lacunarity + 5.9;
+        }
+        return Sum / Norm;
+    }
+
+    Billow(PosX, PosY, Octaves = 5, Lacunarity = 2.0, Gain = 0.5)
+    {
+        let Sum = 0.0, Amp = 1.0, Norm = 0.0, Fx = PosX, Fy = PosY;
+        for (let Octave = 0; Octave < Octaves; Octave++)
+        {
+            Sum  += Amp * (Math.abs(this.Sample(Fx, Fy)) * 2.0 - 1.0);
+            Norm += Amp;
+            Amp  *= Gain;
+            Fx   *= Lacunarity;
+            Fy   *= Lacunarity;
+        }
+        return Sum / Norm;
+    }
+}
+
+export class GradientNoise3
+{
+    constructor(Seed = 1)
+    {
+        const NextRandom = Mulberry32(Seed * 977 + 3);
+        const Order = new Uint8Array(256);
+        for (let Index = 0; Index < 256; Index++)
+            Order[Index] = Index;
+        for (let Index = 255; Index > 0; Index--)
+        {
+            const Swap = Math.floor(NextRandom() * (Index + 1));
+            const Temp = Order[Index];
+            Order[Index] = Order[Swap];
+            Order[Swap] = Temp;
+        }
+        this.Perm = new Uint8Array(512);
+        for (let Index = 0; Index < 512; Index++)
+            this.Perm[Index] = Order[Index & 255];
+    }
+
+    Grad(Hash, Dx, Dy, Dz)
+    {
+        const H = Hash & 15;
+        const U = H < 8 ? Dx : Dy;
+        const V = H < 4 ? Dy : (H === 12 || H === 14 ? Dx : Dz);
+        return ((H & 1) === 0 ? U : -U) + ((H & 2) === 0 ? V : -V);
+    }
+
+    Sample(PosX, PosY, PosZ)
+    {
+        const Perm = this.Perm;
+        const CellX = Math.floor(PosX) & 255;
+        const CellY = Math.floor(PosY) & 255;
+        const CellZ = Math.floor(PosZ) & 255;
+        const FracX = PosX - Math.floor(PosX);
+        const FracY = PosY - Math.floor(PosY);
+        const FracZ = PosZ - Math.floor(PosZ);
+        const Fade = (T) => T * T * T * (T * (T * 6.0 - 15.0) + 10.0);
+        const U = Fade(FracX), V = Fade(FracY), W = Fade(FracZ);
+        const A  = Perm[CellX] + CellY, AA = Perm[A] + CellZ, AB = Perm[A + 1] + CellZ;
+        const B  = Perm[CellX + 1] + CellY, BA = Perm[B] + CellZ, BB = Perm[B + 1] + CellZ;
+        const Mix = (Lo, Hi, T) => Lo + T * (Hi - Lo);
+        return Mix(
+            Mix(Mix(this.Grad(Perm[AA], FracX, FracY, FracZ), this.Grad(Perm[BA], FracX - 1.0, FracY, FracZ), U),
+                Mix(this.Grad(Perm[AB], FracX, FracY - 1.0, FracZ), this.Grad(Perm[BB], FracX - 1.0, FracY - 1.0, FracZ), U), V),
+            Mix(Mix(this.Grad(Perm[AA + 1], FracX, FracY, FracZ - 1.0), this.Grad(Perm[BA + 1], FracX - 1.0, FracY, FracZ - 1.0), U),
+                Mix(this.Grad(Perm[AB + 1], FracX, FracY - 1.0, FracZ - 1.0), this.Grad(Perm[BB + 1], FracX - 1.0, FracY - 1.0, FracZ - 1.0), U), V),
+            W
+        );
+    }
+
+    Fbm(PosX, PosY, PosZ, Octaves = 4, Lacunarity = 2.0, Gain = 0.5)
+    {
+        let Sum = 0.0, Amp = 1.0, Norm = 0.0;
+        let Fx = PosX, Fy = PosY, Fz = PosZ;
+        for (let Octave = 0; Octave < Octaves; Octave++)
+        {
+            Sum  += Amp * this.Sample(Fx, Fy, Fz);
+            Norm += Amp;
+            Amp  *= Gain;
+            Fx    = Fx * Lacunarity + 11.7;
+            Fy    = Fy * Lacunarity + 5.3;
+            Fz    = Fz * Lacunarity - 7.9;
+        }
+        return Sum / Norm;
+    }
+}
+
 //--------------------------------------------------------------------------------------------------------------------------------------------
 //                                                                  CHANNEL REGISTRY
 //--------------------------------------------------------------------------------------------------------------------------------------------
