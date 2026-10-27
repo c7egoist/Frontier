@@ -200,6 +200,7 @@ const SharedGlsl = /* glsl */`
     uniform vec3  SandColour;
     uniform vec3  ScreeColour;
     uniform vec3  SnowColour;
+    uniform vec3  WaterTint;
     uniform float StrataContrast;
     uniform float StrataBand;
     uniform float Vegetation;
@@ -551,16 +552,24 @@ const SurfaceFragmentCore = /* glsl */`
         Roughness = mix(Roughness, 0.22, IceW);
         Roughness = mix(Roughness, 0.45, smoothstep(0.55, 0.95, FlowEffective) * RockW * 0.7);
 
-        float Wet = clamp(WaterHere * 0.85 + smoothstep(0.78, 0.97, FlowEffective) * 0.55
-                          + (1.0 - smoothstep(0.0, 1.6, abs(HeightHere - WaterLevel))) * 0.5, 0.0, 1.0) * (1.0 - SnowW);
-        Albedo *= 1.0 - 0.48 * Wet;
-        Roughness = mix(Roughness, 0.28, Wet * 0.8);
+        // Alluvial riverbank & lakeshore gravel/sand bar collar around rivers and perched lakes.
+        float BankCollar = smoothstep(0.02, 0.16, WaterHere) * (1.0 - smoothstep(0.18, 0.36, WaterHere))
+                         * Flatness * (1.0 - SnowW * 0.85) * (1.0 - InsideCave);
+        vec3 BankGravel = mix(SandColour, RockLowColour * 0.82, 0.48);
+        Albedo = mix(Albedo, BankGravel, BankCollar * 0.72);
 
-        // ---- normals: 3D shelf normal + triplanar 3D micro detail -------------------------
-        float BumpStrength = mix(0.16, 0.58, RockW);
+        float Wet = clamp(WaterHere * 0.85 + smoothstep(0.72, 0.96, FlowEffective) * 0.55
+                          + (1.0 - smoothstep(0.0, 1.8, abs(HeightHere - WaterLevel))) * 0.5, 0.0, 1.0) * (1.0 - SnowW);
+        Albedo *= 1.0 - 0.36 * Wet;
+        Roughness = mix(Roughness, 0.26, Wet * 0.8);
+
+        // ---- normals: 3D shelf normal + meso rock cleavage + triplanar 3D micro detail ----
+        float MesoFade = exp(-ViewDistance / 3600.0);
+        float BumpStrength = mix(0.16, 0.62, RockW);
         BumpStrength = mix(BumpStrength, 0.05, SnowW);
-        BumpStrength = mix(BumpStrength, 0.30, ScreeW * 0.7);
-        vec3 Normal = PerturbNormal(WorldPos, GeometricNormal, 0.38, BumpStrength * 0.055 * DetailFade);
+        BumpStrength = mix(BumpStrength, 0.32, ScreeW * 0.7);
+        vec3 MesoNormal = PerturbNormal(WorldPos, ShelfNormal, 0.048, RockW * 0.095 * MesoFade);
+        vec3 Normal = PerturbNormal(WorldPos, MesoNormal, 0.38, BumpStrength * 0.062 * DetailFade);
         float AridFlat = Flatness * smoothstep(0.35, 0.75, StrataContrast);
         float Ripple = sin(dot(XZ, vec2(0.83, 0.55)) * 2.4);
         Normal = normalize(Normal + vec3(0.83, 0.0, 0.55) * Ripple * 0.04 * SandW * AridFlat * DetailFade);
@@ -585,6 +594,34 @@ const SurfaceFragmentCore = /* glsl */`
                          * (1.0 - Roughness) * 0.35 * AmbientOcclusion;
 
         vec3 Colour = Diffuse + Specular + EnvSpecular;
+
+        // ---- Gaea-style Perched Lakes, Tarns & Flowing Rivers (above sea-level plane) -----
+        float WaterCover = smoothstep(0.18, 0.38, WaterHere) * smoothstep(0.80, 0.93, GeometricNormal.y)
+                         * (1.0 - SnowW * 0.88) * (1.0 - InsideCave);
+        if (WaterCover > 0.005)
+        {
+            float WaterDepth01 = clamp((WaterHere - 0.18) / 0.72, 0.0, 1.0);
+            float Absorption   = 1.0 - exp(-WaterDepth01 * 2.6);
+            vec3 WaterBodyCol  = mix(WaterTint * 1.45, WaterTint * 0.48, Absorption);
+
+            vec2 WaveCoord = XZ * 0.18 + vec2(TimeSeconds * 0.04, -TimeSeconds * 0.03);
+            vec3 RippleVec = vec3((HashNoise(WaveCoord) - 0.5) * 0.04 * DetailFade, 1.0, (HashNoise(WaveCoord + 19.3) - 0.5) * 0.04 * DetailFade);
+            vec3 WaterNormal = normalize(mix(GeometricNormal, normalize(RippleVec), smoothstep(0.84, 0.98, GeometricNormal.y)));
+
+            vec3 ReflDir = reflect(-ViewDir, WaterNormal);
+            vec3 WaterSkyRefl = mix(SkyHorizonColour, SkyZenithColour, pow(max(ReflDir.y, 0.0), 0.5));
+            float WaterFresnel = 0.02 + 0.98 * pow(1.0 - max(dot(WaterNormal, ViewDir), 0.0), 5.0);
+            vec3 WaterSunSpec = SunColour * GgxSpecular(WaterNormal, ViewDir, SunDirection, mix(0.07, 0.32, 1.0 - DetailFade), vec3(0.02))
+                              * max(dot(WaterNormal, SunDirection), 0.0) * Shadow;
+
+            vec3 LitWater = mix(WaterBodyCol, WaterSkyRefl, WaterFresnel * 0.78) + WaterSunSpec;
+            float RapidGrade = smoothstep(0.95, 0.84, GeometricNormal.y) * smoothstep(0.76, 0.92, FlowHere);
+            float FoamMask   = clamp(RapidGrade * smoothstep(0.45, 0.80, HashNoise(XZ * 0.30)) * 0.65, 0.0, 0.65);
+            LitWater = mix(LitWater, vec3(0.90, 0.94, 0.96), FoamMask);
+
+            float WaterAlpha = clamp(mix(0.42, 0.94, Absorption) + WaterFresnel * 0.25, 0.0, 0.95) * WaterCover;
+            Colour = mix(Colour, LitWater, WaterAlpha);
+        }
 
         // Inspected-channel tint overlay (while painting channels).
         if (OverlayAmount > 0.001)
@@ -956,7 +993,6 @@ const WaterFragmentGlsl = /* glsl */`#version 300 es
     in vec3 WorldPosition;
     out vec4 OutColour;
     uniform vec3 CameraPosition;
-    uniform vec3 WaterTint;
     ${SharedGlsl}
 
     float WaterBump(vec2 P)
@@ -967,6 +1003,8 @@ const WaterFragmentGlsl = /* glsl */`#version 300 es
     void main()
     {
         vec2 XZ = WorldPosition.xz;
+        if (abs(XZ.x) > FieldExtent * 0.499 || abs(XZ.y) > FieldExtent * 0.499)
+            discard;
         float TerrainHeight = SampleHeight(XZ);
         float DepthBelow = WaterLevel - TerrainHeight;
         if (DepthBelow < -0.05)
@@ -1127,7 +1165,7 @@ export class ReliefRasterization
         Gl.bindVertexArray(null);
 
         // Water plane covering the field plus a margin.
-        const Reach = WorldExtent * 4.0;
+        const Reach = WorldExtent * 0.5;
         const Plane = new Float32Array([-Reach, -Reach, Reach, -Reach, -Reach, Reach, Reach, Reach]);
         this.WaterVao = Gl.createVertexArray();
         Gl.bindVertexArray(this.WaterVao);

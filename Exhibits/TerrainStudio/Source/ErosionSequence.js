@@ -253,17 +253,41 @@ export async function ThermalErosion(Field, Params, Report, Cancel)
     const CliffAngle = (Params.CliffAngle !== undefined) ? Params.CliffAngle : Params.TalusAngle;
     const CliffLimit = Math.tan(CliffAngle * Math.PI / 180.0) * TexelSize;
     const HardnessNorm = new Float32Array(N * N);
+    if (CliffLimit > Limit)
     {
-        const Hardness = Field.ChannelSamples("Hardness");
+        const Hardness   = Field.ChannelSamples("Hardness");
+        const Deposition = Field.ChannelSamples("Deposition");
         let Lo = 1e9, Hi = -1e9;
+        let HMin = 1e9, HMax = -1e9;
         for (let Index = 0; Index < Hardness.length; Index++)
         {
             if (Hardness[Index] < Lo) Lo = Hardness[Index];
             if (Hardness[Index] > Hi) Hi = Hardness[Index];
+            if (Heights[Index] < HMin) HMin = Heights[Index];
+            if (Heights[Index] > HMax) HMax = Heights[Index];
         }
-        if (Hi - Lo > 0.05 && CliffLimit > Limit)
-            for (let Index = 0; Index < Hardness.length; Index++)
-                HardnessNorm[Index] = (Hardness[Index] - Lo) / (Hi - Lo);
+        const HSpan = Math.max(HMax - HMin, 1.0);
+        const SmoothBase = BoxBlurInPlace(Heights, 10);
+        const HasStrata = (Hi - Lo > 0.05);
+        for (let Index = 0; Index < Hardness.length; Index++)
+        {
+            // Crystalline bedrock competence: convex arêtes/spurs (Heights > SmoothBase) and upper
+            // massif walls are competent bedrock that holds CliffAngle, whereas concave chutes and
+            // sediment aprons relax at TalusAngle (32-35 deg) into realistic scree fans.
+            const Elev01 = (Heights[Index] - HMin) / HSpan;
+            const Protrusion = Math.min(Math.max((Heights[Index] - SmoothBase[Index] + 4.0) / 26.0, 0.0), 1.0);
+            const Bedrock = Math.min(Math.max(Protrusion * 0.68 + Math.max(Elev01 - 0.25, 0.0) * 0.55 - Deposition[Index] * 0.65, 0.0), 0.92);
+            if (HasStrata)
+            {
+                const StrataH = (Hardness[Index] - Lo) / (Hi - Lo);
+                HardnessNorm[Index] = Math.max(StrataH, Bedrock * 0.55);
+            }
+            else
+            {
+                HardnessNorm[Index] = Bedrock;
+                Hardness[Index] = 0.25 + 0.70 * Bedrock;
+            }
+        }
     }
 
     for (let Iteration = 0; Iteration < Iterations; Iteration++)
@@ -726,9 +750,91 @@ export async function FluvialIncision(Field, Params, Report, Cancel)
             if (Cut > 0.0)
                 Heights[Index] -= Cut;
         }
-        Report(0.55 + 0.45 * (Iteration + 1) / Iterations);
+        Report(0.45 + 0.35 * (Iteration + 1) / Iterations);
         Cancel.ThrowIfRequested();
         await YieldBriefly();
+    }
+    await BakeHydrologyChannels(Field, Percent => Report(0.80 + 0.20 * Percent), Cancel);
+    Report(1.0);
+}
+
+// 📝 Post-incision hydrology solver: re-solves drainage on the carved valleys, fills closed topographic
+//    depressions into flat-surfaced perched lakes/tarns at their spillway elevations, and dilates trunk
+//    streams into continuous multi-texel rivers and braided channels bordered by alluvial gravel bars.
+export async function BakeHydrologyChannels(Field, Report, Cancel)
+{
+    const N = Resolution;
+    const Heights    = Field.Heights;
+    const Flow       = Field.ChannelSamples("Flow");
+    const Water      = Field.ChannelSamples("Water");
+    const Deposition = Field.ChannelSamples("Deposition");
+
+    const { Filled, Receiver, Order, Ordered, Accumulation } = await SolveDrainage(
+        Field, Percent => Report(Percent * 0.65), Cancel
+    );
+    let MaxAccumulation = 1.0;
+    for (let Index = 0; Index < Accumulation.length; Index++)
+    {
+        if (Accumulation[Index] > MaxAccumulation)
+            MaxAccumulation = Accumulation[Index];
+    }
+    const LogMax = Math.log(1.0 + MaxAccumulation);
+
+    const RiverSeed = new Float32Array(Heights.length);
+    const BankSeed  = new Float32Array(Heights.length);
+    Water.fill(0.0);
+
+    for (let Index = 0; Index < Heights.length; Index++)
+    {
+        const FlowNorm = Math.log(1.0 + Accumulation[Index]) / LogMax;
+        Flow[Index] = FlowNorm;
+
+        const X = Index % N, Z = (Index / N) | 0;
+        const Target = Receiver[Index];
+        let LocalSlope = 0.03;
+        if (Target >= 0)
+        {
+            const Tx = Target % N, Tz = (Target / N) | 0;
+            const Step = Math.sqrt((X - Tx) * (X - Tx) + (Z - Tz) * (Z - Tz)) * TexelSize;
+            LocalSlope = Math.max((Heights[Index] - Heights[Target]) / Step, 0.0);
+        }
+
+        // 1. Bounded valley tarns & pools (shallow depressions 0.35m..12m deep on gentle valley floors).
+        const LakeDepth = Filled[Index] - Heights[Index];
+        let Standing = 0.0;
+        if (LakeDepth > 0.35 && LakeDepth < 12.5 && LocalSlope < 0.08)
+        {
+            Standing = Math.min(0.28 + (LakeDepth - 0.35) / 6.0, 0.96);
+            BankSeed[Index] = Math.max(BankSeed[Index], 0.55);
+        }
+
+        // 2. Major valley-bottom trunk rivers & primary tributaries only (FlowNorm > 0.76).
+        if (FlowNorm > 0.76)
+        {
+            const StreamStrength = Math.min((FlowNorm - 0.76) / 0.24, 1.0);
+            const PoolBonus = LocalSlope < 0.04 ? (1.0 - LocalSlope / 0.04) * 0.28 : 0.0;
+            const RiverDepth = Math.min(0.24 + StreamStrength * 0.64 + PoolBonus, 0.94);
+            RiverSeed[Index] = Math.max(RiverSeed[Index], RiverDepth);
+            BankSeed[Index]  = Math.max(BankSeed[Index], StreamStrength);
+            Standing = Math.max(Standing, RiverDepth);
+        }
+        Water[Index] = Standing;
+    }
+
+    // Dilate trunk rivers by 1 texel into crisp 3-6m wide valley rivers bordered by alluvial gravel bars.
+    const DilatedRiver = BoxBlurInPlace(RiverSeed, 1);
+    const DilatedBanks = BoxBlurInPlace(BankSeed, 3);
+    for (let Index = 0; Index < Heights.length; Index++)
+    {
+        const ChannelW = Math.min(DilatedRiver[Index] * 1.85, 0.90);
+        if (ChannelW > 0.16)
+        {
+            Water[Index] = Math.max(Water[Index], ChannelW);
+            Heights[Index] -= ChannelW * 0.35;
+        }
+        const BankW = Math.min(DilatedBanks[Index] * 1.9, 0.85);
+        if (BankW > 0.08)
+            Deposition[Index] = Math.min(Deposition[Index] + BankW * 0.30, 1.0);
     }
     Report(1.0);
 }
@@ -809,20 +915,29 @@ export async function GlacialPolish(Field, Params, Report, Cancel)
 
     const Strength = Params.Strength;
     const Scour    = Params.ScourMetres;
+    const Water    = Field.ChannelSamples("Water");
     for (let Index = 0; Index < Heights.length; Index++)
     {
-        const Swath = Math.min(TroughSwath[Index] * 2.4, 1.0);
+        // Gate glacial action strictly to valleys & cirque concavities (Heights <= BlurredWide + 2m)
+        // so glaciers NEVER shave or round off the sharp arête crests and pyramidal horns above them!
+        const Concavity = BlurredWide[Index] + 2.0 - Heights[Index];
+        if (Concavity <= 0.0)
+            continue;
+        const ValleyMask = Math.min(Concavity / 14.0, 1.0);
+        const Swath = Math.min(TroughSwath[Index] * 2.2, 1.0) * ValleyMask;
         const Pinch = Math.max(BlurredNear[Index] - Heights[Index], 0.0);
         if (Swath < 0.02 && Pinch < 0.25)
             continue;
         const Trough = Swath * Swath * (3.0 - 2.0 * Swath);
-        // Round sharp \/ valley bottoms toward the parabolic floor while lowering the flanks into a U-trough (\___/).
         const FloorTarget = Math.min(BlurredNear[Index], BlurredWide[Index]) - Scour * Trough * 0.65;
-        const PinchLift = Pinch * Strength * 0.65;
+        const PinchLift = Pinch * Strength * 0.65 * ValleyMask;
         const TroughCut = (FloorTarget - Heights[Index]) * Strength * Trough * 0.72;
         Heights[Index] += PinchLift + TroughCut;
         if (Trough > 0.25 && Heights[Index] <= BlurredNear[Index] + 2.0)
             Deposition[Index] = Math.min(Deposition[Index] + Trough * Strength * 0.22, 1.0);
+        // Overdeepened glacial cirque pockets & valley benches hold tarn water.
+        if (Trough > 0.55 && Concavity > 6.5 && Flow[Index] > 0.68)
+            Water[Index] = Math.max(Water[Index], Math.min((Trough - 0.45) * 1.1, 0.85));
     }
     Report(1.0);
 }

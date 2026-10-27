@@ -726,34 +726,46 @@ export class TerrainStudio
     DrawSyntheticThumb(Canvas, Preset)
     {
         const Ctx = Canvas.getContext("2d");
+        if (Preset._syntheticImage)
+        {
+            Ctx.putImageData(Preset._syntheticImage, 0, 0);
+            return;
+        }
         const W = Canvas.width, H = Canvas.height;
         const Noise = new LatticeNoise(Preset.SeedMark || 99);
         const Heights = new Float32Array(W * H);
-        for (let Y = 0; Y < H; Y++)
+        for (let Y = 0; Y < H; Y += 2)
         {
-            for (let X = 0; X < W; X++)
+            for (let X = 0; X < W; X += 2)
             {
                 const Nx = X / W * 5.2, Ny = Y / H * 5.2;
                 let Reading;
-                if (Preset.Id === "Canyon")
+                if (Preset.Id === "Canyon" || Preset.Id === "MonumentButte")
                 {
-                    Reading = Noise.Fractal(Nx * 0.5, Ny * 0.5, 4, 2.0, 0.5) * 0.5 + 0.5;
+                    Reading = Noise.Fractal(Nx * 0.5, Ny * 0.5, 3, 2.0, 0.5) * 0.5 + 0.5;
                     Reading = Math.pow(Reading, 0.45);
-                    Reading = Math.round(Reading * 7.0) / 7.0 + Noise.Fractal(Nx * 2.0, Ny * 2.0, 3, 2.0, 0.5) * 0.05;
+                    Reading = Math.round(Reading * 7.0) / 7.0 + Noise.Fractal(Nx * 2.0, Ny * 2.0, 2, 2.0, 0.5) * 0.05;
                 }
-                else if (Preset.Id === "RockyDesert")
+                else if (Preset.Id === "RockyDesert" || Preset.Id === "Badlands")
                 {
                     const Cell = Noise.Cellular(Nx * 0.9, Ny * 0.9);
-                    Reading = Math.min(Math.max((Cell - 0.05) / 0.5, 0), 1) * 0.75 + Noise.Fractal(Nx, Ny, 3, 2.0, 0.5) * 0.16 + 0.1;
+                    Reading = Math.min(Math.max((Cell - 0.05) / 0.5, 0), 1) * 0.75 + Noise.Fractal(Nx, Ny, 2, 2.0, 0.5) * 0.16 + 0.1;
                 }
                 else
                 {
-                    Reading = Noise.Ridged(Nx, Ny, 5, 2.05, 0.52, 1.6) * 0.72 + Noise.Fractal(Nx * 0.5 + 9, Ny * 0.5, 4, 2.0, 0.5) * 0.28 + 0.12;
+                    Reading = Noise.Ridged(Nx, Ny, 3, 2.05, 0.52, 1.5) * 0.72 + Noise.Fractal(Nx * 0.5 + 9, Ny * 0.5, 2, 2.0, 0.5) * 0.28 + 0.12;
                 }
                 Heights[Y * W + X] = Reading;
+                if (X + 1 < W) Heights[Y * W + X + 1] = Reading;
+                if (Y + 1 < H)
+                {
+                    Heights[(Y + 1) * W + X] = Reading;
+                    if (X + 1 < W) Heights[(Y + 1) * W + X + 1] = Reading;
+                }
             }
         }
         this.HillshadeToCanvas(Ctx, W, H, (Px, Py) => Heights[Math.min(H - 1, Math.max(0, Py)) * W + Math.min(W - 1, Math.max(0, Px))], 1.9, Preset.Category);
+        Preset._syntheticImage = Ctx.getImageData(0, 0, W, H);
     }
 
     DrawRealThumb(Preset)
@@ -808,6 +820,33 @@ export class TerrainStudio
                     R = 0.52 + Band * 0.20; G = 0.32 + Band * 0.10; B = 0.19;
                     const Valley = Math.max(0, 0.35 - Centre) * 1.2;
                     R += Valley * 0.2; G += Valley * 0.22; B += Valley * 0.05;
+                }
+                else if (Category === "Fluvial")
+                {
+                    if (Centre < 0.30)
+                    {
+                        R = 0.06 + Centre * 0.35; G = 0.30 + Centre * 0.55; B = 0.38 + Centre * 0.50;
+                    }
+                    else
+                    {
+                        R = 0.26 + Centre * 0.26; G = 0.34 + Centre * 0.24; B = 0.28 + Centre * 0.26;
+                        if (Centre > 0.72)
+                        {
+                            const SnowT = Math.min((Centre - 0.72) / 0.2, 1.0);
+                            R += SnowT * 0.45; G += SnowT * 0.48; B += SnowT * 0.52;
+                        }
+                    }
+                }
+                else if (Category === "Volcanic")
+                {
+                    if (Centre < 0.28)
+                    {
+                        R = 0.07 + Centre * 0.30; G = 0.36 + Centre * 0.50; B = 0.36 + Centre * 0.45;
+                    }
+                    else
+                    {
+                        R = 0.22 + Centre * 0.24; G = 0.25 + Centre * 0.24; B = 0.23 + Centre * 0.22;
+                    }
                 }
                 else
                 {
@@ -1144,16 +1183,12 @@ export class TerrainStudio
     RefreshStamps()
     {
         const StartedAt = performance.now();
-        this.SetSyncState("Polygonising 3D SDF caves & voxels…", true);
-        setTimeout(() =>
-        {
-            const Surface = PolygoniseStamps(this.Field, this.Stamps);
-            this.Raster.SetStampSurface(Surface);
-            this.Raster.UploadChannelGroup(this.Field, "CaveCutout");
-            this.RefreshChannelPreviews();
-            this.RefreshSurvey();
-            this.SetSyncState(`Stamps polygonised in ${Math.round(performance.now() - StartedAt)} ms`, false);
-        }, 20);
+        const Surface = PolygoniseStamps(this.Field, this.Stamps);
+        this.Raster.SetStampSurface(Surface);
+        this.Raster.UploadChannelGroup(this.Field, "CaveCutout");
+        this.RefreshChannelPreviews();
+        this.RefreshSurvey();
+        this.SetSyncState(`Stamps polygonised in ${Math.round(performance.now() - StartedAt)} ms`, false);
     }
 
     //--------------------------------------------------------------------------------------------------------
@@ -3120,14 +3155,16 @@ export class TerrainStudio
     Start()
     {
         let LastStamp = performance.now();
+        let LastRenderStamp = 0;
         let FpsFrames = 0;
         let FpsStamp = LastStamp;
         const Frame = (NowStamp) =>
         {
             const Delta = Math.min((NowStamp - LastStamp) / 1000.0, 0.1);
             LastStamp = NowStamp;
-            if (this.ViewDimension === "3d")
+            if (this.ViewDimension === "3d" && !this.Paused && (!this.Evaluating || NowStamp - LastRenderStamp > 450))
             {
+                LastRenderStamp = NowStamp;
                 this.Raster.ResizeToDisplay();
                 const Camera = this.Raster.Camera;
                 if (this.Autorotate && !this.Pointer.Dragging)
