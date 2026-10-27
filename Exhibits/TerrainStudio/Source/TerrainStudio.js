@@ -10,12 +10,12 @@
 //    any layer's mask or read directly by the material splat. Sculpt strokes live in their own delta
 //    field applied by a stack layer, so hand work survives downstream re-erosion like real geology.
 
-import { ReliefField, LatticeNoise, Resolution, TexelSize, WorldExtent, DerivedChannels, MaterialPaintChannels } from "./ReliefField.js?v=10";
-import { LayerStackEvaluation, LayerTypes, LayerTypeById, ConstructLayer } from "./LayerStackEvaluation.js?v=10";
-import { ReliefPresets } from "./ReliefPresets.js?v=10";
-import { ReliefRasterization } from "./ReliefRasterization.js?v=10";
-import { PolygoniseStamps, ConstructStamp, ConstructCave, StampShapes } from "./DistanceStamps.js?v=10";
-import { Cancellation, BakeSurfaceData } from "./ErosionSequence.js?v=10";
+import { ReliefField, LatticeNoise, Resolution, TexelSize, WorldExtent, DerivedChannels, MaterialPaintChannels } from "./ReliefField.js?v=13";
+import { LayerStackEvaluation, LayerTypes, LayerTypeById, ConstructLayer } from "./LayerStackEvaluation.js?v=13";
+import { ReliefPresets } from "./ReliefPresets.js?v=13";
+import { ReliefRasterization } from "./ReliefRasterization.js?v=13";
+import { PolygoniseStamps, ConstructStamp, ConstructCave, StampShapes } from "./DistanceStamps.js?v=13";
+import { Cancellation, BakeSurfaceData } from "./ErosionSequence.js?v=13";
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
 //                                                                  GLYPHS
@@ -713,7 +713,9 @@ export class TerrainStudio
         let Shown = 0;
         for (const Preset of this.AllPresets())
         {
-            if (Filter !== "all" && Preset.Category !== Filter)
+            if (Filter === "Slate" && Preset.Origin !== "Slate")
+                continue;
+            if (Filter !== "all" && Filter !== "Slate" && Preset.Category !== Filter)
                 continue;
             if (Query && !(Preset.Label + " " + Preset.Region).toLowerCase().includes(Query))
                 continue;
@@ -730,7 +732,7 @@ export class TerrainStudio
             Badge.innerHTML = GlyphSvg("check");
             Card.appendChild(Badge);
             Card.appendChild(Construct("div", "preset-name", Preset.Label));
-            Card.appendChild(Construct("div", "preset-kind", Preset.Category + " · 1024²"));
+            Card.appendChild(Construct("div", "preset-kind", (Preset.Origin === "Slate" ? "Slate · " : "") + Preset.Category + " · 1024²"));
             Card.title = Preset.Blurb;
             Card.addEventListener("click", () => this.LoadPreset(Preset));
             Grid.appendChild(Card);
@@ -760,20 +762,41 @@ export class TerrainStudio
             {
                 const Nx = X / W * 5.2, Ny = Y / H * 5.2;
                 let Reading;
-                if (Preset.Id === "Canyon" || Preset.Id === "MonumentButte")
+                const S = Preset.ThumbSpec;
+                if (S && S.stackHeight > 40)
+                {
+                    const Cell = 1.0 - Noise.Cellular(Nx * 1.15, Ny * 1.15);
+                    const Step = Math.floor(Math.max(0.0, Cell - 0.22) * 8.0) / 6.0;
+                    Reading = Step * 0.78 + Noise.Fractal(Nx * 1.2, Ny * 1.2, 2, 2.0, 0.5) * 0.14 + 0.12;
+                }
+                else if (S && S.cliffHeight > 40)
+                {
+                    const Edge = Noise.Fractal(Nx * 0.38 + 2.1, Ny * 0.38 - 1.4, 2, 2.0, 0.5);
+                    const Esc = Edge > 0.0 ? 0.75 : 0.12;
+                    Reading = Esc + Noise.Ridged(Nx * 0.9, Ny * 0.9, 2, 2.0, 0.5, 1.4) * 0.22;
+                }
+                else if (S && S.duneAmount > 10)
+                {
+                    const Wave = (Nx * 1.4 + Ny * 0.8 + Noise.Fractal(Nx * 0.6, Ny * 0.6, 2, 2.0, 0.5) * 0.8) % 1.0;
+                    const Fr = Wave < 0 ? Wave + 1.0 : Wave;
+                    Reading = (Fr < 0.72 ? Math.pow(Fr / 0.72, 1.6) : 1.0 - (Fr - 0.72) / 0.28) * 0.65 + 0.2;
+                }
+                else if (Preset.Id === "Canyon" || Preset.Id === "MonumentButte" || (S && (S.canyonDepth > 60 || S.plateauStrength > 0.5)))
                 {
                     Reading = Noise.Fractal(Nx * 0.5, Ny * 0.5, 3, 2.0, 0.5) * 0.5 + 0.5;
                     Reading = Math.pow(Reading, 0.45);
                     Reading = Math.round(Reading * 7.0) / 7.0 + Noise.Fractal(Nx * 2.0, Ny * 2.0, 2, 2.0, 0.5) * 0.05;
                 }
-                else if (Preset.Id === "RockyDesert" || Preset.Id === "Badlands")
+                else if (Preset.Id === "RockyDesert" || Preset.Id === "Badlands" || (S && S.outcropDensity > 0.2))
                 {
                     const Cell = Noise.Cellular(Nx * 0.9, Ny * 0.9);
                     Reading = Math.min(Math.max((Cell - 0.05) / 0.5, 0), 1) * 0.75 + Noise.Fractal(Nx, Ny, 2, 2.0, 0.5) * 0.16 + 0.1;
                 }
                 else
                 {
-                    Reading = Noise.Ridged(Nx, Ny, 3, 2.05, 0.52, 1.5) * 0.72 + Noise.Fractal(Nx * 0.5 + 9, Ny * 0.5, 2, 2.0, 0.5) * 0.28 + 0.12;
+                    const Freq = S ? (S.baseFrequency || 1.5) * 0.65 : 1.0;
+                    const Sharp = S ? Math.min(2.2, S.ridgeSharpness || 1.5) : 1.5;
+                    Reading = Noise.Ridged(Nx * Freq, Ny * Freq, 3, 2.05, 0.52, Sharp) * 0.72 + Noise.Fractal(Nx * 0.5 + 9, Ny * 0.5, 2, 2.0, 0.5) * 0.28 + 0.12;
                 }
                 Heights[Y * W + X] = Reading;
                 if (X + 1 < W) Heights[Y * W + X + 1] = Reading;

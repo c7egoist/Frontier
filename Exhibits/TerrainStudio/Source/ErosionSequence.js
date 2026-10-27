@@ -11,7 +11,7 @@
 //    thermal relaxation holds every slope at or below its angle of repose; glacial polish widens trunk
 //    valleys into U profiles; the slab transport model moves sand downwind and drops it in wind shadow.
 
-import { Resolution, WorldExtent, TexelSize, ConstructRandomStream, LatticeNoise, SimplexNoise, GradientNoise3, Mulberry32, HashCoords } from "./ReliefField.js?v=10";
+import { Resolution, WorldExtent, TexelSize, ConstructRandomStream, LatticeNoise, SimplexNoise, GradientNoise3, Mulberry32, HashCoords } from "./ReliefField.js?v=13";
 
 const YieldInterval = 4096;   // completions between yields to the browser
 

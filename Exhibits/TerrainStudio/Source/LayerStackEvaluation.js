@@ -9,9 +9,9 @@
 //    result through strength × mask weight. A layer can therefore be masked by the water it will one
 //    day stand beside: paint the Water channel, point a layer's mask at it, rebuild.
 
-import { Resolution, TexelSize, WorldExtent, LatticeNoise, SimplexNoise, HashCoords, MaskWeight, SlopeAt } from "./ReliefField.js?v=10";
-import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation, ApplyRuggedOutcropsAndRocks, ApplyStrataPackages, RuggedPushPull, AddBoulderTors, BoxBlurInPlace } from "./ErosionSequence.js?v=10";
-import { BuildProceduralCaves } from "./DistanceStamps.js?v=10";
+import { Resolution, TexelSize, WorldExtent, LatticeNoise, SimplexNoise, HashCoords, MaskWeight, SlopeAt } from "./ReliefField.js?v=13";
+import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation, ApplyRuggedOutcropsAndRocks, ApplyStrataPackages, RuggedPushPull, AddBoulderTors, BoxBlurInPlace } from "./ErosionSequence.js?v=13";
+import { BuildProceduralCaves } from "./DistanceStamps.js?v=13";
 
 async function YieldBriefly()
 {
@@ -393,7 +393,8 @@ async function BuildRockStacks(Field, Layer, Out, Report, Cancel)
     const InvN     = 1.0 / (N - 1);
     const Amp      = P.StackHeight !== undefined ? P.StackHeight : 145.0;
     const Levels   = Math.max(1, Math.min(16, Math.round(P.StackLevels !== undefined ? P.StackLevels : 6)));
-    const Scale    = Math.max(25.0, P.StackScale || 210.0);
+    const RawScale = P.StackScale || 210.0;
+    const Scale    = RawScale < 15.0 ? 145.0 : Math.max(25.0, RawScale);
     const Taper    = P.StackTaper !== undefined ? P.StackTaper : 0.5;
     const Sharp    = P.StackSharpness !== undefined ? P.StackSharpness : 0.85;
     const Chaos    = P.StackChaos !== undefined ? P.StackChaos : 0.6;

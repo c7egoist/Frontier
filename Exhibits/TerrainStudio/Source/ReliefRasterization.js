@@ -11,7 +11,7 @@
 //    Debug view modes recolour the same surface by any channel — the fastest way to see whether the
 //    fluvial solver or your brush actually did what you told it to.
 
-import { Resolution, TexelSize, WorldExtent } from "./ReliefField.js?v=10";
+import { Resolution, TexelSize, WorldExtent } from "./ReliefField.js?v=13";
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
 //                                                                  MATRIX ARITHMETIC
