@@ -11,7 +11,7 @@
 //    Debug view modes recolour the same surface by any channel — the fastest way to see whether the
 //    fluvial solver or your brush actually did what you told it to.
 
-import { Resolution, TexelSize, WorldExtent } from "./ReliefField.js";
+import { Resolution, TexelSize, WorldExtent } from "./ReliefField.js?v=8";
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
 //                                                                  MATRIX ARITHMETIC
@@ -271,6 +271,20 @@ const SharedGlsl = /* glsl */`
 
     uniform float QualityDetailScale;
 
+    float SampleDetailedHeight(vec2 XZ, float Protrusion, float QScale)
+    {
+        float BaseH = SampleChannelBilinear(HeightTex, 0, XZ);
+        if (QScale <= 0.85)
+            return BaseH;
+        float Gain = clamp((QScale - 0.85) * 1.15, 0.0, 1.6);
+        float R1 = 1.0 - abs(HashNoise(XZ * 0.28 + 7.1) * 2.0 - 1.0);
+        float R2 = 1.0 - abs(HashNoise(XZ * 0.62 - 13.4) * 2.0 - 1.0);
+        float Crag = (R1 * R1 * 0.68 + R2 * R2 * 0.32) - 0.35;
+        return BaseH + Crag * 3.2 * Gain * clamp(Protrusion * 1.4, 0.15, 1.0);
+    }
+
+
+
     float NoiseOctaves(vec2 P, int Octaves)
     {
         float Sum = 0.0;
@@ -407,13 +421,42 @@ const TerrainVertexGlsl = /* glsl */`#version 300 es
     precision highp float;
     precision highp int;
     uniform sampler2D HeightTex;
+    uniform sampler2D FieldTexC;
     uniform mat4 ViewProjection;
     uniform float GridResUniform;
+    uniform float QualityDetailScale;
     const float FieldExtent = ${WorldExtent.toFixed(1)};
     const int   FieldRes    = ${Resolution};
     layout(location = 0) in vec2 GridCoord;
     out vec3 WorldPosition;
     out vec2 WorldXZ;
+
+    float HashGridV(vec2 P)
+    {
+        vec3 P3 = fract(vec3(P.xyx) * 0.1031);
+        P3 += dot(P3, P3.yzx + 33.33);
+        return fract((P3.x + P3.y) * P3.z);
+    }
+
+    float HashNoiseV(vec2 P)
+    {
+        vec2 I = floor(P);
+        vec2 F = fract(P);
+        vec2 U = F * F * (3.0 - 2.0 * F);
+        return mix(mix(HashGridV(I), HashGridV(I + vec2(1.0, 0.0)), U.x),
+                   mix(HashGridV(I + vec2(0.0, 1.0)), HashGridV(I + vec2(1.0, 1.0)), U.x), U.y);
+    }
+
+    float SubTexelCrag(vec2 XZ, float Protrusion, float QScale)
+    {
+        if (QScale <= 0.85)
+            return 0.0;
+        float Gain = clamp((QScale - 0.85) * 1.15, 0.0, 1.6);
+        float R1 = 1.0 - abs(HashNoiseV(XZ * 0.28 + 7.1) * 2.0 - 1.0);
+        float R2 = 1.0 - abs(HashNoiseV(XZ * 0.62 - 13.4) * 2.0 - 1.0);
+        float Crag = (R1 * R1 * 0.68 + R2 * R2 * 0.32) - 0.35;
+        return Crag * 3.2 * Gain * clamp(Protrusion * 1.4, 0.15, 1.0);
+    }
 
     float FetchHeightBilinear(vec2 WorldXZIn)
     {
@@ -429,19 +472,20 @@ const TerrainVertexGlsl = /* glsl */`#version 300 es
         return mix(mix(AA, BA, Frac.x), mix(AB, BB, Frac.x), Frac.y);
     }
 
+    float FetchProtrusion(vec2 WorldXZIn)
+    {
+        vec2 Grid = (WorldXZIn / FieldExtent + 0.5) * float(FieldRes) - 0.5;
+        ivec2 C = clamp(ivec2(floor(Grid)), ivec2(0), ivec2(FieldRes - 1));
+        return texelFetch(FieldTexC, C, 0).g;
+    }
+
     void main()
     {
         float ActiveGrid = max(GridResUniform, 256.0);
         vec2 XZ = (GridCoord / ActiveGrid - 0.5) * FieldExtent;
         float Height = FetchHeightBilinear(XZ);
-        // Gentle valley-pinch relaxation only at tight V-bottoms so crags and outcrops stay sharp.
-        float Step = 2.4;
-        float HAvg = 0.25 * (FetchHeightBilinear(XZ + vec2(Step, 0.0))
-                           + FetchHeightBilinear(XZ - vec2(Step, 0.0))
-                           + FetchHeightBilinear(XZ + vec2(0.0, Step))
-                           + FetchHeightBilinear(XZ - vec2(0.0, Step)));
-        float Concavity = max(HAvg - Height - 0.35, 0.0);
-        Height += min(Concavity * 0.25, 1.2);
+        float Protrusion = FetchProtrusion(XZ);
+        Height += SubTexelCrag(XZ, Protrusion, max(QualityDetailScale, 1.0));
         WorldPosition = vec3(XZ.x, Height, XZ.y);
         WorldXZ = XZ;
         gl_Position = ViewProjection * vec4(WorldPosition, 1.0);
@@ -518,68 +562,74 @@ const SurfaceFragmentCore = /* glsl */`
         float BandPhase = sin(StrataAngle);
         float BandShelf = cos(StrataAngle);
 
-        // 3D angular fracture & outcrop crag mask so rock outcrops & boulders have crisp geological edges.
+        // 3-scale 3D angular rock fracture & outcrop masks for crisp geological edges from orbit to close-up zoom.
         float QScale = max(QualityDetailScale, 1.0);
-        float FractureMacro = RidgedOctaves(XZ * 0.038 + vec2(HeightHere * 0.016), 2);
-        float FractureMeso  = RidgedOctaves(XZ * 0.15 * QScale - vec2(HeightHere * 0.032), 2);
-        float OutcropCrag   = clamp((ProtrusionHere - 0.44) * 1.75 + (HardnessHere - 0.62) * 1.15 + (FractureMacro - 0.56) * 0.55, 0.0, 1.0)
+        float FractureMacro = RidgedOctaves(XZ * 0.042 + vec2(HeightHere * 0.018), 2);
+        float FractureMeso  = RidgedOctaves(XZ * 0.18 * QScale - vec2(HeightHere * 0.036), 2);
+        float FractureMicro = RidgedOctaves(XZ * 0.58 * QScale + vec2(HeightHere * 0.075), 2);
+        float OutcropCrag   = clamp((ProtrusionHere - 0.38) * 1.85 + (HardnessHere - 0.58) * 1.25 + (FractureMacro - 0.52) * 0.65, 0.0, 1.0)
                             * (1.0 - smoothstep(0.90, 0.97, GeometricNormal.y));
 
         float Flatness = smoothstep(0.82, 0.96, GeometricNormal.y);
-        // Slopes steeper than ~16-28 deg and protruding outcrop crags expose fractured bedrock.
-        float SlopeRock = 1.0 - smoothstep(0.75, 0.92, GeometricNormal.y - WearEffective * 0.08 - OutcropCrag * 0.22);
-        float HighRock  = smoothstep(0.32, 0.54, HeightNorm) * (1.0 - smoothstep(0.89, 0.97, GeometricNormal.y - OutcropCrag * 0.14));
-        float RockW = clamp(max(max(SlopeRock, HighRock), OutcropCrag * 0.88), 0.0, 1.0);
+        // Slopes steeper than ~15-26 deg and protruding outcrop crags expose fractured bedrock.
+        float SlopeRock = 1.0 - smoothstep(0.74, 0.92, GeometricNormal.y - WearEffective * 0.09 - OutcropCrag * 0.26);
+        float HighRock  = smoothstep(0.30, 0.52, HeightNorm) * (1.0 - smoothstep(0.88, 0.96, GeometricNormal.y - OutcropCrag * 0.16));
+        float RockW = clamp(max(max(SlopeRock, HighRock), OutcropCrag * 0.92), 0.0, 1.0);
         RockW = mix(RockW, 1.0, InsideCave);
 
-        vec3 ShelfNormal = normalize(GeometricNormal + vec3(0.0, max(BandShelf, -0.35) * StrataContrast * 0.25 * RockW * (1.0 - InsideCave), 0.0));
+        vec3 ShelfNormal = normalize(GeometricNormal + vec3(0.0, max(BandShelf, -0.35) * StrataContrast * 0.28 * RockW * (1.0 - InsideCave), 0.0));
 
         float ValleyFloor = smoothstep(0.84, 0.96, GeometricNormal.y);
-        float VegSignal = MoistureHere * 0.65 + (1.0 - HeightNorm) * 0.45 - 0.20 + (FractureMacro - 0.5) * 0.12;
-        float MeadowW = Vegetation * smoothstep(0.34, 0.60, VegSignal) * ValleyFloor
+        float VegSignal = MoistureHere * 0.65 + (1.0 - HeightNorm) * 0.45 - 0.20 + (FractureMacro - 0.5) * 0.15;
+        float MeadowW = Vegetation * smoothstep(0.36, 0.56, VegSignal) * ValleyFloor
                       * (1.0 - smoothstep(0.26, 0.42, HeightNorm))
-                      * (1.0 - clamp(SnowHere * 2.5, 0.0, 1.0)) * (1.0 - RockW * 0.80) * (1.0 - InsideCave);
+                      * (1.0 - clamp(SnowHere * 2.5, 0.0, 1.0)) * (1.0 - RockW * 0.85) * (1.0 - InsideCave);
         float SedimentW = clamp(DepositionHere * 1.45 - 0.28, 0.0, 1.0) * (0.35 + 0.65 * smoothstep(0.25, 0.70, FlowEffective)) * Flatness * (1.0 - InsideCave);
         float SandW = clamp(DepositionHere * 1.25 - 0.22, 0.0, 1.0) * (1.0 - MoistureHere * 0.55) * Flatness
                     + (1.0 - smoothstep(0.0, 3.5, HeightHere - WaterLevel)) * step(0.0, HeightHere - WaterLevel) * 0.6 * Flatness;
         SandW = clamp(SandW * (1.0 - SedimentW * 0.70) * (1.0 - InsideCave * 0.8), 0.0, 1.0);
 
         // Talus scree fans & scattered 3D angular boulders on mid-slopes and cliff bases.
-        float ScreeSlope = smoothstep(0.67, 0.84, GeometricNormal.y) * (1.0 - smoothstep(0.91, 0.97, GeometricNormal.y));
-        float ScreeW = clamp(DepositionHere * 1.28 + WearEffective * 0.30 - 0.14, 0.0, 1.0) * ScreeSlope * (1.0 - SandW) * (1.0 - OutcropCrag * 0.70) * (1.0 - InsideCave);
+        float ScreeSlope = smoothstep(0.66, 0.84, GeometricNormal.y) * (1.0 - smoothstep(0.91, 0.97, GeometricNormal.y));
+        float ScreeW = clamp(DepositionHere * 1.32 + WearEffective * 0.30 - 0.12, 0.0, 1.0) * ScreeSlope * (1.0 - SandW) * (1.0 - OutcropCrag * 0.75) * (1.0 - InsideCave);
 
         // Individual 3D rocks & talus boulders scattered on scree aprons, moraines & valley shoulders.
-        float BoulderField = pow(clamp(FractureMeso * 1.32 - 0.48, 0.0, 1.0), 1.90);
-        float BoulderZone  = clamp(ScreeW * 1.35 + DepositionHere * 0.70 * (1.0 - Flatness * 0.65), 0.0, 1.0) * (1.0 - WaterHere);
-        float BoulderMask  = clamp(BoulderField * BoulderZone * 1.35, 0.0, 1.0) * (1.0 - InsideCave);
+        float BoulderField = pow(clamp(FractureMeso * 0.95 + FractureMicro * 0.42 - 0.48, 0.0, 1.0), 1.85);
+        float BoulderZone  = clamp(ScreeW * 1.45 + DepositionHere * 0.78 * (1.0 - Flatness * 0.60), 0.0, 1.0) * (1.0 - WaterHere);
+        float BoulderMask  = clamp(BoulderField * BoulderZone * 1.55, 0.0, 1.0) * (1.0 - InsideCave);
 
-        RockW = clamp(max(RockW * (1.0 - ScreeW * 0.65), BoulderMask * 0.88), 0.0, 1.0);
-        // Full, bright snowpack (already macro-slope gated by SnowAccumulation) with crisp fracture edges where steep outcrop crags & boulders bite through.
-        float SnowW = clamp(SnowHere * 1.25 + (FractureMacro - 0.50) * 0.10 - max(OutcropCrag - 0.55, 0.0) * 0.52 - BoulderMask * 0.78, 0.0, 1.0)
-                    * smoothstep(0.42, 0.68, GeometricNormal.y) * (1.0 - InsideCave);
+        RockW = clamp(max(RockW * (1.0 - ScreeW * 0.62), BoulderMask * 0.92), 0.0, 1.0);
+
+        // Opaque, fracture-broken snow boundary (no blurry airbrushed grey halo!): snow terminates in a
+        // razor-sharp geological edge against protruding rock crags, dihedrals, and boulders.
+        float SnowSignal = SnowHere * 1.28 + (FractureMacro - 0.50) * 0.22 + (FractureMeso - 0.50) * 0.16
+                         - max(OutcropCrag - 0.42, 0.0) * 0.82 - BoulderMask * 0.90
+                         - (1.0 - smoothstep(0.55, 0.78, GeometricNormal.y)) * 0.55;
+        float SnowW = smoothstep(0.28, 0.48, SnowSignal) * smoothstep(0.40, 0.64, GeometricNormal.y) * (1.0 - InsideCave);
         float IceW = SnowW * smoothstep(0.42, 0.78, FlowEffective) * Flatness;
 
-        // ---- albedos: natural stone/earth tones graded by height, hardness, protrusion & AO ---
+        // ---- albedos: natural stone/earth tones with crisp rock joint fissures & mineral grain ---
         float RockMix = clamp(HeightNorm * 0.54 + ProtrusionHere * 0.48 + HardnessHere * 0.25 - 0.18, 0.0, 1.0);
         vec3 RockAlbedo = mix(RockLowColour, RockHighColour, RockMix);
         // Warm iron-oxide/lichen mineral weathering on exposed rock ribs breaks up monochromatic grey stone.
-        vec3 WarmMineral = mix(RockAlbedo, vec3(0.45, 0.39, 0.33), 0.28);
-        RockAlbedo = mix(RockAlbedo, WarmMineral, clamp(FractureMacro * 0.85 + ProtrusionHere * 0.35 - 0.35, 0.0, 0.65) * (1.0 - StrataContrast * 0.5));
+        vec3 WarmMineral = mix(RockAlbedo, vec3(0.46, 0.39, 0.32), 0.32);
+        RockAlbedo = mix(RockAlbedo, WarmMineral, clamp(FractureMacro * 0.85 + ProtrusionHere * 0.35 - 0.35, 0.0, 0.68) * (1.0 - StrataContrast * 0.5));
         vec3 BandTint = mix(vec3(1.10, 0.90, 0.73), vec3(0.74, 0.60, 0.54), BandPhase * 0.5 + 0.5);
         RockAlbedo *= mix(vec3(1.0), BandTint, StrataContrast * 0.92);
-        // Crevice darkening + wind-polished outcrop arrises + natural mineral fracture variation.
-        float MineralVar = 0.86 + 0.26 * FractureMacro + 0.12 * (FractureMeso - 0.5);
-        RockAlbedo *= MineralVar * (0.72 + 0.28 * OcclusionHere) * (0.88 + 0.28 * ProtrusionHere + 0.08 * WearEffective);
+        // Sharp rock joint fissures + wind-scoured outcrop arrises so close-up rock has real fracture character.
+        float JointFissure = smoothstep(0.18, 0.42, FractureMeso * 0.62 + FractureMicro * 0.38);
+        float MineralVar   = (0.72 + 0.38 * JointFissure) * (0.86 + 0.24 * FractureMacro);
+        RockAlbedo *= MineralVar * (0.70 + 0.30 * OcclusionHere) * (0.86 + 0.30 * ProtrusionHere + 0.08 * WearEffective);
         // Distinct weathered block contrast on protruding outcrop crags and scattered talus boulders.
-        vec3 BoulderTone = mix(RockLowColour * 0.68, WarmMineral * 1.12, step(0.50, FractureMacro));
-        RockAlbedo = mix(RockAlbedo, BoulderTone, clamp(BoulderMask * 0.62 + OutcropCrag * 0.26, 0.0, 0.68));
+        vec3 BoulderTone = mix(RockLowColour * 0.64, WarmMineral * 1.14, step(0.50, FractureMacro));
+        RockAlbedo = mix(RockAlbedo, BoulderTone, clamp(BoulderMask * 0.68 + OutcropCrag * 0.28, 0.0, 0.72));
 
         vec3 SoilAlbedo = mix(DryColour, RockLowColour * 1.04, clamp(0.25 + DepositionHere * 0.55, 0.0, 1.0));
         vec3 SedimentAlbedo = mix(SandColour, DryColour, 0.45) * 0.94;
-        vec3 MeadowAlbedo = mix(MeadowColour * 0.92, DryColour * 0.94, clamp((1.0 - MoistureHere) * 0.85 - 0.05, 0.0, 1.0));
-        vec3 SandAlbedo = SandColour * (0.95 + 0.08 * FractureMacro);
-        vec3 ScreeAlbedo = ScreeColour * (0.86 + 0.22 * FractureMeso) * (0.92 + 0.14 * ProtrusionHere);
-        vec3 SnowAlbedo = SnowColour;
+        vec3 MeadowAlbedo = mix(MeadowColour * 0.90, DryColour * 0.94, clamp((1.0 - MoistureHere) * 0.85 - 0.05, 0.0, 1.0)) * (0.88 + 0.22 * FractureMicro);
+        vec3 SandAlbedo = SandColour * (0.94 + 0.10 * FractureMacro);
+        vec3 ScreeAlbedo = ScreeColour * (0.80 + 0.32 * FractureMicro) * (0.90 + 0.16 * ProtrusionHere);
+        vec3 SnowAlbedo = SnowColour * (0.95 + 0.05 * FractureMeso);
         vec3 IceAlbedo = mix(SnowColour, vec3(0.55, 0.72, 0.85), 0.65);
 
         vec3 Albedo = SoilAlbedo;
@@ -593,10 +643,10 @@ const SurfaceFragmentCore = /* glsl */`
         Albedo *= mix(vec3(1.04, 1.00, 0.94), vec3(0.96, 0.99, 1.05), HeightNorm);
 
         float Roughness = 0.92;
-        Roughness = mix(Roughness, 0.84, RockW);
-        Roughness = mix(Roughness, 0.52, SnowW * 0.6);
+        Roughness = mix(Roughness, 0.82, RockW);
+        Roughness = mix(Roughness, 0.50, SnowW * 0.6);
         Roughness = mix(Roughness, 0.22, IceW);
-        Roughness = mix(Roughness, 0.44, smoothstep(0.55, 0.95, FlowEffective) * RockW * 0.7);
+        Roughness = mix(Roughness, 0.42, smoothstep(0.55, 0.95, FlowEffective) * RockW * 0.7);
 
         // Alluvial riverbank & lakeshore gravel/sand bar collar around rivers and perched lakes.
         float BankCollar = smoothstep(0.02, 0.16, WaterHere) * (1.0 - smoothstep(0.18, 0.36, WaterHere))
@@ -609,14 +659,14 @@ const SurfaceFragmentCore = /* glsl */`
         Albedo *= 1.0 - 0.36 * Wet;
         Roughness = mix(Roughness, 0.26, Wet * 0.8);
 
-        // ---- normals: 3D shelf normal + meso outcrop cleavage + crag & boulder facets ----
-        float MesoFade  = exp(-ViewDistance / 4000.0);
-        float CragFade  = exp(-ViewDistance / 2200.0);
-        float MesoStrength = clamp(RockW * 0.20 + OutcropCrag * 0.16, 0.0, 0.32) * (1.0 - SnowW * 0.78);
-        float CragStrength = clamp(RockW * 0.22 + OutcropCrag * 0.20 + BoulderMask * 0.38 + ScreeW * 0.18, 0.0, 0.52) * (1.0 - SnowW * 0.82);
+        // ---- normals: 3D shelf normal + meso outcrop cleavage + crag/boulder facets ----
+        float MesoFade  = exp(-ViewDistance / 4200.0);
+        float CragFade  = exp(-ViewDistance / 2600.0);
+        float MesoStrength = clamp(RockW * 0.28 + OutcropCrag * 0.22, 0.0, 0.44) * (1.0 - SnowW * 0.82);
+        float CragStrength = clamp(RockW * 0.32 + OutcropCrag * 0.26 + BoulderMask * 0.48 + ScreeW * 0.26, 0.0, 0.68) * (1.0 - SnowW * 0.85);
 
-        vec3 MesoNormal = PerturbNormal(WorldPos, ShelfNormal, 0.052, MesoStrength * MesoFade);
-        vec3 Normal     = PerturbNormal(WorldPos, MesoNormal, 0.24 * QScale, CragStrength * CragFade);
+        vec3 MesoNormal = PerturbNormal(WorldPos, ShelfNormal, 0.056, MesoStrength * MesoFade);
+        vec3 Normal     = PerturbNormal(WorldPos, MesoNormal, 0.26 * QScale, CragStrength * CragFade);
 
         float AridFlat = Flatness * smoothstep(0.35, 0.75, StrataContrast);
         float Ripple = sin(dot(XZ, vec2(0.83, 0.55)) * 2.4);
@@ -713,13 +763,15 @@ const TerrainFragmentGlsl = /* glsl */`#version 300 es
         if (CaveCut > 0.42)
             discard;
 
-        // Crisp 1.15-texel central difference so every couloir, rill, outcrop crag, and boulder casts a sharp normal without bilinear grid seams.
-        float E = FieldTexel * 1.15;
-        float H0  = SampleHeight(XZ);
-        float Hx1 = SampleHeight(XZ + vec2(E, 0.0));
-        float Hx0 = SampleHeight(XZ - vec2(E, 0.0));
-        float Hz1 = SampleHeight(XZ + vec2(0.0, E));
-        float Hz0 = SampleHeight(XZ - vec2(0.0, E));
+        // Crisp central difference including sub-texel crag displacement at 2K/4K quality.
+        float QScale = max(QualityDetailScale, 1.0);
+        float ProHere = SampleChannelBilinear(FieldTexC, 1, XZ);
+        float E = FieldTexel * (1.05 / sqrt(QScale));
+        float H0  = SampleDetailedHeight(XZ, ProHere, QScale);
+        float Hx1 = SampleDetailedHeight(XZ + vec2(E, 0.0), ProHere, QScale);
+        float Hx0 = SampleDetailedHeight(XZ - vec2(E, 0.0), ProHere, QScale);
+        float Hz1 = SampleDetailedHeight(XZ + vec2(0.0, E), ProHere, QScale);
+        float Hz0 = SampleDetailedHeight(XZ - vec2(0.0, E), ProHere, QScale);
         vec3 FineNormal = normalize(vec3(-(Hx1 - Hx0) / (2.0 * E), 1.0, -(Hz1 - Hz0) / (2.0 * E)));
 
         // Only relax V-seam normals on near-flat valley bottoms (FineNormal.y > 0.88), never on steep couloirs or rock outcrops.

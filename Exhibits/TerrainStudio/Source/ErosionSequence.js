@@ -11,7 +11,7 @@
 //    thermal relaxation holds every slope at or below its angle of repose; glacial polish widens trunk
 //    valleys into U profiles; the slab transport model moves sand downwind and drops it in wind shadow.
 
-import { Resolution, TexelSize, ConstructRandomStream, LatticeNoise } from "./ReliefField.js";
+import { Resolution, TexelSize, ConstructRandomStream, LatticeNoise } from "./ReliefField.js?v=8";
 
 const YieldInterval = 4096;   // completions between yields to the browser
 
@@ -58,9 +58,19 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
     const DepositRate      = Params.DepositRate;
     const EvaporateRate    = 0.01;
     const Gravity          = -4.0;
-    const Radius           = Math.max(1, Math.round(Params.Radius));
+    // Keep rill erosion brush tight (<= 2 texels) so droplets carve sharp couloirs instead of 18m-wide rounded troughs.
+    const Radius           = Math.min(Math.max(1, Math.round(Params.Radius * 0.5)), 2);
 
-    // Brush offsets with linear falloff, normalised once.
+    // Precompute ridge-crest bedrock shield so raindrops flow off sharp arêtes & horns without blunting them.
+    const SmoothCrest = BoxBlurInPlace(Heights, 5);
+    const CrestShield = new Float32Array(N * N);
+    for (let Index = 0; Index < Heights.length; Index++)
+    {
+        const Convex = Math.max(Heights[Index] - SmoothCrest[Index], 0.0);
+        CrestShield[Index] = Math.max(Hardness[Index], Math.min(Convex / 5.5, 0.92));
+    }
+
+    // Brush offsets with sharp falloff, normalised once.
     const Offsets  = [];
     const Weights  = [];
     let WeightSum  = 0.0;
@@ -71,7 +81,7 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
             const Distance = Math.sqrt(Ox * Ox + Oy * Oy);
             if (Distance <= Radius)
             {
-                const Weight = 1.0 - Distance / Radius;
+                const Weight = Math.pow(1.0 - Distance / (Radius + 0.35), 1.5);
                 Offsets.push([Ox, Oy]);
                 Weights.push(Weight);
                 WeightSum += Weight;
@@ -174,7 +184,9 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
             }
             else
             {
-                let Amount = Math.min((Capacity - Sediment) * ErodeRate, EffectiveDrop > 0.0 ? EffectiveDrop : 0.0);
+                // Horton overland flow ramp: droplets on summit divides (Step < 5) gather flow before incising bedrock.
+                const StepRamp = Math.min(Step / 5.0, 1.0);
+                let Amount = Math.min((Capacity - Sediment) * ErodeRate * StepRamp, EffectiveDrop > 0.0 ? EffectiveDrop : 0.0);
                 if (Amount > 0.0)
                 {
                     for (let BrushIndex = 0; BrushIndex < Offsets.length; BrushIndex++)
@@ -184,7 +196,7 @@ export async function HydraulicErosion(Field, Params, Report, Cancel)
                         if (TargetX < 0 || TargetX >= N || TargetY < 0 || TargetY >= N)
                             continue;
                         const TargetIndex = TargetY * N + TargetX;
-                        const Resistance  = 1.0 - 0.85 * Hardness[TargetIndex];
+                        const Resistance  = 1.0 - 0.88 * CrestShield[TargetIndex];
                         const Weighted    = Amount * Weights[BrushIndex] * Resistance;
                         const Taken       = Heights[TargetIndex] < Weighted ? Heights[TargetIndex] : Weighted;
                         Heights[TargetIndex] -= Taken;
@@ -250,7 +262,8 @@ export async function ThermalErosion(Field, Params, Report, Cancel)
     // Hardness-aware repose: where strata hardness varies across the field, hard beds are allowed
     // to stand at CliffAngle while soft beds still repose at TalusAngle — the cliff-and-bench
     // staircase of real sedimentary country. On uniform-hardness fields this reduces to classic talus.
-    const CliffAngle = (Params.CliffAngle !== undefined) ? Params.CliffAngle : Params.TalusAngle;
+    const RawCliff = (Params.CliffAngle !== undefined) ? Params.CliffAngle : Params.TalusAngle;
+    const CliffAngle = RawCliff > Params.TalusAngle ? Math.max(RawCliff, 75.0) : RawCliff;
     const CliffLimit = Math.tan(CliffAngle * Math.PI / 180.0) * TexelSize;
     const HardnessNorm = new Float32Array(N * N);
     if (CliffLimit > Limit)
@@ -267,16 +280,15 @@ export async function ThermalErosion(Field, Params, Report, Cancel)
             if (Heights[Index] > HMax) HMax = Heights[Index];
         }
         const HSpan = Math.max(HMax - HMin, 1.0);
-        const SmoothBase = BoxBlurInPlace(Heights, 10);
+        const SmoothBase = BoxBlurInPlace(Heights, 8);
         const HasStrata = (Hi - Lo > 0.05);
         for (let Index = 0; Index < Hardness.length; Index++)
         {
-            // Crystalline bedrock competence: convex arêtes/spurs (Heights > SmoothBase) and upper
-            // massif walls are competent bedrock that holds CliffAngle, whereas concave chutes and
-            // sediment aprons relax at TalusAngle (32-35 deg) into realistic scree fans.
+            // Crystalline bedrock competence: convex arêtes/horns (Heights > SmoothBase) hold steep CliffAngle (75°+)
+            // so peaks stay razor-sharp, while concave chutes & aprons relax at TalusAngle (33-35°) into scree fans.
             const Elev01 = (Heights[Index] - HMin) / HSpan;
-            const Protrusion = Math.min(Math.max((Heights[Index] - SmoothBase[Index] + 4.0) / 26.0, 0.0), 1.0);
-            const Bedrock = Math.min(Math.max(Protrusion * 0.68 + Math.max(Elev01 - 0.25, 0.0) * 0.55 - Deposition[Index] * 0.65, 0.0), 0.92);
+            const Protrusion = Math.min(Math.max((Heights[Index] - SmoothBase[Index] + 2.5) / 14.0, 0.0), 1.0);
+            const Bedrock = Math.min(Math.max(Protrusion * 0.82 + Math.max(Elev01 - 0.22, 0.0) * 0.60 - Deposition[Index] * 0.70, 0.0), 0.98);
             if (HasStrata)
             {
                 const StrataH = (Hardness[Index] - Lo) / (Hi - Lo);
@@ -1223,7 +1235,8 @@ export function ApplyRuggedOutcropsAndRocks(Field, Params = {})
     const SmoothOutcrop = BoxBlurInPlace(OutcropField, 1);
     for (let Index = 0; Index < Heights.length; Index++)
     {
-        const OutLift = 0.62 * OutcropField[Index] + 0.38 * SmoothOutcrop[Index];
+        // Keep 82% of raw angular crag relief so outcrops and ridge teeth stay sharp and chiseled.
+        const OutLift = 0.82 * OutcropField[Index] + 0.18 * SmoothOutcrop[Index];
         const BldLift = BoulderField[Index];
         const TotalLift = OutLift + BldLift;
         if (TotalLift > 0.08)

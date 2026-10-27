@@ -5,7 +5,7 @@
 //    Arid, and Volcanic & Karst provinces. Every preset is an ordinary layer stack combining tectonic/structural
 //    uplift, Gaea-style river incision, perched lakes/tarns, glacial/hydraulic/thermal erosion, and 3D SDF caves.
 
-import { ConstructLayer } from "./LayerStackEvaluation.js";
+import { ConstructLayer } from "./LayerStackEvaluation.js?v=8";
 
 export const DefaultEnvironment =
 {
@@ -39,31 +39,35 @@ export const ReliefPresets =
         [
             ConstructLayer("ContinentalMass", {
                 Label: "Alpine basement", Blend: "Replace", Seed: 4815,
-                Params: { Amplitude: 245, BaseElevation: 45, Wavelength: 1320, Octaves: 6, Gain: 0.48, Warp: 170, Plateau: 0.10, Tilt: 35, TiltAngle: 28 },
+                Params: { Amplitude: 205, BaseElevation: 42, Wavelength: 1340, Octaves: 5, Gain: 0.48, Warp: 160, Plateau: 0.12, Tilt: 58, TiltAngle: 18 },
+            }),
+            ConstructLayer("TectonicFront", {
+                Label: "Jungfrau–Aar massif wall", Seed: 4816,
+                Params: { Amplitude: 365, Angle: 104, Offset: 28, Width: 550, Asymmetry: 0.44, Meander: 215, Waviness: 1020, CrestWavelength: 450 },
             }),
             ConstructLayer("RidgeUplift", {
                 Label: "Horn & arête crests", Seed: 9021,
-                Params: { Amplitude: 395, Wavelength: 780, Octaves: 5, Sharpness: 1.52, Warp: 165 },
+                Params: { Amplitude: 320, Wavelength: 800, Octaves: 5, Sharpness: 1.56, Warp: 160 },
             }),
             ConstructLayer("FluvialIncision", {
                 Label: "Drainage & rivers", Seed: 4817,
-                Params: { Strength: 2.15, Iterations: 4, Sedimentation: 0.50, Capacity: 1.15 },
+                Params: { Strength: 2.35, Iterations: 5, Sedimentation: 0.50, Capacity: 1.12 },
             }),
             ConstructLayer("GlacialPolish", {
                 Label: "Glacial U-troughs & tarns", Seed: 4819,
-                Params: { Strength: 0.72, WidthTexels: 16, ScourMetres: 9 },
+                Params: { Strength: 0.74, WidthTexels: 17, ScourMetres: 11 },
             }),
             ConstructLayer("HydraulicErosion", {
                 Label: "Rill & couloir wash", Seed: 4823,
-                Params: { Droplets: 140000, Inertia: 0.26, Capacity: 4.2, ErodeRate: 0.30, DepositRate: 0.32, Radius: 3 },
+                Params: { Droplets: 145000, Inertia: 0.25, Capacity: 4.3, ErodeRate: 0.31, DepositRate: 0.32, Radius: 2 },
             }),
             ConstructLayer("ThermalErosion", {
                 Label: "Scree & cliff repose", Seed: 4829,
-                Params: { Iterations: 52, TalusAngle: 34, CliffAngle: 68, Rate: 0.48 },
+                Params: { Iterations: 50, TalusAngle: 35, CliffAngle: 75, Rate: 0.48 },
             }),
             ConstructLayer("SnowAccumulation", {
                 Label: "Cirque & couloir snowfields", Seed: 4831,
-                Params: { Snowline: 325, Band: 65, SlopeLimit: 42, Depth: 4 },
+                Params: { Snowline: 410, Band: 72, SlopeLimit: 44, Depth: 4.4 },
             }),
             ConstructLayer("CaveNetwork", {
                 Label: "Alpine karst caves (SDF)", Seed: 4835,

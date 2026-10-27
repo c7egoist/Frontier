@@ -2114,3 +2114,18 @@ input[type=range].pill-slider::-moz-range-track
     #library { width: 256px; }
     .doc-title { min-width: 0; }
 }
+
+.viewport-chips button.chip,
+#chip-resolution
+{
+    pointer-events: auto;
+    cursor: pointer;
+    transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+.viewport-chips button.chip:hover,
+#chip-resolution:hover
+{
+    background: rgba(38, 38, 38, 0.95);
+    border-color: rgba(255, 255, 255, 0.28);
+    color: #fff;
+}

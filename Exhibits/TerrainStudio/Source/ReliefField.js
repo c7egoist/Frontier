@@ -129,21 +129,28 @@ export class LatticeNoise
         let FrequencyY = PosY;
         let Sum        = 0.0;
         let Normaliser = 0.0;
-        const Exp = Math.min(Math.max(Sharpness * 0.72, 0.75), 1.18);
+        let Weight     = 1.0;
+        const BaseExp  = Math.min(Math.max(Sharpness * 0.96, 0.95), 1.68);
+        const EffGain  = Math.min(Gain, 0.44);
         for (let Octave = 0; Octave < Octaves; Octave++)
         {
             const Primary   = this.Sample(FrequencyX, FrequencyY);
             const Secondary = this.Sample(FrequencyX * 1.37 + 17.3, FrequencyY * 1.37 - 9.1);
-            const Signal    = Primary * 0.68 + Secondary * 0.32;
-            let Ridge = 1.0 - Math.sqrt(Signal * Signal + 0.016);
-            Ridge = Math.pow(Math.max(Ridge, 0.0), Exp);
-            Sum        += Amplitude * Ridge;
+            const Signal    = Primary * 0.70 + Secondary * 0.30;
+            // Tight crest on macro octaves (0.00045) so main peaks are sharp pointed arêtes (/\),
+            // slightly softer on micro octaves so flanks stay planar-concave instead of spiky.
+            const CrestEps  = Octave < 2 ? 0.00045 : 0.0025;
+            let Ridge = 1.0 - Math.sqrt(Signal * Signal + CrestEps);
+            Ridge = Math.pow(Math.max(Ridge, 0.0), BaseExp);
+            const Hetero = Ridge * (0.45 + 0.55 * Weight);
+            Weight = Math.min(Math.max(Ridge * 1.45, 0.22), 1.0);
+            Sum        += Amplitude * Hetero;
             Normaliser += Amplitude;
             const RotatedX = FrequencyX * 0.8 - FrequencyY * 0.6;
             const RotatedY = FrequencyX * 0.6 + FrequencyY * 0.8;
             FrequencyX = RotatedX * Lacunarity + 5.1;
             FrequencyY = RotatedY * Lacunarity + 9.4;
-            Amplitude *= Gain;
+            Amplitude *= EffGain;
         }
         return Sum / Normaliser;   // in [0, 1)
     }

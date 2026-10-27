@@ -10,12 +10,12 @@
 //    any layer's mask or read directly by the material splat. Sculpt strokes live in their own delta
 //    field applied by a stack layer, so hand work survives downstream re-erosion like real geology.
 
-import { ReliefField, LatticeNoise, Resolution, TexelSize, WorldExtent, DerivedChannels, MaterialPaintChannels } from "./ReliefField.js";
-import { LayerStackEvaluation, LayerTypes, LayerTypeById, ConstructLayer } from "./LayerStackEvaluation.js";
-import { ReliefPresets } from "./ReliefPresets.js";
-import { ReliefRasterization } from "./ReliefRasterization.js";
-import { PolygoniseStamps, ConstructStamp, ConstructCave, StampShapes } from "./DistanceStamps.js";
-import { Cancellation, BakeSurfaceData } from "./ErosionSequence.js";
+import { ReliefField, LatticeNoise, Resolution, TexelSize, WorldExtent, DerivedChannels, MaterialPaintChannels } from "./ReliefField.js?v=8";
+import { LayerStackEvaluation, LayerTypes, LayerTypeById, ConstructLayer } from "./LayerStackEvaluation.js?v=8";
+import { ReliefPresets } from "./ReliefPresets.js?v=8";
+import { ReliefRasterization } from "./ReliefRasterization.js?v=8";
+import { PolygoniseStamps, ConstructStamp, ConstructCave, StampShapes } from "./DistanceStamps.js?v=8";
+import { Cancellation, BakeSurfaceData } from "./ErosionSequence.js?v=8";
 
 //--------------------------------------------------------------------------------------------------------------------------------------------
 //                                                                  GLYPHS
@@ -1472,6 +1472,7 @@ export class TerrainStudio
     SetQuality(QualityId)
     {
         this.Raster.SetQuality(QualityId);
+        this.Field.QualityDetailScale = this.Raster.QualityDetailScale || 1.0;
         const ShortLabels = { "512": "512² (Draft)", "1024": "1024² (1K)", "2048": "2048² (2K)", "4096": "4096² (4K)" };
         const Short = ShortLabels[String(QualityId)] || "1024² (1K)";
         if (ById("quality-label"))
@@ -1480,6 +1481,7 @@ export class TerrainStudio
             ById("chip-resolution").textContent = `${Short} · 2 km ▾`;
         if (ById("identity-kind"))
             ById("identity-kind").textContent = `Heightfield + SDF · ${Short}`;
+        this.RefreshOutcropsLive();
         this.ConstructSceneControls();
         ShowToast(`Terrain quality set to ${Short} (${this.Raster.ActiveGridSegments}² mesh)`, "layers");
     }

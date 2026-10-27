@@ -9,9 +9,9 @@
 //    result through strength × mask weight. A layer can therefore be masked by the water it will one
 //    day stand beside: paint the Water channel, point a layer's mask at it, rebuild.
 
-import { Resolution, TexelSize, WorldExtent, LatticeNoise, MaskWeight, SlopeAt } from "./ReliefField.js";
-import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation, ApplyRuggedOutcropsAndRocks, BoxBlurInPlace } from "./ErosionSequence.js";
-import { BuildProceduralCaves } from "./DistanceStamps.js";
+import { Resolution, TexelSize, WorldExtent, LatticeNoise, MaskWeight, SlopeAt } from "./ReliefField.js?v=8";
+import { HydraulicErosion, ThermalErosion, FluvialIncision, GlacialPolish, AeolianSettle, SnowAccumulation, ApplyRuggedOutcropsAndRocks, BoxBlurInPlace } from "./ErosionSequence.js?v=8";
+import { BuildProceduralCaves } from "./DistanceStamps.js?v=8";
 
 async function YieldBriefly()
 {
@@ -76,8 +76,8 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
     const P     = Layer.Params;
     const Noise = new LatticeNoise(Layer.Seed ^ 0x51AB);
     const N     = Resolution;
-    const Scale = TexelSize / Math.max(P.Wavelength, 720.0);
-    const WarpScale = TexelSize / (Math.max(P.Wavelength, 720.0) * 1.85);
+    const Scale = TexelSize / Math.max(P.Wavelength, 740.0);
+    const WarpScale = TexelSize / (Math.max(P.Wavelength, 740.0) * 1.80);
     const WarpTexels = P.Warp / TexelSize;
     let Lo = Infinity, Hi = -Infinity;
     for (let Z = 0; Z < N; Z++)
@@ -89,29 +89,35 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
             const Ux = (X + WarpX) * Scale;
             const Uz = (Z + WarpZ) * Scale;
 
-            // Long connected structural fold spines (anisotropic along strike so mountains form
-            // sweeping chains and cols with wide open valleys between them).
+            // Monumental connected structural fold spines (4 octaves with sharp 0.00045 crest so
+            // main peaks form pointed horns & arêtes while flanks sweep into wide glacial valleys).
             const StrikeA = Ux * 0.85 + Uz * 0.52;
             const CrossA  = -Ux * 0.52 + Uz * 0.85;
-            const SpineA  = Noise.Ridged(StrikeA * 0.50, CrossA * 0.88, 4, 2.05, 0.46, P.Sharpness * 1.15);
+            const SpineA  = Noise.Ridged(StrikeA * 0.50, CrossA * 0.88, 4, 2.05, 0.42, P.Sharpness * 1.25);
 
             const StrikeB = Ux * 0.48 - Uz * 0.88;
             const CrossB  = Ux * 0.88 + Uz * 0.48;
-            const SpineB  = Noise.Ridged(StrikeB * 0.55 + 7.4, CrossB * 0.90 - 4.1, 4, 2.05, 0.44, P.Sharpness * 1.12);
+            const SpineB  = Noise.Ridged(StrikeB * 0.55 + 7.4, CrossB * 0.90 - 4.1, 4, 2.05, 0.42, P.Sharpness * 1.22);
 
             const Diff = SpineA - SpineB;
-            const ConnectedSpine = 0.5 * (SpineA + SpineB + Math.sqrt(Diff * Diff + 0.008));
+            const MaxSpine = 0.5 * (SpineA + SpineB + Math.sqrt(Diff * Diff + 0.0003));
+            // Pyramidal horn intersections: where two arêtes cross (SpineA * SpineB), the crest rises to a sharp Matterhorn point!
+            const HornPeak = Math.pow(Math.max(SpineA * SpineB, 0.0), 0.72);
+            const ConnectedSpine = 0.54 * MaxSpine + 0.46 * HornPeak;
 
             // Swiss-style fold-advected lateral spur ribs branching off the main mountain flanks.
-            const SpurCoordX = Ux * 1.75 + (SpineA - 0.5) * 0.65;
-            const SpurCoordZ = Uz * 1.75 - (SpineB - 0.5) * 0.65;
-            const LateralSpurs = Noise.Ridged(SpurCoordX + 11.3, SpurCoordZ - 6.7, 3, 2.1, 0.46, P.Sharpness * 1.20);
-            const SpurWeight = ConnectedSpine * (1.05 - ConnectedSpine * 0.30);
+            const SpurCoordX = Ux * 1.75 + (SpineA - 0.5) * 0.68;
+            const SpurCoordZ = Uz * 1.75 - (SpineB - 0.5) * 0.68;
+            const LateralSpurs = Noise.Ridged(SpurCoordX + 11.3, SpurCoordZ - 6.7, 4, 2.08, 0.42, P.Sharpness * 1.32);
+            const SpurWeight = ConnectedSpine * (1.05 - ConnectedSpine * 0.22);
 
-            const BroadDome = Noise.Fractal(Ux * 0.52 + 5.2, Uz * 0.52 - 3.8, 3, 2.0, 0.48) * 0.5 + 0.5;
-            const Envelope  = 0.42 + 0.58 * (Noise.Fractal(X * Scale * 0.34 + 9.2, Z * Scale * 0.34 + 4.4, 3, 2.0, 0.5) * 0.5 + 0.5);
+            // Chiseled pyramidal facetting on the upper horns so summits terminate in crisp angular points.
+            const HornFacet = Noise.Ridged(Ux * 2.65 + 29.4, Uz * 2.65 - 18.2, 3, 2.05, 0.40, P.Sharpness * 1.45);
+            const HornWeight = ConnectedSpine * ConnectedSpine;
 
-            const Raised = (0.66 * ConnectedSpine + 0.22 * LateralSpurs * SpurWeight + 0.12 * BroadDome) * Envelope;
+            const Envelope = 0.45 + 0.55 * (Noise.Ridged(X * Scale * 0.38 + 9.2, Z * Scale * 0.38 + 4.4, 2, 2.0, 0.40, 1.15));
+
+            const Raised = (0.66 * ConnectedSpine + 0.24 * LateralSpurs * SpurWeight + 0.10 * HornFacet * HornWeight) * Envelope;
             Out[Z * N + X] = Raised;
             if (Raised < Lo) Lo = Raised;
             if (Raised > Hi) Hi = Raised;
@@ -127,12 +133,9 @@ async function BuildRidgeUplift(Field, Layer, Out, Report, Cancel)
     for (let Index = 0; Index < Out.length; Index++)
     {
         const Unit = Math.min(Math.max((Out[Index] - Lo) / Span, 0.0), 1.0);
-        // Concave mountain flanks (\___/) rising to sharp chiseled arête crests (/\).
-        Out[Index] = Math.pow(Unit, 1.38) * P.Amplitude;
+        // Concave mountain flanks (\___/) rising to sharp pointed pyramidal horns & arête crests (/\).
+        Out[Index] = Math.pow(Unit, 1.45) * P.Amplitude;
     }
-    const Softened = BoxBlurInPlace(Out, 1);
-    for (let Index = 0; Index < Out.length; Index++)
-        Out[Index] += (Softened[Index] - Out[Index]) * 0.14;
 }
 
 async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
@@ -157,11 +160,15 @@ async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
             const Meander = Noise.Fractal(Along * AlongScale + 13.0, 4.7, 3, 2.0, 0.5) * P.Meander;
             const Distance = Across - P.Offset - Meander;
             const Width = Distance > 0.0 ? P.Width : P.Width * (1.0 - P.Asymmetry * 0.55);
-            const Profile = Math.exp(-(Distance * Distance) / (Width * Width * 1.35));
-            const MainDivide = 0.54 + 0.46 * (Noise.Ridged(Along * CrestScale * 0.48 + 2.2, Distance * CrestScale * 0.22, 3, 2.0, 0.45, 1.25));
-            const Buttresses = Noise.Ridged(Along * CrestScale * 0.65 - 7.4, Distance * CrestScale * 0.28 + 4.1, 3, 2.0, 0.44, 1.22);
-            const SpurFade   = Math.exp(-(Distance * Distance) / (Width * Width * 3.2));
-            const Raised     = Profile * MainDivide + SpurFade * (1.0 - Profile * 0.42) * Buttresses * 0.56;
+            const NormDist = Math.abs(Distance) / Math.max(Width, 1.0);
+            // Sharp concave-flanked ridge profile (exponent 1.04 instead of 1.65) so the tectonic divide rises to a pointed crest (/\), never a flat Gaussian dome!
+            const Profile  = Math.exp(-Math.pow(NormDist, 1.04) * 1.12);
+            const DivideA  = Noise.Ridged(Along * CrestScale * 0.52 + 2.2, Distance * CrestScale * 0.26, 4, 2.05, 0.42, 1.42);
+            const DivideB  = Noise.Ridged(Along * CrestScale * 0.82 - 5.1, Distance * CrestScale * 0.42 + 3.7, 4, 2.05, 0.42, 1.38);
+            const MainDivide = 0.22 + 0.46 * DivideA + 0.32 * Math.pow(DivideA * DivideB, 0.75);
+            const Buttresses = Noise.Ridged(Along * CrestScale * 0.68 - 7.4, Distance * CrestScale * 0.32 + 4.1, 4, 2.05, 0.42, 1.35);
+            const SpurFade   = Math.exp(-Math.pow(NormDist, 1.25) * 0.65);
+            const Raised     = Profile * MainDivide + SpurFade * (1.0 - Profile * 0.35) * Buttresses * 0.58;
             Out[Z * N + X] = Raised;
             if (Raised < Lo) Lo = Raised;
             if (Raised > Hi) Hi = Raised;
@@ -177,11 +184,8 @@ async function BuildTectonicFront(Field, Layer, Out, Report, Cancel)
     for (let Index = 0; Index < Out.length; Index++)
     {
         const Unit = Math.min(Math.max((Out[Index] - Lo) / Span, 0.0), 1.0);
-        Out[Index] = Math.pow(Unit, 1.28) * P.Amplitude;
+        Out[Index] = Math.pow(Unit, 1.36) * P.Amplitude;
     }
-    const Softened = BoxBlurInPlace(Out, 2);
-    for (let Index = 0; Index < Out.length; Index++)
-        Out[Index] += (Softened[Index] - Out[Index]) * 0.22;
 }
 
 async function BuildCellularPlateau(Field, Layer, Out, Report, Cancel)
@@ -708,14 +712,15 @@ export class LayerStackEvaluation
 
         const OutcropScale = (Field.OutcropScale !== undefined) ? Field.OutcropScale : 1.0;
         const RockScale    = (Field.RockScatterScale !== undefined) ? Field.RockScatterScale : 1.0;
+        const QualityBoost = (Field.QualityDetailScale !== undefined) ? Field.QualityDetailScale : 1.0;
         const Seed = (Layers && Layers[0]) ? (Layers[0].Seed ^ 0x5A17) : 7331;
         if (OutcropScale > 0.01 || RockScale > 0.01)
         {
             ApplyRuggedOutcropsAndRocks(Field,
             {
-                OutcropAmplitude: 18.5 * OutcropScale,
-                RockAmplitude:    5.8 * RockScale,
-                Density:          0.62,
+                OutcropAmplitude: 14.5 * OutcropScale * Math.pow(QualityBoost, 0.22),
+                RockAmplitude:    4.8 * RockScale * Math.pow(QualityBoost, 0.30),
+                Density:          Math.min(0.60 * Math.pow(QualityBoost, 0.18), 0.85),
                 Seed:             Seed,
             });
         }
