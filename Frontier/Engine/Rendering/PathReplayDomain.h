@@ -72,6 +72,9 @@ struct PathReplayHistorySpecification
     bool PowerWeightedFacets = false;
     bool UniformFacetMixture = false;
     uint32_t InitialCandidates = 1;
+    // 📝 The caller advances the allocation revision when persistent output storage is replaced.
+    bool CompactOutput = false;
+    std::uint64_t OutputAllocationRevision = 0;
     bool operator==(const PathReplayHistorySpecification&) const = default;
 };
 
@@ -80,12 +83,15 @@ struct PathReplayHistoryDecision
     bool Changed = true;
     uint32_t MaximumHistory = 1;
     bool CameraOnly = false;
+    bool ResetReservoir = true;
 };
 
 // 📝 Tracks exact input revisions, including in-place atlas and BVH changes. CameraOnly additionally requires
 //     the supplied previous camera to match the last resolved camera and unchanged non-camera metadata.
 //     This is a bounded heuristic, not a proof of unbiased adaptive reuse; it does not own GPU histories,
-//     validate submissions or issue renderer commands.
+//     validate submissions or issue renderer commands. The caller must honor ResetReservoir and reset optional
+//     colour/seed histories when it is true, advance OutputAllocationRevision on replacement, and invalidate
+//     the snapshot after failed or abandoned submissions. The recorder cannot enforce these obligations.
 class PathReplayHistoryDomain
 {
   public:

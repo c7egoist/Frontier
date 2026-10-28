@@ -42,8 +42,38 @@ void ValidateReplayCompactReconstruction(const char* Driver, const std::string& 
     std::printf("COMPACT_RECONSTRUCTION_PARITY pixels=1024 frames=4 float_readbacks=bit_exact slots=equal\n");
 }
 
+void ValidateReplayReconstructionLayoutTransitions(const char* Driver, const std::string& Shaders)
+{
+    const auto Scene = ReplayCameraPlane(0, 0);
+    LightComputeSubmission Switched(Driver), Fresh(Driver);
+    Switched.Prepare(Scene, Shaders, false, false, false, false, true, false, 0);
+    Fresh.Prepare(Scene, Shaders, false, false, false, false, true, false, 0);
+    const auto Execute = [&](LightComputeSubmission& Compute, uint32_t Seed, bool Reset)
+    {
+        return ExecuteReplayCameraPlane(Compute, Scene, Seed, true, true, Reset, true, true,
+                                        1, 2, {.025f,.025f,.025f}, false);
+    };
+    for (uint32_t Frame = 0; Frame < 3; ++Frame)
+        (void)Execute(Switched, 610001u + Frame * 7919u, Frame == 0);
+    for (uint32_t Transition = 0; Transition < 2; ++Transition)
+    {
+        Switched.CompactReplay = Transition == 0;
+        Fresh.CompactReplay = Switched.CompactReplay;
+        const uint32_t Seed = 710001u + Transition * 7919u;
+        const auto Expected = Execute(Fresh, Seed, true);
+        const auto Actual = Execute(Switched, Seed, false);
+        Require(Switched.ReplayLastReset && Switched.ReplayLastReconstructionReset &&
+                Switched.HistorySequence == 1 && Switched.ExtendedStatistics()[20] == 0 &&
+                Switched.ExtendedStatistics()[23] == 0 && ReplayCandidateImagesEqual(Expected, Actual),
+                "Layout switch failed to reset reconstructed colour and reservoir histories");
+        (void)Execute(Switched, Seed + 1, false);
+    }
+    std::printf("LAYOUT_RECONSTRUCTION_TRANSITIONS directions=2 colour_reset=1 fresh_exact=1\n");
+}
+
 void ValidateReplayDynamicCamera(const char* Driver, const std::string& Shaders)
 {
+    ValidateReplayReconstructionLayoutTransitions(Driver, Shaders);
     ValidateReplayCompactReconstruction(Driver, Shaders);
     constexpr uint32_t Bounces = 4, Candidates = 4, WarmFrames = 3, Batches = 16, CpuSamples = 1024;
     const auto Previous = ReplayCameraPlane(0, 0);

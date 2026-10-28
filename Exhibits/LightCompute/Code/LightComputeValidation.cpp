@@ -857,12 +857,13 @@ struct LightComputeSubmission
                 "Replay facet-source distribution exceeds the prepared storage span");
         const PathReplayHistorySpecification ReplaySpecification{Bounces, PositiveFloor, Environment, PrimaryVisibility,
             RoughOpaque, SampleFacets, DoubleCountForAudit, StrictMotionForAudit, BalanceSampling, TexturedDiffuse,
-            ImportanceRough, PowerWeightedFacets, UniformFacetMixture, InitialCandidates};
+            ImportanceRough, PowerWeightedFacets, UniformFacetMixture, InitialCandidates, CompactReplay};
         // 📝 Reservoir replay can retain capped history across changes; radiance accumulation cannot.
         const auto ReplayDecision = ReplayHistoryDomain.Resolve(ReplayDomainView(Scene), ReplaySpecification,
                                                                 FullHistoryForAudit);
         ReplayLastHistoryCap = ReplayDecision.MaximumHistory;
-        bool Reset = ResetHistory || Scene.Width != ReceiverWidth || Scene.Height != ReceiverHeight;
+        bool Reset = ResetHistory || ReplayDecision.ResetReservoir ||
+                     Scene.Width != ReceiverWidth || Scene.Height != ReceiverHeight;
         Upload(Scene, TexturedDiffuse);
         if (!FacetSources.empty())
             std::memcpy(static_cast<float*>(Buffers[4].Address) + ReplayFacetStart,
@@ -1747,6 +1748,21 @@ int main(int Count, char** Arguments)
         if (Count == 4 && std::string(Arguments[3]) == "--replay-dynamic-camera")
         {
             ValidateReplayDynamicCamera(Arguments[1], Arguments[2]);
+            return 0;
+        }
+        if (Count == 4 && std::string(Arguments[3]) == "--replay-reconstruction-layout-transitions")
+        {
+            ValidateReplayReconstructionLayoutTransitions(Arguments[1], Arguments[2]);
+            return 0;
+        }
+        if (Count == 5 && std::string(Arguments[3]) == "--capture-replay-layout-transitions")
+        {
+            ValidateReplayLayoutTransitions(Arguments[1], Arguments[2], Arguments[4]);
+            return 0;
+        }
+        if (Count == 4 && std::string(Arguments[3]) == "--replay-layout-transitions")
+        {
+            ValidateReplayLayoutTransitions(Arguments[1], Arguments[2]);
             return 0;
         }
         if (Count == 4 && std::string(Arguments[3]) == "--replay-compact-parity")

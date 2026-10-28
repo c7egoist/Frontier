@@ -193,8 +193,21 @@ void ValidateEngineReplayHistory()
     ShortCamera.Camera = ShortCamera.Camera.first(11);
     Require(Rejected([&] { (void)History.Resolve(ShortCamera, Specification); }), "Short history camera accepted");
     Compare(false, 64);
+    Specification.CompactOutput = true;
+    auto Layout = History.Resolve(Fixture.View(), Specification, true);
+    Require(Layout.Changed && Layout.ResetReservoir && !Layout.CameraOnly && Layout.MaximumHistory == 64,
+            "Layout transition did not force a reset under the audit override");
+    Layout = History.Resolve(Fixture.View(), Specification);
+    Require(!Layout.Changed && !Layout.ResetReservoir, "Stable layout needlessly reset the reservoir");
+    Specification.OutputAllocationRevision = 1;
+    Layout = History.Resolve(Fixture.View(), Specification);
+    Require(Layout.Changed && Layout.ResetReservoir && !Layout.CameraOnly, "Allocation revision did not reset history");
+    Specification.CompactOutput = false;
+    Layout = History.Resolve(Fixture.View(), Specification);
+    Require(Layout.ResetReservoir, "Returning to legacy layout did not reset history");
     History.Invalidate();
-    Compare(true, 1);
+    Layout = History.Resolve(Fixture.View(), Specification);
+    Require(Layout.Changed && Layout.ResetReservoir, "Invalidation did not reset history");
     ReplayInputFixture CameraFixture;
     PathReplayHistoryDomain CameraHistory;
     PathReplayHistorySpecification CameraSpecification{};

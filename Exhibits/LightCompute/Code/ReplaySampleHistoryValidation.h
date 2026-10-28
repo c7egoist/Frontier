@@ -626,8 +626,51 @@ void ValidateReplayCompactParity(const char* Driver, const std::string& Shaders,
                 "float_readbacks=bit_exact slots=bit_exact finite_guides=1\n", SeedOffset);
 }
 
+// 📝 A layout change must not reinterpret any reservoir or seed bank from the previous layout.
+void ValidateReplayLayoutTransitions(const char* Driver, const std::string& Shaders,
+                                     const std::string& Directory = {})
+{
+    const auto Scene = ReplayCameraPlane(0, 0);
+    for (bool SeedHistory : {false, true})
+    {
+        LightComputeSubmission Switched(Driver), Fresh(Driver);
+        Switched.Prepare(Scene, Shaders, false, false, false, false, true, false, 0);
+        Fresh.Prepare(Scene, Shaders, false, false, false, false, true, false, 0);
+        const auto Execute = [&](LightComputeSubmission& Compute, uint32_t Seed, bool Reset)
+        {
+            return ExecuteReplaySampleHistory(Compute, Scene, Seed, Reset, SeedHistory, 2, {.025f,.025f,.025f},
+                                              1, !SeedHistory, !SeedHistory);
+        };
+        for (uint32_t Frame = 0; Frame < 3; ++Frame)
+            (void)Execute(Switched, 410001u + 7919u * Frame, Frame == 0);
+        for (uint32_t Transition = 0; Transition < 2; ++Transition)
+        {
+            Switched.CompactReplay = Transition == 0;
+            Fresh.CompactReplay = Switched.CompactReplay;
+            const uint32_t Seed = 510001u + Transition * 7919u;
+            const auto Expected = Execute(Fresh, Seed, true);
+            const auto Actual = Execute(Switched, Seed, false);
+            Require(Switched.ReplayLastReset && Switched.HistorySequence == 1 &&
+                    Switched.ExtendedStatistics()[20] == 0 &&
+                    (!SeedHistory || Switched.ExtendedStatistics()[23] == 0) &&
+                    ReplayCandidateImagesEqual(Expected, Actual),
+                    "Changing replay output layout did not reset history to fresh output");
+            if (!SeedHistory && Transition == 0 && !Directory.empty())
+            {
+                std::filesystem::create_directories(Directory);
+                WriteImage(Directory + "/LayoutFresh.ppm", Expected, Scene.Width, Scene.Height, 3);
+                WriteImage(Directory + "/LayoutSwitched.ppm", Actual, Scene.Width, Scene.Height, 3);
+            }
+            (void)Execute(Switched, Seed + 1, false);
+        }
+    }
+    std::printf("LAYOUT_TRANSITIONS modes=reservoir,seed directions=legacy_to_compact,compact_to_legacy "
+                "fresh_exact=1 history_reset=1\n");
+}
+
 void ValidateReplaySampleHistory(const char* Driver, const std::string& Shaders)
 {
+    ValidateReplayLayoutTransitions(Driver, Shaders);
     ValidateReplayCompactParity(Driver, Shaders);
     ValidateReplaySampleSubpixel(Driver, Shaders);
     ValidateReplaySampleFacetConvergence(Driver, Shaders);

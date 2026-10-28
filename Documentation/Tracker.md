@@ -4,6 +4,15 @@ Single progress and violation tracker. Detailed evidence belongs in Exhibits, no
 The [renderer and GI evidence map](../Exhibits/RecoveryAudit/RendererStatus.md) separates software tracing,
 hardware RT, non-ray paths, reflections, PBR and the statistical limits of the recent charts.
 
+## Replay history layout reset — 2026-10-28
+
+- Reproduced a missing reset on switching legacy/compact replay layouts. The Engine history domain now signals
+  `ResetReservoir` on initial use, layout change, allocation-revision change and invalidation; the exhibit honors
+  it for reservoir, seed and colour history. Allocation revision and failure invalidation remain caller-managed.
+- Fresh-output comparisons cover both layout directions and all three modes on SwiftShader CPU Vulkan;
+  allocation replacement is host-tested only. [Results and captures](../Exhibits/LightCompute/ReplayLayoutReset.md).
+  This is not complete ReSTIR, renderer integration, a performance measurement or physical-GPU validation.
+
 ## Compact replay repeated parity — 2026-10-28
 
 - Added eight deterministic seed batches and a focused compact parity command; 65,536 paired outputs compare

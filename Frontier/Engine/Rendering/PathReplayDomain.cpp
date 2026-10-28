@@ -286,6 +286,8 @@ PathReplayHistoryDecision PathReplayHistoryDomain::Resolve(const PathReplayScene
     Require(Specification.InitialCandidates >= 1 &&
                 Specification.InitialCandidates <= PathReplayMaximumInitialCandidates,
             "Replay history requires one to four initial candidates");
+    const bool ResetReservoir = !PriorAvailable || PriorSpecification.CompactOutput != Specification.CompactOutput ||
+                                PriorSpecification.OutputAllocationRevision != Specification.OutputAllocationRevision;
     const bool SpecificationChanged = !PriorAvailable || PriorSpecification != Specification;
     const bool CameraChanged = !PriorAvailable ||
                                std::memcmp(Scene.Camera.data(), PriorCamera.data(),
@@ -332,7 +334,7 @@ PathReplayHistoryDecision PathReplayHistoryDomain::Resolve(const PathReplayScene
     PriorCorners.swap(CurrentCorners);
     PriorMaterialAtlas.swap(CurrentMaterialAtlas);
     PriorAvailable = true;
-    return {Changed, Changed && !FullHistoryForAudit ? 1u : 64u, CameraOnly};
+    return {Changed, Changed && !FullHistoryForAudit ? 1u : 64u, CameraOnly, ResetReservoir};
 }
 
 void PathReplayHistoryDomain::Invalidate() noexcept

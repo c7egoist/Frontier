@@ -1,0 +1,7 @@
+Colour reconstruction layout reset: Release GCC 12.2, Slang 2026.14.1, SwiftShader CPU Vulkan
+Base addf9432142525592a9f101a5c47eff94c97ffa4 plus working changes
+a20a213744e98859885c79434cffde058d08b8d752c9e61a202cd98876b351c0  Frontier/Engine/Rendering/PathReplayDomain.h
+aa1796b45ab93d2d24ded129268498faaf4b53362dae818ddb5c6085416c0e7d  Frontier/Engine/Rendering/PathReplayDomain.cpp
+a10d5ab34a492c52a05ecc446beee3fe7ace4af651cf1a16770bb9b55c3016a4  Exhibits/LightCompute/Code/LightComputeValidation.cpp
+94e65e01d9860d0d46eaf75b752de9ebb544ce6b7a0d5d73575396ce76e4b590  Exhibits/LightCompute/Code/ReplayDynamicCameraValidation.h
+LAYOUT_RECONSTRUCTION_TRANSITIONS directions=2 colour_reset=1 fresh_exact=1
