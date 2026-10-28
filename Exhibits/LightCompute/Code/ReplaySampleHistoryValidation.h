@@ -570,7 +570,7 @@ void CaptureReplaySampleHistory(const char* Driver, const std::string& Shaders, 
 }
 
 // 📝 Compare float readbacks and live history slots, not only tone-mapped image bytes.
-void ValidateReplayCompactParity(const char* Driver, const std::string& Shaders)
+void ValidateReplayCompactParity(const char* Driver, const std::string& Shaders, uint32_t SeedOffset = 0)
 {
     const auto Previous = ReplayCameraPlane(0, 0), Current = ReplayCameraPlane(.03125f, 0);
     for (bool SampleHistory : {false, true})
@@ -586,7 +586,7 @@ void ValidateReplayCompactParity(const char* Driver, const std::string& Shaders)
             const auto& Scene = Frame < 3 ? Previous : Current;
             const auto Execute = [&](LightComputeSubmission& Compute)
             {
-                return ExecuteReplaySampleHistory(Compute, Scene, 820001u + Frame * 7919u, Frame == 0,
+                return ExecuteReplaySampleHistory(Compute, Scene, 820001u + SeedOffset + Frame * 7919u, Frame == 0,
                     SampleHistory, 4, {.025f,.025f,.025f}, 1, !SampleHistory, !SampleHistory);
             };
             const auto A = Execute(Legacy), B = Execute(Compact);
@@ -600,6 +600,9 @@ void ValidateReplayCompactParity(const char* Driver, const std::string& Shaders)
                 {
                     const auto Old = ReplaySampleSlot(Legacy, Slot, Pixel);
                     const auto New = ReplaySampleSlot(Compact, Slot, Pixel);
+                    for (unsigned Channel = 0; Channel < 4; ++Channel)
+                        Require(std::isfinite(Old[Channel]) && std::isfinite(New[Channel]),
+                                "Compact parity encountered non-finite reservoir or guide");
                     if (std::memcmp(Old.data(), New.data(), sizeof(Old)) != 0)
                     {
                         std::printf("COMPACT_MISMATCH mode=%u frame=%u pixel=%u slot=%u old=%g,%g,%g,%g new=%g,%g,%g,%g\n",
@@ -610,12 +613,17 @@ void ValidateReplayCompactParity(const char* Driver, const std::string& Shaders)
                 }
                 if (SampleHistory)
                     for (uint32_t Slot = 11; Slot <= 14; ++Slot)
-                        Require(ReplaySampleSlot(Legacy, Slot, Pixel) == ReplaySampleSlot(Compact, Slot, Pixel),
+                    {
+                        const auto Old = ReplaySampleSlot(Legacy, Slot, Pixel);
+                        const auto New = ReplaySampleSlot(Compact, Slot, Pixel);
+                        Require(std::memcmp(Old.data(), New.data(), sizeof(Old)) == 0,
                                 "Compact seed bank differs from legacy");
+                    }
             }
         }
     }
-    std::printf("COMPACT_PARITY pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=equal\n");
+    std::printf("COMPACT_PARITY seed_offset=%u pixels=1024 frames=4 modes=reservoir,seed "
+                "float_readbacks=bit_exact slots=bit_exact finite_guides=1\n", SeedOffset);
 }
 
 void ValidateReplaySampleHistory(const char* Driver, const std::string& Shaders)

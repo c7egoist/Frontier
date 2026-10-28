@@ -4,6 +4,15 @@ Single progress and violation tracker. Detailed evidence belongs in Exhibits, no
 The [renderer and GI evidence map](../Exhibits/RecoveryAudit/RendererStatus.md) separates software tracing,
 hardware RT, non-ray paths, reflections, PBR and the statistical limits of the recent charts.
 
+## Compact replay repeated parity — 2026-10-28
+
+- Added eight deterministic seed batches and a focused compact parity command; 65,536 paired outputs compare
+  bit-for-bit across reservoir-reuse and seed-history modes. Guide channels must be finite; compared history
+  slots are bit-identical. The earlier single mismatch did not recur, but its cause remains unknown.
+  [Scope and retained results](../Exhibits/LightCompute/ReplayCompact.md#repeated-parity-follow-up).
+- These are small SwiftShader CPU-Vulkan fixtures, not physical-GPU performance, completed ReSTIR or evidence
+  that seed history and reservoir reuse can be combined.
+
 ## Compact replay output — 2026-10-28
 
 - Added a default-off replay-specific output layout. At 1920 × 1080, its minimum output descriptor range is

@@ -1,0 +1,16 @@
+Compact parity: eight deterministic batches, Debug ASan/UBSan host; driver and shaders uninstrumented
+Base 4c443083288d891158c6e4e9c90baa99c3f9a15f plus working changes
+1e74ded4df4bf5191c48377bfb04db0ea05d658fa1105b3312ba4492eb48fe46  Frontier/Engine/Rendering/Shaders/LightInfluence.slang
+ea479d45d69cae732c205d0a3c7d0c02be76119664793c71e42c3cbb2f528526  Frontier/Engine/Rendering/Shaders/PathReplayReservoir.slang
+51907571e9fd398552d4be1e13cf872b029df5f266ad9b1b4a853e55a2fd1ed1  Frontier/Engine/Rendering/Shaders/PathReplaySampleHistory.slang
+54389225f96ab62b65ade7da229ef5471401d3757c08aaee65ae8aa897e58ab3  Exhibits/LightCompute/Code/LightComputeValidation.cpp
+382fecc4c474e8e6011d458c2392b2617da5aeb574925a862530d17c5d67ecf4  Exhibits/LightCompute/Code/ReplaySampleHistoryValidation.h
+COMPACT_PARITY seed_offset=0 pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=bit_exact finite_guides=1
+COMPACT_PARITY seed_offset=104729 pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=bit_exact finite_guides=1
+COMPACT_PARITY seed_offset=209458 pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=bit_exact finite_guides=1
+COMPACT_PARITY seed_offset=314187 pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=bit_exact finite_guides=1
+COMPACT_PARITY seed_offset=418916 pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=bit_exact finite_guides=1
+COMPACT_PARITY seed_offset=523645 pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=bit_exact finite_guides=1
+COMPACT_PARITY seed_offset=628374 pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=bit_exact finite_guides=1
+COMPACT_PARITY seed_offset=733103 pixels=1024 frames=4 modes=reservoir,seed float_readbacks=bit_exact slots=bit_exact finite_guides=1
+PASS compact replay parity across eight deterministic seed batches

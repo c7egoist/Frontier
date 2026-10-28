@@ -52,6 +52,17 @@ the seed-history mode remains mutually exclusive with reservoir reuse.
 [Moving scene](Results/ReplayCompactMotion-release.txt) · [Capture comparison](Results/ReplayCompactCapture.txt).
 The release and sanitizer retry include the added mismatch-print diagnostic.
 
+## Repeated parity follow-up
+
+Eight deterministic seed batches now exercise both reservoir reuse and seed history across three warm-up
+frames and a half-pixel camera move. In each batch, legacy and compact outputs are compared bit-for-bit for
+1,024 pixels in four frames per mode. Reservoir/guide slots 0–4 and seed-bank slots 11–14 are also compared
+bit-for-bit; reservoir/guide channels are required to be finite. This is 65,536 paired output pixels in total.
+The 8/8 release batches pass; see the [release log](Results/ReplayCompactRepeat-release.txt) and
+[host sanitizer log](Results/ReplayCompactRepeat-sanitized.txt). The earlier mismatch did not recur in these
+runs, but its original cause remains unknown. A fixed synthetic scene, finite seeds and software Vulkan cannot
+rule out failures under different devices or scene content.
+
 ## Reproduce
 
 Requires CMake 3.20+, C++20, Slang 2026.14.1, Vulkan-Headers 1.4.321 and SwiftShader under
@@ -67,6 +78,9 @@ FRONTIER_REPLAY_COMPACT=1 SANITIZE=1 BUILD_JOBS=1 RESULTS="$PWD/_ClaudeScratch/c
 FRONTIER_REPLAY_COMPACT=1 RESULTS="$PWD/_ClaudeScratch/compact-motion.txt" \
   bash Exhibits/LightCompute/RunReplayDynamicCamera.sh
 bash Exhibits/LightCompute/RunReplayCompactCapture.sh
+# After preparing the release/sanitized builds above:
+bash Exhibits/LightCompute/RunReplayCompactRepeat.sh
+SANITIZE=1 bash Exhibits/LightCompute/RunReplayCompactRepeat.sh
 ```
 
 The frame-time cost, physical-GPU behavior, full renderer integration, dynamic reconstruction, unbiased reuse

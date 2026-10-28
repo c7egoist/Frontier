@@ -1749,6 +1749,13 @@ int main(int Count, char** Arguments)
             ValidateReplayDynamicCamera(Arguments[1], Arguments[2]);
             return 0;
         }
+        if (Count == 4 && std::string(Arguments[3]) == "--replay-compact-parity")
+        {
+            for (uint32_t Batch = 0; Batch < 8; ++Batch)
+                ValidateReplayCompactParity(Arguments[1], Arguments[2], Batch * 104729u);
+            std::printf("PASS compact replay parity across eight deterministic seed batches\n");
+            return 0;
+        }
         if (Count == 4 && std::string(Arguments[3]) == "--replay-sample-history")
         {
             ValidateReplaySampleHistory(Arguments[1], Arguments[2]);
