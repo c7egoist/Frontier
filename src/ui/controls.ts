@@ -276,9 +276,10 @@ export function select<T extends string | number>(
   return { refresh };
 }
 
-export function check(parent: HTMLElement, label: string, get: () => boolean, set: (v: boolean) => void, onChange: Listener): { refresh: () => void } {
+export function check(parent: HTMLElement, label: string, get: () => boolean, set: (v: boolean) => void, onChange: Listener, opts: { title?: string } = {}): { refresh: () => void } {
   const row = el('div', 'ctl rowctl');
   const lab = el('span', 'lab', label);
+  if (opts.title) row.title = opts.title;
   const sw = el('button', 'sw');
   sw.setAttribute('role', 'switch');
   const refresh = (): void => {

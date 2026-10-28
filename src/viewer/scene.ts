@@ -10,6 +10,7 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 import { GpuBuffers } from '../tree/export';
 import { LeafMesh } from '../tree/mesh';
 import { WIND_ATTRIBUTES, WIND_FUNCTIONS, WIND_UNIFORMS } from './shaders';
+import { Collider, InteractionField, fieldBounds } from './interaction';
 import type { ObstacleKind } from '../env/environment';
 
 export interface ObstacleGeometry {
@@ -46,12 +47,18 @@ export interface ViewerSettings {
   showObstacles: boolean;
   /** Draw the ground semi-transparent so buried roots stay visible. */
   xrayGround: boolean;
-  /** GPU collision demo: a collider sweeps through the plant and the vertex shader bends it away. */
+  /** GPU collision: colliders bend the plant through a displacement field with spring memory. */
   pushEnabled: boolean;
-  /** Collider radius in metres; 0 = sized from the plant. */
+  /** A character-sized capsule walks a figure-of-eight through the plant. */
+  pushSweep: boolean;
+  /** Radius of the draggable hand collider in metres; 0 = sized from the plant. */
   pushRadius: number;
-  /** 0 soft foliage … 1 stiff stems. */
+  /** 0 soft foliage (yields locally) … 1 rigid (moves as whole limbs). */
   pushStiff: number;
+  /** Spring return rate 0…1. */
+  pushSpring: number;
+  /** Spring damping 0…1 (low = springs back with a wobble). */
+  pushDamping: number;
   /** Sweep speed multiplier. */
   pushSpeed: number;
 }
@@ -72,8 +79,11 @@ export const DEFAULT_VIEW: ViewerSettings = {
   showObstacles: true,
   xrayGround: false,
   pushEnabled: false,
+  pushSweep: true,
   pushRadius: 0,
   pushStiff: 0.35,
+  pushSpring: 0.35,
+  pushDamping: 0.3,
   pushSpeed: 1,
 };
 
@@ -114,7 +124,16 @@ export class Viewer {
   private disposed = false;
   private frameCallbacks: ((dt: number) => void)[] = [];
   private collider: THREE.Mesh;
+  private walker: THREE.Mesh;
+  private walkerKey = '';
   private pushTime = 0;
+  private field: InteractionField;
+  private handPos = new THREE.Vector3(0, -10, 0);
+  private handPlaced = false;
+  private handDrag = false;
+  private handPlane = new THREE.Plane();
+  private handOffset = new THREE.Vector3();
+  private treeBox = new THREE.Box3(new THREE.Vector3(-0.5, 0, -0.5), new THREE.Vector3(0.5, 1, 0.5));
   private lastFpsTime = 0;
   private frames = 0;
   fps = 0;
@@ -185,11 +204,21 @@ export class Viewer {
       uPush: { value: new THREE.Vector4(0, -10, 0, 0.3) },
       uPushStrength: { value: 0 },
       uPushStiff: { value: 0.35 },
+      uFieldOn: { value: 0 },
+      uField: { value: null },
+      uFieldMin: { value: new THREE.Vector3(-1, -0.1, -1) },
+      uFieldSize: { value: new THREE.Vector3(2, 2, 2) },
     };
-    this.collider = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 28), new THREE.MeshStandardMaterial({ color: 0x9aa3b2, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.42, depthWrite: false }));
+    this.field = new InteractionField(this.renderer);
+    const colliderMat = new THREE.MeshStandardMaterial({ color: 0x9aa3b2, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.42, depthWrite: false });
+    this.collider = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 28), colliderMat);
     this.collider.castShadow = false;
     this.collider.visible = false;
     this.scene.add(this.collider);
+    this.walker = new THREE.Mesh(new THREE.CapsuleGeometry(1, 1, 8, 32), colliderMat.clone());
+    this.walker.castShadow = false;
+    this.walker.visible = false;
+    this.scene.add(this.walker);
 
     this.matcapTexture = makeMatcap();
 
@@ -281,12 +310,21 @@ export class Viewer {
   }
 
   private onPointerMove = (ev: PointerEvent): void => {
+    if (this.handDrag) {
+      const p = this.handPoint(ev);
+      if (p) this.handPos.copy(p.sub(this.handOffset));
+      return;
+    }
     if (this.dragIndex >= 0) {
       const p = this.groundPoint(ev);
       if (!p) return;
       const x = p.x - this.dragOffset.x;
       const z = p.z - this.dragOffset.y;
       for (const cb of this.placementListeners) cb({ index: this.dragIndex, x, z, phase: 'move' });
+      return;
+    }
+    if (this.pickHand(ev)) {
+      this.canvas.style.cursor = 'grab';
       return;
     }
     this.setHover(this.pickObstacle(ev));
@@ -297,6 +335,21 @@ export class Viewer {
     if (this.placing) {
       const p = this.groundPoint(ev);
       if (p) for (const cb of this.placementListeners) cb({ index: -1, x: p.x, z: p.z, phase: 'add' });
+      ev.preventDefault();
+      ev.stopImmediatePropagation();
+      return;
+    }
+    if (this.pickHand(ev)) {
+      // Drag the hand collider in the view plane through its centre.
+      const n = new THREE.Vector3();
+      this.camera.getWorldDirection(n);
+      this.handPlane.setFromNormalAndCoplanarPoint(n, this.handPos);
+      const hp = this.handPoint(ev);
+      this.handOffset.copy(hp ? hp.sub(this.handPos) : new THREE.Vector3());
+      this.handDrag = true;
+      this.controls.enabled = false;
+      this.canvas.style.cursor = 'grabbing';
+      this.canvas.setPointerCapture(ev.pointerId);
       ev.preventDefault();
       ev.stopImmediatePropagation();
       return;
@@ -317,6 +370,13 @@ export class Viewer {
   };
 
   private onPointerUp = (ev: PointerEvent): void => {
+    if (this.handDrag) {
+      this.handDrag = false;
+      this.controls.enabled = true;
+      this.canvas.style.cursor = '';
+      if (this.canvas.hasPointerCapture(ev.pointerId)) this.canvas.releasePointerCapture(ev.pointerId);
+      return;
+    }
     if (this.dragIndex < 0) return;
     const i = this.dragIndex;
     this.dragIndex = -1;
@@ -364,24 +424,97 @@ export class Viewer {
     }
   };
 
-  /** The collider sweeps a figure-of-eight through the plant at about a third of its height. */
+  /** Radius of the hand collider: the setting, or a fifth of the plant height. */
+  private handRadius(): number {
+    const s = this.settings;
+    return s.pushRadius > 0 ? s.pushRadius : Math.min(0.6, Math.max(0.06, 0.2 * this.treeHeight));
+  }
+
+  /** The walker's capsule: a character-sized collider scaled to the plant. */
+  private walkerRadius(): number {
+    return Math.min(0.5, Math.max(0.08, 0.16 * this.treeHeight));
+  }
+
+  /**
+   * GPU collision, once per frame: move the colliders (the walker's figure-of-eight, the hand
+   * where the user dragged it), advance the spring field on the GPU, hand the field texture to
+   * the plant shaders.
+   */
   private updateCollider(dt: number): void {
     const s = this.settings;
     this.collider.visible = s.pushEnabled;
+    this.walker.visible = s.pushEnabled && s.pushSweep;
     this.uniforms.uPushStrength.value = s.pushEnabled ? 1 : 0;
-    if (!s.pushEnabled) return;
-    this.pushTime += dt * Math.max(0, s.pushSpeed);
-    const H = this.treeHeight;
-    const R = s.pushRadius > 0 ? s.pushRadius : Math.min(0.9, Math.max(0.1, 0.22 * H));
-    const A = 0.55 * H + R;
-    const w = 0.55;
-    const x = A * Math.sin(w * this.pushTime);
-    const z = 0.6 * A * Math.sin(2 * w * this.pushTime + 0.4);
-    const y = Math.max(R * 0.6, 0.38 * H + 0.12 * H * Math.sin(0.37 * this.pushTime));
-    this.collider.position.set(x, y, z);
-    this.collider.scale.setScalar(R);
-    (this.uniforms.uPush.value as THREE.Vector4).set(x, y, z, R);
     this.uniforms.uPushStiff.value = s.pushStiff;
+    if (!s.pushEnabled) {
+      this.field.clear();
+      return;
+    }
+    const H = this.treeHeight;
+    const R = this.handRadius();
+    if (!this.handPlaced) {
+      // Parked beside the plant until it is dragged.
+      this.handPos.set(0.45 * H + 2 * R, Math.max(R, 0.45 * H), 0.2 * H);
+      this.handPlaced = true;
+    }
+    this.collider.position.copy(this.handPos);
+    this.collider.scale.setScalar(R);
+    (this.uniforms.uPush.value as THREE.Vector4).set(this.handPos.x, this.handPos.y, this.handPos.z, R);
+
+    const colliders: Collider[] = [{ a: this.handPos.clone(), b: this.handPos.clone(), r: R }];
+    if (s.pushSweep) {
+      this.pushTime += dt * Math.max(0, s.pushSpeed);
+      const rw = this.walkerRadius();
+      const A = 0.55 * H + rw;
+      const w = 0.5;
+      const x = A * Math.sin(w * this.pushTime);
+      const z = 0.6 * A * Math.sin(2 * w * this.pushTime + 0.4);
+      const hw = Math.min(1.8, Math.max(2.2 * rw, 0.75 * H));
+      const a = new THREE.Vector3(x, rw, z);
+      const b = new THREE.Vector3(x, Math.max(rw + 1e-3, hw - rw), z);
+      colliders.push({ a, b, r: rw });
+      const key = `${rw.toFixed(4)}:${(b.y - a.y).toFixed(4)}`;
+      if (key !== this.walkerKey) {
+        this.walker.geometry.dispose();
+        this.walker.geometry = new THREE.CapsuleGeometry(rw, b.y - a.y, 8, 32);
+        this.walkerKey = key;
+      }
+      this.walker.position.set(x, 0.5 * (a.y + b.y), z);
+    }
+    if (this.field.supported) {
+      const k = 15 + 185 * Math.min(1, Math.max(0, s.pushSpring));
+      const damp = 0.01 + 0.25 * Math.min(1, Math.max(0, s.pushDamping));
+      this.field.step(dt, colliders, k, damp, 1.6 * Math.max(R, this.walkerRadius()));
+      this.uniforms.uField.value = this.field.texture;
+      (this.uniforms.uFieldMin.value as THREE.Vector3).copy(this.field.min);
+      (this.uniforms.uFieldSize.value as THREE.Vector3).copy(this.field.size);
+      this.uniforms.uFieldOn.value = 1;
+    } else {
+      this.uniforms.uFieldOn.value = 0;
+    }
+  }
+
+  /** Whether the GPU spring field is available (float render targets). */
+  get fieldSupported(): boolean {
+    return this.field.supported;
+  }
+
+  /** Place the hand collider (object space, metres) — what a game would do from its animation system. */
+  setHand(x: number, y: number, z: number): void {
+    this.handPos.set(x, y, z);
+    this.handPlaced = true;
+  }
+
+  private pickHand(ev: PointerEvent): boolean {
+    if (!this.settings.pushEnabled || !this.collider.visible) return false;
+    this.raycaster.setFromCamera(this.pointerNdc(ev), this.camera);
+    return this.raycaster.intersectObject(this.collider, false).length > 0;
+  }
+
+  private handPoint(ev: PointerEvent): THREE.Vector3 | null {
+    this.raycaster.setFromCamera(this.pointerNdc(ev), this.camera);
+    const p = new THREE.Vector3();
+    return this.raycaster.ray.intersectPlane(this.handPlane, p) ? p : null;
   }
 
   applySettings(s: ViewerSettings): void {
@@ -428,6 +561,11 @@ export class Viewer {
     geo.setAttribute('aLevel', new THREE.BufferAttribute(buffers.level, 1));
     geo.setAttribute('aJunction', new THREE.BufferAttribute(buffers.junction, 1));
     geo.setIndex(new THREE.BufferAttribute(buffers.index, 1));
+
+    geo.computeBoundingBox();
+    this.treeBox.copy(geo.boundingBox!);
+    this.handPlaced = false;
+    this.field.setBounds(fieldBounds(this.treeBox, Math.max(this.handRadius(), this.walkerRadius())));
 
     const mat = this.makeBarkMaterial();
     this.branchMesh = new THREE.Mesh(geo, mat);
@@ -639,14 +777,14 @@ export class Viewer {
           }`,
         );
     };
-    mat.customProgramCacheKey = () => 'bark-wind-v5';
+    mat.customProgramCacheKey = () => 'bark-wind-v6';
     return mat;
   }
 
   private makeLeafMaterial(): THREE.MeshStandardMaterial {
     const mat = new THREE.MeshStandardMaterial({ color: LEAF, roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
     mat.onBeforeCompile = (shader) => this.injectWind(shader);
-    mat.customProgramCacheKey = () => 'leaf-wind-v4';
+    mat.customProgramCacheKey = () => 'leaf-wind-v5';
     return mat;
   }
 

@@ -114,7 +114,7 @@ leavesToggle.addEventListener('click', () => {
 });
 const touchToggle = el('button');
 touchToggle.append(icon('touch'), el('span', '', 'Touch'));
-touchToggle.title = 'GPU collision demo: a collider sweeps through the plant and the vertex shader bends it out of the way';
+touchToggle.title = 'GPU collision: a walker and a draggable hand collider bend the plant through a spring displacement field computed on the GPU';
 touchToggle.addEventListener('click', () => {
   view.pushEnabled = !view.pushEnabled;
   syncView();
@@ -1812,11 +1812,19 @@ function buildViewPage(): void {
   viewRefreshers.push(slider(s1, 'Limb flex', () => view.limbFlex, (v) => (view.limbFlex = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
   viewRefreshers.push(slider(s1, 'Detail flutter', () => view.detailFlex, (v) => (view.detailFlex = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
 
-  const sT = section('Interaction', page, { hint: view.pushEnabled ? 'collider on' : 'off' });
-  viewRefreshers.push(check(sT, 'Collider sweep', () => view.pushEnabled, (v) => (view.pushEnabled = v), syncView).refresh);
-  viewRefreshers.push(slider(sT, 'Collider radius', () => view.pushRadius, (v) => (view.pushRadius = v), { min: 0, max: 1.5, step: 0.01, ...cm, title: '0 sizes the collider from the plant height' }, syncView).refresh);
-  viewRefreshers.push(slider(sT, 'Stiffness', () => view.pushStiff, (v) => (view.pushStiff = v), { min: 0, max: 1, step: 0.01, title: 'Soft foliage yields locally, stiff stems move more as whole limbs and less' }, syncView).refresh);
+  const fieldHint = viewer.fieldSupported ? 'GPU spring field' : 'no float targets — instantaneous fallback';
+  const sT = section('Interaction', page, { hint: 'off' });
+  const hintEl = sT.parentElement?.querySelector('.hint');
+  viewRefreshers.push(() => {
+    if (hintEl) hintEl.textContent = view.pushEnabled ? fieldHint : 'off';
+  });
+  viewRefreshers.push(check(sT, 'Collision', () => view.pushEnabled, (v) => (view.pushEnabled = v), syncView, { title: 'Colliders bend the plant on the GPU; drag the translucent hand sphere into the plant' }).refresh);
+  viewRefreshers.push(check(sT, 'Walker sweep', () => view.pushSweep, (v) => (view.pushSweep = v), syncView, { title: 'A character-sized capsule walks a figure-of-eight through the plant' }).refresh);
   viewRefreshers.push(slider(sT, 'Sweep speed', () => view.pushSpeed, (v) => (view.pushSpeed = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
+  viewRefreshers.push(slider(sT, 'Hand radius', () => view.pushRadius, (v) => (view.pushRadius = v), { min: 0, max: 1.5, step: 0.01, ...cm, title: '0 sizes the hand collider from the plant height' }, syncView).refresh);
+  viewRefreshers.push(slider(sT, 'Rigidity', () => view.pushStiff, (v) => (view.pushStiff = v), { min: 0, max: 1, step: 0.01, title: 'Soft foliage yields locally; rigid stems move as whole limbs' }, syncView).refresh);
+  viewRefreshers.push(slider(sT, 'Spring', () => view.pushSpring, (v) => (view.pushSpring = v), { min: 0, max: 1, step: 0.01, title: 'How fast the plant returns after the collider has passed' }, syncView).refresh);
+  viewRefreshers.push(slider(sT, 'Damping', () => view.pushDamping, (v) => (view.pushDamping = v), { min: 0, max: 1, step: 0.01, title: 'Low damping springs back with a wobble, high damping settles at once' }, syncView).refresh);
 
   const s2 = section('Display', page);
   viewRefreshers.push(check(s2, 'Quad overlay', () => view.showWire, (v) => (view.showWire = v), syncView).refresh);

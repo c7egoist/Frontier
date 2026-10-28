@@ -16,6 +16,8 @@
  * branch it grows from, plus its own flutter.
  */
 
+import { FIELD_SAMPLE_GLSL, PUSH_GLSL } from './interaction';
+
 export const WIND_UNIFORMS = /* glsl */ `
 uniform float uTime;
 uniform vec3  uWindDir;
@@ -25,9 +27,12 @@ uniform float uTreeHeight;
 uniform float uTrunkFlex;
 uniform float uLimbFlex;
 uniform float uDetailFlex;
-uniform vec4  uPush;         // collider centre (xyz) and radius (w)
+uniform vec4  uPush;         // hand collider centre (xyz) and radius (w): sag reference, stateless fallback
 uniform float uPushStrength; // 0 = off
-uniform float uPushStiff;    // 0 soft foliage … 1 stiff stems
+uniform float uPushStiff;    // 0 soft foliage (yields locally) … 1 rigid (moves as whole limbs)
+uniform float uFieldOn;      // 1 = sample the displacement field, 0 = stateless fallback
+${FIELD_SAMPLE_GLSL}
+${PUSH_GLSL}
 `;
 
 export const WIND_ATTRIBUTES = /* glsl */ `
@@ -47,23 +52,14 @@ float windWave(float t) {
   return sin(t) * 0.7 + sin(t * 2.31 + 1.3) * 0.2 + sin(t * 4.7 + 0.7) * 0.1;
 }
 
-// Displacement a point q receives from the collider: radially out of a soft shell
-// around it (1.6 radii), strongest at the surface, nothing beyond the shell.
-vec3 pushAt(vec3 q, float anchor) {
-  vec3 d = q - uPush.xyz;
-  float R = max(uPush.w, 1e-3);
-  float dist = length(d);
-  float reach = 1.6 * R;
-  if (dist >= reach) return vec3(0.0);
-  vec3 away = dist > 1e-4 ? d / dist : vec3(0.0, 1.0, 0.0);
-  // Mostly sideways: plants bend away rather than lift.
-  away.y *= 0.35;
-  float pen = (reach - dist) / reach;      // 1 at the centre … 0 at the shell
-  float amt = R * pen * pen * (3.0 - 2.0 * pen) * mix(1.1, 0.45, uPushStiff);
-  return away * (amt * anchor);
+// Displacement at a point: the GPU spring field (see interaction.ts) or, without float
+// render targets, the instantaneous shell push of the hand collider.
+vec3 pushDisp(vec3 q) {
+  if (uFieldOn > 0.5) return fieldAt(q);
+  return pushFromCapsule(q, uPush.xyz, uPush.xyz, uPush.w) * mix(1.1, 0.45, uPushStiff);
 }
 
-// Collision response on the GPU: the plant bends out of the way of a collider.
+// Collision response on the GPU: the plant bends out of the way of the colliders.
 // Two tiers like the wind, so that it stays hierarchical: the limb is moved as a
 // whole by what its pivot feels (scaled by the distance along the limb), and
 // every vertex additionally yields locally. Roots and the base stay anchored.
@@ -71,9 +67,9 @@ vec3 applyPush(vec3 p) {
   if (uPushStrength <= 0.0) return p;
   float anchor = smoothstep(0.0, 0.18, aWind.x);
   vec3 dp = vec3(0.0);
-  if (aWind.y > 0.0) dp += pushAt(aPivot, anchor) * (0.35 + 0.65 * aWind.y);
-  dp += pushAt(p, anchor) * mix(1.0, 0.6, uPushStiff);
-  dp *= uPushStrength;
+  if (aWind.y > 0.0) dp += pushDisp(aPivot) * (0.35 + 0.65 * aWind.y) * mix(0.8, 1.2, uPushStiff);
+  dp += pushDisp(p) * mix(1.0, 0.45, uPushStiff);
+  dp *= uPushStrength * anchor;
   // The bent part sags a little, as a pushed stem does, instead of stretching.
   float m = length(dp);
   dp.y -= 0.25 * m * m / max(uPush.w, 0.05);

@@ -23,6 +23,7 @@ npm run build      # static bundle in dist/
 | Meshing | `src/tree/mesher.ts` | **Welded quad mesher** (below). Emits quads only, plus ≤1 triangle per tip cap for odd ring counts. |
 | Validation | `src/tree/validate.ts` | Half-edge style audit: boundary edges, non-manifold edges, winding consistency, degenerate faces, isolated vertices, connected components, Euler characteristic / genus, valence histogram. |
 | Wind | `src/viewer/shaders.ts` | Three-tier vertex wind (trunk sway ∝ height², limb bending about a per-limb pivot with phase, twig/leaf flutter). Data is baked per vertex by the mesher. |
+| Collision | `src/viewer/interaction.ts` | GPU displacement field with spring memory (32³ cells in a half-float ping-pong target, 120 Hz Verlet sub-steps, capsule colliders); the vertex shader samples it at the vertex and its limb pivot so a walker's wake bends and springs back without physics bodies. |
 | Grasses | `src/plant/grassMesher.ts`, `src/plant/grassParams.ts` | **Welded grass mesher** (below): crown dome, leaf blades, culms with nodes/sheaths/leaves and four inflorescence types, all one closed quad manifold. 14 species in three families (turf & meadow, tussock, cereals & reeds). |
 | Organs | `src/plant/organMesher.ts` | **Welded organ mesher** (below): the shared engine for every non-tree plant — windows planned on a parent's ring lattice, collar loops, forks, refinement bands, one closed quad manifold per plant. |
 | Succulents | `src/plant/succulentMesher.ts`, `src/plant/succulentParams.ts` | Columnar and barrel cacti with ribs, areoles and spines, forking arms, opuntia pads with tunas, tree aloes with leaf tufts, agave / yucca / aloe rosettes with terminal spines, marginal teeth and flower stalks. 19 species in four desert families. |
@@ -175,17 +176,30 @@ Because junctions are shared topology, the deformation is C0-continuous through 
 
 ### Interaction (GPU collision)
 
-The same attributes drive the **Touch** demo (toolbar, or View › Interaction): a collider
-sweeps a figure-of-eight through the plant and `applyPush` in `src/viewer/shaders.ts` bends the
-plant out of its way entirely in the vertex shader — no CPU work, no physics bodies. It is the
-two-tier scheme games use for grass, crops and shrubs: the limb is moved as a whole by the
-displacement its *pivot* feels (scaled by `limb`, so a leaf swings about its base rather than
-stretching), every vertex additionally yields locally inside a soft shell round the collider,
-`height` anchors the base, and a small sag keeps the pushed part from lengthening. `Stiffness`
-trades the local yield against the whole-limb motion. In an engine the collider becomes a list
-of capsules (or a top-down "interaction" render target the characters write into) and a tiny
-per-instance spring state in a compute pass gives the spring-back; see the notes in the PR for
-the full pipeline (and why XPBD is reserved for hero plants).
+The same attributes drive **Touch** (toolbar, View › Interaction, or `touch on` in the command
+line): colliders bend the plant out of their way entirely on the GPU, with memory, so a wake
+springs back and wobbles after a character has passed. `src/viewer/interaction.ts` keeps a
+32 × 32 × 32 **displacement field** over the plant's bounding box in a half-float render target
+(the 32 slices tiled 8 × 4 in one 256 × 128 texture, so the sampler gets hardware bilinear
+filtering and the shader blends two slices by hand). Every frame a fragment pass advances each
+cell as a damped spring at fixed 120 Hz sub-steps (Verlet; ≤ 8 per frame): while a capsule
+touches a cell it is pulled firmly toward the radial push out of a soft shell round the capsule,
+afterwards it relaxes home at the `Spring` rate with `Damping` — the whole cost is 32 k texels
+and a handful of capsule uniforms, no physics bodies, no CPU work, no vertex readback.
+`applyPush` in `src/viewer/shaders.ts` then samples the field twice per vertex: at the limb
+*pivot* (scaled by `limb`, so a leaf swings about its base instead of stretching) and at the
+vertex itself for the local yield; `height` anchors the base and a small sag keeps the pushed
+part from lengthening. `Rigidity` trades the local yield against the whole-limb motion. Two
+colliders are built in: a character-sized capsule that walks a figure-of-eight (`Walker sweep`,
+`Sweep speed`) and a hand sphere you can drag through the plant (`Hand radius`; it moves in the
+view plane, orbit is suspended while dragging). `Viewer.setHand(x, y, z)` places it from script,
+which is what a game's animation system would do with its bone capsules. Without float render
+targets the shader falls back to the instantaneous shell push of the hand.
+
+In an engine the same pass runs once per plant instance (or once per terrain tile as a 2-D
+field the characters write into) and feeds the vertex shader of thousands of instances; XPBD
+or Chaos-style rigs are reserved for hero plants in cut-scenes, exactly as the field here is
+separate from the wind, which stays a pure function of time.
 
 ## Verification tooling
 
