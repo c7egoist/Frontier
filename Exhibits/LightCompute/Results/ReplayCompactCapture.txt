@@ -1,0 +1,9 @@
+SAMPLE_CAPTURE 64x64 bounces=4 warm_frames=3 accepted=3990 full=3990 rejected=106 rejected_raw_exact=1
+PASS subpixel seed and four-fresh path readbacks
+SAMPLE_CAPTURE 64x64 bounces=4 warm_frames=3 accepted=3990 full=3990 rejected=106 rejected_raw_exact=1
+PASS subpixel seed and four-fresh path readbacks
+0ce207975898c2039cf1063c527a58304adc9e088183f0b12b7f952a165008c1  /home/user/Frontier/_ClaudeScratch/replay-compact-parity/compact/ReplaySampleFresh.ppm
+44dc6a55adc306c5d53a1251cedeca15c50187f1fb3bbf11f21239becbcc9fdc  /home/user/Frontier/_ClaudeScratch/replay-compact-parity/compact/ReplaySampleFourFresh.ppm
+5eeb71270e8d9c9baebcbb5588b97536dd99bc20ed2661455797bb39f5e8494e  /home/user/Frontier/_ClaudeScratch/replay-compact-parity/compact/ReplaySampleRetraced.ppm
+8e89a6f5ac3e4275537239213906af870cdf8c7ccd79372614d92f1998679422  /home/user/Frontier/_ClaudeScratch/replay-compact-parity/compact/ReplaySampleAcceptance.ppm
+PASS four identical PPM captures
