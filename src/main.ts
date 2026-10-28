@@ -112,7 +112,14 @@ leavesToggle.addEventListener('click', () => {
   view.showLeaves = !view.showLeaves;
   syncView();
 });
-toggleSeg.append(wireToggle, leavesToggle, windToggle);
+const touchToggle = el('button');
+touchToggle.append(icon('touch'), el('span', '', 'Touch'));
+touchToggle.title = 'GPU collision demo: a collider sweeps through the plant and the vertex shader bends it out of the way';
+touchToggle.addEventListener('click', () => {
+  view.pushEnabled = !view.pushEnabled;
+  syncView();
+});
+toggleSeg.append(wireToggle, leavesToggle, windToggle, touchToggle);
 const actionSeg = el('div', 'seg');
 const frameBtn = el('button');
 frameBtn.append(icon('frame'), el('span', '', 'Frame'));
@@ -363,6 +370,7 @@ function syncView(): void {
   for (const [id, b] of modeButtons) b.classList.toggle('on', id === view.mode);
   wireToggle.classList.toggle('on', view.showWire);
   windToggle.classList.toggle('on', view.windEnabled);
+  touchToggle.classList.toggle('on', view.pushEnabled);
   leavesToggle.classList.toggle('on', view.showLeaves);
   legend.style.display = view.mode === 'levels' || view.mode === 'junctions' || view.mode === 'wind' ? '' : 'none';
   legend.innerHTML = '';
@@ -1461,7 +1469,13 @@ function buildVegetablePage(): void {
     }
     if (v.fruitShape === 'ear') {
       stepper(sFr, 'Husk leaves', () => V().husk, (val) => (V().husk = val), { min: 0, max: 6, integer: true }, onChange);
+      slider(sFr, 'Husk opened', () => V().huskOpen, (val) => (V().huskOpen = val), { min: 0, max: 1, step: 0.01, ...pct, title: 'How far the husks are peeled back from the tip' }, onChange);
       slider(sFr, 'Silk', () => V().silk, (val) => (V().silk = val), { min: 0, max: 0.15, step: 0.005, ...cm }, onChange);
+      select(sFr, 'Kernel rows', [{ value: 0, label: 'Smooth ear' }, { value: 12, label: '12 rows' }, { value: 16, label: '16 rows' }, { value: 24, label: '24 rows' }, { value: 32, label: '32 rows' }], () => V().kernelRows, (val) => (V().kernelRows = val), rebuild);
+      if (v.kernelRows > 0) {
+        stepper(sFr, 'Kernels per row', () => V().kernels, (val) => (V().kernels = val), { min: 8, max: 60, integer: true }, onChange);
+        slider(sFr, 'Kernel relief', () => V().kernelDepth, (val) => (V().kernelDepth = val), { min: 0, max: 0.3, step: 0.01, ...pct, title: 'Depth of the grooves between kernels, as a fraction of the ear radius' }, onChange);
+      }
     }
   }
   if (stalk) {
@@ -1798,6 +1812,12 @@ function buildViewPage(): void {
   viewRefreshers.push(slider(s1, 'Limb flex', () => view.limbFlex, (v) => (view.limbFlex = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
   viewRefreshers.push(slider(s1, 'Detail flutter', () => view.detailFlex, (v) => (view.detailFlex = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
 
+  const sT = section('Interaction', page, { hint: view.pushEnabled ? 'collider on' : 'off' });
+  viewRefreshers.push(check(sT, 'Collider sweep', () => view.pushEnabled, (v) => (view.pushEnabled = v), syncView).refresh);
+  viewRefreshers.push(slider(sT, 'Collider radius', () => view.pushRadius, (v) => (view.pushRadius = v), { min: 0, max: 1.5, step: 0.01, ...cm, title: '0 sizes the collider from the plant height' }, syncView).refresh);
+  viewRefreshers.push(slider(sT, 'Stiffness', () => view.pushStiff, (v) => (view.pushStiff = v), { min: 0, max: 1, step: 0.01, title: 'Soft foliage yields locally, stiff stems move more as whole limbs and less' }, syncView).refresh);
+  viewRefreshers.push(slider(sT, 'Sweep speed', () => view.pushSpeed, (v) => (view.pushSpeed = v), { min: 0, max: 3, step: 0.05 }, syncView).refresh);
+
   const s2 = section('Display', page);
   viewRefreshers.push(check(s2, 'Quad overlay', () => view.showWire, (v) => (view.showWire = v), syncView).refresh);
   viewRefreshers.push(check(s2, 'Leaf cards', () => view.showLeaves, (v) => (view.showLeaves = v), syncView).refresh);
@@ -1935,6 +1955,9 @@ function runCommand(line: string): void {
   } else if (v === 'leaves') {
     view.showLeaves = arg ? arg === 'on' : !view.showLeaves;
     syncView();
+  } else if (v === 'touch' || v === 'collide') {
+    view.pushEnabled = arg ? arg === 'on' : !view.pushEnabled;
+    syncView();
   } else if (v === 'quads' || v === 'wire') {
     view.showWire = arg ? arg === 'on' : !view.showWire;
     syncView();
@@ -1958,7 +1981,7 @@ function runCommand(line: string): void {
   } else if (v === 'shot' || v === 'screenshot') {
     download(viewer.screenshot(), `${slug(params.name)}_${params.seed}.png`);
   } else if (v === 'help' || v === '?') {
-    showToast('seed [n] · preset <name> · mode <shaded|matcap|wireframe|levels|junctions|wind> · export obj|glb · frame [base] · wind|leaves|quads [on|off] · scatter [n] · clear · shot', 5000);
+    showToast('seed [n] · preset <name> · mode <shaded|matcap|wireframe|levels|junctions|wind> · export obj|glb · frame [base] · wind|leaves|quads|touch [on|off] · scatter [n] · clear · shot', 5000);
   } else {
     showToast(`Unknown command “${verb}” · type help`);
   }

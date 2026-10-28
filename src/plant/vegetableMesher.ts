@@ -624,7 +624,8 @@ export class VegetableMesher extends OrganMesher {
       case 'tapered':
         return (t) => (t < 0.12 ? Math.pow(Math.sin((Math.PI / 2) * (t / 0.12)), 0.6) : Math.max(0.08, Math.pow(1 - (t - 0.12) / 0.88, 0.8)));
       case 'ear':
-        return (t) => (t < 0.1 ? lerp1(0.55, 1, smooth(t / 0.1)) : t > 0.7 ? Math.max(0.15, 1 - Math.pow((t - 0.7) / 0.3, 1.6) * 0.9) : 1);
+        // Zea mays: cylindrical, a short shoulder at the butt and a blunt, rounded tip.
+        return (t) => (t < 0.1 ? lerp1(0.6, 1, smooth(t / 0.1)) : t > 0.76 ? Math.max(0.2, 1 - Math.pow((t - 0.76) / 0.24, 1.5) * 0.75) : 1);
       default:
         return (t) => Math.pow(Math.sin(Math.PI * Math.pow(t, 0.85)), 0.55);
     }
@@ -633,9 +634,12 @@ export class VegetableMesher extends OrganMesher {
   private makeFruit(exit: Exit, v: FruitSpec): Organ {
     const p = this.p;
     const { shape, L, R } = v;
-    const N0 = exit.N; // 6 (pedicel window) — refined to 12 / 24
-    const target = evenSides(p.fruitSides, 8, 32);
-    const doublings = target >= 4 * N0 ? 2 : target >= 2 * N0 ? 1 : 0;
+    const N0 = exit.N; // 6 (pedicel window) — refined to 12 / 24 (96 for a cob of kernels)
+    // Kernels are the cob's own lattice: `kernelRows` rows round, each kernel 96 / rows columns wide and
+    // five rings long; the height field is additive (row bump + kernel bump) so every quad stays planar.
+    const kernelRows = shape === 'ear' && p.kernelRows > 0 && p.kernels > 0 ? [12, 16, 24, 32].reduce((a, b) => (Math.abs(b - p.kernelRows) < Math.abs(a - p.kernelRows) ? b : a)) : 0;
+    const target = kernelRows > 0 ? 16 * N0 : evenSides(p.fruitSides, 8, 32);
+    const doublings = target >= 16 * N0 ? 4 : target >= 8 * N0 ? 3 : target >= 4 * N0 ? 2 : target >= 2 * N0 ? 1 : 0;
     const rNeck = Math.min(0.5 * R, 0.45 * exit.size);
     const sStart = Math.max(this.collarLen(rNeck, 1.2), 0.3 * exit.size);
     const total = sStart + L;
@@ -654,13 +658,23 @@ export class VegetableMesher extends OrganMesher {
     const ribDepth = v.ribDepth;
     const stations: number[] = [];
     const nBody = shape === 'pod' ? 10 : shape === 'ear' ? 12 : 14;
-    for (let k = 1; k < nBody; k++) {
-      const t = k / nBody;
-      // Denser at both ends of round bodies.
-      const u = 0.5 - 0.5 * Math.cos(Math.PI * t);
-      stations.push(sStart + neckLen + (L - neckLen) * u);
+    // Kernel lattice along the ear: boundaries and two shoulder rings per kernel.
+    const nK = kernelRows > 0 ? Math.max(4, Math.round(p.kernels)) : 0;
+    const sK0 = sStart + neckLen + 0.05 * L;
+    const sK1 = sStart + 0.965 * L;
+    const kl = nK > 0 ? (sK1 - sK0) / nK : 0;
+    const kDepth = clamp(p.kernelDepth, 0, 0.35);
+    if (nK > 0) {
+      for (let i = 0; i < nK; i++) for (let q = 0; q < 5; q++) stations.push(sK0 + (i + q / 5) * kl);
+      stations.push(sK1, sStart + 0.985 * L);
+    } else {
+      for (let k = 1; k < nBody; k++) {
+        const t = k / nBody;
+        // Denser at both ends of round bodies.
+        const u = 0.5 - 0.5 * Math.cos(Math.PI * t);
+        stations.push(sStart + neckLen + (L - neckLen) * u);
+      }
     }
-    // Ear kernels: rows of dimples via the profile's z offset are too fine; the ear stays smooth with a husk.
     const children: Attachment[] = [];
     const calyx = shape === 'round' || shape === 'oblong' || shape === 'tapered' ? Math.max(0, Math.round(p.calyx)) : 0;
     const Nbody = N0 * Math.pow(2, doublings);
@@ -686,30 +700,33 @@ export class VegetableMesher extends OrganMesher {
       }
     }
     if (shape === 'ear') {
-      // Husk leaves wrapped around the ear and a silk tuft at the tip.
+      // Husk leaves wrapped around the ear from its butt and a silk tuft at the tip.
       const husk = Math.max(0, Math.round(p.husk));
+      const hw = Nbody >= 96 ? 8 : Nbody >= 48 ? 4 : 2;
+      const hh = Nbody >= 48 ? 2 : 1;
       for (let k = 0; k < husk; k++) {
         const col = Math.round((k * Nbody) / Math.max(1, husk));
-        const sH = sStart + neckLen + 1.5 * cellBody;
+        const sH = sStart + neckLen + (0.5 * hh + 1) * cellBody;
         children.push({
           s: sH,
-          az: (col + 0.5) * (TAU / Nbody),
-          w: 2,
-          h: 1,
-          hh: 0.5 * cellBody,
+          az: (col + 0.5 * hw) * (TAU / Nbody),
+          w: hw,
+          h: hh,
+          hh: 0.5 * hh * cellBody,
           optional: true,
           loopExit: true,
           j0: 0,
           row0: 0,
           row1: 0,
-          make: (ex) => this.makeHusk(ex, v.base, L, R, line, sStart),
+          make: (ex) => this.makeHusk(ex, v.base, L, R, line, sStart, k / Math.max(1, husk)),
         });
       }
       if (p.silk > 0) {
-        for (let k = 0; k < 6; k++) {
+        const nSilk = Nbody >= 96 ? 16 : Nbody >= 48 ? 12 : 6;
+        for (let k = 0; k < nSilk; k++) {
           children.push({
-            s: sStart + L - 1.6 * cellBody * 0.5,
-            az: (k * Nbody) / 6 * (TAU / Nbody) + 0.5 * (TAU / Nbody),
+            s: nK > 0 ? sStart + 0.975 * L : sStart + L - 0.8 * cellBody,
+            az: ((k * Nbody) / nSilk + 0.5 + (k % 2)) * (TAU / Nbody),
             w: 1,
             h: 1,
             hh: 0.25 * cellBody,
@@ -719,7 +736,7 @@ export class VegetableMesher extends OrganMesher {
             j0: 0,
             row0: 0,
             row1: 0,
-            make: (ex) => this.makeSilk(ex, v.base, p.silk),
+            make: (ex) => this.makeSilk(ex, v.base, p.silk * (0.8 + 0.4 * this.fruitRng.next())),
           });
         }
       }
@@ -731,7 +748,17 @@ export class VegetableMesher extends OrganMesher {
       line,
       sStart,
       profile: (s, j, NN) => {
-        const rr = rad(s);
+        let rr = rad(s);
+        if (nK > 0 && NN >= 16 * N0 && s > sK0 - 1e-6 && s < sK1 + 1e-6) {
+          // Kernel bumps: rounded tops, grooves on the shared boundary columns (deeper, between the rows)
+          // and rings; additive so the lattice quads are planar. They fade out towards the tip.
+          const cols = NN / kernelRows;
+          const uc = ((j / cols) % 1 + 1) % 1;
+          const us = (((s - sK0) / kl) % 1 + 1) % 1;
+          const bump = 0.6 * smooth(Math.min(uc, 1 - uc) * 3) + 0.4 * smooth(Math.min(us, 1 - us) * 3);
+          const fade = clamp((sK1 - s) / (2.5 * kl), 0, 1);
+          rr *= 1 - kDepth * fade * (1 - bump);
+        }
         const q = ribbedPoint(NN, j, rr, ribs, ribDepth * clamp((s - sStart - neckLen) / (0.15 * L), 0, 1), 1.6);
         // Blossom-end dimple / stem-end shoulder for oblate fruit.
         const t = clamp((s - sStart) / L, 0, 1);
@@ -748,7 +775,7 @@ export class VegetableMesher extends OrganMesher {
       wind: () => this.still(v.base),
       pivot: v.base.pivot,
       r0: rNeck,
-      minGap: Math.min(0.25 * cellBody, (0.45 * neckLen) / (doublings + 1)),
+      minGap: Math.min(0.25 * cellBody, (0.45 * neckLen) / (doublings + 1), nK > 0 ? 0.2 * kl : Infinity),
     };
   }
 
@@ -783,17 +810,28 @@ export class VegetableMesher extends OrganMesher {
     };
   }
 
-  /** Husk leaf: a broad blade wrapped around the ear, following its axis and flaring at the tip. */
-  private makeHusk(exit: Exit, base: WindBase, earL: number, earR: number, ear: Line, sEar0: number): Organ {
-    const N = exit.N; // 6 → the husk is a 6-vertex cupped blade
-    const len = earL * 1.15;
+  /**
+   * Husk leaf: a broad blade wrapped around the ear, following its axis. Closed husks (`huskOpen` 0)
+   * reach past the tip and flare a little; peeled-back ones leave the ear from lower down, bending
+   * out over the kernels with their tips curling away — the outer husks open furthest.
+   */
+  private makeHusk(exit: Exit, base: WindBase, earL: number, earR: number, ear: Line, sEar0: number, order: number): Organ {
+    const N = exit.N; // 6 or 12 → a cupped blade
+    const open = clamp(this.p.huskOpen, 0, 1) * (0.7 + 0.3 * (1 - order));
+    const len = earL * lerp1(1.15, 0.9, open);
     const f = ear.at(sEar0);
-    const dir0 = normalize(add(scale(f.dir, 1), scale(exit.normal, 0.35)));
+    const dir0 = normalize(add(scale(f.dir, 1), scale(exit.normal, 0.35 + 0.15 * open)));
     let right0 = projectOnPlane(cross(f.dir, exit.normal), dir0);
     right0 = lengthSq(right0) < 1e-12 ? anyPerpendicular(dir0) : normalize(right0);
-    const line = growLine(exit.pos, dir0, right0, len, 8, (t0, t1) => ({ pitch: -0.32 * (Math.pow(t1, 2) - Math.pow(t0, 2)) }));
-    const W = 1.5 * earR;
-    const wNeck = Math.max(0.9 * exit.size, 0.4 * W);
+    // Pitch is about the blade's own right: negative curls the tip outwards, away from the ear.
+    const tOpen = lerp1(0.85, 0.35, open);
+    const curl = lerp1(0.32, 2.4, open);
+    const line = growLine(exit.pos, dir0, right0, len, 10, (t0, t1) => {
+      const g = (t: number) => (t < tOpen ? 0.1 * t * t : 0.1 * tOpen * tOpen + Math.pow((t - tOpen) / (1 - tOpen), 1.6));
+      return { pitch: -curl * (g(t1) - g(t0)) };
+    });
+    const W = 2 * earR;
+    const wNeck = Math.max(0.9 * exit.size, 0.35 * W);
     const sStart = Math.min(0.2 * len, Math.max(this.collarLen(0.5 * wNeck, 1.2), 0.5 * exit.size));
     const widthAt = (s: number): number => {
       const t = clamp(s / len, 0, 1);

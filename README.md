@@ -131,6 +131,11 @@ bells), Bitter Aloe (candelabra of racemes), Aloe Vera (lateral raceme). Century
 Agave, Spanish Dagger, Bitter Aloe and Aloe Vera ship in flower; the other agaves have their
 inflorescence configured and switch it on from the Flower stalk section.
 
+Maize ears: the kernels are the cob's own lattice — the ear refines 6 → 96 vertices round in its
+neck, `kernelRows` rows of kernels each `96 / rows` columns wide and five rings long, with an
+additive height field (row groove + kernel groove) so every quad stays planar; husks are cupped
+blades welded at the butt that peel back by `huskOpen`, silks leave 1 × 1 windows at the tip.
+
 ### Carnivorous plants
 
 `CarnivoreMesher` builds the traps themselves as part of the same closed surface — nothing is
@@ -167,6 +172,20 @@ Per-vertex attributes baked by the mesher:
 * `detail` — high-frequency flutter weight for twigs and leaves.
 
 Because junctions are shared topology, the deformation is C0-continuous through every collar.
+
+### Interaction (GPU collision)
+
+The same attributes drive the **Touch** demo (toolbar, or View › Interaction): a collider
+sweeps a figure-of-eight through the plant and `applyPush` in `src/viewer/shaders.ts` bends the
+plant out of its way entirely in the vertex shader — no CPU work, no physics bodies. It is the
+two-tier scheme games use for grass, crops and shrubs: the limb is moved as a whole by the
+displacement its *pivot* feels (scaled by `limb`, so a leaf swings about its base rather than
+stretching), every vertex additionally yields locally inside a soft shell round the collider,
+`height` anchors the base, and a small sag keeps the pushed part from lengthening. `Stiffness`
+trades the local yield against the whole-limb motion. In an engine the collider becomes a list
+of capsules (or a top-down "interaction" render target the characters write into) and a tiny
+per-instance spring state in a compute pass gives the spring-back; see the notes in the PR for
+the full pipeline (and why XPBD is reserved for hero plants).
 
 ## Verification tooling
 

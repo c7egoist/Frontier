@@ -151,8 +151,16 @@ export interface VegetableParams {
   fruitSides: number;
   /** Husk leaves around an ear (maize). */
   husk: number;
+  /** How far the husks are peeled back from the ear tip: 0 closed over the ear, 1 opened to the middle. */
+  huskOpen: number;
   /** Silk tuft length at the ear tip (maize). */
   silk: number;
+  /** Kernel rows round the cob (12, 16, 24 or 32 — the cob is 96 vertices round); 0 for a smooth ear. */
+  kernelRows: number;
+  /** Kernels along each row. */
+  kernels: number;
+  /** Depth of the grooves between kernels as a fraction of the ear radius. */
+  kernelDepth: number;
 
   // ---- Stalk (maize)
   /** Nodes along the stalk. */
@@ -234,7 +242,11 @@ export const DEFAULT_VEGETABLE: VegetableParams = {
   truss: 3,
   fruitSides: 16,
   husk: 0,
+  huskOpen: 0.5,
   silk: 0,
+  kernelRows: 16,
+  kernels: 30,
+  kernelDepth: 0.12,
   nodes: 10,
   tassel: 0,
   tasselBranches: 12,
@@ -783,8 +795,12 @@ export const VEGETABLE_PRESETS: { name: string; vegetable: Partial<VegetablePara
       calyx: 0,
       truss: 1,
       fruitSides: 16,
-      husk: 3,
-      silk: 0.06,
+      husk: 4,
+      huskOpen: 0.6,
+      silk: 0.07,
+      kernelRows: 16,
+      kernels: 32,
+      kernelDepth: 0.12,
       tassel: 1,
       tasselBranches: 12,
       tasselLength: 0.35,

@@ -25,6 +25,9 @@ uniform float uTreeHeight;
 uniform float uTrunkFlex;
 uniform float uLimbFlex;
 uniform float uDetailFlex;
+uniform vec4  uPush;         // collider centre (xyz) and radius (w)
+uniform float uPushStrength; // 0 = off
+uniform float uPushStiff;    // 0 soft foliage … 1 stiff stems
 `;
 
 export const WIND_ATTRIBUTES = /* glsl */ `
@@ -42,6 +45,39 @@ vec3 rotateAroundAxis(vec3 p, vec3 axis, float angle) {
 // Smooth triangle-ish wave used to avoid the too-regular look of a pure sine.
 float windWave(float t) {
   return sin(t) * 0.7 + sin(t * 2.31 + 1.3) * 0.2 + sin(t * 4.7 + 0.7) * 0.1;
+}
+
+// Displacement a point q receives from the collider: radially out of a soft shell
+// around it (1.6 radii), strongest at the surface, nothing beyond the shell.
+vec3 pushAt(vec3 q, float anchor) {
+  vec3 d = q - uPush.xyz;
+  float R = max(uPush.w, 1e-3);
+  float dist = length(d);
+  float reach = 1.6 * R;
+  if (dist >= reach) return vec3(0.0);
+  vec3 away = dist > 1e-4 ? d / dist : vec3(0.0, 1.0, 0.0);
+  // Mostly sideways: plants bend away rather than lift.
+  away.y *= 0.35;
+  float pen = (reach - dist) / reach;      // 1 at the centre … 0 at the shell
+  float amt = R * pen * pen * (3.0 - 2.0 * pen) * mix(1.1, 0.45, uPushStiff);
+  return away * (amt * anchor);
+}
+
+// Collision response on the GPU: the plant bends out of the way of a collider.
+// Two tiers like the wind, so that it stays hierarchical: the limb is moved as a
+// whole by what its pivot feels (scaled by the distance along the limb), and
+// every vertex additionally yields locally. Roots and the base stay anchored.
+vec3 applyPush(vec3 p) {
+  if (uPushStrength <= 0.0) return p;
+  float anchor = smoothstep(0.0, 0.18, aWind.x);
+  vec3 dp = vec3(0.0);
+  if (aWind.y > 0.0) dp += pushAt(aPivot, anchor) * (0.35 + 0.65 * aWind.y);
+  dp += pushAt(p, anchor) * mix(1.0, 0.6, uPushStiff);
+  dp *= uPushStrength;
+  // The bent part sags a little, as a pushed stem does, instead of stretching.
+  float m = length(dp);
+  dp.y -= 0.25 * m * m / max(uPush.w, 0.05);
+  return p + dp;
 }
 
 vec3 applyWind(vec3 p) {
@@ -81,6 +117,6 @@ vec3 applyWind(vec3 p) {
   float t = windWave(uTime * 0.85) * 0.7 + 0.3;
   p += dir * (sway * t);
   p += side * (sway * 0.2 * windWave(uTime * 0.55 + 2.0));
-  return p;
+  return applyPush(p);
 }
 `;

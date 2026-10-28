@@ -357,6 +357,26 @@ describe('welded vegetable with its crop is a single closed manifold', () => {
     expect(mesh.triCount).toBe(0);
   });
 
+  it('a maize ear carries its kernels in the cob lattice, husks that peel back and silks', () => {
+    const preset = VEGETABLE_PRESETS.find((c) => c.name === 'Maize')!;
+    const withKernels = buildVegetable(preset, 1);
+    expect(withKernels.report.closed && withKernels.report.manifold).toBe(true);
+    expect(withKernels.report.components).toBe(1);
+    expect(withKernels.report.genus).toBe(0);
+    expect(withKernels.stats.counts.ears).toBe(2);
+    expect(withKernels.stats.counts.husks).toBe(2 * preset.vegetable.husk!);
+    expect(withKernels.stats.counts.silks).toBeGreaterThanOrEqual(2 * 12);
+    expect(withKernels.stats.dropped).toBe(0);
+    // Kernels are geometry: the 96-column cob with five rings per kernel is far denser than a smooth ear.
+    const smooth = buildVegetable({ vegetable: { ...preset.vegetable, kernelRows: 0 } }, 1);
+    expect(smooth.report.closed && smooth.report.genus === 0).toBe(true);
+    expect(withKernels.mesh.quadCount).toBeGreaterThan(1.8 * smooth.mesh.quadCount);
+    // Closed husks still build (and reach past the tip).
+    const closed = buildVegetable({ vegetable: { ...preset.vegetable, huskOpen: 0 } }, 2);
+    expect(closed.report.closed && closed.report.components === 1).toBe(true);
+    expect(closed.stats.counts.husks).toBe(2 * preset.vegetable.husk!);
+  });
+
   it('vegetable presets carry their kind through the shared pipeline', () => {
     const crops = PRESETS.filter(isVegetable);
     expect(crops.length).toBe(VEGETABLE_PRESETS.length);

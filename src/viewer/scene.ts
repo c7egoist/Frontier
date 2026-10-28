@@ -46,6 +46,14 @@ export interface ViewerSettings {
   showObstacles: boolean;
   /** Draw the ground semi-transparent so buried roots stay visible. */
   xrayGround: boolean;
+  /** GPU collision demo: a collider sweeps through the plant and the vertex shader bends it away. */
+  pushEnabled: boolean;
+  /** Collider radius in metres; 0 = sized from the plant. */
+  pushRadius: number;
+  /** 0 soft foliage … 1 stiff stems. */
+  pushStiff: number;
+  /** Sweep speed multiplier. */
+  pushSpeed: number;
 }
 
 export const DEFAULT_VIEW: ViewerSettings = {
@@ -63,6 +71,10 @@ export const DEFAULT_VIEW: ViewerSettings = {
   showGrid: true,
   showObstacles: true,
   xrayGround: false,
+  pushEnabled: false,
+  pushRadius: 0,
+  pushStiff: 0.35,
+  pushSpeed: 1,
 };
 
 const BARK = new THREE.Color(0x6e6258);
@@ -101,6 +113,8 @@ export class Viewer {
   private matcapTexture: THREE.Texture;
   private disposed = false;
   private frameCallbacks: ((dt: number) => void)[] = [];
+  private collider: THREE.Mesh;
+  private pushTime = 0;
   private lastFpsTime = 0;
   private frames = 0;
   fps = 0;
@@ -168,7 +182,14 @@ export class Viewer {
       uTrunkFlex: { value: 1 },
       uLimbFlex: { value: 1 },
       uDetailFlex: { value: 1 },
+      uPush: { value: new THREE.Vector4(0, -10, 0, 0.3) },
+      uPushStrength: { value: 0 },
+      uPushStiff: { value: 0.35 },
     };
+    this.collider = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 28), new THREE.MeshStandardMaterial({ color: 0x9aa3b2, roughness: 0.35, metalness: 0.05, transparent: true, opacity: 0.42, depthWrite: false }));
+    this.collider.castShadow = false;
+    this.collider.visible = false;
+    this.scene.add(this.collider);
 
     this.matcapTexture = makeMatcap();
 
@@ -330,6 +351,7 @@ export class Viewer {
     const dt = this.clock.getDelta();
     const t = this.clock.elapsedTime;
     this.uniforms.uTime.value = this.settings.windEnabled ? t : 0;
+    this.updateCollider(dt);
     this.controls.autoRotate = this.settings.autoRotate;
     this.controls.update();
     for (const cb of this.frameCallbacks) cb(dt);
@@ -341,6 +363,26 @@ export class Viewer {
       this.lastFpsTime = t;
     }
   };
+
+  /** The collider sweeps a figure-of-eight through the plant at about a third of its height. */
+  private updateCollider(dt: number): void {
+    const s = this.settings;
+    this.collider.visible = s.pushEnabled;
+    this.uniforms.uPushStrength.value = s.pushEnabled ? 1 : 0;
+    if (!s.pushEnabled) return;
+    this.pushTime += dt * Math.max(0, s.pushSpeed);
+    const H = this.treeHeight;
+    const R = s.pushRadius > 0 ? s.pushRadius : Math.min(0.9, Math.max(0.1, 0.22 * H));
+    const A = 0.55 * H + R;
+    const w = 0.55;
+    const x = A * Math.sin(w * this.pushTime);
+    const z = 0.6 * A * Math.sin(2 * w * this.pushTime + 0.4);
+    const y = Math.max(R * 0.6, 0.38 * H + 0.12 * H * Math.sin(0.37 * this.pushTime));
+    this.collider.position.set(x, y, z);
+    this.collider.scale.setScalar(R);
+    (this.uniforms.uPush.value as THREE.Vector4).set(x, y, z, R);
+    this.uniforms.uPushStiff.value = s.pushStiff;
+  }
 
   applySettings(s: ViewerSettings): void {
     this.settings = { ...s };
@@ -597,14 +639,14 @@ export class Viewer {
           }`,
         );
     };
-    mat.customProgramCacheKey = () => 'bark-wind-v4';
+    mat.customProgramCacheKey = () => 'bark-wind-v5';
     return mat;
   }
 
   private makeLeafMaterial(): THREE.MeshStandardMaterial {
     const mat = new THREE.MeshStandardMaterial({ color: LEAF, roughness: 0.75, metalness: 0, side: THREE.DoubleSide });
     mat.onBeforeCompile = (shader) => this.injectWind(shader);
-    mat.customProgramCacheKey = () => 'leaf-wind-v3';
+    mat.customProgramCacheKey = () => 'leaf-wind-v4';
     return mat;
   }
 
