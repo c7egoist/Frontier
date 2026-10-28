@@ -208,6 +208,28 @@ void ValidateEngineReplayHistory()
     History.Invalidate();
     Layout = History.Resolve(Fixture.View(), Specification);
     Require(Layout.Changed && Layout.ResetReservoir, "Invalidation did not reset history");
+    // 📝 A rejected or abandoned submission invalidates speculative history; successful work keeps it.
+    {
+        PathReplayHistorySubmission Submission(History, Fixture.View(), Specification);
+        Require(!Submission.Decision().ResetReservoir, "Stable submission unexpectedly reset");
+    }
+    Layout = History.Resolve(Fixture.View(), Specification);
+    Require(Layout.ResetReservoir, "Abandoned submission failed to invalidate history");
+    {
+        PathReplayHistorySubmission Submission(History, Fixture.View(), Specification);
+        Require(!Submission.Decision().ResetReservoir, "Stable submission unexpectedly reset");
+        Submission.AcknowledgeCompletion();
+    }
+    Layout = History.Resolve(Fixture.View(), Specification);
+    Require(!Layout.Changed && !Layout.ResetReservoir, "Completed submission did not preserve history");
+    try
+    {
+        PathReplayHistorySubmission Submission(History, Fixture.View(), Specification);
+        throw std::runtime_error("injected submission error");
+    }
+    catch (const std::runtime_error&) {}
+    Layout = History.Resolve(Fixture.View(), Specification);
+    Require(Layout.ResetReservoir, "Exception failed to invalidate the pending submission");
     ReplayInputFixture CameraFixture;
     PathReplayHistoryDomain CameraHistory;
     PathReplayHistorySpecification CameraSpecification{};

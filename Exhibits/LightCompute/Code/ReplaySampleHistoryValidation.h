@@ -668,8 +668,45 @@ void ValidateReplayLayoutTransitions(const char* Driver, const std::string& Shad
                 "fresh_exact=1 history_reset=1\n");
 }
 
+// 📝 An abandoned recording must not make an unsubmitted layout look like completed GPU history.
+void ValidateReplayAbandonedSubmission(const char* Driver, const std::string& Shaders,
+                                       const std::string& Directory = {})
+{
+    const auto Scene = ReplayCameraPlane(0, 0);
+    for (uint32_t Injection = 0; Injection < 2; ++Injection)
+    {
+        LightComputeSubmission Interrupted(Driver), Fresh(Driver);
+        Interrupted.Prepare(Scene, Shaders, false, false, false, false, true, false, 0);
+        Fresh.Prepare(Scene, Shaders, false, false, false, false, true, false, 0);
+        for (uint32_t Frame = 0; Frame < 3; ++Frame)
+            (void)ExecuteReplaySampleHistory(Interrupted, Scene, 610001u + 7919u * Frame, Frame == 0,
+                                             true, 2, {.025f,.025f,.025f});
+        Interrupted.CompactReplay = Fresh.CompactReplay = true;
+        Interrupted.ReplayFailAfterResolveForAudit = Injection == 0;
+        Interrupted.ReplayFailBeforeSubmitForAudit = Injection == 1;
+        bool Failed = false;
+        try { (void)ExecuteReplaySampleHistory(Interrupted, Scene, 720001u, false, true, 2, {.025f,.025f,.025f}); }
+        catch (const std::runtime_error&) { Failed = true; }
+        Interrupted.ReplayFailAfterResolveForAudit = Interrupted.ReplayFailBeforeSubmitForAudit = false;
+        Require(Failed, "Injected failure did not run");
+        const auto Expected = ExecuteReplaySampleHistory(Fresh, Scene, 720001u, true, true, 2, {.025f,.025f,.025f});
+        const auto Actual = ExecuteReplaySampleHistory(Interrupted, Scene, 720001u, false, true, 2, {.025f,.025f,.025f});
+        Require(Interrupted.ReplayLastReset && Interrupted.ReplayLastSampleHistoryReset &&
+                Interrupted.ExtendedStatistics()[23] == 0 && ReplayCandidateImagesEqual(Expected, Actual),
+                "Abandoned submission reused incompatible GPU history");
+        if (Injection == 1 && !Directory.empty())
+        {
+            std::filesystem::create_directories(Directory);
+            WriteImage(Directory + "/ReplayRetryFresh.ppm", Expected, Scene.Width, Scene.Height, 3);
+            WriteImage(Directory + "/ReplayRetryActual.ppm", Actual, Scene.Width, Scene.Height, 3);
+        }
+    }
+    std::printf("ABANDONED_SUBMISSION injected=after_resolve,before_queue retry_reset=1 fresh_exact=1 retained=0\n");
+}
+
 void ValidateReplaySampleHistory(const char* Driver, const std::string& Shaders)
 {
+    ValidateReplayAbandonedSubmission(Driver, Shaders);
     ValidateReplayLayoutTransitions(Driver, Shaders);
     ValidateReplayCompactParity(Driver, Shaders);
     ValidateReplaySampleSubpixel(Driver, Shaders);

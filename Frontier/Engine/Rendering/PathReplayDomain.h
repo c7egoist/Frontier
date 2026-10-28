@@ -111,4 +111,23 @@ class PathReplayHistoryDomain
     std::vector<float> PriorMaterialAtlas;
 };
 
+// 📝 One submission per domain may be pending. Acknowledging requires completed, successful GPU work;
+//    otherwise destruction invalidates the speculative snapshot and forces a reset on the next resolve.
+class PathReplayHistorySubmission
+{
+  public:
+    PathReplayHistorySubmission(PathReplayHistoryDomain& Domain, const PathReplaySceneView& Scene,
+                                const PathReplayHistorySpecification& Specification, bool FullHistoryForAudit = false);
+    ~PathReplayHistorySubmission();
+    PathReplayHistorySubmission(const PathReplayHistorySubmission&) = delete;
+    PathReplayHistorySubmission& operator=(const PathReplayHistorySubmission&) = delete;
+    [[nodiscard]] const PathReplayHistoryDecision& Decision() const noexcept { return Intake; }
+    void AcknowledgeCompletion() noexcept { Completed = true; }
+
+  private:
+    PathReplayHistoryDomain& Domain;
+    PathReplayHistoryDecision Intake;
+    bool Completed = false;
+};
+
 } // namespace Frontier

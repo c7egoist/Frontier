@@ -346,4 +346,17 @@ void PathReplayHistoryDomain::Invalidate() noexcept
     PriorCorners.clear();
     PriorMaterialAtlas.clear();
 }
+PathReplayHistorySubmission::PathReplayHistorySubmission(PathReplayHistoryDomain& History,
+                                                         const PathReplaySceneView& Scene,
+                                                         const PathReplayHistorySpecification& Specification,
+                                                         bool FullHistoryForAudit)
+    : Domain(History), Intake(History.Resolve(Scene, Specification, FullHistoryForAudit))
+{
+}
+
+PathReplayHistorySubmission::~PathReplayHistorySubmission()
+{
+    if (!Completed) Domain.Invalidate();
+}
+
 } // namespace Frontier

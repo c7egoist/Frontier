@@ -4,6 +4,14 @@ Single progress and violation tracker. Detailed evidence belongs in Exhibits, no
 The [renderer and GI evidence map](../Exhibits/RecoveryAudit/RendererStatus.md) separates software tracing,
 hardware RT, non-ray paths, reflections, PBR and the statistical limits of the recent charts.
 
+## Replay submission snapshot safety — 2026-10-28
+
+- Reproduced stale replay history after an abandoned recording. An Engine submission-scope guard invalidates
+  speculative history unless the caller acknowledges successful completion; the LightCompute host uses it after
+  fence completion. Injected failures after resolve and before queue submission retry with fresh output.
+- Actual device loss, failed Vulkan calls, in-flight resource handling, production integration and physical GPU
+  are not proven. [Contract, tests and readbacks](../Exhibits/LightCompute/ReplaySubmission.md).
+
 ## Replay history layout reset — 2026-10-28
 
 - Reproduced a missing reset on switching legacy/compact replay layouts. The Engine history domain now signals

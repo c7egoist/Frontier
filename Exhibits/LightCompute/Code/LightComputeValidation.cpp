@@ -254,6 +254,7 @@ struct LightComputeSubmission
     VkPipeline ReplayGatherSampleHistoryPipeline = VK_NULL_HANDLE, ReplayFinalizeSampleHistoryPipeline = VK_NULL_HANDLE;
     VkPipeline ReplayProbeRegionPipeline = VK_NULL_HANDLE, ReplayTailAuditPipeline = VK_NULL_HANDLE;
     bool CompactReplay = false;
+    bool ReplayFailAfterResolveForAudit = false, ReplayFailBeforeSubmitForAudit = false;
     bool PendingOrdinaryHistoryReset = false;
     bool ReplayLastReset = true, ReplayLastReconstructionReset = true, ReplayReconstructionActive = false;
     bool ReplayLastSampleHistoryReset = true, ReplaySampleHistoryActive = false;
@@ -859,8 +860,11 @@ struct LightComputeSubmission
             RoughOpaque, SampleFacets, DoubleCountForAudit, StrictMotionForAudit, BalanceSampling, TexturedDiffuse,
             ImportanceRough, PowerWeightedFacets, UniformFacetMixture, InitialCandidates, CompactReplay};
         // 📝 Reservoir replay can retain capped history across changes; radiance accumulation cannot.
-        const auto ReplayDecision = ReplayHistoryDomain.Resolve(ReplayDomainView(Scene), ReplaySpecification,
-                                                                FullHistoryForAudit);
+        PathReplayHistorySubmission ReplaySubmission(ReplayHistoryDomain, ReplayDomainView(Scene), ReplaySpecification,
+                                                     FullHistoryForAudit);
+        const auto ReplayDecision = ReplaySubmission.Decision();
+        if (ReplayFailAfterResolveForAudit)
+            throw std::runtime_error("Injected replay failure after history resolve");
         ReplayLastHistoryCap = ReplayDecision.MaximumHistory;
         bool Reset = ResetHistory || ReplayDecision.ResetReservoir ||
                      Scene.Width != ReceiverWidth || Scene.Height != ReceiverHeight;
@@ -953,6 +957,8 @@ struct LightComputeSubmission
         CmdPipelineBarrier(Commands, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_HOST_BIT,
                            0, 1, &Barrier, 0, nullptr, 0, nullptr);
         Confirm(EndCommandBuffer(Commands));
+        if (ReplayFailBeforeSubmitForAudit)
+            throw std::runtime_error("Injected replay failure before queue submission");
         VkSubmitInfo Submission{};
         Submission.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         Submission.commandBufferCount = 1;
@@ -968,6 +974,7 @@ struct LightComputeSubmission
         ReplayPreviousTemporal = Temporal;
         ReplayPreviousSpatial = Spatial;
         ReplayPreviousDiffuseCamera = DiffuseCameraReprojection;
+        ReplaySubmission.AcknowledgeCompletion();
         return Result;
     }
     // One translating, unobstructed rectangular source; other geometry or changing emission is rejected/reset.
@@ -1758,6 +1765,16 @@ int main(int Count, char** Arguments)
         if (Count == 5 && std::string(Arguments[3]) == "--capture-replay-layout-transitions")
         {
             ValidateReplayLayoutTransitions(Arguments[1], Arguments[2], Arguments[4]);
+            return 0;
+        }
+        if (Count == 5 && std::string(Arguments[3]) == "--capture-replay-abandoned-submission")
+        {
+            ValidateReplayAbandonedSubmission(Arguments[1], Arguments[2], Arguments[4]);
+            return 0;
+        }
+        if (Count == 4 && std::string(Arguments[3]) == "--replay-abandoned-submission")
+        {
+            ValidateReplayAbandonedSubmission(Arguments[1], Arguments[2]);
             return 0;
         }
         if (Count == 4 && std::string(Arguments[3]) == "--replay-layout-transitions")
