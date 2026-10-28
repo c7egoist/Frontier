@@ -1,7 +1,7 @@
 import './ui/styles.css';
 import { PRESETS, PRESET_GROUPS, TreeParams, PlantKind, cloneParams, SHAPE_NAMES, Shape, scatterFor, trunkBaseRadius, rootReach, isGrass, isSucculent, isVegetable, isCarnivore, isOrganPlant, plantKind } from './tree/params';
 import { GrassParams, Inflorescence, INFLORESCENCE_NAMES, HEAD_BRANCH_NAMES, grassHeight, grassHabit } from './plant/grassParams';
-import { SucculentParams, SucculentForm, SUCCULENT_FORM_NAMES, succulentHeight, succulentHabit } from './plant/succulentParams';
+import { SucculentParams, SucculentForm, SUCCULENT_FORM_NAMES, Inflorescence as StalkInflorescence, INFLORESCENCE_NAMES as STALK_INFLORESCENCE_NAMES, StalkOrigin, STALK_ORIGIN_NAMES, FlowerKind, FLOWER_KIND_NAMES, succulentHeight, succulentHabit } from './plant/succulentParams';
 import { VegetableParams, VegetableForm, FruitShape, LeafShape, VEGETABLE_FORM_NAMES, FRUIT_SHAPE_NAMES, vegetableHeight, vegetableHabit } from './plant/vegetableParams';
 import { CarnivoreParams, CarnivoreForm, TrapKind, HoodKind, CARNIVORE_FORM_NAMES, TRAP_NAMES, HOOD_NAMES, carnivoreHeight, carnivoreHabit } from './plant/carnivoreParams';
 import { Viewer, DEFAULT_VIEW, ViewerSettings, DisplayMode } from './viewer/scene';
@@ -1303,15 +1303,30 @@ function buildSucculentPage(): void {
     slider(sLeaf, 'Tooth length', () => C().toothLength, (v) => (C().toothLength = v), { min: 0.001, max: 0.03, step: 0.0005, ...mm }, onChange);
   }
   if (rosette) {
-    const sStalk = section('Flower stalk', page, { hint: c.stalk ? 'in flower' : 'none' });
+    const sStalk = section('Flower stalk', page, { hint: c.stalk ? STALK_INFLORESCENCE_NAMES[c.inflorescence].toLowerCase() : 'none' });
     check(sStalk, 'Flower stalk', () => C().stalk > 0, (v) => (C().stalk = v ? 1 : 0), rebuild);
     if (c.stalk > 0) {
-      slider(sStalk, 'Stalk height', () => C().stalkHeight, (v) => (C().stalkHeight = v), { min: 0.1, max: 4, step: 0.01, ...cm }, onChange);
-      slider(sStalk, 'Stalk radius', () => C().stalkRadius, (v) => (C().stalkRadius = v), { min: 0.003, max: 0.04, step: 0.0005, ...mm }, onChange);
-      slider(sStalk, 'Flowers', () => C().flowers, (v) => (C().flowers = Math.round(v)), { min: 0, max: 300, step: 1 }, onChange);
-      slider(sStalk, 'Flower length', () => C().flowerLength, (v) => (C().flowerLength = v), { min: 0.01, max: 0.08, step: 0.001, ...mm }, onChange);
-      slider(sStalk, 'Flower radius', () => C().flowerRadius, (v) => (C().flowerRadius = v), { min: 0.001, max: 0.012, step: 0.0002, ...mm }, onChange);
-      slider(sStalk, 'Flower droop', () => C().flowerDroop, (v) => (C().flowerDroop = v), { min: 0, max: 100, step: 1, unit: '°' }, onChange);
+      const branched = c.inflorescence !== 'raceme';
+      select(sStalk, 'Inflorescence', (Object.keys(STALK_INFLORESCENCE_NAMES) as StalkInflorescence[]).map((k) => ({ value: k, label: STALK_INFLORESCENCE_NAMES[k] })), () => C().inflorescence, (v) => (C().inflorescence = v), rebuild);
+      select(sStalk, 'Rises from', (Object.keys(STALK_ORIGIN_NAMES) as StalkOrigin[]).map((k) => ({ value: k, label: STALK_ORIGIN_NAMES[k] })), () => C().stalkOrigin, (v) => (C().stalkOrigin = v), rebuild);
+      slider(sStalk, 'Stalk height', () => C().stalkHeight, (v) => (C().stalkHeight = v), { min: 0.1, max: 8, step: 0.01, ...cm, title: 'Length of the peduncle above the crown' }, onChange);
+      slider(sStalk, 'Stalk radius', () => C().stalkRadius, (v) => (C().stalkRadius = v), { min: 0.003, max: 0.08, step: 0.0005, ...mm, title: 'Radius at the base; the stalk tapers to a third of it' }, onChange);
+      slider(sStalk, 'Arch', () => C().stalkArch, (v) => (C().stalkArch = v), { min: 0, max: 180, step: 1, unit: '°', title: 'How far the stalk bends over along its length (foxtail agave)' }, onChange);
+      stepper(sStalk, 'Bracts', () => C().bracts, (v) => (C().bracts = v), { min: 0, max: 40, integer: true }, onChange);
+      if (branched) {
+        stepper(sStalk, 'Branches', () => C().branches, (v) => (C().branches = v), { min: 1, max: 40, integer: true }, onChange);
+        slider(sStalk, 'Branch length', () => C().branchLength, (v) => (C().branchLength = v), { min: 0.05, max: 1.5, step: 0.01, ...cm, title: 'Longest (lowest) branch of a panicle; every raceme of a candelabra' }, onChange);
+        slider(sStalk, 'Branch angle', () => C().branchAngle, (v) => (C().branchAngle = v), { min: 10, max: 90, step: 1, unit: '°', title: 'Angle a branch leaves the stalk at' }, onChange);
+        slider(sStalk, 'Branch curve', () => C().branchCurve, (v) => (C().branchCurve = v), { min: -60, max: 60, step: 1, unit: '°', title: 'Negative sweeps the branches up (agave candelabra), positive lets them droop' }, onChange);
+        slider(sStalk, 'Branch zone', () => C().branchZone, (v) => (C().branchZone = v), { min: 0.1, max: 0.8, step: 0.01, ...pct, title: 'Fraction of the stalk that carries branches' }, onChange);
+      }
+      select(sStalk, 'Flower', (Object.keys(FLOWER_KIND_NAMES) as FlowerKind[]).map((k) => ({ value: k, label: FLOWER_KIND_NAMES[k] })), () => C().flowerKind, (v) => (C().flowerKind = v), rebuild);
+      slider(sStalk, 'Flowers', () => C().flowers, (v) => (C().flowers = Math.round(v)), { min: 0, max: 2000, step: 10, title: 'Flowers on the whole inflorescence; the top of a raceme carries buds' }, onChange);
+      slider(sStalk, 'Flower length', () => C().flowerLength, (v) => (C().flowerLength = v), { min: 0.01, max: 0.1, step: 0.001, ...mm }, onChange);
+      slider(sStalk, 'Flower radius', () => C().flowerRadius, (v) => (C().flowerRadius = v), { min: 0.001, max: 0.03, step: 0.0002, ...mm }, onChange);
+      slider(sStalk, 'Flower droop', () => C().flowerDroop, (v) => (C().flowerDroop = v), { min: -90, max: 100, step: 1, unit: '°', title: 'Angle below the horizontal the open flowers hang at; negative points them up (agaves)' }, onChange);
+      if (c.flowerKind !== 'bell') slider(sStalk, 'Stamens', () => C().stamens, (v) => (C().stamens = v), { min: 0, max: 2, step: 0.05, title: 'Length of the stamens beyond the mouth, as a multiple of the flower length' }, onChange);
+      slider(sStalk, 'Flower zone', () => C().flowerZone, (v) => (C().flowerZone = v), { min: 0.1, max: 0.9, step: 0.01, ...pct, title: 'Fraction of each raceme / branch, from its tip, that carries flowers' }, onChange);
     }
   }
 

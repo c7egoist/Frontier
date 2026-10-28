@@ -5,12 +5,16 @@
  * base ring is the topological root; the trunk column (or barrel, first pad,
  * rosette stem) grows from it and every arm, pad, leaf, flower stalk, fruit,
  * areole, spine and marginal tooth leaves its parent through a window welded
- * with collar loops. Fruit bodies, areoles and pads that are much wider than
+ * with collar loops. A terminal flower stalk continues the rosette stem from
+ * its tip ring instead of a cap; its branches, bracts, flowers and buds leave
+ * it through windows in turn, and every axis ends in a terminal flower or bud.
+ * Fruit bodies, areoles, pads and flowering branches that are much wider than
  * their necks double their ring resolution through all-quad refinement bands.
  *
  * Organ levels (Levels view / GLB TEXCOORD_1):
  *   0 body (trunk, barrel, first pad, rosette stem) · 1 arms, pads, flower
- *   stalks · 2 leaves, fruits, flowers · 3 areoles, spines, teeth.
+ *   stalks and their branches · 2 leaves, fruits, bracts, flowers, buds ·
+ *   3 areoles, spines, teeth.
  */
 
 import { VertexWind } from '../tree/mesh';
@@ -25,6 +29,8 @@ export type SucculentStats = OrganStats;
 export interface SucculentBuildResult extends OrganBuildResult {
   stats: SucculentStats;
 }
+
+type FlowerShape = 'tube' | 'funnel' | 'bell' | 'bud';
 
 const GOLDEN = 2.399963229728653; // 137.5°
 
@@ -727,12 +733,16 @@ export class SucculentMesher extends OrganMesher {
     const spacing0 = Math.max(0.003, p.ringAspect * ((TAU * r) / N));
     // Trunked rosettes (yuccas, foxtail agaves) carry their leaves only on the top part of the stem.
     const zone = clamp(p.leafZone, 0.1, 1);
-    const spacing = this.packSpacing(n + (p.stalk > 0 ? 3 : 0) + Math.floor(N / (w + 1)), w, h, N, Math.max(0.02, zone * (L - domeLen - Math.max(sStart, depth - 0.02) - 2 * spacing0)), spacing0);
+    const spacing = this.packSpacing(n + (p.stalk > 0 && p.stalkOrigin !== 'terminal' ? 3 : 0) + Math.floor(N / (w + 1)), w, h, N, Math.max(0.02, zone * (L - domeLen - Math.max(sStart, depth - 0.02) - 2 * spacing0)), spacing0);
+    const hasStalk = p.stalk > 0 && p.stalkHeight > 0;
+    const terminal = hasStalk && p.stalkOrigin === 'terminal';
+    // A terminal peduncle continues the stem: the bud narrows to the stalk radius instead of a point.
+    const tipF = terminal ? clamp(p.stalkRadius / (0.5 * r), 0.1, 0.95) : 0.06;
     const rad = (s: number): number => {
       const t = clamp((s - depth) / H, -1, 1);
       let rr = r * (1 - 0.5 * smooth(t));
       const td = (s - (L - domeLen)) / domeLen;
-      if (td > 0) rr *= Math.max(0.06, Math.pow(Math.max(0, 1 - td), 0.65));
+      if (td > 0) rr *= Math.max(tipF, Math.pow(Math.max(0, 1 - td), 0.65));
       return rr;
     };
     const lean = p.leanV * DEG2RAD * this.rng.uniform();
@@ -745,9 +755,8 @@ export class SucculentMesher extends OrganMesher {
 
     const children: Attachment[] = [];
     const sTop = L - domeLen - (0.5 * h + 1) * spacing;
-    const hasStalk = p.stalk > 0 && p.stalkHeight > 0;
-    // The flower stalk takes the top two rows below the dome; the leaves stop a clear row beneath it.
-    const sTo = hasStalk ? sTop - 3.5 * spacing : sTop;
+    // A lateral flower stalk takes the top rows below the dome; the leaves stop a clear row beneath it.
+    const sTo = hasStalk && !terminal ? sTop - 3.5 * spacing : sTop;
     const sFrom0 = Math.max(sStart + (0.5 * h + 1) * spacing, depth + 0.005);
     const sFrom = zone < 1 ? Math.max(sFrom0, sTo - zone * (sTo - sFrom0)) : sFrom0;
     const az0 = this.leafRng.next() * TAU;
@@ -795,19 +804,20 @@ export class SucculentMesher extends OrganMesher {
         make: (ex) => this.makeLeaf(ex, { spread, L: Lf, W: p.leafWidth * (0.75 + 0.25 * lenF), base: { limb: 0, phase: this.leafRng.next(), pivot: ex.pos }, twistSign, level: 2 }),
       });
     }
-    if (hasStalk) {
+    const stalkPhase = this.rng.next();
+    if (hasStalk && !terminal) {
       const s = sTop - 1.5 * spacing;
       children.push({
         s,
         az: this.rng.next() * TAU,
-        w: 2,
+        w: 3,
         h: 2,
         hh: spacing,
         priority: 3,
         j0: 0,
         row0: 0,
         row1: 0,
-        make: (ex) => this.makeStalk(ex, { limb: 0, phase: this.rng.next(), pivot: ex.pos }),
+        make: (ex) => this.makePeduncle(ex, { limb: 0, phase: stalkPhase, pivot: ex.pos }, false),
       });
     }
     this.count('stem');
@@ -829,56 +839,127 @@ export class SucculentMesher extends OrganMesher {
       wind: () => ({ height: 0, limb: 0, phase, detail: STILL_DETAIL }),
       pivot,
       r0: r,
+      continuation: terminal ? (ex) => this.makePeduncle(ex, { limb: 0, phase: stalkPhase, pivot: ex.pos }, true) : undefined,
     };
     this.meshTube(organ, loop, exit, 1);
   }
 
-  private makeStalk(exit: Exit, base: WindBase): Organ {
+  // ---------------------------------------------------------------------------
+  // Inflorescences: peduncle, branches, bracts and flowers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The flower stalk (peduncle). Terminal ones continue the rosette stem from
+   * its tip ring; lateral ones leave a window below the crown. Along it:
+   * scale-like bracts, the side branches of a panicle or candelabra and, for a
+   * raceme / spike, the flowers themselves over the top `flowerZone`; a panicle
+   * keeps a small terminal cluster above its last branch and a candelabra its
+   * central raceme.
+   */
+  private makePeduncle(exit: Exit, base: WindBase, terminal: boolean): Organ {
     const p = this.p;
-    const r = Math.max(0.002, p.stalkRadius);
+    const r = Math.max(0.002, Math.min(p.stalkRadius, terminal ? 0.5 * exit.size : 0.45 * exit.size));
     const L = Math.max(0.05, p.stalkHeight);
-    const N = 8;
-    const cell = (TAU * r) / N;
-    const dir0 = normalize(add(scale(exit.normal, 0.5), UP));
+    const N = exit.N;
+    const cell = Math.max(0.002, (p.ringAspect * TAU * r) / N);
+    const kind = p.inflorescence;
+    const dir0 = terminal ? exit.dir : normalize(add(scale(exit.normal, 0.5), UP));
     let right0 = projectOnPlane(cross(UP, exit.normal), dir0);
     right0 = lengthSq(right0) < 1e-12 ? anyPerpendicular(dir0) : normalize(right0);
-    const line = growLine(exit.pos, dir0, right0, L, 10, (t0, t1) => ({ gravity: -0.45 * (smooth(t1 / 0.35) - smooth(t0 / 0.35)) }));
-    const sStart = Math.max(this.collarLen(r, 1.6), 0.5 * exit.size);
-    const rad = (s: number): number => r * (1 - 0.45 * clamp(s / L, 0, 1));
+    // Lateral stalks straighten up over their first third; the arch (foxtail agave) builds up along the
+    // length and the very tip turns back up towards the light.
+    const arch = clamp(p.stalkArch, 0, 180) * DEG2RAD;
+    const archW = (t: number): number => (t < 0.8 ? Math.pow(t / 0.8, 2) : 1 - 0.22 * smooth((t - 0.8) / 0.2));
+    const line = growLine(exit.pos, dir0, right0, L, 48, (t0, t1) => ({
+      gravity: (terminal ? 0 : -0.45 * (smooth(t1 / 0.35) - smooth(t0 / 0.35))) + arch * (archW(t1) - archW(t0)),
+    }));
+    const sStart = terminal ? this.collarLen(r, 1.0) : Math.max(this.collarLen(r, 1.6), 0.5 * exit.size);
+    // The tip narrows to a terminal flower (panicle) or bud (raceme) that continues the axis.
+    const rf = Math.max(0.0005, p.flowerRadius);
+    const tipKind: FlowerShape = kind === 'panicle' ? p.flowerKind : 'bud';
+    const rTip = Math.max(0.0008, Math.min(0.35 * r, (tipKind === 'bud' ? 0.4 : 0.3) * rf));
+    const tipLen = Math.max(4 * cell, 0.03 * L);
+    const rad = (s: number): number => {
+      const rr = r * (1 - 0.65 * Math.pow(clamp(s / L, 0, 1), 0.9));
+      return Math.min(rr, lerp1(rr, rTip, smooth((s - (L - tipLen)) / tipLen)));
+    };
     const flex = this.flexMax;
     const wind = (s: number): VertexWind => {
       const t = clamp(s / L, 0, 1);
       return { height: 0, limb: flex * t * t, phase: base.phase, detail: STILL_DETAIL };
     };
     const children: Attachment[] = [];
-    const flowers = Math.max(0, Math.round(p.flowers));
-    if (flowers > 0 && p.flowerLength > 0) {
-      const sF1 = L - 1.5 * cell;
-      const rows = Math.max(1, Math.floor((0.42 * L) / cell));
-      const sF0 = sF1 - rows * cell;
-      const total = Math.min(flowers, 4 * rows);
-      for (let k = 0; k < total; k++) {
-        const row = Math.floor(k / 4);
-        const col = 2 * (k % 4) + (row % 2);
-        const s = sF0 + row * cell + 0.5 * cell;
-        const droop = p.flowerDroop * DEG2RAD * (1 + 0.15 * this.detailRng.uniform()) * (row < 2 ? 0.5 : 1);
-        const len = Math.max(0.002, p.flowerLength * (1 + 0.1 * this.detailRng.uniform()));
+    // A lateral stalk leaves through a 3 × 2 window (10 vertices round): it doubles up just past the collar.
+    const refineAt = N < 16 ? sStart + 1.5 * cell : -1;
+    const Nf = refineAt > 0 ? 2 * N : N;
+
+    // ---- Bracts: appressed triangular scales in a spiral, largest at the base.
+    const bracts = Math.max(0, Math.round(p.bracts));
+    for (let k = 0; k < bracts; k++) {
+      const t = 0.08 + (0.84 * (k + 0.5)) / bracts;
+      const sk = t * L;
+      const len = clamp(4 * r, 0.012, 0.11) * lerp1(1.4, 0.7, t) * (1 + 0.15 * this.detailRng.uniform());
+      children.push({
+        s: sk,
+        az: k * GOLDEN + 0.4 * this.detailRng.uniform(),
+        w: 2,
+        h: 1,
+        hh: 0.5 * cell,
+        optional: true,
+        priority: 1,
+        j0: 0,
+        row0: 0,
+        row1: 0,
+        make: (ex) => this.makeBract(ex, { limb: wind(sk).limb, phase: base.phase, pivot: base.pivot }, len),
+      });
+    }
+
+    // ---- Branches of a panicle / candelabra, and how the flowers are shared out.
+    const nBranches = kind === 'raceme' ? 0 : Math.max(0, Math.round(p.branches));
+    const flowersTotal = Math.max(0, Math.round(p.flowers));
+    let flowersHere = flowersTotal;
+    if (nBranches > 0) {
+      const zone = clamp(p.branchZone, 0.1, 0.85);
+      // Panicle: branches up to just below the tip. Candelabra: all below the central raceme.
+      const s1 = kind === 'panicle' ? 0.93 * L : Math.min(0.93 * L, L - clamp(p.flowerZone, 0.05, 0.95) * L - 3 * cell);
+      const s0 = Math.max(sStart + 3 * cell, s1 - zone * L);
+      // Panicle: the lowest branches are the longest (conical outline); candelabra: all alike.
+      const lens: number[] = [];
+      for (let k = 0; k < nBranches; k++) {
+        const u = nBranches > 1 ? k / (nBranches - 1) : 0;
+        lens.push(Math.max(0.03, p.branchLength * (kind === 'panicle' ? lerp1(1, 0.32, Math.pow(u, 0.9)) : lerp1(0.85, 1, u)) * (1 + 0.1 * this.detailRng.uniform())));
+      }
+      const lenSum = lens.reduce((a, b) => a + b, 0);
+      // The peduncle keeps a share for its own tip: a small terminal cluster (panicle) or the central raceme.
+      const share = kind === 'panicle' ? 0.08 : 1.3 / (nBranches + 1.3);
+      flowersHere = Math.round(flowersTotal * share);
+      const onBranches = flowersTotal - flowersHere;
+      for (let k = 0; k < nBranches; k++) {
+        const u = nBranches > 1 ? k / (nBranches - 1) : 0;
+        const sk = s0 + (s1 - s0) * u;
+        const nF = Math.round((onBranches * lens[k]) / lenSum);
         children.push({
-          s,
-          az: (col + 0.5) * (TAU / N),
-          w: 1,
-          h: 1,
-          hh: 0.5 * cell,
-          fixed: true,
-          optional: true,
+          s: sk,
+          az: k * GOLDEN + 0.5 * this.detailRng.uniform(),
+          w: 3,
+          h: 2,
+          hh: cell,
+          priority: 3,
           j0: 0,
           row0: 0,
           row1: 0,
-          make: (ex) => this.makeFlower(ex, { limb: wind(s).limb, phase: base.phase, pivot: base.pivot }, len, droop),
+          make: (ex) => this.makeBranch(ex, { limb: wind(sk).limb, phase: base.phase, pivot: base.pivot }, lens[k], nF),
         });
       }
     }
+
+    // ---- Flowers on the peduncle itself.
+    if (flowersHere > 0 && p.flowerLength > 0) {
+      const zone = kind === 'panicle' && nBranches > 0 ? 0.06 : clamp(p.flowerZone, 0.05, 0.95);
+      this.placeFlowers(children, Nf, cell, L, Math.max(sStart + 3 * cell, L - zone * L), L - 1.5 * cell, flowersHere, wind, base, null);
+    }
     this.count('stalk');
+    const tipWind = { limb: wind(L).limb, phase: base.phase, pivot: base.pivot };
     return {
       level: 1,
       line,
@@ -893,44 +974,262 @@ export class SucculentMesher extends OrganMesher {
       extra: [],
       spacing: cell,
       rowLattice: cell,
+      refine: refineAt > 0 ? [refineAt] : undefined,
       children,
       wind,
       pivot: base.pivot,
       r0: r,
+      continuation: p.flowerLength > 0 ? (ex) => this.makeFlower(ex, tipWind, tipKind, p.flowerDroop * DEG2RAD, tipKind === 'bud' ? 0.5 : 1, true) : undefined,
     };
   }
 
-  private makeFlower(exit: Exit, base: WindBase, len: number, droop: number): Organ {
+  /**
+   * Flower windows over [sFrom, sTo] of an axis of N columns: as many rows as
+   * the count needs (never closer than a free row apart), the columns of a row
+   * spread round the axis — or, on a branch, over its underside / top only
+   * (`side`), so pendent bells and upturned funnels never cross the branch.
+   * The top of a raceme carries buds: shorter, closed, pointing up.
+   */
+  private placeFlowers(children: Attachment[], N: number, cell: number, L: number, sFrom: number, sTo: number, count: number, wind: (s: number) => VertexWind, base: WindBase, side: 'under' | 'top' | null): void {
     const p = this.p;
+    if (count <= 0 || sTo <= sFrom) return;
     const rf = Math.max(0.0005, p.flowerRadius);
-    const dir0 = normalize(add(scale(exit.normal, Math.cos(droop)), scale(UP, -Math.sin(droop))));
-    let right0 = projectOnPlane(cross(UP, exit.normal), dir0);
+    // Small flowers fit through a 1 × 1 window (4 → 8 vertices round), larger ones through 2 × 1 (6 → 12 / 24).
+    const w = rf < 0.0095 ? 1 : 2;
+    const h = 1;
+    const span = side ? Math.floor(N / 2) - 1 : N;
+    const perRow = Math.max(1, Math.floor(span / (w + 1)));
+    const cellsAvail = Math.max(1, Math.floor((sTo - sFrom) / cell));
+    // As many rows as the zone allows (a free row between them), as few flowers per row as the count
+    // needs: a dense spiral from the bottom to the top of the zone rather than sparse whorls.
+    const maxRows = Math.floor((cellsAvail - 1) / (h + 1)) + 1;
+    const perRowUsed = clamp(Math.ceil(count / maxRows), 1, perRow);
+    const rowsUsed = Math.max(1, Math.min(maxRows, Math.ceil(count / perRowUsed)));
+    const pitchCells = rowsUsed > 1 ? (cellsAvail - 1) / (rowsUsed - 1) : 0;
+    const colPitch = Math.max(w + 1, Math.floor(span / perRowUsed));
+    const droop = p.flowerDroop * DEG2RAD;
+    const budFrom = 0.86;
+    let k = 0;
+    for (let row = 0; row < rowsUsed && k < count; row++) {
+      const s = sFrom + (Math.round(row * pitchCells) + 0.5) * cell;
+      const t = rowsUsed > 1 ? row / (rowsUsed - 1) : 0;
+      // Each row turns on by a golden fraction of the column pitch: a spiral, not columns.
+      const shift = Math.floor(((row * GOLDEN) / TAU) % 1 * colPitch);
+      for (let c = 0; c < perRowUsed && k < count; c++) {
+        const col = c * colPitch + shift;
+        if (side && col + w > span) break;
+        const j0 = side ? (side === 'under' ? N / 2 + 1 + col : 1 + col) : col;
+        const bud = rowsUsed >= 6 && t > budFrom;
+        const budSize = lerp1(0.55, 0.38, (t - budFrom) / (1 - budFrom));
+        const sk = s;
+        children.push({
+          s: sk,
+          az: (j0 + 0.5 * w) * (TAU / N),
+          w,
+          h,
+          hh: 0.5 * cell,
+          fixed: true,
+          optional: true,
+          azFrame: side ? 'line' : undefined,
+          j0: 0,
+          row0: 0,
+          row1: 0,
+          make: (ex) => this.makeFlower(ex, { limb: wind(sk).limb, phase: base.phase, pivot: base.pivot }, bud ? 'bud' : p.flowerKind, bud ? -75 * DEG2RAD : droop, bud ? budSize : 1, false),
+        });
+        k++;
+      }
+    }
+  }
+
+  /** A side branch: the arm of a panicle ending in a cluster of upturned funnels or hung with bells, or an erect raceme of a candelabra. */
+  private makeBranch(exit: Exit, base: WindBase, len: number, nFlowers: number): Organ {
+    const p = this.p;
+    const kind = p.inflorescence;
+    const r = Math.max(0.0015, Math.min(0.4 * exit.size, kind === 'candelabra' ? 0.7 * p.stalkRadius : 0.3 * p.stalkRadius));
+    const angle = clamp(p.branchAngle, 5, 110) * DEG2RAD;
+    const curve = clamp(p.branchCurve, -90, 90) * DEG2RAD;
+    const dir0 = normalize(add(scale(exit.dir, Math.cos(angle)), scale(exit.normal, Math.sin(angle))));
+    // right = circumferential: the frame's up then points up-and-inwards along the branch, and a bend by
+    // "gravity" keeps it so — the underside (az 3π/2) and top (az π/2) of the branch stay where they are.
+    let right0 = projectOnPlane(cross(exit.dir, exit.normal), dir0);
     right0 = lengthSq(right0) < 1e-12 ? anyPerpendicular(dir0) : normalize(right0);
-    const sStart = Math.min(0.35 * len, Math.max(this.collarLen(rf, 1.5), 0.3 * exit.size));
-    const L = Math.max(len, sStart + 0.002);
-    const line = growLine(exit.pos, dir0, right0, L, 4, (t0, t1) => ({ gravity: 0.5 * droop * (Math.pow(t1, 2) - Math.pow(t0, 2)) }));
+    const L = Math.max(0.03, len);
+    const line = growLine(exit.pos, dir0, right0, L, 16, (t0, t1) => ({ gravity: curve * (Math.pow(t1, 1.2) - Math.pow(t0, 1.2)) }));
+    const sStart = Math.max(this.collarLen(r, 1.4), 0.4 * exit.size);
+    const N0 = exit.N;
+    const N = 2 * N0;
+    const cell = Math.max(0.0015, (p.ringAspect * TAU * r) / N);
+    const taper = kind === 'candelabra' ? 0.35 : 0.5;
+    const rf = Math.max(0.0005, p.flowerRadius);
+    const tipKind: FlowerShape = kind === 'candelabra' ? 'bud' : p.flowerKind;
+    const rTip = Math.max(0.0006, Math.min((1 - taper) * r, (tipKind === 'bud' ? 0.4 : 0.3) * rf));
+    const tipLen = Math.max(3 * cell, 0.05 * L);
     const rad = (s: number): number => {
-      const t = clamp((s - sStart) / Math.max(1e-6, L - sStart), 0, 1);
-      return rf * (0.7 + 0.5 * Math.sin(Math.PI * Math.pow(t, 0.7)) * (1 - 0.35 * t));
+      const rr = r * (1 - taper * clamp(s / L, 0, 1));
+      return Math.min(rr, lerp1(rr, rTip, smooth((s - (L - tipLen)) / tipLen)));
     };
-    this.count('flowers');
+    const flex = Math.max(base.limb, this.flexMax);
+    const wind = (s: number): VertexWind => {
+      const t = clamp(s / L, 0, 1);
+      return { height: 0, limb: lerp1(base.limb, flex, t * t), phase: base.phase, detail: STILL_DETAIL };
+    };
+    const children: Attachment[] = [];
+    const zone = clamp(p.flowerZone, 0.05, 0.95);
+    const sTo = L - 1.5 * cell;
+    const sFrom = Math.max(sStart + 2.5 * cell, L - zone * L);
+    // The branch doubles its vertex count where the flowers begin.
+    const refineAt = Math.max(sStart + 1.5 * cell, sFrom - 2 * cell);
+    const rising = p.flowerDroop < 0;
+    this.placeFlowers(children, N, cell, L, Math.max(sFrom, refineAt + 1.5 * cell), sTo, nFlowers, wind, base, kind === 'candelabra' ? null : rising ? 'top' : 'under');
+    this.count('branches');
+    const tipWind = { limb: wind(L).limb, phase: base.phase, pivot: base.pivot };
+    return {
+      level: 1,
+      line,
+      sStart,
+      profile: (s, j, NN) => {
+        const rr = rad(s);
+        const th = (TAU * j) / NN;
+        return { x: rr * Math.cos(th), y: rr * Math.sin(th) };
+      },
+      radius: rad,
+      round: true,
+      extra: [],
+      spacing: cell,
+      rowLattice: cell,
+      refine: refineAt < sTo - 3 * cell ? [refineAt] : undefined,
+      children,
+      wind,
+      pivot: base.pivot,
+      r0: r,
+      continuation: p.flowerLength > 0 ? (ex) => this.makeFlower(ex, tipWind, tipKind, p.flowerDroop * DEG2RAD, tipKind === 'bud' ? 0.5 : 1, true) : undefined,
+    };
+  }
+
+  /** A bract: a scale-like triangular leaf pressed to the peduncle, its tip curling out. */
+  private makeBract(exit: Exit, base: WindBase, len: number): Organ {
+    const spreadA = 22 * DEG2RAD;
+    const dir0 = normalize(add(scale(exit.dir, Math.cos(spreadA)), scale(exit.normal, Math.sin(spreadA))));
+    let right0 = projectOnPlane(cross(exit.dir, exit.normal), dir0);
+    right0 = lengthSq(right0) < 1e-12 ? anyPerpendicular(dir0) : normalize(right0);
+    const W = Math.min(0.5 * len, 0.9 * exit.size);
+    const L = Math.max(len, 1.5 * W);
+    const line = growLine(exit.pos, dir0, right0, L, 6, (t0, t1) => ({ pitch: 0.7 * (t1 * t1 - t0 * t0) }));
+    const sStart = Math.min(0.3 * L, Math.max(0.6 * exit.size, this.collarLen(0.5 * W, 1.2)));
+    const widthAt = (s: number): number => Math.max(0.1 * W, W * Math.pow(1 - clamp(s / L, 0, 1), 0.9));
+    this.count('bracts');
+    return {
+      level: 2,
+      line,
+      sStart,
+      profile: (s, j, N) => cupPoint(N, j, widthAt(s), 0.1 * W, 0.6),
+      radius: (s) => 0.5 * widthAt(s),
+      round: false,
+      extra: [0.5 * L, 0.8 * L],
+      spacing: Math.max(0.004, 0.35 * L),
+      children: [],
+      wind: () => ({ height: 0, limb: base.limb, phase: base.phase, detail: STILL_DETAIL }),
+      pivot: base.pivot,
+      r0: 0.5 * W,
+      collarRings: 0,
+    };
+  }
+
+  /**
+   * One flower: pedicel → perianth → exserted stamens (or, for a bell, the wall
+   * folding back up inside the open mouth). Tubes (aloes) are slightly
+   * inflated at the base and narrow to a six-lobed mouth; funnels (agaves)
+   * flare, with a bundle of long stamens tipped by anthers; bells (yuccas) are
+   * six-ribbed and really open; buds are short closed spindles.
+   */
+  private makeFlower(exit: Exit, base: WindBase, kind: FlowerShape, droop: number, sizeF: number, terminal: boolean): Organ {
+    const p = this.p;
+    const rf = Math.max(0.0005, p.flowerRadius * (kind === 'bud' ? 0.8 : 1) * (1 + 0.06 * this.detailRng.uniform()));
+    const len = Math.max(0.002, p.flowerLength * sizeF * (1 + 0.1 * this.detailRng.uniform()));
+    // A terminal flower continues the axis from its (already narrowed) tip ring: the pedicel matches it.
+    const rp = terminal ? Math.max(0.0003, 0.5 * exit.size) : Math.max(0.0003, Math.min(0.3 * rf, 0.3 * exit.size));
+    const pedF = kind === 'bell' ? 0.55 : kind === 'funnel' ? 0.2 : kind === 'bud' ? 0.25 : 0.35;
+    const Lp = terminal ? Math.max(0.004, 0.4 * pedF * len) : Math.max(1.4 * exit.size, pedF * len);
+    const isBell = kind === 'bell';
+    const stamens = kind === 'tube' || kind === 'funnel' ? Math.max(0, p.stamens) * len : 0;
+    const Lin = isBell ? 0.4 * len : 0;
+    const Lm = Lp + len;
+    const L = Lm + Lin + stamens;
+    // The pedicel leaves along the surface normal and bends under gravity until the flower hangs (or
+    // points up) at `droop` from the horizontal, whatever side of the branch it left from.
+    const el = Math.asin(clamp(exit.normal.y, -1, 1));
+    // A terminal flower carries on from the tip, nodding halfway towards its droop; buds carry straight on.
+    const bend = terminal ? (kind === 'bud' ? 0 : clamp(0.5 * (el + droop), -1.2, 1.2)) : clamp(el + droop + 0.1 * this.detailRng.uniform(), -2.4, 2.4);
+    // A little scatter in where each pedicel points, so dense racemes do not read as a lattice.
+    const dir0 = terminal ? exit.dir : normalize(rotateAxis(exit.normal, exit.dir, 0.2 * this.detailRng.uniform()));
+    let right0 = projectOnPlane(cross(UP, dir0), dir0);
+    right0 = lengthSq(right0) < 1e-12 ? anyPerpendicular(dir0) : normalize(right0);
+    const tP = Lp / L;
+    const line = growLine(exit.pos, dir0, right0, L, 10, (t0, t1) => ({ gravity: bend * (smooth(t1 / tP) - smooth(t0 / tP)) }));
+    const sStart = terminal ? Math.min(0.5 * Lp, Math.max(0.002, 0.3 * exit.size)) : Math.min(0.3 * Lp, Math.max(this.collarLen(rp, 1.5), 0.3 * exit.size));
+    const perianth = (t: number): number => {
+      switch (kind) {
+        case 'tube':
+          return rf * (0.78 + 0.22 * Math.sin(Math.PI * Math.pow(t, 0.75))) * (1 - 0.12 * smooth((t - 0.7) / 0.3));
+        case 'funnel':
+          return rf * (0.3 + 0.7 * Math.pow(t, 1.4));
+        case 'bell':
+          return rf * (0.3 + 0.7 * Math.sin(0.5 * Math.PI * Math.min(1, t / 0.78))) * (1 - 0.12 * smooth((t - 0.78) / 0.22));
+        default:
+          return rf * 0.85 * (0.45 + 0.55 * Math.sin(Math.PI * Math.pow(t, 0.9)));
+      }
+    };
+    const rad = (s: number): number => {
+      if (s < Lp) return rp * (1 + 0.3 * smooth((s - (Lp - 0.3 * len)) / (0.3 * len)));
+      if (s <= Lm) return Math.max(1.3 * rp, perianth((s - Lp) / len));
+      if (isBell) return lerp1(0.82 * perianth(1), 0.25 * rf, smooth((s - Lm) / Lin));
+      // Stamens: a bundle of filaments ending in anthers.
+      const u = (s - Lm) / Math.max(1e-6, stamens);
+      return rf * (u < 0.82 ? 0.14 : lerp1(0.14, 0.3, Math.sin(Math.PI * clamp((u - 0.82) / 0.18, 0, 1))));
+    };
+    const ribs = kind === 'tube' ? { from: 0.7, depth: 0.12 } : kind === 'funnel' ? { from: 0.45, depth: 0.3 } : kind === 'bell' ? { from: 0.35, depth: 0.22 } : { from: 2, depth: 0 };
+    this.count(kind === 'bud' ? 'buds' : 'flowers');
+    const extra: number[] = [Lp];
+    for (let k = 1; k <= 6; k++) extra.push(Lp + (len * k) / 7);
+    if (isBell) for (let k = 0; k < 3; k++) extra.push(Lm + (Lin * k) / 3);
+    if (stamens > 0) extra.push(Lm, Lm + 0.5 * stamens, Lm + 0.82 * stamens, Lm + 0.91 * stamens);
+    // Refinement: 4/6-vertex pedicel → 8/12-vertex corolla; wide bells refine twice (→ 24).
+    const refineAt = clamp(Lp - 0.35 * len, sStart + 0.35 * (Lp - sStart), Lp - 0.002);
+    const refines: number[] = [];
+    if (!terminal) {
+      if (refineAt - sStart > 0.006 && rf > 0.009) refines.push(0.5 * (sStart + refineAt));
+      refines.push(refineAt);
+    }
     return {
       level: 2,
       line,
       sStart,
       profile: (s, j, N) => {
         const rr = rad(s);
-        const th = (TAU * j) / N;
-        return { x: rr * Math.cos(th), y: rr * Math.sin(th) };
+        if (s <= Lp) {
+          const th = (TAU * j) / N;
+          return { x: rr * Math.cos(th), y: rr * Math.sin(th) };
+        }
+        if (s <= Lm) {
+          const t = (s - Lp) / len;
+          return ribbedPoint(N, j, rr, 6, ribs.depth * smooth((t - ribs.from) / Math.max(1e-6, 1 - ribs.from)), 1);
+        }
+        if (isBell) {
+          // Inside the bell: the ring centre keeps advancing along the line, the surface goes back in.
+          const pt = ribbedPoint(N, j, rr, 6, 0.5 * ribs.depth, 1);
+          return { x: pt.x, y: pt.y, z: -2 * (s - Lm) };
+        }
+        return ribbedPoint(N, j, rr, 3, 0.45, 0.7);
       },
       radius: rad,
       round: true,
-      extra: [sStart + 0.35 * (L - sStart), sStart + 0.7 * (L - sStart)],
-      spacing: L,
+      extra,
+      spacing: Math.max(0.3 * Lp, 0.0015),
+      refine: refines.length ? refines : undefined,
       children: [],
       wind: () => ({ height: 0, limb: base.limb, phase: base.phase, detail: 0.2 * this.flutter }),
       pivot: base.pivot,
-      r0: rf,
+      r0: rp,
       collarRings: 0,
     };
   }

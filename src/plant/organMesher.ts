@@ -79,6 +79,13 @@ export interface Attachment {
    * away from the centreline.
    */
   normalHint?: V3;
+  /**
+   * Measure `az` in the frame of the parent's own centreline instead of the
+   * ring frame the mesher fits to the parent's window (round organs are
+   * rotated to face their window): for children that must sit on the physical
+   * underside or top of a branch (pendent bells, upturned funnels).
+   */
+  azFrame?: 'line';
   // Filled in by the planner.
   j0: number;
   row0: number;
@@ -133,6 +140,12 @@ export interface Organ {
    * Windows are never planned across a refinement station.
    */
   refine?: number[];
+  /**
+   * Terminal continuation: instead of capping the tip, the organ hands its
+   * last ring to this child as its base loop (the rosette stem of an agave
+   * becoming the peduncle). The exit is the tip frame.
+   */
+  continuation?: (exit: Exit) => Organ;
 }
 
 export interface Ring {
@@ -443,6 +456,8 @@ export abstract class OrganMesher {
       if (Math.abs(ph) > 1e-6) {
         const rs = o.line.rights;
         for (let i = 0; i < rs.length; i++) rs[i] = rotateAxis(rs[i], o.line.dirs[i], ph);
+        // Children placed in the centreline frame keep their physical azimuth.
+        for (const c of o.children) if (c.azFrame === 'line') c.az -= ph;
       }
     }
 
@@ -603,7 +618,16 @@ export abstract class OrganMesher {
         mesh.addQuad(a[j], a[j1], b[j1], b[j], [j / N, va, (j + 1) / N, va, (j + 1) / N, vb, j / N, vb]);
       }
     }
-    this.cap(rings[K - 1].idx);
+    if (o.continuation) {
+      // The tip ring is the base loop of the continuation (no cap).
+      const last = rings[K - 1];
+      const f = o.line.at(L);
+      const tipExit: Exit = { pos: f.pos, normal: f.dir, dir: f.dir, size: 2 * Math.max(1e-4, o.radius(L)), N: last.idx.length };
+      const next = o.continuation(tipExit);
+      this.meshTube(next, last.idx, tipExit, depth + 1);
+    } else {
+      this.cap(rings[K - 1].idx);
+    }
 
     // ---- Children.
     for (const c of rows) {

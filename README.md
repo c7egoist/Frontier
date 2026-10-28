@@ -111,11 +111,25 @@ channelled leaves, `bladePoint` for grass-like blades) and a list of **attachmen
 * **Wind.** `finish(sway)` normalises the height attribute by the plant height and scales it by the
   species' `sway`, so a saguaro barely moves while a tomato bush sways; `limb` / `pivot` / `phase`
   run per arm, pad or leaf.
+* **Inflorescences.** The flower stalk of an agave, yucca or aloe is a real peduncle: a
+  *terminal* one **continues the rosette stem** (the stem's tip ring is handed on as the stalk's
+  base loop — `Organ.continuation` — so the bud narrows into the stalk instead of being capped), a
+  *lateral* one leaves a 3 × 2 window under the crown. Along it sit spiral bracts, the branches of
+  a **panicle** (agave candelabra with upturned arms and flat clusters of funnels with exserted
+  stamens; yucca panicle hung with open six-ribbed bells) or **candelabra** (aloe: a whorl of erect
+  racemes) and, on a **raceme**, the flowers themselves — pendent tubes with a six-lobed mouth,
+  buds in a tapering cone at the top, a terminal flower or bud continuing every axis. Branches
+  double their vertex count where the flowers begin; pendent flowers hang only from the underside
+  of a branch and upturned ones rise only from its top (`Attachment.azFrame: 'line'` keeps their
+  azimuth physical on a ring frame the mesher has rotated). Foxtail agave arches its raceme over.
 
 Succulent presets: Saguaro, Cardón, Organ Pipe, San Pedro, Golden Barrel, Fishhook Barrel,
 Pincushion, Prickly Pear (obovate pads leaning out of the parent plane, tunas along the rims),
-Teddy-Bear Cholla, Candelabra Tree, Quiver Tree, Century Plant, Blue Agave, Artichoke Agave,
-Foxtail Agave, Queen Victoria Agave, Spanish Dagger, Bitter Aloe, Aloe Vera.
+Teddy-Bear Cholla, Candelabra Tree, Quiver Tree, Century Plant (6 m panicle), Blue Agave,
+Artichoke Agave, Foxtail Agave (arching raceme), Queen Victoria Agave, Spanish Dagger (panicle of
+bells), Bitter Aloe (candelabra of racemes), Aloe Vera (lateral raceme). Century Plant, Foxtail
+Agave, Spanish Dagger, Bitter Aloe and Aloe Vera ship in flower; the other agaves have their
+inflorescence configured and switch it on from the Flower stalk section.
 
 ### Carnivorous plants
 

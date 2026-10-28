@@ -244,6 +244,56 @@ describe('welded succulent (cactus) is a single closed manifold', () => {
     expect(report.components).toBe(1);
   });
 
+  it('inflorescences are welded organs: peduncle, branches, bracts, flowers and buds', () => {
+    const expectStalk = (name: string, seed: number) => {
+      const preset = SUCCULENT_PRESETS.find((c) => c.name === name)!;
+      const sp = { ...DEFAULT_SUCCULENT, ...preset.succulent, stalk: 1 };
+      const built = new SucculentMesher(sp, seed).build();
+      const report = validateTopology(built.mesh);
+      expect(report.closed && report.manifold).toBe(true);
+      expect(report.components).toBe(1);
+      expect(report.genus).toBe(0);
+      const c = built.stats.counts;
+      expect(c.stalk).toBe(1);
+      expect(c.bracts).toBe(sp.bracts);
+      expect(c.branches ?? 0).toBe(sp.inflorescence === 'raceme' ? 0 : sp.branches);
+      // At least four fifths of the requested flowers are placed (the top of a raceme is buds).
+      expect((c.flowers ?? 0) + (c.buds ?? 0)).toBeGreaterThan(0.8 * sp.flowers);
+      expect(built.stats.dropped).toBe(0);
+      return { sp, built };
+    };
+    // Terminal peduncles continue the stem: the stalk is the stem's continuation, not a window child,
+    // so the plant is taller than the crown by roughly the stalk height.
+    const century = expectStalk('Century Plant', 1);
+    expect(century.built.height).toBeGreaterThan(0.85 * (century.sp.height + century.sp.stalkHeight));
+    expectStalk('Spanish Dagger', 2);
+    expectStalk('Foxtail Agave', 1);
+    // Lateral ones leave a window below the crown.
+    const aloe = expectStalk('Bitter Aloe', 3);
+    expect(aloe.built.height).toBeLessThan(aloe.sp.height + aloe.sp.stalkHeight + 0.6 * aloe.sp.branchLength);
+    expectStalk('Aloe Vera', 1);
+    // Presets that ship without a stalk still build theirs when it is switched on.
+    expectStalk('Blue Agave', 1);
+    expectStalk('Queen Victoria Agave', 2);
+  });
+
+  it('a terminal continuation replaces the tip cap, a lateral stalk keeps it', () => {
+    const preset = SUCCULENT_PRESETS.find((c) => c.name === 'Aloe Vera')!;
+    const base = { ...DEFAULT_SUCCULENT, ...preset.succulent, stalk: 1, flowers: 0, bracts: 0 };
+    const lateral = new SucculentMesher({ ...base, stalkOrigin: 'lateral' }, 1).build();
+    const terminal = new SucculentMesher({ ...base, stalkOrigin: 'terminal' }, 1).build();
+    for (const b of [lateral, terminal]) {
+      const r = validateTopology(b.mesh);
+      expect(r.closed && r.manifold && r.components === 1 && r.genus === 0).toBe(true);
+      expect(b.stats.counts.stalk).toBe(1);
+    }
+    // The terminal stalk rises from the crown's very top, the lateral one from a window a few rows
+    // below it: a little lower, and the stem keeps its own cap (the mesh differs, the genus does not).
+    expect(terminal.height).toBeGreaterThan(lateral.height);
+    expect(terminal.height - lateral.height).toBeLessThan(0.3 * base.stalkHeight);
+    expect(terminal.mesh.quadCount).not.toBe(lateral.mesh.quadCount);
+  });
+
   it('succulent presets carry their kind through the shared pipeline', () => {
     const cacti = PRESETS.filter(isSucculent);
     expect(cacti.length).toBe(SUCCULENT_PRESETS.length);

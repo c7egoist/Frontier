@@ -8,12 +8,35 @@
  *   pad     – flattened stem segments (cladodes) chained from each other's
  *             rims, with areoles on the faces and fruits on the upper rim;
  *   rosette – a short stem bearing thick channelled leaves in a spiral, with
- *             marginal teeth and an optional lateral flower stalk.
+ *             marginal teeth and an optional inflorescence: a terminal
+ *             panicle or spike (agaves, yuccas) or a lateral raceme or
+ *             candelabra of racemes (aloes), with bracts, branches and
+ *             the flowers themselves (tubes, funnels or bells).
  * Lengths are metres, angles degrees.
  */
 
 export type SucculentForm = 'column' | 'pad' | 'rosette';
 export type SucculentBody = 'column' | 'barrel';
+/** Inflorescence: one dense raceme / spike, several erect racemes, or a branched panicle. */
+export type Inflorescence = 'raceme' | 'candelabra' | 'panicle';
+/** Where the flower stalk rises: the stem apex (agaves, yuccas) or a leaf axil (aloes). */
+export type StalkOrigin = 'terminal' | 'lateral';
+export type FlowerKind = 'tube' | 'funnel' | 'bell';
+
+export const INFLORESCENCE_NAMES: Record<Inflorescence, string> = {
+  raceme: 'Raceme / spike (aloe vera, foxtail agave)',
+  candelabra: 'Candelabra of racemes (bitter aloe)',
+  panicle: 'Branched panicle (agaves, yuccas)',
+};
+export const STALK_ORIGIN_NAMES: Record<StalkOrigin, string> = {
+  terminal: 'Terminal (agaves, yuccas)',
+  lateral: 'Lateral (aloes)',
+};
+export const FLOWER_KIND_NAMES: Record<FlowerKind, string> = {
+  tube: 'Tubular (aloes)',
+  funnel: 'Funnel with long stamens (agaves)',
+  bell: 'Pendent bell (yuccas)',
+};
 
 export const SUCCULENT_FORM_NAMES: Record<SucculentForm, string> = {
   column: 'Column / barrel',
@@ -168,16 +191,36 @@ export interface SucculentParams {
   /** Marginal teeth per edge (0 = entire margins). */
   teeth: number;
   toothLength: number;
-  /** Lateral flower stalk (aloes). */
+  // ---- Inflorescence (rosettes)
+  /** 1 = in flower, 0 = vegetative. */
   stalk: number;
+  inflorescence: Inflorescence;
+  stalkOrigin: StalkOrigin;
+  /** Length of the peduncle (the flower stalk) and its radius at the base; it tapers to a third. */
   stalkHeight: number;
   stalkRadius: number;
-  /** Tubular flowers on the upper part of the stalk. */
+  /** Arch of the peduncle under the weight of the flowers (the foxtail agave bends right over). */
+  stalkArch: number;
+  /** Scale-like bracts along the peduncle. */
+  bracts: number;
+  /** Panicle / candelabra: side branches, their length (the lowest of a panicle), angle from the peduncle and curvature (negative = rising). */
+  branches: number;
+  branchLength: number;
+  branchAngle: number;
+  branchCurve: number;
+  /** Fraction of the peduncle, from the top, that carries the branches. */
+  branchZone: number;
+  /** Flowers over the whole inflorescence, their shape and size. */
   flowers: number;
+  flowerKind: FlowerKind;
   flowerLength: number;
   flowerRadius: number;
-  /** Droop of the flowers from the horizontal. */
+  /** Droop of the open flowers from the horizontal; negative points up (agave funnels). */
   flowerDroop: number;
+  /** Exserted stamens as a fraction of the flower length (agaves ≈ 1.2, aloes ≈ 0.3, yuccas 0). */
+  stamens: number;
+  /** Fraction of a raceme (or of a branch) covered by flowers, from its tip. */
+  flowerZone: number;
 
   // ---- Resolution and wind
   /** Ring vertices per rib (3 or 4), or around a smooth stem (8–96). */
@@ -276,12 +319,24 @@ export const DEFAULT_SUCCULENT: SucculentParams = {
   teeth: 14,
   toothLength: 0.008,
   stalk: 0,
+  inflorescence: 'raceme',
+  stalkOrigin: 'lateral',
   stalkHeight: 0.9,
   stalkRadius: 0.012,
-  flowers: 80,
+  stalkArch: 0,
+  bracts: 8,
+  branches: 0,
+  branchLength: 0.4,
+  branchAngle: 45,
+  branchCurve: -20,
+  branchZone: 0.5,
+  flowers: 120,
+  flowerKind: 'tube',
   flowerLength: 0.035,
   flowerRadius: 0.004,
-  flowerDroop: 60,
+  flowerDroop: 70,
+  stamens: 0.3,
+  flowerZone: 0.4,
   sides: 4,
   ringAspect: 1,
   padSides: 20,
@@ -296,8 +351,13 @@ export function succulentHeight(p: SucculentParams): number {
   switch (p.form) {
     case 'pad':
       return Math.max(0.1, p.padLength * (1 + 0.8 * Math.max(0, p.padLevels - 1)));
-    case 'rosette':
-      return Math.max(0.1, p.height + p.leafLength * Math.cos((p.leafSpreadTop * Math.PI) / 180), p.stalk ? p.stalkHeight : 0);
+    case 'rosette': {
+      const crown = p.height + p.leafLength * Math.cos((p.leafSpreadTop * Math.PI) / 180);
+      // The peduncle rises from the crown (lateral) or the stem apex; a strongly arched one tops out lower.
+      const archF = p.stalkArch > 60 ? 0.6 : 0.95;
+      const stalkTop = p.stalk ? (p.stalkOrigin === 'terminal' ? p.height : 0.8 * p.height) + archF * p.stalkHeight : 0;
+      return Math.max(0.1, crown, stalkTop);
+    }
     default:
       return Math.max(0.1, p.height * (1 + (p.armLevels > 0 && p.arms > 0 ? Math.max(0, p.armLength * p.armLevels * 0.5) : 0)));
   }
@@ -704,7 +764,25 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       leafTipSpine: 0.04,
       teeth: 14,
       toothLength: 0.009,
-      stalk: 0,
+      stalk: 1,
+      inflorescence: 'panicle',
+      stalkOrigin: 'terminal',
+      stalkHeight: 6,
+      stalkRadius: 0.065,
+      stalkArch: 4,
+      bracts: 22,
+      branches: 18,
+      branchLength: 0.9,
+      branchAngle: 58,
+      branchCurve: -38,
+      branchZone: 0.48,
+      flowers: 900,
+      flowerKind: 'funnel',
+      flowerLength: 0.07,
+      flowerRadius: 0.009,
+      flowerDroop: -55,
+      stamens: 1.1,
+      flowerZone: 0.28,
       leafSides: 16,
       sides: 24,
       flex: 0.25,
@@ -734,6 +812,24 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       teeth: 22,
       toothLength: 0.004,
       stalk: 0,
+      inflorescence: 'panicle',
+      stalkOrigin: 'terminal',
+      stalkHeight: 5,
+      stalkRadius: 0.045,
+      stalkArch: 3,
+      bracts: 20,
+      branches: 22,
+      branchLength: 0.6,
+      branchAngle: 55,
+      branchCurve: -35,
+      branchZone: 0.45,
+      flowers: 600,
+      flowerKind: 'funnel',
+      flowerLength: 0.065,
+      flowerRadius: 0.008,
+      flowerDroop: -55,
+      stamens: 1.1,
+      flowerZone: 0.28,
       leafSides: 12,
       sides: 36,
       flex: 0.2,
@@ -763,6 +859,24 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       teeth: 9,
       toothLength: 0.004,
       stalk: 0,
+      inflorescence: 'panicle',
+      stalkOrigin: 'terminal',
+      stalkHeight: 3.6,
+      stalkRadius: 0.04,
+      stalkArch: 2,
+      bracts: 18,
+      branches: 20,
+      branchLength: 0.45,
+      branchAngle: 62,
+      branchCurve: -45,
+      branchZone: 0.45,
+      flowers: 700,
+      flowerKind: 'funnel',
+      flowerLength: 0.06,
+      flowerRadius: 0.008,
+      flowerDroop: -60,
+      stamens: 1.0,
+      flowerZone: 0.3,
       leafSides: 12,
       sides: 36,
       flex: 0.15,
@@ -793,7 +907,21 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       leafTipSpine: 0,
       leafZone: 0.25,
       teeth: 0,
-      stalk: 0,
+      stalk: 1,
+      inflorescence: 'raceme',
+      stalkOrigin: 'terminal',
+      stalkHeight: 2.8,
+      stalkRadius: 0.03,
+      stalkArch: 150,
+      bracts: 14,
+      branches: 0,
+      flowers: 1100,
+      flowerKind: 'funnel',
+      flowerLength: 0.04,
+      flowerRadius: 0.0045,
+      flowerDroop: -10,
+      stamens: 0.9,
+      flowerZone: 0.66,
       leafSides: 12,
       sides: 24,
       flex: 0.35,
@@ -822,6 +950,20 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       leafTipSpine: 0.012,
       teeth: 0,
       stalk: 0,
+      inflorescence: 'raceme',
+      stalkOrigin: 'terminal',
+      stalkHeight: 3.2,
+      stalkRadius: 0.018,
+      stalkArch: 6,
+      bracts: 16,
+      branches: 0,
+      flowers: 500,
+      flowerKind: 'funnel',
+      flowerLength: 0.04,
+      flowerRadius: 0.005,
+      flowerDroop: -30,
+      stamens: 0.8,
+      flowerZone: 0.6,
       leafSides: 8,
       sides: 40,
       flex: 0.1,
@@ -853,12 +995,24 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       leafZone: 0.35,
       teeth: 0,
       stalk: 1,
-      stalkHeight: 1.1,
-      stalkRadius: 0.02,
-      flowers: 120,
-      flowerLength: 0.06,
-      flowerRadius: 0.016,
-      flowerDroop: 75,
+      inflorescence: 'panicle',
+      stalkOrigin: 'terminal',
+      stalkHeight: 1.3,
+      stalkRadius: 0.022,
+      stalkArch: 3,
+      bracts: 12,
+      branches: 26,
+      branchLength: 0.3,
+      branchAngle: 48,
+      branchCurve: 8,
+      branchZone: 0.55,
+      flowers: 320,
+      flowerKind: 'bell',
+      flowerLength: 0.045,
+      flowerRadius: 0.015,
+      flowerDroop: 82,
+      stamens: 0,
+      flowerZone: 0.75,
       leafSides: 8,
       sides: 36,
       flex: 0.2,
@@ -885,12 +1039,24 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       teeth: 12,
       toothLength: 0.005,
       stalk: 1,
+      inflorescence: 'candelabra',
+      stalkOrigin: 'lateral',
       stalkHeight: 1.0,
-      stalkRadius: 0.012,
-      flowers: 110,
-      flowerLength: 0.035,
-      flowerRadius: 0.004,
-      flowerDroop: 65,
+      stalkRadius: 0.02,
+      stalkArch: 0,
+      bracts: 6,
+      branches: 6,
+      branchLength: 0.72,
+      branchAngle: 30,
+      branchCurve: -30,
+      branchZone: 0.2,
+      flowers: 900,
+      flowerKind: 'tube',
+      flowerLength: 0.033,
+      flowerRadius: 0.0042,
+      flowerDroop: 72,
+      stamens: 0.3,
+      flowerZone: 0.5,
       leafSides: 12,
       sides: 24,
       flex: 0.3,
@@ -920,12 +1086,20 @@ export const SUCCULENT_PRESETS: { name: string; succulent: Partial<SucculentPara
       teeth: 10,
       toothLength: 0.003,
       stalk: 1,
-      stalkHeight: 0.75,
-      stalkRadius: 0.008,
-      flowers: 100,
+      inflorescence: 'raceme',
+      stalkOrigin: 'lateral',
+      stalkHeight: 0.8,
+      stalkRadius: 0.009,
+      stalkArch: 0,
+      bracts: 8,
+      branches: 0,
+      flowers: 110,
+      flowerKind: 'tube',
       flowerLength: 0.03,
-      flowerRadius: 0.0035,
-      flowerDroop: 70,
+      flowerRadius: 0.0038,
+      flowerDroop: 75,
+      stamens: 0.25,
+      flowerZone: 0.36,
       leafSides: 10,
       sides: 24,
       flex: 0.3,
