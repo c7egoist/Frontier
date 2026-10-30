@@ -332,8 +332,8 @@ const ed = $('editor'), ectx = ed.getContext('2d');
 const ROLE_COLORS = { lug: '#38c46d', groove: '#e5423f', sipe: '#9aa4ff' };
 // editor mapping: canvas x = across (v), canvas y = around (u, 3 tiles stacked)
 function edGeom() {
-  const W = ed.width, H = ed.height, tileH = H / 3;
-  return { W, H, tileH, tileTop: tileH, toXY: (u, v) => [(v + 1) / 2 * W, tileTop + u * tileH], toUV: (px, py) => { let u = (py - tileTop) / tileH; u = ((u % 1) + 1) % 1; return [u, px / W * 2 - 1]; } };
+  const W = ed.width, H = ed.height, tileH = H / 3, tileTop = tileH;
+  return { W, H, tileH, tileTop, toXY: (u, v) => [(v + 1) / 2 * W, tileTop + u * tileH], toUV: (px, py) => { let u = (py - tileTop) / tileH; u = ((u % 1) + 1) % 1; return [u, px / W * 2 - 1]; } };
 }
 function shapeMMPoints(s) { // for hit-testing in (u,v) space we test polygon directly in uv
   let pts = s.points;
