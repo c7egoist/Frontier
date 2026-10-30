@@ -1,0 +1,591 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Frontier Tyre Quad Editor — SVG/shape → clean-quad tread, arrayed on the tyre</title>
+<style>
+  :root{--bg:#0c0d0f;--card:#17181b;--card2:#1e2024;--card3:#25272c;--line:rgba(255,255,255,.07);--txt:#e6e7ea;--mut:#8a8d94;--dim:#5c5f66;--green:#38c46d;--yellow:#d6c93a;--red:#e5423f;--orange:#f0a04b;--blue:#4fc3f7;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;font-size:13px}
+  *{box-sizing:border-box} html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);overflow:hidden}
+  #app{display:grid;grid-template-columns:302px 1fr 356px;grid-template-rows:52px 1fr;height:100vh;gap:10px;padding:10px}
+  header{grid-column:1/4;display:flex;align-items:center;gap:12px;padding:0 6px}
+  header .logo{width:32px;height:32px;border-radius:50%;background:conic-gradient(from 210deg,#fff 0 12%,transparent 12% 25%,#fff 25% 37%,transparent 37% 50%,#fff 50% 62%,transparent 62% 75%,#fff 75% 87%,transparent 87%);-webkit-mask:radial-gradient(circle,transparent 30%,#000 32%);mask:radial-gradient(circle,transparent 30%,#000 32%)}
+  header h1{font-size:16px;font-weight:500;margin:0} header .sub{color:var(--mut);font-size:12px}
+  header .right{margin-left:auto;display:flex;gap:6px;align-items:center}
+  aside{display:flex;flex-direction:column;gap:10px;overflow-y:auto;scrollbar-width:thin;min-height:0}
+  .card{background:var(--card);border-radius:18px;padding:14px 16px 12px;flex:0 0 auto}
+  .card h2{font-size:14px;font-weight:500;margin:0 0 10px;display:flex;gap:8px;align-items:center}
+  .card h2::before{content:"";width:3px;height:15px;border-radius:2px;background:var(--bar,var(--green))}
+  .card h2 .r{margin-left:auto;color:var(--mut);font-size:11.5px;font-weight:400}
+  .row{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .row label{flex:0 0 108px;color:var(--mut);font-size:12.5px;white-space:nowrap}
+  .row .val{flex:0 0 52px;text-align:right;font-variant-numeric:tabular-nums}
+  .row input[type=range]{flex:1;min-width:0;accent-color:#fff}
+  .row select,.row input[type=text]{flex:1;min-width:0;background:var(--card2);color:var(--txt);border:1px solid transparent;border-radius:999px;padding:6px 11px;font:inherit;font-size:12.5px;outline:0}
+  button{background:var(--card2);color:var(--txt);border:1px solid transparent;border-radius:999px;padding:7px 13px;font:inherit;font-size:12.5px;cursor:pointer}
+  button:hover{background:var(--card3)} button.primary{background:#fff;color:#111} button.on{background:#fff;color:#111}
+  button.small{padding:4px 10px;font-size:11.5px} button.danger:hover{background:var(--red);color:#fff}
+  .btns{display:flex;flex-wrap:wrap;gap:5px;margin:7px 0 2px}
+  .hint{color:var(--mut);font-size:11.5px;line-height:1.5} .hint b{color:var(--txt);font-weight:500}
+  code{background:var(--card2);padding:1px 5px;border-radius:5px;font-size:11px}
+  #view{position:relative;border-radius:18px;overflow:hidden;background:radial-gradient(900px 500px at 60% 0%,#191b1f,#0b0c0e);min-height:0}
+  #view canvas{display:block}
+  .float{position:absolute;background:rgba(23,24,27,.82);backdrop-filter:blur(12px);border-radius:16px;padding:11px 14px}
+  #badge{left:14px;top:14px} #badge .name{font-size:22px;color:#fff} #badge .size{color:var(--mut);font-size:12.5px}
+  #statsBox{right:14px;top:14px;min-width:196px;font-size:12px}
+  #statsBox .grid{display:grid;grid-template-columns:1fr auto;gap:2px 12px} #statsBox .k{color:var(--mut)} #statsBox .v{text-align:right;font-variant-numeric:tabular-nums}
+  .good{color:var(--green)} .warn{color:var(--yellow)} .bad{color:var(--red)}
+  #viewBtns{left:14px;bottom:14px;display:flex;gap:4px;padding:6px}
+  #buildState{right:14px;bottom:14px;color:var(--mut);font-size:12px}
+  #editor{width:100%;height:352px;display:block;background:#101114;border-radius:14px;cursor:crosshair;touch-action:none}
+  .tools{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0}
+  .tools button.on{background:#fff;color:#111}
+  #shapeList{display:flex;flex-direction:column;gap:4px;max-height:190px;overflow-y:auto;scrollbar-width:thin}
+  .shape{display:flex;align-items:center;gap:7px;background:var(--card2);border:1px solid transparent;border-radius:11px;padding:6px 8px;cursor:pointer;font-size:12.5px}
+  .shape.sel{border-color:#fff} .shape .sw{width:4px;height:16px;border-radius:2px;flex:0 0 4px}
+  .shape .nm{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+  .shape small{color:var(--mut)} .shape button{padding:0 5px;background:transparent;color:var(--mut)} .shape button:hover{color:#fff}
+  #presets{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .preset{background:var(--card2);border-radius:13px;padding:8px 10px;cursor:pointer;border:1px solid transparent}
+  .preset:hover{background:var(--card3)} .preset.active{border-color:#fff}
+  .preset .n{font-size:12.5px;color:#fff} .preset .t{color:var(--mut);font-size:10px;text-transform:uppercase;letter-spacing:.08em}
+  input[type=file]{font-size:11.5px;color:var(--mut);max-width:150px}
+  #toast{position:absolute;left:50%;bottom:18px;transform:translateX(-50%);background:#fff;color:#111;padding:7px 15px;border-radius:999px;opacity:0;transition:.3s;pointer-events:none;font-size:12.5px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="logo"></div>
+    <div><h1>Tyre Quad Editor</h1><div class="sub">Draw / import vector shapes → real all-quad tread mesh → arrayed &amp; wrapped on the tyre. No heightmaps.</div></div>
+    <div class="right">
+      <button id="undoBtn" title="Ctrl+Z">Undo</button>
+      <button id="rebuildBtn" class="primary">Rebuild mesh</button>
+    </div>
+  </header>
+
+  <aside id="left">
+    <div class="card" style="--bar:var(--green)"><h2>Tread presets <span class="r">shape-based</span></h2>
+      <div id="presets"></div>
+      <div class="hint" style="margin-top:8px">These are built from the same editable shapes you draw — including the asymmetric off-road and UHP patterns that a heightmap generator mangles. Load one, then look at its shape list.</div>
+    </div>
+
+    <div class="card" style="--bar:var(--yellow)"><h2>Tyre</h2><div id="tyreParams"></div></div>
+
+    <div class="card" style="--bar:var(--orange)"><h2>Array around tyre</h2>
+      <div id="arrayParams"></div>
+      <div class="hint">One tile repeats around the circumference and is <b>welded at the seam</b>. Alternate-mirror / flip modes are how real alternating off-road patterns are made.</div>
+    </div>
+
+    <div class="card" style="--bar:var(--red)"><h2>Quad meshing</h2>
+      <div id="meshParams"></div>
+      <div class="hint">Shape edges become mesh constraints; each region (lug top, groove floor, sipe) is meshed, split to quads and smoothed. Lower detail = finer, cleaner, slower.</div>
+    </div>
+
+    <div class="card" style="--bar:var(--blue)"><h2>Deformation test</h2>
+      <div id="deformParams"></div>
+      <div class="hint">This moves the actual quad vertices (contact-patch load, twist, inflation) — the reason you wanted clean quads instead of a displaced heightmap grid.</div>
+    </div>
+
+    <div class="card" style="--bar:var(--green)"><h2>Export / import</h2>
+      <div class="btns">
+        <button id="expOBJ" class="primary">OBJ (true quads)</button>
+        <button id="expJSON">Pattern JSON</button>
+        <button id="expSVG">Tile SVG</button>
+      </div>
+      <div class="row"><label>Import JSON</label><input type="file" id="impJSON" accept=".json"></div>
+      <div class="row"><label>Import SVG</label><input type="file" id="impSVG" accept=".svg"></div>
+      <div class="hint">OBJ faces are written as 4-vertex <code>f a b c d</code> — open it in Blender and check the topology yourself. (GLB/glTF would force triangles, so it is deliberately not offered as the "quad" export.)</div>
+    </div>
+  </aside>
+
+  <main id="view">
+    <div class="float" id="badge"><div class="name" id="badgeName">—</div><div class="size" id="badgeSize">—</div></div>
+    <div class="float" id="statsBox"><div class="grid" id="statsGrid"></div></div>
+    <div class="float" id="viewBtns">
+      <button class="small" id="wireBtn">Quad wireframe</button>
+      <button class="small" id="rimBtn">Rim</button>
+      <button class="small" id="spinBtn">Spin</button>
+      <button class="small" data-view="iso">Iso</button>
+      <button class="small" data-view="side">Side</button>
+      <button class="small" data-view="top">Tread</button>
+    </div>
+    <div class="float" id="buildState">ready</div>
+    <div id="toast"></div>
+  </main>
+
+  <aside id="right">
+    <div class="card" style="--bar:var(--yellow)"><h2>Shape editor <span class="r">one tread tile</span></h2>
+      <canvas id="editor" width="640" height="704"></canvas>
+      <div class="tools" id="tools">
+        <button data-tool="select" class="on">Select / move</button>
+        <button data-tool="pen">Pen</button>
+        <button data-tool="rect">Rect</button>
+        <button data-tool="ellipse">Ellipse</button>
+        <button data-tool="chevron">Chevron</button>
+        <button data-tool="lug">Lug block</button>
+        <button data-tool="bar">Groove bar</button>
+      </div>
+      <div class="hint" id="toolHint">Drag a shape to move it, drag its white points to reshape. <b>Pen:</b> click to add points, double-click / Enter to close, Esc to cancel. The tile repeats above/below (around the tyre) and left/right is across the tread. Shapes may cross the tile edge — they wrap.</div>
+      <div class="row"><label>Snap to grid</label><input type="checkbox" id="snapChk" checked></div>
+    </div>
+
+    <div class="card" style="--bar:var(--orange)"><h2>Shapes in tile <span class="r" id="shapeCount"></span></h2>
+      <div id="shapeList"></div>
+      <div class="btns">
+        <button id="mirrorYBtn" class="small">Mirror selected ↔ across</button>
+        <button id="mirrorXBtn" class="small">Flip selected ↕ around</button>
+        <button id="symBtn" class="small">Symmetrise tile (mirror all)</button>
+      </div>
+      <div class="hint">Order matters where shapes overlap: the shape lower in this list wins (drawn last = cut/applied last).</div>
+    </div>
+
+    <div class="card" style="--bar:var(--red)"><h2>Selected shape</h2><div id="shapeProps" class="hint">Select a shape in the list or editor.</div></div>
+  </aside>
+</div>
+
+<script type="importmap">{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { buildTyreMesh, validateQuadMesh, parseSVG, shapesToSVG, toOBJ, PRESETS, makeShape, chaikin } from './quad-core.mjs';
+
+// ------------------------------------------------------------------ state
+const S = {
+  name: 'Trail Lock A/T', type: 'Off-road',
+  tyre: { width: 285, aspect: 70, rim: 17, treadDepth: 15, crown: 3.2, shoulder: 12, treadFrac: 0.91 },
+  repeats: 0,            // 0 = auto from design pitch
+  designPitch: 64,
+  mode: 'mirrorAlt',
+  edge: 10, bevel: 1.6,
+  load: 0, twist: 0, pressure: 0,
+  shapes: [], sel: -1, tool: 'select', snap: true,
+  wire: false, rim: true, spin: false,
+};
+let built = null, history = [];
+const $ = id => document.getElementById(id);
+const toast = m => { const t = $('toast'); t.textContent = m; t.style.opacity = 1; setTimeout(() => t.style.opacity = 0, 2200); };
+const pushHistory = () => { history.push(JSON.stringify(S.shapes)); if (history.length > 40) history.shift(); };
+
+// ------------------------------------------------------------------ three
+const view = $('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); view.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 1, 5000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x222226, 0.5));
+const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(300, 500, 200); scene.add(key);
+const group = new THREE.Group(); scene.add(group);
+let treadMesh = null, sideMesh = null, rimMesh = null, wireLines = null, basePos = new Map();
+
+function quadGeometry(mesh, colorFn) {
+  const pos = new Float32Array(mesh.positions.flat());
+  const col = new Float32Array(mesh.positions.length * 3);
+  mesh.positions.forEach((p, i) => { const c = colorFn(p, i); col.set(c, i * 3); });
+  const idx = [];
+  for (const q of mesh.quads) idx.push(q[0], q[1], q[2], q[0], q[2], q[3]); // GPU rasterisation only; topology stays quad
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(idx); g.computeVertexNormals();
+  return g;
+}
+function quadEdges(mesh) {
+  const seen = new Set(), pts = [];
+  const P = mesh.positions;
+  for (const q of mesh.quads) for (let i = 0; i < 4; i++) {
+    const a = q[i], b = q[(i + 1) % 4], k = a < b ? a + '_' + b : b + '_' + a;
+    if (seen.has(k)) continue; seen.add(k); pts.push(...P[a], ...P[b]);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return g;
+}
+const rubber = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, metalness: 0.0, side: THREE.DoubleSide });
+const rimMat = new THREE.MeshStandardMaterial({ color: 0xb9bfc6, roughness: 0.32, metalness: 0.85, side: THREE.DoubleSide });
+
+function rebuild() {
+  $('buildState').textContent = 'meshing… (constrained triangulation → quads)';
+  setTimeout(() => {
+    const t0 = performance.now();
+    try {
+      built = buildTyreMesh(S.shapes, S.tyre, { repeats: S.repeats > 0 ? S.repeats : undefined, pitch: S.designPitch, mode: S.mode, edge: S.edge, bevel: S.bevel });
+    } catch (e) { $('buildState').textContent = 'mesh failed: ' + e.message; console.error(e); return; }
+    for (const m of [treadMesh, sideMesh, rimMesh, wireLines]) if (m) { group.remove(m); m.geometry.dispose(); }
+    basePos.clear();
+    const d = built.dims, depth = S.tyre.treadDepth;
+    const treadCol = p => { const r = Math.hypot(p[1], p[2]); const f = Math.max(0, Math.min(1, (r - (d.Rout - depth - 2)) / (depth + 2))); const c = 0.055 + f * 0.075; return [c, c, c * 1.04]; };
+    treadMesh = new THREE.Mesh(quadGeometry(built.tread, treadCol), rubber); group.add(treadMesh); basePos.set(treadMesh, built.tread.positions);
+    sideMesh = new THREE.Mesh(quadGeometry(built.sidewall, () => [0.045, 0.045, 0.048]), rubber); group.add(sideMesh); basePos.set(sideMesh, built.sidewall.positions);
+    rimMesh = new THREE.Mesh(quadGeometry(built.rim, () => [1, 1, 1]), rimMat); rimMesh.visible = S.rim; group.add(rimMesh);
+    wireLines = new THREE.LineSegments(quadEdges(built.tread), new THREE.LineBasicMaterial({ color: 0x38c46d, transparent: true, opacity: 0.55 }));
+    wireLines.visible = S.wire; group.add(wireLines);
+    applyDeform();
+    const st = built.tread.stats, ms = Math.round(performance.now() - t0);
+    $('buildState').textContent = `built in ${ms} ms · ${built.repeats} repeats · pitch ${built.pitch.toFixed(1)} mm`;
+    $('statsGrid').innerHTML = `
+      <span class="k">Faces</span><span class="v">${st.quads.toLocaleString()} quads</span>
+      <span class="k">Triangles in mesh</span><span class="v ${st.triangles ? 'bad' : 'good'}">${st.triangles}</span>
+      <span class="k">Vertices</span><span class="v">${st.vertices.toLocaleString()}</span>
+      <span class="k">Poor quads (&lt;25°)</span><span class="v ${st.poorQuads / st.quads < 0.08 ? 'good' : 'warn'}">${st.poorQuads} (${(100 * st.poorQuads / st.quads).toFixed(1)}%)</span>
+      <span class="k">Min quad angle</span><span class="v">${st.minQuadAngleDeg}°</span>
+      <span class="k">Extraordinary verts</span><span class="v">${st.extraordinaryVertices.toLocaleString()}</span>
+      <span class="k">Tile quads</span><span class="v">${built.tileStats.quads} (100% quad: ${built.tileStats.allQuads ? 'yes' : 'no'})</span>`;
+    $('badgeName').textContent = S.name;
+    $('badgeSize').textContent = `${S.tyre.width}/${S.tyre.aspect} R${S.tyre.rim} · ${S.type} · depth ${S.tyre.treadDepth}mm`;
+    drawEditor();
+  }, 30);
+}
+let rebuildTimer = null;
+const schedule = () => { clearTimeout(rebuildTimer); rebuildTimer = setTimeout(rebuild, 280); };
+
+function applyDeform() {
+  if (!built) return;
+  const d = built.dims;
+  for (const mesh of [treadMesh, sideMesh]) {
+    if (!mesh) continue;
+    const base = basePos.get(mesh), posAttr = mesh.geometry.getAttribute('position');
+    for (let i = 0; i < base.length; i++) {
+      let [x, y, z] = base[i];
+      const r = Math.hypot(y, z) || 1, ang = Math.atan2(z, y);
+      // pressure: uniform radial growth of the tread band
+      const grow = 1 + S.pressure * 0.015 * Math.max(0, (r - d.Rrim) / (d.Rout - d.Rrim));
+      y *= grow; z *= grow;
+      // twist about the axle, proportional to distance from centre plane
+      if (S.twist) { const a = S.twist * Math.PI / 180 * (x / (S.tyre.width / 2)) * 0.6, c = Math.cos(a), s = Math.sin(a); const yy = y * c - z * s, zz = y * s + z * c; y = yy; z = zz; }
+      // contact patch: flatten near the bottom (-Y), bulge the sidewalls there
+      if (S.load) {
+        let da = Math.atan2(Math.sin(ang + Math.PI / 2), Math.cos(ang + Math.PI / 2));
+        const w = Math.exp(-((da / 0.6) ** 2));
+        const sink = S.load * 26 * w * (r / d.Rout);
+        y -= sink * (y / r); z -= sink * (z / r); // radially toward the axle
+        x += Math.sign(x) * S.load * 5.5 * w;     // sidewall bulge at the patch
+      }
+      posAttr.setXYZ(i, x, y, z);
+    }
+    posAttr.needsUpdate = true; mesh.geometry.computeVertexNormals();
+  }
+  if (wireLines) wireLines.visible = S.wire && !S.load;
+}
+
+// ------------------------------------------------------------------ sliders
+function slider(parent, label, obj, key, min, max, step, fmt, after = schedule) {
+  const row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = `<label>${label}</label>`;
+  const input = document.createElement('input'); input.type = 'range'; input.min = min; input.max = max; input.step = step; input.value = obj[key];
+  const val = document.createElement('span'); val.className = 'val'; val.textContent = fmt(obj[key]);
+  input.oninput = () => { obj[key] = parseFloat(input.value); val.textContent = fmt(obj[key]); after(); };
+  row.append(input, val); parent.appendChild(row); return input;
+}
+function buildPanels() {
+  const tp = $('tyreParams'); tp.innerHTML = '';
+  slider(tp, 'Width (mm)', S.tyre, 'width', 165, 335, 5, v => v, () => { schedule(); drawEditor(); });
+  slider(tp, 'Aspect (%)', S.tyre, 'aspect', 25, 80, 1, v => v);
+  slider(tp, 'Rim (in)', S.tyre, 'rim', 13, 22, 1, v => v);
+  slider(tp, 'Tread depth', S.tyre, 'treadDepth', 3, 18, 0.5, v => v + 'mm', () => { S.shapes.forEach(s => { if (s.role !== 'sipe') s.depth = S.tyre.treadDepth; }); buildShapeProps(); schedule(); });
+  slider(tp, 'Crown (mm)', S.tyre, 'crown', 0, 5, 0.1, v => v.toFixed(1));
+  slider(tp, 'Shoulder (mm)', S.tyre, 'shoulder', 6, 30, 1, v => v);
+  const ap = $('arrayParams'); ap.innerHTML = '';
+  slider(ap, 'Design pitch', S, 'designPitch', 36, 110, 1, v => v + 'mm');
+  slider(ap, 'Repeats (0=auto)', S, 'repeats', 0, 60, 1, v => v || 'auto');
+  const mrow = document.createElement('div'); mrow.className = 'row'; mrow.innerHTML = '<label>Array mode</label>';
+  const msel = document.createElement('select');
+  msel.innerHTML = [['straight', 'Straight repeat'], ['mirrorAlt', 'Alternate mirror (across)'], ['flipAlt', 'Alternate flip (around)'], ['rotateAlt', 'Alternate 180° rotation']].map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+  msel.value = S.mode; msel.onchange = () => { S.mode = msel.value; schedule(); };
+  mrow.appendChild(msel); ap.appendChild(mrow);
+  const mp = $('meshParams'); mp.innerHTML = '';
+  slider(mp, 'Detail (edge mm)', S, 'edge', 5, 18, 0.5, v => v.toFixed(1));
+  slider(mp, 'Chamfer (mm)', S, 'bevel', 0, 3.5, 0.1, v => v.toFixed(1));
+  const dp = $('deformParams'); dp.innerHTML = '';
+  const deformOnly = () => applyDeform();
+  slider(dp, 'Contact load', S, 'load', 0, 1, 0.01, v => Math.round(v * 100) + '%', deformOnly);
+  slider(dp, 'Twist', S, 'twist', -30, 30, 0.5, v => v + '°', deformOnly);
+  slider(dp, 'Pressure', S, 'pressure', -1, 1, 0.01, v => (v > 0 ? '+' : '') + Math.round(v * 100) + '%', deformOnly);
+}
+
+// ------------------------------------------------------------------ presets
+function loadPreset(i, keepTyre = false) {
+  const p = PRESETS[i];
+  pushHistory();
+  S.name = p.name; S.type = p.type;
+  if (!keepTyre) Object.assign(S.tyre, p.tyre);
+  S.shapes = p.build(64, 200);
+  S.sel = -1;
+  document.querySelectorAll('.preset').forEach((el, j) => el.classList.toggle('active', j === i));
+  buildPanels(); refreshShapeUI(); rebuild();
+}
+function buildPresets() {
+  const box = $('presets'); box.innerHTML = '';
+  PRESETS.forEach((p, i) => {
+    const el = document.createElement('div'); el.className = 'preset';
+    el.innerHTML = `<div class="n">${p.name}</div><div class="t">${p.type}</div>`;
+    el.onclick = () => loadPreset(i); box.appendChild(el);
+  });
+}
+
+// ------------------------------------------------------------------ 2D editor
+const ed = $('editor'), ectx = ed.getContext('2d');
+const ROLE_COLORS = { lug: '#38c46d', groove: '#e5423f', sipe: '#9aa4ff' };
+// editor mapping: canvas x = across (v), canvas y = around (u, 3 tiles stacked)
+function edGeom() {
+  const W = ed.width, H = ed.height, tileH = H / 3;
+  return { W, H, tileH, tileTop: tileH, toXY: (u, v) => [(v + 1) / 2 * W, tileTop + u * tileH], toUV: (px, py) => { let u = (py - tileTop) / tileH; u = ((u % 1) + 1) % 1; return [u, px / W * 2 - 1]; } };
+}
+function shapeMMPoints(s) { // for hit-testing in (u,v) space we test polygon directly in uv
+  let pts = s.points;
+  if (s.smooth > 0) pts = chaikin(pts.map(p => [...p]), Math.min(3, s.smooth | 0));
+  return pts;
+}
+function drawEditor() {
+  const { W, H, tileH, tileTop, toXY } = edGeom();
+  ectx.clearRect(0, 0, W, H);
+  ectx.fillStyle = '#101114'; ectx.fillRect(0, 0, W, H);
+  // centreline + quarter guides
+  ectx.strokeStyle = 'rgba(255,255,255,.05)';
+  for (const fx of [0.25, 0.5, 0.75]) { ectx.beginPath(); ectx.moveTo(W * fx, 0); ectx.lineTo(W * fx, H); ectx.stroke(); }
+  const drawShape = (s, offsetTiles, alpha, selected) => {
+    const pts = shapeMMPoints(s);
+    if (pts.length < 2) return;
+    ectx.beginPath();
+    pts.forEach(([u, v], i) => { const [x, y] = toXY(u, v); const yy = y + offsetTiles * tileH; i ? ectx.lineTo(x, yy) : ectx.moveTo(x, yy); });
+    ectx.closePath();
+    ectx.globalAlpha = alpha;
+    ectx.fillStyle = ROLE_COLORS[s.role] + '55'; ectx.fill();
+    ectx.globalAlpha = Math.min(1, alpha + 0.35);
+    ectx.strokeStyle = selected ? '#fff' : ROLE_COLORS[s.role]; ectx.lineWidth = selected ? 2.5 : 1.5; ectx.stroke();
+    ectx.globalAlpha = 1;
+  };
+  for (const off of [-1, 0, 1]) S.shapes.forEach((s, i) => drawShape(s, off, off === 0 ? 0.95 : 0.22, off === 0 && i === S.sel));
+  // main tile border
+  ectx.strokeStyle = 'rgba(255,255,255,.35)'; ectx.lineWidth = 1; ectx.strokeRect(0.5, tileTop + 0.5, W - 1, tileH - 1);
+  ectx.fillStyle = 'rgba(255,255,255,.45)'; ectx.font = '11px system-ui';
+  ectx.fillText('← across tread (v) · centre line →', 8, tileTop + 14);
+  ectx.fillText('tile repeats around the tyre ↓', 8, tileTop * 2 + 14);
+  // selected vertices
+  if (S.sel >= 0 && S.shapes[S.sel]) {
+    ectx.fillStyle = '#fff';
+    for (const [u, v] of S.shapes[S.sel].points) { const [x, y] = toXY(u, v); ectx.beginPath(); ectx.arc(x, y, 3.5, 0, 7); ectx.fill(); }
+  }
+  if (pending.length) {
+    ectx.strokeStyle = '#fff'; ectx.setLineDash([5, 4]); ectx.beginPath();
+    pending.forEach(([u, v], i) => { const [x, y] = toXY(u, v); i ? ectx.lineTo(x, y) : ectx.moveTo(x, y); }); ectx.stroke(); ectx.setLineDash([]);
+    ectx.fillStyle = '#fff'; pending.forEach(([u, v]) => { const [x, y] = toXY(u, v); ectx.beginPath(); ectx.arc(x, y, 3, 0, 7); ectx.fill(); });
+  }
+  if (dragRect) { ectx.strokeStyle = '#fff'; ectx.strokeRect(dragRect[0], dragRect[1], dragRect[2] - dragRect[0], dragRect[3] - dragRect[1]); }
+}
+let pending = [], dragRect = null, dragState = null;
+const snapVal = (v, step) => S.snap ? Math.round(v / step) * step : v;
+function evUV(e) {
+  const r = ed.getBoundingClientRect(), { toUV } = edGeom();
+  return toUV((e.clientX - r.left) / r.width * ed.width, (e.clientY - r.top) / r.height * ed.height);
+}
+function hitShape(u, v) {
+  for (let i = S.shapes.length - 1; i >= 0; i--) {
+    const pts = shapeMMPoints(S.shapes[i]);
+    // point-in-polygon in (v,u) planar space
+    let inside = false;
+    for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) {
+      const [ui, vi] = pts[a], [uj, vj] = pts[b];
+      if (((vi > v) !== (vj > v)) && (u < (uj - ui) * (v - vi) / (vj - vi) + ui)) inside = !inside;
+    }
+    if (inside) return i;
+  }
+  return -1;
+}
+ed.addEventListener('pointerdown', e => {
+  const [u0, v0] = evUV(e);
+  if (S.tool === 'pen') { pending.push([snapVal(u0, 0.02), snapVal(v0, 0.02)]); drawEditor(); return; }
+  if (S.tool === 'select') {
+    if (S.sel >= 0) { // vertex drag?
+      const s = S.shapes[S.sel], { toXY } = edGeom(), r = ed.getBoundingClientRect();
+      const px = (e.clientX - r.left) / r.width * ed.width, py = (e.clientY - r.top) / r.height * ed.height;
+      for (let i = 0; i < s.points.length; i++) { const [x, y] = toXY(s.points[i][0], s.points[i][1]); if (Math.hypot(x - px, y - py) < 9) { dragState = { kind: 'vertex', i, moved: false }; ed.setPointerCapture(e.pointerId); return; } }
+    }
+    const hit = hitShape(u0, v0);
+    S.sel = hit; refreshShapeUI();
+    if (hit >= 0) { dragState = { kind: 'move', start: [u0, v0], orig: S.shapes[hit].points.map(p => [...p]), moved: false }; ed.setPointerCapture(e.pointerId); }
+    drawEditor(); return;
+  }
+  dragState = { kind: 'create', start: [u0, v0], px: [e.clientX, e.clientY] };
+  ed.setPointerCapture(e.pointerId);
+});
+ed.addEventListener('pointermove', e => {
+  if (!dragState) return;
+  const [u, v] = evUV(e), s = S.shapes[S.sel];
+  if (dragState.kind === 'vertex' && s) { s.points[dragState.i] = [snapVal(u, 0.01), snapVal(v, 0.01)]; dragState.moved = true; drawEditor(); }
+  else if (dragState.kind === 'move' && s) {
+    const du = u - dragState.start[0], dv = v - dragState.start[1];
+    s.points = dragState.orig.map(([a, b]) => [a + du, b + dv]); dragState.moved = true; drawEditor();
+  } else if (dragState.kind === 'create') {
+    const r = ed.getBoundingClientRect();
+    dragRect = [dragState.px[0], dragState.px[1], e.clientX, e.clientY].map((val, i) => (val - (i % 2 ? r.top : r.left)) / (i % 2 ? r.height : r.width) * (i % 2 ? ed.height : ed.width));
+    drawEditor();
+  }
+});
+ed.addEventListener('pointerup', e => {
+  if (!dragState) return;
+  const kind = dragState.kind;
+  if ((kind === 'vertex' || kind === 'move') && dragState.moved) { pushHistoryBeforeChange(); refreshShapeUI(); schedule(); }
+  if (kind === 'create') {
+    const [u1, v1] = evUV(e), [u0, v0] = dragState.start;
+    createFromDrag(S.tool, u0, v0, u1, v1);
+    dragRect = null;
+  }
+  dragState = null; drawEditor();
+});
+ed.addEventListener('dblclick', () => { if (S.tool === 'pen') finishPen(); });
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+  if (S.tool === 'pen' && e.key === 'Enter') finishPen();
+  if (e.key === 'Escape') { pending = []; drawEditor(); }
+  if ((e.key === 'Delete' || e.key === 'Backspace') && S.sel >= 0) { pushHistory(); S.shapes.splice(S.sel, 1); S.sel = -1; refreshShapeUI(); schedule(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') undo();
+});
+let lastHistoryPush = 0;
+function pushHistoryBeforeChange() { const now = Date.now(); if (now - lastHistoryPush > 800) { pushHistory(); lastHistoryPush = now; } }
+function finishPen() {
+  if (pending.length >= 3) {
+    pushHistory();
+    const role = pendingRole();
+    S.shapes.push(makeShape(pending, { name: role === 'lug' ? 'Drawn lug' : 'Drawn groove', role, depth: role === 'sipe' ? 3.5 : S.tyre.treadDepth }));
+    S.sel = S.shapes.length - 1; refreshShapeUI(); schedule();
+  }
+  pending = []; drawEditor();
+}
+function pendingRole() { return document.querySelector('input[name=newRole]:checked')?.value || 'lug'; }
+function createFromDrag(tool, u0, v0, u1, v1) {
+  const ua = Math.min(u0, u1), ub = Math.max(u0, u1), va = Math.min(v0, v1), vb = Math.max(v0, v1);
+  if (ub - ua < 0.02 && tool !== 'bar') return;
+  pushHistory();
+  const role = pendingRole(); let pts = [], name = tool;
+  const midu = (ua + ub) / 2, midv = (va + vb) / 2;
+  if (tool === 'rect') pts = [[ua, va], [ub, va], [ub, vb], [ua, vb]];
+  else if (tool === 'ellipse') { for (let i = 0; i < 20; i++) { const a = i / 20 * Math.PI * 2; pts.push([midu + Math.cos(a) * (ub - ua) / 2, midv + Math.sin(a) * (vb - va) / 2]); } }
+  else if (tool === 'chevron') pts = [[ua, va], [midu, vb], [ub, va], [ub, va + (vb - va) * 0.38], [midu, vb * 0.62 + va * 0.38], [ua, va + (vb - va) * 0.38]];
+  else if (tool === 'lug') { const iu = (ub - ua) * 0.18, iv = (vb - va) * 0.18; pts = [[ua + iu, va], [ub - iu, va], [ub, va + iv], [ub, vb - iv], [ub - iu, vb], [ua + iu, vb], [ua, vb - iv], [ua, va + iv]]; }
+  else if (tool === 'bar') {
+    // drag = centreline, fixed 7mm width, computed in mm so the bar is straight on the tyre
+    const P = S.designPitch, W = S.tyre.width * (S.tyre.treadFrac ?? 0.9);
+    const ax = v0 * W / 2, ay = u0 * P, bx = v1 * W / 2, by = u1 * P;
+    const dx = bx - ax, dy = by - ay, l = Math.hypot(dx, dy) || 1, nx = -dy / l * 3.5, ny = dx / l * 3.5;
+    pts = [[(ay - ny) / P, (ax - nx) / (W / 2)], [(by - ny) / P, (bx - nx) / (W / 2)], [(by + ny) / P, (bx + nx) / (W / 2)], [(ay + ny) / P, (ax + nx) / (W / 2)]];
+    name = 'Groove bar';
+  }
+  if (pts.length >= 3) { S.shapes.push(makeShape(pts, { name, role, depth: role === 'sipe' ? 3.5 : S.tyre.treadDepth })); S.sel = S.shapes.length - 1; refreshShapeUI(); schedule(); }
+}
+document.querySelectorAll('#tools button').forEach(b => b.onclick = () => {
+  S.tool = b.dataset.tool;
+  document.querySelectorAll('#tools button').forEach(x => x.classList.toggle('on', x === b));
+  $('toolHint').innerHTML = S.tool === 'pen' ? '<b>Pen:</b> click to add points, double-click / Enter to close the shape.' : S.tool === 'select' ? 'Drag a shape to move it, drag its white points to reshape. Delete key removes it.' : 'Drag on the tile to draw the shape. New shapes use the role chosen below.';
+});
+$('snapChk').onchange = e => S.snap = e.target.checked;
+
+// ------------------------------------------------------------------ shape list / props
+const ROLE_LABEL = { lug: 'Lug (raised block)', groove: 'Groove (cut)', sipe: 'Sipe (thin cut)' };
+function refreshShapeUI() { buildShapeList(); buildShapeProps(); drawEditor(); }
+function buildShapeList() {
+  const box = $('shapeList'); box.innerHTML = '';
+  $('shapeCount').textContent = S.shapes.length + ' shapes';
+  S.shapes.forEach((s, i) => {
+    const el = document.createElement('div'); el.className = 'shape' + (i === S.sel ? ' sel' : '');
+    el.innerHTML = `<span class="sw" style="background:${ROLE_COLORS[s.role]}"></span><span class="nm">${s.name} <small>${s.role} · ${Math.abs(s.depth)}mm</small></span>`;
+    const dup = document.createElement('button'); dup.textContent = '⧉'; dup.title = 'Duplicate';
+    dup.onclick = e => { e.stopPropagation(); pushHistory(); const c = JSON.parse(JSON.stringify(s)); c.id = 's' + Date.now(); c.points = c.points.map(([u, v]) => [u + 0.03, v]); S.shapes.splice(i + 1, 0, c); S.sel = i + 1; refreshShapeUI(); schedule(); };
+    const del = document.createElement('button'); del.textContent = '✕'; del.title = 'Delete';
+    del.onclick = e => { e.stopPropagation(); pushHistory(); S.shapes.splice(i, 1); S.sel = -1; refreshShapeUI(); schedule(); };
+    el.append(dup, del);
+    el.onclick = () => { S.sel = i; refreshShapeUI(); };
+    box.appendChild(el);
+  });
+}
+function buildShapeProps() {
+  const box = $('shapeProps'), s = S.shapes[S.sel];
+  if (!s) { box.innerHTML = 'Select a shape in the list or editor.<br><br>New-shape role: ' + roleRadios(); bindRoleRadios(); return; }
+  box.innerHTML = '';
+  const nameRow = document.createElement('div'); nameRow.className = 'row'; nameRow.innerHTML = '<label>Name</label>';
+  const nameIn = document.createElement('input'); nameIn.type = 'text'; nameIn.value = s.name;
+  nameIn.onchange = () => { s.name = nameIn.value; buildShapeList(); };
+  nameRow.appendChild(nameIn); box.appendChild(nameRow);
+  const roleRow = document.createElement('div'); roleRow.className = 'row'; roleRow.innerHTML = '<label>Role</label>';
+  const roleSel = document.createElement('select');
+  roleSel.innerHTML = Object.entries(ROLE_LABEL).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+  roleSel.value = s.role; roleSel.onchange = () => { pushHistory(); s.role = roleSel.value; refreshShapeUI(); schedule(); };
+  roleRow.appendChild(roleSel); box.appendChild(roleRow);
+  slider(box, 'Depth (mm)', s, 'depth', 0.5, 18, 0.1, v => v.toFixed(1) + 'mm');
+  slider(box, 'Smooth outline', s, 'smooth', 0, 3, 1, v => v ? '×' + v : 'off');
+  const btns = document.createElement('div'); btns.className = 'btns';
+  const mk = (label, fn) => { const b = document.createElement('button'); b.className = 'small'; b.textContent = label; b.onclick = fn; btns.appendChild(b); };
+  mk('Rotate 15°', () => transformSelected((u, v) => rot(u, v, 15)));
+  mk('Rotate 45°', () => transformSelected((u, v) => rot(u, v, 45)));
+  mk('Scale +10%', () => transformSelected((u, v) => scalePt(u, v, 1.1)));
+  mk('Scale −10%', () => transformSelected((u, v) => scalePt(u, v, 0.9)));
+  mk('Bring to front', () => { pushHistory(); S.shapes.push(S.shapes.splice(S.sel, 1)[0]); S.sel = S.shapes.length - 1; refreshShapeUI(); schedule(); });
+  mk('Send to back', () => { pushHistory(); S.shapes.unshift(S.shapes.splice(S.sel, 1)[0]); S.sel = 0; refreshShapeUI(); schedule(); });
+  box.appendChild(btns);
+  const nr = document.createElement('div'); nr.innerHTML = '<div class="hint" style="margin-top:8px">New-shape role:</div>' + roleRadios(); box.appendChild(nr); bindRoleRadios();
+}
+function roleRadios() { return ['lug', 'groove', 'sipe'].map(r => `<label style="margin-right:10px;color:var(--mut)"><input type="radio" name="newRole" value="${r}" ${r === 'lug' ? 'checked' : ''}> ${r}</label>`).join(''); }
+function bindRoleRadios() {}
+function centroid(s) { return s.points.reduce((a, p) => [a[0] + p[0] / s.points.length, a[1] + p[1] / s.points.length], [0, 0]); }
+function rot(u, v, deg) { const s = S.shapes[S.sel], [cu, cv] = centroid(s), a = deg * Math.PI / 180; const du = u - cu, dv = (v - cv) * 2.2; return [cu + du * Math.cos(a) - dv * Math.sin(a), cv + (du * Math.sin(a) + dv * Math.cos(a)) / 2.2]; }
+function scalePt(u, v, f) { const s = S.shapes[S.sel], [cu, cv] = centroid(s); return [cu + (u - cu) * f, cv + (v - cv) * f]; }
+function transformSelected(fn) { const s = S.shapes[S.sel]; if (!s) return; pushHistory(); s.points = s.points.map(([u, v]) => fn(u, v)); refreshShapeUI(); schedule(); }
+$('mirrorYBtn').onclick = () => { const s = S.shapes[S.sel]; if (!s) return toast('Select a shape first'); pushHistory(); s.points = s.points.map(([u, v]) => [u, -v]); refreshShapeUI(); schedule(); };
+$('mirrorXBtn').onclick = () => { const s = S.shapes[S.sel]; if (!s) return toast('Select a shape first'); pushHistory(); const [cu] = centroid(s); s.points = s.points.map(([u, v]) => [2 * cu - u, v]); refreshShapeUI(); schedule(); };
+$('symBtn').onclick = () => {
+  pushHistory();
+  const copies = S.shapes.map(s => { const c = JSON.parse(JSON.stringify(s)); c.id = 's' + Date.now() + Math.random(); c.name = s.name + ' (mir)'; c.points = s.points.map(([u, v]) => [u, -v]); return c; });
+  S.shapes.push(...copies); refreshShapeUI(); schedule(); toast('Tile symmetrised across the centreline');
+};
+function undo() { const prev = history.pop(); if (!prev) return; S.shapes = JSON.parse(prev); S.sel = -1; refreshShapeUI(); schedule(); }
+$('undoBtn').onclick = undo;
+
+// ------------------------------------------------------------------ header / view buttons
+$('rebuildBtn').onclick = rebuild;
+$('wireBtn').onclick = e => { S.wire = !S.wire; if (wireLines) wireLines.visible = S.wire; e.target.classList.toggle('on', S.wire); };
+$('rimBtn').onclick = e => { S.rim = !S.rim; if (rimMesh) rimMesh.visible = S.rim; e.target.classList.toggle('on', S.rim); };
+$('rimBtn').classList.add('on');
+$('spinBtn').onclick = e => { S.spin = !S.spin; e.target.classList.toggle('on', S.spin); };
+function setView(name) {
+  const R = built ? built.dims.Rout : 320;
+  const pos = { iso: [R * 1.15, R * 0.85, R * 1.5], side: [0, R * 0.25, R * 2.4], top: [R * 0.02, R * 2.3, R * 0.02] }[name] || [R, R, R];
+  camera.position.set(...pos); controls.target.set(0, 0, 0);
+}
+document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => setView(b.dataset.view));
+
+// ------------------------------------------------------------------ export / import
+function download(name, text, type = 'text/plain') { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type })); a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+$('expOBJ').onclick = () => {
+  if (!built) return;
+  const parts = ['# Frontier Tyre Quad Editor — all-quad export', '# Tread band, sidewalls and rim are separate objects. Every face has 4 vertices.'];
+  let offset = 0;
+  const addMesh = (mesh, name) => { parts.push('o ' + name); for (const p of mesh.positions) parts.push(`v ${p[0].toFixed(3)} ${p[1].toFixed(3)} ${p[2].toFixed(3)}`); for (const q of mesh.quads) parts.push('f ' + q.map(v => v + 1 + offset).join(' ')); offset += mesh.positions.length; };
+  addMesh(built.tread, 'Tread_quads'); addMesh(built.sidewall, 'Sidewall_quads'); if (S.rim) addMesh(built.rim, 'Rim_quads');
+  download(S.name.replace(/\W+/g, '_') + '_quads.obj', parts.join('\n'));
+  toast('OBJ exported — verify: every f line has 4 indices');
+};
+$('expJSON').onclick = () => download(S.name.replace(/\W+/g, '_') + '.json', JSON.stringify({ name: S.name, type: S.type, tyre: S.tyre, repeats: S.repeats, designPitch: S.designPitch, mode: S.mode, edge: S.edge, bevel: S.bevel, shapes: S.shapes }, null, 2), 'application/json');
+$('expSVG').onclick = () => download(S.name.replace(/\W+/g, '_') + '_tile.svg', shapesToSVG(S.shapes, S.designPitch, S.tyre.width), 'image/svg+xml');
+$('impJSON').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => { const d = JSON.parse(t); pushHistory(); Object.assign(S, { name: d.name || S.name, type: d.type || S.type, repeats: d.repeats ?? 0, designPitch: d.designPitch ?? 64, mode: d.mode || 'straight', edge: d.edge ?? 10, bevel: d.bevel ?? 1.6 }); if (d.tyre) Object.assign(S.tyre, d.tyre); S.shapes = d.shapes || []; S.sel = -1; buildPanels(); refreshShapeUI(); rebuild(); toast('Pattern imported'); });
+};
+$('impSVG').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => { const shapes = parseSVG(t, { depth: S.tyre.treadDepth }); if (!shapes.length) return toast('No shapes found in that SVG'); pushHistory(); S.shapes = shapes; S.sel = -1; refreshShapeUI(); rebuild(); toast(`Imported ${shapes.length} shapes from SVG — now arrayed as quads`); });
+};
+
+// ------------------------------------------------------------------ boot
+function resize() { const w = view.clientWidth, h = view.clientHeight; renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(view);
+buildPresets(); buildPanels();
+loadPreset(1);
+setView('iso');
+renderer.setAnimationLoop(() => { if (S.spin && !S.load) group.rotation.x += 0.004; controls.update(); renderer.render(scene, camera); });
+</script>
+</body>
+</html>
