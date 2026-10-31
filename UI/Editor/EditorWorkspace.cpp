@@ -291,13 +291,13 @@ void EditorWorkspace::ConstructInterface()
 
     if (PendingProjectSplit && Panels.QuerySeated() && Panels.QueryDockspace() != 0)
     {
-        if (ImGuiViewport *MainViewport = ImGui::GetMainViewport())
+        if (ImGuiViewport *PrimaryViewport = ImGui::GetMainViewport())
         {
             const ImGuiID Root = Panels.QueryDockspace();
             ImGui::DockBuilderRemoveNodeChildNodes(Root);
-            ImGui::DockBuilderSetNodePos(Root, ImVec2(MainViewport->Pos.x, MainViewport->Pos.y + 38.0f * Scale));
+            ImGui::DockBuilderSetNodePos(Root, ImVec2(PrimaryViewport->Pos.x, PrimaryViewport->Pos.y + 38.0f * Scale));
             ImGui::DockBuilderSetNodeSize(
-                Root, ImVec2(MainViewport->Size.x, std::max(120.0f, MainViewport->Size.y - 72.0f * Scale)));
+                Root, ImVec2(PrimaryViewport->Size.x, std::max(120.0f, PrimaryViewport->Size.y - 72.0f * Scale)));
 
             ImGuiID LeftColumn = 0;
             ImGuiID CentreRight = 0;
@@ -334,14 +334,14 @@ void EditorWorkspace::ConstructInterface()
 void EditorWorkspace::ConstructNotchBandReturnButton(float Scale)
 {
     if (!EvaluateReturnToBrowser) return;
-    const auto *Main = ImGui::GetMainViewport();
-    if (Main->WorkSize.x <= 0 || Main->WorkSize.y <= 0) return;
+    const auto *PrimaryViewport = ImGui::GetMainViewport();
+    if (PrimaryViewport->WorkSize.x <= 0 || PrimaryViewport->WorkSize.y <= 0) return;
 
     const KitFaces Faces = ResolveKitFaces();
     const KitTheme Theme = ResolveKitTheme();
-    ImGui::SetNextWindowPos(ImVec2(Main->WorkPos.x + 14.0f * Scale, Main->WorkPos.y + 10.0f * Scale));
+    ImGui::SetNextWindowPos(ImVec2(PrimaryViewport->WorkPos.x + 14.0f * Scale, PrimaryViewport->WorkPos.y + 10.0f * Scale));
     ImGui::SetNextWindowSize(ImVec2(320.0f * Scale, 34.0f * Scale));
-    ImGui::SetNextWindowViewport(Main->ID);
+    ImGui::SetNextWindowViewport(PrimaryViewport->ID);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
     if (ImGui::Begin("##FrontierNotchReturnBar", nullptr,
