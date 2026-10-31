@@ -137,7 +137,20 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   leaches and transports dissolved Fe/Cu along flow paths, and boulders in
   those paths stain from the transported state. The **Mineral Strata &
   Dissolved Stain** shading mode visualises the source beds and stain trails.
+- **Dedicated Wind Erosion layer**: wind no longer hides inside the
+  snow/glacier layer. Its own simulation layer controls prevailing direction,
+  speed, overall rate, rock abrasion, deflation, lee deposition, turbulent
+  direction wander, gustiness, abrasive sand supply, saltation-curtain /
+  undercut height, yardang streamlining and vertical fluting. Local flow
+  bends around terrain and is sheltered in lee wakes, while soft/fractured
+  strata abrade faster than hard caprock — replacing ruler-straight mountain
+  grooves with curved corridors, fins and spire-like remnants. Wind settings
+  can be changed between seasons without rebuilding the already-eroded
+  terrain. The **Utah Wind + Rain Canyon** preset is a rocky Utah stack with
+  only Rain and Wind simulation layers (no snow, rockfall/boulders or
+  chemical layers).
 
-Verification: `npm test` — 34/34 pass (includes `tests/rain-erosion.test.mjs`,
-rigid-body free-fall/no-elevator tests, exact-mesh seating / pause-freeze, and
-simulation-season / mineral-strata regression tests). `npm run build` clean.
+Verification: `npm test` — 35/35 pass (includes `tests/rain-erosion.test.mjs`,
+rigid-body free-fall/no-elevator tests, exact-mesh seating / pause-freeze,
+simulation-season / mineral-strata, and dedicated wind-erosion regression
+tests). `npm run build` clean.

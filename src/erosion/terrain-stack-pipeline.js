@@ -102,7 +102,7 @@ const MASK_MODE_CODE = {
 export const SIM_PROCESS_DEFS = [
   { id: 'hydraulic', flag: 'simHydraulicPlaying', label: 'Rain & runoff', short: 'Rain', layerTypes: ['hydraulic-erosion'] },
   { id: 'cryo', flag: 'simCryoPlaying', label: 'Snow & glaciers', short: 'Snow', layerTypes: ['aeolian-glacial'] },
-  { id: 'wind', flag: 'simWindPlaying', label: 'Wind & saltation', short: 'Wind', layerTypes: ['aeolian-glacial'] },
+  { id: 'wind', flag: 'simWindPlaying', label: 'Wind erosion & saltation', short: 'Wind', layerTypes: ['wind-erosion', 'aeolian-glacial'] },
   { id: 'rockfall', flag: 'simRockfallPlaying', label: 'Talus, rockfall & boulders', short: 'Rockfall', layerTypes: ['thermal-talus', 'rock-placement'] },
   { id: 'chemical', flag: 'simChemicalPlaying', label: 'Chemical weathering', short: 'Chemical', layerTypes: ['chemical-weathering'] },
 ];
@@ -297,6 +297,10 @@ export class TerrainStackPipeline {
     this.layers = preset.layers();
     // Select Base Landform or top meaningful layer
     this.selectedLayerId = this.layers[0]?.id || null;
+    const selectedProcesses = this.simulationProcessesForLayer(this.getSelectedLayer());
+    if (selectedProcesses.length && this.simPlaybackMode === 'solo') {
+      this.simSoloProcess = selectedProcesses[0];
+    }
     this.evaluateStack({ reseedPlacements: true });
     this.engine.camera.target[1] = (ep.relief || 168) * 0.30;
   }
@@ -373,8 +377,13 @@ export class TerrainStackPipeline {
     return state;
   }
 
+  _hasDedicatedWindLayer() {
+    return this.layers.some((l) => l.enabled && l.type === 'wind-erosion');
+  }
+
   _computeSimAvailability() {
     const avail = { hydraulic: false, cryo: false, wind: false, rockfall: false, chemical: false };
+    const hasDedicatedWind = this._hasDedicatedWindLayer();
     for (const layer of this.layers) {
       if (!layer.enabled) continue;
       const p = layer.params || {};
@@ -384,17 +393,49 @@ export class TerrainStackPipeline {
         avail.rockfall = true;
       } else if (layer.type === 'chemical-weathering') {
         if (this.paletteId !== 7 && (p.chemRate ?? DEFAULT_EROSION_PARAMS.chemRate) > 0.001) avail.chemical = true;
+      } else if (layer.type === 'wind-erosion') {
+        if ((p.windSpeed ?? 0) > 0.03 && (p.windErosionRate ?? DEFAULT_EROSION_PARAMS.windErosionRate) > 0.001) avail.wind = true;
       } else if (layer.type === 'aeolian-glacial') {
         if ((p.snowfallRate ?? 0) > 0.015 || (p.glacierStrength ?? 0) > 0.015) avail.cryo = true;
-        if ((p.windSpeed ?? 0) > 0.03) avail.wind = true;
+        // Legacy combined stacks may still drive wind from the snow layer,
+        // but a dedicated Wind Erosion layer is the sole wind authority.
+        if (!hasDedicatedWind && (p.windSpeed ?? 0) > 0.03) avail.wind = true;
       }
     }
     this.simAvailable = avail;
     return avail;
   }
 
+  /**
+   * Applies Wind Erosion settings to the live engine without rebuilding the
+   * stack. This lets the user run a Wind season, pause, change direction or
+   * abrasion/turbulence, then resume on the already-eroded terrain (essential
+   * for multi-direction natural windwork). Only the topmost enabled wind
+   * layer is the live authority, matching bottom-to-top evaluation order.
+   */
+  applyLiveWindLayerParams(layer, reason = 'Wind settings changed') {
+    if (!layer || layer.type !== 'wind-erosion' || !layer.enabled) return false;
+    const authority = this.layers.find((l) => l.enabled && l.type === 'wind-erosion');
+    if (!authority || authority.id !== layer.id) return false;
+    const ep = this.engine.params;
+    const p = layer.params || {};
+    const keys = [
+      'windSpeed', 'windAzimuth', 'dryAeolianMode', 'windErosionRate',
+      'windAbrasion', 'windDeflation', 'windDeposition', 'windTurbulence',
+      'windGustiness', 'windSandSupply', 'windCurtainHeight',
+      'windStreamlining', 'windFluting',
+    ];
+    for (const key of keys) ep[key] = p[key] ?? DEFAULT_EROSION_PARAMS[key];
+    ep.simWindPlaying = ep.windSpeed > 0.03 && ep.windErosionRate > 0.001;
+    this.pauseSimulationForEdit(reason);
+    this._applySimulationPlayback(true);
+    return true;
+  }
+
   simulationProcessesForLayer(layer) {
     if (!layer) return [];
+    if (layer.type === 'wind-erosion') return ['wind'];
+    if (layer.type === 'aeolian-glacial') return ['cryo'];
     return SIM_PROCESS_DEFS.filter((d) => d.layerTypes.includes(layer.type)).map((d) => d.id);
   }
 
@@ -732,7 +773,18 @@ export class TerrainStackPipeline {
     ep.snowfallRate = 0.0;
     ep.glacierStrength = 0.0;
     ep.windSpeed = 0.0;
+    ep.windAzimuth = DEFAULT_EROSION_PARAMS.windAzimuth;
     ep.dryAeolianMode = 0.0;
+    ep.windErosionRate = DEFAULT_EROSION_PARAMS.windErosionRate;
+    ep.windAbrasion = DEFAULT_EROSION_PARAMS.windAbrasion;
+    ep.windDeflation = DEFAULT_EROSION_PARAMS.windDeflation;
+    ep.windDeposition = DEFAULT_EROSION_PARAMS.windDeposition;
+    ep.windTurbulence = DEFAULT_EROSION_PARAMS.windTurbulence;
+    ep.windGustiness = DEFAULT_EROSION_PARAMS.windGustiness;
+    ep.windSandSupply = DEFAULT_EROSION_PARAMS.windSandSupply;
+    ep.windCurtainHeight = DEFAULT_EROSION_PARAMS.windCurtainHeight;
+    ep.windStreamlining = DEFAULT_EROSION_PARAMS.windStreamlining;
+    ep.windFluting = DEFAULT_EROSION_PARAMS.windFluting;
 
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
@@ -1010,17 +1062,52 @@ export class TerrainStackPipeline {
             ep.simRockfallPlaying = prevR;
           });
         }
+      } else if (layer.type === 'wind-erosion') {
+        ep.windSpeed = p.windSpeed ?? DEFAULT_EROSION_PARAMS.windSpeed;
+        ep.windAzimuth = p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth;
+        ep.dryAeolianMode = p.dryAeolianMode ?? DEFAULT_EROSION_PARAMS.dryAeolianMode;
+        ep.windErosionRate = p.windErosionRate ?? DEFAULT_EROSION_PARAMS.windErosionRate;
+        ep.windAbrasion = p.windAbrasion ?? DEFAULT_EROSION_PARAMS.windAbrasion;
+        ep.windDeflation = p.windDeflation ?? DEFAULT_EROSION_PARAMS.windDeflation;
+        ep.windDeposition = p.windDeposition ?? DEFAULT_EROSION_PARAMS.windDeposition;
+        ep.windTurbulence = p.windTurbulence ?? DEFAULT_EROSION_PARAMS.windTurbulence;
+        ep.windGustiness = p.windGustiness ?? DEFAULT_EROSION_PARAMS.windGustiness;
+        ep.windSandSupply = p.windSandSupply ?? DEFAULT_EROSION_PARAMS.windSandSupply;
+        ep.windCurtainHeight = p.windCurtainHeight ?? DEFAULT_EROSION_PARAMS.windCurtainHeight;
+        ep.windStreamlining = p.windStreamlining ?? DEFAULT_EROSION_PARAMS.windStreamlining;
+        ep.windFluting = p.windFluting ?? DEFAULT_EROSION_PARAMS.windFluting;
+        ep.simWindPlaying = ep.windSpeed > 0.03 && ep.windErosionRate > 0.001;
+
+        const bakeSteps = Math.max(0, Math.min(160, Math.round((p.bakeSteps ?? 0) * (fastPreview ? 0.5 : 1.0))));
+        if (bakeSteps > 0) {
+          this._runMaskedSimulation(layer, maxRelief, () => {
+            const prevH = ep.simHydraulicPlaying, prevC = ep.simCryoPlaying, prevR = ep.simRockfallPlaying, prevChem = ep.simChemicalPlaying;
+            ep.simHydraulicPlaying = false;
+            ep.simCryoPlaying = false;
+            ep.simRockfallPlaying = false;
+            ep.simChemicalPlaying = false;
+            ep.simWindPlaying = true;
+            this.engine.stepSimulation(bakeSteps, { skipTelemetry: true });
+            ep.simHydraulicPlaying = prevH;
+            ep.simCryoPlaying = prevC;
+            ep.simRockfallPlaying = prevR;
+            ep.simChemicalPlaying = prevChem;
+            ep.simWindPlaying = ep.windSpeed > 0.03 && ep.windErosionRate > 0.001;
+          });
+        }
       } else if (layer.type === 'aeolian-glacial') {
         ep.snowline = p.snowline ?? DEFAULT_EROSION_PARAMS.snowline;
         ep.snowfallRate = p.snowfallRate ?? 0.0;
         ep.glacierStrength = p.glacierStrength ?? 0.0;
         ep.iceMeltRate = p.iceMeltRate ?? DEFAULT_EROSION_PARAMS.iceMeltRate;
-        ep.windSpeed = p.windSpeed ?? 0.0;
-        ep.windAzimuth = p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth;
-        ep.dryAeolianMode = p.dryAeolianMode ?? 0.0;
+        if (!this._hasDedicatedWindLayer()) {
+          ep.windSpeed = p.windSpeed ?? 0.0;
+          ep.windAzimuth = p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth;
+          ep.dryAeolianMode = p.dryAeolianMode ?? 0.0;
+        }
         ep.snowLayerEnabled = true;
         ep.simCryoPlaying = ep.snowfallRate > 0.015 || ep.glacierStrength > 0.015;
-        ep.simWindPlaying = ep.windSpeed > 0.03;
+        ep.simWindPlaying = ep.windSpeed > 0.03 && (ep.windErosionRate ?? DEFAULT_EROSION_PARAMS.windErosionRate) > 0.001;
 
         // Seed snowpack & valley glaciers (`progInitSnow`) on the terrain constructed up to this stage!
         this.engine.seedInitialSnow();

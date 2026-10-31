@@ -886,6 +886,12 @@ export class GpuErosionEngine {
       rock = 0.14 + 0.30 * clamp01(p.rockfallRate);
     }
 
+    // A dedicated Wind Erosion layer must emit saltating grains even when a
+    // legacy emitter preset (e.g. sky-rain) originally supplied none.
+    if (p.simWindPlaying !== false && (p.windSpeed ?? 0) > 0.03) {
+      wind = Math.max(wind, 0.18 + 0.55 * clamp01(p.windSpeed) * (0.45 + 0.55 * clamp01(p.windSandSupply ?? DEFAULT_EROSION_PARAMS.windSandSupply)));
+    }
+
     // Independent Simulation Layer Play/Pause Gating: allows running all active simulations
     // simultaneously OR soloing/pausing Hydraulic, Cryo, Wind, or Rockfall one at a time!
     if (p.simHydraulicPlaying === false) rain = 0.0;
@@ -906,6 +912,41 @@ export class GpuErosionEngine {
       snowVec: [p.snowline, activeSnow, p.simCryoPlaying === false ? 0.0 : clamp01(p.glacierStrength), 0.35 + 0.9 * activeSnow],
       windVec: [Math.cos(azRad) * windMag, Math.sin(azRad) * windMag, p.simWindPlaying === false ? 0.0 : (0.25 + 0.95 * activeWind), 0.35 + 0.65 * activeWind],
       materialTheme: Number.isFinite(p.materialTheme) ? p.materialTheme : 0,
+    };
+  }
+
+  /**
+   * Dedicated Wind Erosion uniforms shared by particle saltation and the
+   * terrain integrator:
+   *   A = (abrasion rate incl. gust phase, lee deposition, turbulence, curtain)
+   *   B = (sand supply, vertical fluting, streamlining/shelter, deflation)
+   */
+  _getWindErosionUniforms() {
+    const p = this.params;
+    const clamp = (v, lo, hi, fb) => {
+      const n = Number(v ?? fb);
+      return Number.isFinite(n) ? Math.max(lo, Math.min(hi, n)) : fb;
+    };
+    const active = p.simWindPlaying === false ? 0.0 : 1.0;
+    const gustiness = clamp(p.windGustiness, 0, 1, DEFAULT_EROSION_PARAMS.windGustiness);
+    const gustPhase = 1.0 + gustiness * 0.38 * Math.sin((this.stepCount || 0) * 0.17 + (p.seed || 0) * 0.001);
+    const abrasion = active
+      * clamp(p.windErosionRate, 0, 1.5, DEFAULT_EROSION_PARAMS.windErosionRate)
+      * clamp(p.windAbrasion, 0, 1.5, DEFAULT_EROSION_PARAMS.windAbrasion)
+      * gustPhase;
+    return {
+      a: [
+        Math.max(0, Math.min(2.4, abrasion)),
+        clamp(p.windDeposition, 0, 1.5, DEFAULT_EROSION_PARAMS.windDeposition),
+        clamp(p.windTurbulence, 0, 1, DEFAULT_EROSION_PARAMS.windTurbulence),
+        clamp(p.windCurtainHeight, 0.03, 1, DEFAULT_EROSION_PARAMS.windCurtainHeight),
+      ],
+      b: [
+        clamp(p.windSandSupply, 0, 1.2, DEFAULT_EROSION_PARAMS.windSandSupply),
+        clamp(p.windFluting, 0, 1, DEFAULT_EROSION_PARAMS.windFluting),
+        clamp(p.windStreamlining, 0, 1, DEFAULT_EROSION_PARAMS.windStreamlining),
+        clamp(p.windDeflation, 0, 1.5, DEFAULT_EROSION_PARAMS.windDeflation),
+      ],
     };
   }
 
@@ -1339,6 +1380,7 @@ export class GpuErosionEngine {
     const emitter = EMITTER_MODES[p.emitterMode] || EMITTER_MODES['sky-rain'];
     const { hardnessVec, strataVec } = this._getHardnessUniforms();
     const climate = this._getClimateUniforms();
+    const windErosion = this._getWindErosionUniforms();
     const chemRates = this._chemRates();
 
     gl.disable(gl.DEPTH_TEST);
@@ -1407,6 +1449,8 @@ export class GpuErosionEngine {
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uSpeciesMix'), climate.speciesVec);
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uSnowParams'), climate.snowVec);
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uWindParams'), climate.windVec);
+        gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uWindErodeA'), windErosion.a);
+        gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uWindErodeB'), windErosion.b);
         gl.uniform1f(gl.getUniformLocation(this.progParticleStep, 'uDryAeolian'), p.dryAeolianMode || 0.0);
         gl.uniform1f(gl.getUniformLocation(this.progParticleStep, 'uSeed'), p.seed);
 
@@ -1495,6 +1539,8 @@ export class GpuErosionEngine {
         p.simWindPlaying === false ? 0.0 : (p.windSpeed ?? 0.0),
         p.erosionStrength ?? 0.70
       );
+      gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uWindErodeA'), windErosion.a);
+      gl.uniform4fv(gl.getUniformLocation(this.progTerrainIntegrate, 'uWindErodeB'), windErosion.b);
 
       const chemOn = p.simChemicalPlaying === false ? 0.0 : 1.0;
       gl.uniform4f(

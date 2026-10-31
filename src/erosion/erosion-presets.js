@@ -766,6 +766,21 @@ export const DEFAULT_EROSION_PARAMS = {
   glacierStrength: 0.74,  // Glacial ice U-valley plucking & moraine bulldozing
   windSpeed: 0.58,        // Aeolian saltation & snow-drift speed
   windAzimuth: 35,        // Wind direction (degrees)
+  // Dedicated Wind Erosion layer controls. The old model used one fixed
+  // direction everywhere, which ruled straight grooves across mountains.
+  // These add turbulent/gusting local flow, terrain deflection and lee
+  // sheltering, differential sandstone abrasion, basal saltation-curtain
+  // undercutting, and warped vertical fluting for Utah-style fins/spires.
+  windErosionRate: 0.85,
+  windAbrasion: 0.90,
+  windDeflation: 0.65,
+  windDeposition: 0.55,
+  windTurbulence: 0.65,
+  windGustiness: 0.45,
+  windSandSupply: 0.65,
+  windCurtainHeight: 0.42,
+  windStreamlining: 0.55,
+  windFluting: 0.65,
   rockfallRate: 0.45,     // Ballistic cliff rockfall & scree intensity
 
   // 2.5D Ice-Melt Rivers, Hydrostatic Lakes & Dry Aeolian Controls

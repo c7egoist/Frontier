@@ -731,9 +731,9 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
   }
   assert.ok(verified >= 45, `Expected >= 45 verified pipeline GPU uniform bindings, got ${verified}`);
 
-  // Verify 15 composable operations across all 5 categories, and ZERO colour/material/biome layers!
+  // Verify 16 composable operations across all 5 categories, and ZERO colour/material/biome layers!
   const specKeys = Object.keys(LAYER_OPERATION_SPECS);
-  assert.equal(specKeys.length, 15);
+  assert.equal(specKeys.length, 16);
   for (const catKey of ['landform', 'simulation', 'spline', 'rocks', 'vegetation']) {
     assert.ok(LAYER_CATEGORIES[catKey], `Missing category ${catKey}`);
     assert.ok(specKeys.some((k) => LAYER_OPERATION_SPECS[k].category === catKey), `No operation in category ${catKey}`);
@@ -751,19 +751,23 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
   }
   assert.equal(Object.keys(DERIVED_PALETTES).length, 10, 'All 10 regional geological MATERIAL_THEMES live separately from the layer stack');
 
-  // Verify all 19 canonical EROSION_LANDSCAPES preset stack recipes build valid bottom-up stacks anchored by base-landform at bottom!
+  // Verify all 19 canonical EROSION_LANDSCAPES recipes plus the curated
+  // Utah Wind+Rain stack build valid bottom-up stacks anchored by base-landform.
   const presetKeys = Object.keys(TERRAIN_STACK_PRESETS);
-  assert.equal(presetKeys.length, 19);
+  assert.equal(presetKeys.length, 20);
   for (const pk of presetKeys) {
+    const isUtahWindRain = pk === 'utah-wind-rain-canyon';
     const orig = EROSION_LANDSCAPES[pk];
-    assert.ok(orig, `Stack preset ${pk} must map 1:1 to canonical EROSION_LANDSCAPES`);
+    if (!isUtahWindRain) assert.ok(orig, `Stack preset ${pk} must map 1:1 to canonical EROSION_LANDSCAPES`);
+    const expectedType = isUtahWindRain ? 15 : orig.terrainType;
+    const expectedRelief = isUtahWindRain ? 158 : (orig.defaults.relief ?? DEFAULT_EROSION_PARAMS.relief);
     const stack = TERRAIN_STACK_PRESETS[pk].layers();
     assert.ok(stack.length >= 3, `Preset ${pk} must populate a multi-stage editable stack`);
     const bottomLayer = stack[stack.length - 1];
     assert.equal(bottomLayer.type, 'base-landform', `Bottom layer of ${pk} must be base-landform (evaluated first)`);
-    assert.equal(bottomLayer.params.archetype, orig.terrainType, `Preset ${pk} must use exact INIT_TERRAIN_FRAG terrainType ${orig.terrainType}`);
+    assert.equal(bottomLayer.params.archetype, expectedType, `Preset ${pk} must use exact INIT_TERRAIN_FRAG terrainType ${expectedType}`);
     assert.equal(bottomLayer.params.seed, 4029, `Preset ${pk} must preserve default seed 4029`);
-    assert.equal(bottomLayer.params.relief, orig.defaults.relief ?? DEFAULT_EROSION_PARAMS.relief, `Preset ${pk} must preserve exact relief`);
+    assert.equal(bottomLayer.params.relief, expectedRelief, `Preset ${pk} must preserve exact relief`);
     for (const l of stack) {
       assert.ok(l.id && l.type && l.params && typeof l.enabled === 'boolean');
     }
@@ -1188,6 +1192,11 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
     assert.equal(engine.pipeline.simPlaybackMode, 'solo', 'Seasons default to one-at-a-time playback');
     assert.ok(elements.get('tp-sim-panel').innerHTML.includes('SIMULATION SEASONS'), 'Simulation Seasons panel must render');
     assert.ok(elements.get('tp-sim-panel').innerHTML.includes('data-sim-process="wind"'), 'Wind must be an independently triggerable season');
+    const defaultSnowLayer = engine.pipeline.layers.find((l) => l.type === 'aeolian-glacial');
+    const defaultWindLayer = engine.pipeline.layers.find((l) => l.type === 'wind-erosion');
+    assert.ok(defaultSnowLayer && defaultWindLayer, 'Default preset must split Snow and dedicated Wind Erosion layers');
+    assert.deepEqual(engine.pipeline.simulationProcessesForLayer(defaultSnowLayer), ['cryo'], 'Snow layer must trigger only Snow when Wind has its own layer');
+    assert.deepEqual(engine.pipeline.simulationProcessesForLayer(defaultWindLayer), ['wind'], 'Wind Erosion layer must trigger only Wind');
 
     // Solo season: snow runs while rain/wind/chemical/rockfall stay frozen.
     engine.pipeline.startSimulation('cryo');
@@ -1223,22 +1232,47 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
     assert.ok(elements.get('tp-select-palette').innerHTML.includes('<option'), 'Palette select must be populated');
     assert.ok(elements.get('tp-layer-list').innerHTML.includes('tp-layer-row'), 'Layer stack list must render rows');
     assert.ok(elements.get('tp-inspector-content').innerHTML.includes('tp-property-card'), 'Inspector must render property cards');
-    assert.ok(elements.get('cb-preset-grid').innerHTML.includes('cb-preset-card'), 'Preset shelf must render all 19 recipes');
+    assert.ok(elements.get('cb-preset-grid').innerHTML.includes('cb-preset-card'), 'Preset shelf must render all canonical + Utah recipes');
 
-    // Cycle through ALL 19 canonical stack presets, verifying exact generator/parameter/seed parity & zero feedback loops!
+    // Cycle through ALL canonical stack presets plus Utah Wind+Rain, verifying
+    // exact generator/parameter/seed parity & zero feedback loops!
     for (const presetId of Object.keys(TERRAIN_STACK_PRESETS)) {
+      const isUtahWindRain = presetId === 'utah-wind-rain-canyon';
       const orig = EROSION_LANDSCAPES[presetId];
-      const d = { ...DEFAULT_EROSION_PARAMS, ...(orig.defaults || {}) };
+      const d = {
+        ...DEFAULT_EROSION_PARAMS,
+        ...(orig?.defaults || {}),
+        ...(isUtahWindRain ? { relief: 158, roughness: 0.68 } : {}),
+      };
       engine.pipeline.loadPreset(presetId);
       assert.equal(engine.params.relief, d.relief, `Preset ${presetId} relief parity`);
       assert.equal(engine.params.roughness, d.roughness, `Preset ${presetId} roughness parity`);
       assert.equal(engine.params.seed, 4029, `Preset ${presetId} seed parity`);
-      assert.equal(engine.params.materialTheme, orig.materialTheme ?? 0, `Preset ${presetId} materialTheme parity`);
+      assert.equal(engine.params.materialTheme, isUtahWindRain ? 0 : (orig.materialTheme ?? 0), `Preset ${presetId} materialTheme parity`);
       assert.ok(engine.telemetry.fineSedM3 < 50_000_000, `Preset ${presetId} fineSedM3 must stay physically bounded`);
       assert.ok(engine.telemetry.coarseSedM3 < 50_000_000, `Preset ${presetId} coarseSedM3 must stay physically bounded`);
       ui.renderAll();
       engine.renderFrame();
     }
+
+    // Utah workflow: top Wind layer is selected/armed on load, simulation
+    // remains paused, and only Rain + Wind are available seasons.
+    engine.pipeline.loadPreset('utah-wind-rain-canyon');
+    assert.equal(engine.pipeline.liveSimRunning, false, 'Utah recipe must not auto-start wind or rain');
+    assert.equal(engine.pipeline.simSoloProcess, 'wind', 'Utah recipe arms Wind for the first Simulate press');
+    const utahState = engine.pipeline.getSimulationControlState();
+    assert.deepEqual(
+      utahState.processes.filter((proc) => proc.available).map((proc) => proc.id),
+      ['hydraulic', 'wind'],
+      'Utah recipe exposes Rain + Wind seasons only'
+    );
+    const utahWindLayer = engine.pipeline.layers.find((l) => l.type === 'wind-erosion');
+    utahWindLayer.params.windAzimuth = -42;
+    utahWindLayer.params.windTurbulence = 0.91;
+    assert.equal(engine.pipeline.applyLiveWindLayerParams(utahWindLayer), true, 'Top Wind layer applies live without stack rebuild');
+    assert.equal(engine.params.windAzimuth, -42, 'Live wind direction updates the engine');
+    assert.equal(engine.params.windTurbulence, 0.91, 'Live wind turbulence updates the engine');
+    assert.equal(engine.pipeline.liveSimRunning, false, 'Changing wind settings pauses until Simulate is pressed again');
 
     // Exercise every composable stack operation (Ridges, Rock Stacks, Cliff Push-Pull, Spline, Caves, River, Baked Masked Sim, Sculpt)!
     engine.pipeline.loadPreset('icelandic-highlands');
@@ -1633,7 +1667,7 @@ test('Chemical weathering is a terrain-wide simulation layer with multiple react
     const chemLayers = preset.layers().filter((l) => l.type === 'chemical-weathering');
     assert.equal(
       chemLayers.length,
-      presetId === 'lunar-mare-craters' ? 0 : 1,
+      presetId === 'lunar-mare-craters' || presetId === 'utah-wind-rain-canyon' ? 0 : 1,
       `${presetId} chemical layer count`
     );
   }
@@ -1722,4 +1756,77 @@ test('Simulation seasons trigger solo/simultaneously and mineral strata feed wat
     assert.ok(uiSrc.includes(`key: '${key}'`), `Inspector missing ${key} slider`);
   }
   assert.ok(mainSrc.includes('startSimulation(firstAvailable)'), 'Header Simulate runs the selected simulation layer season');
+});
+
+test('Wind erosion is its own turbulent layer and Utah stack has Rain + Wind only', () => {
+  const spec = LAYER_OPERATION_SPECS['wind-erosion'];
+  assert.ok(spec, 'Dedicated Wind Erosion layer operation exists');
+  assert.equal(spec.category, 'simulation');
+  assert.equal(spec.glyph, 'wind');
+  assert.ok(spec.writes.includes('Height') && spec.writes.includes('FineSed'), 'Wind layer writes terrain/sediment channels');
+
+  const windKeys = [
+    'windSpeed', 'windAzimuth', 'dryAeolianMode', 'windErosionRate', 'windAbrasion',
+    'windDeflation', 'windDeposition', 'windTurbulence', 'windGustiness',
+    'windSandSupply', 'windCurtainHeight', 'windStreamlining', 'windFluting',
+  ];
+  const layer = createStackLayer('wind-erosion');
+  assert.equal(layer.params.bakeSteps, 0, 'Wind layer defaults to live simulation');
+  for (const key of windKeys) {
+    assert.equal(layer.params[key], DEFAULT_EROSION_PARAMS[key], `${key} defaults from erosion params`);
+    assert.ok(Number.isFinite(DEFAULT_EROSION_PARAMS[key]), `${key} is finite`);
+  }
+
+  // Canonical recipes split the old combined layer into Snow and Wind layers
+  // while preserving each landscape's original wind speed/direction values.
+  for (const [presetId, landscape] of Object.entries(EROSION_LANDSCAPES)) {
+    const d = { ...DEFAULT_EROSION_PARAMS, ...(landscape.defaults || {}) };
+    const stack = TERRAIN_STACK_PRESETS[presetId].layers();
+    const windLayers = stack.filter((l) => l.type === 'wind-erosion');
+    const snowLayers = stack.filter((l) => l.type === 'aeolian-glacial');
+    assert.equal(windLayers.length, (d.windSpeed ?? 0) > 0.04 ? 1 : 0, `${presetId} dedicated wind layer count`);
+    assert.equal(
+      snowLayers.length,
+      ((d.snowfallRate ?? 0) > 0.015 || (d.glacierStrength ?? 0) > 0.015) ? 1 : 0,
+      `${presetId} snow/glacier layer count`
+    );
+    if (windLayers.length) {
+      assert.equal(windLayers[0].params.windSpeed, d.windSpeed, `${presetId} wind speed parity`);
+      assert.equal(windLayers[0].params.windAzimuth, d.windAzimuth, `${presetId} wind direction parity`);
+    }
+  }
+
+  // Requested rocky Utah workflow: exactly Wind + Rain simulation layers,
+  // with no snow, rockfall/boulder placement, or chemical simulation layers.
+  const utah = TERRAIN_STACK_PRESETS['utah-wind-rain-canyon'];
+  assert.ok(utah, 'Utah Wind + Rain Canyon recipe exists');
+  const utahStack = utah.layers();
+  assert.deepEqual(
+    utahStack.map((l) => l.type),
+    ['wind-erosion', 'hydraulic-erosion', 'stratigraphic-beds', 'base-landform'],
+    'Utah stack must contain only Wind + Rain simulations above strata/base'
+  );
+  assert.ok(!utahStack.some((l) => ['aeolian-glacial', 'thermal-talus', 'rock-placement', 'chemical-weathering'].includes(l.type)));
+  assert.ok(utahStack[0].params.bakeSteps === 0 && utahStack[0].params.windTurbulence >= 0.7, 'Utah wind is live-first and turbulent/natural, not ruler-straight');
+  assert.ok(utahStack[0].params.windFluting >= 0.8 && utahStack[0].params.windAbrasion > 1.0, 'Utah wind is tuned for fluted fins/spires');
+  assert.ok(utahStack[1].params.rainIntensity > 0 && utahStack[1].params.bakeSteps === 0, 'Utah stack keeps a live Rain wash layer');
+
+  // Shader/engine/pipeline/UI plumbing for the dedicated controls.
+  for (const token of ['uWindErodeA', 'uWindErodeB', 'gustWindDir', 'terrainDeflectedWind', 'windWander']) {
+    assert.ok(Shaders.PARTICLE_STEP_FRAG.includes(token), `PARTICLE_STEP_FRAG missing turbulent wind token ${token}`);
+  }
+  for (const token of ['uWindErodeA', 'uWindErodeB', 'localWind', 'windShadow', 'windExposure', 'saltationCurtain', 'fluteGate', 'hardnessResist']) {
+    assert.ok(Shaders.TERRAIN_INTEGRATE_FRAG.includes(token), `TERRAIN_INTEGRATE_FRAG missing natural wind token ${token}`);
+  }
+
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  assert.ok(engSrc.includes('_getWindErosionUniforms') && engSrc.includes("'uWindErodeA'") && engSrc.includes("'uWindErodeB'"));
+  assert.ok(pipeSrc.includes("layer.type === 'wind-erosion'") && pipeSrc.includes("layerTypes: ['wind-erosion', 'aeolian-glacial']"));
+  assert.ok(pipeSrc.includes('applyLiveWindLayerParams') && uiSrc.includes('isLiveWindParam'), 'Wind direction/parameters must be changeable between seasons without rebuilding eroded terrain');
+  for (const key of windKeys) {
+    assert.ok(uiSrc.includes(`key: '${key}'`), `Wind inspector missing ${key} slider`);
+  }
+  assert.ok(uiSrc.includes("label: 'Prevailing Wind Direction'"), 'Wind direction/angle must be directly editable');
 });

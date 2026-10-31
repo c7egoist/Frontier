@@ -30,7 +30,8 @@ const SVG_ICONS = {
   river: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 2.5c3.5 2.2-2.5 4.6 2 7.2 4.2 2.4 1 4.4 6 5.8"/><path d="M8.5 2.5c2.2 1.8-1 3.5 1.2 5.2"/></svg>`,
   droplet: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5C9 2.5 4.5 7.7 4.5 11a4.5 4.5 0 0 0 9 0C13.5 7.7 9 2.5 9 2.5Z"/></svg>`,
   talus: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.5v11h12L3 3.5Z"/><circle cx="11.5" cy="8.2" r="1"/><circle cx="13.5" cy="11" r="1.1"/></svg>`,
-  wind: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 2v14M3 5.5l12 7M15 5.5l-12 7"/></svg>`,
+  snow: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 2v14M3 5.5l12 7M15 5.5l-12 7"/></svg>`,
+  wind: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h8.2a2.3 2.3 0 1 0-2.2-3.1M2.5 9.5h11.2a2.4 2.4 0 1 1-2.3 3.3M2.5 13h6.2"/></svg>`,
   flask: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2.5h4M8 2.5v3.9L4.4 13.2a1.8 1.8 0 0 0 1.6 2.6h6a1.8 1.8 0 0 0 1.6-2.6L10 6.4V2.5"/><path d="M6.2 11h5.6"/></svg>`,
   spline: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 14c1-5 11-3 12-10"/><circle cx="3" cy="14" r="1.6" fill="currentColor"/><circle cx="15" cy="4" r="1.6" fill="currentColor"/></svg>`,
   boulders: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3,13.5 5.5,6.5 11.5,5.5 15,10.5 13,14.5 4.5,14.5"/></svg>`,
@@ -51,7 +52,8 @@ const OP_DESCRIPTIONS = {
   'river-incision': 'Integrates catchment drainage discharge and carves bedrock gorges weighted by 3D rock hardness.',
   'hydraulic-erosion': 'Simulates rainfall runoff detachment, sediment capacity transport, and piedmont alluvial fans.',
   'thermal-talus': 'Spalls over-steepened cliff faces and relaxes loose scree cones to their angle of repose.',
-  'aeolian-glacial': 'Simulates alpine snowpack & cirque glacier plucking or windward sand saltation.',
+  'aeolian-glacial': 'Simulates alpine snowpack, avalanches, firn compaction and cirque glacier plucking. Wind erosion now has its own layer.',
+  'wind-erosion': 'Simulates turbulent wind flow around rock: sand saltation, deflation, lee deposition, differential sandstone abrasion, basal undercutting, yardang streamlining and warped vertical fluting for fins and spires.',
   'chemical-weathering': 'Reacts water, snowmelt and evaporation with mineral veins: iron rust, copper patina, hydrolysis to clay, dissolution, salt bursting and desert varnish.',
   'spline-feature': 'Steers an interactive 3D control spline to cut canyon gorges, grade switchback roads, or excavate lakes.',
   'rock-placement': 'Distributes gravity-settled 3D loose boulders across cliff toes and crowns (distinct from bedrock landforms).',
@@ -217,6 +219,26 @@ const INSPECTOR_SCHEMAS = {
     ],
     hasSeed: false,
   },
+  'wind-erosion': {
+    selects: [],
+    sliders: [
+      { key: 'bakeSteps', label: 'Stack Bake Steps', min: 0, max: 160, step: 2, fmt: (v) => (v > 0 ? `${Math.round(v)} steps` : 'Live sim') },
+      { key: 'windAzimuth', label: 'Prevailing Wind Direction', min: -180, max: 180, step: 1, fmt: (v) => `${Math.round(v)}°` },
+      { key: 'windSpeed', label: 'Wind Speed', min: 0.0, max: 1.4, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windErosionRate', label: 'Overall Wind Erosion Rate', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windAbrasion', label: 'Rock Sandblasting / Abrasion', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windDeflation', label: 'Loose-Sand Deflation Pickup', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windDeposition', label: 'Lee / Slipface Deposition', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windTurbulence', label: 'Turbulent Direction Wander', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windGustiness', label: 'Gust Strength Variation', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windSandSupply', label: 'Abrasive Sand Supply', min: 0.0, max: 1.2, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windCurtainHeight', label: 'Saltation Curtain / Undercut Height', min: 0.05, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}% relief` },
+      { key: 'windStreamlining', label: 'Yardang Streamlining & Lee Shelter', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windFluting', label: 'Vertical Fluting / Fin Separation', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'dryAeolianMode', label: 'Arid Saltation Regime', min: 0.0, max: 1.0, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
+    ],
+    hasSeed: false,
+  },
   'aeolian-glacial': {
     selects: [],
     sliders: [
@@ -225,9 +247,6 @@ const INSPECTOR_SCHEMAS = {
       { key: 'snowfallRate', label: 'Snowfall Rate', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'glacierStrength', label: 'Glacier Ice Strength', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'iceMeltRate', label: 'Glacial Meltwater Recharge', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
-      { key: 'windSpeed', label: 'Wind Speed & Saltation', min: 0.0, max: 1.2, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
-      { key: 'windAzimuth', label: 'Prevailing Wind Azimuth', min: -180, max: 180, step: 1, fmt: (v) => `${Math.round(v)}°` },
-      { key: 'dryAeolianMode', label: 'Arid Erg Regime', min: 0.0, max: 1.0, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
     ],
     hasSeed: false,
   },
@@ -894,7 +913,8 @@ export class ErosionLayerStackUI {
           <p class="tp-card-note">Runs only this process; snow, rain, wind, rockfall and chemical seasons stay frozen unless Simultaneous mode is chosen in the Simulation Seasons panel. Editing the base stack auto-pauses again.</p>
           <div class="tp-card-footer-btns">${seasonButtons}</div>
           ${layer.type === 'chemical-weathering' ? '<p class="tp-card-note">Tip: run a Rain season first (or Simultaneous) — dissolved Fe/Cu stains follow the water from the mineral beds set on Stratigraphic Beds layers.</p>' : ''}
-          ${layer.type === 'aeolian-glacial' ? '<p class="tp-card-note">This layer owns two independent seasons: Snow &amp; glaciers, and Wind &amp; saltation.</p>' : ''}
+          ${layer.type === 'wind-erosion' ? '<p class="tp-card-note">This is the independent Wind season. Set its direction/angle, speed, abrasion, turbulence, sand supply, undercut height and fluting here; snow drift uses this same prevailing wind only when Snow and Wind run simultaneously.</p>' : ''}
+          ${layer.type === 'aeolian-glacial' && layerSeasonIds.includes('wind') ? '<p class="tp-card-note">Legacy combined stack: this snow layer can still drive Wind until a dedicated Wind Erosion layer is added.</p>' : ''}
         </section>`;
     }
 
@@ -1072,13 +1092,21 @@ export class ErosionLayerStackUI {
         if (out && slDef) out.textContent = slDef.fmt(v);
         const pct = ((v - Number(inp.min)) / Math.max(1e-6, Number(inp.max) - Number(inp.min))) * 100;
         inp.parentElement.style.setProperty('--fill', `${pct.toFixed(1)}%`);
-        this.pipeline.evaluateStack({
-          reseedPlacements: layer.type === 'rock-placement',
-          fastPreview: true,
-        });
+        const isLiveWindParam = layer.type === 'wind-erosion' && key !== 'bakeSteps';
+        if (!(isLiveWindParam && this.pipeline.applyLiveWindLayerParams(layer))) {
+          this.pipeline.evaluateStack({
+            reseedPlacements: layer.type === 'rock-placement',
+            fastPreview: true,
+          });
+        }
         this.updateSceneCaption();
       });
       inp.addEventListener('change', () => {
+        const isLiveWindParam = layer.type === 'wind-erosion' && key !== 'bakeSteps';
+        if (isLiveWindParam && this.pipeline.applyLiveWindLayerParams(layer)) {
+          this.renderStackList();
+          return;
+        }
         this.pipeline.evaluateStack({ reseedPlacements: true, fastPreview: false });
         this.renderStackList();
       });

@@ -379,26 +379,52 @@ export const LAYER_OPERATION_SPECS = {
       chemCopper: DEFAULT_EROSION_PARAMS.chemCopper,
     },
   },
+  'wind-erosion': {
+    type: 'wind-erosion',
+    category: 'simulation',
+    defaultName: 'Wind erosion & sandblasting',
+    glyph: 'wind',
+    reads: ['Height', 'FineSed', 'Slope', '3D Hardness'],
+    writes: ['Height', 'FineSed', 'CoarseSed'],
+    summary: (p) =>
+      `${p.bakeSteps > 0 ? `${Math.round(p.bakeSteps)} baked · ` : ''}${Math.round((p.windSpeed ?? DEFAULT_EROSION_PARAMS.windSpeed) * 100)}% @ ${Math.round(p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth)}° · abrasion ${Math.round((p.windAbrasion ?? DEFAULT_EROSION_PARAMS.windAbrasion) * 100)}% · turbulence ${Math.round((p.windTurbulence ?? DEFAULT_EROSION_PARAMS.windTurbulence) * 100)}%`,
+    defaults: {
+      bakeSteps: 0,
+      windSpeed: DEFAULT_EROSION_PARAMS.windSpeed,
+      windAzimuth: DEFAULT_EROSION_PARAMS.windAzimuth,
+      dryAeolianMode: DEFAULT_EROSION_PARAMS.dryAeolianMode,
+      windErosionRate: DEFAULT_EROSION_PARAMS.windErosionRate,
+      windAbrasion: DEFAULT_EROSION_PARAMS.windAbrasion,
+      windDeflation: DEFAULT_EROSION_PARAMS.windDeflation,
+      windDeposition: DEFAULT_EROSION_PARAMS.windDeposition,
+      windTurbulence: DEFAULT_EROSION_PARAMS.windTurbulence,
+      windGustiness: DEFAULT_EROSION_PARAMS.windGustiness,
+      windSandSupply: DEFAULT_EROSION_PARAMS.windSandSupply,
+      windCurtainHeight: DEFAULT_EROSION_PARAMS.windCurtainHeight,
+      windStreamlining: DEFAULT_EROSION_PARAMS.windStreamlining,
+      windFluting: DEFAULT_EROSION_PARAMS.windFluting,
+    },
+  },
+
   'aeolian-glacial': {
     type: 'aeolian-glacial',
     category: 'simulation',
-    defaultName: 'Glacial / wind process',
-    glyph: 'wind',
+    defaultName: 'Snowpack & glaciers',
+    glyph: 'snow',
     reads: ['Height', 'FineSed'],
     writes: ['Height', 'FineSed', 'SnowIce'],
-    summary: (p) =>
-      (p.dryAeolianMode ?? 0) > 0.4
-        ? `Aeolian wind ${Math.round((p.windSpeed ?? 0.58) * 100)}% · ${Math.round(p.windAzimuth ?? 35)}°`
-        : `Snowline ${Math.round((p.snowline ?? 0.42) * 100)}% · ice ${Math.round((p.glacierStrength ?? 0.74) * 100)}%`,
+    summary: (p) => `Snowline ${Math.round((p.snowline ?? 0.42) * 100)}% · snow ${Math.round((p.snowfallRate ?? 0.82) * 100)}% · ice ${Math.round((p.glacierStrength ?? 0.74) * 100)}%`,
     defaults: {
       bakePasses: 0,
       snowline: DEFAULT_EROSION_PARAMS.snowline,
       snowfallRate: DEFAULT_EROSION_PARAMS.snowfallRate,
       glacierStrength: DEFAULT_EROSION_PARAMS.glacierStrength,
       iceMeltRate: DEFAULT_EROSION_PARAMS.iceMeltRate,
-      windSpeed: DEFAULT_EROSION_PARAMS.windSpeed,
+      // Legacy fallback fields only; new Snow layers do not secretly start
+      // a Wind season. Add Wind Erosion when wind is wanted.
+      windSpeed: 0,
       windAzimuth: DEFAULT_EROSION_PARAMS.windAzimuth,
-      dryAeolianMode: DEFAULT_EROSION_PARAMS.dryAeolianMode,
+      dryAeolianMode: 0,
     },
   },
 
@@ -502,24 +528,48 @@ function buildStackRecipeFromLandscape(landscapeId) {
     })
   );
 
-  // 3. Cryosphere Snow/Glaciers & Aeolian Wind Process (when active in preset)
-  const hasCryoOrWind =
-    (d.snowfallRate ?? 0) > 0.015 ||
-    (d.glacierStrength ?? 0) > 0.015 ||
-    (d.windSpeed ?? 0) > 0.04;
-  if (hasCryoOrWind) {
-    const isDryWind = (d.dryAeolianMode ?? 0) > 0.4;
+  // 3. Cryosphere and Wind are separate simulation layers / seasons.
+  // Snowpack & glaciers no longer hide the wind controls: wind direction,
+  // abrasion, saltation, turbulence and fluting live on Wind Erosion.
+  const hasCryo = (d.snowfallRate ?? 0) > 0.015 || (d.glacierStrength ?? 0) > 0.015;
+  const hasWind = (d.windSpeed ?? 0) > 0.04;
+  if (hasCryo) {
     layers.push(
       createStackLayer('aeolian-glacial', {
-        name: isDryWind ? 'Aeolian sand saltation & wind' : 'Snowpack, glaciers & mountain wind',
+        name: 'Snowpack & glaciers',
         bakePasses: 0,
         snowline: d.snowline,
         snowfallRate: d.snowfallRate,
         glacierStrength: d.glacierStrength,
         iceMeltRate: d.iceMeltRate,
+        // Wind is owned by the dedicated layer below when present. These
+        // legacy fields remain only as a fallback for manually built stacks.
+        windSpeed: hasWind ? 0 : d.windSpeed,
+        windAzimuth: d.windAzimuth,
+        dryAeolianMode: 0,
+      })
+    );
+  }
+  if (hasWind) {
+    const dryWind = (d.dryAeolianMode ?? 0) > 0.4;
+    const rockyWind = preset.terrainType === 1 || preset.terrainType === 4 || preset.terrainType === 12 || preset.terrainType === 15;
+    layers.push(
+      createStackLayer('wind-erosion', {
+        name: dryWind ? 'Wind erosion, saltation & sandblasting' : 'Wind erosion & deflation',
+        bakeSteps: 0,
         windSpeed: d.windSpeed,
         windAzimuth: d.windAzimuth,
         dryAeolianMode: d.dryAeolianMode,
+        windErosionRate: d.windErosionRate ?? DEFAULT_EROSION_PARAMS.windErosionRate,
+        windAbrasion: d.windAbrasion ?? (rockyWind ? 1.0 : DEFAULT_EROSION_PARAMS.windAbrasion),
+        windDeflation: d.windDeflation ?? DEFAULT_EROSION_PARAMS.windDeflation,
+        windDeposition: d.windDeposition ?? DEFAULT_EROSION_PARAMS.windDeposition,
+        windTurbulence: d.windTurbulence ?? (rockyWind ? 0.72 : DEFAULT_EROSION_PARAMS.windTurbulence),
+        windGustiness: d.windGustiness ?? DEFAULT_EROSION_PARAMS.windGustiness,
+        windSandSupply: d.windSandSupply ?? (dryWind ? 0.82 : DEFAULT_EROSION_PARAMS.windSandSupply),
+        windCurtainHeight: d.windCurtainHeight ?? DEFAULT_EROSION_PARAMS.windCurtainHeight,
+        windStreamlining: d.windStreamlining ?? (preset.terrainType === 12 || preset.terrainType === 15 ? 0.74 : DEFAULT_EROSION_PARAMS.windStreamlining),
+        windFluting: d.windFluting ?? (rockyWind ? 0.78 : DEFAULT_EROSION_PARAMS.windFluting),
       })
     );
   }
@@ -642,6 +692,93 @@ function buildStackRecipeFromLandscape(landscapeId) {
 }
 
 /**
+ * Curated Utah stack requested for wind-led canyon work: rocky rugged-desert
+ * base + strong sedimentary strata + Rain + dedicated Wind Erosion only.
+ * Deliberately contains no snow/glacier, thermal rockfall, rock-placement,
+ * chemical, vegetation or cave layers, so the two live seasons are exactly
+ * Rain and Wind and either can be simulated one at a time.
+ */
+function buildUtahWindRainRecipe() {
+  const seed = DEFAULT_EROSION_PARAMS.seed;
+  const layers = [
+    createStackLayer('wind-erosion', {
+      name: 'Utah wind erosion & sandblasting',
+      bakeSteps: 0,
+      windSpeed: 0.92,
+      windAzimuth: 32,
+      dryAeolianMode: 0.90,
+      windErosionRate: 1.05,
+      windAbrasion: 1.08,
+      windDeflation: 0.75,
+      windDeposition: 0.45,
+      windTurbulence: 0.78,
+      windGustiness: 0.55,
+      windSandSupply: 0.85,
+      windCurtainHeight: 0.48,
+      windStreamlining: 0.72,
+      windFluting: 0.82,
+    }),
+    createStackLayer('hydraulic-erosion', {
+      name: 'Desert flash rain & wash runoff',
+      bakeSteps: 0,
+      rainIntensity: 0.36,
+      erosionStrength: 0.72,
+      sedimentCapacity: 0.74,
+      depositionRate: 0.48,
+      evaporation: 0.38,
+      headwaterFlow: 0,
+      lakeRetention: 0.12,
+      oasisSpring: 0,
+    }),
+    createStackLayer('stratigraphic-beds', {
+      name: 'Utah sandstone / shale strata',
+      rockHardness: 0.50,
+      strataStrength: 0.92,
+      strataFreq: 11.0,
+      strataDip: 5,
+      strataStrike: 32,
+      faultWeakness: 0.70,
+      mineralIron: 0.68,
+      mineralCopper: 0.10,
+      mineralCarbonate: 0.52,
+      mineralSalt: 0.34,
+      mineralHorizon: 0.42,
+      mineralHorizonWidth: 0.55,
+      mineralBandStrength: 0.80,
+      terraceCarve: 0.16,
+      ledgeOverhang: 0.10,
+      opacity: 1.0,
+      seed,
+    }),
+    createStackLayer('base-landform', {
+      name: 'Utah rugged desert crags base',
+      archetype: 15,
+      seed,
+      relief: 158,
+      roughness: 0.68,
+    }),
+  ];
+  return {
+    id: 'utah-wind-rain-canyon',
+    name: 'Utah Wind + Rain Canyon',
+    subtitle: 'Rocky Utah sandstone with Rain + turbulent Wind Erosion only — no snow, rockfall or chemical layers',
+    category: 'Wind + Rain Stack',
+    terrainType: 15,
+    palette: 0,
+    fabricMode: 0,
+    emitterMode: 'all-weather',
+    particleCount: DEFAULT_EROSION_PARAMS.particleCount,
+    particleInertia: 0.38,
+    pipeFlowBlend: 0.50,
+    sunAzimuth: 55,
+    sunElevation: 24,
+    showWater: true,
+    showParticles: true,
+    layers: () => structuredClone(layers).map((l) => ({ ...l, id: nextLayerId(l.type.slice(0, 4)) })),
+  };
+}
+
+/**
  * Curated showcase order across all 19 original `EROSION_LANDSCAPES` (`icelandic-highlands` default first!).
  */
 const PRESET_ORDER = [
@@ -659,6 +796,7 @@ const PRESET_ORDER = [
   'glacial-lake-watershed',
   'lunar-mare-craters',
   'layered-plateau',
+  'utah-wind-rain-canyon',
   'alpine-divide',
   'fault-escarpment',
   'volcanic-caldera',
@@ -668,7 +806,9 @@ const PRESET_ORDER = [
 
 export const TERRAIN_STACK_PRESETS = {};
 for (const id of PRESET_ORDER) {
-  if (EROSION_LANDSCAPES[id]) {
+  if (id === 'utah-wind-rain-canyon') {
+    TERRAIN_STACK_PRESETS[id] = buildUtahWindRainRecipe();
+  } else if (EROSION_LANDSCAPES[id]) {
     TERRAIN_STACK_PRESETS[id] = buildStackRecipeFromLandscape(id);
   }
 }

@@ -819,6 +819,8 @@ uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
 uniform vec4 uSpeciesMix;     // (rainFrac, snowFrac, windFrac, rockfallFrac)
 uniform vec4 uSnowParams;     // (snowlineNorm, snowfallRate, glacierStrength, meltRate)
 uniform vec4 uWindParams;     // (windX, windZ, saltationPower, duneRate)
+uniform vec4 uWindErodeA;      // (abrasion rate, lee deposition, turbulence, curtain height)
+uniform vec4 uWindErodeB;      // (sand supply, fluting, streamlining, deflation)
 uniform float uDryAeolian;
 uniform float uSeed;
 
@@ -1102,6 +1104,12 @@ void main() {
                             * (1.0 - smoothstep(0.55, 1.10, snowCell.g * 0.6));
 
   vec2 windDir = safeNorm2(uWindParams.xy, vec2(1.0, 0.0));
+  vec2 windPerp = vec2(-windDir.y, windDir.x);
+  float gustNoiseA = fbm2D(posAge.xz * 0.018 + vec2(uSeed * 0.011, uDomain.w * 0.006), 3, 0.55);
+  float gustNoiseB = fbm2D(posAge.xz * 0.043 + vec2(-uSeed * 0.007, 19.7 - uDomain.w * 0.004), 2, 0.50);
+  float windWander = ((gustNoiseA - 0.5) * 1.45 + (gustNoiseB - 0.5) * 0.55) * uWindErodeA.z;
+  vec2 gustWindDir = safeNorm2(windDir + windPerp * windWander, windDir);
+  float windGust = 0.62 + 0.80 * smoothstep(0.25, 0.85, gustNoiseA);
 
   // Species-dependent surface steering & locomotion laws
   vec2 steerDir;
@@ -1115,14 +1123,20 @@ void main() {
     float creep = avalanche ? (2.4 + 9.0 * (sinTheta - 0.36)) : (0.25 + 1.9 * sinTheta);
     speed = clamp(mix(length(velWater.xz), creep, 0.35), 0.06, 9.0);
   } else if (species == SP_WIND) {
+    float crossSlopeWind = dot(grad, windPerp);
+    vec2 terrainDeflectedWind = safeNorm2(
+      gustWindDir - windPerp * clamp(crossSlopeWind, -1.2, 1.2) * uWindErodeB.z * 0.18,
+      gustWindDir
+    );
     if (uDryAeolian > 0.35) {
-      // Pure aeolian desert saltation: wind drives sand grains UP windward stoss slopes and across corridors!
-      steerDir = safeNorm2(windDir * 0.94 + jitterDir * 0.05, windDir);
-      speed = clamp(mix(length(velWater.xz), 7.5 + 8.0 * uWindParams.z, 0.28), 1.2, 18.0);
+      // Pure aeolian desert saltation: turbulent gusts drive grains up stoss
+      // faces, around crags and through curved corridors instead of one ruler line.
+      steerDir = safeNorm2(terrainDeflectedWind * 0.94 + jitterDir * 0.05, terrainDeflectedWind);
+      speed = clamp(mix(length(velWater.xz), (7.5 + 8.0 * uWindParams.z) * windGust, 0.28), 1.2, 20.0);
     } else {
-      vec2 saltSteer = safeNorm2(windDir * 0.72 + downDir * 0.36 + jitterDir * 0.05, windDir);
+      vec2 saltSteer = safeNorm2(terrainDeflectedWind * 0.72 + downDir * 0.36 + jitterDir * 0.05, terrainDeflectedWind);
       steerDir = saltSteer;
-      speed = clamp(mix(length(velWater.xz), 6.0 + 20.0 * sinTheta, 0.22), 0.5, 22.0);
+      speed = clamp(mix(length(velWater.xz), (6.0 + 20.0 * sinTheta) * windGust, 0.22), 0.5, 23.0);
     }
   } else if (species == SP_ROCK) {
     vec2 rollSteer = safeNorm2(downDir * 0.90 + jitterDir * 0.06, downDir);
@@ -1184,47 +1198,47 @@ void main() {
     if (uDryAeolian > 0.35) {
       // Werner (1995) wind-shadow dune dynamics:
       // grad points upslope; dot(grad, windDir) > 0 on windward stoss, < -0.18 in leeward slipface shadow!
-      float slopeAlongWind = dot(grad, windDir);
+      float slopeAlongWind = dot(grad, gustWindDir);
       bool inLeeShadow = slopeAlongWind < -0.18;
       if (inLeeShadow && fineLoad > 1e-6) {
         // Flow separation bubble past the sharp dune brink: saltating grains drop onto upper slipface!
-        float dropLee = fineLoad * 0.68;
+        float dropLee = fineLoad * clamp(0.22 + 0.58 * uWindErodeA.y, 0.0, 0.94);
         dFine += dropLee;
         fineLoad -= dropLee;
         speed *= 0.65;
       } else {
         float stossExpose = clamp(0.45 + 0.85 * slopeAlongWind, 0.0, 1.35);
-        float capDry = uWindParams.z * 0.032 * stossExpose;
+        float capDry = uWindParams.z * 0.032 * stossExpose * (0.25 + uWindErodeB.x) * (0.40 + uWindErodeA.y);
         if (fineLoad > capDry) {
-          float sur = (fineLoad - capDry) * 0.45;
+          float sur = (fineLoad - capDry) * clamp(0.18 + 0.42 * uWindErodeA.y, 0.0, 0.85);
           dFine += sur;
           fineLoad -= sur;
         } else if (tC.b > 0.04) {
           // Gentle laminar saltation pickup from windward sand slope (preserves silky smooth stoss!)
-          float pick = min(tC.b * 0.0035, (capDry - fineLoad) * 0.22 * dt * 18.0);
+          float pick = min(tC.b * 0.0035, (capDry - fineLoad) * 0.22 * (0.25 + uWindErodeB.w) * dt * 18.0);
           dFine -= pick;
           fineLoad += pick;
         } else {
           // Windward bedrock abrasion on exposed yardangs
           float abr = min(max(0.0, tC.r - 1.0),
-            uWindParams.z * 0.0035 * stossExpose / (0.35 + 2.4 * hardness) * dt * 20.0);
+            uWindParams.z * 0.0035 * stossExpose * uWindErodeA.x * (0.30 + 0.95 * uWindErodeB.x) / (0.35 + 2.4 * hardness) * dt * 20.0);
           dBedrock -= abr;
           fineLoad += abr;
         }
       }
     } else {
-      float windAligned = clamp(-dot(downDir, windDir) * 0.5 + 0.5, 0.0, 1.0);
-      float capacity = uWindParams.z * 0.055 * (0.35 + 0.65 * speed / 12.0) * (1.0 + 1.4 * max(0.0, rawSlope));
+      float windAligned = clamp(-dot(downDir, gustWindDir) * 0.5 + 0.5, 0.0, 1.0);
+      float capacity = uWindParams.z * 0.055 * (0.35 + 0.65 * speed / 12.0) * (1.0 + 1.4 * max(0.0, rawSlope)) * (0.30 + uWindErodeB.x) * (0.40 + uWindErodeA.y);
       if (totalLoad > capacity) {
         float surplus = totalLoad - capacity;
-        dFine += surplus * (0.55 + 0.45 * uWindParams.w);
+        dFine += surplus * clamp(0.25 + 0.55 * uWindErodeA.y + 0.20 * uWindParams.w, 0.0, 1.0);
         fineLoad = max(0.0, fineLoad - surplus);
         speed *= 0.80;
       } else {
         // Sandblasting plucks fine dust from windward faces (hardness resists)
         float abrasion = min(max(0.0, tC.r - 1.0),
-          uWindParams.z * 0.006 * windAligned * (1.0 + 2.2 * max(0.0, rawSlope)) / (0.30 + 2.2 * hardness) * dt * 24.0);
-        float loose = min(tC.b, abrasion * 1.6 + tC.b * 0.012);
+          uWindParams.z * 0.006 * windAligned * uWindErodeA.x * (0.30 + 0.95 * uWindErodeB.x) * (1.0 + 2.2 * max(0.0, rawSlope)) / (0.30 + 2.2 * hardness) * dt * 24.0);
+        float loose = min(tC.b, abrasion * 1.6 + tC.b * 0.012 * (0.25 + uWindErodeB.w));
         dBedrock -= abrasion;
         dFine -= loose;
         fineLoad += abrasion + loose;
@@ -1543,6 +1557,8 @@ uniform vec4 uBrush;          // (brushX, brushZ, brushRadius, brushMode)
 uniform vec4 uClimate;        // (snowlineNorm, snowfallRate, glacierStrength, meltRate)
 uniform vec4 uHydrology;      // (iceMeltRate, headwaterFlow, lakeRetention, dryAeolianMode)
 uniform vec4 uWindField;      // (windDirX, windDirZ, windSpeed, erosionStrength)
+uniform vec4 uWindErodeA;      // (abrasion rate, lee deposition, turbulence, curtain height)
+uniform vec4 uWindErodeB;      // (sand supply, fluting, streamlining, deflation)
 uniform vec4 uChemInt;        // (dissolution, salt bursting, hydrolysis conversion, master rate)
 uniform float uBrushStrength;
 uniform float uSeed;
@@ -1782,11 +1798,22 @@ void main() {
   }
 
   // ==========================================================================
-  // AEOLIAN WIND EROSION: STOSS-TO-LEE DUNE SALTATION & VENTIFACT ROCK SANDBLASTING!
+  // AEOLIAN WIND EROSION: turbulent, terrain-deflected flow; stoss-to-lee
+  // saltation; lee sheltering; differential sandstone abrasion; basal
+  // saltation-curtain undercutting; and warped vertical fluting. This
+  // replaces the old single-vector ruler cut that grooved mountains in
+  // perfectly straight lines.
   // ==========================================================================
-  if (uWindField.z > 0.08 && water < 0.015 && snowDepth < 0.04 && c.x > 1 && c.x < maxI - 1 && c.y > 1 && c.y < maxI - 1) {
-    vec2 wDir = safeNorm2(uWindField.xy, vec2(1.0, 0.0));
-    float wPow = uWindField.z * (0.35 + 0.65 * uHydrology.w);
+  if (uWindField.z > 0.03 && water < 0.015 && snowDepth < 0.04 && c.x > 1 && c.x < maxI - 1 && c.y > 1 && c.y < maxI - 1) {
+    vec2 baseWindDir = safeNorm2(uWindField.xy, vec2(1.0, 0.0));
+    vec2 windPerp = vec2(-baseWindDir.y, baseWindDir.x);
+    float gustNoiseA = fbm2D(worldXZ * 0.018 + vec2(uSeed * 0.011, -uSeed * 0.007), 3, 0.55);
+    float gustNoiseB = fbm2D(worldXZ * 0.047 + vec2(23.7 - uSeed * 0.005, uSeed * 0.009), 2, 0.50);
+    vec2 localWind = safeNorm2(
+      baseWindDir + windPerp * (((gustNoiseA - 0.5) * 1.45 + (gustNoiseB - 0.5) * 0.55) * uWindErodeA.z),
+      baseWindDir
+    );
+    float windGust = 0.60 + 0.85 * smoothstep(0.25, 0.85, gustNoiseA);
 
     vec4 aR = texelFetch(uTerrainTex, ivec2(c.x + 1, c.y), 0);
     vec4 aL = texelFetch(uTerrainTex, ivec2(c.x - 1, c.y), 0);
@@ -1796,12 +1823,19 @@ void main() {
       (aR.r + aR.g + aR.b) - (aL.r + aL.g + aL.b),
       (aU.r + aU.g + aU.b) - (aD.r + aD.g + aD.b)
     ) / (2.0 * cellSize);
-    // hGrad points upslope: dot(hGrad, wDir) > 0 on windward stoss, < 0 on leeward slipface!
-    float slopeAlongW = dot(hGrad, wDir);
 
-    // Sample upwind & downwind cells for conservative saltation sand transport across dunes
-    vec2 upUv = clamp(vUv - wDir * (1.35 / uIntParams.x), vec2(0.002), vec2(0.998));
-    vec2 dnUv = clamp(vUv + wDir * (1.35 / uIntParams.x), vec2(0.002), vec2(0.998));
+    // Flow bends around cross-wind high ground and into corridors, rather
+    // than crossing every ridge along the same compass vector.
+    float crossSlopeW = dot(hGrad, windPerp);
+    localWind = safeNorm2(
+      localWind - windPerp * clamp(crossSlopeW, -1.2, 1.2) * uWindErodeB.z * 0.18,
+      localWind
+    );
+    float slopeAlongW = dot(hGrad, localWind);
+    float wPow = uWindField.z * (0.55 + 0.45 * uHydrology.w) * windGust;
+
+    vec2 upUv = clamp(vUv - localWind * (1.35 / uIntParams.x), vec2(0.002), vec2(0.998));
+    vec2 dnUv = clamp(vUv + localWind * (1.35 / uIntParams.x), vec2(0.002), vec2(0.998));
     vec4 tUp = sampleGridBilinear(uTerrainTex, upUv, uIntParams.x);
     vec4 tDn = sampleGridBilinear(uTerrainTex, dnUv, uIntParams.x);
 
@@ -1811,26 +1845,81 @@ void main() {
     float upSlopeW = (hHere - hUp) / (1.35 * cellSize);
     float dnSlopeW = (hDn - hHere) / (1.35 * cellSize);
 
-    // Sauermann/Werner wind speed-up on windward stoss & flow separation drop in leeward shadow
-    float emitUp   = smoothstep(-0.14, 0.32, upSlopeW) * min(tUp.b, 0.40);
+    // Multi-distance upwind shelter: a higher ridge a few cells to a few
+    // tens of metres upwind puts this cell in a separated lee wake, where
+    // abrasion collapses and airborne sand preferentially settles.
+    vec4 tShelter1 = sampleGridBilinear(uTerrainTex, clamp(vUv - localWind * (3.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 tShelter2 = sampleGridBilinear(uTerrainTex, clamp(vUv - localWind * (9.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 tShelter3 = sampleGridBilinear(uTerrainTex, clamp(vUv - localWind * (20.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    float hShelter1 = tShelter1.r + tShelter1.g + tShelter1.b;
+    float hShelter2 = tShelter2.r + tShelter2.g + tShelter2.b;
+    float hShelter3 = tShelter3.r + tShelter3.g + tShelter3.b;
+    float shelterSlope = max(
+      (hShelter1 - hHere) / max(3.0 * cellSize, 0.001) - 0.22,
+      max(
+        (hShelter2 - hHere) / max(9.0 * cellSize, 0.001) - 0.22,
+        (hShelter3 - hHere) / max(20.0 * cellSize, 0.001) - 0.22
+      )
+    );
+    float windShadow = smoothstep(0.02, 0.38, shelterSlope) * (0.30 + 0.70 * uWindErodeB.z);
+    float windExposure = 1.0 - 0.82 * windShadow;
+
+    // Sauermann/Werner stoss emission and lee deposition, now driven by the
+    // local gust direction and separated pickup/deposition settings.
+    float emitUp = smoothstep(-0.14, 0.32, upSlopeW) * min(tUp.b, 0.40);
     float emitHere = smoothstep(-0.14, 0.32, dnSlopeW) * min(fine, 0.40);
-    float saltFluxRate = 0.055 * wPow * wPow * dt;
-    float sandIn  = min(tUp.b * 0.16, emitUp * saltFluxRate);
-    float sandOut = min(fine * 0.16, emitHere * saltFluxRate);
+    float saltFluxRate = 0.055 * wPow * wPow * dt * (0.30 + uWindErodeB.x);
+    float sandIn = min(tUp.b * 0.16, emitUp * saltFluxRate)
+                 * (0.25 + uWindErodeA.y)
+                 * (1.0 + windShadow * uWindErodeA.y);
+    float sandOut = min(fine * 0.16, emitHere * saltFluxRate)
+                  * (0.25 + uWindErodeB.w)
+                  * windExposure;
     fine = max(0.0, fine + sandIn - sandOut);
 
-    // Kinetic windward sandblasting on exposed desert rock inselbergs, yardangs & Tassili cliffs!
-    if (fine < 0.10 && slopeAlongW > 0.04) {
+    // Differential rock abrasion: soft/fractured strata and warped vertical
+    // flutes cut faster than hard caprock, while the saltation curtain
+    // preferentially undercuts lower cliff faces, leaving fins and spires.
+    if (uWindErodeA.x > 0.001 && slopeAlongW > 0.03) {
       float wHard = evalRockHardness3D(vec3(worldXZ.x, bedrock, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
-      // Saltation curtain hits hardest 0.5m..28m above desert floor where sand grains bounce!
-      float saltationCurtain = 1.0 - smoothstep(0.08, 0.48, elevN);
-      float sandSupply = 0.35 + 0.65 * smoothstep(0.01, 0.25, tUp.b + aL.b + aR.b + aU.b + aD.b);
-      float abrade = wPow * uWindField.w * slopeAlongW * (0.40 + 0.60 * saltationCurtain) * sandSupply
-                   * 0.016 * dt / (0.28 + 2.3 * wHard);
+      float sandShield = 1.0 - smoothstep(0.06, 0.45, fine);
+      float avgNeighbourH = 0.25 * (
+        (aR.r + aR.g + aR.b) + (aL.r + aL.g + aL.b) +
+        (aU.r + aU.g + aU.b) + (aD.r + aD.g + aD.b)
+      );
+      float convexityW = clamp((hHere - avgNeighbourH) / max(cellSize, 0.001) * 0.18, -0.4, 1.2);
+      float faceExposure = clamp(
+        0.18 + 0.95 * smoothstep(0.03, 0.75, slopeAlongW) + 0.35 * max(convexityW, 0.0),
+        0.0, 1.45
+      );
+
+      float upwindBase = min(min(hUp, hShelter1), min(hShelter2, hShelter3));
+      float localReliefN = clamp(max(hHere - upwindBase, 0.0) / reliefScale, 0.0, 1.25);
+      float curtainCentre = mix(0.035, 0.30, uWindErodeA.w);
+      float curtainWidth = mix(0.055, 0.24, uWindErodeA.w);
+      float curtainDist = (localReliefN - curtainCentre) / curtainWidth;
+      float saltationCurtain = 0.24 + 0.76 * exp(-curtainDist * curtainDist);
+
+      float alongWindCoord = dot(worldXZ, localWind);
+      float crossWindCoord = dot(worldXZ, windPerp);
+      float fluteWarp = (fbm2D(vec2(alongWindCoord * 0.012, bedrock * 0.018) + vec2(uSeed * 0.013, 7.3), 3, 0.52) - 0.5) * 18.0;
+      float fluteNoise = ridgedFbm2D(
+        vec2((crossWindCoord + fluteWarp) * 0.105, bedrock * 0.040 + alongWindCoord * 0.006) + vec2(11.1, uSeed * 0.017),
+        3, 0.55
+      );
+      float fluteGate = mix(1.0, 0.42 + 1.35 * smoothstep(0.42, 0.90, fluteNoise), uWindErodeB.y);
+
+      float localSand = smoothstep(0.01, 0.25, tUp.b + aL.b + aR.b + aU.b + aD.b);
+      float sandSupply = clamp((0.18 + 0.95 * uWindErodeB.x) * 0.55 + localSand * 0.65, 0.0, 1.60);
+      float hardnessResist = 0.22 + 2.70 * wHard * wHard;
+      float abrade = wPow * uWindErodeA.x * faceExposure * windExposure * sandShield
+                   * saltationCurtain * fluteGate * sandSupply * armour
+                   * 0.020 * dt / hardnessResist;
       float rockLoss = min(max(0.0, bedrock - 1.0), abrade);
+      float coarseFrac = mix(0.06, 0.30, smoothstep(0.35, 1.25, length(hGrad)));
       bedrock = max(1.0, bedrock - rockLoss);
-      fine += rockLoss * 0.85;
-      coarse += rockLoss * 0.15;
+      fine += rockLoss * (1.0 - coarseFrac);
+      coarse += rockLoss * coarseFrac;
     }
   }
 
