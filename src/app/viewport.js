@@ -71,6 +71,7 @@ export class RockStudioViewport {
       uUseVertexAlbedo: { value: 0.0 },
       uDebugMode: { value: 0 },
       uFabricType: { value: 0 },
+      uChemStrength: { value: 1.0 },
     };
     this.hasCustomAlbedo = false;
     this.manualLithologyOverride = false;
@@ -313,6 +314,7 @@ export class RockStudioViewport {
       shader.uniforms.uUseVertexAlbedo = this.shaderUniforms.uUseVertexAlbedo;
       shader.uniforms.uDebugMode = this.shaderUniforms.uDebugMode;
       shader.uniforms.uFabricType = this.shaderUniforms.uFabricType;
+      shader.uniforms.uChemStrength = this.shaderUniforms.uChemStrength;
 
       shader.vertexShader = shader.vertexShader
         .replace(
@@ -320,8 +322,10 @@ export class RockStudioViewport {
           `#include <common>
            attribute vec4 aRockMask;
            attribute vec3 aRockAlbedo;
+           attribute vec2 aRockStain;
            varying vec4 vRockMask;
            varying vec3 vRockAlbedo;
+           varying vec2 vRockStain;
            varying vec3 vWorldNormalViz;
            varying vec3 vRockWorldPos;`
         )
@@ -330,6 +334,7 @@ export class RockStudioViewport {
           `#include <begin_vertex>
            vRockMask = aRockMask;
            vRockAlbedo = aRockAlbedo;
+           vRockStain = aRockStain;
            vWorldNormalViz = normalize(mat3(modelMatrix) * objectNormal);
            vRockWorldPos = (modelMatrix * vec4(transformed, 1.0)).xyz;`
         );
@@ -340,8 +345,10 @@ export class RockStudioViewport {
           `#include <common>
            varying vec4 vRockMask;
            varying vec3 vRockAlbedo;
+           varying vec2 vRockStain;
            varying vec3 vWorldNormalViz;
            varying vec3 vRockWorldPos;
+           uniform float uChemStrength;
            uniform float uCurvatureStrength;
            uniform float uAoStrength;
            uniform float uUseVertexAlbedo;
@@ -416,6 +423,23 @@ export class RockStudioViewport {
            diffuseColor.rgb = (diffuseColor.rgb + vec3(edgeCatch)) * cavityDark;`
         )
         .replace(
+          '#include <map_fragment>',
+          `#include <map_fragment>
+           // Chemical weathering: baked iron-rust & copper-patina stain flow
+           if (uChemStrength > 0.001) {
+             float feS = clamp(vRockStain.x, 0.0, 1.0) * uChemStrength;
+             float cuS = clamp(vRockStain.y, 0.0, 1.0) * uChemStrength;
+             if (feS > 0.004) {
+               vec3 rust = mix(vec3(0.46, 0.21, 0.06), vec3(0.15, 0.06, 0.03), smoothstep(0.35, 0.9, feS));
+               diffuseColor.rgb = mix(diffuseColor.rgb, rust, smoothstep(0.05, 0.7, feS) * 0.88);
+             }
+             if (cuS > 0.004) {
+               vec3 patina = mix(vec3(0.14, 0.48, 0.38), vec3(0.08, 0.26, 0.52), smoothstep(0.4, 0.95, cuS));
+               diffuseColor.rgb = mix(diffuseColor.rgb, patina, smoothstep(0.05, 0.7, cuS) * 0.85);
+             }
+           }`
+        )
+        .replace(
           '#include <aomap_fragment>',
           `#include <aomap_fragment>
            float vtxAO = mix(1.0, vRockMask.x, uAoStrength);
@@ -465,6 +489,8 @@ export class RockStudioViewport {
       ? meshData.albedos
       : new Float32Array(vCount * 3).fill(0.5);
     geometry.setAttribute('aRockAlbedo', new THREE.BufferAttribute(albedoArr, 3));
+    const stainArr = meshData.stains ? meshData.stains : new Float32Array(vCount * 2);
+    geometry.setAttribute('aRockStain', new THREE.BufferAttribute(stainArr, 2));
     geometry.setIndex(new THREE.BufferAttribute(meshData.indices, 1));
     geometry.computeBoundingSphere();
 
@@ -519,10 +545,12 @@ export class RockStudioViewport {
   _applyShadingUniforms() {
     const mode = this.shadingMode;
     this.shaderUniforms.uUseVertexAlbedo.value = 0.0;
+    this.shaderUniforms.uChemStrength.value = 1.0;
     if (mode === 'pure-clay') {
       this.rockMaterial.color.set(LITHOLOGY_PALETTES.pureClay.color);
       this.rockMaterial.roughness = LITHOLOGY_PALETTES.pureClay.roughness;
       this.shaderUniforms.uCurvatureStrength.value = 0.0;
+      this.shaderUniforms.uChemStrength.value = 0.0; // pure clay stays unstained
       this.shaderUniforms.uAoStrength.value = 0.85;
       this.shaderUniforms.uDebugMode.value = 0;
     } else if (mode === 'lithology') {

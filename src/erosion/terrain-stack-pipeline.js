@@ -1099,6 +1099,7 @@ export class TerrainStackPipeline {
       gl.uniform1i(gl.getUniformLocation(this.engine.progRockInstance, 'uMaterialTheme'), this.engine._themeCode());
       gl.uniform1i(gl.getUniformLocation(this.engine.progRockInstance, 'uFabricMode'), this.engine._fabricCode());
       gl.uniform1f(gl.getUniformLocation(this.engine.progRockInstance, 'uSeed'), p.seed);
+      gl.uniform1f(gl.getUniformLocation(this.engine.progRockInstance, 'uChemWeather'), p.chemicalWeathering ?? 0.7);
 
       gl.bindBuffer(gl.ARRAY_BUFFER, this.engine.rockInstVbo);
       const subs = this.engine.rockCalving.atlas.submeshes;

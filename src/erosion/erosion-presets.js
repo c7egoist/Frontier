@@ -796,6 +796,7 @@ export const DEFAULT_EROSION_PARAMS = {
   sdfFeaturePreset: 'escarpment', // Enabled by default so user immediately sees 3D SDF Escarpment + Rocks on terrain!
   showOutcrops: true,
   boulderDensity: 0.65,
+  chemicalWeathering: 0.7,  // rust-bleed & copper-patina staining strength on boulders/outcrops
 
   // Layer Stack Visual & Structural Layer Controls (defaults preserve 100% identical terrain & shading output!)
   strataLayerEnabled: true,

@@ -37,6 +37,9 @@ function parseArgs(argv) {
     else if (a === '--rain' && argv[i + 1]) opts.rainErosionAmount = Number(argv[++i]);
     else if (a === '--rain-droplets' && argv[i + 1]) opts.rainDroplets = Number(argv[++i]);
     else if (a === '--rain-edge' && argv[i + 1]) opts.rainEdgeProtection = Number(argv[++i]);
+    else if (a === '--chem' && argv[i + 1]) opts.chemAmount = Number(argv[++i]);
+    else if (a === '--iron' && argv[i + 1]) opts.ironContent = Number(argv[++i]);
+    else if (a === '--copper' && argv[i + 1]) opts.copperContent = Number(argv[++i]);
     else if (a === '--out' && argv[i + 1]) opts.out = argv[++i];
     else if (a === '--lods') opts.lods = true;
     else if (a === '--help' || a === '-h') {
@@ -76,5 +79,9 @@ if (opts.lods) {
   if (res.stats.rainErosion) {
     const re = res.stats.rainErosion;
     console.log(`        rain: ${re.droplets} droplets | eroded ${re.erodedM3} m3 | deposited ${re.depositedM3} m3 | ${re.elapsedMs}ms`);
+  }
+  if (res.stats.chemicalStaining) {
+    const cs = res.stats.chemicalStaining;
+    console.log(`        chem: rust on ${(cs.stainedFracFe * 100).toFixed(1)}% of surface | patina ${(cs.stainedFracCu * 100).toFixed(1)}% | ${cs.elapsedMs}ms`);
   }
 }

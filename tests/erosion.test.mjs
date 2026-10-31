@@ -1488,3 +1488,16 @@ test('Sediment/water transport feels boulders: obstacle field diverts flow, bank
   const binds = engSrc.split("'uRockObstacleTex', this.obstacleTex[this.obstacleIdx]").length - 1;
   assert.ok(binds >= 6, `Obstacle texture must bind into particle/flux/integrate/talus x2/cryo passes (found ${binds})`);
 });
+
+test('Chemical weathering on Terrain Studio boulders: rust bleed & copper patina shader + plumbing', () => {
+  assert.ok(Shaders.ROCK_INSTANCE_FRAG.includes('uniform float uChemWeather'), 'Rock shader takes chemical weathering strength');
+  assert.ok(Shaders.ROCK_INSTANCE_FRAG.includes('ironRich') && Shaders.ROCK_INSTANCE_FRAG.includes('copperRich'),
+    'Per-instance iron/copper mineralogy from seed hash');
+  assert.ok(Shaders.ROCK_INSTANCE_FRAG.includes('uMaterialTheme != 7'), 'No oxidation on the airless lunar theme');
+  assert.ok(Shaders.ROCK_INSTANCE_VERT.includes('vInstCentre'), 'Seep columns anchored to the rigid-body centre');
+  assert.ok(typeof DEFAULT_EROSION_PARAMS.chemicalWeathering === 'number', 'chemicalWeathering param exists');
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  assert.ok(engSrc.includes("'uChemWeather'"), 'Engine sets uChemWeather');
+  assert.ok(pipeSrc.includes("'uChemWeather'"), 'Pipeline sets uChemWeather');
+});

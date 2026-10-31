@@ -35,6 +35,9 @@ const SLIDER_SCHEMA = {
     { key: 'rainErosionAmount', label: 'Rainfall Erosion Amount', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'rainDroplets',      label: 'Raindrop Count',          min: 0, max: 24000, step: 500, fmt: (v) => `${(Number(v) / 1000).toFixed(1)}k` },
     { key: 'rainEdgeProtection', label: 'Sharp Edge Protection',  min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'chemAmount',    label: 'Chemical Weathering (Rust/Patina)', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'ironContent',   label: 'Iron Content (Rust Stain)',         min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'copperContent', label: 'Copper Content (Blue Patina)',      min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
   ],
 };
 
@@ -46,6 +49,7 @@ const state = {
   params: resolveParams({
     archetype: 'desert-arch', seed: 4029, quality: 'medium', decimation: 1.0,
     rainErosionAmount: 0.5, rainDroplets: 8000, rainEdgeProtection: 0.7,
+    chemAmount: 0.65, ironContent: 0.55, copperContent: 0.18,
   }),
   categoryFilter: 'All',
   latestResult: null,
@@ -317,6 +321,14 @@ function initTerrainStudio() {
     });
   }
 
+  const chemSlider = document.getElementById('tp-chem');
+  if (chemSlider) {
+    chemSlider.value = erosionEngine.params.chemicalWeathering ?? 0.7;
+    chemSlider.addEventListener('input', () => {
+      erosionEngine.params.chemicalWeathering = Number(chemSlider.value);
+    });
+  }
+
   const playBtn = document.getElementById('btn-er-play');
   const syncPlayBtn = () => {
     const running = Boolean(erosionEngine.pipeline.liveSimRunning);
@@ -517,6 +529,9 @@ function selectArchetype(archId) {
     quality: state.params.quality,
     decimation: state.params.decimation,
     rainErosionAmount: state.params.rainErosionAmount ?? 0.5,
+    chemAmount: state.params.chemAmount ?? 0.65,
+    ironContent: state.params.ironContent ?? 0.55,
+    copperContent: state.params.copperContent ?? 0.18,
     rainDroplets: state.params.rainDroplets ?? 8000,
     rainEdgeProtection: state.params.rainEdgeProtection ?? 0.7,
     ...(state.params.customArchCurves ? { customArchCurves: state.params.customArchCurves } : {}),

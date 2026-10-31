@@ -1667,6 +1667,7 @@ export class GpuErosionEngine {
       gl.uniform1i(gl.getUniformLocation(this.progRockInstance, 'uMaterialTheme'), this._themeCode());
       gl.uniform1i(gl.getUniformLocation(this.progRockInstance, 'uFabricMode'), this._fabricCode());
       gl.uniform1f(gl.getUniformLocation(this.progRockInstance, 'uSeed'), p.seed);
+      gl.uniform1f(gl.getUniformLocation(this.progRockInstance, 'uChemWeather'), p.chemicalWeathering ?? 0.7);
 
       gl.bindBuffer(gl.ARRAY_BUFFER, this.rockInstVbo);
       const subs = this.rockCalving.atlas.submeshes;

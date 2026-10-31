@@ -301,6 +301,26 @@ export function renderFormationPng(mesh, dims, options = {}) {
           bG = w0 * albs[i0 * 3 + 1] + w1 * albs[i1 * 3 + 1] + w2 * albs[i2 * 3 + 1];
           bB = w0 * albs[i0 * 3 + 2] + w1 * albs[i1 * 3 + 2] + w2 * albs[i2 * 3 + 2];
         }
+        if (!pureClay && mesh.stains) {
+          const stn = mesh.stains;
+          const fe = w0 * stn[i0 * 2] + w1 * stn[i1 * 2] + w2 * stn[i2 * 2];
+          const cu = w0 * stn[i0 * 2 + 1] + w1 * stn[i1 * 2 + 1] + w2 * stn[i2 * 2 + 1];
+          const sstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+          if (fe > 0.004) {
+            const k = sstep(0.35, 0.9, fe);
+            const m = sstep(0.05, 0.7, fe) * 0.88;
+            bR += ((0.46 + (0.15 - 0.46) * k) - bR) * m;
+            bG += ((0.21 + (0.06 - 0.21) * k) - bG) * m;
+            bB += ((0.06 + (0.03 - 0.06) * k) - bB) * m;
+          }
+          if (cu > 0.004) {
+            const k = sstep(0.4, 0.95, cu);
+            const m = sstep(0.05, 0.7, cu) * 0.85;
+            bR += ((0.14 + (0.08 - 0.14) * k) - bR) * m;
+            bG += ((0.48 + (0.26 - 0.48) * k) - bG) * m;
+            bB += ((0.38 + (0.52 - 0.38) * k) - bB) * m;
+          }
+        }
         const albR = (bR + edgeLift) * cavDark;
         const albG = (bG + edgeLift) * cavDark;
         const albB = (bB + edgeLift * 0.95) * cavDark;

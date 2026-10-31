@@ -16,6 +16,7 @@ import { createTectonicField } from './tectonics.js';
 import { buildMacroFormation } from './formations.js';
 import { createGeologicalSdfEvaluator } from './surface-detail.js';
 import { erodeSdfWithRain } from './rain-erosion.js';
+import { computeChemicalStains } from './chemical-staining.js';
 
 export function generateRockFormation(rawParams = {}, onProgress = null) {
   const t0 = performance.now();
@@ -142,6 +143,26 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
     pos[i + 2] += shiftZ;
   }
 
+  // Chemical weathering stains (opt-in; Rock Studio enables by default):
+  // dissolved Fe/Cu routed down the finished mesh by steepest descent,
+  // depositing rust/patina along real drainage lines. Attribute-only --
+  // geometry is untouched, so this runs after decimation on the final mesh.
+  let chemStats = null;
+  const chemAmount = params.chemAmount ?? 0;
+  if (chemAmount > 0.001) {
+    if (onProgress) onProgress(0.97, 'Chemical weathering (iron & copper stain flow)...');
+    const cs = computeChemicalStains(finalMesh, {
+      amount: chemAmount,
+      iron: params.ironContent ?? 0.55,
+      copper: params.copperContent ?? 0.18,
+      seed: params.seed,
+    });
+    finalMesh.stains = cs.stains;
+    chemStats = cs.stats;
+  } else {
+    finalMesh.stains = null;
+  }
+
   const elapsedMs = Math.round(performance.now() - t0);
 
   if (onProgress) onProgress(1.0, 'Ready');
@@ -165,6 +186,7 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
             elapsedMs: rainStats.elapsedMs,
           }
         : null,
+      chemicalStaining: chemStats,
       gridDims: [sdf.nx, sdf.ny, sdf.nz],
       activeBricks: sdf.activeBrickCoords.length / 4,
       rawTriangles: rawTriCount,

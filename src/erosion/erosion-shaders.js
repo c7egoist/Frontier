@@ -2841,6 +2841,7 @@ out vec3 vWorldPos;
 out vec3 vWorldNormal;
 out vec4 vMask;
 out vec3 vInstMeta; // (seedHash, wear, isOutcrop)
+out vec3 vInstCentre;
 
 void main() {
   // Real rigid bodies: the CPU physics integrator owns the world position.
@@ -2859,6 +2860,7 @@ void main() {
   vWorldPos = wp;
   vMask = aMask;
   vInstMeta = vec3(aInstCol0.w, aInstCol1.w, aInstPosMeta.w);
+  vInstCentre = aInstPosMeta.xyz;
   gl_Position = uViewProj * vec4(wp, 1.0);
 }
 `;
@@ -2870,6 +2872,7 @@ in vec3 vWorldPos;
 in vec3 vWorldNormal;
 in vec4 vMask;
 in vec3 vInstMeta;
+in vec3 vInstCentre;
 
 layout(location = 0) out vec4 outColor;
 
@@ -2886,6 +2889,7 @@ uniform int uViewMode;
 uniform int uMaterialTheme;
 uniform int uFabricMode;
 uniform float uSeed;
+uniform float uChemWeather;
 
 ${COMMON_GEOLOGY_GLSL}
 
@@ -2931,6 +2935,48 @@ void main() {
   // (uFabricMode accepted for compatibility, intentionally unused).
   vec3 albedo = mix(softCol, hardCol, clamp(hardness * 0.85 + vInstMeta.x * 0.25, 0.0, 1.0));
   albedo *= (1.0 + 0.08 * vMask.z - 0.14 * vMask.y);
+
+  // Chemical weathering: iron rust bleeding & copper patina. Mineral content
+  // is per-instance (seed hash); seeps start at joints/concavities and streak
+  // DOWN near-vertical faces in hashed seep columns anchored to the body.
+  // No oxidation without water + oxygen: the lunar theme (7) is exempt, wet
+  // lowlands stain faster than snowy heights. Flat two-tone mineral colours
+  // (dark wet core -> ochre / malachite halo), no noise grain.
+  if (uChemWeather > 0.001 && uMaterialTheme != 7) {
+    float h1 = fract(vInstMeta.x * 7.313);
+    float h2 = fract(vInstMeta.x * 13.727 + 0.371);
+    float h3 = fract(vInstMeta.x * 5.179 + 0.613);
+    float themeIron = (uMaterialTheme == 3 || uMaterialTheme == 5 || uMaterialTheme == 6 || uMaterialTheme == 9) ? 1.15
+                    : (uMaterialTheme == 2 ? 0.55 : 0.9);
+    float ironRich = clamp(smoothstep(0.30, 0.92, h1) * themeIron, 0.0, 1.0);
+    float copperRich = smoothstep(0.84, 0.97, h2); // ~1 in 8 boulders copper-bearing
+    vec3 local = vWorldPos - vInstCentre;
+    float side = smoothstep(0.15, 0.60, 1.0 - abs(N.y));
+    vec2 tang = vec2(-N.z, N.x);
+    float u = dot(local.xz, tang / max(length(tang), 1e-4));
+    float cols = 0.0;
+    cols += 0.85 * exp(-pow((u - (h1 - 0.5) * 7.0) / (0.16 + 0.30 * h3), 2.0));
+    cols += 0.65 * exp(-pow((u - (h2 - 0.5) * 7.0) / (0.12 + 0.26 * h1), 2.0));
+    cols += 0.50 * exp(-pow((u - (h3 - 0.5) * 7.0) / (0.20 + 0.34 * h2), 2.0));
+    float drop = clamp(0.5 - 0.5 * vMask.w, 0.0, 1.0); // 0 crown -> 1 base
+    float run = smoothstep(0.04, 0.40, drop) * (1.0 - 0.30 * drop);
+    float seep = 0.45 + 0.85 * vMask.z + 0.55 * (1.0 - vMask.x);
+    float wetHist = (0.55 + 0.45 * smoothstep(0.0, 0.22, tCell.a))
+                  * (1.0 - 0.45 * smoothstep(0.0, 1.6, snowCell.r + snowCell.g * 0.4));
+    float streak = clamp(side * run * seep * wetHist, 0.0, 1.5);
+    float rustAmt = clamp(cols * streak * ironRich, 0.0, 1.2) * uChemWeather;
+    float cuAmt = clamp(cols * streak * copperRich * 1.15, 0.0, 1.2) * uChemWeather;
+    float rind = ironRich * (0.25 + 0.75 * vInstMeta.y) * uChemWeather;
+    albedo = mix(albedo, albedo * vec3(1.10, 0.84, 0.66), 0.38 * rind);
+    if (rustAmt > 0.01) {
+      vec3 rust = mix(vec3(0.42, 0.18, 0.05), vec3(0.14, 0.06, 0.03), smoothstep(0.35, 0.95, rustAmt));
+      albedo = mix(albedo, rust, smoothstep(0.06, 0.70, rustAmt) * 0.88);
+    }
+    if (cuAmt > 0.01) {
+      vec3 patina = mix(vec3(0.10, 0.38, 0.30), vec3(0.07, 0.22, 0.45), smoothstep(0.35, 0.95, cuAmt) * (0.35 + 0.65 * h3));
+      albedo = mix(albedo, patina, smoothstep(0.06, 0.70, cuAmt) * 0.85);
+    }
+  }
 
   // Icelandic moss on upward-facing settled boulders & damp outcrops
   if ((uMaterialTheme == 1 || uMaterialTheme == 4 || uMaterialTheme == 8) && N.y > 0.45) {

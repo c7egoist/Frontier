@@ -16,6 +16,7 @@ self.onmessage = (event) => {
       mesh.indices.buffer,
     ];
     if (mesh.albedos) transferList.push(mesh.albedos.buffer);
+    if (mesh.stains) transferList.push(mesh.stains.buffer);
 
     self.postMessage(
       {
@@ -30,6 +31,7 @@ self.onmessage = (event) => {
           uvs: mesh.uvs,
           colors: mesh.colors,
           albedos: mesh.albedos || null,
+          stains: mesh.stains || null,
           hasCustomAlbedo: !!mesh.hasCustomAlbedo,
           indices: mesh.indices,
         },
