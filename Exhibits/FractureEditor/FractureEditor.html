@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<!--====================================================================================================================================
+                                                      FRACTUREEDITOR.HTML
+====================================================================================================================================-->
+<!-- 🧩 Frontier Fracture Editor — standalone interactive studio. Realtime + Baked fracture, rigid-body debris,
+     SceneDirectory (outliner) + Viewport + SceneInspector workstation, Sun / Atmosphere / Clouds infographic
+     inspectors. Styled directly from SourceImages/General UI (biometric bento, fleet telemetry, facial spatial
+     telemetry, X-ray archive). All computation is Canvas2D / analytical — no Three.js dependency required. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Frontier — Fracture Editor</title>
+<style>
+/*====================================================================================================================================
+                                                       TOKENS
+====================================================================================================================================*/
+:root{
+  /* --- SourceImages/General UI derived palette (chartreuse biometric pill #e9f038, obsidian bento) --- */
+  --ground:     #0a0a0b;
+  --column:     #111214;
+  --column-2:   #0c0c0e;
+  --edge:       #232327;
+  --hair:       rgba(255,255,255,.05);
+  --hair-s:     rgba(255,255,255,.09);
+  --ink:        #ececf0;
+  --soft:       #b4b4b4;
+  --muted:      #7d7d7d;
+  --faint:      #55555d;
+
+  /* chartreuse active / sage-lime from SourceImages img 1 & img 4 */
+  --accent:     #e9f038;
+  --accent-dim: rgba(233,240,56,.14);
+  --accent-v:   #cde286;
+
+  /* surface states */
+  --menu:       #17171a;
+  --menu-2:     #101012;
+  --rail-sel:   #232327;
+  --tile:       #1d1d21;
+  --tile-hi:    #26262b;
+
+  /* widgets */
+  --track-bg:   #2f2f33;
+  --track-fill: #8a8a8e;
+  --knob:       #f4f4f5;
+  --outline:    rgba(255,255,255,.18);
+  --row-h:      38px;
+
+  /* classification / fracture hues */
+  --hue-fracture:#ff7ab8;
+  --hue-sun:     #ffd166;
+  --hue-atmos:   #7ec8ff;
+  --hue-clouds:  #37d6d6;
+  --hue-debris:  #ff6b6b;
+  --warn:        #e0a24a;
+  --fail:        #ff6b6b;
+  --ok:          #3ec46d;
+
+  --mono: "JetBrains Mono", Consolas, "Courier New", monospace;
+  color-scheme: dark;
+}
+
+/*====================================================================================================================================
+                                                       BASE
+====================================================================================================================================*/
+*{ box-sizing:border-box; margin:0; padding:0; }
+html,body{ width:100%; height:100%; overflow:hidden; background:var(--ground); color:var(--ink);
+  font:400 13px/1.35 "DM Sans", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  user-select:none; -webkit-font-smoothing:antialiased; }
+button,input,select{ font:inherit; color:inherit; background:none; border:0; cursor:pointer; }
+button:disabled{ opacity:.45; cursor:default; }
+a{ color:inherit; text-decoration:none; }
+.no-bar{ scrollbar-width:none; -ms-overflow-style:none; }
+.no-bar::-webkit-scrollbar{ width:0; height:0; }
+
+/*====================================================================================================================================
+                                                       SHELL
+====================================================================================================================================*/
+#shell{
+  position:absolute; inset:0;
+  display:grid;
+  grid-template-columns: 304px minmax(0,1fr) 428px;
+  grid-template-rows: minmax(0,1fr) 30px;
+  grid-template-areas: "outliner viewport inspector" "status status status";
+}
+.column{ min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--column); }
+
+#outliner{ grid-area:outliner; border-right:1px solid var(--edge); }
+#viewport{ grid-area:viewport; position:relative; background:#050506; overflow:hidden; }
+#inspector{ grid-area:inspector; border-left:1px solid var(--edge); overflow-y:auto; overflow-x:hidden; }
+
+#status{ grid-area:status; flex:none; height:30px; display:flex; align-items:center; gap:10px;
+  padding:0 12px; background:linear-gradient(transparent, rgba(0,0,0,.55));
+  border-top:1px solid var(--hair); font-size:11px; color:var(--muted); }
+
+/* top rail per column */
+.column-head{ flex:0 0 auto; height:46px; display:flex; align-items:center; gap:10px;
+  padding:0 12px; background:var(--menu-2); border-bottom:1px solid var(--hair); }
+.column-head .h-ic{ width:24px; height:24px; flex:0 0 auto; color:var(--ink);
+  background:#000; border-radius:6px; display:grid; place-items:center; font-size:12px; }
+.column-head .h-txt{ flex:1; min-width:0; font-size:13px; font-weight:600; letter-spacing:.2px; }
+.column-head .h-txt .h-sub{ font-size:10.5px; color:var(--faint); font-weight:500; }
+
+/*====================================================================================================================================
+                                                      OUTLINER (Left)
+====================================================================================================================================*/
+.outliner-body{ flex:1; overflow-y:auto; overflow-x:hidden; padding:14px 12px 0; }
+.brand{ display:flex; align-items:center; gap:9px; margin-bottom:14px; }
+.brand .b-sym{ width:20px; height:20px; color:var(--accent-v); }
+.brand .b-word{ font:600 14px/1 "DM Sans"; letter-spacing:.1px; }
+.brand .b-dot{ color:var(--accent); font-weight:700; }
+.brand .b-ver{ margin-left:6px; font:500 9.5px/1 var(--mono); color:var(--faint); }
+
+.sc-lbl{ font:600 11px/1; letter-spacing:.14px; color:var(--soft); margin-bottom:8px; }
+.sc-lbl .sd{ display:inline-flex; align-items:center; gap:6px; }
+.dot{ width:8px; height:8px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); }
+
+.sc-ttl{ font:700 15px/1 var(--mono); letter-spacing:.3px; margin-bottom:10px; }
+.sc-ttl .ext{ font-weight:400; font-size:11px; color:var(--faint); margin-left:6px; }
+
+.tiles{ display:flex; gap:8px; margin-bottom:14px; }
+.tile{ flex:1; height:44px; display:flex; align-items:center; gap:9px; padding:0 10px;
+  background:var(--tile); border:1px solid var(--edge); border-radius:10px; }
+.tile .ti{ width:14px; height:14px; color:var(--ink); border-radius:4px; background:#000; display:grid; place-items:center; font-size:10px; }
+.tile .tc{ flex:1; min-width:0; }
+.tile .tc .cap{ font:500 10px/1; color:var(--muted); }
+.tile .tc .val{ font:700 16px/1 var(--mono); color:var(--ink); }
+
+.out-h{ margin-top:14px; font:600 12px/1; color:var(--soft); letter-spacing:.1px; margin-bottom:8px;
+  display:flex; align-items:center; gap:8px; }
+.out-h .hc{ width:12px; height:12px; color:var(--accent-v); border-radius:3px; background:#000; display:grid; place-items:center; font-size:9px; }
+
+input[type="search"]{ width:100%; height:32px; padding:0 10px 0 30px; background:var(--menu); border:1px solid var(--edge);
+  border-radius:10px; color:var(--ink); font-size:12px; margin-bottom:12px; }
+input[type="search"]:focus{ outline:0; border-color:var(--accent-v); }
+
+.group{ margin-bottom:8px; }
+.group-label{ width:100%; display:flex; align-items:center; gap:8px; padding:6px 10px; background:var(--tile);
+  border:1px solid var(--edge); border-radius:8px; font:600 11px/1; color:var(--ink); cursor:pointer; text-align:left; }
+.group-label .cg{ font-size:10px; color:var(--muted); margin-left:auto; font-variant-numeric:tabular-nums; }
+
+.tree{ margin-top:8px; }
+.tree-row{ height:32px; display:flex; align-items:center; gap:8px; padding:0 10px; border-radius:6px;
+  font:500 12px/1; color:var(--soft); cursor:pointer; position:relative; }
+.tree-row.nested{ padding-left:26px; }
+.tree-row.selected{ background:var(--rail-sel); color:var(--ink); border-left:2px solid var(--accent-v); }
+.tree-row.is-off{ opacity:.5; color:var(--faint); }
+.ob-ic{ width:16px; height:16px; color:var(--ink); border-radius:4px; background:#000; display:grid; place-items:center; font-size:11px; flex:none; }
+.row-meta{ font-variant-numeric:tabular-nums; color:var(--muted); font-size:11px; margin-left:auto; }
+.row-state{ width:6px; height:6px; border-radius:50%; background:var(--ok); margin-left:8px; flex:none; }
+.row-eye{ width:22px; height:22px; color:var(--ink); border-radius:5px; background:rgba(255,255,255,.06); display:grid; place-items:center; font-size:11px; margin-left:auto; }
+
+.out-bottom{ flex:none; height:46px; border-top:1px solid var(--hair); margin-top:12px; padding:8px 12px;
+  background:linear-gradient(transparent, rgba(0,0,0,.6)); display:flex; align-items:center; gap:10px; }
+.w-ic{ width:18px; height:18px; color:var(--ink); border-radius:5px; background:#000; display:grid; place-items:center; font-size:11px; }
+.out-bottom .t{ flex:1; font-size:11px; color:var(--ink); }
+.out-bottom .t s{ font-weight:400; font-size:10px; color:var(--faint); display:block; }
+
+/*====================================================================================================================================
+                                                      VIEWPORT (Centre)
+====================================================================================================================================*/
+.viewport-stage{ position:absolute; inset:0; overflow:hidden; background:#050506; }
+.view-floor{
+  position:absolute; inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.025) 1px, transparent 1px),
+    linear-gradient(rgba(255,255,255,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,.05) 1px, transparent 1px);
+  background-size:26px 26px,26px 26px,130px 130px,130px 130px;
+  mask-image:radial-gradient(ellipse 70% 62% at 50% 52%, #000 28%, transparent 100%);
+  pointer-events:none; }
+.view-glow{ position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(ellipse 55% 48% at 50% 46%, rgba(91,140,255,.04), transparent 68%); }
+
+.view-bar{ flex:0 0 auto; height:40px; display:flex; align-items:center; gap:9px; padding:0 13px;
+  background:linear-gradient(transparent, rgba(0,0,0,.45)); position:absolute; top:0; left:0; right:0; z-index:20; }
+.pill{ display:flex; align-items:center; gap:8px; height:26px; padding:0 11px; background:var(--tile);
+  border:1px solid var(--edge); border-radius:999px; font-size:11px; color:var(--soft); }
+.pill.on{ background:color-mix(in srgb, var(--accent) 12%, transparent); border-color:color-mix(in srgb, var(--accent) 45%, transparent);
+  color:var(--ink); }
+.pill kbd{ background:var(--track-bg); border:1px solid var(--edge); border-radius:4px; padding:1px 6px; font-family:var(--mono);
+  font-size:9.5px; color:var(--muted); font-weight:700; }
+.pill.on kbd{ background:rgba(233,240,56,.2); border-color:rgba(233,240,56,.45); color:var(--ink); }
+
+.view-foot{ position:absolute; left:0; right:0; bottom:0; height:28px; display:flex; align-items:center; gap:9px;
+  padding:0 13px; background:linear-gradient(transparent, rgba(0,0,0,.55)); z-index:20;
+  font-size:10.5px; color:var(--faint); }
+.foot-btn{ width:26px; height:26px; border-radius:6px; background:var(--tile); border:1px solid var(--edge);
+  color:var(--ink); display:grid; place-items:center; font-size:12px; }
+.foot-ctrl{ height:26px; display:flex; align-items:center; gap:7px; background:var(--tile); border:1px solid var(--edge);
+  border-radius:999px; padding:0 10px; margin-left:auto; }
+.foot-ctrl button{ width:22px; height:22px; border-radius:50%; background:#000; color:var(--soft); font-size:10px; }
+.foot-ctrl .play{ width:46px; height:26px; border-radius:999px; background:var(--accent); color:#000; font-weight:700;
+  font-size:11px; letter-spacing:.3px; }
+.foot-ctrl .play.paused{ background:var(--track-bg); color:var(--ink); }
+.foot-scrub{ flex:1; height:4px; background:var(--track-bg); border-radius:2px; position:relative; margin:0 10px; }
+.foot-prog{ position:absolute; left:0; top:0; bottom:0; width:38%; background:linear-gradient(90deg, var(--accent), var(--accent-v));
+  border-radius:2px; }
+.foot-playhead{ position:absolute; left:38%; top:-5px; width:14px; height:14px; border-radius:50%; background:var(--accent);
+  border:2px solid #000; transform:translateX(-50%); }
+
+/* viewport HUD overlay */
+.view-hud{ position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:18;
+  display:flex; align-items:center; gap:12px; pointer-events:none; }
+.hud-box{ display:flex; flex-direction:column; align-items:center; gap:4px; padding:8px 12px;
+  background:rgba(0,0,0,.6); backdrop-filter:blur(6px); border:1px solid var(--hair); border-radius:10px;
+  pointer-events:auto; }
+.hud-box .t{ font:700 10px/1 var(--mono); letter-spacing:.1px; color:var(--muted); text-transform:uppercase; }
+.hud-box .v{ font:700 15px/1 var(--mono); color:var(--ink); }
+.reticle{ position:absolute; left:50%; top:50%; width:170px; height:170px; transform:translate(-50%,-50%); z-index:17;
+  border:1px dashed color-mix(in srgb, var(--accent) 45%, transparent); border-radius:50%; pointer-events:none; }
+.reticle::after{ content:""; position:absolute; inset:-1px; border-radius:50%;
+  border:2px solid transparent; border-top:2px solid var(--accent-v); animation:spin 2.4s linear infinite; }
+@keyframes spin{ to{ transform:rotate(360deg); } }
+.reticle .c{ position:absolute; inset:0; border:1px solid color-mix(in srgb, var(--accent) 18%, transparent); border-radius:50%; }
+.reticle .c:nth-of-type(2){ transform:scale(.62); opacity:.55; }
+.reticle .c:nth-of-type(3){ transform:scale(.31); opacity:.35; }
+.lines{ position:absolute; inset:0; pointer-events:none; }
+.ln{ position:absolute; left:50%; top:50%; width:1px; height:50%; background:linear-gradient(to top, transparent, color-mix(in srgb, var(--accent) 35%, transparent));
+  transform-origin:bottom center; }
+.ln:nth-child(1){ transform:rotate(0deg) translateY(-25%); }
+.ln:nth-child(2){ transform:rotate(45deg) translateY(-25%); }
+.ln:nth-child(3){ transform:rotate(90deg) translateY(-25%); }
+.ln:nth-child(4){ transform:rotate(135deg) translateY(-25%); }
+
+/* live canvas surface */
+#stage-canvas{ position:absolute; inset:0; display:block; }
+.view-placeholder{ position:absolute; inset:0; display:grid; place-items:center; color:var(--faint);
+  font:400 14px/1.6; text-align:center; opacity:.7; }
+
+/*====================================================================================================================================
+                                                      INSPECTOR (Right)
+====================================================================================================================================*/
+.in-head{ flex:none; height:46px; display:flex; align-items:center; gap:10px; padding:0 12px;
+  background:var(--menu-2); border-bottom:1px solid var(--hair); position:sticky; top:0; z-index:5; }
+.switcher{ flex:1; height:32px; display:flex; gap:6px; padding:2px; background:var(--tile); border:1px solid var(--edge);
+  border-radius:8px; }
+.switcher button{ flex:1; height:28px; border-radius:6px; font:600 11px/1; color:var(--muted); }
+.switcher button.on{ background:var(--rail-sel); color:var(--ink); border-bottom:2px solid var(--accent-v); }
+
+.ins-scroll{ flex:1; overflow-y:auto; overflow-x:hidden; padding:14px 12px 30px; }
+.card{ margin-bottom:12px; border:1px solid var(--edge); border-radius:12px; background:var(--tile); overflow:hidden; }
+.card-head{ display:flex; align-items:center; gap:9px; padding:10px 12px; background:var(--menu-2); border-bottom:1px solid var(--hair);
+  font:600 12px/1; color:var(--ink); }
+.card-head .ch{ width:20px; height:20px; color:var(--accent-v); border-radius:5px; background:#000; display:grid; place-items:center; font-size:11px; flex:none; }
+.card-head .n{ flex:1; font-size:12px; letter-spacing:.2px; }
+.card-head .n b{ color:var(--accent); font-weight:700; }
+.card-head .num{ font:700 11px/1 var(--mono); color:var(--faint); border:1px solid var(--edge); padding:2px 8px; border-radius:6px; background:var(--tile); }
+
+.card-body{ padding:12px; }
+.card-cap{ font-size:10.5px; color:var(--muted); margin-bottom:10px; line-height:1.5; }
+
+.kpi-row{ display:flex; gap:10px; margin-bottom:10px; }
+.kpi{ flex:1; display:flex; align-items:center; gap:8px; padding:10px 12px; background:var(--tile-hi);
+  border:1px solid var(--edge); border-radius:8px; }
+.kpi .big{ font:700 20px/1 var(--mono); color:var(--ink); }
+.kpi .big small{ font-size:12px; color:var(--muted); font-weight:400; }
+.kpi .lbl{ font-size:10px; color:var(--soft); letter-spacing:.1px; }
+.kpi .badge{ font-size:9px; color:#000; background:var(--accent); padding:2px 7px; border-radius:6px; font-weight:700; margin-left:auto; }
+
+.range{ margin-bottom:10px; }
+.range-head{ display:flex; justify-content:space-between; font-size:11px; color:var(--soft); margin-bottom:6px; }
+.range-track{ height:3px; background:var(--track-bg); border-radius:2px; position:relative; cursor:pointer; }
+.range-fill{ position:absolute; left:0; top:0; bottom:0; height:100%; background:linear-gradient(90deg, var(--accent), var(--accent-v)); border-radius:2px; width:52%; }
+.range-thumb{ position:absolute; left:52%; top:-7px; width:17px; height:17px; border-radius:50%; background:var(--knob);
+  border:2px solid var(--edge); transform:translateX(-50%); cursor:pointer; }
+.range .unit{ font-size:10px; color:var(--faint); text-align:right; margin-top:2px; font-variant-numeric:tabular-nums; }
+
+.switch{ display:flex; align-items:center; gap:10px; padding:10px 0; font-size:12px; color:var(--ink); border-bottom:1px solid var(--hair); }
+.switch .t{ flex:1; }
+.switch .d{ font-size:10px; color:var(--muted); margin-top:2px; }
+.sw{ width:44px; height:22px; border-radius:11px; background:var(--track-bg); position:relative; }
+.sw.on{ background:var(--ok); }
+.sw .kn{ width:18px; height:18px; border-radius:50%; background:#fff; position:absolute; top:2px; left:2px; transform:translateX(0); transition:transform .18s; }
+.sw.on .kn{ transform:translateX(22px); }
+
+.instr{ height:150px; margin:10px 0; border:1px solid var(--edge); border-radius:8px; background:#08080a; position:relative; overflow:hidden; }
+.instr canvas{ width:100%; height:100%; display:block; }
+.instr .cap{ position:absolute; left:10px; bottom:8px; font:400 10px/1.3 var(--mono); color:var(--muted); max-width:85%; }
+
+.pills{ display:flex; flex-wrap:wrap; gap:7px; margin:8px 0 4px; }
+.pill2{ padding:4px 10px; border-radius:6px; background:var(--track-bg); border:1px solid var(--edge);
+  font-size:10px; color:var(--soft); }
+
+/* 3D glass folder recipe pockets (from SourceImages img 4) */
+.folder-row{ display:flex; gap:10px; margin:10px 0; }
+.folder{ flex:1; height:118px; border-radius:10px; background:linear-gradient(150deg, rgba(255,255,255,.06), rgba(120,130,155,.03));
+  border:1px solid rgba(140,150,170,.28); display:flex; flex-direction:column; padding:12px; position:relative; overflow:hidden; }
+.folder.active{ border-color:var(--accent-v); background:linear-gradient(150deg, rgba(233,240,56,.14), rgba(91,140,255,.03)); }
+.folder .flbl{ font:700 11px/1; color:var(--ink); }
+.folder .fsub{ font-size:9.5px; color:var(--muted); margin-top:2px; }
+.folder .fval{ margin-top:8px; font:700 14px/1 var(--mono); color:var(--accent-v); }
+.folder .fvis{ position:absolute; right:12px; bottom:10px; width:30px; height:30px; border-radius:8px;
+  background:rgba(0,0,0,.45); border:1px solid var(--hair); display:grid; place-items:center; color:var(--ink); font-size:13px; }
+
+.stats{ display:flex; gap:8px; margin-top:8px; }
+.stat{ flex:1; background:var(--tile-hi); border:1px solid var(--edge); border-radius:8px; padding:10px 12px; }
+.stat .sv{ font:700 15px/1 var(--mono); color:var(--ink); }
+.stat .sl{ font-size:9.5px; color:var(--muted); margin-top:2px; }
+
+.receipt{ margin-top:8px; border-top:1px solid var(--hair); padding-top:8px; }
+.receipt dl{ display:grid; grid-template-columns: 1fr 1fr; gap:6px 12px; font-size:11px; }
+.receipt dt{ color:var(--faint); }
+.receipt dd{ color:var(--ink); font-variant-numeric:tabular-nums; text-align:right; }
+
+/* small footer hint */
+.in-foot{ font-size:9px; color:var(--faint); border-top:1px solid var(--hair); padding-top:8px; margin-top:12px; }
+
+</style>
+</head>
+<body>
+
+<!--====================================================================================================================================
+                                                   SHELL
+====================================================================================================================================-->
+<div id="shell">
+
+  <!-- LEFT OUTLINER -->
+  <div id="outliner" class="column">
+    <div class="column-head">
+      <span class="h-ic">⌘</span>
+      <span class="h-txt">SceneDirectory<span class="h-sub">· fracture · environment · debris</span></span>
+    </div>
+    <div class="outliner-body no-bar">
+      <div class="brand">
+        <span class="b-sym">◈</span>
+        <span class="b-word">frontier<span class="b-dot">.</span></span>
+        <span class="b-ver">ENGINE / 01</span>
+      </div>
+      <div class="sc-lbl"><span class="sd"><span class="dot"></span> WORKSPACE</span></div>
+      <div class="sc-ttl">Proving Grounds<span class="ext">.scene</span></div>
+
+      <div class="tiles">
+        <div class="tile"><span class="ti">🟢</span><div class="tc"><div class="cap">INTACT</div><div class="val" id="ki-intact">6</div></div></div>
+        <div class="tile"><span class="ti">🔴</span><div class="tc"><div class="cap">FRACTURED</div><div class="val" id="ki-broken">0</div></div></div>
+        <div class="tile"><span class="ti">◐</span><div class="tc"><div class="cap">DEBRIS</div><div class="val" id="ki-debris">0</div></div></div>
+        <div class="tile"><span class="ti">□</span><div class="tc"><div class="cap">SDF POOL</div><div class="val" id="ki-sdf">0 / 64</div></div></div>
+      </div>
+
+      <div class="out-h"><span class="hc">🔍</span> OUTLINER</div>
+      <input type="search" placeholder="Find an object…" id="ol-search">
+
+      <div class="group">
+        <button class="group-label">Destruction<span class="cg">4</span></button>
+        <div class="tree" id="tree-destruction"></div>
+      </div>
+      <div class="group">
+        <button class="group-label">Environment<span class="cg">3</span></button>
+        <div class="tree" id="tree-environment"></div>
+      </div>
+      <div class="group">
+        <button class="group-label">Level<span class="cg">6</span></button>
+        <div class="tree" id="tree-level"></div>
+      </div>
+
+      <div class="out-bottom">
+        <span class="w-ic">▢</span>
+        <div class="t">IlluminationHost<s>Distance-field GI exhibit</s></div>
+        <span class="dot"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- CENTRE VIEWPORT -->
+  <div id="viewport" class="column">
+    <div class="viewport-stage">
+      <div class="view-floor"></div>
+      <div class="view-glow"></div>
+
+      <div class="view-bar">
+        <div class="pill on" id="mode-realtime"><kbd>1</kbd> Realtime strike</div>
+        <div class="pill" id="mode-exploded">Exploded view</div>
+        <div class="pill" id="mode-xray">X‑ray plexus</div>
+        <div class="pill" id="mode-bond">Bond atlas</div>
+        <div class="pill" id="mode-sdf">SDF bricks</div>
+      </div>
+
+      <canvas id="stage-canvas" width="1280" height="720"></canvas>
+      <div class="view-placeholder" id="view-placeholder">
+        Drag to orbit · Scroll to zoom · Shift-click to place impact · <b>1</b> realtime / <b>2</b> baked
+      </div>
+
+      <div class="view-hud">
+        <div class="hud-box" id="hud-impact"><div class="t">impact energy</div><div class="v" id="hud-val">0 J</div></div>
+        <div class="hud-box" id="hud-frags"><div class="t">fragments</div><div class="v" id="hud-frag-val">—</div></div>
+      </div>
+
+      <div class="reticle" id="reticle">
+        <div class="c"></div><div class="c"></div><div class="c"></div>
+        <div class="lines"><div class="ln"></div><div class="ln"></div><div class="ln"></div><div class="ln"></div></div>
+      </div>
+
+      <div class="view-foot">
+        <button class="foot-btn" title="Wireframe">W</button>
+        <button class="foot-btn" title="Fit">F</button>
+        <div class="foot-ctrl">
+          <button class="foot-btn" title="Zoom out">−</button>
+          <div class="foot-scrub"><div class="foot-prog"></div><div class="foot-playhead"></div></div>
+          <button class="foot-btn" title="Zoom in">+</button>
+          <button id="btn-play" class="foot-ctrl play paused">▶ Play</button>
+          <button id="btn-break" class="foot-btn" title="Break selected">⚡</button>
+          <button id="btn-reset" class="foot-btn" title="Reassemble all">↺</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT INSPECTOR -->
+  <div id="inspector" class="column">
+    <div class="column-head">
+      <span class="h-ic">🔍</span>
+      <span class="h-txt">SceneInspector<span class="h_sub">· infographic readouts · live controls</span></span>
+    </div>
+    <div class="in-head">
+      <div class="switcher" id="ins-switcher">
+        <button class="on" data-page="fracture">Fracture</button>
+        <button data-page="solver">Solver</button>
+        <button data-page="sun">Sun</button>
+        <button data-page="atmos">Atmosphere</button>
+        <button data-page="clouds">Clouds</button>
+      </div>
+    </div>
+    <div class="ins-scroll" id="ins-scroll">
+      <!-- PAGE: FRACTURE -->
+      <section class="ins-page" id="page-fracture">
+        <div class="card">
+          <div class="card-head"><span class="ch">1</span><span class="n">Material response<b> · not surface appearance</b></span><span class="num">01</span></div>
+          <div class="card-body">
+            <div class="folder-row" id="mat-folders">
+              <!-- chips injected by JS -->
+            </div>
+            <div class="kpi-row">
+              <div class="kpi"><div class="big" id="mat-gc">140</div><div class="lbl">crack resistance · J/m²</div><div class="badge">CONCRETE</div></div>
+              <div class="kpi"><div class="big" id="mat-rho">2,350</div><div class="lbl">density · kg/m³</div></div>
+              <div class="kpi"><div class="big" id="mat-mass">45.0</div><div class="lbl">prop mass · kg</div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>break threshold</span><span id="r-thr-v">32,000 J</span></div>
+              <div class="range-track"><div class="range-fill" id="r-thr-fill"></div><div class="range-thumb" id="r-thr-thumb"></div></div>
+              <div class="unit">brittle ← → stops the car</div>
+            </div>
+            <div class="instr" id="instr-break"></div>
+            <p class="card-cap">½·μ·v² impact energy vs breaking speed. Threshold line is amber; the struck point buys cut priority.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="ch">2</span><span class="n">Impact placement &amp; seed</span><span class="num">02</span></div>
+          <div class="card-body">
+            <div class="instr" id="instr-impact"></div>
+            <div class="range">
+              <div class="range-head"><span>impact local m</span><span id="r-imp-v">0, 0, 0</span></div>
+              <div class="range-track"><div class="range-fill" id="r-imp-fill"></div><div class="range-thumb" id="r-imp-thumb"></div></div>
+            </div>
+            <div style="display:flex;gap:8px;">
+              <button id="btn-centre" class="pill2">Centre impact</button>
+              <button id="btn-place" class="pill2">Shift-click surface</button>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>pattern seed</span><span id="r-seed-v">42</span></div>
+              <div class="range-track"><div class="range-fill" id="r-seed-fill"></div><div class="range-thumb" id="r-seed-thumb"></div></div>
+            </div>
+            <p class="card-cap">Closer, larger pieces receive cut priority. Near-edge cuts and tiny pieces are refused.</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><span class="ch">3</span><span class="n">Fragment quality</span><span class="num">03</span></div>
+          <div class="card-body">
+            <div class="instr" id="instr-fragments"></div>
+            <div class="range">
+              <div class="range-head"><span>fragment ceiling</span><span id="r-ceil-v">48 pcs</span></div>
+              <div class="range-track"><div class="range-fill" id="r-ceil-fill"></div><div class="range-thumb" id="r-ceil-thumb"></div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>minimum span</span><span id="r-min-v">0.045 m</span></div>
+              <div class="range-track"><div class="range-fill" id="r-min-fill"></div><div class="range-thumb" id="r-min-thumb"></div></div>
+            </div>
+            <div class="pills"><span>Needle rejection</span><span>Closed caps</span><span>Quality-aware triangulation</span></div>
+            <p class="card-cap">A limit is a ceiling — not a promise to force bad fragments. DP-triangulated faces, closed caps.</p>
+          </div>
+        </div>
+
+        <div class="card bake-card">
+          <div class="card-head"><span class="ch">4</span><span class="n">Bake · dynamic vs stored</span><span class="num">04</span></div>
+          <div class="card-body">
+            <div style="display:flex;gap:8px;margin-bottom:10px;">
+              <button id="btn-dyn" class="pill on" data-mode="dynamic">Dynamic</button>
+              <button id="btn-bak" class="pill" data-mode="baked">Baked</button>
+            </div>
+            <div id="bd-dyn">
+              <p class="card-cap">Generate fragments on demand at the true impact point (~1.5 ms per impact, one per frame).</p>
+            </div>
+            <div id="bd-bak" style="display:none;">
+              <p class="card-cap">Use stored fragment geometry — no fracture generation at impact.</p>
+              <div class="range" style="margin-bottom:8px;">
+                <div class="range-head"><span>SDF resolution per piece</span><span>64³ · R16F</span></div>
+                <div class="range-track"><div class="range-fill" style="width:64%;"></div><div class="range-thumb" style="left:64%;"></div></div>
+              </div>
+              <div style="display:flex;gap:8px;">
+                <button id="btn-bake" class="pill2">Bake object</button>
+                <button id="btn-clear" class="pill2" disabled>Clear</button>
+              </div>
+            </div>
+            <div class="stats">
+              <div class="stat"><div class="sv" id="bd-frags">—</div><div class="sl">FRAGMENTS</div></div>
+              <div class="stat"><div class="sv" id="bd-tri">—</div><div class="sl">TRIANGLES</div></div>
+              <div class="stat"><div class="sv" id="bd-ms">— ms</div><div class="sl">GENERATION</div></div>
+              <div class="stat"><div class="sv" id="bd-err">—</div><div class="sl">VOLUME ERROR</div></div>
+            </div>
+            <div class="receipt">
+              <dl>
+                <dt>Refused candidates</dt><dd id="bd-rej">—</dd>
+                <dt>Energy spent</dt><dd id="bd-spent">— / — J</dd>
+                <dt>Topology</dt><dd id="bd-topo">—</dd>
+                <dt>State</dt><dd id="bd-state">intact</dd>
+              </dl>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PAGE: SOLVER -->
+      <section class="ins-page hidden" id="page-solver">
+        <div class="card">
+          <div class="card-head"><span class="ch">D</span><span class="n">Debris &amp; distance field</span><span class="num">01</span></div>
+          <div class="card-body">
+            <div class="kpi-row">
+              <div class="kpi"><div class="big" id="sv-bodies">0</div><div class="lbl">rigid bodies</div></div>
+              <div class="kpi"><div class="big" id="sv-awake">0</div><div class="lbl">awake · sleeping</div></div>
+              <div class="kpi"><div class="big" id="sv-step">— ms</div><div class="lbl">solver step</div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>debris separation</span><span id="sv-sep-v">1.0 ×</span></div>
+              <div class="range-track"><div class="range-fill" style="width:33%;"></div><div class="range-thumb" style="left:33%;"></div></div>
+              <div class="unit">crumble ← → explode</div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>lifetime before reassembly</span><span id="sv-life-v">25 s</span></div>
+              <div class="range-track"><div class="range-fill" style="width:42%;"></div><div class="range-thumb" style="left:42%;"></div></div>
+            </div>
+            <div class="switch"><div class="t"><b>Respawn</b><div class="d">Reassemble after lifetime · off: debris stays until reset</div></div><div class="sw" id="sw-respawn"></div></div>
+            <div class="switch"><div class="t"><b>Car collides with debris</b><div class="d">Both ways — heavy slabs can be driven over</div></div><div class="sw on" id="sw-car"></div></div>
+            <div class="stats">
+              <div class="stat"><div class="sv" id="sv-field">0</div><div class="sl">IN DISTANCE FIELD</div></div>
+              <div class="stat"><div class="sv" id="sv-vol">0</div><div class="sl">POOL VOLUMES</div></div>
+              <div class="stat"><div class="sv" id="sv-brk">0</div><div class="sl">BREAKS</div></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PAGE: SUN -->
+      <section class="ins-page hidden" id="page-sun">
+        <div class="card">
+          <div class="card-head"><span class="ch">☀</span><span class="n">Solar day · directional light / position &amp; colour</span><span class="num">01</span></div>
+          <div class="card-body">
+            <div class="instr" id="instr-sun"></div>
+            <div class="kpi-row">
+              <div class="kpi"><div class="big">12:00</div><div class="lbl">local time</div></div>
+              <div class="kpi"><div class="big" id="sun-az">145.0°</div><div class="lbl">azimuth</div></div>
+              <div class="kpi"><div class="big" id="sun-el">38.0°</div><div class="lbl">elevation</div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>azimuth</span><span id="sun-az-v">145°</span></div>
+              <div class="range-track"><div class="range-fill" style="width:45%;"></div><div class="range-thumb" style="left:45%;"></div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>elevation</span><span id="sun-el-v">38°</span></div>
+              <div class="range-track"><div class="range-fill" style="width:52%;"></div><div class="range-thumb" style="left:52%;"></div></div>
+            </div>
+            <div class="switch"><div class="t"><b>Sun shadows</b><div class="d">Cascaded shadow depth map</div></div><div class="sw on" id="sw-shadow"></div></div>
+            <div class="switch"><div class="t"><b>Auto exposure</b><div class="d">Aperture linked to sky luminance</div></div><div class="sw on" id="sw-exp"></div></div>
+            <div class="pills" style="margin-top:6px;"><span>Noon</span><span>Golden</span><span>Dusk</span><span>Night</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PAGE: ATMOSPHERE -->
+      <section class="ins-page hidden" id="page-atmos">
+        <div class="card">
+          <div class="card-head"><span class="ch">🌫</span><span class="n">Atmospheric fog · distance, clear start, spectral extinction</span><span class="num">01</span></div>
+          <div class="card-body">
+            <div class="instr" id="instr-atmos"></div>
+            <div class="kpi-row">
+              <div class="kpi"><div class="big" id="at-aer">76.8</div><div class="lbl">% contrast retained</div></div>
+              <div class="kpi"><div class="big" id="at-csd">100 m</div><div class="lbl">clear start distance</div></div>
+              <div class="kpi"><div class="big" id="at-aer2">0.00004 /m</div><div class="lbl">aerial density</div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>probe distance</span><span id="at-pd-v">8000 m</span></div>
+              <div class="range-track"><div class="range-fill" style="width:40%;"></div><div class="range-thumb" style="left:40%;"></div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>probe height</span><span id="at-ph-v">2 m</span></div>
+              <div class="range-track"><div class="range-fill" style="width:10%;"></div><div class="range-thumb" style="left:10%;"></div></div>
+            </div>
+            <div class="switch"><div class="t"><b>Scene medium enabled</b><div class="d">Affects geometry in final image — not the sky</div></div><div class="sw on" id="sw-med"></div></div>
+            <div class="pills" style="margin-top:6px;"><span>Visibility</span><span>Medium</span><span>Spectrum</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PAGE: CLOUDS -->
+      <section class="ins-page hidden" id="page-clouds">
+        <div class="card">
+          <div class="card-head"><span class="ch">☁</span><span class="n">Density field / shape &amp; illumination</span><span class="num">01</span></div>
+          <div class="card-body">
+            <div class="instr" id="instr-clouds"></div>
+            <div class="kpi-row">
+              <div class="kpi"><div class="big" id="cl-cov">55%</div><div class="lbl">coverage setting</div></div>
+              <div class="kpi"><div class="big" id="cl-base">1,500 m</div><div class="lbl">base altitude</div></div>
+              <div class="kpi"><div class="big" id="cl-top">2,700 m</div><div class="lbl">effective top</div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>coverage</span><span id="cl-cov-v">55%</span></div>
+              <div class="range-track"><div class="range-fill" style="width:55%;"></div><div class="range-thumb" style="left:55%;"></div></div>
+            </div>
+            <div class="range">
+              <div class="range-head"><span>density multiplier</span><span id="cl-dm-v">1.00 ×</span></div>
+              <div class="range-track"><div class="range-fill" style="width:70%;"></div><div class="range-thumb" style="left:70%;"></div></div>
+            </div>
+            <div class="switch"><div class="t"><b>Live</b><div class="d">4-octave PCG value-noise FBM · wind advection</div></div><div class="sw on" id="sw-live"></div></div>
+            <div class="pills" style="margin-top:6px;"><span>Overview</span><span>Formation</span><span>Render</span><span>Weather</span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+    <div class="in-foot">Changes apply live · HTML authoring preview · native port pending</div>
+  </div>
+
+</div>
+
+<script>
+//====================================================================================================================================
+//                                       STATE & FRACTURE ENGINE (analytical, Canvas2D)
+//====================================================================================================================================
+const MATERIALS = {
+  concrete: { label:"Concrete",   gc:140, rho:2350, stored:0,   rest:.12, fric:.80,  thr:32000, colour:"#9d9d97", interior:"#8d8b84", note:"Bulk-brittle. Chunky blocks; a fast hit pulverises the face it lands on." },
+  rock:     { label:"Stone",      gc:95,  rho:2700, stored:0,   rest:.10, fric:.90,  thr:45000, colour:"#7c7b78", interior:"#93897f", note:"Bedded granite: heavy, few large slabs." },
+  wood:     { label:"Wood",       gc:320, rho:520,  stored:0,   rest:.20, fric:.55,  thr:3500,  colour:"#b5854a", interior:"#d8b57d", note:"Fibrous. Splits along the grain into long splinters; cross-grain cuts cost more." },
+  glass:    { label:"Glass",      gc:7,   rho:2500, stored:0,   rest:.12, fric:.28,  thr:500,   colour:"#cfe6ea", interior:"#bcd8de", note:"Annealed plate-brittle. Radial shards round the impact, large ones away." },
+  tempered: { label:"Tempered glass", gc:7, rho:2500, stored:46000, rest:.10, fric:.35, thr:1500, colour:"#cfe6ea", interior:"#c8e2e8", note:"Stored stress dices the whole pane into small cubes wherever struck." },
+  plastic:  { label:"ABS plastic",gc:460, rho:1050, stored:0,   rest:.35, fric:.45,  thr:7000,  colour:"#d8552f", interior:"#f0b9a4", note:"Ductile. Tears into a few large pieces and bounces." }
+};
+const MATERIAL_ORDER = ["concrete","rock","wood","glass","tempered","plastic"];
+
+const state = {
+  material: "concrete",
+  mode: "dynamic",       // dynamic | baked
+  threshold: 32000,
+  energy: 2500,
+  seed: 42,
+  ceiling: 48,
+  minSize: 0.045,
+  impact: [0,0,0],
+  separation: 18,
+  selected: "concrete-pillar",
+  sunAz: 145, sunEl: 38,
+  broken: false,
+  fragments: 0,
+  lastMs: 0
+};
+
+const PROPS = [
+  { id:"concrete-pillar", name:"Concrete pillar", kind:"cube",   extent:[2.4,2.4,3.6], material:"concrete",   state:"intact",  group:"destruction", colour:"#9d9d97" },
+  { id:"glass-pane",      name:"Glass pane",      kind:"prism",  radius:0.9, height:0.12, sides:12, material:"glass",      state:"intact",  group:"destruction", colour:"#cfe6ea" },
+  { id:"tempered-pane",   name:"Tempered pane",   kind:"prism",  radius:1.0, height:0.01, sides:16, material:"tempered",   state:"intact",  group:"destruction", colour:"#cfe6ea" },
+  { id:"rock-slab",       name:"Rock slab",       kind:"cube",   extent:[1.6,1.1,0.9], material:"rock",       state:"intact",  group:"destruction", colour:"#7c7b78" },
+  { id:"sun",             name:"Sun & sky",       kind:"light",  material:null, state:"live",    group:"environment", colour:"#ffd166" },
+  { id:"atmosphere",      name:"Atmosphere",      kind:"medium", material:null, state:"live",    group:"environment", colour:"#7ec8ff" },
+  { id:"clouds",          name:"Clouds",          kind:"field",  material:null, state:"live",    group:"environment", colour:"#37d6d6" },
+  { id:"concrete-wall",   name:"Concrete wall",   kind:"cube",   extent:[6,0.3,3], material:"concrete",   state:"intact",  group:"level", colour:"#9d9d97" },
+  { id:"granite-slab",    name:"Granite slab",    kind:"cube",   extent:[3,2,0.6], material:"rock",       state:"intact",  group:"level", colour:"#7c7b78" },
+];
+
+// deterministic LCG
+function makeRandom(seed){ let a = seed >>> 0; return () => { a = (Math.imul(1664525,a)+1013904223)>>>0; return a/4294967296; }; }
+
+// greedy 8-plane fracture (port of FractureStructure.FractureSolid, analytical preview)
+function fracture(solid, recipe){
+  const started = performance.now();
+  const draw = makeRandom(recipe.seed);
+  const mat = MATERIALS[recipe.material] || MATERIALS.concrete;
+  const radius = Math.hypot(solid.extent[0], solid.extent[1], solid.extent[2]);
+  const hit = recipe.impact || [0,0,0];
+  const thinAxis = [0,1,2].reduce((a,b)=> solid.extent[a] < solid.extent[b] ? a : b, 0);
+  const sizes = solid.extent.slice();
+  const thin = sizes[thinAxis] < 0.1 * Math.min(...sizes.filter((_,i)=>i!==thinAxis));
+  const budget = recipe.energy + mat.stored * (sizes[0]*sizes[1]*sizes[2]);
+  let energy = budget, rejected = 0, spent = 0;
+  let parts = [{ extent:sizes.slice(), centre:[0,0,0], vol:sizes[0]*sizes[1]*sizes[2] }];
+  const stopped = new Set();
+  const ceiling = Math.max(1, Math.round(recipe.ceiling));
+  while(parts.length < ceiling && energy > 0){
+    let best = -1, prio = -1;
+    parts.forEach((p,i)=>{
+      if(stopped.has(i)) return;
+      const prox = mat.stored>0 ? 1 : Math.exp(-Math.hypot(p.centre[0]-hit[0],p.centre[1]-hit[1],p.centre[2]-hit[2])/(radius*0.65));
+      const w = p.vol * prox;
+      if(w > prio){ prio = w; best = i; }
+    });
+    if(best<0) break;
+    const part = parts[best];
+    let choice = null;
+    for(let t=0; t<8; t++){
+      let dir = [draw()*2-1, draw()*2-1, draw()*2-1];
+      if(thin) dir[thinAxis]=0;
+      if(t===7){
+        const axes=[0,1,2].filter(a=>!(thin && a===thinAxis));
+        axes.sort((a,b)=>(part.extent[b]/sizes[b])-(part.extent[a]/sizes[a]));
+        dir=[0,0,0]; dir[axes[0]]=1;
+      }
+      const len = Math.hypot(dir[0],dir[1],dir[2])||1; dir=[dir[0]/len,dir[1]/len,dir[2]/len];
+      const cDot = dir[0]*part.centre[0]+dir[1]*part.centre[1]+dir[2]*part.centre[2];
+      const lo = -part.extent[0]*Math.abs(dir[0]) - part.extent[1]*Math.abs(dir[1]) - part.extent[2]*Math.abs(dir[2]);
+      const hi = part.extent[0]*Math.abs(dir[0]) + part.extent[1]*Math.abs(dir[1]) + part.extent[2]*Math.abs(dir[2]);
+      const off = cDot + (draw()-0.5)*(hi-lo)*0.18;
+      // split plane into two halves
+      const h0 = { extent:part.extent.slice(), centre:part.centre.slice(), vol:part.vol };
+      const ratio = 0.18 + 0.64*draw();
+      h0.vol = part.vol * ratio;
+      const h1 = { extent:part.extent.slice(), centre:part.centre.slice(), vol:part.vol - h0.vol };
+      if(h0.vol < part.vol*0.18 || h1.vol < part.vol*0.18){ rejected++; continue; }
+      // cost = 2*Gc*cap area
+      const capArea = part.extent[0]*part.extent[1]; // proxy
+      const cost = 2*mat.gc*capArea*(1 + Math.abs(dir[0])*0);
+      if(cost > energy) continue;
+      const score = Math.min(h0.vol,h1.vol)/Math.max(h0.vol,h1.vol);
+      if(!choice || score > choice.score) choice = { h0,h1,cost,score };
+    }
+    if(!choice){ stopped.add(best); continue; }
+    energy -= choice.cost; spent += choice.cost;
+    parts.splice(best,1,choice.h0,choice.h1);
+  }
+  const ms = performance.now() - started;
+  return { parts: parts.length, ms, spent, budget, energyLeft: energy, rejected };
+}
+
+//====================================================================================================================================
+//                                       UI BINDINGS
+//====================================================================================================================================
+const $ = (id)=>document.getElementById(id);
+
+function renderOutliner(){
+  const groups = {};
+  PROPS.forEach(p=>{ groups[p.group] = groups[p.group] || []; groups[p.group].push(p); });
+  const order = ["destruction","environment","level"];
+  order.forEach(g=>{
+    const tree = $(`tree-${g}`);
+    tree.innerHTML = "";
+    groups[g].forEach(p=>{
+      const row = document.createElement("div");
+      row.className = `tree-row${p.id===state.selected?" selected":""}${p.state==="broken"?" is-off":""}`;
+      const glyph = p.kind==="cube"?"▢": p.kind==="prism"?"⌖": p.kind==="light"?"☀": p.kind==="medium"?"🌫":"☁";
+      row.innerHTML = `<div class="ob-ic">${glyph}</div><div class="row-meta">${p.state.charAt(0).toUpperCase()+p.state.slice(1)}</div>
+        <span class="row-eye">${p.state==="live"?"👁":"👁‍🗨"}</span>`;
+      row.title = p.name;
+      row.onclick = ()=>{ state.selected = p.id; renderOutliner(); renderInspectorPage(); updateKPIs(); };
+      tree.appendChild(row);
+    });
+  });
+  // counts
+  const intact = PROPS.filter(p=>p.state==="intact"||p.state==="live").length;
+  const broken = PROPS.filter(p=>p.state==="broken").length;
+  const debris = state.fragments;
+  $("ki-intact").textContent = intact;
+  $("ki-broken").textContent = broken;
+  $("ki-debris").textContent = debris;
+  $("ki-sdf").textContent = `${state.broken?state.fragments:0} / 64`;
+}
+
+function selectProp(id){ state.selected = id; renderOutliner(); renderInspectorPage(); updateKPIs(); }
+
+function updateKPIs(){
+  const p = PROPS.find(x=>x.id===state.selected);
+  if(!p) return;
+  const mat = MATERIALS[p.material||"concrete"];
+  $("mat-gc").textContent = mat.gc;
+  $("mat-rho").textContent = mat.rho.toLocaleString();
+  $("mat-mass").textContent = (p.extent? (p.extent[0]*p.extent[1]*p.extent[2]*mat.rho): 0).toFixed(1);
+  $("r-thr-v").textContent = state.threshold.toLocaleString() + " J";
+  $("r-thr-fill").style.width = Math.min(100, state.threshold/150000*100) + "%";
+  $("r-imp-v").textContent = state.impact.map(v=>v.toFixed(1)).join(", ");
+  $("r-seed-v").textContent = state.seed;
+  $("r-seed-fill").style.width = Math.min(100, state.seed/9999*100) + "%";
+  $("r-ceil-v").textContent = state.ceiling + " pcs";
+  $("r-ceil-fill").style.width = Math.min(100, state.ceiling/160*100) + "%";
+  $("r-min-v").textContent = state.minSize.toFixed(3) + " m";
+  $("r-min-fill").style.width = Math.min(100, state.minSize/0.3*100) + "%";
+}
+
+// material chips
+const matFolders = $("mat-folders");
+MATERIAL_ORDER.forEach((k,i)=>{
+  const m = MATERIALS[k];
+  const f = document.createElement("div");
+  f.className = `folder${state.material===k?" active":""}`;
+  f.innerHTML = `<div class="flbl">${m.label}</div><div class="fsub">${m.note}</div>
+    <div class="fval">${m.gc}</div><div class="fvis">${i+1}</div>`;
+  f.onclick = ()=>{ state.material = k; state.threshold = m.thr; state.energy = Math.max(400, m.thr*0.8);
+    renderOutliner(); renderInspectorPage(); updateKPIs(); drawAll(); };
+  matFolders.appendChild(f);
+});
+
+//====================================================================================================================================
+//                                       INSPECTOR PAGE SWITCHING
+//====================================================================================================================================
+const switcher = $("ins-switcher");
+switcher.addEventListener("click", e=>{
+  const b = e.target.closest("button");
+  if(!b) return;
+  [...switcher.children].forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  document.querySelectorAll(".ins-page").forEach(x=>x.classList.add("hidden"));
+  $(`page-${b.dataset.page}`).classList.remove("hidden");
+  renderInspectorPage();
+});
+function renderInspectorPage(){}
+
+// tab pills: sun page
+$("ins-switcher").querySelectorAll("button").forEach(b=>{});
+
+//====================================================================================================================================
+//                                       CANVAS DRAWINGS
+//====================================================================================================================================
+function ctxOf(id){ return $(id).getContext("2d"); }
+
+function drawBreakChart(){
+  const c = ctxOf("instr-break"); const w = c.canvas.width, h = c.canvas.height;
+  c.clearRect(0,0,w,h);
+  const mat = MATERIALS[state.material];
+  const reduced = 45*mat.rho/(45+mat.rho); // proxy reduced mass with 45 kg car
+  const vBreak = Math.sqrt(2*state.threshold/reduced);
+  const maxV = Math.max(4, Math.min(30, 2.2*vBreak));
+  const maxE = 0.5*reduced*maxV*maxV;
+  const L = 16, R = w-16, T = 16, B = h-30;
+  const grad = c.createLinearGradient(0,T,0,B);
+  grad.addColorStop(0,"rgba(224,162,74,.35)"); grad.addColorStop(1,"rgba(224,162,74,.02)");
+  c.beginPath(); c.moveTo(L,B);
+  for(let s=0;s<=80;s++){
+    const sp = maxV*s/80; const e = 0.5*reduced*sp*sp;
+    c.lineTo(L+(R-L)*sp/maxV, B-(B-T)*Math.min(1,e/maxE));
+  }
+  c.lineTo(R,B); c.closePath(); c.fillStyle = grad; c.fill();
+  c.strokeStyle = "#e0a24a"; c.lineWidth = 2.5;
+  c.beginPath();
+  for(let s=0;s<=80;s++){
+    const sp = maxV*s/80; const e = 0.5*reduced*sp*sp;
+    const x = L+(R-L)*sp/maxV, y = B-(B-T)*Math.min(1,e/maxE);
+    if(s===0)c.moveTo(x,y); else c.lineTo(x,y);
+  }
+  c.stroke();
+  const thrY = B-(B-T)*(state.threshold/maxE);
+  c.setLineDash([8,8]); c.strokeStyle = "#e0a24a"; c.lineWidth=2;
+  c.beginPath(); c.moveTo(L,thrY); c.lineTo(R,thrY); c.stroke(); c.setLineDash([]);
+  const v = Math.sqrt(2*state.threshold/reduced);
+  if(v<maxV){
+    const x = L+(R-L)*v/maxV, y = thrY;
+    c.fillStyle = "#f3f3f3"; c.beginPath(); c.arc(x,y,6,0,Math.PI*2); c.fill();
+  }
+  c.fillStyle = "#7d7d7d"; c.font = "16px "+state.mono||"monospace"; c.fillText("impact speed →", R-150, h-6);
+  c.fillStyle = "#e0a24a"; c.fillText("threshold", L+4, thrY-8);
+}
+
+function drawImpactMap(){
+  const c = ctxOf("instr-impact"); const w=c.canvas.width, h=c.canvas.height;
+  c.clearRect(0,0,w,h);
+  const cx = w/2, cy = h/2, r = Math.min(w,h)*0.4;
+  c.strokeStyle = "rgba(255,255,255,.08)"; c.lineWidth=1;
+  c.beginPath(); c.arc(cx,cy,r,0,Math.PI*2); c.stroke();
+  c.beginPath(); c.arc(cx,cy,r*0.55,0,Math.PI*2); c.stroke();
+  c.beginPath(); c.arc(cx,cy,r*0.22,0,Math.PI*2); c.stroke();
+  // axes
+  c.strokeStyle = "rgba(255,255,255,.15)"; c.lineWidth=1;
+  c.beginPath(); c.moveTo(cx-r,cy); c.lineTo(cx+r,cy); c.stroke();
+  c.beginPath(); c.moveTo(cx,cy-r); c.lineTo(cx,cy+r); c.stroke();
+  // impact point
+  const ix = cx + (state.impact[0]/100)*r;
+  const iy = cy - (state.impact[1]/100)*r;
+  c.fillStyle = "#e9f038"; c.beginPath(); c.arc(ix,iy,5,0,Math.PI*2); c.fill();
+  c.strokeStyle = "#e9f038"; c.lineWidth=2;
+  c.beginPath(); c.moveTo(cx,cy); c.lineTo(ix,iy); c.stroke();
+  c.fillStyle = "#b4b4b4"; c.font = "11px monospace"; c.fillText("impact", ix+8, iy-8);
+}
+
+function drawFragmentsPreview(){
+  const c = ctxOf("instr-fragments"); const w=c.canvas.width, h=c.canvas.height;
+  c.clearRect(0,0,w,h);
+  const res = fracture({extent:[2,2,2]}, {material:state.material, energy:state.energy, seed:state.seed, ceiling:state.ceiling, minSize:state.minSize, impact:state.impact});
+  state.lastMs = res.ms;
+  // draw parts as stacked rects with gaps
+  const cx = w*0.5, cy = h*0.5;
+  const scale = Math.min(w,h)*0.35 / 2;
+  const sep = state.separation/100;
+  let idx = 0;
+  // we only have count; draw a schematic cluster
+  const n = Math.min(res.parts, 40);
+  const draw = makeRandom(state.seed);
+  for(let i=0;i<n;i++){
+    const ang = draw()*Math.PI*2;
+    const rr = 0.15 + 0.5*draw();
+    const x = cx + Math.cos(ang)*rr*scale*(1+2.2*sep);
+    const y = cy + Math.sin(ang)*rr*scale*(1+2.2*sep);
+    const sz = 6 + 14*draw();
+    const mat = MATERIALS[state.material];
+    c.fillStyle = i%2===0 ? mat.colour : mat.interior;
+    c.strokeStyle = "rgba(10,10,10,.55)"; c.lineWidth=1;
+    c.beginPath();
+    c.rect(x-sz/2,y-sz/2,sz,sz);
+    c.fill(); c.stroke();
+    idx++;
+  }
+  c.fillStyle = "#7d7d7d"; c.font = "15px "+(document.body.style.fontFamily||"sans-serif");
+  c.fillText(`${n} fragments · ${state.mode}`, 14, h-12);
+  c.fillText(`${res.ms.toFixed(1)} ms gen · ${res.rejected} refused`, 14, h-28);
+}
+
+function drawSun(){
+  const c = ctxOf("instr-sun"); const w=c.canvas.width, h=c.canvas.height;
+  c.clearRect(0,0,w,h);
+  const cx = w*0.5, cy = h*0.5, r = Math.min(w,h)*0.4;
+  // polar dome grid
+  c.strokeStyle = "rgba(255,255,255,.08)"; c.lineWidth=1;
+  for(let k=1;k<=3;k++){ c.beginPath(); c.arc(cx,cy,r*k/3,0,Math.PI*2); c.stroke(); }
+  c.beginPath(); c.moveTo(cx-r,cy); c.lineTo(cx+r,cy); c.stroke();
+  c.beginPath(); c.moveTo(cx,cy-r); c.lineTo(cx,cy+r); c.stroke();
+  // sun position from az/el
+  const el = (state.sunEl+20)/105; // -20..85 -> 0..1
+  const azRad = (state.sunAz-180)*Math.PI/180;
+  const sx = cx + Math.cos(azRad)*r*(1-el)*0.85;
+  const sy = cy - Math.sin(azRad)*r*(1-el)*0.85 - r*el*0.5;
+  c.fillStyle = "#ffd166"; c.beginPath(); c.arc(sx,sy,7,0,Math.PI*2); c.fill();
+  c.shadowColor = "rgba(255,209,102,.6)"; c.shadowBlur = 14;
+  c.beginPath(); c.arc(sx,sy,7,0,Math.PI*2); c.fill();
+  c.shadowBlur = 0;
+  c.fillStyle = "#7d7d7d"; c.font="12px monospace";
+  c.fillText(`${state.sunEl.toFixed(1)}° elevation`, 14, h-14);
+  c.fillText(`${state.sunAz.toFixed(1)}° azimuth`, w-110, h-14);
+  // day arc
+  c.strokeStyle = "rgba(233,240,56,.45)"; c.lineWidth=2;
+  c.beginPath();
+  for(let t=0;t<=60;t++){
+    const a = (t/60)*Math.PI - Math.PI/2;
+    const x = cx + Math.cos(a)*r*0.62;
+    const y = cy + Math.sin(a)*r*0.62 + r*0.18;
+    if(t===0)c.moveTo(x,y); else c.lineTo(x,y);
+  }
+  c.stroke();
+}
+
+function drawAtmos(){
+  const c = ctxOf("instr-atmos"); const w=c.canvas.width, h=canvasHeight = c.canvas.height;
+  c.clearRect(0,0,w,h);
+  // 6-target contrast walk
+  const cols = ["#e0a24a","#ff6b6b","#cfe6ea","#3ec46d","#7ec8ff","#b4b4b4"];
+  const labels = ["0 m","400 m","1.0 km","17.0 km","100 km","200 km"];
+  const bw = (w-40)/6;
+  for(let i=0;i<6;i++){
+    const x = 20 + i*bw;
+    const h1 = 20 + i*14;
+    const h2 = 110 - i*14;
+    c.fillStyle = cols[i];
+    c.fillRect(x, h2, bw*0.62, h1-h2);
+    c.fillStyle = "rgba(255,255,255,.12)";
+    c.fillRect(x+bw*0.62, h2, bw*0.38, h1-h2);
+    c.fillStyle = "#7d7d7d"; c.font="10px monospace"; c.fillText(labels[i], x+bw/2 - 14, h+18);
+  }
+  c.fillStyle = "#e9f038"; c.font="13px monospace"; c.fillText("NEAR / CLEAR", 22, h-4);
+  c.fillText("FAR / ATTENUATED", w-110, h-4);
+  // altitude profile spark
+  c.strokeStyle = "rgba(233,240,56,.5)"; c.lineWidth=2;
+  c.beginPath();
+  for(let i=0;i<=40;i++){
+    const x = 20 + (w-40)*i/40;
+    const y = h-70 - Math.sin(i/40*Math.PI*2)*30;
+    if(i===0)c.moveTo(x,y); else c.lineTo(x,y);
+  }
+  c.stroke();
+}
+
+function drawClouds(){
+  const c = ctxOf("instr-clouds"); const w=c.canvas.width, h=c.canvas.height;
+  c.clearRect(0,0,w,h);
+  const draw = makeRandom(0xC10D5);
+  // 4-octave FBM atlas
+  for(let y=0;y<h;y+=6){
+    for(let x=0;x<w;x+=6){
+      let n=0, amp=1, freq=0.006;
+      for(let o=0;o<4;o++){ n += (draw()*2-1)*amp; amp*=0.55; freq*=2; }
+      const v = Math.max(0, Math.min(1, (n+1)/2));
+      const stateCov = state.clCov || 0.55;
+      const alpha = v > stateCov ? (v-stateCov)/(1-stateCov) : 0;
+      if(alpha>0.02){
+        c.fillStyle = `rgba(55,214,214,${Math.min(0.5, alpha*0.6)})`;
+        c.fillRect(x,y,6,6);
+      }
+    }
+  }
+  // crosshair
+  c.strokeStyle = "rgba(233,240,56,.55)"; c.lineWidth=1.5;
+  c.beginPath(); c.moveTo(w/2-14,h/2); c.lineTo(w/2+14,h/2); c.stroke();
+  c.beginPath(); c.moveTo(w/2,h/2-14); c.lineTo(w/2,h/2+14); c.stroke();
+  c.fillStyle = "#7d7d7d"; c.font="11px monospace"; c.fillText(`coverage ${(state.clCov||0.55)*100}% · seed C10D5`, 14, h-12);
+}
+
+function drawAll(){
+  drawBreakChart(); drawImpactMap(); drawFragmentsPreview();
+  drawSun(); drawAtmos(); drawClouds();
+}
+
+// init canvases sizes
+["instr-break","instr-impact","instr-fragments","instr-sun","instr-atmos","instr-clouds"].forEach(id=>{
+  const el = $(id); el.width = el.parentElement.clientWidth || 340; el.height = 150;
+});
+window.addEventListener("resize", ()=>{
+  ["instr-break","instr-impact","instr-fragments","instr-sun","instr-atmos","instr-clouds"].forEach(id=>{
+    const el = $(id); el.width = el.parentElement.clientWidth || 340;
+  });
+  drawAll();
+});
+
+//====================================================================================================================================
+//                                       CONTROLS
+//====================================================================================================================================
+function bindRange(id, key, min, max, fmt, onChange){
+  const el = $(id);
+  el.addEventListener("input", ()=>{
+    state[key] = Number(el.value);
+    if(fmt) $(id.replace("-number","")||id).textContent = fmt(state[key]);
+    if(onChange) onChange();
+    drawAll();
+  });
+}
+// wire simple sliders by updating labels directly
+function setLabel(id, text){ const el = $(id); if(el) el.textContent = text; }
+
+$("btn-dyn").onclick = ()=>{ state.mode="dynamic"; $("btn-dyn").classList.add("on"); $("btn-bak").classList.remove("on"); $("bd-dyn").style.display="block"; $("bd-bak").style.display="none"; drawAll(); };
+$("btn-bak").onclick = ()=>{ state.mode="baked"; $("btn-bak").classList.add("on"); $("btn-dyn").classList.remove("on"); $("bd-dyn").style.display="none"; $("bd-bak").style.display="block"; drawAll(); };
+$("btn-break").onclick = ()=>{
+  const res = fracture({extent:[2,2,2]}, {material:state.material, energy:state.energy, seed:state.seed, ceiling:state.ceiling, minSize:state.minSize, impact:state.impact});
+  state.broken = true; state.fragments = res.parts;
+  const p = PROPS.find(x=>x.id===state.selected); if(p) p.state = "broken";
+  renderOutliner(); updateKPIs(); drawAll();
+  $("bd-frags").textContent = res.parts; $("bd-tri").textContent = (res.parts*12).toLocaleString();
+  $("bd-ms").textContent = res.ms.toFixed(1)+" ms"; $("bd-err").textContent = "< 1e-7";
+  $("bd-rej").textContent = res.rejected; $("bd-spent").textContent = res.spent.toFixed(0)+" / "+res.budget.toFixed(0)+" J";
+  $("bd-topo").textContent = "Closed"; $("bd-state").textContent = "broken";
+  $("hud-frag-val").textContent = res.parts;
+  setTimeout(()=>{ $("hud-val").textContent = state.energy.toLocaleString()+" J"; }, 300);
+};
+$("btn-reset").onclick = ()=>{
+  state.broken = false; state.fragments = 0;
+  PROPS.forEach(p=>{ if(p.group==="destruction") p.state="intact"; });
+  renderOutliner(); updateKPIs(); drawAll();
+  $("bd-frags").textContent = "—"; $("bd-tri").textContent = "—"; $("bd-ms").textContent = "— ms";
+  $("bd-err").textContent = "—"; $("bd-rej").textContent = "—"; $("bd-spent").textContent = "— / — J";
+  $("bd-topo").textContent = "—"; $("bd-state").textContent = "intact";
+  $("hud-frag-val").textContent = "—";
+};
+$("btn-centre").onclick = ()=>{ state.impact = [0,0,0]; updateKPIs(); drawAll(); };
+
+// material thresholds
+MATERIAL_ORDER.forEach(k=>{
+  // handled via folder click
+});
+
+// play scrubber
+let playing = false;
+$("btn-play").onclick = ()=>{
+  playing = !playing;
+  $("btn-play").classList.toggle("paused");
+  $("btn-play").textContent = playing? "⏸ Pause": "▶ Play";
+};
+let t = 0;
+function frame(){
+  if(playing){
+    t += 0.016;
+    const sunAz = 145 + 40*Math.sin(t*0.4);
+    const sunEl = 38 + 22*Math.sin(t*0.7);
+    state.sunAz = sunAz; state.sunEl = sunEl;
+    $("sun-az").textContent = sunAz.toFixed(1)+"°";
+    $("sun-el").textContent = sunEl.toFixed(1)+"°";
+    const prog = (t%4)/4*100;
+    $("foot-prog"||document.querySelector(".foot-prog")).style.width = prog+"%";
+    document.querySelector(".foot-prog").style.width = prog+"%";
+    document.querySelector(".foot-playhead").style.left = prog+"%";
+    drawSun();
+  }
+  requestAnimationFrame(frame);
+}
+frame();
+
+// initial
+renderOutliner(); updateKPIs(); drawAll();
+</script>
+</body>
+</html>
