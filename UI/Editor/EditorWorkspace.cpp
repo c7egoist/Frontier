@@ -173,7 +173,7 @@ void EditorWorkspace::ActivateProjectWorkspace(
     if (const LogCategory *CabinChannel = Categories.QueryByName("CabinHMI"))
     {
         WriteLog(CabinChannel->Token, LogSeverity::Info, LogVerbosity::Display,
-                 "Cabin HMI telemetry bus connected · docked LogStream & ControlCentre theme synchronized",
+                 "Cabin HMI telemetry bus connected · ControlCentre theme synchronized · Log Stream hidden",
                  "ProjectEverestInterchange.cpp");
     }
     if (const LogCategory *WeatherChannel = Categories.QueryByName("Weather"))
@@ -230,11 +230,12 @@ void EditorWorkspace::ActivateProjectWorkspace(
         OutlinerPanel.Select(SunToken);
     }
 
+    const bool LogStreamWasOpen = Panels.QueryOpen("LogStream");
     (void)Panels.ConfigureOpen("viewport", true);
-    (void)Panels.ConfigureOpen("LogStream", true);
+    (void)Panels.ConfigureOpen("LogStream", false);
     (void)Panels.ConfigureOpen("Inspector", true);
     (void)Panels.ConfigureOpen("Outliner", true);
-    PendingProjectSplit = !LayoutRestored;
+    PendingProjectSplit = !LayoutRestored || LogStreamWasOpen;
     LogPanel.Synchronize(LogStore(), Categories, 1.0 / 60.0);
     OutlinerPanel.Synchronize(SceneDirectory::Instance());
 }
@@ -256,7 +257,7 @@ void EditorWorkspace::ConstructInterface()
         (void)Panels.ConfigureOpen("viewport", true);
         if (NotchBandComposition)
         {
-            (void)Panels.ConfigureOpen("LogStream", true);
+            (void)Panels.ConfigureOpen("LogStream", false);
             (void)Panels.ConfigureOpen("Outliner", true);
             (void)Panels.ConfigureOpen("Inspector", true);
             PendingProjectSplit = true;
@@ -396,12 +397,7 @@ void EditorWorkspace::ConstructInterface()
             {
                 ImGui::DockBuilderDockWindow("Content Browser###FrontierPanel-content", CentreColumn);
             }
-            ImGuiID LogColumn = RightColumn;
-            ImGuiID InspectorColumn = 0;
-            ImGui::DockBuilderSplitNode(RightColumn, ImGuiDir_Down, 0.46f, &InspectorColumn, &LogColumn);
-            ImGui::DockBuilderDockWindow("Notifications###FrontierPanel-notifications", LogColumn);
-            ImGui::DockBuilderDockWindow("Log Stream###FrontierPanel-LogStream", LogColumn);
-            ImGui::DockBuilderDockWindow("Inspector###FrontierPanel-Inspector", InspectorColumn);
+            ImGui::DockBuilderDockWindow("Inspector###FrontierPanel-Inspector", RightColumn);
             ImGui::DockBuilderFinish(Root);
             PendingProjectSplit = false;
         }
@@ -586,7 +582,7 @@ void EditorWorkspace::ConstructViewport()
     KitDrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(CL + 18.0f, Y + 16.0f), Theme.Muted,
                    "VULKAN SCENE VIEWPORT / PROVING GROUNDS", 1.2f);
     KitDrawText(Ink, Faces.Regular, 12.5f, ImVec2(CL + 18.0f, Y + 36.0f), Theme.Faint,
-                "UI host, docking, ControlCentre theme, Outliner, and LogStream active.");
+                "UI host, docking, ControlCentre theme, Outliner, and shared Inspector active; Log Stream hidden.");
 
     Y += CanvasH + 12.0f;
     const float InfoH = std::max(140.0f, PB - Y - 16.0f);

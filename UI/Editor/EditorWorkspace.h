@@ -66,7 +66,7 @@ class EditorWorkspace
     void ConstructNotchBandReturnButton(float Scale);
     void ConstructViewport();
     ControlCentrePanel &Centre;
-    PanelDockspace      Panels;
+    PanelDockspace      Panels; // One Inspector dock surface dispatches to the selected record's domain panel.
     LogStreamPanel      LogPanel;
     SceneDirectoryPanel OutlinerPanel;
     SceneInspectorPanel  InspectorPanel;

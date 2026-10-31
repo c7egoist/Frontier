@@ -3,7 +3,7 @@
 ==========================================================================================================================================*/
 // 🧩 End-to-end validation and native CPU exhibit capture for Frontier -> Project Browser -> Select Application ->
 //    Project Everest -> docked EditorWorkspace (PanelDockspace + ControlCentrePanel UI theme controller +
-//    LogStreamPanel + SceneDirectoryPanel Outliner + RecordEntry constructor/destructor lifecycle).
+//    shared Inspector + SceneDirectoryPanel Outliner + RecordEntry constructor/destructor lifecycle).
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -263,6 +263,10 @@ int main(int ArgumentCount, char **Arguments)
             new ControlCentrePanel(RepositoryRoot / "EngineContent/FontArchives", PersonalPrefs));
         auto *Centre = static_cast<ControlCentrePanel *>(Ownership.get());
         Require(Centre->Initialize() && Centre->Activate(), "ControlCentrePanel failed to initialize");
+        auto AppearanceDraft = Centre->QueryAppearance().QueryDraft();
+        AppearanceDraft.Theme = ThemeCategory::Oled;
+        Centre->QueryAppearance().ConfigureDraft(AppearanceDraft);
+        Centre->QueryAppearance().Apply();
 
         // 1. Project Browser discovery & filter to Application Projects.
         auto Browser = std::make_unique<ProjectBrowserPanel>();
@@ -380,14 +384,6 @@ int main(int ArgumentCount, char **Arguments)
         Require(SceneDirectory::Instance().QueryCount() == 10u && RecordInspectorRegistry::Instance().QueryCount() == 10u,
                 "RecordEntry destructor must auto-unregister from SceneDirectory and Inspector registry");
 
-        // Emit one expandable diagnostic error entry as well so severity chips, counts, and detail expansion are live.
-        if (const LogCategory *RenderCat = LogCategories().QueryByName("Render"))
-        {
-            WriteLog(RenderCat->Token, LogSeverity::Error, LogVerbosity::Display,
-                     "Scene renderer dispatches deferred until Phase 2 · UI host & LogStream verified active",
-                     "ProjectEverestValidation.cpp:208");
-        }
-
         const auto PumpWorkspaceFrames = [&](int Count) {
             for (int Index = 0; Index < Count; ++Index)
             {
@@ -405,22 +401,19 @@ int main(int ArgumentCount, char **Arguments)
 
         PumpWorkspaceFrames(12);
         {
-            ImGuiWindow *OutlinerWindow = ImGui::FindWindowByName("Outliner###FrontierPanel-Outliner");
-            ImGuiWindow *ViewportWindow = ImGui::FindWindowByName("Viewport###FrontierPanel-viewport");
-            ImGuiWindow *LogWindow      = ImGui::FindWindowByName("Log Stream###FrontierPanel-LogStream");
+            ImGuiWindow *OutlinerWindow  = ImGui::FindWindowByName("Outliner###FrontierPanel-Outliner");
+            ImGuiWindow *ViewportWindow  = ImGui::FindWindowByName("Viewport###FrontierPanel-viewport");
+            ImGuiWindow *LogWindow       = ImGui::FindWindowByName("Log Stream###FrontierPanel-LogStream");
             ImGuiWindow *InspectorWindow = ImGui::FindWindowByName("Inspector###FrontierPanel-Inspector");
-            Require(OutlinerWindow != nullptr && ViewportWindow != nullptr && LogWindow != nullptr &&
-                        InspectorWindow != nullptr,
-                    "Docked Outliner, Viewport, LogStream, or Environment Inspector ImGui window missing");
+            Require(OutlinerWindow != nullptr && ViewportWindow != nullptr && InspectorWindow != nullptr,
+                    "Docked Outliner, Viewport, or shared Inspector ImGui window missing");
+            Require(!Workspace->QueryPanels().QueryOpen("LogStream") && LogWindow == nullptr,
+                    "Log Stream must remain hidden from the Project Everest workspace");
             Require(OutlinerWindow->Pos.x + 80.0f < ViewportWindow->Pos.x &&
-                        ViewportWindow->Pos.x + 80.0f < LogWindow->Pos.x && LogWindow->Size.x >= 720.0f,
-                    "Expected side-by-side 3-column dock split (Outliner | Viewport | Log Stream)");
+                        ViewportWindow->Pos.x + 80.0f < InspectorWindow->Pos.x && InspectorWindow->Size.x >= 400.0f,
+                    "Expected Outliner | Viewport | one full-height Inspector dock split");
         }
-        // Select the error row so the inline detail inspector in LogStreamPanel is also exercised visually.
-        if (Workspace->QueryLogStreamPanel().QueryVisible().size() > 0)
-        {
-            Workspace->QueryLogStreamPanel().SelectVisible(Workspace->QueryLogStreamPanel().QueryVisible().size() - 1u);
-        }
+        ImGuiWindow *SharedInspectorWindow = ImGui::FindWindowByName("Inspector###FrontierPanel-Inspector");
         PumpWorkspaceFrames(4);
         const RasterizedCapture OledWorkspaceCapture =
             RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field);
@@ -439,6 +432,8 @@ int main(int ArgumentCount, char **Arguments)
             Workspace->QuerySceneDirectoryPanel().Select(SelectedRow->Token);
             (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
             PumpWorkspaceFrames(3);
+            Require(ImGui::FindWindowByName("Inspector###FrontierPanel-Inspector") == SharedInspectorWindow,
+                    "Changing selected record must reuse the single docked Inspector window");
             const RasterizedCapture Capture = RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field);
             WritePngCapture(Capture, ExhibitImages / Filename);
         };
@@ -460,16 +455,26 @@ int main(int ArgumentCount, char **Arguments)
             Workspace->QuerySceneDirectoryPanel().Select(Row->Token);
             (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
             PumpWorkspaceFrames(3);
+            const auto FindFlareTabContentWindow = []() -> ImGuiWindow * {
+                for (ImGuiWindow *Window : ImGui::GetCurrentContext()->Windows)
+                {
+                    if (std::string(Window->Name).find("##flare_tab_content_") != std::string::npos)
+                    {
+                        return Window;
+                    }
+                }
+                return nullptr;
+            };
             IO.AddMousePosEvent(1200.0f, 850.0f);
             for (int32_t Tick = 0; Tick < 16; ++Tick)
             {
                 IO.AddMouseWheelEvent(0.0f, -1.0f);
                 PumpWorkspaceFrames(1);
             }
-            ImGuiWindow *InspectorScroll = ImGui::FindWindowByName("Inspector###FrontierPanel-Inspector");
-            Require(InspectorScroll != nullptr && InspectorScroll->Scroll.y > 0.0f,
-                    "Lens Flare tab exhibits require scrolling past the optical preview");
-            InspectorScroll->ScrollTarget.y = InspectorScroll->ScrollMax.y;
+            ImGuiWindow *FlareTabContentWindow = FindFlareTabContentWindow();
+            Require(FlareTabContentWindow != nullptr && FlareTabContentWindow->Scroll.y > 0.0f,
+                    "Lens Flare tab content must respond to wheel scrolling");
+            FlareTabContentWindow->ScrollTarget.y = FlareTabContentWindow->ScrollMax.y;
             IO.AddMousePosEvent(100.0f, 100.0f);
             PumpWorkspaceFrames(3);
             const std::array<std::pair<int32_t, const char *>, 4> Tabs{{
@@ -483,7 +488,11 @@ int main(int ArgumentCount, char **Arguments)
                 Workspace->QuerySceneDirectoryPanel().Select(Row->Token);
                 (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
                 PumpWorkspaceFrames(3);
-                InspectorScroll->ScrollTarget.y = std::max(0.0f, InspectorScroll->ScrollMax.y - 100.0f);
+                FlareTabContentWindow = FindFlareTabContentWindow();
+                Require(FlareTabContentWindow != nullptr,
+                        "Each Lens Flare section must reuse the Inspector tab-content window");
+                FlareTabContentWindow->ScrollTarget.y =
+                    std::max(0.0f, FlareTabContentWindow->ScrollMax.y - 100.0f);
                 PumpWorkspaceFrames(1);
                 IO.AddMousePosEvent(1200.0f, 850.0f);
                 for (int32_t Tick = 0; Tick < 4; ++Tick)
@@ -499,7 +508,7 @@ int main(int ArgumentCount, char **Arguments)
                                 ExhibitImages / Filename);
             }
             Flare->ActiveSectionIndex = 0;
-            InspectorScroll->ScrollTarget.y = 0.0f;
+            FlareTabContentWindow->ScrollTarget.y = 0.0f;
             PumpWorkspaceFrames(3);
         }
         CaptureEnvironmentInspector("Clouds", "09_ProjectEverest_CloudInspector_OLED.png",
@@ -660,45 +669,28 @@ int main(int ArgumentCount, char **Arguments)
             RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field);
         WritePngCapture(LightWorkspaceCapture, ExhibitImages / "05_ProjectEverest_Workspace_LightTheme.png");
 
-        const double OledLogLuminance  = MeanRegionLuminance(OledWorkspaceCapture, 1150, 220, 1880, 960);
-        const double LightLogLuminance = MeanRegionLuminance(LightWorkspaceCapture, 1150, 220, 1880, 960);
         const double OledOutlinerLum   = MeanRegionLuminance(OledWorkspaceCapture, 30, 160, 360, 960);
         const double LightOutlinerLum  = MeanRegionLuminance(LightWorkspaceCapture, 30, 160, 360, 960);
-        const double OledInspectorLum  = MeanRegionLuminance(OledWorkspaceCapture, 770, 520, 1555, 875);
-        const double LightInspectorLum = MeanRegionLuminance(LightWorkspaceCapture, 770, 520, 1555, 875);
-        Require(OledLogLuminance < 0.18 && LightLogLuminance > 0.72,
-                "ControlCentre Theme switch must re-theme LogStreamPanel from dark OLED to Light");
+        const double OledInspectorLum  = MeanRegionLuminance(OledWorkspaceCapture, 1120, 120, 1545, 860);
+        const double LightInspectorLum = MeanRegionLuminance(LightWorkspaceCapture, 1120, 120, 1545, 860);
         Require(OledOutlinerLum < 0.18 && LightOutlinerLum > 0.72,
                 "ControlCentre Theme switch must re-theme SceneDirectoryPanel Outliner from dark OLED to Light");
-        Require(OledInspectorLum < 0.20 && LightInspectorLum > 0.55,
-                "ControlCentre Theme switch must re-theme global SceneInspectorPanel from dark OLED to Light");
+        Require(OledInspectorLum < 0.22 && LightInspectorLum > 0.55,
+                "ControlCentre Theme switch must re-theme the shared Inspector from dark OLED to Light");
 
-        // 6. Switch UI Theme to Sepia via ControlCentrePanel and open the Channels DropdownControlSurface in LogStream.
+        // 6. Apply the Sepia theme while the Log Stream remains hidden from the Project Everest workspace.
         {
             auto Draft  = Centre->QueryAppearance().QueryDraft();
             Draft.Theme = ThemeCategory::Sepia;
             Centre->QueryAppearance().ConfigureDraft(Draft);
             Centre->QueryAppearance().Apply();
-            PumpWorkspaceFrames(6);
-
-            // Open the reusable Channels DropdownControlSurface popup inside a live LogStream frame.
-            Centre->PrepareInterface();
-            (void)Workspace->ConfigurePlatform();
-            ImGui::NewFrame();
-            (void)Centre->Integrate(1.0 / 60.0);
-            Workspace->ConstructInterface();
-            if (ImGuiWindow *LogWindow = ImGui::FindWindowByName("Log Stream###FrontierPanel-LogStream"))
-            {
-                ImGui::OpenPopupEx(LogWindow->GetID("##LogChannelsPopup"), ImGuiPopupFlags_None);
-            }
-            Centre->ConstructInterface();
-            ImGui::Render();
-            FrontierExhibit::AcknowledgeTextures();
-            PumpWorkspaceFrames(4);
+            PumpWorkspaceFrames(8);
         }
-        const RasterizedCapture SepiaChannelsCapture =
+        Require(!Workspace->QueryPanels().QueryOpen("LogStream"),
+                "Applying themes must not expose Log Stream in the Project Everest workspace");
+        const RasterizedCapture SepiaWorkspaceCapture =
             RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field);
-        WritePngCapture(SepiaChannelsCapture, ExhibitImages / "06_ProjectEverest_Workspace_SepiaChannels.png");
+        WritePngCapture(SepiaWorkspaceCapture, ExhibitImages / "06_ProjectEverest_Workspace_SepiaTheme.png");
 
         // Tear down workspace and verify all ten opening-scene RecordEntry objects unregister from both stores.
         Workspace.reset();
@@ -718,8 +710,8 @@ int main(int ArgumentCount, char **Arguments)
                << "  \"application_target\": \"Frontier · Project workspace\",\n"
                << "  \"startup_scene\": \"ProvingGrounds\",\n"
                << "  \"user_log_categories\": [\"Powertrain\", \"CabinHMI\", \"Weather\", \"Fracture\"],\n"
-               << "  \"oled_logstream_luminance\": " << OledLogLuminance << ",\n"
-               << "  \"light_logstream_luminance\": " << LightLogLuminance << ",\n"
+               << "  \"log_stream_visible\": false,\n"
+               << "  \"inspector_dock_count\": 1,\n"
                << "  \"oled_outliner_luminance\": " << OledOutlinerLum << ",\n"
                << "  \"light_outliner_luminance\": " << LightOutlinerLum << ",\n"
                << "  \"oled_inspector_luminance\": " << OledInspectorLum << ",\n"
@@ -731,7 +723,7 @@ int main(int ArgumentCount, char **Arguments)
                << "    \"Exhibits/ProjectEverest/Images/03_ProjectEverest_Workspace_OLED.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/04_ProjectEverest_ControlCentre_ThemeDrawer.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/05_ProjectEverest_Workspace_LightTheme.png\",\n"
-               << "    \"Exhibits/ProjectEverest/Images/06_ProjectEverest_Workspace_SepiaChannels.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/06_ProjectEverest_Workspace_SepiaTheme.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/07_ProjectEverest_FolderInspector_OLED.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/08_ProjectEverest_LensFlareInspector_OLED.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/09_ProjectEverest_CloudInspector_OLED.png\",\n"
@@ -758,9 +750,8 @@ int main(int ArgumentCount, char **Arguments)
                << "  ]\n"
                << "}\n";
 
-        std::cout << "PASS: Project Everest browser discovery, application selection, docked LogStream + Outliner + "
-                     "ControlCentre theme switching (OLED lum="
-                  << OledLogLuminance << " -> Light lum=" << LightLogLuminance << ")\n";
+        std::cout << "PASS: Project Everest browser discovery, hidden Log Stream, docked Outliner + Viewport + one "
+                     "shared Inspector, domain selection, and live theme switching\n";
         return 0;
     }
     catch (const std::exception &Failure)

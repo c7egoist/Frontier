@@ -1,4 +1,4 @@
-# Project Everest — Editor UI & LogStream Exhibit
+# Project Everest — Editor UI Exhibit
 
 End-to-end rendered validation exhibit proving the Phase 1 editor UI delivery for **Project Everest** before Phase 2
 native Vulkan GPU renderer porting (`RTX` `VK_KHR_ray_query` full hardware raytracing + `GTX` SDF with software BVH
@@ -17,21 +17,18 @@ reflections fallback).
 3. **Docked Editor Workspace — OLED Theme (`03_ProjectEverest_Workspace_OLED.png`)**
    - `EditorWorkspace::ActivateProjectWorkspace` mounts `ProjectEverest.projectspace` + `ProjectEverest.frontier`,
      registers the four Project Everest user log categories (`Powertrain`, `CabinHMI`, `Weather`, `Fracture`) alongside
-     the nine engine channels, constructs ten initial `RecordEntry` instances (including six typed global Inspector
-     domains), and docks `Outliner`, `Viewport`, `Log Stream`, and `Inspector` inside `PanelDockspace` beneath the
-     `ControlCentrePanel` top-edge notch. Constructor/destructor validation checks both Outliner and Inspector registry
-     insertion/removal.
+     the nine engine channels, and constructs ten initial `RecordEntry` instances. The `Outliner`, `Viewport`, and one
+     `Inspector` dock surface sit beneath the `ControlCentrePanel` top-edge notch. The selected record routes that single
+     Inspector to its typed domain panel; Log Stream remains a live service but its dock window is hidden. Constructor/
+     destructor validation checks Outliner and Inspector registry insertion/removal.
 4. **ControlCentre Theme Controller (`04_ProjectEverest_ControlCentre_ThemeDrawer.png`)**
    - Opening the `ControlCentrePanel` top-edge drawer exposes the reusable **Appearance -> Theme** controller (`OLED`,
      `Dark`, `Light`, `Sepia`, `Dracula`, `Nord`, `Dim`, `GitHub`) governing the active project workspace.
 5. **Live Workspace Re-Theming — Light Theme (`05_ProjectEverest_Workspace_LightTheme.png`)**
-   - Applying `ThemeCategory::Light` through `ControlCentrePanel` re-themes `PanelDockspace` trapezoidal tabs,
-     `SceneDirectoryPanel` (`Outliner`), `Viewport`, and `LogStreamPanel` live from `ControlKit::Palette()`
-     (`OLED` log region mean luminance `0.075` -> `Light` log region mean luminance `0.968`).
-6. **Live Workspace Re-Theming — Sepia Theme + Channels Surface (`06_ProjectEverest_Workspace_SepiaChannels.png`)**
-   - Applying `ThemeCategory::Sepia` and opening `LogStreamPanel`'s `DropdownControlSurface` (`All channels`) verifies
-     live theme propagation across floating popup surfaces, all nine engine channels, and Project Everest's four
-     coloured user categories (`Powertrain`, `CabinHMI`, `Weather`, `Fracture`).
+   - Applying `ThemeCategory::Light` through `ControlCentrePanel` re-themes the Outliner and shared Inspector live.
+     `ProjectEverestValidation` checks rendered luminance changes while asserting Log Stream remains hidden.
+6. **Live Workspace Re-Theming — Sepia Theme (`06_ProjectEverest_Workspace_SepiaTheme.png`)**
+   - Applying `ThemeCategory::Sepia` verifies theme propagation in the same workspace without opening Log Stream.
 
 ## Global Engine Inspector UI Captures
 
