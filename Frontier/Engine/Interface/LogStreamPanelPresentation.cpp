@@ -138,36 +138,108 @@ constexpr ImU32 InkWithAlpha(ImU32 Colour, float Alpha) noexcept
 
 struct LogPanelTheme
 {
-    static constexpr ImU32 PanelBg   = InkHex(0x0b100e);                    // rgba(11,16,14,.86) over the host page
-    static constexpr ImU32 PanelEdge = InkWhite(0.08f);
-    static constexpr ImU32 Surface   = InkHex(0x0e1411);
-    static constexpr ImU32 Surface2  = InkHex(0x151d18);
-    static constexpr ImU32 Surface3  = InkHex(0x1c2620);
-    static constexpr ImU32 Line      = InkWhite(0.07f);
-    static constexpr ImU32 LineSoft  = InkWhite(0.045f);
-    static constexpr ImU32 RowSep    = InkWhite(0.028f);
-    static constexpr ImU32 RowHover  = InkWhite(0.032f);
-    static constexpr ImU32 Text      = InkHex(0xeef3f0);
-    static constexpr ImU32 Muted     = InkHex(0x97a29b);
-    static constexpr ImU32 Faint     = InkHex(0x5f6b64);
-    static constexpr ImU32 Mint      = InkHex(0x2fe6a7);
-    static constexpr ImU32 MintDeep  = InkHex(0x053322);
-    static constexpr ImU32 MintDim   = InkRgba(47, 230, 167, 33);           // rgba(47,230,167,.13)
-    static constexpr ImU32 Amber     = InkHex(0xffb454);
-    static constexpr ImU32 AmberDim  = InkRgba(255, 180, 84, 31);
-    static constexpr ImU32 Coral     = InkHex(0xff6d6d);
-    static constexpr ImU32 CoralDim  = InkRgba(255, 109, 109, 31);
-    static constexpr ImU32 Red       = InkHex(0xff4747);
-    static constexpr ImU32 ChipOnBg  = InkHex(0xe9f2ed);
-    static constexpr ImU32 ChipOnInk = InkHex(0x0b120e);
-    static constexpr ImU32 MsgText   = InkHex(0xdbe4de);
-    static constexpr ImU32 MsgWarn   = InkHex(0xf0e2cd);
-    static constexpr ImU32 MsgErr    = InkHex(0xf3d9d9);
-    static constexpr ImU32 DetailTx  = InkHex(0xcfd8d1);
-    static constexpr ImU32 MsRow     = InkHex(0x45524a);
-    static constexpr ImU32 MsHead    = InkHex(0x3f4a44);
-    static constexpr ImU32 WarnInk   = InkHex(0x10130f);
+    ImU32  PanelBg        = InkHex(0x0b100e);
+    ImU32  PanelEdge      = InkWhite(0.08f);
+    ImU32  Surface        = InkHex(0x0e1411);
+    ImU32  Surface2       = InkHex(0x151d18);
+    ImU32  Surface3       = InkHex(0x1c2620);
+    ImU32  Line           = InkWhite(0.07f);
+    ImU32  LineSoft       = InkWhite(0.045f);
+    ImU32  RowSep         = InkWhite(0.028f);
+    ImU32  RowHover       = InkWhite(0.032f);
+    ImU32  ActiveBorder   = InkWhite(0.18f);
+    ImU32  SparkGuide     = InkWhite(0.13f);
+    ImU32  SparkLine      = InkWhite(0.85f);
+    ImU32  ScrubTrack     = InkWhite(0.10f);
+    ImU32  ScrubTick      = InkWhite(0.22f);
+    ImU32  TagWash        = InkWhite(0.02f);
+    ImU32  SwatchRingOn   = InkWhite(1.0f);
+    ImU32  SwatchRingOff  = InkWhite(0.14f);
+    ImU32  Text           = InkHex(0xeef3f0);
+    ImU32  Muted          = InkHex(0x97a29b);
+    ImU32  Faint          = InkHex(0x5f6b64);
+    ImU32  Mint           = InkHex(0x2fe6a7);
+    ImU32  MintDeep       = InkHex(0x053322);
+    ImU32  MintDim        = InkRgba(47, 230, 167, 33);
+    ImU32  Amber          = InkHex(0xffb454);
+    ImU32  AmberDim       = InkRgba(255, 180, 84, 31);
+    ImU32  Coral          = InkHex(0xff6d6d);
+    ImU32  CoralDim       = InkRgba(255, 109, 109, 31);
+    ImU32  Red            = InkHex(0xff4747);
+    ImU32  ChipOnBg       = InkHex(0xe9f2ed);
+    ImU32  ChipOnInk      = InkHex(0x0b120e);
+    ImU32  MsgText        = InkHex(0xdbe4de);
+    ImU32  MsgWarn        = InkHex(0xf0e2cd);
+    ImU32  MsgErr         = InkHex(0xf3d9d9);
+    ImU32  DetailTx       = InkHex(0xcfd8d1);
+    ImU32  MsRow          = InkHex(0x45524a);
+    ImU32  MsHead         = InkHex(0x3f4a44);
+    ImU32  WarnInk        = InkHex(0x10130f);
+    ImVec4 SearchTextVec4 = ImVec4(0.933f, 0.953f, 0.941f, 1.0f);
+    bool   LightSurface   = false;
 };
+
+ImU32 LogQuadToImU32(ColorQuad Quad) noexcept
+{
+    const auto Byte = [](float Channel) -> int {
+        return std::clamp(static_cast<int>(Channel * 255.0f + 0.5f), 0, 255);
+    };
+    return InkRgba(Byte(Quad.Red), Byte(Quad.Green), Byte(Quad.Blue), Byte(Quad.Alpha));
+}
+
+ColorQuad BlendLogQuad(ColorQuad From, ColorQuad To, float Weight) noexcept
+{
+    return ColorQuad{From.Red + (To.Red - From.Red) * Weight,
+                     From.Green + (To.Green - From.Green) * Weight,
+                     From.Blue + (To.Blue - From.Blue) * Weight,
+                     From.Alpha + (To.Alpha - From.Alpha) * Weight};
+}
+
+LogPanelTheme ResolveLogPanelTheme() noexcept
+{
+    const ControlKitPalette& Palette = ControlKit::Palette();
+    LogPanelTheme            Theme;
+    Theme.LightSurface   = Palette.LightSurface;
+    Theme.PanelBg        = LogQuadToImU32(Palette.Panel);
+    Theme.PanelEdge      = Palette.LightSurface ? InkRgba(0, 0, 0, 22) : LogQuadToImU32(Palette.Stroke);
+    Theme.Surface        = LogQuadToImU32(Palette.Card);
+    Theme.Surface2       = LogQuadToImU32(Palette.Inset);
+    Theme.Surface3       = LogQuadToImU32(Palette.CardSub);
+    Theme.Line           = Palette.LightSurface ? InkRgba(0, 0, 0, 22) : InkWhite(0.075f);
+    Theme.LineSoft       = Palette.LightSurface ? InkRgba(0, 0, 0, 14) : InkWhite(0.045f);
+    Theme.RowSep         = Palette.LightSurface ? InkRgba(0, 0, 0, 10) : InkWhite(0.028f);
+    Theme.RowHover       = Palette.LightSurface ? InkRgba(0, 0, 0, 9) : InkWhite(0.032f);
+    Theme.ActiveBorder   = Palette.LightSurface ? InkRgba(0, 0, 0, 48) : InkWhite(0.18f);
+    Theme.SparkGuide     = Palette.LightSurface ? InkRgba(0, 0, 0, 26) : InkWhite(0.13f);
+    Theme.SparkLine      = InkWithAlpha(LogQuadToImU32(Palette.Text), 0.85f);
+    Theme.ScrubTrack     = Palette.LightSurface ? InkRgba(0, 0, 0, 26) : InkWhite(0.10f);
+    Theme.ScrubTick      = Palette.LightSurface ? InkRgba(0, 0, 0, 56) : Theme.ScrubTick;
+    Theme.TagWash        = Palette.LightSurface ? InkRgba(0, 0, 0, 7) : InkWhite(0.02f);
+    Theme.SwatchRingOn   = LogQuadToImU32(Palette.Text);
+    Theme.SwatchRingOff  = Palette.LightSurface ? InkRgba(0, 0, 0, 38) : InkWhite(0.14f);
+    Theme.Text           = LogQuadToImU32(Palette.Text);
+    Theme.Muted          = LogQuadToImU32(Palette.TextDim);
+    Theme.Faint          = LogQuadToImU32(Palette.TextFaint);
+    Theme.Mint           = Palette.LightSurface ? InkHex(0x0b9e6d) : InkHex(0x2fe6a7);
+    Theme.MintDeep       = Palette.LightSurface ? InkHex(0xffffff) : InkHex(0x053322);
+    Theme.MintDim        = Palette.LightSurface ? InkRgba(11, 158, 109, 28) : InkRgba(47, 230, 167, 33);
+    Theme.Amber          = Palette.LightSurface ? InkHex(0xc46b08) : InkHex(0xffb454);
+    Theme.AmberDim       = Palette.LightSurface ? InkRgba(196, 107, 8, 28) : InkRgba(255, 180, 84, 31);
+    Theme.Coral          = Palette.LightSurface ? InkHex(0xd43838) : InkHex(0xff6d6d);
+    Theme.CoralDim       = Palette.LightSurface ? InkRgba(212, 56, 56, 26) : InkRgba(255, 109, 109, 31);
+    Theme.Red            = Palette.LightSurface ? InkHex(0xc92a2a) : InkHex(0xff4747);
+    Theme.ChipOnBg       = LogQuadToImU32(Palette.Primary);
+    Theme.ChipOnInk      = LogQuadToImU32(Palette.PrimaryInk);
+    Theme.MsgText        = LogQuadToImU32(BlendLogQuad(Palette.Text, Palette.TextDim, 0.14f));
+    Theme.MsgWarn        = Palette.LightSurface ? InkHex(0x6e3b00) : InkHex(0xf0e2cd);
+    Theme.MsgErr         = Palette.LightSurface ? InkHex(0x7d1a1a) : InkHex(0xf3d9d9);
+    Theme.DetailTx       = LogQuadToImU32(BlendLogQuad(Palette.Text, Palette.TextDim, 0.22f));
+    Theme.MsRow          = LogQuadToImU32(BlendLogQuad(Palette.TextFaint, Palette.Panel, 0.20f));
+    Theme.MsHead         = LogQuadToImU32(BlendLogQuad(Palette.TextFaint, Palette.Panel, 0.30f));
+    Theme.WarnInk        = Palette.LightSurface ? InkHex(0xffffff) : InkHex(0x10130f);
+    Theme.SearchTextVec4 = ImVec4(Palette.Text.Red, Palette.Text.Green, Palette.Text.Blue, Palette.Text.Alpha);
+    return Theme;
+}
 
 // ---------------------------------------------------------------------------
 //   DM Sans faces through the upstream typeface registry (host default font
@@ -397,7 +469,7 @@ void DrawMessageLine(ImDrawList* Ink, ImFont* Font, float Size, ImVec2 Position,
         }
         const char* MatchEnd = Match.End < End ? Match.End : End;
         const float StartX   = Position.x + TextWidth(Font, Size, Begin, Match.Begin);
-        Ink->AddText(Font, Size, ImVec2(StartX, Position.y), LogPanelTheme::Text, Match.Begin, MatchEnd);
+        Ink->AddText(Font, Size, ImVec2(StartX, Position.y), ResolveLogPanelTheme().Text, Match.Begin, MatchEnd);
     }
 }
 
@@ -523,14 +595,14 @@ void DrawWarnGlyph(ImDrawList* Ink, ImVec2 Centre, float Size, ImU32 Fill)
 {
     const IconBox Box = MakeIconBox(Centre, Size);
     Ink->AddTriangleFilled(Box.At(12, 3.6f), Box.At(22, 20), Box.At(2, 20), Fill);
-    Ink->AddRectFilled(Box.At(11.1f, 9.5f), Box.At(12.9f, 14.9f), LogPanelTheme::WarnInk, 0.9f * Box.Scale);
-    Ink->AddCircleFilled(Box.At(12, 17.2f), 1.15f * Box.Scale, LogPanelTheme::WarnInk);
+    Ink->AddRectFilled(Box.At(11.1f, 9.5f), Box.At(12.9f, 14.9f), ResolveLogPanelTheme().WarnInk, 0.9f * Box.Scale);
+    Ink->AddCircleFilled(Box.At(12, 17.2f), 1.15f * Box.Scale, ResolveLogPanelTheme().WarnInk);
 }
 
 void DrawBrandBars(ImDrawList* Ink, ImVec2 Centre)
 {
     const IconBox Box = MakeIconBox(Centre, 16.0f);
-    const ImU32   Colour = InkWithAlpha(LogPanelTheme::Mint, 0.95f);
+    const ImU32   Colour = InkWithAlpha(ResolveLogPanelTheme().Mint, 0.95f);
     const float   Xs[4]     = {5.0f, 10.2f, 15.4f, 20.6f};
     const float   Bottom[4] = {18.5f, 18.5f, 13.5f, 10.5f};
     for (int Index = 0; Index < 4; ++Index)
@@ -572,7 +644,7 @@ void MenuCaption(const LogPanelFaces& Faces, const char* Text)
 {
     ImDrawList*  Ink = ImGui::GetWindowDrawList();
     const ImVec2 At = ImGui::GetCursorScreenPos();
-    DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(At.x + 10.0f, At.y + 8.0f), LogPanelTheme::Faint, Text,
+    DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(At.x + 10.0f, At.y + 8.0f), ResolveLogPanelTheme().Faint, Text,
                 10.5f * 0.13f);
     ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 27.0f));
 }
@@ -583,7 +655,7 @@ void MenuSeparator()
     const ImVec2 At     = ImGui::GetCursorScreenPos();
     const float  Width  = ImGui::GetContentRegionAvail().x;
     Ink->AddRectFilled(ImVec2(At.x + 4.0f, At.y + 6.0f), ImVec2(At.x + Width - 4.0f, At.y + 7.0f),
-                       LogPanelTheme::LineSoft);
+                       ResolveLogPanelTheme().LineSoft);
     ImGui::Dummy(ImVec2(Width, 13.0f));
 }
 
@@ -595,7 +667,7 @@ void MenuTrailingText(const LogPanelFaces& Faces, const char* Text, float Size)
     const float  Width   = TextWidth(Faces.Regular, Size, Text);
     DrawText(Ink, Faces.Regular, Size,
              ImVec2(Maximum.x - 12.0f - Width, Minimum.y + (Maximum.y - Minimum.y - Size) * 0.5f),
-             LogPanelTheme::Faint, Text);
+             ResolveLogPanelTheme().Faint, Text);
 }
 
 } // namespace
@@ -622,7 +694,7 @@ void LogStreamPanel::ConstructInterface()
 {
     LogCategoryRegistry& Categories = LogCategories();
     const LogPanelFaces  Faces      = ResolveLogFaces();
-    using Theme                     = LogPanelTheme;
+    const LogPanelTheme  Theme      = ResolveLogPanelTheme();
 
     // Presentation-local edit buffers. One Log Stream panel is hosted per workspace, so function-local
     //    statics are sufficient; a second hosted instance would need these promoted into the panel.
@@ -644,20 +716,20 @@ void LogStreamPanel::ConstructInterface()
     const bool   Narrow         = WindowSize.x < 900.0f;             // [@media max-width:900px]
     ImDrawList*  Ink            = ImGui::GetWindowDrawList();
 
-    Ink->AddRectFilled(WindowPosition, ImVec2(PR, PB), Theme::PanelBg);
-    Ink->AddRect(WindowPosition, ImVec2(PR, PB), Theme::PanelEdge);
+    Ink->AddRectFilled(WindowPosition, ImVec2(PR, PB), Theme.PanelBg);
+    Ink->AddRect(WindowPosition, ImVec2(PR, PB), Theme.PanelEdge);
 
     // -- Header ------------------------------------------------------------------------------------------------------
     {
         const float Top = PT + 18.0f;
         const float CY  = Top + 18.0f;                               // [px] - 36px row centre
 
-        Ink->AddRectFilled(ImVec2(CL, CY - 15.0f), ImVec2(CL + 30.0f, CY + 15.0f), Theme::Surface2, 9.0f);
-        Ink->AddRect(ImVec2(CL, CY - 15.0f), ImVec2(CL + 30.0f, CY + 15.0f), Theme::Line, 9.0f);
+        Ink->AddRectFilled(ImVec2(CL, CY - 15.0f), ImVec2(CL + 30.0f, CY + 15.0f), Theme.Surface2, 9.0f);
+        Ink->AddRect(ImVec2(CL, CY - 15.0f), ImVec2(CL + 30.0f, CY + 15.0f), Theme.Line, 9.0f);
         DrawBrandBars(Ink, ImVec2(CL + 15.0f, CY));
 
         const float TitleX = CL + 30.0f + 14.0f;
-        DrawText(Ink, Faces.Medium, 21.0f, ImVec2(TitleX, CY - 10.5f), Theme::Text, "Log Stream");
+        DrawText(Ink, Faces.Medium, 21.0f, ImVec2(TitleX, CY - 10.5f), Theme.Text, "Log Stream");
         const float TitleW = TextWidth(Faces.Medium, 21.0f, "Log Stream");
 
         // Live pill (the prototype's trailing session label is demo content, not engine state).
@@ -667,7 +739,7 @@ void LogStreamPanel::ConstructInterface()
         const float   LiveW  = 13.0f + 7.0f + 8.0f + WordW + 13.0f;
         const float   LiveH  = 27.0f;
         PillSurface(Ink, ImVec2(LiveX, CY - LiveH * 0.5f), ImVec2(LiveX + LiveW, CY + LiveH * 0.5f),
-                    Theme::Surface2, Theme::Line, 999.0f);
+                    Theme.Surface2, Theme.Line, 999.0f);
         const ImVec2 DotCentre(LiveX + 13.0f + 3.5f, CY);
         if (!PausedFlag)
         {
@@ -676,18 +748,18 @@ void LogStreamPanel::ConstructInterface()
             {
                 const float Spread = static_cast<float>(Phase / 0.7);
                 Ink->AddCircleFilled(DotCentre, 3.5f + 7.0f * Spread,
-                                     InkWithAlpha(Theme::Mint, 0.45f * (1.0f - Spread)));
+                                     InkWithAlpha(Theme.Mint, 0.45f * (1.0f - Spread)));
             }
         }
-        Ink->AddCircleFilled(DotCentre, 3.5f, PausedFlag ? Theme::Faint : Theme::Mint);
-        DrawText(Ink, Faces.Medium, 12.5f, ImVec2(LiveX + 28.0f, CY - 6.25f), Theme::Text, Word);
+        Ink->AddCircleFilled(DotCentre, 3.5f, PausedFlag ? Theme.Faint : Theme.Mint);
+        DrawText(Ink, Faces.Medium, 12.5f, ImVec2(LiveX + 28.0f, CY - 6.25f), Theme.Text, Word);
 
         // Head clock.
         const LogClockText Clock = FormatLogClock(NowWallMicros(), 0, false);
         const float        ClockX = LiveX + LiveW + 14.0f;
-        DrawText(Ink, Faces.Regular, 13.0f, ImVec2(ClockX, CY - 6.5f), Theme::Faint, Clock.Main);
+        DrawText(Ink, Faces.Regular, 13.0f, ImVec2(ClockX, CY - 6.5f), Theme.Faint, Clock.Main);
         DrawText(Ink, Faces.Regular, 13.0f,
-                 ImVec2(ClockX + TextWidth(Faces.Regular, 13.0f, Clock.Main), CY - 6.5f), Theme::MsHead, Clock.Millis);
+                 ImVec2(ClockX + TextWidth(Faces.Regular, 13.0f, Clock.Main), CY - 6.5f), Theme.MsHead, Clock.Millis);
 
         // Icon buttons: Pause / Clear / Export / Overflow. (No Popout: detaching is the dock tab's own gesture.)
         const bool OverflowOpen = ImGui::IsPopupOpen("##LogOverflowPopup");
@@ -712,9 +784,9 @@ void LogStreamPanel::ConstructInterface()
                                             Action.Tooltip);
             const ImVec2 Minimum(ButtonX, Top - (Hovered ? 1.0f : 0.0f));
             const ImVec2 Maximum(Minimum.x + 36.0f, Minimum.y + 36.0f);
-            const ImU32  Background = Action.Active ? Theme::Mint : Theme::Surface2;
-            const ImU32  Border     = Action.Active ? Theme::Mint : (Hovered ? InkWhite(0.16f) : Theme::Line);
-            const ImU32  GlyphInk   = Action.Active ? Theme::MintDeep : (Hovered ? Theme::Text : Theme::Muted);
+            const ImU32  Background = Action.Active ? Theme.Mint : Theme.Surface2;
+            const ImU32  Border     = Action.Active ? Theme.Mint : (Hovered ? Theme.ActiveBorder : Theme.Line);
+            const ImU32  GlyphInk   = Action.Active ? Theme.MintDeep : (Hovered ? Theme.Text : Theme.Muted);
             PillSurface(Ink, Minimum, Maximum, Background, Border, 11.0f);
             const ImVec2 Centre((Minimum.x + Maximum.x) * 0.5f, (Minimum.y + Maximum.y) * 0.5f);
             switch (Action.Glyph)
@@ -770,8 +842,8 @@ void LogStreamPanel::ConstructInterface()
         const float CardH   = 85.0f;                                 // [px] - 14 + (15 + 2 + 40) + 14
         const float LabelY  = CardTop + 14.0f;
         const float ValueY  = CardTop + 14.0f + 17.0f;
-        Ink->AddRectFilled(ImVec2(CL, CardTop), ImVec2(CR, CardTop + CardH), Theme::Surface, 16.0f);
-        Ink->AddRect(ImVec2(CL, CardTop), ImVec2(CR, CardTop + CardH), Theme::LineSoft, 16.0f);
+        Ink->AddRectFilled(ImVec2(CL, CardTop), ImVec2(CR, CardTop + CardH), Theme.Surface, 16.0f);
+        Ink->AddRect(ImVec2(CL, CardTop), ImVec2(CR, CardTop + CardH), Theme.LineSoft, 16.0f);
 
         char RateBadge[32] = {};
         std::snprintf(RateBadge, sizeof(RateBadge), "+%u/s", QueryRateNow());
@@ -800,15 +872,15 @@ void LogStreamPanel::ConstructInterface()
             ImU32       GlyphFill;                                    // 0 = no warning triangle
         };
         const MetricCell Cells[3] = {
-            {"ENTRIES", TotalCount, RateBadge, Theme::MintDim, Theme::Mint, 0},
+            {"ENTRIES", TotalCount, RateBadge, Theme.MintDim, Theme.Mint, 0},
             {"WARNINGS", QuerySeverityCount(LogSeverity::Warning),
              RecentWarningsCount > 0 ? WarnBadge : "\xE2\x80\x94",
-             RecentWarningsCount > 0 ? Theme::AmberDim : Theme::Surface3,
-             RecentWarningsCount > 0 ? Theme::Amber : Theme::Faint, Theme::Amber},
+             RecentWarningsCount > 0 ? Theme.AmberDim : Theme.Surface3,
+             RecentWarningsCount > 0 ? Theme.Amber : Theme.Faint, Theme.Amber},
             {"ERRORS", QuerySeverityCount(LogSeverity::Error) + QuerySeverityCount(LogSeverity::Fatal),
              RecentErrorsCount > 0 ? ErrBadge : "\xE2\x80\x94",
-             RecentErrorsCount > 0 ? Theme::CoralDim : Theme::Surface3,
-             RecentErrorsCount > 0 ? Theme::Coral : Theme::Faint, Theme::Coral},
+             RecentErrorsCount > 0 ? Theme.CoralDim : Theme.Surface3,
+             RecentErrorsCount > 0 ? Theme.Coral : Theme.Faint, Theme.Coral},
         };
 
         float MetricX = CL + 18.0f;
@@ -820,7 +892,7 @@ void LogStreamPanel::ConstructInterface()
                 DrawWarnGlyph(Ink, ImVec2(MetricX + 6.5f, LabelY + 6.5f), 13.0f, Cell.GlyphFill);
                 LabelX += 20.0f;
             }
-            DrawTracked(Ink, Faces.Medium, 11.0f, ImVec2(LabelX, LabelY), Theme::Faint, Cell.Label, 11.0f * 0.13f);
+            DrawTracked(Ink, Faces.Medium, 11.0f, ImVec2(LabelX, LabelY), Theme.Faint, Cell.Label, 11.0f * 0.13f);
 
             // Light 38px value with the trailing thousands group dimmed at 24px (prototype splitNum).
             const std::string Grouped = FormatGrouped(Cell.Value);
@@ -833,12 +905,12 @@ void LogStreamPanel::ConstructInterface()
             }
             const float Tracking = -38.0f * 0.03f;
             const float HeadW    = TrackedWidth(Faces.Light, 38.0f, Head.c_str(), Tracking);
-            DrawTracked(Ink, Faces.Light, 38.0f, ImVec2(MetricX, ValueY), Theme::Text, Head.c_str(), Tracking);
+            DrawTracked(Ink, Faces.Light, 38.0f, ImVec2(MetricX, ValueY), Theme.Text, Head.c_str(), Tracking);
             float ValueW = HeadW;
             if (!Fraction.empty())
             {
                 DrawTracked(Ink, Faces.Light, 24.0f, ImVec2(MetricX + HeadW + Tracking, ValueY + 11.0f),
-                            Theme::Faint, Fraction.c_str(), -24.0f * 0.03f);
+                            Theme.Faint, Fraction.c_str(), -24.0f * 0.03f);
                 ValueW += Tracking + TrackedWidth(Faces.Light, 24.0f, Fraction.c_str(), -24.0f * 0.03f);
             }
 
@@ -851,7 +923,7 @@ void LogStreamPanel::ConstructInterface()
             const float ContentW = std::max(118.0f, ValueW + 9.0f + BadgeW);
             const float DividerX = MetricX + ContentW + 26.0f;
             Ink->AddLine(ImVec2(DividerX, CardTop + 14.0f), ImVec2(DividerX, CardTop + CardH - 14.0f),
-                         Theme::LineSoft);
+                         Theme.LineSoft);
             MetricX = DividerX + 26.0f;
         }
 
@@ -859,7 +931,7 @@ void LogStreamPanel::ConstructInterface()
         const float SparkRight = CR - 18.0f;
         if (SparkRight - MetricX > 60.0f)
         {
-            DrawTracked(Ink, Faces.Medium, 11.0f, ImVec2(MetricX, LabelY), Theme::Faint, "ENTRIES PER SECOND",
+            DrawTracked(Ink, Faces.Medium, 11.0f, ImVec2(MetricX, LabelY), Theme.Faint, "ENTRIES PER SECOND",
                         11.0f * 0.13f);
             char NowText[16] = {};
             char PeakText[16] = {};
@@ -871,13 +943,13 @@ void LogStreamPanel::ConstructInterface()
                                 TextWidth(Faces.Regular, 13.0f, " peak");
             float RateX = SparkRight - RateW;
             const float RateY = LabelY - 2.0f;
-            DrawText(Ink, Faces.Medium, 13.0f, ImVec2(RateX, RateY), Theme::Text, NowText);
+            DrawText(Ink, Faces.Medium, 13.0f, ImVec2(RateX, RateY), Theme.Text, NowText);
             RateX += TextWidth(Faces.Medium, 13.0f, NowText);
-            DrawText(Ink, Faces.Regular, 13.0f, ImVec2(RateX, RateY), Theme::Muted, " now \xC2\xB7 ");
+            DrawText(Ink, Faces.Regular, 13.0f, ImVec2(RateX, RateY), Theme.Muted, " now \xC2\xB7 ");
             RateX += TextWidth(Faces.Regular, 13.0f, " now \xC2\xB7 ");
-            DrawText(Ink, Faces.Regular, 13.0f, ImVec2(RateX, RateY), Theme::Muted, PeakText);
+            DrawText(Ink, Faces.Regular, 13.0f, ImVec2(RateX, RateY), Theme.Muted, PeakText);
             RateX += TextWidth(Faces.Regular, 13.0f, PeakText);
-            DrawText(Ink, Faces.Regular, 13.0f, ImVec2(RateX, RateY), Theme::Muted, " peak");
+            DrawText(Ink, Faces.Regular, 13.0f, ImVec2(RateX, RateY), Theme.Muted, " peak");
 
             const float X0 = MetricX;
             const float Y0 = CardTop + 14.0f + 15.0f + 4.0f;
@@ -886,7 +958,7 @@ void LogStreamPanel::ConstructInterface()
             const float GuideY = Y0 + H - (H - 6.0f) * 0.66f;
             for (float DashX = X0; DashX + 3.0f <= X0 + W; DashX += 7.0f)
             {
-                Ink->AddLine(ImVec2(DashX, GuideY), ImVec2(DashX + 3.0f, GuideY), InkWhite(0.13f));
+                Ink->AddLine(ImVec2(DashX, GuideY), ImVec2(DashX + 3.0f, GuideY), Theme.SparkGuide);
             }
             float Maximum = 6.0f;
             for (uint32_t Count : RateBuckets)
@@ -910,8 +982,8 @@ void LogStreamPanel::ConstructInterface()
                     Ink->AddQuadFilled(Points[Index - 1], Points[Index],
                                        ImVec2(Points[Index].x, Y0 + H), ImVec2(Points[Index - 1].x, Y0 + H), FillInk);
                 }
-                Ink->AddPolyline(Points.data(), static_cast<int>(Points.size()), InkWhite(0.85f), 0, 1.4f);
-                Ink->AddCircleFilled(ImVec2(X0 + W - 2.0f, Points.back().y), 2.6f, Theme::Mint);
+                Ink->AddPolyline(Points.data(), static_cast<int>(Points.size()), Theme.SparkLine, 0, 1.4f);
+                Ink->AddCircleFilled(ImVec2(X0 + W - 2.0f, Points.back().y), 2.6f, Theme.Mint);
             }
         }
         CursorY = CardTop + CardH;
@@ -980,10 +1052,10 @@ void LogStreamPanel::ConstructInterface()
         };
         const ChipSpec Chips[5] = {
             {"All", LogSeverity::Info, true, 0},
-            {"Info", LogSeverity::Info, false, Theme::Mint},
-            {"Warnings", LogSeverity::Warning, false, Theme::Amber},
-            {"Errors", LogSeverity::Error, false, Theme::Coral},
-            {"Fatal", LogSeverity::Fatal, false, Theme::Red},
+            {"Info", LogSeverity::Info, false, Theme.Mint},
+            {"Warnings", LogSeverity::Warning, false, Theme.Amber},
+            {"Errors", LogSeverity::Error, false, Theme.Coral},
+            {"Fatal", LogSeverity::Fatal, false, Theme.Red},
         };
         for (const ChipSpec& Chip : Chips)
         {
@@ -1001,9 +1073,9 @@ void LogStreamPanel::ConstructInterface()
             ImGui::PushID(Chip.Label);
             const bool Clicked = PillTarget("##LogChip", Minimum, ImVec2(ChipW, ChipH), Hovered);
             ImGui::PopID();
-            ImU32 Background = Pressed ? Theme::ChipOnBg : (Hovered ? Theme::Surface3 : Theme::Surface2);
-            ImU32 InkMain    = Pressed ? Theme::ChipOnInk : (Hovered ? Theme::Text : Theme::Muted);
-            ImU32 InkCount   = Pressed ? Theme::ChipOnInk : Theme::Text;
+            ImU32 Background = Pressed ? Theme.ChipOnBg : (Hovered ? Theme.Surface3 : Theme.Surface2);
+            ImU32 InkMain    = Pressed ? Theme.ChipOnInk : (Hovered ? Theme.Text : Theme.Muted);
+            ImU32 InkCount   = Pressed ? Theme.ChipOnInk : Theme.Text;
             if (!Pressed)
             {
                 Background = InkFade(Background, 0.55f);
@@ -1034,7 +1106,7 @@ void LogStreamPanel::ConstructInterface()
             X += ChipW + 9.0f;
         }
 
-        Ink->AddRectFilled(ImVec2(X + 3.0f, RowCY - 12.0f), ImVec2(X + 4.0f, RowCY + 12.0f), Theme::Line);
+        Ink->AddRectFilled(ImVec2(X + 3.0f, RowCY - 12.0f), ImVec2(X + 4.0f, RowCY + 12.0f), Theme.Line);
         X += 7.0f + 9.0f;
 
         // Dropdown triggers (menus below are the reusable DropdownControlSurface).
@@ -1075,12 +1147,12 @@ void LogStreamPanel::ConstructInterface()
                 ImGui::OpenPopup("##LogChannelsPopup");
             }
             PillSurface(Ink, ChannelsTriggerMin, ChannelsTriggerMax,
-                        ChannelsOpen ? Theme::Surface3 : (Hovered ? Theme::Surface3 : Theme::Surface2),
-                        ChannelsOpen ? InkWhite(0.18f) : Theme::Line, 999.0f);
-            DrawIconFunnel(Ink, ImVec2(ChannelsTriggerMin.x + 21.5f, RowCY), 15.0f, Theme::Muted);
-            DrawText(Ink, Faces.Regular, 13.5f, ImVec2(ChannelsTriggerMin.x + 38.0f, RowCY - 6.75f), Theme::Text,
+                        ChannelsOpen ? Theme.Surface3 : (Hovered ? Theme.Surface3 : Theme.Surface2),
+                        ChannelsOpen ? Theme.ActiveBorder : Theme.Line, 999.0f);
+            DrawIconFunnel(Ink, ImVec2(ChannelsTriggerMin.x + 21.5f, RowCY), 15.0f, Theme.Muted);
+            DrawText(Ink, Faces.Regular, 13.5f, ImVec2(ChannelsTriggerMin.x + 38.0f, RowCY - 6.75f), Theme.Text,
                      ChannelsLabel);
-            DrawIconChevron(Ink, ImVec2(ChannelsTriggerMax.x - 20.0f, RowCY), 12.0f, Theme::Muted, ChannelsOpen);
+            DrawIconChevron(Ink, ImVec2(ChannelsTriggerMax.x - 20.0f, RowCY), 12.0f, Theme.Muted, ChannelsOpen);
             X += TrigW + 9.0f;
         }
         {
@@ -1098,13 +1170,13 @@ void LogStreamPanel::ConstructInterface()
                 ImGui::OpenPopup("##LogVerbosityPopup");
             }
             PillSurface(Ink, VerbosityTriggerMin, VerbosityTriggerMax,
-                        VerbosityOpen ? Theme::Surface3 : (Hovered ? Theme::Surface3 : Theme::Surface2),
-                        VerbosityOpen ? InkWhite(0.18f) : Theme::Line, 999.0f);
-            DrawText(Ink, Faces.Regular, 13.5f, ImVec2(VerbosityTriggerMin.x + 14.0f, RowCY - 6.75f), Theme::Faint,
+                        VerbosityOpen ? Theme.Surface3 : (Hovered ? Theme.Surface3 : Theme.Surface2),
+                        VerbosityOpen ? Theme.ActiveBorder : Theme.Line, 999.0f);
+            DrawText(Ink, Faces.Regular, 13.5f, ImVec2(VerbosityTriggerMin.x + 14.0f, RowCY - 6.75f), Theme.Faint,
                      "Verbosity");
             DrawText(Ink, Faces.Regular, 13.5f,
-                     ImVec2(VerbosityTriggerMin.x + 14.0f + DimW + 9.0f, RowCY - 6.75f), Theme::Text, Value);
-            DrawIconChevron(Ink, ImVec2(VerbosityTriggerMax.x - 20.0f, RowCY), 12.0f, Theme::Muted, VerbosityOpen);
+                     ImVec2(VerbosityTriggerMin.x + 14.0f + DimW + 9.0f, RowCY - 6.75f), Theme.Text, Value);
+            DrawIconChevron(Ink, ImVec2(VerbosityTriggerMax.x - 20.0f, RowCY), 12.0f, Theme.Muted, VerbosityOpen);
             X += TrigW + 9.0f;
         }
 
@@ -1118,9 +1190,9 @@ void LogStreamPanel::ConstructInterface()
             const float SearchW = std::min(330.0f, std::max(140.0f, FollowX - 9.0f - X));
             const ImVec2 Minimum(X, RowTop);
             const ImVec2 Maximum(X + SearchW, RowTop + 37.0f);
-            PillSurface(Ink, Minimum, Maximum, Theme::Surface2,
-                        SearchFocused ? InkWithAlpha(Theme::Mint, 0.45f) : Theme::Line, 999.0f);
-            DrawIconSearch(Ink, ImVec2(X + 20.5f, RowCY), 15.0f, Theme::Faint);
+            PillSurface(Ink, Minimum, Maximum, Theme.Surface2,
+                        SearchFocused ? InkWithAlpha(Theme.Mint, 0.45f) : Theme.Line, 999.0f);
+            DrawIconSearch(Ink, ImVec2(X + 20.5f, RowCY), 15.0f, Theme.Faint);
 
             const bool HasText = !Query.empty();
             char Shown[40] = {};
@@ -1142,7 +1214,7 @@ void LogStreamPanel::ConstructInterface()
             ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
             ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, ImVec4(0, 0, 0, 0));
             ImGui::PushStyleColor(ImGuiCol_FrameBgActive, ImVec4(0, 0, 0, 0));
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.933f, 0.953f, 0.941f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_Text, Theme.SearchTextVec4);
             ImGui::SetNextItemWidth(std::max(30.0f, SearchW - 36.0f - TrailingW));
             if (ImGui::InputTextWithHint("##LogSearch", "Filter text\xE2\x80\xA6", SearchBuffer.data(),
                                          SearchBuffer.size()))
@@ -1159,7 +1231,7 @@ void LogStreamPanel::ConstructInterface()
             {
                 const float ShownW = TextWidth(Faces.Regular, 11.5f, Shown);
                 DrawText(Ink, Faces.Regular, 11.5f, ImVec2(Maximum.x - 8.0f - 24.0f - 8.0f - ShownW, RowCY - 5.75f),
-                         Theme::Faint, Shown);
+                         Theme.Faint, Shown);
                 const ImVec2 DiscCentre(Maximum.x - 8.0f - 12.0f, RowCY);
                 bool ClearHover = false;
                 if (PillTarget("##LogSearchClear", ImVec2(DiscCentre.x - 12.0f, DiscCentre.y - 12.0f),
@@ -1169,8 +1241,8 @@ void LogStreamPanel::ConstructInterface()
                     ConfigureQuery("");
                     SearchSynchronised = Query;
                 }
-                Ink->AddCircleFilled(DiscCentre, 12.0f, Theme::Surface3);
-                DrawIconCross(Ink, DiscCentre, 11.0f, ClearHover ? Theme::Text : Theme::Muted);
+                Ink->AddCircleFilled(DiscCentre, 12.0f, Theme.Surface3);
+                DrawIconCross(Ink, DiscCentre, 11.0f, ClearHover ? Theme.Text : Theme.Muted);
             }
         }
 
@@ -1183,11 +1255,11 @@ void LogStreamPanel::ConstructInterface()
                 ConfigureFollow(!FollowFlag);
             }
             PillSurface(Ink, Minimum, ImVec2(Minimum.x + FollowW, Minimum.y + FollowH),
-                        FollowFlag ? Theme::MintDim : 0,
-                        FollowFlag ? InkWithAlpha(Theme::Mint, 0.4f) : Theme::Line, 999.0f);
-            Ink->AddCircleFilled(ImVec2(Minimum.x + 17.5f, RowCY), 3.5f, FollowFlag ? Theme::Mint : Theme::Faint);
+                        FollowFlag ? Theme.MintDim : 0,
+                        FollowFlag ? InkWithAlpha(Theme.Mint, 0.4f) : Theme.Line, 999.0f);
+            Ink->AddCircleFilled(ImVec2(Minimum.x + 17.5f, RowCY), 3.5f, FollowFlag ? Theme.Mint : Theme.Faint);
             DrawText(Ink, Faces.Regular, 13.0f, ImVec2(Minimum.x + 29.0f, RowCY - 6.5f),
-                     FollowFlag ? Theme::Mint : Theme::Faint, FollowText);
+                     FollowFlag ? Theme.Mint : Theme.Faint, FollowText);
         }
         CursorY = RowTop + 37.0f + 12.0f;
     }
@@ -1240,7 +1312,7 @@ void LogStreamPanel::ConstructInterface()
         {
             ImDrawList*  MenuInk = ImGui::GetWindowDrawList();
             const ImVec2 At      = ImGui::GetCursorScreenPos();
-            DrawText(MenuInk, Faces.Regular, 12.0f, ImVec2(At.x + 10.0f, At.y + 2.0f), Theme::Faint,
+            DrawText(MenuInk, Faces.Regular, 12.0f, ImVec2(At.x + 10.0f, At.y + 2.0f), Theme.Faint,
                      "None yet \xC2\xB7 create one below");
             ImGui::Dummy(ImVec2(ImGui::GetContentRegionAvail().x, 20.0f));
         }
@@ -1275,7 +1347,7 @@ void LogStreamPanel::ConstructInterface()
                 const ImVec2 Centre(SwatchX + 9.0f, SwatchY + 9.0f);
                 MenuInk->AddCircleFilled(Centre, PendingColour == Swatch ? 8.0f : 7.0f, Fill);
                 MenuInk->AddCircle(Centre, 9.0f,
-                                   PendingColour == Swatch ? InkWhite(1.0f) : InkWhite(0.14f), 24,
+                                   PendingColour == Swatch ? Theme.SwatchRingOn : Theme.SwatchRingOff, 24,
                                    PendingColour == Swatch ? 2.0f : 1.0f);
                 SwatchX += 25.0f;
             }
@@ -1287,11 +1359,11 @@ void LogStreamPanel::ConstructInterface()
                 const ImVec2 Minimum = ImGui::GetItemRectMin();
                 const ImVec2 Maximum = ImGui::GetItemRectMax();
                 MenuInk->AddRectFilled(Minimum, Maximum,
-                                       AddHovered ? InkWithAlpha(Theme::Mint, 0.22f) : Theme::MintDim, 9.0f);
+                                       AddHovered ? InkWithAlpha(Theme.Mint, 0.22f) : Theme.MintDim, 9.0f);
                 const float TextW = TextWidth(Faces.Medium, 12.5f, "Add category");
                 DrawText(MenuInk, Faces.Medium, 12.5f,
                          ImVec2((Minimum.x + Maximum.x - TextW) * 0.5f, Minimum.y + (30.0f - 12.5f) * 0.5f),
-                         Theme::Mint, "Add category");
+                         Theme.Mint, "Add category");
             }
             if (AddClicked)
             {
@@ -1322,11 +1394,11 @@ void LogStreamPanel::ConstructInterface()
                 ImGui::PopID();
                 ImDrawList* MenuInk = ImGui::GetWindowDrawList();
                 MenuInk->AddRectFilled(Minimum, ImVec2(Minimum.x + EachW, Minimum.y + 27.0f),
-                                       Hovered ? InkHex(0x243129) : Theme::Surface3, 8.0f);
+                                       Hovered ? InkHex(0x243129) : Theme.Surface3, 8.0f);
                 const float TextW = TextWidth(Faces.Regular, 12.0f, Labels[Index]);
                 DrawText(MenuInk, Faces.Regular, 12.0f,
                          ImVec2(Minimum.x + (EachW - TextW) * 0.5f, Minimum.y + 7.5f),
-                         Hovered ? Theme::Text : Theme::Muted, Labels[Index]);
+                         Hovered ? Theme.Text : Theme.Muted, Labels[Index]);
                 if (Clicked)
                 {
                     if (Index == 0)
@@ -1374,11 +1446,11 @@ void LogStreamPanel::ConstructInterface()
     if (!Narrow)
     {
         const float LabelsY = CursorY;
-        DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(TimeX, LabelsY), Theme::Faint, "TIME", 10.5f * 0.13f);
-        DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(TagX, LabelsY), Theme::Faint, "CHANNEL", 10.5f * 0.13f);
-        DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(MessageX, LabelsY), Theme::Faint, "MESSAGE", 10.5f * 0.13f);
+        DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(TimeX, LabelsY), Theme.Faint, "TIME", 10.5f * 0.13f);
+        DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(TagX, LabelsY), Theme.Faint, "CHANNEL", 10.5f * 0.13f);
+        DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(MessageX, LabelsY), Theme.Faint, "MESSAGE", 10.5f * 0.13f);
         const float SourceW = TrackedWidth(Faces.Medium, 10.5f, "SOURCE", 10.5f * 0.13f);
-        DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(PR - 22.0f - SourceW, LabelsY), Theme::Faint, "SOURCE",
+        DrawTracked(Ink, Faces.Medium, 10.5f, ImVec2(PR - 22.0f - SourceW, LabelsY), Theme.Faint, "SOURCE",
                     10.5f * 0.13f);
         CursorY += 13.0f + 7.0f;
     }
@@ -1387,7 +1459,7 @@ void LogStreamPanel::ConstructInterface()
     const float FooterH   = 51.0f;                                   // [px] - 11 + 26 + 14
     const float StreamTop = CursorY;
     const float StreamH   = std::max(30.0f, (PB - FooterH) - StreamTop);
-    Ink->AddLine(ImVec2(PL, StreamTop), ImVec2(PR, StreamTop), Theme::LineSoft);
+    Ink->AddLine(ImVec2(PL, StreamTop), ImVec2(PR, StreamTop), Theme.LineSoft);
 
     ImGui::SetCursorScreenPos(ImVec2(PL, StreamTop + 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0, 0, 0, 0));
@@ -1470,30 +1542,30 @@ void LogStreamPanel::ConstructInterface()
 
             if (RowIndex > 0)
             {
-                Rows->AddLine(ImVec2(Minimum.x, Minimum.y), ImVec2(Maximum.x, Minimum.y), Theme::RowSep);
+                Rows->AddLine(ImVec2(Minimum.x, Minimum.y), ImVec2(Maximum.x, Minimum.y), Theme.RowSep);
             }
             const bool Alert = Row.Entry.Severity == LogSeverity::Error || Row.Entry.Severity == LogSeverity::Fatal;
             if (Row.Entry.Severity == LogSeverity::Fatal)
             {
-                Rows->AddRectFilled(Minimum, Maximum, InkWithAlpha(Theme::Red, 0.055f), 11.0f);
+                Rows->AddRectFilled(Minimum, Maximum, InkWithAlpha(Theme.Red, 0.055f), 11.0f);
             }
             else if (Selected)
             {
-                Rows->AddRectFilled(Minimum, Maximum, InkWithAlpha(Theme::Mint, 0.055f), 11.0f);
+                Rows->AddRectFilled(Minimum, Maximum, InkWithAlpha(Theme.Mint, 0.055f), 11.0f);
             }
             else if (Hovered)
             {
-                Rows->AddRectFilled(Minimum, Maximum, Theme::RowHover, 11.0f);
+                Rows->AddRectFilled(Minimum, Maximum, Theme.RowHover, 11.0f);
             }
             if (Alert)
             {
                 Rows->AddRectFilled(ImVec2(Minimum.x, Minimum.y + 8.0f),
-                                    ImVec2(Minimum.x + 3.0f, Maximum.y - 8.0f), Theme::Coral, 1.5f);
+                                    ImVec2(Minimum.x + 3.0f, Maximum.y - 8.0f), Theme.Coral, 1.5f);
             }
             else if (Selected)
             {
                 Rows->AddRectFilled(ImVec2(Minimum.x, Minimum.y + 8.0f),
-                                    ImVec2(Minimum.x + 3.0f, Maximum.y - 8.0f), Theme::Mint, 1.5f);
+                                    ImVec2(Minimum.x + 3.0f, Maximum.y - 8.0f), Theme.Mint, 1.5f);
             }
 
             const float RowCY = Minimum.y + RowH * 0.5f;
@@ -1504,23 +1576,23 @@ void LogStreamPanel::ConstructInterface()
             switch (Row.Entry.Severity)
             {
                 case LogSeverity::Warning:
-                    DrawWarnGlyph(Rows, GlyphCentre, 15.0f, Theme::Amber);
+                    DrawWarnGlyph(Rows, GlyphCentre, 15.0f, Theme.Amber);
                     break;
                 case LogSeverity::Error:
                 case LogSeverity::Fatal:
-                    DrawWarnGlyph(Rows, GlyphCentre, 15.0f, Theme::Coral);
+                    DrawWarnGlyph(Rows, GlyphCentre, 15.0f, Theme.Coral);
                     break;
                 case LogSeverity::Info:
-                    Rows->AddCircleFilled(GlyphCentre, 3.5f, InkWithAlpha(Theme::Mint, 0.85f));
+                    Rows->AddCircleFilled(GlyphCentre, 3.5f, InkWithAlpha(Theme.Mint, 0.85f));
                     break;
             }
 
             // Time.
             const LogClockText Clock = FormatLogClock(Row.Entry.WallMicros, SessionStartMicros, SessionClock);
             const float TimeColX = InnerX + 34.0f;
-            DrawText(Rows, Faces.Regular, 12.5f, ImVec2(TimeColX, RowCY - 6.25f), Theme::Muted, Clock.Main);
+            DrawText(Rows, Faces.Regular, 12.5f, ImVec2(TimeColX, RowCY - 6.25f), Theme.Muted, Clock.Main);
             DrawText(Rows, Faces.Regular, 12.5f,
-                     ImVec2(TimeColX + TextWidth(Faces.Regular, 12.5f, Clock.Main), RowCY - 6.25f), Theme::MsRow,
+                     ImVec2(TimeColX + TextWidth(Faces.Regular, 12.5f, Clock.Main), RowCY - 6.25f), Theme.MsRow,
                      Clock.Millis);
 
             // Channel tag (hidden below 900px, per the prototype's media query).
@@ -1532,13 +1604,13 @@ void LogStreamPanel::ConstructInterface()
                 });
                 const bool  IsUser = Category != nullptr && Category->UserCreated;
                 const ImU32 CatInk = IsUser ? ImGui::GetColorU32(ToImVec4(ResolveLogColour(Category->Colour)))
-                                            : Theme::Muted;
+                                            : Theme.Muted;
                 const float TagTextW = TrackedWidth(Faces.Medium, 10.5f, TagName.c_str(), 10.5f * 0.09f);
                 const float TagW = 9.0f + (IsUser ? 12.0f : 0.0f) + TagTextW + 9.0f;
                 const ImVec2 TagMin(TagX - (PL + 12.0f) + Minimum.x, RowCY - 10.5f);
                 PillSurface(Rows, TagMin, ImVec2(TagMin.x + TagW, TagMin.y + 21.0f),
-                            IsUser ? InkWithAlpha(CatInk, 0.09f) : InkWhite(0.02f),
-                            IsUser ? InkWithAlpha(CatInk, 0.42f) : Theme::Line, 999.0f);
+                            IsUser ? InkWithAlpha(CatInk, 0.09f) : Theme.TagWash,
+                            IsUser ? InkWithAlpha(CatInk, 0.42f) : Theme.Line, 999.0f);
                 float TagTextX = TagMin.x + 9.0f;
                 if (IsUser)
                 {
@@ -1550,9 +1622,9 @@ void LogStreamPanel::ConstructInterface()
             }
 
             // Message.
-            const ImU32 MessageInk = Row.Entry.Severity == LogSeverity::Warning ? Theme::MsgWarn
-                                   : Alert ? Theme::MsgErr
-                                           : Theme::MsgText;
+            const ImU32 MessageInk = Row.Entry.Severity == LogSeverity::Warning ? Theme.MsgWarn
+                                   : Alert ? Theme.MsgErr
+                                           : Theme.MsgText;
             const float MsgX = MessageX - (PL + 12.0f) + Minimum.x;
             if (WrapFlag)
             {
@@ -1573,13 +1645,13 @@ void LogStreamPanel::ConstructInterface()
 
             // Source + repeat badge.
             DrawText(Rows, Faces.Regular, 11.5f, ImVec2(Maximum.x - 12.0f - SourceWdt, RowCY - 5.75f),
-                     Theme::Faint, Row.Entry.Source);
+                     Theme.Faint, Row.Entry.Source);
             if (BadgeWidth > 0.0f)
             {
                 const ImVec2 BadgeMin(Maximum.x - 12.0f - SourceWdt - 9.0f - BadgeWidth, RowCY - 8.5f);
-                Rows->AddRectFilled(BadgeMin, ImVec2(BadgeMin.x + BadgeWidth, BadgeMin.y + 17.0f), Theme::Surface3,
+                Rows->AddRectFilled(BadgeMin, ImVec2(BadgeMin.x + BadgeWidth, BadgeMin.y + 17.0f), Theme.Surface3,
                                     999.0f);
-                DrawText(Rows, Faces.Medium, 11.0f, ImVec2(BadgeMin.x + 8.0f, RowCY - 5.5f), Theme::Muted, BadgeText);
+                DrawText(Rows, Faces.Medium, 11.0f, ImVec2(BadgeMin.x + 8.0f, RowCY - 5.5f), Theme.Muted, BadgeText);
             }
 
             // Expanded detail card.
@@ -1587,13 +1659,13 @@ void LogStreamPanel::ConstructInterface()
             {
                 const ImVec2 CardMin(Minimum.x + 46.0f, Minimum.y + RowH + 4.0f);
                 const ImVec2 CardMax(Maximum.x - 12.0f, CardMin.y + (DetailH - 10.0f));
-                Rows->AddRectFilled(CardMin, CardMax, Theme::Surface, 12.0f);
-                Rows->AddRect(CardMin, CardMax, Theme::LineSoft, 12.0f);
+                Rows->AddRectFilled(CardMin, CardMax, Theme.Surface, 12.0f);
+                Rows->AddRect(CardMin, CardMax, Theme.LineSoft, 12.0f);
 
                 float LineY = CardMin.y + 12.0f;
                 for (const TextSpan& Line : DetailLines)
                 {
-                    Rows->AddText(Faces.Regular, 13.0f, ImVec2(CardMin.x + 14.0f, LineY), Theme::DetailTx, Line.Begin,
+                    Rows->AddText(Faces.Regular, 13.0f, ImVec2(CardMin.x + 14.0f, LineY), Theme.DetailTx, Line.Begin,
                                   Line.End);
                     LineY += 20.15f;
                 }
@@ -1616,9 +1688,9 @@ void LogStreamPanel::ConstructInterface()
                 const float MetaY = CardMin.y + 12.0f + DetailTextH + 9.0f;
                 for (const auto& Pair : Meta)
                 {
-                    DrawText(Rows, Faces.Regular, 11.5f, ImVec2(MetaX, MetaY), Theme::Faint, Pair.first);
+                    DrawText(Rows, Faces.Regular, 11.5f, ImVec2(MetaX, MetaY), Theme.Faint, Pair.first);
                     MetaX += TextWidth(Faces.Regular, 11.5f, Pair.first) + 4.0f;
-                    DrawText(Rows, Faces.Medium, 11.5f, ImVec2(MetaX, MetaY), Theme::Muted, Pair.second);
+                    DrawText(Rows, Faces.Medium, 11.5f, ImVec2(MetaX, MetaY), Theme.Muted, Pair.second);
                     MetaX += TextWidth(Faces.Medium, 11.5f, Pair.second) + 16.0f;
                 }
 
@@ -1634,9 +1706,9 @@ void LogStreamPanel::ConstructInterface()
                                                           ImVec2(ActionW, 26.0f), ActionHover);
                     ImGui::PopID();
                     PillSurface(Rows, ImVec2(ActionX, ActionsY), ImVec2(ActionX + ActionW, ActionsY + 26.0f),
-                                ActionHover ? Theme::Surface3 : 0, Theme::Line, 999.0f);
+                                ActionHover ? Theme.Surface3 : 0, Theme.Line, 999.0f);
                     DrawText(Rows, Faces.Regular, 12.0f, ImVec2(ActionX + 12.0f, ActionsY + 7.0f),
-                             ActionHover ? Theme::Text : Theme::Muted, ActionLabels[ActionIndex]);
+                             ActionHover ? Theme.Text : Theme.Muted, ActionLabels[ActionIndex]);
                     if (ActionClicked)
                     {
                         if (ActionIndex == 0)
@@ -1670,10 +1742,10 @@ void LogStreamPanel::ConstructInterface()
             const float HeadW = TextWidth(Faces.Medium, 17.0f, Headline);
             const float GuideW = TextWidth(Faces.Regular, 14.0f, Guidance);
             const ImVec2 At = ImGui::GetCursorScreenPos();
-            DrawText(Rows, Faces.Medium, 17.0f, ImVec2(At.x + (ChildW - HeadW) * 0.5f, At.y + 52.0f), Theme::Muted,
+            DrawText(Rows, Faces.Medium, 17.0f, ImVec2(At.x + (ChildW - HeadW) * 0.5f, At.y + 52.0f), Theme.Muted,
                      Headline);
             DrawText(Rows, Faces.Regular, 14.0f, ImVec2(At.x + (ChildW - GuideW) * 0.5f, At.y + 52.0f + 25.0f),
-                     Theme::Faint, Guidance);
+                     Theme.Faint, Guidance);
             ImGui::Dummy(ImVec2(ChildW, 52.0f + 25.0f + 18.0f + 52.0f));
         }
         else
@@ -1709,30 +1781,30 @@ void LogStreamPanel::ConstructInterface()
             const float Grow = static_cast<float>(Layer) * 6.0f;
             Ink->AddRectFilled(ImVec2(Minimum.x - Grow, Minimum.y - Grow + Grow * 0.55f),
                                ImVec2(Minimum.x + PillW + Grow, Minimum.y + PillH + Grow * 0.55f),
-                               InkWithAlpha(Theme::Mint, 0.35f / (static_cast<float>(Layer) + 1.0f)), 999.0f);
+                               InkWithAlpha(Theme.Mint, 0.35f / (static_cast<float>(Layer) + 1.0f)), 999.0f);
         }
-        PillSurface(Ink, Minimum, ImVec2(Minimum.x + PillW, Minimum.y + PillH), Theme::Mint, 0, 999.0f);
-        DrawIconArrowDown(Ink, ImVec2(Minimum.x + 22.5f, Minimum.y + PillH * 0.5f), 13.0f, Theme::MintDeep);
+        PillSurface(Ink, Minimum, ImVec2(Minimum.x + PillW, Minimum.y + PillH), Theme.Mint, 0, 999.0f);
+        DrawIconArrowDown(Ink, ImVec2(Minimum.x + 22.5f, Minimum.y + PillH * 0.5f), 13.0f, Theme.MintDeep);
         DrawText(Ink, Faces.Medium, 13.0f, ImVec2(Minimum.x + 37.0f, Minimum.y + (PillH - 13.0f) * 0.5f),
-                 Theme::MintDeep, PillText);
+                 Theme.MintDeep, PillText);
     }
 
     // -- Footer -------------------------------------------------------------------------------------------------------
     {
         const float FooterTop = PB - FooterH;
-        Ink->AddLine(ImVec2(PL, FooterTop), ImVec2(PR, FooterTop), Theme::LineSoft);
+        Ink->AddLine(ImVec2(PL, FooterTop), ImVec2(PR, FooterTop), Theme.LineSoft);
         const float StatY = FooterTop + 11.0f + (26.0f - 12.5f) * 0.5f;
 
         const std::string Shown = FormatGrouped(static_cast<uint64_t>(Visible.size()));
         const std::string Total = FormatGrouped(TotalCount);
         float X = CL;
-        DrawText(Ink, Faces.Medium, 12.5f, ImVec2(X, StatY), Theme::Muted, Shown.c_str());
+        DrawText(Ink, Faces.Medium, 12.5f, ImVec2(X, StatY), Theme.Muted, Shown.c_str());
         X += TextWidth(Faces.Medium, 12.5f, Shown.c_str());
-        DrawText(Ink, Faces.Regular, 12.5f, ImVec2(X, StatY), Theme::Faint, " shown \xC2\xB7 ");
+        DrawText(Ink, Faces.Regular, 12.5f, ImVec2(X, StatY), Theme.Faint, " shown \xC2\xB7 ");
         X += TextWidth(Faces.Regular, 12.5f, " shown \xC2\xB7 ");
-        DrawText(Ink, Faces.Medium, 12.5f, ImVec2(X, StatY), Theme::Muted, Total.c_str());
+        DrawText(Ink, Faces.Medium, 12.5f, ImVec2(X, StatY), Theme.Muted, Total.c_str());
         X += TextWidth(Faces.Medium, 12.5f, Total.c_str());
-        DrawText(Ink, Faces.Regular, 12.5f, ImVec2(X, StatY), Theme::Faint, " total");
+        DrawText(Ink, Faces.Regular, 12.5f, ImVec2(X, StatY), Theme.Faint, " total");
         X += TextWidth(Faces.Regular, 12.5f, " total");
         const float ScrubLeft = X + 18.0f;
 
@@ -1758,9 +1830,9 @@ void LogStreamPanel::ConstructInterface()
         float RightX = CR - RightW;
         for (const auto& Stat : RightStats)
         {
-            DrawText(Ink, Faces.Regular, 12.5f, ImVec2(RightX, StatY), Theme::Faint, Stat.first);
+            DrawText(Ink, Faces.Regular, 12.5f, ImVec2(RightX, StatY), Theme.Faint, Stat.first);
             RightX += TextWidth(Faces.Regular, 12.5f, Stat.first);
-            DrawText(Ink, Faces.Medium, 12.5f, ImVec2(RightX, StatY), Theme::Muted, Stat.second);
+            DrawText(Ink, Faces.Medium, 12.5f, ImVec2(RightX, StatY), Theme.Muted, Stat.second);
             RightX += TextWidth(Faces.Medium, 12.5f, Stat.second) + 16.0f;
         }
 
@@ -1771,7 +1843,7 @@ void LogStreamPanel::ConstructInterface()
         const float SH = 26.0f;
         if (SW > 20.0f)
         {
-            Ink->AddLine(ImVec2(SX, SY + SH * 0.5f), ImVec2(SX + SW, SY + SH * 0.5f), InkWhite(0.1f));
+            Ink->AddLine(ImVec2(SX, SY + SH * 0.5f), ImVec2(SX + SW, SY + SH * 0.5f), Theme.ScrubTrack);
             const float TickW = std::max(2.0f, SW / 160.0f);
             for (size_t Index = 0; Index < ScrubBuckets.size(); ++Index)
             {
@@ -1782,13 +1854,13 @@ void LogStreamPanel::ConstructInterface()
                     continue;
                 }
                 const float TickH = 4.0f + std::min(9.0f, static_cast<float>(Bucket.Count));
-                const ImU32 TickInk = Bucket.WorstSeverity >= 2 ? InkWithAlpha(Theme::Coral, 0.9f)
-                                    : Bucket.WorstSeverity == 1 ? InkWithAlpha(Theme::Amber, 0.85f)
-                                                                : InkWhite(0.22f);
+                const ImU32 TickInk = Bucket.WorstSeverity >= 2 ? InkWithAlpha(Theme.Coral, 0.9f)
+                                    : Bucket.WorstSeverity == 1 ? InkWithAlpha(Theme.Amber, 0.85f)
+                                                                : Theme.ScrubTick;
                 Ink->AddRectFilled(ImVec2(TickX, SY + (SH - TickH) * 0.5f),
                                    ImVec2(TickX + TickW - 1.0f, SY + (SH + TickH) * 0.5f), TickInk);
             }
-            Ink->AddRectFilled(ImVec2(SX + SW - 2.0f, SY + 3.0f), ImVec2(SX + SW, SY + SH - 3.0f), Theme::Mint);
+            Ink->AddRectFilled(ImVec2(SX + SW - 2.0f, SY + 3.0f), ImVec2(SX + SW, SY + SH - 3.0f), Theme.Mint);
         }
     }
 }

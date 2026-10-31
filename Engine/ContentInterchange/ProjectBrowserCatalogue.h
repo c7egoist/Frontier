@@ -180,6 +180,33 @@ inline std::string BrowserCategoryLabel(BrowserFileCategory Category)
     return "Document";
 }
 
+enum class BrowserApplicationTarget
+{
+    ProjectWorkspace  = 0,
+    TextureStudio     = 1,
+    DraftingWorkspace = 2,
+    GeometryWorkspace = 3
+};
+
+inline std::string BrowserApplicationLabel(BrowserApplicationTarget Target)
+{
+    switch (Target)
+    {
+        case BrowserApplicationTarget::ProjectWorkspace:  return "Frontier · Project workspace";
+        case BrowserApplicationTarget::TextureStudio:     return "Frontier · Texture Studio";
+        case BrowserApplicationTarget::DraftingWorkspace: return "Frontier · Drafting workspace";
+        case BrowserApplicationTarget::GeometryWorkspace: return "Frontier · Geometry workspace";
+    }
+    return "Frontier · Project workspace";
+}
+
+inline BrowserApplicationTarget DefaultBrowserApplicationTarget(BrowserFileCategory Category) noexcept
+{
+    if (Category == BrowserFileCategory::Cad) return BrowserApplicationTarget::DraftingWorkspace;
+    if (Category == BrowserFileCategory::Geometry) return BrowserApplicationTarget::GeometryWorkspace;
+    return BrowserApplicationTarget::ProjectWorkspace;
+}
+
 inline std::string BrowserLaunchTarget(BrowserFileCategory Category)
 {
     if (Category == BrowserFileCategory::Project) return "Frontier · Project workspace";
@@ -307,7 +334,8 @@ inline BrowserFileCategory ClassifyBrowserImport(const std::string &Extension, b
 {
     const std::string Folded = FoldBrowserText(Extension);
     Supported = true;
-    if (Folded == ".project" || Folded == ".projectspace" || Folded == ".scene") return BrowserFileCategory::Project;
+    if (Folded == ".project" || Folded == ".projectspace" || Folded == ".frontier" || Folded == ".scene")
+        return BrowserFileCategory::Project;
     if (Folded == ".assembly" || Folded == ".sketch") return BrowserFileCategory::Cad;
     if (Folded == ".geometry" || Folded == ".geometryspace" || Folded == ".png" || Folded == ".jpg" ||
         Folded == ".jpeg" || Folded == ".webp")

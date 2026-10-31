@@ -1,0 +1,21 @@
+# Project Everest — Studio Showcase inspection scene
+format = "frontier.scene"
+version = 1
+name = "StudioShowcase"
+
+[environment]
+sun_azimuth_degrees = 215.0
+sun_elevation_degrees = 38.0
+atmosphere_turbidity = 1.9
+cloud_coverage = 0.10
+fog_density = 0.0006
+
+[illumination]
+rtx_path = "HardwareRayQuery"
+gtx_fallback_path = "SignedDistanceFieldAndOrderedBvh"
+restir_temporal_max_history = 20
+
+[deployment]
+vehicle = "Content/Vehicles/EverestVehicle.toml"
+position = [0.0, 0.0, 0.50]
+heading_degrees = 35.0

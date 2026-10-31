@@ -1,0 +1,25 @@
+[Project]
+ProjectName = "Project Everest"
+ProjectFormatNumber = 1
+ContentLocation = "Content"
+OpeningScene = "Content/Scenes/ProvingGrounds.scene.toml"
+CodeImage = "Build/Output/ProjectEverest.dll"
+CodeInterchangeNumber = 3
+InterfaceFingerprint = 0xb6725f24d0869173
+
+# User log categories published by Project Everest (in addition to the 9 engine channels).
+[[LogCategories]]
+Name = "Powertrain"
+Colour = "mint"
+
+[[LogCategories]]
+Name = "CabinHMI"
+Colour = "blue"
+
+[[LogCategories]]
+Name = "Weather"
+Colour = "amber"
+
+[[LogCategories]]
+Name = "Fracture"
+Colour = "pink"

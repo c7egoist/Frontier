@@ -1,0 +1,19 @@
+{
+  "result": "passed",
+  "project": "Project Everest",
+  "application_target": "Frontier · Project workspace",
+  "startup_scene": "ProvingGrounds",
+  "user_log_categories": ["Powertrain", "CabinHMI", "Weather", "Fracture"],
+  "oled_logstream_luminance": 0.0750874,
+  "light_logstream_luminance": 0.967792,
+  "oled_outliner_luminance": 0.04973,
+  "light_outliner_luminance": 0.99127,
+  "captures": [
+    "Exhibits/ProjectEverest/Images/01_ProjectBrowser_Projects.png",
+    "Exhibits/ProjectEverest/Images/02_ProjectBrowser_SelectApplication.png",
+    "Exhibits/ProjectEverest/Images/03_ProjectEverest_Workspace_OLED.png",
+    "Exhibits/ProjectEverest/Images/04_ProjectEverest_ControlCentre_ThemeDrawer.png",
+    "Exhibits/ProjectEverest/Images/05_ProjectEverest_Workspace_LightTheme.png",
+    "Exhibits/ProjectEverest/Images/06_ProjectEverest_Workspace_SepiaChannels.png"
+  ]
+}

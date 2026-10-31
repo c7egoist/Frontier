@@ -1,0 +1,16 @@
+# Project Everest — Dual-tier Vulkan illumination configuration
+format = "frontier.illumination.everest"
+version = 1
+
+[rtx_hardware_tier]
+require_ray_query = true
+require_acceleration_structure = true
+direct_visibility = "HardwareRayQuery"
+indirect_bounce = "RestirHardwareRayQuery"
+reflections = "HardwareRayQuery"
+
+[gtx_fallback_tier]
+indirect_bounce = "SignedDistanceFieldSurfaceCards"
+ambient_occlusion = "SignedDistanceFieldConeTrace"
+reflections = "OrderedSoftwareBvh"
+variance_filter = "PathReplayVarianceFilter"

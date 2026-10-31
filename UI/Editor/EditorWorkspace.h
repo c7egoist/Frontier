@@ -5,9 +5,15 @@
 
 #pragma once
 #include "ControlCentrePanel.h"
+#include "Engine/Interface/LogStreamPanel.h"
 #include "Engine/Interface/PanelDockspace.h"
+#include "Engine/Interface/SceneDirectoryPanel.h"
+#include "Engine/Scene/SceneRecord.h"
+#include <filesystem>
 #include <functional>
+#include <memory>
 #include <string>
+#include <vector>
 
 namespace Frontier
 {
@@ -16,6 +22,7 @@ struct EditorProjectSummary
     std::string Name     = "Untitled project";
     std::string Location;
     std::string Identity;
+    std::string ApplicationTarget = "Frontier · Project workspace";
     size_t      Levels   = 0;
     size_t      Roots    = 0;
     size_t      Catalogue = 0;
@@ -30,6 +37,9 @@ class EditorWorkspace
     EditorWorkspace   &operator=(const EditorWorkspace &) = delete;
     void ConfigureProject(EditorProjectSummary Summary) { Project = std::move(Summary); }
     [[nodiscard]] const EditorProjectSummary &QueryProject() const noexcept { return Project; }
+    void ActivateProjectWorkspace(const std::filesystem::path &ProjectPath, bool NotchBandComposition = true);
+    [[nodiscard]] LogStreamPanel &QueryLogStreamPanel() noexcept { return LogPanel; }
+    [[nodiscard]] SceneDirectoryPanel &QuerySceneDirectoryPanel() noexcept { return OutlinerPanel; }
     std::function<void()> EvaluateReturnToBrowser;
     bool               FinalizeLayout();
     void               IntegrateLayoutPersistence(double ElapsedSeconds);
@@ -50,14 +60,20 @@ class EditorWorkspace
 
   private:
     void ConstructTopBar(float Scale);
+    void ConstructNotchBandReturnButton(float Scale);
     void ConstructViewport();
     ControlCentrePanel &Centre;
     PanelDockspace      Panels;
+    LogStreamPanel      LogPanel;
+    SceneDirectoryPanel OutlinerPanel;
+    std::vector<std::unique_ptr<SceneRecord>> SceneRecords;
     EditorProjectSummary Project;
-    bool                DockableBrowser   = false;
-    bool                LayoutRestored    = false;
+    bool                DockableBrowser      = false;
+    bool                NotchBandComposition = false;
+    bool                LayoutRestored       = false;
     bool                LayoutBlocked     = false;
     bool                Rendered          = false;
+    bool                PendingProjectSplit = false;
     uint64_t            ResetRevision     = 0;
     unsigned            PersistenceFrames = 0;
     double              StableSeconds     = 0;

@@ -152,3 +152,54 @@ to the native Pattern panel, persists vector TOML, and submits GPU coverage/sele
 the recorded evidence explicitly does not represent a Windows desktop session. Pattern Float32 outputs remain
 unconnected to the PBR material renderer; native 3D application, physical height calibration, user-document export and
 Pattern 1:1 parity remain open. GIF previews are 8-bit evidence, not precision checks. Scope remains approximately 68%.
+
+## Upstream and reference branches
+
+| Role                        | Repository and branch                                                                   | Scope                                                                                                          |
+|-----------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| Main integration branch     | `https://github.com/SultanAladin/Frontier/tree/arena/11f31835-frontier`                 | Canonical reusable UI (`PanelDockspace`, `ControlCentrePanel`, `ProjectBrowserPanel`, `ControlKit`) and rules. |
+| Reference branch 1          | `https://github.com/streamlinkinbox/Frontier/tree/arena%2F08e7de48-frontier`            | Fence-published GPU facet area/CDF preparation (`FacetCdfPreparation`, `FacetCdfSubmission`) and ULP contract. |
+| Reference branch 2          | `https://github.com/streamlinkinbox/Frontier/tree/arena%2F5ec53579-frontier`            | `VK_KHR_ray_query` tier negotiation (`PathReplayRayQuery`), SVGF variance filter, `RecordEditorDescription`.   |
+| Reference branch 3          | `https://github.com/egoistm1inbox/Frontier/tree/arena%2F9ce908bc-frontier`              | `LogStream` / `LogStreamPanel`, dual-tier `GTX`/`RTX` design, automotive showcase, and dedicated studios.      |
+
+### Standing post-commit synchronisation rule
+
+- **After every local commit**, immediately fetch and merge the main integration branch
+  `https://github.com/SultanAladin/Frontier/tree/arena/11f31835-frontier` into the active working branch so reusable UI
+  and engine changes from main stay synchronised automatically without repeating the instruction:
+  `git fetch sultan arena/11f31835-frontier && git merge --no-edit sultan/arena/11f31835-frontier`
+  (configuring remote `sultan` -> `https://github.com/SultanAladin/Frontier.git` if not yet present).
+- Keep commits and post-commit merges local until the user explicitly authorises a remote push, preserving the GitHub
+  Actions approval rule above.
+
+## Project Everest — application launch and dual-tier Vulkan illumination
+
+- **Startup flow**: `Frontier` opens in `ProjectBrowserPanel`, where the user selects the target Frontier application
+  and opens **Project Everest** (`Frontier/Projects/Project-Everest/ProjectEverest.projectspace` and
+  `ProjectEverest.frontier`) into the docked editor workspace (`PanelDockspace` + `ControlCentrePanel` UI theme
+  controller + `LogStreamPanel` over `LogRingStore` / `LogCategories`).
+- **RTX tier (hardware ray tracing)**: Enabled strictly on RTX-class GPUs advertising
+  `VK_KHR_acceleration_structure` and `VK_KHR_ray_query` (`PathReplayRayQuery`). Executes hardware ray-traced direct
+  visibility, ReSTIR GI indirect bounce, glass transmission, and glossy/mirror reflections over BLAS/TLAS.
+- **GTX and lower-end fallback tier (SDF + BVH reflections)**: First-class non-RT path when hardware ray query is
+  absent or disabled. Uses analytical and voxel `SignedDistanceField` raymarching plus `OrientedSurfaceCard` ReSTIR GI
+  for indirect illumination and occlusion, paired with `OrderedSoftwareBvh` triangle-BVH compute traversal for
+  reflections.
+- **GPU execution rule**: Every rendering pass compiles real `.slang` shaders to SPIR-V and dispatches on Vulkan
+  `SubmissionOrder` queues; never substitute CPU worker threads or synthetic placeholder SPIR-V words for GPU passes.
+
+## Scene record lifecycle and editor UI architecture
+
+- **Constructor and destructor auto-registration**: Every scene object derives from `RecordEntry`. Constructing an
+  instance registers it in `RecordStore` and, in editor/development builds, automatically publishes it into
+  `SceneDirectory` (**Outliner**) and binds its `RecordEditorDescription` (**Inspector**). Destroying the instance
+  unregisters it from `SceneDirectory`, clears active selection if held, and tears down its Inspector state cleanly.
+  Shipping builds compile zero editor UI symbols.
+- **Three-tier editor authoring model**:
+
+| Authoring tier                    | Location                                        | Responsibility and examples                                                                                                         |
+|-----------------------------------|-------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| Reusable engine components        | `Frontier/Engine/Scene/`                        | Ready-made `RecordEntry` components and reusable Inspector cards for standard items (**Sun**, **Sky / Atmosphere**, **Clouds**, **Fog**, **Lights**, **Camera**). |
+| User-authored custom inspectors   | `Frontier/Projects/<Project>/Source/`           | Project-specific custom designs (**Vehicle**, **Suspension and Tyre**, **Powertrain**, **Cabin HMI**) authoring bespoke `DescribeEditor(RecordEditorDescription&)` layouts on `ControlKit` and `StackRailControls`. |
+| Dedicated domain studios          | `UI/` and `Frontier/Engine/Interface/`          | Docked/modal multi-pane studios sharing `PanelDockspace` and `ControlCentrePanel` for domains beyond a property sheet: **Fracture Studio**, **Fluid / Pyro Studio**, **Particle Studio**, **Cluster Hierarchy Studio**, and **Texture Studio**. |
+

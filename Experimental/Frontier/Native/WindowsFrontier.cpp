@@ -43,7 +43,7 @@ std::filesystem::path ChooseProjectPath(GLFWwindow *Window, bool Save)
     OPENFILENAMEW Selection{};
     Selection.lStructSize  = sizeof(Selection);
     Selection.hwndOwner    = glfwGetWin32Window(Window);
-    Selection.lpstrFilter  = L"Frontier projects (*.projectspace)\0*.projectspace\0\0";
+    Selection.lpstrFilter  = L"Frontier projects (*.projectspace;*.frontier)\0*.projectspace;*.frontier\0\0";
     Selection.lpstrFile    = Filename;
     Selection.nMaxFile    = 32768;
     Selection.lpstrDefExt = L"projectspace";
@@ -146,6 +146,18 @@ int main()
         if (!Appearance->Initialize() || !Appearance->Activate())
             throw std::runtime_error("Frontier appearance initialization failed: " + Appearance->QueryDiagnostic());
         Browser = std::make_unique<Frontier::ProjectBrowserPanel>([&](bool Save) { return ChooseProjectPath(Window, Save); });
+        std::filesystem::path ProjectsRoot = "Frontier/Projects";
+        if (!std::filesystem::is_directory(ProjectsRoot))
+        {
+            wchar_t Executable[MAX_PATH] = {};
+            if (GetModuleFileNameW(nullptr, Executable, MAX_PATH))
+            {
+                const std::filesystem::path Candidate =
+                    std::filesystem::path(Executable).parent_path() / "Frontier/Projects";
+                if (std::filesystem::is_directory(Candidate)) ProjectsRoot = Candidate;
+            }
+        }
+        (void)Browser->AttachProjectDirectory(ProjectsRoot);
         PreviewCatalogue = Frontier::ConstructBrowserCatalogue();
         Browser->PickImportFiles = [&]() { return ChooseImportFiles(Window); };
         Browser->PickImportFolder = [&]() { return ChooseImportFolder(Window); };
@@ -271,11 +283,13 @@ int main()
         Summary.Name = Document.Sections["project"]["name"].value_or(std::string("Project"));
         Summary.Location = Frontier::DiagnosticJournal::EncodePath(Requested);
         Summary.Identity = Document.Sections["project"]["identity"].value_or(std::string{});
+        Summary.ApplicationTarget = Frontier::BrowserApplicationLabel(Browser->QueryApplicationTarget());
         if (const auto *Levels = Document.Sections["levels"].as_array()) Summary.Levels = Levels->size();
         if (const auto *Roots = Document.Sections["content_roots"].as_array()) Summary.Roots = Roots->size();
         if (const auto *Catalogue = Document.Sections["catalogue"].as_array()) Summary.Catalogue = Catalogue->size();
         Summary.StartupLevel = Document.Sections["engine"]["startup_level"].value_or(std::string{});
         Workspace->ConfigureProject(std::move(Summary));
+        Workspace->ActivateProjectWorkspace(Requested, true);
         Workspace->EvaluateReturnToBrowser = [&]() { ReturnRequested = true; };
         glfwSetWindowTitle(Window, ("Frontier - " + Workspace->QueryProject().Name).c_str());
         Frontier::DiagnosticJournal::Append("ProjectSelection", Frontier::DiagnosticJournal::EncodePath(Requested));

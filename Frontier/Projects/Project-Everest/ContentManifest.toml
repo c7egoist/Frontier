@@ -1,0 +1,25 @@
+[Manifest]
+Format = "frontier.content.manifest"
+Version = 1
+ProjectName = "Project Everest"
+ContentRoot = "Content"
+
+[[Entries]]
+Identity = "ProvingGrounds"
+Path = "Content/Scenes/ProvingGrounds.scene.toml"
+Classification = "Scene"
+
+[[Entries]]
+Identity = "StudioShowcase"
+Path = "Content/Scenes/StudioShowcase.scene.toml"
+Classification = "Scene"
+
+[[Entries]]
+Identity = "EverestVehicleConfiguration"
+Path = "Content/Vehicles/EverestVehicle.toml"
+Classification = "Vehicle"
+
+[[Entries]]
+Identity = "EverestDualTierIllumination"
+Path = "Content/Lighting/DualTierIllumination.toml"
+Classification = "Illumination"

@@ -363,6 +363,7 @@ bool ProjectBrowserPanel::OpenSample(const std::string &Token)
     const BrowserCatalogueEntry *Entry = FindEntry(Token);
     if (Entry == nullptr || Entry->Imported) return false;
     ActiveToken = Token;
+    SelectedApplication = DefaultBrowserApplicationTarget(Entry->Category);
     ActiveRevision = int(Entry->Revisions.size()) - 1;
     PreviewIndex = 0;
     DocumentEnabled = Entry->Category == BrowserFileCategory::Document; // 📄 Documents open on their A4 page.
@@ -374,6 +375,32 @@ bool ProjectBrowserPanel::OpenSample(const std::string &Token)
     CaptureDelay = 2;
     FocusBack = true;
     return true;
+}
+
+bool ProjectBrowserPanel::OpenEntry(const std::string &Token)
+{
+    const BrowserCatalogueEntry *Entry = FindEntry(Token);
+    if (Entry == nullptr) return false;
+    ActiveToken = Token;
+    SelectedApplication = DefaultBrowserApplicationTarget(Entry->Category);
+    ActiveRevision = Entry->Imported ? -1 : int(Entry->Revisions.size()) - 1;
+    PreviewIndex = 0;
+    DocumentEnabled = Entry->Category == BrowserFileCategory::Document;
+    Zoom = 100;
+    ActiveTab = "details";
+    ResetLiveCamera(*Entry);
+    LiveChannel = Entry->Imported ? 0 : PreviewConfigFor(*Entry, 0, ActiveRevision).Channel;
+    LiveSignature.clear();
+    CaptureDelay = 2;
+    FocusBack = true;
+    return true;
+}
+
+void ProjectBrowserPanel::ConfigureFilter(const std::string &RequestedFilter)
+{
+    if (RequestedFilter == "all" || RequestedFilter == "recent" || RequestedFilter == "starred" ||
+        RequestedFilter == "project" || RequestedFilter == "cad" || RequestedFilter == "geometry")
+        Filter = RequestedFilter;
 }
 
 void ProjectBrowserPanel::CloseFile()
@@ -558,22 +585,148 @@ size_t ProjectBrowserPanel::AttachPaths(const std::vector<std::filesystem::path>
     return Attached;
 }
 
+size_t ProjectBrowserPanel::AttachProjectDirectory(const std::filesystem::path &ProjectsDirectory)
+{
+    namespace fs = std::filesystem;
+    std::error_code Status;
+    if (!fs::is_directory(ProjectsDirectory, Status)) return 0;
+
+    std::vector<fs::path> Subdirectories;
+    for (const auto &Item : fs::directory_iterator(ProjectsDirectory, Status))
+    {
+        if (Status) break;
+        if (Item.is_directory(Status)) Subdirectories.push_back(Item.path());
+    }
+    std::sort(Subdirectories.begin(), Subdirectories.end(), [](const fs::path &First, const fs::path &Second) {
+        const std::string FirstName  = First.filename().string();
+        const std::string SecondName = Second.filename().string();
+        // Keep Project-Everest first among discovered workspace projects.
+        const bool FirstEverest  = FirstName == "Project-Everest";
+        const bool SecondEverest = SecondName == "Project-Everest";
+        if (FirstEverest != SecondEverest) return FirstEverest;
+        return FirstName < SecondName;
+    });
+
+    size_t Attached = 0;
+    std::vector<BrowserCatalogueEntry> Discovered;
+    for (const auto &Folder : Subdirectories)
+    {
+        fs::path ProjectSpaceFile;
+        fs::path FrontierFile;
+        for (const auto &Child : fs::directory_iterator(Folder, Status))
+        {
+            if (Status || !Child.is_regular_file(Status)) continue;
+            const std::string Ext = FoldBrowserText(Child.path().extension().string());
+            if (Ext == ".projectspace" && ProjectSpaceFile.empty()) ProjectSpaceFile = Child.path();
+            if (Ext == ".frontier" && FrontierFile.empty()) FrontierFile = Child.path();
+        }
+        const fs::path Chosen = !ProjectSpaceFile.empty() ? ProjectSpaceFile : FrontierFile;
+        if (Chosen.empty()) continue;
+
+        const std::u8string RawPath = Chosen.u8string();
+        const std::string PathString(RawPath.begin(), RawPath.end());
+        bool AlreadyPresent = false;
+        for (const auto &Existing : Entries)
+            if (Existing.Path == PathString) AlreadyPresent = true;
+        if (AlreadyPresent) continue;
+
+        BrowserCatalogueEntry Entry;
+        std::string FolderSlug = FoldBrowserText(Folder.filename().string());
+        for (char &Character : FolderSlug)
+            if (!(Character >= 'a' && Character <= 'z') && !(Character >= '0' && Character <= '9')) Character = '-';
+        Entry.Token     = "project-" + FolderSlug;
+        Entry.Extension = FoldBrowserText(Chosen.extension().string());
+        Entry.Category  = BrowserFileCategory::Project;
+        Entry.Art       = "Valley";
+        Entry.Opened    = "Workspace project";
+        Entry.Path      = PathString;
+        Entry.Imported  = true;
+        Entry.ByteCount = fs::file_size(Chosen, Status);
+
+        if (!ProjectSpaceFile.empty())
+        {
+            ProjectSpaceDocument Decoded;
+            std::string DecodeDiag;
+            if (ProjectSpaceCodec::Decode(ProjectSpaceFile, Decoded, DecodeDiag))
+            {
+                Entry.Title       = Decoded.Sections["project"]["name"].value_or(Chosen.stem().string());
+                Entry.Description = Decoded.Sections["project"]["description"].value_or(
+                    std::string("Native Frontier application workspace container."));
+                size_t LevelCount     = 0;
+                size_t CatalogueCount = 0;
+                if (const auto *Levels = Decoded.Sections["levels"].as_array())
+                {
+                    LevelCount = Levels->size();
+                    for (const auto &Node : *Levels)
+                        if (const auto *Row = Node.as_table())
+                            if (const auto Id = (*Row)["identity"].value<std::string>())
+                                Entry.Views.push_back(*Id);
+                }
+                if (const auto *Cat = Decoded.Sections["catalogue"].as_array()) CatalogueCount = Cat->size();
+                Entry.Context = std::to_string(LevelCount) + " level" + (LevelCount == 1 ? "" : "s") + " · " +
+                                std::to_string(CatalogueCount) + " catalogue item" + (CatalogueCount == 1 ? "" : "s");
+            }
+        }
+        if (Entry.Title.empty() && !FrontierFile.empty())
+        {
+            try
+            {
+                const toml::table Table = toml::parse_file(FrontierFile.string());
+                Entry.Title = Table["Project"]["ProjectName"].value_or(Chosen.stem().string());
+                Entry.Description = "Declarative Frontier project descriptor.";
+                Entry.Context = "Frontier descriptor";
+            }
+            catch (...)
+            {
+                Entry.Title = Chosen.stem().string();
+                Entry.Description = "Frontier project descriptor.";
+                Entry.Context = "Frontier project";
+            }
+        }
+        if (Entry.Views.empty()) Entry.Views = {"Workspace preview"};
+
+        const fs::path ReadmePath = Folder / "README.md";
+        if (fs::is_regular_file(ReadmePath, Status))
+        {
+            std::ifstream Readme(ReadmePath, std::ios::binary);
+            const std::string Text{std::istreambuf_iterator<char>(Readme), std::istreambuf_iterator<char>()};
+            Entry.Markdown = Text.substr(0, 262144);
+        }
+
+        Discovered.push_back(std::move(Entry));
+        ++Attached;
+    }
+
+    if (!Discovered.empty())
+    {
+        Entries.insert(Entries.begin(), Discovered.begin(), Discovered.end());
+    }
+    return Attached;
+}
+
+bool ProjectBrowserPanel::ConfirmApplicationLaunch()
+{
+    const BrowserCatalogueEntry *Entry = FindEntry(ActiveToken);
+    if (Entry == nullptr || !Entry->Imported) return false;
+    namespace fs = std::filesystem;
+    std::error_code Status;
+    const fs::path CandidatePath(Entry->Path);
+    if (!fs::is_regular_file(CandidatePath, Status)) return false;
+    if (!SelectProject(CandidatePath)) return false;
+    if (!RequestOpenProject())
+    {
+        Diagnostic.clear();
+        return false;
+    }
+    LaunchOpen = false;
+    return true;
+}
+
 void ProjectBrowserPanel::OpenInFrontier()
 {
     const BrowserCatalogueEntry *Entry = FindEntry(ActiveToken);
     if (Entry == nullptr) return;
-    // 🚀 Real native hand-off for attached project containers; the launch dialog previews every other target.
-    if (Entry->Imported && Entry->Extension == ".projectspace")
-    {
-        namespace fs = std::filesystem;
-        std::error_code Status;
-        const bool Exists = fs::is_regular_file(fs::path(Entry->Path), Status);
-        if (!Status && Exists && SelectProject(fs::path(Entry->Path)))
-        {
-            if (RequestOpenProject()) return;
-            Diagnostic.clear();
-        }
-    }
+    SelectedApplication = DefaultBrowserApplicationTarget(Entry->Category);
     LaunchOpen = true;
 }
 
@@ -608,9 +761,17 @@ bool ProjectBrowserPanel::ConfigureDirectory(const std::filesystem::path &Reques
 
 bool ProjectBrowserPanel::SelectProject(const std::filesystem::path &Path)
 {
+    std::filesystem::path Resolved = Path;
+    if (FoldBrowserText(Path.extension().string()) == ".frontier")
+    {
+        std::filesystem::path CandidateSpace = Path;
+        CandidateSpace.replace_extension(".projectspace");
+        std::error_code Status;
+        if (std::filesystem::is_regular_file(CandidateSpace, Status)) Resolved = CandidateSpace;
+    }
     ProjectSpaceDocument Candidate;
-    if (!ProjectSpaceCodec::Decode(Path, Candidate, Diagnostic)) return false;
-    SelectedPath = Path;
+    if (!ProjectSpaceCodec::Decode(Resolved, Candidate, Diagnostic)) return false;
+    SelectedPath = Resolved;
     SelectedProject = std::move(Candidate);
     Diagnostic.clear();
     return true;
@@ -2570,44 +2731,80 @@ void ProjectBrowserPanel::ConstructLaunchDialog(float Width)
         float Y = Origin.y + Pad;
         const float InnerW = DialogW - Pad * 2;
         const BrowserCatalogueEntry *Entry = FindEntry(ActiveToken);
-        DrawBrowserSpaced(Draw, Font, 9 * Scale, ImVec2(Origin.x + Pad, Y), S.Muted, "NATIVE HAND-OFF PREVIEW",
-            1.8f * Scale);
+        const bool LaunchableProject =
+            Entry != nullptr && Entry->Imported &&
+            (Entry->Extension == ".projectspace" || Entry->Extension == ".frontier");
+        DrawBrowserSpaced(Draw, Font, 9 * Scale, ImVec2(Origin.x + Pad, Y), S.Muted,
+            LaunchableProject ? "SELECT APPLICATION" : "NATIVE HAND-OFF PREVIEW", 1.8f * Scale);
         Y += 9 * Scale + 14 * Scale;
-        DrawBrowserText(Draw, Font, 25 * Scale, ImVec2(Origin.x + Pad, Y), S.Text, "Ready for the next step.");
+        DrawBrowserText(Draw, Font, 25 * Scale, ImVec2(Origin.x + Pad, Y), S.Text,
+            LaunchableProject ? "Open in Frontier" : "Ready for the next step.");
         Y += 25 * Scale + 12 * Scale;
         Y += DrawBrowserParagraph(Draw, Font, 12 * Scale, ImVec2(Origin.x + Pad, Y), S.Muted,
-            Entry != nullptr && Entry->Imported ? "This is the selected local file for a future native hand-off."
-                                                : "This is a sample file used to review the launch flow.",
+            LaunchableProject
+                ? "Select the target Frontier application workspace to open " + Entry->Title + "."
+                : (Entry != nullptr && Entry->Imported
+                          ? "This is the selected local file for a future native hand-off."
+                          : "This is a sample file used to review the launch flow."),
             InnerW, 12 * Scale * 1.8f);
         Y += 20 * Scale;
-        float HandH = 18 * 2 * Scale + 10 * Scale + 10 * Scale + 8 * 3 * Scale;
-        const std::string Target = Entry != nullptr ? BrowserLaunchTarget(Entry->Category) : "Frontier";
-        const std::string File = Entry != nullptr ? Entry->Path : "";
-        const float FileH = DrawBrowserParagraph(nullptr, Font, 11 * Scale, ImVec2(0, 0), S.Text, File,
-            InnerW - 36 * Scale, 11 * Scale * 1.5f);
-        HandH += 12 * Scale + FileH;
+        const std::vector<std::string> ApplicationOptions = {
+            BrowserApplicationLabel(BrowserApplicationTarget::ProjectWorkspace),
+            BrowserApplicationLabel(BrowserApplicationTarget::TextureStudio),
+            BrowserApplicationLabel(BrowserApplicationTarget::DraftingWorkspace),
+            BrowserApplicationLabel(BrowserApplicationTarget::GeometryWorkspace),
+        };
+        const float ComboH = BrowserComboHeight(Frame);
+        float HandH = 18 * 2 * Scale + 8 * Scale + ComboH + 14 * Scale + 8 * Scale + 8 * Scale + 15 * Scale;
+        const std::string RawFile = Entry != nullptr ? Entry->Path : "";
+        const std::string File = EllipsizeBrowserText(Font, 11 * Scale, RawFile, InnerW - 36 * Scale);
         Draw->AddRectFilled(ImVec2(Origin.x + Pad, Y), ImVec2(Origin.x + Pad + InnerW, Y + HandH), S.Control,
             9 * Scale);
         Draw->AddRect(ImVec2(Origin.x + Pad, Y), ImVec2(Origin.x + Pad + InnerW, Y + HandH), S.Line, 9 * Scale, 0,
             std::max(1.f, Scale));
         float HY = Y + 18 * Scale;
-        DrawBrowserSpaced(Draw, Font, 8 * Scale, ImVec2(Origin.x + Pad + 18 * Scale, HY), S.Faint, "OPEN WITH",
+        DrawBrowserSpaced(Draw, Font, 8 * Scale, ImVec2(Origin.x + Pad + 18 * Scale, HY), S.Faint,
+            "APPLICATION TARGET", 1 * Scale);
+        HY += 8 * Scale + 8 * Scale;
+        const int PickedApp = DrawBrowserSelect("launch-app", ImVec2(Origin.x + Pad + 18 * Scale, HY),
+            InnerW - 36 * Scale, ApplicationOptions, int(SelectedApplication), Frame, 11 * Scale, 12 * Scale,
+            26 * Scale, 8 * Scale, S.Selected, 8 * Scale);
+        SelectedApplication = static_cast<BrowserApplicationTarget>(std::clamp(PickedApp, 0, 3));
+        HY += ComboH + 14 * Scale;
+        DrawBrowserSpaced(Draw, Font, 8 * Scale, ImVec2(Origin.x + Pad + 18 * Scale, HY), S.Faint, "PROJECT CONTAINER",
             1 * Scale);
         HY += 8 * Scale + 8 * Scale;
-        DrawBrowserText(Draw, Font, 12 * Scale, ImVec2(Origin.x + Pad + 18 * Scale, HY), S.Text, Target);
-        HY += 12 * Scale + 10 * Scale + 8 * Scale;
-        DrawBrowserSpaced(Draw, Font, 8 * Scale, ImVec2(Origin.x + Pad + 18 * Scale, HY), S.Faint, "FILE", 1 * Scale);
-        HY += 8 * Scale + 8 * Scale;
-        DrawBrowserParagraph(Draw, Font, 11 * Scale, ImVec2(Origin.x + Pad + 18 * Scale, HY), S.Text, File,
-            InnerW - 36 * Scale, 11 * Scale * 1.5f);
+        DrawBrowserText(Draw, Font, 11 * Scale, ImVec2(Origin.x + Pad + 18 * Scale, HY), S.Text, File);
         Y += HandH + 12 * Scale;
         Y += DrawBrowserParagraph(Draw, Font, 10 * Scale, ImVec2(Origin.x + Pad, Y), S.Muted,
-            "This preview does not launch the editor or decode native project content. Your original file is unchanged.",
+            LaunchableProject
+                ? "Launches the docked workspace with PanelDockspace, ControlCentre theme controls, and Log Stream."
+                : "This preview does not launch the editor or decode native project content. Your original file is unchanged.",
             InnerW, 10 * Scale * 1.8f);
         Y += 20 * Scale;
-        const float ButtonW = MeasureBrowserText(Font, 13 * Scale, "Back to preview").x + 40 * Scale;
-        if (DrawBrowserPrimary("return", ImVec2(Origin.x + Pad, Y), "Back to preview", BrowserIcon::Back, false,
-                Frame, 13 * Scale, 20 * Scale, 37 * Scale))
+        if (LaunchableProject)
+        {
+            const float CancelW = MeasureBrowserText(Font, 12 * Scale, "Back to preview").x + 28 * Scale;
+            const bool CancelClicked =
+                PlaceBrowserHit(ImVec2(Origin.x + Pad, Y), ImVec2(CancelW, 37 * Scale), "return");
+            Frame.Draw->AddRect(ImVec2(Origin.x + Pad, Y), ImVec2(Origin.x + Pad + CancelW, Y + 37 * Scale),
+                ImGui::IsItemHovered() ? S.Faint : S.Line, 18.5f * Scale, 0, std::max(1.f, Scale));
+            DrawBrowserText(Draw, Font, 12 * Scale, ImVec2(Origin.x + Pad + 14 * Scale, Y + 12.5f * Scale), S.Text,
+                "Back to preview");
+            if (CancelClicked)
+            {
+                LaunchOpen = false;
+                ImGui::CloseCurrentPopup();
+            }
+            const float LaunchBtnW = MeasureBrowserText(Font, 13 * Scale, "Open Project").x + 48 * Scale;
+            if (DrawBrowserPrimary("confirm-launch", ImVec2(Origin.x + Pad + InnerW - LaunchBtnW, Y), "Open Project",
+                    BrowserIcon::Arrow, true, Frame, 13 * Scale, 18 * Scale, 37 * Scale))
+            {
+                if (ConfirmApplicationLaunch()) ImGui::CloseCurrentPopup();
+            }
+        }
+        else if (DrawBrowserPrimary("return", ImVec2(Origin.x + Pad, Y), "Back to preview", BrowserIcon::Back, false,
+                     Frame, 13 * Scale, 20 * Scale, 37 * Scale))
         {
             LaunchOpen = false;
             ImGui::CloseCurrentPopup();

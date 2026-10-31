@@ -105,9 +105,28 @@ add_library(FrontierInterface STATIC
 target_include_directories(FrontierInterface PUBLIC "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/ExternalPackages/tomlpp/include")
 target_link_libraries(FrontierInterface PUBLIC FrontierImGui thorvg_static FrontierTextFiles FrontierThumbnailAtlasCache)
-add_library(FrontierEditorUI STATIC UI/Editor/ProjectBrowserPanel.cpp UI/Editor/FoundationPanel.cpp UI/Editor/EditorWorkspace.cpp UI/Editor/ControlCentrePanel.cpp UI/Editor/ContentBrowserPanel.cpp)
+add_library(FrontierEditorUI STATIC
+    UI/Editor/ProjectBrowserPanel.cpp
+    UI/Editor/FoundationPanel.cpp
+    UI/Editor/EditorWorkspace.cpp
+    UI/Editor/ControlCentrePanel.cpp
+    UI/Editor/ContentBrowserPanel.cpp
+    Frontier/Engine/Diagnostics/LogRingStore.cpp
+    Frontier/Engine/Diagnostics/LogCategories.cpp
+    Frontier/Engine/Diagnostics/LogStream.cpp
+    Frontier/Engine/Scene/RecordEntry.cpp
+    Frontier/Engine/Scene/RecordStore.cpp
+    Frontier/Engine/Scene/SceneDirectory.cpp
+    Frontier/Engine/Interface/ProjectDescriptor.cpp
+    Frontier/Engine/Interface/ProjectContent.cpp
+    Frontier/Engine/Interface/LogStreamPanel.cpp
+    Frontier/Engine/Interface/LogStreamPanelPresentation.cpp
+    Frontier/Engine/Interface/StackRailControls.cpp
+    Frontier/Engine/Interface/SceneDirectoryPanel.cpp
+    Frontier/Engine/Interface/SceneDirectoryPanelPresentation.cpp)
+target_include_directories(FrontierEditorUI PUBLIC "${CMAKE_SOURCE_DIR}/Frontier")
 target_link_libraries(FrontierEditorUI PUBLIC FrontierInterface)
-target_compile_definitions(FrontierEditorUI PUBLIC FRONTIER_EDITOR=1)
+target_compile_definitions(FrontierEditorUI PUBLIC FRONTIER_EDITOR=1 FRONTIER_WITH_INTERFACE_SDK=1)
 
 # GLFW owns windows/input on every platform; DX11 is only the legacy Windows-only exhibit's display
 # adapter, not the primary renderer, and never needs GLFW built differently per platform.
@@ -493,4 +512,10 @@ if(BUILD_TESTING)
     target_link_libraries(InterfaceValidation PRIVATE FrontierEditorUI)
     add_test(NAME InterfaceValidation COMMAND InterfaceValidation
         "${CMAKE_SOURCE_DIR}/EngineContent/Icons" "${CMAKE_BINARY_DIR}/evidence")
+    add_executable(ProjectEverestValidation Exhibits/ProjectEverest/Code/ProjectEverestValidation.cpp)
+    target_include_directories(ProjectEverestValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(ProjectEverestValidation PRIVATE FrontierEditorUI)
+    add_test(NAME ProjectEverestValidation COMMAND ProjectEverestValidation
+        "${CMAKE_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/project-everest-evidence"
+        "${CMAKE_SOURCE_DIR}/Exhibits/ProjectEverest/Images")
 endif()

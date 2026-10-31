@@ -1,0 +1,10 @@
+# Project Everest — Vehicle configuration (custom user-authored Inspector target)
+format = "frontier.vehicle.everest"
+version = 1
+name = "Everest Concept GT"
+mass_kilograms = 1680.0
+wheelbase_metres = 2.78
+track_width_metres = 1.64
+centre_of_gravity_height_metres = 0.49
+drivetrain = "DualMotorAllWheel"
+peak_power_kilowatts = 420.0

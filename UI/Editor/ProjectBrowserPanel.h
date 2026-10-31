@@ -56,8 +56,15 @@ class ProjectBrowserPanel
     [[nodiscard]] static constexpr std::array<const char *, 1> QueryPresets() noexcept { return {"Blank Project"}; }
     // 📖 1:1 browser navigation (driven by the UI and by the validation harness).
     bool OpenSample(const std::string &Token);
+    bool OpenEntry(const std::string &Token);
     void CloseFile();
+    void ConfigureFilter(const std::string &RequestedFilter);
     size_t AttachPaths(const std::vector<std::filesystem::path> &Paths, bool AutoOpen = true);
+    size_t AttachProjectDirectory(const std::filesystem::path &ProjectsDirectory);
+    void ConfigureApplicationTarget(BrowserApplicationTarget Target) noexcept { SelectedApplication = Target; }
+    [[nodiscard]] BrowserApplicationTarget QueryApplicationTarget() const noexcept { return SelectedApplication; }
+    void OpenApplicationPrompt() noexcept { if (!ActiveToken.empty()) LaunchOpen = true; }
+    bool ConfirmApplicationLaunch();
     [[nodiscard]] bool IsReaderOpen() const noexcept { return !ActiveToken.empty(); }
     [[nodiscard]] const std::string &QueryActiveToken() const noexcept { return ActiveToken; }
     [[nodiscard]] size_t QueryEntryCount() const noexcept { return Entries.size(); }
@@ -133,6 +140,7 @@ class ProjectBrowserPanel
     std::map<std::string, CachedPreviewTriangles> PreviewCache;
     BrowserPreferences Prefs;
     BrowserPreviewCamera LiveCamera;
+    BrowserApplicationTarget SelectedApplication = BrowserApplicationTarget::ProjectWorkspace;
     int PreviewIndex = 0, ActiveRevision = 0, Zoom = 100, LiveChannel = 0, CaptureDelay = 0;
     uint64_t AttachSerial = 0;
     std::chrono::steady_clock::time_point ToastUntil{};

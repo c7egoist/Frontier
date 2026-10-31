@@ -1,0 +1,21 @@
+# Project Everest — Proving Grounds opening scene
+format = "frontier.scene"
+version = 1
+name = "ProvingGrounds"
+
+[environment]
+sun_azimuth_degrees = 142.0
+sun_elevation_degrees = 26.5
+atmosphere_turbidity = 2.4
+cloud_coverage = 0.28
+fog_density = 0.0018
+
+[illumination]
+rtx_path = "HardwareRayQuery"
+gtx_fallback_path = "SignedDistanceFieldAndOrderedBvh"
+restir_temporal_max_history = 20
+
+[deployment]
+vehicle = "Content/Vehicles/EverestVehicle.toml"
+position = [0.0, 0.0, 0.52]
+heading_degrees = 24.0
