@@ -203,9 +203,31 @@ void DrawIdentityHeader(const KitFaces& Faces, ImVec2 Minimum, float Width, ImU3
     KitDrawText(Ink, Faces.Regular, 11.5f, ImVec2(Minimum.x + 54.0f, Minimum.y + 32.0f), Theme.Muted, Sub);
 }
 
+void RenderSteppedFolderGlyph(ImDrawList* Ink, ImVec2 Centre, float Scale, ImU32 AccentColour, bool Expanded)
+{
+    // 📝 Stepped rear tab ear + front chamfered pocket inspired by SourceImages/Folder UI/.
+    const float HalfW = 7.5f * Scale;
+    const float HalfH = 5.5f * Scale;
+    const ImVec2 TopLeft(Centre.x - HalfW, Centre.y - HalfH);
+    const ImVec2 BottomRight(Centre.x + HalfW, Centre.y + HalfH);
+
+    // Rear stepped ear tab on the right-hand shoulder.
+    const ImU32 RearFill   = KitInkWithAlpha(AccentColour, Expanded ? 0.30f : 0.18f);
+    const ImU32 FrontFill  = KitInkWithAlpha(AccentColour, Expanded ? 0.56f : 0.34f);
+    const ImU32 EdgeStroke = KitInkWithAlpha(AccentColour, 0.92f);
+
+    Ink->AddRectFilled(ImVec2(TopLeft.x, TopLeft.y + 1.5f * Scale), BottomRight, RearFill, 2.0f * Scale);
+    Ink->AddRectFilled(ImVec2(Centre.x + 0.5f * Scale, TopLeft.y - 1.2f * Scale),
+                       ImVec2(BottomRight.x, TopLeft.y + 3.0f * Scale), RearFill, 1.6f * Scale);
+    // Front pocket sheet.
+    const float PocketTop = TopLeft.y + (Expanded ? 3.2f : 2.2f) * Scale;
+    Ink->AddRectFilled(ImVec2(TopLeft.x, PocketTop), BottomRight, FrontFill, 2.0f * Scale);
+    Ink->AddRect(ImVec2(TopLeft.x, PocketTop), BottomRight, EdgeStroke, 2.0f * Scale, 0, 1.15f);
+}
+
 TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Minimum, float Width, float Indent,
                                bool HasChildren, bool Collapsed, ImU32 DotColour, const char* Name,
-                               const char* Meta, bool Visible, bool Selected)
+                               const char* Meta, bool Visible, bool Selected, bool FolderGlyphEnabled)
 {
     const KitTheme     Theme   = ResolveKitTheme();
     ImDrawList*        Ink     = ImGui::GetWindowDrawList();
@@ -253,13 +275,21 @@ TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Min
     }
     CursorX += 18.0f;
 
-    // Classification dot + name.
-    Ink->AddCircleFilled(ImVec2(CursorX + 4.0f, CentreY), 3.5f,
-                         Visible ? DotColour : KitInkWithAlpha(DotColour, 0.35f));
-    CursorX += 16.0f;
-    const ImU32 NameColour = !Visible ? Theme.Faint : (Selected ? Theme.Text : Theme.Muted);
-    KitDrawText(Ink, Selected ? Faces.Medium : Faces.Regular, 13.0f, ImVec2(CursorX, CentreY - 6.5f), NameColour,
-                Name);
+    // Classification dot (or stepped folder glyph) + name.
+    const ImU32 EffectiveDot = Visible ? DotColour : KitInkWithAlpha(DotColour, 0.35f);
+    if (FolderGlyphEnabled)
+    {
+        RenderSteppedFolderGlyph(Ink, ImVec2(CursorX + 5.5f, CentreY), 0.92f, EffectiveDot, !Collapsed);
+        CursorX += 19.0f;
+    }
+    else
+    {
+        Ink->AddCircleFilled(ImVec2(CursorX + 4.0f, CentreY), 3.5f, EffectiveDot);
+        CursorX += 16.0f;
+    }
+    const ImU32 NameColour = !Visible ? Theme.Faint : (Selected || FolderGlyphEnabled ? Theme.Text : Theme.Muted);
+    KitDrawText(Ink, (Selected || FolderGlyphEnabled) ? Faces.Medium : Faces.Regular, 13.0f,
+                ImVec2(CursorX, CentreY - 6.5f), NameColour, Name);
 
     // Visibility eye (right) and meta before it.
     const float EyeX = Maximum.x - 8.0f - 24.0f;

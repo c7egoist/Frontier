@@ -22,6 +22,7 @@ namespace Frontier
 //    illumination, cameras, physics bodies, interface and content objects).
 enum class RecordClassification : uint8_t
 {
+    Folder,
     Vehicle,
     Tyre,
     Environment,
@@ -40,6 +41,7 @@ enum class RecordClassification : uint8_t
 {
     switch (Classification)
     {
+        case RecordClassification::Folder:       return "Folder";
         case RecordClassification::Vehicle:      return "Vehicle";
         case RecordClassification::Tyre:         return "Tyre";
         case RecordClassification::Environment:  return "Environment";

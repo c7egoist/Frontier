@@ -115,6 +115,10 @@ add_library(FrontierEditorUI STATIC
     Frontier/Engine/Diagnostics/LogCategories.cpp
     Frontier/Engine/Diagnostics/LogStream.cpp
     Frontier/Engine/Scene/RecordEntry.cpp
+    Frontier/Engine/Scene/RecordInspectorRegistry.cpp
+    Frontier/Engine/Scene/GlobalEnvironmentRecords.cpp
+    Frontier/Engine/Rendering/AtmosphereModel.cpp
+    Frontier/Engine/Rendering/CloudField.cpp
     Frontier/Engine/Scene/RecordStore.cpp
     Frontier/Engine/Scene/SceneDirectory.cpp
     Frontier/Engine/Interface/ProjectDescriptor.cpp
@@ -123,7 +127,9 @@ add_library(FrontierEditorUI STATIC
     Frontier/Engine/Interface/LogStreamPanelPresentation.cpp
     Frontier/Engine/Interface/StackRailControls.cpp
     Frontier/Engine/Interface/SceneDirectoryPanel.cpp
-    Frontier/Engine/Interface/SceneDirectoryPanelPresentation.cpp)
+    Frontier/Engine/Interface/SceneDirectoryPanelPresentation.cpp
+    Frontier/Engine/Interface/SceneInspectorPanel.cpp
+    Frontier/Engine/Interface/SceneInspectorPanelRegistration.cpp)
 target_include_directories(FrontierEditorUI PUBLIC "${CMAKE_SOURCE_DIR}/Frontier")
 target_link_libraries(FrontierEditorUI PUBLIC FrontierInterface)
 target_compile_definitions(FrontierEditorUI PUBLIC FRONTIER_EDITOR=1 FRONTIER_WITH_INTERFACE_SDK=1)

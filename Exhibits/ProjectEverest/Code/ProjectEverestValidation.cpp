@@ -13,6 +13,8 @@
 #include "Engine/Interface/ControlKit.h"
 #include "Engine/Interface/IconPresentation.h"
 #include "Engine/Scene/SceneDirectory.h"
+#include "Engine/Scene/GlobalEnvironmentRecords.h"
+#include "Engine/Scene/RecordInspectorRegistry.h"
 #include "Engine/Scene/SceneRecord.h"
 #include "Exhibits/ControlCentre/Code/CpuRasterization.h"
 #include "UI/Editor/ControlCentrePanel.h"
@@ -22,6 +24,7 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -247,16 +250,28 @@ int main(int ArgumentCount, char **Arguments)
         }
 
         // Verify RecordEntry constructor/destructor auto-registration in SceneDirectory (Outliner).
-        Require(SceneDirectory::Instance().QueryCount() == 5u,
-                "Project Everest opening scene must register 5 initial SceneRecord instances");
+        Require(SceneDirectory::Instance().QueryCount() == 10u && RecordInspectorRegistry::Instance().QueryCount() == 10u,
+                "Project Everest must auto-register its ten initial records in both Outliner and Inspector registry");
+        uint32_t EnvironmentInspectorTally = 0;
+        std::vector<RecordToken> InitialTokens;
+        SceneDirectory::Instance().CopyRegistrationOrder(InitialTokens);
+        for (const RecordToken Token : InitialTokens)
+        {
+            const auto Descriptor = RecordInspectorRegistry::Instance().Query(Token);
+            if (Descriptor && Descriptor->Domain != GlobalInspectorDomain::GenericRecord)
+                ++EnvironmentInspectorTally;
+        }
+        Require(EnvironmentInspectorTally == 6u,
+                "Folder, Sun, Lens Flare, Clouds, Wind, and Atmosphere must bind global Engine Inspectors");
         {
             SceneRecord EphemeralFractureBody(RecordClassification::Geometry);
             (void)SceneDirectory::Instance().ConfigureName(EphemeralFractureBody.Token(), "Test Fracture Specimen");
-            Require(SceneDirectory::Instance().QueryCount() == 6u,
-                    "RecordEntry constructor must auto-register in SceneDirectory");
+            Require(SceneDirectory::Instance().QueryCount() == 11u &&
+                        RecordInspectorRegistry::Instance().QueryRegistered(EphemeralFractureBody.Token()),
+                    "RecordEntry constructor must auto-register in both SceneDirectory and Inspector registry");
         }
-        Require(SceneDirectory::Instance().QueryCount() == 5u,
-                "RecordEntry destructor must auto-unregister from SceneDirectory");
+        Require(SceneDirectory::Instance().QueryCount() == 10u && RecordInspectorRegistry::Instance().QueryCount() == 10u,
+                "RecordEntry destructor must auto-unregister from SceneDirectory and Inspector registry");
 
         // Emit one expandable diagnostic error entry as well so severity chips, counts, and detail expansion are live.
         if (const LogCategory *RenderCat = LogCategories().QueryByName("Render"))
@@ -286,8 +301,10 @@ int main(int ArgumentCount, char **Arguments)
             ImGuiWindow *OutlinerWindow = ImGui::FindWindowByName("Outliner###FrontierPanel-Outliner");
             ImGuiWindow *ViewportWindow = ImGui::FindWindowByName("Viewport###FrontierPanel-viewport");
             ImGuiWindow *LogWindow      = ImGui::FindWindowByName("Log Stream###FrontierPanel-LogStream");
-            Require(OutlinerWindow != nullptr && ViewportWindow != nullptr && LogWindow != nullptr,
-                    "Docked Outliner, Viewport, or LogStream ImGui window missing");
+            ImGuiWindow *InspectorWindow = ImGui::FindWindowByName("Inspector###FrontierPanel-Inspector");
+            Require(OutlinerWindow != nullptr && ViewportWindow != nullptr && LogWindow != nullptr &&
+                        InspectorWindow != nullptr,
+                    "Docked Outliner, Viewport, LogStream, or Environment Inspector ImGui window missing");
             Require(OutlinerWindow->Pos.x + 80.0f < ViewportWindow->Pos.x &&
                         ViewportWindow->Pos.x + 80.0f < LogWindow->Pos.x && LogWindow->Size.x >= 720.0f,
                     "Expected side-by-side 3-column dock split (Outliner | Viewport | Log Stream)");
@@ -301,6 +318,35 @@ int main(int ArgumentCount, char **Arguments)
         const RasterizedCapture OledWorkspaceCapture =
             RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field);
         WritePngCapture(OledWorkspaceCapture, ExhibitImages / "03_ProjectEverest_Workspace_OLED.png");
+
+        const auto CaptureEnvironmentInspector = [&](const char* RecordName, const char* Filename,
+                                                     GlobalInspectorDomain ExpectedDomain) {
+            const auto& Rows = Workspace->QuerySceneDirectoryPanel().QueryRows();
+            const auto SelectedRow = std::find_if(Rows.begin(), Rows.end(), [&](const SceneDirectoryRow& Row) {
+                return Row.Name == RecordName;
+            });
+            Require(SelectedRow != Rows.end(), "Expected global environment record must appear in Outliner");
+            const auto Descriptor = RecordInspectorRegistry::Instance().Query(SelectedRow->Token);
+            Require(Descriptor.has_value() && Descriptor->Domain == ExpectedDomain,
+                    "Global Engine environment record must bind its typed Inspector domain");
+            Workspace->QuerySceneDirectoryPanel().Select(SelectedRow->Token);
+            (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
+            PumpWorkspaceFrames(3);
+            const RasterizedCapture Capture = RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field);
+            WritePngCapture(Capture, ExhibitImages / Filename);
+        };
+        CaptureEnvironmentInspector("Environment", "07_ProjectEverest_FolderInspector_OLED.png",
+                                    GlobalInspectorDomain::Folder);
+        CaptureEnvironmentInspector("Lens Flare", "08_ProjectEverest_LensFlareInspector_OLED.png",
+                                    GlobalInspectorDomain::LensFlare);
+        CaptureEnvironmentInspector("Clouds", "09_ProjectEverest_CloudInspector_OLED.png",
+                                    GlobalInspectorDomain::Clouds);
+        CaptureEnvironmentInspector("Wind", "10_ProjectEverest_WindInspector_OLED.png",
+                                    GlobalInspectorDomain::Wind);
+        CaptureEnvironmentInspector("Atmosphere", "11_ProjectEverest_AtmosphereInspector_OLED.png",
+                                    GlobalInspectorDomain::Atmosphere);
+        CaptureEnvironmentInspector("Sun", "12_ProjectEverest_SunInspector_OLED.png",
+                                    GlobalInspectorDomain::Sun);
 
         // 4. Open ControlCentrePanel top-edge drawer on Appearance -> Theme page over Project Everest.
         Centre->ActivatePage(AppearancePageCategory::Theme);
@@ -329,10 +375,14 @@ int main(int ArgumentCount, char **Arguments)
         const double LightLogLuminance = MeanRegionLuminance(LightWorkspaceCapture, 1150, 220, 1880, 960);
         const double OledOutlinerLum   = MeanRegionLuminance(OledWorkspaceCapture, 30, 160, 360, 960);
         const double LightOutlinerLum  = MeanRegionLuminance(LightWorkspaceCapture, 30, 160, 360, 960);
+        const double OledInspectorLum  = MeanRegionLuminance(OledWorkspaceCapture, 770, 520, 1555, 875);
+        const double LightInspectorLum = MeanRegionLuminance(LightWorkspaceCapture, 770, 520, 1555, 875);
         Require(OledLogLuminance < 0.18 && LightLogLuminance > 0.72,
                 "ControlCentre Theme switch must re-theme LogStreamPanel from dark OLED to Light");
         Require(OledOutlinerLum < 0.18 && LightOutlinerLum > 0.72,
                 "ControlCentre Theme switch must re-theme SceneDirectoryPanel Outliner from dark OLED to Light");
+        Require(OledInspectorLum < 0.20 && LightInspectorLum > 0.55,
+                "ControlCentre Theme switch must re-theme global SceneInspectorPanel from dark OLED to Light");
 
         // 6. Switch UI Theme to Sepia via ControlCentrePanel and open the Channels DropdownControlSurface in LogStream.
         {
@@ -361,10 +411,10 @@ int main(int ArgumentCount, char **Arguments)
             RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field);
         WritePngCapture(SepiaChannelsCapture, ExhibitImages / "06_ProjectEverest_Workspace_SepiaChannels.png");
 
-        // Tear down workspace and verify all 5 opening-scene RecordEntry objects unregistered cleanly.
+        // Tear down workspace and verify all ten opening-scene RecordEntry objects unregister from both stores.
         Workspace.reset();
-        Require(SceneDirectory::Instance().QueryCount() == 0u,
-                "Destroying EditorWorkspace must unregister all owned SceneRecord entries");
+        Require(SceneDirectory::Instance().QueryCount() == 0u && RecordInspectorRegistry::Instance().QueryCount() == 0u,
+                "Destroying EditorWorkspace must clear every Outliner row and typed Inspector descriptor");
 
         Ownership.reset();
         ImGui::DestroyContext();
@@ -383,13 +433,22 @@ int main(int ArgumentCount, char **Arguments)
                << "  \"light_logstream_luminance\": " << LightLogLuminance << ",\n"
                << "  \"oled_outliner_luminance\": " << OledOutlinerLum << ",\n"
                << "  \"light_outliner_luminance\": " << LightOutlinerLum << ",\n"
+               << "  \"oled_inspector_luminance\": " << OledInspectorLum << ",\n"
+               << "  \"light_inspector_luminance\": " << LightInspectorLum << ",\n"
+               << "  \"global_environment_inspector_domains\": 6,\n"
                << "  \"captures\": [\n"
                << "    \"Exhibits/ProjectEverest/Images/01_ProjectBrowser_Projects.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/02_ProjectBrowser_SelectApplication.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/03_ProjectEverest_Workspace_OLED.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/04_ProjectEverest_ControlCentre_ThemeDrawer.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/05_ProjectEverest_Workspace_LightTheme.png\",\n"
-               << "    \"Exhibits/ProjectEverest/Images/06_ProjectEverest_Workspace_SepiaChannels.png\"\n"
+               << "    \"Exhibits/ProjectEverest/Images/06_ProjectEverest_Workspace_SepiaChannels.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/07_ProjectEverest_FolderInspector_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/08_ProjectEverest_LensFlareInspector_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/09_ProjectEverest_CloudInspector_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/10_ProjectEverest_WindInspector_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/11_ProjectEverest_AtmosphereInspector_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/12_ProjectEverest_SunInspector_OLED.png\"\n"
                << "  ]\n"
                << "}\n";
 

@@ -10,7 +10,9 @@
 #include "Engine/Interface/LogStreamPanelRegistration.h"
 #include "Engine/Interface/ProjectDescriptor.h"
 #include "Engine/Interface/SceneDirectoryPanelRegistration.h"
+#include "Engine/Interface/SceneInspectorPanelRegistration.h"
 #include "Engine/Interface/StackRailControls.h"
+#include "Engine/Scene/GlobalEnvironmentRecords.h"
 #include "Engine/Scene/SceneDirectory.h"
 #include <cmath>
 #include <cstdio>
@@ -29,6 +31,9 @@ EditorWorkspace::EditorWorkspace(ControlCentrePanel &ControlCentre)
     LogSpecification.Open                       = false;
     DockPanelSpecification OutlinerSpecification = MakeSceneDirectoryPanelSpecification(OutlinerPanel);
     OutlinerSpecification.Open                  = false;
+    DockPanelSpecification InspectorSpecification = MakeSceneInspectorPanelSpecification(InspectorPanel);
+    InspectorSpecification.Open                  = false;
+    InspectorPanel.BindDirectoryPanel(&OutlinerPanel);
 
     if (!Panels.Register({"content", "Content Browser",
                           [&]()
@@ -45,7 +50,8 @@ EditorWorkspace::EditorWorkspace(ControlCentrePanel &ControlCentre)
             {"notifications", "Notification Stream", [&]() { Centre.ConstructHostedNotificationStream(); }, false}) ||
         !Panels.Register({"viewport", "Viewport", [&]() { ConstructViewport(); }, true}) ||
         !Panels.Register(std::move(LogSpecification)) ||
-        !Panels.Register(std::move(OutlinerSpecification)))
+        !Panels.Register(std::move(OutlinerSpecification)) ||
+        !Panels.Register(std::move(InspectorSpecification)))
         throw std::runtime_error("Panel registration refused.");
     // 📝 The top bar owns the first 52 unscaled pixels; the dockspace starts below it.
     Panels.ConfigureWorkspaceInsets(52, 0);
@@ -183,11 +189,15 @@ void EditorWorkspace::ActivateProjectWorkspace(
                  "ProjectEverestInterchange.cpp");
     }
 
-    // Seed initial opening-scene RecordEntry hierarchy (auto-registered in SceneDirectory via RecordEntry ctor).
+    // Seed the Proving Grounds tree with shared Engine environment records and automatic Inspector bindings.
     SceneRecords.clear();
     if (!Project.StartupLevel.empty())
     {
-        SceneDirectory &Directory = SceneDirectory::Instance();
+        SceneDirectory& Directory = SceneDirectory::Instance();
+        auto EnvironmentFolder = std::make_unique<FolderRecord>("Environment", "ENV", 0xe8c27au);
+        const RecordToken EnvironmentToken = EnvironmentFolder->Token();
+        SceneRecords.push_back(std::move(EnvironmentFolder));
+
         auto VehicleRecord = std::make_unique<SceneRecord>(RecordClassification::Vehicle);
         (void)Directory.ConfigureName(VehicleRecord->Token(), "Everest Concept GT");
         const RecordToken VehicleToken = VehicleRecord->Token();
@@ -198,9 +208,16 @@ void EditorWorkspace::ActivateProjectWorkspace(
         (void)Directory.ConfigureParent(TyreRecord->Token(), VehicleToken);
         SceneRecords.push_back(std::move(TyreRecord));
 
-        auto SunSkyRecord = std::make_unique<SceneRecord>(RecordClassification::Environment);
-        (void)Directory.ConfigureName(SunSkyRecord->Token(), "Sun & Sky Atmosphere");
-        SceneRecords.push_back(std::move(SunSkyRecord));
+        auto SunRecordInstance = std::make_unique<SunRecord>(EnvironmentToken);
+        const RecordToken SunToken = SunRecordInstance->Token();
+        SceneRecords.push_back(std::move(SunRecordInstance));
+
+        auto LensFlareInstance = std::make_unique<LensFlareRecord>(SunToken);
+        SceneRecords.push_back(std::move(LensFlareInstance));
+
+        SceneRecords.push_back(std::make_unique<CloudLayerRecord>(EnvironmentToken));
+        SceneRecords.push_back(std::make_unique<WindFieldRecord>(EnvironmentToken));
+        SceneRecords.push_back(std::make_unique<AtmosphereRecord>(EnvironmentToken));
 
         auto IlluminationRecord = std::make_unique<SceneRecord>(RecordClassification::Illumination);
         (void)Directory.ConfigureName(IlluminationRecord->Token(), "Dual-Tier GI & Reflections");
@@ -210,11 +227,12 @@ void EditorWorkspace::ActivateProjectWorkspace(
         (void)Directory.ConfigureName(CameraRecord->Token(), "Proving Grounds Chase Camera");
         SceneRecords.push_back(std::move(CameraRecord));
 
-        OutlinerPanel.Select(VehicleToken);
+        OutlinerPanel.Select(SunToken);
     }
 
     (void)Panels.ConfigureOpen("viewport", true);
     (void)Panels.ConfigureOpen("LogStream", true);
+    (void)Panels.ConfigureOpen("Inspector", true);
     (void)Panels.ConfigureOpen("Outliner", true);
     PendingProjectSplit = !LayoutRestored;
     LogPanel.Synchronize(LogStore(), Categories, 1.0 / 60.0);
@@ -240,6 +258,7 @@ void EditorWorkspace::ConstructInterface()
         {
             (void)Panels.ConfigureOpen("LogStream", true);
             (void)Panels.ConfigureOpen("Outliner", true);
+            (void)Panels.ConfigureOpen("Inspector", true);
             PendingProjectSplit = true;
         }
         else
@@ -266,6 +285,62 @@ void EditorWorkspace::ConstructInterface()
 
     const double ElapsedSeconds = ImGui::GetIO().DeltaTime > 0.0f ? ImGui::GetIO().DeltaTime : (1.0 / 60.0);
     LogPanel.Synchronize(LogStore(), LogCategories(), ElapsedSeconds);
+
+    while (const std::optional<SceneInspectorPanel::SubfolderRequest> Request = InspectorPanel.TakeSubfolderRequest())
+    {
+        auto Folder = std::make_unique<FolderRecord>(Request->Title, "DIR", 0xe8c27au,
+                                                     Request->EnclosingFolderToken);
+        const RecordToken FolderToken = Folder->Token();
+        SceneRecords.push_back(std::move(Folder));
+        OutlinerPanel.Select(FolderToken);
+    }
+
+    while (const std::optional<GlobalScenePreset> Preset = OutlinerPanel.TakePresetSpawnRequest())
+    {
+        const RecordToken SelectedToken = OutlinerPanel.QuerySelected();
+        const SceneDirectory& Directory = SceneDirectory::Instance();
+        RecordToken EnvironmentFolderToken{};
+        RecordToken SunToken{};
+        for (const std::unique_ptr<RecordEntry>& Existing : SceneRecords)
+        {
+            if (dynamic_cast<FolderRecord*>(Existing.get()) != nullptr &&
+                Directory.QueryName(Existing->Token()) == "Environment")
+                EnvironmentFolderToken = Existing->Token();
+            if (dynamic_cast<SunRecord*>(Existing.get()) != nullptr) SunToken = Existing->Token();
+        }
+        const RecordToken SelectedEnclosure =
+            Directory.QueryClassification(SelectedToken) == RecordClassification::Folder ? SelectedToken
+                                                                                          : EnvironmentFolderToken;
+        std::unique_ptr<RecordEntry> Added;
+        switch (*Preset)
+        {
+            case GlobalScenePreset::Folder:
+                Added = std::make_unique<FolderRecord>("New Folder", "DIR", 0xe8c27au, SelectedEnclosure);
+                break;
+            case GlobalScenePreset::Sun:
+                Added = std::make_unique<SunRecord>(SelectedEnclosure);
+                break;
+            case GlobalScenePreset::LensFlare:
+                Added = std::make_unique<LensFlareRecord>(SunToken);
+                break;
+            case GlobalScenePreset::Clouds:
+                Added = std::make_unique<CloudLayerRecord>(SelectedEnclosure);
+                break;
+            case GlobalScenePreset::Wind:
+                Added = std::make_unique<WindFieldRecord>(SelectedEnclosure);
+                break;
+            case GlobalScenePreset::Atmosphere:
+                Added = std::make_unique<AtmosphereRecord>(SelectedEnclosure);
+                break;
+        }
+        if (Added)
+        {
+            OutlinerPanel.Select(Added->Token());
+            SceneRecords.push_back(std::move(Added));
+            (void)Panels.ConfigureOpen("Inspector", true);
+        }
+    }
+
     while (const std::optional<RecordClassification> Spawn = OutlinerPanel.TakeSpawnRequest())
     {
         auto Record = std::make_unique<SceneRecord>(*Spawn);
@@ -321,8 +396,12 @@ void EditorWorkspace::ConstructInterface()
             {
                 ImGui::DockBuilderDockWindow("Content Browser###FrontierPanel-content", CentreColumn);
             }
-            ImGui::DockBuilderDockWindow("Notifications###FrontierPanel-notifications", RightColumn);
-            ImGui::DockBuilderDockWindow("Log Stream###FrontierPanel-LogStream", RightColumn);
+            ImGuiID LogColumn = RightColumn;
+            ImGuiID InspectorColumn = 0;
+            ImGui::DockBuilderSplitNode(RightColumn, ImGuiDir_Down, 0.46f, &InspectorColumn, &LogColumn);
+            ImGui::DockBuilderDockWindow("Notifications###FrontierPanel-notifications", LogColumn);
+            ImGui::DockBuilderDockWindow("Log Stream###FrontierPanel-LogStream", LogColumn);
+            ImGui::DockBuilderDockWindow("Inspector###FrontierPanel-Inspector", InspectorColumn);
             ImGui::DockBuilderFinish(Root);
             PendingProjectSplit = false;
         }
@@ -386,11 +465,11 @@ void EditorWorkspace::ConstructNotchBandReturnButton(float Scale)
 
 void EditorWorkspace::ConstructTopBar(float Scale)
 {
-    const auto *Main = ImGui::GetMainViewport();
-    if (Main->WorkSize.x <= 0 || Main->WorkSize.y <= 0) return;
-    ImGui::SetNextWindowPos(Main->WorkPos);
-    ImGui::SetNextWindowSize(ImVec2(Main->WorkSize.x, 52 * Scale));
-    ImGui::SetNextWindowViewport(Main->ID);
+    const auto *PrimaryViewport = ImGui::GetMainViewport();
+    if (PrimaryViewport->WorkSize.x <= 0 || PrimaryViewport->WorkSize.y <= 0) return;
+    ImGui::SetNextWindowPos(PrimaryViewport->WorkPos);
+    ImGui::SetNextWindowSize(ImVec2(PrimaryViewport->WorkSize.x, 52 * Scale));
+    ImGui::SetNextWindowViewport(PrimaryViewport->ID);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12 * Scale, 0));
     ImGui::Begin("Frontier editor top bar", nullptr,
                  ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
@@ -412,7 +491,7 @@ void EditorWorkspace::ConstructTopBar(float Scale)
     float ActionsWidth = 0;
     for (const auto *Action : Actions)
         ActionsWidth += ImGui::CalcTextSize(Action).x + ImGui::GetStyle().FramePadding.x * 2 + ImGui::GetStyle().ItemSpacing.x;
-    ImGui::SameLine(Main->WorkSize.x - ActionsWidth - 12 * Scale);
+    ImGui::SameLine(PrimaryViewport->WorkSize.x - ActionsWidth - 12 * Scale);
     ImGui::SetCursorPosY(CentreY);
     if (ImGui::Button(Actions[0])) (void)Panels.ConfigureOpen("LogStream", !Panels.QueryOpen("LogStream"));
     ImGui::SameLine();

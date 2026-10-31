@@ -4,8 +4,11 @@
 RTX/GTX ReSTIR GI + reflections) into native C++ / Vulkan / Slang on Frontier.
 
 Status: 🟢 Active — Phase 1A (`Project Browser -> Select Application -> Project Everest -> Docked Outliner + LogStream + ControlCentre`)
-verified (`11/11` CTests passing). Phase 1B (Global Engine UI: **Folders**, **Sun**, **Lens Flare**, **Clouds**, **Wind**,
-**Atmosphere**) in progress.
+verified. Phase 1B baseline (global Engine records + docked `SceneInspectorPanel` for **Folders**, **Sun**, **Lens Flare**,
+**Clouds**, **Wind**, and **Atmosphere**, with six rendered native C++ Inspector exhibits) implemented and under expanded
+verification. Remaining Phase 1B work: exercise edit interactions and settings persistence, refine each observatory screen
+against the complete VehicleHMI controls/designs, and add Inspector-control mutation assertions. Phase 1A + 1B focused UI
+test suite is run before this commit.
 
 ---
 

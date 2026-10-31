@@ -110,6 +110,9 @@ void DrawStackRailFoot(const KitFaces& Faces, ImVec2 Minimum, float Width, const
 void DrawIdentityHeader(const KitFaces& Faces, ImVec2 Minimum, float Width, ImU32 IconColour, const char* Name,
                         const char* Sub);
 
+// Stepped two-layer chamfered folder pocket glyph (Outliner folder rows & Folder Inspector card).
+void RenderSteppedFolderGlyph(ImDrawList* Ink, ImVec2 Centre, float Scale, ImU32 AccentColour, bool Expanded = true);
+
 struct TreeRowInteraction
 {
     bool Clicked        = false;   // Row body (selection)
@@ -120,7 +123,8 @@ struct TreeRowInteraction
 // One Outliner tree row (demo .tree-row: name, meta, visibility, selected/off states), 30 px tall.
 [[nodiscard]] TreeRowInteraction DrawTreeRow(const KitFaces& Faces, const char* Id, ImVec2 Minimum, float Width,
                                              float Indent, bool HasChildren, bool Collapsed, ImU32 DotColour,
-                                             const char* Name, const char* Meta, bool Visible, bool Selected);
+                                             const char* Name, const char* Meta, bool Visible, bool Selected,
+                                             bool FolderGlyphEnabled = false);
 
 } // namespace Frontier
 

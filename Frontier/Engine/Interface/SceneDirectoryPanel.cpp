@@ -170,6 +170,18 @@ std::optional<RecordClassification> SceneDirectoryPanel::TakeSpawnRequest()
     return Request;
 }
 
+void SceneDirectoryPanel::RequestPresetSpawn(GlobalScenePreset Preset)
+{
+    PendingPresetSpawn = Preset;
+}
+
+std::optional<GlobalScenePreset> SceneDirectoryPanel::TakePresetSpawnRequest()
+{
+    std::optional<GlobalScenePreset> Request = PendingPresetSpawn;
+    PendingPresetSpawn.reset();
+    return Request;
+}
+
 void SceneDirectoryPanel::Select(RecordToken Token)
 {
     Selected = Token;

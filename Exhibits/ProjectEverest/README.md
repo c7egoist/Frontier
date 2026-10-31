@@ -17,9 +17,10 @@ reflections fallback).
 3. **Docked Editor Workspace — OLED Theme (`03_ProjectEverest_Workspace_OLED.png`)**
    - `EditorWorkspace::ActivateProjectWorkspace` mounts `ProjectEverest.projectspace` + `ProjectEverest.frontier`,
      registers the four Project Everest user log categories (`Powertrain`, `CabinHMI`, `Weather`, `Fracture`) alongside
-     the nine engine channels, constructs the initial `SceneRecord` instances (verifying constructor/destructor
-     auto-registration in `SceneDirectory`), and docks `Outliner` (`SceneDirectoryPanel`), `Viewport`, and `Log Stream`
-     (`LogStreamPanel`) inside `PanelDockspace` beneath the `ControlCentrePanel` top-edge notch.
+     the nine engine channels, constructs ten initial `RecordEntry` instances (including six typed global Inspector
+     domains), and docks `Outliner`, `Viewport`, `Log Stream`, and `Inspector` inside `PanelDockspace` beneath the
+     `ControlCentrePanel` top-edge notch. Constructor/destructor validation checks both Outliner and Inspector registry
+     insertion/removal.
 4. **ControlCentre Theme Controller (`04_ProjectEverest_ControlCentre_ThemeDrawer.png`)**
    - Opening the `ControlCentrePanel` top-edge drawer exposes the reusable **Appearance -> Theme** controller (`OLED`,
      `Dark`, `Light`, `Sepia`, `Dracula`, `Nord`, `Dim`, `GitHub`) governing the active project workspace.
@@ -31,6 +32,22 @@ reflections fallback).
    - Applying `ThemeCategory::Sepia` and opening `LogStreamPanel`'s `DropdownControlSurface` (`All channels`) verifies
      live theme propagation across floating popup surfaces, all nine engine channels, and Project Everest's four
      coloured user categories (`Powertrain`, `CabinHMI`, `Weather`, `Fracture`).
+
+## Global Engine Inspector UI Captures
+
+The environment records and their Inspector UI are reusable Engine code shared across every project (`Frontier/Engine/Scene/` and `Frontier/Engine/Interface/`). Their visual language ports the VehicleHMI reference's Observatory, optical workbench,
+wind instruments, and folder telemetry cards through the existing `ControlKit` theme palette. Captures are native C++
+ImGui panel frames; the atmosphere image is labelled a CPU model reference, not GPU LUT readback, and the lens-flare image
+is a geometry preview, not a claim that the HMI HDR composite renderer is already ported.
+
+| File | Panel contents |
+| --- | --- |
+| `Images/07_ProjectEverest_FolderInspector_OLED.png` | Editable folder title, nested counts, category distribution, subfolder creation, subtree visibility, badge, notes, and accent. |
+| `Images/08_ProjectEverest_LensFlareInspector_OLED.png` | Optical-axis ghost guide, source drag target, presets, ghost spacing/count, halo, streaks, and aperture controls. |
+| `Images/09_ProjectEverest_CloudInspector_OLED.png` | Density diagnostic, coverage/density, formation, altitude clip, trace budget, shadows, and shared-wind coupling. |
+| `Images/10_ProjectEverest_WindInspector_OLED.png` | Interactive compass rose, travel/source bearing, speed, gust/turbulence, altitude vector ladder, receiver routing. |
+| `Images/11_ProjectEverest_AtmosphereInspector_OLED.png` | CPU atmosphere model panorama, Rayleigh/Mie/Ozone, RGB transmittance strips, scattering settings, explicit LUT bake. |
+| `Images/12_ProjectEverest_SunInspector_OLED.png` | Altitude/azimuth diagram, quick toggles, presets, daily elevation curve, colour temperature and solar disc controls. |
 
 ## Reproducing
 

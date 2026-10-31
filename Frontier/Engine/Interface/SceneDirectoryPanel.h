@@ -43,6 +43,16 @@ struct SceneClassificationTab
     uint32_t             Count          = 0;   // [records] - Live records in this classification
 };
 
+enum class GlobalScenePreset : uint8_t
+{
+    Folder,
+    Sun,
+    LensFlare,
+    Clouds,
+    Wind,
+    Atmosphere
+};
+
 // What the inspector shows for the current selection ("empty inspector" = HasSelection false).
 struct SceneInspectorSummary
 {
@@ -88,6 +98,9 @@ class SceneDirectoryPanel
     void RequestSpawn(RecordClassification Classification);
     [[nodiscard]] std::optional<RecordClassification> TakeSpawnRequest();
 
+    void RequestPresetSpawn(GlobalScenePreset Preset);
+    [[nodiscard]] std::optional<GlobalScenePreset> TakePresetSpawnRequest();
+
     // Native drawing (interface-SDK builds; an empty stub without the SDK, so portable builds keep linking).
     // The host calls Synchronize() each frame first, then services TakeSpawnRequest().
     void ConstructInterface();
@@ -107,6 +120,7 @@ class SceneDirectoryPanel
     std::string                         TextFilter;            // [text] - Lower-cased on configure
     std::unordered_set<uint64_t>        CollapsedTokens;       // [-] - Panel-side fold state
     std::optional<RecordClassification> PendingSpawn;
+    std::optional<GlobalScenePreset>    PendingPresetSpawn;
     RecordToken                         Selected;
     SceneInspectorSummary               Inspector;
 };

@@ -8,6 +8,8 @@
 #include "Engine/Interface/LogStreamPanel.h"
 #include "Engine/Interface/PanelDockspace.h"
 #include "Engine/Interface/SceneDirectoryPanel.h"
+#include "Engine/Interface/SceneInspectorPanel.h"
+#include "Engine/Scene/RecordEntry.h"
 #include "Engine/Scene/SceneRecord.h"
 #include <filesystem>
 #include <functional>
@@ -40,6 +42,7 @@ class EditorWorkspace
     void ActivateProjectWorkspace(const std::filesystem::path &ProjectPath, bool NotchBandComposition = true);
     [[nodiscard]] LogStreamPanel &QueryLogStreamPanel() noexcept { return LogPanel; }
     [[nodiscard]] SceneDirectoryPanel &QuerySceneDirectoryPanel() noexcept { return OutlinerPanel; }
+    [[nodiscard]] SceneInspectorPanel &QuerySceneInspectorPanel() noexcept { return InspectorPanel; }
     std::function<void()> EvaluateReturnToBrowser;
     bool               FinalizeLayout();
     void               IntegrateLayoutPersistence(double ElapsedSeconds);
@@ -66,7 +69,8 @@ class EditorWorkspace
     PanelDockspace      Panels;
     LogStreamPanel      LogPanel;
     SceneDirectoryPanel OutlinerPanel;
-    std::vector<std::unique_ptr<SceneRecord>> SceneRecords;
+    SceneInspectorPanel  InspectorPanel;
+    std::vector<std::unique_ptr<RecordEntry>> SceneRecords;
     EditorProjectSummary Project;
     bool                DockableBrowser      = false;
     bool                NotchBandComposition = false;

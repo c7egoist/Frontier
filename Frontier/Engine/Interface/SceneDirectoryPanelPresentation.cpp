@@ -16,6 +16,7 @@
 
 #include "Engine/Interface/DropdownControls.h"
 #include "Engine/Interface/StackRailControls.h"
+#include "Engine/Scene/RecordInspectorRegistry.h"
 #include "Engine/Scene/SceneDirectory.h"
 #include "SceneDirectoryPanelRegistration.h"
 
@@ -36,6 +37,7 @@ ImU32 ClassificationColour(RecordClassification Classification) noexcept
 {
     switch (Classification)
     {
+        case RecordClassification::Folder:       return KitInkHex(0xe8c27a);
         case RecordClassification::Vehicle:      return KitInkHex(0x2fe6a7);
         case RecordClassification::Tyre:         return KitInkHex(0x63a8ff);
         case RecordClassification::Environment:  return KitInkHex(0x8fd14f);
@@ -101,7 +103,7 @@ void SceneDirectoryPanel::ConstructInterface()
     Ink->AddRectFilled(WindowPosition, ImVec2(PR, PB), Theme.PanelBg);
     Ink->AddRect(WindowPosition, ImVec2(PR, PB), Theme.PanelEdge);
 
-    // -- StackRail head (title · HeadCount · AddHost) -----------------------------------------------------------------
+    // -- StackRail head (title · HeadCount · Folder quick button · AddHost) ------------------------------------------
     char CountText[48] = {};
     std::snprintf(CountText, sizeof(CountText), "%u objects", QueryTotal());
     const bool AddClicked = DrawStackRailHead(Faces, ImVec2(CL, PT + 12.0f), ContentW, "Outliner", CountText);
@@ -109,16 +111,56 @@ void SceneDirectoryPanel::ConstructInterface()
     {
         ImGui::OpenPopup("##OutlinerSpawnPopup");
     }
+    // Quick New-Folder button directly to the left of the + button.
+    {
+        const ImVec2 FolderBtnMin(CR - 30.0f - 6.0f - 30.0f, PT + 12.0f + 3.0f);
+        bool         FolderHover = false;
+        if (KitTarget("##OutlinerNewFolderQuick", FolderBtnMin, ImVec2(30.0f, 30.0f), FolderHover, "New folder"))
+        {
+            RequestPresetSpawn(GlobalScenePreset::Folder);
+        }
+        KitPillSurface(Ink, FolderBtnMin, ImVec2(FolderBtnMin.x + 30.0f, FolderBtnMin.y + 30.0f),
+                       FolderHover ? Theme.Surface3 : Theme.Surface2, Theme.Line, 9.0f);
+        RenderSteppedFolderGlyph(Ink, ImVec2(FolderBtnMin.x + 15.0f, FolderBtnMin.y + 15.5f), 0.90f,
+                               KitInkHex(0xe8c27a), true);
+    }
     float CursorY = PT + 12.0f + 36.0f + 10.0f;
 
-    // Spawn menu (reusable dropdown surface): one option per classification; the host creates the record.
-    ImGui::SetNextWindowPos(ImVec2(CR - 220.0f, PT + 12.0f + 36.0f + 6.0f), ImGuiCond_Appearing);
+    // Spawn menu (reusable dropdown surface): Folders, Global Engine Environment systems, and generic records.
+    ImGui::SetNextWindowPos(ImVec2(CR - 236.0f, PT + 12.0f + 36.0f + 6.0f), ImGuiCond_Appearing);
     if (DropdownControlSurface::BeginMenu("##OutlinerSpawnPopup"))
     {
-        MenuCaption(Faces, Theme, "SPAWN RECORD");
+        MenuCaption(Faces, Theme, "ORGANIZATION");
+        if (DropdownControlSurface::Option("New Folder"))
+        {
+            RequestPresetSpawn(GlobalScenePreset::Folder);
+        }
+        MenuCaption(Faces, Theme, "GLOBAL ENGINE ENVIRONMENT");
+        if (DropdownControlSurface::Option("Sun (Solar Observatory)"))
+        {
+            RequestPresetSpawn(GlobalScenePreset::Sun);
+        }
+        if (DropdownControlSurface::Option("Lens Flare (Camera Optics)"))
+        {
+            RequestPresetSpawn(GlobalScenePreset::LensFlare);
+        }
+        if (DropdownControlSurface::Option("Clouds (Volumetric Layer)"))
+        {
+            RequestPresetSpawn(GlobalScenePreset::Clouds);
+        }
+        if (DropdownControlSurface::Option("Wind (Forcefield)"))
+        {
+            RequestPresetSpawn(GlobalScenePreset::Wind);
+        }
+        if (DropdownControlSurface::Option("Atmosphere (Optical Workbench)"))
+        {
+            RequestPresetSpawn(GlobalScenePreset::Atmosphere);
+        }
+        MenuCaption(Faces, Theme, "GENERIC RECORDS");
         for (uint32_t Index = 0; Index < static_cast<uint32_t>(RecordClassification::Count); ++Index)
         {
             const RecordClassification Classification = static_cast<RecordClassification>(Index);
+            if (Classification == RecordClassification::Folder) continue;
             char Label[64] = {};
             std::snprintf(Label, sizeof(Label), "%s record", RecordClassificationName(Classification));
             if (DropdownControlSurface::Option(Label))
@@ -266,17 +308,49 @@ void SceneDirectoryPanel::ConstructInterface()
             const ImVec2 At = ImGui::GetCursorScreenPos();
             char         Id[48] = {};
             std::snprintf(Id, sizeof(Id), "OutlinerRow%llu", static_cast<unsigned long long>(Row.Token.Value));
+
+            const bool  FolderRow = (Row.Classification == RecordClassification::Folder);
+            ImU32       RowAccent = ClassificationColour(Row.Classification);
+            if (const auto Bound = RecordInspectorRegistry::Instance().Query(Row.Token))
+            {
+                RowAccent = KitInkHex(Bound->AccentHex);
+            }
+            char FolderMeta[32] = {};
+            const char* MetaText = RecordClassificationName(Row.Classification);
+            if (FolderRow)
+            {
+                std::snprintf(FolderMeta, sizeof(FolderMeta), "%u %s", Row.ChildCount,
+                              Row.ChildCount == 1u ? "item" : "items");
+                MetaText = FolderMeta;
+            }
+
             const TreeRowInteraction Hit = DrawTreeRow(
                 Faces, Id, ImVec2(CL, At.y), ContentW, static_cast<float>(Row.DepthTier) * 16.0f,
-                Row.ChildCount > 0, Row.Collapsed, ClassificationColour(Row.Classification), Row.Name.c_str(),
-                RecordClassificationName(Row.Classification), Row.Visible, QuerySelected() == Row.Token);
+                Row.ChildCount > 0 || FolderRow, Row.Collapsed, RowAccent, Row.Name.c_str(),
+                MetaText, Row.Visible, QuerySelected() == Row.Token, FolderRow);
             if (Hit.ChevronClicked)
             {
                 ConfigureCollapsed(Row.Token, !Row.Collapsed);
             }
             else if (Hit.EyeClicked)
             {
-                (void)Directory.ConfigureVisible(Row.Token, !Row.Visible);
+                const bool TargetVisible = !Row.Visible;
+                (void)Directory.ConfigureVisible(Row.Token, TargetVisible);
+                // Toggling a folder's eye propagates visibility across its direct nested entries.
+                if (FolderRow)
+                {
+                    bool WithinSubtree = false;
+                    for (const SceneDirectoryRow& Candidate : QueryRows())
+                    {
+                        if (Candidate.Token == Row.Token)
+                        {
+                            WithinSubtree = true;
+                            continue;
+                        }
+                        if (!WithinSubtree || Candidate.DepthTier <= Row.DepthTier) break;
+                        (void)Directory.ConfigureVisible(Candidate.Token, TargetVisible);
+                    }
+                }
                 RefreshNeeded = true;
             }
             else if (Hit.Clicked)
