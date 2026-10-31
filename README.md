@@ -86,6 +86,16 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   (`ROCK_IMPRINT_FRAG`): compacted footprint + the displaced volume resurfacing
   as a rim hugging the rock, so boulders protrude naturally and rolling ones
   leave furrows. Melt wakes embedded rocks to settle onto the sediment.
+- **Sediment feels the rocks back**: boulders are rasterized into an obstacle
+  field (`ROCK_OBSTACLE_FRAG`: rock-top height + footprint coverage) that every
+  transport pass reads. Pipe water flux is throttled around protruding rocks
+  (streams divert, pond behind boulder dams, overtop when deep), thermal
+  talus avalanches use `max(terrain, rockTop)` as ground (sediment banks
+  against boulders, sheds off their tops, spills over once banked high
+  enough), droplets ride over/around rock tops with shielded pickup under
+  footprints, the integrator armours the bed beneath rocks while deposition
+  fills only the free cell fraction so sediment wedges up and buries them,
+  and snow creep/drift sheds off and banks against boulders too.
 
-Verification: `npm test` — 27/27 pass (includes new `tests/rain-erosion.test.mjs`
+Verification: `npm test` — 28/28 pass (includes new `tests/rain-erosion.test.mjs`
 and rigid-body free-fall/no-elevator regression tests). `npm run build` clean.
