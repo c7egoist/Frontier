@@ -65,7 +65,7 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   single-counted through the cryosphere pass; droplets ride full total head
   and merge into lakes instead of skating across them; flat hydrostatic
   water-surface normals at shorelines; Froude-limited flow velocity.
-- **Snow improved**: slope-retained orographic snowfall (no cliff flicker),
+- **Snow improved**: slope/wind-aware snowfall — retention sheds from steep faces, windward faces are scoured and lee faces drift-loaded (ported from egoistm1inbox arena/fd0eaa50),
   cohesion-aware avalanche repose, **mass-conserving** wind drift (tilted
   potential), stable pairwise glacier creep, rain-on-snow melt.
 - **Visibility toggles**: Water / Snow / Rain can be hidden independently from

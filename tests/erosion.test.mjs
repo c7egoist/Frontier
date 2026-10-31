@@ -1274,7 +1274,8 @@ test('Shallow-water pipe flow is anti-slosh and snowmelt is single-counted', () 
 
 test('Snow simulation is mass-conserving and visibility toggles exist for water/snow/rain', () => {
   assert.ok(Shaders.SNOW_CRYO_FRAG.includes('windTilt'), 'Wind drift must use the conservative tilted-potential exchange');
-  assert.ok(Shaders.SNOW_CRYO_FRAG.includes('slopeRetain'), 'Snowfall must be slope-retained (no accumulation on vertical cliffs)');
+  assert.ok(Shaders.SNOW_CRYO_FRAG.includes('retention = 1.0 - smoothstep(0.62, 1.05'), 'Snowfall must be slope-retained (sheds from steep faces)');
+  assert.ok(Shaders.SNOW_CRYO_FRAG.includes('windLoad = 1.0 - 0.45 * max(windFace, 0.0) + 0.35 * max(-windFace, 0.0)'), 'Snowfall must be wind-loaded (scoured windward, loaded lee)');
   assert.ok(Shaders.SNOW_CRYO_FRAG.includes('reposeTan = mix(1.25, 0.72'), 'Avalanche repose must include thin-snow cohesion');
   assert.ok(Shaders.PARTICLE_RENDER_VERT.includes('uSpeciesVis'), 'Particle renderer must support per-species visibility');
   assert.equal(DEFAULT_EROSION_PARAMS.showWater, true);

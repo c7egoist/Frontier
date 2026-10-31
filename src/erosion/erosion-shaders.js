@@ -1793,12 +1793,18 @@ void main() {
   if (uClimate.y > 0.01) {
     float stormSwirl = 0.82 + 0.36 * fbm2D(worldXZ * 0.016 + vec2(uWindCryo.w * 0.025, -uWindCryo.w * 0.018) + uSeed * 0.01, 3, 0.52);
     float coldZone = smoothstep(snowlineNorm - 0.18 * uClimate.y, snowlineNorm + 0.12, elevN);
-    // Steep rock catches almost no snowfall (it used to accumulate on vertical
-    // cliffs, instantly avalanche, and flicker). Windward slopes catch more.
-    float slopeRetain = 1.0 - smoothstep(0.85, 1.90, terrSlope);
-    float orographic = 1.0 + 0.35 * clamp(dot(terrGrad, windDirC), -0.6, 1.2);
     float capSoft = max(0.0, 1.0 - snowDepth / 6.5);
-    snowDepth += uClimate.y * coldZone * stormSwirl * slopeRetain * orographic * capSoft * 0.085 * dt;
+
+    // Terrain-aware retention (ported from egoistm1inbox arena/fd0eaa50):
+    // snow sticks to gentle ground and sheds from steep faces (couloirs take it)
+    float retention = 1.0 - smoothstep(0.62, 1.05, terrSlope);
+
+    // Wind loading: the windward face is scoured, the lee face is loaded with drifted snow
+    vec3 nT = safeNorm3(vec3(-terrGrad.x, 1.0, -terrGrad.y), vec3(0.0, 1.0, 0.0));
+    float windFace = clamp(dot(nT.xz, -windDirC) * 2.0, -1.0, 1.0); // > 0 faces into the wind
+    float windLoad = 1.0 - 0.45 * max(windFace, 0.0) + 0.35 * max(-windFace, 0.0);
+
+    snowDepth += uClimate.y * coldZone * stormSwirl * capSoft * retention * windLoad * 0.085 * dt;
   }
 
   // ==========================================================================
