@@ -196,6 +196,8 @@ Pattern 1:1 parity remain open. GIF previews are 8-bit evidence, not precision c
 
 ## Scene record lifecycle and editor UI architecture
 
+- **VehicleHMI UI fidelity is strict 1:1**: When porting an existing VehicleHMI UI, use the original UI source and its assets as the contract. Do not redesign, simplify, reinterpret, add controls, rename labels, regroup sections, or substitute a merely similar diagram. Match its visible hierarchy, wording, values, geometry, state transitions, and pointer/keyboard behavior. The current reference implementation is the original `Experimental/VehicleHmiPrototype/` at Sultan branch `arena/e9bd7db5-frontier`, inspected revision `6afb6f00b5f25c45f7cda92c7da65b64845768f3`; the checked-in mechanical inventory is under `Frontier/Projects/Project-VehicleHmiDemo/Contract/`. A render that only looks inspired by a reference is not 1:1 and must not be described as parity.
+- **One docked Inspector shell, separate domain panels**: Keep the reusable docked `Inspector` as the shared shell/selection dispatcher, but implement each domain as its own focused panel/module and source file (for example `FolderInspectorPanel`, `SolarInspectorPanel`, `LensFlareInspectorPanel`, `CloudInspectorPanel`, `WindInspectorPanel`, `AtmosphereInspectorPanel`). Avoid accumulating unrelated domain layouts in one renderer file; each module must be independently testable against its own source inventory.
 - **Constructor and destructor auto-registration**: Every scene object derives from `RecordEntry`. Constructing an
   instance registers it in `RecordStore` and, in editor/development builds, automatically publishes it into
   `SceneDirectory` (**Outliner**) and binds its `RecordEditorDescription` (**Inspector**). Destroying the instance

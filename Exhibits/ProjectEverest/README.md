@@ -35,10 +35,7 @@ reflections fallback).
 
 ## Global Engine Inspector UI Captures
 
-The environment records and their Inspector UI are reusable Engine code shared across every project (`Frontier/Engine/Scene/` and `Frontier/Engine/Interface/`). Their visual language ports the VehicleHMI reference's Observatory, optical workbench,
-wind instruments, and folder telemetry cards through the existing `ControlKit` theme palette. Captures are native C++
-ImGui panel frames; the atmosphere image is labelled a CPU model reference, not GPU LUT readback, and the lens-flare image
-is a geometry preview, not a claim that the HMI HDR composite renderer is already ported.
+**Status: implementation-progress prototypes only — not 1:1 VehicleHMI parity and not the UI acceptance gate.** The environment records and Inspector modules are reusable Engine code shared across projects (`Frontier/Engine/Scene/` and `Frontier/Engine/Interface/`). The current rendered C++ screens were an initial native approximation; they diverge from the source UI in layout and interaction details and must be replaced/refined against the original source before Phase 1B passes. The strict source is `Experimental/VehicleHmiPrototype/` at Sultan branch `arena/e9bd7db5-frontier`, inspected revision `6afb6f00b5f25c45f7cda92c7da65b64845768f3`, plus the source-image references and checked-in UI inventories. Captures are actual native C++ ImGui frames, but are evidence of progress—not parity. The atmosphere image is labelled a CPU model reference, not GPU LUT readback, and the lens-flare image is a geometry preview, not a claim that the HMI HDR composite renderer is already ported.
 
 | File | Panel contents |
 | --- | --- |

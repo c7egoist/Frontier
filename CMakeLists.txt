@@ -128,6 +128,12 @@ add_library(FrontierEditorUI STATIC
     Frontier/Engine/Interface/StackRailControls.cpp
     Frontier/Engine/Interface/SceneDirectoryPanel.cpp
     Frontier/Engine/Interface/SceneDirectoryPanelPresentation.cpp
+    Frontier/Engine/Interface/FolderInspectorPanel.cpp
+    Frontier/Engine/Interface/SolarInspectorPanel.cpp
+    Frontier/Engine/Interface/LensFlareInspectorPanel.cpp
+    Frontier/Engine/Interface/CloudInspectorPanel.cpp
+    Frontier/Engine/Interface/WindInspectorPanel.cpp
+    Frontier/Engine/Interface/AtmosphereInspectorPanel.cpp
     Frontier/Engine/Interface/SceneInspectorPanel.cpp
     Frontier/Engine/Interface/SceneInspectorPanelRegistration.cpp)
 target_include_directories(FrontierEditorUI PUBLIC "${CMAKE_SOURCE_DIR}/Frontier")

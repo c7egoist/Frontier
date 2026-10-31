@@ -3,12 +3,15 @@
 🧩 Active roadmap for porting the VehicleHMI exhibit (Outliner, Observatory Inspectors, Dedicated Studios, and dual-tier
 RTX/GTX ReSTIR GI + reflections) into native C++ / Vulkan / Slang on Frontier.
 
-Status: 🟢 Active — Phase 1A (`Project Browser -> Select Application -> Project Everest -> Docked Outliner + LogStream + ControlCentre`)
-verified. Phase 1B baseline (global Engine records + docked `SceneInspectorPanel` for **Folders**, **Sun**, **Lens Flare**,
-**Clouds**, **Wind**, and **Atmosphere**, with six rendered native C++ Inspector exhibits) implemented and under expanded
-verification. Remaining Phase 1B work: exercise edit interactions and settings persistence, refine each observatory screen
-against the complete VehicleHMI controls/designs, and add Inspector-control mutation assertions. Phase 1A + 1B focused UI
-test suite is run before this commit.
+Status: 🟡 Active — Phase 1A (`Project Browser -> Select Application -> Project Everest -> Docked Outliner + LogStream + ControlCentre`)
+verified. Phase 1B currently has shared Engine records and an initial native Inspector rendering, but **is not 1:1 VehicleHMI
+parity** and must not pass the UI gate yet. The first C++ Inspector was over-clustered in `SceneInspectorPanel.cpp` and
+its visuals/control groups diverge from the source; treat captures `07`–`12` as implementation progress only, not proof of
+port fidelity. The strict 1:1 source is `Experimental/VehicleHmiPrototype/` at Sultan branch
+`arena/e9bd7db5-frontier`, inspected revision `6afb6f00b5f25c45f7cda92c7da65b64845768f3`, with the checked-in
+mechanical control/label inventories in `Frontier/Projects/Project-VehicleHmiDemo/Contract/`. The UI gate is now blocked on
+source-by-source audit, separate per-domain panel modules, exact control/label/interaction parity, and mutation tests.
+Do not begin Phase 2 Vulkan renderer work before this gate passes.
 
 ---
 
@@ -60,6 +63,23 @@ designs and `SourceImages/Folder UI/` folder telemetry cards with live `ControlC
 | **Clouds** | `CloudLayerRecord` | Cloud Observatory (`Overview` FBM density diagnostic atlas + 2D `Coverage × Density` pad, `Formation` vertical density envelope + ceiling clip + scatter, `Rendering` pixel share + shadow controls, `Weather` shared-wind link). |
 | **Wind** | `WindFieldRecord` | Shared Forcefield Instruments (`Flow` interactive compass rose + streamlines + `FROM °` bearing, `Variability` two-sine gust envelope + XYZ turbulence traces, `Altitude` 6-level 0–3 km shear/veer vector ladder, `Receivers` linked advection routing). |
 | **Atmosphere** | `AtmosphereRecord` | Optical Workbench (`Overview` live `AtmosphereModel` panoramic sky-view capture + 2D `Molecular × Aerosol` pad, `Medium` Rayleigh/Mie/Ozone altitude curves, `Light response` RGB solar transmittance strips, `Baking` `TransmittanceLut` bake status). |
+
+### 3.2.1 Strict 1:1 port contract and per-domain implementation
+
+The table above is a feature map, **not permission to redesign the source**. Port from the original authored screen and its behavior; preserve exact words, section order, component arrangement, visible values, control ranges, interactions, and state transitions. Any unavoidable native-toolkit mismatch must be called out explicitly and approved before changing the visible/interaction contract—do not silently substitute an inspired-by treatment. Use reference revision `6afb6f00b5f25c45f7cda92c7da65b64845768f3` (Sultan `arena/e9bd7db5-frontier`) and the checked-in `UiControlInventory.tsv`, `UiLabels.tsv`, `FileInventory.tsv`, and original `SourceImages/`.
+
+Keep **one docked Inspector shell** for selection and theme integration, but split content into independently owned and testable domain renderers under `Frontier/Engine/Interface/Inspectors/`:
+
+| Native panel module | Source-of-truth UI entry points (at the reference revision) | Required verification |
+| :--- | :--- | :--- |
+| `FolderInspectorPanel` | `SourceImages/Folder UI/` (four source captures); folder telemetry/Outliner reference | Capture overlay; all folder controls and subtree mutation |
+| `SolarInspectorPanel` | `Source/SunInspectorDashboard.js`, `Style/SunInspector.css`, shared native controls and inspector navigation | 1:1 section/label/control inventory; date, presets, tabs, keyboard and edit mutations |
+| `LensFlareInspectorPanel` | `Source/NativeFlarePanel.js` and its worker/kernel dependencies | Source drag, preset changes and every optical control |
+| `CloudInspectorPanel` | `Source/CloudInspectorDashboard.js`, `Source/NativeCloudPanel.js`, `Style/CloudInspector.css` | Density/formation/render/weather interactions and all linked state |
+| `WindInspectorPanel` | `Source/NativeWindPanel.js`, `Style/WindInstruments.css` | Compass pointer/key controls, bearing, variability, altitude and receiver routes |
+| `AtmosphereInspectorPanel` | `Source/AtmosphereInspectorDashboard.js`, atmosphere dashboard style and shared bake controls | Rayleigh/Mie/Ozone, RGB response, explicit bake and every source label |
+
+`SceneInspectorPanel` must become the thin docked shell/dispatcher, not the home for all six domain layouts. Retain shared primitives in a narrow presentation layer; do not force domain-specific cards, charts, navigation, or interactions into a generic combined template. For each panel, retain a checklist mapping every source control/label to its C++ implementation and test. Rendered captures count as evidence only after their domain checklist and interaction tests pass.
 
 ### 3.3 Phase 1C — Custom Project Inspectors & Dedicated Domain Studios
 1. **User-Authored Custom Inspectors (`Frontier/Projects/Project-Everest/Source/`)**:
