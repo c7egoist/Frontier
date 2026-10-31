@@ -116,6 +116,51 @@ void CopyFileClean(const std::filesystem::path &Source, const std::filesystem::p
     std::filesystem::copy_file(Source, Target, std::filesystem::copy_options::overwrite_existing);
 }
 
+void VerifyWindInspectorSourcePort()
+{
+    WindFieldRecord Wind;
+    Wind.BaseSpeedMps = 7.0;
+    Wind.TravelBearingDegrees = 90.0;
+    Wind.GustStrength = 0.25;
+    const double Phase = 2.4;
+    const double ExpectedFactor = 1.0 + 0.25 * (0.65 * std::sin(Phase) + 0.35 * std::sin(Phase * 2.17));
+    Require(std::abs(Wind.EvaluateTwoSineGustFactor(Phase) - ExpectedFactor) < 1.0e-12,
+            "Wind gust reference must match the source's fixed-phase two-sine envelope");
+    Require(std::abs(Wind.QueryMeteorologicalSourceDegrees() - 270.0) < 1.0e-12,
+            "Wind bearing display must remain meteorological FROM while the field stores travel TO");
+    double Speed = 0.0, Bearing = 0.0;
+    Wind.AltitudeShearPerKm = 0.15;
+    Wind.AltitudeVeerDegreesPerKm = 8.0;
+    Wind.EvaluateAltitudeVector(3000.0, Speed, Bearing);
+    Require(std::abs(Speed - 10.15) < 1.0e-12 && std::abs(Bearing - 114.0) < 1.0e-12,
+            "Wind altitude ladder must match source steady shear and veer equations");
+}
+
+void VerifyAtmosphereInspectorBindings()
+{
+    AtmosphereRecord Atmosphere;
+    Atmosphere.SynchronizeAtmosphereParameters(true);
+    const SpectrumRgb Reference = Atmosphere.EvaluateSolarTransmittance(26.5, 145.0);
+    Atmosphere.AirMassEnabled = false;
+    const SpectrumRgb Bypassed = Atmosphere.EvaluateSolarTransmittance(26.5, 145.0);
+    Require(Bypassed.R == 1.0 && Bypassed.G == 1.0 && Bypassed.B == 1.0,
+            "Atmosphere air-mass toggle must bypass direct-light attenuation");
+    Atmosphere.AirMassEnabled = true;
+    Atmosphere.SkyBrightnessScale = 2.0;
+    Atmosphere.SkyTintRgb = {1.0, 0.5, 0.25};
+    Atmosphere.SynchronizeAtmosphereParameters(false);
+    const SpectrumRgb Tinted = Atmosphere.SampleSkyPanorama(0.7, 0.3, 26.5, 145.0);
+    Atmosphere.SkyBrightnessScale = 1.0;
+    Atmosphere.SkyTintRgb = {1.0, 1.0, 1.0};
+    Atmosphere.SynchronizeAtmosphereParameters(false);
+    const SpectrumRgb Untinted = Atmosphere.SampleSkyPanorama(0.7, 0.3, 26.5, 145.0);
+    Require(std::abs(Tinted.R - Untinted.R * 2.0) < 1.0e-9 &&
+                std::abs(Tinted.G - Untinted.G) < 1.0e-9 &&
+                std::abs(Tinted.B - Untinted.B * 0.5) < 1.0e-9,
+            "Atmosphere tint wells and brightness slider must reach the CPU reference model");
+    (void)Reference;
+}
+
 void VerifySolarInspectorSourcePort()
 {
     SunRecord Sun;
@@ -183,6 +228,8 @@ int main(int ArgumentCount, char **Arguments)
         std::filesystem::create_directories(ExhibitImages);
 
         VerifySolarInspectorSourcePort();
+        VerifyWindInspectorSourcePort();
+        VerifyAtmosphereInspectorBindings();
 
         // Work against a disposable copy of Project-Everest for preference/layout writes so browsing and
         // theme-switching tests never mutate the tracked repository files during CTest runs.
@@ -405,6 +452,47 @@ int main(int ArgumentCount, char **Arguments)
                                     GlobalInspectorDomain::Wind);
         CaptureEnvironmentInspector("Atmosphere", "11_ProjectEverest_AtmosphereInspector_OLED.png",
                                     GlobalInspectorDomain::Atmosphere);
+        {
+            const auto& Rows = Workspace->QuerySceneDirectoryPanel().QueryRows();
+            const auto AtmosphereRow = std::find_if(Rows.begin(), Rows.end(), [](const SceneDirectoryRow& Row) {
+                return Row.Name == "Atmosphere";
+            });
+            Require(AtmosphereRow != Rows.end(), "Atmosphere tab exhibits require the Project Everest atmosphere record");
+            const auto AtmosphereDescriptor = RecordInspectorRegistry::Instance().Query(AtmosphereRow->Token);
+            Require(AtmosphereDescriptor.has_value() && AtmosphereDescriptor->Domain == GlobalInspectorDomain::Atmosphere,
+                    "Atmosphere tab exhibits require its typed Inspector domain");
+            auto *Atmosphere = static_cast<AtmosphereRecord *>(AtmosphereDescriptor->PayloadAddress);
+            const std::array<std::pair<int32_t, const char *>, 3> AtmosphereTabs{{
+                {1, "16_ProjectEverest_AtmosphereInspector_Medium_OLED.png"},
+                {2, "17_ProjectEverest_AtmosphereInspector_LightResponse_OLED.png"},
+                {3, "18_ProjectEverest_AtmosphereInspector_Baking_OLED.png"}}};
+            for (const auto &[Section, Filename] : AtmosphereTabs)
+            {
+                Atmosphere->ActiveSectionIndex = Section;
+                PumpWorkspaceFrames(3);
+                Require(Atmosphere->ActiveSectionIndex == Section,
+                        "Atmosphere Inspector tab selection must persist while its native section renders");
+                WritePngCapture(RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field),
+                                ExhibitImages / Filename);
+            }
+            Atmosphere->ActiveSectionIndex = 1;
+            PumpWorkspaceFrames(3);
+            IO.AddMousePosEvent(1200.0f, 850.0f);
+            for (int32_t Tick = 0; Tick < 16; ++Tick)
+            {
+                IO.AddMouseWheelEvent(0.0f, -1.0f);
+                PumpWorkspaceFrames(1);
+            }
+            bool MediumContentFound = false;
+            for (ImGuiWindow *Window : GImGui->Windows)
+                if (std::strstr(Window->Name, "atmosphere_tab_content") != nullptr && Window->Scroll.y > 0.0f)
+                    MediumContentFound = true;
+            Require(MediumContentFound, "Mouse-wheel scrolling must reveal the lower Medium Inspector controls");
+            WritePngCapture(RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field),
+                            ExhibitImages / "19_ProjectEverest_AtmosphereInspector_MediumControls_OLED.png");
+            Atmosphere->ActiveSectionIndex = 0;
+            PumpWorkspaceFrames(3);
+        }
         CaptureEnvironmentInspector("Sun", "12_ProjectEverest_SunInspector_OLED.png",
                                     GlobalInspectorDomain::Sun);
         {

@@ -123,14 +123,14 @@ class LensFlareRecord final : public RecordEntry
     explicit LensFlareRecord(RecordToken EnclosingSunToken = {});
 
     bool    FlareEnabled            = true;     // [-]   - Scene lens-flare activation switch
-    int32_t PresetIndex             = 0;        // [idx] - 0 Cinematic, 1 Anamorphic, 2 Clean, 3 Bloom, 4 Custom
+    int32_t PresetIndex             = 0;        // [idx] - 0 Cinematic, 1 Anamorphic, 2 Starburst, 3 Halo, 4 Custom layers
     double  PreviewSourceU          = 0.28;     // [0-1] - Authoring preview light sensor U
     double  PreviewSourceV          = 0.43;     // [0-1] - Authoring preview light sensor V
     double  GlobalIntensity         = 0.30;     // [-]   - Composite optical gain
     double  OpticalSpread           = 1.00;     // [-]   - Axial dispersion scale
     double  ChromaticSeparation     = 0.20;     // [0-1] - Spectral fringe offset
     int32_t GhostCount              = 6;        // [ct]  - Reflected sensor-axis elements [0..24]
-    int32_t AperturePolygonSides    = 6;        // [ct]  - 0 Round, 6 Hexagon, 8 Octagon
+    int32_t AperturePolygonSides    = 6;        // [ct]  - 0 Round, 6 Hexagon, 8 Octagon (source default: 6)
     double  GhostBrightness         = 0.30;     // [-]   - Internal reflection gain
     double  GhostSpacing            = 1.00;     // [-]   - Inter-element optical spacing
     double  HaloRadius              = 0.22;     // [0-1] - Annular ring radius in aspect-corrected UV
@@ -179,7 +179,9 @@ class CloudLayerRecord final : public RecordEntry
     int32_t         SunShadowTaps           = 2;        // [ct]  - Secondary sun-march taps [0..4]
     int32_t         TargetResolutionPercent = 35;       // [%]   - Quarter/half/full trace resolution [25..100]
     int32_t         PrimaryMarchSteps       = 12;       // [ct]  - Base primary raymarch steps [8..64]
+    int32_t         LocalMarchSteps         = 16;       // [ct]  - Local-volume base samples [8..64]
     bool            GroundShadowsEnabled    = true;     // [-]   - Projected terrain cloud-shadow map
+    int32_t         GroundShadowSamples     = 6;        // [ct]  - Shadow samples per medium [4..12]
     double          ShadowStrength          = 0.65;     // [0-1] - Ground shadow optical attenuation
     double          ShadowSoftnessMetres    = 35.0;     // [m]   - Filter kernel radius
     double          ShadowDistanceMetres    = 6000.0;   // [m]   - Shadow projection extent
@@ -216,9 +218,11 @@ class WindFieldRecord final : public RecordEntry
     double  TurbulenceAmplitude        = 0.15;   // [0-1]    - Tri-axial perturbation amplitude
     double  AltitudeShearPerKm         = 0.15;   // [1/km]   - Steady speed gain per km altitude [0..2]
     double  AltitudeVeerDegreesPerKm   = 8.0;    // [deg/km] - Steady bearing turn per km [-60..60]
-    bool    CloudsFollowEnabled        = true;   // [-]      - Global clouds linked to shared wind
+    bool    LocalCloudEnabled          = false;  // [-]      - Bounded local cloud receiver activation
     bool    LocalCloudFollowEnabled    = true;   // [-]      - Bounded local cloud density linked
+    bool    LocalFogEnabled            = false;  // [-]      - Local volumetric fog receiver activation
     bool    LocalFogFollowEnabled      = true;   // [-]      - Local volumetric fog linked
+    bool    PrecipitationEnabled       = false;  // [-]      - GPU precipitation particle receiver activation
     bool    PrecipitationFollowEnabled = true;   // [-]      - GPU precipitation particles linked
     double  PrecipitationDrift         = 0.65;   // [0-1]    - Falling-particle wind coupling gain
 
@@ -252,9 +256,17 @@ class AtmosphereRecord final : public RecordEntry
     bool                 MultipleScatteringEnabled   = true;   // [-]   - Second-order isotropic scattering term
     bool                 AirMassEnabled              = true;   // [-]   - Spherical optical air-mass integration
     bool                 CivilTwilightLineEnabled    = true;   // [-]   - Horizon twilight band gate
-    double               GroundAlbedoScalar          = 0.30;   // [0-1] - Planetary diffuse ground reflectance
+    std::array<double, 3> GroundAlbedoRgb             = {0.30, 0.30, 0.30}; // [0-1] - Source linear RGB ground albedo
+    std::array<double, 3> SkyTintRgb                  = {1.00, 1.00, 1.00}; // [0-1] - Source linear RGB sky tint
+    double               GroundAlbedoScalar          = 0.30;   // [0-1] - Luminance-weighted ground reflectance
+    double               SkyBrightnessScale         = 1.00;   // [-]   - Sky radiance multiplier [0..3]
     double               HorizonGlow                 = 1.00;   // [-]   - Horizon scattering accent [0..3]
+    double               WhiteLine                  = 1.00;   // [-]   - Twilight line contribution [0..3]
     int32_t              SkySampleBudget             = 40;     // [ct]  - View-ray integration steps [8..64]
+    bool                 UseBakedAtmosphere          = true;   // [-]   - Select baked image when available
+    uint32_t             BakeRequestRevision          = 0;      // [ct]   - UI request count; renderer integration pending
+    double               ProbeAltitudeMetres           = 8000.0; // [m]    - Atmosphere column UI diagnostic probe
+    int32_t              BakeViewIndex                 = 0;      // [idx]  - 0 Air, 1 Sky, 2 Transmit, 3 Sphere
     bool                 AerialPerspectiveEnabled    = true;   // [-]   - Distance aerial perspective medium
     double               AerialStartMetres           = 100.0;  // [m]   - Near-camera aerial perspective offset
     uint32_t             LutRevision                 = 0;      // [ct]  - Incremented on every LUT rebake

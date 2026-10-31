@@ -76,6 +76,7 @@ void BeginCard(const GlobalInspectorPresentationContext& Context, const char* Id
 {
     ImGui::BeginChild(Id, ImVec2(0.0f, Height), false,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ForwardGlobalInspectorCardWheelToParent();
     const ImVec2 Min = ImGui::GetWindowPos();
     const ImVec2 Max(Min.x + ImGui::GetWindowSize().x, Min.y + ImGui::GetWindowSize().y);
     const ImU32 Surface = Context.Theme.LightSurface ? Context.Theme.Surface2 : Background;

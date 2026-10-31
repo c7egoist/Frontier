@@ -138,8 +138,12 @@ void SceneInspectorPanel::ConstructInterface()
     };
 
     const ImU32 Accent = KitInkHex(Descriptor->AccentHex);
-    const bool SolarOwnsHeader = Descriptor->Domain == GlobalInspectorDomain::Sun;
-    if (SolarOwnsHeader)
+    const bool DomainOwnsHeader = Descriptor->Domain == GlobalInspectorDomain::Sun ||
+                                  Descriptor->Domain == GlobalInspectorDomain::LensFlare ||
+                                  Descriptor->Domain == GlobalInspectorDomain::Clouds ||
+                                  Descriptor->Domain == GlobalInspectorDomain::Wind ||
+                                  Descriptor->Domain == GlobalInspectorDomain::Atmosphere;
+    if (DomainOwnsHeader)
     {
         ImGui::SetCursorScreenPos(ImVec2(Left, Window.y + 12.0f));
     }

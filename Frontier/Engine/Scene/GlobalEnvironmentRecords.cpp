@@ -435,77 +435,30 @@ LensFlareRecord::LensFlareRecord(RecordToken EnclosingSunToken)
 void LensFlareRecord::ApplyOpticalPreset(int32_t NewPresetIndex) noexcept
 {
     PresetIndex = std::clamp(NewPresetIndex, 0, 4);
+    // Exact NativeFlarePresets mapping. Global intensity, spread and chromatic separation are deliberately untouched.
     switch (PresetIndex)
     {
-        case 0:   // Cinematic
-            GlobalIntensity         = 0.30;
-            OpticalSpread           = 1.00;
-            ChromaticSeparation     = 0.20;
-            GhostCount              = 6;
-            AperturePolygonSides    = 6;
-            GhostBrightness         = 0.30;
-            GhostSpacing            = 1.00;
-            HaloRadius              = 0.22;
-            HaloWidth               = 0.025;
-            HaloBrightness          = 0.20;
-            AnamorphicStreakEnabled = true;
-            WarmStreakEnabled       = false;
-            StarburstEnabled        = true;
-            StreakGain              = 0.30;
-            ApertureBlades          = 6;
+        case 0: // Cinematic
+            AnamorphicStreakEnabled = true; WarmStreakEnabled = false; StarburstEnabled = true;
+            CustomRayPairs = 8; GhostCount = 6; GhostBrightness = 0.35; AperturePolygonSides = 0;
+            GhostSpacing = 1.0; HaloBrightness = 0.5; StreakGain = 1.0;
             break;
-        case 1:   // Anamorphic Prime
-            GlobalIntensity         = 0.48;
-            OpticalSpread           = 1.25;
-            ChromaticSeparation     = 0.34;
-            GhostCount              = 8;
-            AperturePolygonSides    = 0;
-            GhostBrightness         = 0.24;
-            GhostSpacing            = 1.35;
-            HaloRadius              = 0.28;
-            HaloWidth               = 0.018;
-            HaloBrightness          = 0.14;
-            AnamorphicStreakEnabled = true;
-            WarmStreakEnabled       = true;
-            StarburstEnabled        = false;
-            StreakGain              = 0.65;
-            ApertureBlades          = 8;
+        case 1: // Anamorphic
+            AnamorphicStreakEnabled = true; WarmStreakEnabled = false; StarburstEnabled = false;
+            CustomRayPairs = 2; GhostCount = 4; GhostBrightness = 0.30; AperturePolygonSides = 0;
+            GhostSpacing = 1.0; HaloBrightness = 0.2; StreakGain = 1.5;
             break;
-        case 2:   // Clean Portrait
-            GlobalIntensity         = 0.18;
-            OpticalSpread           = 0.85;
-            ChromaticSeparation     = 0.08;
-            GhostCount              = 4;
-            AperturePolygonSides    = 8;
-            GhostBrightness         = 0.18;
-            GhostSpacing            = 0.80;
-            HaloRadius              = 0.18;
-            HaloWidth               = 0.032;
-            HaloBrightness          = 0.12;
-            AnamorphicStreakEnabled = false;
-            WarmStreakEnabled       = false;
-            StarburstEnabled        = true;
-            StreakGain              = 0.18;
-            ApertureBlades          = 8;
+        case 2: // Starburst
+            AnamorphicStreakEnabled = false; WarmStreakEnabled = false; StarburstEnabled = true;
+            CustomRayPairs = 8; GhostCount = 3; GhostBrightness = 0.20; AperturePolygonSides = 0;
+            GhostSpacing = 1.0; HaloBrightness = 0.1; StreakGain = 0.0;
             break;
-        case 3:   // Solar Bloom
-            GlobalIntensity         = 0.62;
-            OpticalSpread           = 1.40;
-            ChromaticSeparation     = 0.28;
-            GhostCount              = 10;
-            AperturePolygonSides    = 6;
-            GhostBrightness         = 0.42;
-            GhostSpacing            = 1.15;
-            HaloRadius              = 0.34;
-            HaloWidth               = 0.045;
-            HaloBrightness          = 0.36;
-            AnamorphicStreakEnabled = true;
-            WarmStreakEnabled       = true;
-            StarburstEnabled        = true;
-            StreakGain              = 0.45;
-            ApertureBlades          = 6;
+        case 3: // Halo
+            AnamorphicStreakEnabled = false; WarmStreakEnabled = false; StarburstEnabled = false;
+            CustomRayPairs = 6; GhostCount = 0; GhostBrightness = 0.0; AperturePolygonSides = 0;
+            GhostSpacing = 1.0; HaloBrightness = 1.0; StreakGain = 0.0;
             break;
-        default:   // Custom layers retains current layer parameters
+        default: // Custom layers retains the authored parameters.
             break;
     }
 }
@@ -526,7 +479,7 @@ std::vector<std::pair<double, double>> LensFlareRecord::EvaluateSensorGhostCentr
     {
         const double AxisScale =
             1.0 - (0.6 + (static_cast<double>(Index + 1) / static_cast<double>(ClampedCount)) *
-                             (1.7 + GhostSpacing * OpticalSpread));
+                             (1.7 + GhostSpacing));
         const double SensorU = 0.5 + (PreviewSourceU - 0.5) * AxisScale;
         const double SensorV = 0.5 + (PreviewSourceV - 0.5) * AxisScale;
         Centres.emplace_back(SensorU, SensorV);
@@ -679,7 +632,8 @@ double WindFieldRecord::QueryMeteorologicalSourceDegrees() const noexcept
 
 double WindFieldRecord::EvaluateTwoSineGustFactor(double Seconds) const noexcept
 {
-    const double Carrier = 0.60 * std::sin(0.43 * Seconds) + 0.40 * std::sin(0.97 * Seconds + 1.1);
+    // Source port of WindGustFactor: fixed-settings two-sine speed envelope; it does not own a clock.
+    const double Carrier = 0.65 * std::sin(Seconds) + 0.35 * std::sin(Seconds * 2.17);
     return 1.0 + GustStrength * Carrier;
 }
 
@@ -727,7 +681,16 @@ void AtmosphereRecord::SynchronizeAtmosphereParameters(bool RebakeLut)
     Parameters.OzoneAbsorption       = {0.650e-3 * OzoneMultiplier,
                                         1.881e-3 * OzoneMultiplier,
                                         0.085e-3 * OzoneMultiplier};
-    Parameters.GroundAlbedo          = std::clamp(GroundAlbedoScalar, 0.0, 1.0);
+    for (double& Channel : GroundAlbedoRgb) Channel = std::clamp(Channel, 0.0, 1.0);
+    for (double& Channel : SkyTintRgb) Channel = std::clamp(Channel, 0.0, 1.0);
+    SkyBrightnessScale = std::clamp(SkyBrightnessScale, 0.0, 3.0);
+    HorizonGlow = std::clamp(HorizonGlow, 0.0, 3.0);
+    WhiteLine = std::clamp(WhiteLine, 0.0, 3.0);
+    SkySampleBudget = std::clamp(SkySampleBudget, 8, 64);
+    GroundAlbedoScalar = std::clamp(GroundAlbedoRgb[0] * 0.2126 + GroundAlbedoRgb[1] * 0.7152 +
+                                        GroundAlbedoRgb[2] * 0.0722,
+                                    0.0, 1.0);
+    Parameters.GroundAlbedo = GroundAlbedoScalar;
 
     if (RebakeLut)
     {
@@ -739,8 +702,9 @@ void AtmosphereRecord::SynchronizeAtmosphereParameters(bool RebakeLut)
 SpectrumRgb AtmosphereRecord::EvaluateSolarTransmittance(double ElevationDegrees, double AzimuthDegrees) const noexcept
 {
     (void)AzimuthDegrees;
+    if (!AirMassEnabled) return {1.0, 1.0, 1.0};
     const double SinElevation = std::sin(ElevationDegrees * DegreesToRadians);
-    if (OpticalDepthLut.Baked())
+    if (UseBakedAtmosphere && OpticalDepthLut.Baked())
     {
         return OpticalDepthLut.Sample(Parameters, Parameters.GroundRadiusKm + 0.05, SinElevation);
     }
@@ -767,9 +731,9 @@ SpectrumRgb AtmosphereRecord::SampleSkyPanorama(double ViewAzimuthRadians,
                                std::cos(SunElevRad) * std::sin(SunAzimRad),
                                std::sin(SunElevRad)};
     const SpectrumRgb   SolarIrradiance{16.0, 16.0, 16.0};
-    const uint32_t      Steps = static_cast<uint32_t>(std::clamp(SkySampleBudget / 2, 8, 24));
-    SpectrumRgb         Sky   = SingleScattering(Parameters, ObserverKm, ViewDir, SunDir, SolarIrradiance,
-                                                 OpticalDepthLut.Baked() ? &OpticalDepthLut : nullptr, Steps);
+    const uint32_t      Steps = static_cast<uint32_t>(std::clamp(SkySampleBudget, 8, 64));
+    const TransmittanceLut* ActiveLut = UseBakedAtmosphere && OpticalDepthLut.Baked() ? &OpticalDepthLut : nullptr;
+    SpectrumRgb Sky = SingleScattering(Parameters, ObserverKm, ViewDir, SunDir, SolarIrradiance, ActiveLut, Steps);
     if (MultipleScatteringEnabled)
     {
         const SpectrumRgb Multi = MultipleScatteringApprox(Parameters, ObserverKm, ViewDir, SunDir, Sky, SolarIrradiance);
@@ -778,7 +742,8 @@ SpectrumRgb AtmosphereRecord::SampleSkyPanorama(double ViewAzimuthRadians,
         Sky.B += Multi.B;
     }
     const double HorizonFactor = 1.0 + 0.25 * (HorizonGlow - 1.0) * std::exp(-std::abs(ViewElevationRadians) * 9.0);
-    return {Sky.R * HorizonFactor, Sky.G * HorizonFactor, Sky.B * HorizonFactor};
+    const double Brightness = std::clamp(SkyBrightnessScale, 0.0, 3.0) * HorizonFactor;
+    return {Sky.R * Brightness * SkyTintRgb[0], Sky.G * Brightness * SkyTintRgb[1], Sky.B * Brightness * SkyTintRgb[2]};
 }
 
 } // namespace Frontier

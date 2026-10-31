@@ -11,6 +11,9 @@
 #include "Engine/Scene/RecordInspectorRegistry.h"
 #include "Engine/Scene/RecordToken.h"
 
+#include <imgui_internal.h>
+
+#include <algorithm>
 #include <functional>
 #include <string>
 
@@ -18,6 +21,19 @@ namespace Frontier
 {
 
 class SceneDirectoryPanel;
+
+// Inspector cards are child windows without their own scrollbars. Forward wheel input from the hovered card to the
+// scrollable domain tab so controls beneath the visible fold remain reachable.
+inline void ForwardGlobalInspectorCardWheelToParent()
+{
+    ImGuiWindow* Card = ImGui::GetCurrentWindow();
+    ImGuiWindow* Parent = Card->ParentWindow;
+    const ImGuiIO& IO = ImGui::GetIO();
+    if (Parent == nullptr || IO.MouseWheel == 0.0f || !Card->Rect().Contains(IO.MousePos))
+        return;
+    const float Step = ImGui::GetTextLineHeightWithSpacing() * 5.0f;
+    Parent->ScrollTarget.y = std::clamp(Parent->Scroll.y - IO.MouseWheel * Step, 0.0f, Parent->ScrollMax.y);
+}
 
 // This is the narrow bridge from the docked Inspector shell to a domain-specific panel. Keep domain layout and behavior
 // in the individual panel implementation; this object only carries shared selection, theme, geometry and primitives.

@@ -90,6 +90,16 @@ void DrawFolderInspectorPanel(GlobalInspectorPresentationContext& Context)
             }
             Context.PresentSection(Y, "03 / ORGANIZATION", "Folder properties");
             Context.PositionControls(Y);
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, Context.Theme.Surface2);
+            ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, Context.Theme.Surface3);
+            ImGui::PushStyleColor(ImGuiCol_FrameBgActive, Context.Theme.Surface3);
+            ImGui::PushStyleColor(ImGuiCol_Text, Context.Theme.TextVec4);
+            ImGui::PushStyleColor(ImGuiCol_TextSelectedBg, Context.Theme.MintDim);
+            ImGui::PushStyleColor(ImGuiCol_Button, Context.Theme.Surface2);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, Context.Theme.Surface3);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, Context.Theme.Surface3);
+            ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 7.0f);
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(9.0f, 7.0f));
             static std::array<char, 96> TitleBuffer{};
             std::snprintf(TitleBuffer.data(), TitleBuffer.size(), "%s", Folder->TitleText.c_str());
             ImGui::PushItemWidth(-1.0f);
@@ -151,6 +161,8 @@ void DrawFolderInspectorPanel(GlobalInspectorPresentationContext& Context)
                 }
                 ImGui::EndPopup();
             }
+            ImGui::PopStyleVar(2);
+            ImGui::PopStyleColor(8);
 
 }
 } // namespace Frontier
