@@ -116,6 +116,56 @@ void CopyFileClean(const std::filesystem::path &Source, const std::filesystem::p
     std::filesystem::copy_file(Source, Target, std::filesystem::copy_options::overwrite_existing);
 }
 
+void VerifySolarInspectorSourcePort()
+{
+    SunRecord Sun;
+    Require(Sun.SolarClockHours == 12.0 && Sun.CycleDurationHours == 6.0 &&
+                Sun.CalendarDateIso == "2026-10-20",
+            "Sun inspector defaults must match the VehicleHMI celestial settings");
+
+    Sun.RecomputeFromEphemeris();
+    Require(std::abs(Sun.AzimuthDegrees - 97.61628953892796) < 1.0e-8 &&
+                std::abs(Sun.ElevationDegrees - 74.10762841148737) < 1.0e-8,
+            "Sun position solver must match the VehicleHMI celestial solver reference fixture");
+    const DailySolarCurveSummary Curve = Sun.EvaluateDailyElevationCurve();
+    Require(std::abs(Curve.ElevationSamplesDegrees[48] - 74.10762841148737) < 1.0e-8,
+            "Solar day curve must use the source solver at local noon");
+
+    Sun.DayCycleEnabled = true;
+    Require(Sun.SetInspectorValue(SunInspectorValue::Azimuth, 200.0) && Sun.AzimuthDegrees == 180.0 &&
+                !Sun.AutomaticPlacementEnabled && !Sun.DayCycleEnabled,
+            "Manual azimuth edits must clamp and stop automatic placement and the day cycle");
+    Require(Sun.SetInspectorValue(SunInspectorValue::SolarTime, 25.0) && Sun.SolarClockHours == 24.0 &&
+                Sun.AutomaticPlacementEnabled,
+            "Solar time edits must clamp and return to ephemeris-linked placement");
+    Require(Sun.SetInspectorValue(SunInspectorValue::ColourTemperature, 12000.0) &&
+                Sun.ColourTemperatureKelvin == 10000.0 && Sun.TemperatureModeEnabled,
+            "Temperature edits must clamp and select the temperature colour source");
+    Sun.SetCustomTint(0.2, 0.4, 1.2);
+    Require(!Sun.TemperatureModeEnabled && std::abs(Sun.CustomTintRed - 0.2) < 1.0e-12 &&
+                std::abs(Sun.CustomTintGreen - 0.4) < 1.0e-12 && Sun.CustomTintBlue == 1.0,
+            "Custom RGB tint edits must clamp channels and select RGB colour mode");
+    const std::string RetainedDate = Sun.CalendarDateIso;
+    Sun.SetCalendarDate("2026-02-30");
+    Require(Sun.CalendarDateIso == RetainedDate, "Invalid solar calendar dates must not mutate the record");
+    Sun.SetCalendarDate("2026-12-21");
+    Require(Sun.CalendarDateIso == "2026-12-21" && Sun.AutomaticPlacementEnabled,
+            "A valid solar calendar date must enable and recompute automatic placement");
+
+    Sun.ApplyLightingPreset(1);
+    Require(Sun.LightingPresetIndex == 1 && Sun.ElevationDegrees == 10.0 && Sun.AzimuthDegrees == 160.0 &&
+                Sun.SolarIlluminance == 12.0 && !Sun.DayCycleEnabled,
+            "Golden preset must match the VehicleHMI lighting preset");
+    Sun.SunlightEnabled = false;
+    Sun.SolarDiscEnabled = false;
+    Sun.SolarClockHours = 9.0;
+    Sun.ResetDefaults();
+    Require(!Sun.SunlightEnabled && !Sun.SolarDiscEnabled && Sun.SolarClockHours == 9.0 &&
+                Sun.ElevationDegrees == 38.0 && Sun.AzimuthDegrees == 145.0 && !Sun.AutomaticPlacementEnabled &&
+                Sun.TemperatureModeEnabled,
+            "Sun reset must match the source action without resetting unrelated tiles or time");
+}
+
 } // namespace
 
 int main(int ArgumentCount, char **Arguments)
@@ -131,6 +181,8 @@ int main(int ArgumentCount, char **Arguments)
         std::filesystem::remove_all(ScratchDir);
         std::filesystem::create_directories(ScratchDir);
         std::filesystem::create_directories(ExhibitImages);
+
+        VerifySolarInspectorSourcePort();
 
         // Work against a disposable copy of Project-Everest for preference/layout writes so browsing and
         // theme-switching tests never mutate the tracked repository files during CTest runs.
@@ -253,6 +305,7 @@ int main(int ArgumentCount, char **Arguments)
         Require(SceneDirectory::Instance().QueryCount() == 10u && RecordInspectorRegistry::Instance().QueryCount() == 10u,
                 "Project Everest must auto-register its ten initial records in both Outliner and Inspector registry");
         uint32_t EnvironmentInspectorTally = 0;
+        const SunRecord *SeededSun = nullptr;
         std::vector<RecordToken> InitialTokens;
         SceneDirectory::Instance().CopyRegistrationOrder(InitialTokens);
         for (const RecordToken Token : InitialTokens)
@@ -260,9 +313,16 @@ int main(int ArgumentCount, char **Arguments)
             const auto Descriptor = RecordInspectorRegistry::Instance().Query(Token);
             if (Descriptor && Descriptor->Domain != GlobalInspectorDomain::GenericRecord)
                 ++EnvironmentInspectorTally;
+            if (Descriptor && Descriptor->Domain == GlobalInspectorDomain::Sun)
+                SeededSun = static_cast<const SunRecord *>(Descriptor->PayloadAddress);
         }
         Require(EnvironmentInspectorTally == 6u,
                 "Folder, Sun, Lens Flare, Clouds, Wind, and Atmosphere must bind global Engine Inspectors");
+        const auto LinkedFlare = SeededSun != nullptr && SeededSun->LinkedLensFlareToken.IsValid()
+                                     ? RecordInspectorRegistry::Instance().Query(SeededSun->LinkedLensFlareToken)
+                                     : std::nullopt;
+        Require(LinkedFlare.has_value() && LinkedFlare->Domain == GlobalInspectorDomain::LensFlare,
+                "Sun inspector optics link must resolve to its nested Lens Flare record");
         {
             SceneRecord EphemeralFractureBody(RecordClassification::Geometry);
             (void)SceneDirectory::Instance().ConfigureName(EphemeralFractureBody.Token(), "Test Fracture Specimen");
@@ -347,6 +407,32 @@ int main(int ArgumentCount, char **Arguments)
                                     GlobalInspectorDomain::Atmosphere);
         CaptureEnvironmentInspector("Sun", "12_ProjectEverest_SunInspector_OLED.png",
                                     GlobalInspectorDomain::Sun);
+        {
+            const auto &Rows = Workspace->QuerySceneDirectoryPanel().QueryRows();
+            const auto SunRow = std::find_if(Rows.begin(), Rows.end(), [](const SceneDirectoryRow &Row) {
+                return Row.Name == "Sun";
+            });
+            Require(SunRow != Rows.end(), "Sun tab exhibit requires the Project Everest Sun record");
+            const auto SunDescriptor = RecordInspectorRegistry::Instance().Query(SunRow->Token);
+            Require(SunDescriptor.has_value() && SunDescriptor->Domain == GlobalInspectorDomain::Sun,
+                    "Sun tab exhibit requires its source-mapped Solar Inspector");
+            auto *Sun = static_cast<SunRecord *>(SunDescriptor->PayloadAddress);
+            const std::array<std::pair<int32_t, const char *>, 3> SunTabs{{
+                {1, "13_ProjectEverest_SunInspector_Daylight_OLED.png"},
+                {2, "14_ProjectEverest_SunInspector_LightColour_OLED.png"},
+                {3, "15_ProjectEverest_SunInspector_DiscOptics_OLED.png"}}};
+            for (const auto &[Section, Filename] : SunTabs)
+            {
+                Sun->ActiveSectionIndex = Section;
+                PumpWorkspaceFrames(3);
+                Require(Sun->ActiveSectionIndex == Section,
+                        "Sun Inspector tab selection must persist while its native page renders");
+                WritePngCapture(RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field),
+                                ExhibitImages / Filename);
+            }
+            Sun->ActiveSectionIndex = 0;
+            PumpWorkspaceFrames(3);
+        }
 
         // 4. Open ControlCentrePanel top-edge drawer on Appearance -> Theme page over Project Everest.
         Centre->ActivatePage(AppearancePageCategory::Theme);
@@ -448,7 +534,10 @@ int main(int ArgumentCount, char **Arguments)
                << "    \"Exhibits/ProjectEverest/Images/09_ProjectEverest_CloudInspector_OLED.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/10_ProjectEverest_WindInspector_OLED.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/11_ProjectEverest_AtmosphereInspector_OLED.png\",\n"
-               << "    \"Exhibits/ProjectEverest/Images/12_ProjectEverest_SunInspector_OLED.png\"\n"
+               << "    \"Exhibits/ProjectEverest/Images/12_ProjectEverest_SunInspector_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/13_ProjectEverest_SunInspector_Daylight_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/14_ProjectEverest_SunInspector_LightColour_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/15_ProjectEverest_SunInspector_DiscOptics_OLED.png\"\n"
                << "  ]\n"
                << "}\n";
 

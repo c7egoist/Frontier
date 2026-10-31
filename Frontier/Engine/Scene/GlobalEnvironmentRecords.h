@@ -47,6 +47,21 @@ class FolderRecord final : public RecordEntry
 //                                                      SUN RECORD
 //------------------------------------------------------------------------------------------------------------------------
 
+enum class SunInspectorValue : uint8_t
+{
+    Azimuth,
+    Elevation,
+    SolarIlluminance,
+    ColourTemperature,
+    SolarRadius,
+    AureoleGlow,
+    SolarTime,
+    DayDuration,
+    Latitude,
+    Longitude,
+    TimeZone
+};
+
 struct DailySolarCurveSummary
 {
     std::array<double, 97> ElevationSamplesDegrees{};   // [deg] - 15-minute samples across 00:00..24:00
@@ -74,18 +89,22 @@ class SunRecord final : public RecordEntry
     double      CustomTintBlue            = 0.90;       // [0-1] - Explicit RGB source tint B
     double      SolarRadiusDegrees        = 0.27;       // [deg] - Half-angle; angular diameter = 2 * radius
     double      AureoleGlow               = 1.00;       // [-]   - Circumsolar aureole gain
-    double      SolarClockHours           = 14.5;       // [h]   - Local solar clock [0..24]
-    double      CycleDurationHours        = 6.0;        // [h]   - Real-time cycle duration
+    double      SolarClockHours           = 12.0;       // [h]   - VehicleHMI SunTime; local clock [0..24]
+    double      CycleDurationHours        = 6.0;        // [h]   - VehicleHMI DayDuration; real hours per solar day
     double      LatitudeDegrees           = -26.18;     // [deg] - Observer latitude
     double      LongitudeDegrees          = 28.32;      // [deg] - Observer longitude
     double      UtcOffsetHours            = 2.0;        // [h]   - Civil timezone offset from UTC
-    int32_t     CalendarDayOfYear         = 293;        // [day] - Ordinal day [1..365]
+    std::string CalendarDateIso           = "2026-10-20"; // [date] - VehicleHMI SkyDate; ISO civil date
+    int32_t     LightingPresetIndex       = 0;          // [idx] - 0 Noon, 1 Golden, 2 Dusk, 3 Night
     RecordToken LinkedLensFlareToken;                   // [-]   - Optional nested LensFlareRecord for navigation
 
     int32_t     ActiveSectionIndex        = 0;          // [idx] - 0 Overview, 1 Daylight, 2 Light & colour, 3 Disc
 
     void ApplyLightingPreset(int32_t PresetIndex) noexcept;
     void ResetDefaults() noexcept;
+    [[nodiscard]] bool SetInspectorValue(SunInspectorValue Property, double Value) noexcept;
+    void SetCalendarDate(const std::string& IsoDate);
+    void SetCustomTint(double Red, double Green, double Blue) noexcept;
     void RecomputeFromEphemeris() noexcept;
 
     [[nodiscard]] SpatialVector          EvaluateDirectionVector() const noexcept;

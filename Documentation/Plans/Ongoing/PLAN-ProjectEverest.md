@@ -9,9 +9,12 @@ parity** and must not pass the UI gate yet. The first C++ Inspector was over-clu
 its visuals/control groups diverge from the source; treat captures `07`–`12` as implementation progress only, not proof of
 port fidelity. The strict 1:1 source is `Experimental/VehicleHmiPrototype/` at Sultan branch
 `arena/e9bd7db5-frontier`, inspected revision `6afb6f00b5f25c45f7cda92c7da65b64845768f3`, with the checked-in
-mechanical control/label inventories in `Frontier/Projects/Project-VehicleHmiDemo/Contract/`. The UI gate is now blocked on
-source-by-source audit, separate per-domain panel modules, exact control/label/interaction parity, and mutation tests.
-Do not begin Phase 2 Vulkan renderer work before this gate passes.
+mechanical control/label inventories in `Frontier/Projects/Project-VehicleHmiDemo/Contract/`. The strict source audit and separate per-domain module split are now established. The Solar panel is the first source-mapped
+implementation in progress: it has the reference's four tabs, date/time/location and colour/optics controls, source-matched
+celestial calculations, and regression assertions; its native layout/style/interaction parity still needs review, and it
+is **not** accepted as 1:1 yet. Folder, Lens Flare, Clouds, Wind, and Atmosphere remain prototype screens pending their own
+source-driven ports. The UI gate remains blocked on all six domain checklists, exact visible/control/interaction parity,
+mutation tests, and rendered review. Do not begin Phase 2 Vulkan renderer work before this gate passes.
 
 ---
 

@@ -4,12 +4,12 @@
   "application_target": "Frontier · Project workspace",
   "startup_scene": "ProvingGrounds",
   "user_log_categories": ["Powertrain", "CabinHMI", "Weather", "Fracture"],
-  "oled_logstream_luminance": 0.0737605,
-  "light_logstream_luminance": 0.971025,
+  "oled_logstream_luminance": 0.0976507,
+  "light_logstream_luminance": 0.969025,
   "oled_outliner_luminance": 0.052393,
   "light_outliner_luminance": 0.988784,
-  "oled_inspector_luminance": 0.0497659,
-  "light_inspector_luminance": 0.977765,
+  "oled_inspector_luminance": 0.0810823,
+  "light_inspector_luminance": 0.972674,
   "global_environment_inspector_domains": 6,
   "captures": [
     "Exhibits/ProjectEverest/Images/01_ProjectBrowser_Projects.png",
@@ -23,6 +23,9 @@
     "Exhibits/ProjectEverest/Images/09_ProjectEverest_CloudInspector_OLED.png",
     "Exhibits/ProjectEverest/Images/10_ProjectEverest_WindInspector_OLED.png",
     "Exhibits/ProjectEverest/Images/11_ProjectEverest_AtmosphereInspector_OLED.png",
-    "Exhibits/ProjectEverest/Images/12_ProjectEverest_SunInspector_OLED.png"
+    "Exhibits/ProjectEverest/Images/12_ProjectEverest_SunInspector_OLED.png",
+    "Exhibits/ProjectEverest/Images/13_ProjectEverest_SunInspector_Daylight_OLED.png",
+    "Exhibits/ProjectEverest/Images/14_ProjectEverest_SunInspector_LightColour_OLED.png",
+    "Exhibits/ProjectEverest/Images/15_ProjectEverest_SunInspector_DiscOptics_OLED.png"
   ]
 }

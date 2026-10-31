@@ -138,20 +138,28 @@ void SceneInspectorPanel::ConstructInterface()
     };
 
     const ImU32 Accent = KitInkHex(Descriptor->AccentHex);
-    const float HeaderY = Window.y + 16.0f;
-    const std::string TokenText = "RECORD / " + std::to_string(Selected.Value);
-    const std::string DisplayName = SceneDirectory::Instance().QueryName(Selected);
-    PresentText(Left, HeaderY, 9.0f, Accent, Descriptor->Eyebrow.c_str(), Faces.Medium);
-    PresentText(Left, HeaderY + 14.0f, 21.0f, Theme.Text, DisplayName.c_str(), Faces.Light);
-    PresentText(Left, HeaderY + 38.0f, 9.5f, Theme.Muted, Descriptor->Subtitle.c_str());
-    PresentText(Right - KitTextWidth(Faces.Regular, 9.0f, TokenText.c_str()), HeaderY + 4.0f, 9.0f,
-             Theme.Faint, TokenText.c_str());
-
-    ImGui::SetCursorScreenPos(ImVec2(Left, Window.y + 65.0f));
-    if (Descriptor->ActivationTarget != nullptr)
+    const bool SolarOwnsHeader = Descriptor->Domain == GlobalInspectorDomain::Sun;
+    if (SolarOwnsHeader)
     {
-        PresentCheckbox("Enabled in scene", Descriptor->ActivationTarget);
-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::SetCursorScreenPos(ImVec2(Left, Window.y + 12.0f));
+    }
+    else
+    {
+        const float HeaderY = Window.y + 16.0f;
+        const std::string TokenText = "RECORD / " + std::to_string(Selected.Value);
+        const std::string DisplayName = SceneDirectory::Instance().QueryName(Selected);
+        PresentText(Left, HeaderY, 9.0f, Accent, Descriptor->Eyebrow.c_str(), Faces.Medium);
+        PresentText(Left, HeaderY + 14.0f, 21.0f, Theme.Text, DisplayName.c_str(), Faces.Light);
+        PresentText(Left, HeaderY + 38.0f, 9.5f, Theme.Muted, Descriptor->Subtitle.c_str());
+        PresentText(Right - KitTextWidth(Faces.Regular, 9.0f, TokenText.c_str()), HeaderY + 4.0f, 9.0f,
+                    Theme.Faint, TokenText.c_str());
+
+        ImGui::SetCursorScreenPos(ImVec2(Left, Window.y + 65.0f));
+        if (Descriptor->ActivationTarget != nullptr)
+        {
+            PresentCheckbox("Enabled in scene", Descriptor->ActivationTarget);
+            ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        }
     }
 
     const float BodyTop = ImGui::GetCursorScreenPos().y;

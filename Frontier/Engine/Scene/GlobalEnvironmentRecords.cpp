@@ -13,7 +13,9 @@
 #include "Engine/Scene/SceneDirectory.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 
 namespace Frontier
 {
@@ -50,47 +52,95 @@ void BindInspector(RecordInspectorDescriptor Descriptor)
 #endif
 }
 
-// 📝 Low-precision solar position for a given ordinal day, solar clock hour, latitude, longitude, and UTC offset.
-//    Matches VehicleHMI's +X east, +Y north, +Z up frame.
-void EvaluateEphemerisAngles(int32_t DayOfYear,
-                             double  LocalHour,
-                             double  LatitudeDegrees,
-                             double  LongitudeDegrees,
-                             double  UtcOffsetHours,
-                             double& OutElevationDegrees,
-                             double& OutAzimuthDegrees) noexcept
+// 📝 Direct C++ port of VehicleHMI/CelestialSolver.js solar calculations. This is a low-precision visual solver,
+//    not a navigation ephemeris. Coordinate convention is +X east, +Y north, +Z up.
+struct EclipticVector
 {
-    const double ClampedDay     = std::clamp(static_cast<double>(DayOfYear), 1.0, 365.0);
-    const double FractionalYear = (2.0 * PiConstant / 365.0) * (ClampedDay - 1.0 + (LocalHour - 12.0) / 24.0);
-    const double EquationMinutes =
-        229.18 * (0.000075 + 0.001868 * std::cos(FractionalYear) - 0.032077 * std::sin(FractionalYear) -
-                  0.014615 * std::cos(2.0 * FractionalYear) - 0.040849 * std::sin(2.0 * FractionalYear));
-    const double Declination =
-        0.006918 - 0.399912 * std::cos(FractionalYear) + 0.070257 * std::sin(FractionalYear) -
-        0.006758 * std::cos(2.0 * FractionalYear) + 0.000907 * std::sin(2.0 * FractionalYear) -
-        0.002697 * std::cos(3.0 * FractionalYear) + 0.00148 * std::sin(3.0 * FractionalYear);
+    double X = 0.0;
+    double Y = 0.0;
+    double Z = 0.0;
+};
 
-    const double TimeOffsetMinutes = EquationMinutes + 4.0 * LongitudeDegrees - 60.0 * UtcOffsetHours;
-    const double TrueSolarMinutes  = LocalHour * 60.0 + TimeOffsetMinutes;
-    const double HourAngleRadians  = ((TrueSolarMinutes / 4.0) - 180.0) * DegreesToRadians;
-    const double LatitudeRadians   = LatitudeDegrees * DegreesToRadians;
+EclipticVector SolveOrbitalPosition(double NodeDegrees, double InclinationDegrees, double PerihelionDegrees,
+                                    double SemiMajorAxis, double Eccentricity, double MeanAnomalyDegrees) noexcept
+{
+    auto Mod360 = [](double Value) noexcept {
+        Value = std::fmod(Value, 360.0);
+        return Value < 0.0 ? Value + 360.0 : Value;
+    };
+    const double MeanAnomaly = Mod360(MeanAnomalyDegrees) * DegreesToRadians;
+    double       EccentricAnomaly = MeanAnomaly;
+    for (int32_t Iteration = 0; Iteration < 6; ++Iteration)
+    {
+        EccentricAnomaly -= (EccentricAnomaly - Eccentricity * std::sin(EccentricAnomaly) - MeanAnomaly) /
+                            (1.0 - Eccentricity * std::cos(EccentricAnomaly));
+    }
+    const double OrbitalX = SemiMajorAxis * (std::cos(EccentricAnomaly) - Eccentricity);
+    const double OrbitalY = SemiMajorAxis * std::sqrt(1.0 - Eccentricity * Eccentricity) * std::sin(EccentricAnomaly);
+    const double TrueAnomaly = std::atan2(OrbitalY, OrbitalX);
+    const double Distance = std::hypot(OrbitalX, OrbitalY);
+    const double Node = NodeDegrees * DegreesToRadians;
+    const double Inclination = InclinationDegrees * DegreesToRadians;
+    const double Argument = PerihelionDegrees * DegreesToRadians;
+    return {
+        Distance * (std::cos(Node) * std::cos(TrueAnomaly + Argument) -
+                    std::sin(Node) * std::sin(TrueAnomaly + Argument) * std::cos(Inclination)),
+        Distance * (std::sin(Node) * std::cos(TrueAnomaly + Argument) +
+                    std::cos(Node) * std::sin(TrueAnomaly + Argument) * std::cos(Inclination)),
+        Distance * std::sin(TrueAnomaly + Argument) * std::sin(Inclination)};
+}
 
-    const double SinElevation =
-        std::clamp(std::sin(LatitudeRadians) * std::sin(Declination) +
-                       std::cos(LatitudeRadians) * std::cos(Declination) * std::cos(HourAngleRadians),
-                   -1.0, 1.0);
-    const double ElevationRadians = std::asin(SinElevation);
-    OutElevationDegrees           = ElevationRadians * RadiansToDegrees;
+bool ParseCivilDate(const std::string& Text, std::chrono::year_month_day& Date) noexcept
+{
+    int Year = 0, Month = 0, Day = 0;
+    if (Text.size() != 10 || Text[4] != '-' || Text[7] != '-' ||
+        std::sscanf(Text.c_str(), "%4d-%2d-%2d", &Year, &Month, &Day) != 3)
+    {
+        return false;
+    }
+    Date = std::chrono::year{Year} / std::chrono::month{static_cast<unsigned>(Month)} /
+           std::chrono::day{static_cast<unsigned>(Day)};
+    return Date.ok();
+}
 
-    const double CosElevation = std::max(1.0e-5, std::cos(ElevationRadians));
-    const double SinNorthAz   = -std::cos(Declination) * std::sin(HourAngleRadians) / CosElevation;
-    const double CosNorthAz   = (std::sin(Declination) - std::sin(LatitudeRadians) * SinElevation) /
-                              std::max(1.0e-5, std::cos(LatitudeRadians) * CosElevation);
-    const double CompassDegrees = std::atan2(SinNorthAz, CosNorthAz) * RadiansToDegrees;   // Clockwise from +Y north
-    double       EastCounterDeg = 90.0 - CompassDegrees;                                   // Counterclockwise from +X east
-    while (EastCounterDeg > 180.0) EastCounterDeg -= 360.0;
-    while (EastCounterDeg < -180.0) EastCounterDeg += 360.0;
-    OutAzimuthDegrees = EastCounterDeg;
+std::chrono::year_month_day SafeCivilDate(const std::string& Text) noexcept
+{
+    std::chrono::year_month_day Date{};
+    if (ParseCivilDate(Text, Date)) return Date;
+    return std::chrono::year{2026} / std::chrono::October / std::chrono::day{20};
+}
+
+void EvaluateSolarAngles(const std::string& CalendarDateIso, double LocalHour, double LatitudeDegrees,
+                         double LongitudeDegrees, double UtcOffsetHours, double& OutElevationDegrees,
+                         double& OutAzimuthDegrees) noexcept
+{
+    const auto Date = SafeCivilDate(CalendarDateIso);
+    const auto Days = std::chrono::sys_days{Date}.time_since_epoch().count();
+    const double JulianDay = static_cast<double>(Days) + 2440587.5 + (LocalHour - UtcOffsetHours) / 24.0;
+    const double DaysSinceEpoch = JulianDay - 2451543.5;
+    const EclipticVector Sun = SolveOrbitalPosition(
+        0.0, 0.0, 282.9404 + 4.70935e-5 * DaysSinceEpoch, 1.0,
+        0.016709 - 1.151e-9 * DaysSinceEpoch, 356.047 + 0.9856002585 * DaysSinceEpoch);
+    const double Obliquity = (23.4393 - 3.563e-7 * (JulianDay - 2451543.5)) * DegreesToRadians;
+    const double EquatorialX = Sun.X;
+    const double EquatorialY = Sun.Y * std::cos(Obliquity) - Sun.Z * std::sin(Obliquity);
+    const double EquatorialZ = Sun.Y * std::sin(Obliquity) + Sun.Z * std::cos(Obliquity);
+    const double RightAscension = std::atan2(EquatorialY, EquatorialX);
+    const double Declination = std::atan2(EquatorialZ, std::hypot(EquatorialX, EquatorialY));
+    double LocalSiderealDegrees = std::fmod(280.46061837 + 360.98564736629 * (JulianDay - 2451545.0) +
+                                            LongitudeDegrees, 360.0);
+    if (LocalSiderealDegrees < 0.0) LocalSiderealDegrees += 360.0;
+    const double HourAngle = LocalSiderealDegrees * DegreesToRadians - RightAscension;
+    const double Latitude = LatitudeDegrees * DegreesToRadians;
+    const double East = -std::cos(Declination) * std::sin(HourAngle);
+    const double North = std::sin(Declination) * std::cos(Latitude) -
+                         std::cos(Declination) * std::cos(HourAngle) * std::sin(Latitude);
+    const double Up = std::sin(Declination) * std::sin(Latitude) +
+                      std::cos(Declination) * std::cos(HourAngle) * std::cos(Latitude);
+    OutElevationDegrees = std::asin(std::clamp(Up, -1.0, 1.0)) * RadiansToDegrees;
+    OutAzimuthDegrees = std::atan2(North, East) * RadiansToDegrees;
+    while (OutAzimuthDegrees > 180.0) OutAzimuthDegrees -= 360.0;
+    while (OutAzimuthDegrees < -180.0) OutAzimuthDegrees += 360.0;
 }
 
 } // namespace
@@ -143,6 +193,7 @@ SunRecord::SunRecord(RecordToken Enclosure)
 
 void SunRecord::ApplyLightingPreset(int32_t PresetIndex) noexcept
 {
+    if (PresetIndex < 0 || PresetIndex > 3) return;
     // 📝 Exact VehicleHMI InspectorPages.js LightingPresets table.
     switch (PresetIndex)
     {
@@ -169,30 +220,87 @@ void SunRecord::ApplyLightingPreset(int32_t PresetIndex) noexcept
         default:
             break;
     }
+    LightingPresetIndex       = PresetIndex;
     AutomaticPlacementEnabled = false;
     DayCycleEnabled           = false;
 }
 
 void SunRecord::ResetDefaults() noexcept
 {
-    AzimuthDegrees            = 145.0;
-    ElevationDegrees          = 38.0;
-    SolarIlluminance          = 12.0;
-    SunlightEnabled           = true;
-    SolarDiscEnabled          = true;
-    DayCycleEnabled           = false;
+    // Source parity: the VehicleHMI Reset action changes only these seven values.
+    ElevationDegrees        = 38.0;
+    AzimuthDegrees          = 145.0;
+    SolarIlluminance        = 12.0;
+    ColourTemperatureKelvin = 5778.0;
+    SolarRadiusDegrees      = 0.27;
+    AureoleGlow             = 1.0;
+    DayCycleEnabled         = false;
     AutomaticPlacementEnabled = false;
-    TemperatureModeEnabled    = true;
-    ColourTemperatureKelvin   = 5778.0;
-    SolarRadiusDegrees        = 0.27;
-    AureoleGlow               = 1.00;
+    TemperatureModeEnabled  = true;
+}
+
+bool SunRecord::SetInspectorValue(SunInspectorValue Property, double Value) noexcept
+{
+    if (!std::isfinite(Value)) return false;
+    double* Target = nullptr;
+    double Minimum = 0.0;
+    double Maximum = 0.0;
+    switch (Property)
+    {
+        case SunInspectorValue::Azimuth:           Target = &AzimuthDegrees;          Minimum = -180.0; Maximum = 180.0; break;
+        case SunInspectorValue::Elevation:         Target = &ElevationDegrees;        Minimum = -90.0;  Maximum = 90.0;  break;
+        case SunInspectorValue::SolarIlluminance:  Target = &SolarIlluminance;        Minimum = 0.0;    Maximum = 60.0;  break;
+        case SunInspectorValue::ColourTemperature: Target = &ColourTemperatureKelvin; Minimum = 2000.0; Maximum = 10000.0; break;
+        case SunInspectorValue::SolarRadius:       Target = &SolarRadiusDegrees;      Minimum = 0.05;   Maximum = 2.0;   break;
+        case SunInspectorValue::AureoleGlow:       Target = &AureoleGlow;             Minimum = 0.0;    Maximum = 3.0;   break;
+        case SunInspectorValue::SolarTime:         Target = &SolarClockHours;         Minimum = 0.0;    Maximum = 24.0;  break;
+        case SunInspectorValue::DayDuration:       Target = &CycleDurationHours;     Minimum = 0.01;   Maximum = 24.0;  break;
+        case SunInspectorValue::Latitude:          Target = &LatitudeDegrees;         Minimum = -90.0;  Maximum = 90.0;  break;
+        case SunInspectorValue::Longitude:         Target = &LongitudeDegrees;        Minimum = -180.0; Maximum = 180.0; break;
+        case SunInspectorValue::TimeZone:          Target = &UtcOffsetHours;          Minimum = -12.0;  Maximum = 14.0;  break;
+        default: return false;
+    }
+    *Target = std::clamp(Value, Minimum, Maximum);
+    if (Property == SunInspectorValue::Azimuth || Property == SunInspectorValue::Elevation)
+    {
+        AutomaticPlacementEnabled = false;
+        DayCycleEnabled = false;
+    }
+    else if (Property == SunInspectorValue::SolarTime || Property == SunInspectorValue::Latitude ||
+             Property == SunInspectorValue::Longitude || Property == SunInspectorValue::TimeZone)
+    {
+        AutomaticPlacementEnabled = true;
+        RecomputeFromEphemeris();
+    }
+    else if (Property == SunInspectorValue::ColourTemperature)
+    {
+        TemperatureModeEnabled = true;
+    }
+    return true;
+}
+
+void SunRecord::SetCalendarDate(const std::string& IsoDate)
+{
+    std::chrono::year_month_day Parsed{};
+    if (!ParseCivilDate(IsoDate, Parsed)) return;
+    CalendarDateIso = IsoDate;
+    AutomaticPlacementEnabled = true;
+    RecomputeFromEphemeris();
+}
+
+void SunRecord::SetCustomTint(double Red, double Green, double Blue) noexcept
+{
+    CustomTintRed = std::clamp(Red, 0.0, 1.0);
+    CustomTintGreen = std::clamp(Green, 0.0, 1.0);
+    CustomTintBlue = std::clamp(Blue, 0.0, 1.0);
+    TemperatureModeEnabled = false;
 }
 
 void SunRecord::RecomputeFromEphemeris() noexcept
 {
     AutomaticPlacementEnabled = true;
-    EvaluateEphemerisAngles(CalendarDayOfYear, SolarClockHours, LatitudeDegrees, LongitudeDegrees, UtcOffsetHours,
-                            ElevationDegrees, AzimuthDegrees);
+    EvaluateSolarAngles(CalendarDateIso, SolarClockHours, LatitudeDegrees, LongitudeDegrees, UtcOffsetHours,
+                        ElevationDegrees, AzimuthDegrees);
 }
 
 SpatialVector SunRecord::EvaluateDirectionVector() const noexcept
@@ -210,8 +318,8 @@ DailySolarCurveSummary SunRecord::EvaluateDailyElevationCurve() const noexcept
         const double SampleHour = static_cast<double>(Index) * 0.25;
         double       Elev       = 0.0;
         double       Azim       = 0.0;
-        EvaluateEphemerisAngles(CalendarDayOfYear, SampleHour, LatitudeDegrees, LongitudeDegrees, UtcOffsetHours,
-                                Elev, Azim);
+        EvaluateSolarAngles(CalendarDateIso, SampleHour, LatitudeDegrees, LongitudeDegrees, UtcOffsetHours,
+                            Elev, Azim);
         Summary.ElevationSamplesDegrees[Index] = Elev;
     }
 
@@ -313,6 +421,15 @@ LensFlareRecord::LensFlareRecord(RecordToken EnclosingSunToken)
     Descriptor.ActivationTarget = &FlareEnabled;
     Descriptor.PayloadAddress   = this;
     BindInspector(std::move(Descriptor));
+    if (EnclosingSunToken.IsValid())
+    {
+        const auto SunInspector = RecordInspectorRegistry::Instance().Query(EnclosingSunToken);
+        if (SunInspector.has_value() && SunInspector->Domain == GlobalInspectorDomain::Sun &&
+            SunInspector->PayloadAddress != nullptr)
+        {
+            static_cast<SunRecord*>(SunInspector->PayloadAddress)->LinkedLensFlareToken = Token();
+        }
+    }
 }
 
 void LensFlareRecord::ApplyOpticalPreset(int32_t NewPresetIndex) noexcept

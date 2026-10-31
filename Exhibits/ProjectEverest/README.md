@@ -35,7 +35,7 @@ reflections fallback).
 
 ## Global Engine Inspector UI Captures
 
-**Status: implementation-progress prototypes only — not 1:1 VehicleHMI parity and not the UI acceptance gate.** The environment records and Inspector modules are reusable Engine code shared across projects (`Frontier/Engine/Scene/` and `Frontier/Engine/Interface/`). The current rendered C++ screens were an initial native approximation; they diverge from the source UI in layout and interaction details and must be replaced/refined against the original source before Phase 1B passes. The strict source is `Experimental/VehicleHmiPrototype/` at Sultan branch `arena/e9bd7db5-frontier`, inspected revision `6afb6f00b5f25c45f7cda92c7da65b64845768f3`, plus the source-image references and checked-in UI inventories. Captures are actual native C++ ImGui frames, but are evidence of progress—not parity. The atmosphere image is labelled a CPU model reference, not GPU LUT readback, and the lens-flare image is a geometry preview, not a claim that the HMI HDR composite renderer is already ported.
+**Status: Solar inspector source-mapped port in progress; strict 1:1 UI acceptance is not yet claimed.** The environment records and Inspector modules are reusable Engine code shared across projects (`Frontier/Engine/Scene/` and `Frontier/Engine/Interface/`). The Solar panel now follows the reference's four-page structure and has source-solver/control mutation checks, but its native rendering still needs final geometry, styling, and interaction parity review. The other five panels remain progress prototypes and must be ported against their source before Phase 1B passes. The strict source is `Experimental/VehicleHmiPrototype/` at Sultan branch `arena/e9bd7db5-frontier`, inspected revision `6afb6f00b5f25c45f7cda92c7da65b64845768f3`, plus the source-image references and checked-in UI inventories. Captures are actual native C++ ImGui frames, but are evidence of progress—not proof of parity. The atmosphere image is labelled a CPU model reference, not GPU LUT readback, and the lens-flare image is a geometry preview, not a claim that the HMI HDR composite renderer is already ported.
 
 | File | Panel contents |
 | --- | --- |
@@ -44,7 +44,10 @@ reflections fallback).
 | `Images/09_ProjectEverest_CloudInspector_OLED.png` | Density diagnostic, coverage/density, formation, altitude clip, trace budget, shadows, and shared-wind coupling. |
 | `Images/10_ProjectEverest_WindInspector_OLED.png` | Interactive compass rose, travel/source bearing, speed, gust/turbulence, altitude vector ladder, receiver routing. |
 | `Images/11_ProjectEverest_AtmosphereInspector_OLED.png` | CPU atmosphere model panorama, Rayleigh/Mie/Ozone, RGB transmittance strips, scattering settings, explicit LUT bake. |
-| `Images/12_ProjectEverest_SunInspector_OLED.png` | Altitude/azimuth diagram, quick toggles, presets, daily elevation curve, colour temperature and solar disc controls. |
+| `Images/12_ProjectEverest_SunInspector_OLED.png` | Sun Overview: source vector, quick toggles, direction controls, and presets. |
+| `Images/13_ProjectEverest_SunInspector_Daylight_OLED.png` | Sun Daylight: 24-hour solar path, horizon metrics, time controls, date, and observer location. |
+| `Images/14_ProjectEverest_SunInspector_LightColour_OLED.png` | Sun Light & colour: intensity, colour source/tint, temperature, and Planck spectrum reference. |
+| `Images/15_ProjectEverest_SunInspector_DiscOptics_OLED.png` | Sun Disc & optics: angular disc, aureole, and linked Lens Flare record. |
 
 ## Reproducing
 
