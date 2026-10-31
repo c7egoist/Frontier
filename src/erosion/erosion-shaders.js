@@ -807,6 +807,7 @@ uniform sampler2D uVelWaterTex;
 uniform sampler2D uSedimentTex;
 uniform sampler2D uVelocityFieldTex;
 uniform sampler2D uSnowTex;
+uniform sampler2D uRockObstacleTex;
 
 uniform vec4 uDomain;         // (worldSpan, gridRes, dt, stepIndex)
 uniform vec4 uRainEmitter;    // (cloudHeight, rainIntensity, emitterMode, activeCount)
@@ -1069,14 +1070,22 @@ void main() {
   vec4 tU = sampleGridBilinear(uTerrainTex, uv + vec2(0.0, eps), res);
   vec4 tD = sampleGridBilinear(uTerrainTex, uv - vec2(0.0, eps), res);
 
-  float hC = tC.r + tC.g + tC.b;
+  // Boulders are part of the surface a droplet feels: it must climb over or
+  // route around a protruding rock instead of flowing through it.
+  vec4 oC = sampleGridBilinear(uRockObstacleTex, uv, res);
+  vec4 oR = sampleGridBilinear(uRockObstacleTex, uv + vec2(eps, 0.0), res);
+  vec4 oL = sampleGridBilinear(uRockObstacleTex, uv - vec2(eps, 0.0), res);
+  vec4 oU = sampleGridBilinear(uRockObstacleTex, uv + vec2(0.0, eps), res);
+  vec4 oD = sampleGridBilinear(uRockObstacleTex, uv - vec2(0.0, eps), res);
+
+  float hC = max(tC.r + tC.g + tC.b, oC.r);
   // Droplets ride the true total head (bed + FULL water depth). The old 0.45
   // factor under-counted lake surfaces, so droplets happily flowed "downhill"
   // out of lakes across the far shore and eroded there.
-  float headR = tR.r + tR.g + tR.b + tR.a;
-  float headL = tL.r + tL.g + tL.b + tL.a;
-  float headU = tU.r + tU.g + tU.b + tU.a;
-  float headD = tD.r + tD.g + tD.b + tD.a;
+  float headR = max(tR.r + tR.g + tR.b + tR.a, oR.r);
+  float headL = max(tL.r + tL.g + tL.b + tL.a, oL.r);
+  float headU = max(tU.r + tU.g + tU.b + tU.a, oU.r);
+  float headD = max(tD.r + tD.g + tD.b + tD.a, oD.r);
 
   vec2 grad = vec2(headR - headL, headU - headD) / (2.0 * cellSize);
   float gradMag = length(grad);
@@ -1131,7 +1140,7 @@ void main() {
   vec2 nextXZ = posAge.xz + steerDir * stepDist;
   vec2 uvNext = worldToUv(nextXZ, span);
   vec4 tNext = sampleGridBilinear(uTerrainTex, uvNext, res);
-  float hNext = tNext.r + tNext.g + tNext.b;
+  float hNext = max(tNext.r + tNext.g + tNext.b, sampleGridBilinear(uRockObstacleTex, uvNext, res).r);
 
   float dh = hNext - hC;
   float hardness = evalRockHardness3D(vec3(posAge.x, tC.r, posAge.z), uHardnessParams, uStrataOrient, uSeed);
@@ -1302,7 +1311,9 @@ void main() {
     } else {
       float spareCap = capacity - totalLoad;
       float maxCutJump = min(max(0.0, -dh) * 0.92 + 0.015, 0.28);
-      float rawDemand = min(spareCap * uHydraulics.x * 0.95, maxCutJump);
+      // A protruding boulder shields the bed under its footprint from pickup
+      float rockShield = oC.r > (tC.r + tC.g + tC.b) ? (1.0 - 0.92 * clamp(oC.g, 0.0, 1.0)) : 1.0;
+      float rawDemand = min(spareCap * uHydraulics.x * 0.95, maxCutJump) * rockShield;
 
       float takeFine = min(tC.b * 0.55, rawDemand * 0.90);
       float remDemand = max(0.0, rawDemand - takeFine);
@@ -1412,7 +1423,18 @@ layout(location = 0) out vec4 outFlux;
 
 uniform sampler2D uTerrainTex;
 uniform sampler2D uFluxTex;
+uniform sampler2D uRockObstacleTex;
 uniform vec4 uPipeParams; // (gridRes, cellSize, dt, gravity)
+
+// Fraction of a cell face left open by a protruding boulder: fully closed
+// (down to the coverage floor) while the water surface is below the rock
+// top, fully open once overtopped or buried.
+float rockOpenness(vec2 obs, float bed, float surf) {
+  float top = obs.x;
+  if (top <= bed) return 1.0;
+  float fracAbove = clamp((top - surf) / max(0.30, top - bed), 0.0, 1.0);
+  return 1.0 - 0.80 * clamp(obs.y, 0.0, 1.0) * fracAbove;
+}
 
 void main() {
   ivec2 c = ivec2(gl_FragCoord.xy);
@@ -1459,6 +1481,26 @@ void main() {
   float retain = exp(-2.0 * dt);
   vec4 flux = max(vec4(0.0), fOld * retain + dh * (dt * A * g / L));
 
+  // Boulders throttle the pipes they block: streams pond behind them, slip
+  // around their flanks, and only overtop once deep enough. Without this the
+  // heightfield flow runs straight through rock instances.
+  {
+    float bedC = tC.r + tC.g + tC.b;
+    vec4 oC = texelFetch(uRockObstacleTex, c, 0);
+    vec4 oR = texelFetch(uRockObstacleTex, ivec2(min(maxI, c.x + 1), c.y), 0);
+    vec4 oL = texelFetch(uRockObstacleTex, ivec2(max(0, c.x - 1), c.y), 0);
+    vec4 oU = texelFetch(uRockObstacleTex, ivec2(c.x, min(maxI, c.y + 1)), 0);
+    vec4 oD = texelFetch(uRockObstacleTex, ivec2(c.x, max(0, c.y - 1)), 0);
+    float openC = rockOpenness(oC.rg, bedC, bedC + water);
+    vec4 edgeOpen = vec4(
+      min(openC, rockOpenness(oR.rg, tR.r + tR.g + tR.b, tR.r + tR.g + tR.b + tR.a)),
+      min(openC, rockOpenness(oL.rg, tL.r + tL.g + tL.b, tL.r + tL.g + tL.b + tL.a)),
+      min(openC, rockOpenness(oU.rg, tU.r + tU.g + tU.b, tU.r + tU.g + tU.b + tU.a)),
+      min(openC, rockOpenness(oD.rg, tD.r + tD.g + tD.b, tD.r + tD.g + tD.b + tD.a))
+    );
+    flux *= edgeOpen;
+  }
+
   float sumFlux = flux.x + flux.y + flux.z + flux.w;
   if (sumFlux > 1e-7) {
     // Cap 1: cannot drain more volume this step than the cell stores.
@@ -1490,6 +1532,7 @@ uniform sampler2D uTerrainTex;
 uniform sampler2D uDeltaTex;
 uniform sampler2D uFluxTex;
 uniform sampler2D uSnowTex;
+uniform sampler2D uRockObstacleTex;
 
 uniform vec4 uIntParams;      // (gridRes, cellSize, dt, evaporation)
 uniform vec4 uPipeErode;      // (pipeFlowBlend, erosionStrength, rockHardness, worldSpan)
@@ -1538,6 +1581,19 @@ void main() {
   float dCoarse = clamp(delta.g, -0.25, 0.25);
   float dFine = clamp(delta.b, -0.25, 0.25);
 
+  // Boulders armour the bed beneath them (erosion nearly stops under the
+  // footprint; scour instead happens on the exposed flanks) and sediment
+  // deposited into a partly rock-filled cell fills only the free fraction,
+  // so the surface wedges up the rock's sides and buries it.
+  vec4 obsC = texelFetch(uRockObstacleTex, c, 0);
+  float rockCov = clamp(obsC.g, 0.0, 1.0);
+  float protruding = obsC.r > (terr.r + terr.g + terr.b) ? 1.0 : 0.0;
+  float armour = 1.0 - 0.92 * rockCov * protruding;
+  float fillBoost = protruding > 0.5 ? min(2.2, 1.0 / max(0.30, 1.0 - 0.75 * rockCov)) : 1.0;
+  if (dBed < 0.0) dBed *= armour;
+  dCoarse = dCoarse < 0.0 ? dCoarse * armour : dCoarse * fillBoost;
+  dFine = dFine < 0.0 ? dFine * armour : dFine * fillBoost;
+
   float bedrock = max(1.0, terr.r + dBed);
   float coarse = max(0.0, terr.g + dCoarse);
   float fine = max(0.0, terr.b + dFine);
@@ -1560,6 +1616,7 @@ void main() {
     float critShear = 0.04 + 0.55 * hardness * hardness;
     if (shear > critShear && slope > 0.06) {
       float streamCut = min(0.035, (shear - critShear) * uPipeErode.y * uPipeErode.x * 0.018 * dt / (0.15 + 2.5 * hardness));
+      streamCut *= armour; // boulder armours its own footprint against stream cutting
       bedrock = max(1.0, bedrock - streamCut);
       fine += streamCut * 0.18;
     } else if (flowSpeed < 0.85 && water > 0.012 && slope < 0.09) {
@@ -1744,6 +1801,7 @@ layout(location = 0) out vec4 outSnow;
 uniform sampler2D uTerrainTex;
 uniform sampler2D uSnowTex;
 uniform sampler2D uSnowDeltaTex;
+uniform sampler2D uRockObstacleTex;
 uniform vec4 uCryoParams;     // (gridRes, cellSize, dt, worldSpan)
 uniform vec4 uClimate;        // (snowlineNorm, snowfallRate, glacierStrength, meltRate)
 uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
@@ -1819,7 +1877,9 @@ void main() {
       ivec2( 1,  0), ivec2(-1,  0), ivec2( 0,  1), ivec2( 0, -1),
       ivec2( 1,  1), ivec2(-1, -1), ivec2( 1, -1), ivec2(-1,  1)
     );
-    float hSnowHere = hBase + snowDepth;
+    // Snow creep/drift feel boulders: a rock poking through the pack is
+    // ground snow sheds off and banks against, not through.
+    float hSnowHere = max(hBase + snowDepth, texelFetch(uRockObstacleTex, c, 0).r);
     float hIceHere = hBase + iceDepth;
     // Wind tilt potential: drifting snow behaves as if gravity were tipped
     // slightly downwind, so it crosses flats and collects in lee hollows.
@@ -1835,7 +1895,7 @@ void main() {
       vec4 tN = texelFetch(uTerrainTex, nb, 0);
       vec4 sN = texelFetch(uSnowTex, nb, 0);
       float hBaseN = tN.r + tN.g + tN.b;
-      float hSnowN = hBaseN + sN.r;
+      float hSnowN = max(hBaseN + sN.r, texelFetch(uRockObstacleTex, nb, 0).r);
 
       // --- Slab avalanche with cohesion: a thin snow skin clings to ~51 deg,
       // a deep slab releases at the classic ~36 deg repose. Repose uses the
@@ -1961,12 +2021,53 @@ void main() {
 }
 `;
 
+// =============================================================================
+// ROCK OBSTACLE: rasterizes boulder occupancy into a field the sediment and
+// water sims can feel: R = rock-top height (world Y of the ellipsoid cap),
+// G = footprint coverage fraction. Accumulated with MAX over batches of 24
+// rocks (ping-pong, cleared to -1000 = "no rock"). Transport passes take
+// max(terrainHeight, rockTop) as effective ground, so streams divert around
+// boulders, talus banks against them and spills over, and deposition buries
+// them -- sediment no longer flows straight through rocks.
+// =============================================================================
+export const ROCK_OBSTACLE_FRAG = `#version 300 es
+${GLSL_PRECISION_HEADER}
+in vec2 vUv;
+layout(location = 0) out vec4 outObstacle;
+
+uniform sampler2D uObstacleTex;
+uniform vec4 uObstacleDomain; // (worldSpan, cellSize, stampCount, -)
+uniform vec4 uObstacleA[24];  // (worldX, worldZ, Rh, centreY)
+uniform vec4 uObstacleB[24];  // (Rv, -, -, -)
+
+void main() {
+  ivec2 tc = ivec2(gl_FragCoord.xy);
+  vec4 prev = texelFetch(uObstacleTex, tc, 0);
+  float top = prev.r;
+  float cov = prev.g;
+  vec2 worldXZ = (vUv - 0.5) * uObstacleDomain.x;
+  int count = int(uObstacleDomain.z + 0.5);
+  for (int i = 0; i < 24; i++) {
+    if (i >= count) break;
+    vec4 A = uObstacleA[i];
+    vec2 d = (worldXZ - A.xy) / max(A.z, 1e-3);
+    float q = dot(d, d);
+    if (q >= 1.0) continue;
+    float t = A.w + uObstacleB[i].x * sqrt(1.0 - q);
+    top = max(top, t);
+    cov = max(cov, clamp((1.0 - sqrt(q)) * 3.0, 0.0, 1.0));
+  }
+  outObstacle = vec4(top, cov, 0.0, 0.0);
+}
+`;
+
 export const THERMAL_TALUS_FRAG = `#version 300 es
 ${GLSL_PRECISION_HEADER}
 in vec2 vUv;
 layout(location = 0) out vec4 outTerrain;
 
 uniform sampler2D uTerrainTex;
+uniform sampler2D uRockObstacleTex;
 uniform vec4 uTalusParams;    // (gridRes, cellSize, talusControl, worldSpan)
 uniform vec4 uHardnessParams; // (rockHardness, strataStrength, strataFreq, faultWeakness)
 uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
@@ -1987,6 +2088,9 @@ void main() {
   }
 
   float hC = tC.r + tC.g + tC.b;
+  // Sediment avalanches see boulders as ground: talus banks against them,
+  // sheds off their tops, and spills over only once banked high enough.
+  float effHC = max(hC, texelFetch(uRockObstacleTex, c, 0).r);
   vec2 worldXZ = (vUv - 0.5) * uTalusParams.w;
   float hardC = evalRockHardness3D(vec3(worldXZ.x, tC.r, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
 
@@ -2010,19 +2114,21 @@ void main() {
     vec4 tN = texelFetch(uTerrainTex, nb, 0);
     float hN = tN.r + tN.g + tN.b;
     float diff = hC - hN;
+    float effHN = max(hN, texelFetch(uRockObstacleTex, nb, 0).r);
+    float diffSed = effHC - effHN;
 
     float maxDiffFine = fineTan * dist;
-    if (diff > maxDiffFine && tC.b > 1e-5) {
-      netFine -= min(tC.b * 0.11, (diff - maxDiffFine) * 0.085);
-    } else if (-diff > maxDiffFine && tN.b > 1e-5) {
-      netFine += min(tN.b * 0.11, (-diff - maxDiffFine) * 0.085);
+    if (diffSed > maxDiffFine && tC.b > 1e-5) {
+      netFine -= min(tC.b * 0.11, (diffSed - maxDiffFine) * 0.085);
+    } else if (-diffSed > maxDiffFine && tN.b > 1e-5) {
+      netFine += min(tN.b * 0.11, (-diffSed - maxDiffFine) * 0.085);
     }
 
     float maxDiffCoarse = talusTan * dist;
-    if (diff > maxDiffCoarse && tC.g > 1e-5) {
-      netCoarse -= min(tC.g * 0.10, (diff - maxDiffCoarse) * 0.075);
-    } else if (-diff > maxDiffCoarse && tN.g > 1e-5) {
-      netCoarse += min(tN.g * 0.10, (-diff - maxDiffCoarse) * 0.075);
+    if (diffSed > maxDiffCoarse && tC.g > 1e-5) {
+      netCoarse -= min(tC.g * 0.10, (diffSed - maxDiffCoarse) * 0.075);
+    } else if (-diffSed > maxDiffCoarse && tN.g > 1e-5) {
+      netCoarse += min(tN.g * 0.10, (-diffSed - maxDiffCoarse) * 0.075);
     }
 
     float maxDiffCliff = cliffTan * dist;

@@ -340,6 +340,7 @@ export class RockCalvingSystem {
     this.worldSpan = 512.0;
     this.snowGrid = null; // (snowDepth, iceDepth, melt, iceMelt) matching heightGrid layout
     this.pendingImprints = []; // snow imprint stamps awaiting the engine's GPU pass
+    this.obstaclesDirty = true; // sediment/water obstacle field needs (re)build
 
     this.rocks = [];
     // Separate per-submesh instance staging arrays for 6-archetype instanced draw
@@ -682,6 +683,7 @@ export class RockCalvingSystem {
     // A small live rockfall batch so the user sees motion on load
     this.calveCliffBoulders(Math.round(density * 18), rng, false);
     this._rebuildInstanceBuckets();
+    this.obstaclesDirty = true;
   }
 
   /**
@@ -761,6 +763,7 @@ export class RockCalvingSystem {
       this.rocks.push(rk);
       spawned++;
     }
+    if (spawned > 0) this.obstaclesDirty = true;
     return spawned;
   }
 
@@ -1035,11 +1038,31 @@ export class RockCalvingSystem {
     }
 
     this._collectImprints();
+    if (anyAwake) this.obstaclesDirty = true; // rocks moved: transport must re-feel them
 
     if (anyAwake || duringPrewarm) {
       this._rebuildInstanceBuckets();
     }
     return anyAwake;
+  }
+
+  /**
+   * Occupancy stamps for the sediment/water obstacle field: EVERY rock
+   * (rooted outcrops included) as a vertical ellipsoid cap. The engine
+   * rasterizes these (ROCK_OBSTACLE_FRAG) so streams, droplets, talus and
+   * snow creep route around boulders, bank sediment against them, spill
+   * over, and bury them instead of flowing straight through.
+   */
+  getObstacleStamps() {
+    const out = [];
+    for (let i = 0; i < this.rocks.length; i++) {
+      const r = this._ensureBody(this.rocks[i]);
+      const Rv = Math.max(0.1, this._support(r, 0, 1, 0) / EMBED);
+      const Rh = Math.sqrt(Math.max(0.02,
+        (this._support(r, 1, 0, 0) / EMBED) * (this._support(r, 0, 0, 1) / EMBED)));
+      out.push({ x: r.x, z: r.z, cy: r.y, Rv, Rh });
+    }
+    return out;
   }
 
   /** Engine drains pending snow imprints (max `maxCount` per GPU pass). */

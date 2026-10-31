@@ -18,6 +18,7 @@ import {
   PARTICLE_STEP_FRAG,
   PROCEDURAL_MODIFIER_FRAG,
   ROCK_IMPRINT_FRAG,
+  ROCK_OBSTACLE_FRAG,
   ROCK_INSTANCE_FRAG,
   ROCK_INSTANCE_VERT,
   SKY_BG_FRAG,
@@ -204,6 +205,7 @@ export class GpuErosionEngine {
     this.progTerrainIntegrate = createProgram(gl, FULLSCREEN_VERT, TERRAIN_INTEGRATE_FRAG, 'TerrainIntegrate');
     this.progSnowCryo = createProgram(gl, FULLSCREEN_VERT, SNOW_CRYO_FRAG, 'SnowCryo');
     this.progRockImprint = createProgram(gl, FULLSCREEN_VERT, ROCK_IMPRINT_FRAG, 'RockImprint');
+    this.progRockObstacle = createProgram(gl, FULLSCREEN_VERT, ROCK_OBSTACLE_FRAG, 'RockObstacle');
     this.progThermalTalus = createProgram(gl, FULLSCREEN_VERT, THERMAL_TALUS_FRAG, 'ThermalTalus');
     this.progTerrainRender = createProgram(gl, TERRAIN_RENDER_VERT, TERRAIN_RENDER_FRAG, 'TerrainRender');
     this.progRockInstance = createProgram(gl, ROCK_INSTANCE_VERT, ROCK_INSTANCE_FRAG, 'RockInstance');
@@ -254,6 +256,26 @@ export class GpuErosionEngine {
       createFbo(gl, [this.snowTex[0]]),
       createFbo(gl, [this.snowTex[1]]),
     ];
+
+    // Boulder occupancy field for sediment/water transport (rockTop, coverage)
+    this.obstacleTex = [
+      createDataTexture(gl, R, R, gl.RGBA32F, gl.RGBA, gl.FLOAT),
+      createDataTexture(gl, R, R, gl.RGBA32F, gl.RGBA, gl.FLOAT),
+    ];
+    this.obstacleIdx = 0;
+    this.fboRockObstacle = [
+      createFbo(gl, [this.obstacleTex[0]]),
+      createFbo(gl, [this.obstacleTex[1]]),
+    ];
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboRockObstacle[i]);
+      gl.clearColor(-1000, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this._obstA = new Float32Array(24 * 4); // (x, z, Rh, centreY)
+    this._obstB = new Float32Array(24 * 4); // (Rv, -, -, -)
+    this._obstBuiltStep = -999;
 
     // Terrain single & MRT FBOs
     this.fboTerrainSingle = [
@@ -1017,6 +1039,7 @@ export class GpuErosionEngine {
     const cellAreaSample = (p.worldSpan * p.worldSpan) / (TELEMETRY_RES * TELEMETRY_RES);
 
     this.stepCount = 0;
+    this._obstBuiltStep = -999; // force obstacle rebuild for the new landscape
     this.telemetry.steps = 0;
     this.telemetry.erodedVolumeM3 = 0;
     this.telemetry.coarseSedM3 = 0;
@@ -1063,6 +1086,7 @@ export class GpuErosionEngine {
     const p = this.params;
     const cellSize = p.worldSpan / R;
     const { hardnessVec, strataVec } = this._getHardnessUniforms();
+    this._ensureRockObstacles();
 
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
@@ -1079,6 +1103,7 @@ export class GpuErosionEngine {
       const nextTalus = 1 - this.terrainIdx;
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboTerrainSingle[nextTalus]);
       this._bindTex(this.progThermalTalus, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
+      this._bindTex(this.progThermalTalus, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
       this.terrainIdx = nextTalus;
     }
@@ -1103,6 +1128,7 @@ export class GpuErosionEngine {
 
     for (let s = 0; s < count; s++) {
       this.stepCount++;
+      this._ensureRockObstacles();
       const prevP = this.partIdx;
       const nextP = 1 - prevP;
 
@@ -1127,6 +1153,7 @@ export class GpuErosionEngine {
         this._bindTex(this.progParticleStep, 'uSedimentTex', this.partSediment[prevP], 3);
         this._bindTex(this.progParticleStep, 'uVelocityFieldTex', this.velocityFieldTex, 4);
         this._bindTex(this.progParticleStep, 'uSnowTex', this.snowTex[this.snowIdx], 5);
+        this._bindTex(this.progParticleStep, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 6);
 
         gl.uniform4f(gl.getUniformLocation(this.progParticleStep, 'uDomain'), p.worldSpan, R, dt, this.stepCount);
         gl.uniform4f(
@@ -1196,6 +1223,7 @@ export class GpuErosionEngine {
 
         this._bindTex(this.progWaterFlux, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
         this._bindTex(this.progWaterFlux, 'uFluxTex', this.fluxTex[this.fluxIdx], 1);
+        this._bindTex(this.progWaterFlux, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 2);
         gl.uniform4f(gl.getUniformLocation(this.progWaterFlux, 'uPipeParams'), R, cellSize, dt, p.gravity);
 
         gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1215,6 +1243,7 @@ export class GpuErosionEngine {
       this._bindTex(this.progTerrainIntegrate, 'uDeltaTex', this.deltaTex, 1);
       this._bindTex(this.progTerrainIntegrate, 'uFluxTex', this.fluxTex[this.fluxIdx], 2);
       this._bindTex(this.progTerrainIntegrate, 'uSnowTex', this.snowTex[this.snowIdx], 3);
+      this._bindTex(this.progTerrainIntegrate, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 4);
 
       gl.uniform4f(gl.getUniformLocation(this.progTerrainIntegrate, 'uIntParams'), R, cellSize, dt, p.simHydraulicPlaying === false ? 0.0 : p.evaporation);
       gl.uniform4f(
@@ -1274,6 +1303,7 @@ export class GpuErosionEngine {
         gl.useProgram(this.progThermalTalus);
 
         this._bindTex(this.progThermalTalus, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
+      this._bindTex(this.progThermalTalus, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 1);
         gl.uniform4f(
           gl.getUniformLocation(this.progThermalTalus, 'uTalusParams'),
           R,
@@ -1302,6 +1332,7 @@ export class GpuErosionEngine {
         this._bindTex(this.progSnowCryo, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
         this._bindTex(this.progSnowCryo, 'uSnowTex', this.snowTex[this.snowIdx], 1);
         this._bindTex(this.progSnowCryo, 'uSnowDeltaTex', this.snowDeltaTex, 2);
+        this._bindTex(this.progSnowCryo, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 3);
         gl.uniform4f(gl.getUniformLocation(this.progSnowCryo, 'uCryoParams'), R, cellSize, dt, p.worldSpan);
         gl.uniform4fv(gl.getUniformLocation(this.progSnowCryo, 'uClimate'), climate.snowVec);
         gl.uniform4fv(gl.getUniformLocation(this.progSnowCryo, 'uStrataOrient'), strataVec);
@@ -1355,6 +1386,56 @@ export class GpuErosionEngine {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.readPixels(0, 0, TELEMETRY_RES, TELEMETRY_RES, gl.RGBA, gl.FLOAT, this.snowSnap64);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  /**
+   * Rebuilds the boulder-occupancy field consumed by water flux, sediment
+   * integration, droplets, talus and snow creep. Throttled while rocks are
+   * tumbling; static once they sleep. MAX-accumulated in batches of 24.
+   */
+  _ensureRockObstacles() {
+    if (!this.rockCalving.obstaclesDirty) return;
+    if (this.stepCount - this._obstBuiltStep < 6) return;
+    const gl = this.gl;
+    const R = this.gridRes;
+    const cellSize = this.params.worldSpan / R;
+    const stamps = this.rockCalving.getObstacleStamps();
+
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboRockObstacle[0]);
+    gl.viewport(0, 0, R, R);
+    gl.clearColor(-1000, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    let idx = 0;
+
+    if (stamps.length > 0) {
+      gl.useProgram(this.progRockObstacle);
+      gl.bindVertexArray(this.emptyVao);
+      const A = this._obstA;
+      const B = this._obstB;
+      for (let b = 0; b < stamps.length; b += 24) {
+        const n = Math.min(24, stamps.length - b);
+        A.fill(0);
+        B.fill(0);
+        for (let i = 0; i < n; i++) {
+          const s = stamps[b + i];
+          A[i * 4] = s.x; A[i * 4 + 1] = s.z; A[i * 4 + 2] = s.Rh; A[i * 4 + 3] = s.cy;
+          B[i * 4] = s.Rv;
+        }
+        const next = 1 - idx;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboRockObstacle[next]);
+        gl.viewport(0, 0, R, R);
+        this._bindTex(this.progRockObstacle, 'uObstacleTex', this.obstacleTex[idx], 0);
+        gl.uniform4f(gl.getUniformLocation(this.progRockObstacle, 'uObstacleDomain'), this.params.worldSpan, cellSize, n, 0);
+        gl.uniform4fv(gl.getUniformLocation(this.progRockObstacle, 'uObstacleA[0]'), A);
+        gl.uniform4fv(gl.getUniformLocation(this.progRockObstacle, 'uObstacleB[0]'), B);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        idx = next;
+      }
+    }
+    this.obstacleIdx = idx;
+    this.rockCalving.obstaclesDirty = false;
+    this._obstBuiltStep = this.stepCount;
   }
 
   /**

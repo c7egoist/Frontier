@@ -1421,3 +1421,70 @@ test('Boulders embed into snow/sediment by bearing capacity and protrude realist
   const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
   assert.ok(pipeSrc.includes('snapSnowBuf'), 'Pipeline must feed the cryo snapshot to rock physics');
 });
+
+test('Sediment/water transport feels boulders: obstacle field diverts flow, banks talus, buries rocks', () => {
+  const N = 64;
+  const grid = new Float32Array(N * N * 4);
+  for (let iz = 0; iz < N; iz++) {
+    for (let ix = 0; ix < N; ix++) {
+      const u = ix / (N - 1) - 0.5;
+      const scarp = 1 / (1 + Math.exp(u * 22.0));
+      const idx = (iz * N + ix) * 4;
+      grid[idx] = 14 + 95 * scarp;
+      grid[idx + 1] = 0.4 * (1 - scarp);
+    }
+  }
+  const sys = new RockCalvingSystem();
+  assert.equal(sys.obstaclesDirty, true, 'Obstacle field must start dirty (unbuilt)');
+  sys.updateTerrainSnapshot(grid, N, 512.0);
+  sys.seedForLandscape({ seed: 4029, worldSpan: 512.0, boulderDensity: 0.75, strataStrike: 10, strataDip: 12 });
+
+  // Every rock (rooted outcrops included) becomes an occupancy stamp
+  const stamps = sys.getObstacleStamps();
+  assert.equal(stamps.length, sys.rocks.length, 'One obstacle stamp per rock instance');
+  assert.ok(sys.rocks.some((r) => r.isOutcrop), 'Seeded world must contain outcrops (they block flow too)');
+  for (const s of stamps) {
+    assert.ok(Number.isFinite(s.x + s.z + s.cy + s.Rv + s.Rh), 'Stamp values must be finite');
+    assert.ok(s.Rv > 0 && s.Rh > 0, 'Stamp ellipsoid radii must be positive');
+    assert.ok(s.cy + s.Rv > s.cy, 'Stamp top must rise above the body centre');
+  }
+  assert.equal(sys.obstaclesDirty, true, 'Seeding must mark the obstacle field dirty');
+
+  // Dirty lifecycle: engine cleans after build; motion re-dirties; rest stays clean
+  const flat = new Float32Array(N * N * 4);
+  for (let i = 0; i < flat.length; i += 4) flat[i] = 20;
+  const restSys = new RockCalvingSystem();
+  restSys.updateTerrainSnapshot(flat, N, 512.0);
+  const sleeper = {
+    submesh: 2, isOutcrop: false, settled: true,
+    x: 0, y: 21.6, z: 0, vx: 0, vy: 0, vz: 0,
+    sx: 1.7, sy: 1.5, sz: 1.7, isSlab: false, wear: 0.3, seedHash: 0.4,
+  };
+  restSys.rocks.push(sleeper);
+  restSys.obstaclesDirty = false; // simulate engine build
+  restSys.stepPhysics(0.033);
+  assert.equal(restSys.obstaclesDirty, false, 'Sleeping rocks must not trigger obstacle rebuilds');
+  sleeper.settled = false;
+  sleeper.y += 5;
+  restSys.stepPhysics(0.033);
+  assert.equal(restSys.obstaclesDirty, true, 'A moving rock must re-dirty the obstacle field');
+
+  // --- GPU wiring: obstacle stamp shader + every transport consumer ---
+  assert.equal(typeof Shaders.ROCK_OBSTACLE_FRAG, 'string', 'ROCK_OBSTACLE_FRAG must be exported');
+  assert.ok(Shaders.ROCK_OBSTACLE_FRAG.includes('uObstacleA[24]'), 'Obstacle shader takes rock batches');
+  assert.ok(Shaders.ROCK_OBSTACLE_FRAG.includes('outObstacle = vec4(top, cov'), 'Obstacle field stores (rockTop, coverage)');
+  assert.ok(Shaders.WATER_FLUX_FRAG.includes('rockOpenness'), 'Pipe flux must throttle edges blocked by boulders');
+  assert.ok(Shaders.WATER_FLUX_FRAG.includes('flux *= edgeOpen'), 'Water must divert around / pond behind boulders');
+  assert.ok(Shaders.THERMAL_TALUS_FRAG.includes('diffSed') && Shaders.THERMAL_TALUS_FRAG.includes('effHC'),
+    'Talus avalanches must use max(terrain, rockTop) as ground (bank against, spill over)');
+  assert.ok(Shaders.TERRAIN_INTEGRATE_FRAG.includes('armour'), 'Integrate must armour the bed under boulders');
+  assert.ok(Shaders.TERRAIN_INTEGRATE_FRAG.includes('fillBoost'), 'Deposition must fill only the free cell fraction (burial wedge)');
+  assert.ok(Shaders.PARTICLE_STEP_FRAG.includes('rockShield'), 'Droplet pickup must be shielded under boulders');
+  assert.ok(Shaders.PARTICLE_STEP_FRAG.includes('max(tR.r + tR.g + tR.b + tR.a, oR.r)'), 'Droplets must ride over/around rock tops');
+  assert.ok(Shaders.SNOW_CRYO_FRAG.includes('max(hBase + snowDepth, texelFetch(uRockObstacleTex, c, 0).r)'),
+    'Snow creep/drift must shed off and bank against boulders');
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  assert.ok(engSrc.includes('_ensureRockObstacles'), 'Engine must rebuild the obstacle field');
+  const binds = engSrc.split("'uRockObstacleTex', this.obstacleTex[this.obstacleIdx]").length - 1;
+  assert.ok(binds >= 6, `Obstacle texture must bind into particle/flux/integrate/talus x2/cryo passes (found ${binds})`);
+});
