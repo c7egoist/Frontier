@@ -2145,8 +2145,10 @@ export class GpuErosionEngine {
 
   /**
    * Reads back the live GPU-eroded terrain heightfield on demand and builds a game-ready
-   * 3D mesh (positions, normals, tangents, UVs, indices, and stratigraphic/sediment colors)
-   * compatible with our `.GLB` and `.OBJ` exporters!
+   * baked polygon mesh (positions, normals, tangents, UVs, indices, and vertex colors)
+   * compatible with our `.GLB` and `.OBJ` exporters. Any active SDF cave/tunnel
+   * mesh is baked into the same static mesh, and heightfield triangles inside
+   * an open cave portal are omitted so tunnels remain actual holes in-game.
    */
   extractMeshForExport(exportStep = 2) {
     const gl = this.gl;
@@ -2168,11 +2170,16 @@ export class GpuErosionEngine {
     const stride = Math.max(1, exportStep);
     const M = Math.floor((R - 1) / stride) + 1;
     const vCount = M * M;
-    const positions = new Float32Array(vCount * 3);
-    const normals = new Float32Array(vCount * 3);
-    const tangents = new Float32Array(vCount * 4);
-    const uvs = new Float32Array(vCount * 2);
-    const colors = new Float32Array(vCount * 4);
+    const caveSys = this.pipelineMode && this.pipeline ? this.pipeline.caveSystem : null;
+    const caveVertexCount = caveSys && caveSys.positions
+      ? Math.min(Math.floor(caveSys.vertexCount || 0), Math.floor(caveSys.positions.length / 3))
+      : 0;
+    const totalVertexCount = vCount + caveVertexCount;
+    const positions = new Float32Array(totalVertexCount * 3);
+    const normals = new Float32Array(totalVertexCount * 3);
+    const tangents = new Float32Array(totalVertexCount * 4);
+    const uvs = new Float32Array(totalVertexCount * 2);
+    const colors = new Float32Array(totalVertexCount * 4);
 
     const span = this.params.worldSpan;
     const cellWorld = span / (R - 1);
@@ -2238,8 +2245,43 @@ export class GpuErosionEngine {
       }
     }
 
+    // Bake the editor-time SDF cave/tunnel surface into ordinary static
+    // triangles. No runtime SDF/volume evaluation is needed in a game.
+    for (let i = 0; i < caveVertexCount; i++) {
+      const vi = vCount + i;
+      const px = caveSys.positions[i * 3] || 0;
+      const py = caveSys.positions[i * 3 + 1] || 0;
+      const pz = caveSys.positions[i * 3 + 2] || 0;
+      positions[vi * 3] = px;
+      positions[vi * 3 + 1] = py;
+      positions[vi * 3 + 2] = pz;
+      normals[vi * 3] = caveSys.normals?.[i * 3] ?? 0;
+      normals[vi * 3 + 1] = caveSys.normals?.[i * 3 + 1] ?? 1;
+      normals[vi * 3 + 2] = caveSys.normals?.[i * 3 + 2] ?? 0;
+      tangents[vi * 4] = 1;
+      tangents[vi * 4 + 1] = 0;
+      tangents[vi * 4 + 2] = 0;
+      tangents[vi * 4 + 3] = 1;
+      uvs[vi * 2] = Math.max(0, Math.min(1, px / span + 0.5));
+      uvs[vi * 2 + 1] = Math.max(0, Math.min(1, pz / span + 0.5));
+      const ao = Math.max(0, Math.min(1, caveSys.attribs?.[i * 4] ?? 0.55));
+      const shade = 0.30 + ao * 0.58;
+      colors[vi * 4] = 0.48 * shade;
+      colors[vi * 4 + 1] = 0.43 * shade;
+      colors[vi * 4 + 2] = 0.38 * shade;
+      colors[vi * 4 + 3] = 1.0;
+    }
+
+    const portalAt = (u, v) => {
+      if (!caveSys || !caveSys.portalTexData || caveVertexCount <= 0) return 0;
+      const P = caveSys.portalMaskSize || 128;
+      const ix = Math.max(0, Math.min(P - 1, Math.floor(u * P)));
+      const iz = Math.max(0, Math.min(P - 1, Math.floor(v * P)));
+      return caveSys.portalTexData[(iz * P + ix) * 4] || 0;
+    };
+
     const qCount = (M - 1) * (M - 1);
-    const indices = new Uint32Array(qCount * 6);
+    const indices = new Uint32Array(qCount * 6 + caveVertexCount);
     let ip = 0;
     for (let gz = 0; gz < M - 1; gz++) {
       for (let gx = 0; gx < M - 1; gx++) {
@@ -2247,6 +2289,9 @@ export class GpuErosionEngine {
         const i10 = i00 + 1;
         const i01 = i00 + M;
         const i11 = i01 + 1;
+        // Cut a real polygon hole where an SDF cave/tunnel breaches the
+        // heightfield, instead of relying on the editor's portal shader.
+        if (portalAt((gx + 0.5) / Math.max(1, M - 1), (gz + 0.5) / Math.max(1, M - 1)) > 0.38) continue;
         indices[ip++] = i00;
         indices[ip++] = i01;
         indices[ip++] = i10;
@@ -2256,6 +2301,10 @@ export class GpuErosionEngine {
       }
     }
 
-    return { positions, normals, tangents, uvs, colors, indices };
+    for (let i = 0; i < caveVertexCount; i++) {
+      indices[ip++] = vCount + i;
+    }
+
+    return { positions, normals, tangents, uvs, colors, indices: indices.slice(0, ip) };
   }
 }

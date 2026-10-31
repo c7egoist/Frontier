@@ -14,6 +14,8 @@ import {
   DERIVED_PALETTES,
   LAYER_CATEGORIES,
   LAYER_OPERATION_SPECS,
+  SCULPT_BLEND_MODES,
+  SPLINE_LANDFORM_MODES,
   SPLINE_MODES,
   TERRAIN_STACK_PRESETS,
   VEG_SPECIES,
@@ -48,14 +50,15 @@ const OP_DESCRIPTIONS = {
   'rock-stacks': 'Synthesizes Slate-style tiered, leaning boulder tors and mushroom caprock columns.',
   'cliff-push-pull': 'Applies 3D lateral crag buttress and ledge overhang vector displacement on steep faces.',
   'sdf-caves': 'Subtracts real 3D volumetric karst cave tunnels and cliff-base undercuts using boolean SDFs.',
-  'sculpt-layer': 'Stores non-destructive 3D brush edits (add/remove height & carve/fill 3D caves) separately from procedural layers.',
+  'sculpt-layer': 'Stores non-destructive 3D brush edits separately from procedural layers, then Add/Subtract, Multiply/Scale, Mix-to-Target or Max/Min them with seeded noise; also carve/fill 3D caves.',
   'river-incision': 'Integrates catchment drainage discharge and carves bedrock gorges weighted by 3D rock hardness.',
   'hydraulic-erosion': 'Simulates rainfall runoff detachment, sediment capacity transport, and piedmont alluvial fans.',
   'thermal-talus': 'Spalls over-steepened cliff faces and relaxes loose scree cones to their angle of repose.',
   'aeolian-glacial': 'Simulates alpine snowpack, avalanches, firn compaction and cirque glacier plucking. Wind erosion now has its own layer.',
   'wind-erosion': 'Simulates turbulent wind flow around rock: sand saltation, deflation, lee deposition, differential sandstone abrasion, basal undercutting, yardang streamlining and warped vertical fluting for fins and spires.',
   'chemical-weathering': 'Reacts water, snowmelt and evaporation with mineral veins: iron rust, copper patina, hydrolysis to clay, dissolution, salt bursting and desert varnish.',
-  'spline-feature': 'Steers an interactive 3D control spline to cut canyon gorges, grade switchback roads, or excavate lakes.',
+  'spline-feature': 'Legacy interactive spline for canyon gorges, graded roads, or lake basins (unchanged for existing terrains).',
+  'spline-landform': 'New parameterized smooth spline: add a mountain ridge, subtract a canyon, grade a directed river or road, or bore an SDF tunnel completely through terrain.',
   'rock-placement': 'Distributes gravity-settled 3D loose boulders across cliff toes and crowns (distinct from bedrock landforms).',
   'vegetation-placement': 'Instantiates up to 44,000 real 3D multi-blade grass tufts masked by slope, elevation, snow, and water.',
 };
@@ -162,14 +165,21 @@ const INSPECTOR_SCHEMAS = {
     hasSeed: true,
   },
   'sculpt-layer': {
-    selects: [],
+    selects: [
+      { key: 'blendMode', label: 'Sculpt / Noise Blend Operation', options: Object.values(SCULPT_BLEND_MODES).map((o) => ({ value: o.id, label: o.label })) },
+    ],
     sliders: [
       { key: 'brushRadius', label: 'Sculpt / Cave Brush Radius', min: 8, max: 96, step: 1, fmt: (v) => `${Math.round(v)} m` },
       { key: 'brushStrength', label: 'Stamp Strength', min: 0.1, max: 1.5, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'caveHeightOffset', label: '3D Cave Depth Below Surface', min: 2, max: 24, step: 0.5, fmt: (v) => `${Number(v).toFixed(1)} m` },
+      { key: 'noiseAmount', label: 'Procedural Noise Mixed Into Sculpt', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'noiseScale', label: 'Sculpt Noise Frequency', min: 0.3, max: 4.0, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+      { key: 'noiseHeight', label: 'Noise Relief Inside Sculpt Footprint', min: 0, max: 30, step: 0.5, fmt: (v) => `${Number(v).toFixed(1)} m` },
+      { key: 'targetHeight', label: 'Mix / Max-Min Target Height', min: 2, max: 220, step: 1, fmt: (v) => `${Math.round(v)} m` },
+      { key: 'multiplyStrength', label: 'Multiply Height Strength', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'opacity', label: 'Layer Contribution', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     ],
-    hasSeed: false,
+    hasSeed: true,
   },
   'river-incision': {
     selects: [],
@@ -265,6 +275,38 @@ const INSPECTOR_SCHEMAS = {
     ],
     hasSeed: false,
   },
+  'spline-landform': {
+    selects: [
+      { key: 'mode', label: 'Spline Landform Operation', options: Object.values(SPLINE_LANDFORM_MODES).map((o) => ({ value: o.id, label: o.label })) },
+      {
+        key: 'tunnelFollowSurface',
+        label: 'Tunnel Vertical Path',
+        options: [
+          { value: 0, label: 'Fixed Start → End Elevation Grade' },
+          { value: 1, label: 'Follow Surface at Tunnel Depth' },
+        ],
+      },
+    ],
+    sliders: [
+      { key: 'width', label: 'Influence Width', min: 6, max: 180, step: 1, fmt: (v) => `${Math.round(v)} m` },
+      { key: 'amount', label: 'Raise / Cut / Road Amount', min: 0, max: 140, step: 1, fmt: (v) => `${Math.round(v)} m` },
+      { key: 'falloff', label: 'Edge Falloff Softness', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'sharpness', label: 'Crest / Wall Sharpness', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'noiseAmount', label: 'Natural Noise Variation', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'noiseScale', label: 'Noise Frequency', min: 0.3, max: 4.0, step: 0.05, fmt: (v) => `${Number(v).toFixed(2)}×` },
+      { key: 'startElevation', label: 'Start Elevation (River/Road/Tunnel)', min: 2, max: 220, step: 1, fmt: (v) => `${Math.round(v)} m` },
+      { key: 'endElevation', label: 'End Elevation (River/Road/Tunnel)', min: 2, max: 220, step: 1, fmt: (v) => `${Math.round(v)} m` },
+      { key: 'flattenStrength', label: 'Grade Flatten Strength', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'waterDepth', label: 'River Water Depth', min: 0.0, max: 5.0, step: 0.1, fmt: (v) => `${Number(v).toFixed(1)} m` },
+      { key: 'sediment', label: 'Channel / Road Sediment', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'bankHeight', label: 'Bank / Shoulder Height', min: 0.0, max: 6.0, step: 0.1, fmt: (v) => `${Number(v).toFixed(1)} m` },
+      { key: 'tunnelRadius', label: 'SDF Tunnel Radius', min: 2, max: 18, step: 0.5, fmt: (v) => `${Number(v).toFixed(1)} m` },
+      { key: 'tunnelDepth', label: 'Tunnel Depth Below Surface (Follow Mode)', min: 6, max: 70, step: 1, fmt: (v) => `${Math.round(v)} m` },
+      { key: 'tunnelRoughness', label: 'Tunnel Wall Roughness', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'opacity', label: 'Layer Blend Weight', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    ],
+    hasSeed: true,
+  },
   'rock-placement': {
     selects: [],
     sliders: [
@@ -289,6 +331,10 @@ const INSPECTOR_SCHEMAS = {
     hasSeed: true,
   },
 };
+
+function isSplineAuthoringLayer(layer) {
+  return layer?.type === 'spline-feature' || layer?.type === 'spline-landform';
+}
 
 function summarizeLayer(layer) {
   const spec = LAYER_OPERATION_SPECS[layer.type];
@@ -418,8 +464,8 @@ export class ErosionLayerStackUI {
     // Automatically select or highlight relevant layer when entering spline or sculpt tool
     if (tool === 'spline-edit') {
       const sel = this.pipeline.getSelectedLayer();
-      if (!sel || sel.type !== 'spline-feature') {
-        const sp = this.pipeline.layers.find((l) => l.type === 'spline-feature');
+      if (!isSplineAuthoringLayer(sel)) {
+        const sp = this.pipeline.layers.find((l) => isSplineAuthoringLayer(l));
         if (sp) {
           this.pipeline.selectedLayerId = sp.id;
           this.renderStackList();
@@ -477,7 +523,7 @@ export class ErosionLayerStackUI {
         this.elAddMenu.hidden = true;
         this.pipeline.addLayer(type);
         if (type === 'sculpt-layer') this.setAuthorTool('sculpt-add');
-        else if (type === 'spline-feature') this.setAuthorTool('spline-edit');
+        else if (type === 'spline-feature' || type === 'spline-landform') this.setAuthorTool('spline-edit');
         this.renderAll();
       });
     });
@@ -868,7 +914,7 @@ export class ErosionLayerStackUI {
       authoringCardHtml = `
         <section class="tp-property-card">
           <h2><i style="background:${cat.color}"></i><span>Non-Destructive Sculpt Brushes</span></h2>
-          <p class="tp-card-note">Paint directly on the 3D terrain. Edits are stored inside this Sculpt Layer so procedural landforms below remain 100% editable.</p>
+          <p class="tp-card-note">Paint basic raised/carved/smoothed shapes directly on the 3D terrain. They are stored only in this layer, then combined with the landform/noise using the Blend Operation above: Add, Multiply/Scale, Mix to Target, or Max/Min. Place this layer low for base-shape authoring or high for final hand finishing.</p>
           <div class="tp-brush-grid">
             <button type="button" class="${curT === 'sculpt-add' ? 'active' : ''}" data-set-tool="sculpt-add">+ Raise</button>
             <button type="button" class="${curT === 'sculpt-remove' ? 'active' : ''}" data-set-tool="sculpt-remove">− Carve</button>
@@ -881,13 +927,20 @@ export class ErosionLayerStackUI {
             <button type="button" class="tp-mini-btn danger" id="tp-btn-clear-sculpt">Clear Layer Strokes (${layer.params.strokeCount || 0})</button>
           </div>
         </section>`;
-    } else if (layer.type === 'spline-feature') {
+    } else if (isSplineAuthoringLayer(layer)) {
       const pts = layer.params.points || [];
-      const spModeLabel = SPLINE_MODES[layer.params.mode ?? 0]?.label || 'canyon cut';
+      const spModeLabel = layer.type === 'spline-landform'
+        ? (SPLINE_LANDFORM_MODES[layer.params.mode ?? 0]?.label || 'spline landform')
+        : (SPLINE_MODES[layer.params.mode ?? 0]?.label || 'canyon cut');
+      const splineNote = layer.type === 'spline-landform' && Number(layer.params.mode ?? 0) === 4
+        ? 'This path becomes a continuous 3D SDF tube under the heightfield, with portals where it exits the terrain.'
+        : layer.type === 'spline-landform'
+          ? 'The smooth path is an influence mask: it can add a ridge, subtract a canyon, or grade a river/road from Start Elevation to End Elevation.'
+          : 'Legacy spline behaviour is unchanged for existing terrains.';
       authoringCardHtml = `
         <section class="tp-property-card">
           <h2><i style="background:${cat.color}"></i><span>3D Spline Control Path (${pts.length}/8 pts)</span></h2>
-          <p class="tp-card-note">Drag gold control handles directly on the 3D viewport to steer this ${spModeLabel.toLowerCase()}.</p>
+          <p class="tp-card-note">Drag gold control handles directly on the 3D viewport to steer this ${spModeLabel.toLowerCase()}. ${splineNote}</p>
           <div class="tp-card-footer-btns">
             <button type="button" class="tp-mini-btn ${this.pipeline.authorTool === 'spline-edit' ? 'active' : ''}" data-set-tool="spline-edit">Edit Points in Viewport</button>
             <button type="button" class="tp-mini-btn" id="tp-btn-add-spline-pt" ${pts.length >= 8 ? 'disabled' : ''}>+ Append Point</button>
@@ -1331,7 +1384,7 @@ export class ErosionLayerStackUI {
     window.addEventListener('pointermove', (e) => {
       if (this.draggingSplinePt < 0) return;
       const sel = this.pipeline.getSelectedLayer();
-      if (!sel || sel.type !== 'spline-feature') {
+      if (!isSplineAuthoringLayer(sel)) {
         this.draggingSplinePt = -1;
         return;
       }
@@ -1360,7 +1413,7 @@ export class ErosionLayerStackUI {
     const showGizmo =
       this.engine.active &&
       sel &&
-      sel.type === 'spline-feature' &&
+      isSplineAuthoringLayer(sel) &&
       sel.enabled &&
       Array.isArray(sel.params.points) &&
       sel.params.points.length >= 2;

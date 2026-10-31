@@ -90,6 +90,7 @@ uniform vec4 uDomain;    // (worldSpan, gridRes, maxRelief, opKind)
 uniform vec4 uParam0;
 uniform vec4 uParam1;
 uniform vec4 uParam2;
+uniform vec4 uParam3;
 uniform vec4 uMaskCfg1;
 uniform vec4 uMaskCfg2;
 uniform vec4 uSplinePts[4]; // up to 8 (x, z) points packed as 4 vec4s
@@ -123,6 +124,58 @@ void evalSplineDist(vec2 xz, out float minDist, out float alongT) {
     if (d < minDist) {
       minDist = d;
       alongT = (float(i) + t) * invSegs;
+    }
+  }
+}
+
+vec2 splineControlPoint(int idx) {
+  if (idx <= 0) return uSplinePts[0].xy;
+  if (idx == 1) return uSplinePts[0].zw;
+  if (idx == 2) return uSplinePts[1].xy;
+  if (idx == 3) return uSplinePts[1].zw;
+  if (idx == 4) return uSplinePts[2].xy;
+  if (idx == 5) return uSplinePts[2].zw;
+  if (idx == 6) return uSplinePts[3].xy;
+  return uSplinePts[3].zw;
+}
+
+vec2 catmullRomSplinePoint(vec2 p0, vec2 p1, vec2 p2, vec2 p3, float t) {
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return 0.5 * ((2.0 * p1) + (-p0 + p2) * t +
+    (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
+    (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+}
+
+// Smooth Catmull-Rom distance field for the newer Spline Landform layer.
+// The legacy evalSplineDist above remains untouched for spline-feature parity.
+void evalSmoothSplineDist(vec2 xz, out float minDist, out float alongT) {
+  minDist = 1e6;
+  alongT = 0.0;
+  int n = clamp(uSplineCount, 0, 8);
+  if (n < 2) return;
+  int segCount = n - 1;
+  float invSegs = 1.0 / float(max(1, segCount));
+  for (int i = 0; i < 7; i++) {
+    if (i >= segCount) break;
+    vec2 p0 = splineControlPoint(max(i - 1, 0));
+    vec2 p1 = splineControlPoint(i);
+    vec2 p2 = splineControlPoint(min(i + 1, n - 1));
+    vec2 p3 = splineControlPoint(min(i + 2, n - 1));
+    for (int j = 0; j < 5; j++) {
+      float t0 = float(j) * 0.2;
+      float t1 = float(j + 1) * 0.2;
+      vec2 a = catmullRomSplinePoint(p0, p1, p2, p3, t0);
+      vec2 b = catmullRomSplinePoint(p0, p1, p2, p3, t1);
+      vec2 ab = b - a;
+      float len2 = max(1e-4, dot(ab, ab));
+      float localT = clamp(dot(xz - a, ab) / len2, 0.0, 1.0);
+      vec2 proj = a + ab * localT;
+      float d = length(xz - proj);
+      if (d < minDist) {
+        minDist = d;
+        alongT = (float(i) + (float(j) + localT) * 0.2) * invSegs;
+      }
     }
   }
 }
@@ -356,12 +409,43 @@ void main() {
   }
 
   if (opKind == 5) {
-    // 5. NON-DESTRUCTIVE GPU SCULPT LAYER (Height Add/Carve + Laplacian Smooth)
+    // 5. NON-DESTRUCTIVE GPU SCULPT LAYER
+    // uParam0=(opacity, blendMode, noiseAmount, noiseScale)
+    // uParam1=(targetHeight, seed, noiseHeight, multiplyStrength)
+    // Blend 0 preserves the original additive sculpt path exactly when noise=0.
     float opacity = uParam0.x * maskW;
+    int blendMode = int(uParam0.y + 0.5);
+    float noiseAmount = clamp(uParam0.z, 0.0, 1.0);
+    float noiseScale = max(0.05, uParam0.w);
+    float targetHeight = uParam1.x;
+    float seed = uParam1.y;
+    float noiseHeight = uParam1.z;
+    float multiplyStrength = clamp(uParam1.w, 0.0, 2.0);
     vec4 sc = texelFetch(uSculptTex, c, 0);
     float avgBed = (tR.r + tL.r + tU.r + tD.r) * 0.25;
     float smoothed = mix(tC.r, avgBed, clamp(sc.g, 0.0, 0.92));
-    tC.r = max(1.0, mix(tC.r, smoothed + sc.r, clamp(opacity, 0.0, 1.0)));
+    float footprint = clamp(max(sc.b, max(clamp(abs(sc.r) / 18.0, 0.0, 1.0), sc.g)), 0.0, 1.0);
+    vec2 sv = vec2(fract(seed * 0.1031) * 41.0, fract(seed * 0.1733) * 57.0);
+    float ridgeNoise = ridgedFbm2D(worldXZ * (0.012 * noiseScale) + sv, 4, 0.56);
+    float broadNoise = fbm2D(worldXZ * (0.006 * noiseScale) + sv + 17.3, 4, 0.52);
+    float noisyDelta = sc.r * (1.0 + (ridgeNoise - 0.5) * 1.6 * noiseAmount)
+      + (broadNoise - 0.5) * noiseHeight * noiseAmount * footprint;
+    float candidate = smoothed + noisyDelta;
+    float blendW = clamp(opacity, 0.0, 1.0);
+    if (blendMode == 1) {
+      float normalized = clamp(noisyDelta / 45.0, -1.0, 1.0);
+      float heightScale = max(0.05, 1.0 + normalized * multiplyStrength);
+      candidate = smoothed * heightScale + (broadNoise - 0.5) * noiseHeight * 0.35 * noiseAmount * footprint;
+      blendW = clamp(opacity * footprint, 0.0, 1.0);
+    } else if (blendMode == 2) {
+      candidate = targetHeight + noisyDelta;
+      blendW = clamp(opacity * footprint, 0.0, 1.0);
+    } else if (blendMode == 3) {
+      float sculptSurface = targetHeight + noisyDelta;
+      candidate = sc.r >= 0.0 ? max(smoothed, sculptSurface) : min(smoothed, sculptSurface);
+      blendW = clamp(opacity * footprint, 0.0, 1.0);
+    }
+    tC.r = max(1.0, mix(tC.r, candidate, blendW));
     outTerrain = tC;
     outVecDisp = vd;
     return;
@@ -417,6 +501,108 @@ void main() {
     return;
   }
 
+
+  if (opKind == 7) {
+    // 7. PARAMETERIZED SPLINE LANDFORM
+    // Modes: 0=Mountain Ridge Add, 1=Canyon Subtract, 2=River Channel,
+    //        3=Road Cut/Grade, 4=SDF Tunnel (CPU SDF only; no height op)
+    // uParam0=(mode,width,amount,falloff)
+    // uParam1=(sharpness,noiseAmount,noiseScale,waterDepth)
+    // uParam2=(startElevation,endElevation,seed,opacity)
+    // uParam3=(sediment,flattenStrength,bankHeight,reserved)
+    int mode = int(uParam0.x + 0.5);
+    if (mode == 4) {
+      outTerrain = tC;
+      outVecDisp = vd;
+      return;
+    }
+    float width = max(4.0, uParam0.y);
+    float amount = max(0.0, uParam0.z);
+    float falloff = clamp(uParam0.w, 0.0, 1.0);
+    float sharpness = clamp(uParam1.x, 0.0, 1.0);
+    float noiseAmount = clamp(uParam1.y, 0.0, 1.0);
+    float noiseScale = max(0.05, uParam1.z);
+    float waterDepth = max(0.0, uParam1.w);
+    float startElevation = uParam2.x;
+    float endElevation = uParam2.y;
+    float seed = uParam2.z;
+    float opacity = clamp(uParam2.w * maskW, 0.0, 1.0);
+    float sediment = clamp(uParam3.x, 0.0, 1.0);
+    float flattenStrength = clamp(uParam3.y, 0.0, 1.0);
+    float bankHeight = max(0.0, uParam3.z);
+
+    float dSpline;
+    float alongT;
+    evalSmoothSplineDist(worldXZ, dSpline, alongT);
+    vec2 sv = vec2(fract(seed * 0.1031) * 43.0, fract(seed * 0.1733) * 59.0);
+    float wallWarp = (fbm2D(worldXZ * (0.018 * noiseScale) + sv, 3, 0.52) - 0.5)
+      * width * 0.48 * noiseAmount;
+    float d = max(0.0, dSpline + wallWarp);
+    float halfW = width * 0.5;
+    float core = 1.0 - safeSmoothstep(
+      halfW * (0.18 + 0.62 * sharpness),
+      halfW * (0.75 + 0.85 * falloff),
+      d
+    );
+    float profile = pow(max(1e-4, core), mix(1.7, 0.62, sharpness));
+    float bankBand = exp(-pow(max(0.0, d - halfW * 0.72) / (halfW * 0.42 + 1.0), 2.0))
+      * safeSmoothstep(halfW * 0.34, halfW * 0.72, d) * (1.0 - profile * 0.45);
+    float ridgeNoise = ridgedFbm2D(worldXZ * (0.011 * noiseScale) + sv, 5, 0.56);
+    float broadNoise = fbm2D(worldXZ * (0.0055 * noiseScale) + sv + 23.7, 4, 0.52);
+    float noiseMod = clamp(1.0 + (ridgeNoise - 0.5) * 1.7 * noiseAmount, 0.18, 1.9);
+    float grade = mix(startElevation, endElevation, alongT);
+
+    if (mode == 0) {
+      // Additive mountain ridge: broad noisy uplift plus a sharper crest.
+      float lift = amount * profile * noiseMod;
+      float crest = pow(profile, 3.0) * amount * 0.18 * noiseMod;
+      tC.r = max(1.0, tC.r + (lift + crest + bankBand * bankHeight * 0.35) * opacity);
+      tC.b = max(0.0, tC.b - lift * 0.025 * sediment * opacity);
+      tC.g = max(0.0, tC.g + profile * (1.0 - profile) * sediment * 0.18 * opacity);
+    } else if (mode == 1) {
+      // Subtractive canyon. The optional longitudinal grade can guide the
+      // floor downstream, but min() guarantees this mode never fills terrain.
+      float noisyGrade = max(2.0, grade + (broadNoise - 0.5) * amount * 0.10 * noiseAmount);
+      float cutH = max(2.0, tC.r - amount * profile * noiseMod);
+      float guidedH = mix(cutH, min(cutH, noisyGrade), pow(profile, 1.4) * flattenStrength);
+      tC.r = max(1.5, mix(tC.r, guidedH, opacity) + bankBand * bankHeight * opacity);
+      tC.g = max(0.0, tC.g * (1.0 - profile * 0.72 * opacity));
+      tC.b = max(0.0, tC.b * (1.0 - profile * 0.45 * opacity) + profile * sediment * 0.22 * opacity);
+    } else if (mode == 2) {
+      // Directed river: carve toward a start->end water/bed grade so the
+      // channel has a continuous downstream direction chosen by the author.
+      float channelHalf = halfW * 0.48;
+      float channel = 1.0 - safeSmoothstep(channelHalf * 0.35, channelHalf * (1.0 + 0.70 * falloff), d);
+      float noisyGrade = grade + (broadNoise - 0.5) * 0.8 * noiseAmount;
+      float carved = max(1.5, tC.r - amount * pow(profile, 1.25) * noiseMod);
+      float gradeBlend = flattenStrength * max(pow(profile, 1.15), pow(channel, 0.65));
+      float target = mix(carved, noisyGrade, gradeBlend);
+      tC.r = max(1.5, mix(tC.r, target, opacity) + bankBand * bankHeight * opacity);
+      tC.g = max(0.0, tC.g * (1.0 - channel * 0.65 * opacity));
+      tC.b = max(0.0, tC.b + channel * sediment * 0.20 * opacity);
+      float totalH = tC.r + tC.g + tC.b;
+      tC.a = max(tC.a, max(0.0, noisyGrade + waterDepth - totalH) * channel * opacity);
+    } else if (mode == 3) {
+      // Road corridor: cut or fill toward the authored longitudinal grade,
+      // capped by Amount so a road can bench through a hillside without
+      // flattening the entire mountain. Tunnels use mode 4 / the SDF volume.
+      float roadHalf = halfW * 0.62;
+      float roadMask = 1.0 - safeSmoothstep(roadHalf * 0.55, roadHalf * (1.0 + 0.65 * falloff), d);
+      float roadGrade = grade + (broadNoise - 0.5) * 0.7 * noiseAmount;
+      float limitedDelta = clamp(roadGrade - tC.r, -amount, amount);
+      float target = tC.r + limitedDelta;
+      tC.r = max(1.5, mix(tC.r, target, roadMask * flattenStrength * opacity)
+        + bankBand * bankHeight * 0.45 * opacity);
+      tC.g = max(0.0, tC.g * (1.0 - roadMask * 0.80 * opacity));
+      tC.b = max(0.0, tC.b * (1.0 - roadMask * 0.55 * opacity) + roadMask * sediment * 0.10 * opacity);
+      tC.a = max(0.0, tC.a * (1.0 - roadMask * 0.90 * opacity));
+    }
+
+    outTerrain = tC;
+    outVecDisp = vd;
+    return;
+  }
+
   outTerrain = tC;
   outVecDisp = vd;
 }
@@ -430,7 +616,7 @@ export const SCULPT_STAMP_FRAG = `#version 300 es
 ${GLSL_PRECISION_HEADER}
 
 in vec2 vUv;
-layout(location = 0) out vec4 outSculpt; // (deltaH, smoothWeight, 0, 0)
+layout(location = 0) out vec4 outSculpt; // (deltaH, smoothWeight, paintedFootprint, 0)
 
 uniform sampler2D uSculptTex;
 uniform vec4 uBrushPosRad; // (worldX, worldZ, radius, worldSpan)
@@ -451,6 +637,7 @@ void main() {
   int op = int(uBrushOpStr.x + 0.5);
   float str = uBrushOpStr.y;
 
+  cur.b = clamp(max(cur.b, falloff), 0.0, 1.0);
   if (op == 0) {
     cur.r = clamp(cur.r + falloff * str * 2.2, -160.0, 160.0);
   } else if (op == 1) {

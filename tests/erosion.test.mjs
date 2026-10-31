@@ -24,6 +24,9 @@ import {
   DERIVED_PALETTES,
   LAYER_CATEGORIES,
   LAYER_OPERATION_SPECS,
+  SCULPT_BLEND_MODES,
+  SPLINE_LANDFORM_MODES,
+  SPLINE_MODES,
   TERRAIN_STACK_PRESETS,
   createStackLayer,
 } from '../src/erosion/terrain-stack-presets.js';
@@ -731,9 +734,9 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
   }
   assert.ok(verified >= 45, `Expected >= 45 verified pipeline GPU uniform bindings, got ${verified}`);
 
-  // Verify 16 composable operations across all 5 categories, and ZERO colour/material/biome layers!
+  // Verify 17 composable operations across all 5 categories, and ZERO colour/material/biome layers!
   const specKeys = Object.keys(LAYER_OPERATION_SPECS);
-  assert.equal(specKeys.length, 16);
+  assert.equal(specKeys.length, 17);
   for (const catKey of ['landform', 'simulation', 'spline', 'rocks', 'vegetation']) {
     assert.ok(LAYER_CATEGORIES[catKey], `Missing category ${catKey}`);
     assert.ok(specKeys.some((k) => LAYER_OPERATION_SPECS[k].category === catKey), `No operation in category ${catKey}`);
@@ -752,15 +755,17 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
   assert.equal(Object.keys(DERIVED_PALETTES).length, 10, 'All 10 regional geological MATERIAL_THEMES live separately from the layer stack');
 
   // Verify all 19 canonical EROSION_LANDSCAPES recipes plus the curated
-  // Utah Wind+Rain stack build valid bottom-up stacks anchored by base-landform.
+  // Utah and standalone spline-authoring manual stacks build valid
+  // bottom-up stacks anchored by base-landform.
   const presetKeys = Object.keys(TERRAIN_STACK_PRESETS);
-  assert.equal(presetKeys.length, 20);
+  assert.equal(presetKeys.length, 22);
   for (const pk of presetKeys) {
-    const isUtahWindRain = pk === 'utah-wind-rain-canyon';
+    const stackPreset = TERRAIN_STACK_PRESETS[pk];
+    const isManualRecipe = stackPreset.manualRecipe === true;
     const orig = EROSION_LANDSCAPES[pk];
-    if (!isUtahWindRain) assert.ok(orig, `Stack preset ${pk} must map 1:1 to canonical EROSION_LANDSCAPES`);
-    const expectedType = isUtahWindRain ? 15 : orig.terrainType;
-    const expectedRelief = isUtahWindRain ? 158 : (orig.defaults.relief ?? DEFAULT_EROSION_PARAMS.relief);
+    if (!isManualRecipe) assert.ok(orig, `Stack preset ${pk} must map 1:1 to canonical EROSION_LANDSCAPES`);
+    const expectedType = isManualRecipe ? stackPreset.terrainType : orig.terrainType;
+    const expectedRelief = isManualRecipe ? stackPreset.expectedRelief : (orig.defaults.relief ?? DEFAULT_EROSION_PARAMS.relief);
     const stack = TERRAIN_STACK_PRESETS[pk].layers();
     assert.ok(stack.length >= 3, `Preset ${pk} must populate a multi-stage editable stack`);
     const bottomLayer = stack[stack.length - 1];
@@ -1234,21 +1239,23 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
     assert.ok(elements.get('tp-inspector-content').innerHTML.includes('tp-property-card'), 'Inspector must render property cards');
     assert.ok(elements.get('cb-preset-grid').innerHTML.includes('cb-preset-card'), 'Preset shelf must render all canonical + Utah recipes');
 
-    // Cycle through ALL canonical stack presets plus Utah Wind+Rain, verifying
-    // exact generator/parameter/seed parity & zero feedback loops!
+    // Cycle through ALL canonical stack presets plus Utah and the standalone
+    // spline-authoring recipes, verifying exact generator/parameter/seed
+    // parity & zero feedback loops!
     for (const presetId of Object.keys(TERRAIN_STACK_PRESETS)) {
-      const isUtahWindRain = presetId === 'utah-wind-rain-canyon';
+      const stackPreset = TERRAIN_STACK_PRESETS[presetId];
+      const isManualRecipe = stackPreset.manualRecipe === true;
       const orig = EROSION_LANDSCAPES[presetId];
       const d = {
         ...DEFAULT_EROSION_PARAMS,
         ...(orig?.defaults || {}),
-        ...(isUtahWindRain ? { relief: 158, roughness: 0.68 } : {}),
+        ...(isManualRecipe ? { relief: stackPreset.expectedRelief, roughness: stackPreset.expectedRoughness } : {}),
       };
       engine.pipeline.loadPreset(presetId);
       assert.equal(engine.params.relief, d.relief, `Preset ${presetId} relief parity`);
       assert.equal(engine.params.roughness, d.roughness, `Preset ${presetId} roughness parity`);
       assert.equal(engine.params.seed, 4029, `Preset ${presetId} seed parity`);
-      assert.equal(engine.params.materialTheme, isUtahWindRain ? 0 : (orig.materialTheme ?? 0), `Preset ${presetId} materialTheme parity`);
+      assert.equal(engine.params.materialTheme, isManualRecipe ? stackPreset.palette : (orig.materialTheme ?? 0), `Preset ${presetId} materialTheme parity`);
       assert.ok(engine.telemetry.fineSedM3 < 50_000_000, `Preset ${presetId} fineSedM3 must stay physically bounded`);
       assert.ok(engine.telemetry.coarseSedM3 < 50_000_000, `Preset ${presetId} coarseSedM3 must stay physically bounded`);
       ui.renderAll();
@@ -1667,7 +1674,7 @@ test('Chemical weathering is a terrain-wide simulation layer with multiple react
     const chemLayers = preset.layers().filter((l) => l.type === 'chemical-weathering');
     assert.equal(
       chemLayers.length,
-      presetId === 'lunar-mare-craters' || presetId === 'utah-wind-rain-canyon' ? 0 : 1,
+      presetId === 'lunar-mare-craters' || preset.manualRecipe ? 0 : 1,
       `${presetId} chemical layer count`
     );
   }
@@ -1829,4 +1836,126 @@ test('Wind erosion is its own turbulent layer and Utah stack has Rain + Wind onl
     assert.ok(uiSrc.includes(`key: '${key}'`), `Wind inspector missing ${key} slider`);
   }
   assert.ok(uiSrc.includes("label: 'Prevailing Wind Direction'"), 'Wind direction/angle must be directly editable');
+});
+
+
+test('Spline Landform layers sculpt with noise and bore SDF tunnels on isolated test terrains', () => {
+  const spec = LAYER_OPERATION_SPECS['spline-landform'];
+  assert.ok(spec, 'New parameterized Spline Landform operation exists');
+  assert.equal(spec.category, 'spline');
+  assert.ok(spec.writes.includes('SDF Tunnel'), 'Spline landform can write the SDF volume');
+  assert.deepEqual(Object.values(SPLINE_LANDFORM_MODES).map((m) => m.id), [0, 1, 2, 3, 4]);
+  for (const labelPart of ['Mountain Ridge', 'Canyon', 'River Channel', 'Road Cut', 'SDF Tunnel']) {
+    assert.ok(Object.values(SPLINE_LANDFORM_MODES).some((m) => m.label.includes(labelPart)), `Missing spline mode ${labelPart}`);
+  }
+
+  const spline = createStackLayer('spline-landform');
+  for (const key of ['mode', 'width', 'amount', 'falloff', 'sharpness', 'noiseAmount', 'noiseScale', 'waterDepth', 'sediment', 'startElevation', 'endElevation', 'flattenStrength', 'bankHeight', 'tunnelRadius', 'tunnelDepth', 'tunnelFollowSurface', 'tunnelRoughness', 'opacity', 'seed', 'points']) {
+    assert.ok(key in spline.params, `Spline Landform missing parameter ${key}`);
+  }
+  assert.equal(spline.params.points.length, 5);
+
+  // The old spline operation and all canonical landscape recipes remain
+  // untouched: the new layer appears only in the two standalone test terrains
+  // (plus whenever the user explicitly adds it themselves).
+  assert.deepEqual(Object.values(SPLINE_MODES).map((m) => m.label), ['Canyon Gorge Cut', 'Graded Road / Terrace', 'Lake Basin Boundary']);
+  assert.equal(createStackLayer('spline-feature').params.points.length, 4);
+  for (const presetId of Object.keys(EROSION_LANDSCAPES)) {
+    assert.ok(
+      !TERRAIN_STACK_PRESETS[presetId].layers().some((l) => l.type === 'spline-landform'),
+      `Canonical terrain ${presetId} must not be changed by new spline test layers`
+    );
+  }
+  assert.ok(!TERRAIN_STACK_PRESETS['utah-wind-rain-canyon'].layers().some((l) => l.type === 'spline-landform'));
+
+  const canyonRiver = TERRAIN_STACK_PRESETS['spline-canyon-river-test'];
+  assert.ok(canyonRiver?.manualRecipe, 'Spline Canyon + River Test is a separate manual terrain');
+  assert.deepEqual(
+    canyonRiver.layers().filter((l) => l.type === 'spline-landform').map((l) => l.params.mode),
+    [2, 1, 0],
+    'Canyon/river test evaluates ridge addition first, then canyon subtraction, then directed river'
+  );
+  const canyonSculpt = canyonRiver.layers().find((l) => l.type === 'sculpt-layer');
+  assert.ok(canyonSculpt && canyonSculpt.params.noiseAmount > 0.3 && canyonSculpt.params.blendMode === 0);
+
+  const roadTunnel = TERRAIN_STACK_PRESETS['spline-road-tunnel-test'];
+  assert.ok(roadTunnel?.manualRecipe, 'Spline Road + Tunnel Test is a separate manual terrain');
+  assert.deepEqual(
+    roadTunnel.layers().filter((l) => l.type === 'spline-landform').map((l) => l.params.mode),
+    [4, 3],
+    'Road/tunnel test contains a graded road spline and volumetric tunnel spline'
+  );
+  const tunnelLayer = roadTunnel.layers().find((l) => l.type === 'spline-landform' && l.params.mode === 4);
+  assert.ok(tunnelLayer.params.tunnelRadius >= 8 && tunnelLayer.params.points.length === 5);
+
+  // Sculpt authoring now has explicit add/multiply/mix/max-min noise blends.
+  assert.deepEqual(Object.values(SCULPT_BLEND_MODES).map((m) => m.id), [0, 1, 2, 3]);
+  const sculpt = createStackLayer('sculpt-layer');
+  for (const key of ['blendMode', 'noiseAmount', 'noiseScale', 'noiseHeight', 'targetHeight', 'multiplyStrength', 'seed']) {
+    assert.ok(key in sculpt.params, `Sculpt layer missing ${key}`);
+  }
+  assert.equal(sculpt.params.blendMode, 0, 'Default sculpt blend preserves the original additive behaviour');
+  assert.equal(sculpt.params.noiseAmount, 0, 'Default sculpt noise is off for exact legacy strokes');
+  for (const token of ['evalSmoothSplineDist', 'catmullRomSplinePoint', 'if (opKind == 7)', 'uniform vec4 uParam3', 'noisyDelta', 'heightScale', 'sculptSurface', 'paintedFootprint']) {
+    assert.ok(PipelineShaders.STACK_OP_FRAG.includes(token) || PipelineShaders.SCULPT_STAMP_FRAG.includes(token), `Pipeline shader missing ${token}`);
+  }
+  for (const token of ['Mountain Ridge Add', 'Canyon Subtract', 'River Channel', 'Road Cut/Grade', 'SDF Tunnel']) {
+    assert.ok(PipelineShaders.STACK_OP_FRAG.includes(token), `Spline landform shader missing ${token}`);
+  }
+
+  // Direct CPU SDF proof: a smooth spline tube passes completely through a
+  // synthetic ridge and opens the surface portal mask on the slopes.
+  const N = 64;
+  const snap = new Float32Array(N * N * 4);
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const x = (i / (N - 1) - 0.5) * 512;
+      const ridge = Math.max(0, 1 - Math.abs(x) / 150);
+      snap[(j * N + i) * 4] = 22 + 96 * Math.pow(ridge, 1.25);
+    }
+  }
+  const caveSys = new SdfCaveSystem();
+  const tunnelRes = caveSys.rebuildCaveVolume({
+    gridRgba: snap,
+    gridN: N,
+    worldSpan: 512,
+    caveLayers: [],
+    sculptCaveStrokes: [],
+    splineTunnels: [{
+      points: [[-235, 0], [-120, -18], [0, 0], [120, 18], [235, 0]],
+      radius: 8,
+      startElevation: 38,
+      endElevation: 36,
+      roughness: 0.3,
+      strength: 1,
+      seed: 7201,
+    }],
+    maxRelief: 140,
+  });
+  assert.equal(tunnelRes.hasCaves, true);
+  assert.ok(tunnelRes.vertexCount > 3000, `Spline tunnel should extract a substantial tube mesh, got ${tunnelRes.vertexCount}`);
+  let minX = 1e9, maxX = -1e9, maxPortal = 0;
+  for (let v = 0; v < caveSys.vertexCount; v++) {
+    minX = Math.min(minX, caveSys.positions[v * 3]);
+    maxX = Math.max(maxX, caveSys.positions[v * 3]);
+    const nx = caveSys.normals[v * 3], ny = caveSys.normals[v * 3 + 1], nz = caveSys.normals[v * 3 + 2];
+    assert.ok(Math.abs(Math.hypot(nx, ny, nz) - 1) < 1e-3, 'Tunnel mesh normals are unit length');
+  }
+  for (let k = 0; k < caveSys.portalTexData.length; k += 4) maxPortal = Math.max(maxPortal, caveSys.portalTexData[k]);
+  assert.ok(maxX - minX > 220, `Tunnel mesh must span through the ridge, got ${(maxX - minX).toFixed(1)}m`);
+  assert.ok(maxPortal > 0.4, `Tunnel portals must breach the heightfield mask, got ${maxPortal}`);
+
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  const caveSrc = fs.readFileSync(new URL('../src/erosion/sdf-cave-mesher.js', import.meta.url), 'utf8');
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  assert.ok(pipeSrc.includes("layer.type === 'spline-landform'") && pipeSrc.includes('splineTunnels: activeSplineTunnels'));
+  assert.ok(caveSrc.includes('catmullRom2D') && caveSrc.includes('splineTunnels = []') && caveSrc.includes('path.segments'));
+  assert.ok(uiSrc.includes('isSplineAuthoringLayer') && uiSrc.includes("key: 'tunnelRadius'") && uiSrc.includes("key: 'blendMode'"));
+  for (const key of ['width', 'amount', 'falloff', 'sharpness', 'noiseAmount', 'noiseScale', 'startElevation', 'endElevation', 'flattenStrength', 'waterDepth', 'sediment', 'bankHeight', 'tunnelDepth', 'tunnelRoughness']) {
+    assert.ok(uiSrc.includes(`key: '${key}'`), `Spline inspector missing ${key}`);
+  }
+  // Game export is a baked polygon surface: SDF cave triangles and real
+  // portal holes are merged into extractMeshForExport, not left as runtime SDF.
+  assert.ok(engSrc.includes('caveSys.positions') && engSrc.includes('portalAt') && engSrc.includes('indices.slice(0, ip)'));
 });

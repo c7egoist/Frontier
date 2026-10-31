@@ -149,8 +149,37 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   terrain. The **Utah Wind + Rain Canyon** preset is a rocky Utah stack with
   only Rain and Wind simulation layers (no snow, rockfall/boulders or
   chemical layers).
+- **Spline Landform + sculpt/noise authoring**: a new parameterized smooth
+  Catmull-Rom spline layer (separate from the legacy Spline Canyon/Road
+  layer, so existing stacks are unchanged) uses the path as an influence
+  field. **Mountain Ridge** adds noisy uplift, **Canyon** subtracts a
+  noise-broken gorge, **River Channel** grades from start elevation to end
+  elevation and seeds water/sediment along the authored flow direction,
+  **Road Cut / Grade** cuts or fills toward a drivable longitudinal grade,
+  and **SDF Tunnel** turns the spline into a continuous 3D tube in the cave
+  volume that can pass through a ridge and open portals on both sides.
+  Controls include width, amount, falloff, sharpness, noise, elevations,
+  grade strength, sediment, banks, tunnel radius/depth/roughness, seed and
+  draggable control points. The SDF Sculpt layer can now combine hand-painted
+  basic shapes with seeded noise using **Add/Subtract**, **Multiply/Scale**,
+  **Mix to Target Height** or **Max/Min Union-Clip**, at any point in the
+  bottom-to-top stack. Two isolated test terrains exercise this without
+  modifying the canonical landscapes: **Spline Canyon + River Test** and
+  **Spline Road + Tunnel Test**.
+- **Game export path**: the simulation/SDF stays in the editor. Terrain
+  export bakes the heightfield and active SDF cave/tunnel mesh into one
+  ordinary position/normal/UV/colour polygon mesh for `.glb`/`.obj`, omitting
+  heightfield triangles in open portals so tunnels are real holes rather
+  than shader cutouts. In a game engine, use those baked static meshes (with
+  LODs/decimation and a simplified collision mesh) rather than raymarching a
+  full terrain SDF at runtime. For Unreal-style workflows, broad open terrain
+  can remain Landscape/heightfield while caves, arches, road cuts and spline
+  tunnels ship as baked static-mesh inserts; engine-generated mesh distance
+  fields can still accelerate AO/GI without paying for runtime voxel terrain
+  on GTX-class GPUs.
 
-Verification: `npm test` — 35/35 pass (includes `tests/rain-erosion.test.mjs`,
+Verification: `npm test` — 36/36 pass (includes `tests/rain-erosion.test.mjs`,
 rigid-body free-fall/no-elevator tests, exact-mesh seating / pause-freeze,
-simulation-season / mineral-strata, and dedicated wind-erosion regression
-tests). `npm run build` clean.
+simulation-season / mineral-strata, dedicated wind-erosion, and spline
+landform / sculpt-noise / SDF-through-tunnel regression tests).
+`npm run build` clean.

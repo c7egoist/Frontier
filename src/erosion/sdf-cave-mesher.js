@@ -53,6 +53,19 @@ function smax(a, b, k = 2.0) {
   return b + (a - b) * h + k * h * (1 - h);
 }
 
+function catmullRom2D(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return [
+    0.5 * ((2.0 * p1[0]) + (-p0[0] + p2[0]) * t +
+      (2.0 * p0[0] - 5.0 * p1[0] + 4.0 * p2[0] - p3[0]) * t2 +
+      (-p0[0] + 3.0 * p1[0] - 3.0 * p2[0] + p3[0]) * t3),
+    0.5 * ((2.0 * p1[1]) + (-p0[1] + p2[1]) * t +
+      (2.0 * p0[1] - 5.0 * p1[1] + 4.0 * p2[1] - p3[1]) * t2 +
+      (-p0[1] + 3.0 * p1[1] - 3.0 * p2[1] + p3[1]) * t3),
+  ];
+}
+
 // Marching Cubes Edge & Triangle Lookup Tables (compact bitmask + tri connectivity)
 const EDGE_VERTS = [
   [0, 1], [1, 2], [2, 3], [3, 0],
@@ -115,13 +128,14 @@ export class SdfCaveSystem {
     worldSpan,
     caveLayers = [],
     sculptCaveStrokes = [],
+    splineTunnels = [],
     maxRelief = 180,
   }) {
     const P = this.portalMaskSize;
     this.portalTexData.fill(0);
 
     const activeCaves = caveLayers.filter((l) => l.enabled !== false && (l.params.opacity ?? 1) > 0.02);
-    if (activeCaves.length === 0 && sculptCaveStrokes.length === 0) {
+    if (activeCaves.length === 0 && sculptCaveStrokes.length === 0 && splineTunnels.length === 0) {
       this.vertexCount = 0;
       return { vertexCount: 0, hasCaves: false };
     }
@@ -148,6 +162,101 @@ export class SdfCaveSystem {
       const slope = Math.hypot(dhdx, dhdz);
       return { h, slope, dhdx, dhdz };
     };
+
+    // Continuous Spline Landform tunnel paths. Each path is sampled as a
+    // smooth Catmull-Rom curve, lifted to a start->end elevation grade (or a
+    // constant depth below the local surface), then evaluated below as a
+    // true 3D capsule/tube SDF. Endpoints are extended beyond the authored
+    // points so a bore can cleanly exit both sides of a ridge.
+    const tunnelPaths = [];
+    for (const tunnel of splineTunnels) {
+      if (!tunnel || tunnel.enabled === false) continue;
+      const controls = (Array.isArray(tunnel.points) ? tunnel.points : [])
+        .map((pt) => Array.isArray(pt) ? [Number(pt[0]), Number(pt[1])] : [Number(pt?.x ?? pt?.[0]), Number(pt?.z ?? pt?.[1])])
+        .filter((pt) => Number.isFinite(pt[0]) && Number.isFinite(pt[1]))
+        .slice(0, 8);
+      if (controls.length < 2) continue;
+      const radius = Math.max(1.5, Number(tunnel.radius ?? tunnel.tunnelRadius ?? 7.5) || 7.5);
+      const startY = Number(tunnel.startElevation ?? tunnel.startY ?? 46) || 46;
+      const endY = Number(tunnel.endElevation ?? tunnel.endY ?? startY) || startY;
+      const depth = Math.max(4, Number(tunnel.depth ?? tunnel.tunnelDepth ?? 22) || 22);
+      const followSurface = tunnel.followSurface === true || tunnel.tunnelFollowSurface > 0.5;
+      const samples = [];
+      const pushSample = (x, z, along) => {
+        const surf = sampleHeightSlope(x, z);
+        const y = followSurface ? surf.h - depth : startY + (endY - startY) * along;
+        samples.push({ x, y, z });
+      };
+      pushSample(controls[0][0], controls[0][1], 0);
+      const segCount = controls.length - 1;
+      for (let i = 0; i < segCount; i++) {
+        const p0 = controls[Math.max(0, i - 1)];
+        const p1 = controls[i];
+        const p2 = controls[Math.min(segCount, i + 1)];
+        const p3 = controls[Math.min(segCount, i + 2)];
+        const chord = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+        const subdiv = Math.max(3, Math.min(12, Math.ceil(chord / Math.max(9, radius * 1.15))));
+        for (let j = 1; j <= subdiv; j++) {
+          const t = j / subdiv;
+          const [x, z] = catmullRom2D(p0, p1, p2, p3, t);
+          pushSample(x, z, (i + t) / segCount);
+        }
+      }
+      if (samples.length >= 2) {
+        const extendEnd = (from, to, sign) => {
+          let dx = to.x - from.x;
+          let dz = to.z - from.z;
+          const len = Math.hypot(dx, dz) || 1;
+          dx /= len; dz /= len;
+          const dist = radius * 3.0 + worldSpan / P * 2.0;
+          const dyPerM = Math.max(-0.8, Math.min(0.8, (to.y - from.y) / len));
+          return { x: to.x + dx * dist * sign, y: to.y + dyPerM * dist * sign, z: to.z + dz * dist * sign };
+        };
+        samples.unshift(extendEnd(samples[1], samples[0], 1));
+        samples.push(extendEnd(samples[samples.length - 2], samples[samples.length - 1], 1));
+      }
+      const pad = radius + 7;
+      const segments = [];
+      let minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9, minZ = 1e9, maxZ = -1e9;
+      for (const sm of samples) {
+        minX = Math.min(minX, sm.x); maxX = Math.max(maxX, sm.x);
+        minY = Math.min(minY, sm.y); maxY = Math.max(maxY, sm.y);
+        minZ = Math.min(minZ, sm.z); maxZ = Math.max(maxZ, sm.z);
+      }
+      for (let i = 0; i < samples.length - 1; i++) {
+        const a = samples[i], b = samples[i + 1];
+        segments.push({
+          a, b,
+          minX: Math.min(a.x, b.x) - pad, maxX: Math.max(a.x, b.x) + pad,
+          minY: Math.min(a.y, b.y) - pad, maxY: Math.max(a.y, b.y) + pad,
+          minZ: Math.min(a.z, b.z) - pad, maxZ: Math.max(a.z, b.z) + pad,
+        });
+      }
+      const bucketN = 32;
+      const buckets = Array.from({ length: bucketN * bucketN }, () => []);
+      segments.forEach((seg, segIdx) => {
+        const bx0 = Math.max(0, Math.min(bucketN - 1, Math.floor(((seg.minX + half) / worldSpan) * bucketN)));
+        const bx1 = Math.max(0, Math.min(bucketN - 1, Math.floor(((seg.maxX + half) / worldSpan) * bucketN)));
+        const bz0 = Math.max(0, Math.min(bucketN - 1, Math.floor(((seg.minZ + half) / worldSpan) * bucketN)));
+        const bz1 = Math.max(0, Math.min(bucketN - 1, Math.floor(((seg.maxZ + half) / worldSpan) * bucketN)));
+        for (let bz = bz0; bz <= bz1; bz++) {
+          for (let bx = bx0; bx <= bx1; bx++) buckets[bz * bucketN + bx].push(segIdx);
+        }
+      });
+      tunnelPaths.push({
+        samples,
+        segments,
+        buckets,
+        bucketN,
+        radius,
+        roughness: Math.max(0, Math.min(1, Number(tunnel.roughness ?? tunnel.tunnelRoughness ?? 0.32) || 0)),
+        strength: Math.max(0.05, Math.min(1, Number(tunnel.strength ?? tunnel.opacity ?? 1) || 1)),
+        seed: Number(tunnel.seed ?? 7201) || 7201,
+        minX: minX - pad, maxX: maxX + pad,
+        minY: minY - pad, maxY: maxY + pad,
+        minZ: minZ - pad, maxZ: maxZ + pad,
+      });
+    }
 
     // Evaluate positive cave void field C(x, y, z) > 0 inside carved cave/undercut
     const evalCaveVoid = (wx, wy, wz, surf) => {
@@ -206,6 +315,38 @@ export class SdfCaveSystem {
         }
       }
 
+      // Authored spline tunnels: distance to the nearest smooth 3D tube
+      // segment. A slight vertical squash gives a road/rail-like arched
+      // bore rather than a perfectly circular pipe.
+      for (let ti = 0; ti < tunnelPaths.length; ti++) {
+        const path = tunnelPaths[ti];
+        if (wx < path.minX || wx > path.maxX || wy < path.minY || wy > path.maxY || wz < path.minZ || wz > path.maxZ) continue;
+        let bestDist = 1e9;
+        const bx = Math.max(0, Math.min(path.bucketN - 1, Math.floor(((wx + half) / worldSpan) * path.bucketN)));
+        const bz = Math.max(0, Math.min(path.bucketN - 1, Math.floor(((wz + half) / worldSpan) * path.bucketN)));
+        const candidates = path.buckets[bz * path.bucketN + bx];
+        for (let ci = 0; ci < candidates.length; ci++) {
+          const seg = path.segments[candidates[ci]];
+          if (wx < seg.minX || wx > seg.maxX || wy < seg.minY || wy > seg.maxY || wz < seg.minZ || wz > seg.maxZ) continue;
+          const abx = seg.b.x - seg.a.x;
+          const aby = seg.b.y - seg.a.y;
+          const abz = seg.b.z - seg.a.z;
+          const len2 = Math.max(1e-6, abx * abx + aby * aby + abz * abz);
+          const t = Math.max(0, Math.min(1, ((wx - seg.a.x) * abx + (wy - seg.a.y) * aby + (wz - seg.a.z) * abz) / len2));
+          const dx = wx - (seg.a.x + abx * t);
+          const dy = (wy - (seg.a.y + aby * t)) * 1.18;
+          const dz = wz - (seg.a.z + abz * t);
+          const d = Math.hypot(dx, dy, dz);
+          if (d < bestDist) bestDist = d;
+        }
+        if (bestDist < path.radius + 5.0) {
+          const rough = ((noise3D(wx * 0.055, wy * 0.11, wz * 0.055, path.seed) - 0.5) * path.radius * 0.42 +
+            (noise3D(wx * 0.16, wy * 0.24, wz * 0.16, path.seed + 43) - 0.5) * path.radius * 0.12) * path.roughness;
+          const tube = (path.radius + rough - bestDist) * path.strength;
+          voidVal = smax(voidVal, tube, 2.2);
+        }
+      }
+
       return voidVal;
     };
 
@@ -247,6 +388,24 @@ export class SdfCaveSystem {
           if (lowY < minCaveY) minCaveY = lowY;
           if (highY > maxCaveY) maxCaveY = highY;
         }
+      }
+    }
+
+    // Deep authored tunnels can lie below the shallow portal probe, so add
+    // their exact tube bounds to the extraction volume.
+    for (const path of tunnelPaths) {
+      const cellSpan = worldSpan / P;
+      const radiusCells = Math.ceil((path.radius + 8) / cellSpan);
+      for (const sm of path.samples) {
+        if (sm.x < -half - path.radius || sm.x > half + path.radius || sm.z < -half - path.radius || sm.z > half + path.radius) continue;
+        const ci = Math.max(0, Math.min(P - 1, Math.floor((sm.x / worldSpan + 0.5) * P)));
+        const ck = Math.max(0, Math.min(P - 1, Math.floor((sm.z / worldSpan + 0.5) * P)));
+        minI = Math.min(minI, ci - radiusCells);
+        maxI = Math.max(maxI, ci + radiusCells);
+        minK = Math.min(minK, ck - radiusCells);
+        maxK = Math.max(maxK, ck + radiusCells);
+        minCaveY = Math.min(minCaveY, sm.y - path.radius - 8);
+        maxCaveY = Math.max(maxCaveY, sm.y + path.radius + 8);
       }
     }
 

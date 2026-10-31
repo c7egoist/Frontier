@@ -637,7 +637,7 @@ export class TerrainStackPipeline {
     this.evaluateStack({ reseedPlacements: false });
   }
 
-  _runStackOpPass(opKind, layer, u0, u1, u2, maxRelief) {
+  _runStackOpPass(opKind, layer, u0, u1, u2, maxRelief, u3 = [0, 0, 0, 0]) {
     const gl = this.gl;
     const R = this.R;
     const span = this.engine.params.worldSpan;
@@ -669,16 +669,17 @@ export class TerrainStackPipeline {
     gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uParam0'), u0);
     gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uParam1'), u1);
     gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uParam2'), u2);
+    gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uParam3'), u3);
     gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uMaskCfg1'), cfg1);
     gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uMaskCfg2'), cfg2);
 
-    if (opKind === 6) {
+    if (opKind === 6 || opKind === 7) {
       const pts = Array.isArray(layer.params.points) ? layer.params.points : [];
       const count = Math.min(8, pts.length);
       const flat = new Float32Array(16);
       for (let k = 0; k < count; k++) {
-        flat[k * 2 + 0] = pts[k][0];
-        flat[k * 2 + 1] = pts[k][1];
+        flat[k * 2 + 0] = Number.isFinite(pts[k]?.[0]) ? pts[k][0] : 0;
+        flat[k * 2 + 1] = Number.isFinite(pts[k]?.[1]) ? pts[k][1] : 0;
       }
       gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uSplinePts'), flat);
       gl.uniform1i(gl.getUniformLocation(this.progStackOp, 'uSplineCount'), count);
@@ -839,6 +840,7 @@ export class TerrainStackPipeline {
 
     const activeCaveLayers = [];
     const activeSculptCaveStrokes = [];
+    const activeSplineTunnels = [];
     let activeRockLayer = null;
 
     // 2. Walk strictly BOTTOM -> TOP (`i = layers.length - 1` down to `0`)!
@@ -947,7 +949,14 @@ export class TerrainStackPipeline {
         if (entry) {
           for (const cs of entry.caveStrokes) activeSculptCaveStrokes.push(cs);
           if ((p.strokeCount ?? 0) > 0) {
-            this._runStackOpPass(5, layer, [p.opacity ?? 1.0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], maxRelief);
+            this._runStackOpPass(
+              5,
+              layer,
+              [p.opacity ?? 1.0, p.blendMode ?? 0, p.noiseAmount ?? 0, p.noiseScale ?? 1.6],
+              [p.targetHeight ?? 70, p.seed ?? ep.seed, p.noiseHeight ?? 6, p.multiplyStrength ?? 0.65],
+              [0, 0, 0, 0],
+              maxRelief
+            );
           }
         }
       } else if (layer.type === 'spline-feature') {
@@ -959,6 +968,33 @@ export class TerrainStackPipeline {
           [0, 0, 0, 0],
           maxRelief
         );
+      } else if (layer.type === 'spline-landform') {
+        const mode = Math.max(0, Math.min(4, Math.round(p.mode ?? 0)));
+        if (mode === 4) {
+          // Tunnel mode is deliberately volumetric: the heightfield is left
+          // intact and the smooth spline becomes an SDF tube below.
+          activeSplineTunnels.push({
+            points: (Array.isArray(p.points) ? p.points : []).map((pt) => [Number(pt?.[0]) || 0, Number(pt?.[1]) || 0]),
+            radius: Math.max(1.5, p.tunnelRadius ?? 7.5),
+            startElevation: p.startElevation ?? 48,
+            endElevation: p.endElevation ?? 44,
+            depth: Math.max(4, p.tunnelDepth ?? 22),
+            followSurface: (p.tunnelFollowSurface ?? 0) > 0.5,
+            roughness: Math.max(0, Math.min(1, p.tunnelRoughness ?? 0.32)),
+            strength: Math.max(0.05, Math.min(1, p.opacity ?? 1.0)),
+            seed: p.seed ?? ep.seed,
+          });
+        } else {
+          this._runStackOpPass(
+            7,
+            layer,
+            [mode, p.width ?? 72, p.amount ?? 42, p.falloff ?? 0.62],
+            [p.sharpness ?? 0.62, p.noiseAmount ?? 0.38, p.noiseScale ?? 1.7, p.waterDepth ?? 1.2],
+            [p.startElevation ?? 78, p.endElevation ?? 24, p.seed ?? ep.seed, p.opacity ?? 1.0],
+            maxRelief,
+            [p.sediment ?? 0.35, p.flattenStrength ?? 0.78, p.bankHeight ?? 1.6, 0]
+          );
+        }
       } else if (layer.type === 'sdf-caves') {
         activeCaveLayers.push(layer);
       } else if (layer.type === 'river-incision') {
@@ -1173,6 +1209,7 @@ export class TerrainStackPipeline {
       worldSpan: span,
       caveLayers: activeCaveLayers,
       sculptCaveStrokes: activeSculptCaveStrokes,
+      splineTunnels: activeSplineTunnels,
       maxRelief,
     });
     const P = this.caveSystem.portalMaskSize;
