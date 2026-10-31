@@ -1950,7 +1950,10 @@ export class GpuErosionEngine {
         if (this.playing && anySimLayerOn) {
           this.stepSimulation(this.params.substepsPerFrame);
         }
-        if (this.params.simRockfallPlaying !== false && this.params.showOutcrops !== false) {
+        // Pausing the live sim freezes rigid-body boulders as well as the GPU
+        // erosion passes; otherwise rocks keep settling/sinking on a frozen
+        // terrain snapshot after the user pressed Pause Sim.
+        if (this.playing && this.params.simRockfallPlaying !== false && this.params.showOutcrops !== false) {
           this.rockCalving.stepPhysics(frameDt, false);
         }
         this.telemetry.fps = this.fps;
@@ -1972,7 +1975,7 @@ export class GpuErosionEngine {
           this.rockCalving.stepPhysics(frameDt);
         }
       } else {
-        if (this.params.simRockfallPlaying !== false) {
+        if (this.playing && this.params.simRockfallPlaying !== false) {
           this.rockCalving.stepPhysics(frameDt);
         }
         if (this.brushDown && this.params.brushMode !== 'orbit') {

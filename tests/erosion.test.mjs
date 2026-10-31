@@ -556,6 +556,84 @@ test('3D Rocks are true rigid bodies: vertex shader renders CPU world position (
   assert.ok(restGap < 0.35, `Resting boulder must sit on the surface (support gap ${restGap.toFixed(3)} m)`);
 });
 
+test('Boulders seat on true mesh support, keep a soft-ground protrusion floor, and freeze when paused', () => {
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  assert.ok(
+    engSrc.includes('if (this.playing && this.params.simRockfallPlaying !== false && this.params.showOutcrops !== false)'),
+    'Pipeline-mode Pause Sim must freeze rigid-body boulders as well as GPU erosion'
+  );
+  assert.ok(
+    engSrc.includes('if (this.playing && this.params.simRockfallPlaying !== false)'),
+    'Standalone-mode pause must also freeze rigid-body boulders'
+  );
+
+  const atlas = buildRockArchetypeAtlas(7331);
+  assert.equal(atlas.supportVerts.length, 6, 'Rock atlas must expose exact mesh support vertices for every archetype');
+  for (let i = 0; i < atlas.supportVerts.length; i++) {
+    assert.ok(atlas.supportVerts[i].length >= 90, `Archetype ${i} must have a rich exact-support vertex set`);
+  }
+
+  const N = 64;
+  const SPAN = 512.0;
+  const slopeGrid = new Float32Array(N * N * 4);
+  for (let iz = 0; iz < N; iz++) {
+    for (let ix = 0; ix < N; ix++) {
+      const x = (ix / (N - 1) - 0.5) * SPAN;
+      slopeGrid[(iz * N + ix) * 4] = 30.0 + 0.45 * x;
+    }
+  }
+  const slopeSys = new RockCalvingSystem();
+  slopeSys.updateTerrainSnapshot(slopeGrid, N, SPAN);
+  const slopeRock = {
+    submesh: 2, isOutcrop: false, settled: false,
+    x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0,
+    sx: 2.6, sy: 2.2, sz: 2.6, isSlab: false, wear: 0.3, seedHash: 0.4,
+  };
+  slopeRock.y = slopeSys.sampleTerrain(0, 0).surfH + 2.5;
+  slopeSys.rocks.push(slopeRock);
+  for (let s = 0; s < 900 && !slopeRock.settled; s++) slopeSys.stepPhysics(0.033);
+  assert.ok(slopeRock.settled, 'Slope regression rock must come to rest on a 0.45 slope');
+  slopeSys._rebuildInstanceBuckets();
+  const mat = slopeSys.bucketData[slopeRock.submesh];
+  const verts = slopeSys.atlas.supportVerts[slopeRock.submesh];
+  let minVertexClear = Infinity;
+  for (let i = 0; i < verts.length; i += 3) {
+    const wx = mat[12] + mat[0] * verts[i] + mat[4] * verts[i + 1] + mat[8] * verts[i + 2];
+    const wy = mat[13] + mat[1] * verts[i] + mat[5] * verts[i + 1] + mat[9] * verts[i + 2];
+    const wz = mat[14] + mat[2] * verts[i] + mat[6] * verts[i + 1] + mat[10] * verts[i + 2];
+    minVertexClear = Math.min(minVertexClear, wy - slopeSys.sampleTerrain(wx, wz).surfH);
+  }
+  assert.ok(
+    minVertexClear > -0.18,
+    `Resting rock mesh must not sink through a planar slope (min vertex clearance ${minVertexClear.toFixed(3)} m; ellipsoid-only contact was about -0.41 m)`
+  );
+
+  const snowGrid = new Float32Array(N * N * 4);
+  const snowState = new Float32Array(N * N * 4);
+  for (let i = 0; i < N * N; i++) {
+    snowGrid[i * 4] = 30.0;
+    snowState[i * 4] = 6.0;
+  }
+  const snowSys = new RockCalvingSystem();
+  snowSys.updateTerrainSnapshot(snowGrid, N, SPAN, snowState);
+  const snowStart = snowSys.sampleTerrain(0, 0);
+  const snowRock = {
+    submesh: 2, isOutcrop: false, settled: false,
+    x: 0, y: snowStart.totalH + 18, z: 0, vx: 0, vy: 0, vz: 0,
+    sx: 0.85, sy: 0.8, sz: 0.85, isSlab: false, wear: 0.3, seedHash: 0.42,
+  };
+  snowSys.rocks.push(snowRock);
+  for (let s = 0; s < 4000 && !snowRock.settled; s++) snowSys.stepPhysics(0.016);
+  assert.ok(snowRock.settled, 'Deep-snow regression rock must settle');
+  const bottomSup = snowSys._contactSupport(snowRock, 0, 1, 0);
+  const topSup = Math.max(snowSys._support(snowRock, 0, 1, 0), snowSys._meshSupport(snowRock, 0, 1, 0));
+  const snowSurf = snowSys.sampleTerrain(0, 0).surfH;
+  const snowEmbed = snowSurf - (snowRock.y - bottomSup);
+  const protrusionFrac = ((snowRock.y + topSup) - snowSurf) / (topSup + bottomSup);
+  assert.ok(snowEmbed > 0.5, `Small rock must still genuinely embed into deep snow, embed=${snowEmbed.toFixed(3)} m`);
+  assert.ok(protrusionFrac >= 0.32, `Small rock must keep a visible protrusion floor in deep snow, got ${(protrusionFrac * 100).toFixed(1)}% of diameter`);
+});
+
 test('Real 3D Grass tuft mesh, biome vegetation defaults (Green / Dry / Auto-Blend), and Layer Stack preserve preset visual invariance', () => {
   // 1. 3D Curved Grass Tuft Geometry
   const tuft = buildGrassTuftMesh();

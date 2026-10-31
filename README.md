@@ -72,17 +72,23 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   the viewport toolbar (and mirrored in the inspector) without pausing sims.
 - **Rocks are real rigid bodies now** (`src/erosion/rock-calving.js`):
   world-space position + quaternion orientation integrated at 120 Hz substeps
-  under g = 9.81 with ellipsoid-support terrain contact, Coulomb friction,
-  restitution, rolling, water buoyancy/drag and impulse rock-rock collision.
-  The vertex shader no longer re-snaps rocks to the heightfield — settled
-  boulders stay put until erosion genuinely removes their support, then fall.
+  under g = 9.81 with ellipsoid rolling physics raised to the **exact faceted
+  mesh support** at contact (sharp polyhedron corners no longer seat through
+  slopes), a one-time footprint-ring seating correction for wide rocks on
+  uneven ground, Coulomb friction, restitution, rolling, water buoyancy/drag
+  and impulse rock-rock collision. The vertex shader no longer re-snaps rocks
+  to the heightfield — settled boulders stay put until erosion genuinely
+  removes their support, then fall. Pausing/stopping the live sim now freezes
+  boulder physics too, instead of letting rocks keep settling on a frozen
+  terrain snapshot.
 - **Rocks embed into snow & sediment**: the ground is layered (snow/ice over
   loose sediment over bedrock) and the soft layers are crushable — a boulder
   sinks until bearing pressure × contact-patch area carries its true mass
   (fresh snow ~8 kPa hardening as it densifies; sediment 55–140 kPa), so big
   rocks sink deeper, slabs ride high, and mega-boulders punch through snow
   onto sediment. Landings in snow are dead (plastic crush), rolling rocks
-  plough and bog down, and embedded rocks stamp the snowpack
+  plough and bog down (deep soft ground still leaves ~35% of a loose rock's
+  diameter protruding on its compacted plug), and embedded rocks stamp the snowpack
   (`ROCK_IMPRINT_FRAG`): compacted footprint + the displaced volume resurfacing
   as a rim hugging the rock, so boulders protrude naturally and rolling ones
   leave furrows. Melt wakes embedded rocks to settle onto the sediment.
@@ -118,5 +124,6 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   terrain + boulders. Disabled on the airless lunar theme. Flat mineral
   colours only — no noise grain, in keeping with the flat-colour pass.
 
-Verification: `npm test` — 32/32 pass (includes new `tests/rain-erosion.test.mjs`
-and rigid-body free-fall/no-elevator regression tests). `npm run build` clean.
+Verification: `npm test` — 33/33 pass (includes `tests/rain-erosion.test.mjs`,
+rigid-body free-fall/no-elevator tests, and the exact-mesh seating / pause-freeze
+regression test). `npm run build` clean.

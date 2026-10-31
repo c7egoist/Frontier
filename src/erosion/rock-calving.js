@@ -208,6 +208,7 @@ export function buildRockArchetypeAtlas(seed = 7331) {
   const indices = [];
   const submeshes = []; // { firstIndex, indexCount }
   const halfExtents = []; // per-submesh local AABB half extents [hx, hy, hz]
+  const supportVerts = []; // per-submesh unique local vertices for exact mesh support
 
   const specs = [
     // 0..1: Resistant tilted cliff-rim / ridge outcrops (broad rooted base, craggy nose)
@@ -307,12 +308,22 @@ export function buildRockArchetypeAtlas(seed = 7331) {
       }
     }
     // Local AABB half extents of this archetype (for the physics ellipsoid)
+    // plus the unique mesh vertices. The ellipsoid is a good rolling proxy,
+    // but sharp polyhedron corners can project well beyond it; exact support
+    // over these verts prevents those corners seating through the terrain.
     let hx = 0.35, hy = 0.35, hz = 0.35;
+    const supportMap = new Map();
     for (let vi = vertStart; vi < positions.length; vi += 3) {
-      hx = Math.max(hx, Math.abs(positions[vi]));
-      hy = Math.max(hy, Math.abs(positions[vi + 1]));
-      hz = Math.max(hz, Math.abs(positions[vi + 2]));
+      const vx = positions[vi], vy = positions[vi + 1], vz = positions[vi + 2];
+      hx = Math.max(hx, Math.abs(vx));
+      hy = Math.max(hy, Math.abs(vy));
+      hz = Math.max(hz, Math.abs(vz));
+      const key = `${vx.toFixed(4)},${vy.toFixed(4)},${vz.toFixed(4)}`;
+      if (!supportMap.has(key)) supportMap.set(key, [vx, vy, vz]);
     }
+    const flatSupport = [];
+    for (const v of supportMap.values()) flatSupport.push(v[0], v[1], v[2]);
+    supportVerts.push(new Float32Array(flatSupport));
     halfExtents.push([hx, hy, hz]);
     submeshes.push({ firstIndex, indexCount: indices.length - firstIndex });
   }
@@ -324,6 +335,7 @@ export function buildRockArchetypeAtlas(seed = 7331) {
     indices: new Uint16Array(indices),
     submeshes,
     halfExtents,
+    supportVerts,
   };
 }
 
@@ -388,6 +400,91 @@ export class RockCalvingSystem {
     return Math.sqrt(ax * ax + ay * ay + az * az) * EMBED;
   }
 
+  /** Exact convex-mesh support distance from body centre along unit direction d. */
+  _meshSupport(r, dx, dy, dz) {
+    const verts = this.atlas.supportVerts ? this.atlas.supportVerts[r.submesh] : null;
+    if (!verts || verts.length === 0) return this._support(r, dx, dy, dz);
+    quatBasis(r.qx, r.qy, r.qz, r.qw, _basis);
+    const lx = (dx * _basis[0] + dy * _basis[1] + dz * _basis[2]) * r.sx;
+    const ly = (dx * _basis[3] + dy * _basis[4] + dz * _basis[5]) * r.sy;
+    const lz = (dx * _basis[6] + dy * _basis[7] + dz * _basis[8]) * r.sz;
+    let best = -Infinity;
+    for (let i = 0; i < verts.length; i += 3) {
+      const d = verts[i] * lx + verts[i + 1] * ly + verts[i + 2] * lz;
+      if (d > best) best = d;
+    }
+    return best * EMBED;
+  }
+
+  /**
+   * Support distance used for terrain contact: the ellipsoid rolling proxy,
+   * raised to the true lowest mesh corner along the terrain normal when a
+   * faceted corner projects beyond the ellipsoid (the visible sink/clip).
+   */
+  _contactSupport(r, nx, ny, nz) {
+    return Math.max(this._support(r, nx, ny, nz), this._meshSupport(r, -nx, -ny, -nz));
+  }
+
+  /** Cached vertical contact support for a sleeping rock (orientation fixed). */
+  _seatSupportUp(r) {
+    if (r._seatSupUp == null) r._seatSupUp = this._contactSupport(r, 0, 1, 0);
+    return r._seatSupUp;
+  }
+
+  _planeDist(r, st, px, pz, supN) {
+    return (r.x - px) * st.nx + (r.y - st.surfH) * st.ny + (r.z - pz) * st.nz - supN;
+  }
+
+  /**
+   * One-time seating correction: centre-only contact can leave the upslope
+   * or gully-side part of a wide rock buried in neighbouring higher ground.
+   * Sample the footprint ring and lift (never lower) the body until no part
+   * penetrates beyond the soft layer available at that sample. Used when
+   * seeding asleep boulders and at the moment a moving rock falls asleep.
+   */
+  _footprintOffsets(r) {
+    const rh = clamp(
+      Math.sqrt(Math.max(0.05, this._support(r, 1, 0, 0) * this._support(r, 0, 0, 1))) / EMBED,
+      0.35, 7.0
+    );
+    const f = rh * 0.62;
+    const d = f * Math.SQRT1_2;
+    return [[0, 0], [f, 0], [-f, 0], [0, f], [0, -f], [d, d], [d, -d], [-d, d], [-d, -d]];
+  }
+
+  /** Minimum signed plane distance over the footprint (<=0 means supported). */
+  _footprintSupportGap(r) {
+    if (!this.hasHeightSnapshot) return Infinity;
+    const offs = this._footprintOffsets(r);
+    let best = Infinity;
+    for (let i = 0; i < offs.length; i++) {
+      const px = r.x + offs[i][0];
+      const pz = r.z + offs[i][1];
+      const st = this.sampleTerrain(px, pz);
+      const supN = this._contactSupport(r, st.nx, st.ny, st.nz);
+      best = Math.min(best, this._planeDist(r, st, px, pz, supN));
+    }
+    return best;
+  }
+
+  _liftForFootprint(r, allowedPen = 0) {
+    if (!this.hasHeightSnapshot) return 0;
+    const offs = this._footprintOffsets(r);
+    let lift = 0;
+    for (let i = 0; i < offs.length; i++) {
+      const px = r.x + offs[i][0];
+      const pz = r.z + offs[i][1];
+      const st = this.sampleTerrain(px, pz);
+      const supN = this._contactSupport(r, st.nx, st.ny, st.nz);
+      const pd = this._planeDist(r, st, px, pz, supN);
+      const allow = Math.min(Math.max(0, allowedPen), st.dMaxCryo + st.dMaxSed);
+      const deficit = -allow - pd;
+      if (deficit > 0) lift = Math.max(lift, deficit / Math.max(0.35, st.ny));
+    }
+    if (lift > 0) r.y += lift;
+    return lift;
+  }
+
   _makeRock(spec) {
     const r = {
       vx: 0, vy: 0, vz: 0,
@@ -446,11 +543,14 @@ export class RockCalvingSystem {
         }
       } else if (r.settled) {
         const s = this.sampleTerrain(r.x, r.z);
-        const gap = (r.y - this._support(r, 0, 1, 0)) - (s.surfH - (r.embedPen || 0));
+        let gap = (r.y - this._seatSupportUp(r)) - (s.surfH - (r.embedPen || 0)) - (r._seatLift || 0);
+        if (gap > 0.12) gap = Math.min(gap, this._footprintSupportGap(r));
         const holdSlope = (r.muS ?? 0.62) + Math.min(0.9, 1.5 * (r.embedPen || 0) / Math.max(0.3, r.ry || 1));
         if (gap > 0.12 || s.slope > holdSlope + 0.03) {
           r.settled = false;
           r.sleepTimer = 0;
+          r._seatSupUp = undefined;
+          r._seatLift = 0;
         }
       }
     }
@@ -620,7 +720,7 @@ export class RockCalvingSystem {
           wear: rng.range(0.15, 0.55),
         });
         // Rooted bedrock: seated 20% into the ground, static forever (until undercut)
-        rk.y = st.totalH + this._support(rk, 0, 1, 0) * 0.80;
+        rk.y = st.totalH + this._contactSupport(rk, 0, 1, 0) * 0.80;
         this.rocks.push(rk);
       }
     }
@@ -661,12 +761,17 @@ export class RockCalvingSystem {
           });
           // Seated at bearing equilibrium: sunk into snow/sediment until the
           // crushable layer carries its weight, protruding from the surface.
-          const supUpSeed = this._support(rk, 0, 1, 0);
+          const supUpSeed = this._contactSupport(rk, 0, 1, 0);
           const rhSeed = Math.sqrt(Math.max(0.05, this._support(rk, 1, 0, 0) * this._support(rk, 0, 0, 1)));
-          const eqSeed = equilibriumEmbed(rk.mass, Math.max(0.22, supUpSeed), rhSeed, st.dMaxCryo, st.dMaxSed, st.sedSigma, st.ny);
+          const eqRaw = equilibriumEmbed(rk.mass, Math.max(0.22, supUpSeed), rhSeed, st.dMaxCryo, st.dMaxSed, st.sedSigma, st.ny);
+          // Keep at least ~35% of the normal diameter protruding in deep soft ground
+          const eqSeed = Math.min(eqRaw, supUpSeed * 1.30);
           rk.y = st.surfH - eqSeed + supUpSeed;
-          rk.embedPen = eqSeed;
+          const liftSeed = this._liftForFootprint(rk, eqSeed);
+          rk.embedPen = Math.max(0, eqSeed - liftSeed);
           rk.embedSurfH = st.surfH;
+          rk._seatSupUp = supUpSeed;
+          rk._seatLift = liftSeed;
           this.rocks.push(rk);
           placed++;
         }
@@ -749,13 +854,14 @@ export class RockCalvingSystem {
       rk.x += dxn * rk.boundR * 1.1;
       rk.z += dzn * rk.boundR * 1.1;
       const st = this.sampleTerrain(rk.x, rk.z);
-      rk.y = st.surfH + this._support(rk, 0, 1, 0) + 0.12;
+      rk.y = st.surfH + this._contactSupport(rk, 0, 1, 0) + 0.12;
+      this._liftForFootprint(rk, 0);
       const topple = rng.range(0.6, 2.2);
       rk.vx = dxn * topple + rng.signed() * 0.4;
       rk.vz = dzn * topple + rng.signed() * 0.4;
       rk.vy = 0;
       // Initial rolling spin consistent with the topple velocity
-      const sup = Math.max(0.35, this._support(rk, st.nx, st.ny, st.nz));
+      const sup = Math.max(0.35, this._contactSupport(rk, st.nx, st.ny, st.nz));
       rk.ox = (st.ny * rk.vz - st.nz * 0) / sup;
       rk.oy = 0;
       rk.oz = (0 - st.ny * rk.vx) / sup;
@@ -800,11 +906,14 @@ export class RockCalvingSystem {
           // Cheap support audit: wake only if the ground fell away or steepened.
           // Embedded rocks measure the gap from their seat inside the snowpack.
           const stc = this.sampleTerrain(r.x, r.z);
-          const gap = (r.y - this._support(r, 0, 1, 0)) - (stc.surfH - (r.embedPen || 0));
+          let gap = (r.y - this._seatSupportUp(r)) - (stc.surfH - (r.embedPen || 0)) - (r._seatLift || 0);
+          if (gap > 0.12) gap = Math.min(gap, this._footprintSupportGap(r));
           const holdSlope = r.muS + Math.min(0.9, 1.5 * (r.embedPen || 0) / Math.max(0.3, r.ry || 1));
           if (gap > 0.12 || stc.slope > holdSlope + 0.03) {
             r.settled = false;
             r.sleepTimer = 0;
+            r._seatSupUp = undefined;
+            r._seatLift = 0;
           } else {
             continue;
           }
@@ -856,7 +965,7 @@ export class RockCalvingSystem {
         // --- Terrain contact: layered ground (snow/ice over sediment over bedrock)
         const st = this.sampleTerrain(r.x, r.z);
         const nx = st.nx, ny = st.ny, nz = st.nz;
-        const supN = this._support(r, nx, ny, nz);
+        const supN = this._contactSupport(r, nx, ny, nz);
         const planeDist = (r.y - st.surfH) * ny - supN;
 
         if (planeDist < 0) {
@@ -876,16 +985,20 @@ export class RockCalvingSystem {
             // === SOFT CONTACT: the crushable layer carries the rock by
             // bearing pressure over its contact patch. It sinks until
             // sigma(pen) * A(pen) balances its weight: embedded, protruding.
-            let hitFloor = false;
-            if (pen > dMaxTot) {
-              // Fully-compacted floor (firn plug / packed sediment): hard stop
-              const push = pen - dMaxTot;
-              r.x += nx * push; r.y += ny * push; r.z += nz * push;
-              pen = dMaxTot;
-              hitFloor = true;
-            }
             const Rv = Math.max(0.22, supN);
             const Rh = Math.sqrt(Math.max(0.05, this._support(r, 1, 0, 0) * this._support(r, 0, 0, 1)));
+            // Compacted plug / protrusion floor: even in a deep soft layer a
+            // loose boulder seats on its own compacted plug with ~35% of its
+            // normal diameter still protruding (burial after it sleeps can
+            // still cover it via snowfall/deposition, which is separate).
+            const penCap = Math.min(dMaxTot, Rv * 1.30);
+            let hitFloor = false;
+            if (pen > penCap) {
+              const push = pen - penCap;
+              r.x += nx * push; r.y += ny * push; r.z += nz * push;
+              pen = penCap;
+              hitFloor = true;
+            }
             r._groundRv = Rv;
             r._groundRh = Rh;
             const area = contactPatchArea(Rv, Rh, pen);
@@ -995,7 +1108,11 @@ export class RockCalvingSystem {
             const spd = Math.hypot(r.vx, r.vy, r.vz);
             const ang = Math.hypot(r.ox, r.oy, r.oz);
             if (r.sleepTimer > 0.35 && spd < 0.45 && ang < 0.6) {
+              const liftSeat = this._liftForFootprint(r, r.embedPen || 0);
+              if (liftSeat > 0) r.embedPen = Math.max(0, (r.embedPen || 0) - liftSeat);
               r.settled = true;
+              r._seatSupUp = this._contactSupport(r, 0, 1, 0);
+              r._seatLift = liftSeat;
               r.vx = 0; r.vy = 0; r.vz = 0;
               r.ox = 0; r.oy = 0; r.oz = 0;
             }
