@@ -97,5 +97,18 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   fills only the free cell fraction so sediment wedges up and buries them,
   and snow creep/drift sheds off and banks against boulders too.
 
-Verification: `npm test` — 28/28 pass (includes new `tests/rain-erosion.test.mjs`
+- **Chemical weathering stains**: iron "bleeding" (rust) and copper patina,
+  simulated not painted. Rock Formation editor: dissolved Fe/Cu from
+  mineral-veined seep zones (joints/concavities) is routed down the finished
+  mesh by steepest-descent flow accumulation (`src/geology/chemical-staining.js`),
+  depositing ochre streaks along real drainage lines and pooling malachite/
+  azurite in hollows — baked into a per-vertex stain attribute (sliders:
+  Chemical Weathering / Iron / Copper; CLI `--chem/--iron/--copper`).
+  Terrain Studio: boulders get per-instance mineralogy (seed hash) with
+  seep-column rust streaks running down steep faces plus an oxidation rind,
+  scaled by local wetness history and disabled on the airless lunar theme
+  (toolbar "Rust" slider / `chemicalWeathering` param). Flat two-tone mineral
+  colours only — no noise grain, in keeping with the flat-colour pass.
+
+Verification: `npm test` — 31/31 pass (includes new `tests/rain-erosion.test.mjs`
 and rigid-body free-fall/no-elevator regression tests). `npm run build` clean.

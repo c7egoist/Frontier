@@ -2841,7 +2841,7 @@ out vec3 vWorldPos;
 out vec3 vWorldNormal;
 out vec4 vMask;
 out vec3 vInstMeta; // (seedHash, wear, isOutcrop)
-out vec3 vInstCentre;
+out vec4 vInstCentre; // (centre.xyz, radiusY)
 
 void main() {
   // Real rigid bodies: the CPU physics integrator owns the world position.
@@ -2860,7 +2860,7 @@ void main() {
   vWorldPos = wp;
   vMask = aMask;
   vInstMeta = vec3(aInstCol0.w, aInstCol1.w, aInstPosMeta.w);
-  vInstCentre = aInstPosMeta.xyz;
+  vInstCentre = vec4(aInstPosMeta.xyz, aInstCol2.w);
   gl_Position = uViewProj * vec4(wp, 1.0);
 }
 `;
@@ -2872,7 +2872,7 @@ in vec3 vWorldPos;
 in vec3 vWorldNormal;
 in vec4 vMask;
 in vec3 vInstMeta;
-in vec3 vInstCentre;
+in vec4 vInstCentre; // (centre.xyz, radiusY)
 
 layout(location = 0) out vec4 outColor;
 
@@ -2948,33 +2948,37 @@ void main() {
     float h3 = fract(vInstMeta.x * 5.179 + 0.613);
     float themeIron = (uMaterialTheme == 3 || uMaterialTheme == 5 || uMaterialTheme == 6 || uMaterialTheme == 9) ? 1.15
                     : (uMaterialTheme == 2 ? 0.55 : 0.9);
-    float ironRich = clamp(smoothstep(0.30, 0.92, h1) * themeIron, 0.0, 1.0);
-    float copperRich = smoothstep(0.84, 0.97, h2); // ~1 in 8 boulders copper-bearing
-    vec3 local = vWorldPos - vInstCentre;
+    float ironRich = clamp(smoothstep(0.16, 0.82, h1) * themeIron, 0.0, 1.0);
+    float copperRich = smoothstep(0.82, 0.96, h2); // ~1 in 7 boulders copper-bearing
+    vec3 local = vWorldPos - vInstCentre.xyz;
     float side = smoothstep(0.15, 0.60, 1.0 - abs(N.y));
     vec2 tang = vec2(-N.z, N.x);
-    float u = dot(local.xz, tang / max(length(tang), 1e-4));
+    // Seep columns in RADIUS-NORMALIZED units so they cross every boulder's
+    // faces regardless of its size (metre-anchored columns missed small rocks)
+    float u = dot(local.xz, tang / max(length(tang), 1e-4)) / max(vInstCentre.w, 0.25);
     float cols = 0.0;
-    cols += 0.85 * exp(-pow((u - (h1 - 0.5) * 7.0) / (0.16 + 0.30 * h3), 2.0));
-    cols += 0.65 * exp(-pow((u - (h2 - 0.5) * 7.0) / (0.12 + 0.26 * h1), 2.0));
-    cols += 0.50 * exp(-pow((u - (h3 - 0.5) * 7.0) / (0.20 + 0.34 * h2), 2.0));
+    cols += 0.95 * exp(-pow((u - (h1 - 0.5) * 2.4) / (0.10 + 0.20 * h3), 2.0));
+    cols += 0.75 * exp(-pow((u - (h2 - 0.5) * 2.4) / (0.08 + 0.18 * h1), 2.0));
+    cols += 0.60 * exp(-pow((u - (h3 - 0.5) * 2.4) / (0.13 + 0.22 * h2), 2.0));
     float drop = clamp(0.5 - 0.5 * vMask.w, 0.0, 1.0); // 0 crown -> 1 base
     float run = smoothstep(0.04, 0.40, drop) * (1.0 - 0.30 * drop);
     float seep = 0.45 + 0.85 * vMask.z + 0.55 * (1.0 - vMask.x);
     float wetHist = (0.55 + 0.45 * smoothstep(0.0, 0.22, tCell.a))
                   * (1.0 - 0.45 * smoothstep(0.0, 1.6, snowCell.r + snowCell.g * 0.4));
     float streak = clamp(side * run * seep * wetHist, 0.0, 1.5);
-    float rustAmt = clamp(cols * streak * ironRich, 0.0, 1.2) * uChemWeather;
-    float cuAmt = clamp(cols * streak * copperRich * 1.15, 0.0, 1.2) * uChemWeather;
+    // Broad seep wash bleeding from joints (edge mask) even between columns
+    float wash = 0.42 * (0.35 + 0.65 * vMask.z);
+    float rustAmt = clamp((cols + wash) * streak * ironRich, 0.0, 1.3) * uChemWeather;
+    float cuAmt = clamp((cols + wash * 0.7) * streak * copperRich * 1.2, 0.0, 1.3) * uChemWeather;
     float rind = ironRich * (0.25 + 0.75 * vInstMeta.y) * uChemWeather;
-    albedo = mix(albedo, albedo * vec3(1.10, 0.84, 0.66), 0.38 * rind);
+    albedo = mix(albedo, albedo * vec3(1.12, 0.82, 0.62), 0.50 * rind);
     if (rustAmt > 0.01) {
-      vec3 rust = mix(vec3(0.42, 0.18, 0.05), vec3(0.14, 0.06, 0.03), smoothstep(0.35, 0.95, rustAmt));
-      albedo = mix(albedo, rust, smoothstep(0.06, 0.70, rustAmt) * 0.88);
+      vec3 rust = mix(vec3(0.45, 0.19, 0.05), vec3(0.15, 0.06, 0.03), smoothstep(0.35, 0.95, rustAmt));
+      albedo = mix(albedo, rust, smoothstep(0.04, 0.50, rustAmt) * 0.92);
     }
     if (cuAmt > 0.01) {
-      vec3 patina = mix(vec3(0.10, 0.38, 0.30), vec3(0.07, 0.22, 0.45), smoothstep(0.35, 0.95, cuAmt) * (0.35 + 0.65 * h3));
-      albedo = mix(albedo, patina, smoothstep(0.06, 0.70, cuAmt) * 0.85);
+      vec3 patina = mix(vec3(0.11, 0.42, 0.33), vec3(0.07, 0.24, 0.48), smoothstep(0.35, 0.95, cuAmt) * (0.35 + 0.65 * h3));
+      albedo = mix(albedo, patina, smoothstep(0.04, 0.50, cuAmt) * 0.88);
     }
   }
 
