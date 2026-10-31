@@ -446,12 +446,124 @@ int main(int ArgumentCount, char **Arguments)
                                     GlobalInspectorDomain::Folder);
         CaptureEnvironmentInspector("Lens Flare", "08_ProjectEverest_LensFlareInspector_OLED.png",
                                     GlobalInspectorDomain::LensFlare);
+        {
+            const auto& Rows = Workspace->QuerySceneDirectoryPanel().QueryRows();
+            const auto Row = std::find_if(Rows.begin(), Rows.end(), [](const SceneDirectoryRow& Entry) {
+                return Entry.Name == "Lens Flare";
+            });
+            Require(Row != Rows.end(), "Lens Flare tab exhibits require the Project Everest lens record");
+            const auto Descriptor = RecordInspectorRegistry::Instance().Query(Row->Token);
+            Require(Descriptor.has_value() && Descriptor->Domain == GlobalInspectorDomain::LensFlare,
+                    "Lens Flare tab exhibits require their typed Inspector domain");
+            auto *Flare = static_cast<LensFlareRecord *>(Descriptor->PayloadAddress);
+            Flare->ActiveSectionIndex = 0;
+            Workspace->QuerySceneDirectoryPanel().Select(Row->Token);
+            (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
+            PumpWorkspaceFrames(3);
+            IO.AddMousePosEvent(1200.0f, 850.0f);
+            for (int32_t Tick = 0; Tick < 16; ++Tick)
+            {
+                IO.AddMouseWheelEvent(0.0f, -1.0f);
+                PumpWorkspaceFrames(1);
+            }
+            ImGuiWindow *InspectorScroll = ImGui::FindWindowByName("Inspector###FrontierPanel-Inspector");
+            Require(InspectorScroll != nullptr && InspectorScroll->Scroll.y > 0.0f,
+                    "Lens Flare tab exhibits require scrolling past the optical preview");
+            InspectorScroll->ScrollTarget.y = InspectorScroll->ScrollMax.y;
+            IO.AddMousePosEvent(100.0f, 100.0f);
+            PumpWorkspaceFrames(3);
+            const std::array<std::pair<int32_t, const char *>, 4> Tabs{{
+                {0, "26_ProjectEverest_LensFlareInspector_Compose_OLED.png"},
+                {1, "27_ProjectEverest_LensFlareInspector_Ghosts_OLED.png"},
+                {2, "28_ProjectEverest_LensFlareInspector_Halo_OLED.png"},
+                {3, "29_ProjectEverest_LensFlareInspector_Rays_OLED.png"}}};
+            for (const auto &[Section, Filename] : Tabs)
+            {
+                Flare->ActiveSectionIndex = Section;
+                Workspace->QuerySceneDirectoryPanel().Select(Row->Token);
+                (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
+                PumpWorkspaceFrames(3);
+                InspectorScroll->ScrollTarget.y = std::max(0.0f, InspectorScroll->ScrollMax.y - 100.0f);
+                PumpWorkspaceFrames(1);
+                IO.AddMousePosEvent(1200.0f, 850.0f);
+                for (int32_t Tick = 0; Tick < 4; ++Tick)
+                {
+                    IO.AddMouseWheelEvent(0.0f, -1.0f);
+                    PumpWorkspaceFrames(1);
+                }
+                IO.AddMousePosEvent(100.0f, 100.0f);
+                PumpWorkspaceFrames(1);
+                Require(Flare->ActiveSectionIndex == Section,
+                        "Lens Flare Inspector tab selection must persist while its native section renders");
+                WritePngCapture(RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field),
+                                ExhibitImages / Filename);
+            }
+            Flare->ActiveSectionIndex = 0;
+            InspectorScroll->ScrollTarget.y = 0.0f;
+            PumpWorkspaceFrames(3);
+        }
         CaptureEnvironmentInspector("Clouds", "09_ProjectEverest_CloudInspector_OLED.png",
                                     GlobalInspectorDomain::Clouds);
         CaptureEnvironmentInspector("Wind", "10_ProjectEverest_WindInspector_OLED.png",
                                     GlobalInspectorDomain::Wind);
         CaptureEnvironmentInspector("Atmosphere", "11_ProjectEverest_AtmosphereInspector_OLED.png",
                                     GlobalInspectorDomain::Atmosphere);
+        {
+            const auto& Rows = Workspace->QuerySceneDirectoryPanel().QueryRows();
+            const auto Row = std::find_if(Rows.begin(), Rows.end(), [](const SceneDirectoryRow& Entry) {
+                return Entry.Name == "Clouds";
+            });
+            Require(Row != Rows.end(), "Cloud tab exhibits require the Project Everest cloud record");
+            const auto Descriptor = RecordInspectorRegistry::Instance().Query(Row->Token);
+            Require(Descriptor.has_value() && Descriptor->Domain == GlobalInspectorDomain::Clouds,
+                    "Cloud tab exhibits require their typed Inspector domain");
+            auto *Clouds = static_cast<CloudLayerRecord *>(Descriptor->PayloadAddress);
+            const std::array<std::pair<int32_t, const char *>, 3> Tabs{{
+                {1, "20_ProjectEverest_CloudInspector_Formation_OLED.png"},
+                {2, "21_ProjectEverest_CloudInspector_Rendering_OLED.png"},
+                {3, "22_ProjectEverest_CloudInspector_Weather_OLED.png"}}};
+            for (const auto &[Section, Filename] : Tabs)
+            {
+                Clouds->ActiveSectionIndex = Section;
+                Workspace->QuerySceneDirectoryPanel().Select(Row->Token);
+                (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
+                PumpWorkspaceFrames(3);
+                Require(Clouds->ActiveSectionIndex == Section,
+                        "Cloud Inspector tab selection must persist while its native section renders");
+                WritePngCapture(RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field),
+                                ExhibitImages / Filename);
+            }
+            Clouds->ActiveSectionIndex = 0;
+            PumpWorkspaceFrames(3);
+        }
+        {
+            const auto& Rows = Workspace->QuerySceneDirectoryPanel().QueryRows();
+            const auto Row = std::find_if(Rows.begin(), Rows.end(), [](const SceneDirectoryRow& Entry) {
+                return Entry.Name == "Wind";
+            });
+            Require(Row != Rows.end(), "Wind tab exhibits require the Project Everest wind record");
+            const auto Descriptor = RecordInspectorRegistry::Instance().Query(Row->Token);
+            Require(Descriptor.has_value() && Descriptor->Domain == GlobalInspectorDomain::Wind,
+                    "Wind tab exhibits require their typed Inspector domain");
+            auto *Wind = static_cast<WindFieldRecord *>(Descriptor->PayloadAddress);
+            const std::array<std::pair<int32_t, const char *>, 3> Tabs{{
+                {1, "23_ProjectEverest_WindInspector_Variability_OLED.png"},
+                {2, "24_ProjectEverest_WindInspector_Altitude_OLED.png"},
+                {3, "25_ProjectEverest_WindInspector_Receivers_OLED.png"}}};
+            for (const auto &[Section, Filename] : Tabs)
+            {
+                Wind->ActiveSectionIndex = Section;
+                Workspace->QuerySceneDirectoryPanel().Select(Row->Token);
+                (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
+                PumpWorkspaceFrames(3);
+                Require(Wind->ActiveSectionIndex == Section,
+                        "Wind Inspector tab selection must persist while its native section renders");
+                WritePngCapture(RasterizeCurrentFrame(Width, Height, ControlKit::Palette().Field),
+                                ExhibitImages / Filename);
+            }
+            Wind->ActiveSectionIndex = 0;
+            PumpWorkspaceFrames(3);
+        }
         {
             const auto& Rows = Workspace->QuerySceneDirectoryPanel().QueryRows();
             const auto AtmosphereRow = std::find_if(Rows.begin(), Rows.end(), [](const SceneDirectoryRow& Row) {
@@ -462,6 +574,9 @@ int main(int ArgumentCount, char **Arguments)
             Require(AtmosphereDescriptor.has_value() && AtmosphereDescriptor->Domain == GlobalInspectorDomain::Atmosphere,
                     "Atmosphere tab exhibits require its typed Inspector domain");
             auto *Atmosphere = static_cast<AtmosphereRecord *>(AtmosphereDescriptor->PayloadAddress);
+            Workspace->QuerySceneDirectoryPanel().Select(AtmosphereRow->Token);
+            (void)Workspace->QueryPanels().ConfigureOpen("Inspector", true);
+            PumpWorkspaceFrames(3);
             const std::array<std::pair<int32_t, const char *>, 3> AtmosphereTabs{{
                 {1, "16_ProjectEverest_AtmosphereInspector_Medium_OLED.png"},
                 {2, "17_ProjectEverest_AtmosphereInspector_LightResponse_OLED.png"},
@@ -625,7 +740,21 @@ int main(int ArgumentCount, char **Arguments)
                << "    \"Exhibits/ProjectEverest/Images/12_ProjectEverest_SunInspector_OLED.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/13_ProjectEverest_SunInspector_Daylight_OLED.png\",\n"
                << "    \"Exhibits/ProjectEverest/Images/14_ProjectEverest_SunInspector_LightColour_OLED.png\",\n"
-               << "    \"Exhibits/ProjectEverest/Images/15_ProjectEverest_SunInspector_DiscOptics_OLED.png\"\n"
+               << "    \"Exhibits/ProjectEverest/Images/15_ProjectEverest_SunInspector_DiscOptics_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/16_ProjectEverest_AtmosphereInspector_Medium_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/17_ProjectEverest_AtmosphereInspector_LightResponse_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/18_ProjectEverest_AtmosphereInspector_Baking_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/19_ProjectEverest_AtmosphereInspector_MediumControls_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/20_ProjectEverest_CloudInspector_Formation_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/21_ProjectEverest_CloudInspector_Rendering_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/22_ProjectEverest_CloudInspector_Weather_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/23_ProjectEverest_WindInspector_Variability_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/24_ProjectEverest_WindInspector_Altitude_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/25_ProjectEverest_WindInspector_Receivers_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/26_ProjectEverest_LensFlareInspector_Compose_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/27_ProjectEverest_LensFlareInspector_Ghosts_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/28_ProjectEverest_LensFlareInspector_Halo_OLED.png\",\n"
+               << "    \"Exhibits/ProjectEverest/Images/29_ProjectEverest_LensFlareInspector_Rays_OLED.png\"\n"
                << "  ]\n"
                << "}\n";
 

@@ -88,6 +88,28 @@ bool FlareSlider(GlobalInspectorPresentationContext& Context, const char* Label,
     return Changed;
 }
 
+void FlareSelectStyleBegin()
+{
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(216, 208, 223, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(22, 22, 27, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(33, 32, 38, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, IM_COL32(45, 43, 51, 255));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(197, 182, 210, 34));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(26, 27, 32, 255));
+    ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(58, 53, 65, 255));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(71, 64, 79, 255));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(82, 73, 90, 255));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 18.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 7.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+}
+
+void FlareSelectStyleEnd()
+{
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(9);
+}
+
 void FlareNote(GlobalInspectorPresentationContext& Context, const char* Text, float Height = 64.0f)
 {
     const ImVec2 At = ImGui::GetCursorScreenPos();
@@ -104,23 +126,25 @@ void FlarePlotFrame(const char* Id, float Height, ImVec2& Origin, float& Width)
 }
 
 void FlareToggleTile(GlobalInspectorPresentationContext& Context, const char* Name, bool* Value, int32_t* Preset,
-                     float X, float Width, const char* Id)
+                     float X, float Y, float Width, const char* Id)
 {
-    const ImVec2 At = ImGui::GetCursorScreenPos();
-    ImGui::SetCursorScreenPos(ImVec2(X, At.y));
+    ImGui::SetCursorScreenPos(ImVec2(X, Y));
     ImGui::PushID(Id);
-    const bool Clicked = ImGui::InvisibleButton("##flare_tile", ImVec2(Width, 64.0f));
+    const bool Clicked = ImGui::InvisibleButton("##flare_tile", ImVec2(Width, 106.0f));
     const bool Hovered = ImGui::IsItemHovered();
     if (Clicked) { *Value = !*Value; *Preset = 4; }
-    const ImU32 State = *Value ? IM_COL32(172, 208, 158, 255) : IM_COL32(180, 143, 150, 255);
-    ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(X, At.y), ImVec2(X + Width, At.y + 64.0f),
-                                               Hovered ? IM_COL32(51, 52, 54, 255) : IM_COL32(37, 37, 42, 255), 14.0f);
-    ImGui::GetWindowDrawList()->AddRect(ImVec2(X, At.y), ImVec2(X + Width, At.y + 64.0f),
-                                         *Value ? IM_COL32(191, 210, 174, 92) : IM_COL32(194, 157, 162, 42), 14.0f);
+    const ImU32 State = *Value ? IM_COL32(105, 200, 132, 255) : IM_COL32(204, 118, 115, 255);
+    ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(X, Y), ImVec2(X + Width, Y + 106.0f),
+                                               Hovered ? IM_COL32(47, 48, 51, 255) : IM_COL32(32, 32, 32, 255), 16.0f);
+    ImGui::GetWindowDrawList()->AddRect(ImVec2(X, Y), ImVec2(X + Width, Y + 106.0f),
+                                         *Value ? IM_COL32(105, 200, 132, 78) : IM_COL32(204, 118, 115, 78), 16.0f);
     const float CX = X + Width * 0.5f;
-    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(CX, At.y + 20.0f), 6.5f, State, 24);
-    const float TextWidth = KitTextWidth(Context.Faces.Regular, 8.5f, Name);
-    FlareText(Context, ImVec2(CX - TextWidth * 0.5f, At.y + 43.0f), 8.5f, State, Name);
+    ImGui::GetWindowDrawList()->AddCircleFilled(ImVec2(CX, Y + 31.0f), 15.5f, State, 28);
+    const float TextWidth = KitTextWidth(Context.Faces.Regular, 9.0f, Name);
+    FlareText(Context, ImVec2(CX - TextWidth * 0.5f, Y + 60.0f), 9.0f, IM_COL32(200, 200, 200, 255), Name);
+    const char* StateText = *Value ? "ON" : "OFF";
+    const float StateWidth = KitTextWidth(Context.Faces.Regular, 8.0f, StateText);
+    FlareText(Context, ImVec2(CX - StateWidth * 0.5f, Y + 83.0f), 8.0f, State, StateText);
     ImGui::PopID();
 }
 
@@ -195,14 +219,23 @@ void FlarePreview(GlobalInspectorPresentationContext& Context, LensFlareRecord& 
 
 void FlareCompose(GlobalInspectorPresentationContext& Context, LensFlareRecord& Flare)
 {
-    FlareCard(Context, "flare_compose", "02 / SOURCE & PRESET", "Light stack", 275.0f);
+    FlareCard(Context, "flare_compose", "02 / SOURCE & PRESET", "Light stack", 370.0f);
     const char* Names[] = {"Cinematic", "Anamorphic", "Starburst", "Halo", "Custom layers"};
-    if (ImGui::BeginCombo("Optical preset", Names[std::clamp(Flare.PresetIndex, 0, 4)]))
+    const ImVec2 PresetLabelAt = ImGui::GetCursorScreenPos();
+    const float SelectWidth = ImGui::GetContentRegionAvail().x;
+    FlareText(Context, PresetLabelAt, 9.0f, FlareMuted, "Optical preset");
+    ImGui::SetCursorScreenPos(ImVec2(PresetLabelAt.x, PresetLabelAt.y + 17.0f));
+    ImGui::SetNextItemWidth(SelectWidth);
+    FlareSelectStyleBegin();
+    if (ImGui::BeginCombo("##flare_preset", Names[std::clamp(Flare.PresetIndex, 0, 4)]))
     {
         for (int32_t I = 0; I < 5; ++I)
             if (ImGui::Selectable(Names[I], I == Flare.PresetIndex)) Flare.ApplyOpticalPreset(I);
         ImGui::EndCombo();
     }
+    FlareSelectStyleEnd();
+    ImGui::SetCursorScreenPos(ImVec2(PresetLabelAt.x, PresetLabelAt.y + 52.0f));
+    ImGui::Dummy(ImVec2(SelectWidth, 8.0f));
     double Intensity = Flare.GlobalIntensity;
     if (FlareSlider(Context, "Intensity", &Intensity, 0.0, 5.0, "%.2f×")) Flare.GlobalIntensity = Intensity;
     double Spread = Flare.OpticalSpread;
@@ -215,9 +248,9 @@ void FlareCompose(GlobalInspectorPresentationContext& Context, LensFlareRecord& 
 
 void FlareGhosts(GlobalInspectorPresentationContext& Context, LensFlareRecord& Flare)
 {
-    FlareCard(Context, "flare_ghosts", "03 / SENSOR-PLANE POSITIONS", "Internal reflections", 410.0f);
+    FlareCard(Context, "flare_ghosts", "03 / SENSOR-PLANE POSITIONS", "Internal reflections", 810.0f);
     ImVec2 Origin; float Width = 0.0f;
-    const float Height = std::min(220.0f, std::max(160.0f, ImGui::GetContentRegionAvail().x * 0.38f));
+    const float Height = ImGui::GetContentRegionAvail().x * (300.0f / 640.0f);
     FlarePlotFrame("##flare_ghost_plot", Height, Origin, Width);
     const float SX = Width / 640.0f, SY = Height / 300.0f;
     const auto P = [&](float X, float Y) { return ImVec2(Origin.x + X * SX, Origin.y + Y * SY); };
@@ -252,13 +285,22 @@ void FlareGhosts(GlobalInspectorPresentationContext& Context, LensFlareRecord& F
     FlareText(Context, ImVec2(Origin.x + 14.0f, Origin.y + Height - 17.0f), 8.0f, FlareMuted,
               "SOURCE → SENSOR CENTRE → REFLECTIONS");
     ImGui::Dummy(ImVec2(Width, Height + 8.0f));
-    if (ImGui::BeginCombo("Ghost shape", Flare.AperturePolygonSides == 0 ? "Round" : Flare.AperturePolygonSides == 8 ? "Octagon" : "Hexagon"))
+    const ImVec2 ShapeLabelAt = ImGui::GetCursorScreenPos();
+    const float ShapeWidth = ImGui::GetContentRegionAvail().x;
+    FlareText(Context, ShapeLabelAt, 9.0f, FlareMuted, "Ghost shape");
+    ImGui::SetCursorScreenPos(ImVec2(ShapeLabelAt.x, ShapeLabelAt.y + 17.0f));
+    ImGui::SetNextItemWidth(ShapeWidth);
+    FlareSelectStyleBegin();
+    if (ImGui::BeginCombo("##flare_ghost_shape", Flare.AperturePolygonSides == 0 ? "Round" : Flare.AperturePolygonSides == 8 ? "Octagon" : "Hexagon"))
     {
         if (ImGui::Selectable("Round", Flare.AperturePolygonSides == 0)) { Flare.AperturePolygonSides = 0; Flare.PresetIndex = 4; }
         if (ImGui::Selectable("Hexagon", Flare.AperturePolygonSides == 6)) { Flare.AperturePolygonSides = 6; Flare.PresetIndex = 4; }
         if (ImGui::Selectable("Octagon", Flare.AperturePolygonSides == 8)) { Flare.AperturePolygonSides = 8; Flare.PresetIndex = 4; }
         ImGui::EndCombo();
     }
+    FlareSelectStyleEnd();
+    ImGui::SetCursorScreenPos(ImVec2(ShapeLabelAt.x, ShapeLabelAt.y + 52.0f));
+    ImGui::Dummy(ImVec2(ShapeWidth, 8.0f));
     double Count = Flare.GhostCount;
     if (FlareSlider(Context, "Ghost count", &Count, 0.0, 24.0, "%.0f")) { Flare.GhostCount = int32_t(std::round(Count)); Flare.PresetIndex = 4; }
     double Brightness = Flare.GhostBrightness;
@@ -306,13 +348,14 @@ void FlareHalo(GlobalInspectorPresentationContext& Context, LensFlareRecord& Fla
 
 void FlareRays(GlobalInspectorPresentationContext& Context, LensFlareRecord& Flare)
 {
-    FlareCard(Context, "flare_rays", "05 / LAYER MIXER", "Diffraction & streaks", 350.0f);
-    const float Width = ImGui::GetContentRegionAvail().x, Gap = 7.0f, TileWidth = (Width - 2.0f * Gap) / 3.0f;
+    FlareCard(Context, "flare_rays", "05 / LAYER MIXER", "Diffraction & streaks", 540.0f);
+    const float Width = ImGui::GetContentRegionAvail().x, Gap = 8.0f, TileWidth = (Width - 2.0f * Gap) / 3.0f;
     const ImVec2 Start = ImGui::GetCursorScreenPos();
-    FlareToggleTile(Context, "Anamorphic", &Flare.AnamorphicStreakEnabled, &Flare.PresetIndex, Start.x, TileWidth, "anamorphic");
-    FlareToggleTile(Context, "Warm streak", &Flare.WarmStreakEnabled, &Flare.PresetIndex, Start.x + TileWidth + Gap, TileWidth, "warm_streak");
-    FlareToggleTile(Context, "Starburst", &Flare.StarburstEnabled, &Flare.PresetIndex, Start.x + 2.0f * (TileWidth + Gap), TileWidth, "starburst");
-    ImGui::Dummy(ImVec2(Width, 73.0f));
+    FlareToggleTile(Context, "Anamorphic", &Flare.AnamorphicStreakEnabled, &Flare.PresetIndex, Start.x, Start.y, TileWidth, "anamorphic");
+    FlareToggleTile(Context, "Warm streak", &Flare.WarmStreakEnabled, &Flare.PresetIndex, Start.x + TileWidth + Gap, Start.y, TileWidth, "warm_streak");
+    FlareToggleTile(Context, "Starburst", &Flare.StarburstEnabled, &Flare.PresetIndex, Start.x + 2.0f * (TileWidth + Gap), Start.y, TileWidth, "starburst");
+    ImGui::SetCursorScreenPos(ImVec2(Start.x, Start.y + 106.0f));
+    ImGui::Dummy(ImVec2(Width, 20.0f));
     char Rays[80]{};
     std::snprintf(Rays, sizeof(Rays), "%d ray pairs · %s", Flare.QueryEffectiveRayPairs(),
                   Flare.PresetIndex == 4 ? "Custom ray control" : "Legacy aperture control");
@@ -339,7 +382,7 @@ void DrawLensFlareInspectorPanel(GlobalInspectorPresentationContext& Context)
     const ImVec2 Window = ImGui::GetWindowPos(), Size = ImGui::GetWindowSize();
     ImGui::GetWindowDrawList()->AddRectFilled(Window, ImVec2(Window.x + Size.x, Window.y + Size.y), Context.Theme.PanelBg);
 
-    const float HeaderY = Context.BodyTop + 2.0f;
+    const float HeaderY = Context.BodyTop + 2.0f - ImGui::GetScrollY();
     FlareText(Context, ImVec2(Context.Left + 2.0f, HeaderY), 8.5f, FlareMuted, "ENVIRONMENT / CAMERA OPTICS", Context.Faces.Medium);
     FlareText(Context, ImVec2(Context.Left + 2.0f, HeaderY + 18.0f), 30.0f, FlareInk, "Lens flare", Context.Faces.Light);
     FlareText(Context, ImVec2(Context.Left + 2.0f, HeaderY + 53.0f), 10.0f, FlareMuted,

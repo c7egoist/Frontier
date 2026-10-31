@@ -4,12 +4,12 @@
   "application_target": "Frontier · Project workspace",
   "startup_scene": "ProvingGrounds",
   "user_log_categories": ["Powertrain", "CabinHMI", "Weather", "Fracture"],
-  "oled_logstream_luminance": 0.0976444,
-  "light_logstream_luminance": 0.968945,
-  "oled_outliner_luminance": 0.0523931,
+  "oled_logstream_luminance": 0.0976405,
+  "light_logstream_luminance": 0.96895,
+  "oled_outliner_luminance": 0.0523971,
   "light_outliner_luminance": 0.988784,
   "oled_inspector_luminance": 0.0810823,
-  "light_inspector_luminance": 0.972619,
+  "light_inspector_luminance": 0.972618,
   "global_environment_inspector_domains": 6,
   "captures": [
     "Exhibits/ProjectEverest/Images/01_ProjectBrowser_Projects.png",
@@ -26,6 +26,20 @@
     "Exhibits/ProjectEverest/Images/12_ProjectEverest_SunInspector_OLED.png",
     "Exhibits/ProjectEverest/Images/13_ProjectEverest_SunInspector_Daylight_OLED.png",
     "Exhibits/ProjectEverest/Images/14_ProjectEverest_SunInspector_LightColour_OLED.png",
-    "Exhibits/ProjectEverest/Images/15_ProjectEverest_SunInspector_DiscOptics_OLED.png"
+    "Exhibits/ProjectEverest/Images/15_ProjectEverest_SunInspector_DiscOptics_OLED.png",
+    "Exhibits/ProjectEverest/Images/16_ProjectEverest_AtmosphereInspector_Medium_OLED.png",
+    "Exhibits/ProjectEverest/Images/17_ProjectEverest_AtmosphereInspector_LightResponse_OLED.png",
+    "Exhibits/ProjectEverest/Images/18_ProjectEverest_AtmosphereInspector_Baking_OLED.png",
+    "Exhibits/ProjectEverest/Images/19_ProjectEverest_AtmosphereInspector_MediumControls_OLED.png",
+    "Exhibits/ProjectEverest/Images/20_ProjectEverest_CloudInspector_Formation_OLED.png",
+    "Exhibits/ProjectEverest/Images/21_ProjectEverest_CloudInspector_Rendering_OLED.png",
+    "Exhibits/ProjectEverest/Images/22_ProjectEverest_CloudInspector_Weather_OLED.png",
+    "Exhibits/ProjectEverest/Images/23_ProjectEverest_WindInspector_Variability_OLED.png",
+    "Exhibits/ProjectEverest/Images/24_ProjectEverest_WindInspector_Altitude_OLED.png",
+    "Exhibits/ProjectEverest/Images/25_ProjectEverest_WindInspector_Receivers_OLED.png",
+    "Exhibits/ProjectEverest/Images/26_ProjectEverest_LensFlareInspector_Compose_OLED.png",
+    "Exhibits/ProjectEverest/Images/27_ProjectEverest_LensFlareInspector_Ghosts_OLED.png",
+    "Exhibits/ProjectEverest/Images/28_ProjectEverest_LensFlareInspector_Halo_OLED.png",
+    "Exhibits/ProjectEverest/Images/29_ProjectEverest_LensFlareInspector_Rays_OLED.png"
   ]
 }

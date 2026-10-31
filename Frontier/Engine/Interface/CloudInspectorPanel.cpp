@@ -496,13 +496,34 @@ void CloudFormation(GlobalInspectorPresentationContext& Context, CloudLayerRecor
     CloudCard(Context, "cloud_profile", "Layer anatomy", "03 / PROFILE", 850.0f);
     const char* FormationNames[] = {"Stratus", "Stratocumulus", "Cumulus", "Cumulonimbus", "Altostratus", "Cirrus"};
     const int32_t Selected = std::clamp(Clouds.FormationIndex, 0, 5);
-    if (ImGui::BeginCombo("Formation", FormationNames[Selected]))
+    const ImVec2 FormationLabelAt = ImGui::GetCursorScreenPos();
+    const float FormationWidth = ImGui::GetContentRegionAvail().x;
+    CloudText(Context, FormationLabelAt, 10.0f, CloudMuted, "Formation");
+    ImGui::SetCursorScreenPos(ImVec2(FormationLabelAt.x, FormationLabelAt.y + 17.0f));
+    ImGui::SetNextItemWidth(FormationWidth);
+    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(216, 226, 204, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, IM_COL32(22, 28, 20, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, IM_COL32(31, 40, 28, 255));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, IM_COL32(36, 44, 31, 255));
+    ImGui::PushStyleColor(ImGuiCol_Border, IM_COL32(65, 75, 56, 102));
+    ImGui::PushStyleColor(ImGuiCol_PopupBg, IM_COL32(22, 28, 20, 255));
+    ImGui::PushStyleColor(ImGuiCol_Header, IM_COL32(48, 56, 45, 255));
+    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, IM_COL32(58, 68, 51, 255));
+    ImGui::PushStyleColor(ImGuiCol_HeaderActive, IM_COL32(66, 78, 55, 255));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(12.0f, 7.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    if (ImGui::BeginCombo("##cloud_formation", FormationNames[Selected]))
     {
         for (int32_t I = 0; I < 6; ++I)
             if (ImGui::Selectable(FormationNames[I], I == Clouds.FormationIndex)) Clouds.FormationIndex = I;
         ImGui::EndCombo();
     }
     ImGui::SetItemTooltip("Cloud formation");
+    ImGui::PopStyleVar(3);
+    ImGui::PopStyleColor(9);
+    ImGui::SetCursorScreenPos(ImVec2(FormationLabelAt.x, FormationLabelAt.y + 52.0f));
+    ImGui::Dummy(ImVec2(FormationWidth, 12.0f));
     ImVec2 Origin; float Width = 0.0f;
     const float PlotHeight = std::min(195.0f, std::max(145.0f, ImGui::GetContentRegionAvail().x * 0.37f));
     CloudDiagramFrame(Context, "##cloud_profile_plot", PlotHeight, Origin, Width);
