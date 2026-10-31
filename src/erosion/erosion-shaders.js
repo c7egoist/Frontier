@@ -1533,6 +1533,7 @@ uniform sampler2D uDeltaTex;
 uniform sampler2D uFluxTex;
 uniform sampler2D uSnowTex;
 uniform sampler2D uRockObstacleTex;
+uniform sampler2D uChemTex; // R rust, G salt, B varnish(+) / copper patina(-), A hydrolysis alteration
 
 uniform vec4 uIntParams;      // (gridRes, cellSize, dt, evaporation)
 uniform vec4 uPipeErode;      // (pipeFlowBlend, erosionStrength, rockHardness, worldSpan)
@@ -1542,6 +1543,7 @@ uniform vec4 uBrush;          // (brushX, brushZ, brushRadius, brushMode)
 uniform vec4 uClimate;        // (snowlineNorm, snowfallRate, glacierStrength, meltRate)
 uniform vec4 uHydrology;      // (iceMeltRate, headwaterFlow, lakeRetention, dryAeolianMode)
 uniform vec4 uWindField;      // (windDirX, windDirZ, windSpeed, erosionStrength)
+uniform vec4 uChemInt;        // (dissolution, salt bursting, hydrolysis conversion, master rate)
 uniform float uBrushStrength;
 uniform float uSeed;
 
@@ -1586,6 +1588,7 @@ void main() {
   // deposited into a partly rock-filled cell fills only the free fraction,
   // so the surface wedges up the rock's sides and buries it.
   vec4 obsC = texelFetch(uRockObstacleTex, c, 0);
+  vec4 chemC = texelFetch(uChemTex, c, 0);
   float rockCov = clamp(obsC.g, 0.0, 1.0);
   float protruding = obsC.r > (terr.r + terr.g + terr.b) ? 1.0 : 0.0;
   float armour = 1.0 - 0.92 * rockCov * protruding;
@@ -1611,6 +1614,8 @@ void main() {
     ) / (2.0 * cellSize);
     float slope = length(sGrad);
     float hardness = evalRockHardness3D(vec3(worldXZ.x, bedrock, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
+    // Hydrolysed saprolite is mechanically weak; a mature iron-oxide rind slightly armours the bed.
+    hardness = clamp(hardness * (1.0 - 0.55 * chemC.a) + chemC.r * 0.10, 0.04, 0.99);
 
     float shear = discharge * (0.15 + slope) * 2.2;
     float critShear = 0.04 + 0.55 * hardness * hardness;
@@ -1663,6 +1668,45 @@ void main() {
   float meltWater = (max(snowC.b, 0.0) + max(snowC.a, 0.0)) * 0.35;
   water += meltWater;
 
+  // ========================================================================
+  // CHEMICAL GEOMORPHOLOGY: dissolution removes soluble bedrock outright,
+  // hydrolysis converts altered bedrock into clay-rich fine sediment, and
+  // haloclasty (salt crystallisation) granularly disintegrates exposed rock.
+  // ========================================================================
+  if (uChemInt.x + uChemInt.y + uChemInt.z > 0.001) {
+    float chemHardness = evalRockHardness3D(vec3(worldXZ.x, bedrock, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
+    float sedDepthChem = coarse + fine;
+    float exposedChem = clamp(1.0 - sedDepthChem * 1.35, 0.0, 1.0);
+    float shallowChem = clamp(1.15 - sedDepthChem * 0.45, 0.0, 1.0);
+    float wetChem = clamp(water * 4.0 + discharge * 0.65 + meltWater * 6.0, 0.0, 1.25);
+    float solubility = clamp(1.18 - chemHardness + chemC.a * 0.65, 0.05, 1.7);
+    float rockAvailable = max(bedrock - 1.0, 0.0);
+
+    float dissolution = min(rockAvailable,
+      uChemInt.x * wetChem * solubility * (0.28 + 0.95 * chemC.a) * 0.00038 * dt);
+    dissolution *= armour;
+    bedrock -= dissolution;
+    rockAvailable = max(bedrock - 1.0, 0.0);
+
+    float hydrolysis = min(rockAvailable,
+      uChemInt.z * wetChem * chemC.a * shallowChem * clamp(1.20 - chemHardness, 0.05, 1.4) * 0.00032 * dt);
+    hydrolysis *= armour;
+    bedrock -= hydrolysis;
+    fine += hydrolysis * 0.78;
+    rockAvailable = max(bedrock - 1.0, 0.0);
+
+    float saltCrumble = min(rockAvailable,
+      uChemInt.y * chemC.g * chemC.g * exposedChem * clamp(1.25 - chemHardness, 0.05, 1.5) * 0.00045 * dt);
+    saltCrumble *= armour;
+    bedrock -= saltCrumble;
+    fine += saltCrumble * 0.68;
+    coarse += saltCrumble * 0.20;
+
+    float grainBreak = min(coarse, uChemInt.y * chemC.g * coarse * 0.010 * dt);
+    coarse -= grainBreak;
+    fine += grainBreak;
+  }
+
   // Perennial upstream headwater spring recharge -- only into low, gentle valley
   // floors (actual channels), never as a sheet across open slopes.
   if (uHydrology.y > 0.01) {
@@ -1702,6 +1746,7 @@ void main() {
     ) / (2.0 * cellSize);
     float cryoSlope = length(gSurf);
     float cryoHardness = evalRockHardness3D(vec3(worldXZ.x, bedrock, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
+    cryoHardness = clamp(cryoHardness * (1.0 - 0.55 * chemC.a) + chemC.r * 0.10, 0.04, 0.99);
 
     // 1. Glacier basal plucking & abrasion carves flat-floored U-shaped troughs & moraines
     if (iceDepth > 0.02) {
@@ -2061,6 +2106,195 @@ void main() {
 }
 `;
 
+// =============================================================================
+// CHEMICAL WEATHERING: terrain-wide reaction state, ping-ponged at sim res.
+//   R = iron oxide / rust       (0..1)
+//   G = salt efflorescence      (0..1)
+//   B = signed surface coating  (+ desert varnish, - copper patina)
+//   A = hydrolysis alteration   (0..1, clay/saprolite weathering front)
+// TERRAIN_INTEGRATE consumes this state to dissolve soluble bedrock, convert
+// altered rock to fines, salt-burst exposed faces and weaken stream cutting;
+// TERRAIN_RENDER paints the resulting flat mineral films.
+// =============================================================================
+export const CHEM_WEATHER_FRAG = `#version 300 es
+${GLSL_PRECISION_HEADER}
+in vec2 vUv;
+layout(location = 0) out vec4 outChem;
+
+uniform sampler2D uTerrainTex;
+uniform sampler2D uChemTex;
+uniform sampler2D uSnowTex;
+uniform sampler2D uVelocityFieldTex;
+
+uniform vec4 uChemDomain;     // (gridRes, cellSize, dt, worldSpan)
+uniform vec4 uChemRates;      // (rust, hydrolysis, salt, varnish), master rate premultiplied
+uniform vec4 uChemEnv;        // (copper, rainfall wetness, evaporation, dryAeolianMode)
+uniform vec4 uHardnessParams; // (rockHardness, strataStrength, strataFreq, faultWeakness)
+uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
+uniform vec4 uClimate;        // (snowlineNorm, snowfallRate, glacierStrength, meltRate)
+uniform float uSeed;
+uniform float uChemFlowScale; // 0 while pre-ageing a fresh landscape, 1 live
+
+${COMMON_GEOLOGY_GLSL}
+
+float chemGrow(float current, float drive, float dt) {
+  return current + (1.0 - current) * (1.0 - exp(-max(drive, 0.0) * dt));
+}
+
+void main() {
+  ivec2 c = ivec2(gl_FragCoord.xy);
+  int maxI = int(uChemDomain.x) - 1;
+  float cellSize = uChemDomain.y;
+  float dt = uChemDomain.z;
+
+  vec4 terr = texelFetch(uTerrainTex, c, 0);
+  vec4 chem = texelFetch(uChemTex, c, 0);
+  vec4 snowC = texelFetch(uSnowTex, c, 0);
+  vec4 vel = texelFetch(uVelocityFieldTex, c, 0);
+
+  float rust = clamp(chem.r, 0.0, 1.0);
+  float salt = clamp(chem.g, 0.0, 1.0);
+  float varnishAmt = clamp(chem.b, 0.0, 1.0);
+  float patinaAmt = clamp(-chem.b, 0.0, 1.0);
+  float alteration = clamp(chem.a, 0.0, 1.0);
+
+  float coarseDepth = max(terr.g, 0.0);
+  float fineDepth = max(terr.b, 0.0);
+  float sedDepth = coarseDepth + fineDepth;
+  float waterDepth = max(terr.a, 0.0);
+  float hSurf = terr.r + terr.g + terr.b;
+  vec2 worldXZ = (vUv - 0.5) * uChemDomain.w;
+
+  // Local slope from clamped cardinal neighbours (border cells use a one-sided slope).
+  vec4 tR = texelFetch(uTerrainTex, ivec2(min(maxI, c.x + 1), c.y), 0);
+  vec4 tL = texelFetch(uTerrainTex, ivec2(max(0, c.x - 1), c.y), 0);
+  vec4 tU = texelFetch(uTerrainTex, ivec2(c.x, min(maxI, c.y + 1)), 0);
+  vec4 tD = texelFetch(uTerrainTex, ivec2(c.x, max(0, c.y - 1)), 0);
+  vec2 grad = vec2(
+    (tR.r + tR.g + tR.b) - (tL.r + tL.g + tL.b),
+    (tU.r + tU.g + tU.b) - (tD.r + tD.g + tD.b)
+  ) / (2.0 * cellSize);
+  float slope = length(grad);
+
+  float discharge = max(vel.a, 0.0) * uChemFlowScale;
+  float melt = max(snowC.b, 0.0) + max(snowC.a, 0.0);
+  float moisture = clamp(
+    waterDepth * 5.0 + discharge * 0.65 + uChemEnv.y * 0.42 + melt * 5.0 + fineDepth * 0.18,
+    0.0, 1.5
+  );
+  float snowCover = smoothstep(0.03, 0.45, max(snowC.r, 0.0) + max(snowC.g, 0.0));
+  float elevN = hSurf / max(uStrataOrient.w, 1.0);
+  float warmth = clamp(1.18 - smoothstep(uClimate.x - 0.18, uClimate.x + 0.42, elevN), 0.18, 1.15);
+
+  float hardness = evalRockHardness3D(vec3(worldXZ.x, terr.r, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
+  float fracture = clamp(1.15 - hardness, 0.10, 1.20);
+  float rockAccess = exp(-sedDepth * 0.85);
+  float shallow = clamp(1.15 - sedDepth * 0.45, 0.0, 1.0);
+  float exposed = (0.22 + 0.78 * rockAccess) * (1.0 - 0.72 * snowCover);
+  float steep = smoothstep(0.35, 1.15, slope);
+  float damp = clamp(moisture, 0.0, 1.2) * (1.0 - 0.45 * smoothstep(0.35, 1.8, waterDepth));
+
+  // Seeded mineral provinces: iron-rich beds are common, copper veins rare,
+  // carbonate/soluble beds track a third independent field.
+  float veinFe = smoothstep(0.52, 0.84,
+    fbm2D(worldXZ * 0.045 + vec2(uSeed * 0.013, -uSeed * 0.007), 3, 0.52));
+  float veinCuRaw = smoothstep(0.66, 0.88,
+    fbm2D(worldXZ * 0.031 + vec2(-uSeed * 0.017, uSeed * 0.011), 3, 0.52));
+  float veinCu = veinCuRaw * veinCuRaw;
+  float veinCalc = smoothstep(0.54, 0.84,
+    fbm2D(worldXZ * 0.027 + vec2(uSeed * 0.019, uSeed * 0.023), 3, 0.50));
+
+  // Limited pairwise downhill bleeding of dissolved iron/copper. Both cells
+  // derive the same transfer from the same old terrain/state, so no stain is
+  // manufactured; the very small donor caps keep this a bleed, not a flood.
+  if (c.x > 0 && c.x < maxI && c.y > 0 && c.y < maxI) {
+    const ivec2 offs[4] = ivec2[4](
+      ivec2(1, 0), ivec2(-1, 0), ivec2(0, 1), ivec2(0, -1)
+    );
+    float wetSelf = clamp(waterDepth * 5.0 + uChemEnv.y * 0.42 + fineDepth * 0.18, 0.0, 1.2);
+    float bleedRate = 1.0 - exp(-dt * 0.060);
+    float netRust = 0.0;
+    float netPatina = 0.0;
+    for (int i = 0; i < 4; i++) {
+      ivec2 nb = c + offs[i];
+      vec4 tN = texelFetch(uTerrainTex, nb, 0);
+      vec4 chemN = texelFetch(uChemTex, nb, 0);
+      float hN = tN.r + tN.g + tN.b;
+      float dh = hSurf - hN;
+      float wetN = clamp(max(tN.a, 0.0) * 5.0 + uChemEnv.y * 0.42 + max(tN.b, 0.0) * 0.18, 0.0, 1.2);
+      float wetPair = min(wetSelf, wetN);
+      float spill = abs(dh) / (0.12 + abs(dh));
+      float rustN = clamp(chemN.r, 0.0, 1.0);
+      float patinaN = clamp(-chemN.b, 0.0, 1.0);
+      if (dh > 0.001) {
+        netRust -= min(rust * 0.025, max(rust - rustN, 0.0) * 0.010) * bleedRate * wetPair * spill;
+        netPatina -= min(patinaAmt * 0.025, max(patinaAmt - patinaN, 0.0) * 0.010) * bleedRate * wetPair * spill;
+      } else if (dh < -0.001) {
+        netRust += min(rustN * 0.025, max(rustN - rust, 0.0) * 0.010) * bleedRate * wetPair * spill;
+        netPatina += min(patinaN * 0.025, max(patinaN - patinaAmt, 0.0) * 0.010) * bleedRate * wetPair * spill;
+      }
+    }
+    rust = clamp(rust + netRust, 0.0, 1.0);
+    patinaAmt = clamp(patinaAmt + netPatina, 0.0, 1.0);
+  }
+
+  // Iron oxidation: fastest through damp (not drowned), warm, fractured,
+  // iron-bearing rock and iron-stained fine sediment; steep faces bleed.
+  float ironSource = (0.16 + 0.84 * veinFe) * (0.28 + 0.72 * rockAccess) + fineDepth * 0.08;
+  float rustDrive = uChemRates.x * damp * warmth * ironSource * fracture * exposed * (0.55 + 0.45 * steep);
+  rust = chemGrow(rust, rustDrive * 0.030, dt);
+
+  // Hydrolysis: warm, persistently wet, shallowly buried soluble/fractured
+  // bedrock alters toward clay saprolite. Strong channels strip it slowly.
+  float hydrolysisDrive = uChemRates.y * clamp(moisture, 0.0, 1.3) * warmth * shallow
+                          * (0.35 + 0.65 * veinCalc) * fracture * (1.0 - 0.35 * snowCover);
+  alteration = chemGrow(alteration, hydrolysisDrive * 0.018, dt);
+  alteration *= exp(-max(discharge - 0.85, 0.0) * 0.0012 * dt);
+
+  // Salt efflorescence at evaporating shorelines and in arid fine sediment;
+  // genuine through-flow or deep standing water redissolves/flushes it.
+  float evapF = clamp(uChemEnv.z * 4.0, 0.0, 1.4);
+  float shoreline = smoothstep(0.002, 0.035, waterDepth) * (1.0 - smoothstep(0.22, 1.10, waterDepth));
+  float capillary = smoothstep(0.015, 0.22, fineDepth);
+  float aridSalt = max(uChemEnv.w, smoothstep(0.25, 0.80, evapF));
+  float saltDrive = uChemRates.z * evapF * (0.10 + uChemEnv.w * 0.55)
+                    * max(shoreline, capillary * aridSalt) * (1.0 - 0.65 * snowCover);
+  salt = chemGrow(salt, saltDrive * 0.075, dt);
+  float saltFlush = max(discharge - 0.35, 0.0) * 0.016 + smoothstep(0.55, 1.60, waterDepth) * 0.006;
+  salt *= exp(-saltFlush * dt);
+
+  // Dominant surface coating: almost immobile desert varnish accretes very
+  // slowly on dry, steep, exposed rock; copper patina needs moist Cu veins.
+  float dryness = (1.0 - clamp(moisture, 0.0, 1.0)) * clamp(uChemEnv.w + evapF * 0.38, 0.05, 1.35);
+  float varnishDrive = uChemRates.w * dryness * exposed * smoothstep(0.30, 0.95, slope);
+  varnishAmt = chemGrow(varnishAmt, varnishDrive * 0.006, dt);
+
+  float patinaDrive = uChemEnv.x * veinCu * damp * warmth * rockAccess * fracture * exposed;
+  patinaAmt = chemGrow(patinaAmt, patinaDrive * 0.026, dt);
+
+  varnishAmt *= exp(-patinaDrive * 0.010 * dt);
+  patinaAmt *= exp(-varnishDrive * 0.006 * dt);
+
+  // Burial and energetic channel scour remove or hide surface films. The
+  // subsurface hydrolysis front survives shallow burial, as saprolite does.
+  float burial = smoothstep(0.55, 1.80, sedDepth);
+  float scour = max(discharge - 1.10, 0.0);
+  float surfaceLoss = exp(-(burial * 0.0012 + scour * 0.0009) * dt);
+  rust *= surfaceLoss;
+  varnishAmt *= surfaceLoss;
+  patinaAmt *= surfaceLoss;
+  salt *= exp(-burial * 0.0015 * dt);
+
+  float coating = varnishAmt >= patinaAmt ? varnishAmt : -patinaAmt;
+  outChem = vec4(
+    clamp(rust, 0.0, 1.0),
+    clamp(salt, 0.0, 1.0),
+    clamp(coating, -1.0, 1.0),
+    clamp(alteration, 0.0, 1.0)
+  );
+}
+`;
+
 export const THERMAL_TALUS_FRAG = `#version 300 es
 ${GLSL_PRECISION_HEADER}
 in vec2 vUv;
@@ -2212,6 +2446,7 @@ uniform sampler2D uInitialTex;
 uniform sampler2D uVelocityFieldTex;
 
 uniform sampler2D uSnowTex;
+uniform sampler2D uChemTex;
 uniform sampler2D uCavePortalTex;
 uniform sampler2D uMaskPreviewTex;
 
@@ -2228,6 +2463,7 @@ uniform int uViewMode;
 uniform int uMaterialTheme;   // 0..2 = Baseline, 3 = Grand Canyon, 4 = Studlagil, 5 = Yardang, 6 = Namib Erg
 uniform int uFabricMode;      // 0 = Baseline, 1 = Columnar, 2 = Cross-Bed/Ripples, 3 = Tafoni, 4 = Gneiss
 uniform float uSeed;
+uniform float uChemVis;
 uniform float uHasCaves;
 
 ${COMMON_GEOLOGY_GLSL}
@@ -2461,6 +2697,33 @@ void main() {
   vec3 surfaceAlbedo = rockAlbedo;
   surfaceAlbedo = mix(surfaceAlbedo, coarseGravelCol, (isSideSkirt ? 0.0 : smoothstep(0.012, 0.24, tC.g)) * 0.88);
   surfaceAlbedo = mix(surfaceAlbedo, fineAlluvialCol, (isSideSkirt ? 0.0 : smoothstep(0.008, 0.18, tC.b)) * 0.92);
+
+  // Chemical weathering state (CHEM_WEATHER_FRAG): iron rust, salt crusts,
+  // copper patina, desert varnish and pale hydrolysed clay. Snow/ice cover
+  // still paints over these films below, exactly as it buries real stains.
+  if (uChemVis > 0.001 && !isSideSkirt) {
+    vec4 chemC = sampleGridBilinear(uChemTex, vUv, res);
+    float rockFace = 1.0 - smoothstep(0.05, 0.55, tC.g + tC.b);
+    float rustAmtC = clamp(chemC.r, 0.0, 1.0) * uChemVis;
+    float saltAmtC = clamp(chemC.g, 0.0, 1.0) * uChemVis;
+    float varnishAmtC = clamp(chemC.b, 0.0, 1.0) * uChemVis;
+    float patinaAmtC = clamp(-chemC.b, 0.0, 1.0) * uChemVis;
+    float altAmtC = clamp(chemC.a, 0.0, 1.0) * uChemVis;
+
+    surfaceAlbedo = mix(surfaceAlbedo, vec3(0.58, 0.52, 0.42),
+      smoothstep(0.28, 0.92, altAmtC) * rockFace * 0.52);
+    vec3 rustColC = mix(vec3(0.45, 0.20, 0.06), vec3(0.16, 0.07, 0.035), smoothstep(0.35, 0.95, rustAmtC));
+    surfaceAlbedo = mix(surfaceAlbedo, rustColC,
+      smoothstep(0.05, 0.65, rustAmtC) * (0.35 + 0.65 * rockFace) * 0.90);
+    vec3 patinaColC = mix(vec3(0.11, 0.42, 0.33), vec3(0.07, 0.24, 0.48), smoothstep(0.35, 0.95, patinaAmtC));
+    surfaceAlbedo = mix(surfaceAlbedo, patinaColC,
+      smoothstep(0.05, 0.65, patinaAmtC) * (0.30 + 0.70 * rockFace) * 0.88);
+    surfaceAlbedo = mix(surfaceAlbedo, vec3(0.075, 0.055, 0.040),
+      smoothstep(0.15, 0.82, varnishAmtC) * rockFace * 0.82);
+    surfaceAlbedo = mix(surfaceAlbedo, vec3(0.88, 0.87, 0.82),
+      smoothstep(0.12, 0.75, saltAmtC) * 0.86);
+  }
+
   surfaceAlbedo = mix(surfaceAlbedo, iceAlbedo, iceCover * 0.94);
   surfaceAlbedo = mix(surfaceAlbedo, snowAlbedo, snowCover * 0.97);
 

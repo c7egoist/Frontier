@@ -796,7 +796,15 @@ export const DEFAULT_EROSION_PARAMS = {
   sdfFeaturePreset: 'escarpment', // Enabled by default so user immediately sees 3D SDF Escarpment + Rocks on terrain!
   showOutcrops: true,
   boulderDensity: 0.65,
-  chemicalWeathering: 0.7,  // rust-bleed & copper-patina staining strength on boulders/outcrops
+  chemicalWeathering: 0.7,  // chemical stain visibility on terrain + boulders/outcrops
+  // Terrain-wide chemical weathering / dissolution simulation layer.
+  chemRate: 0.7,
+  chemRust: 0.85,
+  chemCopper: 0.35,
+  chemHydrolysis: 0.65,
+  chemDissolution: 0.55,
+  chemSalt: 0.6,
+  chemVarnish: 0.5,
 
   // Layer Stack Visual & Structural Layer Controls (defaults preserve 100% identical terrain & shading output!)
   strataLayerEnabled: true,
@@ -814,6 +822,7 @@ export const DEFAULT_EROSION_PARAMS = {
   simCryoPlaying: true,
   simWindPlaying: true,
   simRockfallPlaying: true,
+  simChemicalPlaying: true,
 
   // Non-destructive Procedural Generator Modifier Layers (empty by default so presets match 100%!)
   proceduralModifiers: [],

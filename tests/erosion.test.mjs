@@ -45,6 +45,7 @@ const ALL_SHADER_EXPORTS = [
   'TERRAIN_INTEGRATE_FRAG',
   'SNOW_CRYO_FRAG',
   'THERMAL_TALUS_FRAG',
+  'CHEM_WEATHER_FRAG',
   'TERRAIN_RENDER_VERT',
   'TERRAIN_RENDER_FRAG',
   'PARTICLE_RENDER_VERT',
@@ -652,9 +653,9 @@ test('Bottom-to-top Terrain Stack Pipeline shaders, uniform bindings, and non-co
   }
   assert.ok(verified >= 45, `Expected >= 45 verified pipeline GPU uniform bindings, got ${verified}`);
 
-  // Verify 14 composable operations across all 5 categories, and ZERO colour/material/biome layers!
+  // Verify 15 composable operations across all 5 categories, and ZERO colour/material/biome layers!
   const specKeys = Object.keys(LAYER_OPERATION_SPECS);
-  assert.equal(specKeys.length, 14);
+  assert.equal(specKeys.length, 15);
   for (const catKey of ['landform', 'simulation', 'spline', 'rocks', 'vegetation']) {
     assert.ok(LAYER_CATEGORIES[catKey], `Missing category ${catKey}`);
     assert.ok(specKeys.some((k) => LAYER_OPERATION_SPECS[k].category === catKey), `No operation in category ${catKey}`);
@@ -1500,4 +1501,53 @@ test('Chemical weathering on Terrain Studio boulders: rust bleed & copper patina
   const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
   assert.ok(engSrc.includes("'uChemWeather'"), 'Engine sets uChemWeather');
   assert.ok(pipeSrc.includes("'uChemWeather'"), 'Pipeline sets uChemWeather');
+});
+
+test('Chemical weathering is a terrain-wide simulation layer with multiple reaction processes', () => {
+  const spec = LAYER_OPERATION_SPECS['chemical-weathering'];
+  assert.ok(spec, 'Chemical weathering layer operation exists');
+  assert.equal(spec.category, 'simulation');
+  assert.equal(spec.glyph, 'flask');
+  assert.ok(spec.writes.includes('Chemical State'), 'Layer writes a persistent chemical state');
+
+  const layer = createStackLayer('chemical-weathering');
+  for (const key of ['chemRate', 'chemRust', 'chemHydrolysis', 'chemDissolution', 'chemSalt', 'chemVarnish', 'chemCopper']) {
+    assert.equal(layer.params[key], DEFAULT_EROSION_PARAMS[key], `${key} defaults from erosion params`);
+    assert.ok(Number.isFinite(DEFAULT_EROSION_PARAMS[key]) && DEFAULT_EROSION_PARAMS[key] >= 0, `${key} is a valid rate`);
+  }
+  assert.equal(DEFAULT_EROSION_PARAMS.simChemicalPlaying, true);
+
+  for (const [presetId, preset] of Object.entries(TERRAIN_STACK_PRESETS)) {
+    const chemLayers = preset.layers().filter((l) => l.type === 'chemical-weathering');
+    assert.equal(
+      chemLayers.length,
+      presetId === 'lunar-mare-craters' ? 0 : 1,
+      `${presetId} chemical layer count`
+    );
+  }
+
+  // Distinct reaction families live in the persistent terrain state pass.
+  for (const token of ['veinFe', 'veinCu', 'veinCalc', 'rustDrive', 'hydrolysisDrive', 'saltDrive', 'varnishDrive', 'patinaDrive', 'netRust', 'outChem']) {
+    assert.ok(Shaders.CHEM_WEATHER_FRAG.includes(token), `CHEM_WEATHER_FRAG missing ${token}`);
+  }
+
+  // The state is geomorphic, not just a tint: it weakens hardness and drives
+  // dissolution, hydrolysis-to-fines and salt bursting in terrain integration.
+  for (const token of ['uniform sampler2D uChemTex', 'uniform vec4 uChemInt', 'dissolution', 'hydrolysis', 'saltCrumble', '1.0 - 0.55 * chemC.a']) {
+    assert.ok(Shaders.TERRAIN_INTEGRATE_FRAG.includes(token), `TERRAIN_INTEGRATE_FRAG missing ${token}`);
+  }
+  assert.ok(Shaders.TERRAIN_RENDER_FRAG.includes('sampleGridBilinear(uChemTex, vUv, res)'));
+  assert.ok(Shaders.TERRAIN_RENDER_FRAG.includes('rustColC') && Shaders.TERRAIN_RENDER_FRAG.includes('patinaColC'));
+
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  assert.ok(engSrc.includes('progChemWeather') && engSrc.includes('_runChemPass') && engSrc.includes('PASS G'));
+  assert.ok(engSrc.includes('seedChemicalWeathering') && engSrc.includes('simChemicalPlaying'));
+  assert.ok(pipeSrc.includes("layer.type === 'chemical-weathering'"));
+  assert.ok(pipeSrc.includes('_clearChemicalWeathering') && pipeSrc.includes('seedChemicalWeathering'));
+  assert.ok(pipeSrc.includes("'uChemTex', this.engine.chemTex[this.engine.chemIdx], 7"));
+  for (const key of ['chemRate', 'chemRust', 'chemHydrolysis', 'chemDissolution', 'chemSalt', 'chemVarnish', 'chemCopper']) {
+    assert.ok(uiSrc.includes(`key: '${key}'`), `Inspector missing ${key} slider`);
+  }
 });

@@ -6,6 +6,7 @@ import {
 } from './erosion-presets.js';
 import {
   FULLSCREEN_VERT,
+  CHEM_WEATHER_FRAG,
   GRASS_INSTANCE_FRAG,
   GRASS_INSTANCE_VERT,
   INIT_PARTICLES_FRAG,
@@ -206,6 +207,7 @@ export class GpuErosionEngine {
     this.progSnowCryo = createProgram(gl, FULLSCREEN_VERT, SNOW_CRYO_FRAG, 'SnowCryo');
     this.progRockImprint = createProgram(gl, FULLSCREEN_VERT, ROCK_IMPRINT_FRAG, 'RockImprint');
     this.progRockObstacle = createProgram(gl, FULLSCREEN_VERT, ROCK_OBSTACLE_FRAG, 'RockObstacle');
+    this.progChemWeather = createProgram(gl, FULLSCREEN_VERT, CHEM_WEATHER_FRAG, 'ChemWeather');
     this.progThermalTalus = createProgram(gl, FULLSCREEN_VERT, THERMAL_TALUS_FRAG, 'ThermalTalus');
     this.progTerrainRender = createProgram(gl, TERRAIN_RENDER_VERT, TERRAIN_RENDER_FRAG, 'TerrainRender');
     this.progRockInstance = createProgram(gl, ROCK_INSTANCE_VERT, ROCK_INSTANCE_FRAG, 'RockInstance');
@@ -256,6 +258,24 @@ export class GpuErosionEngine {
       createFbo(gl, [this.snowTex[0]]),
       createFbo(gl, [this.snowTex[1]]),
     ];
+
+    // Chemical weathering state ping-pong (RGBA32F: rust, salt,
+    // desert varnish (+) / copper patina (-), hydrolysis alteration)
+    this.chemTex = [
+      createDataTexture(gl, R, R, gl.RGBA32F, gl.RGBA, gl.FLOAT),
+      createDataTexture(gl, R, R, gl.RGBA32F, gl.RGBA, gl.FLOAT),
+    ];
+    this.chemIdx = 0;
+    this.fboChem = [
+      createFbo(gl, [this.chemTex[0]]),
+      createFbo(gl, [this.chemTex[1]]),
+    ];
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboChem[i]);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
 
     // Boulder occupancy field for sediment/water transport (rockTop, coverage)
     this.obstacleTex = [
@@ -860,7 +880,7 @@ export class GpuErosionEngine {
     const activeWind = p.simWindPlaying === false ? 0.0 : clamp01(p.windSpeed);
     const activeSnow = p.simCryoPlaying === false ? 0.0 : clamp01(p.snowfallRate);
     return {
-      anySimActive: rawSum > 1e-4 || p.simHydraulicPlaying !== false || p.simCryoPlaying !== false || p.simWindPlaying !== false || p.simRockfallPlaying !== false,
+      anySimActive: rawSum > 1e-4 || p.simHydraulicPlaying !== false || p.simCryoPlaying !== false || p.simWindPlaying !== false || p.simRockfallPlaying !== false || p.simChemicalPlaying !== false,
       anyParticleSpecies: rawSum > 1e-4,
       speciesVec: rawSum > 1e-4 ? [rain / sum, snow / sum, wind / sum, rock / sum] : [0, 0, 0, 0],
       snowVec: [p.snowline, activeSnow, p.simCryoPlaying === false ? 0.0 : clamp01(p.glacierStrength), 0.35 + 0.9 * activeSnow],
@@ -886,6 +906,7 @@ export class GpuErosionEngine {
       simCryoPlaying: this.params.simCryoPlaying,
       simWindPlaying: this.params.simWindPlaying,
       simRockfallPlaying: this.params.simRockfallPlaying,
+      simChemicalPlaying: this.params.simChemicalPlaying,
     };
     const vegDefaults = getVegetationDefaultsForLandscape(preset.id);
     Object.assign(this.params, DEFAULT_EROSION_PARAMS, vegDefaults, preset.defaults, keep);
@@ -1000,6 +1021,7 @@ export class GpuErosionEngine {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     this.snowIdx = 0;
+    this.seedChemicalWeathering();
 
     // 3. Spawn staggered sky raindrops across all 32,768 GPU particle slots
     const emitter = EMITTER_MODES[p.emitterMode] || EMITTER_MODES['sky-rain'];
@@ -1077,6 +1099,107 @@ export class GpuErosionEngine {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
+  /** Master + per-process chemical reaction rates (zero on the airless lunar theme). */
+  _chemRates() {
+    const p = this.params;
+    const rate = (value, fallback) => {
+      const n = Number(value ?? fallback);
+      return Number.isFinite(n) ? Math.max(0, n) : 0;
+    };
+    const master = this._themeCode() === 7 ? 0 : rate(p.chemRate, DEFAULT_EROSION_PARAMS.chemRate);
+    return {
+      master,
+      rust: master * rate(p.chemRust, DEFAULT_EROSION_PARAMS.chemRust),
+      hydrolysis: master * rate(p.chemHydrolysis, DEFAULT_EROSION_PARAMS.chemHydrolysis),
+      dissolution: master * rate(p.chemDissolution, DEFAULT_EROSION_PARAMS.chemDissolution),
+      salt: master * rate(p.chemSalt, DEFAULT_EROSION_PARAMS.chemSalt),
+      varnish: master * rate(p.chemVarnish, DEFAULT_EROSION_PARAMS.chemVarnish),
+      copper: master * rate(p.chemCopper, DEFAULT_EROSION_PARAMS.chemCopper),
+    };
+  }
+
+  /** Clears both chemical-state buffers (pristine, unweathered terrain). */
+  _clearChemicalWeathering() {
+    const gl = this.gl;
+    gl.viewport(0, 0, this.gridRes, this.gridRes);
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboChem[i]);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.chemIdx = 0;
+  }
+
+  /**
+   * One CHEM_WEATHER_FRAG reaction pass. `flowScale` is 0 while pre-ageing a
+   * freshly generated landscape so a stale discharge field cannot stain it.
+   */
+  _runChemPass(dtChem, flowScale = 1.0) {
+    const rates = this._chemRates();
+    if (rates.master <= 0.0001) return;
+    const gl = this.gl;
+    const R = this.gridRes;
+    const p = this.params;
+    const cellSize = p.worldSpan / R;
+    const { hardnessVec, strataVec } = this._getHardnessUniforms();
+    const climate = this._getClimateUniforms();
+    const rainWet = p.simHydraulicPlaying === false
+      ? 0.0
+      : Math.max(0, Math.min(1.5, p.rainIntensity ?? DEFAULT_EROSION_PARAMS.rainIntensity));
+    const nextChem = 1 - this.chemIdx;
+
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboChem[nextChem]);
+    gl.viewport(0, 0, R, R);
+    gl.useProgram(this.progChemWeather);
+    gl.bindVertexArray(this.emptyVao);
+
+    this._bindTex(this.progChemWeather, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
+    this._bindTex(this.progChemWeather, 'uChemTex', this.chemTex[this.chemIdx], 1);
+    this._bindTex(this.progChemWeather, 'uSnowTex', this.snowTex[this.snowIdx], 2);
+    this._bindTex(this.progChemWeather, 'uVelocityFieldTex', this.velocityFieldTex, 3);
+
+    gl.uniform4f(gl.getUniformLocation(this.progChemWeather, 'uChemDomain'), R, cellSize, dtChem, p.worldSpan);
+    gl.uniform4f(
+      gl.getUniformLocation(this.progChemWeather, 'uChemRates'),
+      rates.rust,
+      rates.hydrolysis,
+      rates.salt,
+      rates.varnish
+    );
+    gl.uniform4f(
+      gl.getUniformLocation(this.progChemWeather, 'uChemEnv'),
+      rates.copper,
+      rainWet,
+      p.evaporation ?? DEFAULT_EROSION_PARAMS.evaporation,
+      p.dryAeolianMode ?? 0.0
+    );
+    gl.uniform4fv(gl.getUniformLocation(this.progChemWeather, 'uHardnessParams'), hardnessVec);
+    gl.uniform4fv(gl.getUniformLocation(this.progChemWeather, 'uStrataOrient'), strataVec);
+    gl.uniform4fv(gl.getUniformLocation(this.progChemWeather, 'uClimate'), climate.snowVec);
+    gl.uniform1f(gl.getUniformLocation(this.progChemWeather, 'uSeed'), p.seed);
+    gl.uniform1f(gl.getUniformLocation(this.progChemWeather, 'uChemFlowScale'), flowScale);
+
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.chemIdx = nextChem;
+  }
+
+  /**
+   * Clears and pre-ages the chemical field so a new landscape opens with
+   * mature rust/patina/salt/varnish/alteration rather than pristine rock.
+   * The reaction ODEs are saturating exponentials, so three long-dt passes
+   * are unconditionally stable.
+   */
+  seedChemicalWeathering() {
+    this._clearChemicalWeathering();
+    if (this.params.simChemicalPlaying === false) return;
+    for (let i = 0; i < 3; i++) {
+      this._runChemPass(100.0, 0.0);
+    }
+  }
+
   /**
    * Executes `passes` iterations of conservative `THERMAL_TALUS_FRAG` (`progThermalTalus`).
    */
@@ -1122,6 +1245,7 @@ export class GpuErosionEngine {
     const emitter = EMITTER_MODES[p.emitterMode] || EMITTER_MODES['sky-rain'];
     const { hardnessVec, strataVec } = this._getHardnessUniforms();
     const climate = this._getClimateUniforms();
+    const chemRates = this._chemRates();
 
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.CULL_FACE);
@@ -1244,6 +1368,7 @@ export class GpuErosionEngine {
       this._bindTex(this.progTerrainIntegrate, 'uFluxTex', this.fluxTex[this.fluxIdx], 2);
       this._bindTex(this.progTerrainIntegrate, 'uSnowTex', this.snowTex[this.snowIdx], 3);
       this._bindTex(this.progTerrainIntegrate, 'uRockObstacleTex', this.obstacleTex[this.obstacleIdx], 4);
+      this._bindTex(this.progTerrainIntegrate, 'uChemTex', this.chemTex[this.chemIdx], 5);
 
       gl.uniform4f(gl.getUniformLocation(this.progTerrainIntegrate, 'uIntParams'), R, cellSize, dt, p.simHydraulicPlaying === false ? 0.0 : p.evaporation);
       gl.uniform4f(
@@ -1272,6 +1397,15 @@ export class GpuErosionEngine {
         climate.windVec[1],
         p.simWindPlaying === false ? 0.0 : (p.windSpeed ?? 0.0),
         p.erosionStrength ?? 0.70
+      );
+
+      const chemOn = p.simChemicalPlaying === false ? 0.0 : 1.0;
+      gl.uniform4f(
+        gl.getUniformLocation(this.progTerrainIntegrate, 'uChemInt'),
+        chemOn * chemRates.dissolution,
+        chemOn * chemRates.salt,
+        chemOn * chemRates.hydrolysis,
+        chemOn * chemRates.master
       );
 
       let brushCode = 0;
@@ -1352,6 +1486,15 @@ export class GpuErosionEngine {
 
       // PASS F2: embedded-boulder snow imprints queued by rock physics
       this._applyRockImprints(R, cellSize);
+
+      // ---------------------------------------------------------------------
+      // PASS G: Chemical weathering & dissolution reactions — gated by the
+      // Chemical Weathering simulation layer. Runs last so it sees this
+      // step's fresh water depth, discharge, sediment and snowmelt fields.
+      // ---------------------------------------------------------------------
+      if (p.simChemicalPlaying !== false) {
+        this._runChemPass(dt, 1.0);
+      }
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1598,6 +1741,7 @@ export class GpuErosionEngine {
     this._bindTex(this.progTerrainRender, 'uInitialTex', this.initialTerrainTex, 1);
     this._bindTex(this.progTerrainRender, 'uVelocityFieldTex', this.velocityFieldTex, 2);
     this._bindTex(this.progTerrainRender, 'uSnowTex', this.snowTex[this.snowIdx], 3);
+    this._bindTex(this.progTerrainRender, 'uChemTex', this.chemTex[this.chemIdx], 7);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(this.progTerrainRender, 'uViewProj'), false, viewProj);
     gl.uniform3fv(gl.getUniformLocation(this.progTerrainRender, 'uCameraPos'), eye);
@@ -1638,6 +1782,7 @@ export class GpuErosionEngine {
       p.dryAeolianMode || 0.0
     );
     gl.uniform1f(gl.getUniformLocation(this.progTerrainRender, 'uSeed'), p.seed);
+    gl.uniform1f(gl.getUniformLocation(this.progTerrainRender, 'uChemVis'), p.chemicalWeathering ?? DEFAULT_EROSION_PARAMS.chemicalWeathering);
 
     gl.drawElements(gl.TRIANGLES, this.terrainIndexCount, gl.UNSIGNED_INT, 0);
 
@@ -1800,7 +1945,8 @@ export class GpuErosionEngine {
           this.params.simHydraulicPlaying !== false ||
           this.params.simCryoPlaying !== false ||
           this.params.simWindPlaying !== false ||
-          this.params.simRockfallPlaying !== false;
+          this.params.simRockfallPlaying !== false ||
+          this.params.simChemicalPlaying !== false;
         if (this.playing && anySimLayerOn) {
           this.stepSimulation(this.params.substepsPerFrame);
         }
@@ -1818,7 +1964,8 @@ export class GpuErosionEngine {
         this.params.simHydraulicPlaying !== false ||
         this.params.simCryoPlaying !== false ||
         this.params.simWindPlaying !== false ||
-        this.params.simRockfallPlaying !== false;
+        this.params.simRockfallPlaying !== false ||
+        this.params.simChemicalPlaying !== false;
       if (this.playing && anySimLayerOn) {
         this.stepSimulation(this.params.substepsPerFrame);
         if (this.params.simRockfallPlaying !== false) {

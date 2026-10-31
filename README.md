@@ -105,10 +105,18 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   azurite in hollows — baked into a per-vertex stain attribute (sliders:
   Chemical Weathering / Iron / Copper; CLI `--chem/--iron/--copper`).
   Terrain Studio: boulders get per-instance mineralogy (seed hash) with
-  seep-column rust streaks running down steep faces plus an oxidation rind,
-  scaled by local wetness history and disabled on the airless lunar theme
-  (toolbar "Rust" slider / `chemicalWeathering` param). Flat two-tone mineral
+  seep-column rust streaks running down steep faces plus an oxidation rind.
+  The terrain itself now has a **Chemical weathering & dissolution**
+  simulation layer (`CHEM_WEATHER_FRAG`): a persistent GPU state tracks iron
+  rust, salt efflorescence, signed desert-varnish/copper-patina coating and
+  hydrolysis alteration from water depth, discharge, snowmelt, evaporation,
+  slope, burial, hardness/fractures and seeded Fe/Cu/carbonate veins. It is
+  geomorphic as well as visual — altered rock loses hardness, soluble bedrock
+  dissolves, hydrolysis creates clay fines and salt crystallisation bursts
+  exposed rock into sediment. Per-process rates and baking live on the layer
+  inspector; the toolbar "Weathering" slider controls stain visibility on
+  terrain + boulders. Disabled on the airless lunar theme. Flat mineral
   colours only — no noise grain, in keeping with the flat-colour pass.
 
-Verification: `npm test` — 31/31 pass (includes new `tests/rain-erosion.test.mjs`
+Verification: `npm test` — 32/32 pass (includes new `tests/rain-erosion.test.mjs`
 and rigid-body free-fall/no-elevator regression tests). `npm run build` clean.

@@ -556,6 +556,7 @@ export class TerrainStackPipeline {
     ep.simCryoPlaying = false;
     ep.simWindPlaying = false;
     ep.simRockfallPlaying = false;
+    ep.simChemicalPlaying = false;
     ep.strataLayerEnabled = false;
     ep.snowLayerEnabled = false;
     ep.showOutcrops = false;
@@ -592,6 +593,8 @@ export class TerrainStackPipeline {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.engine.fboSnowClear[i]);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
+
+    this.engine._clearChemicalWeathering();
 
     // Determine bottom seed early so particle cloud initializes deterministically
     const baseLayer = [...this.layers].reverse().find((l) => l.type === 'base-landform' && l.enabled);
@@ -726,6 +729,7 @@ export class TerrainStackPipeline {
             c: ep.simCryoPlaying,
             w: ep.simWindPlaying,
             r: ep.simRockfallPlaying,
+            chem: ep.simChemicalPlaying,
             rain: ep.rainIntensity,
             erod: ep.erosionStrength,
             hw: ep.headwaterFlow,
@@ -735,6 +739,7 @@ export class TerrainStackPipeline {
           ep.simCryoPlaying = false;
           ep.simWindPlaying = false;
           ep.simRockfallPlaying = false;
+          ep.simChemicalPlaying = false;
           ep.rainIntensity = p.headwaterRain ?? 0.68;
           ep.erosionStrength = p.incisionStrength ?? 0.85;
           ep.headwaterFlow = Math.max(ep.headwaterFlow, (p.headwaterRain ?? 0.68) * 0.65);
@@ -744,6 +749,7 @@ export class TerrainStackPipeline {
           ep.simCryoPlaying = prevFlags.c;
           ep.simWindPlaying = prevFlags.w;
           ep.simRockfallPlaying = prevFlags.r;
+          ep.simChemicalPlaying = prevFlags.chem;
           ep.rainIntensity = prevFlags.rain;
           ep.erosionStrength = prevFlags.erod;
           ep.headwaterFlow = prevFlags.hw;
@@ -763,14 +769,16 @@ export class TerrainStackPipeline {
         const bakeSteps = Math.max(0, Math.min(120, Math.round((p.bakeSteps ?? 0) * (fastPreview ? 0.5 : 1.0))));
         if (bakeSteps > 0) {
           this._runMaskedSimulation(layer, maxRelief, () => {
-            const prevC = ep.simCryoPlaying, prevW = ep.simWindPlaying, prevR = ep.simRockfallPlaying;
+            const prevC = ep.simCryoPlaying, prevW = ep.simWindPlaying, prevR = ep.simRockfallPlaying, prevChem = ep.simChemicalPlaying;
             ep.simCryoPlaying = false;
             ep.simWindPlaying = false;
             ep.simRockfallPlaying = false;
+            ep.simChemicalPlaying = false;
             this.engine.stepSimulation(bakeSteps, { skipTelemetry: true });
             ep.simCryoPlaying = prevC;
             ep.simWindPlaying = prevW;
             ep.simRockfallPlaying = prevR;
+            ep.simChemicalPlaying = prevChem;
           });
         }
       } else if (layer.type === 'thermal-talus') {
@@ -782,6 +790,36 @@ export class TerrainStackPipeline {
         if (bakePasses > 0) {
           this._runMaskedSimulation(layer, maxRelief, () => {
             this.engine.stepThermalTalusOnly(bakePasses);
+          });
+        }
+      } else if (layer.type === 'chemical-weathering') {
+        ep.chemRate = p.chemRate ?? DEFAULT_EROSION_PARAMS.chemRate;
+        ep.chemRust = p.chemRust ?? DEFAULT_EROSION_PARAMS.chemRust;
+        ep.chemHydrolysis = p.chemHydrolysis ?? DEFAULT_EROSION_PARAMS.chemHydrolysis;
+        ep.chemDissolution = p.chemDissolution ?? DEFAULT_EROSION_PARAMS.chemDissolution;
+        ep.chemSalt = p.chemSalt ?? DEFAULT_EROSION_PARAMS.chemSalt;
+        ep.chemVarnish = p.chemVarnish ?? DEFAULT_EROSION_PARAMS.chemVarnish;
+        ep.chemCopper = p.chemCopper ?? DEFAULT_EROSION_PARAMS.chemCopper;
+        ep.simChemicalPlaying = true;
+
+        // Pre-age rust/patina/salt/varnish/alteration on the terrain built so far.
+        this.engine.seedChemicalWeathering();
+
+        const bakeSteps = Math.max(0, Math.min(160, Math.round((p.bakeSteps ?? 0) * (fastPreview ? 0.5 : 1.0))));
+        if (bakeSteps > 0) {
+          this._runMaskedSimulation(layer, maxRelief, () => {
+            const prevH = ep.simHydraulicPlaying, prevC = ep.simCryoPlaying, prevW = ep.simWindPlaying, prevR = ep.simRockfallPlaying;
+            // Water transports reactants/products during the chemical bake;
+            // unrelated snow, wind and rockfall processes stay frozen.
+            ep.simHydraulicPlaying = true;
+            ep.simCryoPlaying = false;
+            ep.simWindPlaying = false;
+            ep.simRockfallPlaying = false;
+            this.engine.stepSimulation(bakeSteps, { skipTelemetry: true });
+            ep.simHydraulicPlaying = prevH;
+            ep.simCryoPlaying = prevC;
+            ep.simWindPlaying = prevW;
+            ep.simRockfallPlaying = prevR;
           });
         }
       } else if (layer.type === 'aeolian-glacial') {
@@ -802,12 +840,14 @@ export class TerrainStackPipeline {
         const bakePasses = Math.max(0, Math.min(64, Math.round((p.bakePasses ?? 0) * (fastPreview ? 0.5 : 1.0))));
         if (bakePasses > 0) {
           this._runMaskedSimulation(layer, maxRelief, () => {
-            const prevH = ep.simHydraulicPlaying, prevR = ep.simRockfallPlaying;
+            const prevH = ep.simHydraulicPlaying, prevR = ep.simRockfallPlaying, prevChem = ep.simChemicalPlaying;
             ep.simHydraulicPlaying = false;
             ep.simRockfallPlaying = false;
+            ep.simChemicalPlaying = false;
             this.engine.stepSimulation(bakePasses, { skipTelemetry: true });
             ep.simHydraulicPlaying = prevH;
             ep.simRockfallPlaying = prevR;
+            ep.simChemicalPlaying = prevChem;
           });
         }
       } else if (layer.type === 'rock-placement') {
@@ -1015,6 +1055,7 @@ export class TerrainStackPipeline {
     this.engine._bindTex(this.engine.progTerrainRender, 'uVecDispTex', this.vecDispTex[this.vecIdx], 4);
     this.engine._bindTex(this.engine.progTerrainRender, 'uCavePortalTex', this.cavePortalTex, 5);
     this.engine._bindTex(this.engine.progTerrainRender, 'uMaskPreviewTex', this.maskTex, 6);
+    this.engine._bindTex(this.engine.progTerrainRender, 'uChemTex', this.engine.chemTex[this.engine.chemIdx], 7);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uViewProj'), false, viewProj);
     gl.uniform3fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uCameraPos'), eye);
@@ -1053,6 +1094,7 @@ export class TerrainStackPipeline {
       p.dryAeolianMode || 0.0
     );
     gl.uniform1f(gl.getUniformLocation(this.engine.progTerrainRender, 'uSeed'), p.seed);
+    gl.uniform1f(gl.getUniformLocation(this.engine.progTerrainRender, 'uChemVis'), p.chemicalWeathering ?? DEFAULT_EROSION_PARAMS.chemicalWeathering);
     gl.uniform1f(gl.getUniformLocation(this.engine.progTerrainRender, 'uUseVecDisp'), this.hasActiveVecDisp ? 1.0 : 0.0);
     gl.uniform1f(gl.getUniformLocation(this.engine.progTerrainRender, 'uHasCaves'), hasCaves ? 1.0 : 0.0);
 

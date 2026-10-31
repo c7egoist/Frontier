@@ -353,6 +353,25 @@ export const LAYER_OPERATION_SPECS = {
     },
   },
 
+  'chemical-weathering': {
+    type: 'chemical-weathering',
+    category: 'simulation',
+    defaultName: 'Chemical weathering & dissolution',
+    glyph: 'flask',
+    reads: ['Height', 'Water', 'Flow', 'SnowIce', '3D Hardness'],
+    writes: ['Height', 'Sediment', 'Chemical State'],
+    summary: (p) => (p.bakeSteps > 0 ? `${Math.round(p.bakeSteps)} bake steps · ${Math.round((p.chemRate ?? DEFAULT_EROSION_PARAMS.chemRate) * 100)}% rate` : `Live chemical sim · ${Math.round((p.chemRate ?? DEFAULT_EROSION_PARAMS.chemRate) * 100)}% rate`),
+    defaults: {
+      bakeSteps: 0,
+      chemRate: DEFAULT_EROSION_PARAMS.chemRate,
+      chemRust: DEFAULT_EROSION_PARAMS.chemRust,
+      chemHydrolysis: DEFAULT_EROSION_PARAMS.chemHydrolysis,
+      chemDissolution: DEFAULT_EROSION_PARAMS.chemDissolution,
+      chemSalt: DEFAULT_EROSION_PARAMS.chemSalt,
+      chemVarnish: DEFAULT_EROSION_PARAMS.chemVarnish,
+      chemCopper: DEFAULT_EROSION_PARAMS.chemCopper,
+    },
+  },
   'aeolian-glacial': {
     type: 'aeolian-glacial',
     category: 'simulation',
@@ -506,6 +525,28 @@ function buildStackRecipeFromLandscape(landscapeId) {
         bakePasses: 0,
         talusAngle: d.talusAngle,
         rockfallRate: d.rockfallRate,
+      })
+    );
+  }
+
+  // 4B. Chemical weathering & dissolution: reacts with the water, flow, snowmelt,
+  // mineral veins and hardness fields produced below it, then weakens/dissolves
+  // bedrock and produces clay fines for the talus + hydraulic processes above it.
+  // The airless lunar material theme (7) has no aqueous chemistry layer.
+  const themeCodeChem = preset.materialTheme ?? d.materialTheme ?? 0;
+  if (themeCodeChem !== 7 && (d.chemRate ?? DEFAULT_EROSION_PARAMS.chemRate) > 0.001) {
+    const aridChem = (d.dryAeolianMode ?? 0) > 0.4 || themeCodeChem === 5 || themeCodeChem === 6 || themeCodeChem === 9;
+    layers.push(
+      createStackLayer('chemical-weathering', {
+        name: aridChem ? 'Salt, varnish & chemical weathering' : 'Chemical weathering & dissolution',
+        bakeSteps: 0,
+        chemRate: d.chemRate,
+        chemRust: d.chemRust,
+        chemHydrolysis: d.chemHydrolysis,
+        chemDissolution: d.chemDissolution,
+        chemSalt: aridChem ? Math.min(1.0, (d.chemSalt ?? DEFAULT_EROSION_PARAMS.chemSalt) * 1.35) : d.chemSalt,
+        chemVarnish: aridChem ? Math.min(1.0, (d.chemVarnish ?? DEFAULT_EROSION_PARAMS.chemVarnish) * 1.4) : d.chemVarnish,
+        chemCopper: d.chemCopper,
       })
     );
   }
