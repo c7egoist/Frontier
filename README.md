@@ -76,6 +76,16 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   restitution, rolling, water buoyancy/drag and impulse rock-rock collision.
   The vertex shader no longer re-snaps rocks to the heightfield — settled
   boulders stay put until erosion genuinely removes their support, then fall.
+- **Rocks embed into snow & sediment**: the ground is layered (snow/ice over
+  loose sediment over bedrock) and the soft layers are crushable — a boulder
+  sinks until bearing pressure × contact-patch area carries its true mass
+  (fresh snow ~8 kPa hardening as it densifies; sediment 55–140 kPa), so big
+  rocks sink deeper, slabs ride high, and mega-boulders punch through snow
+  onto sediment. Landings in snow are dead (plastic crush), rolling rocks
+  plough and bog down, and embedded rocks stamp the snowpack
+  (`ROCK_IMPRINT_FRAG`): compacted footprint + the displaced volume resurfacing
+  as a rim hugging the rock, so boulders protrude naturally and rolling ones
+  leave furrows. Melt wakes embedded rocks to settle onto the sediment.
 
-Verification: `npm test` — 26/26 pass (includes new `tests/rain-erosion.test.mjs`
+Verification: `npm test` — 27/27 pass (includes new `tests/rain-erosion.test.mjs`
 and rigid-body free-fall/no-elevator regression tests). `npm run build` clean.
