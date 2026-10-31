@@ -17,6 +17,7 @@ import {
   PARTICLE_SCATTER_VERT,
   PARTICLE_STEP_FRAG,
   PROCEDURAL_MODIFIER_FRAG,
+  ROCK_IMPRINT_FRAG,
   ROCK_INSTANCE_FRAG,
   ROCK_INSTANCE_VERT,
   SKY_BG_FRAG,
@@ -202,6 +203,7 @@ export class GpuErosionEngine {
     this.progWaterFlux = createProgram(gl, FULLSCREEN_VERT, WATER_FLUX_FRAG, 'WaterFlux');
     this.progTerrainIntegrate = createProgram(gl, FULLSCREEN_VERT, TERRAIN_INTEGRATE_FRAG, 'TerrainIntegrate');
     this.progSnowCryo = createProgram(gl, FULLSCREEN_VERT, SNOW_CRYO_FRAG, 'SnowCryo');
+    this.progRockImprint = createProgram(gl, FULLSCREEN_VERT, ROCK_IMPRINT_FRAG, 'RockImprint');
     this.progThermalTalus = createProgram(gl, FULLSCREEN_VERT, THERMAL_TALUS_FRAG, 'ThermalTalus');
     this.progTerrainRender = createProgram(gl, TERRAIN_RENDER_VERT, TERRAIN_RENDER_FRAG, 'TerrainRender');
     this.progRockInstance = createProgram(gl, ROCK_INSTANCE_VERT, ROCK_INSTANCE_FRAG, 'RockInstance');
@@ -301,6 +303,9 @@ export class GpuErosionEngine {
     this.fboTelemetry = createFbo(gl, [this.telemetryTex]);
     this.telemetryBuf = new Float32Array(TELEMETRY_RES * TELEMETRY_RES * 4);
     this.initialSnap64 = new Float32Array(TELEMETRY_RES * TELEMETRY_RES * 4);
+    this.snowSnap64 = new Float32Array(TELEMETRY_RES * TELEMETRY_RES * 4); // cryo twin for rock embedding
+    this._imprintA = new Float32Array(24 * 4); // ROCK_IMPRINT stamp scratch (x, z, patchR, rimH)
+    this._imprintB = new Float32Array(24 * 4); // (rimW, compactSnow, -, -)
   }
 
   _initMeshVao() {
@@ -997,11 +1002,12 @@ export class GpuErosionEngine {
     gl.uniform1f(gl.getUniformLocation(this.progTelemetry, 'uGridRes'), this.gridRes);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.readPixels(0, 0, TELEMETRY_RES, TELEMETRY_RES, gl.RGBA, gl.FLOAT, this.initialSnap64);
+    this._readSnowSnapshot64();
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindVertexArray(null);
 
-    this.rockCalving.updateTerrainSnapshot(this.initialSnap64, TELEMETRY_RES, p.worldSpan);
+    this.rockCalving.updateTerrainSnapshot(this.initialSnap64, TELEMETRY_RES, p.worldSpan, this.snowSnap64);
     this.rockCalving.seedForLandscape(p);
 
     let initWaterSum = 0;
@@ -1312,6 +1318,9 @@ export class GpuErosionEngine {
         gl.drawArrays(gl.TRIANGLES, 0, 3);
         this.snowIdx = nextSnow;
       }
+
+      // PASS F2: embedded-boulder snow imprints queued by rock physics
+      this._applyRockImprints(R, cellSize);
     }
 
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -1331,6 +1340,52 @@ export class GpuErosionEngine {
         this.telemetry.caveTris = Math.round(this.pipeline.caveSystem.vertexCount / 3);
       }
       if (this.onTelemetry && this.stepCount % 8 === 0) this.onTelemetry(this.telemetry);
+    }
+  }
+
+  /** Downsamples the cryosphere texture to 64x64 so rock physics can embed into snow/ice. */
+  _readSnowSnapshot64() {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboTelemetry);
+    gl.viewport(0, 0, TELEMETRY_RES, TELEMETRY_RES);
+    gl.useProgram(this.progTelemetry);
+    gl.bindVertexArray(this.emptyVao);
+    this._bindTex(this.progTelemetry, 'uTerrainTex', this.snowTex[this.snowIdx], 0);
+    gl.uniform1f(gl.getUniformLocation(this.progTelemetry, 'uGridRes'), this.gridRes);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.readPixels(0, 0, TELEMETRY_RES, TELEMETRY_RES, gl.RGBA, gl.FLOAT, this.snowSnap64);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  /**
+   * Stamps embedded-boulder imprints (compacted footprint + displaced rim)
+   * into the snowpack. Runs right after the cryo pass; no-op unless rock
+   * physics queued stamps. Batches of 24, at most 3 passes per sim step.
+   */
+  _applyRockImprints(R, cellSize) {
+    const gl = this.gl;
+    for (let pass = 0; pass < 3; pass++) {
+      const stamps = this.rockCalving.consumeImprints(24);
+      if (!stamps || stamps.length === 0) return;
+      const A = this._imprintA;
+      const B = this._imprintB;
+      A.fill(0);
+      B.fill(0);
+      for (let i = 0; i < stamps.length; i++) {
+        const s = stamps[i];
+        A[i * 4] = s.x; A[i * 4 + 1] = s.z; A[i * 4 + 2] = s.a; A[i * 4 + 3] = s.rimH;
+        B[i * 4] = s.rimW; B[i * 4 + 1] = s.compactSnow;
+      }
+      const nextSnow = 1 - this.snowIdx;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboSnowClear[nextSnow]);
+      gl.viewport(0, 0, R, R);
+      gl.useProgram(this.progRockImprint);
+      this._bindTex(this.progRockImprint, 'uSnowTex', this.snowTex[this.snowIdx], 0);
+      gl.uniform4f(gl.getUniformLocation(this.progRockImprint, 'uImprintDomain'), this.params.worldSpan, cellSize, stamps.length, 0);
+      gl.uniform4fv(gl.getUniformLocation(this.progRockImprint, 'uImprintA[0]'), A);
+      gl.uniform4fv(gl.getUniformLocation(this.progRockImprint, 'uImprintB[0]'), B);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      this.snowIdx = nextSnow;
     }
   }
 
@@ -1364,7 +1419,8 @@ export class GpuErosionEngine {
     }
 
     // Feed live 64x64 terrain heightfield to 3D rock calving & undercut-boulder wake-up!
-    this.rockCalving.updateTerrainSnapshot(buf, TELEMETRY_RES, this.params.worldSpan);
+    this._readSnowSnapshot64();
+    this.rockCalving.updateTerrainSnapshot(buf, TELEMETRY_RES, this.params.worldSpan, this.snowSnap64);
     if (this.playing && (this.params.rockfallRate || 0) > 0.25 && (this.params.boulderDensity ?? 0.65) > 0.05) {
       if (this.stepCount % 144 === 0) {
         this.rockCalving.calveCliffBoulders(Math.max(1, Math.round(this.params.rockfallRate * 3)));

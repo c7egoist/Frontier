@@ -13,6 +13,14 @@
  * the terrain per frame: a sleeping rock only wakes when erosion actually
  * removes its support, then gravity -- not a heightfield lookup -- moves it.
  * The vertex shader receives the true body centre (see ROCK_INSTANCE_VERT).
+ *
+ * Embedding: snow and loose sediment are crushable bearing layers. A rock
+ * penetrating them feels bearing pressure x contact-patch area (snow hardens
+ * as it densifies under load; sediment is far firmer), so it sinks until its
+ * weight is carried -- big rocks sink proportionally deeper, flat slabs ride
+ * high -- and comes to rest partially embedded, protruding from the surface.
+ * Settled/rolling rocks also emit snow imprints (compaction + displaced rim)
+ * that the engine stamps into the snowpack texture (`ROCK_IMPRINT_FRAG`).
  */
 
 import { createRng } from '../core/prng.js';
@@ -25,6 +33,109 @@ const FLOATS_PER_INSTANCE = 16; // 4 x vec4: col0+seed, col1+wear, col2+radiusY,
 const GRAVITY = 9.81;           // m/s^2, real Earth gravity at true metre scale
 const SUBSTEP_H = 1 / 120;      // physics substep (s)
 const EMBED = 0.96;             // rocks rest very slightly embedded (natural seating)
+
+// ---------------------------------------------------------------------------
+// Crushable-ground bearing model: how rocks embed into snow & sediment.
+// Bearing force = pressure(pen) x contactPatchArea(pen). Fresh snow is weak
+// (~8 kPa) but densifies toward firn as it compacts (hardening x10); loose
+// sediment bears 55-140 kPa. Equilibrium sink depth follows from the rock's
+// true mass: weight grows with R^3, patch area with R^2, so larger boulders
+// sink proportionally deeper (and can punch through snow onto sediment).
+// ---------------------------------------------------------------------------
+const SNOW_SIGMA0 = 8000;        // Pa, fresh-snow bearing strength
+const SNOW_HARDEN = 9.0;         // densification hardening (x10 at full compaction)
+const SNOW_RESIDUAL = 0.18;      // snow crushed under a rock keeps 18% of its loft
+const SED_SIGMA_COARSE = 140000; // Pa, loose coarse talus bearing capacity
+const SED_SIGMA_FINE = 55000;    // Pa, loose fine sand / mud bearing capacity
+const SED_MAX_STRAIN = 0.6;      // sediment compacts/displaces to 40% residual at most
+const SNOW_BULGE_FRAC = 0.35;    // displaced snow volume resurfacing as rim (rest densifies in place)
+const RIM_INNER = 0.82;          // rim profile starts at 0.82 x patch radius (hugs the rock)
+
+/**
+ * Load-bearing contact area (m^2) of an ellipsoid (vertical radius Rv,
+ * horizontal radius Rh) sunk `pen` metres into a surface. Grows with the
+ * elliptical section, saturating at the equator area pi*Rh^2 once the rock
+ * is sunk past its widest belt (support then comes from material compacted
+ * beneath the body, whose projected area no longer grows).
+ */
+export function contactPatchArea(Rv, Rh, pen) {
+  if (pen <= 0 || Rv <= 0 || Rh <= 0) return 0;
+  const p = Math.min(pen, Rv);
+  return Math.PI * ((Rh * Rh) / (Rv * Rv)) * (2 * Rv * p - p * p);
+}
+
+/** Submerged volume (m^3) of the ellipsoid segment below the surface. */
+export function submergedCapVolume(Rv, Rh, pen) {
+  if (pen <= 0 || Rv <= 0 || Rh <= 0) return 0;
+  const p = Math.min(pen, 2 * Rv);
+  return Math.PI * ((Rh * Rh) / (Rv * Rv)) * p * p * (Rv - p / 3);
+}
+
+/**
+ * Bearing pressure (Pa) at penetration `pen` through a snow layer that can
+ * crush `dMaxCryo` metres and a sediment layer that can crush `dMaxSed`.
+ * Snow: quadratic densification hardening. Sediment: firmer, mild hardening,
+ * never weaker than the compacted snow plug transmitting load into it.
+ */
+export function bearingPressure(pen, dMaxCryo, dMaxSed, sedSigma) {
+  if (pen <= 0) return 0;
+  if (pen <= dMaxCryo) {
+    const s = dMaxCryo > 1e-4 ? pen / dMaxCryo : 1;
+    const s2 = s * s;
+    const s12 = s2 * s2 * s2 * s2 * s2 * s2;
+    // Final approach to full compaction stiffens sharply toward firn/ice
+    return SNOW_SIGMA0 * (1 + SNOW_HARDEN * s2) * (1 + 3 * s12);
+  }
+  const sSed = dMaxSed > 1e-4 ? clamp((pen - dMaxCryo) / dMaxSed, 0, 1) : 1;
+  const snowPlug = dMaxCryo > 0.01 ? SNOW_SIGMA0 * (1 + SNOW_HARDEN) * 0.88 : 0;
+  const base = Math.max(sedSigma, snowPlug);
+  const q2 = sSed * sSed;
+  const q12 = q2 * q2 * q2 * q2 * q2 * q2;
+  // Near-maximum compaction the granular skeleton locks up toward bedrock
+  return base * (1 + 1.6 * q2) * (1 + 6 * q12);
+}
+
+/**
+ * Static equilibrium sink depth (m): solves pressure x area = normal weight
+ * by bisection. Returns the fully-compacted floor depth when even that
+ * cannot carry the rock (it then rests on the compacted floor / bedrock).
+ */
+export function equilibriumEmbed(mass, Rv, Rh, dMaxCryo, dMaxSed, sedSigma, loadFactor = 1) {
+  const dMax = dMaxCryo + dMaxSed;
+  if (dMax <= 0 || mass <= 0 || Rv <= 0 || Rh <= 0) return 0;
+  const load = mass * GRAVITY * loadFactor;
+  const f = (p) => bearingPressure(p, dMaxCryo, dMaxSed, sedSigma) * contactPatchArea(Rv, Rh, p) - load;
+  if (f(dMax) < 0) return dMax;
+  let lo = 0;
+  let hi = dMax;
+  for (let i = 0; i < 26; i++) {
+    const mid = 0.5 * (lo + hi);
+    if (f(mid) < 0) lo = mid; else hi = mid;
+  }
+  return 0.5 * (lo + hi);
+}
+
+/**
+ * Rim (displaced-snow berm) geometry for the imprint stamp: peak height such
+ * that the cosine-falloff annulus around the footprint holds exactly
+ * `volume` m^3. The matching GLSL profile lives in ROCK_IMPRINT_FRAG.
+ */
+export function rimHeightForVolume(volume, patchRadius) {
+  const a = Math.max(0.05, patchRadius);
+  const width = clamp(0.85 * a + 0.35, 0.5, 3.0);
+  if (volume <= 0) return { height: 0, width };
+  const r0 = RIM_INNER * a;
+  const r1 = a + width;
+  const STEPS = 32;
+  let integral = 0;
+  for (let i = 0; i < STEPS; i++) {
+    const r = r0 + (r1 - r0) * ((i + 0.5) / STEPS);
+    const s = (r - r0) / (r1 - r0);
+    integral += 2 * Math.PI * r * (0.5 + 0.5 * Math.cos(Math.PI * s));
+  }
+  integral *= (r1 - r0) / STEPS;
+  return { height: volume / Math.max(1e-6, integral), width };
+}
 
 // ---------------------------------------------------------------------------
 // Quaternion helpers (x, y, z, w), column-basis convention matching the
@@ -227,6 +338,8 @@ export class RockCalvingSystem {
     this.heightGrid = new Float32Array(64 * 64 * 4); // (bedrock, coarse, fine, water)
     this.hasHeightSnapshot = false;
     this.worldSpan = 512.0;
+    this.snowGrid = null; // (snowDepth, iceDepth, melt, iceMelt) matching heightGrid layout
+    this.pendingImprints = []; // snow imprint stamps awaiting the engine's GPU pass
 
     this.rocks = [];
     // Separate per-submesh instance staging arrays for 6-archetype instanced draw
@@ -240,7 +353,10 @@ export class RockCalvingSystem {
    * with only yaw+up are upgraded in place.
    */
   _ensureBody(r) {
-    if (r.qw !== undefined && r.rx !== undefined) return r;
+    if (r.qw !== undefined && r.rx !== undefined) {
+      if (r.invMass === undefined) r.invMass = 1 / Math.max(1, r.mass || 1000);
+      return r;
+    }
     const he = this.atlas.halfExtents[r.submesh] || [1, 0.85, 0.95];
     r.sx = r.sx ?? 2; r.sy = r.sy ?? 1.8; r.sz = r.sz ?? 2;
     r.rx = he[0] * r.sx;
@@ -288,18 +404,28 @@ export class RockCalvingSystem {
   }
 
   /**
-   * Updates the terrain snapshot `(bedrock, coarse, fine, water)` read from GPU.
+   * Updates the terrain snapshot `(bedrock, coarse, fine, water)` read from GPU,
+   * plus the matching cryosphere snapshot `(snowDepth, iceDepth, ...)` when fed.
    * Rocks are NEVER repositioned by a snapshot: sleeping boulders only WAKE
-   * when erosion removed their support or steepened their seat beyond static
-   * friction -- gravity does all subsequent motion.
+   * when erosion/melt removed their support or steepened their seat beyond
+   * static friction -- gravity does all subsequent motion. A rock embedded in
+   * snow measures its support gap against the snow surface minus its sink
+   * depth, so fresh snowfall buries it deeper (stays asleep) while melt lets
+   * it settle down onto the sediment.
    */
-  updateTerrainSnapshot(rgba64, gridRes = 64, worldSpan = 512.0) {
+  updateTerrainSnapshot(rgba64, gridRes = 64, worldSpan = 512.0, snowRgba64 = null) {
     this.gridRes = gridRes;
     this.worldSpan = worldSpan;
     if (this.heightGrid.length !== rgba64.length) {
       this.heightGrid = new Float32Array(rgba64.length);
     }
     this.heightGrid.set(rgba64);
+    if (snowRgba64) {
+      if (!this.snowGrid || this.snowGrid.length !== snowRgba64.length) {
+        this.snowGrid = new Float32Array(snowRgba64.length);
+      }
+      this.snowGrid.set(snowRgba64);
+    }
     this.hasHeightSnapshot = true;
 
     for (let i = 0; i < this.rocks.length; i++) {
@@ -319,8 +445,9 @@ export class RockCalvingSystem {
         }
       } else if (r.settled) {
         const s = this.sampleTerrain(r.x, r.z);
-        const gap = (r.y - this._support(r, 0, 1, 0)) - s.totalH;
-        if (gap > 0.12 || s.slope > (r.muS ?? 0.62) + 0.03) {
+        const gap = (r.y - this._support(r, 0, 1, 0)) - (s.surfH - (r.embedPen || 0));
+        const holdSlope = (r.muS ?? 0.62) + Math.min(0.9, 1.5 * (r.embedPen || 0) / Math.max(0.3, r.ry || 1));
+        if (gap > 0.12 || s.slope > holdSlope + 0.03) {
           r.settled = false;
           r.sleepTimer = 0;
         }
@@ -356,6 +483,27 @@ export class RockCalvingSystem {
     const water = bilerp(3);
     const totalH = bedrock + coarse + fine;
 
+    const sg = this.snowGrid;
+    const bilerpS = (ch) => {
+      if (!sg) return 0;
+      const a = sg[i00 + ch] * (1 - fx) + sg[i10 + ch] * fx;
+      const b = sg[i01 + ch] * (1 - fx) + sg[i11 + ch] * fx;
+      return a * (1 - fz) + b * fz;
+    };
+    const snow = Math.max(0, bilerpS(0));
+    const ice = Math.max(0, bilerpS(1));
+    // Rendered cryo lift -- MUST match TERRAIN_RENDER_VERT so physics rests
+    // rocks exactly in the surface the user sees.
+    const snowLift = Math.min(3.4, snow * 0.85 + ice * 0.62);
+    const cryoResidual = Math.min(3.4, snow * 0.85 * SNOW_RESIDUAL + ice * 0.62);
+    const dMaxCryo = Math.max(0, snowLift - cryoResidual);
+    const sedT = coarse + fine;
+    const dMaxSed = sedT * SED_MAX_STRAIN;
+    const sedSigma = sedT > 1e-4
+      ? (coarse * SED_SIGMA_COARSE + fine * SED_SIGMA_FINE * (water > 0.05 ? 0.6 : 1.0)) / sedT
+      : SED_SIGMA_COARSE;
+    const surfH = totalH + snowLift;
+
     const cellM = span / (N - 1);
     const h00 = g[i00] + g[i00 + 1] + g[i00 + 2];
     const h10 = g[i10] + g[i10 + 1] + g[i10 + 2];
@@ -372,6 +520,13 @@ export class RockCalvingSystem {
       fine,
       water,
       totalH,
+      snow,
+      ice,
+      snowLift,
+      surfH,
+      dMaxCryo,
+      dMaxSed,
+      sedSigma,
       dhdx,
       dhdz,
       slope,
@@ -503,7 +658,14 @@ export class RockCalvingSystem {
             seedHash: rng.float(),
             wear: rng.range(0.25, 0.78),
           });
-          rk.y = st.totalH + this._support(rk, 0, 1, 0) * 0.97;
+          // Seated at bearing equilibrium: sunk into snow/sediment until the
+          // crushable layer carries its weight, protruding from the surface.
+          const supUpSeed = this._support(rk, 0, 1, 0);
+          const rhSeed = Math.sqrt(Math.max(0.05, this._support(rk, 1, 0, 0) * this._support(rk, 0, 0, 1)));
+          const eqSeed = equilibriumEmbed(rk.mass, Math.max(0.22, supUpSeed), rhSeed, st.dMaxCryo, st.dMaxSed, st.sedSigma, st.ny);
+          rk.y = st.surfH - eqSeed + supUpSeed;
+          rk.embedPen = eqSeed;
+          rk.embedSurfH = st.surfH;
           this.rocks.push(rk);
           placed++;
         }
@@ -585,7 +747,7 @@ export class RockCalvingSystem {
       rk.x += dxn * rk.boundR * 1.1;
       rk.z += dzn * rk.boundR * 1.1;
       const st = this.sampleTerrain(rk.x, rk.z);
-      rk.y = st.totalH + this._support(rk, 0, 1, 0) + 0.12;
+      rk.y = st.surfH + this._support(rk, 0, 1, 0) + 0.12;
       const topple = rng.range(0.6, 2.2);
       rk.vx = dxn * topple + rng.signed() * 0.4;
       rk.vz = dzn * topple + rng.signed() * 0.4;
@@ -632,10 +794,12 @@ export class RockCalvingSystem {
         if (r.isOutcrop) continue;
 
         if (r.settled) {
-          // Cheap support audit: wake only if the ground fell away or steepened
+          // Cheap support audit: wake only if the ground fell away or steepened.
+          // Embedded rocks measure the gap from their seat inside the snowpack.
           const stc = this.sampleTerrain(r.x, r.z);
-          const gap = (r.y - this._support(r, 0, 1, 0)) - stc.totalH;
-          if (gap > 0.12 || stc.slope > r.muS + 0.03) {
+          const gap = (r.y - this._support(r, 0, 1, 0)) - (stc.surfH - (r.embedPen || 0));
+          const holdSlope = r.muS + Math.min(0.9, 1.5 * (r.embedPen || 0) / Math.max(0.3, r.ry || 1));
+          if (gap > 0.12 || stc.slope > holdSlope + 0.03) {
             r.settled = false;
             r.sleepTimer = 0;
           } else {
@@ -686,33 +850,124 @@ export class RockCalvingSystem {
         if (Math.abs(r.x) > half) { r.x = clamp(r.x, -half, half); r.vx *= -0.25; }
         if (Math.abs(r.z) > half) { r.z = clamp(r.z, -half, half); r.vz *= -0.25; }
 
-        // --- Terrain contact (heightfield plane at body centre)
+        // --- Terrain contact: layered ground (snow/ice over sediment over bedrock)
         const st = this.sampleTerrain(r.x, r.z);
         const nx = st.nx, ny = st.ny, nz = st.nz;
         const supN = this._support(r, nx, ny, nz);
-        const planeDist = (r.y - st.totalH) * ny - supN;
+        const planeDist = (r.y - st.surfH) * ny - supN;
 
         if (planeDist < 0) {
-          // Positional depenetration along the terrain normal
-          const push = -planeDist;
-          r.x += nx * push;
-          r.y += ny * push;
-          r.z += nz * push;
           r.grounded = true;
-
-          // Normal impulse with restitution (dead on sediment/water, lively on bedrock)
-          const vn = r.vx * nx + r.vy * ny + r.vz * nz;
+          r._groundSt = st;
+          let pen = -planeDist;
           let impact = 0;
-          if (vn < 0) {
-            impact = -vn;
-            const soft = (st.coarse + st.fine) > 0.4 || st.water > 0.10;
-            const e = soft ? 0.05 : 0.22;
-            const j = -(1 + e) * vn;
-            r.vx += j * nx; r.vy += j * ny; r.vz += j * nz;
-            if (impact > 7) {
-              // Hard landing dissipates tangential energy (crush/plough)
-              r.vx *= 0.82; r.vz *= 0.82;
+          let muEmbedBoost = 0;
+          let ploughDecel = 0;
+          let muScale = 1;
+          let rollBlendScale = 1;
+          let rollResistK = 0.35;
+          const dMaxTot = st.dMaxCryo + st.dMaxSed;
+          const iceDom = st.snowLift > 0.05 && (st.ice * 0.62) > 0.7 * st.snowLift && st.snow < 0.06;
+
+          if (dMaxTot > 0.005) {
+            // === SOFT CONTACT: the crushable layer carries the rock by
+            // bearing pressure over its contact patch. It sinks until
+            // sigma(pen) * A(pen) balances its weight: embedded, protruding.
+            let hitFloor = false;
+            if (pen > dMaxTot) {
+              // Fully-compacted floor (firn plug / packed sediment): hard stop
+              const push = pen - dMaxTot;
+              r.x += nx * push; r.y += ny * push; r.z += nz * push;
+              pen = dMaxTot;
+              hitFloor = true;
             }
+            const Rv = Math.max(0.22, supN);
+            const Rh = Math.sqrt(Math.max(0.05, this._support(r, 1, 0, 0) * this._support(r, 0, 0, 1)));
+            r._groundRv = Rv;
+            r._groundRh = Rh;
+            const area = contactPatchArea(Rv, Rh, pen);
+            let vn = r.vx * nx + r.vy * ny + r.vz * nz;
+            if (vn < 0) impact = -vn;
+            let sigma = bearingPressure(pen, st.dMaxCryo, st.dMaxSed, st.sedSigma);
+            const inSnow = st.dMaxCryo > 0.01 && pen <= st.dMaxCryo;
+            if (vn > 0) {
+              // Unloading elasticity: crushed snow stays crushed (plastic);
+              // a granular skeleton springs back from a shallow seat, but a
+              // deep plunge rearranges the material and the energy is gone
+              const elastic = inSnow ? 0.25 : clamp(0.25 + st.sedSigma / 240000, 0.4, 0.8);
+              const depthFade = inSnow ? 1 : 1 / (1 + Math.pow(pen / (0.35 * Rv), 2));
+              sigma *= elastic * depthFade;
+            }
+            const dvn = Math.min(sigma * area * r.invMass * h, Math.abs(vn) + 3.0);
+            r.vx += dvn * nx; r.vy += dvn * ny; r.vz += dvn * nz;
+            // Compaction work eats penetration velocity (dead landing, no bounce)
+            vn = r.vx * nx + r.vy * ny + r.vz * nz;
+            if (vn < 0) {
+              // Crush dissipation: snow very lossy, a snow plug still lossy,
+              // bare coarse scree lively, fine mud dead
+              let dampK;
+              if (inSnow) dampK = 2.5 + 9.0 * Math.min(1.5, pen / Rv);
+              else if (st.dMaxCryo > 0.3) dampK = 3.2;
+              else dampK = clamp(6.0 - st.sedSigma / 26000, 0.9, 4.0);
+              const keep = Math.exp(-dampK * h);
+              r.vx += vn * (keep - 1) * nx; r.vy += vn * (keep - 1) * ny; r.vz += vn * (keep - 1) * nz;
+              vn *= keep;
+            }
+            if (hitFloor && vn < 0) {
+              // Thin soft cover over bedrock barely deadens the bounce; a deep
+              // crushable layer absorbs it almost completely.
+              const e = iceDom ? 0.25 : 0.22 - 0.16 * clamp(dMaxTot / 0.8, 0, 1);
+              const j = -(1 + e) * vn;
+              r.vx += j * nx; r.vy += j * ny; r.vz += j * nz;
+              vn = r.vx * nx + r.vy * ny + r.vz * nz;
+              if (impact > 7) {
+                // Hard landing dissipates tangential energy (crush/plough)
+                r.vx *= 0.82; r.vz *= 0.82;
+              }
+            }
+            // Viscous seat damping (pore-air expulsion) kills micro-oscillation
+            // once the rock is nearly at rest tangentially (not while it rolls)
+            if (Math.abs(vn) < 1.2) {
+              const vtxS = r.vx - vn * nx;
+              const vtyS = r.vy - vn * ny;
+              const vtzS = r.vz - vn * nz;
+              if (vtxS * vtxS + vtyS * vtyS + vtzS * vtzS < 6.25) {
+                const keep = Math.exp(-9.0 * h);
+                r.vx += vn * (keep - 1) * nx; r.vy += vn * (keep - 1) * ny; r.vz += vn * (keep - 1) * nz;
+              }
+            }
+            r.embedPen = pen;
+            r.embedSurfH = st.surfH;
+            // Dug-in rocks resist starting to move, plough while moving, and
+            // stop rolling once sunk past ~1/4 of their vertical radius.
+            // Dug-in effects ramp in once the rock is sunk past a shallow seat
+            const penFrac = pen / Rv;
+            const dug = clamp((penFrac - 0.08) / 0.45, 0, 1);
+            muEmbedBoost = 0.9 * dug;
+            // Frontal area ploughing through the layer ~= parabolic segment
+            // (2/3 x width x depth) at the surface chord, width from patch area
+            const frontal = 1.4 * Math.sqrt(area / Math.PI) * pen;
+            ploughDecel = Math.min(28, sigma * frontal * 0.55 * r.invMass);
+            rollBlendScale = clamp(1 - Math.max(0, penFrac - 0.25) * 2.2, 0.05, 1);
+            rollResistK = 0.35 + 6.0 * Math.min(1, penFrac);
+            if (iceDom && penFrac < 0.05) muScale = 0.35; // skating on a crust/ice lens
+          } else {
+            // === HARD CONTACT: bare bedrock or glacier ice ===
+            r.x += nx * pen; r.y += ny * pen; r.z += nz * pen;
+            const vn = r.vx * nx + r.vy * ny + r.vz * nz;
+            if (vn < 0) {
+              impact = -vn;
+              const soft = (st.coarse + st.fine) > 0.4 || st.water > 0.10;
+              const e = iceDom ? 0.28 : (soft ? 0.05 : 0.22);
+              const j = -(1 + e) * vn;
+              r.vx += j * nx; r.vy += j * ny; r.vz += j * nz;
+              if (impact > 7) {
+                r.vx *= 0.82; r.vz *= 0.82;
+              }
+            }
+            if (iceDom) muScale = 0.35; // rock on ice: slippery, lively
+            r.embedPen = 0;
+            r.embedSurfH = st.surfH;
           }
 
           // Tangential velocity & downslope gravity pull
@@ -723,14 +978,14 @@ export class RockCalvingSystem {
           const speedT = Math.hypot(vtx, vty, vtz);
 
           const sedBoost = Math.min(0.25, (st.coarse + st.fine) * 0.10);
-          const muS = r.muS + sedBoost;
+          const muS = (r.muS + sedBoost + muEmbedBoost) * muScale;
           const muK = muS * 0.72;
           // |g_tangential| = gEff * sqrt(1-ny^2); normal gravity load = gEff * ny
           const gTanMag = gEff * Math.sqrt(Math.max(0, 1 - ny * ny));
           const gNormMag = gEff * ny;
 
-          if (speedT < 0.30 && gTanMag <= muS * gNormMag && impact < 1.2) {
-            // Static friction holds: cancel tangential creep, count toward sleep
+          if (speedT < 0.30 && gTanMag <= muS * gNormMag + ploughDecel && impact < 1.2) {
+            // Static friction (plus plough anchor when dug in) holds
             r.vx -= vtx; r.vy -= vty; r.vz -= vtz;
             r.ox *= 0.55; r.oy *= 0.55; r.oz *= 0.55;
             r.sleepTimer += h;
@@ -743,9 +998,9 @@ export class RockCalvingSystem {
             }
           } else {
             r.sleepTimer = 0;
-            // Kinetic (sliding/rolling) friction opposes tangential motion
+            // Kinetic friction + ploughing resistance oppose tangential motion
             if (speedT > 1e-6) {
-              const decel = muK * gNormMag * h;
+              const decel = (muK * gNormMag + ploughDecel) * h;
               const keep = Math.max(0, speedT - decel) / speedT;
               const nVx = vn2 * nx + vtx * keep;
               const nVy = vn2 * ny + vty * keep;
@@ -754,16 +1009,17 @@ export class RockCalvingSystem {
               vtx *= keep; vty *= keep; vtz *= keep;
             }
             // Rolling: spin toward rolling-without-slipping omega = (n x vt)/r
+            // (suppressed once the rock is bogged down in snow/sediment)
             const rEff = Math.max(0.35, supN);
             const wrx = (ny * vtz - nz * vty) / rEff;
             const wry = (nz * vtx - nx * vtz) / rEff;
             const wrz = (nx * vty - ny * vtx) / rEff;
-            const blend = 1 - Math.exp(-6.0 * h);
+            const blend = (1 - Math.exp(-6.0 * h)) * rollBlendScale;
             r.ox += (wrx - r.ox) * blend;
             r.oy += (wry - r.oy) * blend;
             r.oz += (wrz - r.oz) * blend;
             // Rolling resistance
-            const rr = Math.exp(-0.35 * h);
+            const rr = Math.exp(-rollResistK * h);
             r.ox *= rr; r.oy *= rr; r.oz *= rr;
           }
         } else {
@@ -778,10 +1034,76 @@ export class RockCalvingSystem {
       }
     }
 
+    this._collectImprints();
+
     if (anyAwake || duringPrewarm) {
       this._rebuildInstanceBuckets();
     }
     return anyAwake;
+  }
+
+  /** Engine drains pending snow imprints (max `maxCount` per GPU pass). */
+  consumeImprints(maxCount = 24) {
+    if (this.pendingImprints.length === 0) return this.pendingImprints;
+    return this.pendingImprints.splice(0, maxCount);
+  }
+
+  /**
+   * Emits snow imprint stamps for rocks embedded in the snowpack: snow under
+   * the footprint is compacted to its residual and the displaced volume
+   * (bulge fraction; the rest densified in place) resurfaces as a rim around
+   * the rock. Stamps are delta-based -- repeated stamps only add newly
+   * displaced volume -- so a rolling rock ploughs a furrow with berms and a
+   * departed rock leaves a crater the avalanche sim then relaxes.
+   */
+  _collectImprints() {
+    if (!this.snowGrid || !this.hasHeightSnapshot) return;
+    for (let i = 0; i < this.rocks.length; i++) {
+      const r = this.rocks[i];
+      if (r.isOutcrop || r.qw === undefined) continue;
+      const pen = r.embedPen || 0;
+      if (pen <= 0.02) continue;
+      const Rv = r._groundRv || Math.max(0.22, this._support(r, 0, 1, 0));
+      const Rh = r._groundRh || Math.sqrt(Math.max(0.05, this._support(r, 1, 0, 0) * this._support(r, 0, 0, 1)));
+      const a = Math.sqrt(contactPatchArea(Rv, Rh, pen) / Math.PI);
+      if (a < 0.15) continue;
+
+      const st = this.sampleTerrain(r.x, r.z);
+      // Snow at the centre may already be compacted by an earlier stamp;
+      // reference the undisturbed pack just outside the footprint instead.
+      const ringSnow = Math.max(
+        st.snow,
+        this.sampleTerrain(r.x + a + 1.0, r.z).snow,
+        this.sampleTerrain(r.x, r.z + a + 1.0).snow
+      );
+      if (ringSnow <= 0.03) continue;
+      const ringLift = Math.min(3.4, ringSnow * 0.85 + st.ice * 0.62);
+      const ringResidual = Math.min(3.4, ringSnow * 0.85 * SNOW_RESIDUAL + st.ice * 0.62);
+      const penCryo = Math.min(pen, Math.max(st.dMaxCryo, ringLift - ringResidual));
+      if (penCryo <= 0.02) continue;
+      const vSub = submergedCapVolume(Rv, Rh, penCryo);
+
+      const last = r._stamp;
+      const moved = last ? Math.hypot(r.x - last.x, r.z - last.z) : Infinity;
+      if (last && moved <= Math.max(0.3, a * 0.35) && Math.abs(vSub - last.v) <= 0.06) continue;
+      const freshGround = !last || moved > a;
+      const dV = freshGround ? vSub : Math.max(0, vSub - last.v);
+      const rim = rimHeightForVolume(SNOW_BULGE_FRAC * dV, a);
+      this.pendingImprints.push({
+        x: r.x,
+        z: r.z,
+        a,
+        // Rim heights are in rendered-lift metres; snow texture stores depth
+        // whose lift is x0.85, so convert to keep displaced volume honest.
+        rimH: rim.height / 0.85,
+        rimW: rim.width,
+        compactSnow: ringSnow * SNOW_RESIDUAL,
+      });
+      r._stamp = { x: r.x, z: r.z, v: vSub, seq: this._stepSeq || 0, settled: r.settled };
+    }
+    if (this.pendingImprints.length > 256) {
+      this.pendingImprints.splice(0, this.pendingImprints.length - 256);
+    }
   }
 
   /** Impulse-based sphere collision between boulders (spatial hash broadphase). */

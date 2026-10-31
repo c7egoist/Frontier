@@ -167,6 +167,7 @@ export class TerrainStackPipeline {
     // Downsampled 64x64 readback buffer
     this.snapN = 64;
     this.snapBuf = new Float32Array(this.snapN * this.snapN * 4);
+    this.snapSnowBuf = new Float32Array(this.snapN * this.snapN * 4); // cryo twin for rock embedding
     this.lastViewProj = null;
 
     // 128x128 Cave Portal Cutout Texture
@@ -843,6 +844,10 @@ export class TerrainStackPipeline {
     gl.uniform1f(gl.getUniformLocation(this.engine.progTelemetry, 'uGridRes'), R);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.readPixels(0, 0, this.snapN, this.snapN, gl.RGBA, gl.FLOAT, this.snapBuf);
+    // Cryosphere twin snapshot so placed/calved rocks embed into snow correctly
+    this._bindTex(this.engine.progTelemetry, 'uTerrainTex', this.engine.snowTex[this.engine.snowIdx], 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.readPixels(0, 0, this.snapN, this.snapN, gl.RGBA, gl.FLOAT, this.snapSnowBuf);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     this.engine.initialSnap64.set(this.snapBuf);
 
@@ -871,7 +876,7 @@ export class TerrainStackPipeline {
     }
 
     // 7. Update Rock Placement Layer & Telemetry
-    this.engine.rockCalving.updateTerrainSnapshot(this.snapBuf, this.snapN, span);
+    this.engine.rockCalving.updateTerrainSnapshot(this.snapBuf, this.snapN, span, this.snapSnowBuf);
     if (activeRockLayer && reseedPlacements) {
       ep.showOutcrops = true;
       ep.boulderDensity = activeRockLayer.params.density ?? DEFAULT_EROSION_PARAMS.boulderDensity;

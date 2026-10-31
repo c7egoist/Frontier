@@ -1914,6 +1914,53 @@ void main() {
 }
 `;
 
+// =============================================================================
+// ROCK IMPRINT: stamps embedded-boulder footprints into the snowpack.
+// Snow crushed beneath a rock is compacted to its residual depth and the
+// displaced volume resurfaces as a rim hugging the rock (peak heights are
+// volume-normalized on the CPU -- see rimHeightForVolume in rock-calving.js).
+// Stateful: craters and plough furrows persist in the pack and are relaxed
+// by the avalanche/drift terms in SNOW_CRYO_FRAG like any other snow.
+// =============================================================================
+export const ROCK_IMPRINT_FRAG = `#version 300 es
+${GLSL_PRECISION_HEADER}
+in vec2 vUv;
+layout(location = 0) out vec4 outSnow;
+
+uniform sampler2D uSnowTex;
+uniform vec4 uImprintDomain; // (worldSpan, cellSize, stampCount, -)
+uniform vec4 uImprintA[24];  // (worldX, worldZ, patchRadius, rimHeight)
+uniform vec4 uImprintB[24];  // (rimWidth, compactSnowDepth, -, -)
+
+void main() {
+  ivec2 tc = ivec2(gl_FragCoord.xy);
+  vec4 snow = texelFetch(uSnowTex, tc, 0);
+  vec2 worldXZ = (vUv - 0.5) * uImprintDomain.x;
+  float cell = uImprintDomain.y;
+  int count = int(uImprintDomain.z + 0.5);
+  for (int i = 0; i < 24; i++) {
+    if (i >= count) break;
+    vec4 A = uImprintA[i];
+    vec4 B = uImprintB[i];
+    float a = A.z;
+    float r1 = a + B.x;
+    float d = distance(worldXZ, A.xy);
+    if (d > r1) continue;
+    // Compact the snowpack crushed beneath the footprint
+    float inside = 1.0 - smoothstep(a - cell, a, d);
+    snow.r = mix(snow.r, min(snow.r, B.y), inside);
+    // Displaced volume reappears as a rim hugging the rock
+    float r0 = 0.82 * a;
+    if (d > r0 && A.w > 0.0) {
+      float s = clamp((d - r0) / max(0.001, r1 - r0), 0.0, 1.0);
+      snow.r += A.w * (0.5 + 0.5 * cos(3.14159265 * s));
+    }
+  }
+  snow.r = clamp(snow.r, 0.0, 9.0);
+  outSnow = snow;
+}
+`;
+
 export const THERMAL_TALUS_FRAG = `#version 300 es
 ${GLSL_PRECISION_HEADER}
 in vec2 vUv;

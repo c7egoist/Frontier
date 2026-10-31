@@ -10,7 +10,15 @@ import {
   ROCK_FABRIC_MODES,
   getVegetationDefaultsForLandscape,
 } from '../src/erosion/erosion-presets.js';
-import { RockCalvingSystem, buildRockArchetypeAtlas } from '../src/erosion/rock-calving.js';
+import {
+  RockCalvingSystem,
+  buildRockArchetypeAtlas,
+  contactPatchArea,
+  submergedCapVolume,
+  bearingPressure,
+  equilibriumEmbed,
+  rimHeightForVolume,
+} from '../src/erosion/rock-calving.js';
 import { buildGrassTuftMesh, MAX_GRASS_TUFTS } from '../src/erosion/grass-system.js';
 import {
   DERIVED_PALETTES,
@@ -1281,4 +1289,135 @@ test('Snow simulation is mass-conserving and visibility toggles exist for water/
   assert.equal(DEFAULT_EROSION_PARAMS.showWater, true);
   assert.equal(DEFAULT_EROSION_PARAMS.showSnow, true);
   assert.equal(DEFAULT_EROSION_PARAMS.showRain, true);
+});
+
+test('Boulders embed into snow/sediment by bearing capacity and protrude realistically', () => {
+  const N = 64;
+  const world = ({ bed = 20, coarse = 0, fine = 0, snow = 0, ice = 0 } = {}) => {
+    const g = new Float32Array(N * N * 4);
+    const s = new Float32Array(N * N * 4);
+    for (let i = 0; i < g.length; i += 4) {
+      g[i] = bed; g[i + 1] = coarse; g[i + 2] = fine;
+      s[i] = snow; s[i + 1] = ice;
+    }
+    return { g, s };
+  };
+  const dropRock = (w, { dropH = 3, vx = 0, sx = 1.7, sy = 1.5, sz = 1.7 } = {}) => {
+    const sys = new RockCalvingSystem();
+    sys.updateTerrainSnapshot(w.g, N, 512.0, w.s);
+    const st = sys.sampleTerrain(0, 0);
+    const rk = {
+      submesh: 2, isOutcrop: false, settled: false,
+      x: 0, y: st.surfH + dropH + 1.6, z: 0, vx, vy: 0, vz: 0,
+      sx, sy, sz, isSlab: false, wear: 0.3, seedHash: 0.4,
+    };
+    sys.rocks.push(rk);
+    // Rebound = any upward velocity after the fall (grounded flag alone misses
+    // bounces that begin and end inside one stepPhysics call's substeps)
+    let fell = false;
+    let maxRebound = 0;
+    for (let i = 0; i < 700 && !rk.settled; i++) {
+      sys.stepPhysics(0.033);
+      assert.ok(Number.isFinite(rk.x + rk.y + rk.z + rk.vx + rk.vy + rk.vz), 'Rock state must stay finite');
+      if (rk.vy < -3) fell = true;
+      if (fell) maxRebound = Math.max(maxRebound, rk.vy);
+    }
+    assert.ok(rk.settled, 'Rock must come to rest');
+    const supUp = sys._support(rk, 0, 1, 0);
+    return {
+      sys, rk, st, maxRebound,
+      embed: st.surfH - (rk.y - supUp),
+      protrude: (rk.y + supUp) - st.surfH,
+      diameter: 2 * supUp,
+    };
+  };
+
+  // --- Pure bearing model: area saturates at the equator, snow hardens ---
+  assert.ok(contactPatchArea(1, 1, 0.5) < contactPatchArea(1, 1, 1), 'Patch area grows with sink depth');
+  assert.ok(Math.abs(contactPatchArea(1, 1.4, 1) - Math.PI * 1.96) < 1e-9, 'Patch area saturates at pi*Rh^2');
+  assert.ok(Math.abs(submergedCapVolume(1, 1, 2) - (4 / 3) * Math.PI) < 1e-9, 'Full submergence = whole sphere volume');
+  assert.ok(bearingPressure(1.8, 2, 0, 0) > 6 * bearingPressure(0.1, 2, 0, 0), 'Snow must densify-harden strongly under load');
+  assert.ok(bearingPressure(2.1, 2, 1, 55000) > bearingPressure(0.2, 2, 1, 55000), 'Sediment under a compacted plug stays firm');
+
+  // Square-cube law on a finite snowpack: bearing demand (W/A) grows with R,
+  // so a small rock is carried by the snow while a big one punches through it
+  const eqSmall = equilibriumEmbed(1272, 0.45, 0.5, 1.0, 1.5, 140000);
+  const eqLarge = equilibriumEmbed(320000, 2.4, 2.76, 1.0, 1.5, 140000);
+  assert.ok(eqSmall < 1.0, `Small rock must be supported by the snowpack (eq ${eqSmall.toFixed(2)} m)`);
+  assert.ok(eqLarge > 1.0, `Mega-boulder must punch through snow into sediment (eq ${eqLarge.toFixed(2)} m)`);
+  // Snowshoe effect: flat slab of equal mass rides far higher than a blocky rock
+  const eqSlab = equilibriumEmbed(8000, 0.35, 1.7, 2.1, 0, 140000);
+  assert.ok(eqSlab < equilibriumEmbed(8000, 0.8, 0.92, 2.1, 0, 140000) * 0.55, 'Slabs must spread load and ride high');
+
+  // Rim volume conservation: numerically integrate the GLSL annulus profile
+  const rim = rimHeightForVolume(0.42, 0.9);
+  {
+    const r0 = 0.82 * 0.9;
+    const r1 = 0.9 + rim.width;
+    let vol = 0;
+    const M = 4000;
+    for (let i = 0; i < M; i++) {
+      const r = r0 + (r1 - r0) * ((i + 0.5) / M);
+      const s = (r - r0) / (r1 - r0);
+      vol += 2 * Math.PI * r * rim.height * (0.5 + 0.5 * Math.cos(Math.PI * s));
+    }
+    vol *= (r1 - r0) / M;
+    assert.ok(Math.abs(vol - 0.42) / 0.42 < 0.02, `Rim must hold the displaced volume (got ${vol.toFixed(3)} m^3)`);
+  }
+
+  // --- Dynamic embedding on each ground type ---
+  const onBedrock = dropRock(world({}));
+  assert.ok(onBedrock.embed < 0.05, `Bedrock is unyielding (embed ${onBedrock.embed.toFixed(2)} m)`);
+  assert.ok(onBedrock.maxRebound > 0.5, 'Bedrock landing stays lively (bounce)');
+
+  const inSediment = dropRock(world({ fine: 2.5 }));
+  assert.ok(inSediment.embed > 0.15 && inSediment.embed < inSediment.diameter * 0.55,
+    `Rock seats into loose sediment but mostly protrudes (embed ${inSediment.embed.toFixed(2)} m)`);
+  assert.ok(inSediment.maxRebound < 0.8, 'Sediment landing is deadened');
+
+  const inSnow = dropRock(world({ snow: 3 }));
+  assert.ok(inSnow.embed > inSediment.embed && inSnow.embed > inSnow.diameter * 0.25,
+    `Rock sinks deep into snow (embed ${inSnow.embed.toFixed(2)} of ${inSnow.diameter.toFixed(2)} m diameter)`);
+  assert.ok(inSnow.protrude > 0.25, `Rock still protrudes from the snowpack (${inSnow.protrude.toFixed(2)} m)`);
+  assert.ok(inSnow.maxRebound < 0.35, 'Snow landing must not bounce (plastic crush)');
+
+  const onIce = dropRock(world({ ice: 4 }));
+  assert.ok(onIce.embed < 0.05, 'Glacier ice is a hard surface: no embedding');
+  assert.ok(onIce.maxRebound > 0.8, 'Ice landing bounces');
+
+  // Ploughing: a rolling boulder bogs down fast in snow, runs far on bedrock
+  const rollBed = dropRock(world({}), { dropH: 0.3, vx: 6 });
+  const rollSnow = dropRock(world({ snow: 3 }), { dropH: 0.3, vx: 6 });
+  assert.ok(Math.abs(rollSnow.rk.x) < 0.6 * Math.abs(rollBed.rk.x),
+    `Snow ploughing must kill runout (snow ${rollSnow.rk.x.toFixed(1)} m vs bedrock ${rollBed.rk.x.toFixed(1)} m)`);
+
+  // Melt: a rock embedded in snow over sediment wakes and settles down when
+  // the pack melts away (same sediment before/after -- only the snow goes)
+  const meltCase = dropRock(world({ snow: 3, fine: 1 }));
+  const meltY = meltCase.rk.y;
+  meltCase.sys.updateTerrainSnapshot(world({ fine: 1 }).g, N, 512.0, world({}).s);
+  assert.equal(meltCase.rk.settled, false, 'Melt-out must wake the embedded rock');
+  for (let i = 0; i < 400 && !meltCase.rk.settled; i++) meltCase.sys.stepPhysics(0.033);
+  assert.ok(meltCase.rk.settled && meltCase.rk.y < meltY - 0.8, 'After melt-out the rock settles onto the sediment');
+
+  // --- Snow imprints: settling in snow queues GPU stamps ---
+  const stamps = dropRock(world({ snow: 3 })).sys.consumeImprints(24);
+  assert.ok(stamps.length >= 1, 'Embedded rock must queue snow imprints');
+  const last = stamps[stamps.length - 1];
+  assert.ok(last.a > 0.5 && last.rimW > 0.4, 'Imprint footprint/rim geometry is physical');
+  assert.ok(Math.abs(last.compactSnow - 3 * 0.18) < 0.05, 'Imprint compacts snow to 18% residual under the rock');
+  const rimTotal = stamps.reduce((acc, s) => acc + s.rimH, 0);
+  assert.ok(rimTotal > 0, 'Displaced snow volume must resurface as rim height (summed deltas)');
+  assert.equal(dropRock(world({})).sys.consumeImprints(24).length, 0, 'No snow -> no imprints');
+
+  // --- GPU wiring: shader, engine pass, dual snapshots in engine + pipeline ---
+  assert.equal(typeof Shaders.ROCK_IMPRINT_FRAG, 'string', 'ROCK_IMPRINT_FRAG must be exported');
+  assert.ok(Shaders.ROCK_IMPRINT_FRAG.includes('uImprintA[24]'), 'Imprint shader takes a stamp batch');
+  assert.ok(Shaders.ROCK_IMPRINT_FRAG.includes('min(snow.r, B.y)'), 'Imprint compacts snow under the footprint');
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  assert.ok(engSrc.includes('progRockImprint'), 'Engine must compile the imprint program');
+  assert.ok(engSrc.includes('this._applyRockImprints(R, cellSize)'), 'Engine must stamp imprints after the cryo pass');
+  assert.ok(engSrc.includes('_readSnowSnapshot64'), 'Engine must read back the cryo snapshot for physics');
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  assert.ok(pipeSrc.includes('snapSnowBuf'), 'Pipeline must feed the cryo snapshot to rock physics');
 });
