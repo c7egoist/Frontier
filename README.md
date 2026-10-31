@@ -123,7 +123,21 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   inspector; the toolbar "Weathering" slider controls stain visibility on
   terrain + boulders. Disabled on the airless lunar theme. Flat mineral
   colours only — no noise grain, in keeping with the flat-colour pass.
+- **Simulation seasons**: live processes no longer all run at once by default.
+  Rain, snow/glaciers, wind, rockfall/boulders and chemical weathering are
+  separate seasons that can be run **one at a time** or armed together in
+  Simultaneous mode from the Simulation Seasons panel. Selecting a simulation
+  layer arms its season; pressing **Simulate** runs it, and each simulation
+  layer also has its own inspector trigger. Any stack/base-layer evaluation
+  auto-pauses every season until Simulate is pressed again, so snow cannot
+  interfere while shaping the base landform.
+- **Mineral-bearing sedimentary layers**: Stratigraphic Beds now carry iron,
+  copper, carbonate and salt/evaporite composition plus a target horizon.
+  Stack evaluation bakes those into a mineral source field, chemical water
+  leaches and transports dissolved Fe/Cu along flow paths, and boulders in
+  those paths stain from the transported state. The **Mineral Strata &
+  Dissolved Stain** shading mode visualises the source beds and stain trails.
 
-Verification: `npm test` — 33/33 pass (includes `tests/rain-erosion.test.mjs`,
-rigid-body free-fall/no-elevator tests, and the exact-mesh seating / pause-freeze
-regression test). `npm run build` clean.
+Verification: `npm test` — 34/34 pass (includes `tests/rain-erosion.test.mjs`,
+rigid-body free-fall/no-elevator tests, exact-mesh seating / pause-freeze, and
+simulation-season / mineral-strata regression tests). `npm run build` clean.

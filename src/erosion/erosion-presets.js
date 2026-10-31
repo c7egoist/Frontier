@@ -806,6 +806,19 @@ export const DEFAULT_EROSION_PARAMS = {
   chemSalt: 0.6,
   chemVarnish: 0.5,
 
+  // Mineral composition of sedimentary / stratigraphic beds. Stack evaluation
+  // bakes these per-layer abundances into a sim-resolution mineral source
+  // field (Fe, Cu, carbonate, salt); water then leaches and carries the
+  // dissolved load downhill, staining terrain and boulders along flow paths.
+  mineralIron: 0.55,
+  mineralCopper: 0.16,
+  mineralCarbonate: 0.45,
+  mineralSalt: 0.30,
+  mineralHorizon: 0.45,
+  mineralHorizonWidth: 0.55,
+  mineralBandStrength: 0.75,
+  mineralFieldActive: 0.0,
+
   // Layer Stack Visual & Structural Layer Controls (defaults preserve 100% identical terrain & shading output!)
   strataLayerEnabled: true,
   lithologyLayerEnabled: true,

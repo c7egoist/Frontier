@@ -7,6 +7,7 @@ import {
 import {
   FULLSCREEN_VERT,
   CHEM_WEATHER_FRAG,
+  MINERAL_ACCUM_FRAG,
   GRASS_INSTANCE_FRAG,
   GRASS_INSTANCE_VERT,
   INIT_PARTICLES_FRAG,
@@ -208,6 +209,7 @@ export class GpuErosionEngine {
     this.progRockImprint = createProgram(gl, FULLSCREEN_VERT, ROCK_IMPRINT_FRAG, 'RockImprint');
     this.progRockObstacle = createProgram(gl, FULLSCREEN_VERT, ROCK_OBSTACLE_FRAG, 'RockObstacle');
     this.progChemWeather = createProgram(gl, FULLSCREEN_VERT, CHEM_WEATHER_FRAG, 'ChemWeather');
+    this.progMineralAccum = createProgram(gl, FULLSCREEN_VERT, MINERAL_ACCUM_FRAG, 'MineralAccum');
     this.progThermalTalus = createProgram(gl, FULLSCREEN_VERT, THERMAL_TALUS_FRAG, 'ThermalTalus');
     this.progTerrainRender = createProgram(gl, TERRAIN_RENDER_VERT, TERRAIN_RENDER_FRAG, 'TerrainRender');
     this.progRockInstance = createProgram(gl, ROCK_INSTANCE_VERT, ROCK_INSTANCE_FRAG, 'RockInstance');
@@ -272,6 +274,24 @@ export class GpuErosionEngine {
     ];
     for (let i = 0; i < 2; i++) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboChem[i]);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // Mineral source field ping-pong (RGBA32F: iron, copper, carbonate, salt)
+    // baked from sedimentary / stratigraphic stack layers during evaluation.
+    this.mineralTex = [
+      createDataTexture(gl, R, R, gl.RGBA32F, gl.RGBA, gl.FLOAT),
+      createDataTexture(gl, R, R, gl.RGBA32F, gl.RGBA, gl.FLOAT),
+    ];
+    this.mineralIdx = 0;
+    this.fboMineral = [
+      createFbo(gl, [this.mineralTex[0]]),
+      createFbo(gl, [this.mineralTex[1]]),
+    ];
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboMineral[i]);
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
     }
@@ -1021,6 +1041,7 @@ export class GpuErosionEngine {
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     this.snowIdx = 0;
+    this.seedDefaultMineralField();
     this.seedChemicalWeathering();
 
     // 3. Spawn staggered sky raindrops across all 32,768 GPU particle slots
@@ -1099,6 +1120,77 @@ export class GpuErosionEngine {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
+  /** Clears the sedimentary mineral source field (no layer-baked Fe/Cu/carbonate/salt). */
+  _clearMineralField() {
+    const gl = this.gl;
+    gl.viewport(0, 0, this.gridRes, this.gridRes);
+    for (let i = 0; i < 2; i++) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboMineral[i]);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.mineralIdx = 0;
+    this.params.mineralFieldActive = 0.0;
+  }
+
+  /**
+   * Saturatingly accumulates one sedimentary / stratigraphic layer's mineral
+   * composition into the source field, gated by that layer's dipping beds
+   * and target horizon. Called by the stack pipeline for every enabled
+   * stratigraphic-beds layer (specific layers -> specific mineral horizons).
+   */
+  _accumulateMineralStrata(comp = {}, band = {}, hardnessVec = null, strataVec = null, seed = null) {
+    const gl = this.gl;
+    const R = this.gridRes;
+    const p = this.params;
+    const hu = this._getHardnessUniforms();
+    const hv = hardnessVec || hu.hardnessVec;
+    const sv = strataVec || hu.strataVec;
+    const clamp01 = (v, fb) => {
+      const n = Number(v ?? fb);
+      return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
+    };
+    const next = 1 - this.mineralIdx;
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboMineral[next]);
+    gl.viewport(0, 0, R, R);
+    gl.useProgram(this.progMineralAccum);
+    gl.bindVertexArray(this.emptyVao);
+    this._bindTex(this.progMineralAccum, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
+    this._bindTex(this.progMineralAccum, 'uMineralTex', this.mineralTex[this.mineralIdx], 1);
+    gl.uniform4f(
+      gl.getUniformLocation(this.progMineralAccum, 'uMineralComp'),
+      clamp01(comp.iron, p.mineralIron ?? DEFAULT_EROSION_PARAMS.mineralIron),
+      clamp01(comp.copper, p.mineralCopper ?? DEFAULT_EROSION_PARAMS.mineralCopper),
+      clamp01(comp.carbonate, p.mineralCarbonate ?? DEFAULT_EROSION_PARAMS.mineralCarbonate),
+      clamp01(comp.salt, p.mineralSalt ?? DEFAULT_EROSION_PARAMS.mineralSalt)
+    );
+    gl.uniform4f(
+      gl.getUniformLocation(this.progMineralAccum, 'uMineralBand'),
+      clamp01(band.horizon, p.mineralHorizon ?? DEFAULT_EROSION_PARAMS.mineralHorizon),
+      Math.max(0.03, Number(band.horizonWidth ?? p.mineralHorizonWidth ?? DEFAULT_EROSION_PARAMS.mineralHorizonWidth) || 0.55),
+      clamp01(band.bandStrength, p.mineralBandStrength ?? DEFAULT_EROSION_PARAMS.mineralBandStrength),
+      clamp01(band.opacity, 1.0)
+    );
+    gl.uniform4fv(gl.getUniformLocation(this.progMineralAccum, 'uHardnessParams'), hv);
+    gl.uniform4fv(gl.getUniformLocation(this.progMineralAccum, 'uStrataOrient'), sv);
+    gl.uniform4f(gl.getUniformLocation(this.progMineralAccum, 'uMineralDomain'), R, p.worldSpan, seed ?? p.seed, 0);
+    gl.uniform1f(gl.getUniformLocation(this.progMineralAccum, 'uSeed'), seed ?? p.seed);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.mineralIdx = next;
+    this.params.mineralFieldActive = 1.0;
+  }
+
+  /** Standalone-mode default mineral field from the global mineral sliders. */
+  seedDefaultMineralField() {
+    this._clearMineralField();
+    if (this._themeCode() === 7) return;
+    this._accumulateMineralStrata({}, {}, null, null, this.params.seed);
+  }
+
   /** Master + per-process chemical reaction rates (zero on the airless lunar theme). */
   _chemRates() {
     const p = this.params;
@@ -1160,6 +1252,7 @@ export class GpuErosionEngine {
     this._bindTex(this.progChemWeather, 'uChemTex', this.chemTex[this.chemIdx], 1);
     this._bindTex(this.progChemWeather, 'uSnowTex', this.snowTex[this.snowIdx], 2);
     this._bindTex(this.progChemWeather, 'uVelocityFieldTex', this.velocityFieldTex, 3);
+    this._bindTex(this.progChemWeather, 'uMineralTex', this.mineralTex[this.mineralIdx], 4);
 
     gl.uniform4f(gl.getUniformLocation(this.progChemWeather, 'uChemDomain'), R, cellSize, dtChem, p.worldSpan);
     gl.uniform4f(
@@ -1181,6 +1274,7 @@ export class GpuErosionEngine {
     gl.uniform4fv(gl.getUniformLocation(this.progChemWeather, 'uClimate'), climate.snowVec);
     gl.uniform1f(gl.getUniformLocation(this.progChemWeather, 'uSeed'), p.seed);
     gl.uniform1f(gl.getUniformLocation(this.progChemWeather, 'uChemFlowScale'), flowScale);
+    gl.uniform1f(gl.getUniformLocation(this.progChemWeather, 'uMineralFieldActive'), p.mineralFieldActive ?? 0.0);
 
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.chemIdx = nextChem;
@@ -1336,9 +1430,12 @@ export class GpuErosionEngine {
       }
 
       // ---------------------------------------------------------------------
-      // PASS C: GPU Shallow-Water Pipe Flux (`uFluxTex`) — gated by Hydraulic Sim Layer!
+      // PASS C: GPU Shallow-Water Pipe Flux (`uFluxTex`). Rain creates and
+      // erodes with this water, but the routing field is also refreshed for
+      // snowmelt and chemical seasons so existing/melt water can carry
+      // dissolved Fe/Cu without secretly turning rainfall back on.
       // ---------------------------------------------------------------------
-      if (p.simHydraulicPlaying !== false) {
+      if (p.simHydraulicPlaying !== false || p.simCryoPlaying !== false || p.simChemicalPlaying !== false) {
         const nextFlux = 1 - this.fluxIdx;
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboFlux[nextFlux]);
         gl.viewport(0, 0, R, R);
@@ -1726,7 +1823,8 @@ export class GpuErosionEngine {
       p.viewMode === 'flow'     ? 3 :
       p.viewMode === 'clay'     ? 4 :
       p.viewMode === 'cryo'     ? 5 :
-      p.viewMode === 'hydro'    ? 6 : 0;
+      p.viewMode === 'hydro'    ? 6 :
+      p.viewMode === 'mineral'  ? 9 : 0;
 
     gl.enable(gl.DEPTH_TEST);
     gl.depthFunc(gl.LEQUAL);
@@ -1742,6 +1840,7 @@ export class GpuErosionEngine {
     this._bindTex(this.progTerrainRender, 'uVelocityFieldTex', this.velocityFieldTex, 2);
     this._bindTex(this.progTerrainRender, 'uSnowTex', this.snowTex[this.snowIdx], 3);
     this._bindTex(this.progTerrainRender, 'uChemTex', this.chemTex[this.chemIdx], 7);
+    this._bindTex(this.progTerrainRender, 'uMineralTex', this.mineralTex[this.mineralIdx], 8);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(this.progTerrainRender, 'uViewProj'), false, viewProj);
     gl.uniform3fv(gl.getUniformLocation(this.progTerrainRender, 'uCameraPos'), eye);
@@ -1793,6 +1892,8 @@ export class GpuErosionEngine {
 
       this._bindTex(this.progRockInstance, 'uTerrainTex', this.terrainTex[this.terrainIdx], 0);
       this._bindTex(this.progRockInstance, 'uSnowTex', this.snowTex[this.snowIdx], 1);
+      this._bindTex(this.progRockInstance, 'uChemTex', this.chemTex[this.chemIdx], 2);
+      this._bindTex(this.progRockInstance, 'uMineralTex', this.mineralTex[this.mineralIdx], 3);
 
       gl.uniformMatrix4fv(gl.getUniformLocation(this.progRockInstance, 'uViewProj'), false, viewProj);
       gl.uniform3fv(gl.getUniformLocation(this.progRockInstance, 'uCameraPos'), eye);

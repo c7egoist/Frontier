@@ -744,6 +744,114 @@ select {
   color: var(--tp-dim);
 }
 
+/* Simulation seasons: explicit one-at-a-time / simultaneous triggers */
+.tp-sim-panel {
+  margin: 10px 12px 4px;
+  padding: 12px;
+  border: 1px solid rgba(138, 180, 154, 0.22);
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(88, 135, 106, 0.13), rgba(255, 255, 255, 0.025));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tp-sim-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.tp-sim-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: #dce8dd;
+}
+
+.tp-sim-live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #5e5e5c;
+  flex-shrink: 0;
+}
+
+.tp-sim-live-dot.running {
+  background: #79d99a;
+  box-shadow: 0 0 8px rgba(121, 217, 154, 0.75);
+}
+
+.tp-sim-status {
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--tp-muted);
+}
+
+.tp-sim-status.running {
+  color: #b7e2c6;
+}
+
+.tp-sim-modes,
+.tp-sim-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.tp-sim-modes button,
+.tp-sim-chip,
+.tp-sim-master {
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--tp-border-strong);
+  background: #151515;
+  color: #d6d6d0;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.tp-sim-modes button:hover:not(:disabled),
+.tp-sim-chip:hover:not(:disabled),
+.tp-sim-master:hover:not(:disabled) {
+  background: #242424;
+  color: #ffffff;
+}
+
+.tp-sim-modes button.active,
+.tp-sim-chip.active {
+  background: rgba(88, 135, 106, 0.24);
+  border-color: rgba(121, 217, 154, 0.58);
+  color: #c9f0d5;
+}
+
+.tp-sim-chip.playing {
+  background: rgba(88, 135, 106, 0.42);
+  color: #effff3;
+  font-weight: 700;
+}
+
+.tp-sim-chip:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.tp-sim-master {
+  align-self: stretch;
+  background: #26382c;
+  border-color: rgba(121, 217, 154, 0.52);
+  color: #ddf5e4;
+  font-weight: 700;
+}
+
+.tp-sim-note {
+  font-size: 9.5px;
+  line-height: 1.35;
+  color: var(--tp-dim);
+}
+
 /* ==========================================================================
    CENTER DOCK: VIEWPORT BARS, 3D STAGE, FOOTER & PRESET SHELF (.cb-*)
    ========================================================================== */

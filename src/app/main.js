@@ -330,15 +330,31 @@ function initTerrainStudio() {
   }
 
   const playBtn = document.getElementById('btn-er-play');
-  const syncPlayBtn = () => {
-    const running = Boolean(erosionEngine.pipeline.liveSimRunning);
-    erosionEngine.playing = running;
-    playBtn.textContent = running ? '⏸ Pause Sim' : '▶ Live Sim';
-    playBtn.classList.toggle('active-play', running);
+  const syncPlayBtn = (state = erosionEngine.pipeline.getSimulationControlState()) => {
+    erosionEngine.playing = state.running;
+    playBtn.textContent = state.running ? '⏸ Pause' : '▶ Simulate';
+    playBtn.classList.toggle('active-play', state.running);
+    playBtn.title = state.running
+      ? 'Pause all live simulation seasons [Space]'
+      : 'Simulate the selected season — or all enabled seasons in Simultaneous mode [Space]';
   };
+  erosionEngine.pipeline.addSimulationStateListener(syncPlayBtn);
   syncPlayBtn();
   playBtn.addEventListener('click', () => {
-    erosionEngine.pipeline.liveSimRunning = !erosionEngine.pipeline.liveSimRunning;
+    const pipe = erosionEngine.pipeline;
+    if (pipe.liveSimRunning) {
+      pipe.pauseSimulation('');
+    } else if (pipe.simPlaybackMode === 'solo') {
+      // Selecting a simulation layer + pressing Simulate runs that season only.
+      const selected = pipe.getSelectedLayer();
+      const processes = pipe.simulationProcessesForLayer(selected);
+      const state = pipe.getSimulationControlState();
+      const firstAvailable = (processes.includes(state.soloProcess) && state.processes.some((proc) => proc.id === state.soloProcess && proc.available)) ? state.soloProcess : processes.find((id) => state.processes.some((proc) => proc.id === id && proc.available));
+      if (firstAvailable) pipe.startSimulation(firstAvailable);
+      else pipe.startSimulation(null);
+    } else {
+      pipe.startSimulation(null);
+    }
     syncPlayBtn();
   });
 

@@ -43,7 +43,7 @@ const SVG_ICONS = {
 const OP_DESCRIPTIONS = {
   'base-landform': 'Constructs foundational bedrock elevation and base rock competency at the bottom of the stack.',
   'mountain-ridges': 'Adds, subtracts, or blends procedural ridges, plateaus, fault escarpments, dunes, or craters.',
-  'stratigraphic-beds': 'Carves dipping sedimentary bed benches, 3D caprock overhangs, and differential rock hardness.',
+  'stratigraphic-beds': 'Carves dipping sedimentary bed benches and differential hardness, and gives those beds a chemical orientation (iron / copper / carbonate / salt horizons) for water-borne staining.',
   'rock-stacks': 'Synthesizes Slate-style tiered, leaning boulder tors and mushroom caprock columns.',
   'cliff-push-pull': 'Applies 3D lateral crag buttress and ledge overhang vector displacement on steep faces.',
   'sdf-caves': 'Subtracts real 3D volumetric karst cave tunnels and cliff-base undercuts using boolean SDFs.',
@@ -103,6 +103,13 @@ const INSPECTOR_SCHEMAS = {
       { key: 'strataDip', label: 'Bedding Dip Angle', min: 0, max: 45, step: 1, fmt: (v) => `${Math.round(v)}°` },
       { key: 'strataStrike', label: 'Strike Azimuth', min: -180, max: 180, step: 1, fmt: (v) => `${Math.round(v)}°` },
       { key: 'faultWeakness', label: 'Fracture & Fault Weakness', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'mineralIron', label: 'Iron-Rich Beds (Fe → Rust)', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'mineralCopper', label: 'Copper Veins (Cu → Patina)', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'mineralCarbonate', label: 'Carbonate / Soluble Beds', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'mineralSalt', label: 'Salt / Evaporite Beds', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'mineralHorizon', label: 'Mineral Horizon Centre', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}% height` },
+      { key: 'mineralHorizonWidth', label: 'Mineral Horizon Thickness', min: 0.05, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'mineralBandStrength', label: 'Bed-Banded Mineralisation', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'terraceCarve', label: 'Geometric Terrace Carve', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'ledgeOverhang', label: '3D Caprock Ledge Overhang', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'opacity', label: 'Layer Blend Weight', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
@@ -293,6 +300,10 @@ export class ErosionLayerStackUI {
     };
 
     this._cacheDom();
+    this.pipeline.addSimulationStateListener(() => {
+      this.renderSimulationPanel();
+      this._syncHeaderSimButton();
+    });
     this._bindGlobalEvents();
     this.renderAll();
   }
@@ -315,6 +326,8 @@ export class ErosionLayerStackUI {
     this.elPaletteSelect = document.getElementById('tp-select-palette');
     this.elAuthorTools = document.getElementById('tp-author-tools');
     this.elSplineSvg = document.getElementById('spline-gizmo-svg');
+    this.elSimPanel = document.getElementById('tp-sim-panel');
+    this.elHeaderPlay = document.getElementById('btn-er-play');
   }
 
   _bindGlobalEvents() {
@@ -455,6 +468,8 @@ export class ErosionLayerStackUI {
     if (this.elDocTitle) this.elDocTitle.textContent = this.pipeline.projectTitle;
     if (this.elPaletteSelect) this.elPaletteSelect.value = String(this.pipeline.paletteId);
     if (this.elShadingSelect) this.elShadingSelect.value = String(this.pipeline.shadingMode);
+    this.renderSimulationPanel();
+    this._syncHeaderSimButton();
     this.renderStackList();
     this.renderInspector();
     this.renderPresetShelf();
@@ -470,6 +485,102 @@ export class ErosionLayerStackUI {
       `PIPELINE · ${enabledCount}/${this.pipeline.layers.length} ACTIVE PASSES (BOTTOM → TOP) · ` +
       `${this.pipeline.lastEvalMs.toFixed(1)} MS` +
       (caveTris > 0 ? ` · ${caveTris.toLocaleString()} SDF CAVE TRIS` : '');
+  }
+
+  _syncHeaderSimButton() {
+    const btn = this.elHeaderPlay || document.getElementById('btn-er-play');
+    if (!btn) return;
+    const state = this.pipeline.getSimulationControlState();
+    btn.textContent = state.running ? '⏸ Pause' : '▶ Simulate';
+    btn.classList.toggle('active-play', state.running);
+  }
+
+  renderSimulationPanel() {
+    if (!this.elSimPanel) return;
+    const state = this.pipeline.getSimulationControlState();
+    const runningNames = state.processes.filter((proc) => proc.playing).map((proc) => proc.short).join(' + ');
+    const solo = state.processes.find((proc) => proc.id === state.soloProcess);
+    const status = state.running
+      ? `Running: ${runningNames || 'no process selected'}`
+      : (state.pauseReason || 'Paused — press Simulate');
+    const masterLabel = state.running
+      ? '⏸ Pause simulation'
+      : (state.mode === 'solo' ? `▶ Simulate ${solo ? solo.short : 'season'} only` : '▶ Simulate enabled seasons');
+
+    const chips = state.processes.map((proc) => {
+      const armed = state.mode === 'solo' ? proc.solo : proc.enabled;
+      const cls = [
+        'tp-sim-chip',
+        armed && proc.available ? 'active' : '',
+        proc.playing ? 'playing' : '',
+      ].join(' ');
+      const title = !proc.available
+        ? `${proc.label}: add/enable its simulation layer first`
+        : state.mode === 'solo'
+          ? `Simulate ${proc.label} only (other seasons frozen)`
+          : `${proc.enabled ? 'Pause' : 'Arm'} ${proc.label} in simultaneous mode`;
+      const mark = proc.playing ? '⏸' : (state.mode === 'all' ? (proc.enabled ? '●' : '○') : '▶');
+      return `<button type="button" class="${cls}" data-sim-process="${proc.id}" ${proc.available ? '' : 'disabled'} title="${title}">${mark} ${proc.short}</button>`;
+    }).join('');
+
+    this.elSimPanel.innerHTML = `
+      <div class="tp-sim-head">
+        <span class="tp-sim-title">SIMULATION SEASONS</span>
+        <span class="tp-sim-live-dot ${state.running ? 'running' : ''}" title="${state.running ? 'Simulation running' : 'Simulation paused'}"></span>
+      </div>
+      <div class="tp-sim-status ${state.running ? 'running' : ''}">${this._esc(status)}</div>
+      <div class="tp-sim-modes" role="group" aria-label="Simulation playback mode">
+        <button type="button" data-sim-mode="solo" class="${state.mode === 'solo' ? 'active' : ''}" title="Run exactly one season at a time: snow, then rain, then wind, then chemical">One at a time</button>
+        <button type="button" data-sim-mode="all" class="${state.mode === 'all' ? 'active' : ''}" title="Run every armed season together">Simultaneous</button>
+      </div>
+      <div class="tp-sim-chips">${chips}</div>
+      <button type="button" class="tp-sim-master" data-sim-master="1">${masterLabel}</button>
+      <div class="tp-sim-note">Editing any stack/base layer auto-pauses and will not resume until you press Simulate. Chemical staining follows water: run Rain first (or Simultaneous) so flow can carry Fe/Cu from mineral beds.</div>
+    `;
+
+    this.elSimPanel.querySelectorAll('[data-sim-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.pipeline.setSimPlaybackMode(btn.dataset.simMode);
+        this.renderSimulationPanel();
+        this._syncHeaderSimButton();
+        this.renderInspector();
+      });
+    });
+    this.elSimPanel.querySelectorAll('[data-sim-process]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.simProcess;
+        const fresh = this.pipeline.getSimulationControlState();
+        if (fresh.mode === 'solo') {
+          this.pipeline.toggleSimulation(id);
+        } else {
+          const proc = fresh.processes.find((x) => x.id === id);
+          this.pipeline.setSimulationProcessEnabled(id, !(proc && proc.enabled));
+        }
+        this.renderSimulationPanel();
+        this._syncHeaderSimButton();
+        this.renderInspector();
+      });
+    });
+    const master = this.elSimPanel.querySelector('[data-sim-master]');
+    if (master) {
+      master.addEventListener('click', () => {
+        if (this.pipeline.liveSimRunning) {
+          this.pipeline.pauseSimulation('');
+        } else if (this.pipeline.simPlaybackMode === 'solo') {
+          const selected = this.pipeline.getSelectedLayer();
+          const procs = this.pipeline.simulationProcessesForLayer(selected);
+          const fresh = this.pipeline.getSimulationControlState();
+          const first = (procs.includes(fresh.soloProcess) && fresh.processes.some((proc) => proc.id === fresh.soloProcess && proc.available)) ? fresh.soloProcess : procs.find((id) => fresh.processes.some((proc) => proc.id === id && proc.available));
+          if (first) this.pipeline.startSimulation(first);
+          else this.pipeline.startSimulation(null);
+        } else {
+          this.pipeline.startSimulation(null);
+        }
+        this.renderSimulationPanel();
+        this._syncHeaderSimButton();
+        this.renderInspector();
+      });
+    }
   }
 
   renderStackList() {
@@ -560,6 +671,13 @@ export class ErosionLayerStackUI {
       row.addEventListener('click', (e) => {
         if (e.target.closest('button')) return;
         this.pipeline.selectedLayerId = row.dataset.selectId;
+        const selectedLayer = this.pipeline.getSelectedLayer();
+        const seasonIds = this.pipeline.simulationProcessesForLayer(selectedLayer);
+        if (seasonIds.length && this.pipeline.simPlaybackMode === 'solo') {
+          const state0 = this.pipeline.getSimulationControlState();
+          const firstSeason = seasonIds.find((id) => state0.processes.some((proc) => proc.id === id && proc.available)) || seasonIds[0];
+          this.pipeline.selectSimulationProcess(firstSeason);
+        }
         if (this.pipeline.shadingMode === 5) {
           this.pipeline.evaluateStack({ reseedPlacements: false, fastPreview: true });
         }
@@ -759,6 +877,27 @@ export class ErosionLayerStackUI {
         </section>`;
     }
 
+    // Per-layer season trigger: simulate ONLY this layer's process(es).
+    let simCardHtml = '';
+    const layerSeasonIds = this.pipeline.simulationProcessesForLayer(layer);
+    if (layerSeasonIds.length) {
+      const simState = this.pipeline.getSimulationControlState();
+      const seasonButtons = layerSeasonIds.map((id) => {
+        const proc = simState.processes.find((x) => x.id === id);
+        if (!proc) return '';
+        const label = proc.playing && simState.mode === 'solo' && proc.solo ? `⏸ Pause ${proc.short}` : `▶ Simulate ${proc.short} only`;
+        return `<button type="button" class="tp-mini-btn ${proc.playing || proc.solo ? 'active' : ''}" data-simulate-process="${proc.id}" ${proc.available ? '' : 'disabled'}>${label}</button>`;
+      }).join('');
+      simCardHtml = `
+        <section class="tp-property-card">
+          <h2><i style="background:#8ab49a"></i><span>Simulate This Season</span></h2>
+          <p class="tp-card-note">Runs only this process; snow, rain, wind, rockfall and chemical seasons stay frozen unless Simultaneous mode is chosen in the Simulation Seasons panel. Editing the base stack auto-pauses again.</p>
+          <div class="tp-card-footer-btns">${seasonButtons}</div>
+          ${layer.type === 'chemical-weathering' ? '<p class="tp-card-note">Tip: run a Rain season first (or Simultaneous) — dissolved Fe/Cu stains follow the water from the mineral beds set on Stratigraphic Beds layers.</p>' : ''}
+          ${layer.type === 'aeolian-glacial' ? '<p class="tp-card-note">This layer owns two independent seasons: Snow &amp; glaciers, and Wind &amp; saltation.</p>' : ''}
+        </section>`;
+    }
+
     // Black & White Spatial Mask Card
     let maskCardHtml = '';
     if (supportsMask && layer.mask) {
@@ -900,6 +1039,7 @@ export class ErosionLayerStackUI {
       </section>
 
       ${authoringCardHtml}
+      ${simCardHtml}
       ${maskCardHtml}
       ${shadingCardHtml}
     `;
@@ -961,6 +1101,15 @@ export class ErosionLayerStackUI {
         this.renderStackList();
       });
     }
+
+    this.elInspector.querySelectorAll('[data-simulate-process]').forEach((b) => {
+      b.addEventListener('click', () => {
+        this.pipeline.toggleSimulation(b.dataset.simulateProcess);
+        this.renderSimulationPanel();
+        this._syncHeaderSimButton();
+        this.renderInspector();
+      });
+    });
 
     this.elInspector.querySelectorAll('[data-set-tool]').forEach((b) => {
       b.addEventListener('click', () => {

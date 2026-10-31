@@ -33,7 +33,7 @@
 
       <div class="tp-header-right" id="tp-terrain-header-actions">
         <button id="btn-er-reset" class="tp-hdr-btn" type="button" title="Re-evaluate full bottom-to-top pipeline">↻ Re-evaluate</button>
-        <button id="btn-er-play" class="tp-hdr-btn" type="button" title="Toggle continuous live erosion ticking [Space]">▶ Live Sim</button>
+        <button id="btn-er-play" class="tp-hdr-btn" type="button" title="Simulate the selected season (or all enabled seasons in Simultaneous mode) [Space]">▶ Simulate</button>
         <span class="tp-header-sep"></span>
         <button id="btn-er-export-glb" class="tp-hdr-btn primary" type="button" title="Export 3D Terrain Mesh (.GLB)">Export .GLB</button>
         <button id="btn-er-export-obj" class="tp-hdr-btn" type="button" title="Export Wavefront Mesh (.OBJ)">.OBJ</button>
@@ -86,6 +86,8 @@
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3.5 3.5"/></svg>
             <input type="text" id="tp-layer-search-input" placeholder="Filter stack operations..." autocomplete="off" />
           </label>
+
+          <div id="tp-sim-panel" class="tp-sim-panel" aria-label="Simulation seasons"></div>
 
           <div class="tp-layer-order top">
             <span>TOP — EVALUATED LAST</span>
@@ -212,6 +214,7 @@
                 <option value="6">Pure Sculptor Clay</option>
                 <option value="7">Cryosphere (Snow &amp; Glacier Ice)</option>
                 <option value="8">2.5D Hydrology &amp; Basins</option>
+                <option value="9">Mineral Strata &amp; Dissolved Stain (Fe / Cu)</option>
               </select>
             </div>
 

@@ -1578,6 +1578,16 @@ void main() {
   vec2 flowVel = clamp(vec2(qX, qZ) / avgW, vec2(-vMax), vec2(vMax));
   float flowSpeed = length(flowVel);
   float discharge = length(vec2(qX, qZ));
+  // Seasonal isolation: existing water is only routed while a water-carrying
+  // season is active (rain itself, snow/glacier melt, or chemical transport).
+  // In Wind/Rockfall-only seasons the old flux field must not keep silently
+  // moving rivers in the background.
+  float cryoActiveGate = step(0.001, uClimate.y + uClimate.z);
+  float waterRoutingGate = max(step(0.01, uPipeErode.x), max(cryoActiveGate, step(0.001, uChemInt.w)));
+  dWaterPipe *= waterRoutingGate;
+  flowVel *= waterRoutingGate;
+  flowSpeed *= waterRoutingGate;
+  discharge *= waterRoutingGate;
 
   float dBed = clamp(delta.r, -0.22, 0.05);
   float dCoarse = clamp(delta.g, -0.25, 0.25);
@@ -1665,7 +1675,7 @@ void main() {
   // Convert snow depth to water equivalent (~0.35 density ratio). The old code
   // ALSO recomputed a second melt flux from the remaining depths and added a
   // rescaled copy of the cryo melt, manufacturing water on every snowfield.
-  float meltWater = (max(snowC.b, 0.0) + max(snowC.a, 0.0)) * 0.35;
+  float meltWater = (max(snowC.b, 0.0) + max(snowC.a, 0.0)) * 0.35 * cryoActiveGate;
   water += meltWater;
 
   // ========================================================================
@@ -1763,7 +1773,7 @@ void main() {
       float marginFreezeThaw = exp(-sq((snowDepth - 0.38) * 1.9)) * (0.35 + 0.65 * smoothstep(0.25, 0.95, cryoSlope));
       float couloirAvalanche = smoothstep(0.10, 0.65, snowDepth) * smoothstep(0.58, 1.35, cryoSlope);
       float snowCutRate = (marginFreezeThaw * 0.0085 + couloirAvalanche * 0.015)
-                        * (0.30 + 0.70 * uClimate.y) * uWindField.w * dt / (0.28 + 2.1 * cryoHardness);
+                        * (0.30 + 0.70 * uClimate.y) * uWindField.w * dt * cryoActiveGate / (0.28 + 2.1 * cryoHardness);
       float snowCut = min(max(0.0, bedrock - 1.0), snowCutRate);
       bedrock = max(1.0, bedrock - snowCut);
       coarse += snowCut * 0.68;
@@ -2107,6 +2117,78 @@ void main() {
 `;
 
 // =============================================================================
+// MINERAL SOURCE FIELD: bakes sedimentary / stratigraphic layer composition
+// into a sim-resolution source texture consumed by CHEM_WEATHER_FRAG.
+//   R = iron abundance       G = copper abundance
+//   B = carbonate / soluble  A = salt / evaporite
+// Each enabled stratigraphic-beds layer accumulates saturatingly, gated by
+// its own dipping bed coordinate, target horizon and per-bed hash, so added
+// sediment layers become specific Fe/Cu/carbonate/salt horizons. Water in
+// the chemical pass then leaches this field and carries stain downhill.
+// =============================================================================
+export const MINERAL_ACCUM_FRAG = `#version 300 es
+${GLSL_PRECISION_HEADER}
+in vec2 vUv;
+layout(location = 0) out vec4 outMineral;
+
+uniform sampler2D uTerrainTex;
+uniform sampler2D uMineralTex;
+uniform vec4 uMineralComp;    // (iron, copper, carbonate, salt) abundances 0..1
+uniform vec4 uMineralBand;    // (horizon centre, horizon width, band strength, opacity)
+uniform vec4 uHardnessParams; // (rockHardness, strataStrength, strataFreq, faultWeakness)
+uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
+uniform vec4 uMineralDomain;  // (gridRes, worldSpan, seed, unused)
+uniform float uSeed;
+
+${COMMON_GEOLOGY_GLSL}
+
+float mineralGate(float hashValue, float abundance) {
+  float thresh = clamp(abundance, 0.0, 1.0);
+  return 1.0 - smoothstep(thresh - 0.06, thresh + 0.06, hashValue);
+}
+
+void main() {
+  ivec2 c = ivec2(gl_FragCoord.xy);
+  vec4 terr = texelFetch(uTerrainTex, c, 0);
+  vec4 prev = clamp(texelFetch(uMineralTex, c, 0), vec4(0.0), vec4(1.0));
+  vec2 worldXZ = (vUv - 0.5) * uMineralDomain.y;
+  float reliefScale = max(uStrataOrient.w, 1.0);
+
+  vec2 sHoriz = worldXZ / reliefScale;
+  float acrossStrike = worldXZ.x * uStrataOrient.x + worldXZ.y * uStrataOrient.y;
+  float warp = (fbm2D(sHoriz * 2.2 + uSeed, 3, 0.55) - 0.5) * 14.0;
+  float stratY = terr.r + acrossStrike * uStrataOrient.z + warp;
+  float stratNorm = clamp(stratY / reliefScale, -0.25, 1.25);
+
+  float horizonCentre = clamp(uMineralBand.x, 0.0, 1.0);
+  float horizonWidth = max(uMineralBand.y, 0.03);
+  float horizonDist = (stratNorm - horizonCentre) / horizonWidth;
+  float horizonGateRaw = exp(-horizonDist * horizonDist);
+  float horizonGate = mix(1.0, horizonGateRaw, clamp(uMineralBand.z, 0.0, 1.0));
+
+  float bedCoord = (stratY / reliefScale) * max(uHardnessParams.z, 0.1);
+  float bedId = floor(bedCoord);
+  float hashFe = hash12(vec2(bedId, uSeed * 0.171));
+  float hashCu = hash12(vec2(bedId + 41.0, uSeed * 0.237));
+  float hashCalc = hash12(vec2(bedId + 83.0, uSeed * 0.311));
+  float hardness = evalRockHardness3D(vec3(worldXZ.x, terr.r, worldXZ.y), uHardnessParams, uStrataOrient, uSeed);
+
+  float cuVeinNoise = smoothstep(0.62, 0.90,
+    fbm2D(worldXZ * 0.031 + vec2(-uSeed * 0.017, uSeed * 0.011), 3, 0.52));
+  float feGate = mix(0.30, 1.0, mineralGate(hashFe, 0.15 + 0.85 * uMineralComp.x));
+  float cuGate = mineralGate(hashCu, 0.08 + 0.92 * uMineralComp.y) * (0.22 + 0.78 * cuVeinNoise);
+  float calcGate = mineralGate(hashCalc, 0.12 + 0.88 * uMineralComp.z)
+                 * mix(0.40, 1.0, smoothstep(0.30, 0.85, hardness));
+  float saltGate = (0.30 + 0.70 * smoothstep(0.01, 0.35, max(terr.b, 0.0)))
+                 * (0.35 + 0.65 * (1.0 - smoothstep(0.12, 0.70, stratNorm)));
+
+  vec4 gates = vec4(feGate, cuGate, calcGate, saltGate);
+  vec4 add = clamp(uMineralComp * gates * horizonGate * clamp(uMineralBand.w, 0.0, 1.0), vec4(0.0), vec4(1.0));
+  outMineral = clamp(prev + (vec4(1.0) - prev) * add, vec4(0.0), vec4(1.0));
+}
+`;
+
+// =============================================================================
 // CHEMICAL WEATHERING: terrain-wide reaction state, ping-ponged at sim res.
 //   R = iron oxide / rust       (0..1)
 //   G = salt efflorescence      (0..1)
@@ -2125,6 +2207,7 @@ uniform sampler2D uTerrainTex;
 uniform sampler2D uChemTex;
 uniform sampler2D uSnowTex;
 uniform sampler2D uVelocityFieldTex;
+uniform sampler2D uMineralTex;
 
 uniform vec4 uChemDomain;     // (gridRes, cellSize, dt, worldSpan)
 uniform vec4 uChemRates;      // (rust, hydrolysis, salt, varnish), master rate premultiplied
@@ -2134,6 +2217,7 @@ uniform vec4 uStrataOrient;   // (sinStrike, cosStrike, tanDip, reliefScale)
 uniform vec4 uClimate;        // (snowlineNorm, snowfallRate, glacierStrength, meltRate)
 uniform float uSeed;
 uniform float uChemFlowScale; // 0 while pre-ageing a fresh landscape, 1 live
+uniform float uMineralFieldActive; // 1 when stratigraphic layers baked uMineralTex
 
 ${COMMON_GEOLOGY_GLSL}
 
@@ -2151,6 +2235,7 @@ void main() {
   vec4 chem = texelFetch(uChemTex, c, 0);
   vec4 snowC = texelFetch(uSnowTex, c, 0);
   vec4 vel = texelFetch(uVelocityFieldTex, c, 0);
+  vec4 mineralC = clamp(texelFetch(uMineralTex, c, 0), vec4(0.0), vec4(1.0));
 
   float rust = clamp(chem.r, 0.0, 1.0);
   float salt = clamp(chem.g, 0.0, 1.0);
@@ -2204,6 +2289,16 @@ void main() {
   float veinCalc = smoothstep(0.54, 0.84,
     fbm2D(worldXZ * 0.027 + vec2(uSeed * 0.019, uSeed * 0.023), 3, 0.50));
 
+  // Sedimentary-layer mineralogy overrides the generic provinces wherever
+  // stratigraphic beds baked a source field: set an iron-rich bed and only
+  // that horizon leaches rust; copper beds feed patina; carbonate beds drive
+  // hydrolysis/dissolution; evaporite beds supply salt.
+  float mineralMix = clamp(uMineralFieldActive, 0.0, 1.0);
+  veinFe = mix(veinFe, clamp(mineralC.r * 1.45 + veinFe * 0.12, 0.0, 1.25), mineralMix);
+  veinCu = mix(veinCu, clamp(mineralC.g * 1.55 + veinCu * 0.10, 0.0, 1.25), mineralMix);
+  veinCalc = mix(veinCalc, clamp(mineralC.b * 1.35 + veinCalc * 0.15, 0.0, 1.25), mineralMix);
+  float saltSource = mix(0.35, clamp(mineralC.a * 1.50, 0.0, 1.20), mineralMix);
+
   // Limited pairwise downhill bleeding of dissolved iron/copper. Both cells
   // derive the same transfer from the same old terrain/state, so no stain is
   // manufactured; the very small donor caps keep this a bleed, not a flood.
@@ -2219,6 +2314,8 @@ void main() {
       ivec2 nb = c + offs[i];
       vec4 tN = texelFetch(uTerrainTex, nb, 0);
       vec4 chemN = texelFetch(uChemTex, nb, 0);
+      vec4 minN = clamp(texelFetch(uMineralTex, nb, 0), vec4(0.0), vec4(1.0));
+      vec4 velN = texelFetch(uVelocityFieldTex, nb, 0);
       float hN = tN.r + tN.g + tN.b;
       float dh = hSurf - hN;
       float wetN = clamp(max(tN.a, 0.0) * 5.0 + uChemEnv.y * 0.42 + max(tN.b, 0.0) * 0.18, 0.0, 1.2);
@@ -2226,6 +2323,19 @@ void main() {
       float spill = abs(dh) / (0.12 + abs(dh));
       float rustN = clamp(chemN.r, 0.0, 1.0);
       float patinaN = clamp(-chemN.b, 0.0, 1.0);
+      // Dissolved-load transport: water velocity carries Fe/Cu leached from
+      // the neighbour's mineral bed (and its existing stain) into this cell,
+      // so stain trails visibly follow channels below mineral horizons.
+      vec2 offDir = vec2(float(offs[i].x), float(offs[i].y));
+      float flowToSelf = clamp(dot(safeNorm2(velN.xy, vec2(0.0)), -offDir), 0.0, 1.0);
+      float flowFromSelf = clamp(dot(safeNorm2(vel.xy, vec2(0.0)), offDir), 0.0, 1.0);
+      float carry = bleedRate * wetPair * (0.20 + 0.80 * max(spill, max(flowToSelf, flowFromSelf))) * (0.25 + 0.75 * uChemFlowScale);
+      float dissolvedFe = clamp(minN.r * 0.80 + rustN * 0.45, 0.0, 1.25);
+      float dissolvedCu = clamp(minN.g * 0.85 + patinaN * 0.45, 0.0, 1.25);
+      netRust += min(dissolvedFe * 0.010, 0.010) * carry * flowToSelf;
+      netPatina += min(dissolvedCu * 0.010, 0.010) * carry * flowToSelf;
+      netRust -= min(rust * 0.010, 0.006) * carry * flowFromSelf;
+      netPatina -= min(patinaAmt * 0.010, 0.006) * carry * flowFromSelf;
       if (dh > 0.001) {
         netRust -= min(rust * 0.025, max(rust - rustN, 0.0) * 0.010) * bleedRate * wetPair * spill;
         netPatina -= min(patinaAmt * 0.025, max(patinaAmt - patinaN, 0.0) * 0.010) * bleedRate * wetPair * spill;
@@ -2258,7 +2368,7 @@ void main() {
   float capillary = smoothstep(0.015, 0.22, fineDepth);
   float aridSalt = max(uChemEnv.w, smoothstep(0.25, 0.80, evapF));
   float saltDrive = uChemRates.z * evapF * (0.10 + uChemEnv.w * 0.55)
-                    * max(shoreline, capillary * aridSalt) * (1.0 - 0.65 * snowCover);
+                    * max(shoreline, capillary * aridSalt) * (0.20 + 0.95 * saltSource) * (1.0 - 0.65 * snowCover);
   salt = chemGrow(salt, saltDrive * 0.075, dt);
   float saltFlush = max(discharge - 0.35, 0.0) * 0.016 + smoothstep(0.55, 1.60, waterDepth) * 0.006;
   salt *= exp(-saltFlush * dt);
@@ -2447,6 +2557,7 @@ uniform sampler2D uVelocityFieldTex;
 
 uniform sampler2D uSnowTex;
 uniform sampler2D uChemTex;
+uniform sampler2D uMineralTex;
 uniform sampler2D uCavePortalTex;
 uniform sampler2D uMaskPreviewTex;
 
@@ -2806,6 +2917,20 @@ void main() {
     vec3 cavityCol = vec3(0.055, 0.060, 0.070) * ao;
     vec3 crestCol = vec3(0.86, 0.72, 0.46);
     surfaceAlbedo = mix(cavityCol + vec3(0.24) * ao, crestCol, clamp(ridgeConvex * 1.15, 0.0, 1.0));
+  } else if (uViewMode == 9) {
+    // Mineral strata & dissolved-stain diagnostic: iron beds orange, copper
+    // beds teal, carbonate pale, salt white; transported rust/patina trails
+    // from the live chemical state are drawn brighter over the source beds.
+    vec4 minD = sampleGridBilinear(uMineralTex, vUv, res);
+    vec4 chemD = sampleGridBilinear(uChemTex, vUv, res);
+    vec3 minCol = vec3(0.075, 0.078, 0.088);
+    minCol = mix(minCol, vec3(0.78, 0.34, 0.10), clamp(minD.r, 0.0, 1.0));
+    minCol = mix(minCol, vec3(0.08, 0.62, 0.48), clamp(minD.g, 0.0, 1.0) * 0.92);
+    minCol = mix(minCol, vec3(0.72, 0.68, 0.56), clamp(minD.b, 0.0, 1.0) * 0.55);
+    minCol = mix(minCol, vec3(0.94, 0.95, 0.92), clamp(minD.a, 0.0, 1.0) * 0.62);
+    minCol = mix(minCol, vec3(0.96, 0.42, 0.12), clamp(chemD.r, 0.0, 1.0) * 0.72);
+    minCol = mix(minCol, vec3(0.10, 0.76, 0.58), clamp(-chemD.b, 0.0, 1.0) * 0.72);
+    surfaceAlbedo = minCol;
   }
 
   vec3 L = safeNorm3(uSunDir, vec3(0.4, 0.8, 0.4));
@@ -3141,6 +3266,8 @@ layout(location = 0) out vec4 outColor;
 
 uniform sampler2D uTerrainTex;
 uniform sampler2D uSnowTex;
+uniform sampler2D uChemTex;
+uniform sampler2D uMineralTex;
 uniform vec3 uCameraPos;
 uniform vec3 uSunDir;
 uniform vec4 uRenderDomain;   // (worldSpan, gridRes, showWater, timeSec)
@@ -3164,6 +3291,8 @@ void main() {
   vec2 uv = clamp(vWorldPos.xz / span + 0.5, vec2(0.001), vec2(0.999));
   vec4 tCell = sampleGridBilinear(uTerrainTex, uv, res);
   vec4 snowCell = sampleGridBilinear(uSnowTex, uv, res);
+  vec4 chemCell = sampleGridBilinear(uChemTex, uv, res);
+  vec4 mineralCell = sampleGridBilinear(uMineralTex, uv, res);
   float groundH = tCell.r + tCell.g + tCell.b;
 
   float hardness = evalRockHardness3D(vWorldPos + vec3(vInstMeta.x * 19.0, 0.0, 0.0), uHardnessParams, uStrataOrient, uSeed);
@@ -3213,6 +3342,11 @@ void main() {
                     : (uMaterialTheme == 2 ? 0.55 : 0.9);
     float ironRich = clamp(smoothstep(0.16, 0.82, h1) * themeIron, 0.0, 1.0);
     float copperRich = smoothstep(0.82, 0.96, h2); // ~1 in 7 boulders copper-bearing
+    // Water-borne stain: a boulder resting in rust/patina transported from
+    // upslope mineral beds (live chem state) or directly on an Fe/Cu horizon
+    // (mineral source field) stains even if its own clast is not mineralised.
+    ironRich = clamp(max(ironRich * 0.75, max(mineralCell.r * 1.10, clamp(chemCell.r, 0.0, 1.0) * 1.15)), 0.0, 1.20);
+    copperRich = clamp(max(copperRich * 0.75, max(mineralCell.g * 1.20, clamp(-chemCell.b, 0.0, 1.0) * 1.20)), 0.0, 1.20);
     vec3 local = vWorldPos - vInstCentre.xyz;
     float side = smoothstep(0.15, 0.60, 1.0 - abs(N.y));
     vec2 tang = vec2(-N.z, N.x);

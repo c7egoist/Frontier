@@ -171,8 +171,8 @@ export const LAYER_OPERATION_SPECS = {
     defaultName: 'Stratigraphic beds',
     glyph: 'strata',
     reads: ['Height', '3D Strata'],
-    writes: ['3D Hardness', 'Height', 'Overhang'],
-    summary: (p) => `${Number(p.strataFreq).toFixed(1)} beds · dip ${Math.round(p.strataDip)}° · hard ${Math.round(p.rockHardness * 100)}%`,
+    writes: ['3D Hardness', 'Height', 'Overhang', 'Mineral Source'],
+    summary: (p) => `${Number(p.strataFreq).toFixed(1)} beds · dip ${Math.round(p.strataDip)}° · Fe ${Math.round((p.mineralIron ?? 0.55) * 100)}% · Cu ${Math.round((p.mineralCopper ?? 0.16) * 100)}%`,
     defaults: {
       rockHardness: DEFAULT_EROSION_PARAMS.rockHardness,
       strataStrength: DEFAULT_EROSION_PARAMS.strataStrength,
@@ -180,6 +180,13 @@ export const LAYER_OPERATION_SPECS = {
       strataDip: DEFAULT_EROSION_PARAMS.strataDip,
       strataStrike: DEFAULT_EROSION_PARAMS.strataStrike,
       faultWeakness: DEFAULT_EROSION_PARAMS.faultWeakness,
+      mineralIron: DEFAULT_EROSION_PARAMS.mineralIron,
+      mineralCopper: DEFAULT_EROSION_PARAMS.mineralCopper,
+      mineralCarbonate: DEFAULT_EROSION_PARAMS.mineralCarbonate,
+      mineralSalt: DEFAULT_EROSION_PARAMS.mineralSalt,
+      mineralHorizon: DEFAULT_EROSION_PARAMS.mineralHorizon,
+      mineralHorizonWidth: DEFAULT_EROSION_PARAMS.mineralHorizonWidth,
+      mineralBandStrength: DEFAULT_EROSION_PARAMS.mineralBandStrength,
       terraceCarve: 0.0,
       ledgeOverhang: 0.0,
       opacity: 1.0,
@@ -573,16 +580,29 @@ function buildStackRecipeFromLandscape(landscapeId) {
     );
   }
 
-  // 6. 3D Stratigraphic Bedding & Differential Rock Hardness
+  // 6. 3D Stratigraphic Bedding, Differential Rock Hardness & Mineral Beds.
+  // These sedimentary layers carry the iron/copper/carbonate/salt that the
+  // chemical season later dissolves and transports with surface water.
+  const mineralTheme = preset.materialTheme ?? d.materialTheme ?? 0;
+  const mineralArid = (d.dryAeolianMode ?? 0) > 0.4 || mineralTheme === 0 || mineralTheme === 3 || mineralTheme === 5 || mineralTheme === 6 || mineralTheme === 9;
+  const mineralBasalt = mineralTheme === 1 || mineralTheme === 4 || mineralTheme === 8;
+  const mineralScale = mineralTheme === 7 ? 0 : 1;
   layers.push(
     createStackLayer('stratigraphic-beds', {
-      name: '3D stratigraphy & rock hardness',
+      name: '3D stratigraphy, hardness & mineral beds',
       rockHardness: d.rockHardness,
       strataStrength: d.strataStrength,
       strataFreq: d.strataFreq,
       strataDip: d.strataDip,
       strataStrike: d.strataStrike,
       faultWeakness: d.faultWeakness,
+      mineralIron: mineralScale * (d.mineralIron ?? (mineralArid ? 0.72 : mineralBasalt ? 0.64 : DEFAULT_EROSION_PARAMS.mineralIron)),
+      mineralCopper: mineralScale * (d.mineralCopper ?? (mineralArid ? 0.20 : DEFAULT_EROSION_PARAMS.mineralCopper)),
+      mineralCarbonate: mineralScale * (d.mineralCarbonate ?? (mineralArid ? 0.58 : DEFAULT_EROSION_PARAMS.mineralCarbonate)),
+      mineralSalt: mineralScale * (d.mineralSalt ?? (mineralArid ? 0.52 : DEFAULT_EROSION_PARAMS.mineralSalt)),
+      mineralHorizon: d.mineralHorizon ?? DEFAULT_EROSION_PARAMS.mineralHorizon,
+      mineralHorizonWidth: d.mineralHorizonWidth ?? DEFAULT_EROSION_PARAMS.mineralHorizonWidth,
+      mineralBandStrength: d.mineralBandStrength ?? DEFAULT_EROSION_PARAMS.mineralBandStrength,
       terraceCarve: 0.0,
       ledgeOverhang: 0.0,
       opacity: 1.0,

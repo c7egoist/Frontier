@@ -99,6 +99,14 @@ const MASK_MODE_CODE = {
   noise: 5,
 };
 
+export const SIM_PROCESS_DEFS = [
+  { id: 'hydraulic', flag: 'simHydraulicPlaying', label: 'Rain & runoff', short: 'Rain', layerTypes: ['hydraulic-erosion'] },
+  { id: 'cryo', flag: 'simCryoPlaying', label: 'Snow & glaciers', short: 'Snow', layerTypes: ['aeolian-glacial'] },
+  { id: 'wind', flag: 'simWindPlaying', label: 'Wind & saltation', short: 'Wind', layerTypes: ['aeolian-glacial'] },
+  { id: 'rockfall', flag: 'simRockfallPlaying', label: 'Talus, rockfall & boulders', short: 'Rockfall', layerTypes: ['thermal-talus', 'rock-placement'] },
+  { id: 'chemical', flag: 'simChemicalPlaying', label: 'Chemical weathering', short: 'Chemical', layerTypes: ['chemical-weathering'] },
+];
+
 export class TerrainStackPipeline {
   constructor(engine) {
     this.engine = engine;
@@ -116,7 +124,18 @@ export class TerrainStackPipeline {
     this.layers = [];
     this.selectedLayerId = null;
     this.lastEvalMs = 0;
-    this.liveSimRunning = true; // Live conservative GPU simulation ON by default!
+    // Live simulation is explicitly triggered by the user (Simulate button /
+    // a season chip), never auto-started by stack evaluation. Default mode is
+    // one process at a time ("seasons": snow, then rain, then chemical...);
+    // simultaneous mode remains available in the Simulation panel.
+    this.liveSimRunning = false;
+    this.simPlaybackMode = 'solo'; // 'solo' | 'all'
+    this.simSoloProcess = 'hydraulic';
+    this.simProcessEnabled = { hydraulic: true, cryo: true, wind: true, rockfall: true, chemical: true };
+    this.simAvailable = { hydraulic: false, cryo: false, wind: false, rockfall: false, chemical: false };
+    this.simAutoPaused = true;
+    this.simPauseReason = 'Press Simulate to run a season';
+    this._simStateListeners = [];
     this.hasActiveVecDisp = false;
 
     // Per-sculpt-layer GPU delta textures: layerId -> { tex: [t0, t1], fbo: [f0, f1], idx: 0, caveStrokes: [] }
@@ -342,6 +361,146 @@ export class TerrainStackPipeline {
     return this.layers.find((l) => l.id === this.selectedLayerId) || null;
   }
 
+  addSimulationStateListener(fn) {
+    if (typeof fn === 'function') this._simStateListeners.push(fn);
+  }
+
+  _emitSimulationState() {
+    const state = this.getSimulationControlState();
+    for (const fn of this._simStateListeners || []) {
+      try { fn(state); } catch { /* UI listeners must never break evaluation */ }
+    }
+    return state;
+  }
+
+  _computeSimAvailability() {
+    const avail = { hydraulic: false, cryo: false, wind: false, rockfall: false, chemical: false };
+    for (const layer of this.layers) {
+      if (!layer.enabled) continue;
+      const p = layer.params || {};
+      if (layer.type === 'hydraulic-erosion') {
+        avail.hydraulic = true;
+      } else if (layer.type === 'thermal-talus' || layer.type === 'rock-placement') {
+        avail.rockfall = true;
+      } else if (layer.type === 'chemical-weathering') {
+        if (this.paletteId !== 7 && (p.chemRate ?? DEFAULT_EROSION_PARAMS.chemRate) > 0.001) avail.chemical = true;
+      } else if (layer.type === 'aeolian-glacial') {
+        if ((p.snowfallRate ?? 0) > 0.015 || (p.glacierStrength ?? 0) > 0.015) avail.cryo = true;
+        if ((p.windSpeed ?? 0) > 0.03) avail.wind = true;
+      }
+    }
+    this.simAvailable = avail;
+    return avail;
+  }
+
+  simulationProcessesForLayer(layer) {
+    if (!layer) return [];
+    return SIM_PROCESS_DEFS.filter((d) => d.layerTypes.includes(layer.type)).map((d) => d.id);
+  }
+
+  _applySimulationPlayback(emit = true) {
+    const ep = this.engine.params;
+    const avail = this._computeSimAvailability();
+    if (this.simPlaybackMode === 'solo' && !avail[this.simSoloProcess]) {
+      const first = SIM_PROCESS_DEFS.find((d) => avail[d.id]);
+      if (first) this.simSoloProcess = first.id;
+    }
+    for (const def of SIM_PROCESS_DEFS) {
+      const selected = this.simPlaybackMode === 'all'
+        ? this.simProcessEnabled[def.id] !== false
+        : def.id === this.simSoloProcess;
+      ep[def.flag] = Boolean(avail[def.id] && selected);
+    }
+    this.engine.playing = Boolean(this.liveSimRunning);
+    if (emit) this._emitSimulationState();
+    return this.getSimulationControlState();
+  }
+
+  getSimulationControlState() {
+    const ep = this.engine.params;
+    const avail = this.simAvailable || this._computeSimAvailability();
+    return {
+      running: Boolean(this.liveSimRunning),
+      mode: this.simPlaybackMode,
+      soloProcess: this.simSoloProcess,
+      autoPaused: Boolean(this.simAutoPaused),
+      pauseReason: this.simPauseReason || '',
+      processes: SIM_PROCESS_DEFS.map((def) => ({
+        ...def,
+        available: Boolean(avail[def.id]),
+        enabled: this.simProcessEnabled[def.id] !== false,
+        solo: def.id === this.simSoloProcess,
+        playing: Boolean(this.liveSimRunning && ep[def.flag] !== false && avail[def.id]),
+      })),
+    };
+  }
+
+  startSimulation(processId = null) {
+    if (processId && SIM_PROCESS_DEFS.some((d) => d.id === processId)) {
+      this.simPlaybackMode = 'solo';
+      this.simSoloProcess = processId;
+      this.simProcessEnabled[processId] = true;
+    }
+    this.liveSimRunning = true;
+    this.simAutoPaused = false;
+    this.simPauseReason = '';
+    return this._applySimulationPlayback(true);
+  }
+
+  pauseSimulation(reason = '') {
+    this.liveSimRunning = false;
+    this.engine.playing = false;
+    this.simAutoPaused = Boolean(reason);
+    this.simPauseReason = reason || 'Paused';
+    return this._emitSimulationState();
+  }
+
+  /** Editing the stack (especially base landform/shape) freezes every live
+   * process. It stays frozen until the user explicitly presses Simulate. */
+  pauseSimulationForEdit(reason = 'Stack edited') {
+    this.liveSimRunning = false;
+    this.engine.playing = false;
+    this.simAutoPaused = true;
+    this.simPauseReason = `${reason} — press Simulate to resume`;
+    return this._emitSimulationState();
+  }
+
+  toggleSimulation(processId = null) {
+    if (processId) {
+      if (this.liveSimRunning && this.simPlaybackMode === 'solo' && this.simSoloProcess === processId) {
+        return this.pauseSimulation('');
+      }
+      return this.startSimulation(processId);
+    }
+    return this.liveSimRunning ? this.pauseSimulation('') : this.startSimulation(null);
+  }
+
+  setSimPlaybackMode(mode) {
+    this.simPlaybackMode = mode === 'all' ? 'all' : 'solo';
+    return this._applySimulationPlayback(true);
+  }
+
+  /** Selects (but does not start) the one-at-a-time season. */
+  selectSimulationProcess(processId) {
+    if (!SIM_PROCESS_DEFS.some((d) => d.id === processId)) return this.getSimulationControlState();
+    const switchingSeason = this.liveSimRunning && this.simPlaybackMode === 'solo' && this.simSoloProcess !== processId;
+    this.simPlaybackMode = 'solo';
+    this.simSoloProcess = processId;
+    this.simProcessEnabled[processId] = true;
+    if (switchingSeason) {
+      this.liveSimRunning = false;
+      this.simAutoPaused = true;
+      this.simPauseReason = 'Season selected — press Simulate to run it';
+    }
+    return this._applySimulationPlayback(true);
+  }
+
+  setSimulationProcessEnabled(processId, enabled) {
+    if (!SIM_PROCESS_DEFS.some((d) => d.id === processId)) return this.getSimulationControlState();
+    this.simProcessEnabled[processId] = Boolean(enabled);
+    return this._applySimulationPlayback(true);
+  }
+
   _packMaskUniforms(mask) {
     if (!mask || !mask.enabled) {
       return {
@@ -540,7 +699,7 @@ export class TerrainStackPipeline {
    * Iterates from `layers.length - 1` (bottom) up to `0` (top), executing each enabled
    * Landform, Sculpt, Spline, Cave, Simulation, Rock-Placement, and Grass-Placement stage!
    */
-  evaluateStack({ reseedPlacements = true, fastPreview = false } = {}) {
+  evaluateStack({ reseedPlacements = true, fastPreview = false, keepLiveSim = false } = {}) {
     const t0 = performance.now();
     const gl = this.gl;
     const R = this.R;
@@ -550,6 +709,12 @@ export class TerrainStackPipeline {
 
     ep.materialTheme = this.paletteId;
     ep.fabricMode = this.fabricMode;
+
+    // Rebuilding the stack changes the ground under every live process, so
+    // snow/rain/wind/chemical/rockfall all freeze here and stay frozen until
+    // the user explicitly presses Simulate again (no surprise snowfall while
+    // dragging base-landform sliders).
+    if (!keepLiveSim) this.pauseSimulationForEdit('Stack evaluated');
 
     // Reset per-layer active simulation & placement flags before bottom-up walk
     ep.simHydraulicPlaying = false;
@@ -595,6 +760,7 @@ export class TerrainStackPipeline {
     }
 
     this.engine._clearChemicalWeathering();
+    this.engine._clearMineralField();
 
     // Determine bottom seed early so particle cloud initializes deterministically
     const baseLayer = [...this.layers].reverse().find((l) => l.type === 'base-landform' && l.enabled);
@@ -667,6 +833,28 @@ export class TerrainStackPipeline {
             [ep.strataStrike, 0.25, overhang, p.opacity ?? 1.0],
             [p.seed ?? ep.seed, 0, 0, 0],
             maxRelief
+          );
+        }
+
+        // Bake THIS sedimentary layer's chemical orientation (Fe/Cu/carbonate/
+        // salt horizon) into the mineral source field. Multiple stratigraphic
+        // layers accumulate, so specific added beds become specific ore /
+        // evaporite horizons for the later chemical season to leach.
+        ep.mineralIron = p.mineralIron ?? DEFAULT_EROSION_PARAMS.mineralIron;
+        ep.mineralCopper = p.mineralCopper ?? DEFAULT_EROSION_PARAMS.mineralCopper;
+        ep.mineralCarbonate = p.mineralCarbonate ?? DEFAULT_EROSION_PARAMS.mineralCarbonate;
+        ep.mineralSalt = p.mineralSalt ?? DEFAULT_EROSION_PARAMS.mineralSalt;
+        ep.mineralHorizon = p.mineralHorizon ?? DEFAULT_EROSION_PARAMS.mineralHorizon;
+        ep.mineralHorizonWidth = p.mineralHorizonWidth ?? DEFAULT_EROSION_PARAMS.mineralHorizonWidth;
+        ep.mineralBandStrength = p.mineralBandStrength ?? DEFAULT_EROSION_PARAMS.mineralBandStrength;
+        {
+          const { hardnessVec, strataVec } = this.engine._getHardnessUniforms();
+          this.engine._accumulateMineralStrata(
+            { iron: ep.mineralIron, copper: ep.mineralCopper, carbonate: ep.mineralCarbonate, salt: ep.mineralSalt },
+            { horizon: ep.mineralHorizon, horizonWidth: ep.mineralHorizonWidth, bandStrength: ep.mineralBandStrength, opacity: p.opacity ?? 1.0 },
+            hardnessVec,
+            strataVec,
+            p.seed ?? ep.seed
           );
         }
       } else if (layer.type === 'mountain-ridges') {
@@ -936,8 +1124,12 @@ export class TerrainStackPipeline {
     }
 
     gl.bindVertexArray(null);
+    // Evaluation used the sim flags as bake/availability scratch; publish the
+    // user's actual season selection (solo or simultaneous) for live ticking.
+    this._applySimulationPlayback(false);
     this.lastEvalMs = Math.max(0.1, performance.now() - t0);
     this._publishTelemetry();
+    this._emitSimulationState();
   }
 
   _publishTelemetry() {
@@ -988,6 +1180,7 @@ export class TerrainStackPipeline {
       case 6: return 4; // Pure Sculptor Clay
       case 7: return 5; // Cryosphere (Snow & Glacier Ice)
       case 8: return 6; // 2.5D Hydrology & Basins
+      case 9: return 9; // Mineral Strata & Dissolved Stain
       default: return 0;
     }
   }
@@ -1056,6 +1249,7 @@ export class TerrainStackPipeline {
     this.engine._bindTex(this.engine.progTerrainRender, 'uCavePortalTex', this.cavePortalTex, 5);
     this.engine._bindTex(this.engine.progTerrainRender, 'uMaskPreviewTex', this.maskTex, 6);
     this.engine._bindTex(this.engine.progTerrainRender, 'uChemTex', this.engine.chemTex[this.engine.chemIdx], 7);
+    this.engine._bindTex(this.engine.progTerrainRender, 'uMineralTex', this.engine.mineralTex[this.engine.mineralIdx], 8);
 
     gl.uniformMatrix4fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uViewProj'), false, viewProj);
     gl.uniform3fv(gl.getUniformLocation(this.engine.progTerrainRender, 'uCameraPos'), eye);
@@ -1122,6 +1316,8 @@ export class TerrainStackPipeline {
 
       this.engine._bindTex(this.engine.progRockInstance, 'uTerrainTex', this.engine.terrainTex[this.engine.terrainIdx], 0);
       this.engine._bindTex(this.engine.progRockInstance, 'uSnowTex', this.engine.snowTex[this.engine.snowIdx], 1);
+      this.engine._bindTex(this.engine.progRockInstance, 'uChemTex', this.engine.chemTex[this.engine.chemIdx], 2);
+      this.engine._bindTex(this.engine.progRockInstance, 'uMineralTex', this.engine.mineralTex[this.engine.mineralIdx], 3);
 
       gl.uniformMatrix4fv(gl.getUniformLocation(this.engine.progRockInstance, 'uViewProj'), false, viewProj);
       gl.uniform3fv(gl.getUniformLocation(this.engine.progRockInstance, 'uCameraPos'), eye);

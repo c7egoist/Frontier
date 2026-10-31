@@ -992,7 +992,7 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
     'tp-layer-search-input', 'tp-btn-add-layer', 'tp-add-layer-menu',
     'tp-inspector-content', 'cb-preset-grid', 'cb-shelf-drawer', 'cb-btn-toggle',
     'tp-doc-title', 'tp-scene-caption', 'tp-select-shading', 'tp-select-palette',
-    'tp-author-tools', 'spline-gizmo-svg',
+    'tp-author-tools', 'spline-gizmo-svg', 'tp-sim-panel', 'btn-er-play',
   ];
   for (const id of domIds) elements.set(id, makeEl(id));
 
@@ -1184,7 +1184,41 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
     assert.ok(engine.pipeline, 'TerrainStackPipeline must initialize cleanly');
     assert.equal(engine.pipeline.activePresetId, 'icelandic-highlands', 'Default preset must match c5ae88b/2cc3d34 icelandic-highlands');
     assert.equal(engine.params.seed, 4029, 'Default seed must be 4029');
-    assert.equal(engine.pipeline.liveSimRunning, true, 'Live conservative GPU simulation must default to enabled');
+    assert.equal(engine.pipeline.liveSimRunning, false, 'Live simulation must be explicitly triggered, not auto-started by evaluation');
+    assert.equal(engine.pipeline.simPlaybackMode, 'solo', 'Seasons default to one-at-a-time playback');
+    assert.ok(elements.get('tp-sim-panel').innerHTML.includes('SIMULATION SEASONS'), 'Simulation Seasons panel must render');
+    assert.ok(elements.get('tp-sim-panel').innerHTML.includes('data-sim-process="wind"'), 'Wind must be an independently triggerable season');
+
+    // Solo season: snow runs while rain/wind/chemical/rockfall stay frozen.
+    engine.pipeline.startSimulation('cryo');
+    assert.equal(engine.pipeline.liveSimRunning, true, 'Pressing Simulate starts the selected season');
+    assert.equal(engine.params.simCryoPlaying, true, 'Solo Snow season plays cryo');
+    assert.equal(engine.params.simHydraulicPlaying, false, 'Solo Snow freezes rain');
+    assert.equal(engine.params.simWindPlaying, false, 'Solo Snow freezes the wind season');
+    assert.equal(engine.params.simChemicalPlaying, false, 'Solo Snow freezes chemical');
+    assert.equal(engine.params.simRockfallPlaying, false, 'Solo Snow freezes rockfall');
+
+    // Arming another season must not start it; only Simulate does.
+    engine.pipeline.selectSimulationProcess('wind');
+    assert.equal(engine.pipeline.liveSimRunning, false, 'Selecting a different season pauses instead of silently starting it');
+    assert.equal(engine.pipeline.simSoloProcess, 'wind', 'Wind is armed for the next Simulate press');
+    engine.pipeline.startSimulation('cryo');
+
+    // Any stack/base evaluation auto-pauses and must not silently resume.
+    engine.pipeline.evaluateStack({ reseedPlacements: false, fastPreview: true });
+    assert.equal(engine.pipeline.liveSimRunning, false, 'Stack/base evaluation must auto-pause live simulation until explicitly resumed');
+
+    // Simultaneous mode: every armed season runs together, individual pause respected.
+    engine.pipeline.setSimPlaybackMode('all');
+    engine.pipeline.setSimulationProcessEnabled('cryo', false);
+    engine.pipeline.startSimulation(null);
+    assert.equal(engine.params.simHydraulicPlaying, true, 'Simultaneous mode runs rain');
+    assert.equal(engine.params.simCryoPlaying, false, 'Simultaneous mode respects an individually paused snow season');
+    assert.equal(engine.params.simWindPlaying, true, 'Simultaneous mode runs wind');
+    assert.equal(engine.params.simChemicalPlaying, true, 'Simultaneous mode runs chemical');
+    engine.pipeline.pauseSimulation('');
+    engine.pipeline.setSimulationProcessEnabled('cryo', true);
+    engine.pipeline.setSimPlaybackMode('solo');
     assert.ok(lastTel && lastTel.layerCount >= 7, 'Initial telemetry must publish evaluated stack');
     assert.ok(elements.get('tp-select-palette').innerHTML.includes('<option'), 'Palette select must be populated');
     assert.ok(elements.get('tp-layer-list').innerHTML.includes('tp-layer-row'), 'Layer stack list must render rows');
@@ -1628,4 +1662,64 @@ test('Chemical weathering is a terrain-wide simulation layer with multiple react
   for (const key of ['chemRate', 'chemRust', 'chemHydrolysis', 'chemDissolution', 'chemSalt', 'chemVarnish', 'chemCopper']) {
     assert.ok(uiSrc.includes(`key: '${key}'`), `Inspector missing ${key} slider`);
   }
+});
+
+test('Simulation seasons trigger solo/simultaneously and mineral strata feed water-borne stains', () => {
+  // Sedimentary / stratigraphic layers carry a specific chemical orientation.
+  const strataSpec = LAYER_OPERATION_SPECS['stratigraphic-beds'];
+  assert.ok(strataSpec.writes.includes('Mineral Source'), 'Stratigraphic beds write a mineral source field');
+  const strata = createStackLayer('stratigraphic-beds');
+  for (const key of ['mineralIron', 'mineralCopper', 'mineralCarbonate', 'mineralSalt', 'mineralHorizon', 'mineralHorizonWidth', 'mineralBandStrength']) {
+    assert.equal(strata.params[key], DEFAULT_EROSION_PARAMS[key], `${key} defaults from erosion params`);
+    assert.ok(Number.isFinite(DEFAULT_EROSION_PARAMS[key]) && DEFAULT_EROSION_PARAMS[key] >= 0 && DEFAULT_EROSION_PARAMS[key] <= 1, `${key} is a valid abundance`);
+  }
+  for (const [presetId, preset] of Object.entries(TERRAIN_STACK_PRESETS)) {
+    const strataLayers = preset.layers().filter((l) => l.type === 'stratigraphic-beds');
+    assert.equal(strataLayers.length, 1, `${presetId} has one mineral-bearing stratigraphic package`);
+    if (presetId === 'lunar-mare-craters') {
+      assert.equal(strataLayers[0].params.mineralIron, 0, 'Lunar strata carry no aqueous mineral source');
+    } else {
+      assert.ok(strataLayers[0].params.mineralIron > 0, `${presetId} strata are iron-bearing`);
+    }
+  }
+
+  // Mineral source bake + dissolved transport following the water velocity field.
+  assert.equal(typeof Shaders.MINERAL_ACCUM_FRAG, 'string', 'MINERAL_ACCUM_FRAG must be exported');
+  for (const token of ['uMineralComp', 'uMineralBand', 'horizonGate', 'mineralGate', 'outMineral']) {
+    assert.ok(Shaders.MINERAL_ACCUM_FRAG.includes(token), `MINERAL_ACCUM_FRAG missing ${token}`);
+  }
+  for (const token of ['uMineralTex', 'uMineralFieldActive', 'saltSource', 'dissolvedFe', 'dissolvedCu', 'flowToSelf', 'flowFromSelf']) {
+    assert.ok(Shaders.CHEM_WEATHER_FRAG.includes(token), `CHEM_WEATHER_FRAG missing dissolved-transport token ${token}`);
+  }
+  assert.ok(
+    Shaders.ROCK_INSTANCE_FRAG.includes('mineralCell.r') && Shaders.ROCK_INSTANCE_FRAG.includes('chemCell.r'),
+    'Boulders must stain from the mineral bed / transported chemical field beneath them'
+  );
+  assert.ok(Shaders.TERRAIN_RENDER_FRAG.includes('uViewMode == 9'), 'Mineral diagnostic view exists');
+  assert.ok(
+    Shaders.TERRAIN_INTEGRATE_FRAG.includes('waterRoutingGate') && Shaders.TERRAIN_INTEGRATE_FRAG.includes('cryoActiveGate'),
+    'Frozen seasons must not keep routing stale flux or consuming stale snowmelt'
+  );
+
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  const mainSrc = fs.readFileSync(new URL('../src/app/main.js', import.meta.url), 'utf8');
+
+  for (const token of ['progMineralAccum', '_clearMineralField', '_accumulateMineralStrata', 'seedDefaultMineralField', 'uMineralFieldActive']) {
+    assert.ok(engSrc.includes(token), `Engine missing mineral lifecycle token ${token}`);
+  }
+  for (const id of ['hydraulic', 'cryo', 'wind', 'rockfall', 'chemical']) {
+    assert.ok(pipeSrc.includes(`id: '${id}'`), `Pipeline season registry missing ${id}`);
+  }
+  for (const token of ['pauseSimulationForEdit', "pauseSimulationForEdit('Stack evaluated')", 'startSimulation', 'toggleSimulation', 'setSimPlaybackMode', '_clearMineralField', '_accumulateMineralStrata']) {
+    assert.ok(pipeSrc.includes(token), `Pipeline missing season/mineral token ${token}`);
+  }
+  for (const token of ['data-sim-process', 'data-sim-mode', 'data-simulate-process', 'SIMULATION SEASONS']) {
+    assert.ok(uiSrc.includes(token), `Layer UI missing season control token ${token}`);
+  }
+  for (const key of ['mineralIron', 'mineralCopper', 'mineralCarbonate', 'mineralSalt', 'mineralHorizon']) {
+    assert.ok(uiSrc.includes(`key: '${key}'`), `Inspector missing ${key} slider`);
+  }
+  assert.ok(mainSrc.includes('startSimulation(firstAvailable)'), 'Header Simulate runs the selected simulation layer season');
 });
