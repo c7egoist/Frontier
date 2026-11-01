@@ -258,6 +258,7 @@ function setStudioMode(mode) {
   document.getElementById('cb-shelf-root').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('erosion-canvas').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('spline-gizmo-svg').classList.toggle('hidden-panel', !isTerrain);
+  document.getElementById('wind-debug-canvas').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('tp-scene-nav').classList.toggle('hidden-panel', !isTerrain);
   document.getElementById('tp-scene-caption').classList.toggle('hidden-panel', !isTerrain);
 

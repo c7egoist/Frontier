@@ -32,6 +32,13 @@ import {
 } from '../src/erosion/terrain-stack-presets.js';
 import { SdfCaveSystem } from '../src/erosion/sdf-cave-mesher.js';
 import {
+  azimuthForWindFromBearing,
+  buildWindVectorField,
+  sampleWindVector,
+  windCompassFromAzimuth,
+  windSpeedColor,
+} from '../src/erosion/wind-field-debug.js';
+import {
   GpuErosionEngine,
   TERRAIN_RESOLUTION_OPTIONS,
   TERRAIN_RESOLUTION_STORAGE_KEY,
@@ -2058,6 +2065,100 @@ test('Spline control points are editable in full 3D: gizmo axes, numeric X/Z/Y e
   // Mixed paths: a single authored Y blends with the automatic grade fills.
   const mixed = runTunnel([[-235, 0], [-120, -18], [0, 0, 88], [120, 18], [235, 0]]);
   assert.ok(mixed.maxY > flat.maxY + 25, `One raised point must locally lift the bore (mixed roof ${mixed.maxY.toFixed(1)} m)`);
+});
+
+test('Wind erosion debug vector field mirrors the GPU flow model (direction, gusts, deflection, lee shelter)', () => {
+  // Compass semantics: windAzimuth is the direction the wind blows TOWARD in
+  // XZ (dir = (cos, sin)); with North = -Z and East = +X, azimuth 0 blows
+  // toward East, i.e. it is a wind FROM the West.
+  const c0 = windCompassFromAzimuth(0);
+  assert.equal(c0.towardPoint, 'E');
+  assert.equal(c0.fromPoint, 'W');
+  assert.equal(Math.round(c0.towardDeg), 90);
+  const cNeg = windCompassFromAzimuth(-35);
+  assert.equal(cNeg.towardPoint, 'NE');
+  assert.equal(cNeg.fromPoint, 'SW');
+
+  // "Wind FROM <compass>" quick setters are exact inverses.
+  assert.equal(azimuthForWindFromBearing(0), 90, 'Wind from North blows toward +Z (South)');
+  assert.equal(azimuthForWindFromBearing(90), 180, 'Wind from East blows toward -X (West)');
+  assert.equal(azimuthForWindFromBearing(180), -90, 'Wind from South blows toward -Z (North)');
+  assert.equal(azimuthForWindFromBearing(270), 0, 'Wind from West blows toward +X (East)');
+  assert.equal(azimuthForWindFromBearing(315), 45, 'Wind from NW blows toward SE');
+  for (const bearing of [0, 45, 90, 135, 180, 225, 270, 315]) {
+    assert.equal(Math.round(windCompassFromAzimuth(azimuthForWindFromBearing(bearing)).fromDeg), bearing, `FROM ${bearing}° round-trips`);
+  }
+
+  // Flat terrain + zero turbulence: the whole field aligns with the
+  // prevailing vector; only the gust bands modulate speed (as on GPU).
+  const flat = () => 50;
+  const field = buildWindVectorField({
+    heightAt: flat, span: 500, divisions: 9,
+    azimuthDeg: 30, windSpeed: 0.58, turbulence: 0, streamlining: 0, seed: 7, cellSize: 1,
+  });
+  assert.equal(field.arrows.length, 81);
+  const expectX = Math.cos(30 * Math.PI / 180);
+  const expectZ = Math.sin(30 * Math.PI / 180);
+  for (const a of field.arrows) {
+    assert.ok(Math.abs(a.dirX - expectX) < 1e-6 && Math.abs(a.dirZ - expectZ) < 1e-6, 'Calm flat field follows the prevailing vector exactly');
+    assert.ok(a.speed > 0.2 && a.speed < 1.8, `Gust-modulated speed stays in range, got ${a.speed}`);
+    assert.equal(a.active, true);
+  }
+  const speeds = field.arrows.map((a) => a.speed);
+  assert.ok(Math.max(...speeds) > Math.min(...speeds) * 1.2, 'Spatial gust bands still vary speed at zero turbulence');
+
+  // Turbulence bends directions away from the prevailing vector.
+  const turbulent = sampleWindVector(
+    { azimuthDeg: 0, windSpeed: 0.8, turbulence: 1.0, streamlining: 0, seed: 3, cellSize: 1 },
+    120, -80, flat
+  );
+  assert.ok(Math.abs(turbulent.dirZ) > 0.05, `Turbulent wander deflects the local wind, got dirZ ${turbulent.dirZ}`);
+
+  // Terrain deflection: flow bends around a cone flank with streamlining on.
+  const cone = (x, z) => 30 + 70 * Math.exp(-(x * x + z * z) / (2 * 60 * 60));
+  const deflected = sampleWindVector(
+    { azimuthDeg: 0, windSpeed: 0.8, turbulence: 0, streamlining: 1.0, seed: 3, cellSize: 1 },
+    -20, 45, cone
+  );
+  assert.ok(Math.abs(deflected.dirZ) > 0.03, `Cross-slope deflection bends flow around high ground, got dirZ ${deflected.dirZ}`);
+
+  // Lee sheltering: just downwind of a ridge the flow is much weaker than on
+  // the windward side — this is where the debug arrows turn short/cool.
+  const ridge = (x) => 30 + 80 * Math.exp(-(x * x) / (2 * 35 * 35));
+  const p = { azimuthDeg: 0, windSpeed: 0.8, turbulence: 0, streamlining: 0.8, seed: 3, cellSize: 1 };
+  const lee = sampleWindVector(p, 30, 0, ridge);
+  const stoss = sampleWindVector(p, -30, 0, ridge);
+  assert.ok(stoss.exposure > 0.95, `Windward side is fully exposed, got ${stoss.exposure}`);
+  assert.ok(lee.exposure < 0.45, `Lee side is sheltered, got exposure ${lee.exposure}`);
+  assert.ok(lee.speed < stoss.speed * 0.6, `Lee speed collapses vs windward (${lee.speed.toFixed(2)} vs ${stoss.speed.toFixed(2)})`);
+
+  // Water/snow gate dims arrows where wind erosion cannot act.
+  const gated = buildWindVectorField({
+    heightAt: flat, gateAt: (x) => ({ water: x > 0 ? 0.4 : 0, snow: 0 }),
+    span: 500, divisions: 5, azimuthDeg: 0, windSpeed: 0.6, turbulence: 0, streamlining: 0, seed: 1, cellSize: 1,
+  });
+  assert.ok(gated.arrows.filter((a) => a.x > 0).every((a) => !a.active), 'Arrows over water are inactive');
+  assert.ok(gated.arrows.filter((a) => a.x < 0).every((a) => a.active), 'Arrows over dry land stay active');
+
+  // Speed colour ramp endpoints (sheltered blue -> erosive coral).
+  assert.deepEqual(windSpeedColor(0), [61, 123, 253]);
+  assert.deepEqual(windSpeedColor(1), [255, 122, 107]);
+
+  // UI wiring: toggle, readout, FROM setters, overlay canvas & studio mode.
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  for (const token of ['showWindDebug', 'tp-chk-wind-debug', 'tp-wind-debug-readout', 'data-wind-from', 'updateWindDebugOverlay', '_windDebugParams', 'buildWindVectorField', 'azimuthForWindFromBearing', 'windCompassFromAzimuth']) {
+    assert.ok(uiSrc.includes(token), `Layer-stack UI missing wind debug token: ${token}`);
+  }
+  const htmlSrc = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  assert.ok(htmlSrc.includes('id="wind-debug-canvas"'), 'Wind debug canvas exists in the viewport');
+  const mainSrc = fs.readFileSync(new URL('../src/app/main.js', import.meta.url), 'utf8');
+  assert.ok(mainSrc.includes("getElementById('wind-debug-canvas')"), 'Wind debug canvas hides with the terrain studio');
+
+  // Latent bug fixed alongside: sampleTerrain must expose surfaceH (the
+  // engine raycaster / pipeline / spline overlay read it; only surfH existed,
+  // which silently disabled the exact terrain raymarch).
+  const calvSrc = fs.readFileSync(new URL('../src/erosion/rock-calving.js', import.meta.url), 'utf8');
+  assert.ok(calvSrc.includes('surfaceH: surfH'), 'sampleTerrain exposes the surfaceH alias its callers use');
 });
 
 test('Terrain resolution is a safe boot-time quality option and the redesigned UI stays decluttered', () => {

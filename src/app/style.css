@@ -974,6 +974,16 @@ select {
   z-index: 12;
 }
 
+.tp-wind-debug-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 11;
+  display: none;
+}
+
 .tp-scene-caption {
   position: absolute;
   left: 18px;
@@ -2653,6 +2663,54 @@ body.tp-focus-mode .tp-inspector-dock {
 .tp-pt-mini:disabled {
   opacity: 0.3;
   cursor: default;
+}
+
+/* Wind flow debug card: quick "wind FROM" compass setters + speed legend */
+.tp-wind-from-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+  margin: 6px 0 2px;
+}
+
+.tp-wind-from-grid button {
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.2);
+  color: #cfd8d1;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.tp-wind-from-grid button:hover {
+  background: rgba(255, 255, 255, 0.075);
+  color: #ffffff;
+}
+
+.tp-wind-from-grid button.active {
+  border-color: rgba(122, 184, 255, 0.6);
+  background: rgba(122, 184, 255, 0.16);
+  color: #d8ecff;
+}
+
+.tp-wind-legend {
+  height: 8px;
+  border-radius: 999px;
+  margin: 8px 0 4px;
+  background: linear-gradient(90deg, rgb(61, 123, 253), rgb(101, 230, 178) 45%, rgb(255, 209, 102) 75%, rgb(255, 122, 107));
+  opacity: 0.9;
+}
+
+.tp-wind-legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #74837a;
 }
 
 .tp-check-row input,

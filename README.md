@@ -146,7 +146,16 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   strata abrade faster than hard caprock — replacing ruler-straight mountain
   grooves with curved corridors, fins and spire-like remnants. Wind settings
   can be changed between seasons without rebuilding the already-eroded
-  terrain. The **Utah Wind + Rain Canyon** preset is a rocky Utah stack with
+  terrain. The layer's **Wind Flow Debug** card previews exactly where the
+  wind will go before you run it: a toggleable vector field over the terrain
+  (same flow model as the simulation — prevailing vector, turbulent gust
+  wander, terrain deflection and lee sheltering) where arrow direction is the
+  local flow and arrow length/colour is local speed (long/warm = exposed,
+  erosive; short/cool = sheltered deposition; faint rings = blocked by
+  water/snow). A live readout translates the azimuth slider into compass
+  terms ("blows toward NE — a wind FROM SW", North = −Z, East = +X) and
+  one-click **From N/NE/E/…** buttons set the wind to flow from a chosen
+  direction. The **Utah Wind + Rain Canyon** preset is a rocky Utah stack with
   only Rain and Wind simulation layers (no snow, rockfall/boulders or
   chemical layers).
 - **Spline Landform + sculpt/noise authoring**: a new parameterized smooth
@@ -204,9 +213,10 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   header **Focus** button hides both side docks to give the 3D viewport the
   full workspace.
 
-Verification: `npm test` — 38/38 pass (includes `tests/rain-erosion.test.mjs`,
+Verification: `npm test` — 39/39 pass (includes `tests/rain-erosion.test.mjs`,
 rigid-body free-fall/no-elevator tests, exact-mesh seating / pause-freeze,
-simulation-season / mineral-strata, dedicated wind-erosion, spline
+simulation-season / mineral-strata, dedicated wind-erosion + wind-flow
+debug vector field, spline
 landform / sculpt-noise / SDF-through-tunnel, 3D spline-point editing
 (gizmo + per-point elevations), and terrain-resolution / decluttered-UI
 regression tests).

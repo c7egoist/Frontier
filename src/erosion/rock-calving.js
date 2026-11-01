@@ -625,6 +625,7 @@ export class RockCalvingSystem {
       ice,
       snowLift,
       surfH,
+      surfaceH: surfH,
       dMaxCryo,
       dMaxSed,
       sedSigma,

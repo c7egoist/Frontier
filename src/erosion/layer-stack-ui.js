@@ -20,6 +20,13 @@ import {
   TERRAIN_STACK_PRESETS,
   VEG_SPECIES,
 } from './terrain-stack-presets.js';
+import { DEFAULT_EROSION_PARAMS } from './erosion-presets.js';
+import {
+  azimuthForWindFromBearing,
+  buildWindVectorField,
+  windCompassFromAzimuth,
+  windSpeedColor,
+} from './wind-field-debug.js';
 
 const SVG_ICONS = {
   mountain: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14.5 6.8 6l3.4 5 2.4-3.3L16 14.5H2Z"/></svg>`,
@@ -358,6 +365,10 @@ export class ErosionLayerStackUI {
     this.selectedSplinePt = -1;
     this.draggingSplineAxis = null;
     this._splineDrag = null;
+    this.showWindDebug = false;
+    this._windField = null;
+    this._windFieldKey = '';
+    this._windFieldBuiltAt = 0;
 
     // Bind callbacks from engine
     this.engine.onStackMutated = () => {
@@ -366,6 +377,7 @@ export class ErosionLayerStackUI {
     };
     this.engine.onFrameRendered = () => {
       this.updateSplineGizmoOverlay();
+      this.updateWindDebugOverlay();
     };
 
     this._cacheDom();
@@ -395,6 +407,7 @@ export class ErosionLayerStackUI {
     this.elPaletteSelect = document.getElementById('tp-select-palette');
     this.elAuthorTools = document.getElementById('tp-author-tools');
     this.elSplineSvg = document.getElementById('spline-gizmo-svg');
+    this.elWindCanvas = document.getElementById('wind-debug-canvas');
     this.elSimPanel = document.getElementById('tp-sim-panel');
     this.elHeaderPlay = document.getElementById('btn-er-play');
   }
@@ -999,6 +1012,30 @@ export class ErosionLayerStackUI {
         </section>`;
     }
 
+    // Wind Flow Debug Card: prevailing-wind readout, vector-field toggle and
+    // one-click "wind FROM <compass>" azimuth setters.
+    let windDebugCardHtml = '';
+    if (layer.type === 'wind-erosion') {
+      const fromButtons = [[0, 'From N'], [45, 'From NE'], [90, 'From E'], [135, 'From SE'], [180, 'From S'], [225, 'From SW'], [270, 'From W'], [315, 'From NW']]
+        .map(([bearing, label]) => {
+          const active = azimuthForWindFromBearing(bearing) === Math.round(layer.params.windAzimuth ?? NaN);
+          return `<button type="button" class="${active ? 'active' : ''}" data-wind-from="${bearing}" title="Set Prevailing Wind Direction so the wind blows from the ${label.slice(5)}">${label}</button>`;
+        }).join('');
+      windDebugCardHtml = `
+        <section class="tp-property-card">
+          <h2><i style="background:#7ab8ff"></i><span>Wind Flow Debug</span></h2>
+          <p class="tp-card-note" id="tp-wind-debug-readout"></p>
+          <label class="tp-check-row">
+            <input type="checkbox" id="tp-chk-wind-debug" ${this.showWindDebug ? 'checked' : ''} />
+            <span>Show wind vector field on terrain</span>
+          </label>
+          <div class="tp-wind-from-grid">${fromButtons}</div>
+          <div class="tp-wind-legend"></div>
+          <div class="tp-wind-legend-labels"><span>Sheltered · slow</span><span>Fast · erosive</span></div>
+          <p class="tp-card-note">Arrows preview the actual erosion flow (same flow model as the simulation): direction includes turbulent wander and deflection around ridges; length &amp; colour show local speed with gusts and lee sheltering — long/warm abrades windward faces, short/cool marks sheltered lee deposition. Faint rings = wind erosion blocked by water or snow. Compass: −Z = North, +X = East.</p>
+        </section>`;
+    }
+
     // Black & White Spatial Mask Card
     let maskCardHtml = '';
     if (supportsMask && layer.mask) {
@@ -1144,6 +1181,7 @@ export class ErosionLayerStackUI {
 
       ${authoringCardHtml}
       ${simCardHtml}
+      ${windDebugCardHtml}
       ${maskCardHtml}
       ${shadingCardHtml}
     `;
@@ -1371,6 +1409,31 @@ export class ErosionLayerStackUI {
       }
     }
 
+    // Wind flow debug bindings
+    const windDebugChk = document.getElementById('tp-chk-wind-debug');
+    if (windDebugChk) {
+      windDebugChk.addEventListener('change', () => {
+        this.showWindDebug = !!windDebugChk.checked;
+        this._windFieldBuiltAt = 0;
+        this.updateWindDebugOverlay();
+      });
+    }
+    if (layer.type === 'wind-erosion' && this.elInspector) {
+      this.elInspector.querySelectorAll('[data-wind-from]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          layer.params.windAzimuth = azimuthForWindFromBearing(Number(btn.dataset.windFrom));
+          if (!this.pipeline.applyLiveWindLayerParams(layer)) {
+            this.pipeline.evaluateStack({ reseedPlacements: false });
+          }
+          this._windFieldBuiltAt = 0;
+          this.renderStackList();
+          this.renderInspector();
+          this.updateWindDebugOverlay();
+          this.updateSceneCaption();
+        });
+      });
+    }
+
     // Mask bindings
     const chkMask = document.getElementById('tp-chk-mask-enabled');
     if (chkMask) {
@@ -1517,6 +1580,188 @@ export class ErosionLayerStackUI {
         if (this.onPresetChanged) this.onPresetChanged(id);
       });
     });
+  }
+
+  // =========================================================================
+  // WIND EROSION DEBUG VECTOR-FIELD OVERLAY
+  // =========================================================================
+
+  // Resolve the wind settings the debug field should preview: the wind layer
+  // being inspected, else the stack's authoritative (topmost enabled) wind
+  // layer, else the engine's synced wind params.
+  _windDebugParams() {
+    const sel = this.pipeline.getSelectedLayer();
+    const layer = (sel && sel.type === 'wind-erosion')
+      ? sel
+      : (this.pipeline.layers || []).find((l) => l.enabled && l.type === 'wind-erosion') || null;
+    const src = layer ? layer.params : this.engine.params;
+    const num = (v, fb) => (Number.isFinite(Number(v)) ? Number(v) : fb);
+    return {
+      layer,
+      azimuthDeg: num(src.windAzimuth, DEFAULT_EROSION_PARAMS.windAzimuth),
+      windSpeed: num(src.windSpeed, DEFAULT_EROSION_PARAMS.windSpeed),
+      turbulence: num(src.windTurbulence, DEFAULT_EROSION_PARAMS.windTurbulence),
+      streamlining: num(src.windStreamlining, DEFAULT_EROSION_PARAMS.windStreamlining),
+      seed: num(this.engine.params.seed, 1),
+    };
+  }
+
+  // Fast bilinear samplers over the CPU height/snow grids (total height and
+  // the water/snow erosion gate), avoiding full sampleTerrain() cost per tap.
+  _windHeightSampler() {
+    const rc = this.engine.rockCalving;
+    const g = rc?.heightGrid;
+    const N = rc?.gridRes || 0;
+    const span = rc?.worldSpan || this.engine.params.worldSpan || 500;
+    if (!g || N < 2) return null;
+    const sg = rc.snowGrid;
+    const cellAt = (wx, wz) => {
+      const u = Math.max(0.001, Math.min(0.999, wx / span + 0.5)) * (N - 1);
+      const v = Math.max(0.001, Math.min(0.999, wz / span + 0.5)) * (N - 1);
+      const ix = Math.min(N - 2, Math.max(0, Math.floor(u)));
+      const iz = Math.min(N - 2, Math.max(0, Math.floor(v)));
+      return { idx: (iz * N + ix) * 4, fx: u - ix, fz: v - iz };
+    };
+    const sample = (wx, wz) => {
+      const { idx, fx, fz } = cellAt(wx, wz);
+      const hAt = (o) => g[o] + g[o + 1] + g[o + 2];
+      const a = hAt(idx) * (1 - fx) + hAt(idx + 4) * fx;
+      const b = hAt(idx + N * 4) * (1 - fx) + hAt(idx + N * 4 + 4) * fx;
+      return a * (1 - fz) + b * fz;
+    };
+    const gate = (wx, wz) => {
+      const { idx } = cellAt(wx, wz);
+      return { water: g[idx + 3] || 0, snow: sg ? (sg[idx] || 0) : 0 };
+    };
+    return { sample, gate, span };
+  }
+
+  _updateWindReadout() {
+    const el = document.getElementById('tp-wind-debug-readout');
+    if (!el) return;
+    const wp = this._windDebugParams();
+    const c = windCompassFromAzimuth(wp.azimuthDeg);
+    const txt = `Prevailing wind blows toward ${c.towardPoint} (${Math.round(c.towardDeg)}°) — a wind FROM ${c.fromPoint} (${Math.round(c.fromDeg)}°), at ${Math.round((wp.windSpeed || 0) * 100)}% speed.`;
+    if (el.textContent !== txt) el.textContent = txt;
+  }
+
+  updateWindDebugOverlay() {
+    // Keep the inspector readout fresh even while the field itself is hidden
+    // (e.g. while dragging the azimuth slider).
+    this._updateWindReadout();
+
+    const canvas = this.elWindCanvas;
+    if (!canvas || typeof canvas.getContext !== 'function') return;
+    const wp = this._windDebugParams();
+    const show = this.showWindDebug && this.engine.active && (!!wp.layer || (wp.windSpeed || 0) > 0.03);
+    if (!show) {
+      if (canvas.style.display !== 'none') canvas.style.display = 'none';
+      return;
+    }
+    const sampler = this._windHeightSampler();
+    if (!sampler) {
+      canvas.style.display = 'none';
+      return;
+    }
+
+    // Rebuild the CPU field when wind settings change (rate-limited so
+    // slider drags stay smooth), and a few times a second while visible so
+    // it tracks the eroding terrain.
+    const now = performance.now();
+    const key = [wp.azimuthDeg, wp.windSpeed, wp.turbulence, wp.streamlining, wp.seed, this.engine.gridRes].join('|');
+    const age = now - this._windFieldBuiltAt;
+    if (!this._windField || (key !== this._windFieldKey && age > 60) || age > 240) {
+      this._windField = buildWindVectorField({
+        heightAt: sampler.sample,
+        gateAt: sampler.gate,
+        span: sampler.span,
+        divisions: 17,
+        azimuthDeg: wp.azimuthDeg,
+        windSpeed: wp.windSpeed,
+        turbulence: wp.turbulence,
+        streamlining: wp.streamlining,
+        seed: wp.seed,
+        cellSize: sampler.span / Math.max(2, this.engine.gridRes || 512),
+        lift: 5,
+      });
+      this._windFieldKey = key;
+      this._windFieldBuiltAt = now;
+    }
+
+    const w = canvas.clientWidth || this.engine.canvas.clientWidth || 800;
+    const h = canvas.clientHeight || this.engine.canvas.clientHeight || 600;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const pw = Math.max(2, Math.round(w * dpr));
+    const ph = Math.max(2, Math.round(h * dpr));
+    if (canvas.width !== pw || canvas.height !== ph) {
+      canvas.width = pw;
+      canvas.height = ph;
+    }
+    canvas.style.display = 'block';
+    const ctx = canvas.getContext('2d');
+    if (!ctx || typeof ctx.clearRect !== 'function') return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.lineCap = 'round';
+
+    const project = (x, y, z) => {
+      const pr = this.pipeline.projectWorldToScreen(x, y, z);
+      return pr ? { x: pr.u * w, y: pr.v * h } : null;
+    };
+
+    const arrows = this._windField.arrows;
+    for (let i = 0; i < arrows.length; i++) {
+      const a = arrows[i];
+      const b = project(a.x, a.y, a.z);
+      if (!b || b.x < -60 || b.x > w + 60 || b.y < -60 || b.y > h + 60) continue;
+
+      if (!a.active) {
+        // Wind erosion is gated off under water/snow here.
+        ctx.strokeStyle = 'rgba(200,215,225,0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 2.2, 0, 6.2832);
+        ctx.stroke();
+        continue;
+      }
+
+      const t = project(a.tipX, a.tipY, a.tipZ);
+      if (!t) continue;
+      const dx = t.x - b.x;
+      const dy = t.y - b.y;
+      const dl = Math.hypot(dx, dy);
+      if (dl < 3) continue;
+
+      const [r, g, bl] = windSpeedColor(a.speedNorm);
+      const alpha = 0.35 + 0.60 * a.exposure;
+      ctx.strokeStyle = `rgba(${r},${g},${bl},${alpha.toFixed(2)})`;
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = 1.4 + 1.1 * a.speedNorm;
+      ctx.beginPath();
+      ctx.moveTo(b.x, b.y);
+      ctx.lineTo(t.x, t.y);
+      ctx.stroke();
+
+      const ux = dx / dl;
+      const uy = dy / dl;
+      const ah = Math.min(8, 3 + dl * 0.22);
+      const aw = ah * 0.45;
+      ctx.beginPath();
+      ctx.moveTo(t.x, t.y);
+      ctx.lineTo(t.x - ux * ah - uy * aw, t.y - uy * ah + ux * aw);
+      ctx.lineTo(t.x - ux * ah + uy * aw, t.y - uy * ah - ux * aw);
+      ctx.closePath();
+      ctx.fill();
+
+      // Travelling pulse so the flow direction reads at a glance.
+      if (dl > 14) {
+        const phase = (now * 0.00035 * (0.4 + a.speedNorm) + ((i * 37) % 101) / 101) % 1;
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.beginPath();
+        ctx.arc(b.x + dx * phase, b.y + dy * phase, 1.6, 0, 6.2832);
+        ctx.fill();
+      }
+    }
   }
 
   // =========================================================================
