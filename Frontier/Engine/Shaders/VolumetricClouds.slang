@@ -260,6 +260,6 @@ void ReconstructVolumetricCloudsMain(uint3 Tid : SV_DispatchThreadID)
     CloudWorkTarget[uint3(Tid.xy, 1u)] = Filtered;
 
     float3 InitialHdr                  = HdrFrameTarget[uint3(Tid.xy, 0u)].rgb;
-    float3 Composited                  = InitialHdr * Filtered.w + Filtered.rgb;
-    HdrFrameTarget[uint3(Tid.xy, 0u)]  = float4(Composited, 1.0f);
+    float3 Blended                     = InitialHdr * Filtered.w + Filtered.rgb;
+    HdrFrameTarget[uint3(Tid.xy, 0u)]  = float4(Blended, 1.0f);
 }

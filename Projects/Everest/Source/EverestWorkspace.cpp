@@ -51,6 +51,17 @@ float MeasureLabelWidth(ImFont* Font, float Size, const char* Text) noexcept
 } // namespace
 
 //------------------------------------------------------------------------------------------------------------------------
+//                                                    VIEWPORT CAMERA
+//------------------------------------------------------------------------------------------------------------------------
+
+std::array<double, 3> SceneViewportOrbit::ResolvePosition() const noexcept
+{
+    constexpr double Radians = 3.14159265358979323846 / 180.0;
+    const double     Planar  = std::cos(Pitch * Radians) * Distance;
+    return {Focus[0] + Planar * std::cos(Yaw * Radians), Focus[1] + Planar * std::sin(Yaw * Radians), Focus[2] + std::sin(Pitch * Radians) * Distance};
+}
+
+//------------------------------------------------------------------------------------------------------------------------
 //                                                    CONSTRUCTION & LIFECYCLE
 //------------------------------------------------------------------------------------------------------------------------
 
@@ -239,6 +250,7 @@ void EverestWorkspace::ServiceDynamicSceneRequests()
 void EverestWorkspace::ConstructInterface(double DeltaSeconds)
 {
     IntegrateSimulation(DeltaSeconds);
+    ViewportDeltaSeconds = DeltaSeconds;
 
     if (ObservedLayoutRevision != Centre.QueryLayoutResetRevision())
     {
@@ -410,6 +422,47 @@ void EverestWorkspace::ConstructTopToolbar(float Scale)
     ImGui::PopStyleVar(2);
 }
 
+void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds)
+{
+    // 📝 Right drag orbits, middle drag pans, the wheel dollies; W/A/S/D/Q/E fly while the right button is held; F recentres.
+    const ImGuiIO& IO     = ImGui::GetIO();
+    constexpr double Radians = 3.14159265358979323846 / 180.0;
+    const double Yaw = Orbit.Yaw * Radians, Pitch = Orbit.Pitch * Radians;
+    const std::array<double, 3> Forward = {-std::cos(Pitch) * std::cos(Yaw), -std::cos(Pitch) * std::sin(Yaw), -std::sin(Pitch)};
+    const std::array<double, 3> Right   = {std::sin(Yaw), -std::cos(Yaw), 0.0};
+    const std::array<double, 3> Up      = {Right[1] * Forward[2] - Right[2] * Forward[1], Right[2] * Forward[0] - Right[0] * Forward[2],
+                                           Right[0] * Forward[1] - Right[1] * Forward[0]};
+    auto Move = [this](const std::array<double, 3>& Axis, double Amount) {
+        for (int Component = 0; Component < 3; ++Component) Orbit.Focus[Component] += Axis[Component] * Amount;
+    };
+    if (Active && ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    {
+        Orbit.Yaw   = std::fmod(Orbit.Yaw - IO.MouseDelta.x * 0.25, 360.0);
+        Orbit.Pitch = std::clamp(Orbit.Pitch + IO.MouseDelta.y * 0.25, -85.0, 85.0);
+        const double Speed = std::max(2.0, Orbit.Distance * 0.6) * DeltaSeconds * (ImGui::IsKeyDown(ImGuiKey_LeftShift) ? 4.0 : 1.0);
+        if (ImGui::IsKeyDown(ImGuiKey_W)) Move(Forward, Speed);
+        if (ImGui::IsKeyDown(ImGuiKey_S)) Move(Forward, -Speed);
+        if (ImGui::IsKeyDown(ImGuiKey_D)) Move(Right, Speed);
+        if (ImGui::IsKeyDown(ImGuiKey_A)) Move(Right, -Speed);
+        if (ImGui::IsKeyDown(ImGuiKey_E)) Move({0.0, 0.0, 1.0}, Speed);
+        if (ImGui::IsKeyDown(ImGuiKey_Q)) Move({0.0, 0.0, 1.0}, -Speed);
+    }
+    if (Active && ImGui::IsMouseDown(ImGuiMouseButton_Middle))
+    {
+        const double Pan = Orbit.Distance * 0.0016;
+        Move(Right, -IO.MouseDelta.x * Pan);
+        Move(Up, IO.MouseDelta.y * Pan);
+    }
+    if (Hovered && IO.MouseWheel != 0.0f)
+    {
+        Orbit.Distance = std::clamp(Orbit.Distance * std::pow(0.88, static_cast<double>(IO.MouseWheel)), 1.5, 900.0);
+    }
+    if (Hovered && ImGui::IsKeyPressed(ImGuiKey_F, false) && !ImGui::IsMouseDown(ImGuiMouseButton_Right))
+    {
+        Orbit = SceneViewportOrbit{};
+    }
+}
+
 void EverestWorkspace::ConstructViewportSurface()
 {
     const Frontier::InspectorPalette Palette = Frontier::InspectorPalette::Resolve();
@@ -420,10 +473,70 @@ void EverestWorkspace::ConstructViewportSurface()
     const float  H     = std::max(64.0f, Avail.y);
     const ImVec2 Min   = ImGui::GetCursorScreenPos();
     const ImVec2 Max(Min.x + W, Min.y + H);
-    ImGui::InvisibleButton("##SceneViewportCanvas", ImVec2(W, H));
+    ImGui::InvisibleButton("##SceneViewportCanvas", ImVec2(W, H),
+                           ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
+    IntegrateViewportCamera(ImGui::IsItemHovered(), ImGui::IsItemActive(), ViewportDeltaSeconds);
 
     ImDrawList* DrawList = ImGui::GetWindowDrawList();
     DrawList->PushClipRect(Min, Max, true);
+
+    // 📝 The host renders the level's scene through its records; the schematic stands in until an image exists.
+    SceneViewportImage Image;
+    if (PresentSceneViewport)
+    {
+        SceneViewportRequest Request;
+        Request.PanelWidth          = W;
+        Request.PanelHeight         = H;
+        Request.PixelDensity        = ImGui::GetWindowViewport() != nullptr ? ImGui::GetWindowViewport()->FramebufferScale.y : 1.0f;
+        Request.CameraPosition      = Orbit.ResolvePosition();
+        Request.CameraTarget        = Orbit.Focus;
+        Request.VerticalFieldOfView = Orbit.VerticalFieldOfView;
+        Request.DeltaSeconds        = ViewportDeltaSeconds;
+        Image = PresentSceneViewport(Request);
+    }
+    if (Image.Texture != 0)
+    {
+        DrawList->AddImage(static_cast<ImTextureID>(Image.Texture), Min, Max);
+    }
+    else
+    {
+        ConstructViewportSchematic(DrawList, Min, Max);
+    }
+
+    // Minimal viewport technical readout card.
+    char OverlayLine[192]{};
+    if (!Image.Status.empty())
+    {
+        std::snprintf(OverlayLine, sizeof(OverlayLine), "%s  |  SIM: %.1f s", Image.Status.c_str(), ElapsedSeconds);
+    }
+    else
+    {
+        int InspectionMode = 0;
+        if (const auto* PipeRec = dynamic_cast<const Frontier::RenderPipelineRecord*>(QuerySceneWorld().FindFirstByType("RenderPipeline")))
+        {
+            InspectionMode = std::clamp(PipeRec->QueryConfiguration().InspectionModeIndex, 0, 14);
+        }
+        std::snprintf(OverlayLine, sizeof(OverlayLine), "VIEW: %s  |  GRID: 5.0 m  |  SIM: %.1f s",
+                      Frontier::RenderInspectionModes::ModeNames[InspectionMode], ElapsedSeconds);
+    }
+    const float CardW = MeasureLabelWidth(Faces.Monospace, 10.0f, OverlayLine) + 20.0f;
+    DrawList->AddRectFilled(ImVec2(Min.x + 12.0f, Min.y + 12.0f),
+                            ImVec2(Min.x + 12.0f + CardW, Min.y + 36.0f),
+                            IM_COL32(14, 17, 22, 196), 6.0f);
+    DrawList->AddRect(ImVec2(Min.x + 12.0f, Min.y + 12.0f),
+                      ImVec2(Min.x + 12.0f + CardW, Min.y + 36.0f),
+                      Palette.CountCardBorder, 6.0f);
+    DrawList->AddText(Faces.Monospace, 10.0f, ImVec2(Min.x + 22.0f, Min.y + 18.5f),
+                      Palette.TextSecondary, OverlayLine);
+
+    DrawList->PopClipRect();
+}
+
+void EverestWorkspace::ConstructViewportSchematic(ImDrawList* DrawList, const ImVec2& Min, const ImVec2& Max)
+{
+    const Frontier::InspectorPalette Palette = Frontier::InspectorPalette::Resolve();
+    const float W = Max.x - Min.x;
+    const float H = Max.y - Min.y;
 
     float SunElevation = 38.0f;
     float SunAzimuth   = 132.0f;
@@ -481,26 +594,6 @@ void EverestWorkspace::ConstructViewportSurface()
         DrawList->AddLine(ImVec2(Min.x, Y), ImVec2(Max.x, Y), C, Row == 4 ? 1.4f : 1.0f);
     }
 
-    // Minimal viewport technical readout card.
-    int InspectionMode = 0;
-    if (const auto* PipeRec = dynamic_cast<const Frontier::RenderPipelineRecord*>(QuerySceneWorld().FindFirstByType("RenderPipeline")))
-    {
-        InspectionMode = std::clamp(PipeRec->QueryConfiguration().InspectionModeIndex, 0, 14);
-    }
-    char OverlayLine[128]{};
-    std::snprintf(OverlayLine, sizeof(OverlayLine), "VIEW: %s  |  GRID: 5.0 m  |  SIM: %.1f s",
-                  Frontier::RenderInspectionModes::ModeNames[InspectionMode], ElapsedSeconds);
-    const float CardW = MeasureLabelWidth(Faces.Monospace, 10.0f, OverlayLine) + 20.0f;
-    DrawList->AddRectFilled(ImVec2(Min.x + 12.0f, Min.y + 12.0f),
-                            ImVec2(Min.x + 12.0f + CardW, Min.y + 36.0f),
-                            IM_COL32(14, 17, 22, 196), 6.0f);
-    DrawList->AddRect(ImVec2(Min.x + 12.0f, Min.y + 12.0f),
-                      ImVec2(Min.x + 12.0f + CardW, Min.y + 36.0f),
-                      Palette.CountCardBorder, 6.0f);
-    DrawList->AddText(Faces.Monospace, 10.0f, ImVec2(Min.x + 22.0f, Min.y + 18.5f),
-                      Palette.TextSecondary, OverlayLine);
-
-    DrawList->PopClipRect();
 }
 
 #endif // FRONTIER_EDITOR && FRONTIER_WITH_INTERFACE_SDK

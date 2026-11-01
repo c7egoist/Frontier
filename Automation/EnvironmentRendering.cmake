@@ -87,7 +87,7 @@ set(FRONTIER_ENV_SHADER_SPECS
     "VolumetricClouds:ReconstructVolumetricCloudsMain:ReconstructVolumetricClouds:"
     "FogSpace:IntegrateFogSpaceMain:IntegrateFogSpace:"
     "OpticalLensFlare:EvaluateFlareVisibilityMain:EvaluateFlareVisibility:"
-    "OpticalLensFlare:CompositeFlareApertureMain:CompositeFlareAperture:"
+    "OpticalLensFlare:BlendFlareApertureMain:BlendFlareAperture:"
     "PreviewRaster:ClearPreviewShadowMain:ClearPreviewShadow:"
     "PreviewRaster:ProjectPreviewShadowMain:ProjectPreviewShadow:"
     "PreviewRaster:BinPreviewTilesMain:BinPreviewTiles:"
@@ -176,7 +176,7 @@ if(BUILD_TESTING)
         "${CMAKE_BINARY_DIR}/cluster-diagnostic-exhibits")
     set_tests_properties(ClusterDiagnosticValidation PROPERTIES RUN_SERIAL TRUE)
 
-    # CPU-only checks for the retained GeometryProcessing modules (.sdfspace round-trip, composed vehicle SDF, SAH BVH
+    # CPU-only checks for the retained GeometryProcessing modules (.sdfspace round-trip, assembled vehicle SDF, SAH BVH
     # ray/shadow queries), moved out of the removed ReSTIR exhibit so they keep coverage without any renderer.
     add_executable(GeometryProcessingValidation
         Exhibits/ClusterDiagnostic/Code/GeometryProcessingValidation.cpp)

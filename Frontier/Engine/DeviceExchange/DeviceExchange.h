@@ -10,6 +10,8 @@
 #endif
 #include <vulkan/vulkan.h>
 
+#include "VulkanDeviceAccess.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -132,6 +134,7 @@ struct DeviceTexture
     VkImage              Image    = VK_NULL_HANDLE;
     VkDeviceMemory       Memory   = VK_NULL_HANDLE;
     TextureSpecification Specification{};
+    bool                 Owned    = true;   // [-] false: an image another exchange allocated (WrapTexture)
 
     ~DeviceTexture();
 };
@@ -237,13 +240,13 @@ struct DescriptorGroup
 //------------------------------------------------------------------------------------------------------------------------
 
 // 📝 One specialization constant: the constant_id is the position in the list handed to the program constructor.
-struct SpecializationValue
+struct SpecializationConstant
 {
     enum class Category : uint8_t { Unsigned, Signed, Float } Kind = Category::Unsigned;
     uint32_t Bits = 0;
 
-    static SpecializationValue FromUnsigned(uint32_t Scalar) { return {Category::Unsigned, Scalar}; }
-    static SpecializationValue FromFloat(float Scalar);
+    static SpecializationConstant FromUnsigned(uint32_t Scalar) { return {Category::Unsigned, Scalar}; }
+    static SpecializationConstant FromFloat(float Scalar);
 };
 
 struct DeviceProgram
@@ -315,7 +318,7 @@ struct RasterProgramSpecification
     bool                         UnclippedDepth = false;
     std::vector<ColorTarget>     Targets{};
     std::vector<std::shared_ptr<DescriptorLayout>> Layouts{};
-    std::vector<SpecializationValue> Specialization{};
+    std::vector<SpecializationConstant> Specialization{};
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -400,7 +403,12 @@ class DeviceExchange
 
     // Loads the Vulkan loader (explicit path, FRONTIER_VULKAN_DRIVER, or the system libvulkan) and opens one queue.
     bool Initialize(const std::string& ExplicitDriverLibraryPath = "", std::string* OutDiagnostic = nullptr);
+    // 📝 Borrows a Vulkan 1.3 device another owner created with dynamicRendering enabled (the editor's presentation device);
+    //    Shutdown then leaves that device and instance alive.
+    bool AttachDevice(const VulkanDeviceAccess& Access, std::string* OutDiagnostic = nullptr);
     void Shutdown() noexcept;
+    // 📝 This exchange's own device as another exchange can borrow it (same queue, submissions ordered on it).
+    [[nodiscard]] VulkanDeviceAccess QueryDeviceAccess() const noexcept;
 
     [[nodiscard]] bool                       Ready() const noexcept { return Device_ != VK_NULL_HANDLE; }
     [[nodiscard]] const std::string&         AdapterDescription() const noexcept { return AdapterDescription_; }
@@ -410,6 +418,8 @@ class DeviceExchange
     std::shared_ptr<DeviceRegion>      ConstructRegion(VkDeviceSize ByteCount, const std::string& Label = "");
     std::shared_ptr<DeviceRegion>      ConstructRegionFrom(const void* Bytes, VkDeviceSize ByteCount, const std::string& Label = "");
     std::shared_ptr<DeviceTexture>     ConstructTexture(const TextureSpecification& Specification);
+    // 📝 Wraps an image of the same device that another exchange allocated; it must already be in VK_IMAGE_LAYOUT_GENERAL.
+    std::shared_ptr<DeviceTexture>     WrapTexture(VkImage Image, const TextureSpecification& Specification);
     std::shared_ptr<DeviceTextureView> ConstructView(const std::shared_ptr<DeviceTexture>& Texture,
                                                      const TextureViewSpecification& Specification = {});
     std::shared_ptr<DeviceSampler>     ConstructSampler(const SamplerSpecification& Specification);
@@ -420,7 +430,7 @@ class DeviceExchange
 
     std::shared_ptr<DeviceProgram> ConstructComputeProgram(const std::string& SpirvPath, const std::string& EntryPoint,
                                                            std::vector<std::shared_ptr<DescriptorLayout>> Layouts,
-                                                           std::span<const SpecializationValue> Specialization = {},
+                                                           std::span<const SpecializationConstant> Specialization = {},
                                                            std::string* OutDiagnostic = nullptr);
     std::shared_ptr<DeviceProgram> ConstructRasterProgram(const RasterProgramSpecification& Specification,
                                                           std::string* OutDiagnostic = nullptr);
@@ -438,6 +448,8 @@ class DeviceExchange
     CommandSequence BeginSequence();
     bool            Submit(CommandSequence& Sequence, std::string* OutDiagnostic = nullptr);
     bool            FlushWrites(std::string* OutDiagnostic = nullptr);
+    // 📝 Waits until the queue is idle (every submission, including a borrowing owner's), before replacing sampled targets.
+    void            AwaitIdle() noexcept;
 
     // Readback for validation captures.
     bool ReadRegion(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, VkDeviceSize ByteCount, std::vector<uint8_t>& OutBytes);
@@ -452,11 +464,13 @@ class DeviceExchange
     void ReleaseDescriptorGroup(DescriptorGroup& Group) noexcept;
     void ReleaseProgram(DeviceProgram& Program) noexcept;
 
-    struct FunctionTable;
-    [[nodiscard]] const FunctionTable& Functions() const noexcept { return *Functions_; }
+    struct ResolvedFunctions;
+    [[nodiscard]] const ResolvedFunctions& Functions() const noexcept { return *Functions_; }
 
   private:
     bool LoadShaderUnit(const std::string& SpirvPath, VkShaderModule& OutUnit, std::string* OutDiagnostic);
+    uint32_t DescribePhysicalDevice();
+    bool CompleteDevice(std::string* OutDiagnostic);
     uint32_t SelectMemoryType(uint32_t TypeBits, VkMemoryPropertyFlags Required) const;
     bool EnsureStaging(VkDeviceSize ByteCount);
     void TransitionToGeneral(VkCommandBuffer Stream, DeviceTexture& Texture);
@@ -477,7 +491,7 @@ class DeviceExchange
     };
 
     void*                            LibraryHandle_      = nullptr;
-    std::unique_ptr<FunctionTable>   Functions_{};
+    std::unique_ptr<ResolvedFunctions>   Functions_{};
     VkInstance                       Instance_           = VK_NULL_HANDLE;
     VkPhysicalDevice                 PhysicalDevice_     = VK_NULL_HANDLE;
     VkDevice                         Device_             = VK_NULL_HANDLE;
@@ -489,6 +503,7 @@ class DeviceExchange
     VkPhysicalDeviceMemoryProperties MemoryProperties_{};
     DeviceLimitsSummary              Limits_{};
     std::string                      AdapterDescription_{};
+    bool                             DeviceAttached_     = false;   // [-] the device belongs to another owner (AttachDevice)
 
     VkBuffer                         StagingHandle_      = VK_NULL_HANDLE;
     VkDeviceMemory                   StagingMemory_      = VK_NULL_HANDLE;

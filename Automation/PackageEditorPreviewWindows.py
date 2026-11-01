@@ -1,0 +1,110 @@
+#============================================================================================================================================
+#                                                    PACKAGEEDITORPREVIEWWINDOWS.PY
+#============================================================================================================================================
+# 🧩 Package a built Windows x64 Frontier.exe (MSVC or the pinned Zig cross-toolchain) with EngineContent, its Scene Viewport
+#    shader archives and Project Everest, so the editor and the live Scene Viewport can be tried without a build.
+
+from pathlib import Path
+import argparse
+import hashlib
+import json
+import shutil
+import struct
+import subprocess
+import tempfile
+import zipfile
+
+RepositoryRoot = Path(__file__).resolve().parents[1]
+SceneShaderSets = {'GlobalIllumination': 31, 'Environment': 15}
+
+
+def Digest(Filename):
+    return hashlib.sha256(Filename.read_bytes()).hexdigest()
+
+
+def VerifyExecutable(Executable):
+    Payload = Executable.read_bytes()
+    Offset = struct.unpack_from('<I', Payload, 0x3c)[0]
+    if Payload[:2] != b'MZ' or Payload[Offset:Offset + 4] != b'PE\0\0' or \
+            struct.unpack_from('<H', Payload, Offset + 4)[0] != 0x8664 or struct.unpack_from('<H', Payload, Offset + 24)[0] != 0x20b:
+        raise RuntimeError('Expected a Windows x64 PE32+ executable: ' + str(Executable))
+
+
+def VerifySpirv(Folder, Expected):
+    Binaries = sorted(Folder.glob('*.spv'))
+    if len(Binaries) != Expected:
+        raise RuntimeError(f'Expected {Expected} SPIR-V archives in {Folder}, found {len(Binaries)}')
+    for Binary in Binaries:
+        Payload = Binary.read_bytes()
+        if len(Payload) < 20 or len(Payload) % 4 or struct.unpack_from('<I', Payload)[0] != 0x07230203:
+            raise RuntimeError('Malformed SPIR-V: ' + str(Binary))
+
+
+def Main():
+    Parser = argparse.ArgumentParser()
+    Parser.add_argument('--executable', type=Path, required=True, help='the built Frontier.exe')
+    Parser.add_argument('--toolchain', required=True, help='e.g. "Zig 0.13.0 x86_64-windows-gnu (Automation/WindowsToolchain.cmake)"')
+    Parser.add_argument('--output', type=Path, default=RepositoryRoot / 'Binaries/FrontierSceneViewport-Windows-x64.zip')
+    Arguments = Parser.parse_args()
+    Executable = Arguments.executable.resolve()
+    VerifyExecutable(Executable)
+    BuildContent = Executable.parent / 'EngineContent'
+    StagedProject = RepositoryRoot / 'Projects/Everest/Content'
+    for Required in [BuildContent / 'FontArchives/FontCatalogue.json', StagedProject / 'EnvironmentArchives/ProvingGround/ProvingGround.facetspace',
+                     StagedProject / 'EnvironmentArchives/CelestialMaps/Hipparcos8.csv']:
+        if not Required.is_file():
+            raise RuntimeError('Missing (build Frontier first; it stages the project content): ' + str(Required))
+    Scratch = RepositoryRoot / '_ClaudeScratch/tmp'
+    Scratch.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=Scratch, prefix='editor-preview-') as Temporary:
+        Installation = Path(Temporary)
+        shutil.copy2(Executable, Installation / 'Frontier.exe')
+        # 📝 The EngineContent the build placed beside the executable: stored archives replaced by the sets it compiled.
+        shutil.copytree(BuildContent, Installation / 'EngineContent')
+        for Set, Expected in SceneShaderSets.items():
+            VerifySpirv(Installation / 'EngineContent/ShaderArchives' / Set, Expected)
+        Project = Installation / 'Projects/Everest'
+        Project.mkdir(parents=True)
+        shutil.copy2(RepositoryRoot / 'Projects/Everest/Everest.projectspace', Project / 'Everest.projectspace')
+        shutil.copytree(StagedProject, Project / 'Content', ignore=shutil.ignore_patterns('.staged_manifest.json'))
+        Catalogue = json.loads((Installation / 'EngineContent/FontArchives/FontCatalogue.json').read_text(encoding='utf-8'))
+        for Typeface in Catalogue['faces']:
+            if Digest(Installation / 'EngineContent/FontArchives' / Typeface['file']) != Typeface['sha256']:
+                raise RuntimeError('Packaged font differs: ' + Typeface['file'])
+        Notices = Installation / 'Notices'
+        Notices.mkdir()
+        for Package, Filename in [('imgui', 'LICENSE.txt'), ('glfw', 'LICENSE.md'), ('tomlpp', 'LICENSE'), ('stb', 'LICENSE'), ('thorvg', 'LICENSE')]:
+            shutil.copy2(RepositoryRoot / 'ExternalPackages' / Package / Filename, Notices / (Package + '-LICENSE.txt'))
+        shutil.copytree(RepositoryRoot / 'ExternalPackages/vulkan-headers/LICENSES', Notices / 'Vulkan-Headers')
+        shutil.copy2(RepositoryRoot / 'Engine/Interface/Lucide.NOTICE', Notices / 'Lucide.NOTICE')
+        shutil.copy2(RepositoryRoot / 'Documentation/SourceNotices.md', Notices / 'SourceNotices.md')
+        shutil.copy2(RepositoryRoot / 'Exhibits/SceneViewport/WindowsPreviewReadme.md', Installation / 'README.md')
+        Revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=RepositoryRoot, text=True).strip()
+        Metadata = {
+            'format': 1, 'target': 'Windows x64', 'toolchain': Arguments.toolchain, 'revision': Revision,
+            'uncommitted_changes': bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=RepositoryRoot)),
+            'signed': False, 'antivirus_scanned': False, 'windows_runtime_verified': False,
+            'scene_viewport': 'Project Everest > Scene Viewport: ported VehicleHMI ReSTIR GI + PlanetaryAtmosphere environment',
+            'files': {Filename.relative_to(Installation).as_posix(): Digest(Filename)
+                      for Filename in sorted(Installation.rglob('*')) if Filename.is_file()},
+        }
+        (Installation / 'Package.json').write_text(json.dumps(Metadata, indent=2) + '\n', encoding='utf-8')
+        Arguments.output.parent.mkdir(parents=True, exist_ok=True)
+        # 📝 One top-level folder named after the archive: an extraction never merges with an older one.
+        Root = Path(Arguments.output.stem)
+        with zipfile.ZipFile(Arguments.output, 'w', zipfile.ZIP_DEFLATED, compresslevel=6) as Archive:
+            for Filename in sorted(Installation.rglob('*')):
+                if Filename.is_file():
+                    Archive.write(Filename, Root / Filename.relative_to(Installation))
+        with zipfile.ZipFile(Arguments.output) as Archive:
+            if Archive.testzip() is not None:
+                raise RuntimeError('ZIP integrity validation failed')
+        Checksum = Digest(Arguments.output)
+        Arguments.output.with_suffix('.zip.sha256').write_text(Checksum + '  ' + Arguments.output.name + '\n')
+        print('Windows editor preview:', Arguments.output, f'({Arguments.output.stat().st_size / 1048576:.1f} MiB)')
+        print('SHA256:', Checksum)
+        print('Unsigned, not antivirus-scanned, never launched on Windows here: interactive startup is a user acceptance check.')
+
+
+if __name__ == '__main__':
+    Main()

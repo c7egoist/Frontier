@@ -145,13 +145,14 @@ include(Automation/StageProjectContent.cmake)
 add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestApplication.cpp
     Projects/Everest/Source/EverestSimulationRecords.cpp
-    Projects/Everest/Source/EverestWorkspace.cpp)
+    Projects/Everest/Source/EverestWorkspace.cpp
+    Projects/Everest/Source/EverestSceneViewport.cpp)
 target_include_directories(EverestProjectEditor PUBLIC
     "${CMAKE_SOURCE_DIR}"
     "${CMAKE_SOURCE_DIR}/Frontier"
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Source")
 target_compile_definitions(EverestProjectEditor PUBLIC FRONTIER_WITH_INTERFACE_SDK=1 FRONTIER_EDITOR_PROFILE=1 FRONTIER_EDITOR=1)
-target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI)
+target_link_libraries(EverestProjectEditor PUBLIC FrontierSceneEditorUI FrontierSceneViewport)
 frontier_stage_project_content(EverestProjectEditor
     "${CMAKE_SOURCE_DIR}/Projects/Everest/Everest.projectspace"
     "${CMAKE_SOURCE_DIR}/EngineContent"
@@ -575,6 +576,13 @@ if(BUILD_TESTING)
         "${CMAKE_SOURCE_DIR}/Projects/Everest"
         "${CMAKE_BINARY_DIR}/everest-interface-exhibits")
 
+    # 📝 The Everest workspace with its live Scene Viewport (own device), CPU-rasterized — Exhibits/SceneViewport/README.md.
+    add_executable(SceneViewportWorkspaceCapture
+        Exhibits/SceneViewport/Code/SceneViewportWorkspaceCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(SceneViewportWorkspaceCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(SceneViewportWorkspaceCapture PRIVATE EverestProjectEditor)
+
     add_executable(EverestShippingValidation
         Exhibits/EverestInterface/Code/EverestShippingValidation.cpp)
     target_link_libraries(EverestShippingValidation PRIVATE EverestProjectRuntime)
@@ -583,4 +591,4 @@ if(BUILD_TESTING)
 endif()
 
 include(Automation/EnvironmentRendering.cmake)
-include(Automation/IlluminationRendering.cmake)
+include(Automation/GlobalIlluminationRendering.cmake)

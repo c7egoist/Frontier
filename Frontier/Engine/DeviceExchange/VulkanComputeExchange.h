@@ -13,6 +13,8 @@
 #endif
 #include <vulkan/vulkan.h>
 
+#include "VulkanDeviceAccess.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -85,6 +87,8 @@ class VulkanComputeExchange
 
     // Initializes Vulkan instance, physical device, and compute queue from explicit or discovered libvulkan.so.1.
     bool Initialize(const std::string& ExplicitDriverLibraryPath = "", std::string* OutDiagnostic = nullptr);
+    // 📝 Borrows a device another owner created (see VulkanDeviceAccess.h); Shutdown then leaves the device and instance alive.
+    bool AttachDevice(const VulkanDeviceAccess& Access, std::string* OutDiagnostic = nullptr);
     void Shutdown() noexcept;
 
     [[nodiscard]] bool               Ready() const noexcept { return Device_ != VK_NULL_HANDLE; }
@@ -125,6 +129,8 @@ class VulkanComputeExchange
 
   private:
     [[nodiscard]] uint32_t SelectMemoryType(uint32_t TypeBits, VkMemoryPropertyFlags RequiredFlags) const;
+    bool ResolveInstanceFunctions(std::string* OutDiagnostic);
+    bool CompleteDevice(std::string* OutDiagnostic);
     bool TransitionImageLayout(VkCommandBuffer CommandStream, DeviceImageArraySlot& Slot, VkImageLayout TargetLayout);
 
     void*                            LibraryHandle_       = nullptr;
@@ -140,6 +146,7 @@ class VulkanComputeExchange
     VkFence                          SubmitFence_         = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties MemoryProperties_{};
     std::string                      DeviceName_{};
+    bool                             DeviceAttached_      = false;   // [-] the device belongs to another owner (AttachDevice)
 
     PFN_vkGetInstanceProcAddr                    pfnGetInstanceProcAddr_                    = nullptr;
     PFN_vkCreateInstance                         pfnCreateInstance_                         = nullptr;

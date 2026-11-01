@@ -96,7 +96,7 @@ IdentifierRenames = {
     "FeatureVarianceKernel": "FeatureVarianceFilter",
     "ClusterDraw": "ClusterCommand",
     "ClusterDraws": "ClusterCommands",
-    "ClusteredLightBuffer": "ClusteredLightTable",
+    "ClusteredLightBuffer": "ClusteredLightRegister",
 }
 
 # 📝 Banned prose words in comments → compliant wording (whole words, case kept for the first letter).

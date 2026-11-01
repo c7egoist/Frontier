@@ -19,6 +19,7 @@
 #include "UI/Editor/EditorWorkspace.h"
 #include "UI/Editor/ProjectBrowserPanel.h"
 #include "EverestWorkspace.h"
+#include "EverestSceneViewport.h"
 #include <windows.h>
 #include <commdlg.h>
 #include <shlobj.h>
@@ -113,6 +114,25 @@ int main()
     std::map<VkImageView, VkDescriptorSet> PreviewDescriptors;
     VkImageView LastLiveView = VK_NULL_HANDLE;
     bool PreviewFailed = false;
+    // 📝 Everest's live Scene Viewport borrows the presentation device; its presented image is sampled in GENERAL layout.
+    Frontier::VulkanPresentation *Presentation = nullptr;
+    std::unique_ptr<Everest::EverestSceneViewport> SceneView;
+    VkImageView SceneViewImage = VK_NULL_HANDLE;
+    VkDescriptorSet SceneViewDescriptor = VK_NULL_HANDLE;
+    const auto RetireSceneView = [&]()
+    {
+        SceneView.reset(); // 📝 Waits for the device before releasing anything the interface could still sample.
+        if (SceneViewDescriptor) ImGui_ImplVulkan_RemoveTexture(SceneViewDescriptor);
+        SceneViewDescriptor = VK_NULL_HANDLE;
+        SceneViewImage = VK_NULL_HANDLE;
+    };
+    const auto ResolveBesideExecutable = [](const std::filesystem::path &Relative)
+    {
+        if (std::filesystem::exists(Relative)) return Relative;
+        wchar_t Executable[MAX_PATH] = {};
+        if (GetModuleFileNameW(nullptr, Executable, MAX_PATH)) return std::filesystem::path(Executable).parent_path() / Relative;
+        return Relative;
+    };
     // 📝 Stored browser lambdas capture these by reference across frames; InitializeVulkan-scope
     // closures dangle after setup returns and AV on first touch (frame-2 tile resolve).
     const auto Describe = [&](VkImageView View) -> VkDescriptorSet
@@ -137,6 +157,7 @@ int main()
     bool ReturnRequested = false;
     Frontier::ApplicationWindowCallbacks Callbacks;
     Callbacks.Title = "Frontier - Project Browser [" FRONTIER_BUILD_COMMIT "]";
+    Callbacks.SceneRendering = true;
     Callbacks.Initialize = [&](GLFWwindow *Current)
     {
         Window = Current;
@@ -164,6 +185,7 @@ int main()
     };
     Callbacks.InitializeVulkan = [&](Frontier::VulkanPresentation &Display)
     {
+        Presentation = &Display;
         std::filesystem::path ShaderDirectory = "EngineContent/ShaderArchives/Surface";
         if (!std::filesystem::exists(ShaderDirectory))
         {
@@ -273,6 +295,7 @@ int main()
         if (!Frontier::ProjectSpaceCodec::Decode(Requested, Document, Diagnostic))
             throw std::runtime_error("Project activation failed: " + Diagnostic);
         Workspace.reset();
+        RetireSceneView();
         EverestSpace.reset();
         AppearanceOwnership.reset(new Frontier::ControlCentrePanel("EngineContent/FontArchives", Preferences, Requested));
         Appearance = static_cast<Frontier::ControlCentrePanel *>(AppearanceOwnership.get());
@@ -291,6 +314,36 @@ int main()
         {
             EverestSpace = std::make_unique<Everest::EverestWorkspace>(*Appearance, Requested.parent_path());
             EverestSpace->EvaluateReturnToBrowser = [&]() { ReturnRequested = true; };
+            EverestSpace->PresentSceneViewport = [&](const Everest::SceneViewportRequest &Request)
+            {
+                Everest::SceneViewportImage Image;
+                try
+                {
+                    if (!SceneView)
+                    {
+                        const Frontier::VulkanDeviceAccess Device = Presentation ? Presentation->QueryDeviceAccess() : Frontier::VulkanDeviceAccess{};
+                        SceneView = std::make_unique<Everest::EverestSceneViewport>(
+                            EverestSpace->QueryProjectRoot(), ResolveBesideExecutable("EngineContent/ShaderArchives"), &Device);
+                    }
+                    const Everest::SceneViewportRefresh Outcome =
+                        SceneView->Render(Request, EverestSpace->QuerySceneWorld(), EverestSpace->QueryElapsedSeconds());
+                    Image.Status = Outcome.Status;
+                    if (Outcome.View != SceneViewImage)
+                    {
+                        // 📝 Render() retired the queue before replacing its targets: the previous set is no longer sampled.
+                        if (SceneViewDescriptor) ImGui_ImplVulkan_RemoveTexture(SceneViewDescriptor);
+                        SceneViewDescriptor = Outcome.View ? ImGui_ImplVulkan_AddTexture(Outcome.View, VK_IMAGE_LAYOUT_GENERAL) : VK_NULL_HANDLE;
+                        SceneViewImage = Outcome.View;
+                    }
+                    Image.Texture = (uint64_t)SceneViewDescriptor;
+                }
+                catch (const std::exception &Failure)
+                {
+                    Image.Status = std::string("Scene viewport failed: ") + Failure.what();
+                    Frontier::DiagnosticJournal::Append("SceneViewportRefused", Failure.what());
+                }
+                return Image;
+            };
         }
         else
         {
@@ -315,6 +368,7 @@ int main()
         {
             ReturnRequested = false;
             Workspace.reset();
+            RetireSceneView();
             EverestSpace.reset();
             AppearanceOwnership.reset(new Frontier::ControlCentrePanel("EngineContent/FontArchives", Preferences));
             Appearance = static_cast<Frontier::ControlCentrePanel *>(AppearanceOwnership.get());
@@ -359,6 +413,7 @@ int main()
         PreviewDescriptors.clear();
         if (PreviewRendering) PreviewRendering->Finalize();
         PreviewRendering.reset();
+        RetireSceneView();
         EverestSpace.reset();
         Workspace.reset();
         Browser.reset();

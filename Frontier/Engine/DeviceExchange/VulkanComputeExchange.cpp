@@ -237,21 +237,11 @@ bool VulkanComputeExchange::Initialize(const std::string& ExplicitDriverLibraryP
         return false;
     }
 
-#define RESOLVE_VK_INST(Field, Symbol)                                                        \
-    Field = reinterpret_cast<decltype(Field)>(pfnGetInstanceProcAddr_(Instance_, Symbol));    \
-    if (!Field)                                                                               \
-    {                                                                                         \
-        if (OutDiagnostic) *OutDiagnostic = std::string("Missing Vulkan symbol: ") + Symbol;  \
-        Shutdown();                                                                           \
-        return false;                                                                         \
+    if (!ResolveInstanceFunctions(OutDiagnostic))
+    {
+        Shutdown();
+        return false;
     }
-
-    RESOLVE_VK_INST(pfnDestroyInstance_, "vkDestroyInstance");
-    RESOLVE_VK_INST(pfnEnumeratePhysicalDevices_, "vkEnumeratePhysicalDevices");
-    RESOLVE_VK_INST(pfnGetPhysicalDeviceProperties_, "vkGetPhysicalDeviceProperties");
-    RESOLVE_VK_INST(pfnGetPhysicalDeviceMemoryProperties_, "vkGetPhysicalDeviceMemoryProperties");
-    RESOLVE_VK_INST(pfnGetPhysicalDeviceQueueFamilyProperties_, "vkGetPhysicalDeviceQueueFamilyProperties");
-    RESOLVE_VK_INST(pfnCreateDevice_, "vkCreateDevice");
 
     uint32_t DeviceCount = 0u;
     if (pfnEnumeratePhysicalDevices_(Instance_, &DeviceCount, nullptr) != VK_SUCCESS || DeviceCount == 0u)
@@ -315,10 +305,40 @@ bool VulkanComputeExchange::Initialize(const std::string& ExplicitDriverLibraryP
         return false;
     }
 
+    if (!CompleteDevice(OutDiagnostic))
+    {
+        Shutdown();
+        return false;
+    }
+    return true;
+}
+
+bool VulkanComputeExchange::ResolveInstanceFunctions(std::string* OutDiagnostic)
+{
+#define RESOLVE_VK_INST(Field, Symbol)                                                        \
+    Field = reinterpret_cast<decltype(Field)>(pfnGetInstanceProcAddr_(Instance_, Symbol));    \
+    if (!Field)                                                                               \
+    {                                                                                         \
+        if (OutDiagnostic) *OutDiagnostic = std::string("Missing Vulkan symbol: ") + Symbol;  \
+        return false;                                                                         \
+    }
+
+    RESOLVE_VK_INST(pfnDestroyInstance_, "vkDestroyInstance");
+    RESOLVE_VK_INST(pfnEnumeratePhysicalDevices_, "vkEnumeratePhysicalDevices");
+    RESOLVE_VK_INST(pfnGetPhysicalDeviceProperties_, "vkGetPhysicalDeviceProperties");
+    RESOLVE_VK_INST(pfnGetPhysicalDeviceMemoryProperties_, "vkGetPhysicalDeviceMemoryProperties");
+    RESOLVE_VK_INST(pfnGetPhysicalDeviceQueueFamilyProperties_, "vkGetPhysicalDeviceQueueFamilyProperties");
+    RESOLVE_VK_INST(pfnCreateDevice_, "vkCreateDevice");
+#undef RESOLVE_VK_INST
+    return true;
+}
+
+// 📝 Everything after the device exists: device entry points, the queue (unless adopted), pools, samplers and the fence.
+bool VulkanComputeExchange::CompleteDevice(std::string* OutDiagnostic)
+{
     auto GetDeviceProc = reinterpret_cast<PFN_vkGetDeviceProcAddr>(pfnGetInstanceProcAddr_(Instance_, "vkGetDeviceProcAddr"));
     if (!GetDeviceProc)
     {
-        Shutdown();
         return false;
     }
 
@@ -327,7 +347,6 @@ bool VulkanComputeExchange::Initialize(const std::string& ExplicitDriverLibraryP
     if (!Field)                                                                              \
     {                                                                                        \
         if (OutDiagnostic) *OutDiagnostic = std::string("Missing device symbol: ") + Symbol; \
-        Shutdown();                                                                          \
         return false;                                                                        \
     }
 
@@ -387,7 +406,10 @@ bool VulkanComputeExchange::Initialize(const std::string& ExplicitDriverLibraryP
 #undef RESOLVE_VK_INST
 #undef RESOLVE_VK_DEV
 
-    pfnGetDeviceQueue_(Device_, QueueFamily_, 0u, &Queue_);
+    if (Queue_ == VK_NULL_HANDLE)
+    {
+        pfnGetDeviceQueue_(Device_, QueueFamily_, 0u, &Queue_);
+    }
 
     VkCommandPoolCreateInfo PoolSpec{};
     PoolSpec.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -395,7 +417,6 @@ bool VulkanComputeExchange::Initialize(const std::string& ExplicitDriverLibraryP
     PoolSpec.queueFamilyIndex = QueueFamily_;
     if (pfnCreateCommandPool_(Device_, &PoolSpec, nullptr, &CommandPool_) != VK_SUCCESS)
     {
-        Shutdown();
         return false;
     }
 
@@ -411,7 +432,6 @@ bool VulkanComputeExchange::Initialize(const std::string& ExplicitDriverLibraryP
     DescPoolSpec.pPoolSizes    = PoolSizes.data();
     if (pfnCreateDescriptorPool_(Device_, &DescPoolSpec, nullptr, &DescriptorPool_) != VK_SUCCESS)
     {
-        Shutdown();
         return false;
     }
 
@@ -426,14 +446,12 @@ bool VulkanComputeExchange::Initialize(const std::string& ExplicitDriverLibraryP
     SamplerSpec.maxLod       = 0.0f;
     if (pfnCreateSampler_(Device_, &SamplerSpec, nullptr, &LinearClampSampler_) != VK_SUCCESS)
     {
-        Shutdown();
         return false;
     }
 
     SamplerSpec.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     if (pfnCreateSampler_(Device_, &SamplerSpec, nullptr, &LinearRepeatSampler_) != VK_SUCCESS)
     {
-        Shutdown();
         return false;
     }
 
@@ -441,10 +459,41 @@ bool VulkanComputeExchange::Initialize(const std::string& ExplicitDriverLibraryP
     FenceSpec.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     if (pfnCreateFence_(Device_, &FenceSpec, nullptr, &SubmitFence_) != VK_SUCCESS)
     {
-        Shutdown();
         return false;
     }
 
+    return true;
+}
+
+bool VulkanComputeExchange::AttachDevice(const VulkanDeviceAccess& Access, std::string* OutDiagnostic)
+{
+    Shutdown();
+    if (!Access.Valid())
+    {
+        if (OutDiagnostic) *OutDiagnostic = "adopted device incomplete";
+        return false;
+    }
+    pfnGetInstanceProcAddr_ = Access.ResolveInstance;
+    Instance_               = Access.Instance;
+    PhysicalDevice_         = Access.PhysicalDevice;
+    Device_                 = Access.Device;
+    Queue_                  = Access.Queue;
+    QueueFamily_            = Access.QueueFamily;
+    DeviceAttached_         = true;
+    if (!ResolveInstanceFunctions(OutDiagnostic))
+    {
+        Shutdown();
+        return false;
+    }
+    VkPhysicalDeviceProperties Props{};
+    pfnGetPhysicalDeviceProperties_(PhysicalDevice_, &Props);
+    DeviceName_ = Props.deviceName;
+    pfnGetPhysicalDeviceMemoryProperties_(PhysicalDevice_, &MemoryProperties_);
+    if (!CompleteDevice(OutDiagnostic))
+    {
+        Shutdown();
+        return false;
+    }
     return true;
 }
 
@@ -476,16 +525,20 @@ void VulkanComputeExchange::Shutdown() noexcept
         {
             pfnDestroyCommandPool_(Device_, CommandPool_, nullptr);
         }
-        if (pfnDestroyDevice_)
+        if (pfnDestroyDevice_ && !DeviceAttached_)
         {
             pfnDestroyDevice_(Device_, nullptr);
         }
     }
-    if (Instance_ != VK_NULL_HANDLE && pfnDestroyInstance_)
+    if (Instance_ != VK_NULL_HANDLE && pfnDestroyInstance_ && !DeviceAttached_)
     {
         pfnDestroyInstance_(Instance_, nullptr);
     }
-    CloseDynamicLibrary(LibraryHandle_);
+    if (LibraryHandle_ != nullptr)
+    {
+        CloseDynamicLibrary(LibraryHandle_);
+    }
+    DeviceAttached_ = false;
 
     LibraryHandle_       = nullptr;
     Instance_            = VK_NULL_HANDLE;

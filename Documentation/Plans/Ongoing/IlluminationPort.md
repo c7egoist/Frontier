@@ -10,8 +10,9 @@
 | Cascades, shadow, sky, surface, direct | ✔️ identical | 100 % bit-identical at refreshes 0 and 11                       |
 | ReSTIR GI, reflection, SVGF, display   | ✔️ parity    | within the demo's own run-to-run variation                      |
 | Host encoders (constants, cascades, TLAS, tiles, bricks) | ✔️ identical | byte-identical over 12 refreshes             |
-| `LightingSystem`, `EncodeEnvironment`  | 🚧           | taken from the capture                                          |
-| Editor viewport presentation           | 🚧           | offscreen only                                                  |
+| `LightingSystem` (`LuminaireRegister`), `EncodeEnvironment`, `CelestialSolver` | ✔️ identical | refresh constants + luminaire register byte-identical over 12 refreshes |
+| Editor viewport presentation           | ✔️ live      | Everest Scene Viewport on the editor's device (`Exhibits/SceneViewport`) |
+| Environment (clouds, fog, flare, sun, moons, stars, planets) | ✔️ overlaid  | PlanetaryAtmosphere over the refresh, same device and queue |
 
 ## Source of truth
 
@@ -50,11 +51,43 @@
 | `OccupantRole` / `Roles`     | `OccupantParticipation`     | `Role`                |
 | `Footprint`                  | `Coverage`                  | `Footprint`           |
 | `VarianceKernel`             | `VarianceFilter`            | `Kernel`              |
-| `LightingSystem.js`          | `LuminaireTable`            | `system`              |
+| `LightingSystem.js`          | `LuminaireRegister`         | `system`              |
+| `ClusteredLightBuffer`       | `ClusteredLightRegister`    | `Buffer`; owner: no `Table` |
+| `compositePlume`, `composite` sets | `BlendPlume`, `Fragmented` sets | `compose`     |
+
+Owner's review of the viewport code (2026-11-01):
+
+| Was                              | Now                                         | Reason                         |
+|----------------------------------|---------------------------------------------|--------------------------------|
+| `Frontier/Engine/Illumination/`  | `Frontier/Engine/Rendering/GlobalIllumination/` + `Rendering/SceneViewport/` | owner: technical folder names |
+| `Shaders/Illumination/`, `ShaderArchives/Illumination` | `Shaders/GlobalIllumination/`, `ShaderArchives/GlobalIllumination` | same |
+| namespace `Frontier::Illumination` | `Frontier::GlobalIllumination`            | follows the folder             |
+| `AdoptedDevice`, `Adopt`, `QueryAdoption`, `AdoptTexture` | `VulkanDeviceAccess`, `AttachDevice`, `QueryDeviceAccess`, `WrapTexture` | owner: odd name; matches `VulkanRasterAccess` |
+| `LuminaireTable`, `LuminaireKind` | `LuminaireRegister`, `LuminaireCategory`   | owner: no `Table`; `Kind`      |
+| `EnvironmentComposition`         | `EnvironmentOverlay`                        | owner: `compose` is banned     |
+| `CameraState`, `LightState`      | `CameraPose`, `LightSolution`               | `state`                        |
+
+## Editor viewport and environment (2026-11-01)
+
+- **Device:** `VulkanPresentation` asks for a Vulkan 1.3 device with the port's features (`SceneRendering`);
+  `DeviceExchange::AttachDevice` and `VulkanComputeExchange::AttachDevice` borrow it (`VulkanDeviceAccess.h`), so the
+  refresh, the environment and the interface share one queue. The present submission ends with a full dependency; the interface samples the
+  presented image in `GENERAL`.
+- **Viewport:** `Frontier/Engine/Rendering/SceneViewport/SceneViewport` brings up the proving ground
+  (`EngineContent/EnvironmentArchives/ProvingGround`, the demo's own scene, vehicle deactivated) and refreshes it through the demo's sky path
+  (`AdvanceCelestial → ResolveLight → EncodeEnvironment`, light-change relighting) and `LuminaireRegister` every refresh.
+  `Projects/Everest/Source/EverestSceneViewport` maps the level's records (Solar, OpticalFlare, Atmosphere, Clouds, Stars,
+  Moons, Fog, Wind, RenderPipeline) onto it; `EverestWorkspace` owns the orbit/fly camera and draws the image.
+- **Environment (owner's choice: PlanetaryAtmosphere, not the demo's own clouds/flare):** `EnvironmentOverlay`
+  imports the resolved radiance and depth into the environment's visibility layers (`EnvironmentVisibility.slang`), runs
+  every PlanetaryAtmosphere stage except its own visibility raster (`ExecuteOverVisibility`), restores the radiometric
+  scale and presents the overlaid image through the port's tone mapping. The demo's own fog, aerial perspective and flare are
+  switched off in the refresh; its sky still lights the scene (the environment does not relight the illumination).
 
 ## Scope decisions
 
 - Ported: everything the demo executes for the illumination image with clouds, cloud shadows, lens flare, smoke,
   sparks and tyre marks switched off (the reference run switches them off too).
-- Not ported: those effect systems, vehicle physics, HMI/cabin overlays, editor UI of the demo.
+- Not ported: those effect systems, vehicle physics, HMI/cabin overlays, editor UI of the demo. The editor overlays
+  the PlanetaryAtmosphere environment instead of the demo's clouds and flare (owner's choice, 2026-11-01).
 - Removed from the engine: the earlier non-1:1 CPU illumination chain (see Tracker).

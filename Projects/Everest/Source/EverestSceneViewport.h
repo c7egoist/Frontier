@@ -1,0 +1,57 @@
+/*==========================================================================================================================================
+                                                       EVERESTSCENEVIEWPORT.H
+==========================================================================================================================================*/
+// 🧩 Project Everest's live Scene Viewport: the level's environment and render-pipeline records drive the engine SceneViewport
+//    (ported VehicleHMI ReSTIR GI of the proving ground + the PlanetaryAtmosphere environment) on the host's device.
+
+#pragma once
+
+#include "EverestWorkspace.h"
+
+#include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
+
+#include <array>
+#include <filesystem>
+#include <memory>
+#include <string>
+
+namespace Everest
+{
+
+// 📝 The level's environment records as the viewport reads them; an absent record switches its effect off.
+[[nodiscard]] Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::SceneWorld& World, double ElapsedSeconds);
+
+struct SceneViewportRefresh
+{
+    VkImageView             View   = VK_NULL_HANDLE;   // [-] presented image (UNORM view of sRGB bytes, GENERAL layout)
+    std::array<uint32_t, 2> Extent = {0, 0};           // [px] render extent
+    std::string             Status{};                  // [-] renderer, extent, refresh time — or why there is no image
+};
+
+class EverestSceneViewport
+{
+  public:
+    // 📝 ProjectRoot holds Content/EnvironmentArchives/{ProvingGround,CelestialMaps}; ShaderRoot holds the GlobalIllumination
+    //    and Environment SPIR-V folders. HostDevice null opens a device of its own (offscreen validation).
+    EverestSceneViewport(std::filesystem::path ProjectRoot, std::filesystem::path ShaderRoot, const Frontier::VulkanDeviceAccess* HostDevice);
+
+    // 📝 Renders one refresh for the request; rebuilds the renderer when the quality tier or the ray-tracing tier changes.
+    SceneViewportRefresh Render(const SceneViewportRequest& Request, const Frontier::SceneWorld& World, double ElapsedSeconds);
+
+    [[nodiscard]] Frontier::GlobalIllumination::SceneViewport* AccessViewport() noexcept { return Viewport_.get(); }
+
+  private:
+    std::filesystem::path                                        ProjectRoot_;
+    std::filesystem::path                                        ShaderRoot_;
+    bool                                                         HostDeviceAttached_ = false;
+    Frontier::VulkanDeviceAccess                                 Device_{};
+    std::unique_ptr<Frontier::GlobalIllumination::SceneViewport> Viewport_{};
+    std::string                                                  Quality_{};
+    bool                                                         RayTracing_ = true;
+    std::string                                                  Failure_{};
+    double                                                       RefreshMilliseconds_ = 0.0;
+    std::array<uint32_t, 2>                                      RequestedExtent_     = {0, 0};
+    uint32_t                                                     StableExtentCount_   = 0;   // [-] interface ticks at RequestedExtent_
+};
+
+} // namespace Everest

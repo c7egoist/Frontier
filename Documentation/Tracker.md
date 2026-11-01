@@ -686,8 +686,8 @@ Base: `SultanAladin/Frontier` `arena/5f492703-frontier` at `2d55bd2f`, synced wi
 Source of truth: SultanAladin/Frontier `arena/e9bd7db5-frontier` at `6afb6f00`, `Experimental/VehicleHmiPrototype/`.
 
 - **Added:** `Frontier/Engine/DeviceExchange/DeviceExchange` (Vulkan 1.3 raster + compute with WebGPU ordering),
-  `Frontier/Engine/Illumination/*` (17 host modules ported statement for statement), 51 Slang units in
-  `Frontier/Engine/Shaders/Illumination/` (29 entries), `Automation/IlluminationRendering.cmake`,
+  `Frontier/Engine/Rendering/GlobalIllumination/*` (17 host modules ported statement for statement), 51 Slang units in
+  `Frontier/Engine/Shaders/GlobalIllumination/` (29 entries), `Automation/GlobalIlluminationRendering.cmake`,
   `Frontier/Projects/Project-VehicleHmiDemo/Contract/TranslateShaders.py` (first-pass translator, hand-corrected output).
 - **Evidence:** `Exhibits/RestirGiParity/` — capture hooks for the original demo (Node + Dawn + SwiftShader), the
   `RestirGiParityValidation` C++ tool, images and logs. Deterministic stages are bit-identical; the presented image
@@ -705,3 +705,58 @@ Source of truth: SultanAladin/Frontier `arena/e9bd7db5-frontier` at `6afb6f00`, 
 - **Open:** present the port in the Everest/editor viewport; port `LightingSystem` and `EncodeEnvironment` host
   encoders (taken from the capture today); the effect systems listed in the exhibit README are not ported.
 
+
+## Live Scene Viewport + PlanetaryAtmosphere environment (2026-11-01, branch arena/88b72faa-frontier)
+
+Owner's request: hook the ported ReSTIR GI into the editor viewport; add clouds, fog, lens flare, sun, moon, stars and
+planets; recreate the VehicleHMI scene without cars, physics or UI. The environment comes from PlanetaryAtmosphere,
+the 5ec53579 line already in the tree; the owner chose it over porting the demo's own clouds and flare.
+
+- **Added — engine:**
+  - `Frontier/Engine/DeviceExchange/VulkanDeviceAccess.h`, plus `DeviceExchange::AttachDevice` / `QueryDeviceAccess` /
+    `WrapTexture` / `AwaitIdle` and `VulkanComputeExchange::AttachDevice`, so the exchanges can borrow the editor's device.
+  - `VulkanPresentation` `SceneRendering` (a Vulkan 1.3 device with the port's features) and `QueryDeviceAccess`.
+  - `Rendering/GlobalIllumination/EnvironmentEncoding` (1:1: `EncodeEnvironment`, `CelestialSolver`, `CelestialAtlas`
+    roster) and `Rendering/GlobalIllumination/LuminaireRegister` (1:1: `LightingSystem.Update` + `BuildClusterGrid`).
+  - `IlluminationHost` changes: the demo's sky path and light-change relighting, `RefreshInterlude`, `OmitVehicle`, lamp
+    placements from the scene.
+  - `Rendering/SceneViewport/{SceneViewport,EnvironmentOverlay}` and `Shaders/GlobalIllumination/EnvironmentVisibility.slang`.
+  - `PlanetarySubmissionSequence::EnsureViewportTargets` / `ExecuteOverVisibility` / `HdrTarget`.
+  - CMake library `FrontierSceneViewport`.
+- **Added — project, editor and content:**
+  - `Projects/Everest/Source/EverestSceneViewport` (level records → viewport).
+  - `EverestWorkspace`: live Scene Viewport with orbit/pan/dolly/fly; the schematic is kept as the fallback.
+  - `WindowsFrontier.cpp`: `SceneRendering`, the bridge and the ImGui texture.
+  - `EngineContent/EnvironmentArchives/ProvingGround` (the demo's scene and idle profiles, provenance file), imported by
+    `Everest.projectspace`.
+- **Owner's naming and layout review (same day):**
+  - `Frontier/Engine/Illumination/` → `Frontier/Engine/Rendering/GlobalIllumination/` (the port, namespace
+    `Frontier::GlobalIllumination`) + `Frontier/Engine/Rendering/SceneViewport/` (viewport and environment overlay);
+    `Shaders/Illumination/` → `Shaders/GlobalIllumination/`; `Automation/GlobalIlluminationRendering.cmake`.
+  - `AdoptedDevice` → `VulkanDeviceAccess` (`Adopt` → `AttachDevice`, `AdoptTexture` → `WrapTexture`); `LuminaireTable`
+    → `LuminaireRegister`; `ClusteredLightTable` → `ClusteredLightRegister`; `EnvironmentComposition` →
+    `EnvironmentOverlay`; every `compose`/`composite` identifier and comment in the port, the viewport and
+    PlanetaryAtmosphere renamed (`CompositeFlareAperture` → `BlendFlareAperture`); `Kind`, `State`, `Value`, `Frame`
+    identifiers in the new code renamed. Table in `Documentation/Plans/Ongoing/IlluminationPort.md`.
+- **Added — stored SPIR-V:** `EngineContent/ShaderArchives/{GlobalIllumination,Environment}` (31 + 15 archives,
+  `ShaderCompilation.json`), `Automation/StoreShaderArchives.py`, CTest `StoredShaderArchiveValidation`. Editor builds
+  without the pinned slangc (MSVC on Windows) copy them beside `Frontier.exe`; the port's units compile only with the
+  pinned compiler unless `FRONTIER_GLOBAL_ILLUMINATION_SLANGC` names another.
+- **Added — distribution:** `Automation/PackageEditorPreviewWindows.py` and `Exhibits/SceneViewport/WindowsPreviewReadme.md`.
+- **Evidence:** `Exhibits/SceneViewport/`:
+  - day, low-sun, dusk-fog and night images, plus the Everest workspace with the live viewport (CPU-rasterized
+    interface, GPU image read back);
+  - `SceneViewportValidation` 0 failing checks, rendered from the stored archives;
+  - `RestirGiParityValidation … live` 150 checks, 0 failures after the renaming. The environment block and the luminaire
+    register are native and byte-identical over 12 refreshes; the presented image matches 99.98 % (84.4 dB).
+- **Verification:**
+  - GCC 12.2 host build; 64/64 CTests.
+  - SwiftShader 5.0.0 for every image.
+  - Windows: `Frontier.exe` cross-compiled and linked with the pinned Zig 0.13.0 (`x86_64-windows-gnu`,
+    `Automation/WindowsToolchain.cmake`), configured without slangc so the stored archives are used. Never launched.
+  - No hardware GPU run; MSVC not run.
+- **Open:**
+  - The environment does not relight the illumination (cloud shadows and environment moonlight do not reach the scene).
+  - The `Moons` phase field is unused (phase follows geometry).
+  - Viewport submissions are synchronous.
+  - The demo's own clouds, flare passes, weather and vehicle systems remain unported.

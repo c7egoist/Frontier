@@ -14,6 +14,7 @@ EngineContent/*
 !EngineContent/MaterialArchives/
 !EngineContent/PatternArchives/
 !EngineContent/EnvironmentArchives/
+!EngineContent/ShaderArchives/
 EngineContent/EnvironmentArchives/CelestialMaps/*.ppm
 
 # Agent scratch space.
@@ -25,6 +26,8 @@ _ClaudeScratch/
 # Compiled shader blobs (ShaderPlan.ps1 / glslc output) and the make-style include depfiles glslc -MD writes beside them.
 *.spv
 *.spv.d
+# The Scene Viewport's stored SPIR-V (Automation/StoreShaderArchives.py): editor builds without the pinned slangc still run it.
+!EngineContent/ShaderArchives/**/*.spv
 
 # OS / editor cruft.
 .DS_Store

@@ -3,7 +3,7 @@
 //==========================================================================================================================================
 // 1. EvaluateFlareVisibilityMain: 1x1-per-source GPU visibility & spectral transmittance reduction across
 //    reversed-Z VisibilityImage, dielectric glass tint, VolumetricClouds transmittance, and cross-realm PortalAperture bounds.
-// 2. CompositeFlareApertureMain: multi-element chromatic ghosts, polygonal blade starburst, anamorphic streak,
+// 2. BlendFlareApertureMain: multi-element chromatic ghosts, polygonal blade starburst, anamorphic streak,
 //    22-degree atmospheric halo, and physically scaled veiling glare.
 
 #include "PlanetaryRecords.slang"
@@ -80,7 +80,7 @@ void EvaluateFlareVisibilityMain(uint3 Tid : SV_DispatchThreadID)
 
 [shader("compute")]
 [numthreads(8, 8, 1)]
-void CompositeFlareApertureMain(uint3 Tid : SV_DispatchThreadID)
+void BlendFlareApertureMain(uint3 Tid : SV_DispatchThreadID)
 {
     if (Tid.x >= Push.Counts.x || Tid.y >= Push.Counts.y)
     {

@@ -1,0 +1,122 @@
+{
+  "format": 1,
+  "set": "Environment",
+  "compiler": "slangc 2026.14.1",
+  "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc>",
+  "entries": [
+    {
+      "file": "BakeAtmosphereProjectionLut.spv",
+      "spirv_sha256": "68d7cea85c71946801c4dcfdae723dcf0eee00897942c866b0d412a7103723f2"
+    },
+    {
+      "file": "BakeMultiScatterLut.spv",
+      "spirv_sha256": "4665de518f31cc37bc9911bf354bef51572fee2863597af182235be678889c47"
+    },
+    {
+      "file": "BakeTransmittanceLut.spv",
+      "spirv_sha256": "2a10a32637aedaf5fcc4be8be4cd9c2a959c8f09f5385933be3b685a31c349d6"
+    },
+    {
+      "file": "BinPreviewTiles.spv",
+      "spirv_sha256": "9f91212f0920e9f4e2b4d39333a5b16611afa35fbad0b57d4a280940aba3eb6f"
+    },
+    {
+      "file": "BlendFlareAperture.spv",
+      "spirv_sha256": "4b748256ed6ee4b1dc011e1bc38359c689a3ec75621af83e3d243f082b2d5352"
+    },
+    {
+      "file": "ClearPreviewShadow.spv",
+      "spirv_sha256": "2775a41b707d59f928065a9952486c33b90957ead60c7d7c4acdb773f4ed351c"
+    },
+    {
+      "file": "EvaluateFlareVisibility.spv",
+      "spirv_sha256": "01c30dfab5d92537d58dbbc81df3fe3c45ecfdb2dd6d55862bf519f6f9d44636"
+    },
+    {
+      "file": "IntegrateFogSpace.spv",
+      "spirv_sha256": "31b7e6aaaa41eee8eceef202f1190d3c02675b6d083fcce53cb1bd94499c7290"
+    },
+    {
+      "file": "ProjectCloudShadow.spv",
+      "spirv_sha256": "371348a66ab98a9192d156c349e471680025ab921713b5b4df2f3b6a1ce8512b"
+    },
+    {
+      "file": "ProjectPreviewShadow.spv",
+      "spirv_sha256": "9bdc822c43ac1949d6c7ef4207f04a44d906614083b0cc83a2afc05c3e29ef2b"
+    },
+    {
+      "file": "RasterizePlanetaryProjection.spv",
+      "spirv_sha256": "a000f761242876ca56404f773decb2ed3b04bd088c4cc3fe2993fa0f3a0b2772"
+    },
+    {
+      "file": "RasterizeVisibilityProjection.spv",
+      "spirv_sha256": "9b3d9393e8690f1bd627858e2c41f7592dd7911c7bf595ac5dfa9b1f93c236bd"
+    },
+    {
+      "file": "ReconstructVolumetricClouds.spv",
+      "spirv_sha256": "9f4e451ea5c1f096e8fbc7573568e66ef3b08b984dfccc8a95398381852dbbaa"
+    },
+    {
+      "file": "ResolvePreviewView.spv",
+      "spirv_sha256": "cdc7711ed73d1a27bb0108f4bb0b9bd206c82a4e1efaa35f5b2ab76ba5a3deb2"
+    },
+    {
+      "file": "TraceVolumetricClouds.spv",
+      "spirv_sha256": "50596e36db8a35225f31777bb418af53bc57ae968942f475123c413f8745596f"
+    }
+  ],
+  "sources": [
+    {
+      "file": "Frontier/Engine/Shaders/AtmosphereProjection.slang",
+      "sha256": "616a6873c55bc32a80cd6e9af2a5c38e864b7df49a70d003237209e8aeb1e207"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/AtmosphereScattering.slang",
+      "sha256": "eb3127d1fb45fa87dc206ab944ab2038da252a4753a32a7a1e5badfdf137fd94"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/CloudShadowProjection.slang",
+      "sha256": "bb9302f4bcfbfab875fbe0503e37c3b96def910ded978a97e8989376e45a9131"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/CloudSynthesis.slang",
+      "sha256": "6b51156c7e793befb97ef8b647b49f5fa62038a8d781b970e9c65d2d8ff3dff0"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/FogSpace.slang",
+      "sha256": "155788154827013c8fba51513e10ce1cd02df93944e85e4db5fe196f87dd224e"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/ForceField.slang",
+      "sha256": "a4fbb673e63b8939c76ea4c3141485fb4d10990ec4c65e5c185aa7f457a801a1"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/OpticalLensFlare.slang",
+      "sha256": "8e9af564bb3a21fa748e7848197ee82073e5ef682aec7a1e5c2f9836b5b8b3c0"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/PlanetaryProjection.slang",
+      "sha256": "e9b294b4e54ce853a2d0d1fdab1c4b4e4e5df0214e20d748d1d0f56b11cd6d4a"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/PlanetaryRecords.slang",
+      "sha256": "6047fbc521239e7dae28c350b2acba708c9087efffa2fb89a3d14c4b1f33892d"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/PreviewRaster.slang",
+      "sha256": "c6d12f21d3e649a66234179023e909c359121c6e4c90b7256a9e8b538fbc93de"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VisibilityProjection.slang",
+      "sha256": "2255bbe82ec4ab1d27c8ad67b9ef9cec84893b72faf006c3a5421f1059a88c2e"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VolumeDistanceSampling.slang",
+      "sha256": "f2e9a323b6e0f6dfcbd98ede2463e82cf8276feb8e6e1d687c9724966b7e5761"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/VolumetricClouds.slang",
+      "sha256": "caaa5d1d247f2d3cba6ade1f54e2b3899749974aaff0b50698ce769eb74d8bc8"
+    }
+  ]
+}

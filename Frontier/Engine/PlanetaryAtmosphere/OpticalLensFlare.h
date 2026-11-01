@@ -3,9 +3,9 @@
                                      ------------------------------------------------------------------
              Solar limb-darkening & finite-pixel filter, 6-element / 8-element aperture-ghost chain,
              diffraction starburst, warm & anamorphic streaks, antipode halo, PSF glow, veiling glare,
-                  and GPU 1x1-per-source solar disc visibility reduction + aperture composite.
+                    and GPU 1x1-per-source solar disc visibility reduction + aperture blend.
 ==========================================================================================================================================*/
-// 🧩 Optical lens flare & solar disc filter: host analytical optics + Vulkan 1.3 GPU visibility & composite.
+// 🧩 Optical lens flare & solar disc filter: host analytical optics + Vulkan 1.3 GPU visibility & aperture blend.
 
 #pragma once
 
@@ -263,7 +263,7 @@ class OpticalLensFlare
 
   private:
     ComputeProgramSlot   VisibilityProgram_{};
-    ComputeProgramSlot   CompositeProgram_{};
+    ComputeProgramSlot   ApertureProgram_{};
     DeviceImageArraySlot FlareVisibilityImage_{};
 };
 

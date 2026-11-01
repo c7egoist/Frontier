@@ -203,7 +203,7 @@ int ConstructApplicationWindow(const ApplicationWindowCallbacks &Callbacks)
     VulkanPresentation Display;
     Lifetime.PlatformReady = ImGui_ImplGlfw_InitForVulkan(Window, true);
     if (!Lifetime.PlatformReady) throw std::runtime_error("GLFW Vulkan input initialization failed.");
-    Display.Initialize(Window, Callbacks.MaterialRendering);
+    Display.Initialize(Window, Callbacks.MaterialRendering, Callbacks.SceneRendering);
 #else
     DisplayResources Display;
     if (!Display.Initialize(glfwGetWin32Window(Window))) throw std::runtime_error("DX11 exhibit initialization failed.");

@@ -98,7 +98,7 @@ namespace Frontier
     X(vkCmdSetViewport)                                                                                                    \
     X(vkCmdSetScissor)
 
-struct DeviceExchange::FunctionTable
+struct DeviceExchange::ResolvedFunctions
 {
     PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = nullptr;
     PFN_vkCreateInstance      vkCreateInstance      = nullptr;
@@ -275,9 +275,9 @@ void ReportDiagnostic(std::string* OutDiagnostic, const std::string& Message)
 
 } // namespace
 
-SpecializationValue SpecializationValue::FromFloat(float Scalar)
+SpecializationConstant SpecializationConstant::FromFloat(float Scalar)
 {
-    SpecializationValue Result;
+    SpecializationConstant Result;
     Result.Kind = Category::Float;
     std::memcpy(&Result.Bits, &Scalar, sizeof(float));
     return Result;
@@ -335,7 +335,7 @@ DeviceExchange::~DeviceExchange()
 
 bool DeviceExchange::Initialize(const std::string& ExplicitDriverLibraryPath, std::string* OutDiagnostic)
 {
-    Functions_ = std::make_unique<FunctionTable>();
+    Functions_ = std::make_unique<ResolvedFunctions>();
     std::string LibraryPath = ExplicitDriverLibraryPath;
     if (LibraryPath.empty())
     {
@@ -408,20 +408,11 @@ bool DeviceExchange::Initialize(const std::string& ExplicitDriverLibraryPath, st
             break;
         }
     }
-    VkPhysicalDeviceProperties Properties{};
-    Functions_->vkGetPhysicalDeviceProperties(PhysicalDevice_, &Properties);
-    AdapterDescription_ = Properties.deviceName;
-    Limits_.MaximumTexture3D        = Properties.limits.maxImageDimension3D;
-    Limits_.MaximumTexture2D        = Properties.limits.maxImageDimension2D;
-    Limits_.MaximumComputeGroups    = Properties.limits.maxComputeWorkGroupCount[0];
-    Limits_.MinimumUniformAlignment = static_cast<uint32_t>(Properties.limits.minUniformBufferOffsetAlignment);
-    Limits_.MinimumStorageAlignment = static_cast<uint32_t>(Properties.limits.minStorageBufferOffsetAlignment);
-    if (Properties.apiVersion < VK_API_VERSION_1_3)
+    if (DescribePhysicalDevice() < VK_API_VERSION_1_3)
     {
         ReportDiagnostic(OutDiagnostic, "device " + AdapterDescription_ + " lacks Vulkan 1.3 (dynamic rendering)");
         return false;
     }
-    Functions_->vkGetPhysicalDeviceMemoryProperties(PhysicalDevice_, &MemoryProperties_);
 
     uint32_t FamilyCount = 0;
     Functions_->vkGetPhysicalDeviceQueueFamilyProperties(PhysicalDevice_, &FamilyCount, nullptr);
@@ -494,13 +485,33 @@ bool DeviceExchange::Initialize(const std::string& ExplicitDriverLibraryPath, st
         Device_ = VK_NULL_HANDLE;
         return false;
     }
+    return CompleteDevice(OutDiagnostic);
+}
+
+uint32_t DeviceExchange::DescribePhysicalDevice()
+{
+    VkPhysicalDeviceProperties Properties{};
+    Functions_->vkGetPhysicalDeviceProperties(PhysicalDevice_, &Properties);
+    AdapterDescription_ = Properties.deviceName;
+    Limits_.MaximumTexture3D        = Properties.limits.maxImageDimension3D;
+    Limits_.MaximumTexture2D        = Properties.limits.maxImageDimension2D;
+    Limits_.MaximumComputeGroups    = Properties.limits.maxComputeWorkGroupCount[0];
+    Limits_.MinimumUniformAlignment = static_cast<uint32_t>(Properties.limits.minUniformBufferOffsetAlignment);
+    Limits_.MinimumStorageAlignment = static_cast<uint32_t>(Properties.limits.minStorageBufferOffsetAlignment);
+    Functions_->vkGetPhysicalDeviceMemoryProperties(PhysicalDevice_, &MemoryProperties_);
+    return Properties.apiVersion;
+}
+
+// 📝 Everything after the device exists: device entry points, the queue (unless adopted), pools, fence and staging.
+bool DeviceExchange::CompleteDevice(std::string* OutDiagnostic)
+{
 #define FRONTIER_EXCHANGE_LOAD_DEVICE(Name) \
     Functions_->Name = reinterpret_cast<PFN_##Name>(Functions_->vkGetDeviceProcAddr(Device_, #Name));
     FRONTIER_EXCHANGE_DEVICE_FUNCTIONS(FRONTIER_EXCHANGE_LOAD_DEVICE)
 #undef FRONTIER_EXCHANGE_LOAD_DEVICE
     Functions_->vkCmdBeginRendering = reinterpret_cast<PFN_vkCmdBeginRendering>(Functions_->vkGetDeviceProcAddr(Device_, "vkCmdBeginRendering"));
     Functions_->vkCmdEndRendering   = reinterpret_cast<PFN_vkCmdEndRendering>(Functions_->vkGetDeviceProcAddr(Device_, "vkCmdEndRendering"));
-    Functions_->vkGetDeviceQueue(Device_, QueueFamily_, 0, &Queue_);
+    if (Queue_ == VK_NULL_HANDLE) Functions_->vkGetDeviceQueue(Device_, QueueFamily_, 0, &Queue_);
 
     VkCommandPoolCreateInfo PoolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     PoolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -526,7 +537,59 @@ bool DeviceExchange::Initialize(const std::string& ExplicitDriverLibraryPath, st
 
     VkFenceCreateInfo FenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     Functions_->vkCreateFence(Device_, &FenceInfo, nullptr, &SubmitFence_);
+    if (CommandPool_ == VK_NULL_HANDLE || DescriptorPool_ == VK_NULL_HANDLE || SubmitFence_ == VK_NULL_HANDLE)
+    {
+        ReportDiagnostic(OutDiagnostic, "command pool, descriptor pool or fence creation failed");
+        return false;
+    }
     return EnsureStaging(64ull << 20);
+}
+
+VulkanDeviceAccess DeviceExchange::QueryDeviceAccess() const noexcept
+{
+    VulkanDeviceAccess Access;
+    Access.Instance        = Instance_;
+    Access.PhysicalDevice  = PhysicalDevice_;
+    Access.Device          = Device_;
+    Access.Queue           = Queue_;
+    Access.QueueFamily     = QueueFamily_;
+    Access.ResolveInstance = Functions_ ? Functions_->vkGetInstanceProcAddr : nullptr;
+    Access.ApiVersion      = VK_API_VERSION_1_3;
+    return Access;
+}
+
+bool DeviceExchange::AttachDevice(const VulkanDeviceAccess& Access, std::string* OutDiagnostic)
+{
+    Shutdown();
+    if (!Access.Valid())
+    {
+        ReportDiagnostic(OutDiagnostic, "adopted device incomplete");
+        return false;
+    }
+    Functions_ = std::make_unique<ResolvedFunctions>();
+    Functions_->vkGetInstanceProcAddr = Access.ResolveInstance;
+    Instance_ = Access.Instance;
+#define FRONTIER_EXCHANGE_LOAD_INSTANCE(Name) \
+    Functions_->Name = reinterpret_cast<PFN_##Name>(Functions_->vkGetInstanceProcAddr(Instance_, #Name));
+    FRONTIER_EXCHANGE_INSTANCE_FUNCTIONS(FRONTIER_EXCHANGE_LOAD_INSTANCE)
+#undef FRONTIER_EXCHANGE_LOAD_INSTANCE
+    PhysicalDevice_ = Access.PhysicalDevice;
+    Device_         = Access.Device;
+    Queue_          = Access.Queue;
+    QueueFamily_    = Access.QueueFamily;
+    DeviceAttached_ = true;
+    if (DescribePhysicalDevice() < VK_API_VERSION_1_3 || Access.ApiVersion < VK_API_VERSION_1_3)
+    {
+        ReportDiagnostic(OutDiagnostic, "adopted device " + AdapterDescription_ + " was not created for Vulkan 1.3 (dynamic rendering)");
+        Shutdown();
+        return false;
+    }
+    if (!CompleteDevice(OutDiagnostic))
+    {
+        Shutdown();
+        return false;
+    }
+    return true;
 }
 
 void DeviceExchange::Shutdown() noexcept
@@ -547,14 +610,19 @@ void DeviceExchange::Shutdown() noexcept
         if (SubmitFence_ != VK_NULL_HANDLE) Functions_->vkDestroyFence(Device_, SubmitFence_, nullptr);
         if (DescriptorPool_ != VK_NULL_HANDLE) Functions_->vkDestroyDescriptorPool(Device_, DescriptorPool_, nullptr);
         if (CommandPool_ != VK_NULL_HANDLE) Functions_->vkDestroyCommandPool(Device_, CommandPool_, nullptr);
-        Functions_->vkDestroyDevice(Device_, nullptr);
+        if (!DeviceAttached_) Functions_->vkDestroyDevice(Device_, nullptr);
         Device_ = VK_NULL_HANDLE;
+        Queue_  = VK_NULL_HANDLE;
+        CommandPool_ = VK_NULL_HANDLE;
+        DescriptorPool_ = VK_NULL_HANDLE;
+        SubmitFence_ = VK_NULL_HANDLE;
     }
     if (Instance_ != VK_NULL_HANDLE)
     {
-        Functions_->vkDestroyInstance(Instance_, nullptr);
+        if (!DeviceAttached_) Functions_->vkDestroyInstance(Instance_, nullptr);
         Instance_ = VK_NULL_HANDLE;
     }
+    DeviceAttached_ = false;
     if (LibraryHandle_ != nullptr)
     {
 #ifdef _WIN32
@@ -724,6 +792,17 @@ std::shared_ptr<DeviceTexture> DeviceExchange::ConstructTexture(const TextureSpe
     return Texture;
 }
 
+std::shared_ptr<DeviceTexture> DeviceExchange::WrapTexture(VkImage Image, const TextureSpecification& Specification)
+{
+    if (Image == VK_NULL_HANDLE) return nullptr;
+    auto Texture           = std::make_shared<DeviceTexture>();
+    Texture->Specification = Specification;
+    Texture->Image         = Image;
+    Texture->Owned         = false;
+    Texture->Exchange      = this;
+    return Texture;
+}
+
 std::shared_ptr<DeviceTextureView> DeviceExchange::ConstructView(const std::shared_ptr<DeviceTexture>& Texture,
                                                                  const TextureViewSpecification& Specification)
 {
@@ -878,12 +957,12 @@ struct SpecializationBlock
     std::vector<uint32_t>                 Words{};
     VkSpecializationInfo                  Info{};
 
-    explicit SpecializationBlock(std::span<const SpecializationValue> Values)
+    explicit SpecializationBlock(std::span<const SpecializationConstant> Constants)
     {
-        for (uint32_t Index = 0; Index < Values.size(); ++Index)
+        for (uint32_t Index = 0; Index < Constants.size(); ++Index)
         {
             Entries.push_back({Index, Index * 4u, 4u});
-            Words.push_back(Values[Index].Bits);
+            Words.push_back(Constants[Index].Bits);
         }
         Info.mapEntryCount = static_cast<uint32_t>(Entries.size());
         Info.pMapEntries   = Entries.data();
@@ -896,7 +975,7 @@ struct SpecializationBlock
 
 std::shared_ptr<DeviceProgram> DeviceExchange::ConstructComputeProgram(const std::string& SpirvPath, const std::string& EntryPoint,
                                                                        std::vector<std::shared_ptr<DescriptorLayout>> Layouts,
-                                                                       std::span<const SpecializationValue> Specialization,
+                                                                       std::span<const SpecializationConstant> Specialization,
                                                                        std::string* OutDiagnostic)
 {
     VkShaderModule Unit = VK_NULL_HANDLE;
@@ -1074,7 +1153,7 @@ void DeviceExchange::ReleaseRegion(DeviceRegion& Region) noexcept
 void DeviceExchange::ReleaseTexture(DeviceTexture& Texture) noexcept
 {
     if (Device_ == VK_NULL_HANDLE) return;
-    if (Texture.Image != VK_NULL_HANDLE) Functions_->vkDestroyImage(Device_, Texture.Image, nullptr);
+    if (Texture.Image != VK_NULL_HANDLE && Texture.Owned) Functions_->vkDestroyImage(Device_, Texture.Image, nullptr);
     if (Texture.Memory != VK_NULL_HANDLE) Functions_->vkFreeMemory(Device_, Texture.Memory, nullptr);
     Texture.Image  = VK_NULL_HANDLE;
     Texture.Memory = VK_NULL_HANDLE;
@@ -1158,7 +1237,7 @@ void DeviceExchange::WriteTexture(const std::shared_ptr<DeviceTexture>& Texture,
 namespace
 {
 
-void RecordGlobalDependency(const DeviceExchange::FunctionTable& Functions, VkCommandBuffer Stream)
+void RecordGlobalDependency(const DeviceExchange::ResolvedFunctions& Functions, VkCommandBuffer Stream)
 {
     VkMemoryBarrier Barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER};
     Barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
@@ -1289,6 +1368,11 @@ bool DeviceExchange::Submit(CommandSequence& Sequence, std::string* OutDiagnosti
         return false;
     }
     return true;
+}
+
+void DeviceExchange::AwaitIdle() noexcept
+{
+    if (Queue_ != VK_NULL_HANDLE) Functions_->vkQueueWaitIdle(Queue_);
 }
 
 bool DeviceExchange::ReadRegion(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, VkDeviceSize ByteCount,

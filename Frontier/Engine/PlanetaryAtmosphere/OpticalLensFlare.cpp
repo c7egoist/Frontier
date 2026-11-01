@@ -523,11 +523,11 @@ bool OpticalLensFlare::Initialize(VulkanComputeExchange& Exchange,
                                      sizeof(PushHeader),
                                      VisibilityProgram_,
                                      OutDiagnostic) ||
-        !Exchange.LoadComputeProgram(ShaderBinaryDirectory + "/CompositeFlareAperture.spv",
-                                     "CompositeFlareApertureMain",
+        !Exchange.LoadComputeProgram(ShaderBinaryDirectory + "/BlendFlareAperture.spv",
+                                     "BlendFlareApertureMain",
                                      Bindings,
                                      sizeof(PushHeader),
-                                     CompositeProgram_,
+                                     ApertureProgram_,
                                      OutDiagnostic))
     {
         return false;
@@ -539,7 +539,7 @@ bool OpticalLensFlare::Initialize(VulkanComputeExchange& Exchange,
 void OpticalLensFlare::Shutdown(VulkanComputeExchange& Exchange) noexcept
 {
     Exchange.ReleaseImage(FlareVisibilityImage_);
-    Exchange.ReleaseProgram(CompositeProgram_);
+    Exchange.ReleaseProgram(ApertureProgram_);
     Exchange.ReleaseProgram(VisibilityProgram_);
 }
 
@@ -579,7 +579,7 @@ bool OpticalLensFlare::Execute(VulkanComputeExchange&      Exchange,
     }
 
     return Exchange.DispatchCompute(
-        CompositeProgram_, Args, &Push, sizeof(Push), (ViewportWidth + 7u) / 8u, (ViewportHeight + 7u) / 8u, 1u);
+        ApertureProgram_, Args, &Push, sizeof(Push), (ViewportWidth + 7u) / 8u, (ViewportHeight + 7u) / 8u, 1u);
 }
 
 bool OpticalLensFlare::ReadbackVisibilityValues(VulkanComputeExchange&             Exchange,

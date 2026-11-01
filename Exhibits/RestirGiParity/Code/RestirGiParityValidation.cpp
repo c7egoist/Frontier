@@ -5,17 +5,20 @@
 
 #include "ReferenceCapture.h"
 
-#include "Illumination/BoundingStructure.h"
-#include "Illumination/IlluminationConstants.h"
-#include "Illumination/IlluminationHost.h"
-#include "Illumination/OccupantDistanceSpace.h"
-#include "Illumination/RayTracingSpace.h"
-#include "Illumination/SceneDistanceSpace.h"
-#include "Illumination/SurfaceCardDepot.h"
-#include "Illumination/SceneStructure.h"
-#include "Illumination/ShaderInterchange.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/BoundingStructure.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/IlluminationConstants.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/OccupantDistanceSpace.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/RayTracingSpace.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/SceneDistanceSpace.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.h"
+#include "Frontier/Engine/Rendering/GlobalIllumination/ShaderInterchange.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
+#include <iterator>
 #include <cstdio>
 #include <fstream>
 #include <map>
@@ -28,7 +31,7 @@
 #include <string>
 
 using namespace Frontier;
-using namespace Frontier::Illumination;
+using namespace Frontier::GlobalIllumination;
 using namespace Frontier::Parity;
 
 namespace
@@ -145,6 +148,82 @@ std::vector<double> ExtractNumbers(const std::string& Line, std::initializer_lis
     return Values;
 }
 
+// 📝 Flat lookups in the demo's pretty-printed Settings.json ("Key": value): numbers, booleans and strings.
+std::string FindSettingToken(const std::string& Text, const std::string& Key)
+{
+    const std::string Quoted = "\"" + Key + "\":";
+    size_t Cursor = Text.find(Quoted);
+    if (Cursor == std::string::npos) return {};
+    Cursor += Quoted.size();
+    while (Cursor < Text.size() && (Text[Cursor] == ' ' || Text[Cursor] == '\n')) ++Cursor;
+    size_t End = Cursor;
+    if (End < Text.size() && Text[End] == '"')
+    {
+        End = Text.find('"', Cursor + 1);
+        return End == std::string::npos ? std::string{} : Text.substr(Cursor + 1, End - Cursor - 1);
+    }
+    while (End < Text.size() && Text[End] != ',' && Text[End] != '\n' && Text[End] != '}') ++End;
+    return Text.substr(Cursor, End - Cursor);
+}
+
+void ReadSetting(const std::string& Text, const std::string& Key, double& Target)
+{
+    const std::string Token = FindSettingToken(Text, Key);
+    if (!Token.empty()) Target = std::strtod(Token.c_str(), nullptr);
+}
+
+void ReadSetting(const std::string& Text, const std::string& Key, bool& Target)
+{
+    const std::string Token = FindSettingToken(Text, Key);
+    if (Token == "true") Target = true;
+    if (Token == "false") Target = false;
+}
+
+// 📝 The demo's settings at bring-up become the native EnvironmentSettings the host encodes from.
+EnvironmentSettings ReadEnvironmentSettings(const std::filesystem::path& Path)
+{
+    EnvironmentSettings S;
+    std::ifstream Stream(Path);
+    const std::string Text((std::istreambuf_iterator<char>(Stream)), std::istreambuf_iterator<char>());
+    if (Text.empty()) return S;
+    for (const auto& [Key, Target] : std::initializer_list<std::pair<const char*, double*>>{
+             {"SunElevation", &S.SunElevation}, {"SunAzimuth", &S.SunAzimuth}, {"SolarIlluminance", &S.SolarIlluminance},
+             {"SunRadius", &S.SunRadius}, {"SunTemperature", &S.SunTemperature}, {"SunGlow", &S.SunGlow}, {"SunTime", &S.SunTime},
+             {"DayDuration", &S.DayDuration}, {"Latitude", &S.Latitude}, {"Longitude", &S.Longitude}, {"TimeZone", &S.TimeZone},
+             {"StarBrightness", &S.StarBrightness}, {"StarLimit", &S.StarLimit}, {"StarSize", &S.StarSize}, {"StarRotation", &S.StarRotation},
+             {"TwinkleDepth", &S.TwinkleDepth}, {"TwinkleRate", &S.TwinkleRate}, {"MilkyWay", &S.MilkyWay}, {"StarHalo", &S.StarHalo},
+             {"PlanetBrightness", &S.PlanetBrightness}, {"MoonAzimuth", &S.PrimaryMoon.MoonAzimuth}, {"MoonElevation", &S.PrimaryMoon.MoonElevation},
+             {"MoonRoll", &S.PrimaryMoon.MoonRoll}, {"MoonPitch", &S.PrimaryMoon.MoonPitch}, {"MoonSpin", &S.PrimaryMoon.MoonSpin},
+             {"MoonSize", &S.PrimaryMoon.MoonSize}, {"MoonBrightness", &S.PrimaryMoon.MoonBrightness}, {"MoonPhase", &S.PrimaryMoon.MoonPhase},
+             {"MoonGlow", &S.PrimaryMoon.MoonGlow}, {"FogDensity", &S.FogDensity}, {"FogHeight", &S.FogHeight}, {"FogScatter", &S.FogScatter},
+             {"AerialDensity", &S.AerialDensity}, {"AerialStart", &S.AerialStart}, {"AerialMie", &S.AerialMie},
+             {"FlareIntensity", &S.FlareIntensity}, {"FlareSpread", &S.FlareSpread}, {"FlareGhosts", &S.FlareGhosts},
+             {"FlareGhostBrightness", &S.FlareGhostBrightness}, {"FlareHaloRadius", &S.FlareHaloRadius}, {"FlareHaloWidth", &S.FlareHaloWidth},
+             {"FlareHaloBrightness", &S.FlareHaloBrightness}, {"FlareStreak", &S.FlareStreak}, {"FlareRotation", &S.FlareRotation},
+             {"FlareRays", &S.FlareRays}, {"FlareChromatic", &S.FlareChromatic}, {"FlareGhostSpacing", &S.FlareGhostSpacing},
+             {"FlareGhostShape", &S.FlareGhostShape}, {"FlareAperture", &S.FlareAperture}, {"HorizonGlow", &S.HorizonGlow},
+             {"WhiteLine", &S.WhiteLine}, {"Rayleigh", &S.Atmosphere.Rayleigh}, {"Mie", &S.Atmosphere.Mie}, {"Ozone", &S.Atmosphere.Ozone},
+             {"MieG", &S.Atmosphere.MieG}, {"RayleighHeight", &S.Atmosphere.RayleighHeight}, {"MieHeight", &S.Atmosphere.MieHeight}})
+        ReadSetting(Text, Key, *Target);
+    double MoonBody = 0.0;
+    ReadSetting(Text, "MoonBody", MoonBody);
+    S.PrimaryMoon.MoonBody = static_cast<uint32_t>(MoonBody);
+    for (const auto& [Key, Target] : std::initializer_list<std::pair<const char*, bool*>>{
+             {"SunEnabled", &S.SunEnabled}, {"SunDiscEnabled", &S.SunDiscEnabled}, {"SunAutoPosition", &S.SunAutoPosition},
+             {"DayAnimate", &S.DayAnimate}, {"StarsEnabled", &S.StarsEnabled}, {"TwinkleEnabled", &S.TwinkleEnabled},
+             {"PlanetsEnabled", &S.PlanetsEnabled}, {"MoonEnabled", &S.PrimaryMoon.MoonEnabled}, {"MoonFollowSky", &S.PrimaryMoon.MoonFollowSky},
+             {"FogEnabled", &S.FogEnabled}, {"AerialEnabled", &S.AerialEnabled}, {"FlareEnabled", &S.FlareEnabled},
+             {"FlareAnamorphic", &S.FlareAnamorphic}, {"FlareWarmStreak", &S.FlareWarmStreak}, {"FlareBurst", &S.FlareBurst},
+             {"LineAtCivilOnly", &S.LineAtCivilOnly}, {"AtmosphereEnabled", &S.AtmosphereEnabled}, {"AirMass", &S.Atmosphere.AirMass},
+             {"MoonLightEnabled", &S.Atmosphere.MoonLightEnabled}, {"MultipleScattering", &S.Atmosphere.MultipleScattering}})
+        ReadSetting(Text, Key, *Target);
+    ReadSetting(Text, "MoonLightIntensity", S.Atmosphere.MoonLightIntensity);
+    S.FlareCustomLayers = FindSettingToken(Text, "FlarePreset") == "Custom layers";
+    const std::string Date = FindSettingToken(Text, "SkyDate");
+    if (!Date.empty()) S.SkyDate = Date;
+    return S;
+}
+
 } // namespace
 
 int main(int ArgumentCount, char** Arguments)
@@ -231,6 +310,7 @@ int main(int ArgumentCount, char** Arguments)
     }
     IlluminationSettings Settings;
     Settings.Quality = Quality;
+    EnvironmentSettings Environment = ReadEnvironmentSettings(CaptureFolder / "Settings.json");
 
     // 🔍 every host write is observed and compared with the demo's write of the same refresh and label
     std::map<std::string, std::string> LabelMap = {
@@ -368,6 +448,35 @@ int main(int ArgumentCount, char** Arguments)
             Inputs.Camera.Aspect   = ExtractNumbers(Line, {"Camera", "Aspect"})[0];
             Inputs.Camera.Near     = ExtractNumbers(Line, {"Camera", "Near"})[0];
             Inputs.Focus           = {Focus[0], Focus[1], Focus[2]};
+            // 📝 The environment block and the luminaire table come from the native ports (EncodeEnvironment,
+            //    LightingSystem.Update); the comparison below checks them byte for byte against the demo's writes.
+            Inputs.Environment    = &Environment;
+            Inputs.LuminairesLive = true;
+            const auto Body = ExtractNumbers(Line, {"VehicleBody"});
+            if (Body.size() == 16)
+            {
+                Transform VehicleBody{};
+                std::copy(Body.begin(), Body.end(), VehicleBody.begin());
+                Inputs.VehicleTransform = VehicleBody;
+            }
+            // 🔍 the orbital solver reproduces the demo's planets and sidereal angle
+            const CelestialSolution Solved = SolveCelestial(Environment);
+            double PlanetDeviation = 0.0;
+            for (int Planet = 0; Planet < 4; ++Planet)
+            {
+                const std::string Named = std::string("\"Name\":\"") + std::array<const char*, 4>{"Venus", "Jupiter", "Mars", "Saturn"}[Planet] + "\"";
+                const size_t      Entry = Line.find(Named);
+                const auto Logged = Entry == std::string::npos ? std::vector<double>{} : ExtractNumbers(Line.substr(Entry), {"Direction"});
+                for (int Axis = 0; Axis < 3 && Logged.size() == 3; ++Axis)
+                    PlanetDeviation = std::max(PlanetDeviation, std::abs(Logged[Axis] - Solved.Planets[Planet].Direction[Axis]));
+            }
+            // 📝 Doubles may differ in the last bits (V8's fdlibm vs this libm); the float32 'Frame record' bytes below are the
+            //    1:1 criterion, this check bounds the double-precision drift of the solver itself.
+            const auto   Logged   = ExtractNumbers(Line, {"Light", "Sidereal"});
+            const double Sidereal = Logged.empty() ? 0.0 : std::abs(Logged[0] - ResolveSiderealAngle(Solved.JulianDay, Environment.Longitude));
+            char Detail[96];
+            std::snprintf(Detail, sizeof(Detail), "max planet Δ %.3g, sidereal Δ %.3g", PlanetDeviation, Sidereal);
+            ReportCheck(PlanetDeviation < 1.0e-12 && Sidereal < 1.0e-12, "refresh " + std::to_string(Refresh) + " celestial solver", Detail);
             // 📝 Scalars owned by systems outside the port come from the demo's own refresh constants.
             const auto Constants = Capture.QueryWrites(Index, "Frame record");
             if (!Constants.empty())
@@ -378,8 +487,6 @@ int main(int ArgumentCount, char** Arguments)
                 Inputs.External.ElapsedSeconds = Elapsed;
                 std::memcpy(&Inputs.External.HmiWord, Bytes.data() + 119 * 4, 4);
                 std::memcpy(Inputs.External.FireBlock.data(), Bytes.data() + 120 * 4, 32);
-                Inputs.External.EnvironmentBlock.resize(140);
-                std::memcpy(Inputs.External.EnvironmentBlock.data(), Bytes.data() + 128 * 4, 140 * 4);
             }
         }
         auto Supply = [&](uint32_t) {
@@ -405,7 +512,7 @@ int main(int ArgumentCount, char** Arguments)
                 for (const CapturedWrite* Write : Capture.QueryWrites(Index, "Occupant records"))
                     if (Write->Offset != 0) Exchange.WriteRegion(Host.OccupantRegion, Write->Offset, Write->Bytes.data(), Write->Bytes.size());
             }
-            ReplayWrites(Capture, Exchange, Index, "Clustered light records", Host.LuminaireRegion);
+            if (!LiveRefresh) ReplayWrites(Capture, Exchange, Index, "Clustered light records", Host.LuminaireRegion);
             ReplayWrites(Capture, Exchange, Index, "Vehicle record", Host.VehicleRegion);
             ReplayWrites(Capture, Exchange, Index, "Effect record", Host.EffectRegion);
             ReplayWrites(Capture, Exchange, Index, "Projected cloud shadows", Host.CloudShadowParams);
@@ -421,7 +528,7 @@ int main(int ArgumentCount, char** Arguments)
         if (Refresh == 0) HostLabels.insert({"Atmosphere record", "Cluster triangle indices", "Cluster instance identities", "Geometry cluster bounds"});
         if (LiveRefresh)
         {
-            HostLabels.insert({"Frame record", "Cascade records", "Cascade receiver", "Distance record"});
+            HostLabels.insert({"Frame record", "Cascade records", "Cascade receiver", "Distance record", "Clustered light records"});
             if (!Capture.QueryWrites(Index, "Invalidated bricks").empty()) HostLabels.insert("Invalidated bricks");
         }
         CompareObserved(Index, HostLabels);

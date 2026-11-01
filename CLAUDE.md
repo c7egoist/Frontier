@@ -177,9 +177,16 @@ or project-specific types belong in `Engine/` or `UI/Editor/`.
     (with selectable `PreviewShadowMode`: `None`, `ContactEllipsoid`, `OrthoClusterDepth`, `SignedDistanceCone`,
     `HybridOrthoAndDistance`) is strictly guarded under `#if FRONTIER_EDITOR` (zero symbols in Shipping).
   - ReSTIR was removed on 2026-11-01 at the owner's direction: the Stage 3B `SpatiotemporalIllumination` and
-    `SurfaceScatteringAtlas` renderer, its shaders, and its exhibit are gone. Lighting restarts from scratch with simple
-    Blinn-style preview lighting and basic shadows. `.sdfspace` SDF volumes, the software SAH BVH, and the
-    `PreviewRaster` shadow modes remain.
+    `SurfaceScatteringAtlas` renderer, its shaders, and its exhibit are gone. Its replacement is the **1:1 port of the
+    VehicleHMI demo's ReSTIR GI** (`Frontier/Engine/Rendering/GlobalIllumination`,
+    `Frontier/Engine/Shaders/GlobalIllumination`, parity in `Exhibits/RestirGiParity`) — never "optimize" or redesign it.
+    It runs live in the Everest **Scene Viewport** (`Frontier/Engine/Rendering/SceneViewport/{SceneViewport,EnvironmentOverlay}`,
+    `Projects/Everest/Source/EverestSceneViewport`, `Exhibits/SceneViewport`) on the editor's Vulkan 1.3 device
+    (`VulkanDeviceAccess`), with the `PlanetaryAtmosphere` environment (clouds, fog, flare, sun, moons, stars, planets)
+    overlaid on it — the owner chose PlanetaryAtmosphere over the demo's own clouds/flare. Its SPIR-V is also stored in
+    `EngineContent/ShaderArchives/{GlobalIllumination,Environment}` (`Automation/StoreShaderArchives.py`; CTest
+    `StoredShaderArchiveValidation`), so editor builds without the pinned slangc still run it.
+    `.sdfspace` SDF volumes, the software SAH BVH, and the `PreviewRaster` shadow modes remain.
 - **Project creation auto-scaffolding (`ProjectGenerator`):** Creating a new project via `ProjectBrowserPanel`
   auto-generates C++ source scaffolding (`Source/<Identifier>Application.{h,cpp}` with main loop and `SceneWorld`
   integration), a buildable `CMakeLists.txt`, and a default scene (`Content/Levels/Default.levelspace`).

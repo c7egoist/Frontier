@@ -2,8 +2,8 @@
 
 ## Result
 
-The C++/Vulkan/Slang port (`Frontier/Engine/Illumination`, `Frontier/Engine/Shaders/Illumination`) reproduces the
-original WebGPU demo frame for frame. Every deterministic stage is **bit-identical**; the presented image matches
+The C++/Vulkan/Slang port (`Frontier/Engine/Rendering/GlobalIllumination`, `Frontier/Engine/Shaders/GlobalIllumination`)
+reproduces the original WebGPU demo refresh for refresh. Every deterministic stage is **bit-identical**; the presented image matches
 **99.93 %** of 8-bit values (max 1/255, PSNR 79.7 dB) — the same agreement as two runs of the demo itself (99.94 %,
 80.0 dB). Across repeated port runs the presented-image agreement ranged 99.93–99.98 %.
 
@@ -51,9 +51,13 @@ that read it, the resolved signals) therefore varies between any two executions 
    `performance.now()`).
 2. `Code/RestirGiParityValidation.cpp` builds the port from the same scene topology and runs the same refreshes:
    - host uploads are compared byte for byte with the demo's write log;
-   - with `live`, the port's own host encoders produce the refresh constants, cascades, invalidated bricks and TLAS;
-     only buffers of systems outside the port (luminaire table, vehicle/effect/cloud constants, cone transforms) are
-     taken from the capture;
+   - with `live`, the port's own host encoders produce:
+     - the refresh constants, including the environment block (`EncodeEnvironment`, the celestial solver);
+     - the luminaire register (`LuminaireRegister`);
+     - the cascades, invalidated bricks and TLAS.
+
+     Only buffers of systems outside the port (vehicle/effect/cloud constants, cone transforms) are taken from the
+     capture;
    - device targets are read back and compared texel for texel.
 
 ## Reproduce
@@ -68,7 +72,7 @@ git archive 6afb6f00b5f25c45f7cda92c7da65b64845768f3 Experimental/VehicleHmiProt
 CAPTURE_FRAMES=11 Exhibits/RestirGiParity/Code/CaptureReference.sh /tmp/upstream/Experimental/VehicleHmiPrototype /tmp/capture 12 low 480x270
 
 # 3. port parity (FRONTIER_VULKAN_DRIVER / VK_ICD_FILENAMES point at SwiftShader)
-build/RestirGiParityValidation build/ShaderArchives/Illumination /tmp/capture /tmp/parity low 12 288 162 live
+build/RestirGiParityValidation build/ShaderArchives/GlobalIllumination /tmp/capture /tmp/parity low 12 288 162 live
 ```
 
 `CAPTURE_TEXTURES` selects the dumped targets; on a 4 GB host dump at most about a dozen targets per run.
@@ -80,11 +84,13 @@ build/RestirGiParityValidation build/ShaderArchives/Illumination /tmp/capture /t
 
 ## Limitations
 
-- SwiftShader on Linux only. No hardware GPU and no Windows run; the Windows build of the port was not attempted.
+- SwiftShader on Linux only. No hardware GPU and no Windows run. Since 2026-11-01 the port is part of the Windows editor
+  build (cross-compiled and linked, `Exhibits/SceneViewport`).
 - Not ported (switched off in the reference): clouds and cloud shadows, lens flare, smoke/fire, sparks, tyre marks,
   lightning, precipitation, the cabin overlay (glass, HMI screens, mirrors), the HMI screen textures the ray tracer
   samples on the car's displays, vehicle physics, the demo's editor UI.
-- Host encoders still taken from the capture in `live` mode: `LightingSystem` (luminaire table), `EncodeEnvironment`
-  (environment block of the refresh constants), vehicle visual and effect constants.
-- The editor viewport does not present the port yet; the validation renders offscreen.
+- Inputs still taken from the capture in `live` mode: vehicle visual and effect constants (systems outside the port).
+  Since 2026-11-01 the environment block and the luminaire register are native, byte-identical over 12 refreshes.
+- This validation renders offscreen. The editor presents the port live in the Everest Scene Viewport
+  (`Exhibits/SceneViewport`).
 - One reference resolution and quality grade (low, 288 × 162) was compared.

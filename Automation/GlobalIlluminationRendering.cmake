@@ -1,0 +1,179 @@
+#============================================================================================================================================
+#                                                   GLOBALILLUMINATIONRENDERING.CMAKE
+#============================================================================================================================================
+# 🧩 1:1 C++/Vulkan/Slang port of the VehicleHMI demo's ReSTIR GI renderer (scene distance field + surface cards + BVH path
+#    tracer + ReSTIR GI + SVGF + display), its Slang units, and the parity validation against captures of the original demo.
+
+add_library(FrontierGlobalIllumination STATIC
+    Frontier/Engine/DeviceExchange/DeviceExchange.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/TransformProjection.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/SceneStructure.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/BoundingStructure.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/ShaderInterchange.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/OccupantDistanceSpace.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/IlluminationConstants.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/SceneDistanceSpace.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/RayTracingSpace.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/AtmosphereIntegrator.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/ShadowProjection.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/SurfaceProjection.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/ResamplingSequence.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/DisplayProjection.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/RefreshEncoding.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/EnvironmentEncoding.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/LuminaireRegister.cpp
+    Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp)
+
+target_include_directories(FrontierGlobalIllumination PUBLIC
+    "${CMAKE_SOURCE_DIR}"
+    "${CMAKE_SOURCE_DIR}/Frontier/Engine"
+    "${CMAKE_SOURCE_DIR}/ExternalPackages/vulkan-headers/include")
+target_compile_definitions(FrontierGlobalIllumination PUBLIC VK_NO_PROTOTYPES)
+target_compile_features(FrontierGlobalIllumination PUBLIC cxx_std_20)
+target_link_libraries(FrontierGlobalIllumination PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
+
+# 📝 Only the pinned compiler (Automation/PrepareVulkanCompute.py) rebuilds these units by default, so every build presents the
+#    SPIR-V the parity validation measured. Without it the editor uses the stored archives in
+#    EngineContent/ShaderArchives/GlobalIllumination (Automation/StoreShaderArchives.py); pass
+#    -DFRONTIER_GLOBAL_ILLUMINATION_SLANGC=<slangc> to compile them with another Slang compiler.
+find_program(FRONTIER_GLOBAL_ILLUMINATION_SLANGC
+    NAMES slangc
+    PATHS "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/slangtorch/bin"
+    NO_DEFAULT_PATH)
+
+set(FRONTIER_GLOBAL_ILLUMINATION_SHADER_SRC "${CMAKE_SOURCE_DIR}/Frontier/Engine/Shaders/GlobalIllumination")
+set(FRONTIER_GLOBAL_ILLUMINATION_SHADER_OUT "${CMAKE_BINARY_DIR}/ShaderArchives/GlobalIllumination")
+file(GLOB FRONTIER_GLOBAL_ILLUMINATION_SLANG_SOURCES CONFIGURE_DEPENDS "${FRONTIER_GLOBAL_ILLUMINATION_SHADER_SRC}/*.slang")
+
+# Unit:Entry:Stage — one SPIR-V file per entry point, <Unit>.<Entry>.spv.
+set(FRONTIER_GLOBAL_ILLUMINATION_ENTRIES
+    "DistanceTransfer:TransferDistance:compute"
+    "FragmentDistance:ComputeFragmentDistance:compute"
+    "DistanceUnion:UniteDistance:compute"
+    "CardCapture:CaptureVertex:vertex"
+    "CardCapture:CaptureFragment:fragment"
+    "CardDirect:IntegrateCardDirect:compute"
+    "CardRadiosity:IntegrateCardRadiosity:compute"
+    "CardFinal:IntegrateCardFinal:compute"
+    "AtmosphereTransmittance:IntegrateTransmittance:compute"
+    "AtmosphereMultiple:IntegrateMultiple:compute"
+    "AtmosphereScattering:IntegrateSkyView:compute"
+    "ShadowRaster:ShadowVertex:vertex"
+    "ShadowRaster:MaskedShadowVertex:vertex"
+    "ShadowRaster:MaskedShadowFragment:fragment"
+    "GeometryClusterCull:CullGeometryClusters:compute"
+    "SurfaceRaster:SurfaceVertex:vertex"
+    "SurfaceRaster:SurfaceFragment:fragment"
+    "DirectRadiance:IntegrateDirectRadiance:compute"
+    "ReservoirTemporal:ResampleTemporal:compute"
+    "ReservoirSpatial:ResampleSpatial:compute"
+    "ReflectionTrace:TraverseReflection:compute"
+    "VarianceTemporal:IntegrateTemporal:compute"
+    "VarianceWavelet:ConvolveWavelet:compute"
+    "VarianceUpsample:ProjectScreenSignal:compute"
+    "DisplayRecombination:ResolveRecombination:compute"
+    "DisplayAntialias:IntegrateAntialias:compute"
+    "DisplayExposure:IntegrateExposure:compute"
+    "DisplayPresent:PresentVertex:vertex"
+    "DisplayPresent:PresentFragment:fragment"
+    "EnvironmentVisibility:ProjectEnvironmentVisibility:compute"
+    "EnvironmentVisibility:RestoreEnvironmentRadiance:compute")
+
+set(FRONTIER_GLOBAL_ILLUMINATION_SPV_OUTPUTS)
+if(FRONTIER_GLOBAL_ILLUMINATION_SLANGC)
+    foreach(ENTRY_SPEC IN LISTS FRONTIER_GLOBAL_ILLUMINATION_ENTRIES)
+        string(REPLACE ":" ";" ENTRY_PARTS "${ENTRY_SPEC}")
+        list(GET ENTRY_PARTS 0 ENTRY_UNIT)
+        list(GET ENTRY_PARTS 1 ENTRY_NAME)
+        list(GET ENTRY_PARTS 2 ENTRY_STAGE)
+        set(ENTRY_SPV "${FRONTIER_GLOBAL_ILLUMINATION_SHADER_OUT}/${ENTRY_UNIT}.${ENTRY_NAME}.spv")
+        list(APPEND FRONTIER_GLOBAL_ILLUMINATION_SPV_OUTPUTS "${ENTRY_SPV}")
+        add_custom_command(
+            OUTPUT "${ENTRY_SPV}"
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${FRONTIER_GLOBAL_ILLUMINATION_SHADER_OUT}"
+            COMMAND "${FRONTIER_GLOBAL_ILLUMINATION_SLANGC}" "${FRONTIER_GLOBAL_ILLUMINATION_SHADER_SRC}/${ENTRY_UNIT}.slang"
+                -I "${FRONTIER_GLOBAL_ILLUMINATION_SHADER_SRC}"
+                -entry "${ENTRY_NAME}"
+                -stage "${ENTRY_STAGE}"
+                -target spirv
+                -profile spirv_1_3
+                -emit-spirv-directly
+                -matrix-layout-row-major
+                -fvk-use-entrypoint-name
+                -O0
+                -o "${ENTRY_SPV}"
+            DEPENDS ${FRONTIER_GLOBAL_ILLUMINATION_SLANG_SOURCES}
+            VERBATIM)
+    endforeach()
+    add_custom_target(FrontierGlobalIlluminationShaders ALL DEPENDS ${FRONTIER_GLOBAL_ILLUMINATION_SPV_OUTPUTS})
+endif()
+
+# 📝 The live scene viewport: the illumination refresh with the PlanetaryAtmosphere environment overlaid on it on one device
+#    and queue (the editor's Scene Viewport, Exhibits/SceneViewport).
+add_library(FrontierSceneViewport STATIC
+    Frontier/Engine/Rendering/SceneViewport/EnvironmentOverlay.cpp
+    Frontier/Engine/Rendering/SceneViewport/SceneViewport.cpp)
+target_link_libraries(FrontierSceneViewport PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering)
+if(TARGET FrontierGlobalIlluminationShaders)
+    add_dependencies(FrontierSceneViewport FrontierGlobalIlluminationShaders)
+endif()
+if(TARGET FrontierEnvironmentShaders)
+    add_dependencies(FrontierSceneViewport FrontierEnvironmentShaders)
+endif()
+
+# 📝 The editor loads EngineContent/ShaderArchives/{GlobalIllumination,Environment} beside Frontier.exe. The stored archives arrive
+#    with the EngineContent copy; a set this build compiled replaces its stored copy afterwards.
+if(TARGET Frontier)
+    foreach(SCENE_SHADERS GlobalIllumination Environment)
+        if(TARGET Frontier${SCENE_SHADERS}Shaders)
+            add_dependencies(Frontier Frontier${SCENE_SHADERS}Shaders)
+            add_custom_command(TARGET Frontier POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_directory
+                "${CMAKE_BINARY_DIR}/ShaderArchives/${SCENE_SHADERS}" "$<TARGET_FILE_DIR:Frontier>/EngineContent/ShaderArchives/${SCENE_SHADERS}")
+        endif()
+    endforeach()
+endif()
+
+if(BUILD_TESTING)
+    # 📝 Offscreen scene viewport frames (own device, same code path as the editor) — Exhibits/SceneViewport/README.md.
+    add_executable(SceneViewportValidation
+        Exhibits/SceneViewport/Code/SceneViewportValidation.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(SceneViewportValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(SceneViewportValidation PRIVATE FrontierSceneViewport)
+
+    # 📝 Parity validation against a reference capture of the original demo (Exhibits/RestirGiParity/README.md).
+    add_executable(RestirGiParityValidation
+        Exhibits/RestirGiParity/Code/RestirGiParityValidation.cpp
+        Exhibits/RestirGiParity/Code/ReferenceCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(RestirGiParityValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(RestirGiParityValidation PRIVATE FrontierGlobalIllumination)
+    if(TARGET FrontierGlobalIlluminationShaders)
+        add_dependencies(RestirGiParityValidation FrontierGlobalIlluminationShaders)
+    endif()
+
+    # 📝 The stored archives must match the current Slang sources; a set compiled here by the pinned compiler must also match its
+    #    stored copy byte for byte (another compiler's output is not compared).
+    set(FRONTIER_PINNED_SLANG "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/")
+    set(FRONTIER_COMPARED_SHADER_SETS)
+    set(FRONTIER_COMPARED_SHADER_TARGETS)
+    foreach(SCENE_SHADERS GlobalIllumination Environment)
+        if(SCENE_SHADERS STREQUAL "Environment")
+            set(SCENE_SLANGC "${FRONTIER_ENV_SLANGC}")
+        else()
+            set(SCENE_SLANGC "${FRONTIER_GLOBAL_ILLUMINATION_SLANGC}")
+        endif()
+        string(FIND "${SCENE_SLANGC}" "${FRONTIER_PINNED_SLANG}" SCENE_PINNED)
+        if(TARGET Frontier${SCENE_SHADERS}Shaders AND SCENE_PINNED EQUAL 0)
+            list(APPEND FRONTIER_COMPARED_SHADER_SETS ${SCENE_SHADERS})
+        endif()
+    endforeach()
+    if(FRONTIER_COMPARED_SHADER_SETS)
+        add_test(NAME StoredShaderArchiveValidation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/StoreShaderArchives.py"
+            --verify --build "${CMAKE_BINARY_DIR}" --sets ${FRONTIER_COMPARED_SHADER_SETS})
+    else()
+        add_test(NAME StoredShaderArchiveValidation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/StoreShaderArchives.py"
+            --verify)
+    endif()
+endif()

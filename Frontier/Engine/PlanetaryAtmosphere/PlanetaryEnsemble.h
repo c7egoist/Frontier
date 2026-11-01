@@ -213,6 +213,15 @@ class PlanetarySubmissionSequence
                       const PlanetaryRealmEnsemble& Ensemble,
                       const PlanetaryCameraView&    CameraView);
 
+    // 📝 Externally supplied visibility: the caller allocates the targets for the viewport (EnsureViewportTargets), fills all four
+    //    VisibilityArray layers itself (another renderer's radiance, reversed depth and rays, on these y-up axes), then every
+    //    step except the built-in visibility raster draws the dome, clouds, fog and flare into HdrTarget().
+    bool EnsureViewportTargets(VulkanComputeExchange& Exchange, uint32_t ViewportWidth, uint32_t ViewportHeight);
+    bool ExecuteOverVisibility(VulkanComputeExchange&        Exchange,
+                               const PlanetaryRealmEnsemble& Ensemble,
+                               const PlanetaryCameraView&    CameraView);
+    [[nodiscard]] const DeviceImageArraySlot& HdrTarget() const noexcept { return HdrFrameTarget_; }
+
     bool ReadbackHdrFrame(VulkanComputeExchange& Exchange, std::vector<float>& OutLinearRgbaFloats);
     bool ReadbackVisibilityLayer(VulkanComputeExchange& Exchange, uint32_t LayerIndex, std::vector<float>& OutRgbaFloats);
 

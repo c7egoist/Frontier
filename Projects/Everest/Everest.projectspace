@@ -29,6 +29,7 @@ entries = [
     "Icons",
     "EnvironmentArchives/CelestialMaps",
     "EnvironmentArchives/ControlVehicle",
+    "EnvironmentArchives/ProvingGround",
     "MaterialArchives/TextureStudio",
 ]
 

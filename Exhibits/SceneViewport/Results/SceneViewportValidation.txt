@@ -1,0 +1,24 @@
+device: SwiftShader Device (Subzero)
+bring-up: 71.4 s, 2094 occupants (1406 inactive), 30 luminaires, environment overlaid
+[PASS] PlanetaryAtmosphere overlaid on the illumination device
+[PASS] vehicle body and wheels deactivated (no car)
+[PASS] street lamps and lamp posts placed from the scene — 20 + 10
+Daylight: 12 refreshes, mean 13.12 s, slowest 15.44 s; sky 0.863, ground 0.395, brightest 0.984, isolated bright pixels 32 → out/Daylight.png
+[PASS] Daylight presented a lit image
+LowSunFlare: 12 refreshes, mean 14.33 s, slowest 17.91 s; sky 0.787, ground 0.397, brightest 1.000, isolated bright pixels 92 → out/LowSunFlare.png
+[PASS] LowSunFlare presented a lit image
+DuskFogLamps: 12 refreshes, mean 12.88 s, slowest 15.39 s; sky 0.161, ground 0.176, brightest 0.996, isolated bright pixels 93 → out/DuskFogLamps.png
+[PASS] DuskFogLamps presented a lit image
+NightMoonsPlanetsStars: 12 refreshes, mean 12.88 s, slowest 14.92 s; sky 0.003, ground 0.045, brightest 1.000, isolated bright pixels 30 → out/NightMoonsPlanetsStars.png
+[PASS] NightMoonsPlanetsStars presented a lit image
+[PASS] daylight sky is bright — 0.863468
+[PASS] low sun saturates the disc and flare — 1.000000
+[PASS] night sky darker than day — 0.002845 vs 0.863468
+[PASS] night sky shows stars — 30 isolated bright pixels
+
+=== scene viewport: 0 failing checks
+
+real	11m50.006s
+user	21m33.257s
+sys	0m4.405s
+exit 0

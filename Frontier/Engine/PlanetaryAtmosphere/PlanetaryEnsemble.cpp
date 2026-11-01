@@ -831,6 +831,66 @@ bool PlanetarySubmissionSequence::ExecuteFrame(VulkanComputeExchange&        Exc
     return true;
 }
 
+bool PlanetarySubmissionSequence::EnsureViewportTargets(VulkanComputeExchange& Exchange, uint32_t ViewportWidth, uint32_t ViewportHeight)
+{
+    const uint32_t W = std::max(1u, ViewportWidth);
+    const uint32_t H = std::max(1u, ViewportHeight);
+    if (!Visibility_.EnsureDimensions(Exchange, W, H))
+    {
+        return false;
+    }
+    if (HdrFrameTarget_.Width != W || HdrFrameTarget_.Height != H)
+    {
+        return Exchange.AllocateRgba16fArray(W, H, 1u, HdrFrameTarget_);
+    }
+    return true;
+}
+
+bool PlanetarySubmissionSequence::ExecuteOverVisibility(VulkanComputeExchange&        Exchange,
+                                                        const PlanetaryRealmEnsemble& Ensemble,
+                                                        const PlanetaryCameraView&    CameraView)
+{
+    const uint32_t W = std::max(1u, CameraView.ViewportWidth);
+    const uint32_t H = std::max(1u, CameraView.ViewportHeight);
+    if (Visibility_.VisibilityArray().Width != W || Visibility_.VisibilityArray().Height != H || HdrFrameTarget_.Width != W ||
+        HdrFrameTarget_.Height != H)
+    {
+        return false;
+    }
+
+    LastPayload_ = PackEnsemblePayload(Ensemble, CameraView, PlanetaryDome_.IndexedStarCount());
+    if (!Exchange.UploadMemorySpan(EnsembleSpan_,
+                                   LastPayload_.Float4Slots.data(),
+                                   LastPayload_.Float4Slots.size() * sizeof(float) * 4u))
+    {
+        return false;
+    }
+
+    std::vector<AtmosphereRealmRevision> Revisions;
+    Revisions.reserve(Ensemble.Realms.size());
+    for (const PlanetaryRealm& Realm : Ensemble.Realms)
+    {
+        Revisions.push_back({Realm.AtmosphereRevision, Realm.SkyViewRevision});
+    }
+
+    // Same order as ExecuteFrame, step 3 (the visibility raster) supplied by the caller.
+    return AtmosphereLuts_.Execute(Exchange, EnsembleSpan_, Revisions) &&
+           Clouds_.ExecuteShadowProjections(
+               Exchange, EnsembleSpan_, AtmosphereLuts_, static_cast<uint32_t>(Ensemble.Realms.size()), Visibility_.VisibilityArray()) &&
+           PlanetaryDome_.Execute(Exchange, EnsembleSpan_, AtmosphereLuts_, Visibility_.VisibilityArray(), HdrFrameTarget_, W, H) &&
+           Clouds_.ExecuteTraceAndReconstruct(
+               Exchange, EnsembleSpan_, AtmosphereLuts_, Visibility_.VisibilityArray(), HdrFrameTarget_, W, H, CameraView.FrameIndex) &&
+           Fog_.Execute(Exchange, EnsembleSpan_, AtmosphereLuts_, Clouds_, Visibility_.VisibilityArray(), HdrFrameTarget_, W, H) &&
+           LensFlare_.Execute(Exchange,
+                              EnsembleSpan_,
+                              Visibility_.VisibilityArray(),
+                              Clouds_,
+                              HdrFrameTarget_,
+                              static_cast<uint32_t>(LastPayload_.FlareCandidates.size()),
+                              W,
+                              H);
+}
+
 bool PlanetarySubmissionSequence::ReadbackHdrFrame(VulkanComputeExchange& Exchange,
                                                    std::vector<float>&    OutLinearRgbaFloats)
 {
