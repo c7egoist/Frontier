@@ -63,6 +63,21 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     Exchange_      = std::make_unique<DeviceExchange>();
     if (HostDevice != nullptr ? !Exchange_->AttachDevice(*HostDevice, OutDiagnostic) : !Exchange_->Initialize("", OutDiagnostic)) return false;
     Adapter_ = Exchange_->AdapterDescription();
+    if (Configuration.Journal)
+    {
+        Exchange_->FaultObserver = [Journal = Configuration.Journal](const std::string& Fault) { Journal("device fault: " + Fault); };
+    }
+    // 🔍 A device the editor already lost fails every submission; say so instead of blaming the first one made here.
+    if (const VkResult Health = Exchange_->ProbeDevice(); Health != VK_SUCCESS)
+    {
+        if (OutDiagnostic != nullptr)
+        {
+            *OutDiagnostic = std::string("the Vulkan device was lost before the scene viewport submitted anything (vkQueueWaitIdle returned ") +
+                             (Health == VK_ERROR_DEVICE_LOST ? "VK_ERROR_DEVICE_LOST" : std::to_string(static_cast<int>(Health))) + ")";
+        }
+        return false;
+    }
+    if (Configuration.Journal) Configuration.Journal("bring-up on " + Adapter_ + " (" + (HostDevice != nullptr ? "the editor's device" : "an own device") + ")");
 
     // ① the proving ground exactly as the demo built it, the vehicle deactivated (no car yet)
     IlluminationAssets Assets;
@@ -74,6 +89,7 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
     Settings.RayTracing = Configuration.RayTracing;
     Settings.TraceScale = std::max(1u, Configuration.TraceScale);
     Host_ = std::make_unique<IlluminationHost>(*Exchange_, Configuration.GlobalIlluminationShaders);
+    Host_->Journal = Configuration.Journal;
     ScreenExtent = {std::max(64u, ScreenExtent[0]), std::max(64u, ScreenExtent[1])};
     if (!Host_->Construct(Assets, Settings, ScreenExtent, OutDiagnostic)) return false;
 
@@ -104,6 +120,7 @@ bool SceneViewport::Construct(const VulkanDeviceAccess* HostDevice, const SceneV
             if (OutDiagnostic != nullptr) *OutDiagnostic = "environment unavailable: " + EnvironmentDiagnostic;
             return false;
         }
+        if (Configuration.Journal) Configuration.Journal("bring-up ⑧ PlanetaryAtmosphere environment on the same queue");
     }
     PresentedView_ = Exchange_->ConstructView(Host_->CaptureTexture);
     return PresentedView_ != nullptr;

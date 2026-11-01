@@ -6,6 +6,8 @@
 #include "IlluminationHost.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdio>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -55,6 +57,22 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Settings = Configuration;
     Grade    = ResolveQualityGrade(Settings.Quality);
     if (Settings.CardTileBudget == 0) Settings.CardTileBudget = Grade.TileBudget;
+    // 🔍 Each step names the submissions it makes, so a device fault reports where the bring-up stood.
+    auto StepStart = std::chrono::steady_clock::now();
+    auto Step = [&](const std::string& Finished, const std::string& Next) {
+        const auto Now = std::chrono::steady_clock::now();
+        if (Journal)
+        {
+            char Line[320];
+            std::snprintf(Line, sizeof(Line), "bring-up %s (%.0f ms, %llu submissions so far)", Finished.c_str(),
+                          std::chrono::duration<double, std::milli>(Now - StepStart).count(),
+                          static_cast<unsigned long long>(Exchange.CompletedSubmissions()));
+            Journal(Line);
+        }
+        StepStart = Now;
+        Exchange.LabelSubmissions("bring-up: " + Next);
+    };
+    Exchange.LabelSubmissions("bring-up: facet space");
     if (!Scene.LoadFacetSpace(Assets.FacetSpace, OutDiagnostic)) return false;
     if (Assets.OmitVehicle)
     {
@@ -72,9 +90,16 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     LuminaireRegion = Exchange.ConstructRegion(LuminaireRegisterBytes, "Clustered luminaire profiles");
     OccupantRegion  = Exchange.ConstructRegion(static_cast<VkDeviceSize>(Scene.Occupants.size()) * OccupantStride, "Occupant profiles");
 
+    Step("① facet space: " + std::to_string(Scene.Occupants.size()) + " occupants, " + std::to_string(Scene.FacetSets.size()) + " facet sets, " +
+             std::to_string(VertexStream.size() >> 10) + " KiB of vertices (" + Settings.Quality + ")",
+         "distance volumes");
+
     // ② per-occupant distance volumes
     Volumes = std::make_unique<OccupantDistanceSpace>(Exchange, Shaders);
     if (!Volumes->ConstructVolumes(Scene, Grade.VoxelScale, OutDiagnostic)) return false;
+    Step("② distance volumes: " + std::to_string(Volumes->Volumes.size()) + " in " + std::to_string(Volumes->SpaceExtent[0]) + "x" +
+             std::to_string(Volumes->SpaceExtent[1]) + "x" + std::to_string(Volumes->SpaceExtent[2]) + " texels",
+         "surface cards and the ray tracing hierarchy");
 
     // ③ surface cards, then the occupant profiles that reference volumes and cards
     Cards = std::make_unique<SurfaceCardDepot>(Exchange, Shaders, SurfaceCardConfiguration{Grade.CardExtent, Grade.CardDensity});
@@ -89,6 +114,8 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Shaders.ConfigureConstants(ConstructSpecializationConstants({Grade.Steps, Cards->GroundFirstCard, Cards->GroundStripCard,
                                                               static_cast<uint32_t>(Scene.GroundOccupant)}));
 
+    Step("③ " + std::to_string(Scene.Occupants.size()) + " occupant profiles and the two-level ray tracing hierarchy", "scene distance field");
+
     // ④ the scene distance field
     Distance = std::make_unique<SceneDistanceSpace>(Exchange, Shaders,
                                                     SceneDistanceConfiguration{4, Grade.ClipResolution, Grade.FinestVoxel, 6.0, 0.2});
@@ -96,6 +123,8 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Scene.ConstructDistanceList();
     Distance->UploadDistanceList(Scene.DistanceList);
     Volumes->ConstructFragmentProgram();
+
+    Step("④ scene distance field", "illumination stages");
 
     // ⑤ every remaining stage
     Atmosphere = std::make_unique<AtmosphereIntegrator>(Exchange, Shaders);
@@ -180,8 +209,12 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
         Exchange.WriteRegion(MaterialRegion, Offset, Bytes.data(), Bytes.size());
     }
 
+    Step("⑤ illumination stages and programs", "surface card capture");
     Cards->CaptureCards(Scene, VertexRegion);
+    Step("⑥ surface card capture", "screen targets");
     ReconstructScreenTargets(Extent);
+    Step("⑦ screen targets " + std::to_string(Extent[0]) + "x" + std::to_string(Extent[1]), "refresh");
+    StagedRefreshes = 2;
     return true;
 }
 
@@ -305,17 +338,44 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     if (Supplier) Supplier(RefreshIndex);
 
     // ④ record, in the demo's order
-    CommandSequence Sequence = Exchange.BeginSequence();
-    Atmosphere->RecordSkyView(Sequence, Settings.SolarIlluminance);
-    Volumes->RecordFragments(Sequence);
+    // 🔍 Staged: every step in a command stream of its own behind the same staged writes, each submitted and awaited on its
+    //    own and named in a device fault report — the same work as one submission (the first refreshes after a bring-up, or
+    //    FRONTIER_ILLUMINATION_STAGED_SUBMISSIONS=1).
+    const bool Staged = StagedRefreshes > 0 || std::getenv("FRONTIER_ILLUMINATION_STAGED_SUBMISSIONS") != nullptr;
+    if (StagedRefreshes > 0) --StagedRefreshes;
+    std::vector<std::unique_ptr<CommandSequence>> Series;
+    std::vector<std::string>                      Labels;
+    auto Begin = [&](const char* Stage) {
+        if (Series.empty() || Staged)
+        {
+            Series.push_back(std::make_unique<CommandSequence>(Exchange.BeginSequence()));
+            Labels.push_back("refresh " + std::to_string(RefreshIndex) + ": " + Stage);
+        }
+        else
+        {
+            Labels.back() += std::string(", ") + Stage;
+        }
+        return std::ref(*Series.back());
+    };
+    auto SubmitSeries = [&]() {
+        std::vector<CommandSequence*> Streams;
+        for (const auto& Stream : Series) Streams.push_back(Stream.get());
+        const bool Submitted = Exchange.SubmitSeries(Streams, Labels, OutDiagnostic);
+        Series.clear();
+        Labels.clear();
+        return Submitted;
+    };
+    Atmosphere->RecordSkyView(Begin("sky view"), Settings.SolarIlluminance);
+    Volumes->RecordFragments(Begin("fragment distances"));
     if (Inputs != nullptr)
     {
-        Distance->RecordUnion(Sequence, Scene.QueryUnionCount(), RefreshIndex);
+        Distance->RecordUnion(Begin("distance union"), Scene.QueryUnionCount(), RefreshIndex);
     }
     else
     {
         // 📝 Replay: the bricks and the distance constants were supplied; dispatch the union over them.
         const uint32_t BrickCount = static_cast<uint32_t>(Distance->RefreshBricks.size() / 4);
+        CommandSequence& Sequence = Begin("distance union");
         if (BrickCount > 0)
         {
             Sequence.BindProgram(Distance->UnionProgram);
@@ -323,42 +383,43 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
             Sequence.Dispatch(std::min(BrickCount, 65535u), (BrickCount + 65534u) / 65535u);
         }
     }
-    Shadow->RecordCascades(Sequence, Scene, VertexRegion);
-    Cards->RecordLighting(Sequence, Distance->MarchGroup, SamplingGroup, Settings.CardRadiosity);
-    Surface->RecordSurface(Sequence, Scene, VertexRegion);
-    Surface->RecordDirect(Sequence, Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
+    Shadow->RecordCascades(Begin("shadow cascades"), Scene, VertexRegion);
+    Cards->RecordLighting(Begin("card lighting"), Distance->MarchGroup, SamplingGroup, Settings.CardRadiosity);
+    Surface->RecordSurface(Begin("surface raster"), Scene, VertexRegion);
+    Surface->RecordDirect(Begin("direct radiance"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
     if (Settings.Indirect)
     {
-        Resampling->RecordResampling(Sequence, Parity, Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
-        Diffuse->Record(Sequence, Parity, Settings.VarianceFilter);
+        Resampling->RecordResampling(Begin("ReSTIR resampling"), Parity, Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
+        Diffuse->Record(Begin("diffuse variance filter"), Parity, Settings.VarianceFilter);
     }
     if (Settings.Reflection)
     {
-        Resampling->RecordReflection(Sequence, Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
-        Glossy->Record(Sequence, Parity, Settings.VarianceFilter);
+        Resampling->RecordReflection(Begin("reflection trace"), Distance->MarchGroup, SamplingGroup, RayTracing->MarchGroup);
+        Glossy->Record(Begin("glossy variance filter"), Parity, Settings.VarianceFilter);
     }
-    Display->RecordResolve(Sequence, Parity);
+    Display->RecordResolve(Begin("resolve"), Parity);
     if (Interlude == nullptr)
     {
-        Display->RecordPresent(Sequence, Parity, CaptureView, Distance->MarchGroup);
-        if (!Exchange.Submit(Sequence, OutDiagnostic)) return false;
+        Display->RecordPresent(Begin("present"), Parity, CaptureView, Distance->MarchGroup);
+        if (!SubmitSeries()) return false;
     }
     else
     {
         // 📝 Resolve → outside work on the same queue → present; the trailing dependency orders later submissions (the
         //    editor interface sampling the presented image) after the present raster.
-        if (Interlude->AfterResolve) Interlude->AfterResolve(Sequence, Parity);
-        if (!Exchange.Submit(Sequence, OutDiagnostic)) return false;
+        if (Interlude->AfterResolve) Interlude->AfterResolve(Begin("environment import"), Parity);
+        if (!SubmitSeries()) return false;
+        Exchange.LabelSubmissions("refresh " + std::to_string(RefreshIndex) + ": environment overlay");
         if (Interlude->Execute && !Interlude->Execute())
         {
             if (OutDiagnostic != nullptr && OutDiagnostic->empty()) *OutDiagnostic = "refresh interlude failed";
             return false;
         }
-        CommandSequence Presentation = Exchange.BeginSequence();
+        CommandSequence& Presentation = Begin("present");
         if (Interlude->BeforePresent) Interlude->BeforePresent(Presentation, Parity);
         Display->RecordPresent(Presentation, Parity, CaptureView, Distance->MarchGroup, Interlude->PresentSource);
         Presentation.OrderAfterEarlierWork();
-        if (!Exchange.Submit(Presentation, OutDiagnostic)) return false;
+        if (!SubmitSeries()) return false;
     }
     PriorValid = true;
     ++RefreshIndex;

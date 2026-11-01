@@ -244,6 +244,8 @@ struct VulkanPresentation::PresentationAllocation
             SceneDevice = Features13.dynamicRendering == VK_TRUE;
             Enable13.dynamicRendering    = Features13.dynamicRendering;
             Enable13.synchronization2    = Features13.synchronization2;
+            // 📝 The scene viewport's ported WebGPU shaders rely on image accesses outside an image never faulting.
+            Enable13.robustImageAccess   = Features13.robustImageAccess;
             Enable12.scalarBlockLayout   = Features12.scalarBlockLayout;
             Enable11.shaderDrawParameters = Features11.shaderDrawParameters;
             Enable13.pNext = &Enable12;

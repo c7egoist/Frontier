@@ -6,6 +6,7 @@
 
 #include "EverestSceneViewport.h"
 
+#include "Engine/Diagnostics/DiagnosticJournal.h"
 #include "Engine/Diagnostics/LogCategories.h"
 #include "Engine/Diagnostics/LogStream.h"
 
@@ -108,6 +109,9 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
         Configuration.CelestialMaps             = ResolveArchive(ProjectRoot_, "CelestialMaps");
         Configuration.Quality                   = Quality;
         Configuration.RayTracing                = RayTracing;
+        // 🔍 Every bring-up step and device fault lands in the diagnostic journal as it happens (a lost device still leaves
+        //    the step it struck in the log).
+        Configuration.Journal = [](const std::string& Line) { Frontier::DiagnosticJournal::Append("SceneViewport", Line); };
         const auto Extent = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality);
         auto Candidate = std::make_unique<Frontier::GlobalIllumination::SceneViewport>();
         std::string Diagnostic;

@@ -124,6 +124,11 @@ class IlluminationHost
     // 📝 Street-lamp heads and lamp-post lanterns of the loaded scene, in placement order (LevelStructure.js).
     void ResolveLampPlacements();
 
+    // 🔍 One line per bring-up step with its duration (the editor's diagnostic journal); unset = silent.
+    std::function<void(const std::string&)> Journal{};
+    // 🔍 Refreshes still to submit step by step (a device fault then names its step); a bring-up sets two.
+    uint32_t StagedRefreshes = 0;
+
     DeviceExchange&                     Exchange;
     ShaderInterchange                   Shaders;
     IlluminationSettings                Settings{};

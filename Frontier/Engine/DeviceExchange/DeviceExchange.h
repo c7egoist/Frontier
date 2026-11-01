@@ -447,9 +447,24 @@ class DeviceExchange
     // Recording + submission. Submit waits for completion (one submission in flight; WebGPU onSubmittedWorkDone).
     CommandSequence BeginSequence();
     bool            Submit(CommandSequence& Sequence, std::string* OutDiagnostic = nullptr);
+    // 📝 Several sequences behind one set of staged writes — the work of one submission — each submitted and awaited on its
+    //    own under its label, so a device fault names the sequence it struck.
+    bool            SubmitSeries(std::span<CommandSequence* const> Series, std::span<const std::string> Labels,
+                                 std::string* OutDiagnostic = nullptr);
     bool            FlushWrites(std::string* OutDiagnostic = nullptr);
     // 📝 Waits until the queue is idle (every submission, including a borrowing owner's), before replacing sampled targets.
     void            AwaitIdle() noexcept;
+    // 📝 VK_SUCCESS while the queue answers; VK_ERROR_DEVICE_LOST once any owner of the device lost it.
+    VkResult        ProbeDevice() noexcept;
+
+    // 🔍 Names the work of the following submissions in failure reports ("distance volume 12 of 340, slab 3").
+    void LabelSubmissions(std::string Label) { SubmissionLabel_ = std::move(Label); }
+    // 🔍 Every rejected queue write or copy and every failed submission, oldest first (empty while healthy).
+    [[nodiscard]] const std::vector<std::string>& Faults() const noexcept { return Faults_; }
+    // 🔍 Sees each fault as it is recorded (the editor journals them).
+    std::function<void(const std::string&)> FaultObserver{};
+    [[nodiscard]] uint64_t CompletedSubmissions() const noexcept { return CompletedSubmissions_; }
+    void RecordFault(const std::string& Fault);
 
     // Readback for validation captures.
     bool ReadRegion(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, VkDeviceSize ByteCount, std::vector<uint8_t>& OutBytes);
@@ -474,7 +489,8 @@ class DeviceExchange
     uint32_t SelectMemoryType(uint32_t TypeBits, VkMemoryPropertyFlags Required) const;
     bool EnsureStaging(VkDeviceSize ByteCount);
     void TransitionToGeneral(VkCommandBuffer Stream, DeviceTexture& Texture);
-    bool ExecuteImmediately(const std::function<void(VkCommandBuffer)>& Record);
+    bool ExecuteImmediately(const std::function<void(VkCommandBuffer)>& Record, std::string* OutFailure = nullptr);
+    std::string DescribeSubmissionPoint() const;
 
     struct PendingRegionWrite
     {
@@ -514,6 +530,11 @@ class DeviceExchange
     std::vector<PendingTextureWrite> PendingTextures_{};
     std::vector<std::shared_ptr<DeviceTexture>> PendingTransitions_{};
     std::vector<VkCommandBuffer>     ActiveStreams_{};
+
+    std::string                      SubmissionLabel_{};          // [-] the work the next submission carries
+    std::string                      CompletedLabel_{};           // [-] the work of the last submission that completed
+    uint64_t                         CompletedSubmissions_ = 0;   // [-] submissions whose fence signalled
+    std::vector<std::string>         Faults_{};
 };
 
 } // namespace Frontier

@@ -111,8 +111,9 @@ bool OccupantDistanceSpace::ConstructVolumes(SceneStructure& Scene, double Voxel
     auto Layout  = Exchange_.ConstructDescriptorLayout(Slots, "Distance transfer");
     auto Program = Shaders_.ConstructComputeProgram("DistanceTransfer", "TransferDistance", {Layout});
 
-    for (const OccupantVolume& Volume : Volumes)
+    for (size_t VolumeIndex = 0; VolumeIndex < Volumes.size(); ++VolumeIndex)
     {
+        const OccupantVolume& Volume = Volumes[VolumeIndex];
         const FacetSet&    Set = Scene.FacetSets[Volume.FacetSet];
         std::vector<float> Corners(Set.Facets.size() * 9);
         for (size_t Index = 0; Index < Set.Facets.size(); ++Index)
@@ -153,6 +154,10 @@ bool OccupantDistanceSpace::ConstructVolumes(SceneStructure& Scene, double Voxel
             std::memcpy(Bytes, Integers, sizeof(Bytes));
             auto Uniform = Exchange_.ConstructRegionFrom(Bytes, sizeof(Bytes), "Transfer constants");
             auto Group   = Exchange_.ConstructDescriptorGroup(Layout, {Uniform, EntryRegion, FacetRegion, TextureView}, "Distance transfer");
+            Exchange_.LabelSubmissions("bring-up: distance volume " + std::to_string(VolumeIndex + 1) + " of " + std::to_string(Volumes.size()) + " ('" +
+                                       Set.Name + "', " + std::to_string(Structure.FacetCount) + " facets, " + std::to_string(Volume.Resolution[0]) + "x" +
+                                       std::to_string(Volume.Resolution[1]) + "x" + std::to_string(Volume.Resolution[2]) + "), slices " +
+                                       std::to_string(Slab) + "-" + std::to_string(Slab + SlabExtent - 1));
             CommandSequence Sequence = Exchange_.BeginSequence();
             Sequence.BindProgram(Program);
             Sequence.BindGroup(0, Group);

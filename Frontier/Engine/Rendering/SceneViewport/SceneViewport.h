@@ -10,6 +10,7 @@
 
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -26,6 +27,8 @@ struct SceneViewportConfiguration
     std::string           Quality    = "medium";         // [-] the demo's grades: low | medium | high
     bool                  RayTracing = true;             // [-] RTX ReSTIR path tracer; false = GTX distance-field GI
     uint32_t              TraceScale = 2;                // [-] screen pixels per resampling pixel along one axis
+    // 🔍 Bring-up steps and device faults, one line each (the editor's diagnostic journal); unset = silent.
+    std::function<void(const std::string&)> Journal{};
 };
 
 // 📝 A camera in the illumination world (z up), as an orbit or fly controller resolves it.

@@ -126,6 +126,7 @@ int main(int ArgumentCount, char** Arguments)
     const uint32_t Height    = ArgumentCount > 8 ? static_cast<uint32_t>(std::atoi(Arguments[8])) : 270u;
     const uint32_t Refreshes = ArgumentCount > 9 ? static_cast<uint32_t>(std::atoi(Arguments[9])) : 16u;
     std::filesystem::create_directories(OutFolder);
+    Configuration.Journal = [](const std::string& Line) { std::printf("  %s\n", Line.c_str()); };
 
     SceneViewport Viewport;
     std::string   Diagnostic;
@@ -235,6 +236,8 @@ int main(int ArgumentCount, char** Arguments)
     ReportCheck(Statistics[3].SkyLuminance < Statistics[0].SkyLuminance * 0.5, "night sky darker than day",
                 std::to_string(Statistics[3].SkyLuminance) + " vs " + std::to_string(Statistics[0].SkyLuminance));
     ReportCheck(Statistics[3].StarPixels > 8, "night sky shows stars", std::to_string(Statistics[3].StarPixels) + " isolated bright pixels");
+    const std::vector<std::string>& Faults = Host.Exchange.Faults();
+    ReportCheck(Faults.empty(), "no rejected transfers or failed submissions", Faults.empty() ? "" : Faults.front());
     std::printf("\n=== scene viewport: %d failing checks\n", Failures);
     return Failures == 0 ? 0 : 1;
 }

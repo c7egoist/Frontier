@@ -6,9 +6,11 @@
 #include "DeviceExchange.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <tuple>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -52,6 +54,7 @@ namespace Frontier
     X(vkCreateFence)                                                                                                       \
     X(vkDestroyFence)                                                                                                      \
     X(vkWaitForFences)                                                                                                     \
+    X(vkGetFenceStatus)                                                                                                    \
     X(vkResetFences)                                                                                                       \
     X(vkCreateBuffer)                                                                                                      \
     X(vkDestroyBuffer)                                                                                                     \
@@ -273,6 +276,25 @@ void ReportDiagnostic(std::string* OutDiagnostic, const std::string& Message)
     }
 }
 
+std::string NameResult(VkResult Result)
+{
+    switch (Result)
+    {
+        case VK_SUCCESS:                    return "VK_SUCCESS";
+        case VK_NOT_READY:                  return "VK_NOT_READY";
+        case VK_TIMEOUT:                    return "VK_TIMEOUT";
+        case VK_ERROR_OUT_OF_HOST_MEMORY:   return "VK_ERROR_OUT_OF_HOST_MEMORY";
+        case VK_ERROR_OUT_OF_DEVICE_MEMORY: return "VK_ERROR_OUT_OF_DEVICE_MEMORY";
+        case VK_ERROR_INITIALIZATION_FAILED: return "VK_ERROR_INITIALIZATION_FAILED";
+        case VK_ERROR_DEVICE_LOST:          return "VK_ERROR_DEVICE_LOST";
+        case VK_ERROR_MEMORY_MAP_FAILED:    return "VK_ERROR_MEMORY_MAP_FAILED";
+        case VK_ERROR_OUT_OF_POOL_MEMORY:   return "VK_ERROR_OUT_OF_POOL_MEMORY";
+        case VK_ERROR_FRAGMENTED_POOL:      return "VK_ERROR_FRAGMENTED_POOL";
+        case VK_ERROR_UNKNOWN:              return "VK_ERROR_UNKNOWN";
+        default:                            return "VkResult " + std::to_string(static_cast<int>(Result));
+    }
+}
+
 } // namespace
 
 SpecializationConstant SpecializationConstant::FromFloat(float Scalar)
@@ -462,6 +484,9 @@ bool DeviceExchange::Initialize(const std::string& ExplicitDriverLibraryPath, st
     VkPhysicalDeviceVulkan13Features Enable13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     Enable13.dynamicRendering = VK_TRUE;
     Enable13.synchronization2 = Features13.synchronization2;
+    // 📝 WebGPU never faults on an image access outside the image (Tint clamps loads, drops stores); robustImageAccess, which
+    //    every Vulkan 1.3 device supports, gives the ported shaders that guarantee.
+    Enable13.robustImageAccess = Features13.robustImageAccess;
     VkPhysicalDeviceVulkan12Features Enable12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     Enable12.scalarBlockLayout = Features12.scalarBlockLayout;
     Enable13.pNext = &Enable12;
@@ -888,6 +913,16 @@ std::shared_ptr<DescriptorGroup> DeviceExchange::ConstructDescriptorGroup(const 
     std::vector<VkWriteDescriptorSet>   Writes;
     std::vector<VkDescriptorBufferInfo> BufferInfos(Group->Resources.size());
     std::vector<VkDescriptorImageInfo>  ImageInfos(Group->Resources.size());
+    // 🔍 A binding left unwritten holds no descriptor: the GPU reads garbage through it (a fault, a lost device).
+    for (uint32_t Slot = 0; Slot < Layout->Slots.size(); ++Slot)
+    {
+        const bool Present = Slot < Group->Resources.size() &&
+                             (Group->Resources[Slot].Region || Group->Resources[Slot].View || Group->Resources[Slot].Sampler);
+        if (!Present)
+        {
+            RecordFault("descriptor group '" + Label + "' leaves binding " + std::to_string(Slot) + " of layout '" + Layout->Label + "' unwritten");
+        }
+    }
     for (uint32_t Slot = 0; Slot < Group->Resources.size() && Slot < Layout->Slots.size(); ++Slot)
     {
         const DescriptorResource& Resource = Group->Resources[Slot];
@@ -1203,6 +1238,13 @@ void DeviceExchange::ReleaseProgram(DeviceProgram& Program) noexcept
 void DeviceExchange::WriteRegion(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, const void* Bytes, VkDeviceSize ByteCount)
 {
     if (!Region || ByteCount == 0) return;
+    // 📝 GPUQueue.writeBuffer past the end is a validation error that writes nothing; a Vulkan copy past the end faults the GPU.
+    if (Offset > Region->Capacity || ByteCount > Region->Capacity - Offset)
+    {
+        RecordFault("write of " + std::to_string(ByteCount) + " B at " + std::to_string(Offset) + " overruns '" + Region->Label + "' (" +
+                    std::to_string(Region->Capacity) + " B); not written");
+        return;
+    }
     if (WriteObserver) WriteObserver(Region->Label, Offset, Bytes, ByteCount);
     if (!EnsureStaging(ByteCount + 16)) return;
     const VkDeviceSize StagingOffset = (StagingCursor_ + 15) / 16 * 16;
@@ -1216,6 +1258,27 @@ void DeviceExchange::WriteTexture(const std::shared_ptr<DeviceTexture>& Texture,
                                   uint32_t OriginZ, uint32_t Level)
 {
     if (!Texture || ByteCount == 0) return;
+    {
+        // 📝 GPUQueue.writeTexture outside the subresource is a validation error that writes nothing.
+        const TextureSpecification& Specification = Texture->Specification;
+        const bool     Volume    = Specification.Dimension == TextureDimension::Volumetric;
+        const uint32_t MipWidth  = std::max(1u, Specification.Width >> Level);
+        const uint32_t MipHeight = std::max(1u, Specification.Height >> Level);
+        const uint32_t MipDepth  = Volume ? std::max(1u, Specification.DepthOrLayers >> Level) : 1u;
+        const VkDeviceSize Needed = static_cast<VkDeviceSize>(Width) * Height * Depth * QueryTexelBytes(Specification.Format);
+        const bool Inside = Level < Specification.Levels && (Volume || Layer < Specification.DepthOrLayers) &&
+                            static_cast<uint64_t>(OriginX) + Width <= MipWidth && static_cast<uint64_t>(OriginY) + Height <= MipHeight &&
+                            static_cast<uint64_t>(OriginZ) + Depth <= MipDepth && ByteCount >= Needed;
+        if (!Inside)
+        {
+            RecordFault("texture write " + std::to_string(Width) + "x" + std::to_string(Height) + "x" + std::to_string(Depth) + " at (" +
+                        std::to_string(OriginX) + ", " + std::to_string(OriginY) + ", " + std::to_string(OriginZ) + ") layer " + std::to_string(Layer) +
+                        " level " + std::to_string(Level) + " lies outside '" + Specification.Label + "' (" + std::to_string(Specification.Width) + "x" +
+                        std::to_string(Specification.Height) + "x" + std::to_string(Specification.DepthOrLayers) + ", " + std::to_string(ByteCount) +
+                        " B supplied); not written");
+            return;
+        }
+    }
     if (!EnsureStaging(ByteCount + 16)) return;
     const VkDeviceSize StagingOffset = (StagingCursor_ + 15) / 16 * 16;
     std::memcpy(StagingBytes_ + StagingOffset, Bytes, static_cast<size_t>(ByteCount));
@@ -1270,14 +1333,19 @@ void DeviceExchange::TransitionToGeneral(VkCommandBuffer Stream, DeviceTexture& 
     }
 }
 
-bool DeviceExchange::ExecuteImmediately(const std::function<void(VkCommandBuffer)>& Record)
+bool DeviceExchange::ExecuteImmediately(const std::function<void(VkCommandBuffer)>& Record, std::string* OutFailure)
 {
     VkCommandBufferAllocateInfo Allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     Allocate.commandPool        = CommandPool_;
     Allocate.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     Allocate.commandBufferCount = 1;
     VkCommandBuffer Stream      = VK_NULL_HANDLE;
-    if (Functions_->vkAllocateCommandBuffers(Device_, &Allocate, &Stream) != VK_SUCCESS) return false;
+    VkResult Result = Functions_->vkAllocateCommandBuffers(Device_, &Allocate, &Stream);
+    if (Result != VK_SUCCESS)
+    {
+        ReportDiagnostic(OutFailure, "vkAllocateCommandBuffers returned " + NameResult(Result));
+        return false;
+    }
     VkCommandBufferBeginInfo Begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     Begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     Functions_->vkBeginCommandBuffer(Stream, &Begin);
@@ -1287,10 +1355,41 @@ bool DeviceExchange::ExecuteImmediately(const std::function<void(VkCommandBuffer
     Submit.commandBufferCount = 1;
     Submit.pCommandBuffers    = &Stream;
     Functions_->vkResetFences(Device_, 1, &SubmitFence_);
-    const bool Submitted = Functions_->vkQueueSubmit(Queue_, 1, &Submit, SubmitFence_) == VK_SUCCESS;
-    if (Submitted) Functions_->vkWaitForFences(Device_, 1, &SubmitFence_, VK_TRUE, UINT64_MAX);
+    Result = Functions_->vkQueueSubmit(Queue_, 1, &Submit, SubmitFence_);
+    if (Result != VK_SUCCESS)
+    {
+        ReportDiagnostic(OutFailure, "vkQueueSubmit returned " + NameResult(Result));
+    }
+    else
+    {
+        // 📝 A device lost while this work ran may still signal the fence; the status query then reports the loss.
+        Result = Functions_->vkWaitForFences(Device_, 1, &SubmitFence_, VK_TRUE, UINT64_MAX);
+        if (Result == VK_SUCCESS) Result = Functions_->vkGetFenceStatus(Device_, SubmitFence_);
+        if (Result != VK_SUCCESS) ReportDiagnostic(OutFailure, "the fence wait returned " + NameResult(Result));
+    }
     Functions_->vkFreeCommandBuffers(Device_, CommandPool_, 1, &Stream);
-    return Submitted;
+    if (Result == VK_SUCCESS) ++CompletedSubmissions_;
+    return Result == VK_SUCCESS;
+}
+
+std::string DeviceExchange::DescribeSubmissionPoint() const
+{
+    std::string Point = SubmissionLabel_.empty() ? std::string("unlabelled work") : "'" + SubmissionLabel_ + "'";
+    Point += ", after " + std::to_string(CompletedSubmissions_) + " completed submissions";
+    if (!CompletedLabel_.empty()) Point += " (the last: '" + CompletedLabel_ + "')";
+    return Point;
+}
+
+void DeviceExchange::RecordFault(const std::string& Fault)
+{
+    if (Faults_.size() < 64) Faults_.push_back(Fault);
+    if (FaultObserver) FaultObserver(Fault);
+}
+
+VkResult DeviceExchange::ProbeDevice() noexcept
+{
+    if (Device_ == VK_NULL_HANDLE || Queue_ == VK_NULL_HANDLE) return VK_ERROR_INITIALIZATION_FAILED;
+    return Functions_->vkQueueWaitIdle(Queue_);
 }
 
 bool DeviceExchange::FlushWrites(std::string* OutDiagnostic)
@@ -1302,6 +1401,7 @@ bool DeviceExchange::FlushWrites(std::string* OutDiagnostic)
     PendingTransitions_.clear();
     PendingRegions_.clear();
     PendingTextures_.clear();
+    std::string Failure;
     const bool Executed = ExecuteImmediately([&](VkCommandBuffer Stream) {
         RecordGlobalDependency(*Functions_, Stream);
         for (auto& Texture : Transitions)
@@ -1309,21 +1409,48 @@ bool DeviceExchange::FlushWrites(std::string* OutDiagnostic)
             if (Texture && Texture->Image != VK_NULL_HANDLE) TransitionToGeneral(Stream, *Texture);
         }
         RecordGlobalDependency(*Functions_, Stream);
+        // 📝 Queue writes land in the order they were issued (a region's zero fill, then its contents). Copies without a
+        //    barrier between them may run concurrently on a GPU, so a write that overlaps an earlier one of this flush
+        //    waits for it; writes to disjoint ranges still run together.
+        std::vector<std::tuple<VkBuffer, VkDeviceSize, VkDeviceSize>> Written;
         for (const auto& Write : Regions)
         {
             if (!Write.Region || Write.Region->Handle == VK_NULL_HANDLE) continue;
+            if (Write.StagingOffset + Write.ByteCount > StagingCapacity_) continue;
+            const VkDeviceSize Start = Write.TargetOffset, End = Write.TargetOffset + Write.ByteCount;
+            const bool Overlaps = std::any_of(Written.begin(), Written.end(), [&](const auto& Earlier) {
+                return std::get<0>(Earlier) == Write.Region->Handle && Start < std::get<2>(Earlier) && std::get<1>(Earlier) < End;
+            });
+            if (Overlaps)
+            {
+                RecordGlobalDependency(*Functions_, Stream);
+                Written.clear();
+            }
+            Written.emplace_back(Write.Region->Handle, Start, End);
             VkBufferCopy Copy{Write.StagingOffset, Write.TargetOffset, Write.ByteCount};
             Functions_->vkCmdCopyBuffer(Stream, StagingHandle_, Write.Region->Handle, 1, &Copy);
         }
+        std::vector<VkImage> Imaged;
         for (const auto& Write : Textures)
         {
             if (!Write.Texture || Write.Texture->Image == VK_NULL_HANDLE) continue;
+            if (std::find(Imaged.begin(), Imaged.end(), Write.Texture->Image) != Imaged.end())
+            {
+                RecordGlobalDependency(*Functions_, Stream);
+                Imaged.clear();
+            }
+            Imaged.push_back(Write.Texture->Image);
             Functions_->vkCmdCopyBufferToImage(Stream, StagingHandle_, Write.Texture->Image, VK_IMAGE_LAYOUT_GENERAL, 1, &Write.Copy);
         }
         RecordGlobalDependency(*Functions_, Stream);
-    });
+    }, &Failure);
     StagingCursor_ = 0;
-    if (!Executed) ReportDiagnostic(OutDiagnostic, "staged write submission failed");
+    if (!Executed)
+    {
+        const std::string Report = "staged write submission failed: " + Failure + " — " + DescribeSubmissionPoint();
+        RecordFault(Report);
+        ReportDiagnostic(OutDiagnostic, Report);
+    }
     return Executed;
 }
 
@@ -1355,19 +1482,50 @@ bool DeviceExchange::Submit(CommandSequence& Sequence, std::string* OutDiagnosti
     Submit.commandBufferCount = 1;
     Submit.pCommandBuffers    = &Stream;
     Functions_->vkResetFences(Device_, 1, &SubmitFence_);
-    if (Functions_->vkQueueSubmit(Queue_, 1, &Submit, SubmitFence_) != VK_SUCCESS)
+    // 🔍 FRONTIER_DEVICE_TRACE=1 names every submission on stderr before it runs (a driver crash then names its work).
+    static const bool Trace = std::getenv("FRONTIER_DEVICE_TRACE") != nullptr;
+    if (Trace) std::fprintf(stderr, "[DeviceExchange] submission %llu: %s\n", static_cast<unsigned long long>(CompletedSubmissions_ + 1), SubmissionLabel_.c_str());
+    const VkResult Submitted = Functions_->vkQueueSubmit(Queue_, 1, &Submit, SubmitFence_);
+    if (Submitted != VK_SUCCESS)
     {
-        ReportDiagnostic(OutDiagnostic, "vkQueueSubmit failed");
+        Functions_->vkFreeCommandBuffers(Device_, CommandPool_, 1, &Stream);
+        const std::string Report = "vkQueueSubmit returned " + NameResult(Submitted) + " — " + DescribeSubmissionPoint();
+        RecordFault(Report);
+        ReportDiagnostic(OutDiagnostic, Report);
         return false;
     }
-    const VkResult Waited = Functions_->vkWaitForFences(Device_, 1, &SubmitFence_, VK_TRUE, UINT64_MAX);
+    VkResult Waited = Functions_->vkWaitForFences(Device_, 1, &SubmitFence_, VK_TRUE, UINT64_MAX);
+    if (Waited == VK_SUCCESS) Waited = Functions_->vkGetFenceStatus(Device_, SubmitFence_);
     Functions_->vkFreeCommandBuffers(Device_, CommandPool_, 1, &Stream);
     if (Waited != VK_SUCCESS)
     {
-        ReportDiagnostic(OutDiagnostic, "device lost while waiting for the submission");
+        const std::string Report = "the submission's fence wait returned " + NameResult(Waited) + " — " + DescribeSubmissionPoint();
+        RecordFault(Report);
+        ReportDiagnostic(OutDiagnostic, Report);
         return false;
     }
+    ++CompletedSubmissions_;
+    CompletedLabel_ = SubmissionLabel_;
     return true;
+}
+
+bool DeviceExchange::SubmitSeries(std::span<CommandSequence* const> Series, std::span<const std::string> Labels, std::string* OutDiagnostic)
+{
+    bool Healthy = FlushWrites(OutDiagnostic);
+    for (size_t Index = 0; Index < Series.size(); ++Index)
+    {
+        if (!Healthy)
+        {
+            // 📝 The streams after a failure are never submitted; they go back to the pool.
+            VkCommandBuffer Stream = Series[Index]->Stream();
+            Functions_->vkEndCommandBuffer(Stream);
+            Functions_->vkFreeCommandBuffers(Device_, CommandPool_, 1, &Stream);
+            continue;
+        }
+        if (Index < Labels.size()) SubmissionLabel_ = Labels[Index];
+        Healthy = Submit(*Series[Index], OutDiagnostic);
+    }
+    return Healthy;
 }
 
 void DeviceExchange::AwaitIdle() noexcept
@@ -1378,6 +1536,11 @@ void DeviceExchange::AwaitIdle() noexcept
 bool DeviceExchange::ReadRegion(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, VkDeviceSize ByteCount,
                                 std::vector<uint8_t>& OutBytes)
 {
+    if (!Region || Offset > Region->Capacity || ByteCount > Region->Capacity - Offset)
+    {
+        RecordFault("read of " + std::to_string(ByteCount) + " B at " + std::to_string(Offset) + " overruns '" + (Region ? Region->Label : std::string("?")) + "'");
+        return false;
+    }
     if (!FlushWrites()) return false;
     if (!EnsureStaging(ByteCount)) return false;
     const bool Executed = ExecuteImmediately([&](VkCommandBuffer Stream) {
@@ -1548,6 +1711,14 @@ void CommandSequence::CopyRegion(const std::shared_ptr<DeviceRegion>& Source, Vk
                                  const std::shared_ptr<DeviceRegion>& Target, VkDeviceSize TargetOffset, VkDeviceSize ByteCount)
 {
     if (ByteCount == 0) return;
+    // 📝 copyBufferToBuffer outside either buffer is a validation error that copies nothing.
+    if (SourceOffset > Source->Capacity || ByteCount > Source->Capacity - SourceOffset || TargetOffset > Target->Capacity ||
+        ByteCount > Target->Capacity - TargetOffset)
+    {
+        Exchange_.RecordFault("copy of " + std::to_string(ByteCount) + " B from '" + Source->Label + "' @" + std::to_string(SourceOffset) + " to '" +
+                              Target->Label + "' @" + std::to_string(TargetOffset) + " overruns a region; not copied");
+        return;
+    }
     OrderAfterEarlierWork();
     Retained_.push_back(Source);
     Retained_.push_back(Target);
