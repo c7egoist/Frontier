@@ -583,3 +583,4 @@ if(BUILD_TESTING)
 endif()
 
 include(Automation/EnvironmentRendering.cmake)
+include(Automation/IlluminationRendering.cmake)
