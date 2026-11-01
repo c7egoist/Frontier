@@ -1123,11 +1123,33 @@ void main() {
     float creep = avalanche ? (2.4 + 9.0 * (sinTheta - 0.36)) : (0.25 + 1.9 * sinTheta);
     speed = clamp(mix(length(velWater.xz), creep, 0.35), 0.06, 9.0);
   } else if (species == SP_WIND) {
-    float crossSlopeWind = dot(grad, windPerp);
-    vec2 terrainDeflectedWind = safeNorm2(
-      gustWindDir - windPerp * clamp(crossSlopeWind, -1.2, 1.2) * uWindErodeB.z * 0.18,
-      gustWindDir
-    );
+    // Wrap-around terrain flow (same multi-scale obstacle model as the
+    // terrain integrator): saltating grains are carried around massifs and
+    // along valley axes instead of straight over every ridge.
+    vec4 obE6 = sampleGridBilinear(uTerrainTex, clamp(uv + vec2(eps * 6.0, 0.0), vec2(0.002), vec2(0.998)), res);
+    vec4 obW6 = sampleGridBilinear(uTerrainTex, clamp(uv - vec2(eps * 6.0, 0.0), vec2(0.002), vec2(0.998)), res);
+    vec4 obU6 = sampleGridBilinear(uTerrainTex, clamp(uv + vec2(0.0, eps * 6.0), vec2(0.002), vec2(0.998)), res);
+    vec4 obD6 = sampleGridBilinear(uTerrainTex, clamp(uv - vec2(0.0, eps * 6.0), vec2(0.002), vec2(0.998)), res);
+    vec4 obE16 = sampleGridBilinear(uTerrainTex, clamp(uv + vec2(eps * 16.0, 0.0), vec2(0.002), vec2(0.998)), res);
+    vec4 obW16 = sampleGridBilinear(uTerrainTex, clamp(uv - vec2(eps * 16.0, 0.0), vec2(0.002), vec2(0.998)), res);
+    vec4 obU16 = sampleGridBilinear(uTerrainTex, clamp(uv + vec2(0.0, eps * 16.0), vec2(0.002), vec2(0.998)), res);
+    vec4 obD16 = sampleGridBilinear(uTerrainTex, clamp(uv - vec2(0.0, eps * 16.0), vec2(0.002), vec2(0.998)), res);
+    vec2 obstacleGrad = 0.60 * vec2(
+        (obE6.r + obE6.g + obE6.b) - (obW6.r + obW6.g + obW6.b),
+        (obU6.r + obU6.g + obU6.b) - (obD6.r + obD6.g + obD6.b)) / (12.0 * cellSize)
+      + 0.40 * vec2(
+        (obE16.r + obE16.g + obE16.b) - (obW16.r + obW16.g + obW16.b),
+        (obU16.r + obU16.g + obU16.b) - (obD16.r + obD16.g + obD16.b)) / (32.0 * cellSize);
+    vec2 terrainDeflectedWind = gustWindDir;
+    float ogLen = length(obstacleGrad);
+    if (ogLen > 1e-4) {
+      vec2 ogDir = obstacleGrad / ogLen;
+      float intoHill = dot(gustWindDir, ogDir);
+      float wrapBlock = uWindErodeB.z * smoothstep(0.06, 0.80, ogLen) * 0.94;
+      if (intoHill > 0.0 && wrapBlock > 0.001) {
+        terrainDeflectedWind = safeNorm2(gustWindDir - ogDir * (intoHill * wrapBlock), gustWindDir);
+      }
+    }
     if (uDryAeolian > 0.35) {
       // Pure aeolian desert saltation: turbulent gusts drive grains up stoss
       // faces, around crags and through curved corridors instead of one ruler line.
@@ -1824,15 +1846,41 @@ void main() {
       (aU.r + aU.g + aU.b) - (aD.r + aD.g + aD.b)
     ) / (2.0 * cellSize);
 
-    // Flow bends around cross-wind high ground and into corridors, rather
-    // than crossing every ridge along the same compass vector.
-    float crossSlopeW = dot(hGrad, windPerp);
-    localWind = safeNorm2(
-      localWind - windPerp * clamp(crossSlopeW, -1.2, 1.2) * uWindErodeB.z * 0.18,
-      localWind
-    );
+    // Wrap-around terrain flow: a smoothed multi-scale obstacle gradient
+    // (hill/valley scale, not single-cell noise) progressively blocks the
+    // into-hill component of the wind. The remaining tangential flow splits
+    // around massifs, follows contours along flanks and funnels through
+    // saddles and valley axes instead of riding straight over every ridge.
+    // Scaled by the Streamlining setting (uWindErodeB.z); at 0 the wind
+    // rides over terrain along the gust vector as before.
+    vec4 obE6 = sampleGridBilinear(uTerrainTex, clamp(vUv + vec2(6.0 / uIntParams.x, 0.0), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 obW6 = sampleGridBilinear(uTerrainTex, clamp(vUv - vec2(6.0 / uIntParams.x, 0.0), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 obU6 = sampleGridBilinear(uTerrainTex, clamp(vUv + vec2(0.0, 6.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 obD6 = sampleGridBilinear(uTerrainTex, clamp(vUv - vec2(0.0, 6.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 obE16 = sampleGridBilinear(uTerrainTex, clamp(vUv + vec2(16.0 / uIntParams.x, 0.0), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 obW16 = sampleGridBilinear(uTerrainTex, clamp(vUv - vec2(16.0 / uIntParams.x, 0.0), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 obU16 = sampleGridBilinear(uTerrainTex, clamp(vUv + vec2(0.0, 16.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec4 obD16 = sampleGridBilinear(uTerrainTex, clamp(vUv - vec2(0.0, 16.0 / uIntParams.x), vec2(0.002), vec2(0.998)), uIntParams.x);
+    vec2 obstacleGrad = 0.60 * vec2(
+        (obE6.r + obE6.g + obE6.b) - (obW6.r + obW6.g + obW6.b),
+        (obU6.r + obU6.g + obU6.b) - (obD6.r + obD6.g + obD6.b)) / (12.0 * cellSize)
+      + 0.40 * vec2(
+        (obE16.r + obE16.g + obE16.b) - (obW16.r + obW16.g + obW16.b),
+        (obU16.r + obU16.g + obU16.b) - (obD16.r + obD16.g + obD16.b)) / (32.0 * cellSize);
+    float ogLen = length(obstacleGrad);
+    vec2 windBeforeWrap = localWind;
+    if (ogLen > 1e-4) {
+      vec2 ogDir = obstacleGrad / ogLen;
+      float intoHill = dot(localWind, ogDir);
+      float wrapBlock = uWindErodeB.z * smoothstep(0.06, 0.80, ogLen) * 0.94;
+      if (intoHill > 0.0 && wrapBlock > 0.001) {
+        localWind = safeNorm2(localWind - ogDir * (intoHill * wrapBlock), localWind);
+      }
+    }
+    float wrapDeflect = 1.0 - dot(windBeforeWrap, localWind);
     float slopeAlongW = dot(hGrad, localWind);
-    float wPow = uWindField.z * (0.55 + 0.45 * uHydrology.w) * windGust;
+    // Continuity: flow bent around terrain speeds up along flanks / through gaps.
+    float wPow = uWindField.z * (0.55 + 0.45 * uHydrology.w) * windGust * (1.0 + 0.55 * wrapDeflect);
 
     vec2 upUv = clamp(vUv - localWind * (1.35 / uIntParams.x), vec2(0.002), vec2(0.998));
     vec2 dnUv = clamp(vUv + localWind * (1.35 / uIntParams.x), vec2(0.002), vec2(0.998));

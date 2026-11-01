@@ -250,7 +250,7 @@ const INSPECTOR_SCHEMAS = {
       { key: 'windGustiness', label: 'Gust Strength Variation', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'windSandSupply', label: 'Abrasive Sand Supply', min: 0.0, max: 1.2, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'windCurtainHeight', label: 'Saltation Curtain / Undercut Height', min: 0.05, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}% relief` },
-      { key: 'windStreamlining', label: 'Yardang Streamlining & Lee Shelter', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+      { key: 'windStreamlining', label: 'Wrap Around Terrain & Lee Shelter', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'windFluting', label: 'Vertical Fluting / Fin Separation', min: 0.0, max: 1.0, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'dryAeolianMode', label: 'Arid Saltation Regime', min: 0.0, max: 1.0, step: 0.05, fmt: (v) => `${Math.round(v * 100)}%` },
     ],
@@ -1032,7 +1032,7 @@ export class ErosionLayerStackUI {
           <div class="tp-wind-from-grid">${fromButtons}</div>
           <div class="tp-wind-legend"></div>
           <div class="tp-wind-legend-labels"><span>Sheltered · slow</span><span>Fast · erosive</span></div>
-          <p class="tp-card-note">Arrows preview the actual erosion flow (same flow model as the simulation): direction includes turbulent wander and deflection around ridges; length &amp; colour show local speed with gusts and lee sheltering — long/warm abrades windward faces, short/cool marks sheltered lee deposition. Faint rings = wind erosion blocked by water or snow. Compass: −Z = North, +X = East.</p>
+          <p class="tp-card-note">Arrows preview the actual erosion flow (same flow model as the simulation): direction includes turbulent wander and wrap-around flow — the wind splits around massifs, follows contours and funnels through saddles/valleys (strength = Wrap Around Terrain slider; at 0% it rides straight over). Length &amp; colour show local speed with gusts, flank speedup and lee sheltering — long/warm abrades exposed faces, short/cool marks sheltered lee deposition. Faint rings = wind erosion blocked by water or snow. Compass: −Z = North, +X = East.</p>
         </section>`;
     }
 
@@ -1675,7 +1675,7 @@ export class ErosionLayerStackUI {
         heightAt: sampler.sample,
         gateAt: sampler.gate,
         span: sampler.span,
-        divisions: 17,
+        divisions: 21,
         azimuthDeg: wp.azimuthDeg,
         windSpeed: wp.windSpeed,
         turbulence: wp.turbulence,

@@ -141,15 +141,19 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   snow/glacier layer. Its own simulation layer controls prevailing direction,
   speed, overall rate, rock abrasion, deflation, lee deposition, turbulent
   direction wander, gustiness, abrasive sand supply, saltation-curtain /
-  undercut height, yardang streamlining and vertical fluting. Local flow
-  bends around terrain and is sheltered in lee wakes, while soft/fractured
+  undercut height, wrap-around streamlining and vertical fluting. Local
+  flow genuinely wraps around terrain — a multi-scale obstacle gradient
+  blocks the into-hill wind component, so flow splits around massifs,
+  follows contours, speeds along flanks and funnels through saddles and
+  valley axes (Wrap slider at 0% restores straight over-the-top flow) — and
+  is sheltered in lee wakes, while soft/fractured
   strata abrade faster than hard caprock — replacing ruler-straight mountain
   grooves with curved corridors, fins and spire-like remnants. Wind settings
   can be changed between seasons without rebuilding the already-eroded
   terrain. The layer's **Wind Flow Debug** card previews exactly where the
   wind will go before you run it: a toggleable vector field over the terrain
   (same flow model as the simulation — prevailing vector, turbulent gust
-  wander, terrain deflection and lee sheltering) where arrow direction is the
+  wander, wrap-around terrain flow and lee sheltering) where arrow direction is the
   local flow and arrow length/colour is local speed (long/warm = exposed,
   erosive; short/cool = sheltered deposition; faint rings = blocked by
   water/snow). A live readout translates the azimuth slider into compass

@@ -3,8 +3,9 @@
  *
  * The aeolian erosion in `erosion-shaders.js` (terrain integrator) does not
  * blow along one compass vector: the prevailing wind is bent by seeded
- * turbulent gust wander, deflected around cross-wind slopes, and slowed in
- * multi-distance lee shelter behind ridges. That makes the erosion hard to
+ * turbulent gust wander, wraps around massifs and channels through valleys
+ * (multi-scale obstacle deflection), and is slowed in multi-distance lee
+ * shelter behind ridges. That makes the erosion hard to
  * predict from the azimuth slider alone, so this module reproduces the same
  * flow model on the CPU (same noise, scales and formulas) to draw a debug
  * vector field over the terrain: arrow direction = local flow direction,
@@ -154,15 +155,35 @@ export function sampleWindVector(p, wx, wz, heightAt) {
   let [lx, lz] = norm2(baseX + perpX * wander, baseZ + perpZ * wander, baseX, baseZ);
   const gust = 0.60 + 0.85 * smoothstep(0.25, 0.85, gustNoiseA);
 
-  // Terrain gradient (central differences over one grid cell, as in shader).
   const hC = heightAt(wx, wz);
-  const gradX = (heightAt(wx + cellSize, wz) - heightAt(wx - cellSize, wz)) / (2 * cellSize);
-  const gradZ = (heightAt(wx, wz + cellSize) - heightAt(wx, wz - cellSize)) / (2 * cellSize);
 
-  // Flow bends around cross-wind high ground into corridors.
-  const crossSlope = gradX * perpX + gradZ * perpZ;
-  const deflect = clamp(crossSlope, -1.2, 1.2) * streamlining * 0.18;
-  [lx, lz] = norm2(lx - perpX * deflect, lz - perpZ * deflect, lx, lz);
+  // Wrap-around terrain flow (identical to the shaders): a smoothed
+  // multi-scale obstacle gradient (±6 / ±16 cells) progressively blocks the
+  // into-hill component of the wind, so the remaining tangential flow splits
+  // around massifs, follows contours along flanks and funnels through
+  // saddles and valley axes instead of riding straight over every ridge.
+  const ogAt = (cells) => [
+    (heightAt(wx + cells * cellSize, wz) - heightAt(wx - cells * cellSize, wz)) / (2 * cells * cellSize),
+    (heightAt(wx, wz + cells * cellSize) - heightAt(wx, wz - cells * cellSize)) / (2 * cells * cellSize),
+  ];
+  const og6 = ogAt(6);
+  const og16 = ogAt(16);
+  const ogX = og6[0] * 0.60 + og16[0] * 0.40;
+  const ogZ = og6[1] * 0.60 + og16[1] * 0.40;
+  const ogLen = Math.hypot(ogX, ogZ);
+  let wrapDeflect = 0;
+  if (ogLen > 1e-4) {
+    const ogDirX = ogX / ogLen;
+    const ogDirZ = ogZ / ogLen;
+    const intoHill = lx * ogDirX + lz * ogDirZ;
+    const wrapBlock = streamlining * smoothstep(0.06, 0.80, ogLen) * 0.94;
+    if (intoHill > 0 && wrapBlock > 0.001) {
+      const beforeX = lx;
+      const beforeZ = lz;
+      [lx, lz] = norm2(lx - ogDirX * intoHill * wrapBlock, lz - ogDirZ * intoHill * wrapBlock, lx, lz);
+      wrapDeflect = 1 - (beforeX * lx + beforeZ * lz);
+    }
+  }
 
   // Multi-distance upwind shelter (3 / 9 / 20 cells upwind, as in shader).
   const shelterAt = (cells) => (heightAt(wx - lx * cells * cellSize, wz - lz * cells * cellSize) - hC) / Math.max(cells * cellSize, 0.001) - 0.22;
@@ -171,14 +192,15 @@ export function sampleWindVector(p, wx, wz, heightAt) {
   const exposure = 1.0 - 0.82 * shadow;
 
   // Engine speed uniform when the wind season plays: 0.25 + 0.95 * speed.
+  // Continuity: flow bent around terrain speeds up along flanks / gaps.
   const baseSpeed = 0.25 + 0.95 * clamp(Number(p.windSpeed) || 0, 0, 1);
-  const speed = baseSpeed * gust * exposure;
+  const speed = baseSpeed * gust * exposure * (1 + 0.55 * wrapDeflect);
 
-  return { dirX: lx, dirZ: lz, speed, gust, exposure, shadow, baseSpeed, height: hC };
+  return { dirX: lx, dirZ: lz, speed, gust, exposure, shadow, baseSpeed, wrapDeflect, height: hC };
 }
 
-/** Reference maximum of `speed` (full speed slider, peak gust, unsheltered). */
-export const WIND_SPEED_REF_MAX = 1.2 * 1.45;
+/** Reference maximum of `speed` (full speed slider, peak gust, unsheltered, flank speedup). */
+export const WIND_SPEED_REF_MAX = 1.2 * 1.45 * 1.30;
 
 /** Speed -> display colour (cool/slow -> mint -> warm/fast), as [r, g, b]. */
 export function windSpeedColor(t) {
@@ -262,6 +284,7 @@ export function buildWindVectorField(opts) {
         speedNorm,
         exposure: v.exposure,
         shadow: v.shadow,
+        wrapDeflect: v.wrapDeflect,
         active,
       });
     }

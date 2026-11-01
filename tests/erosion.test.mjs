@@ -2114,13 +2114,37 @@ test('Wind erosion debug vector field mirrors the GPU flow model (direction, gus
   );
   assert.ok(Math.abs(turbulent.dirZ) > 0.05, `Turbulent wander deflects the local wind, got dirZ ${turbulent.dirZ}`);
 
-  // Terrain deflection: flow bends around a cone flank with streamlining on.
+  // Wrap-around flow: the wind splits around a cone instead of riding over
+  // it — symmetric outward bending either side of the stagnation centreline,
+  // and no bending at all when Wrap/Streamlining is 0 (legacy ride-over).
   const cone = (x, z) => 30 + 70 * Math.exp(-(x * x + z * z) / (2 * 60 * 60));
-  const deflected = sampleWindVector(
-    { azimuthDeg: 0, windSpeed: 0.8, turbulence: 0, streamlining: 1.0, seed: 3, cellSize: 1 },
-    -20, 45, cone
+  const wrapP = { azimuthDeg: 0, windSpeed: 0.8, turbulence: 0, streamlining: 1.0, seed: 3, cellSize: 1 };
+  const northSide = sampleWindVector(wrapP, -50, 30, cone);
+  const southSide = sampleWindVector(wrapP, -50, -30, cone);
+  const centreline = sampleWindVector(wrapP, -50, 0, cone);
+  assert.ok(northSide.dirZ > 0.4, `Flow wraps around the +Z flank, got dirZ ${northSide.dirZ.toFixed(3)}`);
+  assert.ok(southSide.dirZ < -0.4, `Flow wraps around the -Z flank, got dirZ ${southSide.dirZ.toFixed(3)}`);
+  assert.ok(Math.abs(centreline.dirZ) < 0.02, 'Centreline is the symmetric split line');
+  assert.ok(northSide.wrapDeflect > 0.1, 'Wrap deflection is recorded for the flank speedup');
+  const rideOver = sampleWindVector({ ...wrapP, streamlining: 0 }, -50, 30, cone);
+  assert.ok(Math.abs(rideOver.dirZ) < 1e-6, 'Streamlining 0 keeps the legacy straight-over-the-terrain flow');
+  const halfWrap = sampleWindVector({ ...wrapP, streamlining: 0.55 }, -50, 30, cone);
+  assert.ok(halfWrap.dirZ > 0.15 && halfWrap.dirZ < northSide.dirZ, 'Wrap strength scales with the Streamlining setting');
+
+  // Valley channeling: a diagonal wind is funnelled along the valley axis.
+  const valley = (x, z) => 30 + 70 * (1 - Math.exp(-(z * z) / (2 * 55 * 55)));
+  const channelled = sampleWindVector(
+    { azimuthDeg: 40, windSpeed: 0.8, turbulence: 0, streamlining: 1.0, seed: 3, cellSize: 1 },
+    0, 30, valley
   );
-  assert.ok(Math.abs(deflected.dirZ) > 0.03, `Cross-slope deflection bends flow around high ground, got dirZ ${deflected.dirZ}`);
+  assert.ok(channelled.dirX > 0.9 && channelled.dirZ < 0.35,
+    `Diagonal wind (0.766, 0.643) is channelled along the valley, got (${channelled.dirX.toFixed(3)}, ${channelled.dirZ.toFixed(3)})`);
+
+  // The GPU shaders implement the same wrap model in both wind passes.
+  const erosionShaderSrc = fs.readFileSync(new URL('../src/erosion/erosion-shaders.js', import.meta.url), 'utf8');
+  assert.ok((erosionShaderSrc.match(/obstacleGrad/g) || []).length >= 4, 'Both wind passes compute the multi-scale obstacle gradient');
+  assert.ok(erosionShaderSrc.includes('wrapBlock') && erosionShaderSrc.includes('wrapDeflect'), 'Wrap-around blocking + flank speedup present in the integrator');
+  assert.ok(!erosionShaderSrc.includes('crossSlopeW') && !erosionShaderSrc.includes('crossSlopeWind'), 'Old single-cell cross-slope nudge is replaced');
 
   // Lee sheltering: just downwind of a ridge the flow is much weaker than on
   // the windward side — this is where the debug arrows turn short/cool.
