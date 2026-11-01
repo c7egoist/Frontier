@@ -146,7 +146,10 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   blocks the into-hill wind component, so flow splits around massifs,
   follows contours, speeds along flanks and funnels through saddles and
   valley axes (Wrap slider at 0% restores straight over-the-top flow) — and
-  is sheltered in lee wakes, while soft/fractured
+  is sheltered in lee wakes. Abrasion acts along those wrapped streamlines
+  (tangential flank/valley-wall sandblasting and flow-aligned fluting), not
+  only on head-on faces, so the carved pattern tracks the debug flow field,
+  while soft/fractured
   strata abrade faster than hard caprock — replacing ruler-straight mountain
   grooves with curved corridors, fins and spire-like remnants. Wind settings
   can be changed between seasons without rebuilding the already-eroded

@@ -2146,6 +2146,17 @@ test('Wind erosion debug vector field mirrors the GPU flow model (direction, gus
   assert.ok(erosionShaderSrc.includes('wrapBlock') && erosionShaderSrc.includes('wrapDeflect'), 'Wrap-around blocking + flank speedup present in the integrator');
   assert.ok(!erosionShaderSrc.includes('crossSlopeW') && !erosionShaderSrc.includes('crossSlopeWind'), 'Old single-cell cross-slope nudge is replaced');
 
+  // Erosion must FOLLOW the wrapped streamlines, not just steer by them:
+  // tangential flank abrasion in both passes, flutes aligned to the local
+  // wrapped wind, and particle erosion decisions made against the wrapped
+  // direction (previously the un-wrapped gust vector).
+  assert.ok((erosionShaderSrc.match(/tangentialSlope/g) || []).length >= 4, 'Tangential streamline abrasion present in both wind passes');
+  assert.ok(erosionShaderSrc.includes('slopeAlongW > -0.25'), 'Abrasion gate admits tangential (contour-streaming) flow, not only head-on faces');
+  assert.ok(erosionShaderSrc.includes('dot(worldXZ, localPerp)'), 'Wind flutes align to the wrapped local wind');
+  assert.ok(!erosionShaderSrc.includes('dot(grad, gustWindDir)'), 'Particle stoss/lee decisions no longer use the un-wrapped gust vector');
+  assert.ok(erosionShaderSrc.includes('dot(grad, terrainDeflectedWind)'), 'Particle stoss/lee decisions use the wrapped wind');
+  assert.ok(erosionShaderSrc.includes('terrainDeflectedWind * 0.88'), 'Saltation steering follows the wrapped wind with only mild downslope dilution');
+
   // Lee sheltering: just downwind of a ridge the flow is much weaker than on
   // the windward side — this is where the debug arrows turn short/cool.
   const ridge = (x) => 30 + 80 * Math.exp(-(x * x) / (2 * 35 * 35));

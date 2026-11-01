@@ -1641,7 +1641,14 @@ export class ErosionLayerStackUI {
     if (!el) return;
     const wp = this._windDebugParams();
     const c = windCompassFromAzimuth(wp.azimuthDeg);
-    const txt = `Prevailing wind blows toward ${c.towardPoint} (${Math.round(c.towardDeg)}°) — a wind FROM ${c.fromPoint} (${Math.round(c.fromDeg)}°), at ${Math.round((wp.windSpeed || 0) * 100)}% speed.`;
+    // The simulation is driven by the topmost enabled Wind layer; say so when
+    // the previewed (selected) layer is a different one, so the arrows are
+    // never silently showing a field the sim won't use.
+    const authority = (this.pipeline.layers || []).find((l) => l.enabled && l.type === 'wind-erosion');
+    const note = wp.layer && authority && authority.id !== wp.layer.id
+      ? ' Previewing the selected layer — the topmost Wind layer drives the simulation.'
+      : '';
+    const txt = `Prevailing wind blows toward ${c.towardPoint} (${Math.round(c.towardDeg)}°) — a wind FROM ${c.fromPoint} (${Math.round(c.fromDeg)}°), at ${Math.round((wp.windSpeed || 0) * 100)}% speed.${note}`;
     if (el.textContent !== txt) el.textContent = txt;
   }
 
