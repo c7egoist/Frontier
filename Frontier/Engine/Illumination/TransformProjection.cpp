@@ -11,9 +11,12 @@
 namespace Frontier::Illumination
 {
 
+// ⚠️ The round trip goes through a volatile float: GCC 12 -O2 SLP vectorization was observed dropping the
+//    double → float → double truncation for paired stores (View[12], View[13]), which broke parity with the demo.
 double StoreSingle(double Scalar) noexcept
 {
-    return static_cast<double>(static_cast<float>(Scalar));
+    volatile float Single = static_cast<float>(Scalar);
+    return static_cast<double>(Single);
 }
 
 // 📝 V8's Math.hypot: the largest magnitude scales every term, the squares are summed with Kahan compensation.

@@ -20,6 +20,7 @@ add_library(FrontierIllumination STATIC
     Frontier/Engine/Illumination/SurfaceProjection.cpp
     Frontier/Engine/Illumination/ResamplingSequence.cpp
     Frontier/Engine/Illumination/DisplayProjection.cpp
+    Frontier/Engine/Illumination/RefreshEncoding.cpp
     Frontier/Engine/Illumination/IlluminationHost.cpp)
 
 target_include_directories(FrontierIllumination PUBLIC

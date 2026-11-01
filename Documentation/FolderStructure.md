@@ -23,13 +23,14 @@ Frontier/
 │   ├── Lifecycle/             # Activation sequence
 │   └── Render/                # Blank; Git retention marker only
 ├── Frontier/
-│   └── Engine/                # Multi-realm PlanetaryAtmosphere, GeometricRaster, DeviceExchange, Rendering & Shaders
-│       ├── DeviceExchange/    # VulkanComputeExchange, DeviceMemorySpan, DeviceImageArraySlot
+│   └── Engine/                # Multi-realm PlanetaryAtmosphere, GeometricRaster, DeviceExchange, Illumination, Rendering & Shaders
+│       ├── DeviceExchange/    # VulkanComputeExchange (compute), DeviceExchange (raster + compute, WebGPU ordering)
 │       ├── GeometricRaster/   # VisibilityProjection (cross-portal ray routing & reversed-Z visibility)
 │       ├── PlanetaryAtmosphere/ # AtmosphereScattering, AstronomicalEphemeris, SkyProjection, PlanetaryProjection,
 │       │                        # CloudSpace, VolumetricClouds, FogSpace, OpticalLensFlare, PlanetaryEnsemble, WeatherEffects
-│       ├── Rendering/         # Core frame graph, GI, surface cards, and reference renderer units
-│       └── Shaders/           # Slang 2026 SPIR-V 1.3 compute & raster shaders
+│       ├── Illumination/      # 1:1 port of the VehicleHMI ReSTIR GI renderer (distance field, cards, BVH, ReSTIR, SVGF)
+│       ├── Rendering/         # SubmissionOrder, BarrierDerivation, TransientTargetAtlas, environment/inspection units
+│       └── Shaders/           # Slang 2026 SPIR-V 1.3 compute & raster shaders (Illumination/ holds the port's units)
 ├── UI/
 │   └── Editor/                # Lifecycle-owned production editor UI
 ├── Projects/

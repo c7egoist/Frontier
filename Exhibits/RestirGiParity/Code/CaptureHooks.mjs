@@ -337,6 +337,15 @@ export default {
             // 📝 Effects outside the illumination port (clouds, cloud shadows, lens flare, smoke, sparks, tyre marks) are
             //    switched off for the reference, so the comparison isolates the ported chain.
             Object.assign(Host.Settings, JSON.parse(process.env.CAPTURE_SETTINGS || "{}"));
+            // 📝 The camera and light each refresh is encoded from, so the port's host encoders can be checked exactly.
+            const Encode = Host.EncodeFrameRecord.bind(Host);
+            Host.EncodeFrameRecord = (Camera, Light) =>
+            {
+                fs.appendFileSync(path.join(OutFolder, "Refreshes.jsonl"), JSON.stringify({ Refresh: Host.FrameIndex, Camera, Light,
+                    Focus: Host.Focus, TraceExtent: Host.TraceExtent, ScreenExtent: Host.ScreenExtent, PriorValid: Host.PriorValid,
+                    VehicleBody: Host.Vehicle.QueryBodyTransform ? Array.from(Host.Vehicle.QueryBodyTransform()) : null }) + "\n");
+                return Encode(Camera, Light);
+            };
             WriteFacetSpace(Host.Scene, path.join(OutFolder, "Scene.facetspace"));
             fs.writeFileSync(path.join(OutFolder, "Settings.json"), JSON.stringify({ Settings: Host.Settings, Grade: Host.Grade,
                 ScreenExtent: Host.ScreenExtent, TraceExtent: Host.TraceExtent, TraceScale: Host.TraceScaleUsed,

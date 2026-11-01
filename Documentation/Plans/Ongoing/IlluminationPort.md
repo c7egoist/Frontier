@@ -2,18 +2,16 @@
 
 ## Status
 
-| Area                                   | State        | Evidence                                                        |
+| Area                                   | State        | Evidence (`Exhibits/RestirGiParity`)                            |
 |----------------------------------------|--------------|-----------------------------------------------------------------|
-| WGSL → Slang (51 units, 29 entries)    | ✔️ compiles  | `Frontier/Engine/Shaders/Illumination/`                         |
-| `DeviceExchange` (raster + compute)    | ✔️ compute   | bit-identical occupant distance space                           |
-| Scene topology + vertex stream         | ✔️ identical | 3,964,224 B vertex upload byte-identical                        |
-| Bounding structures (32 sets)          | ✔️ identical | entry + facet uploads byte-identical                            |
-| Occupant distance space                | ✔️ identical | 13,166,440 half values, 100 % bit-identical                     |
-| Scene distance cascades                | 🚧           |                                                                 |
-| Surface cards                          | 🚧           |                                                                 |
-| Ray tracing space (BLAS/TLAS)          | 🚧           |                                                                 |
-| Atmosphere, shadow, surface, direct    | 🚧           |                                                                 |
-| ReSTIR GI, reflection, SVGF, display   | 🚧           |                                                                 |
+| WGSL → Slang (51 units, 29 entries)    | ✔️ ported    | compiles; outputs below                                         |
+| `DeviceExchange` (raster + compute)    | ✔️ ported    | bit-identical raster and compute targets                       |
+| Scene, BVH, cards, distance volumes    | ✔️ identical | uploads byte-identical, volumes/captures 100 % bit-identical    |
+| Cascades, shadow, sky, surface, direct | ✔️ identical | 100 % bit-identical at refreshes 0 and 11                       |
+| ReSTIR GI, reflection, SVGF, display   | ✔️ parity    | within the demo's own run-to-run variation                      |
+| Host encoders (constants, cascades, TLAS, tiles, bricks) | ✔️ identical | byte-identical over 12 refreshes             |
+| `LightingSystem`, `EncodeEnvironment`  | 🚧           | taken from the capture                                          |
+| Editor viewport presentation           | 🚧           | offscreen only                                                  |
 
 ## Source of truth
 

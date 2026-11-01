@@ -669,9 +669,8 @@ Base: `SultanAladin/Frontier` `arena/5f492703-frontier` at `2d55bd2f`, synced wi
   `PreviewShadowMode`s, `ForceField`, and the GeometryProcessing restructure.
 - **Moved:** `BakeSdfSpaceTool.cpp` and the CPU `.sdfspace`/BVH checks (new `GeometryProcessingValidation`) to
   `Exhibits/ClusterDiagnostic/Code/`.
-- **Open:** the older exhibit-only CPU ReSTIR reference (`ReservoirSampling`, `IlluminationUnits`, `ReferenceRenderer`,
-  `Exhibits/{IlluminationChain,CompleteRenderer}`) awaits an owner decision. No performance claim is made; the cause of
-  the reported 10 FPS remains unmeasured.
+- **Closed (see next section):** the older exhibit-only CPU ReSTIR reference was removed once the owner delegated the
+  decision. No performance claim is made; the cause of the reported 10 FPS remains unmeasured.
 - **Verification:** GCC 12.2, Slang 2026.14.1, SwiftShader Vulkan 1.3. The other 56 root CTests have no changed inputs
   and were not re-run. Windows/MSVC builds were not run.
 
@@ -681,3 +680,28 @@ Base: `SultanAladin/Frontier` `arena/5f492703-frontier` at `2d55bd2f`, synced wi
 | Affected root CTests                         | 7/7 passed       | 7/7 passed            |
 | Root CTest registrations                     | 63               | 63                    |
 | Retained preview/environment PNGs vs renders | n/a              | 15/15 pixel-identical |
+
+## VehicleHMI ReSTIR GI — 1:1 C++/Vulkan/Slang port (2026-11-01, branch arena/88b72faa-frontier)
+
+Source of truth: SultanAladin/Frontier `arena/e9bd7db5-frontier` at `6afb6f00`, `Experimental/VehicleHmiPrototype/`.
+
+- **Added:** `Frontier/Engine/DeviceExchange/DeviceExchange` (Vulkan 1.3 raster + compute with WebGPU ordering),
+  `Frontier/Engine/Illumination/*` (17 host modules ported statement for statement), 51 Slang units in
+  `Frontier/Engine/Shaders/Illumination/` (29 entries), `Automation/IlluminationRendering.cmake`,
+  `Frontier/Projects/Project-VehicleHmiDemo/Contract/TranslateShaders.py` (first-pass translator, hand-corrected output).
+- **Evidence:** `Exhibits/RestirGiParity/` — capture hooks for the original demo (Node + Dawn + SwiftShader), the
+  `RestirGiParityValidation` C++ tool, images and logs. Deterministic stages are bit-identical; the presented image
+  matches 99.93–99.98 % of 8-bit values across runs (two runs of the demo itself: 99.94 %). The residual variance is a
+  card-radiosity race inside the original, ported unchanged.
+- **Removed (owner: "u can decide what and what not to remove"):** the non-1:1 CPU illumination chain
+  `Frontier/Engine/Rendering/{ReservoirSampling,IlluminationUnits,ReferenceRenderer,CompleteFrameUnits,
+  VarianceFiltering,DiscrepancySequence,DistanceField,SurfaceCards}` and `Exhibits/{IlluminationChain,CompleteRenderer,
+  IndirectIllumination}`. Retained: `SubmissionOrder`, `BarrierDerivation`, `TransientTargetAtlas`, `EnvironmentUnits`,
+  `.sdfspace`/`BoundingVolumeAtlas`/`PreviewRaster` (editor preview path, not the illumination port).
+- **Naming:** demo identifiers barred by `SKILL-Naming.md` were renamed (table in
+  `Documentation/Plans/Ongoing/IlluminationPort.md`); behaviour is unchanged.
+- **Verification:** GCC 12.2, Slang 2026.14.1, SwiftShader 5.0.0. Full root build and 63/63 root CTests pass; the
+  parity tool needs a reference capture and is not a CTest. Windows/MSVC and hardware GPUs were not run.
+- **Open:** present the port in the Everest/editor viewport; port `LightingSystem` and `EncodeEnvironment` host
+  encoders (taken from the capture today); the effect systems listed in the exhibit README are not ported.
+

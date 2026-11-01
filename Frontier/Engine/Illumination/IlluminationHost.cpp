@@ -182,25 +182,41 @@ void IlluminationHost::ReconstructScreenTargets(std::array<uint32_t, 2> Extent)
     CaptureView = Exchange.ConstructView(CaptureTexture, SrgbView);
 }
 
-bool IlluminationHost::AdvanceRefresh(const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier, std::string* OutDiagnostic)
+bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
+                                      std::string* OutDiagnostic)
 {
     const uint32_t Parity = RefreshIndex & 1u;
     // ① scene motion (transforms of the dynamic occupants) is supplied before the host derives anything from it
     if (Prepare) Prepare(RefreshIndex);
-    // ② light (the sky-view key and the atmosphere constants come from it)
-    Atmosphere->ResolveLight(Settings.SunElevation, Settings.SunAzimuth, Settings.SolarIlluminance, Settings.Atmosphere);
+    // ② camera, light, refresh constants, the dynamic occupants' profiles
+    const LightState Light = Atmosphere->ResolveLight(Settings.SunElevation, Settings.SunAzimuth, Settings.SolarIlluminance, Settings.Atmosphere);
+    if (Inputs != nullptr)
+    {
+        const std::vector<uint8_t> Constants = Encoder.Encode(Inputs->Camera, Light, Inputs->Toggles, Inputs->External, ScreenExtent, TraceExtent,
+                                                              Settings.TraceScale, RefreshIndex, Inputs->Focus, PriorValid);
+        Exchange.WriteRegion(RefreshRegion, 0, Constants.data(), Constants.size());
+        const std::vector<uint8_t> Dynamic = Scene.EncodeOccupantProfiles(&Volumes->Volumes, Scene.DynamicCount);
+        Exchange.WriteRegion(OccupantRegion, 0, Dynamic.data(), Dynamic.size());
+    }
     // ③ invalidation and relighting schedules
     RayTracing->RefreshTlas(Scene, nullptr);
     if (Scene.ConstructDistanceList()) Distance->UploadDistanceList(Scene.DistanceList);
+    if (Inputs != nullptr) Distance->ScheduleInvalidation(Inputs->Focus, ResolveMovedBounds(Scene, Distance->Frozen));
     Cards->ScheduleTiles(Settings.CardTileBudget);
+    if (Inputs != nullptr) Shadow->ResolveCascades(Inputs->Camera, Light.Direction);
     if (Supplier) Supplier(RefreshIndex);
 
     // ④ record, in the demo's order
     CommandSequence Sequence = Exchange.BeginSequence();
     Atmosphere->RecordSkyView(Sequence, Settings.SolarIlluminance);
     Volumes->RecordFragments(Sequence);
+    if (Inputs != nullptr)
     {
-        // 📝 The union's brick count travels in the distance constants the supplier (or the schedule) wrote.
+        Distance->RecordUnion(Sequence, Scene.QueryUnionCount(), RefreshIndex);
+    }
+    else
+    {
+        // 📝 Replay: the bricks and the distance constants were supplied; dispatch the union over them.
         const uint32_t BrickCount = static_cast<uint32_t>(Distance->RefreshBricks.size() / 4);
         if (BrickCount > 0)
         {

@@ -9,6 +9,7 @@
 #include "DisplayProjection.h"
 #include "IlluminationConstants.h"
 #include "OccupantDistanceSpace.h"
+#include "RefreshEncoding.h"
 #include "RayTracingSpace.h"
 #include "ResamplingSequence.h"
 #include "SceneDistanceSpace.h"
@@ -76,6 +77,16 @@ struct IlluminationAssets
 //    supplies them from a capture, the editor from its own scene.
 using RefreshWriteSupplier = std::function<void(uint32_t RefreshIndex)>;
 
+// 📝 Live inputs of one refresh: the camera the editor (or a capture) resolved, its cascade focus, and the inputs owned
+//    by systems outside the port. Without them the refresh is a pure device replay of supplied writes.
+struct RefreshInputs
+{
+    CameraState           Camera{};
+    Vector3               Focus{};
+    RefreshToggles        Toggles{};
+    RefreshExternalInputs External{};
+};
+
 class IlluminationHost
 {
   public:
@@ -86,7 +97,8 @@ class IlluminationHost
     void ReconstructScreenTargets(std::array<uint32_t, 2> ScreenExtent);
 
     // 📝 One refresh in the demo's recording order; the supplier runs after the host's own writes (later writes win).
-    bool AdvanceRefresh(const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier, std::string* OutDiagnostic = nullptr);
+    bool AdvanceRefresh(const RefreshInputs* Inputs, const RefreshWriteSupplier& Prepare, const RefreshWriteSupplier& Supplier,
+                        std::string* OutDiagnostic = nullptr);
 
     DeviceExchange&                     Exchange;
     ShaderInterchange                   Shaders;
@@ -113,6 +125,7 @@ class IlluminationHost
     std::shared_ptr<DescriptorGroup>    SamplingGroup{};
     std::array<uint32_t, 2>             ScreenExtent{0, 0};
     std::array<uint32_t, 2>             TraceExtent{0, 0};
+    RefreshEncoder                      Encoder{};
     uint32_t                            RefreshIndex = 0;
     bool                                PriorValid   = false;
 };
