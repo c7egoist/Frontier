@@ -2537,6 +2537,124 @@ body.tp-focus-mode .tp-inspector-dock {
   background: rgba(0, 0, 0, 0.2);
 }
 
+/* 3D spline point editor (numeric X / Z / Y rows in the inspector) */
+.tp-spline-pt-head,
+.tp-spline-pt-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 1fr 1fr 24px 24px;
+  gap: 5px;
+  align-items: center;
+}
+
+.tp-spline-pt-head {
+  padding: 0 4px 2px;
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #74837a;
+  text-align: center;
+}
+
+.tp-spline-pt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tp-spline-pt-row {
+  padding: 3px 4px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+}
+
+.tp-spline-pt-row.selected {
+  border-color: rgba(101, 230, 178, 0.35);
+  background: rgba(101, 230, 178, 0.07);
+}
+
+.tp-pt-badge {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(101, 230, 178, 0.4);
+  background: rgba(5, 18, 14, 0.85);
+  color: #c9ffe7;
+  font-size: 10px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.tp-spline-pt-row.selected .tp-pt-badge {
+  background: var(--tp-accent);
+  border-color: var(--tp-accent);
+  color: #042116;
+  font-weight: 700;
+}
+
+.tp-pt-num {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: rgba(0, 0, 0, 0.22);
+  color: #e8efe9;
+  font-size: 10.5px;
+  padding: 0 7px;
+  text-align: center;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.tp-pt-num::-webkit-outer-spin-button,
+.tp-pt-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.tp-pt-num::placeholder {
+  color: #5f6f64;
+}
+
+.tp-pt-num:focus {
+  outline: none;
+  border-color: rgba(101, 230, 178, 0.55);
+}
+
+.tp-pt-num:disabled {
+  opacity: 0.38;
+}
+
+.tp-pt-mini {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #cfd8d1;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+
+.tp-pt-mini:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.tp-pt-mini.danger:hover:not(:disabled) {
+  border-color: rgba(255, 122, 112, 0.5);
+  color: #ffb8b1;
+}
+
+.tp-pt-mini:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
 .tp-check-row input,
 .tp-switch input {
   accent-color: var(--tp-accent);

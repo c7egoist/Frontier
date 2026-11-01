@@ -677,11 +677,25 @@ export class TerrainStackPipeline {
       const pts = Array.isArray(layer.params.points) ? layer.params.points : [];
       const count = Math.min(8, pts.length);
       const flat = new Float32Array(16);
+      const elev = new Float32Array(8);
+      // Points are [x, z] or [x, z, y]. A finite third element is an authored
+      // absolute elevation: the spline becomes a true 3D control path whose
+      // height profile drives the river/road/canyon grade (and ridge crest).
+      // Unset points are pre-filled from the same start->end grade the 2D
+      // path used, and with no authored Y anywhere the shader keeps its
+      // original grade bit-for-bit.
+      const hasY = pts.slice(0, count).some((pt) => Number.isFinite(pt?.[2]));
+      const fbStart = opKind === 7 ? (u2[0] ?? 78) : maxRelief * 0.24;
+      const fbEnd = opKind === 7 ? (u2[1] ?? 24) : maxRelief * 0.56;
       for (let k = 0; k < count; k++) {
         flat[k * 2 + 0] = Number.isFinite(pts[k]?.[0]) ? pts[k][0] : 0;
         flat[k * 2 + 1] = Number.isFinite(pts[k]?.[1]) ? pts[k][1] : 0;
+        const t = count > 1 ? k / (count - 1) : 0;
+        elev[k] = Number.isFinite(pts[k]?.[2]) ? pts[k][2] : fbStart + (fbEnd - fbStart) * t;
       }
       gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uSplinePts'), flat);
+      gl.uniform4fv(gl.getUniformLocation(this.progStackOp, 'uSplineElev'), elev);
+      gl.uniform1f(gl.getUniformLocation(this.progStackOp, 'uSplineHasY'), hasY ? 1 : 0);
       gl.uniform1i(gl.getUniformLocation(this.progStackOp, 'uSplineCount'), count);
     }
 
@@ -974,7 +988,9 @@ export class TerrainStackPipeline {
           // Tunnel mode is deliberately volumetric: the heightfield is left
           // intact and the smooth spline becomes an SDF tube below.
           activeSplineTunnels.push({
-            points: (Array.isArray(p.points) ? p.points : []).map((pt) => [Number(pt?.[0]) || 0, Number(pt?.[1]) || 0]),
+            // Third coordinate (when finite) is the authored bore elevation:
+            // the tunnel follows the true 3D spline through those heights.
+            points: (Array.isArray(p.points) ? p.points : []).map((pt) => [Number(pt?.[0]) || 0, Number(pt?.[1]) || 0, Number.isFinite(pt?.[2]) ? pt[2] : NaN]),
             radius: Math.max(1.5, p.tunnelRadius ?? 7.5),
             startElevation: p.startElevation ?? 48,
             endElevation: p.endElevation ?? 44,

@@ -160,7 +160,14 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   volume that can pass through a ridge and open portals on both sides.
   Controls include width, amount, falloff, sharpness, noise, elevations,
   grade strength, sediment, banks, tunnel radius/depth/roughness, seed and
-  draggable control points. The SDF Sculpt layer can now combine hand-painted
+  fully editable control points. Spline points are true **3D**: select a
+  point and drag it on the terrain or pull the viewport gizmo's **X / Y / Z**
+  axis arrows (Y = absolute elevation), or edit X/Z/Y numerically in the
+  inspector's point list (with insert/delete per point; 2–8 points). An
+  authored point elevation re-grades the river/road/canyon locally, sets the
+  ridge crest height, and steers the SDF tunnel bore up or down through the
+  ridge; leaving Y empty keeps the automatic Start→End grade, so all
+  existing presets are unchanged. The SDF Sculpt layer can now combine hand-painted
   basic shapes with seeded noise using **Add/Subtract**, **Multiply/Scale**,
   **Mix to Target Height** or **Max/Min Union-Clip**, at any point in the
   bottom-to-top stack. Two isolated test terrains exercise this without
@@ -197,9 +204,10 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   header **Focus** button hides both side docks to give the 3D viewport the
   full workspace.
 
-Verification: `npm test` — 37/37 pass (includes `tests/rain-erosion.test.mjs`,
+Verification: `npm test` — 38/38 pass (includes `tests/rain-erosion.test.mjs`,
 rigid-body free-fall/no-elevator tests, exact-mesh seating / pause-freeze,
 simulation-season / mineral-strata, dedicated wind-erosion, spline
-landform / sculpt-noise / SDF-through-tunnel, and terrain-resolution /
-decluttered-UI regression tests).
+landform / sculpt-noise / SDF-through-tunnel, 3D spline-point editing
+(gizmo + per-point elevations), and terrain-resolution / decluttered-UI
+regression tests).
 `npm run build` clean.

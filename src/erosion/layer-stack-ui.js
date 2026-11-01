@@ -355,6 +355,9 @@ export class ErosionLayerStackUI {
     this.shadingCardOpen = false;
     this.dragFromIdx = null;
     this.draggingSplinePt = -1;
+    this.selectedSplinePt = -1;
+    this.draggingSplineAxis = null;
+    this._splineDrag = null;
 
     // Bind callbacks from engine
     this.engine.onStackMutated = () => {
@@ -938,18 +941,38 @@ export class ErosionLayerStackUI {
         ? (SPLINE_LANDFORM_MODES[layer.params.mode ?? 0]?.label || 'spline landform')
         : (SPLINE_MODES[layer.params.mode ?? 0]?.label || 'canyon cut');
       const splineNote = layer.type === 'spline-landform' && Number(layer.params.mode ?? 0) === 4
-        ? 'This path becomes a continuous 3D SDF tube under the heightfield, with portals where it exits the terrain.'
+        ? 'This path becomes a continuous 3D SDF tube under the heightfield, with portals where it exits the terrain. Point Y sets the bore height directly.'
         : layer.type === 'spline-landform'
-          ? 'The smooth path is an influence mask: it can add a ridge, subtract a canyon, or grade a river/road from Start Elevation to End Elevation.'
-          : 'Legacy spline behaviour is unchanged for existing terrains.';
+          ? 'The smooth path is an influence mask: it can add a ridge, subtract a canyon, or grade a river/road. Point Y overrides the Start→End grade locally.'
+          : 'Legacy spline behaviour is unchanged for existing terrains; Y only re-grades the Graded Road mode.';
+      const usesY = this._splineUsesElevation(layer);
+      const anyY = pts.some((pt) => Number.isFinite(pt?.[2]));
+      if (this.selectedSplinePt < 0 || this.selectedSplinePt >= pts.length) this.selectedSplinePt = pts.length ? 0 : -1;
+      const ptRows = pts.map((pt, i) => {
+        const hasY = Number.isFinite(pt?.[2]);
+        const autoY = Math.round(this._splineEffectiveY(layer, i));
+        return `
+          <div class="tp-spline-pt-row ${i === this.selectedSplinePt ? 'selected' : ''}">
+            <button type="button" class="tp-pt-badge" data-pt-select="${i}" title="Select point ${i + 1} (shows the 3D gizmo)">${i + 1}</button>
+            <input type="number" class="tp-pt-num" data-pt-axis="0" data-pt-idx="${i}" value="${Math.round(pt[0] ?? 0)}" step="1" title="Point ${i + 1} X — east-west position in metres" aria-label="Point ${i + 1} X" />
+            <input type="number" class="tp-pt-num" data-pt-axis="1" data-pt-idx="${i}" value="${Math.round(pt[1] ?? 0)}" step="1" title="Point ${i + 1} Z — north-south position in metres" aria-label="Point ${i + 1} Z" />
+            <input type="number" class="tp-pt-num" data-pt-axis="2" data-pt-idx="${i}" value="${hasY ? Math.round(pt[2]) : ''}" placeholder="${autoY}" step="1" ${usesY ? '' : 'disabled'} title="${usesY ? `Point ${i + 1} elevation Y in metres. Empty = automatic grade (currently ${autoY} m).` : 'This spline mode follows the terrain heightfield, so point elevation is not used.'}" aria-label="Point ${i + 1} elevation" />
+            <button type="button" class="tp-pt-mini" data-pt-insert="${i}" ${pts.length >= 8 ? 'disabled' : ''} title="Insert a point after point ${i + 1}">+</button>
+            <button type="button" class="tp-pt-mini danger" data-pt-delete="${i}" ${pts.length <= 2 ? 'disabled' : ''} title="Delete point ${i + 1}">×</button>
+          </div>`;
+      }).join('');
       authoringCardHtml = `
         <section class="tp-property-card">
           <h2><i style="background:${cat.color}"></i><span>3D Spline Control Path (${pts.length}/8 pts)</span></h2>
-          <p class="tp-card-note">Drag the viewport handles to steer this ${spModeLabel.toLowerCase()}. ${splineNote}</p>
+          <p class="tp-card-note">Select a point, then drag it on the terrain or pull the gizmo axes — <b style="color:#ff8a7a">X</b> east-west, <b style="color:#65e6b2">Y</b> elevation, <b style="color:#7ab8ff">Z</b> north-south — to steer this ${spModeLabel.toLowerCase()}. ${splineNote} Empty Y keeps the automatic grade; Delete removes the selected point.</p>
+          <div class="tp-spline-pt-head"><span>#</span><span>X (m)</span><span>Z (m)</span><span>Y elev (m)</span><span></span><span></span></div>
+          <div class="tp-spline-pt-list">${ptRows}</div>
           <div class="tp-card-footer-btns">
             <button type="button" class="tp-mini-btn ${this.pipeline.authorTool === 'spline-edit' ? 'active' : ''}" data-set-tool="spline-edit">Edit Points in Viewport</button>
             <button type="button" class="tp-mini-btn" id="tp-btn-add-spline-pt" ${pts.length >= 8 ? 'disabled' : ''}>+ Append Point</button>
             <button type="button" class="tp-mini-btn" id="tp-btn-pop-spline-pt" ${pts.length <= 2 ? 'disabled' : ''}>− Remove Last</button>
+            ${usesY && !anyY ? '<button type="button" class="tp-mini-btn" id="tp-btn-spline-bake-y" title="Write the current automatic grade into every point so each height can be edited or dragged individually">Bake Elevations to Points</button>': ''}
+            ${anyY ? '<button type="button" class="tp-mini-btn" id="tp-btn-spline-clear-y" title="Remove authored per-point elevations; the path returns to the automatic start→end grade">Clear Elevations</button>' : ''}
           </div>
         </section>`;
     }
@@ -1224,7 +1247,10 @@ export class ErosionLayerStackUI {
         const prev = pts[pts.length - 2] || [-40, -40];
         const nx = Math.max(-230, Math.min(230, last[0] + (last[0] - prev[0]) * 0.6));
         const nz = Math.max(-230, Math.min(230, last[1] + (last[1] - prev[1]) * 0.6));
-        pts.push([Math.round(nx), Math.round(nz)]);
+        const newPt = [Math.round(nx), Math.round(nz)];
+        if (Number.isFinite(last[2])) newPt.push(last[2]);
+        pts.push(newPt);
+        this.selectedSplinePt = pts.length - 1;
         this.pipeline.evaluateStack({ reseedPlacements: true });
         this.renderAll();
       });
@@ -1236,9 +1262,113 @@ export class ErosionLayerStackUI {
         const pts = layer.params.points || [];
         if (pts.length <= 2) return;
         pts.pop();
+        this.selectedSplinePt = Math.max(0, Math.min(this.selectedSplinePt, pts.length - 1));
         this.pipeline.evaluateStack({ reseedPlacements: true });
         this.renderAll();
       });
+    }
+
+    // Per-point numeric editor: X / Z / Y fields, select, insert, delete.
+    if (isSplineAuthoringLayer(layer) && this.elInspector) {
+      const halfSpan = (this.engine.params.worldSpan || 500) * 0.5;
+      const clampXZ = (v) => Math.max(-halfSpan, Math.min(halfSpan, v));
+
+      this.elInspector.querySelectorAll('input[data-pt-axis]').forEach((input) => {
+        input.addEventListener('change', () => {
+          const idx = Number(input.dataset.ptIdx);
+          const axis = Number(input.dataset.ptAxis);
+          const pt = (layer.params.points || [])[idx];
+          if (!pt) return;
+          if (axis === 2) {
+            const raw = String(input.value).trim();
+            if (raw === '') {
+              pt.length = 2; // back to the automatic start->end grade
+            } else {
+              const v = Number(raw);
+              if (!Number.isFinite(v)) { this.renderInspector(); return; }
+              pt[2] = Math.max(1, Math.min(300, Math.round(v)));
+            }
+          } else {
+            const v = Number(input.value);
+            if (!Number.isFinite(v)) { this.renderInspector(); return; }
+            pt[axis] = Math.round(clampXZ(v));
+          }
+          this.selectedSplinePt = idx;
+          this.pipeline.evaluateStack({ reseedPlacements: true });
+          this.renderStackList();
+          this.renderInspector();
+          this.updateSplineGizmoOverlay();
+        });
+      });
+
+      this.elInspector.querySelectorAll('[data-pt-select]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          this.selectedSplinePt = Number(btn.dataset.ptSelect);
+          if (this.pipeline.authorTool !== 'spline-edit') this.setAuthorTool('spline-edit');
+          this.renderInspector();
+          this.updateSplineGizmoOverlay();
+        });
+      });
+
+      this.elInspector.querySelectorAll('[data-pt-insert]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const pts = layer.params.points || [];
+          if (pts.length >= 8) return;
+          const idx = Number(btn.dataset.ptInsert);
+          const a = pts[idx];
+          if (!a) return;
+          const isLast = idx === pts.length - 1;
+          const b = isLast ? (pts[idx - 1] || a) : pts[idx + 1];
+          let nx;
+          let nz;
+          if (isLast) {
+            nx = clampXZ(a[0] + (a[0] - (b[0] || 0)) * 0.5);
+            nz = clampXZ(a[1] + (a[1] - (b[1] || 0)) * 0.5);
+          } else {
+            nx = ((a[0] || 0) + (b[0] || 0)) / 2;
+            nz = ((a[1] || 0) + (b[1] || 0)) / 2;
+          }
+          const mid = [Math.round(nx), Math.round(nz)];
+          if (!isLast && Number.isFinite(a[2]) && Number.isFinite(b[2])) mid.push(Math.round((a[2] + b[2]) / 2));
+          else if (isLast && Number.isFinite(a[2])) mid.push(a[2]);
+          pts.splice(idx + 1, 0, mid);
+          this.selectedSplinePt = idx + 1;
+          this.pipeline.evaluateStack({ reseedPlacements: true });
+          this.renderAll();
+        });
+      });
+
+      this.elInspector.querySelectorAll('[data-pt-delete]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const pts = layer.params.points || [];
+          if (pts.length <= 2) return;
+          const idx = Number(btn.dataset.ptDelete);
+          pts.splice(idx, 1);
+          this.selectedSplinePt = Math.max(0, Math.min(idx, pts.length - 1));
+          this.pipeline.evaluateStack({ reseedPlacements: true });
+          this.renderAll();
+        });
+      });
+
+      const bakeYBtn = document.getElementById('tp-btn-spline-bake-y');
+      if (bakeYBtn) {
+        bakeYBtn.addEventListener('click', () => {
+          const pts = layer.params.points || [];
+          pts.forEach((pt, i) => { pt[2] = Math.round(this._splineEffectiveY(layer, i)); });
+          this.pipeline.evaluateStack({ reseedPlacements: true });
+          this.renderAll();
+        });
+      }
+
+      const clearYBtn = document.getElementById('tp-btn-spline-clear-y');
+      if (clearYBtn) {
+        clearYBtn.addEventListener('click', () => {
+          const pts = layer.params.points || [];
+          pts.forEach((pt) => { if (pt.length > 2) pt.length = 2; });
+          this.pipeline.evaluateStack({ reseedPlacements: true });
+          this.renderAll();
+        });
+      }
     }
 
     // Mask bindings
@@ -1392,12 +1522,125 @@ export class ErosionLayerStackUI {
   // =========================================================================
   // INTERACTIVE 3D SPLINE GIZMO OVERLAY
   // =========================================================================
+
+  // Modes whose geometry actually consumes the longitudinal elevation
+  // profile, i.e. where a point's Y (third coordinate) does something.
+  _splineUsesElevation(layer) {
+    if (!layer) return false;
+    if (layer.type === 'spline-landform') return true; // ridge crest + canyon/river/road grades + tunnel bore
+    if (layer.type === 'spline-feature') return Number(layer.params.mode ?? 0) === 1; // legacy graded road only
+    return false;
+  }
+
+  // The elevation a control point effectively sits at before the user authors
+  // an explicit Y: its slot on the start->end grade (or tunnel depth path).
+  _splineEffectiveY(layer, idx) {
+    const pts = layer?.params?.points || [];
+    const pt = pts[idx];
+    if (!pt) return 0;
+    if (Number.isFinite(pt[2])) return pt[2];
+    const t = pts.length > 1 ? idx / (pts.length - 1) : 0;
+    const p = layer.params;
+    if (layer.type === 'spline-landform') {
+      if (Number(p.mode ?? 0) === 4 && Number(p.tunnelFollowSurface ?? 0) > 0.5) {
+        const st = this.engine.rockCalving.sampleTerrain(pt[0], pt[1]);
+        return st.surfaceH - Math.max(4, p.tunnelDepth ?? 22);
+      }
+      const a = p.startElevation ?? 78;
+      const b = p.endElevation ?? 24;
+      return a + (b - a) * t;
+    }
+    if (layer.type === 'spline-feature') {
+      const mr = this.pipeline._maxReliefEstimate ? this.pipeline._maxReliefEstimate() : 180;
+      return mr * (0.24 + (0.56 - 0.24) * t);
+    }
+    return this.engine.rockCalving.sampleTerrain(pt[0], pt[1]).surfaceH + 5.0;
+  }
+
+  // World-space position of a control point's gizmo handle: authored Y when
+  // set, otherwise the effective grade height for elevation-driven modes or
+  // a terrain drape for purely heightfield-relative modes.
+  _splineHandleWorld(layer, idx) {
+    const pt = layer.params.points[idx];
+    const x = pt[0] || 0;
+    const z = pt[1] || 0;
+    let y;
+    if (Number.isFinite(pt[2])) y = pt[2];
+    else if (this._splineUsesElevation(layer)) y = this._splineEffectiveY(layer, idx);
+    else y = this.engine.rockCalving.sampleTerrain(x, z).surfaceH + 5.0;
+    return [x, y, z];
+  }
+
+  // Camera ray through a pointer position (same construction the engine's
+  // XZ raycaster uses, but keeping the full 3D ray for axis dragging).
+  _splinePointerRay(e) {
+    const canvas = this.engine.canvas;
+    const rect = canvas.getBoundingClientRect();
+    if (!rect || rect.width < 2 || rect.height < 2) return null;
+    const basis = this.engine._getCameraBasis ? this.engine._getCameraBasis() : null;
+    if (!basis) return null;
+    const { eye, forward, right, up } = basis;
+    const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    const ndcY = 1 - ((e.clientY - rect.top) / rect.height) * 2;
+    const aspect = rect.width / rect.height;
+    const tanHalf = Math.tan(((this.engine.camera.fovDeg || 42) * Math.PI) / 360);
+    const sx = ndcX * aspect * tanHalf;
+    const sy = ndcY * tanHalf;
+    let dx = forward[0] + right[0] * sx + up[0] * sy;
+    let dy = forward[1] + right[1] * sx + up[1] * sy;
+    let dz = forward[2] + right[2] * sx + up[2] * sy;
+    const dl = Math.hypot(dx, dy, dz) || 1;
+    return { origin: eye, dir: [dx / dl, dy / dl, dz / dl] };
+  }
+
+  // Parameter t of the point on an infinite axis line closest to a ray.
+  _rayAxisParam(ray, axisOrigin, axisDir) {
+    const [dx, dy, dz] = ray.dir;
+    const [ax, ay, az] = axisDir;
+    const wx = ray.origin[0] - axisOrigin[0];
+    const wy = ray.origin[1] - axisOrigin[1];
+    const wz = ray.origin[2] - axisOrigin[2];
+    const b = dx * ax + dy * ay + dz * az;
+    const d0 = dx * wx + dy * wy + dz * wz;
+    const e0 = ax * wx + ay * wy + az * wz;
+    const denom = 1 - b * b;
+    if (Math.abs(denom) < 1e-6) return null;
+    return (e0 - b * d0) / denom;
+  }
+
   _bindSplineGizmoEvents() {
     if (!this.elSplineSvg) return;
 
     window.addEventListener('pointermove', (e) => {
-      if (this.draggingSplinePt < 0) return;
       const sel = this.pipeline.getSelectedLayer();
+
+      // Axis drag: slide the selected point along one world axis (X / Y / Z)
+      // by tracking the closest point between the pointer ray and the axis.
+      if (this.draggingSplineAxis && this._splineDrag) {
+        if (!isSplineAuthoringLayer(sel)) {
+          this.draggingSplineAxis = null;
+          this._splineDrag = null;
+          return;
+        }
+        const drag = this._splineDrag;
+        const pt = sel.params.points?.[drag.idx];
+        if (!pt) return;
+        const ray = this._splinePointerRay(e);
+        if (!ray) return;
+        const t = this._rayAxisParam(ray, drag.origin, drag.dir);
+        if (t === null || !Number.isFinite(t)) return;
+        const delta = t - drag.startT;
+        const half = (this.engine.params.worldSpan || 500) * 0.5;
+        if (drag.axis === 'x') pt[0] = Math.max(-half, Math.min(half, Math.round(drag.origX + delta)));
+        else if (drag.axis === 'z') pt[1] = Math.max(-half, Math.min(half, Math.round(drag.origZ + delta)));
+        else if (drag.axis === 'y') pt[2] = Math.max(1, Math.min(300, Math.round((drag.origY + delta) * 2) / 2));
+        this.pipeline.evaluateStack({ reseedPlacements: false, fastPreview: true });
+        this.updateSplineGizmoOverlay();
+        return;
+      }
+
+      // Centre-handle drag: move the point across the terrain (XZ), as before.
+      if (this.draggingSplinePt < 0) return;
       if (!isSplineAuthoringLayer(sel)) {
         this.draggingSplinePt = -1;
         return;
@@ -1412,11 +1655,32 @@ export class ErosionLayerStackUI {
     });
 
     window.addEventListener('pointerup', () => {
-      if (this.draggingSplinePt >= 0) {
+      if (this.draggingSplinePt >= 0 || this.draggingSplineAxis) {
         this.draggingSplinePt = -1;
+        this.draggingSplineAxis = null;
+        this._splineDrag = null;
         this.pipeline.evaluateStack({ reseedPlacements: true, fastPreview: false });
         this.renderStackList();
+        this.renderInspector();
+        this.updateSplineGizmoOverlay();
       }
+    });
+
+    // Delete removes the selected control point while spline editing.
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+      if (this.pipeline.authorTool !== 'spline-edit') return;
+      const sel = this.pipeline.getSelectedLayer();
+      if (!isSplineAuthoringLayer(sel)) return;
+      const pts = sel.params.points || [];
+      if (pts.length <= 2 || this.selectedSplinePt < 0 || this.selectedSplinePt >= pts.length) return;
+      e.preventDefault();
+      pts.splice(this.selectedSplinePt, 1);
+      this.selectedSplinePt = Math.max(0, Math.min(this.selectedSplinePt, pts.length - 1));
+      this.pipeline.evaluateStack({ reseedPlacements: true });
+      this.renderAll();
     });
   }
 
@@ -1442,33 +1706,149 @@ export class ErosionLayerStackUI {
     const h = svg.clientHeight || this.engine.canvas.clientHeight || 600;
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
 
-    const pts2D = [];
-    for (let i = 0; i < sel.params.points.length; i++) {
-      const [wx, wz] = sel.params.points[i];
-      const st = this.engine.rockCalving.sampleTerrain(wx, wz);
-      const pr = this.pipeline.projectWorldToScreen(wx, st.surfaceH + 5.0, wz);
-      if (pr) pts2D.push({ i, x: pr.u * w, y: pr.v * h, wx, wz });
-    }
+    const pts = sel.params.points;
+    if (this.selectedSplinePt < 0 || this.selectedSplinePt >= pts.length) this.selectedSplinePt = 0;
 
-    if (pts2D.length < 2) {
+    const project = (wx, wy, wz) => {
+      const pr = this.pipeline.projectWorldToScreen(wx, wy, wz);
+      return pr ? { x: pr.u * w, y: pr.v * h } : null;
+    };
+
+    // Control handles sit at their true 3D positions; a dashed drop line to
+    // the terrain surface keeps elevated / buried points readable.
+    const worlds = pts.map((_, i) => this._splineHandleWorld(sel, i));
+    const handles = [];
+    worlds.forEach((world, i) => {
+      const scr = project(world[0], world[1], world[2]);
+      if (!scr) return;
+      const surfY = this.engine.rockCalving.sampleTerrain(world[0], world[2]).surfaceH;
+      const gnd = project(world[0], surfY, world[2]);
+      handles.push({ i, world, surfY, x: scr.x, y: scr.y, gnd });
+    });
+
+    if (handles.length < 2) {
       svg.innerHTML = '';
       return;
     }
 
-    const polyPoints = pts2D.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+    // Path preview: smooth 3D Catmull-Rom for the landform spline (matching
+    // the shader), straight segments for the legacy corridor spline.
+    const pathPts = [];
+    if (sel.type === 'spline-landform' && worlds.length >= 2) {
+      const cr1 = (p0, p1, p2, p3, t) => {
+        const t2 = t * t;
+        const t3 = t2 * t;
+        return 0.5 * ((2.0 * p1) + (-p0 + p2) * t + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+      };
+      const at = (idx) => worlds[Math.max(0, Math.min(worlds.length - 1, idx))];
+      for (let i = 0; i < worlds.length - 1; i++) {
+        for (let j = 0; j < 8; j++) {
+          const t = j / 8;
+          const s = project(
+            cr1(at(i - 1)[0], worlds[i][0], worlds[i + 1][0], at(i + 2)[0], t),
+            cr1(at(i - 1)[1], worlds[i][1], worlds[i + 1][1], at(i + 2)[1], t),
+            cr1(at(i - 1)[2], worlds[i][2], worlds[i + 1][2], at(i + 2)[2], t)
+          );
+          if (s) pathPts.push(`${s.x.toFixed(1)},${s.y.toFixed(1)}`);
+        }
+      }
+      const lastW = worlds[worlds.length - 1];
+      const lastS = project(lastW[0], lastW[1], lastW[2]);
+      if (lastS) pathPts.push(`${lastS.x.toFixed(1)},${lastS.y.toFixed(1)}`);
+    } else {
+      for (const p of handles) pathPts.push(`${p.x.toFixed(1)},${p.y.toFixed(1)}`);
+    }
+
+    let drops = '';
+    for (const p of handles) {
+      if (p.gnd && Math.abs(p.world[1] - p.surfY) > 2.5) {
+        drops += `
+          <line x1="${p.x.toFixed(1)}" y1="${p.y.toFixed(1)}" x2="${p.gnd.x.toFixed(1)}" y2="${p.gnd.y.toFixed(1)}" stroke="rgba(217,255,235,0.4)" stroke-width="1" stroke-dasharray="3 4" />
+          <circle cx="${p.gnd.x.toFixed(1)}" cy="${p.gnd.y.toFixed(1)}" r="3" fill="none" stroke="rgba(217,255,235,0.55)" stroke-width="1" />`;
+      }
+    }
+
+    // Translation gizmo on the selected point: X (east-west), Y (elevation,
+    // only for modes that consume it) and Z (north-south) axis arrows.
+    let axesSvg = '';
+    const selH = handles.find((hh) => hh.i === this.selectedSplinePt);
+    if (selH) {
+      const axisLen = Math.max(10, Math.min(80, (this.engine.camera.distance || 700) * 0.085));
+      const axes = [
+        { id: 'x', dir: [1, 0, 0], color: '#ff7a6b', label: 'X' },
+        ...(this._splineUsesElevation(sel) ? [{ id: 'y', dir: [0, 1, 0], color: '#65e6b2', label: 'Y' }] : []),
+        { id: 'z', dir: [0, 0, 1], color: '#7ab8ff', label: 'Z' },
+      ];
+      for (const ax of axes) {
+        const tip = project(
+          selH.world[0] + ax.dir[0] * axisLen,
+          selH.world[1] + ax.dir[1] * axisLen,
+          selH.world[2] + ax.dir[2] * axisLen
+        );
+        if (!tip) continue;
+        const dx = tip.x - selH.x;
+        const dy = tip.y - selH.y;
+        const dl = Math.hypot(dx, dy) || 1;
+        const ux = dx / dl;
+        const uy = dy / dl;
+        const px = -uy;
+        const py = ux;
+        const ah = 9;
+        const aw = 4.2;
+        const active = this.draggingSplineAxis === ax.id;
+        axesSvg += `
+          <line x1="${selH.x.toFixed(1)}" y1="${selH.y.toFixed(1)}" x2="${tip.x.toFixed(1)}" y2="${tip.y.toFixed(1)}" stroke="${ax.color}" stroke-width="${active ? 3.4 : 2.4}" stroke-linecap="round" opacity="0.95" />
+          <polygon points="${tip.x.toFixed(1)},${tip.y.toFixed(1)} ${(tip.x - ux * ah + px * aw).toFixed(1)},${(tip.y - uy * ah + py * aw).toFixed(1)} ${(tip.x - ux * ah - px * aw).toFixed(1)},${(tip.y - uy * ah - py * aw).toFixed(1)}" fill="${ax.color}" />
+          <text x="${(tip.x + ux * 13).toFixed(1)}" y="${(tip.y + uy * 13 + 3).toFixed(1)}" text-anchor="middle" fill="${ax.color}" font-size="10" font-weight="700" font-family="Inter, sans-serif">${ax.label}</text>
+          <line class="spline-axis-hit" data-gizmo-axis="${ax.id}" data-pt-idx="${selH.i}" x1="${selH.x.toFixed(1)}" y1="${selH.y.toFixed(1)}" x2="${tip.x.toFixed(1)}" y2="${tip.y.toFixed(1)}" stroke="rgba(0,0,0,0)" stroke-width="16" stroke-linecap="round" />`;
+      }
+    }
+
     let circles = '';
-    for (const p of pts2D) {
+    for (const p of handles) {
+      const isSel = p.i === this.selectedSplinePt;
       circles += `
         <g class="spline-handle" data-pt-idx="${p.i}" transform="translate(${p.x.toFixed(1)},${p.y.toFixed(1)})">
-          <circle r="10" fill="rgba(5,18,14,0.82)" stroke="#65e6b2" stroke-width="2" />
-          <text y="3.5" text-anchor="middle" fill="#dededc" font-size="9" font-family="DM Sans, sans-serif">${p.i + 1}</text>
+          <circle r="${isSel ? 11 : 9}" fill="${isSel ? 'rgba(101,230,178,0.95)' : 'rgba(5,18,14,0.82)'}" stroke="${isSel ? '#ffffff' : '#65e6b2'}" stroke-width="${isSel ? 2.4 : 2}" />
+          <text y="3.5" text-anchor="middle" fill="${isSel ? '#04231a' : '#dededc'}" font-size="9" font-weight="${isSel ? 700 : 400}" font-family="Inter, sans-serif">${p.i + 1}</text>
         </g>`;
     }
 
     svg.innerHTML = `
-      <polyline points="${polyPoints}" fill="none" stroke="rgba(101,230,178,0.88)" stroke-width="2.2" stroke-dasharray="6 4" />
+      <polyline points="${pathPts.join(' ')}" fill="none" stroke="rgba(101,230,178,0.88)" stroke-width="2.2" stroke-dasharray="6 4" />
+      ${drops}
+      ${axesSvg}
       ${circles}
     `;
+
+    svg.querySelectorAll('.spline-axis-hit').forEach((line) => {
+      line.style.cursor = 'grab';
+      line.style.pointerEvents = 'all';
+      line.addEventListener('pointerdown', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const idx = Number(line.dataset.ptIdx);
+        const axis = line.dataset.gizmoAxis;
+        const pt = sel.params.points[idx];
+        if (!pt) return;
+        this.selectedSplinePt = idx;
+        this.draggingSplineAxis = axis;
+        const origin = this._splineHandleWorld(sel, idx);
+        const dirVec = axis === 'x' ? [1, 0, 0] : axis === 'y' ? [0, 1, 0] : [0, 0, 1];
+        const ray = this._splinePointerRay(e);
+        const startT = ray ? this._rayAxisParam(ray, origin, dirVec) : null;
+        this._splineDrag = {
+          axis,
+          idx,
+          origin,
+          dir: dirVec,
+          startT: startT ?? 0,
+          origX: pt[0] || 0,
+          origZ: pt[1] || 0,
+          origY: this._splineEffectiveY(sel, idx),
+        };
+      });
+    });
 
     svg.querySelectorAll('.spline-handle').forEach((g) => {
       g.style.cursor = 'grab';
@@ -1476,7 +1856,11 @@ export class ErosionLayerStackUI {
       g.addEventListener('pointerdown', (e) => {
         e.stopPropagation();
         e.preventDefault();
-        this.draggingSplinePt = Number(g.dataset.ptIdx);
+        const idx = Number(g.dataset.ptIdx);
+        const changed = idx !== this.selectedSplinePt;
+        this.selectedSplinePt = idx;
+        this.draggingSplinePt = idx;
+        if (changed) this.renderInspector();
       });
     });
   }

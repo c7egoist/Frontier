@@ -66,6 +66,14 @@ function catmullRom2D(p0, p1, p2, p3, t) {
   ];
 }
 
+function catmullRom1D(p0, p1, p2, p3, t) {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return 0.5 * ((2.0 * p1) + (-p0 + p2) * t +
+    (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
+    (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+}
+
 // Marching Cubes Edge & Triangle Lookup Tables (compact bitmask + tri connectivity)
 const EDGE_VERTS = [
   [0, 1], [1, 2], [2, 3], [3, 0],
@@ -172,7 +180,7 @@ export class SdfCaveSystem {
     for (const tunnel of splineTunnels) {
       if (!tunnel || tunnel.enabled === false) continue;
       const controls = (Array.isArray(tunnel.points) ? tunnel.points : [])
-        .map((pt) => Array.isArray(pt) ? [Number(pt[0]), Number(pt[1])] : [Number(pt?.x ?? pt?.[0]), Number(pt?.z ?? pt?.[1])])
+        .map((pt) => Array.isArray(pt) ? [Number(pt[0]), Number(pt[1]), Number(pt[2])] : [Number(pt?.x ?? pt?.[0]), Number(pt?.z ?? pt?.[1]), Number(pt?.y ?? pt?.[2])])
         .filter((pt) => Number.isFinite(pt[0]) && Number.isFinite(pt[1]))
         .slice(0, 8);
       if (controls.length < 2) continue;
@@ -181,13 +189,25 @@ export class SdfCaveSystem {
       const endY = Number(tunnel.endElevation ?? tunnel.endY ?? startY) || startY;
       const depth = Math.max(4, Number(tunnel.depth ?? tunnel.tunnelDepth ?? 22) || 22);
       const followSurface = tunnel.followSurface === true || tunnel.tunnelFollowSurface > 0.5;
+      // Optional authored 3D path: a finite third coordinate on any control
+      // point is its absolute bore elevation. The tube then follows a true 3D
+      // Catmull-Rom through those heights; unset points fall back to the
+      // same grade / surface-depth the 2D path used. With no authored Y
+      // anywhere the sampling below is exactly the original behaviour.
+      const hasY = controls.some((c) => Number.isFinite(c[2]));
+      const controlYs = hasY ? controls.map((c, ci) => {
+        if (Number.isFinite(c[2])) return c[2];
+        const t = controls.length > 1 ? ci / (controls.length - 1) : 0;
+        return followSurface ? sampleHeightSlope(c[0], c[1]).h - depth : startY + (endY - startY) * t;
+      }) : null;
       const samples = [];
-      const pushSample = (x, z, along) => {
-        const surf = sampleHeightSlope(x, z);
-        const y = followSurface ? surf.h - depth : startY + (endY - startY) * along;
+      const pushSample = (x, z, along, authoredY = NaN) => {
+        const y = Number.isFinite(authoredY)
+          ? authoredY
+          : (followSurface ? sampleHeightSlope(x, z).h - depth : startY + (endY - startY) * along);
         samples.push({ x, y, z });
       };
-      pushSample(controls[0][0], controls[0][1], 0);
+      pushSample(controls[0][0], controls[0][1], 0, hasY ? controlYs[0] : NaN);
       const segCount = controls.length - 1;
       for (let i = 0; i < segCount; i++) {
         const p0 = controls[Math.max(0, i - 1)];
@@ -199,7 +219,14 @@ export class SdfCaveSystem {
         for (let j = 1; j <= subdiv; j++) {
           const t = j / subdiv;
           const [x, z] = catmullRom2D(p0, p1, p2, p3, t);
-          pushSample(x, z, (i + t) / segCount);
+          const authoredY = hasY ? catmullRom1D(
+            controlYs[Math.max(0, i - 1)],
+            controlYs[i],
+            controlYs[Math.min(segCount, i + 1)],
+            controlYs[Math.min(segCount, i + 2)],
+            t
+          ) : NaN;
+          pushSample(x, z, (i + t) / segCount, authoredY);
         }
       }
       if (samples.length >= 2) {

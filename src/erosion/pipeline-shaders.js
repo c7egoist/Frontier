@@ -94,6 +94,8 @@ uniform vec4 uParam3;
 uniform vec4 uMaskCfg1;
 uniform vec4 uMaskCfg2;
 uniform vec4 uSplinePts[4]; // up to 8 (x, z) points packed as 4 vec4s
+uniform vec4 uSplineElev[2]; // up to 8 control-point elevations (m); unset points are pre-filled from the start->end grade
+uniform float uSplineHasY;   // 1 when any control point carries an authored elevation (true 3D spline)
 uniform int uSplineCount;
 
 ${COMMON_GEOLOGY_GLSL}
@@ -145,6 +147,45 @@ vec2 catmullRomSplinePoint(vec2 p0, vec2 p1, vec2 p2, vec2 p3, float t) {
   return 0.5 * ((2.0 * p1) + (-p0 + p2) * t +
     (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
     (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+}
+
+float splinePointElev(int idx) {
+  if (idx <= 0) return uSplineElev[0].x;
+  if (idx == 1) return uSplineElev[0].y;
+  if (idx == 2) return uSplineElev[0].z;
+  if (idx == 3) return uSplineElev[0].w;
+  if (idx == 4) return uSplineElev[1].x;
+  if (idx == 5) return uSplineElev[1].y;
+  if (idx == 6) return uSplineElev[1].z;
+  return uSplineElev[1].w;
+}
+
+float catmullRom1D(float p0, float p1, float p2, float p3, float t) {
+  float t2 = t * t;
+  float t3 = t2 * t;
+  return 0.5 * ((2.0 * p1) + (-p0 + p2) * t +
+    (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t2 +
+    (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t3);
+}
+
+// Longitudinal elevation of the spline at alongT. When no control point
+// carries an authored elevation this returns the caller's original
+// start->end grade unchanged; with authored 3D points it smoothly
+// interpolates the control heights, so dragging a point up or down in the
+// viewport re-grades the river / road / canyon (or ridge crest) locally.
+float splineGradeAt(float alongT, float fallbackGrade) {
+  if (uSplineHasY < 0.5) return fallbackGrade;
+  int n = clamp(uSplineCount, 2, 8);
+  float segF = clamp(alongT, 0.0, 1.0) * float(n - 1);
+  int i = min(int(segF), n - 2);
+  float t = segF - float(i);
+  return catmullRom1D(
+    splinePointElev(max(i - 1, 0)),
+    splinePointElev(i),
+    splinePointElev(min(i + 1, n - 1)),
+    splinePointElev(min(i + 2, n - 1)),
+    t
+  );
 }
 
 // Smooth Catmull-Rom distance field for the newer Spline Landform layer.
@@ -482,7 +523,7 @@ void main() {
     } else if (mode == 1) {
       // Graded Mountain Road / Bench Terrace
       float roadMask = 1.0 - safeSmoothstep(halfW * 0.65, halfW * (1.0 + bankFall), dWarped);
-      float gradeElev = mix(maxRelief * 0.24, maxRelief * 0.56, alongT);
+      float gradeElev = splineGradeAt(alongT, mix(maxRelief * 0.24, maxRelief * 0.56, alongT));
       tC.r = max(1.5, mix(tC.r, gradeElev, roadMask * opacity));
       tC.g *= (1.0 - roadMask * 0.85 * opacity);
     } else {
@@ -550,13 +591,22 @@ void main() {
     float ridgeNoise = ridgedFbm2D(worldXZ * (0.011 * noiseScale) + sv, 5, 0.56);
     float broadNoise = fbm2D(worldXZ * (0.0055 * noiseScale) + sv + 23.7, 4, 0.52);
     float noiseMod = clamp(1.0 + (ridgeNoise - 0.5) * 1.7 * noiseAmount, 0.18, 1.9);
-    float grade = mix(startElevation, endElevation, alongT);
+    float grade = splineGradeAt(alongT, mix(startElevation, endElevation, alongT));
 
     if (mode == 0) {
       // Additive mountain ridge: broad noisy uplift plus a sharper crest.
+      // With authored 3D point elevations the crest is instead pulled toward
+      // the spline's height profile (raise-only, so it still reads as an
+      // added mountain rather than a levelling pass).
       float lift = amount * profile * noiseMod;
       float crest = pow(profile, 3.0) * amount * 0.18 * noiseMod;
-      tC.r = max(1.0, tC.r + (lift + crest + bankBand * bankHeight * 0.35) * opacity);
+      if (uSplineHasY > 0.5) {
+        float crestTarget = grade + crest + (ridgeNoise - 0.5) * amount * 0.16 * noiseAmount;
+        float raised = mix(tC.r, crestTarget, pow(profile, 1.25));
+        tC.r = max(1.0, mix(tC.r, max(tC.r, raised), opacity) + bankBand * bankHeight * 0.35 * opacity);
+      } else {
+        tC.r = max(1.0, tC.r + (lift + crest + bankBand * bankHeight * 0.35) * opacity);
+      }
       tC.b = max(0.0, tC.b - lift * 0.025 * sediment * opacity);
       tC.g = max(0.0, tC.g + profile * (1.0 - profile) * sediment * 0.18 * opacity);
     } else if (mode == 1) {

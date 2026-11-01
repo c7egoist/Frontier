@@ -1979,6 +1979,87 @@ test('Spline Landform layers sculpt with noise and bore SDF tunnels on isolated 
   assert.ok(engSrc.includes('caveSys.positions') && engSrc.includes('portalAt') && engSrc.includes('indices.slice(0, ip)'));
 });
 
+test('Spline control points are editable in full 3D: gizmo axes, numeric X/Z/Y editor, 3D grades and tunnel bore', () => {
+  // Data model: points are [x, z] (legacy/automatic grade) or [x, z, y]
+  // (authored absolute elevation). Defaults and every shipped recipe stay in
+  // the legacy 2D form, so existing terrains keep identical output.
+  const fresh = createStackLayer('spline-landform');
+  assert.ok(fresh.params.points.every((pt) => pt.length === 2), 'Default spline points carry no authored Y (automatic grade)');
+  for (const presetId of ['spline-canyon-river-test', 'spline-road-tunnel-test']) {
+    for (const l of TERRAIN_STACK_PRESETS[presetId].layers().filter((x) => x.type === 'spline-landform')) {
+      assert.ok(l.params.points.every((pt) => pt.length === 2), `${presetId} keeps legacy [x,z] points`);
+    }
+  }
+  const authored = createStackLayer('spline-landform', { params: { points: [[-100, 20, 80], [0, 0], [100, -20, 15]] } });
+  assert.deepEqual(authored.params.points, [[-100, 20, 80], [0, 0], [100, -20, 15]], 'Authored per-point elevations survive layer creation/cloning');
+
+  // Shader: per-point elevations are a real grade input for both spline ops,
+  // with an exact fallback to the original start->end grade when absent.
+  for (const token of ['uniform vec4 uSplineElev[2]', 'uniform float uSplineHasY', 'float splinePointElev(', 'float catmullRom1D(', 'float splineGradeAt(', 'if (uSplineHasY < 0.5) return fallbackGrade;']) {
+    assert.ok(PipelineShaders.STACK_OP_FRAG.includes(token), `Stack shader missing 3D spline token: ${token}`);
+  }
+  assert.ok(PipelineShaders.STACK_OP_FRAG.includes('splineGradeAt(alongT, mix(startElevation, endElevation, alongT))'), 'Spline Landform grade consumes per-point Y');
+  assert.ok(PipelineShaders.STACK_OP_FRAG.includes('splineGradeAt(alongT, mix(maxRelief * 0.24, maxRelief * 0.56, alongT))'), 'Legacy graded road consumes per-point Y with its original fallback');
+  assert.ok(PipelineShaders.STACK_OP_FRAG.includes('crestTarget'), 'Ridge crest follows authored 3D point heights when present');
+  assert.ok(PipelineShaders.STACK_OP_FRAG.includes('evalSplineDist(worldXZ, dSpline, alongT)'), 'Legacy 2D distance field is retained');
+
+  // Pipeline: elevations are packed (unset points pre-filled from the grade)
+  // and tunnel points keep their authored bore height.
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  for (const token of ["'uSplineElev'", "'uSplineHasY'", 'Number.isFinite(pt?.[2])', 'fbStart + (fbEnd - fbStart) * t']) {
+    assert.ok(pipeSrc.includes(token), `Pipeline missing 3D spline packing token: ${token}`);
+  }
+  assert.ok(pipeSrc.includes('Number.isFinite(pt?.[2]) ? pt[2] : NaN'), 'Tunnel normalization preserves authored point elevations');
+
+  // UI: selected-point axis gizmo + full numeric point editor.
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  for (const token of ['selectedSplinePt', 'draggingSplineAxis', '_splinePointerRay', '_rayAxisParam', '_splineUsesElevation', '_splineEffectiveY', '_splineHandleWorld', 'data-gizmo-axis', 'spline-axis-hit', 'data-pt-axis', 'data-pt-select', 'data-pt-insert', 'data-pt-delete', 'tp-btn-spline-bake-y', 'tp-btn-spline-clear-y', 'tp-spline-pt-row']) {
+    assert.ok(uiSrc.includes(token), `Layer-stack UI missing 3D spline editor token: ${token}`);
+  }
+
+  // Direct CPU SDF proof: the bore follows authored point elevations in 3D.
+  const N = 64;
+  const snap = new Float32Array(N * N * 4);
+  for (let j = 0; j < N; j++) {
+    for (let i = 0; i < N; i++) {
+      const x = (i / (N - 1) - 0.5) * 512;
+      const ridge = Math.max(0, 1 - Math.abs(x) / 150);
+      snap[(j * N + i) * 4] = 22 + 96 * Math.pow(ridge, 1.25);
+    }
+  }
+  const runTunnel = (points) => {
+    const sys = new SdfCaveSystem();
+    const res = sys.rebuildCaveVolume({
+      gridRgba: snap,
+      gridN: N,
+      worldSpan: 512,
+      caveLayers: [],
+      sculptCaveStrokes: [],
+      splineTunnels: [{ points, radius: 8, startElevation: 38, endElevation: 36, roughness: 0, strength: 1, seed: 7201 }],
+      maxRelief: 140,
+    });
+    assert.equal(res.hasCaves, true);
+    assert.ok(res.vertexCount > 1500, `3D tunnel should extract a tube mesh, got ${res.vertexCount}`);
+    let minY = 1e9, maxY = -1e9;
+    for (let v = 0; v < sys.vertexCount; v++) {
+      minY = Math.min(minY, sys.positions[v * 3 + 1]);
+      maxY = Math.max(maxY, sys.positions[v * 3 + 1]);
+    }
+    return { minY, maxY };
+  };
+
+  const flat = runTunnel([[-235, 0], [-120, -18], [0, 0], [120, 18], [235, 0]]);
+  const arched = runTunnel([[-235, 0, 30], [-120, -18, 60], [0, 0, 95], [120, 18, 60], [235, 0, 30]]);
+  assert.ok(arched.maxY > flat.maxY + 35, `Raising middle points must lift the bore (flat roof ${flat.maxY.toFixed(1)} m vs arched ${arched.maxY.toFixed(1)} m)`);
+
+  const dipped = runTunnel([[-235, 0, 34], [-120, -18, 20], [0, 0, 9], [120, 18, 20], [235, 0, 34]]);
+  assert.ok(dipped.minY < flat.minY - 10, `Lowering middle points must sink the bore (flat floor ${flat.minY.toFixed(1)} m vs dipped ${dipped.minY.toFixed(1)} m)`);
+
+  // Mixed paths: a single authored Y blends with the automatic grade fills.
+  const mixed = runTunnel([[-235, 0], [-120, -18], [0, 0, 88], [120, 18], [235, 0]]);
+  assert.ok(mixed.maxY > flat.maxY + 25, `One raised point must locally lift the bore (mixed roof ${mixed.maxY.toFixed(1)} m)`);
+});
+
 test('Terrain resolution is a safe boot-time quality option and the redesigned UI stays decluttered', () => {
   assert.deepEqual([...TERRAIN_RESOLUTION_OPTIONS], [256, 512, 768, 1024]);
   assert.equal(DEFAULT_EROSION_PARAMS.gridSize, 512, 'The established default terrain remains bit-for-bit 512²');
