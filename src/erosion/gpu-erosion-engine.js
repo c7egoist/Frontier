@@ -41,6 +41,63 @@ export const MAX_GPU_PARTICLES = PART_TEX_W * PART_TEX_H;
 
 const TELEMETRY_RES = 64;
 
+export const TERRAIN_RESOLUTION_OPTIONS = Object.freeze([256, 512, 768, 1024]);
+export const TERRAIN_RESOLUTION_STORAGE_KEY = 'frontier.terrainResolution.v1';
+
+const TERRAIN_RESOLUTION_PROFILES = Object.freeze({
+  256: Object.freeze({ label: 'Performance', detail: 'fast iteration' }),
+  512: Object.freeze({ label: 'Balanced', detail: 'default' }),
+  768: Object.freeze({ label: 'High', detail: 'finer channels & detail' }),
+  1024: Object.freeze({ label: 'Ultra', detail: 'high VRAM' }),
+});
+
+export function normalizeTerrainResolution(value, fallback = DEFAULT_EROSION_PARAMS.gridSize) {
+  const numeric = Number(value);
+  if (TERRAIN_RESOLUTION_OPTIONS.includes(numeric)) return numeric;
+  const safeFallback = Number(fallback);
+  return TERRAIN_RESOLUTION_OPTIONS.includes(safeFallback)
+    ? safeFallback
+    : DEFAULT_EROSION_PARAMS.gridSize;
+}
+
+export function terrainResolutionProfile(value, worldSpan = DEFAULT_EROSION_PARAMS.worldSpan) {
+  const resolution = normalizeTerrainResolution(value);
+  const span = Number.isFinite(Number(worldSpan)) && Number(worldSpan) > 0
+    ? Number(worldSpan)
+    : DEFAULT_EROSION_PARAMS.worldSpan;
+  const profile = TERRAIN_RESOLUTION_PROFILES[resolution];
+  return {
+    value: resolution,
+    label: profile.label,
+    detail: profile.detail,
+    cellSizeMeters: span / resolution,
+    relativeCellCount: (resolution / DEFAULT_EROSION_PARAMS.gridSize) ** 2,
+  };
+}
+
+export function resolveTerrainResolution(preferred) {
+  if (preferred !== undefined && preferred !== null && preferred !== '') {
+    return normalizeTerrainResolution(preferred);
+  }
+
+  try {
+    const search = globalThis.location?.search || '';
+    const fromUrl = new URLSearchParams(search).get('terrainRes');
+    if (fromUrl) return normalizeTerrainResolution(fromUrl);
+  } catch (_) {
+    // A malformed/host-restricted location should never prevent the studio booting.
+  }
+
+  try {
+    const stored = globalThis.localStorage?.getItem(TERRAIN_RESOLUTION_STORAGE_KEY);
+    if (stored) return normalizeTerrainResolution(stored);
+  } catch (_) {
+    // Storage may be unavailable in private/embedded browser contexts.
+  }
+
+  return DEFAULT_EROSION_PARAMS.gridSize;
+}
+
 const TELEMETRY_FRAG = `#version 300 es
 precision highp float;
 precision highp int;
@@ -115,7 +172,7 @@ function createFbo(gl, textures) {
 }
 
 export class GpuErosionEngine {
-  constructor(canvas, onTelemetry = null) {
+  constructor(canvas, onTelemetry = null, options = {}) {
     this.canvas = canvas;
     this.onTelemetry = onTelemetry;
 
@@ -138,8 +195,16 @@ export class GpuErosionEngine {
     this.hasFloatBlend = Boolean(gl.getExtension('EXT_float_blend'));
     gl.getExtension('OES_texture_float_linear');
 
-    this.params = { ...DEFAULT_EROSION_PARAMS };
-    this.gridRes = this.params.gridSize; // 512
+    // Terrain resolution is deliberately a boot-time choice: every height,
+    // flux, chemistry, obstacle, sculpt and render-mesh buffer is allocated
+    // from this one value. The studio persists the user's choice and reloads
+    // so a resolution change can never leave mismatched GPU textures behind.
+    const engineOptions = options && typeof options === 'object' ? options : {};
+    const requestedGridSize = resolveTerrainResolution(
+      engineOptions.gridSize ?? engineOptions.terrainResolution
+    );
+    this.params = { ...DEFAULT_EROSION_PARAMS, gridSize: requestedGridSize };
+    this.gridRes = requestedGridSize;
 
     this.active = false;   // Whether this viewport tab is visible
     this.playing = true;   // Whether simulation steps advance each frame
@@ -151,6 +216,7 @@ export class GpuErosionEngine {
 
     this.telemetry = {
       steps: 0,
+      gridRes: this.gridRes,
       particles: this.params.particleCount,
       erodedVolumeM3: 0,
       coarseSedM3: 0,

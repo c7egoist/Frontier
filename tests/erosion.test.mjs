@@ -31,7 +31,14 @@ import {
   createStackLayer,
 } from '../src/erosion/terrain-stack-presets.js';
 import { SdfCaveSystem } from '../src/erosion/sdf-cave-mesher.js';
-import { GpuErosionEngine } from '../src/erosion/gpu-erosion-engine.js';
+import {
+  GpuErosionEngine,
+  TERRAIN_RESOLUTION_OPTIONS,
+  TERRAIN_RESOLUTION_STORAGE_KEY,
+  normalizeTerrainResolution,
+  resolveTerrainResolution,
+  terrainResolutionProfile,
+} from '../src/erosion/gpu-erosion-engine.js';
 import { ErosionLayerStackUI } from '../src/erosion/layer-stack-ui.js';
 import * as Shaders from '../src/erosion/erosion-shaders.js';
 import * as PipelineShaders from '../src/erosion/pipeline-shaders.js';
@@ -1195,6 +1202,8 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
     assert.equal(engine.params.seed, 4029, 'Default seed must be 4029');
     assert.equal(engine.pipeline.liveSimRunning, false, 'Live simulation must be explicitly triggered, not auto-started by evaluation');
     assert.equal(engine.pipeline.simPlaybackMode, 'solo', 'Seasons default to one-at-a-time playback');
+    assert.equal(engine.gridRes, 512, 'Terrain resolution defaults to the established 512² simulation grid');
+    assert.equal(elements.get('cb-shelf-drawer').hidden, true, 'Preset recipes stay closed by default so the viewport stays dominant');
     assert.ok(elements.get('tp-sim-panel').innerHTML.includes('SIMULATION SEASONS'), 'Simulation Seasons panel must render');
     assert.ok(elements.get('tp-sim-panel').innerHTML.includes('data-sim-process="wind"'), 'Wind must be an independently triggerable season');
     const defaultSnowLayer = engine.pipeline.layers.find((l) => l.type === 'aeolian-glacial');
@@ -1304,6 +1313,16 @@ test('End-to-end stateful Mock-WebGL2 + DOM boot of GpuErosionEngine, TerrainSta
 
     const exported = engine.extractMeshForExport(4);
     assert.ok(exported.positions.length > 0 && exported.indices.length > 0, 'Mesh export must succeed in pipelineMode');
+
+    // A higher boot-time terrain grid must flow through the engine, stack
+    // pipeline and telemetry as one consistent allocation size.
+    const highResEngine = new GpuErosionEngine(canvas, () => {}, { gridSize: 768 });
+    assert.equal(highResEngine.gridRes, 768);
+    assert.equal(highResEngine.params.gridSize, 768);
+    assert.equal(highResEngine.pipeline.R, 768);
+    assert.equal(highResEngine.telemetry.gridRes, 768);
+    highResEngine.renderFrame();
+
     assert.ok(drawCount > 250, `Expected >250 verified WebGL2 draw calls with zero feedback loops, got ${drawCount}`);
   } finally {
     globalThis.document = prevDoc;
@@ -1958,4 +1977,69 @@ test('Spline Landform layers sculpt with noise and bore SDF tunnels on isolated 
   // Game export is a baked polygon surface: SDF cave triangles and real
   // portal holes are merged into extractMeshForExport, not left as runtime SDF.
   assert.ok(engSrc.includes('caveSys.positions') && engSrc.includes('portalAt') && engSrc.includes('indices.slice(0, ip)'));
+});
+
+test('Terrain resolution is a safe boot-time quality option and the redesigned UI stays decluttered', () => {
+  assert.deepEqual([...TERRAIN_RESOLUTION_OPTIONS], [256, 512, 768, 1024]);
+  assert.equal(DEFAULT_EROSION_PARAMS.gridSize, 512, 'The established default terrain remains bit-for-bit 512²');
+  assert.equal(normalizeTerrainResolution(256), 256);
+  assert.equal(normalizeTerrainResolution('768'), 768);
+  assert.equal(normalizeTerrainResolution(1024), 1024);
+  assert.equal(normalizeTerrainResolution(2048), 512, 'Unsupported extreme grids cannot allocate an unbounded GPU working set');
+  assert.equal(normalizeTerrainResolution('not-a-grid', 768), 768);
+  assert.equal(resolveTerrainResolution(1024), 1024, 'An explicit engine option wins over URL/storage defaults');
+
+  const high = terrainResolutionProfile(768, 500);
+  assert.equal(high.label, 'High');
+  assert.ok(Math.abs(high.cellSizeMeters - (500 / 768)) < 1e-12);
+  assert.equal(high.relativeCellCount, 2.25);
+  assert.equal(terrainResolutionProfile(1024).relativeCellCount, 4);
+  assert.equal(terrainResolutionProfile(256).relativeCellCount, 0.25);
+
+  const engSrc = fs.readFileSync(new URL('../src/erosion/gpu-erosion-engine.js', import.meta.url), 'utf8');
+  const pipeSrc = fs.readFileSync(new URL('../src/erosion/terrain-stack-pipeline.js', import.meta.url), 'utf8');
+  const mainSrc = fs.readFileSync(new URL('../src/app/main.js', import.meta.url), 'utf8');
+  const uiSrc = fs.readFileSync(new URL('../src/erosion/layer-stack-ui.js', import.meta.url), 'utf8');
+  const htmlSrc = fs.readFileSync(new URL('../index.html', import.meta.url), 'utf8');
+  const cssSrc = fs.readFileSync(new URL('../src/app/style.css', import.meta.url), 'utf8');
+
+  // Every grid-sized resource derives from the same boot-time engine value;
+  // the UI reloads instead of mutating textures underneath a live pipeline.
+  for (const token of [
+    'constructor(canvas, onTelemetry = null, options = {})',
+    'resolveTerrainResolution(',
+    'gridSize: requestedGridSize',
+    'this.gridRes = requestedGridSize',
+    'gridRes: this.gridRes',
+  ]) {
+    assert.ok(engSrc.includes(token), `Engine resolution plumbing missing ${token}`);
+  }
+  assert.ok(pipeSrc.includes('this.R = engine.gridRes'), 'Stack pipeline must allocate from the selected engine resolution');
+  for (const token of [
+    "getElementById('tp-terrain-resolution')",
+    'gridSize: initialTerrainResolution',
+    'TERRAIN_RESOLUTION_STORAGE_KEY',
+    "searchParams.set('terrainRes'",
+    'TERRAIN_RESOLUTION_SNAPSHOT_KEY',
+    'captureTerrainResolutionSnapshot(next)',
+    'restoreTerrainResolutionSnapshot();',
+    'createStackLayer(layer.type',
+    "getElementById('er-stat-grid')",
+  ]) {
+    assert.ok(mainSrc.includes(token), `Studio resolution control missing ${token}`);
+  }
+  assert.ok(mainSrc.includes(TERRAIN_RESOLUTION_STORAGE_KEY) || mainSrc.includes('TERRAIN_RESOLUTION_STORAGE_KEY'));
+  for (const option of ['256² · Performance', '512² · Balanced', '768² · High', '1024² · Ultra']) {
+    assert.ok(htmlSrc.includes(option), `Missing terrain resolution option ${option}`);
+  }
+
+  // Decluttering is structural, not just a colour swap: recipes and global
+  // shading start collapsed, and Focus mode can remove both side docks.
+  assert.ok(uiSrc.includes('this.shelfOpen = false'), 'Preset shelf defaults closed');
+  assert.ok(htmlSrc.includes('id="cb-shelf-drawer" hidden'), 'Preset drawer is hidden before first UI render');
+  assert.ok(uiSrc.includes('<details class="tp-property-card tp-collapsible-card"'), 'Global shading card is collapsible');
+  assert.ok(htmlSrc.includes('id="btn-toggle-panels"') && mainSrc.includes("classList.toggle('tp-focus-mode')"));
+  for (const token of ['2026 TELEMETRY-GLASS REDESIGN', 'body.tp-focus-mode .tp-layer-dock', '.tp-resolution-control', '.tp-collapsible-card', 'backdrop-filter: blur(18px)']) {
+    assert.ok(cssSrc.includes(token), `Redesigned UI stylesheet missing ${token}`);
+  }
 });

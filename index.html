@@ -19,6 +19,7 @@
         </div>
         <span class="tp-header-sep"></span>
         <span class="tp-doc-name" id="tp-doc-title">Icelandic Glacial Highlands</span>
+        <button id="btn-toggle-panels" class="tp-hdr-btn tp-focus-btn" type="button" aria-pressed="false" title="Hide the side panels and give the 3D viewport the full workspace">Focus</button>
       </div>
 
       <div class="tp-workspace-switch" id="studio-mode-switcher">
@@ -32,6 +33,15 @@
       </div>
 
       <div class="tp-header-right" id="tp-terrain-header-actions">
+        <label class="tp-resolution-control" title="Terrain simulation/render grid. Changing this cleanly reloads Terrain Studio so every GPU buffer is rebuilt at the new resolution.">
+          <span>Terrain grid</span>
+          <select id="tp-terrain-resolution" class="tp-resolution-select" aria-label="Terrain resolution">
+            <option value="256">256² · Performance · 1.95 m</option>
+            <option value="512" selected>512² · Balanced · 0.98 m</option>
+            <option value="768">768² · High · 0.65 m</option>
+            <option value="1024">1024² · Ultra · 0.49 m</option>
+          </select>
+        </label>
         <button id="btn-er-reset" class="tp-hdr-btn" type="button" title="Re-evaluate full bottom-to-top pipeline">↻ Re-evaluate</button>
         <button id="btn-er-play" class="tp-hdr-btn" type="button" title="Simulate the selected season (or all enabled seasons in Simultaneous mode) [Space]">▶ Simulate</button>
         <span class="tp-header-sep"></span>
@@ -304,13 +314,13 @@
         <!-- COLLAPSIBLE PRESET STACK RECIPES SHELF (.asset-content-browser / .cb-*) -->
         <section class="asset-content-browser" id="cb-shelf-root">
           <div class="cb-bar">
-            <button type="button" class="cb-toggle-btn open" id="cb-btn-toggle">
+            <button type="button" class="cb-toggle-btn" id="cb-btn-toggle" aria-expanded="false">
               <span class="cb-chevron">▾</span>
-              <span>Stack Preset Recipes (19 Landscapes · Seed #4029)</span>
+              <span>Terrain recipes</span>
             </button>
-            <span class="cb-hint">Loading a preset populates the full non-destructive layer stack</span>
+            <span class="cb-hint">Closed by default · open when switching terrains</span>
           </div>
-          <div class="cb-drawer" id="cb-shelf-drawer">
+          <div class="cb-drawer" id="cb-shelf-drawer" hidden>
             <div class="cb-preset-grid" id="cb-preset-grid"></div>
           </div>
         </section>

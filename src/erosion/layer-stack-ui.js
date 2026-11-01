@@ -351,7 +351,8 @@ export class ErosionLayerStackUI {
     this.onPresetChanged = opts.onPresetChanged || null;
     this.searchQuery = '';
     this.addMenuOpen = false;
-    this.shelfOpen = true;
+    this.shelfOpen = false;
+    this.shadingCardOpen = false;
     this.dragFromIdx = null;
     this.draggingSplinePt = -1;
 
@@ -419,10 +420,15 @@ export class ErosionLayerStackUI {
     }
 
     if (this.elShelfToggle && this.elShelfDrawer) {
-      this.elShelfToggle.addEventListener('click', () => {
-        this.shelfOpen = !this.shelfOpen;
+      const syncShelf = () => {
         this.elShelfDrawer.hidden = !this.shelfOpen;
         this.elShelfToggle.classList.toggle('open', this.shelfOpen);
+        this.elShelfToggle.setAttribute?.('aria-expanded', this.shelfOpen ? 'true' : 'false');
+      };
+      syncShelf();
+      this.elShelfToggle.addEventListener('click', () => {
+        this.shelfOpen = !this.shelfOpen;
+        syncShelf();
       });
     }
 
@@ -547,9 +553,8 @@ export class ErosionLayerStackUI {
     const enabledCount = this.pipeline.layers.filter((l) => l.enabled).length;
     const caveTris = Math.round(this.pipeline.caveSystem.vertexCount / 3);
     this.elSceneCaption.textContent =
-      `PIPELINE · ${enabledCount}/${this.pipeline.layers.length} ACTIVE PASSES (BOTTOM → TOP) · ` +
-      `${this.pipeline.lastEvalMs.toFixed(1)} MS` +
-      (caveTris > 0 ? ` · ${caveTris.toLocaleString()} SDF CAVE TRIS` : '');
+      `${enabledCount}/${this.pipeline.layers.length} passes · ${this.pipeline.lastEvalMs.toFixed(1)} ms` +
+      (caveTris > 0 ? ` · ${caveTris.toLocaleString()} cave tris` : '');
   }
 
   _syncHeaderSimButton() {
@@ -600,7 +605,7 @@ export class ErosionLayerStackUI {
       </div>
       <div class="tp-sim-chips">${chips}</div>
       <button type="button" class="tp-sim-master" data-sim-master="1">${masterLabel}</button>
-      <div class="tp-sim-note">Editing any stack/base layer auto-pauses and will not resume until you press Simulate. Chemical staining follows water: run Rain first (or Simultaneous) so flow can carry Fe/Cu from mineral beds.</div>
+      <div class="tp-sim-note">Stack edits auto-pause. Chemical transport follows Rain or Simultaneous flow.</div>
     `;
 
     this.elSimPanel.querySelectorAll('[data-sim-mode]').forEach((btn) => {
@@ -940,7 +945,7 @@ export class ErosionLayerStackUI {
       authoringCardHtml = `
         <section class="tp-property-card">
           <h2><i style="background:${cat.color}"></i><span>3D Spline Control Path (${pts.length}/8 pts)</span></h2>
-          <p class="tp-card-note">Drag gold control handles directly on the 3D viewport to steer this ${spModeLabel.toLowerCase()}. ${splineNote}</p>
+          <p class="tp-card-note">Drag the viewport handles to steer this ${spModeLabel.toLowerCase()}. ${splineNote}</p>
           <div class="tp-card-footer-btns">
             <button type="button" class="tp-mini-btn ${this.pipeline.authorTool === 'spline-edit' ? 'active' : ''}" data-set-tool="spline-edit">Edit Points in Viewport</button>
             <button type="button" class="tp-mini-btn" id="tp-btn-add-spline-pt" ${pts.length >= 8 ? 'disabled' : ''}>+ Append Point</button>
@@ -1042,9 +1047,12 @@ export class ErosionLayerStackUI {
       .join('');
 
     const shadingCardHtml = `
-      <section class="tp-property-card">
-        <h2><i style="background:#82939e"></i><span>Derived Surface Shading &amp; Sun</span></h2>
-        <p class="tp-card-note">Shading is derived purely from AO, protrusions, height, rock hardness, sediment &amp; flow — independent of the geometry stack.</p>
+      <details class="tp-property-card tp-collapsible-card" id="tp-shading-card" ${this.shadingCardOpen ? 'open' : ''}>
+        <summary class="tp-card-summary">
+          <span class="tp-card-summary-title"><i style="background:#82939e"></i>Derived Surface Shading &amp; Sun</span>
+          <span class="tp-card-chevron" aria-hidden="true">▾</span>
+        </summary>
+        <p class="tp-card-note">Global viewport shading from AO, height, hardness, sediment and flow — independent of the selected layer.</p>
         <div class="tp-control-row">
           <div class="tp-control-label"><span>Rock Micro-Fabric</span></div>
           <select class="tp-select" id="tp-select-fabric">${fabOpts}</select>
@@ -1079,7 +1087,7 @@ export class ErosionLayerStackUI {
           <input type="checkbox" id="tp-chk-show-particles" ${this.engine.params.showParticles !== false ? 'checked' : ''} />
           <span>Show All 3D Weather Particles</span>
         </label>
-      </section>`;
+      </details>`;
 
     this.elInspector.innerHTML = `
       <div class="tp-inspector-trail">
@@ -1346,6 +1354,12 @@ export class ErosionLayerStackUI {
         this.engine.params.showParticles = chkPart.checked;
       });
     }
+    const shadingCard = document.getElementById('tp-shading-card');
+    if (shadingCard) {
+      shadingCard.addEventListener('toggle', () => {
+        this.shadingCardOpen = Boolean(shadingCard.open);
+      });
+    }
   }
 
   renderPresetShelf() {
@@ -1446,13 +1460,13 @@ export class ErosionLayerStackUI {
     for (const p of pts2D) {
       circles += `
         <g class="spline-handle" data-pt-idx="${p.i}" transform="translate(${p.x.toFixed(1)},${p.y.toFixed(1)})">
-          <circle r="10" fill="rgba(18,18,18,0.78)" stroke="#d9b281" stroke-width="2" />
+          <circle r="10" fill="rgba(5,18,14,0.82)" stroke="#65e6b2" stroke-width="2" />
           <text y="3.5" text-anchor="middle" fill="#dededc" font-size="9" font-family="DM Sans, sans-serif">${p.i + 1}</text>
         </g>`;
     }
 
     svg.innerHTML = `
-      <polyline points="${polyPoints}" fill="none" stroke="rgba(217,178,129,0.85)" stroke-width="2.2" stroke-dasharray="6 4" />
+      <polyline points="${polyPoints}" fill="none" stroke="rgba(101,230,178,0.88)" stroke-width="2.2" stroke-dasharray="6 4" />
       ${circles}
     `;
 

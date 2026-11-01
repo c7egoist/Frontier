@@ -178,8 +178,28 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   fields can still accelerate AO/GI without paying for runtime voxel terrain
   on GTX-class GPUs.
 
-Verification: `npm test` — 36/36 pass (includes `tests/rain-erosion.test.mjs`,
+- **Terrain resolution + calmer studio UI**: the header **Terrain grid**
+  selector offers **256² Performance**, **512² Balanced** (the unchanged
+  default), **768² High**, and **1024² Ultra**. Resolution is applied at
+  studio boot — the selector saves the choice and reloads with
+  `?terrainRes=<size>` — so terrain height/water/sediment, snow, chemistry,
+  mineral, rock-obstacle, sculpt, stack and render-mesh buffers are all
+  allocated at exactly the same size instead of being resized underneath a
+  live GPU pipeline. A one-time validated session snapshot restores the
+  current recipe, layer stack, spline points, settings, cave strokes and
+  camera after the reload (live erosion progress and GPU height-sculpt
+  stamps reset with the reallocated textures). At the default 500 m span
+  those grids are roughly
+  1.95 m, 0.98 m, 0.65 m and 0.49 m per cell; 768² has 2.25× and 1024² has
+  4× the 512² cell/VRAM workload. The editor chrome now uses near-black
+  green glass panels, pill navigation and compact horizontal inspector
+  controls; terrain recipes and global shading start collapsed, and the
+  header **Focus** button hides both side docks to give the 3D viewport the
+  full workspace.
+
+Verification: `npm test` — 37/37 pass (includes `tests/rain-erosion.test.mjs`,
 rigid-body free-fall/no-elevator tests, exact-mesh seating / pause-freeze,
-simulation-season / mineral-strata, dedicated wind-erosion, and spline
-landform / sculpt-noise / SDF-through-tunnel regression tests).
+simulation-season / mineral-strata, dedicated wind-erosion, spline
+landform / sculpt-noise / SDF-through-tunnel, and terrain-resolution /
+decluttered-UI regression tests).
 `npm run build` clean.
