@@ -1124,6 +1124,7 @@ void DeviceExchange::ReleaseProgram(DeviceProgram& Program) noexcept
 void DeviceExchange::WriteRegion(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, const void* Bytes, VkDeviceSize ByteCount)
 {
     if (!Region || ByteCount == 0) return;
+    if (WriteObserver) WriteObserver(Region->Label, Offset, Bytes, ByteCount);
     if (!EnsureStaging(ByteCount + 16)) return;
     const VkDeviceSize StagingOffset = (StagingCursor_ + 15) / 16 * 16;
     std::memcpy(StagingBytes_ + StagingOffset, Bytes, static_cast<size_t>(ByteCount));

@@ -431,6 +431,9 @@ class DeviceExchange
                       uint32_t Width, uint32_t Height, uint32_t Depth = 1u, uint32_t OriginX = 0u, uint32_t OriginY = 0u,
                       uint32_t OriginZ = 0u, uint32_t Level = 0u);
 
+    // 🔍 Validation hook: sees every queue write (region label, offset, bytes) as it is staged.
+    std::function<void(const std::string&, VkDeviceSize, const void*, VkDeviceSize)> WriteObserver{};
+
     // Recording + submission. Submit waits for completion (one submission in flight; WebGPU onSubmittedWorkDone).
     CommandSequence BeginSequence();
     bool            Submit(CommandSequence& Sequence, std::string* OutDiagnostic = nullptr);

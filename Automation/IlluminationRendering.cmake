@@ -13,7 +13,14 @@ add_library(FrontierIllumination STATIC
     Frontier/Engine/Illumination/OccupantDistanceSpace.cpp
     Frontier/Engine/Illumination/IlluminationConstants.cpp
     Frontier/Engine/Illumination/SceneDistanceSpace.cpp
-    Frontier/Engine/Illumination/SurfaceCardDepot.cpp)
+    Frontier/Engine/Illumination/SurfaceCardDepot.cpp
+    Frontier/Engine/Illumination/RayTracingSpace.cpp
+    Frontier/Engine/Illumination/AtmosphereIntegrator.cpp
+    Frontier/Engine/Illumination/ShadowProjection.cpp
+    Frontier/Engine/Illumination/SurfaceProjection.cpp
+    Frontier/Engine/Illumination/ResamplingSequence.cpp
+    Frontier/Engine/Illumination/DisplayProjection.cpp
+    Frontier/Engine/Illumination/IlluminationHost.cpp)
 
 target_include_directories(FrontierIllumination PUBLIC
     "${CMAKE_SOURCE_DIR}"
