@@ -49,6 +49,7 @@ import {
 import { ErosionLayerStackUI } from '../src/erosion/layer-stack-ui.js';
 import * as Shaders from '../src/erosion/erosion-shaders.js';
 import * as PipelineShaders from '../src/erosion/pipeline-shaders.js';
+import { checkGlslScopes } from './glsl-scope-check.mjs';
 
 const ALL_SHADER_EXPORTS = [
   'FULLSCREEN_VERT',
@@ -135,6 +136,34 @@ test('GPU Erosion presets cover all 19 landscapes including non-periodic Himalay
   assert.equal(codes.size, 6, 'Emitter mode codes must be unique for GPU dispatch');
   assert.equal(DEFAULT_EROSION_PARAMS.gridSize, 512);
   assert.ok(DEFAULT_EROSION_PARAMS.particleCount >= 8192 && DEFAULT_EROSION_PARAMS.particleCount <= 32768);
+});
+
+test('All GLSL shaders pass declaration-before-use scope checking (no undeclared or out-of-scope identifiers)', () => {
+  // Regression guard: a wind-shader edit once referenced a variable outside
+  // the block that declared it (terrainDeflectedWind). Node's mock WebGL
+  // cannot compile GLSL, so it shipped and black-screened in the browser
+  // with ANGLE "undeclared identifier". This scope checker catches that
+  // whole class statically (validated to flag the original bug at the exact
+  // line ANGLE reported, with zero false positives on the fixed shaders).
+  for (const [modName, mod] of [['erosion-shaders', Shaders], ['pipeline-shaders', PipelineShaders]]) {
+    for (const [name, value] of Object.entries(mod)) {
+      if (typeof value !== 'string' || !value.includes('void main')) continue;
+      const errors = checkGlslScopes(value, `${modName}.${name}`);
+      assert.deepEqual(errors, [], `${modName}.${name} scope errors:\n${errors.join('\n')}`);
+    }
+  }
+
+  // The checker itself must catch the original failure mode.
+  const buggy = `#version 300 es
+precision highp float;
+out vec4 o;
+void main() {
+  if (true) { vec2 innerOnly = vec2(1.0); o = vec4(innerOnly, 0.0, 1.0); }
+  o = vec4(innerOnly, 0.0, 1.0);
+}`;
+  const buggyErrors = checkGlslScopes(buggy, 'synthetic');
+  assert.equal(buggyErrors.length, 1);
+  assert.ok(buggyErrors[0].includes("'innerOnly'"), `Scope checker must flag out-of-block use, got: ${buggyErrors.join(' | ')}`);
 });
 
 test('All 18 WebGL2 GLSL ES 3.00 shaders satisfy strict ANGLE precision, brace, and interface invariants', () => {

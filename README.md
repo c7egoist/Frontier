@@ -220,7 +220,10 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   header **Focus** button hides both side docks to give the 3D viewport the
   full workspace.
 
-Verification: `npm test` — 39/39 pass (includes `tests/rain-erosion.test.mjs`,
+Verification: `npm test` — 40/40 pass (includes `tests/rain-erosion.test.mjs`,
+a static GLSL declaration-before-use scope check over every shader (the mock
+WebGL in Node cannot compile GLSL, so this guards against browser-only
+"undeclared identifier" black screens),
 rigid-body free-fall/no-elevator tests, exact-mesh seating / pause-freeze,
 simulation-season / mineral-strata, dedicated wind-erosion + wind-flow
 debug vector field, spline

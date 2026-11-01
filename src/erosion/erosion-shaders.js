@@ -1110,6 +1110,10 @@ void main() {
   float windWander = ((gustNoiseA - 0.5) * 1.45 + (gustNoiseB - 0.5) * 0.55) * uWindErodeA.z;
   vec2 gustWindDir = safeNorm2(windDir + windPerp * windWander, windDir);
   float windGust = 0.62 + 0.80 * smoothstep(0.25, 0.85, gustNoiseA);
+  // Wrap-deflected wind, computed in the SP_WIND steering branch below but
+  // declared at function scope: the sediment-exchange phase also evaluates
+  // stoss/lee exposure against it.
+  vec2 terrainDeflectedWind = gustWindDir;
 
   // Species-dependent surface steering & locomotion laws
   vec2 steerDir;
@@ -1140,7 +1144,7 @@ void main() {
       + 0.40 * vec2(
         (obE16.r + obE16.g + obE16.b) - (obW16.r + obW16.g + obW16.b),
         (obU16.r + obU16.g + obU16.b) - (obD16.r + obD16.g + obD16.b)) / (32.0 * cellSize);
-    vec2 terrainDeflectedWind = gustWindDir;
+    terrainDeflectedWind = gustWindDir;
     float ogLen = length(obstacleGrad);
     if (ogLen > 1e-4) {
       vec2 ogDir = obstacleGrad / ogLen;
