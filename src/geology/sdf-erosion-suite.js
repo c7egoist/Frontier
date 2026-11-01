@@ -1,0 +1,943 @@
+/**
+ * Terrain-equivalent erosion processes adapted to a true 3D SDF surface.
+ *
+ * Terrain Studio's live GPU model is a 2.5D heightfield (bedrock, sediment,
+ * water, snow and chemistry textures). A free-standing rock/cliff asset has
+ * overhangs, vertical faces and undersides, so those shader passes cannot be
+ * pasted onto it unchanged. This suite preserves the same process laws in
+ * the representation a rock actually needs:
+ *
+ *   Rain       -> existing capacity-limited droplet runoff on the SDF.
+ *   Wind       -> saltating grains driven by a gusting, terrain-deflected
+ *                 flow; head-on + tangential flank abrasion, lee deposition.
+ *   Thermal    -> dry granular particles that only detach above repose and
+ *                 deposit below it (rockfall/talus transport).
+ *   Cryo       -> snow/melt particles settle into ledges and concavities,
+ *                 then freeze-thaw expansion wedges grains loose.
+ *   Chemical   -> water-residence dissolution in wet hollows and soluble
+ *                 bands; the separate mesh stain pass colours the result.
+ *
+ * Every process uses a sub-voxel SDF brush, geological hardness, convex-edge
+ * protection, thin-wall protection, and a per-node carve cap. There is no
+ * blanket Laplacian smoothing, so high-resolution erosion incises instead of
+ * turning the formation into melted chocolate.
+ */
+
+import { clamp, smoothstep } from '../core/vec3.js';
+import { scalarField3D } from '../core/spatial-noise.js';
+import { erodeSdfWithRain } from './rain-erosion.js';
+
+const BRUSH_R = 1.6;
+
+function defaultParticleCount(sdf, baseAt192) {
+  const maxDim = Math.max(sdf?.nx || 192, sdf?.ny || 192, sdf?.nz || 192);
+  // Most particles sweep a physical strip whose width scales with h while
+  // their path length in steps scales with 1/h. A 1.25 exponent maintains
+  // coverage without the cubic total work a naive area-squared count causes.
+  const scale = (maxDim / 192) ** 1.25;
+  return Math.round(clamp(baseAt192 * scale, 600, 26000));
+}
+
+function createSdfProcessTool(sdf, options = {}) {
+  const { nx, ny, nz, gx, gy, gz, strideY, strideZ } = sdf;
+  const h = sdf.voxelSize;
+  const ox = sdf.originX, oy = sdf.originY, oz = sdf.originZ;
+  const values = sdf.values;
+  const band = 3.0 * h;
+  const maxCarveDepth = options.maxCarveDepth ?? h * 7;
+  const carveTotals = new Map();
+
+  const ensureNode = (ix, iy, iz) => {
+    const idx = ix + iy * strideY + iz * strideZ;
+    let v = values[idx];
+    if (Number.isNaN(v)) {
+      v = sdf.ensureSample ? sdf.ensureSample(ix, iy, iz) : h * 4;
+      values[idx] = v;
+    }
+    return v;
+  };
+
+  // Materialize a small halo around any sparse/converted narrow band so
+  // trilinear samples and brushes do not encounter NaN at brick boundaries.
+  for (let pass = 0; pass < 2; pass++) {
+    const toFill = [];
+    for (let iz = 1; iz < gz - 1; iz++) {
+      const zOff = iz * strideZ;
+      for (let iy = 1; iy < gy - 1; iy++) {
+        let idx = zOff + iy * strideY + 1;
+        for (let ix = 1; ix < gx - 1; ix++, idx++) {
+          if (!Number.isNaN(values[idx])) continue;
+          if (
+            !Number.isNaN(values[idx - 1]) || !Number.isNaN(values[idx + 1]) ||
+            !Number.isNaN(values[idx - strideY]) || !Number.isNaN(values[idx + strideY]) ||
+            !Number.isNaN(values[idx - strideZ]) || !Number.isNaN(values[idx + strideZ])
+          ) toFill.push(ix, iy, iz);
+        }
+      }
+    }
+    for (let i = 0; i < toFill.length; i += 3) ensureNode(toFill[i], toFill[i + 1], toFill[i + 2]);
+    if (!toFill.length) break;
+  }
+
+  const sg = new Float64Array(4); // phi, grad x/y/z (world gradient)
+  function sampleGrad(wx, wy, wz) {
+    const fx = clamp((wx - ox) / h, 0, nx - 1.001);
+    const fy = clamp((wy - oy) / h, 0, ny - 1.001);
+    const fz = clamp((wz - oz) / h, 0, nz - 1.001);
+    const ix = Math.floor(fx), iy = Math.floor(fy), iz = Math.floor(fz);
+    const tx = fx - ix, ty = fy - iy, tz = fz - iz;
+
+    const c000 = ensureNode(ix, iy, iz);
+    const c100 = ensureNode(ix + 1, iy, iz);
+    const c010 = ensureNode(ix, iy + 1, iz);
+    const c110 = ensureNode(ix + 1, iy + 1, iz);
+    const c001 = ensureNode(ix, iy, iz + 1);
+    const c101 = ensureNode(ix + 1, iy, iz + 1);
+    const c011 = ensureNode(ix, iy + 1, iz + 1);
+    const c111 = ensureNode(ix + 1, iy + 1, iz + 1);
+
+    const x00 = c000 + (c100 - c000) * tx;
+    const x10 = c010 + (c110 - c010) * tx;
+    const x01 = c001 + (c101 - c001) * tx;
+    const x11 = c011 + (c111 - c011) * tx;
+    const y0 = x00 + (x10 - x00) * ty;
+    const y1 = x01 + (x11 - x01) * ty;
+    sg[0] = y0 + (y1 - y0) * tz;
+
+    const dx00 = c100 - c000, dx10 = c110 - c010, dx01 = c101 - c001, dx11 = c111 - c011;
+    sg[1] = ((dx00 + (dx10 - dx00) * ty) * (1 - tz) + (dx01 + (dx11 - dx01) * ty) * tz) / h;
+    const dy00 = c010 - c000, dy10 = c110 - c100, dy01 = c011 - c001, dy11 = c111 - c101;
+    sg[2] = ((dy00 + (dy10 - dy00) * tx) * (1 - tz) + (dy01 + (dy11 - dy01) * tx) * tz) / h;
+    const dz00 = c001 - c000, dz10 = c101 - c100, dz01 = c011 - c010, dz11 = c111 - c110;
+    sg[3] = ((dz00 + (dz01 - dz00) * ty) * (1 - tx) + (dz10 + (dz11 - dz10) * ty) * tx) / h;
+    return sg;
+  }
+
+  function sampleOnly(wx, wy, wz) {
+    sampleGrad(wx, wy, wz);
+    return sg[0];
+  }
+
+  function laplacianAt(wx, wy, wz) {
+    const ix = clamp(Math.round((wx - ox) / h), 1, nx - 1);
+    const iy = clamp(Math.round((wy - oy) / h), 1, ny - 1);
+    const iz = clamp(Math.round((wz - oz) / h), 1, nz - 1);
+    const c = ensureNode(ix, iy, iz);
+    const sum =
+      ensureNode(ix - 1, iy, iz) + ensureNode(ix + 1, iy, iz) +
+      ensureNode(ix, iy - 1, iz) + ensureNode(ix, iy + 1, iz) +
+      ensureNode(ix, iy, iz - 1) + ensureNode(ix, iy, iz + 1);
+    return (sum - 6 * c) / (h * h);
+  }
+
+  const brushNodes = [];
+  function applyBrushAt(wx, wy, wz, delta) {
+    if (!Number.isFinite(delta) || Math.abs(delta) <= 1e-12) return 0;
+    brushNodes.length = 0;
+    const cx = Math.round((wx - ox) / h);
+    const cy = Math.round((wy - oy) / h);
+    const cz = Math.round((wz - oz) / h);
+    const R = Math.ceil(BRUSH_R);
+    let wSum = 0;
+
+    for (let jz = cz - R; jz <= cz + R; jz++) {
+      if (jz < 1 || jz > nz - 1) continue;
+      for (let jy = cy - R; jy <= cy + R; jy++) {
+        if (jy < 1 || jy > ny - 1) continue;
+        for (let jx = cx - R; jx <= cx + R; jx++) {
+          if (jx < 1 || jx > nx - 1) continue;
+          const dx = ox + jx * h - wx;
+          const dy = oy + jy * h - wy;
+          const dz = oz + jz * h - wz;
+          const dist = Math.sqrt(dx * dx + dy * dy + dz * dz) / h;
+          if (dist > BRUSH_R) continue;
+          const idx = jx + jy * strideY + jz * strideZ;
+          if (Number.isNaN(values[idx])) ensureNode(jx, jy, jz);
+          const w = 1 - dist / BRUSH_R;
+          brushNodes.push(idx, w);
+          wSum += w;
+        }
+      }
+    }
+    if (wSum <= 1e-12) return 0;
+
+    let applied = 0;
+    for (let i = 0; i < brushNodes.length; i += 2) {
+      const idx = brushNodes[i];
+      const old = values[idx];
+      if (Number.isNaN(old) || old < -band || old > band) continue;
+      let step = delta * (brushNodes[i + 1] / wSum);
+      if (step > 0) {
+        const used = carveTotals.get(idx) || 0;
+        const room = maxCarveDepth - used;
+        if (room <= 0) continue;
+        step = Math.min(step, room);
+        carveTotals.set(idx, used + step);
+      }
+      const next = clamp(old + step, -band * 1.35, band * 1.35);
+      values[idx] = next;
+      applied += next - old;
+    }
+    return applied;
+  }
+
+  function protectionMultiplier(wx, wy, wz, nnx, nny, nnz, opts = {}) {
+    const edgeProtection = clamp(opts.edgeProtection ?? 0.7, 0, 1);
+    let hardness = 0.6;
+    if (opts.hardnessAt) {
+      const hv = opts.hardnessAt(wx, wy, wz);
+      if (Number.isFinite(hv)) hardness = clamp(hv, 0, 1);
+    }
+    let m = 1 / (0.35 + 2.6 * hardness * hardness);
+
+    const lap = laplacianAt(wx, wy, wz) * h;
+    if (lap > 0) {
+      const k = clamp(lap * 0.55, 0, 1);
+      m *= 1 - edgeProtection * 0.88 * k;
+    } else {
+      m *= 1 + 0.28 * clamp(-lap * 0.45, 0, 1);
+    }
+
+    const behind = sampleOnly(wx - nnx * 3 * h, wy - nny * 3 * h, wz - nnz * 3 * h);
+    if (behind > -1.6 * h) m *= 0.22;
+    return m;
+  }
+
+  const projected = new Float64Array(3);
+  function projectToSurface(wx, wy, wz) {
+    let px = wx, py = wy, pz = wz;
+    for (let i = 0; i < 2; i++) {
+      sampleGrad(px, py, pz);
+      const gl = Math.hypot(sg[1], sg[2], sg[3]);
+      if (gl < 1e-9) break;
+      px -= sg[1] / gl * sg[0];
+      py -= sg[2] / gl * sg[0];
+      pz -= sg[3] / gl * sg[0];
+    }
+    projected[0] = px; projected[1] = py; projected[2] = pz;
+    return projected;
+  }
+
+  const minX = ox + 1.5 * h, maxX = ox + (nx - 1.5) * h;
+  const minY = oy + 1.5 * h, maxY = oy + (ny - 1.5) * h;
+  const minZ = oz + 1.5 * h, maxZ = oz + (nz - 1.5) * h;
+  const insideInner = (x, y, z) => x >= minX && x <= maxX && y >= minY && y <= maxY && z >= minZ && z <= maxZ;
+
+  const hit = new Float64Array(3);
+  function traceRay(px, py, pz, dx, dy, dz, maxSteps = 360) {
+    const dl = Math.hypot(dx, dy, dz);
+    if (dl < 1e-12) return false;
+    dx /= dl; dy /= dl; dz /= dl;
+    for (let i = 0; i < maxSteps; i++) {
+      if (!insideInner(px, py, pz)) return false;
+      const phi = sampleOnly(px, py, pz);
+      if (phi <= 0.30 * h) {
+        hit[0] = px; hit[1] = py; hit[2] = pz;
+        return true;
+      }
+      const step = clamp(phi * 0.85, 0.55 * h, 4.0 * h);
+      px += dx * step; py += dy * step; pz += dz * step;
+    }
+    return false;
+  }
+
+  function traceDown(x, z) {
+    return traceRay(x, maxY - h, z, 0, -1, 0, 420);
+  }
+
+  return {
+    h, ox, oy, oz, nx, ny, nz,
+    minX, maxX, minY, maxY, minZ, maxZ,
+    sampleGrad, sampleOnly, laplacianAt,
+    applyBrushAt, protectionMultiplier, projectToSurface,
+    traceRay, traceDown, insideInner, hit, sg,
+  };
+}
+
+function downhillFromNormal(nnx, nny, nnz, out) {
+  // Project gravity (0,-1,0) onto the tangent plane.
+  const gDotN = -nny;
+  let sx = -nnx * gDotN;
+  let sy = -1 - nny * gDotN;
+  let sz = -nnz * gDotN;
+  const len = Math.hypot(sx, sy, sz);
+  if (len < 1e-10) {
+    out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 0;
+    return out;
+  }
+  out[0] = sx / len; out[1] = sy / len; out[2] = sz / len; out[3] = len;
+  return out;
+}
+
+/** Wind saltation/abrasion with gust wander, obstacle wrap and lee shelter. */
+export function erodeSdfWithWind(sdf, options = {}) {
+  const t0 = performance.now();
+  const amount = clamp(options.amount ?? 0, 0, 1);
+  const stats = {
+    particlesRequested: 0, particles: 0, steps: 0,
+    erodedVolume: 0, depositedVolume: 0, abrasionEvents: 0, depositionEvents: 0,
+    elapsedMs: 0,
+  };
+  if (!sdf || amount <= 0) {
+    stats.elapsedMs = Math.round(performance.now() - t0);
+    return stats;
+  }
+
+  const particleCount = Math.max(0, Math.round(options.particleCount ?? defaultParticleCount(sdf, 7000)));
+  stats.particlesRequested = particleCount;
+  const azimuthRad = (options.azimuthDeg ?? options.windAzimuth ?? 35) * Math.PI / 180;
+  const baseWindX = Math.cos(azimuthRad), baseWindZ = Math.sin(azimuthRad);
+  const perpX = -baseWindZ, perpZ = baseWindX;
+  const turbulence = clamp(options.turbulence ?? 0.45, 0, 1);
+  const streamlining = clamp(options.streamlining ?? options.windStreamlining ?? 0.65, 0, 1);
+  const sandSupply = clamp(options.sandSupply ?? 0.65, 0, 1);
+  const fluting = clamp(options.fluting ?? 0.65, 0, 1);
+  const curtainHeight = clamp(options.curtainHeight ?? 0.42, 0.03, 1);
+  const baseSpeed = clamp(options.speed ?? 0.62, 0.05, 1.5);
+  const edgeProtection = clamp(options.edgeProtection ?? 0.7, 0, 1);
+  const groundY = options.groundY ?? -Infinity;
+  const rng = options.rng;
+  const rand = () => (rng ? rng.float() : Math.random());
+  const onProgress = options.onProgress || null;
+  const seedSalt = (options.seedSalt ?? 0x51ab3d) | 0;
+
+  const tool = createSdfProcessTool(sdf, { maxCarveDepth: sdf.voxelSize * (2.0 + 8.0 * amount) });
+  const { h } = tool;
+  const centerX = tool.ox + tool.nx * h * 0.5;
+  const centerY = tool.oy + tool.ny * h * 0.5;
+  const centerZ = tool.oz + tool.nz * h * 0.5;
+  const spanX = tool.nx * h, spanY = tool.ny * h, spanZ = tool.nz * h;
+  const halfAlong = 0.5 * (spanX * Math.abs(baseWindX) + spanZ * Math.abs(baseWindZ));
+  const halfPerp = 0.5 * (spanX * Math.abs(perpX) + spanZ * Math.abs(perpZ));
+  const surfaceMinX = sdf.meshBounds?.minX ?? tool.minX;
+  const surfaceMaxX = sdf.meshBounds?.maxX ?? tool.maxX;
+  const surfaceMinY = sdf.meshBounds?.minY ?? (Number.isFinite(groundY) ? groundY : tool.minY);
+  const surfaceMaxY = sdf.meshBounds?.maxY ?? tool.maxY;
+  const surfaceMinZ = sdf.meshBounds?.minZ ?? tool.minZ;
+  const surfaceMaxZ = sdf.meshBounds?.maxZ ?? tool.maxZ;
+  const surfaceHeight = Math.max(h, surfaceMaxY - surfaceMinY);
+  const surfaceAlongSpan = sdf.meshBounds
+    ? Math.abs((sdf.meshBounds.maxX - sdf.meshBounds.minX) * baseWindX) +
+      Math.abs((sdf.meshBounds.maxZ - sdf.meshBounds.minZ) * baseWindZ)
+    : halfAlong * 2;
+  const maxSteps = Math.round(clamp(Math.max(tool.nx, tool.ny, tool.nz) * 2.0, 220, 850));
+  const reportEvery = Math.max(1, Math.floor(particleCount / 12));
+
+  for (let pIdx = 0; pIdx < particleCount; pIdx++) {
+    if (onProgress && pIdx % reportEvery === 0) onProgress(pIdx / Math.max(1, particleCount));
+
+    const gust = 0.72 + rand() * 0.72;
+    const initialYaw = azimuthRad + (rand() - 0.5) * turbulence * 0.38;
+    let vx = Math.cos(initialYaw), vy = (rand() - 0.5) * turbulence * 0.08, vz = Math.sin(initialYaw);
+    const vl0 = Math.hypot(vx, vy, vz) || 1;
+    vx /= vl0; vy /= vl0; vz /= vl0;
+
+    // Pick a target point inside the asset bounds, then back-cast along
+    // -wind to the SDF domain boundary. Sampling a rectangle by projected
+    // half-extents places many diagonal-wind starts outside the domain.
+    const targetX = surfaceMinX + rand() * Math.max(0, surfaceMaxX - surfaceMinX);
+    const targetZ = surfaceMinZ + rand() * Math.max(0, surfaceMaxZ - surfaceMinZ);
+    const sy0 = clamp(surfaceMinY + rand() * surfaceHeight, tool.minY + h, tool.maxY - h);
+    let back = Infinity;
+    if (Math.abs(baseWindX) > 1e-9) {
+      back = Math.min(back, baseWindX > 0
+        ? (targetX - tool.minX) / baseWindX
+        : (tool.maxX - targetX) / -baseWindX);
+    }
+    if (Math.abs(baseWindZ) > 1e-9) {
+      back = Math.min(back, baseWindZ > 0
+        ? (targetZ - tool.minZ) / baseWindZ
+        : (tool.maxZ - targetZ) / -baseWindZ);
+    }
+    if (!Number.isFinite(back) || back <= 0) continue;
+    const startBack = Math.max(0, back - Math.min(2 * h, back * 0.05));
+    const sx0 = targetX - baseWindX * startBack;
+    const sz0 = targetZ - baseWindZ * startBack;
+    if (!tool.traceRay(sx0, sy0, sz0, vx, vy, vz, 480)) continue;
+
+    let px = tool.hit[0], py = tool.hit[1], pz = tool.hit[2];
+    const pr = tool.projectToSurface(px, py, pz);
+    px = pr[0]; py = pr[1]; pz = pr[2];
+
+    stats.particles++;
+    let speed = baseSpeed * gust;
+    let sediment = h * (0.04 + 0.20 * sandSupply) * gust;
+    let attached = true;
+    let maxAlong = px * baseWindX + pz * baseWindZ;
+
+    for (let step = 0; step < maxSteps; step++) {
+      if (!tool.insideInner(px, py, pz)) break;
+      stats.steps++;
+      tool.sampleGrad(px, py, pz);
+      const phi = tool.sg[0];
+      let gx = tool.sg[1], gy = tool.sg[2], gz = tool.sg[3];
+      const gl = Math.hypot(gx, gy, gz);
+      if (gl < 1e-9) break;
+      const nnx = gx / gl, nny = gy / gl, nnz = gz / gl;
+      const alongPos = px * baseWindX + pz * baseWindZ;
+      maxAlong = Math.max(maxAlong, alongPos);
+      // A saltating grain should leave in the wake, never orbit a closed
+      // rock back onto its own windward face.
+      if (alongPos < maxAlong - surfaceAlongSpan * 0.38) break;
+      let detachAfterExchange = false;
+
+      // Gusting target flow. scalarField3D is a flow-wander field here,
+      // not a shape/colour texture.
+      const yawNoise = scalarField3D(px * 0.16 + 17.3, py * 0.12 - 4.1, pz * 0.16 + 9.7, seedSalt);
+      const pitchNoise = scalarField3D(px * 0.11 - 8.2, py * 0.15 + 3.4, pz * 0.11 - 12.8, seedSalt ^ 0x27d4eb2d);
+      const yaw = azimuthRad + yawNoise * turbulence * 0.58;
+      let tx = Math.cos(yaw), ty = pitchNoise * turbulence * 0.12, tz = Math.sin(yaw);
+      vx += (tx - vx) * 0.22; vy += (ty - vy) * 0.22; vz += (tz - vz) * 0.22;
+
+      // Obstacle wrap: remove into-solid motion close to the surface.
+      if (attached && phi < 4.5 * h) {
+        const dotVN = vx * nnx + vy * nny + vz * nnz;
+        if (dotVN < 0) {
+          const remove = dotVN * (0.25 + 0.72 * streamlining);
+          vx -= nnx * remove; vy -= nny * remove; vz -= nnz * remove;
+        }
+      }
+      let vl = Math.hypot(vx, vy, vz);
+      if (vl < 0.22) {
+        // A head-on gust stagnates at the face; split around the side the
+        // particle is already offset towards, as streamlines do.
+        const side = ((px - centerX) * perpX + (pz - centerZ) * perpZ) >= 0 ? 1 : -1;
+        vx = perpX * side; vy = pitchNoise * 0.30; vz = perpZ * side;
+        vl = Math.hypot(vx, vy, vz) || 1;
+      }
+      vx /= vl; vy /= vl; vz /= vl;
+
+      if (attached && Math.abs(phi) <= 1.35 * h) {
+        const windDotN = nnx * baseWindX + nnz * baseWindZ;
+        const headOn = clamp(-windDotN, 0, 1);
+        const tangential = Math.sqrt(Math.max(0, 1 - windDotN * windDotN));
+        const steepness = Math.sqrt(Math.max(0, 1 - nny * nny));
+        const exposure = Math.pow(headOn, 1.3) + streamlining * 0.55 * tangential * (0.25 + 0.75 * steepness);
+
+        let shelter = 0;
+        for (const back of [2, 5, 9]) {
+          const upPhi = tool.sampleOnly(px - baseWindX * back * h, py, pz - baseWindZ * back * h);
+          shelter = Math.max(shelter, 1 - smoothstep(-0.5 * h, 1.6 * h, upPhi));
+        }
+
+        if (windDotN > 0.20 && shelter > 0.42 && rand() < 0.22) detachAfterExchange = true;
+
+        const speedTarget = baseSpeed * gust * (1 - shelter * 0.55) *
+          (1 + streamlining * 0.38 * tangential * steepness);
+        speed += (speedTarget - speed) * 0.20;
+        speed = clamp(speed, 0.06, 2.2);
+
+        const capacity = h * (0.08 + 0.50 * amount) * speed * (0.22 + exposure);
+        const lee = shelter > 0.30 || windDotN > 0.14;
+        const canHold = steepness < 0.80 && nny > -0.35;
+
+        if (lee && canHold && sediment > capacity * 0.45) {
+          const dep = Math.min(sediment, sediment * (0.10 + 0.30 * shelter));
+          if (dep > 1e-9) {
+            const applied = tool.applyBrushAt(px, py, pz, -dep);
+            stats.depositedVolume -= applied * h * h;
+            sediment = Math.max(0, sediment + applied);
+            stats.depositionEvents++;
+          }
+        } else if (exposure > 0.035 && sediment < capacity) {
+          const along = px * baseWindX + pz * baseWindZ;
+          const acrossCoord = px * perpX + pz * perpZ;
+          const streak = scalarField3D(acrossCoord * 1.35, py * 0.90, along * 0.22, seedSalt ^ 0x5bd1e995);
+          const fluteFactor = 1 + fluting * 0.50 * streak;
+          const heightN = clamp((py - surfaceMinY) / surfaceHeight, 0, 1);
+          const curtainBoost = 1 + 0.80 * (1 - smoothstep(0, curtainHeight, heightN));
+          const protection = tool.protectionMultiplier(px, py, pz, nnx, nny, nnz, {
+            edgeProtection, hardnessAt: options.hardnessAt,
+          });
+          let erode = h * 0.16 * (0.20 + amount) * exposure * speed * fluteFactor * curtainBoost *
+            (0.30 + 0.70 * sandSupply) * protection;
+          erode = Math.min(erode, Math.max(0, capacity - sediment));
+          if (erode > 1e-9) {
+            const applied = tool.applyBrushAt(px, py, pz, erode);
+            if (applied > 0) {
+              stats.erodedVolume += applied * h * h;
+              sediment += applied;
+              stats.abrasionEvents++;
+            }
+          }
+        }
+      }
+
+      if (py <= groundY + 0.55 * h) {
+        if (sediment > 1e-9) {
+          const applied = tool.applyBrushAt(px, py, pz, -sediment);
+          stats.depositedVolume -= applied * h * h;
+        }
+        break;
+      }
+
+      if (detachAfterExchange) {
+        attached = false;
+        vx = baseWindX + nnx * 0.28;
+        vy = vy * 0.35 + nny * 0.10;
+        vz = baseWindZ + nnz * 0.28;
+        const dl = Math.hypot(vx, vy, vz) || 1;
+        vx /= dl; vy /= dl; vz /= dl;
+      }
+
+      const stepLen = 0.8 * h * clamp(speed, 0.55, 1.65) * (attached ? 1 : 2.4);
+      let qx = px + vx * stepLen;
+      let qy = py + vy * stepLen - (phi > 1.5 * h ? 0.025 * h : 0);
+      let qz = pz + vz * stepLen;
+      if (!tool.insideInner(qx, qy, qz)) break;
+      const qPhi = tool.sampleOnly(qx, qy, qz);
+      if (attached && Math.abs(qPhi) < 2.6 * h) {
+        const qp = tool.projectToSurface(qx, qy, qz);
+        qx = qp[0]; qy = qp[1]; qz = qp[2];
+      } else if (!attached && qPhi <= 0.32 * h) {
+        // Ballistic wake grains only reattach on a genuine new impact,
+        // not merely because their trajectory passes near another face.
+        const qp = tool.projectToSurface(qx, qy, qz);
+        qx = qp[0]; qy = qp[1]; qz = qp[2];
+        attached = true;
+      }
+      px = qx; py = qy; pz = qz;
+    }
+  }
+
+  if (onProgress) onProgress(1);
+  stats.erodedVolume = Math.max(0, stats.erodedVolume);
+  stats.depositedVolume = Math.max(0, stats.depositedVolume);
+  stats.elapsedMs = Math.round(performance.now() - t0);
+  return stats;
+}
+
+/** Dry granular/rockfall transport gated by an angle of repose. */
+export function erodeSdfWithThermalTalus(sdf, options = {}) {
+  const t0 = performance.now();
+  const amount = clamp(options.amount ?? 0, 0, 1);
+  const stats = {
+    particlesRequested: 0, particles: 0, steps: 0,
+    erodedVolume: 0, depositedVolume: 0, elapsedMs: 0,
+  };
+  if (!sdf || amount <= 0) {
+    stats.elapsedMs = Math.round(performance.now() - t0);
+    return stats;
+  }
+
+  const particleCount = Math.max(0, Math.round(options.particleCount ?? defaultParticleCount(sdf, 5500)));
+  stats.particlesRequested = particleCount;
+  const reposeSin = Math.sin(clamp(options.reposeAngleDeg ?? 34, 8, 70) * Math.PI / 180);
+  const edgeProtection = clamp(options.edgeProtection ?? 0.7, 0, 1);
+  const groundY = options.groundY ?? -Infinity;
+  const rng = options.rng;
+  const rand = () => (rng ? rng.float() : Math.random());
+  const onProgress = options.onProgress || null;
+  const tool = createSdfProcessTool(sdf, { maxCarveDepth: sdf.voxelSize * (1.8 + 6.5 * amount) });
+  const { h } = tool;
+  const maxSteps = Math.round(clamp(Math.max(tool.nx, tool.ny, tool.nz) * 2.1, 200, 850));
+  const reportEvery = Math.max(1, Math.floor(particleCount / 12));
+  const down = new Float64Array(4);
+
+  for (let pIdx = 0; pIdx < particleCount; pIdx++) {
+    if (onProgress && pIdx % reportEvery === 0) onProgress(pIdx / Math.max(1, particleCount));
+
+    let px = 0, py = 0, pz = 0, hit = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const sx = tool.minX + rand() * (tool.maxX - tool.minX);
+      const sz = tool.minZ + rand() * (tool.maxZ - tool.minZ);
+      if (!tool.traceDown(sx, sz)) continue;
+      const pr = tool.projectToSurface(tool.hit[0], tool.hit[1], tool.hit[2]);
+      px = pr[0]; py = pr[1]; pz = pr[2];
+      tool.sampleGrad(px, py, pz);
+      const gl = Math.hypot(tool.sg[1], tool.sg[2], tool.sg[3]);
+      if (gl < 1e-9) continue;
+      const nny = tool.sg[2] / gl;
+      if (nny < -0.3) continue;
+      const slopeSin = Math.sqrt(Math.max(0, 1 - nny * nny));
+      hit = true;
+      if (slopeSin > reposeSin * 0.55 || attempt === 2) break;
+    }
+    if (!hit) continue;
+
+    stats.particles++;
+    let dirX = 0, dirY = 0, dirZ = 0;
+    let speed = 0.35;
+    let load = 0;
+
+    for (let step = 0; step < maxSteps; step++) {
+      stats.steps++;
+      tool.sampleGrad(px, py, pz);
+      const gl = Math.hypot(tool.sg[1], tool.sg[2], tool.sg[3]);
+      if (gl < 1e-9) break;
+      const nnx = tool.sg[1] / gl, nny = tool.sg[2] / gl, nnz = tool.sg[3] / gl;
+      downhillFromNormal(nnx, nny, nnz, down);
+      const slopeSin = down[3];
+
+      if (slopeSin > reposeSin) {
+        const capacity = (slopeSin - reposeSin) * speed * h * 2.4 * (0.35 + amount);
+        if (load < capacity) {
+          const protection = tool.protectionMultiplier(px, py, pz, nnx, nny, nnz, {
+            edgeProtection: edgeProtection * 0.8, hardnessAt: options.hardnessAt,
+          });
+          const erode = Math.min(capacity - load, h * 0.13 * (0.25 + amount) * protection);
+          if (erode > 1e-9) {
+            const applied = tool.applyBrushAt(px, py, pz, erode);
+            if (applied > 0) {
+              stats.erodedVolume += applied * h * h;
+              load += applied;
+            }
+          }
+        }
+      } else if (load > 1e-9 && slopeSin < reposeSin * 0.94 && nny > -0.1) {
+        const dep = slopeSin < 0.20 ? load : load * (0.25 + 0.45 * amount);
+        const applied = tool.applyBrushAt(px, py, pz, -dep);
+        stats.depositedVolume -= applied * h * h;
+        load = Math.max(0, load + applied);
+        if (slopeSin < 0.05) break;
+      }
+
+      if (slopeSin < 0.015) break;
+      let mx = down[0] * 0.82 + dirX * 0.18;
+      let my = down[1] * 0.82 + dirY * 0.18;
+      let mz = down[2] * 0.82 + dirZ * 0.18;
+      const mdn = mx * nnx + my * nny + mz * nnz;
+      mx -= nnx * mdn; my -= nny * mdn; mz -= nnz * mdn;
+      const ml = Math.hypot(mx, my, mz);
+      if (ml < 1e-9) break;
+      mx /= ml; my /= ml; mz /= ml;
+      dirX = mx; dirY = my; dirZ = mz;
+
+      const oldY = py;
+      let qx = px + mx * 0.8 * h;
+      let qy = py + my * 0.8 * h;
+      let qz = pz + mz * 0.8 * h;
+      if (!tool.insideInner(qx, qy, qz)) break;
+      if (qy <= groundY + 0.55 * h) {
+        if (load > 1e-9) {
+          const applied = tool.applyBrushAt(px, py, pz, -load);
+          stats.depositedVolume -= applied * h * h;
+        }
+        break;
+      }
+      const qp = tool.projectToSurface(qx, qy, qz);
+      qx = qp[0]; qy = qp[1]; qz = qp[2];
+      const dh = oldY - qy;
+      speed = clamp(Math.sqrt(Math.max(0.003, speed * speed + Math.max(dh, -0.4 * h) * 2.6)), 0.05, 5.0);
+      px = qx; py = qy; pz = qz;
+    }
+  }
+
+  if (onProgress) onProgress(1);
+  stats.erodedVolume = Math.max(0, stats.erodedVolume);
+  stats.depositedVolume = Math.max(0, stats.depositedVolume);
+  stats.elapsedMs = Math.round(performance.now() - t0);
+  return stats;
+}
+
+/** Freeze-thaw wedging fed by snow/melt particles settling in concavities. */
+export function erodeSdfWithFreezeThaw(sdf, options = {}) {
+  const t0 = performance.now();
+  const amount = clamp(options.amount ?? 0, 0, 1);
+  const stats = {
+    particlesRequested: 0, particles: 0, steps: 0, frostEvents: 0,
+    erodedVolume: 0, depositedVolume: 0, elapsedMs: 0,
+  };
+  if (!sdf || amount <= 0) {
+    stats.elapsedMs = Math.round(performance.now() - t0);
+    return stats;
+  }
+
+  const particleCount = Math.max(0, Math.round(options.particleCount ?? defaultParticleCount(sdf, 4500)));
+  stats.particlesRequested = particleCount;
+  const rng = options.rng;
+  const rand = () => (rng ? rng.float() : Math.random());
+  const onProgress = options.onProgress || null;
+  const groundY = options.groundY ?? -Infinity;
+  const seedSalt = (options.seedSalt ?? 0x2f6e1b) | 0;
+  const tool = createSdfProcessTool(sdf, { maxCarveDepth: sdf.voxelSize * (1.6 + 5.5 * amount) });
+  const { h } = tool;
+  const reportEvery = Math.max(1, Math.floor(particleCount / 12));
+  const down = new Float64Array(4);
+
+  const moveDownhill = (state) => {
+    tool.sampleGrad(state.x, state.y, state.z);
+    const gl = Math.hypot(tool.sg[1], tool.sg[2], tool.sg[3]);
+    if (gl < 1e-9) return false;
+    const nnx = tool.sg[1] / gl, nny = tool.sg[2] / gl, nnz = tool.sg[3] / gl;
+    downhillFromNormal(nnx, nny, nnz, down);
+    if (down[3] < 0.015) return false;
+    const qx = state.x + down[0] * 0.8 * h;
+    const qy = state.y + down[1] * 0.8 * h;
+    const qz = state.z + down[2] * 0.8 * h;
+    if (!tool.insideInner(qx, qy, qz)) return false;
+    const qp = tool.projectToSurface(qx, qy, qz);
+    state.x = qp[0]; state.y = qp[1]; state.z = qp[2];
+    return true;
+  };
+
+  for (let pIdx = 0; pIdx < particleCount; pIdx++) {
+    if (onProgress && pIdx % reportEvery === 0) onProgress(pIdx / Math.max(1, particleCount));
+    const sx = tool.minX + rand() * (tool.maxX - tool.minX);
+    const sz = tool.minZ + rand() * (tool.maxZ - tool.minZ);
+    if (!tool.traceDown(sx, sz)) continue;
+    const pr = tool.projectToSurface(tool.hit[0], tool.hit[1], tool.hit[2]);
+    const state = { x: pr[0], y: pr[1], z: pr[2] };
+    if (state.y <= groundY + 0.5 * h) continue;
+
+    stats.particles++;
+    // Meltwater/snow creeps until a ledge or a water-trapping concavity.
+    for (let s = 0; s < 120; s++) {
+      stats.steps++;
+      tool.sampleGrad(state.x, state.y, state.z);
+      const gl = Math.hypot(tool.sg[1], tool.sg[2], tool.sg[3]);
+      if (gl < 1e-9) break;
+      const nny = tool.sg[2] / gl;
+      const slopeSin = Math.sqrt(Math.max(0, 1 - nny * nny));
+      const concave = clamp(-tool.laplacianAt(state.x, state.y, state.z) * h * 0.75, 0, 1);
+      if ((slopeSin < 0.34 && nny > 0.05) || concave > 0.48 || state.y <= groundY + 0.6 * h) break;
+      if (!moveDownhill(state)) break;
+    }
+
+    // Repeated expansion in a crack sheet (noise zero-crossing), amplified
+    // where water actually ponds in concave rock.
+    let loose = 0;
+    const cycles = 1 + Math.round(amount * 2);
+    for (let cycle = 0; cycle < cycles; cycle++) {
+      tool.sampleGrad(state.x, state.y, state.z);
+      const gl = Math.hypot(tool.sg[1], tool.sg[2], tool.sg[3]);
+      if (gl < 1e-9) break;
+      const nnx = tool.sg[1] / gl, nny = tool.sg[2] / gl, nnz = tool.sg[3] / gl;
+      if (nny < -0.35) break;
+      const concave = clamp(-tool.laplacianAt(state.x, state.y, state.z) * h * 0.80, 0, 1);
+      const sheetNoise = scalarField3D(state.x * 0.55, state.y * 0.55, state.z * 0.55, seedSalt);
+      const crack = 1 - smoothstep(0.02, 0.42, Math.abs(sheetNoise));
+      const protection = tool.protectionMultiplier(state.x, state.y, state.z, nnx, nny, nnz, {
+        edgeProtection: options.edgeProtection ?? 0.7, hardnessAt: options.hardnessAt,
+      });
+      const delta = h * (0.05 + 0.30 * amount) * (0.30 + 0.70 * concave) * (0.35 + 0.65 * crack) * protection;
+      const applied = tool.applyBrushAt(state.x, state.y, state.z, delta);
+      if (applied > 0) {
+        stats.erodedVolume += applied * h * h;
+        loose += applied;
+      }
+    }
+    stats.frostEvents++;
+
+    // Loosened grains wash a short distance and lodge below the crack.
+    for (let s = 0; s < 36 && loose > 1e-9; s++) {
+      stats.steps++;
+      tool.sampleGrad(state.x, state.y, state.z);
+      const gl = Math.hypot(tool.sg[1], tool.sg[2], tool.sg[3]);
+      if (gl < 1e-9) break;
+      const nny = tool.sg[2] / gl;
+      const slopeSin = Math.sqrt(Math.max(0, 1 - nny * nny));
+      if (slopeSin < 0.48 || state.y <= groundY + 0.6 * h) {
+        const applied = tool.applyBrushAt(state.x, state.y, state.z, -loose * 0.45);
+        stats.depositedVolume -= applied * h * h;
+        loose = Math.max(0, loose + applied);
+        if (slopeSin < 0.20) break;
+      }
+      if (!moveDownhill(state)) break;
+    }
+  }
+
+  if (onProgress) onProgress(1);
+  stats.erodedVolume = Math.max(0, stats.erodedVolume);
+  stats.depositedVolume = Math.max(0, stats.depositedVolume);
+  stats.elapsedMs = Math.round(performance.now() - t0);
+  return stats;
+}
+
+/** Chemical dissolution along actual wet runoff/residence paths. */
+export function erodeSdfWithChemicalDissolution(sdf, options = {}) {
+  const t0 = performance.now();
+  const amount = clamp(options.amount ?? 0, 0, 1);
+  const stats = {
+    particlesRequested: 0, particles: 0, steps: 0,
+    dissolvedVolume: 0, erodedVolume: 0, elapsedMs: 0,
+  };
+  if (!sdf || amount <= 0) {
+    stats.elapsedMs = Math.round(performance.now() - t0);
+    return stats;
+  }
+
+  const particleCount = Math.max(0, Math.round(options.particleCount ?? defaultParticleCount(sdf, 5500)));
+  stats.particlesRequested = particleCount;
+  const rng = options.rng;
+  const rand = () => (rng ? rng.float() : Math.random());
+  const onProgress = options.onProgress || null;
+  const groundY = options.groundY ?? -Infinity;
+  const seedSalt = (options.seedSalt ?? 0x73c19a) | 0;
+  const tool = createSdfProcessTool(sdf, { maxCarveDepth: sdf.voxelSize * (1.5 + 5.0 * amount) });
+  const { h } = tool;
+  const maxSteps = Math.round(clamp(Math.max(tool.nx, tool.ny, tool.nz) * 1.8, 180, 750));
+  const reportEvery = Math.max(1, Math.floor(particleCount / 12));
+  const down = new Float64Array(4);
+
+  for (let pIdx = 0; pIdx < particleCount; pIdx++) {
+    if (onProgress && pIdx % reportEvery === 0) onProgress(pIdx / Math.max(1, particleCount));
+    const sx = tool.minX + rand() * (tool.maxX - tool.minX);
+    const sz = tool.minZ + rand() * (tool.maxZ - tool.minZ);
+    if (!tool.traceDown(sx, sz)) continue;
+    const pr = tool.projectToSurface(tool.hit[0], tool.hit[1], tool.hit[2]);
+    let px = pr[0], py = pr[1], pz = pr[2];
+    if (py <= groundY + 0.5 * h) continue;
+
+    stats.particles++;
+    let water = 1;
+    for (let step = 0; step < maxSteps; step++) {
+      stats.steps++;
+      tool.sampleGrad(px, py, pz);
+      const gl = Math.hypot(tool.sg[1], tool.sg[2], tool.sg[3]);
+      if (gl < 1e-9) break;
+      const nnx = tool.sg[1] / gl, nny = tool.sg[2] / gl, nnz = tool.sg[3] / gl;
+      if (nny < -0.35) break;
+      downhillFromNormal(nnx, nny, nnz, down);
+      const slopeSin = down[3];
+      const residence = 1 - clamp(slopeSin, 0, 1);
+      const concave = clamp(-tool.laplacianAt(px, py, pz) * h * 0.70, 0, 1);
+      // Fine Y frequency makes soluble stratigraphic bands; this is a
+      // mineral susceptibility field, not a colour texture.
+      const mineral = scalarField3D(px * 0.38, py * 1.05, pz * 0.38, seedSalt);
+      const susceptibility = 0.30 + 0.70 * smoothstep(-0.60, 0.75, mineral);
+      const protection = tool.protectionMultiplier(px, py, pz, nnx, nny, nnz, {
+        edgeProtection: options.edgeProtection ?? 0.7, hardnessAt: options.hardnessAt,
+      });
+      const poolBoost = slopeSin < 0.015 ? 1.45 : 1.0;
+      const delta = h * 0.075 * (0.20 + amount) * water * poolBoost *
+        (0.35 + 0.65 * residence) * (0.45 + 0.55 * concave) * susceptibility * protection;
+      const applied = tool.applyBrushAt(px, py, pz, delta);
+      if (applied > 0) stats.dissolvedVolume += applied * h * h;
+
+      if (slopeSin < 0.015 || py <= groundY + 0.55 * h) break;
+      const qx = px + down[0] * 0.8 * h;
+      const qy = py + down[1] * 0.8 * h;
+      const qz = pz + down[2] * 0.8 * h;
+      if (!tool.insideInner(qx, qy, qz)) break;
+      const qp = tool.projectToSurface(qx, qy, qz);
+      px = qp[0]; py = qp[1]; pz = qp[2];
+      water *= 0.994;
+      if (water < 0.04) break;
+    }
+  }
+
+  if (onProgress) onProgress(1);
+  stats.dissolvedVolume = Math.max(0, stats.dissolvedVolume);
+  stats.erodedVolume = stats.dissolvedVolume;
+  stats.elapsedMs = Math.round(performance.now() - t0);
+  return stats;
+}
+
+/**
+ * Runs the enabled SDF processes in a stable geological order.
+ * Input is a flat options object; see generator.js for the UI mapping.
+ */
+export function applySdfErosionSuite(sdf, options = {}) {
+  const t0 = performance.now();
+  const stats = {
+    chemicalDissolution: null,
+    wind: null,
+    rain: null,
+    cryo: null,
+    thermal: null,
+    elapsedMs: 0,
+  };
+  if (!sdf) return stats;
+
+  const common = {
+    edgeProtection: options.edgeProtection ?? 0.7,
+    hardnessAt: options.hardnessAt || null,
+    groundY: options.groundY ?? -Infinity,
+  };
+  const forkRng = (label) => (options.rng?.fork ? options.rng.fork(label) : options.rng);
+  const onProgress = options.onProgress || null;
+  const tasks = [];
+
+  if ((options.chemicalDissolutionAmount ?? 0) > 0.001) {
+    tasks.push({
+      key: 'chemicalDissolution',
+      stage: 'Chemical dissolution on SDF (wet residence paths)...',
+      run: (progress) => erodeSdfWithChemicalDissolution(sdf, {
+        ...common,
+        amount: options.chemicalDissolutionAmount,
+        particleCount: options.chemicalDroplets,
+        rng: forkRng('sdf-chemical-dissolution'),
+        seedSalt: options.seedSalt,
+        onProgress: progress,
+      }),
+    });
+  }
+  if ((options.windAmount ?? 0) > 0.001) {
+    tasks.push({
+      key: 'wind',
+      stage: 'Wind saltation on SDF (gusting wrap-around flow)...',
+      run: (progress) => erodeSdfWithWind(sdf, {
+        ...common,
+        amount: options.windAmount,
+        particleCount: options.windParticles,
+        azimuthDeg: options.windAzimuthDeg ?? options.windAzimuth ?? 35,
+        turbulence: options.windTurbulence ?? 0.45,
+        streamlining: options.windStreamlining ?? 0.65,
+        sandSupply: options.windSandSupply ?? 0.65,
+        fluting: options.windFluting ?? 0.65,
+        curtainHeight: options.windCurtainHeight ?? 0.42,
+        speed: options.windSpeed ?? 0.62,
+        rng: forkRng('sdf-wind-erosion'),
+        seedSalt: options.seedSalt,
+        onProgress: progress,
+      }),
+    });
+  }
+  if ((options.rainAmount ?? 0) > 0.001) {
+    tasks.push({
+      key: 'rain',
+      stage: 'Rain droplet erosion on SDF (particle runoff)...',
+      run: (progress) => erodeSdfWithRain(sdf, {
+        dropletCount: options.rainDroplets ?? defaultParticleCount(sdf, 9000),
+        amount: options.rainAmount,
+        edgeProtection: common.edgeProtection,
+        hardnessAt: common.hardnessAt,
+        groundY: common.groundY,
+        rng: forkRng('rain-erosion'),
+        onProgress: progress,
+      }),
+    });
+  }
+  if ((options.cryoAmount ?? 0) > 0.001) {
+    tasks.push({
+      key: 'cryo',
+      stage: 'Cryo freeze-thaw on SDF (settled meltwater)...',
+      run: (progress) => erodeSdfWithFreezeThaw(sdf, {
+        ...common,
+        amount: options.cryoAmount,
+        particleCount: options.cryoParticles,
+        rng: forkRng('sdf-cryo-erosion'),
+        seedSalt: options.seedSalt,
+        onProgress: progress,
+      }),
+    });
+  }
+  if ((options.thermalAmount ?? 0) > 0.001) {
+    tasks.push({
+      key: 'thermal',
+      stage: 'Thermal talus on SDF (angle-of-repose transport)...',
+      run: (progress) => erodeSdfWithThermalTalus(sdf, {
+        ...common,
+        amount: options.thermalAmount,
+        particleCount: options.thermalParticles,
+        reposeAngleDeg: options.thermalReposeAngleDeg ?? 34,
+        rng: forkRng('sdf-thermal-talus'),
+        onProgress: progress,
+      }),
+    });
+  }
+
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+    const base = i / tasks.length;
+    const slice = 1 / tasks.length;
+    if (onProgress) onProgress(base, task.stage, task.key);
+    stats[task.key] = task.run(onProgress
+      ? (f) => onProgress(base + slice * clamp(f, 0, 1), task.stage, task.key)
+      : null);
+  }
+  if (onProgress && tasks.length) onProgress(1, 'SDF erosion suite complete', 'done');
+  stats.elapsedMs = Math.round(performance.now() - t0);
+  return stats;
+}

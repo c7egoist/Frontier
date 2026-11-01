@@ -43,12 +43,26 @@ const SLIDER_SCHEMA = {
     { key: 'creaseAngle',       label: 'Crease Split Angle',     min: 22,   max: 85,  step: 1,    fmt: (v) => `${v}°` },
   ],
   erosion: [
+    { type: 'heading', label: 'Rain / Hydraulic Runoff' },
     { key: 'rainErosionAmount', label: 'Rainfall Erosion Amount', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
-    { key: 'rainDroplets',      label: 'Raindrop Count',          min: 0, max: 24000, step: 500, fmt: (v) => `${(Number(v) / 1000).toFixed(1)}k` },
-    { key: 'rainEdgeProtection', label: 'Sharp Edge Protection',  min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
-    { key: 'chemAmount',    label: 'Chemical Weathering (Rust/Patina)', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'rainDroplets',      label: 'Raindrop Count',          min: 0, max: 48000, step: 500, fmt: (v) => `${(Number(v) / 1000).toFixed(1)}k` },
+    { type: 'heading', label: 'Wind / Saltation' },
+    { key: 'windErosionAmount', label: 'Wind Erosion Amount',      min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'windAzimuth',       label: 'Wind Azimuth (toward)',   min: -180, max: 180, step: 1, fmt: (v) => `${v}°` },
+    { key: 'windTurbulence',    label: 'Gust Wander / Turbulence', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'windStreamlining',  label: 'Flow Wrap / Streamlining', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { type: 'heading', label: 'Thermal / Rockfall Talus' },
+    { key: 'thermalErosionAmount', label: 'Thermal Talus Amount', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'thermalReposeAngle',   label: 'Talus Repose Angle',   min: 22, max: 48, step: 1, fmt: (v) => `${v}°` },
+    { type: 'heading', label: 'Cryo / Freeze–Thaw' },
+    { key: 'cryoErosionAmount', label: 'Freeze–Thaw Wedging', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { type: 'heading', label: 'Chemical Weathering' },
+    { key: 'chemDissolutionAmount', label: 'Chemical Dissolution (geometry)', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { key: 'chemAmount',    label: 'Chemical Staining (Rust/Patina colour)', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'ironContent',   label: 'Iron Content (Rust Stain)',         min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'copperContent', label: 'Copper Content (Blue Patina)',      min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
+    { type: 'heading', label: 'Shared SDF Protection' },
+    { key: 'rainEdgeProtection', label: 'Sharp Edge Protection (all processes)', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
   ],
 };
 
@@ -59,7 +73,12 @@ const state = {
   studioMode: window.location.hash === '#rock' ? 'rock' : 'erosion',
   params: resolveParams({
     archetype: 'desert-arch', seed: 4029, quality: 'medium', decimation: 1.0,
+    sdfErosionSource: 'mesh', erosionSdfResolution: 192,
     rainErosionAmount: 0.5, rainDroplets: 8000, rainEdgeProtection: 0.7,
+    windErosionAmount: 0.30, windAzimuth: 35, windTurbulence: 0.45, windStreamlining: 0.65,
+    thermalErosionAmount: 0.20, thermalReposeAngle: 34,
+    cryoErosionAmount: 0.10,
+    chemDissolutionAmount: 0.16,
     chemAmount: 0.8, ironContent: 0.7, copperContent: 0.25,
   }),
   categoryFilter: 'All',
@@ -237,6 +256,30 @@ function updateRockHud(stats) {
   document.getElementById('stat-verts').textContent = stats.vertices.toLocaleString();
   document.getElementById('stat-blocks').textContent = `${stats.blockCount}`;
   document.getElementById('stat-time').textContent = `${stats.elapsedMs}ms`;
+
+  const sdfDims = stats.sdfErosion?.gridDims || stats.gridDims || [];
+  const sdfEl = document.getElementById('stat-sdf');
+  if (sdfEl && sdfDims.length === 3) {
+    sdfEl.textContent = `${Math.max(...sdfDims)} vox · ${(stats.voxelSize * 100).toFixed(1)}cm`;
+  }
+
+  const readout = document.getElementById('sdf-erosion-readout');
+  if (readout) {
+    if (stats.meshToSdf) {
+      const conv = stats.meshToSdf;
+      readout.textContent =
+        `Mesh → SDF bake: ${conv.gridDims.join('×')} cells · ${(conv.voxelSize * 100).toFixed(1)} cm voxels · ` +
+        `${conv.sourceTriangles.toLocaleString()} source tris` +
+        (conv.resolutionClamped ? ` · memory guard reduced ${conv.requestedMaxAxisVoxels}→${conv.effectiveMaxAxisVoxels}` : '') +
+        '. World scale and grounded Y=0 are preserved for terrain placement; use QEM for the final game LOD.';
+    } else if (stats.sdfErosion) {
+      readout.textContent =
+        `Analytic SDF bake: ${stats.sdfErosion.gridDims.join('×')} cells · ` +
+        `${(stats.sdfErosion.voxelSize * 100).toFixed(1)} cm voxels. Erosion runs before Dual Contouring and QEM.`;
+    } else {
+      readout.textContent = 'Enable any SDF process above to convert and erode the formation. Mesh → SDF preserves world scale and grounded Y=0 for terrain placement.';
+    }
+  }
 }
 
 // ============================================================================
@@ -836,7 +879,17 @@ function selectArchetype(archId) {
     seed: state.params.seed,
     quality: state.params.quality,
     decimation: state.params.decimation,
+    sdfErosionSource: state.params.sdfErosionSource ?? 'mesh',
+    erosionSdfResolution: state.params.erosionSdfResolution ?? 192,
     rainErosionAmount: state.params.rainErosionAmount ?? 0.5,
+    windErosionAmount: state.params.windErosionAmount ?? 0.30,
+    windAzimuth: state.params.windAzimuth ?? 35,
+    windTurbulence: state.params.windTurbulence ?? 0.45,
+    windStreamlining: state.params.windStreamlining ?? 0.65,
+    thermalErosionAmount: state.params.thermalErosionAmount ?? 0.20,
+    thermalReposeAngle: state.params.thermalReposeAngle ?? 34,
+    cryoErosionAmount: state.params.cryoErosionAmount ?? 0.10,
+    chemDissolutionAmount: state.params.chemDissolutionAmount ?? 0.16,
     chemAmount: state.params.chemAmount ?? 0.8,
     ironContent: state.params.ironContent ?? 0.7,
     copperContent: state.params.copperContent ?? 0.25,
@@ -856,6 +909,13 @@ function buildSliders(groupKey, mountId) {
   const mount = document.getElementById(mountId);
   mount.innerHTML = '';
   for (const spec of SLIDER_SCHEMA[groupKey]) {
+    if (spec.type === 'heading') {
+      const heading = document.createElement('div');
+      heading.className = 'slider-subhead';
+      heading.textContent = spec.label;
+      mount.appendChild(heading);
+      continue;
+    }
     const wrap = document.createElement('div');
     wrap.className = 'slider-group';
     const val = state.params[spec.key];
@@ -968,6 +1028,24 @@ function initRockActionButtons() {
     state.params.decimation = Number(e.target.value);
     requestSynthesis(false);
   });
+
+  const sdfSourceSelect = document.getElementById('select-sdf-erosion-source');
+  if (sdfSourceSelect) {
+    sdfSourceSelect.value = state.params.sdfErosionSource || 'mesh';
+    sdfSourceSelect.addEventListener('change', (e) => {
+      state.params.sdfErosionSource = e.target.value === 'mesh' ? 'mesh' : 'analytic';
+      requestSynthesis(false);
+    });
+  }
+
+  const sdfResolutionSelect = document.getElementById('select-erosion-sdf-resolution');
+  if (sdfResolutionSelect) {
+    sdfResolutionSelect.value = String(state.params.erosionSdfResolution ?? 192);
+    sdfResolutionSelect.addEventListener('change', (e) => {
+      state.params.erosionSdfResolution = Number(e.target.value) || 0;
+      requestSynthesis(false);
+    });
+  }
 
   document.getElementById('btn-reset-params').addEventListener('click', () => selectArchetype(state.params.archetype));
 

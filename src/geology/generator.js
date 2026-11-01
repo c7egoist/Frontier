@@ -4,6 +4,7 @@
 
 import { createRng } from '../core/prng.js';
 import { evaluateSparseSdf } from '../core/sparse-sdf.js';
+import { convertMeshToSdf } from '../core/mesh-to-sdf.js';
 import { extractDualContourMesh } from '../core/dual-contour.js';
 import {
   removeFloatingIslands,
@@ -11,12 +12,30 @@ import {
   decimateMeshQEM,
   buildGameReadyAttributes,
 } from '../core/mesh-post.js';
-import { resolveParams, QUALITY_LEVELS, FORMATION_PRESETS } from './presets.js';
+import {
+  resolveParams,
+  QUALITY_LEVELS,
+  FORMATION_PRESETS,
+  normalizeErosionSdfResolution,
+} from './presets.js';
 import { createTectonicField } from './tectonics.js';
 import { buildMacroFormation } from './formations.js';
 import { createGeologicalSdfEvaluator } from './surface-detail.js';
-import { erodeSdfWithRain } from './rain-erosion.js';
+import { applySdfErosionSuite } from './sdf-erosion-suite.js';
 import { computeChemicalStains } from './chemical-staining.js';
+
+function summarizeSdfProcess(stats) {
+  if (!stats) return null;
+  const eroded = stats.erodedVolume ?? stats.dissolvedVolume ?? 0;
+  return {
+    particles: stats.particles ?? stats.droplets ?? 0,
+    particlesRequested: stats.particlesRequested ?? stats.droplets ?? 0,
+    steps: stats.steps ?? 0,
+    erodedM3: Number(eroded.toFixed(3)),
+    depositedM3: Number((stats.depositedVolume ?? 0).toFixed(3)),
+    elapsedMs: stats.elapsedMs ?? 0,
+  };
+}
 
 export function generateRockFormation(rawParams = {}, onProgress = null) {
   const t0 = performance.now();
@@ -61,41 +80,120 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
   };
 
   const maxSpan = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, bounds.maxZ - bounds.minZ);
-  const voxelSize = maxSpan / qSpec.maxAxisVoxels;
 
-  const sdf = evaluateSparseSdf(bounds, voxelSize, evaluator, onProgress);
-
-  // Particle rain erosion directly on the SDF grid (opt-in; Rock Studio
-  // enables it by default). Runs BEFORE contouring at full voxel quality --
-  // bake high, then the normal QEM decimation below produces the low-poly.
-  let rainStats = null;
+  // SDF erosion bake controls. The generator API keeps the historical
+  // analytic-SDF default for compatibility; Rock & Cliff Studio explicitly
+  // selects the mesh source so the exact placement mesh is converted back
+  // to an erosion SDF at an independent, user-selected resolution.
   const rainAmount = params.rainErosionAmount ?? 0;
-  if (rainAmount > 0.001) {
-    const dropletCount = params.rainDroplets ?? Math.round(qSpec.maxAxisVoxels * 48);
-    rainStats = erodeSdfWithRain(sdf, {
-      dropletCount,
-      amount: rainAmount,
-      edgeProtection: params.rainEdgeProtection ?? 0.7,
+  const windAmount = params.windErosionAmount ?? params.windAmount ?? 0;
+  const thermalAmount = params.thermalErosionAmount ?? params.thermalAmount ?? 0;
+  const cryoAmount = params.cryoErosionAmount ?? params.cryoAmount ?? 0;
+  const chemicalDissolutionAmount =
+    params.chemDissolutionAmount ?? params.chemicalDissolutionAmount ?? 0;
+  const anySdfErosion =
+    rainAmount > 0.001 || windAmount > 0.001 || thermalAmount > 0.001 ||
+    cryoAmount > 0.001 || chemicalDissolutionAmount > 0.001;
+  const requestedErosionResolution = normalizeErosionSdfResolution(
+    params.erosionSdfResolution ?? params.sdfErosionResolution ?? 0
+  );
+  const sdfErosionSource =
+    String(params.sdfErosionSource || 'analytic').toLowerCase() === 'mesh' ? 'mesh' : 'analytic';
+  const sdfEdgeProtection = params.sdfEdgeProtection ?? params.rainEdgeProtection ?? 0.7;
+
+  // In analytic mode, an explicitly requested bake resolution can be the
+  // first (and only) SDF evaluation. In mesh mode, the source formation is
+  // evaluated at the normal quality, contoured, and then that exact mesh is
+  // voxelized at the bake resolution below.
+  const sourceMaxAxisVoxels =
+    anySdfErosion && sdfErosionSource === 'analytic' && requestedErosionResolution > 0
+      ? requestedErosionResolution
+      : qSpec.maxAxisVoxels;
+  const sourceVoxelSize = maxSpan / sourceMaxAxisVoxels;
+
+  let sdf = evaluateSparseSdf(bounds, sourceVoxelSize, evaluator, onProgress);
+  const sourceGridDims = [sdf.nx, sdf.ny, sdf.nz];
+  const sourceGridMaxAxis = Math.max(...sourceGridDims);
+  let meshToSdfStats = null;
+  let erosionSuiteStats = null;
+  let rainStats = null;
+
+  if (anySdfErosion) {
+    if (sdfErosionSource === 'mesh') {
+      if (onProgress) onProgress(0.655, 'Extracting source mesh for SDF conversion...');
+      const sourceDc = extractDualContourMesh(sdf, {
+        qefRegularization: 0.014,
+        rootSteps: 2,
+      }, onProgress
+        ? () => onProgress(0.655, 'Extracting source mesh for SDF conversion...')
+        : null);
+      const sourceClean = removeFloatingIslands(
+        sourceDc.positions,
+        sourceDc.indices,
+        macro.groundY ?? 0,
+        sourceVoxelSize * 3.5
+      );
+      if (sourceClean.indices.length >= 3) {
+        if (onProgress) onProgress(0.66, 'Converting placement mesh → erosion SDF...');
+        sdf = convertMeshToSdf(sourceClean, {
+          maxAxisVoxels: requestedErosionResolution || sourceGridMaxAxis,
+          bandVoxels: 4,
+          onProgress: onProgress
+            ? (f, stage) => onProgress(0.66 + 0.015 * f, `Mesh → SDF: ${stage}`)
+            : null,
+        });
+        meshToSdfStats = sdf.conversionStats;
+      }
+    }
+
+    const erosionGridMaxAxis = Math.max(sdf.nx, sdf.ny, sdf.nz);
+    erosionSuiteStats = applySdfErosionSuite(sdf, {
+      rainAmount,
+      rainDroplets: params.rainDroplets ?? Math.round(erosionGridMaxAxis * 48),
+      windAmount,
+      windParticles: params.windParticles ?? params.windErosionParticles,
+      windAzimuthDeg: params.windAzimuth ?? params.windAzimuthDeg ?? 35,
+      windTurbulence: params.windTurbulence ?? 0.45,
+      windStreamlining: params.windStreamlining ?? 0.65,
+      windSandSupply: params.windSandSupply ?? 0.65,
+      windFluting: params.windFluting ?? 0.65,
+      windCurtainHeight: params.windCurtainHeight ?? 0.42,
+      windSpeed: params.windSpeed ?? 0.62,
+      thermalAmount,
+      thermalParticles: params.thermalParticles ?? params.thermalErosionParticles,
+      thermalReposeAngleDeg: params.thermalReposeAngle ?? params.thermalReposeAngleDeg ?? 34,
+      cryoAmount,
+      cryoParticles: params.cryoParticles ?? params.cryoErosionParticles,
+      chemicalDissolutionAmount,
+      chemicalDroplets: params.chemDissolutionDroplets ?? params.chemicalDroplets,
+      edgeProtection: sdfEdgeProtection,
       hardnessAt: evaluator.evalHardness || null,
       groundY: macro.groundY ?? -Infinity,
-      rng: rng.fork('rain-erosion'),
+      rng,
+      seedSalt: params.seed,
       onProgress: onProgress
-        ? (f) => onProgress(0.65 + 0.04 * f, 'Rain droplet erosion (particle runoff)...')
+        ? (f, stage) => onProgress(0.68 + 0.08 * f, stage)
         : null,
     });
+    rainStats = erosionSuiteStats.rain;
   }
 
   const dc = extractDualContourMesh(sdf, {
     qefRegularization: 0.014,
     rootSteps: 2,
-  }, onProgress);
+  }, onProgress
+    ? (f, stage) => {
+        const t = Math.min(1, Math.max(0, (f - 0.66) / 0.14));
+        onProgress((anySdfErosion ? 0.76 : 0.66) + 0.08 * t, stage);
+      }
+    : null);
 
   if (onProgress) onProgress(0.84, 'Filtering islands & relaxing surface...');
   const cleaned = removeFloatingIslands(
     dc.positions,
     dc.indices,
     macro.groundY ?? 0,
-    voxelSize * 3.5
+    sdf.voxelSize * 3.5
   );
 
   const preset = FORMATION_PRESETS[params.archetype] || FORMATION_PRESETS['cliff-wall'];
@@ -176,7 +274,25 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
       blockCount: macro.blocks.length,
       cutCount: macro.cuts.length,
       faultCount: tectonics.faults.length,
-      voxelSize: Number(voxelSize.toFixed(4)),
+      voxelSize: Number(sdf.voxelSize.toFixed(4)),
+      sourceVoxelSize: Number(sourceVoxelSize.toFixed(4)),
+      sourceGridDims,
+      meshToSdf: meshToSdfStats ? { ...meshToSdfStats } : null,
+      sdfErosion: erosionSuiteStats
+        ? {
+            source: sdfErosionSource,
+            requestedMaxAxisVoxels:
+              requestedErosionResolution || (sdfErosionSource === 'mesh' ? sourceGridMaxAxis : sourceMaxAxisVoxels),
+            gridDims: [sdf.nx, sdf.ny, sdf.nz],
+            voxelSize: Number(sdf.voxelSize.toFixed(4)),
+            chemicalDissolution: summarizeSdfProcess(erosionSuiteStats.chemicalDissolution),
+            wind: summarizeSdfProcess(erosionSuiteStats.wind),
+            rain: summarizeSdfProcess(erosionSuiteStats.rain),
+            cryo: summarizeSdfProcess(erosionSuiteStats.cryo),
+            thermal: summarizeSdfProcess(erosionSuiteStats.thermal),
+            elapsedMs: erosionSuiteStats.elapsedMs,
+          }
+        : null,
       rainErosion: rainStats
         ? {
             droplets: rainStats.droplets,

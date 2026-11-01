@@ -201,6 +201,25 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   fields can still accelerate AO/GI without paying for runtime voxel terrain
   on GTX-class GPUs.
 
+- **Rock & Cliff Studio — Mesh → SDF erosion bake**: the generated placement
+  mesh can now be converted back into a true narrow-band 3D SDF
+  (`src/core/mesh-to-sdf.js`) without changing its world scale or grounded
+  `Y=0` origin. Sign is recovered by scanline parity and near-surface
+  distance by a triangle BVH, with a node-memory guard and full conversion
+  stats (source triangles, effective grid, voxel size in the HUD/readout).
+  Erosion resolution is independent of formation quality — Match source,
+  192, 256, 320 or 384 cells along the longest span — so a fast/interactive
+  formation can receive a hero-resolution erosion bake and then use the
+  existing QEM targets for terrain-placement LODs. Terrain Studio's process
+  laws are adapted honestly to overhangs/undersides in
+  `src/geology/sdf-erosion-suite.js`: capacity-limited rain runoff, gusting
+  wrap-around wind saltation with lee deposition, repose-gated thermal
+  talus, settled-meltwater freeze–thaw, and wet-residence chemical
+  dissolution (the existing Fe/Cu stain pass remains the colour layer). All
+  share geological hardness, convex-edge protection, thin-span protection
+  and per-node carve caps before Dual Contouring. An Analytic SDF source
+  remains available for the fastest native path. CLI example:
+  `--sdf-source mesh --erosion-res 320 --wind 0.45 --thermal 0.25`.
 - **Terrain resolution + calmer studio UI**: the header **Terrain grid**
   selector offers **256² Performance**, **512² Balanced** (the unchanged
   default), **768² High**, and **1024² Ultra**. Resolution is applied at
@@ -220,7 +239,9 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   header **Focus** button hides both side docks to give the 3D viewport the
   full workspace.
 
-Verification: `npm test` — 40/40 pass (includes `tests/rain-erosion.test.mjs`,
+Verification: `npm test` — 45/45 pass (includes `tests/rain-erosion.test.mjs`,
+`tests/mesh-sdf-erosion.test.mjs` for mesh→SDF sign/distance/resolution,
+directional wind, the full 3D erosion suite and grounded placement export,
 a static GLSL declaration-before-use scope check over every shader (the mock
 WebGL in Node cannot compile GLSL, so this guards against browser-only
 "undeclared identifier" black screens),

@@ -645,6 +645,27 @@ export const QUALITY_LEVELS = {
   ultra:  { label: 'Ultra Hero',   maxAxisVoxels: 248 },
 };
 
+/**
+ * Independent resolution used only for the Rock Studio erosion bake.
+ * `0` means "match the source formation grid"; positive values are the
+ * requested number of SDF cells along the formation's longest span. The
+ * mesh converter may reduce this further under its node-memory guard and
+ * reports the effective resolution in the generation stats.
+ */
+export const EROSION_SDF_RESOLUTIONS = [
+  { value: 0, label: 'Match source grid' },
+  { value: 192, label: '192 — Detail bake' },
+  { value: 256, label: '256 — Hero bake' },
+  { value: 320, label: '320 — Ultra bake' },
+  { value: 384, label: '384 — Extreme bake (slow)' },
+];
+
+export function normalizeErosionSdfResolution(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(Math.min(512, Math.max(48, n)));
+}
+
 export function resolveParams(input = {}) {
   const archetype = FORMATION_PRESETS[input.archetype] ? input.archetype : 'desert-arch';
   const preset = FORMATION_PRESETS[archetype];

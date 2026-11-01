@@ -276,6 +276,7 @@
             <div class="hud-stat"><span class="hud-k">TRIS</span><span class="hud-v" id="stat-tris">—</span></div>
             <div class="hud-stat"><span class="hud-k">VERTS</span><span class="hud-v" id="stat-verts">—</span></div>
             <div class="hud-stat"><span class="hud-k">LITHONS</span><span class="hud-v" id="stat-blocks">—</span></div>
+            <div class="hud-stat"><span class="hud-k">SDF</span><span class="hud-v" id="stat-sdf">—</span></div>
             <div class="hud-stat"><span class="hud-k">TIME</span><span class="hud-v" id="stat-time">—</span></div>
           </div>
 
@@ -384,11 +385,29 @@
 
           <section class="panel-section">
             <div class="section-header">
-              <span>RAIN EROSION — PARTICLE RUNOFF</span>
-              <span class="tag-pill">SDF</span>
+              <span>EROSION BAKE — MESH → SDF</span>
+              <span class="tag-pill">3D PROCESSES</span>
             </div>
+            <label class="field-row">
+              <span>Erosion SDF Source</span>
+              <select id="select-sdf-erosion-source">
+                <option value="mesh" selected>Placement Mesh → SDF</option>
+                <option value="analytic">Analytic Formation SDF</option>
+              </select>
+            </label>
+            <label class="field-row">
+              <span>Erosion Resolution</span>
+              <select id="select-erosion-sdf-resolution">
+                <option value="0">Match source grid</option>
+                <option value="192" selected>192 — Detail bake</option>
+                <option value="256">256 — Hero bake</option>
+                <option value="320">320 — Ultra bake</option>
+                <option value="384">384 — Extreme (slow)</option>
+              </select>
+            </label>
+            <p class="export-note" id="sdf-erosion-readout">The generated placement mesh is voxelized into a true signed-distance field, eroded in 3D, contoured again, and only then QEM-baked. World scale and grounded Y=0 are preserved.</p>
             <div id="sliders-erosion"></div>
-            <p class="export-note">Terrain-Studio raindrops locked onto the 3D SDF surface. Carves rills &amp; gullies; sharp edges and thin arch spans are protected (no melting). Erode at High / Ultra, then bake down with the QEM target above.</p>
+            <p class="export-note">Terrain Studio’s process laws adapted to overhangs and undersides: capacity-limited rain, gusting wrap-around wind saltation, repose-gated talus, freeze–thaw wedging, and wet-path chemical dissolution. All share hardness, sharp-edge and thin-span protection — incision, not melting.</p>
           </section>
 
           <section class="panel-section">
