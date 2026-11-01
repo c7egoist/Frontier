@@ -388,7 +388,7 @@ void EverestWorkspace::ConstructTopToolbar(float Scale)
         {
             const auto* PipelineRecord = dynamic_cast<const Frontier::RenderPipelineRecord*>(
                 const_cast<Frontier::SceneWorld&>(QuerySceneWorld()).FindFirstByType("RenderPipeline"));
-            const char* TierText = "TIER: RTX (VK_KHR_ray_query + ReSTIR)";
+            const char* TierText = "TIER: RTX (VK_KHR_ray_query)";
             ImU32       TierTint = Palette.LiveGreen;
             if (PipelineRecord != nullptr && !PipelineRecord->QueryConfiguration().HardwareRayQueryTier)
             {

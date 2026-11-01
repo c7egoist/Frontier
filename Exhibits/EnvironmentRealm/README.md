@@ -8,8 +8,7 @@ Planetary Atmosphere, Celestial Ephemeris, Volumetric Clouds, Cloud Shadows, Fog
 - `Frontier/Engine/GeometricRaster/` (`VisibilityProjection`, `ThemeCardPalette`, and `#if FRONTIER_EDITOR` `PreviewRaster` with 5 modular `PreviewShadowMode`s)
 - `Frontier/Engine/PhysicalDynamics/` (`ForceField` — complete 8-trigger dynamic system layered over global wind)
 - `Frontier/Engine/PlanetaryAtmosphere/` (`AtmosphereScattering`, `AstronomicalEphemeris`, `AtmosphereProjection`, `PlanetaryProjection`, `CloudSpace`, `VolumetricClouds`, `FogSpace`, `OpticalLensFlare`, `PlanetaryEnsemble`, `WeatherEffects`)
-- `Frontier/Engine/Rendering/` (`SurfaceScatteringAtlas`, `SpatiotemporalIllumination`)
-- `Frontier/Engine/Shaders/` (`PlanetaryRecords.slang`, `ForceField.slang`, `AtmosphereScattering.slang`, `AtmosphereProjection.slang`, `CloudSynthesis.slang`, `CloudShadowProjection.slang`, `VolumetricClouds.slang`, `VisibilityProjection.slang`, `PlanetaryProjection.slang`, `FogSpace.slang`, `OpticalLensFlare.slang`, `DisplayPresent.slang`, `SurfaceRaster.slang`, `VolumeDistanceSampling.slang`, `BoundingVolumeSearch.slang`, `SurfaceScatteringEvaluation.slang`, `PreviewRaster.slang`, `SpatiotemporalIllumination.slang`)
+- `Frontier/Engine/Shaders/` (`PlanetaryRecords.slang`, `ForceField.slang`, `AtmosphereScattering.slang`, `AtmosphereProjection.slang`, `CloudSynthesis.slang`, `CloudShadowProjection.slang`, `VolumetricClouds.slang`, `VisibilityProjection.slang`, `PlanetaryProjection.slang`, `FogSpace.slang`, `OpticalLensFlare.slang`, `DisplayPresent.slang`, `SurfaceRaster.slang`, `VolumeDistanceSampling.slang`, `BoundingVolumeSearch.slang`, `PreviewRaster.slang`)
 
 ## Reproduction
 

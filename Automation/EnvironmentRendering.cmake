@@ -2,8 +2,7 @@
 #                                                     ENVIRONMENTRENDERING.CMAKE
 #============================================================================================================================================
 # 🧩 Multi-instance PlanetaryAtmosphere + 8-Trigger ForceField + GeometryProcessing (QEM Cluster Refinement, Headless .sdfspace
-#    VolumeDistanceArchive, Software SAH BoundingVolumeAtlas) + (#if FRONTIER_EDITOR) PreviewRaster + Stage 3B GTX-First
-#    SpatiotemporalIllumination (ReSTIR + SDF GI + Software BVH + TextureWorkspace ScatteringSequence).
+#    VolumeDistanceArchive, Software SAH BoundingVolumeAtlas) + (#if FRONTIER_EDITOR) PreviewRaster + Slang SPIR-V.
 
 add_library(FrontierEnvironmentRendering STATIC
     Engine/ContentInterchange/VolumeDistanceField.cpp
@@ -30,9 +29,7 @@ add_library(FrontierEnvironmentRendering STATIC
     Frontier/Engine/Rendering/EnvironmentUnits.cpp
     Frontier/Engine/Rendering/SubmissionOrder.cpp
     Frontier/Engine/Rendering/TransientTargetAtlas.cpp
-    Frontier/Engine/Rendering/BarrierDerivation.cpp
-    Frontier/Engine/Rendering/SurfaceScatteringAtlas.cpp
-    Frontier/Engine/Rendering/SpatiotemporalIllumination.cpp)
+    Frontier/Engine/Rendering/BarrierDerivation.cpp)
 
 target_include_directories(FrontierEnvironmentRendering PUBLIC
     "${CMAKE_SOURCE_DIR}"
@@ -61,7 +58,7 @@ target_compile_definitions(FrontierPreviewShippingCheck PRIVATE
 
 # Headless CLI baker converting binary FCT1 .facet geometry into compact IEEE-754 Float16 .sdfspace SDF volumes.
 add_executable(FrontierBakeSdfSpace
-    Exhibits/SpatiotemporalIllumination/Code/BakeSdfSpaceTool.cpp)
+    Exhibits/ClusterDiagnostic/Code/BakeSdfSpaceTool.cpp)
 target_link_libraries(FrontierBakeSdfSpace PRIVATE FrontierEnvironmentRendering)
 
 find_program(FRONTIER_ENV_SLANGC
@@ -76,8 +73,7 @@ set(FRONTIER_ENV_COMMON_SLANG
     "${FRONTIER_ENV_SHADER_SRC}/AtmosphereScattering.slang"
     "${FRONTIER_ENV_SHADER_SRC}/CloudSynthesis.slang"
     "${FRONTIER_ENV_SHADER_SRC}/VolumeDistanceSampling.slang"
-    "${FRONTIER_ENV_SHADER_SRC}/BoundingVolumeSearch.slang"
-    "${FRONTIER_ENV_SHADER_SRC}/SurfaceScatteringEvaluation.slang")
+    "${FRONTIER_ENV_SHADER_SRC}/BoundingVolumeSearch.slang")
 
 # Module:EntryPoint:OutputStem:ExtraDefineFlag
 set(FRONTIER_ENV_SHADER_SPECS
@@ -95,11 +91,7 @@ set(FRONTIER_ENV_SHADER_SPECS
     "PreviewRaster:ClearPreviewShadowMain:ClearPreviewShadow:"
     "PreviewRaster:ProjectPreviewShadowMain:ProjectPreviewShadow:"
     "PreviewRaster:BinPreviewTilesMain:BinPreviewTiles:"
-    "PreviewRaster:ResolvePreviewViewMain:ResolvePreviewView:"
-    "SpatiotemporalIllumination:TracePrimarySurfaceMain:TracePrimarySurface:"
-    "SpatiotemporalIllumination:SampleDirectReservoirsMain:SampleDirectReservoirs:"
-    "SpatiotemporalIllumination:ReuseSpatialReservoirsMain:ReuseSpatialReservoirs:"
-    "SpatiotemporalIllumination:FilterSpatiotemporalAtrousMain:FilterSpatiotemporalAtrous:")
+    "PreviewRaster:ResolvePreviewViewMain:ResolvePreviewView:")
 
 set(FRONTIER_ENV_SPV_OUTPUTS)
 if(FRONTIER_ENV_SLANGC)
@@ -184,19 +176,14 @@ if(BUILD_TESTING)
         "${CMAKE_BINARY_DIR}/cluster-diagnostic-exhibits")
     set_tests_properties(ClusterDiagnosticValidation PROPERTIES RUN_SERIAL TRUE)
 
-    add_executable(SpatiotemporalIlluminationValidation
-        Exhibits/SpatiotemporalIllumination/Code/SpatiotemporalIlluminationValidation.cpp
-        Engine/Render/StbImageWriteImplementation.cpp)
-    target_include_directories(SpatiotemporalIlluminationValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
-    target_link_libraries(SpatiotemporalIlluminationValidation PRIVATE FrontierEnvironmentRendering)
-    if(TARGET FrontierEnvironmentShaders)
-        add_dependencies(SpatiotemporalIlluminationValidation FrontierEnvironmentShaders)
-    endif()
-    add_test(NAME SpatiotemporalIlluminationValidation COMMAND SpatiotemporalIlluminationValidation
+    # CPU-only checks for the retained GeometryProcessing modules (.sdfspace round-trip, composed vehicle SDF, SAH BVH
+    # ray/shadow queries), moved out of the removed ReSTIR exhibit so they keep coverage without any renderer.
+    add_executable(GeometryProcessingValidation
+        Exhibits/ClusterDiagnostic/Code/GeometryProcessingValidation.cpp)
+    target_link_libraries(GeometryProcessingValidation PRIVATE FrontierEnvironmentRendering)
+    add_test(NAME GeometryProcessingValidation COMMAND GeometryProcessingValidation
         "${CMAKE_SOURCE_DIR}"
-        "${FRONTIER_ENV_SHADER_OUT}"
-        "${CMAKE_BINARY_DIR}/spatiotemporal-illumination-exhibits")
-    set_tests_properties(SpatiotemporalIlluminationValidation PROPERTIES RUN_SERIAL TRUE)
+        "${CMAKE_BINARY_DIR}/geometry-processing-exhibits")
 
     add_executable(ProjectContentStagingValidation
         Exhibits/ProjectSpace/Code/ProjectContentStagingValidation.cpp)

@@ -653,4 +653,31 @@ The new appearance files use Allman braces, flat namespace indentation, and desc
   `ControlVehicle` PNG exhibits, and `EnvironmentRealmValidation` + 8 showcase PNGs including
   `TornadoSupercellAndDustVortex.png`). Phase 3B (GTX-first ReSTIR + SDF + software CWBVH renderer) queued next.
 
+## ReSTIR Removal: Lighting Restarts from Scratch (2026-11-01, branch arena/88b72faa-frontier)
 
+Base: `SultanAladin/Frontier` `arena/5f492703-frontier` at `2d55bd2f`, synced without `.github/workflows`.
+
+- **Removed, Stage 3B renderer:** `Frontier/Engine/Rendering/{SpatiotemporalIllumination,SurfaceScatteringAtlas}`,
+  `Frontier/Engine/Shaders/{SpatiotemporalIllumination,SurfaceScatteringEvaluation}.slang`, its four kernels
+  (`TracePrimarySurface`, `SampleDirectReservoirs`, `ReuseSpatialReservoirs`, `FilterSpatiotemporalAtrous`), and
+  `Exhibits/SpatiotemporalIllumination/` (validation, README, three captures).
+- **Removed, editor ReSTIR controls:** `RenderPipelineConfiguration::{RestirTemporalHistory,RestirSpatialNeighbors}`,
+  the `ReSTIR M-Cap` slider, and `ReSTIR` in the RTX tier captions and `EverestWorkspace` tier pill. Evidence:
+  `Exhibits/EverestInterface/Images/07-EverestRenderPipelineInspector.png`; captures 02-06 re-taken.
+- **Retained:** `.sdfspace` SDF (`VolumeDistanceArchive`, `VolumeDistanceSampling.slang`), software SAH BVH
+  (`BoundingVolumeAtlas`; `BoundingVolumeSearch.slang` now has no kernel consumer), `PreviewRaster` with all five
+  `PreviewShadowMode`s, `ForceField`, and the GeometryProcessing restructure.
+- **Moved:** `BakeSdfSpaceTool.cpp` and the CPU `.sdfspace`/BVH checks (new `GeometryProcessingValidation`) to
+  `Exhibits/ClusterDiagnostic/Code/`.
+- **Open:** the older exhibit-only CPU ReSTIR reference (`ReservoirSampling`, `IlluminationUnits`, `ReferenceRenderer`,
+  `Exhibits/{IlluminationChain,CompleteRenderer}`) awaits an owner decision. No performance claim is made; the cause of
+  the reported 10 FPS remains unmeasured.
+- **Verification:** GCC 12.2, Slang 2026.14.1, SwiftShader Vulkan 1.3. The other 56 root CTests have no changed inputs
+  and were not re-run. Windows/MSVC builds were not run.
+
+| Check (Linux host verification)              | Before `2d55bd2` | After                 |
+|----------------------------------------------|------------------|-----------------------|
+| Environment Slang kernels                    | 19, 12 warnings  | 15, 0 warnings        |
+| Affected root CTests                         | 7/7 passed       | 7/7 passed            |
+| Root CTest registrations                     | 63               | 63                    |
+| Retained preview/environment PNGs vs renders | n/a              | 15/15 pixel-identical |

@@ -212,6 +212,14 @@ int main(int ArgumentCount, char** Arguments)
         RenderFrames(4);
         WritePngCapture(OutputDir / "04-EverestChemicalKinetics.png");
 
+        // Exhibit 07: Select RenderPipelineRecord (dual-tier GPU path, quality, buffer inspection, exposure, bloom).
+        // Numbered 07 so the existing 01-06 capture names stay stable.
+        auto* PipelineRec = World.FindFirstByType("RenderPipeline");
+        Require(PipelineRec != nullptr, "Expected RenderPipeline record in Everest SceneWorld.");
+        Workspace.QueryOutliner().Select(PipelineRec->QueryToken());
+        RenderFrames(4);
+        WritePngCapture(OutputDir / "07-EverestRenderPipelineInspector.png");
+
         // Exhibit 05: Open standalone FractureEditor modal
         Workspace.QueryOutliner().Select(FractureRec->QueryToken());
         InspectorRuntime::Instance().RequestEditorOpen(FractureRec->QueryToken());
@@ -237,7 +245,7 @@ int main(int ArgumentCount, char** Arguments)
         ImGui::GetIO().BackendFlags = 0;
         ImGui::DestroyContext();
 
-        std::cout << "[EverestInterfaceValidation] Passed (ProjectGenerator C++ scaffolding, .levelspace, composable inspectors, and 6 PNG exhibits verified).\n";
+        std::cout << "[EverestInterfaceValidation] Passed (ProjectGenerator C++ scaffolding, .levelspace, composable inspectors, and 7 PNG exhibits verified).\n";
         return 0;
     }
     catch (const std::exception& Error)

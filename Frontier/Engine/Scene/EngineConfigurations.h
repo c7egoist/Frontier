@@ -56,14 +56,12 @@ struct DiagnosticsConfiguration : RevisionCounter
 struct RenderPipelineConfiguration : RevisionCounter
 {
     bool  Enabled                = true;
-    bool  HardwareRayQueryTier   = true;   // true: RTX VK_KHR_ray_query + ReSTIR GI | false: GTX 4-Cascade SDF + SAH-2 BVH
+    bool  HardwareRayQueryTier   = true;   // true: RTX VK_KHR_ray_query | false: GTX 4-Cascade SDF + SAH-2 BVH
     int   QualityTier            = 2;      // 0 Low · 1 Medium · 2 Ultra
     int   InspectionModeIndex    = 0;      // 0..14 viewport inspection buffer modes
     int   InspectionDistanceMode = 2;      // 0 Near · 1 Medium · 2 Far
     float ExposureCompensationEv = 0.15f;
     float BloomIntensity         = 0.28f;
-    float RestirTemporalHistory  = 20.0f;
-    float RestirSpatialNeighbors = 5.0f;
     bool  TemporalAntiAliasing   = true;
     bool  GlobalIllumination     = true;
     bool  ScreenSpaceReflections = true;

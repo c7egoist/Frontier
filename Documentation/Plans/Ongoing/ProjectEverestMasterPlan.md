@@ -77,7 +77,8 @@ When a user creates a new project via `ProjectBrowserPanel::CreateProject`:
    (`64 KB` pages, two-phase Hi-Z, 3-tier Material LOD virtualization, `ControlVehicle{Body,Rim,Tyre}.facet`),
    theme-bound `Experimental/AtmosphereEditor/` + `ThemeCardPalette.h`, and Editor/Development-only `DiagnosticRaster`
    strictly excluded from Shipping builds (`61/61` CTests passing).
-4. **Phase 3B (Next):** GTX-first compute/raster ReSTIR + SDF + software CWBVH raytracing renderer (zero hardware RTX
-   raytracing cores required) coupled with `TextureBake` / `TextureWorkspace` material evaluation.
+4. **Phase 3B (Restarting):** ReSTIR removed on 2026-11-01 at owner direction (`SpatiotemporalIllumination`,
+   `SurfaceScatteringAtlas`, their shaders, and exhibit). Lighting restarts from scratch with simple Blinn-style preview
+   lighting and basic shadows; `.sdfspace` SDF, software SAH BVH, and `PreviewRaster` shadow modes are retained.
 5. **Phase 4:** Physical, Thermal, Chemical, Weather, Fluid Plume, Fracture, Particle, and Mechanical Simulation Systems
-   (including `VehicleInspector` once the GTX ReSTIR + SDF + software BVH renderer is verified on GPU).
+   (including `VehicleInspector` once the restarted renderer is verified on GPU).

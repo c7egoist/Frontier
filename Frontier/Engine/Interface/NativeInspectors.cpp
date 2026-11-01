@@ -316,7 +316,7 @@ void DiagnosticsInspector::ConstructInspector()
 
 void RenderPipelineInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches)
 {
-    OutSwitches.push_back({"RTX Hardware", "RayQuery+ReSTIR", &Parameters.HardwareRayQueryTier});
+    OutSwitches.push_back({"RTX Hardware", "RayQuery", &Parameters.HardwareRayQueryTier});
     OutSwitches.push_back({"Indirect GI", "Multi-bounce", &Parameters.GlobalIllumination});
     OutSwitches.push_back({"Temporal AA", "Subpixel jitter", &Parameters.TemporalAntiAliasing});
     OutSwitches.push_back({"Reflections", "BVH / RayQuery", &Parameters.ScreenSpaceReflections});
@@ -356,7 +356,6 @@ void RenderPipelineInspector::ConstructInspector()
                                                         static_cast<int>(RenderInspectionModes::DistanceCount));
     Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##ExposureEv", "Exposure EV", Parameters.ExposureCompensationEv, -4.0f, 4.0f, "%+.2f EV");
     Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##BloomInt", "Bloom Intensity", Parameters.BloomIntensity, 0.0f, 1.5f, "%.2f");
-    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##RestirHist", "ReSTIR M-Cap", Parameters.RestirTemporalHistory, 1.0f, 32.0f, "%.0fx");
     if (Changed)
     {
         Parameters.AdvanceRevision();

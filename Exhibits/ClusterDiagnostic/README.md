@@ -17,3 +17,20 @@ telemetry, `PrimitiveGeometryGenerator` + binary `FCT1` `ControlVehicle{Body,Rim
 | ![ControlVehicle Cluster Identity](Images/ControlVehicleClusterIdentity.png) | **Cluster Identity (`ControlVehicleClusterIdentity.png`)**: Per-cluster golden-ratio ID palette across body, rims, tyres, and plinth, plus translucent cyan glazing showing interior clusters surviving two-phase opaque-only Hi-Z culling. |
 | ![ControlVehicle Refinement and Wireframe](Images/ControlVehicleRefinementAndWireframe.png) | **Shaded + Cluster Wireframe (`ControlVehicleRefinementAndWireframe.png`)**: Anti-aliased `1 px` screen-space barycentric triangle edges colored by QEM refinement tier over shaded automotive surfaces. |
 | ![ControlVehicle Glass Layer Peel](Images/ControlVehicleGlassLayerPeel.png) | **Two-Layer Glass Peel (`ControlVehicleGlassLayerPeel.png`)**: Single-layer cyan vs two-layer amber-gold dielectric glazing thickness peel over surviving interior cabin geometry. |
+
+## Retained geometry tooling
+
+Moved here on 2026-11-01 from the removed ReSTIR exhibit (`Exhibits/SpatiotemporalIllumination/`). Neither needs a
+renderer: the baker writes the `.sdfspace` volumes used by the SDF shadow modes, and the CPU-only validation keeps
+coverage for `VolumeDistanceArchive` and `BoundingVolumeAtlas`.
+
+| Source                                  | Build target                   | Checks or output                        |
+|-----------------------------------------|--------------------------------|-----------------------------------------|
+| `Code/BakeSdfSpaceTool.cpp`             | `FrontierBakeSdfSpace`         | `.facet` to Float16 `.sdfspace` volumes |
+| `Code/GeometryProcessingValidation.cpp` | `GeometryProcessingValidation` | SDF round-trip, vehicle SDF, BVH rays   |
+
+```bash
+cmake --build build --target FrontierBakeSdfSpace GeometryProcessingValidation
+./build/FrontierBakeSdfSpace <input.facet> <output.sdfspace> <Nx> <Ny> <Nz> [skip_glass=1]
+ctest --test-dir build -R GeometryProcessingValidation --output-on-failure
+```

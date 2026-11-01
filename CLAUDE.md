@@ -170,15 +170,16 @@ or project-specific types belong in `Engine/` or `UI/Editor/`.
 - **Container file extensions (`*space` family):** Use `.projectspace`, `.levelspace`, `.worldspace`, and `.sdfspace`
   for project, level, world, and headless-baked Float16 signed distance field containers — never compound `.toml`
   suffixes such as `.level.toml` even when serialized as TOML.
-- **Geometry, Modular Preview Shadows, & GTX-First Illumination Taxonomy:**
+- **Geometry & Modular Preview Shadows Taxonomy:**
   - `Frontier/Engine/Geometry/PrimitiveGeometryGenerator.{h,cpp}` and
     `Frontier/Engine/Geometry/GeometryProcessing/{FacetTierBuild,QuadricTierBuild,ScreenSpaceClusterRefinement,VolumeDistanceArchive,BoundingVolumeAtlas}.{h,cpp}`.
   - `Frontier/Engine/GeometricRaster/{VisibilityProjection,PreviewRaster,ThemeCardPalette}` where `PreviewRaster`
     (with selectable `PreviewShadowMode`: `None`, `ContactEllipsoid`, `OrthoClusterDepth`, `SignedDistanceCone`,
     `HybridOrthoAndDistance`) is strictly guarded under `#if FRONTIER_EDITOR` (zero symbols in Shipping).
-  - `Frontier/Engine/Rendering/{SurfaceScatteringAtlas,SpatiotemporalIllumination}` delivers GTX-first Vulkan 1.3
-    compute ReSTIR + `.sdfspace` SDF GI/AO + software SAH-BVH raytracing (zero hardware RTX dependency), reusing
-    `TextureWorkspace` (`ScatteringSequence.h` + `AutomotivePaint.h`) materials.
+  - ReSTIR was removed on 2026-11-01 at the owner's direction: the Stage 3B `SpatiotemporalIllumination` and
+    `SurfaceScatteringAtlas` renderer, its shaders, and its exhibit are gone. Lighting restarts from scratch with simple
+    Blinn-style preview lighting and basic shadows. `.sdfspace` SDF volumes, the software SAH BVH, and the
+    `PreviewRaster` shadow modes remain.
 - **Project creation auto-scaffolding (`ProjectGenerator`):** Creating a new project via `ProjectBrowserPanel`
   auto-generates C++ source scaffolding (`Source/<Identifier>Application.{h,cpp}` with main loop and `SceneWorld`
   integration), a buildable `CMakeLists.txt`, and a default scene (`Content/Levels/Default.levelspace`).
@@ -227,5 +228,5 @@ or project-specific types belong in `Engine/` or `UI/Editor/`.
   - Project-specific records and user-authored `*Inspector` classes live in `Projects/<Project>/` and register into
     `SceneWorld` and `InspectorRuntime` without modifying `Engine/`.
   - **Sequencing rule:** Leave `VehicleInspector` and vehicle systems deferred until Environment and Render Engines
-    (RTX `VK_KHR_ray_query` + ReSTIR GI and GTX 4-cascade SDF + Surface Cards + SAH-2 BVH) are complete.
+    (RTX `VK_KHR_ray_query` and GTX 4-cascade SDF + Surface Cards + SAH-2 BVH) are complete.
 
