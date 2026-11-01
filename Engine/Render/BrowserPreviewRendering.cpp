@@ -29,14 +29,15 @@ void RequireBrowserSuccess(VkResult Result)
 
 std::vector<uint32_t> DecodeBrowserShader(const std::filesystem::path &Path)
 {
+    // 📝 The path is part of the message: the start-up failure dialog is often the only thing a tester can report.
     std::ifstream Input(Path, std::ios::binary | std::ios::ate);
     const auto Bytes = Input.tellg();
     if (!Input || Bytes < 20 || Bytes > 16777216 || Bytes % 4)
-        throw std::runtime_error("Missing or malformed browser shader archive.");
+        throw std::runtime_error("Missing or malformed browser shader archive: " + DiagnosticJournal::EncodePath(Path));
     std::vector<uint32_t> Words(size_t(Bytes) / 4);
     Input.seekg(0);
     if (!Input.read(reinterpret_cast<char *>(Words.data()), Bytes) || Words[0] != 0x07230203)
-        throw std::runtime_error("Invalid browser shader archive.");
+        throw std::runtime_error("Invalid browser shader archive: " + DiagnosticJournal::EncodePath(Path));
     return Words;
 }
 

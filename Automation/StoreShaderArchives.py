@@ -1,9 +1,9 @@
 #============================================================================================================================================
 #                                                       STORESHADERARCHIVES.PY
 #============================================================================================================================================
-# 🧩 Keeps the Scene Viewport's compiled SPIR-V in EngineContent/ShaderArchives, so an editor build without the pinned Slang compiler
-#    still runs the viewport: `--build <dir>` stores the archives a build compiled, `--verify` checks the stored archives against
-#    the current Slang sources (and against the build's archives when that build compiled them).
+# 🧩 Keeps the editor's compiled SPIR-V in EngineContent/ShaderArchives, so an editor build without a Slang compiler still starts (the
+#    Project Browser's Surface set) and runs the Scene Viewport: `--build <dir>` stores the archives a build compiled, `--verify`
+#    checks the stored archives against the current Slang sources (and against the build's archives when that build compiled them).
 
 from pathlib import Path
 import argparse
@@ -23,6 +23,11 @@ ArchiveSets = {
     'Environment': ('Frontier/Engine/Shaders', ['AtmosphereScattering', 'AtmosphereProjection', 'VisibilityProjection',
                                                  'PlanetaryProjection', 'CloudShadowProjection', 'VolumetricClouds', 'FogSpace',
                                                  'OpticalLensFlare', 'PreviewRaster']),
+    # 📝 Everything a build compiles into ShaderArchives/Surface: Project Browser previews (loaded at start-up), CAD, MatCap,
+    #    material surfaces, vector coverage and the bake field. Frontier.exe stops at start-up without the Browser entries.
+    'Surface': ('Engine/Render/Shader', ['CadSurface', 'CadEdge', 'MatCapSurface', 'PreviewPbrSurface', 'MaterialSurface',
+                                         'BrowserPreview', 'BrowserDrafting', 'VectorCoverage', 'VectorSurface',
+                                         'BakeFieldEvaluation']),
 }
 IncludePattern = re.compile(r'^\s*(?:#include\s+"([^"]+)"|import\s+([A-Za-z_][A-Za-z0-9_.]*)\s*;)', re.MULTILINE)
 
@@ -48,9 +53,16 @@ def ResolveSources(Set):
     return sorted(Found)
 
 
-def DescribeCompiler(Compiler):
+def DescribeCompiler(Compiler, Compiled):
     if not Compiler:
         return 'unrecorded'
+    if Compiler.endswith('.js'):
+        # 📝 The portable Slang WASM path (FRONTIER_SLANG_WASM, Automation/CompileSurfaceShaders.mjs) records its version and
+        #    hashes beside the SPIR-V it wrote.
+        Recorded = Compiled / 'ShaderCompilation.json'
+        Facts = json.loads(Recorded.read_text(encoding='utf-8')) if Recorded.is_file() else {}
+        return (f'slang-wasm {Facts.get("compiler", "unrecorded")} ({Path(Compiler).name}, '
+                f'wasm sha256 {Facts.get("compiler_wasm_sha256", "unrecorded")})')
     Version = subprocess.run([Compiler, '-version'], capture_output=True, text=True)
     return 'slangc ' + (Version.stdout + Version.stderr).strip()
 
@@ -69,8 +81,8 @@ def Store(Set, Build, Compiler):
     Manifest = {
         'format': 1,
         'set': Set,
-        'compiler': DescribeCompiler(Compiler),
-        'refresh': 'python Automation/StoreShaderArchives.py --build <build> --compiler <slangc>',
+        'compiler': DescribeCompiler(Compiler, Compiled),
+        'refresh': f'python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets {Set}',
         'entries': [{'file': Binary.name, 'spirv_sha256': Digest(Binary)} for Binary in Binaries],
         'sources': [{'file': Source.relative_to(RepositoryRoot).as_posix(), 'sha256': Digest(Source)} for Source in ResolveSources(Set)],
     }
@@ -79,6 +91,7 @@ def Store(Set, Build, Compiler):
 
 
 def Verify(Set, Build):
+    # 📝 Build: compare that build's compiled SPIR-V with the stored copy (only meaningful for the compiler that stored it).
     Failures = []
     Target   = StoredRoot / Set
     Manifest = json.loads((Target / 'ShaderCompilation.json').read_text(encoding='utf-8'))
@@ -112,11 +125,14 @@ def Main():
     Parser.add_argument('--compiler', default='', help='the slangc that compiled them (recorded in ShaderCompilation.json)')
     Parser.add_argument('--sets', nargs='+', default=list(ArchiveSets), choices=list(ArchiveSets))
     Parser.add_argument('--verify', action='store_true', help='check instead of store; --build adds the compiled-vs-stored check')
+    Parser.add_argument('--compare', nargs='*', choices=list(ArchiveSets),
+                        help='with --verify --build: the sets whose compiled SPIR-V must equal the stored copy (default: every --sets)')
     Arguments = Parser.parse_args()
     if Arguments.verify:
-        Results = [Verify(Set, Arguments.build.resolve() if Arguments.build else None) for Set in Arguments.sets]
+        Compared = set(Arguments.sets if Arguments.compare is None else Arguments.compare)
+        Results = [Verify(Set, Arguments.build.resolve() if Arguments.build and Set in Compared else None) for Set in Arguments.sets]
         if not all(Results):
-            print('Refresh: python Automation/StoreShaderArchives.py --build <build> --compiler <slangc>')
+            print('Refresh: python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets <set>')
             sys.exit(1)
         return
     if Arguments.build is None:

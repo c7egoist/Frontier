@@ -23,6 +23,7 @@
 #include <windows.h>
 #include <commdlg.h>
 #include <shlobj.h>
+#include <shellapi.h>
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
 #include <imgui.h>
@@ -33,6 +34,7 @@
 #include <cwchar>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -100,6 +102,21 @@ std::filesystem::path ChooseImportFolder(GLFWwindow *Window)
     return std::filesystem::path{};
 }
 
+// 📝 `Frontier.exe <project>.projectspace` (or a project dropped on Frontier.exe) opens that project instead of the browser.
+std::filesystem::path ResolveLaunchProject()
+{
+    std::filesystem::path Requested;
+    int Count = 0;
+    LPWSTR *Words = CommandLineToArgvW(GetCommandLineW(), &Count);
+    try
+    {
+        if (Words && Count > 1) Requested = std::filesystem::absolute(std::filesystem::path(Words[1]));
+    }
+    catch (...) { Requested.clear(); }
+    if (Words) LocalFree(Words);
+    return Requested;
+}
+
 int main()
 {
     Frontier::DiagnosticJournal::Initialize("Frontier");
@@ -119,6 +136,7 @@ int main()
     std::unique_ptr<Everest::EverestSceneViewport> SceneView;
     VkImageView SceneViewImage = VK_NULL_HANDLE;
     VkDescriptorSet SceneViewDescriptor = VK_NULL_HANDLE;
+    int SceneViewJournalEntries = 0; // 📝 the first statuses and every new target reach the diagnostic file, capped
     const auto RetireSceneView = [&]()
     {
         SceneView.reset(); // 📝 Waits for the device before releasing anything the interface could still sample.
@@ -155,6 +173,7 @@ int main()
     GLFWwindow *Window = nullptr;
     std::filesystem::path Preferences;
     bool ReturnRequested = false;
+    std::filesystem::path LaunchProject = ResolveLaunchProject();
     Frontier::ApplicationWindowCallbacks Callbacks;
     Callbacks.Title = "Frontier - Project Browser [" FRONTIER_BUILD_COMMIT "]";
     Callbacks.SceneRendering = true;
@@ -328,6 +347,11 @@ int main()
                     const Everest::SceneViewportRefresh Outcome =
                         SceneView->Render(Request, EverestSpace->QuerySceneWorld(), EverestSpace->QueryElapsedSeconds());
                     Image.Status = Outcome.Status;
+                    if ((Outcome.View != SceneViewImage || SceneViewJournalEntries < 12) && SceneViewJournalEntries < 32)
+                    {
+                        Frontier::DiagnosticJournal::Append("SceneViewport", (Outcome.View ? "image " : "no image ") + Outcome.Status);
+                        ++SceneViewJournalEntries;
+                    }
                     if (Outcome.View != SceneViewImage)
                     {
                         // 📝 Render() retired the queue before replacing its targets: the previous set is no longer sampled.
@@ -362,7 +386,17 @@ int main()
     };
     Callbacks.ConfigurePlatform = [&]()
     {
-        const auto Requested = Browser->ConsumeLaunchPath();
+        auto Requested = Browser->ConsumeLaunchPath();
+        if (Requested.empty() && !LaunchProject.empty())
+        {
+            Requested = std::exchange(LaunchProject, std::filesystem::path{});
+            Frontier::DiagnosticJournal::Append("ProjectSelection", "Command line: " + Frontier::DiagnosticJournal::EncodePath(Requested));
+            if (!std::filesystem::is_regular_file(Requested))
+            {
+                Frontier::DiagnosticJournal::Append("ProjectSelection", "Command-line project not found; staying in the Project Browser");
+                Requested.clear();
+            }
+        }
         if (!Requested.empty()) ActivateProject(Requested);
         if (ReturnRequested && (Workspace || EverestSpace))
         {

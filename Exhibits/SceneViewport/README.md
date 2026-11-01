@@ -124,18 +124,28 @@ Every shader is a `.slang` unit: the port's 54 units in `Frontier/Engine/Shaders
 PlanetaryAtmosphere units in `Frontier/Engine/Shaders`. CMake compiles them to SPIR-V 1.3 with the pinned Slang compiler
 (`Automation/PrepareVulkanCompute.py`, slangc 2026.14.1).
 
-So that an editor build without that compiler (for example MSVC on Windows) still runs the viewport, the compiled
-archives are also stored in `EngineContent/ShaderArchives/{GlobalIllumination,Environment}`:
+So that an editor build without that compiler (for example MSVC on Windows) still starts and runs the viewport, the
+compiled archives are also stored in `EngineContent/ShaderArchives/{GlobalIllumination,Environment,Surface}`:
+
+- `Surface` is the editor's own raster set (`Engine/Render/Shader`, 18 entries): the Project Browser previews that
+  `Frontier.exe` loads at start-up, CAD, MatCap and material surfaces, vector coverage and the bake field. It is
+  compiled with the repository's portable compiler, `slang-loader@0.0.7` (Slang 2026.19 WASM, `FRONTIER_SLANG_WASM`),
+  because the pinned slangc has no SPIR-V optimizer. Until 2026-11-02 it was not stored: a build without a Slang
+  compiler on `PATH` (the 21a0ccb4 download, or MSVC without the Vulkan SDK) stopped at start-up with
+  "Missing or malformed browser shader archive". CTest `BrowserPreviewStartupValidation` now runs the browser's
+  start-up rendering from the stored set (four pipelines, four catalogue thumbnails, one read back).
 
 - The editor build copies `EngineContent` beside `Frontier.exe`, stored archives included. A set the build compiled
   replaces its stored copy afterwards.
 - The port's units compile only with the pinned compiler by default, so every build presents the SPIR-V the parity
   validation measured. `-DFRONTIER_GLOBAL_ILLUMINATION_SLANGC=<slangc>` selects another compiler.
-- `Automation/StoreShaderArchives.py --build <build> --compiler <slangc>` refreshes the stored archives after a shader
-  change. `ShaderCompilation.json` records the compiler and the SHA-256 of every source and archive.
+- `Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets <set>` refreshes the
+  stored archives after a shader change. `ShaderCompilation.json` records the compiler and the SHA-256 of every source
+  and archive.
 - CTest `StoredShaderArchiveValidation` fails when a Slang source changed without refreshing the stored archives. When
-  the build compiled a set with the pinned compiler, the test also requires the compiled and stored SPIR-V to be
-  byte-identical. Recompiling from scratch reproduced all 46 stored archives byte for byte.
+  the build compiled a set with the compiler that stored it (pinned slangc; for `Surface`, the slang-loader WASM by its
+  SHA-256), the test also requires the compiled and stored SPIR-V to be byte-identical. Recompiling from scratch
+  reproduced all 46 GlobalIllumination and Environment archives byte for byte, and the 18 Surface archives likewise.
 
 ## Checks
 
@@ -164,7 +174,9 @@ archives are also stored in `EngineContent/ShaderArchives/{GlobalIllumination,En
    the Scene Viewport brings the scene up. Started from elsewhere, open `Projects/Everest/Everest.projectspace` through
    the browser.
 
-No Slang compiler is needed for this: the stored archives are used. A ready-made package is built with
+No Slang compiler is needed for this: the stored archives are used (all three sets, since 2026-11-02). A Slang
+compiler on `PATH`, such as the Vulkan SDK's, recompiles the Surface set instead. `Frontier.exe
+Projects\Everest\Everest.projectspace` opens Everest without the browser. A ready-made package is built with
 `Automation/PackageEditorPreviewWindows.py` (see Distribution below).
 
 ## Reproduce (Linux host, SwiftShader)
@@ -187,9 +199,22 @@ imports.
 `Automation/PackageEditorPreviewWindows.py --executable <build>/Frontier.exe --toolchain "<toolchain>"` packages
 `Frontier.exe` with `EngineContent` (shader archives included), Project Everest with its staged content, the licence
 notices, `WindowsPreviewReadme.md` as `README.md` and a `Package.json` with a SHA-256 for every file. It checks the
-executable is Windows x64 PE32+, the SPIR-V archives are complete and well-formed and the fonts match their catalogue.
+executable is Windows x64 PE32+, every entry of every stored shader set is present and well-formed, the files
+`Frontier.exe` opens before the first click are there, and the fonts match their catalogue.
 `--omit-material-archives` leaves out the Texture Studio material archives (about 180 MiB), which the Scene Viewport
 does not read.
+
+`Automation/Workflows/EditorPreviewWindows.yml` publishes downloads on GitHub once it is copied to
+`.github/workflows/` (GitHub runs workflows only from there; Arena's GitHub App may not create workflow files, and its
+sandbox cannot reach `uploads.github.com`). Then every push of `main` or an `arena/…` branch runs:
+
+1. the Zig cross-build, packaged (the download);
+2. an MSVC build exactly as above (`cmake -S . -B Build/Editor -A x64`), packaged as `…-MSVC.zip`;
+3. the packaged `Frontier.exe` launched on a GitHub Windows runner with a CPU Vulkan driver
+   (`Automation/LaunchEditorPreviewWindows.ps1`: Chrome's SwiftShader, else Mesa lavapipe): the Project Browser until
+   its first thumbnails are confirmed, then Everest from the command line until the Scene Viewport has presented
+   four refreshes, with a screenshot and the diagnostic file of each;
+4. a pre-release `editor-preview-<sha>` with both packages, the screenshots and the results in its notes.
 
 ## Not claimed
 

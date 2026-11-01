@@ -15,7 +15,12 @@ import tempfile
 import zipfile
 
 RepositoryRoot = Path(__file__).resolve().parents[1]
-SceneShaderSets = {'GlobalIllumination': 31, 'Environment': 15}
+# 📝 What Frontier.exe opens before the first click (Experimental/Frontier/Native/WindowsFrontier.cpp). The 21a0ccb4 preview had no
+#    ShaderArchives/Surface and stopped at start-up with "Missing or malformed browser shader archive".
+StartupFiles = ['EngineContent/FontArchives/FontCatalogue.json', 'Projects/Everest/Everest.projectspace'] + \
+    [f'EngineContent/ShaderArchives/Surface/{Entry}.spv'
+     for Entry in ['BrowserPreviewVertex', 'BrowserPreviewFragment', 'BrowserDraftingVertex', 'BrowserDraftingFragment']]
+StartupFolders = ['EngineContent/Icons']
 
 
 def Digest(Filename):
@@ -30,14 +35,36 @@ def VerifyExecutable(Executable):
         raise RuntimeError('Expected a Windows x64 PE32+ executable: ' + str(Executable))
 
 
-def VerifySpirv(Folder, Expected):
-    Binaries = sorted(Folder.glob('*.spv'))
-    if len(Binaries) != Expected:
-        raise RuntimeError(f'Expected {Expected} SPIR-V archives in {Folder}, found {len(Binaries)}')
-    for Binary in Binaries:
-        Payload = Binary.read_bytes()
-        if len(Payload) < 20 or len(Payload) % 4 or struct.unpack_from('<I', Payload)[0] != 0x07230203:
-            raise RuntimeError('Malformed SPIR-V: ' + str(Binary))
+def VerifySpirv(Binary):
+    Payload = Binary.read_bytes() if Binary.is_file() else b''
+    if len(Payload) < 20 or len(Payload) % 4 or struct.unpack_from('<I', Payload)[0] != 0x07230203:
+        raise RuntimeError('Missing or malformed SPIR-V: ' + str(Binary))
+
+
+def VerifyShaderSets(Installation):
+    # 📝 Every set stored in the repository (Automation/StoreShaderArchives.py) arrives complete, whether the build compiled its own
+    #    copy or used the stored one.
+    Counts = {}
+    for Manifest in sorted((RepositoryRoot / 'EngineContent/ShaderArchives').glob('*/ShaderCompilation.json')):
+        Entries = json.loads(Manifest.read_text(encoding='utf-8'))['entries']
+        for Entry in Entries:
+            VerifySpirv(Installation / 'EngineContent/ShaderArchives' / Manifest.parent.name / Entry['file'])
+        Counts[Manifest.parent.name] = len(Entries)
+    if set(Counts) != {'GlobalIllumination', 'Environment', 'Surface'}:
+        raise RuntimeError('Expected the GlobalIllumination, Environment and Surface shader sets, found ' + ', '.join(sorted(Counts)))
+    return Counts
+
+
+def VerifyStartup(Installation):
+    for Required in StartupFiles:
+        if not (Installation / Required).is_file():
+            raise RuntimeError('Frontier.exe needs this at start-up: ' + Required)
+    for Required in StartupFolders:
+        if not any((Installation / Required).iterdir()):
+            raise RuntimeError('Frontier.exe needs this at start-up: ' + Required)
+    for Required in StartupFiles:
+        if Required.endswith('.spv'):
+            VerifySpirv(Installation / Required)
 
 
 def Main():
@@ -64,13 +91,13 @@ def Main():
         # 📝 The EngineContent the build placed beside the executable: stored archives replaced by the sets it compiled.
         Omitted = shutil.ignore_patterns('MaterialArchives') if Arguments.omit_material_archives else None
         shutil.copytree(BuildContent, Installation / 'EngineContent', ignore=Omitted)
-        for Set, Expected in SceneShaderSets.items():
-            VerifySpirv(Installation / 'EngineContent/ShaderArchives' / Set, Expected)
+        ShaderCounts = VerifyShaderSets(Installation)
         Project = Installation / 'Projects/Everest'
         Project.mkdir(parents=True)
         shutil.copy2(RepositoryRoot / 'Projects/Everest/Everest.projectspace', Project / 'Everest.projectspace')
         Staging = ['.staged_manifest.json'] + (['MaterialArchives'] if Arguments.omit_material_archives else [])
         shutil.copytree(StagedProject, Project / 'Content', ignore=shutil.ignore_patterns(*Staging))
+        VerifyStartup(Installation)
         Catalogue = json.loads((Installation / 'EngineContent/FontArchives/FontCatalogue.json').read_text(encoding='utf-8'))
         for Typeface in Catalogue['faces']:
             if Digest(Installation / 'EngineContent/FontArchives' / Typeface['file']) != Typeface['sha256']:
@@ -90,6 +117,7 @@ def Main():
             'signed': False, 'antivirus_scanned': False, 'windows_runtime_verified': False,
             'scene_viewport': 'Project Everest > Scene Viewport: ported VehicleHMI ReSTIR GI + PlanetaryAtmosphere environment',
             'omitted': ['EngineContent/MaterialArchives', 'Projects/Everest/Content/MaterialArchives'] if Arguments.omit_material_archives else [],
+            'shader_sets': ShaderCounts, 'startup_files_verified': StartupFiles + StartupFolders,
             'files': {Filename.relative_to(Installation).as_posix(): Digest(Filename)
                       for Filename in sorted(Installation.rglob('*')) if Filename.is_file()},
         }

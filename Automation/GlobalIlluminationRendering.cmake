@@ -153,11 +153,12 @@ if(BUILD_TESTING)
         add_dependencies(RestirGiParityValidation FrontierGlobalIlluminationShaders)
     endif()
 
-    # 📝 The stored archives must match the current Slang sources; a set compiled here by the pinned compiler must also match its
-    #    stored copy byte for byte (another compiler's output is not compared).
+    # 📝 Every stored set must match the current Slang sources. A set this build compiled with the compiler that stored it must also
+    #    match its stored copy byte for byte: GlobalIllumination/Environment with the pinned slangc, Surface (the Project Browser's
+    #    start-up archives, CAD, materials, vector coverage, bake field) with the slang-loader 0.0.7 Slang WASM. Other compilers'
+    #    output is not compared.
     set(FRONTIER_PINNED_SLANG "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/")
     set(FRONTIER_COMPARED_SHADER_SETS)
-    set(FRONTIER_COMPARED_SHADER_TARGETS)
     foreach(SCENE_SHADERS GlobalIllumination Environment)
         if(SCENE_SHADERS STREQUAL "Environment")
             set(SCENE_SLANGC "${FRONTIER_ENV_SLANGC}")
@@ -169,11 +170,15 @@ if(BUILD_TESTING)
             list(APPEND FRONTIER_COMPARED_SHADER_SETS ${SCENE_SHADERS})
         endif()
     endforeach()
-    if(FRONTIER_COMPARED_SHADER_SETS)
-        add_test(NAME StoredShaderArchiveValidation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/StoreShaderArchives.py"
-            --verify --build "${CMAKE_BINARY_DIR}" --sets ${FRONTIER_COMPARED_SHADER_SETS})
-    else()
-        add_test(NAME StoredShaderArchiveValidation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/StoreShaderArchives.py"
-            --verify)
+    if(TARGET FrontierSurfaceShaders AND NOT FRONTIER_SLANGC AND FRONTIER_SLANG_WASM)
+        get_filename_component(SURFACE_WASM_FOLDER "${FRONTIER_SLANG_WASM}" DIRECTORY)
+        if(EXISTS "${SURFACE_WASM_FOLDER}/slang-wasm.wasm")
+            file(SHA256 "${SURFACE_WASM_FOLDER}/slang-wasm.wasm" SURFACE_WASM_DIGEST)
+            if(SURFACE_WASM_DIGEST STREQUAL "834d30ccf9fc5c01baa33cca361734fbd65a0cdd3985af95bb454ecfff66e5f1")
+                list(APPEND FRONTIER_COMPARED_SHADER_SETS Surface)
+            endif()
+        endif()
     endif()
+    add_test(NAME StoredShaderArchiveValidation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/StoreShaderArchives.py"
+        --verify --sets GlobalIllumination Environment Surface --build "${CMAKE_BINARY_DIR}" --compare ${FRONTIER_COMPARED_SHADER_SETS})
 endif()

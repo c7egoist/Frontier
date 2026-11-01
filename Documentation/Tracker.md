@@ -763,3 +763,37 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   - The `Moons` phase field is unused (phase follows geometry).
   - Viewport submissions are synchronous.
   - The demo's own clouds, flare passes, weather and vehicle systems remain unported.
+
+## Windows start-up fix, stored Surface shaders, GitHub-built downloads (2026-11-02, branch arena/88b72faa-frontier)
+
+- **Reported:** the `21a0ccb4` download stopped at start-up: "Severe application failure: Missing or malformed browser
+  shader archive." The Project Browser loads `EngineContent/ShaderArchives/Surface/Browser{Preview,Drafting}{Vertex,Fragment}.spv`.
+  That set was compiled only when a `slangc` was on `PATH`. The cross-build had none, so the package had no `Surface`
+  folder. The packager checked only the two Scene Viewport sets, and the README's "no Slang compiler needed" was wrong
+  for MSVC builds without the Vulkan SDK.
+- **Fixed:**
+  - `EngineContent/ShaderArchives/Surface`: all 18 entries a build compiles into that folder (7 raster sources, vertex and fragment,
+    vector coverage/selection/surface, bake field), compiled with `slang-loader@0.0.7` (Slang 2026.19 WASM) and stored by
+    `Automation/StoreShaderArchives.py --sets Surface`. The editor's `EngineContent` copy carries it beside `Frontier.exe`.
+  - `StoreShaderArchives.py`: `Surface` set, WASM compiler recorded from the build's manifest, `--compare` (sets whose
+    compiled SPIR-V must equal the stored copy). CTest `StoredShaderArchiveValidation` now verifies all three sets and
+    compares each set the build compiled with the compiler that stored it.
+  - CTest `BrowserPreviewStartupValidation` (`Exhibits/Renderer/Code`): the browser's start-up rendering from the stored set.
+  - `PackageEditorPreviewWindows.py` checks every entry of every stored set and the files `Frontier.exe` opens before
+    the first click.
+  - `BrowserPreviewRendering`: the start-up error names the missing file.
+- **Added:**
+  - `Frontier.exe <project>.projectspace` opens the project directly; a missing path stays in the browser.
+  - The journal records the Scene Viewport's first 12 statuses and every new target (capped at 32).
+  - `Automation/Workflows/EditorPreviewWindows.yml` + `Automation/LaunchEditorPreviewWindows.ps1`: Zig cross-build and
+    package, MSVC build as the README describes, the package launched on a Windows runner with a CPU Vulkan driver
+    (Project Browser, then Everest's Scene Viewport, with screenshots), and a pre-release `editor-preview-<sha>`.
+    Inactive until copied to `.github/workflows/`: the push of that path was refused ("refusing to allow a GitHub App to
+    create or update workflow … without `workflows` permission"), and this host cannot reach `uploads.github.com`.
+- **Verification (Linux host, fresh sandbox):**
+  - `BrowserPreviewStartupValidation` on SwiftShader: four browser archives, 4 pipelines, 4 thumbnails, 2,916 colours
+    read back.
+  - `StoredShaderArchiveValidation` passes. A from-scratch recompile reproduced all 31 + 15 + 18 stored archives byte
+    for byte.
+  - Zig cross-build of `Frontier.exe` with no Slang compiler configured: `EngineContent/ShaderArchives/Surface` lands
+    beside it.

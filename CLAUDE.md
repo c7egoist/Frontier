@@ -185,7 +185,12 @@ or project-specific types belong in `Engine/` or `UI/Editor/`.
     (`VulkanDeviceAccess`), with the `PlanetaryAtmosphere` environment (clouds, fog, flare, sun, moons, stars, planets)
     overlaid on it — the owner chose PlanetaryAtmosphere over the demo's own clouds/flare. Its SPIR-V is also stored in
     `EngineContent/ShaderArchives/{GlobalIllumination,Environment}` (`Automation/StoreShaderArchives.py`; CTest
-    `StoredShaderArchiveValidation`), so editor builds without the pinned slangc still run it.
+    `StoredShaderArchiveValidation`), so editor builds without the pinned slangc still run it. The editor's own raster set
+    `EngineContent/ShaderArchives/Surface` (Project Browser start-up, CAD, materials, vector, bake) is stored the same way;
+    refresh it after any `Engine/Render/Shader/*.slang` edit, or `Frontier.exe` built without slangc stops at start-up.
+    `Automation/Workflows/EditorPreviewWindows.yml` builds, launch-checks and publishes Windows pre-releases once the owner
+    copies it to `.github/workflows/` (the Arena GitHub App cannot push workflow files; the sandbox cannot reach
+    `uploads.github.com`). Until then, Windows packages go to the owner's Google Drive.
     `.sdfspace` SDF volumes, the software SAH BVH, and the `PreviewRaster` shadow modes remain.
 - **Project creation auto-scaffolding (`ProjectGenerator`):** Creating a new project via `ProjectBrowserPanel`
   auto-generates C++ source scaffolding (`Source/<Identifier>Application.{h,cpp}` with main loop and `SceneWorld`
