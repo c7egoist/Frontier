@@ -743,6 +743,9 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   without the pinned slangc (MSVC on Windows) copy them beside `Frontier.exe`; the port's units compile only with the
   pinned compiler unless `FRONTIER_GLOBAL_ILLUMINATION_SLANGC` names another.
 - **Added — distribution:** `Automation/PackageEditorPreviewWindows.py` and `Exhibits/SceneViewport/WindowsPreviewReadme.md`.
+  Delivered: `FrontierSceneViewport-Windows-x64.zip` (25 MiB, material archives omitted, commit `21a0ccb4`, SHA-256
+  `4a9c1a7f…36d0`) to the owner's Google Drive. A GitHub prerelease was attempted, but this host cannot reach
+  `uploads.github.com`, so no release exists.
 - **Evidence:** `Exhibits/SceneViewport/`:
   - day, low-sun, dusk-fog and night images, plus the Everest workspace with the live viewport (CPU-rasterized
     interface, GPU image read back);
