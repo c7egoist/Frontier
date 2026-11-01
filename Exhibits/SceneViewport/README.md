@@ -223,7 +223,9 @@ sandbox cannot reach `uploads.github.com`). Then every push of `main` or an `are
 - **Windows.** The Windows editor target was cross-compiled and linked with the repository's pinned Zig 0.13.0
   `x86_64-windows-gnu` toolchain (`Automation/WindowsToolchain.cmake`), configured without a Slang compiler so it used
   the stored archives. It imports only Windows system DLLs and the UCRT, and loads `vulkan-1.dll` at run time. It was
-  never launched, and MSVC was not run.
+  never launched here, and MSVC was not run: `Automation/Workflows/EditorPreviewWindows.yml` does both on GitHub's
+  Windows runners once it is copied to `.github/workflows/`. The owner's first launch of the `21a0ccb4` package stopped
+  at start-up because the `Surface` set was missing; `e4b9baf4` stores it and checks it (see Shaders above).
 - **Environment lighting the scene.** The environment does not relight the illumination. Cloud shadows, environment
   moonlight and fog shadowing do not reach the GI scene, which is lit by the demo's own sky model.
 - **Moon phase record.** Moon phase follows the sun–moon geometry. The `Moons` record's phase value is not used.

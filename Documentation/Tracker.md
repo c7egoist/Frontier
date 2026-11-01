@@ -797,3 +797,13 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
     for byte.
   - Zig cross-build of `Frontier.exe` with no Slang compiler configured: `EngineContent/ShaderArchives/Surface` lands
     beside it.
+- **Delivered:** `FrontierSceneViewport-Windows-x64-e4b9baf4.zip` (22.1 MiB, material archives omitted, revision
+  `e4b9baf4`, SHA-256 `a3b5d646…f968`, `Frontier.exe` SHA-256 `1cee57b8…11ac`) to the owner's Google Drive. The
+  extracted zip passed `BrowserPreviewStartupValidation` against its own `Surface` folder, and the exe imports only Windows
+  system DLLs and the UCRT. No GitHub release: the workflow could not be pushed (see Added), and asset uploads need
+  `uploads.github.com`.
+- **Not run:** the Windows launch and the MSVC build (both wait for the workflow to be activated); no hardware GPU.
+- **Proposed next (owner to choose):** make the environment light the scene. Either PlanetaryAtmosphere feeds the port's
+  existing sky, sun, moon and cloud-shadow inputs (`DirectRadiance` bindings 11–13, `CelestialSky`/`SampleSkyRadiance`,
+  reflections), keeping the GI algorithms 1:1; or the demo's own sky, clouds, cloud shadows, fog and flare return 1:1
+  and replace the overlay.
