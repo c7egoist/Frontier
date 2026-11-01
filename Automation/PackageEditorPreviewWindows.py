@@ -45,6 +45,8 @@ def Main():
     Parser.add_argument('--executable', type=Path, required=True, help='the built Frontier.exe')
     Parser.add_argument('--toolchain', required=True, help='e.g. "Zig 0.13.0 x86_64-windows-gnu (Automation/WindowsToolchain.cmake)"')
     Parser.add_argument('--output', type=Path, default=RepositoryRoot / 'Binaries/FrontierSceneViewport-Windows-x64.zip')
+    Parser.add_argument('--omit-material-archives', action='store_true',
+                        help='leave out the Texture Studio material archives (~180 MiB); the Scene Viewport does not read them')
     Arguments = Parser.parse_args()
     Executable = Arguments.executable.resolve()
     VerifyExecutable(Executable)
@@ -60,13 +62,15 @@ def Main():
         Installation = Path(Temporary)
         shutil.copy2(Executable, Installation / 'Frontier.exe')
         # 📝 The EngineContent the build placed beside the executable: stored archives replaced by the sets it compiled.
-        shutil.copytree(BuildContent, Installation / 'EngineContent')
+        Omitted = shutil.ignore_patterns('MaterialArchives') if Arguments.omit_material_archives else None
+        shutil.copytree(BuildContent, Installation / 'EngineContent', ignore=Omitted)
         for Set, Expected in SceneShaderSets.items():
             VerifySpirv(Installation / 'EngineContent/ShaderArchives' / Set, Expected)
         Project = Installation / 'Projects/Everest'
         Project.mkdir(parents=True)
         shutil.copy2(RepositoryRoot / 'Projects/Everest/Everest.projectspace', Project / 'Everest.projectspace')
-        shutil.copytree(StagedProject, Project / 'Content', ignore=shutil.ignore_patterns('.staged_manifest.json'))
+        Staging = ['.staged_manifest.json'] + (['MaterialArchives'] if Arguments.omit_material_archives else [])
+        shutil.copytree(StagedProject, Project / 'Content', ignore=shutil.ignore_patterns(*Staging))
         Catalogue = json.loads((Installation / 'EngineContent/FontArchives/FontCatalogue.json').read_text(encoding='utf-8'))
         for Typeface in Catalogue['faces']:
             if Digest(Installation / 'EngineContent/FontArchives' / Typeface['file']) != Typeface['sha256']:
@@ -85,6 +89,7 @@ def Main():
             'uncommitted_changes': bool(subprocess.check_output(['git', 'status', '--porcelain', '--untracked-files=no'], cwd=RepositoryRoot)),
             'signed': False, 'antivirus_scanned': False, 'windows_runtime_verified': False,
             'scene_viewport': 'Project Everest > Scene Viewport: ported VehicleHMI ReSTIR GI + PlanetaryAtmosphere environment',
+            'omitted': ['EngineContent/MaterialArchives', 'Projects/Everest/Content/MaterialArchives'] if Arguments.omit_material_archives else [],
             'files': {Filename.relative_to(Installation).as_posix(): Digest(Filename)
                       for Filename in sorted(Installation.rglob('*')) if Filename.is_file()},
         }

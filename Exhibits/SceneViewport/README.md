@@ -188,11 +188,13 @@ imports.
 `Frontier.exe` with `EngineContent` (shader archives included), Project Everest with its staged content, the licence
 notices, `WindowsPreviewReadme.md` as `README.md` and a `Package.json` with a SHA-256 for every file. It checks the
 executable is Windows x64 PE32+, the SPIR-V archives are complete and well-formed and the fonts match their catalogue.
+`--omit-material-archives` leaves out the Texture Studio material archives (about 180 MiB), which the Scene Viewport
+does not read.
 
 ## Not claimed
 
 - **Hardware.** Every image here was rendered on SwiftShader (CPU Vulkan): about 12–19 s per refresh at 480 × 270, and
-  about 51 s at the workspace's 1028 × 482 `high` tier. No hardware GPU and no Windows desktop session was run.
+  about 52 s at the workspace's 1028 × 482 `high` tier. No hardware GPU and no Windows desktop session was run.
 - **Windows.** The Windows editor target was cross-compiled and linked with the repository's pinned Zig 0.13.0
   `x86_64-windows-gnu` toolchain (`Automation/WindowsToolchain.cmake`), configured without a Slang compiler so it used
   the stored archives. It imports only Windows system DLLs and the UCRT, and loads `vulkan-1.dll` at run time. It was

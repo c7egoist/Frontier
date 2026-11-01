@@ -1,6 +1,8 @@
 # Frontier editor — Scene Viewport preview (Windows x64)
 
 This folder runs as extracted. Keep `Frontier.exe`, `EngineContent/` and `Projects/` side by side.
+`Package.json` lists anything left out of this download under `omitted`: the small download leaves out the Texture
+Studio material archives, which the Scene Viewport does not read.
 
 ## Run
 
