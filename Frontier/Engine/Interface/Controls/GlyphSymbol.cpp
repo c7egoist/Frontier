@@ -45,6 +45,12 @@ struct GlyphSource
 
 // 📝 EditorIcons.js EditorGlyphs, then ConstructGlyph's Marks (attribute quotes single, otherwise verbatim).
 constexpr GlyphSource GlyphSources[] = {
+    {"ScanCorners","<path d='M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3'/>"},
+    {"Info", "<circle cx='12' cy='12' r='9'/><path d='M12 11v6M12 7v1'/>"},
+    {"TriangleAlert", "<path d='M12 3 22 21H2Z'/><path d='M12 9v5M12 17v1'/>"},
+    {"CircleAlert", "<circle cx='12' cy='12' r='9'/><path d='M12 6v8M12 17v1'/>"},
+    {"Focus", "<path d='M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5'/><circle cx='12' cy='12' r='3'/>"},
+    {"MousePointer", "<path d='m4 3 15 10-7 1-3 7Z'/>"},
     {"Power", "<path d='M12 2v8'/><path d='M6 5a9 9 0 1 0 12 0'/>"},
     {"Layers",
      "<path d='M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 "

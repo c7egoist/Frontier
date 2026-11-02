@@ -52,7 +52,6 @@ struct ViewportRendering
     bool     TemporalAntiAliasing = true;
     double   ExposureCompensation = 0.0;     // [EV]
     uint32_t Inspection           = 0;       // [-] the demo's inspection view 0–14 (RefreshToggles::Inspection)
-    bool     DistanceSlice        = false;   // [-] the distance-slice inset (the demo's InsetEnabled, HMI word bit 0)
 };
 
 // 📝 What the refresh ran with, for the viewport's readout (the demo's PresentMeasurements).
@@ -66,6 +65,7 @@ struct ViewportStatistics
     uint32_t                InitialCandidates = 0;        // [-] M
     uint32_t                TlasInstances     = 0;        // [-] active instances of the software TLAS
     uint32_t                TlasEntries       = 0;        // [-] TLAS entries in use
+    uint32_t                SceneTriangles    = 0;
     uint32_t                BlasTriangles     = 0;        // [-] static BLAS triangles
     uint32_t                ClipResolution    = 0;        // [voxels] distance clipmap edge (the grade's ClipResolution)
     uint32_t                SurfaceCards      = 0;        // [-] surface cards in the depot

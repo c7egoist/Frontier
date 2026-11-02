@@ -46,6 +46,14 @@ class SolarInspector final : public RecordInspector
         return Parameters.ElevationDegrees > 0.0f ? RecordOperationalCondition::Live : RecordOperationalCondition::Warm;
     }
 
+    bool QueryViewTarget(InspectorViewTarget& View) const noexcept override
+    {
+        const auto& Body = Parameters;
+        View.Celestial = true; View.Azimuth = Body.AzimuthDegrees; View.Elevation = Body.ElevationDegrees;
+        View.Diameter = Body.AngularDiameterDeg;
+        return true;
+    }
+
   private:
     // 📝 SolarDayData: the elevation every quarter hour for one date and place, with its 0° crossings.
     struct SolarDayPath

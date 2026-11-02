@@ -84,7 +84,7 @@ std::vector<uint8_t> RefreshEncoder::Encode(const CameraPose& Camera, const Ligh
     Unsigned(107, Toggles.SpatialCount);
     for (int Channel = 0; Channel < 3; ++Channel) Scalar(108 + Channel, Light.NightSky[Channel]);
     Scalar(111, Toggles.IncandescenceScale);
-    Scalar(112, Toggles.SliceHeight);
+    Scalar(112, 0);
     Scalar(113, Toggles.ExposureCompensation);
     Scalar(114, Toggles.IndirectScale);
     // 📝 JS Math.round rounds halfway cases towards +∞.
@@ -93,7 +93,7 @@ std::vector<uint8_t> RefreshEncoder::Encode(const CameraPose& Camera, const Ligh
     const uint32_t ScaleShort   = static_cast<uint32_t>(std::max(1.0, std::min(65535.0, std::floor(Toggles.ReflectionScale * 1000.0 + 0.5) + 1.0)));
     Unsigned(115, DistanceMode | (RoughByte << 8) | (ScaleShort << 16));
     for (int Axis = 0; Axis < 3; ++Axis) Scalar(116 + Axis, Focus[Axis]);
-    Unsigned(119, External.HmiWord);
+    Unsigned(119, External.PresentationControl);
     std::memcpy(Bytes.data() + 120 * 4, External.FireBlock.data(), 32);
     const size_t EnvironmentCount = std::min<size_t>(External.EnvironmentBlock.size(), 140);
     if (EnvironmentCount > 0) std::memcpy(Bytes.data() + 128 * 4, External.EnvironmentBlock.data(), EnvironmentCount * 4);

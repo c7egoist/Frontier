@@ -288,7 +288,14 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
 {
     InitializeWorld();
 
-    OutlinerPanel.ConfigureConstructibleTypes(QuerySceneWorld().EnumerateRegisteredTypes());
+    const std::vector<std::string> SceneTypes = {"Solar","OpticalFlare","Atmosphere","Clouds","Fog","Stars","Moons","Planet","ForceField","Wind"};
+    OutlinerPanel.ConfigureVisibleTypes(SceneTypes);
+    auto Types = QuerySceneWorld().EnumerateRegisteredTypes();
+    std::erase_if(Types,[&](const auto& Entry)
+    {
+        return std::find(SceneTypes.begin(),SceneTypes.end(),Entry.first)==SceneTypes.end() && Entry.first!="LocalCloud" && Entry.first!="LocalFog";
+    });
+    OutlinerPanel.ConfigureConstructibleTypes(std::move(Types));
     OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
 
     if (Frontier::SceneRecordBase* Solar = QuerySceneWorld().FindFirstByType("Solar"))
@@ -301,7 +308,7 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
 
     Dockspace.ConfigureDockspaceKey("EverestWorkspaceDockspace");
     // 📝 No top toolbar (owner's request): only the Control Centre notch remains, in a band as tall as its tab.
-    Dockspace.ConfigureWorkspaceInsets(NotchBandHeight, Frontier::ViewportChromeControls::StatusStripHeight);
+    Dockspace.ConfigureWorkspaceInsets(NotchBandHeight, 0);
     // 📝 The Control Centre can outlive the workspace (a host may retire it either way round): the actions hold only a weak
     //    token of the workspace and do nothing once it is gone.
     const std::weak_ptr<bool> Token = Liveness;
@@ -313,6 +320,8 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
                  EvaluateReturnToBrowser();
              }
          }},
+        {"Render settings",Frontier::ControlCentreIconCategory::SlidersQuality,
+         [this,Token]() { if (!Token.expired()) if (auto* Entry=QuerySceneWorld().FindFirstByType("RenderPipeline")) OutlinerPanel.Select(Entry->QueryToken()); }},
         {"Save level", Frontier::ControlCentreIconCategory::SaveDisk,
          [this, Token]() {
              if (!Token.expired())
@@ -322,13 +331,33 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
          }},
     });
 
-    if (!Dockspace.Register(Frontier::MakeSceneDirectoryPanelSpecification(OutlinerPanel)) ||
-        !Dockspace.Register({"Viewport", "Viewport", [this]() { ConstructViewportSurface(); }, true, {}, {}, true}) ||
-        !Dockspace.Register(Frontier::MakeLogStreamPanelSpecification(LogPanel)) ||
-        !Dockspace.Register(Frontier::MakeSceneInspectorPanelSpecification(InspectorPanel)))
+    auto OutlinerSpec=Frontier::MakeSceneDirectoryPanelSpecification(OutlinerPanel);
+    auto InspectorSpec=Frontier::MakeSceneInspectorPanelSpecification(InspectorPanel);
+    auto LogSpec=Frontier::MakeLogStreamPanelSpecification(LogPanel);
+    Frontier::DockPanelSpecification ViewportSpec{"Viewport","Viewport",[this]() { ConstructViewportSurface(); },true,{},{},true};
+    ViewportSpec.ConstructFooter=[this]() { ConstructViewportFooter(Frontier::InspectorRuntime::Instance().ResolveInterfaceScale()); };
+    auto Footer=[this](std::vector<Frontier::ViewportStatusItem> Cells)
     {
+        const float Scale=Frontier::InspectorRuntime::Instance().ResolveInterfaceScale();
+        const auto Min=ImGui::GetCursorScreenPos();
+        Frontier::ViewportChromeControls::ConstructStatusStrip(ImGui::GetWindowDrawList(),Frontier::EditorTypefaces::Resolve(),Min,
+            {Min.x+ImGui::GetContentRegionAvail().x,Min.y+28*Scale},Cells,{},Scale);
+        ImGui::Dummy({1,28*Scale});
+    };
+    OutlinerSpec.ConstructFooter=[this,Footer]() { Footer({{"SCENE",std::to_string(OutlinerPanel.QueryTotal()),IM_COL32(164,198,180,255),"Layers"},
+        {"SELECTED",OutlinerPanel.QuerySelected().IsValid()?"1":"0",IM_COL32(170,190,208,255),"MousePointer"}}); };
+    InspectorSpec.ConstructFooter=[this,Footer]()
+    {
+        const auto* Page=Frontier::InspectorRuntime::Instance().FindInspector(OutlinerPanel.QuerySelected());
+        Footer({{"PARAMETERS",Page?"Editing":"No selection",IM_COL32(160,192,213,255),"Info"},
+            {"REV",Page?std::to_string(Page->QueryRevision()):"—",IM_COL32(192,195,184,255),nullptr}});
+    };
+    LogSpec.ConstructFooter=[this,Footer]() { Footer({{"ENTRIES",std::to_string(LogPanel.QueryTotalCount()),IM_COL32(150,192,216,255),"Info"},
+        {"WARN",std::to_string(LogPanel.QueryWarningsLastMinute()),IM_COL32(224,184,105,255),"TriangleAlert"},
+        {"ERROR",std::to_string(LogPanel.QueryErrorsLastMinute()),IM_COL32(224,125,124,255),"CircleAlert"}}); };
+    if (!Dockspace.Register(std::move(OutlinerSpec)) || !Dockspace.Register(std::move(ViewportSpec)) ||
+        !Dockspace.Register(std::move(LogSpec)) || !Dockspace.Register(std::move(InspectorSpec)))
         throw std::runtime_error("EverestWorkspace dockspace registration refused.");
-    }
 
     (void)Dockspace.ConfigureStackedPanels("Viewport", "LogStream", 520.0f);
     (void)Dockspace.ConfigureColumns({
@@ -567,6 +596,16 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
         Access.LunarPlacement = {Solution.Moon.Azimuth, Solution.Moon.Elevation, Solution.MoonPhase};
         for (size_t Body = 0; Body < Access.PlanetPlacements.size(); ++Body)
             Access.PlanetPlacements[Body] = {Solution.Planets[Body].Azimuth, Solution.Planets[Body].Elevation};
+        for (size_t Body=0;Body<Access.Planets.size();++Body)
+            if (auto* Planet=Access.Planets[Body]; Planet && Planet->FollowSky)
+            {
+                const float Azimuth=float(std::fmod(Solution.Planets[Body].Azimuth+540,360)-180);
+                const float Elevation=float(Solution.Planets[Body].Elevation);
+                if(Planet->AzimuthDegrees!=Azimuth || Planet->ElevationDegrees!=Elevation)
+                {
+                    Planet->AzimuthDegrees=Azimuth;Planet->ElevationDegrees=Elevation;Planet->AdvanceRevision();
+                }
+            }
         for (const auto* Entry : QuerySceneWorld().FindAllByType("Moons"))
         {
             auto* Moons = dynamic_cast<Frontier::MoonRecord*>(QuerySceneWorld().FindRecord(Entry->QueryToken()));
@@ -635,8 +674,16 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     {
         SaveActiveLevel();
     }
-    Dockspace.ConstructInterface(Scale);
-    ConstructStatusStrip(Scale);
+    if (!IO.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_V,false)) ToggleViewportOverlay(2);
+    if (Overlays.Fullscreen && ImGui::IsKeyPressed(ImGuiKey_Escape,false)) { Overlays.Fullscreen=false; NoticeSeconds=0; NoticeText.clear(); }
+    std::array<float,3> Focus;
+    if (Frontier::InspectorRuntime::Instance().ConsumeSkyFocus(Focus))
+    {
+        Flight.Heading=Focus[0];Flight.Elevation=Focus[1];Flight.VerticalFieldOfView=std::clamp(double(Focus[2])*2.4,3.0,110.0)*3.141592653589793/180;
+        Flight.Velocity={0,0,0};Navigation.Mode=SceneCameraMode::Free;Navigation.Up={0,0,1};
+    }
+    if (Overlays.Fullscreen) ConstructFullscreenViewport(Scale);
+    else Dockspace.ConstructInterface(Scale);
     Frontier::InspectorRuntime::Instance().ConstructActiveEditor();
 }
 
@@ -676,6 +723,7 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
     Pointer.RightDown    = ImGui::IsMouseDown(ImGuiMouseButton_Right);
     Pointer.MiddleDown   = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
     Pointer.AltDown      = IO.KeyAlt;
+    Pointer.ControlDown  = IO.KeyCtrl;
     Pointer.ShiftDown    = IO.KeyShift;
     Pointer.MotionPixels = {static_cast<double>(IO.MouseDelta.x), static_cast<double>(IO.MouseDelta.y)};
     Pointer.WheelNotches = (Hovered || Active) ? static_cast<double>(IO.MouseWheel) : 0.0;
@@ -728,7 +776,12 @@ void EverestWorkspace::IntegrateViewportCamera(bool Hovered, bool Active, double
         ReleasePointerConstraint();
     }
 
-    IntegrateSceneViewportFlight(Flight, Pointer, DeltaSeconds);
+    const auto Subject=ResolveCameraSubject();
+    const uint64_t Selected=OutlinerPanel.QuerySelected().Value;
+    if(Selected!=Navigation.Selected && Navigation.Mode!=SceneCameraMode::Free && Navigation.Mode!=SceneCameraMode::Space)
+        ConfigureSceneCamera(Flight,Navigation,Navigation.Mode,Subject);
+    Navigation.Selected=Selected;
+    IntegrateSceneCamera(Flight,Navigation,Pointer,Subject,DeltaSeconds);
 }
 
 void EverestWorkspace::ReleasePointerConstraint()
@@ -750,15 +803,6 @@ void EverestWorkspace::ConstructViewportSurface()
     const ImVec2 Max(Min.x + W, Min.y + H);
     const ImVec2 StageMin(Min.x, Min.y + BarH);
 
-    // 📝 The demo's tab strip: "Viewport" and the scene pill (index.html .viewport-tabs).
-    if (const ImGuiWindow* Panel = ImGui::GetCurrentWindow(); Panel->DockNode != nullptr && Panel->DockNode->TabBar != nullptr &&
-                                                           !Panel->DockNode->IsHiddenTabBar() && Panel->DockNode->VisibleWindow == Panel)
-    {
-        const ImRect Strip = Panel->DockNode->TabBar->BarRect;
-        Frontier::ViewportChromeControls::ConstructScenePill(ImGui::GetForegroundDrawList(Panel->Viewport), Frontier::EditorTypefaces::Resolve(), Strip.Min,
-                                                             Strip.Max, "Proving Grounds", Scale);
-    }
-
     ImGui::SetCursorScreenPos(StageMin);
     ImGui::SetNextItemAllowOverlap();
     ImGui::InvisibleButton("##SceneViewportCanvas", ImVec2(W, H - BarH),
@@ -772,11 +816,7 @@ void EverestWorkspace::ConstructViewportSurface()
     if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !StageActive)
     {
         if (ImGui::IsKeyPressed(ImGuiKey_H, false)) ToggleViewportOverlay(0);
-        // 📝 The demo's own labels disagree: the bar says "Distance slice (I)", the inset's close button "(J)", and its key is J
-        //    (I cycles the vehicle's lights). With no vehicle here, both toggle the slice.
-        if (ImGui::IsKeyPressed(ImGuiKey_I, false) || ImGui::IsKeyPressed(ImGuiKey_J, false)) ToggleViewportOverlay(1);
-        if (ImGui::IsKeyPressed(ImGuiKey_V, false)) ToggleViewportOverlay(2);
-        if (ImGui::IsKeyPressed(ImGuiKey_F8, false)) AnnounceViewportNotice("Chase follows the vehicle \xE2\x80\x94 this level has no vehicle");
+
     }
 
     ImDrawList* DrawList = ImGui::GetWindowDrawList();
@@ -794,7 +834,7 @@ void EverestWorkspace::ConstructViewportSurface()
         Request.CameraTarget        = Flight.ResolveTarget();
         Request.VerticalFieldOfView = Flight.ResolveFieldOfView();
         Request.DeltaSeconds        = ViewportDeltaSeconds;
-        Request.DistanceSlice       = Overlays.DistanceSliceVisible && !Overlays.CleanView;
+        Request.CameraUp = Navigation.Up;
         Image       = PresentSceneViewport(Request);
         LastReadout = Image.Readout;
         PublishRenderReadouts(QuerySceneWorld(), LastReadout);
@@ -803,15 +843,17 @@ void EverestWorkspace::ConstructViewportSurface()
     {
         DrawList->AddImage(static_cast<ImTextureID>(Image.Texture), StageMin, Max);
         const auto* Field = dynamic_cast<const Frontier::ForceFieldRecord*>(QuerySceneWorld().FindFirstByType("ForceField"));
-        if (Field && Field->QueryConfiguration().Visualize && !Overlays.CleanView && LastReadout.Environment)
+        if (Field && Field->QueryConfiguration().Visualize && !Overlays.Fullscreen && LastReadout.Environment)
         {
             Frontier::WorldVectorView Projection;
             Projection.Eye = Flight.Position;
             Projection.Forward = Flight.ResolveForward();
-            const double Horizontal = std::hypot(Projection.Forward[0],Projection.Forward[1]);
-            Projection.Right = {Projection.Forward[1] / Horizontal,-Projection.Forward[0] / Horizontal,0};
-            Projection.Up = {-Projection.Forward[0] * Projection.Forward[2] / Horizontal,
-                -Projection.Forward[1] * Projection.Forward[2] / Horizontal,Horizontal};
+            const auto& F=Projection.Forward; const auto& U=Navigation.Up;
+            Projection.Right={F[1]*U[2]-F[2]*U[1],F[2]*U[0]-F[0]*U[2],F[0]*U[1]-F[1]*U[0]};
+            const double Length=std::max(1e-8,std::hypot(Projection.Right[0],Projection.Right[1],Projection.Right[2]));
+            for (double& Axis:Projection.Right) Axis/=Length;
+            const auto& R=Projection.Right;
+            Projection.Up={R[1]*F[2]-R[2]*F[1],R[2]*F[0]-R[0]*F[2],R[0]*F[1]-R[1]*F[0]};
             Projection.VerticalFieldOfView = Flight.ResolveFieldOfView();
             Frontier::WorldVectorOverlay::Construct(DrawList,StageMin,{W,H-BarH},Projection,
                 LastReadout.Environment->Vectors,Field->QueryConfiguration().ArrowSeconds,Scale);
@@ -829,91 +871,48 @@ void EverestWorkspace::ConstructViewportSurface()
     ConstructViewportBar(Min, ImVec2(Max.x, StageMin.y), Scale);
 }
 
-void EverestWorkspace::ConstructViewportBar(const ImVec2& Min, const ImVec2& Max, float Scale)
+SceneCameraSubject EverestWorkspace::ResolveCameraSubject() const
 {
-    // 📝 EditorControls.js viewport bar, left to right: scene heading, live pill, Particles, camera rigs, inspection view,
-    //    then readout, distance slice, respawn, reassemble and clean view against the right edge.
+    SceneCameraSubject Subject;
+    const auto* Inspector=Frontier::InspectorRuntime::Instance().FindInspector(OutlinerPanel.QuerySelected());
+    Frontier::InspectorViewTarget Target;
+    if (Inspector && Inspector->QueryViewTarget(Target))
+    {
+        Subject.Available=true;Subject.Celestial=Target.Celestial;Subject.Position=Target.Position;Subject.Radius=Target.Radius;
+        Subject.Azimuth=Target.Azimuth;Subject.Elevation=Target.Elevation;Subject.Diameter=Target.Diameter;
+    }
+    return Subject;
+}
+
+void EverestWorkspace::ConstructViewportBar(const ImVec2& Min,const ImVec2& Max,float Scale)
+{
     using Frontier::ViewportChromeControls;
-    const Frontier::EditorTypefaces Faces    = Frontier::EditorTypefaces::Resolve();
-    ImDrawList*                     DrawList = ImGui::GetWindowDrawList();
-    const float                     Height   = Max.y - Min.y;
-    const float                     Gap      = ViewportChromeControls::BarGap * Scale;
-    ViewportChromeControls::ConstructBarBackground(DrawList, Min, Max, Scale);
-    DrawList->PushClipRect(Min, Max, true);
-
-    float Pen = Min.x + ViewportChromeControls::BarPadding * Scale;
-    Pen += ViewportChromeControls::ConstructSceneHeading(DrawList, Faces, ImVec2(Pen, Min.y), Height, "Scene",
-                                                         "Vulkan \xC2\xB7 distance-field GI \xC2\xB7 ReSTIR", Scale) + Gap;
-    if (LastReadout.Presenting)
+    const auto Faces=Frontier::EditorTypefaces::Resolve();
+    auto* Ink=ImGui::GetWindowDrawList();
+    ViewportChromeControls::ConstructBarBackground(Ink,Min,Max,Scale);
+    Ink->PushClipRect(Min,Max,true);
+    const float Height=Max.y-Min.y, Button=34*Scale, Gap=8*Scale;
+    float X=Min.x+12*Scale;
+    int Mode=int(Navigation.Mode);
+    if (ViewportChromeControls::ConstructSelectField("##CameraType",Faces,{X,Min.y+(Height-Button)*.5f},{std::min(210*Scale,(Max.x-Min.x)*.42f),Button},
+        SceneCameraNames.data(),int(SceneCameraNames.size()),Mode,Scale))
     {
-        Pen += ViewportChromeControls::ConstructLivePill(DrawList, Faces, ImVec2(Pen, Min.y), Height, "LIVE", Scale) + Gap;
+        const auto Subject=ResolveCameraSubject();
+        ConfigureSceneCamera(Flight,Navigation,SceneCameraMode(Mode),Subject);
+        if ((Mode==0 || Mode==1) && !Subject.Available) AnnounceViewportNotice("Select a local volume, field region or celestial body to target");
     }
-
-    // 📝 Particles opens the level's particle authoring editor (the demo's particle workspace).
-    Frontier::SceneRecordBase* Particles  = QuerySceneWorld().FindFirstByType("Particles");
-    const bool                 Authorable = Particles != nullptr && Frontier::InspectorRuntime::Instance().QueryHasEditor(Particles->QueryToken());
-    const float                ButtonH    = ViewportChromeControls::IconButtonExtent * Scale;
-    const float                ParticlesW = ViewportChromeControls::MeasureLabelButton(Faces, "Particles", Scale);
-    if (ViewportChromeControls::ConstructLabelButton("##ParticleLaunch", Faces, ImVec2(Pen, Min.y + 0.5f * (Height - ButtonH)), ImVec2(ParticlesW, ButtonH),
-                                                     "Particles", Authorable, "Open particle authoring workspace", Scale) &&
-        Authorable)
+    X+=std::min(210*Scale,(Max.x-Min.x)*.42f)+Gap;
+    if (ViewportChromeControls::ConstructIconButton("##FrameSelection",{X,Min.y+(Height-Button)*.5f},Button,"Focus",false,true,"Frame selected (F)"))
+        ConfigureSceneCamera(Flight,Navigation,Navigation.Mode,ResolveCameraSubject(),true);
+    X+=Button+Gap;
+    if (ViewportChromeControls::ConstructIconButton("##HomeCamera",{X,Min.y+(Height-Button)*.5f},Button,"RotateCcw",false,true,"Return to the scene camera"))
     {
-        (void)Frontier::InspectorRuntime::Instance().RequestEditorOpen(Particles->QueryToken());
+        Flight=SceneViewportFlight{};Navigation=SceneViewportNavigation{};
     }
-    Pen += ParticlesW + Gap;
-
-    // 📝 Camera rigs: Chase needs the vehicle, which this level omits; Free is the Unreal Engine viewport camera.
-    static const char* const RigOptions[]  = {"Chase", "Free \xC2\xB7 F8"};
-    static const char* const RigTooltips[] = {"Chase follows the vehicle \xE2\x80\x94 this level has no vehicle",
-                                              "Free camera: Unreal Engine viewport controls (hold the right button + W/A/S/D)"};
-    const bool               RigEnabled[]  = {false, true};
-    int                      Rig           = 1;
-    const float              SegmentedH    = 36.0f * Scale;
-    (void)ViewportChromeControls::ConstructSegmentedSwitch("##CameraRig", Faces, ImVec2(Pen, Min.y + 0.5f * (Height - SegmentedH)),
-                                                           ImVec2(ViewportChromeControls::SegmentedWidth * Scale, SegmentedH), RigOptions, 2, Rig, RigEnabled,
-                                                           RigTooltips, Scale);
-    Pen += ViewportChromeControls::SegmentedWidth * Scale + Gap;
-
-    // 📝 The inspection view is the RenderPipeline record's InspectionModeIndex (the demo's Settings.Inspection).
-    auto*       Pipeline   = dynamic_cast<Frontier::RenderPipelineRecord*>(QuerySceneWorld().FindFirstByType("RenderPipeline"));
-    int         Inspection = Pipeline != nullptr ? std::clamp(Pipeline->QueryConfiguration().InspectionModeIndex, 0, 14) : 0;
-    const float SelectH    = 35.0f * Scale;
-    if (ViewportChromeControls::ConstructSelectField("##InspectionView", Faces, ImVec2(Pen, Min.y + 0.5f * (Height - SelectH)),
-                                                     ImVec2(ViewportChromeControls::SelectWidth * Scale, SelectH), Frontier::RenderInspectionModes::ModeNames,
-                                                     static_cast<int>(Frontier::RenderInspectionModes::ModeCount), Inspection, Scale) &&
-        Pipeline != nullptr)
-    {
-        Pipeline->AccessConfiguration().InspectionModeIndex = Inspection;
-        Pipeline->AccessConfiguration().AdvanceRevision();
-    }
-    Pen += ViewportChromeControls::SelectWidth * Scale + Gap;
-
-    const float Icon  = ViewportChromeControls::IconButtonExtent * Scale;
-    const float IconY = Min.y + 0.5f * (Height - Icon);
-    float       X     = std::max(Pen, Max.x - ViewportChromeControls::BarPadding * Scale - 5.0f * Icon - 4.0f * Gap);
-    if (ViewportChromeControls::ConstructIconButton("##Readout", ImVec2(X, IconY), Icon, "Activity", Overlays.ReadoutVisible && !Overlays.CleanView, true,
-                                                    "Readout (H)"))
-    {
-        ToggleViewportOverlay(0);
-    }
-    X += Icon + Gap;
-    if (ViewportChromeControls::ConstructIconButton("##DistanceSlice", ImVec2(X, IconY), Icon, "Grid", Overlays.DistanceSliceVisible && !Overlays.CleanView,
-                                                    true, "Distance slice (I)"))
-    {
-        ToggleViewportOverlay(1);
-    }
-    X += Icon + Gap;
-    (void)ViewportChromeControls::ConstructIconButton("##Respawn", ImVec2(X, IconY), Icon, "RotateCcw", false, false,
-                                                      "Respawn (R) \xE2\x80\x94 this level has no vehicle");
-    X += Icon + Gap;
-    (void)ViewportChromeControls::ConstructIconButton("##Reassemble", ImVec2(X, IconY), Icon, "Undo2", false, false,
-                                                      "Reassemble every prop \xE2\x80\x94 no breakable props in this viewport");
-    X += Icon + Gap;
-    if (ViewportChromeControls::ConstructIconButton("##CleanView", ImVec2(X, IconY), Icon, "ScanCorners", Overlays.CleanView, true, "Clean view (V)"))
-    {
-        ToggleViewportOverlay(2);
-    }
-    DrawList->PopClipRect();
+    const float Right=Max.x-12*Scale;
+    if (ViewportChromeControls::ConstructIconButton("##Readout",{Right-2*Button-Gap,Min.y+(Height-Button)*.5f},Button,"Activity",Overlays.ReadoutVisible,true,"Detailed readout (H)")) ToggleViewportOverlay(0);
+    if (ViewportChromeControls::ConstructIconButton("##Fullscreen",{Right-Button,Min.y+(Height-Button)*.5f},Button,"ScanCorners",Overlays.Fullscreen,true,"Fullscreen viewport (V), Escape restores panels")) ToggleViewportOverlay(2);
+    Ink->PopClipRect();
 }
 
 void EverestWorkspace::ConstructViewportOverlays(const ImVec2& StageMin, const ImVec2& StageMax, const SceneViewportImage& Image, float Scale)
@@ -930,27 +929,10 @@ void EverestWorkspace::ConstructViewportOverlays(const ImVec2& StageMin, const I
     }
     else if (PresentSceneViewport && Image.Texture == 0)
     {
-        ViewportChromeControls::ConstructBringUpCard(DrawList, Faces, StageMin, StageMax, "Frontier \xC2\xB7 Proving Grounds",
+        ViewportChromeControls::ConstructBringUpCard(DrawList, Faces, StageMin, StageMax, "Opening viewport",
                                                      Image.Status.empty() ? "Starting" : Image.Status.c_str(), 0.0f, Scale);
     }
-    const bool Overlaid = !Overlays.CleanView && Image.Texture != 0;
-
-    // ② #inset-frame: the distance slice DisplayPresent draws, 0.34 of the image height at the top-right, 16 px in
-    if (Overlaid && Overlays.DistanceSliceVisible && Readout.ScreenExtent[0] > 0 && Readout.ScreenExtent[1] > 0)
-    {
-        const float  ToPanelX = (StageMax.x - StageMin.x) / static_cast<float>(Readout.ScreenExtent[0]);
-        const float  ToPanelY = (StageMax.y - StageMin.y) / static_cast<float>(Readout.ScreenExtent[1]);
-        const float  Size     = std::floor(static_cast<float>(Readout.ScreenExtent[1]) * 0.34f);
-        const ImVec2 InsetMin(StageMin.x + (static_cast<float>(Readout.ScreenExtent[0]) - Size - 16.0f) * ToPanelX, StageMin.y + 16.0f * ToPanelY);
-        const ImVec2 InsetMax(InsetMin.x + Size * ToPanelX, InsetMin.y + Size * ToPanelY);
-        if (ViewportChromeControls::ConstructInsetFrame("##InsetFrame", Faces, InsetMin, InsetMax,
-                                                        "GDF slice \xC2\xB7 blue inside \xC2\xB7 amber outside \xC2\xB7 magenta = rewritten by a moving occupant "
-                                                        "\xC2\xB7 teal = scrolled \xC2\xB7 green = cascade 0",
-                                                        "Hide the distance slice (J)", Scale))
-        {
-            ToggleViewportOverlay(1);
-        }
-    }
+    const bool Overlaid = !Overlays.Fullscreen && Image.Texture != 0;
 
     // ③ #hud: the readout lines of the demo's PresentMeasurements, with this viewport's camera keys
     if (Overlaid && Overlays.ReadoutVisible)
@@ -969,14 +951,13 @@ void EverestWorkspace::ConstructViewportOverlays(const ImVec2& StageMin, const I
                       Readout.TraceExtent[0], Readout.TraceExtent[1], Readout.RendererTag.c_str());
         std::vector<std::string> Lines;
         Lines.emplace_back(First);
-        Lines.emplace_back("ControlVehicle  omitted (this level has no vehicle)");
         if (!Readout.AccelerationLine.empty()) Lines.push_back(Readout.AccelerationLine);
         char Camera[160];
         std::snprintf(Camera, sizeof(Camera), "Camera  speed %d (%g\xC3\x97) \xC2\xB7 field of view %.0f\xC2\xB0", Flight.SpeedSetting,
                       SceneViewportFlight::ResolveSpeed(Flight.SpeedSetting), Flight.ResolveFieldOfView() * 57.29577951308232);
         Lines.emplace_back(Camera);
-        Lines.emplace_back("RMB look  RMB+W/A/S/D fly  E/Q up\xC2\xB7" "down  RMB+wheel speed  Shift \xC3\x97" "2  Alt orbit  F start view");
-        Lines.emplace_back("H readout  I distance slice  V clean view");
+        Lines.emplace_back("RMB look  RMB+W/A/S/D fly  E/Q up\xC2\xB7" "down  RMB+wheel speed  Shift \xC3\x97" "2  Orbit selected / F frame selected");
+        Lines.emplace_back("H readout  V fullscreen  Esc restore panels");
         if (ViewportChromeControls::ConstructReadoutOverlay("##Readout", Faces, StageMin, StageMax, Lines, "Hide the readout (H)", Scale))
         {
             ToggleViewportOverlay(0);
@@ -999,23 +980,34 @@ void EverestWorkspace::ConstructViewportOverlays(const ImVec2& StageMin, const I
 
 void EverestWorkspace::ToggleViewportOverlay(int Overlay)
 {
-    // 📝 OverlayDock.js Toggle: asking for one overlay out of the clean view brings the view back first, then shows it.
-    if (Overlay == 2)
+    if (Overlay==2)
     {
-        Overlays.CleanView = !Overlays.CleanView;
-        if (Overlays.CleanView) AnnounceViewportNotice("Clean view \xE2\x80\x94 press V to bring the overlays back");
-        return;
+        Overlays.Fullscreen=!Overlays.Fullscreen;
+        if(Overlays.Fullscreen) AnnounceViewportNotice("Fullscreen viewport · V or Escape restores panels");
+        else { NoticeSeconds=0; NoticeText.clear(); }
     }
-    bool& Visible = Overlay == 0 ? Overlays.ReadoutVisible : Overlays.DistanceSliceVisible;
-    if (Overlays.CleanView)
-    {
-        Overlays.CleanView = false;
-        Visible            = true;
-    }
-    else
-    {
-        Visible = !Visible;
-    }
+    else Overlays.ReadoutVisible=!Overlays.ReadoutVisible;
+}
+
+void EverestWorkspace::ConstructFullscreenViewport(float Scale)
+{
+    const auto* Main=ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(Main->Pos);
+    ImGui::SetNextWindowSize(Main->Size);
+    ImGui::SetNextWindowViewport(Main->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,{0,0});
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize,0);
+    ImGui::Begin("##ViewportFullscreen",nullptr,ImGuiWindowFlags_NoDecoration|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoDocking|ImGuiWindowFlags_NoSavedSettings);
+    if (Dockspace.QueryDockspace()) ImGui::DockSpace(Dockspace.QueryDockspace(),{0,0},ImGuiDockNodeFlags_KeepAliveOnly);
+    const auto Origin=ImGui::GetCursorScreenPos();
+    const auto Extent=ImGui::GetContentRegionAvail();
+    ImGui::BeginChild("FullscreenContent",{Extent.x,Extent.y-28*Scale},ImGuiChildFlags_None,ImGuiWindowFlags_NoScrollbar);
+    ConstructViewportSurface();
+    ImGui::EndChild();
+    ImGui::SetCursorScreenPos({Origin.x,Origin.y+Extent.y-28*Scale});
+    ConstructViewportFooter(Scale);
+    ImGui::End();
+    ImGui::PopStyleVar(2);
 }
 
 void EverestWorkspace::AnnounceViewportNotice(std::string Text)
@@ -1024,48 +1016,24 @@ void EverestWorkspace::AnnounceViewportNotice(std::string Text)
     NoticeSeconds = 2.4;
 }
 
-void EverestWorkspace::ConstructStatusStrip(float Scale)
+void EverestWorkspace::ConstructViewportFooter(float Scale)
 {
-    // 📝 index.html footer#status (EditorShell.js items): realtime, frame, quality, sun, speed, smoke, fragments, camera … GPU.
-    const Frontier::EditorTypefaces Faces = Frontier::EditorTypefaces::Resolve();
-    const ImGuiViewport*            Main  = ImGui::GetMainViewport();
-    const float                     StripH = Frontier::ViewportChromeControls::StatusStripHeight * Scale;
-    const ImVec2                    StripMin(Main->Pos.x, Main->Pos.y + Main->Size.y - StripH);
-    const ImVec2                    StripMax(Main->Pos.x + Main->Size.x, Main->Pos.y + Main->Size.y);
-    ImGui::SetNextWindowPos(StripMin, ImGuiCond_Always);
-    ImGui::SetNextWindowSize(ImVec2(StripMax.x - StripMin.x, StripH), ImGuiCond_Always);
-    ImGui::SetNextWindowViewport(Main->ID);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    if (ImGui::Begin("##EverestStatusStrip", nullptr,
-                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
-                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground))
-    {
-        char Realtime[32], Frame[32], Sun[32], Camera[64];
-        std::snprintf(Realtime, sizeof(Realtime), "%.0f fps", 1.0 / std::max(FrameSeconds, 1.0e-4));
-        std::snprintf(Frame, sizeof(Frame), "%.1f ms", LastReadout.RefreshMilliseconds > 0.0 ? LastReadout.RefreshMilliseconds : FrameSeconds * 1000.0);
-        double Elevation = 0.0;
-        if (const auto* Solar = dynamic_cast<const Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
-            Elevation = Solar->QueryConfiguration().ElevationDegrees;
-        std::snprintf(Sun, sizeof(Sun), "%.1f\xC2\xB0", Elevation);
-        std::snprintf(Camera, sizeof(Camera), "%.0f, %.0f, %.0f", Flight.Position[0], Flight.Position[1], Flight.Position[2]);
-        const std::vector<Frontier::ViewportStatusItem> Leading = {
-            {"REALTIME", Realtime},
-            {"FRAME", Frame},
-            {"QUALITY", LastReadout.Quality.empty() ? std::string("\xE2\x80\x93") : LastReadout.Quality},
-            {"SUN", Sun},
-            {"SPEED", "\xE2\x80\x93"},
-            {"SMOKE", "idle"},
-            {"FRAGMENTS", "0"},
-            {"CAM", Camera},
-        };
-        const std::vector<Frontier::ViewportStatusItem> Trailing = {
-            {"GPU", LastReadout.Adapter.empty() ? std::string("\xE2\x80\x93") : LastReadout.Adapter},
-        };
-        Frontier::ViewportChromeControls::ConstructStatusStrip(ImGui::GetWindowDrawList(), Faces, StripMin, StripMax, Leading, Trailing, Scale);
-    }
-    ImGui::End();
-    ImGui::PopStyleVar(2);
+    const auto Min=ImGui::GetCursorScreenPos();
+    const ImVec2 Max(Min.x+ImGui::GetContentRegionAvail().x,Min.y+28*Scale);
+    const double Fps=FrameSeconds>0 ? 1/FrameSeconds : 0;
+    const ImU32 Health=Fps>=55?IM_COL32(130,206,158,255):Fps>=25?IM_COL32(222,183,103,255):IM_COL32(227,121,120,255);
+    char Rate[32],Time[32],Sun[32];
+    std::snprintf(Rate,sizeof(Rate),"%.0f",Fps);
+    std::snprintf(Time,sizeof(Time),"%.1f ms",LastReadout.RefreshMilliseconds);
+    float Elevation=0;
+    if(const auto* Entry=dynamic_cast<const Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar"))) Elevation=Entry->QueryConfiguration().ElevationDegrees;
+    std::snprintf(Sun,sizeof(Sun),"%.1f°",double(Elevation));
+    const std::vector<Frontier::ViewportStatusItem> Cells = {{"FPS",Rate,Health,Fps>=55?"Activity":"TriangleAlert"},
+        {"RENDER",LastReadout.Presenting?Time:"—",IM_COL32(164,192,212,255),"Info"},
+        {"TRIANGLES",LastReadout.Presenting?std::to_string(LastReadout.SceneTriangles):"—",IM_COL32(176,195,206,255),"Box"},
+        {"SUN",Sun,IM_COL32(228,195,126,255),"Sun"}};
+    Frontier::ViewportChromeControls::ConstructStatusStrip(ImGui::GetWindowDrawList(),Frontier::EditorTypefaces::Resolve(),Min,Max,Cells,{},Scale);
+    ImGui::Dummy({1,28*Scale});
 }
 
 void EverestWorkspace::ConstructViewportSchematic(ImDrawList* DrawList, const ImVec2& Min, const ImVec2& Max)

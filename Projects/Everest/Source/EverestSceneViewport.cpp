@@ -223,12 +223,12 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Camera.Position            = {Request.CameraPosition[0], Request.CameraPosition[1], Request.CameraPosition[2]};
     Camera.Target              = {Request.CameraTarget[0], Request.CameraTarget[1], Request.CameraTarget[2]};
     Camera.VerticalFieldOfView = Request.VerticalFieldOfView;
+    Camera.Up = Request.CameraUp;
     Frontier::GlobalIllumination::ViewportRendering Rendering;
     Rendering.GlobalIllumination   = Pipeline.GlobalIllumination;
     Rendering.TemporalAntiAliasing = Pipeline.TemporalAntiAliasing;
     Rendering.ExposureCompensation = Pipeline.ExposureCompensationEv;
     Rendering.Inspection           = static_cast<uint32_t>(std::clamp(Pipeline.InspectionModeIndex, 0, 14));
-    Rendering.DistanceSlice        = Request.DistanceSlice;
     // 📝 Screen targets follow the panel once its size held still for six interface ticks (a dragged splitter would rebuild
     //    them on every tick); meanwhile the last extent stretches over the panel.
     const auto Requested = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality);
@@ -276,6 +276,7 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Outcome.Readout.Presenting          = Outcome.View != VK_NULL_HANDLE;
     Outcome.Readout.Adapter             = Viewport_->QueryAdapter();
     Outcome.Readout.RendererTag         = Tag;
+    Outcome.Readout.SceneTriangles = Statistics.SceneTriangles;
     Outcome.Readout.ScreenExtent        = Statistics.ScreenExtent;
     Outcome.Readout.TraceExtent         = Statistics.TraceExtent;
     Outcome.Readout.RefreshMilliseconds = RefreshMilliseconds_;

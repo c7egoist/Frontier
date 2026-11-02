@@ -101,14 +101,20 @@ class VulkanComputeExchange
     bool DownloadMemorySpan(const DeviceMemorySpan& Slot, void* DestinationBytes, VkDeviceSize ByteCount) const;
 
     // 2D-Array image management (VK_FORMAT_R16G16B16A16_SFLOAT storage+sampled or VK_FORMAT_R8G8B8A8_SRGB sampled)
-    bool AllocateRgba16fArray(uint32_t Width, uint32_t Height, uint32_t ArrayLayers, DeviceImageArraySlot& OutSlot);
+    bool AllocateFloatRgbaArray(uint32_t Width, uint32_t Height, uint32_t ArrayLayers, VkFormat Format, DeviceImageArraySlot& OutSlot);
+    bool AllocateRgba16fArray(uint32_t Width, uint32_t Height, uint32_t ArrayLayers, DeviceImageArraySlot& OutSlot)
+    { return AllocateFloatRgbaArray(Width,Height,ArrayLayers,VK_FORMAT_R16G16B16A16_SFLOAT,OutSlot); }
+    bool AllocateRgba32fArray(uint32_t Width, uint32_t Height, uint32_t ArrayLayers, DeviceImageArraySlot& OutSlot)
+    { return AllocateFloatRgbaArray(Width,Height,ArrayLayers,VK_FORMAT_R32G32B32A32_SFLOAT,OutSlot); }
     bool AllocateSrgb8Array(uint32_t Width, uint32_t Height, uint32_t ArrayLayers, DeviceImageArraySlot& OutSlot);
     void ReleaseImage(DeviceImageArraySlot& Slot) noexcept;
 
     bool ClearRgba16fArray(DeviceImageArraySlot& Slot, std::array<float, 4> ClearColour = {0.0f, 0.0f, 0.0f, 0.0f});
     bool UploadSrgb8Array(DeviceImageArraySlot& Slot, std::span<const uint8_t> RgbaBytes);
     bool UploadRgba16fLayer(DeviceImageArraySlot& Slot, uint32_t LayerIndex, std::span<const float> RgbaFloats);
-    bool DownloadRgba16fLayer(DeviceImageArraySlot& Slot, uint32_t LayerIndex, std::vector<float>& OutRgbaFloats);
+    bool DownloadFloatRgbaLayer(DeviceImageArraySlot& Slot, uint32_t LayerIndex, std::vector<float>& OutRgbaFloats);
+    bool DownloadRgba16fLayer(DeviceImageArraySlot& Slot, uint32_t LayerIndex, std::vector<float>& OutRgbaFloats)
+    { return DownloadFloatRgbaLayer(Slot,LayerIndex,OutRgbaFloats); }
 
     // SPIR-V compute program compilation & synchronous queue execution
     bool LoadComputeProgram(const std::string&                SpvFilePath,

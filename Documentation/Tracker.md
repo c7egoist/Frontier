@@ -1072,3 +1072,24 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   `c6816fae35461e6b0776aab035a5ffbe1fc64bf4`; 23,819,540 bytes. ZIP integrity, all 901 file hashes, the exact
   executable, current environment shaders and the 30-record level (Wind below Force Field) verified.
   SHA-256 `9dd54698cfc9137c8ab1805274fd8e7a08e31d9df9a69bafbf825da99c9aee97`. Windows execution, signing and antivirus checks remain unrun.
+
+
+## Celestial parameters and workspace simplification (2026-11-02, arena/8b705b7d-frontier)
+
+- **Requested:** live Moon/planet parameters; separate interactive planet instruments and previews; remove unused
+  Outliner demonstrations, branding and scene notch; remove distance-slice/reassemble/particle-launch chrome;
+  fullscreen V, selected-target orbit/chase, axis and space cameras; independent panel headers/footers.
+- **Implemented and verified:** four Moon slots now feed the native atlas, phase/orientation/size/
+  brightness/glow and primary moonlight; planets use authoring descriptors shared with native surface previews.
+  Venus, Jupiter, Mars and Saturn have different interactive instruments. Find in sky / Place in view actions added.
+  Camera dropdown, fullscreen viewport and local panel footers replace the prior placeholder/combined chrome.
+  Distance-slice shader, UI path and present descriptor dependency removed. Unrendered default demonstrations moved
+  to an explicit exhibit fixture; 20 persisted settings/scene records, 15 scene entries shown in Outliner.
+- **Acceptance:** 102 native celestial GPU checks; 95 real workspace/camera checks; 337 inspector assertions, all
+  passing. Local media, solar occlusion, existing force triggers, camera flight, editor and Shipping regressions pass.
+  Space-view ray coordinates now use float32 visibility storage; 150 km camera positions remain finite.
+  Genuine native captures show all four planets, lunar parameter changes, fullscreen, panel footers and space flight.
+- **Windows:** Release x64 cross-build passes. Interactive Windows/hardware-GPU validation remains unrun; final archive
+  metadata is retained beside the exhibit. No GitHub Actions were run.
+- **Evidence:** `Exhibits/CelestialWorkspace/`; fixed-axis views are perspective views; Space is wide-range flight,
+  not a new solar-system dynamics simulation. Renderer settings remain available from Control Centre Quick Controls.

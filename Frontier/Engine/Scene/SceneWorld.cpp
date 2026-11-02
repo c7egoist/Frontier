@@ -768,6 +768,22 @@ template <>
 void PlanetRecord::SerializeConfiguration(toml::table& OutTable) const
 {
     OutTable.insert_or_assign("enabled", Parameters.Enabled);
+    OutTable.insert_or_assign("follow_sky",Parameters.FollowSky);
+    WriteFloat3(OutTable,"surface_tint",Parameters.SurfaceTint);
+    OutTable.insert_or_assign("azimuth_degrees",double(Parameters.AzimuthDegrees));
+    OutTable.insert_or_assign("elevation_degrees",double(Parameters.ElevationDegrees));
+    OutTable.insert_or_assign("spin_degrees",double(Parameters.SpinDegrees));
+    OutTable.insert_or_assign("tilt_degrees",double(Parameters.TiltDegrees));
+    OutTable.insert_or_assign("roll_degrees",double(Parameters.RollDegrees));
+    OutTable.insert_or_assign("band_contrast",double(Parameters.BandContrast));
+    OutTable.insert_or_assign("surface_detail",double(Parameters.SurfaceDetail));
+    OutTable.insert_or_assign("cloud_veil",double(Parameters.CloudVeil));
+    OutTable.insert_or_assign("atmosphere_height",double(Parameters.AtmosphereHeight));
+    OutTable.insert_or_assign("limb_glow",double(Parameters.LimbGlow));
+    OutTable.insert_or_assign("ring_inner_radius",double(Parameters.RingInnerRadius));
+    OutTable.insert_or_assign("ring_outer_radius",double(Parameters.RingOuterRadius));
+    OutTable.insert_or_assign("ring_optical_depth",double(Parameters.RingOpticalDepth));
+
     OutTable.insert_or_assign("body", static_cast<int64_t>(Parameters.Body));
     OutTable.insert_or_assign("apparent_diameter_deg", static_cast<double>(Parameters.ApparentDiameterDegrees));
     OutTable.insert_or_assign("brightness", static_cast<double>(Parameters.Brightness));
@@ -784,6 +800,21 @@ void PlanetRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.Brightness              = ReadFloat(InTable, "brightness", Parameters.Brightness);
     Parameters.RingSystem              = ReadBool(InTable, "ring_system", Parameters.RingSystem);
     Parameters.AtmosphereShell         = ReadBool(InTable, "atmosphere_shell", Parameters.AtmosphereShell);
+    Parameters.FollowSky = ReadBool(InTable,"follow_sky",Parameters.FollowSky);
+    ReadFloat3(InTable,"surface_tint",Parameters.SurfaceTint);
+    Parameters.AzimuthDegrees = ReadFloat(InTable,"azimuth_degrees",Parameters.AzimuthDegrees);
+    Parameters.ElevationDegrees = ReadFloat(InTable,"elevation_degrees",Parameters.ElevationDegrees);
+    Parameters.SpinDegrees = ReadFloat(InTable,"spin_degrees",Parameters.SpinDegrees);
+    Parameters.TiltDegrees = ReadFloat(InTable,"tilt_degrees",Parameters.TiltDegrees);
+    Parameters.RollDegrees = ReadFloat(InTable,"roll_degrees",Parameters.RollDegrees);
+    Parameters.BandContrast = ReadFloat(InTable,"band_contrast",Parameters.BandContrast);
+    Parameters.SurfaceDetail = ReadFloat(InTable,"surface_detail",Parameters.SurfaceDetail);
+    Parameters.CloudVeil = ReadFloat(InTable,"cloud_veil",Parameters.CloudVeil);
+    Parameters.AtmosphereHeight = ReadFloat(InTable,"atmosphere_height",Parameters.AtmosphereHeight);
+    Parameters.LimbGlow = ReadFloat(InTable,"limb_glow",Parameters.LimbGlow);
+    Parameters.RingInnerRadius = ReadFloat(InTable,"ring_inner_radius",Parameters.RingInnerRadius);
+    Parameters.RingOuterRadius = ReadFloat(InTable,"ring_outer_radius",Parameters.RingOuterRadius);
+    Parameters.RingOpticalDepth = ReadFloat(InTable,"ring_optical_depth",Parameters.RingOpticalDepth);
     Parameters.AdvanceRevision();
 }
 

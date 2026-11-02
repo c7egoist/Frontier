@@ -107,3 +107,13 @@ The font catalogue has a native TOML form; JSON remains only an automation/repor
 `Frontier/Engine/PlanetaryAtmosphere/VolumeBounds.h` and its Slang counterpart own finite-volume envelopes.
 `Frontier/Engine/Scene/EnvironmentDiagnostics.h` carries owned LUT/field readouts without exposing device resources to UI.
 The user's functional-baking/local-media request expands the previous selective UI-only boundary for these integrations.
+
+
+## Celestial workspace and camera inspection (2026-11-02)
+
+`Exhibits/CelestialWorkspace/` owns native celestial parameter/camera/chrome checks and rendered evidence.
+`Exhibits/EverestInterface/Content/Simulation.levelspace` retains the unrendered simulation demonstrations for regressions;
+they no longer populate the default editor scene. Planet rendering descriptors are derived in
+`Frontier/Engine/PlanetaryAtmosphere/CelestialAuthoring.*`; live planet previews reuse the native CPU evaluator.
+Panel-local footer support lives in the existing `PanelDockspace` registration. The removed distance-slice UI/shader
+has no replacement implementation; its uniform slot is reserved for compatibility with the remaining encoding.

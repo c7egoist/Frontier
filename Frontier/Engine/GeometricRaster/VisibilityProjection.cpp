@@ -40,7 +40,7 @@ bool VisibilityProjection::Initialize(VulkanComputeExchange& Exchange,
         return false;
     }
 
-    return Exchange.AllocateRgba16fArray(8u, 8u, 4u, VisibilityArray_);
+    return Exchange.AllocateRgba32fArray(8u, 8u, 4u, VisibilityArray_);
 }
 
 void VisibilityProjection::Shutdown(VulkanComputeExchange& Exchange) noexcept
@@ -59,7 +59,7 @@ bool VisibilityProjection::EnsureDimensions(VulkanComputeExchange& Exchange,
     {
         return true;
     }
-    return Exchange.AllocateRgba16fArray(W, H, 4u, VisibilityArray_);
+    return Exchange.AllocateRgba32fArray(W, H, 4u, VisibilityArray_);
 }
 
 bool VisibilityProjection::Execute(VulkanComputeExchange&      Exchange,
@@ -91,7 +91,7 @@ bool VisibilityProjection::ReadbackLayer(VulkanComputeExchange& Exchange,
                                          uint32_t               LayerIndex,
                                          std::vector<float>&    OutRgbaFloats)
 {
-    return Exchange.DownloadRgba16fLayer(VisibilityArray_, LayerIndex, OutRgbaFloats);
+    return Exchange.DownloadFloatRgbaLayer(VisibilityArray_, LayerIndex, OutRgbaFloats);
 }
 
 } // namespace Frontier

@@ -163,91 +163,6 @@ void SceneDirectoryPanel::ConstructInterface()
 
     float CursorY = PanelTop + BodyPadTop * S;
 
-    // -- .brand: the Layers glyph turned −10°, "frontier." and ENGINE / 01 ---------------------------------------------
-    {
-        // 📝 font-size 23px, line-height 1.35; the 24 px glyph is centred on the line box.
-        const float LineTall = 23.0f * 1.35f * S;
-        const float GlyphTop = CursorY + 0.5f * (LineTall - 24.0f * S);
-        const int   First    = DrawList->VtxBuffer.Size;
-        (void)GlyphSymbol::Construct(DrawList, "Layers", ImVec2(LeftX + 8.0f * S, GlyphTop), 24.0f * S, 1.5f, ResolveCssColour(0xC2C2C2FF));
-        // 📝 transform: rotate(-10deg) about the glyph's centre.
-        const ImVec2 Pivot(LeftX + 8.0f * S + 12.0f * S, GlyphTop + 12.0f * S);
-        const float  Cosine = std::cos(-10.0f * 3.14159265f / 180.0f), Sine = std::sin(-10.0f * 3.14159265f / 180.0f);
-        for (int Index = First; Index < DrawList->VtxBuffer.Size; ++Index)
-        {
-            ImDrawVert& Vertex = DrawList->VtxBuffer[Index];
-            const float X      = Vertex.pos.x - Pivot.x, Y = Vertex.pos.y - Pivot.y;
-            Vertex.pos         = ImVec2(Pivot.x + X * Cosine - Y * Sine, Pivot.y + X * Sine + Y * Cosine);
-        }
-        const float WordX = LeftX + (8.0f + 24.0f + 10.0f) * S;
-        const float WordW = PlaceText(DrawList, Faces, Faces.Medium, 23.0f * S, WordX, CursorY, 1.35f, ResolveCssColour(BodyInk), "frontier",
-                                      -1.1f * S);
-        PlaceText(DrawList, Faces, Faces.Medium, 23.0f * S, WordX + WordW, CursorY, 1.35f, ResolveCssColour(0xA8A8A8FF), ".", -1.1f * S);
-        const char* Version  = "ENGINE / 01";
-        const float VersionW = MeasureText(Faces, Faces.Medium, 9.0f * S, Version, 1.4f * S);
-        // 📝 The 9 px version line is centred on the 23 px line box (align-items: center).
-        PlaceText(DrawList, Faces, Faces.Medium, 9.0f * S, RightX - 8.0f * S - VersionW, CursorY + 0.5f * (LineTall - 9.0f * 1.35f * S), 1.35f,
-                  ResolveCssColour(0x6F6F6FFF), Version, 1.4f * S);
-        CursorY += LineTall + 26.0f * S;
-    }
-
-    // -- .scene-label (WORKSPACE + status dot) and .scene-title (dynamic level title) ----------------------------------
-    const std::string SceneTitle    = Directory.QueryActiveSceneTitle();
-    const std::string SceneSubtitle = Directory.QueryActiveSceneSubtitle();
-    {
-        const float LabelTall = 9.0f * 1.35f * S;
-        PlaceText(DrawList, Faces, Faces.SemiBold, 9.0f * S, LeftX + 10.0f * S, CursorY, 1.35f, ResolveCssColour(0x717171FF), "WORKSPACE", 1.6f * S);
-        const ImVec2 Dot(RightX - 10.0f * S - 2.5f * S, CursorY + 0.5f * LabelTall);
-        DrawList->AddCircleFilled(Dot, 6.0f * S, ResolveCssColour(0x3EC46D22), 16);   // box-shadow: 0 0 6px #3ec46d88
-        DrawList->AddCircleFilled(Dot, 4.0f * S, ResolveCssColour(0x3EC46D44), 16);
-        DrawList->AddCircleFilled(Dot, 2.5f * S, ResolveCssColour(LiveGreen), 12);
-        CursorY += LabelTall;
-
-        const float TitleTop = CursorY + 10.0f * S;
-        const float TitleW   = PlaceText(DrawList, Faces, Faces.Regular, 16.0f * S, LeftX + 10.0f * S, TitleTop, 1.35f, ResolveCssColour(BodyInk),
-                                         SceneTitle.c_str(), -0.4f * S);
-        PlaceText(DrawList, Faces, Faces.Regular, 16.0f * S, LeftX + 10.0f * S + TitleW, TitleTop, 1.35f, ResolveCssColour(0x6F6F6FFF), ".levelspace",
-                  -0.4f * S);
-        CursorY = TitleTop + 16.0f * 1.35f * S + 20.0f * S;
-    }
-
-    // -- .count-tiles: Enabled / Disabled -------------------------------------------------------------------------------
-    uint32_t EnabledRecords  = 0;
-    uint32_t DisabledRecords = 0;
-    for (const SceneDirectoryRow& Row : QueryRows())
-    {
-        if (ResolveRowSwitch(Runtime, Row).On) ++EnabledRecords;
-        else                                   ++DisabledRecords;
-    }
-    {
-        const float Gap   = 9.0f * S;
-        const float TileW = (InnerW - 4.0f * S - Gap) * 0.5f;
-        const float TileH = 62.0f * S;
-        for (int TileIndex = 0; TileIndex < 2; ++TileIndex)
-        {
-            const bool  EnabledTile = (TileIndex == 0);
-            const float TileX       = LeftX + 2.0f * S + static_cast<float>(TileIndex) * (TileW + Gap);
-            DrawList->AddRectFilled(ImVec2(TileX, CursorY), ImVec2(TileX + TileW, CursorY + TileH), ResolveCssColour(0x1C1C1CFF), 14.0f * S);
-            DrawList->AddRect(ImVec2(TileX, CursorY), ImVec2(TileX + TileW, CursorY + TileH), ResolveCssColour(0x2C2C2CFF), 14.0f * S, 0, S);
-
-            // 📝 .count-icon: a 22 px disc at the padding corner holding a 12 px glyph, stroke 2.4.
-            const ImVec2 Disc(TileX + (1.0f + 12.0f + 11.0f) * S, CursorY + (1.0f + 10.0f + 11.0f) * S);
-            DrawList->AddCircleFilled(Disc, 11.0f * S, EnabledTile ? ResolveCssColour(LiveGreen) : ResolveCssColour(0x2C2C2CFF), 24);
-            (void)GlyphSymbol::Construct(DrawList, EnabledTile ? "Check" : "EyeOff", ImVec2(Disc.x - 6.0f * S, Disc.y - 6.0f * S), 12.0f * S, 2.4f,
-                                         EnabledTile ? ResolveCssColour(0x0B2414FF) : ResolveCssColour(0x8A8A8AFF));
-
-            const char* Caption = EnabledTile ? "Enabled" : "Disabled";
-            PlaceText(DrawList, Faces, Faces.Regular, 10.0f * S, TileX + 13.0f * S, CursorY + TileH - (1.0f + 8.0f + 10.0f * 1.35f) * S, 1.35f,
-                      ResolveCssColour(0x9A9A9AFF), Caption);
-            char Figure[24] = {};
-            std::snprintf(Figure, sizeof(Figure), "%u", EnabledTile ? EnabledRecords : DisabledRecords);
-            const float FigureW = MeasureText(Faces, Faces.Light, 27.0f * S, Figure, -1.0f * S);
-            PlaceText(DrawList, Faces, Faces.Light, 27.0f * S, TileX + TileW - 14.0f * S - FigureW, CursorY + 14.0f * S, 1.35f,
-                      ResolveCssColour(0xE6E6E6FF), Figure, -1.0f * S);
-        }
-        CursorY += TileH + 16.0f * S;
-    }
-
     // -- .outliner-heading: "Outliner" + count, and Frontier's '+' add record menu ------------------------------------
     {
         const float LineTall = 12.0f * 1.35f * S;
@@ -329,7 +244,7 @@ void SceneDirectoryPanel::ConstructInterface()
                 TreeContent += (std::max(Artwork ? 18.0f : 12.0f, 10.0f * 1.35f) + 8.0f + (Folded ? 0.0f : 40.0f * static_cast<float>(Members)) + 16.0f) * S;
             }
         }
-        const float FooterSpan = (1.0f + 16.0f + 34.0f + 2.0f + BodyPadBottom) * S;
+        const float FooterSpan = 0.0f;
         const float Overflow   = TreeContent - ((PanelBot - FooterSpan) - (CursorY + (34.0f + 18.0f) * S));
         const float SearchH    = std::max(18.0f * S, 34.0f * S - std::max(0.0f, Overflow));
         const ImVec2 SearchMin(LeftX + 4.0f * S, CursorY);
@@ -368,7 +283,7 @@ void SceneDirectoryPanel::ConstructInterface()
     }
 
     // -- .tree: groups and rows (scrolls between the search and the footer) --------------------------------------------
-    const float FooterHeight = (1.0f + 16.0f + 34.0f + 2.0f + BodyPadBottom) * S;
+    const float FooterHeight = 0.0f;
     const float TreeHeight   = std::max(60.0f * S, (PanelBot - FooterHeight) - CursorY);
 
     ImGui::SetCursorScreenPos(ImVec2(LeftX, CursorY));
@@ -629,25 +544,6 @@ void SceneDirectoryPanel::ConstructInterface()
     ImGui::EndChild();
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
-
-    // -- .outliner-bottom: the world icon, the level title and subtitle, the status dot --------------------------------
-    {
-        const float FootTop = PanelBot - FooterHeight;
-        DrawList->AddLine(ImVec2(LeftX, FootTop), ImVec2(RightX, FootTop), ResolveCssColour(0x292929FF), S);
-        const ImVec2 WorldMin(LeftX + 10.0f * S, FootTop + 17.0f * S);
-        DrawList->AddRectFilled(WorldMin, ImVec2(WorldMin.x + 34.0f * S, WorldMin.y + 34.0f * S), ResolveCssColour(0x252525FF), 8.0f * S);
-        (void)GlyphSymbol::Construct(DrawList, "Box", ImVec2(WorldMin.x + 8.0f * S, WorldMin.y + 8.0f * S), 18.0f * S, 1.5f,
-                                     ResolveCssColour(0x9A9A9AFF));
-        const float TextX    = WorldMin.x + (34.0f + 11.0f) * S;
-        const float StackTop = WorldMin.y + 0.5f * (34.0f - (11.0f * 1.35f + 3.0f + 10.0f * 1.35f)) * S;
-        PlaceText(DrawList, Faces, Faces.Medium, 11.0f * S, TextX, StackTop, 1.35f, ResolveCssColour(0xBBBBBBFF), SceneTitle.c_str());
-        PlaceText(DrawList, Faces, Faces.Regular, 10.0f * S, TextX, StackTop + (11.0f * 1.35f + 3.0f) * S, 1.35f, ResolveCssColour(0x6E6E6EFF),
-                  SceneSubtitle.c_str());
-        const ImVec2 Dot(RightX - 10.0f * S - 2.5f * S, WorldMin.y + 17.0f * S);
-        DrawList->AddCircleFilled(Dot, 6.0f * S, ResolveCssColour(0x3EC46D22), 16);
-        DrawList->AddCircleFilled(Dot, 4.0f * S, ResolveCssColour(0x3EC46D44), 16);
-        DrawList->AddCircleFilled(Dot, 2.5f * S, ResolveCssColour(LiveGreen), 12);
-    }
 
     ImGui::SetCursorScreenPos(ImVec2(LeftX, PanelTop));
     ImGui::Dummy(ImVec2(1.0f, 1.0f));

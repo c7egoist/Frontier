@@ -665,10 +665,11 @@ bool VulkanComputeExchange::DownloadMemorySpan(const DeviceMemorySpan& Slot, voi
     return true;
 }
 
-bool VulkanComputeExchange::AllocateRgba16fArray(uint32_t Width, uint32_t Height, uint32_t ArrayLayers, DeviceImageArraySlot& OutSlot)
+bool VulkanComputeExchange::AllocateFloatRgbaArray(uint32_t Width, uint32_t Height, uint32_t ArrayLayers, VkFormat Format, DeviceImageArraySlot& OutSlot)
 {
     ReleaseImage(OutSlot);
-    if (!Ready() || Width == 0u || Height == 0u || ArrayLayers == 0u)
+    if (!Ready() || Width == 0u || Height == 0u || ArrayLayers == 0u ||
+        (Format != VK_FORMAT_R16G16B16A16_SFLOAT && Format != VK_FORMAT_R32G32B32A32_SFLOAT))
     {
         return false;
     }
@@ -676,7 +677,7 @@ bool VulkanComputeExchange::AllocateRgba16fArray(uint32_t Width, uint32_t Height
     VkImageCreateInfo ImageSpec{};
     ImageSpec.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     ImageSpec.imageType     = VK_IMAGE_TYPE_2D;
-    ImageSpec.format        = VK_FORMAT_R16G16B16A16_SFLOAT;
+    ImageSpec.format        = Format;
     ImageSpec.extent        = {Width, Height, 1u};
     ImageSpec.mipLevels     = 1u;
     ImageSpec.arrayLayers   = ArrayLayers;
@@ -1024,7 +1025,7 @@ bool VulkanComputeExchange::UploadRgba16fLayer(DeviceImageArraySlot&  Slot,
     return Ok;
 }
 
-bool VulkanComputeExchange::DownloadRgba16fLayer(DeviceImageArraySlot& Slot,
+bool VulkanComputeExchange::DownloadFloatRgbaLayer(DeviceImageArraySlot& Slot,
                                                  uint32_t              LayerIndex,
                                                  std::vector<float>&   OutRgbaFloats)
 {
@@ -1033,8 +1034,10 @@ bool VulkanComputeExchange::DownloadRgba16fLayer(DeviceImageArraySlot& Slot,
     {
         return false;
     }
+    const bool FullPrecision = Slot.Format == VK_FORMAT_R32G32B32A32_SFLOAT;
+    if (!FullPrecision && Slot.Format != VK_FORMAT_R16G16B16A16_SFLOAT) return false;
     DeviceMemorySpan TransferSpan;
-    if (!AllocateMemorySpan(FloatCount * sizeof(uint16_t), TransferSpan))
+    if (!AllocateMemorySpan(FloatCount * (FullPrecision ? sizeof(float) : sizeof(uint16_t)), TransferSpan))
     {
         return false;
     }
@@ -1078,11 +1081,12 @@ bool VulkanComputeExchange::DownloadRgba16fLayer(DeviceImageArraySlot& Slot,
         return false;
     }
 
-    const auto* HalfPtr = static_cast<const uint16_t*>(TransferSpan.MappedBytes);
     OutRgbaFloats.resize(FloatCount);
-    for (size_t Index = 0u; Index < FloatCount; ++Index)
+    if (FullPrecision) std::memcpy(OutRgbaFloats.data(),TransferSpan.MappedBytes,FloatCount*sizeof(float));
+    else
     {
-        OutRgbaFloats[Index] = UnpackHalfFloat(HalfPtr[Index]);
+        const auto* HalfPtr = static_cast<const uint16_t*>(TransferSpan.MappedBytes);
+        for (size_t Index=0;Index<FloatCount;++Index) OutRgbaFloats[Index]=UnpackHalfFloat(HalfPtr[Index]);
     }
     ReleaseMemorySpan(TransferSpan);
     return true;

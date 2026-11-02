@@ -11,10 +11,10 @@
 // 📝 Not part of the VehicleHMI demo: this unit only bridges the ported refresh to the environment drawn over it.
   [[vk::binding(1, 0)]] Texture2D<float4>                    ResolvedRadiance;
   [[vk::binding(2, 0)]] Texture2D<float>                     SurfaceDepth;
-  [[vk::binding(3, 0)]] [format("rgba16f")] RWTexture2D<float4> VisibilityRadiance;   // layer 0: radiance, reversed depth
-  [[vk::binding(4, 0)]] [format("rgba16f")] RWTexture2D<float4> VisibilityOrigin;     // layer 1: ray origin, realm
-  [[vk::binding(5, 0)]] [format("rgba16f")] RWTexture2D<float4> VisibilityDirection;  // layer 2: ray direction, hit distance
-  [[vk::binding(6, 0)]] [format("rgba16f")] RWTexture2D<float4> VisibilityGlass;      // layer 3: glass tint, portal + 1
+  [[vk::binding(3, 0)]] [format("rgba32f")] RWTexture2D<float4> VisibilityRadiance;   // layer 0: radiance, reversed depth
+  [[vk::binding(4, 0)]] [format("rgba32f")] RWTexture2D<float4> VisibilityOrigin;     // layer 1: ray origin, realm
+  [[vk::binding(5, 0)]] [format("rgba32f")] RWTexture2D<float4> VisibilityDirection;  // layer 2: ray direction, hit distance
+  [[vk::binding(6, 0)]] [format("rgba32f")] RWTexture2D<float4> VisibilityGlass;      // layer 3: glass tint, portal + 1
 
 // 📝 RadianceScale converts the refresh's radiometric scale into the environment's (its sun irradiance ≈ 1.38 where the refresh's
 //    is 12); RestoreEnvironmentRadiance undoes it on the overlaid image, so the environment's own constants keep their designed

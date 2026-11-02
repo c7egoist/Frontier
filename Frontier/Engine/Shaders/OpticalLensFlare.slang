@@ -11,7 +11,7 @@
 [[vk::push_constant]] PushDispatchHeader Push;
 
 [[vk::binding(0, 0)]] StructuredBuffer<float4>                     Ensemble;
-[[vk::binding(1, 0)]] [format("rgba16f")] RWTexture2DArray<float4> VisibilityImage;
+[[vk::binding(1, 0)]] [format("rgba32f")] RWTexture2DArray<float4> VisibilityImage;
 [[vk::binding(2, 0)]] [format("rgba16f")] RWTexture2DArray<float4> CloudWorkArray;
 [[vk::binding(3, 0)]] [format("rgba16f")] RWTexture2DArray<float4> FlareVisibility;
 [[vk::binding(4, 0)]] [format("rgba16f")] RWTexture2DArray<float4> HdrFrame;

@@ -37,10 +37,21 @@ struct InspectorSwitchEntry
 //                                                    RECORD INSPECTOR BASE
 //------------------------------------------------------------------------------------------------------------------------
 
+struct InspectorViewTarget
+{
+    std::array<double,3> Position{};
+    double Radius = 5;
+    bool Celestial = false;
+    float Azimuth = 0;
+    float Elevation = 0;
+    float Diameter = 1;
+};
+
 class RecordInspector
 {
   public:
     virtual ~RecordInspector() = default;
+    virtual bool QueryViewTarget(InspectorViewTarget&) const noexcept { return false; }
 
     [[nodiscard]] virtual const char* QueryEyebrowText() const noexcept                     = 0;
     [[nodiscard]] virtual const char* QuerySectionNote() const noexcept                     { return "Live"; }
@@ -112,6 +123,12 @@ class InspectorRuntime
     void                                     RegisterSolarPlacementSolver(SolarPlacementSolver Solver) noexcept;
     [[nodiscard]] SolarPlacementSolver       QuerySolarPlacementSolver() const noexcept;
 
+    void RequestSkyFocus(float Azimuth, float Elevation, float Diameter) noexcept { SkyFocus = {Azimuth,Elevation,Diameter}; SkyFocusPending = true; }
+    bool ConsumeSkyFocus(std::array<float,3>& Focus) noexcept
+    {
+        if (!SkyFocusPending) return false;
+        Focus = SkyFocus; SkyFocusPending = false; return true;
+    }
     void ConfigureEnvironmentAccess(const EnvironmentEditAccess& Access) noexcept { EnvironmentAccess = Access; }
     [[nodiscard]] const EnvironmentEditAccess& QueryEnvironmentAccess() const noexcept { return EnvironmentAccess; }
 
@@ -123,6 +140,8 @@ class InspectorRuntime
   private:
     friend class RecordEntry;
 
+    std::array<float,3> SkyFocus{};
+    bool SkyFocusPending = false;
     InspectorRuntime()  = default;
     ~InspectorRuntime() = default;
 

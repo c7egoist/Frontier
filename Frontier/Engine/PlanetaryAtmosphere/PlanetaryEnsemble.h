@@ -31,10 +31,10 @@ namespace Frontier
 {
 
 inline constexpr uint32_t kEnsembleHeaderFloat4Count    = 10u;
-inline constexpr uint32_t kRealmRecordFloat4Stride      = 18u;
+inline constexpr uint32_t kRealmRecordFloat4Stride      = 19u;
 inline constexpr uint32_t kSunRecordFloat4Stride        = 6u;
-inline constexpr uint32_t kMoonRecordFloat4Stride       = 5u;
-inline constexpr uint32_t kPlanetRecordFloat4Stride    = 6u;
+inline constexpr uint32_t kMoonRecordFloat4Stride       = 7u;
+inline constexpr uint32_t kPlanetRecordFloat4Stride    = 8u;
 inline constexpr uint32_t kCloudRecordFloat4Stride     = 8u;
 inline constexpr uint32_t kFogBoxRecordFloat4Stride    = 6u;
 inline constexpr uint32_t kLuminaireRecordFloat4Stride = 3u;
@@ -109,6 +109,9 @@ struct PlanetaryRealm
     float                       StarBrightnessScale     = 1.0f;
     float                       ScintillationStrength   = 1.0f;
     float                       MilkyWayIntensity       = 1.0f;
+    float StarPointSize = 1;
+    float StarScintillationRate = 1;
+    float StarHalo = 0;
     float                       StarLimitingMagnitude   = 7.0f;
     std::array<float, 3>        StarBasisRow0           = {1.0f, 0.0f, 0.0f};
     std::array<float, 3>        StarBasisRow1           = {0.0f, 1.0f, 0.0f};

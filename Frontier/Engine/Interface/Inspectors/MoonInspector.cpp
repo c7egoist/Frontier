@@ -308,13 +308,11 @@ bool MoonInspector::ConstructLight(ControlColumn &Page)
     Changed |= SliderRow::Construct(Page, "MoonGlow", "Lunar glow", Moon.Glow, 0, 3, 0.01f, "×");
     if (ActiveInstance == 0)
     {
-        const SwitchTile Light[] = {{"Illuminate scene", &Parameters.IlluminateScene, TileGlyph::Sun, true, false,
-                                     "The selected native renderer has no per-Moon scene-light switch."}};
-        SwitchTiles::Construct(Page, "MoonLightEnabled", Light, 1, 1);
-        SliderRow::Construct(Page, "MoonLightIntensity", "Moonlight power", Parameters.LightPower, 0, 5, 0.01f, "×", 1, false,
-                             "Native moonlight currently uses the legacy lunar albedo and sun–moon geometry.");
-        CaptionText::Construct(Page, "Primary Moon is the demo’s directional light source. Native moonlight remains on its legacy path; "
-                                     "these light controls are unavailable.");
+        const SwitchTile Light[] = {{"Illuminate scene", &Parameters.IlluminateScene, TileGlyph::Sun, false, false,
+                                     "The primary Moon controls the scene moonlight."}};
+        Changed |= SwitchTiles::Construct(Page, "MoonLightEnabled", Light, 1, 1);
+        Changed |= SliderRow::Construct(Page, "MoonLightIntensity", "Moonlight power", Parameters.LightPower, 0, 5, 0.01f, "×");
+        CaptionText::Construct(Page, "The primary slot supplies directional moonlight at night. Phase, elevation, visibility, brightness and this power control update that light.");
     }
     else
         CaptionText::Construct(Page, "Visual body only. Scene lighting comes from the primary Moon.");
@@ -324,7 +322,7 @@ bool MoonInspector::ConstructLight(ControlColumn &Page)
     CaptionText::Construct(Page, "Angular diameter · compressed visual comparison", 8, 0);
     Pen = DiagramCanvas::Begin(Page, "MoonSize", 256, 215, 15, 15);
     ConstructSurface(Pen, true);
-    Changed |= SliderRow::Construct(Page, "MoonSizeField", "Angular diameter", Moon.AngularDiameterDegrees, 0.1f, 180, 0.01f, "°");
+    Changed |= SliderRow::Construct(Page, "MoonSizeField", "Angular diameter", Moon.AngularDiameterDegrees, 0.1f, 179.9f, 0.01f, "°");
     if (NextButton::Construct(Page, "MoonEarthSize", "Earth Moon reference / 0.52°"))
     {
         Moon.AngularDiameterDegrees = 0.52f;
@@ -463,9 +461,10 @@ bool MoonInspector::ConstructBodies(ControlColumn &Page)
 //                                                    INSTANCE AND PAGE DISPATCH
 //------------------------------------------------------------------------------------------------------------------------
 
-void MoonInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry> &OutSwitches)
+void MoonInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches)
 {
-    OutSwitches.push_back({"Secondary Moon", "Legacy viewport", &Parameters.SecondaryMoonEnabled});
+    constexpr const char* Names[] = {"Moon 1","Moon 2","Moon 3","Moon 4"};
+    for (size_t Slot=0;Slot<4;++Slot) OutSwitches.push_back({Names[Slot],"Native sky body",&Parameters.Instances[Slot].Visible});
 }
 
 void MoonInspector::ConstructInspector()
@@ -473,7 +472,9 @@ void MoonInspector::ConstructInspector()
     const auto    Theme = ControlTheme::ResolveMoon();
     const auto    Faces = EditorTypefaces::Resolve();
     ControlColumn Page(Theme, Faces, InspectorRuntime::Instance().ResolveInterfaceScale());
-    PageHeading::Construct(Page, "MoonHeader", "Inspector / Environment", "Moons", nullptr, "Scene bodies · phase · surface light");
+    bool Changed = PageHeading::Construct(Page,"MoonHeader","Inspector / Environment","Moons",Parameters.Enabled ? "● Visible" : "○ Hidden",
+        "Scene bodies · phase · surface light","Toggle the Moon group");
+    if (Changed) Parameters.Enabled = !Parameters.Enabled;
     BeginMoonCard(Page, "Moon settings", true);
     std::array<std::string, 4>  Names;
     std::array<const char *, 4> Choices;
@@ -489,7 +490,7 @@ void MoonInspector::ConstructInspector()
                            123 * Page.QueryScale(), Choices.data(), 4, ActiveInstance, true, "Active moon instance");
     auto            &Moon       = Parameters.Instances[ActiveInstance];
     const SwitchTile Settings[] = {{"Visible", &Moon.Visible, TileGlyph::Sun}, {"Follow sky", &Moon.FollowSky, TileGlyph::Orbit}};
-    bool             Changed    = SwitchTiles::Construct(Page, "MoonSettings", Settings, 2, 2, 16.2f, 0);
+    Changed |= SwitchTiles::Construct(Page, "MoonSettings", Settings, 2, 2, 16.2f, 0);
     Page.EndCard();
     const auto &Access = InspectorRuntime::Instance().QueryEnvironmentAccess();
     if (Moon.FollowSky && Access.CelestialReady)
@@ -498,6 +499,15 @@ void MoonInspector::ConstructInspector()
         Moon.ElevationDegrees = static_cast<float>(Access.LunarPlacement[1]);
         Moon.PhaseDays        = static_cast<float>(Access.LunarPlacement[2]);
     }
+    const ActionEntry Actions[] = {{"MoonFind","Find in sky"},{"MoonPlace","Place in view",Access.CameraReady}};
+    ActionRowLook Look; Look.MarginTop = 0; Look.MarginBottom = 15;
+    const int Action = ActionRow::Construct(Page,Actions,Look);
+    if (Action == 1)
+    {
+        Moon.AzimuthDegrees = float(std::atan2(Access.CameraForward[1],Access.CameraForward[0]) * 180 / EnvironmentReadings::Pi);
+        Moon.ElevationDegrees = 25; Moon.Visible = true; Moon.FollowSky = false; Parameters.Enabled = true; Changed = true;
+    }
+    if (Action >= 0) InspectorRuntime::Instance().RequestSkyFocus(Moon.AzimuthDegrees,Moon.ElevationDegrees,Moon.AngularDiameterDegrees);
     RefreshSurface();
     constexpr const char *Tabs[] = {"Phase", "Placement", "Light & size", "Bodies"};
     TabStrip::Construct(Page, "MoonTabs", Tabs, 4, ActivePane);
@@ -518,12 +528,10 @@ void MoonInspector::ConstructInspector()
     }
     if (Moon.FollowSky && !Access.CelestialReady)
         CaptionText::Construct(Page, "Follow sky requires the scene Sun’s date and observer solution.");
-    CaptionText::Construct(Page, "Four instances are authored and saved. Surface, phase, placement and size drive the isolated reference; "
-                                 "the viewport retains its two legacy bodies and lighting. Additional native bodies are not connected.");
+    CaptionText::Construct(Page, "All four slots update the native sky. Find in sky points the camera at this slot; Place in view switches off sky following and puts it above the horizon.");
     Page.Finalize();
     if (Changed)
     {
-        Parameters.Enabled              = Parameters.Instances[0].Visible;
         Parameters.SecondaryMoonEnabled = Parameters.Instances[1].Visible;
         Parameters.AdvanceRevision();
     }

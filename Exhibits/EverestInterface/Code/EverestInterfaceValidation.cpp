@@ -161,6 +161,7 @@ int main(int ArgumentCount, char** Arguments)
         // -------------------------------------------------------------------------------------------------------------
         Everest::EverestWorkspace Workspace(*Centre, LaunchedPath.parent_path());
         SceneWorld&               World = Workspace.QuerySceneWorld();
+        Require(World.LoadLevelSpace(EverestRoot.parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace"), "Simulation exhibit fixture failed to load");
         Require(World.QueryRecordCount() == 30, "Expected 30 records in Projects/Everest/Content/Levels/Default.levelspace.");
         // 📝 Each planet of the sky is its own Scene Directory entry (Venus, Jupiter, Mars, Saturn), beside the starfield and moons.
         Require(World.FindAllByType("Planet").size() == 4 && World.FindFirstByType("Stars") && World.FindFirstByType("Moons"),
@@ -265,7 +266,7 @@ int main(int ArgumentCount, char** Arguments)
         WritePngCapture(OutputDir / "06-EverestControlCentre.png");
 
         // Exhibit 06b: the workspace has no top toolbar; its Projects and Save level actions are on the Quick Controls page
-        Require(Centre->QueryQuickActionCount() == 2, "EverestWorkspace must place Projects and Save level on Quick Controls.");
+        Require(Centre->QueryQuickActionCount() == 3, "EverestWorkspace must place Projects and Save level on Quick Controls.");
         Centre->ActivateSettingsPage(ControlCentrePageCategory::QuickControls);
         RenderFrames(36);
         WritePngCapture(OutputDir / "06b-EverestQuickControls.png");

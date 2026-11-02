@@ -9,7 +9,7 @@
 
 [[vk::binding(0, 0)]] StructuredBuffer<float4>                     Ensemble;
 [[vk::binding(1, 0)]] Sampler2DArray<float4>                       TransLut;
-[[vk::binding(2, 0)]] [format("rgba16f")] RWTexture2DArray<float4> VisibilityUnused;
+[[vk::binding(2, 0)]] [format("rgba32f")] RWTexture2DArray<float4> VisibilityUnused;
 [[vk::binding(3, 0)]] [format("rgba16f")] RWTexture2DArray<float4> CloudShadowTarget;
 [[vk::binding(4, 0)]] [format("rgba16f")] RWTexture2DArray<float4> SecondaryUnused;
 

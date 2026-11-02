@@ -221,8 +221,7 @@ bool StarInspector::ConstructPopulation(ControlColumn &Page)
     BeginStarCard(Page, "Point spread", "RENDERER CONTROLS", ResolveCssColour(0x20262EFF), 4);
     Changed |= SliderRow::Construct(Page, "StarBrightness", "Star brightness", Parameters.MagnitudeGain, 0, 5, 0.01f, "×");
     Changed |= SliderRow::Construct(Page, "StarSize", "Point size", Parameters.PointSize, 0.2f, 3, 0.01f, "×");
-    SliderRow::Construct(Page, "StarHalo", "Star halo", Parameters.HaloGain, 0, 2, 0.01f, "×", 1, false,
-                         "The native sky has no authored star-halo multiplier.");
+    Changed |= SliderRow::Construct(Page, "StarHalo", "Star halo", Parameters.HaloGain, 0, 2, 0.01f, "×");
     Changed |= SliderRow::Construct(Page, "MilkyWay", "Milky Way", Parameters.MilkyWayLuminance, 0, 3, 0.01f, "×");
     Page.EndCard();
     return Changed;

@@ -203,7 +203,7 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Glossy = std::make_unique<VarianceIntegrator>(Exchange, Shaders, "Glossy", VarianceSettings{0.12f, 12, 2, 3.0f});
     Glossy->ConstructPrograms(RefreshRegion);
     Display = std::make_unique<DisplayProjection>(Exchange, Shaders);
-    Display->ConstructPrograms(RefreshRegion, MaterialRegion, Distance->MarchLayout, OccupantRegion, TextureFormat::Rgba8UnormSrgb);
+    Display->ConstructPrograms(RefreshRegion, MaterialRegion, OccupantRegion, TextureFormat::Rgba8UnormSrgb);
     for (const auto& [Offset, Bytes] : Assets.MaterialRewrites)
     {
         Exchange.WriteRegion(MaterialRegion, Offset, Bytes.data(), Bytes.size());
@@ -411,7 +411,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
     if (Interlude == nullptr)
     {
         Display->RecordResolve(Begin("resolve"), Parity);
-        Display->RecordPresent(Begin("present"), Parity, CaptureView, Distance->MarchGroup);
+        Display->RecordPresent(Begin("present"), Parity, CaptureView);
         if (!SubmitSeries()) return false;
     }
     else
@@ -430,7 +430,7 @@ bool IlluminationHost::AdvanceRefresh(const RefreshInputs* Inputs, const Refresh
         CommandSequence& Presentation = Begin("antialias and present");
         if (Interlude->BeforeAntialias) Interlude->BeforeAntialias(Presentation, Parity);
         Display->RecordAntialias(Presentation, Parity, Interlude->AntialiasSource);
-        Display->RecordPresent(Presentation, Parity, CaptureView, Distance->MarchGroup);
+        Display->RecordPresent(Presentation, Parity, CaptureView);
         Presentation.OrderAfterEarlierWork();
         if (!SubmitSeries()) return false;
     }

@@ -282,6 +282,9 @@ struct MoonConfiguration : RevisionCounter
         Bodies[1].Visible = true;
         Bodies[1].Body = 1;
         Bodies[1].AngularDiameterDegrees = 1.6f;
+        Bodies[1].AzimuthDegrees = 30; Bodies[1].ElevationDegrees = 25;
+        Bodies[2].AzimuthDegrees = -65; Bodies[2].ElevationDegrees = 45;
+        Bodies[3].AzimuthDegrees = 70; Bodies[3].ElevationDegrees = 20;
         return Bodies;
     }();
 };
@@ -296,6 +299,22 @@ struct PlanetConfiguration : RevisionCounter
     float    Brightness              = 1.0f;
     bool     RingSystem              = false;
     bool     AtmosphereShell         = false;
+    bool FollowSky = true;
+    float AzimuthDegrees = -8.0f;
+    float ElevationDegrees = 35.0f;
+    float SpinDegrees = 0.0f;
+    float TiltDegrees = 20.0f;
+    float RollDegrees = 0.0f;
+    float SurfaceTint[3] = {1,1,1};
+    float BandContrast = 1.0f;
+    float SurfaceDetail = 1.0f;
+    float CloudVeil = 0.8f;
+    float AtmosphereHeight = 0.065f;
+    float LimbGlow = 0.85f;
+    float RingInnerRadius = 1.32f;
+    float RingOuterRadius = 2.38f;
+    float RingOpticalDepth = 1.45f;
+
 };
 
 inline constexpr std::array<const char*, 4> PlanetBodyNames = {"Venus", "Jupiter", "Mars", "Saturn"};

@@ -218,9 +218,9 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.Toggles.Inspection           = std::min<uint32_t>(Rendering.Inspection, 14u);
     Host_->Settings.Indirect            = Rendering.GlobalIllumination;
     // 📝 Idle inputs of the parts outside the port, as the demo writes them with no cabin and nothing burning; bit 0 of the
-    //    HMI word is the demo's distance-slice inset (DisplayPresent draws it in the image's top-right corner).
+    //    presentation word carries only exposure/scale metadata.
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;
-    Inputs.External.HmiWord        = (Rendering.DistanceSlice ? 1u : 0u) | (1u << 8) | (1000u << 20);
+    Inputs.External.PresentationControl        = (1u << 8) | (1000u << 20);
     Inputs.External.FireBlock      = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.46f, 0.14f, 14.0f};
     Inputs.Environment             = &Sky;
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);
@@ -245,6 +245,9 @@ ViewportStatistics SceneViewport::QueryStatistics() const noexcept
     Statistics.InitialCandidates = Toggles.InitialCandidates;
     if (Host_)
     {
+        for (const auto& Run : Host_->Scene.DrawRuns)
+            if (Run.FacetSet < Host_->Scene.FacetSets.size())
+                Statistics.SceneTriangles += Host_->Scene.FacetSets[Run.FacetSet].VertexCount / 3 * Run.Count;
         Statistics.ScreenExtent   = Host_->ScreenExtent;
         Statistics.TraceExtent    = Host_->TraceExtent;
         Statistics.ClipResolution = Host_->Grade.ClipResolution;

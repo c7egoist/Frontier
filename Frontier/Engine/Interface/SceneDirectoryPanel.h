@@ -90,6 +90,7 @@ class SceneDirectoryPanel
     [[nodiscard]] std::optional<RecordClassification> TakeSpawnRequest();
 
     // Dynamic Game Engine Editor construction / deletion catalogue (populated by SceneWorld).
+    void ConfigureVisibleTypes(std::vector<std::string> Types) { VisibleTypes = {Types.begin(),Types.end()}; }
     void ConfigureConstructibleTypes(std::vector<std::pair<std::string, std::string>> TypeEntries);
     [[nodiscard]] const std::vector<std::pair<std::string, std::string>>& QueryConstructibleTypes() const noexcept
     {
@@ -111,6 +112,7 @@ class SceneDirectoryPanel
   private:
     void RebuildVisible();
 
+    std::unordered_set<std::string> VisibleTypes;
     std::vector<SceneDirectoryRow>      Rows;
     std::vector<SceneDirectoryRow>      Visible;
     std::vector<SceneClassificationTab> Tabs;

@@ -485,7 +485,7 @@ int main(int ArgumentCount, char** Arguments)
                 float Elapsed;
                 std::memcpy(&Elapsed, Bytes.data() + 87 * 4, 4);
                 Inputs.External.ElapsedSeconds = Elapsed;
-                std::memcpy(&Inputs.External.HmiWord, Bytes.data() + 119 * 4, 4);
+                std::memcpy(&Inputs.External.PresentationControl, Bytes.data() + 119 * 4, 4);
                 std::memcpy(Inputs.External.FireBlock.data(), Bytes.data() + 120 * 4, 32);
             }
         }

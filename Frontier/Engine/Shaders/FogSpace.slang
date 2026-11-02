@@ -13,7 +13,7 @@
 [[vk::binding(1, 0)]] Sampler2DArray<float4>                       TransLut;
 [[vk::binding(2, 0)]] Sampler2DArray<float4>                       MultiLut;
 [[vk::binding(3, 0)]] Sampler2DArray<float4>                       CloudShadowLut;
-[[vk::binding(4, 0)]] [format("rgba16f")] RWTexture2DArray<float4> VisibilityImage;
+[[vk::binding(4, 0)]] [format("rgba32f")] RWTexture2DArray<float4> VisibilityImage;
 [[vk::binding(5, 0)]] [format("rgba16f")] RWTexture2DArray<float4> HdrFrame;
 // Another renderer's sun shadow cascades (FogSpace.h FogSceneShadow): rows 0-11 three light view-projection matrices of a z-up
 // world as row vectors, 12 far distances + count, 13 world texel sizes, 14 control (x enabled, y depth bias).

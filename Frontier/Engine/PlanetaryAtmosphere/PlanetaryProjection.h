@@ -59,6 +59,10 @@ struct LunarBodyDescriptor
     float           EarthshineStrength    = 0.0022f;
     float           SurfaceBrightness     = 1.0f;
     float           AtmosphereHaze        = -1.0f;              // < 0 selects preset lunar exosphere/haze; [0..1] overrides
+    bool            OverridePhase = false;
+    Vec3            PhaseLightDirection = {0,0,-1};
+    Vec3            PhaseIrradiance = {1,1,1};
+    float           GlowStrength = 1;
     Vec3            AtmosphereTintRgb     = {0.0f, 0.0f, 0.0f}; // {0,0,0} selects preset lunar atmosphere tint
 };
 
@@ -106,6 +110,7 @@ enum class PlanetarySurfaceArchetype : uint32_t
     OceanicTerrestrial  = 1,
     RustyDesertWorld    = 2,
     MethaneIceGiant     = 3,
+    CloudVeiledWorld    = 4,
 };
 
 struct PlanetaryRingSystem
@@ -135,6 +140,10 @@ struct PlanetaryBodyDescriptor
     float                     SpinPhaseRad       = 0.0f;
     float                     SurfaceAlbedoScale = 1.0f;
     uint32_t                  ProceduralSeed     = 42u;
+    Vec3 SurfaceTint = {1,1,1};
+    float BandContrast = 1;
+    float SurfaceDetail = 1;
+    float CloudVeil = .8f;
     PlanetaryRingSystem       Rings{};
     PlanetaryAtmosphereShell  Atmosphere{};
 };

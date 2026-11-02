@@ -72,6 +72,14 @@ class FogInspector final : public RecordInspector
         return Parameters.LocalVolume ? "NativeLocalFog" : "NativeFog";
     }
 
+    bool QueryViewTarget(InspectorViewTarget& View) const noexcept override
+    {
+        if (!Parameters.LocalVolume) return false;
+        View.Position = {Parameters.CentreMetres[0],Parameters.CentreMetres[1],Parameters.CentreMetres[2]};
+        View.Radius = std::max({Parameters.HalfExtentsMetres[0],Parameters.HalfExtentsMetres[1],Parameters.HalfExtentsMetres[2]});
+        return true;
+    }
+
   private:
     bool ConstructVisibility(ControlColumn &Page);
     bool ConstructMedium(ControlColumn &Page);

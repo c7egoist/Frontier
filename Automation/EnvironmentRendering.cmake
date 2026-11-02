@@ -21,6 +21,7 @@ add_library(FrontierEnvironmentRendering STATIC
     Frontier/Engine/PlanetaryAtmosphere/AstronomicalEphemeris.cpp
     Frontier/Engine/PlanetaryAtmosphere/AtmosphereProjection.cpp
     Frontier/Engine/PlanetaryAtmosphere/PlanetaryProjection.cpp
+    Frontier/Engine/PlanetaryAtmosphere/CelestialAuthoring.cpp
     Frontier/Engine/PlanetaryAtmosphere/CloudSpace.cpp
     Frontier/Engine/PlanetaryAtmosphere/VolumetricClouds.cpp
     Frontier/Engine/PlanetaryAtmosphere/FogSpace.cpp
@@ -132,6 +133,17 @@ if(FRONTIER_ENV_SLANGC)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(CelestialRenderValidation
+        Exhibits/CelestialWorkspace/Code/CelestialRenderValidation.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(CelestialRenderValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(CelestialRenderValidation PRIVATE FrontierEnvironmentRendering)
+    if(TARGET FrontierEnvironmentShaders)
+        add_dependencies(CelestialRenderValidation FrontierEnvironmentShaders)
+    endif()
+    add_test(NAME CelestialRenderValidation COMMAND CelestialRenderValidation
+        "${CMAKE_SOURCE_DIR}" "${FRONTIER_ENV_SHADER_OUT}" "${CMAKE_BINARY_DIR}/celestial-render-exhibits")
+
     add_executable(LocalMediaValidation
         Exhibits/LocalMedia/Code/LocalMediaValidation.cpp
         Engine/Render/StbImageWriteImplementation.cpp)

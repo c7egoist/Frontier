@@ -40,12 +40,12 @@ struct RefreshConstants
     uint SpatialCount;                            // [-]    spatial candidates per pixel
     float3 NightSkyRadiance;                      // [-]    floor radiance of the night sky
     float IncandescenceScale;                           // [-]    multiplies every authored incandescence
-    float SliceHeight;                             // [m]    inspection slice through the distance field
+    float Reserved112;                             // [-]    retained uniform alignment
     float ExposureCompensation;                    // [EV]
     float IndirectScale;                           // [-]    multiplies the resolved indirect term
     uint DistanceInspection;                      // [-]    distance inspection selector
     float3 FocusPosition;                         // [m]    centre of the scene distance field cascades
-    uint InsetEnabled;                            // [-]    draw the distance slice inset
+    uint PresentationControl;                            // [-]    presentation brightness and scale
     float3 FireLightPosition;                     // [m]    power-weighted centre of the burning tyres
     float FireLightIntensity;                      // [-]    point intensity; 0 when nothing burns
     float3 FireLightColour;                       // [-]    chromaticity of the flame light
@@ -131,13 +131,13 @@ float ResolveReflectionScale(RefreshConstants Refresh)
 
 float ResolveHmiBrightness(RefreshConstants Refresh)
 {
-    let Encoded = (Refresh.InsetEnabled >> 8u) & 0xFFFu;
+    let Encoded = (Refresh.PresentationControl >> 8u) & 0xFFFu;
     return SelectBranch(1.0, max(float(Encoded) - 1.0, 0.0) / 1000.0, Encoded > 0u);
 }
 
 float ResolveHmiScale(RefreshConstants Refresh)
 {
-    let Encoded = (Refresh.InsetEnabled >> 20u) & 0xFFFu;
+    let Encoded = (Refresh.PresentationControl >> 20u) & 0xFFFu;
     return SelectBranch(1.0, float(Encoded) / 1000.0, Encoded > 0u);
 }
 

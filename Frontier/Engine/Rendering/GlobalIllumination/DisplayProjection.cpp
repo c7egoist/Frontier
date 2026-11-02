@@ -24,7 +24,7 @@ DisplayProjection::DisplayProjection(DeviceExchange& Exchange, ShaderInterchange
 }
 
 void DisplayProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& RefreshRegion, const std::shared_ptr<DeviceRegion>& MaterialRegion,
-                                          const std::shared_ptr<DescriptorLayout>& DistanceLayout, const std::shared_ptr<DeviceRegion>& OccupantRegion,
+                                          const std::shared_ptr<DeviceRegion>& OccupantRegion,
                                           TextureFormat PresentFormat)
 {
     RefreshRegion_  = RefreshRegion;
@@ -49,7 +49,7 @@ void DisplayProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     Present.VertexEntry   = "PresentVertex";
     Present.FragmentEntry = "PresentFragment";
     Present.Targets       = {{PresentFormat}};
-    Present.Layouts       = {PresentLayout_, DistanceLayout};
+    Present.Layouts       = {PresentLayout_};
     PresentProgram_ = Shaders_.ConstructRasterProgram("DisplayPresent", Present);
     SamplerSpecification Linear;
     Linear.MagFilter = Linear.MinFilter = FilterMode::Linear;
@@ -152,14 +152,12 @@ void DisplayProjection::RecordAntialias(CommandSequence& Sequence, uint32_t Pari
     Sequence.Dispatch(1);
 }
 
-void DisplayProjection::RecordPresent(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Target,
-                                      const std::shared_ptr<DescriptorGroup>& DistanceGroup)
+void DisplayProjection::RecordPresent(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Target)
 {
     const std::array<ColorAttachment, 1> Colors = {{{Target, LoadOperation::Clear, {0.0f, 0.0f, 0.0f, 1.0f}}}};
     Sequence.BeginRaster(Colors, nullptr, "Display present");
     Sequence.BindProgram(PresentProgram_);
     Sequence.BindGroup(0, PresentGroups_[Parity]);
-    Sequence.BindGroup(1, DistanceGroup);
     Sequence.Draw(3);
     Sequence.EndRaster();
 }

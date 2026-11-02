@@ -26,31 +26,31 @@
     },
     {
       "file": "CardDirect.IntegrateCardDirect.spv",
-      "spirv_sha256": "2996c473f14cdbe57187bf489a5e243ddc18c289179f242f5411b5bd90a23a29"
+      "spirv_sha256": "eb8d0fc98c37fec0058b4339279032f0d0e8b50044bc07376fe2d9188c68a3a8"
     },
     {
       "file": "CardFinal.IntegrateCardFinal.spv",
-      "spirv_sha256": "47b54139593dab4d681500ed57af8d844fbd8afede02934d6a0716dba7aac918"
+      "spirv_sha256": "746fb62fd86dc574e82eee4ec36cf12aebec4a116c9dd784054b3cb392d8325b"
     },
     {
       "file": "CardRadiosity.IntegrateCardRadiosity.spv",
-      "spirv_sha256": "c76655e41603055d1166e3f192b73d5cf3781f006d623515d55872d4fea82ed5"
+      "spirv_sha256": "9215f8d60ccbe5a3dbfb250de8b8336fd29fa17cc1be5a082bc292e1d9fa9f15"
     },
     {
       "file": "DirectRadiance.IntegrateDirectRadiance.spv",
-      "spirv_sha256": "ce057c03a24a5e62e06187123848756cac5fc8d0abeb7d7bfdaf3e845a0a1d17"
+      "spirv_sha256": "cf891985dfd112b57f310009289f77bd2c2c7753ec9d82120110ba3c466fdeda"
     },
     {
       "file": "DisplayAntialias.IntegrateAntialias.spv",
-      "spirv_sha256": "22c269e4769f6c20b3c18847bc8d3811d1fd9152674337bc8753b80b3e07ce8f"
+      "spirv_sha256": "102c506b64c066c5d09c9c58fc5bb9d23c2d4b27f4524388e1dd43a1ece4e689"
     },
     {
       "file": "DisplayExposure.IntegrateExposure.spv",
-      "spirv_sha256": "db91f2e5a8c8885f3b469729a4013579c29b9e6077bff98d21f4a5a58187ae25"
+      "spirv_sha256": "f2ff6e3de68124b72bbb2d1bc1b2877482b86d8896753eb983dc53a33226cec6"
     },
     {
       "file": "DisplayPresent.PresentFragment.spv",
-      "spirv_sha256": "765b79d5411df06b719fddbaec0059d0ee5a4b6f09fe83352a3b374064d062f4"
+      "spirv_sha256": "cb140fe9c68b8f58efa2404328b79ff0006bb007236550cb3234ed694e26c7e4"
     },
     {
       "file": "DisplayPresent.PresentVertex.spv",
@@ -58,7 +58,7 @@
     },
     {
       "file": "DisplayRecombination.ResolveRecombination.spv",
-      "spirv_sha256": "b7079a8fa021464f1a4ec780ccf387b73516e862825c1265888d87c722a330a7"
+      "spirv_sha256": "5b047f3d597b35422ba1974e8966e20dbbc6df9a8d7e47d0189cb6a35e7e27fe"
     },
     {
       "file": "DistanceTransfer.TransferDistance.spv",
@@ -78,11 +78,11 @@
     },
     {
       "file": "EnvironmentVisibility.ProjectEnvironmentVisibility.spv",
-      "spirv_sha256": "0ea1f5941eeb3571f1cbc5e7b84012c2e35a850479a56285872b3f86dbf71b99"
+      "spirv_sha256": "b4ab6ca5226ec661c75030e685ee1a8f032ed5cb166ed808e9734b6ab31640fe"
     },
     {
       "file": "EnvironmentVisibility.RestoreEnvironmentRadiance.spv",
-      "spirv_sha256": "e59d61c0b4090180e008e89e4e2dc1aea348fbd3a75bca7a7d5e5ca9a45575b8"
+      "spirv_sha256": "a013df97fb5f8fe03bbe3a5502391e62165cacd9dbacf28541083b7669f3f86d"
     },
     {
       "file": "FragmentDistance.ComputeFragmentDistance.spv",
@@ -90,19 +90,19 @@
     },
     {
       "file": "GeometryClusterCull.CullGeometryClusters.spv",
-      "spirv_sha256": "ee6cdccae34544c00660611de3cd48bf0c71e6cf5626df21ed54209aef4c4f5f"
+      "spirv_sha256": "1593747d00e44b5c2ca0ed0cf28f9ba3a37581ab0328e67bd89d36c2c82b6002"
     },
     {
       "file": "ReflectionTrace.TraverseReflection.spv",
-      "spirv_sha256": "e8948d2a1a11bc349213b4291746cac9d9b5ff7c9dbe11e5e8c0d8dc72a55e13"
+      "spirv_sha256": "6e4e689a0827db62b1445fef5dbe8697a2b3a64df4799bfece272208bb442d0f"
     },
     {
       "file": "ReservoirSpatial.ResampleSpatial.spv",
-      "spirv_sha256": "3222cc481caf462b34fe0930d6f09fec92ddaf3cb19f49d8d80f55e2dee7c712"
+      "spirv_sha256": "5e8df8d62cb08233a9d834c2d73dddbaaf809a6bff81facc0f3f66c8f0d64925"
     },
     {
       "file": "ReservoirTemporal.ResampleTemporal.spv",
-      "spirv_sha256": "c89c2dfc79988dd337876a3715ce5067b14aff61ab615bd0605a306d68ad46d0"
+      "spirv_sha256": "3d2af1a20fb03739771b5fe0b1131e50523fa60d61306243f5a91a807a8803e8"
     },
     {
       "file": "ShadowRaster.MaskedShadowFragment.spv",
@@ -118,19 +118,19 @@
     },
     {
       "file": "SurfaceRaster.SurfaceFragment.spv",
-      "spirv_sha256": "21e39abd727e700438cfe432dbba970be7892819434dfe4aa05537075d93fade"
+      "spirv_sha256": "130c2c47b54b0e676b6ac7537effd401a59e2d46a6fd203792aa608cc46af23d"
     },
     {
       "file": "SurfaceRaster.SurfaceVertex.spv",
-      "spirv_sha256": "9fd1914b9a0f71169474b2421dc24180b5be6255697b1b686845343eb167b1b8"
+      "spirv_sha256": "890ba64cbde2995111e975a934fb95760a0f374aefc7d404495cecf104925118"
     },
     {
       "file": "VarianceTemporal.IntegrateTemporal.spv",
-      "spirv_sha256": "ac861d6d47d0de0944cae18d13356df53caf391d2a3ee76d8618b9aa1d55c555"
+      "spirv_sha256": "0af0039d139585822ed0f8677cecacfae793bcd12bcb02f21648c95614d0b111"
     },
     {
       "file": "VarianceUpsample.ProjectScreenSignal.spv",
-      "spirv_sha256": "c62180b6d97bd41c43e6b01fbd94f190d64f9692d0359840916d18380e7aa9b6"
+      "spirv_sha256": "01526bafb50ae9cfdb9c98c07025cce2afd0f4cedcfd34fb1d807178a7d3f4c1"
     },
     {
       "file": "VarianceWavelet.ConvolveWavelet.spv",
@@ -228,7 +228,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayPresent.slang",
-      "sha256": "c7ecfb1d1c4b780f3528e6a5cdb7d7f1546ba8177be8129406e40ed9a0da2447"
+      "sha256": "94c6225deb502d9fdfe554a970f2a7b784ef2d355f2854ed79a566157f89375e"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/DisplayRecombination.slang",
@@ -260,7 +260,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/EnvironmentVisibility.slang",
-      "sha256": "f21675f15d4946b5776b6f2f38fc54b62e4ff405a8008aef459948de80031ec5"
+      "sha256": "e6d9cf99f5c266e1b0ba474a29761d7e9bd388582c9deaa8c3288d2313604566"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/FireIllumination.slang",
@@ -324,7 +324,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
-      "sha256": "65807b80d64ad368d171dc73a845c8a03acaaf844c371f013bfd7a603e087ecc"
+      "sha256": "4bf1c6507cec129065a93ada9e6c984fabdea120b7bb6f2e4cb806a79470fec5"
     },
     {
       "file": "Frontier/Engine/Shaders/GlobalIllumination/ShadowRaster.slang",

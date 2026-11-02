@@ -26,6 +26,7 @@ struct AtmosphereBakeReadout
     uint64_t                       RequestSerial = 0;
     uint64_t                       Generation    = 0;
     AtmosphereOpticalConfiguration Inputs{};
+    float ObserverAltitudeKm = .05f;
     std::array<float, 3>           SolarDirection{};
     std::vector<float>             Transmittance;
     std::vector<float>             MultipleScattering;

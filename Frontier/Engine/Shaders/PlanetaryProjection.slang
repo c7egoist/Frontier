@@ -16,7 +16,7 @@
 [[vk::binding(4, 0)]] Sampler2DArray<float4>                       MultiLut;
 [[vk::binding(5, 0)]] Sampler2DArray<float4>                       SkyViewLut;
 [[vk::binding(6, 0)]] Sampler2DArray<float4>                       LunarAtlas; // 2048x1024x6 VK_FORMAT_R8G8B8A8_SRGB
-[[vk::binding(7, 0)]] [format("rgba16f")] RWTexture2DArray<float4> VisibilityImage;
+[[vk::binding(7, 0)]] [format("rgba32f")] RWTexture2DArray<float4> VisibilityImage;
 [[vk::binding(8, 0)]] [format("rgba16f")] RWTexture2DArray<float4> HdrFrame;
 
 static const uint kOctGridDim = 32u;
@@ -88,6 +88,8 @@ float3 EvaluatePlanetGpu(StructuredBuffer<float4> Ens,
     float4 P3        = Ens[PlanetOffset + 3u];
     float4 P4        = Ens[PlanetOffset + 4u];
     float4 P5        = Ens[PlanetOffset + 5u];
+    float4 P6 = Ens[PlanetOffset + 6u];
+    float4 P7 = Ens[PlanetOffset + 7u];
 
     float3 CenterDir = P0.xyz;
     float  θRadius   = max(P0.w, 1.0e-5f);
@@ -169,7 +171,7 @@ float3 EvaluatePlanetGpu(StructuredBuffer<float4> Ens,
         if (Arch == 0u)
         {
             float Zones = 0.5f + 0.5f * sin(φLat * 18.0f + 0.35f * sin(λLon * 4.0f + φLat * 9.0f));
-            Albedo     *= lerp(float3(0.76f, 0.68f, 0.58f), float3(1.16f, 1.10f, 1.02f), Zones);
+            Albedo     *= lerp(float3(0.76f, 0.68f, 0.58f), float3(1.16f, 1.10f, 1.02f), saturate(.5f + (Zones-.5f)*P6.x));
         }
         else if (Arch == 1u)
         {
@@ -182,12 +184,20 @@ float3 EvaluatePlanetGpu(StructuredBuffer<float4> Ens,
         else if (Arch == 2u)
         {
             float3 SpherePt = float3(cos(φLat) * cos(λLon), sin(φLat), cos(φLat) * sin(λLon));
-            Albedo         *= (0.72f + 0.48f * FbmRotated3D(SpherePt * 4.2f, 4, 613u));
+            Albedo         *= (1.0f + P6.y * (-0.28f + 0.48f * FbmRotated3D(SpherePt * 4.2f, 4, 613u + uint(P6.w))));
+        }
+        else if (Arch == 4u)
+        {
+            float3 SpherePt = float3(cos(φLat)*cos(λLon),sin(φLat),cos(φLat)*sin(λLon));
+            float Cloud = FbmRotated3D(SpherePt*5.0f,4,997u + uint(P6.w));
+            Albedo = lerp(float3(.60f,.40f,.18f),float3(.96f,.87f,.66f),saturate(.25f + Cloud * P6.z));
         }
         else
         {
             Albedo *= (0.90f + 0.14f * cos(φLat * 8.0f));
         }
+
+        Albedo *= max(P7.rgb,float3(0.0f));
 
         float μView = max(0.02f, dot(Normal, -ViewDirection));
         for (uint SunIdx = 0u; SunIdx < SunCount; ++SunIdx)
@@ -223,7 +233,7 @@ float3 EvaluatePlanetGpu(StructuredBuffer<float4> Ens,
             float Limb = pow(μ₀, 0.82f) * pow(μView, 0.14f);
             BodyCol   += Albedo * (P2.w / π) * SolarIrradiance * (0.28f * Limb * RingTrans);
         }
-        BodyCol += Albedo * 2.5e-4f;
+        BodyCol += Albedo * (P2.w / .55f) * 2.5e-4f;
     }
 
     float3 AtmoGlow = float3(0.0f);
@@ -351,8 +361,8 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
         float2 OctUv  = DirectionToOctUv(CelestialDir);
         int    Cx0    = clamp(int(OctUv.x * float(kOctGridDim)), 0, int(kOctGridDim) - 1);
         int    Cy0    = clamp(int(OctUv.y * float(kOctGridDim)), 0, int(kOctGridDim) - 1);
-        float  σPsf   = max(0.85f * PixelSpanRad, 3.5e-4f);
-        float  Cutoff = 3.6f * σPsf;
+        float  σPsf   = max(0.85f * PixelSpanRad, 3.5e-4f) * max(.2f,Ensemble[RealmOffset+18u].x);
+        float  Cutoff = (Ensemble[RealmOffset+18u].z > 0 ? 8.0f : 3.6f) * σPsf;
 
         for (int Dy = -1; Dy <= 1; ++Dy)
         {
@@ -390,8 +400,9 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
                     float4 St1     = StarRecords[StIdx + 1u];
                     float  Flux    = pow(10.0f, -0.34f * (St0.w - 0.5f)) * 0.28f * R5.y;
                     float  Core    = exp(-0.5f * (θStar * θStar) / (σPsf * σPsf));
-                    float  Twinkle = EvaluateScintillationGpu(ViewDirection.y, St1.w, TimeSeconds, R5.z);
-                    ExoRadiance   += St1.xyz * (Flux * Core * Twinkle);
+                    float  Twinkle = EvaluateScintillationGpu(ViewDirection.y, St1.w, TimeSeconds * Ensemble[RealmOffset+18u].y, R5.z);
+                    float Halo = Ensemble[RealmOffset+18u].z * .08f * exp(-.125f*(θStar*θStar)/(σPsf*σPsf));
+                    ExoRadiance   += St1.xyz * (Flux * (Core+Halo) * Twinkle);
                 }
             }
         }
@@ -437,6 +448,8 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
         float4 M2            = Ensemble[MoonOffset + 2u];
         float4 M3            = Ensemble[MoonOffset + 3u];
         float4 M4            = Ensemble[MoonOffset + 4u]; // AtmosphereTintRgb.xyz, AtmosphereHaze
+        float4 M5 = Ensemble[MoonOffset + 5u];
+        float4 M6 = Ensemble[MoonOffset + 6u];
         float3 MoonDirection = M0.xyz;
         float  θMoonRadius   = max(M0.w, 1.0e-5f);
         float  Haze          = saturate(M4.w);
@@ -448,7 +461,7 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
         if (θSeparation < θMoonRadius * 3.8f)
         {
             float AureoleDist = max(0.0f, θSeparation - θMoonRadius) / max(θMoonRadius, 1.0e-4f);
-            float Aureole     = (0.012f + 0.022f * Haze) * M3.y * exp(-AureoleDist * (2.1f - 0.7f * Haze));
+            float Aureole     = (0.012f + 0.022f * Haze) * M3.y * M6.w * exp(-AureoleDist * (2.1f - 0.7f * Haze));
             ExoRadiance      += lerp(float3(0.76f, 0.84f, 1.00f), HazeTint, Haze) * Aureole;
         }
 
@@ -460,11 +473,11 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
             float  RimMask   = RimRise * RimDecay * Haze;
             float3 TangDir   = SafeNormalize(ViewDirection - MoonDirection * dot(ViewDirection, MoonDirection));
             float3 ShellNorm = SafeNormalize(TangDir * 0.94f - MoonDirection * 0.34f);
-            for (uint SunIdx = 0u; SunIdx < SunCount; ++SunIdx)
+            for (uint SunIdx = 0u; SunIdx < (M5.w > .5f ? 1u : SunCount); ++SunIdx)
             {
                 uint   SunOffset       = SunSlotOffset(Ensemble, SunFirst + SunIdx);
-                float3 SolarDirection  = Ensemble[SunOffset + 0u].xyz;
-                float3 SolarIrradiance = Ensemble[SunOffset + 1u].xyz;
+                float3 SolarDirection  = M5.w > .5f ? M5.xyz : Ensemble[SunOffset + 0u].xyz;
+                float3 SolarIrradiance = M5.w > .5f ? M6.xyz : Ensemble[SunOffset + 1u].xyz;
                 float  ShellLit        = smoothstep(-0.28f, 0.45f, dot(ShellNorm, SolarDirection));
                 ExoRadiance           += HazeTint * SolarIrradiance * (0.14f * M3.y * (0.18f + 0.82f * ShellLit) * RimMask);
             }
@@ -481,7 +494,7 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
         float  ClampedSep = min(θSeparation, θMoonRadius * 0.9995f);
         float3 RadDir     = SafeNormalize(ViewDirection - MoonDirection * dot(ViewDirection, MoonDirection));
         float3 ClampedRay = SafeNormalize(MoonDirection * cos(ClampedSep) + RadDir * sin(ClampedSep));
-        float  Distance   = 1.0f / sin(min(θMoonRadius, 1.2f));
+        float  Distance   = 1.0f / sin(min(θMoonRadius, 1.5707f));
         float3 MoonPos    = MoonDirection * Distance;
         float3 OffsetC    = -MoonPos;
         float  HalfB      = dot(OffsetC, ClampedRay);
@@ -514,11 +527,11 @@ void RasterizePlanetaryProjectionMain(uint3 Tid : SV_DispatchThreadID)
         float  Wrap         = 0.30f * Haze;
         float3 LitSurface   = float3(0.0f);
 
-        for (uint SunIdx = 0u; SunIdx < SunCount; ++SunIdx)
+        for (uint SunIdx = 0u; SunIdx < (M5.w > .5f ? 1u : SunCount); ++SunIdx)
         {
             uint   SunOffset       = SunSlotOffset(Ensemble, SunFirst + SunIdx);
-            float3 SolarDirection  = Ensemble[SunOffset + 0u].xyz;
-            float3 SolarIrradiance = Ensemble[SunOffset + 1u].xyz;
+            float3 SolarDirection  = M5.w > .5f ? M5.xyz : Ensemble[SunOffset + 0u].xyz;
+            float3 SolarIrradiance = M5.w > .5f ? M6.xyz : Ensemble[SunOffset + 1u].xyz;
             float  μ₀              = max(0.0f, (dot(Normal, SolarDirection) + Wrap) / (1.0f + Wrap));
             if (μ₀ > 0.0f)
             {

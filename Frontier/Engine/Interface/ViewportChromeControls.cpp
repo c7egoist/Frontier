@@ -6,6 +6,7 @@
 #include "Engine/Interface/ViewportChromeControls.h"
 
 #include "Engine/Interface/InspectorControls.h"
+#include "Engine/Interface/Controls/GlyphSymbol.h"
 
 #include <imgui_internal.h>
 
@@ -124,72 +125,10 @@ ImU32 FadeColour(ImU32 Colour, float Factor) noexcept
     return (Colour & ~IM_COL32_A_MASK) | (Alpha << IM_COL32_A_SHIFT);
 }
 
-// 📝 The demo's Lucide glyphs (24-unit view box, 1.7 stroke) at Extent pixels: Activity (readout), Grid (distance slice),
-//    RotateCcw (respawn), Undo2 (reassemble), ScanCorners (clean view).
+// 📝 Approved vector glyphs are reused by camera controls and each panel's status row.
 void ConstructLucideGlyph(ImDrawList* DrawList, ImVec2 Centre, float Extent, ImU32 Colour, const char* Glyph) noexcept
 {
-    const float Unit   = Extent / 24.0f;
-    const float Stroke = 1.7f * Unit;
-    auto Point = [&](float X, float Y) { return ImVec2(Centre.x + (X - 12.0f) * Unit, Centre.y + (Y - 12.0f) * Unit); };
-    auto Polyline = [&](std::initializer_list<ImVec2> Points) {
-        for (const ImVec2& Vertex : Points) DrawList->PathLineTo(Point(Vertex.x, Vertex.y));
-        DrawList->PathStroke(Colour, ImDrawFlags_None, Stroke);
-    };
-    auto Arc = [&](float X, float Y, float Radius, float From, float To) { DrawList->PathArcTo(Point(X, Y), Radius * Unit, From, To, 0); };
-    constexpr float Pi = 3.14159265358979323846f;
-    if (std::strcmp(Glyph, "Activity") == 0)
-    {
-        Polyline({{22.0f, 12.0f}, {19.52f, 12.0f}, {18.43f, 12.32f}, {17.59f, 13.46f}, {15.24f, 21.82f}, {15.0f, 22.0f}, {14.76f, 21.82f},
-                  {9.24f, 2.18f}, {9.0f, 2.0f}, {8.76f, 2.18f}, {6.41f, 10.54f}, {5.57f, 11.68f}, {4.49f, 12.0f}, {2.0f, 12.0f}});
-    }
-    else if (std::strcmp(Glyph, "Grid") == 0)
-    {
-        DrawList->AddRect(Point(3.0f, 3.0f), Point(21.0f, 21.0f), Colour, 2.0f * Unit, ImDrawFlags_None, Stroke);
-        Polyline({{3.0f, 9.0f}, {21.0f, 9.0f}});
-        Polyline({{3.0f, 15.0f}, {21.0f, 15.0f}});
-        Polyline({{9.0f, 3.0f}, {9.0f, 21.0f}});
-        Polyline({{15.0f, 3.0f}, {15.0f, 21.0f}});
-    }
-    else if (std::strcmp(Glyph, "RotateCcw") == 0)
-    {
-        // 📝 M3 12 a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74 L3 8 — the arc runs from 9 o'clock round to about 10:30.
-        Arc(12.0f, 12.0f, 9.0f, Pi, -0.5f * Pi - 0.82f);
-        DrawList->PathLineTo(Point(3.0f, 8.0f));
-        DrawList->PathStroke(Colour, ImDrawFlags_None, Stroke);
-        Polyline({{3.0f, 3.0f}, {3.0f, 8.0f}, {8.0f, 8.0f}});
-    }
-    else if (std::strcmp(Glyph, "Undo2") == 0)
-    {
-        Polyline({{9.0f, 14.0f}, {4.0f, 9.0f}, {9.0f, 4.0f}});
-        DrawList->PathLineTo(Point(4.0f, 9.0f));
-        DrawList->PathLineTo(Point(14.5f, 9.0f));
-        Arc(14.5f, 14.5f, 5.5f, -0.5f * Pi, 0.5f * Pi);
-        DrawList->PathLineTo(Point(11.0f, 20.0f));
-        DrawList->PathStroke(Colour, ImDrawFlags_None, Stroke);
-    }
-    else if (std::strcmp(Glyph, "ScanCorners") == 0)
-    {
-        DrawList->PathLineTo(Point(3.0f, 7.0f));
-        Arc(5.0f, 5.0f, 2.0f, Pi, 1.5f * Pi);
-        DrawList->PathLineTo(Point(7.0f, 3.0f));
-        DrawList->PathStroke(Colour, ImDrawFlags_None, Stroke);
-        DrawList->PathLineTo(Point(17.0f, 3.0f));
-        Arc(19.0f, 5.0f, 2.0f, -0.5f * Pi, 0.0f);
-        DrawList->PathLineTo(Point(21.0f, 7.0f));
-        DrawList->PathStroke(Colour, ImDrawFlags_None, Stroke);
-        DrawList->PathLineTo(Point(21.0f, 17.0f));
-        Arc(19.0f, 19.0f, 2.0f, 0.0f, 0.5f * Pi);
-        DrawList->PathLineTo(Point(17.0f, 21.0f));
-        DrawList->PathStroke(Colour, ImDrawFlags_None, Stroke);
-        DrawList->PathLineTo(Point(7.0f, 21.0f));
-        Arc(5.0f, 19.0f, 2.0f, 0.5f * Pi, Pi);
-        DrawList->PathLineTo(Point(3.0f, 17.0f));
-        DrawList->PathStroke(Colour, ImDrawFlags_None, Stroke);
-    }
-    else if (std::strcmp(Glyph, "ChevronDown") == 0)
-    {
-        Polyline({{6.0f, 9.0f}, {12.0f, 15.0f}, {18.0f, 9.0f}});
-    }
+    GlyphSymbol::Construct(DrawList,Glyph,{Centre.x-Extent*.5f,Centre.y-Extent*.5f},Extent,1.7f,Colour);
 }
 
 // 📝 .overlay-close: 20 px, radius 6 px, ×; Min is its top-left corner.
@@ -220,25 +159,7 @@ bool ConstructOverlayClose(const char* Id, const EditorTypefaces& Faces, ImVec2 
 //                                                    VIEWPORT BAR
 //------------------------------------------------------------------------------------------------------------------------
 
-void ViewportChromeControls::ConstructScenePill(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 StripMin, ImVec2 StripMax, const char* Text,
-                                                float Scale)
-{
-    // 📝 11 px #9a9a9a, padding 4 px 28 px, radius 0 0 14 px 14 px, #1a1a1a, 1 px #262626 without the top edge.
-    const float  Size  = 11.0f * DmSansEm * Scale;
-    const float  Width = MeasureText(Faces.Regular, Size, Text) + 56.0f * Scale + 2.0f * Scale;
-    const float  Tall  = std::min(StripMax.y - StripMin.y, 11.0f * 1.35f * Scale + 8.0f * Scale + Scale);
-    const ImVec2 Min(0.5f * (StripMin.x + StripMax.x - Width), StripMin.y);
-    const ImVec2 Max(Min.x + Width, Min.y + Tall);
-    const float  Radius = 14.0f * Scale;
-    DrawList->AddRectFilled(Min, Max, IM_COL32(0x1A, 0x1A, 0x1A, 0xFF), Radius, ImDrawFlags_RoundCornersBottom);
-    DrawList->PathLineTo(ImVec2(Min.x + 0.5f, Min.y));
-    DrawList->PathArcTo(ImVec2(Min.x + Radius, Max.y - Radius), Radius - 0.5f, 3.14159265f, 0.5f * 3.14159265f);
-    DrawList->PathArcTo(ImVec2(Max.x - Radius, Max.y - Radius), Radius - 0.5f, 0.5f * 3.14159265f, 0.0f);
-    DrawList->PathLineTo(ImVec2(Max.x - 0.5f, Min.y));
-    DrawList->PathStroke(SegmentedStroke, ImDrawFlags_None, Scale);
-    DrawList->AddText(ResolveFace(Faces.Regular), Size, ImVec2(Min.x + 0.5f * (Width - MeasureText(Faces.Regular, Size, Text)), Min.y + 0.5f * (Tall - Size)),
-                      IM_COL32(0x9A, 0x9A, 0x9A, 0xFF), Text);
-}
+
 
 void ViewportChromeControls::ConstructBarBackground(ImDrawList* DrawList, ImVec2 Min, ImVec2 Max, float Scale)
 {
@@ -246,36 +167,9 @@ void ViewportChromeControls::ConstructBarBackground(ImDrawList* DrawList, ImVec2
     DrawList->AddLine(ImVec2(Min.x, Max.y - 0.5f * Scale), ImVec2(Max.x, Max.y - 0.5f * Scale), EdgeStroke, Scale);
 }
 
-float ViewportChromeControls::ConstructSceneHeading(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 Min, float Height, const char* Title,
-                                                    const char* Subtitle, float Scale)
-{
-    // 📝 .scene-heading: column; strong 13 px / 500, span 9 px #707070; centred in the bar; margin-right 6 px.
-    const float TitleCss     = 13.0f * Scale;
-    const float SubtitleCss  = 9.0f * Scale;
-    const float TitleSize    = TitleCss * DmSansEm;
-    const float SubtitleSize = SubtitleCss * DmSansEm;
-    const float Block        = TitleCss * 1.35f + SubtitleCss * 1.35f;
-    const float Top          = Min.y + 0.5f * (Height - Block);
-    const float HalfLeading  = ResolveHalfLeading(1.35f, DmSansEm);
-    DrawList->AddText(ResolveFace(Faces.Medium), TitleSize, ImVec2(Min.x, Top + HalfLeading * TitleCss), TextTone, Title);
-    DrawList->AddText(ResolveFace(Faces.Regular), SubtitleSize, ImVec2(Min.x, Top + 1.35f * TitleCss + HalfLeading * SubtitleCss), SubtitleTone, Subtitle);
-    return std::max(MeasureText(Faces.Medium, TitleSize, Title), MeasureText(Faces.Regular, SubtitleSize, Subtitle)) + 6.0f * Scale;
-}
 
-float ViewportChromeControls::ConstructLivePill(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 Min, float Height, const char* Text, float Scale)
-{
-    // 📝 .live-pill: 9 px, letter-spacing 1.2 px, padding 3 px 7 px, radius 5 px.
-    const float  Size    = 9.0f * DmSansEm * Scale;
-    const float  Spacing = 1.2f * Scale;
-    const float  Width   = ConstructSpacedText(nullptr, Faces.Regular, Size, ImVec2(), 0, Text, Spacing) + 14.0f * Scale + 2.0f * Scale;
-    const float  Tall    = 9.0f * 1.35f * Scale + 6.0f * Scale + 2.0f * Scale;
-    const ImVec2 PillMin(Min.x, Min.y + 0.5f * (Height - Tall));
-    const ImVec2 PillMax(Min.x + Width, PillMin.y + Tall);
-    DrawList->AddRectFilled(PillMin, PillMax, LivePillSurface, 5.0f * Scale);
-    DrawList->AddRect(PillMin, PillMax, LivePillStroke, 5.0f * Scale, ImDrawFlags_None, Scale);
-    ConstructSpacedText(DrawList, Faces.Regular, Size, ImVec2(PillMin.x + 8.0f * Scale, PillMin.y + 0.5f * (Tall - Size)), LivePillText, Text, Spacing);
-    return Width;
-}
+
+
 
 float ViewportChromeControls::MeasureLabelButton(const EditorTypefaces& Faces, const char* Label, float Scale)
 {
@@ -458,29 +352,7 @@ bool ViewportChromeControls::ConstructReadoutOverlay(const char* Id, const Edito
     return ConstructOverlayClose(Id, Faces, ImVec2(Max.x - 26.0f * Scale, Min.y + 6.0f * Scale), CloseTooltip, Scale);
 }
 
-bool ViewportChromeControls::ConstructInsetFrame(const char* Id, const EditorTypefaces& Faces, ImVec2 InsetMin, ImVec2 InsetMax, const char* Legend,
-                                                 const char* CloseTooltip, float Scale)
-{
-    // 📝 #inset-legend: 6 px below the frame, right-aligned, padding 4 px 8 px, radius 8 px, rgba(16, 16, 16, 0.8),
-    //    10 px / 1.4 monospace in --muted, max-width 46 vw.
-    ImDrawList* DrawList = ImGui::GetWindowDrawList();
-    if (Legend != nullptr && Legend[0] != '\0')
-    {
-        ImFont*      Mono   = ResolveFace(Faces.Monospace);
-        const float  Css    = 10.0f * Scale;
-        const float  Size   = Css * JetBrainsMonoEm;
-        const float  WrapW  = std::max(80.0f * Scale, 0.46f * ImGui::GetMainViewport()->Size.x - 16.0f * Scale);
-        const ImVec2 Extent = Mono->CalcTextSizeA(Size, FLT_MAX, WrapW, Legend);
-        const float  Lines  = std::max(1.0f, std::round(Extent.y / Size));
-        const ImVec2 Min(InsetMax.x - Extent.x - 16.0f * Scale, InsetMax.y + 6.0f * Scale);
-        const ImVec2 Max(InsetMax.x, Min.y + 1.4f * Css * Lines + 8.0f * Scale);
-        DrawList->AddRectFilled(Min, Max, IM_COL32(0x10, 0x10, 0x10, 0xCC), 8.0f * Scale);
-        DrawList->AddText(Mono, Size, ImVec2(Min.x + 8.0f * Scale, Min.y + 4.0f * Scale + ResolveHalfLeading(1.4f, JetBrainsMonoEm) * Css), MutedTone, Legend,
-                          nullptr, WrapW);
-    }
-    // 📝 .overlay-close at top/right 6 px inside the frame.
-    return ConstructOverlayClose(Id, Faces, ImVec2(InsetMax.x - 26.0f * Scale, InsetMin.y + 6.0f * Scale), CloseTooltip, Scale);
-}
+
 
 void ViewportChromeControls::ConstructOverlayNotice(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 StageMin, ImVec2 StageMax, const char* Text,
                                                     float Scale)
@@ -564,18 +436,23 @@ void ViewportChromeControls::ConstructStatusStrip(ImDrawList* DrawList, const Ed
     const float MeasurementTop  = 0.5f * (Min.y + Max.y - MeasurementSize);
     const float CaptionTop      = MeasurementTop + 0.8f * (MeasurementSize - CaptionSize);
     auto MeasureItem = [&](const ViewportStatusItem& Item) {
-        return ConstructSpacedText(nullptr, Faces.Regular, CaptionSize, ImVec2(), 0, Item.Caption.c_str(), Spacing) + 8.0f * Scale +
+        return (Item.Glyph ? 18 * Scale : 0) + ConstructSpacedText(nullptr, Faces.Regular, CaptionSize, ImVec2(), 0, Item.Caption.c_str(), Spacing) + 8.0f * Scale +
                MeasureText(Faces.Regular, MeasurementSize, Item.Measurement.c_str());
     };
     auto ConstructItem = [&](const ViewportStatusItem& Item, float Pen) {
+        if (Item.Glyph)
+        {
+            GlyphSymbol::Construct(DrawList,Item.Glyph,{Pen,(Min.y+Max.y)*.5f-6*Scale},12*Scale,1.6f,Item.Colour ? Item.Colour : StatusMeasurement);
+            Pen += 18*Scale;
+        }
         const float CaptionW = ConstructSpacedText(DrawList, Faces.Regular, CaptionSize, ImVec2(Pen, CaptionTop), StatusCaption, Item.Caption.c_str(), Spacing);
-        DrawList->AddText(ResolveFace(Faces.Regular), MeasurementSize, ImVec2(Pen + CaptionW + 8.0f * Scale, MeasurementTop), StatusMeasurement,
+        DrawList->AddText(ResolveFace(Faces.Regular), MeasurementSize, ImVec2(Pen + CaptionW + 8.0f * Scale, MeasurementTop), Item.Colour ? Item.Colour : StatusMeasurement,
                           Item.Measurement.c_str());
     };
     float TrailingWidth = 0.0f;
     for (const ViewportStatusItem& Item : Trailing) TrailingWidth += MeasureItem(Item) + 22.0f * Scale;
     const float TrailingStart = Max.x - 16.0f * Scale - std::max(0.0f, TrailingWidth - 22.0f * Scale);
-    DrawList->PushClipRect(Min, ImVec2(TrailingStart - 22.0f * Scale, Max.y), true);
+    DrawList->PushClipRect(Min, ImVec2(Trailing.empty() ? Max.x : TrailingStart - 22.0f * Scale, Max.y), true);
     float Pen = Min.x + 16.0f * Scale;
     for (const ViewportStatusItem& Item : Leading)
     {

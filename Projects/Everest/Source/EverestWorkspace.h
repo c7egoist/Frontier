@@ -42,7 +42,7 @@ struct SceneViewportRequest
     std::array<double, 3> CameraTarget        = {1.0, 0.0, 0.0};      // [m]
     double                VerticalFieldOfView = 1.0471975511965976;   // [rad]
     double                DeltaSeconds        = 0.0;                  // [s]
-    bool                  DistanceSlice       = false;                // [-] the demo's distance-slice inset (I)
+    std::array<double,3> CameraUp = {0,0,1};
 };
 
 // 📝 What the host's renderer reports for the viewport bar, readout and status strip (the demo's PresentMeasurements).
@@ -62,6 +62,7 @@ struct SceneViewportReadout
     uint32_t                TlasInstances       = 0;         // [-] active software TLAS instances
     uint32_t                ClipResolution      = 0;         // [voxels] distance clipmap edge
     uint32_t                SurfaceCards        = 0;         // [-] surface cards
+    uint32_t                SceneTriangles      = 0;
     uint32_t                GeometryClusters    = 0;         // [-] geometry cluster candidates
 };
 
@@ -76,8 +77,7 @@ struct SceneViewportImage
 struct SceneViewportOverlays
 {
     bool ReadoutVisible       = false;   // [-] HudVisible, off by default as in the demo
-    bool DistanceSliceVisible = false;   // [-] InsetEnabled
-    bool CleanView            = false;   // [-]
+    bool Fullscreen = false;
 };
 
 // 📝 Free camera of the viewport, navigated as Unreal Engine's perspective viewport (z up, metres): a position, the view's
@@ -114,6 +114,7 @@ struct SceneViewportPointer
     bool                  RightDown     = false;        // [-]
     bool                  MiddleDown    = false;        // [-]
     bool                  AltDown       = false;        // [-]
+    bool                  ControlDown   = false;
     bool                  ShiftDown     = false;        // [-]
     std::array<double, 2> MotionPixels  = {0.0, 0.0};   // [px] pointer motion, +x right, +y down
     double                WheelNotches  = 0.0;          // [-] +away from the user
@@ -123,6 +124,31 @@ struct SceneViewportPointer
 
 // 📝 Advances the viewport camera by one tick of input: Unreal Engine's perspective viewport navigation.
 void IntegrateSceneViewportFlight(SceneViewportFlight& Flight, const SceneViewportPointer& Pointer, double DeltaSeconds);
+
+enum class SceneCameraMode : uint32_t { Orbit, Chase, Free, Top, Bottom, Front, Back, Left, Right, Space };
+inline constexpr std::array<const char*,10> SceneCameraNames = {"Orbit selected","Chase selected","Free / WASD","Top","Bottom","Front","Back","Left","Right","Space navigation"};
+struct SceneCameraSubject
+{
+    bool Available = false;
+    bool Celestial = false;
+    std::array<double,3> Position{};
+    double Radius = 5;
+    double Azimuth = 0, Elevation = 0, Diameter = 1;
+};
+struct SceneViewportNavigation
+{
+    SceneCameraMode Mode = SceneCameraMode::Free;
+    std::array<double,3> Anchor{};
+    std::array<double,3> ChaseOffset{};
+    std::array<double,3> Up = {0,0,1};
+    SceneViewportFlight ScenePose;
+    bool ScenePoseReady = false;
+    uint64_t Selected = 0;
+};
+void ConfigureSceneCamera(SceneViewportFlight& Flight, SceneViewportNavigation& Navigation,
+                          SceneCameraMode Mode, const SceneCameraSubject& Subject, bool FrameSelection = false);
+void IntegrateSceneCamera(SceneViewportFlight& Flight, SceneViewportNavigation& Navigation,
+                          const SceneViewportPointer& Pointer, const SceneCameraSubject& Subject, double DeltaSeconds);
 
 class EverestWorkspace
 {
@@ -151,6 +177,7 @@ class EverestWorkspace
     //    PlatformHandle) while a camera drag lasts, so the view turns without the pointer meeting the screen edge; the
     //    pointer returns where the drag began. Without it the pointer stays visible and free.
     std::function<void(void* PlatformWindow, bool ConstraintEnabled)> ConstrainPointer;
+    [[nodiscard]] SceneViewportNavigation& AccessViewportNavigation() noexcept { return Navigation; }
     [[nodiscard]] SceneViewportFlight&      AccessViewportFlight() noexcept { return Flight; }
     [[nodiscard]] SceneViewportOverlays&    AccessViewportOverlays() noexcept { return Overlays; }
 
@@ -181,7 +208,9 @@ class EverestWorkspace
     void ReleasePointerConstraint();
     void ConstructViewportBar(const ImVec2& Min, const ImVec2& Max, float Scale);
     void ConstructViewportOverlays(const ImVec2& StageMin, const ImVec2& StageMax, const SceneViewportImage& Image, float Scale);
-    void ConstructStatusStrip(float Scale);
+    void ConstructViewportFooter(float Scale);
+    SceneCameraSubject ResolveCameraSubject() const;
+    void ConstructFullscreenViewport(float Scale);
     void ToggleViewportOverlay(int Overlay);
     void AnnounceViewportNotice(std::string Text);
 
@@ -193,6 +222,7 @@ class EverestWorkspace
     Frontier::LogStreamPanel      LogPanel;
     uint64_t                      ObservedLayoutRevision = 0;
     SceneViewportFlight           Flight{};
+    SceneViewportNavigation Navigation{};
     double                        ViewportDeltaSeconds   = 0.0;
     void*                         ConstrainedWindow      = nullptr;   // [-] platform window holding the pointer, or null
     int                           ConstraintSettleTicks  = 0;         // [-] ticks whose motion is dropped after a lock

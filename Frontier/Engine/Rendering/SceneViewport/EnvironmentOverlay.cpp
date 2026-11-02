@@ -8,6 +8,7 @@
 
 #include "Engine/PlanetaryAtmosphere/PlanetaryEnsemble.h"
 #include "Engine/PhysicalDynamics/AtmosphericFlow.h"
+#include "Engine/PlanetaryAtmosphere/CelestialAuthoring.h"
 #include <unordered_map>
 #include <unordered_set>
 
@@ -211,8 +212,8 @@ bool EnvironmentOverlay::Construct(const std::filesystem::path& EnvironmentShade
     }
     Constructed_ = true;
     const std::vector<DescriptorSlot> Slots = {{D::Uniform}, {D::Texture2D}, {D::TextureDepth2D},
-                                               {D::StorageTexture2D, TextureFormat::Rgba16Float}, {D::StorageTexture2D, TextureFormat::Rgba16Float},
-                                               {D::StorageTexture2D, TextureFormat::Rgba16Float}, {D::StorageTexture2D, TextureFormat::Rgba16Float},
+                                               {D::StorageTexture2D, TextureFormat::Rgba32Float}, {D::StorageTexture2D, TextureFormat::Rgba32Float},
+                                               {D::StorageTexture2D, TextureFormat::Rgba32Float}, {D::StorageTexture2D, TextureFormat::Rgba32Float},
                                                {D::Uniform}, {D::StorageTexture2D, TextureFormat::Rgba16Float}};
     ImportLayout_  = Exchange_.ConstructDescriptorLayout(Slots, "Environment visibility");
     ImportRegion_  = Exchange_.ConstructRegion(16, "Environment import profile");
@@ -271,20 +272,13 @@ void EnvironmentOverlay::AdjustLight(const IlluminationHost& Host, const SceneEn
             for (int Channel = 0; Channel < 3; ++Channel) Arrival[Channel] = Colour[Channel] * Through[Channel] * Horizon * Fade * Lit * Gain;
             return Arrival;
         };
-        // 📝 Luna: the demo's full-moon light (0.08, 0.10, 0.14); phase 0 new · 0.5 full · 1 new, albedo against the reference 0.12.
-        const Vector3 LunaDirection  = ResolveMoonDirection(S.Moons.PrimaryOrbitDegrees, Latitude);
-        const double  LunaLit        = 0.5 - 0.5 * std::cos(2.0 * Pi * static_cast<double>(S.Moons.PrimaryPhase));
-        const Vector3 Luna           = Moonlight(LunaDirection, LunaLit, S.Moons.Enabled ? std::max(0.0, S.Moons.PrimaryAlbedo / 0.12) : 0.0,
-                                                 {0.08, 0.10, 0.14});
-        // 📝 Ember: disc ≈ 0.35 of Luna's at surface brightness 1.4 against 1.6, warmer; lit fraction (1 − cos elongation) / 2.
-        const Vector3 EmberDirection = ResolveMoonDirection(S.Moons.SecondaryOrbitDegrees, Latitude);
-        const double  EmberLit       = 0.5 - 0.5 * DotVector(Light.SunDirection, EmberDirection);
-        const Vector3 Ember          = Moonlight(EmberDirection, EmberLit, (S.Moons.Enabled && S.Moons.SecondaryMoonEnabled) ? 0.30 : 0.0,
-                                                 {0.10, 0.075, 0.05});
-        const double LunaSum  = Luna[0] + Luna[1] + Luna[2];
-        const double EmberSum = Ember[0] + Ember[1] + Ember[2];
-        if (LunaSum + EmberSum > 0.0) Light.Direction = LunaSum >= EmberSum ? LunaDirection : EmberDirection;
-        for (int Channel = 0; Channel < 3; ++Channel) Light.Illuminance[Channel] = Luna[Channel] + Ember[Channel];
+        const auto& Primary = S.Moons.Instances[0];
+        const Vector3 Direction = ResolveSkyDirection(Primary.ElevationDegrees,Primary.AzimuthDegrees);
+        const double Lit = .5 - .5 * std::cos(2 * Pi * Primary.PhaseDays / 29.53);
+        const double Gain = S.Moons.Enabled && S.Moons.IlluminateScene && Primary.Visible ?
+            std::clamp<double>(S.Moons.LightPower,0,5) * std::clamp<double>(Primary.Brightness,0,5) : 0;
+        Light.Direction = Direction;
+        Light.Illuminance = Moonlight(Direction,Lit,Gain,{.08,.10,.14});
     }
     AdjustedLight_ = Light;
 }
@@ -397,11 +391,12 @@ bool EnvironmentOverlay::ReconstructTargets(IlluminationHost& Host, uint32_t Wid
     Layers.Width         = Visibility.Width;
     Layers.Height        = Visibility.Height;
     Layers.DepthOrLayers = Visibility.ArrayLayers;
-    Layers.Format        = TextureFormat::Rgba16Float;
+    Layers.Format        = TextureFormat::Rgba32Float;
     Layers.Usage         = TextureUsage::Storage | TextureUsage::Sampled;
     VisibilityTexture_   = Exchange_.WrapTexture(Visibility.Image, Layers);
     TextureSpecification Overlaid = Layers;
     Overlaid.Label         = "Environment radiance (borrowed)";
+    Overlaid.Format        = TextureFormat::Rgba16Float;
     Overlaid.DepthOrLayers = 1;
     RadianceTexture_       = Exchange_.WrapTexture(Radiance.Image, Overlaid);
     if (!VisibilityTexture_ || !RadianceTexture_) return false;
@@ -446,7 +441,7 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     R.Atmosphere              = Air;
     R.AtmosphereSamples = std::clamp(S.Atmosphere.TierSamples,8u,64u);
     R.MultipleScattering = S.Atmosphere.MultiScatteringLut;
-    R.ObserverAltitudeKm      = ObserverAltitudeKm;
+    R.ObserverAltitudeKm = static_cast<float>(std::clamp(Camera.Position[2] / 1000.0,.001,1000.0));
     R.GroundPlaneY            = 0.0f;
     R.EnableAerialPerspective = S.Atmosphere.Enabled && S.Atmosphere.AerialPerspective;
     R.TwilightStrength        = 1.15f * std::clamp(S.Atmosphere.HorizonGlow, 0.0f, 3.0f);   // the page's Horizon glow
@@ -471,32 +466,29 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
         R.Suns.push_back(Sun);
     }
 
-    // ③ Luna and a second body on the observer's equator path; the phase follows the sun–moon geometry
+    // 📝 Every authored slot reaches the native lunar atlas, including phase and artistic diameter.
     R.Moons.clear();
     if (S.Moons.Enabled)
     {
-        LunarBodyDescriptor Luna;
-        Luna.Preset            = LunarBodyPreset::Luna;
-        Luna.DirectionUnit     = ToVec3(ProjectEnvironmentAxes(ResolveMoonDirection(S.Moons.PrimaryOrbitDegrees, Latitude)));
-        Luna.AngularRadiusRad  = 0.022f;
-        Luna.SurfaceBrightness = 1.6f * std::max(0.05f, S.Moons.PrimaryAlbedo / 0.12f);
-        Luna.EarthshineStrength = 0.0022f * std::max(0.0f, S.Moons.EarthshineLuminance / 0.22f);
-        R.Moons.push_back(Luna);
-        if (S.Moons.SecondaryMoonEnabled)
+        for (auto Moon : S.Moons.Instances)
         {
-            LunarBodyDescriptor Ember;
-            Ember.Preset            = LunarBodyPreset::Ember;
-            Ember.DirectionUnit     = ToVec3(ProjectEnvironmentAxes(ResolveMoonDirection(S.Moons.SecondaryOrbitDegrees, Latitude)));
-            Ember.AngularRadiusRad  = 0.013f;
-            Ember.SurfaceBrightness = 1.4f;
-            R.Moons.push_back(Ember);
+            if (Moon.FollowSky)
+            {
+                Moon.AzimuthDegrees=float(Host.LastCelestial.Moon.Azimuth);
+                Moon.ElevationDegrees=float(Host.LastCelestial.Moon.Elevation);
+                Moon.PhaseDays=float(Host.LastCelestial.MoonPhase);
+            }
+            if (!Moon.Visible) continue;
+            auto Descriptor = ResolveAuthoredMoon(Moon,static_cast<float>(2.9 / .82 * RadianceScale_));
+            Descriptor.EarthshineStrength = .0022f * std::max(0.0f,S.Moons.EarthshineLuminance / .22f);
+            R.Moons.push_back(Descriptor);
         }
     }
 
     // ④ Hipparcos stars and the planets of the demo's own orbital solver, turned with the sky
     const double Drift = S.ElapsedSeconds * std::max(0.0f, S.Stars.SiderealSpeed) * SiderealRate;
     const double φ     = Latitude * DegreesToRadian;
-    const double Δ     = Sidereal + Drift - CatalogueSidereal;
+    const double Δ     = Sidereal + Drift - CatalogueSidereal + S.Stars.RotationDegrees * DegreesToRadian;
     R.StarBasisRow0          = {static_cast<float>(std::cos(Δ)), static_cast<float>(std::cos(φ) * std::sin(Δ)), static_cast<float>(std::sin(φ) * std::sin(Δ))};
     R.StarBasisRow1          = {0.0f, static_cast<float>(std::sin(φ)), static_cast<float>(-std::cos(φ))};
     // 📝 Stars and the Milky Way carry fixed radiance: scaled so that, under the refresh's night exposure (≤ 0.82), they read
@@ -504,9 +496,12 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
     const float Starlight    = static_cast<float>(2.9 / 0.82 * RadianceScale_);
     R.StarBrightnessScale    = S.Stars.Enabled ? std::max(0.0f, S.Stars.MagnitudeGain) * Starlight : 0.0f;
     R.MilkyWayIntensity      = S.Stars.Enabled ? std::max(0.0f, S.Stars.MilkyWayLuminance / 0.55f) * Starlight : 0.0f;
-    R.ScintillationStrength  = std::max(0.0f, S.Stars.AtmosphericScintillate / 0.35f);
+    R.ScintillationStrength  = S.Stars.ScintillationEnabled ? std::max(0.0f, S.Stars.AtmosphericScintillate / 0.35f) : 0.0f;
     // 📝 N(m) ≈ 10^(0.4·m + 1.3) stars brighter than magnitude m over the whole sky.
-    R.StarLimitingMagnitude  = static_cast<float>(std::clamp((std::log10(std::max<double>(10.0, S.Stars.HipparcosCount)) - 1.3) / 0.4, 2.0, 8.0));
+    R.StarLimitingMagnitude = std::clamp(S.Stars.LimitingMagnitude,0.0f,8.0f);
+    R.StarPointSize = std::clamp(S.Stars.PointSize,.2f,3.0f);
+    R.StarScintillationRate = std::clamp(S.Stars.ScintillationRateHz,.2f,3.0f);
+    R.StarHalo = std::clamp(S.Stars.HaloGain,0.0f,2.0f);
     // 📝 The planets of the demo's own orbital solver, each from its Scene Directory entry (Venus, Jupiter, Mars, Saturn).
     R.Planets.clear();
     {
@@ -515,15 +510,9 @@ void EnvironmentOverlay::ResolveRealm(const IlluminationHost& Host, const SceneE
         {
             const size_t Body = std::min<size_t>(Planet.Body, PlanetArchetypes.size() - 1);
             if (!Planet.Enabled || Body >= Host.LastCelestial.Planets.size()) continue;
-            PlanetaryBodyDescriptor Descriptor;
-            Descriptor.Archetype          = PlanetArchetypes[Body];
-            Descriptor.DirectionUnit      = ToVec3(ProjectEnvironmentAxes(RotateAbout(Host.LastCelestial.Planets[Body].Direction, Pole, -Drift)));
-            Descriptor.AngularRadiusRad   = static_cast<float>(0.5 * std::clamp(static_cast<double>(Planet.ApparentDiameterDegrees), 0.05, 6.0) * DegreesToRadian);
-            Descriptor.SurfaceAlbedoScale = std::max(0.0f, Planet.Brightness);
-            Descriptor.SpinAxisUnit       = {0.12f, 0.97f, 0.21f};
-            Descriptor.ProceduralSeed     = 7u + static_cast<uint32_t>(Body) * 13u;
-            Descriptor.Rings.Enabled      = Planet.RingSystem;
-            Descriptor.Atmosphere.Enabled = Planet.AtmosphereShell;
+            const auto Direction = Planet.FollowSky ? ToVec3(ProjectEnvironmentAxes(RotateAbout(Host.LastCelestial.Planets[Body].Direction,Pole,-Drift))) :
+                ResolveCelestialDirection(Planet.AzimuthDegrees,Planet.ElevationDegrees);
+            auto Descriptor = ResolveAuthoredPlanet(Planet,Direction);
             R.Planets.push_back(Descriptor);
         }
     }
@@ -748,6 +737,7 @@ void EnvironmentOverlay::PublishEnvironmentReadout(const SceneEnvironment& Setti
         Bake->RequestSerial = Settings.Atmosphere.BakeRequested;
         Bake->Generation = BakeReadout_ ? BakeReadout_->Generation + 1 : 1;
         Bake->Inputs = Settings.Atmosphere;
+        Bake->ObserverAltitudeKm = Realm.ObserverAltitudeKm;
         if (!Realm.Suns.empty()) Bake->SolarDirection = Realm.Suns[0].DirectionUnit;
         auto& Projection = Planetary_->Sequence.AtmosphereLuts();
         Bake->Ready = Projection.ReadbackTransmittanceLayer(Environment_,0,Bake->Transmittance) &&

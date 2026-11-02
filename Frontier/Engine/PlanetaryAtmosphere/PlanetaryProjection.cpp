@@ -816,7 +816,7 @@ Vec3 PlanetaryDomeProjection::EvaluatePlanetaryBody(const PlanetaryBodyDescripto
                     const float SunLit    = InPlanetUmbra ? 0.03f : 1.0f;
                     const float SunTilt   = 0.28f + 0.72f * std::abs(Dot3(SpinAxis, SunDir));
                     const Vec3  RingTint  = Lerp3(Planet.Rings.InnerTintRgb, Planet.Rings.OuterTintRgb, NormU);
-                    RingRadiance          = Mul3(Mul3Comp(RingTint, SolarIrradianceRgb), RingAlpha * SunLit * SunTilt * 0.42f);
+                    RingRadiance          = Mul3(Mul3Comp(RingTint, SolarIrradianceRgb), RingAlpha * SunLit * SunTilt * 0.42f * Planet.SurfaceAlbedoScale);
                 }
             }
         }
@@ -843,7 +843,7 @@ Vec3 PlanetaryDomeProjection::EvaluatePlanetaryBody(const PlanetaryBodyDescripto
                 const float Fine  = Fbm3D({RotPt.X * 6.0f, RotPt.Y * 6.0f, RotPt.Z * 16.0f}, 3u, Planet.ProceduralSeed + 19u);
                 const Vec3  Zone  = {0.86f, 0.78f, 0.66f};
                 const Vec3  Belt  = {0.58f, 0.39f, 0.26f};
-                Albedo            = Lerp3(Belt, Zone, std::clamp(0.7f * Bands + 0.3f * Fine, 0.0f, 1.0f));
+                Albedo            = Lerp3(Belt, Zone, std::clamp(0.5f + (0.7f * Bands + 0.3f * Fine - 0.5f) * Planet.BandContrast, 0.0f, 1.0f));
                 const float SpotD = std::hypot(λLon - 0.5f, (φLat + 0.38f) * 2.2f);
                 if (SpotD < 0.28f)
                 {
@@ -868,6 +868,13 @@ Vec3 PlanetaryDomeProjection::EvaluatePlanetaryBody(const PlanetaryBodyDescripto
                 const float Maria = Fbm3D(Mul3(RotPt, 3.2f), 4u, Planet.ProceduralSeed);
                 const float Ridge = RidgedFbm3D(Mul3(RotPt, 8.5f), 4u, Planet.ProceduralSeed + 31u);
                 Albedo            = Lerp3({0.32f, 0.16f, 0.10f}, {0.72f, 0.38f, 0.20f}, std::clamp(0.65f * Maria + 0.35f * Ridge, 0.0f, 1.0f));
+                Albedo = Lerp3({.52f,.27f,.15f},Albedo,Planet.SurfaceDetail);
+                break;
+            }
+            case PlanetarySurfaceArchetype::CloudVeiledWorld:
+            {
+                const float Clouds = Fbm3D(Mul3(RotPt,5),4u,Planet.ProceduralSeed+997u);
+                Albedo = Lerp3({.60f,.40f,.18f},{.96f,.87f,.66f},std::clamp(.25f+Clouds*Planet.CloudVeil,0.0f,1.0f));
                 break;
             }
             case PlanetarySurfaceArchetype::MethaneIceGiant:
@@ -877,7 +884,7 @@ Vec3 PlanetaryDomeProjection::EvaluatePlanetaryBody(const PlanetaryBodyDescripto
                 break;
             }
         }
-        Albedo = Mul3(Albedo, Planet.SurfaceAlbedoScale);
+        Albedo = Mul3(Mul3Comp(Albedo,Planet.SurfaceTint), Planet.SurfaceAlbedoScale);
 
         float RingShadow = 1.0f;
         if (Planet.Rings.Enabled)
@@ -927,7 +934,7 @@ Vec3 PlanetaryDomeProjection::EvaluatePlanetaryBody(const PlanetaryBodyDescripto
                 const Vec3  MidPt   = Normalize3(Add3(RayOrigin, Mul3(ViewDir, 0.5f * (std::max(0.0f, ShellNear) + SegEnd))));
                 const float SunTerm = Smoothstep(-0.22f, 0.45f, Dot3(MidPt, SunDir));
                 const float LimbOpt = std::clamp(Path / (2.0f * std::sqrt(ShellRadius * ShellRadius - 1.0f)), 0.0f, 1.4f);
-                const float Glow    = Planet.Atmosphere.LimbGlowStrength * LimbOpt * LimbOpt * SunTerm * 0.35f;
+                const float Glow    = Planet.SurfaceAlbedoScale * Planet.Atmosphere.LimbGlowStrength * LimbOpt * LimbOpt * SunTerm * 0.35f;
                 AtmoRadiance        = Mul3(Mul3Comp(Planet.Atmosphere.RayleighTintRgb, SolarIrradianceRgb), Glow);
             }
         }
@@ -967,6 +974,7 @@ Vec3 PlanetaryDomeProjection::EvaluateLunarBody(const LunarBodyDescriptor& Moon,
                                                 float                      PixelAngularSizeRad,
                                                 float&                     OutCoverage) const noexcept
 {
+    if (Moon.OverridePhase) SolarIrradianceRgb = Moon.PhaseIrradiance;
     OutCoverage = 0.0f;
     if (Moon.AngularRadiusRad <= 1e-6f)
     {
@@ -974,7 +982,7 @@ Vec3 PlanetaryDomeProjection::EvaluateLunarBody(const LunarBodyDescriptor& Moon,
     }
     const Vec3  ViewDir  = Normalize3(ViewDirectionUnit);
     const Vec3  MoonDir  = Normalize3(Moon.DirectionUnit);
-    const Vec3  SunDir   = Normalize3(SunDirectionUnit);
+    const Vec3  SunDir   = Normalize3(Moon.OverridePhase ? Moon.PhaseLightDirection : SunDirectionUnit);
     const float cosθ     = std::clamp(Dot3(ViewDir, MoonDir), -1.0f, 1.0f);
     const float θRad     = std::acos(cosθ);
     const float HalfAa   = std::max(0.55f * PixelAngularSizeRad, 1e-5f);

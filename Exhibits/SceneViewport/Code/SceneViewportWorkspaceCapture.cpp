@@ -89,7 +89,6 @@ int main(int ArgumentCount, char** Arguments)
 
         // 📝 The capture shows the demo's readout (H) and distance slice (I), which the editor starts with off.
         Workspace.AccessViewportOverlays().ReadoutVisible       = true;
-        Workspace.AccessViewportOverlays().DistanceSliceVisible = true;
         for (int Tick = 0; Tick < Refreshes; ++Tick)
         {
             Centre->PrepareInterface();

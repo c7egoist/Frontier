@@ -85,6 +85,14 @@ class MoonInspector final : public RecordInspector
                "/4";
     }
 
+    bool QueryViewTarget(InspectorViewTarget& View) const noexcept override
+    {
+        const auto& Body = Parameters.Instances[ActiveInstance];
+        View.Celestial = true; View.Azimuth = Body.AzimuthDegrees; View.Elevation = Body.ElevationDegrees;
+        View.Diameter = Body.AngularDiameterDegrees;
+        return true;
+    }
+
   private:
     void RefreshSurface();
     void ConstructSurface(const DiagramPen &Pen, bool Comparison = false, bool Guide = false);

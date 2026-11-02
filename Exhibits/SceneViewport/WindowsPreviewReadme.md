@@ -1,130 +1,86 @@
-# Frontier editor — Scene Viewport preview (Windows x64)
+# Frontier editor preview — Windows x64
 
-This folder runs as extracted. Keep `Frontier.exe`, `EngineContent/` and `Projects/` side by side.
-`Package.json` lists anything left out of this download under `omitted`: the small download leaves out the Texture
-Studio material archives, which the Scene Viewport does not read.
+Extract the ZIP into a new folder. Keep `Frontier.exe`, `EngineContent/` and `Projects/` together.
+Start `Frontier.exe`, then open Project Everest. Alternatively:
 
-## Run
+```text
+Frontier.exe Projects\Everest\Everest.projectspace
+```
 
-1. Start `Frontier.exe`. The Project Browser opens and lists **Project Everest**. The Zig build (`Package.json` →
-   `toolchain`) also opens a console window with the log output; closing it closes the editor. The MSVC build has none.
-2. Open Everest. The **Scene Viewport** panel brings up the live renderer. The first bring-up takes a while,
-   because the distance volumes, surface cards and BVH are built from the scene. The panel shows the schematic and a
-   status line until the first image is ready.
-   - To skip the browser, run `Frontier.exe Projects\Everest\Everest.projectspace`, or drop the `.projectspace` file
-     on `Frontier.exe`.
-3. Camera controls, as in Unreal Engine's perspective viewport. The pointer hides during a drag and comes back
-   where the drag began.
+`Package.json` identifies the source revision, file hashes, toolchain and omitted content. The small archive excludes
+Texture Studio material archives; the scene viewport does not need them.
 
-   | Input                                  | Camera                                                          |
-   |----------------------------------------|-----------------------------------------------------------------|
-   | hold right button, move the mouse      | look around in place                                            |
-   | hold right button + W / S              | fly forward / back (also ↑ / ↓, numpad 8 / 2)                   |
-   | hold right button + A / D              | fly left / right (also ← / →, numpad 4 / 6)                     |
-   | hold right button + E / Q              | up / down in the world (also Page Up / Page Down, numpad 9 / 7) |
-   | hold right button + R / F              | up / down along the view                                        |
-   | hold right button + Z / C              | widen / narrow the field of view; it returns on release         |
-   | hold right button + mouse wheel        | camera speed 1–8 (shown briefly at the bottom of the viewport)  |
-   | Shift while flying                     | twice the speed                                                 |
-   | hold left button, move the mouse       | forward / back over the ground and turn                         |
-   | middle button, or left + right buttons | move sideways and up / down without turning                     |
-   | mouse wheel                            | step forward / back (0.96 m per notch)                          |
-   | Alt + left / right / middle drag       | orbit / dolly / track around a pivot ahead of the camera        |
-   | F                                      | back to the level's starting view                               |
-4. The viewport bar above the image is the VehicleHMI demo's:
-   - the select switches the inspection view (Final image, Direct sun only, … the demo's 15). It is the
-     `RenderPipeline` record's buffer index, so the Inspector shows the same choice;
-   - **Particles** opens the level's particle editor;
-   - the round buttons, also on keys: readout **H**, distance slice **I** (or **J**) and clean view **V**, which hides
-     both. Respawn and Reassemble are greyed out, because this level has no vehicle and no breakable props;
-   - the strip along the bottom of the window shows the frame rate, the refresh time, the quality, the sun, the camera
-     position and the GPU.
-5. Select the level's environment records in the Scene Directory and edit them in the Inspector:
-   `Solar`, `OpticalFlare`, `Atmosphere` (with the four `Planet` entries under it: Venus, Jupiter, Mars, Saturn),
-   `Clouds` (global/local), `Stars`, `Moons`, `Fog` (height/local), `AerialFog`, `Lightning`, `Wind` and
-   `RenderPipeline`.
-   - `RenderPipeline` quality tier 0/1/2 selects the demo's `low`/`medium`/`high` grade.
-   - The hardware ray query (RTX) tier selects the ReSTIR path tracer. Turning it off selects the distance-field GI
-     (GTX path). Changing a tier rebuilds the viewport.
+## Celestial bodies
 
-## Environment controls in this build
+- Moon controls now drive all four native sky slots: visibility, phase, placement, orientation, diameter, brightness
+  and glow. The primary slot also controls moonlight at night.
+- Use **Find in sky** to frame the selected body. **Place in view** switches off following and puts it above the
+  horizon.
+- Venus, Jupiter, Mars and Saturn each have their own interactive surface instruments and live native previews.
+  Controls for orientation, surface appearance, atmospheric limbs and rings update the viewport.
+- **Follow sky** uses the date and observer settings on the Sun. Editing manual placement switches following off.
+- Stars' limiting magnitude, size, halo, rotation and scintillation controls now reach native rendering.
+- Previews are isolated surface evaluations under fixed reference light; they are not copies of the scene camera.
 
-The native inspector includes Clouds/local cloud, Wind, Height Fog, Atmospheric Fog, local fog, Lightning, Stars,
-four-slot Moon authoring and Lens Flare. The original Sun and Atmosphere pages are retained.
+## Cameras and viewport
 
-- **Local volumes:** Local Cloud and Local Volumetric Fog start disabled in the default scene. Select one and press
-  Place in front of camera, or enable it. Both now render natively. The creation menu also offers Local Cloud and
-Local Fog.
-- **Force Field:** Wind is its own contributor under the Force Field record. Enable Show world vectors and place the
-  inspection region ahead of the camera. Arrows display evaluated velocity in m/s, with an explicit X-ray overlay.
-- **Wind:** direction, gust, shear, veer and curl drive native density advection. Follow wind is independent per medium;
-  stopping Wind or unlinking a medium retains its accumulated position. Tree bending is not a registered consumer.
-- **Fog:** box, ellipsoid, sphere and hemisphere/dome bounds, density falloff, spatial noise and sun self-shadowing
-  work.
-  March samples can be tuned, including 16/32/64/128. Enabled local fog volumes share the highest requested budget.
-- **Clouds:** view samples, sun-shadow taps and trace-resolution percentage affect actual native rendering. Shared
-  cloud quality is authored on the global Cloud record, including when that global layer is disabled.
-- **Atmosphere baking:** press Bake atmosphere with the viewport running. Actual GPU tables and the inputs used to
-  build them appear below. Use baked settings freezes those coefficients; edits stay separate until rebake. Disabling
-  the switch returns to live settings. Save level / Ctrl+S persists the coefficients; GPU images regenerate on reload.
-- **Lens Flare export:** Export HDR writes a 640 × 280 linear RGB PFM through a path-entry modal; existing files are
-  refused.
-- Lightning execution/audio, four-body Moon rendering, custom flare layers and unconnected artistic shadow controls
-  remain labelled unavailable or reference-only. No fake GPU timings are displayed.
+| Input / mode | Action |
+|--------------|--------|
+| Camera dropdown | Orbit selected, Chase selected, Free/WASD, Top, Bottom, Front, Back, Left, Right, Space |
+| Free / RMB + mouse | Look around |
+| Free / RMB + W/A/S/D | Move forward/back/left/right |
+| Free / E/Q, Shift | Up/down; speed boost |
+| Free / RMB + wheel | Change flight speed |
+| Orbit / middle or left drag | Rotate around the selected finite target |
+| Orbit / Shift-middle | Pan |
+| Orbit / Ctrl-middle or wheel | Dolly |
+| Chase | Follow the active selected target; sky bodies provide directional tracking |
+| F / focus button | Frame the selected target |
+| Circular reset button | Restore the scene camera |
+| V | Fill the application window with the viewport |
+| Escape or V in fullscreen | Restore the docked panels |
+| H | Toggle the detailed readout |
 
-The code was checked on native Linux software Vulkan. The Windows binary was cross-built, not launched here.
-It is unsigned and not antivirus-scanned. See the repository's `Exhibits/LocalMedia/` for native images and results.
+Axis views use fixed-axis perspective projection. Space navigation starts at 150 km, enables wide-range flight, and
+restores the earlier scene position when leaving. It is not a new physical solar-system simulation.
 
-## What you are looking at
+The scene-name notch, old Scene/renderer/live text, particle-editor launcher, respawn/reassemble buttons and
+Distance Slice debug view have been removed. Distance Slice is also removed from the native presentation shader.
 
-- The 1:1 C++/Vulkan/Slang port of the VehicleHMI demo's ReSTIR GI renders the demo's proving ground, without the car.
-- The PlanetaryAtmosphere environment is drawn over it: atmosphere, sun, lens flare, volumetric clouds, height fog lit
-  by
-  the street lamps, moons, planets and Hipparcos stars.
-- The environment also lights the scene. Its sun, filtered through its air, is the key light, and Luna and Ember take
-  over at night. Its sky lights every bounce and reflection, its clouds shade the ground, and the buildings and posts
-  shadow the sun shafts in the fog.
-- Everything runs on the editor's own Vulkan 1.3 device and queue.
-- Select **Environment · Solar** in the Outliner to open the demo's Sun page in the Inspector. It has four tabs:
-  - **Overview:** drag the dial, use the presets, switch the Sunlight, Sun disc and Day cycle tiles.
-  - **Daylight:** date, place and time. "Manual ↗" switches to "Time linked ↗", and the Day cycle runs the clock.
-  - **Light & colour:** intensity, temperature or an RGB tint, and the spectrum reference.
-  - **Disc & optics:** angular size and aureole, plus "Open Lens Flare ↗", which selects the flare.
+Each panel owns its footer. The viewport footer reports FPS, render time, scene triangles and Sun elevation using
+colour and status icons. Render time is not a separate GPU timestamp. No workspace-wide status footer remains.
 
-  Every change applies live and is saved with the level.
+## Outliner and settings
 
-## Requirements
+Outliner shows 15 actual scene/environment entries. The Frontier brand/workspace banners and level badge are removed.
+Simulation Origin and unrendered scientific, fluid, fracture and particle examples are not in the default scene.
+Their reusable engine code remains; regression examples live in an exhibit fixture.
 
-- Windows 10/11 x64.
-- A GPU and driver with Vulkan 1.3, dynamic rendering, scalar block layout and shader draw parameters.
-- The RTX path needs `VK_KHR_ray_query` and acceleration structures. Without them, set the ray query tier off.
+Required renderer settings remain persisted in the level. Open **Control Centre → Quick Controls → Render settings**
+to edit the renderer without listing its implementation details as scene objects. Save with **Ctrl+S** or **Save
+level**.
 
-If the viewport cannot start, its status line says why. The same message is written to the Log Stream panel and to
-the diagnostic journal.
+## Local media, wind and baking
 
-## If it does not start
+- Local Cloud and Local Volumetric Fog start disabled. Select one and **Place in front of camera**, or enable it.
+  Both render natively. Local Cloud and Local Fog also have explicit creation-menu entries.
+- Wind is a separate contributor under Force Field. Field vectors are evaluated velocity in m/s and are labelled as
+  an X-ray overlay. No vegetation/tree-bending consumer is registered in Everest.
+- Following media advect their density through fixed bounds. Stopping or unlinking retains accumulated displacement.
+- Fog supports box/ellipsoid/sphere/hemisphere bounds, falloff, noise, self-shadowing and adjustable march samples.
+  Cloud trace resolution and 16/32/64/128-style sample budgets affect actual rendering.
+- **Atmosphere → Baking → Bake atmosphere** generates real GPU lookups and shows their input snapshot.
+  **Use baked settings** freezes those optical coefficients; rebake to replace them or turn it off for live editing.
+  Coefficients persist with the level; GPU images regenerate from them on load. The Sun remains dynamic.
+- Lens Flare **Export HDR** writes linear RGB PFM and refuses to overwrite an existing file.
 
-- The failure dialog names what was missing or refused, and the path of the diagnostic file:
-  `%LOCALAPPDATA%\Frontier\Logs\Frontier-<number>.log`. That file is the most useful thing to send back.
-- The journal records start-up, the Vulkan device, the project that opened and the Scene Viewport's first statuses
-  (renderer, extent, refresh time), so a viewport problem on a particular GPU shows up there too.
-- The Scene Viewport writes its bring-up into the same journal, one line per step (`[SceneViewport] bring-up ① facet
-  space …` to `⑧ PlanetaryAtmosphere environment …`). A device failure names the Vulkan result and the step that was
-  submitted (`device fault: …`). The first two refreshes are submitted step by step, so a fault there names its step.
-- Keep the extracted folder together: `Frontier.exe` reads `EngineContent/ShaderArchives/Surface` (Project Browser),
-  `GlobalIllumination` and `Environment` (Scene Viewport) beside itself.
+## Validation and limitations
 
-## Not verified
+Native C++/Vulkan changes are tested on Linux with SwiftShader. The Windows executable is cross-built, not
+interactively executed on Windows here. The package is unsigned and not antivirus-scanned.
 
-- This build is **unsigned** and was **not antivirus-scanned**. Windows SmartScreen or the browser may warn about it.
-  Do not turn protection off. If the download or start is blocked, build from source instead (see the repository's
-  `Exhibits/SceneViewport/README.md`).
-- `Package.json` → `toolchain` says how this copy was built: the repository's pinned Zig cross-toolchain on Linux, or
-  MSVC. Releases on GitHub are launched on a GitHub Windows runner with a CPU Vulkan driver before they are published;
-  the release notes carry that run's result and screenshots. No copy has been run on a hardware GPU by the authors, and
-  all rendering evidence in the repository comes from CPU Vulkan drivers.
-- Known gaps:
-  - the drawn moon discs still follow the sun–moon geometry; the `Moons` record's phase sets Luna's light only;
-  - viewport submissions are synchronous.
+See `Exhibits/CelestialWorkspace/` and `Exhibits/LocalMedia/` in the repository for actual rendered evidence,
+parameter-change checks and reproduction commands. Captures use small scene render extents for software-Vulkan
+validation; they are not hardware-performance claims.
 
-`Package.json` lists the source revision, the toolchain and a SHA-256 for every file.
+Unconnected artistic shadow controls and unsupported specialist authoring features remain explicitly unavailable.

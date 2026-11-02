@@ -43,7 +43,7 @@ std::array<double, 3> Sample(const std::vector<float> &Image, int Width, int Hei
 std::array<double, 2> SkyCoordinate(const AtmosphereBakeReadout &Bake, const std::array<double, 3> &Direction)
 {
     const double Ground     = std::max(100.0f, Bake.Inputs.PlanetRadiusKm);
-    const double Limb       = -std::asin(Ground / (Ground + .05));
+    const double Limb       = -std::asin(Ground / (Ground + std::max(.001f,Bake.ObserverAltitudeKm)));
     const double Elevation  = std::asin(std::clamp(Direction[1], -1.0, 1.0));
     const double Vertical   = Elevation < Limb
                                   ? .5 - .5 * std::sqrt(std::clamp((Elevation - Limb) / std::max(-Pi * .5 - Limb, -.0001), 0.0, 1.0))

@@ -1044,6 +1044,7 @@ bool AtmosphereInspector::ConstructBaking(ControlColumn &Page)
         Reading("Ozone", Inputs.OzoneAbsorptionScale, "×");
         Reading("Rayleigh height", Inputs.RayleighHeightMetres, "m");
         Reading("Mie height", Inputs.MieHeightMetres, "m");
+        Reading("Observer altitude", Bake->ObserverAltitudeKm, "km");
         Reading("Planet radius", Inputs.PlanetRadiusKm, "km");
         Reading("Atmosphere depth", Inputs.AtmosphereThicknessKm, "km");
         Reading("Ground albedo R", Inputs.GroundAlbedo[0], "");

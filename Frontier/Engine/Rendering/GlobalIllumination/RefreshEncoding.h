@@ -44,7 +44,6 @@ struct RefreshToggles
     uint32_t SpatialCount         = 5;
     double   SkyScale             = 1.0;
     double   IncandescenceScale   = 1.0;
-    double   SliceHeight          = 0.6;    // [m]
     double   ExposureCompensation = 0.0;    // [EV]
     double   IndirectScale        = 1.0;
     uint32_t DistanceInspection   = 1;
@@ -57,7 +56,7 @@ struct RefreshToggles
 struct RefreshExternalInputs
 {
     double                 ElapsedSeconds  = 0.0;    // [s]
-    uint32_t               HmiWord         = 0;      // [-] scalar 119: inset | brightness << 8 | scale << 20
+    uint32_t               PresentationControl         = 0;      // [-] scalar 119: brightness << 8 | scale << 20
     std::array<float, 8>   FireBlock{};              // [-] scalars 120..127
     std::vector<float>     EnvironmentBlock{};       // [-] scalars 128..267 (EncodeEnvironment)
     bool                   SmokeResident   = false;

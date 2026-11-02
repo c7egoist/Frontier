@@ -361,7 +361,21 @@ void PanelDockspace::ConstructInterface(float Scale)
                     Entry.Placement = 1;
                 ImGui::EndPopup();
             }
-            Entry.Specification.ConstructContent();
+            if (Entry.Specification.ConstructFooter)
+            {
+                const ImVec2 Origin = ImGui::GetCursorScreenPos();
+                const ImVec2 Extent = ImGui::GetContentRegionAvail();
+                const float Footer = Entry.Specification.FooterHeight * Scale;
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding,ImVec2(0,0));
+                ImGui::BeginChild("##PanelContent",ImVec2(Extent.x,std::max(1.0f,Extent.y-Footer)),ImGuiChildFlags_None,
+                    Entry.Specification.WheelScrollOnly ? ImGuiWindowFlags_NoScrollbar : ImGuiWindowFlags_None);
+                Entry.Specification.ConstructContent();
+                ImGui::EndChild();
+                ImGui::PopStyleVar();
+                ImGui::SetCursorScreenPos(ImVec2(Origin.x,Origin.y+Extent.y-Footer));
+                Entry.Specification.ConstructFooter();
+            }
+            else Entry.Specification.ConstructContent();
             Entry.Presented = true;
         }
         else

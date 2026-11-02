@@ -26,6 +26,8 @@ struct ViewportStatusItem
 {
     std::string Caption{};       // [-] e.g. "REALTIME"
     std::string Measurement{};   // [-] e.g. "60 fps"
+    ImU32 Colour = 0;
+    const char* Glyph = nullptr;
 };
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -46,11 +48,10 @@ class ViewportChromeControls
     static constexpr float StatusStripHeight = 28.0f;   // [px] #shell's status row
 
     // 📝 .viewport-tabs .scene-pill: the scene's name hanging from the top of the tab strip, centred across it.
-    static void  ConstructScenePill(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 StripMin, ImVec2 StripMax, const char* Text, float Scale);
+
     static void  ConstructBarBackground(ImDrawList* DrawList, ImVec2 Min, ImVec2 Max, float Scale);
-    static float ConstructSceneHeading(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 Min, float Height, const char* Title,
-                                       const char* Subtitle, float Scale);
-    static float ConstructLivePill(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 Min, float Height, const char* Text, float Scale);
+
+
     [[nodiscard]] static float MeasureLabelButton(const EditorTypefaces& Faces, const char* Label, float Scale);
     static bool  ConstructLabelButton(const char*            Id,
                                       const EditorTypefaces& Faces,
@@ -87,14 +88,7 @@ class ViewportChromeControls
                                          const std::vector<std::string>& Lines,
                                          const char*                     CloseTooltip,
                                          float                           Scale);
-    // 📝 #inset-frame: the close button in the distance slice's top-right corner and the legend beneath it; true when closed.
-    static bool  ConstructInsetFrame(const char*            Id,
-                                     const EditorTypefaces& Faces,
-                                     ImVec2                 InsetMin,
-                                     ImVec2                 InsetMax,
-                                     const char*            Legend,
-                                     const char*            CloseTooltip,
-                                     float                  Scale);
+
     // 📝 #overlay-notice: a short line centred near the stage's bottom edge.
     static void  ConstructOverlayNotice(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 StageMin, ImVec2 StageMax, const char* Text, float Scale);
     // 📝 #bring-up: the start-up card over the whole stage (heading, caption, 360 px progress bar).

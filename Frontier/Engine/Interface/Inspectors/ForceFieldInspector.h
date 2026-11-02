@@ -48,6 +48,13 @@ class ForceFieldInspector final : public RecordInspector
     }
     void ConstructInspector() override;
 
+    bool QueryViewTarget(InspectorViewTarget& View) const noexcept override
+    {
+        View.Position = {Parameters.CentreMetres[0],Parameters.CentreMetres[1],Parameters.CentreMetres[2]};
+        View.Radius = std::max({Parameters.HalfExtentsMetres[0],Parameters.HalfExtentsMetres[1],Parameters.HalfExtentsMetres[2]});
+        return true;
+    }
+
   private:
     ForceFieldConfiguration &Parameters;
 };

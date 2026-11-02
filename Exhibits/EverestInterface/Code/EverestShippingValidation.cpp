@@ -41,6 +41,7 @@ int main(int ArgumentCount, char** Arguments)
 
         Everest::EverestWorkspace Workspace(EverestRoot);
         Frontier::SceneWorld&     World = Workspace.QuerySceneWorld();
+        Require(World.LoadLevelSpace(EverestRoot.parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace"), "Simulation exhibit fixture failed to load");
 
         Require(World.QueryRecordCount() == 30, "Expected 30 dynamic records from Default.levelspace in Shipping.");
         Require(Frontier::RecordStore::Instance().QueryCount() == 30, "RecordStore count mismatch in Shipping.");

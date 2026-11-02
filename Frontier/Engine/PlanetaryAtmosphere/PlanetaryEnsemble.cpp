@@ -309,6 +309,8 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
                                  Moon.RollAngleRad,
                                  Haze});
             MoonSlots.push_back({HazeTint.X, HazeTint.Y, HazeTint.Z, Haze});
+            MoonSlots.push_back({Moon.PhaseLightDirection.X,Moon.PhaseLightDirection.Y,Moon.PhaseLightDirection.Z,Moon.OverridePhase ? 1.0f : 0.0f});
+            MoonSlots.push_back({Moon.PhaseIrradiance.X,Moon.PhaseIrradiance.Y,Moon.PhaseIrradiance.Z,Moon.GlowStrength});
         }
 
         const uint32_t PlanetFirst = static_cast<uint32_t>(PlanetSlots.size() / kPlanetRecordFloat4Stride);
@@ -330,7 +332,7 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
                 SurfTint = {0.32f, 0.78f, 0.94f};
             }
 
-            const std::array<float, 3> AtmoTint = {0.42f, 0.68f, 1.0f};
+            const auto AtmoTint = FromVec3(Planet.Atmosphere.RayleighTintRgb);
             const float RingOpacity = Planet.Rings.Enabled
                                           ? std::clamp(1.0f - std::exp(-Planet.Rings.PeakOpticalDepth), 0.0f, 0.96f)
                                           : 0.0f;
@@ -338,18 +340,20 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
             PlanetSlots.push_back({Dir[0], Dir[1], Dir[2], Planet.AngularRadiusRad});
             PlanetSlots.push_back({Axis[0], Axis[1], Axis[2], Planet.SpinPhaseRad});
             PlanetSlots.push_back({SurfTint[0], SurfTint[1], SurfTint[2], 0.55f * Planet.SurfaceAlbedoScale});
-            PlanetSlots.push_back({AtmoTint[0],
-                                   AtmoTint[1],
-                                   AtmoTint[2],
+            PlanetSlots.push_back({AtmoTint[0] * Planet.SurfaceAlbedoScale,
+                                   AtmoTint[1] * Planet.SurfaceAlbedoScale,
+                                   AtmoTint[2] * Planet.SurfaceAlbedoScale,
                                    Planet.Atmosphere.Enabled ? Planet.Atmosphere.ShellHeightFraction : 0.0f});
-            PlanetSlots.push_back({1.6f,
+            PlanetSlots.push_back({Planet.Atmosphere.LimbGlowStrength,
                                    static_cast<float>(static_cast<uint32_t>(Planet.Archetype)),
                                    Planet.Rings.Enabled ? Planet.Rings.InnerRadiusRatio : 0.0f,
                                    Planet.Rings.Enabled ? Planet.Rings.OuterRadiusRatio : 0.0f});
             PlanetSlots.push_back({RingOpacity,
-                                   Planet.Rings.OuterTintRgb.X,
-                                   Planet.Rings.OuterTintRgb.Y,
-                                   Planet.Rings.OuterTintRgb.Z});
+                                   Planet.Rings.OuterTintRgb.X * Planet.SurfaceAlbedoScale,
+                                   Planet.Rings.OuterTintRgb.Y * Planet.SurfaceAlbedoScale,
+                                   Planet.Rings.OuterTintRgb.Z * Planet.SurfaceAlbedoScale});
+            PlanetSlots.push_back({Planet.BandContrast,Planet.SurfaceDetail,Planet.CloudVeil,float(Planet.ProceduralSeed)});
+            PlanetSlots.push_back({Planet.SurfaceTint.X,Planet.SurfaceTint.Y,Planet.SurfaceTint.Z,0});
         }
 
         const uint32_t CloudFirst = static_cast<uint32_t>(CloudSlots.size() / kCloudRecordFloat4Stride);
@@ -588,6 +592,7 @@ PackedEnsemblePayload PackEnsemblePayload(const PlanetaryRealmEnsemble& Ensemble
                               static_cast<float>(ForceCount),
                               static_cast<float>(WindProf.GustAmplitude),
                               EffWindSec});
+        RealmSlots.push_back({Realm.StarPointSize,Realm.StarScintillationRate,Realm.StarHalo,0});
     }
 
     for (const PortalAperture& Portal : Ensemble.Portals)

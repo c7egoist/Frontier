@@ -94,7 +94,7 @@ std::vector<uint8_t> GenerateLunarReference(const LunarSurfaceReference &Surface
                  static_cast<size_t>(std::clamp(static_cast<int>(U * Surface.Width), 0, Surface.Width - 1))) *
                 3;
             const double Wrap        = Preset.Haze * 0.3;
-            const double Cosine      = std::max(0.0, (RolledAlong * std::sin(Phase) - NormalForward * std::cos(Phase) + Wrap) / (1 + Wrap));
+            const double Cosine      = std::max(0.0, (NormalAlong * std::sin(Phase) - NormalForward * std::cos(Phase) + Wrap) / (1 + Wrap));
             const double Limb        = 1 - 0.5 * std::pow(1 - NormalForward, 2) * std::max<double>(Preset.Haze, 0.35);
             const double Light       = (std::pow(Cosine, 0.8) * Limb + 0.012) * Moon.Brightness;
             const size_t Destination = (static_cast<size_t>(Row) * 256 + Column) * 4;

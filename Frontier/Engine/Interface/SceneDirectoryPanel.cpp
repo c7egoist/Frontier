@@ -54,6 +54,14 @@ void SceneDirectoryPanel::Synchronize(const SceneDirectory& Directory)
 {
     std::vector<RecordToken> Order;
     Directory.CopyRegistrationOrder(Order);
+    if (!VisibleTypes.empty()) std::erase_if(Order,[&](RecordToken Token)
+    {
+        return !VisibleTypes.contains(Directory.QueryMetadata(Token).SubtitleCategory);
+    });
+    const std::unordered_set<uint64_t> Included = [&]
+    {
+        std::unordered_set<uint64_t> Tokens; for (auto Token : Order) Tokens.insert(Token.Value); return Tokens;
+    }();
     Total = static_cast<uint32_t>(Order.size());
 
     std::unordered_map<uint64_t, std::vector<RecordToken>> Children;
@@ -61,7 +69,7 @@ void SceneDirectoryPanel::Synchronize(const SceneDirectory& Directory)
     for (const RecordToken Token : Order)
     {
         const RecordToken Parent = Directory.QueryParent(Token);
-        if (Parent.IsValid() && Directory.QueryRegistered(Parent))
+        if (Parent.IsValid() && Included.contains(Parent.Value))
         {
             Children[Parent.Value].push_back(Token);
         }

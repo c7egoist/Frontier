@@ -183,6 +183,7 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/Inspectors/LunarSurfaceReference.cpp
     Frontier/Engine/Interface/Inspectors/MoonInspector.cpp
     Frontier/Engine/Interface/Inspectors/PlanetInspector.cpp
+    Frontier/Engine/Interface/Inspectors/PlanetSurfacePreview.cpp
     Frontier/Engine/Interface/Inspectors/FogInspector.cpp
     Frontier/Engine/Interface/Inspectors/LightningInspector.cpp
     Frontier/Engine/Interface/Inspectors/WindInspector.cpp
@@ -204,6 +205,7 @@ include(Automation/StageProjectContent.cmake)
 add_library(EverestProjectEditor STATIC
     Projects/Everest/Source/EverestApplication.cpp
     Projects/Everest/Source/EverestSimulationRecords.cpp
+    Projects/Everest/Source/EverestViewportNavigation.cpp
     Projects/Everest/Source/EverestWorkspace.cpp
     Projects/Everest/Source/EverestSceneViewport.cpp)
 target_include_directories(EverestProjectEditor PUBLIC
@@ -227,6 +229,7 @@ add_library(EverestProjectRuntime STATIC
     Frontier/Engine/Diagnostics/LogStream.cpp
     Projects/Everest/Source/EverestApplication.cpp
     Projects/Everest/Source/EverestSimulationRecords.cpp
+    Projects/Everest/Source/EverestViewportNavigation.cpp
     Projects/Everest/Source/EverestWorkspace.cpp)
 target_include_directories(EverestProjectRuntime PUBLIC
     "${CMAKE_SOURCE_DIR}"
@@ -624,6 +627,15 @@ if(BUILD_TESTING)
     target_link_libraries(InterfaceValidation PRIVATE FrontierEditorUI)
     add_test(NAME InterfaceValidation COMMAND InterfaceValidation
         "${CMAKE_SOURCE_DIR}/EngineContent/Icons" "${CMAKE_BINARY_DIR}/evidence")
+
+    add_executable(CelestialWorkspaceValidation
+        Exhibits/CelestialWorkspace/Code/CelestialWorkspaceValidation.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(CelestialWorkspaceValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(CelestialWorkspaceValidation PRIVATE EverestProjectEditor)
+    add_test(NAME CelestialWorkspaceValidation COMMAND CelestialWorkspaceValidation
+        "${CMAKE_SOURCE_DIR}/EngineContent" "${CMAKE_SOURCE_DIR}/Projects/Everest"
+        "${CMAKE_BINARY_DIR}/ShaderArchives" "${CMAKE_BINARY_DIR}/celestial-workspace-exhibits")
 
     add_executable(SceneMediaValidation
         Exhibits/LocalMedia/Code/SceneMediaValidation.cpp

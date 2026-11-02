@@ -31,7 +31,7 @@ class DisplayProjection
     DisplayProjection(DeviceExchange& Exchange, ShaderInterchange& Shaders);
 
     void ConstructPrograms(const std::shared_ptr<DeviceRegion>& RefreshRegion, const std::shared_ptr<DeviceRegion>& MaterialRegion,
-                           const std::shared_ptr<DescriptorLayout>& DistanceLayout, const std::shared_ptr<DeviceRegion>& OccupantRegion,
+                           const std::shared_ptr<DeviceRegion>& OccupantRegion,
                            TextureFormat PresentFormat);
     void ConstructTargets(std::array<uint32_t, 2> ScreenExtent, const SurfaceProjection& Surface, const ResamplingSequence& Resampling,
                           const VarianceIntegrator& Diffuse, const VarianceIntegrator& Glossy, const SurfaceCardDepot& Cards,
@@ -42,8 +42,7 @@ class DisplayProjection
     //    adaptation meters the recombined image, so the overlay leaves the exposure where the demo puts it.
     void RecordRecombination(CommandSequence& Sequence);
     void RecordAntialias(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Source);
-    void RecordPresent(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Target,
-                       const std::shared_ptr<DescriptorGroup>& DistanceGroup);
+    void RecordPresent(CommandSequence& Sequence, uint32_t Parity, const std::shared_ptr<DeviceTextureView>& Target);
 
     std::array<uint32_t, 2>                           ScreenExtent{0, 0};
     std::shared_ptr<DeviceTexture>                    RecombinedTexture{}, InspectionTexture{}, PostTexture{};

@@ -256,8 +256,8 @@ void ValidatePersistence(const std::filesystem::path &Project, const std::filesy
 {
     SceneWorld  World;
     std::string Diagnostic;
-    if (!World.LoadStartupLevelFromProject(Project, &Diagnostic)) throw std::runtime_error(Diagnostic);
-    for (const char *Category : {"Clouds", "Wind", "ForceField", "Atmosphere", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
+    if (!World.LoadLevelSpace(Project.parent_path().parent_path().parent_path() / "Exhibits/EverestInterface/Content/Simulation.levelspace", &Diagnostic)) throw std::runtime_error(Diagnostic);
+    for (const char *Category : {"Clouds", "Wind", "ForceField", "Atmosphere", "Planet", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
     {
         auto *Entry = World.FindFirstByType(Category);
         if (!Entry) throw std::runtime_error(std::string("Missing record ") + Category);
@@ -286,7 +286,7 @@ void ValidatePersistence(const std::filesystem::path &Project, const std::filesy
     Verify(Reloaded.LoadLevelSpace(Scratch / "Environment.levelspace", &Diagnostic) &&
                Reloaded.QueryRecordCount() == World.QueryRecordCount(),
            "Complete environment level reloaded");
-    for (const char *Category : {"Clouds", "Wind", "ForceField", "Atmosphere", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
+    for (const char *Category : {"Clouds", "Wind", "ForceField", "Atmosphere", "Planet", "Fog", "AerialFog", "Lightning", "Stars", "OpticalFlare", "Moons"})
     {
         toml::table Before, After;
         World.FindFirstByType(Category)->SerializeConfiguration(Before);
@@ -490,6 +490,17 @@ void ValidateInspectors(InterfaceCapture &Capture, const std::filesystem::path &
         {
             Inspector->ConfigureSection(Section);
             Capture.Capture(*Inspector, Output / (std::string(Name) + "-" + std::to_string(Section) + ".png"));
+        }
+    }
+    auto Planets = ResolveDefaultPlanets();
+    for (auto& Planet : Planets)
+    {
+        Planet.ApparentDiameterDegrees = 8;
+        PlanetInspector Page(Planet);
+        for (int Section = 0; Section < Page.QuerySectionCount(); ++Section)
+        {
+            Page.ConfigureSection(Section);
+            Capture.Capture(Page,Output / (std::string(PlanetBodyNames[Planet.Body]) + "-" + std::to_string(Section) + ".png"));
         }
     }
     Capture.Height = 6000;
