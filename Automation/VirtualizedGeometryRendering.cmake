@@ -6,7 +6,8 @@
 
 add_library(FrontierVirtualizedGeometry STATIC
     Frontier/Engine/Rendering/VirtualizedGeometry/NestingConstruction.cpp
-    Frontier/Engine/Rendering/VirtualizedGeometry/NestingSelection.cpp)
+    Frontier/Engine/Rendering/VirtualizedGeometry/NestingSelection.cpp
+    Frontier/Engine/Rendering/VirtualizedGeometry/VisibilityResolve.cpp)
 target_include_directories(FrontierVirtualizedGeometry PUBLIC "${CMAKE_SOURCE_DIR}/Frontier/Engine")
 target_compile_features(FrontierVirtualizedGeometry PUBLIC cxx_std_20)
 # 📝 Parity with the demo's JavaScript doubles needs plain IEEE evaluation: no fused multiply-adds.
@@ -28,4 +29,15 @@ if(BUILD_TESTING)
         FRONTIER_VIRTUALIZED_GEOMETRY_EXHIBIT="${CMAKE_SOURCE_DIR}/Exhibits/VirtualizedGeometry")
     target_link_libraries(NestingParityValidation PRIVATE FrontierVirtualizedGeometry)
     add_test(NAME NestingParityValidation COMMAND NestingParityValidation)
+
+    # 📝 The demo's 22 virtualized geometry tests, assertion for assertion (Exhibits/VirtualizedGeometry/README.md).
+    add_executable(VirtualizedGeometryValidation
+        Exhibits/VirtualizedGeometry/Code/VirtualizedGeometryValidation.cpp
+        Exhibits/VirtualizedGeometry/Code/SurfaceSoupArchive.cpp
+        Engine/Render/StbImageImplementation.cpp)
+    target_include_directories(VirtualizedGeometryValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_compile_definitions(VirtualizedGeometryValidation PRIVATE
+        FRONTIER_VIRTUALIZED_GEOMETRY_EXHIBIT="${CMAKE_SOURCE_DIR}/Exhibits/VirtualizedGeometry")
+    target_link_libraries(VirtualizedGeometryValidation PRIVATE FrontierVirtualizedGeometry)
+    add_test(NAME VirtualizedGeometryValidation COMMAND VirtualizedGeometryValidation)
 endif()
