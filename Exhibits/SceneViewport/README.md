@@ -14,6 +14,11 @@ shade the ground, and the scene's sun cascades shadow the fog's sun shafts. The 
 environment only feeds the inputs the ported units already read (see *How it is wired*). The four planets are level
 records in the Scene Directory, like the sun, the moons and the stars.
 
+The viewport navigates like **Unreal Engine's** perspective viewport (see *Camera*). The VehicleHMI demo's interface is
+being ported 1:1: its **viewport column** (tab strip, viewport bar, readout, distance slice, notices, bring-up and
+failure) and its **status strip** are in. The 15 inspection views and the distance slice drive the port's own inputs.
+`InterfacePortInventory.md` tracks every element and label of the demo's interface.
+
 | Daylight — the level as authored | Low sun — flare, long shadows |
 |---|---|
 | ![Daylight](Images/Daylight.png) | ![Low sun](Images/LowSunFlare.png) |
@@ -46,14 +51,18 @@ clock), so the shafts take 0.42 % of the frame's light. The drift between the tw
 ![Everest workspace with the live Scene Viewport](Images/EverestLiveSceneViewport.png)
 
 That capture runs the real `EverestWorkspace` and the same `EverestSceneViewport` bridge the editor uses, through the
-level's records (`Default.levelspace`, quality tier 2 → `high`, 1028 × 482). The bridge opens a device of its own here,
-reads the presented image back, and the interface is CPU-rasterized at 1920 × 1080
-(`Code/SceneViewportWorkspaceCapture.cpp`, log in `Results/SceneViewportWorkspaceCapture.txt`). The Log Stream shows the
-viewport's bring-up line. In the editor, the image stays on the GPU and ImGui samples it directly. The capture was
-re-taken after Option A, from `24ef36a1`: 12 refreshes in 11 min 25 s on SwiftShader. The environment lights the scene,
-and the Outliner lists the four planet entries (26 records). Compared with the capture before Option A, the shadows now
-take the environment's blue sky as their fill. The blue/red ratio of the pixel means rises from 1.10 to 2.08 in the
-ground shadow, from 0.96 to 1.36 on the tower's shaded side, and from 1.21 to 1.46 in the sky's zenith band.
+level's records (`Default.levelspace`, quality tier 2 → `high`, 1028 × 430 under the demo's viewport bar). The bridge
+opens a device of its own here, reads the presented image back, and the interface is CPU-rasterized at 1920 × 1080
+(`Code/SceneViewportWorkspaceCapture.cpp`, log in `Results/SceneViewportWorkspaceCapture.txt`). In the editor, the image
+stays on the GPU and ImGui samples it directly. The capture took 12 refreshes, 11 min 10 s on SwiftShader. The demo's
+readout (H) and distance slice (I) are switched on here; the editor starts with both off.
+
+The readout's TLAS line reads 504 instances (1007 entries) and 20,878 BLAS triangles. The demo reports 509 (1017) and
+the same 20,878 triangles. Its five extra instances are the car body and wheels, which this level omits, and a TLAS over
+N instances has 2N − 1 entries. A thirteenth refresh, with the RenderPipeline record set to the demo's "Normals" view as
+the bar's select sets it, shows the port's normals inspection:
+
+![The Normals inspection view](Images/EverestLiveSceneViewport-Normals.png)
 
 ## Layout
 
@@ -81,8 +90,12 @@ VulkanPresentation (Vulkan 1.3 + dynamicRendering, scalar layouts, draw paramete
    │  QueryDeviceAccess() → VulkanDeviceAccess
    ├─ DeviceExchange::AttachDevice          illumination port     ─┐  one VkDevice, one queue, the editor's thread
    └─ VulkanComputeExchange::AttachDevice   PlanetaryAtmosphere   ─┘
-EverestWorkspace::ConstructViewportSurface   Unreal Engine viewport navigation (IntegrateSceneViewportFlight; see Camera)
+EverestWorkspace::ConstructViewportSurface   Unreal Engine viewport navigation (IntegrateSceneViewportFlight, Camera)
+   ├─ ConstructViewportBar / ConstructViewportOverlays / ConstructStatusStrip   the demo's viewport column + status
+   │     (ViewportChromeControls; inspection view → RenderPipeline.InspectionModeIndex; distance slice → request)
    └─ PresentSceneViewport(request) → EverestSceneViewport::Render(request, level records)
+        │  Rendering.Inspection → RefreshToggles::Inspection; Rendering.DistanceSlice → HMI word bit 0
+        │  Readout ← SceneViewport::QueryStatistics
         └─ SceneViewport::Refresh
              ① AdvanceCelestial → ResolveLight → AdjustLight* → light-change relighting (10° / 30 %) → EncodeEnvironment
                → RefreshConstants; LuminaireRegister (20 street lamps + 10 lamp posts) — all ported 1:1
@@ -376,6 +389,11 @@ Everest opened, and then `VK_ERROR_DEVICE_LOST`.
   sandbox.
 - **Moon phase record.** The drawn moon discs follow the sun–moon geometry. The `Moons` record's phase sets only Luna's
   light.
+- **Interface.** Only the demo's viewport column and status strip are ported (`InterfacePortInventory.md`). The Clean
+  view keeps the editor columns, because hiding docked panels (the demo's P) is not ported yet. The bring-up card shows
+  no progress, because the bring-up runs synchronously. The viewport chrome uses the demo's dark colours and does not
+  follow a light appearance. The controls were checked offscreen (layout, readout figures, the Normals view through the
+  record). Clicking through them on Windows was not tried.
 - **Synchronous submissions.** Submissions are synchronous (one fence wait per step group). Pipelining the viewport
   with the interface (Option A's optional step 6) waits until the device-loss fix has run on the RX 9060 XT, because
   pipelining changes the same synchronization.

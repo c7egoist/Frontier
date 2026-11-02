@@ -93,14 +93,17 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     if (const auto* Entry = FindEntry<Frontier::RenderPipelineRecord>(World, "RenderPipeline")) Pipeline = Entry->QueryConfiguration();
     const std::string Quality    = Pipeline.QualityTier <= 0 ? "low" : (Pipeline.QualityTier == 1 ? "medium" : "high");
     const bool        RayTracing = Pipeline.HardwareRayQueryTier;
+    Outcome.Readout.Quality = Quality;
     if (!Pipeline.Enabled)
     {
-        Outcome.Status = "Render pipeline disabled";
+        Outcome.Status          = "Render pipeline disabled";
+        Outcome.Readout.Failure = Outcome.Status;
         return Outcome;
     }
     if (HostDeviceAttached_ && !Device_.Valid())
     {
-        Outcome.Status = "Scene viewport needs a Vulkan 1.3 adapter with dynamic rendering";
+        Outcome.Status          = "Scene viewport needs a Vulkan 1.3 adapter with dynamic rendering";
+        Outcome.Readout.Failure = Outcome.Status;
         return Outcome;
     }
 
@@ -109,7 +112,8 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     {
         if (!Failure_.empty() && Quality == Quality_ && RayTracing == RayTracing_)
         {
-            Outcome.Status = Failure_;
+            Outcome.Status          = Failure_;
+            Outcome.Readout.Failure = Failure_;
             return Outcome;
         }
         Viewport_.reset();
@@ -135,7 +139,8 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
             Failure_ = "Scene viewport unavailable: " + Diagnostic;
             Frontier::WriteLogFormat(ViewportLogCategory(), Frontier::LogSeverity::Error, Frontier::LogVerbosity::Log, "SceneViewport", "%s",
                                      Failure_.c_str());
-            Outcome.Status = Failure_;
+            Outcome.Status          = Failure_;
+            Outcome.Readout.Failure = Failure_;
             return Outcome;
         }
         Viewport_ = std::move(Candidate);
@@ -154,6 +159,8 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     Rendering.GlobalIllumination   = Pipeline.GlobalIllumination;
     Rendering.TemporalAntiAliasing = Pipeline.TemporalAntiAliasing;
     Rendering.ExposureCompensation = Pipeline.ExposureCompensationEv;
+    Rendering.Inspection           = static_cast<uint32_t>(std::clamp(Pipeline.InspectionModeIndex, 0, 14));
+    Rendering.DistanceSlice        = Request.DistanceSlice;
     // 📝 Screen targets follow the panel once its size held still for six interface ticks (a dragged splitter would rebuild
     //    them on every tick); meanwhile the last extent stretches over the panel.
     const auto Requested = Frontier::GlobalIllumination::SceneViewport::ResolveScreenExtent(Request.PanelWidth, Request.PanelHeight, Request.PixelDensity, Quality);
@@ -168,7 +175,8 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
         Frontier::WriteLogFormat(ViewportLogCategory(), Frontier::LogSeverity::Error, Frontier::LogVerbosity::Log, "SceneViewport", "%s",
                                  Failure_.c_str());
         Viewport_.reset();
-        Outcome.Status = Failure_;
+        Outcome.Status          = Failure_;
+        Outcome.Readout.Failure = Failure_;
         return Outcome;
     }
     const double Milliseconds = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
@@ -179,6 +187,29 @@ SceneViewportRefresh EverestSceneViewport::Render(const SceneViewportRequest& Re
     std::snprintf(Status, sizeof(Status), "LIVE: ReSTIR GI %s + PlanetaryAtmosphere  |  %u x %u  |  %.1f ms", RayTracing ? "RTX" : "GTX", Outcome.Extent[0],
                   Outcome.Extent[1], RefreshMilliseconds_);
     Outcome.Status = Status;
+
+    // 📝 The demo's readout figures (IlluminationHost.js PresentMeasurements): renderer tag and the TLAS line.
+    const Frontier::GlobalIllumination::ViewportStatistics Statistics = Viewport_->QueryStatistics();
+    char Tag[96];
+    if (Statistics.RayTracing)
+    {
+        std::snprintf(Tag, sizeof(Tag), "RTX ReSTIR PT (%uB GI \xC2\xB7 %uB Refl \xC2\xB7 M=%u)", Statistics.MaxBounces, Statistics.ReflectionBounces,
+                      Statistics.InitialCandidates);
+        char Acceleration[160];
+        std::snprintf(Acceleration, sizeof(Acceleration), "BVH hierarchy   TLAS %u instances (%u nodes) \xC2\xB7 BLAS %u tris", Statistics.TlasInstances,
+                      Statistics.TlasEntries, Statistics.BlasTriangles);
+        Outcome.Readout.AccelerationLine = Acceleration;
+    }
+    else
+    {
+        std::snprintf(Tag, sizeof(Tag), "GTX SDF GI");
+    }
+    Outcome.Readout.Presenting          = Outcome.View != VK_NULL_HANDLE;
+    Outcome.Readout.Adapter             = Viewport_->QueryAdapter();
+    Outcome.Readout.RendererTag         = Tag;
+    Outcome.Readout.ScreenExtent        = Statistics.ScreenExtent;
+    Outcome.Readout.TraceExtent         = Statistics.TraceExtent;
+    Outcome.Readout.RefreshMilliseconds = RefreshMilliseconds_;
     return Outcome;
 }
 

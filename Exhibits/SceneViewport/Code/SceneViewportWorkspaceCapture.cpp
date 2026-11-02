@@ -74,8 +74,9 @@ int main(int ArgumentCount, char** Arguments)
             const auto Start = std::chrono::steady_clock::now();
             const Everest::SceneViewportRefresh Outcome = Bridge.Render(Request, Workspace.QuerySceneWorld(), Workspace.QueryElapsedSeconds());
             Everest::SceneViewportImage Image;
-            Image.Status = Outcome.Status;
-            LastStatus   = Outcome.Status;
+            Image.Status  = Outcome.Status;
+            Image.Readout = Outcome.Readout;
+            LastStatus    = Outcome.Status;
             if (Outcome.View != VK_NULL_HANDLE && Bridge.AccessViewport()->ReadPresented(ViewportPixels))
             {
                 ViewportExtent = Outcome.Extent;
@@ -86,6 +87,9 @@ int main(int ArgumentCount, char** Arguments)
             return Image;
         };
 
+        // 📝 The capture shows the demo's readout (H) and distance slice (I), which the editor starts with off.
+        Workspace.AccessViewportOverlays().ReadoutVisible       = true;
+        Workspace.AccessViewportOverlays().DistanceSliceVisible = true;
         for (int Tick = 0; Tick < Refreshes; ++Tick)
         {
             Centre->PrepareInterface();
@@ -99,17 +103,38 @@ int main(int ArgumentCount, char** Arguments)
         }
         Require(!ViewportPixels.empty(), "no scene viewport image was presented: " + LastStatus);
 
-        const ImDrawData* DrawData = ImGui::GetDrawData();
-        std::vector<unsigned char> Pixels(static_cast<size_t>(CaptureWidth) * CaptureHeight * 3u, 14u);
-        const std::function<FrontierExhibit::Image(ImTextureID)> Resolve = [&](ImTextureID Texture) {
-            return Texture == ViewportTag ? FrontierExhibit::Image{ViewportPixels.data(), static_cast<int>(ViewportExtent[0]), static_cast<int>(ViewportExtent[1]), 4}
-                                          : FrontierExhibit::Image{};
+        const auto WriteCapture = [&](const std::filesystem::path& Target) {
+            const ImDrawData* DrawData = ImGui::GetDrawData();
+            std::vector<unsigned char> Pixels(static_cast<size_t>(CaptureWidth) * CaptureHeight * 3u, 14u);
+            const std::function<FrontierExhibit::Image(ImTextureID)> Resolve = [&](ImTextureID Texture) {
+                return Texture == ViewportTag ? FrontierExhibit::Image{ViewportPixels.data(), static_cast<int>(ViewportExtent[0]), static_cast<int>(ViewportExtent[1]), 4}
+                                              : FrontierExhibit::Image{};
+            };
+            for (const ImDrawList* List : DrawData->CmdLists)
+                FrontierExhibit::RasterizeCommands(List, Pixels.data(), CaptureWidth, CaptureHeight, DrawData->DisplayPos, DrawData->FramebufferScale, nullptr,
+                                                   &Resolve);
+            Require(stbi_write_png(Target.string().c_str(), CaptureWidth, CaptureHeight, 3, Pixels.data(), CaptureWidth * 3) != 0, "PNG write failed");
+            std::printf("[SceneViewportWorkspaceCapture] %s (viewport %u x %u)\n", Target.string().c_str(), ViewportExtent[0], ViewportExtent[1]);
         };
-        for (const ImDrawList* List : DrawData->CmdLists)
-            FrontierExhibit::RasterizeCommands(List, Pixels.data(), CaptureWidth, CaptureHeight, DrawData->DisplayPos, DrawData->FramebufferScale, nullptr,
-                                               &Resolve);
-        Require(stbi_write_png(OutputPath.string().c_str(), CaptureWidth, CaptureHeight, 3, Pixels.data(), CaptureWidth * 3) != 0, "PNG write failed");
-        std::printf("[SceneViewportWorkspaceCapture] %s (viewport %u x %u)\n", OutputPath.string().c_str(), ViewportExtent[0], ViewportExtent[1]);
+        WriteCapture(OutputPath);
+
+        // 📝 The viewport bar's inspection select writes the RenderPipeline record; the next refresh reads it. Here the record
+        //    is set to the demo's "Normals" view (8) and one more refresh is captured beside the main image.
+        if (auto* Pipeline = dynamic_cast<RenderPipelineRecord*>(Workspace.QuerySceneWorld().FindFirstByType("RenderPipeline")))
+        {
+            Pipeline->AccessConfiguration().InspectionModeIndex = 8;
+            Pipeline->AccessConfiguration().AdvanceRevision();
+            Centre->PrepareInterface();
+            ImGui::NewFrame();
+            (void)Centre->Integrate(1.0 / 30.0);
+            Workspace.ConstructInterface(1.0 / 30.0);
+            Centre->ConstructInterface();
+            ImGui::Render();
+            FrontierExhibit::AcknowledgeTextures();
+            std::filesystem::path Normals = OutputPath;
+            Normals.replace_filename(OutputPath.stem().string() + "-Normals" + OutputPath.extension().string());
+            WriteCapture(Normals);
+        }
 
         Workspace.PresentSceneViewport = nullptr;
         Ownership.reset();

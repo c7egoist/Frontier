@@ -48,9 +48,25 @@ struct ViewportCamera
 // 📝 Render-pipeline record values that change the refresh without rebuilding it.
 struct ViewportRendering
 {
-    bool   GlobalIllumination   = true;
-    bool   TemporalAntiAliasing = true;
-    double ExposureCompensation = 0.0;   // [EV]
+    bool     GlobalIllumination   = true;
+    bool     TemporalAntiAliasing = true;
+    double   ExposureCompensation = 0.0;     // [EV]
+    uint32_t Inspection           = 0;       // [-] the demo's inspection view 0–14 (RefreshToggles::Inspection)
+    bool     DistanceSlice        = false;   // [-] the distance-slice inset (the demo's InsetEnabled, HMI word bit 0)
+};
+
+// 📝 What the refresh ran with, for the viewport's readout (the demo's PresentMeasurements).
+struct ViewportStatistics
+{
+    std::array<uint32_t, 2> ScreenExtent      = {0, 0};   // [px]
+    std::array<uint32_t, 2> TraceExtent       = {0, 0};   // [px] resampling targets
+    bool                    RayTracing        = true;     // [-] RTX ReSTIR path tracer, else GTX distance-field GI
+    uint32_t                MaxBounces        = 0;        // [-]
+    uint32_t                ReflectionBounces = 0;        // [-]
+    uint32_t                InitialCandidates = 0;        // [-] M
+    uint32_t                TlasInstances     = 0;        // [-] active instances of the software TLAS
+    uint32_t                TlasEntries       = 0;        // [-] TLAS entries in use
+    uint32_t                BlasTriangles     = 0;        // [-] static BLAS triangles
 };
 
 class SceneViewport
@@ -77,6 +93,7 @@ class SceneViewport
     [[nodiscard]] std::array<uint32_t, 2> QueryScreenExtent() const noexcept;
     [[nodiscard]] bool QueryEnvironmentActive() const noexcept { return static_cast<bool>(Overlay_); }
     [[nodiscard]] const std::string& QueryAdapter() const noexcept { return Adapter_; }
+    [[nodiscard]] ViewportStatistics QueryStatistics() const noexcept;
     [[nodiscard]] const SceneViewportConfiguration& QueryConfiguration() const noexcept { return Configuration_; }
     bool ReadPresented(std::vector<uint8_t>& OutRgba);
 

@@ -24,14 +24,22 @@ Studio material archives, which the Scene Viewport does not read.
    | hold right button + E / Q              | up / down in the world (also Page Up / Page Down, numpad 9 / 7) |
    | hold right button + R / F              | up / down along the view                                        |
    | hold right button + Z / C              | widen / narrow the field of view; it returns on release         |
-   | hold right button + mouse wheel        | camera speed 1–8 (shown in the viewport's status line)          |
+   | hold right button + mouse wheel        | camera speed 1–8 (shown briefly at the bottom of the viewport)  |
    | Shift while flying                     | twice the speed                                                 |
    | hold left button, move the mouse       | forward / back over the ground and turn                         |
    | middle button, or left + right buttons | move sideways and up / down without turning                     |
    | mouse wheel                            | step forward / back (0.96 m per notch)                          |
    | Alt + left / right / middle drag       | orbit / dolly / track around a pivot ahead of the camera        |
    | F                                      | back to the level's starting view                               |
-4. Select the level's environment records in the Scene Directory and edit them in the Inspector:
+4. The viewport bar above the image is the VehicleHMI demo's:
+   - the select switches the inspection view (Final image, Direct sun only, … the demo's 15). It is the
+     `RenderPipeline` record's buffer index, so the Inspector shows the same choice;
+   - **Particles** opens the level's particle editor;
+   - the round buttons, also on keys: readout **H**, distance slice **I** (or **J**) and clean view **V**, which hides
+     both. Respawn and Reassemble are greyed out, because this level has no vehicle and no breakable props;
+   - the strip along the bottom of the window shows the frame rate, the refresh time, the quality, the sun, the camera
+     position and the GPU.
+5. Select the level's environment records in the Scene Directory and edit them in the Inspector:
    `Solar`, `OpticalFlare`, `Atmosphere` (with the four `Planet` entries under it: Venus, Jupiter, Mars, Saturn),
    `Clouds`, `Stars`, `Moons`, `Fog`, `Wind` and `RenderPipeline`.
    - `RenderPipeline` quality tier 0/1/2 selects the demo's `low`/`medium`/`high` grade.

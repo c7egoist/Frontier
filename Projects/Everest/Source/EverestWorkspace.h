@@ -39,12 +39,36 @@ struct SceneViewportRequest
     std::array<double, 3> CameraTarget        = {1.0, 0.0, 0.0};      // [m]
     double                VerticalFieldOfView = 1.0471975511965976;   // [rad]
     double                DeltaSeconds        = 0.0;                  // [s]
+    bool                  DistanceSlice       = false;                // [-] the demo's distance-slice inset (I)
+};
+
+// 📝 What the host's renderer reports for the viewport bar, readout and status strip (the demo's PresentMeasurements).
+struct SceneViewportReadout
+{
+    bool                    Presenting          = false;     // [-] an image is live
+    std::string             Adapter{};                       // [-] GPU name
+    std::string             Quality{};                       // [-] low / medium / high
+    std::string             RendererTag{};                   // [-] "RTX ReSTIR PT (3B GI · 2B Refl · M=2)" or "GTX SDF GI"
+    std::string             AccelerationLine{};              // [-] "BVH hierarchy   TLAS …" (RTX) or empty
+    std::array<uint32_t, 2> ScreenExtent        = {0, 0};    // [px]
+    std::array<uint32_t, 2> TraceExtent         = {0, 0};    // [px]
+    double                  RefreshMilliseconds = 0.0;       // [ms] smoothed refresh duration
+    std::string             Failure{};                       // [-] why there is no image, if it failed
 };
 
 struct SceneViewportImage
 {
-    uint64_t    Texture = 0;   // [-] ImTextureID of the presented image; 0 while unavailable
-    std::string Status{};      // [-] one line drawn over the viewport (renderer, extent, bring-up or failure)
+    uint64_t             Texture = 0;   // [-] ImTextureID of the presented image; 0 while unavailable
+    std::string          Status{};      // [-] renderer, extent and refresh time, or the bring-up / failure line
+    SceneViewportReadout Readout{};     // [-]
+};
+
+// 📝 The demo's overlay switches (OverlayDock.js): readout (H), distance slice (I) and the clean view (V), which hides both.
+struct SceneViewportOverlays
+{
+    bool ReadoutVisible       = false;   // [-] HudVisible, off by default as in the demo
+    bool DistanceSliceVisible = false;   // [-] InsetEnabled
+    bool CleanView            = false;   // [-]
 };
 
 // 📝 Free camera of the viewport, navigated as Unreal Engine's perspective viewport (z up, metres): a position, the view's
@@ -119,6 +143,7 @@ class EverestWorkspace
     //    pointer returns where the drag began. Without it the pointer stays visible and free.
     std::function<void(void* PlatformWindow, bool ConstraintEnabled)> ConstrainPointer;
     [[nodiscard]] SceneViewportFlight&      AccessViewportFlight() noexcept { return Flight; }
+    [[nodiscard]] SceneViewportOverlays&    AccessViewportOverlays() noexcept { return Overlays; }
 
     [[nodiscard]] Frontier::SceneDirectoryPanel& QueryOutliner() noexcept { return OutlinerPanel; }
     [[nodiscard]] Frontier::SceneInspectorPanel& QueryInspector() noexcept { return InspectorPanel; }
@@ -145,6 +170,11 @@ class EverestWorkspace
     void ConstructViewportSchematic(ImDrawList* DrawList, const ImVec2& Min, const ImVec2& Max);
     void IntegrateViewportCamera(bool Hovered, bool Active, double DeltaSeconds);
     void ReleasePointerConstraint();
+    void ConstructViewportBar(const ImVec2& Min, const ImVec2& Max, float Scale);
+    void ConstructViewportOverlays(const ImVec2& StageMin, const ImVec2& StageMax, const SceneViewportImage& Image, float Scale);
+    void ConstructStatusStrip(float Scale);
+    void ToggleViewportOverlay(int Overlay);
+    void AnnounceViewportNotice(std::string Text);
 
     Frontier::ControlCentrePanel& Centre;
     Frontier::PanelDockspace      Dockspace;
@@ -156,6 +186,14 @@ class EverestWorkspace
     double                        ViewportDeltaSeconds   = 0.0;
     void*                         ConstrainedWindow      = nullptr;   // [-] platform window holding the pointer, or null
     int                           ConstraintSettleTicks  = 0;         // [-] ticks whose motion is dropped after a lock
+    SceneViewportOverlays         Overlays{};
+    SceneViewportReadout          LastReadout{};
+    std::array<float, 240>        FrameDurations{};                   // [ms] the last 240 interface ticks (1 % low)
+    size_t                        FrameDurationCursor    = 0;
+    double                        FrameSeconds           = 0.0;       // [s] smoothed tick (0.9 / 0.1)
+    std::string                   NoticeText{};                       // [-] #overlay-notice
+    double                        NoticeSeconds          = 0.0;       // [s] left on screen
+    int                           AnnouncedSpeedSetting  = 4;         // [-]
 #endif
 
     std::filesystem::path ProjectRoot;

@@ -24,22 +24,24 @@
 namespace Frontier
 {
 
+// 📝 The VehicleHMI demo's inspection views (EditorControls.js select), in its order: the index is the port's
+//    RefreshToggles::Inspection, which DisplayPresent and the resolve shaders read.
 const char* const RenderInspectionModes::ModeNames[RenderInspectionModes::ModeCount] = {
-    "Final Lit",
+    "Final image",
+    "Direct sun only",
+    "Indirect diffuse (GI)",
+    "Indirect irradiance (denoised)",
+    "ReSTIR irradiance (raw, no denoise)",
+    "Glossy reflections",
+    "BVH / Distance-field inspection",
+    "Surface cards (texel space)",
+    "Normals",
     "Albedo",
-    "World Normal",
-    "Roughness",
-    "Metallic",
-    "Ambient Occlusion",
-    "Direct Sun",
-    "Indirect GI",
-    "Reflections",
-    "Distance Field",
-    "Surface Cards",
-    "Polygon Clusters",
-    "Motion Vectors",
-    "Volumetric Scattering",
-    "Thermal / Radiance",
+    "Clusters: visibility buffer IDs",
+    "Clusters: deferred resolve",
+    "Clusters: Hi-Z pyramid",
+    "Clusters: glass layers (front/back)",
+    "Clusters: LOD levels (near\xE2\x86\x92" "far)",
 };
 
 const char* const RenderInspectionModes::DistanceNames[RenderInspectionModes::DistanceCount] = {

@@ -15,14 +15,17 @@
 #include "Engine/Interface/NativeInspectors.h"
 #include "Engine/Interface/SceneDirectoryPanelRegistration.h"
 #include "Engine/Interface/SceneInspectorPanel.h"
+#include "Engine/Interface/ViewportChromeControls.h"
 #include "Engine/Scene/SceneDirectory.h"
 #include <imgui.h>
+#include <imgui_internal.h>
 #endif
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
+#include <vector>
 
 namespace Everest
 {
@@ -276,10 +279,10 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
     }
 
     Dockspace.ConfigureDockspaceKey("EverestWorkspaceDockspace");
-    Dockspace.ConfigureWorkspaceInsets(50.0f, 0.0f);
+    Dockspace.ConfigureWorkspaceInsets(50.0f, Frontier::ViewportChromeControls::StatusStripHeight);
 
     if (!Dockspace.Register(Frontier::MakeSceneDirectoryPanelSpecification(OutlinerPanel)) ||
-        !Dockspace.Register({"Viewport", "Scene Viewport", [this]() { ConstructViewportSurface(); }, true}) ||
+        !Dockspace.Register({"Viewport", "Viewport", [this]() { ConstructViewportSurface(); }, true}) ||
         !Dockspace.Register(Frontier::MakeLogStreamPanelSpecification(LogPanel)) ||
         !Dockspace.Register(Frontier::MakeSceneInspectorPanelSpecification(InspectorPanel)))
     {
@@ -464,9 +467,19 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
     LogPanel.Synchronize(Frontier::LogStore(), Frontier::LogCategories(), DeltaSeconds);
 
+    // 📝 The readout's frame figures: a 0.9 / 0.1 smoothed tick and the last 240 ticks for the 1 % low (IlluminationHost.js).
+    if (DeltaSeconds > 0.0)
+    {
+        FrameSeconds = FrameSeconds <= 0.0 ? DeltaSeconds : FrameSeconds * 0.9 + DeltaSeconds * 0.1;
+        FrameDurations[FrameDurationCursor] = static_cast<float>(DeltaSeconds * 1000.0);
+        FrameDurationCursor                 = (FrameDurationCursor + 1) % FrameDurations.size();
+    }
+    NoticeSeconds = std::max(0.0, NoticeSeconds - std::max(0.0, DeltaSeconds));
+
     const float Scale = Centre.QueryAppearance().QueryApplied().InterfaceScale / 100.0f;
     ConstructTopToolbar(Scale);
     Dockspace.ConstructInterface(Scale);
+    ConstructStatusStrip(Scale);
     Frontier::InspectorRuntime::Instance().ConstructActiveEditor();
 }
 
@@ -693,17 +706,45 @@ void EverestWorkspace::ReleasePointerConstraint()
 
 void EverestWorkspace::ConstructViewportSurface()
 {
-    const Frontier::InspectorPalette Palette = Frontier::InspectorPalette::Resolve();
-    const Frontier::EditorTypefaces  Faces   = Frontier::EditorTypefaces::Resolve();
-
+    // 📝 The demo's viewport column (index.html #viewport-column): the viewport bar above the stage; on the stage the
+    //    presented image, then the overlays (bring-up, failure, distance slice, readout, notice).
+    const float  Scale = Centre.QueryAppearance().QueryApplied().InterfaceScale / 100.0f;
     const ImVec2 Avail = ImGui::GetContentRegionAvail();
+    const float  BarH  = Frontier::ViewportChromeControls::BarHeight * Scale;
     const float  W     = std::max(64.0f, Avail.x);
-    const float  H     = std::max(64.0f, Avail.y);
+    const float  H     = std::max(64.0f + BarH, Avail.y);
     const ImVec2 Min   = ImGui::GetCursorScreenPos();
     const ImVec2 Max(Min.x + W, Min.y + H);
-    ImGui::InvisibleButton("##SceneViewportCanvas", ImVec2(W, H),
+    const ImVec2 StageMin(Min.x, Min.y + BarH);
+
+    // 📝 The demo's tab strip: "Viewport" and the scene pill (index.html .viewport-tabs).
+    if (const ImGuiWindow* Panel = ImGui::GetCurrentWindow(); Panel->DockNode != nullptr && Panel->DockNode->TabBar != nullptr &&
+                                                           !Panel->DockNode->IsHiddenTabBar() && Panel->DockNode->VisibleWindow == Panel)
+    {
+        const ImRect Strip = Panel->DockNode->TabBar->BarRect;
+        Frontier::ViewportChromeControls::ConstructScenePill(ImGui::GetForegroundDrawList(Panel->Viewport), Frontier::EditorTypefaces::Resolve(), Strip.Min,
+                                                             Strip.Max, "Proving Grounds", Scale);
+    }
+
+    ImGui::SetCursorScreenPos(StageMin);
+    ImGui::SetNextItemAllowOverlap();
+    ImGui::InvisibleButton("##SceneViewportCanvas", ImVec2(W, H - BarH),
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight | ImGuiButtonFlags_MouseButtonMiddle);
-    IntegrateViewportCamera(ImGui::IsItemHovered(), ImGui::IsItemActive(), ViewportDeltaSeconds);
+    const bool StageHovered = ImGui::IsItemHovered();
+    const bool StageActive  = ImGui::IsItemActive();
+    IntegrateViewportCamera(StageHovered, StageActive, ViewportDeltaSeconds);
+
+    // 📝 The demo's overlay keys, while the viewport has the pointer or the focus and no text field takes the keys.
+    const ImGuiIO& IO = ImGui::GetIO();
+    if ((StageHovered || ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) && !IO.WantTextInput && !StageActive)
+    {
+        if (ImGui::IsKeyPressed(ImGuiKey_H, false)) ToggleViewportOverlay(0);
+        // 📝 The demo's own labels disagree: the bar says "Distance slice (I)", the inset's close button "(J)", and its key is J
+        //    (I cycles the vehicle's lights). With no vehicle here, both toggle the slice.
+        if (ImGui::IsKeyPressed(ImGuiKey_I, false) || ImGui::IsKeyPressed(ImGuiKey_J, false)) ToggleViewportOverlay(1);
+        if (ImGui::IsKeyPressed(ImGuiKey_V, false)) ToggleViewportOverlay(2);
+        if (ImGui::IsKeyPressed(ImGuiKey_F8, false)) AnnounceViewportNotice("Chase follows the vehicle \xE2\x80\x94 this level has no vehicle");
+    }
 
     ImDrawList* DrawList = ImGui::GetWindowDrawList();
     DrawList->PushClipRect(Min, Max, true);
@@ -714,51 +755,267 @@ void EverestWorkspace::ConstructViewportSurface()
     {
         SceneViewportRequest Request;
         Request.PanelWidth          = W;
-        Request.PanelHeight         = H;
+        Request.PanelHeight         = H - BarH;
         Request.PixelDensity        = ImGui::GetWindowViewport() != nullptr ? ImGui::GetWindowViewport()->FramebufferScale.y : 1.0f;
         Request.CameraPosition      = Flight.Position;
         Request.CameraTarget        = Flight.ResolveTarget();
         Request.VerticalFieldOfView = Flight.ResolveFieldOfView();
         Request.DeltaSeconds        = ViewportDeltaSeconds;
-        Image = PresentSceneViewport(Request);
+        Request.DistanceSlice       = Overlays.DistanceSliceVisible && !Overlays.CleanView;
+        Image       = PresentSceneViewport(Request);
+        LastReadout = Image.Readout;
     }
     if (Image.Texture != 0)
     {
-        DrawList->AddImage(static_cast<ImTextureID>(Image.Texture), Min, Max);
+        DrawList->AddImage(static_cast<ImTextureID>(Image.Texture), StageMin, Max);
     }
     else
     {
-        ConstructViewportSchematic(DrawList, Min, Max);
+        ConstructViewportSchematic(DrawList, StageMin, Max);
     }
-
-    // Minimal viewport technical readout card.
-    char OverlayLine[192]{};
-    if (!Image.Status.empty())
-    {
-        std::snprintf(OverlayLine, sizeof(OverlayLine), "%s  |  SIM: %.1f s  |  CAMERA SPEED %d", Image.Status.c_str(), ElapsedSeconds,
-                      Flight.SpeedSetting);
-    }
-    else
-    {
-        int InspectionMode = 0;
-        if (const auto* PipeRec = dynamic_cast<const Frontier::RenderPipelineRecord*>(QuerySceneWorld().FindFirstByType("RenderPipeline")))
-        {
-            InspectionMode = std::clamp(PipeRec->QueryConfiguration().InspectionModeIndex, 0, 14);
-        }
-        std::snprintf(OverlayLine, sizeof(OverlayLine), "VIEW: %s  |  GRID: 5.0 m  |  SIM: %.1f s",
-                      Frontier::RenderInspectionModes::ModeNames[InspectionMode], ElapsedSeconds);
-    }
-    const float CardW = MeasureLabelWidth(Faces.Monospace, 10.0f, OverlayLine) + 20.0f;
-    DrawList->AddRectFilled(ImVec2(Min.x + 12.0f, Min.y + 12.0f),
-                            ImVec2(Min.x + 12.0f + CardW, Min.y + 36.0f),
-                            IM_COL32(14, 17, 22, 196), 6.0f);
-    DrawList->AddRect(ImVec2(Min.x + 12.0f, Min.y + 12.0f),
-                      ImVec2(Min.x + 12.0f + CardW, Min.y + 36.0f),
-                      Palette.CountCardBorder, 6.0f);
-    DrawList->AddText(Faces.Monospace, 10.0f, ImVec2(Min.x + 22.0f, Min.y + 18.5f),
-                      Palette.TextSecondary, OverlayLine);
-
+    ConstructViewportOverlays(StageMin, Max, Image, Scale);
     DrawList->PopClipRect();
+
+    ConstructViewportBar(Min, ImVec2(Max.x, StageMin.y), Scale);
+}
+
+void EverestWorkspace::ConstructViewportBar(const ImVec2& Min, const ImVec2& Max, float Scale)
+{
+    // 📝 EditorControls.js viewport bar, left to right: scene heading, live pill, Particles, camera rigs, inspection view,
+    //    then readout, distance slice, respawn, reassemble and clean view against the right edge.
+    using Frontier::ViewportChromeControls;
+    const Frontier::EditorTypefaces Faces    = Frontier::EditorTypefaces::Resolve();
+    ImDrawList*                     DrawList = ImGui::GetWindowDrawList();
+    const float                     Height   = Max.y - Min.y;
+    const float                     Gap      = ViewportChromeControls::BarGap * Scale;
+    ViewportChromeControls::ConstructBarBackground(DrawList, Min, Max, Scale);
+    DrawList->PushClipRect(Min, Max, true);
+
+    float Pen = Min.x + ViewportChromeControls::BarPadding * Scale;
+    Pen += ViewportChromeControls::ConstructSceneHeading(DrawList, Faces, ImVec2(Pen, Min.y), Height, "Scene",
+                                                         "Vulkan \xC2\xB7 distance-field GI \xC2\xB7 ReSTIR", Scale) + Gap;
+    if (LastReadout.Presenting)
+    {
+        Pen += ViewportChromeControls::ConstructLivePill(DrawList, Faces, ImVec2(Pen, Min.y), Height, "LIVE", Scale) + Gap;
+    }
+
+    // 📝 Particles opens the level's particle authoring editor (the demo's particle workspace).
+    Frontier::SceneRecordBase* Particles  = QuerySceneWorld().FindFirstByType("Particles");
+    const bool                 Authorable = Particles != nullptr && Frontier::InspectorRuntime::Instance().QueryHasEditor(Particles->QueryToken());
+    const float                ButtonH    = ViewportChromeControls::IconButtonExtent * Scale;
+    const float                ParticlesW = ViewportChromeControls::MeasureLabelButton(Faces, "Particles", Scale);
+    if (ViewportChromeControls::ConstructLabelButton("##ParticleLaunch", Faces, ImVec2(Pen, Min.y + 0.5f * (Height - ButtonH)), ImVec2(ParticlesW, ButtonH),
+                                                     "Particles", Authorable, "Open particle authoring workspace", Scale) &&
+        Authorable)
+    {
+        (void)Frontier::InspectorRuntime::Instance().RequestEditorOpen(Particles->QueryToken());
+    }
+    Pen += ParticlesW + Gap;
+
+    // 📝 Camera rigs: Chase needs the vehicle, which this level omits; Free is the Unreal Engine viewport camera.
+    static const char* const RigOptions[]  = {"Chase", "Free \xC2\xB7 F8"};
+    static const char* const RigTooltips[] = {"Chase follows the vehicle \xE2\x80\x94 this level has no vehicle",
+                                              "Free camera: Unreal Engine viewport controls (hold the right button + W/A/S/D)"};
+    const bool               RigEnabled[]  = {false, true};
+    int                      Rig           = 1;
+    const float              SegmentedH    = 36.0f * Scale;
+    (void)ViewportChromeControls::ConstructSegmentedSwitch("##CameraRig", Faces, ImVec2(Pen, Min.y + 0.5f * (Height - SegmentedH)),
+                                                           ImVec2(ViewportChromeControls::SegmentedWidth * Scale, SegmentedH), RigOptions, 2, Rig, RigEnabled,
+                                                           RigTooltips, Scale);
+    Pen += ViewportChromeControls::SegmentedWidth * Scale + Gap;
+
+    // 📝 The inspection view is the RenderPipeline record's InspectionModeIndex (the demo's Settings.Inspection).
+    auto*       Pipeline   = dynamic_cast<Frontier::RenderPipelineRecord*>(QuerySceneWorld().FindFirstByType("RenderPipeline"));
+    int         Inspection = Pipeline != nullptr ? std::clamp(Pipeline->QueryConfiguration().InspectionModeIndex, 0, 14) : 0;
+    const float SelectH    = 35.0f * Scale;
+    if (ViewportChromeControls::ConstructSelectField("##InspectionView", Faces, ImVec2(Pen, Min.y + 0.5f * (Height - SelectH)),
+                                                     ImVec2(ViewportChromeControls::SelectWidth * Scale, SelectH), Frontier::RenderInspectionModes::ModeNames,
+                                                     static_cast<int>(Frontier::RenderInspectionModes::ModeCount), Inspection, Scale) &&
+        Pipeline != nullptr)
+    {
+        Pipeline->AccessConfiguration().InspectionModeIndex = Inspection;
+        Pipeline->AccessConfiguration().AdvanceRevision();
+    }
+    Pen += ViewportChromeControls::SelectWidth * Scale + Gap;
+
+    const float Icon  = ViewportChromeControls::IconButtonExtent * Scale;
+    const float IconY = Min.y + 0.5f * (Height - Icon);
+    float       X     = std::max(Pen, Max.x - ViewportChromeControls::BarPadding * Scale - 5.0f * Icon - 4.0f * Gap);
+    if (ViewportChromeControls::ConstructIconButton("##Readout", ImVec2(X, IconY), Icon, "Activity", Overlays.ReadoutVisible && !Overlays.CleanView, true,
+                                                    "Readout (H)"))
+    {
+        ToggleViewportOverlay(0);
+    }
+    X += Icon + Gap;
+    if (ViewportChromeControls::ConstructIconButton("##DistanceSlice", ImVec2(X, IconY), Icon, "Grid", Overlays.DistanceSliceVisible && !Overlays.CleanView,
+                                                    true, "Distance slice (I)"))
+    {
+        ToggleViewportOverlay(1);
+    }
+    X += Icon + Gap;
+    (void)ViewportChromeControls::ConstructIconButton("##Respawn", ImVec2(X, IconY), Icon, "RotateCcw", false, false,
+                                                      "Respawn (R) \xE2\x80\x94 this level has no vehicle");
+    X += Icon + Gap;
+    (void)ViewportChromeControls::ConstructIconButton("##Reassemble", ImVec2(X, IconY), Icon, "Undo2", false, false,
+                                                      "Reassemble every prop \xE2\x80\x94 no breakable props in this viewport");
+    X += Icon + Gap;
+    if (ViewportChromeControls::ConstructIconButton("##CleanView", ImVec2(X, IconY), Icon, "ScanCorners", Overlays.CleanView, true, "Clean view (V)"))
+    {
+        ToggleViewportOverlay(2);
+    }
+    DrawList->PopClipRect();
+}
+
+void EverestWorkspace::ConstructViewportOverlays(const ImVec2& StageMin, const ImVec2& StageMax, const SceneViewportImage& Image, float Scale)
+{
+    using Frontier::ViewportChromeControls;
+    const Frontier::EditorTypefaces Faces    = Frontier::EditorTypefaces::Resolve();
+    ImDrawList*                     DrawList = ImGui::GetWindowDrawList();
+    const SceneViewportReadout&     Readout  = Image.Readout;
+
+    // ① #failure, or #bring-up while the first image is still to come
+    if (!Readout.Failure.empty())
+    {
+        ViewportChromeControls::ConstructFailurePanel(DrawList, Faces, StageMin, StageMax, Readout.Failure, Scale);
+    }
+    else if (PresentSceneViewport && Image.Texture == 0)
+    {
+        ViewportChromeControls::ConstructBringUpCard(DrawList, Faces, StageMin, StageMax, "Frontier \xC2\xB7 Proving Grounds",
+                                                     Image.Status.empty() ? "Starting" : Image.Status.c_str(), 0.0f, Scale);
+    }
+    const bool Overlaid = !Overlays.CleanView && Image.Texture != 0;
+
+    // ② #inset-frame: the distance slice DisplayPresent draws, 0.34 of the image height at the top-right, 16 px in
+    if (Overlaid && Overlays.DistanceSliceVisible && Readout.ScreenExtent[0] > 0 && Readout.ScreenExtent[1] > 0)
+    {
+        const float  ToPanelX = (StageMax.x - StageMin.x) / static_cast<float>(Readout.ScreenExtent[0]);
+        const float  ToPanelY = (StageMax.y - StageMin.y) / static_cast<float>(Readout.ScreenExtent[1]);
+        const float  Size     = std::floor(static_cast<float>(Readout.ScreenExtent[1]) * 0.34f);
+        const ImVec2 InsetMin(StageMin.x + (static_cast<float>(Readout.ScreenExtent[0]) - Size - 16.0f) * ToPanelX, StageMin.y + 16.0f * ToPanelY);
+        const ImVec2 InsetMax(InsetMin.x + Size * ToPanelX, InsetMin.y + Size * ToPanelY);
+        if (ViewportChromeControls::ConstructInsetFrame("##InsetFrame", Faces, InsetMin, InsetMax,
+                                                        "GDF slice \xC2\xB7 blue inside \xC2\xB7 amber outside \xC2\xB7 magenta = rewritten by a moving occupant "
+                                                        "\xC2\xB7 teal = scrolled \xC2\xB7 green = cascade 0",
+                                                        "Hide the distance slice (J)", Scale))
+        {
+            ToggleViewportOverlay(1);
+        }
+    }
+
+    // ③ #hud: the readout lines of the demo's PresentMeasurements, with this viewport's camera keys
+    if (Overlaid && Overlays.ReadoutVisible)
+    {
+        std::vector<float> Durations;
+        for (const float Duration : FrameDurations)
+            if (Duration > 0.0f) Durations.push_back(Duration);
+        std::sort(Durations.begin(), Durations.end());
+        const float Slowest = Durations.empty() ? 0.0f : Durations[std::min(Durations.size() - 1, static_cast<size_t>(0.99 * static_cast<double>(Durations.size())))];
+        char        Low[16];
+        if (Slowest > 0.0f) std::snprintf(Low, sizeof(Low), "%.0f", 1000.0 / static_cast<double>(Slowest));
+        else std::snprintf(Low, sizeof(Low), "\xE2\x80\x93");
+        char First[256];
+        std::snprintf(First, sizeof(First), "%.0f fps \xC2\xB7 %.1f ms \xC2\xB7 1%% low %s fps \xC2\xB7 %u\xC3\x97%u \xC2\xB7 trace %u\xC3\x97%u \xC2\xB7 %s",
+                      1.0 / std::max(FrameSeconds, 1.0e-4), FrameSeconds * 1000.0, Low, Readout.ScreenExtent[0], Readout.ScreenExtent[1],
+                      Readout.TraceExtent[0], Readout.TraceExtent[1], Readout.RendererTag.c_str());
+        std::vector<std::string> Lines;
+        Lines.emplace_back(First);
+        Lines.emplace_back("ControlVehicle  omitted (this level has no vehicle)");
+        if (!Readout.AccelerationLine.empty()) Lines.push_back(Readout.AccelerationLine);
+        char Camera[160];
+        std::snprintf(Camera, sizeof(Camera), "Camera  speed %d (%g\xC3\x97) \xC2\xB7 field of view %.0f\xC2\xB0", Flight.SpeedSetting,
+                      SceneViewportFlight::ResolveSpeed(Flight.SpeedSetting), Flight.ResolveFieldOfView() * 57.29577951308232);
+        Lines.emplace_back(Camera);
+        Lines.emplace_back("RMB look  RMB+W/A/S/D fly  E/Q up\xC2\xB7" "down  RMB+wheel speed  Shift \xC3\x97" "2  Alt orbit  F start view");
+        Lines.emplace_back("H readout  I distance slice  V clean view");
+        if (ViewportChromeControls::ConstructReadoutOverlay("##Readout", Faces, StageMin, StageMax, Lines, "Hide the readout (H)", Scale))
+        {
+            ToggleViewportOverlay(0);
+        }
+    }
+
+    // ④ #overlay-notice: transient lines (camera speed, clean view)
+    if (AnnouncedSpeedSetting != Flight.SpeedSetting)
+    {
+        AnnouncedSpeedSetting = Flight.SpeedSetting;
+        char Speed[64];
+        std::snprintf(Speed, sizeof(Speed), "Camera speed %d (%g\xC3\x97)", Flight.SpeedSetting, SceneViewportFlight::ResolveSpeed(Flight.SpeedSetting));
+        AnnounceViewportNotice(Speed);
+    }
+    if (NoticeSeconds > 0.0 && !NoticeText.empty())
+    {
+        ViewportChromeControls::ConstructOverlayNotice(DrawList, Faces, StageMin, StageMax, NoticeText.c_str(), Scale);
+    }
+}
+
+void EverestWorkspace::ToggleViewportOverlay(int Overlay)
+{
+    // 📝 OverlayDock.js Toggle: asking for one overlay out of the clean view brings the view back first, then shows it.
+    if (Overlay == 2)
+    {
+        Overlays.CleanView = !Overlays.CleanView;
+        if (Overlays.CleanView) AnnounceViewportNotice("Clean view \xE2\x80\x94 press V to bring the overlays back");
+        return;
+    }
+    bool& Visible = Overlay == 0 ? Overlays.ReadoutVisible : Overlays.DistanceSliceVisible;
+    if (Overlays.CleanView)
+    {
+        Overlays.CleanView = false;
+        Visible            = true;
+    }
+    else
+    {
+        Visible = !Visible;
+    }
+}
+
+void EverestWorkspace::AnnounceViewportNotice(std::string Text)
+{
+    NoticeText    = std::move(Text);
+    NoticeSeconds = 2.4;
+}
+
+void EverestWorkspace::ConstructStatusStrip(float Scale)
+{
+    // 📝 index.html footer#status (EditorShell.js items): realtime, frame, quality, sun, speed, smoke, fragments, camera … GPU.
+    const Frontier::EditorTypefaces Faces = Frontier::EditorTypefaces::Resolve();
+    const ImGuiViewport*            Main  = ImGui::GetMainViewport();
+    const float                     StripH = Frontier::ViewportChromeControls::StatusStripHeight * Scale;
+    const ImVec2                    StripMin(Main->Pos.x, Main->Pos.y + Main->Size.y - StripH);
+    const ImVec2                    StripMax(Main->Pos.x + Main->Size.x, Main->Pos.y + Main->Size.y);
+    ImGui::SetNextWindowPos(StripMin, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(StripMax.x - StripMin.x, StripH), ImGuiCond_Always);
+    ImGui::SetNextWindowViewport(Main->ID);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    if (ImGui::Begin("##EverestStatusStrip", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDocking |
+                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground))
+    {
+        char Realtime[32], Frame[32], Sun[32], Camera[64];
+        std::snprintf(Realtime, sizeof(Realtime), "%.0f fps", 1.0 / std::max(FrameSeconds, 1.0e-4));
+        std::snprintf(Frame, sizeof(Frame), "%.1f ms", LastReadout.RefreshMilliseconds > 0.0 ? LastReadout.RefreshMilliseconds : FrameSeconds * 1000.0);
+        double Elevation = 0.0;
+        if (const auto* Solar = dynamic_cast<const Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
+            Elevation = Solar->QueryConfiguration().ElevationDegrees;
+        std::snprintf(Sun, sizeof(Sun), "%.1f\xC2\xB0", Elevation);
+        std::snprintf(Camera, sizeof(Camera), "%.0f, %.0f, %.0f", Flight.Position[0], Flight.Position[1], Flight.Position[2]);
+        const std::vector<Frontier::ViewportStatusItem> Leading = {
+            {"REALTIME", Realtime},
+            {"FRAME", Frame},
+            {"QUALITY", LastReadout.Quality.empty() ? std::string("\xE2\x80\x93") : LastReadout.Quality},
+            {"SUN", Sun},
+            {"SPEED", "\xE2\x80\x93"},
+            {"SMOKE", "idle"},
+            {"FRAGMENTS", "0"},
+            {"CAM", Camera},
+        };
+        const std::vector<Frontier::ViewportStatusItem> Trailing = {
+            {"GPU", LastReadout.Adapter.empty() ? std::string("\xE2\x80\x93") : LastReadout.Adapter},
+        };
+        Frontier::ViewportChromeControls::ConstructStatusStrip(ImGui::GetWindowDrawList(), Faces, StripMin, StripMax, Leading, Trailing, Scale);
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(2);
 }
 
 void EverestWorkspace::ConstructViewportSchematic(ImDrawList* DrawList, const ImVec2& Min, const ImVec2& Max)

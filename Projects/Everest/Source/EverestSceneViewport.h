@@ -26,6 +26,7 @@ struct SceneViewportRefresh
     VkImageView             View   = VK_NULL_HANDLE;   // [-] presented image (UNORM view of sRGB bytes, GENERAL layout)
     std::array<uint32_t, 2> Extent = {0, 0};           // [px] render extent
     std::string             Status{};                  // [-] renderer, extent, refresh time — or why there is no image
+    SceneViewportReadout    Readout{};                 // [-] the viewport bar, readout and status strip figures
 };
 
 class EverestSceneViewport

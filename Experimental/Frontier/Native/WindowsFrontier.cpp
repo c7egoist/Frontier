@@ -360,7 +360,8 @@ int main()
                     }
                     const Everest::SceneViewportRefresh Outcome =
                         SceneView->Render(Request, EverestSpace->QuerySceneWorld(), EverestSpace->QueryElapsedSeconds());
-                    Image.Status = Outcome.Status;
+                    Image.Status  = Outcome.Status;
+                    Image.Readout = Outcome.Readout;
                     if ((Outcome.View != SceneViewImage || SceneViewJournalEntries < 12) && SceneViewJournalEntries < 32)
                     {
                         Frontier::DiagnosticJournal::Append("SceneViewport", (Outcome.View ? "image " : "no image ") + Outcome.Status);

@@ -193,10 +193,12 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     Inputs.Toggles.Antialias            = Rendering.TemporalAntiAliasing;
     Inputs.Toggles.ExposureCompensation = Rendering.ExposureCompensation;
     Inputs.Toggles.RayTracing           = Configuration_.RayTracing;
+    Inputs.Toggles.Inspection           = std::min<uint32_t>(Rendering.Inspection, 14u);
     Host_->Settings.Indirect            = Rendering.GlobalIllumination;
-    // 📝 Idle inputs of the parts outside the port, as the demo writes them with no cabin and nothing burning.
+    // 📝 Idle inputs of the parts outside the port, as the demo writes them with no cabin and nothing burning; bit 0 of the
+    //    HMI word is the demo's distance-slice inset (DisplayPresent draws it in the image's top-right corner).
     Inputs.External.ElapsedSeconds = ElapsedSeconds_;
-    Inputs.External.HmiWord        = (1u << 8) | (1000u << 20);
+    Inputs.External.HmiWord        = (Rendering.DistanceSlice ? 1u : 0u) | (1u << 8) | (1000u << 20);
     Inputs.External.FireBlock      = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.46f, 0.14f, 14.0f};
     Inputs.Environment             = &Sky;
     Inputs.CelestialDelta          = std::max(0.0, DeltaSeconds);
@@ -209,6 +211,28 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         return false;
     }
     return Host_->AdvanceRefresh(&Inputs, nullptr, nullptr, OutDiagnostic, &Interlude);
+}
+
+ViewportStatistics SceneViewport::QueryStatistics() const noexcept
+{
+    ViewportStatistics Statistics;
+    const RefreshToggles Toggles;
+    Statistics.RayTracing        = Configuration_.RayTracing;
+    Statistics.MaxBounces        = Toggles.MaxBounces;
+    Statistics.ReflectionBounces = Toggles.ReflectionBounces;
+    Statistics.InitialCandidates = Toggles.InitialCandidates;
+    if (Host_)
+    {
+        Statistics.ScreenExtent = Host_->ScreenExtent;
+        Statistics.TraceExtent  = Host_->TraceExtent;
+        if (Host_->RayTracing)
+        {
+            Statistics.TlasInstances = Host_->RayTracing->ActiveInstances;
+            Statistics.TlasEntries   = Host_->RayTracing->UsedTlasEntries;
+            Statistics.BlasTriangles = Host_->RayTracing->StaticTriCount;
+        }
+    }
+    return Statistics;
 }
 
 VkImageView SceneViewport::QueryPresentedView() const noexcept

@@ -919,3 +919,29 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Download (camera):** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `8c34e1b3` (Zig 0.13.0, no uncommitted
   changes, Surface 18 / GlobalIllumination 33 / Environment 15), 22.2 MiB, SHA-256
   `c31128c87517a88cad776a56bb9ba308cf27b8cd64b6009f37541b7fbc3b9353`; its `README.md` lists the Unreal controls.
+- **Interface, first slice of the 1:1 VehicleHMI demo UI** (`Exhibits/SceneViewport/InterfacePortInventory.md`):
+  - *Reference.* The demo at `6afb6f00` ran headless on SwiftShader (Chromium from npm `@sparticuz/chromium` 153.0.0,
+    puppeteer-core 23.11.1, `quality=low&scale=0.5&stresspool=0&capture=1&omit=Cabin`; editor ready after 50 s). The shell,
+    every region's HTML and one Inspector page per Outliner entry (45) were captured (`Tools/CaptureDemoInterface.js`).
+  - *Ported:* the viewport column (tab "Viewport" and the scene pill, viewport bar with scene heading, LIVE pill,
+    Particles, Chase/Free segmented switch, the 15 inspection views and the five round buttons; readout; distance-slice
+    frame and legend; overlay notice; bring-up card; failure panel) and the status strip.
+    `Frontier/Engine/Interface/ViewportChromeControls.{h,cpp}` carries `FrontierEditor.css` metrics and colours and draws
+    the demo's Lucide glyphs from their SVG paths. `EverestWorkspace` lays out and wires the controls.
+  - *Wired to the port:* the select writes `RenderPipeline.InspectionModeIndex`, now named after the demo's 15 views, which
+    `ViewportRendering::Inspection` passes to `RefreshToggles::Inspection`. The distance slice sets HMI word bit 0, which
+    `DisplayPresent` draws. The readout uses `SceneViewport::QueryStatistics`: screen and trace extents, bounces, TLAS
+    instances and entries, BLAS triangles. Particles opens the level's `Particles` record in `ParticleEditor`.
+  - *Inactive, stated in their tooltips:* Chase, Respawn and Reassemble (no vehicle, no breakable props).
+  - *Label contract:* `Exhibits/SceneViewport/Results/UiLabels.tsv`. Of 138 labels, 13 were ported this turn and 28
+    earlier (25 GPU labels found verbatim in the GI port); 1 removal is proposed and 96 are pending.
+- **Verification (Linux host, SwiftShader):**
+  - workspace capture: 12 refreshes in 11 min 10 s, with the readout and the distance slice on. The TLAS line reads 504
+    instances (1007 entries) and 20,878 BLAS triangles; the demo reads 509 (1017) and the same triangles, the
+    difference being its car. A thirteenth refresh with the record set to "Normals" shows the port's normals view
+    (`Images/EverestLiveSceneViewport-Normals.png`);
+  - CTests: `SceneViewportFlightValidation` (19/0), `InterfaceValidation`, `EverestInterfaceValidation`,
+    `EverestShippingValidation`, `ProjectSpaceValidation`, `EnvironmentRealmValidation`, `ProjectContentStagingValidation`,
+    `DockingValidation`, `WorkspaceLayoutValidation` and `StoredShaderArchiveValidation` pass.
+- **Not run:** no hardware GPU and no Windows session; the pointer lock, the keys and clicks through the bar were not
+  exercised interactively.
