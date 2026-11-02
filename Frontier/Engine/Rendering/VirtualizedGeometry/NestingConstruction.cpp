@@ -5,9 +5,12 @@
 //    build, validation and tier collection. JavaScript Map/Set iteration order is kept wherever it reaches a result.
 #include "NestingConstruction.h"
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cstring>
+#include <exception>
 #include <stdexcept>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 namespace Frontier::VirtualizedGeometry
@@ -437,8 +440,9 @@ struct SimplifiedGroup : TierGeometry
 class GroupSimplification
 {
   public:
-    GroupSimplification(const TierGeometry& Local, uint32_t TargetTriangles)
-        : VertexCount_(Local.VertexCount()), TriangleCount_(Local.TriangleCount()), Target_(TargetTriangles), Families_(Local.Families),
+    GroupSimplification(const TierGeometry& Local, uint32_t TargetTriangles, const NestingOptions& Options,
+                        const std::vector<uint8_t>* OpenBorder = nullptr)
+        : Options_(Options), OpenBorder_(OpenBorder), VertexCount_(Local.VertexCount()), TriangleCount_(Local.TriangleCount()), Target_(TargetTriangles), Families_(Local.Families),
           LivePositions_(Local.Positions), LiveTriangles_(Local.Triangles.begin(), Local.Triangles.end()), LiveCornerUvs_(Local.CornerUvs),
           LiveSharpMask_(Local.SharpMask), VertexTriangles_(VertexCount_)
     {
@@ -454,6 +458,8 @@ class GroupSimplification
         uint32_t Other  = 0;
         bool     Sharp  = false, UvSeam = false;
         Point2   UvV{}, UvO{};
+        uint32_t Family = 0;   // [-] family of the first triangle on the edge (I5 class borders)
+        uint32_t Count  = 0;   // [-] live triangles on the edge (I4 open borders)
     };
     struct VertexFeatures
     {
@@ -506,6 +512,8 @@ class GroupSimplification
     void HeapPush(CollapseCandidate Item);
     [[nodiscard]] CollapseCandidate HeapPop();
 
+    const NestingOptions&       Options_;
+    const std::vector<uint8_t>* OpenBorder_ = nullptr;   // [-] I4: bit e marks an edge on the surface's own open border
     uint32_t                    VertexCount_ = 0, TriangleCount_ = 0, Target_ = 0;
     const std::vector<uint32_t>& Families_;
     std::vector<double>         LivePositions_;
@@ -556,14 +564,24 @@ GroupSimplification::VertexFeatures GroupSimplification::AnalyzeVertexFeatures(u
                 }
             if (!Entry)
             {
-                Features.Neighbours.push_back({Other, false, false, UvV, UvO});
+                Features.Neighbours.push_back({Other, false, false, UvV, UvO, Families_[Triangle], 0});
                 Entry = &Features.Neighbours.back();
             }
-            else if (UvDistance(UvV, Entry->UvV) > UvMatchTolerance || UvDistance(UvO, Entry->UvO) > UvMatchTolerance)
-                Entry->UvSeam = true;
+            else
+            {
+                if (UvDistance(UvV, Entry->UvV) > UvMatchTolerance || UvDistance(UvO, Entry->UvO) > UvMatchTolerance) Entry->UvSeam = true;
+                // 📝 I5: a family border inside the group is a feature curve, collapsible along itself like a marked sharp edge.
+                if (Options_.ClassBorderCollapse && Families_[Triangle] != Entry->Family) Entry->Sharp = true;
+            }
             if ((LiveSharpMask_[Triangle] & (1u << Edge)) != 0) Entry->Sharp = true;
+            ++Entry->Count;
         }
     }
+    // 📝 I4: an edge with one live triangle and an unlocked end lies on the surface's own open border (group borders lock both
+    //    ends), a feature curve its vertices may slide along instead of a locked fence that fans needles into the interior.
+    if (Options_.NeedleGuard && OpenBorder_)
+        for (NeighbourFeature& Entry : Features.Neighbours)
+            if (Entry.Count == 1 && !(Locked_[Vertex] && Locked_[Entry.Other])) Entry.Sharp = true;
     for (const NeighbourFeature& Entry : Features.Neighbours)
     {
         if (Entry.Sharp) ++Features.SharpDegree;
@@ -633,7 +651,29 @@ std::optional<GroupSimplification::CollapseCandidate> GroupSimplification::Evalu
     // 📝 Edge-length regularization: on ruled or planar patches the plane quadric cost is near zero along straight
     //    generators, so without a length tie-breaker the heap collapses whole columns into needles first.
     const double Trace = JsMax(Sum[0] + Sum[4] + Sum[7], 1e-6);
-    const double Cost  = Error + 0.02 * Deviation * Deviation * Trace;
+    double       Cost  = Error + 0.02 * Deviation * Deviation * Trace;
+    if (Options_.NeedleGuard)
+    {
+        // 📝 I4: the plane quadrics are blind to triangle shape, so flat runs (terrain benches, caps) collapse into needles; the worst
+        //    longest² / (2·area) the collapse would leave around A and B adds a cost in the units of the length term above.
+        double WorstAspect = 0.0;
+        for (uint32_t Vertex : {A, B})
+            for (uint32_t Triangle : VertexTriangles_[Vertex])
+            {
+                if (!Alive_[Triangle]) continue;
+                const std::array<uint32_t, 3> Corners = ResolvedCorners(Triangle);
+                if (IndexOf(Corners, A) >= 0 && IndexOf(Corners, B) >= 0) continue;
+                std::array<Point3, 3> Moved;
+                for (int Corner = 0; Corner < 3; ++Corner)
+                    Moved[Corner] = (Corners[Corner] == A || Corners[Corner] == B) ? Position : LivePosition(Corners[Corner]);
+                const double Longest    = JsMax(JsMax(Length(Subtract(Moved[1], Moved[0])), Length(Subtract(Moved[2], Moved[1]))),
+                                                Length(Subtract(Moved[0], Moved[2])));
+                const double DoubleArea = Length(Cross(Subtract(Moved[1], Moved[0]), Subtract(Moved[2], Moved[0])));
+                WorstAspect = JsMax(WorstAspect, DoubleArea > 0 ? Longest * Longest / DoubleArea : 1e6);
+            }
+        const double EdgeLength = Length(Subtract(PA, PB));
+        Cost += 0.02 * EdgeLength * EdgeLength * Trace * JsMax(0.0, WorstAspect - 3.0);
+    }
     return CollapseCandidate{A, B, Position, PinA, PinB, Cost, Deviation, Versions_[A], Versions_[B]};
 }
 
@@ -765,14 +805,25 @@ std::optional<std::vector<GroupSimplification::UvUpdate>> GroupSimplification::C
 SimplifiedGroup GroupSimplification::Run()
 {
     Locked_.assign(VertexCount_, 0);
+    auto OnOpenBorder = [&](const IncidentEdge& Entry) {
+        if (!Options_.NeedleGuard || !OpenBorder_ || Entry.Triangles.size() != 1) return false;
+        const uint32_t Triangle = Entry.Triangles[0];
+        for (uint32_t Corner = 0; Corner < 3; ++Corner)
+        {
+            const uint32_t V0 = static_cast<uint32_t>(LiveTriangles_[Triangle * 3 + Corner]);
+            const uint32_t V1 = static_cast<uint32_t>(LiveTriangles_[Triangle * 3 + (Corner + 1) % 3]);
+            if ((V0 == Entry.A && V1 == Entry.B) || (V0 == Entry.B && V1 == Entry.A)) return ((*OpenBorder_)[Triangle] & (1u << Corner)) != 0;
+        }
+        return false;
+    };
     for (const IncidentEdge& Entry : Edges_.Edges)
     {
-        const bool BorderEdge   = Entry.Triangles.size() != 2;
+        const bool BorderEdge   = Entry.Triangles.size() != 2 && !OnOpenBorder(Entry);
         bool       FamilyBorder = false;
         if (Entry.Triangles.size() >= 2)
             for (uint32_t Triangle : Entry.Triangles)
                 if (Families_[Triangle] != Families_[Entry.Triangles[0]]) FamilyBorder = true;
-        if (BorderEdge || FamilyBorder)
+        if (BorderEdge || (FamilyBorder && !Options_.ClassBorderCollapse))
         {
             Locked_[Entry.A] = 1;
             Locked_[Entry.B] = 1;
@@ -812,14 +863,16 @@ SimplifiedGroup GroupSimplification::Run()
     // line penalize bending a crease or seam while letting collinear runs collapse freely.
     for (const IncidentEdge& Entry : Edges_.Edges)
     {
-        if (!Entry.Sharp && !Entry.UvSeam) continue;
+        const bool ClassBorder = (Options_.ClassBorderCollapse && Entry.Triangles.size() == 2 &&
+                                  Families_[Entry.Triangles[0]] != Families_[Entry.Triangles[1]]) || OnOpenBorder(Entry);
+        if (!Entry.Sharp && !Entry.UvSeam && !ClassBorder) continue;
         const Point3 PA = LivePosition(Entry.A), PB = LivePosition(Entry.B);
         const Point3 Span = Subtract(PB, PA);
         const double EdgeLength = Length(Span);
         if (!(EdgeLength > 1e-12)) continue;
         const Point3 Tangent = {Span[0] / EdgeLength, Span[1] / EdgeLength, Span[2] / EdgeLength};
         const auto [U, V] = OrthogonalBasis(Tangent);
-        const double FeatureWeight = (Entry.Sharp ? 6.0 : 4.0) * EdgeLength * EdgeLength;
+        const double FeatureWeight = (Entry.Sharp || ClassBorder ? 6.0 : 4.0) * EdgeLength * EdgeLength;
         const Quadric Plane1 = QuadricFromPlane(U, -Dot(U, PA), FeatureWeight);
         const Quadric Plane2 = QuadricFromPlane(V, -Dot(V, PA), FeatureWeight);
         for (uint32_t Endpoint : {Entry.A, Entry.B})
@@ -1150,6 +1203,175 @@ struct WeldedTier : TierGeometry
     return Out;
 }
 
+// 📝 Closest point on a triangle by Voronoi region (Ericson, Real-Time Collision Detection §5.1.5), squared distance.
+[[nodiscard]] double SquaredTriangleDistance(const Point3& P, const Point3& A, const Point3& B, const Point3& C) noexcept
+{
+    const Point3 AB = Subtract(B, A), AC = Subtract(C, A), AP = Subtract(P, A);
+    const double D1 = Dot(AB, AP), D2 = Dot(AC, AP);
+    Point3 Q = A;
+    if (!(D1 <= 0 && D2 <= 0))
+    {
+        const Point3 BP = Subtract(P, B), CP = Subtract(P, C);
+        const double D3 = Dot(AB, BP), D4 = Dot(AC, BP), D5 = Dot(AB, CP), D6 = Dot(AC, CP);
+        const double VC = D1 * D4 - D3 * D2, VB = D5 * D2 - D1 * D6, VA = D3 * D6 - D5 * D4;
+        auto Along = [](const Point3& Origin, const Point3& Span, double T) {
+            return Point3{Origin[0] + Span[0] * T, Origin[1] + Span[1] * T, Origin[2] + Span[2] * T};
+        };
+        if (D3 >= 0 && D4 <= D3) Q = B;
+        else if (VC <= 0 && D1 >= 0 && D3 <= 0) Q = Along(A, AB, D1 / (D1 - D3));
+        else if (D6 >= 0 && D5 <= D6) Q = C;
+        else if (VB <= 0 && D2 >= 0 && D6 <= 0) Q = Along(A, AC, D2 / (D2 - D6));
+        else if (VA <= 0 && (D4 - D3) >= 0 && (D5 - D6) >= 0) Q = Along(B, Subtract(C, B), (D4 - D3) / ((D4 - D3) + (D5 - D6)));
+        else
+        {
+            const double Scale = 1 / (VA + VB + VC);
+            Q = Along(Along(A, AB, VB * Scale), AC, VC * Scale);
+        }
+    }
+    const Point3 Offset = Subtract(P, Q);
+    return Dot(Offset, Offset);
+}
+
+using TriangleCorners = std::array<Point3, 3>;
+
+// 📝 Uniform grid over triangle boxes for nearest-triangle queries: a query widens ring by ring until no unvisited cell can hold a
+//    nearer triangle. Ties keep the first triangle met, so queries are deterministic.
+class TriangleProximity
+{
+  public:
+    explicit TriangleProximity(const std::vector<TriangleCorners>& Facets) : Facets_(Facets)
+    {
+        Minimum_ = {Unbounded, Unbounded, Unbounded};
+        Point3 Maximum{-Unbounded, -Unbounded, -Unbounded};
+        for (const TriangleCorners& T : Facets_)
+            for (const Point3& P : T)
+                for (int A = 0; A < 3; ++A)
+                {
+                    Minimum_[A] = std::min(Minimum_[A], P[A]);
+                    Maximum[A]  = std::max(Maximum[A], P[A]);
+                }
+        const double Extent = std::max({Maximum[0] - Minimum_[0], Maximum[1] - Minimum_[1], Maximum[2] - Minimum_[2], 1e-9});
+        Cell_ = Extent / (std::cbrt(static_cast<double>(std::max<size_t>(1, Facets_.size()))) * 1.5 + 1);
+        for (int A = 0; A < 3; ++A) Count_[A] = std::max(1, static_cast<int>(std::ceil((Maximum[A] - Minimum_[A]) / Cell_)) + 1);
+        Bins_.assign(static_cast<size_t>(Count_[0]) * Count_[1] * Count_[2], {});
+        for (uint32_t Index = 0; Index < Facets_.size(); ++Index)
+        {
+            std::array<int, 3> Low{}, High{};
+            for (int A = 0; A < 3; ++A)
+            {
+                Low[A]  = Clamp(static_cast<int>((std::min({Facets_[Index][0][A], Facets_[Index][1][A], Facets_[Index][2][A]}) - Minimum_[A]) / Cell_), A);
+                High[A] = Clamp(static_cast<int>((std::max({Facets_[Index][0][A], Facets_[Index][1][A], Facets_[Index][2][A]}) - Minimum_[A]) / Cell_), A);
+            }
+            for (int X = Low[0]; X <= High[0]; ++X)
+                for (int Y = Low[1]; Y <= High[1]; ++Y)
+                    for (int Z = Low[2]; Z <= High[2]; ++Z) Bins_[Bin(X, Y, Z)].push_back(Index);
+        }
+    }
+    // 📝 Squared distance to the nearest triangle and its index.
+    [[nodiscard]] std::pair<double, uint32_t> Nearest(const Point3& P) const
+    {
+        std::array<int, 3> Home{};
+        double Outside = 0.0;
+        for (int A = 0; A < 3; ++A)
+        {
+            Home[A] = Clamp(static_cast<int>(std::floor((P[A] - Minimum_[A]) / Cell_)), A);
+            Outside = std::max({Outside, Minimum_[A] - P[A], P[A] - (Minimum_[A] + Count_[A] * Cell_)});
+        }
+        double   Best = Unbounded;
+        uint32_t Hit  = 0;
+        const int Rings = std::max({Count_[0], Count_[1], Count_[2]});
+        for (int Ring = 0; Ring <= Rings; ++Ring)
+        {
+            const double Reach = std::max(0.0, (Ring - 1) * Cell_ + Outside);
+            if (Reach * Reach > Best) break;
+            for (int X = std::max(0, Home[0] - Ring); X <= std::min(Count_[0] - 1, Home[0] + Ring); ++X)
+                for (int Y = std::max(0, Home[1] - Ring); Y <= std::min(Count_[1] - 1, Home[1] + Ring); ++Y)
+                    for (int Z = std::max(0, Home[2] - Ring); Z <= std::min(Count_[2] - 1, Home[2] + Ring); ++Z)
+                    {
+                        if (std::max({std::abs(X - Home[0]), std::abs(Y - Home[1]), std::abs(Z - Home[2])}) != Ring) continue;
+                        for (uint32_t Index : Bins_[Bin(X, Y, Z)])
+                        {
+                            const double Distance = SquaredTriangleDistance(P, Facets_[Index][0], Facets_[Index][1], Facets_[Index][2]);
+                            if (Distance < Best || (Distance == Best && Index < Hit))
+                            {
+                                Best = Distance;
+                                Hit  = Index;
+                            }
+                        }
+                    }
+        }
+        return {Best, Hit};
+    }
+  private:
+    [[nodiscard]] int Clamp(int Value, int Axis) const noexcept { return std::clamp(Value, 0, Count_[Axis] - 1); }
+    [[nodiscard]] size_t Bin(int X, int Y, int Z) const noexcept { return (static_cast<size_t>(X) * Count_[1] + Y) * Count_[2] + Z; }
+    const std::vector<TriangleCorners>& Facets_;
+    Point3                              Minimum_{};
+    double                              Cell_ = 1.0;
+    std::array<int, 3>                  Count_{1, 1, 1};
+    std::vector<std::vector<uint32_t>>  Bins_{};
+};
+
+[[nodiscard]] TriangleCorners ReadTriangle(const TierGeometry& Geometry, uint32_t Triangle)
+{
+    return {Geometry.ReadPosition(Geometry.Triangles[Triangle * 3]), Geometry.ReadPosition(Geometry.Triangles[Triangle * 3 + 1]),
+            Geometry.ReadPosition(Geometry.Triangles[Triangle * 3 + 2])};
+}
+[[nodiscard]] Point3 Centroid(const TriangleCorners& T) noexcept
+{
+    return {(T[0][0] + T[1][0] + T[2][0]) / 3, (T[0][1] + T[1][1] + T[2][1]) / 3, (T[0][2] + T[1][2] + T[2][2]) / 3};
+}
+
+// 📝 I3: two-sided deviation between a simplified group and the source leaf triangles it stands in for, sampled at the vertices,
+//    edge midpoints and centroids of the simplified triangles and at the vertices and centroids of the leaves.
+[[nodiscard]] double MeasureGroupDeviation(const TierGeometry& Simplified, const TierGeometry& Leaf, const std::vector<uint32_t>& LeafTriangles)
+{
+    std::vector<TriangleCorners> Coarse, Source;
+    for (uint32_t Triangle = 0; Triangle < Simplified.TriangleCount(); ++Triangle) Coarse.push_back(ReadTriangle(Simplified, Triangle));
+    for (uint32_t Triangle : LeafTriangles) Source.push_back(ReadTriangle(Leaf, Triangle));
+    if (Coarse.empty() || Source.empty()) return 0.0;
+    const TriangleProximity CoarseGrid(Coarse), SourceGrid(Source);
+    auto Midpoint = [](const Point3& A, const Point3& B) { return Point3{(A[0] + B[0]) / 2, (A[1] + B[1]) / 2, (A[2] + B[2]) / 2}; };
+    double Worst = 0.0;
+    for (const TriangleCorners& T : Coarse)
+        for (const Point3& Sample : {T[0], T[1], T[2], Midpoint(T[0], T[1]), Midpoint(T[1], T[2]), Midpoint(T[2], T[0]), Centroid(T)})
+            Worst = std::max(Worst, SourceGrid.Nearest(Sample).first);
+    for (const TriangleCorners& T : Source)
+        for (const Point3& Sample : {T[0], T[1], T[2], Centroid(T)}) Worst = std::max(Worst, CoarseGrid.Nearest(Sample).first);
+    return std::sqrt(Worst);
+}
+
+// 📝 I2: Function(Index) for every index on up to Threads workers; the first exception is rethrown after every worker joined.
+template <typename Function> void ForEachParallel(uint32_t Count, uint32_t Threads, const Function& Work)
+{
+    const uint32_t Workers = std::min<uint32_t>(Threads == 0 ? std::max(1u, std::thread::hardware_concurrency()) : Threads, Count);
+    if (Workers <= 1)
+    {
+        for (uint32_t Index = 0; Index < Count; ++Index) Work(Index);
+        return;
+    }
+    std::atomic<uint32_t> Cursor{0};
+    std::atomic<bool>     Failed{false};
+    std::exception_ptr    Failure;
+    std::vector<std::thread> Pool;
+    for (uint32_t Worker = 0; Worker < Workers; ++Worker)
+        Pool.emplace_back([&]() {
+            for (uint32_t Index = Cursor++; Index < Count && !Failed; Index = Cursor++)
+            {
+                try
+                {
+                    Work(Index);
+                }
+                catch (...)
+                {
+                    if (!Failed.exchange(true)) Failure = std::current_exception();
+                }
+            }
+        });
+    for (std::thread& Thread : Pool) Thread.join();
+    if (Failure) std::rethrow_exception(Failure);
+}
+
 [[nodiscard]] std::string PositionKeyText(const Point3& P)
 {
     std::string Text(24, '\0');
@@ -1286,8 +1508,10 @@ GeometryNesting ConstructGeometryNesting(const SurfaceSoup& Source, const Nestin
         std::vector<std::vector<uint32_t>> Groups{};
         std::vector<uint32_t>              GroupOf{};
         std::vector<double>                GroupDeviation{};
+        std::vector<std::vector<uint32_t>> Leaves{};   // [-] I3: source leaf triangles per group, ascending
     };
     std::optional<FinerGroups> Finer;
+    std::vector<std::vector<uint32_t>> ClusterLeaves;   // [-] I3: source leaf triangles each cluster stands in for
     for (uint32_t Tier = 0; Tier < Options.TierLimit; ++Tier)
     {
         const std::vector<std::vector<uint32_t>> TierClusters = PartitionClusters(TierSource, PartitionKeys, TriangleLimit, VertexLimit);
@@ -1306,7 +1530,12 @@ GeometryNesting ConstructGeometryNesting(const SurfaceSoup& Source, const Nestin
             double FinerError = 0.0;
             for (uint32_t Child : FinerClusters) FinerError = JsMax(FinerError, Clusters[Child].Error);
             const double GroupStep = Finer ? JsMax(Finer->GroupDeviation[Finer->GroupOf[Members[0]]], 1e-5) : 0.0;
-            const double Error     = Tier == 0 ? 0.0 : FinerError + GroupStep;
+            // 📝 I3: the group's measured deviation from the source, kept monotone by the finer errors (plus the demo's minimum step),
+            //    instead of a bound that sums every tier's own deviation.
+            const double Error = Tier == 0                   ? 0.0
+                                 : Options.MeasuredDeviation ? JsMax(FinerError + 1e-5, Finer->GroupDeviation[Finer->GroupOf[Members[0]]])
+                                                             : FinerError + GroupStep;
+            if (Options.MeasuredDeviation) ClusterLeaves.push_back(Finer ? std::vector<uint32_t>{} : Members);
             ClusterMeasure Measured = MeasureCluster(TierSource, Members, Error);
             const Point3        TightMinimum = Measured.Minimum, TightMaximum = Measured.Maximum;
             const NestingSphere TightSphere  = Measured.Sphere;
@@ -1406,6 +1635,31 @@ GeometryNesting ConstructGeometryNesting(const SurfaceSoup& Source, const Nestin
                 }
             }
         }
+        if (Options.MeasuredDeviation && Finer)
+        {
+            // 📝 I3: every source leaf of a finer group belongs to the coarser cluster of that group nearest to it, so a cluster's
+            //    leaves are its own region and a coarser group's measured deviation compares like with like.
+            std::vector<std::vector<uint32_t>> CoarserOfGroup(Finer->Groups.size());
+            for (uint32_t Identity : TierClusterIdentities)
+            {
+                const uint32_t SourceGroup = Finer->GroupOf[Clusters[Identity].FirstTriangle];
+                if (SourceGroup < CoarserOfGroup.size()) CoarserOfGroup[SourceGroup].push_back(Identity);
+            }
+            ForEachParallel(static_cast<uint32_t>(Finer->Groups.size()), Options.Threads, [&](uint32_t GroupIndex) {
+                std::vector<TriangleCorners> Facets;
+                std::vector<uint32_t>        Owner;
+                for (uint32_t Identity : CoarserOfGroup[GroupIndex])
+                    for (uint32_t Triangle : Clusters[Identity].Triangles)
+                    {
+                        Facets.push_back(ReadTriangle(TierSource, Triangle));
+                        Owner.push_back(Identity);
+                    }
+                if (Facets.empty()) return;
+                const TriangleProximity Grid(Facets);
+                for (uint32_t Leaf : Finer->Leaves[GroupIndex])
+                    ClusterLeaves[Owner[Grid.Nearest(Centroid(ReadTriangle(Nesting.Tiers[0], Leaf))).second]].push_back(Leaf);
+            });
+        }
         NestingTier TierEntry;
         static_cast<TierGeometry&>(TierEntry) = TierSource;
         TierEntry.Tier            = Tier;
@@ -1414,22 +1668,63 @@ GeometryNesting ConstructGeometryNesting(const SurfaceSoup& Source, const Nestin
         TierEntry.UvSeamEdgeCount = TierIncidence.UvSeamEdgeCount;
         Nesting.Tiers.push_back(std::move(TierEntry));
         if (TierSource.TriangleCount() <= TriangleLimit) break;
+        // 📝 I4: edges with one triangle in the whole tier are the surface's own open border (not a group border).
+        std::vector<uint8_t> TierOpenBorder;
+        if (Options.NeedleGuard)
+        {
+            TierOpenBorder.assign(TierSource.TriangleCount(), 0);
+            for (const IncidentEdge& Entry : TierIncidence.Edges)
+            {
+                if (Entry.Triangles.size() != 1) continue;
+                const uint32_t Triangle = Entry.Triangles[0];
+                for (uint32_t Corner = 0; Corner < 3; ++Corner)
+                {
+                    const uint32_t V0 = TierSource.Triangles[Triangle * 3 + Corner], V1 = TierSource.Triangles[Triangle * 3 + (Corner + 1) % 3];
+                    if ((V0 == Entry.A && V1 == Entry.B) || (V0 == Entry.B && V1 == Entry.A)) TierOpenBorder[Triangle] |= static_cast<uint8_t>(1u << Corner);
+                }
+            }
+        }
         const uint32_t EffectiveGroupLimit = static_cast<uint32_t>(std::min<double>(static_cast<double>(GroupLimit) * std::ldexp(1.0, static_cast<int>(Tier)), 32.0));
         const std::vector<std::vector<uint32_t>> Groups = GroupClusters(TierSource, TierClusters, EffectiveGroupLimit);
         TierGeometry Concatenated;
         std::vector<uint64_t> CoarserKeys;
         FinerGroups Next;
         bool Progress = false;
-        for (uint32_t GroupIdentity = 0; GroupIdentity < Groups.size(); ++GroupIdentity)
-        {
-            const std::vector<uint32_t>& Members = Groups[GroupIdentity];
+        // 📝 I2: groups simplify independently; results merge in group order, so any thread count gives the serial build's bits.
+        std::vector<SimplifiedGroup> Results(Groups.size());
+        std::vector<uint32_t>        LocalTriangles(Groups.size());
+        std::vector<std::vector<uint32_t>> GroupLeaves(Options.MeasuredDeviation ? Groups.size() : 0);
+        auto SimplifyOne = [&](uint32_t GroupIdentity) {
             std::vector<uint32_t> TriangleList;
-            for (uint32_t Cluster : Members) TriangleList.insert(TriangleList.end(), TierClusters[Cluster].begin(), TierClusters[Cluster].end());
+            for (uint32_t Cluster : Groups[GroupIdentity])
+                TriangleList.insert(TriangleList.end(), TierClusters[Cluster].begin(), TierClusters[Cluster].end());
             std::sort(TriangleList.begin(), TriangleList.end());
             const TierGeometry Local = ExtractGroupGeometry(TierSource, TriangleList);
             const uint32_t Target = static_cast<uint32_t>(JsMax(1.0, std::ceil(static_cast<double>(Local.TriangleCount()) * TargetRatio)));
-            const SimplifiedGroup Simplified = GroupSimplification(Local, Target).Run();
-            if (Simplified.Triangles.size() < Local.Triangles.size()) Progress = true;
+            std::vector<uint8_t> LocalOpenBorder;
+            if (Options.NeedleGuard)
+                for (uint32_t Triangle : TriangleList) LocalOpenBorder.push_back(TierOpenBorder[Triangle]);
+            Results[GroupIdentity] = GroupSimplification(Local, Target, Options, Options.NeedleGuard ? &LocalOpenBorder : nullptr).Run();
+            LocalTriangles[GroupIdentity] = static_cast<uint32_t>(Local.Triangles.size());
+            if (Options.MeasuredDeviation)
+            {
+                std::vector<uint32_t>& Leaves = GroupLeaves[GroupIdentity];
+                for (uint32_t Cluster : Groups[GroupIdentity])
+                {
+                    const std::vector<uint32_t>& Own = ClusterLeaves[FirstCluster + Cluster];
+                    Leaves.insert(Leaves.end(), Own.begin(), Own.end());
+                }
+                std::sort(Leaves.begin(), Leaves.end());
+                Leaves.erase(std::unique(Leaves.begin(), Leaves.end()), Leaves.end());
+                Results[GroupIdentity].Deviation = MeasureGroupDeviation(Results[GroupIdentity], Nesting.Tiers[0], Leaves);
+            }
+        };
+        ForEachParallel(static_cast<uint32_t>(Groups.size()), Options.Threads, SimplifyOne);
+        for (uint32_t GroupIdentity = 0; GroupIdentity < Groups.size(); ++GroupIdentity)
+        {
+            const std::vector<uint32_t>& Members = Groups[GroupIdentity];
+            const SimplifiedGroup& Simplified = Results[GroupIdentity];
+            if (Simplified.Triangles.size() < LocalTriangles[GroupIdentity]) Progress = true;
             const uint32_t Base = Concatenated.VertexCount();
             Concatenated.Positions.insert(Concatenated.Positions.end(), Simplified.Positions.begin(), Simplified.Positions.end());
             for (uint32_t Index : Simplified.Triangles) Concatenated.Triangles.push_back(Index + Base);
@@ -1446,6 +1741,7 @@ GeometryNesting ConstructGeometryNesting(const SurfaceSoup& Source, const Nestin
             for (uint32_t Cluster : Members) GroupMembers.push_back(FirstCluster + Cluster);
             Next.Groups.push_back(std::move(GroupMembers));
         }
+        if (Options.MeasuredDeviation) Next.Leaves = std::move(GroupLeaves);
         if (!Progress) break;
         WeldedTier Welded = WeldTierGeometry(Concatenated, CoarserKeys, Next.GroupOf);
         Next.GroupOf  = std::move(Welded.GroupOf);
@@ -1454,6 +1750,16 @@ GeometryNesting ConstructGeometryNesting(const SurfaceSoup& Source, const Nestin
         Finer         = std::move(Next);
     }
     return Nesting;
+}
+
+NestingOptions RefinedNestingOptions()
+{
+    NestingOptions Options;
+    Options.MeasuredDeviation   = true;
+    Options.NeedleGuard         = true;
+    Options.ClassBorderCollapse = true;
+    Options.Threads             = 0;
+    return Options;
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -1538,6 +1844,8 @@ NestingValidation ValidateGeometryNesting(const SurfaceSoup& Source, const Geome
                 size_t Inside = 0;
                 for (uint32_t Triangle : Entry.Triangles) Inside += UnionTriangles.contains(Triangle) ? 1 : 0;
                 if (!Inside || (Inside == Entry.Triangles.size() && Entry.Triangles.size() == 2)) continue;
+                // 📝 I4: the surface's own open border has no neighbour to crack against; with the needle guard it may slide.
+                if (Options.NeedleGuard && Entry.Triangles.size() == 1) continue;
                 for (uint32_t Vertex : {Entry.A, Entry.B})
                     Confirm(CoarserPositions.contains(PositionKeyText(FinerTier.ReadPosition(Vertex))),
                             "shared border vertex moved during simplification (crack)");

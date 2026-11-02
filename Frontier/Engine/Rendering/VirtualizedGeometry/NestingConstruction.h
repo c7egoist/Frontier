@@ -46,7 +46,14 @@ struct NestingOptions
     std::vector<uint32_t> TransmissiveFamilies{}; // [-] families that form the transmissive (glass) class
     std::optional<double> SharpAngleDegrees{};    // [deg] optional dihedral crease angle (the editor never sets it)
     std::optional<double> SharpNormalCosine{};    // [-] corner-normal crease threshold, cos 45° when absent
+    // 📝 Refinements over the demo (Documentation/Plans/Ongoing/VirtualizedGeometry.md I2-I5). All off: the demo bit for bit.
+    bool                  MeasuredDeviation   = false;   // [-] I3: group error measured against the source leaves, not summed
+    bool                  NeedleGuard         = false;   // [-] I4: aspect-ratio term against needle triangles
+    bool                  ClassBorderCollapse = false;   // [-] I5: glass/opaque borders collapse along their curve, not locked
+    uint32_t              Threads             = 1;       // [-] I2: groups simplified in parallel (0: every hardware thread)
 };
+// 📝 The editor's build: every refinement on, every hardware thread.
+[[nodiscard]] NestingOptions RefinedNestingOptions();
 
 // 📝 Indexed geometry of one tier: positions per vertex, three vertices, a family, six corner UVs and a sharp mask per triangle.
 struct TierGeometry

@@ -103,6 +103,16 @@ if(BUILD_TESTING)
     target_link_libraries(VirtualizedGeometryValidation PRIVATE FrontierVirtualizedGeometry)
     add_test(NAME VirtualizedGeometryValidation COMMAND VirtualizedGeometryValidation)
 
+    # 📝 Before and after of every builder refinement (I2-I5) on the corpus (Results/NestingRefinement.txt).
+    add_executable(NestingRefinementMeasure
+        Exhibits/VirtualizedGeometry/Code/NestingRefinementMeasure.cpp
+        Exhibits/VirtualizedGeometry/Code/SurfaceSoupArchive.cpp
+        Engine/Render/StbImageImplementation.cpp)
+    target_include_directories(NestingRefinementMeasure PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_compile_definitions(NestingRefinementMeasure PRIVATE
+        FRONTIER_VIRTUALIZED_GEOMETRY_EXHIBIT="${CMAKE_SOURCE_DIR}/Exhibits/VirtualizedGeometry")
+    target_link_libraries(NestingRefinementMeasure PRIVATE FrontierVirtualizedGeometry)
+
     # 📝 The GPU takeover in the editor's scene viewport, offscreen (needs a Vulkan device; Exhibits/VirtualizedGeometry/README.md).
     add_executable(VirtualizedGeometryCapture
         Exhibits/VirtualizedGeometry/Code/VirtualizedGeometryCapture.cpp
