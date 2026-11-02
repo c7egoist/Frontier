@@ -981,3 +981,32 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
 - **Download (Sun page):** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `dc93d268` (Zig 0.13.0, no
   uncommitted changes, Surface 18 / GlobalIllumination 33 / Environment 15), 22.2 MiB, SHA-256
   `0c3453599e65b14ecda52e55bb74b926af39965bc9bd4f598b2986d15188ab25`.
+
+## TAA with the overlay, sun behind clouds, editor UI fixes, the Atmosphere page (2026-11-02, branch arena/88b72faa-frontier)
+
+- **Requested:** report on the antialiasing (edge shimmer with TAA on); the sun drew in front of clouds; no visible
+  panel scrollbars (wheel scrolling with eased overscroll); remove the top toolbar strip and keep only the notch; Log
+  Stream fixes (no entries per second, round buttons, filters in their own row, no overlapping expanded cards, square
+  rows, several rows expanded at once); port the environment Inspector pages (Atmosphere first). Jolt physics is the
+  next phase.
+- **Delivered:**
+  - `d5981a3` the PlanetaryAtmosphere overlay is drawn before the demo's TAA and antialiased with the refresh
+    (`Exhibits/SceneViewport/README.md`, *Temporal antialiasing*): silhouette shimmer with TAA on −54 % on SwiftShader.
+  - `654216b` Log Stream rework, wheel-only panels (`DockPanelSpecification::WheelScrollOnly`), the top toolbar
+    removed: Projects and Save level on the Control Centre's Quick Controls, Ctrl+S saves.
+  - `5f6d596` clouds hide the sun disc (`ResolveSolarDiscTransmittance`) and are lit from behind (a g 0.9 silver
+    lining lobe); `SolarOcclusionValidation` (CTest): disc behind a dense cloud 1.61 → 1.03 × the cloud, a cloud beside
+    the sun 1.89 → 2.58 × the same cloud with the sun behind the camera.
+  - `9de54d4`, `e7c5544` the demo's Atmosphere page (four tabs, all instruments) with native fields for its keys; scale
+    heights, ground albedo, horizon glow and air mass are live in the viewport; sky tint, sky brightness, white line,
+    civil-only, multiple scattering, LUT samples and the GPU previews are disabled with a tooltip (pending).
+- **Verification (Linux host, SwiftShader):** `EverestInterfaceValidation` (with Quick Controls and the four Atmosphere
+  tabs captured), `EnvironmentRealmValidation`, `SolarOcclusionValidation`, `ForceFieldTriggerValidation`,
+  `ClusterDiagnosticValidation`, `ControlCentreValidation`, `DockingValidation`, `WorkspaceLayoutValidation`,
+  `InterfaceValidation`, `EverestShippingValidation`, `StoredShaderArchiveValidation` pass; the Log Stream proof passes
+  72 checks.
+- **Not run:** no hardware GPU and no Windows session.
+- **Next:** Moons, Stars, Height fog, Atmospheric fog, Clouds, Wind, Lens flare, Local cloud / fog, Lightning; then Jolt.
+- **Download:** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `e7c55447` (Zig 0.13.0, no uncommitted changes,
+  Surface 18 / GlobalIllumination 33 / Environment 15), 22.3 MiB, SHA-256
+  `e8081a26463e68f57d7e75c71134324e5422723c363cc471e4e0f94c6fe2d57f`.
