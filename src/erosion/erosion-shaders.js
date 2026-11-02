@@ -839,6 +839,7 @@ layout(location = 1) out vec4 outVelWater;
 layout(location = 2) out vec4 outSediment;
 
 uniform vec4 uSpawnBox; // (worldSpan, cloudHeight, seed, emitterMode)
+uniform vec4 uSpeciesMix; // (rain, snow, wind, rockfall) active-season weights
 
 ${COMMON_GEOLOGY_GLSL}
 
@@ -858,6 +859,22 @@ void main() {
   else if (mode == 2 || mode == 5) speciesPick = 0.0;
   else if (mode == 3) speciesPick = 2.0;
   else if (mode == 4) speciesPick = 3.0;
+
+  // The emitter footprint is not a season gate. When the engine supplies an
+  // active species mix, it is authoritative from the first frame: resetting
+  // while Snow is solo must not seed a sky full of rain/wind/rock particles
+  // that only disappear after their old lifetimes expire.
+  float initWR = max(0.0, uSpeciesMix.x);
+  float initWS = max(0.0, uSpeciesMix.y);
+  float initWW = max(0.0, uSpeciesMix.z);
+  float initTotalW = initWR + initWS + initWW + max(0.0, uSpeciesMix.w);
+  if (initTotalW > 0.0005) {
+    float initPick = rnd.z * initTotalW;
+    speciesPick = initPick > initWR + initWS + initWW ? 3.0
+                : initPick > initWR + initWS ? 2.0
+                : initPick > initWR ? 1.0
+                : 0.0;
+  }
 
   outPosAge = vec4(xz.x, dropY, xz.y, -0.02 - 0.95 * rnd.z);
   outVelWater = vec4(0.0, speciesPick == 1.0 ? (-3.2 - 1.5 * rnd.z) : (-7.5 - 2.5 * rnd.z), 0.0, 0.55);
@@ -1049,6 +1066,34 @@ void main() {
   int species = int(sed.w + 0.5);
 
   bool outOfBounds = abs(posAge.x) > halfSpan || abs(posAge.z) > halfSpan;
+
+  // Season gates must apply to particles that are already alive, not only to
+  // future spawns. Without this, switching to Snow-only left yesterday's
+  // raindrops falling and hydraulically eroding for the rest of their 38 s
+  // lifetime. A surface particle from a now-frozen season first settles the
+  // load it was already carrying; airborne precipitation simply stops. The
+  // slot is then respawned from the currently active species mix.
+  float speciesWeight = species == SP_SNOW ? max(0.0, uSpeciesMix.y)
+                      : species == SP_WIND ? max(0.0, uSpeciesMix.z)
+                      : species == SP_ROCK ? max(0.0, uSpeciesMix.w)
+                      : max(0.0, uSpeciesMix.x);
+  float totalSpeciesWeight = max(0.0, uSpeciesMix.x) + max(0.0, uSpeciesMix.y)
+                           + max(0.0, uSpeciesMix.z) + max(0.0, uSpeciesMix.w);
+  if (speciesWeight <= 0.0005) {
+    if (totalSpeciesWeight <= 0.0005) {
+      outPosAge = posAge;
+      outVelWater = velWater;
+      outSediment = sed;
+      return;
+    }
+    if (!outOfBounds && posAge.w >= 0.0 && (sed.x + sed.y) > 1e-5) {
+      if (species == SP_SNOW) outExchange2 = vec4(sed.x, 0.0, 0.0, 0.0);
+      else outExchange = vec4(0.0, sed.x, sed.y, 0.0);
+    }
+    spawnNewDrop(coord, uDomain.w, outPosAge, outVelWater, outSediment);
+    return;
+  }
+
   if (outOfBounds || (posAge.w >= 0.0 && (velWater.w < 0.015 || posAge.w > uLifeEvap.z))) {
     if (!outOfBounds && (sed.x + sed.y) > 1e-5) {
       if (species == SP_SNOW) outExchange2 = vec4(sed.x, 0.0, 0.0, 0.0);
@@ -1291,14 +1336,10 @@ void main() {
     coarseLoad -= drift;
     dSnow += drift + deposit * 0.55;
 
-    // High cold cells compact deep snowpack into flowing glacier ice
-    float iceFormation = snowCell.r * smoothstep(0.30, 0.80, snowStickCapacity) * uSnowParams.z * 0.020 * dt;
-    if (tC.a > 0.01) {
-      // Snowmelt feeds meltwater runoff which then behaves like rain
-      dIce += min(snowCell.r * 0.02, tC.a * 0.004);
-      outExchange = vec4(0.0, 0.0, 0.0, min(0.004, tC.a * 0.002 + snowCell.r * 0.0016));
-    }
-    dIce += iceFormation;
+    // Snow particles only deliver/drift snow. They do not manufacture ice or
+    // meltwater here: SNOW_CRYO_FRAG is the single owner of firn compaction
+    // (snow depth decreases as ice depth increases) and of melt reporting
+    // (snow/ice depth decreases before the equivalent water is added).
   } else if (species == SP_WIND) {
     // ---------------- AEOLIAN SALTATION, WINDWARD ABRASION & LEE-SLOPE DUNE BUILD ----------------
     if (uDryAeolian > 0.35) {

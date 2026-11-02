@@ -1722,6 +1722,44 @@ test('Snow simulation is mass-conserving and visibility toggles exist for water/
   assert.equal(DEFAULT_EROSION_PARAMS.showWater, true);
   assert.equal(DEFAULT_EROSION_PARAMS.showSnow, true);
   assert.equal(DEFAULT_EROSION_PARAMS.showRain, true);
+
+  // Snow-only is a hard particle-species boundary, including particles that
+  // were already alive when the season changed. Otherwise old raindrops
+  // remain visible and keep doing hydraulic work under a Snow solo.
+  assert.ok(Shaders.INIT_PARTICLES_FRAG.includes('uniform vec4 uSpeciesMix')
+    && Shaders.INIT_PARTICLES_FRAG.includes('initTotalW'),
+    'Initial particle population must obey the active season mix');
+  assert.ok(Shaders.PARTICLE_STEP_FRAG.includes('speciesWeight <= 0.0005')
+    && Shaders.PARTICLE_STEP_FRAG.includes('totalSpeciesWeight'),
+    'Live particles from frozen seasons must be recycled immediately');
+  assert.ok(!Shaders.PARTICLE_STEP_FRAG.includes('iceFormation')
+    && !Shaders.PARTICLE_STEP_FRAG.includes('behaves like rain'),
+    'Snow particles must not manufacture glacier ice or meltwater runoff');
+  assert.ok(Shaders.SNOW_CRYO_FRAG.includes('snowDepth -= melt')
+    && Shaders.SNOW_CRYO_FRAG.includes('iceDepth -= iceMelt'),
+    'Meltwater must be subtracted from snow/ice before it is reported');
+
+  const climateHarness = Object.create(GpuErosionEngine.prototype);
+  climateHarness.stepCount = 0;
+  climateHarness.params = {
+    ...DEFAULT_EROSION_PARAMS,
+    emitterMode: 'glacial-blizzard',
+    snowfallRate: 0,
+    glacierStrength: 0.5,
+    simHydraulicPlaying: false,
+    simCryoPlaying: true,
+    simWindPlaying: false,
+    simRockfallPlaying: false,
+    showRain: true,
+    showSnow: true,
+  };
+  assert.deepEqual(climateHarness._getClimateUniforms().speciesVec, [0, 0, 0, 0],
+    'Frost/glacier-only Cryo with zero snowfall creates no precipitation particles');
+  climateHarness.params.snowfallRate = 0.8;
+  assert.deepEqual(climateHarness._getClimateUniforms().speciesVec, [0, 1, 0, 0],
+    'Snow solo emits snow particles only, never rain/wind/rockfall');
+  assert.deepEqual(climateHarness._getSpeciesVisUniform(), [0, 1, 0, 0],
+    'Snow solo hides every non-snow particle species');
 });
 
 test('Boulders embed into snow/sediment by bearing capacity and protrude realistically', () => {

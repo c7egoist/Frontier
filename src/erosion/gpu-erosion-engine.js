@@ -1071,11 +1071,15 @@ export class GpuErosionEngine {
   /** Per-species particle visibility for PARTICLE_RENDER_VERT (rain, snow, wind sand, rockfall). */
   _getSpeciesVisUniform() {
     const p = this.params;
+    // Visibility toggles and season gates are separate controls, but a
+    // frozen season's particles should not remain visible as if its weather
+    // were still falling. Snow-only therefore hides rain/wind/rockfall
+    // particles even before the step shader recycles their slots.
     return [
-      p.showRain === false ? 0.0 : 1.0,
-      p.showSnow === false ? 0.0 : 1.0,
-      1.0,
-      1.0,
+      p.showRain === false || p.simHydraulicPlaying === false ? 0.0 : 1.0,
+      p.showSnow === false || p.simCryoPlaying === false ? 0.0 : 1.0,
+      p.simWindPlaying === false ? 0.0 : 1.0,
+      p.simRockfallPlaying === false ? 0.0 : 1.0,
     ];
   }
 
@@ -1134,6 +1138,10 @@ export class GpuErosionEngine {
     if (p.simCryoPlaying === false) snow = 0.0;
     if (p.simWindPlaying === false) wind = 0.0;
     if (p.simRockfallPlaying === false) rock = 0.0;
+    // A Cryo season may be running only for frost damage or for melting an
+    // existing glacier. Zero snowfall means zero new snow particles; the
+    // glacial-blizzard emitter label alone must not create precipitation.
+    if (clamp01(p.snowfallRate) <= 0.001) snow = 0.0;
 
     const rawSum = rain + snow + wind + rock;
     const sum = Math.max(1e-4, rawSum);
@@ -1344,6 +1352,7 @@ export class GpuErosionEngine {
       p.seed,
       emitter.code
     );
+    gl.uniform4fv(gl.getUniformLocation(this.progInitParticles, 'uSpeciesMix'), this._getClimateUniforms().speciesVec);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fboInitParticles[0]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.partIdx = 0;
@@ -1695,7 +1704,7 @@ export class GpuErosionEngine {
         );
         gl.uniform4f(
           gl.getUniformLocation(this.progParticleStep, 'uHydraulics'),
-          p.erosionStrength,
+          p.simHydraulicPlaying === false ? 0.0 : p.erosionStrength,
           p.sedimentCapacity,
           p.depositionRate,
           p.particleInertia
@@ -1705,7 +1714,7 @@ export class GpuErosionEngine {
           p.evaporation,
           p.gravity,
           38.0,
-          p.pipeFlowBlend
+          p.simHydraulicPlaying === false ? 0.0 : p.pipeFlowBlend
         );
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uHardnessParams'), hardnessVec);
         gl.uniform4fv(gl.getUniformLocation(this.progParticleStep, 'uStrataOrient'), strataVec);
