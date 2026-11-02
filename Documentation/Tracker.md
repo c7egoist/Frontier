@@ -916,3 +916,6 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
     navigation (`NavEnableKeyboard`) does not move on the arrows.
   - `SceneViewportFlightValidation` (new CTest, 19 checks, 0 failing): directions are read from the renderer's view
     basis; D/A are screen right/left at 5 headings × 4 elevations.
+- **Download (camera):** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `8c34e1b3` (Zig 0.13.0, no uncommitted
+  changes, Surface 18 / GlobalIllumination 33 / Environment 15), 22.2 MiB, SHA-256
+  `c31128c87517a88cad776a56bb9ba308cf27b8cd64b6009f37541b7fbc3b9353`; its `README.md` lists the Unreal controls.
