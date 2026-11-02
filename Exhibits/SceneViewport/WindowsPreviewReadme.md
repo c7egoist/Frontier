@@ -20,7 +20,8 @@ Studio material archives, which the Scene Viewport does not read.
    - hold the right mouse button and use W/A/S/D/Q/E: fly;
    - F: recentre.
 4. Select the level's environment records in the Scene Directory and edit them in the Inspector:
-   `Solar`, `OpticalFlare`, `Atmosphere`, `Clouds`, `Stars`, `Moons`, `Fog`, `Wind` and `RenderPipeline`.
+   `Solar`, `OpticalFlare`, `Atmosphere` (with the four `Planet` entries under it: Venus, Jupiter, Mars, Saturn),
+   `Clouds`, `Stars`, `Moons`, `Fog`, `Wind` and `RenderPipeline`.
    - `RenderPipeline` quality tier 0/1/2 selects the demo's `low`/`medium`/`high` grade.
    - The hardware ray query (RTX) tier selects the ReSTIR path tracer. Turning it off selects the distance-field GI
      (GTX path). Changing a tier rebuilds the viewport.
@@ -30,6 +31,9 @@ Studio material archives, which the Scene Viewport does not read.
 - The 1:1 C++/Vulkan/Slang port of the VehicleHMI demo's ReSTIR GI renders the demo's proving ground, without the car.
 - The PlanetaryAtmosphere environment is drawn over it: atmosphere, sun, lens flare, volumetric clouds, height fog lit by
   the street lamps, moons, planets and Hipparcos stars.
+- The environment also lights the scene. Its sun, filtered through its air, is the key light, and Luna and Ember take
+  over at night. Its sky lights every bounce and reflection, its clouds shade the ground, and the buildings and posts
+  shadow the sun shafts in the fog.
 - Everything runs on the editor's own Vulkan 1.3 device and queue.
 
 ## Requirements
@@ -47,6 +51,9 @@ the diagnostic journal.
   `%LOCALAPPDATA%\Frontier\Logs\Frontier-<number>.log`. That file is the most useful thing to send back.
 - The journal records start-up, the Vulkan device, the project that opened and the Scene Viewport's first statuses
   (renderer, extent, refresh time), so a viewport problem on a particular GPU shows up there too.
+- The Scene Viewport writes its bring-up into the same journal, one line per step (`[SceneViewport] bring-up ① facet
+  space …` to `⑧ PlanetaryAtmosphere environment …`). A device failure names the Vulkan result and the step that was
+  submitted (`device fault: …`). The first two refreshes are submitted step by step, so a fault there names its step.
 - Keep the extracted folder together: `Frontier.exe` reads `EngineContent/ShaderArchives/Surface` (Project Browser),
   `GlobalIllumination` and `Environment` (Scene Viewport) beside itself.
 
@@ -60,8 +67,7 @@ the diagnostic journal.
   the release notes carry that run's result and screenshots. No copy has been run on a hardware GPU by the authors, and
   all rendering evidence in the repository comes from CPU Vulkan drivers.
 - Known gaps:
-  - the environment does not relight the scene (cloud shadows and environment moonlight do not reach it);
-  - the `Moons` record's phase value is unused (the phase follows the sun–moon geometry);
+  - the drawn moon discs still follow the sun–moon geometry; the `Moons` record's phase sets Luna's light only;
   - viewport submissions are synchronous.
 
 `Package.json` lists the source revision, the toolchain and a SHA-256 for every file.

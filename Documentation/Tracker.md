@@ -807,3 +807,51 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   existing sky, sun, moon and cloud-shadow inputs (`DirectRadiance` bindings 11–13, `CelestialSky`/`SampleSkyRadiance`,
   reflections), keeping the GI algorithms 1:1; or the demo's own sky, clouds, cloud shadows, fog and flare return 1:1
   and replace the overlay.
+
+## AMD device-loss fix, environment lighting the scene (Option A), planet records (2026-11-02, branch arena/88b72faa-frontier)
+
+- **Reported:** on the owner's RX 9060 XT the `e4b9baf4` download failed 2.7 s after Everest opened ("staged write
+  submission failed", then `VK_ERROR_DEVICE_LOST`). The owner then chose Option A: PlanetaryAtmosphere lights the scene.
+  Solar bodies means the sun, moons and planets, and the stars stay in.
+- **Device loss, fixed in `8d50414`:**
+  - *Cause.* `DeviceExchange::FlushWrites` recorded a flush's staged writes as unordered buffer copies.
+    `ConstructRegionFrom` stages a zero fill and then the contents into the same buffer, and the zero fill could land
+    last. The zeroed distance-volume hierarchy made `TransferDistance` loop forever, and Windows reset the GPU after 2 s.
+  - *Fix.* An overlapping write now waits for the earlier one. Synchronization validation (Khronos layer built from
+    source) found 4 write-after-write hazards before the fix and none after: SwiftShader over the bring-up and 8
+    refreshes, lavapipe over the bring-up.
+  - *Hardening.* Checked fence waits; the `VkResult` and the labelled submission in every failure; range checks on
+    queue writes, copies and reads; unwritten bindings reported; `robustImageAccess`; a device probe; the bring-up
+    journalled step by step; the first two refreshes submitted per step.
+- **Option A, `09d5fa3`:** the GI algorithms stay 1:1, and the environment feeds the inputs they already read.
+  - *Sun.* The key light is the sun through the environment's air (`AdjustLight`).
+  - *Night.* Luna lights the night at the `Moons` phase and albedo, together with Ember.
+  - *Sky.* `ProjectEnvironmentSky` writes the environment's sky into the port's sky view, which cards, ReSTIR GI and
+    reflections sample.
+  - *Clouds.* `ProjectCloudShadow` writes the environment's cloud shadow map into the port's idle projected cloud
+    shadows.
+  - *Fog.* The fog's sun shafts are shadowed by the port's sun cascades (`IntegrateFogSpace` bindings 6/7).
+  - *Demo inputs.* `SceneViewportConfiguration::EnvironmentLighting = false` restores the demo's own inputs.
+  - *Archives.* New stored SPIR-V: `EnvironmentLighting` ×2 and `IntegrateFogSpace`. GlobalIllumination now holds 33
+    entries and Environment 15.
+- **Planets as records:** the `Planet` type has an inspector and a glyph. `Default.levelspace` has
+  `rec_planet_{venus,jupiter,mars,saturn}` under `Atmosphere` (26 records). The viewport draws the planets from these
+  entries. The sun, moons and stars were already entries.
+- **Verification (Linux host, SwiftShader):**
+  - `SceneViewportValidation`, low, 480 × 270, 12 refreshes, from the stored archives: 18 checks, 0 failing.
+    - Daylight key light (10.86, 8.53, 6.20); sky zenith (0.165, 0.400, 1.220); clouds shade 39.6 % of the map.
+    - The low sun's red/blue rises from 1.75 to 5.20.
+    - The night key light is Luna (0.064, 0.064, 0.067).
+    - Fog shafts: 0.767 / 0.771 unshadowed / 0.767.
+  - The earlier high-tier pass (320 × 180, 2 refreshes) under synchronization validation: 0 failing checks, 0 layer
+    messages.
+  - spirv-val (Vulkan 1.3) passes on the three new archives.
+  - `StoredShaderArchiveValidation`, `BrowserPreviewStartupValidation`, `EverestInterfaceValidation` (26/27 records, four
+    planets), `EverestShippingValidation` (26 records; planets survive the `.levelspace` round trip),
+    `ProjectSpaceValidation`, `EnvironmentRealmValidation` and `ProjectContentStagingValidation` pass.
+- **Not run:**
+  - no hardware GPU, no Windows launch;
+  - the parity capture was not re-run, because its reference capture is not in this sandbox. The new hooks are not
+    called without an environment, so its 150 checks still hold for the demo inputs;
+  - the workspace capture image predates Option A;
+  - pipelining (Option A step 6) is future work.
