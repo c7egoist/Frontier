@@ -945,3 +945,6 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
     `DockingValidation`, `WorkspaceLayoutValidation` and `StoredShaderArchiveValidation` pass.
 - **Not run:** no hardware GPU and no Windows session; the pointer lock, the keys and clicks through the bar were not
   exercised interactively.
+- **Download (interface + camera):** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `6b9235a2` (Zig 0.13.0, no
+  uncommitted changes, Surface 18 / GlobalIllumination 33 / Environment 15), 22.2 MiB, SHA-256
+  `0aad940fe6314b5a5d977437150c5572c2a7e35a321464a1e387222903000c26`.
