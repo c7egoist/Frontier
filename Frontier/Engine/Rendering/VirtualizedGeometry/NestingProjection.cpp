@@ -6,6 +6,7 @@
 #include "NestingProjection.h"
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cstring>
 namespace Frontier::VirtualizedGeometry
 {
@@ -94,8 +95,8 @@ void NestingProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     using D = DescriptorCode;
     const std::vector<DescriptorSlot> CullSlots = {{D::Uniform}, {D::StorageRead}, {D::StorageRead}, {D::Storage}, {D::Storage}, {D::Storage},
                                                    {D::Texture2DUnfiltered}, {D::Storage}, {D::Storage}, {D::Storage}};
-    CountedCommands_ = Exchange_.Capabilities().DrawIndirectCount;
-    Compacted_       = CompactCommands && (CountedCommands_ || Exchange_.Capabilities().MultiDrawIndirect);
+    CountedCommands_   = Exchange_.Capabilities().DrawIndirectCount;
+    CompactionOffered_ = CountedCommands_ || Exchange_.Capabilities().MultiDrawIndirect;
     CullLayout_ = Exchange_.ConstructDescriptorLayout(CullSlots, "Virtualized geometry culling");
     const std::vector<DescriptorSlot> SeedSlots = {{D::TextureDepth2D}, {D::StorageTexture2D, TextureFormat::R32Float}};
     SeedLayout_ = Exchange_.ConstructDescriptorLayout(SeedSlots, "Hi-Z seed");
@@ -116,10 +117,13 @@ void NestingProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     DummyStorageView_ = Exchange_.ConstructView(ConstructDummy("Resolve dummy (storage slot)", TextureFormat::Rgba16Float,
                                                                TextureUsage::Storage | TextureUsage::Sampled));
     DummySampledView_ = Exchange_.ConstructView(ConstructDummy("Resolve dummy (sampled slot)", TextureFormat::Rgba16Float, TextureUsage::Sampled));
-    CullProgram_       = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", Compacted_ ? "SelectAndCullPhase1Compacted" : "SelectAndCullPhase1",
-                                                          {CullLayout_});
-    Phase2Program_     = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", Compacted_ ? "CullPhase2DisoccludedCompacted" : "CullPhase2Disoccluded",
-                                                          {CullLayout_});
+    CullProgram_       = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", "SelectAndCullPhase1", {CullLayout_});
+    Phase2Program_     = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", "CullPhase2Disoccluded", {CullLayout_});
+    if (CompactionOffered_)
+    {
+        CompactedCullProgram_   = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", "SelectAndCullPhase1Compacted", {CullLayout_});
+        CompactedPhase2Program_ = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", "CullPhase2DisoccludedCompacted", {CullLayout_});
+    }
     SeedProgram_       = Shaders_.ConstructComputeProgram("HiZPyramid", "SeedHiZFromDepth", {SeedLayout_});
     DownsampleProgram_ = Shaders_.ConstructComputeProgram("HiZDownsample", "DownsampleHiZMip", {DownsampleLayout_});
 
@@ -558,13 +562,15 @@ void NestingProjection::RecordCullPhase1(CommandSequence& Sequence)
     ServiceStreaming(2);
     RefreshGroups();
     if (!CullGroup_) return;
-    RecordedCommands_ = 0;
+    RecordedCommands_     = 0;
+    RecordedMilliseconds_ = 0.0;
+    Compacted_            = CompactCommands && CompactionOffered_;
     if (Compacted_ && CountedCommands_)
     {
         const std::array<uint32_t, 4> Zeros{};
         Exchange_.WriteRegion(CompactedCounts_, 0, Zeros.data(), sizeof(Zeros));
     }
-    Sequence.BindProgram(CullProgram_);
+    Sequence.BindProgram(Compacted_ ? CompactedCullProgram_ : CullProgram_);
     Sequence.BindGroup(0, CullGroup_);
     Sequence.Dispatch((RecordCount_ + 63) / 64);
 }
@@ -597,7 +603,7 @@ void NestingProjection::RecordCullPhase2(CommandSequence& Sequence)
 {
     if (!Records_) return;
     const std::shared_ptr<DeviceTextureView>& HiZView = CurrentHiZView_ ? CurrentHiZView_ : PreviousHiZView_;
-    Sequence.BindProgram(Phase2Program_);
+    Sequence.BindProgram(Compacted_ ? CompactedPhase2Program_ : Phase2Program_);
     Sequence.BindGroup(0, CullGroupFor(HiZView));
     Sequence.Dispatch((RecordCount_ + 63) / 64);
     PreviousHiZView_ = HiZView;
@@ -607,6 +613,7 @@ void NestingProjection::RecordCullPhase2(CommandSequence& Sequence)
 void NestingProjection::RecordClusters(CommandSequence& Sequence, const std::shared_ptr<DeviceRegion>& Instances, uint32_t Phase)
 {
     if (!Records_) return;
+    const auto Start = std::chrono::steady_clock::now();
     const std::shared_ptr<DeviceRegion>& Commands = Phase == 2 ? Phase2Commands_ : Phase1Commands_;
     Sequence.BindVertexRegion(0, VertexRegion_);
     Sequence.BindIndexRegion(IndexRegion_);
@@ -614,14 +621,17 @@ void NestingProjection::RecordClusters(CommandSequence& Sequence, const std::sha
     {
         // 📝 I1: both classes of this phase in two calls; the occupant arrives as FirstInstance over the identity instance stream.
         for (uint32_t List : {Phase == 2 ? 2u : 0u, Phase == 2 ? 3u : 1u}) RecordList(Sequence, Instances, List);
-        return;
     }
-    RecordedCommands_ += RecordCount_;
-    for (const ClusterRecord& Cluster : Clusters_)
+    else
     {
-        Sequence.BindVertexRegion(1, Instances, static_cast<VkDeviceSize>(Cluster.Occupant) * 4);
-        Sequence.DrawIndexedIndirect(Commands, static_cast<VkDeviceSize>(Cluster.Record) * CommandBytes);
+        RecordedCommands_ += RecordCount_;
+        for (const ClusterRecord& Cluster : Clusters_)
+        {
+            Sequence.BindVertexRegion(1, Instances, static_cast<VkDeviceSize>(Cluster.Occupant) * 4);
+            Sequence.DrawIndexedIndirect(Commands, static_cast<VkDeviceSize>(Cluster.Record) * CommandBytes);
+        }
     }
+    RecordedMilliseconds_ += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
 }
 
 //------------------------------------------------------------------------------------------------------------------------
@@ -631,20 +641,20 @@ void NestingProjection::RecordClusters(CommandSequence& Sequence, const std::sha
 void NestingProjection::RecordClass(CommandSequence& Sequence, const std::shared_ptr<DeviceRegion>& Commands, const std::shared_ptr<DeviceRegion>& Instances,
                                     bool Transmissive)
 {
+    const auto Start = std::chrono::steady_clock::now();
     Sequence.BindVertexRegion(0, VertexRegion_);
     Sequence.BindIndexRegion(IndexRegion_);
     if (Compacted_)
-    {
         RecordList(Sequence, Instances, (Commands == Phase2Commands_ ? 2u : 0u) + (Transmissive ? 1u : 0u));
-        return;
-    }
-    for (const ClusterRecord& Cluster : Clusters_)
-    {
-        if (((Cluster.ClassMask & 2u) != 0) != Transmissive) continue;
-        ++RecordedCommands_;
-        Sequence.BindVertexRegion(1, Instances, static_cast<VkDeviceSize>(Cluster.Occupant) * 4);
-        Sequence.DrawIndexedIndirect(Commands, static_cast<VkDeviceSize>(Cluster.Record) * CommandBytes);
-    }
+    else
+        for (const ClusterRecord& Cluster : Clusters_)
+        {
+            if (((Cluster.ClassMask & 2u) != 0) != Transmissive) continue;
+            ++RecordedCommands_;
+            Sequence.BindVertexRegion(1, Instances, static_cast<VkDeviceSize>(Cluster.Occupant) * 4);
+            Sequence.DrawIndexedIndirect(Commands, static_cast<VkDeviceSize>(Cluster.Record) * CommandBytes);
+        }
+    RecordedMilliseconds_ += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - Start).count();
 }
 
 void NestingProjection::RecordList(CommandSequence& Sequence, const std::shared_ptr<DeviceRegion>& Instances, uint32_t List)

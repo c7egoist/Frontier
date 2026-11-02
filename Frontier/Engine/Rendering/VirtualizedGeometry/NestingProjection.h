@@ -58,11 +58,12 @@ class NestingProjection
     bool     Enabled     = false;   // [-] the demo's ?hierarchy=1
     uint32_t StreamSlots = 0;       // [-] the demo's ?streampages (0: one slot per page)
     // 📝 I1: one call per phase and class — an indirect-count draw over compacted commands with drawIndirectCount, else one multi-draw
-    //    over the records with multiDrawIndirect; with neither, or with this off, the demo's one command per record. Read at
-    //    ConstructPrograms.
+    //    over the records with multiDrawIndirect; with neither, or with this off, the demo's one command per record. Read at each
+    //    refresh's first cull.
     bool     CompactCommands = true;
     [[nodiscard]] bool     CommandsCompacted() const noexcept { return Compacted_; }
     [[nodiscard]] uint32_t RecordedCommands() const noexcept { return RecordedCommands_; }   // [-] indirect calls of the last refresh
+    [[nodiscard]] double   RecordedMilliseconds() const noexcept { return RecordedMilliseconds_; }   // [ms] host time recording them
 
   private:
     struct ExpandedCluster
@@ -115,6 +116,7 @@ class NestingProjection
     std::shared_ptr<DeviceRegion>     RefreshRegion_{}, OccupantRegion_{};
     std::shared_ptr<DescriptorLayout> CullLayout_{}, SeedLayout_{}, DownsampleLayout_{}, VisibilityLayout_{}, GlassBackLayout_{}, ResolveLayout_{},
                                       FallbackLayout_{};
+    std::shared_ptr<DeviceProgram>    CompactedCullProgram_{}, CompactedPhase2Program_{};
     std::shared_ptr<DeviceProgram>    CullProgram_{}, Phase2Program_{}, SeedProgram_{}, DownsampleProgram_{}, VisibilityOpaqueProgram_{},
                                       VisibilityGlassProgram_{}, VisibilityGlassBackProgram_{}, ResolveOpaqueProgram_{}, ResolveRefractionProgram_{},
                                       InspectIdentitiesProgram_{}, InspectGlassProgram_{}, InspectCopyProgram_{}, InspectHiZProgram_{},
@@ -137,7 +139,9 @@ class NestingProjection
     std::array<uint32_t, 2>           Extent_{0, 0};
     std::optional<std::array<uint32_t, 2>> TargetExtent_{};
     bool                              ProgramsBuilt_ = false, Records_ = false, Compacted_ = false, CountedCommands_ = false;
+    bool                              CompactionOffered_ = false;
     uint32_t                          RecordedCommands_ = 0;
+    double                            RecordedMilliseconds_ = 0.0;
     std::shared_ptr<DeviceRegion>     CompactedCommands_{}, CompactedCounts_{}, ClassCommands_{};
     void RecordList(CommandSequence& Sequence, const std::shared_ptr<DeviceRegion>& Instances, uint32_t List);
     std::optional<std::string>        ActivationError_{};

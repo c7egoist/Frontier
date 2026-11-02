@@ -58,3 +58,12 @@ if(FRONTIER_GLOBAL_ILLUMINATION_SLANGC)
     endforeach()
     add_custom_target(FrontierAnalyticIlluminationShaders ALL DEPENDS ${FRONTIER_ANALYTIC_ILLUMINATION_SPV_OUTPUTS})
 endif()
+
+if(BUILD_TESTING)
+    # 📝 The analytic illumination in the editor's scene viewport, offscreen (needs a Vulkan device; Exhibits/AnalyticIllumination).
+    add_executable(AnalyticIlluminationCapture
+        Exhibits/AnalyticIllumination/Code/AnalyticIlluminationCapture.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(AnalyticIlluminationCapture PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(AnalyticIlluminationCapture PRIVATE FrontierSceneViewport)
+endif()

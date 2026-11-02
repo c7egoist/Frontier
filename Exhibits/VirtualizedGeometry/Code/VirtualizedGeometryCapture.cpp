@@ -2,11 +2,11 @@
                                                     VIRTUALIZEDGEOMETRYCAPTURE.CPP
 ==========================================================================================================================================*/
 // 🧩 The GPU virtualized geometry in the editor's own scene viewport, offscreen: the proving ground without and with the cluster
-//    takeover, the five cluster inspection modes, the takeover's records and pages, and the refresh times either way.
+//    takeover, I1's one call per phase and class against the demo's one command per record on the same pages, the five cluster
+//    inspection modes, the takeover's records and pages, and the refresh times every way.
 
 // 📝 Usage: VirtualizedGeometryCapture <GlobalIllumination shaders> <Environment shaders> <ProvingGround> <CelestialMaps> <out>
-//    [quality] [width] [height] [refreshes] [stream slots] [uncompacted]. The VirtualizedGeometry archives sit beside the
-//    GlobalIllumination ones; "uncompacted" keeps the demo's one indirect command per cluster record (I1 off).
+//    [quality] [width] [height] [refreshes] [stream slots]. The VirtualizedGeometry archives sit beside the GlobalIllumination ones.
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
 #include "stb_image_write.h"
 #include <algorithm>
@@ -31,7 +31,7 @@ void ReportCheck(bool Passed, const std::string& Name, const std::string& Detail
 struct Capture
 {
     std::vector<uint8_t> Rgba{};
-    double               MeanSeconds = 0.0, SlowestSeconds = 0.0;
+    double               MeanSeconds = 0.0, SlowestSeconds = 0.0, RecordedMilliseconds = 0.0;
 };
 
 double MeanAbsoluteDifference(const std::vector<uint8_t>& A, const std::vector<uint8_t>& B)
@@ -72,7 +72,6 @@ int main(int ArgumentCount, char** Arguments)
     const uint32_t Height      = ArgumentCount > 8 ? static_cast<uint32_t>(std::atoi(Arguments[8])) : 270u;
     const uint32_t Refreshes   = ArgumentCount > 9 ? static_cast<uint32_t>(std::atoi(Arguments[9])) : 8u;
     const uint32_t StreamSlots = ArgumentCount > 10 ? static_cast<uint32_t>(std::atoi(Arguments[10])) : 0u;
-    const bool     Uncompacted = ArgumentCount > 11 && std::string(Arguments[11]) == "uncompacted";
     std::filesystem::create_directories(OutFolder);
     Configuration.Journal = [](const std::string& Line) { std::printf("  %s\n", Line.c_str()); };
 
@@ -109,6 +108,7 @@ int main(int ArgumentCount, char** Arguments)
             }
             const double Seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - Start).count();
             Result.MeanSeconds += Seconds / Count;
+            if (Host.Surface && Host.Surface->Virtualized) Result.RecordedMilliseconds += Host.Surface->Virtualized->RecordedMilliseconds() / Count;
             Result.SlowestSeconds = std::max(Result.SlowestSeconds, Seconds);
         }
         if (!Viewport.ReadPresented(Result.Rgba)) ReportCheck(false, Name + " readback");
@@ -123,7 +123,6 @@ int main(int ArgumentCount, char** Arguments)
     const Capture Reference = Run(Baseline, Refreshes, "Baseline");
 
     // ② the takeover: pages stream two per refresh, so run until every page is resident
-    if (Host.Surface && Host.Surface->Virtualized) Host.Surface->Virtualized->CompactCommands = !Uncompacted;
     ViewportRendering Virtualized;
     Virtualized.VirtualizedGeometry    = true;
     Virtualized.VirtualizedStreamSlots = StreamSlots;
@@ -142,12 +141,28 @@ int main(int ArgumentCount, char** Arguments)
     }
     std::printf("every page resident after %u refreshes\n", StreamingRefreshes);
     const Capture Settled = Run(Virtualized, Refreshes, "Virtualized");
-    std::printf("cluster commands: %u indirect calls per refresh (%s)\n", Projection->RecordedCommands(),
-                Projection->CommandsCompacted() ? "one call per phase and class" : "one indirect command per cluster record");
+    const uint32_t SettledCommands = Projection->RecordedCommands();
+    const bool     Compacted       = Projection->CommandsCompacted();
     const double Difference = MeanAbsoluteDifference(Reference.Rgba, Settled.Rgba);
     std::printf("virtualized vs baseline: mean absolute difference %.4f; refresh %.3f s vs %.3f s (%.2fx)\n", Difference, Settled.MeanSeconds,
                 Reference.MeanSeconds, Settled.MeanSeconds / std::max(1e-9, Reference.MeanSeconds));
     ReportCheck(Difference < 0.05, "the virtualized surface matches the lossless one within 5 % mean difference", std::to_string(Difference));
+
+    // ③ I1 before and after on the same resident pages and camera: the demo's one indirect command per cluster record
+    Projection->CompactCommands = false;
+    const Capture PerRecord = Run(Virtualized, Refreshes, "VirtualizedPerRecord");
+    const uint32_t PerRecordCommands = Projection->RecordedCommands();
+    Projection->CompactCommands = true;
+    std::printf("cluster commands, demo: %u indirect calls per refresh, %.3f ms recording them, refresh %.3f s\n", PerRecordCommands,
+                PerRecord.RecordedMilliseconds, PerRecord.MeanSeconds);
+    std::printf("cluster commands, I1:   %u indirect calls per refresh, %.3f ms recording them, refresh %.3f s (%s)\n", SettledCommands,
+                Settled.RecordedMilliseconds, Settled.MeanSeconds,
+                Compacted ? "one call per phase and class" : "the device offers neither drawIndirectCount nor multiDrawIndirect");
+    const double CommandDifference = MeanAbsoluteDifference(PerRecord.Rgba, Settled.Rgba);
+    std::printf("I1 vs demo commands: mean absolute difference %.6f\n", CommandDifference);
+    ReportCheck(!Compacted || SettledCommands < PerRecordCommands, "I1 records fewer indirect calls than one per cluster record",
+                std::to_string(SettledCommands) + " vs " + std::to_string(PerRecordCommands));
+    ReportCheck(CommandDifference < 0.002, "I1 draws the same image as the per-record commands", std::to_string(CommandDifference));
 
     // ③ the five cluster inspection modes
     const char* const Names[] = {"ClusterIdentities", "ClusterResolve", "ClusterHiZ", "ClusterGlassLayers", "ClusterTiers"};
