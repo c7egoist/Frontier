@@ -240,6 +240,14 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
     {
         return false;
     }
+    // 📝 Inspection modes 6-14 show a buffer, not the scene (the demo presents 6, 8, 9 and 10-14 un-tonemapped): the environment
+    //    keeps lighting the refresh but is not composited over them, as the demo, which has no overlay, shows them.
+    if (Overlay_ && Inputs.Toggles.Inspection >= 6u)
+    {
+        Interlude.AfterRecombination = nullptr;
+        Interlude.BeforeAntialias    = nullptr;
+        Interlude.AntialiasSource    = nullptr;
+    }
     return Host_->AdvanceRefresh(&Inputs, nullptr, nullptr, OutDiagnostic, &Interlude);
 }
 
