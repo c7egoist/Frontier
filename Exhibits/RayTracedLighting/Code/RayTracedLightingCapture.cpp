@@ -8,9 +8,9 @@
 // 📝 Usage: RayTracedLightingCapture <GlobalIllumination shaders> <Environment shaders> <ProvingGround> <CelestialMaps> <out>
 //    <view[,view…]> <variant[,variant…]> [warm refreshes] [measured refreshes] [indirect 0|1] [width] [height]. Time is frozen so
 //    nothing but the estimators changes between refreshes; each variant starts from a cleared history. Measure whole multiples of
-//    the antialiasing's 16-refresh jitter cycle so every mean covers the same sub-pixel offsets. The Reference variant, when
-//    listed, runs first (64 sun rays per pixel, 16 reflection samples per screen pixel); every later refresh is then compared with
-//    its mean. Views and variants: the tables below.
+//    the antialiasing's 16-refresh jitter cycle so every mean covers the same sub-pixel offsets. A …Reference variant, when listed,
+//    runs first (converged: 64 sun rays per pixel, or 16 reflection samples per screen pixel); every later refresh is then compared
+//    with its mean. Views and variants: the tables below.
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
 #include "stb_image_write.h"
 #include <algorithm>
@@ -37,8 +37,8 @@ struct ViewSpecification
 // 📝 The proving ground's glossy surfaces: the glass and tempered panes (roughness 0.04 / 0.06), the cones (0.22), the control
 //    tower's cabin glass (0.04); shadows: a light pole's head and mast (11 m, penumbra 0 → ~17 cm) and the tower's.
 const ViewSpecification Views[] = {
-    {"PaneNear", {3.0, -23.6, 1.5}, {6.0, -27.2, 1.0}, {0, 0, 480, 270}},
-    {"ConesNear", {-33.2, 18.6, 1.3}, {-30.0, 15.2, 0.3}, {0, 0, 480, 270}},
+    {"PaneNear", {3.0, -23.6, 1.5}, {6.0, -27.2, 1.0}, {150, 74, 278, 212}},
+    {"ConesNear", {-31.07, 16.39, 0.8}, {-30.0, 15.2, 0.3}, {196, 68, 284, 196}},
     {"PenumbraNear", {-3.0, -4.5, 2.5}, {-5.8, -1.0, 0.0}, {0, 0, 480, 270}},
     {"TowerShadow", {-37.0, -13.0, 4.0}, {-46.0, -20.0, 0.0}, {0, 100, 480, 270}},
 };
@@ -63,8 +63,10 @@ const VariantSpecification Variants[] = {
     {"MirrorFilter", R::SolarDisc | R::MirrorFilter, true, true},
     {"MirrorTrace", R::SolarDisc | R::MirrorFilter | R::MirrorTrace, true, true},
     {"Refined", R::SolarDisc | R::StratifiedSun | R::PenumbraFilter | R::MirrorFilter | R::MirrorTrace, true, true},
-    // 📝 Converged: 64 sun rays per pixel, every reflective pixel traced 16 times at screen resolution and taken unfiltered.
-    {"Reference", R::SolarDisc | R::MirrorFilter | R::MirrorTrace | R::ShadowReference | R::MirrorReference, true, true},
+    // 📝 Converged references, each changing only what its views test: 64 sun rays per pixel (shadow views); every reflective pixel
+    //    traced 16 times at screen resolution and taken unfiltered (reflection views).
+    {"ShadowReference", R::SolarDisc | R::ShadowReference, true, true},
+    {"MirrorReference", R::SolarDisc | R::MirrorFilter | R::MirrorTrace | R::MirrorReference, true, true},
     // 📝 Where fireflies come from: the direct term alone and the specular reflection alone, before and after the solar disc.
     {"DemoDirect", 0u, true, true, 1u},
     {"DemoSpecular", 0u, true, true, 5u},
@@ -203,7 +205,7 @@ int main(int ArgumentCount, char** Arguments)
 
         // 📝 The reference runs first; every other variant's refreshes are then measured against its mean.
         std::vector<std::string> Order = VariantNames;
-        const auto ReferenceAt = std::find(Order.begin(), Order.end(), std::string("Reference"));
+        const auto ReferenceAt = std::find_if(Order.begin(), Order.end(), [](const std::string& Name) { return Name.find("Reference") != std::string::npos; });
         if (ReferenceAt != Order.end()) std::rotate(Order.begin(), ReferenceAt, ReferenceAt + 1);
         std::vector<double> ReferenceLuma;
         std::vector<uint8_t> Transition(PixelCount, 0u);
@@ -218,7 +220,7 @@ int main(int ArgumentCount, char** Arguments)
                 std::printf("unknown variant %s\n", VariantName.c_str());
                 return 2;
             }
-            const bool IsReference = VariantName == "Reference";
+            const bool IsReference = VariantName.find("Reference") != std::string::npos;
             Host.Settings.VarianceFilter = Variant->VarianceFilter;
             Host.PriorValid              = false;   // 📝 a cleared history: the temporal reuse restarts, the antialiasing takes the refresh
             Viewport.ToggleAdjustment = [Variant, Indirect](RefreshToggles& Toggles) {
