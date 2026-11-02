@@ -4,7 +4,11 @@ ExternalPackages/
 # Build outputs and intermediates.
 Build/
 build/
-Binaries/
+# 📝 Packages stay local, except the Scene Viewport's Windows download, which the branch carries so the owner can take
+#    it from GitHub (Arena's GitHub App may not add workflow files, and its sandbox cannot reach uploads.github.com).
+Binaries/*
+!Binaries/FrontierSceneViewport-Windows-x64.zip
+!Binaries/FrontierSceneViewport-Windows-x64.zip.sha256
 
 # Sample meshes / textures / assets — tracked separately.
 EngineContent/*
