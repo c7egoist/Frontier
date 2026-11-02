@@ -55,6 +55,13 @@ Studio material archives, which the Scene Viewport does not read.
   over at night. Its sky lights every bounce and reflection, its clouds shade the ground, and the buildings and posts
   shadow the sun shafts in the fog.
 - Everything runs on the editor's own Vulkan 1.3 device and queue.
+- Select **Environment · Solar** in the Outliner to open the demo's Sun page in the Inspector. It has four tabs:
+  - **Overview:** drag the dial, use the presets, switch the Sunlight, Sun disc and Day cycle tiles.
+  - **Daylight:** date, place and time. "Manual ↗" switches to "Time linked ↗", and the Day cycle runs the clock.
+  - **Light & colour:** intensity, temperature or an RGB tint, and the spectrum reference.
+  - **Disc & optics:** angular size and aureole, plus "Open Lens Flare ↗", which selects the flare.
+
+  Every change applies live and is saved with the level.
 
 ## Requirements
 

@@ -8,10 +8,13 @@
 #include "Engine/Diagnostics/BuildConfiguration.h"
 #include "Engine/Scene/RecordToken.h"
 #include "Engine/Scene/SceneDirectory.h"
+#include "Engine/Scene/SolarPlacement.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -47,6 +50,12 @@ class RecordInspector
     virtual void                      ConfigureToggle(bool Enabled)                         { (void)Enabled; }
     [[nodiscard]] virtual uint64_t    QueryRevision() const noexcept                        { return 0; }
     virtual void                      EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches) { (void)OutSwitches; }
+    // 📝 True for a page that lays out the whole Inspector column itself (the demo's environment observatories): the
+    //    runtime then draws no crumb bar, record header or switch grid around it.
+    [[nodiscard]] virtual bool        QueryOccupiesColumn() const noexcept                  { return false; }
+    // 📝 A page's section tabs (the demo's Overview / Daylight / …): how many there are, and which one shows.
+    [[nodiscard]] virtual int         QuerySectionCount() const noexcept                    { return 0; }
+    virtual void                      ConfigureSection(int Section) noexcept                { (void)Section; }
     virtual void                      ConstructInspector()                                  = 0;
 };
 
@@ -85,6 +94,18 @@ class InspectorRuntime
     [[nodiscard]] RecordToken QueryActiveEditorToken() const noexcept;
     void                      ConstructActiveEditor();
 
+    // 📝 A page asking the Outliner to select the first record of a type ("Open Lens Flare ↗"); the workspace consumes it.
+    void                      RequestSelection(std::string_view TypeIdentifier);
+    [[nodiscard]] std::string ConsumeSelectionRequest();
+
+    // 📝 The workspace's interface scale (Appearance → Interface scale / 100), configured once per frame.
+    void                ConfigureInterfaceScale(float Scale) noexcept;
+    [[nodiscard]] float ResolveInterfaceScale() const noexcept;
+
+    // 📝 The celestial solver the Sun page asks for its day path; registered by the project that links the renderer.
+    void                                     RegisterSolarPlacementSolver(SolarPlacementSolver Solver) noexcept;
+    [[nodiscard]] SolarPlacementSolver       QuerySolarPlacementSolver() const noexcept;
+
   private:
     friend class RecordEntry;
 
@@ -103,6 +124,9 @@ class InspectorRuntime
     std::unordered_map<uint64_t, SlotEntry> Slots;
     RecordToken                             ActiveEditorToken{};
 #endif
+    std::string          PendingSelectionType{};
+    SolarPlacementSolver SolarSolver    = nullptr;
+    float                InterfaceScale = 1.0f;
 };
 
 } // namespace Frontier

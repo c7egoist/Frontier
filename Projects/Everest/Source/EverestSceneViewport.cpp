@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 
 namespace Everest
@@ -48,6 +49,39 @@ uint32_t ViewportLogCategory()
 }
 
 } // namespace
+
+Frontier::SolarPlacement SolveSolarPlacement(const Frontier::SolarPlacementQuery& Query)
+{
+    Frontier::GlobalIllumination::EnvironmentSettings Settings;
+    Settings.SkyDate   = Query.CalendarDate;
+    Settings.Latitude  = Query.LatitudeDegrees;
+    Settings.Longitude = Query.LongitudeDegrees;
+    Settings.TimeZone  = Query.UtcOffsetHours;
+    Settings.SunTime   = Query.LocalSolarHours;
+    const Frontier::GlobalIllumination::CelestialSolution Solved = Frontier::GlobalIllumination::SolveCelestial(Settings);
+    return {Solved.Sun.Elevation, Solved.Sun.Azimuth};
+}
+
+bool AdvanceSolarDay(Frontier::SolarConfiguration& Sun, double DeltaSeconds)
+{
+    // 📝 AdvanceCelestial: SunTime = (SunTime + Δt · 24 / (DayDuration · 3600)) mod 24, and the cycle links the sun.
+    if (Sun.DayCycle)
+    {
+        const double Advanced = static_cast<double>(Sun.LocalSolarHours) +
+                                std::max(0.0, DeltaSeconds) * 24.0 / (std::max(0.01, static_cast<double>(Sun.DayDurationHours)) * 3600.0);
+        Sun.LocalSolarHours = static_cast<float>(std::fmod(Advanced, 24.0));
+        Sun.TimeLinked      = true;
+    }
+    if (!Sun.TimeLinked) return false;
+    const Frontier::SolarPlacement Placement = SolveSolarPlacement(
+        {Sun.CalendarDate, Sun.LatitudeDegrees, Sun.LongitudeDegrees, Sun.UtcOffsetHours, Sun.LocalSolarHours});
+    const auto Elevation = static_cast<float>(Placement.ElevationDegrees);
+    const auto Azimuth   = static_cast<float>(Placement.AzimuthDegrees);
+    if (Elevation == Sun.ElevationDegrees && Azimuth == Sun.AzimuthDegrees) return false;
+    Sun.ElevationDegrees = Elevation;
+    Sun.AzimuthDegrees   = Azimuth;
+    return true;
+}
 
 Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::SceneWorld& World, double ElapsedSeconds)
 {

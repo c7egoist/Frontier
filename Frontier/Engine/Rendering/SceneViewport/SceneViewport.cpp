@@ -137,6 +137,19 @@ void SceneViewport::ResolveSky(const SceneEnvironment& S)
     Sky.SolarIlluminance = 12.0 * std::max(0.0f, S.Solar.IlluminanceKilolux) / 98.0;
     Sky.SunTemperature   = std::clamp(static_cast<double>(S.Solar.KelvinTemperature), 1000.0, 40000.0);
     Sky.SunRadius        = 0.5 * std::max(0.05f, S.Solar.AngularDiameterDeg);
+    Sky.SunDiscEnabled   = S.Solar.DiscVisible;
+    Sky.SunGlow          = std::max(0.0f, S.Solar.AureoleGain);
+    Sky.Atmosphere.SunColourIsRgb = S.Solar.ColourSource == 1u;
+    Sky.Atmosphere.SunTint        = {S.Solar.TintLinear[0], S.Solar.TintLinear[1], S.Solar.TintLinear[2]};
+
+    // 📝 The day clock's date, place and time: the editor already wrote the solved sun into the record when time-linked,
+    //    so the port keeps manual placement; its moons, planets and sidereal stars follow the same clock.
+    Sky.SunTime     = std::clamp(static_cast<double>(S.Solar.LocalSolarHours), 0.0, 24.0);
+    Sky.DayDuration = std::max(0.01, static_cast<double>(S.Solar.DayDurationHours));
+    Sky.SkyDate     = S.Solar.CalendarDate;
+    Sky.Latitude    = std::clamp(static_cast<double>(S.Solar.LatitudeDegrees), -90.0, 90.0);
+    Sky.Longitude   = std::clamp(static_cast<double>(S.Solar.LongitudeDegrees), -180.0, 180.0);
+    Sky.TimeZone    = std::clamp(static_cast<double>(S.Solar.UtcOffsetHours), -12.0, 14.0);
 
     // ② fog, aerial perspective and the flare come from the overlaid environment when it is present
     const bool Overlaid = static_cast<bool>(Overlay_);

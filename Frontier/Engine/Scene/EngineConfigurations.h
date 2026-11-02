@@ -109,16 +109,30 @@ struct PolygonClusterConfiguration : RevisionCounter
 //                                                    ENVIRONMENT CONFIGURATIONS
 //------------------------------------------------------------------------------------------------------------------------
 
+// 📝 The level's sun. Below the original fields sit the demo Sun page's remaining settings (EnvironmentDefaults): the
+//    disc and its aureole, the colour source, and the day clock that places the sun from a date, a place and a time.
 struct SolarConfiguration : RevisionCounter
 {
-    bool  Enabled              = true;
-    float ElevationDegrees     = 38.0f;
-    float AzimuthDegrees       = 132.0f;
-    float IlluminanceKilolux   = 98.0f;
-    float AngularDiameterDeg   = 0.53f;
-    float KelvinTemperature    = 5778.0f;
-    bool  CastRaytracedShadow  = true;
-    bool  VolumetricLightShaft = true;
+    bool                 Enabled              = true;
+    float                ElevationDegrees     = 38.0f;
+    float                AzimuthDegrees       = 132.0f;
+    float                IlluminanceKilolux   = 98.0f;
+    float                AngularDiameterDeg   = 0.53f;
+    float                KelvinTemperature    = 5778.0f;
+    bool                 CastRaytracedShadow  = true;
+    bool                 VolumetricLightShaft = true;
+    bool                 DiscVisible          = true;                 // SunDiscEnabled
+    float                AureoleGain          = 1.0f;                 // SunGlow [×]
+    uint32_t             ColourSource         = 0;                    // SunColourSource: 0 Temperature, 1 RGB
+    std::array<float, 3> TintLinear           = {1.0f, 1.0f, 1.0f};   // SunTint, linear
+    bool                 TimeLinked           = false;                // SunAutoPosition: the day clock places the sun
+    bool                 DayCycle             = false;                // DayAnimate: the clock runs
+    float                LocalSolarHours      = 12.0f;                // SunTime [h]
+    float                DayDurationHours     = 6.0f;                 // DayDuration [real h per simulated day]
+    std::string          CalendarDate         = "2026-10-20";         // SkyDate
+    float                LatitudeDegrees      = -26.18f;              // [°]
+    float                LongitudeDegrees     = 28.32f;               // [°]
+    float                UtcOffsetHours       = 2.0f;                 // TimeZone [h]
 };
 
 struct OpticalFlareConfiguration : RevisionCounter

@@ -240,6 +240,38 @@ void InspectorRuntime::ConstructActiveEditor()
 #endif
 }
 
+void InspectorRuntime::RequestSelection(std::string_view TypeIdentifier)
+{
+    PendingSelectionType.assign(TypeIdentifier.data(), TypeIdentifier.size());
+}
+
+std::string InspectorRuntime::ConsumeSelectionRequest()
+{
+    std::string Request;
+    Request.swap(PendingSelectionType);
+    return Request;
+}
+
+void InspectorRuntime::ConfigureInterfaceScale(float Scale) noexcept
+{
+    InterfaceScale = Scale > 0.0f ? Scale : 1.0f;
+}
+
+float InspectorRuntime::ResolveInterfaceScale() const noexcept
+{
+    return InterfaceScale;
+}
+
+void InspectorRuntime::RegisterSolarPlacementSolver(SolarPlacementSolver Solver) noexcept
+{
+    SolarSolver = Solver;
+}
+
+SolarPlacementSolver InspectorRuntime::QuerySolarPlacementSolver() const noexcept
+{
+    return SolarSolver;
+}
+
 void InspectorRuntime::InspectRecord([[maybe_unused]] RecordToken Token, bool& OutDeleteRequested)
 {
     OutDeleteRequested = false;
@@ -262,6 +294,37 @@ void InspectorRuntime::InspectRecord([[maybe_unused]] RecordToken Token, bool& O
 
     const SceneDirectoryMetadata Meta = Directory.QueryMetadata(Token);
     const std::string            Name = Directory.QueryName(Token);
+
+    // 📝 A page that occupies the column (the demo's environment observatories) lays it out itself, edge to edge.
+    if (auto Occupied = Slots.find(Token.Value);
+        Occupied != Slots.end() && Occupied->second.Inspectors.size() == 1 && Occupied->second.Inspectors.front()->QueryOccupiesColumn())
+    {
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+        if (ImGui::BeginChild("##InspectorObservatoryRegion", ImVec2(0.0f, 0.0f), false))
+        {
+            Occupied->second.Inspectors.front()->ConstructInspector();
+            if (Meta.RemovableInEditor)
+            {
+                // 📝 The page's 20 px inset on both sides: the button sizes itself to the region it is given.
+                const float Inset = 20.0f * InterfaceScale;
+                ImGui::SetCursorPosX(Inset);
+                if (ImGui::BeginChild("##RemoveSceneRecordRegion", ImVec2(std::max(140.0f, ImGui::GetContentRegionAvail().x - Inset), 30.0f),
+                                      ImGuiChildFlags_None, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBackground))
+                {
+                    if (InspectorControls::ConstructDangerButton(Palette, Faces, "##RemoveSceneRecordBtn", "Remove from Scene"))
+                    {
+                        OutDeleteRequested = true;
+                    }
+                }
+                ImGui::EndChild();
+                ImGui::Dummy(ImVec2(1.0f, Inset));
+            }
+        }
+        ImGui::EndChild();
+        ImGui::PopStyleVar();
+        return;
+    }
+
     InspectorControls::ConstructCrumbBar(
         Palette, Faces, Meta.GroupName.empty() ? RecordClassificationName(Directory.QueryClassification(Token)) : Meta.GroupName.c_str());
 

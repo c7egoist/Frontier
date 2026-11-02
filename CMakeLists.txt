@@ -133,6 +133,8 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/ParticleEditor.cpp
     Frontier/Engine/Interface/PolygonClusterEditor.cpp
     Frontier/Engine/Interface/NativeInspectors.cpp
+    Frontier/Engine/Interface/ObservatoryControls.cpp
+    Frontier/Engine/Interface/SolarObservatory.cpp
     Frontier/Engine/Interface/SceneInspectorPanel.cpp
     Frontier/Engine/Interface/ViewportChromeControls.cpp)
 target_include_directories(FrontierSceneEditorUI PUBLIC

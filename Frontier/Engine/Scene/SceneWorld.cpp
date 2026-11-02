@@ -384,17 +384,47 @@ void SolarRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("elevation_deg", static_cast<double>(Parameters.ElevationDegrees));
     OutTable.insert_or_assign("azimuth_deg", static_cast<double>(Parameters.AzimuthDegrees));
     OutTable.insert_or_assign("illuminance_klx", static_cast<double>(Parameters.IlluminanceKilolux));
+    OutTable.insert_or_assign("angular_diameter_deg", static_cast<double>(Parameters.AngularDiameterDeg));
     OutTable.insert_or_assign("kelvin", static_cast<double>(Parameters.KelvinTemperature));
+    OutTable.insert_or_assign("ray_shadow", Parameters.CastRaytracedShadow);
+    OutTable.insert_or_assign("light_shafts", Parameters.VolumetricLightShaft);
+    OutTable.insert_or_assign("disc_visible", Parameters.DiscVisible);
+    OutTable.insert_or_assign("aureole_gain", static_cast<double>(Parameters.AureoleGain));
+    OutTable.insert_or_assign("colour_source", static_cast<int64_t>(Parameters.ColourSource));
+    WriteFloat3(OutTable, "tint_linear", Parameters.TintLinear.data());
+    OutTable.insert_or_assign("time_linked", Parameters.TimeLinked);
+    OutTable.insert_or_assign("day_cycle", Parameters.DayCycle);
+    OutTable.insert_or_assign("local_solar_h", static_cast<double>(Parameters.LocalSolarHours));
+    OutTable.insert_or_assign("day_duration_h", static_cast<double>(Parameters.DayDurationHours));
+    OutTable.insert_or_assign("calendar_date", Parameters.CalendarDate);
+    OutTable.insert_or_assign("latitude_deg", static_cast<double>(Parameters.LatitudeDegrees));
+    OutTable.insert_or_assign("longitude_deg", static_cast<double>(Parameters.LongitudeDegrees));
+    OutTable.insert_or_assign("utc_offset_h", static_cast<double>(Parameters.UtcOffsetHours));
 }
 
 template <>
 void SolarRecord::DeserializeConfiguration(const toml::table& InTable)
 {
-    Parameters.Enabled            = ReadBool(InTable, "enabled", Parameters.Enabled);
-    Parameters.ElevationDegrees   = ReadFloat(InTable, "elevation_deg", Parameters.ElevationDegrees);
-    Parameters.AzimuthDegrees     = ReadFloat(InTable, "azimuth_deg", Parameters.AzimuthDegrees);
-    Parameters.IlluminanceKilolux = ReadFloat(InTable, "illuminance_klx", Parameters.IlluminanceKilolux);
-    Parameters.KelvinTemperature  = ReadFloat(InTable, "kelvin", Parameters.KelvinTemperature);
+    Parameters.Enabled              = ReadBool(InTable, "enabled", Parameters.Enabled);
+    Parameters.ElevationDegrees     = ReadFloat(InTable, "elevation_deg", Parameters.ElevationDegrees);
+    Parameters.AzimuthDegrees       = ReadFloat(InTable, "azimuth_deg", Parameters.AzimuthDegrees);
+    Parameters.IlluminanceKilolux   = ReadFloat(InTable, "illuminance_klx", Parameters.IlluminanceKilolux);
+    Parameters.AngularDiameterDeg   = ReadFloat(InTable, "angular_diameter_deg", Parameters.AngularDiameterDeg);
+    Parameters.KelvinTemperature    = ReadFloat(InTable, "kelvin", Parameters.KelvinTemperature);
+    Parameters.CastRaytracedShadow  = ReadBool(InTable, "ray_shadow", Parameters.CastRaytracedShadow);
+    Parameters.VolumetricLightShaft = ReadBool(InTable, "light_shafts", Parameters.VolumetricLightShaft);
+    Parameters.DiscVisible          = ReadBool(InTable, "disc_visible", Parameters.DiscVisible);
+    Parameters.AureoleGain          = ReadFloat(InTable, "aureole_gain", Parameters.AureoleGain);
+    Parameters.ColourSource         = std::min<uint32_t>(1u, ReadUint32(InTable, "colour_source", Parameters.ColourSource));
+    if (InTable.contains("tint_linear")) ReadFloat3(InTable, "tint_linear", Parameters.TintLinear.data());
+    Parameters.TimeLinked           = ReadBool(InTable, "time_linked", Parameters.TimeLinked);
+    Parameters.DayCycle             = ReadBool(InTable, "day_cycle", Parameters.DayCycle);
+    Parameters.LocalSolarHours      = ReadFloat(InTable, "local_solar_h", Parameters.LocalSolarHours);
+    Parameters.DayDurationHours     = ReadFloat(InTable, "day_duration_h", Parameters.DayDurationHours);
+    if (const auto Date = InTable["calendar_date"].value<std::string>()) Parameters.CalendarDate = *Date;
+    Parameters.LatitudeDegrees      = ReadFloat(InTable, "latitude_deg", Parameters.LatitudeDegrees);
+    Parameters.LongitudeDegrees     = ReadFloat(InTable, "longitude_deg", Parameters.LongitudeDegrees);
+    Parameters.UtcOffsetHours       = ReadFloat(InTable, "utc_offset_h", Parameters.UtcOffsetHours);
     Parameters.AdvanceRevision();
 }
 

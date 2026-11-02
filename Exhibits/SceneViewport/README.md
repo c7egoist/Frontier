@@ -15,8 +15,13 @@ environment only feeds the inputs the ported units already read (see *How it is 
 records in the Scene Directory, like the sun, the moons and the stars.
 
 The viewport navigates like **Unreal Engine's** perspective viewport (see *Camera*). The VehicleHMI demo's interface is
-being ported 1:1: its **viewport column** (tab strip, viewport bar, readout, distance slice, notices, bring-up and
-failure) and its **status strip** are in. The 15 inspection views and the distance slice drive the port's own inputs.
+being ported 1:1. Two regions are in:
+
+- its **viewport column** (tab strip, viewport bar, readout, distance slice, notices, bring-up and failure) and its
+  **status strip**; the 15 inspection views and the distance slice drive the port's own inputs;
+- its **Sun page**, which occupies the Inspector when the Solar record is selected. Every control writes the level's
+  sun, and a day clock (the demo's `AdvanceCelestial`) can place the sun from a date, a place and a time.
+
 `InterfacePortInventory.md` tracks every element and label of the demo's interface.
 
 | Daylight — the level as authored | Low sun — flare, long shadows |
@@ -389,11 +394,13 @@ Everest opened, and then `VK_ERROR_DEVICE_LOST`.
   sandbox.
 - **Moon phase record.** The drawn moon discs follow the sun–moon geometry. The `Moons` record's phase sets only Luna's
   light.
-- **Interface.** Only the demo's viewport column and status strip are ported (`InterfacePortInventory.md`). The Clean
-  view keeps the editor columns, because hiding docked panels (the demo's P) is not ported yet. The bring-up card shows
-  no progress, because the bring-up runs synchronously. The viewport chrome uses the demo's dark colours and does not
-  follow a light appearance. The controls were checked offscreen (layout, readout figures, the Normals view through the
-  record). Clicking through them on Windows was not tried.
+- **Interface.** Only the demo's viewport column, status strip and Sun page are ported (`InterfacePortInventory.md`);
+  the other environment pages still show the generic inspector. The Sun page's "Sun disc" switch reaches the GI sky's
+  disc only, because the PlanetaryAtmosphere sky has no disc switch. The Clean view keeps the editor columns, because
+  hiding docked panels (the demo's P) is not ported yet. The bring-up card shows no progress, because the bring-up runs
+  synchronously. The viewport chrome uses the demo's dark colours and does not follow a light appearance. The controls
+  were checked offscreen (layout, readout figures, the Normals view through the record). Clicking through them on
+  Windows was not tried.
 - **Synchronous submissions.** Submissions are synchronous (one fence wait per step group). Pipelining the viewport
   with the interface (Option A's optional step 6) waits until the device-loss fix has run on the RX 9060 XT, because
   pipelining changes the same synchronization.

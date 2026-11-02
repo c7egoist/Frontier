@@ -9,6 +9,7 @@
 #include "EverestWorkspace.h"
 
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
+#include "Frontier/Engine/Scene/SolarPlacement.h"
 
 #include <array>
 #include <filesystem>
@@ -20,6 +21,13 @@ namespace Everest
 
 // 📝 The level's environment records as the viewport reads them; an absent record switches its effect off.
 [[nodiscard]] Frontier::GlobalIllumination::SceneEnvironment ResolveSceneEnvironment(const Frontier::SceneWorld& World, double ElapsedSeconds);
+
+// 📝 The GlobalIllumination port's celestial solver (the demo's SolveCelestial) answering the Sun page and the day clock.
+[[nodiscard]] Frontier::SolarPlacement SolveSolarPlacement(const Frontier::SolarPlacementQuery& Query);
+
+// 📝 The demo's AdvanceCelestial for the level's sun: a running day clock advances the local solar time and links the
+//    sun to it; a time-linked sun takes the solved elevation and azimuth. Returns true when the sun moved.
+bool AdvanceSolarDay(Frontier::SolarConfiguration& Sun, double DeltaSeconds);
 
 struct SceneViewportRefresh
 {

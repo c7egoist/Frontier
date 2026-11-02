@@ -461,37 +461,6 @@ void PolygonClusterInspector::ConstructInspector()
 //                                                    ENVIRONMENT INSPECTORS
 //------------------------------------------------------------------------------------------------------------------------
 
-void SolarInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches)
-{
-    OutSwitches.push_back({"Ray Shadows", "Soft penumbra", &Parameters.CastRaytracedShadow});
-    OutSwitches.push_back({"Light Shafts", "Froxel shafts", &Parameters.VolumetricLightShaft});
-}
-
-void SolarInspector::ConstructInspector()
-{
-    const InspectorPalette Palette = InspectorPalette::Resolve();
-    const EditorTypefaces  Faces   = EditorTypefaces::Resolve();
-
-    char ArcHeader[64]{};
-    std::snprintf(ArcHeader, sizeof(ArcHeader), "HEMISPHERE ELEVATION · %.1f deg", Parameters.ElevationDegrees);
-    const float AzimuthRatio   = std::clamp(Parameters.AzimuthDegrees / 360.0f, 0.0f, 1.0f);
-    const float ElevationRatio = std::clamp((Parameters.ElevationDegrees + 15.0f) / 105.0f, 0.0f, 1.0f);
-    DiagramControls::ConstructArcPlot(Palette, Faces, ArcHeader, "HORIZON PLANE",
-                                      AzimuthRatio, ElevationRatio,
-                                      ParseHexSpectrum("#f2b84b", Palette.WarmAmber));
-
-    bool Changed = false;
-    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##SunEl", "Elevation", Parameters.ElevationDegrees, -15.0f, 90.0f, "%.1f deg");
-    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##SunAz", "Azimuth", Parameters.AzimuthDegrees, 0.0f, 360.0f, "%.0f deg");
-    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##SunLux", "Illuminance", Parameters.IlluminanceKilolux, 0.0f, 130.0f, "%.1f klx");
-    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##SunAng", "Angular Disc", Parameters.AngularDiameterDeg, 0.2f, 2.5f, "%.2f deg");
-    Changed |= InspectorControls::ConstructSliderRow(Palette, Faces, "##SunKelvin", "Blackbody Temp", Parameters.KelvinTemperature, 2200.0f, 9000.0f, "%.0f K");
-    if (Changed)
-    {
-        Parameters.AdvanceRevision();
-    }
-}
-
 void OpticalFlareInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches)
 {
     OutSwitches.push_back({"Anamorphic", "Horizontal streak", &Parameters.AnamorphicStreak});
@@ -890,8 +859,6 @@ void SurfaceCardInspector::ConstructInspector() {}
 void PolygonClusterInspector::ConstructEditor(RecordToken) {}
 void PolygonClusterInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}
 void PolygonClusterInspector::ConstructInspector() {}
-void SolarInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}
-void SolarInspector::ConstructInspector() {}
 void OpticalFlareInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}
 void OpticalFlareInspector::ConstructInspector() {}
 void AtmosphereInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>&) {}

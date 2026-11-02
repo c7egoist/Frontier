@@ -25,6 +25,15 @@ namespace
 //------------------------------------------------------------------------------------------------------------------------
 
 // 📝 FrontierEditor.css colours (the demo's dark scheme, its only one).
+// 📝 stb_truetype sizes a face by (ascent − descent), CSS by the em: ImGui pixel height per CSS pixel of font-size.
+constexpr float DmSansEm        = 1.302f;   // DM Sans hhea 992 / −310 over 1000 units
+constexpr float JetBrainsMonoEm = 1.320f;   // JetBrains Mono hhea 1020 / −300 over 1000 units
+// 📝 Half the leading of a CSS line box (LineHeight × em) around the face's content area, per em.
+[[nodiscard]] constexpr float ResolveHalfLeading(float LineHeight, float EmHeight) noexcept
+{
+    return 0.5f * (LineHeight - EmHeight);
+}
+
 constexpr ImU32 BarSurface        = IM_COL32(0x16, 0x16, 0x16, 0xFF);   // --column
 constexpr ImU32 EdgeStroke        = IM_COL32(0x2A, 0x2A, 0x2A, 0xFF);   // --edge
 constexpr ImU32 TextTone          = IM_COL32(0xDC, 0xDC, 0xDC, 0xFF);   // --text
@@ -198,7 +207,7 @@ bool ConstructOverlayClose(const char* Id, const EditorTypefaces& Faces, ImVec2 
     DrawList->AddRectFilled(Min, Max, IconSurface, 6.0f * Scale);
     DrawList->AddRect(Min, Max, Hovered ? CloseHoverStroke : CloseStroke, 6.0f * Scale, ImDrawFlags_None, Scale);
     const char* Cross     = "\xC3\x97";
-    const float CrossSize = 13.0f * Scale;
+    const float CrossSize = 13.0f * DmSansEm * Scale;
     const float CrossW    = MeasureText(Faces.Regular, CrossSize, Cross);
     DrawList->AddText(ResolveFace(Faces.Regular), CrossSize, ImVec2(Min.x + 0.5f * (Extent - CrossW), Min.y + 0.5f * (Extent - CrossSize)),
                       Hovered ? IconHoverGlyph : CloseText, Cross);
@@ -215,9 +224,9 @@ void ViewportChromeControls::ConstructScenePill(ImDrawList* DrawList, const Edit
                                                 float Scale)
 {
     // 📝 11 px #9a9a9a, padding 4 px 28 px, radius 0 0 14 px 14 px, #1a1a1a, 1 px #262626 without the top edge.
-    const float  Size  = 11.0f * Scale;
+    const float  Size  = 11.0f * DmSansEm * Scale;
     const float  Width = MeasureText(Faces.Regular, Size, Text) + 56.0f * Scale + 2.0f * Scale;
-    const float  Tall  = std::min(StripMax.y - StripMin.y, Size * 1.35f + 8.0f * Scale + Scale);
+    const float  Tall  = std::min(StripMax.y - StripMin.y, 11.0f * 1.35f * Scale + 8.0f * Scale + Scale);
     const ImVec2 Min(0.5f * (StripMin.x + StripMax.x - Width), StripMin.y);
     const ImVec2 Max(Min.x + Width, Min.y + Tall);
     const float  Radius = 14.0f * Scale;
@@ -241,22 +250,25 @@ float ViewportChromeControls::ConstructSceneHeading(ImDrawList* DrawList, const 
                                                     const char* Subtitle, float Scale)
 {
     // 📝 .scene-heading: column; strong 13 px / 500, span 9 px #707070; centred in the bar; margin-right 6 px.
-    const float TitleSize    = 13.0f * Scale;
-    const float SubtitleSize = 9.0f * Scale;
-    const float Block        = TitleSize * 1.35f + SubtitleSize * 1.35f;
+    const float TitleCss     = 13.0f * Scale;
+    const float SubtitleCss  = 9.0f * Scale;
+    const float TitleSize    = TitleCss * DmSansEm;
+    const float SubtitleSize = SubtitleCss * DmSansEm;
+    const float Block        = TitleCss * 1.35f + SubtitleCss * 1.35f;
     const float Top          = Min.y + 0.5f * (Height - Block);
-    DrawList->AddText(ResolveFace(Faces.Medium), TitleSize, ImVec2(Min.x, Top + 0.175f * TitleSize), TextTone, Title);
-    DrawList->AddText(ResolveFace(Faces.Regular), SubtitleSize, ImVec2(Min.x, Top + 1.35f * TitleSize + 0.175f * SubtitleSize), SubtitleTone, Subtitle);
+    const float HalfLeading  = ResolveHalfLeading(1.35f, DmSansEm);
+    DrawList->AddText(ResolveFace(Faces.Medium), TitleSize, ImVec2(Min.x, Top + HalfLeading * TitleCss), TextTone, Title);
+    DrawList->AddText(ResolveFace(Faces.Regular), SubtitleSize, ImVec2(Min.x, Top + 1.35f * TitleCss + HalfLeading * SubtitleCss), SubtitleTone, Subtitle);
     return std::max(MeasureText(Faces.Medium, TitleSize, Title), MeasureText(Faces.Regular, SubtitleSize, Subtitle)) + 6.0f * Scale;
 }
 
 float ViewportChromeControls::ConstructLivePill(ImDrawList* DrawList, const EditorTypefaces& Faces, ImVec2 Min, float Height, const char* Text, float Scale)
 {
     // 📝 .live-pill: 9 px, letter-spacing 1.2 px, padding 3 px 7 px, radius 5 px.
-    const float  Size    = 9.0f * Scale;
+    const float  Size    = 9.0f * DmSansEm * Scale;
     const float  Spacing = 1.2f * Scale;
     const float  Width   = ConstructSpacedText(nullptr, Faces.Regular, Size, ImVec2(), 0, Text, Spacing) + 14.0f * Scale + 2.0f * Scale;
-    const float  Tall    = Size * 1.35f + 6.0f * Scale + 2.0f * Scale;
+    const float  Tall    = 9.0f * 1.35f * Scale + 6.0f * Scale + 2.0f * Scale;
     const ImVec2 PillMin(Min.x, Min.y + 0.5f * (Height - Tall));
     const ImVec2 PillMax(Min.x + Width, PillMin.y + Tall);
     DrawList->AddRectFilled(PillMin, PillMax, LivePillSurface, 5.0f * Scale);
@@ -268,7 +280,7 @@ float ViewportChromeControls::ConstructLivePill(ImDrawList* DrawList, const Edit
 float ViewportChromeControls::MeasureLabelButton(const EditorTypefaces& Faces, const char* Label, float Scale)
 {
     // 📝 .icon-button.particle-launch: width auto, min-width 72 px, padding 0 12 px, 11 px.
-    return std::max(72.0f * Scale, MeasureText(Faces.Regular, 11.0f * Scale, Label) + 24.0f * Scale + 2.0f * Scale);
+    return std::max(72.0f * Scale, MeasureText(Faces.Regular, 11.0f * DmSansEm * Scale, Label) + 24.0f * Scale + 2.0f * Scale);
 }
 
 bool ViewportChromeControls::ConstructLabelButton(const char* Id, const EditorTypefaces& Faces, ImVec2 Min, ImVec2 Size, const char* Label, bool Enabled,
@@ -285,7 +297,7 @@ bool ViewportChromeControls::ConstructLabelButton(const char* Id, const EditorTy
     const float  Fade = Enabled ? 1.0f : 0.45f;
     DrawList->AddRectFilled(Min, Max, FadeColour(Hovered ? IconHoverSurface : IconSurface, Fade), 9.0f * Scale);
     DrawList->AddRect(Min, Max, FadeColour(Hovered ? IconHoverStroke : IconStroke, Fade), 9.0f * Scale, ImDrawFlags_None, Scale);
-    const float TextSize = 11.0f * Scale;
+    const float TextSize = 11.0f * DmSansEm * Scale;
     const float TextW    = MeasureText(Faces.Regular, TextSize, Label);
     DrawList->AddText(ResolveFace(Faces.Regular), TextSize, ImVec2(Min.x + 0.5f * (Size.x - TextW), Min.y + 0.5f * (Size.y - TextSize)),
                       FadeColour(Hovered ? IconHoverGlyph : IconGlyph, Fade), Label);
@@ -324,7 +336,7 @@ bool ViewportChromeControls::ConstructSegmentedSwitch(const char* Id, const Edit
     const float Inset   = 4.0f * Scale + Scale;
     const float Gap     = 4.0f * Scale;
     const float CellW   = (Size.x - 2.0f * Inset - Gap * static_cast<float>(OptionCount - 1)) / static_cast<float>(OptionCount);
-    const float TextSz  = 10.0f * Scale;
+    const float TextSz  = 10.0f * DmSansEm * Scale;
     bool        Changed = false;
     for (int Index = 0; Index < OptionCount; ++Index)
     {
@@ -374,7 +386,7 @@ bool ViewportChromeControls::ConstructSelectField(const char* Id, const EditorTy
     const ImVec2 Max(Min.x + Size.x, Min.y + Size.y);
     DrawList->AddRectFilled(Min, Max, SelectSurface, 9.0f * Scale);
     DrawList->AddRect(Min, Max, Hovered ? IconHoverStroke : SelectStroke, 9.0f * Scale, ImDrawFlags_None, Scale);
-    const float TextSize = 11.0f * Scale;
+    const float TextSize = 11.0f * DmSansEm * Scale;
     DrawList->PushClipRect(Min, ImVec2(Max.x - 26.0f * Scale, Max.y), true);
     DrawList->AddText(ResolveFace(Faces.Regular), TextSize, ImVec2(Min.x + 10.0f * Scale, Min.y + 0.5f * (Size.y - TextSize)), SelectText, Options[InOutIndex]);
     DrawList->PopClipRect();
@@ -422,8 +434,9 @@ bool ViewportChromeControls::ConstructReadoutOverlay(const char* Id, const Edito
 {
     // 📝 #hud: top/left 12 px, padding 10 px 34 px 10 px 13 px, radius 12 px, 11 px / 1.5 monospace; max-width 100 % − 24 px.
     ImFont*     Mono     = ResolveFace(Faces.Monospace);
-    const float TextSize = 11.0f * Scale;
-    const float Leading  = 1.5f * TextSize;
+    const float TextCss  = 11.0f * Scale;
+    const float TextSize = TextCss * JetBrainsMonoEm;
+    const float Leading  = 1.5f * TextCss;
     float       Widest   = 0.0f;
     for (const std::string& Line : Lines) Widest = std::max(Widest, MeasureText(Mono, TextSize, Line.c_str()));
     const ImVec2 Min(StageMin.x + 12.0f * Scale, StageMin.y + 12.0f * Scale);
@@ -436,7 +449,7 @@ bool ViewportChromeControls::ConstructReadoutOverlay(const char* Id, const Edito
     DrawList->PushClipRect(Min, ImVec2(Max.x - 34.0f * Scale, Max.y), true);
     for (size_t Line = 0; Line < Lines.size(); ++Line)
     {
-        DrawList->AddText(Mono, TextSize, ImVec2(Min.x + 14.0f * Scale, Min.y + 11.0f * Scale + Leading * static_cast<float>(Line) + 0.25f * TextSize),
+        DrawList->AddText(Mono, TextSize, ImVec2(Min.x + 14.0f * Scale, Min.y + 11.0f * Scale + Leading * static_cast<float>(Line) + ResolveHalfLeading(1.5f, JetBrainsMonoEm) * TextCss),
                           ReadoutText, Lines[Line].c_str());
     }
     DrawList->PopClipRect();
@@ -454,13 +467,16 @@ bool ViewportChromeControls::ConstructInsetFrame(const char* Id, const EditorTyp
     if (Legend != nullptr && Legend[0] != '\0')
     {
         ImFont*      Mono   = ResolveFace(Faces.Monospace);
-        const float  Size   = 10.0f * Scale;
+        const float  Css    = 10.0f * Scale;
+        const float  Size   = Css * JetBrainsMonoEm;
         const float  WrapW  = std::max(80.0f * Scale, 0.46f * ImGui::GetMainViewport()->Size.x - 16.0f * Scale);
         const ImVec2 Extent = Mono->CalcTextSizeA(Size, FLT_MAX, WrapW, Legend);
+        const float  Lines  = std::max(1.0f, std::round(Extent.y / Size));
         const ImVec2 Min(InsetMax.x - Extent.x - 16.0f * Scale, InsetMax.y + 6.0f * Scale);
-        const ImVec2 Max(InsetMax.x, Min.y + 1.4f * Extent.y + 8.0f * Scale);
+        const ImVec2 Max(InsetMax.x, Min.y + 1.4f * Css * Lines + 8.0f * Scale);
         DrawList->AddRectFilled(Min, Max, IM_COL32(0x10, 0x10, 0x10, 0xCC), 8.0f * Scale);
-        DrawList->AddText(Mono, Size, ImVec2(Min.x + 8.0f * Scale, Min.y + 4.0f * Scale + 0.2f * Size), MutedTone, Legend, nullptr, WrapW);
+        DrawList->AddText(Mono, Size, ImVec2(Min.x + 8.0f * Scale, Min.y + 4.0f * Scale + ResolveHalfLeading(1.4f, JetBrainsMonoEm) * Css), MutedTone, Legend,
+                          nullptr, WrapW);
     }
     // 📝 .overlay-close at top/right 6 px inside the frame.
     return ConstructOverlayClose(Id, Faces, ImVec2(InsetMax.x - 26.0f * Scale, InsetMin.y + 6.0f * Scale), CloseTooltip, Scale);
@@ -471,9 +487,9 @@ void ViewportChromeControls::ConstructOverlayNotice(ImDrawList* DrawList, const 
 {
     // 📝 #overlay-notice: bottom 18 px, centred, padding 7 px 14 px, radius 10 px, 11 px #bdbdbd.
     if (Text == nullptr || Text[0] == '\0') return;
-    const float  Size  = 11.0f * Scale;
+    const float  Size  = 11.0f * DmSansEm * Scale;
     const float  Width = MeasureText(Faces.Regular, Size, Text) + 28.0f * Scale + 2.0f * Scale;
-    const float  Tall  = Size * 1.35f + 14.0f * Scale + 2.0f * Scale;
+    const float  Tall  = 11.0f * 1.35f * Scale + 14.0f * Scale + 2.0f * Scale;
     const ImVec2 Min(0.5f * (StageMin.x + StageMax.x - Width), StageMax.y - 18.0f * Scale - Tall);
     const ImVec2 Max(Min.x + Width, Min.y + Tall);
     DrawList->AddRectFilled(Min, Max, NoticeSurface, 10.0f * Scale);
@@ -486,20 +502,23 @@ void ViewportChromeControls::ConstructBringUpCard(ImDrawList* DrawList, const Ed
 {
     // 📝 #bring-up: veil over the stage; h2 15 px / 500 #e2e2e2, caption 11 px muted, 360 × 3 px bar; 12 px gaps; centred.
     DrawList->AddRectFilled(StageMin, StageMax, BringUpVeil);
-    const float HeadingSize = 15.0f * Scale;
-    const float CaptionSize = 11.0f * Scale;
+    const float HeadingCss  = 15.0f * Scale;
+    const float CaptionCss  = 11.0f * Scale;
+    const float HeadingSize = HeadingCss * DmSansEm;
+    const float CaptionSize = CaptionCss * DmSansEm;
+    const float HalfLeading = ResolveHalfLeading(1.35f, DmSansEm);
     const float Gap         = 12.0f * Scale;
     const float BarW        = 360.0f * Scale;
     const float BarH        = 3.0f * Scale;
-    const float Block       = HeadingSize * 1.35f + Gap + CaptionSize * 1.35f + Gap + BarH;
+    const float Block       = HeadingCss * 1.35f + Gap + CaptionCss * 1.35f + Gap + BarH;
     const float CentreX     = 0.5f * (StageMin.x + StageMax.x);
     float       Pen         = 0.5f * (StageMin.y + StageMax.y - Block);
-    DrawList->AddText(ResolveFace(Faces.Medium), HeadingSize, ImVec2(CentreX - 0.5f * MeasureText(Faces.Medium, HeadingSize, Heading), Pen + 0.175f * HeadingSize),
-                      BringUpHeading, Heading);
-    Pen += HeadingSize * 1.35f + Gap;
-    DrawList->AddText(ResolveFace(Faces.Regular), CaptionSize, ImVec2(CentreX - 0.5f * MeasureText(Faces.Regular, CaptionSize, Caption), Pen + 0.175f * CaptionSize),
-                      MutedTone, Caption);
-    Pen += CaptionSize * 1.35f + Gap;
+    DrawList->AddText(ResolveFace(Faces.Medium), HeadingSize,
+                      ImVec2(CentreX - 0.5f * MeasureText(Faces.Medium, HeadingSize, Heading), Pen + HalfLeading * HeadingCss), BringUpHeading, Heading);
+    Pen += HeadingCss * 1.35f + Gap;
+    DrawList->AddText(ResolveFace(Faces.Regular), CaptionSize,
+                      ImVec2(CentreX - 0.5f * MeasureText(Faces.Regular, CaptionSize, Caption), Pen + HalfLeading * CaptionCss), MutedTone, Caption);
+    Pen += CaptionCss * 1.35f + Gap;
     const ImVec2 BarMin(CentreX - 0.5f * BarW, Pen);
     DrawList->AddRectFilled(BarMin, ImVec2(BarMin.x + BarW, BarMin.y + BarH), EdgeStroke, 2.0f * Scale);
     const float Filled = BarW * std::clamp(Fraction, 0.0f, 1.0f);
@@ -512,7 +531,7 @@ void ViewportChromeControls::ConstructFailurePanel(ImDrawList* DrawList, const E
     // 📝 #failure: left/bottom 12 px, max 70 % × 40 %, padding 10 px 14 px, radius 10 px, 11 px / 1.45 monospace, pre-wrap.
     if (Text.empty()) return;
     ImFont*      Mono     = ResolveFace(Faces.Monospace);
-    const float  Size     = 11.0f * Scale;
+    const float  Size     = 11.0f * JetBrainsMonoEm * Scale;
     const float  MaxWidth = 0.70f * (StageMax.x - StageMin.x);
     const float  WrapW    = std::max(40.0f * Scale, MaxWidth - 28.0f * Scale - 2.0f * Scale);
     const ImVec2 TextSize = Mono->CalcTextSizeA(Size, FLT_MAX, WrapW, Text.c_str());
@@ -539,8 +558,8 @@ void ViewportChromeControls::ConstructStatusStrip(ImDrawList* DrawList, const Ed
     //    8 px gap, measurement 10 px #cfcfcf; captions and measurements share a baseline.
     DrawList->AddRectFilled(Min, Max, StatusSurface);
     DrawList->AddLine(ImVec2(Min.x, Min.y + 0.5f * Scale), ImVec2(Max.x, Min.y + 0.5f * Scale), EdgeStroke, Scale);
-    const float CaptionSize     = 8.0f * Scale;
-    const float MeasurementSize = 10.0f * Scale;
+    const float CaptionSize     = 8.0f * DmSansEm * Scale;
+    const float MeasurementSize = 10.0f * DmSansEm * Scale;
     const float Spacing         = 1.3f * Scale;
     const float MeasurementTop  = 0.5f * (Min.y + Max.y - MeasurementSize);
     const float CaptionTop      = MeasurementTop + 0.8f * (MeasurementSize - CaptionSize);

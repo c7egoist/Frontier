@@ -84,7 +84,7 @@ Source/PlumeSpace.js	Plume march
 Source/PrecipitationSequence.js	GPU cloud precipitation		
 Source/PrecipitationSequence.js	Stopped precipitation mesh grains		
 Source/PrecipitationSequence.js	GPU cloud snowflakes		
-Source/PreviewStartup.js	Could not load the app runtime.		proposed (owner decision): web module-loading failure; native start-up failures go to the failure panel and the diagnostic journal
+Source/PreviewStartup.js	Could not load the app runtime.		approved (owner, 2026-11-02): web module-loading failure; native start-up failures go to the failure panel and the diagnostic journal
 Source/RayTracingSpace.js	Fallback HMI screen texture	Frontier/Engine/Rendering/GlobalIllumination/RayTracingSpace.cpp (earlier port)	
 Source/ResamplingSequence.js	ReSTIR GI	Frontier/Engine/Rendering/GlobalIllumination/ResamplingSequence.cpp (earlier port)	
 Source/ResamplingSequence.js	Reflection traversal		
@@ -95,12 +95,12 @@ Source/SkyLutPreview.js	Sky LUT inspector copy
 Source/SnowfallSequence.js	Falling snow		
 Source/SparkSequence.js	Sparks		
 Source/StarCatalogue.js	Native star catalogue cells + records	Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp (earlier port)	
-Source/SunInspectorDashboard.js	Reset Sun settings		
-Source/SunInspectorDashboard.js	Sun inspector sections		
-Source/SunInspectorDashboard.js	Toggle automatic Sun position		
-Source/SunInspectorDashboard.js	Solar calendar date		
-Source/SunInspectorDashboard.js	Sun colour source		
-Source/SunInspectorDashboard.js	Sun Tint		
+Source/SunInspectorDashboard.js	Reset Sun settings	Frontier/Engine/Interface/SolarObservatory.cpp (Reset ↗ tooltip)	
+Source/SunInspectorDashboard.js	Sun inspector sections	Frontier/Engine/Interface/SolarObservatory.cpp (section tab strip id)	
+Source/SunInspectorDashboard.js	Toggle automatic Sun position	Frontier/Engine/Interface/SolarObservatory.cpp (Manual ↗ / Time linked ↗ tooltip)	
+Source/SunInspectorDashboard.js	Solar calendar date	Frontier/Engine/Interface/SolarObservatory.cpp (calendar date field tooltip)	
+Source/SunInspectorDashboard.js	Sun colour source	Frontier/Engine/Interface/SolarObservatory.cpp (colour source select tooltip)	
+Source/SunInspectorDashboard.js	Sun Tint	Frontier/Engine/Interface/SolarObservatory.cpp (Sun Tint row)	
 Source/SurfaceCardDepot.js	Card direct irradiance	Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.cpp (earlier port)	
 Source/SurfaceCardDepot.js	Card final radiance	Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.cpp (earlier port)	
 Source/SurfaceCardDepot.js	Card capture depth	Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.cpp (earlier port)	

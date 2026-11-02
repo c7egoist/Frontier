@@ -9,6 +9,8 @@
 #include "Engine/Diagnostics/LogStream.h"
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
+#include "EverestSceneViewport.h"
+
 #include "Engine/Interface/InspectorControls.h"
 #include "Engine/Interface/InspectorRuntime.h"
 #include "Engine/Interface/LogStreamPanelRegistration.h"
@@ -278,6 +280,8 @@ EverestWorkspace::EverestWorkspace(Frontier::ControlCentrePanel& ControlCentre,
         OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
     }
 
+    Frontier::InspectorRuntime::Instance().RegisterSolarPlacementSolver(&SolveSolarPlacement);
+
     Dockspace.ConfigureDockspaceKey("EverestWorkspaceDockspace");
     Dockspace.ConfigureWorkspaceInsets(50.0f, Frontier::ViewportChromeControls::StatusStripHeight);
 
@@ -464,6 +468,20 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     }
 
     ServiceDynamicSceneRequests();
+
+    // 📝 The day clock (the demo's AdvanceCelestial) moves the level's sun before anything reads it this frame.
+    if (auto* Solar = dynamic_cast<Frontier::SolarRecord*>(QuerySceneWorld().FindFirstByType("Solar")))
+    {
+        (void)AdvanceSolarDay(Solar->AccessConfiguration(), DeltaSeconds);
+    }
+    // 📝 A page's "Open … ↗" selects the first record of the type it names.
+    if (const std::string Requested = Frontier::InspectorRuntime::Instance().ConsumeSelectionRequest(); !Requested.empty())
+    {
+        if (Frontier::SceneRecordBase* Target = QuerySceneWorld().FindFirstByType(Requested))
+        {
+            OutlinerPanel.Select(Target->QueryToken());
+        }
+    }
     OutlinerPanel.Synchronize(Frontier::SceneDirectory::Instance());
     LogPanel.Synchronize(Frontier::LogStore(), Frontier::LogCategories(), DeltaSeconds);
 
@@ -477,6 +495,7 @@ void EverestWorkspace::ConstructInterface(double DeltaSeconds)
     NoticeSeconds = std::max(0.0, NoticeSeconds - std::max(0.0, DeltaSeconds));
 
     const float Scale = Centre.QueryAppearance().QueryApplied().InterfaceScale / 100.0f;
+    Frontier::InspectorRuntime::Instance().ConfigureInterfaceScale(Scale);
     ConstructTopToolbar(Scale);
     Dockspace.ConstructInterface(Scale);
     ConstructStatusStrip(Scale);
