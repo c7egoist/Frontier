@@ -117,3 +117,9 @@ they no longer populate the default editor scene. Planet rendering descriptors a
 `Frontier/Engine/PlanetaryAtmosphere/CelestialAuthoring.*`; live planet previews reuse the native CPU evaluator.
 Panel-local footer support lives in the existing `PanelDockspace` registration. The removed distance-slice UI/shader
 has no replacement implementation; its uniform slot is reserved for compatibility with the remaining encoding.
+
+## Virtualized geometry evidence (2026-11-02)
+
+`Exhibits/VirtualizedGeometry/` measures the VehicleHMI demo's cluster-DAG builder against the branch's C++ tier build
+on the demo's own corpus (standalone CMake target plus Node.js scripts; nothing renders). The report and the port plan
+live in `Documentation/Plans/Ongoing/VirtualizedGeometry.md`.

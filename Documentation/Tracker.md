@@ -1098,3 +1098,28 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   `Binaries/FrontierSceneViewport-Windows-x64.zip`, 23,828,892 bytes. All 901 file hashes,
   exact executable, current Environment/GlobalIllumination shaders and cleaned 20-record level verified.
   SHA-256 `9bd6b57e03af13cfdb946e125e98db380a75ca2a0b446013d8ef84231e4d1db8`. Windows interactive execution/signing/antivirus checks remain unrun.
+
+## Virtualized geometry report and the fast preview question (2026-11-02, arena/88b72faa-frontier)
+
+- **Requested:** compare the Nanite-like feature of the VehicleHMI demo, `5ec53579` and this branch ("cluster
+  refinement"), say which is better and whether it can be improved, report first; explain how to enable the "Fast
+  Blinn" render with the simple sky.
+- **Branch:** `arena/88b72faa-frontier` fast-forwarded to the owner's `arena/8b705b7d-frontier` `650e631` (six commits,
+  no divergence).
+- **Findings:** the demo's `VirtualizedGeometry` (`6afb6f0`) is the only complete pipeline: build, GPU cut and cull,
+  two-phase Hi-Z, visibility raster, resolve, streaming and debug views. `5ec53579`'s `ClusterNesting` and
+  `VisibilityCull` are byte-identical in this branch and carry no simplified levels. The branch's C++
+  `ScreenSpaceClusterRefinement` / `QuadricTierBuild` / `FacetTierBuild` (from `2d55bd2`) is a CPU-only partial port
+  used only by `Exhibits/ClusterDiagnostic`. Render settings' Buffer index 6 and 10–14 read an inspection target that
+  nothing writes.
+- **Measured** (`Exhibits/VirtualizedGeometry/`, same corpus for both builders): the demo's per-cluster errors give a
+  crack-free cut at all 48 thresholds, the C++ errors double-cover at 30. The demo keeps authored creases and UV seams
+  while simplifying (vessel 2976 → 92); the C++ build drops authored creases after the leaf tier and pins seams
+  (→ 236). Terrain at 4096 triangles: 0.06 % vs 1.03 % Hausdorff. The C++ build is 7–14× faster, and its coarse
+  terrain is better (2.4 % vs 9.3 %). The demo's 22 unit tests pass under Node.js 22.
+- **Recommendation:** port the demo 1:1 in six steps (build, CPU runtime, GPU, inspection views, streaming, parity
+  exhibit), then measured improvements (indirect-count draws, import-time build, tighter error, terrain needles,
+  class borders). Owner decisions are listed in `Documentation/Plans/Ongoing/VirtualizedGeometry.md` §5.3.
+- **Fast Blinn:** no such switch exists in this branch, `5ec53579` or the demo. `BlinnRenderer` (CPU) lives in
+  egoistm1inbox `9ce908bc` and is only called by a validation suite; `PreviewRaster` (gradient sky, GGX) runs only in
+  `Exhibits/ClusterDiagnostic`. Proposed as a small Editor/Development-only viewport renderer.
