@@ -283,6 +283,9 @@ sandbox cannot reach `uploads.github.com`). Then every push of `main` or an `are
    four refreshes, with a screenshot and the diagnostic file of each;
 4. a pre-release `editor-preview-<sha>` with both packages, the screenshots and the results in its notes.
 
+Until then, the agent commits and pushes the source to its branch as usual and puts each Zig-built download on the
+owner's Google Drive. `Documentation/Tracker.md` records each download's revision, file and SHA-256.
+
 ## Device loss on the RX 9060 XT (fixed in `8d50414`)
 
 The owner's log of the `e4b9baf4` download on an AMD RX 9060 XT showed "staged write submission failed" 2.7 s after

@@ -849,6 +849,15 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   - `StoredShaderArchiveValidation`, `BrowserPreviewStartupValidation`, `EverestInterfaceValidation` (26/27 records, four
     planets), `EverestShippingValidation` (26 records; planets survive the `.levelspace` round trip),
     `ProjectSpaceValidation`, `EnvironmentRealmValidation` and `ProjectContentStagingValidation` pass.
+- **Delivered:** Windows x64 downloads (Zig 0.13.0 cross-builds) on the owner's Google Drive.
+  - `8d504144` (the device-loss fix alone): `FrontierSceneViewport-Windows-x64-8d504144.zip`, Drive id
+    `1eKLpqBk6cZIAu8DnyCe2VVT0EatfVvWF`, SHA-256 `a6a53f20ba0842cb6790aaeb77575b095b107296e963b8f335b0f7a46cf896cb`.
+  - `9b8d83df` (Option A and the planets, with this exhibit's documentation):
+    `FrontierSceneViewport-Windows-x64-9b8d83df.zip`, 22.2 MiB, Drive id `1BLxO9tPIOWwBtRIrPy7G8-rUily5tne6`, SHA-256
+    `5a0a7226b4d76a9782a45187e168de8ffd1765d5ed9cce20c6793a3ff438d6ee`.
+  - The package records revision `9b8d83df` with no uncommitted changes; its shader sets are Surface 18,
+    GlobalIllumination 33 and Environment 15. The executable is PE32+ x64 and imports only Windows system DLLs and the
+    UCRT. The upload matches the local file in size and MD5.
 - **Not run:**
   - no hardware GPU, no Windows launch;
   - the parity capture was not re-run, because its reference capture is not in this sandbox. The new hooks are not
