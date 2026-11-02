@@ -189,8 +189,10 @@ or project-specific types belong in `Engine/` or `UI/Editor/`.
     `EngineContent/ShaderArchives/Surface` (Project Browser start-up, CAD, materials, vector, bake) is stored the same way;
     refresh it after any `Engine/Render/Shader/*.slang` edit, or `Frontier.exe` built without slangc stops at start-up.
     `Automation/Workflows/EditorPreviewWindows.yml` builds, launch-checks and publishes Windows pre-releases once the owner
-    copies it to `.github/workflows/` (the Arena GitHub App cannot push workflow files; the sandbox cannot reach
-    `uploads.github.com`). Until then, Windows packages go to the owner's Google Drive.
+    copies it to `.github/workflows/` (GitHub refuses workflow files pushed by the Arena GitHub App, which has no
+    `workflows` permission; the sandbox cannot reach `uploads.github.com`). Commits and pushes work as usual. Until the
+    workflow runs, the agent commits each Windows package to its branch as
+    `Binaries/FrontierSceneViewport-Windows-x64.zip` with its `.zip.sha256` (earlier packages went to the owner's Drive).
     `.sdfspace` SDF volumes, the software SAH BVH, and the `PreviewRaster` shadow modes remain.
 - **Project creation auto-scaffolding (`ProjectGenerator`):** Creating a new project via `ProjectBrowserPanel`
   auto-generates C++ source scaffolding (`Source/<Identifier>Application.{h,cpp}` with main loop and `SceneWorld`

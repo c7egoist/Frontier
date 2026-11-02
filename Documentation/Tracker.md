@@ -865,3 +865,34 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
     called without an environment, so its 150 checks still hold for the demo inputs;
   - the workspace capture image predates Option A;
   - pipelining (Option A step 6) is future work.
+
+## The Windows download on GitHub; workspace capture after Option A (2026-11-02, branch arena/88b72faa-frontier)
+
+- **Asked:** "commit to arena/88b72faa-frontier", and why the agent kept saying it could not commit to GitHub.
+- **Commits work.** Every change of this work is pushed to `arena/88b72faa-frontier`; `main` changes only when the
+  owner merges. GitHub refuses two narrower things:
+  - a push that adds a workflow file. Tried again: `refusing to allow a GitHub App to create or update workflow
+    .github/workflows/EditorPreviewWindows.yml without workflows permission`. The rejected commit never reached the
+    remote and was dropped locally;
+  - release assets, which upload through `uploads.github.com`. This sandbox cannot reach that host
+    (`SSL_ERROR_SYSCALL`).
+- **Delivered on GitHub:** `Binaries/FrontierSceneViewport-Windows-x64.zip` and its `.zip.sha256`, committed in
+  `f0fed15`: 22.2 MiB, SHA-256 `09584aa5486945c0855f25c03995ce15e27897386e5699ecea5afc260ff36591`.
+  - It is the Zig 0.13.0 cross-build of `24ef36a1`: the code of the `9b8d83df` download plus documentation, with no
+    uncommitted changes.
+  - Shader sets: Surface 18, GlobalIllumination 33 and Environment 15. `Frontier.exe` is PE32+ x64 and imports only
+    Windows system DLLs and the UCRT.
+  - The file on GitHub matches the local file: git blob `32357bfa60608debfbf0f71cf6e0cd835e9eef92`, 23,237,717 bytes.
+  - `.gitignore` keeps every other package local. Once the owner places the workflow, each push is published as a
+    pre-release and the branch stops carrying packages.
+- **Workspace capture after Option A:** `Exhibits/SceneViewport/Images/EverestLiveSceneViewport.png` re-taken from
+  `24ef36a1` (SwiftShader, `high`, 1028 × 482, 12 refreshes, 11 min 25 s, exit 0; bring-up 114.5 s). The Outliner lists
+  the four planet entries (26 records). The shadows take the environment's blue sky as their fill: the blue/red ratio
+  of the pixel means rises from 1.10 to 2.08 in the ground shadow, from 0.96 to 1.36 on the tower's shaded side, and
+  from 1.21 to 1.46 in the sky's zenith band.
+- **Held back:**
+  - pipelining (Option A step 6) waits until the device-loss fix has run on the RX 9060 XT, because it changes the same
+    synchronization;
+  - the moon phase. The drawn disc follows the sun–moon geometry, while the `Moons` record's phase sets Luna's light.
+    For the record to drive the disc, either the moon shader gets a phase input or Luna's position follows from the
+    phase. The owner decides.

@@ -49,8 +49,11 @@ That capture runs the real `EverestWorkspace` and the same `EverestSceneViewport
 level's records (`Default.levelspace`, quality tier 2 → `high`, 1028 × 482). The bridge opens a device of its own here,
 reads the presented image back, and the interface is CPU-rasterized at 1920 × 1080
 (`Code/SceneViewportWorkspaceCapture.cpp`, log in `Results/SceneViewportWorkspaceCapture.txt`). The Log Stream shows the
-viewport's bring-up line. In the editor, the image stays on the GPU and ImGui samples it directly. This capture was made
-before Option A, so it still shows the demo's own lighting under the overlay.
+viewport's bring-up line. In the editor, the image stays on the GPU and ImGui samples it directly. The capture was
+re-taken after Option A, from `24ef36a1`: 12 refreshes in 11 min 25 s on SwiftShader. The environment lights the scene,
+and the Outliner lists the four planet entries (26 records). Compared with the capture before Option A, the shadows now
+take the environment's blue sky as their fill. The blue/red ratio of the pixel means rises from 1.10 to 2.08 in the
+ground shadow, from 0.96 to 1.36 on the tower's shaded side, and from 1.21 to 1.46 in the sky's zenith band.
 
 ## Layout
 
@@ -271,9 +274,19 @@ executable is Windows x64 PE32+, every entry of every stored shader set is prese
 `--omit-material-archives` leaves out the Texture Studio material archives (about 180 MiB), which the Scene Viewport
 does not read.
 
-`Automation/Workflows/EditorPreviewWindows.yml` publishes downloads on GitHub once it is copied to
-`.github/workflows/` (GitHub runs workflows only from there; Arena's GitHub App may not create workflow files, and its
-sandbox cannot reach `uploads.github.com`). Then every push of `main` or an `arena/…` branch runs:
+**Download from GitHub.** The branch carries the current Zig-built package,
+[`Binaries/FrontierSceneViewport-Windows-x64.zip`](../../Binaries/FrontierSceneViewport-Windows-x64.zip), with its
+SHA-256 in `Binaries/FrontierSceneViewport-Windows-x64.zip.sha256`. On GitHub, open the file and press *Download raw
+file*. `Documentation/Tracker.md` records each package's revision and SHA-256. Earlier packages went to the owner's
+Google Drive.
+
+`Automation/Workflows/EditorPreviewWindows.yml` publishes downloads as GitHub releases once it is in
+`.github/workflows/`. GitHub runs workflows only from there. When Arena's GitHub App pushes the file, GitHub refuses
+it: `refusing to allow a GitHub App to create or update workflow .github/workflows/EditorPreviewWindows.yml without
+workflows permission` (tried again on 2026-11-02). Commits without workflow files are accepted. The owner places the
+file once: on GitHub, *Add file → Create new file* on the branch, name it `.github/workflows/EditorPreviewWindows.yml`,
+paste the contents of `Automation/Workflows/EditorPreviewWindows.yml`, and commit. Then every push of `main` or an
+`arena/…` branch runs:
 
 1. the Zig cross-build, packaged (the download);
 2. an MSVC build exactly as above (`cmake -S . -B Build/Editor -A x64`), packaged as `…-MSVC.zip`;
@@ -283,8 +296,8 @@ sandbox cannot reach `uploads.github.com`). Then every push of `main` or an `are
    four refreshes, with a screenshot and the diagnostic file of each;
 4. a pre-release `editor-preview-<sha>` with both packages, the screenshots and the results in its notes.
 
-Until then, the agent commits and pushes the source to its branch as usual and puts each Zig-built download on the
-owner's Google Drive. `Documentation/Tracker.md` records each download's revision, file and SHA-256.
+Once the workflow runs, the agent stops committing packages to `Binaries/`, so that each package does not add another
+22 MiB to the repository's history.
 
 ## Device loss on the RX 9060 XT (fixed in `8d50414`)
 
@@ -328,7 +341,6 @@ Everest opened, and then `VK_ERROR_DEVICE_LOST`.
   sandbox.
 - **Moon phase record.** The drawn moon discs follow the sun–moon geometry. The `Moons` record's phase sets only Luna's
   light.
-- **Workspace capture.** `Images/EverestLiveSceneViewport.png` predates Option A: it shows the demo's own lighting under
-  the overlay.
 - **Synchronous submissions.** Submissions are synchronous (one fence wait per step group). Pipelining the viewport
-  with the interface (Option A's optional step 6) is future work.
+  with the interface (Option A's optional step 6) waits until the device-loss fix has run on the RX 9060 XT, because
+  pipelining changes the same synchronization.

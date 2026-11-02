@@ -1,18 +1,18 @@
-  viewport image 1028 x 482 for a 1028 x 482 panel in 175.9 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  54213.1 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 50.7 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53859.5 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 52.9 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53767.3 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 52.4 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53632.2 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 53.0 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53566.6 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 54.6 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53671.7 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 44.1 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  52718.6 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 45.5 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  52000.9 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 44.5 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  51249.1 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 45.7 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  50692.0 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 45.7 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  50193.0 ms
-  viewport image 1028 x 482 for a 1028 x 482 panel in 44.2 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  49590.2 ms
-[SceneViewportWorkspaceCapture] out/EverestLiveSceneViewport.png (viewport 1028 x 482)
+  viewport image 1028 x 482 for a 1028 x 482 panel in 168.5 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53977.0 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 50.9 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53673.0 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 50.9 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53395.8 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 51.1 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53168.5 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 51.7 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  53022.6 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 50.2 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  52740.6 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 43.6 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  51829.4 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 44.0 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  51042.9 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 43.8 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  50316.0 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 42.9 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  49573.3 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 43.0 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  48913.1 ms
+  viewport image 1028 x 482 for a 1028 x 482 panel in 43.1 s — LIVE: ReSTIR GI RTX + PlanetaryAtmosphere  |  1028 x 482  |  48328.6 ms
+[SceneViewportWorkspaceCapture] /home/user/Frontier/_ClaudeScratch/tmp/capture/EverestLiveSceneViewport.png (viewport 1028 x 482)
 
-real	11m50.232s
-user	20m34.670s
-sys	0m5.502s
+real	11m24.590s
+user	20m50.591s
+sys	0m4.093s
 exit 0
