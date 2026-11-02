@@ -95,12 +95,12 @@ Source/SkyLutPreview.js	Sky LUT inspector copy
 Source/SnowfallSequence.js	Falling snow		
 Source/SparkSequence.js	Sparks		
 Source/StarCatalogue.js	Native star catalogue cells + records	Frontier/Engine/Rendering/GlobalIllumination/IlluminationHost.cpp (earlier port)	
-Source/SunInspectorDashboard.js	Reset Sun settings	Frontier/Engine/Interface/SolarObservatory.cpp (Reset ↗ tooltip)	
-Source/SunInspectorDashboard.js	Sun inspector sections	Frontier/Engine/Interface/SolarObservatory.cpp (section tab strip id)	
-Source/SunInspectorDashboard.js	Toggle automatic Sun position	Frontier/Engine/Interface/SolarObservatory.cpp (Manual ↗ / Time linked ↗ tooltip)	
-Source/SunInspectorDashboard.js	Solar calendar date	Frontier/Engine/Interface/SolarObservatory.cpp (calendar date field tooltip)	
-Source/SunInspectorDashboard.js	Sun colour source	Frontier/Engine/Interface/SolarObservatory.cpp (colour source select tooltip)	
-Source/SunInspectorDashboard.js	Sun Tint	Frontier/Engine/Interface/SolarObservatory.cpp (Sun Tint row)	
+Source/SunInspectorDashboard.js	Reset Sun settings	Frontier/Engine/Interface/Inspectors/SolarInspector.cpp (Reset ↗ tooltip)	
+Source/SunInspectorDashboard.js	Sun inspector sections	Frontier/Engine/Interface/Inspectors/SolarInspector.cpp (section tab strip id)	
+Source/SunInspectorDashboard.js	Toggle automatic Sun position	Frontier/Engine/Interface/Inspectors/SolarInspector.cpp (Manual ↗ / Time linked ↗ tooltip)	
+Source/SunInspectorDashboard.js	Solar calendar date	Frontier/Engine/Interface/Inspectors/SolarInspector.cpp (calendar date field tooltip)	
+Source/SunInspectorDashboard.js	Sun colour source	Frontier/Engine/Interface/Inspectors/SolarInspector.cpp (colour source select tooltip)	
+Source/SunInspectorDashboard.js	Sun Tint	Frontier/Engine/Interface/Inspectors/SolarInspector.cpp (Sun Tint row)	
 Source/SurfaceCardDepot.js	Card direct irradiance	Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.cpp (earlier port)	
 Source/SurfaceCardDepot.js	Card final radiance	Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.cpp (earlier port)	
 Source/SurfaceCardDepot.js	Card capture depth	Frontier/Engine/Rendering/GlobalIllumination/SurfaceCardDepot.cpp (earlier port)	

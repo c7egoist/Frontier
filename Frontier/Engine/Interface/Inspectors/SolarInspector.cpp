@@ -1,17 +1,17 @@
 /*==========================================================================================================================================
-                                                         SOLAROBSERVATORY.CPP
+                                                           SOLARINSPECTOR.CPP
 ==========================================================================================================================================*/
 // 🧩 The demo's Sun page (SunInspectorDashboard.js + SunInspector.css) 1:1 on the level's SolarConfiguration: the header
 //    with Reset ↗, four section tabs, the solar vector dial, the direction tiles and quick switches, aim sliders and
 //    lighting presets, the solar day ephemeris, time & location, radiance and the thermal spectrum, the apparent disc,
 //    and the link to the Lens flare page.
 
-#include "Engine/Interface/NativeInspectors.h"
+#include "Engine/Interface/Inspectors/SolarInspector.h"
 
 #if FRONTIER_EDITOR && defined(FRONTIER_WITH_INTERFACE_SDK)
 
 #include "Engine/Interface/InspectorControls.h"
-#include "Engine/Interface/ObservatoryControls.h"
+#include "Engine/Interface/Controls/PageControls.h"
 
 #include <algorithm>
 #include <array>
@@ -103,9 +103,9 @@ constexpr std::array<LightingPreset, 4> LightingPresets = {{{"Noon", 64.0f, 145.
 }
 
 // 📝 The page's instruments ([data-instrument] rules of SunInspector.css, its second block).
-ObservatoryCardLook DirectionLook()
+CardLook DirectionLook()
 {
-    ObservatoryCardLook Look;
+    CardLook Look;
     Look.Fill       = ResolveCssColour(0x23241EFF);
     Look.Glow       = ResolveCssColour(0x6A603326);
     Look.GlowCentre = ImVec2(0.55f, 0.60f);
@@ -116,40 +116,40 @@ ObservatoryCardLook DirectionLook()
     return Look;
 }
 
-ObservatoryCardLook AimLook()
+CardLook AimLook()
 {
-    ObservatoryCardLook Look;
+    CardLook Look;
     Look.TopRule     = ResolveCssColour(0xFFFFFF13);
     Look.Radius      = 0.0f;
     Look.PaddingTop  = 17.0f;
     Look.PaddingSide = 0.0f;
-    Look.PaddingBase = 17.0f;
+    Look.PaddingBottom = 17.0f;
     Look.MarginTop   = 18.0f;
     return Look;
 }
 
-ObservatoryCardLook FlatLook(uint32_t Fill, float Radius)
+CardLook FlatLook(uint32_t Fill, float Radius)
 {
-    ObservatoryCardLook Look;
+    CardLook Look;
     Look.Fill   = ResolveCssColour(Fill);
     Look.Radius = Radius;
     return Look;
 }
 
-ObservatoryCardLook RadianceLook()
+CardLook RadianceLook()
 {
-    ObservatoryCardLook Look;
+    CardLook Look;
     Look.Border      = ResolveCssColour(0xF0D99C09);
     Look.Radius      = 0.0f;
     Look.PaddingTop  = 0.0f;
     Look.PaddingSide = 0.0f;
-    Look.PaddingBase = 0.0f;
+    Look.PaddingBottom = 0.0f;
     return Look;
 }
 
-ObservatoryCardLook SpectrumLook()
+CardLook SpectrumLook()
 {
-    ObservatoryCardLook Look;
+    CardLook Look;
     Look.Fill       = ResolveCssColour(0x25251FFF);
     Look.Glow       = ResolveCssColour(0x89714918);
     Look.GlowCentre = ImVec2(0.5f, 0.8f);
@@ -157,9 +157,9 @@ ObservatoryCardLook SpectrumLook()
     return Look;
 }
 
-ObservatoryCardLook AngularLook()
+CardLook AngularLook()
 {
-    ObservatoryCardLook Look;
+    CardLook Look;
     Look.Fill       = ResolveCssColour(0x24251FFF);
     Look.Glow       = ResolveCssColour(0x86774320);
     Look.GlowCentre = ImVec2(0.5f, 0.45f);
@@ -169,9 +169,9 @@ ObservatoryCardLook AngularLook()
     return Look;
 }
 
-ObservatoryCardLook SubcomponentLook()
+CardLook SubcomponentLook()
 {
-    ObservatoryCardLook Look;
+    CardLook Look;
     Look.Border = ResolveCssColour(0xFFFFFF15);
     Look.Radius = 18.0f;
     return Look;
@@ -243,13 +243,13 @@ void SolarInspector::EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwi
 
 void SolarInspector::ConstructInspector()
 {
-    const ObservatoryTheme Theme = ObservatoryTheme::ResolveSolar();
+    const ControlTheme Theme = ControlTheme::ResolveSolar();
     const EditorTypefaces  Faces = EditorTypefaces::Resolve();
-    ObservatoryColumn      Page(Theme, Faces, InspectorRuntime::Instance().ResolveInterfaceScale());
+    ControlColumn      Page(Theme, Faces, InspectorRuntime::Instance().ResolveInterfaceScale());
     ImDrawList*            DrawList = Page.QueryDrawList();
     const float            S        = Page.QueryScale();
     bool                   Changed  = false;
-    ImGui::PushID("SolarObservatory");
+    ImGui::PushID("SolarInspectorPage");
 
     // 📝 SetSunInspectorValue: direction edits stop the clock; time and place edits link the sun to it.
     auto Manual = [&]() {
@@ -260,7 +260,7 @@ void SolarInspector::ConstructInspector()
     float Azimuth    = WrapAzimuth(Parameters.AzimuthDegrees);
     float Radius     = 0.5f * Parameters.AngularDiameterDeg;
 
-    if (Page.ConstructHeader("Header", "ENVIRONMENT / 02", "Sun", "Reset \xE2\x86\x97", "Directional light / position & colour.",
+    if (PageHeading::Construct(Page, "Header", "ENVIRONMENT / 02", "Sun", "Reset \xE2\x86\x97", "Directional light / position & colour.",
                              "Reset Sun settings"))
     {
         // 📝 Reset ↗: EnvironmentDefaults for the sun keys, the direction fallback {38, 145, 12}, manual, temperature source.
@@ -280,7 +280,7 @@ void SolarInspector::ConstructInspector()
     }
 
     static constexpr std::array<const char*, 4> Panes = {"Overview", "Daylight", "Light & colour", "Disc & optics"};
-    (void)Page.ConstructTabs("Sun inspector sections", Panes.data(), static_cast<int>(Panes.size()), ActivePane);
+    (void)TabStrip::Construct(Page, "Sun inspector sections", Panes.data(), static_cast<int>(Panes.size()), ActivePane);
 
     const float  Elevation = Parameters.ElevationDegrees;
     const bool   Lit       = Parameters.Enabled && Elevation >= 0.0f;
@@ -289,8 +289,8 @@ void SolarInspector::ConstructInspector()
     {
         // ── 01 / DIRECTION ──────────────────────────────────────────────────────────────────────────────────────────
         Page.BeginCard(DirectionLook(), "Solar vector", "01 / DIRECTION");
-        ObservatoryDiagramDrag Drag;
-        const ObservatoryPen   Pen = Page.BeginDiagram("##SolarVector", 640.0f, 420.0f, 7.0f, 0.0f, &Drag, "Sun vector editor \xC2\xB7 drag azimuth and elevation");
+        DiagramDrag Drag;
+        const DiagramPen   Pen = DiagramCanvas::Begin(Page, "##SolarVector", 640.0f, 420.0f, 7.0f, 0.0f, &Drag, "Sun vector editor \xC2\xB7 drag azimuth and elevation");
         const ImVec2           Origin(320.0f, 210.0f);
         for (const float Ring : {45.0f, 90.0f, 135.0f, 180.0f})
         {
@@ -335,11 +335,11 @@ void SolarInspector::ConstructInspector()
         const float  CardWidth  = Page.QueryCardWidth();
         const ImVec2 HeroMin(CardOrigin.x + 19.0f * S, CardOrigin.y + 49.0f * S);
         const std::string ElevationFigure = ResolveFigure("%.1f", static_cast<double>(Parameters.ElevationDegrees));
-        (void)Page.ConstructReadoutAt(HeroMin, "Elevation", ElevationFigure.c_str(), "\xC2\xB0", 37.0f, 17.0f, -2.0f, 1.25f);
+        (void)ReadoutBlock::ConstructAt(Page, HeroMin, "Elevation", ElevationFigure.c_str(), "\xC2\xB0", 37.0f, 17.0f, -2.0f, 1.25f);
         const char* ModeText  = Parameters.TimeLinked ? "Time linked \xE2\x86\x97" : "Manual \xE2\x86\x97";
-        const float ModeWidth = Page.MeasureTag(ModeText, 9.0f, 10.0f);
+        const float ModeWidth = TagPill::Measure(Page, ModeText, 9.0f, 10.0f);
         bool        ModePress = false;
-        (void)Page.ConstructTagAt("##SolarMode", ImVec2(CardOrigin.x + CardWidth - 19.0f * S - ModeWidth, HeroMin.y), ModeText, true, &ModePress, 9.0f, 10.0f,
+        (void)TagPill::ConstructAt(Page, "##SolarMode", ImVec2(CardOrigin.x + CardWidth - 19.0f * S - ModeWidth, HeroMin.y), ModeText, true, &ModePress, 9.0f, 10.0f,
                                   7.0f, 29.0f, ResolveCssColour(0x303128FF), ResolveCssColour(0xE4DBBDFF), "Toggle automatic Sun position");
         if (ModePress)
         {
@@ -352,27 +352,27 @@ void SolarInspector::ConstructInspector()
         const float VectorZ = std::sin(Elevation * SolarPi / 180.0f);
         char        Vector[64]{};
         std::snprintf(Vector, sizeof(Vector), "%.2f / %.2f / %.2f", static_cast<double>(VectorX), static_cast<double>(VectorY), static_cast<double>(VectorZ));
-        Page.ConstructAtlasFooter("WORLD XYZ \xC2\xB7 Z UP", Vector, 9.0f, 11.0f, 0.0f);
+        FooterRow::ConstructAtlas(Page, "WORLD XYZ \xC2\xB7 Z UP", Vector, 9.0f, 11.0f, 0.0f);
         Page.EndCard();
 
         // 📝 .co-kpis: Azimuth, Source tint, Sunlight (lit).
-        const std::array<ObservatoryMetric, 3> Metrics = {{
+        const std::array<MetricTile, 3> Metrics = {{
             {"Azimuth", ResolveFigure("%.1f", static_cast<double>(Azimuth)), "\xC2\xB0 / +X east"},
             {"Source tint", Parameters.ColourSource == 1u ? std::string("RGB") : ResolveFigure("%.0f K", std::round(static_cast<double>(Parameters.KelvinTemperature))),
              "source setting"},
             {"Sunlight", ResolveFigure("%.1f", static_cast<double>(Multiplier)), "\xC3\x97 multiplier"},
         }};
-        Page.ConstructMetrics(Metrics.data(), static_cast<int>(Metrics.size()));
+        MetricTiles::Construct(Page, Metrics.data(), static_cast<int>(Metrics.size()));
 
         // 📝 The native quick toggles: Sunlight, Sun disc, Day cycle (NativeOrbit).
-        const std::array<ObservatorySwitchTile, 3> Quick = {{
-            {"Sunlight", &Parameters.Enabled, ObservatoryGlyph::Sun},
-            {"Sun disc", &Parameters.DiscVisible, ObservatoryGlyph::Sun, false, false,
+        const std::array<SwitchTile, 3> Quick = {{
+            {"Sunlight", &Parameters.Enabled, TileGlyph::Sun},
+            {"Sun disc", &Parameters.DiscVisible, TileGlyph::Sun, false, false,
              "Sun disc: the GI sky's disc; the PlanetaryAtmosphere sky still draws its own disc"},
-            {"Day cycle", &Parameters.DayCycle, ObservatoryGlyph::Orbit},
+            {"Day cycle", &Parameters.DayCycle, TileGlyph::Orbit},
         }};
         const bool Narrow = Page.QueryContainerWidth() <= 369.0f;
-        if (Page.ConstructSwitchTiles("Quick", Quick.data(), static_cast<int>(Quick.size()), Narrow ? 2 : 3))
+        if (SwitchTiles::Construct(Page, "Quick", Quick.data(), static_cast<int>(Quick.size()), Narrow ? 2 : 3))
         {
             if (Parameters.DayCycle) Parameters.TimeLinked = true;
             Changed = true;
@@ -380,26 +380,26 @@ void SolarInspector::ConstructInspector()
 
         // ── 02 / AIM ───────────────────────────────────────────────────────────────────────────────────────────────
         Page.BeginCard(AimLook(), "Direction controls", "02 / AIM");
-        if (Page.ConstructSlider("Azimuth", "Azimuth", Azimuth, AzimuthMinimum, AzimuthMaximum, 0.1f, "\xC2\xB0"))
+        if (SliderRow::Construct(Page, "Azimuth", "Azimuth", Azimuth, AzimuthMinimum, AzimuthMaximum, 0.1f, "\xC2\xB0"))
         {
             Parameters.AzimuthDegrees = Azimuth;
             Manual();
             Changed = true;
         }
         float ElevationSetting = Parameters.ElevationDegrees;
-        if (Page.ConstructSlider("Elevation", "Elevation", ElevationSetting, ElevationMinimum, ElevationMaximum, 0.1f, "\xC2\xB0"))
+        if (SliderRow::Construct(Page, "Elevation", "Elevation", ElevationSetting, ElevationMinimum, ElevationMaximum, 0.1f, "\xC2\xB0"))
         {
             Parameters.ElevationDegrees = ElevationSetting;
             Manual();
             Changed = true;
         }
-        Page.ConstructCaption("Inner horizon ring: 0\xC2\xB0. Centre: zenith. Outer region: below horizon. Editing direction stops the day cycle and "
+        CaptionText::Construct(Page, "Inner horizon ring: 0\xC2\xB0. Centre: zenith. Outer region: below horizon. Editing direction stops the day cycle and "
                               "switches to manual.");
         Page.EndCard();
 
         std::array<const char*, 4> PresetNames{};
         for (size_t Index = 0; Index < LightingPresets.size(); ++Index) PresetNames[Index] = LightingPresets[Index].Name;
-        const int Chosen = Page.ConstructPresets("Presets", PresetNames.data(), static_cast<int>(PresetNames.size()), PressedPreset);
+        const int Chosen = PresetStrip::Construct(Page, "Presets", PresetNames.data(), static_cast<int>(PresetNames.size()), PressedPreset);
         if (Chosen >= 0)
         {
             Manual();
@@ -420,15 +420,15 @@ void SolarInspector::ConstructInspector()
             const float  HeroTall = 9.0f * 1.4f + 5.0f + 49.0f * 1.25f;
             const ImVec2 HeroMin  = Page.Space(HeroTall, 0.0f, 0.0f);
             const std::string Clock = ResolveSolarClock(Parameters.LocalSolarHours);
-            (void)Page.ConstructReadoutAt(HeroMin, "Local time", Clock.c_str(), "", 49.0f, 17.0f, -2.0f, 1.25f);
+            (void)ReadoutBlock::ConstructAt(Page, HeroMin, "Local time", Clock.c_str(), "", 49.0f, 17.0f, -2.0f, 1.25f);
             const char* Playing = Parameters.DayCycle ? "Cycle running" : (Parameters.TimeLinked ? "Time linked" : "Manual direction");
-            const float TagWidth = Page.MeasureTag(Playing);
+            const float TagWidth = TagPill::Measure(Page, Playing);
             const float TagTall  = (2.0f * 6.0f + 9.0f * 1.4f + 2.0f) * S;
-            (void)Page.ConstructTagAt("##Playing", ImVec2(HeroMin.x + Page.QueryWidth() - TagWidth, HeroMin.y + 0.5f * (HeroTall * S - TagTall)), Playing, false,
+            (void)TagPill::ConstructAt(Page, "##Playing", ImVec2(HeroMin.x + Page.QueryWidth() - TagWidth, HeroMin.y + 0.5f * (HeroTall * S - TagTall)), Playing, false,
                                       nullptr);
         }
-        ObservatoryDiagramDrag Drag;
-        const ObservatoryPen   Pen = Page.BeginDiagram("##SolarDay", 640.0f, 320.0f, 12.0f, 12.0f, &Drag, "Solar day timeline \xC2\xB7 drag local time");
+        DiagramDrag Drag;
+        const DiagramPen   Pen = DiagramCanvas::Begin(Page, "##SolarDay", 640.0f, 320.0f, 12.0f, 12.0f, &Drag, "Solar day timeline \xC2\xB7 drag local time");
         auto                   Height = [](float ElevationDegrees) { return 160.0f - ElevationDegrees / 90.0f * 110.0f; };
         for (const float Mark : {-60.0f, 0.0f, 60.0f})
         {
@@ -485,25 +485,25 @@ void SolarInspector::ConstructInspector()
             const std::string Set   = DayPath.SetHours < 0.0f ? std::string("\xE2\x80\x94") : ResolveSolarClock(DayPath.SetHours);
             const std::string Hours = ResolveFigure("%.1f", static_cast<double>(DayPath.DayHours));
             const float       Top   = Min.y + 14.0f * S;
-            (void)Page.ConstructReadoutAt(ImVec2(Min.x, Top), "Horizon rise", Rise.c_str(), "", 22.0f, 9.0f, -1.3f, 1.25f);
-            (void)Page.ConstructReadoutAt(ImVec2(Min.x + Column + 10.0f * S, Top), "Horizon set", Set.c_str(), "", 22.0f, 9.0f, -1.3f, 1.25f);
-            (void)Page.ConstructReadoutAt(ImVec2(Min.x + 2.0f * (Column + 10.0f * S), Top), "Above horizon", Hours.c_str(), "h", 22.0f, 9.0f, -1.3f, 1.25f, 0, 0, 0,
+            (void)ReadoutBlock::ConstructAt(Page, ImVec2(Min.x, Top), "Horizon rise", Rise.c_str(), "", 22.0f, 9.0f, -1.3f, 1.25f);
+            (void)ReadoutBlock::ConstructAt(Page, ImVec2(Min.x + Column + 10.0f * S, Top), "Horizon set", Set.c_str(), "", 22.0f, 9.0f, -1.3f, 1.25f);
+            (void)ReadoutBlock::ConstructAt(Page, ImVec2(Min.x + 2.0f * (Column + 10.0f * S), Top), "Above horizon", Hours.c_str(), "h", 22.0f, 9.0f, -1.3f, 1.25f, 0, 0, 0,
                                           9.0f, 5.0f, true);
         }
-        Page.ConstructCaption("Date/location solver \xC2\xB7 geometric 0\xC2\xB0 crossings, without refraction or terrain. This path is a reference while "
+        CaptionText::Construct(Page, "Date/location solver \xC2\xB7 geometric 0\xC2\xB0 crossings, without refraction or terrain. This path is a reference while "
                               "direction is manual, not recorded telemetry.");
-        if (Page.ConstructSlider("SunTime", "Local solar control time", Parameters.LocalSolarHours, 0.0f, 24.0f, 0.01f, "h"))
+        if (SliderRow::Construct(Page, "SunTime", "Local solar control time", Parameters.LocalSolarHours, 0.0f, 24.0f, 0.01f, "h"))
         {
             Parameters.TimeLinked = true;
             Changed               = true;
         }
-        Changed |= Page.ConstructSlider("DayDuration", "Full day duration", Parameters.DayDurationHours, 0.01f, 24.0f, 0.01f, "real h");
+        Changed |= SliderRow::Construct(Page, "DayDuration", "Full day duration", Parameters.DayDurationHours, 0.01f, 24.0f, 0.01f, "real h");
         Page.EndCard();
 
         // ── 04 / COORDINATES ───────────────────────────────────────────────────────────────────────────────────────
         Page.BeginCard(FlatLook(0x20221EFF, 24.0f), "Time & location", "04 / COORDINATES");
         std::string Date = Parameters.CalendarDate;
-        if (Page.ConstructDateRow("CalendarDate", "Calendar date", Date, true, "Solar calendar date"))
+        if (DateRow::Construct(Page, "CalendarDate", "Calendar date", Date, true, "Solar calendar date"))
         {
             // 📝 Only a well-formed YYYY-MM-DD is taken (the demo checks the pattern and Date.parse).
             const bool WellFormed = Date.size() == 10 && Date[4] == '-' && Date[7] == '-' &&
@@ -523,13 +523,13 @@ void SolarInspector::ConstructInspector()
               std::tuple<const char*, const char*, float*, float, float, float, const char*>{"TimeZone", "UTC offset", &Parameters.UtcOffsetHours, -12.0f, 14.0f, 0.5f,
                                                                                             "h"}})
         {
-            if (Page.ConstructSlider(Id, Label, *Target, Minimum, Maximum, Step, Unit))
+            if (SliderRow::Construct(Page, Id, Label, *Target, Minimum, Maximum, Step, Unit))
             {
                 Parameters.TimeLinked = true;
                 Changed               = true;
             }
         }
-        Page.ConstructCaption("Changing time, date or location links the Sun to the existing celestial solver. The day-cycle switch stays in the Overview "
+        CaptionText::Construct(Page, "Changing time, date or location links the Sun to the existing celestial solver. The day-cycle switch stays in the Overview "
                               "quick toggles.");
         Page.EndCard();
     }
@@ -538,28 +538,28 @@ void SolarInspector::ConstructInspector()
         // ── 05 / RADIANCE ──────────────────────────────────────────────────────────────────────────────────────────
         Page.BeginCard(RadianceLook(), "Light source", "05 / RADIANCE");
         const std::string Intensity = ResolveFigure("%.1f", static_cast<double>(Multiplier));
-        Page.ConstructReadout("Sunlight intensity", Intensity.c_str(), "\xC3\x97");
-        if (Page.ConstructSlider("SolarIlluminance", "Sunlight multiplier", Multiplier, 0.0f, MultiplierMaximum, 0.1f, "\xC3\x97"))
+        ReadoutBlock::Construct(Page, "Sunlight intensity", Intensity.c_str(), "\xC3\x97");
+        if (SliderRow::Construct(Page, "SolarIlluminance", "Sunlight multiplier", Multiplier, 0.0f, MultiplierMaximum, 0.1f, "\xC3\x97"))
         {
             Parameters.IlluminanceKilolux = Multiplier * KilaluxPerMultiplier;
             Changed                       = true;
         }
-        Page.ConstructCaption("Exhibit intensity multiplier, not a measured lux or irradiance value. Atmospheric transmission is applied by the renderer.");
+        CaptionText::Construct(Page, "Exhibit intensity multiplier, not a measured lux or irradiance value. Atmospheric transmission is applied by the renderer.");
         static constexpr std::array<const char*, 2> Sources = {"Temperature", "RGB"};
         int Source = static_cast<int>(std::min<uint32_t>(Parameters.ColourSource, 1u));
-        if (Page.ConstructSelect("ColourSource", "Colour source", Sources.data(), static_cast<int>(Sources.size()), Source, true, "Sun colour source"))
+        if (SelectRow::Construct(Page, "ColourSource", "Colour source", Sources.data(), static_cast<int>(Sources.size()), Source, true, "Sun colour source"))
         {
             Parameters.ColourSource = static_cast<uint32_t>(Source);
             Changed                 = true;
         }
         float Tint[3] = {Parameters.TintLinear[0], Parameters.TintLinear[1], Parameters.TintLinear[2]};
-        if (Page.ConstructTintRow("SunTint", "Sun Tint", Tint))
+        if (TintRow::Construct(Page, "SunTint", "Sun Tint", Tint))
         {
             Parameters.TintLinear   = {Tint[0], Tint[1], Tint[2]};
             Parameters.ColourSource = 1u;
             Changed                 = true;
         }
-        if (Page.ConstructSlider("SunTemperature", "Colour temperature", Parameters.KelvinTemperature, KelvinMinimum, KelvinMaximum, 50.0f, "K"))
+        if (SliderRow::Construct(Page, "SunTemperature", "Colour temperature", Parameters.KelvinTemperature, KelvinMinimum, KelvinMaximum, 50.0f, "K"))
         {
             Parameters.ColourSource = 0u;
             Changed                 = true;
@@ -573,14 +573,14 @@ void SolarInspector::ConstructInspector()
             const float  HeroTall = 9.0f * 1.4f + 5.0f + 43.0f * 1.25f;
             const ImVec2 HeroMin  = Page.Space(10.0f + HeroTall + 10.0f, 0.0f, 0.0f);
             const std::string Kelvin = ResolveFigure("%.0f", std::round(static_cast<double>(Parameters.KelvinTemperature)));
-            (void)Page.ConstructReadoutAt(ImVec2(HeroMin.x, HeroMin.y + 10.0f * S), "Thermal reference", Kelvin.c_str(), "K", 43.0f, 10.0f, -1.3f, 1.25f);
+            (void)ReadoutBlock::ConstructAt(Page, ImVec2(HeroMin.x, HeroMin.y + 10.0f * S), "Thermal reference", Kelvin.c_str(), "K", 43.0f, 10.0f, -1.3f, 1.25f);
             const char* Mode     = Parameters.ColourSource == 1u ? "RGB source \xC2\xB7 reference only" : "Temperature source";
-            const float TagWidth = Page.MeasureTag(Mode);
+            const float TagWidth = TagPill::Measure(Page, Mode);
             const float TagTall  = (2.0f * 6.0f + 9.0f * 1.4f + 2.0f) * S;
-            (void)Page.ConstructTagAt("##ThermalMode", ImVec2(HeroMin.x + Page.QueryWidth() - TagWidth, HeroMin.y + 0.5f * ((10.0f + HeroTall + 10.0f) * S - TagTall)),
+            (void)TagPill::ConstructAt(Page, "##ThermalMode", ImVec2(HeroMin.x + Page.QueryWidth() - TagWidth, HeroMin.y + 0.5f * ((10.0f + HeroTall + 10.0f) * S - TagTall)),
                                       Mode, false, nullptr);
         }
-        const ObservatoryPen Pen = Page.BeginDiagram("##Spectrum", 640.0f, 280.0f, 12.0f, 12.0f);
+        const DiagramPen Pen = DiagramCanvas::Begin(Page, "##Spectrum", 640.0f, 280.0f, 12.0f, 12.0f);
         for (const float Rule : {28.0f, 80.0f, 132.0f, 184.0f}) Pen.Line(ImVec2(32.0f, Rule), ImVec2(608.0f, Rule), ResolveCssColour(0xEAD6AD1A), 1.0f, 2.0f, 6.0f);
         const std::array<float, 65> Spectrum = ResolveThermalSpectrum(Parameters.KelvinTemperature);
         std::vector<ImVec2>         Curve;
@@ -616,18 +616,18 @@ void SolarInspector::ConstructInspector()
             const ImVec2 Min     = Page.Space(1.0f + 16.0f + RowTall, 12.0f, 0.0f);
             DrawList->AddLine(ImVec2(Min.x, Min.y + 0.5f * S), ImVec2(Min.x + Page.QueryWidth(), Min.y + 0.5f * S), ResolveCssColour(0xE8C78B19), S);
             const std::string PeakFigure = ResolveFigure("%.0f", static_cast<double>(Peak));
-            (void)Page.ConstructReadoutAt(ImVec2(Min.x, Min.y + 17.0f * S), "Blackbody peak", PeakFigure.c_str(), "nm", 24.0f, 10.0f, -1.3f, 1.25f);
-            (void)Page.ConstructReadoutAt(ImVec2(Min.x + 0.5f * (Page.QueryWidth() + 12.0f * S), Min.y + 17.0f * S), "Visible window", "380\xE2\x80\x93" "780", "nm",
+            (void)ReadoutBlock::ConstructAt(Page, ImVec2(Min.x, Min.y + 17.0f * S), "Blackbody peak", PeakFigure.c_str(), "nm", 24.0f, 10.0f, -1.3f, 1.25f);
+            (void)ReadoutBlock::ConstructAt(Page, ImVec2(Min.x + 0.5f * (Page.QueryWidth() + 12.0f * S), Min.y + 17.0f * S), "Visible window", "380\xE2\x80\x93" "780", "nm",
                                           24.0f, 10.0f, -1.3f, 1.25f);
         }
-        Page.ConstructCaption("Normalised thermal reference, not measured radiance. The renderer uses its existing RGB approximation; RGB mode uses your custom "
+        CaptionText::Construct(Page, "Normalised thermal reference, not measured radiance. The renderer uses its existing RGB approximation; RGB mode uses your custom "
                               "tint. The blackbody peak may fall outside the visible window.");
         Page.EndCard();
 
         // 📝 A Frontier addition (no demo counterpart): the native sun's render switches stay reachable.
         Page.BeginCard(FlatLook(0x20221EFF, 24.0f), "Frontier render switches", "09 / ENGINE");
-        Changed |= Page.ConstructToggle("RayShadows", "Ray-traced sun shadows", Parameters.CastRaytracedShadow);
-        Changed |= Page.ConstructToggle("LightShafts", "Volumetric light shafts", Parameters.VolumetricLightShaft);
+        Changed |= ToggleRow::Construct(Page, "RayShadows", "Ray-traced sun shadows", Parameters.CastRaytracedShadow);
+        Changed |= ToggleRow::Construct(Page, "LightShafts", "Volumetric light shafts", Parameters.VolumetricLightShaft);
         Page.EndCard();
     }
     else
@@ -635,9 +635,9 @@ void SolarInspector::ConstructInspector()
         // ── 07 / ANGULAR SIZE ──────────────────────────────────────────────────────────────────────────────────────
         Page.BeginCard(AngularLook(), "Apparent solar disc", "07 / ANGULAR SIZE");
         const std::string Diameter = ResolveFigure("%.2f", static_cast<double>(Radius * 2.0f));
-        Page.ConstructReadout("Angular diameter", Diameter.c_str(), "\xC2\xB0");
-        ObservatoryDiagramDrag Drag;
-        const ObservatoryPen   Pen = Page.BeginDiagram("##SolarDisc", 640.0f, 280.0f, 12.0f, 12.0f, &Drag, "Solar disc size editor \xC2\xB7 drag horizontally");
+        ReadoutBlock::Construct(Page, "Angular diameter", Diameter.c_str(), "\xC2\xB0");
+        DiagramDrag Drag;
+        const DiagramPen   Pen = DiagramCanvas::Begin(Page, "##SolarDisc", 640.0f, 280.0f, 12.0f, 12.0f, &Drag, "Solar disc size editor \xC2\xB7 drag horizontally");
         const ImVec2           Centre(320.0f, 130.0f);
         for (const float Ring : {45.0f, 85.0f, 118.0f}) Pen.Circle(Centre, Ring, 0, ResolveCssColour(0xE8C78B22));
         Pen.Line(ImVec2(180.0f, 130.0f), ImVec2(460.0f, 130.0f), ResolveCssColour(0xE8C78B2A), 1.0f, 2.0f, 5.0f);
@@ -653,26 +653,26 @@ void SolarInspector::ConstructInspector()
             Parameters.AngularDiameterDeg = 2.0f * Radius;
             Changed                       = true;
         }
-        if (Page.ConstructSlider("SunRadius", "Angular diameter", Radius, RadiusMinimum, RadiusMaximum, 0.005f, "\xC2\xB0", 2.0f))
+        if (SliderRow::Construct(Page, "SunRadius", "Angular diameter", Radius, RadiusMinimum, RadiusMaximum, 0.005f, "\xC2\xB0", 2.0f))
         {
             Parameters.AngularDiameterDeg = 2.0f * Radius;
             Changed                       = true;
         }
-        Changed |= Page.ConstructSlider("SunGlow", "Optical aureole", Parameters.AureoleGain, 0.0f, AureoleMaximum, 0.01f, "\xC3\x97");
-        Page.ConstructCaption("Disc diagram is exaggerated for editing; the sky uses the actual angular diameter. The Sun disc quick toggle remains in Overview.");
+        Changed |= SliderRow::Construct(Page, "SunGlow", "Optical aureole", Parameters.AureoleGain, 0.0f, AureoleMaximum, 0.01f, "\xC3\x97");
+        CaptionText::Construct(Page, "Disc diagram is exaggerated for editing; the sky uses the actual angular diameter. The Sun disc quick toggle remains in Overview.");
         Page.EndCard();
 
         // ── 08 / SUBCOMPONENT ──────────────────────────────────────────────────────────────────────────────────────
         Page.BeginCard(SubcomponentLook(), "Connected optics", "08 / SUBCOMPONENT");
-        Page.ConstructCaption("Lens flare is a separate optical subcomponent. Opening it does not change sunlight or exposure.");
-        if (Page.ConstructNextButton("##OpenLensFlare", "Open Lens Flare \xE2\x86\x97"))
+        CaptionText::Construct(Page, "Lens flare is a separate optical subcomponent. Opening it does not change sunlight or exposure.");
+        if (NextButton::Construct(Page, "##OpenLensFlare", "Open Lens Flare \xE2\x86\x97"))
         {
             InspectorRuntime::Instance().RequestSelection("OpticalFlare");
         }
         Page.EndCard();
     }
 
-    Page.ConstructFooter("DIRECTIONAL LIGHT / Z UP", "Settings apply live \xE2\x86\x97");
+    FooterRow::Construct(Page, "DIRECTIONAL LIGHT / Z UP", "Settings apply live \xE2\x86\x97");
     Page.Finalize();
     ImGui::PopID();
     if (Changed)

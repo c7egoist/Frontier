@@ -224,24 +224,24 @@ int main(int ArgumentCount, char** Arguments)
         RenderFrames(4);
         WritePngCapture(OutputDir / "07-EverestRenderPipelineInspector.png");
 
-        // Exhibit 08: the demo's environment observatory pages, one capture per section tab (InspectorPages ported 1:1).
-        int ObservatoryCaptures = 0;
+        // Exhibit 08: the demo's environment Inspector pages, one capture per section tab (InspectorPages ported 1:1).
+        int PageCaptures = 0;
         for (const char* Type : {"Solar"})
         {
-            SceneRecordBase* ObservatoryRec = World.FindFirstByType(Type);
-            Require(ObservatoryRec != nullptr, "Expected every environment observatory record in Everest SceneWorld.");
-            RecordInspector* Observatory = InspectorRuntime::Instance().FindInspector(ObservatoryRec->QueryToken());
-            Require(Observatory != nullptr && Observatory->QueryOccupiesColumn(), "An environment observatory page must occupy the Inspector column.");
-            Workspace.QueryOutliner().Select(ObservatoryRec->QueryToken());
-            const int Sections = std::max(1, Observatory->QuerySectionCount());
+            SceneRecordBase* PageEntry = World.FindFirstByType(Type);
+            Require(PageEntry != nullptr, "Expected every environment page's record in Everest SceneWorld.");
+            RecordInspector* Page = InspectorRuntime::Instance().FindInspector(PageEntry->QueryToken());
+            Require(Page != nullptr && Page->QueryOccupiesColumn(), "An environment Inspector page must occupy the Inspector column.");
+            Workspace.QueryOutliner().Select(PageEntry->QueryToken());
+            const int Sections = std::max(1, Page->QuerySectionCount());
             for (int Section = 0; Section < Sections; ++Section)
             {
-                Observatory->ConfigureSection(Section);
+                Page->ConfigureSection(Section);
                 RenderFrames(4);
-                WritePngCapture(OutputDir / ("08-Observatory-" + std::string(Type) + "-" + std::to_string(Section + 1) + ".png"));
-                ++ObservatoryCaptures;
+                WritePngCapture(OutputDir / ("08-InspectorPage-" + std::string(Type) + "-" + std::to_string(Section + 1) + ".png"));
+                ++PageCaptures;
             }
-            Observatory->ConfigureSection(0);
+            Page->ConfigureSection(0);
         }
 
         // Exhibit 05: Open standalone FractureEditor modal
@@ -270,7 +270,7 @@ int main(int ArgumentCount, char** Arguments)
         ImGui::DestroyContext();
 
         std::cout << "[EverestInterfaceValidation] Passed (ProjectGenerator C++ scaffolding, .levelspace, composable inspectors, 7 PNG exhibits and "
-                  << ObservatoryCaptures << " observatory page captures verified).\n";
+                  << PageCaptures << " environment page captures verified).\n";
         return 0;
     }
     catch (const std::exception& Error)

@@ -295,12 +295,12 @@ void InspectorRuntime::InspectRecord([[maybe_unused]] RecordToken Token, bool& O
     const SceneDirectoryMetadata Meta = Directory.QueryMetadata(Token);
     const std::string            Name = Directory.QueryName(Token);
 
-    // 📝 A page that occupies the column (the demo's environment observatories) lays it out itself, edge to edge.
+    // 📝 A page that occupies the column (the demo's environment Inspector pages) lays it out itself, edge to edge.
     if (auto Occupied = Slots.find(Token.Value);
         Occupied != Slots.end() && Occupied->second.Inspectors.size() == 1 && Occupied->second.Inspectors.front()->QueryOccupiesColumn())
     {
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
-        if (ImGui::BeginChild("##InspectorObservatoryRegion", ImVec2(0.0f, 0.0f), false))
+        if (ImGui::BeginChild("##InspectorPageRegion", ImVec2(0.0f, 0.0f), false))
         {
             Occupied->second.Inspectors.front()->ConstructInspector();
             if (Meta.RemovableInEditor)

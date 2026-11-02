@@ -132,9 +132,50 @@ add_library(FrontierSceneEditorUI STATIC
     Frontier/Engine/Interface/FluidPlumeEditor.cpp
     Frontier/Engine/Interface/ParticleEditor.cpp
     Frontier/Engine/Interface/PolygonClusterEditor.cpp
-    Frontier/Engine/Interface/NativeInspectors.cpp
-    Frontier/Engine/Interface/ObservatoryControls.cpp
-    Frontier/Engine/Interface/SolarObservatory.cpp
+    Frontier/Engine/Interface/Controls/ControlTheme.cpp
+    Frontier/Engine/Interface/Controls/ControlColumn.cpp
+    Frontier/Engine/Interface/Controls/GlyphRun.cpp
+    Frontier/Engine/Interface/Controls/DiagramPen.cpp
+    Frontier/Engine/Interface/Controls/DiagramCanvas.cpp
+    Frontier/Engine/Interface/Controls/PageHeading.cpp
+    Frontier/Engine/Interface/Controls/TabStrip.cpp
+    Frontier/Engine/Interface/Controls/ReadoutBlock.cpp
+    Frontier/Engine/Interface/Controls/TagPill.cpp
+    Frontier/Engine/Interface/Controls/MetricTiles.cpp
+    Frontier/Engine/Interface/Controls/SwitchTiles.cpp
+    Frontier/Engine/Interface/Controls/SliderRow.cpp
+    Frontier/Engine/Interface/Controls/SelectRow.cpp
+    Frontier/Engine/Interface/Controls/PresetStrip.cpp
+    Frontier/Engine/Interface/Controls/ToggleRow.cpp
+    Frontier/Engine/Interface/Controls/NextButton.cpp
+    Frontier/Engine/Interface/Controls/DateRow.cpp
+    Frontier/Engine/Interface/Controls/TintRow.cpp
+    Frontier/Engine/Interface/Controls/CaptionText.cpp
+    Frontier/Engine/Interface/Controls/FooterRow.cpp
+    Frontier/Engine/Interface/Inspectors/RenderInspectionModes.cpp
+    Frontier/Engine/Interface/Inspectors/SpatialInspector.cpp
+    Frontier/Engine/Interface/Inspectors/PhysicsInspector.cpp
+    Frontier/Engine/Interface/Inspectors/ThermalInspector.cpp
+    Frontier/Engine/Interface/Inspectors/ChemicalInspector.cpp
+    Frontier/Engine/Interface/Inspectors/SurfaceOpticsInspector.cpp
+    Frontier/Engine/Interface/Inspectors/DiagnosticsInspector.cpp
+    Frontier/Engine/Interface/Inspectors/RenderPipelineInspector.cpp
+    Frontier/Engine/Interface/Inspectors/DistanceFieldInspector.cpp
+    Frontier/Engine/Interface/Inspectors/SurfaceCardInspector.cpp
+    Frontier/Engine/Interface/Inspectors/PolygonClusterInspector.cpp
+    Frontier/Engine/Interface/Inspectors/SolarInspector.cpp
+    Frontier/Engine/Interface/Inspectors/OpticalFlareInspector.cpp
+    Frontier/Engine/Interface/Inspectors/AtmosphereInspector.cpp
+    Frontier/Engine/Interface/Inspectors/CloudInspector.cpp
+    Frontier/Engine/Interface/Inspectors/StarInspector.cpp
+    Frontier/Engine/Interface/Inspectors/MoonInspector.cpp
+    Frontier/Engine/Interface/Inspectors/PlanetInspector.cpp
+    Frontier/Engine/Interface/Inspectors/FogInspector.cpp
+    Frontier/Engine/Interface/Inspectors/LightningInspector.cpp
+    Frontier/Engine/Interface/Inspectors/WindInspector.cpp
+    Frontier/Engine/Interface/Inspectors/FluidPlumeInspector.cpp
+    Frontier/Engine/Interface/Inspectors/FractureInspector.cpp
+    Frontier/Engine/Interface/Inspectors/ParticleInspector.cpp
     Frontier/Engine/Interface/SceneInspectorPanel.cpp
     Frontier/Engine/Interface/ViewportChromeControls.cpp)
 target_include_directories(FrontierSceneEditorUI PUBLIC

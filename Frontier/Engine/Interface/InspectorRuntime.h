@@ -50,7 +50,7 @@ class RecordInspector
     virtual void                      ConfigureToggle(bool Enabled)                         { (void)Enabled; }
     [[nodiscard]] virtual uint64_t    QueryRevision() const noexcept                        { return 0; }
     virtual void                      EnumerateSwitches(std::vector<InspectorSwitchEntry>& OutSwitches) { (void)OutSwitches; }
-    // 📝 True for a page that lays out the whole Inspector column itself (the demo's environment observatories): the
+    // 📝 True for a page that lays out the whole Inspector column itself (the demo's environment Inspector pages): the
     //    runtime then draws no crumb bar, record header or switch grid around it.
     [[nodiscard]] virtual bool        QueryOccupiesColumn() const noexcept                  { return false; }
     // 📝 A page's section tabs (the demo's Overview / Daylight / …): how many there are, and which one shows.
