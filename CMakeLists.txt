@@ -684,4 +684,5 @@ if(BUILD_TESTING)
 endif()
 
 include(Automation/EnvironmentRendering.cmake)
+include(Automation/VirtualizedGeometryRendering.cmake)
 include(Automation/GlobalIlluminationRendering.cmake)
