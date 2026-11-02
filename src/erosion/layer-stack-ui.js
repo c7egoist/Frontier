@@ -33,28 +33,62 @@ import {
   effectiveWindAzimuthAtStep,
   normalizeWindShiftMode,
 } from './wind-regime.js';
+import {
+  Brush,
+  Check,
+  Columns3,
+  Contrast,
+  Droplets,
+  Eye,
+  EyeOff,
+  FlaskConical,
+  Gem,
+  Layers,
+  Mountain,
+  MountainSnow,
+  MoveHorizontal,
+  Paintbrush,
+  Rainbow,
+  Route,
+  Snowflake,
+  Spline,
+  Sprout,
+  Triangle,
+  Wind,
+} from 'lucide';
+
+// Lucide icon set (ISC-licensed lucide package). Glyphs are stroke icons
+// rendered with `currentColor`, so the ICON ITSELF carries the per-type
+// colour (see LAYER_ICON_COLORS below) — icon tiles stay neutral.
+function lucideIcon(iconNode, size = 18) {
+  const body = (iconNode || [])
+    .map(([tag, attrs]) => `<${tag} ${Object.entries(attrs || {}).map(([k, v]) => `${k}="${v}"`).join(' ')}/>`)
+    .join('');
+  return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+}
 
 const SVG_ICONS = {
-  mountain: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14.5 6.8 6l3.4 5 2.4-3.3L16 14.5H2Z"/></svg>`,
-  ridge: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 13.5 5.5 5l3.5 6 3.5-7 4 9.5"/><path d="M5.5 5l1.6 4.2"/></svg>`,
-  strata: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M2 5.2h14M2 9h14M2 12.8h14"/><path d="M5 5.2v3.8M12 9v3.8"/></svg>`,
-  stacks: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 15V7.5h3.5V15M10.5 15V4.5H14V15M2.5 7.5h6M9.5 4.5h5.5"/></svg>`,
-  cliff: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 15V3.5h6.5L7.5 8h4l-2 7H3Z"/><path d="M12.5 6.5h3m-1.2-1.4 1.4 1.4-1.4 1.4"/></svg>`,
-  cave: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14.5V6.5C2 4.3 5 3 9 3s7 1.3 7 3.5v8h-3.2v-3.6c0-2.1-1.7-3.4-3.8-3.4s-3.8 1.3-3.8 3.4v3.6H2Z"/></svg>`,
-  sculpt: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11.8 3.2 3 3-7.6 7.6H4.2v-3l7.6-7.6Z"/><path d="M2.5 15.5h13"/></svg>`,
-  river: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M4 2.5c3.5 2.2-2.5 4.6 2 7.2 4.2 2.4 1 4.4 6 5.8"/><path d="M8.5 2.5c2.2 1.8-1 3.5 1.2 5.2"/></svg>`,
-  droplet: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 2.5C9 2.5 4.5 7.7 4.5 11a4.5 4.5 0 0 0 9 0C13.5 7.7 9 2.5 9 2.5Z"/></svg>`,
-  talus: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.5v11h12L3 3.5Z"/><circle cx="11.5" cy="8.2" r="1"/><circle cx="13.5" cy="11" r="1.1"/></svg>`,
-  snow: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 2v14M3 5.5l12 7M15 5.5l-12 7"/></svg>`,
-  wind: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h8.2a2.3 2.3 0 1 0-2.2-3.1M2.5 9.5h11.2a2.4 2.4 0 1 1-2.3 3.3M2.5 13h6.2"/></svg>`,
-  flask: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2.5h4M8 2.5v3.9L4.4 13.2a1.8 1.8 0 0 0 1.6 2.6h6a1.8 1.8 0 0 0 1.6-2.6L10 6.4V2.5"/><path d="M6.2 11h5.6"/></svg>`,
-  spline: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M3 14c1-5 11-3 12-10"/><circle cx="3" cy="14" r="1.6" fill="currentColor"/><circle cx="15" cy="4" r="1.6" fill="currentColor"/></svg>`,
-  boulders: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3,13.5 5.5,6.5 11.5,5.5 15,10.5 13,14.5 4.5,14.5"/></svg>`,
-  grass: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M9 15V5M6 15c0-3.8-1.5-6.2-3.5-7.8M12 15c0-3.8 1.5-6.2 3.5-7.8"/></svg>`,
-  eyeOpen: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M1.5 8s2.4-4.2 6.5-4.2S14.5 8 14.5 8s-2.4 4.2-6.5 4.2S1.5 8 1.5 8Z"/><circle cx="8" cy="8" r="1.9"/></svg>`,
-  eyeClosed: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 2l12 12M3.2 5.6C2.1 6.8 1.5 8 1.5 8s2.4 4.2 6.5 4.2c1.4 0 2.6-.4 3.6-1M6.6 3.9A7 7 0 0 1 8 3.8c4.1 0 6.5 4.2 6.5 4.2a11 11 0 0 1-1.8 2.4"/></svg>`,
-  mask: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="5.5"/><path d="M8 2.5a5.5 5.5 0 0 1 0 11V2.5Z" fill="currentColor"/></svg>`,
-  check: `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-6.5"/></svg>`,
+  mountain: lucideIcon(Mountain),
+  ridge: lucideIcon(MountainSnow),
+  strata: lucideIcon(Layers),
+  stacks: lucideIcon(Columns3),
+  cliff: lucideIcon(MoveHorizontal),
+  cave: lucideIcon(Rainbow),
+  sculpt: lucideIcon(Paintbrush),
+  river: lucideIcon(Route),
+  droplet: lucideIcon(Droplets),
+  talus: lucideIcon(Triangle),
+  snow: lucideIcon(Snowflake),
+  wind: lucideIcon(Wind),
+  flask: lucideIcon(FlaskConical),
+  spline: lucideIcon(Spline),
+  boulders: lucideIcon(Gem),
+  grass: lucideIcon(Sprout),
+  eyeOpen: lucideIcon(Eye, 16),
+  eyeClosed: lucideIcon(EyeOff, 16),
+  mask: lucideIcon(Contrast, 16),
+  check: lucideIcon(Check, 16),
+  brush: lucideIcon(Brush),
 };
 
 // Per-layer-type icon colours (Exhibits outliner style: every node carries

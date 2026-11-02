@@ -3845,3 +3845,275 @@ summary:focus-visible {
   color: #c6f6d8;
   backdrop-filter: blur(10px);
 }
+
+/* ==========================================================================
+   ROUNDED RESTORATION + LUCIDE GLYPHS (user correction)
+   Squared corners apply ONLY to layer-stack entries (.tp-layer-row and
+   its mask sub-row). Everything else returns to rounded/pill geometry.
+   Layer icons are Lucide glyphs: the GLYPH carries the per-type colour
+   (stroke = currentColor) on a neutral/transparent tile — no tinted
+   icon backgrounds anywhere.
+   ========================================================================== */
+
+/* Header + shell controls: pills again */
+.tp-mark-glyph {
+  border-radius: 8px;
+}
+
+.tp-workspace-switch {
+  border-radius: 999px;
+}
+
+.tp-ws-btn {
+  border-radius: 999px;
+}
+
+.tp-hdr-btn,
+.tp-resolution-select {
+  border-radius: 999px;
+}
+
+.tp-tab-add {
+  border-radius: 50%;
+}
+
+.tp-count-pill {
+  border-radius: 999px;
+}
+
+.tp-add-btn {
+  border-radius: 50%;
+}
+
+.tp-add-popover {
+  border-radius: 16px;
+}
+
+.tp-menu-item {
+  border-radius: 10px;
+}
+
+/* Add-menu + outliner + inspector icons: coloured Lucide glyph, no tile tint */
+.tp-menu-dot {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--cat-accent, #8b9b82);
+}
+
+.tp-menu-dot svg {
+  width: 17px;
+  height: 17px;
+}
+
+.tp-layer-icon {
+  width: 30px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--cat-accent, #8b9b82);
+}
+
+.tp-layer-icon svg {
+  width: 19px;
+  height: 19px;
+}
+
+.tp-identity-badge {
+  border: 1px solid var(--tp-border);
+  border-radius: 12px;
+  background: #141416;
+  color: var(--cat-accent, #8b9b82);
+}
+
+/* Outliner chrome around the (still squared) entries: rounded again */
+.tp-stat-card {
+  border-radius: 16px;
+}
+
+.tp-layer-search {
+  border-radius: 999px;
+}
+
+.tp-sim-panel {
+  border-radius: 16px;
+}
+
+.tp-sim-modes button,
+.tp-sim-chip,
+.tp-sim-master {
+  border-radius: 999px;
+}
+
+.tp-step-pill {
+  border-radius: 999px;
+}
+
+.tp-icon-btn {
+  border-radius: 8px;
+}
+
+.tp-mask-chip {
+  border-radius: 4px;
+}
+
+.tp-mask-eye {
+  border-radius: 999px;
+}
+
+.tp-layer-actions button {
+  border-radius: 999px;
+}
+
+/* The squared exception, restated: layer-stack entries only */
+.tp-layer-row {
+  border-radius: 0;
+}
+
+.tp-layer-row.selected::before {
+  border-radius: 0;
+}
+
+.tp-mask-row {
+  border-radius: 0;
+}
+
+/* Viewport header + tool rail: rounded controls */
+#tp-scene-nav.tp-vp-cam-group {
+  padding: 2px;
+  border-radius: 999px;
+}
+
+#tp-scene-nav .tp-vp-btn {
+  border: none;
+  border-radius: 999px;
+}
+
+.tp-pill-select,
+.tp-vis-toggle {
+  border-radius: 999px;
+}
+
+.tp-tool-rail {
+  border-radius: 14px;
+}
+
+.tp-tool-rail button {
+  border-radius: 10px;
+}
+
+.tp-tool-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tp-scene-caption {
+  border-radius: 999px;
+}
+
+.cb-preset-card {
+  border-radius: 12px;
+}
+
+/* Inspector: rounded cards + controls */
+.tp-io-pill {
+  border-radius: 999px;
+}
+
+.tp-property-card {
+  border-radius: 16px;
+}
+
+.tp-card-chevron {
+  border-radius: 50%;
+}
+
+.tp-select {
+  border-radius: 8px;
+}
+
+.tp-amount {
+  border-radius: 999px;
+}
+
+.tp-amount output {
+  border-radius: 999px;
+}
+
+.tp-seed-input,
+.tp-mini-btn {
+  border-radius: 999px;
+}
+
+.tp-brush-grid button {
+  border-radius: 12px;
+}
+
+.tp-spline-pt-row {
+  border-radius: 10px;
+}
+
+.tp-pt-badge {
+  border-radius: 50%;
+}
+
+.tp-pt-num {
+  border-radius: 999px;
+}
+
+.tp-pt-mini {
+  border-radius: 50%;
+}
+
+.tp-wind-from-grid button {
+  border-radius: 999px;
+}
+
+.tp-wind-legend {
+  border-radius: 999px;
+}
+
+/* Rock Studio: rounded again */
+.panel-section {
+  border-radius: 16px;
+}
+
+.tag-pill,
+.cat-chip,
+.seed-chip,
+.btn-mini,
+.btn-secondary {
+  border-radius: 999px;
+}
+
+.field-row select,
+.seed-row input {
+  border-radius: 8px;
+}
+
+.archetype-card {
+  border-radius: 12px;
+}
+
+.quality-seg button {
+  border-radius: 8px;
+}
+
+.btn-primary {
+  border-radius: 999px;
+}
+
+.hud-top,
+.camera-bar {
+  border-radius: 12px;
+}
+
+.camera-bar .cam-btn {
+  border-radius: 999px;
+}
+
+.status-toast {
+  border-radius: 999px;
+}

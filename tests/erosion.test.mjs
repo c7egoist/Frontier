@@ -2384,12 +2384,24 @@ test('Terrain resolution is a safe boot-time quality option and the redesigned U
   const charcoalBlock = cssSrc.slice(cssSrc.indexOf('CHARCOAL EDITOR REDESIGN'));
   assert.ok(/\.tp-layer-row \{[^}]*border-radius: 0;/s.test(charcoalBlock),
     'Layer-stack entries must be squared (border-radius: 0) in the charcoal theme');
-  assert.ok(/\.tp-layer-icon \{[^}]*border-radius: 2px;/s.test(charcoalBlock),
-    'Layer icon tiles must be squared in the charcoal theme');
 
-  for (const token of ['LAYER_ICON_COLORS', 'layerIconColor(', 'tp-layer-status', "check: `<svg"]) {
+  // User correction: squared corners ONLY on layer-stack entries — the rest
+  // of the UI is rounded again, and layer icons are Lucide glyphs whose
+  // glyph (not tile background) carries the per-type colour.
+  const restoredBlock = cssSrc.slice(cssSrc.indexOf('ROUNDED RESTORATION + LUCIDE GLYPHS'));
+  assert.ok(restoredBlock.length > 100, 'Rounded-restoration theme block present');
+  assert.ok(/\.tp-layer-icon \{[^}]*background: transparent;/s.test(restoredBlock),
+    'Layer icon tiles must be transparent — the glyph itself is coloured');
+  assert.ok(/\.tp-hdr-btn,\s*\.tp-resolution-select \{[^}]*border-radius: 999px;/s.test(restoredBlock),
+    'Non-layer controls are rounded again');
+  assert.ok(/\.tp-layer-row \{[^}]*border-radius: 0;/s.test(restoredBlock),
+    'Layer rows stay squared after the rounded restoration');
+
+  for (const token of ['LAYER_ICON_COLORS', 'layerIconColor(', 'tp-layer-status', "from 'lucide'", 'lucideIcon(Mountain)', 'lucideIcon(FlaskConical)']) {
     assert.ok(uiSrc.includes(token), `Outliner coloured-icon/status wiring missing ${token}`);
   }
+  const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.ok(pkg.dependencies && pkg.dependencies.lucide, 'Lucide is a declared dependency');
 
   // Tools live in the stage rail, NOT inside the viewport header element.
   const headerStart = htmlSrc.indexOf('id="tp-terrain-bars"');
