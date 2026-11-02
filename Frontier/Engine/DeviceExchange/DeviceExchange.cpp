@@ -98,6 +98,7 @@ namespace Frontier
     X(vkCmdBindIndexBuffer)                                                                                                \
     X(vkCmdDraw)                                                                                                           \
     X(vkCmdDrawIndexedIndirect)                                                                                            \
+    X(vkCmdDrawIndexedIndirectCount)                                                                                       \
     X(vkCmdSetViewport)                                                                                                    \
     X(vkCmdSetScissor)
 
@@ -468,6 +469,7 @@ bool DeviceExchange::Initialize(const std::string& ExplicitDriverLibraryPath, st
     Enabled.shaderStorageImageWriteWithoutFormat = Supported.shaderStorageImageWriteWithoutFormat;
     Enabled.robustBufferAccess                   = Supported.robustBufferAccess;
     Enabled.samplerAnisotropy                    = Supported.samplerAnisotropy;
+    Enabled.multiDrawIndirect                    = Supported.multiDrawIndirect;
     Enabled.textureCompressionBC                 = VK_FALSE;
 
     VkPhysicalDeviceVulkan13Features Features13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
@@ -491,6 +493,9 @@ bool DeviceExchange::Initialize(const std::string& ExplicitDriverLibraryPath, st
     Enable13.robustImageAccess = Features13.robustImageAccess;
     VkPhysicalDeviceVulkan12Features Enable12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     Enable12.scalarBlockLayout = Features12.scalarBlockLayout;
+    Enable12.drawIndirectCount = Features12.drawIndirectCount;
+    Capabilities_.DrawIndirectCount = Features12.drawIndirectCount == VK_TRUE;
+    Capabilities_.MultiDrawIndirect = Supported.multiDrawIndirect == VK_TRUE;
     Enable13.pNext = &Enable12;
     VkPhysicalDeviceVulkan11Features Enable11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
     Enable11.shaderDrawParameters = Features11.shaderDrawParameters;
@@ -539,6 +544,7 @@ bool DeviceExchange::CompleteDevice(std::string* OutDiagnostic)
     Functions_->vkCmdBeginRendering = reinterpret_cast<PFN_vkCmdBeginRendering>(Functions_->vkGetDeviceProcAddr(Device_, "vkCmdBeginRendering"));
     Functions_->vkCmdEndRendering   = reinterpret_cast<PFN_vkCmdEndRendering>(Functions_->vkGetDeviceProcAddr(Device_, "vkCmdEndRendering"));
     if (Queue_ == VK_NULL_HANDLE) Functions_->vkGetDeviceQueue(Device_, QueueFamily_, 0, &Queue_);
+    if (!Functions_->vkCmdDrawIndexedIndirectCount) Capabilities_.DrawIndirectCount = false;
 
     VkCommandPoolCreateInfo PoolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     PoolInfo.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -582,6 +588,8 @@ VulkanDeviceAccess DeviceExchange::QueryDeviceAccess() const noexcept
     Access.QueueFamily     = QueueFamily_;
     Access.ResolveInstance = Functions_ ? Functions_->vkGetInstanceProcAddr : nullptr;
     Access.ApiVersion      = VK_API_VERSION_1_3;
+    Access.DrawIndirectCount = Capabilities_.DrawIndirectCount;
+    Access.MultiDrawIndirect = Capabilities_.MultiDrawIndirect;
     return Access;
 }
 
@@ -605,6 +613,8 @@ bool DeviceExchange::AttachDevice(const VulkanDeviceAccess& Access, std::string*
     Queue_          = Access.Queue;
     QueueFamily_    = Access.QueueFamily;
     DeviceAttached_ = true;
+    Capabilities_.DrawIndirectCount = Access.DrawIndirectCount;
+    Capabilities_.MultiDrawIndirect = Access.MultiDrawIndirect;
     if (DescribePhysicalDevice() < VK_API_VERSION_1_3 || Access.ApiVersion < VK_API_VERSION_1_3)
     {
         ReportDiagnostic(OutDiagnostic, "adopted device " + AdapterDescription_ + " was not created for Vulkan 1.3 (dynamic rendering)");
@@ -1700,6 +1710,23 @@ void CommandSequence::DrawIndexedIndirect(const std::shared_ptr<DeviceRegion>& R
 {
     Retained_.push_back(Region);
     Exchange_.Functions().vkCmdDrawIndexedIndirect(CommandStream_, Region->Handle, Offset, 1, 20);
+}
+
+void CommandSequence::DrawIndexedIndirectCount(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset,
+                                               const std::shared_ptr<DeviceRegion>& CountRegion, VkDeviceSize CountOffset, uint32_t MaximumDraws,
+                                               uint32_t Stride)
+{
+    if (MaximumDraws == 0) return;
+    Retained_.push_back(Region);
+    Retained_.push_back(CountRegion);
+    Exchange_.Functions().vkCmdDrawIndexedIndirectCount(CommandStream_, Region->Handle, Offset, CountRegion->Handle, CountOffset, MaximumDraws, Stride);
+}
+
+void CommandSequence::DrawIndexedIndirectSeries(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, uint32_t DrawCount, uint32_t Stride)
+{
+    if (DrawCount == 0) return;
+    Retained_.push_back(Region);
+    Exchange_.Functions().vkCmdDrawIndexedIndirect(CommandStream_, Region->Handle, Offset, DrawCount, Stride);
 }
 
 void CommandSequence::EndRaster()

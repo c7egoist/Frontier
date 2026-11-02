@@ -27,6 +27,8 @@ struct VulkanDeviceAccess
     uint32_t                  QueueFamily     = 0u;
     PFN_vkGetInstanceProcAddr ResolveInstance = nullptr;
     uint32_t                  ApiVersion      = 0u;   // [-] VK_API_VERSION_* the instance and device were created for
+    bool                      DrawIndirectCount = false;   // [-] drawIndirectCount enabled (vkCmdDrawIndexedIndirectCount)
+    bool                      MultiDrawIndirect = false;   // [-] multiDrawIndirect enabled (drawCount > 1)
 
     [[nodiscard]] bool Valid() const noexcept
     {

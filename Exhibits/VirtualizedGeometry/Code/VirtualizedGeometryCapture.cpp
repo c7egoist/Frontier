@@ -5,7 +5,8 @@
 //    takeover, the five cluster inspection modes, the takeover's records and pages, and the refresh times either way.
 
 // 📝 Usage: VirtualizedGeometryCapture <GlobalIllumination shaders> <Environment shaders> <ProvingGround> <CelestialMaps> <out>
-//    [quality] [width] [height] [refreshes] [stream slots]. The VirtualizedGeometry archives sit beside the GlobalIllumination ones.
+//    [quality] [width] [height] [refreshes] [stream slots] [uncompacted]. The VirtualizedGeometry archives sit beside the
+//    GlobalIllumination ones; "uncompacted" keeps the demo's one indirect command per cluster record (I1 off).
 #include "Frontier/Engine/Rendering/SceneViewport/SceneViewport.h"
 #include "stb_image_write.h"
 #include <algorithm>
@@ -71,6 +72,7 @@ int main(int ArgumentCount, char** Arguments)
     const uint32_t Height      = ArgumentCount > 8 ? static_cast<uint32_t>(std::atoi(Arguments[8])) : 270u;
     const uint32_t Refreshes   = ArgumentCount > 9 ? static_cast<uint32_t>(std::atoi(Arguments[9])) : 8u;
     const uint32_t StreamSlots = ArgumentCount > 10 ? static_cast<uint32_t>(std::atoi(Arguments[10])) : 0u;
+    const bool     Uncompacted = ArgumentCount > 11 && std::string(Arguments[11]) == "uncompacted";
     std::filesystem::create_directories(OutFolder);
     Configuration.Journal = [](const std::string& Line) { std::printf("  %s\n", Line.c_str()); };
 
@@ -121,6 +123,7 @@ int main(int ArgumentCount, char** Arguments)
     const Capture Reference = Run(Baseline, Refreshes, "Baseline");
 
     // ② the takeover: pages stream two per refresh, so run until every page is resident
+    if (Host.Surface && Host.Surface->Virtualized) Host.Surface->Virtualized->CompactCommands = !Uncompacted;
     ViewportRendering Virtualized;
     Virtualized.VirtualizedGeometry    = true;
     Virtualized.VirtualizedStreamSlots = StreamSlots;
@@ -139,6 +142,8 @@ int main(int ArgumentCount, char** Arguments)
     }
     std::printf("every page resident after %u refreshes\n", StreamingRefreshes);
     const Capture Settled = Run(Virtualized, Refreshes, "Virtualized");
+    std::printf("cluster commands: %u indirect calls per refresh (%s)\n", Projection->RecordedCommands(),
+                Projection->CommandsCompacted() ? "one call per phase and class" : "one indirect command per cluster record");
     const double Difference = MeanAbsoluteDifference(Reference.Rgba, Settled.Rgba);
     std::printf("virtualized vs baseline: mean absolute difference %.4f; refresh %.3f s vs %.3f s (%.2fx)\n", Difference, Settled.MeanSeconds,
                 Reference.MeanSeconds, Settled.MeanSeconds / std::max(1e-9, Reference.MeanSeconds));

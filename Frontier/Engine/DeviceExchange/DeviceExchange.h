@@ -358,6 +358,10 @@ class CommandSequence
     void BindIndexRegion(const std::shared_ptr<DeviceRegion>& Region, VkIndexType IndexType = VK_INDEX_TYPE_UINT32);
     void Draw(uint32_t VertexCount, uint32_t InstanceCount = 1u, uint32_t FirstVertex = 0u, uint32_t FirstInstance = 0u);
     void DrawIndexedIndirect(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset);
+    // 📝 Many commands in one call: the count read from CountRegion (drawIndirectCount), or a fixed series (multiDrawIndirect).
+    void DrawIndexedIndirectCount(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, const std::shared_ptr<DeviceRegion>& CountRegion,
+                                  VkDeviceSize CountOffset, uint32_t MaximumDraws, uint32_t Stride = 20);
+    void DrawIndexedIndirectSeries(const std::shared_ptr<DeviceRegion>& Region, VkDeviceSize Offset, uint32_t DrawCount, uint32_t Stride = 20);
     void SetViewport(float X, float Y, float Width, float Height, float MinimumDepth = 0.0f, float MaximumDepth = 1.0f);
     void SetScissor(uint32_t X, uint32_t Y, uint32_t Width, uint32_t Height);
     void EndRaster();
@@ -384,6 +388,11 @@ class CommandSequence
 //                                                   DEVICE EXCHANGE
 //------------------------------------------------------------------------------------------------------------------------
 
+struct DeviceCapabilities
+{
+    bool DrawIndirectCount = false;   // [-] CommandSequence::DrawIndexedIndirectCount is available
+    bool MultiDrawIndirect = false;   // [-] CommandSequence::DrawIndexedIndirectSeries is available
+};
 struct DeviceLimitsSummary
 {
     uint32_t MaximumTexture3D        = 0;
@@ -414,6 +423,7 @@ class DeviceExchange
     [[nodiscard]] bool                       Ready() const noexcept { return Device_ != VK_NULL_HANDLE; }
     [[nodiscard]] const std::string&         AdapterDescription() const noexcept { return AdapterDescription_; }
     [[nodiscard]] const DeviceLimitsSummary& Limits() const noexcept { return Limits_; }
+    [[nodiscard]] const DeviceCapabilities&  Capabilities() const noexcept { return Capabilities_; }
 
     // Resources (the demo's ConstructRecords / ConstructRecordsFrom / ConstructTexture / ConstructSampler).
     std::shared_ptr<DeviceRegion>      ConstructRegion(VkDeviceSize ByteCount, const std::string& Label = "");
@@ -519,6 +529,7 @@ class DeviceExchange
     VkFence                          SubmitFence_        = VK_NULL_HANDLE;
     VkPhysicalDeviceMemoryProperties MemoryProperties_{};
     DeviceLimitsSummary              Limits_{};
+    DeviceCapabilities               Capabilities_{};
     std::string                      AdapterDescription_{};
     bool                             DeviceAttached_     = false;   // [-] the device belongs to another owner (AttachDevice)
 

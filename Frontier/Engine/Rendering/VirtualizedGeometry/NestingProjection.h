@@ -57,6 +57,12 @@ class NestingProjection
 
     bool     Enabled     = false;   // [-] the demo's ?hierarchy=1
     uint32_t StreamSlots = 0;       // [-] the demo's ?streampages (0: one slot per page)
+    // 📝 I1: one call per phase and class — an indirect-count draw over compacted commands with drawIndirectCount, else one multi-draw
+    //    over the records with multiDrawIndirect; with neither, or with this off, the demo's one command per record. Read at
+    //    ConstructPrograms.
+    bool     CompactCommands = true;
+    [[nodiscard]] bool     CommandsCompacted() const noexcept { return Compacted_; }
+    [[nodiscard]] uint32_t RecordedCommands() const noexcept { return RecordedCommands_; }   // [-] indirect calls of the last refresh
 
   private:
     struct ExpandedCluster
@@ -130,7 +136,10 @@ class NestingProjection
     std::map<std::array<const void*, 3>, std::shared_ptr<DescriptorGroup>>          ResolveGroups_{};
     std::array<uint32_t, 2>           Extent_{0, 0};
     std::optional<std::array<uint32_t, 2>> TargetExtent_{};
-    bool                              ProgramsBuilt_ = false, Records_ = false;
+    bool                              ProgramsBuilt_ = false, Records_ = false, Compacted_ = false, CountedCommands_ = false;
+    uint32_t                          RecordedCommands_ = 0;
+    std::shared_ptr<DeviceRegion>     CompactedCommands_{}, CompactedCounts_{}, ClassCommands_{};
+    void RecordList(CommandSequence& Sequence, const std::shared_ptr<DeviceRegion>& Instances, uint32_t List);
     std::optional<std::string>        ActivationError_{};
     std::string                       StatusCaption_{};
     std::string                       Key_{};

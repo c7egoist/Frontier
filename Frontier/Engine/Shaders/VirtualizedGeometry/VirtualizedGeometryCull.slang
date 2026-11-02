@@ -41,6 +41,12 @@ struct ClusterCommand
   [[vk::binding(5, 0)]] RWStructuredBuffer<uint>                 ClusterVerdicts;   // 0 not cut or culled, 1 phase-1 visible, 2 retry,
                                                                                      // 3 phase-2 disoccluded, 4 occluded
   [[vk::binding(6, 0)]] Texture2D<float>                         HiZPyramid;
+// 📝 I1: four command lists per refresh, [phase-1 opaque | phase-1 glass | phase-2 opaque | phase-2 glass], each ArrayCount(Clusters)
+//    long, the occupant in FirstInstance: compacted (appended, counts zeroed by the host before phase 1) for one indirect-count draw
+//    per list, and by record (culled records keep zero instances) for one multi-draw per list where drawIndirectCount is absent.
+  [[vk::binding(7, 0)]] RWStructuredBuffer<ClusterCommand>       CompactedCommands;
+  [[vk::binding(8, 0)]] RWStructuredBuffer<uint>                 CompactedCounts;
+  [[vk::binding(9, 0)]] RWStructuredBuffer<ClusterCommand>       ClassCommands;
 
 static const float PixelErrorThreshold = 1.0;    // [px]
 static const float NearPlaneClamp      = 0.1;    // [m]
@@ -160,9 +166,7 @@ bool TestHiZOcclusion(NestedClusterProfile C, float4x4 M)
     return clamp(ClosestDepth, 0.0, 1.0) + 1.0e-5 >= OccluderDepth;
 }
 
-[shader("compute")]
-[numthreads(64, 1, 1)]
-void SelectAndCullPhase1(uint3 ID : SV_DispatchThreadID)
+void SelectAndCullPhase1Body(uint3 ID)
 {
     let I = ID.x;
     if (I >= ArrayCount(Clusters)) { return; }
@@ -205,9 +209,7 @@ void SelectAndCullPhase1(uint3 ID : SV_DispatchThreadID)
     Phase2Commands[I]  = ClusterCommand(C.IndexCount, 0u, C.FirstIndex, 0u, 0u);
 }
 
-[shader("compute")]
-[numthreads(64, 1, 1)]
-void CullPhase2Disoccluded(uint3 ID : SV_DispatchThreadID)
+void CullPhase2DisoccludedBody(uint3 ID)
 {
     let I = ID.x;
     if (I >= ArrayCount(Clusters)) { return; }
@@ -218,4 +220,48 @@ void CullPhase2Disoccluded(uint3 ID : SV_DispatchThreadID)
     let Disoccluded = TestHiZOcclusion(C, CurrentM);
     ClusterVerdicts[I] = SelectBranch(4u, 3u, Disoccluded);
     Phase2Commands[I]  = ClusterCommand(C.IndexCount, SelectBranch(0u, 1u, Disoccluded), C.FirstIndex, 0u, 0u);
+}
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void SelectAndCullPhase1(uint3 ID : SV_DispatchThreadID) { SelectAndCullPhase1Body(ID); }
+
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CullPhase2Disoccluded(uint3 ID : SV_DispatchThreadID) { CullPhase2DisoccludedBody(ID); }
+
+void PlaceCommand(uint List, uint I, NestedClusterProfile C, bool Visible)
+{
+    ClassCommands[List * ArrayCount(Clusters) + I] = ClusterCommand(C.IndexCount, SelectBranch(0u, 1u, Visible), C.FirstIndex, 0u, C.Occupant);
+    if (!Visible) { return; }
+    var Slot = 0u;
+    InterlockedAdd(CompactedCounts[List], 1u, Slot);
+    CompactedCommands[List * ArrayCount(Clusters) + Slot] = ClusterCommand(C.IndexCount, 1u, C.FirstIndex, 0u, C.Occupant);
+}
+
+// 📝 I1: the demo's phase-1 cut and cull, then the record's place in the four lists (both phase-2 lists start without it).
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void SelectAndCullPhase1Compacted(uint3 ID : SV_DispatchThreadID)
+{
+    SelectAndCullPhase1Body(ID);
+    let I = ID.x;
+    if (I >= ArrayCount(Clusters)) { return; }
+    let C = Clusters[I];
+    let Glass = (C.Flags & 2u) != 0u;
+    PlaceCommand(SelectBranch(0u, 1u, Glass), I, C, ClusterVerdicts[I] == 1u);
+    PlaceCommand(SelectBranch(1u, 0u, Glass), I, C, false);
+    PlaceCommand(2u, I, C, false);
+    PlaceCommand(3u, I, C, false);
+}
+
+// 📝 I1: the demo's phase-2 disocclusion test, then every disoccluded record joins its class's phase-2 list.
+[shader("compute")]
+[numthreads(64, 1, 1)]
+void CullPhase2DisoccludedCompacted(uint3 ID : SV_DispatchThreadID)
+{
+    CullPhase2DisoccludedBody(ID);
+    let I = ID.x;
+    if (I >= ArrayCount(Clusters)) { return; }
+    if (ClusterVerdicts[I] == 3u) { PlaceCommand(SelectBranch(2u, 3u, (Clusters[I].Flags & 2u) != 0u), I, Clusters[I], true); }
 }

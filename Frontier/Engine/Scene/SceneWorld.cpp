@@ -337,6 +337,7 @@ void RenderPipelineRecord::SerializeConfiguration(toml::table& OutTable) const
     OutTable.insert_or_assign("temporal_aa", Parameters.TemporalAntiAliasing);
     OutTable.insert_or_assign("virtualized_geometry", Parameters.VirtualizedGeometry);
     OutTable.insert_or_assign("virtualized_stream_slots", static_cast<int64_t>(Parameters.VirtualizedStreamSlots));
+    OutTable.insert_or_assign("analytic_illumination", Parameters.AnalyticIllumination);
 }
 
 template <>
@@ -352,6 +353,7 @@ void RenderPipelineRecord::DeserializeConfiguration(const toml::table& InTable)
     Parameters.TemporalAntiAliasing   = ReadBool(InTable, "temporal_aa", Parameters.TemporalAntiAliasing);
     Parameters.VirtualizedGeometry    = ReadBool(InTable, "virtualized_geometry", Parameters.VirtualizedGeometry);
     Parameters.VirtualizedStreamSlots = std::max(0, ReadInt(InTable, "virtualized_stream_slots", Parameters.VirtualizedStreamSlots));
+    Parameters.AnalyticIllumination   = ReadBool(InTable, "analytic_illumination", Parameters.AnalyticIllumination);
     Parameters.AdvanceRevision();
 }
 

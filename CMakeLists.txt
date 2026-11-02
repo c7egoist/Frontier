@@ -685,4 +685,5 @@ endif()
 
 include(Automation/EnvironmentRendering.cmake)
 include(Automation/VirtualizedGeometryRendering.cmake)
+include(Automation/AnalyticIlluminationRendering.cmake)
 include(Automation/GlobalIlluminationRendering.cmake)

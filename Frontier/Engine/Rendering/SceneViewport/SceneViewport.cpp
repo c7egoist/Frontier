@@ -199,6 +199,33 @@ bool SceneViewport::Refresh(const ViewportCamera& Camera, const SceneEnvironment
         PresentedView_ = Exchange_->ConstructView(Host_->CaptureTexture);
     }
     ElapsedSeconds_ += std::max(0.0, DeltaSeconds);
+    if (Rendering.AnalyticIllumination)
+    {
+        // 📝 The analytic illumination draws the loaded scene into the same presented image; the global illumination rests.
+        if (!Analytic_)
+        {
+            auto Candidate = std::make_unique<AnalyticIllumination::AnalyticIlluminationSequence>(
+                *Exchange_, Configuration_.GlobalIlluminationShaders.parent_path() / "AnalyticIllumination");
+            if (!Candidate->Construct(Host_->Scene, Host_->VertexRegion, Host_->OccupantRegion, Host_->MaterialRegion, OutDiagnostic)) return false;
+            Analytic_ = std::move(Candidate);
+            if (Configuration_.Journal) Configuration_.Journal("analytic illumination up");
+        }
+        AnalyticIllumination::AnalyticCamera View;
+        View.Position            = Camera.Position;
+        View.Target              = Camera.Target;
+        View.Up                  = Camera.Up;
+        View.VerticalFieldOfView = Camera.VerticalFieldOfView;
+        View.Near                = Camera.Near;
+        AnalyticIllumination::AnalyticSun Sun;
+        Sun.Enabled              = Environment.Solar.Enabled;
+        Sun.ElevationDegrees     = Environment.Solar.ElevationDegrees;
+        Sun.AzimuthDegrees       = Environment.Solar.AzimuthDegrees;
+        Sun.IlluminanceKilolux   = Environment.Solar.IlluminanceKilolux;
+        Sun.KelvinTemperature    = Environment.Solar.KelvinTemperature;
+        Sun.AngularDiameter      = Environment.Solar.AngularDiameterDeg;
+        Sun.ExposureCompensation = Rendering.ExposureCompensation;
+        return Analytic_->Refresh(View, Sun, ScreenExtent, Host_->CaptureView, OutDiagnostic);
+    }
     ResolveSky(Environment);
 
     RefreshInputs Inputs;

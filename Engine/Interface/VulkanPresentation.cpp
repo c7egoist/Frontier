@@ -90,6 +90,8 @@ struct VulkanPresentation::PresentationAllocation
     VkQueueFlags             QueueCapabilities = 0;
     uint32_t                 ApiVersion        = 0;
     bool                     SceneDevice       = false;
+    bool                     DrawIndirectCount = false;   // [-] enabled for the virtualized geometry's compacted commands
+    bool                     MultiDrawIndirect = false;
     ImGui_ImplVulkanH_Window Main;
     bool                     RendererReady = false;
     bool                     Rebuild       = false;
@@ -233,6 +235,8 @@ struct VulkanPresentation::PresentationAllocation
             Enabled.shaderStorageImageWriteWithoutFormat = Supported.shaderStorageImageWriteWithoutFormat;
             Enabled.robustBufferAccess                   = Supported.robustBufferAccess;
             Enabled.samplerAnisotropy                    = Supported.samplerAnisotropy;
+            Enabled.multiDrawIndirect                    = Supported.multiDrawIndirect;
+            MultiDrawIndirect                            = Supported.multiDrawIndirect == VK_TRUE;
             VkPhysicalDeviceVulkan13Features Features13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
             VkPhysicalDeviceVulkan12Features Features12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
             VkPhysicalDeviceVulkan11Features Features11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
@@ -247,6 +251,8 @@ struct VulkanPresentation::PresentationAllocation
             // 📝 The scene viewport's ported WebGPU shaders rely on image accesses outside an image never faulting.
             Enable13.robustImageAccess   = Features13.robustImageAccess;
             Enable12.scalarBlockLayout   = Features12.scalarBlockLayout;
+            Enable12.drawIndirectCount   = Features12.drawIndirectCount;
+            DrawIndirectCount            = Features12.drawIndirectCount == VK_TRUE;
             Enable11.shaderDrawParameters = Features11.shaderDrawParameters;
             Enable13.pNext = &Enable12;
             Enable12.pNext = &Enable11;
@@ -360,6 +366,8 @@ VulkanDeviceAccess VulkanPresentation::QueryDeviceAccess() const
     Access.QueueFamily     = Display.QueueFamily;
     Access.ResolveInstance = Resolve<PFN_vkGetInstanceProcAddr>(Display.Instance, "vkGetInstanceProcAddr");
     Access.ApiVersion      = Display.ApiVersion;
+    Access.DrawIndirectCount = Display.DrawIndirectCount;
+    Access.MultiDrawIndirect = Display.MultiDrawIndirect;
     return Access;
 }
 

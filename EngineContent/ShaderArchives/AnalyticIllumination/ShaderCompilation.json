@@ -1,0 +1,54 @@
+{
+  "format": 1,
+  "set": "AnalyticIllumination",
+  "compiler": "slangc 2026.14.1",
+  "refresh": "python Automation/StoreShaderArchives.py --build <build> --compiler <slangc or slang-wasm.js> --sets AnalyticIllumination",
+  "entries": [
+    {
+      "file": "SolarDepthRasterization.SolarDepthVertex.spv",
+      "spirv_sha256": "f3b8969c381a0da91332bf5710844166607aea987dabdd7ab02ca38efc9b47f1"
+    },
+    {
+      "file": "SurfaceShadingRasterization.ShadingFragment.spv",
+      "spirv_sha256": "c44d5cf73a9e507df592b15f2d4c453af3097e377237829813c487662145bd4f"
+    },
+    {
+      "file": "SurfaceShadingRasterization.ShadingVertex.spv",
+      "spirv_sha256": "deca99b025f56072f0a9a5af3fd360575d424bcd81e1a32fdcce20c79786d171"
+    },
+    {
+      "file": "SurfaceShadingRasterization.SkyFragment.spv",
+      "spirv_sha256": "5c04a29139c13e9f8664be9c76532e3c724365ad0b2860b44b446b5dd5a626b6"
+    },
+    {
+      "file": "SurfaceShadingRasterization.SkyVertex.spv",
+      "spirv_sha256": "72bc5fa80ec05f892afeba93bdb7638440b817dda39a4c75225a23dd423d3b77"
+    }
+  ],
+  "sources": [
+    {
+      "file": "Frontier/Engine/Shaders/AnalyticIllumination/AnalyticLayouts.slang",
+      "sha256": "55ee911e91b18ecb0797e00de4617fe376a37f912317f61cac0fc6cdc013ef69"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/AnalyticIllumination/SolarDepthRasterization.slang",
+      "sha256": "d5a413aca7f9ce6ddbcc581f5156369aba5396fa7d90e6665ad3b40711244263"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/AnalyticIllumination/SurfaceShadingRasterization.slang",
+      "sha256": "42bfa2a774192b55b4a0d2c236f16a7b3b884afb7ff3fdd97c630a52c9827dfe"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/HostConstants.slang",
+      "sha256": "e7db94f4ed7070df8437a5462c47a95ddabf41c3498825c44675364fd631b3f1"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/IntrinsicParity.slang",
+      "sha256": "8073ff213243e2548ab7d7bc96fda2406ce9931f4e63279f624672beb5ca2c84"
+    },
+    {
+      "file": "Frontier/Engine/Shaders/GlobalIllumination/SceneLayouts.slang",
+      "sha256": "4bf1c6507cec129065a93ada9e6c984fabdea120b7bb6f2e4cb806a79470fec5"
+    }
+  ]
+}

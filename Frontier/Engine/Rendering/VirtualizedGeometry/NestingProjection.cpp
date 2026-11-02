@@ -93,7 +93,9 @@ void NestingProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     Shaders_.ConfigureConstants(IlluminationShaders_.Constants());
     using D = DescriptorCode;
     const std::vector<DescriptorSlot> CullSlots = {{D::Uniform}, {D::StorageRead}, {D::StorageRead}, {D::Storage}, {D::Storage}, {D::Storage},
-                                                   {D::Texture2DUnfiltered}};
+                                                   {D::Texture2DUnfiltered}, {D::Storage}, {D::Storage}, {D::Storage}};
+    CountedCommands_ = Exchange_.Capabilities().DrawIndirectCount;
+    Compacted_       = CompactCommands && (CountedCommands_ || Exchange_.Capabilities().MultiDrawIndirect);
     CullLayout_ = Exchange_.ConstructDescriptorLayout(CullSlots, "Virtualized geometry culling");
     const std::vector<DescriptorSlot> SeedSlots = {{D::TextureDepth2D}, {D::StorageTexture2D, TextureFormat::R32Float}};
     SeedLayout_ = Exchange_.ConstructDescriptorLayout(SeedSlots, "Hi-Z seed");
@@ -114,8 +116,10 @@ void NestingProjection::ConstructPrograms(const std::shared_ptr<DeviceRegion>& R
     DummyStorageView_ = Exchange_.ConstructView(ConstructDummy("Resolve dummy (storage slot)", TextureFormat::Rgba16Float,
                                                                TextureUsage::Storage | TextureUsage::Sampled));
     DummySampledView_ = Exchange_.ConstructView(ConstructDummy("Resolve dummy (sampled slot)", TextureFormat::Rgba16Float, TextureUsage::Sampled));
-    CullProgram_       = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", "SelectAndCullPhase1", {CullLayout_});
-    Phase2Program_     = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", "CullPhase2Disoccluded", {CullLayout_});
+    CullProgram_       = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", Compacted_ ? "SelectAndCullPhase1Compacted" : "SelectAndCullPhase1",
+                                                          {CullLayout_});
+    Phase2Program_     = Shaders_.ConstructComputeProgram("VirtualizedGeometryCull", Compacted_ ? "CullPhase2DisoccludedCompacted" : "CullPhase2Disoccluded",
+                                                          {CullLayout_});
     SeedProgram_       = Shaders_.ConstructComputeProgram("HiZPyramid", "SeedHiZFromDepth", {SeedLayout_});
     DownsampleProgram_ = Shaders_.ConstructComputeProgram("HiZDownsample", "DownsampleHiZMip", {DownsampleLayout_});
 
@@ -473,6 +477,9 @@ NestingProjection* NestingProjection::Prepare(const SceneStructure& Scene)
     Phase1Commands_  = Make(static_cast<VkDeviceSize>(RecordCount_) * CommandBytes, "Nesting phase-1 commands");
     Phase2Commands_  = Make(static_cast<VkDeviceSize>(RecordCount_) * CommandBytes, "Nesting phase-2 commands");
     Verdicts_        = Make(static_cast<VkDeviceSize>(RecordCount_) * 4, "Nesting cluster verdicts");
+    CompactedCommands_ = Make(static_cast<VkDeviceSize>(RecordCount_) * 4 * CommandBytes, "Nesting compacted commands");
+    CompactedCounts_   = Make(16, "Nesting compacted counts");
+    ClassCommands_     = Make(static_cast<VkDeviceSize>(RecordCount_) * 4 * CommandBytes, "Nesting class commands");
     Records_ = true;
     RefreshGroups();
     return this;
@@ -532,7 +539,8 @@ std::shared_ptr<DescriptorGroup> NestingProjection::CullGroupFor(const std::shar
     const std::pair<const void*, const void*> Key = {ClusterRecords_.get(), HiZView.get()};
     auto Hit = CullGroups_.find(Key);
     if (Hit != CullGroups_.end()) return Hit->second;
-    auto Group = Exchange_.ConstructDescriptorGroup(CullLayout_, {RefreshRegion_, OccupantRegion_, ClusterRecords_, Phase1Commands_, Phase2Commands_, Verdicts_, HiZView},
+    auto Group = Exchange_.ConstructDescriptorGroup(CullLayout_, {RefreshRegion_, OccupantRegion_, ClusterRecords_, Phase1Commands_, Phase2Commands_, Verdicts_, HiZView,
+                                                                  CompactedCommands_, CompactedCounts_, ClassCommands_},
                                                     "Virtualized geometry culling");
     return CullGroups_.emplace(Key, Group).first->second;
 }
@@ -550,6 +558,12 @@ void NestingProjection::RecordCullPhase1(CommandSequence& Sequence)
     ServiceStreaming(2);
     RefreshGroups();
     if (!CullGroup_) return;
+    RecordedCommands_ = 0;
+    if (Compacted_ && CountedCommands_)
+    {
+        const std::array<uint32_t, 4> Zeros{};
+        Exchange_.WriteRegion(CompactedCounts_, 0, Zeros.data(), sizeof(Zeros));
+    }
     Sequence.BindProgram(CullProgram_);
     Sequence.BindGroup(0, CullGroup_);
     Sequence.Dispatch((RecordCount_ + 63) / 64);
@@ -596,6 +610,13 @@ void NestingProjection::RecordClusters(CommandSequence& Sequence, const std::sha
     const std::shared_ptr<DeviceRegion>& Commands = Phase == 2 ? Phase2Commands_ : Phase1Commands_;
     Sequence.BindVertexRegion(0, VertexRegion_);
     Sequence.BindIndexRegion(IndexRegion_);
+    if (Compacted_)
+    {
+        // 📝 I1: both classes of this phase in two calls; the occupant arrives as FirstInstance over the identity instance stream.
+        for (uint32_t List : {Phase == 2 ? 2u : 0u, Phase == 2 ? 3u : 1u}) RecordList(Sequence, Instances, List);
+        return;
+    }
+    RecordedCommands_ += RecordCount_;
     for (const ClusterRecord& Cluster : Clusters_)
     {
         Sequence.BindVertexRegion(1, Instances, static_cast<VkDeviceSize>(Cluster.Occupant) * 4);
@@ -612,12 +633,29 @@ void NestingProjection::RecordClass(CommandSequence& Sequence, const std::shared
 {
     Sequence.BindVertexRegion(0, VertexRegion_);
     Sequence.BindIndexRegion(IndexRegion_);
+    if (Compacted_)
+    {
+        RecordList(Sequence, Instances, (Commands == Phase2Commands_ ? 2u : 0u) + (Transmissive ? 1u : 0u));
+        return;
+    }
     for (const ClusterRecord& Cluster : Clusters_)
     {
         if (((Cluster.ClassMask & 2u) != 0) != Transmissive) continue;
+        ++RecordedCommands_;
         Sequence.BindVertexRegion(1, Instances, static_cast<VkDeviceSize>(Cluster.Occupant) * 4);
         Sequence.DrawIndexedIndirect(Commands, static_cast<VkDeviceSize>(Cluster.Record) * CommandBytes);
     }
+}
+
+void NestingProjection::RecordList(CommandSequence& Sequence, const std::shared_ptr<DeviceRegion>& Instances, uint32_t List)
+{
+    Sequence.BindVertexRegion(1, Instances, 0);
+    const VkDeviceSize Offset = static_cast<VkDeviceSize>(List) * RecordCount_ * CommandBytes;
+    if (CountedCommands_)
+        Sequence.DrawIndexedIndirectCount(CompactedCommands_, Offset, CompactedCounts_, List * 4, RecordCount_, CommandBytes);
+    else
+        Sequence.DrawIndexedIndirectSeries(ClassCommands_, Offset, RecordCount_, CommandBytes);
+    ++RecordedCommands_;
 }
 
 std::shared_ptr<DescriptorGroup> NestingProjection::ResolveGroupFor(const std::shared_ptr<DeviceTextureView>& Slot6, const std::shared_ptr<DeviceTextureView>& Slot11,

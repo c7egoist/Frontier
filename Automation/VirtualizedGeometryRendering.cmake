@@ -33,6 +33,8 @@ file(GLOB FRONTIER_VIRTUALIZED_GEOMETRY_SLANG_SOURCES CONFIGURE_DEPENDS "${FRONT
 set(FRONTIER_VIRTUALIZED_GEOMETRY_ENTRIES
     "VirtualizedGeometryCull:SelectAndCullPhase1:compute"
     "VirtualizedGeometryCull:CullPhase2Disoccluded:compute"
+    "VirtualizedGeometryCull:SelectAndCullPhase1Compacted:compute"
+    "VirtualizedGeometryCull:CullPhase2DisoccludedCompacted:compute"
     "HiZPyramid:SeedHiZFromDepth:compute"
     "HiZDownsample:DownsampleHiZMip:compute"
     "VisibilityRaster:VisibilityVertex:vertex"

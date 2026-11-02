@@ -25,6 +25,9 @@ ArchiveSets = {
     'VirtualizedGeometry': ('Frontier/Engine/Shaders/VirtualizedGeometry',
                             ['VirtualizedGeometryCull', 'HiZPyramid', 'HiZDownsample', 'VisibilityRaster', 'MaterialResolve',
                              'ClusterDebugFallback'], ['Frontier/Engine/Shaders/GlobalIllumination']),
+    # 📝 The analytic illumination's units include the illumination port's scene layouts and intrinsics as well.
+    'AnalyticIllumination': ('Frontier/Engine/Shaders/AnalyticIllumination', ['SolarDepthRasterization', 'SurfaceShadingRasterization'],
+                             ['Frontier/Engine/Shaders/GlobalIllumination']),
     'Environment': ('Frontier/Engine/Shaders', ['AtmosphereScattering', 'AtmosphereProjection', 'VisibilityProjection',
                                                  'PlanetaryProjection', 'CloudShadowProjection', 'VolumetricClouds', 'FogSpace',
                                                  'OpticalLensFlare', 'PreviewRaster']),

@@ -117,7 +117,7 @@ endif()
 add_library(FrontierSceneViewport STATIC
     Frontier/Engine/Rendering/SceneViewport/EnvironmentOverlay.cpp
     Frontier/Engine/Rendering/SceneViewport/SceneViewport.cpp)
-target_link_libraries(FrontierSceneViewport PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering)
+target_link_libraries(FrontierSceneViewport PUBLIC FrontierGlobalIllumination FrontierEnvironmentRendering FrontierAnalyticIllumination)
 if(TARGET FrontierGlobalIlluminationShaders)
     add_dependencies(FrontierSceneViewport FrontierGlobalIlluminationShaders)
 endif()
@@ -127,11 +127,14 @@ endif()
 if(TARGET FrontierVirtualizedGeometryShaders)
     add_dependencies(FrontierSceneViewport FrontierVirtualizedGeometryShaders)
 endif()
+if(TARGET FrontierAnalyticIlluminationShaders)
+    add_dependencies(FrontierSceneViewport FrontierAnalyticIlluminationShaders)
+endif()
 
 # 📝 The editor loads EngineContent/ShaderArchives/{GlobalIllumination,Environment} beside Frontier.exe. The stored archives arrive
 #    with the EngineContent copy; a set this build compiled replaces its stored copy afterwards.
 if(TARGET Frontier)
-    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry)
+    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry AnalyticIllumination)
         if(TARGET Frontier${SCENE_SHADERS}Shaders)
             add_dependencies(Frontier Frontier${SCENE_SHADERS}Shaders)
             add_custom_command(TARGET Frontier POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -171,7 +174,7 @@ if(BUILD_TESTING)
     #    output is not compared.
     set(FRONTIER_PINNED_SLANG "${CMAKE_SOURCE_DIR}/ExternalPackages/VulkanCompute/Slang/")
     set(FRONTIER_COMPARED_SHADER_SETS)
-    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry)
+    foreach(SCENE_SHADERS GlobalIllumination Environment VirtualizedGeometry AnalyticIllumination)
         if(SCENE_SHADERS STREQUAL "Environment")
             set(SCENE_SLANGC "${FRONTIER_ENV_SLANGC}")
         else()
@@ -192,5 +195,5 @@ if(BUILD_TESTING)
         endif()
     endif()
     add_test(NAME StoredShaderArchiveValidation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/Automation/StoreShaderArchives.py"
-        --verify --sets GlobalIllumination Environment VirtualizedGeometry Surface --build "${CMAKE_BINARY_DIR}" --compare ${FRONTIER_COMPARED_SHADER_SETS})
+        --verify --sets GlobalIllumination Environment VirtualizedGeometry AnalyticIllumination Surface --build "${CMAKE_BINARY_DIR}" --compare ${FRONTIER_COMPARED_SHADER_SETS})
 endif()

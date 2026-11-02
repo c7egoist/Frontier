@@ -69,6 +69,8 @@ struct RenderPipelineConfiguration : RevisionCounter
     // 📝 The demo's ?hierarchy=1 and ?streampages: the cluster nesting takeover of eligible static sets (levelspace keys, no controls).
     bool  VirtualizedGeometry    = false;
     int   VirtualizedStreamSlots = 0;      // 0: one arena slot per page
+    // 📝 The editor's fast closed-form renderer instead of the global illumination (levelspace key, no controls yet).
+    bool  AnalyticIllumination   = false;
 };
 
 struct DistanceFieldConfiguration : RevisionCounter

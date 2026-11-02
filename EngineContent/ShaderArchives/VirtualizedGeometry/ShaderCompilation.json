@@ -54,11 +54,19 @@
     },
     {
       "file": "VirtualizedGeometryCull.CullPhase2Disoccluded.spv",
-      "spirv_sha256": "dc26e5bfec79fc3883a1e2d817e4a4850d63855676d0d0be8594460955b67973"
+      "spirv_sha256": "e7559f95e374261efe8af780d0fd5738d54c354fd660bb727a3a616cbaaca608"
+    },
+    {
+      "file": "VirtualizedGeometryCull.CullPhase2DisoccludedCompacted.spv",
+      "spirv_sha256": "128db33377ba92c2f2fe5aab2206fe74b374235fcd8efe7ad9df35f127f2cfc2"
     },
     {
       "file": "VirtualizedGeometryCull.SelectAndCullPhase1.spv",
-      "spirv_sha256": "d3987d58fa691edfb714ca54d119caa327953fa7e50d6027bffc2af1e5561c77"
+      "spirv_sha256": "e8cd782b56aa1fd056a205d5b8fe38e873071fc9e626d85c12de90658e9f8487"
+    },
+    {
+      "file": "VirtualizedGeometryCull.SelectAndCullPhase1Compacted.spv",
+      "spirv_sha256": "f2fa10449d1b6ba702f963bf3f11623eefb23e3b0a04d90200aa12368e2e6f30"
     },
     {
       "file": "VisibilityRaster.VisibilityFragment.spv",
@@ -112,7 +120,7 @@
     },
     {
       "file": "Frontier/Engine/Shaders/VirtualizedGeometry/VirtualizedGeometryCull.slang",
-      "sha256": "1d200da59e2f69533ff436752603f15890a00432cc52ac9d1f64cc2fa2b56de5"
+      "sha256": "df86843e5d0f02382e0630206aa98f9d11b9799f455b222d48d24643dec5504b"
     },
     {
       "file": "Frontier/Engine/Shaders/VirtualizedGeometry/VisibilityRaster.slang",
