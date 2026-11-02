@@ -67,3 +67,6 @@ _AgentScratch/
 *.lib
 /google_drive/
 **/Saved/
+
+# The Zig toolchain configure writes CMake's standard-library probe to a file named "-" in the source root.
+/-
