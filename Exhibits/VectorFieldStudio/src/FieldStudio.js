@@ -353,6 +353,8 @@ export class FieldStudio {
             this.terrain = generateTerrain(this.state.terrain);
             this.renderer.setTerrain(this.terrain);
             this.renderer.setQuality(this.state.quality);
+            this.renderer.gpuField.reset();
+            if (this.state.layers.probe.valid) this.renderer.setProbe(this.state.layers.probe.position);
             this.renderer.setProbeTool(this.state.layers.probe.active);
             this.outliner.render();
             this.inspector.render();
@@ -386,6 +388,8 @@ export class FieldStudio {
             this.terrain = generateTerrain(this.state.terrain);
             this.renderer.setTerrain(this.terrain);
             this.renderer.setQuality(this.state.quality);
+            this.renderer.gpuField.reset();
+            if (this.state.layers.probe.valid) this.renderer.setProbe(this.state.layers.probe.position);
             this.renderer.setProbeTool(this.state.layers.probe.active);
             this.outliner.render();
             this.inspector.render();
