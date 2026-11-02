@@ -43,12 +43,17 @@ const SLIDER_SCHEMA = {
     { key: 'creaseAngle',       label: 'Crease Split Angle',     min: 22,   max: 85,  step: 1,    fmt: (v) => `${v}°` },
   ],
   erosion: [
+    { type: 'heading', label: 'Live Erosion Preview' },
+    { key: 'erosionPreviewFrames', label: 'Preview Frames During Bake', min: 2, max: 12, step: 1, fmt: (v) => `${Math.round(Number(v))} frames` },
+    { key: 'erosionPreviewDelayMs', label: 'Hold Each Preview Frame', min: 0, max: 1200, step: 50, fmt: (v) => `${Math.round(Number(v))} ms` },
     { type: 'heading', label: 'Rain / Hydraulic Runoff' },
     { key: 'rainErosionAmount', label: 'Rainfall Erosion Amount', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'rainDroplets',      label: 'Raindrop Count',          min: 0, max: 48000, step: 500, fmt: (v) => `${(Number(v) / 1000).toFixed(1)}k` },
     { type: 'heading', label: 'Wind / Saltation' },
     { key: 'windErosionAmount', label: 'Wind Erosion Amount',      min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
-    { key: 'windAzimuth',       label: 'Wind Azimuth (toward)',   min: -180, max: 180, step: 1, fmt: (v) => `${v}°` },
+    { key: 'windAzimuth',       label: 'Prevailing Wind Azimuth (toward)', min: -180, max: 180, step: 1, fmt: (v) => `${v}°` },
+    { key: 'windShiftRange',    label: 'Direction Swing Range (±)', min: 0, max: 180, step: 5, fmt: (v) => `±${Math.round(Number(v))}°` },
+    { key: 'windShiftCycles',   label: 'Direction Cycles Over Bake', min: 0.25, max: 6, step: 0.25, fmt: (v) => `${Number(v).toFixed(2)}×` },
     { key: 'windTurbulence',    label: 'Gust Wander / Turbulence', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { key: 'windStreamlining',  label: 'Flow Wrap / Streamlining', min: 0, max: 1, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
     { type: 'heading', label: 'Thermal / Rockfall Talus' },
@@ -74,8 +79,10 @@ const state = {
   params: resolveParams({
     archetype: 'desert-arch', seed: 4029, quality: 'medium', decimation: 1.0,
     sdfErosionSource: 'mesh', erosionSdfResolution: 192,
+    liveErosionPreview: false, erosionPreviewFrames: 6, erosionPreviewDelayMs: 380,
     rainErosionAmount: 0.5, rainDroplets: 8000, rainEdgeProtection: 0.7,
-    windErosionAmount: 0.30, windAzimuth: 35, windTurbulence: 0.45, windStreamlining: 0.65,
+    windErosionAmount: 0.30, windAzimuth: 35, windShiftMode: 'oscillate', windShiftRange: 60,
+    windShiftCycles: 2, windTurbulence: 0.45, windStreamlining: 0.65,
     thermalErosionAmount: 0.20, thermalReposeAngle: 34,
     cryoErosionAmount: 0.10,
     chemDissolutionAmount: 0.16,
@@ -204,6 +211,21 @@ worker.onmessage = (e) => {
     return;
   }
 
+  if (msg.type === 'erosion-preview') {
+    if (state.studioMode === 'rock') {
+      const pct = Math.round((msg.fraction ?? 0) * 100);
+      progressFill.style.width = `${68 + Math.round((msg.fraction ?? 0) * 8)}%`;
+      statusToast.classList.remove('hidden');
+      statusToast.textContent = `Live erosion ${pct}% — ${msg.stage} Preview only; the final bake is still running.`;
+      if (viewport) {
+        const shouldFrame = state.autoFrameNext;
+        viewport.setFormationMesh(msg.mesh, msg.lithology, msg.dimensions, shouldFrame);
+        if (shouldFrame) state.autoFrameNext = false;
+      }
+    }
+    return;
+  }
+
   busy = false;
   if (msg.type === 'done') {
     if (curveOverlay && state.customCurveActive) {
@@ -278,6 +300,19 @@ function updateRockHud(stats) {
         `${(stats.sdfErosion.voxelSize * 100).toFixed(1)} cm voxels. Erosion runs before Dual Contouring and QEM.`;
     } else {
       readout.textContent = 'Enable any SDF process above to convert and erode the formation. Mesh → SDF preserves world scale and grounded Y=0 for terrain placement.';
+    }
+
+    const wind = stats.sdfErosion?.wind;
+    if (wind?.directionMode && wind.directionMode !== 'fixed' && wind.directionSamplesDeg?.length) {
+      readout.textContent +=
+        ` Wind direction over the bake (${wind.directionMode}, ${wind.directionCycles} cycle(s)): ` +
+        `${wind.directionSamplesDeg.map((deg) => `${Math.round(deg)}°`).join(' → ')}.`;
+    }
+    if (stats.sdfErosion?.previewFrames > 0) {
+      readout.textContent += ` ${stats.sdfErosion.previewFrames} live SDF preview frame(s) were shown; export uses this final bake.`;
+    }
+    if (stats.sdfErosion?.previewError) {
+      readout.textContent += ` Live preview note: ${stats.sdfErosion.previewError}`;
     }
   }
 }
@@ -881,9 +916,15 @@ function selectArchetype(archId) {
     decimation: state.params.decimation,
     sdfErosionSource: state.params.sdfErosionSource ?? 'mesh',
     erosionSdfResolution: state.params.erosionSdfResolution ?? 192,
+    liveErosionPreview: state.params.liveErosionPreview ?? false,
+    erosionPreviewFrames: state.params.erosionPreviewFrames ?? 6,
+    erosionPreviewDelayMs: state.params.erosionPreviewDelayMs ?? 380,
     rainErosionAmount: state.params.rainErosionAmount ?? 0.5,
     windErosionAmount: state.params.windErosionAmount ?? 0.30,
     windAzimuth: state.params.windAzimuth ?? 35,
+    windShiftMode: state.params.windShiftMode ?? 'oscillate',
+    windShiftRange: state.params.windShiftRange ?? 60,
+    windShiftCycles: state.params.windShiftCycles ?? 2,
     windTurbulence: state.params.windTurbulence ?? 0.45,
     windStreamlining: state.params.windStreamlining ?? 0.65,
     thermalErosionAmount: state.params.thermalErosionAmount ?? 0.20,
@@ -1043,6 +1084,26 @@ function initRockActionButtons() {
     sdfResolutionSelect.value = String(state.params.erosionSdfResolution ?? 192);
     sdfResolutionSelect.addEventListener('change', (e) => {
       state.params.erosionSdfResolution = Number(e.target.value) || 0;
+      requestSynthesis(false);
+    });
+  }
+
+  const livePreviewChk = document.getElementById('chk-live-erosion-preview');
+  if (livePreviewChk) {
+    livePreviewChk.checked = state.params.liveErosionPreview === true;
+    livePreviewChk.addEventListener('change', (e) => {
+      state.params.liveErosionPreview = e.target.checked;
+      // Turning it on immediately reruns the current recipe so the user can
+      // watch the staged SDF checkpoints; turning it off needs no rebuild.
+      if (e.target.checked) requestSynthesis(false);
+    });
+  }
+
+  const windShiftSelect = document.getElementById('select-wind-shift-mode');
+  if (windShiftSelect) {
+    windShiftSelect.value = state.params.windShiftMode || 'oscillate';
+    windShiftSelect.addEventListener('change', (e) => {
+      state.params.windShiftMode = e.target.value;
       requestSynthesis(false);
     });
   }

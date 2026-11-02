@@ -27,6 +27,12 @@ import {
   windCompassFromAzimuth,
   windSpeedColor,
 } from './wind-field-debug.js';
+import {
+  WIND_SHIFT_MODES,
+  describeWindRegime,
+  effectiveWindAzimuthAtStep,
+  normalizeWindShiftMode,
+} from './wind-regime.js';
 
 const SVG_ICONS = {
   mountain: `<svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14.5 6.8 6l3.4 5 2.4-3.3L16 14.5H2Z"/></svg>`,
@@ -237,10 +243,18 @@ const INSPECTOR_SCHEMAS = {
     hasSeed: false,
   },
   'wind-erosion': {
-    selects: [],
+    selects: [
+      {
+        key: 'windShiftMode',
+        label: 'Direction Over Time',
+        options: WIND_SHIFT_MODES.map((mode) => ({ value: mode.value, label: mode.label })),
+      },
+    ],
     sliders: [
       { key: 'bakeSteps', label: 'Stack Bake Steps', min: 0, max: 160, step: 2, fmt: (v) => (v > 0 ? `${Math.round(v)} steps` : 'Live sim') },
       { key: 'windAzimuth', label: 'Prevailing Wind Direction', min: -180, max: 180, step: 1, fmt: (v) => `${Math.round(v)}°` },
+      { key: 'windShiftRange', label: 'Direction Swing Range (±)', min: 0, max: 180, step: 5, fmt: (v) => `±${Math.round(v)}°` },
+      { key: 'windShiftPeriod', label: 'Direction Cycle Length', min: 30, max: 1200, step: 10, fmt: (v) => `${Math.round(v)} steps` },
       { key: 'windSpeed', label: 'Wind Speed', min: 0.0, max: 1.4, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'windErosionRate', label: 'Overall Wind Erosion Rate', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
       { key: 'windAbrasion', label: 'Rock Sandblasting / Abrasion', min: 0.0, max: 1.5, step: 0.02, fmt: (v) => `${Math.round(v * 100)}%` },
@@ -1007,7 +1021,7 @@ export class ErosionLayerStackUI {
           <p class="tp-card-note">Runs only this process; snow, rain, wind, rockfall and chemical seasons stay frozen unless Simultaneous mode is chosen in the Simulation Seasons panel. Editing the base stack auto-pauses again.</p>
           <div class="tp-card-footer-btns">${seasonButtons}</div>
           ${layer.type === 'chemical-weathering' ? '<p class="tp-card-note">Tip: run a Rain season first (or Simultaneous) — dissolved Fe/Cu stains follow the water from the mineral beds set on Stratigraphic Beds layers.</p>' : ''}
-          ${layer.type === 'wind-erosion' ? '<p class="tp-card-note">This is the independent Wind season. Set its direction/angle, speed, abrasion, turbulence, sand supply, undercut height and fluting here; snow drift uses this same prevailing wind only when Snow and Wind run simultaneously.</p>' : ''}
+          ${layer.type === 'wind-erosion' ? '<p class="tp-card-note">This is the independent Wind season. Set its prevailing direction plus Direction Over Time — fixed, seasonal swing, weather-front sectors or a full wind rose — along with speed, abrasion, turbulence, sand supply, undercut height and fluting. Snow drift uses the current effective wind only when Snow and Wind run simultaneously.</p>' : ''}
           ${layer.type === 'aeolian-glacial' && layerSeasonIds.includes('wind') ? '<p class="tp-card-note">Legacy combined stack: this snow layer can still drive Wind until a dedicated Wind Erosion layer is added.</p>' : ''}
         </section>`;
     }
@@ -1032,7 +1046,7 @@ export class ErosionLayerStackUI {
           <div class="tp-wind-from-grid">${fromButtons}</div>
           <div class="tp-wind-legend"></div>
           <div class="tp-wind-legend-labels"><span>Sheltered · slow</span><span>Fast · erosive</span></div>
-          <p class="tp-card-note">Arrows preview the actual erosion flow (same flow model as the simulation): direction includes turbulent wander and wrap-around flow — the wind splits around massifs, follows contours and funnels through saddles/valleys (strength = Wrap Around Terrain slider; at 0% it rides straight over). Length &amp; colour show local speed with gusts, flank speedup and lee sheltering — long/warm abrades exposed faces, short/cool marks sheltered lee deposition. Faint rings = wind erosion blocked by water or snow. Compass: −Z = North, +X = East.</p>
+          <p class="tp-card-note">Arrows preview the actual erosion flow at the current simulation step (same flow model as the simulation): the base direction follows Direction Over Time, then turbulent wander and wrap-around flow bend it around massifs, contours and saddles/valleys (strength = Wrap Around Terrain slider; at 0% it rides straight over). Run the Wind season and the whole field veers through the selected swing, sectors or wind rose. Length &amp; colour show local speed with gusts, flank speedup and lee sheltering — long/warm abrades exposed faces, short/cool marks sheltered lee deposition. Faint rings = wind erosion blocked by water or snow. Compass: −Z = North, +X = East.</p>
         </section>`;
     }
 
@@ -1197,10 +1211,19 @@ export class ErosionLayerStackUI {
 
     this.elInspector.querySelectorAll('[data-param-select]').forEach((sel) => {
       sel.addEventListener('change', () => {
-        layer.params[sel.dataset.paramSelect] = Number(sel.value);
-        this.pipeline.evaluateStack({ reseedPlacements: true });
+        const key = sel.dataset.paramSelect;
+        layer.params[key] = Number(sel.value);
+        // Wind direction regime is a live season setting: changing it must
+        // not rebuild (and erase) the terrain already eroded this season.
+        const isLiveWindSelect = layer.type === 'wind-erosion' && key === 'windShiftMode';
+        if (!(isLiveWindSelect && this.pipeline.applyLiveWindLayerParams(layer))) {
+          this.pipeline.evaluateStack({ reseedPlacements: true });
+        }
+        this._windFieldBuiltAt = 0;
         this.renderStackList();
         this.updateSplineGizmoOverlay();
+        this.updateWindDebugOverlay();
+        this.updateSceneCaption();
       });
     });
 
@@ -1596,9 +1619,22 @@ export class ErosionLayerStackUI {
       : (this.pipeline.layers || []).find((l) => l.enabled && l.type === 'wind-erosion') || null;
     const src = layer ? layer.params : this.engine.params;
     const num = (v, fb) => (Number.isFinite(Number(v)) ? Number(v) : fb);
+    const regimeParams = {
+      windAzimuth: num(src.windAzimuth, DEFAULT_EROSION_PARAMS.windAzimuth),
+      windShiftMode: src.windShiftMode ?? DEFAULT_EROSION_PARAMS.windShiftMode,
+      windShiftRange: num(src.windShiftRange, DEFAULT_EROSION_PARAMS.windShiftRange),
+      windShiftPeriod: num(src.windShiftPeriod, DEFAULT_EROSION_PARAMS.windShiftPeriod),
+    };
     return {
       layer,
-      azimuthDeg: num(src.windAzimuth, DEFAULT_EROSION_PARAMS.windAzimuth),
+      // Arrows show the direction the simulation is using at the current
+      // step, not merely the centre of the shifting regime.
+      azimuthDeg: effectiveWindAzimuthAtStep(regimeParams, this.engine.stepCount || 0),
+      prevailingAzimuthDeg: regimeParams.windAzimuth,
+      shiftMode: normalizeWindShiftMode(regimeParams.windShiftMode),
+      shiftRangeDeg: regimeParams.windShiftRange,
+      shiftPeriodSteps: regimeParams.windShiftPeriod,
+      regimeLabel: describeWindRegime(regimeParams),
       windSpeed: num(src.windSpeed, DEFAULT_EROSION_PARAMS.windSpeed),
       turbulence: num(src.windTurbulence, DEFAULT_EROSION_PARAMS.windTurbulence),
       streamlining: num(src.windStreamlining, DEFAULT_EROSION_PARAMS.windStreamlining),
@@ -1641,6 +1677,7 @@ export class ErosionLayerStackUI {
     if (!el) return;
     const wp = this._windDebugParams();
     const c = windCompassFromAzimuth(wp.azimuthDeg);
+    const prevailing = windCompassFromAzimuth(wp.prevailingAzimuthDeg);
     // The simulation is driven by the topmost enabled Wind layer; say so when
     // the previewed (selected) layer is a different one, so the arrows are
     // never silently showing a field the sim won't use.
@@ -1648,7 +1685,10 @@ export class ErosionLayerStackUI {
     const note = wp.layer && authority && authority.id !== wp.layer.id
       ? ' Previewing the selected layer — the topmost Wind layer drives the simulation.'
       : '';
-    const txt = `Prevailing wind blows toward ${c.towardPoint} (${Math.round(c.towardDeg)}°) — a wind FROM ${c.fromPoint} (${Math.round(c.fromDeg)}°), at ${Math.round((wp.windSpeed || 0) * 100)}% speed.${note}`;
+    const regime = wp.shiftMode === 'fixed'
+      ? `Prevailing wind blows toward ${c.towardPoint} (${Math.round(c.towardDeg)}°) — a wind FROM ${c.fromPoint} (${Math.round(c.fromDeg)}°).`
+      : `Wind is currently blowing toward ${c.towardPoint} (${Math.round(c.towardDeg)}°) — FROM ${c.fromPoint} (${Math.round(c.fromDeg)}°). It moves around the prevailing ${prevailing.towardPoint} centre as a ${wp.regimeLabel}; step ${this.engine.stepCount || 0}.`;
+    const txt = `${regime} Speed ${Math.round((wp.windSpeed || 0) * 100)}%.${note}`;
     if (el.textContent !== txt) el.textContent = txt;
   }
 

@@ -21,16 +21,14 @@ import {
 import { compileCurvedArchRib } from './arch-curves.js';
 
 /**
- * STRATIFIED SEDIMENTARY CLIFF & FORESHORE HEADLAND (`sedimentary-cliff`)
- * Modeled directly after coastal/canyon stratified headland cliffs (`images (1).jpg`):
- * - Broad, gently sloping, layered & iron-stained bedrock foreshore platform at the base
- *   with a crisp dark wave-undercut basal notch (ZERO smooth melted sand-cones hiding the cliff!)
- * - Asymmetric coastal headland silhouette: high craggy stair-stepped bluff on the left/center
- *   stepping down into a long, bold, flat-topped seaward bedrock ledge/spit jutting out to the right!
- * - Crisp vertically-jointed blocky lower & middle strata (rust-ochre lower beds, pale buff middle-lower
- *   beds, finely laminated purplish-maroon siltstone/shale middle-upper beds) with sharp vertical
- *   joint seams & plucked rectangular block recesses
- * - Ragged, boulder-strewn upper terraces crowned with dozens of angular weathered outcrop boulders!
+ * STRATIFIED SEDIMENTARY CLIFF (`sedimentary-cliff`)
+ * A broad, placement-friendly escarpment rather than a tower-plus-spit:
+ * - One continuous, gently embayed wall with hard projecting beds, soft
+ *   recessed partings, a dark basal notch and a narrow grounded toe bench.
+ * - The rim benches down from left to right but stays cliff-height across
+ *   the full asset, so the stratigraphy reads as one formation.
+ * - Crisp vertically jointed lower/middle strata (rust-ochre, pale buff and
+ *   dusty maroon siltstone) with restrained caprock slabs and toe blocks.
  */
 export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureFn, addTalusFn) {
   const S = params.scale;
@@ -38,9 +36,9 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
   const blocks = [];
   const cuts = [];
 
-  const width = S * 1.24;
-  const height = S * 0.66;
-  const depth = S * 0.48;
+  const width = S * 1.36;
+  const height = S * 0.72;
+  const depth = S * 0.42;
 
   const dipRad = clamp((params.dipAngle ?? 5), 0, 18) * 0.38 * DEG2RAD;
   const strikeRad = (params.strikeAngle ?? -8) * DEG2RAD;
@@ -53,59 +51,63 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
   const bevel = S * (0.0009 + 0.0016 * (params.edgeWear ?? 0.26)); // Crisp blocky joint arrises!
   const planSalt = rng.int(1, 99999);
 
-  // Asymmetric coastal headland cliff planform: bold left-center cliff face + jutting right seaward spit!
+  // Broad escarpment planform. The previous twin headlands + deep bight made
+  // the asset read as a round tower beside a separate spit; this keeps one
+  // continuous, gently embayed cliff wall from shoulder to shoulder.
   function cliffFrontZ(x) {
     const u = x / (width * 0.5); // -1 .. +1
-    const mainHeadland = Math.exp(-((u + 0.28) * (u + 0.28)) / 0.22) * 0.22;
-    const rightSpitProj = Math.exp(-((u - 0.52) * (u - 0.52)) / 0.18) * 0.28;
-    const midBight = -Math.exp(-((u - 0.12) * (u - 0.12)) / 0.09) * 0.14;
-    const endTrim = -0.26 * Math.pow(Math.abs(u), 3.0);
-    const jag = scalarField3D(u * 5.2, 0.5, 0.8, planSalt) * 0.055;
-    return (mainHeadland + rightSpitProj + midBight + endTrim + jag) * depth;
+    const mainButtress = Math.exp(-((u + 0.16) * (u + 0.16)) / 0.32) * 0.10;
+    const secondaryButtress = Math.exp(-((u - 0.48) * (u - 0.48)) / 0.22) * 0.06;
+    const shallowBay = -Math.exp(-((u - 0.10) * (u - 0.10)) / 0.13) * 0.05;
+    const endTrim = -0.15 * Math.pow(Math.abs(u), 3.0);
+    const jag = scalarField3D(u * 5.2, 0.5, 0.8, planSalt) * 0.040;
+    return (mainButtress + secondaryButtress + shallowBay + endTrim + jag) * depth;
   }
 
   function cliffBackZ(x) {
     const u = x / (width * 0.5);
-    // Right seaward spit narrows into a true projecting coastal promontory fin!
-    const spitNarrow = u > 0.12 ? 0.36 * Math.pow((u - 0.12) / 0.88, 1.35) : 0.18 * Math.pow(-u, 2.4);
-    const backJag = scalarField3D(u * 3.0, 1.7, 0.4, planSalt + 37) * 0.06;
-    return (-0.52 + spitNarrow + backJag) * depth;
+    // Keep a thick wall across the full width instead of pinching the right
+    // half into a narrow fin/spit.
+    const shoulderNarrow = u > 0.12
+      ? 0.17 * Math.pow((u - 0.12) / 0.88, 1.35)
+      : 0.10 * Math.pow(-u, 2.4);
+    const backJag = scalarField3D(u * 3.0, 1.7, 0.4, planSalt + 37) * 0.045;
+    return (-0.52 + shoulderNarrow + backJag) * depth;
   }
 
-  // Asymmetric stepped coastal bluff profile (high craggy bluff on left -> long low seaward ledge on right!)
+  // One stepped plateau rim across the asset: highest at the left/centre,
+  // then benching down but remaining unmistakably cliff-height at the right.
   function bluffHeightAt(x) {
     const u = x / (width * 0.5); // -1 .. +1
     let hProfile;
-    if (u < -0.10) {
-      // High left bluff tapering slightly only at far-left edge
-      const leftEdge = u < -0.74 ? 1.0 - 0.58 * Math.pow((-u - 0.74) / 0.26, 1.8) : 1.0;
-      hProfile = (0.94 + 0.08 * Math.cos((u + 0.35) * 3.2)) * leftEdge;
-    } else if (u < 0.34) {
-      // Stepped descent from upper bluff down toward the projecting seaward ledge!
-      const t = (u + 0.10) / 0.44;
-      hProfile = 0.94 * (1 - t) + 0.31 * t + 0.05 * Math.sin(t * Math.PI * 2.5);
+    if (u < -0.15) {
+      const leftEdge = u < -0.78 ? 1.0 - 0.46 * Math.pow((-u - 0.78) / 0.22, 1.8) : 1.0;
+      hProfile = (0.98 + 0.05 * Math.cos((u + 0.30) * 3.0)) * leftEdge;
+    } else if (u < 0.38) {
+      const t = (u + 0.15) / 0.53;
+      hProfile = 0.98 * (1 - t) + 0.77 * t + 0.035 * Math.sin(t * Math.PI * 2.5);
     } else {
-      // Long, low, flat-topped seaward rock spit jutting out on the right (`images (1).jpg`!)
-      const tipDrop = u > 0.84 ? 1.0 - 0.48 * Math.pow((u - 0.84) / 0.16, 1.6) : 1.0;
-      hProfile = (0.31 - 0.05 * (u - 0.34)) * tipDrop;
+      const tipDrop = u > 0.86 ? 1.0 - 0.38 * Math.pow((u - 0.86) / 0.14, 1.6) : 1.0;
+      hProfile = (0.77 - 0.08 * (u - 0.38)) * tipDrop;
     }
-    const localStep = 1.0 + 0.045 * scalarField3D(u * 4.5, 2.1, 0.9, planSalt + 71);
-    return height * clamp(hProfile * localStep, 0.14, 1.04);
+    const localStep = 1.0 + 0.04 * scalarField3D(u * 4.5, 2.1, 0.9, planSalt + 71);
+    return height * clamp(hProfile * localStep, 0.24, 1.04);
   }
 
-  // 1. Continuous Stepped Coastal Bedrock Foreshore Platform (NO hexagon stepping-stones & NO wax cones!)
+  // 1. Narrow stepped toe bench. It grounds the escarpment without the old
+  // wide, pale "pancake" apron that dominated the foreground silhouette.
   const nPlatCols = 11;
-  const platSpanX = width * 1.00;
+  const platSpanX = width * 0.96;
   const platStepX = platSpanX / nPlatCols;
   for (let row = 0; row < 2; row++) {
     for (let i = 0; i < nPlatCols; i++) {
       const cx = -platSpanX * 0.5 + (i + 0.5) * platStepX;
       const fzCliff = cliffFrontZ(cx);
-      const z0 = row === 0 ? fzCliff - depth * 0.16 : fzCliff + depth * 0.12;
-      const z1 = row === 0 ? fzCliff + depth * 0.22 : fzCliff + depth * (0.44 - 0.12 * Math.abs(cx / (width * 0.5)));
+      const z0 = row === 0 ? fzCliff - depth * 0.14 : fzCliff + depth * 0.08;
+      const z1 = row === 0 ? fzCliff + depth * 0.15 : fzCliff + depth * (0.22 - 0.04 * Math.abs(cx / (width * 0.5)));
       if (z1 <= z0 + S * 0.03) continue;
 
-      const platH = height * (row === 0 ? rng.range(0.062, 0.082) : rng.range(0.034, 0.052));
+      const platH = height * (row === 0 ? rng.range(0.044, 0.060) : rng.range(0.024, 0.038));
       let poly = sculptGeologicalParentPoly(
         [cx + rng.signed() * S * 0.005, groundY + platH * 0.46, 0.5 * (z0 + z1)],
         [platStepX * 0.78, platH * 0.54, (z1 - z0) * 0.68],
@@ -136,9 +138,8 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
   const spineStep = spineSpan / nSpine;
   for (let i = 0; i < nSpine; i++) {
     const cx = -spineSpan * 0.5 + (i + 0.5) * spineStep;
-    const isRightSpit = cx > width * 0.14;
-    const hLocal = bluffHeightAt(cx) * (isRightSpit ? 0.99 : 0.94);
-    const fzCore = cliffFrontZ(cx) - S * (isRightSpit ? 0.016 : 0.022);
+    const hLocal = bluffHeightAt(cx) * 0.97;
+    const fzCore = cliffFrontZ(cx) - S * 0.020;
     const bzCore = Math.min(fzCore - S * 0.075, cliffBackZ(cx) + S * 0.010);
     let cPoly = sculptGeologicalParentPoly(
       [cx, groundY + (height * 0.07 + hLocal) * 0.5, 0.5 * (fzCore + bzCore)],
@@ -195,8 +196,8 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
       const blockStepZ = (
         projFrac * (0.62 + 0.50 * overhang)
         - upperRetreat
-        - (isPluckedBlock ? rng.range(0.06, 0.13) : 0)
-        + scalarField3D((cx / width) * 6.5, stepSalt * 1.9, 0.5, planSalt + stepSalt * 17) * 0.035
+        - (isPluckedBlock ? rng.range(0.035, 0.075) : 0)
+        + scalarField3D((cx / width) * 6.5, stepSalt * 1.9, 0.5, planSalt + stepSalt * 17) * 0.022
       ) * depth;
 
       const fzMid = cliffFrontZ(cx) + blockStepZ;
@@ -220,6 +221,13 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
       const botN = [-bedFrame.normal[0], -bedFrame.normal[1], -bedFrame.normal[2]];
       poly = clipPolyByHalfSpace(poly, topN, vdot(topN, [0, topRef, 0]), 'bedTop') || poly;
       poly = clipPolyByHalfSpace(poly, botN, vdot(botN, [0, botRef, 0]), 'bedBot') || poly;
+      // Terminal beds must obey the same bluff profile as the interior spine.
+      // Without this clip, each upper joint block can overshoot the rim by a
+      // different amount and the skyline turns into a pile of separate teeth.
+      if (wy1 > localBluff - bedH * 0.15) {
+        const rimN = vnorm([rng.signed() * 0.08, 0.985, rng.signed() * 0.10]);
+        poly = clipPolyByHalfSpace(poly, rimN, vdot(rimN, [cx, groundY + localBluff, fzMid]), 'bluffRim') || poly;
+      }
       if (!poly) continue;
 
       const midY = 0.5 * (wy0 + wy1);
@@ -274,10 +282,10 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
     { h: 0.042, proj:  0.02, hard: 0.72, n: 28, ret: 0.06 }, // 9. Laminated purplish-maroon siltstone packet 2
     { h: 0.048, proj:  0.06, hard: 0.82, n: 26, ret: 0.07 }, // 10. Projecting maroon-violet rib bed
     { h: 0.038, proj: -0.02, hard: 0.65, n: 26, ret: 0.09 }, // 11. Thin maroon flagstone packet
-    { h: 0.052, proj:  0.04, hard: 0.84, n: 22, ret: 0.13 }, // 12. Upper-mid terraced ledge bed
-    { h: 0.064, proj:  0.02, hard: 0.88, n: 18, ret: 0.20, x1: 0.22 }, // 13. Upper retreating bluff bench 1
-    { h: 0.072, proj:  0.00, hard: 0.90, n: 15, ret: 0.29, x1: 0.08 }, // 14. Upper retreating bluff bench 2
-    { h: 0.076, proj: -0.02, hard: 0.92, n: 12, ret: 0.38, x1: -0.04 }, // 15. High left crag bluff wall
+    { h: 0.052, proj:  0.04, hard: 0.84, n: 18, ret: 0.09 }, // 12. Upper-mid terraced ledge bed
+    { h: 0.064, proj:  0.02, hard: 0.88, n: 16, ret: 0.13, x1: 0.40 }, // 13. Upper bluff bench across most of the wall
+    { h: 0.072, proj:  0.00, hard: 0.90, n: 13, ret: 0.19, x1: 0.28 }, // 14. Retreating upper bench
+    { h: 0.076, proj: -0.02, hard: 0.92, n: 10, ret: 0.26, x1: 0.14 }, // 15. High caprock wall, still part of one escarpment
   ];
 
   let refY = groundY + height * 0.058;
@@ -294,20 +302,21 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
     refY += bedH * 0.96;
   }
 
-  // 3. Craggy Angular Outcrop Blocks & Fractured Caprock Slabs Across the Upper Bluff Terraces (`images (1).jpg`!)
-  const numBluffBoulders = 38;
+  // 3. Sparse caprock slabs on the upper benches. The old 38-block scatter
+  // turned the rim into a rubble pile and hid the stratigraphic wall.
+  const numBluffBoulders = 10;
   for (let b = 0; b < numBluffBoulders; b++) {
-    const u = rng.range(-0.90, 0.34);
+    const u = rng.range(-0.90, 0.48);
     const bx = u * width * 0.48;
     const localTop = bluffHeightAt(bx);
-    if (localTop < height * 0.36) continue;
+    if (localTop < height * 0.42) continue;
 
-    const terraceFrac = rng.range(0.68, 0.98);
+    const terraceFrac = rng.range(0.84, 0.98);
     const by = groundY + localTop * terraceFrac;
-    const retreatZ = -(terraceFrac - 0.62) * depth * 0.52;
-    const bz = cliffFrontZ(bx) + retreatZ + rng.range(-0.14, 0.03) * depth;
+    const retreatZ = -(terraceFrac - 0.78) * depth * 0.44;
+    const bz = cliffFrontZ(bx) + retreatZ + rng.range(-0.08, 0.01) * depth;
 
-    const rB = S * rng.range(0.030, 0.066);
+    const rB = S * rng.range(0.020, 0.042);
     const bFrame = buildStrikeDipFrame(
       strikeRad + rng.signed() * 0.24,
       dipRad + rng.range(-5, 14) * DEG2RAD
@@ -336,7 +345,7 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
   }
 
   // Sparse angular fallen rock blocks resting directly on the bedrock foreshore (NO melted sand cones!)
-  const numToeBlocks = Math.round(6 + (params.talusAmount ?? 0.52) * 8);
+  const numToeBlocks = Math.round(4 + (params.talusAmount ?? 0.52) * 5);
   for (let t = 0; t < numToeBlocks; t++) {
     const tx = rng.range(-0.44, 0.38) * width;
     const rT = S * rng.range(0.026, 0.054);
@@ -366,11 +375,13 @@ export function buildSedimentaryCliff(params, tectonics, rng, recursiveFractureF
 
 /**
  * SCULPTED NARROW SLOT CANYON (`slot-canyon`)
- * Antelope Canyon / Buckskin Gulch water-sculpted Navajo sandstone corkscrew gorge:
- * - Synthesizes C0-continuous, boundary-matched 3D corkscrewing flash-flood wave walls along
- *   both sides of a sinuous canyon floor (`nTiers = 9` x `nSegsZ = 14` smooth-melded eolian
- *   sandstone blocks — ZERO cut-log tube ends, ZERO pancake/louver gaps, ZERO bread-loaf blocks!)
- * - Crowned with natural stepped cross-bedded Navajo slickrock rim domes & wedged chockstones!
+ * Antelope Canyon / Buckskin Gulch water-sculpted Navajo sandstone gorge:
+ * - Two long, comparatively thin opposing fins make the asset read first as
+ *   an open, walkable S-curved corridor, not as a crack in a mesa.
+ * - Boundary-matched tiers/segments keep the fluted inner walls continuous,
+ *   while calmer wave amplitudes preserve a clear floor-to-rim slot.
+ * - High portal walls, restrained outer benches and only two floor stones
+ *   keep both entrances legible from a normal 3/4 production view.
  */
 export function buildSlotCanyon(params, tectonics, rng) {
   const S = params.scale;
@@ -385,45 +396,47 @@ export function buildSlotCanyon(params, tectonics, rng) {
   const bevel = S * (0.0020 + 0.0030 * (params.edgeWear ?? 0.56));
   const smoothR = S * 0.015;
 
-  const lengthZ = S * 1.04;
-  const height = S * 0.68;
-  const maxOuterX = S * 0.48;
+  const lengthZ = S * 1.22;
+  const height = S * 0.82;
+  const maxOuterX = S * 0.36;
   const phase = rng.float() * Math.PI * 2;
   const waveSalt = rng.int(1, 99999);
 
   function slotCenterX(zf) {
-    return S * 0.105 * Math.sin(zf * Math.PI * 1.65 + phase) +
-           S * 0.032 * Math.cos(zf * Math.PI * 2.8 - phase * 0.5);
+    return S * 0.112 * Math.sin(zf * Math.PI * 1.75 + phase) +
+           S * 0.028 * Math.cos(zf * Math.PI * 2.7 - phase * 0.5);
   }
 
-  // Smooth C1 analytical 3D flash-flood corkscrew inner canyon wall X(zf, yf, side)
+  // Smooth analytical flood-fluted inner wall. The minimum clear gap is
+  // deliberately larger and the corkscrew amplitude smaller than the old
+  // version, whose opposing waves could visually close the corridor.
   function innerWallX(zf, yf, side) {
-    const mouthFlare = 1.0 + 0.58 * Math.pow(Math.abs(zf) * 2.0, 2.5);
-    const halfGap = S * (0.058 + 0.034 * Math.pow(yf - 0.44, 2) * 2.4) * mouthFlare;
-    // Sweeping Antelope-Canyon flood-vortex corkscrew ribs!
-    const vortexWave1 = Math.sin(yf * Math.PI * 2.7 + zf * Math.PI * 2.2 + side * 0.45) * S * (0.052 + 0.036 * overhang);
-    const vortexWave2 = Math.cos(yf * Math.PI * 4.6 - zf * Math.PI * 2.9 + side * 1.1) * S * 0.022;
-    const fineUndul = scalarField3D(zf * 3.2, yf * 3.2, side * 1.7, waveSalt) * S * 0.014;
-    return slotCenterX(zf) + side * halfGap + vortexWave1 + vortexWave2 + fineUndul;
+    const mouthFlare = 1.0 + 0.34 * Math.pow(Math.abs(zf) * 2.0, 2.2);
+    const halfGap = S * (0.082 + 0.022 * Math.pow(yf - 0.44, 2) * 2.0) * mouthFlare;
+    const vortexWave1 = Math.sin(yf * Math.PI * 2.45 + zf * Math.PI * 2.0 + side * 0.45) * S * (0.030 + 0.020 * overhang);
+    const vortexWave2 = Math.cos(yf * Math.PI * 4.1 - zf * Math.PI * 2.6 + side * 1.1) * S * 0.012;
+    const fineUndul = scalarField3D(zf * 3.2, yf * 3.2, side * 1.7, waveSalt) * S * 0.008;
+    return slotCenterX(zf) + side * halfGap + side * (vortexWave1 + vortexWave2) + fineUndul;
   }
 
-  // Smoothly domed exterior Navajo slickrock fin profile on both sides & portal ends!
+  // Thinner exterior fins: enough structural thickness to contour cleanly,
+  // but not so much rock that the slot becomes an incidental surface crack.
   function outerFlankX(zf, yf, side) {
-    const portalTaper = clamp(1.06 - 0.50 * Math.pow(Math.abs(zf) * 2.0, 2.3), 0.36, 1.0);
-    const domeTaper = 1.0 - 0.34 * Math.pow(yf, 1.45);
-    const embay = 1.0 + 0.12 * scalarField3D(zf * 2.4, yf * 1.2, side * 2.3, waveSalt + 41);
-    return slotCenterX(zf) * 0.35 + side * maxOuterX * portalTaper * domeTaper * embay;
+    const portalTaper = clamp(1.04 - 0.34 * Math.pow(Math.abs(zf) * 2.0, 2.3), 0.48, 1.0);
+    const domeTaper = 1.0 - 0.20 * Math.pow(yf, 1.45);
+    const embay = 1.0 + 0.09 * scalarField3D(zf * 2.4, yf * 1.2, side * 2.3, waveSalt + 41);
+    return slotCenterX(zf) * 0.42 + side * maxOuterX * portalTaper * domeTaper * embay;
   }
 
   function wallCrestH(zf, side) {
-    const portalEnv = clamp(1.08 - 0.58 * Math.pow(Math.abs(zf) * 2.0, 2.4), 0.28, 1.0);
-    const slickrockDomes = 0.92 + 0.12 * Math.cos(zf * Math.PI * 3.0 + side * 0.8) +
-                           0.07 * scalarField3D(zf * 3.0, side * 1.9, 0.5, waveSalt + 83);
+    const portalEnv = clamp(1.06 - 0.30 * Math.pow(Math.abs(zf) * 2.0, 2.4), 0.68, 1.0);
+    const slickrockDomes = 0.95 + 0.08 * Math.cos(zf * Math.PI * 3.0 + side * 0.8) +
+                           0.05 * scalarField3D(zf * 3.0, side * 1.9, 0.5, waveSalt + 83);
     return height * portalEnv * slickrockDomes;
   }
 
-  const nTiers = 9;
-  const nSegsZ = 14;
+  const nTiers = 10;
+  const nSegsZ = 16;
   const dzSeg = lengthZ / nSegsZ;
   const tierStepY = height / nTiers;
 
@@ -519,35 +532,17 @@ export function buildSlotCanyon(params, tectonics, rng) {
       }
     }
 
-    // Natural stepped cross-bedded slickrock benches wrapping the outer desert flanks!
-    for (let sb = 0; sb < 4; sb++) {
-      const zf = -0.34 + sb * 0.23 + rng.signed() * 0.04;
-      const bh = height * rng.range(0.16, 0.34);
-      const bx = outerFlankX(zf, 0.12, side) + side * S * rng.range(0.02, 0.06);
-      let benchP = sculptGeologicalParentPoly(
-        [bx, groundY + bh * 0.46, zf * lengthZ],
-        [S * rng.range(0.09, 0.14), bh * 0.52, S * rng.range(0.13, 0.20)],
-        bedFrame,
-        rng,
-        { jointDispersion: 0.14, cornerBlunt: 0.78, flatBaseY: groundY, extraBevelCuts: 6 }
-      );
-      benchP = clipPolyByHalfSpace(benchP, [0, -1, 0], -groundY, 'base') || benchP;
-      const compSB = compilePolyBlock(benchP, bedFrame, {
-        edgeBevel: bevel,
-        smoothUnionR: smoothR * 0.85,
-        detailScale: 0.96,
-        isEolian: true,
-        seedSalt: rng.int(1, 999999),
-      });
-      if (compSB) blocks.push(compSB);
-    }
+    // No exterior bench blocks. QA renders showed even one low bench per
+    // side as a rectangular tab stuck onto the fin; the continuous outer
+    // flank profile is cleaner and keeps the slot itself as the subject.
   }
 
-  // Wedged flash-flood canyon-floor chockstones & portal boulders
-  for (const zf of [-0.44, -0.15, 0.19, 0.45]) {
-    const bx = slotCenterX(zf) + rng.signed() * S * 0.025;
+  // Two modest floor stones in the middle reach only. Portal boulders used
+  // to plug the very openings that establish this as a canyon asset.
+  for (const zf of [-0.16, 0.18]) {
+    const bx = slotCenterX(zf) + rng.signed() * S * 0.018;
     const bz = zf * lengthZ;
-    const rChock = S * rng.range(0.032, 0.055);
+    const rChock = S * rng.range(0.026, 0.042);
     const bFrame = buildStrikeDipFrame(rng.float() * Math.PI * 2, rng.range(18, 46) * DEG2RAD);
     let bPoly = sculptGeologicalParentPoly(
       [bx, groundY + rChock * 0.68, bz],
@@ -572,11 +567,11 @@ export function buildSlotCanyon(params, tectonics, rng) {
 
 /**
  * BRYCE BADLANDS HOODOO RIDGE (`hoodoo-columns`)
- * Bryce Canyon Silent City / Queen's Garden corrugated badlands fin & turret wall:
- * - Continuous, fused badlands fin-ridges dissecting into closely-spaced corrugated Claron
- *   limestone/marl spires & bulbous-necked totems (ZERO floating square graduation caps!)
- * - Rhythmic horizontal hard/soft Claron beds modulate every fluted fin smoothly from flared
- *   badlands apron to weathered turret/dome crests!
+ * Bryce Canyon Silent City / Queen's Garden corrugated fin wall:
+ * - Irregularly spaced fused fins dissect into dominant towers, low saddles
+ *   and offset foreground sentinels rather than a regular organ-pipe row.
+ * - Correlated Claron beds still pinch/swell every spire, but small phase
+ *   offsets and a fused foreground apron keep the group grounded and organic.
  */
 export function buildHoodooColumns(params, tectonics, rng, addTalusFn) {
   const S = params.scale;
@@ -590,17 +585,19 @@ export function buildHoodooColumns(params, tectonics, rng, addTalusFn) {
   const overhang = params.overhangStrength ?? 0.82;
   const bevel = S * (0.0016 + 0.0028 * (params.edgeWear ?? 0.44));
 
-  // 1. Flared Badlands Marl Ridge Pedestal & Buttress Ribs (anchors the entire Silent City fin!)
-  const finSpineNodes = 9;
-  for (let i = 0; i < finSpineNodes; i++) {
-    const u = (i / (finSpineNodes - 1)) - 0.5;
-    const cx = u * 0.88 * S;
-    const cz = Math.sin(u * 2.8) * S * 0.035;
-    const baseH = S * (0.26 - 0.14 * Math.abs(u)) * rng.range(0.90, 1.12);
+  // 1. Irregular badlands ridge pedestals. Equal node spacing used to set up
+  // a fence-like rhythm before the spires were even added.
+  const finSpineU = [-0.48, -0.37, -0.25, -0.14, -0.05, 0.06, 0.17, 0.29, 0.41, 0.48];
+  for (let i = 0; i < finSpineU.length; i++) {
+    const u = finSpineU[i];
+    const cx = u * 0.92 * S;
+    const cz = Math.sin(u * 3.1 + i * 0.23) * S * 0.045;
+    const sag = (i === 2 || i === 7) ? 0.78 : 1.0;
+    const baseH = S * (0.30 - 0.13 * Math.abs(u)) * sag * rng.range(0.88, 1.16);
 
     let ped = sculptGeologicalParentPoly(
       [cx, groundY + baseH * 0.45, cz],
-      [S * 0.105, baseH * 0.54, S * (0.20 - 0.08 * Math.abs(u))],
+      [S * rng.range(0.085, 0.125), baseH * 0.54, S * (0.22 - 0.08 * Math.abs(u))],
       bedFrame,
       rng,
       { jointDispersion: 0.09, cornerBlunt: 0.78, flatBaseY: groundY, extraBevelCuts: 6 }
@@ -619,34 +616,42 @@ export function buildHoodooColumns(params, tectonics, rng, addTalusFn) {
 
   // 2. Corrugated Parallel Hoodoo Spires & Fluted Badlands Buttress Ribs (continuous, zero floating squares!)
   const spires = [
-    { x: -0.05, z: -0.01, h: 0.95, rx: 0.082, rz: 0.115, style: 'bulbCap' },
-    { x:  0.07, z:  0.01, h: 0.87, rx: 0.076, rz: 0.108, style: 'turret' },
-    { x: -0.17, z: -0.02, h: 0.80, rx: 0.078, rz: 0.105, style: 'spire' },
-    { x:  0.19, z: -0.01, h: 0.74, rx: 0.074, rz: 0.100, style: 'bulbCap' },
-    { x: -0.29, z:  0.01, h: 0.65, rx: 0.072, rz: 0.095, style: 'turret' },
-    { x:  0.31, z:  0.01, h: 0.57, rx: 0.068, rz: 0.090, style: 'spire' },
-    { x: -0.40, z:  0.02, h: 0.44, rx: 0.064, rz: 0.082, style: 'spire' },
-    { x:  0.41, z:  0.02, h: 0.40, rx: 0.060, rz: 0.078, style: 'turret' },
-    // Secondary foreground parallel fin hoodoos (Bryce amphitheater depth!)
-    { x: -0.11, z:  0.13, h: 0.60, rx: 0.064, rz: 0.078, style: 'bulbCap' },
-    { x:  0.02, z:  0.14, h: 0.52, rx: 0.060, rz: 0.074, style: 'spire' },
-    { x:  0.14, z:  0.12, h: 0.47, rx: 0.058, rz: 0.072, style: 'turret' },
-    { x: -0.24, z:  0.12, h: 0.39, rx: 0.055, rz: 0.068, style: 'spire' },
+    // Main fin: uneven gaps, one dominant tower pair, and a low saddle before
+    // a right-hand sentinel instead of a perfectly descending ladder.
+    { x: -0.06, z: -0.020, h: 1.02, rx: 0.084, rz: 0.118, style: 'bulbCap' },
+    { x:  0.05, z:  0.015, h: 0.94, rx: 0.077, rz: 0.109, style: 'turret' },
+    { x: -0.19, z: -0.030, h: 0.79, rx: 0.077, rz: 0.106, style: 'spire' },
+    { x:  0.17, z: -0.025, h: 0.68, rx: 0.073, rz: 0.101, style: 'bulbCap' },
+    { x: -0.31, z:  0.005, h: 0.58, rx: 0.071, rz: 0.096, style: 'turret' },
+    { x:  0.28, z:  0.000, h: 0.45, rx: 0.066, rz: 0.089, style: 'spire' },
+    { x:  0.39, z: -0.015, h: 0.66, rx: 0.068, rz: 0.092, style: 'turret' },
+    { x: -0.43, z:  0.020, h: 0.37, rx: 0.062, rz: 0.083, style: 'spire' },
+    { x:  0.48, z:  0.020, h: 0.33, rx: 0.057, rz: 0.076, style: 'spire' },
+    // Foreground fin: staggered in both X and Z so it adds amphitheater
+    // depth without mirroring the back wall.
+    { x: -0.13, z:  0.145, h: 0.64, rx: 0.065, rz: 0.080, style: 'bulbCap' },
+    { x:  0.01, z:  0.160, h: 0.49, rx: 0.059, rz: 0.074, style: 'spire' },
+    { x:  0.12, z:  0.130, h: 0.57, rx: 0.061, rz: 0.077, style: 'turret' },
+    { x: -0.26, z:  0.135, h: 0.34, rx: 0.054, rz: 0.068, style: 'spire' },
+    { x:  0.24, z:  0.150, h: 0.38, rx: 0.055, rz: 0.070, style: 'bulbCap' },
   ];
 
-  // Shared master stratigraphic pinch-and-swell profile across the entire badlands amphitheater!
-  const nZones = 11;
+  // Shared stratigraphy with a small per-spire phase. Beds still correlate
+  // across the fin, but ribs no longer pulse in lockstep like organ pipes.
+  const nZones = 12;
   const ribSalt = rng.int(1, 99999);
-  function masterSwellAt(yf) {
-    const wave = 0.88 + 0.18 * Math.sin(yf * Math.PI * 7.2 + 0.5) + 0.08 * Math.cos(yf * Math.PI * 13.0);
-    return wave;
+  function masterSwellAt(yf, phaseShift = 0) {
+    return 0.94 +
+      0.11 * Math.sin(yf * Math.PI * 7.2 + 0.5 + phaseShift) +
+      0.05 * Math.cos(yf * Math.PI * 13.0 - phaseShift * 1.7);
   }
 
   for (let hi = 0; hi < spires.length; hi++) {
     const hd = spires[hi];
     const hx = hd.x * S + rng.signed() * S * 0.005;
     const hz = hd.z * S + rng.signed() * S * 0.005;
-    const topY = hd.h * S * rng.range(0.96, 1.04);
+    const topY = hd.h * S * rng.range(0.94, 1.06);
+    const ribPhase = Math.sin(hi * 2.39996) * 0.42;
 
     // Continuous fluted badlands fin core from groundY to topY (guarantees 0 floating caps!)
     let shaft = createBoxPoly(
@@ -688,12 +693,12 @@ export function buildHoodooColumns(params, tectonics, rng, addTalusFn) {
       const isSubCrownNeck = !isCrown && actualY1 >= topY - S * 0.10;
 
       let taper = 1.14 - 0.46 * Math.pow(hFrac, 1.15);
-      let swell = masterSwellAt(yf);
+      let swell = masterSwellAt(yf, ribPhase);
       if (hd.style === 'bulbCap') {
-        if (isCrown) swell = 1.06 + 0.10 * overhang; // Rounded weathered dolomite bulb, NOT a square plate!
-        else if (isSubCrownNeck) swell = 0.72;
+        if (isCrown) swell = 1.02 + 0.05 * overhang; // Weathered hard-bed crown, not a mushroom cap.
+        else if (isSubCrownNeck) swell = 0.82;
       } else if (hd.style === 'spire' && isCrown) {
-        swell = 0.68;
+        swell = 0.76;
       }
 
       let ringPoly = sculptGeologicalParentPoly(
@@ -733,11 +738,37 @@ export function buildHoodooColumns(params, tectonics, rng, addTalusFn) {
     }
   }
 
+  // Fused low badlands apron under the foreground fin. This grounds the
+  // second row in the same eroding slope instead of leaving it as a set of
+  // separate columns standing on the placement plane.
+  const apronU = [-0.34, -0.18, -0.03, 0.12, 0.27];
+  for (let ai = 0; ai < apronU.length; ai++) {
+    const ax = apronU[ai] * S;
+    const apronH = S * rng.range(0.10, 0.17) * (ai === 2 ? 1.18 : 1.0);
+    let apron = sculptGeologicalParentPoly(
+      [ax, groundY + apronH * 0.42, S * rng.range(0.16, 0.20)],
+      [S * rng.range(0.10, 0.14), apronH * 0.52, S * rng.range(0.10, 0.14)],
+      bedFrame,
+      rng,
+      { jointDispersion: 0.10, cornerBlunt: 0.80, flatBaseY: groundY, extraBevelCuts: 6 }
+    );
+    apron = clipPolyByHalfSpace(apron, [0, -1, 0], -groundY, 'base') || apron;
+    const compApron = compilePolyBlock(apron, bedFrame, {
+      edgeBevel: bevel,
+      smoothUnionR: S * 0.014,
+      detailScale: 0.95,
+      isSedimentary: true,
+      hardness: 0.46,
+      seedSalt: rng.int(1, 999999),
+    });
+    if (compApron) blocks.push(compApron);
+  }
+
   if (addTalusFn) {
     addTalusFn(blocks, bedFrame, rng, {
-      talusAmount: (params.talusAmount ?? 0.44) * 0.80,
-      scale: S * 0.84,
-      spanX: S * 0.84,
+      talusAmount: (params.talusAmount ?? 0.44) * 0.30,
+      scale: S * 0.68,
+      spanX: S * 0.86,
       groundY,
       edgeBevel: bevel,
       mode: 'outcrop',

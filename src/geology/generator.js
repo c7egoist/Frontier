@@ -11,6 +11,7 @@ import {
   taubinSmoothWeldedMesh,
   decimateMeshQEM,
   buildGameReadyAttributes,
+  buildPreviewMeshAttributes,
 } from '../core/mesh-post.js';
 import {
   resolveParams,
@@ -34,10 +35,75 @@ function summarizeSdfProcess(stats) {
     erodedM3: Number(eroded.toFixed(3)),
     depositedM3: Number((stats.depositedVolume ?? 0).toFixed(3)),
     elapsedMs: stats.elapsedMs ?? 0,
+    ...(stats.directionMode
+      ? {
+          directionMode: stats.directionMode,
+          directionRangeDeg: stats.directionRangeDeg ?? 0,
+          directionCycles: stats.directionCycles ?? 0,
+          directionSamplesDeg: [...(stats.directionSamplesDeg || [])],
+        }
+      : {}),
   };
 }
 
-export function generateRockFormation(rawParams = {}, onProgress = null) {
+function buildErosionPreviewMesh(sdf, groundY, anchor, maxTriangles) {
+  const dc = extractDualContourMesh(sdf, {
+    qefRegularization: 0.014,
+    rootSteps: 2,
+  });
+  const cleaned = removeFloatingIslands(
+    dc.positions,
+    dc.indices,
+    groundY ?? 0,
+    sdf.voxelSize * 3.5
+  );
+  if (!cleaned.indices.length || !cleaned.positions.length) return null;
+
+  let positions = cleaned.positions;
+  let indices = cleaned.indices;
+  const triCount = indices.length / 3;
+  if (maxTriangles > 0 && triCount > maxTriangles) {
+    const decimated = decimateMeshQEM(positions, indices, maxTriangles / triCount);
+    positions = decimated.positions;
+    indices = decimated.indices;
+  }
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i], y = positions[i + 1], z = positions[i + 2];
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+  }
+  if (!Number.isFinite(minX)) return null;
+
+  // Reuse the first frame's placement anchor for every preview, so watching
+  // erosion does not look like the asset itself is sliding around.
+  const useAnchor = anchor || {
+    shiftX: -0.5 * (minX + maxX),
+    shiftY: -minY,
+    shiftZ: -0.5 * (minZ + maxZ),
+  };
+  const mesh = buildPreviewMeshAttributes(positions, indices, { uvScale: 0.35 });
+  for (let i = 0; i < mesh.positions.length; i += 3) {
+    mesh.positions[i] += useAnchor.shiftX;
+    mesh.positions[i + 1] += useAnchor.shiftY;
+    mesh.positions[i + 2] += useAnchor.shiftZ;
+  }
+
+  return {
+    mesh,
+    dimensions: [
+      Number((maxX - minX).toFixed(2)),
+      Number((maxY - minY).toFixed(2)),
+      Number((maxZ - minZ).toFixed(2)),
+    ],
+    anchor: useAnchor,
+  };
+}
+
+export function generateRockFormation(rawParams = {}, onProgress = null, onPreview = null) {
   const t0 = performance.now();
   const params = resolveParams(rawParams);
   const rng = createRng(params.seed);
@@ -68,6 +134,7 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
   }
 
   const qSpec = QUALITY_LEVELS[params.quality] || QUALITY_LEVELS.high;
+  const formationPreset = FORMATION_PRESETS[params.archetype] || FORMATION_PRESETS['cliff-wall'];
   const evaluator = createGeologicalSdfEvaluator(macro, params, rng.fork('detail'));
   const pad = evaluator.detailMargin + params.scale * 0.025;
   const bounds = {
@@ -100,6 +167,18 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
   const sdfErosionSource =
     String(params.sdfErosionSource || 'analytic').toLowerCase() === 'mesh' ? 'mesh' : 'analytic';
   const sdfEdgeProtection = params.sdfEdgeProtection ?? params.rainEdgeProtection ?? 0.7;
+  const erosionPreviewEnabled = typeof onPreview === 'function';
+  const erosionPreviewFrames = Math.max(
+    1,
+    Math.min(16, Math.round(params.erosionPreviewFrames ?? params.liveErosionPreviewFrames ?? 6))
+  );
+  const erosionPreviewMaxTriangles = Math.max(
+    0,
+    Math.round(params.erosionPreviewMaxTriangles ?? 65000)
+  );
+  let erosionPreviewAnchor = null;
+  let erosionPreviewFramesEmitted = 0;
+  let erosionPreviewError = null;
 
   // In analytic mode, an explicitly requested bake resolution can be the
   // first (and only) SDF evaluation. In mesh mode, the source formation is
@@ -153,6 +232,10 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
       windAmount,
       windParticles: params.windParticles ?? params.windErosionParticles,
       windAzimuthDeg: params.windAzimuth ?? params.windAzimuthDeg ?? 35,
+      windShiftMode: params.windShiftMode ?? params.windDirectionMode ?? 'fixed',
+      windShiftRange: params.windShiftRange ?? params.windShiftRangeDeg ?? 55,
+      windShiftCycles: params.windShiftCycles ?? 1,
+      windShiftSectors: params.windShiftSectors ?? 5,
       windTurbulence: params.windTurbulence ?? 0.45,
       windStreamlining: params.windStreamlining ?? 0.65,
       windSandSupply: params.windSandSupply ?? 0.65,
@@ -173,6 +256,33 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
       seedSalt: params.seed,
       onProgress: onProgress
         ? (f, stage) => onProgress(0.68 + 0.08 * f, stage)
+        : null,
+      previewFrames: erosionPreviewFrames,
+      onPreview: erosionPreviewEnabled
+        ? (info) => {
+            try {
+              const built = buildErosionPreviewMesh(
+                sdf,
+                macro.groundY ?? 0,
+                erosionPreviewAnchor,
+                erosionPreviewMaxTriangles
+              );
+              if (!built) return;
+              erosionPreviewAnchor = built.anchor;
+              erosionPreviewFramesEmitted++;
+              onPreview({
+                ...info,
+                mesh: built.mesh,
+                dimensions: built.dimensions,
+                lithology: formationPreset.lithology,
+                triangles: built.mesh.indices.length / 3,
+              });
+            } catch (err) {
+              // A preview is observational only: never let contouring a
+              // snapshot destroy an otherwise valid final erosion bake.
+              erosionPreviewError = err?.message || String(err);
+            }
+          }
         : null,
     });
     rainStats = erosionSuiteStats.rain;
@@ -290,6 +400,8 @@ export function generateRockFormation(rawParams = {}, onProgress = null) {
             rain: summarizeSdfProcess(erosionSuiteStats.rain),
             cryo: summarizeSdfProcess(erosionSuiteStats.cryo),
             thermal: summarizeSdfProcess(erosionSuiteStats.thermal),
+            previewFrames: erosionPreviewFramesEmitted,
+            previewError: erosionPreviewError,
             elapsedMs: erosionSuiteStats.elapsedMs,
           }
         : null,

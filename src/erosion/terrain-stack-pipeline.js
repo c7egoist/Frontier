@@ -420,7 +420,8 @@ export class TerrainStackPipeline {
     const ep = this.engine.params;
     const p = layer.params || {};
     const keys = [
-      'windSpeed', 'windAzimuth', 'dryAeolianMode', 'windErosionRate',
+      'windSpeed', 'windAzimuth', 'windShiftMode', 'windShiftRange',
+      'windShiftPeriod', 'dryAeolianMode', 'windErosionRate',
       'windAbrasion', 'windDeflation', 'windDeposition', 'windTurbulence',
       'windGustiness', 'windSandSupply', 'windCurtainHeight',
       'windStreamlining', 'windFluting',
@@ -789,6 +790,11 @@ export class TerrainStackPipeline {
     ep.glacierStrength = 0.0;
     ep.windSpeed = 0.0;
     ep.windAzimuth = DEFAULT_EROSION_PARAMS.windAzimuth;
+    // A shifting regime is authored by a Wind layer; snow-only/legacy stacks
+    // keep their historical fixed drift direction until such a layer sets it.
+    ep.windShiftMode = 0;
+    ep.windShiftRange = DEFAULT_EROSION_PARAMS.windShiftRange;
+    ep.windShiftPeriod = DEFAULT_EROSION_PARAMS.windShiftPeriod;
     ep.dryAeolianMode = 0.0;
     ep.windErosionRate = DEFAULT_EROSION_PARAMS.windErosionRate;
     ep.windAbrasion = DEFAULT_EROSION_PARAMS.windAbrasion;
@@ -1117,6 +1123,9 @@ export class TerrainStackPipeline {
       } else if (layer.type === 'wind-erosion') {
         ep.windSpeed = p.windSpeed ?? DEFAULT_EROSION_PARAMS.windSpeed;
         ep.windAzimuth = p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth;
+        ep.windShiftMode = p.windShiftMode ?? DEFAULT_EROSION_PARAMS.windShiftMode;
+        ep.windShiftRange = p.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange;
+        ep.windShiftPeriod = p.windShiftPeriod ?? DEFAULT_EROSION_PARAMS.windShiftPeriod;
         ep.dryAeolianMode = p.dryAeolianMode ?? DEFAULT_EROSION_PARAMS.dryAeolianMode;
         ep.windErosionRate = p.windErosionRate ?? DEFAULT_EROSION_PARAMS.windErosionRate;
         ep.windAbrasion = p.windAbrasion ?? DEFAULT_EROSION_PARAMS.windAbrasion;
@@ -1155,6 +1164,9 @@ export class TerrainStackPipeline {
         if (!this._hasDedicatedWindLayer()) {
           ep.windSpeed = p.windSpeed ?? 0.0;
           ep.windAzimuth = p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth;
+          ep.windShiftMode = p.windShiftMode ?? 0;
+          ep.windShiftRange = p.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange;
+          ep.windShiftPeriod = p.windShiftPeriod ?? DEFAULT_EROSION_PARAMS.windShiftPeriod;
           ep.dryAeolianMode = p.dryAeolianMode ?? 0.0;
         }
         ep.snowLayerEnabled = true;

@@ -7,6 +7,7 @@
  *   npm run generate -- --archetype sedimentary-cliff --seed 4029 --out exports/cliff.glb
  *   npm run generate -- --archetype cliff-wall --rain 0.6 --rain-droplets 14000 --quality ultra --decimation 0.3
  *   npm run generate -- --archetype cliff-wall --sdf-source mesh --erosion-res 320 --wind 0.45 --thermal 0.25 --decimation 0.3
+ *   npm run generate -- --archetype utah-canyon --wind 0.5 --wind-shift sectors --wind-shift-range 75 --wind-shift-cycles 2
  */
 
 import fs from 'node:fs';
@@ -42,6 +43,9 @@ function parseArgs(argv) {
     else if (a === '--erosion-res' && argv[i + 1]) opts.erosionSdfResolution = Number(argv[++i]);
     else if (a === '--wind' && argv[i + 1]) opts.windErosionAmount = Number(argv[++i]);
     else if (a === '--wind-azimuth' && argv[i + 1]) opts.windAzimuth = Number(argv[++i]);
+    else if (a === '--wind-shift' && argv[i + 1]) opts.windShiftMode = argv[++i];
+    else if (a === '--wind-shift-range' && argv[i + 1]) opts.windShiftRange = Number(argv[++i]);
+    else if (a === '--wind-shift-cycles' && argv[i + 1]) opts.windShiftCycles = Number(argv[++i]);
     else if (a === '--wind-turbulence' && argv[i + 1]) opts.windTurbulence = Number(argv[++i]);
     else if (a === '--wind-streamlining' && argv[i + 1]) opts.windStreamlining = Number(argv[++i]);
     else if (a === '--thermal' && argv[i + 1]) opts.thermalErosionAmount = Number(argv[++i]);
@@ -97,6 +101,9 @@ if (opts.lods) {
       .filter((key) => suite[key])
       .map((key) => `${key} ${suite[key].erodedM3}m3`);
     console.log(`        SDF erosion (${suite.source}): ${parts.join(' | ')} | ${suite.elapsedMs}ms`);
+    if (suite.wind?.directionMode) {
+      console.log(`        wind regime: ${suite.wind.directionMode} | samples ${(suite.wind.directionSamplesDeg || []).join('° -> ')}°`);
+    }
   }
   if (res.stats.rainErosion) {
     const re = res.stats.rainErosion;

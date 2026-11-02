@@ -524,12 +524,12 @@ export function createGeologicalSdfEvaluator(macro, params, rng) {
   let evalRockColor = null;
 
   if (archetype === 'sedimentary-cliff') {
-    // Note: `buildSedimentaryCliff` scales `dipAngle * 0.38` and `height = S * 0.66` — match 1:1 so color beds lock to 3D strata!
+    // Note: `buildSedimentaryCliff` scales `dipAngle * 0.38` and `height = S * 0.72` — match 1:1 so color beds lock to 3D strata!
     const strikeRad = (params.strikeAngle ?? 8) * DEG2RAD;
     const dipRad = clamp((params.dipAngle ?? 4), 0, 18) * 0.38 * DEG2RAD;
     const stratFrame = buildStrikeDipFrame(strikeRad, dipRad);
     const fy0 = stratFrame.normal[0], fy1 = stratFrame.normal[1], fy2 = stratFrame.normal[2];
-    const cliffH = S * 0.66;
+    const cliffH = S * 0.72;
 
     evalRockColor = (wx, wy, wz, nx, ny, nz, ao, cav, outRgb) => {
       const bedWarp = scalarField3D(wx * warpFreq * 1.4, wy * warpFreq * 0.7, wz * warpFreq * 1.4, warpSalt + 19) * S * 0.008;
@@ -542,11 +542,12 @@ export function createGeologicalSdfEvaluator(macro, params, rng) {
 
       let sR, sG, sB;
       if (u < 0.105) {
-        // 1. Foreshore wave-cut bedrock platform & wet basal notch (`images (1).jpg` raw-sienna ochre & dark slate seams!)
+        // 1. Toe bench and basal notch: muted grey-brown bedrock rather than
+        // a saturated orange apron that visually melts away from the wall.
         const darkSeam = smoothstep(0.30, 0.88, fineBed);
-        sR = (0.48 * (1 - darkSeam) + 0.31 * darkSeam) + 0.022 * mGrain;
-        sG = (0.37 * (1 - darkSeam) + 0.29 * darkSeam) + 0.018 * mGrain;
-        sB = (0.26 * (1 - darkSeam) + 0.25 * darkSeam) + 0.016 * mGrain;
+        sR = (0.45 * (1 - darkSeam) + 0.30 * darkSeam) + 0.022 * mGrain;
+        sG = (0.38 * (1 - darkSeam) + 0.28 * darkSeam) + 0.018 * mGrain;
+        sB = (0.30 * (1 - darkSeam) + 0.25 * darkSeam) + 0.016 * mGrain;
       } else if (u < 0.29) {
         // 2. Lower blocky cliff & right seaward spit: interbedded coastal ochre-amber & weathered grey-taupe sandstone!
         const ochreBed = smoothstep(-0.18, 0.28, Math.sin(u * 76.0 + 0.4));
@@ -564,15 +565,16 @@ export function createGeologicalSdfEvaluator(macro, params, rng) {
         sG = gG * (1 - ironSeam) + 0.37 * ironSeam + 0.018 * mGrain;
         sB = gB * (1 - ironSeam) + 0.26 * ironSeam + 0.016 * mGrain;
       } else if (u < 0.69) {
-        // 4. Signature mid-upper laminated purplish-maroon / plum-brown siltstone-mudstone unit (`images (1).jpg`!)
-        const buffRib = Math.pow(clamp(Math.sin(u * 88.0 + 1.2), 0, 1), 4.5) * 0.55;
+        // 4. Mid-upper laminated dusty maroon-brown siltstone. Keep it earthy
+        // rather than candy pink: lower blue, warmer red/green balance.
+        const buffRib = Math.pow(clamp(Math.sin(u * 88.0 + 1.2), 0, 1), 4.5) * 0.50;
         const deepPlum = 0.5 + 0.5 * fineBed;
-        const pR = 0.36 + 0.055 * deepPlum;
-        const pG = 0.27 + 0.042 * deepPlum;
-        const pB = 0.28 + 0.046 * deepPlum;
+        const pR = 0.40 + 0.045 * deepPlum;
+        const pG = 0.285 + 0.035 * deepPlum;
+        const pB = 0.225 + 0.030 * deepPlum;
         sR = pR * (1 - buffRib) + 0.48 * buffRib + 0.020 * mGrain;
-        sG = pG * (1 - buffRib) + 0.45 * buffRib + 0.018 * mGrain;
-        sB = pB * (1 - buffRib) + 0.41 * buffRib + 0.018 * mGrain;
+        sG = pG * (1 - buffRib) + 0.43 * buffRib + 0.018 * mGrain;
+        sB = pB * (1 - buffRib) + 0.34 * buffRib + 0.018 * mGrain;
       } else {
         // 5. Upper weathered coastal tan-grey bluff caprock & russet-stained craggy outcrop blocks
         const russet = clamp(mPatch * 0.85 + 0.28, 0, 1) * clamp(ny * 0.55 + 0.45, 0, 1);

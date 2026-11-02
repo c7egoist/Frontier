@@ -446,12 +446,24 @@ export const LAYER_OPERATION_SPECS = {
     glyph: 'wind',
     reads: ['Height', 'FineSed', 'Slope', '3D Hardness'],
     writes: ['Height', 'FineSed', 'CoarseSed'],
-    summary: (p) =>
-      `${p.bakeSteps > 0 ? `${Math.round(p.bakeSteps)} baked · ` : ''}${Math.round((p.windSpeed ?? DEFAULT_EROSION_PARAMS.windSpeed) * 100)}% @ ${Math.round(p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth)}° · abrasion ${Math.round((p.windAbrasion ?? DEFAULT_EROSION_PARAMS.windAbrasion) * 100)}% · turbulence ${Math.round((p.windTurbulence ?? DEFAULT_EROSION_PARAMS.windTurbulence) * 100)}%`,
+    summary: (p) => {
+      const shiftMode = Number(p.windShiftMode ?? DEFAULT_EROSION_PARAMS.windShiftMode);
+      const shift = shiftMode === 3
+        ? ' · 360° wind rose'
+        : shiftMode === 2
+          ? ` · front sectors ±${Math.round(p.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange)}°`
+          : shiftMode === 1
+            ? ` · seasonal swing ±${Math.round(p.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange)}°`
+            : ' · fixed direction';
+      return `${p.bakeSteps > 0 ? `${Math.round(p.bakeSteps)} baked · ` : ''}${Math.round((p.windSpeed ?? DEFAULT_EROSION_PARAMS.windSpeed) * 100)}% @ ${Math.round(p.windAzimuth ?? DEFAULT_EROSION_PARAMS.windAzimuth)}°${shift} · abrasion ${Math.round((p.windAbrasion ?? DEFAULT_EROSION_PARAMS.windAbrasion) * 100)}%`;
+    },
     defaults: {
       bakeSteps: 0,
       windSpeed: DEFAULT_EROSION_PARAMS.windSpeed,
       windAzimuth: DEFAULT_EROSION_PARAMS.windAzimuth,
+      windShiftMode: DEFAULT_EROSION_PARAMS.windShiftMode,
+      windShiftRange: DEFAULT_EROSION_PARAMS.windShiftRange,
+      windShiftPeriod: DEFAULT_EROSION_PARAMS.windShiftPeriod,
       dryAeolianMode: DEFAULT_EROSION_PARAMS.dryAeolianMode,
       windErosionRate: DEFAULT_EROSION_PARAMS.windErosionRate,
       windAbrasion: DEFAULT_EROSION_PARAMS.windAbrasion,
@@ -619,6 +631,9 @@ function buildStackRecipeFromLandscape(landscapeId) {
         bakeSteps: 0,
         windSpeed: d.windSpeed,
         windAzimuth: d.windAzimuth,
+        windShiftMode: d.windShiftMode ?? DEFAULT_EROSION_PARAMS.windShiftMode,
+        windShiftRange: d.windShiftRange ?? DEFAULT_EROSION_PARAMS.windShiftRange,
+        windShiftPeriod: d.windShiftPeriod ?? DEFAULT_EROSION_PARAMS.windShiftPeriod,
         dryAeolianMode: d.dryAeolianMode,
         windErosionRate: d.windErosionRate ?? DEFAULT_EROSION_PARAMS.windErosionRate,
         windAbrasion: d.windAbrasion ?? (rockyWind ? 1.0 : DEFAULT_EROSION_PARAMS.windAbrasion),
@@ -766,6 +781,11 @@ function buildUtahWindRainRecipe() {
       bakeSteps: 0,
       windSpeed: 0.92,
       windAzimuth: 32,
+      // Desert fronts do not sandblast from one bearing forever: step the
+      // prevailing wind through sectors either side of the mean direction.
+      windShiftMode: 2,
+      windShiftRange: 70,
+      windShiftPeriod: 220,
       dryAeolianMode: 0.90,
       windErosionRate: 1.05,
       windAbrasion: 1.08,

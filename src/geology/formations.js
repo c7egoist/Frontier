@@ -989,8 +989,11 @@ function buildMetamorphicOutcrop(params, tectonics, rng) {
 }
 
 /**
- * 6. CAPROCK SANDSTONE BUTTE & UNDERCUT ALCOVE (`sandstone-butte`)
- * Sweeping monumental mesa caprock slabs + deep clean overhanging canyon alcove (no hanging pillars!).
+ * 6. CAPROCK SANDSTONE BUTTE (`sandstone-butte`)
+ * Sweeping monumental mesa caprock slabs over a naturally recessed soft
+ * bed. The former broad boolean alcove cut has been removed: it read as an
+ * artificial cave/hole, while differential bedding already gives the
+ * undercut profile a butte needs.
  */
 function buildSandstoneButte(params, tectonics, rng) {
   const S = params.scale;
@@ -1007,7 +1010,7 @@ function buildSandstoneButte(params, tectonics, rng) {
   // Broad horizontal mechanical rock units with irregular headland buttress prows (no regular comb slots!)
   const unitSpecs = [
     { y0: 0.00, y1: 0.24, zFront: 0.88, wScale: 1.06, comp: 0.55 },
-    { y0: 0.20, y1: 0.50, zFront: 0.72, wScale: 0.94, comp: 0.30 }, // Recessive alcove horizon
+    { y0: 0.20, y1: 0.50, zFront: 0.84, wScale: 0.94, comp: 0.42 }, // Recessed soft-bed horizon (not a cave)
     { y0: 0.45, y1: 0.78, zFront: 1.04, wScale: 1.02, comp: 0.88 }, // Massive cliff-former
     { y0: 0.73, y1: 0.94, zFront: 1.15, wScale: 1.05, comp: 1.00 }, // Overhanging caprock!
     { y0: 0.88, y1: 1.06, zFront: 0.82, wScale: 0.65, comp: 0.90 }, // Asymmetric summit mesa crown
@@ -1077,24 +1080,8 @@ function buildSandstoneButte(params, tectonics, rng) {
     }
   }
 
-  // Single broad, continuous vaulted canyon alcove undercut beneath the overhanging caprock
-  const alcoveX = rng.signed() * S * 0.08;
-  const alcoveY = height * 0.30;
-  const alcoveZ = radZ * 0.88;
-  const cFrame = tectonics.localFrameAt(alcoveX, alcoveY, alcoveZ);
-  const mainAlcove = sculptGeologicalParentPoly(
-    [alcoveX, alcoveY, alcoveZ],
-    [radX * 0.62, height * 0.20, radZ * 0.58],
-    cFrame,
-    rng,
-    { jointDispersion: 0.14, cornerBlunt: 0.86, extraBevelCuts: 5 }
-  );
-  const compAlcove = compilePolyBlock(mainAlcove, cFrame, {
-    edgeBevel: bevel * 1.6,
-    seedSalt: rng.int(1, 999999),
-  });
-  if (compAlcove) cuts.push(compAlcove);
-
+  // No broad alcove/hole cut. The recessed soft-bed unit above supplies the
+  // shadowed under-caprock band while keeping the butte a solid landform.
   addTalusAndFallenBoulders(blocks, tectonics.baseFrame, rng, {
     talusAmount: params.talusAmount ?? 0.66,
     scale: S,
@@ -1495,12 +1482,12 @@ function buildDesertSpires(params, tectonics, rng) {
 
 /**
  * 11. UTAH CANYON WALL & SLICKROCK ALCOVE (`utah-canyon`)
- * Zion Great Arch / Escalante Coyote Gulch / Mesa Verde Cliff Palace canyon amphitheater:
- * - Sweeping crescent horseshoe Navajo sandstone canyon wall built from continuous stepped
- *   sandstone cliff units & tapering cross-bedded slickrock wings (ZERO rectangular toast-wall
- *   and ZERO vertical piano-key columns!)
- * - Deep recessed vaulted blind alcove carved beneath the towering sheer upper cliff face via
- *   stepped exfoliation fracture vaults + horizontal seepage ledges + fallen alcove roof slabs!
+ * Zion / Escalante slickrock amphitheater wall:
+ * - Sweeping crescent Navajo sandstone wall built from continuous stepped
+ *   cliff units and tapering cross-bedded wings.
+ * - The alcove is now a shallow, open seep bay recessed into the lower/mid
+ *   wall units themselves. There is deliberately no deep boolean cave/vault
+ *   punched into the cliff, because that read as a fake artificial hole.
  */
 function buildUtahCanyon(params, tectonics, rng) {
   const S = params.scale;
@@ -1543,6 +1530,21 @@ function buildUtahCanyon(params, tectonics, rng) {
     return height * wingEnv * rimSwell;
   }
 
+  // Shallow open seep bay: recess only the soft lower/mid wall units by a
+  // fraction of the wall depth. This keeps an alcove-like amphitheater in
+  // plan/profile without a roof, back wall or cave-like through-hole.
+  const shallowBayX = rng.signed() * width * 0.035;
+  function shallowBayRecess(x, unitIdx) {
+    const band = unitIdx === 1 ? 0.35 : unitIdx === 2 ? 0.70 : 0;
+    if (band <= 0) return 0;
+    const dx = (x - shallowBayX) / (width * 0.22);
+    const bay = Math.exp(-dx * dx);
+    const brokenEdge = 0.82 + 0.18 * scalarField3D(x / Math.max(1, S) * 2.4, unitIdx * 1.7, 0.4, baySalt + 811);
+    // Deliberately only ~0.4–0.6 m at production scale. A deeper first pass
+    // still read as a roofed cave between two pillars in the QA render.
+    return -depth * 0.055 * bay * band * brokenEdge * (0.78 + 0.22 * overhang);
+  }
+
   const wallUnits = [
     { y0: 0.00, y1: 0.18, proj:  0.18, smooth: 1.2 },
     { y0: 0.14, y1: 0.36, proj:  0.04, smooth: 1.0 },
@@ -1569,8 +1571,9 @@ function buildUtahCanyon(params, tectonics, rng) {
 
       const actualTop = Math.min(localCrest, refY1);
       const browWave = scalarField3D((cx / width) * 4.2, uIdx * 1.7, 0.5, baySalt + uIdx * 47) * depth * 0.045;
-      const fz0 = cliffFrontZ(cx - dxSeg * 0.5) + wu.proj * depth * (0.65 + 0.45 * overhang) + browWave;
-      const fz1 = cliffFrontZ(cx + dxSeg * 0.5) + wu.proj * depth * (0.65 + 0.45 * overhang) + browWave;
+      const bayRecess = shallowBayRecess(cx, uIdx);
+      const fz0 = cliffFrontZ(cx - dxSeg * 0.5) + wu.proj * depth * (0.65 + 0.45 * overhang) + browWave + bayRecess;
+      const fz1 = cliffFrontZ(cx + dxSeg * 0.5) + wu.proj * depth * (0.65 + 0.45 * overhang) + browWave + bayRecess;
       const fzMid = 0.5 * (fz0 + fz1);
       const bzMid = Math.min(fzMid - S * 0.10, cliffBackZ(cx));
 
@@ -1617,69 +1620,9 @@ function buildUtahCanyon(params, tectonics, rng) {
     }
   }
 
-  // Stepped Multi-Ring Exfoliation Blind Alcove Beneath the Towering Upper Cliff Brow!
-  const alcX = rng.signed() * width * 0.03;
-  const alcBaseZ = cliffFrontZ(alcX);
-  const vaultRings = [
-    { x:  0.00, y: 0.25, z:  0.14, rx: 0.30, ry: 0.26, rz: 0.15 },
-    { x: -0.01, y: 0.22, z:  0.04, rx: 0.26, ry: 0.22, rz: 0.19 },
-    { x:  0.01, y: 0.18, z: -0.06, rx: 0.21, ry: 0.17, rz: 0.20 },
-    { x: -0.11, y: 0.15, z: -0.02, rx: 0.14, ry: 0.12, rz: 0.17 },
-  ];
-
-  for (let v = 0; v < vaultRings.length; v++) {
-    const vr = vaultRings[v];
-    const vx = alcX + vr.x * width;
-    const vy = groundY + vr.y * height;
-    const vz = alcBaseZ + vr.z * depth;
-    const vFrame = buildStrikeDipFrame(strikeRad + rng.signed() * 0.08, rng.range(4, 12) * DEG2RAD);
-
-    let vPoly = createBoxPoly(
-      vx - vr.rx * 1.3 * width, groundY + 0.055 * height, vz - vr.rz * 1.3 * depth,
-      vx + vr.rx * 1.3 * width, vy + vr.ry * 1.25 * height, vz + vr.rz * 1.6 * depth,
-      'alcoveVault'
-    );
-    for (let aIdx = 0; aIdx < 9; aIdx++) {
-      const theta = -Math.PI * 0.48 + (aIdx / 8) * Math.PI * 0.96 + rng.signed() * 0.06;
-      const nx = Math.sin(theta) / (vr.rx * width);
-      const ny = Math.cos(theta) / (vr.ry * height * (0.82 + 0.25 * overhang));
-      const nz = -0.22 / (vr.rz * depth);
-      const vn = vnorm([nx, ny, nz]);
-      const px = vx + Math.sin(theta) * vr.rx * width;
-      const py = vy + Math.cos(theta) * vr.ry * height * (0.82 + 0.25 * overhang);
-      vPoly = clipPolyByHalfSpace(vPoly, vn, vdot(vn, [px, py, vz]), 'exfolArch') || vPoly;
-    }
-    const backAlcN = perturbNormal(vnorm([rng.signed() * 0.14, -0.18, -0.97]), rng, 0.06);
-    vPoly = clipPolyByHalfSpace(vPoly, backAlcN, vdot(backAlcN, [vx, vy, vz - vr.rz * depth]), 'alcoveBack') || vPoly;
-
-    const compV = compilePolyBlock(vPoly, vFrame, { edgeBevel: S * 0.003 });
-    if (compV) cuts.push(compV);
-  }
-
-  const grottoLedges = [
-    { x: -0.10, y: 0.042, z: -0.06, rx: 0.13, ry: 0.045, rz: 0.10 },
-    { x:  0.09, y: 0.038, z: -0.05, rx: 0.14, ry: 0.040, rz: 0.11 },
-    { x: -0.01, y: 0.078, z: -0.14, rx: 0.16, ry: 0.036, rz: 0.08 },
-  ];
-  for (const gl of grottoLedges) {
-    let lPoly = sculptGeologicalParentPoly(
-      [alcX + gl.x * width, groundY + gl.y * height, alcBaseZ + gl.z * depth],
-      [gl.rx * width, gl.ry * height, gl.rz * depth],
-      bedFrame,
-      rng,
-      { jointDispersion: 0.12, cornerBlunt: 0.78, flatBaseY: groundY, extraBevelCuts: 5 }
-    );
-    lPoly = clipPolyByHalfSpace(lPoly, [0, -1, 0], -groundY, 'base') || lPoly;
-    const compL = compilePolyBlock(lPoly, bedFrame, {
-      edgeBevel: bevel,
-      smoothUnionR: smoothR * 0.7,
-      detailScale: 0.92,
-      isEolian: true,
-      seedSalt: rng.int(1, 999999),
-    });
-    if (compL) blocks.push(compL);
-  }
-
+  // No alcove subtraction cuts: the shallow bay above is part of the wall
+  // construction. Only the two narrow vertical joint chimneys below remain
+  // as cuts, and they read as fracture slots rather than a cave/hole.
   for (const jxFrac of [-0.36, 0.35]) {
     const jx = jxFrac * width;
     const slotW = S * (0.010 + 0.012 * aperture);

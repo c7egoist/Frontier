@@ -25,6 +25,7 @@
 
 import { clamp, smoothstep } from '../core/vec3.js';
 import { scalarField3D } from '../core/spatial-noise.js';
+import { effectiveWindAzimuthDeg, normalizeWindShiftMode } from '../erosion/wind-regime.js';
 import { erodeSdfWithRain } from './rain-erosion.js';
 
 const BRUSH_R = 1.6;
@@ -285,9 +286,25 @@ export function erodeSdfWithWind(sdf, options = {}) {
 
   const particleCount = Math.max(0, Math.round(options.particleCount ?? defaultParticleCount(sdf, 7000)));
   stats.particlesRequested = particleCount;
-  const azimuthRad = (options.azimuthDeg ?? options.windAzimuth ?? 35) * Math.PI / 180;
-  const baseWindX = Math.cos(azimuthRad), baseWindZ = Math.sin(azimuthRad);
-  const perpX = -baseWindZ, perpZ = baseWindX;
+  const prevailingAzimuthDeg = options.azimuthDeg ?? options.windAzimuth ?? 35;
+  const windRegime = {
+    windAzimuth: prevailingAzimuthDeg,
+    windShiftMode: options.shiftMode ?? options.windShiftMode ?? options.windDirectionMode ?? 'fixed',
+    windShiftRange: options.shiftRangeDeg ?? options.windShiftRange ?? options.windShiftRangeDeg ?? 55,
+    windShiftSectors: options.shiftSectors ?? options.windShiftSectors ?? 5,
+  };
+  const shiftMode = normalizeWindShiftMode(windRegime.windShiftMode);
+  const shiftCycles = clamp(
+    Number(options.shiftCycles ?? options.windShiftCycles ?? (shiftMode === 'fixed' ? 0 : 1)),
+    0,
+    12
+  );
+  stats.directionMode = shiftMode;
+  stats.directionRangeDeg = clamp(Number(windRegime.windShiftRange) || 0, 0, 180);
+  stats.directionCycles = shiftCycles;
+  stats.directionSamplesDeg = [0, 0.25, 0.5, 0.75, 1].map((f) =>
+    Number(effectiveWindAzimuthDeg(windRegime, f * shiftCycles).toFixed(2))
+  );
   const turbulence = clamp(options.turbulence ?? 0.45, 0, 1);
   const streamlining = clamp(options.streamlining ?? options.windStreamlining ?? 0.65, 0, 1);
   const sandSupply = clamp(options.sandSupply ?? 0.65, 0, 1);
@@ -307,8 +324,6 @@ export function erodeSdfWithWind(sdf, options = {}) {
   const centerY = tool.oy + tool.ny * h * 0.5;
   const centerZ = tool.oz + tool.nz * h * 0.5;
   const spanX = tool.nx * h, spanY = tool.ny * h, spanZ = tool.nz * h;
-  const halfAlong = 0.5 * (spanX * Math.abs(baseWindX) + spanZ * Math.abs(baseWindZ));
-  const halfPerp = 0.5 * (spanX * Math.abs(perpX) + spanZ * Math.abs(perpZ));
   const surfaceMinX = sdf.meshBounds?.minX ?? tool.minX;
   const surfaceMaxX = sdf.meshBounds?.maxX ?? tool.maxX;
   const surfaceMinY = sdf.meshBounds?.minY ?? (Number.isFinite(groundY) ? groundY : tool.minY);
@@ -316,15 +331,23 @@ export function erodeSdfWithWind(sdf, options = {}) {
   const surfaceMinZ = sdf.meshBounds?.minZ ?? tool.minZ;
   const surfaceMaxZ = sdf.meshBounds?.maxZ ?? tool.maxZ;
   const surfaceHeight = Math.max(h, surfaceMaxY - surfaceMinY);
-  const surfaceAlongSpan = sdf.meshBounds
-    ? Math.abs((sdf.meshBounds.maxX - sdf.meshBounds.minX) * baseWindX) +
-      Math.abs((sdf.meshBounds.maxZ - sdf.meshBounds.minZ) * baseWindZ)
-    : halfAlong * 2;
+  const surfaceAlongSpanFor = (windX, windZ) =>
+    Math.abs((surfaceMaxX - surfaceMinX) * windX) + Math.abs((surfaceMaxZ - surfaceMinZ) * windZ);
   const maxSteps = Math.round(clamp(Math.max(tool.nx, tool.ny, tool.nz) * 2.0, 220, 850));
   const reportEvery = Math.max(1, Math.floor(particleCount / 12));
 
   for (let pIdx = 0; pIdx < particleCount; pIdx++) {
     if (onProgress && pIdx % reportEvery === 0) onProgress(pIdx / Math.max(1, particleCount));
+
+    // Particle index is geologic time in an offline bake: later grains
+    // belong to later weather. A grain keeps one regime direction for its
+    // short saltation life, while thousands of grains sample the swing,
+    // sector sequence or full wind rose across the bake.
+    const regimeFraction = particleCount > 1 ? pIdx / (particleCount - 1) : 0;
+    const azimuthRad = effectiveWindAzimuthDeg(windRegime, regimeFraction * shiftCycles) * Math.PI / 180;
+    const baseWindX = Math.cos(azimuthRad), baseWindZ = Math.sin(azimuthRad);
+    const perpX = -baseWindZ, perpZ = baseWindX;
+    const surfaceAlongSpan = surfaceAlongSpanFor(baseWindX, baseWindZ);
 
     const gust = 0.72 + rand() * 0.72;
     const initialYaw = azimuthRad + (rand() - 0.5) * turbulence * 0.38;
@@ -836,6 +859,7 @@ export function applySdfErosionSuite(sdf, options = {}) {
     rain: null,
     cryo: null,
     thermal: null,
+    previewFrames: 0,
     elapsedMs: 0,
   };
   if (!sdf) return stats;
@@ -847,6 +871,14 @@ export function applySdfErosionSuite(sdf, options = {}) {
   };
   const forkRng = (label) => (options.rng?.fork ? options.rng.fork(label) : options.rng);
   const onProgress = options.onProgress || null;
+  const onPreview = typeof options.onPreview === 'function' ? options.onPreview : null;
+  const previewFrameCount = onPreview
+    ? clamp(Math.round(options.previewFrames ?? 6), 1, 16)
+    : 0;
+  // The requested count is the total number of snapshots, including the
+  // source frame at 0 and completed frame at 1.
+  const previewIntervals = Math.max(1, previewFrameCount - 1);
+  let nextPreviewAt = previewFrameCount > 1 ? 1 / previewIntervals : Infinity;
   const tasks = [];
 
   if ((options.chemicalDissolutionAmount ?? 0) > 0.001) {
@@ -872,6 +904,10 @@ export function applySdfErosionSuite(sdf, options = {}) {
         amount: options.windAmount,
         particleCount: options.windParticles,
         azimuthDeg: options.windAzimuthDeg ?? options.windAzimuth ?? 35,
+        shiftMode: options.windShiftMode ?? options.windDirectionMode ?? 'fixed',
+        shiftRangeDeg: options.windShiftRange ?? options.windShiftRangeDeg ?? 55,
+        shiftCycles: options.windShiftCycles ?? options.windShiftCycleCount ?? 1,
+        shiftSectors: options.windShiftSectors ?? 5,
         turbulence: options.windTurbulence ?? 0.45,
         streamlining: options.windStreamlining ?? 0.65,
         sandSupply: options.windSandSupply ?? 0.65,
@@ -928,14 +964,47 @@ export function applySdfErosionSuite(sdf, options = {}) {
     });
   }
 
+  let lastPreviewFraction = -1;
+  const emitPreview = (fraction, stage, process, processFraction) => {
+    if (!onPreview) return;
+    const f = clamp(fraction, 0, 1);
+    if (f <= lastPreviewFraction && lastPreviewFraction >= 0) return;
+    lastPreviewFraction = f;
+    stats.previewFrames++;
+    onPreview({
+      fraction: f,
+      stage,
+      process: process || null,
+      processFraction: clamp(processFraction ?? f, 0, 1),
+    });
+  };
+
+  if (onPreview && tasks.length) {
+    emitPreview(0, 'Before SDF erosion (source formation)', null, 0);
+  }
+
   for (let i = 0; i < tasks.length; i++) {
     const task = tasks[i];
     const base = i / tasks.length;
     const slice = 1 / tasks.length;
     if (onProgress) onProgress(base, task.stage, task.key);
-    stats[task.key] = task.run(onProgress
-      ? (f) => onProgress(base + slice * clamp(f, 0, 1), task.stage, task.key)
-      : null);
+    const progress = (onProgress || onPreview)
+      ? (f) => {
+          const pf = clamp(f, 0, 1);
+          const global = base + slice * pf;
+          if (onProgress) onProgress(global, task.stage, task.key);
+          if (onPreview && global >= nextPreviewAt) {
+            emitPreview(global, task.stage, task.key, pf);
+            nextPreviewAt = global >= 0.999
+              ? Infinity
+              : (Math.floor(global * previewIntervals) + 1) / previewIntervals;
+          }
+        }
+      : null;
+    stats[task.key] = task.run(progress);
+  }
+  if (onPreview && previewFrameCount > 1 && tasks.length && lastPreviewFraction < 0.999) {
+    emitPreview(1, 'SDF erosion complete (before final contour/QEM)', 'done', 1);
   }
   if (onProgress && tasks.length) onProgress(1, 'SDF erosion suite complete', 'done');
   stats.elapsedMs = Math.round(performance.now() - t0);

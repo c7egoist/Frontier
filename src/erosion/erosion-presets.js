@@ -765,7 +765,13 @@ export const DEFAULT_EROSION_PARAMS = {
   snowfallRate: 0.82,     // Blizzard snow accumulation intensity
   glacierStrength: 0.74,  // Glacial ice U-valley plucking & moraine bulldozing
   windSpeed: 0.58,        // Aeolian saltation & snow-drift speed
-  windAzimuth: 35,        // Wind direction (degrees)
+  windAzimuth: 35,        // Prevailing wind direction (degrees, blown toward)
+  // Slow directional regime: real prevailing winds veer/back with seasons
+  // and weather systems, so faces outside the mean wind also get worked.
+  // 0=fixed, 1=seasonal swing, 2=weather-front sectors, 3=full wind rose.
+  windShiftMode: 1,
+  windShiftRange: 55,     // +/- degrees around the prevailing direction
+  windShiftPeriod: 240,   // simulation steps per complete direction cycle
   // Dedicated Wind Erosion layer controls. The old model used one fixed
   // direction everywhere, which ruled straight grooves across mountains.
   // These add turbulent/gusting local flow, terrain deflection and lee

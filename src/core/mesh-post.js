@@ -789,3 +789,76 @@ export function buildGameReadyAttributes(weldedPositions, weldedIndices, sdf, op
     indices: outIndices,
   };
 }
+
+/**
+ * Lightweight render attributes for intermediate erosion-bake snapshots.
+ * The live preview deliberately skips volumetric AO/curvature/albedo baking:
+ * it needs to show the actual SDF surface several times during a bake, while
+ * the final mesh still receives the full game-ready attribute pass above.
+ */
+export function buildPreviewMeshAttributes(positions, indices, options = {}) {
+  const uvScale = options.uvScale ?? 0.35;
+  const numVerts = positions.length / 3;
+  const normals = new Float32Array(numVerts * 3);
+
+  for (let i = 0; i < indices.length; i += 3) {
+    const i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+    const x0 = positions[i0 * 3], y0 = positions[i0 * 3 + 1], z0 = positions[i0 * 3 + 2];
+    const ux = positions[i1 * 3] - x0;
+    const uy = positions[i1 * 3 + 1] - y0;
+    const uz = positions[i1 * 3 + 2] - z0;
+    const vx = positions[i2 * 3] - x0;
+    const vy = positions[i2 * 3 + 1] - y0;
+    const vz = positions[i2 * 3 + 2] - z0;
+    const nx = uy * vz - uz * vy;
+    const ny = uz * vx - ux * vz;
+    const nz = ux * vy - uy * vx;
+    normals[i0 * 3] += nx; normals[i0 * 3 + 1] += ny; normals[i0 * 3 + 2] += nz;
+    normals[i1 * 3] += nx; normals[i1 * 3 + 1] += ny; normals[i1 * 3 + 2] += nz;
+    normals[i2 * 3] += nx; normals[i2 * 3 + 1] += ny; normals[i2 * 3 + 2] += nz;
+  }
+
+  const uvs = new Float32Array(numVerts * 2);
+  const colors = new Float32Array(numVerts * 4);
+  for (let v = 0; v < numVerts; v++) {
+    const vi = v * 3;
+    let nx = normals[vi], ny = normals[vi + 1], nz = normals[vi + 2];
+    const len = Math.hypot(nx, ny, nz);
+    if (len > 1e-12) {
+      nx /= len; ny /= len; nz /= len;
+    } else {
+      nx = 0; ny = 1; nz = 0;
+    }
+    normals[vi] = nx; normals[vi + 1] = ny; normals[vi + 2] = nz;
+
+    const px = positions[vi], py = positions[vi + 1], pz = positions[vi + 2];
+    const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
+    if (ay >= ax && ay >= az) {
+      uvs[v * 2] = px * uvScale;
+      uvs[v * 2 + 1] = pz * uvScale;
+    } else if (ax >= az) {
+      uvs[v * 2] = pz * uvScale;
+      uvs[v * 2 + 1] = py * uvScale;
+    } else {
+      uvs[v * 2] = px * uvScale;
+      uvs[v * 2 + 1] = py * uvScale;
+    }
+
+    // Viewport mask contract: AO, cavity, edge, up-mask. Neutral preview
+    // values keep the intermediate surface honest rather than fake-baking AO.
+    colors[v * 4] = 0.94;
+    colors[v * 4 + 1] = 0.04;
+    colors[v * 4 + 2] = 0.03;
+    colors[v * 4 + 3] = clamp(ny * 0.5 + 0.5, 0, 1);
+  }
+
+  return {
+    positions: new Float32Array(positions),
+    normals,
+    uvs,
+    colors,
+    albedos: null,
+    hasCustomAlbedo: false,
+    indices: new Uint32Array(indices),
+  };
+}

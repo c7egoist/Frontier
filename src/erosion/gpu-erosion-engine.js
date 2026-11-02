@@ -34,6 +34,7 @@ import {
 import { MAX_GRASS_TUFTS, buildGrassTuftMesh } from './grass-system.js';
 import { RockCalvingSystem } from './rock-calving.js';
 import { TerrainStackPipeline } from './terrain-stack-pipeline.js';
+import { effectiveWindAzimuthAtStep, windShiftOffsetDeg, windCyclesAtStep } from './wind-regime.js';
 
 const PART_TEX_W = 256;
 const PART_TEX_H = 128; // 256 * 128 = 32,768 GPU particle slots
@@ -967,7 +968,12 @@ export class GpuErosionEngine {
 
     const rawSum = rain + snow + wind + rock;
     const sum = Math.max(1e-4, rawSum);
-    const azRad = (p.windAzimuth * Math.PI) / 180;
+    // Slow weather regime: the prevailing direction itself moves over the
+    // simulation (seasonal swing / front sectors / full wind rose). Local
+    // gust wander and terrain wrap in the shaders act around this vector.
+    const windCycles = windCyclesAtStep(p, this.stepCount || 0);
+    const effectiveWindAzimuth = effectiveWindAzimuthAtStep(p, this.stepCount || 0);
+    const azRad = (effectiveWindAzimuth * Math.PI) / 180;
     const windMag = 0.35 + 0.65 * clamp01(p.windSpeed);
     const activeWind = p.simWindPlaying === false ? 0.0 : clamp01(p.windSpeed);
     const activeSnow = p.simCryoPlaying === false ? 0.0 : clamp01(p.snowfallRate);
@@ -977,6 +983,9 @@ export class GpuErosionEngine {
       speciesVec: rawSum > 1e-4 ? [rain / sum, snow / sum, wind / sum, rock / sum] : [0, 0, 0, 0],
       snowVec: [p.snowline, activeSnow, p.simCryoPlaying === false ? 0.0 : clamp01(p.glacierStrength), 0.35 + 0.9 * activeSnow],
       windVec: [Math.cos(azRad) * windMag, Math.sin(azRad) * windMag, p.simWindPlaying === false ? 0.0 : (0.25 + 0.95 * activeWind), 0.35 + 0.65 * activeWind],
+      windAzimuthDeg: effectiveWindAzimuth,
+      windShiftOffsetDeg: windShiftOffsetDeg(p, windCycles),
+      windCycles,
       materialTheme: Number.isFinite(p.materialTheme) ? p.materialTheme : 0,
     };
   }
@@ -1445,8 +1454,6 @@ export class GpuErosionEngine {
     const activeCount = Math.min(MAX_GPU_PARTICLES, Math.max(1024, Math.floor(p.particleCount)));
     const emitter = EMITTER_MODES[p.emitterMode] || EMITTER_MODES['sky-rain'];
     const { hardnessVec, strataVec } = this._getHardnessUniforms();
-    const climate = this._getClimateUniforms();
-    const windErosion = this._getWindErosionUniforms();
     const chemRates = this._chemRates();
 
     gl.disable(gl.DEPTH_TEST);
@@ -1454,6 +1461,11 @@ export class GpuErosionEngine {
 
     for (let s = 0; s < count; s++) {
       this.stepCount++;
+      // Recompute per substep, not once per batch: a 96-step stack bake must
+      // travel through the shifting wind regime (and gust phase), rather
+      // than eroding every substep from the direction at batch start.
+      const climate = this._getClimateUniforms();
+      const windErosion = this._getWindErosionUniforms();
       this._ensureRockObstacles();
       const prevP = this.partIdx;
       const nextP = 1 - prevP;

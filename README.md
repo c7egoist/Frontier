@@ -141,7 +141,16 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   snow/glacier layer. Its own simulation layer controls prevailing direction,
   speed, overall rate, rock abrasion, deflation, lee deposition, turbulent
   direction wander, gustiness, abrasive sand supply, saltation-curtain /
-  undercut height, wrap-around streamlining and vertical fluting. Local
+  undercut height, wrap-around streamlining and vertical fluting. The
+  prevailing direction itself can also move through geologic time
+  (`src/erosion/wind-regime.js`): **Fixed**, a seasonal **swing** of
+  ±range around the prevailing bearing, discrete weather-front **sectors**
+  across ±range, or a full 360° rotating **wind rose**, with a user-set
+  cycle length in simulation steps. Terrain uniforms are recomputed every
+  substep, so long bakes and stack replays really do travel through those
+  bearings; local gust wander and obstacle wrap then act around the current
+  effective direction. Utah defaults to five front sectors across ±70° over
+  220 steps. Local
   flow genuinely wraps around terrain — a multi-scale obstacle gradient
   blocks the into-hill wind component, so flow splits around massifs,
   follows contours, speeds along flanks and funnels through saddles and
@@ -217,9 +226,28 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   talus, settled-meltwater freeze–thaw, and wet-residence chemical
   dissolution (the existing Fe/Cu stain pass remains the colour layer). All
   share geological hardness, convex-edge protection, thin-span protection
-  and per-node carve caps before Dual Contouring. An Analytic SDF source
+  and per-node carve caps before Dual Contouring. Rock wind uses the same
+  shifting-direction regimes as Terrain: each saltation grain keeps the
+  bearing for its short life while later grains sample the seasonal swing,
+  front-sector sequence or 360° wind rose over the bake. Rock & Cliff
+  Studio exposes prevailing azimuth, regime, swing range and cycles over
+  the bake alongside all of its existing rain/wind/thermal/cryo/chemical
+  amounts. Tick **▶ Watch erosion live** to receive staged, anchored SDF
+  preview meshes in the viewport while the worker continues; preview frame
+  count and hold time are user sliders, previews are triangle-capped and
+  never replace the final grounded export bake. An Analytic SDF source
   remains available for the fastest native path. CLI example:
-  `--sdf-source mesh --erosion-res 320 --wind 0.45 --thermal 0.25`.
+  `--sdf-source mesh --erosion-res 320 --wind 0.45 --wind-shift sectors
+  --wind-shift-range 80 --wind-shift-cycles 2 --thermal 0.25`.
+- **Formation cleanup pass**: Stratified Sedimentary Cliff is now one broad
+  continuous escarpment with a rim-clipped skyline and narrower toe bench;
+  Sculpted Narrow Slot Canyon is a taller, thinner pair of fins around a
+  visibly open S-curved corridor; Bryce Badlands Hoodoo Ridge uses irregular
+  fused fins, offset foreground sentinels, phase-shifted Claron ribs and a
+  grounded apron. Utah Canyon Wall & Alcove and Desert Caprock Mesa Butte
+  remain available, but their broad artificial alcove/hole cuts are gone —
+  Utah keeps only a shallow open seep bay plus narrow joint chimneys, while
+  the Butte relies on its recessed soft bed under the caprock.
 - **Terrain resolution + calmer studio UI**: the header **Terrain grid**
   selector offers **256² Performance**, **512² Balanced** (the unchanged
   default), **768² High**, and **1024² Ultra**. Resolution is applied at
@@ -239,9 +267,12 @@ npm run generate -- --archetype sedimentary-cliff --seed 4029 --lods --out expor
   header **Focus** button hides both side docks to give the 3D viewport the
   full workspace.
 
-Verification: `npm test` — 45/45 pass (includes `tests/rain-erosion.test.mjs`,
+Verification: `npm test` — 52/52 pass (includes `tests/rain-erosion.test.mjs`,
 `tests/mesh-sdf-erosion.test.mjs` for mesh→SDF sign/distance/resolution,
 directional wind, the full 3D erosion suite and grounded placement export,
+`tests/wind-regime-preview-formations.test.mjs` for shifting prevailing
+wind, multi-face Rock wind abrasion, watchable SDF preview frames and the
+five named formation fixes,
 a static GLSL declaration-before-use scope check over every shader (the mock
 WebGL in Node cannot compile GLSL, so this guards against browser-only
 "undeclared identifier" black screens),
