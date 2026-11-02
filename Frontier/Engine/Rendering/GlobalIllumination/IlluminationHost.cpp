@@ -196,6 +196,8 @@ bool IlluminationHost::Construct(const IlluminationAssets& Assets, const Illumin
     Surface = std::make_unique<SurfaceProjection>(Exchange, Shaders);
     Surface->ConstructPrograms(RefreshRegion, OccupantRegion, MaterialRegion, Distance->MarchLayout, Cards->SamplingLayout, RayTracing->MarchLayout,
                                Exchange.ConstructView(TyreMarkTexture), DepositSampler, EffectRegion, VehicleRegion);
+    // 📝 I2: the cluster nestings stored beside the facet space at import (NestingArchiveExport); the editor never builds them.
+    if (Surface->Virtualized) Surface->Virtualized->AssignArchive(std::filesystem::path(Assets.FacetSpace).replace_extension(".nestingspace"));
     Resampling = std::make_unique<ResamplingSequence>(Exchange, Shaders);
     Resampling->ConstructPrograms(RefreshRegion, MaterialRegion, Distance->MarchLayout, Cards->SamplingLayout, RayTracing->MarchLayout);
     Diffuse = std::make_unique<VarianceIntegrator>(Exchange, Shaders, "Diffuse", VarianceSettings{0.08f, 24, 3, 4.0f});

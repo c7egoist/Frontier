@@ -6,3 +6,4 @@ Automation/Patches/*.patch text eol=lf whitespace=-blank-at-eol,-blank-at-eof
 
 # Zlib-compressed corpus soups of the virtualized geometry parity (Exhibits/VirtualizedGeometry/Surfaces).
 *.soup binary
+*.nestingspace binary

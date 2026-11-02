@@ -9,6 +9,7 @@
 //    modes 10-14 activate it on demand (ActivateForInspection). Eligible: a facet set of ≥ 256 facets, no reserved fragment vertices,
 //    no dynamic occupant in its run. Shadows, ray tracing, distance fields and cards keep the full-detail geometry.
 #pragma once
+#include "NestingArchive.h"
 #include "NestingSelection.h"
 #include "Rendering/GlobalIllumination/SceneStructure.h"
 #include "Rendering/GlobalIllumination/ShaderInterchange.h"
@@ -19,6 +20,11 @@
 #include <string>
 namespace Frontier::VirtualizedGeometry
 {
+[[nodiscard]] SurfaceSoup ConvertFacetSet(const GlobalIllumination::FacetSet& Set);
+// 📝 I2, the import step: the nesting of every eligible set of a scene (≥ 256 facets, no reserved fragment vertices, at least one run
+//    without a dynamic occupant), built with the given options on their worker threads.
+[[nodiscard]] NestingArchive ConstructSceneNestingArchive(const GlobalIllumination::SceneStructure& Scene, const NestingOptions& Options);
+
 class NestingProjection
 {
   public:
@@ -38,6 +44,9 @@ class NestingProjection
     void DismissInspectionStatus() { StatusCaption_.clear(); }
     // 📝 The demo's ActivateForDebug, synchronous: programs and targets now, records at the next Prepare.
     void ActivateForInspection();
+    // 📝 I2: the stored nestings beside the scene's .facetspace. The editor never builds: a set without a current entry stays on the
+    //    lossless-cluster path.
+    void AssignArchive(const std::filesystem::path& Path);
     [[nodiscard]] bool OwnsOccupant(uint32_t Occupant) const { return OwnedOccupants_.contains(Occupant); }
     [[nodiscard]] bool HasRecords() const noexcept { return Records_; }
     [[nodiscard]] uint32_t RecordCount() const noexcept { return RecordCount_; }
@@ -80,7 +89,7 @@ class NestingProjection
     };
     using RecordMirror = std::array<uint32_t, 24>;   // [-] 96 B NestedClusterProfile
 
-    ExpandedSet& BuildSet(uint32_t FacetSetIndex, const GlobalIllumination::FacetSet& Set);
+    ExpandedSet* BuildSet(uint32_t FacetSetIndex, const GlobalIllumination::FacetSet& Set);
     void RefreshGroups();
     std::shared_ptr<DescriptorGroup> CullGroupFor(const std::shared_ptr<DeviceTextureView>& HiZView);
     std::shared_ptr<DescriptorGroup> ResolveGroupFor(const std::shared_ptr<DeviceTextureView>& Slot6, const std::shared_ptr<DeviceTextureView>& Slot11,
@@ -95,6 +104,8 @@ class NestingProjection
     GlobalIllumination::ShaderInterchange Shaders_;
     const GlobalIllumination::ShaderInterchange& IlluminationShaders_;
     std::map<uint32_t, ExpandedSet>   Retained_{};
+    std::optional<NestingArchive>     Archive_{};
+    std::string                       ArchiveCaption_{};   // [-] why sets fell back (missing or stale archive entries)
     std::shared_ptr<DeviceRegion>     RefreshRegion_{}, OccupantRegion_{};
     std::shared_ptr<DescriptorLayout> CullLayout_{}, SeedLayout_{}, DownsampleLayout_{}, VisibilityLayout_{}, GlassBackLayout_{}, ResolveLayout_{},
                                       FallbackLayout_{};

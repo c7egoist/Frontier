@@ -7,7 +7,8 @@
 add_library(FrontierVirtualizedGeometry STATIC
     Frontier/Engine/Rendering/VirtualizedGeometry/NestingConstruction.cpp
     Frontier/Engine/Rendering/VirtualizedGeometry/NestingSelection.cpp
-    Frontier/Engine/Rendering/VirtualizedGeometry/VisibilityResolve.cpp)
+    Frontier/Engine/Rendering/VirtualizedGeometry/VisibilityResolve.cpp
+    Frontier/Engine/Rendering/VirtualizedGeometry/NestingArchive.cpp)
 target_include_directories(FrontierVirtualizedGeometry PUBLIC "${CMAKE_SOURCE_DIR}/Frontier/Engine")
 target_compile_features(FrontierVirtualizedGeometry PUBLIC cxx_std_20)
 # 📝 Parity with the demo's JavaScript doubles needs plain IEEE evaluation: no fused multiply-adds.
@@ -102,6 +103,13 @@ if(BUILD_TESTING)
         FRONTIER_VIRTUALIZED_GEOMETRY_EXHIBIT="${CMAKE_SOURCE_DIR}/Exhibits/VirtualizedGeometry")
     target_link_libraries(VirtualizedGeometryValidation PRIVATE FrontierVirtualizedGeometry)
     add_test(NAME VirtualizedGeometryValidation COMMAND VirtualizedGeometryValidation)
+
+    # 📝 I2, the import step: the proving ground's cluster nestings, built once and stored beside its facet space; the validation
+    #    rebuilds them and requires the stored archive to be current (EngineContent/EnvironmentArchives/ProvingGround).
+    add_executable(NestingArchiveExport Exhibits/VirtualizedGeometry/Code/NestingArchiveExport.cpp)
+    target_link_libraries(NestingArchiveExport PRIVATE FrontierGlobalIllumination)
+    add_test(NAME NestingArchiveValidation COMMAND NestingArchiveExport --verify
+        "${CMAKE_SOURCE_DIR}/EngineContent/EnvironmentArchives/ProvingGround/ProvingGround.facetspace")
 
     # 📝 Before and after of every builder refinement (I2-I5) on the corpus (Results/NestingRefinement.txt).
     add_executable(NestingRefinementMeasure

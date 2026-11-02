@@ -29,7 +29,9 @@ constexpr uint32_t ResidentFlag = 8;    // [-]
 [[nodiscard]] float FamilyFloat(uint32_t Family) noexcept { return std::bit_cast<float>(Family); }
 [[nodiscard]] uint32_t FloatWord(double Value) noexcept { return std::bit_cast<uint32_t>(static_cast<float>(Value)); }
 
-[[nodiscard]] SurfaceSoup ConvertFacetSet(const FacetSet& Set)
+} // namespace
+
+SurfaceSoup ConvertFacetSet(const FacetSet& Set)
 {
     SurfaceSoup Soup;
     Soup.Facets.reserve(Set.Facets.size());
@@ -44,7 +46,33 @@ constexpr uint32_t ResidentFlag = 8;    // [-]
     }
     return Soup;
 }
-} // namespace
+
+NestingArchive ConstructSceneNestingArchive(const SceneStructure& Scene, const NestingOptions& Options)
+{
+    NestingArchive Archive;
+    Archive.Profile = NestingProfileBits(Options);
+    std::vector<bool> Eligible(Scene.FacetSets.size(), false);
+    for (const DrawRun& Run : Scene.DrawRuns)
+    {
+        bool Static = true;
+        for (uint32_t Index = 0; Static && Index < Run.Count; ++Index)
+            Static = (Scene.Occupants[Run.First + Index].Participation & OccupantParticipation::Dynamic) == 0;
+        if (Static) Eligible[Run.FacetSet] = true;
+    }
+    for (uint32_t SetIndex = 0; SetIndex < Scene.FacetSets.size(); ++SetIndex)
+    {
+        const FacetSet& Set = Scene.FacetSets[SetIndex];
+        if (!Eligible[SetIndex] || Set.Facets.size() < 256 || Set.VertexCapacity) continue;
+        const SurfaceSoup Soup = ConvertFacetSet(Set);
+        NestingArchiveEntry Entry;
+        Entry.FacetSet   = SetIndex;
+        Entry.FacetCount = static_cast<uint32_t>(Set.Facets.size());
+        Entry.Digest     = DigestSurfaceSoup(Soup);
+        Entry.Nesting    = ConstructGeometryNesting(Soup, Options);
+        Archive.Entries.push_back(std::move(Entry));
+    }
+    return Archive;
+}
 
 NestingProjection::NestingProjection(DeviceExchange& Exchange, const ShaderInterchange& IlluminationShaders)
     : Exchange_(Exchange), Shaders_(Exchange, IlluminationShaders.SpirvFolder().parent_path() / "VirtualizedGeometry"),
@@ -151,7 +179,8 @@ void NestingProjection::ReportInspectionStatus()
 {
     const std::string State = InspectionState();
     StatusCaption_ = State == "failed"        ? "Cluster inspection: activation failed — " + *ActivationError_
-                     : State == "no-geometry" ? "Cluster inspection: no eligible facet set in scene (needs >= 256 facets, static, non-breakable occupants)"
+                     : State == "no-geometry" ? "Cluster inspection: no eligible facet set in scene (needs >= 256 facets, static, non-breakable occupants" +
+                                                    (ArchiveCaption_.empty() ? std::string(")") : "; " + ArchiveCaption_ + ")")
                      : State == "ready"       ? std::string()
                                               : "Cluster inspection: activating";
 }
@@ -259,13 +288,42 @@ void NestingProjection::ConstructTargets(uint32_t Width, uint32_t Height)
 //                                                     SET GEOMETRY AND RECORDS
 //------------------------------------------------------------------------------------------------------------------------
 
-NestingProjection::ExpandedSet& NestingProjection::BuildSet(uint32_t FacetSetIndex, const FacetSet& Set)
+void NestingProjection::AssignArchive(const std::filesystem::path& Path)
+{
+    std::string Diagnostic;
+    Archive_ = ReadNestingArchive(Path, &Diagnostic);
+    ArchiveCaption_ = Archive_ ? std::string() : Diagnostic;
+    if (Archive_ && Archive_->Profile != NestingProfileBits(RefinedNestingOptions()))
+    {
+        ArchiveCaption_ = "the nesting archive was built with another refinement profile; rerun NestingArchiveExport";
+        Archive_.reset();
+    }
+    Retained_.clear();
+    Key_.clear();
+}
+
+// 📝 The demo's BuildSet, with the nesting loaded from the stored archive (I2) instead of built here.
+NestingProjection::ExpandedSet* NestingProjection::BuildSet(uint32_t FacetSetIndex, const FacetSet& Set)
 {
     auto Hit = Retained_.find(FacetSetIndex);
-    if (Hit != Retained_.end() && Hit->second.FacetCount == Set.Facets.size()) return Hit->second;
+    if (Hit != Retained_.end() && Hit->second.FacetCount == Set.Facets.size()) return &Hit->second;
+    const NestingArchiveEntry* Stored = nullptr;
+    if (Archive_)
+        for (const NestingArchiveEntry& Entry : Archive_->Entries)
+            if (Entry.FacetSet == FacetSetIndex && Entry.FacetCount == Set.Facets.size())
+            {
+                Stored = &Entry;
+                break;
+            }
+    if (!Stored || Stored->Digest != DigestSurfaceSoup(ConvertFacetSet(Set)))
+    {
+        if (ArchiveCaption_.empty())
+            ArchiveCaption_ = "facet set " + std::to_string(FacetSetIndex) + " has no current stored nesting; rerun NestingArchiveExport";
+        return nullptr;
+    }
     ExpandedSet Built;
     Built.FacetCount = Set.Facets.size();
-    Built.Nesting    = ConstructGeometryNesting(ConvertFacetSet(Set), {});
+    Built.Nesting    = Stored->Nesting;
     for (const NestingTier& Tier : Built.Nesting.Tiers)
         for (uint32_t ClusterIdentity : Tier.Clusters)
         {
@@ -294,7 +352,7 @@ NestingProjection::ExpandedSet& NestingProjection::BuildSet(uint32_t FacetSetInd
             }
             Built.Clusters.push_back({ClusterIdentity, FirstIndex, BaseVertex, Node.TriangleCount * 3, Node.TriangleCount * 3});
         }
-    return Retained_.insert_or_assign(FacetSetIndex, std::move(Built)).first->second;
+    return &Retained_.insert_or_assign(FacetSetIndex, std::move(Built)).first->second;
 }
 
 NestingProjection* NestingProjection::Prepare(const SceneStructure& Scene)
@@ -324,7 +382,9 @@ NestingProjection* NestingProjection::Prepare(const SceneStructure& Scene)
         for (uint32_t Index = 0; Eligible && Index < Run.Count; ++Index)
             Eligible = (Scene.Occupants[Run.First + Index].Participation & OccupantParticipation::Dynamic) == 0;
         if (!Eligible) continue;
-        ExpandedSet& Built = BuildSet(Run.FacetSet, Set);
+        ExpandedSet* Expanded = BuildSet(Run.FacetSet, Set);
+        if (!Expanded) continue;
+        ExpandedSet& Built = *Expanded;
         const std::vector<NestingPage> SetPages = PackNestingPages(Built.Nesting);
         std::map<uint32_t, const ExpandedCluster*> RecordByCluster;
         for (const ExpandedCluster& Record : Built.Clusters) RecordByCluster[Record.ClusterIdentity] = &Record;
