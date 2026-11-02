@@ -982,7 +982,7 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   uncommitted changes, Surface 18 / GlobalIllumination 33 / Environment 15), 22.2 MiB, SHA-256
   `0c3453599e65b14ecda52e55bb74b926af39965bc9bd4f598b2986d15188ab25`.
 
-## TAA with the overlay, sun behind clouds, editor UI fixes, the Atmosphere page (2026-11-02, branch arena/88b72faa-frontier)
+## TAA with the overlay, the sun behind clouds, UI fixes, the Atmosphere page (2026-11-02, arena/88b72faa-frontier)
 
 - **Requested:** report on the antialiasing (edge shimmer with TAA on); the sun drew in front of clouds; no visible
   panel scrollbars (wheel scrolling with eased overscroll); remove the top toolbar strip and keep only the notch; Log
@@ -1006,7 +1006,8 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   `InterfaceValidation`, `EverestShippingValidation`, `StoredShaderArchiveValidation` pass; the Log Stream proof passes
   72 checks.
 - **Not run:** no hardware GPU and no Windows session.
-- **Next:** Moons, Stars, Height fog, Atmospheric fog, Clouds, Wind, Lens flare, Local cloud / fog, Lightning; then Jolt.
+- **Next:** Moons, Stars, Height fog, Atmospheric fog, Clouds, Wind, Lens flare, Local cloud and fog, Lightning;
+  then Jolt.
 - **Download:** `Binaries/FrontierSceneViewport-Windows-x64.zip` from `e7c55447` (Zig 0.13.0, no uncommitted changes,
   Surface 18 / GlobalIllumination 33 / Environment 15), 22.3 MiB, SHA-256
   `e8081a26463e68f57d7e75c71134324e5422723c363cc471e4e0f94c6fe2d57f`.
