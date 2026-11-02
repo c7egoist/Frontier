@@ -848,7 +848,8 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   - spirv-val (Vulkan 1.3) passes on the three new archives.
   - `StoredShaderArchiveValidation`, `BrowserPreviewStartupValidation`, `EverestInterfaceValidation` (26/27 records, four
     planets), `EverestShippingValidation` (26 records; planets survive the `.levelspace` round trip),
-    `ProjectSpaceValidation`, `EnvironmentRealmValidation` and `ProjectContentStagingValidation` pass.
+    `ProjectSpaceValidation`, `InterfaceValidation`, `EnvironmentRealmValidation` and `ProjectContentStagingValidation`
+    pass.
 - **Delivered:** Windows x64 downloads (Zig 0.13.0 cross-builds) on the owner's Google Drive.
   - `8d504144` (the device-loss fix alone): `FrontierSceneViewport-Windows-x64-8d504144.zip`, Drive id
     `1eKLpqBk6cZIAu8DnyCe2VVT0EatfVvWF`, SHA-256 `a6a53f20ba0842cb6790aaeb77575b095b107296e963b8f335b0f7a46cf896cb`.
