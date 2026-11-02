@@ -130,6 +130,18 @@ if(FRONTIER_ENV_SLANGC)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(LocalMediaValidation
+        Exhibits/LocalMedia/Code/LocalMediaValidation.cpp
+        Engine/Render/StbImageWriteImplementation.cpp)
+    target_include_directories(LocalMediaValidation PRIVATE "${CMAKE_SOURCE_DIR}/ExternalPackages/stb")
+    target_link_libraries(LocalMediaValidation PRIVATE FrontierEnvironmentRendering)
+    if(TARGET FrontierEnvironmentShaders)
+        add_dependencies(LocalMediaValidation FrontierEnvironmentShaders)
+    endif()
+    add_test(NAME LocalMediaValidation COMMAND LocalMediaValidation
+        "${CMAKE_SOURCE_DIR}" "${FRONTIER_ENV_SHADER_OUT}" "${CMAKE_BINARY_DIR}/local-media-exhibits")
+    set_tests_properties(LocalMediaValidation PROPERTIES RUN_SERIAL TRUE)
+
     add_executable(EnvironmentRealmValidation
         Exhibits/EnvironmentRealm/Code/EnvironmentRealmValidation.cpp
         Engine/Render/StbImageWriteImplementation.cpp)

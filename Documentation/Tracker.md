@@ -1036,3 +1036,20 @@ the 5ec53579 line already in the tree; the owner chose it over porting the demo'
   antivirus-scanned. Renderer extensions and Jolt were not undertaken.
 - **Evidence/reproduction:** [EnvironmentInspectors](../Exhibits/EnvironmentInspectors/README.md), including native
   images, source/native comparisons, source/image manifests, and the retained verification report.
+
+
+## Functional baking, atmospheric fields and local media (2026-11-02, arena/8b705b7d-frontier)
+
+- **Requested:** publish the existing Windows ZIP and preserve the UI work first; then real baking and baked-result
+  inspection, Force Field/Wind separation and world vectors, local cloud/fog rendering, wind/noise/shape verification,
+  and adjustable march samples/resolution. This explicitly extends the earlier UI-only renderer boundary for these areas.
+- **Preserved before new code:** `e4c9e57b607dbc73d44967e3fe5f2a698865dff1` pushed to the session branch; direct GitHub
+  binary URL supplied. The pre-existing untracked file `-` was not included or modified.
+- **Additional reference:** `streamlinkinbox/Frontier`, `arena/08e7de48-frontier`, pinned
+  `7bc60250e153a9b7d70c9740744723fde19fae22`. Its C++ height-fog/cloud equations and retained local-fog prototype inspected.
+- **Reproduced before renderer edits:** `LocalMediaValidation --baseline`, real native Vulkan on SwiftShader.
+  Fog wind reversal produces zero image difference; zero velocity still drifts (mean RGB difference 0.00092608).
+  Heterogeneity already changes radiance (0.000686922). The GPU fog shader uses a hard-coded drift vector.
+  Atmosphere's Bake button ignores its return, and viewport snapshots omit the local cloud/fog records.
+- **Status:** implementation and acceptance checks in progress. Baseline is not a passing local-media test.
+  Evidence: `Exhibits/LocalMedia/Results/Before/`; no claims yet for repaired coupling, shapes, baking or world vectors.
